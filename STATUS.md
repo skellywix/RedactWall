@@ -2,11 +2,12 @@
 
 ## Open
 
-- [P1] Add managed extension deployment guide and policy JSON examples.
-  Evidence: docs lint/static review.
+- None selected. Next pass should pick the highest-impact production-readiness gap.
 
 ## Done
 
+- 2026-06-26: Added managed Chrome extension deployment guide, force-install policy example, managed storage policy example, and schema-alignment tests for pilot deployment docs.
+  Evidence: `npm test`, `npm run sync-check`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Added planted canary token detector, policy/template hard-stop defaults, extension default policy support, full masking, docs, and false-positive counterexamples.
   Evidence: `npm test`, `npm run sync-check`, `npm run eval`, `verifyAuditChain()`.
 - 2026-06-26: Added session-protected examiner evidence export with policy, stats, audit integrity, detector inventory, query metadata, masked findings, prompt hashes, and audit hashes. Prompt bodies and audit detail text are omitted.

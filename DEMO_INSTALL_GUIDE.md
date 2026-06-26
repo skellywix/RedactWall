@@ -202,6 +202,14 @@ Refresh ChatGPT, Claude, Gemini, Copilot, or Perplexity after changing extension
 
 For a real pilot, use Chrome managed storage or extension policy to set `serverUrl`, `ingestKey`, `user`, `email`, and `orgId` centrally. Do not ask users to type ingest keys by hand.
 
+Managed deployment examples live in:
+
+```text
+docs/MANAGED_EXTENSION_DEPLOYMENT.md
+docs/examples/chrome-managed-storage.policy.json
+docs/examples/chrome-extension-settings.example.json
+```
+
 ## Configure Demo Policy
 
 The default policy is block mode:

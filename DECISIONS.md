@@ -8,3 +8,4 @@
 - 2026-06-26: SIEM/webhook alerts are best-effort and sanitized. Webhook failures must never block a user's request or leak raw prompt content into logs.
 - 2026-06-26: Evidence exports use hashes for prompt bodies and audit details. Even redacted prompt text can contain sensitive category-only context, so exports omit bodies entirely.
 - 2026-06-26: Canary tokens use explicit `PS-CANARY-...` or `PROMPTSENTINEL-CANARY-...` formats with enough suffix entropy to avoid flagging ordinary discussion of canaries.
+- 2026-06-26: Managed Chrome deployment examples are treated as secret-bearing config because managed storage carries the ingest key. Source examples must keep placeholders only.
