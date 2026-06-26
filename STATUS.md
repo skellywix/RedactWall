@@ -6,6 +6,8 @@
 
 ## Done
 
+- 2026-06-26: Hardened the reference Squid/ICAP bridge with bounded control-plane requests, explicit fail-closed gate verdicts, and fail-closed release polling for API/proxy enforcement.
+  Evidence: `node --test test/squid-icap-bridge.test.js`, live temp-DB proxy bridge smoke through `/api/v1/gate`, `npm test`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Updated GitHub Actions workflow dependencies to maintained current major lines for checkout, setup-node, and artifact upload after CI reported Node 20 action deprecation warnings.
   Evidence: upstream release tags verified through GitHub API; `npm test`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Hardened the endpoint agent to fail closed when supported-file scans or policy refreshes stall or return unusable control-plane responses. Scan outages now block locally and can be recorded as sanitized `scan_unavailable` unscanned-file events.
