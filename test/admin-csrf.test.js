@@ -56,8 +56,10 @@ test('dashboard exposes retention settings and manual purge control', () => {
 });
 
 test('dashboard renders auditors as read-only users', () => {
-  assert.match(dashboard, /let currentRole = 'security_admin'/);
+  assert.match(dashboard, /let currentRole = 'auditor'/);
+  assert.match(dashboard, /function normalizeRole\(role\)/);
   assert.match(dashboard, /function canAdminWrite\(\)/);
+  assert.match(dashboard, /currentRole = normalizeRole\(me\.role\)/);
   assert.match(dashboard, /\$\('#who'\)\.textContent = `\$\{me\.user\} \/ \$\{roleLabel\(currentRole\)\}`/);
   assert.match(dashboard, /Read-only auditor view/);
   assert.match(dashboard, /if \(!canAdminWrite\(\)\)/);

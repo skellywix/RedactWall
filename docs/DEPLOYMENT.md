@@ -167,7 +167,7 @@ Set these through `.env`, container environment, or a deployment secret manager:
 | Variable | Purpose |
 | --- | --- |
 | `ADMIN_PASSWORD` | Security Admin console password. Production preflight requires non-default, at least 16 characters. |
-| `AUDITOR_USER` / `AUDITOR_PASSWORD` | Optional read-only console account for examiner or client-demo access. Set both together; production preflight requires `AUDITOR_PASSWORD` to be at least 16 characters. |
+| `AUDITOR_USER` / `AUDITOR_PASSWORD` | Optional read-only console account for examiner or client-demo access. Set both together, keep `AUDITOR_USER` distinct from `ADMIN_USER`, and use at least 16 characters for `AUDITOR_PASSWORD`. |
 | `SENTINEL_SECRET` | Stable session-signing secret shared by all instances. Production preflight requires at least 32 characters from environment. |
 | `SENTINEL_DATA_KEY` | Stable AES-256-GCM data key source for retained approval prompts. Production preflight requires this key, or the `SENTINEL_SECRET` fallback, to be at least 32 characters. |
 | `INGEST_API_KEY` | Sensor and proxy key for `/api/v1/*` ingest endpoints. Production preflight requires non-default, at least 32 characters. |

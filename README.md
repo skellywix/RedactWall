@@ -239,7 +239,7 @@ Copy `.env.example` to `.env` (or export):
 | `SENTINEL_DB_PATH` | SQLite store path (default `data/sentinel.db`). Use **local disk**, never a cloud-synced folder or network share. Production preflight blocks unsafe paths. |
 | `SENTINEL_POLICY_PATH` | Optional policy file path for isolated tests or pilots (default `config/policy.json`) |
 | `ADMIN_USER` / `ADMIN_PASSWORD` | Console credentials; production preflight requires a non-default password of at least 16 characters |
-| `AUDITOR_USER` / `AUDITOR_PASSWORD` | Optional read-only console credentials for examiner or client-demo access; set both together, and use at least 16 characters for `AUDITOR_PASSWORD` |
+| `AUDITOR_USER` / `AUDITOR_PASSWORD` | Optional read-only console credentials for examiner or client-demo access; set both together, keep `AUDITOR_USER` distinct from `ADMIN_USER`, and use at least 16 characters for `AUDITOR_PASSWORD` |
 | `SENTINEL_SECRET` | Session cookie signing secret; production preflight requires at least 32 characters from environment |
 | `SENTINEL_DATA_KEY` | Encrypts retained raw prompts at rest; production preflight requires at least 32 characters for this key or the `SENTINEL_SECRET` fallback |
 | `INGEST_API_KEY` | Key sensors present to the gate API; production preflight requires a non-default key of at least 32 characters |
@@ -256,8 +256,8 @@ Production preflight requires custom secrets with minimum lengths: 16 characters
 for `ADMIN_PASSWORD` and optional `AUDITOR_PASSWORD`, and 32 characters for
 `INGEST_API_KEY`, `SENTINEL_SECRET`, and `SENTINEL_DATA_KEY` when raw approval
 retention is enabled. If auditor login is configured, both `AUDITOR_USER` and
-`AUDITOR_PASSWORD` must be present. Development/demo mode reports weak custom
-values as warnings.
+`AUDITOR_PASSWORD` must be present and `AUDITOR_USER` must be distinct from
+`ADMIN_USER`. Development/demo mode reports weak custom values as warnings.
 
 `/readyz` reports whether the database and deployment preflight are usable. Logged-in admins can inspect detailed checks at `/api/preflight`.
 

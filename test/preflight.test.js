@@ -121,6 +121,16 @@ test('production preflight blocks weak or partial auditor login config', () => {
     preflight.summarizeFailures(weak).map((line) => line.split(':')[0]),
     ['auditor_password_strength'],
   );
+
+  const duplicate = preflight.configStatus({
+    env: { ...base, ADMIN_USER: 'admin', AUDITOR_USER: 'admin', AUDITOR_PASSWORD: 'long-auditor-password' },
+    ...common,
+  });
+  assert.strictEqual(duplicate.ready, false);
+  assert.deepStrictEqual(
+    preflight.summarizeFailures(duplicate).map((line) => line.split(':')[0]),
+    ['auditor_user_distinct'],
+  );
 });
 
 test('production preflight blocks custom but short secrets', () => {

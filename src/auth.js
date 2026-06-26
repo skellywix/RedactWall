@@ -32,10 +32,11 @@ function resolveSecret() {
 const { secret: SECRET, source: SECRET_SOURCE } = resolveSecret();
 
 const DEFAULT_ADMIN_PASSWORD = 'ChangeMe!2026';
-const ADMIN_USER = process.env.ADMIN_USER || 'admin';
+const ADMIN_USER = String(process.env.ADMIN_USER || 'admin').trim() || 'admin';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || DEFAULT_ADMIN_PASSWORD;
-const AUDITOR_USER = process.env.AUDITOR_USER || '';
+const AUDITOR_USER = String(process.env.AUDITOR_USER || '').trim();
 const AUDITOR_PASSWORD = process.env.AUDITOR_PASSWORD || '';
+const AUDITOR_DISTINCT = !!AUDITOR_USER && AUDITOR_USER !== ADMIN_USER;
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000; // 8h
 
 function buildAccount(user, password, role) {
@@ -51,7 +52,7 @@ function buildAccount(user, password, role) {
 
 const ACCOUNTS = [
   buildAccount(ADMIN_USER, ADMIN_PASSWORD, 'security_admin'),
-  buildAccount(AUDITOR_USER, AUDITOR_PASSWORD, 'auditor'),
+  AUDITOR_DISTINCT ? buildAccount(AUDITOR_USER, AUDITOR_PASSWORD, 'auditor') : null,
 ].filter(Boolean);
 
 function findAccount(user) {
@@ -106,6 +107,9 @@ function verify(token) {
   try {
     const payload = JSON.parse(Buffer.from(body, 'base64url').toString());
     if (payload.exp && Date.now() > payload.exp) return null;
+    if (!payload.user) return null;
+    if (!payload.role && payload.user === ADMIN_USER) payload.role = 'security_admin';
+    if (!['security_admin', 'auditor'].includes(payload.role)) return null;
     return payload;
   } catch { return null; }
 }
@@ -158,6 +162,6 @@ module.exports = {
   authenticate, verifyPassword, createSession, verify, createCsrfToken, verifyCsrfToken, requireAuth, requireRole, requireCsrf,
   loginStatus, registerFail, registerSuccess,
   ADMIN_USER, ADMIN_PASSWORD_IS_DEFAULT: ADMIN_PASSWORD === DEFAULT_ADMIN_PASSWORD,
-  AUDITOR_ENABLED: !!findAccount(AUDITOR_USER),
+  AUDITOR_ENABLED: AUDITOR_DISTINCT && ACCOUNTS.some((account) => account.role === 'auditor'),
   SECRET_SOURCE, SECRET_IS_STABLE: SECRET_SOURCE === 'env' || SECRET_SOURCE === 'file',
 };

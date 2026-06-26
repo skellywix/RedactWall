@@ -53,6 +53,7 @@ function configStatus(input = {}) {
   const severity = production ? 'error' : 'warning';
   const dbPath = input.dbPath || env.SENTINEL_DB_PATH || '';
   const dbPathReason = cloudSyncedPathReason(dbPath);
+  const adminUser = String(input.adminUser ?? env.ADMIN_USER ?? 'admin').trim();
   const adminPassword = input.adminPassword ?? env.ADMIN_PASSWORD ?? '';
   const auditorUser = String(input.auditorUser ?? env.AUDITOR_USER ?? '').trim();
   const auditorPassword = input.auditorPassword ?? env.AUDITOR_PASSWORD ?? '';
@@ -82,6 +83,13 @@ function configStatus(input = {}) {
       severity,
       'Auditor login has both AUDITOR_USER and AUDITOR_PASSWORD when configured.',
       'Set both AUDITOR_USER and AUDITOR_PASSWORD, or remove both to disable auditor login.',
+    ),
+    check(
+      'auditor_user_distinct',
+      !auditorConfigured || !auditorUser || auditorUser !== adminUser,
+      severity,
+      'Auditor username is distinct from ADMIN_USER.',
+      'Set AUDITOR_USER to a separate read-only account name.',
     ),
     check(
       'auditor_password_strength',

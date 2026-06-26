@@ -9,7 +9,7 @@ let currentQueue = [];
 let currentActivity = [];
 let currentCoverage = null;
 let searchTerm = '';
-let currentRole = 'security_admin';
+let currentRole = 'auditor';
 
 const icons = {
   check: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m5 12 4 4L19 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
@@ -51,8 +51,12 @@ function sourceLabel(source) {
   })[source] || source || 'API';
 }
 
+function normalizeRole(role) {
+  return role === 'security_admin' ? 'security_admin' : 'auditor';
+}
+
 function roleLabel(role) {
-  return role === 'auditor' ? 'Auditor' : 'Security Admin';
+  return normalizeRole(role) === 'security_admin' ? 'Security Admin' : 'Auditor';
 }
 
 function canAdminWrite() {
@@ -161,7 +165,7 @@ async function init() {
   if (!meRes) return;
   const me = await meRes.json();
   await loadCsrf();
-  currentRole = me.role || 'security_admin';
+  currentRole = normalizeRole(me.role);
   $('#who').textContent = `${me.user} / ${roleLabel(currentRole)}`;
   if (me.defaultPassword) {
     const b = $('#banner');

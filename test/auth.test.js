@@ -2,6 +2,9 @@
 /** Admin auth: password check, brute-force lockout, session signing. node --test */
 const test = require('node:test');
 const assert = require('node:assert');
+const crypto = require('node:crypto');
+const { execFileSync } = require('node:child_process');
+const path = require('node:path');
 
 process.env.ADMIN_PASSWORD = 'unit-pass';
 process.env.AUDITOR_USER = 'auditor';
@@ -10,6 +13,12 @@ process.env.SENTINEL_SECRET = 'unit-secret-stable';
 process.env.LOGIN_MAX_ATTEMPTS = '3';
 process.env.LOGIN_WINDOW_MS = '100000';
 const auth = require('../src/auth');
+
+function signedSession(payload) {
+  const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const mac = crypto.createHmac('sha256', process.env.SENTINEL_SECRET).update(body).digest('base64url');
+  return `${body}.${mac}`;
+}
 
 test('verifyPassword accepts only the right user+password', () => {
   assert.ok(auth.verifyPassword('admin', 'unit-pass'));
@@ -53,6 +62,45 @@ test('session token signs and verifies; tampered/none rejected', () => {
   assert.strictEqual(auth.verify(auditor).role, 'auditor');
   assert.strictEqual(auth.verify('bad.token'), null);
   assert.strictEqual(auth.verify(null), null);
+});
+
+test('session verification preserves legacy admin cookies and rejects unknown roles', () => {
+  const legacy = signedSession({ user: 'admin', iat: Date.now(), exp: Date.now() + 60000 });
+  const verifiedLegacy = auth.verify(legacy);
+  assert.deepStrictEqual(verifiedLegacy, {
+    user: 'admin',
+    role: 'security_admin',
+    iat: verifiedLegacy.iat,
+    exp: verifiedLegacy.exp,
+  });
+
+  const unknownRole = signedSession({ user: 'admin', role: 'owner', iat: Date.now(), exp: Date.now() + 60000 });
+  assert.strictEqual(auth.verify(unknownRole), null);
+  const missingUser = signedSession({ role: 'security_admin', iat: Date.now(), exp: Date.now() + 60000 });
+  assert.strictEqual(auth.verify(missingUser), null);
+});
+
+test('duplicate auditor username is not enabled at runtime', () => {
+  const script = [
+    "const auth = require('./src/auth');",
+    "console.log(JSON.stringify({ enabled: auth.AUDITOR_ENABLED, admin: auth.authenticate('admin', 'unit-pass'), duplicate: auth.authenticate('admin', 'auditor-pass') }));",
+  ].join('');
+  const output = execFileSync(process.execPath, ['-e', script], {
+    cwd: path.join(__dirname, '..'),
+    env: {
+      ...process.env,
+      ADMIN_USER: 'admin',
+      ADMIN_PASSWORD: 'unit-pass',
+      AUDITOR_USER: ' admin ',
+      AUDITOR_PASSWORD: 'auditor-pass',
+      SENTINEL_SECRET: 'unit-secret-stable',
+    },
+    encoding: 'utf8',
+  });
+  const result = JSON.parse(output);
+  assert.strictEqual(result.enabled, false);
+  assert.deepStrictEqual(result.admin, { user: 'admin', role: 'security_admin' });
+  assert.strictEqual(result.duplicate, null);
 });
 
 test('csrf token is bound to the signed session token', () => {
