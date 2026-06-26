@@ -155,6 +155,15 @@ const appendAudit = sdb.transaction((event) => {
 
 const RETENTION_FINAL_STATUSES = ['approved', 'denied', 'redacted'];
 const SAFE_STATUS = /^[a-z_]+$/;
+const STATS_BLOCKED_STATUSES = [
+  'pending',
+  'pending_justification',
+  'denied',
+  'blocked_by_user',
+  'injection_blocked',
+  'file_blocked_unscanned',
+  'response_flagged',
+];
 
 function normalizePurgeStatuses(statuses) {
   const input = Array.isArray(statuses) && statuses.length ? statuses : RETENTION_FINAL_STATUSES;
@@ -218,7 +227,10 @@ function stats() {
   for (const r of sdb.prepare('SELECT status, COUNT(*) n FROM queries GROUP BY status').all()) counts[r.status] = r.n;
   const total = sdb.prepare('SELECT COUNT(*) n FROM queries').get().n;
   const today = new Date().toISOString().slice(0, 10);
-  const todayBlocked = sdb.prepare("SELECT COUNT(*) n FROM queries WHERE substr(createdAt,1,10) = ? AND status != 'allowed'").get(today).n;
+  const blockedPlaceholders = STATS_BLOCKED_STATUSES.map(() => '?').join(', ');
+  const todayBlocked = sdb.prepare(
+    `SELECT COUNT(*) n FROM queries WHERE substr(createdAt,1,10) = ? AND status IN (${blockedPlaceholders})`,
+  ).get(today, ...STATS_BLOCKED_STATUSES).n;
   const entity = {};
   for (const r of sdb.prepare('SELECT data FROM queries').all()) {
     const ec = JSON.parse(r.data).entityCounts || {};

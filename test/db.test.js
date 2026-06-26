@@ -66,6 +66,17 @@ test('legitimate state transition keeps evidence binding intact', () => {
   assert.strictEqual(db.verifyAuditChain().ok, true, 'transition + its audit event stay consistent');
 });
 
+test('stats count only real blocked statuses for todayBlocked', () => {
+  const before = db.stats().todayBlocked;
+  for (const status of ['pending', 'file_blocked_unscanned', 'response_flagged']) {
+    db.createQuery({ status, user: 'metric', redactedPrompt: '[' + status + ']' });
+  }
+  for (const status of ['allowed', 'redacted', 'paste_flagged', 'shadow_ai', 'warned_sent', 'justified']) {
+    db.createQuery({ status, user: 'metric', redactedPrompt: '[' + status + ']' });
+  }
+  assert.strictEqual(db.stats().todayBlocked - before, 3);
+});
+
 test('retention purge removes sealed raw/vault fields and preserves audit integrity', () => {
   const createdAt = '2026-01-01T00:00:00.000Z';
   const approved = db.createQuery({
