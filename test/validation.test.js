@@ -63,6 +63,15 @@ async function login(port) {
   return { cookie, csrfToken: csrf.csrfToken };
 }
 
+async function waitFor(fn, timeoutMs = 1000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (fn()) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.fail('timed out waiting for condition');
+}
+
 test('gate rejects invalid client analysis without echoing prompt values', async () => withServer(async (port) => {
   const sensitiveValue = '524-71-9043';
   const res = await jsonFetch(port, '/api/v1/gate', {
@@ -144,6 +153,91 @@ test('sensor metadata validation rejects unknown fields without echoing them', a
     fields: ['sensor.token'],
   });
   assert.ok(!JSON.stringify(body).includes(secret));
+}));
+
+test('mixed sensor versions emit sanitized SIEM version-gap alert', async () => withServer(async (port) => {
+  const originalFetch = global.fetch;
+  const originalWebhook = process.env.SIEM_WEBHOOK_URL;
+  const sent = [];
+  process.env.SIEM_WEBHOOK_URL = 'https://siem.example.test/hook';
+  global.fetch = async (url, opts) => {
+    if (String(url) === process.env.SIEM_WEBHOOK_URL) {
+      sent.push(JSON.parse(opts.body));
+      return { ok: true, status: 202, json: async () => ({ ok: true }) };
+    }
+    return originalFetch(url, opts);
+  };
+
+  try {
+    for (const version of ['0.3.0', '0.2.9']) {
+      const res = await jsonFetch(port, '/api/v1/gate', {
+        headers: { 'x-api-key': 'unit-ingest-key' },
+        body: {
+          prompt: 'Draft a generic branch lobby update with no member details.',
+          user: 'pilot@example.test',
+          destination: 'chatgpt.com',
+          source: 'browser_extension',
+          channel: 'submit',
+          clientOutcome: 'allowed',
+          note: 'ps_ingest_should_not_leave',
+          sensor: {
+            name: 'browser_extension',
+            version,
+            platform: 'chrome_mv3',
+          },
+        },
+      });
+      assert.strictEqual(res.status, 200);
+    }
+
+    await waitFor(() => sent.some((alert) => alert.action === 'SENSOR_VERSION_GAP'));
+    const gap = sent.find((alert) => alert.action === 'SENSOR_VERSION_GAP');
+    const wire = JSON.stringify(gap);
+    assert.strictEqual(gap.source, 'browser_extension');
+    assert.strictEqual(gap.sensorVersionGap.versionHealth, 'mixed');
+    assert.ok(gap.sensorVersionGap.versions.some((v) => v.version === '0.3.0'));
+    assert.ok(gap.sensorVersionGap.versions.some((v) => v.version === '0.2.9'));
+    assert.ok(!wire.includes('ps_ingest_should_not_leave'));
+    assert.ok(!wire.includes('member details'));
+  } finally {
+    global.fetch = originalFetch;
+    if (originalWebhook === undefined) delete process.env.SIEM_WEBHOOK_URL;
+    else process.env.SIEM_WEBHOOK_URL = originalWebhook;
+  }
+}));
+
+test('api-only events do not emit sensor version-gap alerts', async () => withServer(async (port) => {
+  const originalFetch = global.fetch;
+  const originalWebhook = process.env.SIEM_WEBHOOK_URL;
+  const sent = [];
+  process.env.SIEM_WEBHOOK_URL = 'https://siem.example.test/hook';
+  global.fetch = async (url, opts) => {
+    if (String(url) === process.env.SIEM_WEBHOOK_URL) {
+      sent.push(JSON.parse(opts.body));
+      return { ok: true, status: 202, json: async () => ({ ok: true }) };
+    }
+    return originalFetch(url, opts);
+  };
+
+  try {
+    const res = await jsonFetch(port, '/api/v1/gate', {
+      headers: { 'x-api-key': 'unit-ingest-key' },
+      body: {
+        prompt: 'Draft a generic branch lobby update.',
+        user: 'api@example.test',
+        destination: 'chatgpt.com',
+        source: 'api',
+        channel: 'submit',
+      },
+    });
+    assert.strictEqual(res.status, 200);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.ok(!sent.some((alert) => alert.action === 'SENSOR_VERSION_GAP'));
+  } finally {
+    global.fetch = originalFetch;
+    if (originalWebhook === undefined) delete process.env.SIEM_WEBHOOK_URL;
+    else process.env.SIEM_WEBHOOK_URL = originalWebhook;
+  }
 }));
 
 test('client redaction evidence rejects unknown detector ids', async () => withServer(async (port) => {

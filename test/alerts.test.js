@@ -74,6 +74,32 @@ test('admin step-up alert metadata stays sanitized', () => {
   assert.ok(!wire.includes('Member John'));
 });
 
+test('sensor version gap alert metadata stays sanitized', () => {
+  const payload = alerts.sanitizedAlert(sampleQuery(), {
+    action: 'SENSOR_VERSION_GAP',
+    force: true,
+    sensorVersionGap: {
+      source: 'browser_extension',
+      label: 'Browser extension',
+      versionHealth: 'mixed',
+      latestVersion: '0.3.0',
+      versions: [
+        { version: '0.3.0', events: 2, lastSeen: '2026-06-26T12:00:00.000Z', secret: 'ps_ingest_should_not_leave' },
+        { version: '0.2.9', events: 1, lastSeen: '2026-06-26T11:00:00.000Z' },
+      ],
+      platforms: ['chrome_mv3'],
+      secret: 'ps_ingest_should_not_leave',
+    },
+  });
+  const wire = JSON.stringify(payload);
+  assert.strictEqual(payload.action, 'SENSOR_VERSION_GAP');
+  assert.strictEqual(payload.sensorVersionGap.versionHealth, 'mixed');
+  assert.deepStrictEqual(payload.sensorVersionGap.versions.map((v) => v.version), ['0.3.0', '0.2.9']);
+  assert.ok(!wire.includes('ps_ingest_should_not_leave'));
+  assert.ok(!wire.includes('524-71-9043'));
+  assert.ok(!wire.includes('Member John'));
+});
+
 test('webhook emit is disabled without url and swallows network failures', async () => {
   const disabled = await alerts.emitSecurityAlert(sampleQuery(), { url: '' });
   assert.deepStrictEqual(disabled, { sent: false, reason: 'disabled' });

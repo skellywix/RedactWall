@@ -6,6 +6,8 @@
 
 ## Done
 
+- 2026-06-26: Added sanitized SIEM alerts for sensor version posture gaps: mixed or missing browser/endpoint/MCP sensor versions now emit forced `SENSOR_VERSION_GAP` webhook events with bounded source/version/platform metadata, while API/proxy traffic is excluded.
+  Evidence: `node --test test/validation.test.js test/alerts.test.js test/coverage.test.js`, `npm test`, `npm run test:browser`, `npm run sync-check`, `npm run setup:check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Added sensor version posture across the control plane: browser extension, endpoint agent, and MCP guard now send bounded name/version/platform metadata; ingest validation stores it safely; the Coverage tab summarizes latest and mixed sensor versions without prompt bodies.
   Evidence: `node --test test/coverage.test.js test/validation.test.js test/extension.test.js test/endpoint-agent.test.js test/mcp-guard.test.js test/alerts.test.js test/evidence.test.js`, `npm test`, `npm run test:browser`, `npm run package:extension -- <temp>`, `npm run sync-check`, `npm run setup:check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Added repeatable Chrome extension packaging for managed pilots: `npm run package:extension` writes a zip plus SHA-256 manifest, verifies Manifest V3 wiring, synced engine copies, managed-storage schema coverage, and refuses packaged development ingest keys. The extension now fails closed until local or managed storage supplies the ingest key.

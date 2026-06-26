@@ -247,7 +247,7 @@ Copy `.env.example` to `.env` (or export):
 | `INGEST_AUTH_LOCK_MS` | Optional invalid ingest-key throttle lock time (default 60000 ms, bounded 1000 to 3600000) |
 | `FILE_EXTRACT_TIMEOUT_MS` | Optional per-file extraction timeout (default 5000 ms, bounded 100 to 60000) |
 | `FILE_EXTRACT_MAX_CHARS` | Optional extracted-text cap before detection (default 1000000 chars, bounded 1000 to 5000000) |
-| `SIEM_WEBHOOK_URL` | Optional sanitized webhook for high-risk security events and failed admin step-up checks |
+| `SIEM_WEBHOOK_URL` | Optional sanitized webhook for high-risk security events, sensor version gaps, and failed admin step-up checks |
 | `SIEM_WEBHOOK_TOKEN` | Optional bearer token for the SIEM webhook |
 | `SIEM_ALERT_MIN_RISK` / `SIEM_ALERT_MIN_SEVERITY` | Alert thresholds for allowed-but-risky events; blocked and response-flagged events alert automatically |
 

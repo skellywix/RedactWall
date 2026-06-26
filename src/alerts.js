@@ -6,7 +6,7 @@
  * prompt body, no token vault, and no raw finding values leave this process.
  */
 require('./env').loadEnv();
-const { safeSensor } = require('./sensor-metadata');
+const { safeSensor, safeSensorVersionGap } = require('./sensor-metadata');
 
 function num(v, fallback) {
   const n = Number(v);
@@ -37,6 +37,7 @@ function sanitizedAlert(query, opts = {}) {
     adminEvent: !!opts.adminEvent,
     adminActor: opts.adminActor || null,
     stepUpScope: opts.stepUpScope || null,
+    sensorVersionGap: safeSensorVersionGap(opts.sensorVersionGap),
     queryId: query.id,
     createdAt: query.createdAt,
     status: query.status,

@@ -180,6 +180,11 @@ Set `SIEM_WEBHOOK_URL` to send sanitized security events to a SOC or SIEM webhoo
 
 Blocked prompt/file events, response leakage, hidden-instruction blocks, and failed or locked admin step-up confirmations for raw reveal and approval release are alertable. Webhook delivery is best-effort and never blocks the user-facing request.
 
+Sensor version posture gaps are also alertable. If browser extension, endpoint
+agent, or MCP guard events show mixed versions or missing version metadata,
+PromptSentinel sends a forced `SENSOR_VERSION_GAP` alert with bounded source,
+version, and platform metadata only.
+
 ## Retention Operations
 
 PromptSentinel retains raw approval prompts and token vaults only for records that need review or rehydration. Set `rawRetentionDays` in policy to define how long finalized `approved`, `denied`, and `redacted` records keep those sealed fields. The default is 30 days.

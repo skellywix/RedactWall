@@ -95,7 +95,49 @@ function broadcast(event, data) {
 }
 
 function emitSecurityAlert(row, action, opts = {}) {
-  alerts.emitSecurityAlert(row, { action, ...opts }).catch(() => {});
+  fireSecurityAlert(row, { action, ...opts });
+  if (!opts.adminEvent) {
+    try {
+      emitSensorVersionGapAlert(row);
+    } catch {}
+  }
+}
+
+function fireSecurityAlert(row, opts) {
+  try {
+    Promise.resolve(alerts.emitSecurityAlert(row, opts)).catch(() => {});
+  } catch {}
+}
+
+const SENSOR_VERSION_ALERT_SOURCES = new Set(['browser_extension', 'endpoint_agent', 'mcp_guard']);
+
+function sensorVersionGapFor(row) {
+  if (!row || !SENSOR_VERSION_ALERT_SOURCES.has(row.source)) return null;
+  const report = coverage.summarize(db.listQueries({ limit: 5000 }), policy.loadPolicy());
+  const sensor = (report.sensors || []).find((item) => item.source === row.source);
+  if (!sensor || !sensor.events || sensor.versionHealth === 'current') return null;
+  return {
+    source: sensor.source,
+    label: sensor.label,
+    versionHealth: sensor.versionHealth,
+    latestVersion: sensor.latestVersion || null,
+    versions: (sensor.versions || []).map((item) => ({
+      version: item.version,
+      events: item.events,
+      lastSeen: item.lastSeen,
+    })),
+    platforms: sensor.platforms || [],
+  };
+}
+
+function emitSensorVersionGapAlert(row) {
+  const gap = sensorVersionGapFor(row);
+  if (!gap) return;
+  fireSecurityAlert(row, {
+    action: 'SENSOR_VERSION_GAP',
+    force: true,
+    sensorVersionGap: gap,
+  });
 }
 
 function emitAdminSecurityAlert(req, action, actor, scope) {
