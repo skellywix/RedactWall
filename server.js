@@ -28,6 +28,7 @@ const alerts = require('./src/alerts');
 const evidence = require('./src/evidence');
 const preflight = require('./src/preflight');
 const validation = require('./src/validation');
+const coverage = require('./src/coverage');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -651,6 +652,10 @@ app.get('/api/risk', auth.requireAuth, (req, res) => {
     topEntities: Object.entries(r.entities).sort((a, b) => b[1] - a[1]).slice(0, 5),
   })).sort((a, b) => (b.avgRisk * b.events) - (a.avgRisk * a.events));
   res.json({ users });
+});
+
+app.get('/api/coverage', auth.requireAuth, (req, res) => {
+  res.json(coverage.summarize(db.listQueries({ limit: 5000 }), policy.loadPolicy()));
 });
 
 // Regulation policy templates (list + one-click apply).

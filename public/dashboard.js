@@ -7,6 +7,7 @@ let selected = null;
 let csrfToken = '';
 let currentQueue = [];
 let currentActivity = [];
+let currentCoverage = null;
 let searchTerm = '';
 
 const icons = {
@@ -32,6 +33,10 @@ function statusTone(status) {
   if (['denied', 'blocked_by_user', 'injection_blocked', 'response_flagged'].includes(s)) return 'bad';
   if (['pending', 'shadow_ai'].includes(s)) return 'warn';
   return 'info';
+}
+
+function postureTone(state) {
+  return state === 'covered' ? 'good' : 'warn';
 }
 
 function sourceLabel(source) {
@@ -287,6 +292,50 @@ function renderActivityRows(rows) {
   </tr>`).join('') || '<tr><td colspan="8" class="empty">No matching activity</td></tr>';
 }
 
+async function loadCoverage() {
+  const r = await api('/api/coverage');
+  if (!r) return;
+  currentCoverage = await r.json();
+  renderCoverage(currentCoverage);
+}
+
+function renderCoverage(c) {
+  if (!c) return;
+  const totals = c.totals || {};
+  $('#coverageScore').innerHTML = `
+    <div class="score-ring" style="--score:${escapeHtml(c.score || 0)}%"><b>${escapeHtml(c.score || 0)}</b></div>
+    <span>Coverage score</span>
+    <div class="coverage-kpis">
+      <div class="mini-kpi"><b>${escapeHtml(totals.events || 0)}</b><span>Events</span></div>
+      <div class="mini-kpi"><b>${escapeHtml(totals.governedActive || 0)}/${escapeHtml(totals.governedDestinations || 0)}</b><span>Governed</span></div>
+      <div class="mini-kpi"><b>${escapeHtml(totals.shadowEvents || 0)}</b><span>Shadow AI</span></div>
+      <div class="mini-kpi"><b>${escapeHtml(totals.blocked || 0)}</b><span>Blocked</span></div>
+    </div>`;
+  $('#coveragePosture').innerHTML = (c.posture || []).map((p) => `
+    <div class="posture-item">
+      <span>${escapeHtml(p.label)} <span class="pill ${postureTone(p.state)}">${escapeHtml(p.state)}</span></span>
+      <b>${escapeHtml(p.detail)}</b>
+    </div>`).join('');
+  $('#sensorMix').innerHTML = (c.sensors || []).map((s) => `
+    <div class="sensor-row">
+      <div><strong>${escapeHtml(s.label)}</strong><span>${escapeHtml(s.lastSeen ? fmt(s.lastSeen) : 'No events observed')}</span></div>
+      <div class="count">${escapeHtml(s.events || 0)}</div>
+    </div>`).join('');
+  $('#governedRows').innerHTML = (c.governedDestinations || []).map((d) => `<tr>
+    <td class="mono">${escapeHtml(d.destination)}</td>
+    <td class="mono">${escapeHtml(d.events)}</td>
+    <td class="mono">${escapeHtml(d.blocked)}</td>
+    <td class="mono">${escapeHtml(d.redacted)}</td>
+    <td class="mono">${escapeHtml(d.users)}</td>
+    <td class="mono">${escapeHtml(d.lastSeen ? fmt(d.lastSeen) : '-')}</td>
+  </tr>`).join('') || '<tr><td colspan="6" class="empty">No governed destinations are configured.</td></tr>';
+  $('#shadowRows').innerHTML = (c.shadowDestinations || []).map((d) => `
+    <div class="shadow-row">
+      <div><strong>${escapeHtml(d.destination)}</strong><span>${escapeHtml(d.users)} users / last ${escapeHtml(d.lastSeen ? fmt(d.lastSeen) : '-')}</span></div>
+      <div class="count">${escapeHtml(d.shadow)}</div>
+    </div>`).join('') || '<div class="empty"><div class="big">No shadow AI</div>No ungoverned AI tools have been reported.</div>';
+}
+
 async function loadAudit() {
   const r = await api('/api/audit');
   if (!r) return;
@@ -398,6 +447,7 @@ function activateTab(name) {
   if (name === 'audit') loadAudit();
   if (name === 'policy') loadPolicy();
   if (name === 'activity') loadActivity();
+  if (name === 'coverage') loadCoverage();
 }
 
 $$('.tab').forEach((t) => {
@@ -405,13 +455,14 @@ $$('.tab').forEach((t) => {
 });
 
 $('#refreshQueue').onclick = loadQueue;
+$('#refreshCoverage').onclick = loadCoverage;
 $('#logout').onclick = async () => { await api('/api/logout', { method: 'POST' }); location.href = '/login.html'; };
 $('#exportEvidence').onclick = exportEvidence;
 $('#globalSearch').addEventListener('input', (e) => updateSearch(e.target.value));
 
 function connectStream() {
   const es = new EventSource('/api/stream');
-  es.addEventListener('query', () => { loadStats(); loadQueue(); flash(); });
+  es.addEventListener('query', () => { loadStats(); loadQueue(); if (!$('#tab-coverage').classList.contains('hidden')) loadCoverage(); flash(); });
   es.addEventListener('decision', () => { loadStats(); loadQueue(); loadActivity(); });
   es.addEventListener('stats', () => loadStats());
   es.onerror = () => { $('#liveTxt').textContent = 'Reconnecting'; };

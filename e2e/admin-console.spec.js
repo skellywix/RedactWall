@@ -27,6 +27,19 @@ test('admin console login, approval, policy save, and evidence export work in a 
   const gated = await gateResponse.json();
   expect(gated.status).toBe('pending');
 
+  const shadowResponse = await request.post('/api/v1/gate', {
+    headers: { 'x-api-key': 'e2e-ingest-key' },
+    data: {
+      prompt: '[shadow-AI] visit to ungoverned AI tool: notebooklm.google.com',
+      user: 'analyst@example.test',
+      destination: 'notebooklm.google.com',
+      source: 'browser_extension',
+      channel: 'shadow_ai',
+      clientOutcome: 'shadow_ai',
+    },
+  });
+  expect(shadowResponse.ok()).toBeTruthy();
+
   await login(page);
 
   const queueItem = page.locator(`.q[data-id="${gated.id}"]`);
@@ -46,6 +59,12 @@ test('admin console login, approval, policy save, and evidence export work in a 
   await page.locator('#globalSearch').fill('no-such-user');
   await expect(page.locator('#activityRows')).toContainText('No matching activity');
   await page.locator('#globalSearch').fill('');
+
+  await page.locator('.content-tabs .tab[data-tab="coverage"]').click();
+  await expect(page.locator('#tab-coverage')).toBeVisible();
+  await expect(page.locator('#coverageScore')).toContainText('Coverage score');
+  await expect(page.locator('#shadowRows')).toContainText('notebooklm.google.com');
+  await expect(page.locator('#sensorMix')).toContainText('Browser extension');
 
   await page.locator('.content-tabs .tab[data-tab="policy"]').click();
   await page.locator('input[name="mode"][value="warn"]').check();

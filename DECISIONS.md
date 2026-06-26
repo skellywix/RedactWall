@@ -28,3 +28,4 @@
 - 2026-06-26: Endpoint supported-file scans must fail closed on control-plane timeout, auth failure, or malformed scan verdict. Returning `null` is not enough for a DLP sensor because the local file path must stay blocked.
 - 2026-06-26: Keep CI action versions on maintained current major lines when GitHub reports runtime deprecations. Green checks with platform warnings are still maintenance debt for a production-readiness branch.
 - 2026-06-26: Proxy/ICAP enforcement must fail closed when the control plane is unreachable or returns an unusable verdict. A proxy path cannot forward a prompt unless PromptSentinel explicitly allows or an approved hold is released.
+- 2026-06-26: Coverage posture can be product-visible only as aggregate control metadata. It may count governed destinations, sensors, users, and shadow-AI sightings, but it must not expose prompt bodies, raw prompts, or decision notes.

@@ -6,6 +6,8 @@
 
 ## Done
 
+- 2026-06-26: Added an AI coverage posture dashboard and protected `/api/coverage` summary so admins can see governed AI destinations, sensor mix, shadow-AI sightings, and coverage score without exposing prompt bodies.
+  Evidence: `node --test test/coverage.test.js`, `npm run test:browser`, `npm test`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Hardened the reference Squid/ICAP bridge with bounded control-plane requests, explicit fail-closed gate verdicts, and fail-closed release polling for API/proxy enforcement.
   Evidence: `node --test test/squid-icap-bridge.test.js`, live temp-DB proxy bridge smoke through `/api/v1/gate`, `npm test`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Updated GitHub Actions workflow dependencies to maintained current major lines for checkout, setup-node, and artifact upload after CI reported Node 20 action deprecation warnings.
