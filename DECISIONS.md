@@ -5,3 +5,4 @@
 - 2026-06-26: Eccentric ideas are welcome only when they make the product easier to trust, operate, or demo.
 - 2026-06-26: Admin unsafe actions require a session-bound CSRF header. Sensor ingest routes stay outside this middleware because they use ingest-key auth, not browser cookies.
 - 2026-06-26: Use a conservative CSP that allows current inline dashboard assets but still locks framing, base URI, form target, connect sources, MIME sniffing, referrers, and browser feature access.
+- 2026-06-26: SIEM/webhook alerts are best-effort and sanitized. Webhook failures must never block a user's request or leak raw prompt content into logs.

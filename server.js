@@ -22,6 +22,7 @@ const db = require('./src/db');
 const auth = require('./src/auth');
 const dataCrypto = require('./src/crypto');
 const templates = require('./src/templates');
+const alerts = require('./src/alerts');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -68,6 +69,10 @@ const sseClients = new Set();
 function broadcast(event, data) {
   const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
   for (const res of sseClients) { try { res.write(payload); } catch {} }
+}
+
+function emitSecurityAlert(row, action) {
+  alerts.emitSecurityAlert(row, { action }).catch(() => {});
 }
 
 // =============================================================================
@@ -190,6 +195,7 @@ app.post('/api/v1/gate', checkIngestKey, (req, res) => {
   if (clientOutcome === 'injection_blocked') {
     const row = db.createQuery({ status: 'injection_blocked', ...base });
     db.appendAudit({ action: 'INJECTION_BLOCKED', queryId: row.id, actor: user, detail: note || 'hidden instructions detected' });
+    emitSecurityAlert(row, 'INJECTION_BLOCKED');
     broadcast('query', { type: 'injection_blocked', query: publicQuery(row) });
     broadcast('stats', db.stats());
     return res.json({ id: row.id, decision: 'block', status: 'injection_blocked' });
@@ -200,6 +206,7 @@ app.post('/api/v1/gate', checkIngestKey, (req, res) => {
   if (clientOutcome === 'shadow_ai') {
     const row = db.createQuery({ status: 'shadow_ai', ...base });
     db.appendAudit({ action: 'SHADOW_AI', queryId: row.id, actor: user, detail: `ungoverned AI tool: ${destination}` });
+    emitSecurityAlert(row, 'SHADOW_AI');
     broadcast('query', { type: 'shadow_ai', query: publicQuery(row) });
     broadcast('stats', db.stats());
     return res.json({ id: row.id, decision: 'log', status: 'shadow_ai' });
@@ -208,6 +215,7 @@ app.post('/api/v1/gate', checkIngestKey, (req, res) => {
   if (clientOutcome === 'file_too_large' || clientOutcome === 'file_unsupported') {
     const row = db.createQuery({ status: 'file_blocked_unscanned', ...base });
     db.appendAudit({ action: 'FILE_BLOCKED_UNSCANNED', queryId: row.id, actor: user, detail: note || 'file blocked unscanned' });
+    emitSecurityAlert(row, 'FILE_BLOCKED_UNSCANNED');
     broadcast('query', { type: 'file_blocked_unscanned', query: publicQuery(row) });
     broadcast('stats', db.stats());
     return res.json({ id: row.id, decision: 'block', status: 'file_blocked_unscanned' });
@@ -216,6 +224,7 @@ app.post('/api/v1/gate', checkIngestKey, (req, res) => {
   if (verdict.decision === 'allow') {
     const row = db.createQuery({ status: 'allowed', ...base });
     db.appendAudit({ action: 'ALLOWED', queryId: row.id, actor: user, detail: `${source} risk ${analysis.riskScore}` });
+    emitSecurityAlert(row, 'ALLOWED');
     broadcast('query', { type: 'allowed', query: publicQuery(row) });
     broadcast('stats', db.stats());
     return res.json({ id: row.id, decision: 'allow', riskScore: analysis.riskScore, findings, categories });
@@ -270,6 +279,7 @@ app.post('/api/v1/gate', checkIngestKey, (req, res) => {
     : status === 'warned_sent' ? 'WARNED_SENT'
     : status === 'blocked_by_user' ? 'SELF_BLOCKED' : 'FLAGGED';
   db.appendAudit({ action, queryId: row.id, actor: user, detail: `${source}/${channel}: ${verdict.reasons.join('; ')}` });
+  emitSecurityAlert(row, action);
   broadcast('query', { type: status, query: publicQuery(row) });
   broadcast('stats', db.stats());
   return res.json({
@@ -330,6 +340,7 @@ app.post('/api/v1/scan-file', checkIngestKey, async (req, res) => {
       redactedPrompt: '[unsupported file] ' + filename, findings: [], categories: [], entityCounts: {},
       riskScore: 0, maxSeverity: 0, maxSeverityLabel: 'none', reasons: ['Unsupported file type recorded'] });
     db.appendAudit({ action: 'FILE_RECORDED', queryId: row.id, actor: user, detail: filename });
+    emitSecurityAlert(row, 'FILE_RECORDED');
     broadcast('query', { type: 'flagged', query: publicQuery(row) });
     broadcast('stats', db.stats());
     return res.json({ id: row.id, decision: 'allow', supported: false, filename });
@@ -347,6 +358,7 @@ app.post('/api/v1/scan-file', checkIngestKey, async (req, res) => {
   if (verdict.decision === 'allow') {
     const row = db.createQuery({ status: 'allowed', ...base });
     db.appendAudit({ action: 'FILE_ALLOWED', queryId: row.id, actor: user, detail: filename + ' risk ' + analysis.riskScore });
+    emitSecurityAlert(row, 'FILE_ALLOWED');
     broadcast('query', { type: 'allowed', query: publicQuery(row) }); broadcast('stats', db.stats());
     return res.json({ id: row.id, decision: 'allow', supported: true, filename, riskScore: analysis.riskScore, findings, categories });
   }
@@ -356,6 +368,7 @@ app.post('/api/v1/scan-file', checkIngestKey, async (req, res) => {
   const rawFile = '[file:' + filename + ']\n' + extracted.text.slice(0, 5000);
   const row = db.createQuery({ status, mode, ...base, _rawPrompt: rawToStore(rawFile, status, pol) });
   db.appendAudit({ action: status === 'pending' ? 'FILE_BLOCKED' : 'FILE_FLAGGED', queryId: row.id, actor: user, detail: filename + ': ' + verdict.reasons.join('; ') });
+  emitSecurityAlert(row, status === 'pending' ? 'FILE_BLOCKED' : 'FILE_FLAGGED');
   broadcast('query', { type: status, query: publicQuery(row) }); broadcast('stats', db.stats());
   res.json({ id: row.id, decision: 'block', mode, status, supported: true, filename, riskScore: analysis.riskScore, findings, categories, reasons: verdict.reasons });
 });
@@ -377,6 +390,7 @@ app.post('/api/v1/scan-response', checkIngestKey, (req, res) => {
       riskScore: analysis.riskScore, maxSeverity: analysis.maxSeverity, maxSeverityLabel: analysis.maxSeverityLabel,
       reasons: ['Sensitive data present in AI response'] });
     db.appendAudit({ action: 'RESPONSE_FLAGGED', queryId: row.id, actor: user, detail: `${source}: ${findings.map((f) => f.type).join(', ') || categories.join(', ')}` });
+    emitSecurityAlert(row, 'RESPONSE_FLAGGED');
     broadcast('query', { type: 'response_flagged', query: publicQuery(row) });
     broadcast('stats', db.stats());
   }

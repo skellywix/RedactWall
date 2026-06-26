@@ -174,6 +174,9 @@ Copy `.env.example` to `.env` (or export):
 | `SENTINEL_SECRET` | Session cookie signing secret |
 | `SENTINEL_DATA_KEY` | Encrypts retained raw prompts at rest (falls back to `SENTINEL_SECRET`; if neither set, raw isn't stored) |
 | `INGEST_API_KEY` | Key sensors present to the gate API |
+| `SIEM_WEBHOOK_URL` | Optional sanitized webhook for high-risk security events |
+| `SIEM_WEBHOOK_TOKEN` | Optional bearer token for the SIEM webhook |
+| `SIEM_ALERT_MIN_RISK` / `SIEM_ALERT_MIN_SEVERITY` | Alert thresholds for allowed-but-risky events; blocked and response-flagged events alert automatically |
 
 ## Compliance note
 
