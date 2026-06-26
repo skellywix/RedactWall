@@ -192,9 +192,10 @@ PromptSentinel retains raw approval prompts and token vaults only for records th
 Revealing a retained raw prompt or approving a held prompt release requires an active Security Admin session, a CSRF token, and password confirmation. Successful reveals, failed reveal confirmations, approved releases, and failed approval confirmations are written to the audit log.
 
 Sensors or proxy bridges that poll `/api/v1/status/:id` for a held prompt must
-send the `x-release-token` returned by the original gate response. PromptSentinel
-stores only the token hash, and the reference Squid/ICAP bridge forwards the
-token automatically through `awaitRelease`.
+send the `x-release-token` header returned by the original gate response.
+PromptSentinel stores only the token hash, rejects query-string release tokens,
+and the reference Squid/ICAP bridge forwards the header automatically through
+`awaitRelease`.
 
 The server runs a retention purge on startup and then hourly. Security Admins can also run it from the Policy tab or with:
 
