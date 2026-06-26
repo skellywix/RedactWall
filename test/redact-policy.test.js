@@ -22,6 +22,7 @@ fs.writeFileSync(process.env.SENTINEL_POLICY_PATH, JSON.stringify({
 }, null, 2));
 
 const app = require('../server');
+const db = require('../src/db');
 
 function listen(appUnderTest) {
   return new Promise((resolve, reject) => {
@@ -76,19 +77,24 @@ test('redact mode tokenizes structured-only prompt findings', async () => withSe
 
 test('redact mode holds mixed structured and semantic prompt findings', async () => withServer(async (port) => {
   const secret = '524-71-9043';
-  const prompt = 'Strictly confidential: our largest commercial relationship is about to walk; draft retention options before the board hears. Member SSN ' + secret + '.';
+  const confidentialPhrase = 'our largest commercial relationship is about to walk';
+  const prompt = 'Strictly confidential: ' + confidentialPhrase + '; draft retention options before the board hears. Member SSN ' + secret + '.';
   const res = await gate(port, prompt);
 
   assert.strictEqual(res.status, 200);
   const body = await res.json();
+  const stored = db.getQuery(body.id);
   assert.strictEqual(body.decision, 'block');
   assert.strictEqual(body.status, 'pending');
   assert.strictEqual(body.mode, 'redact');
   assert.ok(body.findings.some((f) => f.type === 'US_SSN'));
   assert.ok(body.categories.includes('CONFIDENTIAL_BUSINESS'));
   assert.strictEqual(body.tokenizedPrompt, undefined);
+  assert.strictEqual(stored.redactedPrompt, '[REDACTED: CONFIDENTIAL_BUSINESS]');
   assert.ok(!JSON.stringify(body).includes(secret));
   assert.ok(!JSON.stringify(body).includes(prompt));
+  assert.ok(!JSON.stringify(stored).includes(secret));
+  assert.ok(!JSON.stringify(stored).includes(confidentialPhrase));
 }));
 
 test('redact mode accepts whole-chunk client redaction for semantic evidence', async () => withServer(async (port) => {
@@ -121,6 +127,35 @@ test('redact mode accepts whole-chunk client redaction for semantic evidence', a
   assert.strictEqual(body.status, 'redacted');
   assert.deepStrictEqual(body.categories, ['CONFIDENTIAL_BUSINESS']);
   assert.strictEqual(body.tokenizedPrompt, '[REDACTED: CONFIDENTIAL_BUSINESS]');
+}));
+
+test('scan-response stores category hits as whole-chunk redacted previews', async () => withServer(async (port) => {
+  const confidentialPhrase = 'our largest commercial relationship is about to walk';
+  const text = 'Strictly confidential: ' + confidentialPhrase + '; draft retention options before the board hears.';
+  const res = await fetch(`http://127.0.0.1:${port}/api/v1/scan-response`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': 'unit-ingest-key',
+    },
+    body: JSON.stringify({
+      text,
+      user: 'analyst@example.test',
+      destination: 'chatgpt.com',
+      source: 'api',
+    }),
+  });
+
+  assert.strictEqual(res.status, 200);
+  const body = await res.json();
+  assert.strictEqual(body.leaked, true);
+  assert.deepStrictEqual(body.categories, ['CONFIDENTIAL_BUSINESS']);
+  assert.strictEqual(body.redacted, '[REDACTED: CONFIDENTIAL_BUSINESS]');
+  const stored = db.listQueries({ status: 'response_flagged', limit: 1 })[0];
+  assert.ok(stored);
+  assert.strictEqual(stored.redactedPrompt, '[AI response] [REDACTED: CONFIDENTIAL_BUSINESS]');
+  assert.ok(!JSON.stringify(body).includes(confidentialPhrase));
+  assert.ok(!JSON.stringify(stored).includes(confidentialPhrase));
 }));
 
 test.after(() => {

@@ -6,6 +6,8 @@
 
 ## Done
 
+- 2026-06-26: Sanitized semantic-category previews so held prompts, scanned files, and flagged AI responses store whole-chunk `[REDACTED: ...]` evidence instead of retaining confidential business context with only structured values masked.
+  Evidence: `node --test test/redact-policy.test.js test/processors.test.js`, `npm test`, `npm run test:browser`, `npm run sync-check`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Added a Windows endpoint-agent scheduled-task install path for pilots: per-user logon task, restart-on-failure settings, least-privilege interactive principal, restricted local config, `SENTINEL_ENV_PATH` loading, uninstall support, and client-demo docs.
   Evidence: `node --test test/env.test.js test/endpoint-agent.test.js test/endpoint-agent-install.test.js`, PowerShell parser checks for endpoint install/run/uninstall scripts, `npm test`, `npm run test:browser`, `npm run sync-check`, `npm run setup:check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Closed the mixed-content redact-mode leak path: prompt and file flows now tokenize only structured-only findings, hold semantic or mixed semantic+structured content for Security Admin review, and preserve MCP whole-chunk redaction telemetry as redacted.

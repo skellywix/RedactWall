@@ -200,6 +200,16 @@ function canTokenizeAllSensitivity(analysis) {
   return !!(analysis && (analysis.findings || []).length && !(analysis.categories || []).length);
 }
 
+function categoryNames(analysis) {
+  return [...new Set(((analysis && analysis.categories) || []).map((c) => c.category).filter(Boolean))];
+}
+
+function safePreview(text, analysis, prefix = '', limit = 600) {
+  const categories = categoryNames(analysis);
+  if (categories.length) return prefix + '[REDACTED: ' + categories.join(', ') + ']';
+  return prefix + detector.redact(text, analysis.findings || []).slice(0, limit);
+}
+
 function clientFindingsFrom(body) {
   return (body.clientFindings || [])
     .filter((f) => f && typeof f.type === 'string')
@@ -270,7 +280,7 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
   const verdict = policy.evaluate(analysis, pol);
 
   // Privacy-preserving record: redacted prompt + masked findings + categories.
-  const redactedPrompt = clientRedacted ? prompt : detector.redact(prompt, analysis.findings);
+  const redactedPrompt = clientRedacted && !categoryNames(analysis).length ? prompt : safePreview(prompt, analysis);
   const findings = analysis.findings.map((f) => ({
     type: f.type, severity: f.severity, score: f.score, masked: f.masked || detector.maskValue(f.type, f.value || ''),
   }));
@@ -468,7 +478,7 @@ app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation
   const verdict = policy.evaluate(analysis, pol);
   const findings = analysis.findings.map((x) => ({ type: x.type, severity: x.severity, score: x.score, masked: detector.maskValue(x.type, x.value) }));
   const categories = (analysis.categories || []).map((c) => c.category);
-  const preview = '[file:' + filename + '] ' + detector.redact(extracted.text, analysis.findings).slice(0, 600);
+  const preview = safePreview(extracted.text, analysis, '[file:' + filename + '] ');
   const base = { user, orgId, destination, source, channel, filename, processor: extracted.processor,
     redactedPrompt: preview, findings, categories, entityCounts: analysis.entityCounts,
     riskScore: analysis.riskScore, maxSeverity: analysis.maxSeverity, maxSeverityLabel: analysis.maxSeverityLabel, reasons: verdict.reasons };
@@ -527,11 +537,11 @@ app.post('/api/v1/scan-response', checkIngestKey, validation.validateBody(valida
   const analysis = detector.analyze(text, policy.analyzeOpts(pol));
   const findings = analysis.findings.map((f) => ({ type: f.type, severity: f.severity, score: f.score, masked: detector.maskValue(f.type, f.value) }));
   const categories = (analysis.categories || []).map((c) => c.category);
-  const redacted = detector.redact(text, analysis.findings);
+  const redacted = safePreview(text, analysis);
   const leaked = findings.length > 0 || categories.length > 0;
   if (leaked) {
     const row = db.createQuery({ status: 'response_flagged', user, orgId, destination, source, channel: 'ai_response',
-      redactedPrompt: '[AI response] ' + redacted.slice(0, 600), findings, categories, entityCounts: analysis.entityCounts,
+      redactedPrompt: '[AI response] ' + redacted, findings, categories, entityCounts: analysis.entityCounts,
       riskScore: analysis.riskScore, maxSeverity: analysis.maxSeverity, maxSeverityLabel: analysis.maxSeverityLabel,
       reasons: ['Sensitive data present in AI response'] });
     db.appendAudit({ action: 'RESPONSE_FLAGGED', queryId: row.id, actor: user, detail: `${source}: ${findings.map((f) => f.type).join(', ') || categories.join(', ')}` });
