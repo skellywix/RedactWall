@@ -9,7 +9,7 @@ require('../src/env').loadEnv();
  * reports verdicts to the control plane. Respects scanner ignore-lists.
  *
  * Usage: node agent.js [watchDir]
- *   SENTINEL_URL (default http://localhost:4000), INGEST_API_KEY (default dev-ingest-key)
+ *   SENTINEL_URL (default http://localhost:4000), INGEST_API_KEY (required for control-plane calls)
  *   ENDPOINT_AGENT_WATCH_DIR (default OS temp promptsentinel-watch)
  */
 const fs = require('fs');
@@ -19,7 +19,7 @@ const processors = require('../src/processors');
 const VERSION = require('../package.json').version;
 
 const SERVER = process.env.SENTINEL_URL || 'http://localhost:4000';
-const KEY = process.env.INGEST_API_KEY || 'dev-ingest-key';
+const KEY = process.env.INGEST_API_KEY || '';
 function defaultWatchDir(argv = process.argv, env = process.env) {
   return argv[2] || env.ENDPOINT_AGENT_WATCH_DIR || path.join(os.tmpdir(), 'promptsentinel-watch');
 }
@@ -36,6 +36,11 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 10000;
 let scannerState = scannerConfig(DEFAULT_SCANNER);
 
 if (!fs.existsSync(WATCH)) fs.mkdirSync(WATCH, { recursive: true });
+
+function configuredKey(opts = {}) {
+  const value = Object.prototype.hasOwnProperty.call(opts, 'key') ? opts.key : KEY;
+  return typeof value === 'string' ? value.trim() : '';
+}
 
 function lowerList(value, fallback = []) {
   const src = Array.isArray(value) ? value : value instanceof Set ? Array.from(value) : fallback;
@@ -73,7 +78,8 @@ async function fetchPolicy(opts = {}) {
   const fetchImpl = opts.fetchImpl || globalThis.fetch;
   if (!fetchImpl) return null;
   const server = opts.server || SERVER;
-  const key = opts.key || KEY;
+  const key = configuredKey(opts);
+  if (!key) return null;
   try {
     const r = await fetchWithTimeout(fetchImpl, server + '/api/v1/policy', {
       headers: { 'x-api-key': key },
@@ -115,9 +121,10 @@ async function fetchWithTimeout(fetchImpl, url, options, opts = {}) {
 
 async function postJson(apiPath, body, opts = {}) {
   const server = opts.server || SERVER;
-  const key = opts.key || KEY;
+  const key = configuredKey(opts);
   const fetchImpl = opts.fetchImpl || globalThis.fetch;
   if (!fetchImpl) return null;
+  if (!key) return null;
   try {
     const r = await fetchWithTimeout(fetchImpl, server + apiPath, {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': key }, body: JSON.stringify(body),
@@ -222,6 +229,7 @@ function start() {
   console.log('PromptSentinel endpoint agent');
   console.log('  watching:', WATCH);
   console.log('  server  :', SERVER);
+  console.log('  ingest  :', KEY ? 'configured' : 'not configured (control-plane calls disabled)');
   console.log('  Supported: pdf, docx, xlsx, pptx, and text files. Drop a file in to scan.\n');
 
   refreshPolicy({ silent: true }).finally(() => {
@@ -248,5 +256,6 @@ module.exports = {
   fetchWithTimeout,
   defaultWatchDir,
   sensorMetadata,
+  configuredKey,
   start,
 };

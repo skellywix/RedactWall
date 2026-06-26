@@ -216,9 +216,11 @@ Create a pilot handoff package from the repo root:
 
 ```powershell
 npm run package:extension
+npm run package:endpoint-agent
+npm run package:mcp-guard
 ```
 
-Give the Chrome admin the zip from `dist\extension\` and the adjacent `.manifest.json` with the SHA-256 hash. The package script fails if the synced detection engine drifted or if a development ingest key is present in the extension files.
+Give the Chrome admin the zip from `dist\extension\` and the adjacent `.manifest.json` with the SHA-256 hash. Endpoint and MCP pilot zips land under `dist\endpoint-agent\` and `dist\mcp-guard\` with the same manifest pattern. The package scripts fail if development ingest keys or prompt bodies are present in the handoff files.
 
 Managed deployment examples live in:
 
@@ -480,6 +482,7 @@ node endpoint-agent\agent.js .\demo-watch
 For a longer Windows pilot, install it as a logon task instead of leaving a terminal open:
 
 ```powershell
+npm run package:endpoint-agent
 .\scripts\install-endpoint-agent.ps1 `
   -SentinelUrl "http://localhost:4000" `
   -IngestKey "demo-ingest-key" `

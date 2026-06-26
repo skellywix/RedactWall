@@ -126,6 +126,21 @@ It verifies Manifest V3 wiring, managed-storage schema coverage, synced engine
 copies, and absence of a packaged development ingest key. Configure `serverUrl`,
 `ingestKey`, and identity through Chrome managed storage or local demo storage.
 
+## Endpoint Agent Package
+
+Build the endpoint file-sensor artifact before a Windows pilot handoff:
+
+```bash
+npm run package:endpoint-agent
+```
+
+The command writes a zip and adjacent SHA-256 manifest under
+`dist/endpoint-agent/`. It includes the endpoint runtime, env loader, file-type
+processor registry, and scheduled-task install/run/uninstall scripts. It refuses
+synthetic prompt bodies and packaged development ingest keys. Set the real
+`SENTINEL_URL`, `INGEST_API_KEY`, and watch directory during install; the agent
+does not contact the control plane without an explicit ingest key.
+
 ## MCP Guard Package
 
 Build the MCP guard artifact before an agent pilot handoff:

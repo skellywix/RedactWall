@@ -6,6 +6,8 @@
 
 ## Done
 
+- 2026-06-26: Added repeatable endpoint-agent pilot packaging: `npm run package:endpoint-agent` writes a prompt-free zip plus SHA-256 manifest with the endpoint runtime, file processor registry, env loader, and scheduled-task install/run/uninstall scripts; the endpoint agent now requires an explicit ingest key before control-plane calls and reports that state at startup without printing secrets.
+  Evidence: `node --test test/endpoint-agent-package.test.js test/endpoint-agent.test.js test/endpoint-agent-install.test.js`, `npm run package:endpoint-agent -- <temp>`, `npm test`, `npm run test:browser`, `npm run setup:check`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Hardened Docker Compose pilot readiness: Compose now passes generated Security Admin MFA and auditor credentials into the container, keeps SQLite evidence on the named `/data` volume, has a `/readyz` healthcheck that catches blocked preflight or database readiness, and static Docker deployment tests guard the contract.
   Evidence: `node --test test/docker-deployment.test.js test/setup.test.js test/preflight.test.js`, `docker compose config`, `npm test`, `npm run test:browser`, `npm run setup:check`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Added an end-to-end production setup smoke test: a temp env now runs `setup.js --production --skip-install`, confirms generated secrets and a local SQLite store, proves setup/check output do not print admin, MFA, or ingest secrets, then verifies `mfa-uri.js` is the explicit enrollment-only reveal path.

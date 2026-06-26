@@ -5,7 +5,7 @@ const assert = require('node:assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { scanFile, refreshPolicy, scannerConfig, ignoredByScanner, postJson, defaultWatchDir } = require('../endpoint-agent/agent');
+const { scanFile, refreshPolicy, fetchPolicy, scannerConfig, ignoredByScanner, postJson, defaultWatchDir, configuredKey } = require('../endpoint-agent/agent');
 const pkg = require('../package.json');
 
 test('watch directory prefers CLI argument, then endpoint env, then temp default', () => {
@@ -91,6 +91,30 @@ test('blocks supported files locally when scan API is unavailable', async () => 
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test('blocks supported files locally without an ingest key or network call', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-agent-'));
+  const filename = 'loan.txt';
+  fs.writeFileSync(path.join(dir, filename), 'Loan file that must not pass. SSN 524-71-9043.');
+
+  let calls = 0;
+  const res = await scanFile(filename, {
+    watchDir: dir,
+    user: 'unit-user',
+    key: '',
+    fetchImpl: async () => {
+      calls += 1;
+      return { ok: true, json: async () => ({ decision: 'allow' }) };
+    },
+  });
+
+  assert.strictEqual(res.decision, 'block');
+  assert.strictEqual(res.status, 'scan_unavailable');
+  assert.strictEqual(res.supported, true);
+  assert.strictEqual(calls, 0);
+
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test('postJson times out stalled control-plane requests', async () => {
   const started = Date.now();
   const res = await postJson('/api/v1/scan-file', { filename: 'loan.txt' }, {
@@ -110,6 +134,19 @@ test('postJson times out stalled control-plane requests', async () => {
 
   assert.strictEqual(res, null);
   assert.ok(Date.now() - started < 1000);
+});
+
+test('does not contact the control plane without an ingest key', async () => {
+  let calls = 0;
+  const fetchImpl = async () => {
+    calls += 1;
+    return { ok: true, json: async () => ({}) };
+  };
+
+  assert.strictEqual(configuredKey({ key: '  unit-key  ' }), 'unit-key');
+  assert.strictEqual(await fetchPolicy({ key: '', fetchImpl }), null);
+  assert.strictEqual(await postJson('/api/v1/gate', { prompt: 'blocked locally' }, { key: '', fetchImpl }), null);
+  assert.strictEqual(calls, 0);
 });
 
 test('refreshes scanner policy from the control plane', async () => {
