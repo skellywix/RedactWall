@@ -207,7 +207,7 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 | Shadow-AI discovery | Working — flags use of ungoverned AI tools |
 | Output scanning | Working — `/api/v1/scan-response` flags PII/secrets in AI replies |
 | MCP guard / Endpoint agent | Working references — inline redaction; folder watch (pdf/docx/xlsx/pptx/text) |
-| Auth & ops | Working: login lockout, password-confirmed raw reveal and release approval, stable secret, `/healthz` · `/readyz` · `/api/metrics`, sensor version posture, Docker, CI |
+| Auth & ops | Working: login lockout, password-confirmed raw reveal and release approval, release-token scoped polling, stable secret, `/healthz` · `/readyz` · `/api/metrics`, sensor version posture, Docker, CI |
 
 ## Shipped since the skeleton (see `ITERATIONS.md`)
 
@@ -270,6 +270,11 @@ hash-chained audit trail.
 
 Approving a held prompt also requires password confirmation. A stale or stolen
 admin browser session alone is not enough to release a blocked prompt.
+Sensors polling `/api/v1/status/:id` for a held prompt must also present the
+per-query release token returned by the original gate response in the
+`x-release-token` header. The server stores only the token hash, so one sensor
+key plus a guessed or leaked query id is not enough to read release state for
+another held item.
 
 Even so, a product that inspects employee input requires proper authorization
 and clear employee notice. See `AI_Chat_DLP_Implementation_Plan.docx` for the

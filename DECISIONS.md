@@ -16,6 +16,7 @@
 - 2026-06-26: Mixed or missing versions for browser, endpoint, or MCP sensors should trigger a sanitized best-effort `SENSOR_VERSION_GAP` alert. API/proxy traffic is excluded because it is not managed sensor deployment health.
 - 2026-06-26: Evidence exports use hashes for prompt bodies and audit details. Even redacted prompt text can contain sensitive category-only context, so exports omit bodies entirely.
 - 2026-06-26: Production readiness must reject SQLite evidence-store paths that are missing, cloud-synced, or network-backed. A broken database lock or sync conflict can undermine the audit chain, so local demo mode may warn, but production mode must block.
+- 2026-06-26: Approval polling needs a per-query release token in addition to the ingest key. The ingest key authenticates the sensor fleet, while the release token scopes status reads to the held item that created the token.
 - 2026-06-26: Canary tokens use explicit `PS-CANARY-...` or `PROMPTSENTINEL-CANARY-...` formats with enough suffix entropy to avoid flagging ordinary discussion of canaries.
 - 2026-06-26: Managed Chrome deployment examples are treated as secret-bearing config because managed storage carries the ingest key. Source examples must keep placeholders only.
 - 2026-06-26: Examiner evidence should be product-visible through the dashboard, but the UI must call only the sanitized evidence endpoint and never reveal raw prompt data.

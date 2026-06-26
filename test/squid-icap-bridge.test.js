@@ -106,13 +106,14 @@ test('awaitRelease releases only approved or allowed statuses', async () => {
     { status: 'approved' },
   ];
   const result = await awaitRelease('q_1/needs encoding', {
+    releaseToken: 'release-token-unit',
     sentinel: 'http://sentinel.test',
     key: 'proxy-key',
     intervalMs: 1,
     timeoutMs: 1000,
     sleepImpl: async () => {},
     fetchImpl: async (url, opts) => {
-      seen.push({ url, key: opts.headers['x-api-key'] });
+      seen.push({ url, key: opts.headers['x-api-key'], releaseToken: opts.headers['x-release-token'] });
       return jsonResponse(200, sequence.shift());
     },
   });
@@ -120,6 +121,7 @@ test('awaitRelease releases only approved or allowed statuses', async () => {
   assert.deepStrictEqual(result, { released: true });
   assert.strictEqual(seen[0].url, 'http://sentinel.test/api/v1/status/q_1%2Fneeds%20encoding');
   assert.strictEqual(seen[0].key, 'proxy-key');
+  assert.strictEqual(seen[0].releaseToken, 'release-token-unit');
 });
 
 test('awaitRelease fails closed on missing id and status API failure', async () => {

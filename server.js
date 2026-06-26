@@ -30,6 +30,7 @@ const evidence = require('./src/evidence');
 const preflight = require('./src/preflight');
 const validation = require('./src/validation');
 const coverage = require('./src/coverage');
+const releaseTokens = require('./src/release-token');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -238,6 +239,21 @@ function rawToStore(text, status, pol) {
   if (pol && pol.storeRawForApproval === false) return undefined;
   const sealed = dataCrypto.seal(text);
   return sealed == null ? undefined : sealed;
+}
+
+function createQueryWithReleaseToken(query) {
+  if (query && query.status === 'pending') {
+    const release = releaseTokens.issueReleaseToken();
+    return {
+      row: db.createQuery({ ...query, _releaseTokenHash: release.hash }),
+      releaseToken: release.token,
+    };
+  }
+  return { row: db.createQuery(query), releaseToken: null };
+}
+
+function releaseTokenPayload(releaseToken) {
+  return releaseToken ? { releaseToken } : {};
 }
 
 function runRetentionPurge({ actor = 'system', now = new Date() } = {}) {
@@ -449,7 +465,7 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
     tokenizedPrompt = prompt;
   }
 
-  const row = db.createQuery({
+  const { row, releaseToken } = createQueryWithReleaseToken({
     status, mode, ...base, decisionNote: note,
     _rawPrompt: rawToStore(prompt, status, pol),
     _tokenVault: tokenVault,
@@ -466,6 +482,7 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
   broadcast('stats', db.stats());
   return res.json({
     id: row.id, decision: status === 'redacted' ? 'redact' : 'block', mode, status,
+    ...releaseTokenPayload(releaseToken),
     riskScore: analysis.riskScore, findings, categories, reasons: verdict.reasons,
     tokenizedPrompt,
     message: status === 'redacted' ? 'Sensitive values tokenized — safe to send; re-hydrate the AI response via /api/v1/rehydrate.'
@@ -582,7 +599,9 @@ app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation
     tokenizedPrompt = '[file:' + filename + ']\n' + t.text;
     tokenVault = dataCrypto.seal(JSON.stringify(t.map));
   }
-  const row = db.createQuery({ status, mode, ...base, _rawPrompt: rawToStore(rawFile, status, pol), _tokenVault: tokenVault, tokenizedPrompt });
+  const { row, releaseToken } = createQueryWithReleaseToken({
+    status, mode, ...base, _rawPrompt: rawToStore(rawFile, status, pol), _tokenVault: tokenVault, tokenizedPrompt,
+  });
   const action = status === 'pending' ? 'FILE_BLOCKED'
     : status === 'redacted' ? 'FILE_REDACTED'
     : 'FILE_FLAGGED';
@@ -594,6 +613,7 @@ app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation
     decision: status === 'redacted' ? 'redact' : 'block',
     mode,
     status,
+    ...releaseTokenPayload(releaseToken),
     supported: true,
     filename,
     riskScore: analysis.riskScore,
@@ -635,6 +655,8 @@ app.post('/api/v1/scan-response', checkIngestKey, validation.validateBody(valida
 app.get('/api/v1/status/:id', checkIngestKey, (req, res) => {
   const q = db.getQuery(req.params.id);
   if (!q) return res.status(404).json({ error: 'not found' });
+  const releaseToken = req.get('x-release-token') || '';
+  if (!releaseTokens.verifyReleaseToken(q, releaseToken)) return res.status(401).json({ error: 'invalid release token' });
   const released = q.status === 'approved' || q.status === 'allowed';
   res.json({ id: q.id, status: q.status, released });
 });
@@ -714,7 +736,7 @@ app.get('/api/me', auth.requireAuth, (req, res) => {
 // ADMIN API (session-protected)
 // =============================================================================
 function publicQuery(q, { includeRaw = false } = {}) {
-  const { _rawPrompt, _tokenVault, ...rest } = q;
+  const { _rawPrompt, _tokenVault, _releaseTokenHash, ...rest } = q;
   return includeRaw ? { ...rest, rawPrompt: _rawPrompt } : rest;
 }
 

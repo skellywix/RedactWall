@@ -97,6 +97,7 @@ async function gate({
 
 /** Block inline: poll until the admin releases, or time out (deny by default). */
 async function awaitRelease(id, {
+  releaseToken,
   timeoutMs = 5 * 60 * 1000,
   intervalMs = 2000,
   sentinel = SENTINEL,
@@ -112,7 +113,10 @@ async function awaitRelease(id, {
     let r;
     try {
       r = await fetchWithTimeout(fetchImpl, `${sentinel}/api/v1/status/${encodeURIComponent(id)}`, {
-        headers: { 'x-api-key': key },
+        headers: {
+          'x-api-key': key,
+          ...(releaseToken ? { 'x-release-token': releaseToken } : {}),
+        },
       }, { timeoutMs: perRequestTimeoutMs });
     } catch (e) {
       return { released: false, reason: e && e.code === 'SENTINEL_TIMEOUT' ? 'status_timeout' : 'status_unreachable' };
@@ -132,7 +136,7 @@ async function awaitRelease(id, {
  *   const verdict = await gate({...});
  *   if (verdict.decision === 'allow') return ICAP_ALLOW;       // forward unchanged
  *   if (!verdict.id) return ICAP_BLOCK_403;                    // fail closed
- *   const rel = await awaitRelease(verdict.id);                // hold the request
+ *   const rel = await awaitRelease(verdict.id, { releaseToken: verdict.releaseToken });
  *   return rel.released ? ICAP_ALLOW : ICAP_BLOCK_403;         // release or block
  */
 module.exports = { extractPrompt, gate, awaitRelease, fetchWithTimeout, requestTimeoutMs, failClosed };
