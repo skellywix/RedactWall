@@ -6,6 +6,8 @@
 
 ## Done
 
+- 2026-06-26: Hardened the endpoint agent to fail closed when supported-file scans or policy refreshes stall or return unusable control-plane responses. Scan outages now block locally and can be recorded as sanitized `scan_unavailable` unscanned-file events.
+  Evidence: `node --test test/endpoint-agent.test.js`, `node --test test/validation.test.js`, `npm test`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Added permanent Playwright coverage for the mobile admin console layout so CI verifies collapsed rail tabs, usable content tabs, and no page-level horizontal overflow.
   Evidence: `npm run test:browser`, `npm test`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Made the MCP guard detection path policy-aware so tool-output redaction honors centralized `ignore` and `disabledDetectors` settings before reporting sanitized evidence.

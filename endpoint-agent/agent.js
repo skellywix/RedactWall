@@ -26,6 +26,7 @@ const DEFAULT_SCANNER = {
   maxFileBytes: 6.3 * 1024 * 1024,
 };
 const POLICY_REFRESH_MS = 15 * 60 * 1000;
+const DEFAULT_REQUEST_TIMEOUT_MS = 10000;
 let scannerState = scannerConfig(DEFAULT_SCANNER);
 
 if (!fs.existsSync(WATCH)) fs.mkdirSync(WATCH, { recursive: true });
@@ -64,9 +65,9 @@ async function fetchPolicy(opts = {}) {
   const server = opts.server || SERVER;
   const key = opts.key || KEY;
   try {
-    const r = await fetchImpl(server + '/api/v1/policy', {
+    const r = await fetchWithTimeout(fetchImpl, server + '/api/v1/policy', {
       headers: { 'x-api-key': key },
-    });
+    }, opts);
     if (!r || !r.ok) return null;
     return r.json();
   } catch (e) {
@@ -81,16 +82,39 @@ async function refreshPolicy(opts = {}) {
   return scannerState;
 }
 
+function requestTimeoutMs(opts = {}) {
+  const n = Number(opts.timeoutMs ?? process.env.SENTINEL_REQUEST_TIMEOUT_MS ?? DEFAULT_REQUEST_TIMEOUT_MS);
+  if (!Number.isFinite(n)) return DEFAULT_REQUEST_TIMEOUT_MS;
+  return Math.max(50, Math.min(120000, n));
+}
+
+async function fetchWithTimeout(fetchImpl, url, options, opts = {}) {
+  const timeout = requestTimeoutMs(opts);
+  if (!globalThis.AbortController) return fetchImpl(url, options);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  try {
+    return await fetchImpl(url, { ...options, signal: controller.signal });
+  } catch (e) {
+    if (e && e.name === 'AbortError') e.code = 'SENTINEL_TIMEOUT';
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function postJson(apiPath, body, opts = {}) {
   const server = opts.server || SERVER;
   const key = opts.key || KEY;
   const fetchImpl = opts.fetchImpl || globalThis.fetch;
   if (!fetchImpl) return null;
   try {
-    const r = await fetchImpl(server + apiPath, {
+    const r = await fetchWithTimeout(fetchImpl, server + apiPath, {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': key }, body: JSON.stringify(body),
-    });
-    return r.json();
+    }, opts);
+    const parsed = await r.json().catch(() => null);
+    if (!r.ok) return null;
+    return parsed;
   } catch (e) { console.error('  report failed:', e.message); return null; }
 }
 
@@ -122,6 +146,17 @@ function unscannedFileEvent(filename, user, outcome, note) {
   };
 }
 
+async function blockScanUnavailable(file, user, opts = {}) {
+  console.log(`[BLOCK] ${file} could not be sent to PromptSentinel for scanning`);
+  await (opts.report || report)(unscannedFileEvent(
+    file,
+    user,
+    'scan_unavailable',
+    'blocked locally: control plane scan unavailable',
+  ), opts);
+  return { decision: 'block', status: 'scan_unavailable', supported: true };
+}
+
 async function scanFile(file, opts = {}) {
   const watchDir = opts.watchDir || WATCH;
   const scanner = opts.scanner ? scannerConfig(opts.scanner) : scannerState;
@@ -150,7 +185,9 @@ async function scanFile(file, opts = {}) {
   // preview to /gate would make the control plane re-scan clean placeholder text
   // and lose the real finding.
   const res = await (opts.scanFileApi || scanFileApi)(fileRequest(file, buf, user), opts);
-  if (!res) return null;
+  if (!res || res.error || (!res.decision && res.supported !== false)) {
+    return blockScanUnavailable(file, user, opts);
+  }
   if (res.supported === false) {
     console.log(`[file] ${file} (unsupported) -> recorded`);
     return res;
@@ -195,5 +232,7 @@ module.exports = {
   refreshPolicy,
   scannerConfig,
   ignoredByScanner,
+  requestTimeoutMs,
+  fetchWithTimeout,
   start,
 };

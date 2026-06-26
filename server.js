@@ -298,7 +298,7 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
     return res.json({ id: row.id, decision: 'log', status: 'shadow_ai' });
   }
 
-  if (clientOutcome === 'file_too_large' || clientOutcome === 'file_unsupported') {
+  if (clientOutcome === 'file_too_large' || clientOutcome === 'file_unsupported' || clientOutcome === 'scan_unavailable') {
     const row = db.createQuery({ status: 'file_blocked_unscanned', ...base });
     db.appendAudit({ action: 'FILE_BLOCKED_UNSCANNED', queryId: row.id, actor: user, detail: note || 'file blocked unscanned' });
     emitSecurityAlert(row, 'FILE_BLOCKED_UNSCANNED');

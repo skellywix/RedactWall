@@ -78,6 +78,7 @@ const clientOutcomeSchema = z.enum([
   'shadow_ai',
   'file_too_large',
   'file_unsupported',
+  'scan_unavailable',
   'sent_after_warning',
   'justified',
   'blocked_by_user',

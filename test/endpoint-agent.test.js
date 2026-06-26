@@ -5,7 +5,7 @@ const assert = require('node:assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { scanFile, refreshPolicy, scannerConfig, ignoredByScanner } = require('../endpoint-agent/agent');
+const { scanFile, refreshPolicy, scannerConfig, ignoredByScanner, postJson } = require('../endpoint-agent/agent');
 
 test('sends supported file bytes to scan-file API instead of redacted gate preview', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-agent-'));
@@ -58,6 +58,51 @@ test('does not upload unsupported file bytes', async () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test('blocks supported files locally when scan API is unavailable', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-agent-'));
+  const filename = 'loan.txt';
+  const raw = 'Loan file that must not pass during outage. SSN 524-71-9043.';
+  fs.writeFileSync(path.join(dir, filename), raw);
+
+  let reportRequest;
+  const res = await scanFile(filename, {
+    watchDir: dir,
+    user: 'unit-user',
+    scanFileApi: async () => null,
+    report: async (req) => { reportRequest = req; return null; },
+  });
+
+  assert.strictEqual(res.decision, 'block');
+  assert.strictEqual(res.status, 'scan_unavailable');
+  assert.strictEqual(res.supported, true);
+  assert.strictEqual(reportRequest.clientOutcome, 'scan_unavailable');
+  assert.match(reportRequest.prompt, /^\[file blocked unscanned\] loan\.txt$/);
+  assert.ok(!JSON.stringify(reportRequest).includes('524-71-9043'));
+
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('postJson times out stalled control-plane requests', async () => {
+  const started = Date.now();
+  const res = await postJson('/api/v1/scan-file', { filename: 'loan.txt' }, {
+    server: 'http://sentinel.test',
+    key: 'unit-key',
+    timeoutMs: 10,
+    fetchImpl: async (url, opts) => new Promise((resolve, reject) => {
+      assert.strictEqual(url, 'http://sentinel.test/api/v1/scan-file');
+      assert.strictEqual(opts.headers['x-api-key'], 'unit-key');
+      opts.signal.addEventListener('abort', () => {
+        const e = new Error('aborted');
+        e.name = 'AbortError';
+        reject(e);
+      });
+    }),
+  });
+
+  assert.strictEqual(res, null);
+  assert.ok(Date.now() - started < 1000);
+});
+
 test('refreshes scanner policy from the control plane', async () => {
   let request;
   const scanner = await refreshPolicy({
@@ -85,6 +130,27 @@ test('refreshes scanner policy from the control plane', async () => {
   assert.ok(scanner.ignoreFilenames.has('skip-me.txt'));
   assert.ok(scanner.ignoreExtensions.has('.blocked'));
   assert.strictEqual(scanner.maxFileBytes, 4096);
+});
+
+test('policy refresh times out and keeps the current scanner config', async () => {
+  const started = Date.now();
+  const scanner = await refreshPolicy({
+    server: 'http://sentinel.test',
+    key: 'policy-key',
+    timeoutMs: 10,
+    silent: true,
+    fetchImpl: async (url, opts) => new Promise((resolve, reject) => {
+      assert.strictEqual(url, 'http://sentinel.test/api/v1/policy');
+      opts.signal.addEventListener('abort', () => {
+        const e = new Error('aborted');
+        e.name = 'AbortError';
+        reject(e);
+      });
+    }),
+  });
+
+  assert.ok(scanner.ignoreFilenames instanceof Set);
+  assert.ok(Date.now() - started < 1000);
 });
 
 test('scanner policy controls endpoint ignores and size blocking', async () => {

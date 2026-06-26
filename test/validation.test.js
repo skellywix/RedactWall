@@ -106,6 +106,28 @@ test('valid gate payload from sensors still evaluates normally', async () => wit
   assert.strictEqual(body.riskScore, 0);
 }));
 
+test('gate accepts scan_unavailable as a blocked unscanned file outcome', async () => withServer(async (port) => {
+  const fileContent = 'member file SSN 524-71-9043';
+  const res = await jsonFetch(port, '/api/v1/gate', {
+    headers: { 'x-api-key': 'unit-ingest-key' },
+    body: {
+      prompt: '[file blocked unscanned] member-loan.txt',
+      user: 'endpoint-user',
+      destination: 'desktop-ai-app',
+      source: 'endpoint_agent',
+      channel: 'file_upload',
+      clientOutcome: 'scan_unavailable',
+      note: 'blocked locally: control plane scan unavailable',
+    },
+  });
+
+  assert.strictEqual(res.status, 200);
+  const body = await res.json();
+  assert.strictEqual(body.decision, 'block');
+  assert.strictEqual(body.status, 'file_blocked_unscanned');
+  assert.ok(!JSON.stringify(body).includes(fileContent));
+}));
+
 test('scan-file rejects invalid base64 without echoing file content', async () => withServer(async (port) => {
   const secretFilePayload = 'loan file SSN 524-71-9043';
   const res = await jsonFetch(port, '/api/v1/scan-file', {
