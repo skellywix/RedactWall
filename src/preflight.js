@@ -12,6 +12,17 @@ function check(id, ok, severity, message, remediation) {
   return { id, ok: !!ok, severity, message, remediation };
 }
 
+const MIN_SECRET_LENGTHS = {
+  adminPassword: 16,
+  ingestKey: 32,
+  sessionSecret: 32,
+  dataKey: 32,
+};
+
+function hasMinLength(value, min) {
+  return String(value || '').trim().length >= min;
+}
+
 function pathSegments(value) {
   return String(value || '')
     .replace(/\\/g, '/')
@@ -41,6 +52,10 @@ function configStatus(input = {}) {
   const severity = production ? 'error' : 'warning';
   const dbPath = input.dbPath || env.SENTINEL_DB_PATH || '';
   const dbPathReason = cloudSyncedPathReason(dbPath);
+  const adminPassword = input.adminPassword ?? env.ADMIN_PASSWORD ?? '';
+  const ingestKey = input.ingestKey ?? env.INGEST_API_KEY ?? '';
+  const sessionSecret = input.sessionSecret ?? env.SENTINEL_SECRET ?? '';
+  const dataKeySource = input.dataKeySource ?? env.SENTINEL_DATA_KEY ?? env.SENTINEL_SECRET ?? '';
   const checks = [
     check(
       'admin_password',
@@ -50,11 +65,25 @@ function configStatus(input = {}) {
       'Set ADMIN_PASSWORD to a unique value before any pilot or production use.',
     ),
     check(
+      'admin_password_strength',
+      hasMinLength(adminPassword, MIN_SECRET_LENGTHS.adminPassword),
+      severity,
+      `Admin password is at least ${MIN_SECRET_LENGTHS.adminPassword} characters.`,
+      `Set ADMIN_PASSWORD to at least ${MIN_SECRET_LENGTHS.adminPassword} characters.`,
+    ),
+    check(
       'ingest_key',
       !input.ingestKeyIsDefault,
       severity,
       'Sensor ingest key is not the development default.',
       'Set INGEST_API_KEY to a long random value and deploy it through managed policy or agent configuration.',
+    ),
+    check(
+      'ingest_key_strength',
+      hasMinLength(ingestKey, MIN_SECRET_LENGTHS.ingestKey),
+      severity,
+      `Sensor ingest key is at least ${MIN_SECRET_LENGTHS.ingestKey} characters.`,
+      `Set INGEST_API_KEY to at least ${MIN_SECRET_LENGTHS.ingestKey} random characters.`,
     ),
     check(
       'session_secret',
@@ -64,11 +93,25 @@ function configStatus(input = {}) {
       'Set SENTINEL_SECRET to a stable random value shared by all server instances.',
     ),
     check(
+      'session_secret_strength',
+      hasMinLength(sessionSecret, MIN_SECRET_LENGTHS.sessionSecret),
+      severity,
+      `Session signing secret is at least ${MIN_SECRET_LENGTHS.sessionSecret} characters.`,
+      `Set SENTINEL_SECRET to at least ${MIN_SECRET_LENGTHS.sessionSecret} random characters.`,
+    ),
+    check(
       'raw_prompt_encryption',
       !!input.dataCryptoEnabled,
       severity,
       'Retained approval prompts can be encrypted at rest.',
       'Set SENTINEL_DATA_KEY or SENTINEL_SECRET before enabling raw approval retention.',
+    ),
+    check(
+      'data_key_strength',
+      hasMinLength(dataKeySource, MIN_SECRET_LENGTHS.dataKey),
+      severity,
+      `Raw-prompt encryption key source is at least ${MIN_SECRET_LENGTHS.dataKey} characters.`,
+      `Set SENTINEL_DATA_KEY, or SENTINEL_SECRET fallback, to at least ${MIN_SECRET_LENGTHS.dataKey} random characters.`,
     ),
     check(
       'secure_cookie',
@@ -103,4 +146,4 @@ function summarizeFailures(status) {
     .map((c) => `${c.id}: ${c.remediation}`);
 }
 
-module.exports = { bool, cloudSyncedPathReason, configStatus, summarizeFailures };
+module.exports = { bool, cloudSyncedPathReason, configStatus, summarizeFailures, MIN_SECRET_LENGTHS };

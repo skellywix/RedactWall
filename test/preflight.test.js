@@ -1,5 +1,5 @@
 'use strict';
-/** Production preflight must block unsafe defaults only in production mode. */
+/** Production preflight must block unsafe deployment configuration. */
 const test = require('node:test');
 const assert = require('node:assert');
 const preflight = require('../src/preflight');
@@ -27,13 +27,31 @@ test('production preflight blocks unsafe deployment defaults', () => {
   assert.strictEqual(status.level, 'blocked');
   assert.deepStrictEqual(
     preflight.summarizeFailures(status).map((line) => line.split(':')[0]),
-    ['admin_password', 'ingest_key', 'session_secret', 'raw_prompt_encryption', 'secure_cookie', 'sqlite_local_disk'],
+    [
+      'admin_password',
+      'admin_password_strength',
+      'ingest_key',
+      'ingest_key_strength',
+      'session_secret',
+      'session_secret_strength',
+      'raw_prompt_encryption',
+      'data_key_strength',
+      'secure_cookie',
+      'sqlite_local_disk',
+    ],
   );
 });
 
 test('production preflight passes with stable secrets and secure cookies', () => {
   const status = preflight.configStatus({
-    env: { NODE_ENV: 'production', SENTINEL_DB_PATH: '/var/lib/promptsentinel/sentinel.db' },
+    env: {
+      NODE_ENV: 'production',
+      SENTINEL_DB_PATH: '/var/lib/promptsentinel/sentinel.db',
+      ADMIN_PASSWORD: 'long-admin-password',
+      INGEST_API_KEY: 'ps_ingest_' + 'a'.repeat(32),
+      SENTINEL_SECRET: 's'.repeat(32),
+      SENTINEL_DATA_KEY: 'd'.repeat(32),
+    },
     adminPasswordIsDefault: false,
     ingestKeyIsDefault: false,
     secretSource: 'env',
@@ -45,9 +63,60 @@ test('production preflight passes with stable secrets and secure cookies', () =>
   assert.ok(status.checks.every((c) => c.ok));
 });
 
+test('production preflight blocks custom but short secrets', () => {
+  const status = preflight.configStatus({
+    env: {
+      NODE_ENV: 'production',
+      SENTINEL_DB_PATH: '/var/lib/promptsentinel/sentinel.db',
+      ADMIN_PASSWORD: 'short-pass',
+      INGEST_API_KEY: 'short-ingest-key',
+      SENTINEL_SECRET: 'short-session-secret',
+      SENTINEL_DATA_KEY: 'short-data-key',
+    },
+    adminPasswordIsDefault: false,
+    ingestKeyIsDefault: false,
+    secretSource: 'env',
+    dataCryptoEnabled: true,
+    cookieSecure: true,
+  });
+  assert.strictEqual(status.ready, false);
+  assert.deepStrictEqual(
+    preflight.summarizeFailures(status).map((line) => line.split(':')[0]),
+    ['admin_password_strength', 'ingest_key_strength', 'session_secret_strength', 'data_key_strength'],
+  );
+});
+
+test('development preflight warns on weak custom secrets without blocking demos', () => {
+  const status = preflight.configStatus({
+    env: {
+      NODE_ENV: 'development',
+      SENTINEL_DB_PATH: '/tmp/promptsentinel/sentinel.db',
+      ADMIN_PASSWORD: 'short-pass',
+      INGEST_API_KEY: 'short-ingest-key',
+      SENTINEL_SECRET: 'short-session-secret',
+      SENTINEL_DATA_KEY: 'short-data-key',
+    },
+    adminPasswordIsDefault: false,
+    ingestKeyIsDefault: false,
+    secretSource: 'env',
+    dataCryptoEnabled: true,
+    cookieSecure: false,
+  });
+  assert.strictEqual(status.ready, true);
+  assert.strictEqual(status.level, 'warnings');
+  assert.ok(status.checks.some((c) => c.id === 'admin_password_strength' && !c.ok && c.severity === 'warning'));
+});
+
 test('production preflight blocks cloud-synced sqlite paths', () => {
   const status = preflight.configStatus({
-    env: { NODE_ENV: 'production', SENTINEL_DB_PATH: 'C:\\Users\\Pilot\\OneDrive - Credit Union\\sentinel.db' },
+    env: {
+      NODE_ENV: 'production',
+      SENTINEL_DB_PATH: 'C:\\Users\\Pilot\\OneDrive - Credit Union\\sentinel.db',
+      ADMIN_PASSWORD: 'long-admin-password',
+      INGEST_API_KEY: 'ps_ingest_' + 'a'.repeat(32),
+      SENTINEL_SECRET: 's'.repeat(32),
+      SENTINEL_DATA_KEY: 'd'.repeat(32),
+    },
     adminPasswordIsDefault: false,
     ingestKeyIsDefault: false,
     secretSource: 'env',

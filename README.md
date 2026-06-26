@@ -238,10 +238,10 @@ Copy `.env.example` to `.env` (or export):
 | `HTTPS` / `COOKIE_SECURE` | Mark admin session cookies secure when the dashboard is served over TLS |
 | `SENTINEL_DB_PATH` | SQLite store path (default `data/sentinel.db`). Use **local disk**, never a cloud-synced folder or network share. Production preflight blocks unsafe paths. |
 | `SENTINEL_POLICY_PATH` | Optional policy file path for isolated tests or pilots (default `config/policy.json`) |
-| `ADMIN_USER` / `ADMIN_PASSWORD` | Console credentials — change before real use |
-| `SENTINEL_SECRET` | Session cookie signing secret |
-| `SENTINEL_DATA_KEY` | Encrypts retained raw prompts at rest (falls back to `SENTINEL_SECRET`; if neither set, raw isn't stored) |
-| `INGEST_API_KEY` | Key sensors present to the gate API |
+| `ADMIN_USER` / `ADMIN_PASSWORD` | Console credentials; production preflight requires a non-default password of at least 16 characters |
+| `SENTINEL_SECRET` | Session cookie signing secret; production preflight requires at least 32 characters from environment |
+| `SENTINEL_DATA_KEY` | Encrypts retained raw prompts at rest; production preflight requires at least 32 characters for this key or the `SENTINEL_SECRET` fallback |
+| `INGEST_API_KEY` | Key sensors present to the gate API; production preflight requires a non-default key of at least 32 characters |
 | `INGEST_AUTH_MAX_FAILURES` | Optional invalid ingest-key throttle threshold (default 20, bounded 3 to 1000) |
 | `INGEST_AUTH_WINDOW_MS` | Optional invalid ingest-key throttle window (default 60000 ms, bounded 1000 to 3600000) |
 | `INGEST_AUTH_LOCK_MS` | Optional invalid ingest-key throttle lock time (default 60000 ms, bounded 1000 to 3600000) |
@@ -250,6 +250,11 @@ Copy `.env.example` to `.env` (or export):
 | `SIEM_WEBHOOK_URL` | Optional sanitized webhook for high-risk security events, sensor version gaps, and failed admin step-up checks |
 | `SIEM_WEBHOOK_TOKEN` | Optional bearer token for the SIEM webhook |
 | `SIEM_ALERT_MIN_RISK` / `SIEM_ALERT_MIN_SEVERITY` | Alert thresholds for allowed-but-risky events; blocked and response-flagged events alert automatically |
+
+Production preflight requires custom secrets with minimum lengths: 16 characters
+for `ADMIN_PASSWORD`, and 32 characters for `INGEST_API_KEY`,
+`SENTINEL_SECRET`, and `SENTINEL_DATA_KEY` when raw approval retention is
+enabled. Development/demo mode reports weak custom values as warnings.
 
 `/readyz` reports whether the database and deployment preflight are usable. Logged-in admins can inspect detailed checks at `/api/preflight`.
 
