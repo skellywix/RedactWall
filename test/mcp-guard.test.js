@@ -2,11 +2,16 @@
 /** MCP guard must never pass sensitive tool output to the model unchanged. */
 const test = require('node:test');
 const assert = require('node:assert');
-const { guardToolResult, reportBody } = require('../mcp-guard/guard');
+const { guardToolResult, reportBody, refreshPolicy } = require('../mcp-guard/guard');
+
+const noOpFetch = async () => ({ ok: true });
 
 test('redacts structured PII in MCP tool output', async () => {
   const raw = 'Member SSN 524-71-9043 should not reach the model.';
-  const guarded = await guardToolResult(raw, { agent: 'test', tool: 'sharepoint.fetchDoc' });
+  const guarded = await guardToolResult(raw, { agent: 'test', tool: 'sharepoint.fetchDoc' }, {
+    fetchImpl: noOpFetch,
+    policy: { ignore: [], disabledDetectors: [] },
+  });
   assert.strictEqual(guarded.redacted, true);
   assert.ok(guarded.findings.includes('US_SSN'));
   assert.ok(!guarded.text.includes('524-71-9043'));
@@ -15,7 +20,10 @@ test('redacts structured PII in MCP tool output', async () => {
 
 test('whole-chunk redacts category-only confidential MCP output', async () => {
   const raw = 'Between us, we are switching away from our core processor next quarter. Keep this internal and do not forward.';
-  const guarded = await guardToolResult(raw, { agent: 'test', tool: 'sharepoint.fetchDoc' });
+  const guarded = await guardToolResult(raw, { agent: 'test', tool: 'sharepoint.fetchDoc' }, {
+    fetchImpl: noOpFetch,
+    policy: { ignore: [], disabledDetectors: [] },
+  });
   assert.strictEqual(guarded.redacted, true);
   assert.ok(guarded.findings.includes('CONFIDENTIAL_BUSINESS'));
   assert.ok(!guarded.text.includes('switching away from our core processor'));
@@ -30,6 +38,7 @@ test('reports sanitized client analysis for locally redacted MCP output', async 
       outbound = { url, body: JSON.parse(opts.body), headers: opts.headers };
       return { ok: true };
     },
+    policy: { ignore: [], disabledDetectors: [] },
     server: 'http://sentinel.test',
     key: 'unit-key',
   });
@@ -66,4 +75,42 @@ test('report body preserves category evidence without raw confidential text', ()
   assert.deepStrictEqual(body.clientEntityCounts, { CONFIDENTIAL_BUSINESS: 1 });
   assert.strictEqual(body.prompt, '[REDACTED: CONFIDENTIAL_BUSINESS]');
   assert.ok(!JSON.stringify(body).includes('switching away from our core processor'));
+});
+
+test('honors detector ignore policy for MCP tool output', async () => {
+  const raw = 'Member SSN 524-71-9043 should be ignored by this policy.';
+  const guarded = await guardToolResult(raw, { agent: 'test', tool: 'sharepoint.fetchDoc' }, {
+    fetchImpl: noOpFetch,
+    policy: { ignore: ['US_SSN'], disabledDetectors: [] },
+  });
+
+  assert.strictEqual(guarded.redacted, false);
+  assert.deepStrictEqual(guarded.findings, []);
+  assert.strictEqual(guarded.text, raw);
+});
+
+test('refreshes MCP detection policy from the control plane', async () => {
+  let request;
+  const policy = await refreshPolicy({
+    server: 'http://sentinel.test',
+    key: 'policy-key',
+    fetchImpl: async (url, opts) => {
+      request = { url, headers: opts.headers };
+      return {
+        ok: true,
+        json: async () => ({ ignore: ['US_SSN', 'CREDENTIALS'], disabledDetectors: ['CREDIT_CARD'] }),
+      };
+    },
+  });
+
+  assert.strictEqual(request.url, 'http://sentinel.test/api/v1/policy');
+  assert.strictEqual(request.headers['x-api-key'], 'policy-key');
+  assert.deepStrictEqual(policy.ignore, ['US_SSN', 'CREDENTIALS']);
+  assert.deepStrictEqual(policy.disabledDetectors, ['CREDIT_CARD']);
+
+  const guarded = await guardToolResult('SSN 524-71-9043', { agent: 'test', tool: 'drive.fetch' }, {
+    fetchImpl: noOpFetch,
+    skipPolicyRefresh: true,
+  });
+  assert.strictEqual(guarded.redacted, false);
 });

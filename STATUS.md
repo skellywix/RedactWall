@@ -6,6 +6,8 @@
 
 ## Done
 
+- 2026-06-26: Made the MCP guard detection path policy-aware so tool-output redaction honors centralized `ignore` and `disabledDetectors` settings before reporting sanitized evidence.
+  Evidence: `node --test test/mcp-guard.test.js`, `npm test`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Improved mobile admin-console layout by hiding duplicated side-rail tabs under narrow viewports while keeping content tabs reachable and preventing horizontal page overflow.
   Evidence: `npm run test:browser`, mobile Playwright smoke at 390x844 viewport; earlier same-worktree gate passed `npm test`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, and `verifyAuditChain()`.
 - 2026-06-26: Synced the endpoint agent with centralized scanner policy from `/api/v1/policy`, including managed ignore directories, filenames, extensions, and max file size enforcement.

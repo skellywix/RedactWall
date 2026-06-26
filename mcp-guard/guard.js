@@ -14,6 +14,58 @@ const D = require('../shared/detect');
 
 const SERVER = process.env.SENTINEL_URL || 'http://localhost:4000';
 const KEY = process.env.INGEST_API_KEY || 'dev-ingest-key';
+const POLICY_REFRESH_MS = 15 * 60 * 1000;
+const DEFAULT_DETECTION_POLICY = { ignore: [], disabledDetectors: [] };
+let detectionPolicy = normalizeDetectionPolicy(DEFAULT_DETECTION_POLICY);
+let lastPolicyRefresh = 0;
+
+function lowerDetectorList(value) {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item) => typeof item === 'string' && item.trim()).map((item) => item.trim());
+}
+
+function normalizeDetectionPolicy(policy = {}) {
+  return {
+    ignore: lowerDetectorList(policy.ignore),
+    disabledDetectors: lowerDetectorList(policy.disabledDetectors),
+  };
+}
+
+function detectionOptions(policy = detectionPolicy) {
+  return normalizeDetectionPolicy(policy);
+}
+
+async function fetchPolicy(opts = {}) {
+  const fetchImpl = opts.fetchImpl || globalThis.fetch;
+  if (!fetchImpl) return null;
+  const server = opts.server || SERVER;
+  const key = opts.key || KEY;
+  try {
+    const r = await fetchImpl(server + '/api/v1/policy', {
+      headers: { 'x-api-key': key },
+    });
+    if (!r || !r.ok) return null;
+    return r.json();
+  } catch (e) {
+    if (!opts.silent) console.error('  policy refresh failed:', e.message);
+    return null;
+  }
+}
+
+async function refreshPolicy(opts = {}) {
+  const pol = await fetchPolicy(opts);
+  if (pol) {
+    detectionPolicy = normalizeDetectionPolicy(pol);
+    lastPolicyRefresh = Date.now();
+  }
+  return detectionPolicy;
+}
+
+async function maybeRefreshPolicy(opts = {}) {
+  if (opts.policy || opts.skipPolicyRefresh) return;
+  if (Date.now() - lastPolicyRefresh < (opts.policyRefreshMs || POLICY_REFRESH_MS)) return;
+  await refreshPolicy({ ...opts, silent: opts.silentPolicyRefresh !== false });
+}
 
 function publicFindings(analysis) {
   return (analysis.findings || []).map((f) => ({
@@ -66,7 +118,8 @@ async function logEvent(rec, opts = {}) {
  * @returns {Promise<{ text:string, redacted:boolean, findings:string[] }>}
  */
 async function guardToolResult(text, ctx = {}, opts = {}) {
-  const a = D.analyze(text || '');
+  await maybeRefreshPolicy(opts);
+  const a = D.analyze(text || '', detectionOptions(opts.policy || detectionPolicy));
   const findings = [...new Set(a.findings.map(f => f.type).concat(a.categories.map(c => c.category)))];
   if (!a.findings.length && !a.categories.length) {
     return { text, redacted: false, findings: [] };
@@ -88,7 +141,16 @@ function wrapTool(handler, ctx = {}) {
   };
 }
 
-module.exports = { guardToolResult, wrapTool, reportBody, publicFindings, publicCategories };
+module.exports = {
+  guardToolResult,
+  wrapTool,
+  reportBody,
+  publicFindings,
+  publicCategories,
+  fetchPolicy,
+  refreshPolicy,
+  detectionOptions,
+};
 
 // ---- demo when run directly ------------------------------------------------
 if (require.main === module) {
