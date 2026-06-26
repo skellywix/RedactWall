@@ -14,6 +14,7 @@ function check(id, ok, severity, message, remediation) {
 
 const MIN_SECRET_LENGTHS = {
   adminPassword: 16,
+  auditorPassword: 16,
   ingestKey: 32,
   sessionSecret: 32,
   dataKey: 32,
@@ -53,6 +54,10 @@ function configStatus(input = {}) {
   const dbPath = input.dbPath || env.SENTINEL_DB_PATH || '';
   const dbPathReason = cloudSyncedPathReason(dbPath);
   const adminPassword = input.adminPassword ?? env.ADMIN_PASSWORD ?? '';
+  const auditorUser = String(input.auditorUser ?? env.AUDITOR_USER ?? '').trim();
+  const auditorPassword = input.auditorPassword ?? env.AUDITOR_PASSWORD ?? '';
+  const auditorPasswordSet = !!String(auditorPassword).trim();
+  const auditorConfigured = !!auditorUser || auditorPasswordSet;
   const ingestKey = input.ingestKey ?? env.INGEST_API_KEY ?? '';
   const sessionSecret = input.sessionSecret ?? env.SENTINEL_SECRET ?? '';
   const dataKeySource = input.dataKeySource ?? env.SENTINEL_DATA_KEY ?? env.SENTINEL_SECRET ?? '';
@@ -70,6 +75,20 @@ function configStatus(input = {}) {
       severity,
       `Admin password is at least ${MIN_SECRET_LENGTHS.adminPassword} characters.`,
       `Set ADMIN_PASSWORD to at least ${MIN_SECRET_LENGTHS.adminPassword} characters.`,
+    ),
+    check(
+      'auditor_credentials',
+      !auditorConfigured || (!!auditorUser && auditorPasswordSet),
+      severity,
+      'Auditor login has both AUDITOR_USER and AUDITOR_PASSWORD when configured.',
+      'Set both AUDITOR_USER and AUDITOR_PASSWORD, or remove both to disable auditor login.',
+    ),
+    check(
+      'auditor_password_strength',
+      !auditorConfigured || hasMinLength(auditorPassword, MIN_SECRET_LENGTHS.auditorPassword),
+      severity,
+      `Auditor password is at least ${MIN_SECRET_LENGTHS.auditorPassword} characters when auditor login is configured.`,
+      `Set AUDITOR_PASSWORD to at least ${MIN_SECRET_LENGTHS.auditorPassword} characters, or remove AUDITOR_USER to disable auditor login.`,
     ),
     check(
       'ingest_key',

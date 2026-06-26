@@ -9,6 +9,7 @@ let currentQueue = [];
 let currentActivity = [];
 let currentCoverage = null;
 let searchTerm = '';
+let currentRole = 'security_admin';
 
 const icons = {
   check: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m5 12 4 4L19 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
@@ -50,6 +51,14 @@ function sourceLabel(source) {
   })[source] || source || 'API';
 }
 
+function roleLabel(role) {
+  return role === 'auditor' ? 'Auditor' : 'Security Admin';
+}
+
+function canAdminWrite() {
+  return currentRole === 'security_admin';
+}
+
 function queryText(q) {
   return [
     q.id, q.user, q.destination, q.source, q.channel, q.status, q.maxSeverityLabel,
@@ -78,7 +87,7 @@ async function api(path, opts = {}) {
   next.headers = headers;
   const r = await fetch(path, next);
   if (r.status === 401 && !allowAuthError) { location.href = '/login.html'; return null; }
-  if (r.status === 403) alert('Security token expired. Refresh the dashboard and try again.');
+  if (r.status === 403) alert('Request not allowed for this session. Refresh or use a Security Admin account.');
   return r;
 }
 
@@ -152,7 +161,8 @@ async function init() {
   if (!meRes) return;
   const me = await meRes.json();
   await loadCsrf();
-  $('#who').textContent = `${me.user} / Security Admin`;
+  currentRole = me.role || 'security_admin';
+  $('#who').textContent = `${me.user} / ${roleLabel(currentRole)}`;
   if (me.defaultPassword) {
     const b = $('#banner');
     b.style.display = 'block';
@@ -231,6 +241,14 @@ function renderQueueView() {
 function renderQueueItem(q) {
   const sev = sevClass(q.maxSeverityLabel);
   const detected = Object.keys(q.entityCounts || {}).join(', ') || (q.categories || []).join(', ') || 'policy match';
+  const controls = canAdminWrite()
+    ? `<textarea class="note" id="note_${escapeHtml(q.id)}" placeholder="Decision note, recorded in audit log"></textarea>
+    <div class="actions">
+      <button class="btn approve" data-act="approve" data-id="${escapeHtml(q.id)}" type="button">${icons.check}Approve release</button>
+      <button class="btn deny" data-act="deny" data-id="${escapeHtml(q.id)}" type="button">${icons.deny}Deny</button>
+      <button class="btn reveal" data-act="reveal" data-id="${escapeHtml(q.id)}" type="button">${icons.eye}Reveal gated</button>
+    </div>`
+    : '<div class="readonly-note">Read-only auditor view</div>';
   return `<article class="q ${selected === q.id ? 'selected' : ''}" data-id="${escapeHtml(q.id)}" tabindex="0">
     <div class="top">
       <span class="select-dot" aria-hidden="true"></span>
@@ -245,12 +263,7 @@ function renderQueueItem(q) {
     <div class="prompt" id="p_${escapeHtml(q.id)}">${escapeHtml(q.redactedPrompt)}</div>
     <div class="chips">${findingChips(q.findings, q.categories)}</div>
     <div class="reasons">Detected: ${escapeHtml(detected)}${(q.reasons || []).length ? `; ${escapeHtml((q.reasons || []).join('; '))}` : ''}</div>
-    <textarea class="note" id="note_${escapeHtml(q.id)}" placeholder="Decision note, recorded in audit log"></textarea>
-    <div class="actions">
-      <button class="btn approve" data-act="approve" data-id="${escapeHtml(q.id)}" type="button">${icons.check}Approve release</button>
-      <button class="btn deny" data-act="deny" data-id="${escapeHtml(q.id)}" type="button">${icons.deny}Deny</button>
-      <button class="btn reveal" data-act="reveal" data-id="${escapeHtml(q.id)}" type="button">${icons.eye}Reveal gated</button>
-    </div>
+    ${controls}
   </article>`;
 }
 
@@ -283,6 +296,10 @@ function renderIncident(q) {
 document.addEventListener('click', async (e) => {
   const actionButton = e.target.closest('[data-act]');
   if (actionButton) {
+    if (!canAdminWrite()) {
+      alert('Request not allowed for this session. Use a Security Admin account.');
+      return;
+    }
     const act = actionButton.dataset.act;
     const id = actionButton.dataset.id;
     if (act === 'reveal') {
@@ -486,6 +503,7 @@ async function loadPolicy() {
   if (!pRes || !tRes) return;
   const p = await pRes.json();
   const tpls = await tRes.json();
+  const readonly = !canAdminWrite();
   const modes = [
     ['warn', 'Warn', 'Nudge the user, let them proceed'],
     ['justify', 'Require justification', 'User must give a business reason'],
@@ -493,38 +511,43 @@ async function loadPolicy() {
     ['block', 'Block', 'Hold for admin approval'],
   ];
   const tplBar = `<div class="template-bar"><div class="template-title">Regulation templates</div>
-    <div class="chips">${tpls.map((t) => `<button class="chip ps-tpl" data-tpl="${escapeHtml(t.id)}" title="${escapeHtml(t.description)}" type="button"><b>${escapeHtml(t.label)}</b></button>`).join('')}</div></div>`;
+    <div class="chips">${tpls.map((t) => (readonly
+    ? `<span class="chip" title="${escapeHtml(t.description)}"><b>${escapeHtml(t.label)}</b></span>`
+    : `<button class="chip ps-tpl" data-tpl="${escapeHtml(t.id)}" title="${escapeHtml(t.description)}" type="button"><b>${escapeHtml(t.label)}</b></button>`)).join('')}</div></div>`;
   $('#policyBox').innerHTML = `${tplBar}
     <div class="policy-label">When a sensor detects sensitive content</div>
     <div class="policy-options">
-      ${modes.map(([v, t, d]) => `<label class="policy-option ${p.enforcementMode === v ? 'selected' : ''}">
-        <span><input type="radio" name="mode" value="${v}" ${p.enforcementMode === v ? 'checked' : ''}/>${t}</span>
+      ${modes.map(([v, t, d]) => `<label class="policy-option ${p.enforcementMode === v ? 'selected' : ''} ${readonly ? 'readonly' : ''}">
+        <span><input type="radio" name="mode" value="${v}" ${p.enforcementMode === v ? 'checked' : ''} ${readonly ? 'disabled' : ''}/>${t}</span>
         <p>${d}</p>
       </label>`).join('')}
     </div>
     <div class="policy-label">Trigger thresholds</div>
     <div class="field-grid">
       <label for="pol_sev">Block at minimum severity</label>
-      <select id="pol_sev">
+      <select id="pol_sev" ${readonly ? 'disabled' : ''}>
         ${[[1, 'low'], [2, 'medium'], [3, 'high'], [4, 'critical']].map(([v, l]) => `<option value="${v}" ${p.blockMinSeverity === v ? 'selected' : ''}>${l}</option>`).join('')}
       </select>
       <label for="pol_risk">Block at risk score greater than or equal to</label>
-      <input id="pol_risk" type="number" min="0" max="100" value="${escapeHtml(p.blockRiskScore)}"/>
+      <input id="pol_risk" type="number" min="0" max="100" value="${escapeHtml(p.blockRiskScore)}" ${readonly ? 'disabled' : ''}/>
       <label for="pol_retention">Purge retained raw approval data after days</label>
-      <input id="pol_retention" type="number" min="0" max="3650" value="${escapeHtml(p.rawRetentionDays ?? 30)}"/>
+      <input id="pol_retention" type="number" min="0" max="3650" value="${escapeHtml(p.rawRetentionDays ?? 30)}" ${readonly ? 'disabled' : ''}/>
     </div>
     <div class="template-bar"><div class="template-title">Hard-stop entities</div>
       <div class="chips">${(p.alwaysBlock || []).map((x) => `<span class="chip"><b>${escapeHtml(x)}</b></span>`).join('')}</div></div>
     <div class="template-bar"><div class="template-title">Governed AI destinations</div>
       <div class="chips">${(p.governedDestinations || []).map((x) => `<span class="chip">${escapeHtml(x)}</span>`).join('')}</div></div>
-    <button class="btn approve" id="savePolicy" type="button">${icons.check}Save policy</button>
-    <button class="btn" id="runRetentionPurge" type="button">${icons.refresh}Run retention purge</button>
+    ${readonly
+    ? '<div class="readonly-note">Read-only auditor view</div>'
+    : `<button class="btn approve" id="savePolicy" type="button">${icons.check}Save policy</button>
+    <button class="btn" id="runRetentionPurge" type="button">${icons.refresh}Run retention purge</button>`}
     <span id="polSaved" class="save-status"></span>`;
   $$('input[name=mode]').forEach((radio) => {
     radio.onchange = () => {
       $$('.policy-option').forEach((option) => option.classList.toggle('selected', option.contains(radio) && radio.checked));
     };
   });
+  if (readonly) return;
   $('#savePolicy').onclick = async () => {
     const mode = (document.querySelector('input[name=mode]:checked') || {}).value || p.enforcementMode;
     const body = {

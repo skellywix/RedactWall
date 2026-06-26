@@ -34,16 +34,41 @@ const { secret: SECRET, source: SECRET_SOURCE } = resolveSecret();
 const DEFAULT_ADMIN_PASSWORD = 'ChangeMe!2026';
 const ADMIN_USER = process.env.ADMIN_USER || 'admin';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || DEFAULT_ADMIN_PASSWORD;
+const AUDITOR_USER = process.env.AUDITOR_USER || '';
+const AUDITOR_PASSWORD = process.env.AUDITOR_PASSWORD || '';
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000; // 8h
 
-const SALT = crypto.randomBytes(16);
-const PW_HASH = crypto.scryptSync(ADMIN_PASSWORD, SALT, 32);
+function buildAccount(user, password, role) {
+  if (!user || !password) return null;
+  const salt = crypto.randomBytes(16);
+  return {
+    user,
+    role,
+    salt,
+    hash: crypto.scryptSync(password, salt, 32),
+  };
+}
+
+const ACCOUNTS = [
+  buildAccount(ADMIN_USER, ADMIN_PASSWORD, 'security_admin'),
+  buildAccount(AUDITOR_USER, AUDITOR_PASSWORD, 'auditor'),
+].filter(Boolean);
+
+function findAccount(user) {
+  return ACCOUNTS.find((account) => account.user === user) || null;
+}
+
+function authenticate(user, password) {
+  const account = findAccount(user);
+  if (!account) return null;
+  let h;
+  try { h = crypto.scryptSync(password || '', account.salt, 32); } catch { return null; }
+  if (!crypto.timingSafeEqual(h, account.hash)) return null;
+  return { user: account.user, role: account.role };
+}
 
 function verifyPassword(user, password) {
-  if (user !== ADMIN_USER) return false;
-  let h;
-  try { h = crypto.scryptSync(password || '', SALT, 32); } catch { return false; }
-  return crypto.timingSafeEqual(h, PW_HASH);
+  return !!authenticate(user, password);
 }
 
 // ---- brute-force throttling --------------------------------------------------
@@ -110,6 +135,16 @@ function requireAuth(req, res, next) {
   req.user = session;
   next();
 }
+
+function requireRole(...roles) {
+  const allowed = new Set(roles);
+  return (req, res, next) => {
+    const role = req.user && req.user.role;
+    if (!allowed.has(role)) return res.status(403).json({ error: 'forbidden' });
+    next();
+  };
+}
+
 function requireCsrf(req, res, next) {
   const method = String(req.method || 'GET').toUpperCase();
   if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return next();
@@ -120,8 +155,9 @@ function requireCsrf(req, res, next) {
 }
 
 module.exports = {
-  verifyPassword, createSession, verify, createCsrfToken, verifyCsrfToken, requireAuth, requireCsrf,
+  authenticate, verifyPassword, createSession, verify, createCsrfToken, verifyCsrfToken, requireAuth, requireRole, requireCsrf,
   loginStatus, registerFail, registerSuccess,
   ADMIN_USER, ADMIN_PASSWORD_IS_DEFAULT: ADMIN_PASSWORD === DEFAULT_ADMIN_PASSWORD,
+  AUDITOR_ENABLED: !!findAccount(AUDITOR_USER),
   SECRET_SOURCE, SECRET_IS_STABLE: SECRET_SOURCE === 'env' || SECRET_SOURCE === 'file',
 };

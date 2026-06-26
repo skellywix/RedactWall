@@ -672,25 +672,31 @@ app.post('/api/login', validation.validateBody(validation.loginSchema), (req, re
     db.appendAudit({ action: 'LOGIN_LOCKED', actor: user || '?', detail: 'too many attempts' });
     return res.status(429).json({ error: 'too many attempts — temporarily locked', retryMs: st.retryMs });
   }
-  if (!auth.verifyPassword(user, password)) {
+  const account = auth.authenticate(user, password);
+  if (!account) {
     const r = auth.registerFail(key);
     db.appendAudit({ action: 'LOGIN_FAILED', actor: user || '?', detail: r.locked ? 'locked out' : (r.remaining + ' attempts left') });
     return res.status(401).json({ error: 'invalid credentials', remaining: r.remaining });
   }
   auth.registerSuccess(key);
-  const token = auth.createSession(user);
+  const token = auth.createSession(account.user, account.role);
   res.cookie('sentinel_session', token, SESSION_COOKIE_OPTIONS);
-  db.appendAudit({ action: 'ADMIN_LOGIN', actor: user });
-  res.json({ ok: true, user, role: 'security_admin' });
+  db.appendAudit({
+    action: account.role === 'security_admin' ? 'ADMIN_LOGIN' : 'AUDITOR_LOGIN',
+    actor: account.user,
+    detail: account.role,
+  });
+  res.json({ ok: true, user: account.user, role: account.role });
 });
 
-const adminWrite = [auth.requireAuth, auth.requireCsrf];
+const sessionWrite = [auth.requireAuth, auth.requireCsrf];
+const adminWrite = [auth.requireAuth, auth.requireCsrf, auth.requireRole('security_admin')];
 
 app.get('/api/csrf', auth.requireAuth, (req, res) => {
   res.json({ csrfToken: auth.createCsrfToken(req.cookies && req.cookies.sentinel_session) });
 });
 
-app.post('/api/logout', ...adminWrite, (req, res) => {
+app.post('/api/logout', ...sessionWrite, (req, res) => {
   res.clearCookie('sentinel_session', {
     path: SESSION_COOKIE_OPTIONS.path,
     sameSite: SESSION_COOKIE_OPTIONS.sameSite,

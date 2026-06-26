@@ -63,6 +63,66 @@ test('production preflight passes with stable secrets and secure cookies', () =>
   assert.ok(status.checks.every((c) => c.ok));
 });
 
+test('production preflight accepts a strong optional auditor login', () => {
+  const status = preflight.configStatus({
+    env: {
+      NODE_ENV: 'production',
+      SENTINEL_DB_PATH: '/var/lib/promptsentinel/sentinel.db',
+      ADMIN_PASSWORD: 'long-admin-password',
+      AUDITOR_USER: 'auditor',
+      AUDITOR_PASSWORD: 'long-auditor-password',
+      INGEST_API_KEY: 'ps_ingest_' + 'a'.repeat(32),
+      SENTINEL_SECRET: 's'.repeat(32),
+      SENTINEL_DATA_KEY: 'd'.repeat(32),
+    },
+    adminPasswordIsDefault: false,
+    ingestKeyIsDefault: false,
+    secretSource: 'env',
+    dataCryptoEnabled: true,
+    cookieSecure: true,
+  });
+  assert.strictEqual(status.ready, true);
+  assert.strictEqual(status.level, 'ok');
+  assert.ok(status.checks.every((c) => c.ok));
+});
+
+test('production preflight blocks weak or partial auditor login config', () => {
+  const base = {
+    NODE_ENV: 'production',
+    SENTINEL_DB_PATH: '/var/lib/promptsentinel/sentinel.db',
+    ADMIN_PASSWORD: 'long-admin-password',
+    INGEST_API_KEY: 'ps_ingest_' + 'a'.repeat(32),
+    SENTINEL_SECRET: 's'.repeat(32),
+    SENTINEL_DATA_KEY: 'd'.repeat(32),
+  };
+  const common = {
+    adminPasswordIsDefault: false,
+    ingestKeyIsDefault: false,
+    secretSource: 'env',
+    dataCryptoEnabled: true,
+    cookieSecure: true,
+  };
+  const partial = preflight.configStatus({
+    env: { ...base, AUDITOR_USER: 'auditor' },
+    ...common,
+  });
+  assert.strictEqual(partial.ready, false);
+  assert.deepStrictEqual(
+    preflight.summarizeFailures(partial).map((line) => line.split(':')[0]),
+    ['auditor_credentials', 'auditor_password_strength'],
+  );
+
+  const weak = preflight.configStatus({
+    env: { ...base, AUDITOR_USER: 'auditor', AUDITOR_PASSWORD: 'short' },
+    ...common,
+  });
+  assert.strictEqual(weak.ready, false);
+  assert.deepStrictEqual(
+    preflight.summarizeFailures(weak).map((line) => line.split(':')[0]),
+    ['auditor_password_strength'],
+  );
+});
+
 test('production preflight blocks custom but short secrets', () => {
   const status = preflight.configStatus({
     env: {
@@ -86,6 +146,31 @@ test('production preflight blocks custom but short secrets', () => {
   );
 });
 
+test('production preflight blocks short auditor password when auditor login is configured', () => {
+  const status = preflight.configStatus({
+    env: {
+      NODE_ENV: 'production',
+      SENTINEL_DB_PATH: '/var/lib/promptsentinel/sentinel.db',
+      ADMIN_PASSWORD: 'long-admin-password',
+      AUDITOR_USER: 'auditor',
+      AUDITOR_PASSWORD: 'short-auditor',
+      INGEST_API_KEY: 'ps_ingest_' + 'a'.repeat(32),
+      SENTINEL_SECRET: 's'.repeat(32),
+      SENTINEL_DATA_KEY: 'd'.repeat(32),
+    },
+    adminPasswordIsDefault: false,
+    ingestKeyIsDefault: false,
+    secretSource: 'env',
+    dataCryptoEnabled: true,
+    cookieSecure: true,
+  });
+  assert.strictEqual(status.ready, false);
+  assert.deepStrictEqual(
+    preflight.summarizeFailures(status).map((line) => line.split(':')[0]),
+    ['auditor_password_strength'],
+  );
+});
+
 test('development preflight warns on weak custom secrets without blocking demos', () => {
   const status = preflight.configStatus({
     env: {
@@ -105,6 +190,29 @@ test('development preflight warns on weak custom secrets without blocking demos'
   assert.strictEqual(status.ready, true);
   assert.strictEqual(status.level, 'warnings');
   assert.ok(status.checks.some((c) => c.id === 'admin_password_strength' && !c.ok && c.severity === 'warning'));
+});
+
+test('development preflight warns on weak auditor login without blocking demos', () => {
+  const status = preflight.configStatus({
+    env: {
+      NODE_ENV: 'development',
+      SENTINEL_DB_PATH: '/tmp/promptsentinel/sentinel.db',
+      ADMIN_PASSWORD: 'long-admin-password',
+      AUDITOR_USER: 'auditor',
+      AUDITOR_PASSWORD: 'short',
+      INGEST_API_KEY: 'ps_ingest_' + 'a'.repeat(32),
+      SENTINEL_SECRET: 's'.repeat(32),
+      SENTINEL_DATA_KEY: 'd'.repeat(32),
+    },
+    adminPasswordIsDefault: false,
+    ingestKeyIsDefault: false,
+    secretSource: 'env',
+    dataCryptoEnabled: true,
+    cookieSecure: false,
+  });
+  assert.strictEqual(status.ready, true);
+  assert.strictEqual(status.level, 'warnings');
+  assert.ok(status.checks.some((c) => c.id === 'auditor_password_strength' && !c.ok && c.severity === 'warning'));
 });
 
 test('production preflight blocks cloud-synced sqlite paths', () => {

@@ -6,6 +6,8 @@
 
 ## Done
 
+- 2026-06-26: Added an optional read-only auditor console role for demos and examiner reviews: `AUDITOR_USER`/`AUDITOR_PASSWORD` can log in with role `auditor`, read dashboard evidence and policy, but cannot perform CSRF-protected admin writes. Production preflight requires both auditor credential fields and enforces a 16-character auditor password when configured.
+  Evidence: `node --test test/auth.test.js test/auditor-role.test.js test/admin-csrf.test.js test/preflight.test.js test/setup.test.js test/server-integration.test.js test/approval-stepup.test.js test/reveal-stepup.test.js test/retention.test.js test/validation.test.js`, `npm test`, `npm run test:browser`, `npm run setup:check`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Added production preflight strength checks for custom secrets: non-default admin passwords must be at least 16 characters, and ingest keys, session secrets, and raw-prompt data-key sources must be at least 32 characters. Development mode reports weak custom secrets as warnings.
   Evidence: `node --test test/preflight.test.js test/setup.test.js test/server-integration.test.js`, `npm test`, `npm run test:browser`, `npm run setup:check`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Scoped approval-status polling with per-query release tokens: held prompt and file responses now return a release token, the server stores only its hash, `/api/v1/status/:id` requires the matching token for held rows, and the reference proxy bridge forwards it while polling.

@@ -10,11 +10,11 @@ const server = fs.readFileSync(path.join(root, 'server.js'), 'utf8');
 const dashboard = fs.readFileSync(path.join(root, 'public', 'dashboard.js'), 'utf8');
 
 test('admin write routes include csrf middleware', () => {
-  assert.match(server, /const adminWrite = \[auth\.requireAuth,\s*auth\.requireCsrf\]/);
+  assert.match(server, /const sessionWrite = \[auth\.requireAuth,\s*auth\.requireCsrf\]/);
+  assert.match(server, /const adminWrite = \[auth\.requireAuth,\s*auth\.requireCsrf,\s*auth\.requireRole\('security_admin'\)\]/);
   assert.match(server, /app\.post\(\s*'\/api\/queries\/:id\/reveal',\s*\.\.\.adminWrite,\s*validation\.validateBody\(validation\.revealSchema\),\s*requireRevealPassword,/);
   assert.match(server, /app\.post\(\s*'\/api\/queries\/:id\/approve',\s*\.\.\.adminWrite,\s*validation\.validateBody\(validation\.approveSchema\),\s*requireApprovePassword,/);
   for (const route of [
-    "app.post('/api/logout', ...adminWrite",
     "app.post('/api/queries/:id/deny', ...adminWrite",
     "app.post('/api/retention/purge', ...adminWrite",
     "app.put('/api/policy/apply-template', ...adminWrite",
@@ -22,6 +22,7 @@ test('admin write routes include csrf middleware', () => {
   ]) {
     assert.ok(server.includes(route), route);
   }
+  assert.ok(server.includes("app.post('/api/logout', ...sessionWrite"), 'logout remains available to any authenticated session');
 });
 
 test('dashboard fetches and sends csrf token on unsafe admin requests', () => {
@@ -52,4 +53,12 @@ test('dashboard exposes retention settings and manual purge control', () => {
   assert.match(dashboard, /rawRetentionDays: Number\(\$\(\'#pol_retention\'\)\.value\)/);
   assert.match(dashboard, /id="runRetentionPurge"/);
   assert.match(dashboard, /api\('\/api\/retention\/purge', \{ method: 'POST' \}\)/);
+});
+
+test('dashboard renders auditors as read-only users', () => {
+  assert.match(dashboard, /let currentRole = 'security_admin'/);
+  assert.match(dashboard, /function canAdminWrite\(\)/);
+  assert.match(dashboard, /\$\('#who'\)\.textContent = `\$\{me\.user\} \/ \$\{roleLabel\(currentRole\)\}`/);
+  assert.match(dashboard, /Read-only auditor view/);
+  assert.match(dashboard, /if \(!canAdminWrite\(\)\)/);
 });
