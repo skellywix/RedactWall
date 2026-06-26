@@ -45,6 +45,7 @@ function parseArgs(argv = process.argv.slice(2)) {
   };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
+    if (arg === '--') continue;
     if (arg === '--env') opts.envPath = path.resolve(argv[++i] || DEFAULT_ENV_PATH);
     else if (arg === '--issuer') opts.issuer = argv[++i] || opts.issuer;
     else if (arg === '--account') opts.account = argv[++i] || '';

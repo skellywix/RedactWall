@@ -43,6 +43,9 @@ test('rejects invalid enrollment secrets and parses cli options', () => {
   assert.match(opts.envPath, /pilot\.env$/);
   assert.strictEqual(opts.issuer, 'Pilot CU');
   assert.strictEqual(opts.account, 'admin@pilot.test');
+
+  const separated = parseArgs(['--', '--env', 'pilot.env']);
+  assert.match(separated.envPath, /pilot\.env$/);
 });
 
 function childEnv() {
