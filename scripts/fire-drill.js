@@ -1,4 +1,5 @@
 'use strict';
+require('../src/env').loadEnv();
 /**
  * Synthetic control fire drill: send a planted canary through the gate API and
  * fail if the system does not detect it or if the raw token leaks in response.

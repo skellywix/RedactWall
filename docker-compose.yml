@@ -1,0 +1,28 @@
+services:
+  promptsentinel:
+    build: .
+    image: promptsentinel:local
+    environment:
+      PORT: 4000
+      NODE_ENV: ${NODE_ENV:-development}
+      HTTPS: ${HTTPS:-false}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      ADMIN_USER: ${ADMIN_USER:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-ChangeMe!2026}
+      SENTINEL_SECRET: ${SENTINEL_SECRET:-}
+      SENTINEL_DATA_KEY: ${SENTINEL_DATA_KEY:-}
+      INGEST_API_KEY: ${INGEST_API_KEY:-dev-ingest-key}
+      SENTINEL_REQUEST_TIMEOUT_MS: ${SENTINEL_REQUEST_TIMEOUT_MS:-10000}
+      SIEM_WEBHOOK_URL: ${SIEM_WEBHOOK_URL:-}
+      SIEM_WEBHOOK_TOKEN: ${SIEM_WEBHOOK_TOKEN:-}
+      SIEM_ALERT_MIN_RISK: ${SIEM_ALERT_MIN_RISK:-25}
+      SIEM_ALERT_MIN_SEVERITY: ${SIEM_ALERT_MIN_SEVERITY:-3}
+      SENTINEL_DB_PATH: /data/sentinel.db
+    ports:
+      - "${PORT:-4000}:4000"
+    volumes:
+      - promptsentinel-data:/data
+    restart: unless-stopped
+
+volumes:
+  promptsentinel-data:

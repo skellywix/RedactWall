@@ -9,6 +9,7 @@
  * Closes the biggest gap vs. plain-text-only scanning: PDFs, Word, Excel, and
  * PowerPoint files uploaded to AI tools now get inspected.
  */
+require('./env').loadEnv();
 const path = require('path');
 
 const TEXT_EXT = new Set(['.txt', '.csv', '.tsv', '.json', '.yaml', '.yml', '.xml', '.html', '.htm',

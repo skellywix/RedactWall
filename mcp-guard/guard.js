@@ -1,4 +1,5 @@
 'use strict';
+require('../src/env').loadEnv();
 /**
  * PromptSentinel MCP guard (reference implementation).
  *

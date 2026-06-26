@@ -3,6 +3,7 @@
  * Policy engine. Decides allow / block-and-hold for each analyzed prompt, and
  * holds the scanner config (ignore-lists, disabled detectors) synced to sensors.
  */
+require('./env').loadEnv();
 const fs = require('fs');
 const path = require('path');
 

@@ -86,25 +86,33 @@ git ls-files --others --ignored --exclude-standard | Select-Object -First 40
 
 It is normal for `node_modules/` to appear as ignored if dependencies are installed. It is not source code and should not be committed.
 
-## Install Dependencies
+## Run Setup
 
-Install from the lockfile:
-
-```powershell
-npm ci
-```
-
-If this is a quick local run and `node_modules/` already exists, this is usually enough:
+Run the project setup command:
 
 ```powershell
-npm install
+npm run setup
 ```
 
-For client demos, prefer `npm ci` because it uses `package-lock.json` and gives a repeatable install.
+This installs dependencies from `package-lock.json`, writes `.env` with stable demo secrets, initializes the SQLite store, and runs deployment preflight.
+
+If you also need browser E2E test dependencies on the demo machine:
+
+```powershell
+npm run setup -- --with-browser
+```
+
+For production-style setup, use:
+
+```powershell
+npm run setup:prod
+```
 
 ## Configure Demo Secrets
 
-For a polished demo, do not use the default admin password or ingest key. In PowerShell:
+`npm run setup` already writes non-default demo secrets into `.env`. If you want temporary shell-only values for a one-off demo, use the commands below.
+
+In PowerShell:
 
 ```powershell
 $env:PORT = "4000"
@@ -685,7 +693,7 @@ chrome.storage.local.set({ ingestKey: "demo-ingest-key" });
 `better-sqlite3` is a native package. Use Node.js 22 or newer and run:
 
 ```powershell
-npm ci
+npm run setup
 ```
 
 If the local machine cannot build native packages, use Docker for the server demo.
@@ -713,10 +721,10 @@ Do not do this on a real pilot without exporting or preserving evidence first.
 
 Before the meeting:
 
-- Dependencies installed with `npm ci`.
+- Setup completed with `npm run setup`.
 - Server starts on `http://localhost:4000`.
 - Admin password is not the default.
-- `SENTINEL_SECRET`, `SENTINEL_DATA_KEY`, and `INGEST_API_KEY` are set.
+- `.env` contains `SENTINEL_SECRET`, `SENTINEL_DATA_KEY`, and `INGEST_API_KEY`.
 - Chrome extension is loaded and pinned.
 - Extension storage points to the right server and ingest key.
 - Policy starts in `block`.

@@ -1,4 +1,5 @@
 'use strict';
+require('../src/env').loadEnv();
 /**
  * PromptSentinel endpoint agent (reference implementation).
  *

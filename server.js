@@ -11,6 +11,7 @@
  *   4. The waiting client polls GET /api/v1/status/:id (or long-poll /await/:id)
  *      and proceeds only if released.
  */
+require('./src/env').loadEnv();
 const express = require('express');
 const cookieParser = require('cookie-parser');
 const helmet = require('helmet');

@@ -3,7 +3,13 @@
   "version": "0.3.0",
   "description": "Inline DLP gateway for AI chat prompts - detects PII, blocks risky prompts, reversibly redacts, and releases only after Security Admin approval. Built for compliance (NCUA/GLBA/PCI/HIPAA) at credit unions and similar.",
   "main": "server.js",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
+    "setup": "node scripts/setup.js",
+    "setup:prod": "node scripts/setup.js --production",
+    "setup:check": "node scripts/setup.js --check --skip-install",
     "start": "node server.js",
     "test": "node --test",
     "test:browser": "playwright test",

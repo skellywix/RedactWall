@@ -5,6 +5,7 @@
  * Alerts are best-effort and privacy-preserving: no raw prompt, no redacted
  * prompt body, no token vault, and no raw finding values leave this process.
  */
+require('./env').loadEnv();
 
 function num(v, fallback) {
   const n = Number(v);

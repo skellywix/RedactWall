@@ -1,4 +1,5 @@
 'use strict';
+require('../src/env').loadEnv();
 /**
  * Simulates the network proxy / SDK calling the gate with realistic prompts.
  * Usage: node scripts/simulate.js [baseUrl]

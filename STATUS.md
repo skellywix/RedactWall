@@ -6,6 +6,8 @@
 
 ## Done
 
+- 2026-06-26: Added repeatable deployment setup tooling: `.env` loading, generated setup/preflight scripts, Docker Compose path, deployment docs, and tests that keep copied example credentials flagged as unsafe.
+  Evidence: `node --test test/env.test.js test/setup.test.js test/auth.test.js test/preflight.test.js`, `npm run setup:check`, `npm test`, `npm run test:browser`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Bounded MCP guard control-plane requests so policy refresh and best-effort audit logging cannot stall redacted tool output delivery when the control plane is slow or unavailable.
   Evidence: `node --test test/mcp-guard.test.js`, `npm test`, `npm run test:browser`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Published full sensor policy from `/api/v1/policy` and made browser local analysis honor centralized detector `ignore` and `disabledDetectors` settings, aligning browser, endpoint, MCP, and server policy behavior.

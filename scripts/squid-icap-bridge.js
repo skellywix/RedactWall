@@ -1,4 +1,5 @@
 'use strict';
+require('../src/env').loadEnv();
 /**
  * Reference ICAP-side bridge (sketch).
  *

@@ -32,3 +32,4 @@
 - 2026-06-26: Browser warn/justify proceeds must be recorded before resend. If the control plane is unreachable or returns an unusable verdict, the extension blocks the sensitive send until audit capture is available.
 - 2026-06-26: `/api/v1/policy` is the contract for all deployed sensors. It must include detector ignore/disable settings and scanner controls, while leaving admin-only raw-retention settings out of the sensor payload.
 - 2026-06-26: MCP redaction is the primary safety action, while control-plane logging is best-effort. Logging and policy refresh requests must be bounded so a slow server cannot hang an agent tool call after sensitive content has already been redacted locally.
+- 2026-06-26: Native setup should generate stable `.env` secrets instead of relying on shell-only exports. A copied `.env.example` remains unsafe until default admin and ingest credentials are replaced.

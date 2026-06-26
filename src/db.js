@@ -21,6 +21,7 @@
  * current state). Editing a query's findings, decisionNote, or an audit detail
  * after the fact breaks verification, not just the thin event header.
  */
+require('./env').loadEnv();
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

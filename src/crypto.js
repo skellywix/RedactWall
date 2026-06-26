@@ -14,6 +14,7 @@
  * refused (seal() returns null), so we never write cleartext member data by
  * accident.
  */
+require('./env').loadEnv();
 const crypto = require('crypto');
 
 const KEY_SRC = process.env.SENTINEL_DATA_KEY || process.env.SENTINEL_SECRET || '';

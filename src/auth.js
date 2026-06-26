@@ -9,6 +9,7 @@
  *   SENTINEL_SECRET so every instance shares it — logged at startup.)
  * - Brute-force defense: per user+IP attempt throttling with temporary lockout.
  */
+require('./env').loadEnv();
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
@@ -30,8 +31,9 @@ function resolveSecret() {
 }
 const { secret: SECRET, source: SECRET_SOURCE } = resolveSecret();
 
+const DEFAULT_ADMIN_PASSWORD = 'ChangeMe!2026';
 const ADMIN_USER = process.env.ADMIN_USER || 'admin';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'ChangeMe!2026';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || DEFAULT_ADMIN_PASSWORD;
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000; // 8h
 
 const SALT = crypto.randomBytes(16);
@@ -120,6 +122,6 @@ function requireCsrf(req, res, next) {
 module.exports = {
   verifyPassword, createSession, verify, createCsrfToken, verifyCsrfToken, requireAuth, requireCsrf,
   loginStatus, registerFail, registerSuccess,
-  ADMIN_USER, ADMIN_PASSWORD_IS_DEFAULT: !process.env.ADMIN_PASSWORD,
+  ADMIN_USER, ADMIN_PASSWORD_IS_DEFAULT: ADMIN_PASSWORD === DEFAULT_ADMIN_PASSWORD,
   SECRET_SOURCE, SECRET_IS_STABLE: SECRET_SOURCE === 'env' || SECRET_SOURCE === 'file',
 };

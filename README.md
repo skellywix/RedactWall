@@ -95,11 +95,37 @@ blocked unscanned file without storing the file bytes.
 ## Quick start
 
 ```bash
-npm install
-npx playwright install chromium   # one-time browser install for E2E tests
+npm run setup
 npm start
-# dashboard: http://localhost:4000   (admin / ChangeMe!2026)
+# dashboard: http://localhost:4000   (credentials in .env)
 ```
+
+`npm run setup` installs dependencies, writes a local `.env` with stable secrets,
+initializes the SQLite store, and runs deployment preflight. The generated admin
+password and ingest key live in `.env`.
+
+For browser E2E test setup, install Chromium too:
+
+```bash
+npm run setup -- --with-browser
+```
+
+For a production-style install:
+
+```bash
+npm run setup:prod
+npm start
+```
+
+For Docker:
+
+```bash
+npm run setup:prod -- --skip-install
+docker compose up -d --build
+```
+
+See `docs/DEPLOYMENT.md` for native Node, Docker Compose, health checks, and
+preflight details.
 
 ### Try the browser extension (flagship)
 
