@@ -6,6 +6,8 @@
 
 ## Done
 
+- 2026-06-26: Hardened the browser extension control-plane path with bounded background-worker requests, fail-closed gate/file-scan outage verdicts, and warn/justify resend logic that waits for a recorded server decision before allowing a sensitive prompt to proceed.
+  Evidence: `node --test test/extension.test.js`, live temp-server extension background smoke, `npm run test:browser`, `npm test`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Added an AI coverage posture dashboard and protected `/api/coverage` summary so admins can see governed AI destinations, sensor mix, shadow-AI sightings, and coverage score without exposing prompt bodies.
   Evidence: `node --test test/coverage.test.js`, `npm run test:browser`, `npm test`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Hardened the reference Squid/ICAP bridge with bounded control-plane requests, explicit fail-closed gate verdicts, and fail-closed release polling for API/proxy enforcement.

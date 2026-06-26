@@ -89,21 +89,57 @@
     return (analysis.categories || []).map((c) => ({ category: c.category, score: c.score }));
   }
   function report(text, analysis, channel, outcome, note, extra) {
-    chrome.runtime.sendMessage({
-      type: 'report',
-      payload: {
-        prompt: text, destination: SITE, channel, source: 'browser_extension',
-        categories: (analysis.categories || []).map((c) => c.category),
-        clientFindings: publicFindings(analysis),
-        clientCategories: publicCategories(analysis),
-        clientEntityCounts: analysis.entityCounts || {},
-        clientRiskScore: analysis.riskScore || 0,
-        clientMaxSeverity: analysis.maxSeverity || 0,
-        clientMaxSeverityLabel: analysis.maxSeverityLabel || 'none',
-        outcome, note: note || '',
-        ...(extra || {}),
-      },
+    return new Promise((resolve) => {
+      try {
+        chrome.runtime.sendMessage({
+          type: 'report',
+          payload: {
+            prompt: text, destination: SITE, channel, source: 'browser_extension',
+            categories: (analysis.categories || []).map((c) => c.category),
+            clientFindings: publicFindings(analysis),
+            clientCategories: publicCategories(analysis),
+            clientEntityCounts: analysis.entityCounts || {},
+            clientRiskScore: analysis.riskScore || 0,
+            clientMaxSeverity: analysis.maxSeverity || 0,
+            clientMaxSeverityLabel: analysis.maxSeverityLabel || 'none',
+            outcome, note: note || '',
+            ...(extra || {}),
+          },
+        }, (res) => {
+          if (chrome.runtime.lastError) return resolve(null);
+          resolve(res || null);
+        });
+      } catch (_) {
+        resolve(null);
+      }
     });
+  }
+
+  function recordedProceedResponse(res, outcome) {
+    if (!res || typeof res !== 'object' || !res.id) return false;
+    if (res.decision === 'allow') return true;
+    if (outcome === 'sent_after_warning') return res.status === 'warned_sent';
+    if (outcome === 'justified') return res.status === 'justified';
+    return false;
+  }
+
+  async function proceedAfterRecorded(text, analysis, outcome, note, el) {
+    const res = await report(text, analysis, 'submit', outcome, note);
+    if (!recordedProceedResponse(res, outcome)) {
+      toast('PromptSentinel could not record this decision. Send blocked until the control plane is reachable.');
+      return;
+    }
+    bypassOnce = true;
+    resend(el);
+  }
+
+  async function sendApprovalRequest(text, analysis) {
+    const res = await report(text, analysis, 'submit', 'awaiting_approval');
+    if (res && res.id && res.status === 'pending') {
+      toast('Sent to your Security Admin for approval.');
+      return;
+    }
+    toast('PromptSentinel could not reach the control plane. Approval request blocked for now.');
   }
 
   // ---- inline banner UI -----------------------------------------------------
@@ -193,14 +229,10 @@
     showBanner({
       mode: verdict.action, items, risk: verdict.analysis.riskScore,
       justify: verdict.action === 'justify',
-      onProceed: (note) => {
-        report(text, verdict.analysis, 'submit', verdict.action === 'justify' ? 'justified' : 'sent_after_warning', note);
-        bypassOnce = true;
-        resend(el);
-      },
+      onProceed: (note) => proceedAfterRecorded(text, verdict.analysis, verdict.action === 'justify' ? 'justified' : 'sent_after_warning', note, el),
       onBlock: (requestApproval) => {
-        report(text, verdict.analysis, 'submit', requestApproval ? 'awaiting_approval' : 'blocked_by_user');
-        if (requestApproval) toast('Sent to your Security Admin for approval.');
+        if (requestApproval) sendApprovalRequest(text, verdict.analysis);
+        else report(text, verdict.analysis, 'submit', 'blocked_by_user');
       },
     });
     return false;
@@ -347,6 +379,8 @@
     const items = (res.findings || []).map((x) => x.type).concat(res.categories || []);
     if (res.decision === 'allow' && res.supported !== false) {
       toast('PromptSentinel scanned ' + filename + ' clean. Attach it again to upload.');
+    } else if (res.status === 'scan_unavailable') {
+      toast('PromptSentinel could not verify ' + filename + '. Upload blocked until the control plane is reachable.');
     } else if (res.supported === false || res.inspected === false) {
       toast('PromptSentinel could not inspect ' + filename + '. Upload blocked and recorded.');
     } else {

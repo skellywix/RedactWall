@@ -11,6 +11,7 @@ try { importScripts('lib/adapters.js'); } catch (e) { /* PSAdapters used only fo
 const DEFAULTS = {
   serverUrl: 'http://localhost:4000',
   ingestKey: 'dev-ingest-key',
+  requestTimeoutMs: 10000,
   enabled: true,
   policy: { enforcementMode: 'block', blockMinSeverity: 2, blockRiskScore: 25, governedDestinations: [], alwaysBlock: ['US_SSN', 'CREDIT_CARD', 'BANK_ACCOUNT', 'ROUTING_NUMBER', 'SECRET_KEY', 'PRIVATE_KEY', 'CANARY_TOKEN'] },
 };
@@ -36,16 +37,46 @@ async function serverCfg() {
   let managed = {};
   try { managed = (await chrome.storage.managed.get(['serverUrl', 'ingestKey'])) || {}; } catch (e) {}
   const c = await cfg();
-  return { serverUrl: managed.serverUrl || c.serverUrl, ingestKey: managed.ingestKey || c.ingestKey, enabled: c.enabled };
+  return { serverUrl: managed.serverUrl || c.serverUrl, ingestKey: managed.ingestKey || c.ingestKey, enabled: c.enabled, requestTimeoutMs: c.requestTimeoutMs };
+}
+
+function requestTimeoutMs(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return DEFAULTS.requestTimeoutMs;
+  return Math.max(50, Math.min(60000, Math.floor(n)));
+}
+
+function failClosed(reason) {
+  return { decision: 'block', status: 'control_plane_unavailable', reason };
+}
+
+function scanUnavailable(reason) {
+  return { decision: 'block', status: 'scan_unavailable', supported: true, inspected: false, reason };
+}
+
+async function fetchJsonWithTimeout(url, options, timeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), requestTimeoutMs(timeoutMs));
+  try {
+    const r = await fetch(url, { ...(options || {}), signal: controller.signal });
+    const body = await r.json().catch(() => null);
+    if (!r.ok) return { ok: false, reason: 'http_' + r.status, body };
+    if (!body || typeof body !== 'object') return { ok: false, reason: 'invalid_json', body };
+    return { ok: true, body };
+  } catch (e) {
+    return { ok: false, reason: e && e.name === 'AbortError' ? 'timeout' : 'unreachable' };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function refreshPolicy() {
   const c = await serverCfg();
   if (!c.enabled) return;
   try {
-    const r = await fetch(c.serverUrl + '/api/v1/policy', { headers: { 'x-api-key': c.ingestKey } });
+    const r = await fetchJsonWithTimeout(c.serverUrl + '/api/v1/policy', { headers: { 'x-api-key': c.ingestKey } }, c.requestTimeoutMs);
     if (r.ok) {
-      const p = await r.json();
+      const p = r.body;
       await chrome.storage.local.set({ policy: { ...DEFAULTS.policy, ...p } });
     }
   } catch (e) { /* offline → keep cached/default policy (fail-safe to block) */ }
@@ -68,7 +99,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return;
       }
       try {
-        const r = await fetch(c.serverUrl + '/api/v1/gate', {
+        const r = await fetchJsonWithTimeout(c.serverUrl + '/api/v1/gate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-api-key': c.ingestKey },
           body: JSON.stringify({
@@ -88,10 +119,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             clientOutcome: msg.payload.outcome,
             note: msg.payload.note,
           }),
-        });
-        const j = await r.json().catch(() => ({}));
-        sendResponse && sendResponse(j);
-      } catch (e) { sendResponse && sendResponse(null); }
+        }, c.requestTimeoutMs);
+        sendResponse && sendResponse(r.ok ? r.body : failClosed('gate_' + r.reason));
+      } catch (e) { sendResponse && sendResponse(failClosed('gate_unreachable')); }
     });
     return true;
   }
@@ -102,7 +132,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return;
       }
       try {
-        const r = await fetch(c.serverUrl + '/api/v1/scan-file', {
+        const r = await fetchJsonWithTimeout(c.serverUrl + '/api/v1/scan-file', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-api-key': c.ingestKey },
           body: JSON.stringify({
@@ -114,13 +144,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             channel: msg.payload.channel,
             source: msg.payload.source,
           }),
-        });
-        if (!r.ok) {
-          sendResponse && sendResponse(null);
-          return;
-        }
-        sendResponse && sendResponse(await r.json().catch(() => ({})));
-      } catch (e) { sendResponse && sendResponse(null); }
+        }, c.requestTimeoutMs);
+        sendResponse && sendResponse(r.ok ? r.body : scanUnavailable('scan_file_' + r.reason));
+      } catch (e) { sendResponse && sendResponse(scanUnavailable('scan_file_unreachable')); }
     });
     return true;
   }
@@ -142,10 +168,10 @@ chrome.tabs?.onUpdated.addListener(async (tabId, info, tab) => {
   const [sc, who] = await Promise.all([serverCfg(), identity()]);
   if (!sc.enabled) return;
   try {
-    await fetch(sc.serverUrl + '/api/v1/gate', {
+    await fetchJsonWithTimeout(sc.serverUrl + '/api/v1/gate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': sc.ingestKey },
       body: JSON.stringify({ prompt: '[shadow-AI] visit to ungoverned AI tool: ' + host, user: who.user, orgId: who.orgId, destination: host, channel: 'shadow_ai', source: 'browser_extension', clientOutcome: 'shadow_ai' }),
-    });
+    }, sc.requestTimeoutMs);
   } catch (e) {}
 });
