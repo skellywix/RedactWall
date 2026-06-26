@@ -6,6 +6,8 @@
 
 ## Done
 
+- 2026-06-26: Updated GitHub Actions workflow dependencies to maintained current major lines for checkout, setup-node, and artifact upload after CI reported Node 20 action deprecation warnings.
+  Evidence: upstream release tags verified through GitHub API; `npm test`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Hardened the endpoint agent to fail closed when supported-file scans or policy refreshes stall or return unusable control-plane responses. Scan outages now block locally and can be recorded as sanitized `scan_unavailable` unscanned-file events.
   Evidence: `node --test test/endpoint-agent.test.js`, `node --test test/validation.test.js`, `npm test`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Added permanent Playwright coverage for the mobile admin console layout so CI verifies collapsed rail tabs, usable content tabs, and no page-level horizontal overflow.

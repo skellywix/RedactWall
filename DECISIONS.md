@@ -26,3 +26,4 @@
 - 2026-06-26: Endpoint file scanning should obey the same scanner policy the control plane serves to other sensors. Hardcoded local ignore and size settings are only defaults when policy refresh is unavailable.
 - 2026-06-26: MCP tool-output redaction must respect centralized detection policy. Local MCP defaults are acceptable only until the guard can refresh `ignore` and `disabledDetectors` from the control plane.
 - 2026-06-26: Endpoint supported-file scans must fail closed on control-plane timeout, auth failure, or malformed scan verdict. Returning `null` is not enough for a DLP sensor because the local file path must stay blocked.
+- 2026-06-26: Keep CI action versions on maintained current major lines when GitHub reports runtime deprecations. Green checks with platform warnings are still maintenance debt for a production-readiness branch.
