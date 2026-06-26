@@ -34,10 +34,13 @@ const { secret: SECRET, source: SECRET_SOURCE } = resolveSecret();
 const DEFAULT_ADMIN_PASSWORD = 'ChangeMe!2026';
 const ADMIN_USER = String(process.env.ADMIN_USER || 'admin').trim() || 'admin';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || DEFAULT_ADMIN_PASSWORD;
+const ADMIN_TOTP_SECRET = String(process.env.ADMIN_TOTP_SECRET || '').trim();
 const AUDITOR_USER = String(process.env.AUDITOR_USER || '').trim();
 const AUDITOR_PASSWORD = process.env.AUDITOR_PASSWORD || '';
 const AUDITOR_DISTINCT = !!AUDITOR_USER && AUDITOR_USER !== ADMIN_USER;
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000; // 8h
+const TOTP_STEP_MS = 30 * 1000;
+const TOTP_WINDOW = Number(process.env.ADMIN_TOTP_WINDOW || 1);
 
 function buildAccount(user, password, role) {
   if (!user || !password) return null;
@@ -70,6 +73,71 @@ function authenticate(user, password) {
 
 function verifyPassword(user, password) {
   return !!authenticate(user, password);
+}
+
+function normalizeTotpSecret(secret) {
+  return String(secret || '').replace(/[\s=-]/g, '').toUpperCase();
+}
+
+function decodeBase32(secret) {
+  const normalized = normalizeTotpSecret(secret);
+  if (!normalized || /[^A-Z2-7]/.test(normalized)) return null;
+  let bits = 0;
+  let value = 0;
+  const bytes = [];
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  for (const char of normalized) {
+    value = (value << 5) | alphabet.indexOf(char);
+    bits += 5;
+    if (bits >= 8) {
+      bytes.push((value >>> (bits - 8)) & 0xff);
+      bits -= 8;
+    }
+  }
+  return Buffer.from(bytes);
+}
+
+const ADMIN_TOTP_KEY = decodeBase32(ADMIN_TOTP_SECRET);
+
+function hotp(key, counter) {
+  if (counter < 0) return '';
+  const msg = Buffer.alloc(8);
+  let n = BigInt(counter);
+  for (let i = 7; i >= 0; i -= 1) {
+    msg[i] = Number(n & 0xffn);
+    n >>= 8n;
+  }
+  const h = crypto.createHmac('sha1', key).update(msg).digest();
+  const offset = h[h.length - 1] & 0x0f;
+  const bin = ((h[offset] & 0x7f) << 24)
+    | ((h[offset + 1] & 0xff) << 16)
+    | ((h[offset + 2] & 0xff) << 8)
+    | (h[offset + 3] & 0xff);
+  return String(bin % 1000000).padStart(6, '0');
+}
+
+function safeCodeEqual(left, right) {
+  const a = Buffer.from(String(left || ''));
+  const b = Buffer.from(String(right || ''));
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+function totpCode(secret = ADMIN_TOTP_SECRET, now = Date.now()) {
+  const key = decodeBase32(secret);
+  if (!key || key.length < 10) return null;
+  return hotp(key, Math.floor(Number(now) / TOTP_STEP_MS));
+}
+
+function verifyTotpCode(code, now = Date.now()) {
+  if (!ADMIN_TOTP_SECRET || !ADMIN_TOTP_KEY || ADMIN_TOTP_KEY.length < 10) return false;
+  const submitted = String(code || '').replace(/\s/g, '');
+  if (!/^\d{6}$/.test(submitted)) return false;
+  const window = Math.max(0, Math.min(3, Number.isFinite(TOTP_WINDOW) ? Math.floor(TOTP_WINDOW) : 1));
+  const counter = Math.floor(Number(now) / TOTP_STEP_MS);
+  for (let offset = -window; offset <= window; offset += 1) {
+    if (safeCodeEqual(hotp(ADMIN_TOTP_KEY, counter + offset), submitted)) return true;
+  }
+  return false;
 }
 
 // ---- brute-force throttling --------------------------------------------------
@@ -159,9 +227,11 @@ function requireCsrf(req, res, next) {
 }
 
 module.exports = {
-  authenticate, verifyPassword, createSession, verify, createCsrfToken, verifyCsrfToken, requireAuth, requireRole, requireCsrf,
+  authenticate, verifyPassword, verifyTotpCode, totpCode, createSession, verify, createCsrfToken, verifyCsrfToken, requireAuth, requireRole, requireCsrf,
   loginStatus, registerFail, registerSuccess,
   ADMIN_USER, ADMIN_PASSWORD_IS_DEFAULT: ADMIN_PASSWORD === DEFAULT_ADMIN_PASSWORD,
+  ADMIN_MFA_REQUIRED: !!ADMIN_TOTP_SECRET,
+  ADMIN_MFA_CONFIGURED: !!ADMIN_TOTP_KEY && ADMIN_TOTP_KEY.length >= 10,
   AUDITOR_ENABLED: AUDITOR_DISTINCT && ACCOUNTS.some((account) => account.role === 'auditor'),
   SECRET_SOURCE, SECRET_IS_STABLE: SECRET_SOURCE === 'env' || SECRET_SOURCE === 'file',
 };

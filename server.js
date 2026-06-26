@@ -665,7 +665,7 @@ app.get('/api/v1/status/:id', checkIngestKey, (req, res) => {
 // AUTH
 // =============================================================================
 app.post('/api/login', validation.validateBody(validation.loginSchema), (req, res) => {
-  const { user, password } = req.body || {};
+  const { user, password, otp } = req.body || {};
   const key = (user || '?') + '|' + (req.ip || (req.connection && req.connection.remoteAddress) || '');
   const st = auth.loginStatus(key);
   if (st.locked) {
@@ -677,6 +677,11 @@ app.post('/api/login', validation.validateBody(validation.loginSchema), (req, re
     const r = auth.registerFail(key);
     db.appendAudit({ action: 'LOGIN_FAILED', actor: user || '?', detail: r.locked ? 'locked out' : (r.remaining + ' attempts left') });
     return res.status(401).json({ error: 'invalid credentials', remaining: r.remaining });
+  }
+  if (account.role === 'security_admin' && auth.ADMIN_MFA_REQUIRED && !auth.verifyTotpCode(otp)) {
+    const r = auth.registerFail(key);
+    db.appendAudit({ action: 'ADMIN_MFA_FAILED', actor: account.user, detail: r.locked ? 'locked out' : (r.remaining + ' attempts left') });
+    return res.status(401).json({ error: 'invalid mfa code', mfaRequired: true, remaining: r.remaining });
   }
   auth.registerSuccess(key);
   const token = auth.createSession(account.user, account.role);

@@ -102,7 +102,8 @@ npm start
 
 `npm run setup` installs dependencies, writes a local `.env` with stable secrets,
 initializes the SQLite store, and runs deployment preflight. The generated admin
-password and ingest key live in `.env`.
+password and ingest key live in `.env`; production setup also writes
+`ADMIN_TOTP_SECRET` for authenticator enrollment.
 
 For browser E2E test setup, install Chromium too:
 
@@ -221,7 +222,7 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 
 ## Still ahead (to ship commercially)
 
-- SSO/MFA and multiple admin roles; deeper multi-tenant isolation per institution.
+- SSO, polished MFA enrollment UX, and multiple admin roles; deeper multi-tenant isolation per institution.
 - Signed Chrome Web Store listing and force-install rollout; local extension zip plus integrity manifest are packaged.
 - Email/Slack escalation rules on top of the sanitized SIEM webhook.
 - Endpoint agent as a signed native service hooking clipboard + AI-app upload dirs.
@@ -239,6 +240,7 @@ Copy `.env.example` to `.env` (or export):
 | `SENTINEL_DB_PATH` | SQLite store path (default `data/sentinel.db`). Use **local disk**, never a cloud-synced folder or network share. Production preflight blocks unsafe paths. |
 | `SENTINEL_POLICY_PATH` | Optional policy file path for isolated tests or pilots (default `config/policy.json`) |
 | `ADMIN_USER` / `ADMIN_PASSWORD` | Console credentials; production preflight requires a non-default password of at least 16 characters |
+| `ADMIN_TOTP_SECRET` | Base32 authenticator secret for Security Admin MFA; production preflight requires it and admin login requires a current 6-digit code when set |
 | `AUDITOR_USER` / `AUDITOR_PASSWORD` | Optional read-only console credentials for examiner or client-demo access; set both together, keep `AUDITOR_USER` distinct from `ADMIN_USER`, and use at least 16 characters for `AUDITOR_PASSWORD` |
 | `SENTINEL_SECRET` | Session cookie signing secret; production preflight requires at least 32 characters from environment |
 | `SENTINEL_DATA_KEY` | Encrypts retained raw prompts at rest; production preflight requires at least 32 characters for this key or the `SENTINEL_SECRET` fallback |
@@ -252,12 +254,14 @@ Copy `.env.example` to `.env` (or export):
 | `SIEM_WEBHOOK_TOKEN` | Optional bearer token for the SIEM webhook |
 | `SIEM_ALERT_MIN_RISK` / `SIEM_ALERT_MIN_SEVERITY` | Alert thresholds for allowed-but-risky events; blocked and response-flagged events alert automatically |
 
-Production preflight requires custom secrets with minimum lengths: 16 characters
-for `ADMIN_PASSWORD` and optional `AUDITOR_PASSWORD`, and 32 characters for
-`INGEST_API_KEY`, `SENTINEL_SECRET`, and `SENTINEL_DATA_KEY` when raw approval
-retention is enabled. If auditor login is configured, both `AUDITOR_USER` and
+Production preflight requires Security Admin MFA through `ADMIN_TOTP_SECRET`,
+custom secrets with minimum lengths, 16 characters for `ADMIN_PASSWORD` and
+optional `AUDITOR_PASSWORD`, and 32 characters for `INGEST_API_KEY`,
+`SENTINEL_SECRET`, and `SENTINEL_DATA_KEY` when raw approval retention is
+enabled. If auditor login is configured, both `AUDITOR_USER` and
 `AUDITOR_PASSWORD` must be present and `AUDITOR_USER` must be distinct from
-`ADMIN_USER`. Development/demo mode reports weak custom values as warnings.
+`ADMIN_USER`. Development/demo mode reports weak or missing custom values as
+warnings.
 
 `/readyz` reports whether the database and deployment preflight are usable. Logged-in admins can inspect detailed checks at `/api/preflight`.
 

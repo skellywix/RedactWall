@@ -7,6 +7,7 @@ const { execFileSync } = require('node:child_process');
 const path = require('node:path');
 
 process.env.ADMIN_PASSWORD = 'unit-pass';
+process.env.ADMIN_TOTP_SECRET = 'JBSWY3DPEHPK3PXP';
 process.env.AUDITOR_USER = 'auditor';
 process.env.AUDITOR_PASSWORD = 'auditor-pass';
 process.env.SENTINEL_SECRET = 'unit-secret-stable';
@@ -39,6 +40,19 @@ test('authenticate returns the account role without leaking hashes', () => {
   });
   assert.strictEqual(auth.authenticate('auditor', 'wrong'), null);
   assert.strictEqual(auth.AUDITOR_ENABLED, true);
+});
+
+test('totp codes verify for the configured admin mfa secret', () => {
+  const now = 1700000000000;
+  const code = auth.totpCode(process.env.ADMIN_TOTP_SECRET, now);
+  assert.match(code, /^\d{6}$/);
+  assert.strictEqual(auth.verifyTotpCode(code, now), true);
+  assert.strictEqual(auth.verifyTotpCode(code, now + 30000), true, 'one time step of skew is accepted');
+  assert.strictEqual(auth.verifyTotpCode(code, now + 90000), false, 'wide clock skew is rejected');
+  assert.strictEqual(auth.verifyTotpCode(code === '000000' ? '111111' : '000000', now), false);
+  assert.strictEqual(auth.totpCode('not-valid', now), null);
+  assert.strictEqual(auth.ADMIN_MFA_REQUIRED, true);
+  assert.strictEqual(auth.ADMIN_MFA_CONFIGURED, true);
 });
 
 test('locks out after the configured number of failures, resets on success', () => {

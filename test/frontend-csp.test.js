@@ -18,6 +18,14 @@ test('admin pages load external scripts instead of inline scripts', () => {
   assert.doesNotMatch(loginHtml, /<script>\s*\S/);
 });
 
+test('login page sends optional authenticator code', () => {
+  assert.match(loginHtml, /id="otp"/);
+  assert.match(loginHtml, /autocomplete="one-time-code"/);
+  assert.match(loginJs, /const otpInput = document\.getElementById\('otp'\)/);
+  assert.match(loginJs, /otp: otpInput\.value/);
+  assert.match(loginJs, /mfaRequired/);
+});
+
 test('public frontend files avoid known mojibake after asset extraction', () => {
   for (const [name, text] of Object.entries({ dashboardHtml, loginHtml, dashboardJs, loginJs })) {
     assert.doesNotMatch(text, /[âÂÃ�]/, name);

@@ -14,6 +14,7 @@ function check(id, ok, severity, message, remediation) {
 
 const MIN_SECRET_LENGTHS = {
   adminPassword: 16,
+  adminTotpSecret: 16,
   auditorPassword: 16,
   ingestKey: 32,
   sessionSecret: 32,
@@ -22,6 +23,11 @@ const MIN_SECRET_LENGTHS = {
 
 function hasMinLength(value, min) {
   return String(value || '').trim().length >= min;
+}
+
+function hasValidBase32Secret(value, min) {
+  const normalized = String(value || '').replace(/[\s=-]/g, '').toUpperCase();
+  return normalized.length >= min && /^[A-Z2-7]+$/.test(normalized);
 }
 
 function pathSegments(value) {
@@ -55,6 +61,7 @@ function configStatus(input = {}) {
   const dbPathReason = cloudSyncedPathReason(dbPath);
   const adminUser = String(input.adminUser ?? env.ADMIN_USER ?? 'admin').trim();
   const adminPassword = input.adminPassword ?? env.ADMIN_PASSWORD ?? '';
+  const adminTotpSecret = input.adminTotpSecret ?? env.ADMIN_TOTP_SECRET ?? '';
   const auditorUser = String(input.auditorUser ?? env.AUDITOR_USER ?? '').trim();
   const auditorPassword = input.auditorPassword ?? env.AUDITOR_PASSWORD ?? '';
   const auditorPasswordSet = !!String(auditorPassword).trim();
@@ -76,6 +83,20 @@ function configStatus(input = {}) {
       severity,
       `Admin password is at least ${MIN_SECRET_LENGTHS.adminPassword} characters.`,
       `Set ADMIN_PASSWORD to at least ${MIN_SECRET_LENGTHS.adminPassword} characters.`,
+    ),
+    check(
+      'admin_mfa',
+      !!String(adminTotpSecret || '').trim(),
+      severity,
+      'Security Admin TOTP MFA is configured.',
+      'Set ADMIN_TOTP_SECRET to a base32 authenticator secret before production use.',
+    ),
+    check(
+      'admin_mfa_secret',
+      !String(adminTotpSecret || '').trim() || hasValidBase32Secret(adminTotpSecret, MIN_SECRET_LENGTHS.adminTotpSecret),
+      severity,
+      `Security Admin TOTP secret is valid base32 and at least ${MIN_SECRET_LENGTHS.adminTotpSecret} characters.`,
+      `Set ADMIN_TOTP_SECRET to a base32 value at least ${MIN_SECRET_LENGTHS.adminTotpSecret} characters long.`,
     ),
     check(
       'auditor_credentials',

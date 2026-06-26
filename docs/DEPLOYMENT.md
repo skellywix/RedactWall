@@ -25,7 +25,7 @@ npm start
 `npm run setup` does four things:
 
 1. Installs dependencies from `package-lock.json`.
-2. Creates `.env` with stable admin, ingest, session, and data-encryption secrets.
+2. Creates `.env` with stable admin, MFA, ingest, session, and data-encryption secrets.
 3. Initializes `data/sentinel.db`.
 4. Runs the same deployment preflight used by `/readyz`.
 
@@ -37,6 +37,7 @@ npm start
 ```
 
 Production mode expects TLS at the dashboard edge. If TLS is terminated by a reverse proxy, keep `COOKIE_SECURE=true` and serve the dashboard only over HTTPS.
+`npm run setup:prod` writes `ADMIN_TOTP_SECRET`; enroll that base32 secret in the Security Admin's authenticator app before client-facing use.
 
 To inspect an existing install without changing files:
 
@@ -167,6 +168,7 @@ Set these through `.env`, container environment, or a deployment secret manager:
 | Variable | Purpose |
 | --- | --- |
 | `ADMIN_PASSWORD` | Security Admin console password. Production preflight requires non-default, at least 16 characters. |
+| `ADMIN_TOTP_SECRET` | Base32 authenticator secret for Security Admin MFA. Production preflight requires it, and admin login requires a current 6-digit code when it is set. |
 | `AUDITOR_USER` / `AUDITOR_PASSWORD` | Optional read-only console account for examiner or client-demo access. Set both together, keep `AUDITOR_USER` distinct from `ADMIN_USER`, and use at least 16 characters for `AUDITOR_PASSWORD`. |
 | `SENTINEL_SECRET` | Stable session-signing secret shared by all instances. Production preflight requires at least 32 characters from environment. |
 | `SENTINEL_DATA_KEY` | Stable AES-256-GCM data key source for retained approval prompts. Production preflight requires this key, or the `SENTINEL_SECRET` fallback, to be at least 32 characters. |
@@ -177,11 +179,13 @@ Never bind `SENTINEL_DB_PATH` to a cloud-synced folder or network share. SQLite 
 
 `npm run setup:prod` generates values that meet these floors. When values come from a deployment secret manager, keep the same minimum lengths or `/readyz` will report production readiness as blocked.
 
-Production preflight also blocks short custom secrets. Use at least 16
-characters for `ADMIN_PASSWORD` and `AUDITOR_PASSWORD` when auditor login is
+Production preflight also blocks missing Security Admin MFA and short custom
+secrets. Use a base32 `ADMIN_TOTP_SECRET` at least 16 characters long, at least
+16 characters for `ADMIN_PASSWORD` and `AUDITOR_PASSWORD` when auditor login is
 configured, and at least 32 random characters for `INGEST_API_KEY`,
 `SENTINEL_SECRET`, and `SENTINEL_DATA_KEY` when retained raw approval data is
-enabled.
+enabled. `npm run setup:prod` generates a TOTP secret; enroll it in the
+operator's authenticator app before serving the console to pilot users.
 
 Auditor sessions can read sanitized dashboard evidence, audit status, policy,
 and examiner exports. They cannot reveal retained raw prompts, approve or deny

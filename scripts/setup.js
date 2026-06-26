@@ -24,6 +24,7 @@ const ENV_ORDER = [
   'SENTINEL_DB_PATH',
   'ADMIN_USER',
   'ADMIN_PASSWORD',
+  'ADMIN_TOTP_SECRET',
   'SENTINEL_SECRET',
   'SENTINEL_DATA_KEY',
   'INGEST_API_KEY',
@@ -36,6 +37,14 @@ const ENV_ORDER = [
 
 function randomText(bytes = 32) {
   return crypto.randomBytes(bytes).toString('base64url');
+}
+
+function randomBase32(chars = 32) {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  const bytes = crypto.randomBytes(chars);
+  let out = '';
+  for (const b of bytes) out += alphabet[b % alphabet.length];
+  return out;
 }
 
 function randomPassword() {
@@ -56,6 +65,7 @@ function buildEnv(opts = {}) {
     SENTINEL_DB_PATH: nativeDataPath(),
     ADMIN_USER: 'admin',
     ADMIN_PASSWORD: randomPassword(),
+    ADMIN_TOTP_SECRET: production ? randomBase32(32) : '',
     SENTINEL_SECRET: randomText(32),
     SENTINEL_DATA_KEY: randomText(32),
     INGEST_API_KEY: `ps_ingest_${randomText(32)}`,
@@ -70,6 +80,7 @@ function buildEnv(opts = {}) {
 function placeholderValue(key, value) {
   const v = String(value || '').trim();
   if (key === 'ADMIN_PASSWORD') return !v || v === 'ChangeMe!2026';
+  if (key === 'ADMIN_TOTP_SECRET') return !v;
   if (key === 'INGEST_API_KEY') return !v || v === 'dev-ingest-key';
   if (key === 'SENTINEL_SECRET' || key === 'SENTINEL_DATA_KEY') return !v;
   if (key === 'SENTINEL_DB_PATH') return !v;
@@ -112,7 +123,7 @@ function renderEnv(values, opts = {}) {
   };
   ['PORT', 'NODE_ENV', 'HTTPS', 'COOKIE_SECURE', 'SENTINEL_DB_PATH'].forEach(add);
   lines.push('', '# Security Admin console');
-  ['ADMIN_USER', 'ADMIN_PASSWORD'].forEach(add);
+  ['ADMIN_USER', 'ADMIN_PASSWORD', 'ADMIN_TOTP_SECRET'].forEach(add);
   lines.push('', '# Stable secrets. Keep these values across restarts.');
   ['SENTINEL_SECRET', 'SENTINEL_DATA_KEY'].forEach(add);
   lines.push('', '# Sensor/API configuration');

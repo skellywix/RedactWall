@@ -162,6 +162,10 @@ const scanResponseSchema = z.object({
 const loginSchema = z.object({
   user: nonBlankString(128),
   password: nonBlankString(512),
+  otp: z.preprocess(
+    (value) => (value == null ? '' : value),
+    z.string().max(32).default(''),
+  ),
 }).strict();
 
 const revealSchema = z.object({
