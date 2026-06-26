@@ -6,6 +6,8 @@
 
 ## Done
 
+- 2026-06-26: Added permanent Playwright coverage for the mobile admin console layout so CI verifies collapsed rail tabs, usable content tabs, and no page-level horizontal overflow.
+  Evidence: `npm run test:browser`, `npm test`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Made the MCP guard detection path policy-aware so tool-output redaction honors centralized `ignore` and `disabledDetectors` settings before reporting sanitized evidence.
   Evidence: `node --test test/mcp-guard.test.js`, `npm test`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Improved mobile admin-console layout by hiding duplicated side-rail tabs under narrow viewports while keeping content tabs reachable and preventing horizontal page overflow.

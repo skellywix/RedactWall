@@ -3,6 +3,15 @@
 const fs = require('fs/promises');
 const { test, expect } = require('@playwright/test');
 
+async function login(page) {
+  await page.goto('/login.html');
+  await expect(page.getByRole('heading', { name: 'PromptSentinel' })).toBeVisible();
+  await page.locator('#password').fill('e2e-pass');
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await expect(page).toHaveURL(/\/index\.html$/);
+  await expect(page.locator('#who')).toContainText('admin / Security Admin');
+}
+
 test('admin console login, approval, policy save, and evidence export work in a browser', async ({ page, request }) => {
   const gateResponse = await request.post('/api/v1/gate', {
     headers: { 'x-api-key': 'e2e-ingest-key' },
@@ -18,12 +27,7 @@ test('admin console login, approval, policy save, and evidence export work in a 
   const gated = await gateResponse.json();
   expect(gated.status).toBe('pending');
 
-  await page.goto('/login.html');
-  await expect(page.getByRole('heading', { name: 'PromptSentinel' })).toBeVisible();
-  await page.locator('#password').fill('e2e-pass');
-  await page.getByRole('button', { name: 'Continue' }).click();
-  await expect(page).toHaveURL(/\/index\.html$/);
-  await expect(page.locator('#who')).toContainText('admin / Security Admin');
+  await login(page);
 
   const queueItem = page.locator(`.q[data-id="${gated.id}"]`);
   await expect(queueItem).toBeVisible();
@@ -63,4 +67,21 @@ test('admin console login, approval, policy save, and evidence export work in a 
   expect(pack.auditIntegrity.ok).toBe(true);
   expect(JSON.stringify(pack)).not.toContain('524-71-9043');
   expect(pack.stats.approved).toBeGreaterThanOrEqual(1);
+});
+
+test('admin console mobile layout keeps content tabs usable', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+
+  await expect(page.locator('.content-tabs .tab[data-tab="queue"]')).toBeVisible();
+  const railTabsDisplay = await page.locator('.rail .tabs').evaluate((el) => getComputedStyle(el).display);
+  expect(railTabsDisplay).toBe('none');
+
+  await page.locator('.content-tabs .tab[data-tab="policy"]').click();
+  await expect(page.locator('#tab-policy')).toBeVisible();
+  await page.locator('.content-tabs .tab[data-tab="audit"]').click();
+  await expect(page.locator('#tab-audit')).toBeVisible();
+
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(1);
 });
