@@ -63,7 +63,10 @@ Then start the container:
 docker compose up -d --build
 ```
 
-The Compose file mounts a named volume at `/data` and overrides `SENTINEL_DB_PATH` to `/data/sentinel.db`, so the container keeps runtime state outside the image.
+The Compose file mounts a named volume at `/data`, overrides
+`SENTINEL_DB_PATH` to `/data/sentinel.db`, and checks `/readyz` for container
+health, so the container keeps runtime state outside the image and reports
+unhealthy if database or production preflight readiness is blocked.
 
 For a local HTTP-only container smoke test, set these in `.env` before starting Compose:
 
