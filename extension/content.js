@@ -53,8 +53,12 @@
   }
 
   // ---- decide what to do ----------------------------------------------------
+  function detectionPolicy() {
+    return { ignore: POLICY.ignore || [], disabledDetectors: POLICY.disabledDetectors || [] };
+  }
+
   function evaluate(text) {
-    const a = D.analyze(text);
+    const a = D.analyze(text, detectionPolicy());
     if (!a.findings.length && !a.categories.length) return { action: 'allow', analysis: a };
     const hardStop = a.findings.some((f) => (POLICY.alwaysBlock || []).includes(f.type));
     // REDACT mode neutralizes everything token-able locally, so it takes
@@ -325,13 +329,10 @@
     const t = (e.clipboardData || window.clipboardData);
     const pasted = t ? t.getData('text') : '';
     if (!pasted || pasted.length < 6) return;
-    const a = D.analyze(pasted);
-    if (a.findings.length || a.categories.length) {
-      const verdict = evaluate(pasted);
-      if (verdict.action !== 'allow') {
-        report(pasted, a, 'paste', 'paste_flagged');
-        toast('PromptSentinel: pasted content contains ' + summarize(a).slice(0, 3).join(', '));
-      }
+    const verdict = evaluate(pasted);
+    if (verdict.action !== 'allow') {
+      report(pasted, verdict.analysis, 'paste', 'paste_flagged');
+      toast('PromptSentinel: pasted content contains ' + summarize(verdict.analysis).slice(0, 3).join(', '));
     }
   }, true);
 

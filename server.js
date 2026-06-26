@@ -403,7 +403,10 @@ app.get('/api/v1/policy', checkIngestKey, (req, res) => {
   res.json({
     enforcementMode: p.enforcementMode, blockMinSeverity: p.blockMinSeverity,
     blockRiskScore: p.blockRiskScore, alwaysBlock: p.alwaysBlock,
+    ignore: p.ignore || [],
+    disabledDetectors: p.disabledDetectors || [],
     governedDestinations: p.governedDestinations,
+    scanner: p.scanner || {},
   });
 });
 

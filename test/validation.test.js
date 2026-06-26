@@ -145,6 +145,26 @@ test('scan-file rejects invalid base64 without echoing file content', async () =
   assert.ok(!JSON.stringify(body).includes(secretFilePayload));
 }));
 
+test('sensor policy endpoint publishes detector and scanner controls', async () => withServer(async (port) => {
+  const res = await jsonFetch(port, '/api/v1/policy', {
+    method: 'GET',
+    headers: { 'x-api-key': 'unit-ingest-key' },
+  });
+
+  assert.strictEqual(res.status, 200);
+  const body = await res.json();
+  assert.ok(Array.isArray(body.alwaysBlock));
+  assert.ok(Array.isArray(body.ignore));
+  assert.ok(Array.isArray(body.disabledDetectors));
+  assert.ok(Array.isArray(body.governedDestinations));
+  assert.ok(body.scanner && typeof body.scanner === 'object');
+  assert.ok(Array.isArray(body.scanner.ignoreDirectories));
+  assert.ok(Array.isArray(body.scanner.ignoreFilenames));
+  assert.ok(Array.isArray(body.scanner.ignoreExtensions));
+  assert.strictEqual(typeof body.scanner.maxFileBytes, 'number');
+  assert.strictEqual(body.storeRawForApproval, undefined);
+}));
+
 test('malformed json returns sanitized json error', async () => withServer(async (port) => {
   const res = await fetch(`http://127.0.0.1:${port}/api/v1/gate`, {
     method: 'POST',

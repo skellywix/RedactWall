@@ -71,6 +71,15 @@ test('active content scripts receive policy updates from storage', () => {
   assert.match(content, /if \(c\.policy\) POLICY = \{ \.\.\.POLICY, \.\.\.c\.policy\.newValue \};/);
 });
 
+test('browser local analysis honors centralized detector policy', () => {
+  assert.match(content, /function detectionPolicy\(\)/);
+  assert.match(content, /ignore:\s*POLICY\.ignore \|\| \[\]/);
+  assert.match(content, /disabledDetectors:\s*POLICY\.disabledDetectors \|\| \[\]/);
+  assert.match(content, /D\.analyze\(text,\s*detectionPolicy\(\)\)/);
+  assert.match(content, /const verdict = evaluate\(pasted\)/);
+  assert.doesNotMatch(content, /const a = D\.analyze\(pasted\)/);
+});
+
 test('browser file uploads use scan-file API with base64 content', () => {
   assert.match(content, /type:\s*'scanFile'/);
   assert.match(content, /contentBase64:\s*bytesToBase64/);
