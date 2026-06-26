@@ -23,7 +23,10 @@
     if (res && res.policy) POLICY = res.policy;
     if (res && typeof res.enabled === 'boolean') ENABLED = res.enabled;
   });
-  chrome.storage.onChanged.addListener((c) => { if (c.enabled) ENABLED = c.enabled.newValue; });
+  chrome.storage.onChanged.addListener((c) => {
+    if (c.enabled) ENABLED = c.enabled.newValue;
+    if (c.policy) POLICY = { ...POLICY, ...c.policy.newValue };
+  });
 
   // ---- find the prompt text the user is about to send -----------------------
   const SELECTORS = [
@@ -56,9 +59,10 @@
     const hardStop = a.findings.some((f) => (POLICY.alwaysBlock || []).includes(f.type));
     // REDACT mode neutralizes everything token-able locally, so it takes
     // precedence over hard-stop blocking: if there are structured findings we
-    // tokenize and let it through; a categories-only hit has nothing to swap.
+    // tokenize and let it through; a categories-only hit has nothing to swap,
+    // so it must not be sent raw.
     if ((POLICY.enforcementMode || 'block') === 'redact') {
-      return { action: a.findings.length ? 'redact' : 'allow', analysis: a };
+      return { action: a.findings.length ? 'redact' : 'block', analysis: a };
     }
     const breach = hardStop || a.maxSeverity >= POLICY.blockMinSeverity || a.riskScore >= POLICY.blockRiskScore;
     if (!breach) return { action: 'allow', analysis: a };
@@ -73,13 +77,31 @@
   }
 
   // ---- report to the server (telemetry + queue) -----------------------------
-  function report(text, analysis, channel, outcome, note) {
+  function publicFindings(analysis) {
+    return (analysis.findings || []).map((f) => ({
+      type: f.type,
+      severity: f.severity,
+      score: f.score,
+      masked: D.maskValue(f.type, f.value),
+    }));
+  }
+  function publicCategories(analysis) {
+    return (analysis.categories || []).map((c) => ({ category: c.category, score: c.score }));
+  }
+  function report(text, analysis, channel, outcome, note, extra) {
     chrome.runtime.sendMessage({
       type: 'report',
       payload: {
         prompt: text, destination: SITE, channel, source: 'browser_extension',
-        categories: analysis.categories.map((c) => c.category),
+        categories: (analysis.categories || []).map((c) => c.category),
+        clientFindings: publicFindings(analysis),
+        clientCategories: publicCategories(analysis),
+        clientEntityCounts: analysis.entityCounts || {},
+        clientRiskScore: analysis.riskScore || 0,
+        clientMaxSeverity: analysis.maxSeverity || 0,
+        clientMaxSeverityLabel: analysis.maxSeverityLabel || 'none',
         outcome, note: note || '',
+        ...(extra || {}),
       },
     });
   }
@@ -158,7 +180,7 @@
       const t = D.tokenize(text, verdict.analysis.findings);
       mergeRehydrate(t.map);
       setComposerText(el, t.text);
-      report(text, verdict.analysis, 'submit', 'redacted_sent');
+      report(t.text, verdict.analysis, 'submit', 'redacted_sent', '', { clientPreRedacted: true });
       toast('PromptSentinel: ' + Object.keys(t.map).length + ' sensitive value(s) tokenized before sending — the reply is restored here automatically.');
       bypassOnce = true;
       resend(el);
@@ -292,25 +314,49 @@
     if (e.target && e.target.type === 'file' && e.target.files && e.target.files.length) scanFiles(e.target.files, e);
   }, true);
   function scanFiles(files, e) {
+    try { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation(); } catch (_) {}
     [...files].forEach((f) => {
-      if (f.size > 2_000_000 || !/text|json|csv|javascript|x-|plain|md|xml/.test(f.type || '') && !/\.(txt|csv|json|js|ts|py|java|sql|env|md|log|xml|yaml|yml)$/i.test(f.name)) {
-        toast('PromptSentinel: file ' + f.name + ' attached to AI tool (recorded).');
-        chrome.runtime.sendMessage({ type: 'report', payload: { prompt: '[file] ' + f.name, destination: SITE, channel: 'file_upload', source: 'browser_extension', categories: [], outcome: 'file_flagged' } });
+      if (f.size > 6_300_000) {
+        toast('PromptSentinel blocked ' + f.name + ': file is too large to inspect.');
+        chrome.runtime.sendMessage({ type: 'report', payload: { prompt: '[file too large to inspect] ' + f.name, destination: SITE, channel: 'file_upload', source: 'browser_extension', categories: [], outcome: 'file_too_large', note: 'blocked locally: file too large to inspect' } });
         return;
       }
       const reader = new FileReader();
       reader.onload = () => {
-        const text = String(reader.result || '');
-        const a = D.analyze(text);
-        if (a.findings.length || a.categories.length) {
-          const verdict = evaluate(text);
-          report('[file:' + f.name + '] ' + text.slice(0, 500), a, 'file_upload', verdict.action === 'allow' ? 'file_flagged' : 'file_' + verdict.action);
-          if (verdict.action === 'block') { try { e.preventDefault(); e.stopPropagation(); } catch (_) {} }
-          toast('PromptSentinel: ' + f.name + ' contains ' + summarize(a).slice(0, 3).join(', '));
-        }
+        chrome.runtime.sendMessage({
+          type: 'scanFile',
+          payload: {
+            filename: f.name,
+            contentBase64: bytesToBase64(new Uint8Array(reader.result || [])),
+            destination: SITE,
+            channel: 'file_upload',
+            source: 'browser_extension',
+          },
+        }, (res) => {
+          if (!res) {
+            toast('PromptSentinel could not verify ' + f.name + '. Upload blocked.');
+            return;
+          }
+          const items = (res.findings || []).map((x) => x.type).concat(res.categories || []);
+          if (res.decision === 'allow' && res.supported !== false) {
+            toast('PromptSentinel scanned ' + f.name + ' clean. Attach it again to upload.');
+          } else if (res.supported === false) {
+            toast('PromptSentinel could not inspect ' + f.name + '. Upload blocked and recorded.');
+          } else {
+            toast('PromptSentinel blocked ' + f.name + ': ' + (items.slice(0, 3).join(', ') || 'sensitive content'));
+          }
+        });
       };
-      reader.readAsText(f.slice(0, 200000));
+      reader.readAsArrayBuffer(f);
     });
+  }
+  function bytesToBase64(bytes) {
+    let binary = '';
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+    }
+    return btoa(binary);
   }
 
   // ---- tiny toast -----------------------------------------------------------

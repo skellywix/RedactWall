@@ -62,6 +62,12 @@
     const check = sum % 11; const cd = check === 10 ? 'X' : String(check);
     return v[8] === cd;
   }
+  function bankAccountPlausible(m) {
+    const d = String(m || '').replace(/\D/g, '');
+    if (d.length < 6 || d.length > 17) return false;
+    if (/^(\d)\1+$/.test(d)) return false;
+    return true;
+  }
   // Issuer Identification Number (BIN) check — a string passing Luhn is only a
   // real card if its prefix + length match a known network. Cuts the ~10% of
   // random 16-digit numbers that pass Luhn alone down to near zero.
@@ -103,6 +109,10 @@
     // Routing/ABA — valid checksum AND banking context (a bare 9-digit number is
     // far more often an id than a routing number).
     { id: 'ROUTING_NUMBER', score: 0.6, re: /\b\d{9}\b/g, ctx: /\b(routing|aba|rtn|transit|ach|wire|direct\s*deposit|bank)\b/i, validate: (m) => abaValid(m) },
+    // Bank account numbers have no universal checksum, so require explicit
+    // banking/account context and a plausible 6-17 digit value.
+    { id: 'BANK_ACCOUNT', score: 0.72, re: /\b(?:bank|checking|savings|deposit|ach|wire|direct\s*deposit|debit)\s+(?:account|acct)(?:\s*(?:number|no\.?|#))?\s*[:#-]?\s*((?:\d[ -]?){6,17})\b/gi, group: 1, validate: (m) => bankAccountPlausible(m) },
+    { id: 'BANK_ACCOUNT', score: 0.68, re: /\b(?:account|acct)\s*(?:number|no\.?|#)\s*[:#-]?\s*((?:\d[ -]?){6,17})\b/gi, group: 1, ctx: /\b(bank|checking|savings|deposit|ach|wire|loan|member)\b/i, validate: (m) => bankAccountPlausible(m) },
     { id: 'US_TIN_EIN', score: 0.7, re: /\b\d{2}-\d{7}\b/g, ctx: /\b(ein|employer id|tax\s?id|tin|taxpayer)\b/i },
     { id: 'US_PASSPORT', score: 0.7, re: /\b[A-Z]?\d{8,9}\b/g, ctx: /\bpassport\b/i },
     { id: 'VIN', score: 0.85, re: /\b[A-HJ-NPR-Z0-9]{17}\b/g, validate: (m) => vinValid(m) },
@@ -143,12 +153,14 @@
       if (disabled.has(det.id)) continue;
       det.re.lastIndex = 0; let m;
       while ((m = det.re.exec(text)) !== null) {
-        const v = m[0];
+        const v = det.group ? m[det.group] : m[0];
+        if (!v) continue;
+        const start = det.group ? m.index + m[0].indexOf(v) : m.index;
         if (det.validate && !det.validate(v, text)) continue;
-        if (!ctxOk(det, text, m.index)) continue;
-        const key = det.id + '|' + v + '|' + m.index;
+        if (!ctxOk(det, text, start)) continue;
+        const key = det.id + '|' + v + '|' + start;
         if (seen.has(key)) continue; seen.add(key);
-        out.push({ type: det.id, value: v, start: m.index, end: m.index + v.length, score: det.score, severity: SEVERITY[det.id] || 1 });
+        out.push({ type: det.id, value: v, start, end: start + v.length, score: det.score, severity: SEVERITY[det.id] || 1 });
       }
     }
     if (!disabled.has('PERSON_NAME')) {
@@ -344,7 +356,7 @@
     return { tokenizedText: t.text, map: t.map, tokenCount: t.tokens, analysis };
   }
 
-  const api = { analyze, redact, maskValue, tokenize, detokenize, tokenizePrompt, classifySemantic, _featurize, _lrProb, listDetectors, luhnValid, ssnPlausible, abaValid, ibanValid, vinValid, cardNetwork, SEVERITY, SEVERITY_LABEL };
+  const api = { analyze, redact, maskValue, tokenize, detokenize, tokenizePrompt, classifySemantic, _featurize, _lrProb, listDetectors, luhnValid, ssnPlausible, abaValid, ibanValid, vinValid, bankAccountPlausible, cardNetwork, SEVERITY, SEVERITY_LABEL };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (root) root.PSDetect = api;
 })(typeof window !== 'undefined' ? window : (typeof self !== 'undefined' ? self : null));

@@ -35,7 +35,9 @@ async function guardToolResult(text, ctx = {}) {
   if (!a.findings.length && !a.categories.length) {
     return { text, redacted: false, findings: [] };
   }
-  const safe = D.redact(text, a.findings); // structured PII replaced with [TYPE]
+  const safe = a.categories.length
+    ? '[REDACTED: ' + findings.join(', ') + ']'
+    : D.redact(text, a.findings); // structured PII replaced with [TYPE]
   await logEvent({
     prompt: safe.slice(0, 1000),
     user: ctx.agent || 'mcp-agent',

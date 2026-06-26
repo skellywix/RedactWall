@@ -76,6 +76,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             channel: msg.payload.channel,
             source: msg.payload.source,
             clientCategories: msg.payload.categories,
+            clientFindings: msg.payload.clientFindings,
+            clientEntityCounts: msg.payload.clientEntityCounts,
+            clientRiskScore: msg.payload.clientRiskScore,
+            clientMaxSeverity: msg.payload.clientMaxSeverity,
+            clientMaxSeverityLabel: msg.payload.clientMaxSeverityLabel,
+            clientPreRedacted: msg.payload.clientPreRedacted,
             clientOutcome: msg.payload.outcome,
             note: msg.payload.note,
           }),
@@ -83,6 +89,28 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const j = await r.json().catch(() => ({}));
         sendResponse && sendResponse(j);
       } catch (e) { /* swallow; UX already enforced locally */ }
+    });
+    return true;
+  }
+  if (msg.type === 'scanFile') {
+    Promise.all([serverCfg(), identity()]).then(async ([c, who]) => {
+      if (!c.enabled) return;
+      try {
+        const r = await fetch(c.serverUrl + '/api/v1/scan-file', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-api-key': c.ingestKey },
+          body: JSON.stringify({
+            filename: msg.payload.filename,
+            contentBase64: msg.payload.contentBase64,
+            user: who.user,
+            orgId: who.orgId,
+            destination: msg.payload.destination,
+            channel: msg.payload.channel,
+            source: msg.payload.source,
+          }),
+        });
+        sendResponse && sendResponse(await r.json().catch(() => ({})));
+      } catch (e) { sendResponse && sendResponse(null); }
     });
     return true;
   }

@@ -63,6 +63,45 @@ function rawToStore(text, status, pol) {
   return sealed == null ? undefined : sealed;
 }
 
+function clientAnalysisFrom(body) {
+  if (!body || (!Array.isArray(body.clientFindings) && !Array.isArray(body.clientCategories))) return null;
+  const findings = (body.clientFindings || [])
+    .filter((f) => f && typeof f.type === 'string')
+    .map((f) => ({
+      type: f.type,
+      severity: Number(f.severity || detector.SEVERITY[f.type] || 1),
+      score: Number(f.score || 0.5),
+      masked: typeof f.masked === 'string' ? f.masked : undefined,
+    }));
+  const categories = (body.clientCategories || [])
+    .map((c) => (typeof c === 'string' ? { category: c, score: 0.72 } : c))
+    .filter((c) => c && typeof c.category === 'string')
+    .map((c) => ({ category: c.category, score: Number(c.score || 0.72) }));
+  const entityCounts = body.clientEntityCounts && typeof body.clientEntityCounts === 'object'
+    ? { ...body.clientEntityCounts }
+    : {};
+  for (const f of findings) entityCounts[f.type] = (entityCounts[f.type] || 0) + 1;
+  for (const c of categories) entityCounts[c.category] = entityCounts[c.category] || 1;
+  let maxSeverity = Number(body.clientMaxSeverity || 0);
+  for (const f of findings) if (f.severity > maxSeverity) maxSeverity = f.severity;
+  for (const c of categories) {
+    const s = detector.SEVERITY[c.category] || 2;
+    if (s > maxSeverity) maxSeverity = s;
+  }
+  const riskScore = Number.isFinite(Number(body.clientRiskScore))
+    ? Number(body.clientRiskScore)
+    : Math.min(100, Math.round(findings.reduce((s, f) => s + f.severity * f.score * 8, 0)
+      + categories.reduce((s, c) => s + (detector.SEVERITY[c.category] || 2) * c.score * 7, 0)));
+  return {
+    findings,
+    categories,
+    entityCounts,
+    riskScore,
+    maxSeverity,
+    maxSeverityLabel: detector.SEVERITY_LABEL[maxSeverity] || 'none',
+  };
+}
+
 app.post('/api/v1/gate', checkIngestKey, (req, res) => {
   const {
     prompt, user = 'unknown', destination = 'unknown', sourceIp = null,
@@ -73,13 +112,15 @@ app.post('/api/v1/gate', checkIngestKey, (req, res) => {
   }
 
   const pol = policy.loadPolicy();
-  const analysis = detector.analyze(prompt, policy.analyzeOpts(pol));
+  const clientRedacted = clientOutcome === 'redacted_sent' && req.body && req.body.clientPreRedacted === true;
+  const clientAnalysis = clientRedacted ? clientAnalysisFrom(req.body) : null;
+  const analysis = clientAnalysis || detector.analyze(prompt, policy.analyzeOpts(pol));
   const verdict = policy.evaluate(analysis, pol);
 
   // Privacy-preserving record: redacted prompt + masked findings + categories.
-  const redactedPrompt = detector.redact(prompt, analysis.findings);
+  const redactedPrompt = clientRedacted ? prompt : detector.redact(prompt, analysis.findings);
   const findings = analysis.findings.map((f) => ({
-    type: f.type, severity: f.severity, score: f.score, masked: detector.maskValue(f.type, f.value),
+    type: f.type, severity: f.severity, score: f.score, masked: f.masked || detector.maskValue(f.type, f.value),
   }));
   const categories = (analysis.categories || []).map((c) => c.category);
 
@@ -109,6 +150,14 @@ app.post('/api/v1/gate', checkIngestKey, (req, res) => {
     return res.json({ id: row.id, decision: 'log', status: 'shadow_ai' });
   }
 
+  if (clientOutcome === 'file_too_large') {
+    const row = db.createQuery({ status: 'file_blocked_unscanned', ...base });
+    db.appendAudit({ action: 'FILE_BLOCKED_UNSCANNED', queryId: row.id, actor: user, detail: note || 'file too large to inspect' });
+    broadcast('query', { type: 'file_blocked_unscanned', query: publicQuery(row) });
+    broadcast('stats', db.stats());
+    return res.json({ id: row.id, decision: 'block', status: 'file_blocked_unscanned' });
+  }
+
   if (verdict.decision === 'allow') {
     const row = db.createQuery({ status: 'allowed', ...base });
     db.appendAudit({ action: 'ALLOWED', queryId: row.id, actor: user, detail: `${source} risk ${analysis.riskScore}` });
@@ -122,7 +171,8 @@ app.post('/api/v1/gate', checkIngestKey, (req, res) => {
   // point — the prompt can proceed because it no longer contains real PII).
   // Otherwise hard-stop entities force 'block' regardless of mode.
   const hardStop = analysis.findings.some((f) => pol.alwaysBlock.includes(f.type));
-  const mode = pol.enforcementMode === 'redact' ? 'redact'
+  const mode = clientRedacted ? 'redact'
+    : pol.enforcementMode === 'redact' ? 'redact'
     : (hardStop ? 'block' : (pol.enforcementMode || 'block'));
 
   // Status reflects how the sensor resolved it (from clientOutcome) or, for the
@@ -133,7 +183,7 @@ app.post('/api/v1/gate', checkIngestKey, (req, res) => {
   else if (clientOutcome === 'justified') status = 'justified';
   else if (clientOutcome === 'blocked_by_user') status = 'blocked_by_user';
   else if (clientOutcome === 'awaiting_approval') status = 'pending';
-  else if (mode === 'redact') status = analysis.findings.length ? 'redacted' : 'warned';
+  else if (mode === 'redact') status = analysis.findings.length ? 'redacted' : 'pending';
   else if (mode === 'block') status = 'pending';
   else if (mode === 'warn') status = 'warned';
   else if (mode === 'justify') status = 'pending_justification';
@@ -145,10 +195,12 @@ app.post('/api/v1/gate', checkIngestKey, (req, res) => {
   // values in the model's response. The model never sees real PII; the vault is
   // AES-256-GCM encrypted and revealed only on an audit-logged rehydrate.
   let tokenizedPrompt, tokenVault;
-  if (status === 'redacted') {
+  if (status === 'redacted' && !clientRedacted) {
     const t = detector.tokenize(prompt, analysis.findings);
     tokenizedPrompt = t.text;                       // PII-free, safe to retain/display
     tokenVault = dataCrypto.seal(JSON.stringify(t.map));
+  } else if (status === 'redacted') {
+    tokenizedPrompt = prompt;
   }
 
   const row = db.createQuery({
@@ -166,10 +218,11 @@ app.post('/api/v1/gate', checkIngestKey, (req, res) => {
   broadcast('query', { type: status, query: publicQuery(row) });
   broadcast('stats', db.stats());
   return res.json({
-    id: row.id, decision: mode === 'redact' ? 'redact' : 'block', mode, status,
+    id: row.id, decision: status === 'redacted' ? 'redact' : 'block', mode, status,
     riskScore: analysis.riskScore, findings, categories, reasons: verdict.reasons,
     tokenizedPrompt,
-    message: mode === 'redact' ? 'Sensitive values tokenized — safe to send; re-hydrate the AI response via /api/v1/rehydrate.'
+    message: status === 'redacted' ? 'Sensitive values tokenized — safe to send; re-hydrate the AI response via /api/v1/rehydrate.'
+      : mode === 'redact' ? 'Sensitive category cannot be tokenized safely; withheld pending Security Admin approval.'
       : mode === 'block' ? 'Withheld pending Security Admin approval.'
       : mode === 'justify' ? 'Justification required before sending.'
       : 'Sensitive content — user warned.',

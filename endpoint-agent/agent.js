@@ -13,7 +13,6 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const D = require('../shared/detect');
 const processors = require('../src/processors');
 
 const SERVER = process.env.SENTINEL_URL || 'http://localhost:4000';
@@ -26,46 +25,87 @@ const MAX_BYTES = 6.3 * 1024 * 1024;
 
 if (!fs.existsSync(WATCH)) fs.mkdirSync(WATCH, { recursive: true });
 
-async function report(rec) {
+async function postJson(apiPath, body, opts = {}) {
+  const server = opts.server || SERVER;
+  const key = opts.key || KEY;
   try {
-    const r = await fetch(SERVER + '/api/v1/gate', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': KEY }, body: JSON.stringify(rec),
+    const r = await fetch(server + apiPath, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': key }, body: JSON.stringify(body),
     });
     return r.json();
   } catch (e) { console.error('  report failed:', e.message); return null; }
 }
 
-async function scanFile(file) {
-  const full = path.join(WATCH, file);
+async function report(rec, opts = {}) {
+  return postJson('/api/v1/gate', rec, opts);
+}
+
+async function scanFileApi(req, opts = {}) {
+  return postJson('/api/v1/scan-file', req, opts);
+}
+
+function fileRequest(filename, buf, user) {
+  return {
+    filename,
+    contentBase64: buf.toString('base64'),
+    user,
+    destination: 'desktop-ai-app',
+    source: 'endpoint_agent',
+    channel: 'file_upload',
+  };
+}
+
+async function scanFile(file, opts = {}) {
+  const watchDir = opts.watchDir || WATCH;
+  const maxBytes = opts.maxBytes || MAX_BYTES;
+  const full = path.join(watchDir, file);
   let stat; try { stat = fs.statSync(full); } catch { return; }
   if (!stat.isFile()) return;
   const lower = file.toLowerCase();
   if (IGNORE_FILES.has(lower) || IGNORE_EXT.has(path.extname(lower))) return;
-  const user = os.userInfo().username;
+  const user = opts.user || os.userInfo().username;
 
-  if (stat.size > MAX_BYTES || !processors.supported(file)) {
-    console.log(`[file] ${file} (unsupported/large) -> recorded`);
-    await report({ prompt: '[file] ' + file, user, destination: 'desktop-ai-app', source: 'endpoint_agent', channel: 'file_upload' });
-    return;
+  if (stat.size > maxBytes) {
+    console.log(`[BLOCK] ${file} is too large to inspect`);
+    await (opts.report || report)({
+      prompt: '[file too large to inspect] ' + file,
+      user, destination: 'desktop-ai-app', source: 'endpoint_agent', channel: 'file_upload',
+      clientOutcome: 'file_too_large',
+      note: 'blocked locally: file too large to inspect',
+    }, opts);
+    return { decision: 'block', status: 'file_too_large' };
   }
   const buf = fs.readFileSync(full);
-  let text = '';
-  try { ({ text } = await processors.extractText(file, buf)); } catch {}
-  const a = D.analyze(text);
-  if (!a.findings.length && !a.categories.length) { console.log(`[ok]   ${file} -- clean`); return; }
-  const summary = [...new Set(a.findings.map((f) => f.type).concat(a.categories.map((c) => c.category)))];
-  console.log(`[FLAG] ${file} -> ${summary.join(', ')} (risk ${a.riskScore})`);
-  const res = await report({
-    prompt: '[file:' + file + '] ' + D.redact(text, a.findings).slice(0, 800),
-    user, destination: 'desktop-ai-app', source: 'endpoint_agent', channel: 'file_upload',
-  });
+
+  // The server path is authoritative for files. Sending a locally redacted
+  // preview to /gate would make the control plane re-scan clean placeholder text
+  // and lose the real finding.
+  const res = await (opts.scanFileApi || scanFileApi)(fileRequest(file, buf, user), opts);
+  if (!res) return null;
+  if (res.supported === false || !processors.supported(file)) {
+    console.log(`[file] ${file} (unsupported) -> recorded`);
+    return res;
+  }
+  if (res.decision === 'allow') {
+    console.log(`[ok]   ${file} -- clean`);
+    return res;
+  }
+  const summary = (res.findings || []).map((f) => f.type).concat(res.categories || []);
+  console.log(`[FLAG] ${file} -> ${summary.join(', ')} (risk ${res.riskScore})`);
   if (res && res.decision === 'block') console.log(`        held by policy (${res.mode}) -> ${res.id}`);
+  return res;
 }
 
-console.log('PromptSentinel endpoint agent');
-console.log('  watching:', WATCH);
-console.log('  server  :', SERVER);
-console.log('  Supported: pdf, docx, xlsx, pptx, and text files. Drop a file in to scan.\n');
+function start() {
+  console.log('PromptSentinel endpoint agent');
+  console.log('  watching:', WATCH);
+  console.log('  server  :', SERVER);
+  console.log('  Supported: pdf, docx, xlsx, pptx, and text files. Drop a file in to scan.\n');
 
-fs.watch(WATCH, (event, filename) => { if (filename && event === 'rename') setTimeout(() => scanFile(filename), 200); });
-for (const f of fs.readdirSync(WATCH)) scanFile(f);
+  fs.watch(WATCH, (event, filename) => { if (filename && event === 'rename') setTimeout(() => scanFile(filename), 200); });
+  for (const f of fs.readdirSync(WATCH)) scanFile(f);
+}
+
+if (require.main === module) start();
+
+module.exports = { scanFile, fileRequest, report, scanFileApi, postJson, start };
