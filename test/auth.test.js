@@ -34,6 +34,15 @@ test('session token signs and verifies; tampered/none rejected', () => {
   assert.strictEqual(auth.verify(null), null);
 });
 
+test('csrf token is bound to the signed session token', () => {
+  const t = auth.createSession('admin');
+  const csrf = auth.createCsrfToken(t);
+  assert.ok(csrf);
+  assert.strictEqual(auth.verifyCsrfToken(t, csrf), true);
+  assert.strictEqual(auth.verifyCsrfToken(t, csrf + 'x'), false);
+  assert.strictEqual(auth.verifyCsrfToken(auth.createSession('other-admin'), csrf), false);
+});
+
 test('secret from env is reported stable (survives restarts / multi-instance)', () => {
   assert.strictEqual(auth.SECRET_IS_STABLE, true);
 });

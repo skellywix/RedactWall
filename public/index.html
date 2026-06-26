@@ -182,11 +182,30 @@ const $$ = (s,el=document)=>[...el.querySelectorAll(s)];
 const fmt = (iso)=> new Date(iso).toLocaleString();
 const sevClass = (l)=> l||'low';
 let selected=null;
+let csrfToken='';
 
-async function api(path, opts){ const r=await fetch(path,opts); if(r.status===401){location.href='/login.html';return null;} return r; }
+async function api(path, opts={}){
+  const next = {...opts};
+  const method = String(next.method || 'GET').toUpperCase();
+  const headers = new Headers(next.headers || {});
+  if (csrfToken && ['POST','PUT','PATCH','DELETE'].includes(method)) headers.set('x-csrf-token', csrfToken);
+  next.headers = headers;
+  const r=await fetch(path,next);
+  if(r.status===401){location.href='/login.html';return null;}
+  if(r.status===403){alert('Security token expired. Refresh the dashboard and try again.');}
+  return r;
+}
+
+async function loadCsrf(){
+  const r = await api('/api/csrf');
+  if (!r) return;
+  const body = await r.json();
+  csrfToken = body.csrfToken || '';
+}
 
 async function init(){
   const me = await (await api('/api/me')).json();
+  await loadCsrf();
   $('#who').textContent = me.user+' · Security Admin';
   if(me.defaultPassword){ const b=$('#banner'); b.style.display='block';
     b.textContent='⚠ Default admin password in use. Set ADMIN_PASSWORD before deploying to production.'; }

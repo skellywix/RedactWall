@@ -85,6 +85,20 @@ function verify(token) {
 function createSession(user, role = 'security_admin') {
   return sign({ user, role, iat: Date.now(), exp: Date.now() + SESSION_TTL_MS });
 }
+
+function createCsrfToken(sessionToken) {
+  if (!sessionToken) return null;
+  return crypto.createHmac('sha256', SECRET).update('csrf:' + sessionToken).digest('base64url');
+}
+
+function verifyCsrfToken(sessionToken, token) {
+  const expected = createCsrfToken(sessionToken);
+  if (!expected || !token) return false;
+  const a = Buffer.from(String(token));
+  const b = Buffer.from(expected);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
 function requireAuth(req, res, next) {
   const session = verify(req.cookies && req.cookies.sentinel_session);
   if (!session) {
@@ -94,9 +108,17 @@ function requireAuth(req, res, next) {
   req.user = session;
   next();
 }
+function requireCsrf(req, res, next) {
+  const method = String(req.method || 'GET').toUpperCase();
+  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return next();
+  const sessionToken = req.cookies && req.cookies.sentinel_session;
+  const token = req.get('x-csrf-token');
+  if (!verifyCsrfToken(sessionToken, token)) return res.status(403).json({ error: 'invalid csrf token' });
+  next();
+}
 
 module.exports = {
-  verifyPassword, createSession, verify, requireAuth,
+  verifyPassword, createSession, verify, createCsrfToken, verifyCsrfToken, requireAuth, requireCsrf,
   loginStatus, registerFail, registerSuccess,
   ADMIN_USER, ADMIN_PASSWORD_IS_DEFAULT: !process.env.ADMIN_PASSWORD,
   SECRET_SOURCE, SECRET_IS_STABLE: SECRET_SOURCE === 'env' || SECRET_SOURCE === 'file',

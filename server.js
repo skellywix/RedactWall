@@ -384,7 +384,13 @@ app.post('/api/login', (req, res) => {
   res.json({ ok: true, user, role: 'security_admin' });
 });
 
-app.post('/api/logout', (req, res) => {
+const adminWrite = [auth.requireAuth, auth.requireCsrf];
+
+app.get('/api/csrf', auth.requireAuth, (req, res) => {
+  res.json({ csrfToken: auth.createCsrfToken(req.cookies && req.cookies.sentinel_session) });
+});
+
+app.post('/api/logout', ...adminWrite, (req, res) => {
   res.clearCookie('sentinel_session');
   res.json({ ok: true });
 });
@@ -416,7 +422,7 @@ app.get('/api/queries/:id', auth.requireAuth, (req, res) => {
 // Reveal raw prompt (sensitive) — decrypts the sealed value, explicitly
 // audit-logged. Falls back to the redacted prompt when raw was not retained
 // (privacy mode, item not held, or no data key configured).
-app.post('/api/queries/:id/reveal', auth.requireAuth, (req, res) => {
+app.post('/api/queries/:id/reveal', ...adminWrite, (req, res) => {
   const q = db.getQuery(req.params.id);
   if (!q) return res.status(404).json({ error: 'not found' });
   db.appendAudit({ action: 'REVEAL_RAW', queryId: q.id, actor: req.user.user });
@@ -431,7 +437,7 @@ app.post('/api/queries/:id/reveal', auth.requireAuth, (req, res) => {
   res.json({ id: q.id, rawPrompt, rawRetained });
 });
 
-app.post('/api/queries/:id/approve', auth.requireAuth, (req, res) => {
+app.post('/api/queries/:id/approve', ...adminWrite, (req, res) => {
   const q = db.getQuery(req.params.id);
   if (!q) return res.status(404).json({ error: 'not found' });
   if (q.status !== 'pending') return res.status(409).json({ error: `already ${q.status}` });
@@ -445,7 +451,7 @@ app.post('/api/queries/:id/approve', auth.requireAuth, (req, res) => {
   res.json(publicQuery(updated));
 });
 
-app.post('/api/queries/:id/deny', auth.requireAuth, (req, res) => {
+app.post('/api/queries/:id/deny', ...adminWrite, (req, res) => {
   const q = db.getQuery(req.params.id);
   if (!q) return res.status(404).json({ error: 'not found' });
   if (q.status !== 'pending') return res.status(409).json({ error: `already ${q.status}` });
@@ -491,7 +497,7 @@ app.get('/api/risk', auth.requireAuth, (req, res) => {
 
 // Regulation policy templates (list + one-click apply).
 app.get('/api/policy/templates', auth.requireAuth, (req, res) => res.json(templates.list()));
-app.put('/api/policy/apply-template', auth.requireAuth, (req, res) => {
+app.put('/api/policy/apply-template', ...adminWrite, (req, res) => {
   const t = templates.get((req.body || {}).id);
   if (!t) return res.status(404).json({ error: 'unknown template' });
   const merged = { ...policy.loadPolicy(), ...t.policy };
@@ -505,7 +511,7 @@ app.get('/api/audit', auth.requireAuth, (req, res) => {
 });
 
 app.get('/api/policy', auth.requireAuth, (req, res) => res.json(policy.loadPolicy()));
-app.put('/api/policy', auth.requireAuth, (req, res) => {
+app.put('/api/policy', ...adminWrite, (req, res) => {
   const merged = { ...policy.loadPolicy(), ...(req.body || {}) };
   policy.savePolicy(merged);
   db.appendAudit({ action: 'POLICY_UPDATED', actor: req.user.user, detail: `mode=${merged.enforcementMode}` });
