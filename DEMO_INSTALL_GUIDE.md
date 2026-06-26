@@ -191,14 +191,14 @@ For a local demo:
 6. Pin the PromptSentinel extension.
 7. Open the extension popup and confirm it says the browser is protected.
 
-The extension defaults to:
+The extension defaults to localhost but does not ship with a working ingest key:
 
 ```text
 Server URL: http://localhost:4000
-Ingest key: dev-ingest-key
+Ingest key: unset
 ```
 
-If you changed `INGEST_API_KEY` to `demo-ingest-key`, set the extension's local storage value before demoing the browser flow:
+Set the extension's local storage value before demoing the browser flow. Use the `INGEST_API_KEY` from `.env` or the shell value you exported for the server:
 
 1. On `chrome://extensions`, open PromptSentinel details.
 2. Click service worker Inspect views.
@@ -211,6 +211,14 @@ chrome.storage.local.set({ ingestKey: "demo-ingest-key", serverUrl: "http://loca
 Refresh ChatGPT, Claude, Gemini, Copilot, or Perplexity after changing extension storage.
 
 For a real pilot, use Chrome managed storage or extension policy to set `serverUrl`, `ingestKey`, `user`, `email`, and `orgId` centrally. Do not ask users to type ingest keys by hand.
+
+Create a pilot handoff package from the repo root:
+
+```powershell
+npm run package:extension
+```
+
+Give the Chrome admin the zip from `dist\extension\` and the adjacent `.manifest.json` with the SHA-256 hash. The package script fails if the synced detection engine drifted or if a development ingest key is present in the extension files.
 
 Managed deployment examples live in:
 
@@ -778,7 +786,7 @@ This demo is not a full production rollout. For a client pilot, plan these befor
 - SSO or MFA for admins.
 - Stable `SENTINEL_SECRET`, `SENTINEL_DATA_KEY`, and `INGEST_API_KEY`.
 - Local-disk database storage or a managed database migration.
-- Managed Chrome extension deployment.
+- Managed Chrome extension deployment with `npm run package:extension` artifact hashes.
 - Employee notice and authorization.
 - Log retention policy.
 - Raw approval-data retention window in `rawRetentionDays`.

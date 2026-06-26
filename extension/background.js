@@ -10,7 +10,7 @@ try { importScripts('lib/adapters.js'); } catch (e) { /* PSAdapters used only fo
 
 const DEFAULTS = {
   serverUrl: 'http://localhost:4000',
-  ingestKey: 'dev-ingest-key',
+  ingestKey: '',
   requestTimeoutMs: 10000,
   enabled: true,
   policy: { enforcementMode: 'block', blockMinSeverity: 2, blockRiskScore: 25, governedDestinations: [], alwaysBlock: ['US_SSN', 'CREDIT_CARD', 'BANK_ACCOUNT', 'ROUTING_NUMBER', 'SECRET_KEY', 'PRIVATE_KEY', 'CANARY_TOKEN'] },
@@ -54,6 +54,12 @@ function scanUnavailable(reason) {
   return { decision: 'block', status: 'scan_unavailable', supported: true, inspected: false, reason };
 }
 
+function missingServerConfigReason(c) {
+  if (!c.serverUrl) return 'missing_server_url';
+  if (!c.ingestKey) return 'missing_ingest_key';
+  return null;
+}
+
 async function fetchJsonWithTimeout(url, options, timeoutMs) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), requestTimeoutMs(timeoutMs));
@@ -73,6 +79,7 @@ async function fetchJsonWithTimeout(url, options, timeoutMs) {
 async function refreshPolicy() {
   const c = await serverCfg();
   if (!c.enabled) return;
+  if (missingServerConfigReason(c)) return;
   try {
     const r = await fetchJsonWithTimeout(c.serverUrl + '/api/v1/policy', { headers: { 'x-api-key': c.ingestKey } }, c.requestTimeoutMs);
     if (r.ok) {
@@ -96,6 +103,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     Promise.all([serverCfg(), identity()]).then(async ([c, who]) => {
       if (!c.enabled) {
         sendResponse && sendResponse(null);
+        return;
+      }
+      const missing = missingServerConfigReason(c);
+      if (missing) {
+        sendResponse && sendResponse(failClosed(missing));
         return;
       }
       try {
@@ -129,6 +141,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     Promise.all([serverCfg(), identity()]).then(async ([c, who]) => {
       if (!c.enabled) {
         sendResponse && sendResponse(null);
+        return;
+      }
+      const missing = missingServerConfigReason(c);
+      if (missing) {
+        sendResponse && sendResponse(scanUnavailable(missing));
         return;
       }
       try {
@@ -167,6 +184,7 @@ chrome.tabs?.onUpdated.addListener(async (tabId, info, tab) => {
   seenShadow[host] = now;
   const [sc, who] = await Promise.all([serverCfg(), identity()]);
   if (!sc.enabled) return;
+  if (missingServerConfigReason(sc)) return;
   try {
     await fetchJsonWithTimeout(sc.serverUrl + '/api/v1/gate', {
       method: 'POST',

@@ -131,11 +131,26 @@ preflight details.
 
 1. Chrome → Extensions → enable Developer mode → **Load unpacked** → select the
    `extension/` folder.
-2. Open ChatGPT or Claude and type a prompt containing a fake SSN (e.g.
+2. Configure the extension with the demo ingest key from your `.env` or shell:
+
+   ```javascript
+   chrome.storage.local.set({ ingestKey: "<demo-ingest-key>", serverUrl: "http://localhost:4000", enabled: true });
+   ```
+
+3. Open ChatGPT or Claude and type a prompt containing a fake SSN (e.g.
    `123-45-6789`) or paste a code block. You'll get an inline banner; the event
    appears on the dashboard.
-3. Change the mode in the dashboard **Policy** tab (warn / justify / block) — the
+4. Change the mode in the dashboard **Policy** tab (warn / justify / block) — the
    extension picks it up automatically.
+
+Package a pilot handoff artifact with:
+
+```bash
+npm run package:extension
+```
+
+The zip lands in `dist/extension/` beside a SHA-256 manifest. Configure real
+pilot keys through Chrome managed storage, not inside the package.
 
 ### Try the other sensors
 
@@ -206,7 +221,7 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 ## Still ahead (to ship commercially)
 
 - SSO/MFA and multiple admin roles; deeper multi-tenant isolation per institution.
-- Signed extension via Chrome Web Store + managed (force-install) policy via MDM.
+- Signed Chrome Web Store listing and force-install rollout; local extension zip plus integrity manifest are packaged.
 - Email/Slack escalation rules on top of the sanitized SIEM webhook.
 - Endpoint agent as a signed native service hooking clipboard + AI-app upload dirs.
 - Upgrade the on-device classifier to a quantized ONNX/WASM NER when recall demands it.

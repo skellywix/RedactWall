@@ -5,6 +5,7 @@ node_modules/
 # and legacy JSON that may hold cleartext PII)
 data/
 backups/
+dist/
 test-results/
 playwright-report/
 # cloud-sync (ProtonDrive/FUSE) leftovers — never source

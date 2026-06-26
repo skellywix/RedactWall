@@ -6,6 +6,8 @@
 
 ## Done
 
+- 2026-06-26: Added repeatable Chrome extension packaging for managed pilots: `npm run package:extension` writes a zip plus SHA-256 manifest, verifies Manifest V3 wiring, synced engine copies, managed-storage schema coverage, and refuses packaged development ingest keys. The extension now fails closed until local or managed storage supplies the ingest key.
+  Evidence: `npm run package:extension -- <temp>`, `node --test test/extension-package.test.js test/extension.test.js test/managed-extension-docs.test.js`, `npm test`, `npm run test:browser`, `npm run sync-check`, `npm run setup:check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Tightened the dashboard blocked-today metric so it counts only held or blocked statuses, not audit-only paste warnings, shadow-AI sightings, warnings, justifications, or successful redactions.
   Evidence: `node --test test/db.test.js`, `npm run sync-check`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Closed the browser paste-audit gap: `paste_flagged` reports from the extension now pass API validation, create audit-only `PASTE_FLAGGED` evidence with masked findings, avoid raw prompt retention, and show as warning activity in the admin dashboard instead of disappearing as rejected sensor traffic.

@@ -91,6 +91,19 @@ Logged-in admins can inspect detailed configuration checks at:
 http://localhost:4000/api/preflight
 ```
 
+## Browser Extension Package
+
+Build the Chrome extension artifact before a managed pilot handoff:
+
+```bash
+npm run package:extension
+```
+
+The command writes a zip and adjacent SHA-256 manifest under `dist/extension/`.
+It verifies Manifest V3 wiring, managed-storage schema coverage, synced engine
+copies, and absence of a packaged development ingest key. Configure `serverUrl`,
+`ingestKey`, and identity through Chrome managed storage or local demo storage.
+
 ## Endpoint Agent On Windows
 
 For a pilot workstation, install the endpoint file sensor as a per-user scheduled task. The task starts at logon, restarts on failure, and reads its ingest key from a local config file instead of exposing it in the task command line.

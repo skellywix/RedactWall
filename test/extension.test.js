@@ -91,7 +91,7 @@ test('browser file uploads use scan-file API with base64 content', () => {
 
 test('background report fails closed when gate request times out', async () => {
   const bg = loadBackground({
-    local: { requestTimeoutMs: 50 },
+    local: { ingestKey: 'unit-ingest-key', requestTimeoutMs: 50 },
     fetch: (url, options) => new Promise((resolve, reject) => {
       options.signal.addEventListener('abort', () => {
         const err = new Error('aborted');
@@ -117,8 +117,31 @@ test('background report fails closed when gate request times out', async () => {
   assert.strictEqual(res.reason, 'gate_timeout');
 });
 
+test('background report fails closed when no ingest key is configured', async () => {
+  const bg = loadBackground({
+    fetch: async () => {
+      throw new Error('fetch should not run without an ingest key');
+    },
+  });
+  const res = await bg.sendMessage({
+    type: 'report',
+    payload: {
+      prompt: 'Member SSN 524-71-9043',
+      destination: 'chatgpt.com',
+      channel: 'submit',
+      source: 'browser_extension',
+      categories: [],
+      outcome: 'blocked',
+    },
+  });
+  assert.strictEqual(res.decision, 'block');
+  assert.strictEqual(res.status, 'control_plane_unavailable');
+  assert.strictEqual(res.reason, 'missing_ingest_key');
+});
+
 test('background file scan fails closed on control-plane errors', async () => {
   const bg = loadBackground({
+    local: { ingestKey: 'unit-ingest-key' },
     fetch: async () => ({ ok: false, status: 503, json: async () => ({ error: 'unavailable' }) }),
   });
   const res = await bg.sendMessage({
