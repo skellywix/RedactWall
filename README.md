@@ -54,9 +54,10 @@ sensible modes, thresholds, and hard-stops for you.
 Detection is a **plugin registry** (inspired by Strac's auditor): each detector is a
 self-describing unit you can enable or disable per policy. Two layers, both on-device:
 
-1. **Structured PII (22 detectors)** — SSN, credit cards (Luhn), routing numbers
+1. **Structured PII and tripwires (23 detectors)** — SSN, credit cards (Luhn), routing numbers
    (ABA), IBAN (mod-97), US passport, TIN/EIN, driver's license, license plate, VIN,
-   email, phone, IP, DOB, US address, API keys, private keys, passwords.
+   email, phone, IP, DOB, US address, API keys, private keys, passwords, and planted
+   canary tokens for leak drills.
 2. **Semantic categories** — source code, legal/contracts, credentials, and
    confidential business context (e.g. "we're considering leaving our vendor, do not
    share"). This is what keyword lists miss.

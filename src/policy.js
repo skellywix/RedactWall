@@ -12,7 +12,7 @@ const DEFAULT_POLICY = {
   enforcementMode: 'block',
   blockMinSeverity: 2,
   blockRiskScore: 25,
-  alwaysBlock: ['US_SSN', 'CREDIT_CARD', 'BANK_ACCOUNT', 'ROUTING_NUMBER', 'IBAN', 'US_PASSPORT', 'SECRET_KEY', 'PRIVATE_KEY'],
+  alwaysBlock: ['US_SSN', 'CREDIT_CARD', 'BANK_ACCOUNT', 'ROUTING_NUMBER', 'IBAN', 'US_PASSPORT', 'SECRET_KEY', 'PRIVATE_KEY', 'CANARY_TOKEN'],
   // When true, the raw prompt of an item held for approval is retained
   // (encrypted at rest) so an admin can review it. Set false for institutions
   // that forbid any server-side raw retention — reveal then shows redacted only.

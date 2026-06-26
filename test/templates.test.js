@@ -17,6 +17,9 @@ test('NCUA/GLBA hard-stops member NPI (SSN, routing, DOB)', () => {
   const p = T.get('ncua_glba').policy;
   for (const e of ['US_SSN', 'ROUTING_NUMBER', 'DOB']) assert.ok(p.alwaysBlock.includes(e), 'blocks ' + e);
 });
+test('all templates hard-stop planted canary tokens', () => {
+  for (const t of T.list()) assert.ok(t.policy.alwaysBlock.includes('CANARY_TOKEN'), t.id);
+});
 test('redact-first template uses redact mode', () => {
   assert.strictEqual(T.get('redact_first').policy.enforcementMode, 'redact');
 });

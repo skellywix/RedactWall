@@ -352,6 +352,26 @@ Client talk track:
 Keyword filters miss this kind of business context. PromptSentinel treats it as sensitive even without an SSN or card number.
 ```
 
+### Demo 7: Canary Token Tripwire
+
+Paste:
+
+```text
+This fake member record contains PS-CANARY-DEMO2026ABCDEF and should never leave the institution.
+```
+
+Expected:
+
+- PromptSentinel detects `CANARY_TOKEN`.
+- The event is treated as critical.
+- Alerts and evidence exports show the canary finding as masked metadata only.
+
+Client talk track:
+
+```text
+This is a planted tripwire. A credit union can put canaries in fake records, test documents, or internal demo data. If one shows up in an AI prompt, the control proves it caught a path that should not exist.
+```
+
 ## Demo Script: File Upload Scanning
 
 Create a synthetic file:

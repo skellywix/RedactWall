@@ -88,7 +88,7 @@
   const SEVERITY = {
     US_SSN: 4, CREDIT_CARD: 4, BANK_ACCOUNT: 4, ROUTING_NUMBER: 3, IBAN: 3,
     US_PASSPORT: 4, US_TIN_EIN: 3, US_DRIVERS_LICENSE: 3, US_LICENSE_PLATE: 2, VIN: 1,
-    SECRET_KEY: 4, PRIVATE_KEY: 4, PASSWORD: 3, DOB: 3,
+    SECRET_KEY: 4, PRIVATE_KEY: 4, CANARY_TOKEN: 4, PASSWORD: 3, DOB: 3,
     EMAIL_ADDRESS: 2, PHONE_NUMBER: 2, IP_ADDRESS: 1, US_ADDRESS: 2, PERSON_NAME: 1,
     SOURCE_CODE: 3, LEGAL_CONTRACT: 3, CREDENTIALS: 4, CONFIDENTIAL_BUSINESS: 3,
   };
@@ -124,6 +124,8 @@
     { id: 'DOB', score: 0.55, re: /\b(?:0?[1-9]|1[0-2])[/\-](?:0?[1-9]|[12]\d|3[01])[/\-](?:19|20)\d{2}\b/g },
     { id: 'PRIVATE_KEY', score: 0.99, re: /-----BEGIN (?:RSA |EC |OPENSSH |PGP )?PRIVATE KEY-----/g },
     { id: 'SECRET_KEY', score: 0.95, re: /\b(?:sk-[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z\-_]{20,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})\b/g },
+    // Org-planted tripwire values for fake records, demos, and leak drills.
+    { id: 'CANARY_TOKEN', score: 0.99, re: /\b(?:PS|PROMPTSENTINEL)[-_]CANARY[-_][A-Z0-9][A-Z0-9_-]{11,63}\b/gi },
     { id: 'PASSWORD', score: 0.8, re: /\b(?:pass(?:word|wd)?|pwd|passphrase)\s*[:=]\s*\S{4,}/gi },
     { id: 'US_ADDRESS', score: 0.6, re: /\b\d{1,6}\s+(?:[A-Za-z0-9.'-]+\s){0,4}(?:Street|St|Avenue|Ave|Boulevard|Blvd|Road|Rd|Lane|Ln|Drive|Dr|Court|Ct|Way|Place|Pl|Terrace|Ter)\b\.?/gi },
   ];
@@ -305,6 +307,7 @@
     return out;
   }
   function maskValue(type, value) {
+    if (type === 'CANARY_TOKEN') return '[CANARY_TOKEN]';
     const d = (value || '').replace(/\D/g, '');
     if ((type === 'CREDIT_CARD' || type === 'US_SSN' || type === 'BANK_ACCOUNT' || type === 'IBAN') && d.length >= 4) return '•••• ' + d.slice(-4);
     if (type === 'EMAIL_ADDRESS') { const p = value.split('@'); return (p[0] ? p[0][0] : '') + '***@' + (p[1] || ''); }

@@ -32,6 +32,7 @@ test('true positives — structured PII is caught', () => {
   assert.ok(hasType('ACH debit account 000123456789 at First Bank', 'BANK_ACCOUNT'), 'ACH account with context');
   assert.ok(hasType('here is the key AKIAIOSFODNN7EXAMPLE', 'SECRET_KEY'), 'AWS access key id');
   assert.ok(hasType('-----BEGIN RSA PRIVATE KEY-----', 'PRIVATE_KEY'), 'private key header');
+  assert.ok(hasType('fake record marker PS-CANARY-DEMO2026ABCDEF should never leave', 'CANARY_TOKEN'), 'planted canary token');
   assert.ok(hasType('email me at jane.doe@example.com', 'EMAIL_ADDRESS'), 'email');
 });
 
@@ -60,6 +61,11 @@ test('false-positive bait — bare 9-digit ids are NOT routing numbers', () => {
 test('false-positive bait — ordinary account language is NOT a bank account number', () => {
   assert.ok(!hasType('support account 122105155 was updated today', 'BANK_ACCOUNT'));
   assert.ok(!hasType('account holder phone 415-555-0182 is preferred', 'BANK_ACCOUNT'));
+});
+
+test('false-positive bait — canary discussion is NOT a canary token', () => {
+  assert.ok(!hasType('we should add a canary token to the demo playbook', 'CANARY_TOKEN'));
+  assert.ok(!hasType('PS-CANARY is the prefix format, not a live marker', 'CANARY_TOKEN'));
 });
 
 test('false-positive bait — random 16-digit ids are NOT credit cards', () => {

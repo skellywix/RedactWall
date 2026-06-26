@@ -13,7 +13,8 @@
     "US_DRIVERS_LICENSE",
     "DOB",
     "SECRET_KEY",
-    "PRIVATE_KEY"
+    "PRIVATE_KEY",
+    "CANARY_TOKEN"
   ],
   "storeRawForApproval": true,
   "ignore": [],

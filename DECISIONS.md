@@ -7,3 +7,4 @@
 - 2026-06-26: Use a conservative CSP that allows current inline dashboard assets but still locks framing, base URI, form target, connect sources, MIME sniffing, referrers, and browser feature access.
 - 2026-06-26: SIEM/webhook alerts are best-effort and sanitized. Webhook failures must never block a user's request or leak raw prompt content into logs.
 - 2026-06-26: Evidence exports use hashes for prompt bodies and audit details. Even redacted prompt text can contain sensitive category-only context, so exports omit bodies entirely.
+- 2026-06-26: Canary tokens use explicit `PS-CANARY-...` or `PROMPTSENTINEL-CANARY-...` formats with enough suffix entropy to avoid flagging ordinary discussion of canaries.
