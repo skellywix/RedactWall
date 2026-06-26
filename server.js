@@ -94,8 +94,19 @@ function broadcast(event, data) {
   for (const res of sseClients) { try { res.write(payload); } catch {} }
 }
 
-function emitSecurityAlert(row, action) {
-  alerts.emitSecurityAlert(row, { action }).catch(() => {});
+function emitSecurityAlert(row, action, opts = {}) {
+  alerts.emitSecurityAlert(row, { action, ...opts }).catch(() => {});
+}
+
+function emitAdminSecurityAlert(req, action, actor, scope) {
+  const q = req && req.params && req.params.id ? db.getQuery(req.params.id) : null;
+  if (!q) return;
+  emitSecurityAlert(q, action, {
+    force: true,
+    adminEvent: true,
+    adminActor: actor || 'unknown',
+    stepUpScope: scope || null,
+  });
 }
 
 // =============================================================================
@@ -625,11 +636,13 @@ function requireStepUpPassword(scope) {
     const st = auth.loginStatus(key);
     if (st.locked) {
       db.appendAudit({ action: auditScope + '_LOCKED', queryId: req.params.id, actor: user || '?', detail: 'too many attempts' });
+      emitAdminSecurityAlert(req, auditScope + '_LOCKED', user, auditScope);
       return res.status(429).json({ error: 'too many attempts - temporarily locked', retryMs: st.retryMs });
     }
     if (!auth.verifyPassword(user, req.body && req.body.password)) {
       const r = auth.registerFail(key);
       db.appendAudit({ action: auditScope + '_FAILED', queryId: req.params.id, actor: user || '?', detail: r.locked ? 'locked out' : (r.remaining + ' attempts left') });
+      emitAdminSecurityAlert(req, auditScope + '_FAILED', user, auditScope);
       return res.status(401).json({ error: 'invalid credentials', remaining: r.remaining });
     }
     auth.registerSuccess(key);

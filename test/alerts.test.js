@@ -44,6 +44,26 @@ test('alert threshold sends blocked status even below numeric threshold', () => 
   assert.strictEqual(alerts.shouldAlert(sampleQuery({ status: 'pending', riskScore: 0, maxSeverity: 0 })), true);
   assert.strictEqual(alerts.shouldAlert(sampleQuery({ status: 'allowed', riskScore: 0, maxSeverity: 0 })), false);
   assert.strictEqual(alerts.shouldAlert(sampleQuery({ status: 'allowed', riskScore: 30, maxSeverity: 1 })), true);
+  assert.strictEqual(alerts.shouldAlert(sampleQuery({ status: 'allowed', riskScore: 0, maxSeverity: 0 }), { force: true }), true);
+});
+
+test('admin step-up alert metadata stays sanitized', () => {
+  const payload = alerts.sanitizedAlert(sampleQuery({ status: 'approved', riskScore: 0, maxSeverity: 0 }), {
+    action: 'APPROVE_FAILED',
+    adminEvent: true,
+    adminActor: 'admin',
+    stepUpScope: 'APPROVE',
+    force: true,
+  });
+  const wire = JSON.stringify(payload);
+  assert.strictEqual(payload.adminEvent, true);
+  assert.strictEqual(payload.adminActor, 'admin');
+  assert.strictEqual(payload.stepUpScope, 'APPROVE');
+  assert.strictEqual(payload.action, 'APPROVE_FAILED');
+  assert.ok(!wire.includes('524-71-9043'));
+  assert.ok(!wire.includes('sealed-secret'));
+  assert.ok(!wire.includes('sealed-vault'));
+  assert.ok(!wire.includes('Member John'));
 });
 
 test('webhook emit is disabled without url and swallows network failures', async () => {

@@ -147,6 +147,12 @@ Set these through `.env`, container environment, or a deployment secret manager:
 
 Never bind `SENTINEL_DB_PATH` to a cloud-synced folder. SQLite locking must be backed by local disk semantics.
 
+## SIEM Alerts
+
+Set `SIEM_WEBHOOK_URL` to send sanitized security events to a SOC or SIEM webhook. Payloads omit prompt bodies, raw retained prompts, token vaults, and raw finding values.
+
+Blocked prompt/file events, response leakage, hidden-instruction blocks, and failed or locked admin step-up confirmations for raw reveal and approval release are alertable. Webhook delivery is best-effort and never blocks the user-facing request.
+
 ## Retention Operations
 
 PromptSentinel retains raw approval prompts and token vaults only for records that need review or rehydration. Set `rawRetentionDays` in policy to define how long finalized `approved`, `denied`, and `redacted` records keep those sealed fields. The default is 30 days.

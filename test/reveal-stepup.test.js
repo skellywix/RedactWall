@@ -24,6 +24,7 @@ fs.writeFileSync(process.env.SENTINEL_POLICY_PATH, JSON.stringify({
 
 const app = require('../server');
 const db = require('../src/db');
+const alerts = require('../src/alerts');
 
 function listen(appUnderTest) {
   return new Promise((resolve, reject) => {
@@ -89,49 +90,67 @@ test('raw reveal requires password confirmation and audits failures', async () =
   const secret = '524-71-9043';
   const held = await createHeldPrompt(port, secret);
   const { cookie, csrfToken } = await login(port);
+  const originalEmit = alerts.emitSecurityAlert;
+  const sentAlerts = [];
+  alerts.emitSecurityAlert = (query, opts) => {
+    sentAlerts.push(alerts.sanitizedAlert(query, opts));
+    return Promise.resolve({ sent: true, status: 202 });
+  };
 
-  const missing = await jsonFetch(port, `/api/queries/${held.id}/reveal`, {
-    headers: { cookie, 'x-csrf-token': csrfToken },
-  });
-  assert.strictEqual(missing.status, 400);
-  assert.deepStrictEqual(await missing.json(), {
-    error: 'invalid request body',
-    fields: ['password'],
-  });
+  try {
+    const missing = await jsonFetch(port, `/api/queries/${held.id}/reveal`, {
+      headers: { cookie, 'x-csrf-token': csrfToken },
+    });
+    assert.strictEqual(missing.status, 400);
+    assert.deepStrictEqual(await missing.json(), {
+      error: 'invalid request body',
+      fields: ['password'],
+    });
 
-  const wrong = await jsonFetch(port, `/api/queries/${held.id}/reveal`, {
-    headers: { cookie, 'x-csrf-token': csrfToken },
-    body: { password: 'wrong-password' },
-  });
-  assert.strictEqual(wrong.status, 401);
-  assert.ok(!JSON.stringify(await wrong.json()).includes(secret));
-  assert.strictEqual(db.listAudit(20).filter((a) => a.action === 'REVEAL_FAILED').length, 1);
+    const wrong = await jsonFetch(port, `/api/queries/${held.id}/reveal`, {
+      headers: { cookie, 'x-csrf-token': csrfToken },
+      body: { password: 'wrong-password' },
+    });
+    assert.strictEqual(wrong.status, 401);
+    assert.ok(!JSON.stringify(await wrong.json()).includes(secret));
+    assert.strictEqual(db.listAudit(20).filter((a) => a.action === 'REVEAL_FAILED').length, 1);
+    assert.strictEqual(sentAlerts.length, 1);
+    assert.strictEqual(sentAlerts[0].action, 'REVEAL_FAILED');
+    assert.strictEqual(sentAlerts[0].adminEvent, true);
+    assert.strictEqual(sentAlerts[0].adminActor, 'admin');
+    assert.strictEqual(sentAlerts[0].stepUpScope, 'REVEAL');
+    assert.ok(!JSON.stringify(sentAlerts[0]).includes(secret));
 
-  const ok = await jsonFetch(port, `/api/queries/${held.id}/reveal`, {
-    headers: { cookie, 'x-csrf-token': csrfToken },
-    body: { password: 'unit-pass' },
-  });
-  assert.strictEqual(ok.status, 200);
-  const body = await ok.json();
-  assert.strictEqual(body.rawRetained, true);
-  assert.ok(body.rawPrompt.includes(secret));
-  assert.strictEqual(db.listAudit(20).filter((a) => a.action === 'REVEAL_RAW').length, 1);
-  assert.strictEqual(db.verifyAuditChain().ok, true);
+    const ok = await jsonFetch(port, `/api/queries/${held.id}/reveal`, {
+      headers: { cookie, 'x-csrf-token': csrfToken },
+      body: { password: 'unit-pass' },
+    });
+    assert.strictEqual(ok.status, 200);
+    const body = await ok.json();
+    assert.strictEqual(body.rawRetained, true);
+    assert.ok(body.rawPrompt.includes(secret));
+    assert.strictEqual(db.listAudit(20).filter((a) => a.action === 'REVEAL_RAW').length, 1);
+    assert.strictEqual(db.verifyAuditChain().ok, true);
 
-  for (let i = 0; i < 7; i += 1) {
-    const failed = await jsonFetch(port, `/api/queries/${held.id}/reveal`, {
+    for (let i = 0; i < 7; i += 1) {
+      const failed = await jsonFetch(port, `/api/queries/${held.id}/reveal`, {
+        headers: { cookie, 'x-csrf-token': csrfToken },
+        body: { password: 'still-wrong' },
+      });
+      assert.strictEqual(failed.status, 401);
+    }
+    const locked = await jsonFetch(port, `/api/queries/${held.id}/reveal`, {
       headers: { cookie, 'x-csrf-token': csrfToken },
       body: { password: 'still-wrong' },
     });
-    assert.strictEqual(failed.status, 401);
+    assert.strictEqual(locked.status, 429);
+    assert.ok(!JSON.stringify(await locked.json()).includes(secret));
+    assert.strictEqual(db.listAudit(20).filter((a) => a.action === 'REVEAL_LOCKED').length, 1);
+    assert.ok(sentAlerts.some((a) => a.action === 'REVEAL_FAILED'));
+    assert.ok(sentAlerts.some((a) => a.action === 'REVEAL_LOCKED' && a.adminEvent && a.stepUpScope === 'REVEAL'));
+  } finally {
+    alerts.emitSecurityAlert = originalEmit;
   }
-  const locked = await jsonFetch(port, `/api/queries/${held.id}/reveal`, {
-    headers: { cookie, 'x-csrf-token': csrfToken },
-    body: { password: 'still-wrong' },
-  });
-  assert.strictEqual(locked.status, 429);
-  assert.ok(!JSON.stringify(await locked.json()).includes(secret));
-  assert.strictEqual(db.listAudit(20).filter((a) => a.action === 'REVEAL_LOCKED').length, 1);
 }));
 
 test.after(() => {

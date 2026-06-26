@@ -783,7 +783,7 @@ This demo is not a full production rollout. For a client pilot, plan these befor
 - Log retention policy.
 - Raw approval-data retention window in `rawRetentionDays`.
 - Incident response workflow for blocked prompts.
-- SIEM or email alerting for critical events.
+- SIEM or email alerting for critical events and failed admin step-up confirmations.
 - Backup and restore procedure for audit evidence using `npm run backup`, `npm run backup:verify`, and `npm run backup:restore`.
 
 The compliance story is strongest when the demo maps product behavior to controls:

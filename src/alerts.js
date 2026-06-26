@@ -21,6 +21,7 @@ function alertThresholds(opts = {}) {
 
 function shouldAlert(query, opts = {}) {
   if (!query) return false;
+  if (opts.force) return true;
   const { minRisk, minSeverity } = alertThresholds(opts);
   const status = String(query.status || '');
   if (['pending', 'pending_justification', 'response_flagged', 'injection_blocked', 'file_blocked_unscanned'].includes(status)) return true;
@@ -32,6 +33,9 @@ function sanitizedAlert(query, opts = {}) {
     schemaVersion: 1,
     eventType: 'promptsentinel.security_event',
     action: opts.action || null,
+    adminEvent: !!opts.adminEvent,
+    adminActor: opts.adminActor || null,
+    stepUpScope: opts.stepUpScope || null,
     queryId: query.id,
     createdAt: query.createdAt,
     status: query.status,
