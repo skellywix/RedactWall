@@ -26,6 +26,7 @@ const templates = require('./src/templates');
 const alerts = require('./src/alerts');
 const evidence = require('./src/evidence');
 const preflight = require('./src/preflight');
+const validation = require('./src/validation');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -64,6 +65,11 @@ app.use((req, res, next) => {
 });
 
 app.use(express.json({ limit: '12mb' }));
+app.use((err, req, res, next) => {
+  if (err && err.type === 'entity.too.large') return res.status(413).json({ error: 'request body too large' });
+  if (err instanceof SyntaxError && err.status === 400 && 'body' in err) return res.status(400).json({ error: 'invalid json' });
+  return next(err);
+});
 app.use(cookieParser());
 
 // ---- Health / readiness (public, no sensitive data) -------------------------
@@ -181,7 +187,7 @@ function clientAnalysisFrom(body) {
   };
 }
 
-app.post('/api/v1/gate', checkIngestKey, (req, res) => {
+app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gateSchema), (req, res) => {
   const {
     prompt, user = 'unknown', destination = 'unknown', sourceIp = null,
     source = 'api', channel = 'submit', clientOutcome = null, note = '', orgId = null,
@@ -322,7 +328,7 @@ app.post('/api/v1/gate', checkIngestKey, (req, res) => {
 // Re-hydrate an AI response: swap tokens back to their real values using the
 // sealed vault for this query. Lets a proxy/SDK restore the model's answer
 // after a 'redact'-mode send. Audit-logged; never returns the vault itself.
-app.post('/api/v1/rehydrate', checkIngestKey, (req, res) => {
+app.post('/api/v1/rehydrate', checkIngestKey, validation.validateBody(validation.rehydrateSchema), (req, res) => {
   const { id, text } = req.body || {};
   const q = id && db.getQuery(id);
   if (!q) return res.status(404).json({ error: 'not found' });
@@ -349,7 +355,7 @@ app.get('/api/v1/policy', checkIngestKey, (req, res) => {
 app.get('/api/v1/detectors', checkIngestKey, (req, res) => res.json(detector.listDetectors()));
 
 // Scan an uploaded FILE: extract text (pdf/docx/xlsx/text), then gate it.
-app.post('/api/v1/scan-file', checkIngestKey, async (req, res) => {
+app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation.scanFileSchema), async (req, res) => {
   const { filename, contentBase64, user = 'unknown', destination = 'unknown', source = 'api', channel = 'file_upload', orgId = null } = req.body || {};
   if (!filename || !contentBase64) return res.status(400).json({ error: 'filename and contentBase64 required' });
   let buf;
@@ -400,7 +406,7 @@ app.post('/api/v1/scan-file', checkIngestKey, async (req, res) => {
 
 // Scan an AI RESPONSE for sensitive data leaking back to the user (e.g. an MCP
 // tool pulled PII, or the model echoed it). Parity with output-scanning DLP.
-app.post('/api/v1/scan-response', checkIngestKey, (req, res) => {
+app.post('/api/v1/scan-response', checkIngestKey, validation.validateBody(validation.scanResponseSchema), (req, res) => {
   const { text, user = 'unknown', destination = 'unknown', source = 'api', orgId = null } = req.body || {};
   if (typeof text !== 'string' || !text.trim()) return res.status(400).json({ error: 'text (string) required' });
   const pol = policy.loadPolicy();
@@ -433,7 +439,7 @@ app.get('/api/v1/status/:id', checkIngestKey, (req, res) => {
 // =============================================================================
 // AUTH
 // =============================================================================
-app.post('/api/login', (req, res) => {
+app.post('/api/login', validation.validateBody(validation.loginSchema), (req, res) => {
   const { user, password } = req.body || {};
   const key = (user || '?') + '|' + (req.ip || (req.connection && req.connection.remoteAddress) || '');
   const st = auth.loginStatus(key);
@@ -510,7 +516,7 @@ app.post('/api/queries/:id/reveal', ...adminWrite, (req, res) => {
   res.json({ id: q.id, rawPrompt, rawRetained });
 });
 
-app.post('/api/queries/:id/approve', ...adminWrite, (req, res) => {
+app.post('/api/queries/:id/approve', ...adminWrite, validation.validateBody(validation.noteSchema), (req, res) => {
   const q = db.getQuery(req.params.id);
   if (!q) return res.status(404).json({ error: 'not found' });
   if (q.status !== 'pending') return res.status(409).json({ error: `already ${q.status}` });
@@ -524,7 +530,7 @@ app.post('/api/queries/:id/approve', ...adminWrite, (req, res) => {
   res.json(publicQuery(updated));
 });
 
-app.post('/api/queries/:id/deny', ...adminWrite, (req, res) => {
+app.post('/api/queries/:id/deny', ...adminWrite, validation.validateBody(validation.noteSchema), (req, res) => {
   const q = db.getQuery(req.params.id);
   if (!q) return res.status(404).json({ error: 'not found' });
   if (q.status !== 'pending') return res.status(409).json({ error: `already ${q.status}` });
@@ -572,7 +578,7 @@ app.get('/api/risk', auth.requireAuth, (req, res) => {
 
 // Regulation policy templates (list + one-click apply).
 app.get('/api/policy/templates', auth.requireAuth, (req, res) => res.json(templates.list()));
-app.put('/api/policy/apply-template', ...adminWrite, (req, res) => {
+app.put('/api/policy/apply-template', ...adminWrite, validation.validateBody(validation.applyTemplateSchema), (req, res) => {
   const t = templates.get((req.body || {}).id);
   if (!t) return res.status(404).json({ error: 'unknown template' });
   const before = policy.loadPolicy();
@@ -603,9 +609,13 @@ app.get('/api/export/evidence', auth.requireAuth, (req, res) => {
 });
 
 app.get('/api/policy', auth.requireAuth, (req, res) => res.json(policy.loadPolicy()));
-app.put('/api/policy', ...adminWrite, (req, res) => {
+app.put('/api/policy', ...adminWrite, validation.validateBody(validation.policyUpdateSchema), (req, res) => {
   const before = policy.loadPolicy();
-  const merged = { ...before, ...(req.body || {}) };
+  const merged = {
+    ...before,
+    ...(req.body || {}),
+    ...(req.body && req.body.scanner ? { scanner: { ...(before.scanner || {}), ...req.body.scanner } } : {}),
+  };
   policy.savePolicy(merged);
   db.appendAudit({ action: 'POLICY_UPDATED', actor: req.user.user, detail: policy.policyChangeDetail(before, merged) });
   res.json(merged);

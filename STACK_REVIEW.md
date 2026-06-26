@@ -15,12 +15,14 @@ PromptSentinel should optimize for a regulated pilot that installs quickly, prov
   - `public/login.js`
 - Tightened CSP so `script-src` no longer needs `unsafe-inline`.
 - Added static tests that prevent inline scripts and mojibake from creeping back into the admin frontend.
+- Added Zod request-body validation for sensor and admin APIs, with sanitized field-only validation errors.
 
 ## Current Stack Verdict
 
 | Area | Current Choice | Verdict | Rationale |
 | --- | --- | --- | --- |
 | Backend HTTP server | Node.js plus Express 5 | Keep | Express is still a strong fit for a small, auditable API server. Express 5 gives the current major version without a broad rewrite. |
+| Request validation | Zod | Keep | Zod fits the current CommonJS app with compact runtime schemas, no separate schema build step, and enough structure to fail closed on bad sensor/admin bodies. |
 | Security headers | Helmet plus custom `Permissions-Policy` | Keep | Helmet is purpose-built for Express security headers. The app keeps one custom header Helmet does not own directly. |
 | Frontend dashboard | Static HTML, CSS, and vanilla JS | Keep for now | The dashboard is a small authenticated operations console. React, Next, or Vite would add a build chain before the UI needs it. External JS plus strict CSP solves the immediate security issue. |
 | Browser extension | Chrome Manifest V3 plus vanilla JS | Keep | Extension and content-script code benefits from being dependency-light and easy to audit. |
@@ -51,24 +53,21 @@ The better backend improvement was Express 5 plus Helmet, with real HTTP integra
 Revisit Fastify when:
 
 - API schemas become first-class product contracts.
-- Request validation is moved into shared JSON Schema or OpenAPI.
+- Request validation needs shared JSON Schema or OpenAPI artifacts for outside integrators.
 - The service becomes multi-tenant and high-throughput enough for router performance to matter.
 
 ## Next Stack Improvements
 
-1. Add schema validation for admin and sensor API request bodies.
-   Good candidates: Zod for local developer ergonomics, or JSON Schema if API contracts need to be shared with agents and extensions.
-
-2. Add Playwright browser checks for the admin console.
+1. Add Playwright browser checks for the admin console.
    The current static tests prove script placement and headers. Browser tests would prove login, policy save, evidence export, and queue actions render correctly.
 
-3. Add TypeScript only when shared contracts become painful.
+2. Add TypeScript only when shared contracts become painful.
    The repo is currently small enough that CommonJS plus tests is fine. TypeScript becomes worth it when the extension, server, endpoint agent, and MCP guard share larger typed payloads.
 
-4. Plan Postgres for hosted multi-tenant control plane.
+3. Plan Postgres for hosted multi-tenant control plane.
    SQLite remains correct for local demos and pilots. Hosted SaaS needs tenant isolation, backups, migrations, and operational monitoring.
 
-5. Sandbox file parsing.
+4. Sandbox file parsing.
    Office and PDF parsing should eventually run in a constrained worker process with tighter file-type, size, and timeout boundaries.
 
 ## Works Cited
@@ -86,3 +85,5 @@ SQLite. "Appropriate Uses For SQLite." *SQLite*, https://www.sqlite.org/whentous
 Google. "Manifest V3." *Chrome for Developers*, https://developer.chrome.com/docs/extensions/develop/migrate/what-is-mv3. Accessed 26 June 2026.
 
 Vite. "Why Vite." *Vite*, https://vite.dev/guide/why.html. Accessed 26 June 2026.
+
+Zod. "Intro." *Zod*, https://zod.dev/. Accessed 26 June 2026.

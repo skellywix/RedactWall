@@ -16,3 +16,4 @@
 - 2026-06-26: Canary controls should be operational fire drills, not only detector examples. A passing drill requires detection plus no raw canary value in the API response.
 - 2026-06-26: Keep the admin frontend static and dependency-light for the pilot console. Prefer CSP-safe external assets over a React/Vite migration until dashboard complexity justifies a build chain.
 - 2026-06-26: Use Express 5 plus Helmet as the backend baseline. Do not migrate to Fastify until schema-first APIs or throughput pressure outweigh route migration risk.
+- 2026-06-26: Use Zod for route-local request contracts. PromptSentinel needs compact runtime validation and sanitized field-only errors now; JSON Schema/Ajv can wait until external API schemas become a published integration surface.
