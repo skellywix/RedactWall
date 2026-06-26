@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>PromptSentinel — Sign in</title>
+<title>PromptSentinel - Sign in</title>
 <style>
   :root{--bg:#0b1220;--card:#131c2e;--line:#243049;--txt:#e7ecf5;--mut:#8a98b5;--accent:#3b82f6;--accent2:#2563eb;}
   *{box-sizing:border-box}
@@ -31,27 +31,15 @@
 <body>
   <form class="card" id="f">
     <div class="brand"><div class="logo">PS</div><div><h1>PromptSentinel</h1></div></div>
-    <div class="sub">AI Prompt DLP Gateway · Security Admin Console</div>
+    <div class="sub">AI Prompt DLP Gateway - Security Admin Console</div>
     <label>Username</label>
     <input id="user" autocomplete="username" value="admin" />
     <label>Password</label>
-    <input id="password" type="password" autocomplete="current-password" placeholder="••••••••" />
+    <input id="password" type="password" autocomplete="current-password" placeholder="********" />
     <button type="submit">Sign in</button>
     <div class="err" id="err"></div>
     <div class="hint">Dev login: <code>admin</code> / <code>ChangeMe!2026</code></div>
   </form>
-<script>
-  const f = document.getElementById('f');
-  f.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    document.getElementById('err').textContent = '';
-    const r = await fetch('/api/login', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ user: user.value, password: password.value })
-    });
-    if (r.ok) { location.href = '/index.html'; }
-    else { document.getElementById('err').textContent = 'Invalid credentials. Try again.'; }
-  });
-</script>
+<script src="/login.js" defer></script>
 </body>
 </html>

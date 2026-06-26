@@ -124,7 +124,7 @@ server.js                 Control plane: gate API, policy, approval queue, SSE, 
 shared/detect.js          Hybrid detection engine (shared by ALL sensors + server)
 src/policy.js             Enforcement policy + scanner config (ignore-lists, disabled detectors)
 src/processors.js         File-processor registry (pdf / docx / xlsx / pptx / text extraction)
-src/db.js                 JSON store + hash-chained audit log
+src/db.js                 SQLite store + hash-chained audit log
 src/auth.js               Security Admin session auth
 public/index.html         Dashboard (queue, activity, audit, policy)
 extension/                Browser extension (MV3) — flagship sensor
@@ -134,6 +134,8 @@ endpoint-agent/agent.js   Desktop file sensor (reference)
 mcp-guard/guard.js        MCP tool-response redactor (reference)
 scripts/                  simulate.js, squid-icap-bridge.js
 ```
+
+For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 
 ## Where each layer stands
 

@@ -7,7 +7,7 @@ const path = require('path');
 
 const root = path.join(__dirname, '..');
 const server = fs.readFileSync(path.join(root, 'server.js'), 'utf8');
-const dashboard = fs.readFileSync(path.join(root, 'public', 'index.html'), 'utf8');
+const dashboard = fs.readFileSync(path.join(root, 'public', 'dashboard.js'), 'utf8');
 
 test('admin write routes include csrf middleware', () => {
   assert.match(server, /const adminWrite = \[auth\.requireAuth,\s*auth\.requireCsrf\]/);

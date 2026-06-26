@@ -9,19 +9,14 @@ const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
 
 test('server disables framework fingerprinting and sets security headers', () => {
   assert.match(server, /app\.disable\('x-powered-by'\)/);
-  for (const header of [
-    'Content-Security-Policy',
-    'Referrer-Policy',
-    'X-Content-Type-Options',
-    'X-Frame-Options',
-    'Permissions-Policy',
-    'Cross-Origin-Opener-Policy',
-  ]) {
-    assert.ok(server.includes(header), header);
-  }
-  assert.match(server, /frame-ancestors 'none'/);
-  assert.match(server, /X-Frame-Options': 'DENY'/);
-  assert.match(server, /X-Content-Type-Options': 'nosniff'/);
+  assert.match(server, /const helmet = require\('helmet'\)/);
+  assert.match(server, /app\.use\(helmet\(\{/);
+  assert.match(server, /scriptSrc: \["'self'"\]/);
+  assert.doesNotMatch(server, /scriptSrc: \["'self'", "'unsafe-inline'"\]/);
+  assert.match(server, /frameAncestors: \["'none'"\]/);
+  assert.match(server, /frameguard: \{ action: 'deny' \}/);
+  assert.match(server, /referrerPolicy: \{ policy: 'no-referrer' \}/);
+  assert.match(server, /Permissions-Policy/);
 });
 
 test('admin session cookie uses strict same-site and httpOnly attributes', () => {

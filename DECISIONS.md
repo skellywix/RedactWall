@@ -14,3 +14,5 @@
 - 2026-06-26: The Express app must be importable without binding a fixed port. `npm start` owns the listener, while tests and future tooling can attach ephemeral HTTP servers.
 - 2026-06-26: Production mode should fail closed on dangerous deployment defaults. Local demo mode can keep running with visible preflight warnings.
 - 2026-06-26: Canary controls should be operational fire drills, not only detector examples. A passing drill requires detection plus no raw canary value in the API response.
+- 2026-06-26: Keep the admin frontend static and dependency-light for the pilot console. Prefer CSP-safe external assets over a React/Vite migration until dashboard complexity justifies a build chain.
+- 2026-06-26: Use Express 5 plus Helmet as the backend baseline. Do not migrate to Fastify until schema-first APIs or throughput pressure outweigh route migration risk.
