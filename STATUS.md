@@ -6,6 +6,8 @@
 
 ## Done
 
+- 2026-06-26: Bounded MCP guard control-plane requests so policy refresh and best-effort audit logging cannot stall redacted tool output delivery when the control plane is slow or unavailable.
+  Evidence: `node --test test/mcp-guard.test.js`, `npm test`, `npm run test:browser`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Published full sensor policy from `/api/v1/policy` and made browser local analysis honor centralized detector `ignore` and `disabledDetectors` settings, aligning browser, endpoint, MCP, and server policy behavior.
   Evidence: `node --test test/extension.test.js`, `node --test test/validation.test.js`, live temp-server sensor-policy smoke through endpoint and MCP refresh, `npm test`, `npm run test:browser`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Hardened the browser extension control-plane path with bounded background-worker requests, fail-closed gate/file-scan outage verdicts, and warn/justify resend logic that waits for a recorded server decision before allowing a sensitive prompt to proceed.

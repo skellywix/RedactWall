@@ -2,7 +2,7 @@
 /** MCP guard must never pass sensitive tool output to the model unchanged. */
 const test = require('node:test');
 const assert = require('node:assert');
-const { guardToolResult, reportBody, refreshPolicy } = require('../mcp-guard/guard');
+const { guardToolResult, reportBody, refreshPolicy, requestTimeoutMs } = require('../mcp-guard/guard');
 
 const noOpFetch = async () => ({ ok: true });
 
@@ -75,6 +75,36 @@ test('report body preserves category evidence without raw confidential text', ()
   assert.deepStrictEqual(body.clientEntityCounts, { CONFIDENTIAL_BUSINESS: 1 });
   assert.strictEqual(body.prompt, '[REDACTED: CONFIDENTIAL_BUSINESS]');
   assert.ok(!JSON.stringify(body).includes('switching away from our core processor'));
+});
+
+test('MCP control-plane request timeout is bounded', () => {
+  assert.strictEqual(requestTimeoutMs({ timeoutMs: 1 }), 50);
+  assert.strictEqual(requestTimeoutMs({ timeoutMs: 999999 }), 120000);
+  assert.strictEqual(requestTimeoutMs({ timeoutMs: 'bad' }), 10000);
+});
+
+test('returns redacted tool output when audit logging stalls', async () => {
+  const started = Date.now();
+  const guarded = await guardToolResult('Member SSN 524-71-9043 must be redacted.', { agent: 'test', tool: 'drive.fetch' }, {
+    policy: { ignore: [], disabledDetectors: [] },
+    server: 'http://sentinel.test',
+    key: 'unit-key',
+    timeoutMs: 10,
+    fetchImpl: async (url, opts) => new Promise((resolve, reject) => {
+      assert.strictEqual(url, 'http://sentinel.test/api/v1/gate');
+      assert.strictEqual(opts.headers['x-api-key'], 'unit-key');
+      opts.signal.addEventListener('abort', () => {
+        const e = new Error('aborted');
+        e.name = 'AbortError';
+        reject(e);
+      });
+    }),
+  });
+
+  assert.strictEqual(guarded.redacted, true);
+  assert.ok(guarded.text.includes('[US_SSN]'));
+  assert.ok(!guarded.text.includes('524-71-9043'));
+  assert.ok(Date.now() - started < 1000);
 });
 
 test('honors detector ignore policy for MCP tool output', async () => {

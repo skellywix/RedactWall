@@ -15,6 +15,7 @@ const D = require('../shared/detect');
 const SERVER = process.env.SENTINEL_URL || 'http://localhost:4000';
 const KEY = process.env.INGEST_API_KEY || 'dev-ingest-key';
 const POLICY_REFRESH_MS = 15 * 60 * 1000;
+const DEFAULT_REQUEST_TIMEOUT_MS = 10000;
 const DEFAULT_DETECTION_POLICY = { ignore: [], disabledDetectors: [] };
 let detectionPolicy = normalizeDetectionPolicy(DEFAULT_DETECTION_POLICY);
 let lastPolicyRefresh = 0;
@@ -35,15 +36,36 @@ function detectionOptions(policy = detectionPolicy) {
   return normalizeDetectionPolicy(policy);
 }
 
+function requestTimeoutMs(opts = {}) {
+  const n = Number(opts.timeoutMs ?? process.env.SENTINEL_REQUEST_TIMEOUT_MS ?? DEFAULT_REQUEST_TIMEOUT_MS);
+  if (!Number.isFinite(n)) return DEFAULT_REQUEST_TIMEOUT_MS;
+  return Math.max(50, Math.min(120000, n));
+}
+
+async function fetchWithTimeout(fetchImpl, url, options, opts = {}) {
+  const timeout = requestTimeoutMs(opts);
+  if (!globalThis.AbortController) return fetchImpl(url, options);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  try {
+    return await fetchImpl(url, { ...(options || {}), signal: controller.signal });
+  } catch (e) {
+    if (e && e.name === 'AbortError') e.code = 'SENTINEL_TIMEOUT';
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function fetchPolicy(opts = {}) {
   const fetchImpl = opts.fetchImpl || globalThis.fetch;
   if (!fetchImpl) return null;
   const server = opts.server || SERVER;
   const key = opts.key || KEY;
   try {
-    const r = await fetchImpl(server + '/api/v1/policy', {
+    const r = await fetchWithTimeout(fetchImpl, server + '/api/v1/policy', {
       headers: { 'x-api-key': key },
-    });
+    }, opts);
     if (!r || !r.ok) return null;
     return r.json();
   } catch (e) {
@@ -105,11 +127,11 @@ async function logEvent(rec, opts = {}) {
   const server = opts.server || SERVER;
   const key = opts.key || KEY;
   try {
-    await fetchImpl(server + '/api/v1/gate', {
+    await fetchWithTimeout(fetchImpl, server + '/api/v1/gate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': key },
       body: JSON.stringify(rec),
-    });
+    }, opts);
   } catch (e) { /* logging best-effort */ }
 }
 
@@ -150,6 +172,8 @@ module.exports = {
   fetchPolicy,
   refreshPolicy,
   detectionOptions,
+  requestTimeoutMs,
+  fetchWithTimeout,
 };
 
 // ---- demo when run directly ------------------------------------------------
