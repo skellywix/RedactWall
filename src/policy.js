@@ -31,6 +31,50 @@ const DEFAULT_POLICY = {
   },
 };
 
+const AUDIT_FIELDS = [
+  'enforcementMode',
+  'blockMinSeverity',
+  'blockRiskScore',
+  'alwaysBlock',
+  'storeRawForApproval',
+  'ignore',
+  'disabledDetectors',
+  'governedDestinations',
+  'scanner',
+];
+
+function normalizeForAudit(value) {
+  if (Array.isArray(value)) {
+    return value
+      .map(normalizeForAudit)
+      .sort((a, b) => String(JSON.stringify(a)).localeCompare(String(JSON.stringify(b))));
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, normalizeForAudit(value[key])]));
+  }
+  return value;
+}
+
+function policyChangeSummary(before, after, meta = {}) {
+  const changed = [];
+  for (const field of AUDIT_FIELDS) {
+    const oldValue = normalizeForAudit(before && before[field]);
+    const newValue = normalizeForAudit(after && after[field]);
+    if (JSON.stringify(oldValue) !== JSON.stringify(newValue)) {
+      changed.push({ field, before: oldValue, after: newValue });
+    }
+  }
+  return {
+    type: 'policy_change',
+    ...(meta.templateId ? { templateId: String(meta.templateId) } : {}),
+    changed,
+  };
+}
+
+function policyChangeDetail(before, after, meta = {}) {
+  return JSON.stringify(policyChangeSummary(before, after, meta));
+}
+
 function loadPolicy() {
   try {
     if (fs.existsSync(CONFIG_PATH)) {
@@ -69,4 +113,4 @@ function evaluate(analysis, policy = loadPolicy()) {
   return { decision, reasons, policy };
 }
 
-module.exports = { loadPolicy, savePolicy, evaluate, analyzeOpts, DEFAULT_POLICY };
+module.exports = { loadPolicy, savePolicy, evaluate, analyzeOpts, policyChangeSummary, policyChangeDetail, DEFAULT_POLICY };

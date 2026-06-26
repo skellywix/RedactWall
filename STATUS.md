@@ -6,6 +6,8 @@
 
 ## Done
 
+- 2026-06-26: Added structured policy-change diffs for manual and template policy updates, and exposed parsed allowlisted policy changes in evidence exports while keeping general audit detail text hashed.
+  Evidence: `npm test`, `npm run sync-check`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Added an admin dashboard evidence export button that downloads the sanitized examiner pack from `/api/export/evidence`, plus static UI tests to keep it away from raw-prompt APIs.
   Evidence: `npm test`, `npm run sync-check`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Added managed Chrome extension deployment guide, force-install policy example, managed storage policy example, and schema-alignment tests for pilot deployment docs.

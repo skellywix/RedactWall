@@ -7,6 +7,19 @@
  */
 const crypto = require('crypto');
 
+const POLICY_AUDIT_ACTIONS = new Set(['POLICY_UPDATED', 'POLICY_TEMPLATE_APPLIED']);
+const POLICY_AUDIT_FIELDS = new Set([
+  'enforcementMode',
+  'blockMinSeverity',
+  'blockRiskScore',
+  'alwaysBlock',
+  'storeRawForApproval',
+  'ignore',
+  'disabledDetectors',
+  'governedDestinations',
+  'scanner',
+]);
+
 function hashText(value) {
   return crypto.createHash('sha256').update(String(value || '')).digest('hex');
 }
@@ -44,8 +57,35 @@ function safeQuery(q) {
   };
 }
 
-function safeAuditEntry(a) {
+function safePolicyValue(value) {
+  if (value === null || ['string', 'number', 'boolean'].includes(typeof value)) return value;
+  if (Array.isArray(value)) return value.slice(0, 80).map(safePolicyValue);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.keys(value).sort().slice(0, 80).map((key) => [key, safePolicyValue(value[key])]));
+  }
+  return null;
+}
+
+function safePolicyChange(a) {
+  if (!POLICY_AUDIT_ACTIONS.has(a.action) || !a.detail) return null;
+  let parsed;
+  try { parsed = JSON.parse(a.detail); } catch { return null; }
+  if (!parsed || parsed.type !== 'policy_change' || !Array.isArray(parsed.changed)) return null;
+  const changed = parsed.changed
+    .filter((item) => item && POLICY_AUDIT_FIELDS.has(item.field))
+    .map((item) => ({
+      field: item.field,
+      before: safePolicyValue(item.before),
+      after: safePolicyValue(item.after),
+    }));
   return {
+    ...(parsed.templateId ? { templateId: String(parsed.templateId) } : {}),
+    changed,
+  };
+}
+
+function safeAuditEntry(a) {
+  const safe = {
     id: a.id,
     ts: a.ts,
     action: a.action,
@@ -55,6 +95,9 @@ function safeAuditEntry(a) {
     hash: a.hash,
     detailHash: hashText(a.detail || ''),
   };
+  const policyChange = safePolicyChange(a);
+  if (policyChange) safe.policyChange = policyChange;
+  return safe;
 }
 
 function buildEvidencePack(input) {
@@ -81,4 +124,4 @@ function buildEvidencePack(input) {
   };
 }
 
-module.exports = { buildEvidencePack, safeQuery, safeAuditEntry, hashText };
+module.exports = { buildEvidencePack, safeQuery, safeAuditEntry, safePolicyChange, hashText };

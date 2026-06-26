@@ -549,9 +549,10 @@ app.get('/api/policy/templates', auth.requireAuth, (req, res) => res.json(templa
 app.put('/api/policy/apply-template', ...adminWrite, (req, res) => {
   const t = templates.get((req.body || {}).id);
   if (!t) return res.status(404).json({ error: 'unknown template' });
-  const merged = { ...policy.loadPolicy(), ...t.policy };
+  const before = policy.loadPolicy();
+  const merged = { ...before, ...t.policy };
   policy.savePolicy(merged);
-  db.appendAudit({ action: 'POLICY_TEMPLATE_APPLIED', actor: req.user.user, detail: req.body.id + ' -> mode=' + merged.enforcementMode });
+  db.appendAudit({ action: 'POLICY_TEMPLATE_APPLIED', actor: req.user.user, detail: policy.policyChangeDetail(before, merged, { templateId: req.body.id }) });
   res.json(merged);
 });
 
@@ -577,9 +578,10 @@ app.get('/api/export/evidence', auth.requireAuth, (req, res) => {
 
 app.get('/api/policy', auth.requireAuth, (req, res) => res.json(policy.loadPolicy()));
 app.put('/api/policy', ...adminWrite, (req, res) => {
-  const merged = { ...policy.loadPolicy(), ...(req.body || {}) };
+  const before = policy.loadPolicy();
+  const merged = { ...before, ...(req.body || {}) };
   policy.savePolicy(merged);
-  db.appendAudit({ action: 'POLICY_UPDATED', actor: req.user.user, detail: `mode=${merged.enforcementMode}` });
+  db.appendAudit({ action: 'POLICY_UPDATED', actor: req.user.user, detail: policy.policyChangeDetail(before, merged) });
   res.json(merged);
 });
 
