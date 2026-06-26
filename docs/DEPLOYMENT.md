@@ -33,11 +33,14 @@ For production-safe defaults:
 
 ```bash
 npm run setup:prod
+npm run mfa:uri
 npm start
 ```
 
 Production mode expects TLS at the dashboard edge. If TLS is terminated by a reverse proxy, keep `COOKIE_SECURE=true` and serve the dashboard only over HTTPS.
-`npm run setup:prod` writes `ADMIN_TOTP_SECRET`; enroll that base32 secret in the Security Admin's authenticator app before client-facing use.
+`npm run mfa:uri` prints a standard authenticator-app enrollment URI for
+`ADMIN_TOTP_SECRET`. Treat that URI as a secret and enroll it before pilot users
+can reach the console.
 
 To inspect an existing install without changing files:
 
@@ -51,6 +54,7 @@ Generate config first:
 
 ```bash
 npm run setup:prod -- --skip-install
+npm run mfa:uri
 ```
 
 Then start the container:
@@ -185,7 +189,19 @@ secrets. Use a base32 `ADMIN_TOTP_SECRET` at least 16 characters long, at least
 configured, and at least 32 random characters for `INGEST_API_KEY`,
 `SENTINEL_SECRET`, and `SENTINEL_DATA_KEY` when retained raw approval data is
 enabled. `npm run setup:prod` generates a TOTP secret; enroll it in the
-operator's authenticator app before serving the console to pilot users.
+operator's authenticator app before serving the console to pilot users:
+
+```bash
+npm run mfa:uri
+```
+
+The command prints a standard `otpauth://` enrollment URI. Treat it like a
+password because it contains the MFA seed. For a non-default env file or
+white-label issuer, use:
+
+```bash
+npm run mfa:uri -- -- --env pilot.env --issuer "PromptSentinel Pilot"
+```
 
 Auditor sessions can read sanitized dashboard evidence, audit status, policy,
 and examiner exports. They cannot reveal retained raw prompts, approve or deny

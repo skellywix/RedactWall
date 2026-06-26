@@ -6,6 +6,8 @@
 
 ## Done
 
+- 2026-06-26: Added explicit Security Admin MFA enrollment tooling: `npm run mfa:uri` reads `ADMIN_TOTP_SECRET` from `.env`, validates the base32 seed, prints a standard `otpauth://` URI only on operator request, supports alternate env/issuer/account labels, and docs now show the enrollment step for native and Docker production setup.
+  Evidence: `node --test test/mfa-uri.test.js test/setup.test.js test/auth.test.js test/admin-mfa.test.js`, `npm test`, `npm run test:browser`, `npm run setup:check`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Added production Security Admin MFA: production preflight now requires a valid base32 `ADMIN_TOTP_SECRET`, `npm run setup:prod` generates one, admin login requires a current TOTP code when configured, auditor login stays password-only, and malformed MFA secrets warn in demos but block production readiness.
   Evidence: `node --test test/auth.test.js test/admin-mfa.test.js test/preflight.test.js test/setup.test.js test/frontend-csp.test.js test/validation.test.js test/server-integration.test.js`, `npm test`, `npm run test:browser`, `npm run setup:check`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Hardened auditor-role configuration edges: `.env.example` now documents optional auditor credentials, production preflight rejects duplicate auditor/admin usernames, runtime refuses to enable a duplicate auditor account, legacy admin session cookies get a safe `security_admin` role, unknown session roles are rejected, and the dashboard defaults to read-only until `/api/me` proves admin authority.

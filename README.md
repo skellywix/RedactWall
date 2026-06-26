@@ -115,6 +115,7 @@ For a production-style install:
 
 ```bash
 npm run setup:prod
+npm run mfa:uri
 npm start
 ```
 
@@ -122,8 +123,13 @@ For Docker:
 
 ```bash
 npm run setup:prod -- --skip-install
+npm run mfa:uri
 docker compose up -d --build
 ```
+
+`npm run mfa:uri` prints a standard authenticator-app enrollment URI for
+`ADMIN_TOTP_SECRET`. Treat that URI as a secret and enroll it before pilot users
+can reach the console.
 
 See `docs/DEPLOYMENT.md` for native Node, Docker Compose, health checks, and
 preflight details.
