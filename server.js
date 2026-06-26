@@ -25,6 +25,36 @@ const templates = require('./src/templates');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
+const SESSION_COOKIE_OPTIONS = {
+  httpOnly: true,
+  sameSite: 'strict',
+  secure: !!process.env.HTTPS,
+  path: '/',
+  maxAge: 8 * 3600 * 1000,
+};
+
+app.disable('x-powered-by');
+
+app.use((req, res, next) => {
+  res.set({
+    'Content-Security-Policy': [
+      "default-src 'self'",
+      "connect-src 'self'",
+      "img-src 'self' data:",
+      "script-src 'self' 'unsafe-inline'",
+      "style-src 'self' 'unsafe-inline'",
+      "base-uri 'self'",
+      "form-action 'self'",
+      "frame-ancestors 'none'",
+    ].join('; '),
+    'Referrer-Policy': 'no-referrer',
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+    'Cross-Origin-Opener-Policy': 'same-origin',
+  });
+  next();
+});
 
 app.use(express.json({ limit: '12mb' }));
 app.use(cookieParser());
@@ -379,7 +409,7 @@ app.post('/api/login', (req, res) => {
   }
   auth.registerSuccess(key);
   const token = auth.createSession(user);
-  res.cookie('sentinel_session', token, { httpOnly: true, sameSite: 'lax', secure: !!process.env.HTTPS, maxAge: 8 * 3600 * 1000 });
+  res.cookie('sentinel_session', token, SESSION_COOKIE_OPTIONS);
   db.appendAudit({ action: 'ADMIN_LOGIN', actor: user });
   res.json({ ok: true, user, role: 'security_admin' });
 });
@@ -391,7 +421,11 @@ app.get('/api/csrf', auth.requireAuth, (req, res) => {
 });
 
 app.post('/api/logout', ...adminWrite, (req, res) => {
-  res.clearCookie('sentinel_session');
+  res.clearCookie('sentinel_session', {
+    path: SESSION_COOKIE_OPTIONS.path,
+    sameSite: SESSION_COOKIE_OPTIONS.sameSite,
+    secure: SESSION_COOKIE_OPTIONS.secure,
+  });
   res.json({ ok: true });
 });
 
