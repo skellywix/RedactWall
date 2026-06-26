@@ -158,6 +158,7 @@ For a Windows pilot, install the endpoint sensor as a logon task:
 npm test              # Node unit/integration coverage
 npm run test:browser  # Playwright: login, approval, policy save, evidence export
 npm run sync-check    # shared detection engine parity
+npm run backup -- backups  # SQLite audit-store backup + verification manifest
 ```
 
 ## Project layout
@@ -197,6 +198,7 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 
 - **On-device semantic model** behind `classifySemantic()` (no heavy runtime; `npm run train-semantic`).
 - **SQLite** store (WAL + transactions) with audit integrity that covers the evidence, not just the event header.
+- **Backup/verify/restore** tooling for the SQLite evidence store with prompt-free manifests.
 - **Reversible redaction / Redact-&-Send**, sealed token vault, local response re-hydration.
 - **MDM identity**, reliable per-site send, **Man-in-the-Prompt** guard, **shadow-AI** discovery.
 - **Login lockout**, stable session secret, regulation **templates**, **/healthz · /readyz · /api/metrics**, Docker + CI.

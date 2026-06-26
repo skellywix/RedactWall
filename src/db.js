@@ -27,9 +27,12 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const Database = require('better-sqlite3');
+const integrity = require('./audit-integrity');
 
 const DATA_DIR = path.join(__dirname, '..', 'data');
-const ZERO = '0'.repeat(64);
+const ZERO = integrity.ZERO;
+const sha = integrity.sha;
+const canonical = integrity.canonical;
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
 // Open a DB at `p`, preferring WAL, and force a real write so a filesystem that
@@ -83,15 +86,6 @@ sdb.exec(`
 `);
 
 const id = (p) => p + '_' + crypto.randomBytes(8).toString('hex');
-const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
-
-/** Deterministic JSON: object keys sorted recursively so the hash is stable. */
-function canonical(value) {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value);
-  if (Array.isArray(value)) return '[' + value.map(canonical).join(',') + ']';
-  const keys = Object.keys(value).sort();
-  return '{' + keys.map((k) => JSON.stringify(k) + ':' + canonical(value[k])).join(',') + '}';
-}
 
 // ---- Queries -----------------------------------------------------------------
 const qInsert = sdb.prepare('INSERT INTO queries (id, createdAt, status, user, data) VALUES (@id, @createdAt, @status, @user, @data)');
@@ -125,8 +119,7 @@ const updateQuery = sdb.transaction((qid, patch) => {
 
 /** Hash of a query's current full state — binds the evidence into the chain. */
 function queryContentHash(qid) {
-  const r = qById.get(qid);
-  return r ? sha(canonical(JSON.parse(r.data))) : null;
+  return integrity.queryContentHash(sdb, qid);
 }
 
 // ---- Audit (append-only, hash-chained over the FULL canonical entry) ---------
@@ -216,24 +209,7 @@ function listAudit(limit = 200) {
  *    contentHash must still match the query's current content hash.
  */
 function verifyAuditChain() {
-  const rows = sdb.prepare('SELECT entry FROM audit ORDER BY seq ASC').all().map((r) => JSON.parse(r.entry));
-  let prev = ZERO;
-  for (const e of rows) {
-    const { hash, ...body } = e;
-    if (e.prevHash !== prev || sha(canonical(body)) !== hash) {
-      return { ok: false, count: rows.length, brokenAt: e.id, reason: 'chain' };
-    }
-    prev = hash;
-  }
-  const latest = new Map();
-  for (const e of rows) if (e.queryId && e.contentHash) latest.set(e.queryId, e);
-  for (const [qid, e] of latest) {
-    const live = queryContentHash(qid);
-    if (live && live !== e.contentHash) {
-      return { ok: false, count: rows.length, brokenAt: e.id, reason: 'evidence', queryId: qid };
-    }
-  }
-  return { ok: true, count: rows.length };
+  return integrity.verifyAuditChainForDatabase(sdb);
 }
 
 // ---- Stats -------------------------------------------------------------------

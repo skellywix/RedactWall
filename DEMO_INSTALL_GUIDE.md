@@ -561,6 +561,7 @@ Run:
 ```powershell
 npm test
 npm run sync-check
+npm run backup -- backups
 node -e "console.log(JSON.stringify(require('./src/db').verifyAuditChain()))"
 ```
 
@@ -569,6 +570,7 @@ Expected:
 ```text
 tests pass
 engine copies identical
+"manifestFile": "...manifest.json"
 {"ok":true,...}
 ```
 
@@ -782,7 +784,7 @@ This demo is not a full production rollout. For a client pilot, plan these befor
 - Raw approval-data retention window in `rawRetentionDays`.
 - Incident response workflow for blocked prompts.
 - SIEM or email alerting for critical events.
-- Backup and restore procedure for audit evidence.
+- Backup and restore procedure for audit evidence using `npm run backup`, `npm run backup:verify`, and `npm run backup:restore`.
 
 The compliance story is strongest when the demo maps product behavior to controls:
 

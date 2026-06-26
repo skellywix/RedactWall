@@ -163,6 +163,31 @@ Invoke-RestMethod `
 
 Purge events keep the redacted metadata and hash-chained audit trail intact, and evidence exports show purge timestamps and the non-sensitive field names removed.
 
+## Backup And Restore
+
+Back up the SQLite evidence store to local encrypted storage or a managed backup target:
+
+```bash
+npm run backup -- backups
+```
+
+The command writes a `.db` backup plus a `.manifest.json` file with the backup hash, size, counts, and audit-chain verification result. The manifest intentionally omits prompt bodies; treat the `.db` file itself as sensitive runtime state.
+
+Verify a backup before you rely on it:
+
+```bash
+npm run backup:verify -- backups/sentinel-YYYY-MM-DDTHH-MM-SS-sssZ.db
+```
+
+For an offline restore, stop the PromptSentinel process, restore to a new local-disk path, verify it, and then point `SENTINEL_DB_PATH` at the restored file:
+
+```bash
+npm run backup:restore -- backups/sentinel-YYYY-MM-DDTHH-MM-SS-sssZ.db data/restored-sentinel.db
+npm run backup:verify -- data/restored-sentinel.db
+```
+
+Use `--force` only when intentionally replacing an existing restore target.
+
 ## Validation Gate
 
 Before handing a deployment to a pilot user, run:

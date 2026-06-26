@@ -6,6 +6,8 @@
 
 ## Done
 
+- 2026-06-26: Added verifier-first backup/restore tooling for the SQLite evidence store: `npm run backup`, `npm run backup:verify`, and `npm run backup:restore` create prompt-free manifests, verify audit-chain integrity on backup files, and refuse unsafe overwrites unless explicitly forced.
+  Evidence: `node --test test/backup-store.test.js test/db.test.js`, `npm test`, `npm run sync-check`, `npm run setup:check`, `npm audit --omit=dev`, `npm run backup -- <temp>`, `npm run backup:verify -- <backup.db>`, `npm run backup:restore -- <backup.db> <temp/restored.db>`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Added policy-backed retained-data disposal for finalized approval/redact records: `rawRetentionDays` now drives audited purging of sealed raw prompts and token vaults, reveal falls back to safe redacted text after purge, evidence exports show purge metadata without prompt bodies, and the admin policy form exposes the retention window.
   Evidence: `node --test test/db.test.js test/retention.test.js test/policy-history.test.js test/admin-csrf.test.js test/validation.test.js`, `node --test test/evidence.test.js`, `npm test`, `PLAYWRIGHT_PORT=4310 npm run test:browser`, `npm run sync-check`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Sanitized semantic-category previews so held prompts, scanned files, and flagged AI responses store whole-chunk `[REDACTED: ...]` evidence instead of retaining confidential business context with only structured values masked.
