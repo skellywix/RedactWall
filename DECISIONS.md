@@ -23,3 +23,4 @@
 - 2026-06-26: CI should run on `codex/**` pushes, not only pull requests and main branches, because the production-hardening loop pushes every verified improvement branch to GitHub.
 - 2026-06-26: Admin console controls must be real controls, not decorative placeholders. The redesigned topbar search filters queue and activity data instead of acting as static helper text.
 - 2026-06-26: MCP guard telemetry should send only redacted prompt text plus masked detector metadata. The control plane needs examiner-visible finding types, but the model-source document body must not be logged raw.
+- 2026-06-26: Endpoint file scanning should obey the same scanner policy the control plane serves to other sensors. Hardcoded local ignore and size settings are only defaults when policy refresh is unavailable.

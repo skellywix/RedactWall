@@ -6,6 +6,8 @@
 
 ## Done
 
+- 2026-06-26: Synced the endpoint agent with centralized scanner policy from `/api/v1/policy`, including managed ignore directories, filenames, extensions, and max file size enforcement.
+  Evidence: `node --test test/endpoint-agent.test.js`, `npm test`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Polished the redesigned admin console tab rails by hiding native scrollbars while preserving horizontal scrolling for dense operations layouts.
   Evidence: `npm run test:browser`; earlier same-worktree gate for this UI delta also passed `npm test`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, and `verifyAuditChain()`.
 - 2026-06-26: Hardened MCP guard telemetry so locally redacted tool output reports masked client findings/categories to the control plane while keeping raw tool content out of the logged prompt body.

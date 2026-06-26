@@ -5,7 +5,7 @@ const assert = require('node:assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { scanFile } = require('../endpoint-agent/agent');
+const { scanFile, refreshPolicy, scannerConfig, ignoredByScanner } = require('../endpoint-agent/agent');
 
 test('sends supported file bytes to scan-file API instead of redacted gate preview', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-agent-'));
@@ -54,6 +54,75 @@ test('does not upload unsupported file bytes', async () => {
   assert.strictEqual(scanCalled, false);
   assert.strictEqual(reportRequest.clientOutcome, 'file_unsupported');
   assert.ok(!reportRequest.prompt.includes('524-71-9043'));
+
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('refreshes scanner policy from the control plane', async () => {
+  let request;
+  const scanner = await refreshPolicy({
+    server: 'http://sentinel.test',
+    key: 'policy-key',
+    fetchImpl: async (url, opts) => {
+      request = { url, headers: opts.headers };
+      return {
+        ok: true,
+        json: async () => ({
+          scanner: {
+            ignoreDirectories: ['Secrets'],
+            ignoreFilenames: ['skip-me.txt'],
+            ignoreExtensions: ['blocked'],
+            maxFileBytes: 4096,
+          },
+        }),
+      };
+    },
+  });
+
+  assert.strictEqual(request.url, 'http://sentinel.test/api/v1/policy');
+  assert.strictEqual(request.headers['x-api-key'], 'policy-key');
+  assert.ok(scanner.ignoreDirectories.has('secrets'));
+  assert.ok(scanner.ignoreFilenames.has('skip-me.txt'));
+  assert.ok(scanner.ignoreExtensions.has('.blocked'));
+  assert.strictEqual(scanner.maxFileBytes, 4096);
+});
+
+test('scanner policy controls endpoint ignores and size blocking', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-agent-'));
+  const ignored = 'notes.blocked';
+  fs.writeFileSync(path.join(dir, ignored), 'SSN 524-71-9043');
+
+  const scanner = scannerConfig({
+    ignoreExtensions: ['.blocked'],
+    ignoreFilenames: [],
+    ignoreDirectories: [],
+    maxFileBytes: 8,
+  });
+
+  assert.strictEqual(ignoredByScanner(ignored, scanner), true);
+  let scanCalled = false;
+  const ignoredRes = await scanFile(ignored, {
+    watchDir: dir,
+    scanner,
+    scanFileApi: async () => { scanCalled = true; },
+  });
+  assert.strictEqual(ignoredRes, undefined);
+  assert.strictEqual(scanCalled, false);
+
+  const large = 'large.txt';
+  fs.writeFileSync(path.join(dir, large), 'larger than eight bytes');
+  let reportRequest;
+  const blocked = await scanFile(large, {
+    watchDir: dir,
+    scanner,
+    user: 'unit-user',
+    report: async (req) => { reportRequest = req; },
+  });
+
+  assert.strictEqual(blocked.decision, 'block');
+  assert.strictEqual(blocked.status, 'file_too_large');
+  assert.strictEqual(reportRequest.clientOutcome, 'file_too_large');
+  assert.ok(!reportRequest.prompt.includes('larger than eight bytes'));
 
   fs.rmSync(dir, { recursive: true, force: true });
 });

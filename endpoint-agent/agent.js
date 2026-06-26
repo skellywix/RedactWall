@@ -19,17 +19,75 @@ const SERVER = process.env.SENTINEL_URL || 'http://localhost:4000';
 const KEY = process.env.INGEST_API_KEY || 'dev-ingest-key';
 const WATCH = process.argv[2] || path.join(os.tmpdir(), 'promptsentinel-watch');
 
-const IGNORE_FILES = new Set(['thumbs.db', '.ds_store', 'package.json', 'package-lock.json']);
-const IGNORE_EXT = new Set(['.tmp', '.log', '.lock']);
-const MAX_BYTES = 6.3 * 1024 * 1024;
+const DEFAULT_SCANNER = {
+  ignoreDirectories: ['node_modules', '.git', 'Library', 'Applications', 'AppData'],
+  ignoreFilenames: ['thumbs.db', '.ds_store', 'package.json', 'package-lock.json'],
+  ignoreExtensions: ['.tmp', '.log', '.lock'],
+  maxFileBytes: 6.3 * 1024 * 1024,
+};
+const POLICY_REFRESH_MS = 15 * 60 * 1000;
+let scannerState = scannerConfig(DEFAULT_SCANNER);
 
 if (!fs.existsSync(WATCH)) fs.mkdirSync(WATCH, { recursive: true });
+
+function lowerList(value, fallback = []) {
+  const src = Array.isArray(value) ? value : value instanceof Set ? Array.from(value) : fallback;
+  return src
+    .filter((item) => typeof item === 'string' && item.trim())
+    .map((item) => item.trim().toLowerCase());
+}
+
+function scannerConfig(input = {}) {
+  const merged = { ...DEFAULT_SCANNER, ...(input || {}) };
+  const maxFileBytes = Number(merged.maxFileBytes);
+  return {
+    ignoreDirectories: new Set(lowerList(merged.ignoreDirectories, DEFAULT_SCANNER.ignoreDirectories)),
+    ignoreFilenames: new Set(lowerList(merged.ignoreFilenames, DEFAULT_SCANNER.ignoreFilenames)),
+    ignoreExtensions: new Set(lowerList(merged.ignoreExtensions, DEFAULT_SCANNER.ignoreExtensions).map((ext) => (
+      ext.startsWith('.') ? ext : `.${ext}`
+    ))),
+    maxFileBytes: Number.isFinite(maxFileBytes) && maxFileBytes > 0 ? maxFileBytes : DEFAULT_SCANNER.maxFileBytes,
+  };
+}
+
+function ignoredByScanner(file, scanner) {
+  const lower = String(file || '').toLowerCase();
+  const parts = lower.split(/[\\/]+/).filter(Boolean);
+  if (parts.some((part) => scanner.ignoreDirectories.has(part))) return true;
+  if (scanner.ignoreFilenames.has(path.basename(lower))) return true;
+  return scanner.ignoreExtensions.has(path.extname(lower));
+}
+
+async function fetchPolicy(opts = {}) {
+  const fetchImpl = opts.fetchImpl || globalThis.fetch;
+  if (!fetchImpl) return null;
+  const server = opts.server || SERVER;
+  const key = opts.key || KEY;
+  try {
+    const r = await fetchImpl(server + '/api/v1/policy', {
+      headers: { 'x-api-key': key },
+    });
+    if (!r || !r.ok) return null;
+    return r.json();
+  } catch (e) {
+    if (!opts.silent) console.error('  policy refresh failed:', e.message);
+    return null;
+  }
+}
+
+async function refreshPolicy(opts = {}) {
+  const pol = await fetchPolicy(opts);
+  if (pol && pol.scanner) scannerState = scannerConfig(pol.scanner);
+  return scannerState;
+}
 
 async function postJson(apiPath, body, opts = {}) {
   const server = opts.server || SERVER;
   const key = opts.key || KEY;
+  const fetchImpl = opts.fetchImpl || globalThis.fetch;
+  if (!fetchImpl) return null;
   try {
-    const r = await fetch(server + apiPath, {
+    const r = await fetchImpl(server + apiPath, {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': key }, body: JSON.stringify(body),
     });
     return r.json();
@@ -66,12 +124,14 @@ function unscannedFileEvent(filename, user, outcome, note) {
 
 async function scanFile(file, opts = {}) {
   const watchDir = opts.watchDir || WATCH;
-  const maxBytes = opts.maxBytes || MAX_BYTES;
-  const full = path.join(watchDir, file);
+  const scanner = opts.scanner ? scannerConfig(opts.scanner) : scannerState;
+  const maxBytes = opts.maxBytes || scanner.maxFileBytes;
+  const root = path.resolve(watchDir);
+  const full = path.resolve(root, file);
+  if (full !== root && !full.startsWith(root + path.sep)) return;
   let stat; try { stat = fs.statSync(full); } catch { return; }
   if (!stat.isFile()) return;
-  const lower = file.toLowerCase();
-  if (IGNORE_FILES.has(lower) || IGNORE_EXT.has(path.extname(lower))) return;
+  if (ignoredByScanner(file, scanner)) return;
   const user = opts.user || os.userInfo().username;
 
   if (stat.size > maxBytes) {
@@ -115,10 +175,25 @@ function start() {
   console.log('  server  :', SERVER);
   console.log('  Supported: pdf, docx, xlsx, pptx, and text files. Drop a file in to scan.\n');
 
+  refreshPolicy({ silent: true }).finally(() => {
+    for (const f of fs.readdirSync(WATCH)) scanFile(f);
+  });
+  const refreshTimer = setInterval(() => refreshPolicy({ silent: true }), POLICY_REFRESH_MS);
+  if (refreshTimer.unref) refreshTimer.unref();
   fs.watch(WATCH, (event, filename) => { if (filename && event === 'rename') setTimeout(() => scanFile(filename), 200); });
-  for (const f of fs.readdirSync(WATCH)) scanFile(f);
 }
 
 if (require.main === module) start();
 
-module.exports = { scanFile, fileRequest, report, scanFileApi, postJson, start };
+module.exports = {
+  scanFile,
+  fileRequest,
+  report,
+  scanFileApi,
+  postJson,
+  fetchPolicy,
+  refreshPolicy,
+  scannerConfig,
+  ignoredByScanner,
+  start,
+};
