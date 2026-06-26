@@ -14,6 +14,7 @@
 const express = require('express');
 const cookieParser = require('cookie-parser');
 const helmet = require('helmet');
+const crypto = require('crypto');
 const path = require('path');
 
 const detector = require('./src/detector');
@@ -99,6 +100,10 @@ function emitSecurityAlert(row, action) {
 // INGEST / GATE  (called by the proxy/SDK — protected by an API key)
 // =============================================================================
 const INGEST_KEY = process.env.INGEST_API_KEY || 'dev-ingest-key';
+const INGEST_AUTH_MAX_FAILURES = boundedEnvInt('INGEST_AUTH_MAX_FAILURES', 20, 3, 1000);
+const INGEST_AUTH_WINDOW_MS = boundedEnvInt('INGEST_AUTH_WINDOW_MS', 60000, 1000, 3600000);
+const INGEST_AUTH_LOCK_MS = boundedEnvInt('INGEST_AUTH_LOCK_MS', 60000, 1000, 3600000);
+const ingestFailures = new Map();
 
 function currentPreflight() {
   return preflight.configStatus({
@@ -112,10 +117,60 @@ function currentPreflight() {
 }
 
 function checkIngestKey(req, res, next) {
-  const key = req.get('x-api-key');
-  if (key !== INGEST_KEY) return res.status(401).json({ error: 'invalid ingest key' });
-  next();
+  const key = req.get('x-api-key') || '';
+  const subject = req.ip || (req.connection && req.connection.remoteAddress) || 'unknown';
+  if (constantTimeStringEqual(key, INGEST_KEY)) {
+    ingestFailures.delete(subject);
+    return next();
+  }
+  const status = registerIngestFailure(subject);
+  if (status.locked) return res.status(429).json({ error: 'too many ingest key attempts', retryMs: status.retryMs });
+  return res.status(401).json({ error: 'invalid ingest key' });
 }
+
+function constantTimeStringEqual(actual, expected) {
+  const actualText = String(actual || '');
+  const expectedText = String(expected || '');
+  if (actualText.length > 4096 || expectedText.length > 4096) return false;
+  const length = Math.max(actualText.length, expectedText.length, 1);
+  const actualBuffer = Buffer.alloc(length);
+  const expectedBuffer = Buffer.alloc(length);
+  Buffer.from(actualText).copy(actualBuffer);
+  Buffer.from(expectedText).copy(expectedBuffer);
+  return actualText.length === expectedText.length && crypto.timingSafeEqual(actualBuffer, expectedBuffer);
+}
+
+function boundedEnvInt(name, fallback, min, max) {
+  const n = Number(process.env[name]);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, Math.floor(n)));
+}
+
+function registerIngestFailure(subject) {
+  const now = Date.now();
+  const current = ingestFailures.get(subject) || { count: 0, firstAt: now, lockedUntil: 0 };
+  if (current.lockedUntil > now) return { locked: true, retryMs: current.lockedUntil - now };
+  if (now - current.firstAt > INGEST_AUTH_WINDOW_MS) {
+    current.count = 0;
+    current.firstAt = now;
+    current.lockedUntil = 0;
+  }
+  current.count += 1;
+  if (current.count >= INGEST_AUTH_MAX_FAILURES) current.lockedUntil = now + INGEST_AUTH_LOCK_MS;
+  ingestFailures.set(subject, current);
+  return { locked: current.lockedUntil > now, retryMs: Math.max(0, current.lockedUntil - now) };
+}
+
+function pruneIngestFailures() {
+  const now = Date.now();
+  for (const [subject, status] of ingestFailures) {
+    if (status.lockedUntil > now) continue;
+    if (now - status.firstAt <= INGEST_AUTH_WINDOW_MS) continue;
+    ingestFailures.delete(subject);
+  }
+}
+
+setInterval(pruneIngestFailures, Math.min(INGEST_AUTH_WINDOW_MS, 60000)).unref();
 
 // Privacy: only the raw prompt of an item HELD for admin approval is retained,
 // and only sealed (AES-256-GCM). Returns undefined when nothing should be

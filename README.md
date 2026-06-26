@@ -182,6 +182,9 @@ Copy `.env.example` to `.env` (or export):
 | `SENTINEL_SECRET` | Session cookie signing secret |
 | `SENTINEL_DATA_KEY` | Encrypts retained raw prompts at rest (falls back to `SENTINEL_SECRET`; if neither set, raw isn't stored) |
 | `INGEST_API_KEY` | Key sensors present to the gate API |
+| `INGEST_AUTH_MAX_FAILURES` | Optional invalid ingest-key throttle threshold (default 20, bounded 3 to 1000) |
+| `INGEST_AUTH_WINDOW_MS` | Optional invalid ingest-key throttle window (default 60000 ms, bounded 1000 to 3600000) |
+| `INGEST_AUTH_LOCK_MS` | Optional invalid ingest-key throttle lock time (default 60000 ms, bounded 1000 to 3600000) |
 | `FILE_EXTRACT_TIMEOUT_MS` | Optional per-file extraction timeout (default 5000 ms, bounded 100 to 60000) |
 | `FILE_EXTRACT_MAX_CHARS` | Optional extracted-text cap before detection (default 1000000 chars, bounded 1000 to 5000000) |
 | `SIEM_WEBHOOK_URL` | Optional sanitized webhook for high-risk security events |

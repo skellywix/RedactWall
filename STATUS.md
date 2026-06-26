@@ -6,6 +6,8 @@
 
 ## Done
 
+- 2026-06-26: Hardened sensor ingest authentication with constant-time API-key comparison and a bounded invalid-key throttle that still lets a correct key through from the same client.
+  Evidence: `node --test test/ingest-auth.test.js`, `npm test`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, live HTTP ingest auth smoke, `verifyAuditChain()`.
 - 2026-06-26: Added fail-closed file extraction guardrails: corrupt supported files and extraction timeouts are recorded as blocked unscanned files, extracted text is bounded before detection, and browser/endpoint clients surface unreadable files as blocked.
   Evidence: `node --test test/processors.test.js`, `npm test`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, live HTTP file extraction smoke, `verifyAuditChain()`.
 - 2026-06-26: Added Zod request-body validation for sensor ingest, file scanning, response scanning, login, approval notes, template application, and policy updates. Validation responses name fields only, malformed JSON returns sanitized JSON, bad base64 is rejected before decoding, and unknown policy keys fail closed.
