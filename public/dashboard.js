@@ -1,132 +1,307 @@
-const $ = (s,el=document)=>el.querySelector(s);
-const $$ = (s,el=document)=>[...el.querySelectorAll(s)];
-const fmt = (iso)=> new Date(iso).toLocaleString();
-const sevClass = (l)=> l||'low';
-let selected=null;
-let csrfToken='';
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+const fmt = (iso) => (iso ? new Date(iso).toLocaleString() : '-');
+const fmtTime = (iso) => (iso ? new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-');
+const sevClass = (l) => String(l || 'low').toLowerCase();
+let selected = null;
+let csrfToken = '';
+let currentQueue = [];
+let currentActivity = [];
+let searchTerm = '';
 
-async function api(path, opts={}){
-  const next = {...opts};
+const icons = {
+  check: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m5 12 4 4L19 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  deny: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+  eye: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" stroke="currentColor" stroke-width="1.7"/><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" stroke="currentColor" stroke-width="1.7"/></svg>',
+  shield: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 4l7 3v5c0 4.2-2.6 6.8-7 8-4.4-1.2-7-3.8-7-8V7l7-3Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
+};
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+
+function humanize(s) {
+  return String(s || '-').replace(/_/g, ' ');
+}
+
+function statusTone(status) {
+  const s = String(status || '').toLowerCase();
+  if (['approved', 'allowed', 'justified', 'warned_sent', 'redacted'].includes(s)) return 'good';
+  if (['denied', 'blocked_by_user', 'injection_blocked', 'response_flagged'].includes(s)) return 'bad';
+  if (['pending', 'shadow_ai'].includes(s)) return 'warn';
+  return 'info';
+}
+
+function sourceLabel(source) {
+  return ({
+    browser_extension: 'Browser',
+    endpoint_agent: 'Endpoint',
+    mcp_guard: 'MCP',
+    api: 'API',
+    proxy: 'Proxy',
+  })[source] || source || 'API';
+}
+
+function queryText(q) {
+  return [
+    q.id, q.user, q.destination, q.source, q.channel, q.status, q.maxSeverityLabel,
+    q.redactedPrompt, ...(q.reasons || []), ...(q.categories || []),
+    ...(q.findings || []).map((f) => `${f.type} ${f.masked || ''}`),
+    ...Object.keys(q.entityCounts || {}),
+  ].join(' ').toLowerCase();
+}
+
+function matchesSearch(q) {
+  return !searchTerm || queryText(q).includes(searchTerm);
+}
+
+function updateSearch(value) {
+  searchTerm = String(value || '').trim().toLowerCase();
+  renderQueueView();
+  renderActivityRows(currentActivity);
+}
+
+async function api(path, opts = {}) {
+  const next = { ...opts };
   const method = String(next.method || 'GET').toUpperCase();
   const headers = new Headers(next.headers || {});
-  if (csrfToken && ['POST','PUT','PATCH','DELETE'].includes(method)) headers.set('x-csrf-token', csrfToken);
+  if (csrfToken && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) headers.set('x-csrf-token', csrfToken);
   next.headers = headers;
-  const r=await fetch(path,next);
-  if(r.status===401){location.href='/login.html';return null;}
-  if(r.status===403){alert('Security token expired. Refresh the dashboard and try again.');}
+  const r = await fetch(path, next);
+  if (r.status === 401) { location.href = '/login.html'; return null; }
+  if (r.status === 403) alert('Security token expired. Refresh the dashboard and try again.');
   return r;
 }
 
-async function loadCsrf(){
+async function loadCsrf() {
   const r = await api('/api/csrf');
   if (!r) return;
   const body = await r.json();
   csrfToken = body.csrfToken || '';
 }
 
-async function init(){
-  const me = await (await api('/api/me')).json();
+async function init() {
+  const meRes = await api('/api/me');
+  if (!meRes) return;
+  const me = await meRes.json();
   await loadCsrf();
-  $('#who').textContent = me.user+' - Security Admin';
-  if(me.defaultPassword){ const b=$('#banner'); b.style.display='block';
-    b.textContent='[!] Default admin password in use. Set ADMIN_PASSWORD before deploying to production.'; }
+  $('#who').textContent = `${me.user} / Security Admin`;
+  if (me.defaultPassword) {
+    const b = $('#banner');
+    b.style.display = 'block';
+    b.textContent = 'Default admin password is active. Set ADMIN_PASSWORD before production.';
+  }
   await refreshAll();
   connectStream();
 }
 
-async function refreshAll(){ await Promise.all([loadStats(),loadQueue(),loadActivity()]); }
-
-async function loadStats(){
-  const s = await (await api('/api/stats')).json();
-  $('#stats').innerHTML = [
-    ['pending',s.pending,'Awaiting approval'],
-    ['alert',s.todayBlocked,'Blocked today'],
-    ['',s.approved,'Approved'],
-    ['',s.denied,'Denied'],
-    ['',s.total,'Total prompts gated'],
-  ].map(([c,n,l])=>`<div class="stat ${c}"><div class="n">${n}</div><div class="l">${l}</div></div>`).join('');
-  const b=$('#qBadge'); if(s.pending>0){b.classList.remove('hidden');b.textContent=s.pending;}else b.classList.add('hidden');
-  $('#topEntities').innerHTML = (s.topEntities.length? s.topEntities : []).map(([k,v])=>{
-    const max = s.topEntities[0][1]||1;
-    return `<div class="barrow"><div class="name">${k}</div><div class="bar"><i style="width:${Math.round(v/max*100)}%"></i></div><div class="v">${v}</div></div>`;
-  }).join('') || '<div class="empty" style="padding:24px">No detections yet</div>';
+async function refreshAll() {
+  await Promise.all([loadStats(), loadQueue(), loadActivity()]);
 }
 
-function findingChips(findings,categories){
-  const fc=(findings||[]).map(f=>`<span class="chip"><b>${f.type}</b> ${f.masked||''}</span>`).join('');
-  const cc=(categories||[]).map(c=>`<span class="chip" style="border-color:#5b4a1f;color:#fcd34d"><b>${c}</b></span>`).join('');
-  return fc+cc;
+async function loadStats() {
+  const r = await api('/api/stats');
+  if (!r) return;
+  const s = await r.json();
+  const totalDecisions = (s.approved || 0) + (s.denied || 0);
+  const approveRate = totalDecisions ? `${Math.round(((s.approved || 0) / totalDecisions) * 100)}%` : '-';
+  const cards = [
+    ['pending', s.pending, 'Pending approval', 'held for review'],
+    ['alert', s.todayBlocked, 'Blocked today', 'policy stops'],
+    ['good', s.approved, 'Approved', 'released by admin'],
+    ['', s.denied, 'Denied', 'never released'],
+    ['', approveRate, 'Approval rate', 'admin decisions'],
+  ];
+  $('#stats').innerHTML = cards.map(([c, n, l, m]) => `
+    <div class="stat ${c}">
+      <div class="l">${escapeHtml(l)}</div>
+      <div class="n">${escapeHtml(n)}</div>
+      <div class="m">${escapeHtml(m)}</div>
+      <div class="stat-rule"></div>
+    </div>`).join('');
+  const b = $('#qBadge');
+  if (s.pending > 0) { b.classList.remove('hidden'); b.textContent = s.pending; }
+  else b.classList.add('hidden');
+  $('#topEntities').innerHTML = (s.topEntities.length ? s.topEntities : []).map(([k, v]) => {
+    const max = s.topEntities[0][1] || 1;
+    return `<div class="barrow"><div class="name">${escapeHtml(k)}</div><div class="bar"><i style="--w:${Math.round((v / max) * 100)}%"></i></div><div class="v">${escapeHtml(v)}</div></div>`;
+  }).join('') || '<div class="empty"><div class="big">No detections</div>Current data set has no classified prompt findings.</div>';
 }
-const srcLabel={browser_extension:'Browser',endpoint_agent:'Endpoint',mcp_guard:'MCP',api:'API',proxy:'Proxy'};
 
-async function loadQueue(){
-  const rows = await (await api('/api/queries?status=pending')).json();
+function findingChips(findings, categories) {
+  const fc = (findings || []).map((f) => `<span class="chip"><b>${escapeHtml(f.type)}</b> ${escapeHtml(f.masked || '')}</span>`).join('');
+  const cc = (categories || []).map((c) => `<span class="chip category"><b>${escapeHtml(c)}</b></span>`).join('');
+  return fc + cc;
+}
+
+async function loadQueue() {
+  const r = await api('/api/queries?status=pending');
+  if (!r) return;
+  currentQueue = await r.json();
+  if (currentQueue.length && !currentQueue.some((q) => q.id === selected)) selected = currentQueue[0].id;
+  if (!currentQueue.length) selected = null;
+  renderQueueView();
+}
+
+function renderQueueView() {
   const el = $('#queueList');
-  if(!rows.length){ el.innerHTML = `<div class="empty"><div class="big">OK</div>Queue clear - no prompts awaiting approval</div>`; return; }
-  el.innerHTML = rows.map(renderQueueItem).join('');
-}
-
-function renderQueueItem(q){
-  return `<div class="q ${selected===q.id?'selected':''}" data-id="${q.id}">
-    <div class="top">
-      <span class="sev ${sevClass(q.maxSeverityLabel)}">${q.maxSeverityLabel}</span>
-      <span class="risk">risk <b>${q.riskScore}</b>/100</span>
-    </div>
-    <div class="meta">
-      <span>User ${q.user}</span><span>to ${q.destination}</span><span>${q.channel||''}</span><span>${fmt(q.createdAt)}</span>
-    </div>
-    <div class="prompt" id="p_${q.id}">${escapeHtml(q.redactedPrompt)}</div>
-    <div class="chips">${findingChips(q.findings,q.categories)}</div>
-    <div style="margin-top:8px;font-size:12px;color:var(--mut)">Reasons: ${(q.reasons||[]).join('; ')}</div>
-    <textarea class="note" id="note_${q.id}" placeholder="Decision note (optional, recorded in audit log)"></textarea>
-    <div class="actions">
-      <button class="btn approve" data-act="approve" data-id="${q.id}">Approve &amp; release</button>
-      <button class="btn deny" data-act="deny" data-id="${q.id}">Deny</button>
-      <button class="btn reveal" data-act="reveal" data-id="${q.id}">Reveal raw</button>
-    </div>
-  </div>`;
-}
-
-function escapeHtml(s){return (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
-
-document.addEventListener('click', async (e)=>{
-  const act = e.target.dataset.act;
-  if(!act) return;
-  const id = e.target.dataset.id;
-  if(act==='reveal'){
-    const r = await (await api(`/api/queries/${id}/reveal`,{method:'POST'})).json();
-    const p = $('#p_'+id); if(p){ p.textContent = r.rawPrompt; p.style.borderColor='#5b2a2a'; }
-    e.target.textContent='Raw shown (logged)'; e.target.disabled=true;
+  const rows = currentQueue.filter(matchesSearch);
+  if (!currentQueue.length) {
+    el.innerHTML = '<div class="empty"><div class="big">Queue clear</div>No prompts are awaiting approval.</div>';
+    renderIncident(null);
     return;
   }
-  if(act==='approve'||act==='deny'){
-    const note = ($('#note_'+id)||{}).value || '';
-    e.target.disabled=true;
-    await api(`/api/queries/${id}/${act}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({note})});
-    await refreshAll();
+  if (!rows.length) {
+    el.innerHTML = '<div class="empty"><div class="big">No matches</div>No pending prompts match the current search.</div>';
+    renderIncident(null);
+    return;
+  }
+  if (!rows.some((q) => q.id === selected)) selected = rows[0].id;
+  el.innerHTML = rows.map(renderQueueItem).join('');
+  renderIncident(rows.find((q) => q.id === selected) || rows[0]);
+}
+
+function renderQueueItem(q) {
+  const sev = sevClass(q.maxSeverityLabel);
+  const detected = Object.keys(q.entityCounts || {}).join(', ') || (q.categories || []).join(', ') || 'policy match';
+  return `<article class="q ${selected === q.id ? 'selected' : ''}" data-id="${escapeHtml(q.id)}" tabindex="0">
+    <div class="top">
+      <span class="select-dot" aria-hidden="true"></span>
+      <span class="sev ${sev}">${escapeHtml(q.maxSeverityLabel || 'low')}</span>
+      <span class="risk">Risk <b>${escapeHtml(q.riskScore ?? 0)}</b>/100</span>
+    </div>
+    <div class="queue-mainline">
+      <strong>${escapeHtml(q.user || 'unknown user')}</strong>
+      <span>${escapeHtml(sourceLabel(q.source))} -> ${escapeHtml(q.destination || 'unknown destination')}</span>
+      <span>${escapeHtml(fmtTime(q.createdAt))}</span>
+    </div>
+    <div class="prompt" id="p_${escapeHtml(q.id)}">${escapeHtml(q.redactedPrompt)}</div>
+    <div class="chips">${findingChips(q.findings, q.categories)}</div>
+    <div class="reasons">Detected: ${escapeHtml(detected)}${(q.reasons || []).length ? `; ${escapeHtml((q.reasons || []).join('; '))}` : ''}</div>
+    <textarea class="note" id="note_${escapeHtml(q.id)}" placeholder="Decision note, recorded in audit log"></textarea>
+    <div class="actions">
+      <button class="btn approve" data-act="approve" data-id="${escapeHtml(q.id)}" type="button">${icons.check}Approve release</button>
+      <button class="btn deny" data-act="deny" data-id="${escapeHtml(q.id)}" type="button">${icons.deny}Deny</button>
+      <button class="btn reveal" data-act="reveal" data-id="${escapeHtml(q.id)}" type="button">${icons.eye}Reveal gated</button>
+    </div>
+  </article>`;
+}
+
+function renderIncident(q) {
+  const el = $('#incidentDetail');
+  if (!q) {
+    el.innerHTML = '<div class="empty"><div class="big">No selected incident</div>The approval queue is clear.</div>';
+    return;
+  }
+  const sev = sevClass(q.maxSeverityLabel);
+  const risk = Math.max(0, Math.min(100, Number(q.riskScore || 0)));
+  const matches = (q.findings || []).slice(0, 5).map((f) => `
+    <div class="posture-item"><span>${escapeHtml(f.type)}</span><b>${escapeHtml(f.masked || 'redacted')}</b></div>`).join('')
+    || '<div class="posture-item"><span>Policy category</span><b>Context match</b></div>';
+  el.innerHTML = `
+    <div class="detail-grid">
+      <div class="datum"><label>User</label><b>${escapeHtml(q.user || 'unknown')}</b></div>
+      <div class="datum"><label>Destination</label><b>${escapeHtml(q.destination || 'unknown')}</b></div>
+      <div class="datum"><label>Sensor</label><b>${escapeHtml(sourceLabel(q.source))}</b></div>
+      <div class="datum"><label>Created</label><b>${escapeHtml(fmt(q.createdAt))}</b></div>
+    </div>
+    <div class="risk-meter" style="--risk-width:${risk}%">
+      <div class="top"><span class="sev ${sev}">${escapeHtml(q.maxSeverityLabel || 'low')}</span><span class="risk">Risk <b>${risk}</b>/100</span></div>
+      <div class="risk-track"><i></i></div>
+    </div>
+    <div class="prompt">${escapeHtml(q.redactedPrompt)}</div>
+    <div class="posture-list">${matches}</div>`;
+}
+
+document.addEventListener('click', async (e) => {
+  const actionButton = e.target.closest('[data-act]');
+  if (actionButton) {
+    const act = actionButton.dataset.act;
+    const id = actionButton.dataset.id;
+    if (act === 'reveal') {
+      const ok = confirm('Reveal is audit-logged and may display sensitive content. Continue?');
+      if (!ok) return;
+      const r = await api(`/api/queries/${encodeURIComponent(id)}/reveal`, { method: 'POST' });
+      if (!r) return;
+      const body = await r.json();
+      const p = $(`#p_${CSS.escape(id)}`);
+      if (p) { p.textContent = body.rawPrompt; p.classList.add('revealed'); }
+      actionButton.textContent = 'Raw shown and logged';
+      actionButton.disabled = true;
+      return;
+    }
+    if (act === 'approve' || act === 'deny') {
+      const note = ($(`#note_${CSS.escape(id)}`) || {}).value || '';
+      actionButton.disabled = true;
+      const r = await api(`/api/queries/${encodeURIComponent(id)}/${act}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note }),
+      });
+      if (r && r.ok) await refreshAll();
+      else actionButton.disabled = false;
+    }
+    return;
+  }
+  const jump = e.target.closest('[data-tab-jump]');
+  if (jump) {
+    activateTab(jump.dataset.tabJump);
+    return;
+  }
+  const row = e.target.closest('.q[data-id]');
+  if (row && !e.target.closest('textarea,input,button,select,a')) {
+    selected = row.dataset.id;
+    renderQueueView();
   }
 });
 
-async function loadActivity(){
-  const rows = await (await api('/api/queries?limit=200')).json();
-  $('#activityRows').innerHTML = rows.map(q=>`<tr>
-    <td>${fmt(q.createdAt)}</td><td>${(srcLabel[q.source]||q.source||'API')}</td><td>${q.user}</td><td class="mono">${q.destination}</td>
-    <td><span class="sev ${sevClass(q.maxSeverityLabel)}">${q.maxSeverityLabel}</span></td>
-    <td>${q.riskScore}</td>
-    <td>${Object.keys(q.entityCounts||{}).join(', ')||'-'}</td>
-    <td><span class="pill ${q.status==='shadow_ai'?'ADMIN_LOGIN':(q.status==='approved'||q.status==='allowed'||q.status==='justified'||q.status==='warned_sent'||q.status==='redacted'?'APPROVED':(q.status==='denied'||q.status==='blocked_by_user'||q.status==='injection_blocked'||q.status==='response_flagged'?'DENIED':'BLOCKED'))}">${q.status}</span></td>
-  </tr>`).join('') || '<tr><td colspan="8" class="empty">No activity</td></tr>';
+document.addEventListener('keydown', (e) => {
+  const row = e.target.closest('.q[data-id]');
+  if (!row || !['Enter', ' '].includes(e.key)) return;
+  if (e.target.closest('textarea,input,button,select,a')) return;
+  e.preventDefault();
+  selected = row.dataset.id;
+  renderQueueView();
+});
+
+async function loadActivity() {
+  const r = await api('/api/queries?limit=200');
+  if (!r) return;
+  currentActivity = await r.json();
+  renderActivityRows(currentActivity);
 }
 
-async function loadAudit(){
-  const d = await (await api('/api/audit')).json();
+function renderActivityRows(rows) {
+  const filtered = (rows || []).filter(matchesSearch);
+  $('#activityRows').innerHTML = filtered.map((q) => `<tr>
+    <td class="mono">${escapeHtml(fmt(q.createdAt))}</td>
+    <td>${escapeHtml(sourceLabel(q.source))}</td>
+    <td>${escapeHtml(q.user || '-')}</td>
+    <td class="mono">${escapeHtml(q.destination || '-')}</td>
+    <td><span class="sev ${sevClass(q.maxSeverityLabel)}">${escapeHtml(q.maxSeverityLabel || 'low')}</span></td>
+    <td class="mono">${escapeHtml(q.riskScore ?? 0)}</td>
+    <td>${escapeHtml(Object.keys(q.entityCounts || {}).join(', ') || '-')}</td>
+    <td><span class="pill ${statusTone(q.status)}">${escapeHtml(humanize(q.status))}</span></td>
+  </tr>`).join('') || '<tr><td colspan="8" class="empty">No matching activity</td></tr>';
+}
+
+async function loadAudit() {
+  const r = await api('/api/audit');
+  if (!r) return;
+  const d = await r.json();
   const ig = d.integrity;
+  $('#integrity').className = `integrity ${ig.ok ? 'ok' : 'bad'}`;
   $('#integrity').innerHTML = ig.ok
-    ? `<span class="ok">* Chain verified</span> - ${ig.count} entries, cryptographically linked (SHA-256).`
-    : `<span class="bad">* Integrity check FAILED</span> at ${ig.brokenAt}`;
-  $('#auditRows').innerHTML = d.entries.map(a=>`<tr>
-    <td class="mono">${fmt(a.ts)}</td><td><span class="pill ${a.action}">${a.action}</span></td>
-    <td>${a.actor||'-'}</td><td class="mono">${a.queryId||'-'}</td><td>${a.detail||''}</td>
+    ? `${icons.shield}<span>Chain verified: ${escapeHtml(ig.count)} cryptographically linked entries.</span>`
+    : `${icons.shield}<span>Integrity check failed at ${escapeHtml(ig.brokenAt)}.</span>`;
+  $('#auditRows').innerHTML = d.entries.map((a) => `<tr>
+    <td class="mono">${escapeHtml(fmt(a.ts))}</td>
+    <td><span class="pill ${statusTone(a.action)}">${escapeHtml(humanize(a.action))}</span></td>
+    <td>${escapeHtml(a.actor || '-')}</td>
+    <td class="mono">${escapeHtml(a.queryId || '-')}</td>
+    <td>${escapeHtml(a.detail || '')}</td>
   </tr>`).join('');
 }
 
@@ -158,69 +333,95 @@ async function exportEvidence(){
   }
 }
 
-async function loadPolicy(){
-  const p = await (await api('/api/policy')).json();
-  const tpls = await (await api('/api/policy/templates')).json();
-  const modes=[['warn','Warn','Nudge the user, let them proceed'],['justify','Require justification','User must give a business reason'],['redact','Redact &amp; send','Tokenize PII, send safely, restore the reply'],['block','Block','Hold for Security Admin approval']];
-  const tplBar = `<div style="margin-bottom:16px"><div style="color:var(--mut);font-size:12px;margin-bottom:6px">One-click regulation templates</div>
-    <div class="chips">${tpls.map(t=>`<button class="chip ps-tpl" data-tpl="${t.id}" title="${t.description.replace(/"/g,'&quot;')}" style="cursor:pointer">${t.label}</button>`).join('')}</div></div>`;
-  $('#policyBox').innerHTML = tplBar + `
-    <div style="color:var(--mut);font-size:12.5px;margin-bottom:10px">When a sensor detects sensitive content, do this:</div>
-    <div style="display:flex;gap:8px;margin-bottom:20px">
-      ${modes.map(([v,t,d])=>`<label style="flex:1;border:1px solid ${p.enforcementMode===v?'#3b82f6':'var(--line)'};background:${p.enforcementMode===v?'#10243f':'var(--panel2)'};border-radius:10px;padding:10px;cursor:pointer;display:block">
-        <div style="display:flex;align-items:center;gap:7px"><input type="radio" name="mode" value="${v}" ${p.enforcementMode===v?'checked':''} style="accent-color:#3b82f6"/><b style="font-size:13px">${t}</b></div>
-        <div style="color:var(--mut);font-size:11.5px;margin-top:4px;margin-left:22px">${d}</div></label>`).join('')}
+async function loadPolicy() {
+  const pRes = await api('/api/policy');
+  const tRes = await api('/api/policy/templates');
+  if (!pRes || !tRes) return;
+  const p = await pRes.json();
+  const tpls = await tRes.json();
+  const modes = [
+    ['warn', 'Warn', 'Nudge the user, let them proceed'],
+    ['justify', 'Require justification', 'User must give a business reason'],
+    ['redact', 'Redact and send', 'Tokenize PII before release'],
+    ['block', 'Block', 'Hold for admin approval'],
+  ];
+  const tplBar = `<div class="template-bar"><div class="template-title">Regulation templates</div>
+    <div class="chips">${tpls.map((t) => `<button class="chip ps-tpl" data-tpl="${escapeHtml(t.id)}" title="${escapeHtml(t.description)}" type="button"><b>${escapeHtml(t.label)}</b></button>`).join('')}</div></div>`;
+  $('#policyBox').innerHTML = `${tplBar}
+    <div class="policy-label">When a sensor detects sensitive content</div>
+    <div class="policy-options">
+      ${modes.map(([v, t, d]) => `<label class="policy-option ${p.enforcementMode === v ? 'selected' : ''}">
+        <span><input type="radio" name="mode" value="${v}" ${p.enforcementMode === v ? 'checked' : ''}/>${t}</span>
+        <p>${d}</p>
+      </label>`).join('')}
     </div>
-    <div style="color:var(--mut);font-size:12.5px;margin-bottom:10px">Trigger thresholds:</div>
-    <div style="display:grid;grid-template-columns:1fr 110px;gap:10px;align-items:center">
-      <label>Block at minimum severity</label>
+    <div class="policy-label">Trigger thresholds</div>
+    <div class="field-grid">
+      <label for="pol_sev">Block at minimum severity</label>
       <select id="pol_sev">
-        ${[[1,'low'],[2,'medium'],[3,'high'],[4,'critical']].map(([v,l])=>`<option value="${v}" ${p.blockMinSeverity===v?'selected':''}>${l}</option>`).join('')}
+        ${[[1, 'low'], [2, 'medium'], [3, 'high'], [4, 'critical']].map(([v, l]) => `<option value="${v}" ${p.blockMinSeverity === v ? 'selected' : ''}>${l}</option>`).join('')}
       </select>
-      <label>Block at risk score &gt;=</label>
-      <input id="pol_risk" type="number" min="0" max="100" value="${p.blockRiskScore}" style="padding:8px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);color:var(--txt)"/>
+      <label for="pol_risk">Block at risk score greater than or equal to</label>
+      <input id="pol_risk" type="number" min="0" max="100" value="${escapeHtml(p.blockRiskScore)}"/>
     </div>
-    <div style="margin-top:16px"><div style="color:var(--mut);font-size:12px;margin-bottom:6px">Hard-stop entities (always block)</div>
-      <div class="chips">${p.alwaysBlock.map(x=>`<span class="chip"><b>${x}</b></span>`).join('')}</div></div>
-    <div style="margin-top:16px"><div style="color:var(--mut);font-size:12px;margin-bottom:6px">Governed AI destinations</div>
-      <div class="chips">${p.governedDestinations.map(x=>`<span class="chip">${x}</span>`).join('')}</div></div>
-    <button class="btn approve" id="savePolicy" style="margin-top:20px">Save policy</button>
-    <span id="polSaved" style="margin-left:12px;color:#86efac;font-size:12.5px"></span>`;
-  $('#savePolicy').onclick = async ()=>{
-    const mode=(document.querySelector('input[name=mode]:checked')||{}).value||p.enforcementMode;
-    const body = { enforcementMode:mode, blockMinSeverity:Number($('#pol_sev').value), blockRiskScore:Number($('#pol_risk').value) };
-    await api('/api/policy',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-    $('#polSaved').textContent='Saved'; setTimeout(()=>$('#polSaved').textContent='',2000);
+    <div class="template-bar"><div class="template-title">Hard-stop entities</div>
+      <div class="chips">${(p.alwaysBlock || []).map((x) => `<span class="chip"><b>${escapeHtml(x)}</b></span>`).join('')}</div></div>
+    <div class="template-bar"><div class="template-title">Governed AI destinations</div>
+      <div class="chips">${(p.governedDestinations || []).map((x) => `<span class="chip">${escapeHtml(x)}</span>`).join('')}</div></div>
+    <button class="btn approve" id="savePolicy" type="button">${icons.check}Save policy</button>
+    <span id="polSaved" class="save-status"></span>`;
+  $$('input[name=mode]').forEach((radio) => {
+    radio.onchange = () => {
+      $$('.policy-option').forEach((option) => option.classList.toggle('selected', option.contains(radio) && radio.checked));
+    };
+  });
+  $('#savePolicy').onclick = async () => {
+    const mode = (document.querySelector('input[name=mode]:checked') || {}).value || p.enforcementMode;
+    const body = { enforcementMode: mode, blockMinSeverity: Number($('#pol_sev').value), blockRiskScore: Number($('#pol_risk').value) };
+    const r = await api('/api/policy', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!r || !r.ok) return;
+    $('#polSaved').textContent = 'Saved';
+    setTimeout(() => { $('#polSaved').textContent = ''; }, 2000);
   };
-  $$('.ps-tpl').forEach(b=>b.onclick=async()=>{
-    await api('/api/policy/apply-template',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:b.dataset.tpl})});
-    loadPolicy();
+  $$('.ps-tpl').forEach((b) => {
+    b.onclick = async () => {
+      await api('/api/policy/apply-template', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: b.dataset.tpl }) });
+      loadPolicy();
+    };
   });
 }
 
-// Tabs
-$$('.tab').forEach(t=>t.onclick=()=>{
-  $$('.tab').forEach(x=>x.classList.remove('active')); t.classList.add('active');
-  $$('section[id^=tab-]').forEach(s=>s.classList.add('hidden'));
-  $('#tab-'+t.dataset.tab).classList.remove('hidden');
-  if(t.dataset.tab==='audit') loadAudit();
-  if(t.dataset.tab==='policy') loadPolicy();
-  if(t.dataset.tab==='activity') loadActivity();
+function activateTab(name) {
+  $$('.tab').forEach((x) => x.classList.toggle('active', x.dataset.tab === name));
+  $$('section[id^=tab-]').forEach((s) => s.classList.add('hidden'));
+  $(`#tab-${CSS.escape(name)}`).classList.remove('hidden');
+  if (name === 'audit') loadAudit();
+  if (name === 'policy') loadPolicy();
+  if (name === 'activity') loadActivity();
+}
+
+$$('.tab').forEach((t) => {
+  t.onclick = () => activateTab(t.dataset.tab);
 });
 
-$('#logout').onclick = async ()=>{ await api('/api/logout',{method:'POST'}); location.href='/login.html'; };
+$('#refreshQueue').onclick = loadQueue;
+$('#logout').onclick = async () => { await api('/api/logout', { method: 'POST' }); location.href = '/login.html'; };
 $('#exportEvidence').onclick = exportEvidence;
+$('#globalSearch').addEventListener('input', (e) => updateSearch(e.target.value));
 
-// Live stream
-function connectStream(){
+function connectStream() {
   const es = new EventSource('/api/stream');
-  es.addEventListener('query', ()=>{ loadStats(); loadQueue(); flash(); });
-  es.addEventListener('decision', ()=>{ loadStats(); loadQueue(); loadActivity(); });
-  es.addEventListener('stats', ()=> loadStats());
-  es.onerror = ()=>{ $('#liveTxt').textContent='Reconnecting...'; };
-  es.onopen = ()=>{ $('#liveTxt').textContent='Live'; };
+  es.addEventListener('query', () => { loadStats(); loadQueue(); flash(); });
+  es.addEventListener('decision', () => { loadStats(); loadQueue(); loadActivity(); });
+  es.addEventListener('stats', () => loadStats());
+  es.onerror = () => { $('#liveTxt').textContent = 'Reconnecting'; };
+  es.onopen = () => { $('#liveTxt').textContent = 'Live'; };
 }
-function flash(){ const d=document.querySelector('.dot'); d.style.background='#f59e0b'; setTimeout(()=>d.style.background='#22c55e',500); }
+
+function flash() {
+  const d = document.querySelector('.dot');
+  d.style.background = '#f6a21a';
+  setTimeout(() => { d.style.background = '#40d98a'; }, 500);
+}
 
 init();
-

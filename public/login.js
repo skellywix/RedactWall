@@ -1,12 +1,16 @@
 const f = document.getElementById('f');
-  f.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    document.getElementById('err').textContent = '';
-    const r = await fetch('/api/login', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ user: user.value, password: password.value })
-    });
-    if (r.ok) { location.href = '/index.html'; }
-    else { document.getElementById('err').textContent = 'Invalid credentials. Try again.'; }
-  });
+const userInput = document.getElementById('user');
+const passwordInput = document.getElementById('password');
+const errorBox = document.getElementById('err');
 
+f.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  errorBox.textContent = '';
+  const r = await fetch('/api/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user: userInput.value, password: passwordInput.value }),
+  });
+  if (r.ok) location.href = '/index.html';
+  else errorBox.textContent = 'Invalid credentials. Try again.';
+});

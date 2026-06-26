@@ -6,6 +6,8 @@
 
 ## Done
 
+- 2026-06-26: Verified and adopted the redesigned admin console UI: denser operations layout, redesigned login surface, selected-incident detail panel, icon command buttons, and functional global search across queue/activity data.
+  Evidence: `npm run test:browser`, `npm test`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Upgraded GitHub Actions CI so branch pushes under `codex/**` run the production gate: dependency audit, sync-check, Node tests, Playwright browser E2E, audit-chain verification, detection eval, semantic determinism, config drift check, and Docker build.
   Evidence: local non-Docker CI-equivalent commands passed; Docker build remains enforced in GitHub Actions because the local Docker daemon was unavailable.
 - 2026-06-26: Added Playwright browser E2E coverage for the admin console login, pending prompt approval, policy save, audit integrity display, and sanitized evidence export. The E2E server uses temp DB and policy files so tests do not mutate demo config.

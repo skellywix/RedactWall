@@ -21,3 +21,4 @@
 - 2026-06-26: Valid ingest keys should bypass invalid-key throttles. The throttle is for probes and typos, not a mechanism that can pin healthy managed sensors offline after a few bad attempts.
 - 2026-06-26: Browser E2E runs against isolated temp DB and temp policy files. Tests can exercise real admin writes and downloads without mutating `config/policy.json` or leaving demo data behind.
 - 2026-06-26: CI should run on `codex/**` pushes, not only pull requests and main branches, because the production-hardening loop pushes every verified improvement branch to GitHub.
+- 2026-06-26: Admin console controls must be real controls, not decorative placeholders. The redesigned topbar search filters queue and activity data instead of acting as static helper text.
