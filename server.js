@@ -196,6 +196,10 @@ function hasSensitivity(analysis) {
   return !!(analysis && ((analysis.findings || []).length || (analysis.categories || []).length));
 }
 
+function canTokenizeAllSensitivity(analysis) {
+  return !!(analysis && (analysis.findings || []).length && !(analysis.categories || []).length);
+}
+
 function clientFindingsFrom(body) {
   return (body.clientFindings || [])
     .filter((f) => f && typeof f.type === 'string')
@@ -330,12 +334,13 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
   // Status reflects how the sensor resolved it (from clientOutcome) or, for the
   // API/proxy path, defaults to the mode's behaviour.
   let status;
+  const wholeChunkClientRedacted = declaredClientRedacted && /^\s*\[REDACTED:[^\]]+\]\s*$/i.test(prompt);
   if (clientOutcome === 'sent_after_warning') status = 'warned_sent';
-  else if (clientOutcome === 'redacted_sent') status = 'redacted';
+  else if (clientOutcome === 'redacted_sent') status = canTokenizeAllSensitivity(analysis) || wholeChunkClientRedacted ? 'redacted' : 'pending';
   else if (clientOutcome === 'justified') status = 'justified';
   else if (clientOutcome === 'blocked_by_user') status = 'blocked_by_user';
   else if (clientOutcome === 'awaiting_approval') status = 'pending';
-  else if (mode === 'redact') status = analysis.findings.length ? 'redacted' : 'pending';
+  else if (mode === 'redact') status = canTokenizeAllSensitivity(analysis) ? 'redacted' : 'pending';
   else if (mode === 'block') status = 'pending';
   else if (mode === 'warn') status = 'warned';
   else if (mode === 'justify') status = 'pending_justification';
@@ -476,14 +481,41 @@ app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation
     return res.json({ id: row.id, decision: 'allow', supported: true, filename, riskScore: analysis.riskScore, findings, categories });
   }
   const hardStop = analysis.findings.some((x) => pol.alwaysBlock.includes(x.type));
-  const mode = hardStop ? 'block' : (pol.enforcementMode || 'block');
-  const status = mode === 'warn' ? 'warned' : mode === 'justify' ? 'pending_justification' : 'pending';
+  const mode = pol.enforcementMode === 'redact' ? 'redact' : (hardStop ? 'block' : (pol.enforcementMode || 'block'));
+  const status = mode === 'redact' ? (canTokenizeAllSensitivity(analysis) ? 'redacted' : 'pending')
+    : mode === 'warn' ? 'warned'
+    : mode === 'justify' ? 'pending_justification'
+    : 'pending';
   const rawFile = '[file:' + filename + ']\n' + extracted.text.slice(0, 5000);
-  const row = db.createQuery({ status, mode, ...base, _rawPrompt: rawToStore(rawFile, status, pol) });
-  db.appendAudit({ action: status === 'pending' ? 'FILE_BLOCKED' : 'FILE_FLAGGED', queryId: row.id, actor: user, detail: filename + ': ' + verdict.reasons.join('; ') });
-  emitSecurityAlert(row, status === 'pending' ? 'FILE_BLOCKED' : 'FILE_FLAGGED');
+  let tokenizedPrompt, tokenVault;
+  if (status === 'redacted') {
+    const t = detector.tokenize(extracted.text, analysis.findings);
+    tokenizedPrompt = '[file:' + filename + ']\n' + t.text;
+    tokenVault = dataCrypto.seal(JSON.stringify(t.map));
+  }
+  const row = db.createQuery({ status, mode, ...base, _rawPrompt: rawToStore(rawFile, status, pol), _tokenVault: tokenVault, tokenizedPrompt });
+  const action = status === 'pending' ? 'FILE_BLOCKED'
+    : status === 'redacted' ? 'FILE_REDACTED'
+    : 'FILE_FLAGGED';
+  db.appendAudit({ action, queryId: row.id, actor: user, detail: filename + ': ' + verdict.reasons.join('; ') });
+  emitSecurityAlert(row, action);
   broadcast('query', { type: status, query: publicQuery(row) }); broadcast('stats', db.stats());
-  res.json({ id: row.id, decision: 'block', mode, status, supported: true, filename, riskScore: analysis.riskScore, findings, categories, reasons: verdict.reasons });
+  res.json({
+    id: row.id,
+    decision: status === 'redacted' ? 'redact' : 'block',
+    mode,
+    status,
+    supported: true,
+    filename,
+    riskScore: analysis.riskScore,
+    findings,
+    categories,
+    reasons: verdict.reasons,
+    tokenizedPrompt,
+    message: status === 'redacted' ? 'Sensitive file values tokenized - safe to send.'
+      : mode === 'redact' ? 'Sensitive file category cannot be tokenized safely; withheld pending Security Admin approval.'
+      : 'Sensitive file withheld pending Security Admin approval.',
+  });
 });
 
 // Scan an AI RESPONSE for sensitive data leaking back to the user (e.g. an MCP

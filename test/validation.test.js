@@ -106,6 +106,32 @@ test('valid gate payload from sensors still evaluates normally', async () => wit
   assert.strictEqual(body.riskScore, 0);
 }));
 
+test('client redaction evidence rejects unknown detector ids', async () => withServer(async (port) => {
+  const tokenized = 'Member data was replaced with [[NOT_REAL_DETECTOR_1]].';
+  const res = await jsonFetch(port, '/api/v1/gate', {
+    headers: { 'x-api-key': 'unit-ingest-key' },
+    body: {
+      prompt: tokenized,
+      user: 'analyst@example.test',
+      destination: 'chatgpt.com',
+      source: 'browser_extension',
+      channel: 'submit',
+      clientOutcome: 'redacted_sent',
+      clientPreRedacted: true,
+      clientFindings: [{ type: 'NOT_REAL_DETECTOR', severity: 4, score: 0.99, masked: '****' }],
+      clientCategories: ['CREDENTIALS'],
+    },
+  });
+
+  assert.strictEqual(res.status, 400);
+  const body = await res.json();
+  assert.deepStrictEqual(body, {
+    error: 'invalid request body',
+    fields: ['clientFindings.0.type'],
+  });
+  assert.ok(!JSON.stringify(body).includes(tokenized));
+}));
+
 test('gate accepts scan_unavailable as a blocked unscanned file outcome', async () => withServer(async (port) => {
   const fileContent = 'member file SSN 524-71-9043';
   const res = await jsonFetch(port, '/api/v1/gate', {
@@ -200,6 +226,29 @@ test('admin policy rejects unknown settings without changing policy file', async
   assert.deepStrictEqual(body, {
     error: 'invalid request body',
     fields: ['rawPromptRetention'],
+  });
+  assert.strictEqual(fs.readFileSync(policyPath, 'utf8'), originalPolicy);
+}));
+
+test('admin policy rejects unknown detector ids without changing policy file', async () => withServer(async (port) => {
+  const originalPolicy = fs.readFileSync(policyPath, 'utf8');
+  const { cookie, csrfToken } = await login(port);
+  const res = await jsonFetch(port, '/api/policy', {
+    method: 'PUT',
+    headers: {
+      cookie,
+      'x-csrf-token': csrfToken,
+    },
+    body: {
+      ignore: ['NOT_REAL_DETECTOR'],
+    },
+  });
+
+  assert.strictEqual(res.status, 400);
+  const body = await res.json();
+  assert.deepStrictEqual(body, {
+    error: 'invalid request body',
+    fields: ['ignore.0'],
   });
   assert.strictEqual(fs.readFileSync(policyPath, 'utf8'), originalPolicy);
 }));

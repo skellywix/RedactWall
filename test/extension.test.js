@@ -64,7 +64,8 @@ test('redacted browser sends report tokenized text, not original prompt', () => 
 });
 
 test('redact mode blocks category-only hits that cannot be tokenized', () => {
-  assert.match(content, /action:\s*a\.findings\.length \? 'redact' : 'block'/);
+  assert.match(content, /action:\s*\(a\.findings\.length && !a\.categories\.length\) \? 'redact' : 'block'/);
+  assert.match(content, /Semantic categories/);
 });
 
 test('active content scripts receive policy updates from storage', () => {

@@ -466,10 +466,25 @@ Start the agent in a second terminal:
 ```powershell
 $env:SENTINEL_URL = "http://localhost:4000"
 $env:INGEST_API_KEY = "demo-ingest-key"
-node endpoint-agent\agent.js
+node endpoint-agent\agent.js .\demo-watch
 ```
 
-Drop a synthetic file into the watched folder. The current agent default watches:
+For a longer Windows pilot, install it as a logon task instead of leaving a terminal open:
+
+```powershell
+.\scripts\install-endpoint-agent.ps1 `
+  -SentinelUrl "http://localhost:4000" `
+  -IngestKey "demo-ingest-key" `
+  -WatchDir "$env:USERPROFILE\PromptSentinelWatch"
+```
+
+Uninstall with:
+
+```powershell
+.\scripts\uninstall-endpoint-agent.ps1
+```
+
+Drop a synthetic file into the watched folder. The scheduled-task example above watches:
 
 ```text
 %USERPROFILE%\PromptSentinelWatch

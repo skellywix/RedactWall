@@ -5,7 +5,13 @@ const assert = require('node:assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { scanFile, refreshPolicy, scannerConfig, ignoredByScanner, postJson } = require('../endpoint-agent/agent');
+const { scanFile, refreshPolicy, scannerConfig, ignoredByScanner, postJson, defaultWatchDir } = require('../endpoint-agent/agent');
+
+test('watch directory prefers CLI argument, then endpoint env, then temp default', () => {
+  assert.strictEqual(defaultWatchDir(['node', 'agent.js', 'C:\\Watch'], { ENDPOINT_AGENT_WATCH_DIR: 'D:\\FromEnv' }), 'C:\\Watch');
+  assert.strictEqual(defaultWatchDir(['node', 'agent.js'], { ENDPOINT_AGENT_WATCH_DIR: 'D:\\FromEnv' }), 'D:\\FromEnv');
+  assert.match(defaultWatchDir(['node', 'agent.js'], {}), /promptsentinel-watch$/);
+});
 
 test('sends supported file bytes to scan-file API instead of redacted gate preview', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-agent-'));

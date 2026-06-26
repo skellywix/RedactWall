@@ -61,12 +61,11 @@
     const a = D.analyze(text, detectionPolicy());
     if (!a.findings.length && !a.categories.length) return { action: 'allow', analysis: a };
     const hardStop = a.findings.some((f) => (POLICY.alwaysBlock || []).includes(f.type));
-    // REDACT mode neutralizes everything token-able locally, so it takes
-    // precedence over hard-stop blocking: if there are structured findings we
-    // tokenize and let it through; a categories-only hit has nothing to swap,
-    // so it must not be sent raw.
+    // REDACT mode neutralizes structured values locally. Semantic categories
+    // have no span-level token to swap, so any category hit must stay held
+    // rather than leaking confidential context with only the PII tokenized.
     if ((POLICY.enforcementMode || 'block') === 'redact') {
-      return { action: a.findings.length ? 'redact' : 'block', analysis: a };
+      return { action: (a.findings.length && !a.categories.length) ? 'redact' : 'block', analysis: a };
     }
     const breach = hardStop || a.maxSeverity >= POLICY.blockMinSeverity || a.riskScore >= POLICY.blockRiskScore;
     if (!breach) return { action: 'allow', analysis: a };

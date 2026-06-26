@@ -91,6 +91,48 @@ Logged-in admins can inspect detailed configuration checks at:
 http://localhost:4000/api/preflight
 ```
 
+## Endpoint Agent On Windows
+
+For a pilot workstation, install the endpoint file sensor as a per-user scheduled task. The task starts at logon, restarts on failure, and reads its ingest key from a local config file instead of exposing it in the task command line.
+
+Run PowerShell from the project folder:
+
+```powershell
+.\scripts\install-endpoint-agent.ps1 `
+  -SentinelUrl "https://promptsentinel.example.com" `
+  -IngestKey "<pilot-ingest-key>" `
+  -WatchDir "$env:USERPROFILE\PromptSentinelWatch"
+```
+
+This creates:
+
+```text
+Task:   PromptSentinelEndpointAgent
+Config: %LOCALAPPDATA%\PromptSentinel\endpoint-agent.env
+Log:    %LOCALAPPDATA%\PromptSentinel\logs\endpoint-agent.log
+```
+
+The config file carries `SENTINEL_URL`, `INGEST_API_KEY`, and `ENDPOINT_AGENT_WATCH_DIR`. Keep it restricted to the installing user, Administrators, and SYSTEM. For an all-user managed install, pass an explicit `-ConfigDir "$env:ProgramData\PromptSentinel"` from an elevated PowerShell session.
+
+Check status:
+
+```powershell
+Get-ScheduledTask -TaskName PromptSentinelEndpointAgent
+Get-Content "$env:LOCALAPPDATA\PromptSentinel\logs\endpoint-agent.log" -Tail 40
+```
+
+Uninstall:
+
+```powershell
+.\scripts\uninstall-endpoint-agent.ps1
+```
+
+Remove local endpoint config too:
+
+```powershell
+.\scripts\uninstall-endpoint-agent.ps1 -RemoveConfig
+```
+
 ## Required Secrets
 
 Set these through `.env`, container environment, or a deployment secret manager:

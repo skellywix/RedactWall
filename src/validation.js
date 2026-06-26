@@ -5,6 +5,7 @@
  * values, because those values may be prompts, files, passwords, or notes.
  */
 const { z } = require('zod');
+const detector = require('./detector');
 
 const LIMITS = {
   promptChars: 200000,
@@ -19,6 +20,7 @@ const LIMITS = {
 
 const DETECTOR_ID = /^[A-Z0-9_]+$/;
 const HOST_OR_LABEL = /^[A-Za-z0-9.*:_/-]+$/;
+const KNOWN_DETECTOR_IDS = new Set(detector.listDetectors().map((d) => d.id));
 
 function nonBlankString(max) {
   return z.string().max(max).refine((value) => value.trim().length > 0, {
@@ -47,7 +49,9 @@ function nullableString(max = LIMITS.metadataChars) {
   );
 }
 
-const detectorIdSchema = z.string().max(80).regex(DETECTOR_ID);
+const detectorIdSchema = z.string().max(80).regex(DETECTOR_ID).refine((id) => KNOWN_DETECTOR_IDS.has(id), {
+  message: 'unknown detector',
+});
 const clientScoreSchema = z.number().min(0).max(1);
 const severitySchema = z.number().int().min(0).max(4);
 

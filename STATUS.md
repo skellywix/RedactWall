@@ -6,6 +6,14 @@
 
 ## Done
 
+- 2026-06-26: Added a Windows endpoint-agent scheduled-task install path for pilots: per-user logon task, restart-on-failure settings, least-privilege interactive principal, restricted local config, `SENTINEL_ENV_PATH` loading, uninstall support, and client-demo docs.
+  Evidence: `node --test test/env.test.js test/endpoint-agent.test.js test/endpoint-agent-install.test.js`, PowerShell parser checks for endpoint install/run/uninstall scripts, `npm test`, `npm run test:browser`, `npm run sync-check`, `npm run setup:check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
+- 2026-06-26: Closed the mixed-content redact-mode leak path: prompt and file flows now tokenize only structured-only findings, hold semantic or mixed semantic+structured content for Security Admin review, and preserve MCP whole-chunk redaction telemetry as redacted.
+  Evidence: `node --test test/redact-policy.test.js test/processors.test.js test/extension.test.js test/mcp-guard.test.js`, `npm test`, `npm run sync-check`, `git diff --check`, `verifyAuditChain()`.
+- 2026-06-26: Aligned `/api/v1/scan-file` with redact-mode policy for structured file findings: supported file uploads now return a tokenized safe prompt plus sealed rehydrate vault, while category-only file hits remain held for Security Admin review.
+  Evidence: `node --test test/processors.test.js`, `npm test`, `npm run sync-check`, `git diff --check`, `verifyAuditChain()`.
+- 2026-06-26: Hardened sensor/admin validation so client-reported redaction evidence and policy detector lists can only reference detector IDs published by the shared engine, preventing invented labels from polluting policy decisions or examiner evidence.
+  Evidence: `node --test test/validation.test.js`, `npm test`, `npm run sync-check`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Added repeatable deployment setup tooling: `.env` loading, generated setup/preflight scripts, Docker Compose path, deployment docs, and tests that keep copied example credentials flagged as unsafe.
   Evidence: `node --test test/env.test.js test/setup.test.js test/auth.test.js test/preflight.test.js`, `npm run setup:check`, `npm test`, `npm run test:browser`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Bounded MCP guard control-plane requests so policy refresh and best-effort audit logging cannot stall redacted tool output delivery when the control plane is slow or unavailable.

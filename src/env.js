@@ -6,7 +6,9 @@
 const fs = require('fs');
 const path = require('path');
 
-const DEFAULT_ENV_PATH = path.join(__dirname, '..', '.env');
+function defaultEnvPath() {
+  return process.env.SENTINEL_ENV_PATH || path.join(__dirname, '..', '.env');
+}
 
 function unescapeQuoted(value, quote) {
   if (quote === "'") return value;
@@ -59,7 +61,7 @@ function parseEnv(content) {
   return { parsed, errors };
 }
 
-function loadEnv(filePath = DEFAULT_ENV_PATH, opts = {}) {
+function loadEnv(filePath = defaultEnvPath(), opts = {}) {
   const env = opts.env || process.env;
   const resolved = path.resolve(filePath);
   if (!fs.existsSync(resolved)) {
@@ -79,4 +81,4 @@ function loadEnv(filePath = DEFAULT_ENV_PATH, opts = {}) {
   return { loaded: true, path: resolved, keys, skipped, errors };
 }
 
-module.exports = { DEFAULT_ENV_PATH, loadEnv, parseEnv };
+module.exports = { defaultEnvPath, loadEnv, parseEnv };

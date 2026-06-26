@@ -46,6 +46,17 @@ test('loadEnv returns a safe empty result for missing files', () => {
   assert.deepStrictEqual(result.keys, []);
 });
 
+test('default env path can be redirected for endpoint installs', () => {
+  const old = process.env.SENTINEL_ENV_PATH;
+  process.env.SENTINEL_ENV_PATH = path.join(os.tmpdir(), 'endpoint-agent.env');
+  try {
+    assert.strictEqual(env.defaultEnvPath(), process.env.SENTINEL_ENV_PATH);
+  } finally {
+    if (old === undefined) delete process.env.SENTINEL_ENV_PATH;
+    else process.env.SENTINEL_ENV_PATH = old;
+  }
+});
+
 test('copied example admin password is still reported as default', () => {
   const out = execFileSync(process.execPath, ['-e', `
 process.env.ADMIN_PASSWORD = 'ChangeMe!2026';

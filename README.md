@@ -146,6 +146,12 @@ node mcp-guard/guard.js               # demo: redact a SharePoint doc before the
 node endpoint-agent/agent.js <dir>    # watch a folder for files going to desktop AI apps
 ```
 
+For a Windows pilot, install the endpoint sensor as a logon task:
+
+```powershell
+.\scripts\install-endpoint-agent.ps1 -SentinelUrl "https://promptsentinel.example.com" -IngestKey "<pilot-ingest-key>"
+```
+
 ### Test the product
 
 ```bash

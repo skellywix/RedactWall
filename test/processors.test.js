@@ -12,6 +12,19 @@ process.env.SENTINEL_SECRET = 'unit-secret-stable';
 process.env.SENTINEL_DATA_KEY = 'unit-data-key-stable';
 process.env.INGEST_API_KEY = 'unit-ingest-key';
 process.env.SENTINEL_DB_PATH = path.join(os.tmpdir(), 'ps-processors-test-' + crypto.randomBytes(6).toString('hex') + '.db');
+process.env.SENTINEL_POLICY_PATH = path.join(os.tmpdir(), 'ps-processors-policy-' + crypto.randomBytes(6).toString('hex') + '.json');
+
+function setPolicy(patch = {}) {
+  fs.writeFileSync(process.env.SENTINEL_POLICY_PATH, JSON.stringify({
+    enforcementMode: 'block',
+    blockMinSeverity: 2,
+    blockRiskScore: 20,
+    storeRawForApproval: true,
+    ...patch,
+  }, null, 2));
+}
+
+setPolicy();
 
 const processors = require('../src/processors');
 const app = require('../server');
@@ -34,6 +47,22 @@ async function withServer(fn) {
   } finally {
     await close(server);
   }
+}
+
+async function scanFile(port, filename, text) {
+  return fetch(`http://127.0.0.1:${port}/api/v1/scan-file`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': 'unit-ingest-key',
+    },
+    body: JSON.stringify({
+      filename,
+      contentBase64: Buffer.from(text).toString('base64'),
+      user: 'analyst@example.test',
+      destination: 'desktop-ai-app',
+    }),
+  });
 }
 
 test('corrupt supported office files report extraction failure', async () => {
@@ -104,8 +133,72 @@ test('scan-file blocks corrupt supported files without echoing file bytes', asyn
   assert.ok(!JSON.stringify(body).includes(contentBase64));
 }));
 
+test('scan-file redacts structured findings under redact policy', async () => withServer(async (port) => {
+  setPolicy({ enforcementMode: 'redact' });
+  const secret = '524-71-9043';
+  const fileText = 'Loan file. Member SSN ' + secret + ' is pending review.';
+  const res = await scanFile(port, 'member-loan.txt', fileText);
+
+  assert.strictEqual(res.status, 200);
+  const body = await res.json();
+  assert.strictEqual(body.decision, 'redact');
+  assert.strictEqual(body.mode, 'redact');
+  assert.strictEqual(body.status, 'redacted');
+  assert.strictEqual(body.supported, true);
+  assert.match(body.tokenizedPrompt, /\[\[US_SSN_1\]\]/);
+  assert.ok(!JSON.stringify(body).includes(secret));
+  assert.ok(!JSON.stringify(body).includes(Buffer.from(fileText).toString('base64')));
+
+  const rehydrate = await fetch(`http://127.0.0.1:${port}/api/v1/rehydrate`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': 'unit-ingest-key',
+    },
+    body: JSON.stringify({ id: body.id, text: 'Reviewed [[US_SSN_1]].' }),
+  });
+  assert.strictEqual(rehydrate.status, 200);
+  const opened = await rehydrate.json();
+  assert.strictEqual(opened.rehydrated, true);
+  assert.strictEqual(opened.text, 'Reviewed ' + secret + '.');
+}));
+
+test('scan-file holds category-only findings under redact policy', async () => withServer(async (port) => {
+  setPolicy({ enforcementMode: 'redact' });
+  const confidential = 'Strictly confidential: our largest commercial relationship is about to walk; draft retention options before the board hears.';
+  const res = await scanFile(port, 'board-retention-plan.txt', confidential);
+
+  assert.strictEqual(res.status, 200);
+  const body = await res.json();
+  assert.strictEqual(body.decision, 'block');
+  assert.strictEqual(body.mode, 'redact');
+  assert.strictEqual(body.status, 'pending');
+  assert.ok(body.categories.includes('CONFIDENTIAL_BUSINESS'));
+  assert.strictEqual(body.tokenizedPrompt, undefined);
+  assert.ok(!JSON.stringify(body).includes(confidential));
+}));
+
+test('scan-file holds mixed structured and semantic findings under redact policy', async () => withServer(async (port) => {
+  setPolicy({ enforcementMode: 'redact' });
+  const secret = '524-71-9043';
+  const confidential = 'Strictly confidential: our largest commercial relationship is about to walk; draft retention options before the board hears. Member SSN ' + secret + '.';
+  const res = await scanFile(port, 'board-member-risk.txt', confidential);
+
+  assert.strictEqual(res.status, 200);
+  const body = await res.json();
+  assert.strictEqual(body.decision, 'block');
+  assert.strictEqual(body.mode, 'redact');
+  assert.strictEqual(body.status, 'pending');
+  assert.ok(body.findings.some((f) => f.type === 'US_SSN'));
+  assert.ok(body.categories.includes('CONFIDENTIAL_BUSINESS'));
+  assert.strictEqual(body.tokenizedPrompt, undefined);
+  assert.ok(!JSON.stringify(body).includes(secret));
+  assert.ok(!JSON.stringify(body).includes(confidential));
+}));
+
 test.after(() => {
   for (const suffix of ['', '-wal', '-shm']) {
     try { fs.unlinkSync(process.env.SENTINEL_DB_PATH + suffix); } catch {}
   }
+  try { fs.unlinkSync(process.env.SENTINEL_POLICY_PATH); } catch {}
 });

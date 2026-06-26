@@ -10,6 +10,7 @@ require('../src/env').loadEnv();
  *
  * Usage: node agent.js [watchDir]
  *   SENTINEL_URL (default http://localhost:4000), INGEST_API_KEY (default dev-ingest-key)
+ *   ENDPOINT_AGENT_WATCH_DIR (default OS temp promptsentinel-watch)
  */
 const fs = require('fs');
 const path = require('path');
@@ -18,7 +19,10 @@ const processors = require('../src/processors');
 
 const SERVER = process.env.SENTINEL_URL || 'http://localhost:4000';
 const KEY = process.env.INGEST_API_KEY || 'dev-ingest-key';
-const WATCH = process.argv[2] || path.join(os.tmpdir(), 'promptsentinel-watch');
+function defaultWatchDir(argv = process.argv, env = process.env) {
+  return argv[2] || env.ENDPOINT_AGENT_WATCH_DIR || path.join(os.tmpdir(), 'promptsentinel-watch');
+}
+const WATCH = defaultWatchDir();
 
 const DEFAULT_SCANNER = {
   ignoreDirectories: ['node_modules', '.git', 'Library', 'Applications', 'AppData'],
@@ -235,5 +239,6 @@ module.exports = {
   ignoredByScanner,
   requestTimeoutMs,
   fetchWithTimeout,
+  defaultWatchDir,
   start,
 };
