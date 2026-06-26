@@ -189,6 +189,7 @@ test('sensor policy endpoint publishes detector and scanner controls', async () 
   assert.ok(Array.isArray(body.scanner.ignoreExtensions));
   assert.strictEqual(typeof body.scanner.maxFileBytes, 'number');
   assert.strictEqual(body.storeRawForApproval, undefined);
+  assert.strictEqual(body.rawRetentionDays, undefined);
 }));
 
 test('malformed json returns sanitized json error', async () => withServer(async (port) => {

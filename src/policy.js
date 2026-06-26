@@ -18,6 +18,7 @@ const DEFAULT_POLICY = {
   // (encrypted at rest) so an admin can review it. Set false for institutions
   // that forbid any server-side raw retention — reveal then shows redacted only.
   storeRawForApproval: true,
+  rawRetentionDays: 30,
   ignore: [],
   disabledDetectors: [],
   governedDestinations: [
@@ -38,6 +39,7 @@ const AUDIT_FIELDS = [
   'blockRiskScore',
   'alwaysBlock',
   'storeRawForApproval',
+  'rawRetentionDays',
   'ignore',
   'disabledDetectors',
   'governedDestinations',
@@ -95,6 +97,12 @@ function analyzeOpts(policy = loadPolicy()) {
   return { ignore: policy.ignore || [], disabledDetectors: policy.disabledDetectors || [] };
 }
 
+function rawRetentionDays(policy = loadPolicy()) {
+  const n = Number(policy && policy.rawRetentionDays);
+  if (!Number.isFinite(n)) return DEFAULT_POLICY.rawRetentionDays;
+  return Math.max(0, Math.min(3650, Math.floor(n)));
+}
+
 function evaluate(analysis, policy = loadPolicy()) {
   const reasons = [];
   const findings = (analysis.findings || []).filter((f) => !(policy.ignore || []).includes(f.type));
@@ -114,4 +122,4 @@ function evaluate(analysis, policy = loadPolicy()) {
   return { decision, reasons, policy };
 }
 
-module.exports = { loadPolicy, savePolicy, evaluate, analyzeOpts, policyChangeSummary, policyChangeDetail, DEFAULT_POLICY };
+module.exports = { loadPolicy, savePolicy, evaluate, analyzeOpts, rawRetentionDays, policyChangeSummary, policyChangeDetail, DEFAULT_POLICY };

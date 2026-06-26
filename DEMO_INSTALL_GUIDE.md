@@ -153,7 +153,7 @@ Expected output:
 
 ```text
 PromptSentinel running on http://localhost:4000
-Raw-prompt retention: encrypted at rest (AES-256-GCM), held items only.
+Raw-prompt retention: encrypted at rest (AES-256-GCM), held items only; finalized records purge after 30 day(s).
 Ingest key: configured
 ```
 
@@ -283,7 +283,7 @@ Expected:
 - The page shows a PromptSentinel banner.
 - The dashboard shows a pending item.
 - Findings show `US_SSN` and possibly `PERSON_NAME`.
-- The raw prompt is only retained for held approval items, and only when encrypted retention is enabled.
+- The raw prompt is only retained for held approval items, only when encrypted retention is enabled, and purged from finalized records after `rawRetentionDays`.
 
 Client talk track:
 
@@ -779,6 +779,7 @@ This demo is not a full production rollout. For a client pilot, plan these befor
 - Managed Chrome extension deployment.
 - Employee notice and authorization.
 - Log retention policy.
+- Raw approval-data retention window in `rawRetentionDays`.
 - Incident response workflow for blocked prompts.
 - SIEM or email alerting for critical events.
 - Backup and restore procedure for audit evidence.

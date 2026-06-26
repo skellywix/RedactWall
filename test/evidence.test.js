@@ -27,6 +27,8 @@ test('evidence pack omits raw prompt, redacted prompt body, token vault, and aud
       _rawPrompt: 'Member John Carter has SSN 524-71-9043',
       _tokenVault: 'sealed-vault',
       decisionNote: 'contains member SSN 524-71-9043',
+      retentionPurgedAt: '2026-06-27T12:00:00.000Z',
+      retentionPurgedFields: ['rawPrompt'],
       findings: [{ type: 'US_SSN', severity: 4, score: 0.92, masked: '**** 9043', value: '524-71-9043' }],
       categories: [],
       reasons: ['Hard-stop entity present: US_SSN'],
@@ -51,6 +53,8 @@ test('evidence pack omits raw prompt, redacted prompt body, token vault, and aud
   assert.strictEqual(pack.scope.auditDetailsIncluded, false);
   assert.ok(pack.queries[0].promptHash);
   assert.ok(pack.audit[0].detailHash);
+  assert.strictEqual(pack.queries[0].retentionPurgedAt, '2026-06-27T12:00:00.000Z');
+  assert.deepStrictEqual(pack.queries[0].retentionPurgedFields, ['rawPrompt']);
   assert.ok(!wire.includes('524-71-9043'));
   assert.ok(!wire.includes('Member John Carter'));
   assert.ok(!wire.includes('sealed-vault'));

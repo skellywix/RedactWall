@@ -244,7 +244,10 @@ its raw prompt is retained so the admin can review it — and that raw value is
 reveal. Institutions that forbid any server-side raw retention can set
 `storeRawForApproval: false` in policy, in which case reveal shows the redacted
 prompt only. Set `SENTINEL_DATA_KEY` (stable across restarts) to enable the
-encryption; with no key configured, raw prompts are not stored at all.
+encryption; with no key configured, raw prompts are not stored at all. Finalized
+approval records purge retained raw prompt data and token vaults after
+`rawRetentionDays` (default 30) while keeping redacted metadata and the
+hash-chained audit trail.
 
 Even so, a product that inspects employee input requires proper authorization
 and clear employee notice. See `AI_Chat_DLP_Implementation_Plan.docx` for the

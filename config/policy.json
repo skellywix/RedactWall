@@ -17,6 +17,7 @@
     "CANARY_TOKEN"
   ],
   "storeRawForApproval": true,
+  "rawRetentionDays": 30,
   "ignore": [],
   "disabledDetectors": [],
   "governedDestinations": [

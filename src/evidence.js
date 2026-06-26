@@ -14,6 +14,7 @@ const POLICY_AUDIT_FIELDS = new Set([
   'blockRiskScore',
   'alwaysBlock',
   'storeRawForApproval',
+  'rawRetentionDays',
   'ignore',
   'disabledDetectors',
   'governedDestinations',
@@ -54,6 +55,8 @@ function safeQuery(q) {
     promptHash: hashText(q.redactedPrompt || q.tokenizedPrompt || ''),
     decidedBy: q.decidedBy || null,
     decidedAt: q.decidedAt || null,
+    retentionPurgedAt: q.retentionPurgedAt || null,
+    retentionPurgedFields: (q.retentionPurgedFields || []).filter((field) => ['rawPrompt', 'tokenVault'].includes(field)),
   };
 }
 

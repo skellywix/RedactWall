@@ -6,6 +6,8 @@
 
 ## Done
 
+- 2026-06-26: Added policy-backed retained-data disposal for finalized approval/redact records: `rawRetentionDays` now drives audited purging of sealed raw prompts and token vaults, reveal falls back to safe redacted text after purge, evidence exports show purge metadata without prompt bodies, and the admin policy form exposes the retention window.
+  Evidence: `node --test test/db.test.js test/retention.test.js test/policy-history.test.js test/admin-csrf.test.js test/validation.test.js`, `node --test test/evidence.test.js`, `npm test`, `PLAYWRIGHT_PORT=4310 npm run test:browser`, `npm run sync-check`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Sanitized semantic-category previews so held prompts, scanned files, and flagged AI responses store whole-chunk `[REDACTED: ...]` evidence instead of retaining confidential business context with only structured values masked.
   Evidence: `node --test test/redact-policy.test.js test/processors.test.js test/evidence.test.js`, `npm test`, `PLAYWRIGHT_PORT=4310 npm run test:browser`, `npm run sync-check`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Added a Windows endpoint-agent scheduled-task install path for pilots: per-user logon task, restart-on-failure settings, least-privilege interactive principal, restricted local config, `SENTINEL_ENV_PATH` loading, uninstall support, and client-demo docs.

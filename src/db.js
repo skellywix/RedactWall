@@ -96,6 +96,7 @@ function canonical(value) {
 // ---- Queries -----------------------------------------------------------------
 const qInsert = sdb.prepare('INSERT INTO queries (id, createdAt, status, user, data) VALUES (@id, @createdAt, @status, @user, @data)');
 const qById = sdb.prepare('SELECT data FROM queries WHERE id = ?');
+const qUpdateById = sdb.prepare('UPDATE queries SET status = @status, user = @user, data = @data WHERE id = @id');
 
 function createQuery(q) {
   const row = { id: id('q'), createdAt: new Date().toISOString(), status: 'pending', ...q };
@@ -118,8 +119,7 @@ const updateQuery = sdb.transaction((qid, patch) => {
   const cur = qById.get(qid);
   if (!cur) return null;
   const merged = { ...JSON.parse(cur.data), ...patch };
-  sdb.prepare('UPDATE queries SET status = @status, user = @user, data = @data WHERE id = @id')
-    .run({ id: qid, status: merged.status, user: merged.user || null, data: JSON.stringify(merged) });
+  qUpdateById.run({ id: qid, status: merged.status, user: merged.user || null, data: JSON.stringify(merged) });
   return merged;
 });
 
@@ -133,7 +133,7 @@ function queryContentHash(qid) {
 const aLast = sdb.prepare('SELECT hash FROM audit ORDER BY seq DESC LIMIT 1');
 const aInsert = sdb.prepare('INSERT INTO audit (id, ts, action, queryId, actor, prevHash, hash, entry) VALUES (@id, @ts, @action, @queryId, @actor, @prevHash, @hash, @entry)');
 
-const appendAudit = sdb.transaction((event) => {
+function appendAuditRecord(event) {
   const last = aLast.get();
   const prevHash = last ? last.hash : ZERO;
   const contentHash = event.queryId ? queryContentHash(event.queryId) : undefined;
@@ -154,6 +154,54 @@ const appendAudit = sdb.transaction((event) => {
     actor: body.actor || null, prevHash, hash, entry: JSON.stringify(entry),
   });
   return entry;
+}
+
+const appendAudit = sdb.transaction((event) => {
+  return appendAuditRecord(event);
+});
+
+const RETENTION_FINAL_STATUSES = ['approved', 'denied', 'redacted'];
+const SAFE_STATUS = /^[a-z_]+$/;
+
+function normalizePurgeStatuses(statuses) {
+  const input = Array.isArray(statuses) && statuses.length ? statuses : RETENTION_FINAL_STATUSES;
+  return [...new Set(input.map((s) => String(s || '').trim()).filter((s) => SAFE_STATUS.test(s)))];
+}
+
+const purgeRetainedSensitiveData = sdb.transaction((options = {}) => {
+  const before = options.before instanceof Date ? options.before.toISOString() : String(options.before || '');
+  if (!before) return [];
+  const statuses = normalizePurgeStatuses(options.statuses);
+  if (!statuses.length) return [];
+  const placeholders = statuses.map(() => '?').join(', ');
+  const rows = sdb.prepare(
+    `SELECT data FROM queries WHERE createdAt < ? AND status IN (${placeholders}) ORDER BY createdAt ASC, seq ASC`,
+  ).all(before, ...statuses);
+  const now = new Date().toISOString();
+  const purged = [];
+  for (const r of rows) {
+    const q = JSON.parse(r.data);
+    const retentionAnchor = q.decidedAt || q.createdAt;
+    if (retentionAnchor && retentionAnchor >= before) continue;
+    const fields = [];
+    if (q._rawPrompt) fields.push('rawPrompt');
+    if (q._tokenVault) fields.push('tokenVault');
+    if (!fields.length) continue;
+    delete q._rawPrompt;
+    delete q._tokenVault;
+    q.retentionPurgedAt = now;
+    q.retentionPurgedFields = fields;
+    q.retentionPurgeReason = options.reason || 'retention window elapsed';
+    qUpdateById.run({ id: q.id, status: q.status, user: q.user || null, data: JSON.stringify(q) });
+    appendAuditRecord({
+      action: 'RETENTION_PURGED',
+      queryId: q.id,
+      actor: options.actor || 'system',
+      detail: fields.join(',') + ' removed after retention cutoff ' + before,
+    });
+    purged.push({ id: q.id, status: q.status, fields });
+  }
+  return purged;
 });
 
 function listAudit(limit = 200) {
@@ -248,6 +296,7 @@ try { migrateFromJson(); } catch (e) { console.error('[db] migration skipped:', 
 
 module.exports = {
   createQuery, getQuery, listQueries, updateQuery,
+  purgeRetainedSensitiveData,
   appendAudit, listAudit, verifyAuditChain, stats,
   _canonical: canonical, _db: sdb, _dbPath: DB_PATH,
 };

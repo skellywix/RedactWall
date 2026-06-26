@@ -14,6 +14,7 @@ const icons = {
   check: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m5 12 4 4L19 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   deny: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
   eye: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" stroke="currentColor" stroke-width="1.7"/><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" stroke="currentColor" stroke-width="1.7"/></svg>',
+  refresh: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 12a8 8 0 0 1-13.7 5.6M4 12A8 8 0 0 1 17.7 6.4M17.7 6.4H14M17.7 6.4V2.7M6.3 17.6H10M6.3 17.6v3.7" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   shield: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 4l7 3v5c0 4.2-2.6 6.8-7 8-4.4-1.2-7-3.8-7-8V7l7-3Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
 };
 
@@ -412,12 +413,15 @@ async function loadPolicy() {
       </select>
       <label for="pol_risk">Block at risk score greater than or equal to</label>
       <input id="pol_risk" type="number" min="0" max="100" value="${escapeHtml(p.blockRiskScore)}"/>
+      <label for="pol_retention">Purge retained raw approval data after days</label>
+      <input id="pol_retention" type="number" min="0" max="3650" value="${escapeHtml(p.rawRetentionDays ?? 30)}"/>
     </div>
     <div class="template-bar"><div class="template-title">Hard-stop entities</div>
       <div class="chips">${(p.alwaysBlock || []).map((x) => `<span class="chip"><b>${escapeHtml(x)}</b></span>`).join('')}</div></div>
     <div class="template-bar"><div class="template-title">Governed AI destinations</div>
       <div class="chips">${(p.governedDestinations || []).map((x) => `<span class="chip">${escapeHtml(x)}</span>`).join('')}</div></div>
     <button class="btn approve" id="savePolicy" type="button">${icons.check}Save policy</button>
+    <button class="btn" id="runRetentionPurge" type="button">${icons.refresh}Run retention purge</button>
     <span id="polSaved" class="save-status"></span>`;
   $$('input[name=mode]').forEach((radio) => {
     radio.onchange = () => {
@@ -426,11 +430,23 @@ async function loadPolicy() {
   });
   $('#savePolicy').onclick = async () => {
     const mode = (document.querySelector('input[name=mode]:checked') || {}).value || p.enforcementMode;
-    const body = { enforcementMode: mode, blockMinSeverity: Number($('#pol_sev').value), blockRiskScore: Number($('#pol_risk').value) };
+    const body = {
+      enforcementMode: mode,
+      blockMinSeverity: Number($('#pol_sev').value),
+      blockRiskScore: Number($('#pol_risk').value),
+      rawRetentionDays: Number($('#pol_retention').value),
+    };
     const r = await api('/api/policy', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (!r || !r.ok) return;
     $('#polSaved').textContent = 'Saved';
     setTimeout(() => { $('#polSaved').textContent = ''; }, 2000);
+  };
+  $('#runRetentionPurge').onclick = async () => {
+    const r = await api('/api/retention/purge', { method: 'POST' });
+    if (!r || !r.ok) return;
+    const body = await r.json();
+    $('#polSaved').textContent = `Purged ${body.purged || 0} record(s)`;
+    setTimeout(() => { $('#polSaved').textContent = ''; }, 3000);
   };
   $$('.ps-tpl').forEach((b) => {
     b.onclick = async () => {

@@ -186,6 +186,21 @@ function rawToStore(text, status, pol) {
   return sealed == null ? undefined : sealed;
 }
 
+function runRetentionPurge({ actor = 'system', now = new Date() } = {}) {
+  const pol = policy.loadPolicy();
+  const rawRetentionDays = policy.rawRetentionDays(pol);
+  const cutoff = new Date(now.getTime() - rawRetentionDays * 24 * 60 * 60 * 1000).toISOString();
+  const purged = db.purgeRetainedSensitiveData({
+    before: cutoff,
+    actor,
+    reason: 'rawRetentionDays=' + rawRetentionDays,
+  });
+  if (purged.length) {
+    broadcast('stats', db.stats());
+  }
+  return { rawRetentionDays, cutoff, purged };
+}
+
 function safeNumber(value, fallback, min = 0, max = 100) {
   const n = Number(value);
   if (!Number.isFinite(n)) return fallback;
@@ -678,6 +693,16 @@ app.get('/api/metrics', auth.requireAuth, (req, res) => {
 
 app.get('/api/preflight', auth.requireAuth, (req, res) => res.json(currentPreflight()));
 
+app.post('/api/retention/purge', ...adminWrite, (req, res) => {
+  const result = runRetentionPurge({ actor: req.user.user });
+  res.json({
+    rawRetentionDays: result.rawRetentionDays,
+    cutoff: result.cutoff,
+    purged: result.purged.length,
+    records: result.purged,
+  });
+});
+
 // Per-user risk — answers the examiner's "did employee X expose member data?".
 app.get('/api/risk', auth.requireAuth, (req, res) => {
   const rows = db.listQueries({ limit: 5000 });
@@ -775,7 +800,8 @@ function logStartup(port) {
   if (!dataCrypto.ENABLED) {
     console.log('  [!] No SENTINEL_DATA_KEY/SENTINEL_SECRET set — raw prompts are NOT stored (reveal shows redacted). Set a key to enable encrypted raw retention for approvals.');
   } else {
-    console.log('  Raw-prompt retention: encrypted at rest (AES-256-GCM), held items only.');
+    const days = policy.rawRetentionDays(policy.loadPolicy());
+    console.log(`  Raw-prompt retention: encrypted at rest (AES-256-GCM), held items only; finalized records purge after ${days} day(s).`);
   }
   console.log(`  Ingest key: ${INGEST_KEY === 'dev-ingest-key' ? 'dev-ingest-key (override with INGEST_API_KEY)' : 'configured'}`);
 }
@@ -787,10 +813,14 @@ function startServer(port = PORT) {
     for (const blocker of blockers) console.error('[preflight] ' + blocker);
     throw new Error('Production preflight failed');
   }
+  runRetentionPurge();
   const server = app.listen(port, () => {
     const address = server.address();
     logStartup(address && address.port ? address.port : port);
   });
+  const retentionTimer = setInterval(() => runRetentionPurge(), 60 * 60 * 1000);
+  retentionTimer.unref();
+  server.on('close', () => clearInterval(retentionTimer));
   return server;
 }
 
@@ -799,5 +829,6 @@ if (require.main === module) {
 }
 
 app.startServer = startServer;
+app.runRetentionPurge = runRetentionPurge;
 
 module.exports = app;

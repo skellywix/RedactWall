@@ -16,6 +16,7 @@ test('admin write routes include csrf middleware', () => {
     "app.post('/api/queries/:id/reveal', ...adminWrite",
     "app.post('/api/queries/:id/approve', ...adminWrite",
     "app.post('/api/queries/:id/deny', ...adminWrite",
+    "app.post('/api/retention/purge', ...adminWrite",
     "app.put('/api/policy/apply-template', ...adminWrite",
     "app.put('/api/policy', ...adminWrite",
   ]) {
@@ -28,4 +29,11 @@ test('dashboard fetches and sends csrf token on unsafe admin requests', () => {
   assert.match(dashboard, /api\('\/api\/csrf'\)/);
   assert.match(dashboard, /headers\.set\('x-csrf-token', csrfToken\)/);
   assert.match(dashboard, /await loadCsrf\(\)/);
+});
+
+test('dashboard exposes retention settings and manual purge control', () => {
+  assert.match(dashboard, /id="pol_retention"/);
+  assert.match(dashboard, /rawRetentionDays: Number\(\$\(\'#pol_retention\'\)\.value\)/);
+  assert.match(dashboard, /id="runRetentionPurge"/);
+  assert.match(dashboard, /api\('\/api\/retention\/purge', \{ method: 'POST' \}\)/);
 });

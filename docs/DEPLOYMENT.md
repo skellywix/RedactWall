@@ -147,6 +147,22 @@ Set these through `.env`, container environment, or a deployment secret manager:
 
 Never bind `SENTINEL_DB_PATH` to a cloud-synced folder. SQLite locking must be backed by local disk semantics.
 
+## Retention Operations
+
+PromptSentinel retains raw approval prompts and token vaults only for records that need review or rehydration. Set `rawRetentionDays` in policy to define how long finalized `approved`, `denied`, and `redacted` records keep those sealed fields. The default is 30 days.
+
+The server runs a retention purge on startup and then hourly. Security Admins can also run it from the Policy tab or with:
+
+```powershell
+Invoke-RestMethod `
+  -Method Post `
+  -Uri "https://promptsentinel.example.com/api/retention/purge" `
+  -WebSession $adminSession `
+  -Headers @{ "x-csrf-token" = $csrfToken }
+```
+
+Purge events keep the redacted metadata and hash-chained audit trail intact, and evidence exports show purge timestamps and the non-sensitive field names removed.
+
 ## Validation Gate
 
 Before handing a deployment to a pilot user, run:

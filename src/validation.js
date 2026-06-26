@@ -177,6 +177,7 @@ const policyUpdateSchema = z.object({
   blockRiskScore: z.number().int().min(0).max(100).optional(),
   alwaysBlock: z.array(detectorIdSchema).max(LIMITS.policyListItems).optional(),
   storeRawForApproval: z.boolean().optional(),
+  rawRetentionDays: z.number().int().min(0).max(3650).optional(),
   ignore: z.array(detectorIdSchema).max(LIMITS.policyListItems).optional(),
   disabledDetectors: z.array(detectorIdSchema).max(LIMITS.policyListItems).optional(),
   governedDestinations: z.array(z.string().min(1).max(253).regex(HOST_OR_LABEL)).max(LIMITS.policyListItems).optional(),
