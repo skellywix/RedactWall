@@ -15,11 +15,47 @@ const D = require('../shared/detect');
 const SERVER = process.env.SENTINEL_URL || 'http://localhost:4000';
 const KEY = process.env.INGEST_API_KEY || 'dev-ingest-key';
 
-async function logEvent(rec) {
+function publicFindings(analysis) {
+  return (analysis.findings || []).map((f) => ({
+    type: f.type,
+    severity: f.severity,
+    score: f.score,
+    masked: D.maskValue(f.type, f.value),
+  }));
+}
+
+function publicCategories(analysis) {
+  return (analysis.categories || []).map((c) => ({ category: c.category, score: c.score }));
+}
+
+function reportBody({ safeText, analysis, ctx }) {
+  return {
+    prompt: String(safeText || '').slice(0, 1000),
+    user: ctx.agent || 'mcp-agent',
+    destination: ctx.tool || 'mcp-tool',
+    source: 'mcp_guard',
+    channel: 'mcp_doc',
+    clientOutcome: 'redacted_sent',
+    clientPreRedacted: true,
+    clientFindings: publicFindings(analysis),
+    clientCategories: publicCategories(analysis),
+    clientEntityCounts: analysis.entityCounts || {},
+    clientRiskScore: analysis.riskScore || 0,
+    clientMaxSeverity: analysis.maxSeverity || 0,
+    clientMaxSeverityLabel: analysis.maxSeverityLabel || 'none',
+    note: 'MCP guard redacted tool output before model delivery',
+  };
+}
+
+async function logEvent(rec, opts = {}) {
+  const fetchImpl = opts.fetchImpl || globalThis.fetch;
+  if (!fetchImpl) return;
+  const server = opts.server || SERVER;
+  const key = opts.key || KEY;
   try {
-    await fetch(SERVER + '/api/v1/gate', {
+    await fetchImpl(server + '/api/v1/gate', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': KEY },
+      headers: { 'Content-Type': 'application/json', 'x-api-key': key },
       body: JSON.stringify(rec),
     });
   } catch (e) { /* logging best-effort */ }
@@ -29,7 +65,7 @@ async function logEvent(rec) {
  * Inspect+redact a tool result string before returning it to the model.
  * @returns {Promise<{ text:string, redacted:boolean, findings:string[] }>}
  */
-async function guardToolResult(text, ctx = {}) {
+async function guardToolResult(text, ctx = {}, opts = {}) {
   const a = D.analyze(text || '');
   const findings = [...new Set(a.findings.map(f => f.type).concat(a.categories.map(c => c.category)))];
   if (!a.findings.length && !a.categories.length) {
@@ -38,13 +74,7 @@ async function guardToolResult(text, ctx = {}) {
   const safe = a.categories.length
     ? '[REDACTED: ' + findings.join(', ') + ']'
     : D.redact(text, a.findings); // structured PII replaced with [TYPE]
-  await logEvent({
-    prompt: safe.slice(0, 1000),
-    user: ctx.agent || 'mcp-agent',
-    destination: ctx.tool || 'mcp-tool',
-    source: 'mcp_guard',
-    channel: 'mcp_doc',
-  });
+  await logEvent(reportBody({ safeText: safe, analysis: a, ctx }), opts);
   return { text: safe, redacted: true, findings };
 }
 
@@ -58,7 +88,7 @@ function wrapTool(handler, ctx = {}) {
   };
 }
 
-module.exports = { guardToolResult, wrapTool };
+module.exports = { guardToolResult, wrapTool, reportBody, publicFindings, publicCategories };
 
 // ---- demo when run directly ------------------------------------------------
 if (require.main === module) {

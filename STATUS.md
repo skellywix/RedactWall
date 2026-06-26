@@ -6,6 +6,8 @@
 
 ## Done
 
+- 2026-06-26: Hardened MCP guard telemetry so locally redacted tool output reports masked client findings/categories to the control plane while keeping raw tool content out of the logged prompt body.
+  Evidence: `node --test test/mcp-guard.test.js`, `npm test`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, live temp-DB client-redacted ingest smoke, `verifyAuditChain()`.
 - 2026-06-26: Verified and adopted the redesigned admin console UI: denser operations layout, redesigned login surface, selected-incident detail panel, icon command buttons, and functional global search across queue/activity data.
   Evidence: `npm run test:browser`, `npm test`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Upgraded GitHub Actions CI so branch pushes under `codex/**` run the production gate: dependency audit, sync-check, Node tests, Playwright browser E2E, audit-chain verification, detection eval, semantic determinism, config drift check, and Docker build.
