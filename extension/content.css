@@ -1,0 +1,23 @@
+.ps-banner{position:fixed;left:50%;bottom:96px;transform:translateX(-50%);z-index:2147483647;
+  width:min(560px,92vw);background:#fff;color:#15233a;border-radius:14px;
+  box-shadow:0 12px 40px rgba(8,20,40,.28);border:1px solid #e3e8f0;padding:14px 16px;
+  font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:14px;animation:ps-pop .14s ease-out}
+@keyframes ps-pop{from{opacity:0;transform:translateX(-50%) translateY(8px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
+.ps-banner.ps-block{border-top:4px solid #ef4444}
+.ps-banner.ps-justify{border-top:4px solid #f59e0b}
+.ps-banner.ps-warn{border-top:4px solid #eab308}
+.ps-row{display:flex;align-items:flex-start;gap:10px}
+.ps-ic{font-size:18px;line-height:1.4}
+.ps-msg{flex:1;line-height:1.5}
+.ps-msg b{font-weight:600}
+.ps-x{background:none;border:0;color:#90a0b8;font-size:15px;cursor:pointer;padding:2px 4px}
+.ps-just{width:100%;margin-top:10px;border:1px solid #d6deea;border-radius:9px;padding:8px 10px;
+  font:inherit;font-size:13px;resize:vertical;min-height:46px;box-sizing:border-box}
+.ps-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}
+.ps-btn{border:0;border-radius:9px;padding:8px 16px;font-weight:600;font-size:13px;cursor:pointer}
+.ps-primary{background:#2563eb;color:#fff}
+.ps-secondary{background:#eef2f8;color:#33405a}
+.ps-banner.ps-block .ps-primary{background:#334155}
+.ps-toast{position:fixed;right:20px;bottom:20px;z-index:2147483647;background:#15233a;color:#fff;
+  padding:11px 15px;border-radius:10px;font-family:-apple-system,Segoe UI,Roboto,sans-serif;font-size:13px;
+  box-shadow:0 8px 28px rgba(8,20,40,.35);max-width:340px;animation:ps-pop .14s ease-out}

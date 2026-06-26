@@ -1,0 +1,191 @@
+# PromptSentinel
+
+**Stop sensitive data from reaching AI tools — before it leaves the device.**
+
+PromptSentinel inspects what people type, paste, or upload into ChatGPT, Claude,
+Copilot, and Gemini, and **warns, asks for justification, or blocks** based on your
+policy. Detection runs locally (instant, nothing leaves the device just to be
+scanned), and every event flows to one simple dashboard with a full audit trail.
+
+Built to be **simple to deploy** for regulated teams (credit unions / NCUA, GLBA,
+HIPAA, PCI-DSS): install the browser extension, pick one of three policy modes, done.
+
+> Inspired by enterprise DLP platforms (e.g. Strac) but deliberately stripped down:
+> one extension, three policy toggles, one dashboard — not 30 SaaS connectors.
+
+---
+
+## The product, in one picture
+
+```
+  WHERE DATA LEAKS                     ONE CONTROL PLANE
+  ┌─────────────────────────┐
+  │ 🌐 Browser extension     │──┐      ┌───────────────────────────┐
+  │   type / paste / upload  │  │      │  PromptSentinel server    │
+  ├─────────────────────────┤  │      │                           │
+  │ 💻 Endpoint agent        │  ├────► │  • policy (warn/justify/  │
+  │   files to desktop AI    │  │      │    block)                 │
+  ├─────────────────────────┤  │      │  • approval queue         │
+  │ 🔌 MCP guard             │──┘      │  • audit log (hash-chain) │
+  │   redact before model    │        │  • dashboard              │
+  └─────────────────────────┘        └───────────────────────────┘
+        every sensor shares the SAME local detection engine
+```
+
+Three sensors, one brain. Each sensor runs the shared hybrid detector locally and
+reports verdicts to the server for policy, queueing, and audit.
+
+## Four enforcement modes (you pick one)
+
+| Mode | What the user sees | Use when |
+|------|--------------------|----------|
+| **Warn** | A nudge: "this has PII — send anyway?" | Light touch, awareness |
+| **Require justification** | Must type a business reason to proceed (logged) | Balance security + productivity |
+| **Redact & send** | Sensitive values become tokens, the prompt sends safely, and the AI's reply is restored locally | Keep people productive with **zero raw PII leaving the device** |
+| **Block** | Hard stop; can request Security Admin approval | High-risk / strict compliance |
+
+Hard-stop items (SSN, cards, bank/routing, secrets, private keys) always block —
+or, in **Redact** mode, are tokenized — regardless of the chosen mode. One-click
+**regulation templates** (NCUA/GLBA, PCI-DSS, HIPAA, Baseline, Redact-first) set
+sensible modes, thresholds, and hard-stops for you.
+
+## Hybrid detection (local, fast, semantic, pluggable)
+
+Detection is a **plugin registry** (inspired by Strac's auditor): each detector is a
+self-describing unit you can enable or disable per policy. Two layers, both on-device:
+
+1. **Structured PII (22 detectors)** — SSN, credit cards (Luhn), routing numbers
+   (ABA), IBAN (mod-97), US passport, TIN/EIN, driver's license, license plate, VIN,
+   email, phone, IP, DOB, US address, API keys, private keys, passwords.
+2. **Semantic categories** — source code, legal/contracts, credentials, and
+   confidential business context (e.g. "we're considering leaving our vendor, do not
+   share"). This is what keyword lists miss.
+
+`classifySemantic()` in `shared/detect.js` runs a **compact on-device classifier** —
+a per-category hashing-trick logistic regression with **subword (char n-gram) features**
+(trained by `npm run train-semantic`), now covering **all four categories** (source code,
+legal/contracts, credentials, confidential business). It **augments** precise keyword rules
+(max-combine), so literal markers fire and paraphrases like "thinking about switching away
+from our vendor, keep this internal" get caught too.
+
+Quality is **measured, not asserted**: `npm run eval` scores the engine on a *held-out,
+hand-labeled* corpus (`test/fixtures/semantic-eval.json`) it never trained on, and the
+floors are enforced in CI (`test/eval.test.js`). Current held-out result: **semantic
+precision 100% / recall 94%, structured PII 100% / 100%, and zero false positives on
+benign business prompts** — the number that decides whether an admin keeps the control on.
+Thresholds are calibrated on benign prompts the model never saw, so "zero false positives"
+means something. Add a structured detector by pushing one object to the `DETECTORS`
+registry; disable any detector via the policy `disabledDetectors` list.
+
+## File scanning (PDF / Word / Excel / PowerPoint)
+
+People paste *and upload* sensitive files into AI tools. A **processor layer**
+(`src/processors.js`) extracts text from PDFs, `.docx`, `.xlsx`, and `.pptx` (plus all
+text formats) so uploads get the same detection as typed prompts. The endpoint agent
+uses it for every file; sensors can also call `POST /api/v1/scan-file` with a
+base64 file. Add a new file type by pushing a processor with
+`{ supports(name), extract(buffer) }`.
+
+---
+
+
+## Quick start
+
+```bash
+npm install
+npm start
+# dashboard: http://localhost:4000   (admin / ChangeMe!2026)
+```
+
+### Try the browser extension (flagship)
+
+1. Chrome → Extensions → enable Developer mode → **Load unpacked** → select the
+   `extension/` folder.
+2. Open ChatGPT or Claude and type a prompt containing a fake SSN (e.g.
+   `123-45-6789`) or paste a code block. You'll get an inline banner; the event
+   appears on the dashboard.
+3. Change the mode in the dashboard **Policy** tab (warn / justify / block) — the
+   extension picks it up automatically.
+
+### Try the other sensors
+
+```bash
+npm run simulate                      # pushes sample prompts (API/proxy path)
+node mcp-guard/guard.js               # demo: redact a SharePoint doc before the model sees it
+node endpoint-agent/agent.js <dir>    # watch a folder for files going to desktop AI apps
+```
+
+## Project layout
+
+```
+server.js                 Control plane: gate API, policy, approval queue, SSE, audit
+shared/detect.js          Hybrid detection engine (shared by ALL sensors + server)
+src/policy.js             Enforcement policy + scanner config (ignore-lists, disabled detectors)
+src/processors.js         File-processor registry (pdf / docx / xlsx / pptx / text extraction)
+src/db.js                 JSON store + hash-chained audit log
+src/auth.js               Security Admin session auth
+public/index.html         Dashboard (queue, activity, audit, policy)
+extension/                Browser extension (MV3) — flagship sensor
+  manifest.json, content.js, content.css, background.js, popup.html
+  lib/detect.js           (copy of shared/detect.js)
+endpoint-agent/agent.js   Desktop file sensor (reference)
+mcp-guard/guard.js        MCP tool-response redactor (reference)
+scripts/                  simulate.js, squid-icap-bridge.js
+```
+
+## Where each layer stands
+
+| Layer | Status |
+|-------|--------|
+| Control plane (policy, queue, audit, dashboard) | Working — SQLite (WAL/transactions), tamper-evident audit covering the evidence |
+| Hybrid detection engine | Working — 22 structured detectors + **4-category on-device semantic model** (measured P100/R94 on a held-out set) |
+| Reversible redaction | Working — tokenize/detokenize, sealed vault, `/api/v1/rehydrate` |
+| Browser extension | Working — warn/justify/**redact**/block, real-button send, MDM identity, Man-in-the-Prompt guard |
+| Shadow-AI discovery | Working — flags use of ungoverned AI tools |
+| Output scanning | Working — `/api/v1/scan-response` flags PII/secrets in AI replies |
+| MCP guard / Endpoint agent | Working references — inline redaction; folder watch (pdf/docx/xlsx/pptx/text) |
+| Auth & ops | Working — login lockout, stable secret, `/healthz` · `/readyz` · `/api/metrics`, Docker, CI |
+
+## Shipped since the skeleton (see `ITERATIONS.md`)
+
+- **On-device semantic model** behind `classifySemantic()` (no heavy runtime; `npm run train-semantic`).
+- **SQLite** store (WAL + transactions) with audit integrity that covers the evidence, not just the event header.
+- **Reversible redaction / Redact-&-Send**, sealed token vault, local response re-hydration.
+- **MDM identity**, reliable per-site send, **Man-in-the-Prompt** guard, **shadow-AI** discovery.
+- **Login lockout**, stable session secret, regulation **templates**, **/healthz · /readyz · /api/metrics**, Docker + CI.
+
+## Still ahead (to ship commercially)
+
+- SSO/MFA and multiple admin roles; deeper multi-tenant isolation per institution.
+- Signed extension via Chrome Web Store + managed (force-install) policy via MDM.
+- Email/Slack/SIEM alerting on critical blocks.
+- Endpoint agent as a signed native service hooking clipboard + AI-app upload dirs.
+- Upgrade the on-device classifier to a quantized ONNX/WASM NER when recall demands it.
+
+## Configuration
+
+Copy `.env.example` to `.env` (or export):
+
+| Var | Purpose |
+|-----|---------|
+| `PORT` | Dashboard/API port (default 4000) |
+| `SENTINEL_DB_PATH` | SQLite store path (default `data/sentinel.db`). Use **local disk**, never a cloud-synced folder. |
+| `ADMIN_USER` / `ADMIN_PASSWORD` | Console credentials — change before real use |
+| `SENTINEL_SECRET` | Session cookie signing secret |
+| `SENTINEL_DATA_KEY` | Encrypts retained raw prompts at rest (falls back to `SENTINEL_SECRET`; if neither set, raw isn't stored) |
+| `INGEST_API_KEY` | Key sensors present to the gate API |
+
+## Compliance note
+
+Detection happens locally on each sensor. For most events only redacted +
+masked data is stored. The one exception is an item **held for admin approval**:
+its raw prompt is retained so the admin can review it — and that raw value is
+**encrypted at rest (AES-256-GCM)**, decrypted only on an explicit, audit-logged
+reveal. Institutions that forbid any server-side raw retention can set
+`storeRawForApproval: false` in policy, in which case reveal shows the redacted
+prompt only. Set `SENTINEL_DATA_KEY` (stable across restarts) to enable the
+encryption; with no key configured, raw prompts are not stored at all.
+
+Even so, a product that inspects employee input requires proper authorization
+and clear employee notice. See `AI_Chat_DLP_Implementation_Plan.docx` for the
+legal prerequisites and (optional) network-layer deployment for unmanaged devices.

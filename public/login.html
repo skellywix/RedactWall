@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PromptSentinel — Sign in</title>
+<style>
+  :root{--bg:#0b1220;--card:#131c2e;--line:#243049;--txt:#e7ecf5;--mut:#8a98b5;--accent:#3b82f6;--accent2:#2563eb;}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:
+    radial-gradient(1200px 600px at 70% -10%,#16233f 0,transparent 60%),var(--bg);color:var(--txt);
+    min-height:100vh;display:flex;align-items:center;justify-content:center}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:36px 34px;width:380px;
+    box-shadow:0 20px 60px rgba(0,0,0,.45)}
+  .brand{display:flex;align-items:center;gap:12px;margin-bottom:6px}
+  .logo{width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#3b82f6,#22d3ee);
+    display:flex;align-items:center;justify-content:center;font-weight:800;color:#06101f}
+  h1{font-size:20px;margin:0}
+  .sub{color:var(--mut);font-size:13px;margin:4px 0 26px}
+  label{display:block;font-size:12px;color:var(--mut);margin:14px 0 6px;text-transform:uppercase;letter-spacing:.04em}
+  input{width:100%;padding:11px 12px;border-radius:10px;border:1px solid var(--line);background:#0d1626;color:var(--txt);font-size:14px}
+  input:focus{outline:none;border-color:var(--accent)}
+  button{width:100%;margin-top:22px;padding:12px;border:0;border-radius:10px;background:linear-gradient(135deg,var(--accent),var(--accent2));
+    color:#fff;font-weight:600;font-size:15px;cursor:pointer}
+  button:hover{filter:brightness(1.07)}
+  .err{color:#fca5a5;font-size:13px;margin-top:14px;min-height:18px}
+  .hint{margin-top:20px;font-size:12px;color:var(--mut);text-align:center;border-top:1px solid var(--line);padding-top:14px}
+  code{background:#0d1626;padding:2px 6px;border-radius:5px;color:#93c5fd}
+</style>
+</head>
+<body>
+  <form class="card" id="f">
+    <div class="brand"><div class="logo">PS</div><div><h1>PromptSentinel</h1></div></div>
+    <div class="sub">AI Prompt DLP Gateway · Security Admin Console</div>
+    <label>Username</label>
+    <input id="user" autocomplete="username" value="admin" />
+    <label>Password</label>
+    <input id="password" type="password" autocomplete="current-password" placeholder="••••••••" />
+    <button type="submit">Sign in</button>
+    <div class="err" id="err"></div>
+    <div class="hint">Dev login: <code>admin</code> / <code>ChangeMe!2026</code></div>
+  </form>
+<script>
+  const f = document.getElementById('f');
+  f.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    document.getElementById('err').textContent = '';
+    const r = await fetch('/api/login', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ user: user.value, password: password.value })
+    });
+    if (r.ok) { location.href = '/index.html'; }
+    else { document.getElementById('err').textContent = 'Invalid credentials. Try again.'; }
+  });
+</script>
+</body>
+</html>

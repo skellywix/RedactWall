@@ -1,0 +1,24 @@
+{
+  "name": "promptsentinel",
+  "version": "0.3.0",
+  "description": "Inline DLP gateway for AI chat prompts — detects PII, blocks risky prompts, reversibly redacts, and releases only after Security Admin approval. Built for compliance (NCUA/GLBA/PCI/HIPAA) at credit unions and similar.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test",
+    "simulate": "node scripts/simulate.js",
+    "train-semantic": "node scripts/train-semantic.js",
+    "sync-engine": "node scripts/sync-engine.js",
+    "sync-check": "node scripts/sync-check.js",
+    "eval": "node scripts/eval-detect.js"
+  },
+  "license": "UNLICENSED",
+  "private": true,
+  "dependencies": {
+    "adm-zip": "^0.5.17",
+    "better-sqlite3": "^12.11.1",
+    "cookie-parser": "^1.4.6",
+    "express": "^4.19.2",
+    "pdf-parse": "^2.4.5"
+  }
+}

@@ -1,0 +1,466 @@
+'use strict';
+/**
+ * PromptSentinel — inline DLP gateway for AI chat prompts.
+ *
+ * Flow:
+ *   1. The network proxy (Squid+ICAP) or an SDK calls POST /api/v1/gate with the
+ *      user's prompt + context before it is allowed to reach the AI service.
+ *   2. PromptSentinel analyzes for PII, applies policy, and either ALLOWS or
+ *      BLOCKS (holds) the prompt. Blocked prompts enter the approval queue.
+ *   3. A Security Admin reviews the queue in the dashboard and approves/denies.
+ *   4. The waiting client polls GET /api/v1/status/:id (or long-poll /await/:id)
+ *      and proceeds only if released.
+ */
+const express = require('express');
+const cookieParser = require('cookie-parser');
+const path = require('path');
+
+const detector = require('./src/detector');
+const processors = require('./src/processors');
+const policy = require('./src/policy');
+const db = require('./src/db');
+const auth = require('./src/auth');
+const dataCrypto = require('./src/crypto');
+const templates = require('./src/templates');
+
+const app = express();
+const PORT = process.env.PORT || 4000;
+
+app.use(express.json({ limit: '12mb' }));
+app.use(cookieParser());
+
+// ---- Health / readiness (public, no sensitive data) -------------------------
+app.get('/healthz', (req, res) => res.json({ status: 'ok', service: 'promptsentinel', version: require('./package.json').version }));
+app.get('/readyz', (req, res) => { try { db.stats(); res.json({ ready: true }); } catch (e) { res.status(503).json({ ready: false, error: String((e && e.message) || e) }); } });
+
+// ---- Live updates (Server-Sent Events) --------------------------------------
+const sseClients = new Set();
+function broadcast(event, data) {
+  const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  for (const res of sseClients) { try { res.write(payload); } catch {} }
+}
+
+// =============================================================================
+// INGEST / GATE  (called by the proxy/SDK — protected by an API key)
+// =============================================================================
+const INGEST_KEY = process.env.INGEST_API_KEY || 'dev-ingest-key';
+
+function checkIngestKey(req, res, next) {
+  const key = req.get('x-api-key');
+  if (key !== INGEST_KEY) return res.status(401).json({ error: 'invalid ingest key' });
+  next();
+}
+
+// Privacy: only the raw prompt of an item HELD for admin approval is retained,
+// and only sealed (AES-256-GCM). Returns undefined when nothing should be
+// persisted — so allowed/warned/justified items keep ONLY redacted + masked
+// data, and no cleartext member data ever lands on disk.
+function rawToStore(text, status, pol) {
+  const held = status === 'pending' || status === 'pending_justification';
+  if (!held) return undefined;
+  if (pol && pol.storeRawForApproval === false) return undefined;
+  const sealed = dataCrypto.seal(text);
+  return sealed == null ? undefined : sealed;
+}
+
+app.post('/api/v1/gate', checkIngestKey, (req, res) => {
+  const {
+    prompt, user = 'unknown', destination = 'unknown', sourceIp = null,
+    source = 'api', channel = 'submit', clientOutcome = null, note = '', orgId = null,
+  } = req.body || {};
+  if (typeof prompt !== 'string' || !prompt.trim()) {
+    return res.status(400).json({ error: 'prompt (string) required' });
+  }
+
+  const pol = policy.loadPolicy();
+  const analysis = detector.analyze(prompt, policy.analyzeOpts(pol));
+  const verdict = policy.evaluate(analysis, pol);
+
+  // Privacy-preserving record: redacted prompt + masked findings + categories.
+  const redactedPrompt = detector.redact(prompt, analysis.findings);
+  const findings = analysis.findings.map((f) => ({
+    type: f.type, severity: f.severity, score: f.score, masked: detector.maskValue(f.type, f.value),
+  }));
+  const categories = (analysis.categories || []).map((c) => c.category);
+
+  const base = {
+    user, orgId, destination, sourceIp, source, channel,
+    redactedPrompt, findings, categories, entityCounts: analysis.entityCounts,
+    riskScore: analysis.riskScore, maxSeverity: analysis.maxSeverity,
+    maxSeverityLabel: analysis.maxSeverityLabel, reasons: verdict.reasons,
+  };
+
+  // Man-in-the-Prompt: the sensor stopped a prompt carrying hidden instructions.
+  if (clientOutcome === 'injection_blocked') {
+    const row = db.createQuery({ status: 'injection_blocked', ...base });
+    db.appendAudit({ action: 'INJECTION_BLOCKED', queryId: row.id, actor: user, detail: note || 'hidden instructions detected' });
+    broadcast('query', { type: 'injection_blocked', query: publicQuery(row) });
+    broadcast('stats', db.stats());
+    return res.json({ id: row.id, decision: 'block', status: 'injection_blocked' });
+  }
+
+  // Shadow-AI discovery: a visit to an AI tool policy does not govern. Recorded
+  // as an informational event so the examiner sees unmonitored paths, not a leak.
+  if (clientOutcome === 'shadow_ai') {
+    const row = db.createQuery({ status: 'shadow_ai', ...base });
+    db.appendAudit({ action: 'SHADOW_AI', queryId: row.id, actor: user, detail: `ungoverned AI tool: ${destination}` });
+    broadcast('query', { type: 'shadow_ai', query: publicQuery(row) });
+    broadcast('stats', db.stats());
+    return res.json({ id: row.id, decision: 'log', status: 'shadow_ai' });
+  }
+
+  if (verdict.decision === 'allow') {
+    const row = db.createQuery({ status: 'allowed', ...base });
+    db.appendAudit({ action: 'ALLOWED', queryId: row.id, actor: user, detail: `${source} risk ${analysis.riskScore}` });
+    broadcast('query', { type: 'allowed', query: publicQuery(row) });
+    broadcast('stats', db.stats());
+    return res.json({ id: row.id, decision: 'allow', riskScore: analysis.riskScore, findings, categories });
+  }
+
+  // Sensitive content detected. Behaviour depends on the org enforcement mode.
+  // 'redact' neutralizes even hard-stop entities by tokenizing them (that is the
+  // point — the prompt can proceed because it no longer contains real PII).
+  // Otherwise hard-stop entities force 'block' regardless of mode.
+  const hardStop = analysis.findings.some((f) => pol.alwaysBlock.includes(f.type));
+  const mode = pol.enforcementMode === 'redact' ? 'redact'
+    : (hardStop ? 'block' : (pol.enforcementMode || 'block'));
+
+  // Status reflects how the sensor resolved it (from clientOutcome) or, for the
+  // API/proxy path, defaults to the mode's behaviour.
+  let status;
+  if (clientOutcome === 'sent_after_warning') status = 'warned_sent';
+  else if (clientOutcome === 'redacted_sent') status = 'redacted';
+  else if (clientOutcome === 'justified') status = 'justified';
+  else if (clientOutcome === 'blocked_by_user') status = 'blocked_by_user';
+  else if (clientOutcome === 'awaiting_approval') status = 'pending';
+  else if (mode === 'redact') status = analysis.findings.length ? 'redacted' : 'warned';
+  else if (mode === 'block') status = 'pending';
+  else if (mode === 'warn') status = 'warned';
+  else if (mode === 'justify') status = 'pending_justification';
+  else status = 'pending';
+
+  // Reversible tokenization: replace each detected value with a stable typed
+  // placeholder and seal the token->value map (the "vault") at rest. The caller
+  // sends `tokenizedPrompt` to the AI; POST /api/v1/rehydrate restores the real
+  // values in the model's response. The model never sees real PII; the vault is
+  // AES-256-GCM encrypted and revealed only on an audit-logged rehydrate.
+  let tokenizedPrompt, tokenVault;
+  if (status === 'redacted') {
+    const t = detector.tokenize(prompt, analysis.findings);
+    tokenizedPrompt = t.text;                       // PII-free, safe to retain/display
+    tokenVault = dataCrypto.seal(JSON.stringify(t.map));
+  }
+
+  const row = db.createQuery({
+    status, mode, ...base, decisionNote: note,
+    _rawPrompt: rawToStore(prompt, status, pol),
+    _tokenVault: tokenVault,
+    tokenizedPrompt,
+  });
+  const action = status === 'pending' ? 'BLOCKED'
+    : status === 'redacted' ? 'REDACTED'
+    : status === 'justified' ? 'JUSTIFIED'
+    : status === 'warned_sent' ? 'WARNED_SENT'
+    : status === 'blocked_by_user' ? 'SELF_BLOCKED' : 'FLAGGED';
+  db.appendAudit({ action, queryId: row.id, actor: user, detail: `${source}/${channel}: ${verdict.reasons.join('; ')}` });
+  broadcast('query', { type: status, query: publicQuery(row) });
+  broadcast('stats', db.stats());
+  return res.json({
+    id: row.id, decision: mode === 'redact' ? 'redact' : 'block', mode, status,
+    riskScore: analysis.riskScore, findings, categories, reasons: verdict.reasons,
+    tokenizedPrompt,
+    message: mode === 'redact' ? 'Sensitive values tokenized — safe to send; re-hydrate the AI response via /api/v1/rehydrate.'
+      : mode === 'block' ? 'Withheld pending Security Admin approval.'
+      : mode === 'justify' ? 'Justification required before sending.'
+      : 'Sensitive content — user warned.',
+  });
+});
+
+// Re-hydrate an AI response: swap tokens back to their real values using the
+// sealed vault for this query. Lets a proxy/SDK restore the model's answer
+// after a 'redact'-mode send. Audit-logged; never returns the vault itself.
+app.post('/api/v1/rehydrate', checkIngestKey, (req, res) => {
+  const { id, text } = req.body || {};
+  const q = id && db.getQuery(id);
+  if (!q) return res.status(404).json({ error: 'not found' });
+  if (!q._tokenVault) return res.json({ id, text: text || '', rehydrated: false, reason: 'no vault for this item' });
+  const mapJson = dataCrypto.open(q._tokenVault);
+  if (mapJson == null) return res.status(409).json({ error: 'vault unavailable (no/incorrect data key)' });
+  let map; try { map = JSON.parse(mapJson); } catch { return res.status(500).json({ error: 'vault corrupt' }); }
+  const out = detector.detokenize(typeof text === 'string' ? text : '', map);
+  db.appendAudit({ action: 'REHYDRATE', queryId: q.id, actor: q.user || 'sensor', detail: `re-hydrated ${Object.keys(map).length} token(s)` });
+  res.json({ id: q.id, text: out, rehydrated: true });
+});
+
+// Public policy for sensors (ingest-key protected).
+app.get('/api/v1/policy', checkIngestKey, (req, res) => {
+  const p = policy.loadPolicy();
+  res.json({
+    enforcementMode: p.enforcementMode, blockMinSeverity: p.blockMinSeverity,
+    blockRiskScore: p.blockRiskScore, alwaysBlock: p.alwaysBlock,
+    governedDestinations: p.governedDestinations,
+  });
+});
+
+// List available detectors (for the console enable/disable UI).
+app.get('/api/v1/detectors', checkIngestKey, (req, res) => res.json(detector.listDetectors()));
+
+// Scan an uploaded FILE: extract text (pdf/docx/xlsx/text), then gate it.
+app.post('/api/v1/scan-file', checkIngestKey, async (req, res) => {
+  const { filename, contentBase64, user = 'unknown', destination = 'unknown', source = 'api', channel = 'file_upload' } = req.body || {};
+  if (!filename || !contentBase64) return res.status(400).json({ error: 'filename and contentBase64 required' });
+  let buf;
+  try { buf = Buffer.from(contentBase64, 'base64'); } catch { return res.status(400).json({ error: 'bad base64' }); }
+  const pol = policy.loadPolicy();
+  if (buf.length > (pol.scanner && pol.scanner.maxFileBytes || 6.6e6)) return res.status(413).json({ error: 'file too large' });
+
+  let extracted;
+  try { extracted = await processors.extractText(filename, buf); }
+  catch (e) { return res.status(500).json({ error: 'extract failed' }); }
+  if (!extracted.supported) {
+    const row = db.createQuery({ status: 'flagged', user, destination, source, channel,
+      redactedPrompt: '[unsupported file] ' + filename, findings: [], categories: [], entityCounts: {},
+      riskScore: 0, maxSeverity: 0, maxSeverityLabel: 'none', reasons: ['Unsupported file type recorded'] });
+    db.appendAudit({ action: 'FILE_RECORDED', queryId: row.id, actor: user, detail: filename });
+    return res.json({ id: row.id, decision: 'allow', supported: false, filename });
+  }
+
+  const analysis = detector.analyze(extracted.text, policy.analyzeOpts(pol));
+  const verdict = policy.evaluate(analysis, pol);
+  const findings = analysis.findings.map((x) => ({ type: x.type, severity: x.severity, score: x.score, masked: detector.maskValue(x.type, x.value) }));
+  const categories = (analysis.categories || []).map((c) => c.category);
+  const preview = '[file:' + filename + '] ' + detector.redact(extracted.text, analysis.findings).slice(0, 600);
+  const base = { user, destination, source, channel, filename, processor: extracted.processor,
+    redactedPrompt: preview, findings, categories, entityCounts: analysis.entityCounts,
+    riskScore: analysis.riskScore, maxSeverity: analysis.maxSeverity, maxSeverityLabel: analysis.maxSeverityLabel, reasons: verdict.reasons };
+
+  if (verdict.decision === 'allow') {
+    const row = db.createQuery({ status: 'allowed', ...base });
+    db.appendAudit({ action: 'FILE_ALLOWED', queryId: row.id, actor: user, detail: filename + ' risk ' + analysis.riskScore });
+    broadcast('query', { type: 'allowed', query: publicQuery(row) }); broadcast('stats', db.stats());
+    return res.json({ id: row.id, decision: 'allow', supported: true, filename, riskScore: analysis.riskScore, findings, categories });
+  }
+  const hardStop = analysis.findings.some((x) => pol.alwaysBlock.includes(x.type));
+  const mode = hardStop ? 'block' : (pol.enforcementMode || 'block');
+  const status = mode === 'warn' ? 'warned' : mode === 'justify' ? 'pending_justification' : 'pending';
+  const rawFile = '[file:' + filename + ']\n' + extracted.text.slice(0, 5000);
+  const row = db.createQuery({ status, mode, ...base, _rawPrompt: rawToStore(rawFile, status, pol) });
+  db.appendAudit({ action: status === 'pending' ? 'FILE_BLOCKED' : 'FILE_FLAGGED', queryId: row.id, actor: user, detail: filename + ': ' + verdict.reasons.join('; ') });
+  broadcast('query', { type: status, query: publicQuery(row) }); broadcast('stats', db.stats());
+  res.json({ id: row.id, decision: 'block', mode, status, supported: true, filename, riskScore: analysis.riskScore, findings, categories, reasons: verdict.reasons });
+});
+
+// Scan an AI RESPONSE for sensitive data leaking back to the user (e.g. an MCP
+// tool pulled PII, or the model echoed it). Parity with output-scanning DLP.
+app.post('/api/v1/scan-response', checkIngestKey, (req, res) => {
+  const { text, user = 'unknown', destination = 'unknown', source = 'api', orgId = null } = req.body || {};
+  if (typeof text !== 'string' || !text.trim()) return res.status(400).json({ error: 'text (string) required' });
+  const pol = policy.loadPolicy();
+  const analysis = detector.analyze(text, policy.analyzeOpts(pol));
+  const findings = analysis.findings.map((f) => ({ type: f.type, severity: f.severity, score: f.score, masked: detector.maskValue(f.type, f.value) }));
+  const categories = (analysis.categories || []).map((c) => c.category);
+  const redacted = detector.redact(text, analysis.findings);
+  const leaked = findings.length > 0 || categories.length > 0;
+  if (leaked) {
+    const row = db.createQuery({ status: 'response_flagged', user, orgId, destination, source, channel: 'ai_response',
+      redactedPrompt: '[AI response] ' + redacted.slice(0, 600), findings, categories, entityCounts: analysis.entityCounts,
+      riskScore: analysis.riskScore, maxSeverity: analysis.maxSeverity, maxSeverityLabel: analysis.maxSeverityLabel,
+      reasons: ['Sensitive data present in AI response'] });
+    db.appendAudit({ action: 'RESPONSE_FLAGGED', queryId: row.id, actor: user, detail: `${source}: ${findings.map((f) => f.type).join(', ') || categories.join(', ')}` });
+    broadcast('query', { type: 'response_flagged', query: publicQuery(row) });
+    broadcast('stats', db.stats());
+  }
+  res.json({ leaked, findings, categories, redacted });
+});
+
+// Client polls for release decision.
+app.get('/api/v1/status/:id', checkIngestKey, (req, res) => {
+  const q = db.getQuery(req.params.id);
+  if (!q) return res.status(404).json({ error: 'not found' });
+  const released = q.status === 'approved' || q.status === 'allowed';
+  res.json({ id: q.id, status: q.status, released });
+});
+
+// =============================================================================
+// AUTH
+// =============================================================================
+app.post('/api/login', (req, res) => {
+  const { user, password } = req.body || {};
+  const key = (user || '?') + '|' + (req.ip || (req.connection && req.connection.remoteAddress) || '');
+  const st = auth.loginStatus(key);
+  if (st.locked) {
+    db.appendAudit({ action: 'LOGIN_LOCKED', actor: user || '?', detail: 'too many attempts' });
+    return res.status(429).json({ error: 'too many attempts — temporarily locked', retryMs: st.retryMs });
+  }
+  if (!auth.verifyPassword(user, password)) {
+    const r = auth.registerFail(key);
+    db.appendAudit({ action: 'LOGIN_FAILED', actor: user || '?', detail: r.locked ? 'locked out' : (r.remaining + ' attempts left') });
+    return res.status(401).json({ error: 'invalid credentials', remaining: r.remaining });
+  }
+  auth.registerSuccess(key);
+  const token = auth.createSession(user);
+  res.cookie('sentinel_session', token, { httpOnly: true, sameSite: 'lax', secure: !!process.env.HTTPS, maxAge: 8 * 3600 * 1000 });
+  db.appendAudit({ action: 'ADMIN_LOGIN', actor: user });
+  res.json({ ok: true, user, role: 'security_admin' });
+});
+
+app.post('/api/logout', (req, res) => {
+  res.clearCookie('sentinel_session');
+  res.json({ ok: true });
+});
+
+app.get('/api/me', auth.requireAuth, (req, res) => {
+  res.json({ user: req.user.user, role: req.user.role, defaultPassword: auth.ADMIN_PASSWORD_IS_DEFAULT });
+});
+
+// =============================================================================
+// ADMIN API (session-protected)
+// =============================================================================
+function publicQuery(q, { includeRaw = false } = {}) {
+  const { _rawPrompt, _tokenVault, ...rest } = q;
+  return includeRaw ? { ...rest, rawPrompt: _rawPrompt } : rest;
+}
+
+app.get('/api/queries', auth.requireAuth, (req, res) => {
+  const status = req.query.status;
+  const rows = db.listQueries({ status, limit: Number(req.query.limit) || 200 });
+  res.json(rows.map((q) => publicQuery(q)));
+});
+
+app.get('/api/queries/:id', auth.requireAuth, (req, res) => {
+  const q = db.getQuery(req.params.id);
+  if (!q) return res.status(404).json({ error: 'not found' });
+  res.json(publicQuery(q));
+});
+
+// Reveal raw prompt (sensitive) — decrypts the sealed value, explicitly
+// audit-logged. Falls back to the redacted prompt when raw was not retained
+// (privacy mode, item not held, or no data key configured).
+app.post('/api/queries/:id/reveal', auth.requireAuth, (req, res) => {
+  const q = db.getQuery(req.params.id);
+  if (!q) return res.status(404).json({ error: 'not found' });
+  db.appendAudit({ action: 'REVEAL_RAW', queryId: q.id, actor: req.user.user });
+  let rawPrompt, rawRetained = false;
+  if (q._rawPrompt) {
+    const opened = dataCrypto.open(q._rawPrompt);
+    if (opened == null) rawPrompt = '[sealed — data key unavailable or value tampered]';
+    else { rawPrompt = opened; rawRetained = true; }
+  } else {
+    rawPrompt = q.redactedPrompt;
+  }
+  res.json({ id: q.id, rawPrompt, rawRetained });
+});
+
+app.post('/api/queries/:id/approve', auth.requireAuth, (req, res) => {
+  const q = db.getQuery(req.params.id);
+  if (!q) return res.status(404).json({ error: 'not found' });
+  if (q.status !== 'pending') return res.status(409).json({ error: `already ${q.status}` });
+  const note = (req.body && req.body.note) || '';
+  const updated = db.updateQuery(q.id, {
+    status: 'approved', decidedBy: req.user.user, decidedAt: new Date().toISOString(), decisionNote: note,
+  });
+  db.appendAudit({ action: 'APPROVED', queryId: q.id, actor: req.user.user, detail: note });
+  broadcast('decision', { id: q.id, status: 'approved' });
+  broadcast('stats', db.stats());
+  res.json(publicQuery(updated));
+});
+
+app.post('/api/queries/:id/deny', auth.requireAuth, (req, res) => {
+  const q = db.getQuery(req.params.id);
+  if (!q) return res.status(404).json({ error: 'not found' });
+  if (q.status !== 'pending') return res.status(409).json({ error: `already ${q.status}` });
+  const note = (req.body && req.body.note) || '';
+  const updated = db.updateQuery(q.id, {
+    status: 'denied', decidedBy: req.user.user, decidedAt: new Date().toISOString(), decisionNote: note,
+  });
+  db.appendAudit({ action: 'DENIED', queryId: q.id, actor: req.user.user, detail: note });
+  broadcast('decision', { id: q.id, status: 'denied' });
+  broadcast('stats', db.stats());
+  res.json(publicQuery(updated));
+});
+
+app.get('/api/stats', auth.requireAuth, (req, res) => res.json(db.stats()));
+
+// Ops metrics (admin) — counts + live audit-integrity, for dashboards/monitoring.
+app.get('/api/metrics', auth.requireAuth, (req, res) => {
+  const integ = db.verifyAuditChain();
+  res.json({ uptimeSec: Math.round(process.uptime()), ...db.stats(), auditOk: integ.ok, auditCount: integ.count, ts: new Date().toISOString() });
+});
+
+// Per-user risk — answers the examiner's "did employee X expose member data?".
+app.get('/api/risk', auth.requireAuth, (req, res) => {
+  const rows = db.listQueries({ limit: 5000 });
+  const by = {};
+  for (const q of rows) {
+    const u = q.user || 'unknown';
+    const r = (by[u] = by[u] || { user: u, orgId: q.orgId || null, events: 0, blocked: 0, redacted: 0, riskSum: 0, maxSeverity: 0, entities: {} });
+    r.events++;
+    if (q.status === 'pending' || q.status === 'denied') r.blocked++;
+    if (q.status === 'redacted') r.redacted++;
+    r.riskSum += q.riskScore || 0;
+    if ((q.maxSeverity || 0) > r.maxSeverity) r.maxSeverity = q.maxSeverity;
+    for (const [k, v] of Object.entries(q.entityCounts || {})) r.entities[k] = (r.entities[k] || 0) + v;
+  }
+  const users = Object.values(by).map((r) => ({
+    user: r.user, orgId: r.orgId, events: r.events, blocked: r.blocked, redacted: r.redacted,
+    avgRisk: r.events ? Math.round(r.riskSum / r.events) : 0, maxSeverity: r.maxSeverity,
+    topEntities: Object.entries(r.entities).sort((a, b) => b[1] - a[1]).slice(0, 5),
+  })).sort((a, b) => (b.avgRisk * b.events) - (a.avgRisk * a.events));
+  res.json({ users });
+});
+
+// Regulation policy templates (list + one-click apply).
+app.get('/api/policy/templates', auth.requireAuth, (req, res) => res.json(templates.list()));
+app.put('/api/policy/apply-template', auth.requireAuth, (req, res) => {
+  const t = templates.get((req.body || {}).id);
+  if (!t) return res.status(404).json({ error: 'unknown template' });
+  const merged = { ...policy.loadPolicy(), ...t.policy };
+  policy.savePolicy(merged);
+  db.appendAudit({ action: 'POLICY_TEMPLATE_APPLIED', actor: req.user.user, detail: req.body.id + ' -> mode=' + merged.enforcementMode });
+  res.json(merged);
+});
+
+app.get('/api/audit', auth.requireAuth, (req, res) => {
+  res.json({ entries: db.listAudit(Number(req.query.limit) || 200), integrity: db.verifyAuditChain() });
+});
+
+app.get('/api/policy', auth.requireAuth, (req, res) => res.json(policy.loadPolicy()));
+app.put('/api/policy', auth.requireAuth, (req, res) => {
+  const merged = { ...policy.loadPolicy(), ...(req.body || {}) };
+  policy.savePolicy(merged);
+  db.appendAudit({ action: 'POLICY_UPDATED', actor: req.user.user, detail: `mode=${merged.enforcementMode}` });
+  res.json(merged);
+});
+
+// SSE stream for the dashboard.
+app.get('/api/stream', auth.requireAuth, (req, res) => {
+  res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
+  res.flushHeaders();
+  res.write(`event: hello\ndata: ${JSON.stringify({ ok: true })}\n\n`);
+  sseClients.add(res);
+  req.on('close', () => sseClients.delete(res));
+});
+
+// ---- Static dashboard --------------------------------------------------------
+app.get('/', (req, res) => res.redirect('/index.html'));
+app.get('/index.html', auth.requireAuth, (req, res) =>
+  res.sendFile(path.join(__dirname, 'public', 'index.html')));
+app.use(express.static(path.join(__dirname, 'public')));
+
+app.listen(PORT, () => {
+  console.log(`PromptSentinel running on http://localhost:${PORT}`);
+  if (auth.ADMIN_PASSWORD_IS_DEFAULT) {
+    console.log('  [!] Using DEFAULT admin password. Set ADMIN_PASSWORD before production.');
+  }
+  if (!auth.SECRET_IS_STABLE) {
+    console.log('  [!] Session secret is ' + auth.SECRET_SOURCE + ' — set SENTINEL_SECRET (stable) for multi-instance deployments.');
+  }
+  if (!dataCrypto.ENABLED) {
+    console.log('  [!] No SENTINEL_DATA_KEY/SENTINEL_SECRET set — raw prompts are NOT stored (reveal shows redacted). Set a key to enable encrypted raw retention for approvals.');
+  } else {
+    console.log('  Raw-prompt retention: encrypted at rest (AES-256-GCM), held items only.');
+  }
+  console.log(`  Ingest key: ${INGEST_KEY === 'dev-ingest-key' ? 'dev-ingest-key (override with INGEST_API_KEY)' : 'configured'}`);
+});
+
+module.exports = app;

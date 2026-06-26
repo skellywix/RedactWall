@@ -1,0 +1,11 @@
+node_modules/
+*.log
+.env
+# runtime data store — created at startup; never commit (DB artifacts, secrets,
+# and legacy JSON that may hold cleartext PII)
+data/
+# cloud-sync (ProtonDrive/FUSE) leftovers — never source
+.fuse_hidden*
+# editor/OS noise
+.DS_Store
+*.swp

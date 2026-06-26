@@ -1,0 +1,52 @@
+{
+  "enforcementMode": "block",
+  "blockMinSeverity": 2,
+  "blockRiskScore": 20,
+  "alwaysBlock": [
+    "US_SSN",
+    "CREDIT_CARD",
+    "BANK_ACCOUNT",
+    "ROUTING_NUMBER",
+    "IBAN",
+    "US_PASSPORT",
+    "US_TIN_EIN",
+    "US_DRIVERS_LICENSE",
+    "DOB",
+    "SECRET_KEY",
+    "PRIVATE_KEY"
+  ],
+  "storeRawForApproval": true,
+  "ignore": [],
+  "disabledDetectors": [],
+  "governedDestinations": [
+    "chatgpt.com",
+    "openai.com",
+    "claude.ai",
+    "anthropic.com",
+    "gemini.google.com",
+    "copilot.microsoft.com",
+    "perplexity.ai",
+    "poe.com"
+  ],
+  "scanner": {
+    "ignoreDirectories": [
+      "node_modules",
+      ".git",
+      "Library",
+      "Applications",
+      "AppData"
+    ],
+    "ignoreFilenames": [
+      "thumbs.db",
+      ".ds_store",
+      "package.json",
+      "package-lock.json"
+    ],
+    "ignoreExtensions": [
+      ".tmp",
+      ".log",
+      ".lock"
+    ],
+    "maxFileBytes": 6606028.8
+  }
+}
