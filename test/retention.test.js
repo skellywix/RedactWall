@@ -164,6 +164,7 @@ test('purged approval reveal falls back to redacted prompt without the secret', 
 
   const beforeReveal = await jsonFetch(port, `/api/queries/${gated.id}/reveal`, {
     headers: { cookie, 'x-csrf-token': csrfToken },
+    body: { password: 'unit-pass' },
   });
   assert.strictEqual(beforeReveal.status, 200);
   const beforeBody = await beforeReveal.json();
@@ -178,6 +179,7 @@ test('purged approval reveal falls back to redacted prompt without the secret', 
 
   const afterReveal = await jsonFetch(port, `/api/queries/${gated.id}/reveal`, {
     headers: { cookie, 'x-csrf-token': csrfToken },
+    body: { password: 'unit-pass' },
   });
   assert.strictEqual(afterReveal.status, 200);
   const afterBody = await afterReveal.json();

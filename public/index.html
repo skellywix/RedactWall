@@ -375,6 +375,30 @@
   .btn.reveal{background:#0a121d;border-color:var(--line);color:var(--soft)}
   .btn:hover{filter:brightness(1.05)}
   .btn:disabled{opacity:.58;cursor:not-allowed;filter:none}
+  .stepup-dialog{
+    width:min(420px,calc(100vw - 32px));
+    border:1px solid var(--line2);
+    border-radius:8px;
+    background:#0b1521;
+    color:var(--txt);
+    padding:0;
+    box-shadow:0 24px 80px rgba(0,0,0,.55);
+  }
+  .stepup-dialog::backdrop{background:rgba(1,6,13,.72)}
+  .stepup-panel{display:grid;gap:14px;padding:18px}
+  .stepup-panel h2{margin:0;font-size:16px;letter-spacing:0}
+  .stepup-panel p{margin:0;color:var(--mut);font-size:13px;line-height:1.45}
+  .stepup-panel label{display:grid;gap:7px;color:var(--soft);font-size:12px;font-weight:720}
+  .stepup-panel input{
+    width:100%;
+    border:1px solid var(--line);
+    border-radius:8px;
+    background:#08111c;
+    color:var(--txt);
+    padding:10px 11px;
+    font-size:14px;
+  }
+  .stepup-actions{display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap}
   .side-stack{display:grid;gap:14px}
   .coverage-grid{display:grid;grid-template-columns:minmax(0,1.12fr) minmax(330px,.88fr);gap:14px;align-items:start}
   .wide-panel{grid-column:1 / span 2}

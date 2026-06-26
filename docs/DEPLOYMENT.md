@@ -151,6 +151,8 @@ Never bind `SENTINEL_DB_PATH` to a cloud-synced folder. SQLite locking must be b
 
 PromptSentinel retains raw approval prompts and token vaults only for records that need review or rehydration. Set `rawRetentionDays` in policy to define how long finalized `approved`, `denied`, and `redacted` records keep those sealed fields. The default is 30 days.
 
+Revealing a retained raw prompt requires an active Security Admin session, a CSRF token, and password confirmation. Successful reveals and failed password confirmations are written to the audit log.
+
 The server runs a retention purge on startup and then hourly. Security Admins can also run it from the Policy tab or with:
 
 ```powershell

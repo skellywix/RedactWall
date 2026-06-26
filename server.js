@@ -613,6 +613,27 @@ app.post('/api/logout', ...adminWrite, (req, res) => {
   res.json({ ok: true });
 });
 
+function stepUpKey(user, req) {
+  return 'reveal|' + (user || '?') + '|' + (req.ip || (req.connection && req.connection.remoteAddress) || '');
+}
+
+function requireRevealPassword(req, res, next) {
+  const user = req.user && req.user.user;
+  const key = stepUpKey(user, req);
+  const st = auth.loginStatus(key);
+  if (st.locked) {
+    db.appendAudit({ action: 'REVEAL_LOCKED', queryId: req.params.id, actor: user || '?', detail: 'too many attempts' });
+    return res.status(429).json({ error: 'too many attempts - temporarily locked', retryMs: st.retryMs });
+  }
+  if (!auth.verifyPassword(user, req.body && req.body.password)) {
+    const r = auth.registerFail(key);
+    db.appendAudit({ action: 'REVEAL_FAILED', queryId: req.params.id, actor: user || '?', detail: r.locked ? 'locked out' : (r.remaining + ' attempts left') });
+    return res.status(401).json({ error: 'invalid credentials', remaining: r.remaining });
+  }
+  auth.registerSuccess(key);
+  next();
+}
+
 app.get('/api/me', auth.requireAuth, (req, res) => {
   res.json({ user: req.user.user, role: req.user.role, defaultPassword: auth.ADMIN_PASSWORD_IS_DEFAULT });
 });
@@ -637,23 +658,29 @@ app.get('/api/queries/:id', auth.requireAuth, (req, res) => {
   res.json(publicQuery(q));
 });
 
-// Reveal raw prompt (sensitive) — decrypts the sealed value, explicitly
-// audit-logged. Falls back to the redacted prompt when raw was not retained
-// (privacy mode, item not held, or no data key configured).
-app.post('/api/queries/:id/reveal', ...adminWrite, (req, res) => {
-  const q = db.getQuery(req.params.id);
-  if (!q) return res.status(404).json({ error: 'not found' });
-  db.appendAudit({ action: 'REVEAL_RAW', queryId: q.id, actor: req.user.user });
-  let rawPrompt, rawRetained = false;
-  if (q._rawPrompt) {
-    const opened = dataCrypto.open(q._rawPrompt);
-    if (opened == null) rawPrompt = '[sealed — data key unavailable or value tampered]';
-    else { rawPrompt = opened; rawRetained = true; }
-  } else {
-    rawPrompt = q.redactedPrompt;
-  }
-  res.json({ id: q.id, rawPrompt, rawRetained });
-});
+// Reveal raw prompt (sensitive): decrypts the sealed value, requires password
+// step-up, and logs the action. Falls back to the redacted prompt when raw was
+// not retained (privacy mode, item not held, or no data key configured).
+app.post(
+  '/api/queries/:id/reveal',
+  ...adminWrite,
+  validation.validateBody(validation.revealSchema),
+  requireRevealPassword,
+  (req, res) => {
+    const q = db.getQuery(req.params.id);
+    if (!q) return res.status(404).json({ error: 'not found' });
+    db.appendAudit({ action: 'REVEAL_RAW', queryId: q.id, actor: req.user.user });
+    let rawPrompt, rawRetained = false;
+    if (q._rawPrompt) {
+      const opened = dataCrypto.open(q._rawPrompt);
+      if (opened == null) rawPrompt = '[sealed - data key unavailable or value tampered]';
+      else { rawPrompt = opened; rawRetained = true; }
+    } else {
+      rawPrompt = q.redactedPrompt;
+    }
+    res.json({ id: q.id, rawPrompt, rawRetained });
+  },
+);
 
 app.post('/api/queries/:id/approve', ...adminWrite, validation.validateBody(validation.noteSchema), (req, res) => {
   const q = db.getQuery(req.params.id);

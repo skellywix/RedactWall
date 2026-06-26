@@ -192,7 +192,7 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 | Shadow-AI discovery | Working — flags use of ungoverned AI tools |
 | Output scanning | Working — `/api/v1/scan-response` flags PII/secrets in AI replies |
 | MCP guard / Endpoint agent | Working references — inline redaction; folder watch (pdf/docx/xlsx/pptx/text) |
-| Auth & ops | Working — login lockout, stable secret, `/healthz` · `/readyz` · `/api/metrics`, Docker, CI |
+| Auth & ops | Working: login lockout, password-confirmed raw reveal, stable secret, `/healthz` · `/readyz` · `/api/metrics`, Docker, CI |
 
 ## Shipped since the skeleton (see `ITERATIONS.md`)
 
@@ -241,9 +241,10 @@ Copy `.env.example` to `.env` (or export):
 
 Detection happens locally on each sensor. For most events only redacted +
 masked data is stored. The one exception is an item **held for admin approval**:
-its raw prompt is retained so the admin can review it — and that raw value is
-**encrypted at rest (AES-256-GCM)**, decrypted only on an explicit, audit-logged
-reveal. Institutions that forbid any server-side raw retention can set
+its raw prompt is retained so the admin can review it. That raw value is
+**encrypted at rest (AES-256-GCM)** and decrypted only on an explicit,
+password-confirmed, audit-logged reveal. Institutions that forbid any
+server-side raw retention can set
 `storeRawForApproval: false` in policy, in which case reveal shows the redacted
 prompt only. Set `SENTINEL_DATA_KEY` (stable across restarts) to enable the
 encryption; with no key configured, raw prompts are not stored at all. Finalized

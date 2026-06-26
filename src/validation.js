@@ -153,6 +153,10 @@ const loginSchema = z.object({
   password: nonBlankString(512),
 }).strict();
 
+const revealSchema = z.object({
+  password: nonBlankString(512),
+}).strict();
+
 const noteSchema = z.object({
   note: z.preprocess(
     (value) => (value == null ? '' : value),
@@ -217,6 +221,7 @@ module.exports = {
   scanFileSchema,
   scanResponseSchema,
   loginSchema,
+  revealSchema,
   noteSchema,
   applyTemplateSchema,
   policyUpdateSchema,

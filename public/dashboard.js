@@ -70,13 +70,14 @@ function updateSearch(value) {
 }
 
 async function api(path, opts = {}) {
-  const next = { ...opts };
+  const { allowAuthError = false, ...fetchOpts } = opts;
+  const next = { ...fetchOpts };
   const method = String(next.method || 'GET').toUpperCase();
   const headers = new Headers(next.headers || {});
   if (csrfToken && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) headers.set('x-csrf-token', csrfToken);
   next.headers = headers;
   const r = await fetch(path, next);
-  if (r.status === 401) { location.href = '/login.html'; return null; }
+  if (r.status === 401 && !allowAuthError) { location.href = '/login.html'; return null; }
   if (r.status === 403) alert('Security token expired. Refresh the dashboard and try again.');
   return r;
 }
@@ -86,6 +87,45 @@ async function loadCsrf() {
   if (!r) return;
   const body = await r.json();
   csrfToken = body.csrfToken || '';
+}
+
+function askRevealPassword() {
+  return new Promise((resolve) => {
+    const dialog = document.createElement('dialog');
+    dialog.className = 'stepup-dialog';
+    dialog.innerHTML = `
+      <form method="dialog" class="stepup-panel">
+        <div>
+          <h2>Confirm raw reveal</h2>
+          <p>This action is audit-logged and may display sensitive prompt content.</p>
+        </div>
+        <label>Admin password
+          <input name="password" type="password" autocomplete="current-password" required />
+        </label>
+        <div class="stepup-actions">
+          <button class="btn" value="cancel" type="button">Cancel</button>
+          <button class="btn reveal" value="confirm" type="submit">${icons.eye}Reveal</button>
+        </div>
+      </form>`;
+    document.body.appendChild(dialog);
+    const input = $('input[name=password]', dialog);
+    const cleanup = (value) => {
+      dialog.close();
+      dialog.remove();
+      resolve(value);
+    };
+    $('.stepup-actions .btn', dialog).onclick = () => cleanup(null);
+    dialog.addEventListener('cancel', (event) => {
+      event.preventDefault();
+      cleanup(null);
+    });
+    $('form', dialog).addEventListener('submit', (event) => {
+      event.preventDefault();
+      cleanup(input.value);
+    });
+    dialog.showModal();
+    input.focus();
+  });
 }
 
 async function init() {
@@ -227,10 +267,23 @@ document.addEventListener('click', async (e) => {
     const act = actionButton.dataset.act;
     const id = actionButton.dataset.id;
     if (act === 'reveal') {
-      const ok = confirm('Reveal is audit-logged and may display sensitive content. Continue?');
-      if (!ok) return;
-      const r = await api(`/api/queries/${encodeURIComponent(id)}/reveal`, { method: 'POST' });
+      const password = await askRevealPassword();
+      if (!password) return;
+      const r = await api(`/api/queries/${encodeURIComponent(id)}/reveal`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+        allowAuthError: true,
+      });
       if (!r) return;
+      if (r.status === 401) {
+        const body = await r.json().catch(() => ({}));
+        if (body.error === 'unauthenticated') { location.href = '/login.html'; return; }
+        alert('Password confirmation failed.');
+        return;
+      }
+      if (r.status === 429) { alert('Too many confirmation attempts. Try again later.'); return; }
+      if (!r.ok) return;
       const body = await r.json();
       const p = $(`#p_${CSS.escape(id)}`);
       if (p) { p.textContent = body.rawPrompt; p.classList.add('revealed'); }
