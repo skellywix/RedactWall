@@ -6,6 +6,8 @@
 
 ## Done
 
+- 2026-06-26: Refactored server startup behind a `require.main` guard and added real HTTP integration tests for health, readiness, and security headers on an ephemeral port.
+  Evidence: `npm test`, `npm run sync-check`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Added structured policy-change diffs for manual and template policy updates, and exposed parsed allowlisted policy changes in evidence exports while keeping general audit detail text hashed.
   Evidence: `npm test`, `npm run sync-check`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Added an admin dashboard evidence export button that downloads the sanitized examiner pack from `/api/export/evidence`, plus static UI tests to keep it away from raw-prompt APIs.

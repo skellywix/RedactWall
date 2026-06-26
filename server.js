@@ -600,8 +600,8 @@ app.get('/index.html', auth.requireAuth, (req, res) =>
   res.sendFile(path.join(__dirname, 'public', 'index.html')));
 app.use(express.static(path.join(__dirname, 'public')));
 
-app.listen(PORT, () => {
-  console.log(`PromptSentinel running on http://localhost:${PORT}`);
+function logStartup(port) {
+  console.log(`PromptSentinel running on http://localhost:${port}`);
   if (auth.ADMIN_PASSWORD_IS_DEFAULT) {
     console.log('  [!] Using DEFAULT admin password. Set ADMIN_PASSWORD before production.');
   }
@@ -614,6 +614,20 @@ app.listen(PORT, () => {
     console.log('  Raw-prompt retention: encrypted at rest (AES-256-GCM), held items only.');
   }
   console.log(`  Ingest key: ${INGEST_KEY === 'dev-ingest-key' ? 'dev-ingest-key (override with INGEST_API_KEY)' : 'configured'}`);
-});
+}
+
+function startServer(port = PORT) {
+  const server = app.listen(port, () => {
+    const address = server.address();
+    logStartup(address && address.port ? address.port : port);
+  });
+  return server;
+}
+
+if (require.main === module) {
+  startServer();
+}
+
+app.startServer = startServer;
 
 module.exports = app;
