@@ -12,3 +12,4 @@
 - 2026-06-26: Examiner evidence should be product-visible through the dashboard, but the UI must call only the sanitized evidence endpoint and never reveal raw prompt data.
 - 2026-06-26: Policy governance evidence can expose allowlisted policy diffs because policy config is operational metadata. Free-form audit details remain hashed to avoid leaking sensitive prompt context.
 - 2026-06-26: The Express app must be importable without binding a fixed port. `npm start` owns the listener, while tests and future tooling can attach ephemeral HTTP servers.
+- 2026-06-26: Production mode should fail closed on dangerous deployment defaults. Local demo mode can keep running with visible preflight warnings.

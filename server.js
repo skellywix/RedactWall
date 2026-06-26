@@ -24,13 +24,15 @@ const dataCrypto = require('./src/crypto');
 const templates = require('./src/templates');
 const alerts = require('./src/alerts');
 const evidence = require('./src/evidence');
+const preflight = require('./src/preflight');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
+const SECURE_COOKIE = preflight.bool(process.env.COOKIE_SECURE || process.env.HTTPS);
 const SESSION_COOKIE_OPTIONS = {
   httpOnly: true,
   sameSite: 'strict',
-  secure: !!process.env.HTTPS,
+  secure: SECURE_COOKIE,
   path: '/',
   maxAge: 8 * 3600 * 1000,
 };
@@ -63,7 +65,15 @@ app.use(cookieParser());
 
 // ---- Health / readiness (public, no sensitive data) -------------------------
 app.get('/healthz', (req, res) => res.json({ status: 'ok', service: 'promptsentinel', version: require('./package.json').version }));
-app.get('/readyz', (req, res) => { try { db.stats(); res.json({ ready: true }); } catch (e) { res.status(503).json({ ready: false, error: String((e && e.message) || e) }); } });
+app.get('/readyz', (req, res) => {
+  try {
+    db.stats();
+    const cfg = currentPreflight();
+    res.status(cfg.ready ? 200 : 503).json({ ready: cfg.ready, database: true, configuration: cfg.level });
+  } catch (e) {
+    res.status(503).json({ ready: false, database: false, error: String((e && e.message) || e) });
+  }
+});
 
 // ---- Live updates (Server-Sent Events) --------------------------------------
 const sseClients = new Set();
@@ -80,6 +90,17 @@ function emitSecurityAlert(row, action) {
 // INGEST / GATE  (called by the proxy/SDK — protected by an API key)
 // =============================================================================
 const INGEST_KEY = process.env.INGEST_API_KEY || 'dev-ingest-key';
+
+function currentPreflight() {
+  return preflight.configStatus({
+    env: process.env,
+    adminPasswordIsDefault: auth.ADMIN_PASSWORD_IS_DEFAULT,
+    ingestKeyIsDefault: INGEST_KEY === 'dev-ingest-key',
+    secretSource: auth.SECRET_SOURCE,
+    dataCryptoEnabled: dataCrypto.ENABLED,
+    cookieSecure: SESSION_COOKIE_OPTIONS.secure,
+  });
+}
 
 function checkIngestKey(req, res, next) {
   const key = req.get('x-api-key');
@@ -522,6 +543,8 @@ app.get('/api/metrics', auth.requireAuth, (req, res) => {
   res.json({ uptimeSec: Math.round(process.uptime()), ...db.stats(), auditOk: integ.ok, auditCount: integ.count, ts: new Date().toISOString() });
 });
 
+app.get('/api/preflight', auth.requireAuth, (req, res) => res.json(currentPreflight()));
+
 // Per-user risk — answers the examiner's "did employee X expose member data?".
 app.get('/api/risk', auth.requireAuth, (req, res) => {
   const rows = db.listQueries({ limit: 5000 });
@@ -617,6 +640,12 @@ function logStartup(port) {
 }
 
 function startServer(port = PORT) {
+  const cfg = currentPreflight();
+  const blockers = preflight.summarizeFailures(cfg);
+  if (blockers.length) {
+    for (const blocker of blockers) console.error('[preflight] ' + blocker);
+    throw new Error('Production preflight failed');
+  }
   const server = app.listen(port, () => {
     const address = server.address();
     logStartup(address && address.port ? address.port : port);

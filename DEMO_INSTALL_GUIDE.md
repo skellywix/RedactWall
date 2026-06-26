@@ -169,6 +169,8 @@ Invoke-RestMethod http://localhost:4000/healthz
 Invoke-RestMethod http://localhost:4000/readyz
 ```
 
+For a pilot or production dry run, set `NODE_ENV=production` only after replacing the default admin password, ingest key, session secret, data key, and secure-cookie settings. PromptSentinel will refuse production startup when those preflight checks fail.
+
 ## Load The Chrome Extension
 
 For a local demo:

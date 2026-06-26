@@ -170,6 +170,8 @@ Copy `.env.example` to `.env` (or export):
 | Var | Purpose |
 |-----|---------|
 | `PORT` | Dashboard/API port (default 4000) |
+| `NODE_ENV` | Set to `production` to enforce deployment preflight blockers |
+| `HTTPS` / `COOKIE_SECURE` | Mark admin session cookies secure when the dashboard is served over TLS |
 | `SENTINEL_DB_PATH` | SQLite store path (default `data/sentinel.db`). Use **local disk**, never a cloud-synced folder. |
 | `ADMIN_USER` / `ADMIN_PASSWORD` | Console credentials — change before real use |
 | `SENTINEL_SECRET` | Session cookie signing secret |
@@ -178,6 +180,8 @@ Copy `.env.example` to `.env` (or export):
 | `SIEM_WEBHOOK_URL` | Optional sanitized webhook for high-risk security events |
 | `SIEM_WEBHOOK_TOKEN` | Optional bearer token for the SIEM webhook |
 | `SIEM_ALERT_MIN_RISK` / `SIEM_ALERT_MIN_SEVERITY` | Alert thresholds for allowed-but-risky events; blocked and response-flagged events alert automatically |
+
+`/readyz` reports whether the database and deployment preflight are usable. Logged-in admins can inspect detailed checks at `/api/preflight`.
 
 ## Compliance note
 

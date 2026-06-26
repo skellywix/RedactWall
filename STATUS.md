@@ -6,6 +6,8 @@
 
 ## Done
 
+- 2026-06-26: Added deployment preflight checks for default admin credentials, dev ingest key, session secret source, raw-prompt encryption readiness, and secure cookies; wired checks into production startup, `/readyz`, and `/api/preflight`.
+  Evidence: `npm test`, `npm run sync-check`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Refactored server startup behind a `require.main` guard and added real HTTP integration tests for health, readiness, and security headers on an ephemeral port.
   Evidence: `npm test`, `npm run sync-check`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Added structured policy-change diffs for manual and template policy updates, and exposed parsed allowlisted policy changes in evidence exports while keeping general audit detail text hashed.

@@ -41,4 +41,6 @@ test('readiness endpoint is reachable through the importable app', async (t) => 
   assert.strictEqual(res.status, 200);
   const body = await res.json();
   assert.strictEqual(body.ready, true);
+  assert.strictEqual(body.database, true);
+  assert.ok(['ok', 'warnings'].includes(body.configuration));
 });
