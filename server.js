@@ -168,6 +168,7 @@ function currentPreflight() {
     secretSource: auth.SECRET_SOURCE,
     dataCryptoEnabled: dataCrypto.ENABLED,
     cookieSecure: SESSION_COOKIE_OPTIONS.secure,
+    dbPath: process.env.SENTINEL_DB_PATH || '',
   });
 }
 

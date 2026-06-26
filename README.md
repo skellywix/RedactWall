@@ -236,7 +236,7 @@ Copy `.env.example` to `.env` (or export):
 | `PORT` | Dashboard/API port (default 4000) |
 | `NODE_ENV` | Set to `production` to enforce deployment preflight blockers |
 | `HTTPS` / `COOKIE_SECURE` | Mark admin session cookies secure when the dashboard is served over TLS |
-| `SENTINEL_DB_PATH` | SQLite store path (default `data/sentinel.db`). Use **local disk**, never a cloud-synced folder. |
+| `SENTINEL_DB_PATH` | SQLite store path (default `data/sentinel.db`). Use **local disk**, never a cloud-synced folder or network share. Production preflight blocks unsafe paths. |
 | `SENTINEL_POLICY_PATH` | Optional policy file path for isolated tests or pilots (default `config/policy.json`) |
 | `ADMIN_USER` / `ADMIN_PASSWORD` | Console credentials — change before real use |
 | `SENTINEL_SECRET` | Session cookie signing secret |

@@ -12,10 +12,35 @@ function check(id, ok, severity, message, remediation) {
   return { id, ok: !!ok, severity, message, remediation };
 }
 
+function pathSegments(value) {
+  return String(value || '')
+    .replace(/\\/g, '/')
+    .split('/')
+    .map((segment) => segment.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function cloudSyncedPathReason(value) {
+  const text = String(value || '').trim();
+  if (!text) return 'missing';
+  const normalized = text.replace(/\\/g, '/');
+  if (/^\/\//.test(normalized)) return 'network share';
+  const segments = pathSegments(text);
+  if (segments.some((segment) => segment === 'dropbox')) return 'Dropbox';
+  if (segments.some((segment) => segment === 'google drive' || segment === 'googledrive')) return 'Google Drive';
+  if (segments.some((segment) => segment === 'icloud drive' || segment === 'icloud')) return 'iCloud Drive';
+  if (segments.some((segment) => segment === 'box')) return 'Box';
+  const oneDrive = segments.find((segment) => segment === 'onedrive' || segment.startsWith('onedrive - '));
+  if (oneDrive) return 'OneDrive';
+  return null;
+}
+
 function configStatus(input = {}) {
   const env = input.env || process.env;
   const production = env.NODE_ENV === 'production';
   const severity = production ? 'error' : 'warning';
+  const dbPath = input.dbPath || env.SENTINEL_DB_PATH || '';
+  const dbPathReason = cloudSyncedPathReason(dbPath);
   const checks = [
     check(
       'admin_password',
@@ -52,6 +77,15 @@ function configStatus(input = {}) {
       'Admin session cookie is marked secure for production.',
       'Set HTTPS=true or COOKIE_SECURE=true when serving the console over TLS.',
     ),
+    check(
+      'sqlite_local_disk',
+      !!dbPath && !dbPathReason,
+      severity,
+      'SQLite evidence store is configured on a local disk path.',
+      dbPathReason
+        ? `Set SENTINEL_DB_PATH to a local disk path; current path looks like ${dbPathReason}.`
+        : 'Set SENTINEL_DB_PATH to a local disk path outside cloud-synced or network folders.',
+    ),
   ];
   const failed = checks.filter((c) => !c.ok);
   const blockers = failed.filter((c) => c.severity === 'error');
@@ -69,4 +103,4 @@ function summarizeFailures(status) {
     .map((c) => `${c.id}: ${c.remediation}`);
 }
 
-module.exports = { bool, configStatus, summarizeFailures };
+module.exports = { bool, cloudSyncedPathReason, configStatus, summarizeFailures };

@@ -6,6 +6,8 @@
 
 ## Done
 
+- 2026-06-26: Added a production preflight blocker for unsafe SQLite evidence-store paths: missing, cloud-synced, or UNC/network `SENTINEL_DB_PATH` values now fail production readiness while local demo mode keeps running with warnings.
+  Evidence: `node --test test/preflight.test.js test/setup.test.js test/server-integration.test.js`, `npm test`, `npm run test:browser`, `npm run setup:check`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Added sanitized SIEM alerts for sensor version posture gaps: mixed or missing browser/endpoint/MCP sensor versions now emit forced `SENSOR_VERSION_GAP` webhook events with bounded source/version/platform metadata, while API/proxy traffic is excluded.
   Evidence: `node --test test/validation.test.js test/alerts.test.js test/coverage.test.js`, `npm test`, `npm run test:browser`, `npm run sync-check`, `npm run setup:check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Added sensor version posture across the control plane: browser extension, endpoint agent, and MCP guard now send bounded name/version/platform metadata; ingest validation stores it safely; the Coverage tab summarizes latest and mixed sensor versions without prompt bodies.

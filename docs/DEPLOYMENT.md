@@ -172,7 +172,7 @@ Set these through `.env`, container environment, or a deployment secret manager:
 | `INGEST_API_KEY` | Sensor and proxy key for `/api/v1/*` ingest endpoints. |
 | `SENTINEL_DB_PATH` | SQLite path on local persistent disk. |
 
-Never bind `SENTINEL_DB_PATH` to a cloud-synced folder. SQLite locking must be backed by local disk semantics.
+Never bind `SENTINEL_DB_PATH` to a cloud-synced folder or network share. SQLite locking must be backed by local disk semantics, and production preflight blocks missing, cloud-synced, or UNC/network SQLite paths before startup readiness passes.
 
 ## SIEM Alerts
 

@@ -27,13 +27,13 @@ test('production preflight blocks unsafe deployment defaults', () => {
   assert.strictEqual(status.level, 'blocked');
   assert.deepStrictEqual(
     preflight.summarizeFailures(status).map((line) => line.split(':')[0]),
-    ['admin_password', 'ingest_key', 'session_secret', 'raw_prompt_encryption', 'secure_cookie'],
+    ['admin_password', 'ingest_key', 'session_secret', 'raw_prompt_encryption', 'secure_cookie', 'sqlite_local_disk'],
   );
 });
 
 test('production preflight passes with stable secrets and secure cookies', () => {
   const status = preflight.configStatus({
-    env: { NODE_ENV: 'production' },
+    env: { NODE_ENV: 'production', SENTINEL_DB_PATH: '/var/lib/promptsentinel/sentinel.db' },
     adminPasswordIsDefault: false,
     ingestKeyIsDefault: false,
     secretSource: 'env',
@@ -43,6 +43,29 @@ test('production preflight passes with stable secrets and secure cookies', () =>
   assert.strictEqual(status.ready, true);
   assert.strictEqual(status.level, 'ok');
   assert.ok(status.checks.every((c) => c.ok));
+});
+
+test('production preflight blocks cloud-synced sqlite paths', () => {
+  const status = preflight.configStatus({
+    env: { NODE_ENV: 'production', SENTINEL_DB_PATH: 'C:\\Users\\Pilot\\OneDrive - Credit Union\\sentinel.db' },
+    adminPasswordIsDefault: false,
+    ingestKeyIsDefault: false,
+    secretSource: 'env',
+    dataCryptoEnabled: true,
+    cookieSecure: true,
+  });
+  const check = status.checks.find((c) => c.id === 'sqlite_local_disk');
+  assert.strictEqual(status.ready, false);
+  assert.strictEqual(check.ok, false);
+  assert.strictEqual(check.severity, 'error');
+  assert.match(check.remediation, /OneDrive/);
+});
+
+test('sqlite path classifier catches network and common cloud folders', () => {
+  assert.strictEqual(preflight.cloudSyncedPathReason('\\\\fileserver\\share\\sentinel.db'), 'network share');
+  assert.strictEqual(preflight.cloudSyncedPathReason('/Users/pilot/Dropbox/sentinel.db'), 'Dropbox');
+  assert.strictEqual(preflight.cloudSyncedPathReason('/Users/pilot/Google Drive/sentinel.db'), 'Google Drive');
+  assert.strictEqual(preflight.cloudSyncedPathReason('/var/lib/promptsentinel/sentinel.db'), null);
 });
 
 test('boolean env parsing accepts common true values only', () => {
