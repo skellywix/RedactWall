@@ -89,22 +89,22 @@ async function loadCsrf() {
   csrfToken = body.csrfToken || '';
 }
 
-function askRevealPassword() {
+function askStepUpPassword({ title, message, confirmText, icon = '', buttonClass = 'reveal' }) {
   return new Promise((resolve) => {
     const dialog = document.createElement('dialog');
     dialog.className = 'stepup-dialog';
     dialog.innerHTML = `
       <form method="dialog" class="stepup-panel">
         <div>
-          <h2>Confirm raw reveal</h2>
-          <p>This action is audit-logged and may display sensitive prompt content.</p>
+          <h2>${escapeHtml(title)}</h2>
+          <p>${escapeHtml(message)}</p>
         </div>
         <label>Admin password
           <input name="password" type="password" autocomplete="current-password" required />
         </label>
         <div class="stepup-actions">
           <button class="btn" value="cancel" type="button">Cancel</button>
-          <button class="btn reveal" value="confirm" type="submit">${icons.eye}Reveal</button>
+          <button class="btn ${escapeHtml(buttonClass)}" value="confirm" type="submit">${icon}${escapeHtml(confirmText)}</button>
         </div>
       </form>`;
     document.body.appendChild(dialog);
@@ -125,6 +125,25 @@ function askRevealPassword() {
     });
     dialog.showModal();
     input.focus();
+  });
+}
+
+function askRevealPassword() {
+  return askStepUpPassword({
+    title: 'Confirm raw reveal',
+    message: 'This action is audit-logged and may display sensitive prompt content.',
+    confirmText: 'Reveal',
+    icon: icons.eye,
+  });
+}
+
+function askApprovePassword() {
+  return askStepUpPassword({
+    title: 'Confirm release',
+    message: 'Approving releases this held prompt to the requesting sensor.',
+    confirmText: 'Approve release',
+    icon: icons.check,
+    buttonClass: 'approve',
   });
 }
 
@@ -293,12 +312,27 @@ document.addEventListener('click', async (e) => {
     }
     if (act === 'approve' || act === 'deny') {
       const note = ($(`#note_${CSS.escape(id)}`) || {}).value || '';
+      const password = act === 'approve' ? await askApprovePassword() : '';
+      if (act === 'approve' && !password) return;
       actionButton.disabled = true;
       const r = await api(`/api/queries/${encodeURIComponent(id)}/${act}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ note }),
+        body: JSON.stringify(act === 'approve' ? { note, password } : { note }),
+        allowAuthError: act === 'approve',
       });
+      if (r && r.status === 401 && act === 'approve') {
+        const body = await r.json().catch(() => ({}));
+        if (body.error === 'unauthenticated') { location.href = '/login.html'; return; }
+        alert('Password confirmation failed.');
+        actionButton.disabled = false;
+        return;
+      }
+      if (r && r.status === 429 && act === 'approve') {
+        alert('Too many confirmation attempts. Try again later.');
+        actionButton.disabled = false;
+        return;
+      }
       if (r && r.ok) await refreshAll();
       else actionButton.disabled = false;
     }

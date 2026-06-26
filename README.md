@@ -192,7 +192,7 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 | Shadow-AI discovery | Working — flags use of ungoverned AI tools |
 | Output scanning | Working — `/api/v1/scan-response` flags PII/secrets in AI replies |
 | MCP guard / Endpoint agent | Working references — inline redaction; folder watch (pdf/docx/xlsx/pptx/text) |
-| Auth & ops | Working: login lockout, password-confirmed raw reveal, stable secret, `/healthz` · `/readyz` · `/api/metrics`, Docker, CI |
+| Auth & ops | Working: login lockout, password-confirmed raw reveal and release approval, stable secret, `/healthz` · `/readyz` · `/api/metrics`, Docker, CI |
 
 ## Shipped since the skeleton (see `ITERATIONS.md`)
 
@@ -251,6 +251,9 @@ encryption; with no key configured, raw prompts are not stored at all. Finalized
 approval records purge retained raw prompt data and token vaults after
 `rawRetentionDays` (default 30) while keeping redacted metadata and the
 hash-chained audit trail.
+
+Approving a held prompt also requires password confirmation. A stale or stolen
+admin browser session alone is not enough to release a blocked prompt.
 
 Even so, a product that inspects employee input requires proper authorization
 and clear employee notice. See `AI_Chat_DLP_Implementation_Plan.docx` for the

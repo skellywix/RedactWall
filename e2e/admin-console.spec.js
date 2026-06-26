@@ -49,6 +49,9 @@ test('admin console login, approval, policy save, and evidence export work in a 
 
   await page.locator(`#note_${gated.id}`).fill('Synthetic approval for browser E2E');
   await page.getByRole('button', { name: 'Approve release' }).click();
+  await expect(page.getByRole('heading', { name: 'Confirm release' })).toBeVisible();
+  await page.getByLabel('Admin password').fill('e2e-pass');
+  await page.locator('.stepup-dialog').getByRole('button', { name: 'Approve release' }).click();
   await expect(page.locator('#queueList')).toContainText('Queue clear');
 
   await page.locator('.content-tabs .tab[data-tab="activity"]').click();

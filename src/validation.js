@@ -157,6 +157,14 @@ const revealSchema = z.object({
   password: nonBlankString(512),
 }).strict();
 
+const approveSchema = z.object({
+  note: z.preprocess(
+    (value) => (value == null ? '' : value),
+    z.string().max(LIMITS.noteChars).default(''),
+  ),
+  password: nonBlankString(512),
+}).strict();
+
 const noteSchema = z.object({
   note: z.preprocess(
     (value) => (value == null ? '' : value),
@@ -222,6 +230,7 @@ module.exports = {
   scanResponseSchema,
   loginSchema,
   revealSchema,
+  approveSchema,
   noteSchema,
   applyTemplateSchema,
   policyUpdateSchema,

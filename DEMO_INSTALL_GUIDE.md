@@ -544,7 +544,7 @@ Key points:
 - Most prompt text does not need to leave the device.
 - Server records should use redacted prompts and masked findings.
 - Held approval items can retain encrypted raw text if the institution allows it.
-- Raw reveal requires admin password confirmation and is audit logged.
+- Raw reveal and held-prompt release require admin password confirmation and are audit logged.
 - Audit integrity can be checked with one command.
 - Evidence exports contain policy, detector inventory, stats, audit integrity, query metadata, masked findings, and audit hashes, but not prompt bodies or audit detail text.
 

@@ -158,7 +158,7 @@ test('purged approval reveal falls back to redacted prompt without the secret', 
 
   const approve = await jsonFetch(port, `/api/queries/${gated.id}/approve`, {
     headers: { cookie, 'x-csrf-token': csrfToken },
-    body: { note: 'Synthetic approval for retention test' },
+    body: { note: 'Synthetic approval for retention test', password: 'unit-pass' },
   });
   assert.strictEqual(approve.status, 200);
 

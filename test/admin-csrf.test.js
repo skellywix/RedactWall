@@ -12,9 +12,9 @@ const dashboard = fs.readFileSync(path.join(root, 'public', 'dashboard.js'), 'ut
 test('admin write routes include csrf middleware', () => {
   assert.match(server, /const adminWrite = \[auth\.requireAuth,\s*auth\.requireCsrf\]/);
   assert.match(server, /app\.post\(\s*'\/api\/queries\/:id\/reveal',\s*\.\.\.adminWrite,\s*validation\.validateBody\(validation\.revealSchema\),\s*requireRevealPassword,/);
+  assert.match(server, /app\.post\(\s*'\/api\/queries\/:id\/approve',\s*\.\.\.adminWrite,\s*validation\.validateBody\(validation\.approveSchema\),\s*requireApprovePassword,/);
   for (const route of [
     "app.post('/api/logout', ...adminWrite",
-    "app.post('/api/queries/:id/approve', ...adminWrite",
     "app.post('/api/queries/:id/deny', ...adminWrite",
     "app.post('/api/retention/purge', ...adminWrite",
     "app.put('/api/policy/apply-template', ...adminWrite",
@@ -32,12 +32,19 @@ test('dashboard fetches and sends csrf token on unsafe admin requests', () => {
 });
 
 test('dashboard requires masked password confirmation before raw reveal', () => {
+  assert.match(dashboard, /function askStepUpPassword/);
   assert.match(dashboard, /function askRevealPassword\(\)/);
   assert.match(dashboard, /type="password"/);
   assert.match(dashboard, /body: JSON\.stringify\(\{ password \}\)/);
   assert.match(dashboard, /allowAuthError: true/);
   assert.match(dashboard, /Password confirmation failed\./);
   assert.doesNotMatch(dashboard, /\/reveal`, \{ method: 'POST' \}\)/);
+});
+
+test('dashboard requires password confirmation before approving release', () => {
+  assert.match(dashboard, /function askApprovePassword\(\)/);
+  assert.match(dashboard, /const password = act === 'approve' \? await askApprovePassword\(\) : ''/);
+  assert.match(dashboard, /JSON\.stringify\(act === 'approve' \? \{ note, password \} : \{ note \}\)/);
 });
 
 test('dashboard exposes retention settings and manual purge control', () => {

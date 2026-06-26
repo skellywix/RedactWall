@@ -6,6 +6,8 @@
 
 ## Done
 
+- 2026-06-26: Added password step-up for approval release: approving a held prompt now requires admin password confirmation in the dashboard and API, failed confirmations are audit-logged without releasing content, repeated failures lock out the release path, and browser E2E covers the approval dialog.
+  Evidence: `node --test test/approval-stepup.test.js test/reveal-stepup.test.js test/retention.test.js test/admin-csrf.test.js test/validation.test.js`, `npm test`, `npm run test:browser`, `npm run sync-check`, `npm run setup:check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Added password step-up for raw prompt reveal: the dashboard now collects a masked admin password before reveal, the API validates it with lockout-backed auth, failed confirmations are audit-logged without prompt leakage, and successful raw reveals remain explicit audit events.
   Evidence: `node --test test/reveal-stepup.test.js test/retention.test.js test/admin-csrf.test.js test/auth.test.js test/validation.test.js`, `npm test`, `npm run test:browser`, `npm run sync-check`, `npm run setup:check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Added verifier-first backup/restore tooling for the SQLite evidence store: `npm run backup`, `npm run backup:verify`, and `npm run backup:restore` create prompt-free manifests, verify audit-chain integrity on backup files, and refuse unsafe overwrites unless explicitly forced.
