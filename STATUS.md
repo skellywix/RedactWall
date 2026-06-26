@@ -6,6 +6,8 @@
 
 ## Done
 
+- 2026-06-26: Added fail-closed file extraction guardrails: corrupt supported files and extraction timeouts are recorded as blocked unscanned files, extracted text is bounded before detection, and browser/endpoint clients surface unreadable files as blocked.
+  Evidence: `node --test test/processors.test.js`, `npm test`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, live HTTP file extraction smoke, `verifyAuditChain()`.
 - 2026-06-26: Added Zod request-body validation for sensor ingest, file scanning, response scanning, login, approval notes, template application, and policy updates. Validation responses name fields only, malformed JSON returns sanitized JSON, bad base64 is rejected before decoding, and unknown policy keys fail closed.
   Evidence: `node --test test/validation.test.js`, `npm test`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, live HTTP validation smoke, `verifyAuditChain()`.
 - 2026-06-26: Reviewed the app stack, upgraded Express 4 to Express 5, added Helmet-managed security headers, externalized admin/login JavaScript for stricter CSP, added frontend CSP regression tests, and documented stack decisions in `STACK_REVIEW.md`.

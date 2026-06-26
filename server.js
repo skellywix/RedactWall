@@ -365,7 +365,7 @@ app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation
 
   let extracted;
   try { extracted = await processors.extractText(filename, buf); }
-  catch (e) { return res.status(500).json({ error: 'extract failed' }); }
+  catch (e) { extracted = { text: '', processor: null, supported: true, extractionOk: false, error: 'extract_failed' }; }
   if (!extracted.supported) {
     const row = db.createQuery({ status: 'flagged', user, orgId, destination, source, channel,
       redactedPrompt: '[unsupported file] ' + filename, findings: [], categories: [], entityCounts: {},
@@ -375,6 +375,28 @@ app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation
     broadcast('query', { type: 'flagged', query: publicQuery(row) });
     broadcast('stats', db.stats());
     return res.json({ id: row.id, decision: 'allow', supported: false, filename });
+  }
+  if (!extracted.extractionOk) {
+    const reason = extracted.error === 'timeout' ? 'File extraction timed out before inspection completed' : 'File could not be inspected';
+    const row = db.createQuery({ status: 'file_blocked_unscanned', user, orgId, destination, source, channel,
+      filename, processor: extracted.processor, redactedPrompt: '[unreadable file] ' + filename,
+      findings: [], categories: [], entityCounts: {}, riskScore: 0, maxSeverity: 0, maxSeverityLabel: 'none',
+      reasons: [reason] });
+    db.appendAudit({ action: 'FILE_BLOCKED_UNREADABLE', queryId: row.id, actor: user, detail: `${filename}: ${extracted.error || 'extract_failed'}` });
+    emitSecurityAlert(row, 'FILE_BLOCKED_UNREADABLE');
+    broadcast('query', { type: 'file_blocked_unscanned', query: publicQuery(row) });
+    broadcast('stats', db.stats());
+    return res.json({
+      id: row.id,
+      decision: 'block',
+      mode: 'block',
+      status: 'file_blocked_unscanned',
+      supported: true,
+      inspected: false,
+      filename,
+      processor: extracted.processor,
+      reasons: [reason],
+    });
   }
 
   const analysis = detector.analyze(extracted.text, policy.analyzeOpts(pol));

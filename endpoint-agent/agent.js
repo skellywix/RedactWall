@@ -95,6 +95,10 @@ async function scanFile(file, opts = {}) {
     console.log(`[file] ${file} (unsupported) -> recorded`);
     return res;
   }
+  if (res.inspected === false) {
+    console.log(`[BLOCK] ${file} could not be inspected -> ${res.id || 'recorded'}`);
+    return res;
+  }
   if (res.decision === 'allow') {
     console.log(`[ok]   ${file} -- clean`);
     return res;

@@ -28,7 +28,7 @@ PromptSentinel should optimize for a regulated pilot that installs quickly, prov
 | Browser extension | Chrome Manifest V3 plus vanilla JS | Keep | Extension and content-script code benefits from being dependency-light and easy to audit. |
 | Database | SQLite through `better-sqlite3` | Keep for demo and pilot | SQLite fits the local-first, install-in-an-afternoon wedge. Move to Postgres only when multi-tenant hosted operation becomes real. |
 | Tests | Node built-in test runner | Keep | The repo is CommonJS, API-heavy, and already has broad Node test coverage. No need to add Jest or Vitest yet. |
-| File processing | `pdf-parse`, `adm-zip`, local processors | Keep with caution | Good enough for synthetic demos and small pilots. Production should add sandboxing, file limits, and possibly OCR later. |
+| File processing | `pdf-parse`, `adm-zip`, local processors | Keep with caution | Good enough for synthetic demos and small pilots now that corrupt, unreadable, and timed-out supported files fail closed. Production should still move parsing into a constrained worker and possibly add OCR later. |
 | Packaging | Docker plus local Node install | Keep | This supports both developer demos and controlled pilot deployment. |
 
 ## Why Not React, Next.js, or Vite Right Now
@@ -67,8 +67,8 @@ Revisit Fastify when:
 3. Plan Postgres for hosted multi-tenant control plane.
    SQLite remains correct for local demos and pilots. Hosted SaaS needs tenant isolation, backups, migrations, and operational monitoring.
 
-4. Sandbox file parsing.
-   Office and PDF parsing should eventually run in a constrained worker process with tighter file-type, size, and timeout boundaries.
+4. Move file parsing into a constrained worker process.
+   Current guardrails add file limits, parser timeouts, and fail-closed behavior. A production hosted service should still isolate Office and PDF parsing from the main web process.
 
 ## Works Cited
 

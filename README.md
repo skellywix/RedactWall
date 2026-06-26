@@ -85,7 +85,9 @@ People paste *and upload* sensitive files into AI tools. A **processor layer**
 text formats) so uploads get the same detection as typed prompts. The endpoint agent
 uses it for every file; sensors can also call `POST /api/v1/scan-file` with a
 base64 file. Add a new file type by pushing a processor with
-`{ supports(name), extract(buffer) }`.
+`{ supports(name), extract(buffer) }`. Supported files fail closed if extraction
+times out or the parser cannot inspect the file, and the audit log records the
+blocked unscanned file without storing the file bytes.
 
 ---
 
@@ -180,6 +182,8 @@ Copy `.env.example` to `.env` (or export):
 | `SENTINEL_SECRET` | Session cookie signing secret |
 | `SENTINEL_DATA_KEY` | Encrypts retained raw prompts at rest (falls back to `SENTINEL_SECRET`; if neither set, raw isn't stored) |
 | `INGEST_API_KEY` | Key sensors present to the gate API |
+| `FILE_EXTRACT_TIMEOUT_MS` | Optional per-file extraction timeout (default 5000 ms, bounded 100 to 60000) |
+| `FILE_EXTRACT_MAX_CHARS` | Optional extracted-text cap before detection (default 1000000 chars, bounded 1000 to 5000000) |
 | `SIEM_WEBHOOK_URL` | Optional sanitized webhook for high-risk security events |
 | `SIEM_WEBHOOK_TOKEN` | Optional bearer token for the SIEM webhook |
 | `SIEM_ALERT_MIN_RISK` / `SIEM_ALERT_MIN_SEVERITY` | Alert thresholds for allowed-but-risky events; blocked and response-flagged events alert automatically |

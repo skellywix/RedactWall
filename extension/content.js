@@ -347,7 +347,7 @@
     const items = (res.findings || []).map((x) => x.type).concat(res.categories || []);
     if (res.decision === 'allow' && res.supported !== false) {
       toast('PromptSentinel scanned ' + filename + ' clean. Attach it again to upload.');
-    } else if (res.supported === false) {
+    } else if (res.supported === false || res.inspected === false) {
       toast('PromptSentinel could not inspect ' + filename + '. Upload blocked and recorded.');
     } else {
       toast('PromptSentinel blocked ' + filename + ': ' + (items.slice(0, 3).join(', ') || 'sensitive content'));

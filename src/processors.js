@@ -15,6 +15,8 @@ const TEXT_EXT = new Set(['.txt', '.csv', '.tsv', '.json', '.yaml', '.yml', '.xm
   '.md', '.log', '.js', '.ts', '.py', '.java', '.sql', '.env', '.ini', '.conf', '.rtf', '.eml']);
 const OFFICE_EXT = new Set(['.docx', '.xlsx', '.pptx']);
 const PDF_EXT = new Set(['.pdf']);
+const DEFAULT_EXTRACT_TIMEOUT_MS = 5000;
+const DEFAULT_MAX_EXTRACTED_CHARS = 1000000;
 
 function ext(name) { return path.extname(String(name || '')).toLowerCase(); }
 function stripXml(xml) {
@@ -37,7 +39,11 @@ const OfficeProcessor = {
   extract: async (buf) => {
     const AdmZip = require('adm-zip');
     let zip;
-    try { zip = new AdmZip(buf); } catch { return ''; }
+    try { zip = new AdmZip(buf); } catch {
+      const err = new Error('office extract failed');
+      err.code = 'EXTRACT_FAILED';
+      throw err;
+    }
     const parts = [];
     for (const entry of zip.getEntries()) {
       const n = entry.entryName;
@@ -68,7 +74,11 @@ const PdfProcessor = {
       const fn = typeof mod === 'function' ? mod : (mod.pdf || mod.default); // v1 fallback
       const data = await fn(buf);
       return (data && data.text) ? data.text : '';
-    } catch (e) { return ''; }
+    } catch (e) {
+      const err = new Error('pdf extract failed');
+      err.code = 'EXTRACT_FAILED';
+      throw err;
+    }
   },
 };
 
@@ -76,12 +86,75 @@ const PROCESSORS = [TextProcessor, OfficeProcessor, PdfProcessor];
 
 function supported(name) { return PROCESSORS.some((p) => p.supports(name)); }
 
-/** Extract text from a file buffer. Returns { text, processor, supported }. */
-async function extractText(name, buf) {
-  const p = PROCESSORS.find((x) => x.supports(name));
-  if (!p) return { text: '', processor: null, supported: false };
-  const text = await p.extract(buf);
-  return { text: text || '', processor: p.id, supported: true };
+function boundedPositiveInt(value, fallback, min, max) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, Math.floor(n)));
 }
 
-module.exports = { extractText, supported, PROCESSORS, TEXT_EXT, OFFICE_EXT, PDF_EXT };
+function timeoutMs(opts) {
+  return boundedPositiveInt(
+    opts.timeoutMs ?? process.env.FILE_EXTRACT_TIMEOUT_MS,
+    DEFAULT_EXTRACT_TIMEOUT_MS,
+    100,
+    60000,
+  );
+}
+
+function maxTextChars(opts) {
+  return boundedPositiveInt(
+    opts.maxTextChars ?? process.env.FILE_EXTRACT_MAX_CHARS,
+    DEFAULT_MAX_EXTRACTED_CHARS,
+    1000,
+    5000000,
+  );
+}
+
+function withTimeout(promise, ms) {
+  let timer;
+  const timeout = new Promise((resolve, reject) => {
+    timer = setTimeout(() => {
+      const err = new Error('extract timed out');
+      err.code = 'EXTRACT_TIMEOUT';
+      reject(err);
+    }, ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+/** Extract text from a file buffer. Returns { text, processor, supported }. */
+async function extractText(name, buf, opts = {}) {
+  const p = PROCESSORS.find((x) => x.supports(name));
+  if (!p) return { text: '', processor: null, supported: false, extractionOk: false, error: 'unsupported' };
+  try {
+    const raw = await withTimeout(Promise.resolve().then(() => p.extract(buf)), timeoutMs(opts));
+    const text = String(raw || '');
+    const max = maxTextChars(opts);
+    return {
+      text: text.slice(0, max),
+      processor: p.id,
+      supported: true,
+      extractionOk: true,
+      truncated: text.length > max,
+    };
+  } catch (e) {
+    return {
+      text: '',
+      processor: p.id,
+      supported: true,
+      extractionOk: false,
+      error: e && e.code === 'EXTRACT_TIMEOUT' ? 'timeout' : 'extract_failed',
+    };
+  }
+}
+
+module.exports = {
+  extractText,
+  supported,
+  PROCESSORS,
+  TEXT_EXT,
+  OFFICE_EXT,
+  PDF_EXT,
+  DEFAULT_EXTRACT_TIMEOUT_MS,
+  DEFAULT_MAX_EXTRACTED_CHARS,
+};
