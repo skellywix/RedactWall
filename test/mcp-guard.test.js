@@ -3,6 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { guardToolResult, reportBody, refreshPolicy, requestTimeoutMs } = require('../mcp-guard/guard');
+const pkg = require('../package.json');
 
 const noOpFetch = async () => ({ ok: true });
 
@@ -48,6 +49,7 @@ test('reports sanitized client analysis for locally redacted MCP output', async 
   assert.strictEqual(outbound.headers['x-api-key'], 'unit-key');
   assert.strictEqual(outbound.body.source, 'mcp_guard');
   assert.strictEqual(outbound.body.channel, 'mcp_doc');
+  assert.deepStrictEqual(outbound.body.sensor, { name: 'mcp_guard', version: pkg.version, platform: 'node' });
   assert.strictEqual(outbound.body.clientOutcome, 'redacted_sent');
   assert.strictEqual(outbound.body.clientPreRedacted, true);
   assert.ok(outbound.body.clientFindings.some((f) => f.type === 'US_SSN'));

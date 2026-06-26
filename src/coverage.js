@@ -1,5 +1,7 @@
 'use strict';
 
+const { safeSensor } = require('./sensor-metadata');
+
 const SENSOR_LABELS = {
   browser_extension: 'Browser extension',
   endpoint_agent: 'Endpoint agent',
@@ -64,6 +66,42 @@ function publicAggregate(bucket, extra = {}) {
   };
 }
 
+function cleanSensorMetadata(sensor) {
+  return safeSensor(sensor) || {};
+}
+
+function bumpVersion(sensor, q) {
+  const meta = cleanSensorMetadata(q.sensor);
+  const version = meta.version || meta.packageVersion || null;
+  if (version) {
+    const bucket = sensor._versions.get(version) || { version, events: 0, lastSeen: null };
+    bucket.events += 1;
+    if (!bucket.lastSeen || String(q.createdAt || '') > bucket.lastSeen) bucket.lastSeen = q.createdAt || null;
+    sensor._versions.set(version, bucket);
+  }
+  if (meta.platform) sensor._platforms.add(meta.platform);
+}
+
+function finalizeSensor(sensor) {
+  const versions = [...(sensor._versions || new Map()).values()]
+    .sort((a, b) => String(b.lastSeen || '').localeCompare(String(a.lastSeen || '')) || b.events - a.events || a.version.localeCompare(b.version));
+  const platforms = [...(sensor._platforms || new Set())].sort();
+  const versionHealth = sensor.events === 0 ? 'missing'
+    : versions.length === 0 ? 'unknown'
+    : versions.length === 1 ? 'current'
+    : 'mixed';
+  return {
+    source: sensor.source,
+    label: sensor.label,
+    events: sensor.events,
+    lastSeen: sensor.lastSeen,
+    latestVersion: versions[0] ? versions[0].version : null,
+    versionHealth,
+    versions,
+    platforms,
+  };
+}
+
 function summarize(rows, pol) {
   const policy = pol || {};
   const governedSet = new Set((policy.governedDestinations || []).map(normalizeDestination));
@@ -78,9 +116,10 @@ function summarize(rows, pol) {
   for (const q of rows || []) {
     const destination = normalizeDestination(q.destination);
     const source = q.source || 'api';
-    const sensor = sensorCounts.get(source) || { source, label: SENSOR_LABELS[source] || source, events: 0, lastSeen: null };
+    const sensor = sensorCounts.get(source) || { source, label: SENSOR_LABELS[source] || source, events: 0, lastSeen: null, _versions: new Map(), _platforms: new Set() };
     sensor.events += 1;
     if (!sensor.lastSeen || String(q.createdAt || '') > sensor.lastSeen) sensor.lastSeen = q.createdAt || null;
+    bumpVersion(sensor, q);
     sensorCounts.set(source, sensor);
     statuses[q.status || 'unknown'] = (statuses[q.status || 'unknown'] || 0) + 1;
 
@@ -97,10 +136,14 @@ function summarize(rows, pol) {
 
   const requiredSensors = REQUIRED_SENSORS.map((source) => {
     const seen = sensorCounts.get(source);
-    return seen || { source, label: SENSOR_LABELS[source] || source, events: 0, lastSeen: null };
+    return seen || { source, label: SENSOR_LABELS[source] || source, events: 0, lastSeen: null, _versions: new Map(), _platforms: new Set() };
   });
   const additionalSensors = [...sensorCounts.values()].filter((s) => !REQUIRED_SENSORS.includes(s.source));
+  const sensors = [...requiredSensors, ...additionalSensors]
+    .map(finalizeSensor)
+    .sort((a, b) => b.events - a.events || a.label.localeCompare(b.label));
   const activeRequired = requiredSensors.filter((s) => s.events > 0).length;
+  const activeSensorVersionGaps = sensors.filter((s) => s.events > 0 && s.versionHealth !== 'current').length;
   const governedActive = [...governed.values()].filter((g) => g.events > 0).length;
   const governedTotal = governed.size || 0;
   const shadowEvents = statuses.shadow_ai || 0;
@@ -123,7 +166,7 @@ function summarize(rows, pol) {
         .filter(([status]) => BLOCKED_STATUSES.has(status))
         .reduce((sum, [, count]) => sum + count, 0),
     },
-    sensors: [...requiredSensors, ...additionalSensors].sort((a, b) => b.events - a.events || a.label.localeCompare(b.label)),
+    sensors,
     governedDestinations: [...governed.values()]
       .map((bucket) => publicAggregate(bucket, { governed: true }))
       .sort((a, b) => b.events - a.events || a.destination.localeCompare(b.destination)),
@@ -159,6 +202,12 @@ function summarize(rows, pol) {
         label: 'Shadow AI',
         state: shadowEvents ? 'attention' : 'covered',
         detail: `${shadowEvents} sightings`,
+      },
+      {
+        id: 'sensor_versions',
+        label: 'Sensor versions',
+        state: activeSensorVersionGaps ? 'attention' : 'covered',
+        detail: activeSensorVersionGaps ? `${activeSensorVersionGaps} version gaps` : 'reported',
       },
       {
         id: 'governed_destinations',

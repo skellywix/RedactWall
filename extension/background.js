@@ -60,6 +60,15 @@ function missingServerConfigReason(c) {
   return null;
 }
 
+function sensorMetadata() {
+  const manifest = (chrome.runtime && chrome.runtime.getManifest) ? chrome.runtime.getManifest() : {};
+  return {
+    name: 'browser_extension',
+    version: manifest.version || 'unknown',
+    platform: 'chrome_mv3',
+  };
+}
+
 async function fetchJsonWithTimeout(url, options, timeoutMs) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), requestTimeoutMs(timeoutMs));
@@ -121,6 +130,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             destination: msg.payload.destination,
             channel: msg.payload.channel,
             source: msg.payload.source,
+            sensor: sensorMetadata(),
             clientCategories: msg.payload.clientCategories || msg.payload.categories,
             clientFindings: msg.payload.clientFindings,
             clientEntityCounts: msg.payload.clientEntityCounts,
@@ -160,6 +170,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             destination: msg.payload.destination,
             channel: msg.payload.channel,
             source: msg.payload.source,
+            sensor: sensorMetadata(),
           }),
         }, c.requestTimeoutMs);
         sendResponse && sendResponse(r.ok ? r.body : scanUnavailable('scan_file_' + r.reason));
@@ -189,7 +200,7 @@ chrome.tabs?.onUpdated.addListener(async (tabId, info, tab) => {
     await fetchJsonWithTimeout(sc.serverUrl + '/api/v1/gate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': sc.ingestKey },
-      body: JSON.stringify({ prompt: '[shadow-AI] visit to ungoverned AI tool: ' + host, user: who.user, orgId: who.orgId, destination: host, channel: 'shadow_ai', source: 'browser_extension', clientOutcome: 'shadow_ai' }),
+      body: JSON.stringify({ prompt: '[shadow-AI] visit to ungoverned AI tool: ' + host, user: who.user, orgId: who.orgId, destination: host, channel: 'shadow_ai', source: 'browser_extension', sensor: sensorMetadata(), clientOutcome: 'shadow_ai' }),
     }, sc.requestTimeoutMs);
   } catch (e) {}
 });

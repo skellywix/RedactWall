@@ -6,6 +6,7 @@
  * prompt body, no token vault, and no raw finding values leave this process.
  */
 require('./env').loadEnv();
+const { safeSensor } = require('./sensor-metadata');
 
 function num(v, fallback) {
   const n = Number(v);
@@ -44,6 +45,7 @@ function sanitizedAlert(query, opts = {}) {
     orgId: query.orgId || null,
     source: query.source || 'unknown',
     channel: query.channel || 'unknown',
+    sensor: safeSensor(query.sensor),
     destination: query.destination || 'unknown',
     riskScore: query.riskScore || 0,
     maxSeverity: query.maxSeverity || 0,

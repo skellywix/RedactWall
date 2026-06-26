@@ -12,6 +12,7 @@
 - 2026-06-26: Browser paste warnings are audit-only sensor evidence. Record `paste_flagged` with masked findings and no raw prompt retention, but do not create an approval-queue item before the user actually tries to send.
 - 2026-06-26: Dashboard blocked metrics should count held or blocked content, not audit-only activity such as paste warnings, shadow-AI sightings, warn sends, justified sends, or redacted sends.
 - 2026-06-26: Browser extension packages must be generated with a hash manifest and no working development ingest key. Pilot keys belong in Chrome managed storage or local demo storage, not in the shipped extension.
+- 2026-06-26: Sensor version posture is operational metadata only. Store bounded sensor name/version/platform fields for deployment health, but never use that metadata to carry prompts, secrets, policy keys, or user notes.
 - 2026-06-26: Evidence exports use hashes for prompt bodies and audit details. Even redacted prompt text can contain sensitive category-only context, so exports omit bodies entirely.
 - 2026-06-26: Canary tokens use explicit `PS-CANARY-...` or `PROMPTSENTINEL-CANARY-...` formats with enough suffix entropy to avoid flagging ordinary discussion of canaries.
 - 2026-06-26: Managed Chrome deployment examples are treated as secret-bearing config because managed storage carries the ingest key. Source examples must keep placeholders only.

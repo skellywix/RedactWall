@@ -23,6 +23,12 @@ test('evidence pack omits raw prompt, redacted prompt body, token vault, and aud
       destination: 'chatgpt.com',
       source: 'browser_extension',
       channel: 'submit',
+      sensor: {
+        name: 'browser_extension',
+        version: '0.3.0',
+        platform: 'chrome_mv3',
+        secret: 'ps_ingest_should_not_export',
+      },
       redactedPrompt: 'Member John Carter has SSN [US_SSN]',
       _rawPrompt: 'Member John Carter has SSN 524-71-9043',
       _tokenVault: 'sealed-vault',
@@ -59,6 +65,8 @@ test('evidence pack omits raw prompt, redacted prompt body, token vault, and aud
   assert.ok(!wire.includes('Member John Carter'));
   assert.ok(!wire.includes('sealed-vault'));
   assert.ok(!wire.includes('contains member SSN'));
+  assert.ok(!wire.includes('ps_ingest_should_not_export'));
+  assert.deepStrictEqual(pack.queries[0].sensor, { name: 'browser_extension', version: '0.3.0', platform: 'chrome_mv3' });
   assert.ok(wire.includes('**** 9043'));
 });
 

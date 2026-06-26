@@ -16,6 +16,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const processors = require('../src/processors');
+const VERSION = require('../package.json').version;
 
 const SERVER = process.env.SENTINEL_URL || 'http://localhost:4000';
 const KEY = process.env.INGEST_API_KEY || 'dev-ingest-key';
@@ -62,6 +63,10 @@ function ignoredByScanner(file, scanner) {
   if (parts.some((part) => scanner.ignoreDirectories.has(part))) return true;
   if (scanner.ignoreFilenames.has(path.basename(lower))) return true;
   return scanner.ignoreExtensions.has(path.extname(lower));
+}
+
+function sensorMetadata() {
+  return { name: 'endpoint_agent', version: VERSION, platform: process.platform };
 }
 
 async function fetchPolicy(opts = {}) {
@@ -139,6 +144,7 @@ function fileRequest(filename, buf, user) {
     destination: 'desktop-ai-app',
     source: 'endpoint_agent',
     channel: 'file_upload',
+    sensor: sensorMetadata(),
   };
 }
 
@@ -146,6 +152,7 @@ function unscannedFileEvent(filename, user, outcome, note) {
   return {
     prompt: '[file blocked unscanned] ' + filename,
     user, destination: 'desktop-ai-app', source: 'endpoint_agent', channel: 'file_upload',
+    sensor: sensorMetadata(),
     clientOutcome: outcome,
     note,
   };
@@ -240,5 +247,6 @@ module.exports = {
   requestTimeoutMs,
   fetchWithTimeout,
   defaultWatchDir,
+  sensorMetadata,
   start,
 };

@@ -14,6 +14,12 @@ function sampleQuery(overrides = {}) {
     orgId: 'cu-demo',
     source: 'browser_extension',
     channel: 'submit',
+    sensor: {
+      name: 'browser_extension',
+      version: '0.3.0',
+      platform: 'chrome_mv3',
+      secret: 'ps_ingest_should_not_leave',
+    },
     destination: 'chatgpt.com',
     redactedPrompt: 'Member John, SSN [US_SSN]',
     _rawPrompt: 'sealed-secret',
@@ -37,6 +43,8 @@ test('sanitized alert omits raw, redacted prompt body, vault, and finding values
   assert.ok(!wire.includes('sealed-secret'));
   assert.ok(!wire.includes('sealed-vault'));
   assert.ok(!wire.includes('Member John'));
+  assert.ok(!wire.includes('ps_ingest_should_not_leave'));
+  assert.deepStrictEqual(payload.sensor, { name: 'browser_extension', version: '0.3.0', platform: 'chrome_mv3' });
   assert.strictEqual(payload.findings[0].masked, '**** 9043');
 });
 

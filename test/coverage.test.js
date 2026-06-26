@@ -21,6 +21,7 @@ test('coverage summary aggregates governed apps, sensors, and shadow AI without 
       user: 'analyst@example.test',
       destination: 'https://chatgpt.com/c/abc',
       source: 'browser_extension',
+      sensor: { name: 'browser_extension', version: '0.3.0', platform: 'chrome_mv3' },
       redactedPrompt: 'Member [US_SSN]',
       _rawPrompt: 'Member SSN 524-71-9043',
       decisionNote: 'contains synthetic member SSN 524-71-9043',
@@ -32,6 +33,7 @@ test('coverage summary aggregates governed apps, sensors, and shadow AI without 
       user: 'analyst@example.test',
       destination: 'claude.ai',
       source: 'mcp_guard',
+      sensor: { name: 'mcp_guard', version: '0.3.0', platform: 'node' },
       redactedPrompt: 'tokenized',
     },
     {
@@ -41,6 +43,7 @@ test('coverage summary aggregates governed apps, sensors, and shadow AI without 
       user: 'ops@example.test',
       destination: 'notebooklm.google.com',
       source: 'browser_extension',
+      sensor: { name: 'browser_extension', version: '0.2.9', platform: 'chrome_mv3' },
       redactedPrompt: '[shadow-AI] visit',
     },
   ];
@@ -53,7 +56,14 @@ test('coverage summary aggregates governed apps, sensors, and shadow AI without 
   assert.strictEqual(report.governedDestinations.find((d) => d.destination === 'chatgpt.com').blocked, 1);
   assert.strictEqual(report.governedDestinations.find((d) => d.destination === 'claude.ai').redacted, 1);
   assert.strictEqual(report.shadowDestinations[0].destination, 'notebooklm.google.com');
+  const browser = report.sensors.find((s) => s.source === 'browser_extension');
+  assert.strictEqual(browser.versionHealth, 'mixed');
+  assert.strictEqual(browser.latestVersion, '0.2.9');
+  assert.deepStrictEqual(browser.versions.map((v) => v.version), ['0.2.9', '0.3.0']);
+  assert.deepStrictEqual(browser.platforms, ['chrome_mv3']);
   assert.strictEqual(report.sensors.find((s) => s.source === 'endpoint_agent').events, 0);
+  assert.strictEqual(report.sensors.find((s) => s.source === 'endpoint_agent').versionHealth, 'missing');
+  assert.ok(report.posture.some((p) => p.id === 'sensor_versions' && p.state === 'attention'));
   assert.ok(report.score > 0 && report.score < 100);
   assert.ok(!JSON.stringify(report).includes('Member [US_SSN]'));
   assert.ok(!JSON.stringify(report).includes('524-71-9043'));

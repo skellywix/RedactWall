@@ -75,6 +75,13 @@ const entityCountsSchema = z.record(
   z.number().int().min(0).max(100000),
 );
 
+const sensorMetadataSchema = z.object({
+  name: optionalString(80),
+  version: optionalString(80),
+  packageVersion: optionalString(80),
+  platform: optionalString(80),
+}).strict();
+
 const clientOutcomeSchema = z.enum([
   'allowed',
   'redacted_sent',
@@ -97,6 +104,7 @@ const commonSensorContext = {
   source: stringDefault('api'),
   channel: stringDefault('submit'),
   orgId: nullableString(),
+  sensor: sensorMetadataSchema.optional(),
 };
 
 const gateSchema = z.object({
@@ -139,6 +147,7 @@ const scanFileSchema = z.object({
   source: stringDefault('api'),
   channel: stringDefault('file_upload'),
   orgId: nullableString(),
+  sensor: sensorMetadataSchema.optional(),
 }).strict();
 
 const scanResponseSchema = z.object({
@@ -147,6 +156,7 @@ const scanResponseSchema = z.object({
   destination: stringDefault('unknown'),
   source: stringDefault('api'),
   orgId: nullableString(),
+  sensor: sensorMetadataSchema.optional(),
 }).strict();
 
 const loginSchema = z.object({
@@ -200,8 +210,10 @@ const policyUpdateSchema = z.object({
 function validationFields(error) {
   const fields = new Set();
   for (const issue of error.issues || []) {
-    if (issue.path && issue.path.length) fields.add(issue.path.join('.'));
-    else if (Array.isArray(issue.keys)) for (const key of issue.keys) fields.add(String(key));
+    if (Array.isArray(issue.keys) && issue.keys.length) {
+      const prefix = issue.path && issue.path.length ? `${issue.path.join('.')}.` : '';
+      for (const key of issue.keys) fields.add(prefix + String(key));
+    } else if (issue.path && issue.path.length) fields.add(issue.path.join('.'));
     else fields.add('body');
   }
   return Array.from(fields).sort();

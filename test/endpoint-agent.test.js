@@ -6,6 +6,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { scanFile, refreshPolicy, scannerConfig, ignoredByScanner, postJson, defaultWatchDir } = require('../endpoint-agent/agent');
+const pkg = require('../package.json');
 
 test('watch directory prefers CLI argument, then endpoint env, then temp default', () => {
   assert.strictEqual(defaultWatchDir(['node', 'agent.js', 'C:\\Watch'], { ENDPOINT_AGENT_WATCH_DIR: 'D:\\FromEnv' }), 'C:\\Watch');
@@ -35,6 +36,7 @@ test('sends supported file bytes to scan-file API instead of redacted gate previ
   assert.strictEqual(gateCalled, false);
   assert.strictEqual(request.filename, filename);
   assert.strictEqual(Buffer.from(request.contentBase64, 'base64').toString('utf8'), raw);
+  assert.deepStrictEqual(request.sensor, { name: 'endpoint_agent', version: pkg.version, platform: process.platform });
   assert.ok(!request.contentBase64.includes('[US_SSN]'));
 
   fs.rmSync(dir, { recursive: true, force: true });
@@ -59,6 +61,7 @@ test('does not upload unsupported file bytes', async () => {
   assert.strictEqual(res.supported, false);
   assert.strictEqual(scanCalled, false);
   assert.strictEqual(reportRequest.clientOutcome, 'file_unsupported');
+  assert.deepStrictEqual(reportRequest.sensor, { name: 'endpoint_agent', version: pkg.version, platform: process.platform });
   assert.ok(!reportRequest.prompt.includes('524-71-9043'));
 
   fs.rmSync(dir, { recursive: true, force: true });

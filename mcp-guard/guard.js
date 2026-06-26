@@ -12,6 +12,7 @@ require('../src/env').loadEnv();
  * Wrap any tool handler with guardToolResult(). Same shared engine, same server.
  */
 const D = require('../shared/detect');
+const VERSION = require('../package.json').version;
 
 const SERVER = process.env.SENTINEL_URL || 'http://localhost:4000';
 const KEY = process.env.INGEST_API_KEY || 'dev-ingest-key';
@@ -103,6 +104,10 @@ function publicCategories(analysis) {
   return (analysis.categories || []).map((c) => ({ category: c.category, score: c.score }));
 }
 
+function sensorMetadata() {
+  return { name: 'mcp_guard', version: VERSION, platform: 'node' };
+}
+
 function reportBody({ safeText, analysis, ctx }) {
   return {
     prompt: String(safeText || '').slice(0, 1000),
@@ -110,6 +115,7 @@ function reportBody({ safeText, analysis, ctx }) {
     destination: ctx.tool || 'mcp-tool',
     source: 'mcp_guard',
     channel: 'mcp_doc',
+    sensor: sensorMetadata(),
     clientOutcome: 'redacted_sent',
     clientPreRedacted: true,
     clientFindings: publicFindings(analysis),
@@ -175,6 +181,7 @@ module.exports = {
   detectionOptions,
   requestTimeoutMs,
   fetchWithTimeout,
+  sensorMetadata,
 };
 
 // ---- demo when run directly ------------------------------------------------

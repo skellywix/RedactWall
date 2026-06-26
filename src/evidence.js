@@ -6,6 +6,7 @@
  * prompts, or free-form audit details that may contain sensitive context.
  */
 const crypto = require('crypto');
+const { safeSensor } = require('./sensor-metadata');
 
 const POLICY_AUDIT_ACTIONS = new Set(['POLICY_UPDATED', 'POLICY_TEMPLATE_APPLIED']);
 const POLICY_AUDIT_FIELDS = new Set([
@@ -44,6 +45,7 @@ function safeQuery(q) {
     orgId: q.orgId || null,
     source: q.source || 'unknown',
     channel: q.channel || 'unknown',
+    sensor: safeSensor(q.sensor),
     destination: q.destination || 'unknown',
     riskScore: q.riskScore || 0,
     maxSeverity: q.maxSeverity || 0,

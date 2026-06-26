@@ -32,6 +32,7 @@ function loadBackground(opts = {}) {
       onInstalled: { addListener() {} },
       onStartup: { addListener() {} },
       onMessage: { addListener(fn) { onMessage = fn; } },
+      getManifest: () => manifest,
       lastError: null,
     },
     alarms: { create() {}, onAlarm: { addListener() {} } },
@@ -139,6 +140,36 @@ test('background report fails closed when no ingest key is configured', async ()
   assert.strictEqual(res.reason, 'missing_ingest_key');
 });
 
+test('background report includes browser extension version metadata', async () => {
+  let outbound;
+  const bg = loadBackground({
+    local: { ingestKey: 'unit-key' },
+    fetch: async (url, options) => {
+      outbound = { url, body: JSON.parse(options.body), headers: options.headers };
+      return { ok: true, json: async () => ({ decision: 'allow' }) };
+    },
+  });
+  const res = await bg.sendMessage({
+    type: 'report',
+    payload: {
+      prompt: 'Summarize today\'s branch hours.',
+      destination: 'chatgpt.com',
+      channel: 'submit',
+      source: 'browser_extension',
+      categories: [],
+      outcome: 'allowed',
+    },
+  });
+  assert.strictEqual(res.decision, 'allow');
+  assert.strictEqual(outbound.url, 'http://localhost:4000/api/v1/gate');
+  assert.strictEqual(outbound.headers['x-api-key'], 'unit-key');
+  assert.deepStrictEqual(outbound.body.sensor, {
+    name: 'browser_extension',
+    version: manifest.version,
+    platform: 'chrome_mv3',
+  });
+});
+
 test('background file scan fails closed on control-plane errors', async () => {
   const bg = loadBackground({
     local: { ingestKey: 'unit-ingest-key' },
@@ -159,6 +190,36 @@ test('background file scan fails closed on control-plane errors', async () => {
   assert.strictEqual(res.supported, true);
   assert.strictEqual(res.inspected, false);
   assert.strictEqual(res.reason, 'scan_file_http_503');
+});
+
+test('background file scan includes browser extension version metadata', async () => {
+  let outbound;
+  const bg = loadBackground({
+    local: { ingestKey: 'unit-ingest-key' },
+    fetch: async (url, options) => {
+      outbound = { url, body: JSON.parse(options.body) };
+      return { ok: true, json: async () => ({ decision: 'allow', supported: true }) };
+    },
+  });
+
+  const res = await bg.sendMessage({
+    type: 'scanFile',
+    payload: {
+      filename: 'loan.txt',
+      contentBase64: Buffer.from('synthetic').toString('base64'),
+      destination: 'chatgpt.com',
+      channel: 'file_upload',
+      source: 'browser_extension',
+    },
+  });
+
+  assert.strictEqual(res.decision, 'allow');
+  assert.strictEqual(outbound.url, 'http://localhost:4000/api/v1/scan-file');
+  assert.deepStrictEqual(outbound.body.sensor, {
+    name: 'browser_extension',
+    version: manifest.version,
+    platform: 'chrome_mv3',
+  });
 });
 
 test('warn and justify sends wait for recorded gate response before resend', () => {

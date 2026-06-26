@@ -288,6 +288,7 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
   const {
     prompt, user = 'unknown', destination = 'unknown', sourceIp = null,
     source = 'api', channel = 'submit', clientOutcome = null, note = '', orgId = null,
+    sensor = null,
   } = req.body || {};
   if (typeof prompt !== 'string' || !prompt.trim()) {
     return res.status(400).json({ error: 'prompt (string) required' });
@@ -313,7 +314,7 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
   const categories = (analysis.categories || []).map((c) => c.category);
 
   const base = {
-    user, orgId, destination, sourceIp, source, channel,
+    user, orgId, destination, sourceIp, source, channel, sensor,
     redactedPrompt, findings, categories, entityCounts: analysis.entityCounts,
     riskScore: analysis.riskScore, maxSeverity: analysis.maxSeverity,
     maxSeverityLabel: analysis.maxSeverityLabel, reasons: verdict.reasons,
@@ -466,7 +467,7 @@ app.get('/api/v1/detectors', checkIngestKey, (req, res) => res.json(detector.lis
 
 // Scan an uploaded FILE: extract text (pdf/docx/xlsx/text), then gate it.
 app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation.scanFileSchema), async (req, res) => {
-  const { filename, contentBase64, user = 'unknown', destination = 'unknown', source = 'api', channel = 'file_upload', orgId = null } = req.body || {};
+  const { filename, contentBase64, user = 'unknown', destination = 'unknown', source = 'api', channel = 'file_upload', orgId = null, sensor = null } = req.body || {};
   if (!filename || !contentBase64) return res.status(400).json({ error: 'filename and contentBase64 required' });
   let buf;
   try { buf = Buffer.from(contentBase64, 'base64'); } catch { return res.status(400).json({ error: 'bad base64' }); }
@@ -477,7 +478,7 @@ app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation
   try { extracted = await processors.extractText(filename, buf); }
   catch (e) { extracted = { text: '', processor: null, supported: true, extractionOk: false, error: 'extract_failed' }; }
   if (!extracted.supported) {
-    const row = db.createQuery({ status: 'flagged', user, orgId, destination, source, channel,
+    const row = db.createQuery({ status: 'flagged', user, orgId, destination, source, channel, sensor,
       redactedPrompt: '[unsupported file] ' + filename, findings: [], categories: [], entityCounts: {},
       riskScore: 0, maxSeverity: 0, maxSeverityLabel: 'none', reasons: ['Unsupported file type recorded'] });
     db.appendAudit({ action: 'FILE_RECORDED', queryId: row.id, actor: user, detail: filename });
@@ -488,7 +489,7 @@ app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation
   }
   if (!extracted.extractionOk) {
     const reason = extracted.error === 'timeout' ? 'File extraction timed out before inspection completed' : 'File could not be inspected';
-    const row = db.createQuery({ status: 'file_blocked_unscanned', user, orgId, destination, source, channel,
+    const row = db.createQuery({ status: 'file_blocked_unscanned', user, orgId, destination, source, channel, sensor,
       filename, processor: extracted.processor, redactedPrompt: '[unreadable file] ' + filename,
       findings: [], categories: [], entityCounts: {}, riskScore: 0, maxSeverity: 0, maxSeverityLabel: 'none',
       reasons: [reason] });
@@ -514,7 +515,7 @@ app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation
   const findings = analysis.findings.map((x) => ({ type: x.type, severity: x.severity, score: x.score, masked: detector.maskValue(x.type, x.value) }));
   const categories = (analysis.categories || []).map((c) => c.category);
   const preview = safePreview(extracted.text, analysis, '[file:' + filename + '] ');
-  const base = { user, orgId, destination, source, channel, filename, processor: extracted.processor,
+  const base = { user, orgId, destination, source, channel, sensor, filename, processor: extracted.processor,
     redactedPrompt: preview, findings, categories, entityCounts: analysis.entityCounts,
     riskScore: analysis.riskScore, maxSeverity: analysis.maxSeverity, maxSeverityLabel: analysis.maxSeverityLabel, reasons: verdict.reasons };
 
@@ -566,7 +567,7 @@ app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation
 // Scan an AI RESPONSE for sensitive data leaking back to the user (e.g. an MCP
 // tool pulled PII, or the model echoed it). Parity with output-scanning DLP.
 app.post('/api/v1/scan-response', checkIngestKey, validation.validateBody(validation.scanResponseSchema), (req, res) => {
-  const { text, user = 'unknown', destination = 'unknown', source = 'api', orgId = null } = req.body || {};
+  const { text, user = 'unknown', destination = 'unknown', source = 'api', orgId = null, sensor = null } = req.body || {};
   if (typeof text !== 'string' || !text.trim()) return res.status(400).json({ error: 'text (string) required' });
   const pol = policy.loadPolicy();
   const analysis = detector.analyze(text, policy.analyzeOpts(pol));
@@ -575,7 +576,7 @@ app.post('/api/v1/scan-response', checkIngestKey, validation.validateBody(valida
   const redacted = safePreview(text, analysis);
   const leaked = findings.length > 0 || categories.length > 0;
   if (leaked) {
-    const row = db.createQuery({ status: 'response_flagged', user, orgId, destination, source, channel: 'ai_response',
+    const row = db.createQuery({ status: 'response_flagged', user, orgId, destination, source, channel: 'ai_response', sensor,
       redactedPrompt: '[AI response] ' + redacted, findings, categories, entityCounts: analysis.entityCounts,
       riskScore: analysis.riskScore, maxSeverity: analysis.maxSeverity, maxSeverityLabel: analysis.maxSeverityLabel,
       reasons: ['Sensitive data present in AI response'] });

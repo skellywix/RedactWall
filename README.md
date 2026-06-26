@@ -207,7 +207,7 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 | Shadow-AI discovery | Working — flags use of ungoverned AI tools |
 | Output scanning | Working — `/api/v1/scan-response` flags PII/secrets in AI replies |
 | MCP guard / Endpoint agent | Working references — inline redaction; folder watch (pdf/docx/xlsx/pptx/text) |
-| Auth & ops | Working: login lockout, password-confirmed raw reveal and release approval, stable secret, `/healthz` · `/readyz` · `/api/metrics`, Docker, CI |
+| Auth & ops | Working: login lockout, password-confirmed raw reveal and release approval, stable secret, `/healthz` · `/readyz` · `/api/metrics`, sensor version posture, Docker, CI |
 
 ## Shipped since the skeleton (see `ITERATIONS.md`)
 
@@ -216,6 +216,7 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 - **Backup/verify/restore** tooling for the SQLite evidence store with prompt-free manifests.
 - **Reversible redaction / Redact-&-Send**, sealed token vault, local response re-hydration.
 - **MDM identity**, reliable per-site send, **Man-in-the-Prompt** guard, **shadow-AI** discovery.
+- **Coverage posture** showing governed destinations, active sensors, shadow-AI sightings, and sensor versions.
 - **Login lockout**, stable session secret, regulation **templates**, **/healthz · /readyz · /api/metrics**, Docker + CI.
 
 ## Still ahead (to ship commercially)

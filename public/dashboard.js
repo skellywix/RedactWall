@@ -390,6 +390,16 @@ async function loadCoverage() {
 function renderCoverage(c) {
   if (!c) return;
   const totals = c.totals || {};
+  const sensorMetaLine = (s) => {
+    const parts = [];
+    if (s.lastSeen) parts.push(fmt(s.lastSeen));
+    else parts.push('No events observed');
+    if (s.latestVersion) parts.push('v' + s.latestVersion);
+    else if (s.events) parts.push('version unknown');
+    if (s.versionHealth === 'mixed') parts.push((s.versions || []).length + ' versions');
+    if ((s.platforms || []).length) parts.push((s.platforms || []).join(', '));
+    return parts.join(' | ');
+  };
   $('#coverageScore').innerHTML = `
     <div class="score-ring" style="--score:${escapeHtml(c.score || 0)}%"><b>${escapeHtml(c.score || 0)}</b></div>
     <span>Coverage score</span>
@@ -406,7 +416,7 @@ function renderCoverage(c) {
     </div>`).join('');
   $('#sensorMix').innerHTML = (c.sensors || []).map((s) => `
     <div class="sensor-row">
-      <div><strong>${escapeHtml(s.label)}</strong><span>${escapeHtml(s.lastSeen ? fmt(s.lastSeen) : 'No events observed')}</span></div>
+      <div><strong>${escapeHtml(s.label)}</strong><span>${escapeHtml(sensorMetaLine(s))}</span></div>
       <div class="count">${escapeHtml(s.events || 0)}</div>
     </div>`).join('');
   $('#governedRows').innerHTML = (c.governedDestinations || []).map((d) => `<tr>

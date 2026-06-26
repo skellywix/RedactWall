@@ -91,6 +91,20 @@ Logged-in admins can inspect detailed configuration checks at:
 http://localhost:4000/api/preflight
 ```
 
+## Sensor Version Posture
+
+The dashboard Coverage tab summarizes governed destinations, active sensors, and
+the latest reported version for each sensor. Browser extension, endpoint agent,
+and MCP guard events include bounded operational metadata only:
+
+```json
+{ "name": "browser_extension", "version": "0.3.0", "platform": "chrome_mv3" }
+```
+
+Mixed versions show as an attention item so a pilot admin can spot partial
+rollouts after a managed extension or agent update. The coverage API does not
+include prompt bodies, raw retained prompts, token vaults, or decision notes.
+
 ## Browser Extension Package
 
 Build the Chrome extension artifact before a managed pilot handoff:

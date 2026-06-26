@@ -6,6 +6,8 @@
 
 ## Done
 
+- 2026-06-26: Added sensor version posture across the control plane: browser extension, endpoint agent, and MCP guard now send bounded name/version/platform metadata; ingest validation stores it safely; the Coverage tab summarizes latest and mixed sensor versions without prompt bodies.
+  Evidence: `node --test test/coverage.test.js test/validation.test.js test/extension.test.js test/endpoint-agent.test.js test/mcp-guard.test.js test/alerts.test.js test/evidence.test.js`, `npm test`, `npm run test:browser`, `npm run package:extension -- <temp>`, `npm run sync-check`, `npm run setup:check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Added repeatable Chrome extension packaging for managed pilots: `npm run package:extension` writes a zip plus SHA-256 manifest, verifies Manifest V3 wiring, synced engine copies, managed-storage schema coverage, and refuses packaged development ingest keys. The extension now fails closed until local or managed storage supplies the ingest key.
   Evidence: `npm run package:extension -- <temp>`, `node --test test/extension-package.test.js test/extension.test.js test/managed-extension-docs.test.js`, `npm test`, `npm run test:browser`, `npm run sync-check`, `npm run setup:check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Tightened the dashboard blocked-today metric so it counts only held or blocked statuses, not audit-only paste warnings, shadow-AI sightings, warnings, justifications, or successful redactions.

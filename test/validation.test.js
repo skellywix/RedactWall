@@ -98,6 +98,7 @@ test('valid gate payload from sensors still evaluates normally', async () => wit
       clientRiskScore: 0,
       clientMaxSeverity: 0,
       clientMaxSeverityLabel: 'none',
+      sensor: { name: 'browser_extension', version: '0.3.0', platform: 'chrome_mv3' },
     },
   });
 
@@ -105,6 +106,44 @@ test('valid gate payload from sensors still evaluates normally', async () => wit
   const body = await res.json();
   assert.strictEqual(body.decision, 'allow');
   assert.strictEqual(body.riskScore, 0);
+  assert.deepStrictEqual(db.getQuery(body.id).sensor, { name: 'browser_extension', version: '0.3.0', platform: 'chrome_mv3' });
+}));
+
+test('sensor metadata validation rejects oversized values without echoing them', async () => withServer(async (port) => {
+  const tooLong = 'x'.repeat(600);
+  const res = await jsonFetch(port, '/api/v1/gate', {
+    headers: { 'x-api-key': 'unit-ingest-key' },
+    body: {
+      prompt: 'Draft a generic branch announcement.',
+      source: 'browser_extension',
+      sensor: { name: 'browser_extension', version: tooLong, platform: 'chrome_mv3' },
+    },
+  });
+
+  assert.strictEqual(res.status, 400);
+  const body = await res.json();
+  assert.ok(body.fields.includes('sensor.version'));
+  assert.ok(!JSON.stringify(body).includes(tooLong));
+}));
+
+test('sensor metadata validation rejects unknown fields without echoing them', async () => withServer(async (port) => {
+  const secret = 'unit-ingest-key';
+  const res = await jsonFetch(port, '/api/v1/gate', {
+    headers: { 'x-api-key': 'unit-ingest-key' },
+    body: {
+      prompt: 'Draft a generic branch announcement.',
+      source: 'browser_extension',
+      sensor: { name: 'browser_extension', version: '0.3.0', token: secret },
+    },
+  });
+
+  assert.strictEqual(res.status, 400);
+  const body = await res.json();
+  assert.deepStrictEqual(body, {
+    error: 'invalid request body',
+    fields: ['sensor.token'],
+  });
+  assert.ok(!JSON.stringify(body).includes(secret));
 }));
 
 test('client redaction evidence rejects unknown detector ids', async () => withServer(async (port) => {
