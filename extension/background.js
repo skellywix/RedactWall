@@ -63,7 +63,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (msg.type === 'report') {
     Promise.all([serverCfg(), identity()]).then(async ([c, who]) => {
-      if (!c.enabled) return;
+      if (!c.enabled) {
+        sendResponse && sendResponse(null);
+        return;
+      }
       try {
         const r = await fetch(c.serverUrl + '/api/v1/gate', {
           method: 'POST',
@@ -75,7 +78,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             destination: msg.payload.destination,
             channel: msg.payload.channel,
             source: msg.payload.source,
-            clientCategories: msg.payload.categories,
+            clientCategories: msg.payload.clientCategories || msg.payload.categories,
             clientFindings: msg.payload.clientFindings,
             clientEntityCounts: msg.payload.clientEntityCounts,
             clientRiskScore: msg.payload.clientRiskScore,
@@ -88,13 +91,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         });
         const j = await r.json().catch(() => ({}));
         sendResponse && sendResponse(j);
-      } catch (e) { /* swallow; UX already enforced locally */ }
+      } catch (e) { sendResponse && sendResponse(null); }
     });
     return true;
   }
   if (msg.type === 'scanFile') {
     Promise.all([serverCfg(), identity()]).then(async ([c, who]) => {
-      if (!c.enabled) return;
+      if (!c.enabled) {
+        sendResponse && sendResponse(null);
+        return;
+      }
       try {
         const r = await fetch(c.serverUrl + '/api/v1/scan-file', {
           method: 'POST',
@@ -109,6 +115,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             source: msg.payload.source,
           }),
         });
+        if (!r.ok) {
+          sendResponse && sendResponse(null);
+          return;
+        }
         sendResponse && sendResponse(await r.json().catch(() => ({})));
       } catch (e) { sendResponse && sendResponse(null); }
     });

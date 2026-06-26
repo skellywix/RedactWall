@@ -33,3 +33,27 @@ test('sends supported file bytes to scan-file API instead of redacted gate previ
 
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('does not upload unsupported file bytes', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-agent-'));
+  const filename = 'driver-license.png';
+  const raw = 'pretend binary with SSN 524-71-9043';
+  fs.writeFileSync(path.join(dir, filename), raw);
+
+  let scanCalled = false;
+  let reportRequest;
+  const res = await scanFile(filename, {
+    watchDir: dir,
+    user: 'unit-user',
+    scanFileApi: async () => { scanCalled = true; },
+    report: async (req) => { reportRequest = req; },
+  });
+
+  assert.strictEqual(res.decision, 'block');
+  assert.strictEqual(res.supported, false);
+  assert.strictEqual(scanCalled, false);
+  assert.strictEqual(reportRequest.clientOutcome, 'file_unsupported');
+  assert.ok(!reportRequest.prompt.includes('524-71-9043'));
+
+  fs.rmSync(dir, { recursive: true, force: true });
+});

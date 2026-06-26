@@ -15,6 +15,7 @@ test('redacted browser sends report tokenized text, not original prompt', () => 
   assert.doesNotMatch(content, /report\(text,\s*verdict\.analysis,\s*'submit',\s*'redacted_sent'/);
   assert.match(content, /clientPreRedacted:\s*true/);
   assert.match(background, /clientFindings:\s*msg\.payload\.clientFindings/);
+  assert.match(background, /clientCategories:\s*msg\.payload\.clientCategories \|\| msg\.payload\.categories/);
 });
 
 test('redact mode blocks category-only hits that cannot be tokenized', () => {
@@ -28,7 +29,9 @@ test('active content scripts receive policy updates from storage', () => {
 test('browser file uploads use scan-file API with base64 content', () => {
   assert.match(content, /type:\s*'scanFile'/);
   assert.match(content, /contentBase64:\s*bytesToBase64/);
+  assert.match(content, /function handleFileScanResponse/);
   assert.match(background, /\/api\/v1\/scan-file/);
+  assert.match(background, /if \(!c\.enabled\) \{\s*sendResponse && sendResponse\(null\);/);
 });
 
 test('manifest grants alarms permission used for policy refresh', () => {

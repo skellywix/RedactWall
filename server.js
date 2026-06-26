@@ -63,35 +63,54 @@ function rawToStore(text, status, pol) {
   return sealed == null ? undefined : sealed;
 }
 
-function clientAnalysisFrom(body) {
-  if (!body || (!Array.isArray(body.clientFindings) && !Array.isArray(body.clientCategories))) return null;
-  const findings = (body.clientFindings || [])
+function safeNumber(value, fallback, min = 0, max = 100) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, n));
+}
+
+function hasSensitivity(analysis) {
+  return !!(analysis && ((analysis.findings || []).length || (analysis.categories || []).length));
+}
+
+function clientFindingsFrom(body) {
+  return (body.clientFindings || [])
     .filter((f) => f && typeof f.type === 'string')
     .map((f) => ({
       type: f.type,
-      severity: Number(f.severity || detector.SEVERITY[f.type] || 1),
-      score: Number(f.score || 0.5),
+      severity: safeNumber(f.severity, detector.SEVERITY[f.type] || 1, 0, 4),
+      score: safeNumber(f.score, 0.5, 0, 1),
       masked: typeof f.masked === 'string' ? f.masked : undefined,
     }));
-  const categories = (body.clientCategories || [])
+}
+
+function clientCategoriesFrom(body) {
+  return (body.clientCategories || [])
     .map((c) => (typeof c === 'string' ? { category: c, score: 0.72 } : c))
     .filter((c) => c && typeof c.category === 'string')
-    .map((c) => ({ category: c.category, score: Number(c.score || 0.72) }));
+    .map((c) => ({ category: c.category, score: safeNumber(c.score, 0.72, 0, 1) }));
+}
+
+function clientAnalysisFrom(body) {
+  if (!body || (!Array.isArray(body.clientFindings) && !Array.isArray(body.clientCategories))) return null;
+  const findings = clientFindingsFrom(body);
+  const categories = clientCategoriesFrom(body);
+  if (!findings.length && !categories.length) return null;
   const entityCounts = body.clientEntityCounts && typeof body.clientEntityCounts === 'object'
     ? { ...body.clientEntityCounts }
     : {};
   for (const f of findings) entityCounts[f.type] = (entityCounts[f.type] || 0) + 1;
   for (const c of categories) entityCounts[c.category] = entityCounts[c.category] || 1;
-  let maxSeverity = Number(body.clientMaxSeverity || 0);
+  let maxSeverity = safeNumber(body.clientMaxSeverity, 0, 0, 4);
   for (const f of findings) if (f.severity > maxSeverity) maxSeverity = f.severity;
   for (const c of categories) {
     const s = detector.SEVERITY[c.category] || 2;
     if (s > maxSeverity) maxSeverity = s;
   }
-  const riskScore = Number.isFinite(Number(body.clientRiskScore))
-    ? Number(body.clientRiskScore)
-    : Math.min(100, Math.round(findings.reduce((s, f) => s + f.severity * f.score * 8, 0)
-      + categories.reduce((s, c) => s + (detector.SEVERITY[c.category] || 2) * c.score * 7, 0)));
+  maxSeverity = safeNumber(maxSeverity, 0, 0, 4);
+  const computedRisk = Math.min(100, Math.round(findings.reduce((s, f) => s + f.severity * f.score * 8, 0)
+    + categories.reduce((s, c) => s + (detector.SEVERITY[c.category] || 2) * c.score * 7, 0)));
+  const riskScore = Math.max(safeNumber(body.clientRiskScore, computedRisk), computedRisk);
   return {
     findings,
     categories,
@@ -112,15 +131,21 @@ app.post('/api/v1/gate', checkIngestKey, (req, res) => {
   }
 
   const pol = policy.loadPolicy();
-  const clientRedacted = clientOutcome === 'redacted_sent' && req.body && req.body.clientPreRedacted === true;
-  const clientAnalysis = clientRedacted ? clientAnalysisFrom(req.body) : null;
-  const analysis = clientAnalysis || detector.analyze(prompt, policy.analyzeOpts(pol));
+  const analyzeOpts = policy.analyzeOpts(pol);
+  const declaredClientRedacted = clientOutcome === 'redacted_sent' && req.body && req.body.clientPreRedacted === true;
+  const clientAnalysis = declaredClientRedacted ? clientAnalysisFrom(req.body) : null;
+  if (declaredClientRedacted && !clientAnalysis) {
+    return res.status(400).json({ error: 'client redaction analysis required' });
+  }
+  const serverAnalysis = detector.analyze(prompt, analyzeOpts);
+  const clientRedacted = declaredClientRedacted && clientAnalysis && !hasSensitivity(serverAnalysis);
+  const analysis = clientRedacted ? clientAnalysis : serverAnalysis;
   const verdict = policy.evaluate(analysis, pol);
 
   // Privacy-preserving record: redacted prompt + masked findings + categories.
   const redactedPrompt = clientRedacted ? prompt : detector.redact(prompt, analysis.findings);
   const findings = analysis.findings.map((f) => ({
-    type: f.type, severity: f.severity, score: f.score, masked: f.masked || detector.maskValue(f.type, f.value),
+    type: f.type, severity: f.severity, score: f.score, masked: f.masked || detector.maskValue(f.type, f.value || ''),
   }));
   const categories = (analysis.categories || []).map((c) => c.category);
 
@@ -150,9 +175,9 @@ app.post('/api/v1/gate', checkIngestKey, (req, res) => {
     return res.json({ id: row.id, decision: 'log', status: 'shadow_ai' });
   }
 
-  if (clientOutcome === 'file_too_large') {
+  if (clientOutcome === 'file_too_large' || clientOutcome === 'file_unsupported') {
     const row = db.createQuery({ status: 'file_blocked_unscanned', ...base });
-    db.appendAudit({ action: 'FILE_BLOCKED_UNSCANNED', queryId: row.id, actor: user, detail: note || 'file too large to inspect' });
+    db.appendAudit({ action: 'FILE_BLOCKED_UNSCANNED', queryId: row.id, actor: user, detail: note || 'file blocked unscanned' });
     broadcast('query', { type: 'file_blocked_unscanned', query: publicQuery(row) });
     broadcast('stats', db.stats());
     return res.json({ id: row.id, decision: 'block', status: 'file_blocked_unscanned' });
@@ -260,7 +285,7 @@ app.get('/api/v1/detectors', checkIngestKey, (req, res) => res.json(detector.lis
 
 // Scan an uploaded FILE: extract text (pdf/docx/xlsx/text), then gate it.
 app.post('/api/v1/scan-file', checkIngestKey, async (req, res) => {
-  const { filename, contentBase64, user = 'unknown', destination = 'unknown', source = 'api', channel = 'file_upload' } = req.body || {};
+  const { filename, contentBase64, user = 'unknown', destination = 'unknown', source = 'api', channel = 'file_upload', orgId = null } = req.body || {};
   if (!filename || !contentBase64) return res.status(400).json({ error: 'filename and contentBase64 required' });
   let buf;
   try { buf = Buffer.from(contentBase64, 'base64'); } catch { return res.status(400).json({ error: 'bad base64' }); }
@@ -271,10 +296,12 @@ app.post('/api/v1/scan-file', checkIngestKey, async (req, res) => {
   try { extracted = await processors.extractText(filename, buf); }
   catch (e) { return res.status(500).json({ error: 'extract failed' }); }
   if (!extracted.supported) {
-    const row = db.createQuery({ status: 'flagged', user, destination, source, channel,
+    const row = db.createQuery({ status: 'flagged', user, orgId, destination, source, channel,
       redactedPrompt: '[unsupported file] ' + filename, findings: [], categories: [], entityCounts: {},
       riskScore: 0, maxSeverity: 0, maxSeverityLabel: 'none', reasons: ['Unsupported file type recorded'] });
     db.appendAudit({ action: 'FILE_RECORDED', queryId: row.id, actor: user, detail: filename });
+    broadcast('query', { type: 'flagged', query: publicQuery(row) });
+    broadcast('stats', db.stats());
     return res.json({ id: row.id, decision: 'allow', supported: false, filename });
   }
 
@@ -283,7 +310,7 @@ app.post('/api/v1/scan-file', checkIngestKey, async (req, res) => {
   const findings = analysis.findings.map((x) => ({ type: x.type, severity: x.severity, score: x.score, masked: detector.maskValue(x.type, x.value) }));
   const categories = (analysis.categories || []).map((c) => c.category);
   const preview = '[file:' + filename + '] ' + detector.redact(extracted.text, analysis.findings).slice(0, 600);
-  const base = { user, destination, source, channel, filename, processor: extracted.processor,
+  const base = { user, orgId, destination, source, channel, filename, processor: extracted.processor,
     redactedPrompt: preview, findings, categories, entityCounts: analysis.entityCounts,
     riskScore: analysis.riskScore, maxSeverity: analysis.maxSeverity, maxSeverityLabel: analysis.maxSeverityLabel, reasons: verdict.reasons };
 

@@ -315,39 +315,56 @@
   }, true);
   function scanFiles(files, e) {
     try { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation(); } catch (_) {}
-    [...files].forEach((f) => {
-      if (f.size > 6_300_000) {
-        toast('PromptSentinel blocked ' + f.name + ': file is too large to inspect.');
-        chrome.runtime.sendMessage({ type: 'report', payload: { prompt: '[file too large to inspect] ' + f.name, destination: SITE, channel: 'file_upload', source: 'browser_extension', categories: [], outcome: 'file_too_large', note: 'blocked locally: file too large to inspect' } });
-        return;
-      }
-      const reader = new FileReader();
-      reader.onload = () => {
-        chrome.runtime.sendMessage({
-          type: 'scanFile',
-          payload: {
-            filename: f.name,
-            contentBase64: bytesToBase64(new Uint8Array(reader.result || [])),
-            destination: SITE,
-            channel: 'file_upload',
-            source: 'browser_extension',
-          },
-        }, (res) => {
-          if (!res) {
-            toast('PromptSentinel could not verify ' + f.name + '. Upload blocked.');
-            return;
-          }
-          const items = (res.findings || []).map((x) => x.type).concat(res.categories || []);
-          if (res.decision === 'allow' && res.supported !== false) {
-            toast('PromptSentinel scanned ' + f.name + ' clean. Attach it again to upload.');
-          } else if (res.supported === false) {
-            toast('PromptSentinel could not inspect ' + f.name + '. Upload blocked and recorded.');
-          } else {
-            toast('PromptSentinel blocked ' + f.name + ': ' + (items.slice(0, 3).join(', ') || 'sensitive content'));
-          }
-        });
-      };
-      reader.readAsArrayBuffer(f);
+    [...files].forEach(scanOneFile);
+  }
+  function scanOneFile(f) {
+    if (f.size > 6_300_000) {
+      reportUnscannedFile(f.name, 'file_too_large', 'blocked locally: file too large to inspect');
+      toast('PromptSentinel blocked ' + f.name + ': file is too large to inspect.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => sendFileScan(f.name, new Uint8Array(reader.result || []));
+    reader.readAsArrayBuffer(f);
+  }
+  function sendFileScan(filename, bytes) {
+    chrome.runtime.sendMessage({
+      type: 'scanFile',
+      payload: {
+        filename,
+        contentBase64: bytesToBase64(bytes),
+        destination: SITE,
+        channel: 'file_upload',
+        source: 'browser_extension',
+      },
+    }, (res) => handleFileScanResponse(filename, res));
+  }
+  function handleFileScanResponse(filename, res) {
+    if (!res) {
+      toast('PromptSentinel could not verify ' + filename + '. Upload blocked.');
+      return;
+    }
+    const items = (res.findings || []).map((x) => x.type).concat(res.categories || []);
+    if (res.decision === 'allow' && res.supported !== false) {
+      toast('PromptSentinel scanned ' + filename + ' clean. Attach it again to upload.');
+    } else if (res.supported === false) {
+      toast('PromptSentinel could not inspect ' + filename + '. Upload blocked and recorded.');
+    } else {
+      toast('PromptSentinel blocked ' + filename + ': ' + (items.slice(0, 3).join(', ') || 'sensitive content'));
+    }
+  }
+  function reportUnscannedFile(filename, outcome, note) {
+    chrome.runtime.sendMessage({
+      type: 'report',
+      payload: {
+        prompt: '[file blocked unscanned] ' + filename,
+        destination: SITE,
+        channel: 'file_upload',
+        source: 'browser_extension',
+        categories: [],
+        outcome,
+        note,
+      },
     });
   }
   function bytesToBase64(bytes) {

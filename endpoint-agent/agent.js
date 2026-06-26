@@ -55,6 +55,15 @@ function fileRequest(filename, buf, user) {
   };
 }
 
+function unscannedFileEvent(filename, user, outcome, note) {
+  return {
+    prompt: '[file blocked unscanned] ' + filename,
+    user, destination: 'desktop-ai-app', source: 'endpoint_agent', channel: 'file_upload',
+    clientOutcome: outcome,
+    note,
+  };
+}
+
 async function scanFile(file, opts = {}) {
   const watchDir = opts.watchDir || WATCH;
   const maxBytes = opts.maxBytes || MAX_BYTES;
@@ -67,13 +76,13 @@ async function scanFile(file, opts = {}) {
 
   if (stat.size > maxBytes) {
     console.log(`[BLOCK] ${file} is too large to inspect`);
-    await (opts.report || report)({
-      prompt: '[file too large to inspect] ' + file,
-      user, destination: 'desktop-ai-app', source: 'endpoint_agent', channel: 'file_upload',
-      clientOutcome: 'file_too_large',
-      note: 'blocked locally: file too large to inspect',
-    }, opts);
+    await (opts.report || report)(unscannedFileEvent(file, user, 'file_too_large', 'blocked locally: file too large to inspect'), opts);
     return { decision: 'block', status: 'file_too_large' };
+  }
+  if (!processors.supported(file)) {
+    console.log(`[BLOCK] ${file} is unsupported and was not uploaded for scanning`);
+    await (opts.report || report)(unscannedFileEvent(file, user, 'file_unsupported', 'blocked locally: unsupported file type'), opts);
+    return { decision: 'block', status: 'file_unsupported', supported: false };
   }
   const buf = fs.readFileSync(full);
 
@@ -82,7 +91,7 @@ async function scanFile(file, opts = {}) {
   // and lose the real finding.
   const res = await (opts.scanFileApi || scanFileApi)(fileRequest(file, buf, user), opts);
   if (!res) return null;
-  if (res.supported === false || !processors.supported(file)) {
+  if (res.supported === false) {
     console.log(`[file] ${file} (unsupported) -> recorded`);
     return res;
   }
