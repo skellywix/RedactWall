@@ -200,7 +200,7 @@ password because it contains the MFA seed. For a non-default env file or
 white-label issuer, use:
 
 ```bash
-npm run mfa:uri -- -- --env pilot.env --issuer "PromptSentinel Pilot"
+npm run mfa:uri -- --env pilot.env --issuer "PromptSentinel Pilot"
 ```
 
 Auditor sessions can read sanitized dashboard evidence, audit status, policy,

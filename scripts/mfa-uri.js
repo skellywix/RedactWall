@@ -57,7 +57,7 @@ function parseArgs(argv = process.argv.slice(2)) {
 function printHelp() {
   console.log([
     'Usage: npm run mfa:uri',
-    '       npm run mfa:uri -- -- [options]',
+    '       npm run mfa:uri -- [options]',
     '       node scripts/mfa-uri.js [options]',
     '',
     'Options:',
