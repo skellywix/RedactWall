@@ -2,6 +2,11 @@
 /** First-run setup config generation. */
 const test = require('node:test');
 const assert = require('node:assert');
+const { execFileSync } = require('node:child_process');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { parseEnv } = require('../src/env');
 const {
   buildEnv,
   mergeEnv,
@@ -9,6 +14,35 @@ const {
   renderEnv,
   statusFromEnv,
 } = require('../scripts/setup');
+
+const ROOT = path.join(__dirname, '..');
+const SETUP_ENV_KEYS = [
+  'PORT',
+  'NODE_ENV',
+  'HTTPS',
+  'COOKIE_SECURE',
+  'SENTINEL_DB_PATH',
+  'ADMIN_USER',
+  'ADMIN_PASSWORD',
+  'ADMIN_TOTP_SECRET',
+  'SENTINEL_SECRET',
+  'SENTINEL_DATA_KEY',
+  'INGEST_API_KEY',
+  'SENTINEL_REQUEST_TIMEOUT_MS',
+  'SIEM_WEBHOOK_URL',
+  'SIEM_WEBHOOK_TOKEN',
+  'SIEM_ALERT_MIN_RISK',
+  'SIEM_ALERT_MIN_SEVERITY',
+  'AUDITOR_USER',
+  'AUDITOR_PASSWORD',
+  'SENTINEL_ENV_PATH',
+];
+
+function childEnv() {
+  const env = { ...process.env };
+  for (const key of SETUP_ENV_KEYS) delete env[key];
+  return env;
+}
 
 test('production setup env passes deployment preflight', () => {
   const env = buildEnv({ production: true });
@@ -67,4 +101,58 @@ test('parseArgs supports check and alternate env file', () => {
   assert.strictEqual(opts.check, true);
   assert.strictEqual(opts.skipInstall, true);
   assert.match(opts.envPath, /demo\.env$/);
+});
+
+test('production setup, mfa enrollment, and setup check work end to end without setup leaking secrets', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-setup-prod-'));
+  const envPath = path.join(dir, 'pilot.env');
+  const dbPath = path.join(dir, 'sentinel.db').replace(/\\/g, '/');
+  fs.writeFileSync(envPath, `SENTINEL_DB_PATH=${dbPath}\n`);
+  const env = childEnv();
+
+  const setupOut = execFileSync(process.execPath, [
+    path.join(ROOT, 'scripts', 'setup.js'),
+    '--production',
+    '--skip-install',
+    '--env',
+    envPath,
+  ], { cwd: ROOT, encoding: 'utf8', env });
+
+  const parsed = parseEnv(fs.readFileSync(envPath, 'utf8')).parsed;
+  assert.match(parsed.ADMIN_TOTP_SECRET, /^[A-Z2-7]{16,}$/);
+  assert.match(parsed.ADMIN_PASSWORD, /^Ps-/);
+  assert.match(parsed.INGEST_API_KEY, /^ps_ingest_/);
+  assert.strictEqual(parsed.SENTINEL_DB_PATH, dbPath);
+  assert.strictEqual(fs.existsSync(dbPath), true);
+  assert.match(setupOut, /Preflight: ok \(ready\)/);
+  assert.strictEqual(setupOut.includes(parsed.ADMIN_TOTP_SECRET), false);
+  assert.strictEqual(setupOut.includes(parsed.ADMIN_PASSWORD), false);
+  assert.strictEqual(setupOut.includes(parsed.INGEST_API_KEY), false);
+
+  const mfaOut = execFileSync(process.execPath, [
+    path.join(ROOT, 'scripts', 'mfa-uri.js'),
+    '--env',
+    envPath,
+    '--issuer',
+    'PromptSentinel Smoke',
+  ], { cwd: ROOT, encoding: 'utf8', env });
+  const uriLine = mfaOut.split(/\r?\n/).find((line) => line.startsWith('otpauth://'));
+  assert.ok(uriLine);
+  const uri = new URL(uriLine);
+  assert.strictEqual(uri.searchParams.get('secret'), parsed.ADMIN_TOTP_SECRET);
+  assert.strictEqual(uri.searchParams.get('issuer'), 'PromptSentinel Smoke');
+  assert.strictEqual(mfaOut.includes(parsed.ADMIN_PASSWORD), false);
+  assert.strictEqual(mfaOut.includes(parsed.INGEST_API_KEY), false);
+
+  const checkOut = execFileSync(process.execPath, [
+    path.join(ROOT, 'scripts', 'setup.js'),
+    '--check',
+    '--skip-install',
+    '--env',
+    envPath,
+  ], { cwd: ROOT, encoding: 'utf8', env });
+  assert.match(checkOut, /Preflight: ok \(ready\)/);
+  assert.strictEqual(checkOut.includes(parsed.ADMIN_TOTP_SECRET), false);
+  assert.strictEqual(checkOut.includes(parsed.ADMIN_PASSWORD), false);
+  assert.strictEqual(checkOut.includes(parsed.INGEST_API_KEY), false);
 });
