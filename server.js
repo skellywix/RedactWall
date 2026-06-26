@@ -23,6 +23,7 @@ const auth = require('./src/auth');
 const dataCrypto = require('./src/crypto');
 const templates = require('./src/templates');
 const alerts = require('./src/alerts');
+const evidence = require('./src/evidence');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -556,6 +557,22 @@ app.put('/api/policy/apply-template', ...adminWrite, (req, res) => {
 
 app.get('/api/audit', auth.requireAuth, (req, res) => {
   res.json({ entries: db.listAudit(Number(req.query.limit) || 200), integrity: db.verifyAuditChain() });
+});
+
+app.get('/api/export/evidence', auth.requireAuth, (req, res) => {
+  const queryLimit = Math.min(Number(req.query.queryLimit) || 500, 5000);
+  const auditLimit = Math.min(Number(req.query.auditLimit) || 500, 5000);
+  res.json(evidence.buildEvidencePack({
+    version: require('./package.json').version,
+    queryLimit,
+    auditLimit,
+    policy: policy.loadPolicy(),
+    stats: db.stats(),
+    auditIntegrity: db.verifyAuditChain(),
+    detectors: detector.listDetectors(),
+    queries: db.listQueries({ limit: queryLimit }),
+    audit: db.listAudit(auditLimit),
+  }));
 });
 
 app.get('/api/policy', auth.requireAuth, (req, res) => res.json(policy.loadPolicy()));

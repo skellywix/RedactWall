@@ -472,6 +472,7 @@ Show these areas in order:
 5. Regulation templates.
 6. Audit log.
 7. Metrics or risk view.
+8. Evidence export endpoint for examiner packets.
 
 Key points:
 
@@ -480,6 +481,13 @@ Key points:
 - Held approval items can retain encrypted raw text if the institution allows it.
 - Raw reveal is explicit and audit logged.
 - Audit integrity can be checked with one command.
+- Evidence exports contain policy, detector inventory, stats, audit integrity, query metadata, masked findings, and audit hashes, but not prompt bodies or audit detail text.
+
+Export a demo evidence pack by logging into the dashboard first, then visiting:
+
+```text
+http://localhost:4000/api/export/evidence
+```
 
 ## Verify The Demo Before Clients Arrive
 
