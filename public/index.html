@@ -94,6 +94,8 @@
   .bar > i{display:block;height:100%;background:linear-gradient(90deg,#3b82f6,#22d3ee)}
   .barrow .v{width:28px;text-align:right;color:var(--mut)}
   .integrity{font-size:12px;padding:10px 16px;color:var(--mut)}
+  .toolbar{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--line)}
+  .toolbar .status{font-size:12px;color:#86efac}
   .ok{color:#86efac}.bad{color:#fca5a5}
   .hidden{display:none}
   .note{width:100%;margin-top:8px;background:var(--panel2);border:1px solid var(--line);color:var(--txt);
@@ -161,6 +163,10 @@
   <section id="tab-audit" class="hidden">
     <div class="card">
       <h2>Tamper-evident audit log</h2>
+      <div class="toolbar">
+        <button class="ghost" id="exportEvidence" type="button">Export Evidence</button>
+        <span class="status" id="exportStatus"></span>
+      </div>
       <div class="integrity" id="integrity"></div>
       <table><thead><tr><th>Timestamp</th><th>Action</th><th>Actor</th><th>Query</th><th>Detail</th></tr></thead>
         <tbody id="auditRows"></tbody></table>
@@ -309,6 +315,34 @@ async function loadAudit(){
   </tr>`).join('');
 }
 
+async function exportEvidence(){
+  const btn = $('#exportEvidence');
+  const status = $('#exportStatus');
+  btn.disabled = true;
+  status.textContent = 'Preparing...';
+  try {
+    const r = await api('/api/export/evidence?queryLimit=1000&auditLimit=1000');
+    if (!r || !r.ok) throw new Error('export failed');
+    const pack = await r.json();
+    const blob = new Blob([JSON.stringify(pack, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    a.href = url;
+    a.download = `promptsentinel-evidence-${stamp}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    status.textContent = 'Downloaded';
+    setTimeout(() => { status.textContent = ''; }, 2200);
+  } catch (err) {
+    status.textContent = 'Export failed';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 async function loadPolicy(){
   const p = await (await api('/api/policy')).json();
   const tpls = await (await api('/api/policy/templates')).json();
@@ -360,6 +394,7 @@ $$('.tab').forEach(t=>t.onclick=()=>{
 });
 
 $('#logout').onclick = async ()=>{ await api('/api/logout',{method:'POST'}); location.href='/login.html'; };
+$('#exportEvidence').onclick = exportEvidence;
 
 // Live stream
 function connectStream(){
