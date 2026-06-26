@@ -2,7 +2,7 @@
 /** MCP guard must never pass sensitive tool output to the model unchanged. */
 const test = require('node:test');
 const assert = require('node:assert');
-const { guardToolResult, reportBody, refreshPolicy, requestTimeoutMs } = require('../mcp-guard/guard');
+const { fetchPolicy, guardToolResult, reportBody, refreshPolicy, requestTimeoutMs } = require('../mcp-guard/guard');
 const pkg = require('../package.json');
 
 const noOpFetch = async () => ({ ok: true });
@@ -58,6 +58,31 @@ test('reports sanitized client analysis for locally redacted MCP output', async 
   assert.ok(!JSON.stringify(outbound.body).includes('4111 1111 1111 1111'));
 });
 
+test('does not contact the control plane without an ingest key', async () => {
+  let calls = 0;
+  const fetchImpl = async () => {
+    calls += 1;
+    return { ok: true, json: async () => ({ ignore: ['US_SSN'], disabledDetectors: [] }) };
+  };
+
+  const policy = await fetchPolicy({ server: 'http://sentinel.test', key: '', fetchImpl });
+  assert.strictEqual(policy, null);
+
+  const guarded = await guardToolResult('Member SSN 524-71-9043 must stay local.', {
+    agent: 'mcp-unit',
+    tool: 'drive.fetch',
+  }, {
+    server: 'http://sentinel.test',
+    key: '',
+    fetchImpl,
+    policy: { ignore: [], disabledDetectors: [] },
+  });
+
+  assert.strictEqual(guarded.redacted, true);
+  assert.ok(guarded.text.includes('[US_SSN]'));
+  assert.strictEqual(calls, 0);
+});
+
 test('report body preserves category evidence without raw confidential text', () => {
   const analysis = {
     findings: [],
@@ -83,6 +108,22 @@ test('MCP control-plane request timeout is bounded', () => {
   assert.strictEqual(requestTimeoutMs({ timeoutMs: 1 }), 50);
   assert.strictEqual(requestTimeoutMs({ timeoutMs: 999999 }), 120000);
   assert.strictEqual(requestTimeoutMs({ timeoutMs: 'bad' }), 10000);
+});
+
+test('redaction still works without implicit development ingest key logging', async () => {
+  let called = false;
+  const guarded = await guardToolResult('Member SSN 524-71-9043 must be redacted.', { agent: 'test', tool: 'drive.fetch' }, {
+    policy: { ignore: [], disabledDetectors: [] },
+    key: '',
+    fetchImpl: async () => {
+      called = true;
+      return { ok: true };
+    },
+  });
+
+  assert.strictEqual(guarded.redacted, true);
+  assert.ok(guarded.text.includes('[US_SSN]'));
+  assert.strictEqual(called, false);
 });
 
 test('returns redacted tool output when audit logging stalls', async () => {

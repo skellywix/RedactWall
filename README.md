@@ -154,10 +154,13 @@ Package a pilot handoff artifact with:
 
 ```bash
 npm run package:extension
+npm run package:mcp-guard
 ```
 
-The zip lands in `dist/extension/` beside a SHA-256 manifest. Configure real
-pilot keys through Chrome managed storage, not inside the package.
+The extension zip lands in `dist/extension/` beside a SHA-256 manifest. The MCP
+guard zip lands in `dist/mcp-guard/` with its own prompt-free integrity
+manifest. Configure real pilot keys through Chrome managed storage or local
+sensor environment config, not inside packages.
 
 ### Try the other sensors
 

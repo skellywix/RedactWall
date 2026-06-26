@@ -15,12 +15,17 @@ const D = require('../shared/detect');
 const VERSION = require('../package.json').version;
 
 const SERVER = process.env.SENTINEL_URL || 'http://localhost:4000';
-const KEY = process.env.INGEST_API_KEY || 'dev-ingest-key';
+const KEY = process.env.INGEST_API_KEY || '';
 const POLICY_REFRESH_MS = 15 * 60 * 1000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 10000;
 const DEFAULT_DETECTION_POLICY = { ignore: [], disabledDetectors: [] };
 let detectionPolicy = normalizeDetectionPolicy(DEFAULT_DETECTION_POLICY);
 let lastPolicyRefresh = 0;
+
+function configuredKey(opts = {}) {
+  const value = Object.prototype.hasOwnProperty.call(opts, 'key') ? opts.key : KEY;
+  return typeof value === 'string' ? value.trim() : '';
+}
 
 function lowerDetectorList(value) {
   if (!Array.isArray(value)) return [];
@@ -63,7 +68,8 @@ async function fetchPolicy(opts = {}) {
   const fetchImpl = opts.fetchImpl || globalThis.fetch;
   if (!fetchImpl) return null;
   const server = opts.server || SERVER;
-  const key = opts.key || KEY;
+  const key = configuredKey(opts);
+  if (!key) return null;
   try {
     const r = await fetchWithTimeout(fetchImpl, server + '/api/v1/policy', {
       headers: { 'x-api-key': key },
@@ -132,7 +138,8 @@ async function logEvent(rec, opts = {}) {
   const fetchImpl = opts.fetchImpl || globalThis.fetch;
   if (!fetchImpl) return;
   const server = opts.server || SERVER;
-  const key = opts.key || KEY;
+  const key = configuredKey(opts);
+  if (!key) return;
   try {
     await fetchWithTimeout(fetchImpl, server + '/api/v1/gate', {
       method: 'POST',
