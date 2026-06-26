@@ -382,6 +382,18 @@ Client talk track:
 This is a planted tripwire. A credit union can put canaries in fake records, test documents, or internal demo data. If one shows up in an AI prompt, the control proves it caught a path that should not exist.
 ```
 
+After showing the manual paste, run the automated control fire drill:
+
+```powershell
+npm run fire-drill -- http://localhost:4000
+```
+
+Expected:
+
+```text
+FIRE_DRILL_OK ...
+```
+
 ## Demo Script: File Upload Scanning
 
 Create a synthetic file:

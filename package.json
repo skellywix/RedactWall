@@ -7,6 +7,7 @@
     "start": "node server.js",
     "test": "node --test",
     "simulate": "node scripts/simulate.js",
+    "fire-drill": "node scripts/fire-drill.js",
     "train-semantic": "node scripts/train-semantic.js",
     "sync-engine": "node scripts/sync-engine.js",
     "sync-check": "node scripts/sync-check.js",

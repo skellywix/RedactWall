@@ -112,6 +112,7 @@ npm start
 
 ```bash
 npm run simulate                      # pushes sample prompts (API/proxy path)
+npm run fire-drill -- http://localhost:4000  # sends a synthetic canary control
 node mcp-guard/guard.js               # demo: redact a SharePoint doc before the model sees it
 node endpoint-agent/agent.js <dir>    # watch a folder for files going to desktop AI apps
 ```
