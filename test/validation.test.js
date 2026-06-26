@@ -14,6 +14,7 @@ process.env.INGEST_API_KEY = 'unit-ingest-key';
 process.env.SENTINEL_DB_PATH = path.join(os.tmpdir(), 'ps-validation-test-' + crypto.randomBytes(6).toString('hex') + '.db');
 
 const app = require('../server');
+const db = require('../src/db');
 const policyPath = path.join(__dirname, '..', 'config', 'policy.json');
 
 function listen(appUnderTest) {
@@ -152,6 +153,35 @@ test('gate accepts scan_unavailable as a blocked unscanned file outcome', async 
   assert.strictEqual(body.decision, 'block');
   assert.strictEqual(body.status, 'file_blocked_unscanned');
   assert.ok(!JSON.stringify(body).includes(fileContent));
+}));
+
+test('gate records browser paste warnings as audit-only sensor evidence', async () => withServer(async (port) => {
+  const secret = '524-71-9043';
+  const res = await jsonFetch(port, '/api/v1/gate', {
+    headers: { 'x-api-key': 'unit-ingest-key' },
+    body: {
+      prompt: 'Pasted member SSN ' + secret + ' into the composer.',
+      user: 'analyst@example.test',
+      destination: 'chatgpt.com',
+      source: 'browser_extension',
+      channel: 'paste',
+      clientOutcome: 'paste_flagged',
+    },
+  });
+
+  assert.strictEqual(res.status, 200);
+  const body = await res.json();
+  assert.strictEqual(body.decision, 'log');
+  assert.strictEqual(body.status, 'paste_flagged');
+  assert.ok(body.findings.some((f) => f.type === 'US_SSN'));
+  assert.ok(!JSON.stringify(body).includes(secret));
+
+  const stored = db.getQuery(body.id);
+  assert.strictEqual(stored.status, 'paste_flagged');
+  assert.strictEqual(stored.channel, 'paste');
+  assert.strictEqual(stored._rawPrompt, undefined);
+  assert.ok(!JSON.stringify(stored).includes(secret));
+  assert.ok(db.listAudit(10).some((entry) => entry.action === 'PASTE_FLAGGED' && entry.queryId === body.id));
 }));
 
 test('scan-file rejects invalid base64 without echoing file content', async () => withServer(async (port) => {

@@ -358,6 +358,15 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
     return res.json({ id: row.id, decision: 'allow', riskScore: analysis.riskScore, findings, categories });
   }
 
+  if (clientOutcome === 'paste_flagged') {
+    const row = db.createQuery({ status: 'paste_flagged', mode: pol.enforcementMode || 'block', ...base });
+    db.appendAudit({ action: 'PASTE_FLAGGED', queryId: row.id, actor: user, detail: note || `${source}/paste: ${verdict.reasons.join('; ')}` });
+    emitSecurityAlert(row, 'PASTE_FLAGGED');
+    broadcast('query', { type: 'paste_flagged', query: publicQuery(row) });
+    broadcast('stats', db.stats());
+    return res.json({ id: row.id, decision: 'log', status: 'paste_flagged', riskScore: analysis.riskScore, findings, categories });
+  }
+
   // Sensitive content detected. Behaviour depends on the org enforcement mode.
   // 'redact' neutralizes even hard-stop entities by tokenizing them (that is the
   // point — the prompt can proceed because it no longer contains real PII).

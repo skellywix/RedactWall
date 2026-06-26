@@ -32,7 +32,7 @@ function statusTone(status) {
   const s = String(status || '').toLowerCase();
   if (['approved', 'allowed', 'justified', 'warned_sent', 'redacted'].includes(s)) return 'good';
   if (['denied', 'blocked_by_user', 'injection_blocked', 'response_flagged'].includes(s)) return 'bad';
-  if (['pending', 'shadow_ai'].includes(s)) return 'warn';
+  if (['pending', 'shadow_ai', 'paste_flagged'].includes(s)) return 'warn';
   return 'info';
 }
 

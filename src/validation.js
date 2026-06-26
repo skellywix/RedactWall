@@ -83,6 +83,7 @@ const clientOutcomeSchema = z.enum([
   'file_too_large',
   'file_unsupported',
   'scan_unavailable',
+  'paste_flagged',
   'sent_after_warning',
   'justified',
   'blocked_by_user',

@@ -6,6 +6,8 @@
 
 ## Done
 
+- 2026-06-26: Closed the browser paste-audit gap: `paste_flagged` reports from the extension now pass API validation, create audit-only `PASTE_FLAGGED` evidence with masked findings, avoid raw prompt retention, and show as warning activity in the admin dashboard instead of disappearing as rejected sensor traffic.
+  Evidence: focused syntax checks, `node --test test/validation.test.js test/extension.test.js test/alerts.test.js`, `npm test`, `npm run test:browser`, `npm run sync-check`, `npm run setup:check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Added sanitized SIEM/webhook alerts for failed and locked admin step-up confirmations: reveal and approval failures now force best-effort admin security alerts with actor/scope metadata while omitting prompt bodies, raw retained prompts, token vaults, and raw finding values.
   Evidence: `node --test test/alerts.test.js test/approval-stepup.test.js test/reveal-stepup.test.js test/admin-csrf.test.js`, `npm test`, `npm run sync-check`, `npm run setup:check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Added password step-up for approval release: approving a held prompt now requires admin password confirmation in the dashboard and API, failed confirmations are audit-logged without releasing content, repeated failures lock out the release path, and browser E2E covers the approval dialog.

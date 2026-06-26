@@ -9,6 +9,7 @@
 - 2026-06-26: Use a conservative CSP that allows current inline dashboard assets but still locks framing, base URI, form target, connect sources, MIME sniffing, referrers, and browser feature access.
 - 2026-06-26: SIEM/webhook alerts are best-effort and sanitized. Webhook failures must never block a user's request or leak raw prompt content into logs.
 - 2026-06-26: Failed or locked admin step-up checks for raw reveal and approval release are security events. Send them through the same sanitized SIEM path with admin metadata, not prompt bodies or passwords.
+- 2026-06-26: Browser paste warnings are audit-only sensor evidence. Record `paste_flagged` with masked findings and no raw prompt retention, but do not create an approval-queue item before the user actually tries to send.
 - 2026-06-26: Evidence exports use hashes for prompt bodies and audit details. Even redacted prompt text can contain sensitive category-only context, so exports omit bodies entirely.
 - 2026-06-26: Canary tokens use explicit `PS-CANARY-...` or `PROMPTSENTINEL-CANARY-...` formats with enough suffix entropy to avoid flagging ordinary discussion of canaries.
 - 2026-06-26: Managed Chrome deployment examples are treated as secret-bearing config because managed storage carries the ingest key. Source examples must keep placeholders only.
