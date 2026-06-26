@@ -6,6 +6,8 @@
 
 ## Done
 
+- 2026-06-26: Polished the redesigned admin console tab rails by hiding native scrollbars while preserving horizontal scrolling for dense operations layouts.
+  Evidence: `npm run test:browser`; earlier same-worktree gate for this UI delta also passed `npm test`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, and `verifyAuditChain()`.
 - 2026-06-26: Hardened MCP guard telemetry so locally redacted tool output reports masked client findings/categories to the control plane while keeping raw tool content out of the logged prompt body.
   Evidence: `node --test test/mcp-guard.test.js`, `npm test`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, live temp-DB client-redacted ingest smoke, `verifyAuditChain()`.
 - 2026-06-26: Verified and adopted the redesigned admin console UI: denser operations layout, redesigned login surface, selected-incident detail panel, icon command buttons, and functional global search across queue/activity data.
