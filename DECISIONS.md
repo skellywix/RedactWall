@@ -19,3 +19,4 @@
 - 2026-06-26: Use Zod for route-local request contracts. PromptSentinel needs compact runtime validation and sanitized field-only errors now; JSON Schema/Ajv can wait until external API schemas become a published integration surface.
 - 2026-06-26: Treat unreadable supported files as blocked unscanned events. The product should never allow a `.pdf`, `.docx`, `.xlsx`, or `.pptx` just because the parser returned no text or timed out.
 - 2026-06-26: Valid ingest keys should bypass invalid-key throttles. The throttle is for probes and typos, not a mechanism that can pin healthy managed sensors offline after a few bad attempts.
+- 2026-06-26: Browser E2E runs against isolated temp DB and temp policy files. Tests can exercise real admin writes and downloads without mutating `config/policy.json` or leaving demo data behind.

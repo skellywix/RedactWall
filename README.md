@@ -96,6 +96,7 @@ blocked unscanned file without storing the file bytes.
 
 ```bash
 npm install
+npx playwright install chromium   # one-time browser install for E2E tests
 npm start
 # dashboard: http://localhost:4000   (admin / ChangeMe!2026)
 ```
@@ -117,6 +118,14 @@ npm run simulate                      # pushes sample prompts (API/proxy path)
 npm run fire-drill -- http://localhost:4000  # sends a synthetic canary control
 node mcp-guard/guard.js               # demo: redact a SharePoint doc before the model sees it
 node endpoint-agent/agent.js <dir>    # watch a folder for files going to desktop AI apps
+```
+
+### Test the product
+
+```bash
+npm test              # Node unit/integration coverage
+npm run test:browser  # Playwright: login, approval, policy save, evidence export
+npm run sync-check    # shared detection engine parity
 ```
 
 ## Project layout
@@ -178,6 +187,7 @@ Copy `.env.example` to `.env` (or export):
 | `NODE_ENV` | Set to `production` to enforce deployment preflight blockers |
 | `HTTPS` / `COOKIE_SECURE` | Mark admin session cookies secure when the dashboard is served over TLS |
 | `SENTINEL_DB_PATH` | SQLite store path (default `data/sentinel.db`). Use **local disk**, never a cloud-synced folder. |
+| `SENTINEL_POLICY_PATH` | Optional policy file path for isolated tests or pilots (default `config/policy.json`) |
 | `ADMIN_USER` / `ADMIN_PASSWORD` | Console credentials — change before real use |
 | `SENTINEL_SECRET` | Session cookie signing secret |
 | `SENTINEL_DATA_KEY` | Encrypts retained raw prompts at rest (falls back to `SENTINEL_SECRET`; if neither set, raw isn't stored) |

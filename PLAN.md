@@ -48,6 +48,12 @@ npm run eval
 npm run simulate -- http://localhost:4000
 ```
 
+When admin-console behavior changes:
+
+```bash
+npm run test:browser
+```
+
 When `shared/detect.js` changes:
 
 ```bash

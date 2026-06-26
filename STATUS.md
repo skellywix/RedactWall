@@ -6,6 +6,8 @@
 
 ## Done
 
+- 2026-06-26: Added Playwright browser E2E coverage for the admin console login, pending prompt approval, policy save, audit integrity display, and sanitized evidence export. The E2E server uses temp DB and policy files so tests do not mutate demo config.
+  Evidence: `npm run test:browser`, `npm test`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Hardened sensor ingest authentication with constant-time API-key comparison and a bounded invalid-key throttle that still lets a correct key through from the same client.
   Evidence: `node --test test/ingest-auth.test.js`, `npm test`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, live HTTP ingest auth smoke, `verifyAuditChain()`.
 - 2026-06-26: Added fail-closed file extraction guardrails: corrupt supported files and extraction timeouts are recorded as blocked unscanned files, extracted text is bounded before detection, and browser/endpoint clients surface unreadable files as blocked.

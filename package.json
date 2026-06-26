@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "test": "node --test",
+    "test:browser": "playwright test",
     "simulate": "node scripts/simulate.js",
     "fire-drill": "node scripts/fire-drill.js",
     "train-semantic": "node scripts/train-semantic.js",
@@ -23,5 +24,8 @@
     "helmet": "^8.2.0",
     "pdf-parse": "^2.4.5",
     "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1"
   }
 }

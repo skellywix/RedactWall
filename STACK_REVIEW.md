@@ -16,6 +16,7 @@ PromptSentinel should optimize for a regulated pilot that installs quickly, prov
 - Tightened CSP so `script-src` no longer needs `unsafe-inline`.
 - Added static tests that prevent inline scripts and mojibake from creeping back into the admin frontend.
 - Added Zod request-body validation for sensor and admin APIs, with sanitized field-only validation errors.
+- Added Playwright browser coverage for login, approval, policy save, audit integrity, and evidence export.
 
 ## Current Stack Verdict
 
@@ -27,7 +28,7 @@ PromptSentinel should optimize for a regulated pilot that installs quickly, prov
 | Frontend dashboard | Static HTML, CSS, and vanilla JS | Keep for now | The dashboard is a small authenticated operations console. React, Next, or Vite would add a build chain before the UI needs it. External JS plus strict CSP solves the immediate security issue. |
 | Browser extension | Chrome Manifest V3 plus vanilla JS | Keep | Extension and content-script code benefits from being dependency-light and easy to audit. |
 | Database | SQLite through `better-sqlite3` | Keep for demo and pilot | SQLite fits the local-first, install-in-an-afternoon wedge. Move to Postgres only when multi-tenant hosted operation becomes real. |
-| Tests | Node built-in test runner | Keep | The repo is CommonJS, API-heavy, and already has broad Node test coverage. No need to add Jest or Vitest yet. |
+| Tests | Node built-in test runner plus Playwright | Keep | Node tests cover API and engine behavior. Playwright covers rendered admin workflows without forcing a frontend framework or build chain. |
 | File processing | `pdf-parse`, `adm-zip`, local processors | Keep with caution | Good enough for synthetic demos and small pilots now that corrupt, unreadable, and timed-out supported files fail closed. Production should still move parsing into a constrained worker and possibly add OCR later. |
 | Packaging | Docker plus local Node install | Keep | This supports both developer demos and controlled pilot deployment. |
 
@@ -58,16 +59,13 @@ Revisit Fastify when:
 
 ## Next Stack Improvements
 
-1. Add Playwright browser checks for the admin console.
-   The current static tests prove script placement and headers. Browser tests would prove login, policy save, evidence export, and queue actions render correctly.
-
-2. Add TypeScript only when shared contracts become painful.
+1. Add TypeScript only when shared contracts become painful.
    The repo is currently small enough that CommonJS plus tests is fine. TypeScript becomes worth it when the extension, server, endpoint agent, and MCP guard share larger typed payloads.
 
-3. Plan Postgres for hosted multi-tenant control plane.
+2. Plan Postgres for hosted multi-tenant control plane.
    SQLite remains correct for local demos and pilots. Hosted SaaS needs tenant isolation, backups, migrations, and operational monitoring.
 
-4. Move file parsing into a constrained worker process.
+3. Move file parsing into a constrained worker process.
    Current guardrails add file limits, parser timeouts, and fail-closed behavior. A production hosted service should still isolate Office and PDF parsing from the main web process.
 
 ## Works Cited
@@ -77,6 +75,8 @@ Express. "Moving to Express 5." *Express*, OpenJS Foundation, https://expressjs.
 Helmet. "Helmet." *Helmet*, https://helmetjs.github.io/. Accessed 26 June 2026.
 
 Node.js. "Test Runner." *Node.js Documentation*, OpenJS Foundation, https://nodejs.org/api/test.html. Accessed 26 June 2026.
+
+Playwright. "Getting Started." *Playwright*, Microsoft, https://playwright.dev/docs/intro. Accessed 26 June 2026.
 
 OWASP Foundation. "Content Security Policy Cheat Sheet." *OWASP Cheat Sheet Series*, https://cheatsheetseries.owasp.org/cheatsheets/Content_Security_Policy_Cheat_Sheet.html. Accessed 26 June 2026.
 

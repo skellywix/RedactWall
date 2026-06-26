@@ -6,7 +6,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const CONFIG_PATH = path.join(__dirname, '..', 'config', 'policy.json');
+const CONFIG_PATH = process.env.SENTINEL_POLICY_PATH || path.join(__dirname, '..', 'config', 'policy.json');
 
 const DEFAULT_POLICY = {
   enforcementMode: 'block',
