@@ -142,11 +142,11 @@ npm run package:endpoint-agent
 The command writes a zip and adjacent SHA-256 manifest under
 `dist/endpoint-agent/`. It includes the endpoint runtime, shared detection
 engine, policy evaluator, env loader, file-type processor registry, signed
-native handoff prototype, and scheduled-task install/run/uninstall scripts. It
-refuses synthetic prompt bodies and packaged development ingest keys. Set the
-real `SENTINEL_URL`, `INGEST_API_KEY`, and watch directory during install; the
-agent inspects supported files locally and does not contact the control plane
-without an explicit ingest key.
+native handoff prototype, metadata-only handoff writer, and scheduled-task
+install/run/uninstall scripts. It refuses synthetic prompt bodies and packaged
+development ingest keys. Set the real `SENTINEL_URL`, `INGEST_API_KEY`, and
+watch directory during install; the agent inspects supported files locally and
+does not contact the control plane without an explicit ingest key.
 
 ## MCP Guard Package
 
@@ -208,6 +208,23 @@ endpoint agent then scans the referenced file through the same local processor
 and reports only sanitized findings, placeholders, and destination metadata.
 This is the tested contract for a native collector; the current package does
 not install kernel drivers or app hooks by itself.
+
+A native hook, app integration, or pilot script can use the packaged writer to
+produce one signed upload-intent event without putting the handoff secret on the
+command line:
+
+```powershell
+$env:SENTINEL_ENV_PATH = "$env:LOCALAPPDATA\PromptSentinel\endpoint-agent.env"
+node .\endpoint-agent\write-handoff.js `
+  --file "$env:USERPROFILE\Downloads\loan-file.pdf" `
+  --destination "Desktop AI" `
+  --user "analyst@example.com"
+```
+
+The writer loads `ENDPOINT_AGENT_HANDOFF_SECRET` and
+`ENDPOINT_AGENT_HANDOFF_DIR` from the endpoint config, verifies the referenced
+path is a local file, writes the event atomically, and never reads the file
+body.
 
 Check status:
 

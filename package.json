@@ -22,6 +22,7 @@
     "package:extension": "node scripts/package-extension.js",
     "package:endpoint-agent": "node scripts/package-endpoint-agent.js",
     "package:mcp-guard": "node scripts/package-mcp-guard.js",
+    "endpoint:handoff": "node endpoint-agent/write-handoff.js",
     "train-semantic": "node scripts/train-semantic.js",
     "sync-engine": "node scripts/sync-engine.js",
     "sync-check": "node scripts/sync-check.js",

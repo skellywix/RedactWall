@@ -2,11 +2,13 @@
 
 ## Open
 
-- Next pass: prototype the signed native endpoint collector that feeds the handoff contract from clipboard or AI-app upload flows without writing raw prompt or file content into event files.
-- Keep an eye on the remaining product gap: the current endpoint package now has a signed local handoff contract, but it still needs a native desktop collector or OS/app hook before it is true file-flow interception.
+- Next pass: prototype one real desktop hook path that feeds the metadata-only handoff writer from a Windows upload or file-selection flow without writing raw prompt or file content into event files.
+- Keep an eye on the remaining product gap: the current endpoint package now has a signed local handoff contract and writer, but it still needs a native desktop collector or OS/app hook before it is true file-flow interception.
 
 ## Done
 
+- 2026-06-26: Added a metadata-only native handoff writer for pilots and future desktop hooks: the packaged helper loads the endpoint env config, signs a bounded upload-intent event, writes it atomically into the handoff spool, refuses `--secret` command-line handling, and never reads referenced file bytes into the event.
+  Evidence: `node --test test/native-handoff-writer.test.js test/native-handoff.test.js test/endpoint-agent-package.test.js test/endpoint-agent-install.test.js`, `npm run package:endpoint-agent -- <temp>`, `npm test`, `npm run test:browser`, `npm run setup:check`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Tightened the signed native handoff contract and SaaS file-scan boundary: native handoff JSON now uses an explicit allowlist for event and destination fields, the endpoint watcher ignores cleanup races instead of reprocessing removed handoff files, and `/api/v1/scan-file` enforces SaaS tenant checks before decoding uploaded file bodies.
   Evidence: `node --test test/native-handoff.test.js test/endpoint-agent.test.js test/endpoint-agent-package.test.js test/endpoint-agent-install.test.js`, `npm run package:endpoint-agent -- <temp>`, `npm test`, `npm run test:browser`, `npm run setup:check`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Added a signed native endpoint file-flow handoff prototype: the endpoint agent can validate content-free HMAC-signed upload-intent JSON events, scan the referenced absolute local file through the shared local processor/detector path, report only sanitized placeholders and bounded destination metadata, and package the native handoff helper with installer/docs coverage.

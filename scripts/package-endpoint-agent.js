@@ -18,6 +18,7 @@ const PACKAGE_FILES = [
   'src/processors.js',
   'endpoint-agent/agent.js',
   'endpoint-agent/native-handoff.js',
+  'endpoint-agent/write-handoff.js',
   'scripts/install-endpoint-agent.ps1',
   'scripts/run-endpoint-agent.ps1',
   'scripts/uninstall-endpoint-agent.ps1',
@@ -81,6 +82,14 @@ function validateRuntimeFiles(files) {
     throw new Error('Endpoint agent native handoff must be signed and content-free');
   }
 
+  const handoffWriter = files.find((file) => file.path === 'endpoint-agent/write-handoff.js').body.toString('utf8');
+  if (!/writeHandoffFile/.test(handoffWriter) || !/signHandoffEvent/.test(handoffWriter)) {
+    throw new Error('Endpoint agent package must include the native handoff writer');
+  }
+  if (/--secret|contentBase64|readFileSync\(filePath/.test(handoffWriter)) {
+    throw new Error('Endpoint agent handoff writer must not take secrets in argv or read file bodies');
+  }
+
   const install = files.find((file) => file.path === 'scripts/install-endpoint-agent.ps1').body.toString('utf8');
   if (!/\[Parameter\(Mandatory = \$true\)\]\s*\r?\n\s*\[string\]\$IngestKey/.test(install)) {
     throw new Error('Endpoint agent installer must require an ingest key parameter');
@@ -135,6 +144,7 @@ function packageEndpointAgent(opts = {}) {
       localDetectionEngineIncluded: true,
       endpointRedactionHandoffIncluded: true,
       nativeHandoffPrototypeIncluded: true,
+      nativeHandoffWriterIncluded: true,
       scheduledTaskInstallerIncluded: true,
       localConfigEnvPath: true,
       taskArgsDoNotExposeIngestKey: true,

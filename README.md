@@ -183,6 +183,7 @@ npm run simulate                      # pushes sample prompts (API/proxy path)
 npm run fire-drill -- http://localhost:4000  # sends a synthetic canary control
 node mcp-guard/guard.js               # demo: redact a SharePoint doc before the model sees it
 node endpoint-agent/agent.js <dir>    # watch a folder, or process signed native file-flow handoffs
+node endpoint-agent/write-handoff.js --file <path> --destination "Desktop AI"  # write a signed native upload intent
 ```
 
 For a Windows pilot, install the endpoint sensor as a logon task:
@@ -190,6 +191,8 @@ For a Windows pilot, install the endpoint sensor as a logon task:
 ```powershell
 .\scripts\install-endpoint-agent.ps1 -SentinelUrl "https://promptsentinel.example.com" -IngestKey "<pilot-ingest-key>"
 ```
+
+The native handoff writer is a safe collector shim for pilots and future OS/app hooks. It signs a bounded upload-intent JSON file with the local endpoint config secret, references only an absolute local file path, and never reads file bytes or accepts the handoff secret as a command-line argument.
 
 ### Test the product
 
