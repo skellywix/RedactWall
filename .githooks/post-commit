@@ -1,19 +1,28 @@
-#!/usr/bin/env sh
-set -e
+@echo off
+setlocal
 
-branch="$(git symbolic-ref --quiet --short HEAD || true)"
-if [ -z "$branch" ]; then
-  echo "[post-commit] Detached HEAD detected, skipping validation and push."
-  exit 0
-fi
+where npm >nul 2>nul
+if errorlevel 1 (
+  echo [post-commit] npm not found. Install Node.js and npm, then retry.
+  exit /b 1
+)
 
-if ! npm run review:ci; then
-  echo "[post-commit] Review checks failed. Commit is saved locally; push skipped."
-  exit 0
-fi
+for /f "delims=" %%b in ('git symbolic-ref --quiet --short HEAD 2^>nul') do set "CURRENT_BRANCH=%%b"
+if not defined CURRENT_BRANCH (
+  echo [post-commit] Detached HEAD detected, skipping validation and push.
+  exit /b 0
+)
 
-if git push -u origin "$branch"; then
-  echo "[post-commit] Commit pushed to origin/$branch."
-else
-  echo "[post-commit] Push failed; commit is stored locally. Re-run git push when network/credentials are available."
-fi
+call npm run review:ci
+if errorlevel 1 (
+  echo [post-commit] Review checks failed. Commit is saved locally; push skipped.
+  exit /b 0
+)
+
+call git push -u origin "%CURRENT_BRANCH%"
+if errorlevel 1 (
+  echo [post-commit] Push failed; commit is stored locally. Re-run git push when network/credentials are available.
+  exit /b 0
+)
+
+echo [post-commit] Commit pushed to origin/%CURRENT_BRANCH%.
