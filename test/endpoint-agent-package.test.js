@@ -26,7 +26,9 @@ function minimalFiles(agentBody) {
   return [
     { path: 'package.json', body: Buffer.from('{"version":"0.0.0"}') },
     { path: 'package-lock.json', body: Buffer.from('{}') },
+    { path: 'shared/detect.js', body: Buffer.from('module.exports = {};') },
     { path: 'src/env.js', body: Buffer.from('module.exports = {};') },
+    { path: 'src/policy.js', body: Buffer.from('module.exports = {};') },
     { path: 'src/processors.js', body: Buffer.from('module.exports = {};') },
     { path: 'endpoint-agent/agent.js', body: Buffer.from(agentBody) },
     {
@@ -53,6 +55,7 @@ test('package script writes a prompt-free endpoint agent zip and integrity manif
   assert.strictEqual(manifest.sha256, sha256(zipBody));
   assert.strictEqual(manifest.appVersion, JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version);
   assert.strictEqual(manifest.checks.explicitIngestKeyRequired, true);
+  assert.strictEqual(manifest.checks.localDetectionEngineIncluded, true);
   assert.strictEqual(manifest.checks.scheduledTaskInstallerIncluded, true);
   assert.strictEqual(manifest.checks.localConfigEnvPath, true);
   assert.strictEqual(manifest.checks.taskArgsDoNotExposeIngestKey, true);
@@ -64,7 +67,9 @@ test('package script writes a prompt-free endpoint agent zip and integrity manif
   for (const required of [
     'package.json',
     'package-lock.json',
+    'shared/detect.js',
     'src/env.js',
+    'src/policy.js',
     'src/processors.js',
     'endpoint-agent/agent.js',
     'scripts/install-endpoint-agent.ps1',
@@ -91,6 +96,11 @@ test('package validation refuses prompt bodies or development keys', () => {
   assert.throws(
     () => validateRuntimeFiles(minimalFiles("const KEY = process.env.INGEST_API_KEY || '';\nconst sample = '524-71-9043';")),
     /synthetic SSN demo value/
+  );
+
+  assert.throws(
+    () => validateRuntimeFiles(minimalFiles("const KEY = process.env.INGEST_API_KEY || '';\nconst path = '/api/v1/scan-file';\nconst contentBase64 = 'abc';")),
+    /without uploading file bodies/
   );
 });
 

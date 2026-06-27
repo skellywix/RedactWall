@@ -82,9 +82,10 @@ registry; disable any detector via the policy `disabledDetectors` list.
 
 People paste *and upload* sensitive files into AI tools. A **processor layer**
 (`src/processors.js`) extracts text from PDFs, `.docx`, `.xlsx`, and `.pptx` (plus all
-text formats) so uploads get the same detection as typed prompts. The endpoint agent
-uses it for every file; sensors can also call `POST /api/v1/scan-file` with a
-base64 file. Add a new file type by pushing a processor with
+text formats) so uploads get the same detection as typed prompts. The endpoint
+agent uses it locally for every watched file and reports only sanitized evidence
+to the control plane; browser/API sensors can also call `POST /api/v1/scan-file`
+with a base64 file. Add a new file type by pushing a processor with
 `{ supports(name), extract(buffer) }`. Supported files fail closed if extraction
 times out or the parser cannot inspect the file, and the audit log records the
 blocked unscanned file without storing the file bytes.
@@ -218,7 +219,7 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 | Browser extension | Working — warn/justify/**redact**/block, real-button send, MDM identity, Man-in-the-Prompt guard |
 | Shadow-AI discovery | Working — flags use of ungoverned AI tools |
 | Output scanning | Working — `/api/v1/scan-response` flags PII/secrets in AI replies |
-| MCP guard / Endpoint agent | Working references — inline redaction; folder watch (pdf/docx/xlsx/pptx/text) |
+| MCP guard / Endpoint agent | Working references — inline redaction; local folder watch (pdf/docx/xlsx/pptx/text) |
 | Auth & ops | Working: login lockout, password-confirmed raw reveal and release approval, release-token scoped polling, stable secret, `/healthz` · `/readyz` · `/api/metrics`, sensor version posture, Docker, CI |
 
 ## Shipped since the skeleton (see `ITERATIONS.md`)

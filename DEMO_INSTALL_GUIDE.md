@@ -433,7 +433,7 @@ Expected:
 
 - Sensitive file content is not silently uploaded.
 - Supported files include text files, PDFs, Word, Excel, and PowerPoint formats.
-- Unsupported files are blocked or recorded without uploading their bytes from the endpoint agent path.
+- Browser upload scanning uses `/api/v1/scan-file`; the endpoint agent path inspects watched files locally and reports only sanitized evidence.
 
 For a PDF or Office demo, create a file with the same synthetic text and upload it through the browser. Keep it small and obvious.
 
@@ -510,8 +510,8 @@ Copy-Item .\demo-files\loan-summary.txt "$env:USERPROFILE\PromptSentinelWatch\lo
 
 Expected:
 
-- The agent scans the file.
-- Sensitive supported files are sent to `/api/v1/scan-file`.
+- The agent extracts and scans the file locally with the shared detection engine.
+- Sensitive supported files are blocked, redacted, warned, or held according to policy without uploading the file body.
 - Unsupported files are blocked locally and recorded without uploading their bytes.
 - The dashboard records the result.
 

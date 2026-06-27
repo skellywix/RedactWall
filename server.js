@@ -355,14 +355,15 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
 
   const pol = policy.loadPolicy();
   const analyzeOpts = policy.analyzeOpts(pol);
-  const declaredClientRedacted = clientOutcome === 'redacted_sent' && req.body && req.body.clientPreRedacted === true;
-  const clientAnalysis = declaredClientRedacted ? clientAnalysisFrom(req.body) : null;
-  if (declaredClientRedacted && !clientAnalysis) {
+  const declaredClientPreRedacted = req.body && req.body.clientPreRedacted === true;
+  const clientAnalysis = declaredClientPreRedacted ? clientAnalysisFrom(req.body) : null;
+  if (declaredClientPreRedacted && !clientAnalysis) {
     return res.status(400).json({ error: 'client redaction analysis required' });
   }
   const serverAnalysis = detector.analyze(prompt, analyzeOpts);
-  const clientRedacted = declaredClientRedacted && clientAnalysis && !hasSensitivity(serverAnalysis);
-  const analysis = clientRedacted ? clientAnalysis : serverAnalysis;
+  const clientPreRedacted = declaredClientPreRedacted && clientAnalysis && !hasSensitivity(serverAnalysis);
+  const clientRedacted = clientOutcome === 'redacted_sent' && clientPreRedacted;
+  const analysis = clientPreRedacted ? clientAnalysis : serverAnalysis;
   const verdict = policy.evaluate(analysis, pol);
 
   // Privacy-preserving record: redacted prompt + masked findings + categories.
@@ -439,7 +440,7 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
   // Status reflects how the sensor resolved it (from clientOutcome) or, for the
   // API/proxy path, defaults to the mode's behaviour.
   let status;
-  const wholeChunkClientRedacted = declaredClientRedacted && /^\s*\[REDACTED:[^\]]+\]\s*$/i.test(prompt);
+  const wholeChunkClientRedacted = declaredClientPreRedacted && /^\s*\[REDACTED:[^\]]+\]\s*$/i.test(prompt);
   if (clientOutcome === 'sent_after_warning') status = 'warned_sent';
   else if (clientOutcome === 'redacted_sent') status = canTokenizeAllSensitivity(analysis) || wholeChunkClientRedacted ? 'redacted' : 'pending';
   else if (clientOutcome === 'justified') status = 'justified';

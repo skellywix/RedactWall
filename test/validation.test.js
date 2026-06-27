@@ -118,6 +118,38 @@ test('valid gate payload from sensors still evaluates normally', async () => wit
   assert.deepStrictEqual(db.getQuery(body.id).sensor, { name: 'browser_extension', version: '0.3.0', platform: 'chrome_mv3' });
 }));
 
+test('gate preserves pre-redacted endpoint file findings without raw file text', async () => withServer(async (port) => {
+  const rawSecret = '524-71-9043';
+  const res = await jsonFetch(port, '/api/v1/gate', {
+    headers: { 'x-api-key': 'unit-ingest-key' },
+    body: {
+      prompt: '[file:loan.txt] [US_SSN]',
+      user: 'endpoint-user',
+      destination: 'desktop-ai-app',
+      source: 'endpoint_agent',
+      channel: 'file_upload',
+      clientPreRedacted: true,
+      clientFindings: [{ type: 'US_SSN', severity: 4, score: 0.92, masked: '**** 9043' }],
+      clientCategories: [],
+      clientEntityCounts: { US_SSN: 1 },
+      clientRiskScore: 30,
+      clientMaxSeverity: 4,
+      clientMaxSeverityLabel: 'critical',
+      note: 'endpoint agent inspected loan.txt locally',
+    },
+  });
+
+  assert.strictEqual(res.status, 200);
+  const body = await res.json();
+  const stored = db.getQuery(body.id);
+  assert.strictEqual(body.decision, 'block');
+  assert.strictEqual(body.status, 'pending');
+  assert.ok(body.findings.some((f) => f.type === 'US_SSN'));
+  assert.ok(stored.findings.some((f) => f.type === 'US_SSN'));
+  assert.ok(!JSON.stringify(body).includes(rawSecret));
+  assert.ok(!JSON.stringify(stored).includes(rawSecret));
+}));
+
 test('sensor metadata validation rejects oversized values without echoing them', async () => withServer(async (port) => {
   const tooLong = 'x'.repeat(600);
   const res = await jsonFetch(port, '/api/v1/gate', {

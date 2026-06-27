@@ -1,5 +1,5 @@
 'use strict';
-/** Endpoint file sensor must route real file content through /scan-file. */
+/** Endpoint file sensor must inspect locally and report only sanitized evidence. */
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
@@ -14,30 +14,79 @@ test('watch directory prefers CLI argument, then endpoint env, then temp default
   assert.match(defaultWatchDir(['node', 'agent.js'], {}), /promptsentinel-watch$/);
 });
 
-test('sends supported file bytes to scan-file API instead of redacted gate preview', async () => {
+test('analyzes supported files locally and reports sanitized findings to gate', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-agent-'));
   const filename = 'loan.txt';
   const raw = 'Loan file. SSN 524-71-9043. Card 4111 1111 1111 1111.';
   fs.writeFileSync(path.join(dir, filename), raw);
 
-  let request;
-  let gateCalled = false;
+  let reportRequest;
   const res = await scanFile(filename, {
     watchDir: dir,
     user: 'unit-user',
-    scanFileApi: async (req) => {
-      request = req;
-      return { decision: 'block', mode: 'block', id: 'q_test', findings: [{ type: 'US_SSN' }], categories: [], riskScore: 74 };
+    report: async (req) => {
+      reportRequest = req;
+      return { decision: 'block', mode: 'block', status: 'pending', id: 'q_test', findings: req.clientFindings, categories: [], riskScore: req.clientRiskScore };
     },
-    report: async () => { gateCalled = true; },
   });
 
   assert.strictEqual(res.decision, 'block');
-  assert.strictEqual(gateCalled, false);
-  assert.strictEqual(request.filename, filename);
-  assert.strictEqual(Buffer.from(request.contentBase64, 'base64').toString('utf8'), raw);
-  assert.deepStrictEqual(request.sensor, { name: 'endpoint_agent', version: pkg.version, platform: process.platform });
-  assert.ok(!request.contentBase64.includes('[US_SSN]'));
+  assert.strictEqual(reportRequest.source, 'endpoint_agent');
+  assert.strictEqual(reportRequest.channel, 'file_upload');
+  assert.strictEqual(reportRequest.clientPreRedacted, true);
+  assert.ok(reportRequest.clientFindings.some((f) => f.type === 'US_SSN'));
+  assert.ok(reportRequest.clientFindings.some((f) => f.type === 'CREDIT_CARD'));
+  assert.deepStrictEqual(reportRequest.sensor, { name: 'endpoint_agent', version: pkg.version, platform: process.platform });
+  assert.strictEqual(reportRequest.contentBase64, undefined);
+  assert.ok(!JSON.stringify(reportRequest).includes('524-71-9043'));
+  assert.ok(!JSON.stringify(reportRequest).includes('4111 1111 1111 1111'));
+
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('redact policy tokenizes structured file findings locally before reporting', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-agent-'));
+  const filename = 'loan.txt';
+  fs.writeFileSync(path.join(dir, filename), 'Member SSN 524-71-9043 needs a summary.');
+
+  let reportRequest;
+  const res = await scanFile(filename, {
+    watchDir: dir,
+    user: 'unit-user',
+    policy: { enforcementMode: 'redact', alwaysBlock: ['US_SSN'], ignore: [], disabledDetectors: [] },
+    report: async (req) => {
+      reportRequest = req;
+      return { decision: 'redact', mode: 'redact', status: 'redacted', id: 'q_redacted', tokenizedPrompt: req.prompt };
+    },
+  });
+
+  assert.strictEqual(res.decision, 'redact');
+  assert.strictEqual(reportRequest.clientOutcome, 'redacted_sent');
+  assert.match(reportRequest.prompt, /\[\[US_SSN_1\]\]/);
+  assert.ok(!JSON.stringify(reportRequest).includes('524-71-9043'));
+
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('sanitizes sensitive filenames before reporting local file evidence', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-agent-'));
+  const filename = 'member-524-71-9043.txt';
+  fs.writeFileSync(path.join(dir, filename), 'Clean file body for a summary.');
+
+  let reportRequest;
+  const res = await scanFile(filename, {
+    watchDir: dir,
+    user: 'unit-user',
+    report: async (req) => {
+      reportRequest = req;
+      return { decision: 'allow', status: 'allowed', id: 'q_clean' };
+    },
+  });
+
+  assert.strictEqual(res.decision, 'allow');
+  assert.match(reportRequest.prompt, /\[sensitive filename\]/);
+  assert.match(reportRequest.note, /\[sensitive filename\]/);
+  assert.ok(!JSON.stringify(reportRequest).includes('524-71-9043'));
 
   fs.rmSync(dir, { recursive: true, force: true });
 });
@@ -48,45 +97,44 @@ test('does not upload unsupported file bytes', async () => {
   const raw = 'pretend binary with SSN 524-71-9043';
   fs.writeFileSync(path.join(dir, filename), raw);
 
-  let scanCalled = false;
   let reportRequest;
   const res = await scanFile(filename, {
     watchDir: dir,
     user: 'unit-user',
-    scanFileApi: async () => { scanCalled = true; },
     report: async (req) => { reportRequest = req; },
   });
 
   assert.strictEqual(res.decision, 'block');
   assert.strictEqual(res.supported, false);
-  assert.strictEqual(scanCalled, false);
   assert.strictEqual(reportRequest.clientOutcome, 'file_unsupported');
+  assert.strictEqual(reportRequest.contentBase64, undefined);
   assert.deepStrictEqual(reportRequest.sensor, { name: 'endpoint_agent', version: pkg.version, platform: process.platform });
   assert.ok(!reportRequest.prompt.includes('524-71-9043'));
 
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('blocks supported files locally when scan API is unavailable', async () => {
+test('blocks supported files locally when control-plane logging is unavailable', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-agent-'));
   const filename = 'loan.txt';
   const raw = 'Loan file that must not pass during outage. SSN 524-71-9043.';
   fs.writeFileSync(path.join(dir, filename), raw);
 
-  let reportRequest;
+  const requests = [];
   const res = await scanFile(filename, {
     watchDir: dir,
     user: 'unit-user',
-    scanFileApi: async () => null,
-    report: async (req) => { reportRequest = req; return null; },
+    report: async (req) => { requests.push(req); return null; },
   });
 
   assert.strictEqual(res.decision, 'block');
   assert.strictEqual(res.status, 'scan_unavailable');
   assert.strictEqual(res.supported, true);
-  assert.strictEqual(reportRequest.clientOutcome, 'scan_unavailable');
-  assert.match(reportRequest.prompt, /^\[file blocked unscanned\] loan\.txt$/);
-  assert.ok(!JSON.stringify(reportRequest).includes('524-71-9043'));
+  assert.strictEqual(requests[0].clientPreRedacted, true);
+  assert.ok(requests[0].clientFindings.some((f) => f.type === 'US_SSN'));
+  assert.strictEqual(requests[1].clientOutcome, 'scan_unavailable');
+  assert.match(requests[1].prompt, /^\[file blocked unscanned\] loan\.txt$/);
+  assert.ok(!JSON.stringify(requests).includes('524-71-9043'));
 
   fs.rmSync(dir, { recursive: true, force: true });
 });
@@ -117,12 +165,12 @@ test('blocks supported files locally without an ingest key or network call', asy
 
 test('postJson times out stalled control-plane requests', async () => {
   const started = Date.now();
-  const res = await postJson('/api/v1/scan-file', { filename: 'loan.txt' }, {
+  const res = await postJson('/api/v1/gate', { prompt: '[file inspected locally] loan.txt' }, {
     server: 'http://sentinel.test',
     key: 'unit-key',
     timeoutMs: 10,
     fetchImpl: async (url, opts) => new Promise((resolve, reject) => {
-      assert.strictEqual(url, 'http://sentinel.test/api/v1/scan-file');
+      assert.strictEqual(url, 'http://sentinel.test/api/v1/gate');
       assert.strictEqual(opts.headers['x-api-key'], 'unit-key');
       opts.signal.addEventListener('abort', () => {
         const e = new Error('aborted');
@@ -212,14 +260,14 @@ test('scanner policy controls endpoint ignores and size blocking', async () => {
   });
 
   assert.strictEqual(ignoredByScanner(ignored, scanner), true);
-  let scanCalled = false;
+  let reportCalled = false;
   const ignoredRes = await scanFile(ignored, {
     watchDir: dir,
     scanner,
-    scanFileApi: async () => { scanCalled = true; },
+    report: async () => { reportCalled = true; },
   });
   assert.strictEqual(ignoredRes, undefined);
-  assert.strictEqual(scanCalled, false);
+  assert.strictEqual(reportCalled, false);
 
   const large = 'large.txt';
   fs.writeFileSync(path.join(dir, large), 'larger than eight bytes');

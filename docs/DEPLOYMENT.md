@@ -135,10 +135,11 @@ npm run package:endpoint-agent
 ```
 
 The command writes a zip and adjacent SHA-256 manifest under
-`dist/endpoint-agent/`. It includes the endpoint runtime, env loader, file-type
-processor registry, and scheduled-task install/run/uninstall scripts. It refuses
-synthetic prompt bodies and packaged development ingest keys. Set the real
-`SENTINEL_URL`, `INGEST_API_KEY`, and watch directory during install; the agent
+`dist/endpoint-agent/`. It includes the endpoint runtime, shared detection
+engine, policy evaluator, env loader, file-type processor registry, and scheduled-task
+install/run/uninstall scripts. It refuses synthetic prompt bodies and packaged
+development ingest keys. Set the real `SENTINEL_URL`, `INGEST_API_KEY`, and
+watch directory during install; the agent inspects supported files locally and
 does not contact the control plane without an explicit ingest key.
 
 ## MCP Guard Package

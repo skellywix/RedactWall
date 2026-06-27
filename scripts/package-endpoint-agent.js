@@ -12,7 +12,9 @@ const DEFAULT_OUT_DIR = path.join(ROOT, 'dist', 'endpoint-agent');
 const PACKAGE_FILES = [
   'package.json',
   'package-lock.json',
+  'shared/detect.js',
   'src/env.js',
+  'src/policy.js',
   'src/processors.js',
   'endpoint-agent/agent.js',
   'scripts/install-endpoint-agent.ps1',
@@ -63,6 +65,9 @@ function validateRuntimeFiles(files) {
   if (!/process\.env\.INGEST_API_KEY \|\| ''/.test(agent)) {
     throw new Error('Endpoint agent package must require explicit INGEST_API_KEY for control-plane calls');
   }
+  if (/contentBase64|\/api\/v1\/scan-file/.test(agent)) {
+    throw new Error('Endpoint agent package must inspect files locally without uploading file bodies');
+  }
 
   const install = files.find((file) => file.path === 'scripts/install-endpoint-agent.ps1').body.toString('utf8');
   if (!/\[Parameter\(Mandatory = \$true\)\]\s*\r?\n\s*\[string\]\$IngestKey/.test(install)) {
@@ -112,6 +117,7 @@ function packageEndpointAgent(opts = {}) {
     files: packagedFiles.sort((a, b) => a.path.localeCompare(b.path)),
     checks: {
       explicitIngestKeyRequired: true,
+      localDetectionEngineIncluded: true,
       scheduledTaskInstallerIncluded: true,
       localConfigEnvPath: true,
       taskArgsDoNotExposeIngestKey: true,
