@@ -13,7 +13,7 @@
  */
 const test = require('node:test');
 const assert = require('node:assert');
-const D = require('../shared/detect');
+const D = require('../detection-engine/detect');
 
 const find = (text) => D.analyze(text);
 const hasType = (text, t) => find(text).findings.some((f) => f.type === t);
@@ -28,8 +28,11 @@ test('true positives — structured PII is caught', () => {
   assert.ok(hasType('card on file 4111111111111111', 'CREDIT_CARD'), 'bare Visa with context');
   assert.ok(hasType('amex 378282246310005', 'CREDIT_CARD'), 'Amex (15-digit)');
   assert.ok(hasType('ABA routing number 011000015', 'ROUTING_NUMBER'), 'routing with context');
+  assert.ok(hasType('bank account number 123456789012 is in the loan file', 'BANK_ACCOUNT'), 'bank account with context');
+  assert.ok(hasType('ACH debit account 000123456789 at First Bank', 'BANK_ACCOUNT'), 'ACH account with context');
   assert.ok(hasType('here is the key AKIAIOSFODNN7EXAMPLE', 'SECRET_KEY'), 'AWS access key id');
   assert.ok(hasType('-----BEGIN RSA PRIVATE KEY-----', 'PRIVATE_KEY'), 'private key header');
+  assert.ok(hasType('fake record marker PS-CANARY-DEMO2026ABCDEF should never leave', 'CANARY_TOKEN'), 'planted canary token');
   assert.ok(hasType('email me at jane.doe@example.com', 'EMAIL_ADDRESS'), 'email');
 });
 
@@ -55,6 +58,16 @@ test('false-positive bait — bare 9-digit ids are NOT routing numbers', () => {
   assert.ok(!hasType('reference 271234567 attached', 'ROUTING_NUMBER'));
 });
 
+test('false-positive bait — ordinary account language is NOT a bank account number', () => {
+  assert.ok(!hasType('support account 122105155 was updated today', 'BANK_ACCOUNT'));
+  assert.ok(!hasType('account holder phone 415-555-0182 is preferred', 'BANK_ACCOUNT'));
+});
+
+test('false-positive bait — canary discussion is NOT a canary token', () => {
+  assert.ok(!hasType('we should add a canary token to the demo playbook', 'CANARY_TOKEN'));
+  assert.ok(!hasType('PS-CANARY is the prefix format, not a live marker', 'CANARY_TOKEN'));
+});
+
 test('false-positive bait — random 16-digit ids are NOT credit cards', () => {
   assert.ok(!hasType('transaction id 4929939187355598 posted', 'CREDIT_CARD'), 'Luhn-passing id, no context');
   assert.ok(!hasType('ticket 6011000000000004 escalated', 'CREDIT_CARD'), 'valid BIN but no separators/context');
@@ -77,7 +90,7 @@ test('false-positive rate on random ids stays low', () => {
 });
 
 // ---------------------------------------------------------------------------
-// SEMANTIC MODEL — the compact on-device classifier (shared/detect.js, trained
+// SEMANTIC MODEL — the compact on-device classifier (detection-engine/detect.js, trained
 // by scripts/train-semantic.js) catches paraphrased meaning the keyword
 // heuristic misses, while keeping zero false positives on benign prompts.
 test('semantic — paraphrased vendor switch (model)', () => {

@@ -59,7 +59,8 @@ grew from 11 passing / 3 known-failing to **42 passing / 0 failing / 0 todo**.
 - **Man-in-the-Prompt guard**: strips zero-width payloads and hard-blocks bidi-override
   / Unicode-tag injection a malicious extension could smuggle into a prompt.
 - **Shadow-AI discovery**: the background worker flags visits to AI tools policy
-  doesn't govern. Pure helpers live in `shared/adapters.js` with `test/adapters.test.js`.
+  doesn't govern. Pure helpers live in `detection-engine/adapters.js` with
+  `test/adapters.test.js`.
 
 ## Iteration 5 — Security & ops hardening (REVIEW P2)
 - **Auth**: brute-force lockout (per user+IP), and a **stable signing secret** —
@@ -68,7 +69,7 @@ grew from 11 passing / 3 known-failing to **42 passing / 0 failing / 0 todo**.
 - **Output scanning**: `/api/v1/scan-response` flags PII/secret leakage in AI replies.
 - **Per-user risk**: `/api/risk` aggregates events/avg-risk/top-entities per user —
   the examiner's "did employee X expose member data?" view.
-- **Regulation templates**: `src/templates.js` + dashboard one-click apply
+- **Regulation templates**: `server/templates.js` + dashboard one-click apply
   (Baseline, NCUA/GLBA, PCI-DSS, HIPAA, Redact-first). Tests in `test/templates.test.js`.
 - **Ops**: `/healthz`, `/readyz`, `/api/metrics`; multi-stage **Dockerfile** (non-root,
   healthcheck, `/data` volume); **GitHub Actions CI** running tests, engine-drift check,
@@ -100,6 +101,19 @@ grew from 11 passing / 3 known-failing to **42 passing / 0 failing / 0 todo**.
 
 ---
 
+## Iteration 8 — Source-of-truth and review-gated change control
+
+- Added a review-gated local git workflow in-process:
+  - `.githooks` for `pre-commit` and `post-commit`
+  - `npm run hooks:install` to pin hook path to repository hooks
+  - `npm run review:ci` as the required local gate (`git diff --check`, `npm test`, `npm run sync-check`, `npm run eval`)
+- Updated operational docs (`README.md`, `PLAN.md`, `AGENTS.md`, `REVIEW.md`, `STATUS.md`, `CONTRIBUTING.md`) and process decisions (`DECISIONS.md`) so all references now describe this same flow.
+- Converted the local Git hooks to standard `sh` scripts with shebangs so extensionless hooks can be spawned reliably by Git.
+- Aligned the source layout around `detection-engine/`, `sensors/`, and `server/`.
+
+This iteration keeps local change quality and GitHub sync aligned to a single repository path:
+`promptsentinel/`.
+
 ### Test growth
 | Pass | Iteration |
 |----:|-----------|
@@ -110,3 +124,4 @@ grew from 11 passing / 3 known-failing to **42 passing / 0 failing / 0 todo**.
 | 31 | +adapters |
 | 39 | +auth +templates |
 | **42** | +held-out detection eval |
+| 42 | +workflow/process coherency (documentation + hooks) |

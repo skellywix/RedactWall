@@ -14,11 +14,11 @@ PromptSentinel IS a security product, so the adversarial pass is not optional �
 1. **Authorization gate.** Confirm the target is local/staging and you own it. Abort on any production host.
 2. **Automated pass:** invoke `shannon-pentest` against the running server (injection, XSS, SSRF, broken auth, broken authorization). Docker required; ~$50/run.
 3. **Product-specific abuse cases** (what a generic scanner misses):
-   - **Approval-queue IDOR:** can a non-admin session approve/reveal another tenant's held prompt? (`src/auth.js` session + the reveal endpoint.)
-   - **Detector bypass:** can crafted spacing/unicode/encoding slip an `alwaysBlock` value past `shared/detect.js`? Feed mutations through `npm run simulate`.
+   - **Approval-queue IDOR:** can a non-admin session approve/reveal another tenant's held prompt? (`server/auth.js` session + the reveal endpoint.)
+   - **Detector bypass:** can crafted spacing/unicode/encoding slip an `alwaysBlock` value past `detection-engine/detect.js`? Feed mutations through `npm run simulate`.
    - **PII leakage:** grep server logs and the audit `entry` after a blocked prompt — raw sensitive values must never appear (redacted + hashed only).
    - **Audit tamper-evidence:** mutate a row in `data/sentinel.db`, expect `verifyAuditChain()` → `ok:false`.
-   - **Redact mode integrity:** in redact mode, confirm no raw PII leaves the device — only tokens (`src/crypto.js` `seal`).
+   - **Redact mode integrity:** in redact mode, confirm no raw PII leaves the device — only tokens (`server/crypto.js` `seal`).
 4. **Report confirmed only.** No exploit, no report — zero false-positive noise. Each finding gets a reproducible PoC and a `STATUS.md` entry tagged by severity.
 
 ## Stop condition (contract)

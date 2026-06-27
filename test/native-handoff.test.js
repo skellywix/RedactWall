@@ -1,0 +1,92 @@
+'use strict';
+/** Native endpoint handoff events must be signed metadata, not file payloads. */
+const test = require('node:test');
+const assert = require('node:assert');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const handoff = require('../sensors/endpoint-agent/native-handoff');
+
+const SECRET = 'native-handoff-secret-000000000000000001';
+
+function event(overrides = {}) {
+  return {
+    version: handoff.EVENT_VERSION,
+    id: 'evt_unit_1',
+    createdAt: '2026-06-26T15:00:00.000Z',
+    operation: 'upload',
+    filePath: path.join(os.tmpdir(), 'loan.txt'),
+    destination: { app: 'Desktop AI', process: 'desktop-ai.exe' },
+    user: 'analyst@example.test',
+    nonce: 'nonce-1',
+    ...overrides,
+  };
+}
+
+test('native handoff events sign and validate without file content', () => {
+  const signed = handoff.signHandoffEvent(event(), SECRET);
+  assert.match(signed.signature, /^[0-9a-f]{64}$/);
+  assert.strictEqual(JSON.stringify(signed).includes('contentBase64'), false);
+
+  const validated = handoff.validateHandoffEvent(signed, {
+    secret: SECRET,
+    now: new Date('2026-06-26T15:01:00.000Z'),
+  });
+  assert.strictEqual(validated.id, 'evt_unit_1');
+  assert.strictEqual(validated.destination.app, 'Desktop AI');
+  assert.strictEqual(handoff.publicDestination(validated.destination), 'Desktop AI');
+});
+
+test('native handoff rejects bad signatures, stale events, and raw payload keys', () => {
+  const signed = handoff.signHandoffEvent(event(), SECRET);
+  assert.throws(
+    () => handoff.validateHandoffEvent({ ...signed, signature: '0'.repeat(64) }, {
+      secret: SECRET,
+      now: new Date('2026-06-26T15:01:00.000Z'),
+    }),
+    /signature/,
+  );
+  assert.throws(
+    () => handoff.validateHandoffEvent(signed, {
+      secret: SECRET,
+      now: new Date('2026-06-26T15:30:00.000Z'),
+    }),
+    /time window/,
+  );
+  assert.throws(
+    () => handoff.signHandoffEvent(event({ meta: { content_base64: 'abc' } }), SECRET),
+    /not allowed/,
+  );
+  assert.throws(
+    () => handoff.signHandoffEvent(event({ RawText: 'secret' }), SECRET),
+    /not allowed/,
+  );
+  assert.throws(
+    () => handoff.signHandoffEvent(event({ payloadRef: 'anything-extra' }), SECRET),
+    /event\.payloadRef is not allowed/,
+  );
+  assert.throws(
+    () => handoff.signHandoffEvent(event({ destination: { app: 'Desktop AI', extra: 'anything-extra' } }), SECRET),
+    /event\.destination\.extra is not allowed/,
+  );
+});
+
+test('native handoff files are size-bounded and require a configured secret', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-native-handoff-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const handoffPath = path.join(dir, 'handoff.json');
+  fs.writeFileSync(handoffPath, JSON.stringify(handoff.signHandoffEvent(event(), SECRET)));
+
+  const validated = handoff.readHandoffFile(handoffPath, {
+    secret: SECRET,
+    now: new Date('2026-06-26T15:01:00.000Z'),
+  });
+  assert.strictEqual(validated.filePath, path.join(os.tmpdir(), 'loan.txt'));
+  assert.throws(() => handoff.readHandoffFile(handoffPath, {
+    now: new Date('2026-06-26T15:01:00.000Z'),
+  }), /secret/);
+
+  const largePath = path.join(dir, 'large.json');
+  fs.writeFileSync(largePath, 'x'.repeat(handoff.MAX_EVENT_BYTES + 1));
+  assert.throws(() => handoff.readHandoffFile(largePath, { secret: SECRET }), /too large/);
+});

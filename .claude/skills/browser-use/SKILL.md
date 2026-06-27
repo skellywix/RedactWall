@@ -13,7 +13,7 @@ Coding agents are blind to the live web; this gives them eyes and hands for true
 > In Cowork specifically, the built-in **Claude-in-Chrome** tools already provide live browser control — prefer those here; use the external skill in plain Claude Code / CI.
 
 ## PromptSentinel E2E checks
-1. **Paste block:** load the unpacked `extension/` in a test Chrome profile, open chatgpt.com, paste a **synthetic** SSN (`123-45-6789`). Expect the blocking modal from `extension/content.js`; confirm the request to the AI site is NOT sent.
+1. **Paste block:** load the unpacked `sensors/browser-extension/` in a test Chrome profile, open chatgpt.com, paste a **synthetic** SSN (`123-45-6789`). Expect the blocking modal from `sensors/browser-extension/content.js`; confirm the request to the AI site is NOT sent.
 2. **Warn / justify modes:** switch `config/policy.json` enforcementMode, repeat, and confirm the nudge vs justification prompt matches the mode.
 3. **Redact mode:** paste synthetic PII, confirm only tokens leave and the reply is de-tokenized locally.
 4. **Coverage of sites:** repeat the smoke test on claude.ai, gemini.google.com, copilot.microsoft.com.

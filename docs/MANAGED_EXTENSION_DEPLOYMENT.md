@@ -1,0 +1,93 @@
+# Managed Chrome Extension Deployment
+
+This guide bridges the local demo extension to a controlled client pilot.
+
+For a sales demo, `chrome://extensions` plus Load unpacked is fine. For a client pilot, use managed deployment so users cannot silently disable protection and so identity/server configuration comes from IT instead of the employee.
+
+## Pilot Deployment Shape
+
+1. Build a local handoff package with `npm run package:extension`.
+   - Keep the generated `.zip` and `.manifest.json` together.
+   - Confirm the manifest SHA-256 matches the uploaded package.
+2. Publish the extension through a controlled channel.
+   - Preferred: private or unlisted Chrome Web Store item for the client tenant.
+   - Alternative for lab pilots: self-hosted CRX with an update URL.
+3. Force-install the extension with Chrome Enterprise policy.
+4. Set managed storage values for:
+   - `serverUrl`
+   - `ingestKey`
+   - `orgId`
+   - `email` or `user`
+5. Confirm the dashboard receives attributed events.
+6. Confirm the extension is active on governed AI destinations.
+
+## Build The Package
+
+Run from the repo root:
+
+```bash
+npm run package:extension
+```
+
+The command writes:
+
+```text
+dist/browser-extension/promptsentinel-extension-v<version>.zip
+dist/browser-extension/promptsentinel-extension-v<version>.manifest.json
+```
+
+The manifest records the package SHA-256, every packaged file hash, the app and extension versions, the synced engine hashes, and packaging checks. It intentionally contains no prompt bodies or real keys.
+
+The command fails if:
+
+- `sensors/browser-extension/manifest.json` is not Manifest V3.
+- The extension version differs from `package.json`.
+- Required service worker, popup, content scripts, or managed schema files are missing.
+- The copied detection engine under `sensors/browser-extension/lib/` drifted from `detection-engine/`.
+- A development ingest key is present in packaged extension files.
+
+## Extension Settings Example
+
+Use `docs/examples/chrome-extension-settings.example.json` as the shape for Chrome Enterprise extension force-install policy. Replace `<extension-id>` after publishing or packaging the extension.
+
+For a private Chrome Web Store item, the update URL is usually:
+
+```text
+https://clients2.google.com/service/update2/crx
+```
+
+## Managed Storage Example
+
+Use `docs/examples/chrome-managed-storage.policy.json` for the values consumed by `sensors/browser-extension/schema.json`.
+
+Never put a real ingest key in source control or a screenshot. Generate a long random ingest key per pilot and rotate it after demos.
+
+Recommended values:
+
+- `serverUrl`: HTTPS URL of the PromptSentinel control plane.
+- `ingestKey`: pilot-specific ingest key, stored in MDM or Chrome policy.
+- `orgId`: institution or tenant identifier.
+- `email`: end-user email from directory attributes, preferred for the audit log.
+- `user`: fallback username when email is unavailable.
+
+## Validation Checklist
+
+On a managed test device:
+
+1. Open `chrome://policy` and reload policies.
+2. Confirm the extension is force-installed.
+3. Confirm managed storage is present.
+4. Open the PromptSentinel popup and confirm protection is enabled.
+5. Open ChatGPT or Claude and send a benign prompt.
+6. Confirm the dashboard shows the correct user and org.
+7. Paste synthetic PII and confirm a block or redaction.
+8. Visit an ungoverned AI host and confirm shadow-AI discovery logs the event.
+
+## Production Notes
+
+- Use HTTPS for `serverUrl`.
+- Use a stable, rotated `INGEST_API_KEY`.
+- Pair extension force-install with browser policy that blocks unapproved AI destinations or routes them through governance.
+- Keep the extension ID stable across updates.
+- Treat managed policy as secret-bearing configuration because it contains the ingest key.
+- Do not embed ingest keys in the extension package. The packaged extension fails closed until local or managed storage supplies a tenant key.

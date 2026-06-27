@@ -8,7 +8,7 @@ description: Prompt agents the way a good manager delegates — ask for outcomes
 Working with agents is delegation. The same failure modes that sink new tech leads sink agent users: asking for actions instead of outcomes, omitting the why, and taking back control at the first mistake.
 
 ## Three rules
-1. **Outcome, not action.** "Rename this variable" finishes in seconds and leaves you the bottleneck. Instead: "Audit `src/policy.js` and make naming follow our convention (link), so the next reader understands intent." The agent runs longer, aligned to a goal.
+1. **Outcome, not action.** "Rename this variable" finishes in seconds and leaves you the bottleneck. Instead: "Audit `server/policy.js` and make naming follow our convention (link), so the next reader understands intent." The agent runs longer, aligned to a goal.
 2. **Always give the why + context.** Rationale lets the agent suggest something better and do it right next time. No why → it guesses.
 3. **Never take back control.** When the agent does something wrong, the instinct is to do it yourself — and you stop scaling. Give feedback and help it improve instead.
 

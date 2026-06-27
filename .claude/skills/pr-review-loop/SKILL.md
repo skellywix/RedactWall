@@ -19,8 +19,8 @@ A PR number (`gh pr diff <n>`) or local diff (`git diff main...HEAD`).
 - `npm run sync-check` is green — detector edits propagated via `npm run sync-engine`, not hand-copied.
 - No raw sensitive value (prompt text, detected PII) written to logs, errors, or the audit `entry`. Audit stores redacted detections + hashes only.
 - No `alwaysBlock` type (SSN, cards, bank/routing, IBAN, passport, secret/private keys) removed or down-graded.
-- Semantic model block in `shared/detect.js` only changes via `npm run train-semantic` (deterministic) — no hand-edited weights.
-- If `src/db.js`/`src/crypto.js` touched: `verifyAuditChain()` still `ok:true`.
+- Semantic model block in `detection-engine/detect.js` only changes via `npm run train-semantic` (deterministic) — no hand-edited weights.
+- If `server/db.js`/`server/crypto.js` touched: `verifyAuditChain()` still `ok:true`.
 
 **Security** — delegate the deep pass to `shannon-pentest` for auth/IDOR/injection on the server endpoints (approval queue, login, reveal).
 

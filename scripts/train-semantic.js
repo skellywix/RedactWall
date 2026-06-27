@@ -1,7 +1,7 @@
 'use strict';
 /**
  * Train the compact on-device semantic classifier and write its weights into
- * shared/detect.js (between the __SEMANTIC_MODEL__ markers), then sync the
+ * detection-engine/detect.js (between the __SEMANTIC_MODEL__ markers), then sync the
  * extension copy. Deterministic, zero-dependency, runs in a few seconds.
  *
  *   node scripts/train-semantic.js
@@ -21,7 +21,7 @@
  */
 const fs = require('fs');
 const path = require('path');
-const D = require('../shared/detect');
+const D = require('../detection-engine/detect');
 
 // Tiny seeded RNG so the build is reproducible (CI fails on drift).
 let _seed = 1337;
@@ -242,7 +242,7 @@ for (const cat of CATS) {
 }
 
 // ---------- write weights into the engine ------------------------------------
-const enginePath = path.join(__dirname, '..', 'shared', 'detect.js');
+const enginePath = path.join(__dirname, '..', 'detection-engine', 'detect.js');
 let src = fs.readFileSync(enginePath, 'utf8');
 const START = '// __SEMANTIC_MODEL_START__';
 const END = '// __SEMANTIC_MODEL_END__';
@@ -253,7 +253,7 @@ const re = new RegExp(START.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '[\\s\\S]*?
 src = src.replace(re, block);
 fs.writeFileSync(enginePath, src);
 const kb = (Buffer.byteLength(JSON.stringify(model)) / 1024).toFixed(1);
-console.log(`wrote model into shared/detect.js (${kb} KB embedded)`);
+console.log(`wrote model into detection-engine/detect.js (${kb} KB embedded)`);
 
 // keep the extension copy identical
 require('child_process').execSync('node ' + path.join(__dirname, 'sync-engine.js'), { stdio: 'inherit' });

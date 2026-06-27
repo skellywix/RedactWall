@@ -20,8 +20,8 @@ The recurring trigger that surfaces work without you asking. It NEVER edits appl
    - Recent change: `git log --since="yesterday" --oneline`.
    - PromptSentinel health checks:
      - `npm test` — note any failing files (`test/*.test.js`).
-     - `npm run sync-check` — confirms `shared/detect.js` matches `extension/lib/detect.js`. A mismatch is a release blocker.
-     - Audit integrity: `node -e "const db=require('./src/db'); console.log(db.verifyAuditChain())"` — the hash-chain must report `ok:true`.
+     - `npm run sync-check` — confirms `detection-engine/detect.js` matches `sensors/browser-extension/lib/detect.js`. A mismatch is a release blocker.
+     - Audit integrity: `node -e "const db=require('./server/db'); console.log(db.verifyAuditChain())"` — the hash-chain must report `ok:true`.
 3. **Group by root cause, not by symptom.** Five failing tests from one regression are one finding.
 4. **Write findings to `STATUS.md`** under `## Open`, newest first. Tag anything fixable in a single file as `quick-win`. For each, name the likely owning loop (`ci-failure-fix-loop`, `bug-repro-fix-loop`, `security-scan-loop`).
 5. **Stop. Do not fix anything here.** Print a 5-line summary and exit.

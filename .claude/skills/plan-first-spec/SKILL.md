@@ -22,7 +22,7 @@ Iterate on the artifact until you're confident, THEN hand off for autonomous imp
 
 ## PromptSentinel: every plan must name the invariants up front
 A plan that touches detection, policy, or audit states these as non-negotiable constraints so the agent respects them for the whole run:
-- Detector logic lives in `shared/detect.js` only → `npm run sync-engine`; `npm run sync-check` must stay green.
+- Detector logic lives in `detection-engine/detect.js` only → `npm run sync-engine`; `npm run sync-check` must stay green.
 - Semantic model changes go through `npm run train-semantic` (deterministic; CI diffs).
 - No `alwaysBlock` type weakened; no raw PII in logs/audit `entry`; `verifyAuditChain()` stays `ok:true`.
 - Acceptance evidence = `npm test` + the new `test/*.test.js` case + `npm run simulate` where detection changes.

@@ -1,6 +1,6 @@
 'use strict';
 /**
- * Datastore + tamper-evident audit (src/db.js, SQLite-backed).
+ * Datastore + tamper-evident audit (server/db.js, SQLite-backed).
  * Uses an isolated temp DB so it never touches real data. Run: node --test
  */
 const test = require('node:test');
@@ -14,7 +14,7 @@ const crypto = require('crypto');
 // An explicit SENTINEL_DB_PATH also disables legacy JSON auto-migration, so the
 // test store is hermetic.
 process.env.SENTINEL_DB_PATH = path.join(os.tmpdir(), 'ps-db-test-' + crypto.randomBytes(6).toString('hex') + '.db');
-const db = require('../src/db');
+const db = require('../server/db');
 
 test('queries round-trip and update transactionally', () => {
   const q = db.createQuery({ status: 'pending', user: 'alice', redactedPrompt: '[US_SSN]', findings: [{ type: 'US_SSN' }] });
@@ -64,6 +64,82 @@ test('legitimate state transition keeps evidence binding intact', () => {
   db.updateQuery(q.id, { status: 'approved', decidedBy: 'admin', decisionNote: 'ok' });
   db.appendAudit({ action: 'APPROVED', queryId: q.id, actor: 'admin', detail: 'ok' });
   assert.strictEqual(db.verifyAuditChain().ok, true, 'transition + its audit event stay consistent');
+});
+
+test('stats count only real blocked statuses for todayBlocked', () => {
+  const before = db.stats().todayBlocked;
+  for (const status of ['pending', 'file_blocked_unscanned', 'response_flagged']) {
+    db.createQuery({ status, user: 'metric', redactedPrompt: '[' + status + ']' });
+  }
+  for (const status of ['allowed', 'redacted', 'paste_flagged', 'shadow_ai', 'warned_sent', 'justified']) {
+    db.createQuery({ status, user: 'metric', redactedPrompt: '[' + status + ']' });
+  }
+  assert.strictEqual(db.stats().todayBlocked - before, 3);
+});
+
+test('seat stats count unique billable users by tenant', () => {
+  db.createQuery({ status: 'allowed', orgId: 'cu-acme', user: 'Analyst@Example.Test', redactedPrompt: 'ok' });
+  db.createQuery({ status: 'pending', orgId: 'cu-acme', user: 'analyst@example.test', redactedPrompt: 'held' });
+  db.createQuery({ status: 'allowed', orgId: 'cu-acme', user: 'second@example.test', redactedPrompt: 'ok' });
+  db.createQuery({ status: 'seat_limit_blocked', orgId: 'cu-acme', user: 'blocked@example.test', redactedPrompt: '[seat limit exceeded]' });
+  db.createQuery({ status: 'allowed', orgId: 'other-cu', user: 'other@example.test', redactedPrompt: 'ok' });
+  db.createQuery({ status: 'allowed', orgId: 'cu-acme', user: 'unknown', redactedPrompt: 'ok' });
+
+  const seats = db.seatStats({ orgId: 'cu-acme' });
+  assert.strictEqual(seats.seatsUsed, 2);
+  assert.deepStrictEqual(seats.users.map((u) => u.user), ['analyst@example.test', 'second@example.test']);
+  assert.ok(seats.users.every((u) => u.orgId === 'cu-acme'));
+});
+
+test('retention purge removes sealed raw/vault fields and preserves audit integrity', () => {
+  const createdAt = '2026-01-01T00:00:00.000Z';
+  const approved = db.createQuery({
+    createdAt,
+    status: 'approved',
+    user: 'dana',
+    redactedPrompt: 'Member [US_SSN]',
+    _rawPrompt: 'sealed-raw',
+  });
+  const redacted = db.createQuery({
+    createdAt,
+    status: 'redacted',
+    user: 'erin',
+    tokenizedPrompt: 'Member [[US_SSN_1]]',
+    _tokenVault: 'sealed-vault',
+  });
+  const pending = db.createQuery({
+    createdAt,
+    status: 'pending',
+    user: 'frank',
+    redactedPrompt: 'Member [US_SSN]',
+    _rawPrompt: 'still-needed',
+  });
+  const recentlyDecided = db.createQuery({
+    createdAt,
+    status: 'approved',
+    user: 'grace',
+    decidedAt: '2026-02-02T00:00:00.000Z',
+    redactedPrompt: 'Member [US_SSN]',
+    _rawPrompt: 'recent-decision',
+  });
+  db.appendAudit({ action: 'APPROVED', queryId: approved.id, actor: 'admin' });
+  db.appendAudit({ action: 'REDACTED', queryId: redacted.id, actor: 'sensor' });
+  db.appendAudit({ action: 'BLOCKED', queryId: pending.id, actor: 'sensor' });
+  db.appendAudit({ action: 'APPROVED', queryId: recentlyDecided.id, actor: 'admin' });
+
+  const purged = db.purgeRetainedSensitiveData({
+    before: '2026-02-01T00:00:00.000Z',
+    actor: 'retention',
+    reason: 'rawRetentionDays=30',
+  });
+
+  assert.deepStrictEqual(purged.map((p) => p.id).sort(), [approved.id, redacted.id].sort());
+  assert.strictEqual(db.getQuery(approved.id)._rawPrompt, undefined);
+  assert.strictEqual(db.getQuery(redacted.id)._tokenVault, undefined);
+  assert.strictEqual(db.getQuery(pending.id)._rawPrompt, 'still-needed');
+  assert.strictEqual(db.getQuery(recentlyDecided.id)._rawPrompt, 'recent-decision');
+  assert.strictEqual(db.listAudit(10).filter((a) => a.action === 'RETENTION_PURGED').length, 2);
+  assert.strictEqual(db.verifyAuditChain().ok, true, 'purge audit event should rebind changed evidence');
 });
 
 test.after(() => { try { for (const s of ['', '-wal', '-shm']) fs.unlinkSync(process.env.SENTINEL_DB_PATH + s); } catch {} });

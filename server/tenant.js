@@ -1,0 +1,159 @@
+'use strict';
+/**
+ * SaaS/customer tenancy helpers.
+ *
+ * The current commercial-safe shape is a customer-silo deployment: one
+ * PromptSentinel stack per paying customer. These checks make that stack behave
+ * like a tenant-bound SaaS instance without weakening the existing audit store.
+ */
+
+const UNKNOWN_USERS = new Set(['', 'unknown', 'unattributed@unmanaged']);
+const TENANT_ID = /^[a-z0-9][a-z0-9_-]{1,62}$/;
+
+function bool(value) {
+  return ['1', 'true', 'yes', 'on'].includes(String(value || '').toLowerCase());
+}
+
+function normalizeTenantId(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function normalizeUser(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function parseSeatLimit(value) {
+  if (value == null || value === '') return 0;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.floor(n));
+}
+
+function validTenantId(value) {
+  return TENANT_ID.test(normalizeTenantId(value));
+}
+
+function isBillableUser(value) {
+  const user = normalizeUser(value);
+  return !UNKNOWN_USERS.has(user);
+}
+
+function config(env = process.env) {
+  const tenantId = normalizeTenantId(env.SENTINEL_TENANT_ID);
+  const explicitSaasMode = bool(env.SENTINEL_SAAS_MODE);
+  const requireTenantContext = bool(env.SENTINEL_REQUIRE_TENANT_CONTEXT);
+  const requireUserIdentity = bool(env.SENTINEL_REQUIRE_USER_IDENTITY);
+  const seatLimit = parseSeatLimit(env.SENTINEL_SEAT_LIMIT);
+  const saasMode = explicitSaasMode || !!tenantId || seatLimit > 0 || requireTenantContext || requireUserIdentity;
+  return {
+    saasMode,
+    tenantId,
+    tenantIdValid: !tenantId || validTenantId(tenantId),
+    seatLimit,
+    requireTenantContext: requireTenantContext || saasMode,
+    requireUserIdentity: requireUserIdentity || saasMode,
+  };
+}
+
+function seatReport(db, env = process.env) {
+  const cfg = config(env);
+  const orgId = cfg.tenantId || null;
+  const stats = db && typeof db.seatStats === 'function'
+    ? db.seatStats({ orgId })
+    : { users: [], seatsUsed: 0 };
+  const seatsUsed = Number(stats.seatsUsed || 0);
+  const seatLimit = cfg.seatLimit || 0;
+  return {
+    tenantId: cfg.tenantId || null,
+    saasMode: cfg.saasMode,
+    seatLimit,
+    seatsUsed,
+    seatsRemaining: seatLimit ? Math.max(0, seatLimit - seatsUsed) : null,
+    overLimit: !!(seatLimit && seatsUsed > seatLimit),
+    users: stats.users || [],
+  };
+}
+
+function validateSensorAccess({ body = {}, db, env = process.env } = {}) {
+  const cfg = config(env);
+  if (!cfg.saasMode) {
+    return { ok: true, orgId: body.orgId || null };
+  }
+
+  if (!cfg.tenantId || !cfg.tenantIdValid) {
+    return {
+      ok: false,
+      statusCode: 503,
+      status: 'tenant_not_configured',
+      action: 'TENANT_NOT_CONFIGURED',
+      message: 'tenant is not configured',
+      audit: false,
+    };
+  }
+
+  const suppliedOrg = normalizeTenantId(body.orgId);
+  if (cfg.requireTenantContext && !suppliedOrg) {
+    return {
+      ok: false,
+      statusCode: 400,
+      status: 'tenant_context_required',
+      action: 'TENANT_CONTEXT_REQUIRED',
+      message: 'tenant context required',
+      audit: false,
+    };
+  }
+  if (suppliedOrg && suppliedOrg !== cfg.tenantId) {
+    return {
+      ok: false,
+      statusCode: 403,
+      status: 'tenant_mismatch',
+      action: 'TENANT_MISMATCH',
+      message: 'tenant mismatch',
+      audit: false,
+    };
+  }
+
+  const user = normalizeUser(body.user);
+  if (cfg.requireUserIdentity && !isBillableUser(user)) {
+    return {
+      ok: false,
+      statusCode: 400,
+      status: 'user_identity_required',
+      action: 'USER_IDENTITY_REQUIRED',
+      message: 'managed user identity required',
+      audit: false,
+    };
+  }
+
+  if (cfg.seatLimit > 0 && isBillableUser(user)) {
+    const report = seatReport(db, env);
+    const known = report.users.some((item) => normalizeUser(item.user) === user);
+    if (!known && report.seatsUsed >= cfg.seatLimit) {
+      return {
+        ok: false,
+        statusCode: 402,
+        status: 'seat_limit_blocked',
+        action: 'SEAT_LIMIT_BLOCKED',
+        message: 'seat limit exceeded',
+        audit: true,
+        orgId: cfg.tenantId,
+        user,
+        seatLimit: cfg.seatLimit,
+        seatsUsed: report.seatsUsed,
+      };
+    }
+  }
+
+  return { ok: true, orgId: cfg.tenantId };
+}
+
+module.exports = {
+  config,
+  isBillableUser,
+  normalizeTenantId,
+  normalizeUser,
+  parseSeatLimit,
+  seatReport,
+  validateSensorAccess,
+  validTenantId,
+};

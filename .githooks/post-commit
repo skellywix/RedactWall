@@ -1,0 +1,25 @@
+#!/usr/bin/env sh
+set -u
+
+if ! command -v npm >/dev/null 2>&1; then
+  echo "[post-commit] npm not found. Install Node.js and npm, then retry."
+  exit 0
+fi
+
+branch="$(git symbolic-ref --quiet --short HEAD || true)"
+if [ -z "$branch" ]; then
+  echo "[post-commit] Detached HEAD detected, skipping validation and push."
+  exit 0
+fi
+
+if ! npm run review:ci; then
+  echo "[post-commit] Review checks failed. Commit is saved locally; push skipped."
+  exit 0
+fi
+
+if ! git push -u origin "$branch"; then
+  echo "[post-commit] Push failed; commit is stored locally. Re-run git push when network/credentials are available."
+  exit 0
+fi
+
+echo "[post-commit] Commit pushed to origin/$branch."

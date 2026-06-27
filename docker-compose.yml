@@ -1,0 +1,42 @@
+services:
+  promptsentinel:
+    build: .
+    image: promptsentinel:local
+    environment:
+      PORT: 4000
+      NODE_ENV: ${NODE_ENV:-development}
+      HTTPS: ${HTTPS:-false}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      SENTINEL_SAAS_MODE: ${SENTINEL_SAAS_MODE:-false}
+      SENTINEL_TENANT_ID: ${SENTINEL_TENANT_ID:-}
+      SENTINEL_SEAT_LIMIT: ${SENTINEL_SEAT_LIMIT:-}
+      SENTINEL_REQUIRE_TENANT_CONTEXT: ${SENTINEL_REQUIRE_TENANT_CONTEXT:-false}
+      SENTINEL_REQUIRE_USER_IDENTITY: ${SENTINEL_REQUIRE_USER_IDENTITY:-false}
+      ADMIN_USER: ${ADMIN_USER:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-ChangeMe!2026}
+      ADMIN_TOTP_SECRET: ${ADMIN_TOTP_SECRET:-}
+      AUDITOR_USER: ${AUDITOR_USER:-}
+      AUDITOR_PASSWORD: ${AUDITOR_PASSWORD:-}
+      SENTINEL_SECRET: ${SENTINEL_SECRET:-}
+      SENTINEL_DATA_KEY: ${SENTINEL_DATA_KEY:-}
+      INGEST_API_KEY: ${INGEST_API_KEY:-dev-ingest-key}
+      SENTINEL_REQUEST_TIMEOUT_MS: ${SENTINEL_REQUEST_TIMEOUT_MS:-10000}
+      SIEM_WEBHOOK_URL: ${SIEM_WEBHOOK_URL:-}
+      SIEM_WEBHOOK_TOKEN: ${SIEM_WEBHOOK_TOKEN:-}
+      SIEM_ALERT_MIN_RISK: ${SIEM_ALERT_MIN_RISK:-25}
+      SIEM_ALERT_MIN_SEVERITY: ${SIEM_ALERT_MIN_SEVERITY:-3}
+      SENTINEL_DB_PATH: /data/sentinel.db
+    ports:
+      - "${PORT:-4000}:4000"
+    volumes:
+      - promptsentinel-data:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:'+(process.env.PORT||4000)+'/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 4s
+      start_period: 5s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  promptsentinel-data:

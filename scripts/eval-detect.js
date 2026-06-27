@@ -15,7 +15,7 @@
  */
 const fs = require('fs');
 const path = require('path');
-const D = require('../shared/detect');
+const D = require('../detection-engine/detect');
 
 const FIXTURE = path.join(__dirname, '..', 'test', 'fixtures', 'semantic-eval.json');
 const SEM_CATS = ['CONFIDENTIAL_BUSINESS', 'SOURCE_CODE', 'LEGAL_CONTRACT', 'CREDENTIALS'];

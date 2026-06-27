@@ -1,0 +1,813 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PromptSentinel - Security Console</title>
+<style>
+  :root{
+    color-scheme:dark;
+    --bg:#05070b;
+    --rail:#070d14;
+    --rail2:#0a111b;
+    --panel:#0c141f;
+    --panel2:#101a28;
+    --panel3:#111f30;
+    --line:#1e2d40;
+    --line2:#2b4058;
+    --txt:#eef4fb;
+    --mut:#94a3b8;
+    --soft:#c9d5e6;
+    --blue:#6aa7ff;
+    --blue2:#2f7df6;
+    --red:#ff5a66;
+    --red2:#3a1117;
+    --amber:#f6a21a;
+    --yellow:#e4c441;
+    --green:#40d98a;
+    --cyan:#4cc9e8;
+    --shadow:0 18px 60px rgba(0,0,0,.34);
+    --radius:8px;
+  }
+  *{box-sizing:border-box}
+  html{min-height:100%}
+  body{
+    min-height:100vh;
+    margin:0;
+    background:
+      linear-gradient(135deg,rgba(35,80,120,.18),transparent 30%),
+      radial-gradient(900px 520px at 76% -8%,rgba(76,201,232,.12),transparent 58%),
+      var(--bg);
+    color:var(--txt);
+    font-family:Inter,Aptos,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    font-size:14px;
+    letter-spacing:0;
+  }
+  button,input,select,textarea{font:inherit}
+  button{cursor:pointer}
+  a{color:var(--blue)}
+  .app-shell{display:grid;grid-template-columns:248px minmax(0,1fr);min-height:100vh}
+  .rail{
+    position:sticky;
+    top:0;
+    height:100vh;
+    display:flex;
+    flex-direction:column;
+    gap:18px;
+    padding:18px 14px;
+    border-right:1px solid var(--line);
+    background:linear-gradient(180deg,var(--rail),var(--rail2));
+  }
+  .brand{display:flex;align-items:center;gap:12px;padding:2px 6px 12px}
+  .logo{
+    width:34px;
+    height:34px;
+    border:1px solid rgba(106,167,255,.45);
+    border-radius:8px;
+    display:grid;
+    place-items:center;
+    color:var(--blue);
+    background:linear-gradient(180deg,rgba(106,167,255,.16),rgba(64,217,138,.07));
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.03);
+    font-weight:800;
+    font-size:12px;
+  }
+  .brand h1{margin:0;font-size:18px;line-height:1.1;font-weight:760}
+  .brand p{margin:3px 0 0;color:var(--mut);font-size:11px}
+  .tabs{display:flex;flex-direction:column;gap:5px}
+  .tab{
+    width:100%;
+    min-height:42px;
+    display:flex;
+    align-items:center;
+    gap:10px;
+    padding:10px 12px;
+    border:1px solid transparent;
+    border-radius:8px;
+    background:transparent;
+    color:var(--soft);
+    text-align:left;
+  }
+  .tab:hover{background:rgba(255,255,255,.035);border-color:var(--line)}
+  .tab.active{
+    background:linear-gradient(180deg,rgba(47,125,246,.18),rgba(47,125,246,.08));
+    border-color:rgba(106,167,255,.35);
+    color:#fff;
+  }
+  .tab-icon{
+    width:20px;
+    height:20px;
+    display:grid;
+    place-items:center;
+    color:var(--blue);
+  }
+  .tab-icon svg,.btn svg,.ghost svg,.search svg,.integrity svg{width:16px;height:16px;display:block}
+  .badge{
+    margin-left:auto;
+    min-width:24px;
+    height:22px;
+    padding:3px 7px;
+    border-radius:8px;
+    display:inline-grid;
+    place-items:center;
+    background:rgba(255,90,102,.16);
+    border:1px solid rgba(255,90,102,.42);
+    color:#ffd5d8;
+    font-size:12px;
+    font-weight:750;
+  }
+  .rail-section{padding:6px 6px 0;color:#738399;font-size:10px;text-transform:uppercase;letter-spacing:.1em}
+  .rail-status{margin-top:auto;border-top:1px solid var(--line);padding:14px 6px 0;display:grid;gap:9px}
+  .status-line{display:flex;align-items:center;justify-content:space-between;color:var(--mut);font-size:12px}
+  .status-line b{color:var(--soft);font-weight:680}
+  .pin{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 0 4px rgba(64,217,138,.1)}
+  .workspace{min-width:0;padding:0 22px 28px}
+  .topbar{
+    position:sticky;
+    top:0;
+    z-index:9;
+    min-height:62px;
+    display:flex;
+    align-items:center;
+    gap:14px;
+    border-bottom:1px solid var(--line);
+    background:rgba(5,7,11,.86);
+    backdrop-filter:blur(18px);
+  }
+  .search{
+    min-width:260px;
+    max-width:560px;
+    flex:1;
+    height:38px;
+    display:flex;
+    align-items:center;
+    gap:9px;
+    padding:0 12px;
+    border:1px solid var(--line);
+    border-radius:8px;
+    background:#08111c;
+    color:var(--mut);
+  }
+  .search span{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .search input{
+    width:100%;
+    border:0;
+    outline:0;
+    background:transparent;
+    color:var(--txt);
+    font:inherit;
+    min-width:0;
+  }
+  .search input::placeholder{color:var(--mut)}
+  .search:focus-within{border-color:rgba(106,167,255,.55);box-shadow:0 0 0 2px rgba(106,167,255,.14)}
+  .spacer{flex:1}
+  .live,.who{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    color:var(--mut);
+    font-size:12.5px;
+    white-space:nowrap;
+  }
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 0 0 rgba(64,217,138,.55);animation:pulse 2s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(64,217,138,.42)}70%{box-shadow:0 0 0 8px rgba(64,217,138,0)}100%{box-shadow:0 0 0 0 rgba(64,217,138,0)}}
+  .ghost{
+    min-height:36px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    gap:8px;
+    border:1px solid var(--line);
+    border-radius:8px;
+    background:#0a121d;
+    color:var(--soft);
+    padding:8px 11px;
+    font-size:12.5px;
+  }
+  .ghost:hover{border-color:var(--line2);background:#101b29;color:#fff}
+  .banner{
+    display:none;
+    margin:18px 0 0;
+    border:1px solid rgba(246,162,26,.45);
+    background:rgba(246,162,26,.1);
+    color:#ffd99a;
+    border-radius:8px;
+    padding:11px 13px;
+    font-size:12.5px;
+  }
+  .hero-row{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;padding:26px 0 16px}
+  .page-title h2{margin:0;font-size:26px;line-height:1.08;font-weight:780}
+  .page-title p{margin:8px 0 0;color:var(--mut);max-width:760px;line-height:1.5}
+  .control-cluster{display:flex;align-items:center;gap:9px;flex-wrap:wrap;justify-content:flex-end}
+  .stats{
+    display:grid;
+    grid-template-columns:repeat(6,minmax(130px,1fr));
+    gap:10px;
+    margin-bottom:14px;
+  }
+  .stat{
+    min-height:118px;
+    position:relative;
+    overflow:hidden;
+    border:1px solid var(--line);
+    border-radius:8px;
+    background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(255,255,255,.012)),var(--panel);
+    padding:13px 14px;
+    box-shadow:0 1px 0 rgba(255,255,255,.03) inset;
+  }
+  .stat:after{content:"";position:absolute;left:14px;right:14px;bottom:12px;height:2px;border-radius:999px;background:var(--line)}
+  .stat .stat-rule{position:absolute;left:14px;bottom:12px;height:2px;border-radius:999px;background:var(--blue);width:48%}
+  .stat.alert .stat-rule{background:var(--amber);width:62%}
+  .stat.pending .stat-rule{background:var(--red);width:72%}
+  .stat.good .stat-rule{background:var(--green);width:42%}
+  .stat .n{font-size:30px;font-weight:820;line-height:1;margin-top:16px;font-variant-numeric:tabular-nums}
+  .stat .l{color:var(--mut);font-size:11px;text-transform:uppercase;letter-spacing:.08em}
+  .stat .m{color:var(--mut);font-size:12px;margin-top:7px}
+  .stat.alert .n{color:#ffc46d}
+  .stat.pending .n{color:#ff7b84}
+  .stat.good .n{color:#7be7ae}
+  .content-tabs{
+    display:flex;
+    align-items:center;
+    gap:4px;
+    border-bottom:1px solid var(--line);
+    margin-bottom:14px;
+    scrollbar-width:none;
+  }
+  .rail::-webkit-scrollbar,.content-tabs::-webkit-scrollbar{display:none}
+  .content-tabs .tab{
+    width:auto;
+    min-height:44px;
+    border-radius:8px 8px 0 0;
+    border:0;
+    border-bottom:2px solid transparent;
+    padding:11px 14px 10px;
+    color:var(--mut);
+  }
+  .content-tabs .tab.active{
+    border-bottom-color:var(--blue);
+    background:rgba(106,167,255,.08);
+    color:#fff;
+  }
+  .wrap{padding-bottom:28px}
+  .queue-grid{display:grid;grid-template-columns:minmax(0,1.18fr) minmax(360px,.82fr);gap:14px;align-items:start}
+  .panel{
+    border:1px solid var(--line);
+    border-radius:8px;
+    background:linear-gradient(180deg,rgba(255,255,255,.032),rgba(255,255,255,.012)),var(--panel);
+    box-shadow:var(--shadow);
+    overflow:hidden;
+  }
+  .panel-head{
+    min-height:48px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    padding:12px 14px;
+    border-bottom:1px solid var(--line);
+  }
+  .panel-head h2{margin:0;font-size:13px;font-weight:760}
+  .panel-head span{color:var(--mut);font-size:12px}
+  .queue-list{display:grid}
+  .q{
+    border:0;
+    border-bottom:1px solid var(--line);
+    background:transparent;
+    color:inherit;
+    padding:14px;
+    text-align:left;
+    transition:background .12s,border-color .12s;
+  }
+  .q:hover,.q:focus-visible{background:#0f1b29;outline:none}
+  .q.selected{background:linear-gradient(90deg,rgba(47,125,246,.16),rgba(47,125,246,.04));box-shadow:inset 3px 0 0 var(--blue)}
+  .q .top{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+  .select-dot{
+    width:18px;
+    height:18px;
+    border:1px solid var(--line2);
+    border-radius:6px;
+    display:inline-grid;
+    place-items:center;
+    color:var(--blue);
+    flex:0 0 auto;
+  }
+  .q.selected .select-dot{background:rgba(106,167,255,.14);border-color:var(--blue)}
+  .q.selected .select-dot:after{content:"";width:7px;height:7px;border-radius:2px;background:var(--blue)}
+  .sev{
+    display:inline-flex;
+    align-items:center;
+    min-height:23px;
+    padding:3px 8px;
+    border-radius:6px;
+    border:1px solid transparent;
+    font-size:11px;
+    font-weight:780;
+    text-transform:uppercase;
+    letter-spacing:.04em;
+  }
+  .sev.critical{background:rgba(255,90,102,.14);border-color:rgba(255,90,102,.38);color:#ffb8bd}
+  .sev.high{background:rgba(246,162,26,.13);border-color:rgba(246,162,26,.42);color:#ffd28a}
+  .sev.medium{background:rgba(228,196,65,.13);border-color:rgba(228,196,65,.38);color:#f5e48a}
+  .sev.low{background:rgba(148,163,184,.12);border-color:rgba(148,163,184,.25);color:#d6deeb}
+  .risk{margin-left:auto;color:var(--mut);font-size:12px;font-variant-numeric:tabular-nums}
+  .risk b{color:#fff;font-size:17px}
+  .queue-mainline{display:grid;grid-template-columns:minmax(130px,.6fr) minmax(160px,1fr) auto;gap:12px;align-items:center;margin-bottom:9px}
+  .queue-mainline strong{font-weight:720;color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .queue-mainline span{color:var(--mut);font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .prompt{
+    border:1px solid var(--line);
+    border-radius:8px;
+    background:#08111c;
+    color:#dce7f7;
+    padding:10px 11px;
+    font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace;
+    font-size:12.5px;
+    line-height:1.45;
+    white-space:pre-wrap;
+    word-break:break-word;
+  }
+  .prompt.revealed{border-color:rgba(255,90,102,.55);background:#170b0f}
+  .chips{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}
+  .chip{
+    display:inline-flex;
+    align-items:center;
+    gap:5px;
+    min-height:24px;
+    border:1px solid var(--line);
+    border-radius:7px;
+    background:#0b1521;
+    color:#b9c7d8;
+    padding:3px 8px;
+    font-size:11.5px;
+  }
+  .chip b{color:#eef4fb;font-weight:700}
+  .chip.category{border-color:rgba(246,162,26,.35);color:#ffd28a;background:rgba(246,162,26,.08)}
+  .reasons{margin-top:8px;color:var(--mut);font-size:12px;line-height:1.45}
+  .note{
+    width:100%;
+    min-height:38px;
+    margin-top:10px;
+    resize:vertical;
+    border:1px solid var(--line);
+    border-radius:8px;
+    background:#08111c;
+    color:var(--txt);
+    padding:9px 10px;
+    font-size:12.5px;
+  }
+  .note:focus,input:focus,select:focus,textarea:focus{outline:2px solid rgba(106,167,255,.55);outline-offset:1px;border-color:var(--blue)}
+  .readonly-note{
+    display:inline-flex;
+    align-items:center;
+    min-height:28px;
+    margin-top:11px;
+    border:1px solid rgba(106,167,255,.28);
+    border-radius:7px;
+    background:rgba(106,167,255,.08);
+    color:#c8d8ee;
+    padding:5px 9px;
+    font-size:12px;
+    font-weight:720;
+  }
+  .actions{display:flex;gap:8px;margin-top:11px;flex-wrap:wrap}
+  .btn{
+    min-height:36px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    gap:8px;
+    border:1px solid transparent;
+    border-radius:8px;
+    padding:8px 12px;
+    font-weight:760;
+    font-size:12.5px;
+  }
+  .btn.approve{background:linear-gradient(180deg,#35c97b,#1d9858);color:#06150d;border-color:rgba(64,217,138,.35)}
+  .btn.deny{background:linear-gradient(180deg,#ff626d,#c73543);color:#26070c;border-color:rgba(255,90,102,.38)}
+  .btn.reveal{background:#0a121d;border-color:var(--line);color:var(--soft)}
+  .btn:hover{filter:brightness(1.05)}
+  .btn:disabled{opacity:.58;cursor:not-allowed;filter:none}
+  .stepup-dialog{
+    width:min(420px,calc(100vw - 32px));
+    border:1px solid var(--line2);
+    border-radius:8px;
+    background:#0b1521;
+    color:var(--txt);
+    padding:0;
+    box-shadow:0 24px 80px rgba(0,0,0,.55);
+  }
+  .stepup-dialog::backdrop{background:rgba(1,6,13,.72)}
+  .stepup-panel{display:grid;gap:14px;padding:18px}
+  .stepup-panel h2{margin:0;font-size:16px;letter-spacing:0}
+  .stepup-panel p{margin:0;color:var(--mut);font-size:13px;line-height:1.45}
+  .stepup-panel label{display:grid;gap:7px;color:var(--soft);font-size:12px;font-weight:720}
+  .stepup-panel input{
+    width:100%;
+    border:1px solid var(--line);
+    border-radius:8px;
+    background:#08111c;
+    color:var(--txt);
+    padding:10px 11px;
+    font-size:14px;
+  }
+  .stepup-actions{display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap}
+  .side-stack{display:grid;gap:14px}
+  .coverage-grid{display:grid;grid-template-columns:minmax(0,1.12fr) minmax(330px,.88fr);gap:14px;align-items:start}
+  .wide-panel{grid-column:1 / span 2}
+  .coverage-body{display:grid;grid-template-columns:220px minmax(0,1fr);gap:14px;padding:14px}
+  .score-panel{
+    min-height:190px;
+    border:1px solid var(--line);
+    border-radius:8px;
+    background:#08111c;
+    display:grid;
+    place-items:center;
+    padding:14px;
+    text-align:center;
+  }
+  .score-ring{
+    width:132px;
+    height:132px;
+    border-radius:50%;
+    display:grid;
+    place-items:center;
+    background:conic-gradient(var(--green) var(--score), #1b2b3d 0);
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.04);
+  }
+  .score-ring b{
+    width:100px;
+    height:100px;
+    border-radius:50%;
+    display:grid;
+    place-items:center;
+    background:#08111c;
+    color:#fff;
+    font-size:28px;
+    font-variant-numeric:tabular-nums;
+  }
+  .score-panel span{display:block;margin-top:10px;color:var(--mut);font-size:12px}
+  .coverage-kpis{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:12px;width:100%}
+  .mini-kpi{border:1px solid var(--line);border-radius:8px;background:#08111c;padding:10px}
+  .mini-kpi b{display:block;color:#fff;font-size:18px;font-variant-numeric:tabular-nums}
+  .mini-kpi span{display:block;margin-top:4px;color:var(--mut);font-size:11px;text-transform:uppercase;letter-spacing:.06em}
+  .sensor-row,.shadow-row{
+    display:grid;
+    grid-template-columns:minmax(0,1fr) auto;
+    gap:10px;
+    align-items:center;
+    padding:12px 14px;
+    border-bottom:1px solid var(--line);
+  }
+  .sensor-row:last-child,.shadow-row:last-child{border-bottom:0}
+  .sensor-row strong,.shadow-row strong{display:block;color:#fff;font-size:13px;font-weight:720;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sensor-row span,.shadow-row span{display:block;color:var(--mut);font-size:12px;margin-top:4px}
+  .sensor-row .count,.shadow-row .count{color:#fff;font-weight:780;font-variant-numeric:tabular-nums}
+  .incident-detail{display:grid;gap:12px;padding:14px}
+  .detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  .datum{border:1px solid var(--line);border-radius:8px;background:#08111c;padding:10px}
+  .datum label{display:block;color:var(--mut);font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px}
+  .datum b{font-size:13px;font-weight:720;color:#fff;word-break:break-word}
+  .risk-meter{
+    display:grid;
+    gap:8px;
+    border:1px solid var(--line);
+    border-radius:8px;
+    background:#08111c;
+    padding:12px;
+  }
+  .risk-track{height:9px;border-radius:999px;background:#1b2b3d;overflow:hidden}
+  .risk-track i{display:block;height:100%;width:var(--risk-width);background:linear-gradient(90deg,var(--green),var(--yellow),var(--red))}
+  .barrow{display:grid;grid-template-columns:120px minmax(0,1fr) 34px;gap:10px;align-items:center;padding:8px 14px;color:var(--soft);font-size:12.5px}
+  .barrow .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .bar{height:8px;background:#08111c;border-radius:999px;overflow:hidden;border:1px solid var(--line)}
+  .bar > i{display:block;height:100%;background:linear-gradient(90deg,var(--blue),var(--cyan));width:var(--w)}
+  .barrow .v{text-align:right;color:var(--mut);font-variant-numeric:tabular-nums}
+  .posture-list{display:grid;padding:4px 14px 12px}
+  .posture-item{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid var(--line);font-size:12.5px;color:var(--soft)}
+  .posture-item:last-child{border-bottom:0}
+  .posture-item b{color:#fff;font-weight:720}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th,td{text-align:left;padding:11px 12px;border-bottom:1px solid var(--line);vertical-align:middle}
+  th{color:var(--mut);font-weight:720;font-size:10.5px;text-transform:uppercase;letter-spacing:.08em}
+  td{color:#d9e3f0}
+  td.mono,.mono{font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace;font-variant-numeric:tabular-nums;color:#aecaef}
+  .pill{
+    display:inline-flex;
+    align-items:center;
+    min-height:23px;
+    border-radius:7px;
+    border:1px solid var(--line);
+    padding:3px 8px;
+    font-size:11px;
+    font-weight:750;
+    text-transform:uppercase;
+    letter-spacing:.04em;
+  }
+  .pill.good{background:rgba(64,217,138,.1);border-color:rgba(64,217,138,.35);color:#a8f1c9}
+  .pill.bad{background:rgba(255,90,102,.1);border-color:rgba(255,90,102,.34);color:#ffb9be}
+  .pill.info{background:rgba(106,167,255,.1);border-color:rgba(106,167,255,.34);color:#b8d3ff}
+  .pill.warn{background:rgba(246,162,26,.1);border-color:rgba(246,162,26,.35);color:#ffd28a}
+  .toolbar{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line)}
+  .toolbar .status{font-size:12px;color:#9febc3}
+  .save-status{margin-left:10px;color:#9febc3;font-size:12.5px}
+  .integrity{display:flex;align-items:center;gap:8px;color:var(--mut);font-size:12.5px;padding:11px 14px;border-bottom:1px solid var(--line)}
+  .integrity.ok{color:#a8f1c9}
+  .integrity.bad{color:#ffb9be}
+  .policy-card{max-width:980px}
+  .policy-box{padding:14px}
+  .template-bar{margin-bottom:16px}
+  .template-title,.policy-label{color:var(--mut);font-size:12px;margin-bottom:8px}
+  .policy-options{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:18px}
+  .policy-option{
+    border:1px solid var(--line);
+    border-radius:8px;
+    background:#08111c;
+    padding:11px;
+    cursor:pointer;
+  }
+  .policy-option.selected{border-color:rgba(106,167,255,.55);background:rgba(106,167,255,.1)}
+  .policy-option span{display:flex;align-items:center;gap:8px;font-weight:750;font-size:13px;color:#fff}
+  .policy-option p{margin:7px 0 0 24px;color:var(--mut);font-size:11.5px;line-height:1.45}
+  .field-grid{display:grid;grid-template-columns:minmax(180px,1fr) 150px;gap:10px;align-items:center;margin-bottom:18px}
+  select,input[type="number"]{width:100%;min-height:38px;border:1px solid var(--line);border-radius:8px;background:#08111c;color:var(--txt);padding:8px 10px}
+  input[type="radio"]{accent-color:var(--blue)}
+  .hidden{display:none!important}
+  .empty{padding:46px 18px;text-align:center;color:var(--mut)}
+  .empty .big{font-size:13px;font-weight:820;color:#fff;margin-bottom:8px;text-transform:uppercase;letter-spacing:.08em}
+  @media(max-width:1180px){
+    .app-shell{grid-template-columns:1fr}
+    .rail{position:static;height:auto;flex-direction:row;align-items:center;overflow:auto}
+    .brand{min-width:220px;padding-bottom:2px}
+    .tabs{flex-direction:row}
+    .tab{white-space:nowrap}
+    .rail-section,.rail-status{display:none}
+    .workspace{padding:0 16px 24px}
+    .queue-grid{grid-template-columns:1fr}
+    .coverage-grid{grid-template-columns:1fr}
+    .wide-panel{grid-column:auto}
+    .stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+  }
+  @media(max-width:760px){
+    body{font-size:13px}
+    .workspace{padding:0 12px 22px}
+    .rail{display:block;overflow:visible;padding:14px 12px}
+    .rail .tabs{display:none}
+    .brand{min-width:0}
+    .topbar{flex-wrap:wrap;padding:10px 0}
+    .search{order:3;flex-basis:100%;min-width:0}
+    .hero-row{display:block;padding-top:18px}
+    .control-cluster{justify-content:flex-start;margin-top:12px}
+    .stats{grid-template-columns:1fr}
+    .content-tabs{overflow:auto}
+    .coverage-body,.coverage-kpis{grid-template-columns:1fr}
+    .queue-mainline,.detail-grid,.policy-options,.field-grid{grid-template-columns:1fr}
+    .barrow{grid-template-columns:96px minmax(0,1fr) 28px}
+    th,td{padding:10px 9px}
+    table{min-width:760px}
+    .panel{overflow:auto}
+    .who{display:none}
+  }
+  @media(prefers-reduced-motion:reduce){
+    *,*:before,*:after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition:none!important}
+  }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="rail">
+    <div class="brand">
+      <div class="logo" aria-hidden="true">PS</div>
+      <div>
+        <h1>PromptSentinel</h1>
+        <p>AI Prompt DLP Gateway</p>
+      </div>
+    </div>
+    <div class="rail-section">Console</div>
+    <nav class="tabs" aria-label="Primary">
+      <button class="tab active" data-tab="queue" type="button">
+        <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M5 5h14v5H5V5Zm0 9h14v5H5v-5Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg></span>
+        Approval Queue <span class="badge hidden" id="qBadge">0</span>
+      </button>
+      <button class="tab" data-tab="activity" type="button">
+        <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M4 7h16M4 12h16M4 17h10" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></span>
+        All Activity
+      </button>
+      <button class="tab" data-tab="coverage" type="button">
+        <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M4 19V5m0 14h16M8 16V9m5 7V6m5 10v-4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        Coverage
+      </button>
+      <button class="tab" data-tab="audit" type="button">
+        <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M7 4h10v16H7V4Zm3 4h4m-4 4h6m-6 4h3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        Audit Log
+      </button>
+      <button class="tab" data-tab="policy" type="button">
+        <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M12 4l7 3v5c0 4.2-2.6 6.8-7 8-4.4-1.2-7-3.8-7-8V7l7-3Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg></span>
+        Policy
+      </button>
+    </nav>
+    <div class="rail-section">Monitoring</div>
+    <div class="rail-status">
+      <div class="status-line"><span>Hash chain</span><b>Active</b></div>
+      <div class="status-line"><span>Local scan</span><span class="pin" aria-hidden="true"></span></div>
+      <div class="status-line"><span>Version</span><b>0.3.0</b></div>
+    </div>
+  </aside>
+
+  <main class="workspace">
+    <header class="topbar">
+      <label class="search" for="globalSearch">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m21 21-4.35-4.35M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+        <input id="globalSearch" type="search" autocomplete="off" placeholder="Search users, destinations, findings" />
+      </label>
+      <div class="spacer"></div>
+      <div class="live"><span class="dot"></span><span id="liveTxt">Live</span></div>
+      <span class="who" id="who"></span>
+      <button class="ghost" id="logout" type="button">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M10 6H6v12h4m4-3 3-3-3-3m3 3H9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Sign out
+      </button>
+    </header>
+    <div class="banner" id="banner"></div>
+
+    <div class="hero-row">
+      <div class="page-title">
+        <h2>Security Console</h2>
+        <p>Review held prompts, enforce AI-use policy, and export examiner-ready evidence from one control plane.</p>
+      </div>
+      <div class="control-cluster">
+        <button class="ghost" type="button" data-tab-jump="audit">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Evidence
+        </button>
+        <button class="ghost" type="button" data-tab-jump="policy">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 4l7 3v5c0 4.2-2.6 6.8-7 8-4.4-1.2-7-3.8-7-8V7l7-3Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
+          Policy
+        </button>
+      </div>
+    </div>
+
+    <div class="stats" id="stats"></div>
+
+    <div class="content-tabs">
+      <button class="tab active" data-tab="queue" type="button">Approval Queue</button>
+      <button class="tab" data-tab="activity" type="button">All Activity</button>
+      <button class="tab" data-tab="coverage" type="button">Coverage</button>
+      <button class="tab" data-tab="audit" type="button">Audit Log</button>
+      <button class="tab" data-tab="policy" type="button">Policy</button>
+    </div>
+
+    <div class="wrap">
+      <section id="tab-queue">
+        <div class="queue-grid">
+          <div class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Approval Queue</h2>
+                <span>Blocked prompts awaiting Security Admin review</span>
+              </div>
+              <button class="ghost" id="refreshQueue" type="button">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v6h-6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                Refresh
+              </button>
+            </div>
+            <div id="queueList" class="queue-list"></div>
+          </div>
+          <div class="side-stack">
+            <div class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2>Selected Incident</h2>
+                  <span>Redacted review context</span>
+                </div>
+              </div>
+              <div id="incidentDetail" class="incident-detail"></div>
+            </div>
+            <div class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2>Top PII Detected</h2>
+                  <span>Current data set</span>
+                </div>
+              </div>
+              <div id="topEntities"></div>
+            </div>
+            <div class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2>Control Posture</h2>
+                  <span>Operational readiness</span>
+                </div>
+              </div>
+              <div class="posture-list">
+                <div class="posture-item"><span>Audit evidence</span><b>Tamper-evident</b></div>
+                <div class="posture-item"><span>Prompt handling</span><b>Redact-first</b></div>
+                <div class="posture-item"><span>Admin workflow</span><b>Approval gated</b></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="tab-activity" class="hidden">
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>All Gated Prompts</h2>
+              <span>Recent prompt decisions and held requests</span>
+            </div>
+          </div>
+          <table><thead><tr>
+            <th>Time</th><th>Source</th><th>User</th><th>Destination</th><th>Severity</th><th>Risk</th><th>Detected</th><th>Status</th>
+          </tr></thead><tbody id="activityRows"></tbody></table>
+        </div>
+      </section>
+
+      <section id="tab-coverage" class="hidden">
+        <div class="coverage-grid">
+          <div class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>AI Coverage Posture</h2>
+                <span>Governed apps, sensors, and shadow-AI signals</span>
+              </div>
+              <button class="ghost" id="refreshCoverage" type="button">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v6h-6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                Refresh
+              </button>
+            </div>
+            <div class="coverage-body">
+              <div class="score-panel" id="coverageScore"></div>
+              <div class="posture-list" id="coveragePosture"></div>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Sensor Mix</h2>
+                <span>Observed control points</span>
+              </div>
+            </div>
+            <div id="sensorMix"></div>
+          </div>
+          <div class="panel wide-panel">
+            <div class="panel-head">
+              <div>
+                <h2>Governed AI Destinations</h2>
+                <span>Policy list with observed traffic</span>
+              </div>
+            </div>
+            <table><thead><tr><th>Destination</th><th>Events</th><th>Blocked</th><th>Redacted</th><th>Users</th><th>Last Seen</th></tr></thead>
+              <tbody id="governedRows"></tbody></table>
+          </div>
+          <div class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Shadow AI</h2>
+                <span>Ungoverned AI tools reported by sensors</span>
+              </div>
+            </div>
+            <div id="shadowRows"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="tab-audit" class="hidden">
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Tamper-evident Audit Log</h2>
+              <span>Hash-chained admin and policy activity</span>
+            </div>
+          </div>
+          <div class="toolbar">
+            <button class="ghost" id="exportEvidence" type="button">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              Export Evidence
+            </button>
+            <span class="status" id="exportStatus"></span>
+          </div>
+          <div class="integrity" id="integrity"></div>
+          <table><thead><tr><th>Timestamp</th><th>Action</th><th>Actor</th><th>Query</th><th>Detail</th></tr></thead>
+            <tbody id="auditRows"></tbody></table>
+        </div>
+      </section>
+
+      <section id="tab-policy" class="hidden">
+        <div class="panel policy-card">
+          <div class="panel-head">
+            <div>
+              <h2>Detection and Blocking Policy</h2>
+              <span>One policy shared by every sensor</span>
+            </div>
+          </div>
+          <div class="policy-box" id="policyBox"></div>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<script src="/dashboard.js" defer></script>
+</body>
+</html>

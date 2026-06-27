@@ -1,0 +1,12 @@
+#!/usr/bin/env sh
+set -eu
+
+if ! command -v npm >/dev/null 2>&1; then
+  echo "[pre-commit] npm not found. Install Node.js and npm, then retry."
+  exit 1
+fi
+
+if ! npm run review:agent; then
+  echo "[pre-commit] review:agent failed. Commit aborted."
+  exit 1
+fi
