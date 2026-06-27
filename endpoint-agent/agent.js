@@ -272,7 +272,7 @@ async function reportLocalFile(file, user, extracted, opts = {}) {
     return { ...(await blockScanUnavailable(file, user, opts)), inspectedLocally: true, localAnalysis: analysis };
   }
   const mode = fileMode(analysis, pol);
-  const outcome = mode === 'redact' && canTokenizeAllSensitivity(analysis) ? 'redacted_sent' : null;
+  const outcome = mode === 'redact' && canTokenizeAllSensitivity(analysis) ? 'awaiting_approval' : null;
   const safePrompt = safeFilePrompt(file, extracted.text || '', analysis, mode);
   const note = `endpoint agent inspected ${safeFileLabel(file)} locally: ${verdict.reasons.join('; ')}`;
   const res = await (opts.report || report)(localFileRecord(file, user, safePrompt, analysis, outcome, note), opts);

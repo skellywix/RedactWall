@@ -2,7 +2,9 @@
 
 ## Open
 
-- None selected. Next pass should pick the highest-impact production-readiness gap.
+- Next pass: add an explicit endpoint redaction handoff for structured-only file findings, such as writing a sanitized companion file or requiring approval before release, so the watched-file sensor has a real user-facing replacement path instead of telemetry-only token labels.
+- After that: run a package-to-install endpoint pilot smoke that verifies the zip contents, scheduled-task runner, env loading, policy refresh, local file extraction, sanitized gate telemetry, and uninstall path together.
+- Keep an eye on the remaining product gap: the current endpoint agent is still a watched-folder reference sensor, not a native desktop file-interception agent.
 
 ## Done
 

@@ -44,7 +44,7 @@ test('analyzes supported files locally and reports sanitized findings to gate', 
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('redact policy tokenizes structured file findings locally before reporting', async () => {
+test('redact policy tokenizes structured file findings locally before holding for approval', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-agent-'));
   const filename = 'loan.txt';
   fs.writeFileSync(path.join(dir, filename), 'Member SSN 524-71-9043 needs a summary.');
@@ -56,12 +56,12 @@ test('redact policy tokenizes structured file findings locally before reporting'
     policy: { enforcementMode: 'redact', alwaysBlock: ['US_SSN'], ignore: [], disabledDetectors: [] },
     report: async (req) => {
       reportRequest = req;
-      return { decision: 'redact', mode: 'redact', status: 'redacted', id: 'q_redacted', tokenizedPrompt: req.prompt };
+      return { decision: 'block', mode: 'redact', status: 'pending', id: 'q_redacted' };
     },
   });
 
-  assert.strictEqual(res.decision, 'redact');
-  assert.strictEqual(reportRequest.clientOutcome, 'redacted_sent');
+  assert.strictEqual(res.decision, 'block');
+  assert.strictEqual(reportRequest.clientOutcome, 'awaiting_approval');
   assert.match(reportRequest.prompt, /\[\[US_SSN_1\]\]/);
   assert.ok(!JSON.stringify(reportRequest).includes('524-71-9043'));
 
