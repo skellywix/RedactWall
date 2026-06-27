@@ -68,6 +68,9 @@ function validateRuntimeFiles(files) {
   if (/contentBase64|\/api\/v1\/scan-file/.test(agent)) {
     throw new Error('Endpoint agent package must inspect files locally without uploading file bodies');
   }
+  if (!/redacted_available/.test(agent) || !/\.promptsentinel-redacted/.test(agent)) {
+    throw new Error('Endpoint agent package must include the local redacted companion handoff');
+  }
 
   const install = files.find((file) => file.path === 'scripts/install-endpoint-agent.ps1').body.toString('utf8');
   if (!/\[Parameter\(Mandatory = \$true\)\]\s*\r?\n\s*\[string\]\$IngestKey/.test(install)) {
@@ -118,6 +121,7 @@ function packageEndpointAgent(opts = {}) {
     checks: {
       explicitIngestKeyRequired: true,
       localDetectionEngineIncluded: true,
+      endpointRedactionHandoffIncluded: true,
       scheduledTaskInstallerIncluded: true,
       localConfigEnvPath: true,
       taskArgsDoNotExposeIngestKey: true,
