@@ -581,7 +581,8 @@ app.get('/api/v1/detectors', checkIngestKey, (req, res) => res.json(detector.lis
 
 // Scan an uploaded FILE: extract text (pdf/docx/xlsx/text), then gate it.
 app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation.scanFileSchema), async (req, res) => {
-  const { filename, contentBase64 } = req.body || {};
+  if (!enforceTenantForSensor(req, res)) return;
+  const { filename, contentBase64, user = 'unknown', destination = 'unknown', source = 'api', channel = 'file_upload', orgId = null, sensor = null } = req.body || {};
   if (!filename || !contentBase64) return res.status(400).json({ error: 'filename and contentBase64 required' });
   let buf;
   try { buf = Buffer.from(contentBase64, 'base64'); } catch { return res.status(400).json({ error: 'bad base64' }); }
@@ -591,8 +592,6 @@ app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation
   let extracted;
   try { extracted = await processors.extractText(filename, buf); }
   catch (e) { extracted = { text: '', processor: null, supported: true, extractionOk: false, error: 'extract_failed' }; }
-  if (!enforceTenantForSensor(req, res)) return;
-  const { user = 'unknown', destination = 'unknown', source = 'api', channel = 'file_upload', orgId = null, sensor = null } = req.body || {};
   if (!extracted.supported) {
     const row = db.createQuery({ status: 'flagged', user, orgId, destination, source, channel, sensor,
       redactedPrompt: '[unsupported file] ' + filename, findings: [], categories: [], entityCounts: {},

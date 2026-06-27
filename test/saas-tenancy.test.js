@@ -4,8 +4,10 @@ const assert = require('node:assert');
 const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const fs = require('node:fs');
 
 process.env.SENTINEL_DB_PATH = path.join(os.tmpdir(), 'ps-saas-test-' + crypto.randomBytes(6).toString('hex') + '.db');
+process.env.SENTINEL_POLICY_PATH = path.join(os.tmpdir(), 'ps-saas-policy-' + crypto.randomBytes(6).toString('hex') + '.json');
 process.env.INGEST_API_KEY = 'unit-saas-ingest-key';
 process.env.ADMIN_PASSWORD = 'unit-pass';
 process.env.SENTINEL_SECRET = 'unit-saas-secret-stable-value-32';
@@ -13,6 +15,9 @@ process.env.SENTINEL_DATA_KEY = 'unit-saas-data-key-stable-value-32';
 process.env.SENTINEL_SAAS_MODE = 'true';
 process.env.SENTINEL_TENANT_ID = 'cu-acme';
 process.env.SENTINEL_SEAT_LIMIT = '1';
+fs.writeFileSync(process.env.SENTINEL_POLICY_PATH, JSON.stringify({
+  scanner: { maxFileBytes: 1024 },
+}));
 
 const app = require('../server');
 const db = require('../src/db');
@@ -55,6 +60,22 @@ async function postFile(port, body) {
   return { res, body: await res.json() };
 }
 
+async function postScanFile(port, body) {
+  const res = await fetch(`http://127.0.0.1:${port}/api/v1/scan-file`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.INGEST_API_KEY },
+    body: JSON.stringify({
+      filename: 'oversized.txt',
+      contentBase64: Buffer.alloc(2048).toString('base64'),
+      destination: 'chat.openai.com',
+      source: 'browser_extension',
+      channel: 'file_upload',
+      ...body,
+    }),
+  });
+  return { res, body: await res.json() };
+}
+
 async function login(port) {
   const res = await fetch(`http://127.0.0.1:${port}/api/login`, {
     method: 'POST',
@@ -89,6 +110,10 @@ test('SaaS mode enforces tenant identity and paid seat limit', async (t) => {
   const otherTenant = await postGate(port, { orgId: 'other-cu', user: 'analyst@example.test' });
   assert.strictEqual(otherTenant.res.status, 403);
   assert.strictEqual(otherTenant.body.status, 'tenant_mismatch');
+
+  const otherTenantFile = await postScanFile(port, { orgId: 'other-cu', user: 'analyst@example.test' });
+  assert.strictEqual(otherTenantFile.res.status, 403);
+  assert.strictEqual(otherTenantFile.body.status, 'tenant_mismatch');
 
   const secondUser = await postGate(port, { orgId: 'cu-acme', user: 'second@example.test' });
   assert.strictEqual(secondUser.res.status, 402);

@@ -499,7 +499,10 @@ function processHandoffDirectory(dir = HANDOFF_DIR, opts = {}) {
   }
   return fs.watch(dir, (event, filename) => {
     if (filename && event === 'rename' && filename.toLowerCase().endsWith('.json')) {
-      setTimeout(() => processNativeHandoffFileSafe(path.join(dir, filename), opts), HANDOFF_RETRY_DELAY_MS);
+      const handoffFile = path.join(dir, filename);
+      setTimeout(() => {
+        if (fs.existsSync(handoffFile)) processNativeHandoffFileSafe(handoffFile, opts);
+      }, HANDOFF_RETRY_DELAY_MS);
     }
   });
 }

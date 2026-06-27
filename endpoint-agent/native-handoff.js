@@ -32,6 +32,23 @@ const DISALLOWED_EVENT_KEYS = new Set([
   'raw_text',
   'text',
 ]);
+const ALLOWED_EVENT_KEYS = new Set([
+  'version',
+  'id',
+  'createdAt',
+  'operation',
+  'filePath',
+  'destination',
+  'user',
+  'nonce',
+  'signature',
+]);
+const ALLOWED_DESTINATION_KEYS = new Set([
+  'app',
+  'name',
+  'process',
+  'url',
+]);
 
 function defaultHandoffDir(env = process.env) {
   return env.ENDPOINT_AGENT_HANDOFF_DIR || DEFAULT_HANDOFF_DIR;
@@ -66,6 +83,26 @@ function assertNoPayloadKeys(value, prefix = 'event') {
   }
 }
 
+function assertAllowedKeys(value, allowed, prefix) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return;
+  for (const key of Object.keys(value)) {
+    if (!allowed.has(key)) {
+      throw new Error(`native handoff ${prefix}.${key} is not allowed`);
+    }
+  }
+}
+
+function assertAllowedEventShape(event) {
+  assertAllowedKeys(event, ALLOWED_EVENT_KEYS, 'event');
+  const destination = event.destination;
+  if (destination && typeof destination === 'object') {
+    if (Array.isArray(destination)) {
+      throw new Error('native handoff event.destination is not allowed');
+    }
+    assertAllowedKeys(destination, ALLOWED_DESTINATION_KEYS, 'event.destination');
+  }
+}
+
 function normalizeDestination(destination) {
   if (typeof destination === 'string') {
     return { app: boundedString(destination, 'desktop-ai-app', 80) };
@@ -88,6 +125,7 @@ function normalizeEvent(event, opts = {}) {
     throw new Error('native handoff event must be a JSON object');
   }
   assertNoPayloadKeys(event);
+  assertAllowedEventShape(event);
   if (event.version !== EVENT_VERSION) {
     throw new Error('native handoff version is unsupported');
   }

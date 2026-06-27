@@ -61,6 +61,14 @@ test('native handoff rejects bad signatures, stale events, and raw payload keys'
     () => handoff.signHandoffEvent(event({ RawText: 'secret' }), SECRET),
     /not allowed/,
   );
+  assert.throws(
+    () => handoff.signHandoffEvent(event({ payloadRef: 'anything-extra' }), SECRET),
+    /event\.payloadRef is not allowed/,
+  );
+  assert.throws(
+    () => handoff.signHandoffEvent(event({ destination: { app: 'Desktop AI', extra: 'anything-extra' } }), SECRET),
+    /event\.destination\.extra is not allowed/,
+  );
 });
 
 test('native handoff files are size-bounded and require a configured secret', (t) => {
