@@ -16,9 +16,18 @@ Plan → Implement → Validate. Spend most effort planning. See `.claude/skills
 - `npm run sync-check` — verifies `shared/detect.js` == `extension/lib/detect.js`. MUST stay green.
 - `npm run sync-engine` — propagate the shared engine to the copy (the ONLY way to update the copy).
 - `npm run train-semantic` — regenerate the on-device semantic model in `shared/detect.js`. Deterministic; CI fails on drift.
+- `npm run hooks:install` — install local review hooks into `.githooks`.
+- `npm run review:agent` — run the pre-commit review alias locally.
+- `npm run review:ci` — full local gate (`git diff --check`, `npm test`, `npm run sync-check`, `npm run eval`).
 - `npm run eval` — precision/recall/F1 on the HELD-OUT labeled corpus (`test/fixtures/semantic-eval.json`). Floors enforced by `test/eval.test.js`; **zero benign false positives** is the hard gate.
 - `npm run simulate` — end-to-end detection over the sample corpus.
 - `npm start` — run the server. `docker build -t promptsentinel .` — CI also builds the image.
+
+## Change-control process
+- Run `npm run hooks:install` after cloning or reinstalling the repo.
+- `pre-commit` runs `npm run review:agent` and aborts the commit if checks fail.
+- `post-commit` runs `npm run review:ci` and only pushes to `origin` when checks pass.
+- If review or push fails, the commit remains local and you can run `git push` after resolving the issue.
 
 ## Hard invariants (do not break)
 1. Detector logic lives in `shared/detect.js` ONLY. After editing, run `npm run sync-engine`; never hand-edit `extension/lib/detect.js`.
@@ -45,3 +54,4 @@ Functions under ~30 lines; no logic duplicated >2x; no dead code/unused imports;
 - 2026-06-24: Measure detection on a HELD-OUT set, not the trainer's own negatives. Calibrating the threshold on training negatives hid a 34%% CONFIDENTIAL precision (12/18 benign prompts flagged). `npm run eval` is the guard.
 - 2026-06-24: Low-variation positive templates (legal/credentials) must NOT be de-duplicated before training — `uniq()` collapsed them to ~15 examples vs ~1000 negatives and the model learned to predict ~0 (recall 0). Keep repeats so they carry training weight.
 - (add new lessons here, newest first)
+

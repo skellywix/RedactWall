@@ -36,8 +36,8 @@ PromptSentinel differentiators to build toward:
 Run at the end of every successful pass:
 
 ```bash
-npm test
-npm run sync-check
+npm run hooks:install
+npm run review:ci
 node -e "console.log(JSON.stringify(require('./src/db').verifyAuditChain()))"
 ```
 
@@ -69,6 +69,7 @@ npm run sync-check
 - Keep browser, endpoint, MCP, and server behavior aligned.
 - Use synthetic sensitive data only.
 - Commit every successful pass separately.
+- Keep the commit-and-push process aligned: `pre-commit` must pass review checks before commit; post-commit push must only run after the same checks pass.
 
 ## Iteration Themes
 

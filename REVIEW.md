@@ -2,6 +2,17 @@
 
 Reviewed against the stated end goal: *a compliance-grade safety layer that lets a regulated company adopt AI without leaking customer data, and that an examiner will trust.*
 
+## Update — June 27, 2026: Review workflow and Git process
+
+The development flow is now enforced as review-first in git itself:
+
+- Pre-commit gate: `npm run review:agent` before commit.
+- Post-commit gate and sync: `npm run review:ci` then automatic push only on pass.
+- New hook path is `.githooks`, with `npm run hooks:install` for bootstrap.
+
+The technical review model itself remains the same, but the process now ensures
+that each local change is validated before it can leave the machine.
+
 The skeleton genuinely proves the whole loop end to end, and the architecture is the right one (shared detection engine, plugin-registry detectors, three sensors into one control plane, hash-chained audit, redaction/masking, MV3 extension, Office/PDF processors). The clean module separation is a real asset. The issues below are about making it *true* and *trustworthy*, not about restructuring.
 
 Everything marked "evidence" was reproduced by running the actual code, not inferred.
@@ -113,3 +124,4 @@ The extension guards listed sites in one browser. A user can disable it, switch 
 3. Audit integrity + real datastore (#5, #6) — makes "tamper-evident" survive scrutiny.
 4. Identity + reliable send (#7, #8) — makes the flagship sensor's evidence real.
 5. Test fixture for detection — locks in 1–3 and de-risks the future model swap.
+

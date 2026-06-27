@@ -1,0 +1,7 @@
+#!/usr/bin/env sh
+set -e
+
+if ! npm run review:agent; then
+  echo "[pre-commit] review:agent failed. Commit aborted."
+  exit 1
+fi

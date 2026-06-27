@@ -100,6 +100,17 @@ grew from 11 passing / 3 known-failing to **42 passing / 0 failing / 0 todo**.
 
 ---
 
+## Iteration 8 — Source-of-truth and review-gated change control
+
+- Added a review-gated local git workflow in-process:
+  - `.githooks` for `pre-commit` and `post-commit`
+  - `npm run hooks:install` to pin hook path to repository hooks
+  - `npm run review:ci` as the required local gate (`git diff --check`, `npm test`, `npm run sync-check`, `npm run eval`)
+- Updated operational docs (`README.md`, `PLAN.md`, `AGENTS.md`, `REVIEW.md`, `STATUS.md`) and process decisions (`DECISIONS.md`) so all references now describe this same flow.
+
+This iteration keeps local change quality and GitHub sync aligned to a single repository path:
+`promptsentinel/`.
+
 ### Test growth
 | Pass | Iteration |
 |----:|-----------|
@@ -110,3 +121,4 @@ grew from 11 passing / 3 known-failing to **42 passing / 0 failing / 0 todo**.
 | 31 | +adapters |
 | 39 | +auth +templates |
 | **42** | +held-out detection eval |
+| 42 | +workflow/process coherency (documentation + hooks) |

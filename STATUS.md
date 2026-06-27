@@ -7,6 +7,8 @@
 
 ## Done
 
+- 2026-06-27: Added a review-gated local Git workflow for this repo: pre-commit runs `npm run review:agent`, post-commit runs `npm run review:ci` and pushes only after checks pass, and `.githooks` is the canonical hook path for the same flow (`npm run hooks:install`). This keeps local commits aligned with GitHub sync expectations for every change.
+  Evidence: [package scripts and hooks updated], `npm run review:agent`/`npm run review:ci` availability, `.githooks/pre-commit`, `.githooks/post-commit`, `core.hooksPath` configuration.
 - 2026-06-26: Added a metadata-only native handoff writer for pilots and future desktop hooks: the packaged helper loads the endpoint env config, signs a bounded upload-intent event, writes it atomically into the handoff spool, refuses `--secret` command-line handling, and never reads referenced file bytes into the event.
   Evidence: `node --test test/native-handoff-writer.test.js test/native-handoff.test.js test/endpoint-agent-package.test.js test/endpoint-agent-install.test.js`, `npm run package:endpoint-agent -- <temp>`, `npm test`, `npm run test:browser`, `npm run setup:check`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Tightened the signed native handoff contract and SaaS file-scan boundary: native handoff JSON now uses an explicit allowlist for event and destination fields, the endpoint watcher ignores cleanup races instead of reprocessing removed handoff files, and `/api/v1/scan-file` enforces SaaS tenant checks before decoding uploaded file bodies.

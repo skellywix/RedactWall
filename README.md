@@ -203,6 +203,24 @@ npm run sync-check    # shared detection engine parity
 npm run backup -- backups  # SQLite audit-store backup + verification manifest
 ```
 
+## Development and Git workflow
+
+The repository uses one Git source of truth: `promptsentinel/`. Keep commits and pushes inside this folder.
+
+This repo is configured with a review-first workflow:
+
+- Run `npm run hooks:install` once (or after cloning to future team members).
+- `npm run review:ci` runs the full local gate:
+  - `git diff --check`
+  - `npm test`
+  - `npm run sync-check`
+  - `npm run eval`
+- The `pre-commit` hook runs `npm run review:agent` and blocks commits if checks fail.
+- The `post-commit` hook runs the same review gate and pushes only when checks pass.
+- If push fails (network/credentials), the commit stays local and you can retry with `git push`.
+
+For any review notes you want to preserve, add them to `ITERATIONS.md` and `STATUS.md` with the date and commands you ran.
+
 ## Project layout
 
 ```
