@@ -362,12 +362,12 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
   }
   const serverAnalysis = detector.analyze(prompt, analyzeOpts);
   const clientPreRedacted = declaredClientPreRedacted && clientAnalysis && !hasSensitivity(serverAnalysis);
-  const clientRedacted = clientOutcome === 'redacted_sent' && clientPreRedacted;
+  const clientRedactionResolved = (clientOutcome === 'redacted_sent' || clientOutcome === 'redacted_available') && clientPreRedacted;
   const analysis = clientPreRedacted ? clientAnalysis : serverAnalysis;
   const verdict = policy.evaluate(analysis, pol);
 
   // Privacy-preserving record: redacted prompt + masked findings + categories.
-  const redactedPrompt = clientRedacted && !categoryNames(analysis).length ? prompt : safePreview(prompt, analysis);
+  const redactedPrompt = clientRedactionResolved && !categoryNames(analysis).length ? prompt : safePreview(prompt, analysis);
   const findings = analysis.findings.map((f) => ({
     type: f.type, severity: f.severity, score: f.score, masked: f.masked || detector.maskValue(f.type, f.value || ''),
   }));
@@ -433,7 +433,7 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
   // point — the prompt can proceed because it no longer contains real PII).
   // Otherwise hard-stop entities force 'block' regardless of mode.
   const hardStop = analysis.findings.some((f) => pol.alwaysBlock.includes(f.type));
-  const mode = clientRedacted ? 'redact'
+  const mode = clientRedactionResolved ? 'redact'
     : pol.enforcementMode === 'redact' ? 'redact'
     : (hardStop ? 'block' : (pol.enforcementMode || 'block'));
 
@@ -443,6 +443,7 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
   const wholeChunkClientRedacted = declaredClientPreRedacted && /^\s*\[REDACTED:[^\]]+\]\s*$/i.test(prompt);
   if (clientOutcome === 'sent_after_warning') status = 'warned_sent';
   else if (clientOutcome === 'redacted_sent') status = canTokenizeAllSensitivity(analysis) || wholeChunkClientRedacted ? 'redacted' : 'pending';
+  else if (clientOutcome === 'redacted_available') status = canTokenizeAllSensitivity(analysis) || wholeChunkClientRedacted ? 'redacted' : 'pending';
   else if (clientOutcome === 'justified') status = 'justified';
   else if (clientOutcome === 'blocked_by_user') status = 'blocked_by_user';
   else if (clientOutcome === 'awaiting_approval') status = 'pending';
@@ -458,7 +459,7 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
   // values in the model's response. The model never sees real PII; the vault is
   // AES-256-GCM encrypted and revealed only on an audit-logged rehydrate.
   let tokenizedPrompt, tokenVault;
-  if (status === 'redacted' && !clientRedacted) {
+  if (status === 'redacted' && !clientRedactionResolved) {
     const t = detector.tokenize(prompt, analysis.findings);
     tokenizedPrompt = t.text;                       // PII-free, safe to retain/display
     tokenVault = dataCrypto.seal(JSON.stringify(t.map));

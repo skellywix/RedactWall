@@ -4,8 +4,13 @@ PromptSentinel has two supported deployment paths:
 
 1. Native Node.js for demos, pilots, and single-host installs.
 2. Docker Compose for repeatable container installs.
+3. AWS customer-silo SaaS stacks for paid customer deployments.
 
 Use synthetic data for setup checks. Do not seed real member, patient, cardholder, employee, or customer data into a demo.
+
+For AWS paid-customer deployment, see `docs/AWS_SAAS_DEPLOYMENT.md`. The first
+commercial AWS path is one isolated stack per customer with app-level tenant and
+seat enforcement.
 
 ## Native Setup
 
@@ -179,6 +184,8 @@ Log:    %LOCALAPPDATA%\PromptSentinel\logs\endpoint-agent.log
 ```
 
 The config file carries `SENTINEL_URL`, `INGEST_API_KEY`, and `ENDPOINT_AGENT_WATCH_DIR`. Keep it restricted to the installing user, Administrators, and SYSTEM. For an all-user managed install, pass an explicit `-ConfigDir "$env:ProgramData\PromptSentinel"` from an elevated PowerShell session.
+
+The agent inspects supported watched files locally. Under redact policy, structured-only findings write a safe companion text file under `.promptsentinel-redacted` and report `redacted_available` evidence to the control plane; semantic or mixed findings remain held for Security Admin review.
 
 Check status:
 

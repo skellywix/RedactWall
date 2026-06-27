@@ -511,7 +511,8 @@ Copy-Item .\demo-files\loan-summary.txt "$env:USERPROFILE\PromptSentinelWatch\lo
 Expected:
 
 - The agent extracts and scans the file locally with the shared detection engine.
-- Sensitive supported files are blocked, redacted, warned, or held according to policy without uploading the file body.
+- In redact mode, structured-only findings create a local `.promptsentinel-redacted` companion text file with typed placeholders.
+- Semantic or mixed sensitive files stay held for review; no watched file body is uploaded to the control plane.
 - Unsupported files are blocked locally and recorded without uploading their bytes.
 - The dashboard records the result.
 

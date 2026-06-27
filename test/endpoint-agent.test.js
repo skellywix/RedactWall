@@ -44,9 +44,9 @@ test('analyzes supported files locally and reports sanitized findings to gate', 
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('redact policy tokenizes structured file findings locally before holding for approval', async () => {
+test('redact policy writes a sanitized companion file for structured findings', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-agent-'));
-  const filename = 'loan.txt';
+  const filename = 'member-524-71-9043.txt';
   fs.writeFileSync(path.join(dir, filename), 'Member SSN 524-71-9043 needs a summary.');
 
   let reportRequest;
@@ -56,13 +56,75 @@ test('redact policy tokenizes structured file findings locally before holding fo
     policy: { enforcementMode: 'redact', alwaysBlock: ['US_SSN'], ignore: [], disabledDetectors: [] },
     report: async (req) => {
       reportRequest = req;
-      return { decision: 'block', mode: 'redact', status: 'pending', id: 'q_redacted' };
+      return { decision: 'redact', mode: 'redact', status: 'redacted', id: 'q_redacted' };
+    },
+  });
+
+  assert.strictEqual(res.decision, 'redact');
+  assert.strictEqual(reportRequest.clientOutcome, 'redacted_available');
+  assert.match(reportRequest.prompt, /\[\[US_SSN_1\]\]/);
+  assert.ok(!JSON.stringify(reportRequest).includes('524-71-9043'));
+  assert.ok(res.redactionHandoff);
+  assert.match(res.redactionHandoff.relativePath, /^\.promptsentinel-redacted[\\/]/);
+  assert.ok(!res.redactionHandoff.relativePath.includes('524-71-9043'));
+  assert.strictEqual(ignoredByScanner(res.redactionHandoff.relativePath, scannerConfig({
+    ignoreDirectories: [],
+    ignoreFilenames: [],
+    ignoreExtensions: [],
+    maxFileBytes: 4096,
+  })), true);
+  const companion = fs.readFileSync(res.redactionHandoff.path, 'utf8');
+  assert.match(companion, /\[\[US_SSN_1\]\]/);
+  assert.match(companion, /Original file: \[sensitive filename\]/);
+  assert.ok(!companion.includes('524-71-9043'));
+
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('removes redacted companion files when control-plane recording fails', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-agent-'));
+  const filename = 'loan.txt';
+  fs.writeFileSync(path.join(dir, filename), 'Member SSN 524-71-9043 needs a summary.');
+
+  const requests = [];
+  const res = await scanFile(filename, {
+    watchDir: dir,
+    user: 'unit-user',
+    policy: { enforcementMode: 'redact', alwaysBlock: ['US_SSN'], ignore: [], disabledDetectors: [] },
+    report: async (req) => { requests.push(req); return null; },
+  });
+
+  assert.strictEqual(res.decision, 'block');
+  assert.strictEqual(res.status, 'scan_unavailable');
+  assert.strictEqual(requests[0].clientOutcome, 'redacted_available');
+  const handoffDir = path.join(dir, '.promptsentinel-redacted');
+  assert.deepStrictEqual(fs.existsSync(handoffDir) ? fs.readdirSync(handoffDir) : [], []);
+  assert.ok(!JSON.stringify(requests).includes('524-71-9043'));
+
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('falls back to approval when redacted companion creation fails', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-agent-'));
+  const filename = 'loan.txt';
+  fs.writeFileSync(path.join(dir, filename), 'Member SSN 524-71-9043 needs a summary.');
+  fs.writeFileSync(path.join(dir, '.promptsentinel-redacted'), 'not a directory');
+
+  let reportRequest;
+  const res = await scanFile(filename, {
+    watchDir: dir,
+    user: 'unit-user',
+    policy: { enforcementMode: 'redact', alwaysBlock: ['US_SSN'], ignore: [], disabledDetectors: [] },
+    report: async (req) => {
+      reportRequest = req;
+      return { decision: 'block', mode: 'redact', status: 'pending', id: 'q_pending' };
     },
   });
 
   assert.strictEqual(res.decision, 'block');
   assert.strictEqual(reportRequest.clientOutcome, 'awaiting_approval');
-  assert.match(reportRequest.prompt, /\[\[US_SSN_1\]\]/);
+  assert.match(reportRequest.note, /redacted companion unavailable/);
+  assert.strictEqual(res.redactionHandoff, undefined);
   assert.ok(!JSON.stringify(reportRequest).includes('524-71-9043'));
 
   fs.rmSync(dir, { recursive: true, force: true });

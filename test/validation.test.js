@@ -150,6 +150,43 @@ test('gate preserves pre-redacted endpoint file findings without raw file text',
   assert.ok(!JSON.stringify(stored).includes(rawSecret));
 }));
 
+test('gate records endpoint redacted companion availability as redacted without a vault', async () => withServer(async (port) => {
+  const rawSecret = '524-71-9043';
+  const prompt = '[file:loan.txt] [[US_SSN_1]]';
+  const res = await jsonFetch(port, '/api/v1/gate', {
+    headers: { 'x-api-key': 'unit-ingest-key' },
+    body: {
+      prompt,
+      user: 'endpoint-user',
+      destination: 'desktop-ai-app',
+      source: 'endpoint_agent',
+      channel: 'file_upload',
+      clientOutcome: 'redacted_available',
+      clientPreRedacted: true,
+      clientFindings: [{ type: 'US_SSN', severity: 4, score: 0.92, masked: '**** 9043' }],
+      clientCategories: [],
+      clientEntityCounts: { US_SSN: 1 },
+      clientRiskScore: 30,
+      clientMaxSeverity: 4,
+      clientMaxSeverityLabel: 'critical',
+      note: 'endpoint agent wrote a redacted companion',
+    },
+  });
+
+  assert.strictEqual(res.status, 200);
+  const body = await res.json();
+  const stored = db.getQuery(body.id);
+  assert.strictEqual(body.decision, 'redact');
+  assert.strictEqual(body.status, 'redacted');
+  assert.strictEqual(body.tokenizedPrompt, prompt);
+  assert.strictEqual(stored.status, 'redacted');
+  assert.strictEqual(stored.tokenizedPrompt, prompt);
+  assert.strictEqual(stored._tokenVault, undefined);
+  assert.strictEqual(stored._rawPrompt, undefined);
+  assert.ok(!JSON.stringify(body).includes(rawSecret));
+  assert.ok(!JSON.stringify(stored).includes(rawSecret));
+}));
+
 test('sensor metadata validation rejects oversized values without echoing them', async () => withServer(async (port) => {
   const tooLong = 'x'.repeat(600);
   const res = await jsonFetch(port, '/api/v1/gate', {

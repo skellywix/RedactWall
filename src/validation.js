@@ -85,6 +85,7 @@ const sensorMetadataSchema = z.object({
 const clientOutcomeSchema = z.enum([
   'allowed',
   'redacted_sent',
+  'redacted_available',
   'injection_blocked',
   'shadow_ai',
   'file_too_large',

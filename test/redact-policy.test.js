@@ -129,6 +129,42 @@ test('redact mode accepts whole-chunk client redaction for semantic evidence', a
   assert.strictEqual(body.tokenizedPrompt, '[REDACTED: CONFIDENTIAL_BUSINESS]');
 }));
 
+test('redact mode accepts endpoint redacted companion evidence without a vault', async () => withServer(async (port) => {
+  const prompt = '[file:loan.txt] [[US_SSN_1]]';
+  const res = await fetch(`http://127.0.0.1:${port}/api/v1/gate`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': 'unit-ingest-key',
+    },
+    body: JSON.stringify({
+      prompt,
+      user: 'endpoint-user',
+      destination: 'desktop-ai-app',
+      source: 'endpoint_agent',
+      channel: 'file_upload',
+      clientOutcome: 'redacted_available',
+      clientPreRedacted: true,
+      clientFindings: [{ type: 'US_SSN', severity: 4, score: 0.92, masked: '**** 9043' }],
+      clientCategories: [],
+      clientEntityCounts: { US_SSN: 1 },
+      clientRiskScore: 30,
+      clientMaxSeverity: 4,
+      clientMaxSeverityLabel: 'critical',
+      note: 'endpoint agent inspected loan.txt locally; redacted companion .promptsentinel-redacted/loan.promptsentinel-redacted.txt',
+    }),
+  });
+
+  assert.strictEqual(res.status, 200);
+  const body = await res.json();
+  const stored = db.getQuery(body.id);
+  assert.strictEqual(body.decision, 'redact');
+  assert.strictEqual(body.status, 'redacted');
+  assert.strictEqual(body.tokenizedPrompt, prompt);
+  assert.strictEqual(stored.redactedPrompt, prompt);
+  assert.strictEqual(stored._tokenVault, undefined);
+}));
+
 test('scan-response stores category hits as whole-chunk redacted previews', async () => withServer(async (port) => {
   const confidentialPhrase = 'our largest commercial relationship is about to walk';
   const text = 'Strictly confidential: ' + confidentialPhrase + '; draft retention options before the board hears.';

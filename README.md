@@ -84,7 +84,10 @@ People paste *and upload* sensitive files into AI tools. A **processor layer**
 (`src/processors.js`) extracts text from PDFs, `.docx`, `.xlsx`, and `.pptx` (plus all
 text formats) so uploads get the same detection as typed prompts. The endpoint
 agent uses it locally for every watched file and reports only sanitized evidence
-to the control plane; browser/API sensors can also call `POST /api/v1/scan-file`
+to the control plane. In redact mode, structured-only endpoint findings also
+produce a local `.promptsentinel-redacted/*.txt` companion file with typed
+placeholders and no token vault; semantic or mixed findings stay held for
+review. Browser/API sensors can also call `POST /api/v1/scan-file`
 with a base64 file. Add a new file type by pushing a processor with
 `{ supports(name), extract(buffer) }`. Supported files fail closed if extraction
 times out or the parser cannot inspect the file, and the audit log records the
@@ -134,6 +137,11 @@ can reach the console.
 
 See `docs/DEPLOYMENT.md` for native Node, Docker Compose, health checks, and
 preflight details.
+
+For paid AWS SaaS deployments, use `docs/AWS_SAAS_DEPLOYMENT.md`. The supported
+commercial path for the current codebase is a customer-silo AWS stack with one
+tenant id, a paid seat limit, managed sensor identity, and local EBS-backed
+SQLite evidence storage.
 
 ### Try the browser extension (flagship)
 
@@ -219,7 +227,7 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 | Browser extension | Working — warn/justify/**redact**/block, real-button send, MDM identity, Man-in-the-Prompt guard |
 | Shadow-AI discovery | Working — flags use of ungoverned AI tools |
 | Output scanning | Working — `/api/v1/scan-response` flags PII/secrets in AI replies |
-| MCP guard / Endpoint agent | Working references — inline redaction; local folder watch (pdf/docx/xlsx/pptx/text) |
+| MCP guard / Endpoint agent | Working references - inline/MCP redaction; local endpoint folder watch with redacted companion files for structured-only findings |
 | Auth & ops | Working: login lockout, password-confirmed raw reveal and release approval, release-token scoped polling, stable secret, `/healthz` · `/readyz` · `/api/metrics`, sensor version posture, Docker, CI |
 
 ## Shipped since the skeleton (see `ITERATIONS.md`)

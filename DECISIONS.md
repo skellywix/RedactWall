@@ -26,6 +26,7 @@
 - 2026-06-26: Endpoint agent packaging should mirror the browser and MCP handoff standard: a prompt-free zip, SHA-256 manifest, local scheduled-task config, no packaged development ingest key, and no control-plane calls unless `INGEST_API_KEY` is explicitly configured.
 - 2026-06-26: Endpoint supported-file inspection belongs on the sensor, not behind `/api/v1/scan-file`. The endpoint may extract file text locally and send pre-redacted placeholders plus masked detector evidence to `/api/v1/gate`, but it should not upload watched file bodies to the control plane.
 - 2026-06-26: Endpoint file names are sensitive metadata. Reports and logs should use sanitized labels because member identifiers, account numbers, or confidential project names can appear in filenames even when file content is clean.
+- 2026-06-26: Endpoint redaction handoff is `redacted_available`, not `redacted_sent`. A watched-folder sensor can create a safe local companion file, but it should not claim the file was sent to a desktop AI app.
 - 2026-06-26: Canary tokens use explicit `PS-CANARY-...` or `PROMPTSENTINEL-CANARY-...` formats with enough suffix entropy to avoid flagging ordinary discussion of canaries.
 - 2026-06-26: Managed Chrome deployment examples are treated as secret-bearing config because managed storage carries the ingest key. Source examples must keep placeholders only.
 - 2026-06-26: Examiner evidence should be product-visible through the dashboard, but the UI must call only the sanitized evidence endpoint and never reveal raw prompt data.

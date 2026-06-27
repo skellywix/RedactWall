@@ -2,12 +2,13 @@
 
 ## Open
 
-- Next pass: add an explicit endpoint redaction handoff for structured-only file findings, such as writing a sanitized companion file or requiring approval before release, so the watched-file sensor has a real user-facing replacement path instead of telemetry-only token labels.
-- After that: run a package-to-install endpoint pilot smoke that verifies the zip contents, scheduled-task runner, env loading, policy refresh, local file extraction, sanitized gate telemetry, and uninstall path together.
+- Next pass: run a package-to-install endpoint pilot smoke that verifies the zip contents, scheduled-task runner, env loading, policy refresh, local file extraction, sanitized gate telemetry, redacted companion handoff, and uninstall path together.
 - Keep an eye on the remaining product gap: the current endpoint agent is still a watched-folder reference sensor, not a native desktop file-interception agent.
 
 ## Done
 
+- 2026-06-26: Added an explicit endpoint redaction handoff for structured-only watched-file findings: redact policy now writes a sanitized `.promptsentinel-redacted/*.txt` companion file with typed placeholders, reports `redacted_available` evidence to `/api/v1/gate`, ignores generated companions in the watcher, and removes the companion if control-plane recording fails or does not resolve as redacted.
+  Evidence: `node --test test/endpoint-agent.test.js test/redact-policy.test.js test/validation.test.js test/endpoint-agent-package.test.js`, `npm run package:endpoint-agent`, `npm test`, `npm run test:browser`, `npm run setup:check`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Moved endpoint-agent supported-file inspection to the local sensor path: watched files now extract and analyze locally with the shared detector and policy evaluator, then report only sanitized placeholders, masked findings, sanitized filename labels, and client analysis to `/api/v1/gate`; the endpoint package now includes the shared detector/policy files and refuses regressions to file-body upload calls.
   Evidence: `node --test test/endpoint-agent.test.js test/endpoint-agent-package.test.js test/validation.test.js test/redact-policy.test.js test/release-token.test.js`, `npm run package:endpoint-agent`, `npm test`, `npm run test:browser`, `npm run setup:check`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Added repeatable endpoint-agent pilot packaging: `npm run package:endpoint-agent` writes a prompt-free zip plus SHA-256 manifest with the endpoint runtime, file processor registry, env loader, and scheduled-task install/run/uninstall scripts; the endpoint agent now requires an explicit ingest key before control-plane calls and reports that state at startup without printing secrets.
