@@ -6,10 +6,10 @@ const fs = require('fs');
 const path = require('path');
 
 const root = path.join(__dirname, '..');
-const dashboardHtml = fs.readFileSync(path.join(root, 'public', 'index.html'), 'utf8');
-const loginHtml = fs.readFileSync(path.join(root, 'public', 'login.html'), 'utf8');
-const dashboardJs = fs.readFileSync(path.join(root, 'public', 'dashboard.js'), 'utf8');
-const loginJs = fs.readFileSync(path.join(root, 'public', 'login.js'), 'utf8');
+const dashboardHtml = fs.readFileSync(path.join(root, 'server', 'public', 'index.html'), 'utf8');
+const loginHtml = fs.readFileSync(path.join(root, 'server', 'public', 'login.html'), 'utf8');
+const dashboardJs = fs.readFileSync(path.join(root, 'server', 'public', 'dashboard.js'), 'utf8');
+const loginJs = fs.readFileSync(path.join(root, 'server', 'public', 'login.js'), 'utf8');
 
 test('admin pages load external scripts instead of inline scripts', () => {
   assert.match(dashboardHtml, /<script src="\/dashboard\.js" defer><\/script>/);

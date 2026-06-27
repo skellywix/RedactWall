@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert');
-const tenant = require('../src/tenant');
+const tenant = require('../server/tenant');
 
 function fakeDb(users = []) {
   return {

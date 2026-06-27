@@ -26,8 +26,8 @@ function setPolicy(patch = {}) {
 
 setPolicy();
 
-const processors = require('../src/processors');
-const app = require('../server');
+const processors = require('../server/processors');
+const app = require('../server/app');
 
 function listen(appUnderTest) {
   return new Promise((resolve, reject) => {

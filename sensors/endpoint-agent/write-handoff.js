@@ -9,11 +9,11 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const nativeHandoff = require('./native-handoff');
-const { loadEnv } = require('../src/env');
+const { loadEnv } = require('../../server/env');
 
 function usage() {
   return [
-    'Usage: node endpoint-agent/write-handoff.js --file <path> --destination <app> [options]',
+    'Usage: node sensors/endpoint-agent/write-handoff.js --file <path> --destination <app> [options]',
     '',
     'Options:',
     '  --file <path>                 Local file path attempted for upload',

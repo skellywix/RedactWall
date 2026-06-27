@@ -2,7 +2,7 @@
 /** MCP guard must never pass sensitive tool output to the model unchanged. */
 const test = require('node:test');
 const assert = require('node:assert');
-const { fetchPolicy, guardToolResult, reportBody, refreshPolicy, requestTimeoutMs } = require('../mcp-guard/guard');
+const { fetchPolicy, guardToolResult, reportBody, refreshPolicy, requestTimeoutMs } = require('../sensors/mcp-guard/guard');
 const pkg = require('../package.json');
 
 const noOpFetch = async () => ({ ok: true });

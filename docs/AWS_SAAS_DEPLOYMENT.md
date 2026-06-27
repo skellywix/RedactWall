@@ -158,7 +158,7 @@ From the project folder before deployment:
 npm test
 npm run sync-check
 npm run setup:check
-node -e "const v=require('./src/db').verifyAuditChain(); console.log(JSON.stringify(v)); if(!v.ok) process.exit(1)"
+node -e "const v=require('./server/db').verifyAuditChain(); console.log(JSON.stringify(v)); if(!v.ok) process.exit(1)"
 ```
 
 After deployment:

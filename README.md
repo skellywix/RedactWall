@@ -62,7 +62,7 @@ self-describing unit you can enable or disable per policy. Two layers, both on-d
    confidential business context (e.g. "we're considering leaving our vendor, do not
    share"). This is what keyword lists miss.
 
-`classifySemantic()` in `shared/detect.js` runs a **compact on-device classifier** —
+`classifySemantic()` in `detection-engine/detect.js` runs a **compact on-device classifier** —
 a per-category hashing-trick logistic regression with **subword (char n-gram) features**
 (trained by `npm run train-semantic`), now covering **all four categories** (source code,
 legal/contracts, credentials, confidential business). It **augments** precise keyword rules
@@ -81,7 +81,7 @@ registry; disable any detector via the policy `disabledDetectors` list.
 ## File scanning (PDF / Word / Excel / PowerPoint)
 
 People paste *and upload* sensitive files into AI tools. A **processor layer**
-(`src/processors.js`) extracts text from PDFs, `.docx`, `.xlsx`, and `.pptx` (plus all
+(`server/processors.js`) extracts text from PDFs, `.docx`, `.xlsx`, and `.pptx` (plus all
 text formats) so uploads get the same detection as typed prompts. The endpoint
 agent uses it locally for every watched file and reports only sanitized evidence
 to the control plane. In redact mode, structured-only endpoint findings also
@@ -149,7 +149,7 @@ SQLite evidence storage.
 ### Try the browser extension (flagship)
 
 1. Chrome → Extensions → enable Developer mode → **Load unpacked** → select the
-   `extension/` folder.
+   `sensors/browser-extension/` folder.
 2. Configure the extension with the demo ingest key from your `.env` or shell:
 
    ```javascript
@@ -170,7 +170,7 @@ npm run package:endpoint-agent
 npm run package:mcp-guard
 ```
 
-The extension zip lands in `dist/extension/`, the endpoint agent zip lands in
+The extension zip lands in `dist/browser-extension/`, the endpoint agent zip lands in
 `dist/endpoint-agent/`, and the MCP guard zip lands in `dist/mcp-guard/`. Each
 artifact gets a SHA-256 manifest and refuses packaged development keys or prompt
 bodies. Configure real pilot keys through Chrome managed storage or local sensor
@@ -181,9 +181,9 @@ environment config, not inside packages.
 ```bash
 npm run simulate                      # pushes sample prompts (API/proxy path)
 npm run fire-drill -- http://localhost:4000  # sends a synthetic canary control
-node mcp-guard/guard.js               # demo: redact a SharePoint doc before the model sees it
-node endpoint-agent/agent.js <dir>    # watch a folder, or process signed native file-flow handoffs
-node endpoint-agent/write-handoff.js --file <path> --destination "Desktop AI"  # write a signed native upload intent
+node sensors/mcp-guard/guard.js               # demo: redact a SharePoint doc before the model sees it
+node sensors/endpoint-agent/agent.js <dir>    # watch a folder, or process signed native file-flow handoffs
+node sensors/endpoint-agent/write-handoff.js --file <path> --destination "Desktop AI"  # write a signed native upload intent
 ```
 
 For a Windows pilot, install the endpoint sensor as a logon task:
@@ -205,7 +205,7 @@ npm run backup -- backups  # SQLite audit-store backup + verification manifest
 
 ## Development and Git workflow
 
-The repository uses one Git source of truth: `promptsentinel/`. Keep commits and pushes inside this folder.
+The repository uses one Git source of truth: this `promptsentinel/` folder. If your terminal is in the parent `promptsentinel-app/` workspace, run `cd promptsentinel` before source edits, `npm` commands, commits, or pushes.
 
 This repo is configured with a review-first workflow:
 
@@ -218,25 +218,24 @@ This repo is configured with a review-first workflow:
 - The `pre-commit` hook runs `npm run review:agent` and blocks commits if checks fail.
 - The `post-commit` hook runs the same review gate and pushes only when checks pass.
 - If push fails (network/credentials), the commit stays local and you can retry with `git push`.
+- For Codex-driven changes, a separate checker/review agent should review substantive diffs before handoff. The hook gate is still the deterministic local test gate.
 
 For any review notes you want to preserve, add them to `ITERATIONS.md` and `STATUS.md` with the date and commands you ran.
 
 ## Project layout
 
 ```
-server.js                 Control plane: gate API, policy, approval queue, SSE, audit
-shared/detect.js          Hybrid detection engine (shared by ALL sensors + server)
-src/policy.js             Enforcement policy + scanner config (ignore-lists, disabled detectors)
-src/processors.js         File-processor registry (pdf / docx / xlsx / pptx / text extraction)
-src/db.js                 SQLite store + hash-chained audit log
-src/auth.js               Security Admin session auth
-public/index.html         Dashboard (queue, activity, audit, policy)
-extension/                Browser extension (MV3) — flagship sensor
-  manifest.json, content.js, content.css, background.js, popup.html
-  lib/detect.js           (copy of shared/detect.js)
-endpoint-agent/agent.js   Desktop file sensor (reference)
-mcp-guard/guard.js        MCP tool-response redactor (reference)
-scripts/                  simulate.js, squid-icap-bridge.js
+server/app.js                         Control plane: gate API, policy, approval queue, SSE, audit
+server/public/index.html              Dashboard (queue, activity, audit, policy)
+server/policy.js                      Enforcement policy + scanner config
+server/processors.js                  File-processor registry
+server/db.js                          SQLite store + hash-chained audit log
+detection-engine/detect.js            Hybrid detection engine used by every sensor and the server
+sensors/browser-extension/            Browser extension (MV3) flagship sensor
+  lib/detect.js                       Synced copy of detection-engine/detect.js
+sensors/endpoint-agent/agent.js       Desktop file sensor reference
+sensors/mcp-guard/guard.js            MCP tool-response redactor reference
+scripts/                              Setup, packaging, simulation, training, sync checks
 ```
 
 For stack decisions and migration rationale, see `STACK_REVIEW.md`.

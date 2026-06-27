@@ -6,8 +6,8 @@ const fs = require('fs');
 const path = require('path');
 
 const root = path.join(__dirname, '..');
-const dashboardHtml = fs.readFileSync(path.join(root, 'public', 'index.html'), 'utf8');
-const dashboardJs = fs.readFileSync(path.join(root, 'public', 'dashboard.js'), 'utf8');
+const dashboardHtml = fs.readFileSync(path.join(root, 'server', 'public', 'index.html'), 'utf8');
+const dashboardJs = fs.readFileSync(path.join(root, 'server', 'public', 'dashboard.js'), 'utf8');
 
 test('dashboard exposes a sanitized evidence export download action', () => {
   assert.match(dashboardHtml, /id="exportEvidence"/);

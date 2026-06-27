@@ -20,7 +20,7 @@ process.env.INGEST_API_KEY = process.env.INGEST_API_KEY || 'e2e-ingest-key';
 process.env.SENTINEL_DB_PATH = process.env.SENTINEL_DB_PATH || path.join(tempDir, 'sentinel.db');
 process.env.SENTINEL_POLICY_PATH = process.env.SENTINEL_POLICY_PATH || policyPath;
 
-const app = require('../server');
+const app = require('../server/app');
 const server = app.startServer(Number(process.env.PORT));
 
 function cleanup() {

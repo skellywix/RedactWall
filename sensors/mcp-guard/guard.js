@@ -1,5 +1,5 @@
 'use strict';
-require('../src/env').loadEnv();
+require('../../server/env').loadEnv();
 /**
  * PromptSentinel MCP guard (reference implementation).
  *
@@ -11,8 +11,8 @@ require('../src/env').loadEnv();
  *
  * Wrap any tool handler with guardToolResult(). Same shared engine, same server.
  */
-const D = require('../shared/detect');
-const VERSION = require('../package.json').version;
+const D = require('../../detection-engine/detect');
+const VERSION = require('../../package.json').version;
 
 const SERVER = process.env.SENTINEL_URL || 'http://localhost:4000';
 const KEY = process.env.INGEST_API_KEY || '';

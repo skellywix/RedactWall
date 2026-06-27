@@ -32,18 +32,18 @@ npm run package:extension
 The command writes:
 
 ```text
-dist/extension/promptsentinel-extension-v<version>.zip
-dist/extension/promptsentinel-extension-v<version>.manifest.json
+dist/browser-extension/promptsentinel-extension-v<version>.zip
+dist/browser-extension/promptsentinel-extension-v<version>.manifest.json
 ```
 
 The manifest records the package SHA-256, every packaged file hash, the app and extension versions, the synced engine hashes, and packaging checks. It intentionally contains no prompt bodies or real keys.
 
 The command fails if:
 
-- `extension/manifest.json` is not Manifest V3.
+- `sensors/browser-extension/manifest.json` is not Manifest V3.
 - The extension version differs from `package.json`.
 - Required service worker, popup, content scripts, or managed schema files are missing.
-- The copied detection engine under `extension/lib/` drifted from `shared/`.
+- The copied detection engine under `sensors/browser-extension/lib/` drifted from `detection-engine/`.
 - A development ingest key is present in packaged extension files.
 
 ## Extension Settings Example
@@ -58,7 +58,7 @@ https://clients2.google.com/service/update2/crx
 
 ## Managed Storage Example
 
-Use `docs/examples/chrome-managed-storage.policy.json` for the values consumed by `extension/schema.json`.
+Use `docs/examples/chrome-managed-storage.policy.json` for the values consumed by `sensors/browser-extension/schema.json`.
 
 Never put a real ingest key in source control or a screenshot. Generate a long random ingest key per pilot and rotate it after demos.
 

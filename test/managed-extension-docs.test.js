@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 
 const root = path.join(__dirname, '..');
-const schema = JSON.parse(fs.readFileSync(path.join(root, 'extension', 'schema.json'), 'utf8'));
+const schema = JSON.parse(fs.readFileSync(path.join(root, 'sensors', 'browser-extension', 'schema.json'), 'utf8'));
 const managed = JSON.parse(fs.readFileSync(path.join(root, 'docs', 'examples', 'chrome-managed-storage.policy.json'), 'utf8'));
 const extensionSettings = JSON.parse(fs.readFileSync(path.join(root, 'docs', 'examples', 'chrome-extension-settings.example.json'), 'utf8'));
 const guide = fs.readFileSync(path.join(root, 'docs', 'MANAGED_EXTENSION_DEPLOYMENT.md'), 'utf8');

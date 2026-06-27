@@ -2,7 +2,7 @@
 /** Sanitized SIEM/webhook alerting. node --test */
 const test = require('node:test');
 const assert = require('node:assert');
-const alerts = require('../src/alerts');
+const alerts = require('../server/alerts');
 
 function sampleQuery(overrides = {}) {
   return {

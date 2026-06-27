@@ -1,5 +1,5 @@
 'use strict';
-require('../src/env').loadEnv();
+require('../../server/env').loadEnv();
 /**
  * PromptSentinel endpoint agent (reference implementation).
  *
@@ -18,10 +18,10 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 const nativeHandoff = require('./native-handoff');
-const processors = require('../src/processors');
-const policyEngine = require('../src/policy');
-const D = require('../shared/detect');
-const VERSION = require('../package.json').version;
+const processors = require('../../server/processors');
+const policyEngine = require('../../server/policy');
+const D = require('../../detection-engine/detect');
+const VERSION = require('../../package.json').version;
 
 const SERVER = process.env.SENTINEL_URL || 'http://localhost:4000';
 const KEY = process.env.INGEST_API_KEY || '';

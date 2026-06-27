@@ -1,8 +1,8 @@
 'use strict';
-/** Site adapters + Man-in-the-Prompt scanner (shared/adapters.js). node --test */
+/** Site adapters + Man-in-the-Prompt scanner (detection-engine/adapters.js). node --test */
 const test = require('node:test');
 const assert = require('node:assert');
-const A = require('../shared/adapters');
+const A = require('../detection-engine/adapters');
 
 test('send-button selectors are site-specific then generic', () => {
   const sel = A.sendButtonSelectors('chatgpt.com');

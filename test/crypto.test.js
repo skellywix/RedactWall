@@ -1,6 +1,6 @@
 'use strict';
 /**
- * At-rest encryption for retained raw prompts (src/crypto.js).
+ * At-rest encryption for retained raw prompts (server/crypto.js).
  * Run via: node --test
  */
 const test = require('node:test');
@@ -8,7 +8,7 @@ const assert = require('node:assert');
 
 // Key must be set before requiring the module (it reads env at load time).
 process.env.SENTINEL_DATA_KEY = process.env.SENTINEL_DATA_KEY || 'unit-test-stable-key';
-const dataCrypto = require('../src/crypto');
+const dataCrypto = require('../server/crypto');
 
 test('round-trips plaintext', () => {
   const pt = 'Member SSN 524-71-9043, card 4111 1111 1111 1111';

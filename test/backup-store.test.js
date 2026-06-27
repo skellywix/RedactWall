@@ -12,7 +12,7 @@ process.env.SENTINEL_DB_PATH = path.join(tempRoot, 'sentinel.db');
 process.env.SENTINEL_SECRET = 'unit-secret-stable';
 process.env.SENTINEL_DATA_KEY = 'unit-data-key-stable';
 
-const db = require('../src/db');
+const db = require('../server/db');
 const backup = require('../scripts/backup-store');
 
 test('backup workflow verifies and restores audit evidence without leaking manifest prompt data', async () => {

@@ -2,7 +2,7 @@
 /** Production preflight must block unsafe deployment configuration. */
 const test = require('node:test');
 const assert = require('node:assert');
-const preflight = require('../src/preflight');
+const preflight = require('../server/preflight');
 
 const unsafe = {
   adminPasswordIsDefault: true,

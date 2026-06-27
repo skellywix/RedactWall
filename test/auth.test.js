@@ -13,7 +13,7 @@ process.env.AUDITOR_PASSWORD = 'auditor-pass';
 process.env.SENTINEL_SECRET = 'unit-secret-stable';
 process.env.LOGIN_MAX_ATTEMPTS = '3';
 process.env.LOGIN_WINDOW_MS = '100000';
-const auth = require('../src/auth');
+const auth = require('../server/auth');
 
 function signedSession(payload) {
   const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
@@ -96,7 +96,7 @@ test('session verification preserves legacy admin cookies and rejects unknown ro
 
 test('duplicate auditor username is not enabled at runtime', () => {
   const script = [
-    "const auth = require('./src/auth');",
+    "const auth = require('./server/auth');",
     "console.log(JSON.stringify({ enabled: auth.AUDITOR_ENABLED, admin: auth.authenticate('admin', 'unit-pass'), duplicate: auth.authenticate('admin', 'auditor-pass') }));",
   ].join('');
   const output = execFileSync(process.execPath, ['-e', script], {

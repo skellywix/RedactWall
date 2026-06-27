@@ -12,13 +12,13 @@ const DEFAULT_OUT_DIR = path.join(ROOT, 'dist', 'endpoint-agent');
 const PACKAGE_FILES = [
   'package.json',
   'package-lock.json',
-  'shared/detect.js',
-  'src/env.js',
-  'src/policy.js',
-  'src/processors.js',
-  'endpoint-agent/agent.js',
-  'endpoint-agent/native-handoff.js',
-  'endpoint-agent/write-handoff.js',
+  'detection-engine/detect.js',
+  'server/env.js',
+  'server/policy.js',
+  'server/processors.js',
+  'sensors/endpoint-agent/agent.js',
+  'sensors/endpoint-agent/native-handoff.js',
+  'sensors/endpoint-agent/write-handoff.js',
   'scripts/install-endpoint-agent.ps1',
   'scripts/run-endpoint-agent.ps1',
   'scripts/uninstall-endpoint-agent.ps1',
@@ -63,7 +63,7 @@ function validateRuntimeFiles(files) {
     }
   }
 
-  const agent = files.find((file) => file.path === 'endpoint-agent/agent.js').body.toString('utf8');
+  const agent = files.find((file) => file.path === 'sensors/endpoint-agent/agent.js').body.toString('utf8');
   if (!/process\.env\.INGEST_API_KEY \|\| ''/.test(agent)) {
     throw new Error('Endpoint agent package must require explicit INGEST_API_KEY for control-plane calls');
   }
@@ -77,12 +77,12 @@ function validateRuntimeFiles(files) {
     throw new Error('Endpoint agent package must include the signed native handoff prototype');
   }
 
-  const handoff = files.find((file) => file.path === 'endpoint-agent/native-handoff.js').body.toString('utf8');
+  const handoff = files.find((file) => file.path === 'sensors/endpoint-agent/native-handoff.js').body.toString('utf8');
   if (!/createHmac\('sha256'/.test(handoff) || !/contentBase64/.test(handoff)) {
     throw new Error('Endpoint agent native handoff must be signed and content-free');
   }
 
-  const handoffWriter = files.find((file) => file.path === 'endpoint-agent/write-handoff.js').body.toString('utf8');
+  const handoffWriter = files.find((file) => file.path === 'sensors/endpoint-agent/write-handoff.js').body.toString('utf8');
   if (!/writeHandoffFile/.test(handoffWriter) || !/signHandoffEvent/.test(handoffWriter)) {
     throw new Error('Endpoint agent package must include the native handoff writer');
   }

@@ -27,8 +27,8 @@ fs.writeFileSync(process.env.SENTINEL_POLICY_PATH, JSON.stringify({
   rawRetentionDays: 30,
 }, null, 2));
 
-const app = require('../server');
-const auth = require('../src/auth');
+const app = require('../server/app');
+const auth = require('../server/auth');
 
 function listen(appUnderTest) {
   return new Promise((resolve, reject) => {

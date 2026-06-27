@@ -6,7 +6,7 @@ const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { parseEnv } = require('../src/env');
+const { parseEnv } = require('../server/env');
 const {
   buildEnv,
   mergeEnv,

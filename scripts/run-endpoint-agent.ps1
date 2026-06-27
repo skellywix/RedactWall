@@ -19,7 +19,7 @@ $env:SENTINEL_ENV_PATH = $config
 Set-Location -LiteralPath $repo
 
 try {
-  & $node.Source (Join-Path $repo "endpoint-agent\agent.js") *>> $LogPath
+  & $node.Source (Join-Path $repo "sensors\endpoint-agent\agent.js") *>> $LogPath
   exit $LASTEXITCODE
 } catch {
   "$(Get-Date -Format o) endpoint agent runner failed: $($_.Exception.Message)" | Out-File -Append -Encoding utf8 -FilePath $LogPath

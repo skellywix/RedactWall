@@ -4,9 +4,9 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
-const coverage = require('../src/coverage');
+const coverage = require('../server/coverage');
 
-const serverSource = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+const serverSource = fs.readFileSync(path.join(__dirname, '..', 'server/app.js'), 'utf8');
 
 const policy = {
   governedDestinations: ['chatgpt.com', 'claude.ai', 'copilot.microsoft.com'],

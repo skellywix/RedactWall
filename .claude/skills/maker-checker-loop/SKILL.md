@@ -14,9 +14,9 @@ The model that wrote the code is far too generous grading its own homework. Sepa
 ## Checker pass (PromptSentinel gate)
 The checker runs and must get a clean result on all of these before PASS:
 1. `npm test` exits 0.
-2. `npm run sync-check` — the shared engine and `extension/lib/` copy are identical. Any detector change must go through `npm run sync-engine`, never hand-edited in one place.
-3. If `shared/detect.js` semantic weights changed: `npm run train-semantic` then `git diff --exit-code` on the model block — retraining must be deterministic (CI enforces this).
-4. If audit/db code changed: `node -e "require('./src/db').verifyAuditChain()"` reports `ok:true`.
+2. `npm run sync-check` — the shared engine and `sensors/browser-extension/lib/` copy are identical. Any detector change must go through `npm run sync-engine`, never hand-edited in one place.
+3. If `detection-engine/detect.js` semantic weights changed: `npm run train-semantic` then `git diff --exit-code` on the model block — retraining must be deterministic (CI enforces this).
+4. If audit/db code changed: `node -e "require('./server/db').verifyAuditChain()"` reports `ok:true`.
 5. Diff review against project rules: no weakening of `alwaysBlock` types (SSN, cards, bank/routing, IBAN, passport, secret/private keys), no raw sensitive values written to logs or audit `entry`, no new dependency without reason, functions doing one thing.
 
 ## Output

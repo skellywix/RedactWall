@@ -38,7 +38,7 @@ Run at the end of every successful pass:
 ```bash
 npm run hooks:install
 npm run review:ci
-node -e "console.log(JSON.stringify(require('./src/db').verifyAuditChain()))"
+node -e "console.log(JSON.stringify(require('./server/db').verifyAuditChain()))"
 ```
 
 When detector behavior changes:
@@ -54,7 +54,7 @@ When admin-console behavior changes:
 npm run test:browser
 ```
 
-When `shared/detect.js` changes:
+When `detection-engine/detect.js` changes:
 
 ```bash
 npm run sync-engine
@@ -65,7 +65,7 @@ npm run sync-check
 
 - Do not weaken `alwaysBlock` entities.
 - Do not log or persist raw prompt text except encrypted held items covered by policy.
-- Do not hand-edit `extension/lib/detect.js`; sync from `shared/detect.js`.
+- Do not hand-edit `sensors/browser-extension/lib/detect.js`; sync from `detection-engine/detect.js`.
 - Keep browser, endpoint, MCP, and server behavior aligned.
 - Use synthetic sensitive data only.
 - Commit every successful pass separately.

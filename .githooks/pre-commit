@@ -1,14 +1,12 @@
-@echo off
-setlocal
+#!/usr/bin/env sh
+set -eu
 
-where npm >nul 2>nul
-if errorlevel 1 (
-  echo [pre-commit] npm not found. Install Node.js and npm, then retry.
-  exit /b 1
-)
+if ! command -v npm >/dev/null 2>&1; then
+  echo "[pre-commit] npm not found. Install Node.js and npm, then retry."
+  exit 1
+fi
 
-call npm run review:agent
-if errorlevel 1 (
-  echo [pre-commit] review:agent failed. Commit aborted.
-  exit /b 1
-)
+if ! npm run review:agent; then
+  echo "[pre-commit] review:agent failed. Commit aborted."
+  exit 1
+fi

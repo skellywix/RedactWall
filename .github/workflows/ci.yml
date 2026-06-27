@@ -34,14 +34,14 @@ jobs:
             playwright-report/
           if-no-files-found: ignore
       - name: Audit chain verifies
-        run: node -e "const v=require('./src/db').verifyAuditChain(); console.log(JSON.stringify(v)); if(!v.ok) process.exit(1)"
+        run: node -e "const v=require('./server/db').verifyAuditChain(); console.log(JSON.stringify(v)); if(!v.ok) process.exit(1)"
       - name: Detection eval
         run: node scripts/eval-detect.js --ci
       - name: Semantic model is deterministic
         run: |
           npm run train-semantic
           npm run sync-check
-          git diff --exit-code -- shared/detect.js extension/lib/detect.js \
+          git diff --exit-code -- detection-engine/detect.js sensors/browser-extension/lib/detect.js \
             || (echo "Retraining changed the model; commit the regenerated weights." && exit 1)
       - name: Tests do not mutate committed config
         run: git diff --exit-code -- config/policy.json

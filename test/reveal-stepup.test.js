@@ -22,9 +22,9 @@ fs.writeFileSync(process.env.SENTINEL_POLICY_PATH, JSON.stringify({
   rawRetentionDays: 30,
 }, null, 2));
 
-const app = require('../server');
-const db = require('../src/db');
-const alerts = require('../src/alerts');
+const app = require('../server/app');
+const db = require('../server/db');
+const alerts = require('../server/alerts');
 
 function listen(appUnderTest) {
   return new Promise((resolve, reject) => {

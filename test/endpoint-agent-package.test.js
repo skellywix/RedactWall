@@ -26,17 +26,17 @@ function minimalFiles(agentBody) {
   return [
     { path: 'package.json', body: Buffer.from('{"version":"0.0.0"}') },
     { path: 'package-lock.json', body: Buffer.from('{}') },
-    { path: 'shared/detect.js', body: Buffer.from('module.exports = {};') },
-    { path: 'src/env.js', body: Buffer.from('module.exports = {};') },
-    { path: 'src/policy.js', body: Buffer.from('module.exports = {};') },
-    { path: 'src/processors.js', body: Buffer.from('module.exports = {};') },
-    { path: 'endpoint-agent/agent.js', body: Buffer.from(agentBody) },
+    { path: 'detection-engine/detect.js', body: Buffer.from('module.exports = {};') },
+    { path: 'server/env.js', body: Buffer.from('module.exports = {};') },
+    { path: 'server/policy.js', body: Buffer.from('module.exports = {};') },
+    { path: 'server/processors.js', body: Buffer.from('module.exports = {};') },
+    { path: 'sensors/endpoint-agent/agent.js', body: Buffer.from(agentBody) },
     {
-      path: 'endpoint-agent/native-handoff.js',
+      path: 'sensors/endpoint-agent/native-handoff.js',
       body: Buffer.from("require('crypto').createHmac('sha256', 'secret'); const blocked = 'contentBase64';"),
     },
     {
-      path: 'endpoint-agent/write-handoff.js',
+      path: 'sensors/endpoint-agent/write-handoff.js',
       body: Buffer.from('function writeHandoffFile() { return signHandoffEvent(); }\nfunction signHandoffEvent() {}\n'),
     },
     {
@@ -78,13 +78,13 @@ test('package script writes a prompt-free endpoint agent zip and integrity manif
   for (const required of [
     'package.json',
     'package-lock.json',
-    'shared/detect.js',
-    'src/env.js',
-    'src/policy.js',
-    'src/processors.js',
-    'endpoint-agent/agent.js',
-    'endpoint-agent/native-handoff.js',
-    'endpoint-agent/write-handoff.js',
+    'detection-engine/detect.js',
+    'server/env.js',
+    'server/policy.js',
+    'server/processors.js',
+    'sensors/endpoint-agent/agent.js',
+    'sensors/endpoint-agent/native-handoff.js',
+    'sensors/endpoint-agent/write-handoff.js',
     'scripts/install-endpoint-agent.ps1',
     'scripts/run-endpoint-agent.ps1',
     'scripts/uninstall-endpoint-agent.ps1',
@@ -93,13 +93,13 @@ test('package script writes a prompt-free endpoint agent zip and integrity manif
     assert.ok(manifest.files.some((file) => file.path === required), required);
   }
 
-  const agent = zip.readAsText('endpoint-agent/agent.js');
+  const agent = zip.readAsText('sensors/endpoint-agent/agent.js');
   assert.match(agent, /process\.env\.INGEST_API_KEY \|\| ''/);
   assert.match(agent, /redacted_available/);
   assert.match(agent, /\.promptsentinel-redacted/);
   assert.match(agent, /ENDPOINT_AGENT_HANDOFF_SECRET/);
-  assert.match(zip.readAsText('endpoint-agent/native-handoff.js'), /createHmac\('sha256'/);
-  assert.match(zip.readAsText('endpoint-agent/write-handoff.js'), /writeHandoffFile/);
+  assert.match(zip.readAsText('sensors/endpoint-agent/native-handoff.js'), /createHmac\('sha256'/);
+  assert.match(zip.readAsText('sensors/endpoint-agent/write-handoff.js'), /writeHandoffFile/);
   assert.doesNotMatch(agent, /dev-ingest-key|524-71-9043|4111 1111 1111 1111/);
   assert.doesNotMatch(JSON.stringify(manifest), /prompt\s*:/i);
   assert.doesNotMatch(JSON.stringify(manifest), /524-71-9043|4111 1111|REPLACE_WITH_LONG_RANDOM_INGEST_KEY/);
@@ -168,8 +168,8 @@ test('packaged endpoint agent runs a package-to-install pilot smoke', async (t) 
     }
   });
 
-  const agentPath = require.resolve(path.join(installRoot, 'endpoint-agent', 'agent.js'));
-  const writerPath = require.resolve(path.join(installRoot, 'endpoint-agent', 'write-handoff.js'));
+  const agentPath = require.resolve(path.join(installRoot, 'sensors', 'endpoint-agent', 'agent.js'));
+  const writerPath = require.resolve(path.join(installRoot, 'sensors', 'endpoint-agent', 'write-handoff.js'));
   delete require.cache[agentPath];
   delete require.cache[writerPath];
   const agent = require(agentPath);

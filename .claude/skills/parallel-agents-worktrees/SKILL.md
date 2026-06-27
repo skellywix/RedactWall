@@ -22,7 +22,7 @@ Run each agent in its own tmux window / terminal tab and surface its status (run
 Independent tasks: separate features, a bug fix + a dep bump + a doc pass. Most go straight to a clean PR via `no-mistakes-review`; you only engage when one escalates a decision.
 
 ## PromptSentinel caution: serialize engine edits
-Two agents both editing `shared/detect.js` in parallel worktrees will collide on `npm run sync-check` / `npm run train-semantic` at merge. Keep detector/semantic-model changes to ONE worktree at a time; parallelize the independent surfaces (extension UI, server endpoints, docs, tests) freely.
+Two agents both editing `detection-engine/detect.js` in parallel worktrees will collide on `npm run sync-check` / `npm run train-semantic` at merge. Keep detector/semantic-model changes to ONE worktree at a time; parallelize the independent surfaces (extension UI, server endpoints, docs, tests) freely.
 
 ## Pairs with
 `no-mistakes-review` (each worktree's exit path), `long-running-orchestrator` (give a big job its own worktree).

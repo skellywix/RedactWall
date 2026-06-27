@@ -11,9 +11,9 @@ const ROOT = path.join(__dirname, '..');
 const DEFAULT_OUT_DIR = path.join(ROOT, 'dist', 'mcp-guard');
 const PACKAGE_FILES = [
   'package.json',
-  'src/env.js',
-  'shared/detect.js',
-  'mcp-guard/guard.js',
+  'server/env.js',
+  'detection-engine/detect.js',
+  'sensors/mcp-guard/guard.js',
 ];
 
 function posixPath(value) {
@@ -31,7 +31,7 @@ function readJson(file) {
 function runtimeBody(relPath, root = ROOT) {
   const absPath = path.join(root, relPath);
   let body = fs.readFileSync(absPath);
-  if (relPath === 'mcp-guard/guard.js') {
+  if (relPath === 'sensors/mcp-guard/guard.js') {
     body = Buffer.from(body.toString('utf8').replace(/\r?\n\/\/ ---- demo when run directly[\s\S]*$/, '\n'));
   }
   return body;
@@ -60,7 +60,7 @@ function validateRuntimeFiles(files) {
     }
   }
 
-  const guard = files.find((file) => file.path === 'mcp-guard/guard.js').body.toString('utf8');
+  const guard = files.find((file) => file.path === 'sensors/mcp-guard/guard.js').body.toString('utf8');
   if (!/process\.env\.INGEST_API_KEY \|\| ''/.test(guard)) {
     throw new Error('MCP guard package must require explicit INGEST_API_KEY for control-plane logging');
   }

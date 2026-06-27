@@ -126,7 +126,7 @@ Build the Chrome extension artifact before a managed pilot handoff:
 npm run package:extension
 ```
 
-The command writes a zip and adjacent SHA-256 manifest under `dist/extension/`.
+The command writes a zip and adjacent SHA-256 manifest under `dist/browser-extension/`.
 It verifies Manifest V3 wiring, managed-storage schema coverage, synced engine
 copies, and absence of a packaged development ingest key. Configure `serverUrl`,
 `ingestKey`, and identity through Chrome managed storage or local demo storage.
@@ -215,7 +215,7 @@ command line:
 
 ```powershell
 $env:SENTINEL_ENV_PATH = "$env:LOCALAPPDATA\PromptSentinel\endpoint-agent.env"
-node .\endpoint-agent\write-handoff.js `
+node .\sensors\endpoint-agent\write-handoff.js `
   --file "$env:USERPROFILE\Downloads\loan-file.pdf" `
   --destination "Desktop AI" `
   --user "analyst@example.com"
@@ -362,7 +362,7 @@ Before handing a deployment to a pilot user, run:
 npm test
 npm run sync-check
 npm run setup:check
-node -e "const v=require('./src/db').verifyAuditChain(); console.log(JSON.stringify(v)); if(!v.ok) process.exit(1)"
+node -e "const v=require('./server/db').verifyAuditChain(); console.log(JSON.stringify(v)); if(!v.ok) process.exit(1)"
 ```
 
 For dashboard changes:

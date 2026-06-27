@@ -16,7 +16,7 @@ and privacy guarantees the product sells.
 
 ## Non-Negotiable Invariants
 
-- Detector logic stays in `shared/detect.js`; changes there require
+- Detector logic stays in `detection-engine/detect.js`; changes there require
   `npm run sync-engine` and `npm run sync-check`.
 - No raw PII is written to logs or audit details.
 - `verifyAuditChain()` must remain `ok:true`.
@@ -93,7 +93,7 @@ Run these checks after implementation:
 npm test
 npm run sync-check
 npm run setup:check
-node -e "const v=require('./src/db').verifyAuditChain(); console.log(JSON.stringify(v)); if(!v.ok) process.exit(1)"
+node -e "const v=require('./server/db').verifyAuditChain(); console.log(JSON.stringify(v)); if(!v.ok) process.exit(1)"
 ```
 
 For AWS launch readiness, also validate the template locally or in a sandbox

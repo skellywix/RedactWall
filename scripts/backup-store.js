@@ -4,12 +4,12 @@
  * The manifest intentionally contains only metadata, hashes, counts, and audit
  * verification results. The `.db` backup itself is sensitive runtime state.
  */
-require('../src/env').loadEnv();
+require('../server/env').loadEnv();
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const Database = require('better-sqlite3');
-const auditIntegrity = require('../src/audit-integrity');
+const auditIntegrity = require('../server/audit-integrity');
 
 function parseArgs(argv) {
   const out = { _: [] };
@@ -86,7 +86,7 @@ function verifyBackup({ file, manifestFile } = {}) {
 }
 
 async function createBackup({ outDir, file, manifestFile, dbModule, force = false } = {}) {
-  const db = dbModule || require('../src/db');
+  const db = dbModule || require('../server/db');
   const sourceIntegrity = db.verifyAuditChain();
   if (!sourceIntegrity.ok) {
     throw new Error(`refusing to back up a database with broken audit integrity: ${sourceIntegrity.reason || 'unknown'}`);

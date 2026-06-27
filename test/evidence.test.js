@@ -2,7 +2,7 @@
 /** Examiner evidence export must not leak prompt bodies or audit details. */
 const test = require('node:test');
 const assert = require('node:assert');
-const evidence = require('../src/evidence');
+const evidence = require('../server/evidence');
 
 test('evidence pack omits raw prompt, redacted prompt body, token vault, and audit detail text', () => {
   const pack = evidence.buildEvidencePack({
@@ -73,7 +73,7 @@ test('evidence pack omits raw prompt, redacted prompt body, token vault, and aud
 test('server exposes protected evidence export route', () => {
   const fs = require('fs');
   const path = require('path');
-  const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+  const server = fs.readFileSync(path.join(__dirname, '..', 'server/app.js'), 'utf8');
   assert.match(server, /app\.get\('\/api\/export\/evidence', auth\.requireAuth/);
   assert.match(server, /evidence\.buildEvidencePack/);
 });

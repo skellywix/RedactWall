@@ -5,7 +5,7 @@ const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
 
-const server = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+const server = fs.readFileSync(path.join(__dirname, '..', 'server/app.js'), 'utf8');
 
 test('server disables framework fingerprinting and sets security headers', () => {
   assert.match(server, /app\.disable\('x-powered-by'\)/);

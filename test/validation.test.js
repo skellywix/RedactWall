@@ -13,8 +13,8 @@ process.env.SENTINEL_DATA_KEY = 'unit-data-key-stable';
 process.env.INGEST_API_KEY = 'unit-ingest-key';
 process.env.SENTINEL_DB_PATH = path.join(os.tmpdir(), 'ps-validation-test-' + crypto.randomBytes(6).toString('hex') + '.db');
 
-const app = require('../server');
-const db = require('../src/db');
+const app = require('../server/app');
+const db = require('../server/db');
 const policyPath = path.join(__dirname, '..', 'config', 'policy.json');
 
 function listen(appUnderTest) {

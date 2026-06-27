@@ -6,7 +6,7 @@ const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
 
-const env = require('../src/env');
+const env = require('../server/env');
 
 test('parseEnv supports comments, export prefix, and quoted values', () => {
   const parsed = env.parseEnv(`
@@ -61,7 +61,7 @@ test('copied example admin password is still reported as default', () => {
   const out = execFileSync(process.execPath, ['-e', `
 process.env.ADMIN_PASSWORD = 'ChangeMe!2026';
 process.env.SENTINEL_SECRET = 'unit-secret-stable';
-const auth = require('./src/auth');
+const auth = require('./server/auth');
 process.stdout.write(String(auth.ADMIN_PASSWORD_IS_DEFAULT));
 `], {
     cwd: path.join(__dirname, '..'),

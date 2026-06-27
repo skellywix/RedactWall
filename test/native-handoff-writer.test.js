@@ -5,8 +5,8 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const writer = require('../endpoint-agent/write-handoff');
-const handoff = require('../endpoint-agent/native-handoff');
+const writer = require('../sensors/endpoint-agent/write-handoff');
+const handoff = require('../sensors/endpoint-agent/native-handoff');
 
 const SECRET = 'native-handoff-secret-000000000000000001';
 

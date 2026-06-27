@@ -21,4 +21,4 @@ EXPOSE 4000
 VOLUME ["/data"]
 HEALTHCHECK --interval=30s --timeout=4s --start-period=5s --retries=3 \
   CMD node -e "fetch('http://localhost:'+(process.env.PORT||4000)+'/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
-CMD ["node", "server.js"]
+CMD ["node", "server/app.js"]

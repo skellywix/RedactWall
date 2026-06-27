@@ -16,7 +16,7 @@ process.env.INGEST_AUTH_WINDOW_MS = '60000';
 process.env.INGEST_AUTH_LOCK_MS = '60000';
 process.env.SENTINEL_DB_PATH = path.join(os.tmpdir(), 'ps-ingest-auth-test-' + crypto.randomBytes(6).toString('hex') + '.db');
 
-const app = require('../server');
+const app = require('../server/app');
 
 function listen(appUnderTest) {
   return new Promise((resolve, reject) => {

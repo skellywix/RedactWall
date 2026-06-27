@@ -2,8 +2,8 @@
 /** Policy governance diffs must be examiner-readable without exposing audit detail text. */
 const test = require('node:test');
 const assert = require('node:assert');
-const policy = require('../src/policy');
-const evidence = require('../src/evidence');
+const policy = require('../server/policy');
+const evidence = require('../server/evidence');
 
 test('policy change detail records normalized before-after changes', () => {
   const before = {

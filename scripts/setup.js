@@ -9,8 +9,8 @@ const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
-const { parseEnv } = require('../src/env');
-const preflight = require('../src/preflight');
+const { parseEnv } = require('../server/env');
+const preflight = require('../server/preflight');
 
 const ROOT = path.resolve(__dirname, '..');
 const DEFAULT_ENV_PATH = path.join(ROOT, '.env');
@@ -218,9 +218,9 @@ function installDependencies(opts = {}) {
 }
 
 function initializeRuntime(envPath) {
-  require('../src/env').loadEnv(envPath);
+  require('../server/env').loadEnv(envPath);
   fs.mkdirSync(path.join(ROOT, 'data'), { recursive: true });
-  const db = require('../src/db');
+  const db = require('../server/db');
   db.stats();
   return db.verifyAuditChain();
 }

@@ -24,4 +24,4 @@ Keeps the small dependency surface (`express`, `better-sqlite3`, `pdf-parse`, `a
 - Constraints: never auto-merge a major or a parser/native dep; never bump and refactor in the same PR.
 
 ## Security note
-`pdf-parse` and `adm-zip` process untrusted user uploads via `src/processors.js`. Treat their CVEs as priority and pair upgrades with a `bug-repro-fix-loop` regression test using a crafted sample.
+`pdf-parse` and `adm-zip` process untrusted user uploads via `server/processors.js`. Treat their CVEs as priority and pair upgrades with a `bug-repro-fix-loop` regression test using a crafted sample.

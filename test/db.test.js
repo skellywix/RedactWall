@@ -1,6 +1,6 @@
 'use strict';
 /**
- * Datastore + tamper-evident audit (src/db.js, SQLite-backed).
+ * Datastore + tamper-evident audit (server/db.js, SQLite-backed).
  * Uses an isolated temp DB so it never touches real data. Run: node --test
  */
 const test = require('node:test');
@@ -14,7 +14,7 @@ const crypto = require('crypto');
 // An explicit SENTINEL_DB_PATH also disables legacy JSON auto-migration, so the
 // test store is hermetic.
 process.env.SENTINEL_DB_PATH = path.join(os.tmpdir(), 'ps-db-test-' + crypto.randomBytes(6).toString('hex') + '.db');
-const db = require('../src/db');
+const db = require('../server/db');
 
 test('queries round-trip and update transactionally', () => {
   const q = db.createQuery({ status: 'pending', user: 'alice', redactedPrompt: '[US_SSN]', findings: [{ type: 'US_SSN' }] });

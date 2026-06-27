@@ -32,15 +32,15 @@ function writeJson(file, value) {
 function writeFixture(rootDir, opts = {}) {
   const version = '9.9.9';
   writeJson(path.join(rootDir, 'package.json'), { version });
-  writeFile(path.join(rootDir, 'shared', 'detect.js'), 'const detector = 1;\n');
-  writeFile(path.join(rootDir, 'shared', 'adapters.js'), 'const adapters = 1;\n');
-  writeFile(path.join(rootDir, 'extension', 'lib', 'detect.js'), opts.drift ? 'const detector = 2;\n' : 'const detector = 1;\n');
-  writeFile(path.join(rootDir, 'extension', 'lib', 'adapters.js'), 'const adapters = 1;\n');
-  writeFile(path.join(rootDir, 'extension', 'background.js'), opts.devKey ? "const ingestKey = 'dev-ingest-key';\n" : "const ingestKey = '';\n");
-  writeFile(path.join(rootDir, 'extension', 'content.js'), 'console.log("content");\n');
-  writeFile(path.join(rootDir, 'extension', 'content.css'), 'body { color: black; }\n');
-  writeFile(path.join(rootDir, 'extension', 'popup.html'), '<html></html>\n');
-  writeJson(path.join(rootDir, 'extension', 'schema.json'), {
+  writeFile(path.join(rootDir, 'detection-engine', 'detect.js'), 'const detector = 1;\n');
+  writeFile(path.join(rootDir, 'detection-engine', 'adapters.js'), 'const adapters = 1;\n');
+  writeFile(path.join(rootDir, 'sensors', 'browser-extension', 'lib', 'detect.js'), opts.drift ? 'const detector = 2;\n' : 'const detector = 1;\n');
+  writeFile(path.join(rootDir, 'sensors', 'browser-extension', 'lib', 'adapters.js'), 'const adapters = 1;\n');
+  writeFile(path.join(rootDir, 'sensors', 'browser-extension', 'background.js'), opts.devKey ? "const ingestKey = 'dev-ingest-key';\n" : "const ingestKey = '';\n");
+  writeFile(path.join(rootDir, 'sensors', 'browser-extension', 'content.js'), 'console.log("content");\n');
+  writeFile(path.join(rootDir, 'sensors', 'browser-extension', 'content.css'), 'body { color: black; }\n');
+  writeFile(path.join(rootDir, 'sensors', 'browser-extension', 'popup.html'), '<html></html>\n');
+  writeJson(path.join(rootDir, 'sensors', 'browser-extension', 'schema.json'), {
     type: 'object',
     properties: {
       serverUrl: { type: 'string' },
@@ -48,7 +48,7 @@ function writeFixture(rootDir, opts = {}) {
       orgId: { type: 'string' },
     },
   });
-  writeJson(path.join(rootDir, 'extension', 'manifest.json'), {
+  writeJson(path.join(rootDir, 'sensors', 'browser-extension', 'manifest.json'), {
     manifest_version: 3,
     name: 'PromptSentinel',
     version,
@@ -76,7 +76,7 @@ test('package script writes a zip and prompt-free integrity manifest', (t) => {
   const zipBody = fs.readFileSync(result.zipPath);
   assert.strictEqual(manifest.kind, 'promptsentinel-extension-package');
   assert.strictEqual(manifest.sha256, sha256(zipBody));
-  assert.strictEqual(manifest.extensionVersion, JSON.parse(fs.readFileSync(path.join(root, 'extension', 'manifest.json'), 'utf8')).version);
+  assert.strictEqual(manifest.extensionVersion, JSON.parse(fs.readFileSync(path.join(root, 'sensors', 'browser-extension', 'manifest.json'), 'utf8')).version);
   assert.strictEqual(manifest.appVersion, JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version);
   assert.strictEqual(manifest.checks.manifestV3, true);
   assert.strictEqual(manifest.checks.syncedEngine, true);

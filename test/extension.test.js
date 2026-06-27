@@ -7,9 +7,10 @@ const path = require('path');
 const vm = require('vm');
 
 const root = path.join(__dirname, '..');
-const content = fs.readFileSync(path.join(root, 'extension', 'content.js'), 'utf8');
-const background = fs.readFileSync(path.join(root, 'extension', 'background.js'), 'utf8');
-const manifest = JSON.parse(fs.readFileSync(path.join(root, 'extension', 'manifest.json'), 'utf8'));
+const extensionDir = path.join(root, 'sensors', 'browser-extension');
+const content = fs.readFileSync(path.join(extensionDir, 'content.js'), 'utf8');
+const background = fs.readFileSync(path.join(extensionDir, 'background.js'), 'utf8');
+const manifest = JSON.parse(fs.readFileSync(path.join(extensionDir, 'manifest.json'), 'utf8'));
 
 function loadBackground(opts = {}) {
   let onMessage;

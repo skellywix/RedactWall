@@ -19,8 +19,8 @@ fs.writeFileSync(process.env.SENTINEL_POLICY_PATH, JSON.stringify({
   scanner: { maxFileBytes: 1024 },
 }));
 
-const app = require('../server');
-const db = require('../src/db');
+const app = require('../server/app');
+const db = require('../server/db');
 
 function listen(appUnderTest) {
   return new Promise((resolve, reject) => {

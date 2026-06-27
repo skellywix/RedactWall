@@ -6,7 +6,7 @@
  */
 const test = require('node:test');
 const assert = require('node:assert');
-const D = require('../shared/detect');
+const D = require('../detection-engine/detect');
 
 const SAMPLE = 'Member John, SSN 524-71-9043, card 4111 1111 1111 1111, email john@cu.org. SSN 524-71-9043 again.';
 

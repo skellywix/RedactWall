@@ -16,7 +16,7 @@ const {
   defaultWatchDir,
   configuredKey,
   nativeHandoff,
-} = require('../endpoint-agent/agent');
+} = require('../sensors/endpoint-agent/agent');
 const pkg = require('../package.json');
 
 test('watch directory prefers CLI argument, then endpoint env, then temp default', () => {

@@ -1,6 +1,6 @@
 # PromptSentinel Production Loop Decisions
 
-- 2026-06-27: Use a single local source of truth at `promptsentinel/` and require a review-gated git workflow for all changes. `npm run hooks:install` sets `.githooks`, `pre-commit` enforces `npm run review:ci`, and `post-commit` only pushes when the same checks pass.
+- 2026-06-27: Use a single local source of truth at `promptsentinel/` and require a review-gated git workflow for all changes. `npm run hooks:install` sets `.githooks`, `pre-commit` enforces `npm run review:agent`, and `post-commit` only pushes after `npm run review:ci` passes. For substantive Codex-driven changes, run a separate checker/review agent before handoff.
 - 2026-06-26: Use one verified pass per commit. Each pass must leave `npm test`, `npm run sync-check`, and audit integrity green.
 - 2026-06-26: Compete on simple regulated deployment and examiner-grade evidence, not breadth-first connector count.
 - 2026-06-26: Eccentric ideas are welcome only when they make the product easier to trust, operate, or demo.

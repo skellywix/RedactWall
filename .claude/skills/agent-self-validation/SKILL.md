@@ -13,9 +13,9 @@ Frontier models lean on unit tests because of how they're trained — but unit-g
 
 ## PromptSentinel E2E evidence menu (pick what the change touches)
 - **Detection change:** `npm run simulate` over the sample corpus — show before/after verdicts for the relevant prompts (use **synthetic** PII only). For `alwaysBlock` types, prove they still block.
-- **Browser sensor:** load the unpacked `extension/` in a test Chrome profile, paste a synthetic SSN into a chat box, screenshot the block modal AND confirm no request left the page (see `browser-use`).
+- **Browser sensor:** load the unpacked `sensors/browser-extension/` in a test Chrome profile, paste a synthetic SSN into a chat box, screenshot the block modal AND confirm no request left the page (see `browser-use`).
 - **Policy/enforcement:** flip `config/policy.json` mode, show warn vs require-justification vs redact vs block behaving correctly; in redact mode confirm only tokens leave.
-- **Audit/DB:** `node -e "require('./src/db').verifyAuditChain()"` → `ok:true`; show a tampered-row case returning `ok:false`.
+- **Audit/DB:** `node -e "require('./server/db').verifyAuditChain()"` → `ok:true`; show a tampered-row case returning `ok:false`.
 - **Server endpoints:** exercise the approval-queue flow (block → hold → approve → release) and capture the audit entries.
 
 ## Output

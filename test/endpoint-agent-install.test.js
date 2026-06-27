@@ -29,7 +29,7 @@ test('installer registers a restarting scheduled task without putting the ingest
 
 test('runner loads endpoint config through SENTINEL_ENV_PATH and starts the agent', () => {
   assert.match(run, /\$env:SENTINEL_ENV_PATH = \$config/);
-  assert.match(run, /endpoint-agent\\agent\.js/);
+  assert.match(run, /sensors\\endpoint-agent\\agent\.js/);
   assert.match(run, /\*>> \$LogPath/);
 });
 

@@ -8,11 +8,11 @@ const crypto = require('crypto');
 const AdmZip = require('adm-zip');
 
 const ROOT = path.join(__dirname, '..');
-const DEFAULT_OUT_DIR = path.join(ROOT, 'dist', 'extension');
+const DEFAULT_OUT_DIR = path.join(ROOT, 'dist', 'browser-extension');
 const REQUIRED_MANAGED_KEYS = ['serverUrl', 'ingestKey', 'orgId'];
 const ENGINE_COPIES = [
-  ['shared/detect.js', 'extension/lib/detect.js'],
-  ['shared/adapters.js', 'extension/lib/adapters.js'],
+  ['detection-engine/detect.js', 'sensors/browser-extension/lib/detect.js'],
+  ['detection-engine/adapters.js', 'sensors/browser-extension/lib/adapters.js'],
 ];
 
 function posixPath(value) {
@@ -27,7 +27,7 @@ function readJson(file) {
   return JSON.parse(fs.readFileSync(file, 'utf8'));
 }
 
-function collectExtensionFiles(extensionDir = path.join(ROOT, 'extension')) {
+function collectExtensionFiles(extensionDir = path.join(ROOT, 'sensors', 'browser-extension')) {
   const files = [];
 
   function walk(dir) {
@@ -115,7 +115,7 @@ function validatePackageContents(files) {
 
 function packageExtension(opts = {}) {
   const root = opts.root || ROOT;
-  const extensionDir = opts.extensionDir || path.join(root, 'extension');
+  const extensionDir = opts.extensionDir || path.join(root, 'sensors', 'browser-extension');
   const outDir = opts.outDir || DEFAULT_OUT_DIR;
   const now = opts.now || new Date();
   const manifest = readJson(path.join(extensionDir, 'manifest.json'));

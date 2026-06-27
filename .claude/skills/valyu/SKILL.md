@@ -11,9 +11,9 @@ Connects the agent to current, authoritative, often-paywalled data instead of st
 `npx skills add valyuAI/skills` then set your `VALYU_API_KEY` in the environment yourself.
 
 ## PromptSentinel uses
-- **Regulatory grounding:** fetch the current text of NCUA / GLBA Safeguards Rule / PCI-DSS / HIPAA requirements when building the regulation templates in `src/templates.js` — so the mappings cite real, dated source, not memory.
+- **Regulatory grounding:** fetch the current text of NCUA / GLBA Safeguards Rule / PCI-DSS / HIPAA requirements when building the regulation templates in `server/templates.js` — so the mappings cite real, dated source, not memory.
 - **Prospect research:** credit-union profiles, examiner findings, recent breach news to inform sales/positioning.
-- **Detection tuning corpus:** authoritative examples of sensitive-data formats (e.g. real IBAN country structures) to harden `shared/detect.js` validators — using format references, never real PII.
+- **Detection tuning corpus:** authoritative examples of sensitive-data formats (e.g. real IBAN country structures) to harden `detection-engine/detect.js` validators — using format references, never real PII.
 
 ## Best practices (from the skill)
 - Be specific about which sources you need (`included_sources=[...]`).

@@ -2,7 +2,7 @@
 /** Real HTTP smoke tests for the importable Express app. */
 const test = require('node:test');
 const assert = require('node:assert');
-const app = require('../server');
+const app = require('../server/app');
 
 function listen(appUnderTest) {
   return new Promise((resolve, reject) => {

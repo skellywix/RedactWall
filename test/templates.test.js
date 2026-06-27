@@ -1,8 +1,8 @@
 'use strict';
-/** Regulation policy templates (src/templates.js). node --test */
+/** Regulation policy templates (server/templates.js). node --test */
 const test = require('node:test');
 const assert = require('node:assert');
-const T = require('../src/templates');
+const T = require('../server/templates');
 
 test('every template is well-formed', () => {
   const list = T.list();

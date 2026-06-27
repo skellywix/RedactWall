@@ -11,8 +11,8 @@ PromptSentinel should optimize for a regulated pilot that installs quickly, prov
 - Upgraded backend runtime framework from Express 4 to Express 5.
 - Added Helmet for production security headers instead of maintaining all browser security headers by hand.
 - Moved admin dashboard and login JavaScript from inline HTML into external static files:
-  - `public/dashboard.js`
-  - `public/login.js`
+  - `server/public/dashboard.js`
+  - `server/public/login.js`
 - Tightened CSP so `script-src` no longer needs `unsafe-inline`.
 - Added static tests that prevent inline scripts and mojibake from creeping back into the admin frontend.
 - Added Zod request-body validation for sensor and admin APIs, with sanitized field-only validation errors.

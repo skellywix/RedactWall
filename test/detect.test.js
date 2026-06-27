@@ -13,7 +13,7 @@
  */
 const test = require('node:test');
 const assert = require('node:assert');
-const D = require('../shared/detect');
+const D = require('../detection-engine/detect');
 
 const find = (text) => D.analyze(text);
 const hasType = (text, t) => find(text).findings.some((f) => f.type === t);
@@ -90,7 +90,7 @@ test('false-positive rate on random ids stays low', () => {
 });
 
 // ---------------------------------------------------------------------------
-// SEMANTIC MODEL — the compact on-device classifier (shared/detect.js, trained
+// SEMANTIC MODEL — the compact on-device classifier (detection-engine/detect.js, trained
 // by scripts/train-semantic.js) catches paraphrased meaning the keyword
 // heuristic misses, while keeping zero false positives on benign prompts.
 test('semantic — paraphrased vendor switch (model)', () => {

@@ -11,27 +11,27 @@
  *   4. The waiting client polls GET /api/v1/status/:id (or long-poll /await/:id)
  *      and proceeds only if released.
  */
-require('./src/env').loadEnv();
+require('./env').loadEnv();
 const express = require('express');
 const cookieParser = require('cookie-parser');
 const helmet = require('helmet');
 const crypto = require('crypto');
 const path = require('path');
 
-const detector = require('./src/detector');
-const processors = require('./src/processors');
-const policy = require('./src/policy');
-const db = require('./src/db');
-const auth = require('./src/auth');
-const dataCrypto = require('./src/crypto');
-const templates = require('./src/templates');
-const alerts = require('./src/alerts');
-const evidence = require('./src/evidence');
-const preflight = require('./src/preflight');
-const validation = require('./src/validation');
-const coverage = require('./src/coverage');
-const releaseTokens = require('./src/release-token');
-const tenant = require('./src/tenant');
+const detector = require('./detector');
+const processors = require('./processors');
+const policy = require('./policy');
+const db = require('./db');
+const auth = require('./auth');
+const dataCrypto = require('./crypto');
+const templates = require('./templates');
+const alerts = require('./alerts');
+const evidence = require('./evidence');
+const preflight = require('./preflight');
+const validation = require('./validation');
+const coverage = require('./coverage');
+const releaseTokens = require('./release-token');
+const tenant = require('./tenant');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -78,7 +78,7 @@ app.use((err, req, res, next) => {
 app.use(cookieParser());
 
 // ---- Health / readiness (public, no sensitive data) -------------------------
-app.get('/healthz', (req, res) => res.json({ status: 'ok', service: 'promptsentinel', version: require('./package.json').version }));
+app.get('/healthz', (req, res) => res.json({ status: 'ok', service: 'promptsentinel', version: require('../package.json').version }));
 app.get('/readyz', (req, res) => {
   try {
     db.stats();
@@ -947,7 +947,7 @@ app.get('/api/export/evidence', auth.requireAuth, (req, res) => {
   const queryLimit = Math.min(Number(req.query.queryLimit) || 500, 5000);
   const auditLimit = Math.min(Number(req.query.auditLimit) || 500, 5000);
   res.json(evidence.buildEvidencePack({
-    version: require('./package.json').version,
+    version: require('../package.json').version,
     queryLimit,
     auditLimit,
     policy: policy.loadPolicy(),

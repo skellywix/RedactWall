@@ -55,12 +55,12 @@ cd C:\Users\Eric\Desktop\Coding_Projects\promptsentinel-app\promptsentinel
 Important folders:
 
 ```text
-server.js                 Control plane and API
-public/                   Admin dashboard
-extension/                Chrome extension
-endpoint-agent/           Local file sensor demo
-mcp-guard/                MCP tool-output redaction demo
-shared/detect.js          Shared detection engine
+server/app.js                 Control plane and API
+server/public/                Admin dashboard
+sensors/browser-extension/    Chrome extension
+sensors/endpoint-agent/       Local file sensor demo
+sensors/mcp-guard/            MCP tool-output redaction demo
+detection-engine/detect.js    Shared detection engine
 config/policy.json        Demo policy
 data/                     Runtime database and secrets, created automatically
 ```
@@ -187,7 +187,7 @@ For a local demo:
 2. Go to `chrome://extensions`.
 3. Turn on Developer mode.
 4. Click Load unpacked.
-5. Select the `extension/` folder from this repository.
+5. Select the `sensors/browser-extension/` folder from this repository.
 6. Pin the PromptSentinel extension.
 7. Open the extension popup and confirm it says the browser is protected.
 
@@ -220,7 +220,7 @@ npm run package:endpoint-agent
 npm run package:mcp-guard
 ```
 
-Give the Chrome admin the zip from `dist\extension\` and the adjacent `.manifest.json` with the SHA-256 hash. Endpoint and MCP pilot zips land under `dist\endpoint-agent\` and `dist\mcp-guard\` with the same manifest pattern. The package scripts fail if development ingest keys or prompt bodies are present in the handoff files.
+Give the Chrome admin the zip from `dist\browser-extension\` and the adjacent `.manifest.json` with the SHA-256 hash. Endpoint and MCP pilot zips land under `dist\endpoint-agent\` and `dist\mcp-guard\` with the same manifest pattern. The package scripts fail if development ingest keys or prompt bodies are present in the handoff files.
 
 Managed deployment examples live in:
 
@@ -476,7 +476,7 @@ Start the agent in a second terminal:
 ```powershell
 $env:SENTINEL_URL = "http://localhost:4000"
 $env:INGEST_API_KEY = "demo-ingest-key"
-node endpoint-agent\agent.js .\demo-watch
+node sensors\endpoint-agent\agent.js .\demo-watch
 ```
 
 For a longer Windows pilot, install it as a logon task instead of leaving a terminal open:
@@ -523,7 +523,7 @@ The MCP guard demonstrates the agent workflow problem: a tool retrieves sensitiv
 Run:
 
 ```powershell
-node mcp-guard\guard.js
+node sensors\mcp-guard\guard.js
 ```
 
 Expected:
@@ -574,7 +574,7 @@ Run:
 npm test
 npm run sync-check
 npm run backup -- backups
-node -e "console.log(JSON.stringify(require('./src/db').verifyAuditChain()))"
+node -e "console.log(JSON.stringify(require('./server/db').verifyAuditChain()))"
 ```
 
 Expected:
@@ -694,10 +694,10 @@ chrome.storage.local.set({ serverUrl: "http://localhost:4100" });
 Check:
 
 - Chrome Developer mode is on.
-- The loaded folder is exactly `extension/`.
+- The loaded folder is exactly `sensors/browser-extension/`.
 - The extension popup says protecting this browser.
 - The AI site tab was refreshed after loading the extension.
-- The site is in `extension/manifest.json` host permissions.
+- The site is in `sensors/browser-extension/manifest.json` host permissions.
 - The server URL and ingest key match the server.
 
 ### Dashboard Shows 401 For Sensor Events
@@ -732,7 +732,7 @@ If the local machine cannot build native packages, use Docker for the server dem
 Run:
 
 ```powershell
-node -e "console.log(JSON.stringify(require('./src/db').verifyAuditChain(), null, 2))"
+node -e "console.log(JSON.stringify(require('./server/db').verifyAuditChain(), null, 2))"
 ```
 
 For a demo machine, the simplest fix is to reset runtime data:
