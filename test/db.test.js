@@ -77,6 +77,20 @@ test('stats count only real blocked statuses for todayBlocked', () => {
   assert.strictEqual(db.stats().todayBlocked - before, 3);
 });
 
+test('seat stats count unique billable users by tenant', () => {
+  db.createQuery({ status: 'allowed', orgId: 'cu-acme', user: 'Analyst@Example.Test', redactedPrompt: 'ok' });
+  db.createQuery({ status: 'pending', orgId: 'cu-acme', user: 'analyst@example.test', redactedPrompt: 'held' });
+  db.createQuery({ status: 'allowed', orgId: 'cu-acme', user: 'second@example.test', redactedPrompt: 'ok' });
+  db.createQuery({ status: 'seat_limit_blocked', orgId: 'cu-acme', user: 'blocked@example.test', redactedPrompt: '[seat limit exceeded]' });
+  db.createQuery({ status: 'allowed', orgId: 'other-cu', user: 'other@example.test', redactedPrompt: 'ok' });
+  db.createQuery({ status: 'allowed', orgId: 'cu-acme', user: 'unknown', redactedPrompt: 'ok' });
+
+  const seats = db.seatStats({ orgId: 'cu-acme' });
+  assert.strictEqual(seats.seatsUsed, 2);
+  assert.deepStrictEqual(seats.users.map((u) => u.user), ['analyst@example.test', 'second@example.test']);
+  assert.ok(seats.users.every((u) => u.orgId === 'cu-acme'));
+});
+
 test('retention purge removes sealed raw/vault fields and preserves audit integrity', () => {
   const createdAt = '2026-01-01T00:00:00.000Z';
   const approved = db.createQuery({

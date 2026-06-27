@@ -31,6 +31,7 @@ const preflight = require('./src/preflight');
 const validation = require('./src/validation');
 const coverage = require('./src/coverage');
 const releaseTokens = require('./src/release-token');
+const tenant = require('./src/tenant');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -256,6 +257,56 @@ function releaseTokenPayload(releaseToken) {
   return releaseToken ? { releaseToken } : {};
 }
 
+function enforceTenantForSensor(req, res) {
+  const check = tenant.validateSensorAccess({ body: req.body || {}, db });
+  if (check.ok) {
+    req.body.orgId = check.orgId || null;
+    return true;
+  }
+
+  if (check.audit) {
+    const body = req.body || {};
+    const row = db.createQuery({
+      status: check.status,
+      mode: 'billing',
+      user: check.user || body.user || 'unknown',
+      orgId: check.orgId || tenant.config().tenantId || null,
+      destination: body.destination || 'unknown',
+      source: body.source || 'api',
+      channel: body.channel || 'submit',
+      sensor: body.sensor || null,
+      redactedPrompt: '[' + check.message + ']',
+      findings: [],
+      categories: [],
+      entityCounts: {},
+      riskScore: 0,
+      maxSeverity: 0,
+      maxSeverityLabel: 'none',
+      reasons: [check.message],
+      seatLimit: check.seatLimit || null,
+      seatsUsed: check.seatsUsed || null,
+    });
+    db.appendAudit({
+      action: check.action,
+      queryId: row.id,
+      actor: check.user || body.user || 'unknown',
+      detail: 'tenant=' + (row.orgId || 'unknown') + '; seats=' + (check.seatsUsed || 0) + '/' + (check.seatLimit || 0),
+    });
+    emitSecurityAlert(row, check.action);
+    broadcast('query', { type: check.status, query: publicQuery(row) });
+    broadcast('stats', db.stats());
+  }
+
+  res.status(check.statusCode || 403).json({
+    error: check.message,
+    decision: 'block',
+    status: check.status,
+    seatLimit: check.seatLimit || undefined,
+    seatsUsed: check.seatsUsed || undefined,
+  });
+  return false;
+}
+
 function runRetentionPurge({ actor = 'system', now = new Date() } = {}) {
   const pol = policy.loadPolicy();
   const rawRetentionDays = policy.rawRetentionDays(pol);
@@ -344,6 +395,7 @@ function clientAnalysisFrom(body) {
 }
 
 app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gateSchema), (req, res) => {
+  if (!enforceTenantForSensor(req, res)) return;
   const {
     prompt, user = 'unknown', destination = 'unknown', sourceIp = null,
     source = 'api', channel = 'submit', clientOutcome = null, note = '', orgId = null,
@@ -529,7 +581,7 @@ app.get('/api/v1/detectors', checkIngestKey, (req, res) => res.json(detector.lis
 
 // Scan an uploaded FILE: extract text (pdf/docx/xlsx/text), then gate it.
 app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation.scanFileSchema), async (req, res) => {
-  const { filename, contentBase64, user = 'unknown', destination = 'unknown', source = 'api', channel = 'file_upload', orgId = null, sensor = null } = req.body || {};
+  const { filename, contentBase64 } = req.body || {};
   if (!filename || !contentBase64) return res.status(400).json({ error: 'filename and contentBase64 required' });
   let buf;
   try { buf = Buffer.from(contentBase64, 'base64'); } catch { return res.status(400).json({ error: 'bad base64' }); }
@@ -539,6 +591,8 @@ app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation
   let extracted;
   try { extracted = await processors.extractText(filename, buf); }
   catch (e) { extracted = { text: '', processor: null, supported: true, extractionOk: false, error: 'extract_failed' }; }
+  if (!enforceTenantForSensor(req, res)) return;
+  const { user = 'unknown', destination = 'unknown', source = 'api', channel = 'file_upload', orgId = null, sensor = null } = req.body || {};
   if (!extracted.supported) {
     const row = db.createQuery({ status: 'flagged', user, orgId, destination, source, channel, sensor,
       redactedPrompt: '[unsupported file] ' + filename, findings: [], categories: [], entityCounts: {},
@@ -632,6 +686,7 @@ app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation
 // Scan an AI RESPONSE for sensitive data leaking back to the user (e.g. an MCP
 // tool pulled PII, or the model echoed it). Parity with output-scanning DLP.
 app.post('/api/v1/scan-response', checkIngestKey, validation.validateBody(validation.scanResponseSchema), (req, res) => {
+  if (!enforceTenantForSensor(req, res)) return;
   const { text, user = 'unknown', destination = 'unknown', source = 'api', orgId = null, sensor = null } = req.body || {};
   if (typeof text !== 'string' || !text.trim()) return res.status(400).json({ error: 'text (string) required' });
   const pol = policy.loadPolicy();
@@ -824,6 +879,10 @@ app.post('/api/queries/:id/deny', ...adminWrite, validation.validateBody(validat
 });
 
 app.get('/api/stats', auth.requireAuth, (req, res) => res.json(db.stats()));
+
+app.get('/api/billing/seats', auth.requireAuth, (req, res) => {
+  res.json(tenant.seatReport(db));
+});
 
 // Ops metrics (admin) — counts + live audit-integrity, for dashboards/monitoring.
 app.get('/api/metrics', auth.requireAuth, (req, res) => {

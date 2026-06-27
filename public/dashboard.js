@@ -32,7 +32,7 @@ function humanize(s) {
 function statusTone(status) {
   const s = String(status || '').toLowerCase();
   if (['approved', 'allowed', 'justified', 'warned_sent', 'redacted'].includes(s)) return 'good';
-  if (['denied', 'blocked_by_user', 'injection_blocked', 'response_flagged'].includes(s)) return 'bad';
+  if (['denied', 'blocked_by_user', 'injection_blocked', 'response_flagged', 'seat_limit_blocked'].includes(s)) return 'bad';
   if (['pending', 'shadow_ai', 'paste_flagged'].includes(s)) return 'warn';
   return 'info';
 }
@@ -181,17 +181,21 @@ async function refreshAll() {
 }
 
 async function loadStats() {
-  const r = await api('/api/stats');
+  const [r, seatRes] = await Promise.all([api('/api/stats'), api('/api/billing/seats')]);
   if (!r) return;
   const s = await r.json();
+  const seats = seatRes && seatRes.ok ? await seatRes.json() : null;
   const totalDecisions = (s.approved || 0) + (s.denied || 0);
   const approveRate = totalDecisions ? `${Math.round(((s.approved || 0) / totalDecisions) * 100)}%` : '-';
+  const seatValue = seats && seats.seatLimit ? `${seats.seatsUsed}/${seats.seatLimit}` : (seats ? seats.seatsUsed : '-');
+  const seatMeta = seats && seats.seatLimit ? `${seats.seatsRemaining} remaining` : 'billable users';
   const cards = [
     ['pending', s.pending, 'Pending approval', 'held for review'],
     ['alert', s.todayBlocked, 'Blocked today', 'policy stops'],
     ['good', s.approved, 'Approved', 'released by admin'],
     ['', s.denied, 'Denied', 'never released'],
     ['', approveRate, 'Approval rate', 'admin decisions'],
+    [seats && seats.overLimit ? 'alert' : '', seatValue, seats && seats.saasMode ? 'Seats used' : 'Users observed', seatMeta],
   ];
   $('#stats').innerHTML = cards.map(([c, n, l, m]) => `
     <div class="stat ${c}">

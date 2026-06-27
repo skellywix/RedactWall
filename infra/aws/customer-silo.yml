@@ -1,0 +1,308 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: PromptSentinel customer-silo SaaS stack using ALB, EC2, Docker, Secrets Manager, and local EBS-backed SQLite storage.
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC for the public load balancer and PromptSentinel host.
+  PublicSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: At least two public subnets for the internet-facing load balancer.
+  InstanceSubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Subnet for the PromptSentinel host. It must have outbound internet access to pull the image.
+  ImageUri:
+    Type: String
+    MinLength: 1
+    Description: Full ECR image URI, including tag.
+  SecretArn:
+    Type: String
+    MinLength: 1
+    Description: Secrets Manager secret ARN with ADMIN_PASSWORD, ADMIN_TOTP_SECRET, SENTINEL_SECRET, SENTINEL_DATA_KEY, and INGEST_API_KEY.
+  TenantId:
+    Type: String
+    AllowedPattern: '^[a-z0-9][a-z0-9_-]{1,62}$'
+    Description: Lowercase customer tenant slug, for example cu-acme.
+  SeatLimit:
+    Type: Number
+    MinValue: 1
+    Description: Purchased seats for this customer.
+  CertificateArn:
+    Type: String
+    Default: ''
+    Description: Optional ACM certificate ARN. When present, HTTP redirects to HTTPS.
+  InstanceType:
+    Type: String
+    Default: t3.small
+    AllowedValues:
+      - t3.small
+      - t3.medium
+      - t3.large
+      - m7i.large
+    Description: EC2 size for the customer-silo control plane.
+  RootVolumeGb:
+    Type: Number
+    Default: 40
+    MinValue: 20
+    MaxValue: 500
+    Description: Encrypted root EBS volume size. SQLite state lives under /var/lib/promptsentinel.
+  AmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+    Description: Amazon Linux 2023 AMI SSM parameter.
+
+Conditions:
+  HasCertificate: !Not [!Equals [!Ref CertificateArn, '']]
+  NoCertificate: !Equals [!Ref CertificateArn, '']
+
+Resources:
+  AlbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: PromptSentinel ALB ingress
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - !If
+          - HasCertificate
+          - IpProtocol: tcp
+            FromPort: 443
+            ToPort: 443
+            CidrIp: 0.0.0.0/0
+          - !Ref AWS::NoValue
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+
+  AppSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: PromptSentinel app host ingress from ALB only
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 4000
+          ToPort: 4000
+          SourceSecurityGroupId: !Ref AlbSecurityGroup
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+
+  AppLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /promptsentinel/${TenantId}
+      RetentionInDays: 90
+
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+      Policies:
+        - PolicyName: PromptSentinelRuntimeAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref SecretArn
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogStreams
+                Resource: !Sub ${AppLogGroup.Arn}:*
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref InstanceRole
+
+  AppInstance:
+    Type: AWS::EC2::Instance
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT20M
+    Properties:
+      ImageId: !Ref AmiId
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref InstanceProfile
+      SubnetId: !Ref InstanceSubnetId
+      SecurityGroupIds:
+        - !Ref AppSecurityGroup
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: !Ref RootVolumeGb
+            VolumeType: gp3
+            Encrypted: true
+            DeleteOnTermination: false
+      Tags:
+        - Key: Name
+          Value: !Sub promptsentinel-${TenantId}
+        - Key: PromptSentinelTenant
+          Value: !Ref TenantId
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euo pipefail
+
+          dnf update -y
+          dnf install -y docker awscli jq aws-cfn-bootstrap
+          systemctl enable --now docker
+
+          mkdir -p /var/lib/promptsentinel /etc/promptsentinel
+          chmod 700 /etc/promptsentinel
+          chown 1000:1000 /var/lib/promptsentinel
+
+          SECRET_JSON=$(aws secretsmanager get-secret-value --secret-id '${SecretArn}' --region '${AWS::Region}' --query SecretString --output text)
+          secret() { echo "$SECRET_JSON" | jq -r --arg key "$1" '.[$key] // empty'; }
+
+          ADMIN_PASSWORD=$(secret ADMIN_PASSWORD)
+          ADMIN_TOTP_SECRET=$(secret ADMIN_TOTP_SECRET)
+          SENTINEL_SECRET=$(secret SENTINEL_SECRET)
+          SENTINEL_DATA_KEY=$(secret SENTINEL_DATA_KEY)
+          INGEST_API_KEY=$(secret INGEST_API_KEY)
+          AUDITOR_USER=$(secret AUDITOR_USER)
+          AUDITOR_PASSWORD=$(secret AUDITOR_PASSWORD)
+          SIEM_WEBHOOK_URL=$(secret SIEM_WEBHOOK_URL)
+          SIEM_WEBHOOK_TOKEN=$(secret SIEM_WEBHOOK_TOKEN)
+
+          cat > /etc/promptsentinel/env <<EOF
+          PORT=4000
+          NODE_ENV=production
+          HTTPS=true
+          COOKIE_SECURE=true
+          SENTINEL_DB_PATH=/data/sentinel.db
+          SENTINEL_SAAS_MODE=true
+          SENTINEL_TENANT_ID=${TenantId}
+          SENTINEL_SEAT_LIMIT=${SeatLimit}
+          SENTINEL_REQUIRE_TENANT_CONTEXT=true
+          SENTINEL_REQUIRE_USER_IDENTITY=true
+          ADMIN_USER=admin
+          ADMIN_PASSWORD=$ADMIN_PASSWORD
+          ADMIN_TOTP_SECRET=$ADMIN_TOTP_SECRET
+          AUDITOR_USER=$AUDITOR_USER
+          AUDITOR_PASSWORD=$AUDITOR_PASSWORD
+          SENTINEL_SECRET=$SENTINEL_SECRET
+          SENTINEL_DATA_KEY=$SENTINEL_DATA_KEY
+          INGEST_API_KEY=$INGEST_API_KEY
+          SENTINEL_REQUEST_TIMEOUT_MS=10000
+          SIEM_WEBHOOK_URL=$SIEM_WEBHOOK_URL
+          SIEM_WEBHOOK_TOKEN=$SIEM_WEBHOOK_TOKEN
+          SIEM_ALERT_MIN_RISK=25
+          SIEM_ALERT_MIN_SEVERITY=3
+          EOF
+          chmod 600 /etc/promptsentinel/env
+
+          REGISTRY=$(echo '${ImageUri}' | cut -d/ -f1)
+          aws ecr get-login-password --region '${AWS::Region}' | docker login --username AWS --password-stdin "$REGISTRY"
+          docker pull '${ImageUri}'
+          docker rm -f promptsentinel || true
+          docker run -d \
+            --name promptsentinel \
+            --restart unless-stopped \
+            --env-file /etc/promptsentinel/env \
+            -p 4000:4000 \
+            -v /var/lib/promptsentinel:/data \
+            --log-driver=awslogs \
+            --log-opt awslogs-region='${AWS::Region}' \
+            --log-opt awslogs-group='${AppLogGroup}' \
+            --log-opt awslogs-stream='${TenantId}' \
+            '${ImageUri}'
+
+          /opt/aws/bin/cfn-signal --stack '${AWS::StackName}' --resource AppInstance --region '${AWS::Region}' --exit-code 0
+
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Scheme: internet-facing
+      Type: application
+      SecurityGroups:
+        - !Ref AlbSecurityGroup
+      Subnets: !Ref PublicSubnetIds
+      Tags:
+        - Key: PromptSentinelTenant
+          Value: !Ref TenantId
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      VpcId: !Ref VpcId
+      Port: 4000
+      Protocol: HTTP
+      TargetType: instance
+      HealthCheckEnabled: true
+      HealthCheckPath: /readyz
+      HealthCheckProtocol: HTTP
+      Matcher:
+        HttpCode: '200'
+      Targets:
+        - Id: !Ref AppInstance
+          Port: 4000
+
+  HttpForwardListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Condition: NoCertificate
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+
+  HttpRedirectListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Condition: HasCertificate
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: redirect
+          RedirectConfig:
+            Protocol: HTTPS
+            Port: '443'
+            StatusCode: HTTP_301
+
+  HttpsListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Condition: HasCertificate
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 443
+      Protocol: HTTPS
+      Certificates:
+        - CertificateArn: !Ref CertificateArn
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+
+Outputs:
+  Url:
+    Description: Customer console URL. Attach a Route 53 alias and ACM certificate for production.
+    Value: !Sub
+      - '${Scheme}://${DnsName}'
+      - Scheme: !If [HasCertificate, https, http]
+        DnsName: !GetAtt LoadBalancer.DNSName
+  TenantId:
+    Description: Tenant id enforced by the stack.
+    Value: !Ref TenantId
+  SeatLimit:
+    Description: Paid seats enforced by the application.
+    Value: !Ref SeatLimit

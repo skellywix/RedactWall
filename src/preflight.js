@@ -20,6 +20,7 @@ const MIN_SECRET_LENGTHS = {
   sessionSecret: 32,
   dataKey: 32,
 };
+const TENANT_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{1,62}$/;
 
 function hasMinLength(value, min) {
   return String(value || '').trim().length >= min;
@@ -28,6 +29,15 @@ function hasMinLength(value, min) {
 function hasValidBase32Secret(value, min) {
   const normalized = String(value || '').replace(/[\s=-]/g, '').toUpperCase();
   return normalized.length >= min && /^[A-Z2-7]+$/.test(normalized);
+}
+
+function hasValidTenantId(value) {
+  return TENANT_ID_PATTERN.test(String(value || '').trim().toLowerCase());
+}
+
+function positiveInteger(value) {
+  const n = Number(value);
+  return Number.isInteger(n) && n > 0;
 }
 
 function pathSegments(value) {
@@ -66,6 +76,16 @@ function configStatus(input = {}) {
   const auditorPassword = input.auditorPassword ?? env.AUDITOR_PASSWORD ?? '';
   const auditorPasswordSet = !!String(auditorPassword).trim();
   const auditorConfigured = !!auditorUser || auditorPasswordSet;
+  const saasMode = bool(input.saasMode ?? env.SENTINEL_SAAS_MODE);
+  const tenantId = input.tenantId ?? env.SENTINEL_TENANT_ID ?? '';
+  const seatLimit = input.seatLimit ?? env.SENTINEL_SEAT_LIMIT ?? '';
+  const requireTenantContext = input.requireTenantContext ?? env.SENTINEL_REQUIRE_TENANT_CONTEXT;
+  const requireUserIdentity = input.requireUserIdentity ?? env.SENTINEL_REQUIRE_USER_IDENTITY;
+  const saasConfigured = saasMode
+    || !!String(tenantId || '').trim()
+    || !!String(seatLimit || '').trim()
+    || bool(requireTenantContext)
+    || bool(requireUserIdentity);
   const ingestKey = input.ingestKey ?? env.INGEST_API_KEY ?? '';
   const sessionSecret = input.sessionSecret ?? env.SENTINEL_SECRET ?? '';
   const dataKeySource = input.dataKeySource ?? env.SENTINEL_DATA_KEY ?? env.SENTINEL_SECRET ?? '';
@@ -176,6 +196,34 @@ function configStatus(input = {}) {
       dbPathReason
         ? `Set SENTINEL_DB_PATH to a local disk path; current path looks like ${dbPathReason}.`
         : 'Set SENTINEL_DB_PATH to a local disk path outside cloud-synced or network folders.',
+    ),
+    check(
+      'saas_tenant_id',
+      !saasConfigured || hasValidTenantId(tenantId),
+      severity,
+      'SaaS tenant id is configured.',
+      'Set SENTINEL_TENANT_ID to a lowercase customer slug such as cu-acme.',
+    ),
+    check(
+      'saas_seat_limit',
+      !saasConfigured || positiveInteger(seatLimit),
+      severity,
+      'SaaS seat limit is configured.',
+      'Set SENTINEL_SEAT_LIMIT to the purchased positive seat count.',
+    ),
+    check(
+      'saas_tenant_context',
+      !saasConfigured || saasMode || bool(requireTenantContext),
+      severity,
+      'SaaS sensors must send tenant context.',
+      'Set SENTINEL_REQUIRE_TENANT_CONTEXT=true, or set SENTINEL_SAAS_MODE=true.',
+    ),
+    check(
+      'saas_user_identity',
+      !saasConfigured || saasMode || bool(requireUserIdentity),
+      severity,
+      'SaaS sensors must send managed user identity.',
+      'Set SENTINEL_REQUIRE_USER_IDENTITY=true, or set SENTINEL_SAAS_MODE=true.',
     ),
   ];
   const failed = checks.filter((c) => !c.ok);

@@ -25,6 +25,11 @@ function composeEnvironment() {
 test('docker compose passes production setup secrets into the container', () => {
   const env = composeEnvironment();
   for (const key of [
+    'SENTINEL_SAAS_MODE',
+    'SENTINEL_TENANT_ID',
+    'SENTINEL_SEAT_LIMIT',
+    'SENTINEL_REQUIRE_TENANT_CONTEXT',
+    'SENTINEL_REQUIRE_USER_IDENTITY',
     'ADMIN_USER',
     'ADMIN_PASSWORD',
     'ADMIN_TOTP_SECRET',

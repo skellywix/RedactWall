@@ -17,6 +17,7 @@ PromptSentinel should optimize for a regulated pilot that installs quickly, prov
 - Added static tests that prevent inline scripts and mojibake from creeping back into the admin frontend.
 - Added Zod request-body validation for sensor and admin APIs, with sanitized field-only validation errors.
 - Added Playwright browser coverage for login, approval, policy save, audit integrity, and evidence export.
+- Added a customer-silo AWS deployment path for paid pilots: ALB, one EC2 host, encrypted local EBS storage, Docker, Secrets Manager, tenant-bound sensor events, and paid-seat enforcement.
 
 ## Current Stack Verdict
 
@@ -31,6 +32,7 @@ PromptSentinel should optimize for a regulated pilot that installs quickly, prov
 | Tests | Node built-in test runner plus Playwright | Keep | Node tests cover API and engine behavior. Playwright covers rendered admin workflows without forcing a frontend framework or build chain. |
 | File processing | `pdf-parse`, `adm-zip`, local processors | Keep with caution | Good enough for synthetic demos and small pilots now that corrupt, unreadable, and timed-out supported files fail closed. Production should still move parsing into a constrained worker and possibly add OCR later. |
 | Packaging | Docker plus local Node install | Keep | This supports both developer demos and controlled pilot deployment. |
+| Paid-customer cloud path | AWS customer-silo stack on ALB, EC2, local encrypted EBS, Docker, and Secrets Manager | Keep for first paid deployment | A silo stack fits regulated isolation and the current SQLite audit store without pretending the app is already a shared multi-tenant SaaS platform. |
 
 ## Why Not React, Next.js, or Vite Right Now
 
@@ -56,6 +58,12 @@ Revisit Fastify when:
 - API schemas become first-class product contracts.
 - Request validation needs shared JSON Schema or OpenAPI artifacts for outside integrators.
 - The service becomes multi-tenant and high-throughput enough for router performance to matter.
+
+## Why Not Fargate Plus EFS SQLite Right Now
+
+Fargate is attractive for hosted operations, but pairing SQLite with EFS would fight the product's evidence-integrity goal. The current store is designed for local disk semantics, and the production preflight now rejects network or cloud-synced SQLite paths. For the first paid customer, one isolated EC2 stack with encrypted EBS is boring in the right way: easy to explain, easy to inspect, and aligned with the current audit chain.
+
+A shared SaaS plane should move to managed Postgres, tenant-scoped tables, migrations, SSO, and billing operations instead of stretching SQLite across network storage.
 
 ## Next Stack Improvements
 
@@ -87,3 +95,7 @@ Google. "Manifest V3." *Chrome for Developers*, https://developer.chrome.com/doc
 Vite. "Why Vite." *Vite*, https://vite.dev/guide/why.html. Accessed 26 June 2026.
 
 Zod. "Intro." *Zod*, https://zod.dev/. Accessed 26 June 2026.
+
+Amazon Web Services. "Tenant Isolation." *AWS Well-Architected SaaS Lens*, Amazon Web Services, https://docs.aws.amazon.com/wellarchitected/latest/saas-lens/tenant-isolation.html. Accessed 26 June 2026.
+
+Amazon Web Services. "What Is AWS Secrets Manager?" *AWS Secrets Manager User Guide*, Amazon Web Services, https://docs.aws.amazon.com/secretsmanager/latest/userguide/intro.html. Accessed 26 June 2026.

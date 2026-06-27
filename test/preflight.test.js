@@ -65,6 +65,80 @@ test('production preflight passes with stable secrets and secure cookies', () =>
   assert.ok(status.checks.every((c) => c.ok));
 });
 
+test('production preflight blocks incomplete SaaS tenant configuration', () => {
+  const status = preflight.configStatus({
+    env: {
+      NODE_ENV: 'production',
+      SENTINEL_DB_PATH: '/var/lib/promptsentinel/sentinel.db',
+      SENTINEL_SAAS_MODE: 'true',
+      ADMIN_PASSWORD: 'long-admin-password',
+      ADMIN_TOTP_SECRET: 'JBSWY3DPEHPK3PXP',
+      INGEST_API_KEY: 'ps_ingest_' + 'a'.repeat(32),
+      SENTINEL_SECRET: 's'.repeat(32),
+      SENTINEL_DATA_KEY: 'd'.repeat(32),
+    },
+    adminPasswordIsDefault: false,
+    ingestKeyIsDefault: false,
+    secretSource: 'env',
+    dataCryptoEnabled: true,
+    cookieSecure: true,
+  });
+  assert.strictEqual(status.ready, false);
+  assert.deepStrictEqual(
+    preflight.summarizeFailures(status).map((line) => line.split(':')[0]),
+    ['saas_tenant_id', 'saas_seat_limit'],
+  );
+});
+
+test('production preflight passes complete SaaS tenant configuration', () => {
+  const status = preflight.configStatus({
+    env: {
+      NODE_ENV: 'production',
+      SENTINEL_DB_PATH: '/var/lib/promptsentinel/sentinel.db',
+      SENTINEL_SAAS_MODE: 'true',
+      SENTINEL_TENANT_ID: 'cu-acme',
+      SENTINEL_SEAT_LIMIT: '25',
+      ADMIN_PASSWORD: 'long-admin-password',
+      ADMIN_TOTP_SECRET: 'JBSWY3DPEHPK3PXP',
+      INGEST_API_KEY: 'ps_ingest_' + 'a'.repeat(32),
+      SENTINEL_SECRET: 's'.repeat(32),
+      SENTINEL_DATA_KEY: 'd'.repeat(32),
+    },
+    adminPasswordIsDefault: false,
+    ingestKeyIsDefault: false,
+    secretSource: 'env',
+    dataCryptoEnabled: true,
+    cookieSecure: true,
+  });
+  assert.strictEqual(status.ready, true);
+  assert.strictEqual(status.level, 'ok');
+  assert.ok(status.checks.every((c) => c.ok));
+});
+
+test('preflight detects SaaS settings passed directly by setup tooling', () => {
+  const status = preflight.configStatus({
+    env: {
+      NODE_ENV: 'production',
+      SENTINEL_DB_PATH: '/var/lib/promptsentinel/sentinel.db',
+      ADMIN_PASSWORD: 'long-admin-password',
+      ADMIN_TOTP_SECRET: 'JBSWY3DPEHPK3PXP',
+      INGEST_API_KEY: 'ps_ingest_' + 'a'.repeat(32),
+      SENTINEL_SECRET: 's'.repeat(32),
+      SENTINEL_DATA_KEY: 'd'.repeat(32),
+    },
+    tenantId: 'cu-acme',
+    seatLimit: '25',
+    requireTenantContext: 'true',
+    requireUserIdentity: 'true',
+    adminPasswordIsDefault: false,
+    ingestKeyIsDefault: false,
+    secretSource: 'env',
+    dataCryptoEnabled: true,
+    cookieSecure: true,
+  });
+  assert.strictEqual(status.ready, true);
+});
+
 test('production preflight accepts a strong optional auditor login', () => {
   const status = preflight.configStatus({
     env: {

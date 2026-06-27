@@ -22,6 +22,11 @@ const ENV_ORDER = [
   'HTTPS',
   'COOKIE_SECURE',
   'SENTINEL_DB_PATH',
+  'SENTINEL_SAAS_MODE',
+  'SENTINEL_TENANT_ID',
+  'SENTINEL_SEAT_LIMIT',
+  'SENTINEL_REQUIRE_TENANT_CONTEXT',
+  'SENTINEL_REQUIRE_USER_IDENTITY',
   'ADMIN_USER',
   'ADMIN_PASSWORD',
   'ADMIN_TOTP_SECRET',
@@ -63,6 +68,11 @@ function buildEnv(opts = {}) {
     HTTPS: production ? 'true' : 'false',
     COOKIE_SECURE: production ? 'true' : 'false',
     SENTINEL_DB_PATH: nativeDataPath(),
+    SENTINEL_SAAS_MODE: 'false',
+    SENTINEL_TENANT_ID: '',
+    SENTINEL_SEAT_LIMIT: '',
+    SENTINEL_REQUIRE_TENANT_CONTEXT: 'false',
+    SENTINEL_REQUIRE_USER_IDENTITY: 'false',
     ADMIN_USER: 'admin',
     ADMIN_PASSWORD: randomPassword(),
     ADMIN_TOTP_SECRET: production ? randomBase32(32) : '',
@@ -84,6 +94,8 @@ function placeholderValue(key, value) {
   if (key === 'INGEST_API_KEY') return !v || v === 'dev-ingest-key';
   if (key === 'SENTINEL_SECRET' || key === 'SENTINEL_DATA_KEY') return !v;
   if (key === 'SENTINEL_DB_PATH') return !v;
+  if (key === 'SENTINEL_SEAT_LIMIT') return false;
+  if (key === 'SENTINEL_TENANT_ID') return false;
   return false;
 }
 
@@ -122,6 +134,8 @@ function renderEnv(values, opts = {}) {
     seen.add(key);
   };
   ['PORT', 'NODE_ENV', 'HTTPS', 'COOKIE_SECURE', 'SENTINEL_DB_PATH'].forEach(add);
+  lines.push('', '# SaaS/customer tenancy. Enable these for a paid customer stack.');
+  ['SENTINEL_SAAS_MODE', 'SENTINEL_TENANT_ID', 'SENTINEL_SEAT_LIMIT', 'SENTINEL_REQUIRE_TENANT_CONTEXT', 'SENTINEL_REQUIRE_USER_IDENTITY'].forEach(add);
   lines.push('', '# Security Admin console');
   ['ADMIN_USER', 'ADMIN_PASSWORD', 'ADMIN_TOTP_SECRET'].forEach(add);
   lines.push('', '# Stable secrets. Keep these values across restarts.');

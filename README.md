@@ -258,6 +258,11 @@ Copy `.env.example` to `.env` (or export):
 | `NODE_ENV` | Set to `production` to enforce deployment preflight blockers |
 | `HTTPS` / `COOKIE_SECURE` | Mark admin session cookies secure when the dashboard is served over TLS |
 | `SENTINEL_DB_PATH` | SQLite store path (default `data/sentinel.db`). Use **local disk**, never a cloud-synced folder or network share. Production preflight blocks unsafe paths. |
+| `SENTINEL_SAAS_MODE` | Set to `true` for a paid customer stack. Requires tenant context, managed user identity, tenant id, and seat limit. |
+| `SENTINEL_TENANT_ID` | Lowercase customer tenant slug accepted from sensors, for example `cu-acme`. |
+| `SENTINEL_SEAT_LIMIT` | Purchased seat count. New managed users beyond this count are blocked and recorded as `SEAT_LIMIT_BLOCKED`. |
+| `SENTINEL_REQUIRE_TENANT_CONTEXT` | Requires sensors to send the matching `orgId`. Enabled automatically by SaaS mode. |
+| `SENTINEL_REQUIRE_USER_IDENTITY` | Requires sensors to send managed user identity instead of `unknown` or `unattributed@unmanaged`. Enabled automatically by SaaS mode. |
 | `SENTINEL_POLICY_PATH` | Optional policy file path for isolated tests or pilots (default `config/policy.json`) |
 | `ADMIN_USER` / `ADMIN_PASSWORD` | Console credentials; production preflight requires a non-default password of at least 16 characters |
 | `ADMIN_TOTP_SECRET` | Base32 authenticator secret for Security Admin MFA; production preflight requires it and admin login requires a current 6-digit code when set |

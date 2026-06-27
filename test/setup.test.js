@@ -22,6 +22,11 @@ const SETUP_ENV_KEYS = [
   'HTTPS',
   'COOKIE_SECURE',
   'SENTINEL_DB_PATH',
+  'SENTINEL_SAAS_MODE',
+  'SENTINEL_TENANT_ID',
+  'SENTINEL_SEAT_LIMIT',
+  'SENTINEL_REQUIRE_TENANT_CONTEXT',
+  'SENTINEL_REQUIRE_USER_IDENTITY',
   'ADMIN_USER',
   'ADMIN_PASSWORD',
   'ADMIN_TOTP_SECRET',
@@ -56,6 +61,7 @@ test('production setup env passes deployment preflight', () => {
   assert.notStrictEqual(env.INGEST_API_KEY, 'dev-ingest-key');
   assert.ok(env.SENTINEL_SECRET.length >= 32);
   assert.ok(env.SENTINEL_DATA_KEY.length >= 32);
+  assert.strictEqual(env.SENTINEL_SAAS_MODE, 'false');
   assert.strictEqual(status.ready, true);
   assert.strictEqual(status.level, 'ok');
 });

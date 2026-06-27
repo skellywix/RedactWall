@@ -2,11 +2,13 @@
 
 ## Open
 
-- Next pass: harden the paid customer deployment path with a customer-silo AWS shape, tenant-bound sensor events, managed user identity requirements, and seat-limit evidence in the dashboard.
+- Next pass: add a native endpoint interception roadmap spike or prototype that moves beyond watched-folder reference behavior toward real desktop AI file-flow coverage.
 - Keep an eye on the remaining product gap: the current endpoint agent is still a watched-folder reference sensor, not a native desktop file-interception agent.
 
 ## Done
 
+- 2026-06-26: Added the first paid-customer SaaS deployment shape: customer-silo AWS docs/template, SaaS preflight requirements, runtime tenant and managed-identity enforcement, paid seat-limit blocking, seat usage reporting in the dashboard, Docker/setup env propagation, and tests covering API enforcement, seat accounting, and deployment artifacts.
+  Evidence: `node --test test/tenant.test.js test/saas-tenancy.test.js test/preflight.test.js test/db.test.js test/aws-deployment.test.js test/docker-deployment.test.js test/setup.test.js`, `npm test`, `npm run test:browser`, `npm run setup:check`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Added a package-to-install endpoint pilot smoke: the endpoint zip is extracted into a temp install root, the scheduled-task scripts are inspected, config is loaded through `SENTINEL_ENV_PATH`, policy refresh is exercised, a watched file is locally extracted and redacted, sanitized `redacted_available` telemetry is sent, and the companion file is verified to contain placeholders only.
   Evidence: `node --test test/endpoint-agent-package.test.js`, `npm run package:endpoint-agent`, `git diff --check`.
 - 2026-06-26: Added an explicit endpoint redaction handoff for structured-only watched-file findings: redact policy now writes a sanitized `.promptsentinel-redacted/*.txt` companion file with typed placeholders, reports `redacted_available` evidence to `/api/v1/gate`, ignores generated companions in the watcher, and removes the companion if control-plane recording fails or does not resolve as redacted.

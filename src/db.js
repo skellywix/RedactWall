@@ -154,6 +154,7 @@ const appendAudit = sdb.transaction((event) => {
 });
 
 const RETENTION_FINAL_STATUSES = ['approved', 'denied', 'redacted'];
+const SEAT_EXCLUDED_STATUSES = new Set(['seat_limit_blocked']);
 const SAFE_STATUS = /^[a-z_]+$/;
 const STATS_BLOCKED_STATUSES = [
   'pending',
@@ -209,6 +210,43 @@ const purgeRetainedSensitiveData = sdb.transaction((options = {}) => {
 function listAudit(limit = 200) {
   const rows = sdb.prepare('SELECT entry FROM audit ORDER BY seq DESC LIMIT ?').all(Math.max(1, Number(limit) || 200));
   return rows.map((r) => JSON.parse(r.entry));
+}
+
+function normalizedSeatUser(value) {
+  const user = String(value || '').trim().toLowerCase();
+  if (!user || user === 'unknown' || user === 'unattributed@unmanaged') return '';
+  return user;
+}
+
+function normalizedSeatOrg(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function seatStats(filter = {}) {
+  const wantedOrg = normalizedSeatOrg(filter.orgId);
+  const rows = sdb.prepare('SELECT data FROM queries ORDER BY createdAt ASC, seq ASC').all();
+  const users = new Map();
+  for (const r of rows) {
+    const q = JSON.parse(r.data);
+    if (SEAT_EXCLUDED_STATUSES.has(q.status)) continue;
+    const orgId = normalizedSeatOrg(q.orgId);
+    if (wantedOrg && orgId !== wantedOrg) continue;
+    const user = normalizedSeatUser(q.user);
+    if (!user) continue;
+    const current = users.get(user) || {
+      user,
+      orgId: orgId || null,
+      events: 0,
+      firstSeen: q.createdAt || null,
+      lastSeen: q.createdAt || null,
+    };
+    current.events += 1;
+    if (q.createdAt && (!current.firstSeen || q.createdAt < current.firstSeen)) current.firstSeen = q.createdAt;
+    if (q.createdAt && (!current.lastSeen || q.createdAt > current.lastSeen)) current.lastSeen = q.createdAt;
+    users.set(user, current);
+  }
+  const list = Array.from(users.values()).sort((a, b) => a.user.localeCompare(b.user));
+  return { orgId: wantedOrg || null, seatsUsed: list.length, users: list };
 }
 
 /**
@@ -285,6 +323,6 @@ try { migrateFromJson(); } catch (e) { console.error('[db] migration skipped:', 
 module.exports = {
   createQuery, getQuery, listQueries, updateQuery,
   purgeRetainedSensitiveData,
-  appendAudit, listAudit, verifyAuditChain, stats,
+  appendAudit, listAudit, verifyAuditChain, stats, seatStats,
   _canonical: canonical, _db: sdb, _dbPath: DB_PATH,
 };
