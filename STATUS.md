@@ -2,11 +2,13 @@
 
 ## Open
 
-- Next pass: add a native endpoint interception roadmap spike or prototype that moves beyond watched-folder reference behavior toward real desktop AI file-flow coverage.
-- Keep an eye on the remaining product gap: the current endpoint agent is still a watched-folder reference sensor, not a native desktop file-interception agent.
+- Next pass: prototype the signed native endpoint collector that feeds the handoff contract from clipboard or AI-app upload flows without writing raw prompt or file content into event files.
+- Keep an eye on the remaining product gap: the current endpoint package now has a signed local handoff contract, but it still needs a native desktop collector or OS/app hook before it is true file-flow interception.
 
 ## Done
 
+- 2026-06-26: Added a signed native endpoint file-flow handoff prototype: the endpoint agent can validate content-free HMAC-signed upload-intent JSON events, scan the referenced absolute local file through the shared local processor/detector path, report only sanitized placeholders and bounded destination metadata, and package the native handoff helper with installer/docs coverage.
+  Evidence: `node --test test/native-handoff.test.js test/endpoint-agent.test.js test/endpoint-agent-package.test.js test/endpoint-agent-install.test.js`, `npm run package:endpoint-agent -- <temp>`, `npm test`, `npm run test:browser`, `npm run setup:check`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Added the first paid-customer SaaS deployment shape: customer-silo AWS docs/template, SaaS preflight requirements, runtime tenant and managed-identity enforcement, paid seat-limit blocking, seat usage reporting in the dashboard, Docker/setup env propagation, and tests covering API enforcement, seat accounting, and deployment artifacts.
   Evidence: `node --test test/tenant.test.js test/saas-tenancy.test.js test/preflight.test.js test/db.test.js test/aws-deployment.test.js test/docker-deployment.test.js test/setup.test.js`, `npm test`, `npm run test:browser`, `npm run setup:check`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Added a package-to-install endpoint pilot smoke: the endpoint zip is extracted into a temp install root, the scheduled-task scripts are inspected, config is loaded through `SENTINEL_ENV_PATH`, policy refresh is exercised, a watched file is locally extracted and redacted, sanitized `redacted_available` telemetry is sent, and the companion file is verified to contain placeholders only.

@@ -141,11 +141,12 @@ npm run package:endpoint-agent
 
 The command writes a zip and adjacent SHA-256 manifest under
 `dist/endpoint-agent/`. It includes the endpoint runtime, shared detection
-engine, policy evaluator, env loader, file-type processor registry, and scheduled-task
-install/run/uninstall scripts. It refuses synthetic prompt bodies and packaged
-development ingest keys. Set the real `SENTINEL_URL`, `INGEST_API_KEY`, and
-watch directory during install; the agent inspects supported files locally and
-does not contact the control plane without an explicit ingest key.
+engine, policy evaluator, env loader, file-type processor registry, signed
+native handoff prototype, and scheduled-task install/run/uninstall scripts. It
+refuses synthetic prompt bodies and packaged development ingest keys. Set the
+real `SENTINEL_URL`, `INGEST_API_KEY`, and watch directory during install; the
+agent inspects supported files locally and does not contact the control plane
+without an explicit ingest key.
 
 ## MCP Guard Package
 
@@ -187,6 +188,27 @@ The config file carries `SENTINEL_URL`, `INGEST_API_KEY`, and `ENDPOINT_AGENT_WA
 
 The agent inspects supported watched files locally. Under redact policy, structured-only findings write a safe companion text file under `.promptsentinel-redacted` and report `redacted_available` evidence to the control plane; semantic or mixed findings remain held for Security Admin review.
 
+For the native file-flow spike, a future OS or app-specific collector can write
+signed JSON upload-intent events into a local handoff directory instead of
+asking users to move files into the watched folder. Enable that prototype only
+with an explicit local secret:
+
+```powershell
+.\scripts\install-endpoint-agent.ps1 `
+  -SentinelUrl "https://promptsentinel.example.com" `
+  -IngestKey "<pilot-ingest-key>" `
+  -HandoffSecret "<32-plus-character-local-handoff-secret>"
+```
+
+When enabled, the config also carries `ENDPOINT_AGENT_HANDOFF_DIR` and
+`ENDPOINT_AGENT_HANDOFF_SECRET`. Each handoff event must be signed with that
+secret, must name an absolute local file path and destination app, and must not
+contain file bytes, prompt text, `contentBase64`, or raw document content. The
+endpoint agent then scans the referenced file through the same local processor
+and reports only sanitized findings, placeholders, and destination metadata.
+This is the tested contract for a native collector; the current package does
+not install kernel drivers or app hooks by itself.
+
 Check status:
 
 ```powershell
@@ -224,6 +246,8 @@ Set these through `.env`, container environment, or a deployment secret manager:
 | `SENTINEL_SEAT_LIMIT` | Purchased seat count. New managed users beyond this count are blocked and recorded as `SEAT_LIMIT_BLOCKED`. |
 | `SENTINEL_REQUIRE_TENANT_CONTEXT` | Requires sensors to send the matching `orgId`. Enabled automatically by SaaS mode. |
 | `SENTINEL_REQUIRE_USER_IDENTITY` | Requires sensors to send managed user identity instead of `unknown` or `unattributed@unmanaged`. Enabled automatically by SaaS mode. |
+| `ENDPOINT_AGENT_HANDOFF_DIR` | Optional local spool for signed native endpoint upload-intent events. |
+| `ENDPOINT_AGENT_HANDOFF_SECRET` | Optional 32-plus-character local HMAC secret required before the endpoint agent accepts native handoff events. |
 
 Never bind `SENTINEL_DB_PATH` to a cloud-synced folder or network share. SQLite locking must be backed by local disk semantics, and production preflight blocks missing, cloud-synced, or UNC/network SQLite paths before startup readiness passes.
 

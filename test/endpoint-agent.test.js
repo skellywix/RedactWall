@@ -5,7 +5,18 @@ const assert = require('node:assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { scanFile, refreshPolicy, fetchPolicy, scannerConfig, ignoredByScanner, postJson, defaultWatchDir, configuredKey } = require('../endpoint-agent/agent');
+const {
+  scanFile,
+  processNativeHandoffFile,
+  refreshPolicy,
+  fetchPolicy,
+  scannerConfig,
+  ignoredByScanner,
+  postJson,
+  defaultWatchDir,
+  configuredKey,
+  nativeHandoff,
+} = require('../endpoint-agent/agent');
 const pkg = require('../package.json');
 
 test('watch directory prefers CLI argument, then endpoint env, then temp default', () => {
@@ -345,6 +356,78 @@ test('scanner policy controls endpoint ignores and size blocking', async () => {
   assert.strictEqual(blocked.status, 'file_too_large');
   assert.strictEqual(reportRequest.clientOutcome, 'file_too_large');
   assert.ok(!reportRequest.prompt.includes('larger than eight bytes'));
+
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('processes signed native file-flow handoff events without raw payloads', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-agent-native-'));
+  const sourceDir = path.join(dir, 'source');
+  const handoffDir = path.join(dir, 'handoff');
+  fs.mkdirSync(sourceDir, { recursive: true });
+  fs.mkdirSync(handoffDir, { recursive: true });
+  const filePath = path.join(sourceDir, 'member-524-71-9043.txt');
+  fs.writeFileSync(filePath, 'Loan file. SSN 524-71-9043.');
+  const handoffPath = path.join(handoffDir, 'evt.json');
+  const secret = 'native-handoff-secret-000000000000000001';
+  const event = nativeHandoff.signHandoffEvent({
+    version: nativeHandoff.EVENT_VERSION,
+    id: 'evt_native_unit',
+    createdAt: '2026-06-26T15:00:00.000Z',
+    operation: 'upload',
+    filePath,
+    destination: { app: 'Desktop AI' },
+    user: 'native-user@example.test',
+    nonce: 'nonce-1',
+  }, secret);
+  fs.writeFileSync(handoffPath, JSON.stringify(event));
+
+  let reportRequest;
+  const res = await processNativeHandoffFile(handoffPath, {
+    secret,
+    now: new Date('2026-06-26T15:01:00.000Z'),
+    policy: { enforcementMode: 'redact', alwaysBlock: ['US_SSN'], ignore: [], disabledDetectors: [] },
+    report: async (req) => {
+      reportRequest = req;
+      return { decision: 'redact', mode: 'redact', status: 'redacted', id: 'q_native_redacted' };
+    },
+  });
+
+  assert.strictEqual(res.status, 'processed');
+  assert.strictEqual(res.event.id, 'evt_native_unit');
+  assert.strictEqual(res.result.decision, 'redact');
+  assert.strictEqual(reportRequest.user, 'native-user@example.test');
+  assert.strictEqual(reportRequest.destination, 'Desktop AI');
+  assert.match(reportRequest.note, /native handoff evt_native_unit/);
+  assert.strictEqual(reportRequest.clientOutcome, 'redacted_available');
+  assert.match(reportRequest.prompt, /\[\[US_SSN_1\]\]/);
+  assert.ok(!JSON.stringify(reportRequest).includes('524-71-9043'));
+  assert.strictEqual(fs.existsSync(handoffPath), false);
+  assert.match(res.result.redactionHandoff.relativePath, /^\.promptsentinel-redacted[\\/]/);
+  const companion = fs.readFileSync(res.result.redactionHandoff.path, 'utf8');
+  assert.match(companion, /\[\[US_SSN_1\]\]/);
+  assert.ok(!companion.includes('524-71-9043'));
+
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('rejects invalid native handoff events without scanning files', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-agent-native-bad-'));
+  const handoffPath = path.join(dir, 'bad.json');
+  fs.writeFileSync(handoffPath, JSON.stringify({ version: nativeHandoff.EVENT_VERSION, signature: '0'.repeat(64) }));
+
+  let reportCalled = false;
+  const res = await processNativeHandoffFile(handoffPath, {
+    secret: 'native-handoff-secret-000000000000000001',
+    removeRejected: true,
+    silent: true,
+    report: async () => { reportCalled = true; },
+  });
+
+  assert.strictEqual(res.status, 'rejected');
+  assert.match(res.reason, /filePath|signature|createdAt|operation/);
+  assert.strictEqual(reportCalled, false);
+  assert.strictEqual(fs.existsSync(handoffPath), false);
 
   fs.rmSync(dir, { recursive: true, force: true });
 });

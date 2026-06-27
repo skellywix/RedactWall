@@ -4,6 +4,8 @@ param(
   [Parameter(Mandatory = $true)]
   [string]$IngestKey,
   [string]$WatchDir = "$env:USERPROFILE\PromptSentinelWatch",
+  [string]$HandoffDir = "$env:LOCALAPPDATA\PromptSentinel\native-handoff",
+  [string]$HandoffSecret = "",
   [string]$ConfigDir = "$env:LOCALAPPDATA\PromptSentinel",
   [string]$RepoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path,
   [switch]$Force
@@ -23,23 +25,35 @@ if (-not (Test-Path -LiteralPath $runner)) {
 
 $configRoot = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ConfigDir)
 $watchRoot = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($WatchDir)
+$handoffRoot = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($HandoffDir)
 $logDir = Join-Path $configRoot "logs"
 $configPath = Join-Path $configRoot "endpoint-agent.env"
 $logPath = Join-Path $logDir "endpoint-agent.log"
 
 New-Item -ItemType Directory -Force -Path $configRoot, $watchRoot, $logDir | Out-Null
+if ($HandoffSecret) {
+  if ($HandoffSecret.Trim().Length -lt 32) {
+    throw "HandoffSecret must be at least 32 characters when native handoff is enabled."
+  }
+  New-Item -ItemType Directory -Force -Path $handoffRoot | Out-Null
+}
 
 if ((Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) -and -not $Force) {
   throw "Scheduled task $TaskName already exists. Re-run with -Force to replace it."
 }
 
-@(
+$configLines = @(
   "# PromptSentinel endpoint agent local config",
   "SENTINEL_URL=$SentinelUrl",
   "INGEST_API_KEY=$IngestKey",
   "ENDPOINT_AGENT_WATCH_DIR=$watchRoot",
   "SENTINEL_REQUEST_TIMEOUT_MS=10000"
-) | Set-Content -LiteralPath $configPath -Encoding utf8
+)
+if ($HandoffSecret) {
+  $configLines += "ENDPOINT_AGENT_HANDOFF_DIR=$handoffRoot"
+  $configLines += "ENDPOINT_AGENT_HANDOFF_SECRET=$HandoffSecret"
+}
+$configLines | Set-Content -LiteralPath $configPath -Encoding utf8
 
 $acl = Get-Acl -LiteralPath $configPath
 $acl.SetAccessRuleProtection($true, $false)
@@ -72,5 +86,6 @@ Start-ScheduledTask -TaskName $TaskName
 
 Write-Host "Installed $TaskName"
 Write-Host "Watch directory: $watchRoot"
+if ($HandoffSecret) { Write-Host "Native handoff directory: $handoffRoot" }
 Write-Host "Config file: $configPath"
 Write-Host "Log file: $logPath"

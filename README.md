@@ -87,7 +87,10 @@ agent uses it locally for every watched file and reports only sanitized evidence
 to the control plane. In redact mode, structured-only endpoint findings also
 produce a local `.promptsentinel-redacted/*.txt` companion file with typed
 placeholders and no token vault; semantic or mixed findings stay held for
-review. Browser/API sensors can also call `POST /api/v1/scan-file`
+review. A signed native handoff prototype also lets a future desktop collector
+write content-free upload-intent events for absolute local files, so the agent
+can scan files headed to desktop AI apps without relying only on a watched
+folder. Browser/API sensors can also call `POST /api/v1/scan-file`
 with a base64 file. Add a new file type by pushing a processor with
 `{ supports(name), extract(buffer) }`. Supported files fail closed if extraction
 times out or the parser cannot inspect the file, and the audit log records the
@@ -179,7 +182,7 @@ environment config, not inside packages.
 npm run simulate                      # pushes sample prompts (API/proxy path)
 npm run fire-drill -- http://localhost:4000  # sends a synthetic canary control
 node mcp-guard/guard.js               # demo: redact a SharePoint doc before the model sees it
-node endpoint-agent/agent.js <dir>    # watch a folder for files going to desktop AI apps
+node endpoint-agent/agent.js <dir>    # watch a folder, or process signed native file-flow handoffs
 ```
 
 For a Windows pilot, install the endpoint sensor as a logon task:
@@ -227,7 +230,7 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 | Browser extension | Working — warn/justify/**redact**/block, real-button send, MDM identity, Man-in-the-Prompt guard |
 | Shadow-AI discovery | Working — flags use of ungoverned AI tools |
 | Output scanning | Working — `/api/v1/scan-response` flags PII/secrets in AI replies |
-| MCP guard / Endpoint agent | Working references - inline/MCP redaction; local endpoint folder watch with redacted companion files for structured-only findings |
+| MCP guard / Endpoint agent | Working references - inline/MCP redaction; local endpoint folder watch plus signed native file-flow handoff prototype; redacted companion files for structured-only findings |
 | Auth & ops | Working: login lockout, password-confirmed raw reveal and release approval, release-token scoped polling, stable secret, `/healthz` · `/readyz` · `/api/metrics`, sensor version posture, Docker, CI |
 
 ## Shipped since the skeleton (see `ITERATIONS.md`)
@@ -245,7 +248,7 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 - SSO, polished MFA enrollment UX, and multiple admin roles; deeper multi-tenant isolation per institution.
 - Signed Chrome Web Store listing and force-install rollout; local extension zip plus integrity manifest are packaged.
 - Email/Slack escalation rules on top of the sanitized SIEM webhook.
-- Endpoint agent as a signed native service hooking clipboard + AI-app upload dirs.
+- Ship the signed native endpoint collector that feeds the tested handoff contract from clipboard and AI-app upload flows.
 - Upgrade the on-device classifier to a quantized ONNX/WASM NER when recall demands it.
 
 ## Configuration
@@ -270,6 +273,8 @@ Copy `.env.example` to `.env` (or export):
 | `SENTINEL_SECRET` | Session cookie signing secret; production preflight requires at least 32 characters from environment |
 | `SENTINEL_DATA_KEY` | Encrypts retained raw prompts at rest; production preflight requires at least 32 characters for this key or the `SENTINEL_SECRET` fallback |
 | `INGEST_API_KEY` | Key sensors present to the gate API; production preflight requires a non-default key of at least 32 characters |
+| `ENDPOINT_AGENT_HANDOFF_DIR` | Optional local spool for signed native endpoint upload-intent events |
+| `ENDPOINT_AGENT_HANDOFF_SECRET` | Optional 32-plus-character local HMAC secret required before native endpoint handoff events are accepted |
 | `INGEST_AUTH_MAX_FAILURES` | Optional invalid ingest-key throttle threshold (default 20, bounded 3 to 1000) |
 | `INGEST_AUTH_WINDOW_MS` | Optional invalid ingest-key throttle window (default 60000 ms, bounded 1000 to 3600000) |
 | `INGEST_AUTH_LOCK_MS` | Optional invalid ingest-key throttle lock time (default 60000 ms, bounded 1000 to 3600000) |

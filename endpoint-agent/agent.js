@@ -11,11 +11,13 @@ require('../src/env').loadEnv();
  * Usage: node agent.js [watchDir]
  *   SENTINEL_URL (default http://localhost:4000), INGEST_API_KEY (required for control-plane calls)
  *   ENDPOINT_AGENT_WATCH_DIR (default OS temp promptsentinel-watch)
+ *   ENDPOINT_AGENT_HANDOFF_SECRET enables signed native file-flow handoff events
  */
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
+const nativeHandoff = require('./native-handoff');
 const processors = require('../src/processors');
 const policyEngine = require('../src/policy');
 const D = require('../shared/detect');
@@ -27,6 +29,8 @@ function defaultWatchDir(argv = process.argv, env = process.env) {
   return argv[2] || env.ENDPOINT_AGENT_WATCH_DIR || path.join(os.tmpdir(), 'promptsentinel-watch');
 }
 const WATCH = defaultWatchDir();
+const HANDOFF_DIR = nativeHandoff.defaultHandoffDir();
+const HANDOFF_SECRET = nativeHandoff.configuredHandoffSecret();
 
 const DEFAULT_SCANNER = {
   ignoreDirectories: ['node_modules', '.git', 'Library', 'Applications', 'AppData'],
@@ -38,6 +42,7 @@ const REDACTION_HANDOFF_DIR = '.promptsentinel-redacted';
 const REDACTION_HANDOFF_SUFFIX = '.promptsentinel-redacted.txt';
 const POLICY_REFRESH_MS = 15 * 60 * 1000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 10000;
+const HANDOFF_RETRY_DELAY_MS = 200;
 let scannerState = scannerConfig(DEFAULT_SCANNER);
 let policyState = sensorPolicy(policyEngine.DEFAULT_POLICY);
 
@@ -46,6 +51,10 @@ if (!fs.existsSync(WATCH)) fs.mkdirSync(WATCH, { recursive: true });
 function configuredKey(opts = {}) {
   const value = Object.prototype.hasOwnProperty.call(opts, 'key') ? opts.key : KEY;
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function handoffSecretReady(secret) {
+  return typeof secret === 'string' && secret.trim().length >= 32;
 }
 
 function lowerList(value, fallback = []) {
@@ -235,10 +244,10 @@ async function report(rec, opts = {}) {
   return postJson('/api/v1/gate', rec, opts);
 }
 
-function unscannedFileEvent(filename, user, outcome, note) {
+function unscannedFileEvent(filename, user, outcome, note, opts = {}) {
   return {
     prompt: '[file blocked unscanned] ' + safeFileLabel(filename),
-    user, destination: 'desktop-ai-app', source: 'endpoint_agent', channel: 'file_upload',
+    user, destination: opts.destination || 'desktop-ai-app', source: 'endpoint_agent', channel: 'file_upload',
     sensor: sensorMetadata(),
     clientOutcome: outcome,
     note,
@@ -253,16 +262,17 @@ async function blockScanUnavailable(file, user, opts = {}) {
     user,
     'scan_unavailable',
     'blocked locally: control plane decision logging unavailable',
+    opts,
   ), opts);
   return { decision: 'block', status: 'scan_unavailable', supported: true };
 }
 
-function localFileRecord(file, user, safePrompt, analysis, outcome, note) {
+function localFileRecord(file, user, safePrompt, analysis, outcome, note, opts = {}) {
   const label = safeFileLabel(file);
   const base = {
     prompt: String(safePrompt || '').slice(0, 1000),
     user,
-    destination: 'desktop-ai-app',
+    destination: opts.destination || 'desktop-ai-app',
     source: 'endpoint_agent',
     channel: 'file_upload',
     sensor: sensorMetadata(),
@@ -364,16 +374,17 @@ async function reportLocalFile(file, user, extracted, opts = {}) {
   const analysis = D.analyze(extracted.text || '', { ignore: pol.ignore, disabledDetectors: pol.disabledDetectors });
   const verdict = policyEngine.evaluate(analysis, pol);
   if (verdict.decision === 'allow') {
-    const res = await (opts.report || report)(localFileRecord(file, user, safeFilePrompt(file, '', analysis), analysis, 'allowed'), opts);
+    const res = await (opts.report || report)(localFileRecord(file, user, safeFilePrompt(file, '', analysis), analysis, 'allowed', undefined, opts), opts);
     if (res) return { ...res, inspectedLocally: true, localAnalysis: analysis };
     return { ...(await blockScanUnavailable(file, user, opts)), inspectedLocally: true, localAnalysis: analysis };
   }
   const mode = fileMode(analysis, pol);
   const { handoff, handoffError, outcome } = prepareRedactionHandoff(file, extracted.text || '', analysis, mode, opts);
   const safePrompt = safeFilePrompt(file, extracted.text || '', analysis, mode);
+  const handoffSource = opts.nativeHandoff && opts.nativeHandoff.id ? `; native handoff ${opts.nativeHandoff.id}` : '';
   const note = `endpoint agent inspected ${safeFileLabel(file)} locally: ${verdict.reasons.join('; ')}` +
-    handoffNote(handoff, handoffError);
-  const res = await (opts.report || report)(localFileRecord(file, user, safePrompt, analysis, outcome, note), opts);
+    handoffNote(handoff, handoffError) + handoffSource;
+  const res = await (opts.report || report)(localFileRecord(file, user, safePrompt, analysis, outcome, note, opts), opts);
   if (res) return localFileResponse(res, analysis, handoff);
   removeRedactionHandoff(handoff);
   return { ...(await blockScanUnavailable(file, user, opts)), inspectedLocally: true, localAnalysis: analysis };
@@ -390,15 +401,11 @@ function decisionSummary(res) {
   };
 }
 
-async function scanFile(file, opts = {}) {
-  const watchDir = opts.watchDir || WATCH;
+async function scanResolvedFile(file, full, root, opts = {}) {
   const pol = opts.policy ? sensorPolicy(opts.policy) : policyState;
   const scanner = opts.scanner ? scannerConfig(opts.scanner) : pol.scanner || scannerState;
   const maxBytes = opts.maxBytes || scanner.maxFileBytes;
   const label = safeFileLabel(file);
-  const root = path.resolve(watchDir);
-  const full = path.resolve(root, file);
-  if (full !== root && !full.startsWith(root + path.sep)) return;
   let stat; try { stat = fs.statSync(full); } catch { return; }
   if (!stat.isFile()) return;
   if (ignoredByScanner(file, scanner)) return;
@@ -406,22 +413,22 @@ async function scanFile(file, opts = {}) {
 
   if (stat.size > maxBytes) {
     console.log(`[BLOCK] ${label} is too large to inspect`);
-    await (opts.report || report)(unscannedFileEvent(file, user, 'file_too_large', 'blocked locally: file too large to inspect'), opts);
+    await (opts.report || report)(unscannedFileEvent(file, user, 'file_too_large', 'blocked locally: file too large to inspect', opts), opts);
     return { decision: 'block', status: 'file_too_large' };
   }
   if (!processors.supported(file)) {
     console.log(`[BLOCK] ${label} is unsupported and was not uploaded for scanning`);
-    await (opts.report || report)(unscannedFileEvent(file, user, 'file_unsupported', 'blocked locally: unsupported file type'), opts);
+    await (opts.report || report)(unscannedFileEvent(file, user, 'file_unsupported', 'blocked locally: unsupported file type', opts), opts);
     return { decision: 'block', status: 'file_unsupported', supported: false };
   }
   const buf = fs.readFileSync(full);
   const extracted = await processors.extractText(file, buf, opts.extract || {});
   if (!extracted.extractionOk) {
     console.log(`[BLOCK] ${label} could not be inspected locally`);
-    await (opts.report || report)(unscannedFileEvent(file, user, 'scan_unavailable', `blocked locally: ${extracted.error || 'extract_failed'}`), opts);
+    await (opts.report || report)(unscannedFileEvent(file, user, 'scan_unavailable', `blocked locally: ${extracted.error || 'extract_failed'}`, opts), opts);
     return { decision: 'block', status: 'scan_unavailable', supported: true, inspected: false };
   }
-  const res = await reportLocalFile(file, user, extracted, { ...opts, policy: pol });
+  const res = await reportLocalFile(file, user, extracted, { ...opts, policy: pol, watchDir: opts.redactionRoot || opts.watchDir || root });
   if (res.decision === 'allow') {
     console.log(`[ok]   ${label} -- clean`);
     return res;
@@ -436,9 +443,71 @@ async function scanFile(file, opts = {}) {
   return res;
 }
 
+async function scanFile(file, opts = {}) {
+  const watchDir = opts.watchDir || WATCH;
+  const root = path.resolve(watchDir);
+  const full = path.resolve(root, file);
+  if (full !== root && !full.startsWith(root + path.sep)) return;
+  return scanResolvedFile(file, full, root, opts);
+}
+
+async function scanAbsoluteFile(filePath, opts = {}) {
+  const full = path.resolve(String(filePath || ''));
+  const root = path.dirname(full);
+  return scanResolvedFile(path.basename(full), full, root, opts);
+}
+
+function removeHandoffEventFile(file, opts = {}) {
+  try {
+    fs.rmSync(file, { force: true });
+  } catch {
+    if (!opts.silent) console.error('  native handoff cleanup failed');
+  }
+}
+
+async function processNativeHandoffFile(file, opts = {}) {
+  let event;
+  try {
+    event = nativeHandoff.readHandoffFile(file, opts);
+  } catch (e) {
+    if (!opts.silent) console.error('  native handoff rejected:', e.message);
+    if (opts.removeRejected) removeHandoffEventFile(file, opts);
+    return { status: 'rejected', reason: e.message };
+  }
+  const result = await scanAbsoluteFile(event.filePath, {
+    ...opts,
+    user: event.user || opts.user,
+    destination: nativeHandoff.publicDestination(event.destination),
+    nativeHandoff: event,
+    redactionRoot: opts.redactionRoot || path.dirname(file),
+  });
+  if (!opts.keepHandoffFile) removeHandoffEventFile(file, opts);
+  return { status: 'processed', event, result };
+}
+
+function processNativeHandoffFileSafe(file, opts = {}) {
+  Promise.resolve(processNativeHandoffFile(file, opts)).catch((e) => {
+    if (!opts.silent) console.error('  native handoff failed:', e.message);
+  });
+}
+
+function processHandoffDirectory(dir = HANDOFF_DIR, opts = {}) {
+  if (!handoffSecretReady(nativeHandoff.configuredHandoffSecret(opts))) return;
+  fs.mkdirSync(dir, { recursive: true });
+  for (const entry of fs.readdirSync(dir)) {
+    if (entry.toLowerCase().endsWith('.json')) processNativeHandoffFileSafe(path.join(dir, entry), { ...opts, silent: true });
+  }
+  return fs.watch(dir, (event, filename) => {
+    if (filename && event === 'rename' && filename.toLowerCase().endsWith('.json')) {
+      setTimeout(() => processNativeHandoffFileSafe(path.join(dir, filename), opts), HANDOFF_RETRY_DELAY_MS);
+    }
+  });
+}
+
 function start() {
   console.log('PromptSentinel endpoint agent');
   console.log('  watching:', WATCH);
+  console.log('  native handoff:', handoffSecretReady(HANDOFF_SECRET) ? HANDOFF_DIR : 'disabled (set 32+ char ENDPOINT_AGENT_HANDOFF_SECRET)');
   console.log('  server  :', SERVER);
   console.log('  ingest  :', KEY ? 'configured' : 'not configured (control-plane calls disabled)');
   console.log('  Supported: pdf, docx, xlsx, pptx, and text files. Drop a file in to scan.\n');
@@ -449,12 +518,17 @@ function start() {
   const refreshTimer = setInterval(() => refreshPolicy({ silent: true }), POLICY_REFRESH_MS);
   if (refreshTimer.unref) refreshTimer.unref();
   fs.watch(WATCH, (event, filename) => { if (filename && event === 'rename') setTimeout(() => scanFile(filename), 200); });
+  if (handoffSecretReady(HANDOFF_SECRET)) processHandoffDirectory(HANDOFF_DIR, { secret: HANDOFF_SECRET });
 }
 
 if (require.main === module) start();
 
 module.exports = {
   scanFile,
+  scanAbsoluteFile,
+  processNativeHandoffFile,
+  processNativeHandoffFileSafe,
+  processHandoffDirectory,
   report,
   postJson,
   fetchPolicy,
@@ -471,5 +545,7 @@ module.exports = {
   defaultWatchDir,
   sensorMetadata,
   configuredKey,
+  handoffSecretReady,
+  nativeHandoff,
   start,
 };

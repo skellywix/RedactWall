@@ -32,6 +32,10 @@ function minimalFiles(agentBody) {
     { path: 'src/processors.js', body: Buffer.from('module.exports = {};') },
     { path: 'endpoint-agent/agent.js', body: Buffer.from(agentBody) },
     {
+      path: 'endpoint-agent/native-handoff.js',
+      body: Buffer.from("require('crypto').createHmac('sha256', 'secret'); const blocked = 'contentBase64';"),
+    },
+    {
       path: 'scripts/install-endpoint-agent.ps1',
       body: Buffer.from('[Parameter(Mandatory = $true)]\n[string]$IngestKey\n$taskArgs = "-File runner.ps1"\n'),
     },
@@ -57,6 +61,7 @@ test('package script writes a prompt-free endpoint agent zip and integrity manif
   assert.strictEqual(manifest.checks.explicitIngestKeyRequired, true);
   assert.strictEqual(manifest.checks.localDetectionEngineIncluded, true);
   assert.strictEqual(manifest.checks.endpointRedactionHandoffIncluded, true);
+  assert.strictEqual(manifest.checks.nativeHandoffPrototypeIncluded, true);
   assert.strictEqual(manifest.checks.scheduledTaskInstallerIncluded, true);
   assert.strictEqual(manifest.checks.localConfigEnvPath, true);
   assert.strictEqual(manifest.checks.taskArgsDoNotExposeIngestKey, true);
@@ -73,6 +78,7 @@ test('package script writes a prompt-free endpoint agent zip and integrity manif
     'src/policy.js',
     'src/processors.js',
     'endpoint-agent/agent.js',
+    'endpoint-agent/native-handoff.js',
     'scripts/install-endpoint-agent.ps1',
     'scripts/run-endpoint-agent.ps1',
     'scripts/uninstall-endpoint-agent.ps1',
@@ -85,6 +91,8 @@ test('package script writes a prompt-free endpoint agent zip and integrity manif
   assert.match(agent, /process\.env\.INGEST_API_KEY \|\| ''/);
   assert.match(agent, /redacted_available/);
   assert.match(agent, /\.promptsentinel-redacted/);
+  assert.match(agent, /ENDPOINT_AGENT_HANDOFF_SECRET/);
+  assert.match(zip.readAsText('endpoint-agent/native-handoff.js'), /createHmac\('sha256'/);
   assert.doesNotMatch(agent, /dev-ingest-key|524-71-9043|4111 1111 1111 1111/);
   assert.doesNotMatch(JSON.stringify(manifest), /prompt\s*:/i);
   assert.doesNotMatch(JSON.stringify(manifest), /524-71-9043|4111 1111|REPLACE_WITH_LONG_RANDOM_INGEST_KEY/);
@@ -153,7 +161,7 @@ test('packaged endpoint agent runs a package-to-install pilot smoke', async (t) 
     }
   });
 
-  const agentPath = path.join(installRoot, 'endpoint-agent', 'agent.js');
+  const agentPath = require.resolve(path.join(installRoot, 'endpoint-agent', 'agent.js'));
   delete require.cache[agentPath];
   const agent = require(agentPath);
   t.after(() => { delete require.cache[agentPath]; });
@@ -192,11 +200,18 @@ test('packaged endpoint agent runs a package-to-install pilot smoke', async (t) 
       assert.strictEqual(body.clientPreRedacted, true);
       assert.strictEqual(body.source, 'endpoint_agent');
       assert.strictEqual(body.channel, 'file_upload');
+      const isNativeHandoff = /evt_packaged_native/.test(body.note || '');
       assert.match(body.prompt, /\[\[US_SSN_1\]\]/);
-      assert.match(body.prompt, /\[\[CREDIT_CARD_1\]\]/);
+      if (isNativeHandoff) {
+        assert.strictEqual(body.destination, 'Desktop AI');
+        assert.strictEqual(body.user, 'native-user@example.test');
+        assert.match(body.note, /native handoff evt_packaged_native/);
+      } else {
+        assert.match(body.prompt, /\[\[CREDIT_CARD_1\]\]/);
+        assert.ok(body.clientFindings.some((finding) => finding.type === 'CREDIT_CARD'));
+      }
       assert.match(body.note, /\.promptsentinel-redacted/);
       assert.ok(body.clientFindings.some((finding) => finding.type === 'US_SSN'));
-      assert.ok(body.clientFindings.some((finding) => finding.type === 'CREDIT_CARD'));
       assert.ok(!JSON.stringify(body).includes('524-71-9043'));
       assert.ok(!JSON.stringify(body).includes('4111 1111 1111 1111'));
       assert.strictEqual(body.contentBase64, undefined);
@@ -236,6 +251,45 @@ test('packaged endpoint agent runs a package-to-install pilot smoke', async (t) 
   assert.ok(!companion.includes('4111 1111 1111 1111'));
   assert.ok(requests.some((request) => request.url.endsWith('/api/v1/policy')));
   assert.ok(requests.some((request) => request.url.endsWith('/api/v1/gate')));
+
+  const sourceDir = path.join(installRoot, 'native-source');
+  const handoffDir = path.join(installRoot, 'native-handoff');
+  fs.mkdirSync(sourceDir, { recursive: true });
+  fs.mkdirSync(handoffDir, { recursive: true });
+  const nativeFile = path.join(sourceDir, 'member-524-71-9043.txt');
+  fs.writeFileSync(nativeFile, 'Native file flow SSN 524-71-9043 and card 4111 1111 1111 1111.');
+  const nativeSecret = 'native-handoff-secret-000000000000000001';
+  const nativeEventPath = path.join(handoffDir, 'event.json');
+  fs.writeFileSync(nativeEventPath, JSON.stringify(agent.nativeHandoff.signHandoffEvent({
+    version: agent.nativeHandoff.EVENT_VERSION,
+    id: 'evt_packaged_native',
+    createdAt: '2026-06-26T13:01:00.000Z',
+    operation: 'upload',
+    filePath: nativeFile,
+    destination: { app: 'Desktop AI' },
+    user: 'native-user@example.test',
+    nonce: 'native-nonce',
+  }, nativeSecret)));
+
+  const nativeResult = await agent.processNativeHandoffFile(nativeEventPath, {
+    secret: nativeSecret,
+    now: new Date('2026-06-26T13:02:00.000Z'),
+    policy: {
+      enforcementMode: 'redact',
+      blockMinSeverity: 2,
+      blockRiskScore: 20,
+      alwaysBlock: ['US_SSN', 'CREDIT_CARD'],
+      ignore: [],
+      disabledDetectors: [],
+    },
+    fetchImpl,
+  });
+
+  assert.strictEqual(nativeResult.status, 'processed');
+  assert.strictEqual(nativeResult.result.decision, 'redact');
+  assert.strictEqual(fs.existsSync(nativeEventPath), false);
+  assert.ok(!JSON.stringify(requests).includes('524-71-9043'));
+  assert.ok(!JSON.stringify(requests).includes('4111 1111 1111 1111'));
 });
 
 test('package args support explicit output directories', () => {

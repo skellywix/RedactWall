@@ -20,8 +20,11 @@ test('installer registers a restarting scheduled task without putting the ingest
   assert.match(install, /INGEST_API_KEY=\$IngestKey/);
   assert.match(install, /\$env:LOCALAPPDATA\\PromptSentinel/);
   assert.match(install, /BUILTIN\\Administrators/);
+  assert.match(install, /ENDPOINT_AGENT_HANDOFF_SECRET=\$HandoffSecret/);
   assert.doesNotMatch(install, /"-IngestKey"/);
   assert.doesNotMatch(install, /\$IngestKey[\s\S]{0,120}\$taskArgs/);
+  assert.doesNotMatch(install, /"-HandoffSecret"/);
+  assert.doesNotMatch(install, /\$HandoffSecret[\s\S]{0,120}\$taskArgs/);
 });
 
 test('runner loads endpoint config through SENTINEL_ENV_PATH and starts the agent', () => {
@@ -41,4 +44,5 @@ test('deployment docs include endpoint task install and uninstall flow', () => {
   assert.match(deployment, /uninstall-endpoint-agent\.ps1/);
   assert.match(deployment, /PromptSentinelEndpointAgent/);
   assert.match(deployment, /%LOCALAPPDATA%\\PromptSentinel\\endpoint-agent\.env/);
+  assert.match(deployment, /ENDPOINT_AGENT_HANDOFF_SECRET/);
 });

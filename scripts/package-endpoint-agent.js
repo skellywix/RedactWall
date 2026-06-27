@@ -17,6 +17,7 @@ const PACKAGE_FILES = [
   'src/policy.js',
   'src/processors.js',
   'endpoint-agent/agent.js',
+  'endpoint-agent/native-handoff.js',
   'scripts/install-endpoint-agent.ps1',
   'scripts/run-endpoint-agent.ps1',
   'scripts/uninstall-endpoint-agent.ps1',
@@ -71,6 +72,14 @@ function validateRuntimeFiles(files) {
   if (!/redacted_available/.test(agent) || !/\.promptsentinel-redacted/.test(agent)) {
     throw new Error('Endpoint agent package must include the local redacted companion handoff');
   }
+  if (!/native-handoff/.test(agent) || !/ENDPOINT_AGENT_HANDOFF_SECRET/.test(agent)) {
+    throw new Error('Endpoint agent package must include the signed native handoff prototype');
+  }
+
+  const handoff = files.find((file) => file.path === 'endpoint-agent/native-handoff.js').body.toString('utf8');
+  if (!/createHmac\('sha256'/.test(handoff) || !/contentBase64/.test(handoff)) {
+    throw new Error('Endpoint agent native handoff must be signed and content-free');
+  }
 
   const install = files.find((file) => file.path === 'scripts/install-endpoint-agent.ps1').body.toString('utf8');
   if (!/\[Parameter\(Mandatory = \$true\)\]\s*\r?\n\s*\[string\]\$IngestKey/.test(install)) {
@@ -78,6 +87,9 @@ function validateRuntimeFiles(files) {
   }
   if (/"-IngestKey"/.test(install) || /\$IngestKey[\s\S]{0,120}\$taskArgs/.test(install)) {
     throw new Error('Endpoint agent installer must not put the ingest key in scheduled-task arguments');
+  }
+  if (/"-HandoffSecret"/.test(install) || /\$HandoffSecret[\s\S]{0,120}\$taskArgs/.test(install)) {
+    throw new Error('Endpoint agent installer must not put the native handoff secret in scheduled-task arguments');
   }
 
   const runner = files.find((file) => file.path === 'scripts/run-endpoint-agent.ps1').body.toString('utf8');
@@ -122,6 +134,7 @@ function packageEndpointAgent(opts = {}) {
       explicitIngestKeyRequired: true,
       localDetectionEngineIncluded: true,
       endpointRedactionHandoffIncluded: true,
+      nativeHandoffPrototypeIncluded: true,
       scheduledTaskInstallerIncluded: true,
       localConfigEnvPath: true,
       taskArgsDoNotExposeIngestKey: true,
