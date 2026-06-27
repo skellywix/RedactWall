@@ -1,12 +1,25 @@
 #!/usr/bin/env sh
 set -eu
 
-if ! command -v npm >/dev/null 2>&1; then
+find_npm() {
+  if command -v npm >/dev/null 2>&1; then
+    printf '%s\n' npm
+    return 0
+  fi
+  if command -v npm.cmd >/dev/null 2>&1; then
+    printf '%s\n' npm.cmd
+    return 0
+  fi
+  return 1
+}
+
+NPM_CMD="$(find_npm || true)"
+if [ -z "$NPM_CMD" ]; then
   echo "[pre-commit] npm not found. Install Node.js and npm, then retry."
   exit 1
 fi
 
-if ! npm run review:agent; then
+if ! "$NPM_CMD" run review:agent; then
   echo "[pre-commit] review:agent failed. Commit aborted."
   exit 1
 fi
