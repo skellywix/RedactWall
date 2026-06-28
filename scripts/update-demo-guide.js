@@ -1,0 +1,242 @@
+'use strict';
+
+const fs = require('fs');
+const path = require('path');
+
+const ROOT = path.resolve(__dirname, '..');
+const START = '<!-- DEMO_GUIDE_CURRENT_STATE_START -->';
+const END = '<!-- DEMO_GUIDE_CURRENT_STATE_END -->';
+const GENERATED_DOCS = [
+  'DEMO_INSTALL_GUIDE.md',
+  'docs/SALES_DEMO_GUIDE.md',
+  'docs/DEMO_TECHNICIAN_SETUP.md',
+];
+const SEMANTIC_CATEGORIES = ['SOURCE_CODE', 'LEGAL_CONTRACT', 'CREDENTIALS', 'CONFIDENTIAL_BUSINESS'];
+const DEMO_COMMANDS = [
+  'setup',
+  'setup:prod',
+  'setup:check',
+  'start',
+  'simulate',
+  'fire-drill',
+  'test',
+  'test:browser',
+  'sync-check',
+  'eval',
+  'backup',
+  'backup:verify',
+  'backup:restore',
+  'package:extension',
+  'package:endpoint-agent',
+  'package:mcp-guard',
+  'docs:demo-guide',
+  'docs:demo-guide:check',
+];
+const SENSOR_AND_DOC_PATHS = [
+  ['server/app.js', 'Control plane, API, dashboard, policy, approval, audit'],
+  ['server/public/index.html', 'Admin dashboard shell'],
+  ['detection-engine/detect.js', 'Shared detection engine source of truth'],
+  ['sensors/browser-extension/manifest.json', 'Chrome extension entrypoint'],
+  ['sensors/browser-extension/content.js', 'Browser send, paste, upload enforcement'],
+  ['sensors/endpoint-agent/agent.js', 'Local folder and file sensor'],
+  ['sensors/endpoint-agent/write-handoff.js', 'Signed native upload-intent handoff writer'],
+  ['sensors/mcp-guard/guard.js', 'MCP tool-output redaction reference'],
+  ['config/policy.json', 'Demo policy defaults'],
+  ['DEMO_INSTALL_GUIDE.md', 'Demo guide hub'],
+  ['docs/SALES_DEMO_GUIDE.md', 'Sales and client-facing demo script'],
+  ['docs/DEMO_TECHNICIAN_SETUP.md', 'Demo machine setup and reset runbook'],
+  ['docs/DEPLOYMENT.md', 'Native Node and Docker deployment reference'],
+  ['docs/MANAGED_EXTENSION_DEPLOYMENT.md', 'Chrome managed extension pilot reference'],
+  ['docs/TECHNICIAN_DEPLOYMENT_GUIDE.md', 'Install-day production readiness runbook'],
+  ['docs/AWS_SAAS_DEPLOYMENT.md', 'Customer-silo AWS deployment path'],
+];
+
+function readJson(relativePath) {
+  return JSON.parse(fs.readFileSync(path.join(ROOT, relativePath), 'utf8'));
+}
+
+function exists(relativePath) {
+  return fs.existsSync(path.join(ROOT, relativePath));
+}
+
+function docPath(relativePath) {
+  return path.join(ROOT, relativePath);
+}
+
+function asciiText(value) {
+  return String(value || '')
+    .replace(/[^\x20-\x7E]/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function commandTable(pkg, names) {
+  const rows = ['| Command | Current script |', '| --- | --- |'];
+  for (const name of names) {
+    const script = pkg.scripts[name];
+    rows.push(`| \`npm run ${name}\` | \`${script || 'missing'}\` |`);
+  }
+  return rows.join('\n');
+}
+
+function fileTable(entries) {
+  const rows = ['| Path | Demo role | Status |', '| --- | --- | --- |'];
+  for (const [relativePath, role] of entries) {
+    rows.push(`| \`${relativePath}\` | ${role} | ${exists(relativePath) ? 'Present' : 'Missing'} |`);
+  }
+  return rows.join('\n');
+}
+
+function joinInline(items) {
+  return items.length ? items.map((item) => `\`${item}\``).join(', ') : '_None configured._';
+}
+
+function supportedFileTypes(processors) {
+  const groups = [
+    ['Text and config', Array.from(processors.TEXT_EXT).sort()],
+    ['Office', Array.from(processors.OFFICE_EXT).sort()],
+    ['PDF', Array.from(processors.PDF_EXT).sort()],
+  ];
+  return groups.map(([label, values]) => `- ${label}: ${joinInline(values)}`).join('\n');
+}
+
+function hostPermissions(manifest) {
+  return (manifest.host_permissions || [])
+    .filter((entry) => !entry.includes('localhost'))
+    .map((entry) => entry.replace(/^https?:\/\//, '').replace(/\/\*$/, ''))
+    .sort();
+}
+
+function status(value) {
+  return value ? 'enabled' : 'disabled';
+}
+
+function validateRequiredScripts(pkg, names) {
+  const missing = names.filter((name) => !pkg.scripts[name]);
+  if (missing.length) {
+    throw new Error(`package.json is missing demo guide script reference(s): ${missing.join(', ')}`);
+  }
+}
+
+function stalePathProblems(relativePath, guide) {
+  const problems = [];
+  const stalePatterns = [
+    'promptsentinel-app\\promptsentinel',
+    'promptsentinel-app/promptsentinel',
+    'cd promptsentinel',
+  ];
+  for (const pattern of stalePatterns) {
+    if (guide.includes(pattern)) problems.push(`${relativePath}: stale path remains: ${pattern}`);
+  }
+  return problems;
+}
+
+function loadSnapshot() {
+  const pkg = readJson('package.json');
+  const policy = readJson('config/policy.json');
+  const manifest = readJson('sensors/browser-extension/manifest.json');
+  const detector = require(path.join(ROOT, 'detection-engine', 'detect'));
+  const processors = require(path.join(ROOT, 'server', 'processors'));
+  const templates = require(path.join(ROOT, 'server', 'templates'));
+  validateRequiredScripts(pkg, DEMO_COMMANDS);
+
+  const detectors = detector.listDetectors().map((item) => item.id).sort();
+  const semanticCategories = detectors.filter((id) => SEMANTIC_CATEGORIES.includes(id));
+  const templateLabels = templates.list().map((item) => `${item.id} (${item.label})`).sort();
+  return { pkg, policy, manifest, processors, detectors, semanticCategories, templateLabels, hosts: hostPermissions(manifest) };
+}
+
+function overviewTable(snapshot) {
+  const { pkg, policy, manifest, detectors, semanticCategories, templateLabels, hosts } = snapshot;
+  return [
+    '| Source | Current value |',
+    '| --- | --- |',
+    `| App package | \`${pkg.name}@${pkg.version}\` |`,
+    `| Active repo folder | \`${path.basename(ROOT)}\` |`,
+    `| Server entrypoint | \`${pkg.main}\` |`,
+    `| Browser extension | \`${asciiText(manifest.name)}\` version \`${manifest.version}\` |`,
+    `| Default enforcement mode | \`${policy.enforcementMode}\` |`,
+    `| Block thresholds | severity \`${policy.blockMinSeverity}\`, risk score \`${policy.blockRiskScore}\` |`,
+    `| Raw approval retention | ${status(policy.storeRawForApproval)} for \`${policy.rawRetentionDays}\` day(s) |`,
+    `| Governed destinations | ${joinInline(policy.governedDestinations || [])} |`,
+    `| Browser content hosts | ${joinInline(hosts)} |`,
+    `| Hard-stop entities | ${joinInline(policy.alwaysBlock || [])} |`,
+    `| Detector inventory | ${detectors.length} detectors: ${joinInline(detectors)} |`,
+    `| Semantic categories | ${joinInline(semanticCategories)} |`,
+    `| Policy templates | ${joinInline(templateLabels)} |`,
+  ].join('\n');
+}
+
+function generateSection() {
+  const snapshot = loadSnapshot();
+  const lines = [
+    START,
+    '## Current App Snapshot',
+    '',
+    'This section is generated from the app by `npm run docs:demo-guide`. Do not hand-edit between the markers. Run `npm run docs:demo-guide:check` before a client demo and in the review gate so the demo guides move with the product.',
+    '',
+    overviewTable(snapshot),
+    '',
+    '### Supported File Demo Types',
+    '',
+    supportedFileTypes(snapshot.processors),
+    '',
+    '### Demo And Verification Commands',
+    '',
+    commandTable(snapshot.pkg, DEMO_COMMANDS),
+    '',
+    '### Sensor And Evidence Paths',
+    '',
+    fileTable(SENSOR_AND_DOC_PATHS),
+    END,
+  ];
+  return lines.join('\n');
+}
+
+function replaceGeneratedSection(relativePath, guide, section) {
+  const startIndex = guide.indexOf(START);
+  const endIndex = guide.indexOf(END);
+  if (startIndex === -1 || endIndex === -1 || endIndex < startIndex) {
+    throw new Error(`Missing ${START} / ${END} markers in ${relativePath}`);
+  }
+  return `${guide.slice(0, startIndex)}${section}${guide.slice(endIndex + END.length)}`;
+}
+
+function main() {
+  const check = process.argv.includes('--check');
+  const section = generateSection();
+  const updates = [];
+  const problems = [];
+
+  for (const relativePath of GENERATED_DOCS) {
+    const current = fs.readFileSync(docPath(relativePath), 'utf8');
+    const next = replaceGeneratedSection(relativePath, current, section);
+    updates.push({ relativePath, current, next });
+    problems.push(...stalePathProblems(relativePath, next));
+  }
+
+  if (check) {
+    for (const update of updates) {
+      if (update.next !== update.current) {
+        problems.push(`${update.relativePath}: generated current app snapshot is stale`);
+      }
+    }
+    if (problems.length) {
+      console.error('Demo guides check failed:');
+      for (const problem of problems) console.error(`- ${problem}`);
+      process.exit(1);
+    }
+    console.log('Demo guides are current.');
+    return;
+  }
+
+  for (const update of updates) fs.writeFileSync(docPath(update.relativePath), update.next);
+  if (problems.length) {
+    console.error('Updated demo guides, but review these issue(s):');
+    for (const problem of problems) console.error(`- ${problem}`);
+    process.exit(1);
+  }
+  console.log('Updated demo guide current app snapshots.');
+}
+
+main();

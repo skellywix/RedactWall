@@ -102,9 +102,7 @@ For this alignment track, completion requires evidence for every area below:
 
 ## Open Decisions
 
-- Whether to rename the GitHub repository in this same branch or keep the remote
-  repository migration separate from the code/product rename.
-- The local checkout folder rename still needs to be completed from the wrapper
-  folder once no active process is holding the current repo path.
+- The local checkout folder has been renamed to `promptwall/`; the remaining
+  GitHub repository has also been renamed to `skellywix/promptwall`.
 - Whether the next product build should prioritize native desktop collection or
   app/action policy controls.

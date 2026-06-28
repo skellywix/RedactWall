@@ -4,8 +4,7 @@ This repository uses a single source-of-truth and review-gated workflow.
 
 ## Local source and hooks
 
-- Work only inside the active app repo folder (`promptsentinel/` in this checkout
-  until the physical folder migration is completed).
+- Work only inside the active app repo folder (`promptwall/` in this checkout).
 - Run:
 
 ```bash
@@ -23,9 +22,14 @@ to activate the local hooks.
 `review:ci` runs:
 
 - `git diff --check`
+- `npm run docs:demo-guide:check`
 - `npm test`
 - `npm run sync-check`
 - `npm run eval`
+
+`npm run docs:demo-guide` refreshes the generated current-state sections in the
+demo guide hub, sales demo guide, and technician setup guide from the current
+package, policy, sensor, detector, and supporting-doc state.
 
 If push fails, the commit stays local and you can retry `git push` after the issue is fixed.
 
