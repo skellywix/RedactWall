@@ -65,9 +65,10 @@ if ($Force) {
 
 New-Item -Path $commandKey -Force | Out-Null
 New-Item -Path (Join-Path $commandKey "command") -Force | Out-Null
-(Get-Item -LiteralPath $commandKey).SetValue("", $MenuName)
-(Get-Item -LiteralPath $commandKey).SetValue("MultiSelectModel", "Player")
-Set-ItemProperty -LiteralPath $commandKey -Name "Icon" -Value "powershell.exe"
+Set-Item -LiteralPath $commandKey -Value $MenuName
+New-ItemProperty -LiteralPath $commandKey -Name "MUIVerb" -Value $MenuName -PropertyType String -Force | Out-Null
+New-ItemProperty -LiteralPath $commandKey -Name "MultiSelectModel" -Value "Player" -PropertyType String -Force | Out-Null
+New-ItemProperty -LiteralPath $commandKey -Name "Icon" -Value "powershell.exe" -PropertyType String -Force | Out-Null
 
 $taskParts = @(
   "-NoProfile",
@@ -84,7 +85,7 @@ if ($Destination) {
 }
 $taskArgs = $taskParts -join " "
 $command = "powershell.exe $taskArgs"
-(Get-Item -LiteralPath (Join-Path $commandKey "command")).SetValue("", $command)
+Set-Item -LiteralPath (Join-Path $commandKey "command") -Value $command
 
 Write-Host "Installed $MenuName"
 Write-Host "Registry key: HKCU\Software\Classes\*\shell\$KeyName"
