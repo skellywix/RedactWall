@@ -49,8 +49,8 @@ Build next:
 - Broader app/action policy controls beyond the current destination,
   file-upload, response-scanning, browser paste, browser file-drop, and browser
   response-copy controls.
-- Native Jira/Linear issue-creation adapters when pilots need direct API
-  tickets beyond the generic sanitized ticket bridge.
+- Deeper desktop/file-flow collection once protected upload needs to expand
+  into clipboard or app-specific upload paths.
 
 ## Recent Completed Passes
 
@@ -69,6 +69,9 @@ Build next:
   ticket system/project metadata, and no prompt bodies so Jira, Linear, SOAR, or
   internal middleware can create reviewer-owned tickets from the approval
   workflow.
+- Add native Jira and Linear issue-creation adapters that reuse the same
+  sanitized workflow summary and description when a customer does not want to
+  operate ticket middleware.
 - Add owner group, reviewer role, review-after metadata, dashboard builder
   fields, and sanitized examiner evidence for time-bound exception lifecycle
   review.

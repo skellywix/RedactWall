@@ -385,6 +385,8 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 - **Ticket bridge notifications** that send sanitized approval workflow tickets
   to Jira, Linear, SOAR, or internal ticketing middleware without prompt bodies,
   raw findings, vaults, release tokens, or decision notes.
+- **Native Jira and Linear approval tickets** that create sanitized reviewer
+  issues directly when a customer does not want to operate ticket middleware.
 - **Dashboard lineage and sanitized examiner export** with audit integrity,
   policy diffs, full-history coverage posture, workflow ownership, and lineage
   by user, destination, sensor, channel, category, and decision.
@@ -407,8 +409,6 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 - Polished enterprise identity UX, IdP-specific setup recipes, and deeper
   multi-tenant isolation per institution.
 - Signed Chrome Web Store listing and force-install rollout; local extension zip, integrity manifest, release-readiness report, generated ExtensionSettings policy, and managed-policy checklist are packaged.
-- Native Jira/Linear API adapters if pilots need direct issue creation without
-  customer middleware.
 - Ship the signed native endpoint collector that feeds the tested handoff contract from clipboard and AI-app upload flows.
 - Upgrade the on-device classifier to a quantized ONNX/WASM NER when recall demands it.
 
@@ -459,6 +459,16 @@ Copy `.env.example` to `.env` (or export):
 | `PROMPTWALL_APPROVAL_TICKET_SYSTEM` / `APPROVAL_TICKET_SYSTEM` | Optional ticket system label such as `jira`, `linear`, `servicenow`, or `generic` |
 | `PROMPTWALL_APPROVAL_TICKET_PROJECT` / `APPROVAL_TICKET_PROJECT` | Optional project or queue key passed to the ticket bridge |
 | `PROMPTWALL_APPROVAL_TICKET_ISSUE_TYPE` / `APPROVAL_TICKET_ISSUE_TYPE` | Optional issue type, defaulting to `Security Review` |
+| `PROMPTWALL_APPROVAL_JIRA_BASE_URL` / `APPROVAL_JIRA_BASE_URL` | Optional Jira Cloud base URL for direct sanitized issue creation |
+| `PROMPTWALL_APPROVAL_JIRA_EMAIL` / `APPROVAL_JIRA_EMAIL` | Jira account email for API-token auth |
+| `PROMPTWALL_APPROVAL_JIRA_API_TOKEN` / `APPROVAL_JIRA_API_TOKEN` | Jira API token, stored only in deployment secrets |
+| `PROMPTWALL_APPROVAL_JIRA_PROJECT_KEY` / `APPROVAL_JIRA_PROJECT_KEY` | Jira project key for approval workflow issues |
+| `PROMPTWALL_APPROVAL_JIRA_ISSUE_TYPE` / `APPROVAL_JIRA_ISSUE_TYPE` | Optional Jira issue type, defaulting to `Task` |
+| `PROMPTWALL_APPROVAL_LINEAR_API_KEY` / `APPROVAL_LINEAR_API_KEY` | Optional Linear API key for direct sanitized issue creation |
+| `PROMPTWALL_APPROVAL_LINEAR_TEAM_ID` / `APPROVAL_LINEAR_TEAM_ID` | Linear team id for approval workflow issues |
+| `PROMPTWALL_APPROVAL_LINEAR_STATE_ID` / `APPROVAL_LINEAR_STATE_ID` | Optional Linear state id |
+| `PROMPTWALL_APPROVAL_LINEAR_PROJECT_ID` / `APPROVAL_LINEAR_PROJECT_ID` | Optional Linear project id |
+| `PROMPTWALL_APPROVAL_LINEAR_LABEL_IDS` / `APPROVAL_LINEAR_LABEL_IDS` | Optional comma-separated Linear label ids |
 
 PromptWall also accepts product-prefixed aliases for new deployments while
 preserving the older `SENTINEL_*` and endpoint keys for existing installs. Use

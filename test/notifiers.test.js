@@ -134,6 +134,95 @@ test('ticket payload builder produces a bridge-safe issue shape', () => {
   assert.ok(!JSON.stringify(ticket).includes('sealed-vault'));
 });
 
+test('native Jira and Linear adapters create sanitized issue requests', async () => {
+  const requests = [];
+  const env = {
+    PROMPTWALL_APPROVAL_JIRA_BASE_URL: 'https://acme.atlassian.net',
+    PROMPTWALL_APPROVAL_JIRA_EMAIL: 'secops@example.test',
+    PROMPTWALL_APPROVAL_JIRA_API_TOKEN: 'jira-secret-token',
+    PROMPTWALL_APPROVAL_JIRA_PROJECT_KEY: 'SEC',
+    PROMPTWALL_APPROVAL_JIRA_ISSUE_TYPE: 'Task',
+    PROMPTWALL_APPROVAL_LINEAR_API_KEY: 'linear-secret-key',
+    PROMPTWALL_APPROVAL_LINEAR_TEAM_ID: 'team-security',
+    PROMPTWALL_APPROVAL_LINEAR_STATE_ID: 'triage-state',
+    PROMPTWALL_APPROVAL_LINEAR_PROJECT_ID: 'promptwall-project',
+    PROMPTWALL_APPROVAL_LINEAR_LABEL_IDS: 'label-dlp,label-approval',
+  };
+
+  const result = await notifiers.emitApprovalNotification(sampleQuery(), {
+    env,
+    fetch: async (url, opts) => {
+      requests.push({ url, opts });
+      if (url.includes('linear.app')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ data: { issueCreate: { success: true, issue: { identifier: 'SEC-1' } } } }),
+        };
+      }
+      return { ok: true, status: 201 };
+    },
+  });
+
+  assert.strictEqual(result.sent, true);
+  assert.strictEqual(result.status, 'sent');
+  assert.deepStrictEqual(result.channels, ['jira', 'linear']);
+  assert.strictEqual(requests.length, 2);
+
+  assert.strictEqual(requests[0].url, 'https://acme.atlassian.net/rest/api/3/issue');
+  assert.strictEqual(
+    requests[0].opts.headers.Authorization,
+    'Basic ' + Buffer.from('secops@example.test:jira-secret-token').toString('base64'),
+  );
+  const jira = JSON.parse(requests[0].opts.body);
+  assert.strictEqual(jira.fields.project.key, 'SEC');
+  assert.strictEqual(jira.fields.issuetype.name, 'Task');
+  assert.ok(jira.fields.summary.includes('PromptWall approval'));
+  assert.deepStrictEqual(jira.fields.labels.slice(0, 3), ['promptwall', 'approval', 'critical']);
+
+  assert.strictEqual(requests[1].url, 'https://api.linear.app/graphql');
+  assert.strictEqual(requests[1].opts.headers.Authorization, 'linear-secret-key');
+  const linear = JSON.parse(requests[1].opts.body);
+  assert.match(linear.query, /issueCreate/);
+  assert.deepStrictEqual(linear.variables.input, {
+    teamId: 'team-security',
+    title: jira.fields.summary,
+    description: linear.variables.input.description,
+    stateId: 'triage-state',
+    projectId: 'promptwall-project',
+    labelIds: ['label-dlp', 'label-approval'],
+  });
+  assert.match(linear.variables.input.description, /sanitized PromptWall workflow metadata only/);
+
+  const wire = requests.map((request) => request.opts.body).join('\n');
+  assert.ok(!wire.includes('524-71-9043'));
+  assert.ok(!wire.includes('Member Jane'));
+  assert.ok(!wire.includes('sealed raw'));
+  assert.ok(!wire.includes('sealed-vault'));
+  assert.ok(!wire.includes('release-secret-hash'));
+  assert.ok(!wire.includes('ps_ingest_should_not_leave'));
+  assert.match(wire, /US_SSN/);
+});
+
+test('Linear adapter treats GraphQL errors as failed notification delivery', async () => {
+  const result = await notifiers.emitApprovalNotification(sampleQuery(), {
+    env: {
+      PROMPTWALL_APPROVAL_LINEAR_API_KEY: 'linear-secret-key',
+      PROMPTWALL_APPROVAL_LINEAR_TEAM_ID: 'team-security',
+    },
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ errors: [{ message: 'invalid input' }] }),
+    }),
+  });
+
+  assert.strictEqual(result.sent, false);
+  assert.strictEqual(result.status, 'failed');
+  assert.deepStrictEqual(result.channels, ['linear']);
+  assert.strictEqual(result.results[0].reason, 'graphql_error');
+});
+
 test('SMTP adapter sends sanitized approval email through a relay', async (t) => {
   const received = [];
   const server = net.createServer((socket) => {

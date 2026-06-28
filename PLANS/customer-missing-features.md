@@ -165,10 +165,11 @@ dashboard approval queue can now filter held items by workflow state,
 detector/category, and destination so reviewers can work member-data,
 source-code, legal, or app-specific queues without opening every incident.
 PromptWall supports best-effort generic JSON, Slack, Microsoft Teams, SMTP, and
-sanitized ticket-bridge approval notifications, persists delivery status on the
-query, audits notification outcomes, and escalates overdue routed items into
-tamper-evident evidence. Native Jira/Linear API adapters and more granular
-escalation policies are still open.
+sanitized ticket-bridge approval notifications, plus native Jira and Linear
+issue creation for customers that do not want ticketing middleware. It persists
+delivery status on the query, audits notification outcomes, and escalates
+overdue routed items into tamper-evident evidence. More granular escalation
+policies are still open.
 
 Customer ask: "Can member-services exceptions route to compliance, source-code
 events route to security, and urgent approvals notify someone immediately?"
@@ -182,12 +183,14 @@ Implementation connection:
   findings, decision notes, and uploaded file bytes.
 - Generic ticket bridges are implemented on the same notification discipline
   with deterministic dedupe keys and issue-tracker metadata.
-- Build native Jira/Linear API adapters only if a pilot needs direct issue
-  creation without customer middleware.
+- Native Jira and Linear API adapters reuse the same sanitized issue summary and
+  description, with API tokens kept in deployment secrets instead of policy.
 
 Acceptance evidence:
 - Routing, gate, and notifier tests prove sanitized payloads never include
   prompt bodies, token vaults, raw findings, passwords, or decision secrets.
+- Direct Jira and Linear notifier tests prove issue payloads stay prompt-free
+  and treat downstream API failures as failed notification delivery.
 - Browser E2E: blocked synthetic prompt creates an assigned queue item; approve
   and deny remain audited; escalation event appears in evidence export.
 
