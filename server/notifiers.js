@@ -10,6 +10,7 @@
 require('./env').loadEnv();
 const { safeSensor } = require('./sensor-metadata');
 const routing = require('./routing');
+const smtp = require('./smtp');
 
 const MAX_LABELS = 20;
 const MAX_REASONS = 8;
@@ -22,8 +23,18 @@ function envValue(env, ...names) {
   return '';
 }
 
+function parseBool(value, fallback = false) {
+  if (typeof value !== 'string' || !value.trim()) return fallback;
+  return /^(1|true|yes|on)$/i.test(value.trim());
+}
+
+function parsePort(value, fallback) {
+  const port = Number(value);
+  return Number.isInteger(port) && port > 0 && port < 65536 ? port : fallback;
+}
+
 function configuredChannels(env = process.env, opts = {}) {
-  if (Array.isArray(opts.channels)) return opts.channels.filter((c) => c && c.url && c.type);
+  if (Array.isArray(opts.channels)) return opts.channels.filter((c) => c && c.type && (c.url || c.type === 'smtp'));
   const channels = [];
   const webhookUrl = envValue(env, 'PROMPTWALL_APPROVAL_NOTIFY_WEBHOOK_URL', 'APPROVAL_NOTIFY_WEBHOOK_URL');
   if (webhookUrl) {
@@ -38,6 +49,25 @@ function configuredChannels(env = process.env, opts = {}) {
   if (slackUrl) channels.push({ type: 'slack', name: 'slack', url: slackUrl });
   const teamsUrl = envValue(env, 'PROMPTWALL_APPROVAL_TEAMS_WEBHOOK_URL', 'APPROVAL_TEAMS_WEBHOOK_URL');
   if (teamsUrl) channels.push({ type: 'teams', name: 'teams', url: teamsUrl });
+  const smtpHost = envValue(env, 'PROMPTWALL_APPROVAL_SMTP_HOST', 'APPROVAL_SMTP_HOST');
+  const smtpFrom = envValue(env, 'PROMPTWALL_APPROVAL_SMTP_FROM', 'APPROVAL_SMTP_FROM');
+  const smtpTo = smtp.parseRecipients(envValue(env, 'PROMPTWALL_APPROVAL_SMTP_TO', 'APPROVAL_SMTP_TO'));
+  if (smtpHost && smtp.extractEmailAddress(smtpFrom) && smtpTo.length) {
+    const secure = parseBool(envValue(env, 'PROMPTWALL_APPROVAL_SMTP_SECURE', 'APPROVAL_SMTP_SECURE'), false);
+    channels.push({
+      type: 'smtp',
+      name: 'smtp',
+      host: smtpHost,
+      port: parsePort(envValue(env, 'PROMPTWALL_APPROVAL_SMTP_PORT', 'APPROVAL_SMTP_PORT'), secure ? 465 : 587),
+      from: smtpFrom,
+      to: smtpTo,
+      username: envValue(env, 'PROMPTWALL_APPROVAL_SMTP_USERNAME', 'APPROVAL_SMTP_USERNAME'),
+      password: envValue(env, 'PROMPTWALL_APPROVAL_SMTP_PASSWORD', 'APPROVAL_SMTP_PASSWORD'),
+      secure,
+      requireTls: !parseBool(envValue(env, 'PROMPTWALL_APPROVAL_SMTP_ALLOW_INSECURE', 'APPROVAL_SMTP_ALLOW_INSECURE'), false),
+      timeoutMs: parsePort(envValue(env, 'PROMPTWALL_APPROVAL_SMTP_TIMEOUT_MS', 'APPROVAL_SMTP_TIMEOUT_MS'), 10000),
+    });
+  }
   return channels;
 }
 
@@ -139,6 +169,14 @@ function bodyForChannel(channel, payload) {
   return payload;
 }
 
+function smtpPayload(payload) {
+  return { ...payload, summary: payload.summary || oneLine(payload) };
+}
+
+function smtpMessageForPayload(channel, payload, now = new Date()) {
+  return smtp.messageForPayload(channel, smtpPayload(payload), now);
+}
+
 async function postJson(channel, payload, opts = {}) {
   const headers = { 'Content-Type': 'application/json' };
   if (channel.type === 'webhook' && channel.token) headers.Authorization = 'Bearer ' + channel.token;
@@ -170,7 +208,9 @@ async function emitApprovalNotification(query, opts = {}) {
   const results = [];
   for (const channel of channels) {
     try {
-      results.push(await postJson(channel, payload, opts));
+      results.push(channel.type === 'smtp'
+        ? await smtp.send(channel, smtpPayload(payload), opts)
+        : await postJson(channel, payload, opts));
     } catch {
       results.push({ channel: channel.name || channel.type, sent: false, reason: 'error' });
     }
@@ -190,4 +230,5 @@ module.exports = {
   emitApprovalNotification,
   sanitizedApprovalNotification,
   shouldNotifyApproval,
+  smtpMessageForPayload,
 };

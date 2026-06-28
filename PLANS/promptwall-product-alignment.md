@@ -126,6 +126,8 @@ For this alignment track, completion requires evidence for every area below:
 - Extended the browser extension release gate so a real Chrome Web Store
   extension id produces a prompt-free `ExtensionSettings` force-install policy
   artifact for managed rollout handoff.
+- Added direct SMTP approval notifications for reviewer distribution lists while
+  keeping workflow notification payloads prompt-free and secret-free.
 
 ## Open Decisions
 

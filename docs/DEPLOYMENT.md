@@ -595,19 +595,30 @@ approvals to notify a queue, chat channel, SOAR workflow, or ticketing bridge:
 | `PROMPTWALL_APPROVAL_NOTIFY_WEBHOOK_TOKEN` or `APPROVAL_NOTIFY_WEBHOOK_TOKEN` | Optional bearer token for the generic webhook. |
 | `PROMPTWALL_APPROVAL_SLACK_WEBHOOK_URL` or `APPROVAL_SLACK_WEBHOOK_URL` | Slack incoming webhook. |
 | `PROMPTWALL_APPROVAL_TEAMS_WEBHOOK_URL` or `APPROVAL_TEAMS_WEBHOOK_URL` | Microsoft Teams webhook. |
+| `PROMPTWALL_APPROVAL_SMTP_HOST` or `APPROVAL_SMTP_HOST` | SMTP relay host for plain-text sanitized approval email. |
+| `PROMPTWALL_APPROVAL_SMTP_PORT` or `APPROVAL_SMTP_PORT` | SMTP relay port; defaults to `587`, or `465` when implicit TLS is enabled. |
+| `PROMPTWALL_APPROVAL_SMTP_FROM` or `APPROVAL_SMTP_FROM` | Sender address for approval notifications. |
+| `PROMPTWALL_APPROVAL_SMTP_TO` or `APPROVAL_SMTP_TO` | Comma- or semicolon-separated reviewer distribution-list addresses. |
+| `PROMPTWALL_APPROVAL_SMTP_USERNAME` or `APPROVAL_SMTP_USERNAME` | Optional SMTP username. |
+| `PROMPTWALL_APPROVAL_SMTP_PASSWORD` or `APPROVAL_SMTP_PASSWORD` | Optional SMTP password. |
+| `PROMPTWALL_APPROVAL_SMTP_SECURE` or `APPROVAL_SMTP_SECURE` | Set `true` for implicit TLS, usually port `465`. |
+| `PROMPTWALL_APPROVAL_SMTP_ALLOW_INSECURE` or `APPROVAL_SMTP_ALLOW_INSECURE` | Set `true` only for a trusted local relay without TLS. |
 
 Approval notifications are separate from SIEM alerts. They include query id,
 owner group, owner role, SLA, source, channel, destination, severity, detector
 labels, and routing reason. They omit prompt bodies, redacted prompt previews,
 token vaults, release tokens, decision notes, raw finding values, and uploaded
-file bytes.
+file bytes. SMTP email uses the same sanitized routing fields as the webhook
+payload and strips mail-header newlines before delivery.
 
 Delivery is best-effort. PromptWall records `notificationStatus`,
 `notificationLastAttemptAt`, `notificationAttemptCount`, and bounded channel
 names on the query, then writes an audit event such as
-`APPROVAL_NOTIFICATION_SENT` or `APPROVAL_NOTIFICATION_FAILED`. Webhook URLs and
-tokens are secrets; do not commit them to policy files, `.env.example`, docs
-with real values, or support tickets.
+`APPROVAL_NOTIFICATION_SENT` or `APPROVAL_NOTIFICATION_FAILED`. Webhook URLs,
+SMTP credentials, and reviewer distribution lists are operational secrets; do
+not commit them to policy files, `.env.example`, docs with real values, or
+support tickets. SMTP requires TLS by default. Use the insecure relay opt-in
+only for a trusted local mail relay inside the customer network.
 
 The server also runs an SLA escalation pass at startup and every five minutes.
 Overdue routed items receive `escalatedAt`, `escalationReason=sla_due`, an

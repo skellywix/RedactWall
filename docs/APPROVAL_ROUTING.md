@@ -20,8 +20,8 @@ Routeable blocked records carry:
 - `notificationLastAttemptAt`: when PromptWall last attempted workflow
   notification delivery.
 - `notificationAttemptCount`: number of persisted notification attempts.
-- `notificationChannels`: bounded channel names such as `webhook`, `slack`, or
-  `teams`, never URLs or tokens.
+- `notificationChannels`: bounded channel names such as `webhook`, `slack`,
+  `teams`, or `smtp`, never URLs, hosts, recipients, or tokens.
 
 The dashboard exposes the owner and SLA in the approval queue, all-activity
 table, selected incident detail, queue filters by workflow state, category, and
@@ -134,11 +134,21 @@ on the query plus an audit event.
 | Generic webhook bearer token | `PROMPTWALL_APPROVAL_NOTIFY_WEBHOOK_TOKEN` or `APPROVAL_NOTIFY_WEBHOOK_TOKEN` |
 | Slack incoming webhook | `PROMPTWALL_APPROVAL_SLACK_WEBHOOK_URL` or `APPROVAL_SLACK_WEBHOOK_URL` |
 | Microsoft Teams webhook | `PROMPTWALL_APPROVAL_TEAMS_WEBHOOK_URL` or `APPROVAL_TEAMS_WEBHOOK_URL` |
+| SMTP host | `PROMPTWALL_APPROVAL_SMTP_HOST` or `APPROVAL_SMTP_HOST` |
+| SMTP port | `PROMPTWALL_APPROVAL_SMTP_PORT` or `APPROVAL_SMTP_PORT`; defaults to `587`, or `465` when implicit TLS is enabled |
+| SMTP from address | `PROMPTWALL_APPROVAL_SMTP_FROM` or `APPROVAL_SMTP_FROM` |
+| SMTP recipients | `PROMPTWALL_APPROVAL_SMTP_TO` or `APPROVAL_SMTP_TO`; separate addresses with commas or semicolons |
+| SMTP username | `PROMPTWALL_APPROVAL_SMTP_USERNAME` or `APPROVAL_SMTP_USERNAME` |
+| SMTP password | `PROMPTWALL_APPROVAL_SMTP_PASSWORD` or `APPROVAL_SMTP_PASSWORD` |
+| SMTP implicit TLS | `PROMPTWALL_APPROVAL_SMTP_SECURE=true` or `APPROVAL_SMTP_SECURE=true` |
+| SMTP insecure local relay opt-in | `PROMPTWALL_APPROVAL_SMTP_ALLOW_INSECURE=true` or `APPROVAL_SMTP_ALLOW_INSECURE=true` |
 
 The generic webhook receives the canonical sanitized JSON payload. Slack and
 Teams receive channel-native message shapes built from the same sanitized
-payload. Webhook URLs are secrets; keep them in environment or secret-manager
-configuration only.
+payload. SMTP receives the same routing metadata as a plain-text email. Webhook
+URLs and SMTP credentials are secrets; keep them in environment or
+secret-manager configuration only. SMTP requires TLS by default and will only use
+an insecure relay when the explicit insecure-local-relay opt-in is set.
 
 ## SLA Escalation
 
@@ -187,3 +197,11 @@ Accessed 28 June 2026.
 Microsoft. "Create and Send Actionable Messages." *Microsoft Learn*, Microsoft,
 https://learn.microsoft.com/en-us/microsoftteams/platform/webhooks-and-connectors/how-to/connectors-using.
 Accessed 28 June 2026.
+
+Klensin, John. "Simple Mail Transfer Protocol." *RFC 5321*, Internet
+Engineering Task Force, Oct. 2008, https://www.rfc-editor.org/rfc/rfc5321.
+Accessed 28 June 2026.
+
+Hoffman, Paul. "SMTP Service Extension for Secure SMTP over Transport Layer
+Security." *RFC 3207*, Internet Engineering Task Force, Feb. 2002,
+https://www.rfc-editor.org/rfc/rfc3207. Accessed 28 June 2026.
