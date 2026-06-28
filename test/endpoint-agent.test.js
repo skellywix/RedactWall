@@ -355,6 +355,7 @@ test('refreshes scanner policy from the control plane', async () => {
   assert.ok(scanner.ignoreFilenames.has('skip-me.txt'));
   assert.ok(scanner.ignoreExtensions.has('.blocked'));
   assert.strictEqual(scanner.maxFileBytes, 4096);
+  assert.strictEqual(scannerConfig({ maxFileBytes: 4096.7 }).maxFileBytes, 4097);
 });
 
 test('sensor policy keeps the desktop collector destination label', () => {

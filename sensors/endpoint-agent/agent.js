@@ -37,7 +37,7 @@ const DEFAULT_SCANNER = {
   ignoreDirectories: ['node_modules', '.git', 'Library', 'Applications', 'AppData'],
   ignoreFilenames: ['thumbs.db', '.ds_store', 'package.json', 'package-lock.json'],
   ignoreExtensions: ['.tmp', '.log', '.lock'],
-  maxFileBytes: 6.3 * 1024 * 1024,
+  maxFileBytes: Math.round(6.3 * 1024 * 1024),
 };
 const REDACTION_HANDOFF_DIR = '.promptwall-redacted';
 const REDACTION_HANDOFF_SUFFIX = '.promptwall-redacted.txt';
@@ -81,7 +81,7 @@ function scannerConfig(input = {}) {
     ignoreExtensions: new Set(lowerList(merged.ignoreExtensions, DEFAULT_SCANNER.ignoreExtensions).map((ext) => (
       ext.startsWith('.') ? ext : `.${ext}`
     ))),
-    maxFileBytes: Number.isFinite(maxFileBytes) && maxFileBytes > 0 ? maxFileBytes : DEFAULT_SCANNER.maxFileBytes,
+    maxFileBytes: Number.isFinite(maxFileBytes) && maxFileBytes > 0 ? Math.round(maxFileBytes) : DEFAULT_SCANNER.maxFileBytes,
   };
 }
 
