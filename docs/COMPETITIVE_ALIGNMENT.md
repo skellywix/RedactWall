@@ -54,10 +54,6 @@ Build next:
   users, groups, and the sanitized approval workflow.
 - Guided rule-builder controls for scoped policy and exception lifecycle, on top
   of the dashboard JSON editors for `policyScopes` and `policyExceptions`.
-- Non-Windows schedule ownership around the examiner evidence pack. Windows
-  pilots now have a scheduled-task installer, and the pack itself includes
-  report metadata, control mappings, backup verification, and restore-drill
-  evidence without prompt bodies.
 
 ## Recent Completed Passes
 
@@ -72,6 +68,9 @@ Build next:
 - Add best-effort approval notification adapters for generic JSON webhooks,
   Slack, Microsoft Teams, and SMTP reviewer distribution lists, plus persisted
   notification status and SLA escalation audit events.
+- Add Windows Task Scheduler and Linux systemd ownership for recurring sanitized
+  examiner evidence packs, including Docker customer-silo mode and local-npm
+  mode without putting secrets or prompt content into scheduler definitions.
 - Add customer-configurable approval routing rules so Security Admins can route
   held decisions by SCIM user, SCIM group, org id, detector, category, source,
   channel, destination, severity, and risk without exposing prompt or file

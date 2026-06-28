@@ -187,6 +187,42 @@ Log in to the dashboard and confirm:
 - A test event for a second tenant is rejected.
 - A test event beyond the purchased seat count is blocked.
 
+## 6. Schedule Examiner Evidence Packs
+
+The CloudFormation bootstrap installs a host-level systemd timer for recurring
+sanitized evidence packs. It copies the Linux runner and schedule template out
+of the running container, then creates:
+
+```bash
+/var/lib/promptwall/evidence-schedule.json
+/etc/promptwall/evidence-pack.env
+/etc/systemd/system/promptwall-evidence-pack.service
+/etc/systemd/system/promptwall-evidence-pack.timer
+/var/log/promptwall/evidence-pack.log
+```
+
+The default schedule is `OnCalendar=quarterly` with `Persistent=true`, and the
+default config writes packs to `/data/evidence-packs` inside the container,
+which maps to the encrypted EBS-backed `/var/lib/promptwall/evidence-packs`
+folder on the EC2 host.
+
+After deployment, use Systems Manager Session Manager to inspect or adjust the
+schedule config:
+
+```bash
+sudo editor /var/lib/promptwall/evidence-schedule.json
+sudo systemctl restart promptwall-evidence-pack.timer
+sudo systemctl start promptwall-evidence-pack.service
+systemctl list-timers promptwall-evidence-pack.timer
+```
+
+The timer calls the running container with `npm run evidence:pack:scheduled`,
+writes run status to `/var/log/promptwall/evidence-pack.log`, and stores only
+mode, container name, config path, and log path in
+`/etc/promptwall/evidence-pack.env`. Do not put admin passwords, ingest keys,
+data-encryption keys, raw prompt bodies, release tokens, or uploaded file bytes
+in the unit environment.
+
 ## Next Migration
 
 Move to a shared SaaS control plane after the first paid customer stack is

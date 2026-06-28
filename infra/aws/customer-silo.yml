@@ -225,6 +225,60 @@ Resources:
             --log-opt awslogs-stream='${TenantId}' \
             '${ImageUri}'
 
+          mkdir -p /var/log/promptwall
+          docker cp promptwall:/app/scripts/run-evidence-pack.sh /usr/local/bin/promptwall-run-evidence-pack
+          chmod 755 /usr/local/bin/promptwall-run-evidence-pack
+
+          if [ ! -f /var/lib/promptwall/evidence-schedule.json ]; then
+            docker cp promptwall:/app/config/evidence-schedule.example.json /var/lib/promptwall/evidence-schedule.json
+            jq '.outDir = "/data/evidence-packs" | .generatedBy = "aws-systemd-evidence-export"' \
+              /var/lib/promptwall/evidence-schedule.json > /tmp/promptwall-evidence-schedule.json
+            mv /tmp/promptwall-evidence-schedule.json /var/lib/promptwall/evidence-schedule.json
+            chown 1000:1000 /var/lib/promptwall/evidence-schedule.json
+            chmod 600 /var/lib/promptwall/evidence-schedule.json
+          fi
+
+          cat > /etc/promptwall/evidence-pack.env <<'EOF'
+          PROMPTWALL_EVIDENCE_MODE='docker'
+          PROMPTWALL_EVIDENCE_PROJECT_DIR='/app'
+          PROMPTWALL_EVIDENCE_CONFIG='/data/evidence-schedule.json'
+          PROMPTWALL_EVIDENCE_LOG='/var/log/promptwall/evidence-pack.log'
+          PROMPTWALL_EVIDENCE_CONTAINER='promptwall'
+          EOF
+          chmod 600 /etc/promptwall/evidence-pack.env
+
+          cat > /etc/systemd/system/promptwall-evidence-pack.service <<'EOF'
+          [Unit]
+          Description=Generate sanitized PromptWall examiner evidence pack
+          After=network-online.target docker.service
+          Wants=network-online.target
+
+          [Service]
+          Type=oneshot
+          EnvironmentFile=/etc/promptwall/evidence-pack.env
+          ExecStart=/usr/local/bin/promptwall-run-evidence-pack
+          User=root
+          Group=root
+          Nice=5
+          EOF
+
+          cat > /etc/systemd/system/promptwall-evidence-pack.timer <<'EOF'
+          [Unit]
+          Description=Run sanitized PromptWall examiner evidence pack on schedule
+
+          [Timer]
+          OnCalendar=quarterly
+          Persistent=true
+          RandomizedDelaySec=1h
+          Unit=promptwall-evidence-pack.service
+
+          [Install]
+          WantedBy=timers.target
+          EOF
+
+          systemctl daemon-reload
+          systemctl enable --now promptwall-evidence-pack.timer
+
           /opt/aws/bin/cfn-signal --stack '${AWS::StackName}' --resource AppInstance --region '${AWS::Region}' --exit-code 0
 
   LoadBalancer:
