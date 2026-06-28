@@ -112,6 +112,10 @@ async function launchExtensionContext(baseURL, testInfo, policy = fixturePolicy)
 
 async function applyFixturePolicyToPage(context, page, baseURL, governedHost, policy = fixturePolicy) {
   const serviceWorker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
+  const expectedRules = (policy.blockedBrowserActions || []).map((rule) => ({
+    id: rule.id,
+    action: rule.action,
+  }));
   await serviceWorker.evaluate(async ({ serverUrl, policy }) => {
     await chrome.storage.local.set({
       serverUrl,
@@ -124,7 +128,7 @@ async function applyFixturePolicyToPage(context, page, baseURL, governedHost, po
     });
   }, { serverUrl: baseURL, policy });
 
-  await expect.poll(async () => serviceWorker.evaluate(async ({ url, host }) => {
+  await expect.poll(async () => serviceWorker.evaluate(async ({ url, host, expectedRules }) => {
     const tabs = await chrome.tabs.query({});
     const tab = tabs.find((candidate) => candidate.url === url);
     if (!tab || !tab.id) return false;
@@ -136,11 +140,14 @@ async function applyFixturePolicyToPage(context, page, baseURL, governedHost, po
         && state.policy
         && state.policy.blockUnapprovedAiDestinations === true
         && (state.policy.governedDestinations || []).includes(host)
+        && expectedRules.every((expected) => (state.policy.blockedBrowserActions || []).some((actual) => (
+          actual && actual.id === expected.id && actual.action === expected.action
+        )))
       );
     } catch (_) {
       return false;
     }
-  }, { url: page.url(), host: governedHost }), { timeout: 5000 }).toBe(true);
+  }, { url: page.url(), host: governedHost, expectedRules }), { timeout: 5000 }).toBe(true);
 }
 
 async function openControlledAiPage(context, url, html) {
@@ -162,6 +169,16 @@ async function syntheticPaste(page, value) {
   await page.keyboard.press('ControlOrMeta+V');
 }
 
+async function installDraftSyncRecorder(page) {
+  await page.evaluate(() => {
+    const composer = document.querySelector('#prompt-textarea');
+    window.__draftSync = [];
+    composer.addEventListener('input', () => {
+      window.__draftSync.push(composer.value || composer.innerText || composer.textContent || '');
+    });
+  });
+}
+
 async function syntheticFileDrop(page, { name, body }) {
   return page.evaluate(({ name, body }) => {
     const data = new DataTransfer();
@@ -170,6 +187,24 @@ async function syntheticFileDrop(page, { name, body }) {
     document.querySelector('#prompt-textarea').dispatchEvent(event);
     return event.defaultPrevented;
   }, { name, body });
+}
+
+async function syntheticCopyFromResponse(page, value) {
+  return page.evaluate((text) => {
+    const sent = document.querySelector('#sent');
+    sent.insertAdjacentHTML('beforeend', '<p data-response></p>');
+    const response = sent.lastElementChild;
+    response.textContent = text;
+    const range = document.createRange();
+    range.selectNodeContents(response);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    const event = new Event('copy', { bubbles: true, cancelable: true });
+    response.dispatchEvent(event);
+    selection.removeAllRanges();
+    return event.defaultPrevented;
+  }, value);
 }
 
 test.describe('browser extension live smoke', () => {
@@ -207,6 +242,33 @@ test.describe('browser extension live smoke', () => {
 
       await page.getByRole('button', { name: 'Request approval' }).click();
       await expect(page.locator('.ps-toast')).toContainText('Sent to your Security Admin for approval.');
+      await expect(page.locator('[data-sent]')).toHaveCount(0);
+    } finally {
+      await context.close();
+      fs.rmSync(userDataDir, { recursive: true, force: true });
+    }
+  });
+
+  test('prevents hard-stop paste before a live page can draft-sync it', async ({ baseURL }, testInfo) => {
+    const { context, userDataDir } = await launchExtensionContext(baseURL, testInfo);
+    try {
+      const page = await openControlledAiPage(
+        context,
+        'https://chatgpt.com/',
+        chatFixture({
+          host: 'chatgpt.com',
+          sendButton: '<button data-testid="send-button" aria-label="Send prompt">Send</button>',
+        }),
+      );
+
+      await applyFixturePolicyToPage(context, page, baseURL, 'chatgpt.com');
+      await installDraftSyncRecorder(page);
+      await syntheticPaste(page, 'Member test SSN 123-45-6789');
+
+      await expect(page.locator('.ps-toast')).toContainText('blocked sensitive paste');
+      await expect(page.locator('#prompt-textarea')).toHaveValue('');
+      const drafts = await page.evaluate(() => window.__draftSync || []);
+      expect(drafts.join('\n')).not.toContain('123-45-6789');
       await expect(page.locator('[data-sent]')).toHaveCount(0);
     } finally {
       await context.close();
@@ -279,6 +341,43 @@ test.describe('browser extension live smoke', () => {
       await page.waitForTimeout(200);
       fs.mkdirSync(artifactDir, { recursive: true });
       await page.screenshot({ path: path.join(artifactDir, 'chatgpt-drop-blocked.png'), fullPage: true });
+    } finally {
+      await context.close();
+      fs.rmSync(userDataDir, { recursive: true, force: true });
+    }
+  });
+
+  test('blocks configured response copies without reading selected text', async ({ baseURL }, testInfo) => {
+    const policy = {
+      ...fixturePolicy,
+      blockedBrowserActions: [{
+        id: 'block_copy_chatgpt',
+        action: 'copy',
+        destinations: ['chatgpt.com'],
+        reason: 'response_copy_blocked',
+      }],
+    };
+    const { context, userDataDir } = await launchExtensionContext(baseURL, testInfo, policy);
+    try {
+      const page = await openControlledAiPage(
+        context,
+        'https://chatgpt.com/',
+        chatFixture({
+          host: 'chatgpt.com',
+          sendButton: '<button data-testid="send-button" aria-label="Send prompt">Send</button>',
+        }),
+      );
+
+      await applyFixturePolicyToPage(context, page, baseURL, 'chatgpt.com', policy);
+      const prevented = await syntheticCopyFromResponse(page, 'Synthetic response contains member SSN 123-45-6789');
+
+      expect(prevented).toBe(true);
+      await expect(page.locator('.ps-toast')).toContainText('blocked copy');
+      await expect(page.locator('.ps-toast')).not.toContainText('123-45-6789');
+      await expect(page.locator('[data-sent]')).toHaveCount(0);
+      await page.waitForTimeout(200);
+      fs.mkdirSync(artifactDir, { recursive: true });
+      await page.screenshot({ path: path.join(artifactDir, 'chatgpt-copy-blocked.png'), fullPage: true });
     } finally {
       await context.close();
       fs.rmSync(userDataDir, { recursive: true, force: true });

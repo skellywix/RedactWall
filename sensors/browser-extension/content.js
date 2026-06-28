@@ -4,6 +4,7 @@
  *   - Enter keydown (capture phase) on the composer
  *   - Send-button click (capture phase)
  *   - Paste (warn the moment sensitive data lands in the box)
+ *   - Copy (optionally block AI response exfiltration without reading text)
  *   - File drops / uploads
  * Detection is local (lib/detect.js) so it is instant and nothing leaves the
  * device just to be scanned. Enforcement follows the org policy: warn / justify / block.
@@ -259,6 +260,11 @@
   function publicCategories(analysis) {
     return (analysis.categories || []).map((c) => ({ category: c.category, score: c.score }));
   }
+  function safeClientPrompt(text, analysis) {
+    const items = summarize(analysis);
+    if ((analysis.categories || []).length) return '[REDACTED: ' + items.join(', ') + ']';
+    return D.redact(text, analysis.findings || []);
+  }
   function report(text, analysis, channel, outcome, note, extra) {
     return new Promise((resolve) => {
       try {
@@ -474,6 +480,12 @@
     const el = node && (node.nodeType === 1 ? node : node.parentElement);
     return !!(el && el.closest && el.closest('textarea, [contenteditable="true"], .ps-banner, .ps-toast'));
   }
+  function copyOriginInComposerOrUI(event) {
+    if (inComposerOrUI(event && event.target)) return true;
+    const selection = window.getSelection && window.getSelection();
+    if (!selection || selection.rangeCount === 0) return false;
+    return inComposerOrUI(selection.anchorNode) || inComposerOrUI(selection.focusNode);
+  }
   let rehydrating = false, observer = null;
   const TOKEN_RE = /\[\[[A-Z_]+_\d+\]\]/;
   function startRehydrator() {
@@ -547,8 +559,34 @@
     if (!pasted || pasted.length < 6) return;
     const verdict = evaluate(pasted);
     if (verdict.action !== 'allow') {
+      const items = summarize(verdict.analysis).slice(0, 3);
+      if (verdict.action === 'block') {
+        e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+        report(
+          safeClientPrompt(pasted, verdict.analysis),
+          verdict.analysis,
+          'paste',
+          'paste_flagged',
+          'blocked locally: sensitive paste prevented before insertion',
+          { clientPreRedacted: true },
+        );
+        toast('PromptWall blocked sensitive paste: ' + listForScreen(items));
+        return;
+      }
       report(pasted, verdict.analysis, 'paste', 'paste_flagged');
-      toast('PromptWall found sensitive data: ' + listForScreen(summarize(verdict.analysis).slice(0, 3)));
+      toast('PromptWall found sensitive data: ' + listForScreen(items));
+    }
+  }, true);
+
+  // ---- intercept COPY (output exfiltration control) ------------------------
+  document.addEventListener('copy', (e) => {
+    if (!ENABLED) return;
+    if (copyOriginInComposerOrUI(e)) return;
+    const actionRule = browserActionBlockRule('copy');
+    if (actionRule) {
+      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+      reportBlockedBrowserAction('copy', actionRule);
+      toast('PromptWall blocked copy from ' + SITE + ' by policy.');
     }
   }, true);
 
