@@ -111,9 +111,8 @@ grew from 11 passing / 3 known-failing to **42 passing / 0 failing / 0 todo**.
 - Converted the local Git hooks to standard `sh` scripts with shebangs so extensionless hooks can be spawned reliably by Git.
 - Aligned the source layout around `detection-engine/`, `sensors/`, and `server/`.
 
-This iteration keeps local change quality and GitHub sync aligned to a single repository path:
-the active app repo folder (`promptsentinel/` in this checkout until the
-physical folder migration is completed).
+This iteration keeps local change quality and GitHub sync aligned to a single
+repository path: the active app repo folder (`promptwall/` in this checkout).
 
 ### Test growth
 | Pass | Iteration |

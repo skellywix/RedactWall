@@ -174,6 +174,12 @@ SQLite evidence storage.
 For technician-led customer installs, use `docs/TECHNICIAN_DEPLOYMENT_GUIDE.md`
 as the production readiness runbook and handoff checklist.
 
+For demos, start with `DEMO_INSTALL_GUIDE.md`. The client-facing presenter flow
+lives in `docs/SALES_DEMO_GUIDE.md`; the demo-machine setup and reset runbook
+lives in `docs/DEMO_TECHNICIAN_SETUP.md`. Their generated current-state sections
+are refreshed with `npm run docs:demo-guide` and checked by
+`npm run docs:demo-guide:check`.
+
 ### Try the browser extension (flagship)
 
 1. Chrome → Extensions → enable Developer mode → **Load unpacked** → select the
@@ -233,19 +239,10 @@ npm run backup -- backups  # SQLite audit-store backup + verification manifest
 
 ## Development and Git workflow
 
-The repository uses one Git source of truth: this app repo folder. In the current
-checkout that folder is still `promptsentinel/` under the `promptsentinel-app/`
-workspace wrapper, so run `cd promptsentinel` before source edits, `npm`
-commands, commits, or pushes. The product name is PromptWall; after Codex,
-editors, terminals, and Git status watchers are closed, finish the local folder
-rename from the wrapper with:
-
-```powershell
-Rename-Item -LiteralPath .\promptsentinel -NewName promptwall
-```
-
-After that, run source edits, `npm` commands, commits, and pushes from
-`promptwall/`.
+The repository uses one Git source of truth: this app repo folder. In this
+checkout that folder is `promptwall/` under the `promptsentinel-app/` workspace
+wrapper, so run `cd promptwall` before source edits, `npm` commands, commits, or
+pushes.
 
 This repo is configured with a review-first workflow:
 
