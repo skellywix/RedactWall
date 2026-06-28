@@ -629,6 +629,8 @@ test('sensor policy endpoint publishes detector and scanner controls', async () 
   assert.ok(Array.isArray(body.scanner.ignoreExtensions));
   assert.strictEqual(typeof body.scanner.maxFileBytes, 'number');
   assert.strictEqual(body.approvalRoutingRules, undefined);
+  assert.strictEqual(body.policyScopes, undefined);
+  assert.strictEqual(body.policyExceptions, undefined);
   assert.strictEqual(body.storeRawForApproval, undefined);
   assert.strictEqual(body.rawRetentionDays, undefined);
 }));
@@ -846,6 +848,109 @@ test('admin policy accepts customer approval routing rules', async () => withSer
   } finally {
     fs.writeFileSync(policyPath, originalPolicy);
   }
+}));
+
+test('admin policy accepts scoped policy and time-bound exceptions', async () => withServer(async (port) => {
+  const originalPolicy = fs.readFileSync(policyPath, 'utf8');
+  const { cookie, csrfToken } = await login(port);
+  try {
+    const res = await jsonFetch(port, '/api/policy', {
+      method: 'PUT',
+      headers: {
+        cookie,
+        'x-csrf-token': csrfToken,
+      },
+      body: {
+        policyScopes: [{
+          id: 'legal_contract_review',
+          groups: ['PromptWall Legal'],
+          destinations: ['claude.ai'],
+          categories: ['LEGAL_CONTRACT'],
+          enforcementMode: 'block',
+          blockMinSeverity: 2,
+          blockRiskScore: 10,
+          alwaysBlockAdd: ['SECRET_KEY'],
+          reason: 'legal_review',
+        }],
+        policyExceptions: [{
+          id: 'legal_vendor_24h',
+          users: ['counsel@example.test'],
+          destinations: ['claude.ai'],
+          categories: ['LEGAL_CONTRACT'],
+          expiresAt: '2030-01-01T00:00:00.000Z',
+          reason: 'approved_vendor_review',
+        }],
+      },
+    });
+
+    assert.strictEqual(res.status, 200);
+    const body = await res.json();
+    assert.deepStrictEqual(body.policyScopes, [{
+      id: 'legal_contract_review',
+      enabled: true,
+      groups: ['promptwall legal'],
+      detectors: undefined,
+      categories: ['LEGAL_CONTRACT'],
+      sources: undefined,
+      channels: undefined,
+      destinations: ['claude.ai'],
+      enforcementMode: 'block',
+      blockMinSeverity: 2,
+      blockRiskScore: 10,
+      alwaysBlockAdd: ['SECRET_KEY'],
+      reason: 'legal_review',
+    }].map((item) => Object.fromEntries(Object.entries(item).filter(([, value]) => value !== undefined))));
+    assert.deepStrictEqual(body.policyExceptions, [{
+      id: 'legal_vendor_24h',
+      enabled: true,
+      action: 'allow',
+      expiresAt: '2030-01-01T00:00:00.000Z',
+      users: ['counsel@example.test'],
+      categories: ['LEGAL_CONTRACT'],
+      destinations: ['claude.ai'],
+      reason: 'approved_vendor_review',
+    }]);
+  } finally {
+    fs.writeFileSync(policyPath, originalPolicy);
+  }
+}));
+
+test('admin policy rejects malformed scoped policy without echoing values', async () => withServer(async (port) => {
+  const originalPolicy = fs.readFileSync(policyPath, 'utf8');
+  const { cookie, csrfToken } = await login(port);
+  const secret = '524-71-9043';
+  const res = await jsonFetch(port, '/api/policy', {
+    method: 'PUT',
+    headers: {
+      cookie,
+      'x-csrf-token': csrfToken,
+    },
+    body: {
+      policyScopes: [{
+        id: 'bad_scope',
+        groups: [`legal-${secret}`],
+      }],
+      policyExceptions: [{
+        id: 'bad_exception',
+        action: 'allow',
+        expiresAt: 'not-a-date',
+      }],
+    },
+  });
+
+  assert.strictEqual(res.status, 400);
+  const body = await res.json();
+  assert.deepStrictEqual(body, {
+    error: 'invalid request body',
+    fields: [
+      'policyExceptions.0.expiresAt',
+      'policyExceptions.0.id',
+      'policyScopes.0.groups.0',
+      'policyScopes.0.id',
+    ],
+  });
+  assert.ok(!JSON.stringify(body).includes(secret));
+  assert.strictEqual(fs.readFileSync(policyPath, 'utf8'), originalPolicy);
 }));
 
 test('admin policy rejects malformed approval routing rules without echoing values', async () => withServer(async (port) => {

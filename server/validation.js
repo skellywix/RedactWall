@@ -27,6 +27,7 @@ const SENSOR_VERSION = /^[A-Za-z0-9._+:-]+$/;
 const ROUTING_RULE_ID = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const ROUTING_GROUP = /^[a-z][a-z0-9_-]{0,63}$/;
 const ROUTING_REASON = /^[a-z0-9][a-z0-9_:-]{0,79}$/;
+const POLICY_MATCH_TEXT = /^[A-Za-z0-9 ._@:+/-]+$/;
 const SENSITIVE_ROUTING_CODE = /(?:\d{3}[-_:.]?\d{2}[-_:.]?\d{4}|\d{12,19})/;
 const KNOWN_DETECTOR_IDS = new Set(detector.listDetectors().map((d) => d.id));
 
@@ -267,6 +268,62 @@ const approvalRoutingRuleSchema = z.object({
   path: ['id'],
 });
 
+const safePolicyMatchTextSchema = z.string().min(1).max(128).regex(POLICY_MATCH_TEXT).refine((value) => !SENSITIVE_ROUTING_CODE.test(value), {
+  message: 'sensitive identifier not allowed',
+});
+
+const policyMatcherFields = {
+  users: z.array(safePolicyMatchTextSchema).max(40).optional(),
+  groups: z.array(safePolicyMatchTextSchema).max(40).optional(),
+  orgIds: z.array(safePolicyMatchTextSchema).max(40).optional(),
+  detectors: z.array(detectorIdSchema).max(40).optional(),
+  categories: z.array(detectorIdSchema).max(40).optional(),
+  sources: z.array(sensorIdSchema).max(40).optional(),
+  channels: z.array(sensorIdSchema).max(40).optional(),
+  destinations: z.array(z.string().min(1).max(253).regex(HOST_OR_LABEL)).max(40).optional(),
+};
+
+function hasPolicyMatcher(rule) {
+  return ['users', 'groups', 'orgIds', 'detectors', 'categories', 'sources', 'channels', 'destinations']
+    .some((key) => Array.isArray(rule[key]) && rule[key].length);
+}
+
+const policyScopeSchema = z.object({
+  id: routingCodeSchema(ROUTING_RULE_ID, 64),
+  enabled: z.boolean().optional(),
+  ...policyMatcherFields,
+  enforcementMode: z.enum(['block', 'warn', 'justify', 'redact']).optional(),
+  blockMinSeverity: z.number().int().min(1).max(4).optional(),
+  blockRiskScore: z.number().int().min(0).max(100).optional(),
+  alwaysBlockAdd: z.array(detectorIdSchema).max(40).optional(),
+  reason: routingCodeSchema(ROUTING_REASON, 80).optional(),
+}).strict().refine(hasPolicyMatcher, {
+  message: 'at least one matcher required',
+  path: ['id'],
+}).refine((rule) => {
+  return rule.enforcementMode !== undefined
+    || rule.blockMinSeverity !== undefined
+    || rule.blockRiskScore !== undefined
+    || (Array.isArray(rule.alwaysBlockAdd) && rule.alwaysBlockAdd.length > 0);
+}, {
+  message: 'at least one scoped override required',
+  path: ['id'],
+});
+
+const policyExceptionSchema = z.object({
+  id: routingCodeSchema(ROUTING_RULE_ID, 64),
+  enabled: z.boolean().optional(),
+  ...policyMatcherFields,
+  action: z.enum(['allow']).optional(),
+  expiresAt: z.string().min(1).max(40).refine((value) => Number.isFinite(Date.parse(value)), {
+    message: 'invalid datetime',
+  }),
+  reason: routingCodeSchema(ROUTING_REASON, 80).optional(),
+}).strict().refine(hasPolicyMatcher, {
+  message: 'at least one matcher required',
+  path: ['id'],
+});
+
 const policyUpdateSchema = z.object({
   enforcementMode: z.enum(['block', 'warn', 'justify', 'redact']).optional(),
   blockMinSeverity: z.number().int().min(1).max(4).optional(),
@@ -285,6 +342,8 @@ const policyUpdateSchema = z.object({
     message: 'required',
   }).optional(),
   approvalRoutingRules: z.array(approvalRoutingRuleSchema).max(40).optional(),
+  policyScopes: z.array(policyScopeSchema).max(40).optional(),
+  policyExceptions: z.array(policyExceptionSchema).max(40).optional(),
   requiredSensors: z.array(sensorIdSchema).min(1).max(20).optional(),
   desiredSensorVersions: desiredSensorVersionsSchema.optional(),
   scanner: scannerPolicySchema.optional(),

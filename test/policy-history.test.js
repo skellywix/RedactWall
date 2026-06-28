@@ -177,6 +177,63 @@ test('evidence exports parsed policy changes but not raw audit detail text', () 
   assert.ok(!JSON.stringify(entry).includes('"type":"policy_change"'));
 });
 
+test('evidence exports scoped-policy metadata without raw prompt bodies', () => {
+  const safe = evidence.safeQuery({
+    id: 'q_scoped',
+    createdAt: '2026-06-28T12:00:00.000Z',
+    status: 'allowed',
+    mode: 'block',
+    user: 'counsel@example.test',
+    destination: 'claude.ai',
+    riskScore: 20,
+    maxSeverity: 2,
+    maxSeverityLabel: 'medium',
+    redactedPrompt: '[REDACTED:LEGAL_CONTRACT]',
+    policyScopeIds: ['legal_contract_review'],
+    policyExceptionId: 'legal_vendor_24h',
+    _rawPrompt: 'member SSN 524-71-9043',
+  });
+
+  assert.deepStrictEqual(safe.policyScopeIds, ['legal_contract_review']);
+  assert.strictEqual(safe.policyExceptionId, 'legal_vendor_24h');
+  assert.ok(!JSON.stringify(safe).includes('524-71-9043'));
+});
+
+test('evidence exports scoped policy changes', () => {
+  const scope = [{
+    id: 'legal_contract_review',
+    groups: ['promptwall legal'],
+    categories: ['LEGAL_CONTRACT'],
+    destinations: ['claude.ai'],
+    enforcementMode: 'block',
+    blockMinSeverity: 2,
+  }];
+  const detail = policy.policyChangeDetail(
+    { policyScopes: [], policyExceptions: [] },
+    {
+      policyScopes: scope,
+      policyExceptions: [{
+        id: 'legal_vendor_24h',
+        users: ['counsel@example.test'],
+        categories: ['LEGAL_CONTRACT'],
+        expiresAt: '2030-01-01T00:00:00.000Z',
+      }],
+    },
+  );
+  const entry = evidence.safeAuditEntry({
+    id: 'a_scope',
+    ts: '2026-06-28T12:00:00.000Z',
+    action: 'POLICY_UPDATED',
+    actor: 'admin',
+    detail,
+    prevHash: '0'.repeat(64),
+    hash: '1'.repeat(64),
+  });
+
+  assert.deepStrictEqual(entry.policyChange.changed.map((item) => item.field), ['policyScopes', 'policyExceptions']);
+  assert.deepStrictEqual(entry.policyChange.changed[0].after, scope);
+});
+
 test('evidence exports destination-review policy changes', () => {
   const detail = policy.policyChangeDetail(
     { governedDestinations: ['poe.com'], allowedDestinations: [], blockedDestinations: [] },

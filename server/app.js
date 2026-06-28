@@ -258,6 +258,33 @@ function rawToStore(text, status, pol) {
   return sealed == null ? undefined : sealed;
 }
 
+function scimGroupsForUser(userName) {
+  const user = db.getScimUserByUserName(String(userName || '').trim());
+  if (!user || user.active === false) return [];
+  return db.listScimGroups()
+    .filter((group) => (group.members || []).some((member) => member.value === user.id))
+    .map((group) => group.displayName)
+    .filter(Boolean);
+}
+
+function policyContext(input = {}) {
+  return {
+    user: input.user || 'unknown',
+    orgId: input.orgId || null,
+    destination: input.destination || 'unknown',
+    source: input.source || 'api',
+    channel: input.channel || 'submit',
+    groups: scimGroupsForUser(input.user),
+  };
+}
+
+function policyDecisionMetadata(verdict = {}) {
+  return {
+    ...((verdict.policyScopeIds || []).length ? { policyScopeIds: verdict.policyScopeIds } : {}),
+    ...(verdict.policyExceptionId ? { policyExceptionId: verdict.policyExceptionId } : {}),
+  };
+}
+
 function createQuery(query, opts = {}) {
   return db.createQuery(routing.withWorkflow(query, opts));
 }
@@ -573,7 +600,9 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
   const clientPreRedacted = declaredClientPreRedacted && clientAnalysis && !hasSensitivity(serverAnalysis);
   const clientRedactionResolved = (clientOutcome === 'redacted_sent' || clientOutcome === 'redacted_available') && clientPreRedacted;
   const analysis = clientPreRedacted ? clientAnalysis : serverAnalysis;
-  const verdict = policy.evaluate(analysis, pol);
+  const ctx = policyContext({ user, orgId, destination, source, channel });
+  const verdict = policy.evaluate(analysis, pol, ctx);
+  const decisionPolicy = verdict.policy || pol;
 
   // Privacy-preserving record: redacted prompt + masked findings + categories.
   const redactedPrompt = clientRedactionResolved && !categoryNames(analysis).length ? prompt : safePreview(prompt, analysis);
@@ -587,6 +616,7 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
     redactedPrompt, findings, categories, entityCounts: analysis.entityCounts,
     riskScore: analysis.riskScore, maxSeverity: analysis.maxSeverity,
     maxSeverityLabel: analysis.maxSeverityLabel, reasons: verdict.reasons,
+    ...policyDecisionMetadata(verdict),
   };
 
   // Man-in-the-Prompt: the sensor stopped a prompt carrying hidden instructions.
@@ -642,7 +672,7 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
   }
 
   if (clientOutcome === 'paste_flagged') {
-    const row = createQuery({ status: 'paste_flagged', mode: pol.enforcementMode || 'block', ...base });
+    const row = createQuery({ status: 'paste_flagged', mode: decisionPolicy.enforcementMode || 'block', ...base });
     db.appendAudit({ action: 'PASTE_FLAGGED', queryId: row.id, actor: user, detail: note || `${source}/paste: ${verdict.reasons.join('; ')}` });
     emitSecurityAlert(row, 'PASTE_FLAGGED');
     broadcast('query', { type: 'paste_flagged', query: publicQuery(row) });
@@ -654,10 +684,10 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
   // 'redact' neutralizes even hard-stop entities by tokenizing them (that is the
   // point — the prompt can proceed because it no longer contains real PII).
   // Otherwise hard-stop entities force 'block' regardless of mode.
-  const hardStop = analysis.findings.some((f) => pol.alwaysBlock.includes(f.type));
+  const hardStop = analysis.findings.some((f) => decisionPolicy.alwaysBlock.includes(f.type));
   const mode = clientRedactionResolved ? 'redact'
-    : pol.enforcementMode === 'redact' ? 'redact'
-    : (hardStop ? 'block' : (pol.enforcementMode || 'block'));
+    : decisionPolicy.enforcementMode === 'redact' ? 'redact'
+    : (hardStop ? 'block' : (decisionPolicy.enforcementMode || 'block'));
 
   // Status reflects how the sensor resolved it (from clientOutcome) or, for the
   // API/proxy path, defaults to the mode's behaviour.
@@ -691,7 +721,7 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
 
   const { row, releaseToken } = createQueryWithReleaseToken({
     status, mode, ...base, decisionNote: note,
-    _rawPrompt: rawToStore(prompt, status, pol),
+    _rawPrompt: rawToStore(prompt, status, decisionPolicy),
     _tokenVault: tokenVault,
     tokenizedPrompt,
   });
@@ -863,13 +893,16 @@ app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation
   }
 
   const analysis = detector.analyze(extracted.text, policy.analyzeOpts(pol));
-  const verdict = policy.evaluate(analysis, pol);
+  const ctx = policyContext({ user, orgId, destination, source, channel });
+  const verdict = policy.evaluate(analysis, pol, ctx);
+  const decisionPolicy = verdict.policy || pol;
   const findings = analysis.findings.map((x) => ({ type: x.type, severity: x.severity, score: x.score, masked: detector.maskValue(x.type, x.value) }));
   const categories = (analysis.categories || []).map((c) => c.category);
   const preview = safePreview(extracted.text, analysis, '[file:' + filename + '] ');
   const base = { user, orgId, destination, source, channel, sensor, filename, processor: extracted.processor,
     redactedPrompt: preview, findings, categories, entityCounts: analysis.entityCounts,
-    riskScore: analysis.riskScore, maxSeverity: analysis.maxSeverity, maxSeverityLabel: analysis.maxSeverityLabel, reasons: verdict.reasons };
+    riskScore: analysis.riskScore, maxSeverity: analysis.maxSeverity, maxSeverityLabel: analysis.maxSeverityLabel, reasons: verdict.reasons,
+    ...policyDecisionMetadata(verdict) };
 
   if (verdict.decision === 'allow') {
     const row = createQuery({ status: 'allowed', ...base });
@@ -878,8 +911,8 @@ app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation
     broadcast('query', { type: 'allowed', query: publicQuery(row) }); broadcast('stats', db.stats());
     return res.json({ id: row.id, decision: 'allow', supported: true, filename, riskScore: analysis.riskScore, findings, categories });
   }
-  const hardStop = analysis.findings.some((x) => pol.alwaysBlock.includes(x.type));
-  const mode = pol.enforcementMode === 'redact' ? 'redact' : (hardStop ? 'block' : (pol.enforcementMode || 'block'));
+  const hardStop = analysis.findings.some((x) => decisionPolicy.alwaysBlock.includes(x.type));
+  const mode = decisionPolicy.enforcementMode === 'redact' ? 'redact' : (hardStop ? 'block' : (decisionPolicy.enforcementMode || 'block'));
   const status = mode === 'redact' ? (canTokenizeAllSensitivity(analysis) ? 'redacted' : 'pending')
     : mode === 'warn' ? 'warned'
     : mode === 'justify' ? 'pending_justification'
@@ -892,7 +925,7 @@ app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation
     tokenVault = dataCrypto.seal(JSON.stringify(t.map));
   }
   const { row, releaseToken } = createQueryWithReleaseToken({
-    status, mode, ...base, _rawPrompt: rawToStore(rawFile, status, pol), _tokenVault: tokenVault, tokenizedPrompt,
+    status, mode, ...base, _rawPrompt: rawToStore(rawFile, status, decisionPolicy), _tokenVault: tokenVault, tokenizedPrompt,
   });
   const action = status === 'pending' ? 'FILE_BLOCKED'
     : status === 'redacted' ? 'FILE_REDACTED'
