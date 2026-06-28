@@ -48,8 +48,10 @@ if ($User) {
 
 try {
   "$(Get-Date -Format o) protected upload requested" | Out-File -Append -Encoding utf8 -FilePath $LogPath
-  & $node.Source @collectorArgs *>> $LogPath
-  exit $LASTEXITCODE
+  $collectorOutput = & $node.Source @collectorArgs 2>&1
+  $exitCode = $LASTEXITCODE
+  $collectorOutput | Out-File -Append -Encoding utf8 -FilePath $LogPath
+  exit $exitCode
 } catch {
   "$(Get-Date -Format o) desktop collector failed: $($_.Exception.Message)" | Out-File -Append -Encoding utf8 -FilePath $LogPath
   exit 1

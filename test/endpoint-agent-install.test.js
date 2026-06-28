@@ -65,6 +65,10 @@ test('desktop collector shell action is per-user and secret-free', () => {
   assert.match(desktopRun, /if \(\$Destination\)/);
   assert.match(desktopRun, /--wait/);
   assert.match(desktopRun, /--json/);
+  assert.match(desktopRun, /\$collectorOutput = & \$node\.Source @collectorArgs 2>&1/);
+  assert.match(desktopRun, /\$exitCode = \$LASTEXITCODE/);
+  assert.match(desktopRun, /\$collectorOutput \| Out-File -Append/);
+  assert.match(desktopRun, /exit \$exitCode/);
   assert.match(desktopUninstall, /HKEY_CURRENT_USER\\Software\\Classes\\\*\\shell/);
 });
 
