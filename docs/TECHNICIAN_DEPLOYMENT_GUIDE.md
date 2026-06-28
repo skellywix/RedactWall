@@ -563,7 +563,7 @@ Deliver a packet with:
 - `/healthz` and `/readyz` evidence.
 - Preflight status evidence.
 - Sanitized examiner export from `/api/export/evidence`, including coverage,
-  policy diffs, and lineage summaries.
+  policy diffs, approval routing metadata, and lineage summaries.
 - Fleet Install Health evidence from Coverage showing each required sensor by
   user, org, current state, version, and failed check ID.
 - Audit-chain verification output.
@@ -576,6 +576,8 @@ Deliver a packet with:
 - Policy template selected.
 - Seat limit and first seat report.
 - Known gaps, if any, with owner and due date.
+- Approval routing spot-check showing a synthetic held prompt assigned to the
+  expected group and SLA without raw prompt text in the exported evidence.
 
 The handoff packet must not contain:
 

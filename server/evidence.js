@@ -7,6 +7,7 @@
  */
 const crypto = require('crypto');
 const { safeSensor } = require('./sensor-metadata');
+const routing = require('./routing');
 
 const POLICY_AUDIT_ACTIONS = new Set(['POLICY_UPDATED', 'POLICY_TEMPLATE_APPLIED', 'DESTINATION_REVIEWED']);
 const POLICY_AUDIT_FIELDS = new Set([
@@ -76,6 +77,7 @@ function safeInstallChecks(checks = []) {
 }
 
 function safeQuery(q) {
+  const workflow = routing.publicWorkflow(q);
   return {
     id: q.id,
     createdAt: q.createdAt,
@@ -100,6 +102,7 @@ function safeQuery(q) {
     retentionPurgedAt: q.retentionPurgedAt || null,
     retentionPurgedFields: (q.retentionPurgedFields || []).filter((field) => ['rawPrompt', 'tokenVault'].includes(field)),
     installChecks: safeInstallChecks(q.installChecks),
+    workflow,
   };
 }
 
