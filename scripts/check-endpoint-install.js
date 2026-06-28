@@ -97,6 +97,7 @@ function buildInstallReport(opts = {}) {
   checks.push(check('watch_dir', configured(settings.watchDir) && isDirectory(settings.watchDir), configured(settings.watchDir) ? 'configured directory' : 'missing'));
   checks.push(check('endpoint_agent_runtime', existsFile(repoRoot, 'sensors/endpoint-agent/agent.js'), 'agent runtime present'));
   checks.push(check('endpoint_runner', existsFile(repoRoot, 'scripts/run-endpoint-agent.ps1'), 'runner present'));
+  checks.push(check('clipboard_guard_runtime', existsFile(repoRoot, 'sensors/endpoint-agent/collectors/clipboard-guard.js'), 'clipboard guard present'));
   checks.push(check('handoff_secret', requireDesktopCollector ? handoffReady : (!handoffEnabled || handoffReady),
     handoffReady ? 'configured' : (requireDesktopCollector ? 'missing 32-plus character handoff secret' : 'desktop collector disabled')));
   checks.push(check('handoff_dir', desktopCollectorExpected ? configured(settings.handoffDir) && isDirectory(settings.handoffDir) : true,

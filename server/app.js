@@ -612,6 +612,42 @@ function blockFileUploadByPolicy(res, context = {}, responseExtra = {}) {
   });
 }
 
+const SAFE_CLIENT_ACTION_RE = /^[a-z][a-z0-9_:-]{0,79}$/;
+
+function blockedActionLabel(action, source) {
+  const requested = String(action || '').trim().toLowerCase();
+  const browserAction = policy.normalizeBrowserAction(requested);
+  if (browserAction) return browserAction;
+  if (source !== 'browser_extension' && SAFE_CLIENT_ACTION_RE.test(requested)) return requested;
+  return 'browser_action';
+}
+
+function blockedActionEvidence(analysis) {
+  if (!analysis) {
+    return {
+      findings: [],
+      categories: [],
+      entityCounts: {},
+      riskScore: 0,
+      maxSeverity: 0,
+      maxSeverityLabel: 'none',
+    };
+  }
+  return {
+    findings: (analysis.findings || []).map((f) => ({
+      type: f.type,
+      severity: f.severity,
+      score: f.score,
+      masked: f.masked || detector.maskValue(f.type, f.value || ''),
+    })),
+    categories: (analysis.categories || []).map((c) => c.category),
+    entityCounts: analysis.entityCounts || {},
+    riskScore: analysis.riskScore || 0,
+    maxSeverity: analysis.maxSeverity || 0,
+    maxSeverityLabel: analysis.maxSeverityLabel || 'none',
+  };
+}
+
 function blockBrowserActionByPolicy(res, context = {}, responseExtra = {}) {
   const {
     user = 'unknown',
@@ -623,10 +659,13 @@ function blockBrowserActionByPolicy(res, context = {}, responseExtra = {}) {
     sensor = null,
     action = channel || 'paste',
     reason = 'Browser action blocked by policy',
+    analysis = null,
   } = context;
   const normalized = policy.normalizeDestination(destination);
-  const requestedAction = String(action || '').trim().toLowerCase();
-  const normalizedAction = policy.normalizeBrowserAction(requestedAction) || 'browser_action';
+  const normalizedAction = blockedActionLabel(action, source);
+  const evidence = blockedActionEvidence(analysis);
+  const auditAction = source === 'browser_extension' ? 'BROWSER_ACTION_BLOCKED' : 'CLIENT_ACTION_BLOCKED';
+  const promptLabel = source === 'browser_extension' ? 'browser action' : 'client action';
   const row = createQuery({
     status: 'action_blocked',
     mode: 'browser_action_block',
@@ -637,17 +676,17 @@ function blockBrowserActionByPolicy(res, context = {}, responseExtra = {}) {
     source,
     channel: normalizedAction,
     sensor,
-    redactedPrompt: '[browser action blocked] ' + normalizedAction + ' ' + normalized,
-    findings: [],
-    categories: [],
-    entityCounts: {},
-    riskScore: 0,
-    maxSeverity: 0,
-    maxSeverityLabel: 'none',
+    redactedPrompt: '[' + promptLabel + ' blocked] ' + normalizedAction + ' ' + normalized,
+    findings: evidence.findings,
+    categories: evidence.categories,
+    entityCounts: evidence.entityCounts,
+    riskScore: evidence.riskScore,
+    maxSeverity: evidence.maxSeverity,
+    maxSeverityLabel: evidence.maxSeverityLabel,
     reasons: [reason],
   });
-  db.appendAudit({ action: 'BROWSER_ACTION_BLOCKED', queryId: row.id, actor: user, detail: `${source}/${normalizedAction}: ${normalized}` });
-  emitSecurityAlert(row, 'BROWSER_ACTION_BLOCKED');
+  db.appendAudit({ action: auditAction, queryId: row.id, actor: user, detail: `${source}/${normalizedAction}: ${normalized}` });
+  emitSecurityAlert(row, auditAction);
   broadcast('query', { type: 'action_blocked', query: publicQuery(row) });
   broadcast('stats', db.stats());
   return res.json({
@@ -655,9 +694,9 @@ function blockBrowserActionByPolicy(res, context = {}, responseExtra = {}) {
     decision: 'block',
     mode: 'browser_action_block',
     status: 'action_blocked',
-    riskScore: 0,
-    findings: [],
-    categories: [],
+    riskScore: evidence.riskScore,
+    findings: evidence.findings,
+    categories: evidence.categories,
     reasons: [reason],
     ...responseExtra,
   });
@@ -690,6 +729,11 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
   if (clientOutcome === 'file_upload_blocked') {
     return blockFileUploadByPolicy(res, { user, orgId, destination, sourceIp, source, channel, sensor });
   }
+  const declaredClientPreRedacted = req.body && req.body.clientPreRedacted === true;
+  const clientAnalysis = declaredClientPreRedacted ? clientAnalysisFrom(req.body) : null;
+  if (declaredClientPreRedacted && !clientAnalysis) {
+    return res.status(400).json({ error: 'client redaction analysis required' });
+  }
   const browserActionRule = policy.browserActionBlockRule(channel, destination, pol);
   if (browserActionRule || clientOutcome === 'action_blocked') {
     return blockBrowserActionByPolicy(res, {
@@ -701,15 +745,13 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
       channel,
       sensor,
       action: channel,
-      reason: browserActionRule ? policy.browserActionBlockReason(channel, destination, pol) : 'Browser action blocked by policy',
+      reason: browserActionRule
+        ? policy.browserActionBlockReason(channel, destination, pol)
+        : source === 'browser_extension' ? 'Browser action blocked by policy' : 'Client action blocked locally',
+      analysis: clientAnalysis,
     });
   }
   const analyzeOpts = policy.analyzeOpts(pol);
-  const declaredClientPreRedacted = req.body && req.body.clientPreRedacted === true;
-  const clientAnalysis = declaredClientPreRedacted ? clientAnalysisFrom(req.body) : null;
-  if (declaredClientPreRedacted && !clientAnalysis) {
-    return res.status(400).json({ error: 'client redaction analysis required' });
-  }
   const serverAnalysis = detector.analyze(prompt, analyzeOpts);
   const clientPreRedacted = declaredClientPreRedacted && clientAnalysis && !hasSensitivity(serverAnalysis);
   const clientRedactionResolved = (clientOutcome === 'redacted_sent' || clientOutcome === 'redacted_available') && clientPreRedacted;

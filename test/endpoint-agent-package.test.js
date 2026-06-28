@@ -42,6 +42,10 @@ function minimalFiles(agentBody) {
       body: Buffer.from('function writeHandoffFile() { return signHandoffEvent(); }\nfunction signHandoffEvent() {}\n'),
     },
     {
+      path: 'sensors/endpoint-agent/collectors/clipboard-guard.js',
+      body: Buffer.from('async function collectClipboard() { return { clientPreRedacted: true, cleared: true }; }\nconst cmd = "Set-Clipboard";\n'),
+    },
+    {
       path: 'sensors/endpoint-agent/collectors/protected-upload.js',
       body: Buffer.from('async function collectProtectedUploads() { return writeHandoffFile(); }\nfunction writeHandoffFile() {}\nfunction waitForHandoffConsumption() {}\n'),
     },
@@ -87,6 +91,7 @@ test('package script writes a prompt-free endpoint agent zip and integrity manif
   assert.strictEqual(manifest.checks.nativeHandoffPrototypeIncluded, true);
   assert.strictEqual(manifest.checks.nativeHandoffWriterIncluded, true);
   assert.strictEqual(manifest.checks.protectedUploadCollectorIncluded, true);
+  assert.strictEqual(manifest.checks.clipboardGuardIncluded, true);
   assert.strictEqual(manifest.checks.desktopCollectorInstallerIncluded, true);
   assert.strictEqual(manifest.checks.installValidationIncluded, true);
   assert.strictEqual(manifest.checks.scheduledTaskInstallerIncluded, true);
@@ -109,6 +114,7 @@ test('package script writes a prompt-free endpoint agent zip and integrity manif
     'sensors/endpoint-agent/agent.js',
     'sensors/endpoint-agent/native-handoff.js',
     'sensors/endpoint-agent/write-handoff.js',
+    'sensors/endpoint-agent/collectors/clipboard-guard.js',
     'sensors/endpoint-agent/collectors/protected-upload.js',
     'scripts/check-endpoint-install.js',
     'scripts/install-desktop-collector.ps1',
@@ -129,6 +135,7 @@ test('package script writes a prompt-free endpoint agent zip and integrity manif
   assert.match(agent, /ENDPOINT_AGENT_HANDOFF_SECRET/);
   assert.match(zip.readAsText('sensors/endpoint-agent/native-handoff.js'), /createHmac\('sha256'/);
   assert.match(zip.readAsText('sensors/endpoint-agent/write-handoff.js'), /writeHandoffFile/);
+  assert.match(zip.readAsText('sensors/endpoint-agent/collectors/clipboard-guard.js'), /collectClipboard/);
   assert.match(zip.readAsText('sensors/endpoint-agent/collectors/protected-upload.js'), /collectProtectedUploads/);
   assert.match(zip.readAsText('scripts/check-endpoint-install.js'), /\/api\/v1\/heartbeat/);
   assert.match(zip.readAsText('scripts/install-desktop-collector.ps1'), /HKEY_CURRENT_USER\\Software\\Classes\\\*\\shell/);
@@ -222,16 +229,20 @@ test('packaged endpoint agent runs a package-to-install pilot smoke', async (t) 
 
   const agentPath = require.resolve(path.join(installRoot, 'sensors', 'endpoint-agent', 'agent.js'));
   const writerPath = require.resolve(path.join(installRoot, 'sensors', 'endpoint-agent', 'write-handoff.js'));
+  const clipboardPath = require.resolve(path.join(installRoot, 'sensors', 'endpoint-agent', 'collectors', 'clipboard-guard.js'));
   const collectorPath = require.resolve(path.join(installRoot, 'sensors', 'endpoint-agent', 'collectors', 'protected-upload.js'));
   delete require.cache[agentPath];
   delete require.cache[writerPath];
+  delete require.cache[clipboardPath];
   delete require.cache[collectorPath];
   const agent = require(agentPath);
   const handoffWriter = require(writerPath);
+  const clipboardCollector = require(clipboardPath);
   const desktopCollector = require(collectorPath);
   t.after(() => {
     delete require.cache[agentPath];
     delete require.cache[writerPath];
+    delete require.cache[clipboardPath];
     delete require.cache[collectorPath];
   });
   assert.strictEqual(agent.configuredKey({}), 'pilot-ingest-key-000000000000000000000000000001');
@@ -266,6 +277,25 @@ test('packaged endpoint agent runs a package-to-install pilot smoke', async (t) 
     }
     if (url === 'http://promptwall.package.test/api/v1/gate') {
       const body = JSON.parse(opts.body);
+      if (body.channel === 'clipboard') {
+        assert.strictEqual(body.source, 'endpoint_agent');
+        assert.strictEqual(body.clientOutcome, 'action_blocked');
+        assert.strictEqual(body.clientPreRedacted, true);
+        assert.match(body.prompt, /^\[clipboard blocked locally\]/);
+        assert.ok(body.clientFindings.some((finding) => finding.type === 'US_SSN'));
+        assert.ok(body.clientFindings.some((finding) => finding.type === 'CREDIT_CARD'));
+        assert.ok(!JSON.stringify(body).includes('524-71-9043'));
+        assert.ok(!JSON.stringify(body).includes('4111 1111 1111 1111'));
+        return {
+          ok: true,
+          json: async () => ({
+            id: 'q_packaged_clipboard',
+            decision: 'block',
+            mode: 'browser_action_block',
+            status: 'action_blocked',
+          }),
+        };
+      }
       assert.strictEqual(body.clientOutcome, 'redacted_available');
       assert.strictEqual(body.clientPreRedacted, true);
       assert.strictEqual(body.source, 'endpoint_agent');
@@ -391,6 +421,31 @@ test('packaged endpoint agent runs a package-to-install pilot smoke', async (t) 
   assert.strictEqual(nativeResult.status, 'processed');
   assert.strictEqual(nativeResult.result.decision, 'redact');
   assert.strictEqual(fs.existsSync(nativeEvent.path), false);
+
+  let clipboardCleared = 0;
+  const clipboardResult = await clipboardCollector.collectClipboard({
+    readClipboard: async () => 'Clipboard SSN 524-71-9043 and card 4111 1111 1111 1111.',
+    clearClipboard: async () => { clipboardCleared += 1; },
+    clearOnBlock: true,
+    policy: {
+      enforcementMode: 'block',
+      blockMinSeverity: 2,
+      blockRiskScore: 20,
+      alwaysBlock: ['US_SSN', 'CREDIT_CARD'],
+      ignore: [],
+      disabledDetectors: [],
+    },
+    fetchImpl,
+  });
+  assert.strictEqual(clipboardCleared, 1);
+  assert.strictEqual(clipboardResult.status, 'blocked');
+  assert.strictEqual(clipboardResult.cleared, true);
+  assert.ok(clipboardResult.recorded);
+  assert.ok(requests.some((request) => {
+    if (!request.url.endsWith('/api/v1/gate')) return false;
+    const body = JSON.parse(request.body);
+    return body.channel === 'clipboard' && body.clientOutcome === 'action_blocked';
+  }));
   assert.ok(!JSON.stringify(requests).includes('524-71-9043'));
   assert.ok(!JSON.stringify(requests).includes('4111 1111 1111 1111'));
 });

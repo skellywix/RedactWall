@@ -48,6 +48,7 @@ test('endpoint install check validates runtime wiring without exposing secrets',
   assert.strictEqual(report.status, 'ok');
   assert.ok(report.checks.every((item) => item.ok), JSON.stringify(report.checks));
   assert.ok(report.checks.some((item) => item.id === 'desktop_collector_runtime'));
+  assert.ok(report.checks.some((item) => item.id === 'clipboard_guard_runtime'));
   assert.ok(!JSON.stringify(report).includes(ingestKey));
   assert.ok(!JSON.stringify(report).includes(handoffSecret));
 

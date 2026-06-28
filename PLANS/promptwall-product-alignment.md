@@ -171,6 +171,9 @@ For this alignment track, completion requires evidence for every area below:
 - Added native Jira and Linear approval-ticket adapters that create sanitized
   reviewer issues directly from workflow metadata when customers do not want to
   operate ticket middleware.
+- Added a one-shot endpoint clipboard guard that inspects clipboard content
+  locally, records only masked detector evidence, and can clear sensitive
+  clipboard content while recording sanitized `action_blocked` evidence.
 
 ## Open Decisions
 
