@@ -10,6 +10,7 @@ const schema = JSON.parse(fs.readFileSync(path.join(root, 'sensors', 'browser-ex
 const managed = JSON.parse(fs.readFileSync(path.join(root, 'docs', 'examples', 'chrome-managed-storage.policy.json'), 'utf8'));
 const extensionSettings = JSON.parse(fs.readFileSync(path.join(root, 'docs', 'examples', 'chrome-extension-settings.example.json'), 'utf8'));
 const guide = fs.readFileSync(path.join(root, 'docs', 'MANAGED_EXTENSION_DEPLOYMENT.md'), 'utf8');
+const releaseChecklist = fs.readFileSync(path.join(root, 'docs', 'EXTENSION_RELEASE_CHECKLIST.md'), 'utf8');
 
 test('managed storage example uses only schema-backed keys', () => {
   const allowed = new Set(Object.keys(schema.properties));
@@ -30,4 +31,13 @@ test('managed deployment guide warns about secret-bearing policy', () => {
   assert.match(guide, /Treat managed policy as secret-bearing configuration/);
   assert.match(guide, /browser install-health heartbeat/i);
   assert.match(guide, /Coverage tab shows `browser_extension` install health/);
+  assert.match(guide, /release:extension:check/);
+});
+
+test('release checklist covers private rollout, update channel, and rollback', () => {
+  assert.match(releaseChecklist, /Private or unlisted Chrome Web Store release checklist/);
+  assert.match(releaseChecklist, /npm run release:extension:check/);
+  assert.match(releaseChecklist, /https:\/\/clients2\.google\.com\/service\/update2\/crx/);
+  assert.match(releaseChecklist, /Fleet Install Health/);
+  assert.match(releaseChecklist, /Rollback/);
 });

@@ -60,6 +60,9 @@ Build next:
 ## Recent Completed Passes
 
 - Rebrand the visible project from PromptSentinel to PromptWall.
+- Add a Chrome extension release-readiness gate and private or unlisted Web
+  Store checklist so managed browser rollout has package, policy, update URL,
+  and install-health evidence before handoff.
 - Keep compatibility-sensitive runtime contracts stable where breaking them
   would damage existing installs or retained evidence.
 - Add active Poe browser protection because Poe was already a governed
@@ -127,6 +130,7 @@ When browser behavior changes, also run:
 ```powershell
 npm run test:browser
 npm run package:extension -- <temp-output-dir>
+npm run release:extension:check -- <temp-output-dir>
 ```
 
 For examiner export changes, also run:

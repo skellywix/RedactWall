@@ -24,6 +24,7 @@
     "backup:verify": "node scripts/backup-store.js verify",
     "backup:restore": "node scripts/backup-store.js restore",
     "package:extension": "node scripts/package-extension.js",
+    "release:extension:check": "node scripts/check-extension-release.js",
     "package:endpoint-agent": "node scripts/package-endpoint-agent.js",
     "package:mcp-guard": "node scripts/package-mcp-guard.js",
     "docs:sync": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/sync-docs.ps1",

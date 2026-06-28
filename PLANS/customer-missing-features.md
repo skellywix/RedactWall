@@ -160,8 +160,10 @@ blocking, AI-domain adapter and browser-manifest coverage checks, AWS
 customer-silo deployment, setup preflight, browser extension install-health
 heartbeats, endpoint technician install validation heartbeats, MCP guard install
 validation heartbeats, and customer-ready fleet reporting by user, org, sensor,
-version, and failed check exist. Missing pieces are a signed update channel and
-a private or unlisted Chrome Web Store release checklist.
+version, and failed check exist. The browser release-readiness gate and private
+or unlisted Chrome Web Store checklist now exist. The remaining signed-update
+gap is a real Web Store item, stable extension ID, and customer-controlled
+publishing workflow.
 
 Customer ask: "How do we force-install it, keep it updated, and prove every
 covered user actually has it?"
@@ -181,12 +183,14 @@ Implementation connection:
 - Keep technician validation output in the dashboard and evidence export:
   browser managed config, endpoint env, ingest-key presence, handoff readiness,
   last seen time, version, and failed check IDs.
-- Prepare Chrome Web Store private/unlisted release checklist and update docs.
+- Use `npm run release:extension:check` and the Chrome Web Store private/unlisted
+  checklist as the browser rollout handoff gate.
 - Add endpoint package manifest verification to install-day runbook output.
 
 Acceptance evidence:
 - `node --test test/extension.test.js test/sensor-heartbeat.test.js test/endpoint-install-check.test.js test/mcp-install-check.test.js test/coverage.test.js test/extension-package.test.js test/endpoint-agent-package.test.js test/mcp-guard-package.test.js`
 - `npm run package:extension -- <temp>`
+- `npm run release:extension:check -- <temp>`
 - `npm run package:endpoint-agent -- <temp>`
 - Browser E2E shows coverage posture without page overflow on desktop and mobile.
 
@@ -398,6 +402,7 @@ Feature-specific gates:
 ```powershell
 npm run test:browser
 npm run package:extension -- <temp-output-dir>
+npm run release:extension:check -- <temp-output-dir>
 npm run package:endpoint-agent -- <temp-output-dir>
 npm run package:mcp-guard -- <temp-output-dir>
 npm run backup -- <temp-output-dir>

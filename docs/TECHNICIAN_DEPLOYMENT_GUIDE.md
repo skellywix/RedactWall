@@ -167,7 +167,7 @@ normal email.
 Build the three customer handoff artifacts:
 
 ```powershell
-npm run package:extension
+npm run release:extension:check -- dist/browser-extension
 npm run package:endpoint-agent
 npm run package:mcp-guard
 ```
@@ -177,6 +177,9 @@ Record the generated artifact names and SHA-256 manifests:
 - `dist/browser-extension/`
 - `dist/endpoint-agent/`
 - `dist/mcp-guard/`
+
+The browser extension folder should include the zip, integrity manifest, and
+release-readiness report.
 
 The manifests belong in the handoff packet. The packages must not contain real
 ingest keys or prompt bodies.
@@ -391,6 +394,8 @@ the approved secret process.
 ## Phase 8: Browser Extension Rollout
 
 Use `docs/MANAGED_EXTENSION_DEPLOYMENT.md` for the full Chrome policy reference.
+Use `docs/EXTENSION_RELEASE_CHECKLIST.md` before uploading or handing over a
+private or unlisted Chrome Web Store item.
 For install day, the technician must confirm these values in managed storage:
 
 ```json
@@ -554,6 +559,7 @@ Deliver a packet with:
 - CloudFormation stack outputs.
 - Server image URI and tag.
 - Sensor package names and SHA-256 manifest paths.
+- Extension release-readiness report.
 - `/healthz` and `/readyz` evidence.
 - Preflight status evidence.
 - Sanitized examiner export from `/api/export/evidence`, including coverage,

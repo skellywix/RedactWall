@@ -6,8 +6,9 @@ For a sales demo, `chrome://extensions` plus Load unpacked is fine. For a client
 
 ## Pilot Deployment Shape
 
-1. Build a local handoff package with `npm run package:extension`.
+1. Build and check a local handoff package with `npm run release:extension:check`.
    - Keep the generated `.zip` and `.manifest.json` together.
+   - Keep the generated `.release-readiness.json` with the handoff packet.
    - Confirm the manifest SHA-256 matches the uploaded package.
 2. Publish the extension through a controlled channel.
    - Preferred: private or unlisted Chrome Web Store item for the client tenant.
@@ -25,7 +26,19 @@ For a sales demo, `chrome://extensions` plus Load unpacked is fine. For a client
 
 ## Build The Package
 
-Run from the repo root:
+Run the release readiness gate from the repo root:
+
+```bash
+npm run release:extension:check -- dist/browser-extension
+```
+
+The command wraps `npm run package:extension`, validates the force-install and
+managed-storage examples, checks the private or unlisted release checklist, and
+writes a prompt-free release-readiness JSON file. Use `--extension-id
+<chrome-web-store-id>` after the private or unlisted Chrome Web Store item
+exists.
+
+For package-only development checks, run:
 
 ```bash
 npm run package:extension
@@ -36,11 +49,16 @@ The command writes:
 ```text
 dist/browser-extension/promptwall-extension-v<version>.zip
 dist/browser-extension/promptwall-extension-v<version>.manifest.json
+dist/browser-extension/promptwall-extension-v<version>.release-readiness.json
 ```
 
 The manifest records the package SHA-256, every packaged file hash, the app and extension versions, the synced engine hashes, and packaging checks. It intentionally contains no prompt bodies or real keys.
 The package check also verifies that the browser install-health heartbeat code
 is present in the service worker.
+
+The release-readiness report records the Chrome Web Store update URL, package
+hash, policy-example checks, checklist checks, and required install-day evidence.
+It intentionally does not include managed-storage values or ingest keys.
 
 The command fails if:
 
@@ -98,6 +116,8 @@ On a managed test device:
 
 - Use HTTPS for `serverUrl`.
 - Use a stable, rotated `INGEST_API_KEY`.
+- Use `docs/EXTENSION_RELEASE_CHECKLIST.md` before uploading a private or
+  unlisted Chrome Web Store item.
 - Pair extension force-install with browser policy that blocks unapproved AI destinations or routes them through governance.
 - Keep the extension ID stable across updates.
 - Treat managed policy as secret-bearing configuration because it contains the ingest key.

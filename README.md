@@ -208,6 +208,7 @@ Package a pilot handoff artifact with:
 
 ```bash
 npm run package:extension
+npm run release:extension:check
 npm run package:endpoint-agent
 npm run package:mcp-guard
 ```
@@ -216,7 +217,9 @@ The extension zip lands in `dist/browser-extension/`, the endpoint agent zip lan
 `dist/endpoint-agent/`, and the MCP guard zip lands in `dist/mcp-guard/`. Each
 artifact gets a SHA-256 manifest and refuses packaged development keys or prompt
 bodies. Configure real pilot keys through Chrome managed storage or local sensor
-environment config, not inside packages.
+environment config, not inside packages. `release:extension:check` also writes a
+prompt-free Chrome Web Store release-readiness report for private or unlisted
+managed deployments.
 
 ### Try the other sensors
 
@@ -316,7 +319,7 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 ## Still ahead (to ship commercially)
 
 - SSO, polished MFA enrollment UX, and multiple admin roles; deeper multi-tenant isolation per institution.
-- Signed Chrome Web Store listing and force-install rollout; local extension zip plus integrity manifest are packaged.
+- Signed Chrome Web Store listing and force-install rollout; local extension zip, integrity manifest, release-readiness report, and managed-policy checklist are packaged.
 - Email/Slack escalation rules on top of the sanitized SIEM webhook.
 - Ship the signed native endpoint collector that feeds the tested handoff contract from clipboard and AI-app upload flows.
 - Upgrade the on-device classifier to a quantized ONNX/WASM NER when recall demands it.

@@ -55,6 +55,7 @@ This section is generated from the app by `npm run docs:demo-guide`. Do not hand
 | `npm run backup:verify` | `node scripts/backup-store.js verify` |
 | `npm run backup:restore` | `node scripts/backup-store.js restore` |
 | `npm run package:extension` | `node scripts/package-extension.js` |
+| `npm run release:extension:check` | `node scripts/check-extension-release.js` |
 | `npm run package:endpoint-agent` | `node scripts/package-endpoint-agent.js` |
 | `npm run package:mcp-guard` | `node scripts/package-mcp-guard.js` |
 | `npm run endpoint:check` | `node scripts/check-endpoint-install.js` |
@@ -72,6 +73,8 @@ This section is generated from the app by `npm run docs:demo-guide`. Do not hand
 | `sensors/browser-extension/manifest.json` | Chrome extension entrypoint | Present |
 | `sensors/browser-extension/background.js` | Browser install-health heartbeat and control-plane relay | Present |
 | `sensors/browser-extension/content.js` | Browser send, paste, upload enforcement | Present |
+| `scripts/check-extension-release.js` | Browser extension release-readiness gate | Present |
+| `docs/EXTENSION_RELEASE_CHECKLIST.md` | Chrome Web Store private or unlisted release checklist | Present |
 | `sensors/endpoint-agent/agent.js` | Local folder and file sensor | Present |
 | `sensors/endpoint-agent/write-handoff.js` | Signed native upload-intent handoff writer | Present |
 | `scripts/check-endpoint-install.js` | Endpoint install validation and heartbeat evidence | Present |

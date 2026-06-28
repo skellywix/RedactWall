@@ -130,17 +130,19 @@ handoff secrets, tool output, or decision notes.
 
 ## Browser Extension Package
 
-Build the Chrome extension artifact before a managed pilot handoff:
+Build and check the Chrome extension artifact before a managed pilot handoff:
 
 ```bash
-npm run package:extension
+npm run release:extension:check -- dist/browser-extension
 ```
 
-The command writes a zip and adjacent SHA-256 manifest under `dist/browser-extension/`.
-It verifies Manifest V3 wiring, managed-storage schema coverage, synced engine
-copies, browser install-health heartbeat support, and absence of a packaged
-development ingest key. Configure `serverUrl`, `ingestKey`, and identity through
-Chrome managed storage or local demo storage.
+The command writes a zip, adjacent SHA-256 manifest, and release-readiness JSON
+under `dist/browser-extension/`. It verifies Manifest V3 wiring,
+managed-storage schema coverage, synced engine copies, browser install-health
+heartbeat support, Chrome force-install policy examples, the private or unlisted
+release checklist, and absence of a packaged development ingest key. Configure
+`serverUrl`, `ingestKey`, and identity through Chrome managed storage or local
+demo storage.
 
 The extension posts sanitized install-health heartbeats on install, browser
 startup, and a periodic `installHeartbeat` alarm when server config is present.
