@@ -30,7 +30,17 @@ test('evidence pack omits raw prompt, redacted prompt body, token vault, and aud
     coverage: {
       score: 82,
       rawPrompt: 'coverage should not export Member John Carter',
-      totals: { events: 1, blocked: 1, requiredSensors: 3, activeRequiredSensors: 1, activeSensorVersionGaps: 1, activeSensorHealthWarnings: 1 },
+      totals: {
+        events: 1,
+        blocked: 1,
+        requiredSensors: 3,
+        activeRequiredSensors: 1,
+        activeSensorVersionGaps: 1,
+        activeSensorHealthWarnings: 1,
+        endpointAiInventoryReports: 1,
+        endpointAiToolDetections: 2,
+        endpointAiToolUnapproved: 1,
+      },
       sensors: [{
         source: 'browser_extension',
         label: 'Browser extension',
@@ -44,6 +54,17 @@ test('evidence pack omits raw prompt, redacted prompt body, token vault, and aud
           at: '2026-06-26T12:00:00.000Z',
           state: 'attention',
           failedChecks: ['managed_identity'],
+          aiToolInventory: {
+            detected: 2,
+            reported: 2,
+            unapproved: 1,
+            truncated: false,
+            state: 'attention',
+            tools: [
+              { id: 'cursor', label: 'Cursor', approved: true, state: 'approved', detail: 'detected', rawPath: 'C:\\secret\\Cursor.exe' },
+              { id: 'claude_desktop', label: 'Claude Desktop', approved: false, state: 'unapproved', detail: 'unapproved detected', rawArgs: '--profile secret' },
+            ],
+          },
           checks: [
             { id: 'endpoint_env_file', ok: true, detail: 'found', secret: 'check-secret-should-not-export' },
             { id: 'managed_identity', ok: false, detail: 'missing managed identity' },
@@ -73,6 +94,32 @@ test('evidence pack omits raw prompt, redacted prompt body, token vault, and aud
         },
         secret: 'fleet-secret-should-not-export',
       }],
+      endpointAiTools: [
+        {
+          id: 'claude_desktop',
+          label: 'Claude Desktop',
+          approved: false,
+          state: 'unapproved',
+          detail: 'unapproved detected',
+          user: 'jdoe',
+          orgId: 'cu-acme',
+          lastSeen: '2026-06-26T12:00:00.000Z',
+          platforms: ['win32'],
+          processArgs: '--profile secret',
+        },
+        {
+          id: 'cursor',
+          label: 'Cursor',
+          approved: true,
+          state: 'approved',
+          detail: 'detected',
+          user: 'jdoe',
+          orgId: 'cu-acme',
+          lastSeen: '2026-06-26T12:00:00.000Z',
+          platforms: ['win32'],
+          localPath: 'C:\\secret\\Cursor.exe',
+        },
+      ],
     },
     backup: {
       ok: true,
@@ -166,10 +213,20 @@ test('evidence pack omits raw prompt, redacted prompt body, token vault, and aud
   assert.strictEqual(pack.coverage.score, 82);
   assert.strictEqual(pack.coverage.totals.requiredSensors, 3);
   assert.strictEqual(pack.coverage.totals.activeSensorHealthWarnings, 1);
+  assert.strictEqual(pack.coverage.totals.endpointAiToolDetections, 2);
+  assert.strictEqual(pack.coverage.totals.endpointAiToolUnapproved, 1);
   assert.strictEqual(pack.coverage.sensors[0].required, true);
   assert.strictEqual(pack.coverage.sensors[0].desiredVersion, '0.3.0');
   assert.strictEqual(pack.coverage.sensors[0].installHealth.state, 'attention');
   assert.deepStrictEqual(pack.coverage.sensors[0].installHealth.failedChecks, ['managed_identity']);
+  assert.deepStrictEqual(pack.coverage.sensors[0].installHealth.aiToolInventory.tools.map((tool) => [tool.id, tool.state]), [
+    ['cursor', 'approved'],
+    ['claude_desktop', 'unapproved'],
+  ]);
+  assert.deepStrictEqual(pack.coverage.endpointAiTools.map((tool) => [tool.id, tool.state, tool.user]), [
+    ['claude_desktop', 'unapproved', 'jdoe'],
+    ['cursor', 'approved', 'jdoe'],
+  ]);
   assert.strictEqual(pack.coverage.fleet[0].user, 'jdoe');
   assert.strictEqual(pack.coverage.fleet[0].orgId, 'cu-acme');
   assert.strictEqual(pack.coverage.fleet[0].state, 'attention');
@@ -204,6 +261,7 @@ test('evidence pack omits raw prompt, redacted prompt body, token vault, and aud
   assert.ok(!wire.includes('backup-secret-should-not-export'));
   assert.ok(!wire.includes('restore-secret-should-not-export'));
   assert.ok(!wire.includes('C:\\secret'));
+  assert.ok(!wire.includes('--profile secret'));
   assert.ok(!wire.includes('sealed-vault'));
   assert.ok(!wire.includes('contains member SSN'));
   assert.ok(!wire.includes('ps_ingest_should_not_export'));

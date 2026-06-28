@@ -461,7 +461,7 @@
   .mini-kpi b{display:block;color:#fff;font-size:18px;font-variant-numeric:tabular-nums}
   .mini-kpi span{display:block;margin-top:4px;color:var(--mut);font-size:11px;text-transform:uppercase;letter-spacing:.06em}
   .mini-kpi em{display:block;margin-top:5px;color:#b8c6d8;font-size:12px;font-style:normal;line-height:1.3}
-  .sensor-row,.shadow-row{
+  .sensor-row,.shadow-row,.tool-row{
     display:grid;
     grid-template-columns:minmax(0,1fr) auto;
     gap:10px;
@@ -469,10 +469,12 @@
     padding:12px 14px;
     border-bottom:1px solid var(--line);
   }
-  .sensor-row:last-child,.shadow-row:last-child{border-bottom:0}
-  .sensor-row strong,.shadow-row strong{display:block;color:#fff;font-size:13px;font-weight:720;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .sensor-row span,.shadow-row span{display:block;color:var(--mut);font-size:12px;margin-top:4px}
+  .sensor-row:last-child,.shadow-row:last-child,.tool-row:last-child{border-bottom:0}
+  .sensor-row strong,.shadow-row strong,.tool-row strong{display:block;color:#fff;font-size:13px;font-weight:720;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sensor-row span,.shadow-row span,.tool-row span{display:block;color:var(--mut);font-size:12px;margin-top:4px}
   .sensor-row .count,.shadow-row .count{color:#fff;font-weight:780;font-variant-numeric:tabular-nums}
+  .tool-row{grid-template-columns:minmax(0,1fr) minmax(115px,auto)}
+  .tool-state{display:grid;justify-items:end;gap:5px}
   .destination-review{display:grid;justify-items:end;gap:7px}
   .destination-actions{display:flex;justify-content:flex-end;gap:6px;flex-wrap:wrap}
   .ghost.mini{min-height:30px;padding:6px 8px;font-size:11.5px}
@@ -820,6 +822,15 @@
             </div>
             <table><thead><tr><th>User</th><th>Org</th><th>Sensor</th><th>State</th><th>Version</th><th>Failed Checks</th><th>Last Seen</th></tr></thead>
               <tbody id="fleetRows"></tbody></table>
+          </div>
+          <div class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Endpoint AI Tools</h2>
+                <span>Sanitized local app and agent CLI inventory</span>
+              </div>
+            </div>
+            <div id="endpointAiToolRows"></div>
           </div>
           <div class="panel wide-panel">
             <div class="panel-head">

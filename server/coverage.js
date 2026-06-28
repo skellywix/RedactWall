@@ -12,7 +12,19 @@ const SENSOR_LABELS = {
 
 const DEFAULT_REQUIRED_SENSORS = ['browser_extension', 'endpoint_agent', 'mcp_guard'];
 const SENSOR_ID_RE = /^[a-z][a-z0-9_:-]{0,79}$/;
+const AI_TOOL_ID_RE = /^[a-z][a-z0-9_]{0,39}$/;
 const FLEET_LIMIT = 150;
+const ENDPOINT_AI_TOOL_LIMIT = 100;
+const AI_TOOL_LABELS = {
+  chatgpt_desktop: 'ChatGPT Desktop',
+  claude_desktop: 'Claude Desktop',
+  claude_code: 'Claude Code',
+  cursor: 'Cursor',
+  windsurf: 'Windsurf',
+  gemini_cli: 'Gemini CLI',
+  codex_cli: 'Codex CLI',
+};
+const AI_TOOL_RESERVED_CHECKS = new Set(['ai_tool_inventory', 'ai_tool_inventory_runtime']);
 const BLOCKED_STATUSES = new Set([
   'pending',
   'pending_justification',
@@ -151,16 +163,64 @@ function cleanInstallChecks(checks) {
   }).filter(Boolean);
 }
 
+function labelForAiTool(id) {
+  if (AI_TOOL_LABELS[id]) return AI_TOOL_LABELS[id];
+  return String(id || 'unknown')
+    .split('_')
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
+    .slice(0, 80) || 'Unknown AI tool';
+}
+
+function detectedToolCount(check) {
+  const match = String((check && check.detail) || '').match(/^detected:(\d+)$/);
+  return match ? Number(match[1]) : null;
+}
+
+function aiToolInventoryForChecks(checks = []) {
+  const inventoryCheck = checks.find((check) => check.id === 'ai_tool_inventory');
+  const tools = [];
+  for (const check of checks) {
+    if (!check || !String(check.id || '').startsWith('ai_tool_') || AI_TOOL_RESERVED_CHECKS.has(check.id)) continue;
+    const id = String(check.id).slice('ai_tool_'.length);
+    if (!AI_TOOL_ID_RE.test(id)) continue;
+    const approved = check.ok === true;
+    tools.push({
+      id,
+      label: labelForAiTool(id),
+      approved,
+      state: approved ? 'approved' : 'unapproved',
+      detail: String(check.detail || (approved ? 'detected' : 'unapproved detected')).slice(0, 160),
+    });
+  }
+  if (!inventoryCheck && !tools.length) return null;
+  tools.sort((a, b) => Number(a.approved) - Number(b.approved) || a.label.localeCompare(b.label) || a.id.localeCompare(b.id));
+  const detected = detectedToolCount(inventoryCheck);
+  const unapproved = tools.filter((tool) => !tool.approved).length;
+  return {
+    detected: detected == null ? tools.length : detected,
+    reported: tools.length,
+    unapproved,
+    truncated: detected != null && detected > tools.length,
+    state: unapproved ? 'attention' : 'covered',
+    tools,
+  };
+}
+
 function installHealthFor(q) {
   const checks = cleanInstallChecks(q && q.installChecks);
   if (!checks.length) return null;
   const failedChecks = checks.filter((check) => !check.ok).map((check) => check.id);
-  return {
+  const health = {
     at: (q && q.createdAt) || null,
     state: failedChecks.length ? 'attention' : 'covered',
     failedChecks,
     checks,
   };
+  const aiToolInventory = aiToolInventoryForChecks(checks);
+  if (aiToolInventory) health.aiToolInventory = aiToolInventory;
+  return health;
 }
 
 function bumpInstallHealth(sensor, q) {
@@ -315,6 +375,33 @@ function finalizeFleetRow(row, opts = {}) {
   };
 }
 
+function endpointAiToolRows(rows) {
+  const out = [];
+  for (const row of rows || []) {
+    if (!row || row.source !== 'endpoint_agent') continue;
+    const inventory = row.installHealth && row.installHealth.aiToolInventory;
+    if (!inventory || !Array.isArray(inventory.tools)) continue;
+    for (const tool of inventory.tools) {
+      out.push({
+        id: tool.id,
+        label: tool.label,
+        approved: tool.approved === true,
+        state: tool.state,
+        detail: tool.detail,
+        user: row.user || 'unknown',
+        orgId: row.orgId || null,
+        lastSeen: (row.installHealth && row.installHealth.at) || row.lastSeen || null,
+        platforms: Array.isArray(row.platforms) ? row.platforms.slice(0, 5) : [],
+      });
+    }
+  }
+  return out
+    .sort((a, b) => Number(a.approved) - Number(b.approved)
+      || String(a.user || '').localeCompare(String(b.user || ''))
+      || String(a.label || '').localeCompare(String(b.label || '')))
+    .slice(0, ENDPOINT_AI_TOOL_LIMIT);
+}
+
 function summarize(rows, pol) {
   const policy = pol || {};
   const configured = configuredDestinations(policy);
@@ -397,16 +484,24 @@ function summarize(rows, pol) {
       }
     }
   }
-  const fleet = [...fleetRows.values()]
-    .filter((row) => requiredSources.includes(row.source))
+  const allFleet = [...fleetRows.values()]
     .map((row) => finalizeFleetRow(row, {
       required: requiredSources.includes(row.source),
       desiredVersion: desiredVersions[row.source] || null,
-    }))
+    }));
+  const fleet = allFleet
+    .filter((row) => requiredSources.includes(row.source))
     .sort((a, b) => stateRank(a.state) - stateRank(b.state)
       || String(a.user || '').localeCompare(String(b.user || ''))
       || String(a.source || '').localeCompare(String(b.source || '')))
     .slice(0, FLEET_LIMIT);
+  const endpointAiTools = endpointAiToolRows(allFleet);
+  const endpointInventories = allFleet
+    .filter((row) => row.source === 'endpoint_agent' && row.installHealth && row.installHealth.aiToolInventory)
+    .map((row) => row.installHealth.aiToolInventory);
+  const endpointAiInventoryReports = endpointInventories.length;
+  const endpointAiToolDetections = endpointInventories.reduce((sum, inventory) => sum + (Number(inventory.detected) || 0), 0);
+  const endpointAiToolUnapproved = endpointInventories.reduce((sum, inventory) => sum + (Number(inventory.unapproved) || 0), 0);
   const fleetAttention = fleet.filter((row) => ['attention', 'missing', 'outdated', 'unknown'].includes(row.state)).length;
   const fleetCovered = fleet.filter((row) => row.state === 'covered').length;
   const activeSensorVersionGaps = sensors.filter((s) => s.events > 0 && s.versionHealth !== 'current').length;
@@ -438,12 +533,16 @@ function summarize(rows, pol) {
       activeRequiredSensors: activeRequired,
       activeSensorVersionGaps,
       activeSensorHealthWarnings,
+      endpointAiInventoryReports,
+      endpointAiToolDetections,
+      endpointAiToolUnapproved,
       fleetRows: fleet.length,
       fleetCovered,
       fleetAttention,
     },
     sensors,
     fleet,
+    endpointAiTools,
     governedDestinations: [...governed.values()]
       .map((bucket) => publicAggregate(bucket, { governed: true }))
       .sort((a, b) => b.events - a.events || a.destination.localeCompare(b.destination)),
@@ -500,6 +599,14 @@ function summarize(rows, pol) {
         label: 'Sensor install health',
         state: activeSensorHealthWarnings ? 'attention' : 'covered',
         detail: activeSensorHealthWarnings ? `${activeSensorHealthWarnings} install warnings` : 'checks passing',
+      },
+      {
+        id: 'endpoint_ai_tools',
+        label: 'Endpoint AI tools',
+        state: endpointAiToolUnapproved ? 'attention' : (endpointAiInventoryReports ? 'covered' : 'attention'),
+        detail: endpointAiInventoryReports
+          ? `${endpointAiToolDetections} detected tools / ${endpointAiToolUnapproved} unapproved`
+          : 'no endpoint inventory heartbeat',
       },
       {
         id: 'governed_destinations',

@@ -386,7 +386,7 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
   and optional zipped JSON output.
 - **Reversible redaction / Redact-&-Send**, sealed token vault, local response re-hydration.
 - **MDM identity**, reliable per-site send, **Man-in-the-Prompt** guard, **shadow-AI** discovery and default-deny unapproved AI blocking.
-- **Coverage posture** showing governed destinations, required sensors, desired sensor versions, browser/endpoint/MCP install-health checks, endpoint AI tool inventory, fleet state by user/org/sensor, shadow-AI sightings, and stale or missing sensor coverage.
+- **Coverage posture** showing governed destinations, required sensors, desired sensor versions, browser/endpoint/MCP install-health checks, sanitized endpoint AI tool inventory by user/org, fleet state by user/org/sensor, shadow-AI sightings, and stale or missing sensor coverage.
 - **Approval routing** that assigns held decisions to security, compliance, privacy, or legal with SLA metadata, category/destination queue filters, assignment-aware approver decisions, SIEM alert payloads, examiner evidence, sanitized workflow notifications, and overdue SLA escalation evidence.
 - **Ticket bridge notifications** that send sanitized approval workflow tickets
   to Jira, Linear, SOAR, or internal ticketing middleware without prompt bodies,
@@ -394,8 +394,9 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 - **Native Jira and Linear approval tickets** that create sanitized reviewer
   issues directly when a customer does not want to operate ticket middleware.
 - **Dashboard lineage and sanitized examiner export** with audit integrity,
-  policy diffs, full-history coverage posture, workflow ownership, and lineage
-  by user, destination, sensor, channel, category, and decision.
+  policy diffs, endpoint AI tool posture, full-history coverage posture,
+  workflow ownership, and lineage by user, destination, sensor, channel,
+  category, and decision.
 - **Response scanning controls** that let customers flag, redact, or block
   sensitive AI replies while retaining only sanitized evidence.
 - **Browser action controls** that block clipboard paste, file drops, and

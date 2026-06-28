@@ -105,6 +105,9 @@ test('coverage summary aggregates governed apps, sensors, and shadow AI without 
       redactedPrompt: '[sensor heartbeat] endpoint_agent',
       installChecks: [
         { id: 'endpoint_env_file', ok: true, detail: 'found' },
+        { id: 'ai_tool_inventory', ok: true, detail: 'detected:2' },
+        { id: 'ai_tool_cursor', ok: true, detail: 'detected' },
+        { id: 'ai_tool_claude_desktop', ok: false, detail: 'unapproved detected' },
         { id: 'handoff_secret', ok: false, detail: 'missing handoff secret' },
       ],
     },
@@ -141,7 +144,18 @@ test('coverage summary aggregates governed apps, sensors, and shadow AI without 
   assert.strictEqual(endpoint.events, 2);
   assert.strictEqual(endpoint.versionHealth, 'current');
   assert.strictEqual(endpoint.installHealth.state, 'attention');
-  assert.deepStrictEqual(endpoint.installHealth.failedChecks, ['handoff_secret']);
+  assert.deepStrictEqual(endpoint.installHealth.failedChecks, ['ai_tool_claude_desktop', 'handoff_secret']);
+  assert.deepStrictEqual(endpoint.installHealth.aiToolInventory, {
+    detected: 2,
+    reported: 2,
+    unapproved: 1,
+    truncated: false,
+    state: 'attention',
+    tools: [
+      { id: 'claude_desktop', label: 'Claude Desktop', approved: false, state: 'unapproved', detail: 'unapproved detected' },
+      { id: 'cursor', label: 'Cursor', approved: true, state: 'approved', detail: 'detected' },
+    ],
+  });
   assert.strictEqual(report.sensors.find((s) => s.source === 'proxy').versionHealth, 'missing');
   assert.deepStrictEqual(report.desktopCollector, {
     events: 1,
@@ -150,6 +164,7 @@ test('coverage summary aggregates governed apps, sensors, and shadow AI without 
   });
   assert.ok(report.posture.some((p) => p.id === 'desktop_collector' && p.state === 'covered'));
   assert.ok(report.posture.some((p) => p.id === 'endpoint_agent' && p.state === 'attention' && /failed checks/.test(p.detail)));
+  assert.ok(report.posture.some((p) => p.id === 'endpoint_ai_tools' && p.state === 'attention' && /1 unapproved/.test(p.detail)));
   assert.ok(report.posture.some((p) => p.id === 'proxy' && p.state === 'attention' && /required/.test(p.detail)));
   assert.ok(report.posture.some((p) => p.id === 'sensor_versions' && p.state === 'attention'));
   assert.ok(report.posture.some((p) => p.id === 'sensor_health' && p.state === 'attention'));
@@ -162,7 +177,14 @@ test('coverage summary aggregates governed apps, sensors, and shadow AI without 
   assert.strictEqual(opsBrowser.latestVersion, '0.2.9');
   const techEndpoint = report.fleet.find((item) => item.user === 'tech@example.test' && item.source === 'endpoint_agent');
   assert.strictEqual(techEndpoint.state, 'attention');
-  assert.deepStrictEqual(techEndpoint.installHealth.failedChecks, ['handoff_secret']);
+  assert.deepStrictEqual(techEndpoint.installHealth.failedChecks, ['ai_tool_claude_desktop', 'handoff_secret']);
+  assert.strictEqual(report.totals.endpointAiInventoryReports, 1);
+  assert.strictEqual(report.totals.endpointAiToolDetections, 2);
+  assert.strictEqual(report.totals.endpointAiToolUnapproved, 1);
+  assert.deepStrictEqual(report.endpointAiTools.map((tool) => [tool.id, tool.user, tool.approved]), [
+    ['claude_desktop', 'tech@example.test', false],
+    ['cursor', 'tech@example.test', true],
+  ]);
   assert.ok(report.fleet.some((item) => item.user === 'analyst@example.test' && item.source === 'proxy' && item.state === 'missing'));
   assert.ok(report.score > 0 && report.score < 100);
   assert.ok(!JSON.stringify(report).includes('Member [US_SSN]'));
@@ -291,7 +313,11 @@ test('lineage route and dashboard render sanitized lineage view', () => {
 test('coverage dashboard renders fleet install health posture', () => {
   assert.match(dashboardHtml, /Fleet Install Health/);
   assert.match(dashboardHtml, /id="fleetRows"/);
+  assert.match(dashboardHtml, /Endpoint AI Tools/);
+  assert.match(dashboardHtml, /id="endpointAiToolRows"/);
   assert.match(dashboardJs, /totals\.fleetAttention/);
+  assert.match(dashboardJs, /endpointAiTools/);
+  assert.match(dashboardJs, /function endpointAiToolTone/);
   assert.match(dashboardJs, /function fleetTone/);
   assert.match(dashboardJs, /no install-health heartbeat/);
 });
