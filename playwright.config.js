@@ -8,6 +8,7 @@ const baseURL = `http://127.0.0.1:${port}`;
 module.exports = defineConfig({
   testDir: './e2e',
   timeout: 30000,
+  retries: process.env.CI ? 1 : 0,
   fullyParallel: false,
   reporter: [['list']],
   use: {

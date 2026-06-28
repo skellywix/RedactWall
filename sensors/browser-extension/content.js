@@ -299,6 +299,23 @@
     if (outcome === 'justified') return res.status === 'justified';
     return false;
   }
+  function recordedEvidenceResponse(res, expectedStatus) {
+    return !!(res && typeof res === 'object' && res.id && res.status === expectedStatus);
+  }
+
+  function updateEvidenceToast(reportPromise, expectedStatus, recordedMessage, unrecordedMessage) {
+    Promise.resolve(reportPromise)
+      .then((res) => toast(recordedEvidenceResponse(res, expectedStatus) ? recordedMessage : unrecordedMessage))
+      .catch(() => toast(unrecordedMessage));
+  }
+
+  function updateBatchEvidenceToast(reportPromises, expectedStatus, recordedMessage, unrecordedMessage) {
+    Promise.all(reportPromises.map((p) => Promise.resolve(p)
+      .then((res) => recordedEvidenceResponse(res, expectedStatus))
+      .catch(() => false)))
+      .then((results) => toast(results.every(Boolean) ? recordedMessage : unrecordedMessage))
+      .catch(() => toast(unrecordedMessage));
+  }
 
   async function proceedAfterRecorded(text, analysis, outcome, note, el) {
     const res = await report(text, analysis, 'submit', outcome, note);
@@ -388,8 +405,13 @@
     if (!text) return true;
     if (destinationBlocked()) {
       e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
-      reportBlockedDestination('submit');
-      toast('PromptWall blocked sends to ' + SITE + ' by policy.');
+      toast('PromptWall blocked sends to ' + SITE + ' by policy. Recording evidence...');
+      updateEvidenceToast(
+        reportBlockedDestination('submit'),
+        'destination_blocked',
+        'PromptWall blocked sends to ' + SITE + ' by policy and recorded the decision.',
+        'PromptWall blocked sends to ' + SITE + ' by policy. Control-plane evidence was not recorded yet.',
+      );
       return false;
     }
     // Man-in-the-Prompt: strip invisible zero-width payloads silently; HARD-stop
@@ -562,7 +584,7 @@
       const items = summarize(verdict.analysis).slice(0, 3);
       if (verdict.action === 'block') {
         e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
-        report(
+        const reportPromise = report(
           safeClientPrompt(pasted, verdict.analysis),
           verdict.analysis,
           'paste',
@@ -570,7 +592,13 @@
           'blocked locally: sensitive paste prevented before insertion',
           { clientPreRedacted: true },
         );
-        toast('PromptWall blocked sensitive paste: ' + listForScreen(items));
+        toast('PromptWall blocked sensitive paste: ' + listForScreen(items) + '. Recording evidence...');
+        updateEvidenceToast(
+          reportPromise,
+          'paste_flagged',
+          'PromptWall blocked sensitive paste and recorded the decision.',
+          'PromptWall blocked sensitive paste. Control-plane evidence was not recorded yet.',
+        );
         return;
       }
       report(pasted, verdict.analysis, 'paste', 'paste_flagged');
@@ -585,8 +613,13 @@
     const actionRule = browserActionBlockRule('copy');
     if (actionRule) {
       e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
-      reportBlockedBrowserAction('copy', actionRule);
-      toast('PromptWall blocked copy from ' + SITE + ' by policy.');
+      toast('PromptWall blocked copy from ' + SITE + ' by policy. Recording evidence...');
+      updateEvidenceToast(
+        reportBlockedBrowserAction('copy', actionRule),
+        'action_blocked',
+        'PromptWall blocked copy from ' + SITE + ' by policy and recorded the decision.',
+        'PromptWall blocked copy from ' + SITE + ' by policy. Control-plane evidence was not recorded yet.',
+      );
     }
   }, true);
 
@@ -598,8 +631,13 @@
       const actionRule = browserActionBlockRule('drop');
       if (actionRule) {
         e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
-        reportBlockedBrowserAction('drop', actionRule);
-        toast('PromptWall blocked file drops into ' + SITE + ' by policy.');
+        toast('PromptWall blocked file drops into ' + SITE + ' by policy. Recording evidence...');
+        updateEvidenceToast(
+          reportBlockedBrowserAction('drop', actionRule),
+          'action_blocked',
+          'PromptWall blocked file drops into ' + SITE + ' by policy and recorded the decision.',
+          'PromptWall blocked file drops into ' + SITE + ' by policy. Control-plane evidence was not recorded yet.',
+        );
         return;
       }
       scanFiles(files, e);
@@ -612,13 +650,25 @@
   function scanFiles(files, e) {
     try { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation(); } catch (_) {}
     if (destinationBlocked()) {
-      [...files].forEach(() => reportBlockedDestination('file_upload'));
-      toast('PromptWall blocked file uploads to ' + SITE + ' by policy.');
+      const reports = [...files].map(() => reportBlockedDestination('file_upload'));
+      toast('PromptWall blocked file uploads to ' + SITE + ' by policy. Recording evidence...');
+      updateBatchEvidenceToast(
+        reports,
+        'destination_blocked',
+        'PromptWall blocked file uploads to ' + SITE + ' by policy and recorded the decision.',
+        'PromptWall blocked file uploads to ' + SITE + ' by policy. Control-plane evidence was not recorded yet.',
+      );
       return;
     }
     if (fileUploadBlocked()) {
-      [...files].forEach(reportBlockedFileUpload);
-      toast('PromptWall blocked file uploads to ' + SITE + ' by file policy.');
+      const reports = [...files].map(() => reportBlockedFileUpload());
+      toast('PromptWall blocked file uploads to ' + SITE + ' by file policy. Recording evidence...');
+      updateBatchEvidenceToast(
+        reports,
+        'file_upload_blocked',
+        'PromptWall blocked file uploads to ' + SITE + ' by file policy and recorded the decision.',
+        'PromptWall blocked file uploads to ' + SITE + ' by file policy. Control-plane evidence was not recorded yet.',
+      );
       return;
     }
     [...files].forEach(scanOneFile);

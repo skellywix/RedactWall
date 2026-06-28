@@ -105,6 +105,9 @@ test('browser file uploads use scan-file API with base64 content', () => {
 test('browser blocks configured destinations before local prompt or file inspection', () => {
   assert.match(content, /function destinationBlocked\(\)/);
   assert.match(content, /function fileUploadBlocked\(\)/);
+  assert.match(content, /function recordedEvidenceResponse\(res, expectedStatus\)/);
+  assert.match(content, /function updateEvidenceToast\(reportPromise, expectedStatus, recordedMessage, unrecordedMessage\)/);
+  assert.match(content, /function updateBatchEvidenceToast\(reportPromises, expectedStatus, recordedMessage, unrecordedMessage\)/);
   assert.match(content, /POLICY\.allowedDestinations \|\| \[\]/);
   assert.match(content, /POLICY\.blockedDestinations \|\| \[\]/);
   assert.match(content, /POLICY\.blockedFileUploadDestinations \|\| \[\]/);
@@ -116,6 +119,11 @@ test('browser blocks configured destinations before local prompt or file inspect
   assert.match(content, /'file_upload_blocked'/);
   assert.match(content, /PromptWall blocked sends to/);
   assert.match(content, /PromptWall blocked file uploads to/);
+  assert.match(content, /Recording evidence/);
+  assert.match(content, /Control-plane evidence was not recorded yet/);
+  assert.match(content, /updateEvidenceToast\(\s*reportBlockedDestination\('submit'\),\s*'destination_blocked'/);
+  assert.match(content, /updateBatchEvidenceToast\(\s*reports,\s*'destination_blocked'/);
+  assert.match(content, /updateBatchEvidenceToast\(\s*reports,\s*'file_upload_blocked'/);
   assert.match(background, /blockedDestinations:\s*\[\]/);
   assert.match(background, /blockedFileUploadDestinations:\s*\[\]/);
   assert.match(background, /blockedBrowserActions:\s*\[\]/);
@@ -132,6 +140,8 @@ test('browser blocks configured paste, drop, and copy actions without reporting 
   assert.match(content, /selection\.anchorNode/);
   assert.match(content, /e\.preventDefault\(\);\s*e\.stopPropagation\(\);\s*e\.stopImmediatePropagation\(\);/);
   assert.match(content, /function reportBlockedBrowserAction\(action, rule\)/);
+  assert.match(content, /updateEvidenceToast\(\s*reportBlockedBrowserAction\('copy', actionRule\),\s*'action_blocked'/);
+  assert.match(content, /updateEvidenceToast\(\s*reportBlockedBrowserAction\('drop', actionRule\),\s*'action_blocked'/);
   assert.match(content, /'\[browser action blocked\] ' \+ action \+ ' ' \+ SITE/);
   assert.match(content, /'action_blocked'/);
   assert.match(content, /PromptWall blocked paste into/);
@@ -170,6 +180,15 @@ test('browser block banner includes employee coaching guidance', () => {
   assert.match(content, /'<div class="ps-coach">' \+ escapeHtml\(coach\) \+ '<\/div>'/);
   assert.match(content, /PromptWall found sensitive data: ' \+ listForScreen/);
   assert.doesNotMatch(content, /this prompt contains <b>' \+ items\.join/);
+});
+
+test('browser sensitive-paste blocks wait for recorded evidence status', () => {
+  assert.match(content, /const reportPromise = report\(/);
+  assert.match(content, /safeClientPrompt\(pasted, verdict\.analysis\)/);
+  assert.match(content, /'paste_flagged'/);
+  assert.match(content, /updateEvidenceToast\(\s*reportPromise,\s*'paste_flagged'/);
+  assert.match(content, /PromptWall blocked sensitive paste and recorded the decision/);
+  assert.match(content, /PromptWall blocked sensitive paste\. Control-plane evidence was not recorded yet/);
 });
 
 test('browser click interception uses shared send-button adapters', () => {

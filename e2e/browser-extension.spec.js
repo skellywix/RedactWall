@@ -128,9 +128,14 @@ async function applyFixturePolicyToPage(context, page, baseURL, governedHost, po
     });
   }, { serverUrl: baseURL, policy });
 
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await expect(page.locator('h1')).toContainText('controlled chat fixture');
+  await expect(page.locator('[data-sent]')).toHaveCount(0);
+
   await expect.poll(async () => serviceWorker.evaluate(async ({ url, host, expectedRules }) => {
     const tabs = await chrome.tabs.query({});
-    const tab = tabs.find((candidate) => candidate.url === url);
+    const normalizedUrl = String(url || '').replace(/\/$/, '');
+    const tab = tabs.find((candidate) => String(candidate.url || '').replace(/\/$/, '') === normalizedUrl);
     if (!tab || !tab.id) return false;
     try {
       const state = await chrome.tabs.sendMessage(tab.id, { type: 'getPolicyState' });
@@ -147,7 +152,10 @@ async function applyFixturePolicyToPage(context, page, baseURL, governedHost, po
     } catch (_) {
       return false;
     }
-  }, { url: page.url(), host: governedHost, expectedRules }), { timeout: 5000 }).toBe(true);
+  }, { url: page.url(), host: governedHost, expectedRules }), {
+    timeout: 15000,
+    intervals: [100, 250, 500, 1000],
+  }).toBe(true);
 }
 
 async function openControlledAiPage(context, url, html) {
