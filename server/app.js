@@ -603,6 +603,57 @@ function blockFileUploadByPolicy(res, context = {}, responseExtra = {}) {
   });
 }
 
+function blockBrowserActionByPolicy(res, context = {}, responseExtra = {}) {
+  const {
+    user = 'unknown',
+    orgId = null,
+    destination = 'unknown',
+    sourceIp = null,
+    source = 'browser_extension',
+    channel = 'paste',
+    sensor = null,
+    action = channel || 'paste',
+    reason = 'Browser action blocked by policy',
+  } = context;
+  const normalized = policy.normalizeDestination(destination);
+  const requestedAction = String(action || '').trim().toLowerCase();
+  const normalizedAction = requestedAction === 'paste' ? 'paste' : 'browser_action';
+  const row = createQuery({
+    status: 'action_blocked',
+    mode: 'browser_action_block',
+    user,
+    orgId,
+    destination: normalized,
+    sourceIp,
+    source,
+    channel: normalizedAction,
+    sensor,
+    redactedPrompt: '[browser action blocked] ' + normalizedAction + ' ' + normalized,
+    findings: [],
+    categories: [],
+    entityCounts: {},
+    riskScore: 0,
+    maxSeverity: 0,
+    maxSeverityLabel: 'none',
+    reasons: [reason],
+  });
+  db.appendAudit({ action: 'BROWSER_ACTION_BLOCKED', queryId: row.id, actor: user, detail: `${source}/${normalizedAction}: ${normalized}` });
+  emitSecurityAlert(row, 'BROWSER_ACTION_BLOCKED');
+  broadcast('query', { type: 'action_blocked', query: publicQuery(row) });
+  broadcast('stats', db.stats());
+  return res.json({
+    id: row.id,
+    decision: 'block',
+    mode: 'browser_action_block',
+    status: 'action_blocked',
+    riskScore: 0,
+    findings: [],
+    categories: [],
+    reasons: [reason],
+    ...responseExtra,
+  });
+}
+
 app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gateSchema), (req, res) => {
   if (!enforceTenantForSensor(req, res)) return;
   const {
@@ -629,6 +680,20 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
   }
   if (clientOutcome === 'file_upload_blocked') {
     return blockFileUploadByPolicy(res, { user, orgId, destination, sourceIp, source, channel, sensor });
+  }
+  const browserActionRule = policy.browserActionBlockRule(channel, destination, pol);
+  if (browserActionRule || clientOutcome === 'action_blocked') {
+    return blockBrowserActionByPolicy(res, {
+      user,
+      orgId,
+      destination,
+      sourceIp,
+      source,
+      channel,
+      sensor,
+      action: channel,
+      reason: browserActionRule ? policy.browserActionBlockReason(channel, destination, pol) : 'Browser action blocked by policy',
+    });
   }
   const analyzeOpts = policy.analyzeOpts(pol);
   const declaredClientPreRedacted = req.body && req.body.clientPreRedacted === true;
@@ -868,6 +933,7 @@ app.get('/api/v1/policy', checkIngestKey, (req, res) => {
     allowedDestinations: p.allowedDestinations || [],
     blockedDestinations: p.blockedDestinations || [],
     blockedFileUploadDestinations: p.blockedFileUploadDestinations || [],
+    blockedBrowserActions: p.blockedBrowserActions || [],
     blockUnapprovedAiDestinations: p.blockUnapprovedAiDestinations !== false,
     responseScanMode: p.responseScanMode || policy.DEFAULT_POLICY.responseScanMode,
     desktopCollectorDestination: p.desktopCollectorDestination || policy.DEFAULT_POLICY.desktopCollectorDestination,

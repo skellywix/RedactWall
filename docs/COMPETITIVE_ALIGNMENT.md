@@ -46,8 +46,8 @@ Keep:
 Build next:
 
 - Native desktop collector feeding the existing metadata-only endpoint handoff.
-- App and action policy controls beyond the existing destination, file-upload,
-  and response-scanning controls.
+- Broader app/action policy controls beyond the current destination,
+  file-upload, response-scanning, and browser-paste controls.
 - Ticketing adapters on top of provisioned users, groups, identity-backed
   ownership, direct SMTP, and the sanitized approval workflow.
 - Exception lifecycle ownership and expiry review beyond the guided builder's
@@ -67,6 +67,9 @@ Build next:
   decisions were involved without retaining sensitive content.
 - Add Policy-tab response scanning controls so `/api/v1/scan-response` can
   flag, redact, or block sensitive AI replies while storing only sanitized
+  evidence.
+- Add destination-scoped browser paste blocking so admins can stop clipboard
+  paste into selected AI tools while storing only sanitized `action_blocked`
   evidence.
 - Add approval owner and SLA routing so held decisions reach security,
   compliance, privacy, or legal queues with sanitized workflow metadata in the

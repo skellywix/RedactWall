@@ -108,6 +108,7 @@ test('browser blocks configured destinations before local prompt or file inspect
   assert.match(content, /POLICY\.allowedDestinations \|\| \[\]/);
   assert.match(content, /POLICY\.blockedDestinations \|\| \[\]/);
   assert.match(content, /POLICY\.blockedFileUploadDestinations \|\| \[\]/);
+  assert.match(content, /POLICY\.blockedBrowserActions \|\| \[\]/);
   assert.match(content, /POLICY\.blockUnapprovedAiDestinations === false/);
   assert.match(content, /A\.isAiHost\(SITE\)/);
   assert.match(background, /clientOutcome:\s*msg\.payload\.outcome/);
@@ -117,8 +118,20 @@ test('browser blocks configured destinations before local prompt or file inspect
   assert.match(content, /PromptWall blocked file uploads to/);
   assert.match(background, /blockedDestinations:\s*\[\]/);
   assert.match(background, /blockedFileUploadDestinations:\s*\[\]/);
+  assert.match(background, /blockedBrowserActions:\s*\[\]/);
   assert.match(background, /blockUnapprovedAiDestinations:\s*true/);
   assert.match(background, /allowedDestinations:\s*\[\]/);
+});
+
+test('browser blocks configured paste actions without reporting clipboard text', () => {
+  assert.match(content, /function browserActionBlockRule\(action\)/);
+  assert.match(content, /const actionRule = browserActionBlockRule\('paste'\)/);
+  assert.match(content, /e\.preventDefault\(\);\s*e\.stopPropagation\(\);\s*e\.stopImmediatePropagation\(\);/);
+  assert.match(content, /function reportBlockedBrowserAction\(action, rule\)/);
+  assert.match(content, /'\[browser action blocked\] ' \+ action \+ ' ' \+ SITE/);
+  assert.match(content, /'action_blocked'/);
+  assert.match(content, /PromptWall blocked paste into/);
+  assert.match(background, /\.\.\.\(\(c\.policy && c\.policy\.blockedBrowserActions\) \|\| \[\]\)\.flatMap/);
 });
 
 test('browser fallback hard-stops match regulated endpoint defaults before policy sync', () => {

@@ -21,6 +21,7 @@ const ROUTING_DETECTOR_RE = /^[A-Z0-9_]{1,80}$/;
 const POLICY_MATCH_TEXT_RE = /^[A-Za-z0-9 ._@:+/-]{1,128}$/;
 const POLICY_MODE_RANK = { warn: 1, redact: 2, justify: 2, block: 3 };
 const RESPONSE_SCAN_MODES = new Set(['flag', 'redact', 'block']);
+const BROWSER_ACTIONS = new Set(['paste']);
 const SENSITIVE_ROUTING_CODE_RE = /(?:\d{3}[-_:.]?\d{2}[-_:.]?\d{4}|\d{12,19})/;
 const DEFAULT_REQUIRED_SENSORS = ['browser_extension', 'endpoint_agent', 'mcp_guard'];
 const DEFAULT_DESIRED_SENSOR_VERSIONS = Object.fromEntries(
@@ -49,6 +50,7 @@ const DEFAULT_POLICY = {
   allowedDestinations: [],
   blockedDestinations: [],
   blockedFileUploadDestinations: [],
+  blockedBrowserActions: [],
   blockUnapprovedAiDestinations: true,
   responseScanMode: 'flag',
   desktopCollectorDestination: 'Desktop AI',
@@ -98,6 +100,11 @@ function normalizeDesiredSensorVersions(value, fallback = DEFAULT_POLICY.desired
 function normalizeResponseScanMode(value) {
   const mode = String(value || '').trim().toLowerCase();
   return RESPONSE_SCAN_MODES.has(mode) ? mode : DEFAULT_POLICY.responseScanMode;
+}
+
+function normalizeBrowserAction(value) {
+  const action = String(value || '').trim().toLowerCase();
+  return BROWSER_ACTIONS.has(action) ? action : null;
 }
 
 function normalizeRoutingTextList(value, pattern, maxItems = 40) {
@@ -276,6 +283,27 @@ function normalizePolicyExceptions(value) {
   return out;
 }
 
+function normalizeBlockedBrowserActions(value) {
+  if (!Array.isArray(value)) return [];
+  const out = [];
+  const seen = new Set();
+  for (const item of value) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const id = String(item.id || '').trim().toLowerCase();
+    const action = normalizeBrowserAction(item.action);
+    if (!ROUTING_RULE_ID_RE.test(id) || seen.has(id) || !safeRoutingCode(id) || !action) continue;
+    const destinations = normalizeSafeRoutingTextList(item.destinations, /^[A-Za-z0-9.*:_/-]{1,253}$/);
+    if (!destinations.length) continue;
+    const rule = { id, enabled: item.enabled !== false, action, destinations };
+    const reason = String(item.reason || '').trim().toLowerCase();
+    if (ROUTING_REASON_RE.test(reason) && safeRoutingCode(reason)) rule.reason = reason;
+    seen.add(id);
+    out.push(rule);
+    if (out.length >= 40) break;
+  }
+  return out;
+}
+
 function normalizePolicy(p = {}) {
   const scanner = {
     ...DEFAULT_POLICY.scanner,
@@ -296,6 +324,7 @@ function normalizePolicy(p = {}) {
     approvalRoutingRules: normalizeApprovalRoutingRules((p || {}).approvalRoutingRules),
     policyScopes: normalizePolicyScopes((p || {}).policyScopes),
     policyExceptions: normalizePolicyExceptions((p || {}).policyExceptions),
+    blockedBrowserActions: normalizeBlockedBrowserActions((p || {}).blockedBrowserActions),
     requiredSensors: normalizeRequiredSensors((p || {}).requiredSensors),
     desiredSensorVersions: normalizeDesiredSensorVersions((p || {}).desiredSensorVersions),
     responseScanMode: normalizeResponseScanMode((p || {}).responseScanMode),
@@ -316,6 +345,7 @@ const AUDIT_FIELDS = [
   'allowedDestinations',
   'blockedDestinations',
   'blockedFileUploadDestinations',
+  'blockedBrowserActions',
   'blockUnapprovedAiDestinations',
   'responseScanMode',
   'desktopCollectorDestination',
@@ -504,6 +534,26 @@ function destinationAllowed(destination, policy = loadPolicy()) {
   return destinationMatches(destination, policy.allowedDestinations || []);
 }
 
+function browserActionBlockRule(action, destination, policy = loadPolicy()) {
+  const normalizedAction = normalizeBrowserAction(action);
+  if (!normalizedAction) return null;
+  for (const rule of (policy.blockedBrowserActions || [])) {
+    if (!rule || rule.enabled === false || rule.action !== normalizedAction) continue;
+    if (destinationMatches(destination, rule.destinations || [])) return rule;
+  }
+  return null;
+}
+
+function browserActionBlocked(action, destination, policy = loadPolicy()) {
+  return !!browserActionBlockRule(action, destination, policy);
+}
+
+function browserActionBlockReason(action, destination, policy = loadPolicy()) {
+  const rule = browserActionBlockRule(action, destination, policy);
+  if (rule && rule.reason) return rule.reason;
+  return 'Browser action ' + String(action || 'unknown').trim().toLowerCase() + ' blocked by policy';
+}
+
 function analysisDetectorLabels(analysis = {}) {
   return [...new Set((analysis.findings || []).map((item) => String(item.type || '').toUpperCase()).filter(Boolean))];
 }
@@ -629,8 +679,12 @@ module.exports = {
   destinationBlockReason,
   destinationReviewed,
   fileUploadBlocked,
+  browserActionBlockRule,
+  browserActionBlocked,
+  browserActionBlockReason,
   unapprovedAiDestination,
   normalizeResponseScanMode,
+  normalizeBlockedBrowserActions,
   policyChangeSummary,
   policyChangeDetail,
   DEFAULT_POLICY,

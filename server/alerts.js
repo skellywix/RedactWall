@@ -26,7 +26,7 @@ function shouldAlert(query, opts = {}) {
   if (opts.force) return true;
   const { minRisk, minSeverity } = alertThresholds(opts);
   const status = String(query.status || '');
-  if (['pending', 'pending_justification', 'response_flagged', 'response_redacted', 'response_blocked', 'destination_blocked', 'file_upload_blocked', 'injection_blocked', 'file_blocked_unscanned', 'ocr_required'].includes(status)) return true;
+  if (['pending', 'pending_justification', 'response_flagged', 'response_redacted', 'response_blocked', 'destination_blocked', 'file_upload_blocked', 'action_blocked', 'injection_blocked', 'file_blocked_unscanned', 'ocr_required'].includes(status)) return true;
   return (query.riskScore || 0) >= minRisk || (query.maxSeverity || 0) >= minSeverity;
 }
 

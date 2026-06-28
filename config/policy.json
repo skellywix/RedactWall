@@ -52,6 +52,7 @@
   "allowedDestinations": [],
   "blockedDestinations": [],
   "blockedFileUploadDestinations": [],
+  "blockedBrowserActions": [],
   "blockUnapprovedAiDestinations": true,
   "responseScanMode": "flag",
   "desktopCollectorDestination": "Desktop AI",

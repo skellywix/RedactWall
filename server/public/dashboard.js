@@ -188,7 +188,7 @@ function appendGuidedExceptionRule() {
 function statusTone(status) {
   const s = String(status || '').toLowerCase();
   if (['approved', 'allowed', 'justified', 'warned_sent', 'redacted', 'response_redacted'].includes(s)) return 'good';
-  if (['denied', 'blocked_by_user', 'destination_blocked', 'file_upload_blocked', 'injection_blocked', 'response_flagged', 'response_blocked', 'seat_limit_blocked', 'ocr_required'].includes(s)) return 'bad';
+  if (['denied', 'blocked_by_user', 'destination_blocked', 'file_upload_blocked', 'action_blocked', 'injection_blocked', 'response_flagged', 'response_blocked', 'seat_limit_blocked', 'ocr_required'].includes(s)) return 'bad';
   if (['pending', 'shadow_ai', 'paste_flagged'].includes(s)) return 'warn';
   if (s === 'sensor_heartbeat') return 'good';
   return 'info';
@@ -1070,6 +1070,12 @@ async function loadPolicy() {
   ].map(([v, l]) => `<option value="${v}" ${(p.responseScanMode || 'flag') === v ? 'selected' : ''}>${l}</option>`).join('')}
       </select>
     </div>
+    <div class="policy-label">Browser action controls</div>
+    <div class="template-bar">
+      ${readonly
+    ? `<div class="chips">${(p.blockedBrowserActions || []).map((rule) => `<span class="chip"><b>${escapeHtml(rule.action || 'action')}</b> ${escapeHtml((rule.destinations || []).join(', '))}</span>`).join('') || '<span class="chip">no action blocks</span>'}</div>`
+    : `<textarea id="pol_blocked_browser_actions" class="policy-textarea" spellcheck="false" style="min-height:110px" placeholder='[{"id":"block_paste_chatgpt","action":"paste","destinations":["chatgpt.com"],"reason":"clipboard_paste_blocked"}]'>${escapeHtml(policyJsonText(p.blockedBrowserActions))}</textarea>`}
+    </div>
     <div class="policy-label">Fleet posture</div>
     <div class="policy-list-grid">
       <label class="policy-list-field">Required sensors
@@ -1186,6 +1192,8 @@ async function loadPolicy() {
     const mode = (document.querySelector('input[name=mode]:checked') || {}).value || p.enforcementMode;
     const approvalRoutingRules = parsePolicyJsonArray($('#pol_approval_routing_rules').value, 'Approval routing rules');
     if (approvalRoutingRules == null) return;
+    const blockedBrowserActions = parsePolicyJsonArray($('#pol_blocked_browser_actions').value, 'Browser action controls');
+    if (blockedBrowserActions == null) return;
     const policyScopes = parsePolicyJsonArray($('#pol_policy_scopes').value, 'Scoped enforcement rules');
     if (policyScopes == null) return;
     const policyExceptions = parsePolicyJsonArray($('#pol_policy_exceptions').value, 'Time-bound exceptions');
@@ -1205,6 +1213,7 @@ async function loadPolicy() {
       allowedDestinations: parsePolicyList($('#pol_allowed_destinations').value),
       blockedDestinations: parsePolicyList($('#pol_blocked_destinations').value),
       blockedFileUploadDestinations: parsePolicyList($('#pol_blocked_file_upload_destinations').value),
+      blockedBrowserActions,
       blockUnapprovedAiDestinations: $('#pol_block_unapproved_ai').checked,
       responseScanMode: $('#pol_response_scan_mode').value,
     };
