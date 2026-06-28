@@ -128,9 +128,10 @@ control plane applies these scopes on gate and file-scan events and records
 matched scope ids in evidence. Time-bound exceptions can allow matching
 non-hard-stop events until `expiresAt`; hard-stop entities still block.
 
-Configure these advanced fields through the admin policy API. The dashboard
-preserves existing `policyScopes` and `policyExceptions` when saving other
-policy fields, but dedicated form controls are still future work.
+Configure these advanced fields from the Policy tab's scoped-policy editors or
+through the admin policy API. The dashboard keeps the JSON shape explicit so
+install-day technicians can paste customer-specific scoped rules without
+weakening the global baseline.
 
 ## Sensor Version And Install Health
 

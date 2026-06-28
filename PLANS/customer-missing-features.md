@@ -213,8 +213,9 @@ file-upload blocks, detector ignores, scanner controls, server-side
 `policyScopes`, and server-side `policyExceptions`. Scopes can tighten
 enforcement by user, SCIM group, org, source, channel, destination, detector, or
 category. Exceptions can temporarily allow matching non-hard-stop events and are
-recorded in evidence. Dedicated dashboard controls and local sensor-side scoped
-evaluation are still open.
+recorded in evidence. The Policy tab includes advanced JSON editors for scoped
+rules and exceptions. Local sensor-side scoped evaluation and exception
+owner/expiry review are still open.
 
 Customer ask: "Can lending have a different approval path than engineering? Can
 we allow a specific vendor prompt for 24 hours without weakening the global
@@ -225,8 +226,8 @@ need limited exceptions or teams will pressure admins to loosen the baseline.
 
 Implementation connection:
 - Keep global policy as the default.
-- Build dashboard controls for `policyScopes` and `policyExceptions` after the
-  tested JSON/API contract.
+- Replace advanced JSON editing with a guided rule-builder once customer pilots
+  prove the common rule shapes.
 - Decide whether sensors should receive a reduced scoped-policy subset once
   group identity is reliable on every endpoint.
 - Extend exceptions with owner/approval metadata and scheduled expiry review.
@@ -237,6 +238,7 @@ Acceptance evidence:
 - Regression tests prove expired exceptions fail closed, SCIM groups can drive a
   scoped gate decision, and `alwaysBlock` cannot be downgraded by scoped policy
   or exceptions.
+- Browser E2E proves the Policy tab can save scoped rules and exceptions.
 - Evidence export includes scope and exception metadata but not prompt bodies.
 
 ### 6. Examiner-Ready Evidence Packs And Scheduled Reporting
@@ -330,10 +332,9 @@ Acceptance evidence:
 1. Desktop/file-flow collector MVP.
 2. Enterprise SSO login and provisioned role mapping.
 3. Signed update channel and commercial rollout posture.
-4. Dashboard controls for group-scoped policy and time-bound exceptions.
-5. Scheduled examiner evidence pack with backup and restore-drill status.
-6. Customer-defined detectors plus OCR-required handling.
-7. First real MCP content connector SDK and one Microsoft 365 file-content
+4. Scheduled examiner evidence pack with backup and restore-drill status.
+5. Customer-defined detectors plus OCR-required handling.
+6. First real MCP content connector SDK and one Microsoft 365 file-content
    connector.
 
 This order closes the most embarrassing buyer gap first, then turns the product

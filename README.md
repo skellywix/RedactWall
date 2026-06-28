@@ -202,7 +202,8 @@ PromptWall groups to roles, but it does not replace the local console login yet.
 
 For advanced customer policy, use `docs/POLICY_SCOPES.md`. The server can apply
 stricter scoped policy by user, SCIM group, source, channel, destination,
-detector, or category, and can record time-bound non-hard-stop exceptions.
+detector, or category, can record time-bound non-hard-stop exceptions, and can
+manage those advanced fields from the dashboard Policy tab.
 
 For demos, start with `DEMO_INSTALL_GUIDE.md`. The client-facing presenter flow
 lives in `docs/SALES_DEMO_GUIDE.md`; the demo-machine setup and reset runbook
@@ -341,13 +342,14 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
   audit entries, and PromptWall group names mapped onto local roles.
 - **Scoped policy and exceptions** that tighten enforcement for matched users,
   SCIM groups, destinations, sources, channels, detectors, or categories, plus
-  time-bound allow exceptions that cannot bypass hard-stop entities.
+  dashboard-managed time-bound allow exceptions that cannot bypass hard-stop
+  entities.
 - **Login lockout**, stable session secret, regulation **templates**, **/healthz · /readyz · /api/metrics**, Docker + CI.
 
 ## Still ahead (to ship commercially)
 
 - Full SSO/OIDC login that consumes provisioned identities, polished MFA
-  enrollment UX, dashboard controls for scoped policy, and deeper multi-tenant
+  enrollment UX, guided scoped-policy rule builder, and deeper multi-tenant
   isolation per institution.
 - Signed Chrome Web Store listing and force-install rollout; local extension zip, integrity manifest, release-readiness report, and managed-policy checklist are packaged.
 - Direct SMTP and ticketing adapters on top of the existing sanitized webhook, Slack, Teams, and escalation workflow.

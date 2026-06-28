@@ -84,7 +84,11 @@ an `alwaysBlock` entity such as `US_SSN`, `CREDIT_CARD`, `SECRET_KEY`, or
 
 ## Configure
 
-Update the advanced policy fields through the authenticated admin policy API:
+Update the advanced policy fields from the Policy tab's `Scoped enforcement
+rules` and `Time-bound exceptions` editors. The fields accept JSON arrays and
+are validated by the authenticated admin policy API.
+
+The same fields can also be managed directly through the API:
 
 ```bash
 curl -X PUT https://promptwall.customer.example/api/policy \
@@ -94,9 +98,9 @@ curl -X PUT https://promptwall.customer.example/api/policy \
   -d @scoped-policy.json
 ```
 
-The dashboard policy editor preserves existing `policyScopes` and
-`policyExceptions` when saving other policy fields, but it does not yet provide
-dedicated form controls for them.
+The dashboard renders these fields read-only for auditor sessions and editable
+only for Security Admin sessions. Validation rejects malformed matchers and does
+not echo sensitive values back in error responses.
 
 ## Verify
 
@@ -104,5 +108,6 @@ Use synthetic events only:
 
 ```bash
 npm test -- test/policy-scope.test.js test/policy-scope-api.test.js
+npm run test:browser
 node -e "const v=require('./server/db').verifyAuditChain(); console.log(JSON.stringify(v)); if(!v.ok) process.exit(1)"
 ```

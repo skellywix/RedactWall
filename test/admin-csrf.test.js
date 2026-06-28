@@ -71,6 +71,20 @@ test('dashboard exposes retention settings and manual purge control', () => {
   assert.match(dashboard, /api\('\/api\/retention\/purge', \{ method: 'POST' \}\)/);
 });
 
+test('dashboard exposes scoped policy and exception editors', () => {
+  assert.match(index, /policy-advanced-grid/);
+  assert.match(dashboard, /function shortPolicyValue/);
+  assert.match(dashboard, /function policyMatcherSummary/);
+  assert.match(dashboard, /id="pol_policy_scopes"/);
+  assert.match(dashboard, /id="pol_policy_exceptions"/);
+  assert.match(dashboard, /const policyScopes = parsePolicyJsonArray\(\$\(\'#pol_policy_scopes\'\)\.value, 'Scoped enforcement rules'\)/);
+  assert.match(dashboard, /const policyExceptions = parsePolicyJsonArray\(\$\(\'#pol_policy_exceptions\'\)\.value, 'Time-bound exceptions'\)/);
+  assert.match(dashboard, /policyScopes,/);
+  assert.match(dashboard, /policyExceptions,/);
+  assert.match(dashboard, /no scoped rules/);
+  assert.match(dashboard, /no exceptions/);
+});
+
 test('dashboard renders auditors as read-only users', () => {
   assert.match(dashboard, /let currentRole = 'auditor'/);
   assert.match(dashboard, /function normalizeRole\(role\)/);

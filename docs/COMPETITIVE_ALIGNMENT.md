@@ -52,8 +52,8 @@ Build next:
   decision were involved without retaining sensitive content.
 - Direct SMTP notification and identity-backed assignment on top of provisioned
   users, groups, and the sanitized approval workflow.
-- Dashboard controls for scoped policy and exception lifecycle, on top of the
-  server-side `policyScopes` and `policyExceptions` contract.
+- Guided rule-builder controls for scoped policy and exception lifecycle, on top
+  of the dashboard JSON editors for `policyScopes` and `policyExceptions`.
 - Custom detector packs and an `ocr_required` file outcome so pilots can model
   local member IDs and scanned documents before shipping a heavier OCR runtime.
 - MCP connector SDK patterns that force tool-output sanitization before model
@@ -87,6 +87,8 @@ Build next:
 - Add server-side scoped policy and time-bound exceptions that use metadata such
   as user, SCIM group, source, channel, destination, detector, and category while
   preserving hard-stop entities.
+- Add dashboard Policy-tab editors for scoped policy and time-bound exceptions,
+  so customer-specific rules can be configured without direct file edits.
 - Keep compatibility-sensitive runtime contracts stable where breaking them
   would damage existing installs or retained evidence.
 - Add active Poe browser protection because Poe was already a governed
