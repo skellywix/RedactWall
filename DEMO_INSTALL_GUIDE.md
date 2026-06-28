@@ -1,12 +1,12 @@
-# PromptSentinel Demo Install Guide
+# PromptWall Demo Install Guide
 
-This guide is for running a clean client demo of PromptSentinel on a laptop or demo workstation. It covers the control plane, browser extension, file scanning path, endpoint agent, policy modes, reset steps, and the exact demo flow to show a regulated buyer.
+This guide is for running a clean client demo of PromptWall on a laptop or demo workstation. It covers the control plane, browser extension, file scanning path, endpoint agent, policy modes, reset steps, and the exact demo flow to show a regulated buyer.
 
 Use synthetic data only. Do not paste real member, patient, cardholder, customer, employee, source code, or contract data into a demo.
 
 ## What The Demo Shows
 
-PromptSentinel is a local safety layer for AI tools. The demo should prove five things:
+PromptWall is a local safety layer for AI tools. The demo should prove five things:
 
 1. Sensitive data is detected before it leaves the browser or device.
 2. The same detection engine is shared by the browser extension, endpoint agent, MCP guard, and server.
@@ -18,7 +18,7 @@ For a client meeting, the strongest story is:
 
 1. Start in block mode.
 2. Paste a fake SSN into ChatGPT or Claude.
-3. Show that PromptSentinel blocks the send before the prompt leaves the page.
+3. Show that PromptWall blocks the send before the prompt leaves the page.
 4. Open the admin dashboard and show the blocked event.
 5. Switch to redact mode.
 6. Paste a fake credit card or fake member account prompt.
@@ -152,7 +152,7 @@ npm start
 Expected output:
 
 ```text
-PromptSentinel running on http://localhost:4000
+PromptWall running on http://localhost:4000
 Raw-prompt retention: encrypted at rest (AES-256-GCM), held items only; finalized records purge after 30 day(s).
 Ingest key: configured
 ```
@@ -177,7 +177,7 @@ Invoke-RestMethod http://localhost:4000/healthz
 Invoke-RestMethod http://localhost:4000/readyz
 ```
 
-For a pilot or production dry run, set `NODE_ENV=production` only after replacing the default admin password, ingest key, session secret, data key, and secure-cookie settings. PromptSentinel will refuse production startup when those preflight checks fail.
+For a pilot or production dry run, set `NODE_ENV=production` only after replacing the default admin password, ingest key, session secret, data key, and secure-cookie settings. PromptWall will refuse production startup when those preflight checks fail.
 
 ## Load The Chrome Extension
 
@@ -188,7 +188,7 @@ For a local demo:
 3. Turn on Developer mode.
 4. Click Load unpacked.
 5. Select the `sensors/browser-extension/` folder from this repository.
-6. Pin the PromptSentinel extension.
+6. Pin the PromptWall extension.
 7. Open the extension popup and confirm it says the browser is protected.
 
 The extension defaults to localhost but does not ship with a working ingest key:
@@ -200,7 +200,7 @@ Ingest key: unset
 
 Set the extension's local storage value before demoing the browser flow. Use the `INGEST_API_KEY` from `.env` or the shell value you exported for the server:
 
-1. On `chrome://extensions`, open PromptSentinel details.
+1. On `chrome://extensions`, open PromptWall details.
 2. Click service worker Inspect views.
 3. In the console, run:
 
@@ -289,8 +289,8 @@ Draft a denial letter for member John Carter, SSN 524-71-9043, who applied for a
 
 Expected:
 
-- PromptSentinel blocks before send.
-- The page shows a PromptSentinel banner.
+- PromptWall blocks before send.
+- The page shows a PromptWall banner.
 - The dashboard shows a pending item.
 - Findings show `US_SSN` and possibly `PERSON_NAME`.
 - The raw prompt is only retained for held approval items, only when encrypted retention is enabled, and purged from finalized records after `rawRetentionDays`.
@@ -298,7 +298,7 @@ Expected:
 Client talk track:
 
 ```text
-This is the moment the leak normally happens. PromptSentinel stops it before the user sends it to the AI tool.
+This is the moment the leak normally happens. PromptWall stops it before the user sends it to the AI tool.
 ```
 
 ### Demo 3: Request Approval
@@ -371,13 +371,13 @@ Between us, we are switching away from our core processor next quarter. Keep thi
 
 Expected:
 
-- PromptSentinel blocks or holds the prompt.
+- PromptWall blocks or holds the prompt.
 - It does not send category-only confidential content raw because there is no structured value to tokenize.
 
 Client talk track:
 
 ```text
-Keyword filters miss this kind of business context. PromptSentinel treats it as sensitive even without an SSN or card number.
+Keyword filters miss this kind of business context. PromptWall treats it as sensitive even without an SSN or card number.
 ```
 
 ### Demo 7: Canary Token Tripwire
@@ -390,7 +390,7 @@ This fake member record contains PS-CANARY-DEMO2026ABCDEF and should never leave
 
 Expected:
 
-- PromptSentinel detects `CANARY_TOKEN`.
+- PromptWall detects `CANARY_TOKEN`.
 - The event is treated as critical.
 - Alerts and evidence exports show the canary finding as masked metadata only.
 
@@ -424,7 +424,7 @@ Set-Content -LiteralPath .\demo-files\loan-summary.txt -Value "Loan file for mem
 In ChatGPT or Claude:
 
 1. Drag `demo-files\loan-summary.txt` into the chat composer.
-2. PromptSentinel intercepts the upload attempt.
+2. PromptWall intercepts the upload attempt.
 3. The file is scanned by `/api/v1/scan-file`.
 4. The upload is blocked if sensitive content is found.
 5. The dashboard records the event.
@@ -486,7 +486,7 @@ npm run package:endpoint-agent
 .\scripts\install-endpoint-agent.ps1 `
   -SentinelUrl "http://localhost:4000" `
   -IngestKey "demo-ingest-key" `
-  -WatchDir "$env:USERPROFILE\PromptSentinelWatch"
+  -WatchDir "$env:USERPROFILE\PromptWallWatch"
 ```
 
 Uninstall with:
@@ -498,20 +498,20 @@ Uninstall with:
 Drop a synthetic file into the watched folder. The scheduled-task example above watches:
 
 ```text
-%USERPROFILE%\PromptSentinelWatch
+%USERPROFILE%\PromptWallWatch
 ```
 
 For the cleanest demo, create that folder and copy a synthetic file into it:
 
 ```powershell
-New-Item -ItemType Directory -Force "$env:USERPROFILE\PromptSentinelWatch" | Out-Null
-Copy-Item .\demo-files\loan-summary.txt "$env:USERPROFILE\PromptSentinelWatch\loan-summary.txt"
+New-Item -ItemType Directory -Force "$env:USERPROFILE\PromptWallWatch" | Out-Null
+Copy-Item .\demo-files\loan-summary.txt "$env:USERPROFILE\PromptWallWatch\loan-summary.txt"
 ```
 
 Expected:
 
 - The agent extracts and scans the file locally with the shared detection engine.
-- In redact mode, structured-only findings create a local `.promptsentinel-redacted` companion text file with typed placeholders.
+- In redact mode, structured-only findings create a local `.promptwall-redacted` companion text file with typed placeholders.
 - Semantic or mixed sensitive files stay held for review; no watched file body is uploaded to the control plane.
 - Unsupported files are blocked locally and recorded without uploading their bytes.
 - The dashboard records the result.
@@ -606,20 +606,20 @@ npm start
 Build:
 
 ```powershell
-docker build -t promptsentinel-demo .
+docker build -t promptwall-demo .
 ```
 
 Run:
 
 ```powershell
-docker run --rm --name promptsentinel-demo -p 4000:4000 `
+docker run --rm --name promptwall-demo -p 4000:4000 `
   -e ADMIN_USER=admin `
   -e ADMIN_PASSWORD=DemoOnly!2026 `
   -e SENTINEL_SECRET=demo-session-secret-change-me `
   -e SENTINEL_DATA_KEY=demo-data-key-change-me `
   -e INGEST_API_KEY=demo-ingest-key `
-  -v promptsentinel-demo-data:/data `
-  promptsentinel-demo
+  -v promptwall-demo-data:/data `
+  promptwall-demo
 ```
 
 Open:
@@ -650,14 +650,14 @@ Remove-Item -LiteralPath .\demo-watch -Recurse -Force -ErrorAction SilentlyConti
 Reset the Chrome extension:
 
 1. Go to `chrome://extensions`.
-2. Remove PromptSentinel.
+2. Remove PromptWall.
 3. Load unpacked again if needed.
 
 Remove Docker state:
 
 ```powershell
-docker rm -f promptsentinel-demo 2>$null
-docker volume rm promptsentinel-demo-data 2>$null
+docker rm -f promptwall-demo 2>$null
+docker volume rm promptwall-demo-data 2>$null
 ```
 
 ## Troubleshooting
@@ -765,7 +765,7 @@ Before the meeting:
 
 During the meeting:
 
-- Say what PromptSentinel stops before showing the UI.
+- Say what PromptWall stops before showing the UI.
 - Use synthetic examples only.
 - Show a benign prompt first.
 - Show a block.

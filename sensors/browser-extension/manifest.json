@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "PromptSentinel — AI Data Guard",
+  "name": "PromptWall — AI Data Guard",
   "version": "0.3.0",
   "description": "Warns, redacts, or blocks sensitive data (PII, source code, credentials, confidential info) before it is sent to ChatGPT, Claude, Copilot, Gemini, and other AI tools.",
   "permissions": ["storage", "activeTab", "tabs", "alarms"],
@@ -11,13 +11,15 @@
     "https://gemini.google.com/*",
     "https://copilot.microsoft.com/*",
     "https://www.perplexity.ai/*",
+    "https://poe.com/*",
+    "https://www.poe.com/*",
     "http://localhost:4000/*"
   ],
   "background": { "service_worker": "background.js" },
   "storage": { "managed_schema": "schema.json" },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "PromptSentinel"
+    "default_title": "PromptWall"
   },
   "content_scripts": [
     {
@@ -27,7 +29,9 @@
         "https://claude.ai/*",
         "https://gemini.google.com/*",
         "https://copilot.microsoft.com/*",
-        "https://www.perplexity.ai/*"
+        "https://www.perplexity.ai/*",
+        "https://poe.com/*",
+        "https://www.poe.com/*"
       ],
       "js": ["lib/detect.js", "lib/adapters.js", "content.js"],
       "css": ["content.css"],

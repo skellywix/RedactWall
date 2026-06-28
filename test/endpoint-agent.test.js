@@ -22,7 +22,8 @@ const pkg = require('../package.json');
 test('watch directory prefers CLI argument, then endpoint env, then temp default', () => {
   assert.strictEqual(defaultWatchDir(['node', 'agent.js', 'C:\\Watch'], { ENDPOINT_AGENT_WATCH_DIR: 'D:\\FromEnv' }), 'C:\\Watch');
   assert.strictEqual(defaultWatchDir(['node', 'agent.js'], { ENDPOINT_AGENT_WATCH_DIR: 'D:\\FromEnv' }), 'D:\\FromEnv');
-  assert.match(defaultWatchDir(['node', 'agent.js'], {}), /promptsentinel-watch$/);
+  assert.strictEqual(defaultWatchDir(['node', 'agent.js'], { PROMPTWALL_ENDPOINT_AGENT_WATCH_DIR: 'E:\\PromptWallWatch' }), 'E:\\PromptWallWatch');
+  assert.match(defaultWatchDir(['node', 'agent.js'], {}), /promptwall-watch$/);
 });
 
 test('analyzes supported files locally and reports sanitized findings to gate', async () => {
@@ -76,7 +77,7 @@ test('redact policy writes a sanitized companion file for structured findings', 
   assert.match(reportRequest.prompt, /\[\[US_SSN_1\]\]/);
   assert.ok(!JSON.stringify(reportRequest).includes('524-71-9043'));
   assert.ok(res.redactionHandoff);
-  assert.match(res.redactionHandoff.relativePath, /^\.promptsentinel-redacted[\\/]/);
+  assert.match(res.redactionHandoff.relativePath, /^\.promptwall-redacted[\\/]/);
   assert.ok(!res.redactionHandoff.relativePath.includes('524-71-9043'));
   assert.strictEqual(ignoredByScanner(res.redactionHandoff.relativePath, scannerConfig({
     ignoreDirectories: [],
@@ -108,7 +109,7 @@ test('removes redacted companion files when control-plane recording fails', asyn
   assert.strictEqual(res.decision, 'block');
   assert.strictEqual(res.status, 'scan_unavailable');
   assert.strictEqual(requests[0].clientOutcome, 'redacted_available');
-  const handoffDir = path.join(dir, '.promptsentinel-redacted');
+  const handoffDir = path.join(dir, '.promptwall-redacted');
   assert.deepStrictEqual(fs.existsSync(handoffDir) ? fs.readdirSync(handoffDir) : [], []);
   assert.ok(!JSON.stringify(requests).includes('524-71-9043'));
 
@@ -119,7 +120,7 @@ test('falls back to approval when redacted companion creation fails', async () =
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-agent-'));
   const filename = 'loan.txt';
   fs.writeFileSync(path.join(dir, filename), 'Member SSN 524-71-9043 needs a summary.');
-  fs.writeFileSync(path.join(dir, '.promptsentinel-redacted'), 'not a directory');
+  fs.writeFileSync(path.join(dir, '.promptwall-redacted'), 'not a directory');
 
   let reportRequest;
   const res = await scanFile(filename, {
@@ -183,6 +184,62 @@ test('does not upload unsupported file bytes', async () => {
   assert.strictEqual(reportRequest.contentBase64, undefined);
   assert.deepStrictEqual(reportRequest.sensor, { name: 'endpoint_agent', version: pkg.version, platform: process.platform });
   assert.ok(!reportRequest.prompt.includes('524-71-9043'));
+
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('blocks configured endpoint destinations before local file inspection', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-agent-'));
+  const filename = 'member-524-71-9043.txt';
+  fs.writeFileSync(path.join(dir, filename), 'SSN 524-71-9043 should never be inspected for a blocked destination.');
+
+  let reportRequest;
+  const res = await scanFile(filename, {
+    watchDir: dir,
+    user: 'unit-user',
+    destination: 'Desktop AI',
+    policy: { blockedDestinations: ['desktop-ai'], ignore: [], disabledDetectors: [] },
+    report: async (req) => {
+      reportRequest = req;
+      return { decision: 'block', status: 'destination_blocked', id: 'q_destination_blocked' };
+    },
+  });
+
+  assert.strictEqual(res.decision, 'block');
+  assert.strictEqual(res.status, 'destination_blocked');
+  assert.strictEqual(res.inspected, false);
+  assert.strictEqual(reportRequest.clientOutcome, 'destination_blocked');
+  assert.strictEqual(reportRequest.prompt, '[destination blocked] desktop-ai');
+  assert.strictEqual(reportRequest.contentBase64, undefined);
+  assert.ok(!JSON.stringify(reportRequest).includes('524-71-9043'));
+
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('blocks configured file-upload destinations without inspecting endpoint files', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-agent-'));
+  const filename = 'member-524-71-9043.txt';
+  fs.writeFileSync(path.join(dir, filename), 'SSN 524-71-9043 should never be inspected for a file-upload policy block.');
+
+  let reportRequest;
+  const res = await scanFile(filename, {
+    watchDir: dir,
+    user: 'unit-user',
+    destination: 'Desktop AI',
+    policy: { blockedFileUploadDestinations: ['desktop-ai'], ignore: [], disabledDetectors: [] },
+    report: async (req) => {
+      reportRequest = req;
+      return { decision: 'block', status: 'file_upload_blocked', id: 'q_file_upload_blocked' };
+    },
+  });
+
+  assert.strictEqual(res.decision, 'block');
+  assert.strictEqual(res.status, 'file_upload_blocked');
+  assert.strictEqual(res.inspected, false);
+  assert.strictEqual(reportRequest.clientOutcome, 'file_upload_blocked');
+  assert.strictEqual(reportRequest.prompt, '[file upload blocked] desktop-ai');
+  assert.strictEqual(reportRequest.contentBase64, undefined);
+  assert.ok(!JSON.stringify(reportRequest).includes('524-71-9043'));
 
   fs.rmSync(dir, { recursive: true, force: true });
 });
@@ -333,6 +390,7 @@ test('scanner policy controls endpoint ignores and size blocking', async () => {
   });
 
   assert.strictEqual(ignoredByScanner(ignored, scanner), true);
+  assert.strictEqual(ignoredByScanner('.promptsentinel-redacted/loan.promptsentinel-redacted.txt', scanner), true);
   let reportCalled = false;
   const ignoredRes = await scanFile(ignored, {
     watchDir: dir,
@@ -403,7 +461,7 @@ test('processes signed native file-flow handoff events without raw payloads', as
   assert.match(reportRequest.prompt, /\[\[US_SSN_1\]\]/);
   assert.ok(!JSON.stringify(reportRequest).includes('524-71-9043'));
   assert.strictEqual(fs.existsSync(handoffPath), false);
-  assert.match(res.result.redactionHandoff.relativePath, /^\.promptsentinel-redacted[\\/]/);
+  assert.match(res.result.redactionHandoff.relativePath, /^\.promptwall-redacted[\\/]/);
   const companion = fs.readFileSync(res.result.redactionHandoff.path, 'utf8');
   assert.match(companion, /\[\[US_SSN_1\]\]/);
   assert.ok(!companion.includes('524-71-9043'));

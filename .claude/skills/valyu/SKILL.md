@@ -1,6 +1,6 @@
 ---
 name: valyu
-description: Real-time web search plus 36+ specialised/paywalled data sources (SEC filings, PubMed, FRED, patents, academic) through one API with cited answers. For PromptSentinel, use it to pull current NCUA/GLBA/PCI/HIPAA regulatory text, research prospects, and source authoritative tuning data. Wraps the external Valyu skill (needs your API key).
+description: Real-time web search plus 36+ specialised/paywalled data sources (SEC filings, PubMed, FRED, patents, academic) through one API with cited answers. For PromptWall, use it to pull current NCUA/GLBA/PCI/HIPAA regulatory text, research prospects, and source authoritative tuning data. Wraps the external Valyu skill (needs your API key).
 ---
 
 # Valyu
@@ -10,7 +10,7 @@ Connects the agent to current, authoritative, often-paywalled data instead of st
 ## Install + key (you provide the key; I won't enter credentials)
 `npx skills add valyuAI/skills` then set your `VALYU_API_KEY` in the environment yourself.
 
-## PromptSentinel uses
+## PromptWall uses
 - **Regulatory grounding:** fetch the current text of NCUA / GLBA Safeguards Rule / PCI-DSS / HIPAA requirements when building the regulation templates in `server/templates.js` — so the mappings cite real, dated source, not memory.
 - **Prospect research:** credit-union profiles, examiner findings, recent breach news to inform sales/positioning.
 - **Detection tuning corpus:** authoritative examples of sensitive-data formats (e.g. real IBAN country structures) to harden `detection-engine/detect.js` validators — using format references, never real PII.

@@ -30,6 +30,19 @@ test('tenant config normalizes SaaS settings', () => {
   assert.strictEqual(cfg.requireUserIdentity, true);
 });
 
+test('tenant config accepts PromptWall SaaS env aliases', () => {
+  const cfg = tenant.config({
+    PROMPTWALL_SAAS_MODE: 'true',
+    PROMPTWALL_TENANT_ID: ' CU-Acme ',
+    PROMPTWALL_SEAT_LIMIT: '25',
+  });
+  assert.strictEqual(cfg.saasMode, true);
+  assert.strictEqual(cfg.tenantId, 'cu-acme');
+  assert.strictEqual(cfg.seatLimit, 25);
+  assert.strictEqual(cfg.requireTenantContext, true);
+  assert.strictEqual(cfg.requireUserIdentity, true);
+});
+
 test('tenant config fails closed when SaaS settings are partially present', () => {
   const cfg = tenant.config({
     SENTINEL_TENANT_ID: 'cu-acme',

@@ -30,6 +30,8 @@
     "perplexity.ai",
     "poe.com"
   ],
+  "blockedDestinations": [],
+  "blockedFileUploadDestinations": [],
   "scanner": {
     "ignoreDirectories": [
       "node_modules",

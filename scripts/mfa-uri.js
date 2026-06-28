@@ -21,10 +21,10 @@ function validateSecret(secret) {
   return normalized;
 }
 
-function otpauthUri({ secret, account = 'admin', issuer = 'PromptSentinel' } = {}) {
+function otpauthUri({ secret, account = 'admin', issuer = 'PromptWall' } = {}) {
   const normalized = validateSecret(secret);
   if (!normalized) throw new Error('ADMIN_TOTP_SECRET must be valid base32 and at least 16 characters.');
-  const safeIssuer = String(issuer || 'PromptSentinel').trim() || 'PromptSentinel';
+  const safeIssuer = String(issuer || 'PromptWall').trim() || 'PromptWall';
   const safeAccount = String(account || 'admin').trim() || 'admin';
   const label = encodeURIComponent(`${safeIssuer}:${safeAccount}`);
   const params = new URLSearchParams({
@@ -40,7 +40,7 @@ function otpauthUri({ secret, account = 'admin', issuer = 'PromptSentinel' } = {
 function parseArgs(argv = process.argv.slice(2)) {
   const opts = {
     envPath: DEFAULT_ENV_PATH,
-    issuer: 'PromptSentinel',
+    issuer: 'PromptWall',
     account: '',
   };
   for (let i = 0; i < argv.length; i += 1) {
@@ -63,7 +63,7 @@ function printHelp() {
     '',
     'Options:',
     '  --env <path>       Read a non-default env file',
-    '  --issuer <name>    Authenticator issuer label (default PromptSentinel)',
+    '  --issuer <name>    Authenticator issuer label (default PromptWall)',
     '  --account <name>   Authenticator account label (default ADMIN_USER)',
   ].join('\n'));
 }

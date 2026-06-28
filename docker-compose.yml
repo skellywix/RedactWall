@@ -1,26 +1,35 @@
 services:
-  promptsentinel:
+  promptwall:
     build: .
-    image: promptsentinel:local
+    image: promptwall:local
     environment:
       PORT: 4000
       NODE_ENV: ${NODE_ENV:-development}
       HTTPS: ${HTTPS:-false}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
-      SENTINEL_SAAS_MODE: ${SENTINEL_SAAS_MODE:-false}
+      SENTINEL_SAAS_MODE: ${SENTINEL_SAAS_MODE:-}
+      PROMPTWALL_SAAS_MODE: ${PROMPTWALL_SAAS_MODE:-}
       SENTINEL_TENANT_ID: ${SENTINEL_TENANT_ID:-}
+      PROMPTWALL_TENANT_ID: ${PROMPTWALL_TENANT_ID:-}
       SENTINEL_SEAT_LIMIT: ${SENTINEL_SEAT_LIMIT:-}
-      SENTINEL_REQUIRE_TENANT_CONTEXT: ${SENTINEL_REQUIRE_TENANT_CONTEXT:-false}
-      SENTINEL_REQUIRE_USER_IDENTITY: ${SENTINEL_REQUIRE_USER_IDENTITY:-false}
+      PROMPTWALL_SEAT_LIMIT: ${PROMPTWALL_SEAT_LIMIT:-}
+      SENTINEL_REQUIRE_TENANT_CONTEXT: ${SENTINEL_REQUIRE_TENANT_CONTEXT:-}
+      PROMPTWALL_REQUIRE_TENANT_CONTEXT: ${PROMPTWALL_REQUIRE_TENANT_CONTEXT:-}
+      SENTINEL_REQUIRE_USER_IDENTITY: ${SENTINEL_REQUIRE_USER_IDENTITY:-}
+      PROMPTWALL_REQUIRE_USER_IDENTITY: ${PROMPTWALL_REQUIRE_USER_IDENTITY:-}
       ADMIN_USER: ${ADMIN_USER:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-ChangeMe!2026}
       ADMIN_TOTP_SECRET: ${ADMIN_TOTP_SECRET:-}
       AUDITOR_USER: ${AUDITOR_USER:-}
       AUDITOR_PASSWORD: ${AUDITOR_PASSWORD:-}
       SENTINEL_SECRET: ${SENTINEL_SECRET:-}
+      PROMPTWALL_SECRET: ${PROMPTWALL_SECRET:-}
       SENTINEL_DATA_KEY: ${SENTINEL_DATA_KEY:-}
-      INGEST_API_KEY: ${INGEST_API_KEY:-dev-ingest-key}
-      SENTINEL_REQUEST_TIMEOUT_MS: ${SENTINEL_REQUEST_TIMEOUT_MS:-10000}
+      PROMPTWALL_DATA_KEY: ${PROMPTWALL_DATA_KEY:-}
+      INGEST_API_KEY: ${INGEST_API_KEY:-}
+      PROMPTWALL_INGEST_API_KEY: ${PROMPTWALL_INGEST_API_KEY:-}
+      SENTINEL_REQUEST_TIMEOUT_MS: ${SENTINEL_REQUEST_TIMEOUT_MS:-}
+      PROMPTWALL_REQUEST_TIMEOUT_MS: ${PROMPTWALL_REQUEST_TIMEOUT_MS:-}
       SIEM_WEBHOOK_URL: ${SIEM_WEBHOOK_URL:-}
       SIEM_WEBHOOK_TOKEN: ${SIEM_WEBHOOK_TOKEN:-}
       SIEM_ALERT_MIN_RISK: ${SIEM_ALERT_MIN_RISK:-25}
@@ -29,7 +38,7 @@ services:
     ports:
       - "${PORT:-4000}:4000"
     volumes:
-      - promptsentinel-data:/data
+      - promptwall-data:/data
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:'+(process.env.PORT||4000)+'/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
@@ -39,4 +48,4 @@ services:
     restart: unless-stopped
 
 volumes:
-  promptsentinel-data:
+  promptwall-data:

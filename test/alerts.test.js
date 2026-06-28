@@ -37,7 +37,7 @@ function sampleQuery(overrides = {}) {
 test('sanitized alert omits raw, redacted prompt body, vault, and finding values', () => {
   const payload = alerts.sanitizedAlert(sampleQuery(), { action: 'BLOCKED' });
   const wire = JSON.stringify(payload);
-  assert.strictEqual(payload.eventType, 'promptsentinel.security_event');
+  assert.strictEqual(payload.eventType, 'promptwall.security_event');
   assert.strictEqual(payload.action, 'BLOCKED');
   assert.ok(!wire.includes('524-71-9043'));
   assert.ok(!wire.includes('sealed-secret'));

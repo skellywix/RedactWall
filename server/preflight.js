@@ -3,6 +3,7 @@
  * Deployment preflight checks. Local demos can run with warnings; production
  * must not start with defaults that would undermine admin or sensor security.
  */
+const { withEnvAliases } = require('./env');
 
 function bool(value) {
   return ['1', 'true', 'yes', 'on'].includes(String(value || '').toLowerCase());
@@ -64,7 +65,7 @@ function cloudSyncedPathReason(value) {
 }
 
 function configStatus(input = {}) {
-  const env = input.env || process.env;
+  const env = withEnvAliases(input.env || process.env);
   const production = env.NODE_ENV === 'production';
   const severity = production ? 'error' : 'warning';
   const dbPath = input.dbPath || env.SENTINEL_DB_PATH || '';

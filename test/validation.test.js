@@ -403,6 +403,152 @@ test('scan-file rejects invalid base64 without echoing file content', async () =
   assert.ok(!JSON.stringify(body).includes(secretFilePayload));
 }));
 
+test('gate blocks configured destinations without retaining prompt text', async () => withServer(async (port) => {
+  const originalPolicy = fs.readFileSync(policyPath, 'utf8');
+  const secret = '524-71-9043';
+  try {
+    const next = { ...JSON.parse(originalPolicy), blockedDestinations: ['chatgpt.com'] };
+    fs.writeFileSync(policyPath, JSON.stringify(next, null, 2));
+
+    const res = await jsonFetch(port, '/api/v1/gate', {
+      headers: { 'x-api-key': 'unit-ingest-key' },
+      body: {
+        prompt: 'Please review member SSN ' + secret,
+        user: 'analyst@example.test',
+        destination: 'https://chatgpt.com/c/unit',
+        source: 'browser_extension',
+        channel: 'submit',
+      },
+    });
+
+    assert.strictEqual(res.status, 200);
+    const body = await res.json();
+    assert.strictEqual(body.decision, 'block');
+    assert.strictEqual(body.status, 'destination_blocked');
+    assert.deepStrictEqual(body.reasons, ['Destination blocked by policy']);
+
+    const stored = db.getQuery(body.id);
+    assert.strictEqual(stored.status, 'destination_blocked');
+    assert.strictEqual(stored.mode, 'destination_block');
+    assert.strictEqual(stored.destination, 'chatgpt.com');
+    assert.deepStrictEqual(stored.findings, []);
+    assert.deepStrictEqual(stored.categories, []);
+    assert.strictEqual(stored._rawPrompt, undefined);
+    assert.ok(!JSON.stringify(stored).includes(secret));
+    assert.ok(db.listAudit(20).some((entry) => entry.action === 'DESTINATION_BLOCKED' && entry.queryId === body.id));
+  } finally {
+    fs.writeFileSync(policyPath, originalPolicy);
+  }
+}));
+
+test('scan-file blocks configured destinations before file inspection', async () => withServer(async (port) => {
+  const originalPolicy = fs.readFileSync(policyPath, 'utf8');
+  const secret = '524-71-9043';
+  const sensitiveFilename = 'member-524-71-9043.txt';
+  try {
+    const next = { ...JSON.parse(originalPolicy), blockedDestinations: ['desktop-ai-app'] };
+    fs.writeFileSync(policyPath, JSON.stringify(next, null, 2));
+
+    const res = await jsonFetch(port, '/api/v1/scan-file', {
+      headers: { 'x-api-key': 'unit-ingest-key' },
+      body: {
+        filename: sensitiveFilename,
+        contentBase64: Buffer.from('member file SSN ' + secret).toString('base64'),
+        user: 'endpoint-user',
+        destination: 'desktop-ai-app',
+        source: 'endpoint_agent',
+      },
+    });
+
+    assert.strictEqual(res.status, 200);
+    const body = await res.json();
+    assert.strictEqual(body.decision, 'block');
+    assert.strictEqual(body.status, 'destination_blocked');
+    assert.strictEqual(body.inspected, false);
+    assert.strictEqual(body.supported, true);
+
+    const stored = db.getQuery(body.id);
+    assert.strictEqual(stored.status, 'destination_blocked');
+    assert.strictEqual(stored.destination, 'desktop-ai-app');
+    assert.strictEqual(stored._rawPrompt, undefined);
+    assert.strictEqual(stored.filename, undefined);
+    assert.ok(!JSON.stringify(stored).includes(secret));
+    assert.ok(!JSON.stringify(stored).includes(sensitiveFilename));
+  } finally {
+    fs.writeFileSync(policyPath, originalPolicy);
+  }
+}));
+
+test('gate accepts file-upload policy blocks without retaining prompt text', async () => withServer(async (port) => {
+  const secret = '524-71-9043';
+  const res = await jsonFetch(port, '/api/v1/gate', {
+    headers: { 'x-api-key': 'unit-ingest-key' },
+    body: {
+      prompt: '[file upload blocked] chatgpt.com ' + secret,
+      user: 'analyst@example.test',
+      destination: 'chatgpt.com',
+      source: 'browser_extension',
+      channel: 'file_upload',
+      clientOutcome: 'file_upload_blocked',
+      note: 'blocked locally: file upload blocked by policy',
+    },
+  });
+
+  assert.strictEqual(res.status, 200);
+  const body = await res.json();
+  assert.strictEqual(body.decision, 'block');
+  assert.strictEqual(body.status, 'file_upload_blocked');
+  assert.deepStrictEqual(body.reasons, ['File upload blocked by policy']);
+
+  const stored = db.getQuery(body.id);
+  assert.strictEqual(stored.status, 'file_upload_blocked');
+  assert.strictEqual(stored.mode, 'file_upload_block');
+  assert.strictEqual(stored.destination, 'chatgpt.com');
+  assert.deepStrictEqual(stored.findings, []);
+  assert.deepStrictEqual(stored.categories, []);
+  assert.strictEqual(stored._rawPrompt, undefined);
+  assert.ok(!JSON.stringify(stored).includes(secret));
+  assert.ok(db.listAudit(20).some((entry) => entry.action === 'FILE_UPLOAD_BLOCKED' && entry.queryId === body.id));
+}));
+
+test('scan-file blocks configured file-upload destinations before file inspection', async () => withServer(async (port) => {
+  const originalPolicy = fs.readFileSync(policyPath, 'utf8');
+  const secret = '524-71-9043';
+  const sensitiveFilename = 'member-524-71-9043.txt';
+  try {
+    const next = { ...JSON.parse(originalPolicy), blockedFileUploadDestinations: ['chatgpt.com'] };
+    fs.writeFileSync(policyPath, JSON.stringify(next, null, 2));
+
+    const res = await jsonFetch(port, '/api/v1/scan-file', {
+      headers: { 'x-api-key': 'unit-ingest-key' },
+      body: {
+        filename: sensitiveFilename,
+        contentBase64: Buffer.from('member file SSN ' + secret).toString('base64'),
+        user: 'browser-user',
+        destination: 'https://chatgpt.com/c/unit',
+        source: 'browser_extension',
+      },
+    });
+
+    assert.strictEqual(res.status, 200);
+    const body = await res.json();
+    assert.strictEqual(body.decision, 'block');
+    assert.strictEqual(body.status, 'file_upload_blocked');
+    assert.strictEqual(body.inspected, false);
+    assert.strictEqual(body.supported, true);
+
+    const stored = db.getQuery(body.id);
+    assert.strictEqual(stored.status, 'file_upload_blocked');
+    assert.strictEqual(stored.destination, 'chatgpt.com');
+    assert.strictEqual(stored._rawPrompt, undefined);
+    assert.strictEqual(stored.filename, undefined);
+    assert.ok(!JSON.stringify(stored).includes(secret));
+    assert.ok(!JSON.stringify(stored).includes(sensitiveFilename));
+  } finally {
+    fs.writeFileSync(policyPath, originalPolicy);
+  }
+}));
+
 test('sensor policy endpoint publishes detector and scanner controls', async () => withServer(async (port) => {
   const res = await jsonFetch(port, '/api/v1/policy', {
     method: 'GET',
@@ -415,6 +561,8 @@ test('sensor policy endpoint publishes detector and scanner controls', async () 
   assert.ok(Array.isArray(body.ignore));
   assert.ok(Array.isArray(body.disabledDetectors));
   assert.ok(Array.isArray(body.governedDestinations));
+  assert.ok(Array.isArray(body.blockedDestinations));
+  assert.ok(Array.isArray(body.blockedFileUploadDestinations));
   assert.ok(body.scanner && typeof body.scanner === 'object');
   assert.ok(Array.isArray(body.scanner.ignoreDirectories));
   assert.ok(Array.isArray(body.scanner.ignoreFilenames));

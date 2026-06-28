@@ -7,7 +7,7 @@ description: Drives test coverage up to a target on the modules that matter most
 
 Coverage is a means, not the goal: the goal is that a regression in a security-critical path fails a test. Prioritize the modules where a silent bug = a data leak.
 
-## Priority order (PromptSentinel)
+## Priority order (PromptWall)
 1. `detection-engine/detect.js` — every detector + the semantic categories (`SOURCE_CODE`, `CONFIDENTIAL_BUSINESS`, `CREDENTIALS`, `LEGAL_CONTRACT`). Cover both true positives AND the false-positive guards (e.g. bare 9-digit number is NOT a routing number without context).
 2. `server/policy.js` — `evaluate()` decisions across all modes (warn / justify / redact / block) and the `alwaysBlock` hard stops.
 3. `server/crypto.js` — `seal`/`open` round-trip and the disabled-key path.

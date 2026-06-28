@@ -1,16 +1,16 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: PromptSentinel customer-silo SaaS stack using ALB, EC2, Docker, Secrets Manager, and local EBS-backed SQLite storage.
+Description: PromptWall customer-silo SaaS stack using ALB, EC2, Docker, Secrets Manager, and local EBS-backed SQLite storage.
 
 Parameters:
   VpcId:
     Type: AWS::EC2::VPC::Id
-    Description: VPC for the public load balancer and PromptSentinel host.
+    Description: VPC for the public load balancer and PromptWall host.
   PublicSubnetIds:
     Type: List<AWS::EC2::Subnet::Id>
     Description: At least two public subnets for the internet-facing load balancer.
   InstanceSubnetId:
     Type: AWS::EC2::Subnet::Id
-    Description: Subnet for the PromptSentinel host. It must have outbound internet access to pull the image.
+    Description: Subnet for the PromptWall host. It must have outbound internet access to pull the image.
   ImageUri:
     Type: String
     MinLength: 1
@@ -45,7 +45,7 @@ Parameters:
     Default: 40
     MinValue: 20
     MaxValue: 500
-    Description: Encrypted root EBS volume size. SQLite state lives under /var/lib/promptsentinel.
+    Description: Encrypted root EBS volume size. SQLite state lives under /var/lib/promptwall.
   AmiId:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
     Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
@@ -59,7 +59,7 @@ Resources:
   AlbSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: PromptSentinel ALB ingress
+      GroupDescription: PromptWall ALB ingress
       VpcId: !Ref VpcId
       SecurityGroupIngress:
         - IpProtocol: tcp
@@ -80,7 +80,7 @@ Resources:
   AppSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: PromptSentinel app host ingress from ALB only
+      GroupDescription: PromptWall app host ingress from ALB only
       VpcId: !Ref VpcId
       SecurityGroupIngress:
         - IpProtocol: tcp
@@ -94,7 +94,7 @@ Resources:
   AppLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Sub /promptsentinel/${TenantId}
+      LogGroupName: !Sub /promptwall/${TenantId}
       RetentionInDays: 90
 
   InstanceRole:
@@ -111,7 +111,7 @@ Resources:
         - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
         - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
       Policies:
-        - PolicyName: PromptSentinelRuntimeAccess
+        - PolicyName: PromptWallRuntimeAccess
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
@@ -153,8 +153,8 @@ Resources:
             DeleteOnTermination: false
       Tags:
         - Key: Name
-          Value: !Sub promptsentinel-${TenantId}
-        - Key: PromptSentinelTenant
+          Value: !Sub promptwall-${TenantId}
+        - Key: PromptWallTenant
           Value: !Ref TenantId
       UserData:
         Fn::Base64: !Sub |
@@ -165,9 +165,9 @@ Resources:
           dnf install -y docker awscli jq aws-cfn-bootstrap
           systemctl enable --now docker
 
-          mkdir -p /var/lib/promptsentinel /etc/promptsentinel
-          chmod 700 /etc/promptsentinel
-          chown 1000:1000 /var/lib/promptsentinel
+          mkdir -p /var/lib/promptwall /etc/promptwall
+          chmod 700 /etc/promptwall
+          chown 1000:1000 /var/lib/promptwall
 
           SECRET_JSON=$(aws secretsmanager get-secret-value --secret-id '${SecretArn}' --region '${AWS::Region}' --query SecretString --output text)
           secret() { echo "$SECRET_JSON" | jq -r --arg key "$1" '.[$key] // empty'; }
@@ -182,7 +182,7 @@ Resources:
           SIEM_WEBHOOK_URL=$(secret SIEM_WEBHOOK_URL)
           SIEM_WEBHOOK_TOKEN=$(secret SIEM_WEBHOOK_TOKEN)
 
-          cat > /etc/promptsentinel/env <<EOF
+          cat > /etc/promptwall/env <<EOF
           PORT=4000
           NODE_ENV=production
           HTTPS=true
@@ -207,18 +207,18 @@ Resources:
           SIEM_ALERT_MIN_RISK=25
           SIEM_ALERT_MIN_SEVERITY=3
           EOF
-          chmod 600 /etc/promptsentinel/env
+          chmod 600 /etc/promptwall/env
 
           REGISTRY=$(echo '${ImageUri}' | cut -d/ -f1)
           aws ecr get-login-password --region '${AWS::Region}' | docker login --username AWS --password-stdin "$REGISTRY"
           docker pull '${ImageUri}'
-          docker rm -f promptsentinel || true
+          docker rm -f promptwall || true
           docker run -d \
-            --name promptsentinel \
+            --name promptwall \
             --restart unless-stopped \
-            --env-file /etc/promptsentinel/env \
+            --env-file /etc/promptwall/env \
             -p 4000:4000 \
-            -v /var/lib/promptsentinel:/data \
+            -v /var/lib/promptwall:/data \
             --log-driver=awslogs \
             --log-opt awslogs-region='${AWS::Region}' \
             --log-opt awslogs-group='${AppLogGroup}' \
@@ -236,7 +236,7 @@ Resources:
         - !Ref AlbSecurityGroup
       Subnets: !Ref PublicSubnetIds
       Tags:
-        - Key: PromptSentinelTenant
+        - Key: PromptWallTenant
           Value: !Ref TenantId
 
   TargetGroup:

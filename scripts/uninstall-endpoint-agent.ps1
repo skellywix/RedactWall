@@ -1,6 +1,6 @@
 param(
-  [string]$TaskName = "PromptSentinelEndpointAgent",
-  [string]$ConfigDir = "$env:LOCALAPPDATA\PromptSentinel",
+  [string]$TaskName = "PromptWallEndpointAgent",
+  [string]$ConfigDir = "$env:LOCALAPPDATA\PromptWall",
   [switch]$RemoveConfig
 )
 

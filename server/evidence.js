@@ -111,7 +111,7 @@ function buildEvidencePack(input) {
     schemaVersion: 1,
     generatedAt: now,
     service: {
-      name: 'PromptSentinel',
+      name: 'PromptWall',
       version: input.version || 'unknown',
     },
     scope: {

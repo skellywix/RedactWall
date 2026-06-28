@@ -1,5 +1,5 @@
 /*
- * PromptSentinel shared detection engine (browser-safe, zero deps).
+ * PromptWall shared detection engine (browser-safe, zero deps).
  *
  * Plugin architecture (inspired by Strac's auditor): detection is a REGISTRY of
  * self-describing detectors, each with { id, severity, score, scan(text) }.
@@ -125,7 +125,7 @@
     { id: 'PRIVATE_KEY', score: 0.99, re: /-----BEGIN (?:RSA |EC |OPENSSH |PGP )?PRIVATE KEY-----/g },
     { id: 'SECRET_KEY', score: 0.95, re: /\b(?:sk-[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z\-_]{20,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})\b/g },
     // Org-planted tripwire values for fake records, demos, and leak drills.
-    { id: 'CANARY_TOKEN', score: 0.99, re: /\b(?:PS|PROMPTSENTINEL)[-_]CANARY[-_][A-Z0-9][A-Z0-9_-]{11,63}\b/gi },
+    { id: 'CANARY_TOKEN', score: 0.99, re: /\b(?:PS|PROMPTWALL|PROMPTSENTINEL)[-_]CANARY[-_][A-Z0-9][A-Z0-9_-]{11,63}\b/gi },
     { id: 'PASSWORD', score: 0.8, re: /\b(?:pass(?:word|wd)?|pwd|passphrase)\s*[:=]\s*\S{4,}/gi },
     { id: 'US_ADDRESS', score: 0.6, re: /\b\d{1,6}\s+(?:[A-Za-z0-9.'-]+\s){0,4}(?:Street|St|Avenue|Ave|Boulevard|Blvd|Road|Rd|Lane|Ln|Drive|Dr|Court|Ct|Way|Place|Pl|Terrace|Ter)\b\.?/gi },
   ];

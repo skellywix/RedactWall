@@ -151,7 +151,7 @@ test('redact mode accepts endpoint redacted companion evidence without a vault',
       clientRiskScore: 30,
       clientMaxSeverity: 4,
       clientMaxSeverityLabel: 'critical',
-      note: 'endpoint agent inspected loan.txt locally; redacted companion .promptsentinel-redacted/loan.promptsentinel-redacted.txt',
+      note: 'endpoint agent inspected loan.txt locally; redacted companion .promptwall-redacted/loan.promptwall-redacted.txt',
     }),
   });
 

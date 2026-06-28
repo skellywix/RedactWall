@@ -1,4 +1,4 @@
-/* PromptSentinel content script — pre-send inspection on AI chat sites.
+/* PromptWall content script — pre-send inspection on AI chat sites.
  *
  * Strategy: catch the prompt BEFORE it leaves the page.
  *   - Enter keydown (capture phase) on the composer
@@ -55,6 +55,31 @@
   // ---- decide what to do ----------------------------------------------------
   function detectionPolicy() {
     return { ignore: POLICY.ignore || [], disabledDetectors: POLICY.disabledDetectors || [] };
+  }
+
+  function destinationBlocked() {
+    const blocked = POLICY.blockedDestinations || [];
+    const A = window.PSAdapters;
+    if (A && A.isGoverned) return A.isGoverned(SITE, blocked);
+    return blocked.some((host) => SITE === host || SITE.endsWith('.' + host));
+  }
+
+  function fileUploadBlocked() {
+    const blocked = POLICY.blockedFileUploadDestinations || [];
+    const A = window.PSAdapters;
+    if (A && A.isGoverned) return A.isGoverned(SITE, blocked);
+    return blocked.some((host) => SITE === host || SITE.endsWith('.' + host));
+  }
+
+  function emptyAnalysis() {
+    return {
+      findings: [],
+      categories: [],
+      entityCounts: {},
+      riskScore: 0,
+      maxSeverity: 0,
+      maxSeverityLabel: 'none',
+    };
   }
 
   function evaluate(text) {
@@ -129,7 +154,7 @@
   async function proceedAfterRecorded(text, analysis, outcome, note, el) {
     const res = await report(text, analysis, 'submit', outcome, note);
     if (!recordedProceedResponse(res, outcome)) {
-      toast('PromptSentinel could not record this decision. Send blocked until the control plane is reachable.');
+      toast('PromptWall could not record this decision. Send blocked until the control plane is reachable.');
       return;
     }
     bypassOnce = true;
@@ -142,7 +167,15 @@
       toast('Sent to your Security Admin for approval.');
       return;
     }
-    toast('PromptSentinel could not reach the control plane. Approval request blocked for now.');
+    toast('PromptWall could not reach the control plane. Approval request blocked for now.');
+  }
+
+  function reportBlockedDestination(channel) {
+    return report('[destination blocked] ' + SITE, emptyAnalysis(), channel, 'destination_blocked', 'destination blocked by policy');
+  }
+
+  function reportBlockedFileUpload() {
+    return report('[file upload blocked] ' + SITE, emptyAnalysis(), 'file_upload', 'file_upload_blocked', 'file upload blocked by policy');
   }
 
   // ---- inline banner UI -----------------------------------------------------
@@ -192,6 +225,12 @@
     const el = composer || findComposer(e.target);
     let text = readText(el);
     if (!text) return true;
+    if (destinationBlocked()) {
+      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+      reportBlockedDestination('submit');
+      toast('PromptWall blocked sends to ' + SITE + ' by policy.');
+      return false;
+    }
     // Man-in-the-Prompt: strip invisible zero-width payloads silently; HARD-stop
     // strong injection signals (bidi overrides / Unicode tag chars) a malicious
     // extension could use to smuggle hidden instructions under the user's name.
@@ -202,7 +241,7 @@
         if (inj.reasons.some((r) => /bidi|tag/i.test(r))) {
           e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
           report(text, { findings: [], categories: [] }, 'submit', 'injection_blocked', inj.reasons.join(', '));
-          toast('PromptSentinel blocked hidden instructions in this prompt (' + inj.reasons.join(', ') + ').');
+          toast('PromptWall blocked hidden instructions in this prompt (' + inj.reasons.join(', ') + ').');
           return false;
         }
         text = inj.stripped;
@@ -220,7 +259,7 @@
       mergeRehydrate(t.map);
       setComposerText(el, t.text);
       report(t.text, verdict.analysis, 'submit', 'redacted_sent', '', { clientPreRedacted: true });
-      toast('PromptSentinel: ' + Object.keys(t.map).length + ' sensitive value(s) tokenized before sending — the reply is restored here automatically.');
+      toast('PromptWall: ' + Object.keys(t.map).length + ' sensitive value(s) tokenized before sending — the reply is restored here automatically.');
       bypassOnce = true;
       resend(el);
       return false;
@@ -331,7 +370,7 @@
     const verdict = evaluate(pasted);
     if (verdict.action !== 'allow') {
       report(pasted, verdict.analysis, 'paste', 'paste_flagged');
-      toast('PromptSentinel: pasted content contains ' + summarize(verdict.analysis).slice(0, 3).join(', '));
+      toast('PromptWall: pasted content contains ' + summarize(verdict.analysis).slice(0, 3).join(', '));
     }
   }, true);
 
@@ -347,12 +386,22 @@
   }, true);
   function scanFiles(files, e) {
     try { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation(); } catch (_) {}
+    if (destinationBlocked()) {
+      [...files].forEach(() => reportBlockedDestination('file_upload'));
+      toast('PromptWall blocked file uploads to ' + SITE + ' by policy.');
+      return;
+    }
+    if (fileUploadBlocked()) {
+      [...files].forEach(reportBlockedFileUpload);
+      toast('PromptWall blocked file uploads to ' + SITE + ' by file policy.');
+      return;
+    }
     [...files].forEach(scanOneFile);
   }
   function scanOneFile(f) {
     if (f.size > 6_300_000) {
       reportUnscannedFile(f.name, 'file_too_large', 'blocked locally: file too large to inspect');
-      toast('PromptSentinel blocked ' + f.name + ': file is too large to inspect.');
+      toast('PromptWall blocked ' + f.name + ': file is too large to inspect.');
       return;
     }
     const reader = new FileReader();
@@ -373,18 +422,18 @@
   }
   function handleFileScanResponse(filename, res) {
     if (!res) {
-      toast('PromptSentinel could not verify ' + filename + '. Upload blocked.');
+      toast('PromptWall could not verify ' + filename + '. Upload blocked.');
       return;
     }
     const items = (res.findings || []).map((x) => x.type).concat(res.categories || []);
     if (res.decision === 'allow' && res.supported !== false) {
-      toast('PromptSentinel scanned ' + filename + ' clean. Attach it again to upload.');
+      toast('PromptWall scanned ' + filename + ' clean. Attach it again to upload.');
     } else if (res.status === 'scan_unavailable') {
-      toast('PromptSentinel could not verify ' + filename + '. Upload blocked until the control plane is reachable.');
+      toast('PromptWall could not verify ' + filename + '. Upload blocked until the control plane is reachable.');
     } else if (res.supported === false || res.inspected === false) {
-      toast('PromptSentinel could not inspect ' + filename + '. Upload blocked and recorded.');
+      toast('PromptWall could not inspect ' + filename + '. Upload blocked and recorded.');
     } else {
-      toast('PromptSentinel blocked ' + filename + ': ' + (items.slice(0, 3).join(', ') || 'sensitive content'));
+      toast('PromptWall blocked ' + filename + ': ' + (items.slice(0, 3).join(', ') || 'sensitive content'));
     }
   }
   function reportUnscannedFile(filename, outcome, note) {
@@ -421,5 +470,5 @@
     setTimeout(() => { if (toastEl) { toastEl.remove(); toastEl = null; } }, 4200);
   }
 
-  console.log('[PromptSentinel] active on ' + SITE + ' — pre-send inspection enabled.');
+  console.log('[PromptWall] active on ' + SITE + ' — pre-send inspection enabled.');
 })();

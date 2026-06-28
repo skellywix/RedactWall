@@ -40,20 +40,68 @@ test('loadEnv keeps existing process values unless override is requested', () =>
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test('loadEnv maps PromptWall aliases without overwriting configured legacy keys', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-env-alias-test-'));
+  const file = path.join(dir, '.env');
+  fs.writeFileSync(file, [
+    'PROMPTWALL_DB_PATH=/var/lib/promptwall/promptwall.db',
+    'PROMPTWALL_SECRET=promptwall-session-secret',
+    'PROMPTWALL_DATA_KEY=promptwall-data-key',
+    'PROMPTWALL_INGEST_API_KEY=promptwall-ingest-key',
+    'PROMPTWALL_URL=https://promptwall.customer.example',
+    'PROMPTWALL_ENDPOINT_AGENT_HANDOFF_SECRET=promptwall-handoff-secret',
+    'PROMPTWALL_ENDPOINT_AGENT_HANDOFF_DIR=C:/PromptWall/handoff',
+    'SENTINEL_SECRET=legacy-session-secret',
+  ].join('\n'));
+  const target = { SENTINEL_DATA_KEY: '' };
+
+  const result = env.loadEnv(file, { env: target });
+  assert.strictEqual(result.loaded, true);
+  assert.strictEqual(target.SENTINEL_DB_PATH, '/var/lib/promptwall/promptwall.db');
+  assert.strictEqual(target.SENTINEL_SECRET, 'legacy-session-secret');
+  assert.strictEqual(target.SENTINEL_DATA_KEY, 'promptwall-data-key');
+  assert.strictEqual(target.INGEST_API_KEY, 'promptwall-ingest-key');
+  assert.strictEqual(target.SENTINEL_URL, 'https://promptwall.customer.example');
+  assert.strictEqual(target.ENDPOINT_AGENT_HANDOFF_SECRET, 'promptwall-handoff-secret');
+  assert.strictEqual(target.ENDPOINT_AGENT_HANDOFF_DIR, 'C:/PromptWall/handoff');
+  assert.ok(result.aliases.some((item) => item.key === 'SENTINEL_DB_PATH' && item.source === 'PROMPTWALL_DB_PATH'));
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test('loadEnv returns a safe empty result for missing files', () => {
-  const result = env.loadEnv(path.join(os.tmpdir(), 'missing-promptsentinel-env'), { env: {} });
+  const target = { PROMPTWALL_URL: 'https://promptwall.example.test' };
+  const result = env.loadEnv(path.join(os.tmpdir(), 'missing-promptwall-env'), { env: target });
   assert.strictEqual(result.loaded, false);
   assert.deepStrictEqual(result.keys, []);
+  assert.strictEqual(target.SENTINEL_URL, 'https://promptwall.example.test');
 });
 
 test('default env path can be redirected for endpoint installs', () => {
   const old = process.env.SENTINEL_ENV_PATH;
+  const oldPromptWall = process.env.PROMPTWALL_ENV_PATH;
   process.env.SENTINEL_ENV_PATH = path.join(os.tmpdir(), 'endpoint-agent.env');
   try {
     assert.strictEqual(env.defaultEnvPath(), process.env.SENTINEL_ENV_PATH);
   } finally {
     if (old === undefined) delete process.env.SENTINEL_ENV_PATH;
     else process.env.SENTINEL_ENV_PATH = old;
+    if (oldPromptWall === undefined) delete process.env.PROMPTWALL_ENV_PATH;
+    else process.env.PROMPTWALL_ENV_PATH = oldPromptWall;
+  }
+});
+
+test('default env path accepts PromptWall env path alias', () => {
+  const old = process.env.SENTINEL_ENV_PATH;
+  const oldPromptWall = process.env.PROMPTWALL_ENV_PATH;
+  delete process.env.SENTINEL_ENV_PATH;
+  process.env.PROMPTWALL_ENV_PATH = path.join(os.tmpdir(), 'promptwall.env');
+  try {
+    assert.strictEqual(env.defaultEnvPath(), process.env.PROMPTWALL_ENV_PATH);
+  } finally {
+    if (old === undefined) delete process.env.SENTINEL_ENV_PATH;
+    else process.env.SENTINEL_ENV_PATH = old;
+    if (oldPromptWall === undefined) delete process.env.PROMPTWALL_ENV_PATH;
+    else process.env.PROMPTWALL_ENV_PATH = oldPromptWall;
   }
 });
 

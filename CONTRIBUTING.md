@@ -1,10 +1,11 @@
-# Contributing to PromptSentinel
+# Contributing to PromptWall
 
 This repository uses a single source-of-truth and review-gated workflow.
 
 ## Local source and hooks
 
-- Work only inside `promptsentinel/`.
+- Work only inside the active app repo folder (`promptsentinel/` in this checkout
+  until the physical folder migration is completed).
 - Run:
 
 ```bash

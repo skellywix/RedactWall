@@ -128,7 +128,7 @@ function packageExtension(opts = {}) {
   const engineCopies = validateSyncedEngine(root);
 
   fs.mkdirSync(outDir, { recursive: true });
-  const baseName = `promptsentinel-extension-v${manifest.version}`;
+  const baseName = `promptwall-extension-v${manifest.version}`;
   const zipPath = path.join(outDir, `${baseName}.zip`);
   const manifestPath = path.join(outDir, `${baseName}.manifest.json`);
   const zip = new AdmZip();
@@ -141,7 +141,7 @@ function packageExtension(opts = {}) {
   zip.writeZip(zipPath);
   const zipBody = fs.readFileSync(zipPath);
   const packageManifest = {
-    kind: 'promptsentinel-extension-package',
+    kind: 'promptwall-extension-package',
     packageName: path.basename(zipPath),
     extensionVersion: manifest.version,
     appVersion,

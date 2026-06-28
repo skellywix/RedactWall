@@ -29,7 +29,7 @@ test('server module exports an app without requiring a fixed listening port', as
 
   const body = await res.json();
   assert.strictEqual(body.status, 'ok');
-  assert.strictEqual(body.service, 'promptsentinel');
+  assert.strictEqual(body.service, 'promptwall');
 });
 
 test('readiness endpoint is reachable through the importable app', async (t) => {

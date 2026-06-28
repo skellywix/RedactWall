@@ -1,4 +1,4 @@
-# PromptSentinel Production Loop Status
+# PromptWall Production Loop Status
 
 ## Open
 
@@ -19,7 +19,7 @@
   Evidence: `node --test test/tenant.test.js test/saas-tenancy.test.js test/preflight.test.js test/db.test.js test/aws-deployment.test.js test/docker-deployment.test.js test/setup.test.js`, `npm test`, `npm run test:browser`, `npm run setup:check`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Added a package-to-install endpoint pilot smoke: the endpoint zip is extracted into a temp install root, the scheduled-task scripts are inspected, config is loaded through `SENTINEL_ENV_PATH`, policy refresh is exercised, a watched file is locally extracted and redacted, sanitized `redacted_available` telemetry is sent, and the companion file is verified to contain placeholders only.
   Evidence: `node --test test/endpoint-agent-package.test.js`, `npm run package:endpoint-agent`, `git diff --check`.
-- 2026-06-26: Added an explicit endpoint redaction handoff for structured-only watched-file findings: redact policy now writes a sanitized `.promptsentinel-redacted/*.txt` companion file with typed placeholders, reports `redacted_available` evidence to `/api/v1/gate`, ignores generated companions in the watcher, and removes the companion if control-plane recording fails or does not resolve as redacted.
+- 2026-06-26: Added an explicit endpoint redaction handoff for structured-only watched-file findings: redact policy now writes a sanitized `.promptwall-redacted/*.txt` companion file with typed placeholders, reports `redacted_available` evidence to `/api/v1/gate`, ignores generated companions in the watcher, and removes the companion if control-plane recording fails or does not resolve as redacted.
   Evidence: `node --test test/endpoint-agent.test.js test/redact-policy.test.js test/validation.test.js test/endpoint-agent-package.test.js`, `npm run package:endpoint-agent`, `npm test`, `npm run test:browser`, `npm run setup:check`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
 - 2026-06-26: Moved endpoint-agent supported-file inspection to the local sensor path: watched files now extract and analyze locally with the shared detector and policy evaluator, then report only sanitized placeholders, masked findings, sanitized filename labels, and client analysis to `/api/v1/gate`; the endpoint package now includes the shared detector/policy files and refuses regressions to file-body upload calls.
   Evidence: `node --test test/endpoint-agent.test.js test/endpoint-agent-package.test.js test/validation.test.js test/redact-policy.test.js test/release-token.test.js`, `npm run package:endpoint-agent`, `npm test`, `npm run test:browser`, `npm run setup:check`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.

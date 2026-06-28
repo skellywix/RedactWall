@@ -4,7 +4,7 @@ require('../server/env').loadEnv();
  * Reference ICAP-side bridge (sketch).
  *
  * In production, a c-icap service module receives each REQMOD request from
- * Squid, extracts the user's prompt from the HTTP body, and calls PromptSentinel.
+ * Squid, extracts the user's prompt from the HTTP body, and calls PromptWall.
  * This file shows the HTTP call the ICAP module makes, and how it enforces the
  * verdict inline (hold the request until released).
  *

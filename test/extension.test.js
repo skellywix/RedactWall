@@ -91,6 +91,20 @@ test('browser file uploads use scan-file API with base64 content', () => {
   assert.match(background, /if \(!c\.enabled\) \{\s*sendResponse && sendResponse\(null\);/);
 });
 
+test('browser blocks configured destinations before local prompt or file inspection', () => {
+  assert.match(content, /function destinationBlocked\(\)/);
+  assert.match(content, /function fileUploadBlocked\(\)/);
+  assert.match(content, /POLICY\.blockedDestinations \|\| \[\]/);
+  assert.match(content, /POLICY\.blockedFileUploadDestinations \|\| \[\]/);
+  assert.match(background, /clientOutcome:\s*msg\.payload\.outcome/);
+  assert.match(content, /'destination_blocked'/);
+  assert.match(content, /'file_upload_blocked'/);
+  assert.match(content, /PromptWall blocked sends to/);
+  assert.match(content, /PromptWall blocked file uploads to/);
+  assert.match(background, /blockedDestinations:\s*\[\]/);
+  assert.match(background, /blockedFileUploadDestinations:\s*\[\]/);
+});
+
 test('background report fails closed when gate request times out', async () => {
   const bg = loadBackground({
     local: { ingestKey: 'unit-ingest-key', requestTimeoutMs: 50 },
@@ -233,4 +247,13 @@ test('warn and justify sends wait for recorded gate response before resend', () 
 
 test('manifest grants alarms permission used for policy refresh', () => {
   assert.ok(manifest.permissions.includes('alarms'));
+});
+
+test('governed Poe destination receives active content-script protection', () => {
+  const matches = manifest.content_scripts.flatMap((entry) => entry.matches || []);
+  assert.ok(manifest.host_permissions.includes('https://poe.com/*'));
+  assert.ok(manifest.host_permissions.includes('https://www.poe.com/*'));
+  assert.ok(matches.includes('https://poe.com/*'));
+  assert.ok(matches.includes('https://www.poe.com/*'));
+  assert.match(background, /shadow-AI/);
 });

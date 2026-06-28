@@ -1,11 +1,11 @@
 'use strict';
 /**
- * PromptSentinel — inline DLP gateway for AI chat prompts.
+ * PromptWall — inline DLP gateway for AI chat prompts.
  *
  * Flow:
  *   1. The network proxy (Squid+ICAP) or an SDK calls POST /api/v1/gate with the
  *      user's prompt + context before it is allowed to reach the AI service.
- *   2. PromptSentinel analyzes for PII, applies policy, and either ALLOWS or
+ *   2. PromptWall analyzes for PII, applies policy, and either ALLOWS or
  *      BLOCKS (holds) the prompt. Blocked prompts enter the approval queue.
  *   3. A Security Admin reviews the queue in the dashboard and approves/denies.
  *   4. The waiting client polls GET /api/v1/status/:id (or long-poll /await/:id)
@@ -78,7 +78,7 @@ app.use((err, req, res, next) => {
 app.use(cookieParser());
 
 // ---- Health / readiness (public, no sensitive data) -------------------------
-app.get('/healthz', (req, res) => res.json({ status: 'ok', service: 'promptsentinel', version: require('../package.json').version }));
+app.get('/healthz', (req, res) => res.json({ status: 'ok', service: 'promptwall', version: require('../package.json').version }));
 app.get('/readyz', (req, res) => {
   try {
     db.stats();
@@ -394,6 +394,103 @@ function clientAnalysisFrom(body) {
   };
 }
 
+function blockDestinationByPolicy(res, context = {}, responseExtra = {}) {
+  const {
+    user = 'unknown',
+    orgId = null,
+    destination = 'unknown',
+    sourceIp = null,
+    source = 'api',
+    channel = 'submit',
+    sensor = null,
+    redactedPrompt = null,
+  } = context;
+  const normalized = policy.normalizeDestination(destination);
+  const reason = 'Destination blocked by policy';
+  const row = db.createQuery({
+    status: 'destination_blocked',
+    mode: 'destination_block',
+    user,
+    orgId,
+    destination: normalized,
+    sourceIp,
+    source,
+    channel,
+    sensor,
+    redactedPrompt: redactedPrompt || ('[destination blocked] ' + normalized),
+    findings: [],
+    categories: [],
+    entityCounts: {},
+    riskScore: 0,
+    maxSeverity: 0,
+    maxSeverityLabel: 'none',
+    reasons: [reason],
+  });
+  db.appendAudit({ action: 'DESTINATION_BLOCKED', queryId: row.id, actor: user, detail: `${source}/${channel}: ${normalized}` });
+  emitSecurityAlert(row, 'DESTINATION_BLOCKED');
+  broadcast('query', { type: 'destination_blocked', query: publicQuery(row) });
+  broadcast('stats', db.stats());
+  return res.json({
+    id: row.id,
+    decision: 'block',
+    mode: 'destination_block',
+    status: 'destination_blocked',
+    riskScore: 0,
+    findings: [],
+    categories: [],
+    reasons: [reason],
+    ...responseExtra,
+  });
+}
+
+function blockFileUploadByPolicy(res, context = {}, responseExtra = {}) {
+  const {
+    user = 'unknown',
+    orgId = null,
+    destination = 'unknown',
+    sourceIp = null,
+    source = 'api',
+    channel = 'file_upload',
+    sensor = null,
+  } = context;
+  const normalized = policy.normalizeDestination(destination);
+  const reason = 'File upload blocked by policy';
+  const row = db.createQuery({
+    status: 'file_upload_blocked',
+    mode: 'file_upload_block',
+    user,
+    orgId,
+    destination: normalized,
+    sourceIp,
+    source,
+    channel,
+    sensor,
+    redactedPrompt: '[file upload blocked] ' + normalized,
+    findings: [],
+    categories: [],
+    entityCounts: {},
+    riskScore: 0,
+    maxSeverity: 0,
+    maxSeverityLabel: 'none',
+    reasons: [reason],
+  });
+  db.appendAudit({ action: 'FILE_UPLOAD_BLOCKED', queryId: row.id, actor: user, detail: `${source}/${channel}: ${normalized}` });
+  emitSecurityAlert(row, 'FILE_UPLOAD_BLOCKED');
+  broadcast('query', { type: 'file_upload_blocked', query: publicQuery(row) });
+  broadcast('stats', db.stats());
+  return res.json({
+    id: row.id,
+    decision: 'block',
+    mode: 'file_upload_block',
+    status: 'file_upload_blocked',
+    riskScore: 0,
+    findings: [],
+    categories: [],
+    reasons: [reason],
+    ...responseExtra,
+  });
+}
+
 app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gateSchema), (req, res) => {
   if (!enforceTenantForSensor(req, res)) return;
   const {
@@ -406,6 +503,12 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
   }
 
   const pol = policy.loadPolicy();
+  if (policy.destinationBlocked(destination, pol) || clientOutcome === 'destination_blocked') {
+    return blockDestinationByPolicy(res, { user, orgId, destination, sourceIp, source, channel, sensor });
+  }
+  if (clientOutcome === 'file_upload_blocked') {
+    return blockFileUploadByPolicy(res, { user, orgId, destination, sourceIp, source, channel, sensor });
+  }
   const analyzeOpts = policy.analyzeOpts(pol);
   const declaredClientPreRedacted = req.body && req.body.clientPreRedacted === true;
   const clientAnalysis = declaredClientPreRedacted ? clientAnalysisFrom(req.body) : null;
@@ -572,6 +675,8 @@ app.get('/api/v1/policy', checkIngestKey, (req, res) => {
     ignore: p.ignore || [],
     disabledDetectors: p.disabledDetectors || [],
     governedDestinations: p.governedDestinations,
+    blockedDestinations: p.blockedDestinations || [],
+    blockedFileUploadDestinations: p.blockedFileUploadDestinations || [],
     scanner: p.scanner || {},
   });
 });
@@ -584,9 +689,18 @@ app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation
   if (!enforceTenantForSensor(req, res)) return;
   const { filename, contentBase64, user = 'unknown', destination = 'unknown', source = 'api', channel = 'file_upload', orgId = null, sensor = null } = req.body || {};
   if (!filename || !contentBase64) return res.status(400).json({ error: 'filename and contentBase64 required' });
+  const pol = policy.loadPolicy();
+  if (policy.destinationBlocked(destination, pol)) {
+    return blockDestinationByPolicy(res, {
+      user, orgId, destination, source, channel, sensor,
+      redactedPrompt: '[file upload blocked by destination policy] ' + policy.normalizeDestination(destination),
+    }, { supported: true, inspected: false });
+  }
+  if (policy.fileUploadBlocked(destination, pol)) {
+    return blockFileUploadByPolicy(res, { user, orgId, destination, source, channel, sensor }, { supported: true, inspected: false });
+  }
   let buf;
   try { buf = Buffer.from(contentBase64, 'base64'); } catch { return res.status(400).json({ error: 'bad base64' }); }
-  const pol = policy.loadPolicy();
   if (buf.length > (pol.scanner && pol.scanner.maxFileBytes || 6.6e6)) return res.status(413).json({ error: 'file too large' });
 
   let extracted;
@@ -689,6 +803,12 @@ app.post('/api/v1/scan-response', checkIngestKey, validation.validateBody(valida
   const { text, user = 'unknown', destination = 'unknown', source = 'api', orgId = null, sensor = null } = req.body || {};
   if (typeof text !== 'string' || !text.trim()) return res.status(400).json({ error: 'text (string) required' });
   const pol = policy.loadPolicy();
+  if (policy.destinationBlocked(destination, pol)) {
+    return blockDestinationByPolicy(res, {
+      user, orgId, destination, source, channel: 'ai_response', sensor,
+      redactedPrompt: '[AI response blocked by destination policy] ' + policy.normalizeDestination(destination),
+    }, { leaked: false, findings: [], categories: [], redacted: '' });
+  }
   const analysis = detector.analyze(text, policy.analyzeOpts(pol));
   const findings = analysis.findings.map((f) => ({ type: f.type, severity: f.severity, score: f.score, masked: detector.maskValue(f.type, f.value) }));
   const categories = (analysis.categories || []).map((c) => c.category);
@@ -988,7 +1108,7 @@ app.get('/index.html', auth.requireAuth, (req, res) =>
 app.use(express.static(path.join(__dirname, 'public')));
 
 function logStartup(port) {
-  console.log(`PromptSentinel running on http://localhost:${port}`);
+  console.log(`PromptWall running on http://localhost:${port}`);
   if (auth.ADMIN_PASSWORD_IS_DEFAULT) {
     console.log('  [!] Using DEFAULT admin password. Set ADMIN_PASSWORD before production.');
   }

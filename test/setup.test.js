@@ -41,6 +41,17 @@ const SETUP_ENV_KEYS = [
   'AUDITOR_USER',
   'AUDITOR_PASSWORD',
   'SENTINEL_ENV_PATH',
+  'PROMPTWALL_DB_PATH',
+  'PROMPTWALL_SAAS_MODE',
+  'PROMPTWALL_TENANT_ID',
+  'PROMPTWALL_SEAT_LIMIT',
+  'PROMPTWALL_REQUIRE_TENANT_CONTEXT',
+  'PROMPTWALL_REQUIRE_USER_IDENTITY',
+  'PROMPTWALL_SECRET',
+  'PROMPTWALL_DATA_KEY',
+  'PROMPTWALL_INGEST_API_KEY',
+  'PROMPTWALL_REQUEST_TIMEOUT_MS',
+  'PROMPTWALL_ENV_PATH',
 ];
 
 function childEnv() {
@@ -62,6 +73,28 @@ test('production setup env passes deployment preflight', () => {
   assert.ok(env.SENTINEL_SECRET.length >= 32);
   assert.ok(env.SENTINEL_DATA_KEY.length >= 32);
   assert.strictEqual(env.SENTINEL_SAAS_MODE, 'false');
+  assert.strictEqual(status.ready, true);
+  assert.strictEqual(status.level, 'ok');
+});
+
+test('setup preflight accepts PromptWall env aliases', () => {
+  const status = statusFromEnv({
+    NODE_ENV: 'production',
+    HTTPS: 'true',
+    COOKIE_SECURE: 'true',
+    PROMPTWALL_DB_PATH: '/var/lib/promptwall/promptwall.db',
+    PROMPTWALL_SAAS_MODE: 'true',
+    PROMPTWALL_TENANT_ID: 'cu-acme',
+    PROMPTWALL_SEAT_LIMIT: '25',
+    ADMIN_USER: 'admin',
+    ADMIN_PASSWORD: 'long-admin-password',
+    ADMIN_TOTP_SECRET: 'JBSWY3DPEHPK3PXP',
+    PROMPTWALL_SECRET: 's'.repeat(32),
+    PROMPTWALL_DATA_KEY: 'd'.repeat(32),
+    PROMPTWALL_INGEST_API_KEY: 'ps_ingest_' + 'a'.repeat(32),
+    PROMPTWALL_REQUEST_TIMEOUT_MS: '10000',
+  });
+
   assert.strictEqual(status.ready, true);
   assert.strictEqual(status.level, 'ok');
 });
@@ -140,13 +173,13 @@ test('production setup, mfa enrollment, and setup check work end to end without 
     '--env',
     envPath,
     '--issuer',
-    'PromptSentinel Smoke',
+    'PromptWall Smoke',
   ], { cwd: ROOT, encoding: 'utf8', env });
   const uriLine = mfaOut.split(/\r?\n/).find((line) => line.startsWith('otpauth://'));
   assert.ok(uriLine);
   const uri = new URL(uriLine);
   assert.strictEqual(uri.searchParams.get('secret'), parsed.ADMIN_TOTP_SECRET);
-  assert.strictEqual(uri.searchParams.get('issuer'), 'PromptSentinel Smoke');
+  assert.strictEqual(uri.searchParams.get('issuer'), 'PromptWall Smoke');
   assert.strictEqual(mfaOut.includes(parsed.ADMIN_PASSWORD), false);
   assert.strictEqual(mfaOut.includes(parsed.INGEST_API_KEY), false);
 

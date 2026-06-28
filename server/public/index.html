@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>PromptSentinel - Security Console</title>
+<title>PromptWall - Security Console</title>
 <style>
   :root{
     color-scheme:dark;
@@ -531,6 +531,10 @@
   .policy-option p{margin:7px 0 0 24px;color:var(--mut);font-size:11.5px;line-height:1.45}
   .field-grid{display:grid;grid-template-columns:minmax(180px,1fr) 150px;gap:10px;align-items:center;margin-bottom:18px}
   select,input[type="number"]{width:100%;min-height:38px;border:1px solid var(--line);border-radius:8px;background:#08111c;color:var(--txt);padding:8px 10px}
+  .policy-list-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:18px}
+  .policy-list-field{display:grid;gap:8px;color:var(--mut);font-size:12px}
+  .policy-textarea{width:100%;min-height:116px;resize:vertical;border:1px solid var(--line);border-radius:8px;background:#08111c;color:var(--txt);padding:9px 10px;line-height:1.45}
+  .policy-textarea::placeholder{color:#66758a}
   input[type="radio"]{accent-color:var(--blue)}
   .hidden{display:none!important}
   .empty{padding:46px 18px;text-align:center;color:var(--mut)}
@@ -561,7 +565,7 @@
     .stats{grid-template-columns:1fr}
     .content-tabs{overflow:auto}
     .coverage-body,.coverage-kpis{grid-template-columns:1fr}
-    .queue-mainline,.detail-grid,.policy-options,.field-grid{grid-template-columns:1fr}
+    .queue-mainline,.detail-grid,.policy-options,.field-grid,.policy-list-grid{grid-template-columns:1fr}
     .barrow{grid-template-columns:96px minmax(0,1fr) 28px}
     th,td{padding:10px 9px}
     table{min-width:760px}
@@ -579,7 +583,7 @@
     <div class="brand">
       <div class="logo" aria-hidden="true">PS</div>
       <div>
-        <h1>PromptSentinel</h1>
+        <h1>PromptWall</h1>
         <p>AI Prompt DLP Gateway</p>
       </div>
     </div>

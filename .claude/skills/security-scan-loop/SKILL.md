@@ -1,11 +1,11 @@
 ---
 name: security-scan-loop
-description: Scheduled adversarial security pass against a local/staging PromptSentinel instance. Runs the shannon-pentest skill plus product-specific abuse cases (auth/IDOR on the approval queue, detector bypass, PII leakage in logs/audit) and files confirmed findings only. Invoke with /security-scan-loop or schedule with /loop. Never run against production.
+description: Scheduled adversarial security pass against a local/staging PromptWall instance. Runs the shannon-pentest skill plus product-specific abuse cases (auth/IDOR on the approval queue, detector bypass, PII leakage in logs/audit) and files confirmed findings only. Invoke with /security-scan-loop or schedule with /loop. Never run against production.
 ---
 
 # Security Scan Loop
 
-PromptSentinel IS a security product, so the adversarial pass is not optional — it's dogfooding. Runs on a system you own (local `npm start` or staging), never production.
+PromptWall IS a security product, so the adversarial pass is not optional — it's dogfooding. Runs on a system you own (local `npm start` or staging), never production.
 
 ## When to run
 - Before each release and weekly: `/loop "Run the security-scan-loop skill against http://localhost:3000" --schedule "0 3 * * 6"`.

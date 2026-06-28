@@ -5,7 +5,7 @@ param(
   [Parameter(Mandatory = $true)]
   [string]$ConfigPath,
 
-  [string]$LogPath = "$env:LOCALAPPDATA\PromptSentinel\logs\endpoint-agent.log"
+  [string]$LogPath = "$env:LOCALAPPDATA\PromptWall\logs\endpoint-agent.log"
 )
 
 $ErrorActionPreference = "Stop"

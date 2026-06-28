@@ -55,7 +55,7 @@ function parseArgs(argv = process.argv.slice(2)) {
 }
 
 function loadEndpointEnv(envPath) {
-  const requested = envPath || process.env.SENTINEL_ENV_PATH;
+  const requested = envPath || process.env.SENTINEL_ENV_PATH || process.env.PROMPTWALL_ENV_PATH;
   if (!requested) return { loaded: false, path: null, keys: [], skipped: [], errors: [] };
   const result = loadEnv(requested);
   if (result.errors && result.errors.length) {

@@ -1,7 +1,7 @@
 'use strict';
 require('../../server/env').loadEnv();
 /**
- * PromptSentinel endpoint agent (reference implementation).
+ * PromptWall endpoint agent (reference implementation).
  *
  * Catches sensitive FILES headed to desktop AI apps that a browser extension
  * cannot see. Watches a folder, extracts and detects locally using the same
@@ -9,9 +9,10 @@ require('../../server/env').loadEnv();
  * plane. Respects scanner ignore-lists.
  *
  * Usage: node agent.js [watchDir]
- *   SENTINEL_URL (default http://localhost:4000), INGEST_API_KEY (required for control-plane calls)
- *   ENDPOINT_AGENT_WATCH_DIR (default OS temp promptsentinel-watch)
- *   ENDPOINT_AGENT_HANDOFF_SECRET enables signed native file-flow handoff events
+ *   SENTINEL_URL or PROMPTWALL_URL (default http://localhost:4000),
+ *   INGEST_API_KEY or PROMPTWALL_INGEST_API_KEY (required for control-plane calls)
+ *   ENDPOINT_AGENT_WATCH_DIR or PROMPTWALL_ENDPOINT_AGENT_WATCH_DIR
+ *   ENDPOINT_AGENT_HANDOFF_SECRET or PROMPTWALL_ENDPOINT_AGENT_HANDOFF_SECRET enables signed native file-flow handoff events
  */
 const fs = require('fs');
 const path = require('path');
@@ -26,7 +27,7 @@ const VERSION = require('../../package.json').version;
 const SERVER = process.env.SENTINEL_URL || 'http://localhost:4000';
 const KEY = process.env.INGEST_API_KEY || '';
 function defaultWatchDir(argv = process.argv, env = process.env) {
-  return argv[2] || env.ENDPOINT_AGENT_WATCH_DIR || path.join(os.tmpdir(), 'promptsentinel-watch');
+  return argv[2] || env.ENDPOINT_AGENT_WATCH_DIR || env.PROMPTWALL_ENDPOINT_AGENT_WATCH_DIR || path.join(os.tmpdir(), 'promptwall-watch');
 }
 const WATCH = defaultWatchDir();
 const HANDOFF_DIR = nativeHandoff.defaultHandoffDir();
@@ -38,8 +39,10 @@ const DEFAULT_SCANNER = {
   ignoreExtensions: ['.tmp', '.log', '.lock'],
   maxFileBytes: 6.3 * 1024 * 1024,
 };
-const REDACTION_HANDOFF_DIR = '.promptsentinel-redacted';
-const REDACTION_HANDOFF_SUFFIX = '.promptsentinel-redacted.txt';
+const REDACTION_HANDOFF_DIR = '.promptwall-redacted';
+const REDACTION_HANDOFF_SUFFIX = '.promptwall-redacted.txt';
+const LEGACY_REDACTION_HANDOFF_DIR = '.promptsentinel-redacted';
+const LEGACY_REDACTION_HANDOFF_SUFFIX = '.promptsentinel-redacted.txt';
 const POLICY_REFRESH_MS = 15 * 60 * 1000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 10000;
 const HANDOFF_RETRY_DELAY_MS = 200;
@@ -98,6 +101,8 @@ function sensorPolicy(input = {}) {
     alwaysBlock: detectorList(merged.alwaysBlock, defaults.alwaysBlock),
     ignore: detectorList(merged.ignore, defaults.ignore),
     disabledDetectors: detectorList(merged.disabledDetectors, defaults.disabledDetectors),
+    blockedDestinations: lowerList(merged.blockedDestinations, defaults.blockedDestinations),
+    blockedFileUploadDestinations: lowerList(merged.blockedFileUploadDestinations, defaults.blockedFileUploadDestinations),
     scanner: scannerConfig(merged.scanner || DEFAULT_SCANNER),
   };
 }
@@ -114,7 +119,11 @@ function ignoredByScanner(file, scanner) {
 function isRedactionHandoffPath(file) {
   const lower = String(file || '').toLowerCase();
   const parts = lower.split(/[\\/]+/).filter(Boolean);
-  return parts.includes(REDACTION_HANDOFF_DIR) || path.basename(lower).endsWith(REDACTION_HANDOFF_SUFFIX);
+  const base = path.basename(lower);
+  return parts.includes(REDACTION_HANDOFF_DIR)
+    || parts.includes(LEGACY_REDACTION_HANDOFF_DIR)
+    || base.endsWith(REDACTION_HANDOFF_SUFFIX)
+    || base.endsWith(LEGACY_REDACTION_HANDOFF_SUFFIX);
 }
 
 function fileMode(analysis, pol = policyState) {
@@ -254,9 +263,49 @@ function unscannedFileEvent(filename, user, outcome, note, opts = {}) {
   };
 }
 
+function destinationBlockedEvent(user, opts = {}) {
+  const destination = opts.destination || 'desktop-ai-app';
+  return {
+    prompt: '[destination blocked] ' + policyEngine.normalizeDestination(destination),
+    user,
+    destination,
+    source: 'endpoint_agent',
+    channel: 'file_upload',
+    sensor: sensorMetadata(),
+    clientOutcome: 'destination_blocked',
+    note: 'blocked locally: destination blocked by policy',
+  };
+}
+
+async function blockDestinationFile(file, user, opts = {}) {
+  console.log(`[BLOCK] ${safeFileLabel(file)} destination blocked by policy`);
+  await (opts.report || report)(destinationBlockedEvent(user, opts), opts);
+  return { decision: 'block', status: 'destination_blocked', supported: true, inspected: false };
+}
+
+function fileUploadBlockedEvent(user, opts = {}) {
+  const destination = opts.destination || 'desktop-ai-app';
+  return {
+    prompt: '[file upload blocked] ' + policyEngine.normalizeDestination(destination),
+    user,
+    destination,
+    source: 'endpoint_agent',
+    channel: 'file_upload',
+    sensor: sensorMetadata(),
+    clientOutcome: 'file_upload_blocked',
+    note: 'blocked locally: file upload blocked by policy',
+  };
+}
+
+async function blockFileUpload(file, user, opts = {}) {
+  console.log(`[BLOCK] ${safeFileLabel(file)} file upload blocked by policy`);
+  await (opts.report || report)(fileUploadBlockedEvent(user, opts), opts);
+  return { decision: 'block', status: 'file_upload_blocked', supported: true, inspected: false };
+}
+
 async function blockScanUnavailable(file, user, opts = {}) {
   const label = safeFileLabel(file);
-  console.log(`[BLOCK] ${label} could not be recorded by PromptSentinel`);
+  console.log(`[BLOCK] ${label} could not be recorded by PromptWall`);
   await (opts.report || report)(unscannedFileEvent(
     file,
     user,
@@ -313,7 +362,7 @@ function writeRedactionHandoff(file, text, analysis, opts = {}) {
   const tokenized = D.tokenize(text || '', analysis.findings || []);
   const label = safeFileLabel(file);
   const body = [
-    'PromptSentinel redacted companion file',
+    'PromptWall redacted companion file',
     `Original file: ${label}`,
     `Generated: ${new Date().toISOString()}`,
     '',
@@ -410,6 +459,12 @@ async function scanResolvedFile(file, full, root, opts = {}) {
   if (!stat.isFile()) return;
   if (ignoredByScanner(file, scanner)) return;
   const user = opts.user || os.userInfo().username;
+  if (policyEngine.destinationBlocked(opts.destination || 'desktop-ai-app', pol)) {
+    return blockDestinationFile(file, user, opts);
+  }
+  if (policyEngine.fileUploadBlocked(opts.destination || 'desktop-ai-app', pol)) {
+    return blockFileUpload(file, user, opts);
+  }
 
   if (stat.size > maxBytes) {
     console.log(`[BLOCK] ${label} is too large to inspect`);
@@ -508,7 +563,7 @@ function processHandoffDirectory(dir = HANDOFF_DIR, opts = {}) {
 }
 
 function start() {
-  console.log('PromptSentinel endpoint agent');
+  console.log('PromptWall endpoint agent');
   console.log('  watching:', WATCH);
   console.log('  native handoff:', handoffSecretReady(HANDOFF_SECRET) ? HANDOFF_DIR : 'disabled (set 32+ char ENDPOINT_AGENT_HANDOFF_SECRET)');
   console.log('  server  :', SERVER);

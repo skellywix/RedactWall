@@ -18,7 +18,7 @@ test('installer registers a restarting scheduled task without putting the ingest
   assert.match(install, /New-ScheduledTaskPrincipal[\s\S]+-LogonType Interactive[\s\S]+-RunLevel LeastPrivilege/);
   assert.match(install, /Register-ScheduledTask[\s\S]+-Principal \$principal/);
   assert.match(install, /INGEST_API_KEY=\$IngestKey/);
-  assert.match(install, /\$env:LOCALAPPDATA\\PromptSentinel/);
+  assert.match(install, /\$env:LOCALAPPDATA\\PromptWall/);
   assert.match(install, /BUILTIN\\Administrators/);
   assert.match(install, /ENDPOINT_AGENT_HANDOFF_SECRET=\$HandoffSecret/);
   assert.doesNotMatch(install, /"-IngestKey"/);
@@ -42,7 +42,7 @@ test('uninstaller removes task and can remove endpoint config', () => {
 test('deployment docs include endpoint task install and uninstall flow', () => {
   assert.match(deployment, /install-endpoint-agent\.ps1/);
   assert.match(deployment, /uninstall-endpoint-agent\.ps1/);
-  assert.match(deployment, /PromptSentinelEndpointAgent/);
-  assert.match(deployment, /%LOCALAPPDATA%\\PromptSentinel\\endpoint-agent\.env/);
+  assert.match(deployment, /PromptWallEndpointAgent/);
+  assert.match(deployment, /%LOCALAPPDATA%\\PromptWall\\endpoint-agent\.env/);
   assert.match(deployment, /ENDPOINT_AGENT_HANDOFF_SECRET/);
 });

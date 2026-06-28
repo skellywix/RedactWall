@@ -82,7 +82,7 @@ function packageMcpGuard(opts = {}) {
   validateRuntimeFiles(files);
 
   fs.mkdirSync(outDir, { recursive: true });
-  const baseName = `promptsentinel-mcp-guard-v${appVersion}`;
+  const baseName = `promptwall-mcp-guard-v${appVersion}`;
   const zipPath = path.join(outDir, `${baseName}.zip`);
   const manifestPath = path.join(outDir, `${baseName}.manifest.json`);
   const zip = new AdmZip();
@@ -94,7 +94,7 @@ function packageMcpGuard(opts = {}) {
   zip.writeZip(zipPath);
   const zipBody = fs.readFileSync(zipPath);
   const packageManifest = {
-    kind: 'promptsentinel-mcp-guard-package',
+    kind: 'promptwall-mcp-guard-package',
     packageName: path.basename(zipPath),
     appVersion,
     createdAt: now.toISOString(),

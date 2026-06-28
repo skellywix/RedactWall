@@ -32,8 +32,8 @@ npm run package:extension
 The command writes:
 
 ```text
-dist/browser-extension/promptsentinel-extension-v<version>.zip
-dist/browser-extension/promptsentinel-extension-v<version>.manifest.json
+dist/browser-extension/promptwall-extension-v<version>.zip
+dist/browser-extension/promptwall-extension-v<version>.manifest.json
 ```
 
 The manifest records the package SHA-256, every packaged file hash, the app and extension versions, the synced engine hashes, and packaging checks. It intentionally contains no prompt bodies or real keys.
@@ -64,7 +64,7 @@ Never put a real ingest key in source control or a screenshot. Generate a long r
 
 Recommended values:
 
-- `serverUrl`: HTTPS URL of the PromptSentinel control plane.
+- `serverUrl`: HTTPS URL of the PromptWall control plane.
 - `ingestKey`: pilot-specific ingest key, stored in MDM or Chrome policy.
 - `orgId`: institution or tenant identifier.
 - `email`: end-user email from directory attributes, preferred for the audit log.
@@ -77,7 +77,7 @@ On a managed test device:
 1. Open `chrome://policy` and reload policies.
 2. Confirm the extension is force-installed.
 3. Confirm managed storage is present.
-4. Open the PromptSentinel popup and confirm protection is enabled.
+4. Open the PromptWall popup and confirm protection is enabled.
 5. Open ChatGPT or Claude and send a benign prompt.
 6. Confirm the dashboard shows the correct user and org.
 7. Paste synthetic PII and confirm a block or redaction.

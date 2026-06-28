@@ -59,7 +59,7 @@ test('package script writes a prompt-free endpoint agent zip and integrity manif
 
   const manifest = JSON.parse(fs.readFileSync(result.manifestPath, 'utf8'));
   const zipBody = fs.readFileSync(result.zipPath);
-  assert.strictEqual(manifest.kind, 'promptsentinel-endpoint-agent-package');
+  assert.strictEqual(manifest.kind, 'promptwall-endpoint-agent-package');
   assert.strictEqual(manifest.sha256, sha256(zipBody));
   assert.strictEqual(manifest.appVersion, JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version);
   assert.strictEqual(manifest.checks.explicitIngestKeyRequired, true);
@@ -96,7 +96,7 @@ test('package script writes a prompt-free endpoint agent zip and integrity manif
   const agent = zip.readAsText('sensors/endpoint-agent/agent.js');
   assert.match(agent, /process\.env\.INGEST_API_KEY \|\| ''/);
   assert.match(agent, /redacted_available/);
-  assert.match(agent, /\.promptsentinel-redacted/);
+  assert.match(agent, /\.promptwall-redacted/);
   assert.match(agent, /ENDPOINT_AGENT_HANDOFF_SECRET/);
   assert.match(zip.readAsText('sensors/endpoint-agent/native-handoff.js'), /createHmac\('sha256'/);
   assert.match(zip.readAsText('sensors/endpoint-agent/write-handoff.js'), /writeHandoffFile/);
@@ -107,17 +107,17 @@ test('package script writes a prompt-free endpoint agent zip and integrity manif
 
 test('package validation refuses prompt bodies or development keys', () => {
   assert.throws(
-    () => validateRuntimeFiles(minimalFiles("const KEY = process.env.INGEST_API_KEY || 'dev-ingest-key';\nconst outcome = 'redacted_available';\nconst dir = '.promptsentinel-redacted';")),
+    () => validateRuntimeFiles(minimalFiles("const KEY = process.env.INGEST_API_KEY || 'dev-ingest-key';\nconst outcome = 'redacted_available';\nconst dir = '.promptwall-redacted';")),
     /development ingest key/
   );
 
   assert.throws(
-    () => validateRuntimeFiles(minimalFiles("const KEY = process.env.INGEST_API_KEY || '';\nconst outcome = 'redacted_available';\nconst dir = '.promptsentinel-redacted';\nconst sample = '524-71-9043';")),
+    () => validateRuntimeFiles(minimalFiles("const KEY = process.env.INGEST_API_KEY || '';\nconst outcome = 'redacted_available';\nconst dir = '.promptwall-redacted';\nconst sample = '524-71-9043';")),
     /synthetic SSN demo value/
   );
 
   assert.throws(
-    () => validateRuntimeFiles(minimalFiles("const KEY = process.env.INGEST_API_KEY || '';\nconst outcome = 'redacted_available';\nconst dir = '.promptsentinel-redacted';\nconst path = '/api/v1/scan-file';\nconst contentBase64 = 'abc';")),
+    () => validateRuntimeFiles(minimalFiles("const KEY = process.env.INGEST_API_KEY || '';\nconst outcome = 'redacted_available';\nconst dir = '.promptwall-redacted';\nconst path = '/api/v1/scan-file';\nconst contentBase64 = 'abc';")),
     /without uploading file bodies/
   );
 
@@ -223,7 +223,7 @@ test('packaged endpoint agent runs a package-to-install pilot smoke', async (t) 
         assert.match(body.prompt, /\[\[CREDIT_CARD_1\]\]/);
         assert.ok(body.clientFindings.some((finding) => finding.type === 'CREDIT_CARD'));
       }
-      assert.match(body.note, /\.promptsentinel-redacted/);
+      assert.match(body.note, /\.promptwall-redacted/);
       assert.ok(body.clientFindings.some((finding) => finding.type === 'US_SSN'));
       assert.ok(!JSON.stringify(body).includes('524-71-9043'));
       assert.ok(!JSON.stringify(body).includes('4111 1111 1111 1111'));
@@ -253,7 +253,7 @@ test('packaged endpoint agent runs a package-to-install pilot smoke', async (t) 
   assert.strictEqual(result.decision, 'redact');
   assert.strictEqual(result.status, 'redacted');
   assert.ok(result.redactionHandoff);
-  assert.match(result.redactionHandoff.relativePath, /^\.promptsentinel-redacted[\\/]/);
+  assert.match(result.redactionHandoff.relativePath, /^\.promptwall-redacted[\\/]/);
   assert.ok(!result.redactionHandoff.relativePath.includes('524-71-9043'));
 
   const companion = fs.readFileSync(result.redactionHandoff.path, 'utf8');

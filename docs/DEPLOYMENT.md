@@ -1,6 +1,6 @@
-# PromptSentinel Deployment
+# PromptWall Deployment
 
-PromptSentinel has two supported deployment paths:
+PromptWall has three supported deployment paths:
 
 1. Native Node.js for demos, pilots, and single-host installs.
 2. Docker Compose for repeatable container installs.
@@ -11,6 +11,10 @@ Use synthetic data for setup checks. Do not seed real member, patient, cardholde
 For AWS paid-customer deployment, see `docs/AWS_SAAS_DEPLOYMENT.md`. The first
 commercial AWS path is one isolated stack per customer with app-level tenant and
 seat enforcement.
+
+For install technicians taking a customer to production readiness, use
+`docs/TECHNICIAN_DEPLOYMENT_GUIDE.md` as the step-by-step runbook and handoff
+checklist.
 
 ## Native Setup
 
@@ -171,22 +175,22 @@ Run PowerShell from the project folder:
 
 ```powershell
 .\scripts\install-endpoint-agent.ps1 `
-  -SentinelUrl "https://promptsentinel.example.com" `
+  -SentinelUrl "https://promptwall.example.com" `
   -IngestKey "<pilot-ingest-key>" `
-  -WatchDir "$env:USERPROFILE\PromptSentinelWatch"
+  -WatchDir "$env:USERPROFILE\PromptWallWatch"
 ```
 
 This creates:
 
 ```text
-Task:   PromptSentinelEndpointAgent
-Config: %LOCALAPPDATA%\PromptSentinel\endpoint-agent.env
-Log:    %LOCALAPPDATA%\PromptSentinel\logs\endpoint-agent.log
+Task:   PromptWallEndpointAgent
+Config: %LOCALAPPDATA%\PromptWall\endpoint-agent.env
+Log:    %LOCALAPPDATA%\PromptWall\logs\endpoint-agent.log
 ```
 
-The config file carries `SENTINEL_URL`, `INGEST_API_KEY`, and `ENDPOINT_AGENT_WATCH_DIR`. Keep it restricted to the installing user, Administrators, and SYSTEM. For an all-user managed install, pass an explicit `-ConfigDir "$env:ProgramData\PromptSentinel"` from an elevated PowerShell session.
+The config file carries `SENTINEL_URL`, `INGEST_API_KEY`, and `ENDPOINT_AGENT_WATCH_DIR`. Keep it restricted to the installing user, Administrators, and SYSTEM. For an all-user managed install, pass an explicit `-ConfigDir "$env:ProgramData\PromptWall"` from an elevated PowerShell session.
 
-The agent inspects supported watched files locally. Under redact policy, structured-only findings write a safe companion text file under `.promptsentinel-redacted` and report `redacted_available` evidence to the control plane; semantic or mixed findings remain held for Security Admin review.
+The agent inspects supported watched files locally. Under redact policy, structured-only findings write a safe companion text file under `.promptwall-redacted` and report `redacted_available` evidence to the control plane; semantic or mixed findings remain held for Security Admin review.
 
 For the native file-flow spike, a future OS or app-specific collector can write
 signed JSON upload-intent events into a local handoff directory instead of
@@ -195,7 +199,7 @@ with an explicit local secret:
 
 ```powershell
 .\scripts\install-endpoint-agent.ps1 `
-  -SentinelUrl "https://promptsentinel.example.com" `
+  -SentinelUrl "https://promptwall.example.com" `
   -IngestKey "<pilot-ingest-key>" `
   -HandoffSecret "<32-plus-character-local-handoff-secret>"
 ```
@@ -214,7 +218,7 @@ produce one signed upload-intent event without putting the handoff secret on the
 command line:
 
 ```powershell
-$env:SENTINEL_ENV_PATH = "$env:LOCALAPPDATA\PromptSentinel\endpoint-agent.env"
+$env:SENTINEL_ENV_PATH = "$env:LOCALAPPDATA\PromptWall\endpoint-agent.env"
 node .\sensors\endpoint-agent\write-handoff.js `
   --file "$env:USERPROFILE\Downloads\loan-file.pdf" `
   --destination "Desktop AI" `
@@ -229,8 +233,8 @@ body.
 Check status:
 
 ```powershell
-Get-ScheduledTask -TaskName PromptSentinelEndpointAgent
-Get-Content "$env:LOCALAPPDATA\PromptSentinel\logs\endpoint-agent.log" -Tail 40
+Get-ScheduledTask -TaskName PromptWallEndpointAgent
+Get-Content "$env:LOCALAPPDATA\PromptWall\logs\endpoint-agent.log" -Tail 40
 ```
 
 Uninstall:
@@ -266,6 +270,30 @@ Set these through `.env`, container environment, or a deployment secret manager:
 | `ENDPOINT_AGENT_HANDOFF_DIR` | Optional local spool for signed native endpoint upload-intent events. |
 | `ENDPOINT_AGENT_HANDOFF_SECRET` | Optional 32-plus-character local HMAC secret required before the endpoint agent accepts native handoff events. |
 
+PromptWall accepts product-prefixed aliases for new deployments while keeping
+the existing `SENTINEL_*`, `INGEST_API_KEY`, and endpoint-agent names valid for
+upgrades. Use one family per setting; a non-empty legacy key wins when both are
+set.
+
+| Existing key | PromptWall alias |
+| --- | --- |
+| `SENTINEL_ENV_PATH` | `PROMPTWALL_ENV_PATH` |
+| `SENTINEL_URL` | `PROMPTWALL_URL` |
+| `SENTINEL_DB_PATH` | `PROMPTWALL_DB_PATH` |
+| `SENTINEL_POLICY_PATH` | `PROMPTWALL_POLICY_PATH` |
+| `SENTINEL_SAAS_MODE` | `PROMPTWALL_SAAS_MODE` |
+| `SENTINEL_TENANT_ID` | `PROMPTWALL_TENANT_ID` |
+| `SENTINEL_SEAT_LIMIT` | `PROMPTWALL_SEAT_LIMIT` |
+| `SENTINEL_REQUIRE_TENANT_CONTEXT` | `PROMPTWALL_REQUIRE_TENANT_CONTEXT` |
+| `SENTINEL_REQUIRE_USER_IDENTITY` | `PROMPTWALL_REQUIRE_USER_IDENTITY` |
+| `SENTINEL_SECRET` | `PROMPTWALL_SECRET` |
+| `SENTINEL_DATA_KEY` | `PROMPTWALL_DATA_KEY` |
+| `SENTINEL_REQUEST_TIMEOUT_MS` | `PROMPTWALL_REQUEST_TIMEOUT_MS` |
+| `INGEST_API_KEY` | `PROMPTWALL_INGEST_API_KEY` |
+| `ENDPOINT_AGENT_WATCH_DIR` | `PROMPTWALL_ENDPOINT_AGENT_WATCH_DIR` |
+| `ENDPOINT_AGENT_HANDOFF_DIR` | `PROMPTWALL_ENDPOINT_AGENT_HANDOFF_DIR` |
+| `ENDPOINT_AGENT_HANDOFF_SECRET` | `PROMPTWALL_ENDPOINT_AGENT_HANDOFF_SECRET` |
+
 Never bind `SENTINEL_DB_PATH` to a cloud-synced folder or network share. SQLite locking must be backed by local disk semantics, and production preflight blocks missing, cloud-synced, or UNC/network SQLite paths before startup readiness passes.
 
 `npm run setup:prod` generates values that meet these floors. When values come from a deployment secret manager, keep the same minimum lengths or `/readyz` will report production readiness as blocked.
@@ -287,7 +315,7 @@ password because it contains the MFA seed. For a non-default env file or
 white-label issuer, use:
 
 ```bash
-npm run mfa:uri -- --env pilot.env --issuer "PromptSentinel Pilot"
+npm run mfa:uri -- --env pilot.env --issuer "PromptWall Pilot"
 ```
 
 Auditor sessions can read sanitized dashboard evidence, audit status, policy,
@@ -302,18 +330,38 @@ Blocked prompt/file events, response leakage, hidden-instruction blocks, and fai
 
 Sensor version posture gaps are also alertable. If browser extension, endpoint
 agent, or MCP guard events show mixed versions or missing version metadata,
-PromptSentinel sends a forced `SENSOR_VERSION_GAP` alert with bounded source,
+PromptWall sends a forced `SENSOR_VERSION_GAP` alert with bounded source,
 version, and platform metadata only.
+
+## Destination Policy Controls
+
+Security Admins can edit `governedDestinations` and `blockedDestinations` from
+the Policy tab. Governed destinations drive coverage posture and shadow-AI
+classification. Blocked destinations are hard app-level stops: browser sends,
+browser file uploads, endpoint file flows, `/api/v1/gate`,
+`/api/v1/scan-file`, and `/api/v1/scan-response` return
+`destination_blocked` before prompt or file content is analyzed or retained.
+
+Security Admins can also edit `blockedFileUploadDestinations` when a customer
+wants chat allowed but document upload forbidden for a destination. Browser
+uploads, endpoint file flows, and `/api/v1/scan-file` return
+`file_upload_blocked` before uploaded bytes, extracted text, or sensitive
+filenames are retained.
+
+Use host names or URLs for web tools, for example `chatgpt.com` or
+`https://chat.deepseek.com`. Use wildcards such as `*.example-ai.com` for
+subdomains. Desktop app labels normalize spaces to hyphens, so a native handoff
+destination of `Desktop AI` matches `desktop-ai`.
 
 ## Retention Operations
 
-PromptSentinel retains raw approval prompts and token vaults only for records that need review or rehydration. Set `rawRetentionDays` in policy to define how long finalized `approved`, `denied`, and `redacted` records keep those sealed fields. The default is 30 days.
+PromptWall retains raw approval prompts and token vaults only for records that need review or rehydration. Set `rawRetentionDays` in policy to define how long finalized `approved`, `denied`, and `redacted` records keep those sealed fields. The default is 30 days.
 
 Revealing a retained raw prompt or approving a held prompt release requires an active Security Admin session, a CSRF token, and password confirmation. Successful reveals, failed reveal confirmations, approved releases, and failed approval confirmations are written to the audit log.
 
 Sensors or proxy bridges that poll `/api/v1/status/:id` for a held prompt must
 send the `x-release-token` header returned by the original gate response.
-PromptSentinel stores only the token hash, rejects query-string release tokens,
+PromptWall stores only the token hash, rejects query-string release tokens,
 and the reference Squid/ICAP bridge forwards the header automatically through
 `awaitRelease`.
 
@@ -322,7 +370,7 @@ The server runs a retention purge on startup and then hourly. Security Admins ca
 ```powershell
 Invoke-RestMethod `
   -Method Post `
-  -Uri "https://promptsentinel.example.com/api/retention/purge" `
+  -Uri "https://promptwall.example.com/api/retention/purge" `
   -WebSession $adminSession `
   -Headers @{ "x-csrf-token" = $csrfToken }
 ```
@@ -345,7 +393,7 @@ Verify a backup before you rely on it:
 npm run backup:verify -- backups/sentinel-YYYY-MM-DDTHH-MM-SS-sssZ.db
 ```
 
-For an offline restore, stop the PromptSentinel process, restore to a new local-disk path, verify it, and then point `SENTINEL_DB_PATH` at the restored file:
+For an offline restore, stop the PromptWall process, restore to a new local-disk path, verify it, and then point `SENTINEL_DB_PATH` at the restored file:
 
 ```bash
 npm run backup:restore -- backups/sentinel-YYYY-MM-DDTHH-MM-SS-sssZ.db data/restored-sentinel.db

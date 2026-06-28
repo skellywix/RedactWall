@@ -1,5 +1,5 @@
 {
-  "serverUrl": "https://promptsentinel.example.org",
+  "serverUrl": "https://promptwall.example.org",
   "ingestKey": "REPLACE_WITH_LONG_RANDOM_INGEST_KEY",
   "orgId": "credit-union-demo",
   "email": "employee@example.org",

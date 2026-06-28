@@ -5,7 +5,7 @@ const { test, expect } = require('@playwright/test');
 
 async function login(page) {
   await page.goto('/login.html');
-  await expect(page.getByRole('heading', { name: 'PromptSentinel' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'PromptWall' })).toBeVisible();
   await page.locator('#password').fill('e2e-pass');
   await page.getByRole('button', { name: 'Continue' }).click();
   await expect(page).toHaveURL(/\/index\.html$/);
@@ -83,7 +83,7 @@ test('admin console login, approval, policy save, and evidence export work in a 
   const downloadPromise = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Export Evidence' }).click();
   const download = await downloadPromise;
-  expect(download.suggestedFilename()).toMatch(/^promptsentinel-evidence-/);
+  expect(download.suggestedFilename()).toMatch(/^promptwall-evidence-/);
   const exportedPath = await download.path();
   const pack = JSON.parse(await fs.readFile(exportedPath, 'utf8'));
   expect(pack.auditIntegrity.ok).toBe(true);
