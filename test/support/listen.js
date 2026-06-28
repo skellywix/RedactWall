@@ -2,6 +2,14 @@
 const http = require('node:http');
 const net = require('node:net');
 
+const DEFAULT_LOOPBACK_FETCH_TIMEOUT_MS = 5000;
+const DEFAULT_LOOPBACK_FETCH_ATTEMPTS = 30;
+
+function positiveNumber(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 function responseHeaders(raw = {}) {
   return {
     get(name) {
@@ -65,7 +73,7 @@ function loopbackHttpFetchOnce(url, opts = {}) {
         req.setTimeout(0);
       }
     });
-    req.setTimeout(Number(process.env.PROMPTWALL_LOOPBACK_FETCH_TIMEOUT_MS || 500), () => {
+    req.setTimeout(Number(process.env.PROMPTWALL_LOOPBACK_FETCH_TIMEOUT_MS || DEFAULT_LOOPBACK_FETCH_TIMEOUT_MS), () => {
       if (connected) return;
       const err = new Error(`loopback fetch connect timed out on ${target.host}`);
       err.code = 'ETIMEDOUT';
@@ -82,14 +90,15 @@ function loopbackHttpFetchOnce(url, opts = {}) {
 
 async function loopbackHttpFetch(url, opts = {}) {
   let lastError;
-  for (let i = 0; i < 10; i += 1) {
+  const attempts = positiveNumber(process.env.PROMPTWALL_LOOPBACK_FETCH_ATTEMPTS, DEFAULT_LOOPBACK_FETCH_ATTEMPTS);
+  for (let i = 0; i < attempts; i += 1) {
     try {
       return await loopbackHttpFetchOnce(url, opts);
     } catch (err) {
       lastError = err;
       if (opts.signal && opts.signal.aborted) throw err;
       if (!retriableLoopbackError(err)) throw err;
-      await delay(25 * (i + 1));
+      await delay(Math.min(250, 25 * (i + 1)));
     }
   }
   throw lastError;
@@ -201,4 +210,4 @@ async function listen(appUnderTest, opts = {}) {
   throw lastError || new Error('failed to bind loopback test server');
 }
 
-module.exports = { listen };
+module.exports = { listen, loopbackHttpFetch };

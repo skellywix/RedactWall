@@ -24,7 +24,7 @@ fs.writeFileSync(process.env.SENTINEL_POLICY_PATH, JSON.stringify({
 }, null, 2));
 
 const app = require('../server/app');
-const { listen } = require('./support/listen');
+const { listen, loopbackHttpFetch } = require('./support/listen');
 const db = require('../server/db');
 
 
@@ -42,7 +42,7 @@ async function withServer(fn) {
 }
 
 async function jsonFetch(port, apiPath, { method = 'POST', body, headers = {} } = {}) {
-  return fetch(`http://127.0.0.1:${port}${apiPath}`, {
+  return loopbackHttpFetch(`http://127.0.0.1:${port}${apiPath}`, {
     method,
     headers: {
       'Content-Type': 'application/json',

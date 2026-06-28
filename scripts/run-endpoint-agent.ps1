@@ -15,7 +15,8 @@ $logDir = Split-Path -Parent $LogPath
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 
 $node = Get-Command node -ErrorAction Stop
-$env:SENTINEL_ENV_PATH = $config
+$env:PROMPTWALL_ENV_PATH = $config
+Remove-Item Env:\SENTINEL_ENV_PATH -ErrorAction SilentlyContinue
 Set-Location -LiteralPath $repo
 
 try {

@@ -161,6 +161,7 @@ function stalePathProblems(relativePath, guide) {
     'cd promptsentinel',
     '-SentinelUrl',
     '$env:SENTINEL_URL',
+    '$env:SENTINEL_ENV_PATH',
   ];
   for (const pattern of stalePatterns) {
     if (guide.includes(pattern)) problems.push(`${relativePath}: stale path remains: ${pattern}`);

@@ -42,8 +42,10 @@ test('installer registers a restarting scheduled task without putting the ingest
   assert.doesNotMatch(install, /\$HandoffSecret[\s\S]{0,120}\$taskArgs/);
 });
 
-test('runner loads endpoint config through SENTINEL_ENV_PATH and starts the agent', () => {
-  assert.match(run, /\$env:SENTINEL_ENV_PATH = \$config/);
+test('runner loads endpoint config through PROMPTWALL_ENV_PATH and starts the agent', () => {
+  assert.match(run, /\$env:PROMPTWALL_ENV_PATH = \$config/);
+  assert.match(run, /Remove-Item Env:\\SENTINEL_ENV_PATH/);
+  assert.doesNotMatch(run, /\$env:SENTINEL_ENV_PATH = \$config/);
   assert.match(run, /sensors\\endpoint-agent\\agent\.js/);
   assert.match(run, /\*>> \$LogPath/);
 });
@@ -61,7 +63,9 @@ test('desktop collector shell action is per-user and secret-free', () => {
   assert.match(desktopInstall, /run-desktop-collector\.ps1/);
   assert.doesNotMatch(desktopInstall, /"-HandoffSecret"/);
   assert.doesNotMatch(desktopInstall, /INGEST_API_KEY=\$IngestKey/);
-  assert.match(desktopRun, /\$env:SENTINEL_ENV_PATH = \$config/);
+  assert.match(desktopRun, /\$env:PROMPTWALL_ENV_PATH = \$config/);
+  assert.match(desktopRun, /Remove-Item Env:\\SENTINEL_ENV_PATH/);
+  assert.doesNotMatch(desktopRun, /\$env:SENTINEL_ENV_PATH = \$config/);
   assert.match(desktopRun, /\[string\[\]\]\$FilePath/);
   assert.match(desktopRun, /foreach \(\$file in \$FilePath\)/);
   assert.match(desktopRun, /protected-upload\.js/);

@@ -14,7 +14,7 @@ process.env.INGEST_API_KEY = 'unit-ingest-key';
 process.env.SENTINEL_DB_PATH = path.join(os.tmpdir(), 'ps-validation-test-' + crypto.randomBytes(6).toString('hex') + '.db');
 
 const app = require('../server/app');
-const { listen } = require('./support/listen');
+const { listen, loopbackHttpFetch } = require('./support/listen');
 const db = require('../server/db');
 const policyPath = path.join(__dirname, '..', 'config', 'policy.json');
 
@@ -33,7 +33,7 @@ async function withServer(fn) {
 }
 
 async function jsonFetch(port, apiPath, { method = 'POST', body, headers = {} } = {}) {
-  return fetch(`http://127.0.0.1:${port}${apiPath}`, {
+  return loopbackHttpFetch(`http://127.0.0.1:${port}${apiPath}`, {
     method,
     headers: {
       'Content-Type': 'application/json',
