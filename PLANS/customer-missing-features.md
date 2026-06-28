@@ -265,10 +265,11 @@ Acceptance evidence:
 Current state: sanitized evidence export includes audit integrity, policy, parsed
 policy diffs, coverage posture, sensor versions, lineage summaries, report
 metadata, backup status, restore-drill status, and control mappings. Backup and
-restore tooling exists, and `npm run evidence:pack` can generate dated JSON or
-optional zip packs from the local evidence store. The app process does not run
-its own scheduler yet; customer-silo deployments should invoke the schedule
-config from Task Scheduler, cron, systemd timers, or the customer runbook
+restore tooling exists, `npm run evidence:pack` can generate dated JSON or
+optional zip packs from the local evidence store, and
+`npm run evidence:pack:install-task` installs a Windows Task Scheduler wrapper
+for the scheduled export config. Non-Windows customer-silo deployments should
+invoke the schedule config from cron, systemd timers, or the customer runbook
 scheduler.
 
 Customer ask: "Can we hand an examiner a quarterly pack that maps to GLBA, NCUA,
@@ -285,9 +286,12 @@ Implementation connection:
   packs without prompt bodies.
 - Use `config/evidence-schedule.example.json` as the customer-silo schedule
   config template.
+- Use `scripts/install-evidence-pack-task.ps1` and
+  `scripts/run-evidence-pack.ps1` for Windows scheduled examiner-pack exports.
 
 Acceptance evidence:
 - `node --test test/evidence.test.js test/backup-store.test.js test/policy-history.test.js`
+- `node --test test/evidence-pack-task.test.js`
 - `npm run backup -- <temp>` and `npm run backup:verify -- <backup.db>`
 - Evidence pack grep confirms no synthetic SSN, card, API key, release token, or
   raw prompt survives in the export.

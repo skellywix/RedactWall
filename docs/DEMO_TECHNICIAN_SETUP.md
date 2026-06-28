@@ -59,6 +59,7 @@ This section is generated from the app by `npm run docs:demo-guide`. Do not hand
 | `npm run evidence:pack` | `node scripts/export-evidence-pack.js` |
 | `npm run evidence:pack:zip` | `node scripts/export-evidence-pack.js --zip` |
 | `npm run evidence:pack:scheduled` | `node scripts/export-evidence-pack.js --schedule` |
+| `npm run evidence:pack:install-task` | `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/install-evidence-pack-task.ps1` |
 | `npm run package:extension` | `node scripts/package-extension.js` |
 | `npm run release:extension:check` | `node scripts/check-extension-release.js` |
 | `npm run package:endpoint-agent` | `node scripts/package-endpoint-agent.js` |
@@ -96,6 +97,7 @@ This section is generated from the app by `npm run docs:demo-guide`. Do not hand
 | `docs/DEMO_TECHNICIAN_SETUP.md` | Demo machine setup and reset runbook | Present |
 | `docs/DEPLOYMENT.md` | Native Node and Docker deployment reference | Present |
 | `docs/MANAGED_EXTENSION_DEPLOYMENT.md` | Chrome managed extension pilot reference | Present |
+| `docs/EVIDENCE_PACK_TASK.md` | Examiner evidence pack scheduled task reference | Present |
 | `docs/APPROVAL_ROUTING.md` | Approval owner and SLA routing reference | Present |
 | `docs/TECHNICIAN_DEPLOYMENT_GUIDE.md` | Install-day production readiness runbook | Present |
 | `docs/AWS_SAAS_DEPLOYMENT.md` | Customer-silo AWS deployment path | Present |

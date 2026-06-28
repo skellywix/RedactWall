@@ -54,9 +54,10 @@ Build next:
   users, groups, and the sanitized approval workflow.
 - Guided rule-builder controls for scoped policy and exception lifecycle, on top
   of the dashboard JSON editors for `policyScopes` and `policyExceptions`.
-- Automated schedule ownership around the examiner evidence pack, now that the
-  pack itself includes report metadata, control mappings, backup verification,
-  and restore-drill evidence without prompt bodies.
+- Non-Windows schedule ownership around the examiner evidence pack. Windows
+  pilots now have a scheduled-task installer, and the pack itself includes
+  report metadata, control mappings, backup verification, and restore-drill
+  evidence without prompt bodies.
 
 ## Recent Completed Passes
 

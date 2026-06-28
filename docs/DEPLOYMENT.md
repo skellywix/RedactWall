@@ -558,12 +558,25 @@ npm run evidence:pack:zip -- evidence-packs \
 ```
 
 For scheduled customer-silo reporting, copy
-`config/evidence-schedule.example.json`, set the output folder and cadence, and
-invoke it from the platform scheduler:
+`config/evidence-schedule.example.json` to
+`config/evidence-schedule.json`, set the output folder and cadence, and invoke
+it from the platform scheduler:
 
 ```bash
 npm run evidence:pack:scheduled -- config/evidence-schedule.json
 ```
+
+On Windows pilot or customer-silo hosts, install the local scheduled task:
+
+```powershell
+npm run evidence:pack:install-task
+```
+
+The task runs `scripts/run-evidence-pack.ps1`, writes run status to
+`%LOCALAPPDATA%\PromptWall\logs\evidence-pack.log`, and passes only the repo
+path, schedule config path, and log path as task arguments. It does not place
+environment secrets, prompt bodies, release tokens, or upload contents in the
+scheduled task definition.
 
 ## SIEM Alerts
 

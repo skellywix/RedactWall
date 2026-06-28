@@ -586,10 +586,19 @@ sudo docker exec promptwall npm run evidence:pack:zip -- /data/evidence-packs \
   /data/restored-sentinel.db
 ```
 
-For recurring reporting, copy `config/evidence-schedule.example.json` to a
-customer-specific file, set the cadence and output folder, and invoke
+For recurring reporting, copy `config/evidence-schedule.example.json` to
+`config/evidence-schedule.json`, set the cadence and output folder, and invoke
 `npm run evidence:pack:scheduled -- <file>` from Task Scheduler, cron, or the
-customer's runbook scheduler. Keep the generated JSON or zip in the approved
+customer's runbook scheduler. On Windows hosts, install the standard local task:
+
+```powershell
+npm run evidence:pack:install-task
+```
+
+The task writes run status to
+`%LOCALAPPDATA%\PromptWall\logs\evidence-pack.log` and keeps raw prompt bodies,
+environment secrets, release tokens, and uploaded file bytes out of the task
+definition and generated pack. Keep the generated JSON or zip in the approved
 evidence location, not in email or a synced personal folder.
 
 ## Production Handoff Packet
