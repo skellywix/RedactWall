@@ -34,9 +34,9 @@ npm run release:extension:check -- dist/browser-extension
 
 The command wraps `npm run package:extension`, validates the force-install and
 managed-storage examples, checks the private or unlisted release checklist, and
-writes a prompt-free release-readiness JSON file. Use `--extension-id
-<chrome-web-store-id>` after the private or unlisted Chrome Web Store item
-exists.
+writes a prompt-free release-readiness JSON file. After the private or unlisted
+Chrome Web Store item exists, rerun it with the extension id; that also writes a
+ready-to-import force-install policy with the real extension id.
 
 For package-only development checks, run:
 
@@ -50,6 +50,7 @@ The command writes:
 dist/browser-extension/promptwall-extension-v<version>.zip
 dist/browser-extension/promptwall-extension-v<version>.manifest.json
 dist/browser-extension/promptwall-extension-v<version>.release-readiness.json
+dist/browser-extension/promptwall-extension-v<version>.extension-settings.json  # only when an extension id is supplied
 ```
 
 The manifest records the package SHA-256, every packaged file hash, the app and extension versions, the synced engine hashes, and packaging checks. It intentionally contains no prompt bodies or real keys.
@@ -72,6 +73,16 @@ The command fails if:
 ## Extension Settings Example
 
 Use `docs/examples/chrome-extension-settings.example.json` as the shape for Chrome Enterprise extension force-install policy. Replace `<extension-id>` after publishing or packaging the extension.
+Preferred: after the Chrome Web Store item exists, rerun the release gate with
+the real id and use the generated artifact:
+
+```bash
+npm run release:extension:check -- dist/browser-extension <chrome-web-store-id>
+```
+
+The generated `promptwall-extension-v<version>.extension-settings.json` contains
+only the extension id, `force_installed`, and the Chrome Web Store update URL. It
+does not contain `serverUrl`, `orgId`, ingest keys, or user identity.
 
 For a private Chrome Web Store item, the update URL is usually:
 

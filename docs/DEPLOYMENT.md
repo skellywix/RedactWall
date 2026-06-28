@@ -172,6 +172,20 @@ release checklist, and absence of a packaged development ingest key. Configure
 `serverUrl`, `ingestKey`, and identity through Chrome managed storage or local
 demo storage.
 
+After the private or unlisted Chrome Web Store item exists, rerun the same gate
+with the real id:
+
+```bash
+npm run release:extension:check -- dist/browser-extension <chrome-web-store-id>
+```
+
+That adds a prompt-free
+`promptwall-extension-v<version>.extension-settings.json` artifact for Chrome
+Enterprise force-install policy. It contains the extension id, `force_installed`,
+and the Chrome Web Store update URL only; managed storage with `serverUrl`,
+`orgId`, user identity, and the ingest key stays in the customer's policy system
+or vault.
+
 The extension posts sanitized install-health heartbeats on install, browser
 startup, and a periodic `installHeartbeat` alarm when server config is present.
 The heartbeat verifies Manifest V3 metadata, background worker wiring, content

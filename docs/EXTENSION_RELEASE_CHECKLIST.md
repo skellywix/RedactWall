@@ -32,6 +32,22 @@ dist/browser-extension/promptwall-extension-v<version>.manifest.json
 dist/browser-extension/promptwall-extension-v<version>.release-readiness.json
 ```
 
+After the Chrome Web Store item exists, rerun with the final item id:
+
+```bash
+npm run release:extension:check -- dist/browser-extension <chrome-web-store-id>
+```
+
+That writes:
+
+```text
+dist/browser-extension/promptwall-extension-v<version>.extension-settings.json
+```
+
+The generated ExtensionSettings file is safe to attach to the handoff packet
+because it contains only the extension id, force-install mode, and update URL.
+It does not contain managed-storage values or ingest keys.
+
 Attach the `.manifest.json` and `.release-readiness.json` to the technician
 handoff packet. Do not attach managed storage files that contain real ingest
 keys.
@@ -59,7 +75,10 @@ Before upload:
 
 After the Web Store item exists:
 
-- Replace `<extension-id>` in
+- Prefer the generated
+  `promptwall-extension-v<version>.extension-settings.json` from
+  `npm run release:extension:check -- dist/browser-extension <chrome-web-store-id>`.
+- If generating by hand, replace `<extension-id>` in
   `docs/examples/chrome-extension-settings.example.json`.
 - Keep `update_url` set to `https://clients2.google.com/service/update2/crx` for
   Chrome Web Store installs.

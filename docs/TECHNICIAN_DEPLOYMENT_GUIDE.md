@@ -173,6 +173,14 @@ npm run package:endpoint-agent
 npm run package:mcp-guard
 ```
 
+After the private or unlisted Chrome Web Store item exists, rerun the extension
+gate with the final extension id so the handoff packet includes the exact
+force-install policy:
+
+```powershell
+npm run release:extension:check -- dist/browser-extension <chrome-web-store-id>
+```
+
 Record the generated artifact names and SHA-256 manifests:
 
 - `dist/browser-extension/`
@@ -180,7 +188,9 @@ Record the generated artifact names and SHA-256 manifests:
 - `dist/mcp-guard/`
 
 The browser extension folder should include the zip, integrity manifest, and
-release-readiness report.
+release-readiness report. When a Chrome Web Store extension id is supplied, it
+should also include `promptwall-extension-v<version>.extension-settings.json`
+with the real Chrome Web Store extension id and update URL.
 
 The manifests belong in the handoff packet. The packages must not contain real
 ingest keys or prompt bodies.
@@ -592,6 +602,8 @@ Deliver a packet with:
 - Server image URI and tag.
 - Sensor package names and SHA-256 manifest paths.
 - Extension release-readiness report.
+- ExtensionSettings force-install policy generated with the final Chrome Web
+  Store extension id.
 - `/healthz` and `/readyz` evidence.
 - Preflight status evidence.
 - Sanitized examiner pack from `npm run evidence:pack`, including coverage,

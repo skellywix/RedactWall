@@ -123,6 +123,9 @@ For this alignment track, completion requires evidence for every area below:
 - Extended approval routing rules to match SCIM user names, SCIM groups, and
   org ids so provisioned identity can route legal, lending, engineering, or
   other customer review queues without storing raw prompts or file text.
+- Extended the browser extension release gate so a real Chrome Web Store
+  extension id produces a prompt-free `ExtensionSettings` force-install policy
+  artifact for managed rollout handoff.
 
 ## Open Decisions
 
