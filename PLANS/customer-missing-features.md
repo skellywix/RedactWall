@@ -156,11 +156,11 @@ payloads, and examiner export expose that sanitized workflow context. The
 dashboard approval queue can now filter held items by workflow state,
 detector/category, and destination so reviewers can work member-data,
 source-code, legal, or app-specific queues without opening every incident.
-PromptWall supports best-effort generic JSON, Slack, Microsoft Teams, and SMTP
-approval notifications, persists delivery status on the query, audits
-notification outcomes, and escalates overdue routed items into tamper-evident
-evidence. Ticketing adapters and more granular escalation policies are still
-open.
+PromptWall supports best-effort generic JSON, Slack, Microsoft Teams, SMTP, and
+sanitized ticket-bridge approval notifications, persists delivery status on the
+query, audits notification outcomes, and escalates overdue routed items into
+tamper-evident evidence. Native Jira/Linear API adapters and more granular
+escalation policies are still open.
 
 Customer ask: "Can member-services exceptions route to compliance, source-code
 events route to security, and urgent approvals notify someone immediately?"
@@ -172,7 +172,10 @@ Implementation connection:
 - Direct SMTP email is implemented on top of the existing sanitized
   `server/notifiers.js` discipline and refuses prompt bodies, token vaults, raw
   findings, decision notes, and uploaded file bytes.
-- Build ticketing adapters on the same notification discipline.
+- Generic ticket bridges are implemented on the same notification discipline
+  with deterministic dedupe keys and issue-tracker metadata.
+- Build native Jira/Linear API adapters only if a pilot needs direct issue
+  creation without customer middleware.
 
 Acceptance evidence:
 - Routing, gate, and notifier tests prove sanitized payloads never include

@@ -370,6 +370,9 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 - **MDM identity**, reliable per-site send, **Man-in-the-Prompt** guard, **shadow-AI** discovery and default-deny unapproved AI blocking.
 - **Coverage posture** showing governed destinations, required sensors, desired sensor versions, browser/endpoint/MCP install-health checks, fleet state by user/org/sensor, shadow-AI sightings, and stale or missing sensor coverage.
 - **Approval routing** that assigns held decisions to security, compliance, privacy, or legal with SLA metadata, category/destination queue filters, assignment-aware approver decisions, SIEM alert payloads, examiner evidence, sanitized workflow notifications, and overdue SLA escalation evidence.
+- **Ticket bridge notifications** that send sanitized approval workflow tickets
+  to Jira, Linear, SOAR, or internal ticketing middleware without prompt bodies,
+  raw findings, vaults, release tokens, or decision notes.
 - **Dashboard lineage and sanitized examiner export** with audit integrity, policy diffs, coverage posture, workflow ownership, and lineage by user, destination, sensor, channel, category, and decision.
 - **Response scanning controls** that let customers flag, redact, or block
   sensitive AI replies while retaining only sanitized evidence.
@@ -386,11 +389,11 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 
 ## Still ahead (to ship commercially)
 
-- Polished enterprise identity UX, IdP-specific setup recipes, exception
-  lifecycle review, and deeper multi-tenant isolation per institution.
+- Polished enterprise identity UX, IdP-specific setup recipes, and deeper
+  multi-tenant isolation per institution.
 - Signed Chrome Web Store listing and force-install rollout; local extension zip, integrity manifest, release-readiness report, generated ExtensionSettings policy, and managed-policy checklist are packaged.
-- Ticketing adapters on top of the existing sanitized webhook, Slack, Teams,
-  SMTP, and escalation workflow.
+- Native Jira/Linear API adapters if pilots need direct issue creation without
+  customer middleware.
 - Ship the signed native endpoint collector that feeds the tested handoff contract from clipboard and AI-app upload flows.
 - Upgrade the on-device classifier to a quantized ONNX/WASM NER when recall demands it.
 
@@ -435,6 +438,11 @@ Copy `.env.example` to `.env` (or export):
 | `PROMPTWALL_APPROVAL_NOTIFY_WEBHOOK_TOKEN` / `APPROVAL_NOTIFY_WEBHOOK_TOKEN` | Optional bearer token for the approval JSON webhook |
 | `PROMPTWALL_APPROVAL_SLACK_WEBHOOK_URL` / `APPROVAL_SLACK_WEBHOOK_URL` | Optional Slack incoming webhook for routed approval notifications |
 | `PROMPTWALL_APPROVAL_TEAMS_WEBHOOK_URL` / `APPROVAL_TEAMS_WEBHOOK_URL` | Optional Microsoft Teams webhook for routed approval notifications |
+| `PROMPTWALL_APPROVAL_TICKET_WEBHOOK_URL` / `APPROVAL_TICKET_WEBHOOK_URL` | Optional sanitized ticket bridge webhook for Jira, Linear, SOAR, or internal ticketing middleware |
+| `PROMPTWALL_APPROVAL_TICKET_WEBHOOK_TOKEN` / `APPROVAL_TICKET_WEBHOOK_TOKEN` | Optional bearer token for the ticket bridge |
+| `PROMPTWALL_APPROVAL_TICKET_SYSTEM` / `APPROVAL_TICKET_SYSTEM` | Optional ticket system label such as `jira`, `linear`, `servicenow`, or `generic` |
+| `PROMPTWALL_APPROVAL_TICKET_PROJECT` / `APPROVAL_TICKET_PROJECT` | Optional project or queue key passed to the ticket bridge |
+| `PROMPTWALL_APPROVAL_TICKET_ISSUE_TYPE` / `APPROVAL_TICKET_ISSUE_TYPE` | Optional issue type, defaulting to `Security Review` |
 
 PromptWall also accepts product-prefixed aliases for new deployments while
 preserving the older `SENTINEL_*` and endpoint keys for existing installs. Use

@@ -49,6 +49,18 @@ function configuredChannels(env = process.env, opts = {}) {
   if (slackUrl) channels.push({ type: 'slack', name: 'slack', url: slackUrl });
   const teamsUrl = envValue(env, 'PROMPTWALL_APPROVAL_TEAMS_WEBHOOK_URL', 'APPROVAL_TEAMS_WEBHOOK_URL');
   if (teamsUrl) channels.push({ type: 'teams', name: 'teams', url: teamsUrl });
+  const ticketUrl = envValue(env, 'PROMPTWALL_APPROVAL_TICKET_WEBHOOK_URL', 'APPROVAL_TICKET_WEBHOOK_URL');
+  if (ticketUrl) {
+    channels.push({
+      type: 'ticket',
+      name: 'ticket',
+      url: ticketUrl,
+      token: envValue(env, 'PROMPTWALL_APPROVAL_TICKET_WEBHOOK_TOKEN', 'APPROVAL_TICKET_WEBHOOK_TOKEN'),
+      system: envValue(env, 'PROMPTWALL_APPROVAL_TICKET_SYSTEM', 'APPROVAL_TICKET_SYSTEM'),
+      project: envValue(env, 'PROMPTWALL_APPROVAL_TICKET_PROJECT', 'APPROVAL_TICKET_PROJECT'),
+      issueType: envValue(env, 'PROMPTWALL_APPROVAL_TICKET_ISSUE_TYPE', 'APPROVAL_TICKET_ISSUE_TYPE'),
+    });
+  }
   const smtpHost = envValue(env, 'PROMPTWALL_APPROVAL_SMTP_HOST', 'APPROVAL_SMTP_HOST');
   const smtpFrom = envValue(env, 'PROMPTWALL_APPROVAL_SMTP_FROM', 'APPROVAL_SMTP_FROM');
   const smtpTo = smtp.parseRecipients(envValue(env, 'PROMPTWALL_APPROVAL_SMTP_TO', 'APPROVAL_SMTP_TO'));
@@ -163,9 +175,60 @@ function teamsPayload(payload) {
   };
 }
 
+function boundedText(value, limit = 80) {
+  const text = String(value || '').trim();
+  return text ? text.slice(0, limit) : null;
+}
+
+function priorityForTicket(payload) {
+  if (payload.action === 'APPROVAL_ESCALATED') return 'high';
+  if (payload.maxSeverity >= 4 || payload.riskScore >= 75) return 'critical';
+  if (payload.maxSeverity >= 3 || payload.riskScore >= 50) return 'high';
+  return 'normal';
+}
+
+function ticketQuery(payload) {
+  return {
+    id: payload.queryId,
+    createdAt: payload.createdAt,
+    status: payload.status,
+    user: payload.user,
+    orgId: payload.orgId,
+    source: payload.source,
+    channel: payload.channel,
+    sensor: payload.sensor,
+    destination: payload.destination,
+    riskScore: payload.riskScore,
+    maxSeverity: payload.maxSeverity,
+    maxSeverityLabel: payload.maxSeverityLabel,
+    labels: payload.labels,
+    reasons: payload.reasons,
+  };
+}
+
+function ticketPayload(channel, payload) {
+  return {
+    schemaVersion: 1,
+    eventType: 'promptwall.approval_ticket',
+    action: payload.action,
+    title: payload.title,
+    summary: oneLine(payload),
+    dedupeKey: `promptwall:${payload.queryId || 'unknown'}:${payload.action}`,
+    priority: priorityForTicket(payload),
+    ticket: {
+      system: boundedText(channel.system) || 'generic',
+      project: boundedText(channel.project),
+      issueType: boundedText(channel.issueType) || 'Security Review',
+    },
+    query: ticketQuery(payload),
+    workflow: payload.workflow,
+  };
+}
+
 function bodyForChannel(channel, payload) {
   if (channel.type === 'slack') return slackPayload(payload);
   if (channel.type === 'teams') return teamsPayload(payload);
+  if (channel.type === 'ticket') return ticketPayload(channel, payload);
   return payload;
 }
 
@@ -179,7 +242,7 @@ function smtpMessageForPayload(channel, payload, now = new Date()) {
 
 async function postJson(channel, payload, opts = {}) {
   const headers = { 'Content-Type': 'application/json' };
-  if (channel.type === 'webhook' && channel.token) headers.Authorization = 'Bearer ' + channel.token;
+  if ((channel.type === 'webhook' || channel.type === 'ticket') && channel.token) headers.Authorization = 'Bearer ' + channel.token;
   const fetchImpl = opts.fetch || fetch;
   const res = await fetchImpl(channel.url, {
     method: 'POST',
@@ -231,4 +294,5 @@ module.exports = {
   sanitizedApprovalNotification,
   shouldNotifyApproval,
   smtpMessageForPayload,
+  ticketPayload,
 };
