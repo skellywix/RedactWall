@@ -255,6 +255,9 @@ Microsoft 365 Graph file-content connector. Content connectors must call
 pilot keys through Chrome managed storage or local sensor environment config,
 not inside packages. `release:extension:check` also writes a prompt-free Chrome
 Web Store release-readiness report for private or unlisted managed deployments.
+When supplied a Chrome Web Store extension id, it also writes a final Chrome
+`ExtensionSettings` force-install policy with the real extension id and update
+URL, but no managed-storage secrets.
 
 ### Try the other sensors
 
@@ -368,7 +371,7 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 
 - Polished enterprise identity UX, IdP-specific setup recipes, guided scoped-
   policy rule builder, and deeper multi-tenant isolation per institution.
-- Signed Chrome Web Store listing and force-install rollout; local extension zip, integrity manifest, release-readiness report, and managed-policy checklist are packaged.
+- Signed Chrome Web Store listing and force-install rollout; local extension zip, integrity manifest, release-readiness report, generated ExtensionSettings policy, and managed-policy checklist are packaged.
 - Direct SMTP and ticketing adapters on top of the existing sanitized webhook, Slack, Teams, and escalation workflow.
 - Ship the signed native endpoint collector that feeds the tested handoff contract from clipboard and AI-app upload flows.
 - Upgrade the on-device classifier to a quantized ONNX/WASM NER when recall demands it.

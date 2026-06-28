@@ -63,7 +63,8 @@ Build next:
 - Rebrand the visible project from PromptSentinel to PromptWall.
 - Add a Chrome extension release-readiness gate and private or unlisted Web
   Store checklist so managed browser rollout has package, policy, update URL,
-  and install-health evidence before handoff.
+  generated ExtensionSettings force-install policy, and install-health evidence
+  before handoff.
 - Add approval owner and SLA routing so held decisions reach security,
   compliance, privacy, or legal queues with sanitized workflow metadata in the
   dashboard, SIEM alerts, and examiner evidence.
