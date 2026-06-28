@@ -47,9 +47,10 @@ existing customer-style runbooks.
 
 ### Recommendation
 
-Use Option A now, with explicit compatibility notes. Follow with a tested
-runtime alias layer before changing `SENTINEL_*`, cookie names, or data
-encryption namespaces.
+Use Option A plus tested compatibility shims. Runtime-visible names can move to
+PromptWall only when fresh installs use the new name by default and existing
+installs keep a tested fallback. Keep encrypted-data namespaces and retained
+evidence stable until a separate migration plan exists.
 
 ## Implementation Slices
 
@@ -59,9 +60,12 @@ encryption namespaces.
    notes for env-var aliases.
 3. Product alignment: competitor-backed roadmap note, coverage parity checks,
    and active protection for governed destinations.
-4. Next product gap: native desktop collector or deeper app/action policy
+4. Runtime compatibility cleanup: tested `PROMPTWALL_*` aliases, primary
+   PromptWall session cookie with legacy fallback, and stable encrypted-data
+   compatibility.
+5. Next product gap: native desktop collector or deeper app/action policy
    controls beyond destination and file-upload blocking.
-5. Final audit: current-state search, docs check, package generation, tests,
+6. Final audit: current-state search, docs check, package generation, tests,
    eval, sync-check, audit chain, and browser evidence.
 
 ## Acceptance Evidence
@@ -96,6 +100,11 @@ For this alignment track, completion requires evidence for every area below:
 - Added tested `PROMPTWALL_*` aliases for server, SaaS, ingest, timeout, policy,
   endpoint watch, and endpoint handoff runtime settings while keeping existing
   `SENTINEL_*`, `INGEST_API_KEY`, and endpoint-agent keys valid.
+- Changed fresh admin sessions to use `promptwall_session`, while accepting
+  legacy `sentinel_session` cookies and clearing both names on logout.
+- Normalized scanner `maxFileBytes` to an integer in default policy, persisted
+  config, policy load/save, and endpoint-agent scanner config so the admin
+  policy API can round-trip its own full payload.
 - Expanded the sanitized examiner export with coverage posture, sensor-version
   posture, parsed policy diffs, and lineage summaries by user, destination,
   sensor, channel, category, and decision without prompt bodies.
@@ -104,5 +113,5 @@ For this alignment track, completion requires evidence for every area below:
 
 - The local checkout folder has been renamed to `promptwall/`; the remaining
   GitHub repository has also been renamed to `skellywix/promptwall`.
-- Whether the next product build should prioritize native desktop collection or
-  app/action policy controls.
+- Whether the next product build should prioritize native desktop collection,
+  approval routing, or app/action policy controls.

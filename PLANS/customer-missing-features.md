@@ -16,6 +16,31 @@ is operational completeness: IT can deploy it, security can route decisions, an
 examiner can read the evidence, and employees are covered across the real AI
 paths they use.
 
+## 2026 Competitor Refresh
+
+Recent official product pages sharpen the priority order:
+
+- Strac emphasizes browser controls across uploads, downloads, forms, GenAI
+  prompts and responses, shadow IT, and admin-managed blocking. PromptWall's
+  browser prompt and file-upload controls are now directionally right; the
+  remaining paid-pilot gap is proving desktop and file-flow coverage outside the
+  browser.
+- Nightfall emphasizes fast browser rollout, broad sensitive-data detection,
+  real-time redaction, and employee education for AI applications. PromptWall
+  should keep inline coaching in the leak moment and add customer-defined
+  detector packs before chasing a large connector catalog.
+- Check Point AI Security / Lakera treats data leakage and prompt attacks as
+  LLM-native risks across user prompts, documents, tool calls, tool responses,
+  and tool descriptions. PromptWall's MCP guard should become a connector SDK
+  pattern, not just a reference example.
+- Cyberhaven emphasizes shadow AI, autonomous agents, endpoint/developer-tool
+  use, and data movement visibility. PromptWall should keep lineage, sensor
+  health, and coverage posture near the top of the commercial roadmap.
+
+Implication: Option B still wins. Build one real desktop/file-flow collector MVP
+first, then routing, identity, fleet posture, scoped policy, scheduled evidence,
+customer detectors/OCR states, and MCP connectors.
+
 ## Non-Negotiable Constraints
 
 - Detector logic lives in `detection-engine/detect.js`; browser copies are
@@ -279,7 +304,8 @@ Acceptance evidence:
 5. Group-scoped policy and time-bound exceptions.
 6. Scheduled examiner evidence pack with backup and restore-drill status.
 7. Customer-defined detectors plus OCR-required handling.
-8. First real MCP content connector.
+8. First real MCP content connector SDK and one Microsoft 365 file-content
+   connector.
 
 This order closes the most embarrassing buyer gap first, then turns the product
 from a strong demo into something IT and compliance can operate. It avoids
@@ -406,3 +432,20 @@ https://www.nist.gov/itl/ai-risk-management-framework. Accessed 28 June 2026.
 OWASP Foundation. "OWASP Top 10 for Large Language Model Applications."
 *OWASP Gen AI Security Project*, OWASP Foundation,
 https://genai.owasp.org/llm-top-10/. Accessed 28 June 2026.
+
+Check Point AI Security. "Data Leakage Prevention." *Check Point AI Security
+Docs*, Check Point, https://docs.lakera.ai/docs/data-leakage-prevention.
+Accessed 28 June 2026.
+
+Check Point AI Security. "Prompt Defense." *Check Point AI Security Docs*,
+Check Point, https://docs.lakera.ai/docs/prompt-defense. Accessed 28 June 2026.
+
+Cyberhaven. "AI Security for the Age of Autonomous Agents." *Cyberhaven*,
+Cyberhaven, https://www.cyberhaven.com/product/ai-security. Accessed 28 June
+2026.
+
+Nightfall AI. "AI Applications." *Nightfall AI*, Nightfall AI,
+https://www.nightfall.ai/integrations/ai-applications. Accessed 28 June 2026.
+
+Strac. "Browser DLP (Data Loss Prevention)." *Strac*, Strac,
+https://www.strac.io/integration/browser-dlp. Accessed 28 June 2026.
