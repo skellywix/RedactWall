@@ -276,9 +276,9 @@ Acceptance evidence:
 ### 7. Customer-Defined Sensitive Types And Better File Modalities
 
 Current state: structured detectors, semantic categories, held-out eval, file
-processors, and response scanning exist. Missing features include customer-owned
-detector packs for member/account/loan identifiers and OCR or image handling for
-scanned PDFs and screenshots.
+processors, response scanning, customer-owned detector packs, and image
+`ocr_required` handling exist. Remaining gaps are an actual endpoint-local OCR
+runtime and heavier detector-quality upgrades for scanned PDFs and screenshots.
 
 Customer ask: "Can we detect our member numbers, loan IDs, internal project
 codes, screenshots, and scanned loan packets?"
@@ -286,13 +286,16 @@ codes, screenshots, and scanned loan packets?"
 Why it matters: credit unions and healthcare customers have institution-specific
 identifiers. They will also have scanned PDFs where extractable text is missing.
 
-Implementation connection:
-- Add `config/custom-detectors.json` with bounded regex and validator hooks
-  loaded by the shared engine.
-- Add tests that custom detectors cannot create unbounded regex backtracking or
-  overwrite built-in detector IDs.
-- Add a file-processor result state for `ocr_required` before adding an OCR
+Implemented:
+- Added `config/custom-detectors.json` with bounded regex and validator hooks
+  loaded by the shared engine and distributed to browser, endpoint, and MCP
+  sensors through `/api/v1/policy`.
+- Added tests that custom detectors cannot create unbounded regex backtracking
+  or overwrite built-in detector IDs.
+- Added a file-processor result state for `ocr_required` before adding an OCR
   runtime.
+
+Remaining:
 - Prototype OCR as an optional endpoint-local processor only, never server-side
   by default.
 - Keep ONNX/WASM NER as a later detector-quality upgrade, not the blocker for

@@ -93,6 +93,7 @@ function buildEvidencePackFromRuntime(options = {}) {
   const policy = options.policyModule || require('../server/policy');
   const coverage = options.coverageModule || require('../server/coverage');
   const detector = options.detectorModule || require('../server/detector');
+  const customDetectors = options.customDetectorsModule || require('../server/custom-detectors');
   const pkg = options.packageInfo || require('../package.json');
   const queryLimit = boundedNumber(options.queryLimit, DEFAULT_QUERY_LIMIT);
   const auditLimit = boundedNumber(options.auditLimit, DEFAULT_AUDIT_LIMIT);
@@ -124,7 +125,7 @@ function buildEvidencePackFromRuntime(options = {}) {
     stats: db.stats(),
     auditIntegrity: db.verifyAuditChain(),
     coverage: coverage.summarize(queries, activePolicy),
-    detectors: detector.listDetectors(),
+    detectors: detector.listDetectors({ customDetectors: customDetectors.loadCustomDetectors() }),
     queries,
     audit: db.listAudit(auditLimit),
     backup: verified.backup,

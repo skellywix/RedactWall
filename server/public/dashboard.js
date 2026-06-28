@@ -96,7 +96,7 @@ function parsePolicyJsonArray(value, label) {
 function statusTone(status) {
   const s = String(status || '').toLowerCase();
   if (['approved', 'allowed', 'justified', 'warned_sent', 'redacted'].includes(s)) return 'good';
-  if (['denied', 'blocked_by_user', 'destination_blocked', 'file_upload_blocked', 'injection_blocked', 'response_flagged', 'seat_limit_blocked'].includes(s)) return 'bad';
+  if (['denied', 'blocked_by_user', 'destination_blocked', 'file_upload_blocked', 'injection_blocked', 'response_flagged', 'seat_limit_blocked', 'ocr_required'].includes(s)) return 'bad';
   if (['pending', 'shadow_ai', 'paste_flagged'].includes(s)) return 'warn';
   if (s === 'sensor_heartbeat') return 'good';
   return 'info';

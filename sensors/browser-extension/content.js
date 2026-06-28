@@ -68,7 +68,11 @@
 
   // ---- decide what to do ----------------------------------------------------
   function detectionPolicy() {
-    return { ignore: POLICY.ignore || [], disabledDetectors: POLICY.disabledDetectors || [] };
+    return {
+      ignore: POLICY.ignore || [],
+      disabledDetectors: POLICY.disabledDetectors || [],
+      customDetectors: POLICY.customDetectors || [],
+    };
   }
 
   function destinationBlocked() {
@@ -576,6 +580,8 @@
     const items = (res.findings || []).map((x) => x.type).concat(res.categories || []);
     if (res.decision === 'allow' && res.supported !== false) {
       toast('PromptWall scanned ' + filename + ' clean. Attach it again to upload.');
+    } else if (res.status === 'ocr_required') {
+      toast('PromptWall blocked ' + filename + ': OCR is required before inspection.');
     } else if (res.status === 'scan_unavailable') {
       toast('PromptWall could not verify ' + filename + '. Upload blocked until the control plane is reachable.');
     } else if (res.supported === false || res.inspected === false) {

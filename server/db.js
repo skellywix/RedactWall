@@ -186,6 +186,7 @@ const STATS_BLOCKED_STATUSES = [
   'file_upload_blocked',
   'injection_blocked',
   'file_blocked_unscanned',
+  'ocr_required',
   'response_flagged',
 ];
 

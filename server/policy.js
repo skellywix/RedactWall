@@ -8,6 +8,7 @@ const fs = require('fs');
 const path = require('path');
 const pkg = require('../package.json');
 const adapters = require('../detection-engine/adapters');
+const customDetectors = require('./custom-detectors');
 
 const CONFIG_PATH = process.env.SENTINEL_POLICY_PATH || path.join(__dirname, '..', 'config', 'policy.json');
 const SENSOR_ID_RE = /^[a-z][a-z0-9_:-]{0,79}$/;
@@ -360,7 +361,15 @@ function savePolicy(p) {
 }
 
 function analyzeOpts(policy = loadPolicy()) {
-  return { ignore: policy.ignore || [], disabledDetectors: policy.disabledDetectors || [] };
+  return {
+    ignore: policy.ignore || [],
+    disabledDetectors: policy.disabledDetectors || [],
+    customDetectors: customDetectors.loadCustomDetectors(),
+  };
+}
+
+function customDetectorsForSensors() {
+  return customDetectors.loadCustomDetectors();
 }
 
 function rawRetentionDays(policy = loadPolicy()) {
@@ -590,6 +599,7 @@ module.exports = {
   savePolicy,
   evaluate,
   analyzeOpts,
+  customDetectorsForSensors,
   rawRetentionDays,
   normalizeDestination,
   normalizeApprovalRoutingRules,

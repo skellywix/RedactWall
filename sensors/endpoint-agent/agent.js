@@ -101,6 +101,7 @@ function sensorPolicy(input = {}) {
     alwaysBlock: detectorList(merged.alwaysBlock, defaults.alwaysBlock),
     ignore: detectorList(merged.ignore, defaults.ignore),
     disabledDetectors: detectorList(merged.disabledDetectors, defaults.disabledDetectors),
+    customDetectors: Array.isArray(merged.customDetectors) ? merged.customDetectors : [],
     governedDestinations: lowerList(merged.governedDestinations, defaults.governedDestinations),
     allowedDestinations: lowerList(merged.allowedDestinations, defaults.allowedDestinations),
     blockedDestinations: lowerList(merged.blockedDestinations, defaults.blockedDestinations),
@@ -424,7 +425,11 @@ function localFileResponse(res, analysis, handoff) {
 
 async function reportLocalFile(file, user, extracted, opts = {}) {
   const pol = opts.policy ? sensorPolicy(opts.policy) : policyState;
-  const analysis = D.analyze(extracted.text || '', { ignore: pol.ignore, disabledDetectors: pol.disabledDetectors });
+  const analysis = D.analyze(extracted.text || '', {
+    ignore: pol.ignore,
+    disabledDetectors: pol.disabledDetectors,
+    customDetectors: pol.customDetectors,
+  });
   const verdict = policyEngine.evaluate(analysis, pol);
   if (verdict.decision === 'allow') {
     const res = await (opts.report || report)(localFileRecord(file, user, safeFilePrompt(file, '', analysis), analysis, 'allowed', undefined, opts), opts);
@@ -483,9 +488,13 @@ async function scanResolvedFile(file, full, root, opts = {}) {
   const buf = fs.readFileSync(full);
   const extracted = await processors.extractText(file, buf, opts.extract || {});
   if (!extracted.extractionOk) {
+    const ocrRequired = extracted.error === 'ocr_required' || extracted.ocrRequired === true;
+    const outcome = ocrRequired ? 'ocr_required' : 'scan_unavailable';
+    const note = ocrRequired ? 'blocked locally: OCR required before inspection'
+      : `blocked locally: ${extracted.error || 'extract_failed'}`;
     console.log(`[BLOCK] ${label} could not be inspected locally`);
-    await (opts.report || report)(unscannedFileEvent(file, user, 'scan_unavailable', `blocked locally: ${extracted.error || 'extract_failed'}`, opts), opts);
-    return { decision: 'block', status: 'scan_unavailable', supported: true, inspected: false };
+    await (opts.report || report)(unscannedFileEvent(file, user, outcome, note, opts), opts);
+    return { decision: 'block', status: outcome, supported: true, inspected: false, ...(ocrRequired ? { ocrRequired: true } : {}) };
   }
   const res = await reportLocalFile(file, user, extracted, { ...opts, policy: pol, watchDir: opts.redactionRoot || opts.watchDir || root });
   if (res.decision === 'allow') {

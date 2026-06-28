@@ -112,6 +112,7 @@ function supportedFileTypes(processors) {
     ['Text and config', Array.from(processors.TEXT_EXT).sort()],
     ['Office', Array.from(processors.OFFICE_EXT).sort()],
     ['PDF', Array.from(processors.PDF_EXT).sort()],
+    ['Image OCR required', Array.from(processors.IMAGE_EXT).sort()],
   ];
   return groups.map(([label, values]) => `- ${label}: ${joinInline(values)}`).join('\n');
 }
@@ -164,11 +165,12 @@ function loadSnapshot() {
   const policy = readJson('config/policy.json');
   const manifest = readJson('sensors/browser-extension/manifest.json');
   const detector = require(path.join(ROOT, 'detection-engine', 'detect'));
+  const customDetectors = require(path.join(ROOT, 'server', 'custom-detectors'));
   const processors = require(path.join(ROOT, 'server', 'processors'));
   const templates = require(path.join(ROOT, 'server', 'templates'));
   validateRequiredScripts(pkg, DEMO_COMMANDS);
 
-  const detectors = detector.listDetectors().map((item) => item.id).sort();
+  const detectors = detector.listDetectors({ customDetectors: customDetectors.loadCustomDetectors() }).map((item) => item.id).sort();
   const semanticCategories = detectors.filter((id) => SEMANTIC_CATEGORIES.includes(id));
   const templateLabels = templates.list().map((item) => `${item.id} (${item.label})`).sort();
   return {

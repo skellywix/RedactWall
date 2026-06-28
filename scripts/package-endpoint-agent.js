@@ -14,6 +14,7 @@ const PACKAGE_FILES = [
   'package-lock.json',
   'detection-engine/adapters.js',
   'detection-engine/detect.js',
+  'server/custom-detectors.js',
   'server/env.js',
   'server/policy.js',
   'server/processors.js',

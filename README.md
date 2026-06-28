@@ -101,7 +101,7 @@ incident.
 Detection is a **plugin registry** (inspired by Strac's auditor): each detector is a
 self-describing unit you can enable or disable per policy. Two layers, both on-device:
 
-1. **Structured PII and tripwires (23 detectors)** — SSN, credit cards (Luhn), routing numbers
+1. **Structured PII and tripwires** — SSN, credit cards (Luhn), routing numbers
    (ABA), IBAN (mod-97), US passport, TIN/EIN, driver's license, license plate, VIN,
    email, phone, IP, DOB, US address, API keys, private keys, passwords, and planted
    canary tokens for leak drills.
@@ -124,8 +124,12 @@ benign business prompts** — the number that decides whether an admin keeps the
 Thresholds are calibrated on benign prompts the model never saw, so "zero false positives"
 means something. Add a structured detector by pushing one object to the `DETECTORS`
 registry; disable any detector via the policy `disabledDetectors` list.
+Customer-specific identifiers can also be modeled without code changes in
+`config/custom-detectors.json`. Those detector packs are bounded data-only regex
+rules with simple validator knobs, cannot override built-in IDs, and are pushed
+to browser, endpoint, and MCP sensors through `/api/v1/policy`.
 
-## File scanning (PDF / Word / Excel / PowerPoint)
+## File scanning (PDF / Word / Excel / PowerPoint / images)
 
 People paste *and upload* sensitive files into AI tools. A **processor layer**
 (`server/processors.js`) extracts text from PDFs, `.docx`, `.xlsx`, and `.pptx` (plus all
@@ -142,6 +146,10 @@ with a base64 file. Add a new file type by pushing a processor with
 `{ supports(name), extract(buffer) }`. Supported files fail closed if extraction
 times out or the parser cannot inspect the file, and the audit log records the
 blocked unscanned file without storing the file bytes.
+Image uploads (`.png`, `.jpg`, `.jpeg`, `.tif`, `.tiff`, `.bmp`, `.webp`) are
+recognized as supported but return `ocr_required` until an endpoint-local OCR
+processor is configured. They are blocked and recorded without sending image
+bytes or extracted text to the control plane.
 
 ---
 
@@ -375,6 +383,7 @@ Copy `.env.example` to `.env` (or export):
 | `SENTINEL_REQUIRE_TENANT_CONTEXT` | Requires sensors to send the matching `orgId`. Enabled automatically by SaaS mode. |
 | `SENTINEL_REQUIRE_USER_IDENTITY` | Requires sensors to send managed user identity instead of `unknown` or `unattributed@unmanaged`. Enabled automatically by SaaS mode. |
 | `SENTINEL_POLICY_PATH` | Optional policy file path for isolated tests or pilots (default `config/policy.json`) |
+| `SENTINEL_CUSTOM_DETECTORS_PATH` / `PROMPTWALL_CUSTOM_DETECTORS_PATH` | Optional customer detector-pack path (default `config/custom-detectors.json`) |
 | `ADMIN_USER` / `ADMIN_PASSWORD` | Console credentials; production preflight requires a non-default password of at least 16 characters |
 | `ADMIN_TOTP_SECRET` | Base32 authenticator secret for Security Admin MFA; production preflight requires it and admin login requires a current 6-digit code when set |
 | `APPROVER_USER` / `APPROVER_PASSWORD` | Optional reviewer credentials that can approve or deny items assigned to the approver role; set both together, keep `APPROVER_USER` distinct from admin and auditor users, and use at least 16 characters for `APPROVER_PASSWORD` |
@@ -408,6 +417,7 @@ one family per setting; a non-empty legacy key wins when both are set.
 | `SENTINEL_URL` | `PROMPTWALL_URL` |
 | `SENTINEL_DB_PATH` | `PROMPTWALL_DB_PATH` |
 | `SENTINEL_POLICY_PATH` | `PROMPTWALL_POLICY_PATH` |
+| `SENTINEL_CUSTOM_DETECTORS_PATH` | `PROMPTWALL_CUSTOM_DETECTORS_PATH` |
 | `SENTINEL_SAAS_MODE` | `PROMPTWALL_SAAS_MODE` |
 | `SENTINEL_TENANT_ID` | `PROMPTWALL_TENANT_ID` |
 | `SENTINEL_SEAT_LIMIT` | `PROMPTWALL_SEAT_LIMIT` |
