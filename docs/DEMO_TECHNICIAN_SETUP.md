@@ -69,6 +69,7 @@ This section is generated from the app by `npm run docs:demo-guide`. Do not hand
 | Path | Demo role | Status |
 | --- | --- | --- |
 | `server/app.js` | Control plane, API, dashboard, policy, approval, audit | Present |
+| `server/routing.js` | Approval owner and SLA routing rules | Present |
 | `server/public/index.html` | Admin dashboard shell | Present |
 | `detection-engine/detect.js` | Shared detection engine source of truth | Present |
 | `sensors/browser-extension/manifest.json` | Chrome extension entrypoint | Present |
@@ -87,6 +88,7 @@ This section is generated from the app by `npm run docs:demo-guide`. Do not hand
 | `docs/DEMO_TECHNICIAN_SETUP.md` | Demo machine setup and reset runbook | Present |
 | `docs/DEPLOYMENT.md` | Native Node and Docker deployment reference | Present |
 | `docs/MANAGED_EXTENSION_DEPLOYMENT.md` | Chrome managed extension pilot reference | Present |
+| `docs/APPROVAL_ROUTING.md` | Approval owner and SLA routing reference | Present |
 | `docs/TECHNICIAN_DEPLOYMENT_GUIDE.md` | Install-day production readiness runbook | Present |
 | `docs/AWS_SAAS_DEPLOYMENT.md` | Customer-silo AWS deployment path | Present |
 <!-- DEMO_GUIDE_CURRENT_STATE_END -->

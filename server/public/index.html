@@ -468,7 +468,9 @@
   .destination-review{display:grid;justify-items:end;gap:7px}
   .destination-actions{display:flex;justify-content:flex-end;gap:6px;flex-wrap:wrap}
   .ghost.mini{min-height:30px;padding:6px 8px;font-size:11.5px}
+  .ghost.mini.active{border-color:rgba(106,167,255,.55);background:rgba(106,167,255,.12);color:#fff}
   .ghost.danger{border-color:rgba(255,90,102,.34);color:#ffb9be}
+  .queue-tools{display:flex;align-items:center;justify-content:flex-end;gap:6px;flex-wrap:wrap}
   .incident-detail{display:grid;gap:12px;padding:14px}
   .detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
   .datum{border:1px solid var(--line);border-radius:8px;background:#08111c;padding:10px}
@@ -679,10 +681,16 @@
                 <h2>Approval Queue</h2>
                 <span>Blocked prompts awaiting Security Admin review</span>
               </div>
-              <button class="ghost" id="refreshQueue" type="button">
-                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v6h-6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                Refresh
-              </button>
+              <div class="queue-tools">
+                <button class="ghost mini active" data-queue-filter="all" type="button">All</button>
+                <button class="ghost mini" data-queue-filter="mine" type="button">Mine</button>
+                <button class="ghost mini" data-queue-filter="unassigned" type="button">Unassigned</button>
+                <button class="ghost mini" data-queue-filter="escalated" type="button">Escalated</button>
+                <button class="ghost" id="refreshQueue" type="button">
+                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v6h-6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  Refresh
+                </button>
+              </div>
             </div>
             <div id="queueList" class="queue-list"></div>
           </div>
@@ -731,7 +739,7 @@
             </div>
           </div>
           <table><thead><tr>
-            <th>Time</th><th>Source</th><th>User</th><th>Destination</th><th>Severity</th><th>Risk</th><th>Detected</th><th>Status</th>
+            <th>Time</th><th>Source</th><th>User</th><th>Destination</th><th>Owner</th><th>Severity</th><th>Risk</th><th>Detected</th><th>Status</th>
           </tr></thead><tbody id="activityRows"></tbody></table>
         </div>
       </section>

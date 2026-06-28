@@ -7,6 +7,7 @@
  */
 require('./env').loadEnv();
 const { safeSensor, safeSensorVersionGap } = require('./sensor-metadata');
+const routing = require('./routing');
 
 function num(v, fallback) {
   const n = Number(v);
@@ -30,6 +31,7 @@ function shouldAlert(query, opts = {}) {
 }
 
 function sanitizedAlert(query, opts = {}) {
+  const workflow = routing.publicWorkflow(query);
   return {
     schemaVersion: 1,
     eventType: 'promptwall.security_event',
@@ -59,6 +61,7 @@ function sanitizedAlert(query, opts = {}) {
     })),
     categories: query.categories || [],
     reasons: query.reasons || [],
+    workflow,
   };
 }
 

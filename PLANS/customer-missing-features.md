@@ -127,8 +127,10 @@ Acceptance evidence:
 
 Current state: blocked items enter one queue, approval release requires password
 step-up, SIEM alerts are sanitized, and denied or approved decisions are audited.
-There is not yet assignment, escalation, SLA tracking, or direct Slack, Teams, or
-email notifications.
+Held decisions now receive deterministic owner and SLA routing metadata for
+security, compliance, privacy, or legal review, and the dashboard, SIEM payloads,
+and examiner export expose that sanitized workflow context. There is not yet
+persisted escalation state or direct Slack, Teams, or email notifications.
 
 Customer ask: "Can member-services exceptions route to compliance, source-code
 events route to security, and urgent approvals notify someone immediately?"
@@ -137,10 +139,12 @@ Why it matters: a queue without ownership becomes a backlog. Customers need the
 workflow to fit their org chart, not just prove the gate works.
 
 Implementation connection:
-- Add `server/routing.js` to compute assignment from category, detector type,
-  destination, source, user group, and severity.
-- Extend query records with sanitized workflow metadata: `assignedRole`,
-  `assignedGroup`, `slaDueAt`, `escalatedAt`, `notificationStatus`.
+- Extend `server/routing.js` from the current deterministic detector/source
+  routing into customer-configurable assignment from destination, source, user
+  group, and severity.
+- Extend query records beyond the current sanitized workflow metadata
+  (`assignedRole`, `assignedGroup`, `slaDueAt`, `escalatedAt`,
+  `notificationStatus`) with persisted escalation history.
 - Build `server/notifiers.js` on top of the existing sanitized alert discipline.
 - Add channel adapters in this order: SMTP email, Slack webhook, Teams webhook.
 - Add dashboard queue filters: Mine, Unassigned, Escalated, By category, By
@@ -312,7 +316,7 @@ Acceptance evidence:
 ## Recommended Build Order
 
 1. Desktop/file-flow collector MVP.
-2. Approval routing plus notifications.
+2. Notification adapters and persisted escalation on top of approval routing.
 3. Enterprise identity, roles, and SCIM.
 4. Signed update channel and commercial rollout posture.
 5. Group-scoped policy and time-bound exceptions.

@@ -82,6 +82,12 @@ test('evidence pack omits raw prompt, redacted prompt body, token vault, and aud
       decisionNote: 'contains member SSN 524-71-9043',
       retentionPurgedAt: '2026-06-27T12:00:00.000Z',
       retentionPurgedFields: ['rawPrompt'],
+      assignedRole: 'approver',
+      assignedGroup: 'compliance',
+      workflowReason: 'detector:US_SSN',
+      slaDueAt: '2026-06-26T16:00:00.000Z',
+      escalatedAt: null,
+      notificationStatus: 'not_configured',
       installChecks: [
         { id: 'endpoint_env_file', ok: true, detail: 'found', secret: 'query-check-secret-should-not-export' },
       ],
@@ -127,6 +133,14 @@ test('evidence pack omits raw prompt, redacted prompt body, token vault, and aud
   assert.strictEqual(pack.lineage.byDecision[0].key, 'blocked');
   assert.strictEqual(pack.queries[0].retentionPurgedAt, '2026-06-27T12:00:00.000Z');
   assert.deepStrictEqual(pack.queries[0].retentionPurgedFields, ['rawPrompt']);
+  assert.deepStrictEqual(pack.queries[0].workflow, {
+    assignedRole: 'approver',
+    assignedGroup: 'compliance',
+    workflowReason: 'detector:US_SSN',
+    slaDueAt: '2026-06-26T16:00:00.000Z',
+    escalatedAt: null,
+    notificationStatus: 'not_configured',
+  });
   assert.ok(!wire.includes('524-71-9043'));
   assert.ok(!wire.includes('Member John Carter'));
   assert.ok(!wire.includes('coverage-secret-should-not-export'));

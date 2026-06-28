@@ -438,6 +438,9 @@ The examiner export at `/api/export/evidence` includes:
 - Coverage posture, governed and shadow destinations, active sensors, sensor
   versions, version gaps, and fleet install-health state by user, org, and
   required sensor.
+- Approval workflow metadata for held or blocked records: assigned role,
+  assigned group, routing reason, SLA due time, escalation state, and
+  notification status.
 - Prompt/file lineage summaries by user, destination, sensor, channel,
   category, and decision, plus per-event sanitized findings and prompt hashes.
 
@@ -446,7 +449,7 @@ release tokens, decision notes, or uploaded file bytes.
 
 ## SIEM Alerts
 
-Set `SIEM_WEBHOOK_URL` to send sanitized security events to a SOC or SIEM webhook. Payloads omit prompt bodies, raw retained prompts, token vaults, and raw finding values.
+Set `SIEM_WEBHOOK_URL` to send sanitized security events to a SOC or SIEM webhook. Payloads omit prompt bodies, raw retained prompts, token vaults, and raw finding values. Alert payloads include bounded workflow metadata so a SOC can see the assigned group and SLA without receiving sensitive content.
 
 Blocked prompt/file events, response leakage, hidden-instruction blocks, and failed or locked admin step-up confirmations for raw reveal and approval release are alertable. Webhook delivery is best-effort and never blocks the user-facing request.
 

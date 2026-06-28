@@ -30,6 +30,12 @@ function sampleQuery(overrides = {}) {
     findings: [{ type: 'US_SSN', severity: 4, score: 0.92, masked: '**** 9043', value: '524-71-9043' }],
     categories: [],
     reasons: ['Hard-stop entity present: US_SSN'],
+    assignedRole: 'approver',
+    assignedGroup: 'compliance',
+    workflowReason: 'detector:US_SSN',
+    slaDueAt: '2026-06-26T16:00:00.000Z',
+    escalatedAt: null,
+    notificationStatus: 'not_configured',
     ...overrides,
   };
 }
@@ -46,6 +52,14 @@ test('sanitized alert omits raw, redacted prompt body, vault, and finding values
   assert.ok(!wire.includes('ps_ingest_should_not_leave'));
   assert.deepStrictEqual(payload.sensor, { name: 'browser_extension', version: '0.3.0', platform: 'chrome_mv3' });
   assert.strictEqual(payload.findings[0].masked, '**** 9043');
+  assert.deepStrictEqual(payload.workflow, {
+    assignedRole: 'approver',
+    assignedGroup: 'compliance',
+    workflowReason: 'detector:US_SSN',
+    slaDueAt: '2026-06-26T16:00:00.000Z',
+    escalatedAt: null,
+    notificationStatus: 'not_configured',
+  });
 });
 
 test('alert threshold sends blocked status even below numeric threshold', () => {

@@ -10,6 +10,8 @@ let currentActivity = [];
 let currentCoverage = null;
 let searchTerm = '';
 let currentRole = 'auditor';
+let currentUser = '';
+let queueFilter = 'all';
 
 const icons = {
   check: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m5 12 4 4L19 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
@@ -106,21 +108,53 @@ function sourceLabel(source) {
 }
 
 function normalizeRole(role) {
-  return role === 'security_admin' ? 'security_admin' : 'auditor';
+  return ['security_admin', 'approver', 'operator', 'auditor'].includes(role) ? role : 'auditor';
 }
 
 function roleLabel(role) {
-  return normalizeRole(role) === 'security_admin' ? 'Security Admin' : 'Auditor';
+  return ({
+    security_admin: 'Security Admin',
+    approver: 'Approver',
+    operator: 'Operator',
+    auditor: 'Auditor',
+  })[normalizeRole(role)] || humanize(role);
 }
 
 function canAdminWrite() {
   return currentRole === 'security_admin';
 }
 
+function workflowOwner(q) {
+  const group = q.assignedGroup || 'unassigned';
+  const role = q.assignedRole ? ` / ${roleLabel(q.assignedRole)}` : '';
+  return `${group}${role}`;
+}
+
+function isEscalated(q) {
+  if (q.escalatedAt) return true;
+  const due = Date.parse(q.slaDueAt || '');
+  return Number.isFinite(due) && due < Date.now();
+}
+
+function queueFilterMatches(q) {
+  if (queueFilter === 'mine') return q.assignedRole === currentRole || q.assignedUser === currentUser;
+  if (queueFilter === 'unassigned') return !q.assignedRole && !q.assignedGroup;
+  if (queueFilter === 'escalated') return isEscalated(q);
+  return true;
+}
+
+function workflowChips(q) {
+  const chips = [];
+  if (q.assignedGroup || q.assignedRole) chips.push(`<span class="chip"><b>Owner</b> ${escapeHtml(workflowOwner(q))}</span>`);
+  if (q.slaDueAt) chips.push(`<span class="chip ${isEscalated(q) ? 'category' : ''}"><b>SLA</b> ${escapeHtml(fmt(q.slaDueAt))}</span>`);
+  if (q.notificationStatus) chips.push(`<span class="chip"><b>Notify</b> ${escapeHtml(humanize(q.notificationStatus))}</span>`);
+  return chips.join('');
+}
+
 function queryText(q) {
   return [
     q.id, q.user, q.destination, q.source, q.channel, q.status, q.maxSeverityLabel,
-    q.redactedPrompt, ...(q.reasons || []), ...(q.categories || []),
+    q.assignedRole, q.assignedGroup, q.workflowReason, q.redactedPrompt, ...(q.reasons || []), ...(q.categories || []),
     ...(q.findings || []).map((f) => `${f.type} ${f.masked || ''}`),
     ...Object.keys(q.entityCounts || {}),
   ].join(' ').toLowerCase();
@@ -265,6 +299,7 @@ async function init() {
   const me = await meRes.json();
   await loadCsrf();
   currentRole = normalizeRole(me.role);
+  currentUser = me.user || '';
   $('#who').textContent = `${me.user} / ${roleLabel(currentRole)}`;
   if (me.defaultPassword) {
     const b = $('#banner');
@@ -329,14 +364,17 @@ async function loadQueue() {
 
 function renderQueueView() {
   const el = $('#queueList');
-  const rows = currentQueue.filter(matchesSearch);
+  $$('.queue-tools [data-queue-filter]').forEach((button) => {
+    button.classList.toggle('active', button.dataset.queueFilter === queueFilter);
+  });
+  const rows = currentQueue.filter(queueFilterMatches).filter(matchesSearch);
   if (!currentQueue.length) {
     el.innerHTML = '<div class="empty"><div class="big">Queue clear</div>No prompts are awaiting approval.</div>';
     renderIncident(null);
     return;
   }
   if (!rows.length) {
-    el.innerHTML = '<div class="empty"><div class="big">No matches</div>No pending prompts match the current search.</div>';
+    el.innerHTML = '<div class="empty"><div class="big">No matches</div>No pending prompts match the current queue filter.</div>';
     renderIncident(null);
     return;
   }
@@ -368,7 +406,7 @@ function renderQueueItem(q) {
       <span>${escapeHtml(fmtTime(q.createdAt))}</span>
     </div>
     <div class="prompt" id="p_${escapeHtml(q.id)}">${escapeHtml(q.redactedPrompt)}</div>
-    <div class="chips">${findingChips(q.findings, q.categories)}</div>
+    <div class="chips">${findingChips(q.findings, q.categories)}${workflowChips(q)}</div>
     <div class="reasons">Detected: ${escapeHtml(detected)}${(q.reasons || []).length ? `; ${escapeHtml((q.reasons || []).join('; '))}` : ''}</div>
     ${controls}
   </article>`;
@@ -391,6 +429,8 @@ function renderIncident(q) {
       <div class="datum"><label>Destination</label><b>${escapeHtml(q.destination || 'unknown')}</b></div>
       <div class="datum"><label>Sensor</label><b>${escapeHtml(sourceLabel(q.source))}</b></div>
       <div class="datum"><label>Created</label><b>${escapeHtml(fmt(q.createdAt))}</b></div>
+      <div class="datum"><label>Owner</label><b>${escapeHtml(workflowOwner(q))}</b></div>
+      <div class="datum"><label>SLA</label><b>${escapeHtml(q.slaDueAt ? fmt(q.slaDueAt) : '-')}</b></div>
     </div>
     <div class="risk-meter" style="--risk-width:${risk}%">
       <div class="top"><span class="sev ${sev}">${escapeHtml(q.maxSeverityLabel || 'low')}</span><span class="risk">Risk <b>${risk}</b>/100</span></div>
@@ -401,6 +441,12 @@ function renderIncident(q) {
 }
 
 document.addEventListener('click', async (e) => {
+  const filterButton = e.target.closest('[data-queue-filter]');
+  if (filterButton) {
+    queueFilter = filterButton.dataset.queueFilter || 'all';
+    renderQueueView();
+    return;
+  }
   const destinationReview = e.target.closest('[data-destination-review]');
   if (destinationReview) {
     if (!canAdminWrite()) {
@@ -525,11 +571,12 @@ function renderActivityRows(rows) {
     <td>${escapeHtml(sourceLabel(q.source))}</td>
     <td>${escapeHtml(q.user || '-')}</td>
     <td class="mono">${escapeHtml(q.destination || '-')}</td>
+    <td>${escapeHtml(workflowOwner(q))}</td>
     <td><span class="sev ${sevClass(q.maxSeverityLabel)}">${escapeHtml(q.maxSeverityLabel || 'low')}</span></td>
     <td class="mono">${escapeHtml(q.riskScore ?? 0)}</td>
     <td>${escapeHtml(Object.keys(q.entityCounts || {}).join(', ') || '-')}</td>
     <td><span class="pill ${statusTone(q.status)}">${escapeHtml(humanize(q.status))}</span></td>
-  </tr>`).join('') || '<tr><td colspan="8" class="empty">No matching activity</td></tr>';
+  </tr>`).join('') || '<tr><td colspan="9" class="empty">No matching activity</td></tr>';
 }
 
 async function loadCoverage() {

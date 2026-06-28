@@ -38,6 +38,7 @@ const DEMO_COMMANDS = [
 ];
 const SENSOR_AND_DOC_PATHS = [
   ['server/app.js', 'Control plane, API, dashboard, policy, approval, audit'],
+  ['server/routing.js', 'Approval owner and SLA routing rules'],
   ['server/public/index.html', 'Admin dashboard shell'],
   ['detection-engine/detect.js', 'Shared detection engine source of truth'],
   ['sensors/browser-extension/manifest.json', 'Chrome extension entrypoint'],
@@ -56,6 +57,7 @@ const SENSOR_AND_DOC_PATHS = [
   ['docs/DEMO_TECHNICIAN_SETUP.md', 'Demo machine setup and reset runbook'],
   ['docs/DEPLOYMENT.md', 'Native Node and Docker deployment reference'],
   ['docs/MANAGED_EXTENSION_DEPLOYMENT.md', 'Chrome managed extension pilot reference'],
+  ['docs/APPROVAL_ROUTING.md', 'Approval owner and SLA routing reference'],
   ['docs/TECHNICIAN_DEPLOYMENT_GUIDE.md', 'Install-day production readiness runbook'],
   ['docs/AWS_SAAS_DEPLOYMENT.md', 'Customer-silo AWS deployment path'],
 ];

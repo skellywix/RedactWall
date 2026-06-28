@@ -32,6 +32,7 @@ const validation = require('./validation');
 const coverage = require('./coverage');
 const releaseTokens = require('./release-token');
 const tenant = require('./tenant');
+const routing = require('./routing');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -248,15 +249,20 @@ function rawToStore(text, status, pol) {
   return sealed == null ? undefined : sealed;
 }
 
+function createQuery(query, opts = {}) {
+  return db.createQuery(routing.withWorkflow(query, opts));
+}
+
 function createQueryWithReleaseToken(query) {
-  if (query && query.status === 'pending') {
+  const routed = routing.withWorkflow(query);
+  if (routed && routed.status === 'pending') {
     const release = releaseTokens.issueReleaseToken();
     return {
-      row: db.createQuery({ ...query, _releaseTokenHash: release.hash }),
+      row: db.createQuery({ ...routed, _releaseTokenHash: release.hash }),
       releaseToken: release.token,
     };
   }
-  return { row: db.createQuery(query), releaseToken: null };
+  return { row: db.createQuery(routed), releaseToken: null };
 }
 
 function releaseTokenPayload(releaseToken) {
@@ -272,7 +278,7 @@ function enforceTenantForSensor(req, res) {
 
   if (check.audit) {
     const body = req.body || {};
-    const row = db.createQuery({
+    const row = createQuery({
       status: check.status,
       mode: 'billing',
       user: check.user || body.user || 'unknown',
@@ -425,7 +431,7 @@ function blockDestinationByPolicy(res, context = {}, responseExtra = {}) {
     reason = 'Destination blocked by policy',
   } = context;
   const normalized = policy.normalizeDestination(destination);
-  const row = db.createQuery({
+  const row = createQuery({
     status: 'destination_blocked',
     mode: 'destination_block',
     user,
@@ -473,7 +479,7 @@ function blockFileUploadByPolicy(res, context = {}, responseExtra = {}) {
   } = context;
   const normalized = policy.normalizeDestination(destination);
   const reason = 'File upload blocked by policy';
-  const row = db.createQuery({
+  const row = createQuery({
     status: 'file_upload_blocked',
     mode: 'file_upload_block',
     user,
@@ -564,7 +570,7 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
 
   // Man-in-the-Prompt: the sensor stopped a prompt carrying hidden instructions.
   if (clientOutcome === 'injection_blocked') {
-    const row = db.createQuery({ status: 'injection_blocked', ...base });
+    const row = createQuery({ status: 'injection_blocked', ...base });
     db.appendAudit({ action: 'INJECTION_BLOCKED', queryId: row.id, actor: user, detail: note || 'hidden instructions detected' });
     emitSecurityAlert(row, 'INJECTION_BLOCKED');
     broadcast('query', { type: 'injection_blocked', query: publicQuery(row) });
@@ -588,7 +594,7 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
         reason: policy.destinationBlockReason(destination, pol),
       });
     }
-    const row = db.createQuery({ status: 'shadow_ai', ...base });
+    const row = createQuery({ status: 'shadow_ai', ...base });
     db.appendAudit({ action: 'SHADOW_AI', queryId: row.id, actor: user, detail: `ungoverned AI tool: ${destination}` });
     emitSecurityAlert(row, 'SHADOW_AI');
     broadcast('query', { type: 'shadow_ai', query: publicQuery(row) });
@@ -597,7 +603,7 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
   }
 
   if (clientOutcome === 'file_too_large' || clientOutcome === 'file_unsupported' || clientOutcome === 'scan_unavailable') {
-    const row = db.createQuery({ status: 'file_blocked_unscanned', ...base });
+    const row = createQuery({ status: 'file_blocked_unscanned', ...base });
     db.appendAudit({ action: 'FILE_BLOCKED_UNSCANNED', queryId: row.id, actor: user, detail: note || 'file blocked unscanned' });
     emitSecurityAlert(row, 'FILE_BLOCKED_UNSCANNED');
     broadcast('query', { type: 'file_blocked_unscanned', query: publicQuery(row) });
@@ -606,7 +612,7 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
   }
 
   if (verdict.decision === 'allow') {
-    const row = db.createQuery({ status: 'allowed', ...base });
+    const row = createQuery({ status: 'allowed', ...base });
     db.appendAudit({ action: 'ALLOWED', queryId: row.id, actor: user, detail: `${source} risk ${analysis.riskScore}` });
     emitSecurityAlert(row, 'ALLOWED');
     broadcast('query', { type: 'allowed', query: publicQuery(row) });
@@ -615,7 +621,7 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
   }
 
   if (clientOutcome === 'paste_flagged') {
-    const row = db.createQuery({ status: 'paste_flagged', mode: pol.enforcementMode || 'block', ...base });
+    const row = createQuery({ status: 'paste_flagged', mode: pol.enforcementMode || 'block', ...base });
     db.appendAudit({ action: 'PASTE_FLAGGED', queryId: row.id, actor: user, detail: note || `${source}/paste: ${verdict.reasons.join('; ')}` });
     emitSecurityAlert(row, 'PASTE_FLAGGED');
     broadcast('query', { type: 'paste_flagged', query: publicQuery(row) });
@@ -701,7 +707,7 @@ app.post('/api/v1/heartbeat', checkIngestKey, validation.validateBody(validation
   } = req.body || {};
   const checks = safeInstallChecks(req.body && req.body.checks);
   const failedChecks = failedInstallCheckIds(checks);
-  const row = db.createQuery({
+  const row = createQuery({
     status: 'sensor_heartbeat',
     mode: 'sensor_health',
     user,
@@ -803,7 +809,7 @@ app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation
   try { extracted = await processors.extractText(filename, buf); }
   catch (e) { extracted = { text: '', processor: null, supported: true, extractionOk: false, error: 'extract_failed' }; }
   if (!extracted.supported) {
-    const row = db.createQuery({ status: 'flagged', user, orgId, destination, source, channel, sensor,
+    const row = createQuery({ status: 'flagged', user, orgId, destination, source, channel, sensor,
       redactedPrompt: '[unsupported file] ' + filename, findings: [], categories: [], entityCounts: {},
       riskScore: 0, maxSeverity: 0, maxSeverityLabel: 'none', reasons: ['Unsupported file type recorded'] });
     db.appendAudit({ action: 'FILE_RECORDED', queryId: row.id, actor: user, detail: filename });
@@ -814,7 +820,7 @@ app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation
   }
   if (!extracted.extractionOk) {
     const reason = extracted.error === 'timeout' ? 'File extraction timed out before inspection completed' : 'File could not be inspected';
-    const row = db.createQuery({ status: 'file_blocked_unscanned', user, orgId, destination, source, channel, sensor,
+    const row = createQuery({ status: 'file_blocked_unscanned', user, orgId, destination, source, channel, sensor,
       filename, processor: extracted.processor, redactedPrompt: '[unreadable file] ' + filename,
       findings: [], categories: [], entityCounts: {}, riskScore: 0, maxSeverity: 0, maxSeverityLabel: 'none',
       reasons: [reason] });
@@ -845,7 +851,7 @@ app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation
     riskScore: analysis.riskScore, maxSeverity: analysis.maxSeverity, maxSeverityLabel: analysis.maxSeverityLabel, reasons: verdict.reasons };
 
   if (verdict.decision === 'allow') {
-    const row = db.createQuery({ status: 'allowed', ...base });
+    const row = createQuery({ status: 'allowed', ...base });
     db.appendAudit({ action: 'FILE_ALLOWED', queryId: row.id, actor: user, detail: filename + ' risk ' + analysis.riskScore });
     emitSecurityAlert(row, 'FILE_ALLOWED');
     broadcast('query', { type: 'allowed', query: publicQuery(row) }); broadcast('stats', db.stats());
@@ -912,7 +918,7 @@ app.post('/api/v1/scan-response', checkIngestKey, validation.validateBody(valida
   const redacted = safePreview(text, analysis);
   const leaked = findings.length > 0 || categories.length > 0;
   if (leaked) {
-    const row = db.createQuery({ status: 'response_flagged', user, orgId, destination, source, channel: 'ai_response', sensor,
+    const row = createQuery({ status: 'response_flagged', user, orgId, destination, source, channel: 'ai_response', sensor,
       redactedPrompt: '[AI response] ' + redacted, findings, categories, entityCounts: analysis.entityCounts,
       riskScore: analysis.riskScore, maxSeverity: analysis.maxSeverity, maxSeverityLabel: analysis.maxSeverityLabel,
       reasons: ['Sensitive data present in AI response'] });

@@ -295,7 +295,7 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 
 | Layer | Status |
 |-------|--------|
-| Control plane (policy, queue, audit, dashboard) | Working — SQLite (WAL/transactions), tamper-evident audit covering the evidence |
+| Control plane (policy, queue, routing, audit, dashboard) | Working — SQLite (WAL/transactions), owner/SLA routing for held decisions, tamper-evident audit covering the evidence |
 | Hybrid detection engine | Working — 22 structured detectors + **4-category on-device semantic model** (measured P100/R94 on a held-out set) |
 | Reversible redaction | Working — tokenize/detokenize, sealed vault, `/api/v1/rehydrate` |
 | Browser extension | Working — warn/justify/**redact**/block, real-button send, MDM identity, Man-in-the-Prompt guard |
@@ -303,7 +303,7 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 | Destination controls | Working — governed destination coverage, default-deny unapproved AI, full destination blocking, and file-upload-only blocking across browser, endpoint, gate, file, and response paths |
 | Output scanning | Working — `/api/v1/scan-response` flags PII/secrets in AI replies |
 | MCP guard / Endpoint agent | Working references - inline/MCP redaction; local endpoint folder watch plus signed native file-flow handoff prototype; redacted companion files for structured-only findings |
-| Auth & ops | Working: login lockout, password-confirmed raw reveal and release approval, release-token scoped polling, stable secret, `/healthz` · `/readyz` · `/api/metrics`, policy-driven sensor version and browser/endpoint/MCP install-health posture, sanitized examiner export with coverage and lineage, Docker, CI |
+| Auth & ops | Working: login lockout, password-confirmed raw reveal and release approval, release-token scoped polling, stable secret, `/healthz` · `/readyz` · `/api/metrics`, policy-driven sensor version and browser/endpoint/MCP install-health posture, sanitized examiner export with coverage, workflow routing, and lineage, Docker, CI |
 
 ## Shipped since the skeleton (see `ITERATIONS.md`)
 
@@ -313,14 +313,15 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 - **Reversible redaction / Redact-&-Send**, sealed token vault, local response re-hydration.
 - **MDM identity**, reliable per-site send, **Man-in-the-Prompt** guard, **shadow-AI** discovery and default-deny unapproved AI blocking.
 - **Coverage posture** showing governed destinations, required sensors, desired sensor versions, browser/endpoint/MCP install-health checks, fleet state by user/org/sensor, shadow-AI sightings, and stale or missing sensor coverage.
-- **Sanitized examiner export** with audit integrity, policy diffs, coverage posture, and lineage by user, destination, sensor, channel, category, and decision.
+- **Approval routing** that assigns held decisions to security, compliance, privacy, or legal with SLA metadata in the queue, SIEM alert payloads, and examiner evidence.
+- **Sanitized examiner export** with audit integrity, policy diffs, coverage posture, workflow ownership, and lineage by user, destination, sensor, channel, category, and decision.
 - **Login lockout**, stable session secret, regulation **templates**, **/healthz · /readyz · /api/metrics**, Docker + CI.
 
 ## Still ahead (to ship commercially)
 
-- SSO, polished MFA enrollment UX, and multiple admin roles; deeper multi-tenant isolation per institution.
+- SSO, polished MFA enrollment UX, SCIM, and IdP group mapping onto the current routing groups; deeper multi-tenant isolation per institution.
 - Signed Chrome Web Store listing and force-install rollout; local extension zip, integrity manifest, release-readiness report, and managed-policy checklist are packaged.
-- Email/Slack escalation rules on top of the sanitized SIEM webhook.
+- Email/Slack/Teams notification adapters and persisted escalation state on top of the sanitized routing metadata.
 - Ship the signed native endpoint collector that feeds the tested handoff contract from clipboard and AI-app upload flows.
 - Upgrade the on-device classifier to a quantized ONNX/WASM NER when recall demands it.
 
