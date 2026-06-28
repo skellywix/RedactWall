@@ -16,6 +16,7 @@ const fixturePolicy = {
   allowedDestinations: [],
   blockedDestinations: [],
   blockedFileUploadDestinations: [],
+  blockedBrowserActions: [],
   blockUnapprovedAiDestinations: true,
   alwaysBlock: ['US_SSN', 'CREDIT_CARD', 'BANK_ACCOUNT', 'ROUTING_NUMBER', 'IBAN', 'US_PASSPORT', 'SECRET_KEY', 'PRIVATE_KEY', 'CANARY_TOKEN'],
 };
@@ -68,7 +69,7 @@ function chatFixture({ host, sendButton }) {
 </html>`;
 }
 
-async function launchExtensionContext(baseURL, testInfo) {
+async function launchExtensionContext(baseURL, testInfo, policy = fixturePolicy) {
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'promptwall-extension-e2e-'));
   await testInfo.attach('user-data-dir', { body: userDataDir, contentType: 'text/plain' });
   const context = await chromium.launchPersistentContext(userDataDir, {
@@ -86,7 +87,7 @@ async function launchExtensionContext(baseURL, testInfo) {
       serverUrl: baseURL,
       ingestKey: 'e2e-ingest-key',
       enabled: true,
-      policy: fixturePolicy,
+      policy,
       user: 'browser-smoke@example.test',
       orgId: 'e2e-org',
     }, null, 2),
@@ -104,12 +105,12 @@ async function launchExtensionContext(baseURL, testInfo) {
       orgId: 'e2e-org',
       policy,
     });
-  }, { serverUrl: baseURL, policy: fixturePolicy });
+  }, { serverUrl: baseURL, policy });
 
   return { context, userDataDir };
 }
 
-async function applyFixturePolicyToPage(context, page, baseURL, governedHost) {
+async function applyFixturePolicyToPage(context, page, baseURL, governedHost, policy = fixturePolicy) {
   const serviceWorker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
   await serviceWorker.evaluate(async ({ serverUrl, policy }) => {
     await chrome.storage.local.set({
@@ -121,7 +122,7 @@ async function applyFixturePolicyToPage(context, page, baseURL, governedHost) {
       orgId: 'e2e-org',
       policy,
     });
-  }, { serverUrl: baseURL, policy: fixturePolicy });
+  }, { serverUrl: baseURL, policy });
 
   await expect.poll(async () => serviceWorker.evaluate(async ({ url, host }) => {
     const tabs = await chrome.tabs.query({});
@@ -159,6 +160,16 @@ async function syntheticPaste(page, value) {
   await page.evaluate((text) => navigator.clipboard.writeText(text), value);
   await page.locator('#prompt-textarea').focus();
   await page.keyboard.press('ControlOrMeta+V');
+}
+
+async function syntheticFileDrop(page, { name, body }) {
+  return page.evaluate(({ name, body }) => {
+    const data = new DataTransfer();
+    data.items.add(new File([body], name, { type: 'text/plain' }));
+    const event = new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: data });
+    document.querySelector('#prompt-textarea').dispatchEvent(event);
+    return event.defaultPrevented;
+  }, { name, body });
 }
 
 test.describe('browser extension live smoke', () => {
@@ -228,6 +239,46 @@ test.describe('browser extension live smoke', () => {
       await page.waitForTimeout(200);
       fs.mkdirSync(artifactDir, { recursive: true });
       await page.screenshot({ path: path.join(artifactDir, 'poe-blocked.png'), fullPage: true });
+    } finally {
+      await context.close();
+      fs.rmSync(userDataDir, { recursive: true, force: true });
+    }
+  });
+
+  test('blocks configured file drops before browser upload scanning', async ({ baseURL }, testInfo) => {
+    const policy = {
+      ...fixturePolicy,
+      blockedBrowserActions: [{
+        id: 'block_drop_chatgpt',
+        action: 'drop',
+        destinations: ['chatgpt.com'],
+        reason: 'file_drop_blocked',
+      }],
+    };
+    const { context, userDataDir } = await launchExtensionContext(baseURL, testInfo, policy);
+    try {
+      const page = await openControlledAiPage(
+        context,
+        'https://chatgpt.com/',
+        chatFixture({
+          host: 'chatgpt.com',
+          sendButton: '<button data-testid="send-button" aria-label="Send prompt">Send</button>',
+        }),
+      );
+
+      await applyFixturePolicyToPage(context, page, baseURL, 'chatgpt.com', policy);
+      const prevented = await syntheticFileDrop(page, {
+        name: 'member-loan.txt',
+        body: 'Synthetic member SSN 123-45-6789',
+      });
+
+      expect(prevented).toBe(true);
+      await expect(page.locator('.ps-toast')).toContainText('blocked file drops');
+      await expect(page.locator('.ps-toast')).not.toContainText('member-loan.txt');
+      await expect(page.locator('[data-sent]')).toHaveCount(0);
+      await page.waitForTimeout(200);
+      fs.mkdirSync(artifactDir, { recursive: true });
+      await page.screenshot({ path: path.join(artifactDir, 'chatgpt-drop-blocked.png'), fullPage: true });
     } finally {
       await context.close();
       fs.rmSync(userDataDir, { recursive: true, force: true });

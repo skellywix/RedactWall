@@ -617,7 +617,7 @@ function blockBrowserActionByPolicy(res, context = {}, responseExtra = {}) {
   } = context;
   const normalized = policy.normalizeDestination(destination);
   const requestedAction = String(action || '').trim().toLowerCase();
-  const normalizedAction = requestedAction === 'paste' ? 'paste' : 'browser_action';
+  const normalizedAction = policy.normalizeBrowserAction(requestedAction) || 'browser_action';
   const row = createQuery({
     status: 'action_blocked',
     mode: 'browser_action_block',
