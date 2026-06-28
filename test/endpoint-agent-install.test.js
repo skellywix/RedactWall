@@ -18,8 +18,11 @@ test('installer registers a restarting scheduled task without putting the ingest
   assert.match(install, /Register-ScheduledTask/);
   assert.match(install, /New-ScheduledTaskTrigger -AtLogOn/);
   assert.match(install, /New-ScheduledTaskSettingsSet -RestartCount 3/);
-  assert.match(install, /New-ScheduledTaskPrincipal[\s\S]+-LogonType Interactive[\s\S]+-RunLevel LeastPrivilege/);
+  assert.match(install, /New-ScheduledTaskPrincipal[\s\S]+-LogonType Interactive[\s\S]+-RunLevel Limited/);
   assert.match(install, /Register-ScheduledTask[\s\S]+-Principal \$principal/);
+  assert.match(install, /Install-EndpointStartupShortcut/);
+  assert.match(install, /Start-EndpointFallbackProcess/);
+  assert.match(install, /Scheduled task registration was denied/);
   assert.match(install, /INGEST_API_KEY=\$IngestKey/);
   assert.match(install, /\$env:LOCALAPPDATA\\PromptWall/);
   assert.match(install, /BUILTIN\\Administrators/);
@@ -68,6 +71,9 @@ test('desktop collector shell action is per-user and secret-free', () => {
 test('uninstaller removes task and can remove endpoint config', () => {
   assert.match(uninstall, /Stop-ScheduledTask/);
   assert.match(uninstall, /Unregister-ScheduledTask/);
+  assert.match(uninstall, /endpoint-agent\.pid/);
+  assert.match(uninstall, /GetFolderPath\("Startup"\)/);
+  assert.ok(uninstall.includes("sensors[\\\\/]endpoint-agent[\\\\/]agent\\.js"));
   assert.match(uninstall, /\$RemoveConfig/);
   assert.match(uninstall, /\$RemoveDesktopCollector/);
   assert.match(uninstall, /uninstall-desktop-collector\.ps1/);

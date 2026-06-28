@@ -61,6 +61,8 @@ The Policy tab maintains two destination lists:
 
 - `governedDestinations`: AI hosts that should be covered and counted in the
   Coverage tab.
+- `desktopCollectorDestination`: the friendly desktop app label the protected
+  upload collector uses by default, such as `Desktop AI` or `Copilot Desktop`.
 - `blockedDestinations`: AI hosts or desktop app labels that are forbidden.
   Browser sends, browser file uploads, endpoint file flows, gateway prompts,
   uploaded files, and response scans short-circuit as `destination_blocked`

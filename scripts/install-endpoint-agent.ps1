@@ -33,6 +33,7 @@ $handoffRoot = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFrom
 $logDir = Join-Path $configRoot "logs"
 $configPath = Join-Path $configRoot "endpoint-agent.env"
 $logPath = Join-Path $logDir "endpoint-agent.log"
+$pidPath = Join-Path $configRoot "endpoint-agent.pid"
 
 New-Item -ItemType Directory -Force -Path $configRoot, $watchRoot, $logDir | Out-Null
 if ($HandoffSecret) {
@@ -85,6 +86,7 @@ if ($HandoffSecret) {
 if ($Force) {
   Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
   Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath (Join-Path ([Environment]::GetFolderPath("Startup")) "$TaskName.lnk") -Force -ErrorAction SilentlyContinue
 }
 
 $taskArgs = @(
@@ -96,12 +98,80 @@ $taskArgs = @(
   "-LogPath", "`"$logPath`""
 ) -join " "
 
+function Install-EndpointStartupShortcut {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$ShortcutName,
+
+    [Parameter(Mandatory = $true)]
+    [string]$Arguments,
+
+    [Parameter(Mandatory = $true)]
+    [string]$WorkingDirectory
+  )
+
+  $startupDir = [Environment]::GetFolderPath("Startup")
+  New-Item -ItemType Directory -Force -Path $startupDir | Out-Null
+  $shortcutPath = Join-Path $startupDir "$ShortcutName.lnk"
+  $shell = New-Object -ComObject WScript.Shell
+  $shortcut = $shell.CreateShortcut($shortcutPath)
+  $shortcut.TargetPath = "powershell.exe"
+  $shortcut.Arguments = $Arguments
+  $shortcut.WorkingDirectory = $WorkingDirectory
+  $shortcut.WindowStyle = 7
+  $shortcut.Description = "PromptWall endpoint file sensor"
+  $shortcut.Save()
+  return $shortcutPath
+}
+
+function Start-EndpointFallbackProcess {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$RepoRoot,
+
+    [Parameter(Mandatory = $true)]
+    [string]$ConfigPath,
+
+    [Parameter(Mandatory = $true)]
+    [string]$LogPath,
+
+    [Parameter(Mandatory = $true)]
+    [string]$PidPath
+  )
+
+  $node = Get-Command node -ErrorAction Stop
+  $agent = Join-Path $RepoRoot "sensors\endpoint-agent\agent.js"
+  $errLog = Join-Path (Split-Path -Parent $LogPath) "endpoint-agent.err.log"
+  $previousEnvPath = $env:SENTINEL_ENV_PATH
+  $env:SENTINEL_ENV_PATH = $ConfigPath
+  try {
+    $proc = Start-Process -FilePath $node.Source -ArgumentList "`"$agent`"" -WorkingDirectory $RepoRoot -WindowStyle Hidden -RedirectStandardOutput $LogPath -RedirectStandardError $errLog -PassThru
+  } finally {
+    if ($null -eq $previousEnvPath) { Remove-Item Env:\SENTINEL_ENV_PATH -ErrorAction SilentlyContinue }
+    else { $env:SENTINEL_ENV_PATH = $previousEnvPath }
+  }
+  Set-Content -LiteralPath $PidPath -Encoding ascii -Value ([string]$proc.Id)
+  return $proc
+}
+
 $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $taskArgs
 $trigger = New-ScheduledTaskTrigger -AtLogOn
 $settings = New-ScheduledTaskSettingsSet -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero)
-$principal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType Interactive -RunLevel LeastPrivilege
-Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Description "PromptWall endpoint file sensor" | Out-Null
-Start-ScheduledTask -TaskName $TaskName
+$principal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType Interactive -RunLevel Limited
+$startupMode = "scheduled task"
+try {
+  Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Description "PromptWall endpoint file sensor" | Out-Null
+  Start-ScheduledTask -TaskName $TaskName
+} catch {
+  if ($_.Exception.Message -notmatch "Access is denied|0x80070005") {
+    throw
+  }
+  Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
+  $shortcutPath = Install-EndpointStartupShortcut -ShortcutName $TaskName -Arguments $taskArgs -WorkingDirectory $repo
+  Start-EndpointFallbackProcess -RepoRoot $repo -ConfigPath $configPath -LogPath $logPath -PidPath $pidPath | Out-Null
+  $startupMode = "startup shortcut"
+  Write-Warning "Scheduled task registration was denied. Installed a per-user Startup shortcut instead: $shortcutPath"
+}
 
 if ($InstallDesktopCollector) {
   $collectorInstaller = Join-Path $repo "scripts\install-desktop-collector.ps1"
@@ -118,6 +188,7 @@ if ($InstallDesktopCollector) {
 }
 
 Write-Host "Installed $TaskName"
+Write-Host "Startup mode: $startupMode"
 Write-Host "Watch directory: $watchRoot"
 if ($HandoffSecret) { Write-Host "Native handoff directory: $handoffRoot" }
 if ($InstallDesktopCollector) { Write-Host "Desktop collector: $DesktopCollectorMenuName" }
