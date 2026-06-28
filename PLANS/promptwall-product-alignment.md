@@ -65,7 +65,9 @@ evidence stable until a separate migration plan exists.
    compatibility.
 5. Next product gap: native desktop collector or deeper app/action policy
    controls beyond destination, file-upload, and response scanning.
-6. Final audit: current-state search, docs check, package generation, tests,
+6. Exception lifecycle: owner group, reviewer role, review-after metadata, and
+   sanitized expiry-review evidence for time-bound allow rules.
+7. Final audit: current-state search, docs check, package generation, tests,
    eval, sync-check, audit chain, and browser evidence.
 
 ## Acceptance Evidence

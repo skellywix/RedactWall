@@ -27,6 +27,7 @@ const SENSOR_ID = /^[a-z][a-z0-9_:-]{0,79}$/;
 const SENSOR_VERSION = /^[A-Za-z0-9._+:-]+$/;
 const ROUTING_RULE_ID = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const ROUTING_GROUP = /^[a-z][a-z0-9_-]{0,63}$/;
+const ROUTING_ROLE = /^(security_admin|approver)$/;
 const ROUTING_REASON = /^[a-z0-9][a-z0-9_:-]{0,79}$/;
 const POLICY_MATCH_TEXT = /^[A-Za-z0-9 ._@:+/-]+$/;
 const SENSITIVE_ROUTING_CODE = /(?:\d{3}[-_:.]?\d{2}[-_:.]?\d{4}|\d{12,19})/;
@@ -328,10 +329,21 @@ const policyExceptionSchema = z.object({
   expiresAt: z.string().min(1).max(40).refine((value) => Number.isFinite(Date.parse(value)), {
     message: 'invalid datetime',
   }),
+  ownerGroup: routingCodeSchema(ROUTING_GROUP, 64).optional(),
+  reviewerRole: z.string().max(32).regex(ROUTING_ROLE).optional(),
+  reviewAfter: z.string().min(1).max(40).refine((value) => Number.isFinite(Date.parse(value)), {
+    message: 'invalid datetime',
+  }).optional(),
   reason: routingCodeSchema(ROUTING_REASON, 80).optional(),
 }).strict().refine(hasPolicyMatcher, {
   message: 'at least one matcher required',
   path: ['id'],
+}).refine((rule) => {
+  if (!rule.reviewAfter) return true;
+  return Date.parse(rule.reviewAfter) <= Date.parse(rule.expiresAt);
+}, {
+  message: 'review must be due before expiry',
+  path: ['reviewAfter'],
 });
 
 const blockedBrowserActionSchema = z.object({

@@ -369,6 +369,31 @@ function safeCoverage(report) {
   };
 }
 
+function safePolicyExceptionReview(report) {
+  if (!report || typeof report !== 'object') return null;
+  const items = (Array.isArray(report.items) ? report.items : []).slice(0, 40).map((item) => ({
+    id: safeCoverageText(item && item.id),
+    enabled: item && item.enabled !== false,
+    action: safeCoverageText(item && item.action),
+    expiresAt: safeCoverageText(item && item.expiresAt),
+    ownerGroup: safeCoverageText(item && item.ownerGroup),
+    reviewerRole: safeCoverageText(item && item.reviewerRole),
+    reviewAfter: safeCoverageText(item && item.reviewAfter),
+    status: safeCoverageText(item && item.status),
+  }));
+  return {
+    generatedAt: safeCoverageText(report.generatedAt),
+    reviewWindowDays: safeCoverageNumber(report.reviewWindowDays),
+    total: safeCoverageNumber(report.total),
+    active: safeCoverageNumber(report.active),
+    disabled: safeCoverageNumber(report.disabled),
+    expired: safeCoverageNumber(report.expired),
+    reviewDue: safeCoverageNumber(report.reviewDue),
+    expiringSoon: safeCoverageNumber(report.expiringSoon),
+    items,
+  };
+}
+
 function decisionForStatus(status) {
   const value = String(status || 'unknown');
   if (BLOCKED_STATUSES.has(value)) return 'blocked';
@@ -476,6 +501,7 @@ function buildEvidencePack(input) {
   const now = input.generatedAt || new Date().toISOString();
   const queries = input.queries || [];
   const coverageReport = safeCoverage(input.coverage);
+  const policyExceptionReview = safePolicyExceptionReview(input.policyExceptionReview);
   const backup = safeBackupEvidence(input.backup);
   const restoreDrill = safeRestoreDrillEvidence(input.restoreDrill);
   const scope = {
@@ -499,6 +525,7 @@ function buildEvidencePack(input) {
     stats: input.stats,
     auditIntegrity: input.auditIntegrity,
     coverage: coverageReport,
+    policyExceptionReview,
     backup,
     restoreDrill,
     controlMappings: controlMap.buildControlMappings({

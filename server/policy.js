@@ -27,6 +27,7 @@ const DEFAULT_REQUIRED_SENSORS = ['browser_extension', 'endpoint_agent', 'mcp_gu
 const DEFAULT_DESIRED_SENSOR_VERSIONS = Object.fromEntries(
   DEFAULT_REQUIRED_SENSORS.map((source) => [source, pkg.version]),
 );
+const EXCEPTION_REVIEW_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
 const DEFAULT_POLICY = {
   enforcementMode: 'block',
@@ -274,6 +275,15 @@ function normalizePolicyExceptions(value) {
       ...normalizePolicyMatchers(item),
     };
     if (!hasPolicyMatcher(exception)) continue;
+    const ownerGroup = String(item.ownerGroup || '').trim().toLowerCase();
+    if (ROUTING_GROUP_RE.test(ownerGroup) && safeRoutingCode(ownerGroup)) exception.ownerGroup = ownerGroup;
+    const reviewerRole = String(item.reviewerRole || '').trim().toLowerCase();
+    if (ROUTING_ROLE_RE.test(reviewerRole)) exception.reviewerRole = reviewerRole;
+    const reviewAfter = String(item.reviewAfter || '').trim();
+    const reviewTime = Date.parse(reviewAfter);
+    if (reviewAfter && Number.isFinite(reviewTime) && reviewTime <= expires) {
+      exception.reviewAfter = new Date(reviewTime).toISOString();
+    }
     const reason = String(item.reason || '').trim().toLowerCase();
     if (ROUTING_REASON_RE.test(reason) && safeRoutingCode(reason)) exception.reason = reason;
     seen.add(id);
@@ -281,6 +291,50 @@ function normalizePolicyExceptions(value) {
     if (out.length >= 40) break;
   }
   return out;
+}
+
+function exceptionReviewStatus(exception, nowMs, windowMs) {
+  if (!exception || exception.enabled === false) return 'disabled';
+  const expires = Date.parse(exception.expiresAt);
+  if (!Number.isFinite(expires)) return 'invalid';
+  if (expires <= nowMs) return 'expired';
+  const reviewAfter = Date.parse(exception.reviewAfter || '');
+  if (Number.isFinite(reviewAfter) && reviewAfter <= nowMs) return 'review_due';
+  if (expires <= nowMs + windowMs) return 'expiring_soon';
+  return 'active';
+}
+
+function policyExceptionReview(policy = loadPolicy(), options = {}) {
+  const now = options.now instanceof Date ? options.now : new Date(options.now || Date.now());
+  const nowMs = now.getTime();
+  const windowMs = Number.isFinite(Number(options.windowMs))
+    ? Math.max(0, Number(options.windowMs))
+    : EXCEPTION_REVIEW_WINDOW_MS;
+  const items = (policy.policyExceptions || []).map((exception) => {
+    const status = exceptionReviewStatus(exception, nowMs, windowMs);
+    return {
+      id: exception.id,
+      enabled: exception.enabled !== false,
+      action: exception.action || 'allow',
+      expiresAt: exception.expiresAt || null,
+      ownerGroup: exception.ownerGroup || null,
+      reviewerRole: exception.reviewerRole || null,
+      reviewAfter: exception.reviewAfter || null,
+      status,
+    };
+  });
+  const count = (status) => items.filter((item) => item.status === status).length;
+  return {
+    generatedAt: now.toISOString(),
+    reviewWindowDays: Math.round(windowMs / (24 * 60 * 60 * 1000)),
+    total: items.length,
+    active: items.filter((item) => ['active', 'expiring_soon', 'review_due'].includes(item.status)).length,
+    disabled: count('disabled'),
+    expired: count('expired'),
+    reviewDue: count('review_due'),
+    expiringSoon: count('expiring_soon'),
+    items,
+  };
 }
 
 function normalizeBlockedBrowserActions(value) {
@@ -670,6 +724,7 @@ module.exports = {
   normalizeApprovalRoutingRules,
   normalizePolicyScopes,
   normalizePolicyExceptions,
+  policyExceptionReview,
   effectivePolicyForContext,
   policyRuleMatches,
   destinationMatches,
