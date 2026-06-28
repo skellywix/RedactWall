@@ -3,7 +3,7 @@ const http = require('node:http');
 const net = require('node:net');
 
 const DEFAULT_LOOPBACK_FETCH_TIMEOUT_MS = 5000;
-const DEFAULT_LOOPBACK_FETCH_ATTEMPTS = 30;
+const DEFAULT_LOOPBACK_FETCH_ATTEMPTS = 120;
 const DEFAULT_LOOPBACK_LISTEN_TIMEOUT_MS = 5000;
 
 function positiveNumber(value, fallback) {
