@@ -52,6 +52,8 @@ Build next:
   decision were involved without retaining sensitive content.
 - Direct SMTP notification and identity-backed assignment on top of provisioned
   users, groups, and the sanitized approval workflow.
+- Dashboard controls for scoped policy and exception lifecycle, on top of the
+  server-side `policyScopes` and `policyExceptions` contract.
 - Custom detector packs and an `ocr_required` file outcome so pilots can model
   local member IDs and scanned documents before shipping a heavier OCR runtime.
 - MCP connector SDK patterns that force tool-output sanitization before model
@@ -82,6 +84,9 @@ Build next:
 - Add minimal SCIM 2.0 provisioning for users and groups, with bearer auth,
   deactivation, group membership patches, audit entries, and PromptWall group
   display names mapped onto local route roles.
+- Add server-side scoped policy and time-bound exceptions that use metadata such
+  as user, SCIM group, source, channel, destination, detector, and category while
+  preserving hard-stop entities.
 - Keep compatibility-sensitive runtime contracts stable where breaking them
   would damage existing installs or retained evidence.
 - Add active Poe browser protection because Poe was already a governed

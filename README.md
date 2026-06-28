@@ -200,6 +200,10 @@ For customer identity provisioning, use `docs/SCIM_PROVISIONING.md`. The current
 SCIM surface stores users and groups, deprovisions users, and maps known
 PromptWall groups to roles, but it does not replace the local console login yet.
 
+For advanced customer policy, use `docs/POLICY_SCOPES.md`. The server can apply
+stricter scoped policy by user, SCIM group, source, channel, destination,
+detector, or category, and can record time-bound non-hard-stop exceptions.
+
 For demos, start with `DEMO_INSTALL_GUIDE.md`. The client-facing presenter flow
 lives in `docs/SALES_DEMO_GUIDE.md`; the demo-machine setup and reset runbook
 lives in `docs/DEMO_TECHNICIAN_SETUP.md`. Their generated current-state sections
@@ -335,13 +339,16 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 - **Sanitized examiner export** with audit integrity, policy diffs, coverage posture, workflow ownership, and lineage by user, destination, sensor, channel, category, and decision.
 - **SCIM provisioning** for users and groups, with bearer auth, deactivation,
   audit entries, and PromptWall group names mapped onto local roles.
+- **Scoped policy and exceptions** that tighten enforcement for matched users,
+  SCIM groups, destinations, sources, channels, detectors, or categories, plus
+  time-bound allow exceptions that cannot bypass hard-stop entities.
 - **Login lockout**, stable session secret, regulation **templates**, **/healthz · /readyz · /api/metrics**, Docker + CI.
 
 ## Still ahead (to ship commercially)
 
 - Full SSO/OIDC login that consumes provisioned identities, polished MFA
-  enrollment UX, richer IdP group policy, and deeper multi-tenant isolation per
-  institution.
+  enrollment UX, dashboard controls for scoped policy, and deeper multi-tenant
+  isolation per institution.
 - Signed Chrome Web Store listing and force-install rollout; local extension zip, integrity manifest, release-readiness report, and managed-policy checklist are packaged.
 - Direct SMTP and ticketing adapters on top of the existing sanitized webhook, Slack, Teams, and escalation workflow.
 - Ship the signed native endpoint collector that feeds the tested handoff contract from clipboard and AI-app upload flows.

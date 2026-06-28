@@ -209,8 +209,12 @@ Acceptance evidence:
 ### 5. Group-Scoped Policy And Time-Bound Exceptions
 
 Current state: policy is centralized, supports templates, destination blocks,
-file-upload blocks, detector ignores, and scanner controls. It is not yet scoped
-by user group, department, destination class, or exception window.
+file-upload blocks, detector ignores, scanner controls, server-side
+`policyScopes`, and server-side `policyExceptions`. Scopes can tighten
+enforcement by user, SCIM group, org, source, channel, destination, detector, or
+category. Exceptions can temporarily allow matching non-hard-stop events and are
+recorded in evidence. Dedicated dashboard controls and local sensor-side scoped
+evaluation are still open.
 
 Customer ask: "Can lending have a different approval path than engineering? Can
 we allow a specific vendor prompt for 24 hours without weakening the global
@@ -221,19 +225,19 @@ need limited exceptions or teams will pressure admins to loosen the baseline.
 
 Implementation connection:
 - Keep global policy as the default.
-- Add `policy.scopes[]` with matchers for group, source, destination, channel,
-  and detector category.
-- Add `policy.exceptions[]` with owner, expiration, reason code, and sanitized
-  audit history.
-- Update `server/policy.js` so `evaluate(analysis, policy, context)` applies the
-  most specific scoped policy without weakening `alwaysBlock`.
-- Add dashboard controls only after the JSON contract is tested.
+- Build dashboard controls for `policyScopes` and `policyExceptions` after the
+  tested JSON/API contract.
+- Decide whether sensors should receive a reduced scoped-policy subset once
+  group identity is reliable on every endpoint.
+- Extend exceptions with owner/approval metadata and scheduled expiry review.
 
 Acceptance evidence:
 - `node --test test/policy-scope.test.js test/templates.test.js test/validation.test.js`
-- Regression tests prove expired exceptions fail closed and `alwaysBlock` cannot
-  be downgraded by scoped policy.
-- Evidence export includes exception metadata but not prompt bodies.
+- `node --test test/policy-scope-api.test.js test/policy-history.test.js`
+- Regression tests prove expired exceptions fail closed, SCIM groups can drive a
+  scoped gate decision, and `alwaysBlock` cannot be downgraded by scoped policy
+  or exceptions.
+- Evidence export includes scope and exception metadata but not prompt bodies.
 
 ### 6. Examiner-Ready Evidence Packs And Scheduled Reporting
 
@@ -326,7 +330,7 @@ Acceptance evidence:
 1. Desktop/file-flow collector MVP.
 2. Enterprise SSO login and provisioned role mapping.
 3. Signed update channel and commercial rollout posture.
-4. Group-scoped policy and time-bound exceptions.
+4. Dashboard controls for group-scoped policy and time-bound exceptions.
 5. Scheduled examiner evidence pack with backup and restore-drill status.
 6. Customer-defined detectors plus OCR-required handling.
 7. First real MCP content connector SDK and one Microsoft 365 file-content

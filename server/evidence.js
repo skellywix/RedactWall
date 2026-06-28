@@ -24,6 +24,9 @@ const POLICY_AUDIT_FIELDS = new Set([
   'blockedDestinations',
   'blockedFileUploadDestinations',
   'blockUnapprovedAiDestinations',
+  'approvalRoutingRules',
+  'policyScopes',
+  'policyExceptions',
   'requiredSensors',
   'desiredSensorVersions',
   'scanner',
@@ -102,6 +105,10 @@ function safeQuery(q) {
     retentionPurgedAt: q.retentionPurgedAt || null,
     retentionPurgedFields: (q.retentionPurgedFields || []).filter((field) => ['rawPrompt', 'tokenVault'].includes(field)),
     installChecks: safeInstallChecks(q.installChecks),
+    policyScopeIds: (Array.isArray(q.policyScopeIds) ? q.policyScopeIds : [])
+      .filter((item) => typeof item === 'string')
+      .slice(0, 20),
+    policyExceptionId: typeof q.policyExceptionId === 'string' ? q.policyExceptionId : null,
     workflow,
   };
 }

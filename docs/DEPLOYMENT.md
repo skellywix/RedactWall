@@ -120,6 +120,18 @@ This is lifecycle provisioning, not browser-session login. Keep local Security
 Admin credentials as the break-glass console path until SSO/OIDC login lands.
 See `docs/SCIM_PROVISIONING.md` for endpoint details and IdP setup notes.
 
+## Scoped Policy And Exceptions
+
+Use `docs/POLICY_SCOPES.md` when a customer needs stricter controls for a user,
+SCIM group, source, channel, destination, detector, or semantic category. The
+control plane applies these scopes on gate and file-scan events and records
+matched scope ids in evidence. Time-bound exceptions can allow matching
+non-hard-stop events until `expiresAt`; hard-stop entities still block.
+
+Configure these advanced fields through the admin policy API. The dashboard
+preserves existing `policyScopes` and `policyExceptions` when saving other
+policy fields, but dedicated form controls are still future work.
+
 ## Sensor Version And Install Health
 
 The dashboard Coverage tab summarizes governed destinations, active sensors, and
