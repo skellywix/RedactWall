@@ -525,6 +525,8 @@ Deliver a packet with:
 - Sensor package names and SHA-256 manifest paths.
 - `/healthz` and `/readyz` evidence.
 - Preflight status evidence.
+- Sanitized examiner export from `/api/export/evidence`, including coverage,
+  policy diffs, and lineage summaries.
 - Audit-chain verification output.
 - Backup manifest.
 - Chrome managed policy confirmation.
