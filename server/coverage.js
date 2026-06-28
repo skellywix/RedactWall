@@ -10,7 +10,8 @@ const SENSOR_LABELS = {
   proxy: 'Network proxy',
 };
 
-const REQUIRED_SENSORS = ['browser_extension', 'endpoint_agent', 'mcp_guard'];
+const DEFAULT_REQUIRED_SENSORS = ['browser_extension', 'endpoint_agent', 'mcp_guard'];
+const SENSOR_ID_RE = /^[a-z][a-z0-9_:-]{0,79}$/;
 const BLOCKED_STATUSES = new Set([
   'pending',
   'pending_justification',
@@ -120,6 +121,38 @@ function cleanSensorMetadata(sensor) {
   return safeSensor(sensor) || {};
 }
 
+function normalizeSensorId(value) {
+  const id = String(value || '').trim().toLowerCase();
+  return SENSOR_ID_RE.test(id) ? id : null;
+}
+
+function requiredSensorSources(policy = {}) {
+  const source = Array.isArray(policy.requiredSensors) ? policy.requiredSensors : DEFAULT_REQUIRED_SENSORS;
+  const out = [];
+  const seen = new Set();
+  for (const item of source) {
+    const id = normalizeSensorId(item);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out.length ? out : DEFAULT_REQUIRED_SENSORS.slice();
+}
+
+function desiredSensorVersions(policy = {}) {
+  const source = policy.desiredSensorVersions && typeof policy.desiredSensorVersions === 'object'
+    ? policy.desiredSensorVersions
+    : {};
+  const out = {};
+  for (const [rawKey, rawValue] of Object.entries(source)) {
+    const key = normalizeSensorId(rawKey);
+    const version = String(rawValue || '').trim();
+    if (!key || !version || version.length > 80) continue;
+    out[key] = version;
+  }
+  return out;
+}
+
 function bumpVersion(sensor, q) {
   const meta = cleanSensorMetadata(q.sensor);
   const version = meta.version || meta.packageVersion || null;
@@ -132,20 +165,25 @@ function bumpVersion(sensor, q) {
   if (meta.platform) sensor._platforms.add(meta.platform);
 }
 
-function finalizeSensor(sensor) {
+function finalizeSensor(sensor, opts = {}) {
   const versions = [...(sensor._versions || new Map()).values()]
     .sort((a, b) => String(b.lastSeen || '').localeCompare(String(a.lastSeen || '')) || b.events - a.events || a.version.localeCompare(b.version));
   const platforms = [...(sensor._platforms || new Set())].sort();
+  const latestVersion = versions[0] ? versions[0].version : null;
+  const desiredVersion = opts.desiredVersion || null;
   const versionHealth = sensor.events === 0 ? 'missing'
     : versions.length === 0 ? 'unknown'
+    : desiredVersion && latestVersion !== desiredVersion ? 'outdated'
     : versions.length === 1 ? 'current'
     : 'mixed';
   return {
     source: sensor.source,
     label: sensor.label,
+    required: opts.required === true,
     events: sensor.events,
     lastSeen: sensor.lastSeen,
-    latestVersion: versions[0] ? versions[0].version : null,
+    latestVersion,
+    desiredVersion,
     versionHealth,
     versions,
     platforms,
@@ -159,6 +197,8 @@ function summarize(rows, pol) {
   const ungoverned = new Map();
   const shadow = new Map();
   const sensorCounts = new Map();
+  const requiredSources = requiredSensorSources(policy);
+  const desiredVersions = desiredSensorVersions(policy);
   const desktopCollector = {
     events: 0,
     lastSeen: null,
@@ -201,14 +241,17 @@ function summarize(rows, pol) {
     }
   }
 
-  const requiredSensors = REQUIRED_SENSORS.map((source) => {
+  const requiredSensors = requiredSources.map((source) => {
     const seen = sensorCounts.get(source);
     return seen || { source, label: SENSOR_LABELS[source] || source, events: 0, lastSeen: null, _versions: new Map(), _platforms: new Set() };
   });
-  const additionalSensors = [...sensorCounts.values()].filter((s) => !REQUIRED_SENSORS.includes(s.source));
+  const additionalSensors = [...sensorCounts.values()].filter((s) => !requiredSources.includes(s.source));
   const sensors = [...requiredSensors, ...additionalSensors]
-    .map(finalizeSensor)
-    .sort((a, b) => b.events - a.events || a.label.localeCompare(b.label));
+    .map((sensor) => finalizeSensor(sensor, {
+      required: requiredSources.includes(sensor.source),
+      desiredVersion: desiredVersions[sensor.source] || null,
+    }))
+    .sort((a, b) => Number(b.required) - Number(a.required) || b.events - a.events || a.label.localeCompare(b.label));
   const activeRequired = requiredSensors.filter((s) => s.events > 0).length;
   const activeSensorVersionGaps = sensors.filter((s) => s.events > 0 && s.versionHealth !== 'current').length;
   const governedActive = [...governed.values()].filter((g) => g.events > 0).length;
@@ -216,7 +259,7 @@ function summarize(rows, pol) {
   const shadowEvents = statuses.shadow_ai || 0;
   const unresolvedShadowDestinations = [...shadow.values()].filter((bucket) => (bucket.policyState || 'review') === 'review').length;
   const score = Math.round(
-    (activeRequired / REQUIRED_SENSORS.length) * 45
+    (activeRequired / requiredSensors.length) * 45
     + (governedTotal ? (governedActive / governedTotal) * 25 : 0)
     + (governedTotal ? 10 : 0)
     + (unresolvedShadowDestinations ? 0 : 20),
@@ -234,6 +277,9 @@ function summarize(rows, pol) {
       blocked: Object.entries(statuses)
         .filter(([status]) => BLOCKED_STATUSES.has(status))
         .reduce((sum, [, count]) => sum + count, 0),
+      requiredSensors: requiredSensors.length,
+      activeRequiredSensors: activeRequired,
+      activeSensorVersionGaps,
     },
     sensors,
     governedDestinations: [...governed.values()]
@@ -253,18 +299,14 @@ function summarize(rows, pol) {
       destinations: [...desktopCollector.destinations].sort(),
     },
     posture: [
-      {
-        id: 'browser_extension',
-        label: 'Browser extension',
-        state: (sensorCounts.get('browser_extension') || {}).events ? 'covered' : 'attention',
-        detail: `${(sensorCounts.get('browser_extension') || {}).events || 0} events`,
-      },
-      {
-        id: 'endpoint_agent',
-        label: 'Endpoint agent',
-        state: (sensorCounts.get('endpoint_agent') || {}).events ? 'covered' : 'attention',
-        detail: `${(sensorCounts.get('endpoint_agent') || {}).events || 0} events`,
-      },
+      ...sensors.filter((sensor) => sensor.required).map((sensor) => ({
+        id: sensor.source,
+        label: sensor.label,
+        state: sensor.events && sensor.versionHealth === 'current' ? 'covered' : 'attention',
+        detail: sensor.events
+          ? `${sensor.events} events${sensor.desiredVersion ? ` / desired v${sensor.desiredVersion}` : ''}`
+          : 'required, no events',
+      })),
       {
         id: 'desktop_collector',
         label: 'Desktop collector',

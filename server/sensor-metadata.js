@@ -33,6 +33,7 @@ function safeSensorVersionGap(gap) {
     label: safeTextField(gap.label),
     versionHealth: safeTextField(gap.versionHealth),
     latestVersion: safeTextField(gap.latestVersion),
+    desiredVersion: safeTextField(gap.desiredVersion),
     versions,
     platforms,
   };

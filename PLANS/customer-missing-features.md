@@ -153,8 +153,8 @@ Acceptance evidence:
 ### 4. Managed Deployment And Fleet Posture
 
 Current state: extension and endpoint package generation, managed Chrome policy
-docs, sensor version posture, AWS customer-silo deployment, and setup preflight
-exist. Missing pieces are a signed update channel, desired-version policy,
+docs, required-sensor and desired-version posture, AWS customer-silo deployment,
+and setup preflight exist. Missing pieces are a signed update channel,
 technician install validation in-product, and customer-ready fleet reporting.
 
 Customer ask: "How do we force-install it, keep it updated, and prove every
@@ -164,10 +164,11 @@ Why it matters: buyers trust controls they can deploy and monitor. A packaged
 zip is useful for pilots, but commercial customers need rollout health.
 
 Implementation connection:
-- Add `desiredSensorVersions` and `requiredSensors` to policy, exposed only to
-  admins and packaged into public sensor policy where safe.
-- Extend `server/coverage.js` to mark missing, outdated, unmanaged, and unhealthy
+- Use the existing `desiredSensorVersions` and `requiredSensors` policy fields
+  as the rollout contract for required browser, endpoint, MCP, proxy, or custom
   sensors.
+- Extend `server/coverage.js` beyond missing and outdated state to mark
+  unmanaged and unhealthy sensors once installer health checks exist.
 - Add technician validation output to the dashboard and evidence export:
   extension installed, managed identity present, endpoint task running, MCP guard
   configured, last seen time, version, and policy age.

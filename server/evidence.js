@@ -22,6 +22,8 @@ const POLICY_AUDIT_FIELDS = new Set([
   'allowedDestinations',
   'blockedDestinations',
   'blockedFileUploadDestinations',
+  'requiredSensors',
+  'desiredSensorVersions',
   'scanner',
 ]);
 
@@ -142,6 +144,9 @@ function safeCoverageTotals(totals = {}) {
     governedActive: safeCoverageNumber(totals.governedActive),
     shadowEvents: safeCoverageNumber(totals.shadowEvents),
     blocked: safeCoverageNumber(totals.blocked),
+    requiredSensors: safeCoverageNumber(totals.requiredSensors),
+    activeRequiredSensors: safeCoverageNumber(totals.activeRequiredSensors),
+    activeSensorVersionGaps: safeCoverageNumber(totals.activeSensorVersionGaps),
   };
 }
 
@@ -157,9 +162,11 @@ function safeCoverageSensors(sensors = []) {
   return (Array.isArray(sensors) ? sensors : []).slice(0, 25).map((sensor) => ({
     source: safeCoverageText(sensor && sensor.source),
     label: safeCoverageText(sensor && sensor.label),
+    required: sensor && sensor.required === true,
     events: safeCoverageNumber(sensor && sensor.events),
     lastSeen: safeCoverageText(sensor && sensor.lastSeen),
     latestVersion: safeCoverageText(sensor && sensor.latestVersion),
+    desiredVersion: safeCoverageText(sensor && sensor.desiredVersion),
     versionHealth: safeCoverageText(sensor && sensor.versionHealth),
     versions: safeCoverageVersions(sensor && sensor.versions),
     platforms: (Array.isArray(sensor && sensor.platforms) ? sensor.platforms : [])

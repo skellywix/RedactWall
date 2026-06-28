@@ -10,6 +10,13 @@ const serverSource = fs.readFileSync(path.join(__dirname, '..', 'server/app.js')
 
 const policy = {
   governedDestinations: ['chatgpt.com', 'claude.ai', 'copilot.microsoft.com'],
+  requiredSensors: ['browser_extension', 'endpoint_agent', 'mcp_guard', 'proxy'],
+  desiredSensorVersions: {
+    browser_extension: '0.3.0',
+    endpoint_agent: '0.3.0',
+    mcp_guard: '0.3.0',
+    proxy: '1.0.0',
+  },
 };
 
 test('coverage summary aggregates governed apps, sensors, and shadow AI without prompt bodies', () => {
@@ -76,6 +83,9 @@ test('coverage summary aggregates governed apps, sensors, and shadow AI without 
   assert.strictEqual(report.totals.governedActive, 3);
   assert.strictEqual(report.totals.shadowEvents, 1);
   assert.strictEqual(report.totals.unresolvedShadowDestinations, 1);
+  assert.strictEqual(report.totals.requiredSensors, 4);
+  assert.strictEqual(report.totals.activeRequiredSensors, 3);
+  assert.strictEqual(report.totals.activeSensorVersionGaps, 1);
   assert.strictEqual(report.governedDestinations.find((d) => d.destination === 'chatgpt.com').blocked, 1);
   assert.strictEqual(report.governedDestinations.find((d) => d.destination === 'copilot.microsoft.com').blocked, 1);
   assert.strictEqual(report.governedDestinations.find((d) => d.destination === 'claude.ai').redacted, 1);
@@ -83,18 +93,22 @@ test('coverage summary aggregates governed apps, sensors, and shadow AI without 
   assert.strictEqual(report.shadowDestinations[0].destination, 'notebooklm.google.com');
   assert.strictEqual(report.shadowDestinations[0].policyState, 'review');
   const browser = report.sensors.find((s) => s.source === 'browser_extension');
-  assert.strictEqual(browser.versionHealth, 'mixed');
+  assert.strictEqual(browser.required, true);
+  assert.strictEqual(browser.versionHealth, 'outdated');
   assert.strictEqual(browser.latestVersion, '0.2.9');
+  assert.strictEqual(browser.desiredVersion, '0.3.0');
   assert.deepStrictEqual(browser.versions.map((v) => v.version), ['0.2.9', '0.3.0']);
   assert.deepStrictEqual(browser.platforms, ['chrome_mv3']);
   assert.strictEqual(report.sensors.find((s) => s.source === 'endpoint_agent').events, 1);
   assert.strictEqual(report.sensors.find((s) => s.source === 'endpoint_agent').versionHealth, 'current');
+  assert.strictEqual(report.sensors.find((s) => s.source === 'proxy').versionHealth, 'missing');
   assert.deepStrictEqual(report.desktopCollector, {
     events: 1,
     lastSeen: '2026-06-26T13:30:00.000Z',
     destinations: ['claude.ai'],
   });
   assert.ok(report.posture.some((p) => p.id === 'desktop_collector' && p.state === 'covered'));
+  assert.ok(report.posture.some((p) => p.id === 'proxy' && p.state === 'attention' && /required/.test(p.detail)));
   assert.ok(report.posture.some((p) => p.id === 'sensor_versions' && p.state === 'attention'));
   assert.ok(report.score > 0 && report.score < 100);
   assert.ok(!JSON.stringify(report).includes('Member [US_SSN]'));

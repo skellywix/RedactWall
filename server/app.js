@@ -128,6 +128,7 @@ function sensorVersionGapFor(row) {
     label: sensor.label,
     versionHealth: sensor.versionHealth,
     latestVersion: sensor.latestVersion || null,
+    desiredVersion: sensor.desiredVersion || null,
     versions: (sensor.versions || []).map((item) => ({
       version: item.version,
       events: item.events,
@@ -684,6 +685,8 @@ app.get('/api/v1/policy', checkIngestKey, (req, res) => {
     blockedDestinations: p.blockedDestinations || [],
     blockedFileUploadDestinations: p.blockedFileUploadDestinations || [],
     desktopCollectorDestination: p.desktopCollectorDestination || policy.DEFAULT_POLICY.desktopCollectorDestination,
+    requiredSensors: p.requiredSensors || policy.DEFAULT_POLICY.requiredSensors,
+    desiredSensorVersions: p.desiredSensorVersions || policy.DEFAULT_POLICY.desiredSensorVersions,
     scanner: p.scanner || {},
   });
 });

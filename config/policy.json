@@ -53,6 +53,16 @@
   "blockedDestinations": [],
   "blockedFileUploadDestinations": [],
   "desktopCollectorDestination": "Desktop AI",
+  "requiredSensors": [
+    "browser_extension",
+    "endpoint_agent",
+    "mcp_guard"
+  ],
+  "desiredSensorVersions": {
+    "browser_extension": "0.3.0",
+    "endpoint_agent": "0.3.0",
+    "mcp_guard": "0.3.0"
+  },
   "scanner": {
     "ignoreDirectories": [
       "node_modules",

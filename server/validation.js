@@ -21,6 +21,8 @@ const LIMITS = {
 const DETECTOR_ID = /^[A-Z0-9_]+$/;
 const HOST_OR_LABEL = /^[A-Za-z0-9.*:_/-]+$/;
 const DESKTOP_DESTINATION_LABEL = /^[A-Za-z0-9 .:_/-]+$/;
+const SENSOR_ID = /^[a-z][a-z0-9_:-]{0,79}$/;
+const SENSOR_VERSION = /^[A-Za-z0-9._+:-]+$/;
 const KNOWN_DETECTOR_IDS = new Set(detector.listDetectors().map((d) => d.id));
 
 function nonBlankString(max) {
@@ -207,6 +209,14 @@ const scannerPolicySchema = z.object({
   maxFileBytes: z.number().int().min(1024).max(50 * 1024 * 1024).optional(),
 }).strict();
 
+const sensorIdSchema = z.string().max(80).regex(SENSOR_ID);
+const desiredSensorVersionsSchema = z.record(
+  sensorIdSchema,
+  z.string().min(1).max(80).regex(SENSOR_VERSION),
+).refine((value) => Object.keys(value || {}).length <= LIMITS.policyListItems, {
+  message: 'too many desired sensor versions',
+});
+
 const policyUpdateSchema = z.object({
   enforcementMode: z.enum(['block', 'warn', 'justify', 'redact']).optional(),
   blockMinSeverity: z.number().int().min(1).max(4).optional(),
@@ -223,6 +233,8 @@ const policyUpdateSchema = z.object({
   desktopCollectorDestination: z.string().min(1).max(80).regex(DESKTOP_DESTINATION_LABEL).refine((value) => value.trim().length > 0, {
     message: 'required',
   }).optional(),
+  requiredSensors: z.array(sensorIdSchema).min(1).max(20).optional(),
+  desiredSensorVersions: desiredSensorVersionsSchema.optional(),
   scanner: scannerPolicySchema.optional(),
 }).strict();
 
