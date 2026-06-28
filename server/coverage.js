@@ -125,6 +125,42 @@ function cleanSensorMetadata(sensor) {
   return safeSensor(sensor) || {};
 }
 
+function cleanInstallChecks(checks) {
+  return (Array.isArray(checks) ? checks : []).slice(0, 40).map((check) => {
+    if (!check || typeof check !== 'object') return null;
+    const id = normalizeSensorId(check.id);
+    if (!id) return null;
+    const detail = typeof check.detail === 'string' && check.detail.trim()
+      ? check.detail.trim().slice(0, 160)
+      : null;
+    return {
+      id,
+      ok: check.ok === true,
+      ...(detail ? { detail } : {}),
+    };
+  }).filter(Boolean);
+}
+
+function installHealthFor(q) {
+  const checks = cleanInstallChecks(q && q.installChecks);
+  if (!checks.length) return null;
+  const failedChecks = checks.filter((check) => !check.ok).map((check) => check.id);
+  return {
+    at: (q && q.createdAt) || null,
+    state: failedChecks.length ? 'attention' : 'covered',
+    failedChecks,
+    checks,
+  };
+}
+
+function bumpInstallHealth(sensor, q) {
+  const health = installHealthFor(q);
+  if (!health) return;
+  if (!sensor._installHealth || String(health.at || '') >= String(sensor._installHealth.at || '')) {
+    sensor._installHealth = health;
+  }
+}
+
 function normalizeSensorId(value) {
   const id = String(value || '').trim().toLowerCase();
   return SENSOR_ID_RE.test(id) ? id : null;
@@ -191,6 +227,7 @@ function finalizeSensor(sensor, opts = {}) {
     versionHealth,
     versions,
     platforms,
+    installHealth: sensor._installHealth || null,
   };
 }
 
@@ -223,6 +260,7 @@ function summarize(rows, pol) {
     sensor.events += 1;
     if (!sensor.lastSeen || String(q.createdAt || '') > sensor.lastSeen) sensor.lastSeen = q.createdAt || null;
     bumpVersion(sensor, q);
+    bumpInstallHealth(sensor, q);
     sensorCounts.set(source, sensor);
     statuses[q.status || 'unknown'] = (statuses[q.status || 'unknown'] || 0) + 1;
 
@@ -258,6 +296,7 @@ function summarize(rows, pol) {
     .sort((a, b) => Number(b.required) - Number(a.required) || b.events - a.events || a.label.localeCompare(b.label));
   const activeRequired = requiredSensors.filter((s) => s.events > 0).length;
   const activeSensorVersionGaps = sensors.filter((s) => s.events > 0 && s.versionHealth !== 'current').length;
+  const activeSensorHealthWarnings = sensors.filter((s) => s.events > 0 && s.installHealth && s.installHealth.state === 'attention').length;
   const governedActive = [...governed.values()].filter((g) => g.events > 0).length;
   const governedTotal = governed.size || 0;
   const shadowEvents = [...shadow.values()].reduce((sum, bucket) => sum + bucket.shadow, 0);
@@ -284,6 +323,7 @@ function summarize(rows, pol) {
       requiredSensors: requiredSensors.length,
       activeRequiredSensors: activeRequired,
       activeSensorVersionGaps,
+      activeSensorHealthWarnings,
     },
     sensors,
     governedDestinations: [...governed.values()]
@@ -306,9 +346,11 @@ function summarize(rows, pol) {
       ...sensors.filter((sensor) => sensor.required).map((sensor) => ({
         id: sensor.source,
         label: sensor.label,
-        state: sensor.events && sensor.versionHealth === 'current' ? 'covered' : 'attention',
+        state: sensor.events && sensor.versionHealth === 'current'
+          && !(sensor.installHealth && sensor.installHealth.state === 'attention') ? 'covered' : 'attention',
         detail: sensor.events
-          ? `${sensor.events} events${sensor.desiredVersion ? ` / desired v${sensor.desiredVersion}` : ''}`
+          ? `${sensor.events} events${sensor.desiredVersion ? ` / desired v${sensor.desiredVersion}` : ''}` +
+            `${sensor.installHealth && sensor.installHealth.failedChecks.length ? ` / ${sensor.installHealth.failedChecks.length} failed checks` : ''}`
           : 'required, no events',
       })),
       {
@@ -334,6 +376,12 @@ function summarize(rows, pol) {
         label: 'Sensor versions',
         state: activeSensorVersionGaps ? 'attention' : 'covered',
         detail: activeSensorVersionGaps ? `${activeSensorVersionGaps} version gaps` : 'reported',
+      },
+      {
+        id: 'sensor_health',
+        label: 'Sensor install health',
+        state: activeSensorHealthWarnings ? 'attention' : 'covered',
+        detail: activeSensorHealthWarnings ? `${activeSensorHealthWarnings} install warnings` : 'checks passing',
       },
       {
         id: 'governed_destinations',

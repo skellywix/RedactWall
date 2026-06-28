@@ -31,6 +31,7 @@
     "docs:sync:install-task": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/install-docs-sync-task.ps1",
     "docs:demo-guide": "node scripts/update-demo-guide.js",
     "docs:demo-guide:check": "node scripts/update-demo-guide.js --check",
+    "endpoint:check": "node scripts/check-endpoint-install.js",
     "endpoint:handoff": "node sensors/endpoint-agent/write-handoff.js",
     "desktop:collect": "node sensors/endpoint-agent/collectors/protected-upload.js",
     "train-semantic": "node scripts/train-semantic.js",

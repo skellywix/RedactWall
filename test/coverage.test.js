@@ -76,10 +76,25 @@ test('coverage summary aggregates governed apps, sensors, and shadow AI without 
       redactedPrompt: '[file upload blocked] claude.ai',
       decisionNote: 'endpoint_agent/file_upload; native handoff evt_desktop_1',
     },
+    {
+      id: 'q6',
+      createdAt: '2026-06-26T14:00:00.000Z',
+      status: 'sensor_heartbeat',
+      user: 'tech@example.test',
+      destination: 'endpoint-install',
+      source: 'endpoint_agent',
+      channel: 'sensor_health',
+      sensor: { name: 'endpoint_agent', version: '0.3.0', platform: 'win32' },
+      redactedPrompt: '[sensor heartbeat] endpoint_agent',
+      installChecks: [
+        { id: 'endpoint_env_file', ok: true, detail: 'found' },
+        { id: 'handoff_secret', ok: false, detail: 'missing handoff secret' },
+      ],
+    },
   ];
 
   const report = coverage.summarize(rows, policy);
-  assert.strictEqual(report.totals.events, 5);
+  assert.strictEqual(report.totals.events, 6);
   assert.strictEqual(report.totals.governedDestinations, 3);
   assert.strictEqual(report.totals.governedActive, 3);
   assert.strictEqual(report.totals.shadowEvents, 1);
@@ -87,6 +102,7 @@ test('coverage summary aggregates governed apps, sensors, and shadow AI without 
   assert.strictEqual(report.totals.requiredSensors, 4);
   assert.strictEqual(report.totals.activeRequiredSensors, 3);
   assert.strictEqual(report.totals.activeSensorVersionGaps, 1);
+  assert.strictEqual(report.totals.activeSensorHealthWarnings, 1);
   assert.strictEqual(report.governedDestinations.find((d) => d.destination === 'chatgpt.com').blocked, 1);
   assert.strictEqual(report.governedDestinations.find((d) => d.destination === 'copilot.microsoft.com').blocked, 1);
   assert.strictEqual(report.governedDestinations.find((d) => d.destination === 'claude.ai').redacted, 1);
@@ -101,8 +117,11 @@ test('coverage summary aggregates governed apps, sensors, and shadow AI without 
   assert.strictEqual(browser.desiredVersion, '0.3.0');
   assert.deepStrictEqual(browser.versions.map((v) => v.version), ['0.2.9', '0.3.0']);
   assert.deepStrictEqual(browser.platforms, ['chrome_mv3']);
-  assert.strictEqual(report.sensors.find((s) => s.source === 'endpoint_agent').events, 1);
-  assert.strictEqual(report.sensors.find((s) => s.source === 'endpoint_agent').versionHealth, 'current');
+  const endpoint = report.sensors.find((s) => s.source === 'endpoint_agent');
+  assert.strictEqual(endpoint.events, 2);
+  assert.strictEqual(endpoint.versionHealth, 'current');
+  assert.strictEqual(endpoint.installHealth.state, 'attention');
+  assert.deepStrictEqual(endpoint.installHealth.failedChecks, ['handoff_secret']);
   assert.strictEqual(report.sensors.find((s) => s.source === 'proxy').versionHealth, 'missing');
   assert.deepStrictEqual(report.desktopCollector, {
     events: 1,
@@ -110,8 +129,10 @@ test('coverage summary aggregates governed apps, sensors, and shadow AI without 
     destinations: ['claude.ai'],
   });
   assert.ok(report.posture.some((p) => p.id === 'desktop_collector' && p.state === 'covered'));
+  assert.ok(report.posture.some((p) => p.id === 'endpoint_agent' && p.state === 'attention' && /failed checks/.test(p.detail)));
   assert.ok(report.posture.some((p) => p.id === 'proxy' && p.state === 'attention' && /required/.test(p.detail)));
   assert.ok(report.posture.some((p) => p.id === 'sensor_versions' && p.state === 'attention'));
+  assert.ok(report.posture.some((p) => p.id === 'sensor_health' && p.state === 'attention'));
   assert.ok(report.score > 0 && report.score < 100);
   assert.ok(!JSON.stringify(report).includes('Member [US_SSN]'));
   assert.ok(!JSON.stringify(report).includes('524-71-9043'));

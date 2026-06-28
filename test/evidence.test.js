@@ -16,7 +16,7 @@ test('evidence pack omits raw prompt, redacted prompt body, token vault, and aud
     coverage: {
       score: 82,
       rawPrompt: 'coverage should not export Member John Carter',
-      totals: { events: 1, blocked: 1, requiredSensors: 3, activeRequiredSensors: 1, activeSensorVersionGaps: 1 },
+      totals: { events: 1, blocked: 1, requiredSensors: 3, activeRequiredSensors: 1, activeSensorVersionGaps: 1, activeSensorHealthWarnings: 1 },
       sensors: [{
         source: 'browser_extension',
         label: 'Browser extension',
@@ -26,6 +26,15 @@ test('evidence pack omits raw prompt, redacted prompt body, token vault, and aud
         desiredVersion: '0.3.0',
         versions: [{ version: '0.2.9', events: 1, lastSeen: '2026-06-26T12:00:00.000Z' }],
         versionHealth: 'outdated',
+        installHealth: {
+          at: '2026-06-26T12:00:00.000Z',
+          state: 'attention',
+          failedChecks: ['managed_identity'],
+          checks: [
+            { id: 'endpoint_env_file', ok: true, detail: 'found', secret: 'check-secret-should-not-export' },
+            { id: 'managed_identity', ok: false, detail: 'missing managed identity' },
+          ],
+        },
         secret: 'coverage-secret-should-not-export',
       }],
     },
@@ -51,6 +60,9 @@ test('evidence pack omits raw prompt, redacted prompt body, token vault, and aud
       decisionNote: 'contains member SSN 524-71-9043',
       retentionPurgedAt: '2026-06-27T12:00:00.000Z',
       retentionPurgedFields: ['rawPrompt'],
+      installChecks: [
+        { id: 'endpoint_env_file', ok: true, detail: 'found', secret: 'query-check-secret-should-not-export' },
+      ],
       findings: [{ type: 'US_SSN', severity: 4, score: 0.92, masked: '**** 9043', value: '524-71-9043' }],
       categories: [],
       reasons: ['Hard-stop entity present: US_SSN'],
@@ -77,8 +89,11 @@ test('evidence pack omits raw prompt, redacted prompt body, token vault, and aud
   assert.ok(pack.audit[0].detailHash);
   assert.strictEqual(pack.coverage.score, 82);
   assert.strictEqual(pack.coverage.totals.requiredSensors, 3);
+  assert.strictEqual(pack.coverage.totals.activeSensorHealthWarnings, 1);
   assert.strictEqual(pack.coverage.sensors[0].required, true);
   assert.strictEqual(pack.coverage.sensors[0].desiredVersion, '0.3.0');
+  assert.strictEqual(pack.coverage.sensors[0].installHealth.state, 'attention');
+  assert.deepStrictEqual(pack.coverage.sensors[0].installHealth.failedChecks, ['managed_identity']);
   assert.strictEqual(pack.lineage.byUser[0].key, 'jdoe');
   assert.strictEqual(pack.lineage.byDestination[0].key, 'chatgpt.com');
   assert.strictEqual(pack.lineage.bySensor[0].key, 'browser_extension');
@@ -89,10 +104,13 @@ test('evidence pack omits raw prompt, redacted prompt body, token vault, and aud
   assert.ok(!wire.includes('524-71-9043'));
   assert.ok(!wire.includes('Member John Carter'));
   assert.ok(!wire.includes('coverage-secret-should-not-export'));
+  assert.ok(!wire.includes('check-secret-should-not-export'));
+  assert.ok(!wire.includes('query-check-secret-should-not-export'));
   assert.ok(!wire.includes('sealed-vault'));
   assert.ok(!wire.includes('contains member SSN'));
   assert.ok(!wire.includes('ps_ingest_should_not_export'));
   assert.deepStrictEqual(pack.queries[0].sensor, { name: 'browser_extension', version: '0.3.0', platform: 'chrome_mv3' });
+  assert.deepStrictEqual(pack.queries[0].installChecks, [{ id: 'endpoint_env_file', ok: true, detail: 'found' }]);
   assert.ok(wire.includes('**** 9043'));
 });
 

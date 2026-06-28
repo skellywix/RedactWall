@@ -334,6 +334,18 @@ function safeNumber(value, fallback, min = 0, max = 100) {
   return Math.max(min, Math.min(max, n));
 }
 
+function safeInstallChecks(checks = []) {
+  return (Array.isArray(checks) ? checks : []).map((check) => ({
+    id: String(check.id || '').slice(0, 80),
+    ok: check.ok === true,
+    ...(check.detail ? { detail: String(check.detail).slice(0, 160) } : {}),
+  }));
+}
+
+function failedInstallCheckIds(checks = []) {
+  return checks.filter((check) => !check.ok).map((check) => check.id).filter(Boolean);
+}
+
 function hasSensitivity(analysis) {
   return !!(analysis && ((analysis.findings || []).length || (analysis.categories || []).length));
 }
@@ -675,6 +687,56 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
       : mode === 'block' ? 'Withheld pending Security Admin approval.'
       : mode === 'justify' ? 'Justification required before sending.'
       : 'Sensitive content — user warned.',
+  });
+});
+
+app.post('/api/v1/heartbeat', checkIngestKey, validation.validateBody(validation.heartbeatSchema), (req, res) => {
+  if (!enforceTenantForSensor(req, res)) return;
+  const {
+    user = 'unknown',
+    orgId = null,
+    destination = 'sensor-health',
+    source = 'api',
+    sensor = null,
+  } = req.body || {};
+  const checks = safeInstallChecks(req.body && req.body.checks);
+  const failedChecks = failedInstallCheckIds(checks);
+  const row = db.createQuery({
+    status: 'sensor_heartbeat',
+    mode: 'sensor_health',
+    user,
+    orgId,
+    destination: policy.normalizeDestination(destination),
+    source,
+    channel: 'sensor_health',
+    sensor,
+    redactedPrompt: '[sensor heartbeat] ' + String(source || 'api').slice(0, 80),
+    findings: [],
+    categories: [],
+    entityCounts: {},
+    riskScore: 0,
+    maxSeverity: 0,
+    maxSeverityLabel: 'none',
+    reasons: failedChecks.length ? ['Sensor health attention: ' + failedChecks.join(', ')] : ['Sensor heartbeat OK'],
+    installChecks: checks,
+  });
+  db.appendAudit({
+    action: failedChecks.length ? 'SENSOR_HEALTH_ATTENTION' : 'SENSOR_HEARTBEAT',
+    queryId: row.id,
+    actor: user,
+    detail: JSON.stringify({ source, failedChecks, checkCount: checks.length }),
+  });
+  if (failedChecks.length) emitSecurityAlert(row, 'SENSOR_HEALTH_ATTENTION');
+  else {
+    try { emitSensorVersionGapAlert(row); } catch {}
+  }
+  broadcast('query', { type: 'sensor_heartbeat', query: publicQuery(row) });
+  broadcast('stats', db.stats());
+  return res.json({
+    id: row.id,
+    decision: 'recorded',
+    status: 'sensor_heartbeat',
+    failedChecks,
   });
 });
 

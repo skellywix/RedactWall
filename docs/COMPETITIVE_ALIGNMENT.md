@@ -99,6 +99,9 @@ Build next:
 - Expand the sanitized examiner evidence export with coverage posture, sensor
   versions, parsed policy history, and prompt/file lineage summaries by user,
   destination, sensor, category, channel, and decision.
+- Add endpoint install validation heartbeats so technicians can prove endpoint
+  env, runtime, watch directory, and native handoff readiness in Coverage and
+  examiner evidence without exposing keys or prompt/file content.
 
 ## Acceptance Evidence
 

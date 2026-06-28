@@ -21,6 +21,7 @@ const PACKAGE_FILES = [
   'sensors/endpoint-agent/native-handoff.js',
   'sensors/endpoint-agent/write-handoff.js',
   'sensors/endpoint-agent/collectors/protected-upload.js',
+  'scripts/check-endpoint-install.js',
   'scripts/install-desktop-collector.ps1',
   'scripts/install-endpoint-agent.ps1',
   'scripts/run-desktop-collector.ps1',
@@ -103,6 +104,14 @@ function validateRuntimeFiles(files) {
     throw new Error('Endpoint desktop collector must not read file bodies or upload file content');
   }
 
+  const installCheck = files.find((file) => file.path === 'scripts/check-endpoint-install.js').body.toString('utf8');
+  if (!/api\/v1\/heartbeat/.test(installCheck) || !/buildInstallReport/.test(installCheck) || !/INGEST_API_KEY/.test(installCheck)) {
+    throw new Error('Endpoint agent package must include install validation with heartbeat support');
+  }
+  if (/contentBase64|readFileSync\(filePath|dev-ingest-key/.test(installCheck)) {
+    throw new Error('Endpoint install validation must not read file bodies or package development keys');
+  }
+
   const install = files.find((file) => file.path === 'scripts/install-endpoint-agent.ps1').body.toString('utf8');
   if (!/\[Parameter\(Mandatory = \$true\)\]\s*\r?\n\s*\[string\]\$IngestKey/.test(install)) {
     throw new Error('Endpoint agent installer must require an ingest key parameter');
@@ -176,6 +185,7 @@ function packageEndpointAgent(opts = {}) {
       nativeHandoffWriterIncluded: true,
       protectedUploadCollectorIncluded: true,
       desktopCollectorInstallerIncluded: true,
+      installValidationIncluded: true,
       scheduledTaskInstallerIncluded: true,
       localConfigEnvPath: true,
       taskArgsDoNotExposeIngestKey: true,

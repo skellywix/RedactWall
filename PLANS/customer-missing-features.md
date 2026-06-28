@@ -157,9 +157,9 @@ Acceptance evidence:
 Current state: extension and endpoint package generation, managed Chrome policy
 docs, required-sensor and desired-version posture, default-deny unapproved AI
 blocking, AI-domain adapter and browser-manifest coverage checks, AWS
-customer-silo deployment, and setup preflight exist. Missing pieces are a signed
-update channel, technician install validation in-product, and customer-ready
-fleet reporting.
+customer-silo deployment, setup preflight, and endpoint technician install
+validation heartbeats exist. Missing pieces are a signed update channel,
+browser/MCP install validation, and customer-ready fleet reporting.
 
 Customer ask: "How do we force-install it, keep it updated, and prove every
 covered user actually has it?"
@@ -171,16 +171,16 @@ Implementation connection:
 - Use the existing `desiredSensorVersions` and `requiredSensors` policy fields
   as the rollout contract for required browser, endpoint, MCP, proxy, or custom
   sensors.
-- Extend `server/coverage.js` beyond missing and outdated state to mark
-  unmanaged and unhealthy sensors once installer health checks exist.
-- Add technician validation output to the dashboard and evidence export:
-  extension installed, managed identity present, endpoint task running, MCP guard
-  configured, last seen time, version, and policy age.
+- Extend install-health checks beyond the endpoint agent so browser and MCP
+  installs can report managed identity, policy age, and configuration state.
+- Keep technician validation output in the dashboard and evidence export:
+  endpoint env, ingest-key presence, handoff readiness, last seen time, version,
+  and failed check IDs.
 - Prepare Chrome Web Store private/unlisted release checklist and update docs.
 - Add endpoint package manifest verification to install-day runbook output.
 
 Acceptance evidence:
-- `node --test test/coverage.test.js test/extension-package.test.js test/endpoint-agent-package.test.js`
+- `node --test test/sensor-heartbeat.test.js test/endpoint-install-check.test.js test/coverage.test.js test/extension-package.test.js test/endpoint-agent-package.test.js`
 - `npm run package:extension -- <temp>`
 - `npm run package:endpoint-agent -- <temp>`
 - Browser E2E shows coverage posture without page overflow on desktop and mobile.
