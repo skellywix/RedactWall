@@ -6,6 +6,7 @@
  * prompts, or free-form audit details that may contain sensitive context.
  */
 const crypto = require('crypto');
+const controlMap = require('./control-map');
 const { safeSensor } = require('./sensor-metadata');
 const routing = require('./routing');
 
@@ -164,6 +165,90 @@ function safeCoverageNumber(value) {
 
 function safeCoverageText(value) {
   return typeof value === 'string' ? value : null;
+}
+
+function safeBoundedText(value, limit = 160) {
+  if (typeof value !== 'string') return null;
+  const text = value.trim();
+  return text ? text.slice(0, limit) : null;
+}
+
+function safeFileName(value) {
+  const text = safeBoundedText(value, 240);
+  if (!text) return null;
+  return text.replace(/\\/g, '/').split('/').pop().slice(0, 160);
+}
+
+function safeSha256(value) {
+  const text = typeof value === 'string' ? value.trim() : '';
+  return /^[a-f0-9]{64}$/i.test(text) ? text.toLowerCase() : null;
+}
+
+function safeIntegrity(result) {
+  if (!result || typeof result !== 'object') return null;
+  return {
+    ok: result.ok === true,
+    count: safeCoverageNumber(result.count),
+    brokenAt: safeBoundedText(result.brokenAt, 80),
+    reason: safeBoundedText(result.reason, 120),
+    queryId: safeBoundedText(result.queryId, 80),
+  };
+}
+
+function safeBackupEvidence(input) {
+  if (!input || typeof input !== 'object') return null;
+  const manifest = input.manifest && typeof input.manifest === 'object' ? input.manifest : {};
+  const auditIntegrity = input.auditIntegrity || input.backupIntegrity || manifest.backupIntegrity;
+  const sourceIntegrity = input.sourceIntegrity || manifest.sourceIntegrity;
+  const backupSha256 = safeSha256(input.backupSha256 || manifest.backupSha256);
+  return {
+    ok: input.ok === true,
+    checkedAt: safeBoundedText(input.checkedAt || input.verifiedAt || input.createdAt || manifest.createdAt, 80),
+    backupFile: safeFileName(input.backupFile || input.file || manifest.backupFile),
+    backupBytes: safeCoverageNumber(input.backupBytes || input.bytes || manifest.backupBytes),
+    backupSha256,
+    manifestOk: input.manifestOk !== false,
+    auditIntegrity: safeIntegrity(auditIntegrity),
+    sourceIntegrity: safeIntegrity(sourceIntegrity),
+    rawPromptBodiesIncluded: false,
+  };
+}
+
+function safeRestoreDrillEvidence(input) {
+  if (!input || typeof input !== 'object') return null;
+  return {
+    ok: input.ok === true,
+    checkedAt: safeBoundedText(input.checkedAt || input.verifiedAt || input.drilledAt, 80),
+    restoredFile: safeFileName(input.restoredTo || input.file),
+    backupSha256: safeSha256(input.backupSha256),
+    manifestOk: input.manifestOk !== false,
+    auditIntegrity: safeIntegrity(input.auditIntegrity),
+    rawPromptBodiesIncluded: false,
+  };
+}
+
+function safeReportSchedule(schedule) {
+  if (!schedule || typeof schedule !== 'object') return null;
+  return {
+    id: safeBoundedText(schedule.id, 80),
+    enabled: schedule.enabled !== false,
+    cadence: safeBoundedText(schedule.cadence, 40),
+    nextRunAt: safeBoundedText(schedule.nextRunAt, 80),
+    retentionDays: safeCoverageNumber(schedule.retentionDays),
+  };
+}
+
+function safeReport(input, generatedAt) {
+  const report = input && typeof input === 'object' ? input : {};
+  return {
+    id: safeBoundedText(report.id, 120) || `promptwall-evidence-${generatedAt.slice(0, 10)}`,
+    generatedAt,
+    generatedBy: safeBoundedText(report.generatedBy, 80) || 'system',
+    periodStart: safeBoundedText(report.periodStart, 80),
+    periodEnd: safeBoundedText(report.periodEnd, 80),
+    scheduled: report.scheduled === true,
+    schedule: safeReportSchedule(report.schedule),
+  };
 }
 
 function safeCoverageTotals(totals = {}) {
@@ -385,23 +470,42 @@ function buildLineage(rows) {
 function buildEvidencePack(input) {
   const now = input.generatedAt || new Date().toISOString();
   const queries = input.queries || [];
+  const coverageReport = safeCoverage(input.coverage);
+  const backup = safeBackupEvidence(input.backup);
+  const restoreDrill = safeRestoreDrillEvidence(input.restoreDrill);
+  const scope = {
+    queryLimit: input.queryLimit,
+    auditLimit: input.auditLimit,
+    rawPromptBodiesIncluded: false,
+    auditDetailsIncluded: false,
+    backupEvidenceIncluded: !!backup,
+    restoreDrillEvidenceIncluded: !!restoreDrill,
+  };
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     generatedAt: now,
+    report: safeReport(input.report, now),
     service: {
       name: 'PromptWall',
       version: input.version || 'unknown',
     },
-    scope: {
-      queryLimit: input.queryLimit,
-      auditLimit: input.auditLimit,
-      rawPromptBodiesIncluded: false,
-      auditDetailsIncluded: false,
-    },
+    scope,
     policy: input.policy,
     stats: input.stats,
     auditIntegrity: input.auditIntegrity,
-    coverage: safeCoverage(input.coverage),
+    coverage: coverageReport,
+    backup,
+    restoreDrill,
+    controlMappings: controlMap.buildControlMappings({
+      generatedAt: now,
+      scope,
+      policy: input.policy,
+      detectors: input.detectors || [],
+      auditIntegrity: input.auditIntegrity,
+      coverage: coverageReport,
+      backup,
+      restoreDrill,
+    }),
     lineage: buildLineage(queries),
     detectors: input.detectors || [],
     queries: queries.map(safeQuery),
@@ -416,6 +520,9 @@ module.exports = {
   safePolicyChange,
   safeCoverage,
   safeInstallChecks,
+  safeBackupEvidence,
+  safeRestoreDrillEvidence,
+  safeReport,
   buildLineage,
   hashText,
 };

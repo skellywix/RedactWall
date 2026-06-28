@@ -272,6 +272,7 @@ npm test              # Node unit/integration coverage
 npm run test:browser  # Playwright: login, approval, policy save, evidence export
 npm run sync-check    # shared detection engine parity
 npm run backup -- backups  # SQLite audit-store backup + verification manifest
+npm run evidence:pack -- evidence-packs  # Sanitized examiner JSON pack
 ```
 
 ## Development and Git workflow
@@ -333,6 +334,8 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 - **On-device semantic model** behind `classifySemantic()` (no heavy runtime; `npm run train-semantic`).
 - **SQLite** store (WAL + transactions) with audit integrity that covers the evidence, not just the event header.
 - **Backup/verify/restore** tooling for the SQLite evidence store with prompt-free manifests.
+- **Examiner evidence packs** with report metadata, control mappings, backup
+  status, restore-drill status, and optional zipped JSON output.
 - **Reversible redaction / Redact-&-Send**, sealed token vault, local response re-hydration.
 - **MDM identity**, reliable per-site send, **Man-in-the-Prompt** guard, **shadow-AI** discovery and default-deny unapproved AI blocking.
 - **Coverage posture** showing governed destinations, required sensors, desired sensor versions, browser/endpoint/MCP install-health checks, fleet state by user/org/sensor, shadow-AI sightings, and stale or missing sensor coverage.

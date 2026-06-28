@@ -244,10 +244,13 @@ Acceptance evidence:
 ### 6. Examiner-Ready Evidence Packs And Scheduled Reporting
 
 Current state: sanitized evidence export includes audit integrity, policy, parsed
-policy diffs, coverage posture, sensor versions, and lineage summaries. Backup
-and restore tooling exists. The export is still manually downloaded and does not
-yet include scheduled report history, backup status, restore-drill evidence, or
-control mappings.
+policy diffs, coverage posture, sensor versions, lineage summaries, report
+metadata, backup status, restore-drill status, and control mappings. Backup and
+restore tooling exists, and `npm run evidence:pack` can generate dated JSON or
+optional zip packs from the local evidence store. The app process does not run
+its own scheduler yet; customer-silo deployments should invoke the schedule
+config from Task Scheduler, cron, systemd timers, or the customer runbook
+scheduler.
 
 Customer ask: "Can we hand an examiner a quarterly pack that maps to GLBA, NCUA,
 PCI, and HIPAA controls without exporting sensitive prompts?"
@@ -256,13 +259,13 @@ Why it matters: this is the wedge. PromptWall should be easier to defend in an
 exam than a broad DLP platform that takes months to tune.
 
 Implementation connection:
-- Add `server/control-map.js` with stable control families and product evidence
-  pointers.
-- Extend `server/evidence.js` with backup verification status, restore-drill
-  status, report generation metadata, and control mappings.
-- Add `scripts/export-evidence-pack.js` to generate a dated JSON and optional
-  zipped evidence bundle without prompt bodies.
-- Add scheduled export configuration for customer-silo deployments.
+- Keep `server/control-map.js` stable as new product evidence types are added.
+- Keep `server/evidence.js` export fields prompt-free when backup, restore, or
+  report metadata expands.
+- Use `scripts/export-evidence-pack.js` to generate dated JSON and optional zip
+  packs without prompt bodies.
+- Use `config/evidence-schedule.example.json` as the customer-silo schedule
+  config template.
 
 Acceptance evidence:
 - `node --test test/evidence.test.js test/backup-store.test.js test/policy-history.test.js`
