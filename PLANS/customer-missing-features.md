@@ -265,9 +265,11 @@ Acceptance evidence:
 
 Current state: sanitized evidence export includes audit integrity, policy, parsed
 policy diffs, coverage posture, sensor versions, lineage summaries, report
-metadata, backup status, restore-drill status, and control mappings. Backup and
-restore tooling exists, `npm run evidence:pack` can generate dated JSON or
-optional zip packs from the local evidence store,
+metadata, backup status, restore-drill status, and control mappings. The
+dashboard also exposes prompt-free lineage by user, destination, sensor, channel,
+category, and decision through `/api/lineage`. Backup and restore tooling exists,
+`npm run evidence:pack` can generate dated JSON or optional zip packs from the
+local evidence store,
 `npm run evidence:pack:install-task` installs a Windows Task Scheduler wrapper,
 and `npm run evidence:pack:install-systemd` installs a Linux systemd timer for
 Docker or local-npm hosts.

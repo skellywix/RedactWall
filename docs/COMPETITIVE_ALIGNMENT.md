@@ -48,10 +48,8 @@ Build next:
 - Native desktop collector feeding the existing metadata-only endpoint handoff.
 - App and action policy controls beyond destination and file-upload blocking,
   especially response-scanning controls.
-- Data lineage views that answer which user, sensor, destination, category, and
-  decision were involved without retaining sensitive content.
-- Direct SMTP notification and identity-backed assignment on top of provisioned
-  users, groups, and the sanitized approval workflow.
+- Ticketing adapters on top of provisioned users, groups, identity-backed
+  ownership, direct SMTP, and the sanitized approval workflow.
 - Exception lifecycle ownership and expiry review beyond the guided builder's
   time-bound allow rules.
 
@@ -64,6 +62,9 @@ Build next:
   before handoff.
 - Add guided Policy-tab builders for common scoped enforcement rules and
   time-bound exceptions while preserving exact JSON review before save.
+- Add a dashboard Lineage tab backed by `/api/lineage` so admins and auditors
+  can see which users, sensors, destinations, channels, categories, and
+  decisions were involved without retaining sensitive content.
 - Add approval owner and SLA routing so held decisions reach security,
   compliance, privacy, or legal queues with sanitized workflow metadata in the
   dashboard, SIEM alerts, and examiner evidence.

@@ -1305,6 +1305,15 @@ app.get('/api/coverage', auth.requireAuth, (req, res) => {
   res.json(coverage.summarize(db.listQueries({ limit: 5000 }), policy.loadPolicy()));
 });
 
+app.get('/api/lineage', auth.requireAuth, (req, res) => {
+  const limit = Math.max(1, Math.min(Number(req.query.limit) || 1000, 5000));
+  const queries = db.listQueries({ limit });
+  res.json({
+    limit,
+    lineage: evidence.buildLineage(queries),
+  });
+});
+
 app.get('/api/destinations/review', auth.requireAuth, (req, res) => {
   const report = coverage.summarize(db.listQueries({ limit: 5000 }), policy.loadPolicy());
   res.json({ destinations: report.shadowDestinations || [], coverage: report });
