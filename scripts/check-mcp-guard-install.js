@@ -87,6 +87,7 @@ function buildInstallReport(opts = {}) {
     check('ingest_key', keyLooksUsable, keyLooksUsable ? 'configured' : 'missing, weak, or development key'),
     check('node_runtime', nodeMajor() >= 22, `node ${process.versions.node || 'unknown'}`),
     check('mcp_guard_runtime', existsFile(repoRoot, 'sensors/mcp-guard/guard.js'), 'guard runtime present'),
+    check('mcp_connector_sdk', existsFile(repoRoot, 'sensors/mcp-guard/sdk.js'), 'connector SDK present'),
     check('shared_detection_engine', existsFile(repoRoot, 'detection-engine/detect.js'), 'shared engine present'),
     check('env_loader', existsFile(repoRoot, 'server/env.js'), 'env loader present'),
     check('package_manifest', existsFile(repoRoot, 'package.json'), 'package manifest present'),

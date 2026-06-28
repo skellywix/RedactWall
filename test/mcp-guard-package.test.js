@@ -35,6 +35,7 @@ test('package script writes a prompt-free MCP guard zip and integrity manifest',
   assert.strictEqual(manifest.appVersion, JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version);
   assert.strictEqual(manifest.checks.explicitIngestKeyRequired, true);
   assert.strictEqual(manifest.checks.sharedEngineIncluded, true);
+  assert.strictEqual(manifest.checks.connectorSdkIncluded, true);
   assert.strictEqual(manifest.checks.demoCodeExcluded, true);
   assert.strictEqual(manifest.checks.installValidationIncluded, true);
   assert.strictEqual(manifest.checks.developmentIngestKeyAbsent, true);
@@ -42,7 +43,7 @@ test('package script writes a prompt-free MCP guard zip and integrity manifest',
 
   const zip = new AdmZip(result.zipPath);
   const entries = zip.getEntries().map((entry) => entry.entryName).sort();
-  for (const required of ['package.json', 'sensors/mcp-guard/guard.js', 'detection-engine/detect.js', 'server/env.js', 'scripts/check-mcp-guard-install.js']) {
+  for (const required of ['package.json', 'sensors/mcp-guard/guard.js', 'sensors/mcp-guard/sdk.js', 'detection-engine/detect.js', 'server/env.js', 'scripts/check-mcp-guard-install.js']) {
     assert.ok(entries.includes(required), required);
     assert.ok(manifest.files.some((file) => file.path === required), required);
   }
@@ -50,6 +51,8 @@ test('package script writes a prompt-free MCP guard zip and integrity manifest',
   const guard = zip.readAsText('sensors/mcp-guard/guard.js');
   assert.match(guard, /process\.env\.INGEST_API_KEY \|\| ''/);
   assert.doesNotMatch(guard, /demo when run directly|dev-ingest-key|524-71-9043|4111 1111 1111 1111/);
+  assert.match(zip.readAsText('sensors/mcp-guard/sdk.js'), /sanitizeToolResult/);
+  assert.match(zip.readAsText('sensors/mcp-guard/sdk.js'), /connectorHealthCheck/);
   assert.match(zip.readAsText('scripts/check-mcp-guard-install.js'), /\/api\/v1\/heartbeat/);
   assert.doesNotMatch(JSON.stringify(manifest), /prompt\s*:/i);
   assert.doesNotMatch(JSON.stringify(manifest), /524-71-9043|4111 1111|REPLACE_WITH_LONG_RANDOM_INGEST_KEY/);
@@ -62,6 +65,7 @@ test('package validation refuses prompt bodies or development keys', () => {
       { path: 'server/env.js', body: Buffer.from('module.exports = {};') },
       { path: 'detection-engine/detect.js', body: Buffer.from('module.exports = {};') },
       { path: 'sensors/mcp-guard/guard.js', body: Buffer.from("const KEY = process.env.INGEST_API_KEY || '';\nconst sample = '524-71-9043';") },
+      { path: 'sensors/mcp-guard/sdk.js', body: Buffer.from('function sanitizeToolResult() {}\nfunction wrapConnectorTool() {}\nfunction connectorHealthCheck() {}\nmodule.exports = { sanitizeToolResult, wrapConnectorTool, connectorHealthCheck };') },
       { path: 'scripts/check-mcp-guard-install.js', body: Buffer.from("const api = '/api/v1/heartbeat';\nfunction buildInstallReport() {}\nconst key = 'INGEST_API_KEY';") },
     ]),
     /synthetic SSN demo value/
@@ -73,6 +77,7 @@ test('package validation refuses prompt bodies or development keys', () => {
       { path: 'server/env.js', body: Buffer.from('module.exports = {};') },
       { path: 'detection-engine/detect.js', body: Buffer.from('module.exports = {};') },
       { path: 'sensors/mcp-guard/guard.js', body: Buffer.from("const KEY = process.env.INGEST_API_KEY || 'dev-ingest-key';") },
+      { path: 'sensors/mcp-guard/sdk.js', body: Buffer.from('function sanitizeToolResult() {}\nfunction wrapConnectorTool() {}\nfunction connectorHealthCheck() {}\nmodule.exports = { sanitizeToolResult, wrapConnectorTool, connectorHealthCheck };') },
       { path: 'scripts/check-mcp-guard-install.js', body: Buffer.from("const api = '/api/v1/heartbeat';\nfunction buildInstallReport() {}\nconst key = 'INGEST_API_KEY';") },
     ]),
     /development ingest key/

@@ -247,10 +247,12 @@ npm run package:mcp-guard
 The extension zip lands in `dist/browser-extension/`, the endpoint agent zip lands in
 `dist/endpoint-agent/`, and the MCP guard zip lands in `dist/mcp-guard/`. Each
 artifact gets a SHA-256 manifest and refuses packaged development keys or prompt
-bodies. Configure real pilot keys through Chrome managed storage or local sensor
-environment config, not inside packages. `release:extension:check` also writes a
-prompt-free Chrome Web Store release-readiness report for private or unlisted
-managed deployments.
+bodies. The MCP guard package also includes `sensors/mcp-guard/sdk.js`, which
+future content connectors must call through `sanitizeToolResult()` before
+returning tool output to a model. Configure real pilot keys through Chrome
+managed storage or local sensor environment config, not inside packages.
+`release:extension:check` also writes a prompt-free Chrome Web Store
+release-readiness report for private or unlisted managed deployments.
 
 ### Try the other sensors
 
@@ -271,7 +273,7 @@ For a Windows pilot, install the endpoint sensor as a logon task:
 ```
 
 The native handoff writer is a safe collector shim for pilots and future OS/app hooks. It signs a bounded upload-intent JSON file with the local endpoint config secret, references only an absolute local file path, and never reads file bytes or accepts the handoff secret as a command-line argument.
-The browser extension automatically posts sanitized install-health heartbeats on install, startup, and a low-frequency alarm when it has managed or local server config. `npm run endpoint:check` validates the endpoint env file, server URL, ingest-key presence, watch directory, runtime scripts, and optional desktop collector handoff setup. `npm run mcp:check` validates the MCP guard runtime, shared detection engine, Node version, and control-plane config. All three sensor paths post only bounded check IDs and status to `/api/v1/heartbeat` so Coverage and the examiner export can prove install health by user, org, sensor, version, and failed check without exposing keys, handoff secrets, prompt text, tool output, or file content.
+The browser extension automatically posts sanitized install-health heartbeats on install, startup, and a low-frequency alarm when it has managed or local server config. `npm run endpoint:check` validates the endpoint env file, server URL, ingest-key presence, watch directory, runtime scripts, and optional desktop collector handoff setup. `npm run mcp:check` validates the MCP guard runtime, connector SDK, shared detection engine, Node version, and control-plane config. All three sensor paths post only bounded check IDs and status to `/api/v1/heartbeat` so Coverage and the examiner export can prove install health by user, org, sensor, version, and failed check without exposing keys, handoff secrets, prompt text, tool output, or file content.
 
 ### Test the product
 
@@ -318,6 +320,7 @@ sensors/browser-extension/            Browser extension (MV3) flagship sensor
   lib/detect.js                       Synced copy of detection-engine/detect.js
 sensors/endpoint-agent/agent.js       Desktop file sensor reference
 sensors/mcp-guard/guard.js            MCP tool-response redactor reference
+sensors/mcp-guard/sdk.js              MCP connector SDK sanitization boundary
 scripts/                              Setup, packaging, simulation, training, sync checks
 ```
 
@@ -334,7 +337,7 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 | Shadow-AI discovery | Working — flags use of ungoverned AI tools |
 | Destination controls | Working — governed destination coverage, default-deny unapproved AI, full destination blocking, and file-upload-only blocking across browser, endpoint, gate, file, and response paths |
 | Output scanning | Working — `/api/v1/scan-response` flags PII/secrets in AI replies |
-| MCP guard / Endpoint agent | Working references - inline/MCP redaction; local endpoint folder watch plus signed native file-flow handoff prototype; redacted companion files for structured-only findings |
+| MCP guard / Endpoint agent | Working references - inline/MCP redaction; MCP connector SDK with required tool-result sanitization; local endpoint folder watch plus signed native file-flow handoff prototype; redacted companion files for structured-only findings |
 | Auth & ops | Working: login lockout, password-confirmed raw reveal and release approval, release-token scoped polling, stable secret, `/healthz` · `/readyz` · `/api/metrics`, policy-driven sensor version and browser/endpoint/MCP install-health posture, sanitized examiner export with coverage, workflow routing, and lineage, Docker, CI |
 
 ## Shipped since the skeleton (see `ITERATIONS.md`)

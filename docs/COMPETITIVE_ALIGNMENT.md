@@ -54,8 +54,6 @@ Build next:
   users, groups, and the sanitized approval workflow.
 - Guided rule-builder controls for scoped policy and exception lifecycle, on top
   of the dashboard JSON editors for `policyScopes` and `policyExceptions`.
-- MCP connector SDK patterns that force tool-output sanitization before model
-  use, with connector health represented in coverage posture.
 - Automated schedule ownership around the examiner evidence pack, now that the
   pack itself includes report metadata, control mappings, backup verification,
   and restore-drill evidence without prompt bodies.
@@ -141,6 +139,9 @@ Build next:
 - Add customer-ready fleet reporting that aggregates browser, endpoint, and MCP
   install-health state by user, org, sensor version, and failed check in
   Coverage and sanitized examiner evidence.
+- Add the MCP connector SDK pattern that forces `sanitizeToolResult()` before
+  model delivery, packages the SDK with the guard runtime, and exposes
+  connector health check objects for future coverage posture.
 
 ## Acceptance Evidence
 

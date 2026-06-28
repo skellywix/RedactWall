@@ -39,6 +39,7 @@ test('MCP install check validates runtime wiring without exposing secrets', asyn
   assert.strictEqual(report.status, 'ok');
   assert.ok(report.checks.every((item) => item.ok), JSON.stringify(report.checks));
   assert.ok(report.checks.some((item) => item.id === 'mcp_guard_runtime'));
+  assert.ok(report.checks.some((item) => item.id === 'mcp_connector_sdk'));
   assert.ok(report.checks.some((item) => item.id === 'shared_detection_engine'));
   assert.ok(!JSON.stringify(report).includes(ingestKey));
 
