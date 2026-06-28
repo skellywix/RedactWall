@@ -46,8 +46,8 @@ Keep:
 Build next:
 
 - Native desktop collector feeding the existing metadata-only endpoint handoff.
-- Browser coverage tests that prove governed destinations receive active
-  content-script protection when that is technically possible.
+- Customer-ready fleet reporting that aggregates browser, endpoint, and MCP
+  install-health state by user, org, sensor version, and failed check.
 - App and action policy controls beyond destination and file-upload blocking,
   especially response-scanning controls.
 - Data lineage views that answer which user, sensor, destination, category, and
@@ -105,6 +105,10 @@ Build next:
 - Add MCP guard install validation heartbeats so agent/tool-output coverage can
   prove runtime, shared-engine, Node, and control-plane config health without
   exposing ingest keys or tool output.
+- Add browser extension install-health heartbeats so managed Chrome coverage can
+  prove MV3 wiring, content-script coverage, managed config, tenant identity,
+  server URL, ingest-key presence, and policy cache health without exposing
+  ingest keys, prompt text, file content, or page content.
 
 ## Acceptance Evidence
 

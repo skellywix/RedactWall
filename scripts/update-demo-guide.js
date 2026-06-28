@@ -40,6 +40,7 @@ const SENSOR_AND_DOC_PATHS = [
   ['server/public/index.html', 'Admin dashboard shell'],
   ['detection-engine/detect.js', 'Shared detection engine source of truth'],
   ['sensors/browser-extension/manifest.json', 'Chrome extension entrypoint'],
+  ['sensors/browser-extension/background.js', 'Browser install-health heartbeat and control-plane relay'],
   ['sensors/browser-extension/content.js', 'Browser send, paste, upload enforcement'],
   ['sensors/endpoint-agent/agent.js', 'Local folder and file sensor'],
   ['sensors/endpoint-agent/write-handoff.js', 'Signed native upload-intent handoff writer'],

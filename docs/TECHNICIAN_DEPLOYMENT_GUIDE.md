@@ -17,6 +17,8 @@ A customer is production ready only when all of these are true:
 - Security Admin MFA is enrolled and tested.
 - Browser extension policy, endpoint agent config, and any MCP guard config use
   the customer's `serverUrl`, `ingestKey`, `orgId`, and managed user identity.
+- Browser extension install validation has reported sanitized health evidence to
+  the Coverage tab.
 - Endpoint install validation has reported sanitized health evidence to the
   Coverage tab when endpoint rollout is in scope.
 - MCP guard install validation has reported sanitized health evidence to the
@@ -407,16 +409,19 @@ Validation on one managed test device:
 3. Confirm the extension receives managed storage.
 4. Open the extension popup and confirm protection is enabled.
 5. Open an approved AI destination.
-6. Send a benign prompt and confirm it is attributed to the test user.
-7. Paste `123-45-6789` as synthetic SSN test data.
-8. Confirm the configured policy action appears in the browser.
-9. Confirm the dashboard shows the event under the right user and tenant.
-10. Add a disposable host to `blockedDestinations`, refresh policy, and confirm
+6. Confirm the Coverage tab shows a `browser_extension` install-health heartbeat
+   with passing checks for managed config, managed identity, org id, server URL,
+   ingest-key presence, content-script coverage, and policy cache availability.
+7. Send a benign prompt and confirm it is attributed to the test user.
+8. Paste `123-45-6789` as synthetic SSN test data.
+9. Confirm the configured policy action appears in the browser.
+10. Confirm the dashboard shows the event under the right user and tenant.
+11. Add a disposable host to `blockedDestinations`, refresh policy, and confirm
     a send attempt records `destination_blocked` without prompt text.
-11. Add the same host to `blockedFileUploadDestinations`, remove it from
+12. Add the same host to `blockedFileUploadDestinations`, remove it from
     `blockedDestinations`, and confirm an upload attempt records
     `file_upload_blocked` without file content.
-12. Visit an ungoverned AI host and confirm shadow-AI discovery appears.
+13. Visit an ungoverned AI host and confirm shadow-AI discovery appears.
 
 Do not proceed to broad rollout until this managed test device passes.
 
@@ -554,6 +559,7 @@ Deliver a packet with:
 - Audit-chain verification output.
 - Backup manifest.
 - Chrome managed policy confirmation.
+- Browser extension install-health heartbeat evidence in Coverage.
 - Endpoint agent scheduled task/log evidence.
 - Endpoint install-health heartbeat evidence in Coverage.
 - MCP guard install-health and sanitized redaction evidence, if deployed.
@@ -610,6 +616,7 @@ If production is live and unhealthy:
 | Docker cannot pull from ECR | Check instance role permissions, ECR repository region, image URI, and subnet outbound internet access. |
 | Admin login fails | Confirm password delivery, MFA seed enrollment, current TOTP code, and lockout status. |
 | Extension has no config | Reload `chrome://policy`, confirm extension id, force-install policy, and managed storage keys. |
+| Browser install health shows attention | In Coverage, inspect failed check IDs. Reload `chrome://policy`, confirm managed config, tenant id, user identity, and extension version, then restart Chrome or wait for the `installHeartbeat` alarm. |
 | Events are rejected | Check `orgId`, managed user identity, ingest key, tenant slug, and seat limit. |
 | Endpoint agent does not start | Check Node on PATH, scheduled task status, config ACL, log path, and ingest key. |
 | Endpoint install health shows attention | Run `npm run endpoint:check -- --env <path> --json`, fix the failed check IDs, then rerun with `--emit-heartbeat`. |
