@@ -45,12 +45,13 @@ Keep:
 
 Build next:
 
-- Native desktop collector feeding the existing metadata-only endpoint handoff.
+- Native desktop collectors beyond the current protected-upload shell action,
+  metadata-only endpoint handoff, and one-shot clipboard guard.
 - Broader app/action policy controls beyond the current destination,
   file-upload, response-scanning, browser paste, browser file-drop, and browser
   response-copy controls.
 - Deeper desktop/file-flow collection once protected upload needs to expand
-  into clipboard or app-specific upload paths.
+  into app-specific upload paths.
 
 ## Recent Completed Passes
 
@@ -72,6 +73,9 @@ Build next:
 - Add native Jira and Linear issue-creation adapters that reuse the same
   sanitized workflow summary and description when a customer does not want to
   operate ticket middleware.
+- Add a one-shot endpoint clipboard guard that inspects locally, reports only
+  masked findings as `paste_flagged`, and can clear sensitive clipboard content
+  while recording sanitized `action_blocked` evidence.
 - Add owner group, reviewer role, review-after metadata, dashboard builder
   fields, and sanitized examiner evidence for time-bound exception lifecycle
   review.

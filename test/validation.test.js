@@ -567,6 +567,44 @@ test('gate sanitizes malformed browser action labels without retaining channel t
   assert.ok(!db.listAudit(20).some((entry) => String(entry.detail || '').includes(secret)));
 }));
 
+test('gate records endpoint clipboard action blocks with masked client evidence', async () => withServer(async (port) => {
+  const secret = '524-71-9043';
+  const res = await jsonFetch(port, '/api/v1/gate', {
+    headers: { 'x-api-key': 'unit-ingest-key' },
+    body: {
+      prompt: '[clipboard blocked locally] US_SSN ' + secret,
+      user: 'analyst@example.test',
+      destination: 'Desktop AI',
+      source: 'endpoint_agent',
+      channel: 'clipboard',
+      clientOutcome: 'action_blocked',
+      clientPreRedacted: true,
+      clientFindings: [{ type: 'US_SSN', severity: 4, score: 0.95, masked: '***-**-9043' }],
+      clientCategories: [],
+      clientEntityCounts: { US_SSN: 1 },
+      clientRiskScore: 30,
+      clientMaxSeverity: 4,
+      clientMaxSeverityLabel: 'critical',
+    },
+  });
+
+  assert.strictEqual(res.status, 200);
+  const body = await res.json();
+  assert.strictEqual(body.status, 'action_blocked');
+  assert.ok(body.findings.some((f) => f.type === 'US_SSN'));
+  assert.ok(!JSON.stringify(body).includes(secret));
+
+  const stored = db.getQuery(body.id);
+  assert.strictEqual(stored.status, 'action_blocked');
+  assert.strictEqual(stored.source, 'endpoint_agent');
+  assert.strictEqual(stored.channel, 'clipboard');
+  assert.strictEqual(stored.destination, 'desktop-ai');
+  assert.strictEqual(stored._rawPrompt, undefined);
+  assert.ok(stored.findings.some((f) => f.type === 'US_SSN'));
+  assert.ok(!JSON.stringify(stored).includes(secret));
+  assert.ok(db.listAudit(20).some((entry) => entry.action === 'CLIENT_ACTION_BLOCKED' && entry.detail === 'endpoint_agent/clipboard: desktop-ai'));
+}));
+
 test('gate applies configured paste browser action blocks before prompt analysis', async () => withServer(async (port) => {
   const originalPolicy = fs.readFileSync(policyPath, 'utf8');
   const secret = '524-71-9043';

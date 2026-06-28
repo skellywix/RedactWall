@@ -151,7 +151,9 @@ placeholders and no token vault; semantic or mixed findings stay held for
 review. A signed native handoff prototype also lets a future desktop collector
 write content-free upload-intent events for absolute local files, so the agent
 can scan files headed to desktop AI apps without relying only on a watched
-folder. Browser/API sensors can also call `POST /api/v1/scan-file`
+folder. A one-shot endpoint clipboard guard can inspect the current clipboard
+locally, report only masked findings, and optionally clear the clipboard when
+sensitive content is detected. Browser/API sensors can also call `POST /api/v1/scan-file`
 with a base64 file. Add a new file type by pushing a processor with
 `{ supports(name), extract(buffer) }`. Supported files fail closed if extraction
 times out or the parser cannot inspect the file, and the audit log records the
@@ -285,6 +287,7 @@ npm run fire-drill -- http://localhost:4000  # sends a synthetic canary control
 node sensors/mcp-guard/guard.js               # demo: redact a SharePoint doc before the model sees it
 node sensors/endpoint-agent/agent.js <dir>    # watch a folder, or process signed native file-flow handoffs
 node sensors/endpoint-agent/write-handoff.js --file <path> --destination "Desktop AI"  # write a signed native upload intent
+npm run desktop:clipboard -- --clear-on-block --json  # one-shot local clipboard guard, sanitized evidence only
 npm run endpoint:check -- --env "$env:LOCALAPPDATA\PromptWall\endpoint-agent.env" --emit-heartbeat  # validate endpoint install health
 npm run mcp:check -- --env ".env" --emit-heartbeat  # validate MCP guard runtime/config health
 ```
@@ -367,7 +370,7 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 | Destination controls | Working — governed destination coverage, default-deny unapproved AI, full destination blocking, and file-upload-only blocking across browser, endpoint, gate, file, and response paths |
 | Browser action controls | Working — destination-scoped paste, file-drop, and response-copy blocking records sanitized `action_blocked` evidence without sending clipboard text, selected response text, or file bytes. Local browser blocks now distinguish recorded evidence from control-plane-unreachable blocks in the user toast. |
 | Output scanning | Working — `/api/v1/scan-response` flags, redacts, or blocks PII/secrets in AI replies by policy |
-| MCP guard / Endpoint agent | Working references - inline/MCP redaction; MCP connector SDK with required tool-result sanitization; Microsoft 365 text-readable file-content connector; local endpoint folder watch plus signed native file-flow handoff prototype; redacted companion files for structured-only findings |
+| MCP guard / Endpoint agent | Working references - inline/MCP redaction; MCP connector SDK with required tool-result sanitization; Microsoft 365 text-readable file-content connector; local endpoint folder watch plus signed native file-flow handoff prototype, protected-upload shell action, and one-shot clipboard guard; redacted companion files for structured-only findings |
 | Auth & ops | Working: login lockout, password-confirmed raw reveal and release approval, release-token scoped polling, stable secret, `/healthz` · `/readyz` · `/api/metrics`, policy-driven sensor version and browser/endpoint/MCP install-health posture, dashboard lineage, sanitized examiner export with coverage, workflow routing, and lineage, Docker, CI |
 
 ## Shipped since the skeleton (see `ITERATIONS.md`)
@@ -395,6 +398,9 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 - **Browser action controls** that block clipboard paste, file drops, and
   response copy actions in selected AI destinations while retaining only
   sanitized action metadata.
+- **Endpoint clipboard guard** that inspects the current clipboard locally,
+  records masked `paste_flagged` evidence, and can clear sensitive clipboard
+  content while recording sanitized `action_blocked` evidence.
 - **SCIM provisioning and OIDC login** for active provisioned users, with bearer
   provisioning auth, deactivation, audit entries, PromptWall group names mapped
   onto local roles, signed ID-token validation, and local break-glass accounts.
@@ -409,7 +415,9 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 - Polished enterprise identity UX, IdP-specific setup recipes, and deeper
   multi-tenant isolation per institution.
 - Signed Chrome Web Store listing and force-install rollout; local extension zip, integrity manifest, release-readiness report, generated ExtensionSettings policy, and managed-policy checklist are packaged.
-- Ship the signed native endpoint collector that feeds the tested handoff contract from clipboard and AI-app upload flows.
+- Expand endpoint collectors from protected upload and one-shot clipboard
+  guarding into app-specific desktop AI upload hooks when paid pilots need
+  deeper interception.
 - Upgrade the on-device classifier to a quantized ONNX/WASM NER when recall demands it.
 
 ## Configuration

@@ -41,6 +41,7 @@
     "endpoint:check": "node scripts/check-endpoint-install.js",
     "endpoint:handoff": "node sensors/endpoint-agent/write-handoff.js",
     "desktop:collect": "node sensors/endpoint-agent/collectors/protected-upload.js",
+    "desktop:clipboard": "node sensors/endpoint-agent/collectors/clipboard-guard.js",
     "mcp:check": "node scripts/check-mcp-guard-install.js",
     "identity:setup": "node scripts/identity-setup.js",
     "train-semantic": "node scripts/train-semantic.js",

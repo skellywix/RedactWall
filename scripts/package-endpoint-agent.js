@@ -21,6 +21,7 @@ const PACKAGE_FILES = [
   'sensors/endpoint-agent/agent.js',
   'sensors/endpoint-agent/native-handoff.js',
   'sensors/endpoint-agent/write-handoff.js',
+  'sensors/endpoint-agent/collectors/clipboard-guard.js',
   'sensors/endpoint-agent/collectors/protected-upload.js',
   'scripts/check-endpoint-install.js',
   'scripts/install-desktop-collector.ps1',
@@ -105,6 +106,14 @@ function validateRuntimeFiles(files) {
     throw new Error('Endpoint desktop collector must not read file bodies or upload file content');
   }
 
+  const clipboardCollector = files.find((file) => file.path === 'sensors/endpoint-agent/collectors/clipboard-guard.js').body.toString('utf8');
+  if (!/collectClipboard/.test(clipboardCollector) || !/clientPreRedacted/.test(clipboardCollector) || !/Set-Clipboard/.test(clipboardCollector)) {
+    throw new Error('Endpoint agent package must include the clipboard guard collector');
+  }
+  if (/contentBase64|writeFileSync|readFileSync|console\.log\([^)]*raw|console\.error\([^)]*raw/.test(clipboardCollector)) {
+    throw new Error('Endpoint clipboard guard must not upload, persist, or log raw clipboard content');
+  }
+
   const installCheck = files.find((file) => file.path === 'scripts/check-endpoint-install.js').body.toString('utf8');
   if (!/api\/v1\/heartbeat/.test(installCheck) || !/buildInstallReport/.test(installCheck) || !/INGEST_API_KEY/.test(installCheck)) {
     throw new Error('Endpoint agent package must include install validation with heartbeat support');
@@ -185,6 +194,7 @@ function packageEndpointAgent(opts = {}) {
       nativeHandoffPrototypeIncluded: true,
       nativeHandoffWriterIncluded: true,
       protectedUploadCollectorIncluded: true,
+      clipboardGuardIncluded: true,
       desktopCollectorInstallerIncluded: true,
       installValidationIncluded: true,
       scheduledTaskInstallerIncluded: true,

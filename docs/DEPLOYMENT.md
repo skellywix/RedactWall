@@ -219,8 +219,9 @@ The command writes a zip and adjacent SHA-256 manifest under
 `dist/endpoint-agent/`. It includes the endpoint runtime, shared detection
 engine, policy evaluator, env loader, file-type processor registry, signed
 native handoff prototype, metadata-only handoff writer, Windows protected-upload
-desktop collector, and scheduled-task plus shell-action install/run/uninstall
-scripts, plus the endpoint install validation checker. It refuses synthetic
+desktop collector, one-shot clipboard guard, and scheduled-task plus
+shell-action install/run/uninstall scripts, plus the endpoint install validation
+checker. It refuses synthetic
 prompt bodies and packaged development ingest keys. Set the real
 `PROMPTWALL_URL`, `INGEST_API_KEY`, and watch directory during install; the
 legacy `SENTINEL_URL` key remains accepted for existing configs. The agent
@@ -422,6 +423,34 @@ The writer loads `ENDPOINT_AGENT_HANDOFF_SECRET` and
 `ENDPOINT_AGENT_HANDOFF_DIR`, or their `PROMPTWALL_*` aliases, from the endpoint
 config, verifies the referenced path is a local file, writes the event
 atomically, and never reads the file body.
+
+### Clipboard Guard
+
+The packaged endpoint runtime also includes a one-shot clipboard guard for
+Windows pilots. It reads the current clipboard locally, runs the same shared
+detection engine, and sends only masked findings, detector counts, risk, and
+severity to the control plane. Clean or empty clipboard values are not reported.
+
+Run in report-only mode:
+
+```powershell
+$env:PROMPTWALL_ENV_PATH = "$env:LOCALAPPDATA\PromptWall\endpoint-agent.env"
+npm run desktop:clipboard -- --destination "Desktop AI" --user "analyst@example.com" --json
+```
+
+Run in block mode:
+
+```powershell
+$env:PROMPTWALL_ENV_PATH = "$env:LOCALAPPDATA\PromptWall\endpoint-agent.env"
+npm run desktop:clipboard -- --clear-on-block --destination "Desktop AI" --user "analyst@example.com" --json
+```
+
+Report-only mode records sanitized `paste_flagged` evidence when sensitive
+content is present. `--clear-on-block` clears the local clipboard first, then
+records sanitized `action_blocked` evidence. The guard never writes clipboard
+text to disk and never sends `contentBase64`, raw clipboard text, or raw document
+content to the control plane. If Windows refuses the clear operation, the guard
+records sanitized `paste_flagged` evidence and exits nonzero.
 
 Check status:
 
