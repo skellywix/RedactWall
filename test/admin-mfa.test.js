@@ -28,14 +28,9 @@ fs.writeFileSync(process.env.SENTINEL_POLICY_PATH, JSON.stringify({
 }, null, 2));
 
 const app = require('../server/app');
+const { listen } = require('./support/listen');
 const auth = require('../server/auth');
 
-function listen(appUnderTest) {
-  return new Promise((resolve, reject) => {
-    const server = appUnderTest.listen(0, '127.0.0.1', () => resolve(server));
-    server.on('error', reject);
-  });
-}
 
 function close(server) {
   return new Promise((resolve) => server.close(resolve));

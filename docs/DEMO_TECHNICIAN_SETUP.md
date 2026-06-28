@@ -88,6 +88,7 @@ This section is generated from the app by `npm run docs:demo-guide`. Do not hand
 | `scripts/check-endpoint-install.js` | Endpoint install validation and heartbeat evidence | Present |
 | `sensors/mcp-guard/guard.js` | MCP tool-output redaction reference | Present |
 | `sensors/mcp-guard/sdk.js` | MCP connector SDK sanitization boundary | Present |
+| `sensors/mcp-guard/connectors/microsoft365.js` | Microsoft 365 MCP file-content connector | Present |
 | `scripts/check-mcp-guard-install.js` | MCP guard install validation and heartbeat evidence | Present |
 | `config/policy.json` | Demo policy defaults | Present |
 | `DEMO_INSTALL_GUIDE.md` | Demo guide hub | Present |

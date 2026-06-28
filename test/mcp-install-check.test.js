@@ -40,6 +40,7 @@ test('MCP install check validates runtime wiring without exposing secrets', asyn
   assert.ok(report.checks.every((item) => item.ok), JSON.stringify(report.checks));
   assert.ok(report.checks.some((item) => item.id === 'mcp_guard_runtime'));
   assert.ok(report.checks.some((item) => item.id === 'mcp_connector_sdk'));
+  assert.ok(report.checks.some((item) => item.id === 'mcp_microsoft365_connector'));
   assert.ok(report.checks.some((item) => item.id === 'shared_detection_engine'));
   assert.ok(!JSON.stringify(report).includes(ingestKey));
 
@@ -78,6 +79,32 @@ test('MCP install check validates runtime wiring without exposing secrets', asyn
   });
   assert.strictEqual(requests.length, 1);
   assert.strictEqual(response.id, 'q_mcp_heartbeat');
+});
+
+test('MCP install check adds optional Microsoft 365 connector health without exposing tokens', async (t) => {
+  const dir = tempDir(t, 'ps-mcp-m365-check-');
+  const envPath = path.join(dir, 'mcp-guard.env');
+  const ingestKey = 'mcp-ingest-key-000000000000000000000000000002';
+  const graphToken = 'microsoft-graph-token-000000000000000000000001';
+  fs.writeFileSync(envPath, [
+    'SENTINEL_URL=https://promptwall.customer.example',
+    `INGEST_API_KEY=${ingestKey}`,
+    'SENTINEL_TENANT_ID=cu-acme',
+    `M365_GRAPH_ACCESS_TOKEN=${graphToken}`,
+    'M365_TENANT_ID=tenant-acme',
+    'M365_GRAPH_SCOPES=Files.Read Sites.Selected',
+  ].join('\n') + '\n');
+
+  const report = buildInstallReport({ envPath, repoRoot: root, env: {} });
+  assert.strictEqual(report.status, 'ok');
+  assert.ok(report.checks.some((item) => item.id === 'mcp_microsoft365_token' && item.ok && item.detail === 'configured'));
+  assert.ok(report.checks.some((item) => item.id === 'mcp_microsoft365_tenant' && item.ok));
+  assert.ok(report.checks.some((item) => item.id === 'mcp_microsoft365_scopes' && item.ok && item.detail === 'scopes:2'));
+  assert.ok(!JSON.stringify(report).includes(graphToken));
+
+  const heartbeat = buildHeartbeatBody(report, { envPath, env: {}, user: 'mcp-tech@example.test' });
+  assert.ok(heartbeat.checks.some((item) => item.id === 'mcp_microsoft365_scopes' && item.detail === 'scopes:2'));
+  assert.ok(!JSON.stringify(heartbeat).includes(graphToken));
 });
 
 test('MCP install check reports attention for bad config', (t) => {

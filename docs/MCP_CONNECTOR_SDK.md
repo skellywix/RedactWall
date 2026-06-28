@@ -6,7 +6,8 @@ boundary, then returns a model-safe MCP result shape to the caller.
 
 Use it for any connector that fetches customer content from Microsoft 365,
 SharePoint, OneDrive, Google Drive, Slack, Teams, Jira, databases, or internal
-knowledge stores.
+knowledge stores. The first shipped connector is
+`sensors/mcp-guard/connectors/microsoft365.js`.
 
 ## Required Pattern
 
@@ -76,8 +77,21 @@ data, raw document text, or connector request bodies in health details.
 - Keep first-party connectors thin. Fetch content, pass it through the SDK, and
   let the shared detection engine and policy decide what is safe.
 
-## First Connector Target
+## Shipped Connector
 
-The first recommended first-party connector remains Microsoft 365 file content
-through Graph because credit-union pilots are likely to use Microsoft identity,
-SharePoint, and OneDrive. Google Drive should follow only when a pilot needs it.
+PromptWall now includes a Microsoft 365 Graph driveItem content connector for
+text-readable OneDrive and SharePoint files. It fetches the file body, applies
+`sanitizeDriveItemContent()`, and returns only the sanitized MCP result. See
+`docs/MCP_MICROSOFT365_CONNECTOR.md`.
+
+Google Drive should follow only when a pilot needs it.
+
+## Works Cited
+
+Microsoft. "Get DriveItem Content." *Microsoft Learn*, Microsoft,
+https://learn.microsoft.com/en-us/graph/api/driveitem-get-content?view=graph-rest-1.0.
+Accessed 28 June 2026.
+
+Microsoft. "Microsoft Graph Permissions Reference." *Microsoft Learn*,
+Microsoft, https://learn.microsoft.com/en-us/graph/permissions-reference.
+Accessed 28 June 2026.

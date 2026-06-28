@@ -205,12 +205,13 @@ npm run package:mcp-guard
 ```
 
 The command writes a zip and adjacent SHA-256 manifest under `dist/mcp-guard/`.
-It includes the guard runtime, connector SDK, shared detection engine, env
-loader, version metadata, and MCP guard install validation checker. It excludes
-the local direct-run demo and refuses synthetic prompt bodies or development
-ingest keys. Set `SENTINEL_URL` and `INGEST_API_KEY` in the host MCP runtime
-environment; do not bake them into the package. The guard does not contact the
-control plane without an explicit ingest key.
+It includes the guard runtime, connector SDK, Microsoft 365 Graph file-content
+connector, shared detection engine, env loader, version metadata, and MCP guard
+install validation checker. It excludes the local direct-run demo and refuses
+synthetic prompt bodies or development ingest keys. Set `SENTINEL_URL` and
+`INGEST_API_KEY` in the host MCP runtime environment; do not bake them into the
+package. The guard does not contact the control plane without an explicit ingest
+key.
 
 Validate the unpacked MCP guard runtime and optionally emit sanitized health
 evidence:
@@ -224,14 +225,22 @@ npm run mcp:check -- `
 ```
 
 The checker verifies the MCP env file or runtime environment, server URL,
-ingest-key presence, Node version, guard runtime, connector SDK, shared
-detection engine, env loader, and package manifest. It posts only check IDs,
-boolean status, and short details; it does not print or post ingest keys, prompt
-text, tool output, or document content.
+ingest-key presence, Node version, guard runtime, connector SDK, Microsoft 365
+connector, shared detection engine, env loader, and package manifest. It posts
+only check IDs, boolean status, and short details; it does not print or post
+ingest keys, prompt text, tool output, or document content.
 
 Future MCP content connectors must wrap every tool handler with
 `sanitizeToolResult()` or `wrapConnectorTool()` from `sensors/mcp-guard/sdk.js`
 before returning data to the model. See `docs/MCP_CONNECTOR_SDK.md`.
+
+For the shipped Microsoft 365 connector, provide a Graph access token through
+the host MCP runtime environment and use least-privileged file scopes for the
+pilot. The connector supports text-readable driveItem content and rejects
+unsupported binary content by default. See `docs/MCP_MICROSOFT365_CONNECTOR.md`.
+When Microsoft 365 environment values are present, `npm run mcp:check` also
+adds sanitized connector health checks for token presence, tenant ID, and scope
+count without printing or posting the token.
 
 ## Endpoint Agent On Windows
 

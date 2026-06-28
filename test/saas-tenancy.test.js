@@ -20,14 +20,9 @@ fs.writeFileSync(process.env.SENTINEL_POLICY_PATH, JSON.stringify({
 }));
 
 const app = require('../server/app');
+const { listen } = require('./support/listen');
 const db = require('../server/db');
 
-function listen(appUnderTest) {
-  return new Promise((resolve, reject) => {
-    const server = appUnderTest.listen(0, '127.0.0.1', () => resolve(server));
-    server.on('error', reject);
-  });
-}
 
 async function postGate(port, body) {
   const res = await fetch(`http://127.0.0.1:${port}/api/v1/gate`, {

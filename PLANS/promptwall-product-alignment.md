@@ -114,6 +114,9 @@ For this alignment track, completion requires evidence for every area below:
 - Added an MCP connector SDK that forces future content connectors through
   `sanitizeToolResult()` before model delivery, packages with the MCP guard, and
   contributes connector SDK health to install posture.
+- Added the first Microsoft 365 Graph MCP content connector for text-readable
+  OneDrive and SharePoint driveItems, packaged with the guard and sanitized
+  before model delivery.
 
 ## Open Decisions
 

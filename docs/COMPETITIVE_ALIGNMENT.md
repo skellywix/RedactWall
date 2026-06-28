@@ -142,6 +142,9 @@ Build next:
 - Add the MCP connector SDK pattern that forces `sanitizeToolResult()` before
   model delivery, packages the SDK with the guard runtime, and exposes
   connector health check objects for future coverage posture.
+- Add the first Microsoft 365 Graph MCP content connector for text-readable
+  OneDrive and SharePoint driveItems, with SDK sanitization before model
+  delivery and connector runtime/package health evidence.
 
 ## Acceptance Evidence
 

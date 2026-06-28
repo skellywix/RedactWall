@@ -56,6 +56,7 @@ const SENSOR_AND_DOC_PATHS = [
   ['scripts/check-endpoint-install.js', 'Endpoint install validation and heartbeat evidence'],
   ['sensors/mcp-guard/guard.js', 'MCP tool-output redaction reference'],
   ['sensors/mcp-guard/sdk.js', 'MCP connector SDK sanitization boundary'],
+  ['sensors/mcp-guard/connectors/microsoft365.js', 'Microsoft 365 MCP file-content connector'],
   ['scripts/check-mcp-guard-install.js', 'MCP guard install validation and heartbeat evidence'],
   ['config/policy.json', 'Demo policy defaults'],
   ['DEMO_INSTALL_GUIDE.md', 'Demo guide hub'],

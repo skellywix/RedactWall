@@ -3,13 +3,8 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const app = require('../server/app');
+const { listen } = require('./support/listen');
 
-function listen(appUnderTest) {
-  return new Promise((resolve, reject) => {
-    const server = appUnderTest.listen(0, '127.0.0.1', () => resolve(server));
-    server.on('error', reject);
-  });
-}
 
 test('server module exports an app without requiring a fixed listening port', async (t) => {
   assert.strictEqual(typeof app, 'function');
