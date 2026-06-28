@@ -201,7 +201,7 @@ function overviewTable(snapshot) {
     '| Source | Current value |',
     '| --- | --- |',
     `| App package | \`${pkg.name}@${pkg.version}\` |`,
-    `| Active repo folder | \`${path.basename(ROOT)}\` |`,
+    `| Active repo folder | \`${pkg.name}\` |`,
     `| Server entrypoint | \`${pkg.main}\` |`,
     `| Browser extension | \`${asciiText(manifest.name)}\` version \`${manifest.version}\` |`,
     `| Default enforcement mode | \`${policy.enforcementMode}\` |`,
