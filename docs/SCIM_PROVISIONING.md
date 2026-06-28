@@ -144,7 +144,15 @@ tokens, MFA seeds, or IdP secrets.
 
 ## IdP Notes
 
-For Microsoft Entra or Okta-style provisioning, configure:
+For Microsoft Entra or Okta provisioning, use `docs/IDENTITY_IDP_SETUP.md`, the
+dashboard Identity tab, or the secret-free CLI handoff:
+
+```bash
+npm run identity:setup -- --provider entra --base-url https://promptwall.customer.example --tenant-id <tenant-id-or-domain>
+npm run identity:setup -- --provider okta --base-url https://promptwall.customer.example --tenant-id <customer.okta.com>
+```
+
+At a minimum, configure:
 
 - Tenant URL: `https://promptwall.customer.example/scim/v2`
 - Secret token: the `SCIM_BEARER_TOKEN` value from the approved vault

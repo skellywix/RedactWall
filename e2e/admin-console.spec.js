@@ -89,6 +89,19 @@ test('admin console login, approval, policy save, and evidence export work in a 
   await expect(page.locator('#fleetRows')).toContainText('covered');
   await expect(page.locator('#fleetRows')).toContainText('checks ok');
 
+  await page.locator('.content-tabs .tab[data-tab="identity"]').click();
+  await expect(page.locator('#tab-identity')).toBeVisible();
+  await expect(page.locator('#identityScimRows')).toContainText('/scim/v2');
+  await page.locator('#identityTenant').fill('contoso.onmicrosoft.com');
+  await page.locator('#refreshIdentity').click();
+  await expect(page.locator('#identityOidcRows')).toContainText('login.microsoftonline.com/contoso.onmicrosoft.com/v2.0');
+  await page.locator('#identityProvider').selectOption('okta');
+  await page.locator('#identityTenant').fill('customer.okta.com');
+  await page.locator('#refreshIdentity').click();
+  await expect(page.locator('#identityOidcRows')).toContainText('customer.okta.com/oauth2/default');
+  await expect(page.locator('#identityEnvRows')).toContainText('OIDC_CLIENT_SECRET');
+  await expect(page.locator('body')).not.toContainText('e2e-ingest-key');
+
   await page.locator('.content-tabs .tab[data-tab="policy"]').click();
   await expect(page.locator('#pol_desktop_destination')).toBeVisible();
   await page.locator('input[name="mode"][value="warn"]').check();

@@ -54,6 +54,10 @@ Build next:
 ## Recent Completed Passes
 
 - Rebrand the visible project from PromptSentinel to PromptWall.
+- Add provider-specific Microsoft Entra and Okta identity setup handoff through
+  the dashboard Identity tab, an authenticated secret-free API, and
+  `npm run identity:setup`, so SCIM/OIDC pilot setup has exact callback, issuer,
+  role-group, and preflight values without exposing tokens or client secrets.
 - Extend destination-scoped browser action controls from paste-only to
   drag-and-drop file uploads, with sanitized `action_blocked` evidence before
   the browser reads file bytes.

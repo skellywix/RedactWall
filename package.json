@@ -42,6 +42,7 @@
     "endpoint:handoff": "node sensors/endpoint-agent/write-handoff.js",
     "desktop:collect": "node sensors/endpoint-agent/collectors/protected-upload.js",
     "mcp:check": "node scripts/check-mcp-guard-install.js",
+    "identity:setup": "node scripts/identity-setup.js",
     "train-semantic": "node scripts/train-semantic.js",
     "sync-engine": "node scripts/sync-engine.js",
     "sync-check": "node scripts/sync-check.js",

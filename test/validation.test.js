@@ -12,11 +12,13 @@ process.env.SENTINEL_SECRET = 'unit-secret-stable';
 process.env.SENTINEL_DATA_KEY = 'unit-data-key-stable';
 process.env.INGEST_API_KEY = 'unit-ingest-key';
 process.env.SENTINEL_DB_PATH = path.join(os.tmpdir(), 'ps-validation-test-' + crypto.randomBytes(6).toString('hex') + '.db');
+const policyPath = path.join(os.tmpdir(), 'ps-validation-policy-' + crypto.randomBytes(6).toString('hex') + '.json');
+process.env.SENTINEL_POLICY_PATH = policyPath;
+fs.copyFileSync(path.join(__dirname, '..', 'config', 'policy.json'), policyPath);
 
 const app = require('../server/app');
 const { listen, loopbackHttpFetch } = require('./support/listen');
 const db = require('../server/db');
-const policyPath = path.join(__dirname, '..', 'config', 'policy.json');
 
 
 function close(server) {
@@ -1377,4 +1379,5 @@ test.after(() => {
   for (const suffix of ['', '-wal', '-shm']) {
     try { fs.unlinkSync(process.env.SENTINEL_DB_PATH + suffix); } catch {}
   }
+  try { fs.unlinkSync(policyPath); } catch {}
 });

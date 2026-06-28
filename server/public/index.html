@@ -415,13 +415,15 @@
   .stepup-panel textarea{resize:vertical;min-height:84px;line-height:1.45}
   .stepup-actions{display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap}
   .side-stack{display:grid;gap:14px}
-  .coverage-grid,.lineage-grid{display:grid;grid-template-columns:minmax(0,1.12fr) minmax(330px,.88fr);gap:14px;align-items:start}
+  .coverage-grid,.lineage-grid,.identity-grid{display:grid;grid-template-columns:minmax(0,1.12fr) minmax(330px,.88fr);gap:14px;align-items:start}
   .wide-panel{grid-column:1 / span 2}
   .lineage-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;padding:14px}
   .lineage-summary .mini-kpi{min-height:76px}
   .lineage-grid table{table-layout:fixed}
   .lineage-grid th:first-child,.lineage-grid td:first-child{width:42%;overflow-wrap:anywhere}
   .lineage-grid th:not(:first-child),.lineage-grid td:not(:first-child){width:14.5%;text-align:right}
+  .identity-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;padding:14px}
+  .identity-summary .mini-kpi{min-height:86px}
   .coverage-body{display:grid;grid-template-columns:220px minmax(0,1fr);gap:14px;padding:14px}
   .score-panel{
     min-height:190px;
@@ -572,7 +574,7 @@
     .rail-section,.rail-status{display:none}
     .workspace{padding:0 16px 24px}
     .queue-grid{grid-template-columns:1fr}
-    .coverage-grid,.lineage-grid{grid-template-columns:1fr}
+    .coverage-grid,.lineage-grid,.identity-grid{grid-template-columns:1fr}
     .wide-panel{grid-column:auto}
     .stats{grid-template-columns:repeat(2,minmax(0,1fr))}
   }
@@ -588,7 +590,7 @@
     .control-cluster{justify-content:flex-start;margin-top:12px}
     .stats{grid-template-columns:1fr}
     .content-tabs{overflow:auto}
-    .coverage-body,.coverage-kpis,.lineage-summary{grid-template-columns:1fr}
+    .coverage-body,.coverage-kpis,.lineage-summary,.identity-summary{grid-template-columns:1fr}
     .shadow-row{grid-template-columns:1fr}
     .destination-review{justify-items:start}
     .destination-actions{justify-content:flex-start}
@@ -612,7 +614,7 @@
 <div class="app-shell">
   <aside class="rail">
     <div class="brand">
-      <div class="logo" aria-hidden="true">PS</div>
+      <div class="logo" aria-hidden="true">PW</div>
       <div>
         <h1>PromptWall</h1>
         <p>AI Prompt DLP Gateway</p>
@@ -631,6 +633,10 @@
       <button class="tab" data-tab="coverage" type="button">
         <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M4 19V5m0 14h16M8 16V9m5 7V6m5 10v-4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
         Coverage
+      </button>
+      <button class="tab" data-tab="identity" type="button">
+        <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M12 4a4 4 0 1 1 0 8 4 4 0 0 1 0-8ZM4.5 20c.7-3.4 3.3-5.5 7.5-5.5s6.8 2.1 7.5 5.5M17 8h3m-1.5-1.5v3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        Identity
       </button>
       <button class="tab" data-tab="lineage" type="button">
         <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M4 7h5l2 3h9M4 17h5l2-3h9M9 7v10" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
@@ -692,6 +698,7 @@
       <button class="tab active" data-tab="queue" type="button">Approval Queue</button>
       <button class="tab" data-tab="activity" type="button">All Activity</button>
       <button class="tab" data-tab="coverage" type="button">Coverage</button>
+      <button class="tab" data-tab="identity" type="button">Identity</button>
       <button class="tab" data-tab="lineage" type="button">Lineage</button>
       <button class="tab" data-tab="audit" type="button">Audit Log</button>
       <button class="tab" data-tab="policy" type="button">Policy</button>
@@ -832,6 +839,51 @@
               </div>
             </div>
             <div id="shadowRows"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="tab-identity" class="hidden">
+        <div class="identity-grid">
+          <div class="panel wide-panel">
+            <div class="panel-head">
+              <div>
+                <h2>Identity Setup</h2>
+                <span>SCIM and OIDC handoff values</span>
+              </div>
+              <div class="queue-tools">
+                <select id="identityProvider" aria-label="Identity provider">
+                  <option value="entra">Microsoft Entra ID</option>
+                  <option value="okta">Okta</option>
+                </select>
+                <input id="identityTenant" type="text" aria-label="Tenant or domain" placeholder="tenant id or domain" />
+                <button class="ghost" id="refreshIdentity" type="button">
+                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v6h-6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  Refresh
+                </button>
+              </div>
+            </div>
+            <div class="identity-summary" id="identitySummary"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><div><h2>SCIM</h2><span>Provisioning app values</span></div></div>
+            <table><tbody id="identityScimRows"></tbody></table>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><div><h2>OIDC</h2><span>Console SSO app values</span></div></div>
+            <table><tbody id="identityOidcRows"></tbody></table>
+          </div>
+          <div class="panel wide-panel">
+            <div class="panel-head"><div><h2>Environment</h2><span>Server-side settings</span></div></div>
+            <table><thead><tr><th>Key</th><th>PromptWall Alias</th><th>Value</th></tr></thead><tbody id="identityEnvRows"></tbody></table>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><div><h2>Role Groups</h2><span>Provisioned group names</span></div></div>
+            <table><thead><tr><th>Role</th><th>Groups</th></tr></thead><tbody id="identityRoleRows"></tbody></table>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><div><h2>Validation</h2><span>Readiness checks</span></div></div>
+            <div class="posture-list" id="identityValidation"></div>
           </div>
         </div>
       </section>

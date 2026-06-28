@@ -213,10 +213,12 @@ SQLite evidence storage.
 For technician-led customer installs, use `docs/TECHNICIAN_DEPLOYMENT_GUIDE.md`
 as the production readiness runbook and handoff checklist.
 
-For customer identity provisioning and SSO, use `docs/SCIM_PROVISIONING.md`.
-SCIM stores users and groups, deprovisions users, and maps known PromptWall
-groups to roles. OIDC login can then issue console sessions for active
-provisioned users while local console credentials remain the break-glass path.
+For customer identity provisioning and SSO, use `docs/SCIM_PROVISIONING.md` and
+`docs/IDENTITY_IDP_SETUP.md`. SCIM stores users and groups, deprovisions users,
+and maps known PromptWall groups to roles. OIDC login can then issue console
+sessions for active provisioned users while local console credentials remain the
+break-glass path. The dashboard Identity tab and `npm run identity:setup` render
+secret-free Microsoft Entra and Okta setup values for technician handoff.
 
 For advanced customer policy, use `docs/POLICY_SCOPES.md`. The server can apply
 stricter scoped policy by user, SCIM group, source, channel, destination,
@@ -266,6 +268,13 @@ Web Store release-readiness report for private or unlisted managed deployments.
 When supplied a Chrome Web Store extension id, it also writes a final Chrome
 `ExtensionSettings` force-install policy with the real extension id and update
 URL, but no managed-storage secrets.
+
+Generate a customer IdP handoff with:
+
+```bash
+npm run identity:setup -- --provider entra --base-url https://promptwall.customer.example --tenant-id <tenant-id-or-domain>
+npm run identity:setup -- --provider okta --base-url https://promptwall.customer.example --tenant-id <customer.okta.com>
+```
 
 ### Try the other sensors
 
@@ -424,6 +433,7 @@ Copy `.env.example` to `.env` (or export):
 | `INGEST_API_KEY` | Key sensors present to the gate API; production preflight requires a non-default key of at least 32 characters |
 | `SCIM_BEARER_TOKEN` | Optional bearer token that enables `/scim/v2/*` user and group provisioning. Leave empty to disable SCIM. Production preflight requires at least 32 characters when set |
 | `OIDC_ISSUER` / `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` / `OIDC_REDIRECT_URI` | Optional console SSO. OIDC login uses authorization-code flow, validates the ID token, and maps the identity to an active SCIM user. Production preflight requires complete values and a 32-plus-character client secret when any OIDC value is set |
+| `OIDC_SCOPE` | OIDC scopes requested by console SSO, defaulting to `openid email profile` |
 | `OIDC_AUTHORIZATION_ENDPOINT` / `OIDC_TOKEN_ENDPOINT` / `OIDC_JWKS_URI` | Optional explicit OIDC endpoints. Leave all three empty to use issuer discovery, or set all three together |
 | `ENDPOINT_AGENT_HANDOFF_DIR` | Optional local spool for signed native endpoint upload-intent events |
 | `ENDPOINT_AGENT_HANDOFF_SECRET` | Optional 32-plus-character local HMAC secret required before native endpoint handoff events are accepted |

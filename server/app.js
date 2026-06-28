@@ -37,6 +37,7 @@ const workflow = require('./workflow');
 const roles = require('./roles');
 const scim = require('./scim');
 const oidc = require('./oidc');
+const identitySetup = require('./identity-setup');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -201,6 +202,14 @@ function currentPreflight() {
     cookieSecure: SESSION_COOKIE_OPTIONS.secure,
     dbPath: process.env.SENTINEL_DB_PATH || '',
   });
+}
+
+function publicBaseUrl(req) {
+  const forwardedProto = String(req.get('x-forwarded-proto') || '').split(',')[0].trim();
+  const forwardedHost = String(req.get('x-forwarded-host') || '').split(',')[0].trim();
+  const proto = forwardedProto || req.protocol || 'http';
+  const host = forwardedHost || req.get('host') || `localhost:${PORT}`;
+  return `${proto}://${host}`;
 }
 
 function checkIngestKey(req, res, next) {
@@ -1352,6 +1361,18 @@ app.get('/api/metrics', auth.requireAuth, (req, res) => {
 });
 
 app.get('/api/preflight', auth.requireAuth, (req, res) => res.json(currentPreflight()));
+
+app.get('/api/identity/setup-guide', auth.requireAuth, (req, res) => {
+  try {
+    res.json(identitySetup.buildIdentitySetupGuide({
+      provider: req.query.provider,
+      baseUrl: req.query.baseUrl || publicBaseUrl(req),
+      tenantId: req.query.tenantId || req.query.tenant || req.query.oktaDomain,
+    }));
+  } catch (e) {
+    res.status(400).json({ error: String((e && e.message) || e) });
+  }
+});
 
 app.post('/api/retention/purge', ...adminWrite, (req, res) => {
   const result = runRetentionPurge({ actor: req.user.user });

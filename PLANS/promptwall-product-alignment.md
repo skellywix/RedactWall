@@ -129,6 +129,10 @@ For this alignment track, completion requires evidence for every area below:
 - Added SCIM-backed OIDC console login with state, nonce, authorization-code
   token exchange, RS256 JWKS ID-token validation, active SCIM user role mapping,
   PromptWall-prefixed env aliases, and production preflight checks.
+- Added a secret-free enterprise identity handoff for Microsoft Entra and Okta
+  through `server/identity-setup.js`, `/api/identity/setup-guide`, the dashboard
+  Identity tab, `npm run identity:setup`, generated setup env placeholders, and
+  `docs/IDENTITY_IDP_SETUP.md`.
 - Extended approval routing rules to match SCIM user names, SCIM groups, and
   org ids so provisioned identity can route legal, lending, engineering, or
   other customer review queues without storing raw prompts or file text.
@@ -161,5 +165,5 @@ For this alignment track, completion requires evidence for every area below:
 - The local checkout folder has been renamed to `promptwall/`; the remaining
   GitHub repository has also been renamed to `skellywix/promptwall`.
 - Whether the next product build should prioritize deeper desktop interception,
-  IdP-specific setup UX, signed-update operations, or broader app/action policy
-  controls beyond browser paste and file drops.
+  signed-update operations, step-up reauthentication polish, or broader
+  app/action policy controls beyond browser paste and file drops.
