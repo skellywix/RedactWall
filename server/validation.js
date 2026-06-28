@@ -16,6 +16,7 @@ const LIMITS = {
   filenameChars: 512,
   base64Chars: 12 * 1024 * 1024,
   policyListItems: 200,
+  destinationReviewReasonChars: 240,
 };
 
 const DETECTOR_ID = /^[A-Z0-9_]+$/;
@@ -200,6 +201,7 @@ const applyTemplateSchema = z.object({
 const destinationReviewSchema = z.object({
   destination: z.string().min(1).max(253).regex(HOST_OR_LABEL),
   decision: z.enum(['govern', 'allow', 'block']),
+  reason: nonBlankString(LIMITS.destinationReviewReasonChars),
 }).strict();
 
 const scannerPolicySchema = z.object({
@@ -230,6 +232,7 @@ const policyUpdateSchema = z.object({
   allowedDestinations: z.array(z.string().min(1).max(253).regex(HOST_OR_LABEL)).max(LIMITS.policyListItems).optional(),
   blockedDestinations: z.array(z.string().min(1).max(253).regex(HOST_OR_LABEL)).max(LIMITS.policyListItems).optional(),
   blockedFileUploadDestinations: z.array(z.string().min(1).max(253).regex(HOST_OR_LABEL)).max(LIMITS.policyListItems).optional(),
+  blockUnapprovedAiDestinations: z.boolean().optional(),
   desktopCollectorDestination: z.string().min(1).max(80).regex(DESKTOP_DESTINATION_LABEL).refine((value) => value.trim().length > 0, {
     message: 'required',
   }).optional(),

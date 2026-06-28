@@ -26,6 +26,7 @@ function minimalFiles(agentBody) {
   return [
     { path: 'package.json', body: Buffer.from('{"version":"0.0.0"}') },
     { path: 'package-lock.json', body: Buffer.from('{}') },
+    { path: 'detection-engine/adapters.js', body: Buffer.from('module.exports = {};') },
     { path: 'detection-engine/detect.js', body: Buffer.from('module.exports = {};') },
     { path: 'server/env.js', body: Buffer.from('module.exports = {};') },
     { path: 'server/policy.js', body: Buffer.from('module.exports = {};') },
@@ -93,6 +94,7 @@ test('package script writes a prompt-free endpoint agent zip and integrity manif
   for (const required of [
     'package.json',
     'package-lock.json',
+    'detection-engine/adapters.js',
     'detection-engine/detect.js',
     'server/env.js',
     'server/policy.js',

@@ -410,9 +410,9 @@ function blockDestinationByPolicy(res, context = {}, responseExtra = {}) {
     channel = 'submit',
     sensor = null,
     redactedPrompt = null,
+    reason = 'Destination blocked by policy',
   } = context;
   const normalized = policy.normalizeDestination(destination);
-  const reason = 'Destination blocked by policy';
   const row = db.createQuery({
     status: 'destination_blocked',
     mode: 'destination_block',
@@ -510,7 +510,16 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
 
   const pol = policy.loadPolicy();
   if (policy.destinationBlocked(destination, pol) || clientOutcome === 'destination_blocked') {
-    return blockDestinationByPolicy(res, { user, orgId, destination, sourceIp, source, channel, sensor });
+    return blockDestinationByPolicy(res, {
+      user,
+      orgId,
+      destination,
+      sourceIp,
+      source,
+      channel,
+      sensor,
+      reason: policy.destinationBlockReason(destination, pol),
+    });
   }
   if (clientOutcome === 'file_upload_blocked') {
     return blockFileUploadByPolicy(res, { user, orgId, destination, sourceIp, source, channel, sensor });
@@ -554,6 +563,19 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
   // Shadow-AI discovery: a visit to an AI tool policy does not govern. Recorded
   // as an informational event so the examiner sees unmonitored paths, not a leak.
   if (clientOutcome === 'shadow_ai') {
+    if (policy.unapprovedAiDestination(destination, pol)) {
+      return blockDestinationByPolicy(res, {
+        user,
+        orgId,
+        destination,
+        sourceIp,
+        source,
+        channel,
+        sensor,
+        redactedPrompt: '[unapproved AI blocked] ' + policy.normalizeDestination(destination),
+        reason: policy.destinationBlockReason(destination, pol),
+      });
+    }
     const row = db.createQuery({ status: 'shadow_ai', ...base });
     db.appendAudit({ action: 'SHADOW_AI', queryId: row.id, actor: user, detail: `ungoverned AI tool: ${destination}` });
     emitSecurityAlert(row, 'SHADOW_AI');
@@ -684,6 +706,7 @@ app.get('/api/v1/policy', checkIngestKey, (req, res) => {
     allowedDestinations: p.allowedDestinations || [],
     blockedDestinations: p.blockedDestinations || [],
     blockedFileUploadDestinations: p.blockedFileUploadDestinations || [],
+    blockUnapprovedAiDestinations: p.blockUnapprovedAiDestinations !== false,
     desktopCollectorDestination: p.desktopCollectorDestination || policy.DEFAULT_POLICY.desktopCollectorDestination,
     requiredSensors: p.requiredSensors || policy.DEFAULT_POLICY.requiredSensors,
     desiredSensorVersions: p.desiredSensorVersions || policy.DEFAULT_POLICY.desiredSensorVersions,
@@ -704,6 +727,7 @@ app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation
     return blockDestinationByPolicy(res, {
       user, orgId, destination, source, channel, sensor,
       redactedPrompt: '[file upload blocked by destination policy] ' + policy.normalizeDestination(destination),
+      reason: policy.destinationBlockReason(destination, pol),
     }, { supported: true, inspected: false });
   }
   if (policy.fileUploadBlocked(destination, pol)) {
@@ -817,6 +841,7 @@ app.post('/api/v1/scan-response', checkIngestKey, validation.validateBody(valida
     return blockDestinationByPolicy(res, {
       user, orgId, destination, source, channel: 'ai_response', sensor,
       redactedPrompt: '[AI response blocked by destination policy] ' + policy.normalizeDestination(destination),
+      reason: policy.destinationBlockReason(destination, pol),
     }, { leaked: false, findings: [], categories: [], redacted: '' });
   }
   const analysis = detector.analyze(text, policy.analyzeOpts(pol));
@@ -1072,7 +1097,7 @@ app.post('/api/destinations/review', ...adminWrite, validation.validateBody(vali
   db.appendAudit({
     action: 'DESTINATION_REVIEWED',
     actor: req.user.user,
-    detail: policy.policyChangeDetail(before, reviewed.policy),
+    detail: policy.policyChangeDetail(before, reviewed.policy, { reason: req.body.reason }),
   });
   const report = coverage.summarize(db.listQueries({ limit: 5000 }), reviewed.policy);
   broadcast('stats', db.stats());

@@ -22,6 +22,7 @@ const POLICY_AUDIT_FIELDS = new Set([
   'allowedDestinations',
   'blockedDestinations',
   'blockedFileUploadDestinations',
+  'blockUnapprovedAiDestinations',
   'requiredSensors',
   'desiredSensorVersions',
   'scanner',
@@ -108,6 +109,7 @@ function safePolicyChange(a) {
     }));
   return {
     ...(parsed.templateId ? { templateId: String(parsed.templateId) } : {}),
+    ...(parsed.reason ? { reason: String(parsed.reason).slice(0, 240) } : {}),
     changed,
   };
 }

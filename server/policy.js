@@ -7,6 +7,7 @@ require('./env').loadEnv();
 const fs = require('fs');
 const path = require('path');
 const pkg = require('../package.json');
+const adapters = require('../detection-engine/adapters');
 
 const CONFIG_PATH = process.env.SENTINEL_POLICY_PATH || path.join(__dirname, '..', 'config', 'policy.json');
 const SENSOR_ID_RE = /^[a-z][a-z0-9_:-]{0,79}$/;
@@ -38,6 +39,7 @@ const DEFAULT_POLICY = {
   allowedDestinations: [],
   blockedDestinations: [],
   blockedFileUploadDestinations: [],
+  blockUnapprovedAiDestinations: true,
   desktopCollectorDestination: 'Desktop AI',
   requiredSensors: DEFAULT_REQUIRED_SENSORS,
   desiredSensorVersions: DEFAULT_DESIRED_SENSOR_VERSIONS,
@@ -115,6 +117,7 @@ const AUDIT_FIELDS = [
   'allowedDestinations',
   'blockedDestinations',
   'blockedFileUploadDestinations',
+  'blockUnapprovedAiDestinations',
   'desktopCollectorDestination',
   'requiredSensors',
   'desiredSensorVersions',
@@ -145,6 +148,7 @@ function policyChangeSummary(before, after, meta = {}) {
   return {
     type: 'policy_change',
     ...(meta.templateId ? { templateId: String(meta.templateId) } : {}),
+    ...(meta.reason ? { reason: String(meta.reason).trim().slice(0, 240) } : {}),
     changed,
   };
 }
@@ -207,6 +211,30 @@ function destinationMatches(destination, patterns) {
   });
 }
 
+function destinationReviewed(destination, policy = loadPolicy()) {
+  return destinationMatches(destination, [
+    ...((policy || {}).governedDestinations || []),
+    ...((policy || {}).allowedDestinations || []),
+    ...((policy || {}).blockedDestinations || []),
+    ...((policy || {}).blockedFileUploadDestinations || []),
+  ]);
+}
+
+function unapprovedAiDestination(destination, policy = loadPolicy()) {
+  if ((policy || {}).blockUnapprovedAiDestinations === false) return false;
+  const normalized = normalizeDestination(destination);
+  if (!normalized || normalized === 'unknown') return false;
+  if (destinationAllowed(normalized, policy)) return false;
+  if (!adapters.isAiHost(normalized)) return false;
+  return !destinationReviewed(normalized, policy);
+}
+
+function destinationBlockReason(destination, policy = loadPolicy()) {
+  if (destinationMatches(destination, (policy || {}).blockedDestinations || [])) return 'Destination blocked by policy';
+  if (unapprovedAiDestination(destination, policy)) return 'Unapproved AI destination blocked by policy';
+  return 'Destination blocked by policy';
+}
+
 function destinationListWithout(list, destination) {
   const target = normalizeDestination(destination);
   const out = [];
@@ -252,7 +280,8 @@ function reviewDestination(currentPolicy, destination, decision) {
 
 function destinationBlocked(destination, policy = loadPolicy()) {
   if (destinationAllowed(destination, policy)) return false;
-  return destinationMatches(destination, policy.blockedDestinations || []);
+  return destinationMatches(destination, policy.blockedDestinations || [])
+    || unapprovedAiDestination(destination, policy);
 }
 
 function fileUploadBlocked(destination, policy = loadPolicy()) {
@@ -294,7 +323,10 @@ module.exports = {
   reviewDestination,
   destinationAllowed,
   destinationBlocked,
+  destinationBlockReason,
+  destinationReviewed,
   fileUploadBlocked,
+  unapprovedAiDestination,
   policyChangeSummary,
   policyChangeDetail,
   DEFAULT_POLICY,

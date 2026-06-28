@@ -101,9 +101,11 @@ function sensorPolicy(input = {}) {
     alwaysBlock: detectorList(merged.alwaysBlock, defaults.alwaysBlock),
     ignore: detectorList(merged.ignore, defaults.ignore),
     disabledDetectors: detectorList(merged.disabledDetectors, defaults.disabledDetectors),
+    governedDestinations: lowerList(merged.governedDestinations, defaults.governedDestinations),
     allowedDestinations: lowerList(merged.allowedDestinations, defaults.allowedDestinations),
     blockedDestinations: lowerList(merged.blockedDestinations, defaults.blockedDestinations),
     blockedFileUploadDestinations: lowerList(merged.blockedFileUploadDestinations, defaults.blockedFileUploadDestinations),
+    blockUnapprovedAiDestinations: merged.blockUnapprovedAiDestinations !== false,
     desktopCollectorDestination: String(merged.desktopCollectorDestination || defaults.desktopCollectorDestination || 'Desktop AI').trim().slice(0, 80) || 'Desktop AI',
     scanner: scannerConfig(merged.scanner || DEFAULT_SCANNER),
   };

@@ -8,7 +8,7 @@
   },
   "scripts": {
     "hooks:install": "git config core.hooksPath .githooks",
-    "review:ci": "git diff --check && npm run docs:demo-guide:check && npm test && npm run sync-check && npm run eval",
+    "review:ci": "git diff --check && npm run docs:demo-guide:check && npm run ai-domains:check && npm test && npm run sync-check && npm run eval",
     "review:agent": "npm run review:ci",
     "setup": "node scripts/setup.js",
     "setup:prod": "node scripts/setup.js --production",
@@ -36,6 +36,7 @@
     "train-semantic": "node scripts/train-semantic.js",
     "sync-engine": "node scripts/sync-engine.js",
     "sync-check": "node scripts/sync-check.js",
+    "ai-domains:check": "node scripts/check-ai-domain-coverage.js",
     "eval": "node scripts/eval-detect.js"
   },
   "license": "UNLICENSED",

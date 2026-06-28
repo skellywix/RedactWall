@@ -144,3 +144,25 @@ test('server exposes protected evidence export route', () => {
   assert.match(server, /evidence\.buildEvidencePack/);
   assert.match(server, /coverage\.summarize/);
 });
+
+test('evidence exports safe destination review reasons and unapproved AI policy changes', () => {
+  const entry = evidence.safeAuditEntry({
+    id: 'a_destination',
+    ts: '2026-06-26T12:00:00.000Z',
+    action: 'DESTINATION_REVIEWED',
+    actor: 'admin',
+    detail: JSON.stringify({
+      type: 'policy_change',
+      reason: 'Approved pilot for vendor comparison',
+      changed: [{ field: 'blockUnapprovedAiDestinations', before: true, after: false }],
+    }),
+    prevHash: '0'.repeat(64),
+    hash: '1'.repeat(64),
+  });
+
+  assert.strictEqual(entry.policyChange.reason, 'Approved pilot for vendor comparison');
+  assert.deepStrictEqual(entry.policyChange.changed, [
+    { field: 'blockUnapprovedAiDestinations', before: true, after: false },
+  ]);
+  assert.ok(entry.detailHash);
+});

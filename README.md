@@ -71,6 +71,12 @@ The Policy tab maintains two destination lists:
   chat is allowed but file uploads are forbidden. Browser/API uploads and
   endpoint file flows short-circuit as `file_upload_blocked` before uploaded
   bytes, extracted text, or sensitive filenames are retained.
+- `blockUnapprovedAiDestinations`: default-on control that blocks known AI hosts
+  that are not yet governed, allowed, blocked, or file-upload-blocked. The
+  shadow-AI review queue remains the admin path for turning a newly seen tool
+  into an explicit govern/allow/block decision with an audit reason.
+  `npm run ai-domains:check` keeps the reviewed AI watchlist, shared adapter
+  catalog, and browser extension manifest coverage in sync.
 
 Entries accept exact hosts, URLs, subdomains, and wildcards such as
 `*.example-ai.com`. Desktop labels normalize spaces to hyphens, so a native
@@ -288,7 +294,7 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 | Reversible redaction | Working — tokenize/detokenize, sealed vault, `/api/v1/rehydrate` |
 | Browser extension | Working — warn/justify/**redact**/block, real-button send, MDM identity, Man-in-the-Prompt guard |
 | Shadow-AI discovery | Working — flags use of ungoverned AI tools |
-| Destination controls | Working — governed destination coverage, full destination blocking, and file-upload-only blocking across browser, endpoint, gate, file, and response paths |
+| Destination controls | Working — governed destination coverage, default-deny unapproved AI, full destination blocking, and file-upload-only blocking across browser, endpoint, gate, file, and response paths |
 | Output scanning | Working — `/api/v1/scan-response` flags PII/secrets in AI replies |
 | MCP guard / Endpoint agent | Working references - inline/MCP redaction; local endpoint folder watch plus signed native file-flow handoff prototype; redacted companion files for structured-only findings |
 | Auth & ops | Working: login lockout, password-confirmed raw reveal and release approval, release-token scoped polling, stable secret, `/healthz` · `/readyz` · `/api/metrics`, policy-driven sensor version posture, sanitized examiner export with coverage and lineage, Docker, CI |
@@ -299,7 +305,7 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 - **SQLite** store (WAL + transactions) with audit integrity that covers the evidence, not just the event header.
 - **Backup/verify/restore** tooling for the SQLite evidence store with prompt-free manifests.
 - **Reversible redaction / Redact-&-Send**, sealed token vault, local response re-hydration.
-- **MDM identity**, reliable per-site send, **Man-in-the-Prompt** guard, **shadow-AI** discovery.
+- **MDM identity**, reliable per-site send, **Man-in-the-Prompt** guard, **shadow-AI** discovery and default-deny unapproved AI blocking.
 - **Coverage posture** showing governed destinations, required sensors, desired sensor versions, shadow-AI sightings, and stale or missing sensor coverage.
 - **Sanitized examiner export** with audit integrity, policy diffs, coverage posture, and lineage by user, destination, sensor, channel, category, and decision.
 - **Login lockout**, stable session secret, regulation **templates**, **/healthz · /readyz · /api/metrics**, Docker + CI.

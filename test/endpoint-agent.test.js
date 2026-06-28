@@ -364,6 +364,20 @@ test('sensor policy keeps the desktop collector destination label', () => {
   assert.strictEqual(sensorPolicy({ desktopCollectorDestination: '   ' }).desktopCollectorDestination, 'Desktop AI');
 });
 
+test('sensor policy preserves reviewed AI destination controls', () => {
+  const pol = sensorPolicy({
+    governedDestinations: ['ChatGPT.com'],
+    allowedDestinations: ['Claude.ai'],
+    blockedFileUploadDestinations: ['NotebookLM.Google.com'],
+    blockUnapprovedAiDestinations: false,
+  });
+
+  assert.deepStrictEqual(pol.governedDestinations, ['chatgpt.com']);
+  assert.deepStrictEqual(pol.allowedDestinations, ['claude.ai']);
+  assert.deepStrictEqual(pol.blockedFileUploadDestinations, ['notebooklm.google.com']);
+  assert.strictEqual(pol.blockUnapprovedAiDestinations, false);
+});
+
 test('policy refresh times out and keeps the current scanner config', async () => {
   const started = Date.now();
   const scanner = await refreshPolicy({

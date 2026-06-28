@@ -1,0 +1,20 @@
+name: AI Domain Refresh
+on:
+  schedule:
+    - cron: '17 14 * * 1'
+  workflow_dispatch: {}
+jobs:
+  ai-domain-refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Check AI domain coverage
+        run: npm run ai-domains:check
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          AI_DOMAIN_RADAR_SERVICE_CATEGORY: ${{ vars.AI_DOMAIN_RADAR_SERVICE_CATEGORY || 'Generative AI' }}

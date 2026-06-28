@@ -402,7 +402,8 @@
   .stepup-panel h2{margin:0;font-size:16px;letter-spacing:0}
   .stepup-panel p{margin:0;color:var(--mut);font-size:13px;line-height:1.45}
   .stepup-panel label{display:grid;gap:7px;color:var(--soft);font-size:12px;font-weight:720}
-  .stepup-panel input{
+  .stepup-panel input,
+  .stepup-panel textarea{
     width:100%;
     border:1px solid var(--line);
     border-radius:8px;
@@ -411,6 +412,7 @@
     padding:10px 11px;
     font-size:14px;
   }
+  .stepup-panel textarea{resize:vertical;min-height:84px;line-height:1.45}
   .stepup-actions{display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap}
   .side-stack{display:grid;gap:14px}
   .coverage-grid{display:grid;grid-template-columns:minmax(0,1.12fr) minmax(330px,.88fr);gap:14px;align-items:start}

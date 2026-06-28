@@ -412,6 +412,12 @@ browser file uploads, endpoint file flows, `/api/v1/gate`,
 `/api/v1/scan-file`, and `/api/v1/scan-response` return
 `destination_blocked` before prompt or file content is analyzed or retained.
 
+`blockUnapprovedAiDestinations` is enabled by default. Known AI hosts that are
+not governed, allowed, blocked, or file-upload-blocked are treated as unapproved
+and stop as `destination_blocked`. Security Admins can review a shadow-AI
+destination from the Coverage tab and must enter a short reason before moving it
+to govern, allow, or block policy state.
+
 Security Admins can also edit `blockedFileUploadDestinations` when a customer
 wants chat allowed but document upload forbidden for a destination. Browser
 uploads, endpoint file flows, and `/api/v1/scan-file` return

@@ -91,7 +91,7 @@ function bumpAggregate(bucket, q) {
   bucket.events += 1;
   if (BLOCKED_STATUSES.has(q.status)) bucket.blocked += 1;
   if (q.status === 'redacted') bucket.redacted += 1;
-  if (q.status === 'shadow_ai') bucket.shadow += 1;
+  if (isShadowAiEvent(q)) bucket.shadow += 1;
   if (q.user) bucket.users.add(q.user);
   if (!bucket.lastSeen || String(q.createdAt || '') > bucket.lastSeen) bucket.lastSeen = q.createdAt || null;
 }
@@ -115,6 +115,10 @@ function isDesktopCollectorEvent(q) {
   return q.source === 'endpoint_agent'
     && q.channel === 'file_upload'
     && /native handoff/i.test(note);
+}
+
+function isShadowAiEvent(q) {
+  return q && (q.status === 'shadow_ai' || (q.status === 'destination_blocked' && q.channel === 'shadow_ai'));
 }
 
 function cleanSensorMetadata(sensor) {
@@ -235,7 +239,7 @@ function summarize(rows, pol) {
     if (!bucketMap.has(destination)) bucketMap.set(destination, emptyAggregate(destination, policyState));
     bumpAggregate(bucketMap.get(destination), q);
 
-    if (q.status === 'shadow_ai') {
+    if (isShadowAiEvent(q)) {
       if (!shadow.has(destination)) shadow.set(destination, emptyAggregate(destination, policyState));
       bumpAggregate(shadow.get(destination), q);
     }
@@ -256,7 +260,7 @@ function summarize(rows, pol) {
   const activeSensorVersionGaps = sensors.filter((s) => s.events > 0 && s.versionHealth !== 'current').length;
   const governedActive = [...governed.values()].filter((g) => g.events > 0).length;
   const governedTotal = governed.size || 0;
-  const shadowEvents = statuses.shadow_ai || 0;
+  const shadowEvents = [...shadow.values()].reduce((sum, bucket) => sum + bucket.shadow, 0);
   const unresolvedShadowDestinations = [...shadow.values()].filter((bucket) => (bucket.policyState || 'review') === 'review').length;
   const score = Math.round(
     (activeRequired / requiredSensors.length) * 45
@@ -341,4 +345,4 @@ function summarize(rows, pol) {
   };
 }
 
-module.exports = { summarize, normalizeDestination, isDesktopCollectorEvent };
+module.exports = { summarize, normalizeDestination, isDesktopCollectorEvent, isShadowAiEvent };

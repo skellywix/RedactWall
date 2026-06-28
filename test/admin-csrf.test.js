@@ -31,6 +31,8 @@ test('dashboard fetches and sends csrf token on unsafe admin requests', () => {
   assert.match(dashboard, /api\('\/api\/csrf'\)/);
   assert.match(dashboard, /headers\.set\('x-csrf-token', csrfToken\)/);
   assert.match(dashboard, /await loadCsrf\(\)/);
+  assert.match(dashboard, /function askDestinationReviewReason/);
+  assert.match(dashboard, /body: JSON\.stringify\(\{ destination, decision, reason \}\)/);
 });
 
 test('dashboard requires masked password confirmation before raw reveal', () => {
@@ -54,6 +56,8 @@ test('dashboard exposes retention settings and manual purge control', () => {
   assert.match(dashboard, /rawRetentionDays: Number\(\$\(\'#pol_retention\'\)\.value\)/);
   assert.match(dashboard, /id="pol_desktop_destination"/);
   assert.match(dashboard, /desktopCollectorDestination: \(\$\(\'#pol_desktop_destination\'\)\.value \|\| ''\)\.trim\(\)/);
+  assert.match(dashboard, /id="pol_block_unapproved_ai"/);
+  assert.match(dashboard, /blockUnapprovedAiDestinations: \$\('#pol_block_unapproved_ai'\)\.checked/);
   assert.match(dashboard, /id="pol_required_sensors"/);
   assert.match(dashboard, /requiredSensors: parsePolicyList\(\$\(\'#pol_required_sensors\'\)\.value\)/);
   assert.match(dashboard, /id="pol_desired_sensor_versions"/);

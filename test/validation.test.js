@@ -550,6 +550,58 @@ test('scan-file blocks configured file-upload destinations before file inspectio
   }
 }));
 
+test('gate blocks unapproved AI destinations by default with allowlist override', async () => withServer(async (port) => {
+  const originalPolicy = fs.readFileSync(policyPath, 'utf8');
+  try {
+    const next = {
+      ...JSON.parse(originalPolicy),
+      governedDestinations: ['chatgpt.com'],
+      allowedDestinations: [],
+      blockedDestinations: [],
+      blockUnapprovedAiDestinations: true,
+    };
+    fs.writeFileSync(policyPath, JSON.stringify(next, null, 2));
+
+    const blocked = await jsonFetch(port, '/api/v1/gate', {
+      headers: { 'x-api-key': 'unit-ingest-key' },
+      body: {
+        prompt: '[shadow-AI] visit to ungoverned AI tool: notebooklm.google.com',
+        user: 'analyst@example.test',
+        destination: 'notebooklm.google.com',
+        source: 'browser_extension',
+        channel: 'shadow_ai',
+        clientOutcome: 'shadow_ai',
+      },
+    });
+    assert.strictEqual(blocked.status, 200);
+    const blockedBody = await blocked.json();
+    assert.strictEqual(blockedBody.decision, 'block');
+    assert.strictEqual(blockedBody.status, 'destination_blocked');
+    assert.deepStrictEqual(blockedBody.reasons, ['Unapproved AI destination blocked by policy']);
+    const stored = db.getQuery(blockedBody.id);
+    assert.strictEqual(stored.status, 'destination_blocked');
+    assert.strictEqual(stored.channel, 'shadow_ai');
+    assert.strictEqual(stored.destination, 'notebooklm.google.com');
+
+    fs.writeFileSync(policyPath, JSON.stringify({ ...next, allowedDestinations: ['notebooklm.google.com'] }, null, 2));
+    const allowed = await jsonFetch(port, '/api/v1/gate', {
+      headers: { 'x-api-key': 'unit-ingest-key' },
+      body: {
+        prompt: 'Summarize this public FAQ.',
+        user: 'analyst@example.test',
+        destination: 'notebooklm.google.com',
+        source: 'browser_extension',
+        channel: 'submit',
+      },
+    });
+    assert.strictEqual(allowed.status, 200);
+    const allowedBody = await allowed.json();
+    assert.strictEqual(allowedBody.decision, 'allow');
+  } finally {
+    fs.writeFileSync(policyPath, originalPolicy);
+  }
+}));
+
 test('sensor policy endpoint publishes detector and scanner controls', async () => withServer(async (port) => {
   const res = await jsonFetch(port, '/api/v1/policy', {
     method: 'GET',
@@ -565,6 +617,7 @@ test('sensor policy endpoint publishes detector and scanner controls', async () 
   assert.ok(Array.isArray(body.allowedDestinations));
   assert.ok(Array.isArray(body.blockedDestinations));
   assert.ok(Array.isArray(body.blockedFileUploadDestinations));
+  assert.strictEqual(body.blockUnapprovedAiDestinations, true);
   assert.strictEqual(body.desktopCollectorDestination, 'Desktop AI');
   assert.ok(Array.isArray(body.requiredSensors));
   assert.ok(body.requiredSensors.includes('browser_extension'));
@@ -797,7 +850,24 @@ test('admin destination review validates, persists, and audits decisions', async
     assert.strictEqual(invalid.status, 400);
     assert.deepStrictEqual(await invalid.json(), {
       error: 'invalid request body',
-      fields: ['rawPrompt'],
+      fields: ['rawPrompt', 'reason'],
+    });
+    assert.strictEqual(fs.readFileSync(policyPath, 'utf8'), originalPolicy);
+
+    const missingReason = await jsonFetch(port, '/api/destinations/review', {
+      headers: {
+        cookie,
+        'x-csrf-token': csrfToken,
+      },
+      body: {
+        destination: 'poe.com',
+        decision: 'allow',
+      },
+    });
+    assert.strictEqual(missingReason.status, 400);
+    assert.deepStrictEqual(await missingReason.json(), {
+      error: 'invalid request body',
+      fields: ['reason'],
     });
     assert.strictEqual(fs.readFileSync(policyPath, 'utf8'), originalPolicy);
 
@@ -809,6 +879,7 @@ test('admin destination review validates, persists, and audits decisions', async
       body: {
         destination: 'https://www.Poe.com/chat',
         decision: 'allow',
+        reason: 'Approved for vendor evaluation pilot',
       },
     });
     assert.strictEqual(res.status, 200);
@@ -819,7 +890,9 @@ test('admin destination review validates, persists, and audits decisions', async
     assert.ok(!body.policy.governedDestinations.includes('poe.com'));
     assert.ok(!body.policy.blockedDestinations.includes('poe.com'));
     assert.ok(body.coverage);
-    assert.ok(db.listAudit(20).some((entry) => entry.action === 'DESTINATION_REVIEWED'));
+    const reviewAudit = db.listAudit(20).find((entry) => entry.action === 'DESTINATION_REVIEWED');
+    assert.ok(reviewAudit);
+    assert.strictEqual(JSON.parse(reviewAudit.detail).reason, 'Approved for vendor evaluation pilot');
   } finally {
     fs.writeFileSync(policyPath, originalPolicy);
   }
