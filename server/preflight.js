@@ -20,6 +20,7 @@ const MIN_SECRET_LENGTHS = {
   auditorPassword: 16,
   ingestKey: 32,
   scimBearerToken: 32,
+  oidcClientSecret: 32,
   sessionSecret: 32,
   dataKey: 32,
 };
@@ -96,6 +97,37 @@ function configStatus(input = {}) {
   const ingestKey = input.ingestKey ?? env.INGEST_API_KEY ?? '';
   const scimBearerToken = input.scimBearerToken ?? env.SCIM_BEARER_TOKEN ?? '';
   const scimConfigured = !!String(scimBearerToken || '').trim();
+  const oidcIssuer = input.oidcIssuer ?? env.OIDC_ISSUER ?? '';
+  const oidcClientId = input.oidcClientId ?? env.OIDC_CLIENT_ID ?? '';
+  const oidcClientSecret = input.oidcClientSecret ?? env.OIDC_CLIENT_SECRET ?? '';
+  const oidcRedirectUri = input.oidcRedirectUri ?? env.OIDC_REDIRECT_URI ?? '';
+  const oidcAuthorizationEndpoint = input.oidcAuthorizationEndpoint ?? env.OIDC_AUTHORIZATION_ENDPOINT ?? '';
+  const oidcTokenEndpoint = input.oidcTokenEndpoint ?? env.OIDC_TOKEN_ENDPOINT ?? '';
+  const oidcJwksUri = input.oidcJwksUri ?? env.OIDC_JWKS_URI ?? '';
+  const oidcConfigured = [
+    oidcIssuer,
+    oidcClientId,
+    oidcClientSecret,
+    oidcRedirectUri,
+    oidcAuthorizationEndpoint,
+    oidcTokenEndpoint,
+    oidcJwksUri,
+  ].some((value) => !!String(value || '').trim());
+  const oidcComplete = !oidcConfigured || (
+    !!String(oidcIssuer || '').trim()
+    && !!String(oidcClientId || '').trim()
+    && !!String(oidcClientSecret || '').trim()
+    && !!String(oidcRedirectUri || '').trim()
+  );
+  const oidcExplicitEndpoints = !oidcConfigured || (
+    !String(oidcAuthorizationEndpoint || '').trim()
+    && !String(oidcTokenEndpoint || '').trim()
+    && !String(oidcJwksUri || '').trim()
+  ) || (
+    !!String(oidcAuthorizationEndpoint || '').trim()
+    && !!String(oidcTokenEndpoint || '').trim()
+    && !!String(oidcJwksUri || '').trim()
+  );
   const sessionSecret = input.sessionSecret ?? env.SENTINEL_SECRET ?? '';
   const dataKeySource = input.dataKeySource ?? env.SENTINEL_DATA_KEY ?? env.SENTINEL_SECRET ?? '';
   const checks = [
@@ -189,6 +221,34 @@ function configStatus(input = {}) {
       severity,
       `SCIM bearer token is at least ${MIN_SECRET_LENGTHS.scimBearerToken} characters when SCIM provisioning is enabled.`,
       `Set SCIM_BEARER_TOKEN to at least ${MIN_SECRET_LENGTHS.scimBearerToken} random characters, or leave it empty to disable SCIM provisioning.`,
+    ),
+    check(
+      'oidc_config',
+      oidcComplete,
+      severity,
+      'OIDC login has issuer, client id, client secret, and redirect URI when configured.',
+      'Set OIDC_ISSUER, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET, and OIDC_REDIRECT_URI, or remove all OIDC_* values to disable OIDC login.',
+    ),
+    check(
+      'oidc_client_secret_strength',
+      !oidcConfigured || hasMinLength(oidcClientSecret, MIN_SECRET_LENGTHS.oidcClientSecret),
+      severity,
+      `OIDC client secret is at least ${MIN_SECRET_LENGTHS.oidcClientSecret} characters when OIDC login is configured.`,
+      `Set OIDC_CLIENT_SECRET to at least ${MIN_SECRET_LENGTHS.oidcClientSecret} random characters.`,
+    ),
+    check(
+      'oidc_scim_users',
+      !oidcConfigured || scimConfigured,
+      severity,
+      'OIDC login is backed by SCIM-provisioned users and groups.',
+      'Set SCIM_BEARER_TOKEN and provision active users before enabling OIDC login.',
+    ),
+    check(
+      'oidc_endpoints',
+      oidcExplicitEndpoints,
+      severity,
+      'OIDC endpoints are either discovered from issuer metadata or configured as a complete authorization/token/JWKS set.',
+      'Set all of OIDC_AUTHORIZATION_ENDPOINT, OIDC_TOKEN_ENDPOINT, and OIDC_JWKS_URI, or omit all three to use discovery.',
     ),
     check(
       'session_secret',

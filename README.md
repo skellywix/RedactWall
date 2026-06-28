@@ -204,9 +204,10 @@ SQLite evidence storage.
 For technician-led customer installs, use `docs/TECHNICIAN_DEPLOYMENT_GUIDE.md`
 as the production readiness runbook and handoff checklist.
 
-For customer identity provisioning, use `docs/SCIM_PROVISIONING.md`. The current
-SCIM surface stores users and groups, deprovisions users, and maps known
-PromptWall groups to roles, but it does not replace the local console login yet.
+For customer identity provisioning and SSO, use `docs/SCIM_PROVISIONING.md`.
+SCIM stores users and groups, deprovisions users, and maps known PromptWall
+groups to roles. OIDC login can then issue console sessions for active
+provisioned users while local console credentials remain the break-glass path.
 
 For advanced customer policy, use `docs/POLICY_SCOPES.md`. The server can apply
 stricter scoped policy by user, SCIM group, source, channel, destination,
@@ -353,8 +354,9 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 - **Coverage posture** showing governed destinations, required sensors, desired sensor versions, browser/endpoint/MCP install-health checks, fleet state by user/org/sensor, shadow-AI sightings, and stale or missing sensor coverage.
 - **Approval routing** that assigns held decisions to security, compliance, privacy, or legal with SLA metadata, category/destination queue filters, assignment-aware approver decisions, SIEM alert payloads, examiner evidence, sanitized workflow notifications, and overdue SLA escalation evidence.
 - **Sanitized examiner export** with audit integrity, policy diffs, coverage posture, workflow ownership, and lineage by user, destination, sensor, channel, category, and decision.
-- **SCIM provisioning** for users and groups, with bearer auth, deactivation,
-  audit entries, and PromptWall group names mapped onto local roles.
+- **SCIM provisioning and OIDC login** for active provisioned users, with bearer
+  provisioning auth, deactivation, audit entries, PromptWall group names mapped
+  onto local roles, signed ID-token validation, and local break-glass accounts.
 - **Scoped policy and exceptions** that tighten enforcement for matched users,
   SCIM groups, destinations, sources, channels, detectors, or categories, plus
   dashboard-managed time-bound allow exceptions that cannot bypass hard-stop
@@ -363,9 +365,8 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 
 ## Still ahead (to ship commercially)
 
-- Full SSO/OIDC login that consumes provisioned identities, polished MFA
-  enrollment UX, guided scoped-policy rule builder, and deeper multi-tenant
-  isolation per institution.
+- Polished enterprise identity UX, IdP-specific setup recipes, guided scoped-
+  policy rule builder, and deeper multi-tenant isolation per institution.
 - Signed Chrome Web Store listing and force-install rollout; local extension zip, integrity manifest, release-readiness report, and managed-policy checklist are packaged.
 - Direct SMTP and ticketing adapters on top of the existing sanitized webhook, Slack, Teams, and escalation workflow.
 - Ship the signed native endpoint collector that feeds the tested handoff contract from clipboard and AI-app upload flows.
@@ -396,6 +397,8 @@ Copy `.env.example` to `.env` (or export):
 | `SENTINEL_DATA_KEY` | Encrypts retained raw prompts at rest; production preflight requires at least 32 characters for this key or the `SENTINEL_SECRET` fallback |
 | `INGEST_API_KEY` | Key sensors present to the gate API; production preflight requires a non-default key of at least 32 characters |
 | `SCIM_BEARER_TOKEN` | Optional bearer token that enables `/scim/v2/*` user and group provisioning. Leave empty to disable SCIM. Production preflight requires at least 32 characters when set |
+| `OIDC_ISSUER` / `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` / `OIDC_REDIRECT_URI` | Optional console SSO. OIDC login uses authorization-code flow, validates the ID token, and maps the identity to an active SCIM user. Production preflight requires complete values and a 32-plus-character client secret when any OIDC value is set |
+| `OIDC_AUTHORIZATION_ENDPOINT` / `OIDC_TOKEN_ENDPOINT` / `OIDC_JWKS_URI` | Optional explicit OIDC endpoints. Leave all three empty to use issuer discovery, or set all three together |
 | `ENDPOINT_AGENT_HANDOFF_DIR` | Optional local spool for signed native endpoint upload-intent events |
 | `ENDPOINT_AGENT_HANDOFF_SECRET` | Optional 32-plus-character local HMAC secret required before native endpoint handoff events are accepted |
 | `INGEST_AUTH_MAX_FAILURES` | Optional invalid ingest-key throttle threshold (default 20, bounded 3 to 1000) |
@@ -432,6 +435,14 @@ one family per setting; a non-empty legacy key wins when both are set.
 | `SENTINEL_REQUEST_TIMEOUT_MS` | `PROMPTWALL_REQUEST_TIMEOUT_MS` |
 | `INGEST_API_KEY` | `PROMPTWALL_INGEST_API_KEY` |
 | `SCIM_BEARER_TOKEN` | `PROMPTWALL_SCIM_BEARER_TOKEN` |
+| `OIDC_ISSUER` | `PROMPTWALL_OIDC_ISSUER` |
+| `OIDC_CLIENT_ID` | `PROMPTWALL_OIDC_CLIENT_ID` |
+| `OIDC_CLIENT_SECRET` | `PROMPTWALL_OIDC_CLIENT_SECRET` |
+| `OIDC_REDIRECT_URI` | `PROMPTWALL_OIDC_REDIRECT_URI` |
+| `OIDC_AUTHORIZATION_ENDPOINT` | `PROMPTWALL_OIDC_AUTHORIZATION_ENDPOINT` |
+| `OIDC_TOKEN_ENDPOINT` | `PROMPTWALL_OIDC_TOKEN_ENDPOINT` |
+| `OIDC_JWKS_URI` | `PROMPTWALL_OIDC_JWKS_URI` |
+| `OIDC_SCOPE` | `PROMPTWALL_OIDC_SCOPE` |
 | `ENDPOINT_AGENT_WATCH_DIR` | `PROMPTWALL_ENDPOINT_AGENT_WATCH_DIR` |
 | `ENDPOINT_AGENT_HANDOFF_DIR` | `PROMPTWALL_ENDPOINT_AGENT_HANDOFF_DIR` |
 | `ENDPOINT_AGENT_HANDOFF_SECRET` | `PROMPTWALL_ENDPOINT_AGENT_HANDOFF_SECRET` |
@@ -439,10 +450,12 @@ one family per setting; a non-empty legacy key wins when both are set.
 Production preflight requires Security Admin MFA through `ADMIN_TOTP_SECRET`,
 custom secrets with minimum lengths, 16 characters for `ADMIN_PASSWORD` and
 optional `APPROVER_PASSWORD` and `AUDITOR_PASSWORD`, and 32 characters for `INGEST_API_KEY`,
-`SCIM_BEARER_TOKEN` when SCIM is enabled, `SENTINEL_SECRET`, and
-`SENTINEL_DATA_KEY` when raw approval retention is enabled. If approver or
-auditor login is configured, both the username and password must be present, and
-reviewer usernames must be distinct from each other and from `ADMIN_USER`.
+`SCIM_BEARER_TOKEN` when SCIM is enabled, `OIDC_CLIENT_SECRET` when OIDC is
+enabled, `SENTINEL_SECRET`, and `SENTINEL_DATA_KEY` when raw approval retention
+is enabled. If approver or auditor login is configured, both the username and
+password must be present, and reviewer usernames must be distinct from each
+other and from `ADMIN_USER`. OIDC login also requires SCIM provisioning so the
+signed IdP identity maps to an active PromptWall user.
 Development/demo mode reports weak or missing custom values as warnings.
 
 `/readyz` reports whether the database and deployment preflight are usable. Logged-in admins can inspect detailed checks at `/api/preflight`.

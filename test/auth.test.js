@@ -91,6 +91,25 @@ test('session token signs and verifies; tampered/none rejected', () => {
   assert.strictEqual(auth.verify(null), null);
 });
 
+test('oidc session extras are signed and can satisfy fresh step-up', () => {
+  const now = Date.now();
+  const token = auth.createSession('reviewer@example.test', 'approver', {
+    provider: 'oidc',
+    idpSubject: 'subject-1',
+    idpIssuer: 'https://login.example.test',
+    stepUpUntil: now + 60000,
+  });
+  const verified = auth.verify(token);
+  assert.strictEqual(verified.user, 'reviewer@example.test');
+  assert.strictEqual(verified.role, 'approver');
+  assert.strictEqual(verified.provider, 'oidc');
+  assert.strictEqual(verified.idpSubject, 'subject-1');
+  assert.strictEqual(verified.idpIssuer, 'https://login.example.test');
+  assert.strictEqual(auth.oidcStepUpSatisfied(verified, now), true);
+  assert.strictEqual(auth.oidcStepUpSatisfied({ ...verified, stepUpUntil: now - 1 }, now), false);
+  assert.strictEqual(auth.oidcStepUpSatisfied({ user: 'admin', role: 'security_admin' }, now), false);
+});
+
 test('session verification preserves legacy admin cookies and rejects unknown roles', () => {
   const legacy = signedSession({ user: 'admin', iat: Date.now(), exp: Date.now() + 60000 });
   const verifiedLegacy = auth.verify(legacy);

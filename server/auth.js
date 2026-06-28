@@ -187,11 +187,40 @@ function verify(token) {
     const role = roles.normalizeRole(payload.role);
     if (!role) return null;
     payload.role = role;
+    if (payload.provider !== 'oidc') {
+      delete payload.provider;
+      delete payload.idpSubject;
+      delete payload.idpIssuer;
+      delete payload.stepUpUntil;
+    } else {
+      payload.idpSubject = String(payload.idpSubject || '').slice(0, 256);
+      payload.idpIssuer = String(payload.idpIssuer || '').slice(0, 512);
+      payload.stepUpUntil = Number(payload.stepUpUntil) || 0;
+    }
     return payload;
   } catch { return null; }
 }
-function createSession(user, role = roles.SECURITY_ADMIN) {
-  return sign({ user, role, iat: Date.now(), exp: Date.now() + SESSION_TTL_MS });
+function sessionExtras(extras = {}) {
+  if (!extras || extras.provider !== 'oidc') return {};
+  return {
+    provider: 'oidc',
+    idpSubject: String(extras.idpSubject || '').slice(0, 256),
+    idpIssuer: String(extras.idpIssuer || '').slice(0, 512),
+    stepUpUntil: Number(extras.stepUpUntil) || 0,
+  };
+}
+function createSession(user, role = roles.SECURITY_ADMIN, extras = {}) {
+  return sign({
+    user,
+    role,
+    ...sessionExtras(extras),
+    iat: Date.now(),
+    exp: Date.now() + SESSION_TTL_MS,
+  });
+}
+
+function oidcStepUpSatisfied(session = {}, now = Date.now()) {
+  return session.provider === 'oidc' && Number(session.stepUpUntil) > now;
 }
 
 function createCsrfToken(sessionToken) {
@@ -241,7 +270,7 @@ function requireCsrf(req, res, next) {
 }
 
 module.exports = {
-  authenticate, verifyPassword, verifyTotpCode, totpCode, createSession, verify, createCsrfToken, verifyCsrfToken, sessionTokenFromRequest, requireAuth, requireRole, requireCsrf,
+  authenticate, verifyPassword, verifyTotpCode, totpCode, createSession, verify, oidcStepUpSatisfied, createCsrfToken, verifyCsrfToken, sessionTokenFromRequest, requireAuth, requireRole, requireCsrf,
   loginStatus, registerFail, registerSuccess,
   ADMIN_USER, ADMIN_PASSWORD_IS_DEFAULT: ADMIN_PASSWORD === DEFAULT_ADMIN_PASSWORD,
   ADMIN_MFA_REQUIRED: !!ADMIN_TOTP_SECRET,

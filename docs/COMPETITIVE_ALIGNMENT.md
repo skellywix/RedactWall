@@ -81,6 +81,9 @@ Build next:
 - Add minimal SCIM 2.0 provisioning for users and groups, with bearer auth,
   deactivation, group membership patches, audit entries, and PromptWall group
   display names mapped onto local route roles.
+- Add SCIM-backed OIDC console login that validates authorization-code
+  callbacks, state, nonce, RS256 ID-token signatures, issuer, audience, expiry,
+  and active provisioned users before issuing normal PromptWall sessions.
 - Add server-side scoped policy and time-bound exceptions that use metadata such
   as user, SCIM group, source, channel, destination, detector, and category while
   preserving hard-stop entities.

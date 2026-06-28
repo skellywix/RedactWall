@@ -117,10 +117,13 @@ For this alignment track, completion requires evidence for every area below:
 - Added the first Microsoft 365 Graph MCP content connector for text-readable
   OneDrive and SharePoint driveItems, packaged with the guard and sanitized
   before model delivery.
+- Added SCIM-backed OIDC console login with state, nonce, authorization-code
+  token exchange, RS256 JWKS ID-token validation, active SCIM user role mapping,
+  PromptWall-prefixed env aliases, and production preflight checks.
 
 ## Open Decisions
 
 - The local checkout folder has been renamed to `promptwall/`; the remaining
   GitHub repository has also been renamed to `skellywix/promptwall`.
-- Whether the next product build should prioritize native desktop collection,
-  approval routing, or app/action policy controls.
+- Whether the next product build should prioritize deeper desktop interception,
+  IdP-specific setup UX, or app/action policy controls.

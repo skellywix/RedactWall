@@ -61,9 +61,11 @@ domain-refresh check so shadow-AI visibility turns into enforceable policy.
 
 ### 1. Real Desktop And File-Flow Interception
 
-Current state: the endpoint package has a local folder watcher and a signed
-metadata-only native handoff contract, but not a real desktop collector that
-observes a user sending a file to a desktop AI app.
+Current state: the endpoint package has a local folder watcher, signed
+metadata-only native handoff contract, packaged Windows protected-upload shell
+action, desktop collector runner, installer/uninstaller scripts, install-health
+checks, and package-to-install smoke coverage. It is a pilot-safe user-invoked
+collector, not full OS-level interception for every desktop AI app.
 
 Customer ask: "Does this stop files dragged into ChatGPT Desktop, Claude
 Desktop, Copilot Desktop, or other AI apps, not just browser text?"
@@ -72,18 +74,21 @@ Why it matters: this is the biggest remaining product-promise gap. Browser DLP
 is strong, but regulated customers will treat desktop apps and file upload flows
 as obvious leakage paths.
 
-Implementation connection:
-- Reuse `sensors/endpoint-agent/write-handoff.js` and
+Implemented:
+- Reuses `sensors/endpoint-agent/write-handoff.js` and
   `sensors/endpoint-agent/native-handoff.js`.
-- Add a Windows collector layer under `sensors/endpoint-agent/collectors/`.
-- Start with one pilot-safe connector: a signed "protected upload" shell action
-  and app-labeled file-selection flow that writes handoff events through the
-  packaged writer.
+- Adds `sensors/endpoint-agent/collectors/protected-upload.js` as the
+  Windows-first collector layer.
+- Packages a signed "protected upload" shell action and app-labeled
+  file-selection flow that writes handoff events through the packaged writer.
+- Surfaces collector readiness through endpoint install validation and package
+  manifest checks.
+
+Remaining:
 - Follow with higher-friction collectors only after the MVP proves value:
   clipboard observation, native messaging from browser upload surfaces, or app
   specific collectors.
-- Surface collector health in existing sensor-version posture and coverage
-  dashboards.
+- Add deeper app-specific interception only when a paid pilot needs it.
 
 Acceptance evidence:
 - `node --test test/native-handoff.test.js test/native-handoff-writer.test.js test/endpoint-agent.test.js`
@@ -96,9 +101,12 @@ Acceptance evidence:
 
 Current state: local admin login, optional assignment-aware approver login,
 optional auditor login, MFA for Security Admin, managed sensor user identity,
-seat-limit enforcement, and minimal SCIM user/group provisioning exist. SCIM can
-deactivate users and map PromptWall group names to local roles, but full
-SSO/OIDC login, IdP session mapping, and seat lifecycle enforcement from the IdP
+seat-limit enforcement, minimal SCIM user/group provisioning, and SCIM-backed
+OIDC login exist. SCIM can deactivate users and map PromptWall group names to
+local roles. OIDC validates authorization-code callbacks, state, nonce, RS256
+ID-token signatures, issuer, audience, expiry, and active SCIM users before
+issuing PromptWall sessions. Full IdP session lifecycle management, IdP-driven
+seat lifecycle enforcement, IdP-specific setup UX, and polished MFA enrollment
 do not.
 
 Customer ask: "Can we connect this to Microsoft Entra or Okta, map groups to
@@ -107,24 +115,30 @@ roles, deprovision users automatically, and avoid shared admin accounts?"
 Why it matters: regulated customers will accept a local admin for a demo, not for
 production. Identity is also the bridge to group policy and approval routing.
 
-Implementation connection:
-- Extend `server/auth.js` with an OIDC login path while keeping existing local
-  admin, approver, and auditor credentials as break-glass or demo options.
-- Extend the existing `server/roles.js` guards from local sessions to
-  IdP-provisioned `security_admin`, `approver`, `auditor`, and `operator`
-  users.
-- Use the existing SCIM 2.0-compatible provisioning API at `/scim/v2/Users`,
+Implemented:
+- Extends `server/auth.js` and `server/oidc.js` with an OIDC login path while
+  keeping existing local admin, approver, and auditor credentials as break-glass
+  or demo options.
+- Uses the existing `server/roles.js` guards for IdP-provisioned
+  `security_admin`, `approver`, `auditor`, and `operator` users.
+- Uses the existing SCIM 2.0-compatible provisioning API at `/scim/v2/Users`,
   `/scim/v2/Groups`, and `/scim/v2/ServiceProviderConfig` as the identity
-  lifecycle source for the next login slice.
+  lifecycle source for console login.
+
+Remaining:
 - Decide whether provisioned identity state should remain in the SQLite evidence
   database for customer-silo installs or move to a separate app config store
   before shared SaaS migration.
+- Add IdP-specific setup guides and operator UX for Entra and Okta.
+- Decide whether step-up should stay as a fresh OIDC-session window or become a
+  dedicated reauthentication flow.
 
 Acceptance evidence:
 - `node --test test/auth.test.js test/approver-role.test.js test/auditor-role.test.js test/admin-csrf.test.js`
 - `node --test test/scim.test.js` for SCIM create/update/disable and group
   membership role mapping.
-- New tests for OIDC callback validation and session role guards.
+- `node --test test/oidc-login.test.js` for OIDC callback validation, JWKS ID
+  token verification, active-SCIM-user enforcement, and session role guards.
 - Browser E2E: local auditor cannot approve, local approver can approve assigned
   items, Security Admin can edit policy, operator can view deployment health
   only.
@@ -344,8 +358,9 @@ Acceptance evidence:
 
 ## Recommended Build Order
 
-1. Desktop/file-flow collector MVP.
-2. Enterprise SSO login and provisioned role mapping.
+1. Deepen desktop/file-flow coverage beyond the protected-upload MVP only when
+   a pilot needs app-specific interception.
+2. Polish enterprise identity UX, IdP recipes, and step-up reauthentication.
 3. Signed update channel and commercial rollout posture.
 4. Scheduled examiner evidence pack with backup and restore-drill status.
 5. Customer-defined detectors plus OCR-required handling.

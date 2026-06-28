@@ -9,6 +9,8 @@ const root = path.join(__dirname, '..');
 const server = fs.readFileSync(path.join(root, 'server/app.js'), 'utf8');
 const index = fs.readFileSync(path.join(root, 'server', 'public', 'index.html'), 'utf8');
 const dashboard = fs.readFileSync(path.join(root, 'server', 'public', 'dashboard.js'), 'utf8');
+const loginHtml = fs.readFileSync(path.join(root, 'server', 'public', 'login.html'), 'utf8');
+const loginJs = fs.readFileSync(path.join(root, 'server', 'public', 'login.js'), 'utf8');
 
 test('admin write routes include csrf middleware', () => {
   assert.match(server, /const sessionWrite = \[auth\.requireAuth,\s*auth\.requireCsrf\]/);
@@ -35,6 +37,15 @@ test('dashboard fetches and sends csrf token on unsafe admin requests', () => {
   assert.match(dashboard, /await loadCsrf\(\)/);
   assert.match(dashboard, /function askDestinationReviewReason/);
   assert.match(dashboard, /body: JSON\.stringify\(\{ destination, decision, reason \}\)/);
+});
+
+test('login page discovers optional OIDC without exposing secrets', () => {
+  assert.match(server, /app\.get\('\/api\/login-options'/);
+  assert.match(server, /oidc\.publicOptions\(\)/);
+  assert.match(loginHtml, /id="oidc" hidden/);
+  assert.match(loginJs, /fetch\('\/api\/login-options'\)/);
+  assert.match(loginJs, /location\.href = body\.oidc\.startUrl/);
+  assert.doesNotMatch(loginJs, /OIDC_CLIENT_SECRET|client_secret/i);
 });
 
 test('dashboard requires masked password confirmation before raw reveal', () => {
