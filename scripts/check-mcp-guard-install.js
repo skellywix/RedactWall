@@ -157,7 +157,7 @@ async function emitHeartbeat(report, opts = {}) {
   const settings = mcpSettings(envConfig);
   const serverUrl = opts.serverUrl || settings.serverUrl;
   const ingestKey = opts.ingestKey || settings.ingestKey;
-  if (!configured(serverUrl)) throw new Error('SENTINEL_URL is required to emit a heartbeat');
+  if (!configured(serverUrl)) throw new Error('PROMPTWALL_URL or SENTINEL_URL is required to emit a heartbeat');
   if (!configured(ingestKey)) throw new Error('INGEST_API_KEY is required to emit a heartbeat');
   const fetchImpl = opts.fetchImpl || globalThis.fetch;
   if (!fetchImpl) throw new Error('fetch is not available');

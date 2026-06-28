@@ -136,6 +136,10 @@ For this alignment track, completion requires evidence for every area below:
   response text.
 - Added `blockedBrowserActions` for destination-scoped browser paste blocking,
   with sanitized `action_blocked` evidence and no clipboard-text retention.
+- Changed the endpoint installer's public server parameter to `-PromptWallUrl`
+  for fresh installs while keeping `-SentinelUrl` as a tested compatibility
+  alias, and made endpoint/MCP install-health messaging name `PROMPTWALL_URL`
+  first.
 
 ## Open Decisions
 

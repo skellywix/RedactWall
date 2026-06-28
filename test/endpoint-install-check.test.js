@@ -31,7 +31,7 @@ test('endpoint install check validates runtime wiring without exposing secrets',
   const ingestKey = 'pilot-ingest-key-000000000000000000000000000002';
   const handoffSecret = 'native-handoff-secret-000000000000000002';
   fs.writeFileSync(envPath, [
-    'SENTINEL_URL=https://promptwall.customer.example',
+    'PROMPTWALL_URL=https://promptwall.customer.example',
     `INGEST_API_KEY=${ingestKey}`,
     `ENDPOINT_AGENT_WATCH_DIR=${watchDir}`,
     `ENDPOINT_AGENT_HANDOFF_DIR=${handoffDir}`,
@@ -95,7 +95,7 @@ test('endpoint install check reports attention for missing desktop collector pre
   const dir = tempDir(t, 'ps-endpoint-check-attention-');
   const envPath = path.join(dir, 'endpoint-agent.env');
   fs.writeFileSync(envPath, [
-    'SENTINEL_URL=https://promptwall.customer.example',
+    'PROMPTWALL_URL=https://promptwall.customer.example',
     'INGEST_API_KEY=too-short',
     `ENDPOINT_AGENT_WATCH_DIR=${path.join(dir, 'missing-watch')}`,
   ].join('\n') + '\n');

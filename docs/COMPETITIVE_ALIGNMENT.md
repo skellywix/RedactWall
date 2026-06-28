@@ -56,6 +56,8 @@ Build next:
 ## Recent Completed Passes
 
 - Rebrand the visible project from PromptSentinel to PromptWall.
+- Rename the endpoint installer surface to `-PromptWallUrl` while keeping
+  `-SentinelUrl` as a compatibility alias for existing technician scripts.
 - Add a Chrome extension release-readiness gate and private or unlisted Web
   Store checklist so managed browser rollout has package, policy, update URL,
   generated ExtensionSettings force-install policy, and install-health evidence

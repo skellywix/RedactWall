@@ -465,7 +465,7 @@ For a per-user Windows pilot install:
 
 ```powershell
 .\scripts\install-endpoint-agent.ps1 `
-  -SentinelUrl "https://promptwall.customer.example" `
+  -PromptWallUrl "https://promptwall.customer.example" `
   -IngestKey "<customer-ingest-key>" `
   -WatchDir "$env:USERPROFILE\PromptWallWatch"
 ```
@@ -475,7 +475,7 @@ directory:
 
 ```powershell
 .\scripts\install-endpoint-agent.ps1 `
-  -SentinelUrl "https://promptwall.customer.example" `
+  -PromptWallUrl "https://promptwall.customer.example" `
   -IngestKey "<customer-ingest-key>" `
   -WatchDir "C:\PromptWallWatch" `
   -ConfigDir "$env:ProgramData\PromptWall"
@@ -518,7 +518,7 @@ For MCP guard hosts:
 
 1. Install the packaged MCP guard artifact from `dist/mcp-guard/`.
 2. Configure the host runtime environment with:
-   - `SENTINEL_URL=https://promptwall.customer.example`
+   - `PROMPTWALL_URL=https://promptwall.customer.example`
    - `INGEST_API_KEY=<customer-ingest-key>`
    - Managed user identity, if the host runtime supports it.
    - `orgId` or equivalent tenant value set to the customer tenant slug.
