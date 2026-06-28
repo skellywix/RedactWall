@@ -267,6 +267,9 @@ function safeCoverageTotals(totals = {}) {
     activeRequiredSensors: safeCoverageNumber(totals.activeRequiredSensors),
     activeSensorVersionGaps: safeCoverageNumber(totals.activeSensorVersionGaps),
     activeSensorHealthWarnings: safeCoverageNumber(totals.activeSensorHealthWarnings),
+    endpointAiInventoryReports: safeCoverageNumber(totals.endpointAiInventoryReports),
+    endpointAiToolDetections: safeCoverageNumber(totals.endpointAiToolDetections),
+    endpointAiToolUnapproved: safeCoverageNumber(totals.endpointAiToolUnapproved),
     fleetRows: safeCoverageNumber(totals.fleetRows),
     fleetCovered: safeCoverageNumber(totals.fleetCovered),
     fleetAttention: safeCoverageNumber(totals.fleetAttention),
@@ -319,6 +322,24 @@ function safeCoverageFleet(fleet = []) {
   }));
 }
 
+function safeCoverageAiToolInventory(inventory) {
+  if (!inventory || typeof inventory !== 'object') return null;
+  return {
+    detected: safeCoverageNumber(inventory.detected),
+    reported: safeCoverageNumber(inventory.reported),
+    unapproved: safeCoverageNumber(inventory.unapproved),
+    truncated: inventory.truncated === true,
+    state: safeCoverageText(inventory.state),
+    tools: (Array.isArray(inventory.tools) ? inventory.tools : []).slice(0, 25).map((tool) => ({
+      id: safeCoverageText(tool && tool.id),
+      label: safeCoverageText(tool && tool.label),
+      approved: tool && tool.approved === true,
+      state: safeCoverageText(tool && tool.state),
+      detail: safeCoverageText(tool && tool.detail),
+    })),
+  };
+}
+
 function safeCoverageInstallHealth(health) {
   if (!health || typeof health !== 'object') return null;
   const failedChecks = (Array.isArray(health.failedChecks) ? health.failedChecks : [])
@@ -329,7 +350,24 @@ function safeCoverageInstallHealth(health) {
     state: safeCoverageText(health.state),
     failedChecks,
     checks: safeInstallChecks(health.checks),
+    aiToolInventory: safeCoverageAiToolInventory(health.aiToolInventory),
   };
+}
+
+function safeEndpointAiTools(tools = []) {
+  return (Array.isArray(tools) ? tools : []).slice(0, 100).map((tool) => ({
+    id: safeCoverageText(tool && tool.id),
+    label: safeCoverageText(tool && tool.label),
+    approved: tool && tool.approved === true,
+    state: safeCoverageText(tool && tool.state),
+    detail: safeCoverageText(tool && tool.detail),
+    user: safeCoverageText(tool && tool.user),
+    orgId: safeCoverageText(tool && tool.orgId),
+    lastSeen: safeCoverageText(tool && tool.lastSeen),
+    platforms: (Array.isArray(tool && tool.platforms) ? tool.platforms : [])
+      .filter((item) => typeof item === 'string')
+      .slice(0, 5),
+  }));
 }
 
 function safeCoverageDestinations(destinations = []) {
@@ -362,6 +400,7 @@ function safeCoverage(report) {
     totals: safeCoverageTotals(report.totals),
     sensors: safeCoverageSensors(report.sensors),
     fleet: safeCoverageFleet(report.fleet),
+    endpointAiTools: safeEndpointAiTools(report.endpointAiTools),
     governedDestinations: safeCoverageDestinations(report.governedDestinations),
     ungovernedDestinations: safeCoverageDestinations(report.ungovernedDestinations),
     shadowDestinations: safeCoverageDestinations(report.shadowDestinations),

@@ -232,6 +232,10 @@ function fleetTone(state) {
   return 'warn';
 }
 
+function endpointAiToolTone(state) {
+  return String(state || '').toLowerCase() === 'approved' ? 'good' : 'bad';
+}
+
 function destinationPolicyLabel(state) {
   return ({
     allowed: 'Allowed',
@@ -923,6 +927,21 @@ function renderCoverage(c) {
     <td>${escapeHtml(fleetFailedChecks(row))}</td>
     <td class="mono">${escapeHtml(row.lastSeen ? fmt(row.lastSeen) : '-')}</td>
   </tr>`).join('') || '<tr><td colspan="7" class="empty">No fleet sensor evidence yet.</td></tr>';
+  $('#endpointAiToolRows').innerHTML = (c.endpointAiTools || []).map((tool) => {
+    const meta = [
+      tool.user || 'unknown',
+      tool.orgId || '',
+      (tool.platforms || []).join(', '),
+      tool.lastSeen ? fmt(tool.lastSeen) : '',
+    ].filter(Boolean).join(' | ');
+    return `<div class="tool-row">
+      <div><strong>${escapeHtml(tool.label || tool.id || 'Unknown AI tool')}</strong><span>${escapeHtml(meta || '-')}</span></div>
+      <div class="tool-state">
+        <span class="pill ${endpointAiToolTone(tool.state)}">${escapeHtml(tool.state || 'unknown')}</span>
+        <span>${escapeHtml(tool.detail || '-')}</span>
+      </div>
+    </div>`;
+  }).join('') || '<div class="empty"><div class="big">No endpoint AI tools</div>No endpoint AI tool inventory has been reported.</div>';
   $('#governedRows').innerHTML = (c.governedDestinations || []).map((d) => `<tr>
     <td class="mono">${escapeHtml(d.destination)}</td>
     <td class="mono">${escapeHtml(d.events)}</td>

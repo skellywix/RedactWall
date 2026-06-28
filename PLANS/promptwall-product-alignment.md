@@ -178,9 +178,10 @@ For this alignment track, completion requires evidence for every area below:
   workstations can inspect OCR text locally, while browser/API image uploads
   still fail closed as `ocr_required` and the control plane receives only
   sanitized detector evidence.
-- Added sanitized endpoint AI tool inventory to install-health heartbeats so
-  Coverage can show local AI apps and agent CLIs by stable tool id, with
-  optional attention when a detected tool is outside the sanctioned list.
+- Added sanitized endpoint AI tool inventory to install-health heartbeats and
+  promoted it into Coverage, dashboard posture, and examiner evidence by stable
+  tool id, with optional attention when a detected tool is outside the
+  sanctioned list.
 
 ## Open Decisions
 

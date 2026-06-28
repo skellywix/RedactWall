@@ -88,6 +88,9 @@ Implemented:
 - Adds `sensors/endpoint-agent/collectors/ai-tool-inventory.js` so endpoint
   install-health can report detected local AI apps and agent CLIs as sanitized
   check ids, with optional attention for tools outside the sanctioned list.
+- Promotes that inventory into Coverage, dashboard posture, and examiner
+  evidence using sanitized ids only, so security teams can review endpoint AI
+  and developer-tool usage without local paths or process arguments.
 - Surfaces collector readiness through endpoint install validation and package
   manifest checks.
 

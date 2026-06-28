@@ -165,9 +165,12 @@ and MCP guard install validation can also report bounded check results through
 `POST /api/v1/heartbeat`; failed checks show as sensor install-health attention
 in Coverage and in the sanitized examiner export. The Coverage tab also includes
 a Fleet Install Health table that rolls the latest required-sensor state up by
-user, org, source, version, platform, and failed check ID. The coverage API does
-not include prompt bodies, raw retained prompts, token vaults, ingest keys,
-handoff secrets, tool output, or decision notes.
+user, org, source, version, platform, and failed check ID. Endpoint agent
+heartbeats with AI tool inventory checks also render an Endpoint AI Tools panel
+and evidence rows by sanitized tool id, user, org, platform, approval state, and
+last-seen time. The coverage API does not include prompt bodies, raw retained
+prompts, token vaults, ingest keys, handoff secrets, tool output, process
+arguments, local executable paths, or decision notes.
 
 ## Browser Extension Package
 
@@ -617,8 +620,8 @@ The examiner export at `/api/export/evidence` includes:
 - Current policy plus parsed policy diffs for governed destinations, blocked
   destinations, file-upload blocks, retention, detector, and scanner changes.
 - Coverage posture, governed and shadow destinations, active sensors, sensor
-  versions, version gaps, and fleet install-health state by user, org, and
-  required sensor.
+  versions, version gaps, endpoint AI tool posture by sanitized id, and fleet
+  install-health state by user, org, and required sensor.
 - Approval workflow metadata for held or blocked records: assigned role,
   assigned group, routing reason, SLA due time, escalation state, and
   notification status.
@@ -633,7 +636,8 @@ pack does not silently undercount older users, destinations, sensors, or
 decisions.
 
 It does not include raw prompt bodies, retained sealed prompts, token vaults,
-release tokens, decision notes, or uploaded file bytes.
+release tokens, decision notes, process arguments, local executable paths, or
+uploaded file bytes.
 
 The dashboard Lineage tab uses the same prompt-free aggregation through
 `/api/lineage`. It shows lineage by user, destination, sensor, channel,
