@@ -158,9 +158,10 @@ Current state: extension and endpoint package generation, managed Chrome policy
 docs, required-sensor and desired-version posture, default-deny unapproved AI
 blocking, AI-domain adapter and browser-manifest coverage checks, AWS
 customer-silo deployment, setup preflight, browser extension install-health
-heartbeats, endpoint technician install validation heartbeats, and MCP guard
-install validation heartbeats exist. Missing pieces are a signed update channel
-and customer-ready fleet reporting.
+heartbeats, endpoint technician install validation heartbeats, MCP guard install
+validation heartbeats, and customer-ready fleet reporting by user, org, sensor,
+version, and failed check exist. Missing pieces are a signed update channel and
+a private or unlisted Chrome Web Store release checklist.
 
 Customer ask: "How do we force-install it, keep it updated, and prove every
 covered user actually has it?"
@@ -309,7 +310,7 @@ Acceptance evidence:
 1. Desktop/file-flow collector MVP.
 2. Approval routing plus notifications.
 3. Enterprise identity, roles, and SCIM.
-4. Managed deployment and fleet posture.
+4. Signed update channel and commercial rollout posture.
 5. Group-scoped policy and time-bound exceptions.
 6. Scheduled examiner evidence pack with backup and restore-drill status.
 7. Customer-defined detectors plus OCR-required handling.
@@ -325,8 +326,8 @@ workflow, and identity are still commercial blockers.
 
 ### Option A: Enterprise Operations First
 
-Build SSO, SCIM, roles, notifications, and fleet posture before deeper desktop
-collection.
+Build SSO, SCIM, roles, notifications, and signed-update operations before
+deeper desktop collection.
 
 Pros:
 - Strong for IT/security procurement.
@@ -340,7 +341,7 @@ Cons:
 ### Option B: Coverage Reality First
 
 Build the native desktop/file-flow collector MVP, then connect routing,
-notifications, identity, and deployment posture.
+notifications, identity, and signed-update deployment posture.
 
 Pros:
 - Closes the obvious "what about desktop AI?" objection.
@@ -366,8 +367,8 @@ Cons:
 ## Recommendation
 
 Use Option B. Ship one real desktop/file-flow collector MVP, then immediately
-add routing, notifications, identity, and fleet posture. Defer connector breadth
-until the operating model is strong enough to support it.
+add routing, notifications, identity, and signed-update rollout posture. Defer
+connector breadth until the operating model is strong enough to support it.
 
 ## Decisions For Eric
 

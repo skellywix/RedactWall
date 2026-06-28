@@ -7,6 +7,8 @@ const path = require('node:path');
 const coverage = require('../server/coverage');
 
 const serverSource = fs.readFileSync(path.join(__dirname, '..', 'server/app.js'), 'utf8');
+const dashboardHtml = fs.readFileSync(path.join(__dirname, '..', 'server/public/index.html'), 'utf8');
+const dashboardJs = fs.readFileSync(path.join(__dirname, '..', 'server/public/dashboard.js'), 'utf8');
 
 const policy = {
   governedDestinations: ['chatgpt.com', 'claude.ai', 'copilot.microsoft.com'],
@@ -55,6 +57,21 @@ test('coverage summary aggregates governed apps, sensors, and shadow AI without 
       redactedPrompt: '[unapproved AI blocked] notebooklm.google.com',
     },
     {
+      id: 'q7',
+      createdAt: '2026-06-26T11:30:00.000Z',
+      status: 'sensor_heartbeat',
+      user: 'analyst@example.test',
+      destination: 'browser-install',
+      source: 'browser_extension',
+      channel: 'sensor_health',
+      sensor: { name: 'browser_extension', version: '0.3.0', platform: 'chrome_mv3' },
+      redactedPrompt: '[sensor heartbeat] browser_extension',
+      installChecks: [
+        { id: 'managed_config', ok: true, detail: 'configured' },
+        { id: 'managed_identity', ok: true, detail: 'present' },
+      ],
+    },
+    {
       id: 'q4',
       createdAt: '2026-06-26T09:30:00.000Z',
       status: 'destination_blocked',
@@ -94,7 +111,7 @@ test('coverage summary aggregates governed apps, sensors, and shadow AI without 
   ];
 
   const report = coverage.summarize(rows, policy);
-  assert.strictEqual(report.totals.events, 6);
+  assert.strictEqual(report.totals.events, 7);
   assert.strictEqual(report.totals.governedDestinations, 3);
   assert.strictEqual(report.totals.governedActive, 3);
   assert.strictEqual(report.totals.shadowEvents, 1);
@@ -103,6 +120,9 @@ test('coverage summary aggregates governed apps, sensors, and shadow AI without 
   assert.strictEqual(report.totals.activeRequiredSensors, 3);
   assert.strictEqual(report.totals.activeSensorVersionGaps, 1);
   assert.strictEqual(report.totals.activeSensorHealthWarnings, 1);
+  assert.strictEqual(report.totals.fleetRows, 12);
+  assert.strictEqual(report.totals.fleetCovered, 1);
+  assert.strictEqual(report.totals.fleetAttention, 11);
   assert.strictEqual(report.governedDestinations.find((d) => d.destination === 'chatgpt.com').blocked, 1);
   assert.strictEqual(report.governedDestinations.find((d) => d.destination === 'copilot.microsoft.com').blocked, 1);
   assert.strictEqual(report.governedDestinations.find((d) => d.destination === 'claude.ai').redacted, 1);
@@ -133,6 +153,17 @@ test('coverage summary aggregates governed apps, sensors, and shadow AI without 
   assert.ok(report.posture.some((p) => p.id === 'proxy' && p.state === 'attention' && /required/.test(p.detail)));
   assert.ok(report.posture.some((p) => p.id === 'sensor_versions' && p.state === 'attention'));
   assert.ok(report.posture.some((p) => p.id === 'sensor_health' && p.state === 'attention'));
+  const analystBrowser = report.fleet.find((item) => item.user === 'analyst@example.test' && item.source === 'browser_extension');
+  assert.strictEqual(analystBrowser.state, 'covered');
+  assert.strictEqual(analystBrowser.installHealth.state, 'covered');
+  assert.deepStrictEqual(analystBrowser.installHealth.failedChecks, []);
+  const opsBrowser = report.fleet.find((item) => item.user === 'ops@example.test' && item.source === 'browser_extension');
+  assert.strictEqual(opsBrowser.state, 'outdated');
+  assert.strictEqual(opsBrowser.latestVersion, '0.2.9');
+  const techEndpoint = report.fleet.find((item) => item.user === 'tech@example.test' && item.source === 'endpoint_agent');
+  assert.strictEqual(techEndpoint.state, 'attention');
+  assert.deepStrictEqual(techEndpoint.installHealth.failedChecks, ['handoff_secret']);
+  assert.ok(report.fleet.some((item) => item.user === 'analyst@example.test' && item.source === 'proxy' && item.state === 'missing'));
   assert.ok(report.score > 0 && report.score < 100);
   assert.ok(!JSON.stringify(report).includes('Member [US_SSN]'));
   assert.ok(!JSON.stringify(report).includes('524-71-9043'));
@@ -163,6 +194,27 @@ test('coverage marks reviewed shadow AI as governed by policy state', () => {
   assert.ok(report.posture.some((p) => p.id === 'shadow_ai' && p.state === 'covered'));
 });
 
+test('fleet posture reports required sensors instead of API source rows', () => {
+  const report = coverage.summarize([{
+    id: 'q1',
+    createdAt: '2026-06-26T10:00:00.000Z',
+    status: 'allowed',
+    user: 'analyst@example.test',
+    destination: 'chatgpt.com',
+    source: 'api',
+    redactedPrompt: 'benign',
+  }], {
+    governedDestinations: ['chatgpt.com'],
+    requiredSensors: ['browser_extension'],
+    desiredSensorVersions: { browser_extension: '0.3.0' },
+  });
+
+  assert.strictEqual(report.totals.fleetRows, 1);
+  assert.strictEqual(report.fleet[0].source, 'browser_extension');
+  assert.strictEqual(report.fleet[0].state, 'missing');
+  assert.ok(!report.fleet.some((item) => item.source === 'api'));
+});
+
 test('destination normalization removes schemes, paths, and www prefixes', () => {
   assert.strictEqual(coverage.normalizeDestination('https://www.chatgpt.com/g/g-test'), 'chatgpt.com');
   assert.strictEqual(coverage.normalizeDestination('claude.ai/chat'), 'claude.ai');
@@ -171,4 +223,12 @@ test('destination normalization removes schemes, paths, and www prefixes', () =>
 
 test('coverage route stays session protected', () => {
   assert.match(serverSource, /app\.get\('\/api\/coverage', auth\.requireAuth/);
+});
+
+test('coverage dashboard renders fleet install health posture', () => {
+  assert.match(dashboardHtml, /Fleet Install Health/);
+  assert.match(dashboardHtml, /id="fleetRows"/);
+  assert.match(dashboardJs, /totals\.fleetAttention/);
+  assert.match(dashboardJs, /function fleetTone/);
+  assert.match(dashboardJs, /no install-health heartbeat/);
 });

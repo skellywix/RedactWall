@@ -72,6 +72,13 @@ function postureTone(state) {
   return state === 'covered' ? 'good' : 'warn';
 }
 
+function fleetTone(state) {
+  const s = String(state || '').toLowerCase();
+  if (s === 'covered') return 'good';
+  if (s === 'attention' || s === 'missing' || s === 'outdated') return 'bad';
+  return 'warn';
+}
+
 function destinationPolicyLabel(state) {
   return ({
     allowed: 'Allowed',
@@ -550,6 +557,22 @@ function renderCoverage(c) {
     if ((s.platforms || []).length) parts.push((s.platforms || []).join(', '));
     return parts.join(' | ');
   };
+  const fleetVersionLine = (row) => {
+    const parts = [];
+    if (row.latestVersion) parts.push('v' + row.latestVersion);
+    else if (row.events) parts.push('version unknown');
+    if (row.desiredVersion) parts.push('desired v' + row.desiredVersion);
+    if ((row.platforms || []).length) parts.push((row.platforms || []).join(', '));
+    return parts.join(' | ') || '-';
+  };
+  const fleetFailedChecks = (row) => {
+    const failed = row.installHealth && row.installHealth.failedChecks;
+    if (Array.isArray(failed) && failed.length) return failed.join(', ');
+    if (row.installHealth && row.installHealth.state === 'covered') return 'checks ok';
+    if (row.state === 'missing') return 'no required sensor evidence';
+    if (row.state === 'unknown') return 'no install-health heartbeat';
+    return '-';
+  };
   $('#coverageScore').innerHTML = `
     <div class="score-ring" style="--score:${escapeHtml(c.score || 0)}%"><b>${escapeHtml(c.score || 0)}</b></div>
     <span>Coverage score</span>
@@ -558,6 +581,7 @@ function renderCoverage(c) {
       <div class="mini-kpi"><b>${escapeHtml(totals.governedActive || 0)}/${escapeHtml(totals.governedDestinations || 0)}</b><span>Governed</span></div>
       <div class="mini-kpi"><b>${escapeHtml(totals.shadowEvents || 0)}</b><span>Shadow AI</span></div>
       <div class="mini-kpi"><b>${escapeHtml(totals.blocked || 0)}</b><span>Blocked</span></div>
+      <div class="mini-kpi"><b>${escapeHtml(totals.fleetAttention || 0)}</b><span>Fleet gaps</span></div>
     </div>`;
   $('#coveragePosture').innerHTML = (c.posture || []).map((p) => `
     <div class="posture-item">
@@ -569,6 +593,15 @@ function renderCoverage(c) {
       <div><strong>${escapeHtml(s.label)}</strong><span>${escapeHtml(sensorMetaLine(s))}</span></div>
       <div class="count">${escapeHtml(s.events || 0)}</div>
     </div>`).join('');
+  $('#fleetRows').innerHTML = (c.fleet || []).map((row) => `<tr>
+    <td>${escapeHtml(row.user || 'unknown')}</td>
+    <td class="mono">${escapeHtml(row.orgId || '-')}</td>
+    <td>${escapeHtml(row.label || sourceLabel(row.source))}</td>
+    <td><span class="pill ${fleetTone(row.state)}">${escapeHtml(row.state || 'unknown')}</span></td>
+    <td class="mono">${escapeHtml(fleetVersionLine(row))}</td>
+    <td>${escapeHtml(fleetFailedChecks(row))}</td>
+    <td class="mono">${escapeHtml(row.lastSeen ? fmt(row.lastSeen) : '-')}</td>
+  </tr>`).join('') || '<tr><td colspan="7" class="empty">No fleet sensor evidence yet.</td></tr>';
   $('#governedRows').innerHTML = (c.governedDestinations || []).map((d) => `<tr>
     <td class="mono">${escapeHtml(d.destination)}</td>
     <td class="mono">${escapeHtml(d.events)}</td>

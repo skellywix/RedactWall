@@ -46,8 +46,6 @@ Keep:
 Build next:
 
 - Native desktop collector feeding the existing metadata-only endpoint handoff.
-- Customer-ready fleet reporting that aggregates browser, endpoint, and MCP
-  install-health state by user, org, sensor version, and failed check.
 - App and action policy controls beyond destination and file-upload blocking,
   especially response-scanning controls.
 - Data lineage views that answer which user, sensor, destination, category, and
@@ -109,6 +107,9 @@ Build next:
   prove MV3 wiring, content-script coverage, managed config, tenant identity,
   server URL, ingest-key presence, and policy cache health without exposing
   ingest keys, prompt text, file content, or page content.
+- Add customer-ready fleet reporting that aggregates browser, endpoint, and MCP
+  install-health state by user, org, sensor version, and failed check in
+  Coverage and sanitized examiner evidence.
 
 ## Acceptance Evidence
 

@@ -12,6 +12,7 @@ const SENSOR_LABELS = {
 
 const DEFAULT_REQUIRED_SENSORS = ['browser_extension', 'endpoint_agent', 'mcp_guard'];
 const SENSOR_ID_RE = /^[a-z][a-z0-9_:-]{0,79}$/;
+const FLEET_LIMIT = 150;
 const BLOCKED_STATUSES = new Set([
   'pending',
   'pending_justification',
@@ -125,6 +126,11 @@ function cleanSensorMetadata(sensor) {
   return safeSensor(sensor) || {};
 }
 
+function safeFleetText(value, fallback = 'unknown') {
+  const text = String(value || '').trim();
+  return (text || fallback).slice(0, 160);
+}
+
 function cleanInstallChecks(checks) {
   return (Array.isArray(checks) ? checks : []).slice(0, 40).map((check) => {
     if (!check || typeof check !== 'object') return null;
@@ -231,6 +237,80 @@ function finalizeSensor(sensor, opts = {}) {
   };
 }
 
+function fleetKey(source, user, orgId) {
+  return [source || 'api', user || 'unknown', orgId || ''].join('\u0000');
+}
+
+function stateRank(state) {
+  return { attention: 0, missing: 1, outdated: 2, unknown: 3, covered: 4 }[state] ?? 5;
+}
+
+function emptyFleetRow({ source, user, orgId, label }) {
+  return {
+    source,
+    label: label || SENSOR_LABELS[source] || source,
+    user: safeFleetText(user),
+    orgId: orgId ? safeFleetText(orgId, '') : null,
+    events: 0,
+    lastSeen: null,
+    _versions: new Map(),
+    _platforms: new Set(),
+    _installHealth: null,
+  };
+}
+
+function bumpFleetRow(row, q) {
+  row.events += 1;
+  if (!row.lastSeen || String(q.createdAt || '') > row.lastSeen) row.lastSeen = q.createdAt || null;
+  const meta = cleanSensorMetadata(q.sensor);
+  const version = meta.version || meta.packageVersion || null;
+  if (version) {
+    const bucket = row._versions.get(version) || { version, events: 0, lastSeen: null };
+    bucket.events += 1;
+    if (!bucket.lastSeen || String(q.createdAt || '') > bucket.lastSeen) bucket.lastSeen = q.createdAt || null;
+    row._versions.set(version, bucket);
+  }
+  if (meta.platform) row._platforms.add(meta.platform);
+  const health = installHealthFor(q);
+  if (health && (!row._installHealth || String(health.at || '') >= String(row._installHealth.at || ''))) {
+    row._installHealth = health;
+  }
+}
+
+function finalizeFleetRow(row, opts = {}) {
+  const versions = [...(row._versions || new Map()).values()]
+    .sort((a, b) => String(b.lastSeen || '').localeCompare(String(a.lastSeen || '')) || b.events - a.events || a.version.localeCompare(b.version));
+  const latestVersion = versions[0] ? versions[0].version : null;
+  const desiredVersion = opts.desiredVersion || null;
+  const installHealth = row._installHealth || null;
+  const versionHealth = row.events === 0 ? 'missing'
+    : versions.length === 0 ? 'unknown'
+    : desiredVersion && latestVersion !== desiredVersion ? 'outdated'
+    : versions.length === 1 ? 'current'
+    : 'mixed';
+  const state = row.events === 0 ? 'missing'
+    : installHealth && installHealth.state === 'attention' ? 'attention'
+    : versionHealth === 'outdated' || versionHealth === 'mixed' ? 'outdated'
+    : opts.required === true && !installHealth ? 'unknown'
+    : versionHealth === 'unknown' ? 'unknown'
+    : 'covered';
+  return {
+    source: row.source,
+    label: row.label,
+    user: row.user,
+    orgId: row.orgId,
+    required: opts.required === true,
+    state,
+    events: row.events,
+    lastSeen: row.lastSeen,
+    latestVersion,
+    desiredVersion,
+    versionHealth,
+    platforms: [...(row._platforms || new Set())].sort(),
+    installHealth,
+  };
+}
+
 function summarize(rows, pol) {
   const policy = pol || {};
   const configured = configuredDestinations(policy);
@@ -238,6 +318,8 @@ function summarize(rows, pol) {
   const ungoverned = new Map();
   const shadow = new Map();
   const sensorCounts = new Map();
+  const fleetRows = new Map();
+  const fleetUsers = new Map();
   const requiredSources = requiredSensorSources(policy);
   const desiredVersions = desiredSensorVersions(policy);
   const desktopCollector = {
@@ -256,12 +338,20 @@ function summarize(rows, pol) {
     const destination = normalizeDestination(q.destination);
     const policyState = destinationPolicyState(destination, policy);
     const source = q.source || 'api';
+    const user = safeFleetText(q.user);
+    const orgId = q.orgId ? safeFleetText(q.orgId, '') : null;
+    const userKey = [user, orgId || ''].join('\u0000');
+    if (user !== 'unknown') fleetUsers.set(userKey, { user, orgId });
     const sensor = sensorCounts.get(source) || { source, label: SENSOR_LABELS[source] || source, events: 0, lastSeen: null, _versions: new Map(), _platforms: new Set() };
     sensor.events += 1;
     if (!sensor.lastSeen || String(q.createdAt || '') > sensor.lastSeen) sensor.lastSeen = q.createdAt || null;
     bumpVersion(sensor, q);
     bumpInstallHealth(sensor, q);
     sensorCounts.set(source, sensor);
+    const fk = fleetKey(source, user, orgId);
+    const fleetRow = fleetRows.get(fk) || emptyFleetRow({ source, user, orgId, label: SENSOR_LABELS[source] || source });
+    bumpFleetRow(fleetRow, q);
+    fleetRows.set(fk, fleetRow);
     statuses[q.status || 'unknown'] = (statuses[q.status || 'unknown'] || 0) + 1;
 
     if (isDesktopCollectorEvent(q)) {
@@ -295,6 +385,26 @@ function summarize(rows, pol) {
     }))
     .sort((a, b) => Number(b.required) - Number(a.required) || b.events - a.events || a.label.localeCompare(b.label));
   const activeRequired = requiredSensors.filter((s) => s.events > 0).length;
+  for (const who of fleetUsers.values()) {
+    for (const source of requiredSources) {
+      const fk = fleetKey(source, who.user, who.orgId);
+      if (!fleetRows.has(fk)) {
+        fleetRows.set(fk, emptyFleetRow({ source, user: who.user, orgId: who.orgId, label: SENSOR_LABELS[source] || source }));
+      }
+    }
+  }
+  const fleet = [...fleetRows.values()]
+    .filter((row) => requiredSources.includes(row.source))
+    .map((row) => finalizeFleetRow(row, {
+      required: requiredSources.includes(row.source),
+      desiredVersion: desiredVersions[row.source] || null,
+    }))
+    .sort((a, b) => stateRank(a.state) - stateRank(b.state)
+      || String(a.user || '').localeCompare(String(b.user || ''))
+      || String(a.source || '').localeCompare(String(b.source || '')))
+    .slice(0, FLEET_LIMIT);
+  const fleetAttention = fleet.filter((row) => ['attention', 'missing', 'outdated', 'unknown'].includes(row.state)).length;
+  const fleetCovered = fleet.filter((row) => row.state === 'covered').length;
   const activeSensorVersionGaps = sensors.filter((s) => s.events > 0 && s.versionHealth !== 'current').length;
   const activeSensorHealthWarnings = sensors.filter((s) => s.events > 0 && s.installHealth && s.installHealth.state === 'attention').length;
   const governedActive = [...governed.values()].filter((g) => g.events > 0).length;
@@ -324,8 +434,12 @@ function summarize(rows, pol) {
       activeRequiredSensors: activeRequired,
       activeSensorVersionGaps,
       activeSensorHealthWarnings,
+      fleetRows: fleet.length,
+      fleetCovered,
+      fleetAttention,
     },
     sensors,
+    fleet,
     governedDestinations: [...governed.values()]
       .map((bucket) => publicAggregate(bucket, { governed: true }))
       .sort((a, b) => b.events - a.events || a.destination.localeCompare(b.destination)),

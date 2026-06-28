@@ -25,8 +25,8 @@ A customer is production ready only when all of these are true:
   Coverage tab when MCP rollout is in scope.
 - A synthetic sensitive-data test is blocked, redacted, or held according to
   the customer's selected policy.
-- The dashboard shows attributed events, seat usage, sensor versions, and audit
-  entries.
+- The dashboard shows attributed events, seat usage, sensor versions, fleet
+  install health by user/org/sensor, and audit entries.
 - Audit-chain verification returns `ok:true`.
 - A backup is created and verified.
 - The customer handoff packet is complete and contains no secrets.
@@ -412,6 +412,8 @@ Validation on one managed test device:
 6. Confirm the Coverage tab shows a `browser_extension` install-health heartbeat
    with passing checks for managed config, managed identity, org id, server URL,
    ingest-key presence, content-script coverage, and policy cache availability.
+   The Fleet Install Health table should show the test user, org, browser
+   sensor version, `covered` state, and `checks ok`.
 7. Send a benign prompt and confirm it is attributed to the test user.
 8. Paste `123-45-6789` as synthetic SSN test data.
 9. Confirm the configured policy action appears in the browser.
@@ -556,6 +558,8 @@ Deliver a packet with:
 - Preflight status evidence.
 - Sanitized examiner export from `/api/export/evidence`, including coverage,
   policy diffs, and lineage summaries.
+- Fleet Install Health evidence from Coverage showing each required sensor by
+  user, org, current state, version, and failed check ID.
 - Audit-chain verification output.
 - Backup manifest.
 - Chrome managed policy confirmation.
@@ -621,6 +625,7 @@ If production is live and unhealthy:
 | Endpoint agent does not start | Check Node on PATH, scheduled task status, config ACL, log path, and ingest key. |
 | Endpoint install health shows attention | Run `npm run endpoint:check -- --env <path> --json`, fix the failed check IDs, then rerun with `--emit-heartbeat`. |
 | MCP guard install health shows attention | Run `npm run mcp:check -- --env <path> --json`, fix the failed check IDs, then rerun with `--emit-heartbeat`. |
+| Fleet row is missing or unknown | Confirm the sensor emits `user`, `orgId`, `source`, `sensor.version`, and install-health checks. Missing required sensors are expected until each user has a heartbeat or event from that sensor. |
 | Audit verification fails | Stop handoff, preserve the database and logs, and escalate before backup, restore, or data deletion. |
 
 ## Works Cited

@@ -167,6 +167,9 @@ function safeCoverageTotals(totals = {}) {
     activeRequiredSensors: safeCoverageNumber(totals.activeRequiredSensors),
     activeSensorVersionGaps: safeCoverageNumber(totals.activeSensorVersionGaps),
     activeSensorHealthWarnings: safeCoverageNumber(totals.activeSensorHealthWarnings),
+    fleetRows: safeCoverageNumber(totals.fleetRows),
+    fleetCovered: safeCoverageNumber(totals.fleetCovered),
+    fleetAttention: safeCoverageNumber(totals.fleetAttention),
   };
 }
 
@@ -193,6 +196,26 @@ function safeCoverageSensors(sensors = []) {
       .filter((item) => typeof item === 'string')
       .slice(0, 25),
     installHealth: safeCoverageInstallHealth(sensor && sensor.installHealth),
+  }));
+}
+
+function safeCoverageFleet(fleet = []) {
+  return (Array.isArray(fleet) ? fleet : []).slice(0, 150).map((row) => ({
+    source: safeCoverageText(row && row.source),
+    label: safeCoverageText(row && row.label),
+    user: safeCoverageText(row && row.user),
+    orgId: safeCoverageText(row && row.orgId),
+    required: row && row.required === true,
+    state: safeCoverageText(row && row.state),
+    events: safeCoverageNumber(row && row.events),
+    lastSeen: safeCoverageText(row && row.lastSeen),
+    latestVersion: safeCoverageText(row && row.latestVersion),
+    desiredVersion: safeCoverageText(row && row.desiredVersion),
+    versionHealth: safeCoverageText(row && row.versionHealth),
+    platforms: (Array.isArray(row && row.platforms) ? row.platforms : [])
+      .filter((item) => typeof item === 'string')
+      .slice(0, 25),
+    installHealth: safeCoverageInstallHealth(row && row.installHealth),
   }));
 }
 
@@ -238,6 +261,7 @@ function safeCoverage(report) {
     score: safeCoverageNumber(report.score),
     totals: safeCoverageTotals(report.totals),
     sensors: safeCoverageSensors(report.sensors),
+    fleet: safeCoverageFleet(report.fleet),
     governedDestinations: safeCoverageDestinations(report.governedDestinations),
     ungovernedDestinations: safeCoverageDestinations(report.ungovernedDestinations),
     shadowDestinations: safeCoverageDestinations(report.shadowDestinations),
