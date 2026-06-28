@@ -47,7 +47,8 @@ Build next:
 
 - Native desktop collector feeding the existing metadata-only endpoint handoff.
 - Broader app/action policy controls beyond the current destination,
-  file-upload, response-scanning, browser paste, and browser file-drop controls.
+  file-upload, response-scanning, browser paste, browser file-drop, and browser
+  response-copy controls.
 - Native Jira/Linear issue-creation adapters when pilots need direct API
   tickets beyond the generic sanitized ticket bridge.
 
@@ -61,6 +62,9 @@ Build next:
 - Extend destination-scoped browser action controls from paste-only to
   drag-and-drop file uploads, with sanitized `action_blocked` evidence before
   the browser reads file bytes.
+- Extend destination-scoped browser action controls to AI response copy events,
+  with sanitized `action_blocked` evidence before selected response text reaches
+  the clipboard.
 - Add a sanitized approval ticket bridge with deterministic dedupe keys,
   ticket system/project metadata, and no prompt bodies so Jira, Linear, SOAR, or
   internal middleware can create reviewer-owned tickets from the approval
@@ -84,9 +88,9 @@ Build next:
 - Add Policy-tab response scanning controls so `/api/v1/scan-response` can
   flag, redact, or block sensitive AI replies while storing only sanitized
   evidence.
-- Add destination-scoped browser paste and file-drop blocking so admins can stop
-  high-risk browser actions into selected AI tools while storing only sanitized
-  `action_blocked` evidence.
+- Add destination-scoped browser paste, file-drop, and response-copy blocking so
+  admins can stop high-risk browser actions in selected AI tools while storing
+  only sanitized `action_blocked` evidence.
 - Add approval owner and SLA routing so held decisions reach security,
   compliance, privacy, or legal queues with sanitized workflow metadata in the
   dashboard, SIEM alerts, and examiner evidence.

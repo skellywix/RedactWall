@@ -406,6 +406,42 @@ test('gate records browser paste warnings as audit-only sensor evidence', async 
   assert.ok(db.listAudit(10).some((entry) => entry.action === 'PASTE_FLAGGED' && entry.queryId === body.id));
 }));
 
+test('gate records locally blocked sensitive pastes from client-redacted evidence', async () => withServer(async (port) => {
+  const secret = '524-71-9043';
+  const res = await jsonFetch(port, '/api/v1/gate', {
+    headers: { 'x-api-key': 'unit-ingest-key' },
+    body: {
+      prompt: '[REDACTED: US_SSN]',
+      user: 'analyst@example.test',
+      destination: 'chatgpt.com',
+      source: 'browser_extension',
+      channel: 'paste',
+      clientOutcome: 'paste_flagged',
+      clientPreRedacted: true,
+      clientFindings: [{ type: 'US_SSN', severity: 4, score: 0.95, masked: '***-**-9043' }],
+      clientCategories: [],
+      clientEntityCounts: { US_SSN: 1 },
+      clientRiskScore: 30,
+      clientMaxSeverity: 4,
+      clientMaxSeverityLabel: 'critical',
+      note: 'blocked locally: sensitive paste prevented before insertion',
+    },
+  });
+
+  assert.strictEqual(res.status, 200);
+  const body = await res.json();
+  assert.strictEqual(body.decision, 'log');
+  assert.strictEqual(body.status, 'paste_flagged');
+  assert.ok(body.findings.some((f) => f.type === 'US_SSN'));
+  assert.ok(!JSON.stringify(body).includes(secret));
+
+  const stored = db.getQuery(body.id);
+  assert.strictEqual(stored.status, 'paste_flagged');
+  assert.strictEqual(stored.channel, 'paste');
+  assert.ok(stored.findings.some((f) => f.type === 'US_SSN'));
+  assert.ok(!JSON.stringify(stored).includes(secret));
+}));
+
 test('gate accepts browser action blocks without retaining clipboard text', async () => withServer(async (port) => {
   const secret = '524-71-9043';
   const res = await jsonFetch(port, '/api/v1/gate', {
@@ -471,6 +507,39 @@ test('gate accepts blocked browser drops without retaining file text', async () 
   assert.deepStrictEqual(stored.findings, []);
   assert.ok(!JSON.stringify(stored).includes(secret));
   assert.ok(db.listAudit(20).some((entry) => entry.action === 'BROWSER_ACTION_BLOCKED' && entry.detail === 'browser_extension/drop: chatgpt.com'));
+}));
+
+test('gate accepts blocked browser copies without retaining selected text', async () => withServer(async (port) => {
+  const secret = '524-71-9043';
+  const res = await jsonFetch(port, '/api/v1/gate', {
+    headers: { 'x-api-key': 'unit-ingest-key' },
+    body: {
+      prompt: '[browser action blocked] copy chatgpt.com ' + secret,
+      user: 'analyst@example.test',
+      destination: 'chatgpt.com',
+      source: 'browser_extension',
+      channel: 'copy',
+      clientOutcome: 'action_blocked',
+      note: 'response copy blocked by policy',
+    },
+  });
+
+  assert.strictEqual(res.status, 200);
+  const body = await res.json();
+  assert.strictEqual(body.decision, 'block');
+  assert.strictEqual(body.status, 'action_blocked');
+  assert.deepStrictEqual(body.findings, []);
+  assert.deepStrictEqual(body.categories, []);
+  assert.ok(!JSON.stringify(body).includes(secret));
+
+  const stored = db.getQuery(body.id);
+  assert.strictEqual(stored.status, 'action_blocked');
+  assert.strictEqual(stored.mode, 'browser_action_block');
+  assert.strictEqual(stored.channel, 'copy');
+  assert.strictEqual(stored._rawPrompt, undefined);
+  assert.deepStrictEqual(stored.findings, []);
+  assert.ok(!JSON.stringify(stored).includes(secret));
+  assert.ok(db.listAudit(20).some((entry) => entry.action === 'BROWSER_ACTION_BLOCKED' && entry.detail === 'browser_extension/copy: chatgpt.com'));
 }));
 
 test('gate sanitizes malformed browser action labels without retaining channel text', async () => withServer(async (port) => {
@@ -570,6 +639,46 @@ test('gate applies configured drop browser action blocks before prompt analysis'
     const stored = db.getQuery(body.id);
     assert.strictEqual(stored.status, 'action_blocked');
     assert.strictEqual(stored.channel, 'drop');
+    assert.deepStrictEqual(stored.findings, []);
+    assert.ok(!JSON.stringify(stored).includes(secret));
+  } finally {
+    fs.writeFileSync(policyPath, originalPolicy);
+  }
+}));
+
+test('gate applies configured copy browser action blocks before prompt analysis', async () => withServer(async (port) => {
+  const originalPolicy = fs.readFileSync(policyPath, 'utf8');
+  const secret = '524-71-9043';
+  try {
+    const next = {
+      ...JSON.parse(originalPolicy),
+      blockedBrowserActions: [{
+        id: 'block_copy_chatgpt',
+        action: 'copy',
+        destinations: ['chatgpt.com'],
+        reason: 'response_copy_blocked',
+      }],
+    };
+    fs.writeFileSync(policyPath, JSON.stringify(next, null, 2));
+
+    const res = await jsonFetch(port, '/api/v1/gate', {
+      headers: { 'x-api-key': 'unit-ingest-key' },
+      body: {
+        prompt: '[browser action blocked] copy chatgpt.com ' + secret,
+        user: 'analyst@example.test',
+        destination: 'https://chatgpt.com/c/unit',
+        source: 'browser_extension',
+        channel: 'copy',
+      },
+    });
+
+    assert.strictEqual(res.status, 200);
+    const body = await res.json();
+    assert.strictEqual(body.status, 'action_blocked');
+    assert.deepStrictEqual(body.reasons, ['response_copy_blocked']);
+    const stored = db.getQuery(body.id);
+    assert.strictEqual(stored.status, 'action_blocked');
+    assert.strictEqual(stored.channel, 'copy');
     assert.deepStrictEqual(stored.findings, []);
     assert.ok(!JSON.stringify(stored).includes(secret));
   } finally {
@@ -1024,6 +1133,12 @@ test('admin policy accepts browser action block rules', async () => withServer(a
             destinations: ['claude.ai'],
             reason: 'file_drop_blocked',
           },
+          {
+            id: 'block_copy_chatgpt',
+            action: 'copy',
+            destinations: ['chatgpt.com'],
+            reason: 'response_copy_blocked',
+          },
         ],
       },
     });
@@ -1044,6 +1159,13 @@ test('admin policy accepts browser action block rules', async () => withServer(a
         action: 'drop',
         destinations: ['claude.ai'],
         reason: 'file_drop_blocked',
+      },
+      {
+        id: 'block_copy_chatgpt',
+        enabled: true,
+        action: 'copy',
+        destinations: ['chatgpt.com'],
+        reason: 'response_copy_blocked',
       },
     ]);
   } finally {

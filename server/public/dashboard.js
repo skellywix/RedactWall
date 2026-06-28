@@ -1180,7 +1180,7 @@ async function loadPolicy() {
     <div class="template-bar">
       ${readonly
     ? `<div class="chips">${(p.blockedBrowserActions || []).map((rule) => `<span class="chip"><b>${escapeHtml(rule.action || 'action')}</b> ${escapeHtml((rule.destinations || []).join(', '))}</span>`).join('') || '<span class="chip">no action blocks</span>'}</div>`
-    : `<textarea id="pol_blocked_browser_actions" class="policy-textarea" spellcheck="false" style="min-height:110px" placeholder='[{"id":"block_paste_chatgpt","action":"paste","destinations":["chatgpt.com"],"reason":"clipboard_paste_blocked"},{"id":"block_drop_claude","action":"drop","destinations":["claude.ai"],"reason":"file_drop_blocked"}]'>${escapeHtml(policyJsonText(p.blockedBrowserActions))}</textarea>`}
+    : `<textarea id="pol_blocked_browser_actions" class="policy-textarea" spellcheck="false" style="min-height:110px" placeholder='[{"id":"block_paste_chatgpt","action":"paste","destinations":["chatgpt.com"],"reason":"clipboard_paste_blocked"},{"id":"block_drop_claude","action":"drop","destinations":["claude.ai"],"reason":"file_drop_blocked"},{"id":"block_copy_chatgpt","action":"copy","destinations":["chatgpt.com"],"reason":"response_copy_blocked"}]'>${escapeHtml(policyJsonText(p.blockedBrowserActions))}</textarea>`}
     </div>
     <div class="policy-label">Fleet posture</div>
     <div class="policy-list-grid">

@@ -72,10 +72,11 @@ The Policy tab maintains two destination lists:
   endpoint file flows short-circuit as `file_upload_blocked` before uploaded
   bytes, extracted text, or sensitive filenames are retained.
 - `blockedBrowserActions`: destination-scoped browser action rules. Supported
-  actions are `paste` and `drop`, so a customer can allow normal chat while
-  blocking clipboard paste or drag-and-drop file uploads into selected AI tools.
-  The browser reports only sanitized `action_blocked` evidence, not clipboard
-  text or file bytes.
+  actions are `paste`, `drop`, and `copy`, so a customer can allow normal chat
+  while blocking clipboard paste, drag-and-drop file uploads, or copying AI
+  response content from selected tools. The browser reports only sanitized
+  `action_blocked` evidence, not clipboard text, selected response text, or file
+  bytes.
 - `blockUnapprovedAiDestinations`: default-on control that blocks known AI hosts
   that are not yet governed, allowed, blocked, or file-upload-blocked. The
   shadow-AI review queue remains the admin path for turning a newly seen tool
@@ -364,7 +365,7 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 | Browser extension | Working — warn/justify/**redact**/block, real-button send, MDM identity, Man-in-the-Prompt guard |
 | Shadow-AI discovery | Working — flags use of ungoverned AI tools |
 | Destination controls | Working — governed destination coverage, default-deny unapproved AI, full destination blocking, and file-upload-only blocking across browser, endpoint, gate, file, and response paths |
-| Browser action controls | Working — destination-scoped paste and file-drop blocking records sanitized `action_blocked` evidence without sending clipboard text or file bytes |
+| Browser action controls | Working — destination-scoped paste, file-drop, and response-copy blocking records sanitized `action_blocked` evidence without sending clipboard text, selected response text, or file bytes |
 | Output scanning | Working — `/api/v1/scan-response` flags, redacts, or blocks PII/secrets in AI replies by policy |
 | MCP guard / Endpoint agent | Working references - inline/MCP redaction; MCP connector SDK with required tool-result sanitization; Microsoft 365 text-readable file-content connector; local endpoint folder watch plus signed native file-flow handoff prototype; redacted companion files for structured-only findings |
 | Auth & ops | Working: login lockout, password-confirmed raw reveal and release approval, release-token scoped polling, stable secret, `/healthz` · `/readyz` · `/api/metrics`, policy-driven sensor version and browser/endpoint/MCP install-health posture, dashboard lineage, sanitized examiner export with coverage, workflow routing, and lineage, Docker, CI |
@@ -386,8 +387,9 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 - **Dashboard lineage and sanitized examiner export** with audit integrity, policy diffs, coverage posture, workflow ownership, and lineage by user, destination, sensor, channel, category, and decision.
 - **Response scanning controls** that let customers flag, redact, or block
   sensitive AI replies while retaining only sanitized evidence.
-- **Browser action controls** that block clipboard paste and file drops into
-  selected AI destinations while retaining only sanitized action metadata.
+- **Browser action controls** that block clipboard paste, file drops, and
+  response copy actions in selected AI destinations while retaining only
+  sanitized action metadata.
 - **SCIM provisioning and OIDC login** for active provisioned users, with bearer
   provisioning auth, deactivation, audit entries, PromptWall group names mapped
   onto local roles, signed ID-token validation, and local break-glass accounts.
