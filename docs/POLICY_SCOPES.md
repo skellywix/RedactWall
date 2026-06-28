@@ -12,8 +12,9 @@ The feature is intentionally conservative:
 - `alwaysBlock` entities cannot be downgraded by a scope or exception.
 - Sensors do not receive scoped policy yet. The control plane applies scopes
   when it receives gate and file-scan events.
-- Evidence records include matched scope ids and exception ids, not raw prompt
-  bodies.
+- Exception owner and review metadata is limited to safe group and role codes.
+- Evidence records include matched scope ids, exception ids, and sanitized
+  exception review state, not raw prompt bodies.
 
 ## Policy Scopes
 
@@ -72,6 +73,9 @@ Example:
       "destinations": ["claude.ai"],
       "categories": ["LEGAL_CONTRACT"],
       "expiresAt": "2030-01-01T00:00:00.000Z",
+      "ownerGroup": "legal",
+      "reviewerRole": "security_admin",
+      "reviewAfter": "2029-12-15T00:00:00.000Z",
       "reason": "approved_vendor_review"
     }
   ]
@@ -81,6 +85,19 @@ Example:
 Exceptions currently support `action: "allow"` only. If a matching event contains
 an `alwaysBlock` entity such as `US_SSN`, `CREDIT_CARD`, `SECRET_KEY`, or
 `PRIVATE_KEY`, the exception is ignored and the event still blocks.
+
+Lifecycle fields are optional, but recommended:
+
+| Field | Purpose |
+| --- | --- |
+| `ownerGroup` | Safe routing group responsible for reviewing the exception. |
+| `reviewerRole` | Review role, either `security_admin` or `approver`. |
+| `reviewAfter` | ISO timestamp when the exception should be reviewed before expiry. |
+
+The examiner evidence pack includes an exception review summary with
+`active`, `reviewDue`, `expiringSoon`, and `expired` counts plus per-exception
+id, owner group, reviewer role, review timestamp, expiry timestamp, and status.
+It does not include matched users, prompt text, or file content.
 
 ## Configure
 

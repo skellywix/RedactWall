@@ -87,6 +87,9 @@ test('active time-bound exceptions allow matching non-hard-stop content', () => 
       destinations: ['claude.ai'],
       categories: ['LEGAL_CONTRACT'],
       expiresAt: '2030-01-01T00:00:00.000Z',
+      ownerGroup: 'legal',
+      reviewerRole: 'security_admin',
+      reviewAfter: '2029-12-15T00:00:00.000Z',
       reason: 'approved_vendor_review',
     }],
   }, {
@@ -159,12 +162,59 @@ test('policy scope and exception normalization rejects malformed or sensitive id
   assert.deepStrictEqual(policy.normalizePolicyExceptions([
     { id: 'bad_exception', users: ['counsel@example.test'], expiresAt: 'not-a-date' },
     { id: 'sensitive_matcher', users: ['524-71-9043'], expiresAt: '2030-01-01T00:00:00.000Z' },
-    { id: 'good_exception', users: ['counsel@example.test'], expiresAt: '2030-01-01T00:00:00.000Z' },
+    { id: 'good_exception', users: ['counsel@example.test'], expiresAt: '2030-01-01T00:00:00.000Z', ownerGroup: 'Legal', reviewerRole: 'approver', reviewAfter: '2029-12-15T00:00:00.000Z' },
+    { id: 'late_review', users: ['counsel@example.test'], expiresAt: '2030-01-01T00:00:00.000Z', reviewAfter: '2030-01-02T00:00:00.000Z' },
   ]), [{
     id: 'good_exception',
     enabled: true,
     action: 'allow',
     expiresAt: '2030-01-01T00:00:00.000Z',
     users: ['counsel@example.test'],
+    ownerGroup: 'legal',
+    reviewerRole: 'approver',
+    reviewAfter: '2029-12-15T00:00:00.000Z',
+  }, {
+    id: 'late_review',
+    enabled: true,
+    action: 'allow',
+    expiresAt: '2030-01-01T00:00:00.000Z',
+    users: ['counsel@example.test'],
   }]);
+});
+
+test('policy exception review summarizes ownership and expiry state without content', () => {
+  const review = policy.policyExceptionReview({
+    policyExceptions: [{
+      id: 'legal_vendor_24h',
+      enabled: true,
+      action: 'allow',
+      expiresAt: '2026-06-29T12:00:00.000Z',
+      ownerGroup: 'legal',
+      reviewerRole: 'security_admin',
+      reviewAfter: '2026-06-28T00:00:00.000Z',
+      users: ['counsel@example.test'],
+    }, {
+      id: 'expired_vendor',
+      enabled: true,
+      action: 'allow',
+      expiresAt: '2026-06-01T00:00:00.000Z',
+      users: ['counsel@example.test'],
+    }],
+  }, { now: new Date('2026-06-28T12:00:00.000Z') });
+
+  assert.strictEqual(review.total, 2);
+  assert.strictEqual(review.active, 1);
+  assert.strictEqual(review.reviewDue, 1);
+  assert.strictEqual(review.expired, 1);
+  assert.deepStrictEqual(review.items[0], {
+    id: 'legal_vendor_24h',
+    enabled: true,
+    action: 'allow',
+    expiresAt: '2026-06-29T12:00:00.000Z',
+    ownerGroup: 'legal',
+    reviewerRole: 'security_admin',
+    reviewAfter: '2026-06-28T00:00:00.000Z',
+    status: 'review_due',
+  });
+  assert.ok(!JSON.stringify(review).includes('counsel@example.test'));
 });

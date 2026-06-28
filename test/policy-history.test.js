@@ -234,6 +234,55 @@ test('evidence exports scoped policy changes', () => {
   assert.deepStrictEqual(entry.policyChange.changed[0].after, scope);
 });
 
+test('evidence exports sanitized exception review state', () => {
+  const pack = evidence.buildEvidencePack({
+    generatedAt: '2026-06-28T12:00:00.000Z',
+    version: '0.0.0-test',
+    queryLimit: 500,
+    auditLimit: 500,
+    policy: { policyExceptions: [] },
+    stats: {},
+    auditIntegrity: { ok: true, count: 0 },
+    coverage: {},
+    detectors: [],
+    queries: [],
+    audit: [],
+    policyExceptionReview: {
+      generatedAt: '2026-06-28T12:00:00.000Z',
+      reviewWindowDays: 7,
+      total: 1,
+      active: 1,
+      disabled: 0,
+      expired: 0,
+      reviewDue: 1,
+      expiringSoon: 0,
+      items: [{
+        id: 'legal_vendor_24h',
+        enabled: true,
+        action: 'allow',
+        expiresAt: '2026-06-29T12:00:00.000Z',
+        ownerGroup: 'legal',
+        reviewerRole: 'security_admin',
+        reviewAfter: '2026-06-28T00:00:00.000Z',
+        status: 'review_due',
+        user: 'counsel@example.test',
+      }],
+    },
+  });
+
+  assert.deepStrictEqual(pack.policyExceptionReview.items, [{
+    id: 'legal_vendor_24h',
+    enabled: true,
+    action: 'allow',
+    expiresAt: '2026-06-29T12:00:00.000Z',
+    ownerGroup: 'legal',
+    reviewerRole: 'security_admin',
+    reviewAfter: '2026-06-28T00:00:00.000Z',
+    status: 'review_due',
+  }]);
+  assert.ok(!JSON.stringify(pack.policyExceptionReview).includes('counsel@example.test'));
+});
+
 test('evidence exports destination-review policy changes', () => {
   const detail = policy.policyChangeDetail(
     { governedDestinations: ['poe.com'], allowedDestinations: [], blockedDestinations: [] },

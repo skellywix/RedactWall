@@ -1451,6 +1451,7 @@ app.get('/api/export/evidence', auth.requireAuth, (req, res) => {
     stats: db.stats(),
     auditIntegrity: db.verifyAuditChain(),
     coverage: coverage.summarize(queries, activePolicy),
+    policyExceptionReview: policy.policyExceptionReview(activePolicy),
     detectors: detector.listDetectors({ customDetectors: policy.customDetectorsForSensors() }),
     queries,
     audit: db.listAudit(auditLimit),

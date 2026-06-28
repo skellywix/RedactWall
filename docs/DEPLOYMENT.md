@@ -130,6 +130,10 @@ SCIM group, source, channel, destination, detector, or semantic category. The
 control plane applies these scopes on gate and file-scan events and records
 matched scope ids in evidence. Time-bound exceptions can allow matching
 non-hard-stop events until `expiresAt`; hard-stop entities still block.
+Exception rules can also carry `ownerGroup`, `reviewerRole`, and `reviewAfter`
+metadata so temporary allow rules have an accountable review owner before they
+expire. Evidence exports summarize review-due, expiring-soon, expired, and
+active exception state without including matched users or prompt bodies.
 
 Configure common scoped rules and time-bound exceptions from the Policy tab's
 guided builders, then review the generated JSON in the scoped-policy editors

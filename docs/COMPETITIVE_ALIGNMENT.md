@@ -50,12 +50,13 @@ Build next:
   file-upload, response-scanning, and browser-paste controls.
 - Ticketing adapters on top of provisioned users, groups, identity-backed
   ownership, direct SMTP, and the sanitized approval workflow.
-- Exception lifecycle ownership and expiry review beyond the guided builder's
-  time-bound allow rules.
 
 ## Recent Completed Passes
 
 - Rebrand the visible project from PromptSentinel to PromptWall.
+- Add owner group, reviewer role, review-after metadata, dashboard builder
+  fields, and sanitized examiner evidence for time-bound exception lifecycle
+  review.
 - Rename the endpoint installer surface to `-PromptWallUrl` while keeping
   `-SentinelUrl` as a compatibility alias for existing technician scripts.
 - Rename fresh endpoint runner config handoff to `PROMPTWALL_ENV_PATH` while

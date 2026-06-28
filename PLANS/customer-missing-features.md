@@ -235,8 +235,9 @@ enforcement by user, SCIM group, org, source, channel, destination, detector, or
 category. Exceptions can temporarily allow matching non-hard-stop events and are
 recorded in evidence. The Policy tab includes guided builders for common scoped
 rules and time-bound exceptions, plus advanced JSON editors for exact policy
-review and uncommon matcher shapes. Local sensor-side scoped evaluation and
-exception owner/expiry review are still open.
+review and uncommon matcher shapes. Exceptions carry owner group, reviewer role,
+review-after, and expiry metadata into sanitized examiner evidence. Local
+sensor-side scoped evaluation is still open.
 
 Customer ask: "Can lending have a different approval path than engineering? Can
 we allow a specific vendor prompt for 24 hours without weakening the global
@@ -251,7 +252,8 @@ Implementation connection:
   detector, and category rules, with advanced JSON editing for edge cases.
 - Decide whether sensors should receive a reduced scoped-policy subset once
   group identity is reliable on every endpoint.
-- Extend exceptions with owner/approval metadata and scheduled expiry review.
+- Keep exception lifecycle metadata sanitized: group and role ownership only,
+  with review and expiry timestamps but no prompt bodies or matched users.
 
 Acceptance evidence:
 - `node --test test/policy-scope.test.js test/templates.test.js test/validation.test.js`
@@ -260,7 +262,8 @@ Acceptance evidence:
   scoped gate decision, and `alwaysBlock` cannot be downgraded by scoped policy
   or exceptions.
 - Browser E2E proves the Policy tab can save scoped rules and exceptions.
-- Evidence export includes scope and exception metadata but not prompt bodies.
+- Evidence export includes scope ids, exception ids, and exception review state
+  but not prompt bodies.
 
 ### 6. Examiner-Ready Evidence Packs And Scheduled Reporting
 

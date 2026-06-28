@@ -103,6 +103,22 @@ function cleanPolicyId(value, fallback = 'rule') {
   return id || fallback;
 }
 
+function exceptionLifecycleSummary(rule = {}) {
+  const now = Date.now();
+  const expires = Date.parse(rule.expiresAt || '');
+  const reviewAfter = Date.parse(rule.reviewAfter || '');
+  let status = 'active';
+  if (rule.enabled === false) status = 'disabled';
+  else if (Number.isFinite(expires) && expires <= now) status = 'expired';
+  else if (Number.isFinite(reviewAfter) && reviewAfter <= now) status = 'review due';
+  else if (Number.isFinite(expires) && expires <= now + 7 * 24 * 60 * 60 * 1000) status = 'expiring soon';
+  const parts = [status];
+  if (rule.ownerGroup) parts.push(`owner ${rule.ownerGroup}`);
+  if (rule.reviewerRole) parts.push(`reviewer ${rule.reviewerRole}`);
+  if (rule.reviewAfter) parts.push(`review ${rule.reviewAfter}`);
+  return parts.join(' ');
+}
+
 function firstPolicyValue(value, fallback) {
   return parsePolicyList(value)[0] || fallback;
 }
@@ -172,12 +188,22 @@ function appendGuidedExceptionRule() {
     return;
   }
   const hours = Math.max(1, Math.min(24 * 30, Number($('#exception_builder_hours').value) || 24));
+  const now = Date.now();
   const rule = {
     id: cleanPolicyId($('#exception_builder_id').value, suggestedPolicyId('exception', 'exception_builder')),
     ...matchers,
     action: 'allow',
-    expiresAt: new Date(Date.now() + hours * 60 * 60 * 1000).toISOString(),
+    expiresAt: new Date(now + hours * 60 * 60 * 1000).toISOString(),
   };
+  const ownerGroup = cleanPolicyId($('#exception_builder_owner_group').value, '');
+  if (ownerGroup) rule.ownerGroup = ownerGroup;
+  const reviewerRole = $('#exception_builder_reviewer_role').value;
+  if (reviewerRole) rule.reviewerRole = reviewerRole;
+  const reviewHoursRaw = $('#exception_builder_review_hours').value;
+  if (reviewHoursRaw !== '') {
+    const reviewHours = Math.max(1, Math.min(hours, Number(reviewHoursRaw) || hours));
+    rule.reviewAfter = new Date(now + reviewHours * 60 * 60 * 1000).toISOString();
+  }
   const reason = cleanPolicyId($('#exception_builder_reason').value, '');
   if (reason) rule.reason = reason;
   if (addPolicyRuleToTextarea('#pol_policy_exceptions', rule, 'Time-bound exceptions')) {
@@ -1134,6 +1160,13 @@ async function loadPolicy() {
           <label>Categories<input id="exception_builder_categories" type="text" placeholder="LEGAL_CONTRACT"/></label>
           <label>Detectors<input id="exception_builder_detectors" type="text" placeholder="SOURCE_CODE"/></label>
           <label>Expires after hours<input id="exception_builder_hours" type="number" min="1" max="720" value="24"/></label>
+          <label>Owner group<input id="exception_builder_owner_group" type="text" placeholder="legal"/></label>
+          <label>Reviewer role<select id="exception_builder_reviewer_role">
+            <option value="">Unassigned</option>
+            <option value="security_admin">Security Admin</option>
+            <option value="approver">Approver</option>
+          </select></label>
+          <label>Review after hours<input id="exception_builder_review_hours" type="number" min="1" max="720" value="24"/></label>
           <label>Reason<input id="exception_builder_reason" type="text" placeholder="approved_vendor_review"/></label>
         </div>
         <button class="btn" id="addExceptionRule" type="button">${icons.check}Add exception</button>
@@ -1147,8 +1180,8 @@ async function loadPolicy() {
       </label>
       <label class="policy-list-field">Time-bound exceptions
         ${readonly
-    ? `<div class="chips">${(p.policyExceptions || []).map((rule) => `<span class="chip"><b>${escapeHtml(rule.id)}</b> ${escapeHtml(rule.expiresAt || '')} ${escapeHtml(policyMatcherSummary(rule))}</span>`).join('') || '<span class="chip">no exceptions</span>'}</div>`
-    : `<textarea id="pol_policy_exceptions" class="policy-textarea" spellcheck="false" style="min-height:190px" placeholder='[{"id":"legal_vendor_24h","users":["counsel@example.test"],"destinations":["claude.ai"],"categories":["LEGAL_CONTRACT"],"expiresAt":"2030-01-01T00:00:00.000Z"}]'>${escapeHtml(policyJsonText(p.policyExceptions))}</textarea>`}
+    ? `<div class="chips">${(p.policyExceptions || []).map((rule) => `<span class="chip"><b>${escapeHtml(rule.id)}</b> ${escapeHtml(rule.expiresAt || '')} ${escapeHtml(policyMatcherSummary(rule))} ${escapeHtml(exceptionLifecycleSummary(rule))}</span>`).join('') || '<span class="chip">no exceptions</span>'}</div>`
+    : `<textarea id="pol_policy_exceptions" class="policy-textarea" spellcheck="false" style="min-height:190px" placeholder='[{"id":"legal_vendor_24h","users":["counsel@example.test"],"destinations":["claude.ai"],"categories":["LEGAL_CONTRACT"],"expiresAt":"2030-01-01T00:00:00.000Z","ownerGroup":"legal","reviewerRole":"security_admin","reviewAfter":"2029-12-15T00:00:00.000Z"}]'>${escapeHtml(policyJsonText(p.policyExceptions))}</textarea>`}
       </label>
     </div>
     <div class="template-bar"><div class="template-title">Hard-stop entities</div>
