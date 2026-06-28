@@ -1,6 +1,10 @@
 'use strict';
 
 const { safeSensor } = require('./sensor-metadata');
+const {
+  failedInstallCheckIds,
+  isEndpointAiToolPolicyCheckId,
+} = require('./install-checks');
 
 const SENSOR_LABELS = {
   browser_extension: 'Browser extension',
@@ -12,7 +16,6 @@ const SENSOR_LABELS = {
 
 const DEFAULT_REQUIRED_SENSORS = ['browser_extension', 'endpoint_agent', 'mcp_guard'];
 const SENSOR_ID_RE = /^[a-z][a-z0-9_:-]{0,79}$/;
-const AI_TOOL_ID_RE = /^[a-z][a-z0-9_]{0,39}$/;
 const FLEET_LIMIT = 150;
 const ENDPOINT_AI_TOOL_LIMIT = 100;
 const AI_TOOL_LABELS = {
@@ -24,7 +27,6 @@ const AI_TOOL_LABELS = {
   gemini_cli: 'Gemini CLI',
   codex_cli: 'Codex CLI',
 };
-const AI_TOOL_RESERVED_CHECKS = new Set(['ai_tool_inventory', 'ai_tool_inventory_runtime']);
 const BLOCKED_STATUSES = new Set([
   'pending',
   'pending_justification',
@@ -182,9 +184,8 @@ function aiToolInventoryForChecks(checks = []) {
   const inventoryCheck = checks.find((check) => check.id === 'ai_tool_inventory');
   const tools = [];
   for (const check of checks) {
-    if (!check || !String(check.id || '').startsWith('ai_tool_') || AI_TOOL_RESERVED_CHECKS.has(check.id)) continue;
+    if (!check || !isEndpointAiToolPolicyCheckId(check.id)) continue;
     const id = String(check.id).slice('ai_tool_'.length);
-    if (!AI_TOOL_ID_RE.test(id)) continue;
     const approved = check.ok === true;
     tools.push({
       id,
@@ -211,7 +212,7 @@ function aiToolInventoryForChecks(checks = []) {
 function installHealthFor(q) {
   const checks = cleanInstallChecks(q && q.installChecks);
   if (!checks.length) return null;
-  const failedChecks = checks.filter((check) => !check.ok).map((check) => check.id);
+  const failedChecks = failedInstallCheckIds(checks);
   const health = {
     at: (q && q.createdAt) || null,
     state: failedChecks.length ? 'attention' : 'covered',

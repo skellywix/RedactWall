@@ -144,7 +144,7 @@ test('coverage summary aggregates governed apps, sensors, and shadow AI without 
   assert.strictEqual(endpoint.events, 2);
   assert.strictEqual(endpoint.versionHealth, 'current');
   assert.strictEqual(endpoint.installHealth.state, 'attention');
-  assert.deepStrictEqual(endpoint.installHealth.failedChecks, ['ai_tool_claude_desktop', 'handoff_secret']);
+  assert.deepStrictEqual(endpoint.installHealth.failedChecks, ['handoff_secret']);
   assert.deepStrictEqual(endpoint.installHealth.aiToolInventory, {
     detected: 2,
     reported: 2,
@@ -177,7 +177,7 @@ test('coverage summary aggregates governed apps, sensors, and shadow AI without 
   assert.strictEqual(opsBrowser.latestVersion, '0.2.9');
   const techEndpoint = report.fleet.find((item) => item.user === 'tech@example.test' && item.source === 'endpoint_agent');
   assert.strictEqual(techEndpoint.state, 'attention');
-  assert.deepStrictEqual(techEndpoint.installHealth.failedChecks, ['ai_tool_claude_desktop', 'handoff_secret']);
+  assert.deepStrictEqual(techEndpoint.installHealth.failedChecks, ['handoff_secret']);
   assert.strictEqual(report.totals.endpointAiInventoryReports, 1);
   assert.strictEqual(report.totals.endpointAiToolDetections, 2);
   assert.strictEqual(report.totals.endpointAiToolUnapproved, 1);

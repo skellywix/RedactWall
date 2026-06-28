@@ -52,7 +52,7 @@ const CONTROL_MAPPINGS = [
   },
   {
     id: 'fleet_sensor_coverage',
-    title: 'Required sensor coverage and install health',
+    title: 'Required sensor coverage and endpoint posture',
     controlFamilies: [
       'GLBA system-monitoring evidence',
       'NCUA endpoint-control evidence',
@@ -89,8 +89,10 @@ function stateFromCoverage(coverage) {
   const active = Number(totals.activeRequiredSensors) || 0;
   const gaps = Number(totals.activeSensorVersionGaps) || 0;
   const warnings = Number(totals.activeSensorHealthWarnings) || 0;
+  const endpointAiAttention = (Array.isArray(coverage.posture) ? coverage.posture : [])
+    .some((item) => item && item.id === 'endpoint_ai_tools' && item.state === 'attention');
   if (!required) return 'attention';
-  return active >= required && !gaps && !warnings ? 'covered' : 'attention';
+  return active >= required && !gaps && !warnings && !endpointAiAttention ? 'covered' : 'attention';
 }
 
 function stateFromBackup(backup, restoreDrill) {
@@ -121,7 +123,12 @@ function summaryFor(control, input, state) {
     const totals = input.coverage && input.coverage.totals ? input.coverage.totals : {};
     const required = Number(totals.requiredSensors) || 0;
     const active = Number(totals.activeRequiredSensors) || 0;
-    return `${active}/${required} required sensor type(s) active in the evidence window.`;
+    const endpointAi = (Array.isArray(input.coverage && input.coverage.posture) ? input.coverage.posture : [])
+      .find((item) => item && item.id === 'endpoint_ai_tools');
+    const endpointAiDetail = endpointAi && endpointAi.state === 'attention'
+      ? ` Endpoint AI tools: ${endpointAi.detail || 'attention'}.`
+      : '';
+    return `${active}/${required} required sensor type(s) active in the evidence window.${endpointAiDetail}`;
   }
   if (control.id === 'backup_recoverability') {
     if (state === 'not_provided') return 'No backup or restore-drill evidence attached to this pack.';

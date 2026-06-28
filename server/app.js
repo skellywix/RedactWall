@@ -30,6 +30,10 @@ const evidence = require('./evidence');
 const preflight = require('./preflight');
 const validation = require('./validation');
 const coverage = require('./coverage');
+const {
+  endpointAiToolAttentionIds,
+  failedInstallCheckIds,
+} = require('./install-checks');
 const releaseTokens = require('./release-token');
 const tenant = require('./tenant');
 const routing = require('./routing');
@@ -436,10 +440,6 @@ function safeInstallChecks(checks = []) {
     ok: check.ok === true,
     ...(check.detail ? { detail: String(check.detail).slice(0, 160) } : {}),
   }));
-}
-
-function failedInstallCheckIds(checks = []) {
-  return checks.filter((check) => !check.ok).map((check) => check.id).filter(Boolean);
 }
 
 function hasSensitivity(analysis) {
@@ -916,6 +916,7 @@ app.post('/api/v1/heartbeat', checkIngestKey, validation.validateBody(validation
   } = req.body || {};
   const checks = safeInstallChecks(req.body && req.body.checks);
   const failedChecks = failedInstallCheckIds(checks);
+  const aiToolAttention = endpointAiToolAttentionIds(checks);
   const row = createQuery({
     status: 'sensor_heartbeat',
     mode: 'sensor_health',
@@ -932,15 +933,27 @@ app.post('/api/v1/heartbeat', checkIngestKey, validation.validateBody(validation
     riskScore: 0,
     maxSeverity: 0,
     maxSeverityLabel: 'none',
-    reasons: failedChecks.length ? ['Sensor health attention: ' + failedChecks.join(', ')] : ['Sensor heartbeat OK'],
+    reasons: failedChecks.length
+      ? ['Sensor health attention: ' + failedChecks.join(', ')]
+      : aiToolAttention.length
+        ? ['Endpoint AI tool inventory attention: ' + aiToolAttention.join(', ')]
+        : ['Sensor heartbeat OK'],
     installChecks: checks,
   });
   db.appendAudit({
     action: failedChecks.length ? 'SENSOR_HEALTH_ATTENTION' : 'SENSOR_HEARTBEAT',
     queryId: row.id,
     actor: user,
-    detail: JSON.stringify({ source, failedChecks, checkCount: checks.length }),
+    detail: JSON.stringify({ source, failedChecks, aiToolAttention, checkCount: checks.length }),
   });
+  if (aiToolAttention.length) {
+    db.appendAudit({
+      action: 'ENDPOINT_AI_TOOL_ATTENTION',
+      queryId: row.id,
+      actor: user,
+      detail: JSON.stringify({ source, unapprovedTools: aiToolAttention }),
+    });
+  }
   if (failedChecks.length) emitSecurityAlert(row, 'SENSOR_HEALTH_ATTENTION');
   else {
     try { emitSensorVersionGapAlert(row); } catch {}

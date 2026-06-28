@@ -326,9 +326,10 @@ Add-Content "$env:LOCALAPPDATA\PromptWall\endpoint-agent.env" "ENDPOINT_AGENT_AP
 ```
 
 When `ENDPOINT_AGENT_APPROVED_AI_TOOLS` is set, detected endpoint AI tools not
-on that list mark install health as attention. This makes endpoint/developer
-tool visibility show up in Coverage without sending local paths, process args,
-document names, prompt text, or file content.
+on that list report endpoint AI-tool inventory attention. Install-health stays
+reserved for runtime and configuration failures. This makes endpoint/developer tool
+visibility show up in Coverage without sending local paths, process args, document
+names, prompt text, or file content.
 
 The agent inspects supported watched files locally. Under redact policy, structured-only findings write a safe companion text file under `.promptwall-redacted` and report `redacted_available` evidence to the control plane; semantic or mixed findings remain held for Security Admin review. Image files (`.png`, `.jpg`, `.jpeg`, `.tif`, `.tiff`, `.bmp`, `.webp`) are supported as a fail-closed modality. Browser/API uploads still return `ocr_required`; endpoint agents can optionally run a workstation-local OCR command and then send only sanitized detector evidence to the control plane.
 
@@ -541,7 +542,7 @@ Set these through `.env`, container environment, or a deployment secret manager:
 | `ENDPOINT_AGENT_OCR_ARGS_JSON` / `PROMPTWALL_ENDPOINT_AGENT_OCR_ARGS_JSON` | Optional JSON string array of OCR command args. Include `{file}` where the image path belongs; otherwise the file path is appended. |
 | `ENDPOINT_AGENT_OCR_TIMEOUT_MS` / `PROMPTWALL_ENDPOINT_AGENT_OCR_TIMEOUT_MS` | Optional OCR command timeout, defaulting to 15000 ms. |
 | `ENDPOINT_AGENT_OCR_MAX_CHARS` / `PROMPTWALL_ENDPOINT_AGENT_OCR_MAX_CHARS` | Optional OCR output cap before detection, defaulting to 1000000 chars. |
-| `ENDPOINT_AGENT_APPROVED_AI_TOOLS` / `PROMPTWALL_ENDPOINT_AGENT_APPROVED_AI_TOOLS` | Optional comma-separated sanctioned endpoint AI tool ids. Detected local AI tools outside this list mark endpoint install health as attention using sanitized ids only. |
+| `ENDPOINT_AGENT_APPROVED_AI_TOOLS` / `PROMPTWALL_ENDPOINT_AGENT_APPROVED_AI_TOOLS` | Optional comma-separated sanctioned endpoint AI tool ids. Detected local AI tools outside this list report endpoint AI-tool inventory attention using sanitized ids only. |
 
 PromptWall accepts product-prefixed aliases for new deployments while keeping
 the existing `SENTINEL_*`, `INGEST_API_KEY`, and endpoint-agent names valid for
