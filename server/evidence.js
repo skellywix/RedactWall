@@ -44,10 +44,11 @@ const BLOCKED_STATUSES = new Set([
   'file_blocked_unscanned',
   'ocr_required',
   'response_flagged',
+  'response_blocked',
   'seat_limit_blocked',
 ]);
 
-const REDACTED_STATUSES = new Set(['redacted']);
+const REDACTED_STATUSES = new Set(['redacted', 'response_redacted']);
 const ALLOWED_STATUSES = new Set(['allowed', 'approved']);
 const WARNED_STATUSES = new Set(['warned', 'justified']);
 const LINEAGE_LIMIT = 25;

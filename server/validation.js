@@ -347,6 +347,7 @@ const policyUpdateSchema = z.object({
   blockedDestinations: z.array(z.string().min(1).max(253).regex(HOST_OR_LABEL)).max(LIMITS.policyListItems).optional(),
   blockedFileUploadDestinations: z.array(z.string().min(1).max(253).regex(HOST_OR_LABEL)).max(LIMITS.policyListItems).optional(),
   blockUnapprovedAiDestinations: z.boolean().optional(),
+  responseScanMode: z.enum(['flag', 'redact', 'block']).optional(),
   desktopCollectorDestination: z.string().min(1).max(80).regex(DESKTOP_DESTINATION_LABEL).refine((value) => value.trim().length > 0, {
     message: 'required',
   }).optional(),

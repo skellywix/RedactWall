@@ -684,6 +684,12 @@ uploads, endpoint file flows, and `/api/v1/scan-file` return
 `file_upload_blocked` before uploaded bytes, extracted text, or sensitive
 filenames are retained.
 
+Security Admins can set `responseScanMode` from the Policy tab to choose how
+AI replies are handled when `/api/v1/scan-response` detects sensitive content.
+`flag` records sanitized evidence and alerts, `redact` returns a safe response
+preview without creating a reviewer queue item, and `block` suppresses display
+as `response_blocked` with sanitized workflow routing.
+
 Use host names or URLs for web tools, for example `chatgpt.com` or
 `https://chat.deepseek.com`. Use wildcards such as `*.example-ai.com` for
 subdomains. Desktop app labels normalize spaces to hyphens, so a native handoff

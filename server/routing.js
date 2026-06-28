@@ -18,6 +18,7 @@ const ROUTABLE_STATUSES = new Set([
   'ocr_required',
   'injection_blocked',
   'response_flagged',
+  'response_blocked',
 ]);
 
 const SECURITY_LABELS = new Set([

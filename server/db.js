@@ -188,6 +188,7 @@ const STATS_BLOCKED_STATUSES = [
   'file_blocked_unscanned',
   'ocr_required',
   'response_flagged',
+  'response_blocked',
 ];
 
 function normalizePurgeStatuses(statuses) {

@@ -20,6 +20,7 @@ const ROUTING_REASON_RE = /^[a-z0-9][a-z0-9_:-]{0,79}$/;
 const ROUTING_DETECTOR_RE = /^[A-Z0-9_]{1,80}$/;
 const POLICY_MATCH_TEXT_RE = /^[A-Za-z0-9 ._@:+/-]{1,128}$/;
 const POLICY_MODE_RANK = { warn: 1, redact: 2, justify: 2, block: 3 };
+const RESPONSE_SCAN_MODES = new Set(['flag', 'redact', 'block']);
 const SENSITIVE_ROUTING_CODE_RE = /(?:\d{3}[-_:.]?\d{2}[-_:.]?\d{4}|\d{12,19})/;
 const DEFAULT_REQUIRED_SENSORS = ['browser_extension', 'endpoint_agent', 'mcp_guard'];
 const DEFAULT_DESIRED_SENSOR_VERSIONS = Object.fromEntries(
@@ -49,6 +50,7 @@ const DEFAULT_POLICY = {
   blockedDestinations: [],
   blockedFileUploadDestinations: [],
   blockUnapprovedAiDestinations: true,
+  responseScanMode: 'flag',
   desktopCollectorDestination: 'Desktop AI',
   approvalRoutingRules: [],
   policyScopes: [],
@@ -91,6 +93,11 @@ function normalizeDesiredSensorVersions(value, fallback = DEFAULT_POLICY.desired
     out[key] = version;
   }
   return out;
+}
+
+function normalizeResponseScanMode(value) {
+  const mode = String(value || '').trim().toLowerCase();
+  return RESPONSE_SCAN_MODES.has(mode) ? mode : DEFAULT_POLICY.responseScanMode;
 }
 
 function normalizeRoutingTextList(value, pattern, maxItems = 40) {
@@ -291,6 +298,7 @@ function normalizePolicy(p = {}) {
     policyExceptions: normalizePolicyExceptions((p || {}).policyExceptions),
     requiredSensors: normalizeRequiredSensors((p || {}).requiredSensors),
     desiredSensorVersions: normalizeDesiredSensorVersions((p || {}).desiredSensorVersions),
+    responseScanMode: normalizeResponseScanMode((p || {}).responseScanMode),
     scanner,
   };
 }
@@ -309,6 +317,7 @@ const AUDIT_FIELDS = [
   'blockedDestinations',
   'blockedFileUploadDestinations',
   'blockUnapprovedAiDestinations',
+  'responseScanMode',
   'desktopCollectorDestination',
   'approvalRoutingRules',
   'policyScopes',
@@ -621,6 +630,7 @@ module.exports = {
   destinationReviewed,
   fileUploadBlocked,
   unapprovedAiDestination,
+  normalizeResponseScanMode,
   policyChangeSummary,
   policyChangeDetail,
   DEFAULT_POLICY,

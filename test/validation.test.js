@@ -635,6 +635,7 @@ test('sensor policy endpoint publishes detector and scanner controls', async () 
   assert.ok(Array.isArray(body.blockedDestinations));
   assert.ok(Array.isArray(body.blockedFileUploadDestinations));
   assert.strictEqual(body.blockUnapprovedAiDestinations, true);
+  assert.strictEqual(body.responseScanMode, 'flag');
   assert.strictEqual(body.desktopCollectorDestination, 'Desktop AI');
   assert.ok(Array.isArray(body.requiredSensors));
   assert.ok(body.requiredSensors.includes('browser_extension'));

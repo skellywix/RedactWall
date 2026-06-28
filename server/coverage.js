@@ -24,7 +24,9 @@ const BLOCKED_STATUSES = new Set([
   'file_blocked_unscanned',
   'ocr_required',
   'response_flagged',
+  'response_blocked',
 ]);
+const REDACTED_STATUSES = new Set(['redacted', 'response_redacted']);
 
 function normalizeDestination(destination) {
   const raw = String(destination || 'unknown').trim().toLowerCase();
@@ -92,7 +94,7 @@ function emptyAggregate(destination, policyState = 'review') {
 function bumpAggregate(bucket, q) {
   bucket.events += 1;
   if (BLOCKED_STATUSES.has(q.status)) bucket.blocked += 1;
-  if (q.status === 'redacted') bucket.redacted += 1;
+  if (REDACTED_STATUSES.has(q.status)) bucket.redacted += 1;
   if (isShadowAiEvent(q)) bucket.shadow += 1;
   if (q.user) bucket.users.add(q.user);
   if (!bucket.lastSeen || String(q.createdAt || '') > bucket.lastSeen) bucket.lastSeen = q.createdAt || null;

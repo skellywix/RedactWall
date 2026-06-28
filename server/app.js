@@ -451,6 +451,13 @@ function safePreview(text, analysis, prefix = '', limit = 600) {
   return prefix + detector.redact(text, analysis.findings || []).slice(0, limit);
 }
 
+function responseScanOutcome(mode) {
+  const normalized = policy.normalizeResponseScanMode(mode);
+  if (normalized === 'block') return { status: 'response_blocked', decision: 'block', action: 'RESPONSE_BLOCKED' };
+  if (normalized === 'redact') return { status: 'response_redacted', decision: 'redact', action: 'RESPONSE_REDACTED' };
+  return { status: 'response_flagged', decision: 'flag', action: 'RESPONSE_FLAGGED' };
+}
+
 function clientFindingsFrom(body) {
   return (body.clientFindings || [])
     .filter((f) => f && typeof f.type === 'string')
@@ -862,6 +869,7 @@ app.get('/api/v1/policy', checkIngestKey, (req, res) => {
     blockedDestinations: p.blockedDestinations || [],
     blockedFileUploadDestinations: p.blockedFileUploadDestinations || [],
     blockUnapprovedAiDestinations: p.blockUnapprovedAiDestinations !== false,
+    responseScanMode: p.responseScanMode || policy.DEFAULT_POLICY.responseScanMode,
     desktopCollectorDestination: p.desktopCollectorDestination || policy.DEFAULT_POLICY.desktopCollectorDestination,
     requiredSensors: p.requiredSensors || policy.DEFAULT_POLICY.requiredSensors,
     desiredSensorVersions: p.desiredSensorVersions || policy.DEFAULT_POLICY.desiredSensorVersions,
@@ -1015,17 +1023,27 @@ app.post('/api/v1/scan-response', checkIngestKey, validation.validateBody(valida
   const categories = (analysis.categories || []).map((c) => c.category);
   const redacted = safePreview(text, analysis);
   const leaked = findings.length > 0 || categories.length > 0;
+  const outcome = responseScanOutcome(pol.responseScanMode);
   if (leaked) {
-    const row = createQuery({ status: 'response_flagged', user, orgId, destination, source, channel: 'ai_response', sensor,
+    const row = createQuery({ status: outcome.status, mode: 'response_' + outcome.decision, user, orgId, destination, source, channel: 'ai_response', sensor,
       redactedPrompt: '[AI response] ' + redacted, findings, categories, entityCounts: analysis.entityCounts,
       riskScore: analysis.riskScore, maxSeverity: analysis.maxSeverity, maxSeverityLabel: analysis.maxSeverityLabel,
-      reasons: ['Sensitive data present in AI response'] });
-    db.appendAudit({ action: 'RESPONSE_FLAGGED', queryId: row.id, actor: user, detail: `${source}: ${findings.map((f) => f.type).join(', ') || categories.join(', ')}` });
-    emitSecurityAlert(row, 'RESPONSE_FLAGGED');
-    broadcast('query', { type: 'response_flagged', query: publicQuery(row) });
+      reasons: ['Sensitive data present in AI response', 'Response scan mode: ' + outcome.decision] });
+    db.appendAudit({ action: outcome.action, queryId: row.id, actor: user, detail: `${source}: ${findings.map((f) => f.type).join(', ') || categories.join(', ')}` });
+    emitSecurityAlert(row, outcome.action);
+    broadcast('query', { type: outcome.status, query: publicQuery(row) });
     broadcast('stats', db.stats());
   }
-  res.json({ leaked, findings, categories, redacted });
+  res.json({
+    leaked,
+    decision: leaked ? outcome.decision : 'allow',
+    status: leaked ? outcome.status : 'allowed',
+    blocked: leaked && outcome.decision === 'block',
+    findings,
+    categories,
+    redacted,
+    reasons: leaked ? ['Sensitive data present in AI response', 'Response scan mode: ' + outcome.decision] : ['Nothing sensitive detected'],
+  });
 });
 
 // Client polls for release decision.
