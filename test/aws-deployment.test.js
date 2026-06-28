@@ -26,10 +26,27 @@ test('AWS customer-silo template uses local EBS-backed data and Secrets Manager'
   assert.match(template, /HealthCheckPath: \/readyz/);
 });
 
+test('AWS customer-silo template bootstraps recurring examiner evidence packs', () => {
+  assert.match(template, /docker cp promptwall:\/app\/scripts\/run-evidence-pack\.sh \/usr\/local\/bin\/promptwall-run-evidence-pack/);
+  assert.match(template, /docker cp promptwall:\/app\/config\/evidence-schedule\.example\.json \/var\/lib\/promptwall\/evidence-schedule\.json/);
+  assert.match(template, /PROMPTWALL_EVIDENCE_MODE='docker'/);
+  assert.match(template, /PROMPTWALL_EVIDENCE_CONFIG='\/data\/evidence-schedule\.json'/);
+  assert.match(template, /PROMPTWALL_EVIDENCE_CONTAINER='promptwall'/);
+  assert.match(template, /ExecStart=\/usr\/local\/bin\/promptwall-run-evidence-pack/);
+  assert.match(template, /OnCalendar=quarterly/);
+  assert.match(template, /Persistent=true/);
+  assert.match(template, /systemctl enable --now promptwall-evidence-pack\.timer/);
+  const unitEnv = template.match(/cat > \/etc\/promptwall\/evidence-pack\.env <<'EOF'([\s\S]*?)EOF/);
+  assert.ok(unitEnv);
+  assert.doesNotMatch(unitEnv[1], /SENTINEL_SECRET|SENTINEL_DATA_KEY|INGEST_API_KEY|ADMIN_PASSWORD|AUDITOR_PASSWORD/);
+});
+
 test('AWS SaaS deployment docs include launch and validation steps', () => {
   assert.match(docs, /customer-silo model/);
   assert.match(docs, /aws ecr create-repository/);
   assert.match(docs, /aws cloudformation deploy/);
   assert.match(docs, /\/api\/billing\/seats/);
   assert.match(docs, /Do not run this app on Fargate with SQLite over EFS/);
+  assert.match(docs, /promptwall-evidence-pack\.timer/);
+  assert.match(docs, /\/var\/lib\/promptwall\/evidence-schedule\.json/);
 });

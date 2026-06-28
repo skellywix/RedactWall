@@ -601,6 +601,24 @@ environment secrets, release tokens, and uploaded file bytes out of the task
 definition and generated pack. Keep the generated JSON or zip in the approved
 evidence location, not in email or a synced personal folder.
 
+On Linux or AWS Docker hosts, put the schedule config in the mounted data folder
+and install the standard systemd timer:
+
+```bash
+sudo cp config/evidence-schedule.example.json /var/lib/promptwall/evidence-schedule.json
+sudo editor /var/lib/promptwall/evidence-schedule.json
+sudo npm run evidence:pack:install-systemd -- \
+  --mode docker \
+  --container promptwall \
+  --config /data/evidence-schedule.json \
+  --on-calendar quarterly
+```
+
+Set `outDir` to `/data/evidence-packs`. The timer writes status to
+`/var/log/promptwall/evidence-pack.log`, uses `Persistent=true` for missed
+runs, and keeps raw prompt bodies, environment secrets, release tokens, and
+uploaded file bytes out of the systemd unit.
+
 ## Production Handoff Packet
 
 Deliver a packet with:

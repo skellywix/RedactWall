@@ -578,6 +578,25 @@ path, schedule config path, and log path as task arguments. It does not place
 environment secrets, prompt bodies, release tokens, or upload contents in the
 scheduled task definition.
 
+On Linux customer-silo hosts, especially the Docker shape used by the AWS
+runbook, keep the schedule config in the mounted data folder and install the
+systemd timer:
+
+```bash
+sudo cp config/evidence-schedule.example.json /var/lib/promptwall/evidence-schedule.json
+sudo editor /var/lib/promptwall/evidence-schedule.json
+sudo npm run evidence:pack:install-systemd -- \
+  --mode docker \
+  --container promptwall \
+  --config /data/evidence-schedule.json \
+  --on-calendar quarterly
+```
+
+Set the schedule config `outDir` to `/data/evidence-packs` for Docker hosts.
+The systemd unit writes status to `/var/log/promptwall/evidence-pack.log`, uses
+`Persistent=true` for missed runs, and stores only scheduler metadata in
+`/etc/promptwall/evidence-pack.env`.
+
 ## SIEM Alerts
 
 Set `SIEM_WEBHOOK_URL` to send sanitized security events to a SOC or SIEM webhook. Payloads omit prompt bodies, raw retained prompts, token vaults, and raw finding values. Alert payloads include bounded workflow metadata so a SOC can see the assigned group and SLA without receiving sensitive content.

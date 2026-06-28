@@ -92,6 +92,8 @@ This section is generated from the app by `npm run docs:demo-guide`. Do not hand
 | `npm run evidence:pack:zip` | `node scripts/export-evidence-pack.js --zip` |
 | `npm run evidence:pack:scheduled` | `node scripts/export-evidence-pack.js --schedule` |
 | `npm run evidence:pack:install-task` | `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/install-evidence-pack-task.ps1` |
+| `npm run evidence:pack:run-linux` | `bash scripts/run-evidence-pack.sh` |
+| `npm run evidence:pack:install-systemd` | `bash scripts/install-evidence-pack-systemd.sh` |
 | `npm run package:extension` | `node scripts/package-extension.js` |
 | `npm run release:extension:check` | `node scripts/check-extension-release.js` |
 | `npm run package:endpoint-agent` | `node scripts/package-endpoint-agent.js` |

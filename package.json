@@ -27,6 +27,8 @@
     "evidence:pack:zip": "node scripts/export-evidence-pack.js --zip",
     "evidence:pack:scheduled": "node scripts/export-evidence-pack.js --schedule",
     "evidence:pack:install-task": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/install-evidence-pack-task.ps1",
+    "evidence:pack:run-linux": "bash scripts/run-evidence-pack.sh",
+    "evidence:pack:install-systemd": "bash scripts/install-evidence-pack-systemd.sh",
     "package:extension": "node scripts/package-extension.js",
     "release:extension:check": "node scripts/check-extension-release.js",
     "package:endpoint-agent": "node scripts/package-endpoint-agent.js",

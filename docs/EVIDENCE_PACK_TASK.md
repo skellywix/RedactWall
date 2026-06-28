@@ -1,9 +1,10 @@
-# Examiner Evidence Pack Task
+# Examiner Evidence Pack Schedules
 
-PromptWall can register a local Windows scheduled task that generates sanitized
-examiner evidence packs from `config/evidence-schedule.json`.
+PromptWall can register recurring jobs that generate sanitized examiner evidence
+packs from a schedule config. Use Windows Task Scheduler on pilot workstations
+and systemd timers on Linux or AWS customer-silo hosts.
 
-## Schedule
+## Windows Task Scheduler
 
 - Task name: `\PromptWall\PromptWall Examiner Evidence Pack`
 - Default trigger: every 13 weeks on Sunday at 11:00 PM local machine time
@@ -45,4 +46,65 @@ For a direct manual run without registering Task Scheduler:
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\run-evidence-pack.ps1 `
   -ConfigPath config\evidence-schedule.json
+```
+
+## Linux systemd Timer
+
+For Docker customer-silo hosts, put the schedule config in the mounted data
+folder so the container sees it at `/data/evidence-schedule.json`:
+
+```bash
+sudo cp config/evidence-schedule.example.json /var/lib/promptwall/evidence-schedule.json
+sudo editor /var/lib/promptwall/evidence-schedule.json
+```
+
+Set `outDir` inside that file to `/data/evidence-packs`, then install the
+timer:
+
+```bash
+sudo npm run evidence:pack:install-systemd -- \
+  --mode docker \
+  --container promptwall \
+  --config /data/evidence-schedule.json \
+  --on-calendar quarterly
+```
+
+For a local Linux repo checkout without Docker:
+
+```bash
+sudo npm run evidence:pack:install-systemd -- \
+  --mode npm \
+  --project-dir /opt/promptwall \
+  --config config/evidence-schedule.json \
+  --on-calendar weekly
+```
+
+The installer writes:
+
+- `/usr/local/bin/promptwall-run-evidence-pack`
+- `/etc/promptwall/evidence-pack.env`
+- `/etc/systemd/system/promptwall-evidence-pack.service`
+- `/etc/systemd/system/promptwall-evidence-pack.timer`
+- `/var/log/promptwall/evidence-pack.log`
+
+The timer uses `Persistent=true`, so a missed run executes after the host comes
+back online. The unit environment contains scheduler metadata only: mode, repo
+or container name, config path, and log path. It does not include admin
+passwords, ingest keys, encryption keys, raw prompt bodies, release tokens, or
+uploaded file bytes.
+
+Run a one-off pack through the installed service:
+
+```bash
+sudo systemctl start promptwall-evidence-pack.service
+```
+
+For a direct Linux run without registering systemd:
+
+```bash
+npm run evidence:pack:run-linux -- \
+  --mode npm \
+  --project-dir "$PWD" \
+  --config config/evidence-schedule.json \
+  --log /tmp/promptwall-evidence-pack.log
 ```

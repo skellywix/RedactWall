@@ -31,6 +31,8 @@ const DEMO_COMMANDS = [
   'evidence:pack:zip',
   'evidence:pack:scheduled',
   'evidence:pack:install-task',
+  'evidence:pack:run-linux',
+  'evidence:pack:install-systemd',
   'package:extension',
   'release:extension:check',
   'package:endpoint-agent',

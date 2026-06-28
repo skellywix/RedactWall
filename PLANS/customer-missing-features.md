@@ -266,11 +266,10 @@ Current state: sanitized evidence export includes audit integrity, policy, parse
 policy diffs, coverage posture, sensor versions, lineage summaries, report
 metadata, backup status, restore-drill status, and control mappings. Backup and
 restore tooling exists, `npm run evidence:pack` can generate dated JSON or
-optional zip packs from the local evidence store, and
-`npm run evidence:pack:install-task` installs a Windows Task Scheduler wrapper
-for the scheduled export config. Non-Windows customer-silo deployments should
-invoke the schedule config from cron, systemd timers, or the customer runbook
-scheduler.
+optional zip packs from the local evidence store,
+`npm run evidence:pack:install-task` installs a Windows Task Scheduler wrapper,
+and `npm run evidence:pack:install-systemd` installs a Linux systemd timer for
+Docker or local-npm hosts.
 
 Customer ask: "Can we hand an examiner a quarterly pack that maps to GLBA, NCUA,
 PCI, and HIPAA controls without exporting sensitive prompts?"
@@ -288,10 +287,13 @@ Implementation connection:
   config template.
 - Use `scripts/install-evidence-pack-task.ps1` and
   `scripts/run-evidence-pack.ps1` for Windows scheduled examiner-pack exports.
+- Use `scripts/install-evidence-pack-systemd.sh` and
+  `scripts/run-evidence-pack.sh` for Linux scheduled examiner-pack exports.
 
 Acceptance evidence:
 - `node --test test/evidence.test.js test/backup-store.test.js test/policy-history.test.js`
 - `node --test test/evidence-pack-task.test.js`
+- `node --test test/evidence-pack-systemd.test.js`
 - `npm run backup -- <temp>` and `npm run backup:verify -- <backup.db>`
 - Evidence pack grep confirms no synthetic SSN, card, API key, release token, or
   raw prompt survives in the export.
