@@ -45,6 +45,7 @@ test('true positives - regulated customer identifiers are caught', () => {
   assert.ok(hasType('loan number LN-98765432 is on the payoff request', 'LOAN_NUMBER'), 'loan number');
   assert.ok(hasType('MRN MRN-1234567 appears in the chart', 'MEDICAL_RECORD_NUMBER'), 'medical record number');
   assert.ok(hasType('medical insurance number INS-1234567 is on the claim', 'HEALTH_INSURANCE_ID'), 'health insurance ID');
+  assert.ok(hasType('health insurance member id HIX-654321 is on the claim', 'HEALTH_INSURANCE_ID'), 'health insurance member ID');
   assert.ok(hasType('Use SWIFT code BOFAUS3N for the wire transfer', 'SWIFT_BIC'), 'SWIFT/BIC');
   assert.ok(hasType('IPv6 address 2001:0db8:85a3:0000:0000:8a2e:0370:7334 hit the gateway', 'IPV6_ADDRESS'), 'IPv6');
   assert.ok(hasCat('Patient has a diagnosis of diabetes and medication metformin in the discharge summary', 'HEALTH_RECORD'), 'health record category');

@@ -164,7 +164,7 @@
     { id: 'MEMBER_ID', score: 0.76, re: /\b(?:member|customer|client|account holder)\s*(?:id|number|no\.?|#)\s*[:#-]?\s*([A-Z0-9][A-Z0-9_-]{4,24})\b/gi, group: 1, validate: (m) => idValuePlausible(m, 4, 28) },
     { id: 'LOAN_NUMBER', score: 0.74, re: /\b(?:loan|mortgage|application|case)\s*(?:id|number|no\.?|#)\s*[:#-]?\s*([A-Z0-9][A-Z0-9_-]{4,24})\b/gi, group: 1, validate: (m) => idValuePlausible(m, 4, 28) },
     { id: 'MEDICAL_RECORD_NUMBER', score: 0.78, re: /\b(?:mrn|medical record|patient record|chart)\s*(?:id|number|no\.?|#)?\s*[:#-]?\s*([A-Z0-9][A-Z0-9_-]{5,24})\b/gi, group: 1, validate: (m) => idValuePlausible(m, 4, 28) },
-    { id: 'HEALTH_INSURANCE_ID', score: 0.74, re: /\b(?:health|medical|insurance|subscriber|policy|group)\s*(?:member\s*)?(?:id|number|no\.?|#)\s*[:#-]?\s*([A-Z0-9][A-Z0-9_-]{5,24})\b/gi, group: 1, ctx: /\b(health|medical|insurance|subscriber|policy|group|plan)\b/i, validate: (m) => idValuePlausible(m, 4, 28) },
+    { id: 'HEALTH_INSURANCE_ID', score: 0.79, re: /\b(?:health|medical|insurance|subscriber|policy|group)\s*(?:member\s*)?(?:id|number|no\.?|#)\s*[:#-]?\s*([A-Z0-9][A-Z0-9_-]{5,24})\b/gi, group: 1, ctx: /\b(health|medical|insurance|subscriber|policy|group|plan)\b/i, validate: (m) => idValuePlausible(m, 4, 28) },
     { id: 'SWIFT_BIC', score: 0.7, re: /\b[A-Z]{6}[A-Z0-9]{2}(?:[A-Z0-9]{3})?\b/g, ctx: /\b(swift|bic|international wire|wire transfer)\b/i },
     { id: 'EMAIL_ADDRESS', score: 0.95, re: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g },
     { id: 'PHONE_NUMBER', score: 0.7, re: /(?:\+?1[ .-]?)?\(?\b\d{3}\)?[ .-]?\d{3}[ .-]?\d{4}\b/g, validate: (m) => /[()\-. ]/.test(m) || m.length === 10 },
