@@ -69,8 +69,8 @@ Build next:
   compliance, privacy, or legal queues with sanitized workflow metadata in the
   dashboard, SIEM alerts, and examiner evidence.
 - Add best-effort approval notification adapters for generic JSON webhooks,
-  Slack, and Microsoft Teams, plus persisted notification status and SLA
-  escalation audit events.
+  Slack, Microsoft Teams, and SMTP reviewer distribution lists, plus persisted
+  notification status and SLA escalation audit events.
 - Add customer-configurable approval routing rules so Security Admins can route
   held decisions by SCIM user, SCIM group, org id, detector, category, source,
   channel, destination, severity, and risk without exposing prompt or file

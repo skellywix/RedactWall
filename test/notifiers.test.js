@@ -2,6 +2,7 @@
 /** Approval notification adapters must stay sanitized. */
 const test = require('node:test');
 const assert = require('node:assert');
+const net = require('node:net');
 const notifiers = require('../server/notifiers');
 
 function sampleQuery(overrides = {}) {
@@ -92,6 +93,91 @@ test('generic, Slack, and Teams adapters send sanitized payloads', async () => {
   assert.ok(!wire.includes('Member Jane'));
   assert.ok(!wire.includes('sealed-vault'));
   assert.match(wire, /US_SSN/);
+});
+
+test('SMTP adapter sends sanitized approval email through a relay', async (t) => {
+  const received = [];
+  const server = net.createServer((socket) => {
+    let buffer = '';
+    let dataMode = false;
+    let message = '';
+    socket.write('220 smtp.test ESMTP\r\n');
+    socket.on('data', (chunk) => {
+      buffer += chunk.toString('utf8');
+      while (buffer.includes('\n')) {
+        const idx = buffer.indexOf('\n');
+        const line = buffer.slice(0, idx).replace(/\r$/, '');
+        buffer = buffer.slice(idx + 1);
+        if (dataMode) {
+          if (line === '.') {
+            received.push(message);
+            message = '';
+            dataMode = false;
+            socket.write('250 queued\r\n');
+          } else {
+            message += line + '\n';
+          }
+          continue;
+        }
+        if (/^EHLO\b/i.test(line)) socket.write('250 smtp.test\r\n');
+        else if (/^MAIL FROM:/i.test(line)) socket.write('250 sender ok\r\n');
+        else if (/^RCPT TO:/i.test(line)) socket.write('250 recipient ok\r\n');
+        else if (/^DATA$/i.test(line)) {
+          dataMode = true;
+          socket.write('354 end with dot\r\n');
+        } else if (/^QUIT$/i.test(line)) {
+          socket.write('221 bye\r\n');
+          socket.end();
+        } else {
+          socket.write('250 ok\r\n');
+        }
+      }
+    });
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+
+  const port = server.address().port;
+  const result = await notifiers.emitApprovalNotification(sampleQuery(), {
+    env: {
+      APPROVAL_SMTP_HOST: '127.0.0.1',
+      APPROVAL_SMTP_PORT: String(port),
+      APPROVAL_SMTP_FROM: 'PromptWall <alerts@example.test>',
+      APPROVAL_SMTP_TO: 'compliance@example.test; security@example.test',
+      APPROVAL_SMTP_ALLOW_INSECURE: 'true',
+    },
+  });
+
+  assert.strictEqual(result.sent, true);
+  assert.strictEqual(result.status, 'sent');
+  assert.deepStrictEqual(result.channels, ['smtp']);
+  assert.strictEqual(received.length, 1);
+  const wire = received[0];
+  assert.match(wire, /Subject: \[PromptWall\] Approval routed: q_notify/);
+  assert.match(wire, /To: compliance@example.test, security@example.test/);
+  assert.match(wire, /Owner: compliance \/ approver/);
+  assert.match(wire, /Labels: US_SSN/);
+  assert.ok(!wire.includes('524-71-9043'));
+  assert.ok(!wire.includes('Member Jane'));
+  assert.ok(!wire.includes('sealed-vault'));
+  assert.ok(!wire.includes('release-secret-hash'));
+  assert.ok(!wire.includes('ps_ingest_should_not_leave'));
+});
+
+test('SMTP message builder strips header injection and sensitive prompt fields', () => {
+  const payload = notifiers.sanitizedApprovalNotification(sampleQuery());
+  const message = notifiers.smtpMessageForPayload({
+    from: 'PromptWall\r\nBcc: leak@example.test <alerts@example.test>',
+    to: ['compliance@example.test'],
+  }, payload, new Date('2026-06-28T12:00:00.000Z'));
+
+  assert.doesNotMatch(message, /^Bcc:/m);
+  assert.match(message, /Subject: \[PromptWall\] Approval routed: q_notify/);
+  assert.ok(!message.includes('524-71-9043'));
+  assert.ok(!message.includes('Member Jane'));
+  assert.ok(!message.includes('sealed raw'));
+  assert.ok(!message.includes('sealed-vault'));
+  assert.ok(!message.includes('release-secret-hash'));
 });
 
 test('delivery status distinguishes sent, partial, failed, and disabled', () => {
