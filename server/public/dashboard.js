@@ -1147,83 +1147,307 @@ async function exportEvidence(){
   }
 }
 
+function checkMap(preflight) {
+  return new Map(((preflight && preflight.checks) || []).map((item) => [item.id, item]));
+}
+
+function checkGroupState(preflight, ids) {
+  const checks = checkMap(preflight);
+  const selected = ids.map((id) => checks.get(id)).filter(Boolean);
+  if (!selected.length) return 'warn';
+  if (selected.some((item) => !item.ok && item.severity === 'error')) return 'bad';
+  if (selected.some((item) => !item.ok)) return 'warn';
+  return 'good';
+}
+
+function stateLabel(state) {
+  return ({ good: 'Ready', warn: 'Needs review', bad: 'Blocked' })[state] || 'Review';
+}
+
+function statePill(state, label = stateLabel(state)) {
+  const tone = state === 'bad' ? 'bad' : state === 'warn' ? 'warn' : 'good';
+  return `<span class="pill ${tone}">${escapeHtml(label)}</span>`;
+}
+
+function configHealth(preflight) {
+  const checks = (preflight && preflight.checks) || [];
+  const ok = checks.filter((item) => item.ok).length;
+  const score = checks.length ? Math.round((ok / checks.length) * 100) : 0;
+  const state = preflight && preflight.level === 'blocked' ? 'bad' : score < 100 ? 'warn' : 'good';
+  return {
+    score,
+    ok,
+    total: checks.length,
+    state,
+    failed: checks.length - ok,
+    label: preflight && preflight.level ? humanize(preflight.level) : 'unknown',
+  };
+}
+
+function setupChecklist(p, preflight, coverage) {
+  const health = configHealth(preflight);
+  const sensorCount = (coverage && coverage.sensors || []).filter((sensor) => sensor.events || sensor.required).length;
+  const items = [
+    ['Admin access', checkGroupState(preflight, ['admin_password', 'admin_password_strength', 'admin_mfa', 'session_secret']), 'MFA, password, session'],
+    ['Identity provider', checkGroupState(preflight, ['oidc_config', 'oidc_scim_users', 'scim_bearer_token_strength']), 'OIDC and SCIM'],
+    ['Deploy sensors', sensorCount ? 'good' : 'warn', `${sensorCount || 0} observed`],
+    ['Define destinations', (p.governedDestinations || []).length ? 'good' : 'warn', `${(p.governedDestinations || []).length} governed`],
+    ['Choose policy mode', p.enforcementMode ? 'good' : 'warn', humanize(p.enforcementMode)],
+    ['Set approval routing', (p.approvalRoutingRules || []).length ? 'good' : 'warn', `${(p.approvalRoutingRules || []).length} rules`],
+    ['Review DLP rules', (p.alwaysBlock || []).length ? 'good' : 'warn', `${(p.alwaysBlock || []).length} hard stops`],
+    ['Test configuration', health.state === 'bad' ? 'bad' : 'good', `${health.ok}/${health.total || 0} checks`],
+  ];
+  const done = items.filter(([, state]) => state === 'good').length;
+  return { items, done, total: items.length };
+}
+
+function renderSetupChecklist(p, preflight, coverage) {
+  const checklist = setupChecklist(p, preflight, coverage);
+  return `<div class="config-card pad">
+    <div class="sensor-head">
+      <div><h3>Setup Checklist</h3><p>Fast path from install to governed pilot.</p></div>
+      <span class="pill ${checklist.done === checklist.total ? 'good' : 'warn'}">${escapeHtml(checklist.done)}/${escapeHtml(checklist.total)} ready</span>
+    </div>
+    <div class="setup-list">${checklist.items.map(([label, state, detail]) => `
+      <div class="setup-item">
+        <span class="setup-dot ${escapeHtml(state)}">${state === 'bad' ? '!' : ''}</span>
+        <span>${escapeHtml(label)}</span>
+        <small>${escapeHtml(detail)}</small>
+      </div>`).join('')}</div>
+  </div>`;
+}
+
+function renderHealthCard(preflight, coverage, p) {
+  const health = configHealth(preflight);
+  const totals = (coverage && coverage.totals) || {};
+  return `<div class="config-card pad">
+    <div class="sensor-head">
+      <div><h3>Configuration Health</h3><p>Readiness across auth, sensors, data, and governance.</p></div>
+      ${statePill(health.state, health.state === 'good' ? 'Good' : health.label)}
+    </div>
+    <div class="health-score ${escapeHtml(health.state)}"><b>${escapeHtml(health.score)}</b><span>/ 100</span></div>
+    <div class="health-rows">
+      <div class="health-row"><span>Sensors</span><b>${escapeHtml((p.requiredSensors || []).length || 0)} required</b></div>
+      <div class="health-row"><span>Destinations</span><b>${escapeHtml((p.governedDestinations || []).length || 0)} governed</b></div>
+      <div class="health-row"><span>Fleet gaps</span><b>${escapeHtml(totals.fleetAttention || 0)}</b></div>
+      <div class="health-row"><span>Preflight checks</span><b>${escapeHtml(health.failed)} open</b></div>
+    </div>
+  </div>`;
+}
+
+function sensorCard(id, p, coverage) {
+  const labels = {
+    browser_extension: ['Browser Extension', 'Web AI prompts and responses'],
+    endpoint_agent: ['Endpoint Agent', 'Desktop AI apps and file handoff'],
+    mcp_guard: ['MCP Guard', 'Agent tool calls and document context'],
+  };
+  const [label, detail] = labels[id] || [humanize(id), 'Custom sensor'];
+  const sensor = ((coverage && coverage.sensors) || []).find((item) => item.source === id) || {};
+  const required = (p.requiredSensors || []).includes(id);
+  const state = sensor.installHealth && sensor.installHealth.state === 'attention'
+    ? 'warn'
+    : sensor.events || required ? 'good' : 'warn';
+  const version = (p.desiredSensorVersions || {})[id] || sensor.desiredVersion || sensor.latestVersion || '-';
+  return `<div class="sensor-card">
+    <div class="sensor-head">
+      <div><b>${escapeHtml(label)}</b><p>${escapeHtml(detail)}</p></div>
+      ${statePill(state, sensor.events ? 'Observed' : required ? 'Required' : 'Optional')}
+    </div>
+    <dl>
+      <div><dt>Desired version</dt><dd>${escapeHtml(version)}</dd></div>
+      <div><dt>Events</dt><dd>${escapeHtml(sensor.events || 0)}</dd></div>
+      <div><dt>Last seen</dt><dd>${escapeHtml(sensor.lastSeen ? fmt(sensor.lastSeen) : 'No events yet')}</dd></div>
+    </dl>
+    <button class="ghost mini" data-tab-jump="coverage" type="button">Configure sensor</button>
+  </div>`;
+}
+
+function renderSensorSetup(p, coverage) {
+  const ids = [...new Set(['browser_extension', 'endpoint_agent', 'mcp_guard', ...((p.requiredSensors || []))])];
+  return `<div class="config-card pad">
+    <div class="sensor-head">
+      <div><h3>Sensor Setup</h3><p>Deploy and manage the control points that feed one shared policy.</p></div>
+      <button class="ghost mini" data-tab-jump="coverage" type="button">View coverage</button>
+    </div>
+    <div class="sensor-cards">${ids.map((id) => sensorCard(id, p, coverage)).join('')}</div>
+  </div>`;
+}
+
+function envRow(label, state, detail) {
+  return `<div class="settings-row"><span>${escapeHtml(label)}</span><b>${statePill(state, detail)}</b></div>`;
+}
+
+function renderEnvironmentSettings(preflight) {
+  return `<div class="config-card pad">
+    <h3>Environment Settings</h3>
+    <p>Security-critical setup status without exposing secret values.</p>
+    <div class="settings-list">
+      ${envRow('Runtime', preflight && preflight.production ? 'good' : 'warn', preflight && preflight.production ? 'Production' : 'Local / pilot')}
+      ${envRow('Admin auth', checkGroupState(preflight, ['admin_password', 'admin_password_strength', 'admin_mfa']), stateLabel(checkGroupState(preflight, ['admin_password', 'admin_password_strength', 'admin_mfa'])))}
+      ${envRow('Sensor ingest key', checkGroupState(preflight, ['ingest_key', 'ingest_key_strength']), stateLabel(checkGroupState(preflight, ['ingest_key', 'ingest_key_strength'])))}
+      ${envRow('Session secret', checkGroupState(preflight, ['session_secret', 'session_secret_strength']), stateLabel(checkGroupState(preflight, ['session_secret', 'session_secret_strength'])))}
+      ${envRow('Raw approval encryption', checkGroupState(preflight, ['raw_prompt_encryption', 'data_key_strength']), stateLabel(checkGroupState(preflight, ['raw_prompt_encryption', 'data_key_strength'])))}
+      ${envRow('Evidence store', checkGroupState(preflight, ['sqlite_local_disk']), stateLabel(checkGroupState(preflight, ['sqlite_local_disk'])))}
+      ${envRow('Tenant controls', checkGroupState(preflight, ['saas_tenant_id', 'saas_seat_limit', 'saas_tenant_context', 'saas_user_identity']), stateLabel(checkGroupState(preflight, ['saas_tenant_id', 'saas_seat_limit', 'saas_tenant_context', 'saas_user_identity'])))}
+    </div>
+  </div>`;
+}
+
+function renderPolicyTemplates(tpls, readonly) {
+  return `<div class="config-card pad">
+    <div class="sensor-head">
+      <div><h3>Policy Templates</h3><p>Start from a compliance preset, then tune thresholds and destinations.</p></div>
+    </div>
+    <div class="chips">${tpls.map((t) => (readonly
+    ? `<span class="chip" title="${escapeHtml(t.description)}"><b>${escapeHtml(t.label)}</b></span>`
+    : `<button class="chip ps-tpl" data-tpl="${escapeHtml(t.id)}" title="${escapeHtml(t.description)}" type="button"><b>${escapeHtml(t.label)}</b></button>`)).join('')}</div>
+  </div>`;
+}
+
 async function loadPolicy() {
-  const pRes = await api('/api/policy');
-  const tRes = await api('/api/policy/templates');
+  const [pRes, tRes, preflightRes, coverageRes] = await Promise.all([
+    api('/api/policy'),
+    api('/api/policy/templates'),
+    api('/api/preflight'),
+    api('/api/coverage'),
+  ]);
   if (!pRes || !tRes) return;
   const p = await pRes.json();
   const tpls = await tRes.json();
+  const preflight = preflightRes && preflightRes.ok ? await preflightRes.json() : null;
+  const coverage = coverageRes && coverageRes.ok ? await coverageRes.json() : currentCoverage;
+  currentCoverage = coverage || currentCoverage;
   const readonly = !canAdminWrite();
   const modes = [
-    ['warn', 'Warn', 'Nudge the user, let them proceed'],
-    ['justify', 'Require justification', 'User must give a business reason'],
-    ['redact', 'Redact and send', 'Tokenize PII before release'],
-    ['block', 'Block', 'Hold for admin approval'],
+    ['warn', 'Monitor', 'Warn users and allow them to continue'],
+    ['justify', 'Justify', 'Require a business reason before send'],
+    ['redact', 'Redact', 'Tokenize PII before release'],
+    ['block', 'Enforce', 'Hold risky prompts for approval'],
   ];
-  const tplBar = `<div class="template-bar"><div class="template-title">Regulation templates</div>
-    <div class="chips">${tpls.map((t) => (readonly
-    ? `<span class="chip" title="${escapeHtml(t.description)}"><b>${escapeHtml(t.label)}</b></span>`
-    : `<button class="chip ps-tpl" data-tpl="${escapeHtml(t.id)}" title="${escapeHtml(t.description)}" type="button"><b>${escapeHtml(t.label)}</b></button>`)).join('')}</div></div>`;
-  $('#policyBox').innerHTML = `${tplBar}
-    <div class="policy-label">When a sensor detects sensitive content</div>
-    <div class="policy-options">
-      ${modes.map(([v, t, d]) => `<label class="policy-option ${p.enforcementMode === v ? 'selected' : ''} ${readonly ? 'readonly' : ''}">
-        <span><input type="radio" name="mode" value="${v}" ${p.enforcementMode === v ? 'checked' : ''} ${readonly ? 'disabled' : ''}/>${t}</span>
-        <p>${d}</p>
-      </label>`).join('')}
+  const health = configHealth(preflight);
+  const configStatus = $('#configurationStatus');
+  if (configStatus) configStatus.innerHTML = statePill(health.state, `${health.score}/100 ready`);
+  $('#policyBox').innerHTML = `
+    <div class="config-actions">
+      <button class="ghost" id="discardPolicy" type="button">Discard changes</button>
+      <button class="ghost" id="testConfiguration" type="button">${icons.refresh}Test configuration</button>
+      ${readonly ? '<span class="readonly-note">Read-only auditor view</span>' : `<button class="btn approve" id="savePolicy" type="button">${icons.check}Save changes</button>`}
+      <span id="polSaved" class="save-status"></span>
     </div>
-    <div class="policy-label">Trigger thresholds</div>
-    <div class="field-grid">
-      <label for="pol_sev">Block at minimum severity</label>
-      <select id="pol_sev" ${readonly ? 'disabled' : ''}>
-        ${[[1, 'low'], [2, 'medium'], [3, 'high'], [4, 'critical']].map(([v, l]) => `<option value="${v}" ${p.blockMinSeverity === v ? 'selected' : ''}>${l}</option>`).join('')}
-      </select>
-      <label for="pol_risk">Block at risk score greater than or equal to</label>
-      <input id="pol_risk" type="number" min="0" max="100" value="${escapeHtml(p.blockRiskScore)}" ${readonly ? 'disabled' : ''}/>
-      <label for="pol_retention">Purge retained raw approval data after days</label>
-      <input id="pol_retention" type="number" min="0" max="3650" value="${escapeHtml(p.rawRetentionDays ?? 30)}" ${readonly ? 'disabled' : ''}/>
-      <label for="pol_desktop_destination">Default desktop upload destination</label>
-      <input id="pol_desktop_destination" type="text" maxlength="80" value="${escapeHtml(p.desktopCollectorDestination || 'Desktop AI')}" ${readonly ? 'disabled' : ''}/>
-      <label for="pol_block_unapproved_ai">Block unapproved AI destinations</label>
-      <input id="pol_block_unapproved_ai" type="checkbox" ${p.blockUnapprovedAiDestinations !== false ? 'checked' : ''} ${readonly ? 'disabled' : ''}/>
-      <label for="pol_response_scan_mode">When AI responses contain sensitive data</label>
-      <select id="pol_response_scan_mode" ${readonly ? 'disabled' : ''}>
-        ${[
+    <div class="config-grid">
+      ${renderSetupChecklist(p, preflight, coverage)}
+      <div class="config-card pad">
+        <h3>Policy Mode</h3>
+        <p>Choose what every PromptWall sensor does when it sees sensitive content.</p>
+        <div class="policy-options mode-grid">
+          ${modes.map(([v, t, d]) => `<label class="policy-option ${p.enforcementMode === v ? 'selected' : ''} ${readonly ? 'readonly' : ''}">
+            <span><input type="radio" name="mode" value="${v}" ${p.enforcementMode === v ? 'checked' : ''} ${readonly ? 'disabled' : ''}/>${t}</span>
+            <p>${d}</p>
+          </label>`).join('')}
+        </div>
+        <p class="config-subtitle">Always-block identifiers still hard stop regardless of the selected mode.</p>
+      </div>
+      ${renderHealthCard(preflight, coverage, p)}
+    </div>
+    ${renderSensorSetup(p, coverage)}
+    <div class="config-two">
+      <div class="config-card pad">
+        <h3>Core Policy Settings</h3>
+        <p>Set thresholds, retention, response handling, and default desktop destination.</p>
+        <div class="field-grid" style="margin-top:14px">
+          <label for="pol_sev">Block at minimum severity</label>
+          <select id="pol_sev" ${readonly ? 'disabled' : ''}>
+            ${[[1, 'low'], [2, 'medium'], [3, 'high'], [4, 'critical']].map(([v, l]) => `<option value="${v}" ${p.blockMinSeverity === v ? 'selected' : ''}>${l}</option>`).join('')}
+          </select>
+          <label for="pol_risk">Block at risk score greater than or equal to</label>
+          <input id="pol_risk" type="number" min="0" max="100" value="${escapeHtml(p.blockRiskScore)}" ${readonly ? 'disabled' : ''}/>
+          <label for="pol_retention">Purge retained raw approval data after days</label>
+          <input id="pol_retention" type="number" min="0" max="3650" value="${escapeHtml(p.rawRetentionDays ?? 30)}" ${readonly ? 'disabled' : ''}/>
+          <label for="pol_desktop_destination">Default desktop upload destination</label>
+          <input id="pol_desktop_destination" type="text" maxlength="80" value="${escapeHtml(p.desktopCollectorDestination || 'Desktop AI')}" ${readonly ? 'disabled' : ''}/>
+          <label for="pol_block_unapproved_ai">Block unapproved AI destinations</label>
+          <input id="pol_block_unapproved_ai" type="checkbox" ${p.blockUnapprovedAiDestinations !== false ? 'checked' : ''} ${readonly ? 'disabled' : ''}/>
+          <label for="pol_response_scan_mode">When AI responses contain sensitive data</label>
+          <select id="pol_response_scan_mode" ${readonly ? 'disabled' : ''}>
+            ${[
     ['flag', 'Flag and alert'],
     ['redact', 'Redact before display'],
     ['block', 'Block display'],
   ].map(([v, l]) => `<option value="${v}" ${(p.responseScanMode || 'flag') === v ? 'selected' : ''}>${l}</option>`).join('')}
-      </select>
+          </select>
+        </div>
+      </div>
+      ${renderEnvironmentSettings(preflight)}
     </div>
-    <div class="policy-label">Browser action controls</div>
-    <div class="template-bar">
-      ${readonly
-    ? `<div class="chips">${(p.blockedBrowserActions || []).map((rule) => `<span class="chip"><b>${escapeHtml(rule.action || 'action')}</b> ${escapeHtml((rule.destinations || []).join(', '))}</span>`).join('') || '<span class="chip">no action blocks</span>'}</div>`
-    : `<textarea id="pol_blocked_browser_actions" class="policy-textarea" spellcheck="false" style="min-height:110px" placeholder='[{"id":"block_paste_chatgpt","action":"paste","destinations":["chatgpt.com"],"reason":"clipboard_paste_blocked"},{"id":"block_drop_claude","action":"drop","destinations":["claude.ai"],"reason":"file_drop_blocked"},{"id":"block_copy_chatgpt","action":"copy","destinations":["chatgpt.com"],"reason":"response_copy_blocked"}]'>${escapeHtml(policyJsonText(p.blockedBrowserActions))}</textarea>`}
+    <div class="config-two">
+      ${renderPolicyTemplates(tpls, readonly)}
+      <div class="config-card pad">
+        <h3>Hard-stop Entities</h3>
+        <p>These identifiers block or tokenize even if the global mode is softer.</p>
+        <div class="chips">${(p.alwaysBlock || []).map((x) => `<span class="chip"><b>${escapeHtml(x)}</b></span>`).join('')}</div>
+      </div>
     </div>
-    <div class="policy-label">Fleet posture</div>
-    <div class="policy-list-grid">
-      <label class="policy-list-field">Required sensors
+    <div class="config-card pad">
+      <h3>Destination Governance</h3>
+      <p>Define approved AI platforms, explicit allowlists, hard blocks, and file-upload restrictions.</p>
+      <div class="policy-list-grid" style="margin-top:14px">
+        <label class="policy-list-field">Governed AI destinations
+          ${readonly
+    ? `<div class="chips">${(p.governedDestinations || []).map((x) => `<span class="chip">${escapeHtml(x)}</span>`).join('')}</div>`
+    : `<textarea id="pol_governed_destinations" class="policy-textarea" spellcheck="false">${escapeHtml(policyListText(p.governedDestinations))}</textarea>`}
+        </label>
+        <label class="policy-list-field">Allowed AI destinations
+          ${readonly
+    ? `<div class="chips">${(p.allowedDestinations || []).map((x) => `<span class="chip">${escapeHtml(x)}</span>`).join('') || '<span class="chip">none</span>'}</div>`
+    : `<textarea id="pol_allowed_destinations" class="policy-textarea" spellcheck="false" placeholder="chatgpt.com&#10;claude.ai">${escapeHtml(policyListText(p.allowedDestinations))}</textarea>`}
+        </label>
+        <label class="policy-list-field">Blocked AI destinations
+          ${readonly
+    ? `<div class="chips">${(p.blockedDestinations || []).map((x) => `<span class="chip">${escapeHtml(x)}</span>`).join('') || '<span class="chip">none</span>'}</div>`
+    : `<textarea id="pol_blocked_destinations" class="policy-textarea" spellcheck="false" placeholder="deepseek.com&#10;*.example-ai.com">${escapeHtml(policyListText(p.blockedDestinations))}</textarea>`}
+        </label>
+        <label class="policy-list-field">Blocked file uploads
+          ${readonly
+    ? `<div class="chips">${(p.blockedFileUploadDestinations || []).map((x) => `<span class="chip">${escapeHtml(x)}</span>`).join('') || '<span class="chip">none</span>'}</div>`
+    : `<textarea id="pol_blocked_file_upload_destinations" class="policy-textarea" spellcheck="false" placeholder="chatgpt.com&#10;desktop-ai-app">${escapeHtml(policyListText(p.blockedFileUploadDestinations))}</textarea>`}
+        </label>
+      </div>
+    </div>
+    <div class="config-two">
+      <div class="config-card pad">
+        <h3>Browser Action Controls</h3>
+        <p>Block paste, drop, or copy actions on specific destinations before data leaves the browser.</p>
         ${readonly
+    ? `<div class="chips">${(p.blockedBrowserActions || []).map((rule) => `<span class="chip"><b>${escapeHtml(rule.action || 'action')}</b> ${escapeHtml((rule.destinations || []).join(', '))}</span>`).join('') || '<span class="chip">no action blocks</span>'}</div>`
+    : `<textarea id="pol_blocked_browser_actions" class="policy-textarea" spellcheck="false" style="min-height:130px;margin-top:12px" placeholder='[{"id":"block_paste_chatgpt","action":"paste","destinations":["chatgpt.com"],"reason":"clipboard_paste_blocked"},{"id":"block_drop_claude","action":"drop","destinations":["claude.ai"],"reason":"file_drop_blocked"},{"id":"block_copy_chatgpt","action":"copy","destinations":["chatgpt.com"],"reason":"response_copy_blocked"}]'>${escapeHtml(policyJsonText(p.blockedBrowserActions))}</textarea>`}
+      </div>
+      <div class="config-card pad">
+        <h3>Fleet Posture</h3>
+        <p>Required sensors and desired versions used by install-health checks.</p>
+        <div class="policy-list-grid" style="grid-template-columns:1fr;margin-top:12px">
+          <label class="policy-list-field">Required sensors
+            ${readonly
     ? `<div class="chips">${(p.requiredSensors || []).map((x) => `<span class="chip">${escapeHtml(x)}</span>`).join('') || '<span class="chip">none</span>'}</div>`
     : `<textarea id="pol_required_sensors" class="policy-textarea" spellcheck="false" placeholder="browser_extension&#10;endpoint_agent&#10;mcp_guard">${escapeHtml(policyListText(p.requiredSensors))}</textarea>`}
-      </label>
-      <label class="policy-list-field">Desired sensor versions
-        ${readonly
+          </label>
+          <label class="policy-list-field">Desired sensor versions
+            ${readonly
     ? `<div class="chips">${Object.entries(p.desiredSensorVersions || {}).map(([k, v]) => `<span class="chip"><b>${escapeHtml(k)}</b> ${escapeHtml(v)}</span>`).join('') || '<span class="chip">none</span>'}</div>`
     : `<textarea id="pol_desired_sensor_versions" class="policy-textarea" spellcheck="false" placeholder="browser_extension=0.3.0&#10;endpoint_agent=0.3.0">${escapeHtml(policyMapText(p.desiredSensorVersions))}</textarea>`}
-      </label>
+          </label>
+        </div>
+      </div>
     </div>
-    <div class="policy-label">Approval routing rules</div>
-    <div class="template-bar">
+    <div class="config-card pad">
+      <h3>Approval Routing</h3>
+      <p>Route held prompts to the right group and role with SLA context.</p>
       ${readonly
     ? `<div class="chips">${(p.approvalRoutingRules || []).map((rule) => `<span class="chip"><b>${escapeHtml(rule.id)}</b> ${escapeHtml(rule.assignedGroup || '')} / ${escapeHtml(roleLabel(rule.assignedRole))} ${escapeHtml(policyMatcherSummary(rule))}</span>`).join('') || '<span class="chip">default routing</span>'}</div>`
-    : `<textarea id="pol_approval_routing_rules" class="policy-textarea" spellcheck="false" style="min-height:160px" placeholder='[{"id":"legal_group_contracts","groups":["PromptWall Legal"],"categories":["LEGAL_CONTRACT"],"destinations":["claude.ai"],"assignedGroup":"legal","assignedRole":"approver","slaMinutes":60}]'>${escapeHtml(policyJsonText(p.approvalRoutingRules))}</textarea>`}
+    : `<textarea id="pol_approval_routing_rules" class="policy-textarea" spellcheck="false" style="min-height:160px;margin-top:12px" placeholder='[{"id":"legal_group_contracts","groups":["PromptWall Legal"],"categories":["LEGAL_CONTRACT"],"destinations":["claude.ai"],"assignedGroup":"legal","assignedRole":"approver","slaMinutes":60}]'>${escapeHtml(policyJsonText(p.approvalRoutingRules))}</textarea>`}
     </div>
-    <div class="policy-label">Scoped policy and exceptions</div>
     ${readonly ? '' : `<div class="policy-builder-grid">
       <div class="policy-builder" id="scopeRuleBuilder">
-        <h3>Guided scoped enforcement</h3>
+        <h3>Guided Scoped Enforcement</h3>
         <div class="mini-grid">
           <label>Rule id<input id="scope_builder_id" type="text" placeholder="legal_contract_review"/></label>
           <label>SCIM groups<input id="scope_builder_groups" type="text" placeholder="PromptWall Legal"/></label>
@@ -1250,7 +1474,7 @@ async function loadPolicy() {
         <button class="btn" id="addScopeRule" type="button">${icons.check}Add scoped rule</button>
       </div>
       <div class="policy-builder" id="exceptionRuleBuilder">
-        <h3>Guided time-bound exception</h3>
+        <h3>Guided Time-bound Exception</h3>
         <div class="mini-grid">
           <label>Exception id<input id="exception_builder_id" type="text" placeholder="legal_vendor_24h"/></label>
           <label>SCIM groups<input id="exception_builder_groups" type="text" placeholder="PromptWall Legal"/></label>
@@ -1271,52 +1495,43 @@ async function loadPolicy() {
         <button class="btn" id="addExceptionRule" type="button">${icons.check}Add exception</button>
       </div>
     </div>`}
-    <div class="policy-advanced-grid">
-      <label class="policy-list-field">Scoped enforcement rules
-        ${readonly
+    <div class="config-card pad">
+      <h3>Advanced Policy JSON</h3>
+      <p>Edit scoped enforcement and time-bound exceptions directly when the guided builders are not enough.</p>
+      <div class="policy-advanced-grid" style="margin-top:12px">
+        <label class="policy-list-field">Scoped enforcement rules
+          ${readonly
     ? `<div class="chips">${(p.policyScopes || []).map((rule) => `<span class="chip"><b>${escapeHtml(rule.id)}</b> ${escapeHtml(rule.enforcementMode || 'scope')} ${escapeHtml(policyMatcherSummary(rule))}</span>`).join('') || '<span class="chip">no scoped rules</span>'}</div>`
     : `<textarea id="pol_policy_scopes" class="policy-textarea" spellcheck="false" style="min-height:190px" placeholder='[{"id":"legal_contract_review","groups":["PromptWall Legal"],"destinations":["claude.ai"],"categories":["LEGAL_CONTRACT"],"enforcementMode":"block","blockMinSeverity":2}]'>${escapeHtml(policyJsonText(p.policyScopes))}</textarea>`}
-      </label>
-      <label class="policy-list-field">Time-bound exceptions
-        ${readonly
+        </label>
+        <label class="policy-list-field">Time-bound exceptions
+          ${readonly
     ? `<div class="chips">${(p.policyExceptions || []).map((rule) => `<span class="chip"><b>${escapeHtml(rule.id)}</b> ${escapeHtml(rule.expiresAt || '')} ${escapeHtml(policyMatcherSummary(rule))} ${escapeHtml(exceptionLifecycleSummary(rule))}</span>`).join('') || '<span class="chip">no exceptions</span>'}</div>`
     : `<textarea id="pol_policy_exceptions" class="policy-textarea" spellcheck="false" style="min-height:190px" placeholder='[{"id":"legal_vendor_24h","users":["counsel@example.test"],"destinations":["claude.ai"],"categories":["LEGAL_CONTRACT"],"expiresAt":"2030-01-01T00:00:00.000Z","ownerGroup":"legal","reviewerRole":"security_admin","reviewAfter":"2029-12-15T00:00:00.000Z"}]'>${escapeHtml(policyJsonText(p.policyExceptions))}</textarea>`}
-      </label>
-    </div>
-    <div class="template-bar"><div class="template-title">Hard-stop entities</div>
-      <div class="chips">${(p.alwaysBlock || []).map((x) => `<span class="chip"><b>${escapeHtml(x)}</b></span>`).join('')}</div></div>
-    <div class="policy-list-grid">
-      <label class="policy-list-field">Governed AI destinations
-        ${readonly
-    ? `<div class="chips">${(p.governedDestinations || []).map((x) => `<span class="chip">${escapeHtml(x)}</span>`).join('')}</div>`
-    : `<textarea id="pol_governed_destinations" class="policy-textarea" spellcheck="false">${escapeHtml(policyListText(p.governedDestinations))}</textarea>`}
-      </label>
-      <label class="policy-list-field">Allowed AI destinations
-        ${readonly
-    ? `<div class="chips">${(p.allowedDestinations || []).map((x) => `<span class="chip">${escapeHtml(x)}</span>`).join('') || '<span class="chip">none</span>'}</div>`
-    : `<textarea id="pol_allowed_destinations" class="policy-textarea" spellcheck="false" placeholder="chatgpt.com&#10;claude.ai">${escapeHtml(policyListText(p.allowedDestinations))}</textarea>`}
-      </label>
-      <label class="policy-list-field">Blocked AI destinations
-        ${readonly
-    ? `<div class="chips">${(p.blockedDestinations || []).map((x) => `<span class="chip">${escapeHtml(x)}</span>`).join('') || '<span class="chip">none</span>'}</div>`
-    : `<textarea id="pol_blocked_destinations" class="policy-textarea" spellcheck="false" placeholder="deepseek.com&#10;*.example-ai.com">${escapeHtml(policyListText(p.blockedDestinations))}</textarea>`}
-      </label>
-      <label class="policy-list-field">Blocked file uploads
-        ${readonly
-    ? `<div class="chips">${(p.blockedFileUploadDestinations || []).map((x) => `<span class="chip">${escapeHtml(x)}</span>`).join('') || '<span class="chip">none</span>'}</div>`
-    : `<textarea id="pol_blocked_file_upload_destinations" class="policy-textarea" spellcheck="false" placeholder="chatgpt.com&#10;desktop-ai-app">${escapeHtml(policyListText(p.blockedFileUploadDestinations))}</textarea>`}
-      </label>
-    </div>
-    ${readonly
-    ? '<div class="readonly-note">Read-only auditor view</div>'
-    : `<button class="btn approve" id="savePolicy" type="button">${icons.check}Save policy</button>
-    <button class="btn" id="runRetentionPurge" type="button">${icons.refresh}Run retention purge</button>`}
-    <span id="polSaved" class="save-status"></span>`;
+        </label>
+      </div>
+      ${readonly ? '<div class="readonly-note">Read-only auditor view</div>' : `<button class="btn" id="runRetentionPurge" type="button">${icons.refresh}Run retention purge</button>`}
+    </div>`;
   $$('input[name=mode]').forEach((radio) => {
     radio.onchange = () => {
       $$('.policy-option').forEach((option) => option.classList.toggle('selected', option.contains(radio) && radio.checked));
     };
   });
+  $('#discardPolicy').onclick = loadPolicy;
+  $('#testConfiguration').onclick = async () => {
+    const status = $('#polSaved');
+    status.textContent = 'Testing...';
+    const [nextPreflightRes, nextCoverageRes] = await Promise.all([api('/api/preflight'), api('/api/coverage')]);
+    const nextPreflight = nextPreflightRes && nextPreflightRes.ok ? await nextPreflightRes.json() : null;
+    if (nextCoverageRes && nextCoverageRes.ok) currentCoverage = await nextCoverageRes.json();
+    const nextHealth = configHealth(nextPreflight);
+    const configStatus = $('#configurationStatus');
+    if (configStatus) configStatus.innerHTML = statePill(nextHealth.state, `${nextHealth.score}/100 ready`);
+    status.textContent = nextHealth.state === 'bad'
+      ? `${nextHealth.failed} blocking check(s)`
+      : `${nextHealth.failed} warning(s), ${nextHealth.ok}/${nextHealth.total || 0} checks ready`;
+    setTimeout(() => { status.textContent = ''; }, 3600);
+  };
   if (readonly) return;
   $('#addScopeRule').onclick = appendGuidedScopeRule;
   $('#addExceptionRule').onclick = appendGuidedExceptionRule;
@@ -1370,9 +1585,11 @@ async function loadPolicy() {
 }
 
 function activateTab(name) {
+  document.body.dataset.activeTab = name;
   $$('.tab').forEach((x) => x.classList.toggle('active', x.dataset.tab === name));
   $$('section[id^=tab-]').forEach((s) => s.classList.add('hidden'));
   $(`#tab-${CSS.escape(name)}`).classList.remove('hidden');
+  window.scrollTo(0, 0);
   if (name === 'audit') loadAudit();
   if (name === 'policy') loadPolicy();
   if (name === 'activity') loadActivity();
