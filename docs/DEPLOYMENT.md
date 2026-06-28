@@ -122,9 +122,11 @@ Mixed versions show as an attention item so a pilot admin can spot partial
 rollouts after a managed extension or agent update. Browser extension, endpoint,
 and MCP guard install validation can also report bounded check results through
 `POST /api/v1/heartbeat`; failed checks show as sensor install-health attention
-in Coverage and in the sanitized examiner export. The coverage API does not
-include prompt bodies, raw retained prompts, token vaults, ingest keys, handoff
-secrets, tool output, or decision notes.
+in Coverage and in the sanitized examiner export. The Coverage tab also includes
+a Fleet Install Health table that rolls the latest required-sensor state up by
+user, org, source, version, platform, and failed check ID. The coverage API does
+not include prompt bodies, raw retained prompts, token vaults, ingest keys,
+handoff secrets, tool output, or decision notes.
 
 ## Browser Extension Package
 
@@ -432,7 +434,8 @@ The examiner export at `/api/export/evidence` includes:
 - Current policy plus parsed policy diffs for governed destinations, blocked
   destinations, file-upload blocks, retention, detector, and scanner changes.
 - Coverage posture, governed and shadow destinations, active sensors, sensor
-  versions, and version gaps.
+  versions, version gaps, and fleet install-health state by user, org, and
+  required sensor.
 - Prompt/file lineage summaries by user, destination, sensor, channel,
   category, and decision, plus per-event sanitized findings and prompt hashes.
 

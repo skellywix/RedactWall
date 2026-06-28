@@ -40,6 +40,22 @@ test('admin console login, approval, policy save, and evidence export work in a 
   });
   expect(shadowResponse.ok()).toBeTruthy();
 
+  const heartbeatResponse = await request.post('/api/v1/heartbeat', {
+    headers: { 'x-api-key': 'e2e-ingest-key' },
+    data: {
+      user: 'analyst@example.test',
+      orgId: 'cu-acme',
+      destination: 'browser-install',
+      source: 'browser_extension',
+      sensor: { name: 'browser_extension', version: '0.3.0', platform: 'chrome_mv3' },
+      checks: [
+        { id: 'managed_config', ok: true, detail: 'configured' },
+        { id: 'managed_identity', ok: true, detail: 'present' },
+      ],
+    },
+  });
+  expect(heartbeatResponse.ok()).toBeTruthy();
+
   await login(page);
 
   const queueItem = page.locator(`.q[data-id="${gated.id}"]`);
@@ -68,6 +84,10 @@ test('admin console login, approval, policy save, and evidence export work in a 
   await expect(page.locator('#coverageScore')).toContainText('Coverage score');
   await expect(page.locator('#shadowRows')).toContainText('notebooklm.google.com');
   await expect(page.locator('#sensorMix')).toContainText('Browser extension');
+  await expect(page.locator('#fleetRows')).toContainText('analyst@example.test');
+  await expect(page.locator('#fleetRows')).toContainText('cu-acme');
+  await expect(page.locator('#fleetRows')).toContainText('covered');
+  await expect(page.locator('#fleetRows')).toContainText('checks ok');
 
   await page.locator('.content-tabs .tab[data-tab="policy"]').click();
   await expect(page.locator('#pol_desktop_destination')).toBeVisible();

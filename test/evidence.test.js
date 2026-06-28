@@ -37,6 +37,28 @@ test('evidence pack omits raw prompt, redacted prompt body, token vault, and aud
         },
         secret: 'coverage-secret-should-not-export',
       }],
+      fleet: [{
+        source: 'browser_extension',
+        label: 'Browser extension',
+        user: 'jdoe',
+        orgId: 'cu-acme',
+        required: true,
+        state: 'attention',
+        events: 1,
+        latestVersion: '0.2.9',
+        desiredVersion: '0.3.0',
+        versionHealth: 'outdated',
+        platforms: ['chrome_mv3'],
+        installHealth: {
+          at: '2026-06-26T12:00:00.000Z',
+          state: 'attention',
+          failedChecks: ['managed_identity'],
+          checks: [
+            { id: 'managed_identity', ok: false, detail: 'missing managed identity', secret: 'fleet-check-secret-should-not-export' },
+          ],
+        },
+        secret: 'fleet-secret-should-not-export',
+      }],
     },
     detectors: [{ id: 'US_SSN', severity: 4 }],
     queries: [{
@@ -94,6 +116,10 @@ test('evidence pack omits raw prompt, redacted prompt body, token vault, and aud
   assert.strictEqual(pack.coverage.sensors[0].desiredVersion, '0.3.0');
   assert.strictEqual(pack.coverage.sensors[0].installHealth.state, 'attention');
   assert.deepStrictEqual(pack.coverage.sensors[0].installHealth.failedChecks, ['managed_identity']);
+  assert.strictEqual(pack.coverage.fleet[0].user, 'jdoe');
+  assert.strictEqual(pack.coverage.fleet[0].orgId, 'cu-acme');
+  assert.strictEqual(pack.coverage.fleet[0].state, 'attention');
+  assert.deepStrictEqual(pack.coverage.fleet[0].installHealth.failedChecks, ['managed_identity']);
   assert.strictEqual(pack.lineage.byUser[0].key, 'jdoe');
   assert.strictEqual(pack.lineage.byDestination[0].key, 'chatgpt.com');
   assert.strictEqual(pack.lineage.bySensor[0].key, 'browser_extension');
@@ -106,6 +132,8 @@ test('evidence pack omits raw prompt, redacted prompt body, token vault, and aud
   assert.ok(!wire.includes('coverage-secret-should-not-export'));
   assert.ok(!wire.includes('check-secret-should-not-export'));
   assert.ok(!wire.includes('query-check-secret-should-not-export'));
+  assert.ok(!wire.includes('fleet-secret-should-not-export'));
+  assert.ok(!wire.includes('fleet-check-secret-should-not-export'));
   assert.ok(!wire.includes('sealed-vault'));
   assert.ok(!wire.includes('contains member SSN'));
   assert.ok(!wire.includes('ps_ingest_should_not_export'));
