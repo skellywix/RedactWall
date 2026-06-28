@@ -209,6 +209,54 @@ test('production preflight accepts a strong optional approver login', () => {
   assert.ok(status.checks.every((c) => c.ok));
 });
 
+test('production preflight accepts a strong optional scim bearer token', () => {
+  const status = preflight.configStatus({
+    env: {
+      NODE_ENV: 'production',
+      SENTINEL_DB_PATH: '/var/lib/promptwall/sentinel.db',
+      ADMIN_PASSWORD: 'long-admin-password',
+      ADMIN_TOTP_SECRET: 'JBSWY3DPEHPK3PXP',
+      INGEST_API_KEY: 'ps_ingest_' + 'a'.repeat(32),
+      SCIM_BEARER_TOKEN: 'scim_' + 's'.repeat(32),
+      SENTINEL_SECRET: 's'.repeat(32),
+      SENTINEL_DATA_KEY: 'd'.repeat(32),
+    },
+    adminPasswordIsDefault: false,
+    ingestKeyIsDefault: false,
+    secretSource: 'env',
+    dataCryptoEnabled: true,
+    cookieSecure: true,
+  });
+  assert.strictEqual(status.ready, true);
+  assert.strictEqual(status.level, 'ok');
+  assert.ok(status.checks.every((c) => c.ok));
+});
+
+test('production preflight blocks short scim bearer token when scim is configured', () => {
+  const status = preflight.configStatus({
+    env: {
+      NODE_ENV: 'production',
+      SENTINEL_DB_PATH: '/var/lib/promptwall/sentinel.db',
+      ADMIN_PASSWORD: 'long-admin-password',
+      ADMIN_TOTP_SECRET: 'JBSWY3DPEHPK3PXP',
+      INGEST_API_KEY: 'ps_ingest_' + 'a'.repeat(32),
+      SCIM_BEARER_TOKEN: 'short',
+      SENTINEL_SECRET: 's'.repeat(32),
+      SENTINEL_DATA_KEY: 'd'.repeat(32),
+    },
+    adminPasswordIsDefault: false,
+    ingestKeyIsDefault: false,
+    secretSource: 'env',
+    dataCryptoEnabled: true,
+    cookieSecure: true,
+  });
+  assert.strictEqual(status.ready, false);
+  assert.deepStrictEqual(
+    preflight.summarizeFailures(status).map((line) => line.split(':')[0]),
+    ['scim_bearer_token_strength'],
+  );
+});
+
 test('production preflight blocks weak or partial approver login config', () => {
   const base = {
     NODE_ENV: 'production',

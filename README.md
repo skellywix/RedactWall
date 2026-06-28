@@ -196,6 +196,10 @@ SQLite evidence storage.
 For technician-led customer installs, use `docs/TECHNICIAN_DEPLOYMENT_GUIDE.md`
 as the production readiness runbook and handoff checklist.
 
+For customer identity provisioning, use `docs/SCIM_PROVISIONING.md`. The current
+SCIM surface stores users and groups, deprovisions users, and maps known
+PromptWall groups to roles, but it does not replace the local console login yet.
+
 For demos, start with `DEMO_INSTALL_GUIDE.md`. The client-facing presenter flow
 lives in `docs/SALES_DEMO_GUIDE.md`; the demo-machine setup and reset runbook
 lives in `docs/DEMO_TECHNICIAN_SETUP.md`. Their generated current-state sections
@@ -329,11 +333,15 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 - **Coverage posture** showing governed destinations, required sensors, desired sensor versions, browser/endpoint/MCP install-health checks, fleet state by user/org/sensor, shadow-AI sightings, and stale or missing sensor coverage.
 - **Approval routing** that assigns held decisions to security, compliance, privacy, or legal with SLA metadata, category/destination queue filters, assignment-aware approver decisions, SIEM alert payloads, examiner evidence, sanitized workflow notifications, and overdue SLA escalation evidence.
 - **Sanitized examiner export** with audit integrity, policy diffs, coverage posture, workflow ownership, and lineage by user, destination, sensor, channel, category, and decision.
+- **SCIM provisioning** for users and groups, with bearer auth, deactivation,
+  audit entries, and PromptWall group names mapped onto local roles.
 - **Login lockout**, stable session secret, regulation **templates**, **/healthz · /readyz · /api/metrics**, Docker + CI.
 
 ## Still ahead (to ship commercially)
 
-- SSO, polished MFA enrollment UX, SCIM, and IdP group mapping onto the current local roles and routing groups; deeper multi-tenant isolation per institution.
+- Full SSO/OIDC login that consumes provisioned identities, polished MFA
+  enrollment UX, richer IdP group policy, and deeper multi-tenant isolation per
+  institution.
 - Signed Chrome Web Store listing and force-install rollout; local extension zip, integrity manifest, release-readiness report, and managed-policy checklist are packaged.
 - Direct SMTP and ticketing adapters on top of the existing sanitized webhook, Slack, Teams, and escalation workflow.
 - Ship the signed native endpoint collector that feeds the tested handoff contract from clipboard and AI-app upload flows.
@@ -362,6 +370,7 @@ Copy `.env.example` to `.env` (or export):
 | `SENTINEL_SECRET` | Session cookie signing secret; production preflight requires at least 32 characters from environment |
 | `SENTINEL_DATA_KEY` | Encrypts retained raw prompts at rest; production preflight requires at least 32 characters for this key or the `SENTINEL_SECRET` fallback |
 | `INGEST_API_KEY` | Key sensors present to the gate API; production preflight requires a non-default key of at least 32 characters |
+| `SCIM_BEARER_TOKEN` | Optional bearer token that enables `/scim/v2/*` user and group provisioning. Leave empty to disable SCIM. Production preflight requires at least 32 characters when set |
 | `ENDPOINT_AGENT_HANDOFF_DIR` | Optional local spool for signed native endpoint upload-intent events |
 | `ENDPOINT_AGENT_HANDOFF_SECRET` | Optional 32-plus-character local HMAC secret required before native endpoint handoff events are accepted |
 | `INGEST_AUTH_MAX_FAILURES` | Optional invalid ingest-key throttle threshold (default 20, bounded 3 to 1000) |
@@ -396,6 +405,7 @@ one family per setting; a non-empty legacy key wins when both are set.
 | `SENTINEL_DATA_KEY` | `PROMPTWALL_DATA_KEY` |
 | `SENTINEL_REQUEST_TIMEOUT_MS` | `PROMPTWALL_REQUEST_TIMEOUT_MS` |
 | `INGEST_API_KEY` | `PROMPTWALL_INGEST_API_KEY` |
+| `SCIM_BEARER_TOKEN` | `PROMPTWALL_SCIM_BEARER_TOKEN` |
 | `ENDPOINT_AGENT_WATCH_DIR` | `PROMPTWALL_ENDPOINT_AGENT_WATCH_DIR` |
 | `ENDPOINT_AGENT_HANDOFF_DIR` | `PROMPTWALL_ENDPOINT_AGENT_HANDOFF_DIR` |
 | `ENDPOINT_AGENT_HANDOFF_SECRET` | `PROMPTWALL_ENDPOINT_AGENT_HANDOFF_SECRET` |
@@ -403,11 +413,11 @@ one family per setting; a non-empty legacy key wins when both are set.
 Production preflight requires Security Admin MFA through `ADMIN_TOTP_SECRET`,
 custom secrets with minimum lengths, 16 characters for `ADMIN_PASSWORD` and
 optional `APPROVER_PASSWORD` and `AUDITOR_PASSWORD`, and 32 characters for `INGEST_API_KEY`,
-`SENTINEL_SECRET`, and `SENTINEL_DATA_KEY` when raw approval retention is
-enabled. If approver or auditor login is configured, both the username and
-password must be present, and reviewer usernames must be distinct from each
-other and from `ADMIN_USER`. Development/demo mode reports weak or missing
-custom values as warnings.
+`SCIM_BEARER_TOKEN` when SCIM is enabled, `SENTINEL_SECRET`, and
+`SENTINEL_DATA_KEY` when raw approval retention is enabled. If approver or
+auditor login is configured, both the username and password must be present, and
+reviewer usernames must be distinct from each other and from `ADMIN_USER`.
+Development/demo mode reports weak or missing custom values as warnings.
 
 `/readyz` reports whether the database and deployment preflight are usable. Logged-in admins can inspect detailed checks at `/api/preflight`.
 

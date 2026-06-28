@@ -96,8 +96,10 @@ Acceptance evidence:
 
 Current state: local admin login, optional assignment-aware approver login,
 optional auditor login, MFA for Security Admin, managed sensor user identity,
-and seat-limit enforcement exist. Full SSO, SCIM, IdP-backed group mapping, and
-seat lifecycle provisioning do not.
+seat-limit enforcement, and minimal SCIM user/group provisioning exist. SCIM can
+deactivate users and map PromptWall group names to local roles, but full
+SSO/OIDC login, IdP session mapping, and seat lifecycle enforcement from the IdP
+do not.
 
 Customer ask: "Can we connect this to Microsoft Entra or Okta, map groups to
 roles, deprovision users automatically, and avoid shared admin accounts?"
@@ -111,16 +113,18 @@ Implementation connection:
 - Extend the existing `server/roles.js` guards from local sessions to
   IdP-provisioned `security_admin`, `approver`, `auditor`, and `operator`
   users.
-- Add a minimal SCIM 2.0-compatible provisioning API for users and groups:
-  `/scim/v2/Users`, `/scim/v2/Groups`, and `/scim/v2/ServiceProviderConfig`.
-- Store provisioned users and groups in the same SQLite evidence database only
-  after deciding whether identity state belongs in evidence store or a separate
-  app config store.
+- Use the existing SCIM 2.0-compatible provisioning API at `/scim/v2/Users`,
+  `/scim/v2/Groups`, and `/scim/v2/ServiceProviderConfig` as the identity
+  lifecycle source for the next login slice.
+- Decide whether provisioned identity state should remain in the SQLite evidence
+  database for customer-silo installs or move to a separate app config store
+  before shared SaaS migration.
 
 Acceptance evidence:
 - `node --test test/auth.test.js test/approver-role.test.js test/auditor-role.test.js test/admin-csrf.test.js`
-- New tests for OIDC callback validation, role guards, SCIM create/update/disable,
-  and group membership mapping.
+- `node --test test/scim.test.js` for SCIM create/update/disable and group
+  membership role mapping.
+- New tests for OIDC callback validation and session role guards.
 - Browser E2E: local auditor cannot approve, local approver can approve assigned
   items, Security Admin can edit policy, operator can view deployment health
   only.
@@ -139,7 +143,7 @@ source-code, legal, or app-specific queues without opening every incident.
 PromptWall supports best-effort generic JSON, Slack, and Microsoft Teams
 approval notifications, persists delivery status on the query, audits
 notification outcomes, and escalates overdue routed items into tamper-evident
-evidence. Direct SMTP email, identity group mapping, and more granular
+evidence. Direct SMTP email, identity/group routing conditions, and more granular
 escalation policies are still open.
 
 Customer ask: "Can member-services exceptions route to compliance, source-code
@@ -320,7 +324,7 @@ Acceptance evidence:
 ## Recommended Build Order
 
 1. Desktop/file-flow collector MVP.
-2. Enterprise identity, roles, and SCIM.
+2. Enterprise SSO login and provisioned role mapping.
 3. Signed update channel and commercial rollout posture.
 4. Group-scoped policy and time-bound exceptions.
 5. Scheduled examiner evidence pack with backup and restore-drill status.
@@ -337,8 +341,8 @@ workflow, and identity are still commercial blockers.
 
 ### Option A: Enterprise Operations First
 
-Build SSO, SCIM, roles, notifications, and signed-update operations before
-deeper desktop collection.
+Build SSO on top of SCIM, roles, notifications, and signed-update operations
+before deeper desktop collection.
 
 Pros:
 - Strong for IT/security procurement.
@@ -423,7 +427,8 @@ Manual evidence before a paid pilot:
 - Desktop file-flow collector feeds only metadata to the handoff spool and local
   endpoint scanning records sanitized evidence.
 - MCP tool output is redacted before model use.
-- SSO login maps the expected role and local break-glass login still works.
+- SSO login maps the expected SCIM-provisioned role and local break-glass login
+  still works.
 - Notification payloads omit raw prompt text and raw findings.
 - Evidence pack contains coverage, policy, lineage, audit integrity, backup
   status, and control mapping without sensitive bodies.

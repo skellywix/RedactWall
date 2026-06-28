@@ -48,6 +48,7 @@ test('loadEnv maps PromptWall aliases without overwriting configured legacy keys
     'PROMPTWALL_SECRET=promptwall-session-secret',
     'PROMPTWALL_DATA_KEY=promptwall-data-key',
     'PROMPTWALL_INGEST_API_KEY=promptwall-ingest-key',
+    'PROMPTWALL_SCIM_BEARER_TOKEN=promptwall-scim-token',
     'PROMPTWALL_URL=https://promptwall.customer.example',
     'PROMPTWALL_ENDPOINT_AGENT_HANDOFF_SECRET=promptwall-handoff-secret',
     'PROMPTWALL_ENDPOINT_AGENT_HANDOFF_DIR=C:/PromptWall/handoff',
@@ -61,6 +62,7 @@ test('loadEnv maps PromptWall aliases without overwriting configured legacy keys
   assert.strictEqual(target.SENTINEL_SECRET, 'legacy-session-secret');
   assert.strictEqual(target.SENTINEL_DATA_KEY, 'promptwall-data-key');
   assert.strictEqual(target.INGEST_API_KEY, 'promptwall-ingest-key');
+  assert.strictEqual(target.SCIM_BEARER_TOKEN, 'promptwall-scim-token');
   assert.strictEqual(target.SENTINEL_URL, 'https://promptwall.customer.example');
   assert.strictEqual(target.ENDPOINT_AGENT_HANDOFF_SECRET, 'promptwall-handoff-secret');
   assert.strictEqual(target.ENDPOINT_AGENT_HANDOFF_DIR, 'C:/PromptWall/handoff');

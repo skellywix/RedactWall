@@ -31,8 +31,9 @@ scoped queries, SSO, and centralized billing operations.
 The current CloudFormation template still writes the existing `SENTINEL_*` and
 `INGEST_API_KEY` names for upgrade safety. The runtime also accepts
 `PROMPTWALL_*` aliases for those values, including `PROMPTWALL_SECRET`,
-`PROMPTWALL_DATA_KEY`, and `PROMPTWALL_INGEST_API_KEY`, when a future template
-or customer secret standard moves to the new prefix.
+`PROMPTWALL_DATA_KEY`, `PROMPTWALL_INGEST_API_KEY`, and
+`PROMPTWALL_SCIM_BEARER_TOKEN`, when a future template or customer secret
+standard moves to the new prefix.
 
 Do not run this app on Fargate with SQLite over EFS. The current preflight and
 database comments are built around local disk because audit evidence integrity
@@ -72,6 +73,7 @@ folder:
   "SENTINEL_SECRET": "replace-with-32-plus-random-chars",
   "SENTINEL_DATA_KEY": "replace-with-32-plus-random-chars",
   "INGEST_API_KEY": "ps_ingest_replace_with_32_plus_random_chars",
+  "SCIM_BEARER_TOKEN": "",
   "APPROVER_USER": "approver",
   "APPROVER_PASSWORD": "replace-with-16-plus-random-chars",
   "AUDITOR_USER": "auditor",
@@ -192,7 +194,8 @@ operational. That migration should include:
 
 - Postgres datastore with tenant-scoped query and audit tables.
 - Database migrations and backup/restore runbooks.
-- Tenant-aware admin accounts and SSO.
+- Tenant-aware admin accounts and SSO/OIDC login using provisioned SCIM identity
+  state.
 - Billing provider integration for subscription and seat updates.
 - Central operator view across customer stacks or tenants.
 

@@ -110,7 +110,8 @@ The sensor policy endpoint, `/api/v1/policy`, does not expose
   source, destination, severity, detector labels, and SLA. They do not include
   prompt bodies, redacted previews, raw findings, token vaults, release tokens,
   decision notes, or uploaded file bytes.
-- Future SSO and SCIM work should map IdP groups onto these stable route groups
+- SCIM provisioning now maps known PromptWall IdP groups onto these stable route
+  roles. Future SSO login and group-scoped routing should consume those mappings
   instead of replacing the stored evidence fields.
 
 ## Notification Channels

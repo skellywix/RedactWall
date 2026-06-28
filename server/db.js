@@ -83,6 +83,27 @@ sdb.exec(`
     entry     TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_audit_query ON audit(queryId);
+
+  CREATE TABLE IF NOT EXISTS scim_users (
+    seq       INTEGER PRIMARY KEY AUTOINCREMENT,
+    id        TEXT UNIQUE NOT NULL,
+    userName  TEXT UNIQUE NOT NULL,
+    active    INTEGER NOT NULL DEFAULT 1,
+    createdAt TEXT NOT NULL,
+    updatedAt TEXT NOT NULL,
+    data      TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_scim_users_username ON scim_users(userName);
+
+  CREATE TABLE IF NOT EXISTS scim_groups (
+    seq         INTEGER PRIMARY KEY AUTOINCREMENT,
+    id          TEXT UNIQUE NOT NULL,
+    displayName TEXT UNIQUE NOT NULL,
+    createdAt   TEXT NOT NULL,
+    updatedAt   TEXT NOT NULL,
+    data        TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_scim_groups_display ON scim_groups(displayName);
 `);
 
 const id = (p) => p + '_' + crypto.randomBytes(8).toString('hex');
@@ -251,6 +272,115 @@ function seatStats(filter = {}) {
   return { orgId: wantedOrg || null, seatsUsed: list.length, users: list };
 }
 
+// ---- SCIM provisioning -------------------------------------------------------
+const scimUserInsert = sdb.prepare(
+  'INSERT INTO scim_users (id, userName, active, createdAt, updatedAt, data) VALUES (@id, @userName, @active, @createdAt, @updatedAt, @data)',
+);
+const scimUserUpdate = sdb.prepare(
+  'UPDATE scim_users SET userName = @userName, active = @active, updatedAt = @updatedAt, data = @data WHERE id = @id',
+);
+const scimUserById = sdb.prepare('SELECT data FROM scim_users WHERE id = ?');
+const scimUserByUserName = sdb.prepare('SELECT data FROM scim_users WHERE lower(userName) = lower(?)');
+const scimUsersAll = sdb.prepare('SELECT data FROM scim_users ORDER BY lower(userName), seq');
+
+const scimGroupInsert = sdb.prepare(
+  'INSERT INTO scim_groups (id, displayName, createdAt, updatedAt, data) VALUES (@id, @displayName, @createdAt, @updatedAt, @data)',
+);
+const scimGroupUpdate = sdb.prepare(
+  'UPDATE scim_groups SET displayName = @displayName, updatedAt = @updatedAt, data = @data WHERE id = @id',
+);
+const scimGroupById = sdb.prepare('SELECT data FROM scim_groups WHERE id = ?');
+const scimGroupByDisplayName = sdb.prepare('SELECT data FROM scim_groups WHERE lower(displayName) = lower(?)');
+const scimGroupsAll = sdb.prepare('SELECT data FROM scim_groups ORDER BY lower(displayName), seq');
+
+function parseStoredScim(row) {
+  return row ? JSON.parse(row.data) : null;
+}
+
+function getScimUser(scimId) {
+  return parseStoredScim(scimUserById.get(scimId));
+}
+
+function getScimUserByUserName(userName) {
+  return parseStoredScim(scimUserByUserName.get(String(userName || '').trim()));
+}
+
+function listScimUsers() {
+  return scimUsersAll.all().map(parseStoredScim);
+}
+
+function saveScimUser(user) {
+  const now = new Date().toISOString();
+  const existing = user.id ? getScimUser(user.id) : getScimUserByUserName(user.userName);
+  const merged = {
+    ...(existing || {}),
+    ...user,
+    id: existing ? existing.id : (user.id || id('su')),
+    userName: String(user.userName || (existing && existing.userName) || '').trim(),
+    active: user.active !== false,
+    createdAt: existing ? existing.createdAt : now,
+    updatedAt: now,
+  };
+  const row = {
+    id: merged.id,
+    userName: merged.userName,
+    active: merged.active ? 1 : 0,
+    updatedAt: merged.updatedAt,
+    data: JSON.stringify(merged),
+  };
+  if (existing) scimUserUpdate.run(row);
+  else scimUserInsert.run({ ...row, createdAt: merged.createdAt });
+  return merged;
+}
+
+function deactivateScimUser(scimId) {
+  const existing = getScimUser(scimId);
+  if (!existing) return null;
+  return saveScimUser({ ...existing, active: false });
+}
+
+function getScimGroup(scimId) {
+  return parseStoredScim(scimGroupById.get(scimId));
+}
+
+function getScimGroupByDisplayName(displayName) {
+  return parseStoredScim(scimGroupByDisplayName.get(String(displayName || '').trim()));
+}
+
+function listScimGroups() {
+  return scimGroupsAll.all().map(parseStoredScim);
+}
+
+function saveScimGroup(group) {
+  const now = new Date().toISOString();
+  const existing = group.id ? getScimGroup(group.id) : getScimGroupByDisplayName(group.displayName);
+  const merged = {
+    ...(existing || {}),
+    ...group,
+    id: existing ? existing.id : (group.id || id('sg')),
+    displayName: String(group.displayName || (existing && existing.displayName) || '').trim(),
+    members: Array.isArray(group.members) ? group.members : ((existing && existing.members) || []),
+    createdAt: existing ? existing.createdAt : now,
+    updatedAt: now,
+  };
+  const row = {
+    id: merged.id,
+    displayName: merged.displayName,
+    updatedAt: merged.updatedAt,
+    data: JSON.stringify(merged),
+  };
+  if (existing) scimGroupUpdate.run(row);
+  else scimGroupInsert.run({ ...row, createdAt: merged.createdAt });
+  return merged;
+}
+
+function deleteScimGroup(scimId) {
+  const existing = getScimGroup(scimId);
+  if (!existing) return null;
+  sdb.prepare('DELETE FROM scim_groups WHERE id = ?').run(scimId);
+  return existing;
+}
+
 /**
  * Verify the chain AND the evidence binding.
  *  - chain: each entry hash == sha256(canonical(entry-minus-hash)), prevHash links.
@@ -326,5 +456,7 @@ module.exports = {
   createQuery, getQuery, listQueries, updateQuery,
   purgeRetainedSensitiveData,
   appendAudit, listAudit, verifyAuditChain, stats, seatStats,
+  getScimUser, getScimUserByUserName, listScimUsers, saveScimUser, deactivateScimUser,
+  getScimGroup, getScimGroupByDisplayName, listScimGroups, saveScimGroup, deleteScimGroup,
   _canonical: canonical, _db: sdb, _dbPath: DB_PATH,
 };
