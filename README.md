@@ -21,6 +21,32 @@ rename and product-readiness contract.
 
 ---
 
+## Start here
+
+| Goal | Open this |
+|------|-----------|
+| Run PromptWall locally | `npm run setup`, then `npm start` |
+| Understand the repo layout | `docs/README.md`, `server/README.md`, `sensors/README.md`, `scripts/README.md` |
+| Deploy a pilot | `docs/TECHNICIAN_DEPLOYMENT_GUIDE.md` |
+| Configure native Node or Docker | `docs/DEPLOYMENT.md` |
+| Package managed sensors | `docs/MANAGED_EXTENSION_DEPLOYMENT.md`, `docs/DEPLOYMENT.md` |
+| Run a customer demo | `DEMO_INSTALL_GUIDE.md` |
+| Check the engineering gate | `npm run review:ci` |
+| Run focused tests | `test/README.md` |
+
+## Repository map
+
+| Path | Purpose |
+|------|---------|
+| `server/` | Control plane, dashboard, policy, approval workflow, audit, evidence export |
+| `detection-engine/` | Canonical shared detector. Sync browser copies with `npm run sync-engine` |
+| `sensors/` | Browser extension, endpoint agent, and MCP guard |
+| `scripts/` | Setup, packaging, validation, evidence, docs, and maintenance commands |
+| `docs/` | Deployment, rollout, identity, evidence, and demo documentation |
+| `test/` | Node test suite and held-out detection evaluation fixtures |
+| `infra/` | Customer-silo deployment templates |
+| `PLANS/` | Product and implementation planning notes |
+
 ## The product, in one picture
 
 ```

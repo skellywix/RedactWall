@@ -6,6 +6,10 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { parseEnv, withEnvAliases } = require('../server/env');
+const {
+  endpointAiToolAttentionIds,
+  failedInstallCheckIds,
+} = require('../server/install-checks');
 const aiToolInventory = require('../sensors/endpoint-agent/collectors/ai-tool-inventory');
 
 const ROOT = path.join(__dirname, '..');
@@ -129,12 +133,16 @@ function buildInstallReport(opts = {}) {
     : true,
   desktopCollectorExpected ? 'desktop collector present' : 'desktop collector disabled'));
 
-  const status = checks.every((item) => item.ok) ? 'ok' : 'attention';
+  const failedChecks = failedInstallCheckIds(checks);
+  const endpointAiToolAttention = endpointAiToolAttentionIds(checks);
+  const status = failedChecks.length ? 'attention' : 'ok';
   return {
     status,
     generatedAt: new Date().toISOString(),
     envPath: configInfo.path,
     repoRoot,
+    failedChecks,
+    endpointAiToolAttention,
     checks,
   };
 }

@@ -1,0 +1,19 @@
+# Plans
+
+This folder holds planning and product-shaping notes. Treat these files as
+context, not operator runbooks.
+
+| File | Purpose |
+|------|---------|
+| `promptwall-product-alignment.md` | Product-readiness and PromptWall alignment work |
+| `customer-missing-features.md` | Commercial feature gap analysis and build order |
+| `aws-saas-deployment.md` | Planning notes for the AWS customer-silo path |
+
+Current operational truth lives in:
+
+| Need | Source |
+|------|--------|
+| Install and deploy | `../docs/DEPLOYMENT.md` |
+| Production pilot handoff | `../docs/TECHNICIAN_DEPLOYMENT_GUIDE.md` |
+| Demo flow | `../DEMO_INSTALL_GUIDE.md` |
+| Repo commands and gates | `../README.md` |

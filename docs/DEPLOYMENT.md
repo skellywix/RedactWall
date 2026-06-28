@@ -73,9 +73,14 @@ docker compose up -d --build
 ```
 
 The Compose file mounts a named volume at `/data`, overrides
-`SENTINEL_DB_PATH` to `/data/sentinel.db`, and checks `/readyz` for container
-health, so the container keeps runtime state outside the image and reports
-unhealthy if database or production preflight readiness is blocked.
+`SENTINEL_DB_PATH` to `/data/sentinel.db`, `SENTINEL_POLICY_PATH` to
+`/data/policy.json`, and `SENTINEL_CUSTOM_DETECTORS_PATH` to
+`/data/custom-detectors.json`. It checks `/readyz` for container health, so the
+container keeps runtime state outside the image and reports unhealthy if
+database or production preflight readiness is blocked. The container runs with a
+read-only root filesystem, a writable `/tmp` tmpfs, no extra Linux
+capabilities, and `no-new-privileges`; keep all mutable customer state under
+`/data`.
 
 For a local HTTP-only container smoke test, set these in `.env` before starting Compose:
 
@@ -92,6 +97,48 @@ NODE_ENV=production
 HTTPS=true
 COOKIE_SECURE=true
 ```
+
+For paid customer Docker installs, keep these paths on the mounted local-disk
+volume:
+
+```text
+SENTINEL_DB_PATH=/data/sentinel.db
+SENTINEL_POLICY_PATH=/data/policy.json
+SENTINEL_CUSTOM_DETECTORS_PATH=/data/custom-detectors.json
+```
+
+## MECHA Standing Docker Test Environment
+
+The permanent local Docker test environment on MECHA uses:
+
+```text
+Compose project: promptwall-mecha-20260628
+URL: http://localhost:4027
+Env file: .env.mecha.local
+Volume: promptwall-mecha-20260628_promptwall-data
+```
+
+`.env.mecha.local` is ignored by Git and holds generated synthetic local test
+secrets. The standing volume is the reusable test store for mock SaaS events,
+local policy edits, backup drills, and evidence packs.
+
+Use these commands from the repo root:
+
+```bash
+npm run docker:mecha:status
+npm run docker:mecha
+npm run docker:mecha:rebuild
+npm run docker:mecha:restart
+npm run docker:mecha:check
+npm run docker:mecha:smoke
+npm run docker:mecha:logs
+npm run docker:mecha:stop
+```
+
+`docker:mecha:stop` stops the container without deleting the container, network,
+or named volume. Do not use `docker compose down -v` for this standing test
+stack unless you intentionally want to erase the MECHA test database and
+evidence files.
 
 ## Health Checks
 
@@ -330,6 +377,8 @@ on that list report endpoint AI-tool inventory attention. Install-health stays
 reserved for runtime and configuration failures. This makes endpoint/developer tool
 visibility show up in Coverage without sending local paths, process args, document
 names, prompt text, or file content.
+The endpoint checker still prints unapproved tool checks as attention, but it
+does not fail install readiness when runtime and configuration checks pass.
 
 The agent inspects supported watched files locally. Under redact policy, structured-only findings write a safe companion text file under `.promptwall-redacted` and report `redacted_available` evidence to the control plane; semantic or mixed findings remain held for Security Admin review. Image files (`.png`, `.jpg`, `.jpeg`, `.tif`, `.tiff`, `.bmp`, `.webp`) are supported as a fail-closed modality. Browser/API uploads still return `ocr_required`; endpoint agents can optionally run a workstation-local OCR command and then send only sanitized detector evidence to the control plane.
 
@@ -534,8 +583,8 @@ Set these through `.env`, container environment, or a deployment secret manager:
 | `SENTINEL_SEAT_LIMIT` | Purchased seat count. New managed users beyond this count are blocked and recorded as `SEAT_LIMIT_BLOCKED`. |
 | `SENTINEL_REQUIRE_TENANT_CONTEXT` | Requires sensors to send the matching `orgId`. Enabled automatically by SaaS mode. |
 | `SENTINEL_REQUIRE_USER_IDENTITY` | Requires sensors to send managed user identity instead of `unknown` or `unattributed@unmanaged`. Enabled automatically by SaaS mode. |
-| `SENTINEL_POLICY_PATH` | Optional policy file path for isolated tests, pilots, or customer-silo policy storage. |
-| `SENTINEL_CUSTOM_DETECTORS_PATH` / `PROMPTWALL_CUSTOM_DETECTORS_PATH` | Optional customer detector-pack path. Defaults to `config/custom-detectors.json`. |
+| `SENTINEL_POLICY_PATH` | Optional policy file path for isolated tests, pilots, or customer-silo policy storage. Docker customer silos default to `/data/policy.json`. |
+| `SENTINEL_CUSTOM_DETECTORS_PATH` / `PROMPTWALL_CUSTOM_DETECTORS_PATH` | Optional customer detector-pack path. Docker customer silos default to `/data/custom-detectors.json`; native Node defaults to `config/custom-detectors.json`. |
 | `ENDPOINT_AGENT_HANDOFF_DIR` | Optional local spool for signed native endpoint upload-intent events. |
 | `ENDPOINT_AGENT_HANDOFF_SECRET` | Optional 32-plus-character local HMAC secret required before the endpoint agent accepts native handoff events. |
 | `ENDPOINT_AGENT_OCR_COMMAND` / `PROMPTWALL_ENDPOINT_AGENT_OCR_COMMAND` | Optional endpoint-local OCR command for image files. Disabled by default. |

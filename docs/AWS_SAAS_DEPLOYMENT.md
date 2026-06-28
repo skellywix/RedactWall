@@ -16,6 +16,10 @@ scoped queries, SSO, and centralized billing operations.
 - One Amazon Linux 2023 EC2 host running the existing Docker image.
 - Encrypted EBS root volume with `/var/lib/promptwall` mounted into the
   container at `/data`.
+- Docker runtime state under `/data`: `sentinel.db`, `policy.json`,
+  `custom-detectors.json`, backups, and scheduled examiner evidence packs.
+- Hardened container flags: init process, read-only root filesystem, writable
+  `/tmp` tmpfs, dropped Linux capabilities, and `no-new-privileges`.
 - Secrets Manager for admin, optional approver and auditor, MFA, session,
   data-encryption, and ingest secrets.
 - CloudWatch Logs for container stdout/stderr.
@@ -34,6 +38,12 @@ The current CloudFormation template still writes the existing `SENTINEL_*` and
 `PROMPTWALL_DATA_KEY`, `PROMPTWALL_INGEST_API_KEY`, and
 `PROMPTWALL_SCIM_BEARER_TOKEN`, when a future template or customer secret
 standard moves to the new prefix.
+
+The AWS template pins mutable customer state to the mounted `/data` volume:
+`SENTINEL_DB_PATH=/data/sentinel.db`,
+`SENTINEL_POLICY_PATH=/data/policy.json`, and
+`SENTINEL_CUSTOM_DETECTORS_PATH=/data/custom-detectors.json`. Do not store
+customer policy edits or detector packs only in the image layer.
 
 Do not run this app on Fargate with SQLite over EFS. The current preflight and
 database comments are built around local disk because audit evidence integrity

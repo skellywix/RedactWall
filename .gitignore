@@ -1,6 +1,7 @@
 node_modules/
 *.log
 .env
+.env*.local
 # runtime data store — created at startup; never commit (DB artifacts, secrets,
 # and legacy JSON that may hold cleartext PII)
 data/

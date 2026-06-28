@@ -188,6 +188,8 @@ Resources:
           HTTPS=true
           COOKIE_SECURE=true
           SENTINEL_DB_PATH=/data/sentinel.db
+          SENTINEL_POLICY_PATH=/data/policy.json
+          SENTINEL_CUSTOM_DETECTORS_PATH=/data/custom-detectors.json
           SENTINEL_SAAS_MODE=true
           SENTINEL_TENANT_ID=${TenantId}
           SENTINEL_SEAT_LIMIT=${SeatLimit}
@@ -216,6 +218,12 @@ Resources:
           docker run -d \
             --name promptwall \
             --restart unless-stopped \
+            --init \
+            --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+            --cap-drop ALL \
+            --security-opt no-new-privileges \
+            --stop-timeout 30 \
             --env-file /etc/promptwall/env \
             -p 4000:4000 \
             -v /var/lib/promptwall:/data \

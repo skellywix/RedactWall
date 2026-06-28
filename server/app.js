@@ -1609,7 +1609,18 @@ function startServer(port = PORT) {
 }
 
 if (require.main === module) {
-  startServer();
+  const server = startServer();
+  const shutdown = (signal) => {
+    console.log(`PromptWall received ${signal}; shutting down`);
+    const timeout = setTimeout(() => process.exit(1), 10000);
+    timeout.unref();
+    server.close(() => {
+      clearTimeout(timeout);
+      process.exit(0);
+    });
+  };
+  process.once('SIGTERM', () => shutdown('SIGTERM'));
+  process.once('SIGINT', () => shutdown('SIGINT'));
 }
 
 app.startServer = startServer;

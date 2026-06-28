@@ -2,11 +2,19 @@ services:
   promptwall:
     build: .
     image: promptwall:local
+    init: true
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
     environment:
       PORT: 4000
-      NODE_ENV: ${NODE_ENV:-development}
-      HTTPS: ${HTTPS:-false}
-      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      NODE_ENV: ${NODE_ENV:-production}
+      HTTPS: ${HTTPS:-true}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
       SENTINEL_SAAS_MODE: ${SENTINEL_SAAS_MODE:-}
       PROMPTWALL_SAAS_MODE: ${PROMPTWALL_SAAS_MODE:-}
       SENTINEL_TENANT_ID: ${SENTINEL_TENANT_ID:-}
@@ -28,6 +36,10 @@ services:
       PROMPTWALL_DATA_KEY: ${PROMPTWALL_DATA_KEY:-}
       INGEST_API_KEY: ${INGEST_API_KEY:-}
       PROMPTWALL_INGEST_API_KEY: ${PROMPTWALL_INGEST_API_KEY:-}
+      SENTINEL_POLICY_PATH: ${SENTINEL_POLICY_PATH:-/data/policy.json}
+      PROMPTWALL_POLICY_PATH: ${PROMPTWALL_POLICY_PATH:-}
+      SENTINEL_CUSTOM_DETECTORS_PATH: ${SENTINEL_CUSTOM_DETECTORS_PATH:-/data/custom-detectors.json}
+      PROMPTWALL_CUSTOM_DETECTORS_PATH: ${PROMPTWALL_CUSTOM_DETECTORS_PATH:-}
       SCIM_BEARER_TOKEN: ${SCIM_BEARER_TOKEN:-}
       PROMPTWALL_SCIM_BEARER_TOKEN: ${PROMPTWALL_SCIM_BEARER_TOKEN:-}
       SENTINEL_REQUEST_TIMEOUT_MS: ${SENTINEL_REQUEST_TIMEOUT_MS:-}
@@ -47,6 +59,7 @@ services:
       timeout: 4s
       start_period: 5s
       retries: 3
+    stop_grace_period: 30s
     restart: unless-stopped
 
 volumes:

@@ -22,8 +22,19 @@ test('AWS customer-silo template uses local EBS-backed data and Secrets Manager'
   assert.match(template, /VolumeType: gp3/);
   assert.match(template, /Encrypted: true/);
   assert.match(template, /-v \/var\/lib\/promptwall:\/data/);
+  assert.match(template, /SENTINEL_POLICY_PATH=\/data\/policy\.json/);
+  assert.match(template, /SENTINEL_CUSTOM_DETECTORS_PATH=\/data\/custom-detectors\.json/);
   assert.match(template, /secretsmanager:GetSecretValue/);
   assert.match(template, /HealthCheckPath: \/readyz/);
+});
+
+test('AWS customer-silo container runs with hardened Docker flags', () => {
+  assert.match(template, /--init/);
+  assert.match(template, /--read-only/);
+  assert.match(template, /--tmpfs \/tmp:rw,noexec,nosuid,size=64m/);
+  assert.match(template, /--cap-drop ALL/);
+  assert.match(template, /--security-opt no-new-privileges/);
+  assert.match(template, /--stop-timeout 30/);
 });
 
 test('AWS customer-silo template bootstraps recurring examiner evidence packs', () => {

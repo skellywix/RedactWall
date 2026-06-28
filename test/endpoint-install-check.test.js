@@ -96,7 +96,7 @@ test('endpoint install check validates runtime wiring without exposing secrets',
   assert.strictEqual(response.id, 'q_heartbeat');
 });
 
-test('endpoint install check marks unapproved endpoint AI tools as attention without paths', (t) => {
+test('endpoint install check reports unapproved endpoint AI tools without failing install status', (t) => {
   const dir = tempDir(t, 'ps-endpoint-check-ai-tools-');
   const watchDir = path.join(dir, 'watch');
   fs.mkdirSync(watchDir, { recursive: true });
@@ -105,7 +105,7 @@ test('endpoint install check marks unapproved endpoint AI tools as attention wit
     'PROMPTWALL_URL=https://promptwall.customer.example',
     'INGEST_API_KEY=pilot-ingest-key-000000000000000000000000000004',
     `ENDPOINT_AGENT_WATCH_DIR=${watchDir}`,
-    'ENDPOINT_AGENT_APPROVED_AI_TOOLS=cursor',
+    'ENDPOINT_AGENT_APPROVED_AI_TOOLS=cursor,claude_code',
   ].join('\n') + '\n');
 
   const report = buildInstallReport({
@@ -115,7 +115,9 @@ test('endpoint install check marks unapproved endpoint AI tools as attention wit
     processNames: ['Cursor.exe', 'C:\\Users\\analyst\\AppData\\Local\\Programs\\Claude\\Claude.exe --profile rawargument'],
   });
 
-  assert.strictEqual(report.status, 'attention');
+  assert.strictEqual(report.status, 'ok');
+  assert.deepStrictEqual(report.failedChecks, []);
+  assert.deepStrictEqual(report.endpointAiToolAttention, ['claude_desktop']);
   assert.ok(report.checks.some((item) => item.id === 'ai_tool_cursor' && item.ok));
   assert.ok(report.checks.some((item) => item.id === 'ai_tool_claude_desktop' && !item.ok && item.detail === 'unapproved detected'));
   assert.ok(!JSON.stringify(report).includes('Programs\\Claude'));

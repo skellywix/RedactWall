@@ -48,7 +48,15 @@
     "sync-engine": "node scripts/sync-engine.js",
     "sync-check": "node scripts/sync-check.js",
     "ai-domains:check": "node scripts/check-ai-domain-coverage.js",
-    "eval": "node scripts/eval-detect.js"
+    "eval": "node scripts/eval-detect.js",
+    "docker:mecha": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/mecha-docker.ps1 start",
+    "docker:mecha:rebuild": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/mecha-docker.ps1 rebuild",
+    "docker:mecha:restart": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/mecha-docker.ps1 restart",
+    "docker:mecha:stop": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/mecha-docker.ps1 stop",
+    "docker:mecha:status": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/mecha-docker.ps1 status",
+    "docker:mecha:check": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/mecha-docker.ps1 check",
+    "docker:mecha:smoke": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/mecha-docker.ps1 smoke",
+    "docker:mecha:logs": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/mecha-docker.ps1 logs"
   },
   "license": "UNLICENSED",
   "private": true,
