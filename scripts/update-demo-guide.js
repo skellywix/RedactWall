@@ -109,6 +109,20 @@ function fileTable(entries) {
   return rows.join('\n');
 }
 
+function detectEol(text) {
+  const crlf = (text.match(/\r\n/g) || []).length;
+  const lf = (text.match(/\n/g) || []).length - crlf;
+  return crlf > lf ? '\r\n' : '\n';
+}
+
+function normalizeEol(text, eol) {
+  return text.replace(/\r?\n/g, eol);
+}
+
+function sameContent(left, right) {
+  return normalizeEol(left, '\n') === normalizeEol(right, '\n');
+}
+
 function joinInline(items) {
   return items.length ? items.map((item) => `\`${item}\``).join(', ') : '_None configured._';
 }
@@ -249,7 +263,8 @@ function replaceGeneratedSection(relativePath, guide, section) {
   if (startIndex === -1 || endIndex === -1 || endIndex < startIndex) {
     throw new Error(`Missing ${START} / ${END} markers in ${relativePath}`);
   }
-  return `${guide.slice(0, startIndex)}${section}${guide.slice(endIndex + END.length)}`;
+  const fileEol = detectEol(guide);
+  return `${guide.slice(0, startIndex)}${normalizeEol(section, fileEol)}${guide.slice(endIndex + END.length)}`;
 }
 
 function main() {
@@ -267,7 +282,7 @@ function main() {
 
   if (check) {
     for (const update of updates) {
-      if (update.next !== update.current) {
+      if (!sameContent(update.next, update.current)) {
         problems.push(`${update.relativePath}: generated current app snapshot is stale`);
       }
     }
