@@ -31,6 +31,11 @@ to activate the local hooks.
 demo guide hub, sales demo guide, and technician setup guide from the current
 package, policy, sensor, detector, and supporting-doc state.
 
+`npm run docs:sync:install-task` installs the daily 9:00 AM local documentation
+sync task. The task runs `scripts/sync-docs.ps1`, commits tracked Markdown
+documentation changes only, pushes them to the current branch's GitHub upstream,
+and verifies local/upstream parity. See `docs/DOCUMENTATION_SYNC_TASK.md`.
+
 If push fails, the commit stays local and you can retry `git push` after the issue is fixed.
 
 ## Required evidence
