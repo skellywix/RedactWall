@@ -102,6 +102,79 @@ test('writes examiner pack with backup and restore evidence without raw prompt c
   assert.ok(!wire.includes(tempRoot));
 });
 
+test('runtime pack uses full query history for summaries while bounding exported rows', () => {
+  const calls = [];
+  const recent = {
+    id: 'q_recent',
+    createdAt: '2026-06-26T12:02:00.000Z',
+    status: 'allowed',
+    user: 'recent@example.test',
+    source: 'browser_extension',
+    channel: 'submit',
+    destination: 'chatgpt.com',
+    redactedPrompt: 'recent safe prompt',
+    findings: [],
+    categories: [],
+  };
+  const older = {
+    id: 'q_older',
+    createdAt: '2026-06-26T12:01:00.000Z',
+    status: 'destination_blocked',
+    user: 'older@example.test',
+    source: 'endpoint_agent',
+    channel: 'file_upload',
+    destination: 'claude.ai',
+    redactedPrompt: 'older sanitized prompt',
+    findings: [{ type: 'US_SSN', severity: 4, score: 1, masked: '***-**-9043', value: '524-71-9043' }],
+    categories: [],
+  };
+  const fakeDb = {
+    listQueries(filter) {
+      calls.push(filter);
+      return filter && filter.all ? [recent, older] : [recent];
+    },
+    listAudit() { return []; },
+    stats() { return { total: 2 }; },
+    verifyAuditChain() { return { ok: true, count: 2 }; },
+  };
+  const fakeCoverage = {
+    summarize(rows) {
+      return {
+        score: 100,
+        totals: { events: rows.length },
+        sensors: [],
+        fleet: [],
+        governedDestinations: [],
+        ungovernedDestinations: [],
+        shadowDestinations: [],
+        posture: [],
+      };
+    },
+  };
+
+  const pack = packer.buildEvidencePackFromRuntime({
+    dbModule: fakeDb,
+    policyModule: { loadPolicy() { return {}; } },
+    coverageModule: fakeCoverage,
+    detectorModule: { listDetectors() { return []; } },
+    customDetectorsModule: { loadCustomDetectors() { return []; } },
+    packageInfo: { version: '0.3.0' },
+    queryLimit: 1,
+    auditLimit: 1,
+    backupModule: {},
+  });
+
+  assert.deepStrictEqual(calls, [{ limit: 1 }, { all: true }]);
+  assert.strictEqual(pack.queries.length, 1);
+  assert.strictEqual(pack.queries[0].id, 'q_recent');
+  assert.strictEqual(pack.coverage.totals.events, 2);
+  assert.strictEqual(pack.scope.summaryRowsIncluded, 2);
+  assert.strictEqual(pack.scope.summariesUseFullHistory, true);
+  assert.ok(pack.lineage.byUser.some((item) => item.key === 'older@example.test'));
+  assert.ok(pack.lineage.byDestination.some((item) => item.key === 'claude.ai'));
+  assert.ok(!JSON.stringify(pack).includes('524-71-9043'));
+});
+
 test('argument parser supports npm-run paths and optional evidence inputs', () => {
   assert.deepStrictEqual(
     packer.parseArgs(['evidence-packs', '--backup', 'backups/sentinel.db', '--restore-drill', 'restore/sentinel.db', '--zip']),

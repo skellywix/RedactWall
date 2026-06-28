@@ -26,6 +26,18 @@ test('queries round-trip and update transactionally', () => {
   assert.strictEqual(db.updateQuery('q_does_not_exist', { status: 'x' }), null);
 });
 
+test('listQueries can return all rows for evidence summaries', () => {
+  const first = db.createQuery({ status: 'allowed', user: 'summary-a', redactedPrompt: 'safe a' });
+  const second = db.createQuery({ status: 'pending', user: 'summary-b', redactedPrompt: 'safe b' });
+  const limited = db.listQueries({ limit: 1 }).map((q) => q.id);
+  const all = db.listQueries({ all: true }).map((q) => q.id);
+
+  assert.strictEqual(limited.length, 1);
+  assert.ok(all.includes(first.id));
+  assert.ok(all.includes(second.id));
+  assert.ok(all.length > limited.length);
+});
+
 test('audit chain verifies over many sequential appends (no dropped links)', () => {
   for (let i = 0; i < 1000; i++) db.appendAudit({ action: 'PING', actor: 'load', detail: 'n' + i });
   const v = db.verifyAuditChain();

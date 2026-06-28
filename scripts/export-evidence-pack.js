@@ -99,6 +99,7 @@ function buildEvidencePackFromRuntime(options = {}) {
   const auditLimit = boundedNumber(options.auditLimit, DEFAULT_AUDIT_LIMIT);
   const activePolicy = policy.loadPolicy();
   const queries = db.listQueries({ limit: queryLimit });
+  const summaryQueries = db.listQueries({ all: true });
   const verified = options.backup || options.restoreDrill
     ? { backup: options.backup || null, restoreDrill: options.restoreDrill || null }
     : verifyBackupEvidence({
@@ -113,6 +114,8 @@ function buildEvidencePackFromRuntime(options = {}) {
     generatedAt: options.generatedAt,
     queryLimit,
     auditLimit,
+    summaryRowsIncluded: summaryQueries.length,
+    summariesUseFullHistory: true,
     report: {
       id: options.reportId,
       generatedBy: options.generatedBy || 'export-evidence-pack',
@@ -124,9 +127,10 @@ function buildEvidencePackFromRuntime(options = {}) {
     policy: activePolicy,
     stats: db.stats(),
     auditIntegrity: db.verifyAuditChain(),
-    coverage: coverage.summarize(queries, activePolicy),
+    coverage: coverage.summarize(summaryQueries, activePolicy),
     detectors: detector.listDetectors({ customDetectors: customDetectors.loadCustomDetectors() }),
     queries,
+    lineageQueries: summaryQueries,
     audit: db.listAudit(auditLimit),
     backup: verified.backup,
     restoreDrill: verified.restoreDrill,

@@ -212,6 +212,63 @@ test('evidence pack omits raw prompt, redacted prompt body, token vault, and aud
   assert.ok(wire.includes('**** 9043'));
 });
 
+test('evidence pack keeps exported rows bounded while lineage summarizes full history', () => {
+  const recent = {
+    id: 'q_recent',
+    createdAt: '2026-06-26T12:02:00.000Z',
+    status: 'allowed',
+    user: 'recent@example.test',
+    destination: 'chatgpt.com',
+    source: 'browser_extension',
+    channel: 'submit',
+    findings: [],
+    categories: [],
+    riskScore: 0,
+    redactedPrompt: 'recent safe prompt',
+  };
+  const olderSecret = '524-71-9043';
+  const older = {
+    id: 'q_older',
+    createdAt: '2026-06-26T12:01:00.000Z',
+    status: 'destination_blocked',
+    user: 'older@example.test',
+    destination: 'claude.ai',
+    source: 'endpoint_agent',
+    channel: 'file_upload',
+    findings: [{ type: 'US_SSN', severity: 4, score: 1, masked: '***-**-9043', value: olderSecret }],
+    categories: [],
+    riskScore: 40,
+    redactedPrompt: 'Older member SSN ***-**-9043',
+  };
+
+  const pack = evidence.buildEvidencePack({
+    version: '0.3.0',
+    generatedAt: '2026-06-26T12:03:00.000Z',
+    queryLimit: 1,
+    auditLimit: 1,
+    summaryRowsIncluded: 2,
+    summariesUseFullHistory: true,
+    policy: {},
+    stats: { total: 2 },
+    auditIntegrity: { ok: true, count: 2 },
+    coverage: { totals: { events: 2 } },
+    queries: [recent],
+    lineageQueries: [recent, older],
+    audit: [],
+  });
+
+  assert.strictEqual(pack.queries.length, 1);
+  assert.strictEqual(pack.queries[0].id, 'q_recent');
+  assert.strictEqual(pack.scope.summaryRowsIncluded, 2);
+  assert.strictEqual(pack.scope.summariesUseFullHistory, true);
+  assert.ok(pack.lineage.byUser.some((item) => item.key === 'older@example.test'));
+  assert.ok(pack.lineage.byDestination.some((item) => item.key === 'claude.ai'));
+  assert.ok(pack.lineage.byCategory.some((item) => item.key === 'US_SSN'));
+  const wire = JSON.stringify(pack);
+  assert.ok(!wire.includes(olderSecret));
+  assert.ok(!wire.includes('Older member SSN'));
+});
+
 test('lineage groups user, destination, sensor, category, and decision without prompt text', () => {
   const lineage = evidence.buildLineage([
     {
@@ -329,7 +386,9 @@ test('server exposes protected evidence export route', () => {
   const server = fs.readFileSync(path.join(__dirname, '..', 'server/app.js'), 'utf8');
   assert.match(server, /app\.get\('\/api\/export\/evidence', auth\.requireAuth/);
   assert.match(server, /evidence\.buildEvidencePack/);
-  assert.match(server, /coverage\.summarize/);
+  assert.match(server, /summaryQueries = db\.listQueries\(\{ all: true \}\)/);
+  assert.match(server, /coverage\.summarize\(summaryQueries, activePolicy\)/);
+  assert.match(server, /lineageQueries: summaryQueries/);
 });
 
 test('evidence exports safe destination review reasons and unapproved AI policy changes', () => {

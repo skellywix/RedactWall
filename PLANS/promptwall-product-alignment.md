@@ -117,6 +117,8 @@ For this alignment track, completion requires evidence for every area below:
 - Expanded the sanitized examiner export with coverage posture, sensor-version
   posture, parsed policy diffs, and lineage summaries by user, destination,
   sensor, channel, category, and decision without prompt bodies.
+- Changed examiner evidence packs so exported per-event query rows stay bounded
+  while coverage and lineage summaries use the full local evidence history.
 - Added the dashboard Lineage tab on top of the same sanitized aggregation so
   admins and auditors can inspect user, destination, sensor, channel, category,
   and decision buckets without exporting raw evidence.

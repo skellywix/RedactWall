@@ -499,7 +499,10 @@ function buildLineage(rows) {
 
 function buildEvidencePack(input) {
   const now = input.generatedAt || new Date().toISOString();
-  const queries = input.queries || [];
+  const queries = Array.isArray(input.queries) ? input.queries : [];
+  const lineageQueries = Array.isArray(input.lineageQueries)
+    ? input.lineageQueries
+    : (Array.isArray(input.summaryQueries) ? input.summaryQueries : queries);
   const coverageReport = safeCoverage(input.coverage);
   const policyExceptionReview = safePolicyExceptionReview(input.policyExceptionReview);
   const backup = safeBackupEvidence(input.backup);
@@ -507,6 +510,8 @@ function buildEvidencePack(input) {
   const scope = {
     queryLimit: input.queryLimit,
     auditLimit: input.auditLimit,
+    summaryRowsIncluded: safeCoverageNumber(input.summaryRowsIncluded == null ? lineageQueries.length : input.summaryRowsIncluded),
+    summariesUseFullHistory: input.summariesUseFullHistory === true,
     rawPromptBodiesIncluded: false,
     auditDetailsIncluded: false,
     backupEvidenceIncluded: !!backup,
@@ -538,7 +543,7 @@ function buildEvidencePack(input) {
       backup,
       restoreDrill,
     }),
-    lineage: buildLineage(queries),
+    lineage: buildLineage(lineageQueries),
     detectors: input.detectors || [],
     queries: queries.map(safeQuery),
     audit: (input.audit || []).map(safeAuditEntry),

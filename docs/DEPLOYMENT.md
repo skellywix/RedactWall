@@ -556,6 +556,11 @@ The examiner export at `/api/export/evidence` includes:
 - Report metadata, control mappings, and optional backup verification plus
   restore-drill status when generated with the evidence-pack CLI.
 
+`queryLimit` bounds only the exported per-event query rows. Coverage posture and
+lineage summaries are computed from the full local evidence history so a small
+pack does not silently undercount older users, destinations, sensors, or
+decisions.
+
 It does not include raw prompt bodies, retained sealed prompts, token vaults,
 release tokens, decision notes, or uploaded file bytes.
 
