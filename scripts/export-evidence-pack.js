@@ -42,7 +42,7 @@ function boundedNumber(value, fallback, max = MAX_LIMIT) {
 function loadScheduleConfig(file) {
   if (!file) return {};
   const configPath = path.resolve(file);
-  const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  const config = JSON.parse(fs.readFileSync(configPath, 'utf8').replace(/^\uFEFF/, ''));
   return {
     id: config.id,
     outDir: config.outDir,

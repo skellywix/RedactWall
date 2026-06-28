@@ -162,6 +162,24 @@ test('argument parser supports npm-run paths and optional evidence inputs', () =
   );
 });
 
+test('schedule config loader accepts Windows UTF-8 BOM files', () => {
+  const schedulePath = path.join(tempRoot, 'bom-evidence-schedule.json');
+  fs.writeFileSync(schedulePath, `\uFEFF${JSON.stringify({
+    id: 'bom-schedule',
+    enabled: true,
+    cadence: 'quarterly',
+    outDir: 'evidence-packs',
+    queryLimit: 100,
+    auditLimit: 100,
+  })}`);
+
+  const schedule = packer.loadScheduleConfig(schedulePath);
+
+  assert.strictEqual(schedule.id, 'bom-schedule');
+  assert.strictEqual(schedule.scheduled, true);
+  assert.strictEqual(schedule.schedule.cadence, 'quarterly');
+});
+
 test.after(() => {
   try { db._db.close(); } catch {}
   fs.rmSync(tempRoot, { recursive: true, force: true });
