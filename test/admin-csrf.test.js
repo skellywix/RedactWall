@@ -17,6 +17,7 @@ test('admin write routes include csrf middleware', () => {
   for (const route of [
     "app.post('/api/queries/:id/deny', ...adminWrite",
     "app.post('/api/retention/purge', ...adminWrite",
+    "app.post('/api/destinations/review', ...adminWrite",
     "app.put('/api/policy/apply-template', ...adminWrite",
     "app.put('/api/policy', ...adminWrite",
   ]) {

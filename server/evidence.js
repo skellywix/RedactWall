@@ -8,7 +8,7 @@
 const crypto = require('crypto');
 const { safeSensor } = require('./sensor-metadata');
 
-const POLICY_AUDIT_ACTIONS = new Set(['POLICY_UPDATED', 'POLICY_TEMPLATE_APPLIED']);
+const POLICY_AUDIT_ACTIONS = new Set(['POLICY_UPDATED', 'POLICY_TEMPLATE_APPLIED', 'DESTINATION_REVIEWED']);
 const POLICY_AUDIT_FIELDS = new Set([
   'enforcementMode',
   'blockMinSeverity',
@@ -19,6 +19,7 @@ const POLICY_AUDIT_FIELDS = new Set([
   'ignore',
   'disabledDetectors',
   'governedDestinations',
+  'allowedDestinations',
   'blockedDestinations',
   'blockedFileUploadDestinations',
   'scanner',

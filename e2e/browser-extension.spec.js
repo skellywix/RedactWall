@@ -134,6 +134,8 @@ async function syntheticPaste(page, value) {
 }
 
 test.describe('browser extension live smoke', () => {
+  test.setTimeout(90000);
+
   test('blocks a synthetic SSN before ChatGPT fixture send and records approval request', async ({ baseURL }, testInfo) => {
     const { context, userDataDir } = await launchExtensionContext(baseURL, testInfo);
     try {
@@ -147,14 +149,19 @@ test.describe('browser extension live smoke', () => {
       );
 
       await syntheticPaste(page, 'Member test SSN 123-45-6789');
-      await expect(page.locator('.ps-toast')).toContainText('US_SSN');
+      await expect(page.locator('.ps-toast')).toContainText('Social Security number');
 
       await page.locator('#prompt-textarea').fill('Member test SSN 123-45-6789 needs a payoff letter.');
       await page.locator('button[data-testid="send-button"]').click();
 
-      await expect(page.locator('.ps-banner')).toContainText('Blocked');
-      await expect(page.locator('.ps-banner')).toContainText('US_SSN');
+      await expect(page.locator('.ps-banner')).toBeVisible();
+      await expect(page.locator('.ps-title')).toContainText('Sensitive data blocked');
+      await expect(page.locator('.ps-banner')).toContainText('before it could leave this browser');
+      await expect(page.locator('.ps-chip')).toContainText('Social Security number');
+      await expect(page.locator('.ps-banner')).not.toContainText('US_SSN');
+      await expect(page.locator('.ps-coach')).toContainText('member ID');
       await expect(page.locator('[data-sent]')).toHaveCount(0);
+      await page.waitForTimeout(200);
       fs.mkdirSync(artifactDir, { recursive: true });
       await page.screenshot({ path: path.join(artifactDir, 'chatgpt-blocked.png'), fullPage: true });
 
@@ -182,8 +189,13 @@ test.describe('browser extension live smoke', () => {
       await page.locator('#prompt-textarea').fill('Member test SSN 123-45-6789 needs a payoff letter.');
       await page.locator('button.sendButton_demo').click();
 
-      await expect(page.locator('.ps-banner')).toContainText('Blocked');
+      await expect(page.locator('.ps-banner')).toBeVisible();
+      await expect(page.locator('.ps-title')).toContainText('Sensitive data blocked');
+      await expect(page.locator('.ps-chip')).toContainText('Social Security number');
+      await expect(page.locator('.ps-banner')).not.toContainText('US_SSN');
+      await expect(page.locator('.ps-coach')).toContainText('member ID');
       await expect(page.locator('[data-sent]')).toHaveCount(0);
+      await page.waitForTimeout(200);
       fs.mkdirSync(artifactDir, { recursive: true });
       await page.screenshot({ path: path.join(artifactDir, 'poe-blocked.png'), fullPage: true });
     } finally {

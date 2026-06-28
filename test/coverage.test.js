@@ -63,8 +63,10 @@ test('coverage summary aggregates governed apps, sensors, and shadow AI without 
       user: 'ops@example.test',
       destination: 'claude.ai',
       source: 'endpoint_agent',
+      channel: 'file_upload',
       sensor: { name: 'endpoint_agent', version: '0.3.0', platform: 'win32' },
       redactedPrompt: '[file upload blocked] claude.ai',
+      decisionNote: 'endpoint_agent/file_upload; native handoff evt_desktop_1',
     },
   ];
 
@@ -73,11 +75,13 @@ test('coverage summary aggregates governed apps, sensors, and shadow AI without 
   assert.strictEqual(report.totals.governedDestinations, 3);
   assert.strictEqual(report.totals.governedActive, 3);
   assert.strictEqual(report.totals.shadowEvents, 1);
+  assert.strictEqual(report.totals.unresolvedShadowDestinations, 1);
   assert.strictEqual(report.governedDestinations.find((d) => d.destination === 'chatgpt.com').blocked, 1);
   assert.strictEqual(report.governedDestinations.find((d) => d.destination === 'copilot.microsoft.com').blocked, 1);
   assert.strictEqual(report.governedDestinations.find((d) => d.destination === 'claude.ai').redacted, 1);
   assert.strictEqual(report.governedDestinations.find((d) => d.destination === 'claude.ai').blocked, 1);
   assert.strictEqual(report.shadowDestinations[0].destination, 'notebooklm.google.com');
+  assert.strictEqual(report.shadowDestinations[0].policyState, 'review');
   const browser = report.sensors.find((s) => s.source === 'browser_extension');
   assert.strictEqual(browser.versionHealth, 'mixed');
   assert.strictEqual(browser.latestVersion, '0.2.9');
@@ -85,10 +89,41 @@ test('coverage summary aggregates governed apps, sensors, and shadow AI without 
   assert.deepStrictEqual(browser.platforms, ['chrome_mv3']);
   assert.strictEqual(report.sensors.find((s) => s.source === 'endpoint_agent').events, 1);
   assert.strictEqual(report.sensors.find((s) => s.source === 'endpoint_agent').versionHealth, 'current');
+  assert.deepStrictEqual(report.desktopCollector, {
+    events: 1,
+    lastSeen: '2026-06-26T13:30:00.000Z',
+    destinations: ['claude.ai'],
+  });
+  assert.ok(report.posture.some((p) => p.id === 'desktop_collector' && p.state === 'covered'));
   assert.ok(report.posture.some((p) => p.id === 'sensor_versions' && p.state === 'attention'));
   assert.ok(report.score > 0 && report.score < 100);
   assert.ok(!JSON.stringify(report).includes('Member [US_SSN]'));
   assert.ok(!JSON.stringify(report).includes('524-71-9043'));
+});
+
+test('coverage marks desktop collector attention when no native handoff evidence exists', () => {
+  const report = coverage.summarize([], policy);
+  assert.deepStrictEqual(report.desktopCollector, { events: 0, lastSeen: null, destinations: [] });
+  assert.ok(report.posture.some((p) => p.id === 'desktop_collector' && p.state === 'attention'));
+});
+
+test('coverage marks reviewed shadow AI as governed by policy state', () => {
+  const rows = [{
+    id: 'q1',
+    createdAt: '2026-06-26T10:00:00.000Z',
+    status: 'shadow_ai',
+    user: 'analyst@example.test',
+    destination: 'poe.com',
+    source: 'browser_extension',
+    sensor: { name: 'browser_extension', version: '0.3.0', platform: 'chrome_mv3' },
+  }];
+
+  const report = coverage.summarize(rows, { allowedDestinations: ['poe.com'] });
+  assert.strictEqual(report.totals.unresolvedShadowDestinations, 0);
+  assert.strictEqual(report.shadowDestinations[0].destination, 'poe.com');
+  assert.strictEqual(report.shadowDestinations[0].policyState, 'allowed');
+  assert.strictEqual(report.shadowDestinations[0].governed, true);
+  assert.ok(report.posture.some((p) => p.id === 'shadow_ai' && p.state === 'covered'));
 });
 
 test('destination normalization removes schemes, paths, and www prefixes', () => {

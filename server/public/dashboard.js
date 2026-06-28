@@ -52,6 +52,22 @@ function postureTone(state) {
   return state === 'covered' ? 'good' : 'warn';
 }
 
+function destinationPolicyLabel(state) {
+  return ({
+    allowed: 'Allowed',
+    blocked: 'Blocked',
+    file_upload_blocked: 'File uploads blocked',
+    governed: 'Governed',
+    review: 'Needs review',
+  })[state] || 'Needs review';
+}
+
+function destinationPolicyTone(state) {
+  if (state === 'allowed' || state === 'governed') return 'good';
+  if (state === 'blocked' || state === 'file_upload_blocked') return 'bad';
+  return 'warn';
+}
+
 function sourceLabel(source) {
   return ({
     browser_extension: 'Browser',
@@ -313,6 +329,32 @@ function renderIncident(q) {
 }
 
 document.addEventListener('click', async (e) => {
+  const destinationReview = e.target.closest('[data-destination-review]');
+  if (destinationReview) {
+    if (!canAdminWrite()) {
+      alert('Request not allowed for this session. Use a Security Admin account.');
+      return;
+    }
+    const destination = destinationReview.dataset.destination;
+    const decision = destinationReview.dataset.destinationReview;
+    destinationReview.disabled = true;
+    const r = await api('/api/destinations/review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ destination, decision }),
+    });
+    if (!r || !r.ok) {
+      destinationReview.disabled = false;
+      alert('Destination review could not be saved.');
+      return;
+    }
+    const body = await r.json();
+    currentCoverage = body.coverage || currentCoverage;
+    renderCoverage(currentCoverage);
+    await loadStats();
+    if (!$('#tab-policy').classList.contains('hidden')) await loadPolicy();
+    return;
+  }
   const actionButton = e.target.closest('[data-act]');
   if (actionButton) {
     if (!canAdminWrite()) {
@@ -466,7 +508,17 @@ function renderCoverage(c) {
   $('#shadowRows').innerHTML = (c.shadowDestinations || []).map((d) => `
     <div class="shadow-row">
       <div><strong>${escapeHtml(d.destination)}</strong><span>${escapeHtml(d.users)} users / last ${escapeHtml(d.lastSeen ? fmt(d.lastSeen) : '-')}</span></div>
-      <div class="count">${escapeHtml(d.shadow)}</div>
+      <div class="destination-review">
+        <span class="pill ${destinationPolicyTone(d.policyState)}">${escapeHtml(destinationPolicyLabel(d.policyState))}</span>
+        <span class="count">${escapeHtml(d.shadow)}</span>
+        ${(d.policyState || 'review') === 'review' && canAdminWrite()
+    ? `<div class="destination-actions">
+          <button class="ghost mini" data-destination-review="govern" data-destination="${escapeHtml(d.destination)}" type="button">${icons.shield}Govern</button>
+          <button class="ghost mini" data-destination-review="allow" data-destination="${escapeHtml(d.destination)}" type="button">${icons.check}Allow</button>
+          <button class="ghost mini danger" data-destination-review="block" data-destination="${escapeHtml(d.destination)}" type="button">${icons.deny}Block</button>
+        </div>`
+    : ''}
+      </div>
     </div>`).join('') || '<div class="empty"><div class="big">No shadow AI</div>No ungoverned AI tools have been reported.</div>';
 }
 
@@ -551,6 +603,8 @@ async function loadPolicy() {
       <input id="pol_risk" type="number" min="0" max="100" value="${escapeHtml(p.blockRiskScore)}" ${readonly ? 'disabled' : ''}/>
       <label for="pol_retention">Purge retained raw approval data after days</label>
       <input id="pol_retention" type="number" min="0" max="3650" value="${escapeHtml(p.rawRetentionDays ?? 30)}" ${readonly ? 'disabled' : ''}/>
+      <label for="pol_desktop_destination">Default desktop upload destination</label>
+      <input id="pol_desktop_destination" type="text" maxlength="80" value="${escapeHtml(p.desktopCollectorDestination || 'Desktop AI')}" ${readonly ? 'disabled' : ''}/>
     </div>
     <div class="template-bar"><div class="template-title">Hard-stop entities</div>
       <div class="chips">${(p.alwaysBlock || []).map((x) => `<span class="chip"><b>${escapeHtml(x)}</b></span>`).join('')}</div></div>
@@ -559,6 +613,11 @@ async function loadPolicy() {
         ${readonly
     ? `<div class="chips">${(p.governedDestinations || []).map((x) => `<span class="chip">${escapeHtml(x)}</span>`).join('')}</div>`
     : `<textarea id="pol_governed_destinations" class="policy-textarea" spellcheck="false">${escapeHtml(policyListText(p.governedDestinations))}</textarea>`}
+      </label>
+      <label class="policy-list-field">Allowed AI destinations
+        ${readonly
+    ? `<div class="chips">${(p.allowedDestinations || []).map((x) => `<span class="chip">${escapeHtml(x)}</span>`).join('') || '<span class="chip">none</span>'}</div>`
+    : `<textarea id="pol_allowed_destinations" class="policy-textarea" spellcheck="false" placeholder="chatgpt.com&#10;claude.ai">${escapeHtml(policyListText(p.allowedDestinations))}</textarea>`}
       </label>
       <label class="policy-list-field">Blocked AI destinations
         ${readonly
@@ -589,7 +648,9 @@ async function loadPolicy() {
       blockMinSeverity: Number($('#pol_sev').value),
       blockRiskScore: Number($('#pol_risk').value),
       rawRetentionDays: Number($('#pol_retention').value),
+      desktopCollectorDestination: ($('#pol_desktop_destination').value || '').trim(),
       governedDestinations: parsePolicyList($('#pol_governed_destinations').value),
+      allowedDestinations: parsePolicyList($('#pol_allowed_destinations').value),
       blockedDestinations: parsePolicyList($('#pol_blocked_destinations').value),
       blockedFileUploadDestinations: parsePolicyList($('#pol_blocked_file_upload_destinations').value),
     };

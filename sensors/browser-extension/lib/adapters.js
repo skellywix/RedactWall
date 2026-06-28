@@ -20,6 +20,10 @@
     'copilot.microsoft.com': ['button[aria-label*="Submit" i]', 'button[aria-label*="Send" i]'],
     'www.perplexity.ai': ['button[aria-label*="Submit" i]', 'button[aria-label*="Send" i]'],
     'poe.com': ['button[class*="sendButton" i]', 'button[aria-label*="Send" i]'],
+    'chat.deepseek.com': ['button[aria-label*="Send" i]', 'button[type="submit"]'],
+    'chat.qwen.ai': ['button[aria-label*="Send" i]', 'button[type="submit"]'],
+    'kimi.com': ['button[aria-label*="Send" i]', 'button[type="submit"]'],
+    'doubao.com': ['button[aria-label*="Send" i]', 'button[type="submit"]'],
   };
   const GENERIC_SEND = ['button[data-testid="send-button"]', 'button[aria-label*="Send" i]', 'button[aria-label*="Submit" i]', 'button[type="submit"]'];
 
@@ -33,10 +37,19 @@
   // unmonitored). Parity with the "shadow AI discovery" competitors advertise.
   const AI_HOSTS = [
     'chatgpt.com', 'chat.openai.com', 'claude.ai', 'gemini.google.com', 'bard.google.com',
-    'copilot.microsoft.com', 'bing.com', 'perplexity.ai', 'www.perplexity.ai', 'poe.com',
+    'aistudio.google.com', 'notebooklm.google.com', 'copilot.microsoft.com', 'bing.com',
+    'perplexity.ai', 'www.perplexity.ai', 'poe.com',
     'character.ai', 'huggingface.co', 'you.com', 'pi.ai', 'deepseek.com', 'chat.deepseek.com',
-    'mistral.ai', 'chat.mistral.ai', 'groq.com', 'meta.ai', 'x.ai', 'grok.com',
-    'notion.so', 'phind.com', 'chatbot.theb.ai', 'coral.cohere.com', 'replicate.com',
+    'qwen.ai', 'chat.qwen.ai', 'tongyi.aliyun.com', 'qianwen.aliyun.com', 'kimi.com',
+    'moonshot.cn', 'kimi.moonshot.cn', 'doubao.com', 'yuanbao.tencent.com', 'yiyan.baidu.com',
+    'ernie.baidu.com', 'chatglm.cn', 'z.ai', 'bigmodel.cn', 'minimax.io', 'hailuoai.com',
+    'xinghuo.xfyun.cn', 'spark.xfyun.cn', 'ai.360.com', 'metaso.cn', 'wenxiaobai.com',
+    'baichuan-ai.com', 'mistral.ai', 'chat.mistral.ai', 'lechat.mistral.ai', 'groq.com',
+    'meta.ai', 'x.ai', 'grok.com', 'notion.so', 'phind.com', 'chatbot.theb.ai',
+    'coral.cohere.com', 'replicate.com', 'v0.dev', 'bolt.new', 'lovable.dev', 'cursor.com',
+    'windsurf.com', 'replit.com', 'blackbox.ai', 'jasper.ai', 'copy.ai', 'writesonic.com',
+    'chatsonic.com', 'grammarly.com', 'quillbot.com', 'midjourney.com', 'ideogram.ai',
+    'runwayml.com', 'krea.ai', 'elevenlabs.io', 'suno.com', 'udio.com',
   ];
 
   function normalizeHost(value) {

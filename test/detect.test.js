@@ -38,6 +38,32 @@ test('true positives — structured PII is caught', () => {
   assert.ok(hasType('email me at jane.doe@example.com', 'EMAIL_ADDRESS'), 'email');
 });
 
+test('true positives - regulated customer identifiers are caught', () => {
+  assert.ok(hasType('ITIN 912-70-1234 belongs to this taxpayer', 'US_ITIN'), 'ITIN');
+  assert.ok(hasType('NPI 1234567893 is listed for the provider', 'US_NPI'), 'NPI');
+  assert.ok(hasType('member id MBR-123456 needs review', 'MEMBER_ID'), 'member ID');
+  assert.ok(hasType('loan number LN-98765432 is on the payoff request', 'LOAN_NUMBER'), 'loan number');
+  assert.ok(hasType('MRN MRN-1234567 appears in the chart', 'MEDICAL_RECORD_NUMBER'), 'medical record number');
+  assert.ok(hasType('medical insurance number INS-1234567 is on the claim', 'HEALTH_INSURANCE_ID'), 'health insurance ID');
+  assert.ok(hasType('Use SWIFT code BOFAUS3N for the wire transfer', 'SWIFT_BIC'), 'SWIFT/BIC');
+  assert.ok(hasType('IPv6 address 2001:0db8:85a3:0000:0000:8a2e:0370:7334 hit the gateway', 'IPV6_ADDRESS'), 'IPv6');
+  assert.ok(hasCat('Patient has a diagnosis of diabetes and medication metformin in the discharge summary', 'HEALTH_RECORD'), 'health record category');
+});
+
+test('detector inventory exposes new regulated identifiers with severities', () => {
+  const detectors = new Map(D.listDetectors().map((d) => [d.id, d]));
+  for (const id of ['US_ITIN', 'US_NPI', 'MEMBER_ID', 'LOAN_NUMBER', 'MEDICAL_RECORD_NUMBER', 'HEALTH_INSURANCE_ID', 'HEALTH_RECORD']) {
+    assert.ok(detectors.has(id), id + ' should be listed');
+    assert.ok(detectors.get(id).severity >= 3, id + ' should be high severity or stronger');
+  }
+});
+
+test('masking keeps only the last four digits for expanded identifier types', () => {
+  assert.strictEqual(D.maskValue('MEMBER_ID', 'MBR-123456'), '**** 3456');
+  assert.strictEqual(D.maskValue('LOAN_NUMBER', 'LN-98765432'), '**** 5432');
+  assert.strictEqual(D.maskValue('HEALTH_INSURANCE_ID', 'INS-1234567'), '**** 4567');
+});
+
 test('true positives — hard-stop entities reach critical severity', () => {
   assert.strictEqual(find('SSN 123-45-6789').maxSeverityLabel, 'critical');
   assert.strictEqual(find('card 4111 1111 1111 1111').maxSeverityLabel, 'critical');
@@ -73,6 +99,18 @@ test('false-positive bait — canary discussion is NOT a canary token', () => {
 test('false-positive bait — random 16-digit ids are NOT credit cards', () => {
   assert.ok(!hasType('transaction id 4929939187355598 posted', 'CREDIT_CARD'), 'Luhn-passing id, no context');
   assert.ok(!hasType('ticket 6011000000000004 escalated', 'CREDIT_CARD'), 'valid BIN but no separators/context');
+});
+
+test('false-positive bait - custom-looking ids do not swallow trailing prose', () => {
+  const member = find('member id MBR-123456 needs review').findings.find((f) => f.type === 'MEMBER_ID');
+  const insurance = find('medical insurance number INS-1234567 for the health plan').findings.find((f) => f.type === 'HEALTH_INSURANCE_ID');
+  assert.strictEqual(member && member.value, 'MBR-123456');
+  assert.strictEqual(insurance && insurance.value, 'INS-1234567');
+});
+
+test('false-positive bait - ordinary dates and health topics are not DOB or PHI', () => {
+  assert.ok(!hasType('the rollout date is 06/27/2026 on the public calendar', 'DOB'));
+  assert.ok(!hasCat('Explain asthma treatment options at a high level without patient details.', 'HEALTH_RECORD'));
 });
 
 test('false-positive rate on random ids stays low', () => {

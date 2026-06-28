@@ -463,6 +463,10 @@
   .sensor-row strong,.shadow-row strong{display:block;color:#fff;font-size:13px;font-weight:720;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .sensor-row span,.shadow-row span{display:block;color:var(--mut);font-size:12px;margin-top:4px}
   .sensor-row .count,.shadow-row .count{color:#fff;font-weight:780;font-variant-numeric:tabular-nums}
+  .destination-review{display:grid;justify-items:end;gap:7px}
+  .destination-actions{display:flex;justify-content:flex-end;gap:6px;flex-wrap:wrap}
+  .ghost.mini{min-height:30px;padding:6px 8px;font-size:11.5px}
+  .ghost.danger{border-color:rgba(255,90,102,.34);color:#ffb9be}
   .incident-detail{display:grid;gap:12px;padding:14px}
   .detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
   .datum{border:1px solid var(--line);border-radius:8px;background:#08111c;padding:10px}
@@ -530,8 +534,8 @@
   .policy-option span{display:flex;align-items:center;gap:8px;font-weight:750;font-size:13px;color:#fff}
   .policy-option p{margin:7px 0 0 24px;color:var(--mut);font-size:11.5px;line-height:1.45}
   .field-grid{display:grid;grid-template-columns:minmax(180px,1fr) 150px;gap:10px;align-items:center;margin-bottom:18px}
-  select,input[type="number"]{width:100%;min-height:38px;border:1px solid var(--line);border-radius:8px;background:#08111c;color:var(--txt);padding:8px 10px}
-  .policy-list-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:18px}
+  select,input[type="number"],input[type="text"]{width:100%;min-height:38px;border:1px solid var(--line);border-radius:8px;background:#08111c;color:var(--txt);padding:8px 10px}
+  .policy-list-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:18px}
   .policy-list-field{display:grid;gap:8px;color:var(--mut);font-size:12px}
   .policy-textarea{width:100%;min-height:116px;resize:vertical;border:1px solid var(--line);border-radius:8px;background:#08111c;color:var(--txt);padding:9px 10px;line-height:1.45}
   .policy-textarea::placeholder{color:#66758a}
@@ -565,6 +569,9 @@
     .stats{grid-template-columns:1fr}
     .content-tabs{overflow:auto}
     .coverage-body,.coverage-kpis{grid-template-columns:1fr}
+    .shadow-row{grid-template-columns:1fr}
+    .destination-review{justify-items:start}
+    .destination-actions{justify-content:flex-start}
     .queue-mainline,.detail-grid,.policy-options,.field-grid,.policy-list-grid{grid-template-columns:1fr}
     .barrow{grid-template-columns:96px minmax(0,1fr) 28px}
     th,td{padding:10px 9px}

@@ -68,6 +68,45 @@
     if (/^(\d)\1+$/.test(d)) return false;
     return true;
   }
+  function compactDigits(value) {
+    return String(value || '').replace(/\D/g, '');
+  }
+  function idValuePlausible(value, minDigits, maxChars) {
+    const v = String(value || '').trim().replace(/\s+/g, '');
+    const d = compactDigits(v);
+    if (v.length < 5 || v.length > (maxChars || 32)) return false;
+    if (d.length < (minDigits || 4)) return false;
+    if (/^([A-Z0-9])\1+$/i.test(v.replace(/[-_]/g, ''))) return false;
+    return true;
+  }
+  function itinPlausible(raw) {
+    const d = compactDigits(raw);
+    if (!/^9\d{2}(7\d|8[0-8]|9[0-2]|9[4-9])\d{4}$/.test(d)) return false;
+    return ssnPlausible(d) === false;
+  }
+  function npiValid(raw) {
+    const d = compactDigits(raw);
+    if (!/^\d{10}$/.test(d) || /^(\d)\1+$/.test(d)) return false;
+    return luhnValid('80840' + d);
+  }
+  function datePlausible(raw) {
+    const m = String(raw || '').match(/^(\d{1,2})[/-](\d{1,2})[/-]((?:19|20)\d{2})$/);
+    if (!m) return false;
+    const mm = +m[1], dd = +m[2], yy = +m[3];
+    const nowYear = new Date().getFullYear();
+    if (yy < 1900 || yy > nowYear) return false;
+    const days = [31, yy % 4 === 0 && (yy % 100 !== 0 || yy % 400 === 0) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    return mm >= 1 && mm <= 12 && dd >= 1 && dd <= days[mm - 1];
+  }
+  function ipv6Valid(raw) {
+    const v = String(raw || '').toLowerCase();
+    if (!/^[0-9a-f:]+$/.test(v) || !v.includes(':')) return false;
+    if ((v.match(/::/g) || []).length > 1) return false;
+    const halves = v.split('::');
+    const groups = halves.flatMap((part) => part ? part.split(':') : []);
+    if (groups.some((g) => !/^[0-9a-f]{1,4}$/.test(g))) return false;
+    return halves.length === 2 ? groups.length < 8 : groups.length === 8;
+  }
   // Issuer Identification Number (BIN) check — a string passing Luhn is only a
   // real card if its prefix + length match a known network. Cuts the ~10% of
   // random 16-digit numbers that pass Luhn alone down to near zero.
@@ -87,10 +126,12 @@
   // ---------- severity -------------------------------------------------------
   const SEVERITY = {
     US_SSN: 4, CREDIT_CARD: 4, BANK_ACCOUNT: 4, ROUTING_NUMBER: 3, IBAN: 3,
-    US_PASSPORT: 4, US_TIN_EIN: 3, US_DRIVERS_LICENSE: 3, US_LICENSE_PLATE: 2, VIN: 1,
+    US_PASSPORT: 4, US_TIN_EIN: 3, US_ITIN: 4, US_NPI: 3, US_DRIVERS_LICENSE: 3,
+    US_LICENSE_PLATE: 2, VIN: 1, MEMBER_ID: 3, LOAN_NUMBER: 3, MEDICAL_RECORD_NUMBER: 3,
+    HEALTH_INSURANCE_ID: 3, SWIFT_BIC: 2,
     SECRET_KEY: 4, PRIVATE_KEY: 4, CANARY_TOKEN: 4, PASSWORD: 3, DOB: 3,
-    EMAIL_ADDRESS: 2, PHONE_NUMBER: 2, IP_ADDRESS: 1, US_ADDRESS: 2, PERSON_NAME: 1,
-    SOURCE_CODE: 3, LEGAL_CONTRACT: 3, CREDENTIALS: 4, CONFIDENTIAL_BUSINESS: 3,
+    EMAIL_ADDRESS: 2, PHONE_NUMBER: 2, IP_ADDRESS: 1, IPV6_ADDRESS: 1, US_ADDRESS: 2, PERSON_NAME: 1,
+    SOURCE_CODE: 3, LEGAL_CONTRACT: 3, CREDENTIALS: 4, CONFIDENTIAL_BUSINESS: 3, HEALTH_RECORD: 3,
   };
   const SEVERITY_LABEL = { 0: 'none', 1: 'low', 2: 'medium', 3: 'high', 4: 'critical' };
 
@@ -114,16 +155,25 @@
     { id: 'BANK_ACCOUNT', score: 0.72, re: /\b(?:bank|checking|savings|deposit|ach|wire|direct\s*deposit|debit)\s+(?:account|acct)(?:\s*(?:number|no\.?|#))?\s*[:#-]?\s*((?:\d[ -]?){6,17})\b/gi, group: 1, validate: (m) => bankAccountPlausible(m) },
     { id: 'BANK_ACCOUNT', score: 0.68, re: /\b(?:account|acct)\s*(?:number|no\.?|#)\s*[:#-]?\s*((?:\d[ -]?){6,17})\b/gi, group: 1, ctx: /\b(bank|checking|savings|deposit|ach|wire|loan|member)\b/i, validate: (m) => bankAccountPlausible(m) },
     { id: 'US_TIN_EIN', score: 0.7, re: /\b\d{2}-\d{7}\b/g, ctx: /\b(ein|employer id|tax\s?id|tin|taxpayer)\b/i },
+    { id: 'US_ITIN', score: 0.88, re: /\b9\d{2}[- ]?(?:7\d|8[0-8]|9[0-2]|9[4-9])[- ]?\d{4}\b/g, ctx: /\b(itin|individual taxpayer|taxpayer id|tax id|tin)\b/i, validate: (m) => itinPlausible(m) },
     { id: 'US_PASSPORT', score: 0.7, re: /\b[A-Z]?\d{8,9}\b/g, ctx: /\bpassport\b/i },
+    { id: 'US_NPI', score: 0.82, re: /\b(?:npi|national provider identifier)(?:\s*(?:number|no\.?|#))?\s*[:#-]?\s*(\d{10})\b/gi, group: 1, validate: (m) => npiValid(m) },
     { id: 'VIN', score: 0.85, re: /\b[A-HJ-NPR-Z0-9]{17}\b/g, validate: (m) => vinValid(m) },
     { id: 'US_DRIVERS_LICENSE', score: 0.7, re: /\b(?:DL|driver'?s?\s*licen[cs]e|license)\s*#?\s*[:#]?\s*([A-Z0-9]{6,12})\b/gi },
     { id: 'US_LICENSE_PLATE', score: 0.55, re: /\b[A-Z0-9]{5,8}\b/g, ctx: /\b(license plate|plate (?:no|number|#)|tag number)\b/i, validate: (m) => /[A-Z]/.test(m) && /\d/.test(m) },
+    { id: 'MEMBER_ID', score: 0.76, re: /\b(?:member|customer|client|account holder)\s*(?:id|number|no\.?|#)\s*[:#-]?\s*([A-Z0-9][A-Z0-9_-]{4,24})\b/gi, group: 1, validate: (m) => idValuePlausible(m, 4, 28) },
+    { id: 'LOAN_NUMBER', score: 0.74, re: /\b(?:loan|mortgage|application|case)\s*(?:id|number|no\.?|#)\s*[:#-]?\s*([A-Z0-9][A-Z0-9_-]{4,24})\b/gi, group: 1, validate: (m) => idValuePlausible(m, 4, 28) },
+    { id: 'MEDICAL_RECORD_NUMBER', score: 0.78, re: /\b(?:mrn|medical record|patient record|chart)\s*(?:id|number|no\.?|#)?\s*[:#-]?\s*([A-Z0-9][A-Z0-9_-]{5,24})\b/gi, group: 1, validate: (m) => idValuePlausible(m, 4, 28) },
+    { id: 'HEALTH_INSURANCE_ID', score: 0.74, re: /\b(?:health|medical|insurance|subscriber|policy|group)\s*(?:member\s*)?(?:id|number|no\.?|#)\s*[:#-]?\s*([A-Z0-9][A-Z0-9_-]{5,24})\b/gi, group: 1, ctx: /\b(health|medical|insurance|subscriber|policy|group|plan)\b/i, validate: (m) => idValuePlausible(m, 4, 28) },
+    { id: 'SWIFT_BIC', score: 0.7, re: /\b[A-Z]{6}[A-Z0-9]{2}(?:[A-Z0-9]{3})?\b/g, ctx: /\b(swift|bic|international wire|wire transfer)\b/i },
     { id: 'EMAIL_ADDRESS', score: 0.95, re: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g },
     { id: 'PHONE_NUMBER', score: 0.7, re: /(?:\+?1[ .-]?)?\(?\b\d{3}\)?[ .-]?\d{3}[ .-]?\d{4}\b/g, validate: (m) => /[()\-. ]/.test(m) || m.length === 10 },
     { id: 'IP_ADDRESS', score: 0.85, re: /\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b/g },
-    { id: 'DOB', score: 0.55, re: /\b(?:0?[1-9]|1[0-2])[/\-](?:0?[1-9]|[12]\d|3[01])[/\-](?:19|20)\d{2}\b/g },
+    { id: 'IPV6_ADDRESS', score: 0.75, re: /\b(?:[0-9A-Fa-f]{1,4}:){2,7}[0-9A-Fa-f]{1,4}\b/g, validate: (m) => ipv6Valid(m) },
+    { id: 'DOB', score: 0.72, re: /\b(?:0?[1-9]|1[0-2])[/\-](?:0?[1-9]|[12]\d|3[01])[/\-](?:19|20)\d{2}\b/g, ctx: /\b(dob|date of birth|birthdate|born|birthday|patient|member|customer)\b/i, validate: (m) => datePlausible(m) },
     { id: 'PRIVATE_KEY', score: 0.99, re: /-----BEGIN (?:RSA |EC |OPENSSH |PGP )?PRIVATE KEY-----/g },
-    { id: 'SECRET_KEY', score: 0.95, re: /\b(?:sk-[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z\-_]{20,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})\b/g },
+    { id: 'SECRET_KEY', score: 0.95, re: /\b(?:sk-(?:live|test|proj)?-?[A-Za-z0-9_-]{16,}|rk_(?:live|test)_[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{22,}|glpat-[A-Za-z0-9_-]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|SG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}|AIza[0-9A-Za-z\-_]{20,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})\b/g },
+    { id: 'SECRET_KEY', score: 0.9, re: /\b[A-Z][A-Z0-9_]*(?:SECRET|TOKEN|API_KEY|ACCESS_KEY|PASSWORD|PRIVATE_KEY)\s*[:=]\s*["']?([A-Za-z0-9_./+=@%:-]{8,})["']?/g, group: 1 },
     // Org-planted tripwire values for fake records, demos, and leak drills.
     { id: 'CANARY_TOKEN', score: 0.99, re: /\b(?:PS|PROMPTWALL|PROMPTSENTINEL)[-_]CANARY[-_][A-Z0-9][A-Z0-9_-]{11,63}\b/gi },
     { id: 'PASSWORD', score: 0.8, re: /\b(?:pass(?:word|wd)?|pwd|passphrase)\s*[:=]\s*\S{4,}/gi },
@@ -137,7 +187,7 @@
     const seen = new Set();
     const add = (id) => { if (!seen.has(id)) { seen.add(id); ids.push(id); } };
     for (const d of DETECTORS) add(d.id);
-    ['PERSON_NAME', 'SOURCE_CODE', 'LEGAL_CONTRACT', 'CREDENTIALS', 'CONFIDENTIAL_BUSINESS'].forEach(add);
+    ['PERSON_NAME', 'SOURCE_CODE', 'LEGAL_CONTRACT', 'CREDENTIALS', 'CONFIDENTIAL_BUSINESS', 'HEALTH_RECORD'].forEach(add);
     return ids.map((id) => ({ id, severity: SEVERITY[id] || 1, severityLabel: SEVERITY_LABEL[SEVERITY[id] || 1] }));
   }
 
@@ -236,7 +286,8 @@
     if (want('SOURCE_CODE')) {
       let code = 0;
       [/\bfunction\b/, /=>/, /\bdef\s+\w+\s*\(/, /\bclass\s+\w+/, /\bimport\s+[\w{]/, /\b(?:const|let|var)\s+\w+\s*=/,
-       /\bpublic\s+(?:static\s+)?\w+/, /#include\b/, /\bSELECT\b.+\bFROM\b/i, /\breturn\b\s+\w/, /\bif\s*\(.+\)\s*[{:]/].forEach((re) => { if (re.test(t)) code += 0.18; });
+       /\bpublic\s+(?:static\s+)?\w+/, /#include\b/, /\bSELECT\b.+\bFROM\b/i, /\b(?:INSERT|UPDATE|DELETE)\b.+\b(?:INTO|SET|FROM)\b/i,
+       /\breturn\b\s+\w/, /\bif\s*\(.+\)\s*[{:]/, /```[a-z0-9_-]*\n[\s\S]{12,}```/i, /\b(?:async\s+function|await\s+\w+\(|from\s+[\w.]+\s+import|module\.exports|export\s+default)\b/].forEach((re) => { if (re.test(t)) code += 0.18; });
       const braces = (t.match(/[{}();]/g) || []).length;
       if (braces / len > 0.03) code += 0.25;
       if (/\n\s{2,}\S/.test(t) && braces > 3) code += 0.15;
@@ -247,7 +298,8 @@
       let legal = 0;
       ['agreement', 'hereby', 'hereinafter', 'indemnif', 'liabilit', 'shall not', 'terms and conditions',
        'confidentiality', 'non-disclosure', 'party of the', 'in witness whereof', 'governing law', 'warrant',
-       'breach', 'covenant', 'arbitration'].forEach((w) => { if (lower.includes(w)) legal += 0.16; });
+       'breach', 'covenant', 'arbitration', 'force majeure', 'entire agreement', 'assignment without consent',
+       'termination for cause', 'limitation of liability', 'receiving party', 'disclosing party'].forEach((w) => { if (lower.includes(w)) legal += 0.16; });
       const p = _lrProb(t, 'LEGAL_CONTRACT');
       if (legal >= 0.32 || p >= _lrThresh('LEGAL_CONTRACT')) cats.push({ category: 'LEGAL_CONTRACT', score: Math.min(1, Math.max(legal, p)) });
     }
@@ -257,7 +309,8 @@
       // talking ABOUT credentials ("rotate API keys") doesn't score; keep strong
       // standalone signals (bearer token, user:pass@host URI, PEM header).
       [/\bconnection\s*string\b/i, /\bpassword\s*[:=]/i, /\bapi[_ -]?key\s*[:=]/i, /\bsecret\s*[:=]/i, /\btoken\s*[:=]/i,
-       /\bbearer\s+[A-Za-z0-9._-]{8,}/i, /\bclient[_ -]?secret\b/i, /\b[a-z][a-z0-9+.-]*:\/\/[^\s:@/]+:[^\s:@/]+@/i, /-----BEGIN/].forEach((re) => { if (re.test(t)) cred += 0.2; });
+       /\bbearer\s+[A-Za-z0-9._-]{8,}/i, /\bclient[_ -]?secret\s*[:=]/i, /\b[A-Z][A-Z0-9_]*(?:SECRET|TOKEN|API_KEY|ACCESS_KEY|PASSWORD)\s*[:=]/,
+       /\baws_(?:secret_access_key|access_key_id)\s*[:=]/i, /\b[a-z][a-z0-9+.-]*:\/\/[^\s:@/]+:[^\s:@/]+@/i, /-----BEGIN/].forEach((re) => { if (re.test(t)) cred += 0.2; });
       const p = _lrProb(t, 'CREDENTIALS');
       if (cred >= 0.4 || p >= _lrThresh('CREDENTIALS')) cats.push({ category: 'CREDENTIALS', score: Math.min(1, Math.max(cred, p)) });
     }
@@ -268,10 +321,18 @@
       //  3) the trained model, for cue-less confidential meaning it generalizes to.
       const explicitConf = /\b((strictly|company|highly|business) )?confidential\b|internal only|internal[- ]use only|do not (share|distribute|forward|circulate)|not for distribution|proprietary|trade secret|privileged and confidential/i.test(t);
       const secrecyCue = /\b(do not (share|forward|distribute|circulate|mention)|don'?t (share|forward|tell|mention|circulate)|keep (this|it) (internal|confidential|quiet|between us|to yourself|under wraps)|to yourself|strictly (internal|confidential)|internal only|not (yet )?(public|announced|been announced)|off the record|under wraps|hush(\s*hush)?|stays? (internal|in this (thread|room|email)|between us)|cannot leave this|no one else (has|should)|embargo|before (anything|it'?s)( is)? (filed|announced|public)|discreet)/i.test(t);
-      const bizSensitive = /\b(layoffs?|lay(ing)? off|headcount|restructur|wind(ing)? down|merger|acquisition|acquir|transaction|trim(?:ming)?[^.]{0,30}(?:org|team|staff|workforce|headcount|division|department|unit)|consent order|exam(iner| findings)|restat|net[- ]?worth|portfolio|retention|earnings|revenue (projection|target)|miss(ing)? (our )?(numbers|targets?)|pricing (strategy|change)|margins|board (deck|hears|approval)|switch(ing)? (vendors?|processors?|away)|replac(e|ing) (our|the) (core|processor|vendor)|leaving (our|the) (vendor|processor)|considering (leaving|switching)|losing the .{0,24}account|cap table|pre[- ]revenue|churn|pipeline forecast|salary (band|range)|compensation band|pulling out of)\b/i.test(t);
+      const bizSensitive = /\b(layoffs?|lay(ing)? off|headcount|restructur|wind(ing)? down|merger|acquisition|acquir|transaction|trim(?:ming)?[^.]{0,30}(?:org|team|staff|workforce|headcount|division|department|unit)|consent order|exam(iner| findings)|regulatory findings?|bsa|aml|restat|net[- ]?worth|portfolio|retention|earnings|revenue (projection|target)|miss(ing)? (our )?(numbers|targets?)|pricing (strategy|change)|margins|board (deck|pack|hears|approval)|customer list|member list|unreleased roadmap|material nonpublic|mnpi|vendor negotiation|non[- ]?renewal|security incident|breach plan|switch(ing)? (vendors?|processors?|away)|replac(e|ing) (our|the) (core|processor|vendor)|leaving (our|the) (vendor|processor)|considering (leaving|switching)|losing the .{0,24}account|cap table|pre[- ]revenue|churn|pipeline forecast|salary (band|range)|compensation band|pulling out of)\b/i.test(t);
       const p = _lrProb(t, 'CONFIDENTIAL_BUSINESS');
       const kwFires = explicitConf || (secrecyCue && bizSensitive);
       if (kwFires || p >= _lrThresh('CONFIDENTIAL_BUSINESS')) cats.push({ category: 'CONFIDENTIAL_BUSINESS', score: Math.min(1, Math.max(kwFires ? 0.72 : 0, p)) });
+    }
+    if (want('HEALTH_RECORD')) {
+      const patientCue = /\b(patient|member|subscriber|insured|chart|medical record|mrn)\b/i.test(t);
+      const healthTopic = /\b(diagnos(is|ed)|treatment|procedure|lab result|prescription|medication|claim|icd-?10|cpt|hipaa|phi|discharge summary|clinical note|provider|npi)\b/i.test(t);
+      const identifierCue = /\b(mrn|medical record|health insurance|subscriber id|policy number|claim number|npi)\b/i.test(t);
+      const deidentifiedCue = /\b(?:without|no|not)\s+(?:any\s+)?patient\s+(?:details|context|data|identifiers?|info|information)\b/i.test(t);
+      const generalAsk = /\b(explain|what are|best practices|high level|in general|no specifics)\b/i.test(t);
+      if (identifierCue || (patientCue && healthTopic && !deidentifiedCue && !generalAsk)) cats.push({ category: 'HEALTH_RECORD', score: 0.72 });
     }
     return cats;
   }
@@ -309,6 +370,8 @@
   function maskValue(type, value) {
     if (type === 'CANARY_TOKEN') return '[CANARY_TOKEN]';
     const d = (value || '').replace(/\D/g, '');
+    if ((type === 'US_ITIN' || type === 'US_NPI' || type === 'MEMBER_ID' || type === 'LOAN_NUMBER'
+      || type === 'MEDICAL_RECORD_NUMBER' || type === 'HEALTH_INSURANCE_ID') && d.length >= 4) return '**** ' + d.slice(-4);
     if ((type === 'CREDIT_CARD' || type === 'US_SSN' || type === 'BANK_ACCOUNT' || type === 'IBAN') && d.length >= 4) return '•••• ' + d.slice(-4);
     if (type === 'EMAIL_ADDRESS') { const p = value.split('@'); return (p[0] ? p[0][0] : '') + '***@' + (p[1] || ''); }
     if (!value || value.length <= 4) return '****';
@@ -359,7 +422,7 @@
     return { tokenizedText: t.text, map: t.map, tokenCount: t.tokens, analysis };
   }
 
-  const api = { analyze, redact, maskValue, tokenize, detokenize, tokenizePrompt, classifySemantic, _featurize, _lrProb, listDetectors, luhnValid, ssnPlausible, abaValid, ibanValid, vinValid, bankAccountPlausible, cardNetwork, SEVERITY, SEVERITY_LABEL };
+  const api = { analyze, redact, maskValue, tokenize, detokenize, tokenizePrompt, classifySemantic, _featurize, _lrProb, listDetectors, luhnValid, ssnPlausible, abaValid, ibanValid, vinValid, bankAccountPlausible, itinPlausible, npiValid, datePlausible, ipv6Valid, cardNetwork, SEVERITY, SEVERITY_LABEL };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (root) root.PSDetect = api;
 })(typeof window !== 'undefined' ? window : (typeof self !== 'undefined' ? self : null));

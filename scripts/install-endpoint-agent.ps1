@@ -6,6 +6,10 @@ param(
   [string]$WatchDir = "$env:USERPROFILE\PromptWallWatch",
   [string]$HandoffDir = "$env:LOCALAPPDATA\PromptWall\native-handoff",
   [string]$HandoffSecret = "",
+  [switch]$InstallDesktopCollector,
+  [string]$DesktopCollectorDestination = "",
+  [string]$DesktopCollectorMenuName = "PromptWall Protected Upload",
+  [string]$DesktopCollectorKeyName = "PromptWallProtectedUpload",
   [string]$ConfigDir = "$env:LOCALAPPDATA\PromptWall",
   [string]$RepoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path,
   [switch]$Force
@@ -36,6 +40,8 @@ if ($HandoffSecret) {
     throw "HandoffSecret must be at least 32 characters when native handoff is enabled."
   }
   New-Item -ItemType Directory -Force -Path $handoffRoot | Out-Null
+} elseif ($InstallDesktopCollector) {
+  throw "InstallDesktopCollector requires HandoffSecret so protected uploads can be signed."
 }
 
 if ((Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) -and -not $Force) {
@@ -53,6 +59,9 @@ if ($HandoffSecret) {
   $configLines += "ENDPOINT_AGENT_HANDOFF_DIR=$handoffRoot"
   $configLines += "ENDPOINT_AGENT_HANDOFF_SECRET=$HandoffSecret"
 }
+if ($DesktopCollectorDestination) {
+  $configLines += "ENDPOINT_AGENT_DESKTOP_DESTINATION=$DesktopCollectorDestination"
+}
 $configLines | Set-Content -LiteralPath $configPath -Encoding utf8
 
 $acl = Get-Acl -LiteralPath $configPath
@@ -63,8 +72,18 @@ $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRul
 $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule("SYSTEM", "FullControl", "Allow")))
 $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule("BUILTIN\Administrators", "FullControl", "Allow")))
 Set-Acl -LiteralPath $configPath -AclObject $acl
+if ($HandoffSecret) {
+  $handoffAcl = Get-Acl -LiteralPath $handoffRoot
+  $handoffAcl.SetAccessRuleProtection($true, $false)
+  foreach ($rule in @($handoffAcl.Access)) { $handoffAcl.RemoveAccessRule($rule) | Out-Null }
+  $handoffAcl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($currentUser, "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")))
+  $handoffAcl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule("SYSTEM", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")))
+  $handoffAcl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule("BUILTIN\Administrators", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")))
+  Set-Acl -LiteralPath $handoffRoot -AclObject $handoffAcl
+}
 
 if ($Force) {
+  Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
   Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
 }
 
@@ -84,8 +103,23 @@ $principal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType Interact
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Description "PromptWall endpoint file sensor" | Out-Null
 Start-ScheduledTask -TaskName $TaskName
 
+if ($InstallDesktopCollector) {
+  $collectorInstaller = Join-Path $repo "scripts\install-desktop-collector.ps1"
+  if (-not (Test-Path -LiteralPath $collectorInstaller)) {
+    throw "Desktop collector installer not found: $collectorInstaller"
+  }
+  & $collectorInstaller `
+    -ConfigDir $configRoot `
+    -RepoRoot $repo `
+    -Destination $DesktopCollectorDestination `
+    -MenuName $DesktopCollectorMenuName `
+    -KeyName $DesktopCollectorKeyName `
+    -Force:$Force.IsPresent
+}
+
 Write-Host "Installed $TaskName"
 Write-Host "Watch directory: $watchRoot"
 if ($HandoffSecret) { Write-Host "Native handoff directory: $handoffRoot" }
+if ($InstallDesktopCollector) { Write-Host "Desktop collector: $DesktopCollectorMenuName" }
 Write-Host "Config file: $configPath"
 Write-Host "Log file: $logPath"

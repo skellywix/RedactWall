@@ -561,8 +561,10 @@ test('sensor policy endpoint publishes detector and scanner controls', async () 
   assert.ok(Array.isArray(body.ignore));
   assert.ok(Array.isArray(body.disabledDetectors));
   assert.ok(Array.isArray(body.governedDestinations));
+  assert.ok(Array.isArray(body.allowedDestinations));
   assert.ok(Array.isArray(body.blockedDestinations));
   assert.ok(Array.isArray(body.blockedFileUploadDestinations));
+  assert.strictEqual(body.desktopCollectorDestination, 'Desktop AI');
   assert.ok(body.scanner && typeof body.scanner === 'object');
   assert.ok(Array.isArray(body.scanner.ignoreDirectories));
   assert.ok(Array.isArray(body.scanner.ignoreFilenames));
@@ -632,6 +634,76 @@ test('admin policy rejects unknown detector ids without changing policy file', a
     fields: ['ignore.0'],
   });
   assert.strictEqual(fs.readFileSync(policyPath, 'utf8'), originalPolicy);
+}));
+
+test('admin policy accepts desktop collector destination labels', async () => withServer(async (port) => {
+  const originalPolicy = fs.readFileSync(policyPath, 'utf8');
+  const { cookie, csrfToken } = await login(port);
+  try {
+    const res = await jsonFetch(port, '/api/policy', {
+      method: 'PUT',
+      headers: {
+        cookie,
+        'x-csrf-token': csrfToken,
+      },
+      body: {
+        desktopCollectorDestination: 'Copilot Desktop',
+      },
+    });
+
+    assert.strictEqual(res.status, 200);
+    const body = await res.json();
+    assert.strictEqual(body.desktopCollectorDestination, 'Copilot Desktop');
+  } finally {
+    fs.writeFileSync(policyPath, originalPolicy);
+  }
+}));
+
+test('admin destination review validates, persists, and audits decisions', async () => withServer(async (port) => {
+  const originalPolicy = fs.readFileSync(policyPath, 'utf8');
+  const { cookie, csrfToken } = await login(port);
+
+  try {
+    const invalid = await jsonFetch(port, '/api/destinations/review', {
+      headers: {
+        cookie,
+        'x-csrf-token': csrfToken,
+      },
+      body: {
+        destination: 'poe.com',
+        decision: 'allow',
+        rawPrompt: 'member SSN 524-71-9043',
+      },
+    });
+    assert.strictEqual(invalid.status, 400);
+    assert.deepStrictEqual(await invalid.json(), {
+      error: 'invalid request body',
+      fields: ['rawPrompt'],
+    });
+    assert.strictEqual(fs.readFileSync(policyPath, 'utf8'), originalPolicy);
+
+    const res = await jsonFetch(port, '/api/destinations/review', {
+      headers: {
+        cookie,
+        'x-csrf-token': csrfToken,
+      },
+      body: {
+        destination: 'https://www.Poe.com/chat',
+        decision: 'allow',
+      },
+    });
+    assert.strictEqual(res.status, 200);
+    const body = await res.json();
+    assert.strictEqual(body.destination, 'poe.com');
+    assert.strictEqual(body.decision, 'allow');
+    assert.ok(body.policy.allowedDestinations.includes('poe.com'));
+    assert.ok(!body.policy.governedDestinations.includes('poe.com'));
+    assert.ok(!body.policy.blockedDestinations.includes('poe.com'));
+    assert.ok(body.coverage);
+    assert.ok(db.listAudit(20).some((entry) => entry.action === 'DESTINATION_REVIEWED'));
+  } finally {
+    fs.writeFileSync(policyPath, originalPolicy);
+  }
 }));
 
 test.after(() => {

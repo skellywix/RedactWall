@@ -20,6 +20,7 @@ const LIMITS = {
 
 const DETECTOR_ID = /^[A-Z0-9_]+$/;
 const HOST_OR_LABEL = /^[A-Za-z0-9.*:_/-]+$/;
+const DESKTOP_DESTINATION_LABEL = /^[A-Za-z0-9 .:_/-]+$/;
 const KNOWN_DETECTOR_IDS = new Set(detector.listDetectors().map((d) => d.id));
 
 function nonBlankString(max) {
@@ -194,6 +195,11 @@ const applyTemplateSchema = z.object({
   id: z.string().min(1).max(80).regex(/^[a-z0-9_/-]+$/),
 }).strict();
 
+const destinationReviewSchema = z.object({
+  destination: z.string().min(1).max(253).regex(HOST_OR_LABEL),
+  decision: z.enum(['govern', 'allow', 'block']),
+}).strict();
+
 const scannerPolicySchema = z.object({
   ignoreDirectories: z.array(nonBlankString(128)).max(LIMITS.policyListItems).optional(),
   ignoreFilenames: z.array(nonBlankString(128)).max(LIMITS.policyListItems).optional(),
@@ -211,8 +217,12 @@ const policyUpdateSchema = z.object({
   ignore: z.array(detectorIdSchema).max(LIMITS.policyListItems).optional(),
   disabledDetectors: z.array(detectorIdSchema).max(LIMITS.policyListItems).optional(),
   governedDestinations: z.array(z.string().min(1).max(253).regex(HOST_OR_LABEL)).max(LIMITS.policyListItems).optional(),
+  allowedDestinations: z.array(z.string().min(1).max(253).regex(HOST_OR_LABEL)).max(LIMITS.policyListItems).optional(),
   blockedDestinations: z.array(z.string().min(1).max(253).regex(HOST_OR_LABEL)).max(LIMITS.policyListItems).optional(),
   blockedFileUploadDestinations: z.array(z.string().min(1).max(253).regex(HOST_OR_LABEL)).max(LIMITS.policyListItems).optional(),
+  desktopCollectorDestination: z.string().min(1).max(80).regex(DESKTOP_DESTINATION_LABEL).refine((value) => value.trim().length > 0, {
+    message: 'required',
+  }).optional(),
   scanner: scannerPolicySchema.optional(),
 }).strict();
 
@@ -255,5 +265,6 @@ module.exports = {
   approveSchema,
   noteSchema,
   applyTemplateSchema,
+  destinationReviewSchema,
   policyUpdateSchema,
 };

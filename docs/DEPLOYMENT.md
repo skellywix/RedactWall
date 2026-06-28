@@ -146,11 +146,12 @@ npm run package:endpoint-agent
 The command writes a zip and adjacent SHA-256 manifest under
 `dist/endpoint-agent/`. It includes the endpoint runtime, shared detection
 engine, policy evaluator, env loader, file-type processor registry, signed
-native handoff prototype, metadata-only handoff writer, and scheduled-task
-install/run/uninstall scripts. It refuses synthetic prompt bodies and packaged
-development ingest keys. Set the real `SENTINEL_URL`, `INGEST_API_KEY`, and
-watch directory during install; the agent inspects supported files locally and
-does not contact the control plane without an explicit ingest key.
+native handoff prototype, metadata-only handoff writer, Windows protected-upload
+desktop collector, and scheduled-task plus shell-action install/run/uninstall
+scripts. It refuses synthetic prompt bodies and packaged development ingest
+keys. Set the real `SENTINEL_URL`, `INGEST_API_KEY`, and watch directory during
+install; the agent inspects supported files locally and does not contact the
+control plane without an explicit ingest key.
 
 ## MCP Guard Package
 
@@ -192,10 +193,10 @@ The config file carries `SENTINEL_URL`, `INGEST_API_KEY`, and `ENDPOINT_AGENT_WA
 
 The agent inspects supported watched files locally. Under redact policy, structured-only findings write a safe companion text file under `.promptwall-redacted` and report `redacted_available` evidence to the control plane; semantic or mixed findings remain held for Security Admin review.
 
-For the native file-flow spike, a future OS or app-specific collector can write
-signed JSON upload-intent events into a local handoff directory instead of
-asking users to move files into the watched folder. Enable that prototype only
-with an explicit local secret:
+For desktop file flows, enable the native handoff directory with an explicit
+local secret. The endpoint agent keeps scanning locally; the handoff event is
+only a signed upload intent with destination metadata and an absolute local file
+path.
 
 ```powershell
 .\scripts\install-endpoint-agent.ps1 `
@@ -210,10 +211,60 @@ secret, must name an absolute local file path and destination app, and must not
 contain file bytes, prompt text, `contentBase64`, or raw document content. The
 endpoint agent then scans the referenced file through the same local processor
 and reports only sanitized findings, placeholders, and destination metadata.
-This is the tested contract for a native collector; the current package does
-not install kernel drivers or app hooks by itself.
+The handoff directory is ACL-restricted to the installing user, Administrators,
+and SYSTEM. This is the tested contract for native collectors; it does not
+install kernel drivers or universal app hooks.
 
-A native hook, app integration, or pilot script can use the packaged writer to
+### Protected Upload Collector
+
+The packaged desktop collector installs a per-user Windows Explorer shell action
+for a production pilot. A user right-clicks one or more selected files and chooses
+`PromptWall Protected Upload`; the collector writes a signed metadata-only
+handoff event for each selected file, waits for the endpoint agent to consume it, and logs only
+sanitized collector status. The endpoint agent then scans the referenced file
+locally and reports sanitized evidence through the normal control-plane path.
+
+Install it as part of the endpoint agent setup:
+
+```powershell
+.\scripts\install-endpoint-agent.ps1 `
+  -SentinelUrl "https://promptwall.example.com" `
+  -IngestKey "<pilot-ingest-key>" `
+  -HandoffSecret "<32-plus-character-local-handoff-secret>" `
+  -InstallDesktopCollector `
+  -DesktopCollectorDestination "Desktop AI"
+```
+
+Or install only the shell action after endpoint setup:
+
+```powershell
+.\scripts\install-desktop-collector.ps1 `
+  -ConfigDir "$env:LOCALAPPDATA\PromptWall" `
+  -Destination "Desktop AI"
+```
+
+The shell action command does not include the ingest key or handoff secret. It
+loads `%LOCALAPPDATA%\PromptWall\endpoint-agent.env` through
+`SENTINEL_ENV_PATH`, invokes
+`sensors\endpoint-agent\collectors\protected-upload.js`, and passes only the
+selected local file paths to the collector process. The Explorer verb is marked
+with `MultiSelectModel=Player` so it remains available for multi-file
+selections. The collector verifies each path is a local file, writes signed
+events through the packaged writer, and never reads file bytes.
+
+For automation or app-specific integrations, call the collector directly:
+
+```powershell
+$env:SENTINEL_ENV_PATH = "$env:LOCALAPPDATA\PromptWall\endpoint-agent.env"
+node .\sensors\endpoint-agent\collectors\protected-upload.js `
+  --file "$env:USERPROFILE\Downloads\loan-file.pdf" `
+  --destination "Desktop AI" `
+  --user "analyst@example.com" `
+  --wait `
+  --json
+```
+
+An app integration or pilot script can still use the lower-level writer to
 produce one signed upload-intent event without putting the handoff secret on the
 command line:
 
@@ -226,21 +277,22 @@ node .\sensors\endpoint-agent\write-handoff.js `
 ```
 
 The writer loads `ENDPOINT_AGENT_HANDOFF_SECRET` and
-`ENDPOINT_AGENT_HANDOFF_DIR` from the endpoint config, verifies the referenced
-path is a local file, writes the event atomically, and never reads the file
-body.
+`ENDPOINT_AGENT_HANDOFF_DIR`, or their `PROMPTWALL_*` aliases, from the endpoint
+config, verifies the referenced path is a local file, writes the event
+atomically, and never reads the file body.
 
 Check status:
 
 ```powershell
 Get-ScheduledTask -TaskName PromptWallEndpointAgent
 Get-Content "$env:LOCALAPPDATA\PromptWall\logs\endpoint-agent.log" -Tail 40
+Get-Content "$env:LOCALAPPDATA\PromptWall\logs\desktop-collector.log" -Tail 40
 ```
 
 Uninstall:
 
 ```powershell
-.\scripts\uninstall-endpoint-agent.ps1
+.\scripts\uninstall-endpoint-agent.ps1 -RemoveDesktopCollector
 ```
 
 Remove local endpoint config too:

@@ -34,9 +34,49 @@ function normalizeDestination(destination) {
   }
 }
 
-function emptyAggregate(destination) {
+function destinationMatches(destination, patterns) {
+  const host = normalizeDestination(destination);
+  return (patterns || []).some((pattern) => {
+    const target = normalizeDestination(pattern);
+    if (!target || target === 'unknown') return false;
+    if (target === '*') return true;
+    if (target.startsWith('*.')) {
+      const base = target.slice(2);
+      return host.endsWith('.' + base);
+    }
+    if (target.startsWith('*')) {
+      const base = target.slice(1).replace(/^\./, '');
+      return host === base || host.endsWith('.' + base);
+    }
+    return host === target || host.endsWith('.' + target);
+  });
+}
+
+function destinationPolicyState(destination, policy = {}) {
+  if (destinationMatches(destination, policy.allowedDestinations || [])) return 'allowed';
+  if (destinationMatches(destination, policy.blockedDestinations || [])) return 'blocked';
+  if (destinationMatches(destination, policy.blockedFileUploadDestinations || [])) return 'file_upload_blocked';
+  if (destinationMatches(destination, policy.governedDestinations || [])) return 'governed';
+  return 'review';
+}
+
+function configuredDestinations(policy = {}) {
+  const rows = [];
+  for (const [field, state] of [
+    ['governedDestinations', 'governed'],
+    ['allowedDestinations', 'allowed'],
+    ['blockedDestinations', 'blocked'],
+    ['blockedFileUploadDestinations', 'file_upload_blocked'],
+  ]) {
+    for (const destination of policy[field] || []) rows.push({ destination: normalizeDestination(destination), policyState: state });
+  }
+  return rows;
+}
+
+function emptyAggregate(destination, policyState = 'review') {
   return {
     destination,
+    policyState,
     events: 0,
     blocked: 0,
     redacted: 0,
@@ -58,6 +98,7 @@ function bumpAggregate(bucket, q) {
 function publicAggregate(bucket, extra = {}) {
   return {
     destination: bucket.destination,
+    policyState: bucket.policyState || 'review',
     events: bucket.events,
     blocked: bucket.blocked,
     redacted: bucket.redacted,
@@ -66,6 +107,13 @@ function publicAggregate(bucket, extra = {}) {
     lastSeen: bucket.lastSeen,
     ...extra,
   };
+}
+
+function isDesktopCollectorEvent(q) {
+  const note = String(q.decisionNote || q.note || '');
+  return q.source === 'endpoint_agent'
+    && q.channel === 'file_upload'
+    && /native handoff/i.test(note);
 }
 
 function cleanSensorMetadata(sensor) {
@@ -106,17 +154,26 @@ function finalizeSensor(sensor) {
 
 function summarize(rows, pol) {
   const policy = pol || {};
-  const governedSet = new Set((policy.governedDestinations || []).map(normalizeDestination));
+  const configured = configuredDestinations(policy);
   const governed = new Map();
   const ungoverned = new Map();
   const shadow = new Map();
   const sensorCounts = new Map();
+  const desktopCollector = {
+    events: 0,
+    lastSeen: null,
+    destinations: new Set(),
+  };
   const statuses = {};
 
-  for (const destination of governedSet) governed.set(destination, emptyAggregate(destination));
+  for (const item of configured) {
+    if (!item.destination || item.destination === 'unknown' || governed.has(item.destination)) continue;
+    governed.set(item.destination, emptyAggregate(item.destination, destinationPolicyState(item.destination, policy)));
+  }
 
   for (const q of rows || []) {
     const destination = normalizeDestination(q.destination);
+    const policyState = destinationPolicyState(destination, policy);
     const source = q.source || 'api';
     const sensor = sensorCounts.get(source) || { source, label: SENSOR_LABELS[source] || source, events: 0, lastSeen: null, _versions: new Map(), _platforms: new Set() };
     sensor.events += 1;
@@ -125,13 +182,21 @@ function summarize(rows, pol) {
     sensorCounts.set(source, sensor);
     statuses[q.status || 'unknown'] = (statuses[q.status || 'unknown'] || 0) + 1;
 
-    const isGoverned = governedSet.has(destination);
+    if (isDesktopCollectorEvent(q)) {
+      desktopCollector.events += 1;
+      desktopCollector.destinations.add(destination);
+      if (!desktopCollector.lastSeen || String(q.createdAt || '') > desktopCollector.lastSeen) {
+        desktopCollector.lastSeen = q.createdAt || null;
+      }
+    }
+
+    const isGoverned = policyState !== 'review';
     const bucketMap = isGoverned ? governed : ungoverned;
-    if (!bucketMap.has(destination)) bucketMap.set(destination, emptyAggregate(destination));
+    if (!bucketMap.has(destination)) bucketMap.set(destination, emptyAggregate(destination, policyState));
     bumpAggregate(bucketMap.get(destination), q);
 
     if (q.status === 'shadow_ai') {
-      if (!shadow.has(destination)) shadow.set(destination, emptyAggregate(destination));
+      if (!shadow.has(destination)) shadow.set(destination, emptyAggregate(destination, policyState));
       bumpAggregate(shadow.get(destination), q);
     }
   }
@@ -149,11 +214,12 @@ function summarize(rows, pol) {
   const governedActive = [...governed.values()].filter((g) => g.events > 0).length;
   const governedTotal = governed.size || 0;
   const shadowEvents = statuses.shadow_ai || 0;
+  const unresolvedShadowDestinations = [...shadow.values()].filter((bucket) => (bucket.policyState || 'review') === 'review').length;
   const score = Math.round(
     (activeRequired / REQUIRED_SENSORS.length) * 45
     + (governedTotal ? (governedActive / governedTotal) * 25 : 0)
     + (governedTotal ? 10 : 0)
-    + (shadowEvents ? 0 : 20),
+    + (unresolvedShadowDestinations ? 0 : 20),
   );
 
   return {
@@ -164,6 +230,7 @@ function summarize(rows, pol) {
       governedDestinations: governedTotal,
       governedActive,
       shadowEvents,
+      unresolvedShadowDestinations,
       blocked: Object.entries(statuses)
         .filter(([status]) => BLOCKED_STATUSES.has(status))
         .reduce((sum, [, count]) => sum + count, 0),
@@ -177,9 +244,14 @@ function summarize(rows, pol) {
       .sort((a, b) => b.events - a.events || a.destination.localeCompare(b.destination))
       .slice(0, 12),
     shadowDestinations: [...shadow.values()]
-      .map((bucket) => publicAggregate(bucket, { governed: governedSet.has(bucket.destination) }))
-      .sort((a, b) => b.shadow - a.shadow || a.destination.localeCompare(b.destination))
+      .map((bucket) => publicAggregate(bucket, { governed: (bucket.policyState || 'review') !== 'review' }))
+      .sort((a, b) => Number(a.governed) - Number(b.governed) || b.shadow - a.shadow || a.destination.localeCompare(b.destination))
       .slice(0, 12),
+    desktopCollector: {
+      events: desktopCollector.events,
+      lastSeen: desktopCollector.lastSeen,
+      destinations: [...desktopCollector.destinations].sort(),
+    },
     posture: [
       {
         id: 'browser_extension',
@@ -194,6 +266,12 @@ function summarize(rows, pol) {
         detail: `${(sensorCounts.get('endpoint_agent') || {}).events || 0} events`,
       },
       {
+        id: 'desktop_collector',
+        label: 'Desktop collector',
+        state: desktopCollector.events ? 'covered' : 'attention',
+        detail: desktopCollector.events ? `${desktopCollector.events} protected uploads` : 'no protected uploads',
+      },
+      {
         id: 'mcp_guard',
         label: 'MCP guard',
         state: (sensorCounts.get('mcp_guard') || {}).events ? 'covered' : 'attention',
@@ -202,8 +280,8 @@ function summarize(rows, pol) {
       {
         id: 'shadow_ai',
         label: 'Shadow AI',
-        state: shadowEvents ? 'attention' : 'covered',
-        detail: `${shadowEvents} sightings`,
+        state: unresolvedShadowDestinations ? 'attention' : 'covered',
+        detail: `${unresolvedShadowDestinations} pending reviews / ${shadowEvents} sightings`,
       },
       {
         id: 'sensor_versions',
@@ -221,4 +299,4 @@ function summarize(rows, pol) {
   };
 }
 
-module.exports = { summarize, normalizeDestination };
+module.exports = { summarize, normalizeDestination, isDesktopCollectorEvent };

@@ -15,7 +15,7 @@
 
   const D = window.PSDetect;
   const SITE = location.hostname;
-  let POLICY = { enforcementMode: 'block', blockMinSeverity: 2, blockRiskScore: 25, alwaysBlock: [] };
+  let POLICY = { enforcementMode: 'block', blockMinSeverity: 2, blockRiskScore: 25, allowedDestinations: [], alwaysBlock: [] };
   let ENABLED = true;
 
   // Pull policy + enabled state from the background worker.
@@ -58,15 +58,21 @@
   }
 
   function destinationBlocked() {
+    const allowed = POLICY.allowedDestinations || [];
     const blocked = POLICY.blockedDestinations || [];
     const A = window.PSAdapters;
+    if (A && A.isGoverned && A.isGoverned(SITE, allowed)) return false;
+    if (allowed.some((host) => SITE === host || SITE.endsWith('.' + host))) return false;
     if (A && A.isGoverned) return A.isGoverned(SITE, blocked);
     return blocked.some((host) => SITE === host || SITE.endsWith('.' + host));
   }
 
   function fileUploadBlocked() {
+    const allowed = POLICY.allowedDestinations || [];
     const blocked = POLICY.blockedFileUploadDestinations || [];
     const A = window.PSAdapters;
+    if (A && A.isGoverned && A.isGoverned(SITE, allowed)) return false;
+    if (allowed.some((host) => SITE === host || SITE.endsWith('.' + host))) return false;
     if (A && A.isGoverned) return A.isGoverned(SITE, blocked);
     return blocked.some((host) => SITE === host || SITE.endsWith('.' + host));
   }
@@ -102,6 +108,104 @@
   function summarize(a) {
     const items = a.findings.map((f) => f.type).concat(a.categories.map((c) => c.category));
     return [...new Set(items)];
+  }
+
+  const LABELS = {
+    US_SSN: 'Social Security number',
+    CREDIT_CARD: 'payment card number',
+    BANK_ACCOUNT: 'bank account number',
+    ROUTING_NUMBER: 'routing number',
+    IBAN: 'international bank account number',
+    US_PASSPORT: 'passport number',
+    US_TIN_EIN: 'tax ID',
+    US_ITIN: 'individual taxpayer ID',
+    US_NPI: 'provider identifier',
+    US_DRIVERS_LICENSE: 'driver license number',
+    MEMBER_ID: 'member ID',
+    LOAN_NUMBER: 'loan number',
+    MEDICAL_RECORD_NUMBER: 'medical record number',
+    HEALTH_INSURANCE_ID: 'health insurance ID',
+    HEALTH_RECORD: 'health record',
+    SWIFT_BIC: 'SWIFT/BIC code',
+    DOB: 'date of birth',
+    SECRET_KEY: 'API key or token',
+    PRIVATE_KEY: 'private key',
+    PASSWORD: 'password',
+    CREDENTIALS: 'login credentials',
+    SOURCE_CODE: 'source code',
+    LEGAL_CONTRACT: 'contract language',
+    CONFIDENTIAL_BUSINESS: 'confidential business information',
+    CANARY_TOKEN: 'canary token',
+    PERSON_NAME: 'person name',
+    US_ADDRESS: 'street address',
+    PHONE_NUMBER: 'phone number',
+    EMAIL_ADDRESS: 'email address',
+    IP_ADDRESS: 'IP address',
+    IPV6_ADDRESS: 'IPv6 address',
+    US_LICENSE_PLATE: 'license plate',
+    VIN: 'vehicle ID number',
+  };
+
+  const COACHING = {
+    US_SSN: 'Use a member ID, the last four digits, or a synthetic example instead.',
+    CREDIT_CARD: 'Remove the card number or replace it with a tokenized placeholder.',
+    BANK_ACCOUNT: 'Use masked last four digits or a synthetic account example.',
+    ROUTING_NUMBER: 'Remove the routing number unless Security Admin approves this prompt.',
+    IBAN: 'Replace the bank identifier with a synthetic value.',
+    US_PASSPORT: 'Use a masked placeholder instead of a passport number.',
+    US_TIN_EIN: 'Remove taxpayer identifiers or use a synthetic value.',
+    US_ITIN: 'Remove taxpayer identifiers or use a synthetic value.',
+    US_NPI: 'Use a provider placeholder unless Security Admin approves this prompt.',
+    US_DRIVERS_LICENSE: 'Remove the driver license number before sending.',
+    MEMBER_ID: 'Use a synthetic member ID or a masked last four instead.',
+    LOAN_NUMBER: 'Use a synthetic loan number or a masked last four instead.',
+    MEDICAL_RECORD_NUMBER: 'Remove medical record identifiers before sending.',
+    HEALTH_INSURANCE_ID: 'Remove health insurance identifiers before sending.',
+    HEALTH_RECORD: 'Remove patient details or use an approved de-identified workflow.',
+    DOB: 'Generalize the age or date instead of sending a full date of birth.',
+    SECRET_KEY: 'Remove the key or token. Rotate it if it may have been exposed.',
+    PRIVATE_KEY: 'Remove the private key. Rotate it if it may have been exposed.',
+    PASSWORD: 'Remove the password. Rotate it if it may have been exposed.',
+    CREDENTIALS: 'Replace credentials with a neutral placeholder.',
+    SOURCE_CODE: 'Use an approved code-review workflow before sending proprietary code.',
+    LEGAL_CONTRACT: 'Remove contract text unless approved for external AI review.',
+    CONFIDENTIAL_BUSINESS: 'Remove unreleased plans, pricing, vendor changes, or strategy details.',
+    CANARY_TOKEN: 'Stop and notify Security Admin before continuing.',
+  };
+
+  function labelFor(item) {
+    return LABELS[item] || String(item || 'sensitive information').toLowerCase().replace(/_/g, ' ');
+  }
+
+  function labelsFor(items) {
+    return [...new Set(items || [])].map(labelFor);
+  }
+
+  function escapeHtml(value) {
+    return String(value || '').replace(/[&<>"']/g, (ch) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[ch]));
+  }
+
+  function coachingFor(items) {
+    for (const item of items || []) {
+      if (COACHING[item]) return COACHING[item];
+    }
+    return 'Edit out sensitive details, use placeholders, or request approval with a business reason.';
+  }
+
+  function listForScreen(items) {
+    const labels = labelsFor(items);
+    if (!labels.length) return 'sensitive information';
+    if (labels.length === 1) return labels[0];
+    if (labels.length === 2) return labels[0] + ' and ' + labels[1];
+    return labels.slice(0, -1).join(', ') + ', and ' + labels[labels.length - 1];
+  }
+
+  function chipHtml(items) {
+    return labelsFor(items)
+      .map((label) => '<span class="ps-chip">' + escapeHtml(label) + '</span>')
+      .join('');
   }
 
   // ---- report to the server (telemetry + queue) -----------------------------
@@ -185,33 +289,40 @@
     clearBanner();
     banner = document.createElement('div');
     banner.className = 'ps-banner ps-' + mode;
-    const sev = mode === 'block' ? 'Blocked' : mode === 'justify' ? 'Justification required' : 'Heads up';
-    const icon = mode === 'block' ? '⛔' : mode === 'justify' ? '✋' : '⚠️';
+    const title = mode === 'block' ? 'Sensitive data blocked' : mode === 'justify' ? 'Business reason required' : 'Review before sending';
+    const detail = mode === 'block'
+      ? 'PromptWall found ' + listForScreen(items) + ' before it could leave this browser.'
+      : 'PromptWall found ' + listForScreen(items) + ' in this prompt. Review it before sending to ' + SITE + '.';
+    const riskText = mode === 'block' ? '' : ' Risk ' + risk + '/100.';
+    const coach = coachingFor(items);
+    const chips = chipHtml(items);
     banner.innerHTML =
-      '<div class="ps-row"><span class="ps-ic">' + icon + '</span>' +
-      '<div class="ps-msg"><b>' + sev + '</b> — this prompt contains <b>' + items.join(', ') + '</b>' +
-      (mode === 'block' ? ' and cannot be sent to ' + SITE + '.' : ' (risk ' + risk + '/100).') + '</div>' +
-      '<button class="ps-x" title="Dismiss">✕</button></div>' +
-      (justify ? '<textarea class="ps-just" placeholder="Business reason (required to proceed) — recorded for compliance"></textarea>' : '') +
+      '<div class="ps-row"><span class="ps-status-dot"></span>' +
+      '<div class="ps-msg"><div class="ps-title">' + escapeHtml(title) + '</div>' +
+      '<div class="ps-detail">' + escapeHtml(detail + riskText) + '</div></div>' +
+      '<button class="ps-x" title="Dismiss" aria-label="Dismiss">x</button></div>' +
+      '<div class="ps-chips">' + chips + '</div>' +
+      '<div class="ps-coach">' + escapeHtml(coach) + '</div>' +
+      (justify ? '<textarea class="ps-just" placeholder="Business reason required to proceed. Recorded for compliance."></textarea>' : '') +
       '<div class="ps-actions"></div>';
     const actions = banner.querySelector('.ps-actions');
     banner.querySelector('.ps-x').onclick = clearBanner;
 
     if (mode === 'warn') {
-      const edit = mk('button', 'ps-btn ps-secondary', 'Let me edit'); edit.onclick = clearBanner;
+      const edit = mk('button', 'ps-btn ps-secondary', 'Edit prompt'); edit.onclick = clearBanner;
       const go = mk('button', 'ps-btn ps-primary', 'Send anyway'); go.onclick = () => { clearBanner(); onProceed(); };
       actions.append(edit, go);
     } else if (mode === 'justify') {
       const edit = mk('button', 'ps-btn ps-secondary', 'Cancel'); edit.onclick = () => { clearBanner(); onBlock(); };
-      const go = mk('button', 'ps-btn ps-primary', 'Submit & send'); go.onclick = () => {
+      const go = mk('button', 'ps-btn ps-primary', 'Submit reason'); go.onclick = () => {
         const note = banner.querySelector('.ps-just').value.trim();
-        if (note.length < 4) { banner.querySelector('.ps-just').style.borderColor = '#ef4444'; return; }
+        if (note.length < 4) { banner.querySelector('.ps-just').style.borderColor = '#dc2626'; return; }
         clearBanner(); onProceed(note);
       };
       actions.append(edit, go);
     } else { // block
       const req = mk('button', 'ps-btn ps-secondary', 'Request approval'); req.onclick = () => { clearBanner(); onBlock(true); };
-      const ok = mk('button', 'ps-btn ps-primary', 'OK, I\'ll edit'); ok.onclick = () => { clearBanner(); onBlock(false); };
+      const ok = mk('button', 'ps-btn ps-primary', 'Edit prompt'); ok.onclick = () => { clearBanner(); onBlock(false); };
       actions.append(req, ok);
     }
     document.body.appendChild(banner);
@@ -386,7 +497,7 @@
     const verdict = evaluate(pasted);
     if (verdict.action !== 'allow') {
       report(pasted, verdict.analysis, 'paste', 'paste_flagged');
-      toast('PromptWall: pasted content contains ' + summarize(verdict.analysis).slice(0, 3).join(', '));
+      toast('PromptWall found sensitive data: ' + listForScreen(summarize(verdict.analysis).slice(0, 3)));
     }
   }, true);
 
@@ -449,7 +560,7 @@
     } else if (res.supported === false || res.inspected === false) {
       toast('PromptWall could not inspect ' + filename + '. Upload blocked and recorded.');
     } else {
-      toast('PromptWall blocked ' + filename + ': ' + (items.slice(0, 3).join(', ') || 'sensitive content'));
+      toast('PromptWall blocked ' + filename + ': ' + listForScreen(items.slice(0, 3)));
     }
   }
   function reportUnscannedFile(filename, outcome, note) {
