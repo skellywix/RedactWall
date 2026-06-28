@@ -105,6 +105,17 @@ test('browser blocks configured destinations before local prompt or file inspect
   assert.match(background, /blockedFileUploadDestinations:\s*\[\]/);
 });
 
+test('browser click interception uses shared send-button adapters', () => {
+  assert.match(content, /function closestSendButton\(target\)/);
+  assert.match(content, /A\.sendButtonSelectors\(location\.hostname\)/);
+  assert.match(content, /button\[aria-label\*="Submit" i\]/);
+});
+
+test('manifest permits local control-plane URLs used by browser smoke tests', () => {
+  assert.ok(manifest.host_permissions.includes('http://localhost/*'));
+  assert.ok(manifest.host_permissions.includes('http://127.0.0.1/*'));
+});
+
 test('background report fails closed when gate request times out', async () => {
   const bg = loadBackground({
     local: { ingestKey: 'unit-ingest-key', requestTimeoutMs: 50 },

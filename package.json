@@ -17,6 +17,7 @@
     "start": "node server/app.js",
     "test": "node --test --test-concurrency=1",
     "test:browser": "playwright test",
+    "test:browser-extension": "playwright test browser-extension.spec.js --project=chromium",
     "simulate": "node scripts/simulate.js",
     "fire-drill": "node scripts/fire-drill.js",
     "backup": "node scripts/backup-store.js create",

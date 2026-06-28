@@ -24,6 +24,7 @@ This section is generated from the app by `npm run docs:demo-guide`. Do not hand
 | Raw approval retention | enabled for `30` day(s) |
 | Governed destinations | `chatgpt.com`, `openai.com`, `claude.ai`, `anthropic.com`, `gemini.google.com`, `copilot.microsoft.com`, `perplexity.ai`, `poe.com` |
 | Browser content hosts | `chat.openai.com`, `chatgpt.com`, `claude.ai`, `copilot.microsoft.com`, `gemini.google.com`, `poe.com`, `www.perplexity.ai`, `www.poe.com` |
+| Browser local control-plane permissions | `127.0.0.1`, `localhost`, `localhost:4000` |
 | Hard-stop entities | `US_SSN`, `CREDIT_CARD`, `BANK_ACCOUNT`, `ROUTING_NUMBER`, `IBAN`, `US_PASSPORT`, `US_TIN_EIN`, `US_DRIVERS_LICENSE`, `DOB`, `SECRET_KEY`, `PRIVATE_KEY`, `CANARY_TOKEN` |
 | Detector inventory | 24 detectors: `BANK_ACCOUNT`, `CANARY_TOKEN`, `CONFIDENTIAL_BUSINESS`, `CREDENTIALS`, `CREDIT_CARD`, `DOB`, `EMAIL_ADDRESS`, `IBAN`, `IP_ADDRESS`, `LEGAL_CONTRACT`, `PASSWORD`, `PERSON_NAME`, `PHONE_NUMBER`, `PRIVATE_KEY`, `ROUTING_NUMBER`, `SECRET_KEY`, `SOURCE_CODE`, `US_ADDRESS`, `US_DRIVERS_LICENSE`, `US_LICENSE_PLATE`, `US_PASSPORT`, `US_SSN`, `US_TIN_EIN`, `VIN` |
 | Semantic categories | `CONFIDENTIAL_BUSINESS`, `CREDENTIALS`, `LEGAL_CONTRACT`, `SOURCE_CODE` |
@@ -47,6 +48,7 @@ This section is generated from the app by `npm run docs:demo-guide`. Do not hand
 | `npm run fire-drill` | `node scripts/fire-drill.js` |
 | `npm run test` | `node --test --test-concurrency=1` |
 | `npm run test:browser` | `playwright test` |
+| `npm run test:browser-extension` | `playwright test browser-extension.spec.js --project=chromium` |
 | `npm run sync-check` | `node scripts/sync-check.js` |
 | `npm run eval` | `node scripts/eval-detect.js` |
 | `npm run backup` | `node scripts/backup-store.js create` |
@@ -235,6 +237,25 @@ employee sends it to the AI tool.
 
 Do not linger in the browser. Move quickly to the dashboard so the buyer sees
 the control plane.
+
+### Browser-Verified Reference
+
+These screenshots come from the real unpacked Chrome extension running against
+controlled ChatGPT and Poe fixtures:
+
+![PromptWall blocking a synthetic SSN in a ChatGPT fixture](assets/demo/chatgpt-blocked.png)
+
+![PromptWall blocking the same synthetic SSN through a Poe-style send button](assets/demo/poe-blocked.png)
+
+Refresh them with:
+
+```powershell
+npm run test:browser-extension
+```
+
+Use them when a live browser is risky because of network, login, or meeting-room
+constraints. They prove the same story: the prompt is blocked before the fixture
+records any sent message.
 
 ## Scene 3: Admin Queue And Approval
 

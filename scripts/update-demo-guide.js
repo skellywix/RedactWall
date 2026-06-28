@@ -21,6 +21,7 @@ const DEMO_COMMANDS = [
   'fire-drill',
   'test',
   'test:browser',
+  'test:browser-extension',
   'sync-check',
   'eval',
   'backup',
@@ -100,11 +101,23 @@ function supportedFileTypes(processors) {
   return groups.map(([label, values]) => `- ${label}: ${joinInline(values)}`).join('\n');
 }
 
-function hostPermissions(manifest) {
-  return (manifest.host_permissions || [])
-    .filter((entry) => !entry.includes('localhost'))
-    .map((entry) => entry.replace(/^https?:\/\//, '').replace(/\/\*$/, ''))
-    .sort();
+function normalizeManifestHost(entry) {
+  return String(entry || '').replace(/^https?:\/\//, '').replace(/\/\*$/, '');
+}
+
+function uniqueSorted(items) {
+  return [...new Set(items)].sort();
+}
+
+function contentScriptHosts(manifest) {
+  const matches = (manifest.content_scripts || []).flatMap((script) => script.matches || []);
+  return uniqueSorted(matches.map(normalizeManifestHost));
+}
+
+function localControlPlanePermissions(manifest) {
+  return uniqueSorted((manifest.host_permissions || [])
+    .filter((entry) => /^http:\/\/(localhost|127\.0\.0\.1)/.test(entry))
+    .map(normalizeManifestHost));
 }
 
 function status(value) {
@@ -143,11 +156,21 @@ function loadSnapshot() {
   const detectors = detector.listDetectors().map((item) => item.id).sort();
   const semanticCategories = detectors.filter((id) => SEMANTIC_CATEGORIES.includes(id));
   const templateLabels = templates.list().map((item) => `${item.id} (${item.label})`).sort();
-  return { pkg, policy, manifest, processors, detectors, semanticCategories, templateLabels, hosts: hostPermissions(manifest) };
+  return {
+    pkg,
+    policy,
+    manifest,
+    processors,
+    detectors,
+    semanticCategories,
+    templateLabels,
+    contentHosts: contentScriptHosts(manifest),
+    localControlPlaneHosts: localControlPlanePermissions(manifest),
+  };
 }
 
 function overviewTable(snapshot) {
-  const { pkg, policy, manifest, detectors, semanticCategories, templateLabels, hosts } = snapshot;
+  const { pkg, policy, manifest, detectors, semanticCategories, templateLabels, contentHosts, localControlPlaneHosts } = snapshot;
   return [
     '| Source | Current value |',
     '| --- | --- |',
@@ -159,7 +182,8 @@ function overviewTable(snapshot) {
     `| Block thresholds | severity \`${policy.blockMinSeverity}\`, risk score \`${policy.blockRiskScore}\` |`,
     `| Raw approval retention | ${status(policy.storeRawForApproval)} for \`${policy.rawRetentionDays}\` day(s) |`,
     `| Governed destinations | ${joinInline(policy.governedDestinations || [])} |`,
-    `| Browser content hosts | ${joinInline(hosts)} |`,
+    `| Browser content hosts | ${joinInline(contentHosts)} |`,
+    `| Browser local control-plane permissions | ${joinInline(localControlPlaneHosts)} |`,
     `| Hard-stop entities | ${joinInline(policy.alwaysBlock || [])} |`,
     `| Detector inventory | ${detectors.length} detectors: ${joinInline(detectors)} |`,
     `| Semantic categories | ${joinInline(semanticCategories)} |`,

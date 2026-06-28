@@ -356,9 +356,25 @@
     }
   }, true);
 
+  function closestSendButton(target) {
+    if (!target || !target.closest) return null;
+    const A = window.PSAdapters;
+    const selectors = A && A.sendButtonSelectors ? A.sendButtonSelectors(location.hostname)
+      : ['button[data-testid="send-button"]', 'button[aria-label*="Send" i]', 'button[aria-label*="Submit" i]', 'button[type="submit"]'];
+    for (const sel of selectors) {
+      try {
+        const btn = target.closest(sel);
+        if (btn) return btn;
+      } catch (_) {}
+    }
+    return null;
+  }
+
   document.addEventListener('click', (e) => {
-    const btn = e.target.closest('button[data-testid="send-button"], button[aria-label*="Send" i], button[type="submit"]');
-    if (btn) { const el = findComposer(); if (el && readText(el)) interceptSend(e, el); }
+    if (closestSendButton(e.target)) {
+      const el = findComposer();
+      if (el && readText(el)) interceptSend(e, el);
+    }
   }, true);
 
   // ---- intercept PASTE (early warning) --------------------------------------

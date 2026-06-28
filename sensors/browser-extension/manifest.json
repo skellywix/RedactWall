@@ -13,7 +13,9 @@
     "https://www.perplexity.ai/*",
     "https://poe.com/*",
     "https://www.poe.com/*",
-    "http://localhost:4000/*"
+    "http://localhost:4000/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
   ],
   "background": { "service_worker": "background.js" },
   "storage": { "managed_schema": "schema.json" },

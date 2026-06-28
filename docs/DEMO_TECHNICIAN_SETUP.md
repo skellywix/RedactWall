@@ -25,6 +25,7 @@ This section is generated from the app by `npm run docs:demo-guide`. Do not hand
 | Raw approval retention | enabled for `30` day(s) |
 | Governed destinations | `chatgpt.com`, `openai.com`, `claude.ai`, `anthropic.com`, `gemini.google.com`, `copilot.microsoft.com`, `perplexity.ai`, `poe.com` |
 | Browser content hosts | `chat.openai.com`, `chatgpt.com`, `claude.ai`, `copilot.microsoft.com`, `gemini.google.com`, `poe.com`, `www.perplexity.ai`, `www.poe.com` |
+| Browser local control-plane permissions | `127.0.0.1`, `localhost`, `localhost:4000` |
 | Hard-stop entities | `US_SSN`, `CREDIT_CARD`, `BANK_ACCOUNT`, `ROUTING_NUMBER`, `IBAN`, `US_PASSPORT`, `US_TIN_EIN`, `US_DRIVERS_LICENSE`, `DOB`, `SECRET_KEY`, `PRIVATE_KEY`, `CANARY_TOKEN` |
 | Detector inventory | 24 detectors: `BANK_ACCOUNT`, `CANARY_TOKEN`, `CONFIDENTIAL_BUSINESS`, `CREDENTIALS`, `CREDIT_CARD`, `DOB`, `EMAIL_ADDRESS`, `IBAN`, `IP_ADDRESS`, `LEGAL_CONTRACT`, `PASSWORD`, `PERSON_NAME`, `PHONE_NUMBER`, `PRIVATE_KEY`, `ROUTING_NUMBER`, `SECRET_KEY`, `SOURCE_CODE`, `US_ADDRESS`, `US_DRIVERS_LICENSE`, `US_LICENSE_PLATE`, `US_PASSPORT`, `US_SSN`, `US_TIN_EIN`, `VIN` |
 | Semantic categories | `CONFIDENTIAL_BUSINESS`, `CREDENTIALS`, `LEGAL_CONTRACT`, `SOURCE_CODE` |
@@ -48,6 +49,7 @@ This section is generated from the app by `npm run docs:demo-guide`. Do not hand
 | `npm run fire-drill` | `node scripts/fire-drill.js` |
 | `npm run test` | `node --test --test-concurrency=1` |
 | `npm run test:browser` | `playwright test` |
+| `npm run test:browser-extension` | `playwright test browser-extension.spec.js --project=chromium` |
 | `npm run sync-check` | `node scripts/sync-check.js` |
 | `npm run eval` | `node scripts/eval-detect.js` |
 | `npm run backup` | `node scripts/backup-store.js create` |
@@ -414,6 +416,34 @@ Stronger gate:
 
 ```powershell
 npm run review:ci
+```
+
+Browser-extension smoke with screenshots:
+
+```powershell
+npm run test:browser-extension
+```
+
+Expected:
+
+```text
+2 passed
+```
+
+This launches Chrome with the unpacked extension, serves controlled ChatGPT and
+Poe fixtures, blocks a synthetic SSN before send, verifies no fixture message is
+recorded, and writes screenshots to:
+
+```text
+test-results/browser-extension/chatgpt-blocked.png
+test-results/browser-extension/poe-blocked.png
+```
+
+The stable copies used by the sales guide live at:
+
+```text
+docs/assets/demo/chatgpt-blocked.png
+docs/assets/demo/poe-blocked.png
 ```
 
 If `npm run simulate` is part of the demo, run it once while the server is up:
