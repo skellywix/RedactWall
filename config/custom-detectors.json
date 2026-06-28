@@ -1,0 +1,4 @@
+{
+  "_description": "Customer-owned detector packs. Add bounded regex detectors here for local member, account, loan, or internal record identifiers. The engine rejects built-in ID overrides and unsafe regex shapes.",
+  "detectors": []
+}

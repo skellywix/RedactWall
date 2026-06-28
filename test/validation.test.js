@@ -358,6 +358,28 @@ test('gate accepts scan_unavailable as a blocked unscanned file outcome', async 
   assert.ok(!JSON.stringify(body).includes(fileContent));
 }));
 
+test('gate accepts ocr_required as its own blocked file outcome', async () => withServer(async (port) => {
+  const fileContent = 'image bytes with SSN 524-71-9043';
+  const res = await jsonFetch(port, '/api/v1/gate', {
+    headers: { 'x-api-key': 'unit-ingest-key' },
+    body: {
+      prompt: '[file blocked unscanned] member-loan-scan.png',
+      user: 'endpoint-user',
+      destination: 'desktop-ai-app',
+      source: 'endpoint_agent',
+      channel: 'file_upload',
+      clientOutcome: 'ocr_required',
+      note: 'blocked locally: OCR required before inspection',
+    },
+  });
+
+  assert.strictEqual(res.status, 200);
+  const body = await res.json();
+  assert.strictEqual(body.decision, 'block');
+  assert.strictEqual(body.status, 'ocr_required');
+  assert.ok(!JSON.stringify(body).includes(fileContent));
+}));
+
 test('gate records browser paste warnings as audit-only sensor evidence', async () => withServer(async (port) => {
   const secret = '524-71-9043';
   const res = await jsonFetch(port, '/api/v1/gate', {

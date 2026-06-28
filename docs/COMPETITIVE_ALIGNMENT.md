@@ -54,8 +54,6 @@ Build next:
   users, groups, and the sanitized approval workflow.
 - Guided rule-builder controls for scoped policy and exception lifecycle, on top
   of the dashboard JSON editors for `policyScopes` and `policyExceptions`.
-- Custom detector packs and an `ocr_required` file outcome so pilots can model
-  local member IDs and scanned documents before shipping a heavier OCR runtime.
 - MCP connector SDK patterns that force tool-output sanitization before model
   use, with connector health represented in coverage posture.
 - Automated schedule ownership around the examiner evidence pack, now that the
@@ -127,6 +125,9 @@ Build next:
 - Expand the sanitized examiner evidence export with coverage posture, sensor
   versions, parsed policy history, and prompt/file lineage summaries by user,
   destination, sensor, category, channel, and decision.
+- Add customer-defined detector packs plus an `ocr_required` file outcome so
+  pilots can model local member IDs and scanned/image uploads before shipping a
+  heavier endpoint-local OCR runtime.
 - Add endpoint install validation heartbeats so technicians can prove endpoint
   env, runtime, watch directory, and native handoff readiness in Coverage and
   examiner evidence without exposing keys or prompt/file content.

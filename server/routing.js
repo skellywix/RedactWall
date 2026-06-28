@@ -15,6 +15,7 @@ const ROUTABLE_STATUSES = new Set([
   'destination_blocked',
   'file_upload_blocked',
   'file_blocked_unscanned',
+  'ocr_required',
   'injection_blocked',
   'response_flagged',
 ]);

@@ -168,7 +168,7 @@ test('sanitizes sensitive filenames before reporting local file evidence', async
 
 test('does not upload unsupported file bytes', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-agent-'));
-  const filename = 'driver-license.png';
+  const filename = 'driver-license.bin';
   const raw = 'pretend binary with SSN 524-71-9043';
   fs.writeFileSync(path.join(dir, filename), raw);
 
@@ -182,6 +182,32 @@ test('does not upload unsupported file bytes', async () => {
   assert.strictEqual(res.decision, 'block');
   assert.strictEqual(res.supported, false);
   assert.strictEqual(reportRequest.clientOutcome, 'file_unsupported');
+  assert.strictEqual(reportRequest.contentBase64, undefined);
+  assert.deepStrictEqual(reportRequest.sensor, { name: 'endpoint_agent', version: pkg.version, platform: process.platform });
+  assert.ok(!reportRequest.prompt.includes('524-71-9043'));
+
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('blocks image files locally as ocr_required without uploading bytes', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-agent-'));
+  const filename = 'driver-license.png';
+  const raw = 'pretend image bytes with SSN 524-71-9043';
+  fs.writeFileSync(path.join(dir, filename), raw);
+
+  let reportRequest;
+  const res = await scanFile(filename, {
+    watchDir: dir,
+    user: 'unit-user',
+    report: async (req) => { reportRequest = req; },
+  });
+
+  assert.strictEqual(res.decision, 'block');
+  assert.strictEqual(res.status, 'ocr_required');
+  assert.strictEqual(res.supported, true);
+  assert.strictEqual(res.inspected, false);
+  assert.strictEqual(res.ocrRequired, true);
+  assert.strictEqual(reportRequest.clientOutcome, 'ocr_required');
   assert.strictEqual(reportRequest.contentBase64, undefined);
   assert.deepStrictEqual(reportRequest.sensor, { name: 'endpoint_agent', version: pkg.version, platform: process.platform });
   assert.ok(!reportRequest.prompt.includes('524-71-9043'));

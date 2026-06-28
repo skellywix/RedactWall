@@ -16,6 +16,7 @@ const TEXT_EXT = new Set(['.txt', '.csv', '.tsv', '.json', '.yaml', '.yml', '.xm
   '.md', '.log', '.js', '.ts', '.py', '.java', '.sql', '.env', '.ini', '.conf', '.rtf', '.eml']);
 const OFFICE_EXT = new Set(['.docx', '.xlsx', '.pptx']);
 const PDF_EXT = new Set(['.pdf']);
+const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.tif', '.tiff', '.bmp', '.webp']);
 const DEFAULT_EXTRACT_TIMEOUT_MS = 5000;
 const DEFAULT_MAX_EXTRACTED_CHARS = 1000000;
 
@@ -83,7 +84,18 @@ const PdfProcessor = {
   },
 };
 
-const PROCESSORS = [TextProcessor, OfficeProcessor, PdfProcessor];
+const OcrRequiredProcessor = {
+  id: 'ocr_required',
+  supports: (name) => IMAGE_EXT.has(ext(name)),
+  requiresOcr: true,
+  extract: async () => {
+    const err = new Error('ocr required');
+    err.code = 'OCR_REQUIRED';
+    throw err;
+  },
+};
+
+const PROCESSORS = [TextProcessor, OfficeProcessor, PdfProcessor, OcrRequiredProcessor];
 
 function supported(name) { return PROCESSORS.some((p) => p.supports(name)); }
 
@@ -127,6 +139,16 @@ function withTimeout(promise, ms) {
 async function extractText(name, buf, opts = {}) {
   const p = PROCESSORS.find((x) => x.supports(name));
   if (!p) return { text: '', processor: null, supported: false, extractionOk: false, error: 'unsupported' };
+  if (p.requiresOcr) {
+    return {
+      text: '',
+      processor: p.id,
+      supported: true,
+      extractionOk: false,
+      error: 'ocr_required',
+      ocrRequired: true,
+    };
+  }
   try {
     const raw = await withTimeout(Promise.resolve().then(() => p.extract(buf)), timeoutMs(opts));
     const text = String(raw || '');
@@ -144,7 +166,10 @@ async function extractText(name, buf, opts = {}) {
       processor: p.id,
       supported: true,
       extractionOk: false,
-      error: e && e.code === 'EXTRACT_TIMEOUT' ? 'timeout' : 'extract_failed',
+      error: e && e.code === 'EXTRACT_TIMEOUT' ? 'timeout'
+        : e && e.code === 'OCR_REQUIRED' ? 'ocr_required'
+        : 'extract_failed',
+      ...(e && e.code === 'OCR_REQUIRED' ? { ocrRequired: true } : {}),
     };
   }
 }
@@ -156,6 +181,7 @@ module.exports = {
   TEXT_EXT,
   OFFICE_EXT,
   PDF_EXT,
+  IMAGE_EXT,
   DEFAULT_EXTRACT_TIMEOUT_MS,
   DEFAULT_MAX_EXTRACTED_CHARS,
 };

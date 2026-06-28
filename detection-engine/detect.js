@@ -180,15 +180,178 @@
     { id: 'US_ADDRESS', score: 0.6, re: /\b\d{1,6}\s+(?:[A-Za-z0-9.'-]+\s){0,4}(?:Street|St|Avenue|Ave|Boulevard|Blvd|Road|Rd|Lane|Ln|Drive|Dr|Court|Ct|Way|Place|Pl|Terrace|Ter)\b\.?/gi },
   ];
   const NAME_CONTEXT = /\b(?:member|customer|client|account holder|name is|patient|mr\.?|mrs\.?|ms\.?|dr\.?)\b[:,]?\s+([A-Z][a-z]+\s+[A-Z][a-z]+)/g;
+  const SEMANTIC_DETECTOR_IDS = ['PERSON_NAME', 'SOURCE_CODE', 'LEGAL_CONTRACT', 'CREDENTIALS', 'CONFIDENTIAL_BUSINESS', 'HEALTH_RECORD'];
+  const CUSTOM_DETECTOR_ID_RE = /^[A-Z][A-Z0-9_]{2,79}$/;
+  const CUSTOM_DETECTOR_LIMIT = 100;
+  const CUSTOM_PATTERN_MAX_CHARS = 240;
+  const CUSTOM_CONTEXT_MAX_CHARS = 160;
+  const CUSTOM_MAX_REPEAT = 80;
+  const CUSTOM_DETECTOR_CACHE = typeof WeakMap !== 'undefined' ? new WeakMap() : null;
+
+  function builtInDetectorIds() {
+    const ids = new Set();
+    for (const d of DETECTORS) ids.add(d.id);
+    for (const id of SEMANTIC_DETECTOR_IDS) ids.add(id);
+    return ids;
+  }
+
+  function boundedNumberValue(value, fallback, min, max) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.max(min, Math.min(max, n));
+  }
+
+  function normalizeCustomFlags(value) {
+    const raw = String(value || '');
+    if (!/^[i]*$/.test(raw)) return null;
+    return raw.includes('i') ? 'gi' : 'g';
+  }
+
+  function regexLooksSafe(pattern, maxChars) {
+    const p = String(pattern || '');
+    if (!p || p.length > maxChars) return false;
+    if (/\(\?<([!=])?/.test(p) || /\(\?<!|\(\?<=/.test(p)) return false;
+    if (/\\[1-9]/.test(p)) return false;
+    if (/\.\*|\.\+/.test(p)) return false;
+    if ((p.match(/\|/g) || []).length > 24) return false;
+    if ((p.match(/[+*]/g) || []).length > 18) return false;
+    if (/\([^)]*(?:\+|\*|\{\d+(?:,\d*)?\})[^)]*\)(?:\+|\*|\{\d+(?:,\d*)?\})/.test(p)) return false;
+    const reps = p.match(/\{(\d+)(?:,(\d*))?\}/g) || [];
+    for (const rep of reps) {
+      const m = rep.match(/\{(\d+)(?:,(\d*))?\}/);
+      if (!m) continue;
+      if (m[2] === '') return false;
+      const upper = m[2] == null ? Number(m[1]) : Number(m[2]);
+      if (!Number.isFinite(upper) || upper > CUSTOM_MAX_REPEAT) return false;
+    }
+    return true;
+  }
+
+  function normalizeCustomValidators(value) {
+    const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    const out = {};
+    const intFields = [
+      ['minDigits', 0, 0, 64],
+      ['maxDigits', 128, 0, 128],
+      ['minLength', 1, 1, 128],
+      ['maxLength', 128, 1, 128],
+    ];
+    for (const [key, fallback, min, max] of intFields) {
+      if (source[key] === undefined) continue;
+      out[key] = Math.round(boundedNumberValue(source[key], fallback, min, max));
+    }
+    if (source.requireLetter !== undefined) out.requireLetter = source.requireLetter === true;
+    if (source.requireDigit !== undefined) out.requireDigit = source.requireDigit === true;
+    if (source.denyRepeating !== undefined) out.denyRepeating = source.denyRepeating !== false;
+    if (source.plausibleId !== undefined) out.plausibleId = source.plausibleId === true;
+    if (source.checksum !== undefined) {
+      const checksum = String(source.checksum || '').trim().toLowerCase();
+      if (checksum === 'luhn') out.checksum = checksum;
+    }
+    return out;
+  }
+
+  function validateCustomValue(value, validators) {
+    const v = String(value || '').trim();
+    const compact = v.replace(/\s+/g, '');
+    const d = compactDigits(v);
+    const rules = validators || {};
+    if (!v || v.length > 128) return false;
+    if (v.length < (rules.minLength || 1)) return false;
+    if (v.length > (rules.maxLength || 128)) return false;
+    if (d.length < (rules.minDigits || 0)) return false;
+    if (d.length > (rules.maxDigits || 128)) return false;
+    if (rules.requireLetter && !/[A-Za-z]/.test(v)) return false;
+    if (rules.requireDigit && !/\d/.test(v)) return false;
+    if (rules.denyRepeating !== false && /^([A-Z0-9])\1+$/i.test(compact.replace(/[-_]/g, ''))) return false;
+    if (rules.plausibleId && !idValuePlausible(v, rules.minDigits || 4, rules.maxLength || 32)) return false;
+    if (rules.checksum === 'luhn' && !luhnValid(v)) return false;
+    return true;
+  }
+
+  function publicCustomDetector(det) {
+    const out = {
+      id: det.id,
+      label: det.label,
+      severity: det.severity,
+      severityLabel: SEVERITY_LABEL[det.severity] || 'low',
+      score: det.score,
+      pattern: det.pattern,
+      flags: det.flags.replace('g', ''),
+      group: det.group,
+      custom: true,
+    };
+    if (det.context) out.context = det.context;
+    if (Object.keys(det.validators || {}).length) out.validators = det.validators;
+    return out;
+  }
+
+  function normalizeCustomDetector(raw, builtinIds) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw) || raw.enabled === false) return null;
+    const id = String(raw.id || '').trim().toUpperCase();
+    if (!CUSTOM_DETECTOR_ID_RE.test(id)) return null;
+    if ((builtinIds || builtInDetectorIds()).has(id)) return null;
+    const pattern = String(raw.pattern || raw.regex || '').trim();
+    if (!regexLooksSafe(pattern, CUSTOM_PATTERN_MAX_CHARS)) return null;
+    const flags = normalizeCustomFlags(raw.flags);
+    if (!flags) return null;
+    let re;
+    try { re = new RegExp(pattern, flags); } catch { return null; }
+    let ctx = null;
+    let context = '';
+    if (raw.context !== undefined) {
+      context = String(raw.context || '').trim();
+      if (!regexLooksSafe(context, CUSTOM_CONTEXT_MAX_CHARS)) return null;
+      try { ctx = new RegExp(context, flags); } catch { return null; }
+    }
+    const validators = normalizeCustomValidators(raw.validators);
+    return {
+      id,
+      label: String(raw.label || id).trim().slice(0, 80) || id,
+      score: boundedNumberValue(raw.score, 0.75, 0.1, 1),
+      severity: Math.round(boundedNumberValue(raw.severity, 3, 1, 4)),
+      pattern,
+      flags,
+      group: Math.round(boundedNumberValue(raw.group, 0, 0, 10)),
+      context,
+      validators,
+      custom: true,
+      re,
+      ctx,
+      validate: (m) => validateCustomValue(m, validators),
+    };
+  }
+
+  function normalizeCustomDetectors(value) {
+    const list = Array.isArray(value) ? value : (value && Array.isArray(value.detectors) ? value.detectors : []);
+    if (CUSTOM_DETECTOR_CACHE && list && typeof list === 'object') {
+      const cached = CUSTOM_DETECTOR_CACHE.get(list);
+      if (cached) return cached;
+    }
+    const out = [];
+    const seen = new Set();
+    const builtinIds = builtInDetectorIds();
+    for (const item of list) {
+      const det = normalizeCustomDetector(item, builtinIds);
+      if (!det || seen.has(det.id)) continue;
+      seen.add(det.id);
+      out.push(det);
+      if (out.length >= CUSTOM_DETECTOR_LIMIT) break;
+    }
+    if (CUSTOM_DETECTOR_CACHE && list && typeof list === 'object') CUSTOM_DETECTOR_CACHE.set(list, out);
+    return out;
+  }
 
   // Detector metadata for the console (enable/disable lists).
-  function listDetectors() {
+  function listDetectors(opts) {
     const ids = [];
     const seen = new Set();
     const add = (id) => { if (!seen.has(id)) { seen.add(id); ids.push(id); } };
     for (const d of DETECTORS) add(d.id);
-    ['PERSON_NAME', 'SOURCE_CODE', 'LEGAL_CONTRACT', 'CREDENTIALS', 'CONFIDENTIAL_BUSINESS', 'HEALTH_RECORD'].forEach(add);
-    return ids.map((id) => ({ id, severity: SEVERITY[id] || 1, severityLabel: SEVERITY_LABEL[SEVERITY[id] || 1] }));
+    SEMANTIC_DETECTOR_IDS.forEach(add);
+    const builtIn = ids.map((id) => ({ id, severity: SEVERITY[id] || 1, severityLabel: SEVERITY_LABEL[SEVERITY[id] || 1] }));
+    const custom = normalizeCustomDetectors(opts && opts.customDetectors).map(publicCustomDetector);
+    return builtIn.concat(custom);
   }
 
   function ctxOk(det, text, idx) {
@@ -198,10 +361,10 @@
     return det.ctx.test(text.slice(start, end));
   }
 
-  function detectStructured(text, disabled) {
+  function detectStructured(text, disabled, customDetectors) {
     const out = [];
     const seen = new Set();
-    for (const det of DETECTORS) {
+    for (const det of DETECTORS.concat(normalizeCustomDetectors(customDetectors))) {
       if (disabled.has(det.id)) continue;
       det.re.lastIndex = 0; let m;
       while ((m = det.re.exec(text)) !== null) {
@@ -212,7 +375,7 @@
         if (!ctxOk(det, text, start)) continue;
         const key = det.id + '|' + v + '|' + start;
         if (seen.has(key)) continue; seen.add(key);
-        out.push({ type: det.id, value: v, start, end: start + v.length, score: det.score, severity: SEVERITY[det.id] || 1 });
+        out.push({ type: det.id, value: v, start, end: start + v.length, score: det.score, severity: det.severity || SEVERITY[det.id] || 1 });
       }
     }
     if (!disabled.has('PERSON_NAME')) {
@@ -343,7 +506,7 @@
     if (!text || typeof text !== 'string') {
       return { findings: [], categories: [], maxSeverity: 0, maxSeverityLabel: 'none', riskScore: 0, entityCounts: {} };
     }
-    let findings = detectStructured(text, disabled);
+    let findings = detectStructured(text, disabled, opts.customDetectors);
     findings.sort((a, b) => (b.severity - a.severity) || (b.score - a.score));
     const accepted = [];
     for (const f of findings) if (!accepted.some((a) => a.start < f.end && f.start < a.end)) accepted.push(f);
@@ -422,7 +585,11 @@
     return { tokenizedText: t.text, map: t.map, tokenCount: t.tokens, analysis };
   }
 
-  const api = { analyze, redact, maskValue, tokenize, detokenize, tokenizePrompt, classifySemantic, _featurize, _lrProb, listDetectors, luhnValid, ssnPlausible, abaValid, ibanValid, vinValid, bankAccountPlausible, itinPlausible, npiValid, datePlausible, ipv6Valid, cardNetwork, SEVERITY, SEVERITY_LABEL };
+  function publicCustomDetectorConfig(value) {
+    return normalizeCustomDetectors(value).map(publicCustomDetector);
+  }
+
+  const api = { analyze, redact, maskValue, tokenize, detokenize, tokenizePrompt, classifySemantic, _featurize, _lrProb, listDetectors, normalizeCustomDetectors, publicCustomDetectorConfig, luhnValid, ssnPlausible, abaValid, ibanValid, vinValid, bankAccountPlausible, itinPlausible, npiValid, datePlausible, ipv6Valid, cardNetwork, SEVERITY, SEVERITY_LABEL };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (root) root.PSDetect = api;
 })(typeof window !== 'undefined' ? window : (typeof self !== 'undefined' ? self : null));

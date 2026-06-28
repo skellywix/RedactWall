@@ -36,6 +36,7 @@ This section is generated from the app by `npm run docs:demo-guide`. Do not hand
 - Text and config: `.conf`, `.csv`, `.eml`, `.env`, `.htm`, `.html`, `.ini`, `.java`, `.js`, `.json`, `.log`, `.md`, `.py`, `.rtf`, `.sql`, `.ts`, `.tsv`, `.txt`, `.xml`, `.yaml`, `.yml`
 - Office: `.docx`, `.pptx`, `.xlsx`
 - PDF: `.pdf`
+- Image OCR required: `.bmp`, `.jpeg`, `.jpg`, `.png`, `.tif`, `.tiff`, `.webp`
 
 ### Demo And Verification Commands
 

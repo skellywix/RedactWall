@@ -267,7 +267,7 @@ prints and posts only check IDs, boolean status, and short details. It does not
 print or post the ingest key, handoff secret, prompt text, extracted text, or
 file bytes.
 
-The agent inspects supported watched files locally. Under redact policy, structured-only findings write a safe companion text file under `.promptwall-redacted` and report `redacted_available` evidence to the control plane; semantic or mixed findings remain held for Security Admin review.
+The agent inspects supported watched files locally. Under redact policy, structured-only findings write a safe companion text file under `.promptwall-redacted` and report `redacted_available` evidence to the control plane; semantic or mixed findings remain held for Security Admin review. Image files (`.png`, `.jpg`, `.jpeg`, `.tif`, `.tiff`, `.bmp`, `.webp`) are supported as a fail-closed modality and return `ocr_required` until an endpoint-local OCR processor is configured.
 
 For desktop file flows, enable the native handoff directory with an explicit
 local secret. The endpoint agent keeps scanning locally; the handoff event is
@@ -290,6 +290,23 @@ and reports only sanitized findings, placeholders, and destination metadata.
 The handoff directory is ACL-restricted to the installing user, Administrators,
 and SYSTEM. This is the tested contract for native collectors; it does not
 install kernel drivers or universal app hooks.
+
+### Customer Detector Packs
+
+Put customer-specific sensitive types in `config/custom-detectors.json`, or set
+`PROMPTWALL_CUSTOM_DETECTORS_PATH` / `SENTINEL_CUSTOM_DETECTORS_PATH` to an
+alternate JSON file for a customer silo. Detector packs are data-only. Each
+enabled detector supplies an uppercase `id`, bounded `pattern`, optional
+`context`, `severity`, `score`, `group`, and validator knobs such as
+`minDigits`, `maxDigits`, `requireDigit`, `requireLetter`, `plausibleId`, or
+`checksum: "luhn"`.
+
+The shared engine rejects unsafe regex shapes, unbounded repetition, backrefs,
+built-in detector ID overrides, and duplicate custom IDs. The control plane
+normalizes the pack and sends it to browser, endpoint, and MCP sensors through
+`/api/v1/policy`; `/api/v1/detectors` and examiner evidence packs include the
+same custom IDs so Security Admins can use them in `alwaysBlock`, scoped policy,
+exceptions, and approval routing.
 
 ### Protected Upload Collector
 
@@ -401,6 +418,8 @@ Set these through `.env`, container environment, or a deployment secret manager:
 | `SENTINEL_SEAT_LIMIT` | Purchased seat count. New managed users beyond this count are blocked and recorded as `SEAT_LIMIT_BLOCKED`. |
 | `SENTINEL_REQUIRE_TENANT_CONTEXT` | Requires sensors to send the matching `orgId`. Enabled automatically by SaaS mode. |
 | `SENTINEL_REQUIRE_USER_IDENTITY` | Requires sensors to send managed user identity instead of `unknown` or `unattributed@unmanaged`. Enabled automatically by SaaS mode. |
+| `SENTINEL_POLICY_PATH` | Optional policy file path for isolated tests, pilots, or customer-silo policy storage. |
+| `SENTINEL_CUSTOM_DETECTORS_PATH` / `PROMPTWALL_CUSTOM_DETECTORS_PATH` | Optional customer detector-pack path. Defaults to `config/custom-detectors.json`. |
 | `ENDPOINT_AGENT_HANDOFF_DIR` | Optional local spool for signed native endpoint upload-intent events. |
 | `ENDPOINT_AGENT_HANDOFF_SECRET` | Optional 32-plus-character local HMAC secret required before the endpoint agent accepts native handoff events. |
 
@@ -415,6 +434,7 @@ set.
 | `SENTINEL_URL` | `PROMPTWALL_URL` |
 | `SENTINEL_DB_PATH` | `PROMPTWALL_DB_PATH` |
 | `SENTINEL_POLICY_PATH` | `PROMPTWALL_POLICY_PATH` |
+| `SENTINEL_CUSTOM_DETECTORS_PATH` | `PROMPTWALL_CUSTOM_DETECTORS_PATH` |
 | `SENTINEL_SAAS_MODE` | `PROMPTWALL_SAAS_MODE` |
 | `SENTINEL_TENANT_ID` | `PROMPTWALL_TENANT_ID` |
 | `SENTINEL_SEAT_LIMIT` | `PROMPTWALL_SEAT_LIMIT` |

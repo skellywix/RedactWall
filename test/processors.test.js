@@ -75,6 +75,17 @@ test('corrupt supported office files report extraction failure', async () => {
   assert.strictEqual(result.text, '');
 });
 
+test('image files return ocr_required without attempting text extraction', async () => {
+  const result = await processors.extractText('loan-scan.png', Buffer.from('pretend image bytes with SSN 524-71-9043'));
+
+  assert.strictEqual(result.supported, true);
+  assert.strictEqual(result.processor, 'ocr_required');
+  assert.strictEqual(result.extractionOk, false);
+  assert.strictEqual(result.error, 'ocr_required');
+  assert.strictEqual(result.ocrRequired, true);
+  assert.strictEqual(result.text, '');
+});
+
 test('slow processors time out with a typed extraction error', async (t) => {
   const slow = {
     id: 'slow-test',
@@ -129,6 +140,35 @@ test('scan-file blocks corrupt supported files without echoing file bytes', asyn
   assert.strictEqual(body.supported, true);
   assert.strictEqual(body.inspected, false);
   assert.strictEqual(body.processor, 'office');
+  assert.ok(!JSON.stringify(body).includes(secret));
+  assert.ok(!JSON.stringify(body).includes(contentBase64));
+}));
+
+test('scan-file blocks image uploads as ocr_required without echoing file bytes', async () => withServer(async (port) => {
+  const secret = '524-71-9043';
+  const contentBase64 = Buffer.from('pretend image bytes with member SSN ' + secret).toString('base64');
+  const res = await fetch(`http://127.0.0.1:${port}/api/v1/scan-file`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': 'unit-ingest-key',
+    },
+    body: JSON.stringify({
+      filename: 'member-loan-scan.png',
+      contentBase64,
+      user: 'analyst@example.test',
+      destination: 'desktop-ai-app',
+    }),
+  });
+
+  assert.strictEqual(res.status, 200);
+  const body = await res.json();
+  assert.strictEqual(body.decision, 'block');
+  assert.strictEqual(body.status, 'ocr_required');
+  assert.strictEqual(body.supported, true);
+  assert.strictEqual(body.inspected, false);
+  assert.strictEqual(body.processor, 'ocr_required');
+  assert.strictEqual(body.ocrRequired, true);
   assert.ok(!JSON.stringify(body).includes(secret));
   assert.ok(!JSON.stringify(body).includes(contentBase64));
 }));

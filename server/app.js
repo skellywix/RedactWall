@@ -653,13 +653,15 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
     return res.json({ id: row.id, decision: 'log', status: 'shadow_ai' });
   }
 
-  if (clientOutcome === 'file_too_large' || clientOutcome === 'file_unsupported' || clientOutcome === 'scan_unavailable') {
-    const row = createQuery({ status: 'file_blocked_unscanned', ...base });
-    db.appendAudit({ action: 'FILE_BLOCKED_UNSCANNED', queryId: row.id, actor: user, detail: note || 'file blocked unscanned' });
-    emitSecurityAlert(row, 'FILE_BLOCKED_UNSCANNED');
-    broadcast('query', { type: 'file_blocked_unscanned', query: publicQuery(row) });
+  if (clientOutcome === 'file_too_large' || clientOutcome === 'file_unsupported' || clientOutcome === 'ocr_required' || clientOutcome === 'scan_unavailable') {
+    const status = clientOutcome === 'ocr_required' ? 'ocr_required' : 'file_blocked_unscanned';
+    const action = status === 'ocr_required' ? 'FILE_OCR_REQUIRED' : 'FILE_BLOCKED_UNSCANNED';
+    const row = createQuery({ status, ...base });
+    db.appendAudit({ action, queryId: row.id, actor: user, detail: note || 'file blocked unscanned' });
+    emitSecurityAlert(row, action);
+    broadcast('query', { type: status, query: publicQuery(row) });
     broadcast('stats', db.stats());
-    return res.json({ id: row.id, decision: 'block', status: 'file_blocked_unscanned' });
+    return res.json({ id: row.id, decision: 'block', status });
   }
 
   if (verdict.decision === 'allow') {
@@ -821,6 +823,7 @@ app.get('/api/v1/policy', checkIngestKey, (req, res) => {
     blockRiskScore: p.blockRiskScore, alwaysBlock: p.alwaysBlock,
     ignore: p.ignore || [],
     disabledDetectors: p.disabledDetectors || [],
+    customDetectors: policy.customDetectorsForSensors(),
     governedDestinations: p.governedDestinations,
     allowedDestinations: p.allowedDestinations || [],
     blockedDestinations: p.blockedDestinations || [],
@@ -834,7 +837,9 @@ app.get('/api/v1/policy', checkIngestKey, (req, res) => {
 });
 
 // List available detectors (for the console enable/disable UI).
-app.get('/api/v1/detectors', checkIngestKey, (req, res) => res.json(detector.listDetectors()));
+app.get('/api/v1/detectors', checkIngestKey, (req, res) => res.json(detector.listDetectors({
+  customDetectors: policy.customDetectorsForSensors(),
+})));
 
 // Scan an uploaded FILE: extract text (pdf/docx/xlsx/text), then gate it.
 app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation.scanFileSchema), async (req, res) => {
@@ -870,24 +875,30 @@ app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation
     return res.json({ id: row.id, decision: 'allow', supported: false, filename });
   }
   if (!extracted.extractionOk) {
-    const reason = extracted.error === 'timeout' ? 'File extraction timed out before inspection completed' : 'File could not be inspected';
-    const row = createQuery({ status: 'file_blocked_unscanned', user, orgId, destination, source, channel, sensor,
-      filename, processor: extracted.processor, redactedPrompt: '[unreadable file] ' + filename,
+    const ocrRequired = extracted.error === 'ocr_required' || extracted.ocrRequired === true;
+    const status = ocrRequired ? 'ocr_required' : 'file_blocked_unscanned';
+    const reason = ocrRequired ? 'OCR is required before this file can be inspected'
+      : extracted.error === 'timeout' ? 'File extraction timed out before inspection completed'
+      : 'File could not be inspected';
+    const row = createQuery({ status, user, orgId, destination, source, channel, sensor,
+      filename, processor: extracted.processor, redactedPrompt: (ocrRequired ? '[ocr required file] ' : '[unreadable file] ') + filename,
       findings: [], categories: [], entityCounts: {}, riskScore: 0, maxSeverity: 0, maxSeverityLabel: 'none',
       reasons: [reason] });
-    db.appendAudit({ action: 'FILE_BLOCKED_UNREADABLE', queryId: row.id, actor: user, detail: `${filename}: ${extracted.error || 'extract_failed'}` });
-    emitSecurityAlert(row, 'FILE_BLOCKED_UNREADABLE');
-    broadcast('query', { type: 'file_blocked_unscanned', query: publicQuery(row) });
+    const action = ocrRequired ? 'FILE_OCR_REQUIRED' : 'FILE_BLOCKED_UNREADABLE';
+    db.appendAudit({ action, queryId: row.id, actor: user, detail: `${filename}: ${extracted.error || 'extract_failed'}` });
+    emitSecurityAlert(row, action);
+    broadcast('query', { type: status, query: publicQuery(row) });
     broadcast('stats', db.stats());
     return res.json({
       id: row.id,
       decision: 'block',
       mode: 'block',
-      status: 'file_blocked_unscanned',
+      status,
       supported: true,
       inspected: false,
       filename,
       processor: extracted.processor,
+      ...(ocrRequired ? { ocrRequired: true } : {}),
       reasons: [reason],
     });
   }
@@ -1263,7 +1274,7 @@ app.get('/api/export/evidence', auth.requireAuth, (req, res) => {
     stats: db.stats(),
     auditIntegrity: db.verifyAuditChain(),
     coverage: coverage.summarize(queries, activePolicy),
-    detectors: detector.listDetectors(),
+    detectors: detector.listDetectors({ customDetectors: policy.customDetectorsForSensors() }),
     queries,
     audit: db.listAudit(auditLimit),
   }));

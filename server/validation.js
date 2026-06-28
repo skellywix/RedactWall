@@ -6,6 +6,7 @@
  */
 const { z } = require('zod');
 const detector = require('./detector');
+const customDetectors = require('./custom-detectors');
 
 const LIMITS = {
   promptChars: 200000,
@@ -29,7 +30,11 @@ const ROUTING_GROUP = /^[a-z][a-z0-9_-]{0,63}$/;
 const ROUTING_REASON = /^[a-z0-9][a-z0-9_:-]{0,79}$/;
 const POLICY_MATCH_TEXT = /^[A-Za-z0-9 ._@:+/-]+$/;
 const SENSITIVE_ROUTING_CODE = /(?:\d{3}[-_:.]?\d{2}[-_:.]?\d{4}|\d{12,19})/;
-const KNOWN_DETECTOR_IDS = new Set(detector.listDetectors().map((d) => d.id));
+function knownDetectorIds() {
+  return new Set(detector.listDetectors({
+    customDetectors: customDetectors.loadCustomDetectors(),
+  }).map((d) => d.id));
+}
 
 function nonBlankString(max) {
   return z.string().max(max).refine((value) => value.trim().length > 0, {
@@ -58,7 +63,7 @@ function nullableString(max = LIMITS.metadataChars) {
   );
 }
 
-const detectorIdSchema = z.string().max(80).regex(DETECTOR_ID).refine((id) => KNOWN_DETECTOR_IDS.has(id), {
+const detectorIdSchema = z.string().max(80).regex(DETECTOR_ID).refine((id) => knownDetectorIds().has(id), {
   message: 'unknown detector',
 });
 const clientScoreSchema = z.number().min(0).max(1);
@@ -105,6 +110,7 @@ const clientOutcomeSchema = z.enum([
   'shadow_ai',
   'file_too_large',
   'file_unsupported',
+  'ocr_required',
   'scan_unavailable',
   'destination_blocked',
   'file_upload_blocked',

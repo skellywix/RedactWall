@@ -18,7 +18,7 @@ const SERVER = process.env.SENTINEL_URL || 'http://localhost:4000';
 const KEY = process.env.INGEST_API_KEY || '';
 const POLICY_REFRESH_MS = 15 * 60 * 1000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 10000;
-const DEFAULT_DETECTION_POLICY = { ignore: [], disabledDetectors: [] };
+const DEFAULT_DETECTION_POLICY = { ignore: [], disabledDetectors: [], customDetectors: [] };
 let detectionPolicy = normalizeDetectionPolicy(DEFAULT_DETECTION_POLICY);
 let lastPolicyRefresh = 0;
 
@@ -36,6 +36,7 @@ function normalizeDetectionPolicy(policy = {}) {
   return {
     ignore: lowerDetectorList(policy.ignore),
     disabledDetectors: lowerDetectorList(policy.disabledDetectors),
+    customDetectors: Array.isArray(policy.customDetectors) ? policy.customDetectors : [],
   };
 }
 
