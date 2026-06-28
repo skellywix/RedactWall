@@ -120,10 +120,13 @@ For this alignment track, completion requires evidence for every area below:
 - Added SCIM-backed OIDC console login with state, nonce, authorization-code
   token exchange, RS256 JWKS ID-token validation, active SCIM user role mapping,
   PromptWall-prefixed env aliases, and production preflight checks.
+- Extended approval routing rules to match SCIM user names, SCIM groups, and
+  org ids so provisioned identity can route legal, lending, engineering, or
+  other customer review queues without storing raw prompts or file text.
 
 ## Open Decisions
 
 - The local checkout folder has been renamed to `promptwall/`; the remaining
   GitHub repository has also been renamed to `skellywix/promptwall`.
 - Whether the next product build should prioritize deeper desktop interception,
-  IdP-specific setup UX, or app/action policy controls.
+  IdP-specific setup UX, signed-update operations, or app/action policy controls.

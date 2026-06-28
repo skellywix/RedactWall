@@ -71,8 +71,9 @@ Build next:
   Slack, and Microsoft Teams, plus persisted notification status and SLA
   escalation audit events.
 - Add customer-configurable approval routing rules so Security Admins can route
-  held decisions by detector, category, source, channel, destination, severity,
-  and risk without exposing prompt or file content to sensors.
+  held decisions by SCIM user, SCIM group, org id, detector, category, source,
+  channel, destination, severity, and risk without exposing prompt or file
+  content to sensors.
 - Add approval queue filters by workflow state, detector/category, and
   destination so reviewers can triage held items without opening every record.
 - Add an optional local approver role so assigned reviewers can approve or deny

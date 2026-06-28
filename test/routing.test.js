@@ -106,6 +106,57 @@ test('customer approval routing rules override default owners using metadata onl
   assert.ok(!JSON.stringify(routed).includes('function leak'));
 });
 
+test('customer approval routing rules can match provisioned identity metadata', () => {
+  const rule = {
+    id: 'legal_group_contracts',
+    users: ['counsel@example.test'],
+    groups: ['PromptWall Legal'],
+    orgIds: ['cu-001'],
+    categories: ['LEGAL_CONTRACT'],
+    assignedGroup: 'legal',
+    assignedRole: 'approver',
+    slaMinutes: 60,
+    reason: 'legal_review',
+  };
+
+  const routed = routing.routeDecision({
+    status: 'pending',
+    user: 'Counsel@Example.Test',
+    orgId: 'CU-001',
+    destination: 'claude.ai',
+    source: 'browser_extension',
+    channel: 'submit',
+    findings: [],
+    categories: ['LEGAL_CONTRACT'],
+    entityCounts: { LEGAL_CONTRACT: 1 },
+    riskScore: 35,
+    maxSeverity: 3,
+    redactedPrompt: 'Sensitive contract text [LEGAL_CONTRACT]',
+  }, {
+    now: NOW,
+    policy: { approvalRoutingRules: [rule] },
+    context: { groups: ['PromptWall Legal'] },
+  });
+
+  assert.strictEqual(routed.assignedRole, 'approver');
+  assert.strictEqual(routed.assignedGroup, 'legal');
+  assert.strictEqual(routed.workflowReason, 'rule:legal_group_contracts:legal_review');
+  assert.strictEqual(routed.slaDueAt, '2026-06-28T07:00:00.000Z');
+  assert.ok(!JSON.stringify(routed).includes('Sensitive contract text'));
+
+  assert.strictEqual(routing.ruleMatches(rule, {}, {
+    users: ['counsel@example.test'],
+    groups: ['PromptWall Engineering'],
+    orgIds: ['cu-001'],
+    detectorLabels: [],
+    categoryLabels: ['LEGAL_CONTRACT'],
+    source: 'browser_extension',
+    channel: 'submit',
+    riskScore: 35,
+    maxSeverity: 3,
+  }), false);
+});
+
 test('customer routing rules cannot soften critical-risk ownership', () => {
   const routed = routing.routeDecision({
     status: 'pending',

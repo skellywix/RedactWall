@@ -838,6 +838,9 @@ test('admin policy accepts customer approval routing rules', async () => withSer
       body: {
         approvalRoutingRules: [{
           id: 'member_services_chatgpt',
+          users: ['lending@example.test'],
+          groups: ['PromptWall Lending'],
+          orgIds: ['cu-001'],
           detectors: ['MEMBER_ID'],
           destinations: ['chatgpt.com'],
           minSeverity: 2,
@@ -858,6 +861,9 @@ test('admin policy accepts customer approval routing rules', async () => withSer
       assignedRole: 'approver',
       slaMinutes: 120,
       reason: 'member_services',
+      users: ['lending@example.test'],
+      groups: ['promptwall lending'],
+      orgIds: ['cu-001'],
       detectors: ['MEMBER_ID'],
       destinations: ['chatgpt.com'],
       minSeverity: 2,
@@ -983,6 +989,7 @@ test('admin policy rejects malformed approval routing rules without echoing valu
     body: {
       approvalRoutingRules: [{
         id: 'bad_member_rule',
+        groups: [`member-${secret}`],
         detectors: ['NOT_REAL_DETECTOR'],
         assignedGroup: 'member services',
         assignedRole: 'owner',
@@ -1000,6 +1007,7 @@ test('admin policy rejects malformed approval routing rules without echoing valu
       'approvalRoutingRules.0.assignedGroup',
       'approvalRoutingRules.0.assignedRole',
       'approvalRoutingRules.0.detectors.0',
+      'approvalRoutingRules.0.groups.0',
       'approvalRoutingRules.0.reason',
       'approvalRoutingRules.0.slaMinutes',
     ],

@@ -913,8 +913,8 @@ async function loadPolicy() {
     <div class="policy-label">Approval routing rules</div>
     <div class="template-bar">
       ${readonly
-    ? `<div class="chips">${(p.approvalRoutingRules || []).map((rule) => `<span class="chip"><b>${escapeHtml(rule.id)}</b> ${escapeHtml(rule.assignedGroup || '')} / ${escapeHtml(roleLabel(rule.assignedRole))}</span>`).join('') || '<span class="chip">default routing</span>'}</div>`
-    : `<textarea id="pol_approval_routing_rules" class="policy-textarea" spellcheck="false" style="min-height:160px" placeholder='[{"id":"member_services","detectors":["MEMBER_ID"],"destinations":["chatgpt.com"],"assignedGroup":"compliance","assignedRole":"approver","slaMinutes":120}]'>${escapeHtml(policyJsonText(p.approvalRoutingRules))}</textarea>`}
+    ? `<div class="chips">${(p.approvalRoutingRules || []).map((rule) => `<span class="chip"><b>${escapeHtml(rule.id)}</b> ${escapeHtml(rule.assignedGroup || '')} / ${escapeHtml(roleLabel(rule.assignedRole))} ${escapeHtml(policyMatcherSummary(rule))}</span>`).join('') || '<span class="chip">default routing</span>'}</div>`
+    : `<textarea id="pol_approval_routing_rules" class="policy-textarea" spellcheck="false" style="min-height:160px" placeholder='[{"id":"legal_group_contracts","groups":["PromptWall Legal"],"categories":["LEGAL_CONTRACT"],"destinations":["claude.ai"],"assignedGroup":"legal","assignedRole":"approver","slaMinutes":60}]'>${escapeHtml(policyJsonText(p.approvalRoutingRules))}</textarea>`}
     </div>
     <div class="policy-label">Scoped policy and exceptions</div>
     <div class="policy-advanced-grid">

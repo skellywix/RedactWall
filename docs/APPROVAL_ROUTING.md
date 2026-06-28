@@ -1,10 +1,10 @@
 # Approval Routing
 
 PromptWall assigns held decisions before they become a shared queue problem.
-Routing is metadata-only: rules use detector ids, semantic categories, source,
-channel, destination, severity, and risk score. They do not read raw prompt
-bodies, extracted file text, token vaults, decision notes, or uploaded file
-bytes.
+Routing is metadata-only: rules use provisioned SCIM user names, SCIM groups,
+org ids, detector ids, semantic categories, source, channel, destination,
+severity, and risk score. They do not read raw prompt bodies, extracted file
+text, token vaults, decision notes, or uploaded file bytes.
 
 ## Stored Workflow Fields
 
@@ -37,6 +37,11 @@ below.
 
 Each rule can match on:
 
+- `users`: provisioned SCIM `userName` values such as
+  `counsel@example.test`.
+- `groups`: provisioned SCIM group display names such as
+  `PromptWall Legal`.
+- `orgIds`: managed deployment or customer-silo org ids.
 - `detectors`: built-in detector ids such as `MEMBER_ID`, `SOURCE_CODE`, or
   `SECRET_KEY`.
 - `categories`: semantic detector categories such as `LEGAL_CONTRACT` or
@@ -64,6 +69,7 @@ Example:
   },
   {
     "id": "engineering_source_code",
+    "groups": ["PromptWall Engineers"],
     "categories": ["SOURCE_CODE"],
     "sources": ["browser_extension"],
     "assignedGroup": "engineering",
@@ -112,7 +118,9 @@ The sensor policy endpoint, `/api/v1/policy`, does not expose
   decision notes, or uploaded file bytes.
 - SCIM provisioning maps known PromptWall IdP groups onto these stable route
   roles. OIDC login consumes those active provisioned users and group-derived
-  roles instead of replacing the stored evidence fields.
+  roles instead of replacing the stored evidence fields. Approval routing can
+  also use the same SCIM group membership to assign held incidents to customer
+  reviewer pools such as legal, lending, or engineering.
 
 ## Notification Channels
 

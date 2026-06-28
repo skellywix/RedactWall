@@ -86,10 +86,11 @@ handoff destination like `Desktop AI` can be blocked with `desktop-ai`.
 
 The Policy tab also accepts `approvalRoutingRules`, a bounded JSON array for
 customer-specific ownership. Rules match only sanitized metadata such as
-detector ids, categories, source, channel, destination, severity, and risk
-score. A member-services rule can route `MEMBER_ID` findings to compliance with
-a two-hour SLA, while source-code categories can route to engineering or
-security. If no rule matches, PromptWall falls back to the built-in
+SCIM user name, SCIM group, org id, detector ids, categories, source, channel,
+destination, severity, and risk score. A member-services rule can route
+`MEMBER_ID` findings to compliance with a two-hour SLA, while legal or
+engineering IdP groups can route contracts or source code to the right reviewer
+pool. If no rule matches, PromptWall falls back to the built-in
 security/compliance/privacy/legal routing table. Critical-risk records still
 promote to Security Admin ownership with a one-hour-or-less SLA.
 The Approval Queue can filter held items by workflow state, detector/category,

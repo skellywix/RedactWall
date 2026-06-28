@@ -99,13 +99,42 @@ function listMatch(ruleValues, queryValues) {
   return ruleValues.some((ruleValue) => values.has(String(ruleValue || '').trim().toLowerCase()));
 }
 
+function normalizedList(values) {
+  const source = Array.isArray(values) ? values : [values];
+  const out = [];
+  const seen = new Set();
+  for (const item of source) {
+    const text = String(item || '').trim();
+    const key = text.toLowerCase();
+    if (!text || seen.has(key)) continue;
+    seen.add(key);
+    out.push(text);
+  }
+  return out;
+}
+
+function identityFacts(query = {}, context = {}) {
+  const users = normalizedList([query.user, context.user]);
+  const orgIds = normalizedList([query.orgId, context.orgId]);
+  const groups = normalizedList([
+    ...(Array.isArray(query.groups) ? query.groups : []),
+    ...(Array.isArray(query.userGroups) ? query.userGroups : []),
+    ...(Array.isArray(context.groups) ? context.groups : []),
+  ]);
+  return {
+    users,
+    orgIds,
+    groups,
+  };
+}
+
 function destinationRuleMatch(ruleValues, destination) {
   if (!Array.isArray(ruleValues) || !ruleValues.length) return true;
   return policy.destinationMatches(destination, ruleValues);
 }
 
 function ruleHasMatcher(rule = {}) {
-  return ['detectors', 'categories', 'sources', 'channels', 'destinations'].some((key) => Array.isArray(rule[key]) && rule[key].length)
+  return ['users', 'groups', 'orgIds', 'detectors', 'categories', 'sources', 'channels', 'destinations'].some((key) => Array.isArray(rule[key]) && rule[key].length)
     || rule.minSeverity !== undefined
     || rule.minRiskScore !== undefined;
 }
@@ -113,6 +142,9 @@ function ruleHasMatcher(rule = {}) {
 function ruleMatches(rule = {}, query = {}, facts = {}) {
   if (rule.enabled === false) return false;
   if (!ruleHasMatcher(rule)) return false;
+  if (!listMatch(rule.users, facts.users)) return false;
+  if (!listMatch(rule.groups, facts.groups)) return false;
+  if (!listMatch(rule.orgIds, facts.orgIds)) return false;
   if (!listMatch(rule.detectors, facts.detectorLabels)) return false;
   if (!listMatch(rule.categories, facts.categoryLabels)) return false;
   if (!listMatch(rule.sources, [facts.source])) return false;
@@ -153,6 +185,7 @@ function applyCriticalFloor(route, facts) {
 function routeDecision(query = {}, opts = {}) {
   const now = opts.now instanceof Date ? opts.now : new Date(opts.now || Date.now());
   const activePolicy = opts.policy || policy.loadPolicy();
+  const context = opts.context || opts.identityContext || {};
   const detectorLabels = detectorLabelsFor(query);
   const categoryLabels = categoryLabelsFor(query);
   const labels = [...new Set([...detectorLabels, ...categoryLabels])];
@@ -160,7 +193,16 @@ function routeDecision(query = {}, opts = {}) {
   const channel = String(query.channel || '').toLowerCase();
   const riskScore = Number(query.riskScore) || 0;
   const maxSeverity = Number(query.maxSeverity) || 0;
-  const facts = { labels, detectorLabels, categoryLabels, source, channel, riskScore, maxSeverity };
+  const facts = {
+    labels,
+    detectorLabels,
+    categoryLabels,
+    source,
+    channel,
+    riskScore,
+    maxSeverity,
+    ...identityFacts(query, context),
+  };
 
   let route = customRoute(query, facts, activePolicy);
   if (!route) route = {

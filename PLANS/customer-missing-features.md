@@ -150,15 +150,17 @@ step-up, SIEM alerts are sanitized, and denied or approved decisions are audited
 Held decisions receive owner and SLA routing metadata for security, compliance,
 privacy, legal, or customer-defined review groups. Security Admins can configure
 metadata-only `approvalRoutingRules` from the Policy tab or admin policy API.
-The dashboard, SIEM payloads, and examiner export expose that sanitized workflow
-context. The dashboard approval queue can now filter held items by workflow
-state, detector/category, and destination so reviewers can work member-data,
+Rules can match SCIM user names, SCIM groups, org ids, detectors, categories,
+sources, channels, destinations, severity, and risk. The dashboard, SIEM
+payloads, and examiner export expose that sanitized workflow context. The
+dashboard approval queue can now filter held items by workflow state,
+detector/category, and destination so reviewers can work member-data,
 source-code, legal, or app-specific queues without opening every incident.
 PromptWall supports best-effort generic JSON, Slack, and Microsoft Teams
 approval notifications, persists delivery status on the query, audits
 notification outcomes, and escalates overdue routed items into tamper-evident
-evidence. Direct SMTP email, identity/group routing conditions, and more granular
-escalation policies are still open.
+evidence. Direct SMTP email, ticketing adapters, and more granular escalation
+policies are still open.
 
 Customer ask: "Can member-services exceptions route to compliance, source-code
 events route to security, and urgent approvals notify someone immediately?"
@@ -167,14 +169,12 @@ Why it matters: a queue without ownership becomes a backlog. Customers need the
 workflow to fit their org chart, not just prove the gate works.
 
 Implementation connection:
-- Extend the current `approvalRoutingRules` matchers with identity/user-group
-  conditions after enterprise identity lands.
 - Build direct SMTP email and ticketing adapters on top of the existing
   sanitized `server/notifiers.js` discipline.
 
 Acceptance evidence:
-- Routing and notifier tests prove sanitized payloads never include prompt
-  bodies, token vaults, raw findings, passwords, or decision secrets.
+- Routing, gate, and notifier tests prove sanitized payloads never include
+  prompt bodies, token vaults, raw findings, passwords, or decision secrets.
 - Browser E2E: blocked synthetic prompt creates an assigned queue item; approve
   and deny remain audited; escalation event appears in evidence export.
 

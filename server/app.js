@@ -298,12 +298,32 @@ function policyDecisionMetadata(verdict = {}) {
   };
 }
 
+function routeOptionsFor(query = {}, opts = {}) {
+  if (!routing.routeableStatus(query.status) || query.assignedRole || query.assignedGroup || query.slaDueAt) {
+    return opts;
+  }
+  const base = policyContext(query);
+  const extra = opts.context || opts.identityContext || {};
+  const groups = [...new Set([
+    ...(Array.isArray(base.groups) ? base.groups : []),
+    ...(Array.isArray(extra.groups) ? extra.groups : []),
+  ].filter(Boolean))];
+  return {
+    ...opts,
+    context: {
+      ...base,
+      ...extra,
+      groups,
+    },
+  };
+}
+
 function createQuery(query, opts = {}) {
-  return db.createQuery(routing.withWorkflow(query, opts));
+  return db.createQuery(routing.withWorkflow(query, routeOptionsFor(query, opts)));
 }
 
 function createQueryWithReleaseToken(query) {
-  const routed = routing.withWorkflow(query);
+  const routed = routing.withWorkflow(query, routeOptionsFor(query));
   if (routed && routed.status === 'pending') {
     const release = releaseTokens.issueReleaseToken();
     return {
