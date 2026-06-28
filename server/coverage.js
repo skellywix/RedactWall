@@ -20,6 +20,7 @@ const BLOCKED_STATUSES = new Set([
   'blocked_by_user',
   'destination_blocked',
   'file_upload_blocked',
+  'action_blocked',
   'injection_blocked',
   'file_blocked_unscanned',
   'ocr_required',

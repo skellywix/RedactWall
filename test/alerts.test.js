@@ -71,6 +71,7 @@ test('alert threshold sends blocked status even below numeric threshold', () => 
   assert.strictEqual(alerts.shouldAlert(sampleQuery({ status: 'response_flagged', riskScore: 0, maxSeverity: 0 })), true);
   assert.strictEqual(alerts.shouldAlert(sampleQuery({ status: 'response_redacted', riskScore: 0, maxSeverity: 0 })), true);
   assert.strictEqual(alerts.shouldAlert(sampleQuery({ status: 'response_blocked', riskScore: 0, maxSeverity: 0 })), true);
+  assert.strictEqual(alerts.shouldAlert(sampleQuery({ status: 'action_blocked', riskScore: 0, maxSeverity: 0 })), true);
   assert.strictEqual(alerts.shouldAlert(sampleQuery({ status: 'allowed', riskScore: 0, maxSeverity: 0 })), false);
   assert.strictEqual(alerts.shouldAlert(sampleQuery({ status: 'allowed', riskScore: 30, maxSeverity: 1 })), true);
   assert.strictEqual(alerts.shouldAlert(sampleQuery({ status: 'allowed', riskScore: 0, maxSeverity: 0 }), { force: true }), true);

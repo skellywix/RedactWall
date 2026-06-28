@@ -114,6 +114,7 @@ const clientOutcomeSchema = z.enum([
   'scan_unavailable',
   'destination_blocked',
   'file_upload_blocked',
+  'action_blocked',
   'paste_flagged',
   'sent_after_warning',
   'justified',
@@ -333,6 +334,16 @@ const policyExceptionSchema = z.object({
   path: ['id'],
 });
 
+const blockedBrowserActionSchema = z.object({
+  id: routingCodeSchema(ROUTING_RULE_ID, 64),
+  enabled: z.boolean().optional(),
+  action: z.enum(['paste']),
+  destinations: z.array(z.string().min(1).max(253).regex(HOST_OR_LABEL).refine((value) => !SENSITIVE_ROUTING_CODE.test(value), {
+    message: 'sensitive identifier not allowed',
+  })).min(1).max(40),
+  reason: routingCodeSchema(ROUTING_REASON, 80).optional(),
+}).strict();
+
 const policyUpdateSchema = z.object({
   enforcementMode: z.enum(['block', 'warn', 'justify', 'redact']).optional(),
   blockMinSeverity: z.number().int().min(1).max(4).optional(),
@@ -346,6 +357,7 @@ const policyUpdateSchema = z.object({
   allowedDestinations: z.array(z.string().min(1).max(253).regex(HOST_OR_LABEL)).max(LIMITS.policyListItems).optional(),
   blockedDestinations: z.array(z.string().min(1).max(253).regex(HOST_OR_LABEL)).max(LIMITS.policyListItems).optional(),
   blockedFileUploadDestinations: z.array(z.string().min(1).max(253).regex(HOST_OR_LABEL)).max(LIMITS.policyListItems).optional(),
+  blockedBrowserActions: z.array(blockedBrowserActionSchema).max(40).optional(),
   blockUnapprovedAiDestinations: z.boolean().optional(),
   responseScanMode: z.enum(['flag', 'redact', 'block']).optional(),
   desktopCollectorDestination: z.string().min(1).max(80).regex(DESKTOP_DESTINATION_LABEL).refine((value) => value.trim().length > 0, {

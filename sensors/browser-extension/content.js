@@ -15,7 +15,7 @@
 
   const D = window.PSDetect;
   const SITE = location.hostname;
-  let POLICY = { enforcementMode: 'block', blockMinSeverity: 2, blockRiskScore: 25, allowedDestinations: [], blockUnapprovedAiDestinations: true, alwaysBlock: [] };
+  let POLICY = { enforcementMode: 'block', blockMinSeverity: 2, blockRiskScore: 25, allowedDestinations: [], blockedBrowserActions: [], blockUnapprovedAiDestinations: true, alwaysBlock: [] };
   let ENABLED = true;
 
   // Pull policy + enabled state from the background worker.
@@ -32,6 +32,7 @@
         allowedDestinations: POLICY.allowedDestinations || [],
         blockedDestinations: POLICY.blockedDestinations || [],
         blockedFileUploadDestinations: POLICY.blockedFileUploadDestinations || [],
+        blockedBrowserActions: POLICY.blockedBrowserActions || [],
         blockUnapprovedAiDestinations: POLICY.blockUnapprovedAiDestinations !== false,
       },
     });
@@ -100,6 +101,19 @@
     if (allowed.some((host) => SITE === host || SITE.endsWith('.' + host))) return false;
     if (A && A.isGoverned) return A.isGoverned(SITE, blocked);
     return blocked.some((host) => SITE === host || SITE.endsWith('.' + host));
+  }
+
+  function browserActionBlockRule(action) {
+    const normalizedAction = String(action || '').trim().toLowerCase();
+    for (const rule of POLICY.blockedBrowserActions || []) {
+      if (!rule || rule.enabled === false) continue;
+      if (String(rule.action || '').trim().toLowerCase() !== normalizedAction) continue;
+      const destinations = rule.destinations || [];
+      const A = window.PSAdapters;
+      if (A && A.isGoverned && A.isGoverned(SITE, destinations)) return rule;
+      if (destinations.some((host) => SITE === host || SITE.endsWith('.' + host))) return rule;
+    }
+    return null;
   }
 
   function emptyAnalysis() {
@@ -305,6 +319,11 @@
 
   function reportBlockedFileUpload() {
     return report('[file upload blocked] ' + SITE, emptyAnalysis(), 'file_upload', 'file_upload_blocked', 'file upload blocked by policy');
+  }
+
+  function reportBlockedBrowserAction(action, rule) {
+    const reason = (rule && rule.reason) || (action + ' blocked by policy');
+    return report('[browser action blocked] ' + action + ' ' + SITE, emptyAnalysis(), action, 'action_blocked', reason);
   }
 
   // ---- inline banner UI -----------------------------------------------------
@@ -516,6 +535,13 @@
   // ---- intercept PASTE (early warning) --------------------------------------
   document.addEventListener('paste', (e) => {
     if (!ENABLED) return;
+    const actionRule = browserActionBlockRule('paste');
+    if (actionRule) {
+      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+      reportBlockedBrowserAction('paste', actionRule);
+      toast('PromptWall blocked paste into ' + SITE + ' by policy.');
+      return;
+    }
     const t = (e.clipboardData || window.clipboardData);
     const pasted = t ? t.getData('text') : '';
     if (!pasted || pasted.length < 6) return;

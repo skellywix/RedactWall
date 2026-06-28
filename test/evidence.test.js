@@ -285,6 +285,44 @@ test('lineage classifies response scan policy outcomes without response text', (
   assert.ok(!wire.includes('524-71-9043'));
 });
 
+test('lineage classifies browser action blocks without clipboard text', () => {
+  const lineage = evidence.buildLineage([{
+    status: 'action_blocked',
+    user: 'analyst@example.test',
+    destination: 'chatgpt.com',
+    source: 'browser_extension',
+    channel: 'paste',
+    redactedPrompt: '[browser action blocked] paste chatgpt.com',
+  }]);
+
+  assert.deepStrictEqual(lineage.byDecision.map((item) => item.key), ['blocked']);
+  assert.strictEqual(lineage.byChannel[0].key, 'paste');
+  assert.strictEqual(lineage.byDestination[0].key, 'chatgpt.com');
+  assert.ok(!JSON.stringify(lineage).includes('524-71-9043'));
+});
+
+test('evidence exports browser action policy diffs without raw values', () => {
+  const entry = evidence.safeAuditEntry({
+    id: 'a_action_policy',
+    ts: '2026-06-26T12:00:00.000Z',
+    action: 'POLICY_UPDATED',
+    actor: 'admin',
+    detail: JSON.stringify({
+      type: 'policy_change',
+      changed: [{
+        field: 'blockedBrowserActions',
+        before: [],
+        after: [{ id: 'block_paste_chatgpt', action: 'paste', destinations: ['chatgpt.com'], reason: 'clipboard_paste_blocked' }],
+      }],
+    }),
+    prevHash: '0'.repeat(64),
+    hash: '1'.repeat(64),
+  });
+
+  assert.deepStrictEqual(entry.policyChange.changed[0].field, 'blockedBrowserActions');
+  assert.ok(entry.detailHash);
+});
+
 test('server exposes protected evidence export route', () => {
   const fs = require('fs');
   const path = require('path');

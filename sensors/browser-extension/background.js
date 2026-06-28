@@ -13,7 +13,7 @@ const DEFAULTS = {
   ingestKey: '',
   requestTimeoutMs: 10000,
   enabled: true,
-  policy: { enforcementMode: 'block', blockMinSeverity: 2, blockRiskScore: 25, governedDestinations: [], allowedDestinations: [], blockedDestinations: [], blockedFileUploadDestinations: [], blockUnapprovedAiDestinations: true, alwaysBlock: ['US_SSN', 'CREDIT_CARD', 'BANK_ACCOUNT', 'ROUTING_NUMBER', 'US_ITIN', 'US_NPI', 'MEMBER_ID', 'LOAN_NUMBER', 'MEDICAL_RECORD_NUMBER', 'HEALTH_INSURANCE_ID', 'SECRET_KEY', 'PRIVATE_KEY', 'CANARY_TOKEN'] },
+  policy: { enforcementMode: 'block', blockMinSeverity: 2, blockRiskScore: 25, governedDestinations: [], allowedDestinations: [], blockedDestinations: [], blockedFileUploadDestinations: [], blockedBrowserActions: [], blockUnapprovedAiDestinations: true, alwaysBlock: ['US_SSN', 'CREDIT_CARD', 'BANK_ACCOUNT', 'ROUTING_NUMBER', 'US_ITIN', 'US_NPI', 'MEMBER_ID', 'LOAN_NUMBER', 'MEDICAL_RECORD_NUMBER', 'HEALTH_INSURANCE_ID', 'SECRET_KEY', 'PRIVATE_KEY', 'CANARY_TOKEN'] },
 };
 const MANAGED_KEYS = ['user', 'email', 'orgId', 'serverUrl', 'ingestKey'];
 const IDENTITY_KEYS = ['user', 'email', 'orgId'];
@@ -304,6 +304,7 @@ chrome.tabs?.onUpdated.addListener(async (tabId, info, tab) => {
     ...((c.policy && c.policy.allowedDestinations) || []),
     ...((c.policy && c.policy.blockedDestinations) || []),
     ...((c.policy && c.policy.blockedFileUploadDestinations) || []),
+    ...((c.policy && c.policy.blockedBrowserActions) || []).flatMap((rule) => (rule && rule.destinations) || []),
   ];
   if (!self.PSAdapters.isAiHost(host) || self.PSAdapters.isGoverned(host, governed)) return;
   const now = Date.now();

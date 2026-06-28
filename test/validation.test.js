@@ -404,6 +404,104 @@ test('gate records browser paste warnings as audit-only sensor evidence', async 
   assert.ok(db.listAudit(10).some((entry) => entry.action === 'PASTE_FLAGGED' && entry.queryId === body.id));
 }));
 
+test('gate accepts browser action blocks without retaining clipboard text', async () => withServer(async (port) => {
+  const secret = '524-71-9043';
+  const res = await jsonFetch(port, '/api/v1/gate', {
+    headers: { 'x-api-key': 'unit-ingest-key' },
+    body: {
+      prompt: '[browser action blocked] paste chatgpt.com ' + secret,
+      user: 'analyst@example.test',
+      destination: 'chatgpt.com',
+      source: 'browser_extension',
+      channel: 'paste',
+      clientOutcome: 'action_blocked',
+      note: 'clipboard paste blocked by policy',
+    },
+  });
+
+  assert.strictEqual(res.status, 200);
+  const body = await res.json();
+  assert.strictEqual(body.decision, 'block');
+  assert.strictEqual(body.status, 'action_blocked');
+  assert.deepStrictEqual(body.findings, []);
+  assert.deepStrictEqual(body.categories, []);
+  assert.ok(!JSON.stringify(body).includes(secret));
+
+  const stored = db.getQuery(body.id);
+  assert.strictEqual(stored.status, 'action_blocked');
+  assert.strictEqual(stored.mode, 'browser_action_block');
+  assert.strictEqual(stored.channel, 'paste');
+  assert.strictEqual(stored.destination, 'chatgpt.com');
+  assert.strictEqual(stored._rawPrompt, undefined);
+  assert.deepStrictEqual(stored.findings, []);
+  assert.ok(!JSON.stringify(stored).includes(secret));
+  assert.ok(db.listAudit(20).some((entry) => entry.action === 'BROWSER_ACTION_BLOCKED' && entry.queryId === body.id));
+}));
+
+test('gate sanitizes malformed browser action labels without retaining channel text', async () => withServer(async (port) => {
+  const secret = '524-71-9043';
+  const res = await jsonFetch(port, '/api/v1/gate', {
+    headers: { 'x-api-key': 'unit-ingest-key' },
+    body: {
+      prompt: '[browser action blocked] custom',
+      user: 'analyst@example.test',
+      destination: 'chatgpt.com',
+      source: 'browser_extension',
+      channel: 'paste-' + secret,
+      clientOutcome: 'action_blocked',
+    },
+  });
+
+  assert.strictEqual(res.status, 200);
+  const body = await res.json();
+  assert.strictEqual(body.status, 'action_blocked');
+  assert.ok(!JSON.stringify(body).includes(secret));
+
+  const stored = db.getQuery(body.id);
+  assert.strictEqual(stored.channel, 'browser_action');
+  assert.ok(!JSON.stringify(stored).includes(secret));
+  assert.ok(!db.listAudit(20).some((entry) => String(entry.detail || '').includes(secret)));
+}));
+
+test('gate applies configured browser action blocks before prompt analysis', async () => withServer(async (port) => {
+  const originalPolicy = fs.readFileSync(policyPath, 'utf8');
+  const secret = '524-71-9043';
+  try {
+    const next = {
+      ...JSON.parse(originalPolicy),
+      blockedBrowserActions: [{
+        id: 'block_paste_chatgpt',
+        action: 'paste',
+        destinations: ['chatgpt.com'],
+        reason: 'clipboard_paste_blocked',
+      }],
+    };
+    fs.writeFileSync(policyPath, JSON.stringify(next, null, 2));
+
+    const res = await jsonFetch(port, '/api/v1/gate', {
+      headers: { 'x-api-key': 'unit-ingest-key' },
+      body: {
+        prompt: 'Pasted member SSN ' + secret + ' into the composer.',
+        user: 'analyst@example.test',
+        destination: 'https://chatgpt.com/c/unit',
+        source: 'browser_extension',
+        channel: 'paste',
+      },
+    });
+
+    assert.strictEqual(res.status, 200);
+    const body = await res.json();
+    assert.strictEqual(body.status, 'action_blocked');
+    assert.deepStrictEqual(body.reasons, ['clipboard_paste_blocked']);
+    const stored = db.getQuery(body.id);
+    assert.strictEqual(stored.status, 'action_blocked');
+    assert.deepStrictEqual(stored.findings, []);
+    assert.ok(!JSON.stringify(stored).includes(secret));
+  } finally {
+    fs.writeFileSync(policyPath, originalPolicy);
+  }
+}));
+
 test('scan-file rejects invalid base64 without echoing file content', async () => withServer(async (port) => {
   const secretFilePayload = 'loan file SSN 524-71-9043';
   const res = await jsonFetch(port, '/api/v1/scan-file', {
@@ -634,6 +732,7 @@ test('sensor policy endpoint publishes detector and scanner controls', async () 
   assert.ok(Array.isArray(body.allowedDestinations));
   assert.ok(Array.isArray(body.blockedDestinations));
   assert.ok(Array.isArray(body.blockedFileUploadDestinations));
+  assert.ok(Array.isArray(body.blockedBrowserActions));
   assert.strictEqual(body.blockUnapprovedAiDestinations, true);
   assert.strictEqual(body.responseScanMode, 'flag');
   assert.strictEqual(body.desktopCollectorDestination, 'Desktop AI');
@@ -824,6 +923,74 @@ test('admin policy accepts fleet posture settings', async () => withServer(async
   } finally {
     fs.writeFileSync(policyPath, originalPolicy);
   }
+}));
+
+test('admin policy accepts browser action block rules', async () => withServer(async (port) => {
+  const originalPolicy = fs.readFileSync(policyPath, 'utf8');
+  const { cookie, csrfToken } = await login(port);
+  try {
+    const res = await jsonFetch(port, '/api/policy', {
+      method: 'PUT',
+      headers: {
+        cookie,
+        'x-csrf-token': csrfToken,
+      },
+      body: {
+        blockedBrowserActions: [{
+          id: 'block_paste_chatgpt',
+          action: 'paste',
+          destinations: ['chatgpt.com'],
+          reason: 'clipboard_paste_blocked',
+        }],
+      },
+    });
+
+    assert.strictEqual(res.status, 200);
+    const body = await res.json();
+    assert.deepStrictEqual(body.blockedBrowserActions, [{
+      id: 'block_paste_chatgpt',
+      enabled: true,
+      action: 'paste',
+      destinations: ['chatgpt.com'],
+      reason: 'clipboard_paste_blocked',
+    }]);
+  } finally {
+    fs.writeFileSync(policyPath, originalPolicy);
+  }
+}));
+
+test('admin policy rejects malformed browser action rules without echoing values', async () => withServer(async (port) => {
+  const originalPolicy = fs.readFileSync(policyPath, 'utf8');
+  const { cookie, csrfToken } = await login(port);
+  const secret = '524-71-9043';
+  const res = await jsonFetch(port, '/api/policy', {
+    method: 'PUT',
+    headers: {
+      cookie,
+      'x-csrf-token': csrfToken,
+    },
+    body: {
+      blockedBrowserActions: [{
+        id: 'bad_paste',
+        action: 'download',
+        destinations: [`member-${secret}.example`],
+        reason: `paste-${secret}`,
+      }],
+    },
+  });
+
+  assert.strictEqual(res.status, 400);
+  const body = await res.json();
+  assert.deepStrictEqual(body, {
+    error: 'invalid request body',
+    fields: [
+      'blockedBrowserActions.0.action',
+      'blockedBrowserActions.0.destinations.0',
+      'blockedBrowserActions.0.reason',
+    ],
+  });
+  assert.ok(!JSON.stringify(body).includes(secret));
+  assert.strictEqual(fs.readFileSync(policyPath, 'utf8'), originalPolicy);
 }));
 
 test('admin policy accepts customer approval routing rules', async () => withServer(async (port) => {

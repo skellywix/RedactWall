@@ -250,6 +250,23 @@ test('coverage counts response scan block and redaction outcomes', () => {
   assert.strictEqual(chatgpt.blocked, 1);
 });
 
+test('coverage counts browser action blocks as policy stops', () => {
+  const report = coverage.summarize([{
+    id: 'q_action_blocked',
+    createdAt: '2026-06-26T12:00:00.000Z',
+    status: 'action_blocked',
+    user: 'analyst@example.test',
+    destination: 'chatgpt.com',
+    source: 'browser_extension',
+    channel: 'paste',
+    redactedPrompt: '[browser action blocked] paste chatgpt.com',
+  }], policy);
+
+  const chatgpt = report.governedDestinations.find((d) => d.destination === 'chatgpt.com');
+  assert.strictEqual(report.totals.blocked, 1);
+  assert.strictEqual(chatgpt.blocked, 1);
+});
+
 test('coverage route stays session protected', () => {
   assert.match(serverSource, /app\.get\('\/api\/coverage', auth\.requireAuth/);
 });

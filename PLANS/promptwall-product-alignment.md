@@ -134,6 +134,8 @@ For this alignment track, completion requires evidence for every area below:
 - Added `responseScanMode` so Security Admins can flag, redact, or block
   sensitive AI replies through `/api/v1/scan-response` without retaining raw
   response text.
+- Added `blockedBrowserActions` for destination-scoped browser paste blocking,
+  with sanitized `action_blocked` evidence and no clipboard-text retention.
 
 ## Open Decisions
 
@@ -141,4 +143,4 @@ For this alignment track, completion requires evidence for every area below:
   GitHub repository has also been renamed to `skellywix/promptwall`.
 - Whether the next product build should prioritize deeper desktop interception,
   IdP-specific setup UX, signed-update operations, or broader app/action policy
-  controls.
+  controls beyond browser paste.
