@@ -13,6 +13,7 @@ require('./env').loadEnv();
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const roles = require('./roles');
 
 const DATA_DIR = path.join(__dirname, '..', 'data');
 
@@ -35,9 +36,12 @@ const DEFAULT_ADMIN_PASSWORD = 'ChangeMe!2026';
 const ADMIN_USER = String(process.env.ADMIN_USER || 'admin').trim() || 'admin';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || DEFAULT_ADMIN_PASSWORD;
 const ADMIN_TOTP_SECRET = String(process.env.ADMIN_TOTP_SECRET || '').trim();
+const APPROVER_USER = String(process.env.APPROVER_USER || '').trim();
+const APPROVER_PASSWORD = process.env.APPROVER_PASSWORD || '';
 const AUDITOR_USER = String(process.env.AUDITOR_USER || '').trim();
 const AUDITOR_PASSWORD = process.env.AUDITOR_PASSWORD || '';
-const AUDITOR_DISTINCT = !!AUDITOR_USER && AUDITOR_USER !== ADMIN_USER;
+const APPROVER_DISTINCT = !!APPROVER_USER && APPROVER_USER !== ADMIN_USER;
+const AUDITOR_DISTINCT = !!AUDITOR_USER && AUDITOR_USER !== ADMIN_USER && AUDITOR_USER !== APPROVER_USER;
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000; // 8h
 const SESSION_COOKIE_NAME = 'promptwall_session';
 const LEGACY_SESSION_COOKIE_NAME = 'sentinel_session';
@@ -56,8 +60,9 @@ function buildAccount(user, password, role) {
 }
 
 const ACCOUNTS = [
-  buildAccount(ADMIN_USER, ADMIN_PASSWORD, 'security_admin'),
-  AUDITOR_DISTINCT ? buildAccount(AUDITOR_USER, AUDITOR_PASSWORD, 'auditor') : null,
+  buildAccount(ADMIN_USER, ADMIN_PASSWORD, roles.SECURITY_ADMIN),
+  APPROVER_DISTINCT ? buildAccount(APPROVER_USER, APPROVER_PASSWORD, roles.APPROVER) : null,
+  AUDITOR_DISTINCT ? buildAccount(AUDITOR_USER, AUDITOR_PASSWORD, roles.AUDITOR) : null,
 ].filter(Boolean);
 
 function findAccount(user) {
@@ -178,12 +183,14 @@ function verify(token) {
     const payload = JSON.parse(Buffer.from(body, 'base64url').toString());
     if (payload.exp && Date.now() > payload.exp) return null;
     if (!payload.user) return null;
-    if (!payload.role && payload.user === ADMIN_USER) payload.role = 'security_admin';
-    if (!['security_admin', 'auditor'].includes(payload.role)) return null;
+    if (!payload.role && payload.user === ADMIN_USER) payload.role = roles.SECURITY_ADMIN;
+    const role = roles.normalizeRole(payload.role);
+    if (!role) return null;
+    payload.role = role;
     return payload;
   } catch { return null; }
 }
-function createSession(user, role = 'security_admin') {
+function createSession(user, role = roles.SECURITY_ADMIN) {
   return sign({ user, role, iat: Date.now(), exp: Date.now() + SESSION_TTL_MS });
 }
 
@@ -239,7 +246,8 @@ module.exports = {
   ADMIN_USER, ADMIN_PASSWORD_IS_DEFAULT: ADMIN_PASSWORD === DEFAULT_ADMIN_PASSWORD,
   ADMIN_MFA_REQUIRED: !!ADMIN_TOTP_SECRET,
   ADMIN_MFA_CONFIGURED: !!ADMIN_TOTP_KEY && ADMIN_TOTP_KEY.length >= 10,
-  AUDITOR_ENABLED: AUDITOR_DISTINCT && ACCOUNTS.some((account) => account.role === 'auditor'),
+  APPROVER_ENABLED: APPROVER_DISTINCT && ACCOUNTS.some((account) => account.role === roles.APPROVER),
+  AUDITOR_ENABLED: AUDITOR_DISTINCT && ACCOUNTS.some((account) => account.role === roles.AUDITOR),
   SECRET_SOURCE, SECRET_IS_STABLE: SECRET_SOURCE === 'env' || SECRET_SOURCE === 'file',
   SESSION_COOKIE_NAME, LEGACY_SESSION_COOKIE_NAME,
 };

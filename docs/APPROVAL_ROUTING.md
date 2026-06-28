@@ -99,6 +99,11 @@ The sensor policy endpoint, `/api/v1/policy`, does not expose
 ## Operating Notes
 
 - Treat the routing fields as the ownership contract for the current release.
+- Security Admins can approve, deny, and reveal retained raw prompts for any
+  held item after the required step-up. Optional local approver accounts can
+  approve or deny only items assigned to `assignedRole: "approver"` and their
+  `assignedUser`, when present. Approvers cannot reveal raw prompts, purge
+  retention, edit policy, or review governed destinations.
 - Do not use free-form prompt text or file names in routing reasons.
 - Configure external notifications only after the destination is approved for
   sanitized security events. Notification payloads include query id, owner,

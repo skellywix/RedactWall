@@ -364,6 +364,7 @@ Set these through `.env`, container environment, or a deployment secret manager:
 | --- | --- |
 | `ADMIN_PASSWORD` | Security Admin console password. Production preflight requires non-default, at least 16 characters. |
 | `ADMIN_TOTP_SECRET` | Base32 authenticator secret for Security Admin MFA. Production preflight requires it, and admin login requires a current 6-digit code when it is set. |
+| `APPROVER_USER` / `APPROVER_PASSWORD` | Optional reviewer console account that can approve or deny items assigned to the approver role. Set both together, keep `APPROVER_USER` distinct from admin and auditor users, and use at least 16 characters for `APPROVER_PASSWORD`. |
 | `AUDITOR_USER` / `AUDITOR_PASSWORD` | Optional read-only console account for examiner or client-demo access. Set both together, keep `AUDITOR_USER` distinct from `ADMIN_USER`, and use at least 16 characters for `AUDITOR_PASSWORD`. |
 | `SENTINEL_SECRET` | Stable session-signing secret shared by all instances. Production preflight requires at least 32 characters from environment. |
 | `SENTINEL_DATA_KEY` | Stable AES-256-GCM data key source for retained approval prompts. Production preflight requires this key, or the `SENTINEL_SECRET` fallback, to be at least 32 characters. |
@@ -407,8 +408,9 @@ Never bind `SENTINEL_DB_PATH` to a cloud-synced folder or network share. SQLite 
 
 Production preflight also blocks missing Security Admin MFA and short custom
 secrets. Use a base32 `ADMIN_TOTP_SECRET` at least 16 characters long, at least
-16 characters for `ADMIN_PASSWORD` and `AUDITOR_PASSWORD` when auditor login is
-configured, and at least 32 random characters for `INGEST_API_KEY`,
+16 characters for `ADMIN_PASSWORD`, `APPROVER_PASSWORD` when approver login is
+configured, and `AUDITOR_PASSWORD` when auditor login is configured; use at
+least 32 random characters for `INGEST_API_KEY`,
 `SENTINEL_SECRET`, and `SENTINEL_DATA_KEY` when retained raw approval data is
 enabled. `npm run setup:prod` generates a TOTP secret; enroll it in the
 operator's authenticator app before serving the console to pilot users:
@@ -526,7 +528,7 @@ destination of `Desktop AI` matches `desktop-ai`.
 
 PromptWall retains raw approval prompts and token vaults only for records that need review or rehydration. Set `rawRetentionDays` in policy to define how long finalized `approved`, `denied`, and `redacted` records keep those sealed fields. The default is 30 days.
 
-Revealing a retained raw prompt or approving a held prompt release requires an active Security Admin session, a CSRF token, and password confirmation. Successful reveals, failed reveal confirmations, approved releases, and failed approval confirmations are written to the audit log.
+Revealing a retained raw prompt requires an active Security Admin session, a CSRF token, and password confirmation. Approving a held prompt release requires an active Security Admin session or an optional approver session assigned to that item, plus CSRF and password confirmation. Successful reveals, failed reveal confirmations, approved releases, and failed approval confirmations are written to the audit log.
 
 Sensors or proxy bridges that poll `/api/v1/status/:id` for a held prompt must
 send the `x-release-token` header returned by the original gate response.

@@ -100,6 +100,7 @@ Collect this before install day:
 | Customer DNS name | Example `promptwall.customer.example`. |
 | ACM certificate ARN | Required for production HTTPS. |
 | Security Admin owner | Name, email, phone, and MFA enrollment window. |
+| Optional approver account | Username owner, assignment scope, and password delivery path. |
 | Optional auditor account | Username owner and password delivery path. |
 | SIEM webhook | URL, token delivery path, and alert recipient. |
 | Chrome deployment owner | Admin console, MDM, or GPO owner. |
@@ -232,6 +233,8 @@ $SecretJson = @{
   SENTINEL_SECRET = "<32-plus-random-chars>"
   SENTINEL_DATA_KEY = "<32-plus-random-chars>"
   INGEST_API_KEY = "<32-plus-random-chars>"
+  APPROVER_USER = "approver"
+  APPROVER_PASSWORD = "<16-plus-random-chars-or-empty>"
   AUDITOR_USER = "auditor"
   AUDITOR_PASSWORD = "<16-plus-random-chars-or-empty>"
   SIEM_WEBHOOK_URL = ""
@@ -385,7 +388,10 @@ With the customer's Security Admin:
 4. Open the dashboard preflight view and confirm no blockers.
 5. Select the agreed policy template.
 6. Confirm the approval queue is empty before sensor rollout.
-7. Confirm auditor login, if configured, can view sanitized evidence and cannot
+7. Confirm approver login, if configured, can approve or deny assigned approval
+   items and cannot reveal raw prompts, purge retention, edit policy, or review
+   governed destinations.
+8. Confirm auditor login, if configured, can view sanitized evidence and cannot
    approve, deny, reveal, purge, or edit policy.
 
 If MFA enrollment fails, stop the rollout and rotate `ADMIN_TOTP_SECRET` through
