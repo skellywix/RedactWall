@@ -257,6 +257,94 @@ test('production preflight blocks short scim bearer token when scim is configure
   );
 });
 
+test('production preflight accepts complete OIDC login backed by SCIM', () => {
+  const status = preflight.configStatus({
+    env: {
+      NODE_ENV: 'production',
+      SENTINEL_DB_PATH: '/var/lib/promptwall/sentinel.db',
+      ADMIN_PASSWORD: 'long-admin-password',
+      ADMIN_TOTP_SECRET: 'JBSWY3DPEHPK3PXP',
+      INGEST_API_KEY: 'ps_ingest_' + 'a'.repeat(32),
+      SCIM_BEARER_TOKEN: 'scim_' + 's'.repeat(32),
+      OIDC_ISSUER: 'https://login.customer.example',
+      OIDC_CLIENT_ID: 'promptwall-console',
+      OIDC_CLIENT_SECRET: 'oidc_' + 'o'.repeat(32),
+      OIDC_REDIRECT_URI: 'https://promptwall.customer.example/auth/oidc/callback',
+      SENTINEL_SECRET: 's'.repeat(32),
+      SENTINEL_DATA_KEY: 'd'.repeat(32),
+    },
+    adminPasswordIsDefault: false,
+    ingestKeyIsDefault: false,
+    secretSource: 'env',
+    dataCryptoEnabled: true,
+    cookieSecure: true,
+  });
+  assert.strictEqual(status.ready, true);
+  assert.strictEqual(status.level, 'ok');
+  assert.ok(status.checks.every((c) => c.ok));
+});
+
+test('production preflight blocks partial or weak OIDC login config', () => {
+  const base = {
+    NODE_ENV: 'production',
+    SENTINEL_DB_PATH: '/var/lib/promptwall/sentinel.db',
+    ADMIN_PASSWORD: 'long-admin-password',
+    ADMIN_TOTP_SECRET: 'JBSWY3DPEHPK3PXP',
+    INGEST_API_KEY: 'ps_ingest_' + 'a'.repeat(32),
+    SENTINEL_SECRET: 's'.repeat(32),
+    SENTINEL_DATA_KEY: 'd'.repeat(32),
+  };
+  const common = {
+    adminPasswordIsDefault: false,
+    ingestKeyIsDefault: false,
+    secretSource: 'env',
+    dataCryptoEnabled: true,
+    cookieSecure: true,
+  };
+
+  const partial = preflight.configStatus({
+    env: { ...base, OIDC_ISSUER: 'https://login.customer.example' },
+    ...common,
+  });
+  assert.deepStrictEqual(
+    preflight.summarizeFailures(partial).map((line) => line.split(':')[0]),
+    ['oidc_config', 'oidc_client_secret_strength', 'oidc_scim_users'],
+  );
+
+  const weak = preflight.configStatus({
+    env: {
+      ...base,
+      SCIM_BEARER_TOKEN: 'scim_' + 's'.repeat(32),
+      OIDC_ISSUER: 'https://login.customer.example',
+      OIDC_CLIENT_ID: 'promptwall-console',
+      OIDC_CLIENT_SECRET: 'short',
+      OIDC_REDIRECT_URI: 'https://promptwall.customer.example/auth/oidc/callback',
+    },
+    ...common,
+  });
+  assert.deepStrictEqual(
+    preflight.summarizeFailures(weak).map((line) => line.split(':')[0]),
+    ['oidc_client_secret_strength'],
+  );
+
+  const incompleteEndpoints = preflight.configStatus({
+    env: {
+      ...base,
+      SCIM_BEARER_TOKEN: 'scim_' + 's'.repeat(32),
+      OIDC_ISSUER: 'https://login.customer.example',
+      OIDC_CLIENT_ID: 'promptwall-console',
+      OIDC_CLIENT_SECRET: 'oidc_' + 'o'.repeat(32),
+      OIDC_REDIRECT_URI: 'https://promptwall.customer.example/auth/oidc/callback',
+      OIDC_TOKEN_ENDPOINT: 'https://login.customer.example/token',
+    },
+    ...common,
+  });
+  assert.deepStrictEqual(
+    preflight.summarizeFailures(incompleteEndpoints).map((line) => line.split(':')[0]),
+    ['oidc_endpoints'],
+  );
+});
+
 test('production preflight blocks weak or partial approver login config', () => {
   const base = {
     NODE_ENV: 'production',

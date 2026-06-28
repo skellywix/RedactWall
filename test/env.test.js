@@ -49,6 +49,10 @@ test('loadEnv maps PromptWall aliases without overwriting configured legacy keys
     'PROMPTWALL_DATA_KEY=promptwall-data-key',
     'PROMPTWALL_INGEST_API_KEY=promptwall-ingest-key',
     'PROMPTWALL_SCIM_BEARER_TOKEN=promptwall-scim-token',
+    'PROMPTWALL_OIDC_ISSUER=https://login.example.test',
+    'PROMPTWALL_OIDC_CLIENT_ID=promptwall-console',
+    'PROMPTWALL_OIDC_CLIENT_SECRET=promptwall-oidc-secret',
+    'PROMPTWALL_OIDC_REDIRECT_URI=https://promptwall.example.test/auth/oidc/callback',
     'PROMPTWALL_URL=https://promptwall.customer.example',
     'PROMPTWALL_ENDPOINT_AGENT_HANDOFF_SECRET=promptwall-handoff-secret',
     'PROMPTWALL_ENDPOINT_AGENT_HANDOFF_DIR=C:/PromptWall/handoff',
@@ -63,6 +67,10 @@ test('loadEnv maps PromptWall aliases without overwriting configured legacy keys
   assert.strictEqual(target.SENTINEL_DATA_KEY, 'promptwall-data-key');
   assert.strictEqual(target.INGEST_API_KEY, 'promptwall-ingest-key');
   assert.strictEqual(target.SCIM_BEARER_TOKEN, 'promptwall-scim-token');
+  assert.strictEqual(target.OIDC_ISSUER, 'https://login.example.test');
+  assert.strictEqual(target.OIDC_CLIENT_ID, 'promptwall-console');
+  assert.strictEqual(target.OIDC_CLIENT_SECRET, 'promptwall-oidc-secret');
+  assert.strictEqual(target.OIDC_REDIRECT_URI, 'https://promptwall.example.test/auth/oidc/callback');
   assert.strictEqual(target.SENTINEL_URL, 'https://promptwall.customer.example');
   assert.strictEqual(target.ENDPOINT_AGENT_HANDOFF_SECRET, 'promptwall-handoff-secret');
   assert.strictEqual(target.ENDPOINT_AGENT_HANDOFF_DIR, 'C:/PromptWall/handoff');

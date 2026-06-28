@@ -108,7 +108,7 @@ Logged-in admins can inspect detailed configuration checks at:
 http://localhost:4000/api/preflight
 ```
 
-## SCIM Provisioning
+## SCIM Provisioning And OIDC Login
 
 Set `SCIM_BEARER_TOKEN` to enable customer identity provisioning at
 `/scim/v2/*`; leave it empty to disable the surface. The endpoint accepts
@@ -116,9 +116,12 @@ Set `SCIM_BEARER_TOKEN` to enable customer identity provisioning at
 the local evidence database, and maps known PromptWall group display names onto
 the local `security_admin`, `approver`, `auditor`, and `operator` roles.
 
-This is lifecycle provisioning, not browser-session login. Keep local Security
-Admin credentials as the break-glass console path until SSO/OIDC login lands.
-See `docs/SCIM_PROVISIONING.md` for endpoint details and IdP setup notes.
+Set `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, and
+`OIDC_REDIRECT_URI` to enable the console SSO button. OIDC login validates the
+authorization-code callback, state, nonce, RS256 ID-token signature, issuer,
+audience, expiry, and active SCIM user before issuing the normal PromptWall
+session cookie. Keep local Security Admin credentials as the break-glass console
+path. See `docs/SCIM_PROVISIONING.md` for endpoint details and IdP setup notes.
 
 ## Scoped Policy And Exceptions
 
@@ -425,6 +428,11 @@ Set these through `.env`, container environment, or a deployment secret manager:
 | `SENTINEL_DATA_KEY` | Stable AES-256-GCM data key source for retained approval prompts. Production preflight requires this key, or the `SENTINEL_SECRET` fallback, to be at least 32 characters. |
 | `INGEST_API_KEY` | Sensor and proxy key for `/api/v1/*` ingest endpoints. Production preflight requires non-default, at least 32 characters. |
 | `SCIM_BEARER_TOKEN` | Optional bearer token for `/scim/v2/*` provisioning. Leave empty to disable SCIM. Production preflight requires at least 32 characters when set. |
+| `OIDC_ISSUER` | Optional OIDC issuer URL for console SSO. When any OIDC value is set, production preflight requires issuer, client id, client secret, redirect URI, and SCIM provisioning. |
+| `OIDC_CLIENT_ID` | OIDC web application client id. |
+| `OIDC_CLIENT_SECRET` | OIDC web application client secret. Production preflight requires at least 32 characters when OIDC is configured. |
+| `OIDC_REDIRECT_URI` | OIDC callback URL, usually `https://promptwall.customer.example/auth/oidc/callback`. |
+| `OIDC_AUTHORIZATION_ENDPOINT` / `OIDC_TOKEN_ENDPOINT` / `OIDC_JWKS_URI` | Optional explicit endpoints. Leave all three empty for issuer discovery, or set all three together. |
 | `SENTINEL_DB_PATH` | SQLite path on local persistent disk. |
 | `SENTINEL_SAAS_MODE` | Set to `true` for a paid customer stack. Production preflight then requires tenant id and seat limit. |
 | `SENTINEL_TENANT_ID` | Lowercase customer tenant slug accepted from sensors, for example `cu-acme`. |
@@ -458,6 +466,14 @@ set.
 | `SENTINEL_REQUEST_TIMEOUT_MS` | `PROMPTWALL_REQUEST_TIMEOUT_MS` |
 | `INGEST_API_KEY` | `PROMPTWALL_INGEST_API_KEY` |
 | `SCIM_BEARER_TOKEN` | `PROMPTWALL_SCIM_BEARER_TOKEN` |
+| `OIDC_ISSUER` | `PROMPTWALL_OIDC_ISSUER` |
+| `OIDC_CLIENT_ID` | `PROMPTWALL_OIDC_CLIENT_ID` |
+| `OIDC_CLIENT_SECRET` | `PROMPTWALL_OIDC_CLIENT_SECRET` |
+| `OIDC_REDIRECT_URI` | `PROMPTWALL_OIDC_REDIRECT_URI` |
+| `OIDC_AUTHORIZATION_ENDPOINT` | `PROMPTWALL_OIDC_AUTHORIZATION_ENDPOINT` |
+| `OIDC_TOKEN_ENDPOINT` | `PROMPTWALL_OIDC_TOKEN_ENDPOINT` |
+| `OIDC_JWKS_URI` | `PROMPTWALL_OIDC_JWKS_URI` |
+| `OIDC_SCOPE` | `PROMPTWALL_OIDC_SCOPE` |
 | `ENDPOINT_AGENT_WATCH_DIR` | `PROMPTWALL_ENDPOINT_AGENT_WATCH_DIR` |
 | `ENDPOINT_AGENT_HANDOFF_DIR` | `PROMPTWALL_ENDPOINT_AGENT_HANDOFF_DIR` |
 | `ENDPOINT_AGENT_HANDOFF_SECRET` | `PROMPTWALL_ENDPOINT_AGENT_HANDOFF_SECRET` |
@@ -471,8 +487,9 @@ secrets. Use a base32 `ADMIN_TOTP_SECRET` at least 16 characters long, at least
 16 characters for `ADMIN_PASSWORD`, `APPROVER_PASSWORD` when approver login is
 configured, and `AUDITOR_PASSWORD` when auditor login is configured; use at
 least 32 random characters for `INGEST_API_KEY`,
-`SCIM_BEARER_TOKEN` when SCIM is enabled, `SENTINEL_SECRET`, and
-`SENTINEL_DATA_KEY` when retained raw approval data is enabled.
+`SCIM_BEARER_TOKEN` when SCIM is enabled, `OIDC_CLIENT_SECRET` when OIDC is
+enabled, `SENTINEL_SECRET`, and `SENTINEL_DATA_KEY` when retained raw approval
+data is enabled.
 `npm run setup:prod` generates a TOTP secret; enroll it in the operator's
 authenticator app before serving the console to pilot users:
 

@@ -194,8 +194,8 @@ operational. That migration should include:
 
 - Postgres datastore with tenant-scoped query and audit tables.
 - Database migrations and backup/restore runbooks.
-- Tenant-aware admin accounts and SSO/OIDC login using provisioned SCIM identity
-  state.
+- Shared-SaaS identity lifecycle on top of the current customer-silo
+  SCIM-backed OIDC login.
 - Billing provider integration for subscription and seat updates.
 - Central operator view across customer stacks or tenants.
 

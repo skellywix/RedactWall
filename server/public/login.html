@@ -109,6 +109,14 @@
     cursor:pointer;
   }
   button:hover{filter:brightness(1.05)}
+  button.secondary{
+    margin-top:10px;
+    border-color:var(--line2);
+    background:#0b1622;
+    color:var(--txt);
+  }
+  button.secondary:hover{border-color:rgba(106,167,255,.55);filter:none}
+  button[hidden]{display:none}
   .err{color:var(--red);font-size:13px;margin-top:14px;min-height:18px}
   .hint{margin-top:20px;font-size:12px;color:var(--mut);border-top:1px solid var(--line);padding-top:14px;line-height:1.5}
   code{background:#08111c;border:1px solid var(--line);padding:2px 6px;border-radius:6px;color:#b8d3ff}
@@ -151,6 +159,7 @@
       <label for="otp">Authenticator code</label>
       <input id="otp" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="Required for Security Admin MFA" />
       <button type="submit">Continue</button>
+      <button type="button" class="secondary" id="oidc" hidden>Continue with SSO</button>
       <div class="err" id="err"></div>
       <div class="hint">Local demo credential: <code>admin</code> / <code>ChangeMe!2026</code></div>
     </form>

@@ -1,12 +1,14 @@
-# PromptWall SCIM Provisioning
+# PromptWall SCIM Provisioning And OIDC Login
 
-PromptWall exposes a minimal SCIM 2.0 provisioning surface for customer-silo
-deployments that need identity lifecycle evidence before full SSO login exists.
-It stores users and groups, deactivates users, maps known PromptWall group names
-to local roles, and writes sanitized audit entries into the hash chain.
+PromptWall exposes a minimal SCIM 2.0 provisioning surface and a SCIM-backed
+OpenID Connect login bridge for customer-silo deployments. SCIM stores users and
+groups, deactivates users, maps known PromptWall group names to local roles, and
+writes sanitized audit entries into the hash chain. OIDC then consumes those
+active provisioned identities to issue console sessions with the same
+`security_admin`, `approver`, `auditor`, and `operator` route roles.
 
-This is not login yet. Local Security Admin, approver, and auditor accounts still
-control console sessions until SSO/OIDC consumes the provisioned identities.
+Local Security Admin, approver, and auditor credentials remain the break-glass
+path. OIDC login does not grant access to unprovisioned or inactive SCIM users.
 
 ## Enablement
 
@@ -66,8 +68,48 @@ Group display names map onto the existing PromptWall route roles:
 
 Direct SCIM `roles` values can also set one of the same normalized role names.
 If no direct or group role matches, the user resource returns `auditor` as the
-safe default. A provisioned role does not grant console login until SSO/OIDC is
-implemented.
+safe default. OIDC login uses this effective role after the ID token is validated
+and the user is confirmed active in SCIM.
+
+## OIDC Login
+
+Configure the IdP web application with this redirect URI:
+
+```text
+https://promptwall.customer.example/auth/oidc/callback
+```
+
+Set these server-side secrets:
+
+```text
+OIDC_ISSUER=https://login.customer.example/<tenant-or-org>
+OIDC_CLIENT_ID=<registered-web-client-id>
+OIDC_CLIENT_SECRET=<32-plus-random-characters>
+OIDC_REDIRECT_URI=https://promptwall.customer.example/auth/oidc/callback
+```
+
+`PROMPTWALL_OIDC_*` aliases are accepted for each value. PromptWall discovers
+`authorization_endpoint`, `token_endpoint`, and `jwks_uri` from the issuer's
+`.well-known/openid-configuration` document by default. If discovery is not
+available, set all three explicit endpoint variables:
+
+```text
+OIDC_AUTHORIZATION_ENDPOINT=https://login.customer.example/oauth2/v2.0/authorize
+OIDC_TOKEN_ENDPOINT=https://login.customer.example/oauth2/v2.0/token
+OIDC_JWKS_URI=https://login.customer.example/discovery/v2.0/keys
+```
+
+The login bridge uses authorization-code flow with `openid email profile`,
+stores state and nonce in a short-lived HttpOnly state cookie, validates RS256
+ID-token signatures through JWKS, checks issuer, audience, expiry, nonce, and
+subject claims, and maps `email`, `preferred_username`, `upn`, or `unique_name`
+to an active SCIM `userName`. Token values and client secrets are never written
+to audit entries.
+
+Fresh OIDC sessions include a short step-up window when the ID token contains a
+recent `auth_time` claim. That lets routed approvers and Security Admins use the
+existing approve/reveal gates immediately after IdP authentication while local
+break-glass accounts still use password confirmation.
 
 ## Example Smoke Test
 
@@ -84,7 +126,7 @@ curl -sS \
   https://promptwall.customer.example/scim/v2/Groups
 ```
 
-After provisioning, verify the audit chain:
+After provisioning and first SSO login, verify the audit chain:
 
 ```bash
 node -e "const v=require('./server/db').verifyAuditChain(); console.log(JSON.stringify(v)); if(!v.ok) process.exit(1)"
@@ -103,10 +145,19 @@ For Microsoft Entra or Okta-style provisioning, configure:
 - Provision users and groups
 - Assign groups using the PromptWall display names above when role mapping is
   needed
-- Keep local break-glass Security Admin credentials enabled until SSO/OIDC login
-  is available and tested
+- Register a web OIDC app with the callback URL above
+- Use a tenant-specific issuer where possible instead of a broad common issuer
+- Keep local break-glass Security Admin credentials enabled after SSO is tested
 
 ## Works Cited
+
+Microsoft. "OpenID Connect on the Microsoft Identity Platform." *Microsoft
+Learn*, Microsoft, https://learn.microsoft.com/en-us/entra/identity-platform/v2-protocols-oidc.
+Accessed 28 June 2026.
+
+OpenID Foundation. "OpenID Connect Core 1.0 Incorporating Errata Set 2."
+*OpenID Foundation*, 15 Dec. 2023,
+https://openid.net/specs/openid-connect-core-1_0.html. Accessed 28 June 2026.
 
 Internet Engineering Task Force. "System for Cross-Domain Identity Management:
 Protocol." *RFC 7644*, RFC Editor, Sept. 2015,

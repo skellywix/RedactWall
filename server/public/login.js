@@ -3,6 +3,27 @@ const userInput = document.getElementById('user');
 const passwordInput = document.getElementById('password');
 const otpInput = document.getElementById('otp');
 const errorBox = document.getElementById('err');
+const oidcButton = document.getElementById('oidc');
+
+if (new URLSearchParams(location.search).get('oidc') === 'failed') {
+  errorBox.textContent = 'SSO sign-in failed. Try again or use a local account.';
+}
+
+async function loadLoginOptions() {
+  try {
+    const r = await fetch('/api/login-options');
+    if (!r.ok) return;
+    const body = await r.json();
+    if (body.oidc && body.oidc.enabled && body.oidc.startUrl) {
+      oidcButton.hidden = false;
+      oidcButton.onclick = () => {
+        location.href = body.oidc.startUrl;
+      };
+    }
+  } catch {}
+}
+
+loadLoginOptions();
 
 f.addEventListener('submit', async (e) => {
   e.preventDefault();

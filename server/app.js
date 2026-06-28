@@ -36,6 +36,7 @@ const routing = require('./routing');
 const workflow = require('./workflow');
 const roles = require('./roles');
 const scim = require('./scim');
+const oidc = require('./oidc');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -51,6 +52,18 @@ const SESSION_COOKIE_CLEAR_OPTIONS = {
   path: SESSION_COOKIE_OPTIONS.path,
   sameSite: SESSION_COOKIE_OPTIONS.sameSite,
   secure: SESSION_COOKIE_OPTIONS.secure,
+};
+const OIDC_STATE_COOKIE_OPTIONS = {
+  httpOnly: true,
+  sameSite: 'lax',
+  secure: SECURE_COOKIE,
+  path: '/',
+  maxAge: oidc.STATE_TTL_MS,
+};
+const OIDC_STATE_COOKIE_CLEAR_OPTIONS = {
+  path: OIDC_STATE_COOKIE_OPTIONS.path,
+  sameSite: OIDC_STATE_COOKIE_OPTIONS.sameSite,
+  secure: OIDC_STATE_COOKIE_OPTIONS.secure,
 };
 
 app.disable('x-powered-by');
@@ -1039,6 +1052,48 @@ app.post('/api/login', validation.validateBody(validation.loginSchema), (req, re
   res.json({ ok: true, user: account.user, role: account.role });
 });
 
+app.get('/api/login-options', (req, res) => {
+  res.json({ oidc: oidc.publicOptions() });
+});
+
+app.get('/auth/oidc/start', async (req, res) => {
+  try {
+    const redirect = await oidc.buildAuthorizationRedirect({
+      req,
+      returnTo: req.query.returnTo,
+    });
+    res.cookie(oidc.STATE_COOKIE_NAME, redirect.cookieValue, OIDC_STATE_COOKIE_OPTIONS);
+    res.redirect(redirect.url);
+  } catch (err) {
+    db.appendAudit({ action: 'OIDC_LOGIN_FAILED', actor: 'oidc', detail: oidc.publicError(err) });
+    res.status(404).json({ error: oidc.publicError(err) });
+  }
+});
+
+app.get('/auth/oidc/callback', async (req, res) => {
+  try {
+    const result = await oidc.handleCallback({
+      req,
+      query: req.query || {},
+      stateCookie: req.cookies && req.cookies[oidc.STATE_COOKIE_NAME],
+    });
+    const token = auth.createSession(result.account.user, result.account.role, result.sessionExtras);
+    res.cookie(auth.SESSION_COOKIE_NAME, token, SESSION_COOKIE_OPTIONS);
+    res.clearCookie(auth.LEGACY_SESSION_COOKIE_NAME, SESSION_COOKIE_CLEAR_OPTIONS);
+    res.clearCookie(oidc.STATE_COOKIE_NAME, OIDC_STATE_COOKIE_CLEAR_OPTIONS);
+    db.appendAudit({
+      action: roles.loginAuditAction(result.account.role),
+      actor: result.account.user,
+      detail: result.account.role + '; oidc',
+    });
+    res.redirect(result.returnTo || '/index.html');
+  } catch (err) {
+    db.appendAudit({ action: 'OIDC_LOGIN_FAILED', actor: 'oidc', detail: oidc.publicError(err) });
+    res.clearCookie(oidc.STATE_COOKIE_NAME, OIDC_STATE_COOKIE_CLEAR_OPTIONS);
+    res.redirect('/login.html?oidc=failed');
+  }
+});
+
 const sessionWrite = [auth.requireAuth, auth.requireCsrf];
 const adminWrite = [auth.requireAuth, auth.requireCsrf, auth.requireRole(roles.SECURITY_ADMIN)];
 const decisionWrite = [auth.requireAuth, auth.requireCsrf, auth.requireRole(roles.SECURITY_ADMIN, roles.APPROVER)];
@@ -1068,6 +1123,10 @@ function requireStepUpPassword(scope) {
       emitAdminSecurityAlert(req, auditScope + '_LOCKED', user, auditScope);
       return res.status(429).json({ error: 'too many attempts - temporarily locked', retryMs: st.retryMs });
     }
+    if (auth.oidcStepUpSatisfied(req.user)) {
+      auth.registerSuccess(key);
+      return next();
+    }
     if (!auth.verifyPassword(user, req.body && req.body.password)) {
       const r = auth.registerFail(key);
       db.appendAudit({ action: auditScope + '_FAILED', queryId: req.params.id, actor: user || '?', detail: r.locked ? 'locked out' : (r.remaining + ' attempts left') });
@@ -1091,7 +1150,12 @@ function requireDecisionAccess(req, res, next) {
 }
 
 app.get('/api/me', auth.requireAuth, (req, res) => {
-  res.json({ user: req.user.user, role: req.user.role, defaultPassword: auth.ADMIN_PASSWORD_IS_DEFAULT });
+  res.json({
+    user: req.user.user,
+    role: req.user.role,
+    authProvider: req.user.provider || 'local',
+    defaultPassword: auth.ADMIN_PASSWORD_IS_DEFAULT,
+  });
 });
 
 // =============================================================================

@@ -234,6 +234,10 @@ $SecretJson = @{
   SENTINEL_DATA_KEY = "<32-plus-random-chars>"
   INGEST_API_KEY = "<32-plus-random-chars>"
   SCIM_BEARER_TOKEN = "<32-plus-random-chars-or-empty>"
+  OIDC_ISSUER = "<tenant-specific-issuer-or-empty>"
+  OIDC_CLIENT_ID = "<web-client-id-or-empty>"
+  OIDC_CLIENT_SECRET = "<32-plus-random-chars-or-empty>"
+  OIDC_REDIRECT_URI = "https://<customer-host>/auth/oidc/callback"
   APPROVER_USER = "approver"
   APPROVER_PASSWORD = "<16-plus-random-chars-or-empty>"
   AUDITOR_USER = "auditor"
@@ -397,6 +401,9 @@ With the customer's Security Admin:
 9. If SCIM is configured, have the identity admin call
    `/scim/v2/ServiceProviderConfig` with the bearer token and confirm
    `patch.supported=true` and `filter.supported=true`.
+10. If OIDC is configured, confirm the login page shows `Continue with SSO`,
+    sign in as one active SCIM-provisioned test user, and verify `/api/me`
+    reports the expected role without using a local console password.
 
 If MFA enrollment fails, stop the rollout and rotate `ADMIN_TOTP_SECRET` through
 the approved secret process.
@@ -649,10 +656,11 @@ If production is live and unhealthy:
 
 | Symptom | Check |
 | --- | --- |
-| `/readyz` is not 200 | Open `/api/preflight` as admin, then check secret lengths, MFA, secure cookie, local SQLite path, tenant id, seat limit, and SCIM token length if configured. |
+| `/readyz` is not 200 | Open `/api/preflight` as admin, then check secret lengths, MFA, secure cookie, local SQLite path, tenant id, seat limit, SCIM token length, and OIDC completeness if configured. |
 | ALB target is unhealthy | Check instance user data, Docker pull, container logs, security groups, and `/readyz` from the instance. |
 | Docker cannot pull from ECR | Check instance role permissions, ECR repository region, image URI, and subnet outbound internet access. |
 | Admin login fails | Confirm password delivery, MFA seed enrollment, current TOTP code, and lockout status. |
+| OIDC login fails | Confirm `OIDC_ISSUER`, client id, client secret, redirect URI, issuer discovery or explicit endpoints, clock sync, and that the IdP user maps to an active SCIM `userName`. |
 | Extension has no config | Reload `chrome://policy`, confirm extension id, force-install policy, and managed storage keys. |
 | Browser install health shows attention | In Coverage, inspect failed check IDs. Reload `chrome://policy`, confirm managed config, tenant id, user identity, and extension version, then restart Chrome or wait for the `installHeartbeat` alarm. |
 | Events are rejected | Check `orgId`, managed user identity, ingest key, tenant slug, and seat limit. |
