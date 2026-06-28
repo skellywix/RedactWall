@@ -30,6 +30,7 @@ const DEMO_COMMANDS = [
   'package:extension',
   'package:endpoint-agent',
   'package:mcp-guard',
+  'endpoint:check',
   'docs:demo-guide',
   'docs:demo-guide:check',
 ];
@@ -41,6 +42,7 @@ const SENSOR_AND_DOC_PATHS = [
   ['sensors/browser-extension/content.js', 'Browser send, paste, upload enforcement'],
   ['sensors/endpoint-agent/agent.js', 'Local folder and file sensor'],
   ['sensors/endpoint-agent/write-handoff.js', 'Signed native upload-intent handoff writer'],
+  ['scripts/check-endpoint-install.js', 'Endpoint install validation and heartbeat evidence'],
   ['sensors/mcp-guard/guard.js', 'MCP tool-output redaction reference'],
   ['config/policy.json', 'Demo policy defaults'],
   ['DEMO_INSTALL_GUIDE.md', 'Demo guide hub'],

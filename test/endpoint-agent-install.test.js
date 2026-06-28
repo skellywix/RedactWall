@@ -93,4 +93,6 @@ test('deployment docs include endpoint task install and uninstall flow', () => {
   assert.match(deployment, /PromptWallEndpointAgent/);
   assert.match(deployment, /%LOCALAPPDATA%\\PromptWall\\endpoint-agent\.env/);
   assert.match(deployment, /ENDPOINT_AGENT_HANDOFF_SECRET/);
+  assert.match(deployment, /npm run endpoint:check/);
+  assert.match(deployment, /\/api\/v1\/heartbeat/);
 });

@@ -17,6 +17,8 @@ A customer is production ready only when all of these are true:
 - Security Admin MFA is enrolled and tested.
 - Browser extension policy, endpoint agent config, and any MCP guard config use
   the customer's `serverUrl`, `ingestKey`, `orgId`, and managed user identity.
+- Endpoint install validation has reported sanitized health evidence to the
+  Coverage tab when endpoint rollout is in scope.
 - A synthetic sensitive-data test is blocked, redacted, or held according to
   the customer's selected policy.
 - The dashboard shows attributed events, seat usage, sensor versions, and audit
@@ -443,7 +445,17 @@ Validate:
 ```powershell
 Get-ScheduledTask -TaskName PromptWallEndpointAgent
 Get-Content "$env:LOCALAPPDATA\PromptWall\logs\endpoint-agent.log" -Tail 40
+npm run endpoint:check -- `
+  --env "$env:LOCALAPPDATA\PromptWall\endpoint-agent.env" `
+  --emit-heartbeat `
+  --user "tech@example.test" `
+  --org-id "<tenant-slug>"
 ```
+
+If native file-flow handoff is included, add `--require-desktop-collector` to
+the `endpoint:check` command. The checker posts only bounded install-check IDs,
+boolean results, and short details to `/api/v1/heartbeat`; it must not expose
+the ingest key, handoff secret, prompt text, extracted text, or file bytes.
 
 Drop a synthetic test file into the watch directory. The file can contain:
 
@@ -531,6 +543,7 @@ Deliver a packet with:
 - Backup manifest.
 - Chrome managed policy confirmation.
 - Endpoint agent scheduled task/log evidence.
+- Endpoint install-health heartbeat evidence in Coverage.
 - MCP guard evidence, if deployed.
 - Policy template selected.
 - Seat limit and first seat report.
@@ -587,6 +600,7 @@ If production is live and unhealthy:
 | Extension has no config | Reload `chrome://policy`, confirm extension id, force-install policy, and managed storage keys. |
 | Events are rejected | Check `orgId`, managed user identity, ingest key, tenant slug, and seat limit. |
 | Endpoint agent does not start | Check Node on PATH, scheduled task status, config ACL, log path, and ingest key. |
+| Endpoint install health shows attention | Run `npm run endpoint:check -- --env <path> --json`, fix the failed check IDs, then rerun with `--emit-heartbeat`. |
 | Audit verification fails | Stop handoff, preserve the database and logs, and escalate before backup, restore, or data deletion. |
 
 ## Works Cited

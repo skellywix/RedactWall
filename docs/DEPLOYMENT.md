@@ -108,7 +108,7 @@ Logged-in admins can inspect detailed configuration checks at:
 http://localhost:4000/api/preflight
 ```
 
-## Sensor Version Posture
+## Sensor Version And Install Health
 
 The dashboard Coverage tab summarizes governed destinations, active sensors, and
 the latest reported version for each sensor. Browser extension, endpoint agent,
@@ -119,8 +119,11 @@ and MCP guard events include bounded operational metadata only:
 ```
 
 Mixed versions show as an attention item so a pilot admin can spot partial
-rollouts after a managed extension or agent update. The coverage API does not
-include prompt bodies, raw retained prompts, token vaults, or decision notes.
+rollouts after a managed extension or agent update. Endpoint install validation
+can also report bounded check results through `POST /api/v1/heartbeat`; failed
+checks show as sensor install-health attention in Coverage and in the sanitized
+examiner export. The coverage API does not include prompt bodies, raw retained
+prompts, token vaults, ingest keys, handoff secrets, or decision notes.
 
 ## Browser Extension Package
 
@@ -148,10 +151,11 @@ The command writes a zip and adjacent SHA-256 manifest under
 engine, policy evaluator, env loader, file-type processor registry, signed
 native handoff prototype, metadata-only handoff writer, Windows protected-upload
 desktop collector, and scheduled-task plus shell-action install/run/uninstall
-scripts. It refuses synthetic prompt bodies and packaged development ingest
-keys. Set the real `SENTINEL_URL`, `INGEST_API_KEY`, and watch directory during
-install; the agent inspects supported files locally and does not contact the
-control plane without an explicit ingest key.
+scripts, plus the endpoint install validation checker. It refuses synthetic
+prompt bodies and packaged development ingest keys. Set the real `SENTINEL_URL`,
+`INGEST_API_KEY`, and watch directory during install; the agent inspects
+supported files locally and does not contact the control plane without an
+explicit ingest key.
 
 ## MCP Guard Package
 
@@ -190,6 +194,21 @@ Log:    %LOCALAPPDATA%\PromptWall\logs\endpoint-agent.log
 ```
 
 The config file carries `SENTINEL_URL`, `INGEST_API_KEY`, and `ENDPOINT_AGENT_WATCH_DIR`. Keep it restricted to the installing user, Administrators, and SYSTEM. For an all-user managed install, pass an explicit `-ConfigDir "$env:ProgramData\PromptWall"` from an elevated PowerShell session.
+
+Validate the local install and optionally emit sanitized health evidence:
+
+```powershell
+npm run endpoint:check -- `
+  --env "$env:LOCALAPPDATA\PromptWall\endpoint-agent.env" `
+  --emit-heartbeat `
+  --user "tech@example.test" `
+  --org-id "cu-acme"
+```
+
+Add `--require-desktop-collector` when native handoff is in scope. The checker
+prints and posts only check IDs, boolean status, and short details. It does not
+print or post the ingest key, handoff secret, prompt text, extracted text, or
+file bytes.
 
 The agent inspects supported watched files locally. Under redact policy, structured-only findings write a safe companion text file under `.promptwall-redacted` and report `redacted_available` evidence to the control plane; semantic or mixed findings remain held for Security Admin review.
 

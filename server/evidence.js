@@ -59,6 +59,22 @@ function safeFinding(f) {
   };
 }
 
+function safeInstallChecks(checks = []) {
+  return (Array.isArray(checks) ? checks : []).slice(0, 40).map((check) => {
+    if (!check || typeof check !== 'object') return null;
+    const id = typeof check.id === 'string' ? check.id.slice(0, 80) : null;
+    if (!id) return null;
+    const detail = typeof check.detail === 'string' && check.detail.trim()
+      ? check.detail.trim().slice(0, 160)
+      : null;
+    return {
+      id,
+      ok: check.ok === true,
+      ...(detail ? { detail } : {}),
+    };
+  }).filter(Boolean);
+}
+
 function safeQuery(q) {
   return {
     id: q.id,
@@ -83,6 +99,7 @@ function safeQuery(q) {
     decidedAt: q.decidedAt || null,
     retentionPurgedAt: q.retentionPurgedAt || null,
     retentionPurgedFields: (q.retentionPurgedFields || []).filter((field) => ['rawPrompt', 'tokenVault'].includes(field)),
+    installChecks: safeInstallChecks(q.installChecks),
   };
 }
 
@@ -149,6 +166,7 @@ function safeCoverageTotals(totals = {}) {
     requiredSensors: safeCoverageNumber(totals.requiredSensors),
     activeRequiredSensors: safeCoverageNumber(totals.activeRequiredSensors),
     activeSensorVersionGaps: safeCoverageNumber(totals.activeSensorVersionGaps),
+    activeSensorHealthWarnings: safeCoverageNumber(totals.activeSensorHealthWarnings),
   };
 }
 
@@ -174,7 +192,21 @@ function safeCoverageSensors(sensors = []) {
     platforms: (Array.isArray(sensor && sensor.platforms) ? sensor.platforms : [])
       .filter((item) => typeof item === 'string')
       .slice(0, 25),
+    installHealth: safeCoverageInstallHealth(sensor && sensor.installHealth),
   }));
+}
+
+function safeCoverageInstallHealth(health) {
+  if (!health || typeof health !== 'object') return null;
+  const failedChecks = (Array.isArray(health.failedChecks) ? health.failedChecks : [])
+    .filter((item) => typeof item === 'string')
+    .slice(0, 40);
+  return {
+    at: safeCoverageText(health.at),
+    state: safeCoverageText(health.state),
+    failedChecks,
+    checks: safeInstallChecks(health.checks),
+  };
 }
 
 function safeCoverageDestinations(destinations = []) {
@@ -349,6 +381,7 @@ module.exports = {
   safeAuditEntry,
   safePolicyChange,
   safeCoverage,
+  safeInstallChecks,
   buildLineage,
   hashText,
 };

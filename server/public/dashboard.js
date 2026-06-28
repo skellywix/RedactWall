@@ -64,6 +64,7 @@ function statusTone(status) {
   if (['approved', 'allowed', 'justified', 'warned_sent', 'redacted'].includes(s)) return 'good';
   if (['denied', 'blocked_by_user', 'destination_blocked', 'file_upload_blocked', 'injection_blocked', 'response_flagged', 'seat_limit_blocked'].includes(s)) return 'bad';
   if (['pending', 'shadow_ai', 'paste_flagged'].includes(s)) return 'warn';
+  if (s === 'sensor_heartbeat') return 'good';
   return 'info';
 }
 
@@ -543,6 +544,8 @@ function renderCoverage(c) {
     if (s.desiredVersion) parts.push('desired v' + s.desiredVersion);
     if (s.versionHealth === 'mixed') parts.push((s.versions || []).length + ' versions');
     if (s.versionHealth === 'outdated') parts.push('outdated');
+    if (s.installHealth && s.installHealth.state === 'attention') parts.push(((s.installHealth.failedChecks || []).length || 1) + ' failed checks');
+    else if (s.installHealth && s.installHealth.state === 'covered') parts.push('install checks ok');
     if (s.required) parts.push('required');
     if ((s.platforms || []).length) parts.push((s.platforms || []).join(', '));
     return parts.join(' | ');

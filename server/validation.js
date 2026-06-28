@@ -86,6 +86,12 @@ const sensorMetadataSchema = z.object({
   platform: optionalString(80),
 }).strict();
 
+const heartbeatCheckSchema = z.object({
+  id: z.string().min(1).max(80).regex(SENSOR_ID),
+  ok: z.boolean(),
+  detail: optionalString(160),
+}).strict();
+
 const clientOutcomeSchema = z.enum([
   'allowed',
   'redacted_sent',
@@ -164,6 +170,15 @@ const scanResponseSchema = z.object({
   source: stringDefault('api'),
   orgId: nullableString(),
   sensor: sensorMetadataSchema.optional(),
+}).strict();
+
+const heartbeatSchema = z.object({
+  user: stringDefault('unknown'),
+  destination: stringDefault('sensor-health'),
+  source: stringDefault('api'),
+  orgId: nullableString(),
+  sensor: sensorMetadataSchema.optional(),
+  checks: z.array(heartbeatCheckSchema).max(40).optional(),
 }).strict();
 
 const loginSchema = z.object({
@@ -275,6 +290,7 @@ module.exports = {
   rehydrateSchema,
   scanFileSchema,
   scanResponseSchema,
+  heartbeatSchema,
   loginSchema,
   revealSchema,
   approveSchema,

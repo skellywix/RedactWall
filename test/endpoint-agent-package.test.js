@@ -45,6 +45,10 @@ function minimalFiles(agentBody) {
       body: Buffer.from('async function collectProtectedUploads() { return writeHandoffFile(); }\nfunction writeHandoffFile() {}\nfunction waitForHandoffConsumption() {}\n'),
     },
     {
+      path: 'scripts/check-endpoint-install.js',
+      body: Buffer.from("const api = '/api/v1/heartbeat';\nfunction buildInstallReport() {}\nconst key = 'INGEST_API_KEY';\n"),
+    },
+    {
       path: 'scripts/install-desktop-collector.ps1',
       body: Buffer.from('HKEY_CURRENT_USER\\Software\\Classes\\*\\shell\n"%1"\nMultiSelectModel\nPROMPTWALL_ENDPOINT_AGENT_HANDOFF_DIR\nPROMPTWALL_ENDPOINT_AGENT_HANDOFF_SECRET\n'),
     },
@@ -83,6 +87,7 @@ test('package script writes a prompt-free endpoint agent zip and integrity manif
   assert.strictEqual(manifest.checks.nativeHandoffWriterIncluded, true);
   assert.strictEqual(manifest.checks.protectedUploadCollectorIncluded, true);
   assert.strictEqual(manifest.checks.desktopCollectorInstallerIncluded, true);
+  assert.strictEqual(manifest.checks.installValidationIncluded, true);
   assert.strictEqual(manifest.checks.scheduledTaskInstallerIncluded, true);
   assert.strictEqual(manifest.checks.localConfigEnvPath, true);
   assert.strictEqual(manifest.checks.taskArgsDoNotExposeIngestKey, true);
@@ -103,6 +108,7 @@ test('package script writes a prompt-free endpoint agent zip and integrity manif
     'sensors/endpoint-agent/native-handoff.js',
     'sensors/endpoint-agent/write-handoff.js',
     'sensors/endpoint-agent/collectors/protected-upload.js',
+    'scripts/check-endpoint-install.js',
     'scripts/install-desktop-collector.ps1',
     'scripts/install-endpoint-agent.ps1',
     'scripts/run-desktop-collector.ps1',
@@ -122,6 +128,7 @@ test('package script writes a prompt-free endpoint agent zip and integrity manif
   assert.match(zip.readAsText('sensors/endpoint-agent/native-handoff.js'), /createHmac\('sha256'/);
   assert.match(zip.readAsText('sensors/endpoint-agent/write-handoff.js'), /writeHandoffFile/);
   assert.match(zip.readAsText('sensors/endpoint-agent/collectors/protected-upload.js'), /collectProtectedUploads/);
+  assert.match(zip.readAsText('scripts/check-endpoint-install.js'), /\/api\/v1\/heartbeat/);
   assert.match(zip.readAsText('scripts/install-desktop-collector.ps1'), /HKEY_CURRENT_USER\\Software\\Classes\\\*\\shell/);
   assert.match(zip.readAsText('scripts/run-desktop-collector.ps1'), /protected-upload\.js/);
   assert.doesNotMatch(agent, /dev-ingest-key|524-71-9043|4111 1111 1111 1111/);

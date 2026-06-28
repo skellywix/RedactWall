@@ -226,6 +226,7 @@ npm run fire-drill -- http://localhost:4000  # sends a synthetic canary control
 node sensors/mcp-guard/guard.js               # demo: redact a SharePoint doc before the model sees it
 node sensors/endpoint-agent/agent.js <dir>    # watch a folder, or process signed native file-flow handoffs
 node sensors/endpoint-agent/write-handoff.js --file <path> --destination "Desktop AI"  # write a signed native upload intent
+npm run endpoint:check -- --env "$env:LOCALAPPDATA\PromptWall\endpoint-agent.env" --emit-heartbeat  # validate endpoint install health
 ```
 
 For a Windows pilot, install the endpoint sensor as a logon task:
@@ -235,6 +236,7 @@ For a Windows pilot, install the endpoint sensor as a logon task:
 ```
 
 The native handoff writer is a safe collector shim for pilots and future OS/app hooks. It signs a bounded upload-intent JSON file with the local endpoint config secret, references only an absolute local file path, and never reads file bytes or accepts the handoff secret as a command-line argument.
+`npm run endpoint:check` validates the endpoint env file, server URL, ingest-key presence, watch directory, runtime scripts, and optional desktop collector handoff setup. With `--emit-heartbeat`, it posts only bounded check IDs and status to `/api/v1/heartbeat` so Coverage and the examiner export can prove install health without exposing keys, handoff secrets, prompt text, or file content.
 
 ### Test the product
 
@@ -297,7 +299,7 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 | Destination controls | Working — governed destination coverage, default-deny unapproved AI, full destination blocking, and file-upload-only blocking across browser, endpoint, gate, file, and response paths |
 | Output scanning | Working — `/api/v1/scan-response` flags PII/secrets in AI replies |
 | MCP guard / Endpoint agent | Working references - inline/MCP redaction; local endpoint folder watch plus signed native file-flow handoff prototype; redacted companion files for structured-only findings |
-| Auth & ops | Working: login lockout, password-confirmed raw reveal and release approval, release-token scoped polling, stable secret, `/healthz` · `/readyz` · `/api/metrics`, policy-driven sensor version posture, sanitized examiner export with coverage and lineage, Docker, CI |
+| Auth & ops | Working: login lockout, password-confirmed raw reveal and release approval, release-token scoped polling, stable secret, `/healthz` · `/readyz` · `/api/metrics`, policy-driven sensor version and install-health posture, sanitized examiner export with coverage and lineage, Docker, CI |
 
 ## Shipped since the skeleton (see `ITERATIONS.md`)
 
@@ -306,7 +308,7 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 - **Backup/verify/restore** tooling for the SQLite evidence store with prompt-free manifests.
 - **Reversible redaction / Redact-&-Send**, sealed token vault, local response re-hydration.
 - **MDM identity**, reliable per-site send, **Man-in-the-Prompt** guard, **shadow-AI** discovery and default-deny unapproved AI blocking.
-- **Coverage posture** showing governed destinations, required sensors, desired sensor versions, shadow-AI sightings, and stale or missing sensor coverage.
+- **Coverage posture** showing governed destinations, required sensors, desired sensor versions, endpoint install-health checks, shadow-AI sightings, and stale or missing sensor coverage.
 - **Sanitized examiner export** with audit integrity, policy diffs, coverage posture, and lineage by user, destination, sensor, channel, category, and decision.
 - **Login lockout**, stable session secret, regulation **templates**, **/healthz · /readyz · /api/metrics**, Docker + CI.
 
