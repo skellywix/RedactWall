@@ -219,7 +219,8 @@ The command writes a zip and adjacent SHA-256 manifest under
 `dist/endpoint-agent/`. It includes the endpoint runtime, shared detection
 engine, policy evaluator, env loader, file-type processor registry, signed
 native handoff prototype, metadata-only handoff writer, Windows protected-upload
-desktop collector, one-shot clipboard guard, and scheduled-task plus
+desktop collector, one-shot clipboard guard, optional endpoint-local OCR bridge,
+and scheduled-task plus
 shell-action install/run/uninstall scripts, plus the endpoint install validation
 checker. It refuses synthetic
 prompt bodies and packaged development ingest keys. Set the real
@@ -312,7 +313,24 @@ prints and posts only check IDs, boolean status, and short details. It does not
 print or post the ingest key, handoff secret, prompt text, extracted text, or
 file bytes.
 
-The agent inspects supported watched files locally. Under redact policy, structured-only findings write a safe companion text file under `.promptwall-redacted` and report `redacted_available` evidence to the control plane; semantic or mixed findings remain held for Security Admin review. Image files (`.png`, `.jpg`, `.jpeg`, `.tif`, `.tiff`, `.bmp`, `.webp`) are supported as a fail-closed modality and return `ocr_required` until an endpoint-local OCR processor is configured.
+The agent inspects supported watched files locally. Under redact policy, structured-only findings write a safe companion text file under `.promptwall-redacted` and report `redacted_available` evidence to the control plane; semantic or mixed findings remain held for Security Admin review. Image files (`.png`, `.jpg`, `.jpeg`, `.tif`, `.tiff`, `.bmp`, `.webp`) are supported as a fail-closed modality. Browser/API uploads still return `ocr_required`; endpoint agents can optionally run a workstation-local OCR command and then send only sanitized detector evidence to the control plane.
+
+Optional endpoint-local OCR:
+
+```powershell
+Add-Content "$env:LOCALAPPDATA\PromptWall\endpoint-agent.env" @'
+ENDPOINT_AGENT_OCR_COMMAND=C:\Program Files\Tesseract-OCR\tesseract.exe
+ENDPOINT_AGENT_OCR_ARGS_JSON=["{file}","stdout"]
+ENDPOINT_AGENT_OCR_TIMEOUT_MS=15000
+ENDPOINT_AGENT_OCR_MAX_CHARS=1000000
+'@
+```
+
+The OCR command runs through `execFile` without a shell. If the command is not
+configured, image files stay blocked as `ocr_required`. If it is configured and
+returns text, the endpoint agent runs the same local detector/redactor path used
+for text, PDF, Office, and native handoff files. Image bytes and raw OCR text do
+not go to `/api/v1/scan-file` or `/api/v1/gate`.
 
 For desktop file flows, enable the native handoff directory with an explicit
 local secret. The endpoint agent keeps scanning locally; the handoff event is
@@ -502,6 +520,10 @@ Set these through `.env`, container environment, or a deployment secret manager:
 | `SENTINEL_CUSTOM_DETECTORS_PATH` / `PROMPTWALL_CUSTOM_DETECTORS_PATH` | Optional customer detector-pack path. Defaults to `config/custom-detectors.json`. |
 | `ENDPOINT_AGENT_HANDOFF_DIR` | Optional local spool for signed native endpoint upload-intent events. |
 | `ENDPOINT_AGENT_HANDOFF_SECRET` | Optional 32-plus-character local HMAC secret required before the endpoint agent accepts native handoff events. |
+| `ENDPOINT_AGENT_OCR_COMMAND` / `PROMPTWALL_ENDPOINT_AGENT_OCR_COMMAND` | Optional endpoint-local OCR command for image files. Disabled by default. |
+| `ENDPOINT_AGENT_OCR_ARGS_JSON` / `PROMPTWALL_ENDPOINT_AGENT_OCR_ARGS_JSON` | Optional JSON string array of OCR command args. Include `{file}` where the image path belongs; otherwise the file path is appended. |
+| `ENDPOINT_AGENT_OCR_TIMEOUT_MS` / `PROMPTWALL_ENDPOINT_AGENT_OCR_TIMEOUT_MS` | Optional OCR command timeout, defaulting to 15000 ms. |
+| `ENDPOINT_AGENT_OCR_MAX_CHARS` / `PROMPTWALL_ENDPOINT_AGENT_OCR_MAX_CHARS` | Optional OCR output cap before detection, defaulting to 1000000 chars. |
 
 PromptWall accepts product-prefixed aliases for new deployments while keeping
 the existing `SENTINEL_*`, `INGEST_API_KEY`, and endpoint-agent names valid for
@@ -536,6 +558,10 @@ set.
 | `ENDPOINT_AGENT_WATCH_DIR` | `PROMPTWALL_ENDPOINT_AGENT_WATCH_DIR` |
 | `ENDPOINT_AGENT_HANDOFF_DIR` | `PROMPTWALL_ENDPOINT_AGENT_HANDOFF_DIR` |
 | `ENDPOINT_AGENT_HANDOFF_SECRET` | `PROMPTWALL_ENDPOINT_AGENT_HANDOFF_SECRET` |
+| `ENDPOINT_AGENT_OCR_COMMAND` | `PROMPTWALL_ENDPOINT_AGENT_OCR_COMMAND` |
+| `ENDPOINT_AGENT_OCR_ARGS_JSON` | `PROMPTWALL_ENDPOINT_AGENT_OCR_ARGS_JSON` |
+| `ENDPOINT_AGENT_OCR_TIMEOUT_MS` | `PROMPTWALL_ENDPOINT_AGENT_OCR_TIMEOUT_MS` |
+| `ENDPOINT_AGENT_OCR_MAX_CHARS` | `PROMPTWALL_ENDPOINT_AGENT_OCR_MAX_CHARS` |
 
 Never bind `SENTINEL_DB_PATH` to a cloud-synced folder or network share. SQLite locking must be backed by local disk semantics, and production preflight blocks missing, cloud-synced, or UNC/network SQLite paths before startup readiness passes.
 

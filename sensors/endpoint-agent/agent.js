@@ -19,6 +19,7 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 const nativeHandoff = require('./native-handoff');
+const endpointOcr = require('./ocr');
 const processors = require('../../server/processors');
 const policyEngine = require('../../server/policy');
 const D = require('../../detection-engine/detect');
@@ -459,6 +460,13 @@ function decisionSummary(res) {
   };
 }
 
+async function extractEndpointFile(file, full, buf, opts = {}) {
+  const extracted = await processors.extractText(file, buf, opts.extract || {});
+  const needsOcr = !extracted.extractionOk && (extracted.error === 'ocr_required' || extracted.ocrRequired === true);
+  if (!needsOcr) return extracted;
+  return endpointOcr.extractImageFile(file, full, opts.ocr || {});
+}
+
 async function scanResolvedFile(file, full, root, opts = {}) {
   const pol = opts.policy ? sensorPolicy(opts.policy) : policyState;
   const scanner = opts.scanner ? scannerConfig(opts.scanner) : pol.scanner || scannerState;
@@ -486,7 +494,7 @@ async function scanResolvedFile(file, full, root, opts = {}) {
     return { decision: 'block', status: 'file_unsupported', supported: false };
   }
   const buf = fs.readFileSync(full);
-  const extracted = await processors.extractText(file, buf, opts.extract || {});
+  const extracted = await extractEndpointFile(file, full, buf, opts);
   if (!extracted.extractionOk) {
     const ocrRequired = extracted.error === 'ocr_required' || extracted.ocrRequired === true;
     const outcome = ocrRequired ? 'ocr_required' : 'scan_unavailable';

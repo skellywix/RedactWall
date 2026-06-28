@@ -215,6 +215,38 @@ test('blocks image files locally as ocr_required without uploading bytes', async
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test('uses configured endpoint-local OCR for image files without uploading bytes', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-agent-'));
+  const filename = 'loan-scan.png';
+  const raw = 'pretend image bytes with SSN 524-71-9043';
+  fs.writeFileSync(path.join(dir, filename), raw);
+
+  let reportRequest;
+  const res = await scanFile(filename, {
+    watchDir: dir,
+    user: 'unit-user',
+    ocr: { extractImageText: async () => 'OCR text. SSN 524-71-9043.' },
+    report: async (req) => {
+      reportRequest = req;
+      return { decision: 'block', mode: 'block', status: 'pending', id: 'q_ocr', findings: req.clientFindings, categories: [], riskScore: req.clientRiskScore };
+    },
+  });
+
+  assert.strictEqual(res.decision, 'block');
+  assert.strictEqual(res.status, 'pending');
+  assert.strictEqual(res.inspectedLocally, true);
+  assert.ok(res.localAnalysis.findings.some((finding) => finding.type === 'US_SSN'));
+  assert.strictEqual(reportRequest.source, 'endpoint_agent');
+  assert.strictEqual(reportRequest.channel, 'file_upload');
+  assert.strictEqual(reportRequest.clientPreRedacted, true);
+  assert.ok(reportRequest.clientFindings.some((finding) => finding.type === 'US_SSN'));
+  assert.strictEqual(reportRequest.contentBase64, undefined);
+  assert.ok(!JSON.stringify(reportRequest).includes('524-71-9043'));
+  assert.ok(!JSON.stringify(reportRequest).includes(raw));
+
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test('blocks configured endpoint destinations before local file inspection', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-agent-'));
   const filename = 'member-524-71-9043.txt';

@@ -56,6 +56,10 @@ test('loadEnv maps PromptWall aliases without overwriting configured legacy keys
     'PROMPTWALL_URL=https://promptwall.customer.example',
     'PROMPTWALL_ENDPOINT_AGENT_HANDOFF_SECRET=promptwall-handoff-secret',
     'PROMPTWALL_ENDPOINT_AGENT_HANDOFF_DIR=C:/PromptWall/handoff',
+    'PROMPTWALL_ENDPOINT_AGENT_OCR_COMMAND=C:/Program Files/Tesseract-OCR/tesseract.exe',
+    'PROMPTWALL_ENDPOINT_AGENT_OCR_ARGS_JSON=["{file}","stdout"]',
+    'PROMPTWALL_ENDPOINT_AGENT_OCR_TIMEOUT_MS=20000',
+    'PROMPTWALL_ENDPOINT_AGENT_OCR_MAX_CHARS=250000',
     'SENTINEL_SECRET=legacy-session-secret',
   ].join('\n'));
   const target = { SENTINEL_DATA_KEY: '' };
@@ -74,6 +78,10 @@ test('loadEnv maps PromptWall aliases without overwriting configured legacy keys
   assert.strictEqual(target.SENTINEL_URL, 'https://promptwall.customer.example');
   assert.strictEqual(target.ENDPOINT_AGENT_HANDOFF_SECRET, 'promptwall-handoff-secret');
   assert.strictEqual(target.ENDPOINT_AGENT_HANDOFF_DIR, 'C:/PromptWall/handoff');
+  assert.strictEqual(target.ENDPOINT_AGENT_OCR_COMMAND, 'C:/Program Files/Tesseract-OCR/tesseract.exe');
+  assert.strictEqual(target.ENDPOINT_AGENT_OCR_ARGS_JSON, '["{file}","stdout"]');
+  assert.strictEqual(target.ENDPOINT_AGENT_OCR_TIMEOUT_MS, '20000');
+  assert.strictEqual(target.ENDPOINT_AGENT_OCR_MAX_CHARS, '250000');
   assert.ok(result.aliases.some((item) => item.key === 'SENTINEL_DB_PATH' && item.source === 'PROMPTWALL_DB_PATH'));
   fs.rmSync(dir, { recursive: true, force: true });
 });

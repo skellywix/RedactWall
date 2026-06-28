@@ -333,9 +333,10 @@ Acceptance evidence:
 
 Current state: structured detectors, semantic categories, held-out eval, file
 processors, response scanning with flag/redact/block policy controls,
-customer-owned detector packs, and image `ocr_required` handling exist.
-Remaining gaps are an actual endpoint-local OCR runtime and heavier
-detector-quality upgrades for scanned PDFs and screenshots.
+customer-owned detector packs, image `ocr_required` handling, and an optional
+endpoint-local OCR command bridge exist. Remaining gaps are a packaged OCR
+binary/install workflow and heavier detector-quality upgrades for scanned PDFs
+and screenshots.
 
 Customer ask: "Can we detect our member numbers, loan IDs, internal project
 codes, screenshots, and scanned loan packets?"
@@ -351,16 +352,19 @@ Implemented:
   or overwrite built-in detector IDs.
 - Added a file-processor result state for `ocr_required` before adding an OCR
   runtime.
+- Added `sensors/endpoint-agent/ocr.js` as an optional endpoint-only OCR bridge
+  that can call a workstation-local OCR command and then reuse the existing
+  local detector/redactor path without uploading image bytes.
 
 Remaining:
-- Prototype OCR as an optional endpoint-local processor only, never server-side
-  by default.
+- Keep OCR server-side disabled by default and package or install a supported
+  OCR binary only when pilot deployment needs turnkey scanned-image coverage.
 - Keep ONNX/WASM NER as a later detector-quality upgrade, not the blocker for
   commercial workflow features.
 
 Acceptance evidence:
 - `npm run eval`
-- `node --test test/custom-detectors.test.js test/processors.test.js`
+- `node --test test/custom-detectors.test.js test/processors.test.js test/endpoint-ocr.test.js test/endpoint-agent.test.js`
 - Synthetic scanned-file smoke records `ocr_required` or sanitized OCR findings
   without sending image bytes to the control plane.
 
