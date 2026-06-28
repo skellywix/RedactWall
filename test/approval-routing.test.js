@@ -166,6 +166,64 @@ test('gate applies customer-configured approval routing rules from policy', asyn
   }
 }));
 
+test('gate applies SCIM group-aware approval routing without prompt leakage', async () => withServer(async (port) => {
+  const originalPolicy = fs.readFileSync(process.env.SENTINEL_POLICY_PATH, 'utf8');
+  const rawContract = 'The board-approved legal contract includes confidential vendor terms.';
+  const user = db.saveScimUser({
+    userName: 'counsel@example.test',
+    displayName: 'Counsel User',
+    active: true,
+  });
+  db.saveScimGroup({
+    displayName: 'PromptWall Legal',
+    members: [{ value: user.id, display: user.userName }],
+  });
+
+  try {
+    fs.writeFileSync(process.env.SENTINEL_POLICY_PATH, JSON.stringify({
+      ...JSON.parse(originalPolicy),
+      approvalRoutingRules: [{
+        id: 'legal_group_contracts',
+        groups: ['PromptWall Legal'],
+        categories: ['CONFIDENTIAL_BUSINESS'],
+        destinations: ['claude.ai'],
+        assignedGroup: 'legal',
+        assignedRole: 'approver',
+        slaMinutes: 60,
+        reason: 'legal_review',
+      }],
+    }, null, 2));
+
+    const gate = await jsonFetch(port, '/api/v1/gate', {
+      headers: { 'x-api-key': 'unit-ingest-key' },
+      body: {
+        prompt: rawContract,
+        user: 'counsel@example.test',
+        destination: 'https://claude.ai/chat/unit',
+        source: 'browser_extension',
+        channel: 'submit',
+      },
+    });
+    assert.strictEqual(gate.status, 200);
+    const body = await gate.json();
+    assert.strictEqual(body.status, 'pending');
+
+    const stored = db.getQuery(body.id);
+    assert.strictEqual(stored.assignedRole, 'approver');
+    assert.strictEqual(stored.assignedGroup, 'legal');
+    assert.strictEqual(stored.workflowReason, 'rule:legal_group_contracts:legal_review');
+    assert.ok(!JSON.stringify({
+      assignedRole: stored.assignedRole,
+      assignedGroup: stored.assignedGroup,
+      workflowReason: stored.workflowReason,
+      slaDueAt: stored.slaDueAt,
+      notificationStatus: stored.notificationStatus,
+    }).includes(rawContract));
+  } finally {
+    fs.writeFileSync(process.env.SENTINEL_POLICY_PATH, originalPolicy);
+  }
+}));
+
 test.after(() => {
   for (const suffix of ['', '-wal', '-shm']) {
     try { fs.unlinkSync(process.env.SENTINEL_DB_PATH + suffix); } catch {}

@@ -71,6 +71,12 @@ If no direct or group role matches, the user resource returns `auditor` as the
 safe default. OIDC login uses this effective role after the ID token is validated
 and the user is confirmed active in SCIM.
 
+The same provisioned group membership can also drive `approvalRoutingRules`.
+For example, a rule with `groups: ["PromptWall Legal"]` and
+`categories: ["LEGAL_CONTRACT"]` can assign held contract prompts to the legal
+review pool while storing only the sanitized workflow owner, reason, and SLA on
+the evidence record.
+
 ## OIDC Login
 
 Configure the IdP web application with this redirect URI:

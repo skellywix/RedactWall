@@ -140,11 +140,17 @@ function normalizeApprovalRoutingRules(value) {
     };
     const reason = String(item.reason || '').trim().toLowerCase();
     if (ROUTING_REASON_RE.test(reason) && safeRoutingCode(reason)) rule.reason = reason;
+    const users = normalizeSafeRoutingTextList(item.users, POLICY_MATCH_TEXT_RE).map((v) => v.toLowerCase());
+    const groups = normalizeSafeRoutingTextList(item.groups || item.userGroups, POLICY_MATCH_TEXT_RE).map((v) => v.toLowerCase());
+    const orgIds = normalizeSafeRoutingTextList(item.orgIds, POLICY_MATCH_TEXT_RE).map((v) => v.toLowerCase());
     const detectors = normalizeRoutingTextList(item.detectors, ROUTING_DETECTOR_RE).map((v) => v.toUpperCase());
     const categories = normalizeRoutingTextList(item.categories, ROUTING_DETECTOR_RE).map((v) => v.toUpperCase());
     const sources = normalizeRoutingTextList(item.sources, SENSOR_ID_RE).map((v) => v.toLowerCase());
     const channels = normalizeRoutingTextList(item.channels, SENSOR_ID_RE).map((v) => v.toLowerCase());
     const destinations = normalizeRoutingTextList(item.destinations, /^[A-Za-z0-9.*:_/-]{1,253}$/);
+    if (users.length) rule.users = users;
+    if (groups.length) rule.groups = groups;
+    if (orgIds.length) rule.orgIds = orgIds;
     if (detectors.length) rule.detectors = detectors;
     if (categories.length) rule.categories = categories;
     if (sources.length) rule.sources = sources;
@@ -158,7 +164,7 @@ function normalizeApprovalRoutingRules(value) {
       const minRiskScore = Number(item.minRiskScore);
       if (Number.isFinite(minRiskScore)) rule.minRiskScore = Math.max(0, Math.min(100, Math.round(minRiskScore)));
     }
-    const hasMatcher = ['detectors', 'categories', 'sources', 'channels', 'destinations'].some((key) => Array.isArray(rule[key]) && rule[key].length)
+    const hasMatcher = ['users', 'groups', 'orgIds', 'detectors', 'categories', 'sources', 'channels', 'destinations'].some((key) => Array.isArray(rule[key]) && rule[key].length)
       || rule.minSeverity !== undefined
       || rule.minRiskScore !== undefined;
     if (!hasMatcher) continue;

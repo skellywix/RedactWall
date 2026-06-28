@@ -251,9 +251,16 @@ function routingCodeSchema(pattern, max) {
   });
 }
 
+const safePolicyMatchTextSchema = z.string().min(1).max(128).regex(POLICY_MATCH_TEXT).refine((value) => !SENSITIVE_ROUTING_CODE.test(value), {
+  message: 'sensitive identifier not allowed',
+});
+
 const approvalRoutingRuleSchema = z.object({
   id: routingCodeSchema(ROUTING_RULE_ID, 64),
   enabled: z.boolean().optional(),
+  users: z.array(safePolicyMatchTextSchema).max(40).optional(),
+  groups: z.array(safePolicyMatchTextSchema).max(40).optional(),
+  orgIds: z.array(safePolicyMatchTextSchema).max(40).optional(),
   detectors: z.array(detectorIdSchema).max(40).optional(),
   categories: z.array(detectorIdSchema).max(40).optional(),
   sources: z.array(sensorIdSchema).max(40).optional(),
@@ -266,16 +273,12 @@ const approvalRoutingRuleSchema = z.object({
   slaMinutes: z.number().int().min(15).max(7 * 24 * 60),
   reason: routingCodeSchema(ROUTING_REASON, 80).optional(),
 }).strict().refine((rule) => {
-  return ['detectors', 'categories', 'sources', 'channels', 'destinations'].some((key) => Array.isArray(rule[key]) && rule[key].length)
+  return ['users', 'groups', 'orgIds', 'detectors', 'categories', 'sources', 'channels', 'destinations'].some((key) => Array.isArray(rule[key]) && rule[key].length)
     || rule.minSeverity !== undefined
     || rule.minRiskScore !== undefined;
 }, {
   message: 'at least one matcher required',
   path: ['id'],
-});
-
-const safePolicyMatchTextSchema = z.string().min(1).max(128).regex(POLICY_MATCH_TEXT).refine((value) => !SENSITIVE_ROUTING_CODE.test(value), {
-  message: 'sensitive identifier not allowed',
 });
 
 const policyMatcherFields = {

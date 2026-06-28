@@ -565,12 +565,12 @@ version, and platform metadata only.
 ## Approval Workflow Notifications
 
 Configure customer-specific approval ownership in the Policy tab with
-`approvalRoutingRules`. Rules match only metadata: detector ids, semantic
-categories, source, channel, destination, severity, and risk score. They set
-`assignedGroup`, `assignedRole`, and `slaMinutes` before notification delivery.
-Keep rule ids, group ids, and reason codes generic enough for examiner evidence;
-do not encode member names, account numbers, file names, or case details in the
-policy.
+`approvalRoutingRules`. Rules match only metadata: SCIM user names, SCIM groups,
+org ids, detector ids, semantic categories, source, channel, destination,
+severity, and risk score. They set `assignedGroup`, `assignedRole`, and
+`slaMinutes` before notification delivery. Keep rule ids, group ids, and reason
+codes generic enough for examiner evidence; do not encode member names, account
+numbers, file names, or case details in the policy.
 
 Set one or more approval notification channels when a customer wants routed
 approvals to notify a queue, chat channel, SOAR workflow, or ticketing bridge:
