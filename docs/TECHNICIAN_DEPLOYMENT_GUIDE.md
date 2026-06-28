@@ -56,7 +56,7 @@ The supported paid-customer deployment today is one AWS stack per customer:
 
 PromptWall also accepts `PROMPTWALL_*` aliases for those `SENTINEL_*` runtime
 keys, plus `PROMPTWALL_INGEST_API_KEY`, `PROMPTWALL_ENDPOINT_AGENT_WATCH_DIR`,
-`PROMPTWALL_ENDPOINT_AGENT_HANDOFF_DIR`, and
+`PROMPTWALL_SCIM_BEARER_TOKEN`, `PROMPTWALL_ENDPOINT_AGENT_HANDOFF_DIR`, and
 `PROMPTWALL_ENDPOINT_AGENT_HANDOFF_SECRET`. Use one key family per setting in a
 customer env file.
 
@@ -233,6 +233,7 @@ $SecretJson = @{
   SENTINEL_SECRET = "<32-plus-random-chars>"
   SENTINEL_DATA_KEY = "<32-plus-random-chars>"
   INGEST_API_KEY = "<32-plus-random-chars>"
+  SCIM_BEARER_TOKEN = "<32-plus-random-chars-or-empty>"
   APPROVER_USER = "approver"
   APPROVER_PASSWORD = "<16-plus-random-chars-or-empty>"
   AUDITOR_USER = "auditor"
@@ -393,6 +394,9 @@ With the customer's Security Admin:
    governed destinations.
 8. Confirm auditor login, if configured, can view sanitized evidence and cannot
    approve, deny, reveal, purge, or edit policy.
+9. If SCIM is configured, have the identity admin call
+   `/scim/v2/ServiceProviderConfig` with the bearer token and confirm
+   `patch.supported=true` and `filter.supported=true`.
 
 If MFA enrollment fails, stop the rollout and rotate `ADMIN_TOTP_SECRET` through
 the approved secret process.
@@ -629,13 +633,14 @@ If production is live and unhealthy:
 
 | Symptom | Check |
 | --- | --- |
-| `/readyz` is not 200 | Open `/api/preflight` as admin, then check secret lengths, MFA, secure cookie, local SQLite path, tenant id, and seat limit. |
+| `/readyz` is not 200 | Open `/api/preflight` as admin, then check secret lengths, MFA, secure cookie, local SQLite path, tenant id, seat limit, and SCIM token length if configured. |
 | ALB target is unhealthy | Check instance user data, Docker pull, container logs, security groups, and `/readyz` from the instance. |
 | Docker cannot pull from ECR | Check instance role permissions, ECR repository region, image URI, and subnet outbound internet access. |
 | Admin login fails | Confirm password delivery, MFA seed enrollment, current TOTP code, and lockout status. |
 | Extension has no config | Reload `chrome://policy`, confirm extension id, force-install policy, and managed storage keys. |
 | Browser install health shows attention | In Coverage, inspect failed check IDs. Reload `chrome://policy`, confirm managed config, tenant id, user identity, and extension version, then restart Chrome or wait for the `installHeartbeat` alarm. |
 | Events are rejected | Check `orgId`, managed user identity, ingest key, tenant slug, and seat limit. |
+| SCIM provisioning fails | Confirm the IdP base URL ends in `/scim/v2`, the bearer token matches `SCIM_BEARER_TOKEN`, the token is at least 32 characters, and writes use `application/scim+json`. |
 | Endpoint agent does not start | Check Node on PATH, scheduled task status, config ACL, log path, and ingest key. |
 | Endpoint install health shows attention | Run `npm run endpoint:check -- --env <path> --json`, fix the failed check IDs, then rerun with `--emit-heartbeat`. |
 | MCP guard install health shows attention | Run `npm run mcp:check -- --env <path> --json`, fix the failed check IDs, then rerun with `--emit-heartbeat`. |
@@ -675,6 +680,11 @@ Accessed 27 June 2026.
 Google. "Automatically Install Apps and Extensions." *Chrome Enterprise and
 Education Help*, Google, https://support.google.com/chrome/a/answer/6306504.
 Accessed 27 June 2026.
+
+Microsoft. "Tutorial: Develop and Plan Provisioning for a SCIM Endpoint in
+Microsoft Entra ID." *Microsoft Learn*, Microsoft,
+https://learn.microsoft.com/en-us/entra/identity/app-provisioning/use-scim-to-provision-users-and-groups.
+Accessed 28 June 2026.
 
 Joint Task Force. *Security and Privacy Controls for Information Systems and
 Organizations*. NIST Special Publication 800-53 Revision 5, National Institute

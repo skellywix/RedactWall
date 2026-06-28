@@ -19,6 +19,7 @@ const MIN_SECRET_LENGTHS = {
   approverPassword: 16,
   auditorPassword: 16,
   ingestKey: 32,
+  scimBearerToken: 32,
   sessionSecret: 32,
   dataKey: 32,
 };
@@ -93,6 +94,8 @@ function configStatus(input = {}) {
     || bool(requireTenantContext)
     || bool(requireUserIdentity);
   const ingestKey = input.ingestKey ?? env.INGEST_API_KEY ?? '';
+  const scimBearerToken = input.scimBearerToken ?? env.SCIM_BEARER_TOKEN ?? '';
+  const scimConfigured = !!String(scimBearerToken || '').trim();
   const sessionSecret = input.sessionSecret ?? env.SENTINEL_SECRET ?? '';
   const dataKeySource = input.dataKeySource ?? env.SENTINEL_DATA_KEY ?? env.SENTINEL_SECRET ?? '';
   const checks = [
@@ -179,6 +182,13 @@ function configStatus(input = {}) {
       severity,
       `Sensor ingest key is at least ${MIN_SECRET_LENGTHS.ingestKey} characters.`,
       `Set INGEST_API_KEY to at least ${MIN_SECRET_LENGTHS.ingestKey} random characters.`,
+    ),
+    check(
+      'scim_bearer_token_strength',
+      !scimConfigured || hasMinLength(scimBearerToken, MIN_SECRET_LENGTHS.scimBearerToken),
+      severity,
+      `SCIM bearer token is at least ${MIN_SECRET_LENGTHS.scimBearerToken} characters when SCIM provisioning is enabled.`,
+      `Set SCIM_BEARER_TOKEN to at least ${MIN_SECRET_LENGTHS.scimBearerToken} random characters, or leave it empty to disable SCIM provisioning.`,
     ),
     check(
       'session_secret',

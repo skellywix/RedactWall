@@ -35,6 +35,7 @@ const ENV_ORDER = [
   'SENTINEL_SECRET',
   'SENTINEL_DATA_KEY',
   'INGEST_API_KEY',
+  'SCIM_BEARER_TOKEN',
   'SENTINEL_REQUEST_TIMEOUT_MS',
   'SIEM_WEBHOOK_URL',
   'SIEM_WEBHOOK_TOKEN',
@@ -83,6 +84,7 @@ function buildEnv(opts = {}) {
     SENTINEL_SECRET: randomText(32),
     SENTINEL_DATA_KEY: randomText(32),
     INGEST_API_KEY: `ps_ingest_${randomText(32)}`,
+    SCIM_BEARER_TOKEN: '',
     SENTINEL_REQUEST_TIMEOUT_MS: '10000',
     SIEM_WEBHOOK_URL: '',
     SIEM_WEBHOOK_TOKEN: '',
@@ -145,7 +147,7 @@ function renderEnv(values, opts = {}) {
   lines.push('', '# Stable secrets. Keep these values across restarts.');
   ['SENTINEL_SECRET', 'SENTINEL_DATA_KEY'].forEach(add);
   lines.push('', '# Sensor/API configuration');
-  ['INGEST_API_KEY', 'SENTINEL_REQUEST_TIMEOUT_MS'].forEach(add);
+  ['INGEST_API_KEY', 'SCIM_BEARER_TOKEN', 'SENTINEL_REQUEST_TIMEOUT_MS'].forEach(add);
   lines.push('', '# Optional sanitized SIEM/SOC webhook');
   ['SIEM_WEBHOOK_URL', 'SIEM_WEBHOOK_TOKEN', 'SIEM_ALERT_MIN_RISK', 'SIEM_ALERT_MIN_SEVERITY'].forEach(add);
   for (const key of Object.keys(values).sort()) add(key);

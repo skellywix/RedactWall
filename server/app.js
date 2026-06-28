@@ -35,6 +35,7 @@ const tenant = require('./tenant');
 const routing = require('./routing');
 const workflow = require('./workflow');
 const roles = require('./roles');
+const scim = require('./scim');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -77,7 +78,8 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(express.json({ limit: '12mb' }));
+app.use(express.json({ limit: '12mb', type: ['application/json', 'application/*+json'] }));
+app.use('/scim/v2', scim.router());
 app.use((err, req, res, next) => {
   if (err && err.type === 'entity.too.large') return res.status(413).json({ error: 'request body too large' });
   if (err instanceof SyntaxError && err.status === 400 && 'body' in err) return res.status(400).json({ error: 'invalid json' });

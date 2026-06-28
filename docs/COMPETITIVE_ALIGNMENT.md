@@ -50,8 +50,8 @@ Build next:
   especially response-scanning controls.
 - Data lineage views that answer which user, sensor, destination, category, and
   decision were involved without retaining sensitive content.
-- Direct SMTP notification and identity-backed assignment on top of the
-  sanitized approval workflow.
+- Direct SMTP notification and identity-backed assignment on top of provisioned
+  users, groups, and the sanitized approval workflow.
 - Custom detector packs and an `ocr_required` file outcome so pilots can model
   local member IDs and scanned documents before shipping a heavier OCR runtime.
 - MCP connector SDK patterns that force tool-output sanitization before model
@@ -79,6 +79,9 @@ Build next:
 - Add an optional local approver role so assigned reviewers can approve or deny
   their own queue items without receiving Security Admin privileges or raw
   prompt reveal access.
+- Add minimal SCIM 2.0 provisioning for users and groups, with bearer auth,
+  deactivation, group membership patches, audit entries, and PromptWall group
+  display names mapped onto local route roles.
 - Keep compatibility-sensitive runtime contracts stable where breaking them
   would damage existing installs or retained evidence.
 - Add active Poe browser protection because Poe was already a governed
