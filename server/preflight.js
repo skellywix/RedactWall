@@ -16,6 +16,7 @@ function check(id, ok, severity, message, remediation) {
 const MIN_SECRET_LENGTHS = {
   adminPassword: 16,
   adminTotpSecret: 16,
+  approverPassword: 16,
   auditorPassword: 16,
   ingestKey: 32,
   sessionSecret: 32,
@@ -73,6 +74,10 @@ function configStatus(input = {}) {
   const adminUser = String(input.adminUser ?? env.ADMIN_USER ?? 'admin').trim();
   const adminPassword = input.adminPassword ?? env.ADMIN_PASSWORD ?? '';
   const adminTotpSecret = input.adminTotpSecret ?? env.ADMIN_TOTP_SECRET ?? '';
+  const approverUser = String(input.approverUser ?? env.APPROVER_USER ?? '').trim();
+  const approverPassword = input.approverPassword ?? env.APPROVER_PASSWORD ?? '';
+  const approverPasswordSet = !!String(approverPassword).trim();
+  const approverConfigured = !!approverUser || approverPasswordSet;
   const auditorUser = String(input.auditorUser ?? env.AUDITOR_USER ?? '').trim();
   const auditorPassword = input.auditorPassword ?? env.AUDITOR_PASSWORD ?? '';
   const auditorPasswordSet = !!String(auditorPassword).trim();
@@ -120,6 +125,27 @@ function configStatus(input = {}) {
       `Set ADMIN_TOTP_SECRET to a base32 value at least ${MIN_SECRET_LENGTHS.adminTotpSecret} characters long.`,
     ),
     check(
+      'approver_credentials',
+      !approverConfigured || (!!approverUser && approverPasswordSet),
+      severity,
+      'Approver login has both APPROVER_USER and APPROVER_PASSWORD when configured.',
+      'Set both APPROVER_USER and APPROVER_PASSWORD, or remove both to disable approver login.',
+    ),
+    check(
+      'approver_user_distinct',
+      !approverConfigured || !approverUser || (approverUser !== adminUser && approverUser !== auditorUser),
+      severity,
+      'Approver username is distinct from ADMIN_USER and AUDITOR_USER.',
+      'Set APPROVER_USER to a separate review account name.',
+    ),
+    check(
+      'approver_password_strength',
+      !approverConfigured || hasMinLength(approverPassword, MIN_SECRET_LENGTHS.approverPassword),
+      severity,
+      `Approver password is at least ${MIN_SECRET_LENGTHS.approverPassword} characters when approver login is configured.`,
+      `Set APPROVER_PASSWORD to at least ${MIN_SECRET_LENGTHS.approverPassword} characters, or remove APPROVER_USER to disable approver login.`,
+    ),
+    check(
       'auditor_credentials',
       !auditorConfigured || (!!auditorUser && auditorPasswordSet),
       severity,
@@ -128,9 +154,9 @@ function configStatus(input = {}) {
     ),
     check(
       'auditor_user_distinct',
-      !auditorConfigured || !auditorUser || auditorUser !== adminUser,
+      !auditorConfigured || !auditorUser || (auditorUser !== adminUser && auditorUser !== approverUser),
       severity,
-      'Auditor username is distinct from ADMIN_USER.',
+      'Auditor username is distinct from ADMIN_USER and APPROVER_USER.',
       'Set AUDITOR_USER to a separate read-only account name.',
     ),
     check(

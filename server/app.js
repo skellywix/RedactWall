@@ -34,6 +34,7 @@ const releaseTokens = require('./release-token');
 const tenant = require('./tenant');
 const routing = require('./routing');
 const workflow = require('./workflow');
+const roles = require('./roles');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -985,7 +986,7 @@ app.post('/api/login', validation.validateBody(validation.loginSchema), (req, re
   res.cookie(auth.SESSION_COOKIE_NAME, token, SESSION_COOKIE_OPTIONS);
   res.clearCookie(auth.LEGACY_SESSION_COOKIE_NAME, SESSION_COOKIE_CLEAR_OPTIONS);
   db.appendAudit({
-    action: account.role === 'security_admin' ? 'ADMIN_LOGIN' : 'AUDITOR_LOGIN',
+    action: roles.loginAuditAction(account.role),
     actor: account.user,
     detail: account.role,
   });
@@ -993,7 +994,8 @@ app.post('/api/login', validation.validateBody(validation.loginSchema), (req, re
 });
 
 const sessionWrite = [auth.requireAuth, auth.requireCsrf];
-const adminWrite = [auth.requireAuth, auth.requireCsrf, auth.requireRole('security_admin')];
+const adminWrite = [auth.requireAuth, auth.requireCsrf, auth.requireRole(roles.SECURITY_ADMIN)];
+const decisionWrite = [auth.requireAuth, auth.requireCsrf, auth.requireRole(roles.SECURITY_ADMIN, roles.APPROVER)];
 
 app.get('/api/csrf', auth.requireAuth, (req, res) => {
   res.json({ csrfToken: auth.createCsrfToken(auth.sessionTokenFromRequest(req)) });
@@ -1033,6 +1035,14 @@ function requireStepUpPassword(scope) {
 
 const requireRevealPassword = requireStepUpPassword('REVEAL');
 const requireApprovePassword = requireStepUpPassword('APPROVE');
+
+function requireDecisionAccess(req, res, next) {
+  const q = db.getQuery(req.params.id);
+  if (!q) return res.status(404).json({ error: 'not found' });
+  if (!roles.canDecideQuery(req.user, q)) return res.status(403).json({ error: 'forbidden' });
+  req.queryRecord = q;
+  next();
+}
 
 app.get('/api/me', auth.requireAuth, (req, res) => {
   res.json({ user: req.user.user, role: req.user.role, defaultPassword: auth.ADMIN_PASSWORD_IS_DEFAULT });
@@ -1084,12 +1094,12 @@ app.post(
 
 app.post(
   '/api/queries/:id/approve',
-  ...adminWrite,
+  ...decisionWrite,
   validation.validateBody(validation.approveSchema),
+  requireDecisionAccess,
   requireApprovePassword,
   (req, res) => {
-    const q = db.getQuery(req.params.id);
-    if (!q) return res.status(404).json({ error: 'not found' });
+    const q = req.queryRecord;
     if (q.status !== 'pending') return res.status(409).json({ error: `already ${q.status}` });
     const note = (req.body && req.body.note) || '';
     const updated = db.updateQuery(q.id, {
@@ -1102,9 +1112,8 @@ app.post(
   },
 );
 
-app.post('/api/queries/:id/deny', ...adminWrite, validation.validateBody(validation.noteSchema), (req, res) => {
-  const q = db.getQuery(req.params.id);
-  if (!q) return res.status(404).json({ error: 'not found' });
+app.post('/api/queries/:id/deny', ...decisionWrite, validation.validateBody(validation.noteSchema), requireDecisionAccess, (req, res) => {
+  const q = req.queryRecord;
   if (q.status !== 'pending') return res.status(409).json({ error: `already ${q.status}` });
   const note = (req.body && req.body.note) || '';
   const updated = db.updateQuery(q.id, {

@@ -94,9 +94,10 @@ Acceptance evidence:
 
 ### 2. Enterprise Identity, Roles, And Provisioning
 
-Current state: local admin login, optional auditor login, MFA for Security Admin,
-managed sensor user identity, and seat-limit enforcement exist. Full SSO, SCIM,
-approver roles, and group-driven policy do not.
+Current state: local admin login, optional assignment-aware approver login,
+optional auditor login, MFA for Security Admin, managed sensor user identity,
+and seat-limit enforcement exist. Full SSO, SCIM, IdP-backed group mapping, and
+seat lifecycle provisioning do not.
 
 Customer ask: "Can we connect this to Microsoft Entra or Okta, map groups to
 roles, deprovision users automatically, and avoid shared admin accounts?"
@@ -106,10 +107,10 @@ production. Identity is also the bridge to group policy and approval routing.
 
 Implementation connection:
 - Extend `server/auth.js` with an OIDC login path while keeping existing local
-  admin and auditor credentials as break-glass or demo options.
-- Add `server/roles.js` with roles: `security_admin`, `approver`, `auditor`,
-  `operator`.
-- Replace route checks in `server/app.js` with explicit role guards.
+  admin, approver, and auditor credentials as break-glass or demo options.
+- Extend the existing `server/roles.js` guards from local sessions to
+  IdP-provisioned `security_admin`, `approver`, `auditor`, and `operator`
+  users.
 - Add a minimal SCIM 2.0-compatible provisioning API for users and groups:
   `/scim/v2/Users`, `/scim/v2/Groups`, and `/scim/v2/ServiceProviderConfig`.
 - Store provisioned users and groups in the same SQLite evidence database only
@@ -117,11 +118,12 @@ Implementation connection:
   app config store.
 
 Acceptance evidence:
-- `node --test test/auth.test.js test/auditor-role.test.js test/admin-csrf.test.js`
+- `node --test test/auth.test.js test/approver-role.test.js test/auditor-role.test.js test/admin-csrf.test.js`
 - New tests for OIDC callback validation, role guards, SCIM create/update/disable,
   and group membership mapping.
-- Browser E2E: auditor cannot approve, approver can approve assigned items,
-  Security Admin can edit policy, operator can view deployment health only.
+- Browser E2E: local auditor cannot approve, local approver can approve assigned
+  items, Security Admin can edit policy, operator can view deployment health
+  only.
 
 ### 3. Approval Routing, Escalation, And Notifications
 

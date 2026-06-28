@@ -143,6 +143,23 @@ function canAdminWrite() {
   return currentRole === 'security_admin';
 }
 
+function canDecide(q = {}) {
+  if (currentRole === 'security_admin') return true;
+  if (currentRole !== 'approver') return false;
+  return q.assignedRole === 'approver' && (!q.assignedUser || q.assignedUser === currentUser);
+}
+
+function canReveal(q = {}) {
+  return currentRole === 'security_admin' && !!q;
+}
+
+function queueDecisionLabel(q = {}) {
+  if (currentRole === 'auditor') return 'Read-only auditor view';
+  if (currentRole === 'operator') return 'Operator view';
+  if (currentRole === 'approver') return canDecide(q) ? '' : 'Not assigned to your role';
+  return 'Read-only view';
+}
+
 function workflowOwner(q) {
   const group = q.assignedGroup || 'unassigned';
   const role = q.assignedRole ? ` / ${roleLabel(q.assignedRole)}` : '';
@@ -286,7 +303,7 @@ function askStepUpPassword({ title, message, confirmText, icon = '', buttonClass
           <h2>${escapeHtml(title)}</h2>
           <p>${escapeHtml(message)}</p>
         </div>
-        <label>Admin password
+        <label>Account password
           <input name="password" type="password" autocomplete="current-password" required />
         </label>
         <div class="stepup-actions">
@@ -474,13 +491,14 @@ function renderQueueItem(q) {
   const sev = sevClass(q.maxSeverityLabel);
   const detected = Object.keys(q.entityCounts || {}).join(', ') || (q.categories || []).join(', ') || 'policy match';
   const controls = canAdminWrite()
+    || canDecide(q)
     ? `<textarea class="note" id="note_${escapeHtml(q.id)}" placeholder="Decision note, recorded in audit log"></textarea>
     <div class="actions">
       <button class="btn approve" data-act="approve" data-id="${escapeHtml(q.id)}" type="button">${icons.check}Approve release</button>
       <button class="btn deny" data-act="deny" data-id="${escapeHtml(q.id)}" type="button">${icons.deny}Deny</button>
-      <button class="btn reveal" data-act="reveal" data-id="${escapeHtml(q.id)}" type="button">${icons.eye}Reveal gated</button>
+      ${canReveal(q) ? `<button class="btn reveal" data-act="reveal" data-id="${escapeHtml(q.id)}" type="button">${icons.eye}Reveal gated</button>` : ''}
     </div>`
-    : '<div class="readonly-note">Read-only auditor view</div>';
+    : `<div class="readonly-note">${escapeHtml(queueDecisionLabel(q))}</div>`;
   return `<article class="q ${selected === q.id ? 'selected' : ''}" data-id="${escapeHtml(q.id)}" tabindex="0">
     <div class="top">
       <span class="select-dot" aria-hidden="true"></span>
@@ -566,13 +584,14 @@ document.addEventListener('click', async (e) => {
   }
   const actionButton = e.target.closest('[data-act]');
   if (actionButton) {
-    if (!canAdminWrite()) {
-      alert('Request not allowed for this session. Use a Security Admin account.');
-      return;
-    }
     const act = actionButton.dataset.act;
     const id = actionButton.dataset.id;
+    const q = currentQueue.find((item) => item.id === id) || {};
     if (act === 'reveal') {
+      if (!canReveal(q)) {
+        alert('Request not allowed for this session. Use a Security Admin account.');
+        return;
+      }
       const password = await askRevealPassword();
       if (!password) return;
       const r = await api(`/api/queries/${encodeURIComponent(id)}/reveal`, {
@@ -598,6 +617,10 @@ document.addEventListener('click', async (e) => {
       return;
     }
     if (act === 'approve' || act === 'deny') {
+      if (!canDecide(q)) {
+        alert('Request not allowed for this session.');
+        return;
+      }
       const note = ($(`#note_${CSS.escape(id)}`) || {}).value || '';
       const password = act === 'approve' ? await askApprovePassword() : '';
       if (act === 'approve' && !password) return;

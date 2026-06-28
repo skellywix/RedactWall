@@ -327,13 +327,13 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 - **Reversible redaction / Redact-&-Send**, sealed token vault, local response re-hydration.
 - **MDM identity**, reliable per-site send, **Man-in-the-Prompt** guard, **shadow-AI** discovery and default-deny unapproved AI blocking.
 - **Coverage posture** showing governed destinations, required sensors, desired sensor versions, browser/endpoint/MCP install-health checks, fleet state by user/org/sensor, shadow-AI sightings, and stale or missing sensor coverage.
-- **Approval routing** that assigns held decisions to security, compliance, privacy, or legal with SLA metadata, category/destination queue filters, SIEM alert payloads, examiner evidence, sanitized workflow notifications, and overdue SLA escalation evidence.
+- **Approval routing** that assigns held decisions to security, compliance, privacy, or legal with SLA metadata, category/destination queue filters, assignment-aware approver decisions, SIEM alert payloads, examiner evidence, sanitized workflow notifications, and overdue SLA escalation evidence.
 - **Sanitized examiner export** with audit integrity, policy diffs, coverage posture, workflow ownership, and lineage by user, destination, sensor, channel, category, and decision.
 - **Login lockout**, stable session secret, regulation **templates**, **/healthz · /readyz · /api/metrics**, Docker + CI.
 
 ## Still ahead (to ship commercially)
 
-- SSO, polished MFA enrollment UX, SCIM, and IdP group mapping onto the current routing groups; deeper multi-tenant isolation per institution.
+- SSO, polished MFA enrollment UX, SCIM, and IdP group mapping onto the current local roles and routing groups; deeper multi-tenant isolation per institution.
 - Signed Chrome Web Store listing and force-install rollout; local extension zip, integrity manifest, release-readiness report, and managed-policy checklist are packaged.
 - Direct SMTP and ticketing adapters on top of the existing sanitized webhook, Slack, Teams, and escalation workflow.
 - Ship the signed native endpoint collector that feeds the tested handoff contract from clipboard and AI-app upload flows.
@@ -357,6 +357,7 @@ Copy `.env.example` to `.env` (or export):
 | `SENTINEL_POLICY_PATH` | Optional policy file path for isolated tests or pilots (default `config/policy.json`) |
 | `ADMIN_USER` / `ADMIN_PASSWORD` | Console credentials; production preflight requires a non-default password of at least 16 characters |
 | `ADMIN_TOTP_SECRET` | Base32 authenticator secret for Security Admin MFA; production preflight requires it and admin login requires a current 6-digit code when set |
+| `APPROVER_USER` / `APPROVER_PASSWORD` | Optional reviewer credentials that can approve or deny items assigned to the approver role; set both together, keep `APPROVER_USER` distinct from admin and auditor users, and use at least 16 characters for `APPROVER_PASSWORD` |
 | `AUDITOR_USER` / `AUDITOR_PASSWORD` | Optional read-only console credentials for examiner or client-demo access; set both together, keep `AUDITOR_USER` distinct from `ADMIN_USER`, and use at least 16 characters for `AUDITOR_PASSWORD` |
 | `SENTINEL_SECRET` | Session cookie signing secret; production preflight requires at least 32 characters from environment |
 | `SENTINEL_DATA_KEY` | Encrypts retained raw prompts at rest; production preflight requires at least 32 characters for this key or the `SENTINEL_SECRET` fallback |
@@ -401,12 +402,12 @@ one family per setting; a non-empty legacy key wins when both are set.
 
 Production preflight requires Security Admin MFA through `ADMIN_TOTP_SECRET`,
 custom secrets with minimum lengths, 16 characters for `ADMIN_PASSWORD` and
-optional `AUDITOR_PASSWORD`, and 32 characters for `INGEST_API_KEY`,
+optional `APPROVER_PASSWORD` and `AUDITOR_PASSWORD`, and 32 characters for `INGEST_API_KEY`,
 `SENTINEL_SECRET`, and `SENTINEL_DATA_KEY` when raw approval retention is
-enabled. If auditor login is configured, both `AUDITOR_USER` and
-`AUDITOR_PASSWORD` must be present and `AUDITOR_USER` must be distinct from
-`ADMIN_USER`. Development/demo mode reports weak or missing custom values as
-warnings.
+enabled. If approver or auditor login is configured, both the username and
+password must be present, and reviewer usernames must be distinct from each
+other and from `ADMIN_USER`. Development/demo mode reports weak or missing
+custom values as warnings.
 
 `/readyz` reports whether the database and deployment preflight are usable. Logged-in admins can inspect detailed checks at `/api/preflight`.
 

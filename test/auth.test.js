@@ -8,6 +8,8 @@ const path = require('node:path');
 
 process.env.ADMIN_PASSWORD = 'unit-pass';
 process.env.ADMIN_TOTP_SECRET = 'JBSWY3DPEHPK3PXP';
+process.env.APPROVER_USER = 'approver';
+process.env.APPROVER_PASSWORD = 'approver-pass';
 process.env.AUDITOR_USER = 'auditor';
 process.env.AUDITOR_PASSWORD = 'auditor-pass';
 process.env.SENTINEL_SECRET = 'unit-secret-stable';
@@ -23,8 +25,10 @@ function signedSession(payload) {
 
 test('verifyPassword accepts only the right user+password', () => {
   assert.ok(auth.verifyPassword('admin', 'unit-pass'));
+  assert.ok(auth.verifyPassword('approver', 'approver-pass'));
   assert.ok(auth.verifyPassword('auditor', 'auditor-pass'));
   assert.ok(!auth.verifyPassword('admin', 'wrong'));
+  assert.ok(!auth.verifyPassword('approver', 'unit-pass'));
   assert.ok(!auth.verifyPassword('auditor', 'unit-pass'));
   assert.ok(!auth.verifyPassword('mallory', 'unit-pass'));
 });
@@ -34,11 +38,17 @@ test('authenticate returns the account role without leaking hashes', () => {
     user: 'admin',
     role: 'security_admin',
   });
+  assert.deepStrictEqual(auth.authenticate('approver', 'approver-pass'), {
+    user: 'approver',
+    role: 'approver',
+  });
   assert.deepStrictEqual(auth.authenticate('auditor', 'auditor-pass'), {
     user: 'auditor',
     role: 'auditor',
   });
+  assert.strictEqual(auth.authenticate('approver', 'wrong'), null);
   assert.strictEqual(auth.authenticate('auditor', 'wrong'), null);
+  assert.strictEqual(auth.APPROVER_ENABLED, true);
   assert.strictEqual(auth.AUDITOR_ENABLED, true);
 });
 
@@ -74,6 +84,9 @@ test('session token signs and verifies; tampered/none rejected', () => {
   const auditor = auth.createSession('auditor', 'auditor');
   assert.strictEqual(auth.verify(auditor).user, 'auditor');
   assert.strictEqual(auth.verify(auditor).role, 'auditor');
+  const approver = auth.createSession('approver', 'approver');
+  assert.strictEqual(auth.verify(approver).user, 'approver');
+  assert.strictEqual(auth.verify(approver).role, 'approver');
   assert.strictEqual(auth.verify('bad.token'), null);
   assert.strictEqual(auth.verify(null), null);
 });
@@ -139,6 +152,29 @@ test('session token lookup prefers PromptWall cookie with legacy fallback', () =
     },
   }), promptwall);
   assert.strictEqual(auth.sessionTokenFromRequest({ cookies: {} }), '');
+});
+
+test('duplicate approver username is not enabled at runtime', () => {
+  const script = [
+    "const auth = require('./server/auth');",
+    "console.log(JSON.stringify({ enabled: auth.APPROVER_ENABLED, admin: auth.authenticate('admin', 'unit-pass'), duplicate: auth.authenticate('admin', 'approver-pass') }));",
+  ].join('');
+  const output = execFileSync(process.execPath, ['-e', script], {
+    cwd: path.join(__dirname, '..'),
+    env: {
+      ...process.env,
+      ADMIN_USER: 'admin',
+      ADMIN_PASSWORD: 'unit-pass',
+      APPROVER_USER: ' admin ',
+      APPROVER_PASSWORD: 'approver-pass',
+      SENTINEL_SECRET: 'unit-secret-stable',
+    },
+    encoding: 'utf8',
+  });
+  const result = JSON.parse(output);
+  assert.strictEqual(result.enabled, false);
+  assert.deepStrictEqual(result.admin, { user: 'admin', role: 'security_admin' });
+  assert.strictEqual(result.duplicate, null);
 });
 
 test('secret from env is reported stable (survives restarts / multi-instance)', () => {

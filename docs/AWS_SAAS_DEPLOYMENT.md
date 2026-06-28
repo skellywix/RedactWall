@@ -16,7 +16,8 @@ scoped queries, SSO, and centralized billing operations.
 - One Amazon Linux 2023 EC2 host running the existing Docker image.
 - Encrypted EBS root volume with `/var/lib/promptwall` mounted into the
   container at `/data`.
-- Secrets Manager for admin, MFA, session, data-encryption, and ingest secrets.
+- Secrets Manager for admin, optional approver and auditor, MFA, session,
+  data-encryption, and ingest secrets.
 - CloudWatch Logs for container stdout/stderr.
 - Systems Manager Session Manager for operator access. No SSH ingress is
   required by the template.
@@ -71,6 +72,8 @@ folder:
   "SENTINEL_SECRET": "replace-with-32-plus-random-chars",
   "SENTINEL_DATA_KEY": "replace-with-32-plus-random-chars",
   "INGEST_API_KEY": "ps_ingest_replace_with_32_plus_random_chars",
+  "APPROVER_USER": "approver",
+  "APPROVER_PASSWORD": "replace-with-16-plus-random-chars",
   "AUDITOR_USER": "auditor",
   "AUDITOR_PASSWORD": "replace-with-16-plus-random-chars",
   "SIEM_WEBHOOK_URL": "",
