@@ -84,9 +84,15 @@ an `alwaysBlock` entity such as `US_SSN`, `CREDIT_CARD`, `SECRET_KEY`, or
 
 ## Configure
 
-Update the advanced policy fields from the Policy tab's `Scoped enforcement
-rules` and `Time-bound exceptions` editors. The fields accept JSON arrays and
-are validated by the authenticated admin policy API.
+Use the Policy tab's guided scoped-enforcement and time-bound exception builders
+for common user, SCIM group, destination, detector, and category rules. The
+builders append validated JSON into the `Scoped enforcement rules` and
+`Time-bound exceptions` editors so Security Admins can review the exact policy
+payload before saving.
+
+Use the advanced JSON editors directly when a customer needs less common
+matchers such as org, source, or channel. The fields accept JSON arrays and are
+validated by the authenticated admin policy API.
 
 The same fields can also be managed directly through the API:
 

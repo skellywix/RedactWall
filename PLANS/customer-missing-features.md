@@ -232,9 +232,10 @@ file-upload blocks, detector ignores, scanner controls, server-side
 `policyScopes`, and server-side `policyExceptions`. Scopes can tighten
 enforcement by user, SCIM group, org, source, channel, destination, detector, or
 category. Exceptions can temporarily allow matching non-hard-stop events and are
-recorded in evidence. The Policy tab includes advanced JSON editors for scoped
-rules and exceptions. Local sensor-side scoped evaluation and exception
-owner/expiry review are still open.
+recorded in evidence. The Policy tab includes guided builders for common scoped
+rules and time-bound exceptions, plus advanced JSON editors for exact policy
+review and uncommon matcher shapes. Local sensor-side scoped evaluation and
+exception owner/expiry review are still open.
 
 Customer ask: "Can lending have a different approval path than engineering? Can
 we allow a specific vendor prompt for 24 hours without weakening the global
@@ -245,8 +246,8 @@ need limited exceptions or teams will pressure admins to loosen the baseline.
 
 Implementation connection:
 - Keep global policy as the default.
-- Replace advanced JSON editing with a guided rule-builder once customer pilots
-  prove the common rule shapes.
+- Keep the guided builders focused on common user, SCIM group, destination,
+  detector, and category rules, with advanced JSON editing for edge cases.
 - Decide whether sensors should receive a reduced scoped-policy subset once
   group identity is reliable on every endpoint.
 - Extend exceptions with owner/approval metadata and scheduled expiry review.
