@@ -1,7 +1,7 @@
 'use strict';
 require('../../server/env').loadEnv();
 /**
- * PromptSentinel MCP guard (reference implementation).
+ * PromptWall MCP guard (reference implementation).
  *
  * Sits between an MCP server and the model. When an AI agent pulls a document or
  * record through a tool call (SharePoint, Drive, a database), the guard scans

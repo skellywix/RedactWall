@@ -24,14 +24,14 @@ test('builds a standard otpauth uri for authenticator enrollment', () => {
   const uri = new URL(otpauthUri({
     secret: 'jbsw y3dp-ehpk3pxp=',
     account: 'alice@example.test',
-    issuer: 'PromptSentinel Demo',
+    issuer: 'PromptWall Demo',
   }));
 
   assert.strictEqual(uri.protocol, 'otpauth:');
   assert.strictEqual(uri.hostname, 'totp');
-  assert.strictEqual(decodeURIComponent(uri.pathname), '/PromptSentinel Demo:alice@example.test');
+  assert.strictEqual(decodeURIComponent(uri.pathname), '/PromptWall Demo:alice@example.test');
   assert.strictEqual(uri.searchParams.get('secret'), 'JBSWY3DPEHPK3PXP');
-  assert.strictEqual(uri.searchParams.get('issuer'), 'PromptSentinel Demo');
+  assert.strictEqual(uri.searchParams.get('issuer'), 'PromptWall Demo');
   assert.strictEqual(uri.searchParams.get('algorithm'), 'SHA1');
   assert.strictEqual(uri.searchParams.get('digits'), '6');
   assert.strictEqual(uri.searchParams.get('period'), '30');
@@ -69,7 +69,7 @@ test('cli reads an explicit env file and prints enrollment uri only on request',
     '--env',
     envPath,
     '--issuer',
-    'PromptSentinel Test',
+    'PromptWall Test',
   ], {
     cwd: path.join(__dirname, '..'),
     encoding: 'utf8',
@@ -77,9 +77,9 @@ test('cli reads an explicit env file and prints enrollment uri only on request',
   });
 
   assert.match(output, /Treat this MFA enrollment URI as a secret/);
-  assert.match(output, /otpauth:\/\/totp\/PromptSentinel%20Test%3Apilot-admin\?/);
+  assert.match(output, /otpauth:\/\/totp\/PromptWall%20Test%3Apilot-admin\?/);
   assert.match(output, /secret=JBSWY3DPEHPK3PXP/);
-  assert.match(output, /issuer=PromptSentinel\+Test/);
+  assert.match(output, /issuer=PromptWall\+Test/);
 });
 
 test('cli exits nonzero for invalid configured secret', () => {

@@ -50,7 +50,7 @@ function writeFixture(rootDir, opts = {}) {
   });
   writeJson(path.join(rootDir, 'sensors', 'browser-extension', 'manifest.json'), {
     manifest_version: 3,
-    name: 'PromptSentinel',
+    name: 'PromptWall',
     version,
     description: 'Fixture package',
     permissions: ['storage'],
@@ -74,7 +74,7 @@ test('package script writes a zip and prompt-free integrity manifest', (t) => {
 
   const manifest = JSON.parse(fs.readFileSync(result.manifestPath, 'utf8'));
   const zipBody = fs.readFileSync(result.zipPath);
-  assert.strictEqual(manifest.kind, 'promptsentinel-extension-package');
+  assert.strictEqual(manifest.kind, 'promptwall-extension-package');
   assert.strictEqual(manifest.sha256, sha256(zipBody));
   assert.strictEqual(manifest.extensionVersion, JSON.parse(fs.readFileSync(path.join(root, 'sensors', 'browser-extension', 'manifest.json'), 'utf8')).version);
   assert.strictEqual(manifest.appVersion, JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version);

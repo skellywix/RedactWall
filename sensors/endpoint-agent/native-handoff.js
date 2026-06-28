@@ -10,11 +10,12 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
+const { withEnvAliases } = require('../../server/env');
 
 const EVENT_VERSION = 1;
 const MAX_EVENT_BYTES = 16 * 1024;
 const DEFAULT_TTL_MS = 5 * 60 * 1000;
-const DEFAULT_HANDOFF_DIR = path.join(os.tmpdir(), 'promptsentinel-native-handoff');
+const DEFAULT_HANDOFF_DIR = path.join(os.tmpdir(), 'promptwall-native-handoff');
 const DISALLOWED_EVENT_KEYS = new Set([
   'body',
   'bytes',
@@ -51,13 +52,15 @@ const ALLOWED_DESTINATION_KEYS = new Set([
 ]);
 
 function defaultHandoffDir(env = process.env) {
-  return env.ENDPOINT_AGENT_HANDOFF_DIR || DEFAULT_HANDOFF_DIR;
+  const resolved = withEnvAliases(env);
+  return resolved.ENDPOINT_AGENT_HANDOFF_DIR || DEFAULT_HANDOFF_DIR;
 }
 
 function configuredHandoffSecret(opts = {}) {
+  const env = withEnvAliases(process.env);
   const value = Object.prototype.hasOwnProperty.call(opts, 'secret')
     ? opts.secret
-    : process.env.ENDPOINT_AGENT_HANDOFF_SECRET;
+    : env.ENDPOINT_AGENT_HANDOFF_SECRET;
   return typeof value === 'string' ? value.trim() : '';
 }
 

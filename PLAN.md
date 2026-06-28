@@ -1,8 +1,8 @@
-# PromptSentinel Production Readiness Plan
+# PromptWall Production Readiness Plan
 
 ## Goal
 
-Move PromptSentinel from working proof of loop to a credible production baseline for regulated AI usage demos and pilots.
+Move PromptWall from working proof of loop to a credible production baseline for regulated AI usage demos and pilots.
 
 ## Production Baseline Criteria
 
@@ -15,7 +15,10 @@ Move PromptSentinel from working proof of loop to a credible production baseline
 
 ## External Offering Comparison Snapshot
 
-PromptSentinel should not try to out-platform Strac, Nightfall, Cyberhaven, or Lakera immediately. The wedge is a simpler install for smaller regulated shops, with examiner-grade proof and local-first prompt protection.
+PromptWall should not try to out-platform Strac, Nightfall, Cyberhaven, or Lakera immediately. The wedge is a simpler install for smaller regulated shops, with examiner-grade proof and local-first prompt protection.
+
+The sourced comparison and near-term product implications live in
+`docs/COMPETITIVE_ALIGNMENT.md`.
 
 Observed market bar:
 
@@ -24,7 +27,7 @@ Observed market bar:
 - Cyberhaven-style products emphasize data lineage, shadow AI discovery, and visibility into where sensitive data travels.
 - Lakera-style products emphasize prompt injection, agent security, and LLM-facing runtime controls.
 
-PromptSentinel differentiators to build toward:
+PromptWall differentiators to build toward:
 
 - Local-first, examiner-friendly evidence in an afternoon install.
 - One policy, three sensors, one shared detection engine.

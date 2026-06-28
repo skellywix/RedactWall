@@ -3,12 +3,13 @@
  * SaaS/customer tenancy helpers.
  *
  * The current commercial-safe shape is a customer-silo deployment: one
- * PromptSentinel stack per paying customer. These checks make that stack behave
+ * PromptWall stack per paying customer. These checks make that stack behave
  * like a tenant-bound SaaS instance without weakening the existing audit store.
  */
 
 const UNKNOWN_USERS = new Set(['', 'unknown', 'unattributed@unmanaged']);
 const TENANT_ID = /^[a-z0-9][a-z0-9_-]{1,62}$/;
+const { withEnvAliases } = require('./env');
 
 function bool(value) {
   return ['1', 'true', 'yes', 'on'].includes(String(value || '').toLowerCase());
@@ -39,11 +40,12 @@ function isBillableUser(value) {
 }
 
 function config(env = process.env) {
-  const tenantId = normalizeTenantId(env.SENTINEL_TENANT_ID);
-  const explicitSaasMode = bool(env.SENTINEL_SAAS_MODE);
-  const requireTenantContext = bool(env.SENTINEL_REQUIRE_TENANT_CONTEXT);
-  const requireUserIdentity = bool(env.SENTINEL_REQUIRE_USER_IDENTITY);
-  const seatLimit = parseSeatLimit(env.SENTINEL_SEAT_LIMIT);
+  const resolved = withEnvAliases(env);
+  const tenantId = normalizeTenantId(resolved.SENTINEL_TENANT_ID);
+  const explicitSaasMode = bool(resolved.SENTINEL_SAAS_MODE);
+  const requireTenantContext = bool(resolved.SENTINEL_REQUIRE_TENANT_CONTEXT);
+  const requireUserIdentity = bool(resolved.SENTINEL_REQUIRE_USER_IDENTITY);
+  const seatLimit = parseSeatLimit(resolved.SENTINEL_SEAT_LIMIT);
   const saasMode = explicitSaasMode || !!tenantId || seatLimit > 0 || requireTenantContext || requireUserIdentity;
   return {
     saasMode,

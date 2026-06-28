@@ -47,7 +47,7 @@ test('production preflight passes with stable secrets and secure cookies', () =>
   const status = preflight.configStatus({
     env: {
       NODE_ENV: 'production',
-      SENTINEL_DB_PATH: '/var/lib/promptsentinel/sentinel.db',
+      SENTINEL_DB_PATH: '/var/lib/promptwall/sentinel.db',
       ADMIN_PASSWORD: 'long-admin-password',
       ADMIN_TOTP_SECRET: 'JBSWY3DPEHPK3PXP',
       INGEST_API_KEY: 'ps_ingest_' + 'a'.repeat(32),
@@ -65,11 +65,33 @@ test('production preflight passes with stable secrets and secure cookies', () =>
   assert.ok(status.checks.every((c) => c.ok));
 });
 
+test('production preflight accepts PromptWall runtime aliases', () => {
+  const status = preflight.configStatus({
+    env: {
+      NODE_ENV: 'production',
+      PROMPTWALL_DB_PATH: '/var/lib/promptwall/promptwall.db',
+      ADMIN_PASSWORD: 'long-admin-password',
+      ADMIN_TOTP_SECRET: 'JBSWY3DPEHPK3PXP',
+      PROMPTWALL_INGEST_API_KEY: 'ps_ingest_' + 'a'.repeat(32),
+      PROMPTWALL_SECRET: 's'.repeat(32),
+      PROMPTWALL_DATA_KEY: 'd'.repeat(32),
+    },
+    adminPasswordIsDefault: false,
+    ingestKeyIsDefault: false,
+    secretSource: 'env',
+    dataCryptoEnabled: true,
+    cookieSecure: true,
+  });
+  assert.strictEqual(status.ready, true);
+  assert.strictEqual(status.level, 'ok');
+  assert.ok(status.checks.every((c) => c.ok));
+});
+
 test('production preflight blocks incomplete SaaS tenant configuration', () => {
   const status = preflight.configStatus({
     env: {
       NODE_ENV: 'production',
-      SENTINEL_DB_PATH: '/var/lib/promptsentinel/sentinel.db',
+      SENTINEL_DB_PATH: '/var/lib/promptwall/sentinel.db',
       SENTINEL_SAAS_MODE: 'true',
       ADMIN_PASSWORD: 'long-admin-password',
       ADMIN_TOTP_SECRET: 'JBSWY3DPEHPK3PXP',
@@ -94,7 +116,7 @@ test('production preflight passes complete SaaS tenant configuration', () => {
   const status = preflight.configStatus({
     env: {
       NODE_ENV: 'production',
-      SENTINEL_DB_PATH: '/var/lib/promptsentinel/sentinel.db',
+      SENTINEL_DB_PATH: '/var/lib/promptwall/sentinel.db',
       SENTINEL_SAAS_MODE: 'true',
       SENTINEL_TENANT_ID: 'cu-acme',
       SENTINEL_SEAT_LIMIT: '25',
@@ -119,7 +141,7 @@ test('preflight detects SaaS settings passed directly by setup tooling', () => {
   const status = preflight.configStatus({
     env: {
       NODE_ENV: 'production',
-      SENTINEL_DB_PATH: '/var/lib/promptsentinel/sentinel.db',
+      SENTINEL_DB_PATH: '/var/lib/promptwall/sentinel.db',
       ADMIN_PASSWORD: 'long-admin-password',
       ADMIN_TOTP_SECRET: 'JBSWY3DPEHPK3PXP',
       INGEST_API_KEY: 'ps_ingest_' + 'a'.repeat(32),
@@ -143,7 +165,7 @@ test('production preflight accepts a strong optional auditor login', () => {
   const status = preflight.configStatus({
     env: {
       NODE_ENV: 'production',
-      SENTINEL_DB_PATH: '/var/lib/promptsentinel/sentinel.db',
+      SENTINEL_DB_PATH: '/var/lib/promptwall/sentinel.db',
       ADMIN_PASSWORD: 'long-admin-password',
       ADMIN_TOTP_SECRET: 'JBSWY3DPEHPK3PXP',
       AUDITOR_USER: 'auditor',
@@ -166,7 +188,7 @@ test('production preflight accepts a strong optional auditor login', () => {
 test('production preflight blocks weak or partial auditor login config', () => {
   const base = {
     NODE_ENV: 'production',
-    SENTINEL_DB_PATH: '/var/lib/promptsentinel/sentinel.db',
+    SENTINEL_DB_PATH: '/var/lib/promptwall/sentinel.db',
     ADMIN_PASSWORD: 'long-admin-password',
     ADMIN_TOTP_SECRET: 'JBSWY3DPEHPK3PXP',
     INGEST_API_KEY: 'ps_ingest_' + 'a'.repeat(32),
@@ -215,7 +237,7 @@ test('production preflight blocks custom but short secrets', () => {
   const status = preflight.configStatus({
     env: {
       NODE_ENV: 'production',
-      SENTINEL_DB_PATH: '/var/lib/promptsentinel/sentinel.db',
+      SENTINEL_DB_PATH: '/var/lib/promptwall/sentinel.db',
       ADMIN_PASSWORD: 'short-pass',
       ADMIN_TOTP_SECRET: 'JBSWY3DPEHPK3PXP',
       INGEST_API_KEY: 'short-ingest-key',
@@ -239,7 +261,7 @@ test('production preflight blocks invalid admin mfa secret', () => {
   const status = preflight.configStatus({
     env: {
       NODE_ENV: 'production',
-      SENTINEL_DB_PATH: '/var/lib/promptsentinel/sentinel.db',
+      SENTINEL_DB_PATH: '/var/lib/promptwall/sentinel.db',
       ADMIN_PASSWORD: 'long-admin-password',
       ADMIN_TOTP_SECRET: 'not-valid-!@#',
       INGEST_API_KEY: 'ps_ingest_' + 'a'.repeat(32),
@@ -263,7 +285,7 @@ test('production preflight blocks short auditor password when auditor login is c
   const status = preflight.configStatus({
     env: {
       NODE_ENV: 'production',
-      SENTINEL_DB_PATH: '/var/lib/promptsentinel/sentinel.db',
+      SENTINEL_DB_PATH: '/var/lib/promptwall/sentinel.db',
       ADMIN_PASSWORD: 'long-admin-password',
       ADMIN_TOTP_SECRET: 'JBSWY3DPEHPK3PXP',
       AUDITOR_USER: 'auditor',
@@ -289,7 +311,7 @@ test('development preflight warns on weak custom secrets without blocking demos'
   const status = preflight.configStatus({
     env: {
       NODE_ENV: 'development',
-      SENTINEL_DB_PATH: '/tmp/promptsentinel/sentinel.db',
+      SENTINEL_DB_PATH: '/tmp/promptwall/sentinel.db',
       ADMIN_PASSWORD: 'short-pass',
       INGEST_API_KEY: 'short-ingest-key',
       SENTINEL_SECRET: 'short-session-secret',
@@ -310,7 +332,7 @@ test('development preflight warns on invalid admin mfa secret without blocking d
   const status = preflight.configStatus({
     env: {
       NODE_ENV: 'development',
-      SENTINEL_DB_PATH: '/tmp/promptsentinel/sentinel.db',
+      SENTINEL_DB_PATH: '/tmp/promptwall/sentinel.db',
       ADMIN_PASSWORD: 'long-admin-password',
       ADMIN_TOTP_SECRET: 'not-valid-!@#',
       INGEST_API_KEY: 'ps_ingest_' + 'a'.repeat(32),
@@ -332,7 +354,7 @@ test('development preflight warns on weak auditor login without blocking demos',
   const status = preflight.configStatus({
     env: {
       NODE_ENV: 'development',
-      SENTINEL_DB_PATH: '/tmp/promptsentinel/sentinel.db',
+      SENTINEL_DB_PATH: '/tmp/promptwall/sentinel.db',
       ADMIN_PASSWORD: 'long-admin-password',
       AUDITOR_USER: 'auditor',
       AUDITOR_PASSWORD: 'short',
@@ -379,7 +401,7 @@ test('sqlite path classifier catches network and common cloud folders', () => {
   assert.strictEqual(preflight.cloudSyncedPathReason('\\\\fileserver\\share\\sentinel.db'), 'network share');
   assert.strictEqual(preflight.cloudSyncedPathReason('/Users/pilot/Dropbox/sentinel.db'), 'Dropbox');
   assert.strictEqual(preflight.cloudSyncedPathReason('/Users/pilot/Google Drive/sentinel.db'), 'Google Drive');
-  assert.strictEqual(preflight.cloudSyncedPathReason('/var/lib/promptsentinel/sentinel.db'), null);
+  assert.strictEqual(preflight.cloudSyncedPathReason('/var/lib/promptwall/sentinel.db'), null);
 });
 
 test('boolean env parsing accepts common true values only', () => {

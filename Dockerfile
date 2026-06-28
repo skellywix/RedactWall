@@ -1,4 +1,4 @@
-# PromptSentinel — production image (multi-stage; native better-sqlite3 built in
+# PromptWall — production image (multi-stage; native better-sqlite3 built in
 # the builder, slim runtime, non-root, healthchecked).
 FROM node:22-bookworm-slim AS builder
 WORKDIR /app

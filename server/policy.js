@@ -25,6 +25,8 @@ const DEFAULT_POLICY = {
     'chatgpt.com', 'openai.com', 'claude.ai', 'anthropic.com',
     'gemini.google.com', 'copilot.microsoft.com', 'perplexity.ai', 'poe.com',
   ],
+  blockedDestinations: [],
+  blockedFileUploadDestinations: [],
   scanner: {
     ignoreDirectories: ['node_modules', '.git', 'Library', 'Applications', 'AppData'],
     ignoreFilenames: ['thumbs.db', '.ds_store', 'package.json', 'package-lock.json'],
@@ -43,6 +45,8 @@ const AUDIT_FIELDS = [
   'ignore',
   'disabledDetectors',
   'governedDestinations',
+  'blockedDestinations',
+  'blockedFileUploadDestinations',
   'scanner',
 ];
 
@@ -103,6 +107,43 @@ function rawRetentionDays(policy = loadPolicy()) {
   return Math.max(0, Math.min(3650, Math.floor(n)));
 }
 
+function normalizeDestination(value) {
+  const raw = String(value || '').trim().toLowerCase().replace(/\s+/g, '-');
+  if (!raw) return 'unknown';
+  try {
+    const url = raw.includes('://') ? new URL(raw) : new URL(`https://${raw}`);
+    return url.hostname.replace(/^www\./, '');
+  } catch {
+    return raw.replace(/^www\./, '').split(/[/?#]/)[0] || 'unknown';
+  }
+}
+
+function destinationMatches(destination, patterns) {
+  const host = normalizeDestination(destination);
+  return (patterns || []).some((pattern) => {
+    const target = normalizeDestination(pattern);
+    if (!target || target === 'unknown') return false;
+    if (target === '*') return true;
+    if (target.startsWith('*.')) {
+      const base = target.slice(2);
+      return host.endsWith('.' + base);
+    }
+    if (target.startsWith('*')) {
+      const base = target.slice(1).replace(/^\./, '');
+      return host === base || host.endsWith('.' + base);
+    }
+    return host === target || host.endsWith('.' + target);
+  });
+}
+
+function destinationBlocked(destination, policy = loadPolicy()) {
+  return destinationMatches(destination, policy.blockedDestinations || []);
+}
+
+function fileUploadBlocked(destination, policy = loadPolicy()) {
+  return destinationMatches(destination, policy.blockedFileUploadDestinations || []);
+}
+
 function evaluate(analysis, policy = loadPolicy()) {
   const reasons = [];
   const findings = (analysis.findings || []).filter((f) => !(policy.ignore || []).includes(f.type));
@@ -122,4 +163,17 @@ function evaluate(analysis, policy = loadPolicy()) {
   return { decision, reasons, policy };
 }
 
-module.exports = { loadPolicy, savePolicy, evaluate, analyzeOpts, rawRetentionDays, policyChangeSummary, policyChangeDetail, DEFAULT_POLICY };
+module.exports = {
+  loadPolicy,
+  savePolicy,
+  evaluate,
+  analyzeOpts,
+  rawRetentionDays,
+  normalizeDestination,
+  destinationMatches,
+  destinationBlocked,
+  fileUploadBlocked,
+  policyChangeSummary,
+  policyChangeDetail,
+  DEFAULT_POLICY,
+};

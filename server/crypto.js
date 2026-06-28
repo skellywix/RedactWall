@@ -1,6 +1,6 @@
 'use strict';
 /**
- * At-rest encryption for the one piece of cleartext PromptSentinel must
+ * At-rest encryption for the one piece of cleartext PromptWall must
  * sometimes retain: the raw prompt of an item HELD for admin approval.
  *
  * Everything else stored (redacted prompt, masked findings, categories) is
@@ -19,6 +19,8 @@ const crypto = require('crypto');
 
 const KEY_SRC = process.env.SENTINEL_DATA_KEY || process.env.SENTINEL_SECRET || '';
 const ENABLED = KEY_SRC.length > 0;
+// Keep the original namespace so renamed deployments can still open retained
+// approval records sealed before the PromptWall rebrand.
 const KEY = ENABLED ? crypto.createHash('sha256').update('promptsentinel:data-key:v1:' + KEY_SRC).digest() : null;
 const PREFIX = 'enc:v1:';
 

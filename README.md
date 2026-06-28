@@ -1,17 +1,23 @@
-# PromptSentinel
+# PromptWall
 
 **Stop sensitive data from reaching AI tools — before it leaves the device.**
 
-PromptSentinel inspects what people type, paste, or upload into ChatGPT, Claude,
+PromptWall inspects what people type, paste, or upload into ChatGPT, Claude,
 Copilot, and Gemini, and **warns, asks for justification, or blocks** based on your
 policy. Detection runs locally (instant, nothing leaves the device just to be
 scanned), and every event flows to one simple dashboard with a full audit trail.
+The same policy can also block entire AI destinations before prompt or file
+content is analyzed.
 
 Built to be **simple to deploy** for regulated teams (credit unions / NCUA, GLBA,
 HIPAA, PCI-DSS): install the browser extension, pick one of three policy modes, done.
 
 > Inspired by enterprise DLP platforms (e.g. Strac) but deliberately stripped down:
 > one extension, three policy toggles, one dashboard — not 30 SaaS connectors.
+
+See `docs/COMPETITIVE_ALIGNMENT.md` for the current competitor-backed product
+alignment notes and `PLANS/promptwall-product-alignment.md` for the broader
+rename and product-readiness contract.
 
 ---
 
@@ -21,7 +27,7 @@ HIPAA, PCI-DSS): install the browser extension, pick one of three policy modes, 
   WHERE DATA LEAKS                     ONE CONTROL PLANE
   ┌─────────────────────────┐
   │ 🌐 Browser extension     │──┐      ┌───────────────────────────┐
-  │   type / paste / upload  │  │      │  PromptSentinel server    │
+  │   type / paste / upload  │  │      │  PromptWall server    │
   ├─────────────────────────┤  │      │                           │
   │ 💻 Endpoint agent        │  ├────► │  • policy (warn/justify/  │
   │   files to desktop AI    │  │      │    block)                 │
@@ -48,6 +54,25 @@ Hard-stop items (SSN, cards, bank/routing, secrets, private keys) always block �
 or, in **Redact** mode, are tokenized — regardless of the chosen mode. One-click
 **regulation templates** (NCUA/GLBA, PCI-DSS, HIPAA, Baseline, Redact-first) set
 sensible modes, thresholds, and hard-stops for you.
+
+## Destination controls
+
+The Policy tab maintains two destination lists:
+
+- `governedDestinations`: AI hosts that should be covered and counted in the
+  Coverage tab.
+- `blockedDestinations`: AI hosts or desktop app labels that are forbidden.
+  Browser sends, browser file uploads, endpoint file flows, gateway prompts,
+  uploaded files, and response scans short-circuit as `destination_blocked`
+  before prompt or file content is analyzed or retained.
+- `blockedFileUploadDestinations`: AI hosts or desktop app labels where normal
+  chat is allowed but file uploads are forbidden. Browser/API uploads and
+  endpoint file flows short-circuit as `file_upload_blocked` before uploaded
+  bytes, extracted text, or sensitive filenames are retained.
+
+Entries accept exact hosts, URLs, subdomains, and wildcards such as
+`*.example-ai.com`. Desktop labels normalize spaces to hyphens, so a native
+handoff destination like `Desktop AI` can be blocked with `desktop-ai`.
 
 ## Hybrid detection (local, fast, semantic, pluggable)
 
@@ -85,7 +110,7 @@ People paste *and upload* sensitive files into AI tools. A **processor layer**
 text formats) so uploads get the same detection as typed prompts. The endpoint
 agent uses it locally for every watched file and reports only sanitized evidence
 to the control plane. In redact mode, structured-only endpoint findings also
-produce a local `.promptsentinel-redacted/*.txt` companion file with typed
+produce a local `.promptwall-redacted/*.txt` companion file with typed
 placeholders and no token vault; semantic or mixed findings stay held for
 review. A signed native handoff prototype also lets a future desktop collector
 write content-free upload-intent events for absolute local files, so the agent
@@ -146,6 +171,9 @@ commercial path for the current codebase is a customer-silo AWS stack with one
 tenant id, a paid seat limit, managed sensor identity, and local EBS-backed
 SQLite evidence storage.
 
+For technician-led customer installs, use `docs/TECHNICIAN_DEPLOYMENT_GUIDE.md`
+as the production readiness runbook and handoff checklist.
+
 ### Try the browser extension (flagship)
 
 1. Chrome → Extensions → enable Developer mode → **Load unpacked** → select the
@@ -189,7 +217,7 @@ node sensors/endpoint-agent/write-handoff.js --file <path> --destination "Deskto
 For a Windows pilot, install the endpoint sensor as a logon task:
 
 ```powershell
-.\scripts\install-endpoint-agent.ps1 -SentinelUrl "https://promptsentinel.example.com" -IngestKey "<pilot-ingest-key>"
+.\scripts\install-endpoint-agent.ps1 -SentinelUrl "https://promptwall.example.com" -IngestKey "<pilot-ingest-key>"
 ```
 
 The native handoff writer is a safe collector shim for pilots and future OS/app hooks. It signs a bounded upload-intent JSON file with the local endpoint config secret, references only an absolute local file path, and never reads file bytes or accepts the handoff secret as a command-line argument.
@@ -205,7 +233,19 @@ npm run backup -- backups  # SQLite audit-store backup + verification manifest
 
 ## Development and Git workflow
 
-The repository uses one Git source of truth: this `promptsentinel/` folder. If your terminal is in the parent `promptsentinel-app/` workspace, run `cd promptsentinel` before source edits, `npm` commands, commits, or pushes.
+The repository uses one Git source of truth: this app repo folder. In the current
+checkout that folder is still `promptsentinel/` under the `promptsentinel-app/`
+workspace wrapper, so run `cd promptsentinel` before source edits, `npm`
+commands, commits, or pushes. The product name is PromptWall; after Codex,
+editors, terminals, and Git status watchers are closed, finish the local folder
+rename from the wrapper with:
+
+```powershell
+Rename-Item -LiteralPath .\promptsentinel -NewName promptwall
+```
+
+After that, run source edits, `npm` commands, commits, and pushes from
+`promptwall/`.
 
 This repo is configured with a review-first workflow:
 
@@ -249,6 +289,7 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 | Reversible redaction | Working — tokenize/detokenize, sealed vault, `/api/v1/rehydrate` |
 | Browser extension | Working — warn/justify/**redact**/block, real-button send, MDM identity, Man-in-the-Prompt guard |
 | Shadow-AI discovery | Working — flags use of ungoverned AI tools |
+| Destination controls | Working — governed destination coverage, full destination blocking, and file-upload-only blocking across browser, endpoint, gate, file, and response paths |
 | Output scanning | Working — `/api/v1/scan-response` flags PII/secrets in AI replies |
 | MCP guard / Endpoint agent | Working references - inline/MCP redaction; local endpoint folder watch plus signed native file-flow handoff prototype; redacted companion files for structured-only findings |
 | Auth & ops | Working: login lockout, password-confirmed raw reveal and release approval, release-token scoped polling, stable secret, `/healthz` · `/readyz` · `/api/metrics`, sensor version posture, Docker, CI |
@@ -303,6 +344,29 @@ Copy `.env.example` to `.env` (or export):
 | `SIEM_WEBHOOK_URL` | Optional sanitized webhook for high-risk security events, sensor version gaps, and failed admin step-up checks |
 | `SIEM_WEBHOOK_TOKEN` | Optional bearer token for the SIEM webhook |
 | `SIEM_ALERT_MIN_RISK` / `SIEM_ALERT_MIN_SEVERITY` | Alert thresholds for allowed-but-risky events; blocked and response-flagged events alert automatically |
+
+PromptWall also accepts product-prefixed aliases for new deployments while
+preserving the older `SENTINEL_*` and endpoint keys for existing installs. Use
+one family per setting; a non-empty legacy key wins when both are set.
+
+| Existing key | PromptWall alias |
+|--------------|------------------|
+| `SENTINEL_ENV_PATH` | `PROMPTWALL_ENV_PATH` |
+| `SENTINEL_URL` | `PROMPTWALL_URL` |
+| `SENTINEL_DB_PATH` | `PROMPTWALL_DB_PATH` |
+| `SENTINEL_POLICY_PATH` | `PROMPTWALL_POLICY_PATH` |
+| `SENTINEL_SAAS_MODE` | `PROMPTWALL_SAAS_MODE` |
+| `SENTINEL_TENANT_ID` | `PROMPTWALL_TENANT_ID` |
+| `SENTINEL_SEAT_LIMIT` | `PROMPTWALL_SEAT_LIMIT` |
+| `SENTINEL_REQUIRE_TENANT_CONTEXT` | `PROMPTWALL_REQUIRE_TENANT_CONTEXT` |
+| `SENTINEL_REQUIRE_USER_IDENTITY` | `PROMPTWALL_REQUIRE_USER_IDENTITY` |
+| `SENTINEL_SECRET` | `PROMPTWALL_SECRET` |
+| `SENTINEL_DATA_KEY` | `PROMPTWALL_DATA_KEY` |
+| `SENTINEL_REQUEST_TIMEOUT_MS` | `PROMPTWALL_REQUEST_TIMEOUT_MS` |
+| `INGEST_API_KEY` | `PROMPTWALL_INGEST_API_KEY` |
+| `ENDPOINT_AGENT_WATCH_DIR` | `PROMPTWALL_ENDPOINT_AGENT_WATCH_DIR` |
+| `ENDPOINT_AGENT_HANDOFF_DIR` | `PROMPTWALL_ENDPOINT_AGENT_HANDOFF_DIR` |
+| `ENDPOINT_AGENT_HANDOFF_SECRET` | `PROMPTWALL_ENDPOINT_AGENT_HANDOFF_SECRET` |
 
 Production preflight requires Security Admin MFA through `ADMIN_TOTP_SECRET`,
 custom secrets with minimum lengths, 16 characters for `ADMIN_PASSWORD` and

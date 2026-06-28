@@ -1,4 +1,4 @@
-# PromptSentinel — Project Review
+# PromptWall — Project Review
 
 Reviewed against the stated end goal: *a compliance-grade safety layer that lets a regulated company adopt AI without leaking customer data, and that an examiner will trust.*
 

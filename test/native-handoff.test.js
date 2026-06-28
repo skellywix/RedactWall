@@ -90,3 +90,22 @@ test('native handoff files are size-bounded and require a configured secret', (t
   fs.writeFileSync(largePath, 'x'.repeat(handoff.MAX_EVENT_BYTES + 1));
   assert.throws(() => handoff.readHandoffFile(largePath, { secret: SECRET }), /too large/);
 });
+
+test('native handoff accepts PromptWall endpoint env aliases', () => {
+  const oldSecret = process.env.ENDPOINT_AGENT_HANDOFF_SECRET;
+  const oldPromptWallSecret = process.env.PROMPTWALL_ENDPOINT_AGENT_HANDOFF_SECRET;
+  delete process.env.ENDPOINT_AGENT_HANDOFF_SECRET;
+  process.env.PROMPTWALL_ENDPOINT_AGENT_HANDOFF_SECRET = SECRET;
+  try {
+    assert.strictEqual(
+      handoff.defaultHandoffDir({ PROMPTWALL_ENDPOINT_AGENT_HANDOFF_DIR: 'C:/PromptWall/handoff' }),
+      'C:/PromptWall/handoff',
+    );
+    assert.strictEqual(handoff.configuredHandoffSecret(), SECRET);
+  } finally {
+    if (oldSecret === undefined) delete process.env.ENDPOINT_AGENT_HANDOFF_SECRET;
+    else process.env.ENDPOINT_AGENT_HANDOFF_SECRET = oldSecret;
+    if (oldPromptWallSecret === undefined) delete process.env.PROMPTWALL_ENDPOINT_AGENT_HANDOFF_SECRET;
+    else process.env.PROMPTWALL_ENDPOINT_AGENT_HANDOFF_SECRET = oldPromptWallSecret;
+  }
+});

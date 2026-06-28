@@ -21,7 +21,7 @@ test('AWS customer-silo template enforces tenant and seat parameters', () => {
 test('AWS customer-silo template uses local EBS-backed data and Secrets Manager', () => {
   assert.match(template, /VolumeType: gp3/);
   assert.match(template, /Encrypted: true/);
-  assert.match(template, /-v \/var\/lib\/promptsentinel:\/data/);
+  assert.match(template, /-v \/var\/lib\/promptwall:\/data/);
   assert.match(template, /secretsmanager:GetSecretValue/);
   assert.match(template, /HealthCheckPath: \/readyz/);
 });

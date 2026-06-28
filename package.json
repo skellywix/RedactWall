@@ -1,5 +1,5 @@
 {
-  "name": "promptsentinel",
+  "name": "promptwall",
   "version": "0.3.0",
   "description": "Inline DLP gateway for AI chat prompts - detects PII, blocks risky prompts, reversibly redacts, and releases only after Security Admin approval. Built for compliance (NCUA/GLBA/PCI/HIPAA) at credit unions and similar.",
   "main": "server/app.js",
@@ -15,7 +15,7 @@
     "setup:check": "node scripts/setup.js --check --skip-install",
     "mfa:uri": "node scripts/mfa-uri.js",
     "start": "node server/app.js",
-    "test": "node --test",
+    "test": "node --test --test-concurrency=1",
     "test:browser": "playwright test",
     "simulate": "node scripts/simulate.js",
     "fire-drill": "node scripts/fire-drill.js",

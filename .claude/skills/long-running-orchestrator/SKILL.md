@@ -21,7 +21,7 @@ description: For tasks too big for one context window. Breaks the objective into
   - test coverage (`node --test --experimental-test-coverage`), startup/latency, or extension bundle size.
 - **Scored experiments:** when you have an evaluator, run dozens of attempts and keep the best (e.g. tuning semantic thresholds against a labeled corpus, scored automatically).
 
-## Invariants every step must hold (PromptSentinel)
+## Invariants every step must hold (PromptWall)
 `npm test` green · `npm run sync-check` green · semantic model regenerated via `npm run train-semantic` only (deterministic) · `verifyAuditChain()` ok. A step that breaks any of these rolls back.
 
 ## Pairs with

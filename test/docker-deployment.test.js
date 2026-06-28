@@ -26,29 +26,42 @@ test('docker compose passes production setup secrets into the container', () => 
   const env = composeEnvironment();
   for (const key of [
     'SENTINEL_SAAS_MODE',
+    'PROMPTWALL_SAAS_MODE',
     'SENTINEL_TENANT_ID',
+    'PROMPTWALL_TENANT_ID',
     'SENTINEL_SEAT_LIMIT',
+    'PROMPTWALL_SEAT_LIMIT',
     'SENTINEL_REQUIRE_TENANT_CONTEXT',
+    'PROMPTWALL_REQUIRE_TENANT_CONTEXT',
     'SENTINEL_REQUIRE_USER_IDENTITY',
+    'PROMPTWALL_REQUIRE_USER_IDENTITY',
     'ADMIN_USER',
     'ADMIN_PASSWORD',
     'ADMIN_TOTP_SECRET',
     'AUDITOR_USER',
     'AUDITOR_PASSWORD',
     'SENTINEL_SECRET',
+    'PROMPTWALL_SECRET',
     'SENTINEL_DATA_KEY',
+    'PROMPTWALL_DATA_KEY',
     'INGEST_API_KEY',
+    'PROMPTWALL_INGEST_API_KEY',
+    'SENTINEL_REQUEST_TIMEOUT_MS',
+    'PROMPTWALL_REQUEST_TIMEOUT_MS',
   ]) {
     assert.ok(env.has(key), key);
     assert.match(env.get(key), new RegExp(`\\$\\{${key}`), key);
   }
+  assert.doesNotMatch(env.get('INGEST_API_KEY'), /dev-ingest-key/);
+  assert.doesNotMatch(env.get('SENTINEL_SAAS_MODE'), /false/);
+  assert.doesNotMatch(env.get('SENTINEL_REQUEST_TIMEOUT_MS'), /10000/);
 });
 
 test('docker compose keeps sqlite state on a named local volume', () => {
   const env = composeEnvironment();
   assert.strictEqual(env.get('SENTINEL_DB_PATH'), '/data/sentinel.db');
-  assert.match(compose, /-\s*promptsentinel-data:\/data/);
-  assert.match(compose, /^volumes:\r?\n\s+promptsentinel-data:/m);
+  assert.match(compose, /-\s*promptwall-data:\/data/);
+  assert.match(compose, /^volumes:\r?\n\s+promptwall-data:/m);
   assert.doesNotMatch(compose, /\.\.?:\/data/);
 });
 

@@ -52,7 +52,7 @@ let sdb;
 try {
   sdb = openAt(DB_PATH);
 } catch (e) {
-  const fallback = path.join(os.tmpdir(), 'promptsentinel', 'sentinel.db');
+  const fallback = path.join(os.tmpdir(), 'promptwall', 'sentinel.db');
   console.error(`[db] store at ${DB_PATH} unusable (${e.code || e.message}); falling back to ${fallback}. ` +
     'Set SENTINEL_DB_PATH to a local-disk path in production (never a cloud-synced folder).');
   DB_PATH = fallback;
@@ -161,6 +161,8 @@ const STATS_BLOCKED_STATUSES = [
   'pending_justification',
   'denied',
   'blocked_by_user',
+  'destination_blocked',
+  'file_upload_blocked',
   'injection_blocked',
   'file_blocked_unscanned',
   'response_flagged',

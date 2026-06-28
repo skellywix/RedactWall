@@ -1,4 +1,4 @@
-# PromptSentinel — Iteration Log
+# PromptWall — Iteration Log
 
 A record of the self-improvement passes taken to move the project from "skeleton
 that proves the loop" toward production-ready, benchmarked against commercial AI
@@ -112,7 +112,8 @@ grew from 11 passing / 3 known-failing to **42 passing / 0 failing / 0 todo**.
 - Aligned the source layout around `detection-engine/`, `sensors/`, and `server/`.
 
 This iteration keeps local change quality and GitHub sync aligned to a single repository path:
-`promptsentinel/`.
+the active app repo folder (`promptsentinel/` in this checkout until the
+physical folder migration is completed).
 
 ### Test growth
 | Pass | Iteration |

@@ -1,6 +1,6 @@
 ---
 name: daily-triage-loop
-description: Scheduled discovery + triage loop. Each run scans CI failures, open issues, recent commits, and PromptSentinel health (tests, engine sync, audit-chain) and writes a prioritized findings list to STATUS.md. Read-only on code. This is the heartbeat the other loops react to. Invoke with /daily-triage-loop or schedule with /loop.
+description: Scheduled discovery + triage loop. Each run scans CI failures, open issues, recent commits, and PromptWall health (tests, engine sync, audit-chain) and writes a prioritized findings list to STATUS.md. Read-only on code. This is the heartbeat the other loops react to. Invoke with /daily-triage-loop or schedule with /loop.
 ---
 
 # Daily Triage Loop
@@ -18,7 +18,7 @@ The recurring trigger that surfaces work without you asking. It NEVER edits appl
    - CI: `gh run list --status failure --limit 20` and read failing logs.
    - Issues: `gh issue list --label bug` and `gh issue list --label quick-win`.
    - Recent change: `git log --since="yesterday" --oneline`.
-   - PromptSentinel health checks:
+   - PromptWall health checks:
      - `npm test` — note any failing files (`test/*.test.js`).
      - `npm run sync-check` — confirms `detection-engine/detect.js` matches `sensors/browser-extension/lib/detect.js`. A mismatch is a release blocker.
      - Audit integrity: `node -e "const db=require('./server/db'); console.log(db.verifyAuditChain())"` — the hash-chain must report `ok:true`.

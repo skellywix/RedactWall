@@ -70,7 +70,7 @@ function validateRuntimeFiles(files) {
   if (/contentBase64|\/api\/v1\/scan-file/.test(agent)) {
     throw new Error('Endpoint agent package must inspect files locally without uploading file bodies');
   }
-  if (!/redacted_available/.test(agent) || !/\.promptsentinel-redacted/.test(agent)) {
+  if (!/redacted_available/.test(agent) || !/\.promptwall-redacted/.test(agent)) {
     throw new Error('Endpoint agent package must include the local redacted companion handoff');
   }
   if (!/native-handoff/.test(agent) || !/ENDPOINT_AGENT_HANDOFF_SECRET/.test(agent)) {
@@ -120,7 +120,7 @@ function packageEndpointAgent(opts = {}) {
   validateRuntimeFiles(files);
 
   fs.mkdirSync(outDir, { recursive: true });
-  const baseName = `promptsentinel-endpoint-agent-v${appVersion}`;
+  const baseName = `promptwall-endpoint-agent-v${appVersion}`;
   const zipPath = path.join(outDir, `${baseName}.zip`);
   const manifestPath = path.join(outDir, `${baseName}.manifest.json`);
   const zip = new AdmZip();
@@ -132,7 +132,7 @@ function packageEndpointAgent(opts = {}) {
   zip.writeZip(zipPath);
   const zipBody = fs.readFileSync(zipPath);
   const packageManifest = {
-    kind: 'promptsentinel-endpoint-agent-package',
+    kind: 'promptwall-endpoint-agent-package',
     packageName: path.basename(zipPath),
     appVersion,
     createdAt: now.toISOString(),

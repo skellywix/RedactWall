@@ -1,5 +1,5 @@
 /*
- * PromptSentinel site adapters + safety helpers (browser-safe, zero deps).
+ * PromptWall site adapters + safety helpers (browser-safe, zero deps).
  * Shared by the content script and the background worker. Pure functions only
  * (no DOM), so they are unit-testable in Node and identical on every sensor.
  *
@@ -39,7 +39,28 @@
     'notion.so', 'phind.com', 'chatbot.theb.ai', 'coral.cohere.com', 'replicate.com',
   ];
 
-  function hostMatches(host, base) { return host === base || host.endsWith('.' + base); }
+  function normalizeHost(value) {
+    const raw = String(value || '').trim().toLowerCase().replace(/\s+/g, '-');
+    if (!raw) return 'unknown';
+    try {
+      const url = raw.includes('://') ? new URL(raw) : new URL('https://' + raw);
+      return url.hostname.replace(/^www\./, '');
+    } catch (_) {
+      return raw.replace(/^www\./, '').split(/[/?#]/)[0] || 'unknown';
+    }
+  }
+  function hostMatches(host, base) {
+    const h = normalizeHost(host);
+    const b = normalizeHost(base);
+    if (!b || b === 'unknown') return false;
+    if (b === '*') return true;
+    if (b.startsWith('*.')) return h.endsWith('.' + b.slice(2));
+    if (b.startsWith('*')) {
+      const suffix = b.slice(1).replace(/^\./, '');
+      return h === suffix || h.endsWith('.' + suffix);
+    }
+    return h === b || h.endsWith('.' + b);
+  }
   function isGoverned(host, governed) { return (governed || []).some((g) => hostMatches(host, g)); }
   function isAiHost(host) { return AI_HOSTS.some((h) => hostMatches(host, h)); }
 
@@ -61,7 +82,7 @@
     return { suspicious: reasons.length > 0, reasons, stripped };
   }
 
-  const api = { SEND_BUTTONS, GENERIC_SEND, sendButtonSelectors, AI_HOSTS, isGoverned, isAiHost, hostMatches, scanInjection };
+  const api = { SEND_BUTTONS, GENERIC_SEND, sendButtonSelectors, AI_HOSTS, normalizeHost, isGoverned, isAiHost, hostMatches, scanInjection };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (root) root.PSAdapters = api;
 })(typeof window !== 'undefined' ? window : (typeof self !== 'undefined' ? self : null));

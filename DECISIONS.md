@@ -1,6 +1,6 @@
-# PromptSentinel Production Loop Decisions
+# PromptWall Production Loop Decisions
 
-- 2026-06-27: Use a single local source of truth at `promptsentinel/` and require a review-gated git workflow for all changes. `npm run hooks:install` sets `.githooks`, `pre-commit` enforces `npm run review:agent`, and `post-commit` only pushes after `npm run review:ci` passes. For substantive Codex-driven changes, run a separate checker/review agent before handoff.
+- 2026-06-27: Use a single local source of truth at the active app repo folder and require a review-gated git workflow for all changes. In this checkout the folder is still `promptsentinel/` until the physical folder migration completes, while the product and package name are PromptWall. `npm run hooks:install` sets `.githooks`, `pre-commit` enforces `npm run review:agent`, and `post-commit` only pushes after `npm run review:ci` passes. For substantive Codex-driven changes, run a separate checker/review agent before handoff.
 - 2026-06-26: Use one verified pass per commit. Each pass must leave `npm test`, `npm run sync-check`, and audit integrity green.
 - 2026-06-26: Compete on simple regulated deployment and examiner-grade evidence, not breadth-first connector count.
 - 2026-06-26: Eccentric ideas are welcome only when they make the product easier to trust, operate, or demo.
@@ -33,8 +33,8 @@
 - 2026-06-26: Native endpoint interception starts with a signed local handoff contract. OS/app collectors may write bounded upload-intent JSON with destination metadata and an absolute local file path, but never file bytes, prompt text, `contentBase64`, or raw document content; the endpoint agent remains responsible for local extraction, detection, policy, and sanitized reporting.
 - 2026-06-26: Native handoff events are an allowlisted contract, not an extensible metadata bag. Unknown top-level or destination fields are rejected so future collectors cannot smuggle prompt text, file bytes, or operator notes under creative field names.
 - 2026-06-26: Native desktop hooks should call the packaged handoff writer instead of building event JSON themselves. The writer loads the local handoff secret from endpoint config, refuses command-line secret handling, checks the reference is a local file, and writes one atomic metadata-only event.
-- 2026-06-26: SaaS tenant enforcement runs before `/api/v1/scan-file` decodes uploaded file bodies. Cross-tenant or unscoped sensor traffic should be rejected before PromptSentinel spends memory or CPU on customer content.
-- 2026-06-26: Canary tokens use explicit `PS-CANARY-...` or `PROMPTSENTINEL-CANARY-...` formats with enough suffix entropy to avoid flagging ordinary discussion of canaries.
+- 2026-06-26: SaaS tenant enforcement runs before `/api/v1/scan-file` decodes uploaded file bodies. Cross-tenant or unscoped sensor traffic should be rejected before PromptWall spends memory or CPU on customer content.
+- 2026-06-26: Canary tokens use explicit `PS-CANARY-...` or `PROMPTWALL-CANARY-...` formats with enough suffix entropy to avoid flagging ordinary discussion of canaries.
 - 2026-06-26: Managed Chrome deployment examples are treated as secret-bearing config because managed storage carries the ingest key. Source examples must keep placeholders only.
 - 2026-06-26: Examiner evidence should be product-visible through the dashboard, but the UI must call only the sanitized evidence endpoint and never reveal raw prompt data.
 - 2026-06-26: Policy governance evidence can expose allowlisted policy diffs because policy config is operational metadata. Free-form audit details remain hashed to avoid leaking sensitive prompt context.
@@ -43,7 +43,7 @@
 - 2026-06-26: Canary controls should be operational fire drills, not only detector examples. A passing drill requires detection plus no raw canary value in the API response.
 - 2026-06-26: Keep the admin frontend static and dependency-light for the pilot console. Prefer CSP-safe external assets over a React/Vite migration until dashboard complexity justifies a build chain.
 - 2026-06-26: Use Express 5 plus Helmet as the backend baseline. Do not migrate to Fastify until schema-first APIs or throughput pressure outweigh route migration risk.
-- 2026-06-26: Use Zod for route-local request contracts. PromptSentinel needs compact runtime validation and sanitized field-only errors now; JSON Schema/Ajv can wait until external API schemas become a published integration surface.
+- 2026-06-26: Use Zod for route-local request contracts. PromptWall needs compact runtime validation and sanitized field-only errors now; JSON Schema/Ajv can wait until external API schemas become a published integration surface.
 - 2026-06-26: Treat unreadable supported files as blocked unscanned events. The product should never allow a `.pdf`, `.docx`, `.xlsx`, or `.pptx` just because the parser returned no text or timed out.
 - 2026-06-26: Valid ingest keys should bypass invalid-key throttles. The throttle is for probes and typos, not a mechanism that can pin healthy managed sensors offline after a few bad attempts.
 - 2026-06-26: Browser E2E runs against isolated temp DB and temp policy files. Tests can exercise real admin writes and downloads without mutating `config/policy.json` or leaving demo data behind.
@@ -54,7 +54,7 @@
 - 2026-06-26: MCP tool-output redaction must respect centralized detection policy. Local MCP defaults are acceptable only until the guard can refresh `ignore` and `disabledDetectors` from the control plane.
 - 2026-06-26: Endpoint supported-file scans must fail closed on control-plane timeout, auth failure, or malformed scan verdict. Returning `null` is not enough for a DLP sensor because the local file path must stay blocked.
 - 2026-06-26: Keep CI action versions on maintained current major lines when GitHub reports runtime deprecations. Green checks with platform warnings are still maintenance debt for a production-readiness branch.
-- 2026-06-26: Proxy/ICAP enforcement must fail closed when the control plane is unreachable or returns an unusable verdict. A proxy path cannot forward a prompt unless PromptSentinel explicitly allows or an approved hold is released.
+- 2026-06-26: Proxy/ICAP enforcement must fail closed when the control plane is unreachable or returns an unusable verdict. A proxy path cannot forward a prompt unless PromptWall explicitly allows or an approved hold is released.
 - 2026-06-26: Coverage posture can be product-visible only as aggregate control metadata. It may count governed destinations, sensors, users, and shadow-AI sightings, but it must not expose prompt bodies, raw prompts, or decision notes.
 - 2026-06-26: Browser warn/justify proceeds must be recorded before resend. If the control plane is unreachable or returns an unusable verdict, the extension blocks the sensitive send until audit capture is available.
 - 2026-06-26: `/api/v1/policy` is the contract for all deployed sensors. It must include detector ignore/disable settings and scanner controls, while leaving admin-only raw-retention settings out of the sensor payload.

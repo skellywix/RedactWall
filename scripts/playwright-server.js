@@ -8,7 +8,7 @@ const os = require('os');
 const path = require('path');
 
 const root = path.join(__dirname, '..');
-const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'promptsentinel-e2e-'));
+const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'promptwall-e2e-'));
 const policyPath = path.join(tempDir, 'policy.json');
 fs.copyFileSync(path.join(root, 'config', 'policy.json'), policyPath);
 

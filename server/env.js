@@ -6,8 +6,48 @@
 const fs = require('fs');
 const path = require('path');
 
+const ENV_ALIASES = [
+  ['SENTINEL_ENV_PATH', 'PROMPTWALL_ENV_PATH'],
+  ['SENTINEL_URL', 'PROMPTWALL_URL'],
+  ['SENTINEL_DB_PATH', 'PROMPTWALL_DB_PATH'],
+  ['SENTINEL_POLICY_PATH', 'PROMPTWALL_POLICY_PATH'],
+  ['SENTINEL_SAAS_MODE', 'PROMPTWALL_SAAS_MODE'],
+  ['SENTINEL_TENANT_ID', 'PROMPTWALL_TENANT_ID'],
+  ['SENTINEL_SEAT_LIMIT', 'PROMPTWALL_SEAT_LIMIT'],
+  ['SENTINEL_REQUIRE_TENANT_CONTEXT', 'PROMPTWALL_REQUIRE_TENANT_CONTEXT'],
+  ['SENTINEL_REQUIRE_USER_IDENTITY', 'PROMPTWALL_REQUIRE_USER_IDENTITY'],
+  ['SENTINEL_SECRET', 'PROMPTWALL_SECRET'],
+  ['SENTINEL_DATA_KEY', 'PROMPTWALL_DATA_KEY'],
+  ['SENTINEL_REQUEST_TIMEOUT_MS', 'PROMPTWALL_REQUEST_TIMEOUT_MS'],
+  ['INGEST_API_KEY', 'PROMPTWALL_INGEST_API_KEY'],
+  ['ENDPOINT_AGENT_WATCH_DIR', 'PROMPTWALL_ENDPOINT_AGENT_WATCH_DIR'],
+  ['ENDPOINT_AGENT_HANDOFF_DIR', 'PROMPTWALL_ENDPOINT_AGENT_HANDOFF_DIR'],
+  ['ENDPOINT_AGENT_HANDOFF_SECRET', 'PROMPTWALL_ENDPOINT_AGENT_HANDOFF_SECRET'],
+];
+
+function configured(value) {
+  return value != null && String(value).trim() !== '';
+}
+
+function applyEnvAliases(env = process.env) {
+  const aliases = [];
+  for (const [legacy, promptwall] of ENV_ALIASES) {
+    if (!configured(env[legacy]) && configured(env[promptwall])) {
+      env[legacy] = env[promptwall];
+      aliases.push({ key: legacy, source: promptwall });
+    }
+  }
+  return aliases;
+}
+
+function withEnvAliases(env = {}) {
+  const copy = { ...(env || {}) };
+  applyEnvAliases(copy);
+  return copy;
+}
+
 function defaultEnvPath() {
-  return process.env.SENTINEL_ENV_PATH || path.join(__dirname, '..', '.env');
+  return process.env.SENTINEL_ENV_PATH || process.env.PROMPTWALL_ENV_PATH || path.join(__dirname, '..', '.env');
 }
 
 function unescapeQuoted(value, quote) {
@@ -65,7 +105,8 @@ function loadEnv(filePath = defaultEnvPath(), opts = {}) {
   const env = opts.env || process.env;
   const resolved = path.resolve(filePath);
   if (!fs.existsSync(resolved)) {
-    return { loaded: false, path: resolved, keys: [], skipped: [], errors: [] };
+    const aliases = applyEnvAliases(env);
+    return { loaded: false, path: resolved, keys: [], skipped: [], errors: [], aliases };
   }
   const { parsed, errors } = parseEnv(fs.readFileSync(resolved, 'utf8'));
   const keys = [];
@@ -78,7 +119,15 @@ function loadEnv(filePath = defaultEnvPath(), opts = {}) {
     env[key] = value;
     keys.push(key);
   }
-  return { loaded: true, path: resolved, keys, skipped, errors };
+  const aliases = applyEnvAliases(env);
+  return { loaded: true, path: resolved, keys, skipped, errors, aliases };
 }
 
-module.exports = { defaultEnvPath, loadEnv, parseEnv };
+module.exports = {
+  ENV_ALIASES,
+  applyEnvAliases,
+  defaultEnvPath,
+  loadEnv,
+  parseEnv,
+  withEnvAliases,
+};

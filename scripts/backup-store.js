@@ -101,7 +101,7 @@ async function createBackup({ outDir, file, manifestFile, dbModule, force = fals
   const manifest = {
     schemaVersion: 1,
     createdAt: new Date().toISOString(),
-    service: { name: 'PromptSentinel', version: require('../package.json').version },
+    service: { name: 'PromptWall', version: require('../package.json').version },
     sourceDbFile: path.basename(db._dbPath || 'sentinel.db'),
     sourceDbPathHash: crypto.createHash('sha256').update(String(db._dbPath || '')).digest('hex'),
     backupFile: path.basename(backupFile),

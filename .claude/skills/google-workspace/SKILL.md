@@ -1,6 +1,6 @@
 ---
 name: google-workspace
-description: Unified agent access to 50+ Google Workspace APIs (Gmail, Drive, Docs, Sheets, Calendar, Chat) via the gws CLI + its built-in MCP server. For PromptSentinel, use it to assemble compliance evidence into Sheets/Docs, draft examiner-facing reports, and route alerts to Chat. Wraps the external gws tool.
+description: Unified agent access to 50+ Google Workspace APIs (Gmail, Drive, Docs, Sheets, Calendar, Chat) via the gws CLI + its built-in MCP server. For PromptWall, use it to assemble compliance evidence into Sheets/Docs, draft examiner-facing reports, and route alerts to Chat. Wraps the external gws tool.
 ---
 
 # Google Workspace (gws)
@@ -13,7 +13,7 @@ npm install -g @googleworkspace/cli
 gws mcp -s drive,gmail,calendar,sheets,docs,chat
 ```
 
-## PromptSentinel uses
+## PromptWall uses
 - **Compliance evidence pack:** export detection stats + audit-chain verification results into a Sheet; generate the quarterly "how do we know no member data went to ChatGPT" Doc an NCUA examiner asks for.
 - **Exec/board digest:** weekly summary (from `weekly-review-loop`) drafted into a Doc and posted to a Chat space.
 - **Alert routing:** high-severity blocked-prompt notifications to a security Chat channel.

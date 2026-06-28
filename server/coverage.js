@@ -16,6 +16,8 @@ const BLOCKED_STATUSES = new Set([
   'pending_justification',
   'denied',
   'blocked_by_user',
+  'destination_blocked',
+  'file_upload_blocked',
   'injection_blocked',
   'file_blocked_unscanned',
   'response_flagged',

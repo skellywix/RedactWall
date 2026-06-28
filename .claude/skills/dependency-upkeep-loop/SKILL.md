@@ -16,7 +16,7 @@ Keeps the small dependency surface (`express`, `better-sqlite3`, `pdf-parse`, `a
    - *Low-risk* (patch/minor, no breaking notes): proceed.
    - *Risky* (major, native module like `better-sqlite3`, or anything touching `pdf-parse`/`adm-zip` which parse untrusted uploads): route to a human — these are attack surface.
 3. **For low-risk, one package per branch:** `git worktree add ../ps-bump-<pkg> -b chore/bump-<pkg>`, bump, `npm ci`.
-4. **Full gate:** `npm test` && `npm run sync-check` && `docker build -t promptsentinel:dep .`.
+4. **Full gate:** `npm test` && `npm run sync-check` && `docker build -t promptwall:dep .`.
 5. **Auto-merge low-risk on green** (maturity level 4): `gh pr create --fill && gh pr merge --auto --squash`. Risky ones get a PR with a written risk note and NO auto-merge.
 
 ## Stop condition (contract)

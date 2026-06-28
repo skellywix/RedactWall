@@ -1,12 +1,12 @@
 param(
-  [string]$TaskName = "PromptSentinelEndpointAgent",
+  [string]$TaskName = "PromptWallEndpointAgent",
   [string]$SentinelUrl = "http://localhost:4000",
   [Parameter(Mandatory = $true)]
   [string]$IngestKey,
-  [string]$WatchDir = "$env:USERPROFILE\PromptSentinelWatch",
-  [string]$HandoffDir = "$env:LOCALAPPDATA\PromptSentinel\native-handoff",
+  [string]$WatchDir = "$env:USERPROFILE\PromptWallWatch",
+  [string]$HandoffDir = "$env:LOCALAPPDATA\PromptWall\native-handoff",
   [string]$HandoffSecret = "",
-  [string]$ConfigDir = "$env:LOCALAPPDATA\PromptSentinel",
+  [string]$ConfigDir = "$env:LOCALAPPDATA\PromptWall",
   [string]$RepoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path,
   [switch]$Force
 )
@@ -43,7 +43,7 @@ if ((Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) -and -
 }
 
 $configLines = @(
-  "# PromptSentinel endpoint agent local config",
+  "# PromptWall endpoint agent local config",
   "SENTINEL_URL=$SentinelUrl",
   "INGEST_API_KEY=$IngestKey",
   "ENDPOINT_AGENT_WATCH_DIR=$watchRoot",
@@ -81,7 +81,7 @@ $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $taskArgs
 $trigger = New-ScheduledTaskTrigger -AtLogOn
 $settings = New-ScheduledTaskSettingsSet -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero)
 $principal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType Interactive -RunLevel LeastPrivilege
-Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Description "PromptSentinel endpoint file sensor" | Out-Null
+Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Description "PromptWall endpoint file sensor" | Out-Null
 Start-ScheduledTask -TaskName $TaskName
 
 Write-Host "Installed $TaskName"

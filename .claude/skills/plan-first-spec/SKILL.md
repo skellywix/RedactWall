@@ -20,7 +20,7 @@ Have the agent draft `PLANS/<feature>.md` (or an interactive HTML page if you us
 - **Acceptance evidence** — the exact commands that prove done (feeds `goal-contract-loop`).
 Iterate on the artifact until you're confident, THEN hand off for autonomous implementation.
 
-## PromptSentinel: every plan must name the invariants up front
+## PromptWall: every plan must name the invariants up front
 A plan that touches detection, policy, or audit states these as non-negotiable constraints so the agent respects them for the whole run:
 - Detector logic lives in `detection-engine/detect.js` only → `npm run sync-engine`; `npm run sync-check` must stay green.
 - Semantic model changes go through `npm run train-semantic` (deterministic; CI diffs).

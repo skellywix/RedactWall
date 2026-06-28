@@ -11,7 +11,7 @@ The model that wrote the code is far too generous grading its own homework. Sepa
 - **Maker** — implements one finding from `STATUS.md` on a feature branch in an isolated worktree (`git worktree add ../ps-<branch> -b fix/<slug>`). Stays focused on the contract from `goal-contract-loop`.
 - **Checker** — fresh context, adversarial stance, ideally a stronger model. Trusts tests over its own read of the diff.
 
-## Checker pass (PromptSentinel gate)
+## Checker pass (PromptWall gate)
 The checker runs and must get a clean result on all of these before PASS:
 1. `npm test` exits 0.
 2. `npm run sync-check` — the shared engine and `sensors/browser-extension/lib/` copy are identical. Any detector change must go through `npm run sync-engine`, never hand-edited in one place.

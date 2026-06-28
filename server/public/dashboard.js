@@ -29,10 +29,21 @@ function humanize(s) {
   return String(s || '-').replace(/_/g, ' ');
 }
 
+function policyListText(items) {
+  return (items || []).join('\n');
+}
+
+function parsePolicyList(value) {
+  return [...new Set(String(value || '')
+    .split(/[\n,]+/)
+    .map((item) => item.trim())
+    .filter(Boolean))];
+}
+
 function statusTone(status) {
   const s = String(status || '').toLowerCase();
   if (['approved', 'allowed', 'justified', 'warned_sent', 'redacted'].includes(s)) return 'good';
-  if (['denied', 'blocked_by_user', 'injection_blocked', 'response_flagged', 'seat_limit_blocked'].includes(s)) return 'bad';
+  if (['denied', 'blocked_by_user', 'destination_blocked', 'file_upload_blocked', 'injection_blocked', 'response_flagged', 'seat_limit_blocked'].includes(s)) return 'bad';
   if (['pending', 'shadow_ai', 'paste_flagged'].includes(s)) return 'warn';
   return 'info';
 }
@@ -491,7 +502,7 @@ async function exportEvidence(){
     const a = document.createElement('a');
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     a.href = url;
-    a.download = `promptsentinel-evidence-${stamp}.json`;
+    a.download = `promptwall-evidence-${stamp}.json`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -543,8 +554,23 @@ async function loadPolicy() {
     </div>
     <div class="template-bar"><div class="template-title">Hard-stop entities</div>
       <div class="chips">${(p.alwaysBlock || []).map((x) => `<span class="chip"><b>${escapeHtml(x)}</b></span>`).join('')}</div></div>
-    <div class="template-bar"><div class="template-title">Governed AI destinations</div>
-      <div class="chips">${(p.governedDestinations || []).map((x) => `<span class="chip">${escapeHtml(x)}</span>`).join('')}</div></div>
+    <div class="policy-list-grid">
+      <label class="policy-list-field">Governed AI destinations
+        ${readonly
+    ? `<div class="chips">${(p.governedDestinations || []).map((x) => `<span class="chip">${escapeHtml(x)}</span>`).join('')}</div>`
+    : `<textarea id="pol_governed_destinations" class="policy-textarea" spellcheck="false">${escapeHtml(policyListText(p.governedDestinations))}</textarea>`}
+      </label>
+      <label class="policy-list-field">Blocked AI destinations
+        ${readonly
+    ? `<div class="chips">${(p.blockedDestinations || []).map((x) => `<span class="chip">${escapeHtml(x)}</span>`).join('') || '<span class="chip">none</span>'}</div>`
+    : `<textarea id="pol_blocked_destinations" class="policy-textarea" spellcheck="false" placeholder="deepseek.com&#10;*.example-ai.com">${escapeHtml(policyListText(p.blockedDestinations))}</textarea>`}
+      </label>
+      <label class="policy-list-field">Blocked file uploads
+        ${readonly
+    ? `<div class="chips">${(p.blockedFileUploadDestinations || []).map((x) => `<span class="chip">${escapeHtml(x)}</span>`).join('') || '<span class="chip">none</span>'}</div>`
+    : `<textarea id="pol_blocked_file_upload_destinations" class="policy-textarea" spellcheck="false" placeholder="chatgpt.com&#10;desktop-ai-app">${escapeHtml(policyListText(p.blockedFileUploadDestinations))}</textarea>`}
+      </label>
+    </div>
     ${readonly
     ? '<div class="readonly-note">Read-only auditor view</div>'
     : `<button class="btn approve" id="savePolicy" type="button">${icons.check}Save policy</button>
@@ -563,6 +589,9 @@ async function loadPolicy() {
       blockMinSeverity: Number($('#pol_sev').value),
       blockRiskScore: Number($('#pol_risk').value),
       rawRetentionDays: Number($('#pol_retention').value),
+      governedDestinations: parsePolicyList($('#pol_governed_destinations').value),
+      blockedDestinations: parsePolicyList($('#pol_blocked_destinations').value),
+      blockedFileUploadDestinations: parsePolicyList($('#pol_blocked_file_upload_destinations').value),
     };
     const r = await api('/api/policy', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (!r || !r.ok) return;

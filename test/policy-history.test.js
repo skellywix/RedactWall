@@ -5,6 +5,15 @@ const assert = require('node:assert');
 const policy = require('../server/policy');
 const evidence = require('../server/evidence');
 
+test('destination policy matches hosts, URLs, labels, and wildcards', () => {
+  assert.strictEqual(policy.destinationMatches('https://www.chatgpt.com/c/abc', ['chatgpt.com']), true);
+  assert.strictEqual(policy.destinationMatches('chat.deepseek.com', ['*.deepseek.com']), true);
+  assert.strictEqual(policy.destinationMatches('deepseek.com', ['*.deepseek.com']), false);
+  assert.strictEqual(policy.destinationMatches('Desktop AI', ['desktop-ai']), true);
+  assert.strictEqual(policy.destinationBlocked('poe.com', { blockedDestinations: ['poe.com'] }), true);
+  assert.strictEqual(policy.fileUploadBlocked('https://chatgpt.com/c/abc', { blockedFileUploadDestinations: ['chatgpt.com'] }), true);
+});
+
 test('policy change detail records normalized before-after changes', () => {
   const before = {
     enforcementMode: 'block',

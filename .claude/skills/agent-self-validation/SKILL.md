@@ -11,7 +11,7 @@ Frontier models lean on unit tests because of how they're trained — but unit-g
 1. **The repo tells the agent how to exercise the app.** Keep explicit steps in `AGENTS.md` so any fresh agent can validate end-to-end without you explaining it each time.
 2. **Force E2E evidence.** The change isn't done until the agent has produced artifacts proving it works in the real product, attached as a **Testing** section on the PR.
 
-## PromptSentinel E2E evidence menu (pick what the change touches)
+## PromptWall E2E evidence menu (pick what the change touches)
 - **Detection change:** `npm run simulate` over the sample corpus — show before/after verdicts for the relevant prompts (use **synthetic** PII only). For `alwaysBlock` types, prove they still block.
 - **Browser sensor:** load the unpacked `sensors/browser-extension/` in a test Chrome profile, paste a synthetic SSN into a chat box, screenshot the block modal AND confirm no request left the page (see `browser-use`).
 - **Policy/enforcement:** flip `config/policy.json` mode, show warn vs require-justification vs redact vs block behaving correctly; in redact mode confirm only tokens leave.

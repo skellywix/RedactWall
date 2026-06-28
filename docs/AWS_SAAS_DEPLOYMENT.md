@@ -14,7 +14,7 @@ scoped queries, SSO, and centralized billing operations.
 
 - Application Load Balancer at the edge.
 - One Amazon Linux 2023 EC2 host running the existing Docker image.
-- Encrypted EBS root volume with `/var/lib/promptsentinel` mounted into the
+- Encrypted EBS root volume with `/var/lib/promptwall` mounted into the
   container at `/data`.
 - Secrets Manager for admin, MFA, session, data-encryption, and ingest secrets.
 - CloudWatch Logs for container stdout/stderr.
@@ -27,6 +27,12 @@ scoped queries, SSO, and centralized billing operations.
   - `SENTINEL_REQUIRE_TENANT_CONTEXT=true`
   - `SENTINEL_REQUIRE_USER_IDENTITY=true`
 
+The current CloudFormation template still writes the existing `SENTINEL_*` and
+`INGEST_API_KEY` names for upgrade safety. The runtime also accepts
+`PROMPTWALL_*` aliases for those values, including `PROMPTWALL_SECRET`,
+`PROMPTWALL_DATA_KEY`, and `PROMPTWALL_INGEST_API_KEY`, when a future template
+or customer secret standard moves to the new prefix.
+
 Do not run this app on Fargate with SQLite over EFS. The current preflight and
 database comments are built around local disk because audit evidence integrity
 matters more than making the first AWS shape look serverless.
@@ -36,7 +42,7 @@ matters more than making the first AWS shape look serverless.
 Create an ECR repository once:
 
 ```bash
-aws ecr create-repository --repository-name promptsentinel
+aws ecr create-repository --repository-name promptwall
 ```
 
 Build and push:
@@ -44,7 +50,7 @@ Build and push:
 ```bash
 AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 AWS_REGION=us-east-1
-IMAGE="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/promptsentinel:0.3.0"
+IMAGE="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/promptwall:0.3.0"
 
 aws ecr get-login-password --region "$AWS_REGION" \
   | docker login --username AWS --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
@@ -76,7 +82,7 @@ Then create the secret:
 
 ```bash
 aws secretsmanager create-secret \
-  --name promptsentinel/cu-acme \
+  --name promptwall/cu-acme \
   --secret-string file://customer-secret.json
 ```
 
@@ -85,7 +91,7 @@ admins use the console. You can generate production-safe values with:
 
 ```bash
 npm run setup:prod -- --skip-install --env aws-customer.env
-npm run mfa:uri -- --env aws-customer.env --issuer "PromptSentinel cu-acme"
+npm run mfa:uri -- --env aws-customer.env --issuer "PromptWall cu-acme"
 ```
 
 ## 3. Deploy The Customer Stack
@@ -101,13 +107,13 @@ Deploy:
 
 ```bash
 SECRET_ARN=$(aws secretsmanager describe-secret \
-  --secret-id promptsentinel/cu-acme \
+  --secret-id promptwall/cu-acme \
   --query ARN \
   --output text)
 
 aws cloudformation deploy \
   --template-file infra/aws/customer-silo.yml \
-  --stack-name promptsentinel-cu-acme \
+  --stack-name promptwall-cu-acme \
   --capabilities CAPABILITY_NAMED_IAM \
   --parameter-overrides \
     VpcId=vpc-xxxxxxxx \
@@ -127,7 +133,7 @@ Get the URL:
 
 ```bash
 aws cloudformation describe-stacks \
-  --stack-name promptsentinel-cu-acme \
+  --stack-name promptwall-cu-acme \
   --query "Stacks[0].Outputs[?OutputKey=='Url'].OutputValue" \
   --output text
 ```
@@ -138,7 +144,7 @@ For the Chrome extension managed-storage policy, set:
 
 ```json
 {
-  "serverUrl": "https://promptsentinel.customer.example",
+  "serverUrl": "https://promptwall.customer.example",
   "ingestKey": "same-value-as-INGEST_API_KEY",
   "orgId": "cu-acme",
   "email": "${user_email}"
@@ -164,8 +170,8 @@ node -e "const v=require('./server/db').verifyAuditChain(); console.log(JSON.str
 After deployment:
 
 ```bash
-curl https://promptsentinel.customer.example/healthz
-curl https://promptsentinel.customer.example/readyz
+curl https://promptwall.customer.example/healthz
+curl https://promptwall.customer.example/readyz
 ```
 
 Log in to the dashboard and confirm:

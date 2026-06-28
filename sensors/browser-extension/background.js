@@ -1,4 +1,4 @@
-/* PromptSentinel background service worker.
+/* PromptWall background service worker.
  * - Holds the server URL + ingest key, and the org policy (cached).
  * - Resolves the END-USER IDENTITY from MDM-injected managed storage (so the
  *   audit log can answer "did employee X paste member data?" — REVIEW #8).
@@ -13,7 +13,7 @@ const DEFAULTS = {
   ingestKey: '',
   requestTimeoutMs: 10000,
   enabled: true,
-  policy: { enforcementMode: 'block', blockMinSeverity: 2, blockRiskScore: 25, governedDestinations: [], alwaysBlock: ['US_SSN', 'CREDIT_CARD', 'BANK_ACCOUNT', 'ROUTING_NUMBER', 'SECRET_KEY', 'PRIVATE_KEY', 'CANARY_TOKEN'] },
+  policy: { enforcementMode: 'block', blockMinSeverity: 2, blockRiskScore: 25, governedDestinations: [], blockedDestinations: [], blockedFileUploadDestinations: [], alwaysBlock: ['US_SSN', 'CREDIT_CARD', 'BANK_ACCOUNT', 'ROUTING_NUMBER', 'SECRET_KEY', 'PRIVATE_KEY', 'CANARY_TOKEN'] },
 };
 
 async function cfg() {
@@ -188,7 +188,10 @@ chrome.tabs?.onUpdated.addListener(async (tabId, info, tab) => {
   if (info.status !== 'complete' || !tab || !tab.url || !self.PSAdapters) return;
   let host; try { host = new URL(tab.url).hostname; } catch (e) { return; }
   const c = await cfg();
-  const governed = (c.policy && c.policy.governedDestinations) || [];
+  const governed = [
+    ...((c.policy && c.policy.governedDestinations) || []),
+    ...((c.policy && c.policy.blockedDestinations) || []),
+  ];
   if (!self.PSAdapters.isAiHost(host) || self.PSAdapters.isGoverned(host, governed)) return;
   const now = Date.now();
   if (seenShadow[host] && now - seenShadow[host] < 12 * 3600 * 1000) return;

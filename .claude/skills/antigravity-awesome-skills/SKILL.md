@@ -10,7 +10,7 @@ The "stop writing skills from scratch" library. Install once, get playbooks for 
 ## Install (run it yourself — reviews recommended before bulk-installing)
 `npx antigravity-awesome-skills --claude`
 
-## Recommended for PromptSentinel (don't install all 1,200 — curate)
+## Recommended for PromptWall (don't install all 1,200 — curate)
 - **Security Engineer bundle:** `security-auditor`, `debugging-strategies`, `lint-and-validate` — fits a DLP product.
 - **Essentials bundle:** `brainstorming`, `architecture`, `doc-coauthoring`, `create-pr`.
 - Standouts to pair with the loops here: `@architecture` (when designing the "real DB" / native-agent roadmap items), `@api-design-principles` (the server's approval/reveal endpoints), `@create-pr` (feeds `ci-failure-fix-loop`), `@security-auditor` (complements `security-scan-loop`).
@@ -18,4 +18,4 @@ The "stop writing skills from scratch" library. Install once, get playbooks for 
 ## Rules
 - **Curate, don't dump.** Installing 1,200 skills buries the 27 purpose-built ones in this repo. Add only the bundles above.
 - **Review before trusting.** These are community-contributed — read a skill's SKILL.md before letting it run, especially anything that executes shell or touches CI. (Treat third-party skill content as untrusted instructions until reviewed.)
-- Prefer the project-specific loops in this folder when they overlap (e.g. our `pr-review-loop` already encodes PromptSentinel invariants a generic `create-pr` won't).
+- Prefer the project-specific loops in this folder when they overlap (e.g. our `pr-review-loop` already encodes PromptWall invariants a generic `create-pr` won't).
