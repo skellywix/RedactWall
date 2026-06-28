@@ -1464,17 +1464,21 @@ app.get('/api/export/evidence', auth.requireAuth, (req, res) => {
   const auditLimit = Math.min(Number(req.query.auditLimit) || 500, 5000);
   const activePolicy = policy.loadPolicy();
   const queries = db.listQueries({ limit: queryLimit });
+  const summaryQueries = db.listQueries({ all: true });
   res.json(evidence.buildEvidencePack({
     version: require('../package.json').version,
     queryLimit,
     auditLimit,
+    summaryRowsIncluded: summaryQueries.length,
+    summariesUseFullHistory: true,
     policy: activePolicy,
     stats: db.stats(),
     auditIntegrity: db.verifyAuditChain(),
-    coverage: coverage.summarize(queries, activePolicy),
+    coverage: coverage.summarize(summaryQueries, activePolicy),
     policyExceptionReview: policy.policyExceptionReview(activePolicy),
     detectors: detector.listDetectors({ customDetectors: policy.customDetectorsForSensors() }),
     queries,
+    lineageQueries: summaryQueries,
     audit: db.listAudit(auditLimit),
   }));
 });

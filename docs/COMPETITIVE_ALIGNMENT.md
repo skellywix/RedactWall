@@ -154,9 +154,9 @@ Build next:
 - Add an AI-domain watchlist and CI check so adapter coverage, browser manifest
   coverage, and shadow-AI/default-deny inventory do not silently age out as new
   tools appear.
-- Expand the sanitized examiner evidence export with coverage posture, sensor
-  versions, parsed policy history, and prompt/file lineage summaries by user,
-  destination, sensor, category, channel, and decision.
+- Expand the sanitized examiner evidence export with full-history coverage
+  posture, sensor versions, parsed policy history, and prompt/file lineage
+  summaries by user, destination, sensor, category, channel, and decision.
 - Add customer-defined detector packs plus an `ocr_required` file outcome so
   pilots can model local member IDs and scanned/image uploads before shipping a
   heavier endpoint-local OCR runtime.

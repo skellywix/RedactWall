@@ -280,7 +280,10 @@ Acceptance evidence:
 
 Current state: sanitized evidence export includes audit integrity, policy, parsed
 policy diffs, coverage posture, sensor versions, lineage summaries, report
-metadata, backup status, restore-drill status, and control mappings. The
+metadata, backup status, restore-drill status, and control mappings. Exported
+per-event query rows remain bounded by `queryLimit`, but coverage and lineage
+summaries are computed from the full local evidence history so examiner packs do
+not undercount older users, destinations, sensors, categories, or decisions. The
 dashboard also exposes prompt-free lineage by user, destination, sensor, channel,
 category, and decision through `/api/lineage`. Backup and restore tooling exists,
 `npm run evidence:pack` can generate dated JSON or optional zip packs from the

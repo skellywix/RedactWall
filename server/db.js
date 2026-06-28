@@ -123,10 +123,15 @@ function getQuery(qid) {
   return r ? JSON.parse(r.data) : null;
 }
 function listQueries(filter = {}) {
+  const all = filter.all === true;
   const limit = filter.limit ? Math.max(1, Number(filter.limit)) : 200;
-  const rows = filter.status
-    ? sdb.prepare('SELECT data FROM queries WHERE status = ? ORDER BY createdAt DESC, seq DESC LIMIT ?').all(filter.status, limit)
-    : sdb.prepare('SELECT data FROM queries ORDER BY createdAt DESC, seq DESC LIMIT ?').all(limit);
+  const rows = all
+    ? (filter.status
+      ? sdb.prepare('SELECT data FROM queries WHERE status = ? ORDER BY createdAt DESC, seq DESC').all(filter.status)
+      : sdb.prepare('SELECT data FROM queries ORDER BY createdAt DESC, seq DESC').all())
+    : (filter.status
+      ? sdb.prepare('SELECT data FROM queries WHERE status = ? ORDER BY createdAt DESC, seq DESC LIMIT ?').all(filter.status, limit)
+      : sdb.prepare('SELECT data FROM queries ORDER BY createdAt DESC, seq DESC LIMIT ?').all(limit));
   return rows.map((r) => JSON.parse(r.data));
 }
 // Read-modify-write wrapped in a transaction so concurrent updates can't race.

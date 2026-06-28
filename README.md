@@ -376,7 +376,8 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 - **SQLite** store (WAL + transactions) with audit integrity that covers the evidence, not just the event header.
 - **Backup/verify/restore** tooling for the SQLite evidence store with prompt-free manifests.
 - **Examiner evidence packs** with report metadata, control mappings, backup
-  status, restore-drill status, and optional zipped JSON output.
+  status, restore-drill status, full-history coverage and lineage summaries,
+  and optional zipped JSON output.
 - **Reversible redaction / Redact-&-Send**, sealed token vault, local response re-hydration.
 - **MDM identity**, reliable per-site send, **Man-in-the-Prompt** guard, **shadow-AI** discovery and default-deny unapproved AI blocking.
 - **Coverage posture** showing governed destinations, required sensors, desired sensor versions, browser/endpoint/MCP install-health checks, fleet state by user/org/sensor, shadow-AI sightings, and stale or missing sensor coverage.
@@ -384,7 +385,9 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 - **Ticket bridge notifications** that send sanitized approval workflow tickets
   to Jira, Linear, SOAR, or internal ticketing middleware without prompt bodies,
   raw findings, vaults, release tokens, or decision notes.
-- **Dashboard lineage and sanitized examiner export** with audit integrity, policy diffs, coverage posture, workflow ownership, and lineage by user, destination, sensor, channel, category, and decision.
+- **Dashboard lineage and sanitized examiner export** with audit integrity,
+  policy diffs, full-history coverage posture, workflow ownership, and lineage
+  by user, destination, sensor, channel, category, and decision.
 - **Response scanning controls** that let customers flag, redact, or block
   sensitive AI replies while retaining only sanitized evidence.
 - **Browser action controls** that block clipboard paste, file drops, and
