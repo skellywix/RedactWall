@@ -13,6 +13,17 @@ test('evidence pack omits raw prompt, redacted prompt body, token vault, and aud
     policy: { enforcementMode: 'block' },
     stats: { total: 1 },
     auditIntegrity: { ok: true, count: 1 },
+    coverage: {
+      score: 82,
+      rawPrompt: 'coverage should not export Member John Carter',
+      totals: { events: 1, blocked: 1 },
+      sensors: [{
+        source: 'browser_extension',
+        events: 1,
+        versionHealth: 'current',
+        secret: 'coverage-secret-should-not-export',
+      }],
+    },
     detectors: [{ id: 'US_SSN', severity: 4 }],
     queries: [{
       id: 'q_1',
@@ -59,15 +70,62 @@ test('evidence pack omits raw prompt, redacted prompt body, token vault, and aud
   assert.strictEqual(pack.scope.auditDetailsIncluded, false);
   assert.ok(pack.queries[0].promptHash);
   assert.ok(pack.audit[0].detailHash);
+  assert.strictEqual(pack.coverage.score, 82);
+  assert.strictEqual(pack.lineage.byUser[0].key, 'jdoe');
+  assert.strictEqual(pack.lineage.byDestination[0].key, 'chatgpt.com');
+  assert.strictEqual(pack.lineage.bySensor[0].key, 'browser_extension');
+  assert.strictEqual(pack.lineage.byCategory[0].key, 'US_SSN');
+  assert.strictEqual(pack.lineage.byDecision[0].key, 'blocked');
   assert.strictEqual(pack.queries[0].retentionPurgedAt, '2026-06-27T12:00:00.000Z');
   assert.deepStrictEqual(pack.queries[0].retentionPurgedFields, ['rawPrompt']);
   assert.ok(!wire.includes('524-71-9043'));
   assert.ok(!wire.includes('Member John Carter'));
+  assert.ok(!wire.includes('coverage-secret-should-not-export'));
   assert.ok(!wire.includes('sealed-vault'));
   assert.ok(!wire.includes('contains member SSN'));
   assert.ok(!wire.includes('ps_ingest_should_not_export'));
   assert.deepStrictEqual(pack.queries[0].sensor, { name: 'browser_extension', version: '0.3.0', platform: 'chrome_mv3' });
   assert.ok(wire.includes('**** 9043'));
+});
+
+test('lineage groups user, destination, sensor, category, and decision without prompt text', () => {
+  const lineage = evidence.buildLineage([
+    {
+      id: 'q_1',
+      createdAt: '2026-06-26T12:00:00.000Z',
+      status: 'redacted',
+      user: 'analyst@example.test',
+      destination: 'claude.ai',
+      source: 'browser_extension',
+      channel: 'submit',
+      findings: [{ type: 'CREDIT_CARD', severity: 4, score: 1, masked: '**** 1111', value: '4111 1111 1111 1111' }],
+      categories: [],
+      riskScore: 40,
+      redactedPrompt: 'Card **** 1111',
+    },
+    {
+      id: 'q_2',
+      createdAt: '2026-06-26T12:01:00.000Z',
+      status: 'destination_blocked',
+      user: 'analyst@example.test',
+      destination: 'poe.com',
+      source: 'endpoint_agent',
+      channel: 'file_upload',
+      findings: [],
+      categories: ['CONFIDENTIAL_BUSINESS'],
+      riskScore: 0,
+      redactedPrompt: '[destination blocked] poe.com',
+    },
+  ]);
+
+  const wire = JSON.stringify(lineage);
+  assert.deepStrictEqual(lineage.byDecision.map((item) => item.key).sort(), ['blocked', 'redacted']);
+  assert.strictEqual(lineage.byUser[0].key, 'analyst@example.test');
+  assert.strictEqual(lineage.byUser[0].events, 2);
+  assert.ok(lineage.byCategory.some((item) => item.key === 'CREDIT_CARD'));
+  assert.ok(lineage.byCategory.some((item) => item.key === 'CONFIDENTIAL_BUSINESS'));
+  assert.ok(!wire.includes('4111 1111 1111 1111'));
+  assert.ok(!wire.includes('Card **** 1111'));
 });
 
 test('server exposes protected evidence export route', () => {
@@ -76,4 +134,5 @@ test('server exposes protected evidence export route', () => {
   const server = fs.readFileSync(path.join(__dirname, '..', 'server/app.js'), 'utf8');
   assert.match(server, /app\.get\('\/api\/export\/evidence', auth\.requireAuth/);
   assert.match(server, /evidence\.buildEvidencePack/);
+  assert.match(server, /coverage\.summarize/);
 });

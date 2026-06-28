@@ -322,6 +322,20 @@ Auditor sessions can read sanitized dashboard evidence, audit status, policy,
 and examiner exports. They cannot reveal retained raw prompts, approve or deny
 held prompts, run retention purges, apply policy templates, or edit policy.
 
+The examiner export at `/api/export/evidence` includes:
+
+- Audit-chain verification and hash-chained audit entries with detail hashes,
+  not free-form audit detail text.
+- Current policy plus parsed policy diffs for governed destinations, blocked
+  destinations, file-upload blocks, retention, detector, and scanner changes.
+- Coverage posture, governed and shadow destinations, active sensors, sensor
+  versions, and version gaps.
+- Prompt/file lineage summaries by user, destination, sensor, channel,
+  category, and decision, plus per-event sanitized findings and prompt hashes.
+
+It does not include raw prompt bodies, retained sealed prompts, token vaults,
+release tokens, decision notes, or uploaded file bytes.
+
 ## SIEM Alerts
 
 Set `SIEM_WEBHOOK_URL` to send sanitized security events to a SOC or SIEM webhook. Payloads omit prompt bodies, raw retained prompts, token vaults, and raw finding values.

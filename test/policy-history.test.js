@@ -40,8 +40,20 @@ test('policy change detail records normalized before-after changes', () => {
 
 test('evidence exports parsed policy changes but not raw audit detail text', () => {
   const detail = policy.policyChangeDetail(
-    { enforcementMode: 'block', blockRiskScore: 25, rawRetentionDays: 30 },
-    { enforcementMode: 'justify', blockRiskScore: 40, rawRetentionDays: 14 },
+    {
+      enforcementMode: 'block',
+      blockRiskScore: 25,
+      rawRetentionDays: 30,
+      blockedDestinations: [],
+      blockedFileUploadDestinations: [],
+    },
+    {
+      enforcementMode: 'justify',
+      blockRiskScore: 40,
+      rawRetentionDays: 14,
+      blockedDestinations: ['poe.com'],
+      blockedFileUploadDestinations: ['chatgpt.com'],
+    },
   );
   const entry = evidence.safeAuditEntry({
     id: 'a_policy',
@@ -58,6 +70,8 @@ test('evidence exports parsed policy changes but not raw audit detail text', () 
     { field: 'enforcementMode', before: 'block', after: 'justify' },
     { field: 'blockRiskScore', before: 25, after: 40 },
     { field: 'rawRetentionDays', before: 30, after: 14 },
+    { field: 'blockedDestinations', before: [], after: ['poe.com'] },
+    { field: 'blockedFileUploadDestinations', before: [], after: ['chatgpt.com'] },
   ]);
   assert.ok(!JSON.stringify(entry).includes('"type":"policy_change"'));
 });

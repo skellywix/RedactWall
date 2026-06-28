@@ -96,14 +96,15 @@ For this alignment track, completion requires evidence for every area below:
 - Added tested `PROMPTWALL_*` aliases for server, SaaS, ingest, timeout, policy,
   endpoint watch, and endpoint handoff runtime settings while keeping existing
   `SENTINEL_*`, `INGEST_API_KEY`, and endpoint-agent keys valid.
+- Expanded the sanitized examiner export with coverage posture, sensor-version
+  posture, parsed policy diffs, and lineage summaries by user, destination,
+  sensor, channel, category, and decision without prompt bodies.
 
 ## Open Decisions
 
 - Whether to rename the GitHub repository in this same branch or keep the remote
   repository migration separate from the code/product rename.
-- The local checkout folder rename is ready, but this active Windows session is
-  holding the dirty repo directory open. Close Codex/editors/terminals and run
-  `Rename-Item -LiteralPath .\promptsentinel -NewName promptwall` from the
-  wrapper folder.
+- The local checkout folder rename still needs to be completed from the wrapper
+  folder once no active process is holding the current repo path.
 - Whether the next product build should prioritize native desktop collection or
   app/action policy controls.

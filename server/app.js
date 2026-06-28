@@ -1066,15 +1066,18 @@ app.get('/api/audit', auth.requireAuth, (req, res) => {
 app.get('/api/export/evidence', auth.requireAuth, (req, res) => {
   const queryLimit = Math.min(Number(req.query.queryLimit) || 500, 5000);
   const auditLimit = Math.min(Number(req.query.auditLimit) || 500, 5000);
+  const activePolicy = policy.loadPolicy();
+  const queries = db.listQueries({ limit: queryLimit });
   res.json(evidence.buildEvidencePack({
     version: require('../package.json').version,
     queryLimit,
     auditLimit,
-    policy: policy.loadPolicy(),
+    policy: activePolicy,
     stats: db.stats(),
     auditIntegrity: db.verifyAuditChain(),
+    coverage: coverage.summarize(queries, activePolicy),
     detectors: detector.listDetectors(),
-    queries: db.listQueries({ limit: queryLimit }),
+    queries,
     audit: db.listAudit(auditLimit),
   }));
 });

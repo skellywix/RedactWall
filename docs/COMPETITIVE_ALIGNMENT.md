@@ -41,11 +41,10 @@ Build next:
   content-script protection when that is technically possible.
 - App and action policy controls beyond destination and file-upload blocking,
   especially response-scanning controls.
-- Examiner export packs that include coverage posture, policy history, audit
-  integrity, backup status, sensor versions, and release decisions without raw
-  prompts.
 - Data lineage views that answer which user, sensor, destination, category, and
   decision were involved without retaining sensitive content.
+- Backup-status evidence inside the examiner export pack, including last backup
+  verification and restore-drill evidence without prompt bodies.
 
 ## This Pass
 
@@ -65,6 +64,9 @@ Build next:
   prefix.
 - Add tested `PROMPTWALL_*` runtime aliases so new PromptWall deployments can
   use the renamed prefix without breaking existing `SENTINEL_*` installs.
+- Expand the sanitized examiner evidence export with coverage posture, sensor
+  versions, parsed policy history, and prompt/file lineage summaries by user,
+  destination, sensor, category, channel, and decision.
 
 ## Acceptance Evidence
 
@@ -82,6 +84,12 @@ When browser behavior changes, also run:
 ```powershell
 npm run test:browser
 npm run package:extension -- <temp-output-dir>
+```
+
+For examiner export changes, also run:
+
+```powershell
+npm test -- test/evidence.test.js test/policy-history.test.js
 ```
 
 ## Works Cited
