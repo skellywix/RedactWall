@@ -231,17 +231,21 @@ Install it as part of the endpoint agent setup:
   -SentinelUrl "https://promptwall.example.com" `
   -IngestKey "<pilot-ingest-key>" `
   -HandoffSecret "<32-plus-character-local-handoff-secret>" `
-  -InstallDesktopCollector `
-  -DesktopCollectorDestination "Desktop AI"
+  -InstallDesktopCollector
 ```
 
 Or install only the shell action after endpoint setup:
 
 ```powershell
 .\scripts\install-desktop-collector.ps1 `
-  -ConfigDir "$env:LOCALAPPDATA\PromptWall" `
-  -Destination "Desktop AI"
+  -ConfigDir "$env:LOCALAPPDATA\PromptWall"
 ```
+
+The collector uses the Policy tab's `Default desktop upload destination` value
+first, then `ENDPOINT_AGENT_DESKTOP_DESTINATION` from local endpoint config as an
+offline fallback, then `Desktop AI`. Use `-DesktopCollectorDestination` or
+`-Destination` only when you intentionally need a local fallback or app-specific
+override.
 
 The shell action command does not include the ingest key or handoff secret. It
 loads `%LOCALAPPDATA%\PromptWall\endpoint-agent.env` through

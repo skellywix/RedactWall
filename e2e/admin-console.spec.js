@@ -70,13 +70,16 @@ test('admin console login, approval, policy save, and evidence export work in a 
   await expect(page.locator('#sensorMix')).toContainText('Browser extension');
 
   await page.locator('.content-tabs .tab[data-tab="policy"]').click();
+  await expect(page.locator('#pol_desktop_destination')).toBeVisible();
   await page.locator('input[name="mode"][value="warn"]').check();
   await page.locator('#pol_risk').fill('35');
+  await page.locator('#pol_desktop_destination').fill('Copilot Desktop');
   await page.getByRole('button', { name: 'Save policy' }).click();
   await expect(page.locator('#polSaved')).toHaveText('Saved');
   const policy = await page.evaluate(async () => (await fetch('/api/policy')).json());
   expect(policy.enforcementMode).toBe('warn');
   expect(policy.blockRiskScore).toBe(35);
+  expect(policy.desktopCollectorDestination).toBe('Copilot Desktop');
 
   await page.locator('.content-tabs .tab[data-tab="audit"]').click();
   await expect(page.locator('#integrity')).toContainText('Chain verified');

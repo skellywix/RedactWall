@@ -18,7 +18,7 @@ test('installer registers a restarting scheduled task without putting the ingest
   assert.match(install, /Register-ScheduledTask/);
   assert.match(install, /New-ScheduledTaskTrigger -AtLogOn/);
   assert.match(install, /New-ScheduledTaskSettingsSet -RestartCount 3/);
-  assert.match(install, /New-ScheduledTaskPrincipal[\s\S]+-LogonType Interactive[\s\S]+-RunLevel LeastPrivilege/);
+  assert.match(install, /New-ScheduledTaskPrincipal[\s\S]+-LogonType Interactive[\s\S]+-RunLevel Limited/);
   assert.match(install, /Register-ScheduledTask[\s\S]+-Principal \$principal/);
   assert.match(install, /INGEST_API_KEY=\$IngestKey/);
   assert.match(install, /\$env:LOCALAPPDATA\\PromptWall/);
