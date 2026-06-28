@@ -336,7 +336,7 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 
 | Layer | Status |
 |-------|--------|
-| Control plane (policy, queue, routing, audit, dashboard) | Working — SQLite (WAL/transactions), owner/SLA routing for held decisions, tamper-evident audit covering the evidence |
+| Control plane (policy, queue, routing, audit, dashboard) | Working — SQLite (WAL/transactions), owner/SLA routing for held decisions, dashboard lineage views, tamper-evident audit covering the evidence |
 | Hybrid detection engine | Working — 22 structured detectors + **4-category on-device semantic model** (measured P100/R94 on a held-out set) |
 | Reversible redaction | Working — tokenize/detokenize, sealed vault, `/api/v1/rehydrate` |
 | Browser extension | Working — warn/justify/**redact**/block, real-button send, MDM identity, Man-in-the-Prompt guard |
@@ -344,7 +344,7 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 | Destination controls | Working — governed destination coverage, default-deny unapproved AI, full destination blocking, and file-upload-only blocking across browser, endpoint, gate, file, and response paths |
 | Output scanning | Working — `/api/v1/scan-response` flags PII/secrets in AI replies |
 | MCP guard / Endpoint agent | Working references - inline/MCP redaction; MCP connector SDK with required tool-result sanitization; Microsoft 365 text-readable file-content connector; local endpoint folder watch plus signed native file-flow handoff prototype; redacted companion files for structured-only findings |
-| Auth & ops | Working: login lockout, password-confirmed raw reveal and release approval, release-token scoped polling, stable secret, `/healthz` · `/readyz` · `/api/metrics`, policy-driven sensor version and browser/endpoint/MCP install-health posture, sanitized examiner export with coverage, workflow routing, and lineage, Docker, CI |
+| Auth & ops | Working: login lockout, password-confirmed raw reveal and release approval, release-token scoped polling, stable secret, `/healthz` · `/readyz` · `/api/metrics`, policy-driven sensor version and browser/endpoint/MCP install-health posture, dashboard lineage, sanitized examiner export with coverage, workflow routing, and lineage, Docker, CI |
 
 ## Shipped since the skeleton (see `ITERATIONS.md`)
 
@@ -357,7 +357,7 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 - **MDM identity**, reliable per-site send, **Man-in-the-Prompt** guard, **shadow-AI** discovery and default-deny unapproved AI blocking.
 - **Coverage posture** showing governed destinations, required sensors, desired sensor versions, browser/endpoint/MCP install-health checks, fleet state by user/org/sensor, shadow-AI sightings, and stale or missing sensor coverage.
 - **Approval routing** that assigns held decisions to security, compliance, privacy, or legal with SLA metadata, category/destination queue filters, assignment-aware approver decisions, SIEM alert payloads, examiner evidence, sanitized workflow notifications, and overdue SLA escalation evidence.
-- **Sanitized examiner export** with audit integrity, policy diffs, coverage posture, workflow ownership, and lineage by user, destination, sensor, channel, category, and decision.
+- **Dashboard lineage and sanitized examiner export** with audit integrity, policy diffs, coverage posture, workflow ownership, and lineage by user, destination, sensor, channel, category, and decision.
 - **SCIM provisioning and OIDC login** for active provisioned users, with bearer
   provisioning auth, deactivation, audit entries, PromptWall group names mapped
   onto local roles, signed ID-token validation, and local break-glass accounts.
@@ -369,10 +369,11 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 
 ## Still ahead (to ship commercially)
 
-- Polished enterprise identity UX, IdP-specific setup recipes, guided scoped-
-  policy rule builder, and deeper multi-tenant isolation per institution.
+- Polished enterprise identity UX, IdP-specific setup recipes, exception
+  lifecycle review, and deeper multi-tenant isolation per institution.
 - Signed Chrome Web Store listing and force-install rollout; local extension zip, integrity manifest, release-readiness report, generated ExtensionSettings policy, and managed-policy checklist are packaged.
-- Direct SMTP and ticketing adapters on top of the existing sanitized webhook, Slack, Teams, and escalation workflow.
+- Ticketing adapters on top of the existing sanitized webhook, Slack, Teams,
+  SMTP, and escalation workflow.
 - Ship the signed native endpoint collector that feeds the tested handoff contract from clipboard and AI-app upload flows.
 - Upgrade the on-device classifier to a quantized ONNX/WASM NER when recall demands it.
 

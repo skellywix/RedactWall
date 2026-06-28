@@ -8,6 +8,7 @@ let csrfToken = '';
 let currentQueue = [];
 let currentActivity = [];
 let currentCoverage = null;
+let currentLineage = null;
 let searchTerm = '';
 let currentRole = 'auditor';
 let currentUser = '';
@@ -371,10 +372,28 @@ function matchesSearch(q) {
   return !searchTerm || queryText(q).includes(searchTerm);
 }
 
+function lineageText(bucket) {
+  return [
+    bucket.key,
+    ...(bucket.categories || []),
+    bucket.events,
+    bucket.blocked,
+    bucket.redacted,
+    bucket.allowed,
+    bucket.warned,
+    bucket.maxRiskScore,
+  ].join(' ').toLowerCase();
+}
+
+function matchesLineage(bucket) {
+  return !searchTerm || lineageText(bucket || {}).includes(searchTerm);
+}
+
 function updateSearch(value) {
   searchTerm = String(value || '').trim().toLowerCase();
   renderQueueView();
   renderActivityRows(currentActivity);
+  renderLineage(currentLineage);
 }
 
 async function api(path, opts = {}) {
@@ -902,6 +921,61 @@ function renderCoverage(c) {
     </div>`).join('') || '<div class="empty"><div class="big">No shadow AI</div>No ungoverned AI tools have been reported.</div>';
 }
 
+async function loadLineage() {
+  const r = await api('/api/lineage?limit=1000');
+  if (!r) return;
+  const body = await r.json();
+  currentLineage = body.lineage || {};
+  renderLineage(currentLineage);
+}
+
+function renderLineageRows(selector, rows, emptyLabel) {
+  const filtered = (rows || []).filter(matchesLineage);
+  $(selector).innerHTML = filtered.map((row) => `<tr>
+    <td class="mono">${escapeHtml(row.key || '-')}</td>
+    <td class="mono">${escapeHtml(row.events || 0)}</td>
+    <td class="mono">${escapeHtml(row.blocked || 0)}</td>
+    <td class="mono">${escapeHtml(row.redacted || 0)}</td>
+    <td class="mono">${escapeHtml(row.maxRiskScore || 0)}</td>
+  </tr>`).join('') || `<tr><td colspan="5" class="empty">${escapeHtml(emptyLabel)}</td></tr>`;
+}
+
+function lineageTotals(lineage = {}) {
+  const decisions = lineage.byDecision || [];
+  const totalEvents = decisions.reduce((sum, row) => sum + (Number(row.events) || 0), 0);
+  const blocked = decisions.find((row) => row.key === 'blocked');
+  const redacted = decisions.find((row) => row.key === 'redacted');
+  const allowed = decisions.find((row) => row.key === 'allowed');
+  return {
+    events: totalEvents,
+    users: (lineage.byUser || []).length,
+    destinations: (lineage.byDestination || []).length,
+    blocked: blocked ? blocked.events : 0,
+    redacted: redacted ? redacted.events : 0,
+    allowed: allowed ? allowed.events : 0,
+  };
+}
+
+function renderLineage(lineage) {
+  if (!lineage) return;
+  const totals = lineageTotals(lineage);
+  $('#lineageSummary').innerHTML = [
+    ['Events', totals.events, 'recent sanitized records'],
+    ['Users', totals.users, 'unique lineage buckets'],
+    ['Destinations', totals.destinations, 'AI tools and apps'],
+    ['Blocked', totals.blocked, 'policy stops'],
+    ['Redacted', totals.redacted, 'tokenized or masked'],
+    ['Allowed', totals.allowed, 'below thresholds'],
+  ].map(([label, value, meta]) => `
+    <div class="mini-kpi"><b>${escapeHtml(value)}</b><span>${escapeHtml(label)}</span><em>${escapeHtml(meta)}</em></div>`).join('');
+  renderLineageRows('#lineageUsers', lineage.byUser, 'No user lineage yet.');
+  renderLineageRows('#lineageDestinations', lineage.byDestination, 'No destination lineage yet.');
+  renderLineageRows('#lineageSensors', lineage.bySensor, 'No sensor lineage yet.');
+  renderLineageRows('#lineageCategories', lineage.byCategory, 'No category lineage yet.');
+  renderLineageRows('#lineageChannels', lineage.byChannel, 'No channel lineage yet.');
+  renderLineageRows('#lineageDecisions', lineage.byDecision, 'No decision lineage yet.');
+}
+
 async function loadAudit() {
   const r = await api('/api/audit');
   if (!r) return;
@@ -1153,6 +1227,7 @@ function activateTab(name) {
   if (name === 'policy') loadPolicy();
   if (name === 'activity') loadActivity();
   if (name === 'coverage') loadCoverage();
+  if (name === 'lineage') loadLineage();
 }
 
 $$('.tab').forEach((t) => {
@@ -1161,14 +1236,15 @@ $$('.tab').forEach((t) => {
 
 $('#refreshQueue').onclick = loadQueue;
 $('#refreshCoverage').onclick = loadCoverage;
+$('#refreshLineage').onclick = loadLineage;
 $('#logout').onclick = async () => { await api('/api/logout', { method: 'POST' }); location.href = '/login.html'; };
 $('#exportEvidence').onclick = exportEvidence;
 $('#globalSearch').addEventListener('input', (e) => updateSearch(e.target.value));
 
 function connectStream() {
   const es = new EventSource('/api/stream');
-  es.addEventListener('query', () => { loadStats(); loadQueue(); if (!$('#tab-coverage').classList.contains('hidden')) loadCoverage(); flash(); });
-  es.addEventListener('decision', () => { loadStats(); loadQueue(); loadActivity(); });
+  es.addEventListener('query', () => { loadStats(); loadQueue(); if (!$('#tab-coverage').classList.contains('hidden')) loadCoverage(); if (!$('#tab-lineage').classList.contains('hidden')) loadLineage(); flash(); });
+  es.addEventListener('decision', () => { loadStats(); loadQueue(); loadActivity(); if (!$('#tab-lineage').classList.contains('hidden')) loadLineage(); });
   es.addEventListener('stats', () => loadStats());
   es.onerror = () => { $('#liveTxt').textContent = 'Reconnecting'; };
   es.onopen = () => { $('#liveTxt').textContent = 'Live'; };

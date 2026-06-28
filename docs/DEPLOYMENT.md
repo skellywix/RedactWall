@@ -544,6 +544,11 @@ The examiner export at `/api/export/evidence` includes:
 It does not include raw prompt bodies, retained sealed prompts, token vaults,
 release tokens, decision notes, or uploaded file bytes.
 
+The dashboard Lineage tab uses the same prompt-free aggregation through
+`/api/lineage`. It shows lineage by user, destination, sensor, channel,
+category, and decision so Security Admins and auditors can answer coverage and
+examiner questions without downloading the full evidence pack.
+
 Generate a dated examiner pack from the local evidence store:
 
 ```bash

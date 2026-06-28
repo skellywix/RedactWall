@@ -105,6 +105,7 @@ test('auditor can inspect evidence but cannot reveal, decide, purge, or edit pol
     '/api/stats',
     '/api/preflight',
     '/api/audit',
+    '/api/lineage',
     '/api/export/evidence',
     '/api/policy',
     '/api/policy/templates',
