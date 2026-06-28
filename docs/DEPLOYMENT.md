@@ -121,7 +121,15 @@ Set `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, and
 authorization-code callback, state, nonce, RS256 ID-token signature, issuer,
 audience, expiry, and active SCIM user before issuing the normal PromptWall
 session cookie. Keep local Security Admin credentials as the break-glass console
-path. See `docs/SCIM_PROVISIONING.md` for endpoint details and IdP setup notes.
+path. See `docs/SCIM_PROVISIONING.md` for endpoint details and
+`docs/IDENTITY_IDP_SETUP.md` for Microsoft Entra and Okta setup recipes. Logged
+in operators can also open the dashboard Identity tab, or print the same
+secret-free handoff from the CLI:
+
+```bash
+npm run identity:setup -- --provider entra --base-url https://promptwall.customer.example --tenant-id <tenant-id-or-domain>
+npm run identity:setup -- --provider okta --base-url https://promptwall.customer.example --tenant-id <customer.okta.com>
+```
 
 ## Scoped Policy And Exceptions
 
@@ -453,6 +461,7 @@ Set these through `.env`, container environment, or a deployment secret manager:
 | `OIDC_CLIENT_ID` | OIDC web application client id. |
 | `OIDC_CLIENT_SECRET` | OIDC web application client secret. Production preflight requires at least 32 characters when OIDC is configured. |
 | `OIDC_REDIRECT_URI` | OIDC callback URL, usually `https://promptwall.customer.example/auth/oidc/callback`. |
+| `OIDC_SCOPE` | OIDC scopes requested by console SSO, defaulting to `openid email profile`. |
 | `OIDC_AUTHORIZATION_ENDPOINT` / `OIDC_TOKEN_ENDPOINT` / `OIDC_JWKS_URI` | Optional explicit endpoints. Leave all three empty for issuer discovery, or set all three together. |
 | `SENTINEL_DB_PATH` | SQLite path on local persistent disk. |
 | `SENTINEL_SAAS_MODE` | Set to `true` for a paid customer stack. Production preflight then requires tenant id and seat limit. |

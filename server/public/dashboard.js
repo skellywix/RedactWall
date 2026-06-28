@@ -9,6 +9,7 @@ let currentQueue = [];
 let currentActivity = [];
 let currentCoverage = null;
 let currentLineage = null;
+let currentIdentitySetup = null;
 let searchTerm = '';
 let currentRole = 'auditor';
 let currentUser = '';
@@ -947,6 +948,85 @@ function renderCoverage(c) {
     </div>`).join('') || '<div class="empty"><div class="big">No shadow AI</div>No ungoverned AI tools have been reported.</div>';
 }
 
+function identityProviderLabel(provider) {
+  return ({
+    entra: 'Microsoft Entra ID',
+    okta: 'Okta',
+  })[provider] || humanize(provider);
+}
+
+async function loadIdentitySetup() {
+  const provider = ($('#identityProvider') && $('#identityProvider').value) || 'entra';
+  const tenantId = ($('#identityTenant') && $('#identityTenant').value.trim()) || '';
+  const params = new URLSearchParams({ provider });
+  if (tenantId) params.set('tenantId', tenantId);
+  const r = await api(`/api/identity/setup-guide?${params.toString()}`);
+  if (!r) return;
+  currentIdentitySetup = await r.json();
+  if (currentIdentitySetup.error) {
+    $('#identitySummary').innerHTML = `<div class="empty"><div class="big">Identity setup unavailable</div>${escapeHtml(currentIdentitySetup.error)}</div>`;
+    return;
+  }
+  renderIdentitySetup(currentIdentitySetup);
+}
+
+function identityValueRows(rows) {
+  return rows.map(([key, value]) => `<tr><th>${escapeHtml(key)}</th><td class="mono">${escapeHtml(value || '-')}</td></tr>`).join('');
+}
+
+function renderIdentitySummary(guide) {
+  $('#identitySummary').innerHTML = [
+    ['Provider', guide.label || identityProviderLabel(guide.provider), guide.tenantLabel || 'Tenant'],
+    ['SCIM URL', guide.scim && guide.scim.tenantUrl, 'Provisioning'],
+    ['Redirect URI', guide.oidc && guide.oidc.redirectUri, 'Console SSO'],
+    ['Preflight', (guide.preflightChecks || []).join(', '), 'Checks'],
+  ].map(([label, value, meta]) => `
+    <div class="mini-kpi"><b>${escapeHtml(label)}</b><em>${escapeHtml(value || '-')}</em><span>${escapeHtml(meta)}</span></div>
+  `).join('');
+}
+
+function renderIdentityTables(guide) {
+  $('#identityScimRows').innerHTML = identityValueRows([
+    ['Tenant URL', guide.scim && guide.scim.tenantUrl],
+    ['Base URL', guide.scim && guide.scim.baseUrl],
+    ['Authentication', guide.scim && guide.scim.authMode],
+    ['Token env', guide.scim ? `${guide.scim.tokenEnv} / ${guide.scim.tokenAlias}` : ''],
+    ['Unique ID', guide.scim && guide.scim.uniqueIdentifier],
+    ['Content type', guide.scim && guide.scim.contentType],
+  ]);
+  $('#identityOidcRows').innerHTML = identityValueRows([
+    ['Application type', guide.oidc && guide.oidc.applicationType],
+    ['Issuer', guide.oidc && guide.oidc.issuer],
+    ['Redirect URI', guide.oidc && guide.oidc.redirectUri],
+    ['Scopes', guide.oidc ? (guide.oidc.scopes || []).join(' ') : ''],
+    ['Discovery', guide.oidc && guide.oidc.discovery],
+  ]);
+  $('#identityEnvRows').innerHTML = (guide.env || []).map((row) => `<tr>
+    <td class="mono">${escapeHtml(row.key)}</td>
+    <td class="mono">${escapeHtml(row.alias)}</td>
+    <td class="mono">${escapeHtml(row.value)}</td>
+  </tr>`).join('');
+  $('#identityRoleRows').innerHTML = (guide.roleGroups || []).map((row) => `<tr>
+    <td><span class="pill info">${escapeHtml(roleLabel(row.role))}</span></td>
+    <td>${escapeHtml((row.groups || []).join(', '))}</td>
+  </tr>`).join('');
+}
+
+function renderIdentityValidation(guide) {
+  $('#identityValidation').innerHTML = [
+    ...(guide.validation || []).map((item) => ['Command', item]),
+    ...(guide.safety || []).map((item) => ['Safety', item]),
+  ].map(([label, detail]) => `
+    <div class="posture-item"><span>${escapeHtml(label)}</span><b>${escapeHtml(detail)}</b></div>
+  `).join('');
+}
+
+function renderIdentitySetup(guide) {
+  renderIdentitySummary(guide);
+  renderIdentityTables(guide);
+  renderIdentityValidation(guide);
+}
+
 async function loadLineage() {
   const r = await api('/api/lineage?limit=1000');
   if (!r) return;
@@ -1278,6 +1358,7 @@ function activateTab(name) {
   if (name === 'policy') loadPolicy();
   if (name === 'activity') loadActivity();
   if (name === 'coverage') loadCoverage();
+  if (name === 'identity') loadIdentitySetup();
   if (name === 'lineage') loadLineage();
 }
 
@@ -1287,6 +1368,9 @@ $$('.tab').forEach((t) => {
 
 $('#refreshQueue').onclick = loadQueue;
 $('#refreshCoverage').onclick = loadCoverage;
+$('#refreshIdentity').onclick = loadIdentitySetup;
+$('#identityProvider').addEventListener('change', loadIdentitySetup);
+$('#identityTenant').addEventListener('change', loadIdentitySetup);
 $('#refreshLineage').onclick = loadLineage;
 $('#logout').onclick = async () => { await api('/api/logout', { method: 'POST' }); location.href = '/login.html'; };
 $('#exportEvidence').onclick = exportEvidence;

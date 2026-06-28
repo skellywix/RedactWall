@@ -105,9 +105,11 @@ seat-limit enforcement, minimal SCIM user/group provisioning, and SCIM-backed
 OIDC login exist. SCIM can deactivate users and map PromptWall group names to
 local roles. OIDC validates authorization-code callbacks, state, nonce, RS256
 ID-token signatures, issuer, audience, expiry, and active SCIM users before
-issuing PromptWall sessions. Full IdP session lifecycle management, IdP-driven
-seat lifecycle enforcement, IdP-specific setup UX, and polished MFA enrollment
-do not.
+issuing PromptWall sessions. PromptWall now also renders secret-free Microsoft
+Entra and Okta setup values from the dashboard Identity tab and
+`npm run identity:setup`, plus a dedicated IdP setup guide. Full IdP session
+lifecycle management, IdP-driven seat lifecycle enforcement, and polished MFA
+enrollment remain open.
 
 Customer ask: "Can we connect this to Microsoft Entra or Okta, map groups to
 roles, deprovision users automatically, and avoid shared admin accounts?"
@@ -124,12 +126,16 @@ Implemented:
 - Uses the existing SCIM 2.0-compatible provisioning API at `/scim/v2/Users`,
   `/scim/v2/Groups`, and `/scim/v2/ServiceProviderConfig` as the identity
   lifecycle source for console login.
+- Adds provider-specific Entra and Okta setup handoff from
+  `server/identity-setup.js`, `/api/identity/setup-guide`, the dashboard
+  Identity tab, `npm run identity:setup`, `.env.example`, and
+  `docs/IDENTITY_IDP_SETUP.md` without exposing SCIM tokens or OIDC client
+  secrets.
 
 Remaining:
 - Decide whether provisioned identity state should remain in the SQLite evidence
   database for customer-silo installs or move to a separate app config store
   before shared SaaS migration.
-- Add IdP-specific setup guides and operator UX for Entra and Okta.
 - Decide whether step-up should stay as a fresh OIDC-session window or become a
   dedicated reauthentication flow.
 
@@ -139,6 +145,8 @@ Acceptance evidence:
   membership role mapping.
 - `node --test test/oidc-login.test.js` for OIDC callback validation, JWKS ID
   token verification, active-SCIM-user enforcement, and session role guards.
+- `node --test test/identity-setup.test.js` for Entra and Okta handoff values,
+  CLI output, authenticated dashboard/API wiring, and secret-free rendering.
 - Browser E2E: local auditor cannot approve, local approver can approve assigned
   items, Security Admin can edit policy, operator can view deployment health
   only.
@@ -382,7 +390,8 @@ Acceptance evidence:
 
 1. Deepen desktop/file-flow coverage beyond the protected-upload MVP only when
    a pilot needs app-specific interception.
-2. Polish enterprise identity UX, IdP recipes, and step-up reauthentication.
+2. Polish step-up reauthentication and remaining identity lifecycle gaps after
+   Entra/Okta setup handoff.
 3. Signed update channel and commercial rollout posture.
 4. Scheduled examiner evidence pack with backup and restore-drill status.
 5. Customer-defined detectors plus OCR-required handling.

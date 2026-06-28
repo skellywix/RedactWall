@@ -408,10 +408,14 @@ With the customer's Security Admin:
    governed destinations.
 8. Confirm auditor login, if configured, can view sanitized evidence and cannot
    approve, deny, reveal, purge, or edit policy.
-9. If SCIM is configured, have the identity admin call
+9. If SCIM or OIDC is planned, open the dashboard Identity tab or run
+   `npm run identity:setup -- --provider entra --base-url https://<customer-host> --tenant-id <tenant>`
+   or `npm run identity:setup -- --provider okta --base-url https://<customer-host> --tenant-id <customer.okta.com>`
+   and attach only the secret-free values to the handoff.
+10. If SCIM is configured, have the identity admin call
    `/scim/v2/ServiceProviderConfig` with the bearer token and confirm
    `patch.supported=true` and `filter.supported=true`.
-10. If OIDC is configured, confirm the login page shows `Continue with SSO`,
+11. If OIDC is configured, confirm the login page shows `Continue with SSO`,
     sign in as one active SCIM-provisioned test user, and verify `/api/me`
     reports the expected role without using a local console password.
 

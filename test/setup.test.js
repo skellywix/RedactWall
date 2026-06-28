@@ -36,6 +36,14 @@ const SETUP_ENV_KEYS = [
   'SENTINEL_DATA_KEY',
   'INGEST_API_KEY',
   'SCIM_BEARER_TOKEN',
+  'OIDC_ISSUER',
+  'OIDC_CLIENT_ID',
+  'OIDC_CLIENT_SECRET',
+  'OIDC_REDIRECT_URI',
+  'OIDC_SCOPE',
+  'OIDC_AUTHORIZATION_ENDPOINT',
+  'OIDC_TOKEN_ENDPOINT',
+  'OIDC_JWKS_URI',
   'SENTINEL_REQUEST_TIMEOUT_MS',
   'SIEM_WEBHOOK_URL',
   'SIEM_WEBHOOK_TOKEN',
@@ -54,6 +62,14 @@ const SETUP_ENV_KEYS = [
   'PROMPTWALL_DATA_KEY',
   'PROMPTWALL_INGEST_API_KEY',
   'PROMPTWALL_SCIM_BEARER_TOKEN',
+  'PROMPTWALL_OIDC_ISSUER',
+  'PROMPTWALL_OIDC_CLIENT_ID',
+  'PROMPTWALL_OIDC_CLIENT_SECRET',
+  'PROMPTWALL_OIDC_REDIRECT_URI',
+  'PROMPTWALL_OIDC_SCOPE',
+  'PROMPTWALL_OIDC_AUTHORIZATION_ENDPOINT',
+  'PROMPTWALL_OIDC_TOKEN_ENDPOINT',
+  'PROMPTWALL_OIDC_JWKS_URI',
   'PROMPTWALL_REQUEST_TIMEOUT_MS',
   'PROMPTWALL_ENV_PATH',
 ];
@@ -74,6 +90,8 @@ test('production setup env passes deployment preflight', () => {
   assert.notStrictEqual(env.ADMIN_PASSWORD, 'ChangeMe!2026');
   assert.match(env.ADMIN_TOTP_SECRET, /^[A-Z2-7]{16,}$/);
   assert.notStrictEqual(env.INGEST_API_KEY, 'dev-ingest-key');
+  assert.strictEqual(env.OIDC_ISSUER, '');
+  assert.strictEqual(env.OIDC_SCOPE, 'openid email profile');
   assert.ok(env.SENTINEL_SECRET.length >= 32);
   assert.ok(env.SENTINEL_DATA_KEY.length >= 32);
   assert.strictEqual(env.SENTINEL_SAAS_MODE, 'false');
