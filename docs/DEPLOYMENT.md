@@ -658,6 +658,16 @@ approvals to notify a queue, chat channel, SOAR workflow, or ticketing bridge:
 | `PROMPTWALL_APPROVAL_TICKET_SYSTEM` or `APPROVAL_TICKET_SYSTEM` | Optional system label such as `jira`, `linear`, `servicenow`, or `generic`. |
 | `PROMPTWALL_APPROVAL_TICKET_PROJECT` or `APPROVAL_TICKET_PROJECT` | Optional project or queue key passed to the ticket bridge. |
 | `PROMPTWALL_APPROVAL_TICKET_ISSUE_TYPE` or `APPROVAL_TICKET_ISSUE_TYPE` | Optional issue type; defaults to `Security Review`. |
+| `PROMPTWALL_APPROVAL_JIRA_BASE_URL` or `APPROVAL_JIRA_BASE_URL` | Optional Jira Cloud base URL for direct sanitized issue creation. |
+| `PROMPTWALL_APPROVAL_JIRA_EMAIL` or `APPROVAL_JIRA_EMAIL` | Jira account email used with an API token. |
+| `PROMPTWALL_APPROVAL_JIRA_API_TOKEN` or `APPROVAL_JIRA_API_TOKEN` | Jira API token; keep in deployment secrets. |
+| `PROMPTWALL_APPROVAL_JIRA_PROJECT_KEY` or `APPROVAL_JIRA_PROJECT_KEY` | Jira project key for approval workflow issues. |
+| `PROMPTWALL_APPROVAL_JIRA_ISSUE_TYPE` or `APPROVAL_JIRA_ISSUE_TYPE` | Jira issue type, defaulting to `Task`. |
+| `PROMPTWALL_APPROVAL_LINEAR_API_KEY` or `APPROVAL_LINEAR_API_KEY` | Optional Linear API key for direct sanitized issue creation. |
+| `PROMPTWALL_APPROVAL_LINEAR_TEAM_ID` or `APPROVAL_LINEAR_TEAM_ID` | Linear team id for approval workflow issues. |
+| `PROMPTWALL_APPROVAL_LINEAR_STATE_ID` or `APPROVAL_LINEAR_STATE_ID` | Optional Linear state id. |
+| `PROMPTWALL_APPROVAL_LINEAR_PROJECT_ID` or `APPROVAL_LINEAR_PROJECT_ID` | Optional Linear project id. |
+| `PROMPTWALL_APPROVAL_LINEAR_LABEL_IDS` or `APPROVAL_LINEAR_LABEL_IDS` | Optional comma-separated Linear label ids. |
 | `PROMPTWALL_APPROVAL_SMTP_HOST` or `APPROVAL_SMTP_HOST` | SMTP relay host for plain-text sanitized approval email. |
 | `PROMPTWALL_APPROVAL_SMTP_PORT` or `APPROVAL_SMTP_PORT` | SMTP relay port; defaults to `587`, or `465` when implicit TLS is enabled. |
 | `PROMPTWALL_APPROVAL_SMTP_FROM` or `APPROVAL_SMTP_FROM` | Sender address for approval notifications. |
@@ -674,18 +684,20 @@ token vaults, release tokens, decision notes, raw finding values, and uploaded
 file bytes. Ticket bridge payloads add a deterministic `dedupeKey`, ticket
 system/project metadata, priority, and the same sanitized routing fields so a
 customer bridge can create Jira, Linear, ServiceNow, or SOAR tickets without
-receiving prompt bodies. SMTP email uses the same sanitized routing fields as
-the webhook payload and strips mail-header newlines before delivery.
+receiving prompt bodies. Native Jira and Linear adapters create issues directly
+from the same sanitized summary and description when customers do not want to
+operate middleware. SMTP email uses the same sanitized routing fields as the
+webhook payload and strips mail-header newlines before delivery.
 
 Delivery is best-effort. PromptWall records `notificationStatus`,
 `notificationLastAttemptAt`, `notificationAttemptCount`, and bounded channel
 names on the query, then writes an audit event such as
 `APPROVAL_NOTIFICATION_SENT` or `APPROVAL_NOTIFICATION_FAILED`. Webhook URLs,
-ticket bridge tokens, SMTP credentials, and reviewer distribution lists are
-operational secrets; do not commit them to policy files, `.env.example`, docs
-with real values, or support tickets. SMTP requires TLS by default. Use the
-insecure relay opt-in only for a trusted local mail relay inside the customer
-network.
+ticket bridge tokens, Jira API tokens, Linear API keys, SMTP credentials, and
+reviewer distribution lists are operational secrets; do not commit them to
+policy files, `.env.example`, docs with real values, or support tickets. SMTP
+requires TLS by default. Use the insecure relay opt-in only for a trusted local
+mail relay inside the customer network.
 
 The server also runs an SLA escalation pass at startup and every five minutes.
 Overdue routed items receive `escalatedAt`, `escalationReason=sla_due`, an

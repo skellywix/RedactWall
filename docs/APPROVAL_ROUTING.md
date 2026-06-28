@@ -21,7 +21,8 @@ Routeable blocked records carry:
   notification delivery.
 - `notificationAttemptCount`: number of persisted notification attempts.
 - `notificationChannels`: bounded channel names such as `webhook`, `slack`,
-  `teams`, `ticket`, or `smtp`, never URLs, hosts, recipients, or tokens.
+  `teams`, `ticket`, `jira`, `linear`, or `smtp`, never URLs, hosts,
+  recipients, or tokens.
 
 The dashboard exposes the owner and SLA in the approval queue, all-activity
 table, selected incident detail, queue filters by workflow state, category, and
@@ -139,6 +140,16 @@ on the query plus an audit event.
 | Ticket system label | `PROMPTWALL_APPROVAL_TICKET_SYSTEM` or `APPROVAL_TICKET_SYSTEM`; for example `jira`, `linear`, `servicenow`, or `generic` |
 | Ticket project key | `PROMPTWALL_APPROVAL_TICKET_PROJECT` or `APPROVAL_TICKET_PROJECT` |
 | Ticket issue type | `PROMPTWALL_APPROVAL_TICKET_ISSUE_TYPE` or `APPROVAL_TICKET_ISSUE_TYPE`; defaults to `Security Review` |
+| Jira base URL | `PROMPTWALL_APPROVAL_JIRA_BASE_URL` or `APPROVAL_JIRA_BASE_URL`; for example `https://customer.atlassian.net` |
+| Jira account email | `PROMPTWALL_APPROVAL_JIRA_EMAIL` or `APPROVAL_JIRA_EMAIL` |
+| Jira API token | `PROMPTWALL_APPROVAL_JIRA_API_TOKEN` or `APPROVAL_JIRA_API_TOKEN` |
+| Jira project key | `PROMPTWALL_APPROVAL_JIRA_PROJECT_KEY` or `APPROVAL_JIRA_PROJECT_KEY` |
+| Jira issue type | `PROMPTWALL_APPROVAL_JIRA_ISSUE_TYPE` or `APPROVAL_JIRA_ISSUE_TYPE`; defaults to `Task` |
+| Linear API key | `PROMPTWALL_APPROVAL_LINEAR_API_KEY` or `APPROVAL_LINEAR_API_KEY` |
+| Linear team id | `PROMPTWALL_APPROVAL_LINEAR_TEAM_ID` or `APPROVAL_LINEAR_TEAM_ID` |
+| Linear state id | `PROMPTWALL_APPROVAL_LINEAR_STATE_ID` or `APPROVAL_LINEAR_STATE_ID`; optional |
+| Linear project id | `PROMPTWALL_APPROVAL_LINEAR_PROJECT_ID` or `APPROVAL_LINEAR_PROJECT_ID`; optional |
+| Linear label ids | `PROMPTWALL_APPROVAL_LINEAR_LABEL_IDS` or `APPROVAL_LINEAR_LABEL_IDS`; optional comma-separated label ids |
 | SMTP host | `PROMPTWALL_APPROVAL_SMTP_HOST` or `APPROVAL_SMTP_HOST` |
 | SMTP port | `PROMPTWALL_APPROVAL_SMTP_PORT` or `APPROVAL_SMTP_PORT`; defaults to `587`, or `465` when implicit TLS is enabled |
 | SMTP from address | `PROMPTWALL_APPROVAL_SMTP_FROM` or `APPROVAL_SMTP_FROM` |
@@ -154,11 +165,15 @@ payload. The ticket bridge receives a smaller issue-tracker payload with
 `promptwall.approval_ticket`, a deterministic `dedupeKey`, ticket system/project
 metadata, query id, owner, SLA, detector labels, severity, and routing context.
 Use it for Jira, Linear, ServiceNow, SOAR, or internal middleware that creates
-the customer-specific ticket. SMTP receives the same routing metadata as a
-plain-text email. Webhook URLs, ticket bridge tokens, and SMTP credentials are
-secrets; keep them in environment or secret-manager configuration only. SMTP
-requires TLS by default and will only use an insecure relay when the explicit
-insecure-local-relay opt-in is set.
+the customer-specific ticket. The native Jira adapter posts an Atlassian
+Document Format issue to `/rest/api/3/issue`; the native Linear adapter posts an
+`issueCreate` GraphQL mutation. Both use the same sanitized issue summary and
+description. SMTP receives the same routing metadata as a plain-text email.
+Webhook URLs, ticket bridge tokens, Jira API tokens, Linear API keys, SMTP
+credentials, and reviewer distribution lists are secrets; keep them in
+environment or secret-manager configuration only. SMTP requires TLS by default
+and will only use an insecure relay when the explicit insecure-local-relay
+opt-in is set.
 
 ## SLA Escalation
 
@@ -212,8 +227,8 @@ Atlassian. "Issues." *Jira Cloud Platform REST API*, Atlassian,
 https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issues/.
 Accessed 28 June 2026.
 
-Linear. "Webhooks." *Linear Developers*, Linear,
-https://developers.linear.app/docs/graphql/webhooks. Accessed 28 June 2026.
+Linear. "GraphQL API." *Linear Developers*, Linear,
+https://linear.app/developers/graphql. Accessed 28 June 2026.
 
 Klensin, John. "Simple Mail Transfer Protocol." *RFC 5321*, Internet
 Engineering Task Force, Oct. 2008, https://www.rfc-editor.org/rfc/rfc5321.

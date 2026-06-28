@@ -68,9 +68,9 @@ evidence stable until a separate migration plan exists.
    browser file-drop, and browser response-copy controls.
 6. Exception lifecycle: owner group, reviewer role, review-after metadata, and
    sanitized expiry-review evidence for time-bound allow rules.
-7. Workflow ticket bridge: sanitized approval-ticket webhook with dedupe keys
-   and ticket system/project metadata for Jira, Linear, SOAR, or internal
-   middleware.
+7. Workflow ticketing: sanitized approval-ticket webhook with dedupe keys,
+   direct Jira and Linear issue adapters, and ticket system/project metadata for
+   Jira, Linear, SOAR, or internal middleware.
 8. Final audit: current-state search, docs check, package generation, tests,
    eval, sync-check, audit chain, and browser evidence.
 
@@ -168,6 +168,9 @@ For this alignment track, completion requires evidence for every area below:
 - Added a sanitized approval ticket bridge that sends deduplicated, issue-shaped
   workflow payloads to ticketing middleware without prompt bodies, raw findings,
   token vaults, release tokens, or decision notes.
+- Added native Jira and Linear approval-ticket adapters that create sanitized
+  reviewer issues directly from workflow metadata when customers do not want to
+  operate ticket middleware.
 
 ## Open Decisions
 

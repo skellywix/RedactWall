@@ -14,6 +14,7 @@ const smtp = require('./smtp');
 
 const MAX_LABELS = 20;
 const MAX_REASONS = 8;
+const DEFAULT_LINEAR_API_URL = 'https://api.linear.app/graphql';
 
 function envValue(env, ...names) {
   for (const name of names) {
@@ -21,6 +22,32 @@ function envValue(env, ...names) {
     if (typeof value === 'string' && value.trim()) return value.trim();
   }
   return '';
+}
+
+function trimmed(value, limit = 2048) {
+  const text = String(value || '').trim();
+  return text ? text.slice(0, limit) : '';
+}
+
+function csv(value, limit = 20) {
+  return trimmed(value, 4096)
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, limit);
+}
+
+function jiraIssueUrl(baseUrl) {
+  try {
+    const url = new URL(trimmed(baseUrl));
+    if (!/^https?:$/.test(url.protocol)) return '';
+    url.pathname = url.pathname.replace(/\/+$/, '') + '/rest/api/3/issue';
+    url.search = '';
+    url.hash = '';
+    return url.toString();
+  } catch {
+    return '';
+  }
 }
 
 function parseBool(value, fallback = false) {
@@ -31,6 +58,39 @@ function parseBool(value, fallback = false) {
 function parsePort(value, fallback) {
   const port = Number(value);
   return Number.isInteger(port) && port > 0 && port < 65536 ? port : fallback;
+}
+
+function configuredJiraChannel(env) {
+  const url = jiraIssueUrl(envValue(env, 'PROMPTWALL_APPROVAL_JIRA_BASE_URL', 'APPROVAL_JIRA_BASE_URL'));
+  const email = envValue(env, 'PROMPTWALL_APPROVAL_JIRA_EMAIL', 'APPROVAL_JIRA_EMAIL');
+  const token = envValue(env, 'PROMPTWALL_APPROVAL_JIRA_API_TOKEN', 'APPROVAL_JIRA_API_TOKEN');
+  const projectKey = envValue(env, 'PROMPTWALL_APPROVAL_JIRA_PROJECT_KEY', 'APPROVAL_JIRA_PROJECT_KEY');
+  if (!url || !email || !token || !projectKey) return null;
+  return {
+    type: 'jira',
+    name: 'jira',
+    url,
+    email,
+    token,
+    projectKey,
+    issueType: envValue(env, 'PROMPTWALL_APPROVAL_JIRA_ISSUE_TYPE', 'APPROVAL_JIRA_ISSUE_TYPE') || 'Task',
+  };
+}
+
+function configuredLinearChannel(env) {
+  const token = envValue(env, 'PROMPTWALL_APPROVAL_LINEAR_API_KEY', 'APPROVAL_LINEAR_API_KEY');
+  const teamId = envValue(env, 'PROMPTWALL_APPROVAL_LINEAR_TEAM_ID', 'APPROVAL_LINEAR_TEAM_ID');
+  if (!token || !teamId) return null;
+  return {
+    type: 'linear',
+    name: 'linear',
+    url: envValue(env, 'PROMPTWALL_APPROVAL_LINEAR_API_URL', 'APPROVAL_LINEAR_API_URL') || DEFAULT_LINEAR_API_URL,
+    token,
+    teamId,
+    stateId: envValue(env, 'PROMPTWALL_APPROVAL_LINEAR_STATE_ID', 'APPROVAL_LINEAR_STATE_ID'),
+    projectId: envValue(env, 'PROMPTWALL_APPROVAL_LINEAR_PROJECT_ID', 'APPROVAL_LINEAR_PROJECT_ID'),
+    labelIds: csv(envValue(env, 'PROMPTWALL_APPROVAL_LINEAR_LABEL_IDS', 'APPROVAL_LINEAR_LABEL_IDS')),
+  };
 }
 
 function configuredChannels(env = process.env, opts = {}) {
@@ -61,6 +121,10 @@ function configuredChannels(env = process.env, opts = {}) {
       issueType: envValue(env, 'PROMPTWALL_APPROVAL_TICKET_ISSUE_TYPE', 'APPROVAL_TICKET_ISSUE_TYPE'),
     });
   }
+  const jira = configuredJiraChannel(env);
+  if (jira) channels.push(jira);
+  const linear = configuredLinearChannel(env);
+  if (linear) channels.push(linear);
   const smtpHost = envValue(env, 'PROMPTWALL_APPROVAL_SMTP_HOST', 'APPROVAL_SMTP_HOST');
   const smtpFrom = envValue(env, 'PROMPTWALL_APPROVAL_SMTP_FROM', 'APPROVAL_SMTP_FROM');
   const smtpTo = smtp.parseRecipients(envValue(env, 'PROMPTWALL_APPROVAL_SMTP_TO', 'APPROVAL_SMTP_TO'));
@@ -225,10 +289,95 @@ function ticketPayload(channel, payload) {
   };
 }
 
+function issueSummary(payload) {
+  const owner = [payload.workflow.assignedGroup, payload.workflow.assignedRole].filter(Boolean).join('/');
+  const destination = payload.destination || 'unknown';
+  const label = payload.labels[0] || payload.maxSeverityLabel || 'review';
+  return boundedText(`PromptWall ${payload.action === 'APPROVAL_ESCALATED' ? 'escalation' : 'approval'}: ${label} at ${destination}${owner ? ' for ' + owner : ''}`, 240);
+}
+
+function issueDescription(payload) {
+  return [
+    payload.title,
+    `Query: ${payload.queryId || 'unknown'}`,
+    `Action: ${payload.action || 'unknown'}`,
+    `Owner: ${payload.workflow.assignedGroup || 'unassigned'} / ${payload.workflow.assignedRole || 'unassigned'}`,
+    `SLA: ${payload.workflow.slaDueAt || 'none'}`,
+    `Destination: ${payload.destination || 'unknown'}`,
+    `Source: ${payload.source || 'unknown'} / ${payload.channel || 'unknown'}`,
+    `User: ${payload.user || 'unknown'}`,
+    `Org: ${payload.orgId || 'unknown'}`,
+    `Risk: ${payload.maxSeverityLabel || 'none'} (${payload.riskScore || 0})`,
+    `Labels: ${payload.labels.join(', ') || 'none'}`,
+    `Reasons: ${payload.reasons.join('; ') || 'none'}`,
+    '',
+    'This issue was generated from sanitized PromptWall workflow metadata only. It intentionally omits prompt bodies, redacted previews, raw findings, token vaults, release tokens, decision notes, and uploaded file bytes.',
+  ].join('\n').slice(0, 8000);
+}
+
+function issueLabel(value) {
+  const label = String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 64);
+  return label || null;
+}
+
+function issueLabels(payload) {
+  return ['promptwall', 'approval', priorityForTicket(payload), ...payload.labels]
+    .map(issueLabel)
+    .filter(Boolean)
+    .slice(0, 12);
+}
+
+function jiraAdf(text) {
+  const content = String(text || '')
+    .split('\n')
+    .map((line) => line.trim())
+    .map((line) => ({
+      type: 'paragraph',
+      content: line ? [{ type: 'text', text: line }] : [],
+    }));
+  return { type: 'doc', version: 1, content };
+}
+
+function jiraIssuePayload(channel, payload) {
+  return {
+    fields: {
+      project: { key: boundedText(channel.projectKey, 80) },
+      issuetype: { name: boundedText(channel.issueType, 80) || 'Task' },
+      summary: issueSummary(payload),
+      description: jiraAdf(issueDescription(payload)),
+      labels: issueLabels(payload),
+    },
+  };
+}
+
+function linearIssuePayload(channel, payload) {
+  const input = {
+    teamId: boundedText(channel.teamId, 80),
+    title: issueSummary(payload),
+    description: issueDescription(payload),
+  };
+  if (channel.stateId) input.stateId = boundedText(channel.stateId, 80);
+  if (channel.projectId) input.projectId = boundedText(channel.projectId, 80);
+  if (Array.isArray(channel.labelIds) && channel.labelIds.length) {
+    input.labelIds = channel.labelIds.map((id) => boundedText(id, 80)).filter(Boolean).slice(0, 20);
+  }
+  return {
+    query: 'mutation PromptWallIssueCreate($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { id identifier url title } } }',
+    variables: { input },
+  };
+}
+
 function bodyForChannel(channel, payload) {
   if (channel.type === 'slack') return slackPayload(payload);
   if (channel.type === 'teams') return teamsPayload(payload);
   if (channel.type === 'ticket') return ticketPayload(channel, payload);
+  if (channel.type === 'jira') return jiraIssuePayload(channel, payload);
+  if (channel.type === 'linear') return linearIssuePayload(channel, payload);
   return payload;
 }
 
@@ -240,15 +389,40 @@ function smtpMessageForPayload(channel, payload, now = new Date()) {
   return smtp.messageForPayload(channel, smtpPayload(payload), now);
 }
 
-async function postJson(channel, payload, opts = {}) {
+function headersForChannel(channel) {
   const headers = { 'Content-Type': 'application/json' };
   if ((channel.type === 'webhook' || channel.type === 'ticket') && channel.token) headers.Authorization = 'Bearer ' + channel.token;
+  if (channel.type === 'jira') {
+    headers.Accept = 'application/json';
+    headers.Authorization = 'Basic ' + Buffer.from(`${channel.email}:${channel.token}`, 'utf8').toString('base64');
+  }
+  if (channel.type === 'linear') {
+    headers.Accept = 'application/json';
+    headers.Authorization = channel.token;
+  }
+  return headers;
+}
+
+async function linearFailureReason(res) {
+  if (!res || !res.ok || typeof res.json !== 'function') return null;
+  try {
+    const data = await res.json();
+    if (data && ((Array.isArray(data.errors) && data.errors.length) || data.data?.issueCreate?.success === false)) return 'graphql_error';
+    return null;
+  } catch {
+    return 'invalid_graphql_response';
+  }
+}
+
+async function postJson(channel, payload, opts = {}) {
   const fetchImpl = opts.fetch || fetch;
   const res = await fetchImpl(channel.url, {
     method: 'POST',
-    headers,
+    headers: headersForChannel(channel),
     body: JSON.stringify(bodyForChannel(channel, payload)),
   });
+  const linearReason = channel.type === 'linear' ? await linearFailureReason(res) : null;
+  if (linearReason) return { channel: channel.name || channel.type, sent: false, reason: linearReason };
   return res && res.ok
     ? { channel: channel.name || channel.type, sent: true, status: res.status }
     : { channel: channel.name || channel.type, sent: false, reason: 'http_' + (res && res.status) };
@@ -291,6 +465,8 @@ module.exports = {
   configuredChannels,
   deliveryStatus,
   emitApprovalNotification,
+  jiraIssuePayload,
+  linearIssuePayload,
   sanitizedApprovalNotification,
   shouldNotifyApproval,
   smtpMessageForPayload,
