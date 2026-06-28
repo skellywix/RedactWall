@@ -7,6 +7,7 @@ const path = require('path');
 
 const root = path.join(__dirname, '..');
 const server = fs.readFileSync(path.join(root, 'server/app.js'), 'utf8');
+const index = fs.readFileSync(path.join(root, 'server', 'public', 'index.html'), 'utf8');
 const dashboard = fs.readFileSync(path.join(root, 'server', 'public', 'dashboard.js'), 'utf8');
 
 test('admin write routes include csrf middleware', () => {
@@ -75,4 +76,17 @@ test('dashboard renders auditors as read-only users', () => {
   assert.match(dashboard, /\$\('#who'\)\.textContent = `\$\{me\.user\} \/ \$\{roleLabel\(currentRole\)\}`/);
   assert.match(dashboard, /Read-only auditor view/);
   assert.match(dashboard, /if \(!canAdminWrite\(\)\)/);
+});
+
+test('dashboard filters approval queue by workflow state, category, and destination', () => {
+  assert.match(index, /id="queueCategoryFilter"/);
+  assert.match(index, /id="queueDestinationFilter"/);
+  assert.match(index, /Approval queue metadata filters/);
+  assert.match(dashboard, /let queueCategoryFilter = 'all'/);
+  assert.match(dashboard, /let queueDestinationFilter = 'all'/);
+  assert.match(dashboard, /function queueCategoryLabels\(q = \{\}\)/);
+  assert.match(dashboard, /function queueMetadataMatches\(q\)/);
+  assert.match(dashboard, /currentQueue\.filter\(queueMetadataMatches\)\.filter\(matchesSearch\)/);
+  assert.match(dashboard, /e\.target\.matches\('#queueCategoryFilter'\)/);
+  assert.match(dashboard, /e\.target\.matches\('#queueDestinationFilter'\)/);
 });

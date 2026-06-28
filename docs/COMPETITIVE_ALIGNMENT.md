@@ -74,6 +74,8 @@ Build next:
 - Add customer-configurable approval routing rules so Security Admins can route
   held decisions by detector, category, source, channel, destination, severity,
   and risk without exposing prompt or file content to sensors.
+- Add approval queue filters by workflow state, detector/category, and
+  destination so reviewers can triage held items without opening every record.
 - Keep compatibility-sensitive runtime contracts stable where breaking them
   would damage existing installs or retained evidence.
 - Add active Poe browser protection because Poe was already a governed
