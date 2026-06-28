@@ -147,14 +147,17 @@ function workflowChips(q) {
   const chips = [];
   if (q.assignedGroup || q.assignedRole) chips.push(`<span class="chip"><b>Owner</b> ${escapeHtml(workflowOwner(q))}</span>`);
   if (q.slaDueAt) chips.push(`<span class="chip ${isEscalated(q) ? 'category' : ''}"><b>SLA</b> ${escapeHtml(fmt(q.slaDueAt))}</span>`);
+  if (q.escalationReason) chips.push(`<span class="chip category"><b>Escalated</b> ${escapeHtml(humanize(q.escalationReason))}</span>`);
   if (q.notificationStatus) chips.push(`<span class="chip"><b>Notify</b> ${escapeHtml(humanize(q.notificationStatus))}</span>`);
+  if ((q.notificationChannels || []).length) chips.push(`<span class="chip"><b>Channels</b> ${escapeHtml((q.notificationChannels || []).join(', '))}</span>`);
   return chips.join('');
 }
 
 function queryText(q) {
   return [
     q.id, q.user, q.destination, q.source, q.channel, q.status, q.maxSeverityLabel,
-    q.assignedRole, q.assignedGroup, q.workflowReason, q.redactedPrompt, ...(q.reasons || []), ...(q.categories || []),
+    q.assignedRole, q.assignedGroup, q.workflowReason, q.escalationReason, q.notificationStatus,
+    ...(q.notificationChannels || []), q.redactedPrompt, ...(q.reasons || []), ...(q.categories || []),
     ...(q.findings || []).map((f) => `${f.type} ${f.masked || ''}`),
     ...Object.keys(q.entityCounts || {}),
   ].join(' ').toLowerCase();
@@ -431,6 +434,8 @@ function renderIncident(q) {
       <div class="datum"><label>Created</label><b>${escapeHtml(fmt(q.createdAt))}</b></div>
       <div class="datum"><label>Owner</label><b>${escapeHtml(workflowOwner(q))}</b></div>
       <div class="datum"><label>SLA</label><b>${escapeHtml(q.slaDueAt ? fmt(q.slaDueAt) : '-')}</b></div>
+      <div class="datum"><label>Notification</label><b>${escapeHtml(humanize(q.notificationStatus || 'not configured'))}</b></div>
+      <div class="datum"><label>Escalation</label><b>${escapeHtml(q.escalatedAt ? fmt(q.escalatedAt) : '-')}</b></div>
     </div>
     <div class="risk-meter" style="--risk-width:${risk}%">
       <div class="top"><span class="sev ${sev}">${escapeHtml(q.maxSeverityLabel || 'low')}</span><span class="risk">Risk <b>${risk}</b>/100</span></div>

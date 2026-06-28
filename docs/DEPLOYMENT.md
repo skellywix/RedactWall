@@ -458,6 +458,36 @@ agent, or MCP guard events show mixed versions or missing version metadata,
 PromptWall sends a forced `SENSOR_VERSION_GAP` alert with bounded source,
 version, and platform metadata only.
 
+## Approval Workflow Notifications
+
+Set one or more approval notification channels when a customer wants routed
+approvals to notify a queue, chat channel, SOAR workflow, or ticketing bridge:
+
+| Setting | Purpose |
+| --- | --- |
+| `PROMPTWALL_APPROVAL_NOTIFY_WEBHOOK_URL` or `APPROVAL_NOTIFY_WEBHOOK_URL` | Generic sanitized JSON webhook. |
+| `PROMPTWALL_APPROVAL_NOTIFY_WEBHOOK_TOKEN` or `APPROVAL_NOTIFY_WEBHOOK_TOKEN` | Optional bearer token for the generic webhook. |
+| `PROMPTWALL_APPROVAL_SLACK_WEBHOOK_URL` or `APPROVAL_SLACK_WEBHOOK_URL` | Slack incoming webhook. |
+| `PROMPTWALL_APPROVAL_TEAMS_WEBHOOK_URL` or `APPROVAL_TEAMS_WEBHOOK_URL` | Microsoft Teams webhook. |
+
+Approval notifications are separate from SIEM alerts. They include query id,
+owner group, owner role, SLA, source, channel, destination, severity, detector
+labels, and routing reason. They omit prompt bodies, redacted prompt previews,
+token vaults, release tokens, decision notes, raw finding values, and uploaded
+file bytes.
+
+Delivery is best-effort. PromptWall records `notificationStatus`,
+`notificationLastAttemptAt`, `notificationAttemptCount`, and bounded channel
+names on the query, then writes an audit event such as
+`APPROVAL_NOTIFICATION_SENT` or `APPROVAL_NOTIFICATION_FAILED`. Webhook URLs and
+tokens are secrets; do not commit them to policy files, `.env.example`, docs
+with real values, or support tickets.
+
+The server also runs an SLA escalation pass at startup and every five minutes.
+Overdue routed items receive `escalatedAt`, `escalationReason=sla_due`, an
+`APPROVAL_ESCALATED` audit entry, and an escalation notification when a channel
+is configured.
+
 ## Destination Policy Controls
 
 Security Admins can edit `governedDestinations` and `blockedDestinations` from

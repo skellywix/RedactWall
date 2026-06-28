@@ -39,6 +39,8 @@ const DEMO_COMMANDS = [
 const SENSOR_AND_DOC_PATHS = [
   ['server/app.js', 'Control plane, API, dashboard, policy, approval, audit'],
   ['server/routing.js', 'Approval owner and SLA routing rules'],
+  ['server/notifiers.js', 'Sanitized approval workflow notification adapters'],
+  ['server/workflow.js', 'Approval notification status and SLA escalation'],
   ['server/public/index.html', 'Admin dashboard shell'],
   ['detection-engine/detect.js', 'Shared detection engine source of truth'],
   ['sensors/browser-extension/manifest.json', 'Chrome extension entrypoint'],

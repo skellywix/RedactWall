@@ -50,8 +50,8 @@ Build next:
   especially response-scanning controls.
 - Data lineage views that answer which user, sensor, destination, category, and
   decision were involved without retaining sensitive content.
-- Notification adapters that use the sanitized routing metadata now attached to
-  held decisions.
+- Direct SMTP notification, identity-backed assignment, and customer-configured
+  routing rules on top of the sanitized approval workflow.
 - Custom detector packs and an `ocr_required` file outcome so pilots can model
   local member IDs and scanned documents before shipping a heavier OCR runtime.
 - MCP connector SDK patterns that force tool-output sanitization before model
@@ -68,6 +68,9 @@ Build next:
 - Add approval owner and SLA routing so held decisions reach security,
   compliance, privacy, or legal queues with sanitized workflow metadata in the
   dashboard, SIEM alerts, and examiner evidence.
+- Add best-effort approval notification adapters for generic JSON webhooks,
+  Slack, and Microsoft Teams, plus persisted notification status and SLA
+  escalation audit events.
 - Keep compatibility-sensitive runtime contracts stable where breaking them
   would damage existing installs or retained evidence.
 - Add active Poe browser protection because Poe was already a governed

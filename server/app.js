@@ -33,6 +33,7 @@ const coverage = require('./coverage');
 const releaseTokens = require('./release-token');
 const tenant = require('./tenant');
 const routing = require('./routing');
+const workflow = require('./workflow');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -105,6 +106,11 @@ function broadcast(event, data) {
 function emitSecurityAlert(row, action, opts = {}) {
   fireSecurityAlert(row, { action, ...opts });
   if (!opts.adminEvent) {
+    workflow.fireAndPersistApprovalNotification(row, {
+      db,
+      action: action === 'APPROVAL_ESCALATED' ? action : 'APPROVAL_ROUTED',
+      onUpdate: (updated) => broadcast('query', { type: updated.status, query: publicQuery(updated) }),
+    });
     try {
       emitSensorVersionGapAlert(row);
     } catch {}
@@ -332,6 +338,18 @@ function runRetentionPurge({ actor = 'system', now = new Date() } = {}) {
     broadcast('stats', db.stats());
   }
   return { rawRetentionDays, cutoff, purged };
+}
+
+function runWorkflowEscalation({ actor = 'system', now = new Date(), notify = true } = {}) {
+  const result = workflow.escalateDueApprovals({
+    db,
+    actor,
+    now,
+    notify,
+    onUpdate: (updated) => broadcast('query', { type: updated.status, query: publicQuery(updated) }),
+  });
+  if (result.escalated.length) broadcast('stats', db.stats());
+  return result;
 }
 
 function safeNumber(value, fallback, min = 0, max = 100) {
@@ -1260,13 +1278,19 @@ function startServer(port = PORT) {
     throw new Error('Production preflight failed');
   }
   runRetentionPurge();
+  runWorkflowEscalation();
   const server = app.listen(port, () => {
     const address = server.address();
     logStartup(address && address.port ? address.port : port);
   });
   const retentionTimer = setInterval(() => runRetentionPurge(), 60 * 60 * 1000);
+  const workflowTimer = setInterval(() => runWorkflowEscalation(), 5 * 60 * 1000);
   retentionTimer.unref();
-  server.on('close', () => clearInterval(retentionTimer));
+  workflowTimer.unref();
+  server.on('close', () => {
+    clearInterval(retentionTimer);
+    clearInterval(workflowTimer);
+  });
   return server;
 }
 
@@ -1276,5 +1300,6 @@ if (require.main === module) {
 
 app.startServer = startServer;
 app.runRetentionPurge = runRetentionPurge;
+app.runWorkflowEscalation = runWorkflowEscalation;
 
 module.exports = app;
