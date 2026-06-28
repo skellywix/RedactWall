@@ -28,13 +28,8 @@ setPolicy();
 
 const processors = require('../server/processors');
 const app = require('../server/app');
+const { listen } = require('./support/listen');
 
-function listen(appUnderTest) {
-  return new Promise((resolve, reject) => {
-    const server = appUnderTest.listen(0, '127.0.0.1', () => resolve(server));
-    server.on('error', reject);
-  });
-}
 
 function close(server) {
   return new Promise((resolve) => server.close(resolve));

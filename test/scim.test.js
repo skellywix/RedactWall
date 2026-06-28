@@ -15,15 +15,10 @@ process.env.SCIM_BEARER_TOKEN = 'unit-scim-token-with-32-plus-characters';
 process.env.SENTINEL_DB_PATH = path.join(os.tmpdir(), 'ps-scim-test-' + crypto.randomBytes(6).toString('hex') + '.db');
 
 const app = require('../server/app');
+const { listen } = require('./support/listen');
 const db = require('../server/db');
 const scim = require('../server/scim');
 
-function listen(appUnderTest) {
-  return new Promise((resolve, reject) => {
-    const server = appUnderTest.listen(0, '127.0.0.1', () => resolve(server));
-    server.on('error', reject);
-  });
-}
 
 function close(server) {
   return new Promise((resolve) => server.close(resolve));

@@ -14,15 +14,10 @@ process.env.INGEST_API_KEY = 'unit-ingest-key';
 process.env.SENTINEL_DB_PATH = path.join(os.tmpdir(), 'ps-validation-test-' + crypto.randomBytes(6).toString('hex') + '.db');
 
 const app = require('../server/app');
+const { listen } = require('./support/listen');
 const db = require('../server/db');
 const policyPath = path.join(__dirname, '..', 'config', 'policy.json');
 
-function listen(appUnderTest) {
-  return new Promise((resolve, reject) => {
-    const server = appUnderTest.listen(0, '127.0.0.1', () => resolve(server));
-    server.on('error', reject);
-  });
-}
 
 function close(server) {
   return new Promise((resolve) => server.close(resolve));

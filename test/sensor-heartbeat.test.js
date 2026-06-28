@@ -14,16 +14,11 @@ process.env.INGEST_API_KEY = 'unit-ingest-key';
 process.env.SENTINEL_DB_PATH = path.join(os.tmpdir(), 'ps-heartbeat-test-' + crypto.randomBytes(6).toString('hex') + '.db');
 
 const app = require('../server/app');
+const { listen } = require('./support/listen');
 const db = require('../server/db');
 const coverage = require('../server/coverage');
 const evidence = require('../server/evidence');
 
-function listen(appUnderTest) {
-  return new Promise((resolve, reject) => {
-    const server = appUnderTest.listen(0, '127.0.0.1', () => resolve(server));
-    server.on('error', reject);
-  });
-}
 
 function close(server) {
   return new Promise((resolve) => server.close(resolve));

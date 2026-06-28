@@ -62,6 +62,24 @@ function mcpSettings(config = {}) {
   };
 }
 
+function splitScopes(value) {
+  return String(value || '').split(/[,\s]+/).map((scope) => scope.trim()).filter(Boolean);
+}
+
+function microsoft365Settings(config = {}) {
+  return {
+    token: config.M365_GRAPH_ACCESS_TOKEN || config.MICROSOFT_GRAPH_ACCESS_TOKEN || '',
+    tenantId: config.M365_TENANT_ID || config.AZURE_TENANT_ID || '',
+    scopes: splitScopes(config.M365_GRAPH_SCOPES || config.MICROSOFT_GRAPH_SCOPES || 'Files.Read'),
+  };
+}
+
+function microsoft365Configured(settings) {
+  return configured(settings.token)
+    || configured(settings.tenantId)
+    || (settings.scopes.length && settings.scopes.join(' ') !== 'Files.Read');
+}
+
 function nodeMajor() {
   return Number(String(process.versions.node || '').split('.')[0]);
 }
@@ -71,6 +89,7 @@ function buildInstallReport(opts = {}) {
   const env = opts.env || process.env;
   const configInfo = readMcpConfig(opts.envPath, env);
   const settings = mcpSettings(configInfo.config);
+  const microsoft365 = microsoft365Settings(configInfo.config);
   const envExplicit = configured(opts.envPath)
     || configured(env.SENTINEL_ENV_PATH)
     || configured(env.PROMPTWALL_ENV_PATH);
@@ -88,10 +107,20 @@ function buildInstallReport(opts = {}) {
     check('node_runtime', nodeMajor() >= 22, `node ${process.versions.node || 'unknown'}`),
     check('mcp_guard_runtime', existsFile(repoRoot, 'sensors/mcp-guard/guard.js'), 'guard runtime present'),
     check('mcp_connector_sdk', existsFile(repoRoot, 'sensors/mcp-guard/sdk.js'), 'connector SDK present'),
+    check('mcp_microsoft365_connector', existsFile(repoRoot, 'sensors/mcp-guard/connectors/microsoft365.js'), 'Microsoft 365 connector present'),
     check('shared_detection_engine', existsFile(repoRoot, 'detection-engine/detect.js'), 'shared engine present'),
     check('env_loader', existsFile(repoRoot, 'server/env.js'), 'env loader present'),
     check('package_manifest', existsFile(repoRoot, 'package.json'), 'package manifest present'),
   ];
+  if (microsoft365Configured(microsoft365)) {
+    checks.push(
+      check('mcp_microsoft365_token', configured(microsoft365.token) && microsoft365.token.length >= 16,
+        configured(microsoft365.token) && microsoft365.token.length >= 16 ? 'configured' : 'missing or weak access token'),
+      check('mcp_microsoft365_tenant', configured(microsoft365.tenantId),
+        configured(microsoft365.tenantId) ? 'configured' : 'missing tenant id'),
+      check('mcp_microsoft365_scopes', microsoft365.scopes.length > 0, `scopes:${microsoft365.scopes.length}`)
+    );
+  }
 
   return {
     status: checks.every((item) => item.ok) ? 'ok' : 'attention',
@@ -231,6 +260,7 @@ module.exports = {
   buildInstallReport,
   defaultMcpEnvPath,
   emitHeartbeat,
+  microsoft365Settings,
   mcpSettings,
   parseArgs,
   readMcpConfig,

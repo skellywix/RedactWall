@@ -309,11 +309,12 @@ Acceptance evidence:
 
 ### 8. First Real MCP Content Connectors
 
-Current state: MCP guard redacts local tool output through a reference guard, and
-PromptWall now ships a small connector SDK that forces future content connectors
-through `sanitizeToolResult()` before tool output reaches a model. PromptWall
-does not yet ship first-party connectors for Microsoft 365, Google Drive, Slack,
-Teams, or Jira content.
+Current state: MCP guard redacts local tool output through a reference guard,
+PromptWall ships a small connector SDK that forces future content connectors
+through `sanitizeToolResult()` before tool output reaches a model, and
+PromptWall now includes a first Microsoft 365 Graph connector for text-readable
+OneDrive and SharePoint driveItem content. PromptWall does not yet ship
+first-party connectors for Google Drive, Slack, Teams, or Jira content.
 
 Customer ask: "Can it protect agents that pull documents from SharePoint,
 OneDrive, Google Drive, Slack, or Teams before the model sees them?"
@@ -326,11 +327,13 @@ Implemented:
 - Added `sensors/mcp-guard/sdk.js` with `sanitizeToolResult()`,
   `wrapConnectorTool()`, and `connectorHealthCheck()`.
 - Included the connector SDK in the MCP guard package and install-health check.
+- Added `sensors/mcp-guard/connectors/microsoft365.js` for Graph driveItem
+  content with local SDK sanitization before model delivery.
 
 Remaining:
-- First connector recommendation: Microsoft 365 file content via Graph because
-  credit unions are likely to standardize on Microsoft identity and storage.
-- Second connector: Google Drive only if an early prospect needs it.
+- Extend Microsoft 365 support to Office/PDF conversion, site search, and
+  selected-site grants only after pilot needs are clear.
+- Add Google Drive only if an early prospect needs it.
 - Require OAuth scopes, tenant ID, and connector health to appear in coverage
   posture without storing raw document content.
 
@@ -346,7 +349,7 @@ Acceptance evidence:
 3. Signed update channel and commercial rollout posture.
 4. Scheduled examiner evidence pack with backup and restore-drill status.
 5. Customer-defined detectors plus OCR-required handling.
-6. First Microsoft 365 file-content connector using the MCP connector SDK.
+6. Broaden MCP connectors only after Microsoft 365 pilot scope is clear.
 
 This order closes the most embarrassing buyer gap first, then turns the product
 from a strong demo into something IT and compliance can operate. It avoids
@@ -462,6 +465,14 @@ Microsoft. "Microsoft Purview Data Security and Compliance Protections for
 Generative AI Apps." *Microsoft Learn*, Microsoft,
 https://learn.microsoft.com/en-us/purview/ai-microsoft-purview. Accessed 28
 June 2026.
+
+Microsoft. "Get DriveItem Content." *Microsoft Learn*, Microsoft,
+https://learn.microsoft.com/en-us/graph/api/driveitem-get-content?view=graph-rest-1.0.
+Accessed 28 June 2026.
+
+Microsoft. "Microsoft Graph Permissions Reference." *Microsoft Learn*,
+Microsoft, https://learn.microsoft.com/en-us/graph/permissions-reference.
+Accessed 28 June 2026.
 
 Microsoft. "Tutorial: Develop and Plan Provisioning for a SCIM Endpoint in
 Microsoft Entra ID." *Microsoft Learn*, Microsoft,
