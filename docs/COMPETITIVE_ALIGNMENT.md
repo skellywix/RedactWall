@@ -10,26 +10,27 @@ policy, one local detection engine, and one tamper-evident evidence trail.
 
 ## Current Market Bar
 
-- Strac points the market toward broad AI DLP coverage across tools such as
-  ChatGPT and other employee AI usage paths. PromptWall should match the buyer
-  expectation that sensitive data is stopped before it reaches a model, but keep
-  the install smaller and more explainable.
-- Prompt Security pushes visibility into employee GenAI usage, risk, and policy
-  enforcement. PromptWall should make coverage posture and shadow-AI sightings
-  obvious in the admin console, with no raw prompt bodies in the visibility
-  layer.
-- Harmonic-style AI governance products make inline employee coaching part of
-  the value proposition, not an afterthought. PromptWall should keep guidance
-  short, category-specific, and visible at the exact moment a user is about to
-  leak data.
-- Nightfall-style AI DLP raises the detection breadth bar with broad sensitive
-  data coverage across AI apps, browsers, endpoints, and file uploads. PromptWall
-  should not chase every detector immediately, but every blocked event should
-  teach the user the safe substitute to use next time.
+- Strac sets the browser-DLP expectation: monitor and block uploads, downloads,
+  forms, prompt entry, and GenAI leakage in real time, with admin reporting.
+  PromptWall should keep its lighter install story, but browser prompts and file
+  uploads must remain first-class policy surfaces.
+- Nightfall sets the buyer expectation for fast browser rollout, broad sensitive
+  data coverage, real-time redaction, and employee education. PromptWall should
+  keep category-specific coaching inline and make every block teach the safe
+  substitute, without expanding into a broad cloud-DLP project first.
+- Check Point AI Security / Lakera raises the bar for LLM-native controls:
+  data-leakage checks apply to LLM inputs, outputs, tool calls, and tool
+  responses; prompt attacks can arrive from user messages, reference documents,
+  tool responses, and tool descriptions. PromptWall should keep prompt-injection
+  defense, response scanning, MCP redaction, and tool-output sanitization inside
+  the core acceptance gate.
+- Cyberhaven raises the visibility bar beyond chat-only browser tools: security
+  teams need shadow-AI, agent, endpoint, developer-tool, and data-flow visibility
+  plus risk-based controls. PromptWall should make coverage posture and lineage
+  visible without storing raw prompt bodies.
 - OWASP's LLM risk work reinforces that prompt injection and sensitive
-  information disclosure are first-class product risks, not edge cases.
-  PromptWall should keep local prompt-injection defenses, response scanning,
-  MCP redaction, and approval release checks in the core acceptance gate.
+  information disclosure are first-class product risks, not edge cases. The
+  acceptance gate must keep testing both.
 
 ## Product Direction
 
@@ -51,10 +52,14 @@ Build next:
   especially response-scanning controls.
 - Data lineage views that answer which user, sensor, destination, category, and
   decision were involved without retaining sensitive content.
+- Custom detector packs and an `ocr_required` file outcome so pilots can model
+  local member IDs and scanned documents before shipping a heavier OCR runtime.
+- MCP connector SDK patterns that force tool-output sanitization before model
+  use, with connector health represented in coverage posture.
 - Backup-status evidence inside the examiner export pack, including last backup
   verification and restore-drill evidence without prompt bodies.
 
-## This Pass
+## Recent Completed Passes
 
 - Rebrand the visible project from PromptSentinel to PromptWall.
 - Keep compatibility-sensitive runtime contracts stable where breaking them
@@ -76,6 +81,12 @@ Build next:
   prefix.
 - Add tested `PROMPTWALL_*` runtime aliases so new PromptWall deployments can
   use the renamed prefix without breaking existing `SENTINEL_*` installs.
+- Issue fresh admin sessions as `promptwall_session` while accepting legacy
+  `sentinel_session` cookies during migration, and clear both cookie names on
+  logout.
+- Normalize scanner byte limits to integers across policy load/save, default
+  config, and endpoint-agent scanner config so the admin policy API can
+  round-trip its own payload.
 - Expand the sanitized examiner evidence export with coverage posture, sensor
   versions, parsed policy history, and prompt/file lineage summaries by user,
   destination, sensor, category, channel, and decision.
@@ -106,20 +117,36 @@ npm test -- test/evidence.test.js test/policy-history.test.js
 
 ## Works Cited
 
-OWASP Foundation. "OWASP Top 10 for Large Language Model Applications."
-*OWASP GenAI Security Project*, OWASP Foundation, https://genai.owasp.org/llm-top-10/.
-Accessed 27 June 2026.
-
-Prompt Security. "Prompt Security." *Prompt Security*, Prompt Security,
-https://www.prompt.security/. Accessed 27 June 2026.
-
-Harmonic Security. "Harmonic Security | AI Governance & Control Platform."
-*Harmonic Security*, Harmonic Security, https://www.harmonic.security/.
+Check Point AI Security. "Data Leakage Prevention." *Check Point AI Security
+Docs*, Check Point, https://docs.lakera.ai/docs/data-leakage-prevention.
 Accessed 28 June 2026.
 
-Nightfall AI. "Nightfall: AI Data Security & Data Loss Prevention Platform."
-*Nightfall AI*, Nightfall AI, https://www.nightfall.ai/.
+Check Point AI Security. "Prompt Defense." *Check Point AI Security Docs*,
+Check Point, https://docs.lakera.ai/docs/prompt-defense. Accessed 28 June 2026.
+
+Cyberhaven. "AI Security for the Age of Autonomous Agents." *Cyberhaven*,
+Cyberhaven, https://www.cyberhaven.com/product/ai-security. Accessed 28 June
+2026.
+
+Cyberhaven. "Enable Safe AI Adoption Without Blocking Teams." *Cyberhaven*,
+Cyberhaven, https://www.cyberhaven.com/use-cases/secure-ai-usage. Accessed 28
+June 2026.
+
+Nightfall AI. "AI-First Data Leak Prevention (DLP) for ChatGPT." *Nightfall AI*,
+Nightfall AI, https://www.nightfall.ai/lp/chatgpt-dlp. Accessed 28 June 2026.
+
+Nightfall AI. "AI Applications." *Nightfall AI*, Nightfall AI,
+https://www.nightfall.ai/integrations/ai-applications. Accessed 28 June 2026.
+
+OWASP Foundation. "OWASP Top 10 for Large Language Model Applications." *OWASP
+GenAI Security Project*, OWASP Foundation, https://genai.owasp.org/llm-top-10/.
 Accessed 28 June 2026.
+
+Strac. "Browser DLP (Data Loss Prevention)." *Strac*, Strac,
+https://www.strac.io/integration/browser-dlp. Accessed 28 June 2026.
+
+Strac. "Chrome DLP (Data Loss Prevention)." *Strac*, Strac,
+https://www.strac.io/integrations/chrome-dlp. Accessed 28 June 2026.
 
 Strac. "ChatGPT DLP." *Strac*, Strac,
-https://www.strac.io/integration/chatgpt-dlp. Accessed 27 June 2026.
+https://www.strac.io/integration/chatgpt-dlp. Accessed 28 June 2026.
