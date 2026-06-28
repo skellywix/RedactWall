@@ -64,8 +64,8 @@ domain-refresh check so shadow-AI visibility turns into enforceable policy.
 Current state: the endpoint package has a local folder watcher, signed
 metadata-only native handoff contract, packaged Windows protected-upload shell
 action, one-shot clipboard guard, desktop collector runner,
-installer/uninstaller scripts, install-health checks, and package-to-install
-smoke coverage. It is a pilot-safe user-invoked collector set, not full
+installer/uninstaller scripts, install-health checks, sanitized endpoint AI
+tool inventory, and package-to-install smoke coverage. It is a pilot-safe user-invoked collector set, not full
 OS-level interception for every desktop AI app.
 
 Customer ask: "Does this stop files dragged into ChatGPT Desktop, Claude
@@ -85,6 +85,9 @@ Implemented:
 - Adds `sensors/endpoint-agent/collectors/clipboard-guard.js` for one-shot
   local clipboard inspection with sanitized `paste_flagged` evidence and
   optional local clear plus sanitized `action_blocked` evidence.
+- Adds `sensors/endpoint-agent/collectors/ai-tool-inventory.js` so endpoint
+  install-health can report detected local AI apps and agent CLIs as sanitized
+  check ids, with optional attention for tools outside the sanctioned list.
 - Surfaces collector readiness through endpoint install validation and package
   manifest checks.
 
@@ -95,7 +98,7 @@ Remaining:
 
 Acceptance evidence:
 - `node --test test/native-handoff.test.js test/native-handoff-writer.test.js test/endpoint-agent.test.js`
-- `node --test test/endpoint-clipboard-collector.test.js test/endpoint-agent-package.test.js`
+- `node --test test/endpoint-clipboard-collector.test.js test/endpoint-ai-tool-inventory.test.js test/endpoint-agent-package.test.js`
 - `npm run package:endpoint-agent -- <temp>`
 - Manual Windows smoke with synthetic files: protected upload writes only
   metadata, endpoint locally scans, server stores sanitized evidence, and

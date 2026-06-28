@@ -4,6 +4,7 @@ const net = require('node:net');
 
 const DEFAULT_LOOPBACK_FETCH_TIMEOUT_MS = 5000;
 const DEFAULT_LOOPBACK_FETCH_ATTEMPTS = 30;
+const DEFAULT_LOOPBACK_LISTEN_TIMEOUT_MS = 5000;
 
 function positiveNumber(value, fallback) {
   const parsed = Number(value);
@@ -191,7 +192,10 @@ async function listen(appUnderTest, opts = {}) {
   installLoopbackFetch();
   const host = opts.host || '127.0.0.1';
   const attempts = opts.attempts || 8;
-  const timeoutMs = opts.timeoutMs || 1000;
+  const timeoutMs = positiveNumber(
+    opts.timeoutMs,
+    positiveNumber(process.env.PROMPTWALL_LOOPBACK_LISTEN_TIMEOUT_MS, DEFAULT_LOOPBACK_LISTEN_TIMEOUT_MS),
+  );
   let lastError;
   for (let i = 0; i < attempts; i += 1) {
     let server;
