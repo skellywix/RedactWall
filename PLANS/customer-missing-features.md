@@ -231,8 +231,8 @@ Acceptance evidence:
 ### 5. Group-Scoped Policy And Time-Bound Exceptions
 
 Current state: policy is centralized, supports templates, destination blocks,
-file-upload blocks, destination-scoped browser paste blocks, detector ignores,
-scanner controls, server-side `policyScopes`, and server-side
+file-upload blocks, destination-scoped browser paste and file-drop blocks,
+detector ignores, scanner controls, server-side `policyScopes`, and server-side
 `policyExceptions`. Scopes can tighten
 enforcement by user, SCIM group, org, source, channel, destination, detector, or
 category. Exceptions can temporarily allow matching non-hard-stop events and are

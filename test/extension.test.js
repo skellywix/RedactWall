@@ -123,14 +123,16 @@ test('browser blocks configured destinations before local prompt or file inspect
   assert.match(background, /allowedDestinations:\s*\[\]/);
 });
 
-test('browser blocks configured paste actions without reporting clipboard text', () => {
+test('browser blocks configured paste and drop actions without reporting clipboard or file text', () => {
   assert.match(content, /function browserActionBlockRule\(action\)/);
   assert.match(content, /const actionRule = browserActionBlockRule\('paste'\)/);
+  assert.match(content, /const actionRule = browserActionBlockRule\('drop'\)/);
   assert.match(content, /e\.preventDefault\(\);\s*e\.stopPropagation\(\);\s*e\.stopImmediatePropagation\(\);/);
   assert.match(content, /function reportBlockedBrowserAction\(action, rule\)/);
   assert.match(content, /'\[browser action blocked\] ' \+ action \+ ' ' \+ SITE/);
   assert.match(content, /'action_blocked'/);
   assert.match(content, /PromptWall blocked paste into/);
+  assert.match(content, /PromptWall blocked file drops into/);
   assert.match(background, /\.\.\.\(\(c\.policy && c\.policy\.blockedBrowserActions\) \|\| \[\]\)\.flatMap/);
 });
 

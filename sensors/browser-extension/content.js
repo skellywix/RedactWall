@@ -556,7 +556,16 @@
   document.addEventListener('drop', (e) => {
     if (!ENABLED) return;
     const files = e.dataTransfer && e.dataTransfer.files;
-    if (files && files.length) scanFiles(files, e);
+    if (files && files.length) {
+      const actionRule = browserActionBlockRule('drop');
+      if (actionRule) {
+        e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+        reportBlockedBrowserAction('drop', actionRule);
+        toast('PromptWall blocked file drops into ' + SITE + ' by policy.');
+        return;
+      }
+      scanFiles(files, e);
+    }
   }, true);
   document.addEventListener('change', (e) => {
     if (!ENABLED) return;

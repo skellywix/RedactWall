@@ -700,9 +700,10 @@ uploads, endpoint file flows, and `/api/v1/scan-file` return
 filenames are retained.
 
 Security Admins can edit `blockedBrowserActions` for destination-scoped browser
-action blocks. The first enforced action is `paste`: when a configured
-destination matches, the browser prevents the paste before clipboard text lands
-in the composer and reports only sanitized `action_blocked` evidence.
+action blocks. Supported actions are `paste` and `drop`: when a configured
+destination matches, the browser prevents clipboard paste before text lands in
+the composer or prevents drag-and-drop file uploads before the file is read.
+Both paths report only sanitized `action_blocked` evidence.
 
 Security Admins can set `responseScanMode` from the Policy tab to choose how
 AI replies are handled when `/api/v1/scan-response` detects sensitive content.

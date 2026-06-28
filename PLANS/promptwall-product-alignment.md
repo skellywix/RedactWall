@@ -64,7 +64,8 @@ evidence stable until a separate migration plan exists.
    PromptWall session cookie with legacy fallback, and stable encrypted-data
    compatibility.
 5. Next product gap: native desktop collector or deeper app/action policy
-   controls beyond destination, file-upload, and response scanning.
+   controls beyond destination, file-upload, response scanning, browser paste,
+   and browser file-drop controls.
 6. Exception lifecycle: owner group, reviewer role, review-after metadata, and
    sanitized expiry-review evidence for time-bound allow rules.
 7. Workflow ticket bridge: sanitized approval-ticket webhook with dedupe keys
@@ -141,6 +142,9 @@ For this alignment track, completion requires evidence for every area below:
   response text.
 - Added `blockedBrowserActions` for destination-scoped browser paste blocking,
   with sanitized `action_blocked` evidence and no clipboard-text retention.
+- Extended `blockedBrowserActions` to block destination-scoped browser file
+  drops before file bytes are read while retaining only sanitized action
+  metadata.
 - Changed the endpoint installer's public server parameter to `-PromptWallUrl`
   for fresh installs while keeping `-SentinelUrl` as a tested compatibility
   alias, and made endpoint/MCP install-health messaging name `PROMPTWALL_URL`
@@ -158,4 +162,4 @@ For this alignment track, completion requires evidence for every area below:
   GitHub repository has also been renamed to `skellywix/promptwall`.
 - Whether the next product build should prioritize deeper desktop interception,
   IdP-specific setup UX, signed-update operations, or broader app/action policy
-  controls beyond browser paste.
+  controls beyond browser paste and file drops.
