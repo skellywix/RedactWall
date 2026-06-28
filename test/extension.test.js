@@ -54,7 +54,7 @@ function loadBackground(opts = {}) {
     self: {},
     setTimeout,
   };
-  vm.runInNewContext(background + '\nself.__test = { requestTimeoutMs, fetchJsonWithTimeout, failClosed, scanUnavailable, buildHeartbeatBody, buildInstallChecks, reportInstallHealth };', context);
+  vm.runInNewContext(background + '\nself.__test = { requestTimeoutMs, fetchJsonWithTimeout, failClosed, scanUnavailable, browserPlatform, buildHeartbeatBody, buildInstallChecks, reportInstallHealth };', context);
   return {
     context,
     createdAlarms,
@@ -83,6 +83,9 @@ test('active content scripts receive policy updates from storage', () => {
   assert.match(content, /if \(c\.policy\) POLICY = \{ \.\.\.POLICY, \.\.\.c\.policy\.newValue \};/);
   assert.match(content, /msg\.type !== 'getPolicyState'/);
   assert.match(content, /blockUnapprovedAiDestinations:\s*POLICY\.blockUnapprovedAiDestinations !== false/);
+  assert.match(content, /const Ext = window\.PWBrowserApi/);
+  assert.match(content, /Ext\.sendMessage\(\{ type: 'getConfig' \}\)/);
+  assert.match(content, /Ext\.addStorageChangeListener/);
 });
 
 test('browser local analysis honors centralized detector policy', () => {
@@ -98,6 +101,7 @@ test('browser file uploads use scan-file API with base64 content', () => {
   assert.match(content, /type:\s*'scanFile'/);
   assert.match(content, /contentBase64:\s*bytesToBase64/);
   assert.match(content, /function handleFileScanResponse/);
+  assert.match(content, /Ext\.sendMessage\(\{\s*type:\s*'scanFile'/);
   assert.match(background, /\/api\/v1\/scan-file/);
   assert.match(background, /if \(!c\.enabled\) \{\s*sendResponse && sendResponse\(null\);/);
 });
@@ -200,6 +204,12 @@ test('browser click interception uses shared send-button adapters', () => {
 test('manifest permits local control-plane URLs used by browser smoke tests', () => {
   assert.ok(manifest.host_permissions.includes('http://localhost/*'));
   assert.ok(manifest.host_permissions.includes('http://127.0.0.1/*'));
+});
+
+test('manifest loads WebExtension API bridge before content runtime', () => {
+  const scripts = manifest.content_scripts.flatMap((entry) => entry.js || []);
+  assert.ok(scripts.includes('lib/browser-api.js'));
+  assert.ok(scripts.indexOf('lib/browser-api.js') < scripts.indexOf('content.js'));
 });
 
 test('background report fails closed when gate request times out', async () => {
@@ -384,6 +394,17 @@ test('background install health posts secret-free browser heartbeat', async () =
   assert.ok(outbound.body.checks.some((item) => item.id === 'content_script_coverage' && item.ok));
   assert.ok(!outbound.rawBody.includes(ingestKey));
   assert.ok(!JSON.stringify(outbound.body).includes(ingestKey));
+});
+
+test('browser platform metadata distinguishes Firefox manifest and Edge user agent', () => {
+  const bg = loadBackground();
+  assert.strictEqual(bg.context.self.__test.browserPlatform(manifest), 'chrome_mv3');
+  assert.strictEqual(bg.context.self.__test.browserPlatform({
+    ...manifest,
+    browser_specific_settings: { gecko: { id: 'promptwall@example.com' } },
+  }), 'firefox_mv3');
+  bg.context.navigator = { userAgent: 'Mozilla/5.0 AppleWebKit/537.36 Chrome/128.0.0.0 Safari/537.36 Edg/128.0.0.0' };
+  assert.strictEqual(bg.context.self.__test.browserPlatform(manifest), 'edge_mv3');
 });
 
 test('background install health flags unmanaged local config without leaking keys', async () => {

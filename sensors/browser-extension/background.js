@@ -6,6 +6,7 @@
  * - Discovers "shadow AI": use of AI tools the policy does not govern.
  * Detection itself happens locally in the content script.
  */
+try { importScripts('lib/browser-api.js'); } catch (e) { /* optional browser namespace bridge */ }
 try { importScripts('lib/adapters.js'); } catch (e) { /* PSAdapters used only for shadow-AI */ }
 
 const DEFAULTS = {
@@ -82,8 +83,15 @@ function sensorMetadata() {
   return {
     name: 'browser_extension',
     version: manifest.version || 'unknown',
-    platform: 'chrome_mv3',
+    platform: browserPlatform(manifest),
   };
+}
+
+function browserPlatform(manifest = manifestInfo()) {
+  if (manifest.browser_specific_settings && manifest.browser_specific_settings.gecko) return 'firefox_mv3';
+  const ua = (typeof navigator !== 'undefined' && navigator.userAgent) ? navigator.userAgent : '';
+  if (/\bEdg\//.test(ua)) return 'edge_mv3';
+  return 'chrome_mv3';
 }
 
 function installCheck(id, ok, detail) {
@@ -113,9 +121,11 @@ function buildInstallChecks({ config = DEFAULTS, server = {}, identity: who = {}
   const hasManagedServer = !!(managed.serverUrl && managed.ingestKey);
   const hasManagedIdentity = !!(managed.email || managed.user);
   const hasManagedTenant = !!managed.orgId;
+  const background = manifest.background || {};
+  const hasBackground = !!(background.service_worker || (Array.isArray(background.scripts) && background.scripts.length));
   return [
     installCheck('extension_manifest', manifest.manifest_version === 3 && !!manifest.version, `mv${manifest.manifest_version || 'unknown'} v${manifest.version || 'unknown'}`),
-    installCheck('background_worker', !!(manifest.background && manifest.background.service_worker), 'service worker configured'),
+    installCheck('background_worker', hasBackground, background.service_worker ? 'service worker configured' : 'background script configured'),
     installCheck('content_script_coverage', hasContentScriptCoverage(manifest), 'content scripts cover AI hosts'),
     installCheck('protection_enabled', config.enabled !== false, config.enabled === false ? 'disabled locally' : 'enabled'),
     installCheck('server_url', !!origin, origin || 'missing or invalid'),

@@ -17,8 +17,8 @@ Use this index when you know the job but not the file name.
 
 | Topic | Document |
 |-------|----------|
-| Managed Chrome extension rollout | `MANAGED_EXTENSION_DEPLOYMENT.md` |
-| Chrome Web Store release checklist | `EXTENSION_RELEASE_CHECKLIST.md` |
+| Managed browser extension rollout | `MANAGED_EXTENSION_DEPLOYMENT.md` |
+| Browser extension release checklist | `EXTENSION_RELEASE_CHECKLIST.md` |
 | Endpoint agent, MCP guard, Docker, secrets, health checks | `DEPLOYMENT.md` |
 | Evidence pack schedule automation | `EVIDENCE_PACK_TASK.md` |
 | Daily docs sync automation | `DOCUMENTATION_SYNC_TASK.md` |

@@ -1,6 +1,6 @@
 'use strict';
 /**
- * Build a Chrome extension zip plus a prompt-free integrity manifest.
+ * Build browser extension zips plus prompt-free integrity manifests.
  */
 const fs = require('fs');
 const path = require('path');
@@ -9,6 +9,7 @@ const AdmZip = require('adm-zip');
 
 const ROOT = path.join(__dirname, '..');
 const DEFAULT_OUT_DIR = path.join(ROOT, 'dist', 'browser-extension');
+const BROWSER_TARGETS = ['chrome', 'edge', 'firefox'];
 const REQUIRED_MANAGED_KEYS = ['serverUrl', 'ingestKey', 'orgId'];
 const ENGINE_COPIES = [
   ['detection-engine/detect.js', 'sensors/browser-extension/lib/detect.js'],
@@ -25,6 +26,40 @@ function sha256(buffer) {
 
 function readJson(file) {
   return JSON.parse(fs.readFileSync(file, 'utf8'));
+}
+
+function cloneJson(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function normalizeTarget(target = 'chrome') {
+  const normalized = String(target || 'chrome').trim().toLowerCase();
+  if (!BROWSER_TARGETS.includes(normalized)) {
+    throw new Error(`Unsupported extension target: ${target}`);
+  }
+  return normalized;
+}
+
+function manifestForTarget(manifest, target = 'chrome') {
+  const normalized = normalizeTarget(target);
+  const next = cloneJson(manifest);
+  if (normalized === 'firefox') {
+    next.background = { scripts: ['background.js'] };
+    next.browser_specific_settings = {
+      gecko: {
+        id: 'promptwall@example.com',
+        strict_min_version: '109.0',
+      },
+    };
+  }
+  return next;
+}
+
+function backgroundModel(manifest) {
+  const background = manifest.background || {};
+  if (background.service_worker) return 'service_worker';
+  if (Array.isArray(background.scripts) && background.scripts.length) return 'background_scripts';
+  return 'missing';
 }
 
 function collectExtensionFiles(extensionDir = path.join(ROOT, 'sensors', 'browser-extension')) {
@@ -64,11 +99,12 @@ function validateSyncedEngine(root = ROOT) {
   });
 }
 
-function validateManifest({ manifest, schema, appVersion, files }) {
+function validateManifest({ manifest, schema, appVersion, files, target = 'chrome' }) {
+  const normalized = normalizeTarget(target);
   const fileSet = new Set(files.map((f) => f.relPath));
-  if (manifest.manifest_version !== 3) throw new Error('Chrome extension manifest_version must be 3');
+  if (manifest.manifest_version !== 3) throw new Error(`${normalized} extension manifest_version must be 3`);
   if (!manifest.name || !manifest.version || !manifest.description) {
-    throw new Error('Chrome extension manifest must include name, version, and description');
+    throw new Error(`${normalized} extension manifest must include name, version, and description`);
   }
   if (manifest.version !== appVersion) {
     throw new Error(`Extension version ${manifest.version} must match app version ${appVersion}`);
@@ -78,7 +114,13 @@ function validateManifest({ manifest, schema, appVersion, files }) {
   }
 
   requirePackageFile(fileSet, 'manifest.json');
-  requirePackageFile(fileSet, manifest.background && manifest.background.service_worker);
+  if (manifest.background && manifest.background.service_worker) {
+    requirePackageFile(fileSet, manifest.background.service_worker);
+  } else if (manifest.background && Array.isArray(manifest.background.scripts)) {
+    for (const script of manifest.background.scripts) requirePackageFile(fileSet, script);
+  } else {
+    throw new Error(`${normalized} extension manifest must include a background worker or script`);
+  }
   requirePackageFile(fileSet, manifest.action && manifest.action.default_popup);
   requirePackageFile(fileSet, manifest.storage && manifest.storage.managed_schema);
 
@@ -88,11 +130,17 @@ function validateManifest({ manifest, schema, appVersion, files }) {
     if (!Array.isArray(script.matches) || !script.matches.length) {
       throw new Error('Every content script must declare match patterns');
     }
+    if (!(script.js || []).includes('lib/browser-api.js')) {
+      throw new Error('Every content script must load lib/browser-api.js before PromptWall runtime code');
+    }
   }
 
   const schemaKeys = new Set(Object.keys((schema && schema.properties) || {}));
   for (const key of REQUIRED_MANAGED_KEYS) {
     if (!schemaKeys.has(key)) throw new Error(`Managed storage schema is missing ${key}`);
+  }
+  if (normalized === 'firefox' && !(manifest.browser_specific_settings && manifest.browser_specific_settings.gecko && manifest.browser_specific_settings.gecko.id)) {
+    throw new Error('Firefox package must include browser_specific_settings.gecko.id');
   }
 }
 
@@ -124,22 +172,26 @@ function packageExtension(opts = {}) {
   const extensionDir = opts.extensionDir || path.join(root, 'sensors', 'browser-extension');
   const outDir = opts.outDir || DEFAULT_OUT_DIR;
   const now = opts.now || new Date();
-  const manifest = readJson(path.join(extensionDir, 'manifest.json'));
+  const target = normalizeTarget(opts.target || 'chrome');
+  const sourceManifest = readJson(path.join(extensionDir, 'manifest.json'));
+  const manifest = manifestForTarget(sourceManifest, target);
   const schema = readJson(path.join(extensionDir, manifest.storage.managed_schema));
   const appVersion = readJson(path.join(root, 'package.json')).version;
   const files = collectExtensionFiles(extensionDir);
 
-  validateManifest({ manifest, schema, appVersion, files });
+  validateManifest({ manifest, schema, appVersion, files, target });
   validatePackageContents(files);
   const engineCopies = validateSyncedEngine(root);
 
   fs.mkdirSync(outDir, { recursive: true });
-  const baseName = `promptwall-extension-v${manifest.version}`;
+  const baseName = `promptwall-${target}-extension-v${manifest.version}`;
   const zipPath = path.join(outDir, `${baseName}.zip`);
   const manifestPath = path.join(outDir, `${baseName}.manifest.json`);
   const zip = new AdmZip();
   const packagedFiles = files.map((file) => {
-    const body = fs.readFileSync(file.absPath);
+    const body = file.relPath === 'manifest.json'
+      ? Buffer.from(JSON.stringify(manifest, null, 2) + '\n')
+      : fs.readFileSync(file.absPath);
     zip.addFile(file.relPath, body);
     return { path: file.relPath, sizeBytes: body.length, sha256: sha256(body) };
   });
@@ -147,11 +199,13 @@ function packageExtension(opts = {}) {
   zip.writeZip(zipPath);
   const zipBody = fs.readFileSync(zipPath);
   const packageManifest = {
-    kind: 'promptwall-extension-package',
+    kind: 'promptwall-browser-extension-package',
+    browserTarget: target,
     packageName: path.basename(zipPath),
     extensionVersion: manifest.version,
     appVersion,
     manifestVersion: manifest.manifest_version,
+    backgroundModel: backgroundModel(manifest),
     createdAt: now.toISOString(),
     sha256: sha256(zipBody),
     sizeBytes: zipBody.length,
@@ -159,8 +213,10 @@ function packageExtension(opts = {}) {
     engineCopies,
     checks: {
       manifestV3: true,
+      browserTargetManifest: true,
       managedStorageSchema: true,
       syncedEngine: true,
+      browserApiBridgeIncluded: true,
       installValidationIncluded: true,
       developmentIngestKeyAbsent: true,
       broadHostPermissionsAbsent: true,
@@ -170,35 +226,48 @@ function packageExtension(opts = {}) {
   return { zipPath, manifestPath, packageManifest };
 }
 
+function packageExtensions(opts = {}) {
+  const targets = opts.targets || BROWSER_TARGETS;
+  return targets.map((target) => packageExtension({ ...opts, target }));
+}
+
 function parseArgs(argv) {
   const args = [...argv];
   let outDir = DEFAULT_OUT_DIR;
+  let target = 'all';
   while (args.length) {
     const arg = args.shift();
     if (arg === '--out') {
       outDir = path.resolve(args.shift() || '');
+    } else if (arg === '--target') {
+      target = String(args.shift() || '').trim().toLowerCase();
     } else if (arg === '--help' || arg === '-h') {
-      return { help: true, outDir };
+      return { help: true, outDir, target };
     } else if (arg.startsWith('-')) {
       throw new Error(`Unknown option: ${arg}`);
     } else {
       outDir = path.resolve(arg);
     }
   }
-  return { outDir };
+  if (target !== 'all') normalizeTarget(target);
+  return { outDir, target };
 }
 
 function main() {
   try {
     const args = parseArgs(process.argv.slice(2));
     if (args.help) {
-      console.log('Usage: node scripts/package-extension.js [--out <directory>]');
+      console.log('Usage: node scripts/package-extension.js [--out <directory>] [--target chrome|edge|firefox|all]');
       return;
     }
-    const result = packageExtension({ outDir: args.outDir });
-    console.log(`Wrote ${result.zipPath}`);
-    console.log(`Wrote ${result.manifestPath}`);
-    console.log(`SHA-256 ${result.packageManifest.sha256}`);
+    const results = args.target === 'all'
+      ? packageExtensions({ outDir: args.outDir })
+      : [packageExtension({ outDir: args.outDir, target: args.target })];
+    for (const result of results) {
+      console.log(`Wrote ${result.zipPath}`);
+      console.log(`Wrote ${result.manifestPath}`);
+      console.log(`SHA-256 ${result.packageManifest.sha256}`);
+    }
   } catch (err) {
     console.error(err.message || err);
     process.exitCode = 1;
@@ -208,8 +277,11 @@ function main() {
 if (require.main === module) main();
 
 module.exports = {
+  BROWSER_TARGETS,
   collectExtensionFiles,
+  manifestForTarget,
   packageExtension,
+  packageExtensions,
   parseArgs,
   sha256,
   validateManifest,

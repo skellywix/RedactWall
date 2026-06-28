@@ -206,6 +206,9 @@ and MCP guard events include bounded operational metadata only:
 { "name": "browser_extension", "version": "0.3.0", "platform": "chrome_mv3" }
 ```
 
+Managed browser packages report `chrome_mv3`, `edge_mv3`, or `firefox_mv3`
+depending on the installed target.
+
 Mixed versions show as an attention item so a pilot admin can spot partial
 rollouts after a managed extension or agent update. Browser extension, endpoint,
 and MCP guard install validation can also report bounded check results through
@@ -221,33 +224,32 @@ arguments, local executable paths, or decision notes.
 
 ## Browser Extension Package
 
-Build and check the Chrome extension artifact before a managed pilot handoff:
+Build and check browser extension artifacts before a managed pilot handoff:
 
 ```bash
 npm run release:extension:check -- dist/browser-extension
 ```
 
-The command writes a zip, adjacent SHA-256 manifest, and release-readiness JSON
-under `dist/browser-extension/`. It verifies Manifest V3 wiring,
-managed-storage schema coverage, synced engine copies, browser install-health
-heartbeat support, Chrome force-install policy examples, the private or unlisted
-release checklist, and absence of a packaged development ingest key. Configure
-`serverUrl`, `ingestKey`, and identity through Chrome managed storage or local
-demo storage.
+The command writes Chrome, Edge, and Firefox zips, adjacent SHA-256 manifests,
+and a shared release-readiness JSON under `dist/browser-extension/`. It verifies
+Manifest V3 wiring, managed-storage schema coverage, synced engine copies, the
+WebExtension API bridge, browser install-health heartbeat support,
+force-install policy examples, the browser release checklist, and absence of a
+packaged development ingest key. Configure `serverUrl`, `ingestKey`, and
+identity through managed browser storage or local demo storage.
 
-After the private or unlisted Chrome Web Store item exists, rerun the same gate
-with the real id:
+After browser store items or signed Firefox install URLs exist, rerun the same
+gate with the final values:
 
 ```bash
-npm run release:extension:check -- dist/browser-extension <chrome-web-store-id>
+npm run release:extension:check -- dist/browser-extension --chrome-extension-id <chrome-web-store-id> --edge-extension-id <edge-addons-id> --firefox-install-url https://downloads.customer.example/promptwall-firefox.xpi
 ```
 
-That adds a prompt-free
-`promptwall-extension-v<version>.extension-settings.json` artifact for Chrome
-Enterprise force-install policy. It contains the extension id, `force_installed`,
-and the Chrome Web Store update URL only; managed storage with `serverUrl`,
-`orgId`, user identity, and the ingest key stays in the customer's policy system
-or vault.
+That adds prompt-free `promptwall-<browser>-extension-v<version>.extension-settings.json`
+artifacts for browser force-install policy. They contain extension IDs, install
+or update URLs, and `force_installed` mode only; managed storage with
+`serverUrl`, `orgId`, user identity, and the ingest key stays in the customer's
+policy system or vault.
 
 The extension posts sanitized install-health heartbeats on install, browser
 startup, and a periodic `installHeartbeat` alarm when server config is present.

@@ -264,8 +264,10 @@ are refreshed with `npm run docs:demo-guide` and checked by
 
 ### Try the browser extension (flagship)
 
-1. Chrome → Extensions → enable Developer mode → **Load unpacked** → select the
-   `sensors/browser-extension/` folder.
+1. Chrome or Edge: open the extensions page, enable Developer mode, choose
+   **Load unpacked**, and select the `sensors/browser-extension/` folder. Firefox
+   pilots should use the generated Firefox package because its manifest is
+   transformed for Gecko.
 2. Configure the extension with the demo ingest key from your `.env` or shell:
 
    ```javascript
@@ -287,19 +289,19 @@ npm run package:endpoint-agent
 npm run package:mcp-guard
 ```
 
-The extension zip lands in `dist/browser-extension/`, the endpoint agent zip lands in
-`dist/endpoint-agent/`, and the MCP guard zip lands in `dist/mcp-guard/`. Each
-artifact gets a SHA-256 manifest and refuses packaged development keys or prompt
-bodies. The endpoint package includes the optional local OCR bridge; it does not
-bundle an OCR binary. The MCP guard package also includes
+Chrome, Edge, and Firefox extension zips land in `dist/browser-extension/`, the
+endpoint agent zip lands in `dist/endpoint-agent/`, and the MCP guard zip lands
+in `dist/mcp-guard/`. Each artifact gets a SHA-256 manifest and refuses packaged
+development keys or prompt bodies. The endpoint package includes the optional
+local OCR bridge; it does not bundle an OCR binary. The MCP guard package also includes
 `sensors/mcp-guard/sdk.js` and the Microsoft 365 Graph file-content connector.
 Content connectors must call `sanitizeToolResult()` before returning tool output
-to a model. Configure real pilot keys through Chrome managed storage or local
+to a model. Configure real pilot keys through managed browser storage or local
 sensor environment config, not inside packages. `release:extension:check` also
-writes a prompt-free Chrome Web Store release-readiness report for private or
-unlisted managed deployments. When supplied a Chrome Web Store extension id, it
-also writes a final Chrome `ExtensionSettings` force-install policy with the real
-extension id and update URL, but no managed-storage secrets.
+writes a prompt-free browser release-readiness report for managed Chrome, Edge,
+and Firefox deployments. When supplied store IDs or a Firefox install URL, it
+also writes target-specific `ExtensionSettings` force-install policies with no
+managed-storage secrets.
 
 Generate a customer IdP handoff with:
 
@@ -444,7 +446,7 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 
 - Polished enterprise identity UX, IdP-specific setup recipes, and deeper
   multi-tenant isolation per institution.
-- Signed Chrome Web Store listing and force-install rollout; local extension zip, integrity manifest, release-readiness report, generated ExtensionSettings policy, and managed-policy checklist are packaged.
+- Browser store signing and customer account setup remain per-customer rollout work; local Chrome, Edge, and Firefox zips, integrity manifests, release-readiness report, generated ExtensionSettings policy, and managed-policy checklist are packaged.
 - Expand endpoint collectors from protected upload and one-shot clipboard
   guarding into app-specific desktop AI upload hooks when paid pilots need
   deeper interception.

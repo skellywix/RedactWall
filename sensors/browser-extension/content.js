@@ -15,16 +15,17 @@
   window.__promptSentinelLoaded = true;
 
   const D = window.PSDetect;
+  const Ext = window.PWBrowserApi;
   const SITE = location.hostname;
   let POLICY = { enforcementMode: 'block', blockMinSeverity: 2, blockRiskScore: 25, allowedDestinations: [], blockedBrowserActions: [], blockUnapprovedAiDestinations: true, alwaysBlock: [] };
   let ENABLED = true;
 
   // Pull policy + enabled state from the background worker.
-  chrome.runtime.sendMessage({ type: 'getConfig' }, (res) => {
+  Ext.sendMessage({ type: 'getConfig' }).then((res) => {
     if (res && res.policy) POLICY = res.policy;
     if (res && typeof res.enabled === 'boolean') ENABLED = res.enabled;
   });
-  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  Ext.addRuntimeMessageListener((msg, sender, sendResponse) => {
     if (!msg || msg.type !== 'getPolicyState') return false;
     sendResponse({
       enabled: ENABLED,
@@ -39,7 +40,7 @@
     });
     return false;
   });
-  chrome.storage.onChanged.addListener((c) => {
+  Ext.addStorageChangeListener((c) => {
     if (c.enabled) ENABLED = c.enabled.newValue;
     if (c.policy) POLICY = { ...POLICY, ...c.policy.newValue };
   });
@@ -268,7 +269,7 @@
   function report(text, analysis, channel, outcome, note, extra) {
     return new Promise((resolve) => {
       try {
-        chrome.runtime.sendMessage({
+        Ext.sendMessage({
           type: 'report',
           payload: {
             prompt: text, destination: SITE, channel, source: 'browser_extension',
@@ -282,10 +283,7 @@
             outcome, note: note || '',
             ...(extra || {}),
           },
-        }, (res) => {
-          if (chrome.runtime.lastError) return resolve(null);
-          resolve(res || null);
-        });
+        }).then((res) => resolve(res || null)).catch(() => resolve(null));
       } catch (_) {
         resolve(null);
       }
@@ -684,7 +682,7 @@
     reader.readAsArrayBuffer(f);
   }
   function sendFileScan(filename, bytes) {
-    chrome.runtime.sendMessage({
+    Ext.sendMessage({
       type: 'scanFile',
       payload: {
         filename,
@@ -693,7 +691,7 @@
         channel: 'file_upload',
         source: 'browser_extension',
       },
-    }, (res) => handleFileScanResponse(filename, res));
+    }).then((res) => handleFileScanResponse(filename, res)).catch(() => handleFileScanResponse(filename, null));
   }
   function handleFileScanResponse(filename, res) {
     if (!res) {
@@ -714,7 +712,7 @@
     }
   }
   function reportUnscannedFile(filename, outcome, note) {
-    chrome.runtime.sendMessage({
+    Ext.sendMessage({
       type: 'report',
       payload: {
         prompt: '[file blocked unscanned] ' + filename,

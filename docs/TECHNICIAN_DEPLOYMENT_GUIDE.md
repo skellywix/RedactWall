@@ -173,12 +173,12 @@ npm run package:endpoint-agent
 npm run package:mcp-guard
 ```
 
-After the private or unlisted Chrome Web Store item exists, rerun the extension
-gate with the final extension id so the handoff packet includes the exact
-force-install policy:
+After browser store items or signed Firefox install URLs exist, rerun the
+extension gate with the final values so the handoff packet includes exact
+force-install policies:
 
 ```powershell
-npm run release:extension:check -- dist/browser-extension <chrome-web-store-id>
+npm run release:extension:check -- dist/browser-extension --chrome-extension-id <chrome-web-store-id> --edge-extension-id <edge-addons-id> --firefox-install-url https://downloads.customer.example/promptwall-firefox.xpi
 ```
 
 Record the generated artifact names and SHA-256 manifests:
@@ -187,10 +187,11 @@ Record the generated artifact names and SHA-256 manifests:
 - `dist/endpoint-agent/`
 - `dist/mcp-guard/`
 
-The browser extension folder should include the zip, integrity manifest, and
-release-readiness report. When a Chrome Web Store extension id is supplied, it
-should also include `promptwall-extension-v<version>.extension-settings.json`
-with the real Chrome Web Store extension id and update URL.
+The browser extension folder should include Chrome, Edge, and Firefox zips,
+integrity manifests, and the shared release-readiness report. When browser store
+IDs or a Firefox install URL are supplied, it should also include target-specific
+`promptwall-<browser>-extension-v<version>.extension-settings.json` files with
+the real extension id or install URL and no managed-storage secrets.
 
 The manifests belong in the handoff packet. The packages must not contain real
 ingest keys or prompt bodies.
@@ -424,9 +425,9 @@ the approved secret process.
 
 ## Phase 8: Browser Extension Rollout
 
-Use `docs/MANAGED_EXTENSION_DEPLOYMENT.md` for the full Chrome policy reference.
+Use `docs/MANAGED_EXTENSION_DEPLOYMENT.md` for the full managed browser policy reference.
 Use `docs/EXTENSION_RELEASE_CHECKLIST.md` before uploading or handing over a
-private or unlisted Chrome Web Store item.
+Chrome, Edge, or Firefox managed extension package.
 For install day, the technician must confirm these values in managed storage:
 
 ```json
@@ -440,7 +441,8 @@ For install day, the technician must confirm these values in managed storage:
 
 Validation on one managed test device:
 
-1. Open `chrome://policy` and reload policies.
+1. Open the browser policy page and reload policies: `chrome://policy`,
+   `edge://policy`, or `about:policies`.
 2. Confirm the extension is force-installed.
 3. Confirm the extension receives managed storage.
 4. Open the extension popup and confirm protection is enabled.
@@ -449,7 +451,7 @@ Validation on one managed test device:
    with passing checks for managed config, managed identity, org id, server URL,
    ingest-key presence, content-script coverage, and policy cache availability.
    The Fleet Install Health table should show the test user, org, browser
-   sensor version, `covered` state, and `checks ok`.
+   sensor version, platform, `covered` state, and `checks ok`.
 7. Send a benign prompt and confirm it is attributed to the test user.
 8. Paste `123-45-6789` as synthetic SSN test data.
 9. Confirm the configured policy action appears in the browser.
@@ -644,7 +646,7 @@ Deliver a packet with:
   user, org, current state, version, and failed check ID.
 - Audit-chain verification output.
 - Backup manifest.
-- Chrome managed policy confirmation.
+- Managed browser policy confirmation.
 - Browser extension install-health heartbeat evidence in Coverage.
 - Endpoint agent scheduled task/log evidence.
 - Endpoint install-health heartbeat evidence in Coverage.

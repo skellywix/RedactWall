@@ -1,0 +1,10 @@
+{
+  "policies": {
+    "ExtensionSettings": {
+      "promptwall@example.com": {
+        "installation_mode": "force_installed",
+        "install_url": "https://downloads.example.org/promptwall/promptwall-firefox-extension-latest.xpi"
+      }
+    }
+  }
+}

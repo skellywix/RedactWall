@@ -7,8 +7,11 @@ const path = require('path');
 
 const root = path.join(__dirname, '..');
 const schema = JSON.parse(fs.readFileSync(path.join(root, 'sensors', 'browser-extension', 'schema.json'), 'utf8'));
-const managed = JSON.parse(fs.readFileSync(path.join(root, 'docs', 'examples', 'chrome-managed-storage.policy.json'), 'utf8'));
-const extensionSettings = JSON.parse(fs.readFileSync(path.join(root, 'docs', 'examples', 'chrome-extension-settings.example.json'), 'utf8'));
+const managed = JSON.parse(fs.readFileSync(path.join(root, 'docs', 'examples', 'browser-managed-storage.policy.json'), 'utf8'));
+const firefoxManaged = JSON.parse(fs.readFileSync(path.join(root, 'docs', 'examples', 'firefox-managed-storage.policy.json'), 'utf8'));
+const chromeExtensionSettings = JSON.parse(fs.readFileSync(path.join(root, 'docs', 'examples', 'chrome-extension-settings.example.json'), 'utf8'));
+const edgeExtensionSettings = JSON.parse(fs.readFileSync(path.join(root, 'docs', 'examples', 'edge-extension-settings.example.json'), 'utf8'));
+const firefoxExtensionSettings = JSON.parse(fs.readFileSync(path.join(root, 'docs', 'examples', 'firefox-extension-settings.example.json'), 'utf8'));
 const guide = fs.readFileSync(path.join(root, 'docs', 'MANAGED_EXTENSION_DEPLOYMENT.md'), 'utf8');
 const releaseChecklist = fs.readFileSync(path.join(root, 'docs', 'EXTENSION_RELEASE_CHECKLIST.md'), 'utf8');
 
@@ -19,11 +22,22 @@ test('managed storage example uses only schema-backed keys', () => {
   assert.strictEqual(managed.ingestKey, 'REPLACE_WITH_LONG_RANDOM_INGEST_KEY');
 });
 
-test('extension force-install example has placeholder id and update url', () => {
-  assert.ok(extensionSettings.ExtensionSettings);
-  assert.ok(extensionSettings.ExtensionSettings['<extension-id>']);
-  assert.strictEqual(extensionSettings.ExtensionSettings['<extension-id>'].installation_mode, 'force_installed');
-  assert.match(extensionSettings.ExtensionSettings['<extension-id>'].update_url, /^https:\/\//);
+test('Firefox managed storage example uses schema-backed keys', () => {
+  const values = firefoxManaged.policies['3rdparty'].Extensions['promptwall@example.com'];
+  const allowed = new Set(Object.keys(schema.properties));
+  for (const key of Object.keys(values)) assert.ok(allowed.has(key), key);
+  assert.strictEqual(values.ingestKey, 'REPLACE_WITH_LONG_RANDOM_INGEST_KEY');
+});
+
+test('extension force-install examples have placeholder ids and update/install urls', () => {
+  assert.ok(chromeExtensionSettings.ExtensionSettings['<extension-id>']);
+  assert.strictEqual(chromeExtensionSettings.ExtensionSettings['<extension-id>'].installation_mode, 'force_installed');
+  assert.match(chromeExtensionSettings.ExtensionSettings['<extension-id>'].update_url, /^https:\/\//);
+  assert.ok(edgeExtensionSettings.ExtensionSettings['<extension-id>']);
+  assert.strictEqual(edgeExtensionSettings.ExtensionSettings['<extension-id>'].installation_mode, 'force_installed');
+  assert.match(edgeExtensionSettings.ExtensionSettings['<extension-id>'].update_url, /edge\.microsoft\.com/);
+  assert.strictEqual(firefoxExtensionSettings.policies.ExtensionSettings['promptwall@example.com'].installation_mode, 'force_installed');
+  assert.match(firefoxExtensionSettings.policies.ExtensionSettings['promptwall@example.com'].install_url, /^https:\/\//);
 });
 
 test('managed deployment guide warns about secret-bearing policy', () => {
@@ -32,12 +46,15 @@ test('managed deployment guide warns about secret-bearing policy', () => {
   assert.match(guide, /browser install-health heartbeat/i);
   assert.match(guide, /Coverage tab shows `browser_extension` install health/);
   assert.match(guide, /release:extension:check/);
+  assert.match(guide, /Chrome, Edge, and Firefox/);
 });
 
 test('release checklist covers private rollout, update channel, and rollback', () => {
-  assert.match(releaseChecklist, /Private or unlisted Chrome Web Store release checklist/);
+  assert.match(releaseChecklist, /Browser extension release checklist/);
   assert.match(releaseChecklist, /npm run release:extension:check/);
   assert.match(releaseChecklist, /https:\/\/clients2\.google\.com\/service\/update2\/crx/);
+  assert.match(releaseChecklist, /https:\/\/edge\.microsoft\.com\/extensionwebstorebase\/v1\/crx/);
+  assert.match(releaseChecklist, /promptwall@example\.com/);
   assert.match(releaseChecklist, /Fleet Install Health/);
   assert.match(releaseChecklist, /Rollback/);
 });

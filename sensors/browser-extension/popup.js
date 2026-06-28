@@ -1,5 +1,5 @@
 const DEF = { serverUrl: 'http://localhost:4000', enabled: true, policy: { enforcementMode: 'block' } };
-chrome.storage.local.get(['serverUrl', 'enabled', 'policy'], (c) => {
+(window.PWBrowserApi || {}).storageGet('local', ['serverUrl', 'enabled', 'policy']).then((c) => {
   const cfg = { ...DEF, ...c };
   const toggle = document.getElementById('toggle');
   toggle.checked = cfg.enabled !== false;
@@ -7,7 +7,7 @@ chrome.storage.local.get(['serverUrl', 'enabled', 'policy'], (c) => {
   document.getElementById('mode').textContent = (cfg.policy && cfg.policy.enforcementMode) || 'block';
   document.getElementById('dash').href = cfg.serverUrl + '/index.html';
   toggle.addEventListener('change', () => {
-    chrome.storage.local.set({ enabled: toggle.checked });
+    window.PWBrowserApi.storageSet('local', { enabled: toggle.checked });
     paint(toggle.checked);
   });
 });

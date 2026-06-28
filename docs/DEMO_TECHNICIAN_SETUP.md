@@ -81,11 +81,11 @@ This section is generated from the app by `npm run docs:demo-guide`. Do not hand
 | `server/workflow.js` | Approval notification status and SLA escalation | Present |
 | `server/public/index.html` | Admin dashboard shell | Present |
 | `detection-engine/detect.js` | Shared detection engine source of truth | Present |
-| `sensors/browser-extension/manifest.json` | Chrome extension entrypoint | Present |
+| `sensors/browser-extension/manifest.json` | Browser extension source manifest | Present |
 | `sensors/browser-extension/background.js` | Browser install-health heartbeat and control-plane relay | Present |
 | `sensors/browser-extension/content.js` | Browser send, paste, upload enforcement | Present |
 | `scripts/check-extension-release.js` | Browser extension release-readiness gate | Present |
-| `docs/EXTENSION_RELEASE_CHECKLIST.md` | Chrome Web Store private or unlisted release checklist | Present |
+| `docs/EXTENSION_RELEASE_CHECKLIST.md` | Chrome, Edge, and Firefox release checklist | Present |
 | `sensors/endpoint-agent/agent.js` | Local folder and file sensor | Present |
 | `sensors/endpoint-agent/write-handoff.js` | Signed native upload-intent handoff writer | Present |
 | `scripts/check-endpoint-install.js` | Endpoint install validation and heartbeat evidence | Present |
@@ -98,7 +98,7 @@ This section is generated from the app by `npm run docs:demo-guide`. Do not hand
 | `docs/SALES_DEMO_GUIDE.md` | Sales and client-facing demo script | Present |
 | `docs/DEMO_TECHNICIAN_SETUP.md` | Demo machine setup and reset runbook | Present |
 | `docs/DEPLOYMENT.md` | Native Node and Docker deployment reference | Present |
-| `docs/MANAGED_EXTENSION_DEPLOYMENT.md` | Chrome managed extension pilot reference | Present |
+| `docs/MANAGED_EXTENSION_DEPLOYMENT.md` | Managed browser extension pilot reference | Present |
 | `docs/EVIDENCE_PACK_TASK.md` | Examiner evidence pack scheduled task reference | Present |
 | `docs/APPROVAL_ROUTING.md` | Approval owner and SLA routing reference | Present |
 | `docs/TECHNICIAN_DEPLOYMENT_GUIDE.md` | Install-day production readiness runbook | Present |
@@ -317,8 +317,11 @@ extension storage.
 For a managed pilot, use:
 
 - `docs/MANAGED_EXTENSION_DEPLOYMENT.md`
-- `docs/examples/chrome-managed-storage.policy.json`
+- `docs/examples/browser-managed-storage.policy.json`
+- `docs/examples/firefox-managed-storage.policy.json`
 - `docs/examples/chrome-extension-settings.example.json`
+- `docs/examples/edge-extension-settings.example.json`
+- `docs/examples/firefox-extension-settings.example.json`
 
 Never ask pilot users to type ingest keys by hand.
 

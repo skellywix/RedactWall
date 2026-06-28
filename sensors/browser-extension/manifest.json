@@ -271,7 +271,7 @@
         "https://udio.com/*",
         "https://*.udio.com/*"
       ],
-      "js": ["lib/detect.js", "lib/adapters.js", "content.js"],
+      "js": ["lib/browser-api.js", "lib/detect.js", "lib/adapters.js", "content.js"],
       "css": ["content.css"],
       "run_at": "document_idle",
       "all_frames": false

@@ -155,7 +155,7 @@ aws cloudformation describe-stacks \
 
 ## 4. Configure The Customer Sensors
 
-For the Chrome extension managed-storage policy, set:
+For the managed browser extension storage policy, set:
 
 ```json
 {

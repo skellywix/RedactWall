@@ -83,10 +83,10 @@ Build next:
   `-SentinelUrl` as a compatibility alias for existing technician scripts.
 - Rename fresh endpoint runner config handoff to `PROMPTWALL_ENV_PATH` while
   keeping `SENTINEL_ENV_PATH` accepted for existing installs.
-- Add a Chrome extension release-readiness gate and private or unlisted Web
-  Store checklist so managed browser rollout has package, policy, update URL,
-  generated ExtensionSettings force-install policy, and install-health evidence
-  before handoff.
+- Add a browser extension release-readiness gate and managed release checklist
+  so Chrome, Edge, and Firefox rollouts have packages, policies, update or
+  install URLs, generated ExtensionSettings force-install policies, and
+  install-health evidence before handoff.
 - Add guided Policy-tab builders for common scoped enforcement rules and
   time-bound exceptions while preserving exact JSON review before save.
 - Add a dashboard Lineage tab backed by `/api/lineage` so admins and auditors
