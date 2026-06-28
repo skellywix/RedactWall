@@ -11,6 +11,7 @@ const extensionDir = path.join(root, 'sensors', 'browser-extension');
 const content = fs.readFileSync(path.join(extensionDir, 'content.js'), 'utf8');
 const background = fs.readFileSync(path.join(extensionDir, 'background.js'), 'utf8');
 const manifest = JSON.parse(fs.readFileSync(path.join(extensionDir, 'manifest.json'), 'utf8'));
+const adapters = require('../detection-engine/adapters');
 
 function loadBackground(opts = {}) {
   let onMessage;
@@ -94,6 +95,7 @@ test('browser file uploads use scan-file API with base64 content', () => {
 test('browser blocks configured destinations before local prompt or file inspection', () => {
   assert.match(content, /function destinationBlocked\(\)/);
   assert.match(content, /function fileUploadBlocked\(\)/);
+  assert.match(content, /POLICY\.allowedDestinations \|\| \[\]/);
   assert.match(content, /POLICY\.blockedDestinations \|\| \[\]/);
   assert.match(content, /POLICY\.blockedFileUploadDestinations \|\| \[\]/);
   assert.match(background, /clientOutcome:\s*msg\.payload\.outcome/);
@@ -103,6 +105,28 @@ test('browser blocks configured destinations before local prompt or file inspect
   assert.match(content, /PromptWall blocked file uploads to/);
   assert.match(background, /blockedDestinations:\s*\[\]/);
   assert.match(background, /blockedFileUploadDestinations:\s*\[\]/);
+  assert.match(background, /allowedDestinations:\s*\[\]/);
+});
+
+test('destination allowlist overrides wildcard destination blocks', () => {
+  assert.match(content, /A\.isGoverned\(SITE, allowed\)\) return false/);
+  assert.match(background, /\.\.\.\(\(c\.policy && c\.policy\.allowedDestinations\) \|\| \[\]\)/);
+});
+
+test('browser block banner includes employee coaching guidance', () => {
+  assert.match(content, /const LABELS = \{/);
+  assert.match(content, /US_SSN:\s*'Social Security number'/);
+  assert.match(content, /const COACHING = \{/);
+  assert.match(content, /US_SSN:\s*'Use a member ID/);
+  assert.match(content, /CONFIDENTIAL_BUSINESS:\s*'Remove unreleased plans/);
+  assert.match(content, /function coachingFor\(items\)/);
+  assert.match(content, /function listForScreen\(items\)/);
+  assert.match(content, /function chipHtml\(items\)/);
+  assert.match(content, /Sensitive data blocked/);
+  assert.match(content, /before it could leave this browser/);
+  assert.match(content, /'<div class="ps-coach">' \+ escapeHtml\(coach\) \+ '<\/div>'/);
+  assert.match(content, /PromptWall found sensitive data: ' \+ listForScreen/);
+  assert.doesNotMatch(content, /this prompt contains <b>' \+ items\.join/);
 });
 
 test('browser click interception uses shared send-button adapters', () => {
@@ -267,4 +291,26 @@ test('governed Poe destination receives active content-script protection', () =>
   assert.ok(matches.includes('https://poe.com/*'));
   assert.ok(matches.includes('https://www.poe.com/*'));
   assert.match(background, /shadow-AI/);
+});
+
+test('major Chinese AI destinations receive active content-script protection', () => {
+  const matches = manifest.content_scripts.flatMap((entry) => entry.matches || []);
+  for (const pattern of [
+    'https://*.deepseek.com/*',
+    'https://*.qwen.ai/*',
+    'https://kimi.com/*',
+    'https://doubao.com/*',
+    'https://yuanbao.tencent.com/*',
+    'https://yiyan.baidu.com/*',
+    'https://chatglm.cn/*',
+    'https://hailuoai.com/*',
+    'https://xinghuo.xfyun.cn/*',
+    'https://ai.360.com/*',
+  ]) {
+    assert.ok(manifest.host_permissions.includes(pattern), pattern);
+    assert.ok(matches.includes(pattern), pattern);
+  }
+  for (const host of ['chat.deepseek.com', 'chat.qwen.ai', 'kimi.com', 'doubao.com', 'yuanbao.tencent.com']) {
+    assert.strictEqual(adapters.isAiHost(host), true, host);
+  }
 });

@@ -19,8 +19,12 @@ const PACKAGE_FILES = [
   'sensors/endpoint-agent/agent.js',
   'sensors/endpoint-agent/native-handoff.js',
   'sensors/endpoint-agent/write-handoff.js',
+  'sensors/endpoint-agent/collectors/protected-upload.js',
+  'scripts/install-desktop-collector.ps1',
   'scripts/install-endpoint-agent.ps1',
+  'scripts/run-desktop-collector.ps1',
   'scripts/run-endpoint-agent.ps1',
+  'scripts/uninstall-desktop-collector.ps1',
   'scripts/uninstall-endpoint-agent.ps1',
 ];
 
@@ -90,6 +94,14 @@ function validateRuntimeFiles(files) {
     throw new Error('Endpoint agent handoff writer must not take secrets in argv or read file bodies');
   }
 
+  const collector = files.find((file) => file.path === 'sensors/endpoint-agent/collectors/protected-upload.js').body.toString('utf8');
+  if (!/collectProtectedUploads/.test(collector) || !/writeHandoffFile/.test(collector) || !/waitForHandoffConsumption/.test(collector)) {
+    throw new Error('Endpoint agent package must include the protected-upload desktop collector');
+  }
+  if (/contentBase64|readFileSync\(filePath/.test(collector)) {
+    throw new Error('Endpoint desktop collector must not read file bodies or upload file content');
+  }
+
   const install = files.find((file) => file.path === 'scripts/install-endpoint-agent.ps1').body.toString('utf8');
   if (!/\[Parameter\(Mandatory = \$true\)\]\s*\r?\n\s*\[string\]\$IngestKey/.test(install)) {
     throw new Error('Endpoint agent installer must require an ingest key parameter');
@@ -101,9 +113,22 @@ function validateRuntimeFiles(files) {
     throw new Error('Endpoint agent installer must not put the native handoff secret in scheduled-task arguments');
   }
 
+  const collectorInstall = files.find((file) => file.path === 'scripts/install-desktop-collector.ps1').body.toString('utf8');
+  if (!collectorInstall.includes(String.raw`HKEY_CURRENT_USER\Software\Classes\*\shell`) || !collectorInstall.includes('%1')) {
+    throw new Error('Endpoint desktop collector installer must register a per-user file shell action');
+  }
+  if (/"-HandoffSecret"|INGEST_API_KEY=\$IngestKey/.test(collectorInstall)) {
+    throw new Error('Endpoint desktop collector installer must not put secrets in shell commands');
+  }
+
   const runner = files.find((file) => file.path === 'scripts/run-endpoint-agent.ps1').body.toString('utf8');
   if (!/\$env:SENTINEL_ENV_PATH = \$config/.test(runner)) {
     throw new Error('Endpoint agent runner must load local config through SENTINEL_ENV_PATH');
+  }
+
+  const collectorRunner = files.find((file) => file.path === 'scripts/run-desktop-collector.ps1').body.toString('utf8');
+  if (!/\$env:SENTINEL_ENV_PATH = \$config/.test(collectorRunner) || !/protected-upload\.js/.test(collectorRunner)) {
+    throw new Error('Endpoint desktop collector runner must load config and invoke the protected-upload collector');
   }
 }
 
@@ -145,6 +170,8 @@ function packageEndpointAgent(opts = {}) {
       endpointRedactionHandoffIncluded: true,
       nativeHandoffPrototypeIncluded: true,
       nativeHandoffWriterIncluded: true,
+      protectedUploadCollectorIncluded: true,
+      desktopCollectorInstallerIncluded: true,
       scheduledTaskInstallerIncluded: true,
       localConfigEnvPath: true,
       taskArgsDoNotExposeIngestKey: true,

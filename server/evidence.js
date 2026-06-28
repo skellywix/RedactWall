@@ -19,6 +19,7 @@ const POLICY_AUDIT_FIELDS = new Set([
   'ignore',
   'disabledDetectors',
   'governedDestinations',
+  'allowedDestinations',
   'blockedDestinations',
   'blockedFileUploadDestinations',
   'scanner',

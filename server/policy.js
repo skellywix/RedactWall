@@ -13,7 +13,7 @@ const DEFAULT_POLICY = {
   enforcementMode: 'block',
   blockMinSeverity: 2,
   blockRiskScore: 25,
-  alwaysBlock: ['US_SSN', 'CREDIT_CARD', 'BANK_ACCOUNT', 'ROUTING_NUMBER', 'IBAN', 'US_PASSPORT', 'SECRET_KEY', 'PRIVATE_KEY', 'CANARY_TOKEN'],
+  alwaysBlock: ['US_SSN', 'CREDIT_CARD', 'BANK_ACCOUNT', 'ROUTING_NUMBER', 'IBAN', 'US_PASSPORT', 'US_ITIN', 'US_NPI', 'MEMBER_ID', 'LOAN_NUMBER', 'MEDICAL_RECORD_NUMBER', 'HEALTH_INSURANCE_ID', 'SECRET_KEY', 'PRIVATE_KEY', 'CANARY_TOKEN'],
   // When true, the raw prompt of an item held for approval is retained
   // (encrypted at rest) so an admin can review it. Set false for institutions
   // that forbid any server-side raw retention — reveal then shows redacted only.
@@ -24,7 +24,11 @@ const DEFAULT_POLICY = {
   governedDestinations: [
     'chatgpt.com', 'openai.com', 'claude.ai', 'anthropic.com',
     'gemini.google.com', 'copilot.microsoft.com', 'perplexity.ai', 'poe.com',
+    'chat.deepseek.com', 'deepseek.com', 'chat.qwen.ai', 'qwen.ai', 'tongyi.aliyun.com',
+    'kimi.com', 'kimi.moonshot.cn', 'doubao.com', 'yuanbao.tencent.com',
+    'yiyan.baidu.com', 'ernie.baidu.com', 'chatglm.cn', 'z.ai',
   ],
+  allowedDestinations: [],
   blockedDestinations: [],
   blockedFileUploadDestinations: [],
   scanner: {
@@ -45,6 +49,7 @@ const AUDIT_FIELDS = [
   'ignore',
   'disabledDetectors',
   'governedDestinations',
+  'allowedDestinations',
   'blockedDestinations',
   'blockedFileUploadDestinations',
   'scanner',
@@ -137,11 +142,17 @@ function destinationMatches(destination, patterns) {
 }
 
 function destinationBlocked(destination, policy = loadPolicy()) {
+  if (destinationAllowed(destination, policy)) return false;
   return destinationMatches(destination, policy.blockedDestinations || []);
 }
 
 function fileUploadBlocked(destination, policy = loadPolicy()) {
+  if (destinationAllowed(destination, policy)) return false;
   return destinationMatches(destination, policy.blockedFileUploadDestinations || []);
+}
+
+function destinationAllowed(destination, policy = loadPolicy()) {
+  return destinationMatches(destination, policy.allowedDestinations || []);
 }
 
 function evaluate(analysis, policy = loadPolicy()) {
@@ -171,6 +182,7 @@ module.exports = {
   rawRetentionDays,
   normalizeDestination,
   destinationMatches,
+  destinationAllowed,
   destinationBlocked,
   fileUploadBlocked,
   policyChangeSummary,

@@ -9,6 +9,9 @@ const root = path.join(__dirname, '..');
 const install = fs.readFileSync(path.join(root, 'scripts', 'install-endpoint-agent.ps1'), 'utf8');
 const run = fs.readFileSync(path.join(root, 'scripts', 'run-endpoint-agent.ps1'), 'utf8');
 const uninstall = fs.readFileSync(path.join(root, 'scripts', 'uninstall-endpoint-agent.ps1'), 'utf8');
+const desktopInstall = fs.readFileSync(path.join(root, 'scripts', 'install-desktop-collector.ps1'), 'utf8');
+const desktopRun = fs.readFileSync(path.join(root, 'scripts', 'run-desktop-collector.ps1'), 'utf8');
+const desktopUninstall = fs.readFileSync(path.join(root, 'scripts', 'uninstall-desktop-collector.ps1'), 'utf8');
 const deployment = fs.readFileSync(path.join(root, 'docs', 'DEPLOYMENT.md'), 'utf8');
 
 test('installer registers a restarting scheduled task without putting the ingest key in task args', () => {
@@ -21,6 +24,10 @@ test('installer registers a restarting scheduled task without putting the ingest
   assert.match(install, /\$env:LOCALAPPDATA\\PromptWall/);
   assert.match(install, /BUILTIN\\Administrators/);
   assert.match(install, /ENDPOINT_AGENT_HANDOFF_SECRET=\$HandoffSecret/);
+  assert.match(install, /InstallDesktopCollector/);
+  assert.match(install, /install-desktop-collector\.ps1/);
+  assert.match(install, /InstallDesktopCollector requires HandoffSecret/);
+  assert.match(install, /Set-Acl -LiteralPath \$handoffRoot/);
   assert.doesNotMatch(install, /"-IngestKey"/);
   assert.doesNotMatch(install, /\$IngestKey[\s\S]{0,120}\$taskArgs/);
   assert.doesNotMatch(install, /"-HandoffSecret"/);
@@ -33,15 +40,35 @@ test('runner loads endpoint config through SENTINEL_ENV_PATH and starts the agen
   assert.match(run, /\*>> \$LogPath/);
 });
 
+test('desktop collector shell action is per-user and secret-free', () => {
+  assert.match(desktopInstall, /HKEY_CURRENT_USER\\Software\\Classes\\\*\\shell/);
+  assert.match(desktopInstall, /endpoint-agent\.env/);
+  assert.match(desktopInstall, /ENDPOINT_AGENT_HANDOFF_SECRET=\.\{32,\}/);
+  assert.ok(desktopInstall.includes('%1'));
+  assert.match(desktopInstall, /run-desktop-collector\.ps1/);
+  assert.doesNotMatch(desktopInstall, /"-HandoffSecret"/);
+  assert.doesNotMatch(desktopInstall, /INGEST_API_KEY=\$IngestKey/);
+  assert.match(desktopRun, /\$env:SENTINEL_ENV_PATH = \$config/);
+  assert.match(desktopRun, /protected-upload\.js/);
+  assert.match(desktopRun, /--wait/);
+  assert.match(desktopRun, /--json/);
+  assert.match(desktopUninstall, /HKEY_CURRENT_USER\\Software\\Classes\\\*\\shell/);
+});
+
 test('uninstaller removes task and can remove endpoint config', () => {
   assert.match(uninstall, /Unregister-ScheduledTask/);
   assert.match(uninstall, /\$RemoveConfig/);
+  assert.match(uninstall, /\$RemoveDesktopCollector/);
+  assert.match(uninstall, /uninstall-desktop-collector\.ps1/);
   assert.match(uninstall, /endpoint-agent\.env/);
 });
 
 test('deployment docs include endpoint task install and uninstall flow', () => {
   assert.match(deployment, /install-endpoint-agent\.ps1/);
+  assert.match(deployment, /install-desktop-collector\.ps1/);
+  assert.match(deployment, /PromptWall Protected Upload/);
   assert.match(deployment, /uninstall-endpoint-agent\.ps1/);
+  assert.match(deployment, /desktop-collector\.log/);
   assert.match(deployment, /PromptWallEndpointAgent/);
   assert.match(deployment, /%LOCALAPPDATA%\\PromptWall\\endpoint-agent\.env/);
   assert.match(deployment, /ENDPOINT_AGENT_HANDOFF_SECRET/);

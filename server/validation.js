@@ -211,6 +211,7 @@ const policyUpdateSchema = z.object({
   ignore: z.array(detectorIdSchema).max(LIMITS.policyListItems).optional(),
   disabledDetectors: z.array(detectorIdSchema).max(LIMITS.policyListItems).optional(),
   governedDestinations: z.array(z.string().min(1).max(253).regex(HOST_OR_LABEL)).max(LIMITS.policyListItems).optional(),
+  allowedDestinations: z.array(z.string().min(1).max(253).regex(HOST_OR_LABEL)).max(LIMITS.policyListItems).optional(),
   blockedDestinations: z.array(z.string().min(1).max(253).regex(HOST_OR_LABEL)).max(LIMITS.policyListItems).optional(),
   blockedFileUploadDestinations: z.array(z.string().min(1).max(253).regex(HOST_OR_LABEL)).max(LIMITS.policyListItems).optional(),
   scanner: scannerPolicySchema.optional(),

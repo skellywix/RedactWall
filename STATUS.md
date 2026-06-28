@@ -2,11 +2,15 @@
 
 ## Open
 
-- Next pass: prototype one real desktop hook path that feeds the metadata-only handoff writer from a Windows upload or file-selection flow without writing raw prompt or file content into event files.
-- Keep an eye on the remaining product gap: the current endpoint package now has a signed local handoff contract and writer, but it still needs a native desktop collector or OS/app hook before it is true file-flow interception.
+- Next pass: turn the protected-upload shell action into broader desktop coverage, such as native messaging from browser upload surfaces, app-specific upload collectors, or clipboard/file-selection hooks.
+- Keep an eye on the remaining product gap: the endpoint package now has a tested protected-upload pilot path, but it is not yet universal drag/drop interception for every desktop AI app.
 
 ## Done
 
+- 2026-06-28: Added a Windows protected-upload desktop collector path for pilots. The endpoint package now includes a per-user Explorer shell action, a secret-free runner, metadata-only collector events through the signed handoff writer, package validation, install/uninstall docs, and package-to-install smoke coverage.
+  Evidence: `npm test -- test/desktop-collector.test.js test/endpoint-agent-install.test.js test/endpoint-agent-package.test.js`, `npm run review:ci`, `node -e "const v=require('./server/db').verifyAuditChain(); console.log(JSON.stringify(v)); if(!v.ok) process.exit(1)"`.
+- 2026-06-28: Added inline employee coaching to the browser extension block/warn/justify banner. The banner now gives category-specific safe alternatives for SSNs, payment data, credentials, source code, legal contracts, confidential business context, and canary tokens while preserving the existing local detection and fail-closed enforcement path.
+  Evidence: `npm test -- test/detect.test.js test/extension.test.js test/policy-history.test.js test/coverage.test.js test/adapters.test.js`, `$env:PLAYWRIGHT_PORT='4327'; npm run test:browser-extension`, `npm run review:ci`, `node -e "const v=require('./server/db').verifyAuditChain(); console.log(JSON.stringify(v)); if(!v.ok) process.exit(1)"`.
 - 2026-06-27: Added a review-gated local Git workflow for this repo: pre-commit runs `npm run review:agent`, post-commit runs `npm run review:ci` and pushes only after checks pass, and `.githooks` is the canonical hook path for the same flow (`npm run hooks:install`). This keeps local commits aligned with GitHub sync expectations for every change.
   Evidence: [package scripts and hooks updated], `npm run review:agent`/`npm run review:ci` availability, `.githooks/pre-commit`, `.githooks/post-commit`, `core.hooksPath` configuration.
 - 2026-06-26: Added a metadata-only native handoff writer for pilots and future desktop hooks: the packaged helper loads the endpoint env config, signs a bounded upload-intent event, writes it atomically into the handoff spool, refuses `--secret` command-line handling, and never reads referenced file bytes into the event.

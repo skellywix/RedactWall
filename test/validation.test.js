@@ -561,6 +561,7 @@ test('sensor policy endpoint publishes detector and scanner controls', async () 
   assert.ok(Array.isArray(body.ignore));
   assert.ok(Array.isArray(body.disabledDetectors));
   assert.ok(Array.isArray(body.governedDestinations));
+  assert.ok(Array.isArray(body.allowedDestinations));
   assert.ok(Array.isArray(body.blockedDestinations));
   assert.ok(Array.isArray(body.blockedFileUploadDestinations));
   assert.ok(body.scanner && typeof body.scanner === 'object');

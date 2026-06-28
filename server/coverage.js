@@ -106,7 +106,10 @@ function finalizeSensor(sensor) {
 
 function summarize(rows, pol) {
   const policy = pol || {};
-  const governedSet = new Set((policy.governedDestinations || []).map(normalizeDestination));
+  const governedSet = new Set([
+    ...((policy.governedDestinations || []).map(normalizeDestination)),
+    ...((policy.allowedDestinations || []).map(normalizeDestination)),
+  ]);
   const governed = new Map();
   const ungoverned = new Map();
   const shadow = new Map();

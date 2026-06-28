@@ -11,6 +11,9 @@ test('destination policy matches hosts, URLs, labels, and wildcards', () => {
   assert.strictEqual(policy.destinationMatches('deepseek.com', ['*.deepseek.com']), false);
   assert.strictEqual(policy.destinationMatches('Desktop AI', ['desktop-ai']), true);
   assert.strictEqual(policy.destinationBlocked('poe.com', { blockedDestinations: ['poe.com'] }), true);
+  assert.strictEqual(policy.destinationAllowed('chatgpt.com', { allowedDestinations: ['chatgpt.com'] }), true);
+  assert.strictEqual(policy.destinationBlocked('chatgpt.com', { blockedDestinations: ['*'], allowedDestinations: ['chatgpt.com'] }), false);
+  assert.strictEqual(policy.fileUploadBlocked('chatgpt.com', { blockedFileUploadDestinations: ['*'], allowedDestinations: ['chatgpt.com'] }), false);
   assert.strictEqual(policy.fileUploadBlocked('https://chatgpt.com/c/abc', { blockedFileUploadDestinations: ['chatgpt.com'] }), true);
 });
 

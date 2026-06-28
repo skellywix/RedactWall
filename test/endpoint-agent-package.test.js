@@ -40,13 +40,26 @@ function minimalFiles(agentBody) {
       body: Buffer.from('function writeHandoffFile() { return signHandoffEvent(); }\nfunction signHandoffEvent() {}\n'),
     },
     {
+      path: 'sensors/endpoint-agent/collectors/protected-upload.js',
+      body: Buffer.from('async function collectProtectedUploads() { return writeHandoffFile(); }\nfunction writeHandoffFile() {}\nfunction waitForHandoffConsumption() {}\n'),
+    },
+    {
+      path: 'scripts/install-desktop-collector.ps1',
+      body: Buffer.from('HKEY_CURRENT_USER\\Software\\Classes\\*\\shell\n"%1"\n'),
+    },
+    {
       path: 'scripts/install-endpoint-agent.ps1',
       body: Buffer.from('[Parameter(Mandatory = $true)]\n[string]$IngestKey\n$taskArgs = "-File runner.ps1"\n'),
+    },
+    {
+      path: 'scripts/run-desktop-collector.ps1',
+      body: Buffer.from('$env:SENTINEL_ENV_PATH = $config\nprotected-upload.js\n'),
     },
     {
       path: 'scripts/run-endpoint-agent.ps1',
       body: Buffer.from('$env:SENTINEL_ENV_PATH = $config\n'),
     },
+    { path: 'scripts/uninstall-desktop-collector.ps1', body: Buffer.from('Remove-Item\n') },
     { path: 'scripts/uninstall-endpoint-agent.ps1', body: Buffer.from('Unregister-ScheduledTask\n') },
   ];
 }
@@ -67,6 +80,8 @@ test('package script writes a prompt-free endpoint agent zip and integrity manif
   assert.strictEqual(manifest.checks.endpointRedactionHandoffIncluded, true);
   assert.strictEqual(manifest.checks.nativeHandoffPrototypeIncluded, true);
   assert.strictEqual(manifest.checks.nativeHandoffWriterIncluded, true);
+  assert.strictEqual(manifest.checks.protectedUploadCollectorIncluded, true);
+  assert.strictEqual(manifest.checks.desktopCollectorInstallerIncluded, true);
   assert.strictEqual(manifest.checks.scheduledTaskInstallerIncluded, true);
   assert.strictEqual(manifest.checks.localConfigEnvPath, true);
   assert.strictEqual(manifest.checks.taskArgsDoNotExposeIngestKey, true);
@@ -85,8 +100,12 @@ test('package script writes a prompt-free endpoint agent zip and integrity manif
     'sensors/endpoint-agent/agent.js',
     'sensors/endpoint-agent/native-handoff.js',
     'sensors/endpoint-agent/write-handoff.js',
+    'sensors/endpoint-agent/collectors/protected-upload.js',
+    'scripts/install-desktop-collector.ps1',
     'scripts/install-endpoint-agent.ps1',
+    'scripts/run-desktop-collector.ps1',
     'scripts/run-endpoint-agent.ps1',
+    'scripts/uninstall-desktop-collector.ps1',
     'scripts/uninstall-endpoint-agent.ps1',
   ]) {
     assert.ok(entries.includes(required), required);
@@ -100,6 +119,9 @@ test('package script writes a prompt-free endpoint agent zip and integrity manif
   assert.match(agent, /ENDPOINT_AGENT_HANDOFF_SECRET/);
   assert.match(zip.readAsText('sensors/endpoint-agent/native-handoff.js'), /createHmac\('sha256'/);
   assert.match(zip.readAsText('sensors/endpoint-agent/write-handoff.js'), /writeHandoffFile/);
+  assert.match(zip.readAsText('sensors/endpoint-agent/collectors/protected-upload.js'), /collectProtectedUploads/);
+  assert.match(zip.readAsText('scripts/install-desktop-collector.ps1'), /HKEY_CURRENT_USER\\Software\\Classes\\\*\\shell/);
+  assert.match(zip.readAsText('scripts/run-desktop-collector.ps1'), /protected-upload\.js/);
   assert.doesNotMatch(agent, /dev-ingest-key|524-71-9043|4111 1111 1111 1111/);
   assert.doesNotMatch(JSON.stringify(manifest), /prompt\s*:/i);
   assert.doesNotMatch(JSON.stringify(manifest), /524-71-9043|4111 1111|REPLACE_WITH_LONG_RANDOM_INGEST_KEY/);
@@ -133,11 +155,14 @@ test('packaged endpoint agent runs a package-to-install pilot smoke', async (t) 
   const watchDir = path.join(installRoot, 'watch');
   const configDir = path.join(installRoot, 'config');
   const configPath = path.join(configDir, 'endpoint-agent.env');
+  const packageHandoffDir = path.join(installRoot, 'configured-native-handoff');
   fs.mkdirSync(configDir, { recursive: true });
   fs.writeFileSync(configPath, [
     'SENTINEL_URL=http://sentinel.package.test',
     'INGEST_API_KEY=pilot-ingest-key-000000000000000000000000000001',
     `ENDPOINT_AGENT_WATCH_DIR=${watchDir}`,
+    `ENDPOINT_AGENT_HANDOFF_SECRET=native-handoff-secret-000000000000000001`,
+    `ENDPOINT_AGENT_HANDOFF_DIR=${packageHandoffDir}`,
     'SENTINEL_REQUEST_TIMEOUT_MS=250',
   ].join('\n') + '\n');
 
@@ -146,13 +171,22 @@ test('packaged endpoint agent runs a package-to-install pilot smoke', async (t) 
   zip.extractAllTo(installRoot, true);
 
   const installScript = fs.readFileSync(path.join(installRoot, 'scripts', 'install-endpoint-agent.ps1'), 'utf8');
+  const desktopInstallScript = fs.readFileSync(path.join(installRoot, 'scripts', 'install-desktop-collector.ps1'), 'utf8');
+  const desktopRunnerScript = fs.readFileSync(path.join(installRoot, 'scripts', 'run-desktop-collector.ps1'), 'utf8');
   const runnerScript = fs.readFileSync(path.join(installRoot, 'scripts', 'run-endpoint-agent.ps1'), 'utf8');
   const uninstallScript = fs.readFileSync(path.join(installRoot, 'scripts', 'uninstall-endpoint-agent.ps1'), 'utf8');
   assert.match(installScript, /Register-ScheduledTask/);
   assert.match(installScript, /INGEST_API_KEY=\$IngestKey/);
+  assert.match(installScript, /InstallDesktopCollector/);
   assert.doesNotMatch(installScript, /"-IngestKey"/);
+  assert.ok(desktopInstallScript.includes(String.raw`HKEY_CURRENT_USER\Software\Classes\*\shell`));
+  assert.ok(desktopInstallScript.includes('%1'));
+  assert.doesNotMatch(desktopInstallScript, /"-HandoffSecret"/);
+  assert.match(desktopRunnerScript, /protected-upload\.js/);
+  assert.match(desktopRunnerScript, /\$env:SENTINEL_ENV_PATH = \$config/);
   assert.match(runnerScript, /\$env:SENTINEL_ENV_PATH = \$config/);
   assert.match(uninstallScript, /Unregister-ScheduledTask/);
+  assert.match(uninstallScript, /RemoveDesktopCollector/);
   assert.match(uninstallScript, /endpoint-agent\.env/);
 
   const previousEnv = {};
@@ -170,13 +204,17 @@ test('packaged endpoint agent runs a package-to-install pilot smoke', async (t) 
 
   const agentPath = require.resolve(path.join(installRoot, 'sensors', 'endpoint-agent', 'agent.js'));
   const writerPath = require.resolve(path.join(installRoot, 'sensors', 'endpoint-agent', 'write-handoff.js'));
+  const collectorPath = require.resolve(path.join(installRoot, 'sensors', 'endpoint-agent', 'collectors', 'protected-upload.js'));
   delete require.cache[agentPath];
   delete require.cache[writerPath];
+  delete require.cache[collectorPath];
   const agent = require(agentPath);
   const handoffWriter = require(writerPath);
+  const desktopCollector = require(collectorPath);
   t.after(() => {
     delete require.cache[agentPath];
     delete require.cache[writerPath];
+    delete require.cache[collectorPath];
   });
   assert.strictEqual(agent.configuredKey({}), 'pilot-ingest-key-000000000000000000000000000001');
 
@@ -272,6 +310,38 @@ test('packaged endpoint agent runs a package-to-install pilot smoke', async (t) 
   const nativeFile = path.join(sourceDir, 'member-524-71-9043.txt');
   fs.writeFileSync(nativeFile, 'Native file flow SSN 524-71-9043 and card 4111 1111 1111 1111.');
   const nativeSecret = 'native-handoff-secret-000000000000000001';
+  const collectorResult = await desktopCollector.collectProtectedUploads({
+    files: [nativeFile],
+    envPath: configPath,
+    id: 'evt_packaged_collector',
+    now: new Date('2026-06-26T13:00:30.000Z'),
+    destination: 'Desktop AI',
+    user: 'native-user@example.test',
+    nonce: 'collector-nonce',
+  });
+  assert.strictEqual(collectorResult.status, 'written');
+  assert.ok(!JSON.stringify(collectorResult).includes('524-71-9043'));
+  const collectorEventPath = path.join(packageHandoffDir, 'evt_packaged_collector.json');
+  assert.ok(fs.existsSync(collectorEventPath));
+  assert.ok(!fs.readFileSync(collectorEventPath, 'utf8').includes('Native file flow SSN'));
+
+  const collectorNativeResult = await agent.processNativeHandoffFile(collectorEventPath, {
+    secret: nativeSecret,
+    now: new Date('2026-06-26T13:01:00.000Z'),
+    policy: {
+      enforcementMode: 'redact',
+      blockMinSeverity: 2,
+      blockRiskScore: 20,
+      alwaysBlock: ['US_SSN', 'CREDIT_CARD'],
+      ignore: [],
+      disabledDetectors: [],
+    },
+    fetchImpl,
+  });
+  assert.strictEqual(collectorNativeResult.status, 'processed');
+  assert.strictEqual(collectorNativeResult.result.decision, 'redact');
+  assert.strictEqual(fs.existsSync(collectorEventPath), false);
+
   const nativeEvent = handoffWriter.writeHandoffFile({
     filePath: nativeFile,
     dir: handoffDir,

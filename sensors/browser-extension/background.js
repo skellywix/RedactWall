@@ -13,7 +13,7 @@ const DEFAULTS = {
   ingestKey: '',
   requestTimeoutMs: 10000,
   enabled: true,
-  policy: { enforcementMode: 'block', blockMinSeverity: 2, blockRiskScore: 25, governedDestinations: [], blockedDestinations: [], blockedFileUploadDestinations: [], alwaysBlock: ['US_SSN', 'CREDIT_CARD', 'BANK_ACCOUNT', 'ROUTING_NUMBER', 'SECRET_KEY', 'PRIVATE_KEY', 'CANARY_TOKEN'] },
+  policy: { enforcementMode: 'block', blockMinSeverity: 2, blockRiskScore: 25, governedDestinations: [], allowedDestinations: [], blockedDestinations: [], blockedFileUploadDestinations: [], alwaysBlock: ['US_SSN', 'CREDIT_CARD', 'BANK_ACCOUNT', 'ROUTING_NUMBER', 'US_ITIN', 'US_NPI', 'MEMBER_ID', 'LOAN_NUMBER', 'SECRET_KEY', 'PRIVATE_KEY', 'CANARY_TOKEN'] },
 };
 
 async function cfg() {
@@ -190,6 +190,7 @@ chrome.tabs?.onUpdated.addListener(async (tabId, info, tab) => {
   const c = await cfg();
   const governed = [
     ...((c.policy && c.policy.governedDestinations) || []),
+    ...((c.policy && c.policy.allowedDestinations) || []),
     ...((c.policy && c.policy.blockedDestinations) || []),
   ];
   if (!self.PSAdapters.isAiHost(host) || self.PSAdapters.isGoverned(host, governed)) return;

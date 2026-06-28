@@ -32,6 +32,7 @@
     "docs:demo-guide": "node scripts/update-demo-guide.js",
     "docs:demo-guide:check": "node scripts/update-demo-guide.js --check",
     "endpoint:handoff": "node sensors/endpoint-agent/write-handoff.js",
+    "desktop:collect": "node sensors/endpoint-agent/collectors/protected-upload.js",
     "train-semantic": "node scripts/train-semantic.js",
     "sync-engine": "node scripts/sync-engine.js",
     "sync-check": "node scripts/sync-check.js",

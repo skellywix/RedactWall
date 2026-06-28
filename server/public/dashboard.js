@@ -560,6 +560,11 @@ async function loadPolicy() {
     ? `<div class="chips">${(p.governedDestinations || []).map((x) => `<span class="chip">${escapeHtml(x)}</span>`).join('')}</div>`
     : `<textarea id="pol_governed_destinations" class="policy-textarea" spellcheck="false">${escapeHtml(policyListText(p.governedDestinations))}</textarea>`}
       </label>
+      <label class="policy-list-field">Allowed AI destinations
+        ${readonly
+    ? `<div class="chips">${(p.allowedDestinations || []).map((x) => `<span class="chip">${escapeHtml(x)}</span>`).join('') || '<span class="chip">none</span>'}</div>`
+    : `<textarea id="pol_allowed_destinations" class="policy-textarea" spellcheck="false" placeholder="chatgpt.com&#10;claude.ai">${escapeHtml(policyListText(p.allowedDestinations))}</textarea>`}
+      </label>
       <label class="policy-list-field">Blocked AI destinations
         ${readonly
     ? `<div class="chips">${(p.blockedDestinations || []).map((x) => `<span class="chip">${escapeHtml(x)}</span>`).join('') || '<span class="chip">none</span>'}</div>`
@@ -590,6 +595,7 @@ async function loadPolicy() {
       blockRiskScore: Number($('#pol_risk').value),
       rawRetentionDays: Number($('#pol_retention').value),
       governedDestinations: parsePolicyList($('#pol_governed_destinations').value),
+      allowedDestinations: parsePolicyList($('#pol_allowed_destinations').value),
       blockedDestinations: parsePolicyList($('#pol_blocked_destinations').value),
       blockedFileUploadDestinations: parsePolicyList($('#pol_blocked_file_upload_destinations').value),
     };

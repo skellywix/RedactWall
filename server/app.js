@@ -675,6 +675,7 @@ app.get('/api/v1/policy', checkIngestKey, (req, res) => {
     ignore: p.ignore || [],
     disabledDetectors: p.disabledDetectors || [],
     governedDestinations: p.governedDestinations,
+    allowedDestinations: p.allowedDestinations || [],
     blockedDestinations: p.blockedDestinations || [],
     blockedFileUploadDestinations: p.blockedFileUploadDestinations || [],
     scanner: p.scanner || {},
