@@ -27,10 +27,31 @@ if (-not (Test-Path -LiteralPath $configPath)) {
 }
 
 $configText = Get-Content -LiteralPath $configPath -Raw
-if ($configText -notmatch "(?m)^ENDPOINT_AGENT_HANDOFF_DIR=.+$") {
+function Get-EndpointConfigValue {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Text,
+
+    [Parameter(Mandatory = $true)]
+    [string[]]$Names
+  )
+
+  foreach ($name in $Names) {
+    $pattern = "(?m)^\s*$([regex]::Escape($name))=(.+?)\s*$"
+    $match = [regex]::Match($Text, $pattern)
+    if ($match.Success -and $match.Groups[1].Value.Trim()) {
+      return $match.Groups[1].Value.Trim()
+    }
+  }
+  return ""
+}
+
+$handoffDirValue = Get-EndpointConfigValue -Text $configText -Names @("ENDPOINT_AGENT_HANDOFF_DIR", "PROMPTWALL_ENDPOINT_AGENT_HANDOFF_DIR")
+$handoffSecretValue = Get-EndpointConfigValue -Text $configText -Names @("ENDPOINT_AGENT_HANDOFF_SECRET", "PROMPTWALL_ENDPOINT_AGENT_HANDOFF_SECRET")
+if (-not $handoffDirValue) {
   throw "Endpoint native handoff must be enabled before installing the desktop collector."
 }
-if ($configText -notmatch "(?m)^ENDPOINT_AGENT_HANDOFF_SECRET=.{32,}$") {
+if ($handoffSecretValue.Trim().Length -lt 32) {
   throw "Endpoint native handoff secret must be at least 32 characters."
 }
 
@@ -45,6 +66,7 @@ if ($Force) {
 New-Item -Path $commandKey -Force | Out-Null
 New-Item -Path (Join-Path $commandKey "command") -Force | Out-Null
 (Get-Item -LiteralPath $commandKey).SetValue("", $MenuName)
+(Get-Item -LiteralPath $commandKey).SetValue("MultiSelectModel", "Player")
 Set-ItemProperty -LiteralPath $commandKey -Name "Icon" -Value "powershell.exe"
 
 $taskArgs = @(

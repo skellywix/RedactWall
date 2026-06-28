@@ -45,7 +45,7 @@ function minimalFiles(agentBody) {
     },
     {
       path: 'scripts/install-desktop-collector.ps1',
-      body: Buffer.from('HKEY_CURRENT_USER\\Software\\Classes\\*\\shell\n"%1"\n'),
+      body: Buffer.from('HKEY_CURRENT_USER\\Software\\Classes\\*\\shell\n"%1"\nMultiSelectModel\nPROMPTWALL_ENDPOINT_AGENT_HANDOFF_DIR\nPROMPTWALL_ENDPOINT_AGENT_HANDOFF_SECRET\n'),
     },
     {
       path: 'scripts/install-endpoint-agent.ps1',
@@ -53,7 +53,7 @@ function minimalFiles(agentBody) {
     },
     {
       path: 'scripts/run-desktop-collector.ps1',
-      body: Buffer.from('$env:SENTINEL_ENV_PATH = $config\nprotected-upload.js\n'),
+      body: Buffer.from('[string[]]$FilePath\n$env:SENTINEL_ENV_PATH = $config\nprotected-upload.js\n'),
     },
     {
       path: 'scripts/run-endpoint-agent.ps1',
@@ -181,8 +181,11 @@ test('packaged endpoint agent runs a package-to-install pilot smoke', async (t) 
   assert.doesNotMatch(installScript, /"-IngestKey"/);
   assert.ok(desktopInstallScript.includes(String.raw`HKEY_CURRENT_USER\Software\Classes\*\shell`));
   assert.ok(desktopInstallScript.includes('%1'));
+  assert.match(desktopInstallScript, /MultiSelectModel/);
+  assert.match(desktopInstallScript, /PROMPTWALL_ENDPOINT_AGENT_HANDOFF_SECRET/);
   assert.doesNotMatch(desktopInstallScript, /"-HandoffSecret"/);
   assert.match(desktopRunnerScript, /protected-upload\.js/);
+  assert.match(desktopRunnerScript, /\[string\[\]\]\$FilePath/);
   assert.match(desktopRunnerScript, /\$env:SENTINEL_ENV_PATH = \$config/);
   assert.match(runnerScript, /\$env:SENTINEL_ENV_PATH = \$config/);
   assert.match(uninstallScript, /Unregister-ScheduledTask/);

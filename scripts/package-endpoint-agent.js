@@ -114,8 +114,11 @@ function validateRuntimeFiles(files) {
   }
 
   const collectorInstall = files.find((file) => file.path === 'scripts/install-desktop-collector.ps1').body.toString('utf8');
-  if (!collectorInstall.includes(String.raw`HKEY_CURRENT_USER\Software\Classes\*\shell`) || !collectorInstall.includes('%1')) {
+  if (!collectorInstall.includes(String.raw`HKEY_CURRENT_USER\Software\Classes\*\shell`) || !collectorInstall.includes('%1') || !/MultiSelectModel/.test(collectorInstall)) {
     throw new Error('Endpoint desktop collector installer must register a per-user file shell action');
+  }
+  if (!/PROMPTWALL_ENDPOINT_AGENT_HANDOFF_DIR/.test(collectorInstall) || !/PROMPTWALL_ENDPOINT_AGENT_HANDOFF_SECRET/.test(collectorInstall)) {
+    throw new Error('Endpoint desktop collector installer must accept PromptWall handoff env aliases');
   }
   if (/"-HandoffSecret"|INGEST_API_KEY=\$IngestKey/.test(collectorInstall)) {
     throw new Error('Endpoint desktop collector installer must not put secrets in shell commands');
@@ -127,7 +130,7 @@ function validateRuntimeFiles(files) {
   }
 
   const collectorRunner = files.find((file) => file.path === 'scripts/run-desktop-collector.ps1').body.toString('utf8');
-  if (!/\$env:SENTINEL_ENV_PATH = \$config/.test(collectorRunner) || !/protected-upload\.js/.test(collectorRunner)) {
+  if (!/\$env:SENTINEL_ENV_PATH = \$config/.test(collectorRunner) || !/protected-upload\.js/.test(collectorRunner) || !/\[string\[\]\]\$FilePath/.test(collectorRunner)) {
     throw new Error('Endpoint desktop collector runner must load config and invoke the protected-upload collector');
   }
 }

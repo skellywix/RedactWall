@@ -108,6 +108,11 @@ test('browser blocks configured destinations before local prompt or file inspect
   assert.match(background, /allowedDestinations:\s*\[\]/);
 });
 
+test('browser fallback hard-stops match regulated endpoint defaults before policy sync', () => {
+  assert.match(background, /MEDICAL_RECORD_NUMBER/);
+  assert.match(background, /HEALTH_INSURANCE_ID/);
+});
+
 test('destination allowlist overrides wildcard destination blocks', () => {
   assert.match(content, /A\.isGoverned\(SITE, allowed\)\) return false/);
   assert.match(background, /\.\.\.\(\(c\.policy && c\.policy\.allowedDestinations\) \|\| \[\]\)/);

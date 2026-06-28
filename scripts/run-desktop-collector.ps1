@@ -6,7 +6,7 @@ param(
   [string]$ConfigPath,
 
   [Parameter(Mandatory = $true)]
-  [string]$FilePath,
+  [string[]]$FilePath,
 
   [string]$Destination = "Desktop AI",
   [string]$User = "",
@@ -29,9 +29,11 @@ $node = Get-Command node -ErrorAction Stop
 $env:SENTINEL_ENV_PATH = $config
 Set-Location -LiteralPath $repo
 
-$collectorArgs = @(
-  $collector,
-  "--file", $FilePath,
+$collectorArgs = @($collector)
+foreach ($file in $FilePath) {
+  $collectorArgs += @("--file", $file)
+}
+$collectorArgs += @(
   "--destination", $Destination,
   "--env", $config,
   "--wait",

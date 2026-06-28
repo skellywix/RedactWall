@@ -43,12 +43,19 @@ test('runner loads endpoint config through SENTINEL_ENV_PATH and starts the agen
 test('desktop collector shell action is per-user and secret-free', () => {
   assert.match(desktopInstall, /HKEY_CURRENT_USER\\Software\\Classes\\\*\\shell/);
   assert.match(desktopInstall, /endpoint-agent\.env/);
-  assert.match(desktopInstall, /ENDPOINT_AGENT_HANDOFF_SECRET=\.\{32,\}/);
+  assert.match(desktopInstall, /ENDPOINT_AGENT_HANDOFF_DIR/);
+  assert.match(desktopInstall, /PROMPTWALL_ENDPOINT_AGENT_HANDOFF_DIR/);
+  assert.match(desktopInstall, /ENDPOINT_AGENT_HANDOFF_SECRET/);
+  assert.match(desktopInstall, /PROMPTWALL_ENDPOINT_AGENT_HANDOFF_SECRET/);
+  assert.match(desktopInstall, /MultiSelectModel/);
+  assert.match(desktopInstall, /Player/);
   assert.ok(desktopInstall.includes('%1'));
   assert.match(desktopInstall, /run-desktop-collector\.ps1/);
   assert.doesNotMatch(desktopInstall, /"-HandoffSecret"/);
   assert.doesNotMatch(desktopInstall, /INGEST_API_KEY=\$IngestKey/);
   assert.match(desktopRun, /\$env:SENTINEL_ENV_PATH = \$config/);
+  assert.match(desktopRun, /\[string\[\]\]\$FilePath/);
+  assert.match(desktopRun, /foreach \(\$file in \$FilePath\)/);
   assert.match(desktopRun, /protected-upload\.js/);
   assert.match(desktopRun, /--wait/);
   assert.match(desktopRun, /--json/);

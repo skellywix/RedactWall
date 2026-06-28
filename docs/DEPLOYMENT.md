@@ -218,9 +218,9 @@ install kernel drivers or universal app hooks.
 ### Protected Upload Collector
 
 The packaged desktop collector installs a per-user Windows Explorer shell action
-for a production pilot. A user right-clicks a selected file and chooses
+for a production pilot. A user right-clicks one or more selected files and chooses
 `PromptWall Protected Upload`; the collector writes a signed metadata-only
-handoff event, waits for the endpoint agent to consume it, and logs only
+handoff event for each selected file, waits for the endpoint agent to consume it, and logs only
 sanitized collector status. The endpoint agent then scans the referenced file
 locally and reports sanitized evidence through the normal control-plane path.
 
@@ -247,9 +247,10 @@ The shell action command does not include the ingest key or handoff secret. It
 loads `%LOCALAPPDATA%\PromptWall\endpoint-agent.env` through
 `SENTINEL_ENV_PATH`, invokes
 `sensors\endpoint-agent\collectors\protected-upload.js`, and passes only the
-selected local file path to the collector process. The collector verifies the
-path is a local file, writes one signed event through the packaged writer, and
-never reads file bytes.
+selected local file paths to the collector process. The Explorer verb is marked
+with `MultiSelectModel=Player` so it remains available for multi-file
+selections. The collector verifies each path is a local file, writes signed
+events through the packaged writer, and never reads file bytes.
 
 For automation or app-specific integrations, call the collector directly:
 
@@ -276,9 +277,9 @@ node .\sensors\endpoint-agent\write-handoff.js `
 ```
 
 The writer loads `ENDPOINT_AGENT_HANDOFF_SECRET` and
-`ENDPOINT_AGENT_HANDOFF_DIR` from the endpoint config, verifies the referenced
-path is a local file, writes the event atomically, and never reads the file
-body.
+`ENDPOINT_AGENT_HANDOFF_DIR`, or their `PROMPTWALL_*` aliases, from the endpoint
+config, verifies the referenced path is a local file, writes the event
+atomically, and never reads the file body.
 
 Check status:
 

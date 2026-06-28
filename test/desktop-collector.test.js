@@ -91,6 +91,34 @@ test('protected upload writes signed handoff events without file content or file
   assert.strictEqual(validated.user, 'analyst@example.test');
 });
 
+test('protected upload handles repeated files as one bounded batch', async (t) => {
+  withCleanHandoffEnv(t);
+  const dir = tempDir(t);
+  const handoffDir = path.join(dir, 'handoff');
+  const envPath = path.join(dir, 'endpoint-agent.env');
+  const first = path.join(dir, 'first.txt');
+  const second = path.join(dir, 'second.txt');
+  fs.writeFileSync(first, 'First selected file with member data.');
+  fs.writeFileSync(second, 'Second selected file with member data.');
+  fs.writeFileSync(envPath, [
+    `ENDPOINT_AGENT_HANDOFF_SECRET=${SECRET}`,
+    `ENDPOINT_AGENT_HANDOFF_DIR=${handoffDir}`,
+  ].join('\n') + '\n');
+
+  const result = await collector.collectProtectedUploads({
+    files: [first, second],
+    envPath,
+    destination: 'Desktop AI',
+    now: new Date('2026-06-27T20:05:00.000Z'),
+  });
+
+  assert.strictEqual(result.status, 'written');
+  assert.strictEqual(result.count, 2);
+  assert.strictEqual(result.failed, 0);
+  assert.strictEqual(result.results.length, 2);
+  assert.strictEqual(fs.readdirSync(handoffDir).filter((file) => file.endsWith('.json')).length, 2);
+});
+
 test('wait mode reports consumed when the endpoint agent removes the handoff file', async (t) => {
   const dir = tempDir(t);
   const handoffPath = path.join(dir, 'evt.json');
