@@ -12,6 +12,8 @@ let searchTerm = '';
 let currentRole = 'auditor';
 let currentUser = '';
 let queueFilter = 'all';
+let queueCategoryFilter = 'all';
+let queueDestinationFilter = 'all';
 
 const icons = {
   check: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m5 12 4 4L19 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
@@ -158,6 +160,70 @@ function queueFilterMatches(q) {
   if (queueFilter === 'unassigned') return !q.assignedRole && !q.assignedGroup;
   if (queueFilter === 'escalated') return isEscalated(q);
   return true;
+}
+
+function queueCategoryLabels(q = {}) {
+  const labels = [
+    ...(q.categories || []).map((category) => (typeof category === 'string' ? category : category && category.category)),
+    ...(q.findings || []).map((finding) => finding && finding.type),
+    ...Object.keys(q.entityCounts || {}),
+  ];
+  return [...new Set(labels.map((label) => String(label || '').trim()).filter(Boolean))];
+}
+
+function queueDestinationLabel(q = {}) {
+  return String(q.destination || 'unknown').trim() || 'unknown';
+}
+
+function normalizeFilterValue(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function categoryFilterMatches(q) {
+  if (queueCategoryFilter === 'all') return true;
+  return queueCategoryLabels(q).some((label) => normalizeFilterValue(label) === queueCategoryFilter);
+}
+
+function destinationFilterMatches(q) {
+  if (queueDestinationFilter === 'all') return true;
+  return normalizeFilterValue(queueDestinationLabel(q)) === queueDestinationFilter;
+}
+
+function queueMetadataMatches(q) {
+  return queueFilterMatches(q) && categoryFilterMatches(q) && destinationFilterMatches(q);
+}
+
+function uniqueSorted(values) {
+  return [...new Set((values || []).map((value) => String(value || '').trim()).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+}
+
+function syncSelectOptions(select, selected, allLabel, values) {
+  if (!select) return 'all';
+  const options = uniqueSorted(values);
+  const normalizedOptions = new Set(options.map(normalizeFilterValue));
+  const nextSelected = selected === 'all' || normalizedOptions.has(selected) ? selected : 'all';
+  select.innerHTML = [
+    `<option value="all">${escapeHtml(allLabel)}</option>`,
+    ...options.map((value) => `<option value="${escapeHtml(normalizeFilterValue(value))}">${escapeHtml(value)}</option>`),
+  ].join('');
+  select.value = nextSelected;
+  return nextSelected;
+}
+
+function syncQueueFilterOptions() {
+  queueCategoryFilter = syncSelectOptions(
+    $('#queueCategoryFilter'),
+    queueCategoryFilter,
+    'All categories',
+    currentQueue.flatMap(queueCategoryLabels),
+  );
+  queueDestinationFilter = syncSelectOptions(
+    $('#queueDestinationFilter'),
+    queueDestinationFilter,
+    'All destinations',
+    currentQueue.map(queueDestinationLabel),
+  );
 }
 
 function workflowChips(q) {
@@ -387,7 +453,8 @@ function renderQueueView() {
   $$('.queue-tools [data-queue-filter]').forEach((button) => {
     button.classList.toggle('active', button.dataset.queueFilter === queueFilter);
   });
-  const rows = currentQueue.filter(queueFilterMatches).filter(matchesSearch);
+  syncQueueFilterOptions();
+  const rows = currentQueue.filter(queueMetadataMatches).filter(matchesSearch);
   if (!currentQueue.length) {
     el.innerHTML = '<div class="empty"><div class="big">Queue clear</div>No prompts are awaiting approval.</div>';
     renderIncident(null);
@@ -566,6 +633,18 @@ document.addEventListener('click', async (e) => {
   const row = e.target.closest('.q[data-id]');
   if (row && !e.target.closest('textarea,input,button,select,a')) {
     selected = row.dataset.id;
+    renderQueueView();
+  }
+});
+
+document.addEventListener('change', (e) => {
+  if (e.target.matches('#queueCategoryFilter')) {
+    queueCategoryFilter = e.target.value || 'all';
+    renderQueueView();
+    return;
+  }
+  if (e.target.matches('#queueDestinationFilter')) {
+    queueDestinationFilter = e.target.value || 'all';
     renderQueueView();
   }
 });

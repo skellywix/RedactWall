@@ -131,8 +131,11 @@ Held decisions receive owner and SLA routing metadata for security, compliance,
 privacy, legal, or customer-defined review groups. Security Admins can configure
 metadata-only `approvalRoutingRules` from the Policy tab or admin policy API.
 The dashboard, SIEM payloads, and examiner export expose that sanitized workflow
-context. PromptWall supports best-effort generic JSON, Slack, and Microsoft
-Teams approval notifications, persists delivery status on the query, audits
+context. The dashboard approval queue can now filter held items by workflow
+state, detector/category, and destination so reviewers can work member-data,
+source-code, legal, or app-specific queues without opening every incident.
+PromptWall supports best-effort generic JSON, Slack, and Microsoft Teams
+approval notifications, persists delivery status on the query, audits
 notification outcomes, and escalates overdue routed items into tamper-evident
 evidence. Direct SMTP email, identity group mapping, and more granular
 escalation policies are still open.
@@ -148,7 +151,6 @@ Implementation connection:
   conditions after enterprise identity lands.
 - Build direct SMTP email and ticketing adapters on top of the existing
   sanitized `server/notifiers.js` discipline.
-- Add dashboard queue filters: By category and By destination.
 
 Acceptance evidence:
 - Routing and notifier tests prove sanitized payloads never include prompt

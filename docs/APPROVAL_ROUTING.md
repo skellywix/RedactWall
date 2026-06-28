@@ -24,9 +24,9 @@ Routeable blocked records carry:
   `teams`, never URLs or tokens.
 
 The dashboard exposes the owner and SLA in the approval queue, all-activity
-table, selected incident detail, queue filters, notification state, and
-escalation state. SIEM alerts and examiner exports include only the sanitized
-workflow summary.
+table, selected incident detail, queue filters by workflow state, category, and
+destination, notification state, and escalation state. SIEM alerts and examiner
+exports include only the sanitized workflow summary.
 
 ## Customer Routing Rules
 

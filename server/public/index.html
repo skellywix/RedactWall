@@ -471,6 +471,9 @@
   .ghost.mini.active{border-color:rgba(106,167,255,.55);background:rgba(106,167,255,.12);color:#fff}
   .ghost.danger{border-color:rgba(255,90,102,.34);color:#ffb9be}
   .queue-tools{display:flex;align-items:center;justify-content:flex-end;gap:6px;flex-wrap:wrap}
+  .queue-filter-row{display:grid;grid-template-columns:repeat(2,minmax(180px,1fr));gap:10px;padding:0 14px 12px}
+  .queue-filter-row label{display:grid;gap:6px;color:var(--mut);font-size:11px;text-transform:uppercase;letter-spacing:.06em}
+  .queue-filter-row select{min-height:36px;font-size:12.5px}
   .incident-detail{display:grid;gap:12px;padding:14px}
   .detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
   .datum{border:1px solid var(--line);border-radius:8px;background:#08111c;padding:10px}
@@ -576,7 +579,7 @@
     .shadow-row{grid-template-columns:1fr}
     .destination-review{justify-items:start}
     .destination-actions{justify-content:flex-start}
-    .queue-mainline,.detail-grid,.policy-options,.field-grid,.policy-list-grid{grid-template-columns:1fr}
+    .queue-mainline,.detail-grid,.policy-options,.field-grid,.policy-list-grid,.queue-filter-row{grid-template-columns:1fr}
     .barrow{grid-template-columns:96px minmax(0,1fr) 28px}
     th,td{padding:10px 9px}
     table{min-width:760px}
@@ -691,6 +694,14 @@
                   Refresh
                 </button>
               </div>
+            </div>
+            <div class="queue-filter-row" aria-label="Approval queue metadata filters">
+              <label for="queueCategoryFilter">Category
+                <select id="queueCategoryFilter"></select>
+              </label>
+              <label for="queueDestinationFilter">Destination
+                <select id="queueDestinationFilter"></select>
+              </label>
             </div>
             <div id="queueList" class="queue-list"></div>
           </div>

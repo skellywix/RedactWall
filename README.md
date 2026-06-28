@@ -92,6 +92,9 @@ a two-hour SLA, while source-code categories can route to engineering or
 security. If no rule matches, PromptWall falls back to the built-in
 security/compliance/privacy/legal routing table. Critical-risk records still
 promote to Security Admin ownership with a one-hour-or-less SLA.
+The Approval Queue can filter held items by workflow state, detector/category,
+and destination so reviewers can work the right slice without opening every
+incident.
 
 ## Hybrid detection (local, fast, semantic, pluggable)
 
@@ -324,7 +327,7 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 - **Reversible redaction / Redact-&-Send**, sealed token vault, local response re-hydration.
 - **MDM identity**, reliable per-site send, **Man-in-the-Prompt** guard, **shadow-AI** discovery and default-deny unapproved AI blocking.
 - **Coverage posture** showing governed destinations, required sensors, desired sensor versions, browser/endpoint/MCP install-health checks, fleet state by user/org/sensor, shadow-AI sightings, and stale or missing sensor coverage.
-- **Approval routing** that assigns held decisions to security, compliance, privacy, or legal with SLA metadata in the queue, SIEM alert payloads, examiner evidence, sanitized workflow notifications, and overdue SLA escalation evidence.
+- **Approval routing** that assigns held decisions to security, compliance, privacy, or legal with SLA metadata, category/destination queue filters, SIEM alert payloads, examiner evidence, sanitized workflow notifications, and overdue SLA escalation evidence.
 - **Sanitized examiner export** with audit integrity, policy diffs, coverage posture, workflow ownership, and lineage by user, destination, sensor, channel, category, and decision.
 - **Login lockout**, stable session secret, regulation **templates**, **/healthz · /readyz · /api/metrics**, Docker + CI.
 
@@ -332,7 +335,7 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 
 - SSO, polished MFA enrollment UX, SCIM, and IdP group mapping onto the current routing groups; deeper multi-tenant isolation per institution.
 - Signed Chrome Web Store listing and force-install rollout; local extension zip, integrity manifest, release-readiness report, and managed-policy checklist are packaged.
-- Email/Slack/Teams notification adapters and persisted escalation state on top of the sanitized routing metadata.
+- Direct SMTP and ticketing adapters on top of the existing sanitized webhook, Slack, Teams, and escalation workflow.
 - Ship the signed native endpoint collector that feeds the tested handoff contract from clipboard and AI-app upload flows.
 - Upgrade the on-device classifier to a quantized ONNX/WASM NER when recall demands it.
 
