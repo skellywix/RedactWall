@@ -54,6 +54,11 @@ test('dashboard exposes retention settings and manual purge control', () => {
   assert.match(dashboard, /rawRetentionDays: Number\(\$\(\'#pol_retention\'\)\.value\)/);
   assert.match(dashboard, /id="pol_desktop_destination"/);
   assert.match(dashboard, /desktopCollectorDestination: \(\$\(\'#pol_desktop_destination\'\)\.value \|\| ''\)\.trim\(\)/);
+  assert.match(dashboard, /id="pol_required_sensors"/);
+  assert.match(dashboard, /requiredSensors: parsePolicyList\(\$\(\'#pol_required_sensors\'\)\.value\)/);
+  assert.match(dashboard, /id="pol_desired_sensor_versions"/);
+  assert.match(dashboard, /desiredSensorVersions: parsePolicyMap\(\$\(\'#pol_desired_sensor_versions\'\)\.value\)/);
+  assert.match(dashboard, /const separator = trimmed\.includes\('='\) \? trimmed\.indexOf\('='\) : trimmed\.search\(\/\\s\/\)/);
   assert.match(dashboard, /id="runRetentionPurge"/);
   assert.match(dashboard, /api\('\/api\/retention\/purge', \{ method: 'POST' \}\)/);
 });

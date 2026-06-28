@@ -16,11 +16,16 @@ test('evidence pack omits raw prompt, redacted prompt body, token vault, and aud
     coverage: {
       score: 82,
       rawPrompt: 'coverage should not export Member John Carter',
-      totals: { events: 1, blocked: 1 },
+      totals: { events: 1, blocked: 1, requiredSensors: 3, activeRequiredSensors: 1, activeSensorVersionGaps: 1 },
       sensors: [{
         source: 'browser_extension',
+        label: 'Browser extension',
+        required: true,
         events: 1,
-        versionHealth: 'current',
+        latestVersion: '0.2.9',
+        desiredVersion: '0.3.0',
+        versions: [{ version: '0.2.9', events: 1, lastSeen: '2026-06-26T12:00:00.000Z' }],
+        versionHealth: 'outdated',
         secret: 'coverage-secret-should-not-export',
       }],
     },
@@ -71,6 +76,9 @@ test('evidence pack omits raw prompt, redacted prompt body, token vault, and aud
   assert.ok(pack.queries[0].promptHash);
   assert.ok(pack.audit[0].detailHash);
   assert.strictEqual(pack.coverage.score, 82);
+  assert.strictEqual(pack.coverage.totals.requiredSensors, 3);
+  assert.strictEqual(pack.coverage.sensors[0].required, true);
+  assert.strictEqual(pack.coverage.sensors[0].desiredVersion, '0.3.0');
   assert.strictEqual(pack.lineage.byUser[0].key, 'jdoe');
   assert.strictEqual(pack.lineage.byDestination[0].key, 'chatgpt.com');
   assert.strictEqual(pack.lineage.bySensor[0].key, 'browser_extension');

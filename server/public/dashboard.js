@@ -40,6 +40,25 @@ function parsePolicyList(value) {
     .filter(Boolean))];
 }
 
+function policyMapText(items) {
+  return Object.entries(items || {}).map(([key, value]) => `${key}=${value}`).join('\n');
+}
+
+function parsePolicyMap(value) {
+  const out = {};
+  for (const line of String(value || '').split(/[\n,]+/)) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const separator = trimmed.includes('=') ? trimmed.indexOf('=') : trimmed.search(/\s/);
+    if (separator <= 0) continue;
+    const key = trimmed.slice(0, separator).trim();
+    const version = trimmed.slice(separator + 1).trim();
+    if (!key || !version) continue;
+    out[key] = version;
+  }
+  return out;
+}
+
 function statusTone(status) {
   const s = String(status || '').toLowerCase();
   if (['approved', 'allowed', 'justified', 'warned_sent', 'redacted'].includes(s)) return 'good';
@@ -474,7 +493,10 @@ function renderCoverage(c) {
     else parts.push('No events observed');
     if (s.latestVersion) parts.push('v' + s.latestVersion);
     else if (s.events) parts.push('version unknown');
+    if (s.desiredVersion) parts.push('desired v' + s.desiredVersion);
     if (s.versionHealth === 'mixed') parts.push((s.versions || []).length + ' versions');
+    if (s.versionHealth === 'outdated') parts.push('outdated');
+    if (s.required) parts.push('required');
     if ((s.platforms || []).length) parts.push((s.platforms || []).join(', '));
     return parts.join(' | ');
   };
@@ -606,6 +628,19 @@ async function loadPolicy() {
       <label for="pol_desktop_destination">Default desktop upload destination</label>
       <input id="pol_desktop_destination" type="text" maxlength="80" value="${escapeHtml(p.desktopCollectorDestination || 'Desktop AI')}" ${readonly ? 'disabled' : ''}/>
     </div>
+    <div class="policy-label">Fleet posture</div>
+    <div class="policy-list-grid">
+      <label class="policy-list-field">Required sensors
+        ${readonly
+    ? `<div class="chips">${(p.requiredSensors || []).map((x) => `<span class="chip">${escapeHtml(x)}</span>`).join('') || '<span class="chip">none</span>'}</div>`
+    : `<textarea id="pol_required_sensors" class="policy-textarea" spellcheck="false" placeholder="browser_extension&#10;endpoint_agent&#10;mcp_guard">${escapeHtml(policyListText(p.requiredSensors))}</textarea>`}
+      </label>
+      <label class="policy-list-field">Desired sensor versions
+        ${readonly
+    ? `<div class="chips">${Object.entries(p.desiredSensorVersions || {}).map(([k, v]) => `<span class="chip"><b>${escapeHtml(k)}</b> ${escapeHtml(v)}</span>`).join('') || '<span class="chip">none</span>'}</div>`
+    : `<textarea id="pol_desired_sensor_versions" class="policy-textarea" spellcheck="false" placeholder="browser_extension=0.3.0&#10;endpoint_agent=0.3.0">${escapeHtml(policyMapText(p.desiredSensorVersions))}</textarea>`}
+      </label>
+    </div>
     <div class="template-bar"><div class="template-title">Hard-stop entities</div>
       <div class="chips">${(p.alwaysBlock || []).map((x) => `<span class="chip"><b>${escapeHtml(x)}</b></span>`).join('')}</div></div>
     <div class="policy-list-grid">
@@ -649,6 +684,8 @@ async function loadPolicy() {
       blockRiskScore: Number($('#pol_risk').value),
       rawRetentionDays: Number($('#pol_retention').value),
       desktopCollectorDestination: ($('#pol_desktop_destination').value || '').trim(),
+      requiredSensors: parsePolicyList($('#pol_required_sensors').value),
+      desiredSensorVersions: parsePolicyMap($('#pol_desired_sensor_versions').value),
       governedDestinations: parsePolicyList($('#pol_governed_destinations').value),
       allowedDestinations: parsePolicyList($('#pol_allowed_destinations').value),
       blockedDestinations: parsePolicyList($('#pol_blocked_destinations').value),

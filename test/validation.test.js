@@ -263,7 +263,8 @@ test('mixed sensor versions emit sanitized SIEM version-gap alert', async () => 
     const gap = sent.find((alert) => alert.action === 'SENSOR_VERSION_GAP');
     const wire = JSON.stringify(gap);
     assert.strictEqual(gap.source, 'browser_extension');
-    assert.strictEqual(gap.sensorVersionGap.versionHealth, 'mixed');
+    assert.strictEqual(gap.sensorVersionGap.versionHealth, 'outdated');
+    assert.strictEqual(gap.sensorVersionGap.desiredVersion, '0.3.0');
     assert.ok(gap.sensorVersionGap.versions.some((v) => v.version === '0.3.0'));
     assert.ok(gap.sensorVersionGap.versions.some((v) => v.version === '0.2.9'));
     assert.ok(!wire.includes('ps_ingest_should_not_leave'));
@@ -565,6 +566,10 @@ test('sensor policy endpoint publishes detector and scanner controls', async () 
   assert.ok(Array.isArray(body.blockedDestinations));
   assert.ok(Array.isArray(body.blockedFileUploadDestinations));
   assert.strictEqual(body.desktopCollectorDestination, 'Desktop AI');
+  assert.ok(Array.isArray(body.requiredSensors));
+  assert.ok(body.requiredSensors.includes('browser_extension'));
+  assert.ok(body.desiredSensorVersions && typeof body.desiredSensorVersions === 'object');
+  assert.strictEqual(body.desiredSensorVersions.browser_extension, '0.3.0');
   assert.ok(body.scanner && typeof body.scanner === 'object');
   assert.ok(Array.isArray(body.scanner.ignoreDirectories));
   assert.ok(Array.isArray(body.scanner.ignoreFilenames));
@@ -715,6 +720,62 @@ test('admin policy accepts desktop collector destination labels', async () => wi
   } finally {
     fs.writeFileSync(policyPath, originalPolicy);
   }
+}));
+
+test('admin policy accepts fleet posture settings', async () => withServer(async (port) => {
+  const originalPolicy = fs.readFileSync(policyPath, 'utf8');
+  const { cookie, csrfToken } = await login(port);
+  try {
+    const res = await jsonFetch(port, '/api/policy', {
+      method: 'PUT',
+      headers: {
+        cookie,
+        'x-csrf-token': csrfToken,
+      },
+      body: {
+        requiredSensors: ['browser_extension', 'endpoint_agent', 'mcp_guard', 'proxy'],
+        desiredSensorVersions: {
+          browser_extension: '0.3.0',
+          endpoint_agent: '0.3.0',
+          mcp_guard: '0.3.0',
+          proxy: '1.0.0',
+        },
+      },
+    });
+
+    assert.strictEqual(res.status, 200);
+    const body = await res.json();
+    assert.deepStrictEqual(body.requiredSensors, ['browser_extension', 'endpoint_agent', 'mcp_guard', 'proxy']);
+    assert.strictEqual(body.desiredSensorVersions.proxy, '1.0.0');
+  } finally {
+    fs.writeFileSync(policyPath, originalPolicy);
+  }
+}));
+
+test('admin policy rejects malformed fleet posture settings without changing policy file', async () => withServer(async (port) => {
+  const originalPolicy = fs.readFileSync(policyPath, 'utf8');
+  const { cookie, csrfToken } = await login(port);
+  const res = await jsonFetch(port, '/api/policy', {
+    method: 'PUT',
+    headers: {
+      cookie,
+      'x-csrf-token': csrfToken,
+    },
+    body: {
+      requiredSensors: ['Browser Extension'],
+      desiredSensorVersions: {
+        browser_extension: '0.3.0<script>',
+      },
+    },
+  });
+
+  assert.strictEqual(res.status, 400);
+  const body = await res.json();
+  assert.deepStrictEqual(body, {
+    error: 'invalid request body',
+    fields: ['desiredSensorVersions.browser_extension', 'requiredSensors.0'],
+  });
+  assert.strictEqual(fs.readFileSync(policyPath, 'utf8'), originalPolicy);
 }));
 
 test('admin destination review validates, persists, and audits decisions', async () => withServer(async (port) => {

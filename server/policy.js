@@ -6,8 +6,15 @@
 require('./env').loadEnv();
 const fs = require('fs');
 const path = require('path');
+const pkg = require('../package.json');
 
 const CONFIG_PATH = process.env.SENTINEL_POLICY_PATH || path.join(__dirname, '..', 'config', 'policy.json');
+const SENSOR_ID_RE = /^[a-z][a-z0-9_:-]{0,79}$/;
+const SENSOR_VERSION_RE = /^[A-Za-z0-9._+:-]{1,80}$/;
+const DEFAULT_REQUIRED_SENSORS = ['browser_extension', 'endpoint_agent', 'mcp_guard'];
+const DEFAULT_DESIRED_SENSOR_VERSIONS = Object.fromEntries(
+  DEFAULT_REQUIRED_SENSORS.map((source) => [source, pkg.version]),
+);
 
 const DEFAULT_POLICY = {
   enforcementMode: 'block',
@@ -32,6 +39,8 @@ const DEFAULT_POLICY = {
   blockedDestinations: [],
   blockedFileUploadDestinations: [],
   desktopCollectorDestination: 'Desktop AI',
+  requiredSensors: DEFAULT_REQUIRED_SENSORS,
+  desiredSensorVersions: DEFAULT_DESIRED_SENSOR_VERSIONS,
   scanner: {
     ignoreDirectories: ['node_modules', '.git', 'Library', 'Applications', 'AppData'],
     ignoreFilenames: ['thumbs.db', '.ds_store', 'package.json', 'package-lock.json'],
@@ -39,6 +48,36 @@ const DEFAULT_POLICY = {
     maxFileBytes: Math.round(6.3 * 1024 * 1024),
   },
 };
+
+function normalizeSensorId(value) {
+  const id = String(value || '').trim().toLowerCase();
+  return SENSOR_ID_RE.test(id) ? id : null;
+}
+
+function normalizeRequiredSensors(value, fallback = DEFAULT_POLICY.requiredSensors) {
+  const source = Array.isArray(value) ? value : fallback;
+  const out = [];
+  const seen = new Set();
+  for (const item of source || []) {
+    const id = normalizeSensorId(item);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out.length ? out : DEFAULT_REQUIRED_SENSORS.slice();
+}
+
+function normalizeDesiredSensorVersions(value, fallback = DEFAULT_POLICY.desiredSensorVersions) {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : fallback;
+  const out = {};
+  for (const [rawKey, rawValue] of Object.entries(source || {})) {
+    const key = normalizeSensorId(rawKey);
+    const version = String(rawValue || '').trim();
+    if (!key || !SENSOR_VERSION_RE.test(version)) continue;
+    out[key] = version;
+  }
+  return out;
+}
 
 function normalizePolicy(p = {}) {
   const scanner = {
@@ -57,6 +96,8 @@ function normalizePolicy(p = {}) {
   return {
     ...DEFAULT_POLICY,
     ...(p || {}),
+    requiredSensors: normalizeRequiredSensors((p || {}).requiredSensors),
+    desiredSensorVersions: normalizeDesiredSensorVersions((p || {}).desiredSensorVersions),
     scanner,
   };
 }
@@ -75,6 +116,8 @@ const AUDIT_FIELDS = [
   'blockedDestinations',
   'blockedFileUploadDestinations',
   'desktopCollectorDestination',
+  'requiredSensors',
+  'desiredSensorVersions',
   'scanner',
 ];
 

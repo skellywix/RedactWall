@@ -291,7 +291,7 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 | Destination controls | Working — governed destination coverage, full destination blocking, and file-upload-only blocking across browser, endpoint, gate, file, and response paths |
 | Output scanning | Working — `/api/v1/scan-response` flags PII/secrets in AI replies |
 | MCP guard / Endpoint agent | Working references - inline/MCP redaction; local endpoint folder watch plus signed native file-flow handoff prototype; redacted companion files for structured-only findings |
-| Auth & ops | Working: login lockout, password-confirmed raw reveal and release approval, release-token scoped polling, stable secret, `/healthz` · `/readyz` · `/api/metrics`, sensor version posture, sanitized examiner export with coverage and lineage, Docker, CI |
+| Auth & ops | Working: login lockout, password-confirmed raw reveal and release approval, release-token scoped polling, stable secret, `/healthz` · `/readyz` · `/api/metrics`, policy-driven sensor version posture, sanitized examiner export with coverage and lineage, Docker, CI |
 
 ## Shipped since the skeleton (see `ITERATIONS.md`)
 
@@ -300,7 +300,7 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 - **Backup/verify/restore** tooling for the SQLite evidence store with prompt-free manifests.
 - **Reversible redaction / Redact-&-Send**, sealed token vault, local response re-hydration.
 - **MDM identity**, reliable per-site send, **Man-in-the-Prompt** guard, **shadow-AI** discovery.
-- **Coverage posture** showing governed destinations, active sensors, shadow-AI sightings, and sensor versions.
+- **Coverage posture** showing governed destinations, required sensors, desired sensor versions, shadow-AI sightings, and stale or missing sensor coverage.
 - **Sanitized examiner export** with audit integrity, policy diffs, coverage posture, and lineage by user, destination, sensor, channel, category, and decision.
 - **Login lockout**, stable session secret, regulation **templates**, **/healthz · /readyz · /api/metrics**, Docker + CI.
 

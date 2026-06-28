@@ -105,6 +105,9 @@ For this alignment track, completion requires evidence for every area below:
 - Normalized scanner `maxFileBytes` to an integer in default policy, persisted
   config, policy load/save, and endpoint-agent scanner config so the admin
   policy API can round-trip its own full payload.
+- Added policy-driven `requiredSensors` and `desiredSensorVersions` fleet
+  posture so admins can see missing or outdated sensors in coverage, SIEM
+  version-gap alerts, and examiner evidence exports.
 - Expanded the sanitized examiner export with coverage posture, sensor-version
   posture, parsed policy diffs, and lineage summaries by user, destination,
   sensor, channel, category, and decision without prompt bodies.

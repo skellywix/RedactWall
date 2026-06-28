@@ -73,18 +73,22 @@ test('evidence exports parsed policy changes but not raw audit detail text', () 
     {
       enforcementMode: 'block',
       blockRiskScore: 25,
-      rawRetentionDays: 30,
-      blockedDestinations: [],
-      blockedFileUploadDestinations: [],
-    },
-    {
-      enforcementMode: 'justify',
-      blockRiskScore: 40,
-      rawRetentionDays: 14,
-      blockedDestinations: ['poe.com'],
-      blockedFileUploadDestinations: ['chatgpt.com'],
-    },
-  );
+    rawRetentionDays: 30,
+    blockedDestinations: [],
+    blockedFileUploadDestinations: [],
+    requiredSensors: ['browser_extension', 'endpoint_agent'],
+    desiredSensorVersions: { browser_extension: '0.2.9' },
+  },
+  {
+    enforcementMode: 'justify',
+    blockRiskScore: 40,
+    rawRetentionDays: 14,
+    blockedDestinations: ['poe.com'],
+    blockedFileUploadDestinations: ['chatgpt.com'],
+    requiredSensors: ['browser_extension', 'endpoint_agent', 'mcp_guard'],
+    desiredSensorVersions: { browser_extension: '0.3.0', endpoint_agent: '0.3.0' },
+  },
+);
   const entry = evidence.safeAuditEntry({
     id: 'a_policy',
     ts: '2026-06-26T12:00:00.000Z',
@@ -102,6 +106,8 @@ test('evidence exports parsed policy changes but not raw audit detail text', () 
     { field: 'rawRetentionDays', before: 30, after: 14 },
     { field: 'blockedDestinations', before: [], after: ['poe.com'] },
     { field: 'blockedFileUploadDestinations', before: [], after: ['chatgpt.com'] },
+    { field: 'requiredSensors', before: ['browser_extension', 'endpoint_agent'], after: ['browser_extension', 'endpoint_agent', 'mcp_guard'] },
+    { field: 'desiredSensorVersions', before: { browser_extension: '0.2.9' }, after: { browser_extension: '0.3.0', endpoint_agent: '0.3.0' } },
   ]);
   assert.ok(!JSON.stringify(entry).includes('"type":"policy_change"'));
 });

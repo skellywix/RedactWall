@@ -87,6 +87,9 @@ Build next:
 - Normalize scanner byte limits to integers across policy load/save, default
   config, and endpoint-agent scanner config so the admin policy API can
   round-trip its own payload.
+- Add policy-driven required-sensor and desired-version fleet posture so the
+  dashboard, SIEM version-gap alerts, and examiner export can show missing or
+  outdated sensors without prompt bodies.
 - Expand the sanitized examiner evidence export with coverage posture, sensor
   versions, parsed policy history, and prompt/file lineage summaries by user,
   destination, sensor, category, channel, and decision.
