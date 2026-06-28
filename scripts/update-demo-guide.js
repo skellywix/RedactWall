@@ -31,6 +31,7 @@ const DEMO_COMMANDS = [
   'package:endpoint-agent',
   'package:mcp-guard',
   'endpoint:check',
+  'mcp:check',
   'docs:demo-guide',
   'docs:demo-guide:check',
 ];
@@ -44,6 +45,7 @@ const SENSOR_AND_DOC_PATHS = [
   ['sensors/endpoint-agent/write-handoff.js', 'Signed native upload-intent handoff writer'],
   ['scripts/check-endpoint-install.js', 'Endpoint install validation and heartbeat evidence'],
   ['sensors/mcp-guard/guard.js', 'MCP tool-output redaction reference'],
+  ['scripts/check-mcp-guard-install.js', 'MCP guard install validation and heartbeat evidence'],
   ['config/policy.json', 'Demo policy defaults'],
   ['DEMO_INSTALL_GUIDE.md', 'Demo guide hub'],
   ['docs/SALES_DEMO_GUIDE.md', 'Sales and client-facing demo script'],

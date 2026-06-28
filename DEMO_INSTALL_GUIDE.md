@@ -91,6 +91,7 @@ This section is generated from the app by `npm run docs:demo-guide`. Do not hand
 | `npm run package:endpoint-agent` | `node scripts/package-endpoint-agent.js` |
 | `npm run package:mcp-guard` | `node scripts/package-mcp-guard.js` |
 | `npm run endpoint:check` | `node scripts/check-endpoint-install.js` |
+| `npm run mcp:check` | `node scripts/check-mcp-guard-install.js` |
 | `npm run docs:demo-guide` | `node scripts/update-demo-guide.js` |
 | `npm run docs:demo-guide:check` | `node scripts/update-demo-guide.js --check` |
 
@@ -107,6 +108,7 @@ This section is generated from the app by `npm run docs:demo-guide`. Do not hand
 | `sensors/endpoint-agent/write-handoff.js` | Signed native upload-intent handoff writer | Present |
 | `scripts/check-endpoint-install.js` | Endpoint install validation and heartbeat evidence | Present |
 | `sensors/mcp-guard/guard.js` | MCP tool-output redaction reference | Present |
+| `scripts/check-mcp-guard-install.js` | MCP guard install validation and heartbeat evidence | Present |
 | `config/policy.json` | Demo policy defaults | Present |
 | `DEMO_INSTALL_GUIDE.md` | Demo guide hub | Present |
 | `docs/SALES_DEMO_GUIDE.md` | Sales and client-facing demo script | Present |

@@ -119,11 +119,12 @@ and MCP guard events include bounded operational metadata only:
 ```
 
 Mixed versions show as an attention item so a pilot admin can spot partial
-rollouts after a managed extension or agent update. Endpoint install validation
-can also report bounded check results through `POST /api/v1/heartbeat`; failed
-checks show as sensor install-health attention in Coverage and in the sanitized
-examiner export. The coverage API does not include prompt bodies, raw retained
-prompts, token vaults, ingest keys, handoff secrets, or decision notes.
+rollouts after a managed extension or agent update. Endpoint and MCP guard
+install validation can also report bounded check results through
+`POST /api/v1/heartbeat`; failed checks show as sensor install-health attention
+in Coverage and in the sanitized examiner export. The coverage API does not
+include prompt bodies, raw retained prompts, token vaults, ingest keys, handoff
+secrets, or decision notes.
 
 ## Browser Extension Package
 
@@ -166,11 +167,29 @@ npm run package:mcp-guard
 ```
 
 The command writes a zip and adjacent SHA-256 manifest under `dist/mcp-guard/`.
-It includes the guard runtime, shared detection engine, env loader, and version
-metadata. It excludes the local direct-run demo and refuses synthetic prompt
-bodies or development ingest keys. Set `SENTINEL_URL` and `INGEST_API_KEY` in
-the host MCP runtime environment; do not bake them into the package. The guard
-does not contact the control plane without an explicit ingest key.
+It includes the guard runtime, shared detection engine, env loader, version
+metadata, and MCP guard install validation checker. It excludes the local
+direct-run demo and refuses synthetic prompt bodies or development ingest keys.
+Set `SENTINEL_URL` and `INGEST_API_KEY` in the host MCP runtime environment; do
+not bake them into the package. The guard does not contact the control plane
+without an explicit ingest key.
+
+Validate the unpacked MCP guard runtime and optionally emit sanitized health
+evidence:
+
+```powershell
+npm run mcp:check -- `
+  --env ".env" `
+  --emit-heartbeat `
+  --user "tech@example.test" `
+  --org-id "cu-acme"
+```
+
+The checker verifies the MCP env file or runtime environment, server URL,
+ingest-key presence, Node version, guard runtime, shared detection engine, env
+loader, and package manifest. It posts only check IDs, boolean status, and short
+details; it does not print or post ingest keys, prompt text, tool output, or
+document content.
 
 ## Endpoint Agent On Windows
 

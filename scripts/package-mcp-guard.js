@@ -14,6 +14,7 @@ const PACKAGE_FILES = [
   'server/env.js',
   'detection-engine/detect.js',
   'sensors/mcp-guard/guard.js',
+  'scripts/check-mcp-guard-install.js',
 ];
 
 function posixPath(value) {
@@ -67,6 +68,14 @@ function validateRuntimeFiles(files) {
   if (/demo when run directly/.test(guard)) {
     throw new Error('MCP guard package must exclude direct-run demo code');
   }
+
+  const installCheck = files.find((file) => file.path === 'scripts/check-mcp-guard-install.js').body.toString('utf8');
+  if (!/api\/v1\/heartbeat/.test(installCheck) || !/buildInstallReport/.test(installCheck) || !/INGEST_API_KEY/.test(installCheck)) {
+    throw new Error('MCP guard package must include install validation with heartbeat support');
+  }
+  if (/contentBase64|readFileSync\(filePath|dev-ingest-key|524-71-9043|4111 1111 1111 1111/.test(installCheck)) {
+    throw new Error('MCP guard install validation must not read file bodies, package development keys, or carry demo prompt bodies');
+  }
 }
 
 function packageMcpGuard(opts = {}) {
@@ -105,6 +114,7 @@ function packageMcpGuard(opts = {}) {
       explicitIngestKeyRequired: true,
       sharedEngineIncluded: true,
       demoCodeExcluded: true,
+      installValidationIncluded: true,
       developmentIngestKeyAbsent: true,
       promptBodiesAbsent: true,
     },

@@ -19,6 +19,8 @@ A customer is production ready only when all of these are true:
   the customer's `serverUrl`, `ingestKey`, `orgId`, and managed user identity.
 - Endpoint install validation has reported sanitized health evidence to the
   Coverage tab when endpoint rollout is in scope.
+- MCP guard install validation has reported sanitized health evidence to the
+  Coverage tab when MCP rollout is in scope.
 - A synthetic sensitive-data test is blocked, redacted, or held according to
   the customer's selected policy.
 - The dashboard shows attributed events, seat usage, sensor versions, and audit
@@ -481,9 +483,19 @@ For MCP guard hosts:
    - `INGEST_API_KEY=<customer-ingest-key>`
    - Managed user identity, if the host runtime supports it.
    - `orgId` or equivalent tenant value set to the customer tenant slug.
-3. Run the customer's synthetic document retrieval test.
-4. Confirm sensitive content is redacted or blocked before model access.
-5. Confirm the dashboard shows sanitized MCP guard evidence.
+3. Validate the runtime and emit install-health evidence:
+
+   ```powershell
+   npm run mcp:check -- `
+     --env ".env" `
+     --emit-heartbeat `
+     --user "tech@example.test" `
+     --org-id "<tenant-slug>"
+   ```
+
+4. Run the customer's synthetic document retrieval test.
+5. Confirm sensitive content is redacted or blocked before model access.
+6. Confirm the dashboard shows sanitized MCP guard evidence.
 
 Do not store MCP guard secrets in source code, shared scripts, screenshots, or
 chat transcripts.
@@ -544,7 +556,7 @@ Deliver a packet with:
 - Chrome managed policy confirmation.
 - Endpoint agent scheduled task/log evidence.
 - Endpoint install-health heartbeat evidence in Coverage.
-- MCP guard evidence, if deployed.
+- MCP guard install-health and sanitized redaction evidence, if deployed.
 - Policy template selected.
 - Seat limit and first seat report.
 - Known gaps, if any, with owner and due date.
@@ -601,6 +613,7 @@ If production is live and unhealthy:
 | Events are rejected | Check `orgId`, managed user identity, ingest key, tenant slug, and seat limit. |
 | Endpoint agent does not start | Check Node on PATH, scheduled task status, config ACL, log path, and ingest key. |
 | Endpoint install health shows attention | Run `npm run endpoint:check -- --env <path> --json`, fix the failed check IDs, then rerun with `--emit-heartbeat`. |
+| MCP guard install health shows attention | Run `npm run mcp:check -- --env <path> --json`, fix the failed check IDs, then rerun with `--emit-heartbeat`. |
 | Audit verification fails | Stop handoff, preserve the database and logs, and escalate before backup, restore, or data deletion. |
 
 ## Works Cited
