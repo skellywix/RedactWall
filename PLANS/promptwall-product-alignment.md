@@ -154,6 +154,10 @@ For this alignment track, completion requires evidence for every area below:
 - Extended `blockedBrowserActions` to block destination-scoped browser copy
   events from AI response content while retaining only sanitized action
   metadata.
+- Made local browser blocks evidence-aware so blocked sends, sensitive-paste
+  blocks, destination/file-upload blocks, file-drop blocks, and response-copy
+  blocks only claim recorded evidence after the control plane returns the
+  expected id and status.
 - Changed the endpoint installer's public server parameter to `-PromptWallUrl`
   for fresh installs while keeping `-SentinelUrl` as a tested compatibility
   alias, and made endpoint/MCP install-health messaging name `PROMPTWALL_URL`

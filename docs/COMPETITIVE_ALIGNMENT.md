@@ -91,6 +91,10 @@ Build next:
 - Add destination-scoped browser paste, file-drop, and response-copy blocking so
   admins can stop high-risk browser actions in selected AI tools while storing
   only sanitized `action_blocked` evidence.
+- Make local browser blocks evidence-aware: sends, sensitive paste blocks,
+  destination/file-upload blocks, file-drop blocks, and response-copy blocks now
+  only claim a recorded decision after the control plane returns the expected
+  evidence id and status.
 - Add approval owner and SLA routing so held decisions reach security,
   compliance, privacy, or legal queues with sanitized workflow metadata in the
   dashboard, SIEM alerts, and examiner evidence.
