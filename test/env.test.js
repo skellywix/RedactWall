@@ -60,6 +60,7 @@ test('loadEnv maps PromptWall aliases without overwriting configured legacy keys
     'PROMPTWALL_ENDPOINT_AGENT_OCR_ARGS_JSON=["{file}","stdout"]',
     'PROMPTWALL_ENDPOINT_AGENT_OCR_TIMEOUT_MS=20000',
     'PROMPTWALL_ENDPOINT_AGENT_OCR_MAX_CHARS=250000',
+    'PROMPTWALL_ENDPOINT_AGENT_APPROVED_AI_TOOLS=cursor,claude_desktop',
     'SENTINEL_SECRET=legacy-session-secret',
   ].join('\n'));
   const target = { SENTINEL_DATA_KEY: '' };
@@ -82,6 +83,7 @@ test('loadEnv maps PromptWall aliases without overwriting configured legacy keys
   assert.strictEqual(target.ENDPOINT_AGENT_OCR_ARGS_JSON, '["{file}","stdout"]');
   assert.strictEqual(target.ENDPOINT_AGENT_OCR_TIMEOUT_MS, '20000');
   assert.strictEqual(target.ENDPOINT_AGENT_OCR_MAX_CHARS, '250000');
+  assert.strictEqual(target.ENDPOINT_AGENT_APPROVED_AI_TOOLS, 'cursor,claude_desktop');
   assert.ok(result.aliases.some((item) => item.key === 'SENTINEL_DB_PATH' && item.source === 'PROMPTWALL_DB_PATH'));
   fs.rmSync(dir, { recursive: true, force: true });
 });

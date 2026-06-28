@@ -22,6 +22,7 @@ const PACKAGE_FILES = [
   'sensors/endpoint-agent/ocr.js',
   'sensors/endpoint-agent/native-handoff.js',
   'sensors/endpoint-agent/write-handoff.js',
+  'sensors/endpoint-agent/collectors/ai-tool-inventory.js',
   'sensors/endpoint-agent/collectors/clipboard-guard.js',
   'sensors/endpoint-agent/collectors/protected-upload.js',
   'scripts/check-endpoint-install.js',
@@ -95,6 +96,14 @@ function validateRuntimeFiles(files) {
   }
   if (/contentBase64|fetch\(|https?:\/\/|shell:\s*true|readFileSync/.test(ocr)) {
     throw new Error('Endpoint OCR bridge must stay local and must not upload, shell, or read unrelated file bodies');
+  }
+
+  const aiToolInventory = files.find((file) => file.path === 'sensors/endpoint-agent/collectors/ai-tool-inventory.js').body.toString('utf8');
+  if (!/collectAiToolInventory/.test(aiToolInventory) || !/parseApprovedTools/.test(aiToolInventory)) {
+    throw new Error('Endpoint agent package must include sanitized AI tool inventory');
+  }
+  if (/contentBase64|fetch\(|https?:\/\/|readFileSync|writeFileSync|console\.log\([^)]*process|console\.error\([^)]*process/.test(aiToolInventory)) {
+    throw new Error('Endpoint AI tool inventory must not upload, persist, or log local process or path data');
   }
 
   const handoff = files.find((file) => file.path === 'sensors/endpoint-agent/native-handoff.js').body.toString('utf8');
@@ -204,6 +213,7 @@ function packageEndpointAgent(opts = {}) {
       localDetectionEngineIncluded: true,
       endpointRedactionHandoffIncluded: true,
       endpointOcrIncluded: true,
+      aiToolInventoryIncluded: true,
       nativeHandoffPrototypeIncluded: true,
       nativeHandoffWriterIncluded: true,
       protectedUploadCollectorIncluded: true,

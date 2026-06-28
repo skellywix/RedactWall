@@ -177,6 +177,9 @@ Build next:
 - Add endpoint install validation heartbeats so technicians can prove endpoint
   env, runtime, watch directory, and native handoff readiness in Coverage and
   examiner evidence without exposing keys or prompt/file content.
+- Add sanitized endpoint AI tool inventory to install-health heartbeats so
+  Coverage can surface local AI apps and agent CLIs by stable id without
+  uploading paths, process args, prompts, or files.
 - Add MCP guard install validation heartbeats so agent/tool-output coverage can
   prove runtime, shared-engine, Node, and control-plane config health without
   exposing ingest keys or tool output.

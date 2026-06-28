@@ -307,7 +307,7 @@ handoff writer is a safe collector shim for pilots and future OS/app hooks. It
 signs a bounded upload-intent JSON file with the local endpoint config secret,
 references only an absolute local file path, and never reads file bytes or
 accepts the handoff secret as a command-line argument.
-The browser extension automatically posts sanitized install-health heartbeats on install, startup, and a low-frequency alarm when it has managed or local server config. `npm run endpoint:check` validates the endpoint env file, server URL, ingest-key presence, watch directory, runtime scripts, and optional desktop collector handoff setup. `npm run mcp:check` validates the MCP guard runtime, connector SDK, Microsoft 365 connector, shared detection engine, Node version, and control-plane config. All three sensor paths post only bounded check IDs and status to `/api/v1/heartbeat` so Coverage and the examiner export can prove install health by user, org, sensor, version, and failed check without exposing keys, handoff secrets, prompt text, tool output, or file content.
+The browser extension automatically posts sanitized install-health heartbeats on install, startup, and a low-frequency alarm when it has managed or local server config. `npm run endpoint:check` validates the endpoint env file, server URL, ingest-key presence, watch directory, runtime scripts, optional desktop collector handoff setup, OCR readiness, and sanitized local AI tool inventory. `npm run mcp:check` validates the MCP guard runtime, connector SDK, Microsoft 365 connector, shared detection engine, Node version, and control-plane config. All three sensor paths post only bounded check IDs and status to `/api/v1/heartbeat` so Coverage and the examiner export can prove install health by user, org, sensor, version, and failed check without exposing keys, handoff secrets, prompt text, tool output, process args, local paths, or file content.
 
 ### Test the product
 
@@ -373,7 +373,7 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 | Destination controls | Working — governed destination coverage, default-deny unapproved AI, full destination blocking, and file-upload-only blocking across browser, endpoint, gate, file, and response paths |
 | Browser action controls | Working — destination-scoped paste, file-drop, and response-copy blocking records sanitized `action_blocked` evidence without sending clipboard text, selected response text, or file bytes. Local browser blocks now distinguish recorded evidence from control-plane-unreachable blocks in the user toast. |
 | Output scanning | Working — `/api/v1/scan-response` flags, redacts, or blocks PII/secrets in AI replies by policy |
-| MCP guard / Endpoint agent | Working references - inline/MCP redaction; MCP connector SDK with required tool-result sanitization; Microsoft 365 text-readable file-content connector; local endpoint folder watch plus signed native file-flow handoff prototype, protected-upload shell action, and one-shot clipboard guard; redacted companion files for structured-only findings |
+| MCP guard / Endpoint agent | Working references - inline/MCP redaction; MCP connector SDK with required tool-result sanitization; Microsoft 365 text-readable file-content connector; local endpoint folder watch plus signed native file-flow handoff prototype, protected-upload shell action, one-shot clipboard guard, optional local OCR, and sanitized endpoint AI tool inventory; redacted companion files for structured-only findings |
 | Auth & ops | Working: login lockout, password-confirmed raw reveal and release approval, release-token scoped polling, stable secret, `/healthz` · `/readyz` · `/api/metrics`, policy-driven sensor version and browser/endpoint/MCP install-health posture, dashboard lineage, sanitized examiner export with coverage, workflow routing, and lineage, Docker, CI |
 
 ## Shipped since the skeleton (see `ITERATIONS.md`)
@@ -386,7 +386,7 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
   and optional zipped JSON output.
 - **Reversible redaction / Redact-&-Send**, sealed token vault, local response re-hydration.
 - **MDM identity**, reliable per-site send, **Man-in-the-Prompt** guard, **shadow-AI** discovery and default-deny unapproved AI blocking.
-- **Coverage posture** showing governed destinations, required sensors, desired sensor versions, browser/endpoint/MCP install-health checks, fleet state by user/org/sensor, shadow-AI sightings, and stale or missing sensor coverage.
+- **Coverage posture** showing governed destinations, required sensors, desired sensor versions, browser/endpoint/MCP install-health checks, endpoint AI tool inventory, fleet state by user/org/sensor, shadow-AI sightings, and stale or missing sensor coverage.
 - **Approval routing** that assigns held decisions to security, compliance, privacy, or legal with SLA metadata, category/destination queue filters, assignment-aware approver decisions, SIEM alert payloads, examiner evidence, sanitized workflow notifications, and overdue SLA escalation evidence.
 - **Ticket bridge notifications** that send sanitized approval workflow tickets
   to Jira, Linear, SOAR, or internal ticketing middleware without prompt bodies,
@@ -459,6 +459,7 @@ Copy `.env.example` to `.env` (or export):
 | `ENDPOINT_AGENT_OCR_ARGS_JSON` / `PROMPTWALL_ENDPOINT_AGENT_OCR_ARGS_JSON` | Optional JSON string array of OCR command args. Include `{file}` where the image path belongs; otherwise the file path is appended |
 | `ENDPOINT_AGENT_OCR_TIMEOUT_MS` / `PROMPTWALL_ENDPOINT_AGENT_OCR_TIMEOUT_MS` | Optional OCR command timeout (default 15000 ms, bounded 1000 to 120000) |
 | `ENDPOINT_AGENT_OCR_MAX_CHARS` / `PROMPTWALL_ENDPOINT_AGENT_OCR_MAX_CHARS` | Optional OCR output cap before detection (default 1000000 chars, bounded 1000 to 5000000) |
+| `ENDPOINT_AGENT_APPROVED_AI_TOOLS` / `PROMPTWALL_ENDPOINT_AGENT_APPROVED_AI_TOOLS` | Optional comma-separated sanctioned endpoint AI tool ids. Detected local AI tools outside this list mark endpoint install health as attention using sanitized ids only |
 | `INGEST_AUTH_MAX_FAILURES` | Optional invalid ingest-key throttle threshold (default 20, bounded 3 to 1000) |
 | `INGEST_AUTH_WINDOW_MS` | Optional invalid ingest-key throttle window (default 60000 ms, bounded 1000 to 3600000) |
 | `INGEST_AUTH_LOCK_MS` | Optional invalid ingest-key throttle lock time (default 60000 ms, bounded 1000 to 3600000) |
@@ -523,6 +524,7 @@ one family per setting; a non-empty legacy key wins when both are set.
 | `ENDPOINT_AGENT_OCR_ARGS_JSON` | `PROMPTWALL_ENDPOINT_AGENT_OCR_ARGS_JSON` |
 | `ENDPOINT_AGENT_OCR_TIMEOUT_MS` | `PROMPTWALL_ENDPOINT_AGENT_OCR_TIMEOUT_MS` |
 | `ENDPOINT_AGENT_OCR_MAX_CHARS` | `PROMPTWALL_ENDPOINT_AGENT_OCR_MAX_CHARS` |
+| `ENDPOINT_AGENT_APPROVED_AI_TOOLS` | `PROMPTWALL_ENDPOINT_AGENT_APPROVED_AI_TOOLS` |
 
 Production preflight requires Security Admin MFA through `ADMIN_TOTP_SECRET`,
 custom secrets with minimum lengths, 16 characters for `ADMIN_PASSWORD` and

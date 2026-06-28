@@ -51,6 +51,8 @@ test('endpoint install check validates runtime wiring without exposing secrets',
   assert.ok(report.checks.some((item) => item.id === 'clipboard_guard_runtime'));
   assert.ok(report.checks.some((item) => item.id === 'endpoint_ocr_runtime'));
   assert.ok(report.checks.some((item) => item.id === 'endpoint_ocr_config' && item.ok && item.detail === 'disabled'));
+  assert.ok(report.checks.some((item) => item.id === 'ai_tool_inventory_runtime'));
+  assert.ok(report.checks.some((item) => item.id === 'ai_tool_inventory' && item.ok));
   assert.ok(!JSON.stringify(report).includes(ingestKey));
   assert.ok(!JSON.stringify(report).includes(handoffSecret));
 
@@ -92,6 +94,33 @@ test('endpoint install check validates runtime wiring without exposing secrets',
   });
   assert.strictEqual(requests.length, 1);
   assert.strictEqual(response.id, 'q_heartbeat');
+});
+
+test('endpoint install check marks unapproved endpoint AI tools as attention without paths', (t) => {
+  const dir = tempDir(t, 'ps-endpoint-check-ai-tools-');
+  const watchDir = path.join(dir, 'watch');
+  fs.mkdirSync(watchDir, { recursive: true });
+  const envPath = path.join(dir, 'endpoint-agent.env');
+  fs.writeFileSync(envPath, [
+    'PROMPTWALL_URL=https://promptwall.customer.example',
+    'INGEST_API_KEY=pilot-ingest-key-000000000000000000000000000004',
+    `ENDPOINT_AGENT_WATCH_DIR=${watchDir}`,
+    'ENDPOINT_AGENT_APPROVED_AI_TOOLS=cursor',
+  ].join('\n') + '\n');
+
+  const report = buildInstallReport({
+    envPath,
+    repoRoot: root,
+    env: {},
+    processNames: ['Cursor.exe', 'C:\\Users\\analyst\\AppData\\Local\\Programs\\Claude\\Claude.exe --profile rawargument'],
+  });
+
+  assert.strictEqual(report.status, 'attention');
+  assert.ok(report.checks.some((item) => item.id === 'ai_tool_cursor' && item.ok));
+  assert.ok(report.checks.some((item) => item.id === 'ai_tool_claude_desktop' && !item.ok && item.detail === 'unapproved detected'));
+  assert.ok(!JSON.stringify(report).includes('Programs\\Claude'));
+  assert.ok(!JSON.stringify(report).includes('rawargument'));
+  assert.ok(!JSON.stringify(report).includes('pilot-ingest-key'));
 });
 
 test('endpoint install check reports attention for missing desktop collector prerequisites', (t) => {

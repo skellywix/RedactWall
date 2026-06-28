@@ -46,6 +46,10 @@ function minimalFiles(agentBody) {
       body: Buffer.from('function writeHandoffFile() { return signHandoffEvent(); }\nfunction signHandoffEvent() {}\n'),
     },
     {
+      path: 'sensors/endpoint-agent/collectors/ai-tool-inventory.js',
+      body: Buffer.from('function collectAiToolInventory() {}\nfunction parseApprovedTools() {}\nmodule.exports = { collectAiToolInventory, parseApprovedTools };\n'),
+    },
+    {
       path: 'sensors/endpoint-agent/collectors/clipboard-guard.js',
       body: Buffer.from('async function collectClipboard() { return { clientPreRedacted: true, cleared: true }; }\nconst cmd = "Set-Clipboard";\n'),
     },
@@ -93,6 +97,7 @@ test('package script writes a prompt-free endpoint agent zip and integrity manif
   assert.strictEqual(manifest.checks.localDetectionEngineIncluded, true);
   assert.strictEqual(manifest.checks.endpointRedactionHandoffIncluded, true);
   assert.strictEqual(manifest.checks.endpointOcrIncluded, true);
+  assert.strictEqual(manifest.checks.aiToolInventoryIncluded, true);
   assert.strictEqual(manifest.checks.nativeHandoffPrototypeIncluded, true);
   assert.strictEqual(manifest.checks.nativeHandoffWriterIncluded, true);
   assert.strictEqual(manifest.checks.protectedUploadCollectorIncluded, true);
@@ -120,6 +125,7 @@ test('package script writes a prompt-free endpoint agent zip and integrity manif
     'sensors/endpoint-agent/ocr.js',
     'sensors/endpoint-agent/native-handoff.js',
     'sensors/endpoint-agent/write-handoff.js',
+    'sensors/endpoint-agent/collectors/ai-tool-inventory.js',
     'sensors/endpoint-agent/collectors/clipboard-guard.js',
     'sensors/endpoint-agent/collectors/protected-upload.js',
     'scripts/check-endpoint-install.js',
@@ -144,6 +150,7 @@ test('package script writes a prompt-free endpoint agent zip and integrity manif
   assert.match(zip.readAsText('sensors/endpoint-agent/ocr.js'), /extractImageFile/);
   assert.match(zip.readAsText('sensors/endpoint-agent/native-handoff.js'), /createHmac\('sha256'/);
   assert.match(zip.readAsText('sensors/endpoint-agent/write-handoff.js'), /writeHandoffFile/);
+  assert.match(zip.readAsText('sensors/endpoint-agent/collectors/ai-tool-inventory.js'), /collectAiToolInventory/);
   assert.match(zip.readAsText('sensors/endpoint-agent/collectors/clipboard-guard.js'), /collectClipboard/);
   assert.match(zip.readAsText('sensors/endpoint-agent/collectors/protected-upload.js'), /collectProtectedUploads/);
   assert.match(zip.readAsText('scripts/check-endpoint-install.js'), /\/api\/v1\/heartbeat/);

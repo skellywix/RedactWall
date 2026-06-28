@@ -311,7 +311,21 @@ npm run endpoint:check -- `
 Add `--require-desktop-collector` when native handoff is in scope. The checker
 prints and posts only check IDs, boolean status, and short details. It does not
 print or post the ingest key, handoff secret, prompt text, extracted text, or
-file bytes.
+file bytes, executable paths, or process arguments. The endpoint checker also
+adds a sanitized local AI tool inventory to the heartbeat. Detected tools are
+reported as stable check ids such as `ai_tool_cursor` or
+`ai_tool_claude_desktop`.
+
+Optional sanctioned endpoint AI tools:
+
+```powershell
+Add-Content "$env:LOCALAPPDATA\PromptWall\endpoint-agent.env" "ENDPOINT_AGENT_APPROVED_AI_TOOLS=cursor,claude_desktop"
+```
+
+When `ENDPOINT_AGENT_APPROVED_AI_TOOLS` is set, detected endpoint AI tools not
+on that list mark install health as attention. This makes endpoint/developer
+tool visibility show up in Coverage without sending local paths, process args,
+document names, prompt text, or file content.
 
 The agent inspects supported watched files locally. Under redact policy, structured-only findings write a safe companion text file under `.promptwall-redacted` and report `redacted_available` evidence to the control plane; semantic or mixed findings remain held for Security Admin review. Image files (`.png`, `.jpg`, `.jpeg`, `.tif`, `.tiff`, `.bmp`, `.webp`) are supported as a fail-closed modality. Browser/API uploads still return `ocr_required`; endpoint agents can optionally run a workstation-local OCR command and then send only sanitized detector evidence to the control plane.
 
@@ -524,6 +538,7 @@ Set these through `.env`, container environment, or a deployment secret manager:
 | `ENDPOINT_AGENT_OCR_ARGS_JSON` / `PROMPTWALL_ENDPOINT_AGENT_OCR_ARGS_JSON` | Optional JSON string array of OCR command args. Include `{file}` where the image path belongs; otherwise the file path is appended. |
 | `ENDPOINT_AGENT_OCR_TIMEOUT_MS` / `PROMPTWALL_ENDPOINT_AGENT_OCR_TIMEOUT_MS` | Optional OCR command timeout, defaulting to 15000 ms. |
 | `ENDPOINT_AGENT_OCR_MAX_CHARS` / `PROMPTWALL_ENDPOINT_AGENT_OCR_MAX_CHARS` | Optional OCR output cap before detection, defaulting to 1000000 chars. |
+| `ENDPOINT_AGENT_APPROVED_AI_TOOLS` / `PROMPTWALL_ENDPOINT_AGENT_APPROVED_AI_TOOLS` | Optional comma-separated sanctioned endpoint AI tool ids. Detected local AI tools outside this list mark endpoint install health as attention using sanitized ids only. |
 
 PromptWall accepts product-prefixed aliases for new deployments while keeping
 the existing `SENTINEL_*`, `INGEST_API_KEY`, and endpoint-agent names valid for
@@ -562,6 +577,7 @@ set.
 | `ENDPOINT_AGENT_OCR_ARGS_JSON` | `PROMPTWALL_ENDPOINT_AGENT_OCR_ARGS_JSON` |
 | `ENDPOINT_AGENT_OCR_TIMEOUT_MS` | `PROMPTWALL_ENDPOINT_AGENT_OCR_TIMEOUT_MS` |
 | `ENDPOINT_AGENT_OCR_MAX_CHARS` | `PROMPTWALL_ENDPOINT_AGENT_OCR_MAX_CHARS` |
+| `ENDPOINT_AGENT_APPROVED_AI_TOOLS` | `PROMPTWALL_ENDPOINT_AGENT_APPROVED_AI_TOOLS` |
 
 Never bind `SENTINEL_DB_PATH` to a cloud-synced folder or network share. SQLite locking must be backed by local disk semantics, and production preflight blocks missing, cloud-synced, or UNC/network SQLite paths before startup readiness passes.
 

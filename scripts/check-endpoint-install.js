@@ -6,6 +6,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { parseEnv, withEnvAliases } = require('../server/env');
+const aiToolInventory = require('../sensors/endpoint-agent/collectors/ai-tool-inventory');
 
 const ROOT = path.join(__dirname, '..');
 const VERSION = require('../package.json').version;
@@ -82,6 +83,7 @@ function endpointSettings(config = {}) {
     handoffDir: config.ENDPOINT_AGENT_HANDOFF_DIR || config.PROMPTWALL_ENDPOINT_AGENT_HANDOFF_DIR || '',
     handoffSecret: config.ENDPOINT_AGENT_HANDOFF_SECRET || config.PROMPTWALL_ENDPOINT_AGENT_HANDOFF_SECRET || '',
     ocrCommand: config.ENDPOINT_AGENT_OCR_COMMAND || config.PROMPTWALL_ENDPOINT_AGENT_OCR_COMMAND || '',
+    approvedAiTools: config.ENDPOINT_AGENT_APPROVED_AI_TOOLS || config.PROMPTWALL_ENDPOINT_AGENT_APPROVED_AI_TOOLS || '',
     orgId: config.SENTINEL_TENANT_ID || config.PROMPTWALL_TENANT_ID || '',
   };
 }
@@ -111,6 +113,13 @@ function buildInstallReport(opts = {}) {
     configured(settings.ocrCommand) ? 'configured' : 'disabled'));
   checks.push(check('endpoint_runner', existsFile(repoRoot, 'scripts/run-endpoint-agent.ps1'), 'runner present'));
   checks.push(check('clipboard_guard_runtime', existsFile(repoRoot, 'sensors/endpoint-agent/collectors/clipboard-guard.js'), 'clipboard guard present'));
+  checks.push(check('ai_tool_inventory_runtime', existsFile(repoRoot, 'sensors/endpoint-agent/collectors/ai-tool-inventory.js'), 'AI tool inventory present'));
+  checks.push(...aiToolInventory.collectAiToolInventorySync({
+    env: configInfo.config,
+    platform: opts.platform || process.platform,
+    processNames: opts.processNames || [],
+    approvedTools: settings.approvedAiTools,
+  }).checks);
   checks.push(check('handoff_secret', requireDesktopCollector ? handoffReady : (!handoffEnabled || handoffReady),
     handoffReady ? 'configured' : (requireDesktopCollector ? 'missing 32-plus character handoff secret' : 'desktop collector disabled')));
   checks.push(check('handoff_dir', desktopCollectorExpected ? configured(settings.handoffDir) && isDirectory(settings.handoffDir) : true,
@@ -235,6 +244,7 @@ async function main() {
       console.log(usage());
       return;
     }
+    opts.processNames = await aiToolInventory.listProcessNames({ platform: process.platform });
     const report = buildInstallReport(opts);
     if (opts.emitHeartbeat) {
       try {
