@@ -34,6 +34,10 @@ function minimalFiles(agentBody) {
     { path: 'server/processors.js', body: Buffer.from('module.exports = {};') },
     { path: 'sensors/endpoint-agent/agent.js', body: Buffer.from(agentBody) },
     {
+      path: 'sensors/endpoint-agent/ocr.js',
+      body: Buffer.from('const { execFile } = require("child_process");\nconst env = "ENDPOINT_AGENT_OCR_COMMAND";\nfunction extractImageFile() {}\nmodule.exports = { extractImageFile };\n'),
+    },
+    {
       path: 'sensors/endpoint-agent/native-handoff.js',
       body: Buffer.from("require('crypto').createHmac('sha256', 'secret'); const blocked = 'contentBase64';"),
     },
@@ -88,6 +92,7 @@ test('package script writes a prompt-free endpoint agent zip and integrity manif
   assert.strictEqual(manifest.checks.explicitIngestKeyRequired, true);
   assert.strictEqual(manifest.checks.localDetectionEngineIncluded, true);
   assert.strictEqual(manifest.checks.endpointRedactionHandoffIncluded, true);
+  assert.strictEqual(manifest.checks.endpointOcrIncluded, true);
   assert.strictEqual(manifest.checks.nativeHandoffPrototypeIncluded, true);
   assert.strictEqual(manifest.checks.nativeHandoffWriterIncluded, true);
   assert.strictEqual(manifest.checks.protectedUploadCollectorIncluded, true);
@@ -112,6 +117,7 @@ test('package script writes a prompt-free endpoint agent zip and integrity manif
     'server/policy.js',
     'server/processors.js',
     'sensors/endpoint-agent/agent.js',
+    'sensors/endpoint-agent/ocr.js',
     'sensors/endpoint-agent/native-handoff.js',
     'sensors/endpoint-agent/write-handoff.js',
     'sensors/endpoint-agent/collectors/clipboard-guard.js',
@@ -133,6 +139,9 @@ test('package script writes a prompt-free endpoint agent zip and integrity manif
   assert.match(agent, /redacted_available/);
   assert.match(agent, /\.promptwall-redacted/);
   assert.match(agent, /ENDPOINT_AGENT_HANDOFF_SECRET/);
+  assert.match(agent, /extractEndpointFile/);
+  assert.match(zip.readAsText('sensors/endpoint-agent/ocr.js'), /ENDPOINT_AGENT_OCR_COMMAND/);
+  assert.match(zip.readAsText('sensors/endpoint-agent/ocr.js'), /extractImageFile/);
   assert.match(zip.readAsText('sensors/endpoint-agent/native-handoff.js'), /createHmac\('sha256'/);
   assert.match(zip.readAsText('sensors/endpoint-agent/write-handoff.js'), /writeHandoffFile/);
   assert.match(zip.readAsText('sensors/endpoint-agent/collectors/clipboard-guard.js'), /collectClipboard/);

@@ -49,6 +49,8 @@ test('endpoint install check validates runtime wiring without exposing secrets',
   assert.ok(report.checks.every((item) => item.ok), JSON.stringify(report.checks));
   assert.ok(report.checks.some((item) => item.id === 'desktop_collector_runtime'));
   assert.ok(report.checks.some((item) => item.id === 'clipboard_guard_runtime'));
+  assert.ok(report.checks.some((item) => item.id === 'endpoint_ocr_runtime'));
+  assert.ok(report.checks.some((item) => item.id === 'endpoint_ocr_config' && item.ok && item.detail === 'disabled'));
   assert.ok(!JSON.stringify(report).includes(ingestKey));
   assert.ok(!JSON.stringify(report).includes(handoffSecret));
 
@@ -112,6 +114,30 @@ test('endpoint install check reports attention for missing desktop collector pre
   assert.ok(report.checks.some((item) => item.id === 'watch_dir' && !item.ok));
   assert.ok(report.checks.some((item) => item.id === 'handoff_secret' && !item.ok));
   assert.ok(!JSON.stringify(report).includes('too-short'));
+});
+
+test('endpoint install check reports attention for unusable explicit OCR command', (t) => {
+  const dir = tempDir(t, 'ps-endpoint-check-ocr-');
+  const watchDir = path.join(dir, 'watch');
+  fs.mkdirSync(watchDir, { recursive: true });
+  const envPath = path.join(dir, 'endpoint-agent.env');
+  fs.writeFileSync(envPath, [
+    'PROMPTWALL_URL=https://promptwall.customer.example',
+    'INGEST_API_KEY=pilot-ingest-key-000000000000000000000000000003',
+    `ENDPOINT_AGENT_WATCH_DIR=${watchDir}`,
+    `ENDPOINT_AGENT_OCR_COMMAND=${path.join(dir, 'missing-ocr.exe')}`,
+  ].join('\n') + '\n');
+
+  const report = buildInstallReport({
+    envPath,
+    repoRoot: root,
+    env: {},
+  });
+
+  assert.strictEqual(report.status, 'attention');
+  assert.ok(report.checks.some((item) => item.id === 'endpoint_ocr_runtime' && item.ok));
+  assert.ok(report.checks.some((item) => item.id === 'endpoint_ocr_config' && !item.ok));
+  assert.ok(!JSON.stringify(report).includes('pilot-ingest-key'));
 });
 
 test('endpoint install check args cover validation and heartbeat options', () => {

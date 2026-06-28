@@ -57,6 +57,15 @@ function existsFile(root, relPath) {
   return fs.existsSync(path.join(root, relPath));
 }
 
+function commandPathLooksUsable(value) {
+  if (!configured(value)) return true;
+  const command = String(value).trim();
+  if (path.isAbsolute(command) || command.includes(path.sep) || command.includes('/')) {
+    return fs.existsSync(command);
+  }
+  return true;
+}
+
 function check(id, ok, detail) {
   return {
     id,
@@ -72,6 +81,7 @@ function endpointSettings(config = {}) {
     watchDir: config.ENDPOINT_AGENT_WATCH_DIR || config.PROMPTWALL_ENDPOINT_AGENT_WATCH_DIR || '',
     handoffDir: config.ENDPOINT_AGENT_HANDOFF_DIR || config.PROMPTWALL_ENDPOINT_AGENT_HANDOFF_DIR || '',
     handoffSecret: config.ENDPOINT_AGENT_HANDOFF_SECRET || config.PROMPTWALL_ENDPOINT_AGENT_HANDOFF_SECRET || '',
+    ocrCommand: config.ENDPOINT_AGENT_OCR_COMMAND || config.PROMPTWALL_ENDPOINT_AGENT_OCR_COMMAND || '',
     orgId: config.SENTINEL_TENANT_ID || config.PROMPTWALL_TENANT_ID || '',
   };
 }
@@ -96,6 +106,9 @@ function buildInstallReport(opts = {}) {
   checks.push(check('ingest_key', keyLooksUsable, keyLooksUsable ? 'configured' : 'missing, weak, or development key'));
   checks.push(check('watch_dir', configured(settings.watchDir) && isDirectory(settings.watchDir), configured(settings.watchDir) ? 'configured directory' : 'missing'));
   checks.push(check('endpoint_agent_runtime', existsFile(repoRoot, 'sensors/endpoint-agent/agent.js'), 'agent runtime present'));
+  checks.push(check('endpoint_ocr_runtime', existsFile(repoRoot, 'sensors/endpoint-agent/ocr.js'), 'OCR bridge present'));
+  checks.push(check('endpoint_ocr_config', commandPathLooksUsable(settings.ocrCommand),
+    configured(settings.ocrCommand) ? 'configured' : 'disabled'));
   checks.push(check('endpoint_runner', existsFile(repoRoot, 'scripts/run-endpoint-agent.ps1'), 'runner present'));
   checks.push(check('clipboard_guard_runtime', existsFile(repoRoot, 'sensors/endpoint-agent/collectors/clipboard-guard.js'), 'clipboard guard present'));
   checks.push(check('handoff_secret', requireDesktopCollector ? handoffReady : (!handoffEnabled || handoffReady),

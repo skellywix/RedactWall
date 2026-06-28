@@ -170,7 +170,10 @@ Build next:
   summaries by user, destination, sensor, category, channel, and decision.
 - Add customer-defined detector packs plus an `ocr_required` file outcome so
   pilots can model local member IDs and scanned/image uploads before shipping a
-  heavier endpoint-local OCR runtime.
+  packaged endpoint OCR binary and install workflow.
+- Add an optional endpoint-local OCR command bridge so configured workstations
+  can inspect image files locally while server-side uploads still fail closed as
+  `ocr_required` and evidence remains sanitized.
 - Add endpoint install validation heartbeats so technicians can prove endpoint
   env, runtime, watch directory, and native handoff readiness in Coverage and
   examiner evidence without exposing keys or prompt/file content.

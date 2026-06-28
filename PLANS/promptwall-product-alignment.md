@@ -174,6 +174,10 @@ For this alignment track, completion requires evidence for every area below:
 - Added a one-shot endpoint clipboard guard that inspects clipboard content
   locally, records only masked detector evidence, and can clear sensitive
   clipboard content while recording sanitized `action_blocked` evidence.
+- Added an optional endpoint-local OCR bridge for image files so configured
+  workstations can inspect OCR text locally, while browser/API image uploads
+  still fail closed as `ocr_required` and the control plane receives only
+  sanitized detector evidence.
 
 ## Open Decisions
 

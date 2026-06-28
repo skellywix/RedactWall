@@ -159,9 +159,11 @@ with a base64 file. Add a new file type by pushing a processor with
 times out or the parser cannot inspect the file, and the audit log records the
 blocked unscanned file without storing the file bytes.
 Image uploads (`.png`, `.jpg`, `.jpeg`, `.tif`, `.tiff`, `.bmp`, `.webp`) are
-recognized as supported but return `ocr_required` until an endpoint-local OCR
-processor is configured. They are blocked and recorded without sending image
-bytes or extracted text to the control plane.
+recognized as supported. Browser/API uploads still fail closed as
+`ocr_required`. Endpoint agents can optionally run a local OCR command through
+`ENDPOINT_AGENT_OCR_COMMAND`, then feed the extracted text into the same local
+detection path. Image bytes and raw OCR text are not sent to the control plane;
+only masked findings, categories, and sanitized evidence are reported.
 
 ---
 
@@ -262,15 +264,16 @@ npm run package:mcp-guard
 The extension zip lands in `dist/browser-extension/`, the endpoint agent zip lands in
 `dist/endpoint-agent/`, and the MCP guard zip lands in `dist/mcp-guard/`. Each
 artifact gets a SHA-256 manifest and refuses packaged development keys or prompt
-bodies. The MCP guard package also includes `sensors/mcp-guard/sdk.js` and the
-Microsoft 365 Graph file-content connector. Content connectors must call
-`sanitizeToolResult()` before returning tool output to a model. Configure real
-pilot keys through Chrome managed storage or local sensor environment config,
-not inside packages. `release:extension:check` also writes a prompt-free Chrome
-Web Store release-readiness report for private or unlisted managed deployments.
-When supplied a Chrome Web Store extension id, it also writes a final Chrome
-`ExtensionSettings` force-install policy with the real extension id and update
-URL, but no managed-storage secrets.
+bodies. The endpoint package includes the optional local OCR bridge; it does not
+bundle an OCR binary. The MCP guard package also includes
+`sensors/mcp-guard/sdk.js` and the Microsoft 365 Graph file-content connector.
+Content connectors must call `sanitizeToolResult()` before returning tool output
+to a model. Configure real pilot keys through Chrome managed storage or local
+sensor environment config, not inside packages. `release:extension:check` also
+writes a prompt-free Chrome Web Store release-readiness report for private or
+unlisted managed deployments. When supplied a Chrome Web Store extension id, it
+also writes a final Chrome `ExtensionSettings` force-install policy with the real
+extension id and update URL, but no managed-storage secrets.
 
 Generate a customer IdP handoff with:
 
@@ -418,6 +421,8 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 - Expand endpoint collectors from protected upload and one-shot clipboard
   guarding into app-specific desktop AI upload hooks when paid pilots need
   deeper interception.
+- Package or install a supported OCR binary if pilots require turnkey scanned
+  image coverage; the current bridge supports local customer-managed OCR.
 - Upgrade the on-device classifier to a quantized ONNX/WASM NER when recall demands it.
 
 ## Configuration
@@ -450,6 +455,10 @@ Copy `.env.example` to `.env` (or export):
 | `OIDC_AUTHORIZATION_ENDPOINT` / `OIDC_TOKEN_ENDPOINT` / `OIDC_JWKS_URI` | Optional explicit OIDC endpoints. Leave all three empty to use issuer discovery, or set all three together |
 | `ENDPOINT_AGENT_HANDOFF_DIR` | Optional local spool for signed native endpoint upload-intent events |
 | `ENDPOINT_AGENT_HANDOFF_SECRET` | Optional 32-plus-character local HMAC secret required before native endpoint handoff events are accepted |
+| `ENDPOINT_AGENT_OCR_COMMAND` / `PROMPTWALL_ENDPOINT_AGENT_OCR_COMMAND` | Optional endpoint-local OCR command for image files. Disabled by default; use a workstation-local binary such as Tesseract |
+| `ENDPOINT_AGENT_OCR_ARGS_JSON` / `PROMPTWALL_ENDPOINT_AGENT_OCR_ARGS_JSON` | Optional JSON string array of OCR command args. Include `{file}` where the image path belongs; otherwise the file path is appended |
+| `ENDPOINT_AGENT_OCR_TIMEOUT_MS` / `PROMPTWALL_ENDPOINT_AGENT_OCR_TIMEOUT_MS` | Optional OCR command timeout (default 15000 ms, bounded 1000 to 120000) |
+| `ENDPOINT_AGENT_OCR_MAX_CHARS` / `PROMPTWALL_ENDPOINT_AGENT_OCR_MAX_CHARS` | Optional OCR output cap before detection (default 1000000 chars, bounded 1000 to 5000000) |
 | `INGEST_AUTH_MAX_FAILURES` | Optional invalid ingest-key throttle threshold (default 20, bounded 3 to 1000) |
 | `INGEST_AUTH_WINDOW_MS` | Optional invalid ingest-key throttle window (default 60000 ms, bounded 1000 to 3600000) |
 | `INGEST_AUTH_LOCK_MS` | Optional invalid ingest-key throttle lock time (default 60000 ms, bounded 1000 to 3600000) |
@@ -510,6 +519,10 @@ one family per setting; a non-empty legacy key wins when both are set.
 | `ENDPOINT_AGENT_WATCH_DIR` | `PROMPTWALL_ENDPOINT_AGENT_WATCH_DIR` |
 | `ENDPOINT_AGENT_HANDOFF_DIR` | `PROMPTWALL_ENDPOINT_AGENT_HANDOFF_DIR` |
 | `ENDPOINT_AGENT_HANDOFF_SECRET` | `PROMPTWALL_ENDPOINT_AGENT_HANDOFF_SECRET` |
+| `ENDPOINT_AGENT_OCR_COMMAND` | `PROMPTWALL_ENDPOINT_AGENT_OCR_COMMAND` |
+| `ENDPOINT_AGENT_OCR_ARGS_JSON` | `PROMPTWALL_ENDPOINT_AGENT_OCR_ARGS_JSON` |
+| `ENDPOINT_AGENT_OCR_TIMEOUT_MS` | `PROMPTWALL_ENDPOINT_AGENT_OCR_TIMEOUT_MS` |
+| `ENDPOINT_AGENT_OCR_MAX_CHARS` | `PROMPTWALL_ENDPOINT_AGENT_OCR_MAX_CHARS` |
 
 Production preflight requires Security Admin MFA through `ADMIN_TOTP_SECRET`,
 custom secrets with minimum lengths, 16 characters for `ADMIN_PASSWORD` and

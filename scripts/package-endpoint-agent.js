@@ -19,6 +19,7 @@ const PACKAGE_FILES = [
   'server/policy.js',
   'server/processors.js',
   'sensors/endpoint-agent/agent.js',
+  'sensors/endpoint-agent/ocr.js',
   'sensors/endpoint-agent/native-handoff.js',
   'sensors/endpoint-agent/write-handoff.js',
   'sensors/endpoint-agent/collectors/clipboard-guard.js',
@@ -83,6 +84,17 @@ function validateRuntimeFiles(files) {
   }
   if (!/native-handoff/.test(agent) || !/ENDPOINT_AGENT_HANDOFF_SECRET/.test(agent)) {
     throw new Error('Endpoint agent package must include the signed native handoff prototype');
+  }
+  if (!/\.\/ocr/.test(agent) || !/extractEndpointFile/.test(agent)) {
+    throw new Error('Endpoint agent package must route image files through endpoint-local OCR');
+  }
+
+  const ocr = files.find((file) => file.path === 'sensors/endpoint-agent/ocr.js').body.toString('utf8');
+  if (!/extractImageFile/.test(ocr) || !/execFile/.test(ocr) || !/ENDPOINT_AGENT_OCR_COMMAND/.test(ocr)) {
+    throw new Error('Endpoint agent package must include the endpoint-local OCR bridge');
+  }
+  if (/contentBase64|fetch\(|https?:\/\/|shell:\s*true|readFileSync/.test(ocr)) {
+    throw new Error('Endpoint OCR bridge must stay local and must not upload, shell, or read unrelated file bodies');
   }
 
   const handoff = files.find((file) => file.path === 'sensors/endpoint-agent/native-handoff.js').body.toString('utf8');
@@ -191,6 +203,7 @@ function packageEndpointAgent(opts = {}) {
       explicitIngestKeyRequired: true,
       localDetectionEngineIncluded: true,
       endpointRedactionHandoffIncluded: true,
+      endpointOcrIncluded: true,
       nativeHandoffPrototypeIncluded: true,
       nativeHandoffWriterIncluded: true,
       protectedUploadCollectorIncluded: true,
