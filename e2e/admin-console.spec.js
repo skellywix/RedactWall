@@ -94,12 +94,42 @@ test('admin console login, approval, policy save, and evidence export work in a 
   await page.locator('input[name="mode"][value="warn"]').check();
   await page.locator('#pol_risk').fill('35');
   await page.locator('#pol_desktop_destination').fill('Copilot Desktop');
+  await page.locator('#pol_policy_scopes').fill(JSON.stringify([{
+    id: 'legal_contract_review',
+    groups: ['PromptWall Legal'],
+    destinations: ['claude.ai'],
+    categories: ['LEGAL_CONTRACT'],
+    enforcementMode: 'block',
+    blockMinSeverity: 2,
+  }], null, 2));
+  await page.locator('#pol_policy_exceptions').fill(JSON.stringify([{
+    id: 'legal_vendor_24h',
+    users: ['counsel@example.test'],
+    destinations: ['claude.ai'],
+    categories: ['LEGAL_CONTRACT'],
+    expiresAt: '2030-01-01T00:00:00.000Z',
+  }], null, 2));
   await page.getByRole('button', { name: 'Save policy' }).click();
   await expect(page.locator('#polSaved')).toHaveText('Saved');
   const policy = await page.evaluate(async () => (await fetch('/api/policy')).json());
   expect(policy.enforcementMode).toBe('warn');
   expect(policy.blockRiskScore).toBe(35);
   expect(policy.desktopCollectorDestination).toBe('Copilot Desktop');
+  expect(policy.policyScopes[0]).toMatchObject({
+    id: 'legal_contract_review',
+    groups: ['promptwall legal'],
+    destinations: ['claude.ai'],
+    categories: ['LEGAL_CONTRACT'],
+    enforcementMode: 'block',
+    blockMinSeverity: 2,
+  });
+  expect(policy.policyExceptions[0]).toMatchObject({
+    id: 'legal_vendor_24h',
+    users: ['counsel@example.test'],
+    destinations: ['claude.ai'],
+    categories: ['LEGAL_CONTRACT'],
+    expiresAt: '2030-01-01T00:00:00.000Z',
+  });
 
   await page.locator('.content-tabs .tab[data-tab="audit"]').click();
   await expect(page.locator('#integrity')).toContainText('Chain verified');

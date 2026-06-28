@@ -67,6 +67,19 @@ function policyJsonText(value) {
   return JSON.stringify(value || [], null, 2);
 }
 
+function shortPolicyValue(value) {
+  const text = String(value || '');
+  return text.length > 36 ? `${text.slice(0, 33)}...` : text;
+}
+
+function policyMatcherSummary(rule = {}) {
+  const keys = ['users', 'groups', 'orgIds', 'sources', 'channels', 'destinations', 'detectors', 'categories'];
+  return keys
+    .filter((key) => Array.isArray(rule[key]) && rule[key].length)
+    .map((key) => `${key}:${rule[key].slice(0, 2).map(shortPolicyValue).join('|')}${rule[key].length > 2 ? '+' : ''}`)
+    .join(' ');
+}
+
 function parsePolicyJsonArray(value, label) {
   const raw = String(value || '').trim();
   if (!raw) return [];
@@ -903,6 +916,19 @@ async function loadPolicy() {
     ? `<div class="chips">${(p.approvalRoutingRules || []).map((rule) => `<span class="chip"><b>${escapeHtml(rule.id)}</b> ${escapeHtml(rule.assignedGroup || '')} / ${escapeHtml(roleLabel(rule.assignedRole))}</span>`).join('') || '<span class="chip">default routing</span>'}</div>`
     : `<textarea id="pol_approval_routing_rules" class="policy-textarea" spellcheck="false" style="min-height:160px" placeholder='[{"id":"member_services","detectors":["MEMBER_ID"],"destinations":["chatgpt.com"],"assignedGroup":"compliance","assignedRole":"approver","slaMinutes":120}]'>${escapeHtml(policyJsonText(p.approvalRoutingRules))}</textarea>`}
     </div>
+    <div class="policy-label">Scoped policy and exceptions</div>
+    <div class="policy-advanced-grid">
+      <label class="policy-list-field">Scoped enforcement rules
+        ${readonly
+    ? `<div class="chips">${(p.policyScopes || []).map((rule) => `<span class="chip"><b>${escapeHtml(rule.id)}</b> ${escapeHtml(rule.enforcementMode || 'scope')} ${escapeHtml(policyMatcherSummary(rule))}</span>`).join('') || '<span class="chip">no scoped rules</span>'}</div>`
+    : `<textarea id="pol_policy_scopes" class="policy-textarea" spellcheck="false" style="min-height:190px" placeholder='[{"id":"legal_contract_review","groups":["PromptWall Legal"],"destinations":["claude.ai"],"categories":["LEGAL_CONTRACT"],"enforcementMode":"block","blockMinSeverity":2}]'>${escapeHtml(policyJsonText(p.policyScopes))}</textarea>`}
+      </label>
+      <label class="policy-list-field">Time-bound exceptions
+        ${readonly
+    ? `<div class="chips">${(p.policyExceptions || []).map((rule) => `<span class="chip"><b>${escapeHtml(rule.id)}</b> ${escapeHtml(rule.expiresAt || '')} ${escapeHtml(policyMatcherSummary(rule))}</span>`).join('') || '<span class="chip">no exceptions</span>'}</div>`
+    : `<textarea id="pol_policy_exceptions" class="policy-textarea" spellcheck="false" style="min-height:190px" placeholder='[{"id":"legal_vendor_24h","users":["counsel@example.test"],"destinations":["claude.ai"],"categories":["LEGAL_CONTRACT"],"expiresAt":"2030-01-01T00:00:00.000Z"}]'>${escapeHtml(policyJsonText(p.policyExceptions))}</textarea>`}
+      </label>
+    </div>
     <div class="template-bar"><div class="template-title">Hard-stop entities</div>
       <div class="chips">${(p.alwaysBlock || []).map((x) => `<span class="chip"><b>${escapeHtml(x)}</b></span>`).join('')}</div></div>
     <div class="policy-list-grid">
@@ -942,6 +968,10 @@ async function loadPolicy() {
     const mode = (document.querySelector('input[name=mode]:checked') || {}).value || p.enforcementMode;
     const approvalRoutingRules = parsePolicyJsonArray($('#pol_approval_routing_rules').value, 'Approval routing rules');
     if (approvalRoutingRules == null) return;
+    const policyScopes = parsePolicyJsonArray($('#pol_policy_scopes').value, 'Scoped enforcement rules');
+    if (policyScopes == null) return;
+    const policyExceptions = parsePolicyJsonArray($('#pol_policy_exceptions').value, 'Time-bound exceptions');
+    if (policyExceptions == null) return;
     const body = {
       enforcementMode: mode,
       blockMinSeverity: Number($('#pol_sev').value),
@@ -951,6 +981,8 @@ async function loadPolicy() {
       requiredSensors: parsePolicyList($('#pol_required_sensors').value),
       desiredSensorVersions: parsePolicyMap($('#pol_desired_sensor_versions').value),
       approvalRoutingRules,
+      policyScopes,
+      policyExceptions,
       governedDestinations: parsePolicyList($('#pol_governed_destinations').value),
       allowedDestinations: parsePolicyList($('#pol_allowed_destinations').value),
       blockedDestinations: parsePolicyList($('#pol_blocked_destinations').value),
