@@ -52,8 +52,8 @@ Build next:
   decision were involved without retaining sensitive content.
 - Direct SMTP notification and identity-backed assignment on top of provisioned
   users, groups, and the sanitized approval workflow.
-- Guided rule-builder controls for scoped policy and exception lifecycle, on top
-  of the dashboard JSON editors for `policyScopes` and `policyExceptions`.
+- Exception lifecycle ownership and expiry review beyond the guided builder's
+  time-bound allow rules.
 
 ## Recent Completed Passes
 
@@ -62,6 +62,8 @@ Build next:
   Store checklist so managed browser rollout has package, policy, update URL,
   generated ExtensionSettings force-install policy, and install-health evidence
   before handoff.
+- Add guided Policy-tab builders for common scoped enforcement rules and
+  time-bound exceptions while preserving exact JSON review before save.
 - Add approval owner and SLA routing so held decisions reach security,
   compliance, privacy, or legal queues with sanitized workflow metadata in the
   dashboard, SIEM alerts, and examiner evidence.

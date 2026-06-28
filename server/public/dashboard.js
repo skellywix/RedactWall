@@ -93,6 +93,97 @@ function parsePolicyJsonArray(value, label) {
   }
 }
 
+function cleanPolicyId(value, fallback = 'rule') {
+  const id = String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 64);
+  return id || fallback;
+}
+
+function firstPolicyValue(value, fallback) {
+  return parsePolicyList(value)[0] || fallback;
+}
+
+function addPolicyRuleToTextarea(selector, rule, label) {
+  const textarea = $(selector);
+  const existing = parsePolicyJsonArray(textarea.value, label);
+  if (existing == null) return false;
+  const next = existing.filter((item) => item && item.id !== rule.id);
+  next.push(rule);
+  textarea.value = JSON.stringify(next, null, 2);
+  return true;
+}
+
+function collectPolicyMatchers(prefix) {
+  const out = {};
+  for (const key of ['users', 'groups', 'destinations', 'detectors', 'categories']) {
+    const values = parsePolicyList($(`#${prefix}_${key}`).value);
+    if (values.length) out[key] = values;
+  }
+  return out;
+}
+
+function suggestedPolicyId(prefix, matcherPrefix) {
+  const pieces = [
+    firstPolicyValue($(`#${matcherPrefix}_groups`).value, ''),
+    firstPolicyValue($(`#${matcherPrefix}_users`).value, ''),
+    firstPolicyValue($(`#${matcherPrefix}_destinations`).value, ''),
+    firstPolicyValue($(`#${matcherPrefix}_categories`).value, ''),
+    firstPolicyValue($(`#${matcherPrefix}_detectors`).value, ''),
+  ].filter(Boolean);
+  return cleanPolicyId(`${prefix}_${pieces.join('_')}`, `${prefix}_rule`);
+}
+
+function appendGuidedScopeRule() {
+  const matchers = collectPolicyMatchers('scope_builder');
+  if (!Object.keys(matchers).length) {
+    alert('Scoped enforcement needs at least one matcher.');
+    return;
+  }
+  const rule = {
+    id: cleanPolicyId($('#scope_builder_id').value, suggestedPolicyId('scope', 'scope_builder')),
+    ...matchers,
+    enforcementMode: $('#scope_builder_mode').value,
+  };
+  const severityRaw = $('#scope_builder_severity').value;
+  if (severityRaw !== '') {
+    const severity = Number(severityRaw);
+    if (Number.isFinite(severity)) rule.blockMinSeverity = severity;
+  }
+  const riskRaw = $('#scope_builder_risk').value;
+  if (riskRaw !== '') {
+    const risk = Number(riskRaw);
+    if (Number.isFinite(risk)) rule.blockRiskScore = risk;
+  }
+  const reason = cleanPolicyId($('#scope_builder_reason').value, '');
+  if (reason) rule.reason = reason;
+  if (addPolicyRuleToTextarea('#pol_policy_scopes', rule, 'Scoped enforcement rules')) {
+    $('#polSaved').textContent = `Added scoped rule ${rule.id}`;
+  }
+}
+
+function appendGuidedExceptionRule() {
+  const matchers = collectPolicyMatchers('exception_builder');
+  if (!Object.keys(matchers).length) {
+    alert('Time-bound exception needs at least one matcher.');
+    return;
+  }
+  const hours = Math.max(1, Math.min(24 * 30, Number($('#exception_builder_hours').value) || 24));
+  const rule = {
+    id: cleanPolicyId($('#exception_builder_id').value, suggestedPolicyId('exception', 'exception_builder')),
+    ...matchers,
+    action: 'allow',
+    expiresAt: new Date(Date.now() + hours * 60 * 60 * 1000).toISOString(),
+  };
+  const reason = cleanPolicyId($('#exception_builder_reason').value, '');
+  if (reason) rule.reason = reason;
+  if (addPolicyRuleToTextarea('#pol_policy_exceptions', rule, 'Time-bound exceptions')) {
+    $('#polSaved').textContent = `Added exception ${rule.id}`;
+  }
+}
+
 function statusTone(status) {
   const s = String(status || '').toLowerCase();
   if (['approved', 'allowed', 'justified', 'warned_sent', 'redacted'].includes(s)) return 'good';
@@ -917,6 +1008,49 @@ async function loadPolicy() {
     : `<textarea id="pol_approval_routing_rules" class="policy-textarea" spellcheck="false" style="min-height:160px" placeholder='[{"id":"legal_group_contracts","groups":["PromptWall Legal"],"categories":["LEGAL_CONTRACT"],"destinations":["claude.ai"],"assignedGroup":"legal","assignedRole":"approver","slaMinutes":60}]'>${escapeHtml(policyJsonText(p.approvalRoutingRules))}</textarea>`}
     </div>
     <div class="policy-label">Scoped policy and exceptions</div>
+    ${readonly ? '' : `<div class="policy-builder-grid">
+      <div class="policy-builder" id="scopeRuleBuilder">
+        <h3>Guided scoped enforcement</h3>
+        <div class="mini-grid">
+          <label>Rule id<input id="scope_builder_id" type="text" placeholder="legal_contract_review"/></label>
+          <label>SCIM groups<input id="scope_builder_groups" type="text" placeholder="PromptWall Legal"/></label>
+          <label>Users<input id="scope_builder_users" type="text" placeholder="counsel@example.test"/></label>
+          <label>Destinations<input id="scope_builder_destinations" type="text" placeholder="claude.ai"/></label>
+          <label>Categories<input id="scope_builder_categories" type="text" placeholder="LEGAL_CONTRACT"/></label>
+          <label>Detectors<input id="scope_builder_detectors" type="text" placeholder="SECRET_KEY"/></label>
+          <label>Mode<select id="scope_builder_mode">
+            <option value="block">Block</option>
+            <option value="justify">Require justification</option>
+            <option value="redact">Redact</option>
+            <option value="warn">Warn</option>
+          </select></label>
+          <label>Min severity<select id="scope_builder_severity">
+            <option value="">No override</option>
+            <option value="1">low</option>
+            <option value="2" selected>medium</option>
+            <option value="3">high</option>
+            <option value="4">critical</option>
+          </select></label>
+          <label>Risk score<input id="scope_builder_risk" type="number" min="0" max="100" placeholder="25"/></label>
+          <label>Reason<input id="scope_builder_reason" type="text" placeholder="legal_contract_review"/></label>
+        </div>
+        <button class="btn" id="addScopeRule" type="button">${icons.check}Add scoped rule</button>
+      </div>
+      <div class="policy-builder" id="exceptionRuleBuilder">
+        <h3>Guided time-bound exception</h3>
+        <div class="mini-grid">
+          <label>Exception id<input id="exception_builder_id" type="text" placeholder="legal_vendor_24h"/></label>
+          <label>SCIM groups<input id="exception_builder_groups" type="text" placeholder="PromptWall Legal"/></label>
+          <label>Users<input id="exception_builder_users" type="text" placeholder="counsel@example.test"/></label>
+          <label>Destinations<input id="exception_builder_destinations" type="text" placeholder="claude.ai"/></label>
+          <label>Categories<input id="exception_builder_categories" type="text" placeholder="LEGAL_CONTRACT"/></label>
+          <label>Detectors<input id="exception_builder_detectors" type="text" placeholder="SOURCE_CODE"/></label>
+          <label>Expires after hours<input id="exception_builder_hours" type="number" min="1" max="720" value="24"/></label>
+          <label>Reason<input id="exception_builder_reason" type="text" placeholder="approved_vendor_review"/></label>
+        </div>
+        <button class="btn" id="addExceptionRule" type="button">${icons.check}Add exception</button>
+      </div>
+    </div>`}
     <div class="policy-advanced-grid">
       <label class="policy-list-field">Scoped enforcement rules
         ${readonly
@@ -964,6 +1098,8 @@ async function loadPolicy() {
     };
   });
   if (readonly) return;
+  $('#addScopeRule').onclick = appendGuidedScopeRule;
+  $('#addExceptionRule').onclick = appendGuidedExceptionRule;
   $('#savePolicy').onclick = async () => {
     const mode = (document.querySelector('input[name=mode]:checked') || {}).value || p.enforcementMode;
     const approvalRoutingRules = parsePolicyJsonArray($('#pol_approval_routing_rules').value, 'Approval routing rules');

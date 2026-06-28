@@ -84,10 +84,19 @@ test('dashboard exposes retention settings and manual purge control', () => {
 
 test('dashboard exposes scoped policy and exception editors', () => {
   assert.match(index, /policy-advanced-grid/);
+  assert.match(index, /policy-builder-grid/);
   assert.match(dashboard, /function shortPolicyValue/);
   assert.match(dashboard, /function policyMatcherSummary/);
+  assert.match(dashboard, /function appendGuidedScopeRule/);
+  assert.match(dashboard, /function appendGuidedExceptionRule/);
+  assert.match(dashboard, /id="scopeRuleBuilder"/);
+  assert.match(dashboard, /id="exceptionRuleBuilder"/);
+  assert.match(dashboard, /id="addScopeRule"/);
+  assert.match(dashboard, /id="addExceptionRule"/);
   assert.match(dashboard, /id="pol_policy_scopes"/);
   assert.match(dashboard, /id="pol_policy_exceptions"/);
+  assert.match(dashboard, /addPolicyRuleToTextarea\('#pol_policy_scopes', rule, 'Scoped enforcement rules'\)/);
+  assert.match(dashboard, /addPolicyRuleToTextarea\('#pol_policy_exceptions', rule, 'Time-bound exceptions'\)/);
   assert.match(dashboard, /const policyScopes = parsePolicyJsonArray\(\$\(\'#pol_policy_scopes\'\)\.value, 'Scoped enforcement rules'\)/);
   assert.match(dashboard, /const policyExceptions = parsePolicyJsonArray\(\$\(\'#pol_policy_exceptions\'\)\.value, 'Time-bound exceptions'\)/);
   assert.match(dashboard, /policyScopes,/);
