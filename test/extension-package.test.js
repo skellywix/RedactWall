@@ -36,7 +36,9 @@ function writeFixture(rootDir, opts = {}) {
   writeFile(path.join(rootDir, 'detection-engine', 'adapters.js'), 'const adapters = 1;\n');
   writeFile(path.join(rootDir, 'sensors', 'browser-extension', 'lib', 'detect.js'), opts.drift ? 'const detector = 2;\n' : 'const detector = 1;\n');
   writeFile(path.join(rootDir, 'sensors', 'browser-extension', 'lib', 'adapters.js'), 'const adapters = 1;\n');
-  writeFile(path.join(rootDir, 'sensors', 'browser-extension', 'background.js'), opts.devKey ? "const ingestKey = 'dev-ingest-key';\n" : "const ingestKey = '';\n");
+  writeFile(path.join(rootDir, 'sensors', 'browser-extension', 'background.js'), opts.devKey
+    ? "const api = '/api/v1/heartbeat';\nfunction buildInstallChecks() {}\nconst check = 'managed_identity';\nconst ingestKey = 'dev-ingest-key';\n"
+    : "const api = '/api/v1/heartbeat';\nfunction buildInstallChecks() {}\nconst check = 'managed_identity';\n");
   writeFile(path.join(rootDir, 'sensors', 'browser-extension', 'content.js'), 'console.log("content");\n');
   writeFile(path.join(rootDir, 'sensors', 'browser-extension', 'content.css'), 'body { color: black; }\n');
   writeFile(path.join(rootDir, 'sensors', 'browser-extension', 'popup.html'), '<html></html>\n');
@@ -80,6 +82,7 @@ test('package script writes a zip and prompt-free integrity manifest', (t) => {
   assert.strictEqual(manifest.appVersion, JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version);
   assert.strictEqual(manifest.checks.manifestV3, true);
   assert.strictEqual(manifest.checks.syncedEngine, true);
+  assert.strictEqual(manifest.checks.installValidationIncluded, true);
   assert.strictEqual(manifest.checks.developmentIngestKeyAbsent, true);
 
   const zip = new AdmZip(result.zipPath);
@@ -90,6 +93,8 @@ test('package script writes a zip and prompt-free integrity manifest', (t) => {
   }
 
   const background = zip.readAsText('background.js');
+  assert.match(background, /\/api\/v1\/heartbeat/);
+  assert.match(background, /buildInstallChecks/);
   assert.doesNotMatch(background, /dev-ingest-key/);
   assert.doesNotMatch(JSON.stringify(manifest), /prompt\s*:/i);
   assert.doesNotMatch(JSON.stringify(manifest), /524-71-9043|4111 1111|REPLACE_WITH_LONG_RANDOM_INGEST_KEY/);

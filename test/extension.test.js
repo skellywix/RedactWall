@@ -15,7 +15,11 @@ const adapters = require('../detection-engine/adapters');
 
 function loadBackground(opts = {}) {
   let onMessage;
+  let onInstalled;
+  let onStartup;
+  let onAlarm;
   const storage = { ...(opts.local || {}) };
+  const createdAlarms = [];
   const chrome = {
     storage: {
       local: {
@@ -31,13 +35,13 @@ function loadBackground(opts = {}) {
       managed: { get: async () => ({ ...(opts.managed || {}) }) },
     },
     runtime: {
-      onInstalled: { addListener() {} },
-      onStartup: { addListener() {} },
+      onInstalled: { addListener(fn) { onInstalled = fn; } },
+      onStartup: { addListener(fn) { onStartup = fn; } },
       onMessage: { addListener(fn) { onMessage = fn; } },
       getManifest: () => manifest,
       lastError: null,
     },
-    alarms: { create() {}, onAlarm: { addListener() {} } },
+    alarms: { create(name, spec) { createdAlarms.push({ name, spec }); }, onAlarm: { addListener(fn) { onAlarm = fn; } } },
     tabs: { onUpdated: { addListener() {} } },
   };
   const context = {
@@ -50,9 +54,13 @@ function loadBackground(opts = {}) {
     self: {},
     setTimeout,
   };
-  vm.runInNewContext(background + '\nself.__test = { requestTimeoutMs, fetchJsonWithTimeout, failClosed, scanUnavailable };', context);
+  vm.runInNewContext(background + '\nself.__test = { requestTimeoutMs, fetchJsonWithTimeout, failClosed, scanUnavailable, buildHeartbeatBody, buildInstallChecks, reportInstallHealth };', context);
   return {
     context,
+    createdAlarms,
+    runAlarm: (name) => onAlarm && onAlarm({ name }),
+    runInstalled: () => onInstalled && onInstalled(),
+    runStartup: () => onStartup && onStartup(),
     storage,
     sendMessage: (msg) => new Promise((resolve) => onMessage(msg, {}, resolve)),
   };
@@ -298,6 +306,109 @@ test('warn and justify sends wait for recorded gate response before resend', () 
 
 test('manifest grants alarms permission used for policy refresh', () => {
   assert.ok(manifest.permissions.includes('alarms'));
+});
+
+test('background install health posts secret-free browser heartbeat', async () => {
+  const ingestKey = 'browser-ingest-key-0000000000000000000001';
+  let outbound;
+  const bg = loadBackground({
+    managed: {
+      serverUrl: 'https://promptwall.customer.example',
+      ingestKey,
+      email: 'analyst@example.test',
+      orgId: 'cu-acme',
+    },
+    fetch: async (url, options) => {
+      outbound = { url, headers: options.headers, body: JSON.parse(options.body), rawBody: options.body };
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ id: 'q_browser_heartbeat', decision: 'recorded', status: 'sensor_heartbeat', failedChecks: [] }),
+      };
+    },
+  });
+
+  const res = await bg.context.self.__test.reportInstallHealth();
+  assert.strictEqual(res.ok, true);
+  assert.strictEqual(outbound.url, 'https://promptwall.customer.example/api/v1/heartbeat');
+  assert.strictEqual(outbound.headers['x-api-key'], ingestKey);
+  assert.strictEqual(outbound.body.source, 'browser_extension');
+  assert.strictEqual(outbound.body.destination, 'browser-install');
+  assert.strictEqual(outbound.body.user, 'analyst@example.test');
+  assert.strictEqual(outbound.body.orgId, 'cu-acme');
+  assert.deepStrictEqual(outbound.body.sensor, {
+    name: 'browser_extension',
+    version: manifest.version,
+    platform: 'chrome_mv3',
+  });
+  assert.ok(outbound.body.checks.every((item) => item.ok));
+  assert.ok(outbound.body.checks.some((item) => item.id === 'managed_identity' && item.ok));
+  assert.ok(outbound.body.checks.some((item) => item.id === 'content_script_coverage' && item.ok));
+  assert.ok(!outbound.rawBody.includes(ingestKey));
+  assert.ok(!JSON.stringify(outbound.body).includes(ingestKey));
+});
+
+test('background install health flags unmanaged local config without leaking keys', async () => {
+  const ingestKey = 'local-browser-key-000000000000000000000001';
+  let outbound;
+  const bg = loadBackground({
+    local: {
+      serverUrl: 'http://localhost:4000',
+      ingestKey,
+      user: 'local-tech',
+      orgId: 'local-cu',
+    },
+    fetch: async (url, options) => {
+      outbound = { url, body: JSON.parse(options.body), rawBody: options.body };
+      return { ok: true, status: 200, json: async () => ({ id: 'q_local_browser_heartbeat' }) };
+    },
+  });
+
+  const res = await bg.context.self.__test.reportInstallHealth();
+  assert.strictEqual(res.ok, true);
+  assert.strictEqual(outbound.url, 'http://localhost:4000/api/v1/heartbeat');
+  assert.ok(outbound.body.checks.some((item) => item.id === 'managed_config' && !item.ok));
+  assert.ok(outbound.body.checks.some((item) => item.id === 'managed_identity' && !item.ok));
+  assert.ok(outbound.body.checks.some((item) => item.id === 'org_id' && !item.ok));
+  assert.ok(!outbound.rawBody.includes(ingestKey));
+});
+
+test('background install health does not post without ingest key', async () => {
+  const bg = loadBackground({
+    managed: { serverUrl: 'https://promptwall.customer.example', email: 'analyst@example.test', orgId: 'cu-acme' },
+    fetch: async () => {
+      throw new Error('fetch should not run without an ingest key');
+    },
+  });
+  const res = await bg.context.self.__test.reportInstallHealth();
+  assert.strictEqual(res.ok, false);
+  assert.strictEqual(res.reason, 'missing_ingest_key');
+  assert.ok(res.checks.some((item) => item.id === 'ingest_key' && !item.ok));
+});
+
+test('background install health does not throw on invalid server URL', async () => {
+  const bg = loadBackground({
+    managed: {
+      serverUrl: 'not a url',
+      ingestKey: 'browser-ingest-key-0000000000000000000001',
+      email: 'analyst@example.test',
+      orgId: 'cu-acme',
+    },
+    fetch: async () => {
+      throw new Error('fetch should not run with an invalid server URL');
+    },
+  });
+  const res = await bg.context.self.__test.reportInstallHealth();
+  assert.strictEqual(res.ok, false);
+  assert.strictEqual(res.reason, 'invalid_server_url');
+  assert.ok(res.checks.some((item) => item.id === 'server_url' && !item.ok));
+});
+
+test('background schedules browser install-health heartbeats', () => {
+  const bg = loadBackground();
+  assert.ok(bg.createdAlarms.some((item) => item.name === 'installHeartbeat' && item.spec.periodInMinutes === 60));
+  assert.match(background, /onInstalled\.addListener\(\(\) => runAsync\(refreshPolicyAndHealth\)\)/);
+  assert.match(background, /onStartup\.addListener\(\(\) => runAsync\(refreshPolicyAndHealth\)\)/);
 });
 
 test('governed Poe destination receives active content-script protection', () => {

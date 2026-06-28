@@ -119,12 +119,12 @@ and MCP guard events include bounded operational metadata only:
 ```
 
 Mixed versions show as an attention item so a pilot admin can spot partial
-rollouts after a managed extension or agent update. Endpoint and MCP guard
-install validation can also report bounded check results through
+rollouts after a managed extension or agent update. Browser extension, endpoint,
+and MCP guard install validation can also report bounded check results through
 `POST /api/v1/heartbeat`; failed checks show as sensor install-health attention
 in Coverage and in the sanitized examiner export. The coverage API does not
 include prompt bodies, raw retained prompts, token vaults, ingest keys, handoff
-secrets, or decision notes.
+secrets, tool output, or decision notes.
 
 ## Browser Extension Package
 
@@ -136,8 +136,17 @@ npm run package:extension
 
 The command writes a zip and adjacent SHA-256 manifest under `dist/browser-extension/`.
 It verifies Manifest V3 wiring, managed-storage schema coverage, synced engine
-copies, and absence of a packaged development ingest key. Configure `serverUrl`,
-`ingestKey`, and identity through Chrome managed storage or local demo storage.
+copies, browser install-health heartbeat support, and absence of a packaged
+development ingest key. Configure `serverUrl`, `ingestKey`, and identity through
+Chrome managed storage or local demo storage.
+
+The extension posts sanitized install-health heartbeats on install, browser
+startup, and a periodic `installHeartbeat` alarm when server config is present.
+The heartbeat verifies Manifest V3 metadata, background worker wiring, content
+script coverage, protection status, server URL, ingest-key presence, managed
+configuration, managed identity, tenant id, and policy cache availability. It
+posts only check IDs, boolean status, and short details; it does not post ingest
+keys, prompts, file content, or browser page content.
 
 ## Endpoint Agent Package
 

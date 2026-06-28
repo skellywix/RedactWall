@@ -28,4 +28,6 @@ test('extension force-install example has placeholder id and update url', () => 
 test('managed deployment guide warns about secret-bearing policy', () => {
   assert.match(guide, /Never put a real ingest key in source control/);
   assert.match(guide, /Treat managed policy as secret-bearing configuration/);
+  assert.match(guide, /browser install-health heartbeat/i);
+  assert.match(guide, /Coverage tab shows `browser_extension` install health/);
 });

@@ -103,6 +103,7 @@ This section is generated from the app by `npm run docs:demo-guide`. Do not hand
 | `server/public/index.html` | Admin dashboard shell | Present |
 | `detection-engine/detect.js` | Shared detection engine source of truth | Present |
 | `sensors/browser-extension/manifest.json` | Chrome extension entrypoint | Present |
+| `sensors/browser-extension/background.js` | Browser install-health heartbeat and control-plane relay | Present |
 | `sensors/browser-extension/content.js` | Browser send, paste, upload enforcement | Present |
 | `sensors/endpoint-agent/agent.js` | Local folder and file sensor | Present |
 | `sensors/endpoint-agent/write-handoff.js` | Signed native upload-intent handoff writer | Present |

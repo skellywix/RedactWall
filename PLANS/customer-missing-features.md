@@ -157,10 +157,10 @@ Acceptance evidence:
 Current state: extension and endpoint package generation, managed Chrome policy
 docs, required-sensor and desired-version posture, default-deny unapproved AI
 blocking, AI-domain adapter and browser-manifest coverage checks, AWS
-customer-silo deployment, setup preflight, endpoint technician install
-validation heartbeats, and MCP guard install validation heartbeats exist.
-Missing pieces are a signed update channel, browser install validation, and
-customer-ready fleet reporting.
+customer-silo deployment, setup preflight, browser extension install-health
+heartbeats, endpoint technician install validation heartbeats, and MCP guard
+install validation heartbeats exist. Missing pieces are a signed update channel
+and customer-ready fleet reporting.
 
 Customer ask: "How do we force-install it, keep it updated, and prove every
 covered user actually has it?"
@@ -172,18 +172,19 @@ Implementation connection:
 - Use the existing `desiredSensorVersions` and `requiredSensors` policy fields
   as the rollout contract for required browser, endpoint, MCP, proxy, or custom
   sensors.
-- Extend install-health checks beyond the endpoint agent so browser installs can
-  report managed identity, policy age, and configuration state.
+- Use browser extension install-health heartbeats to report managed config,
+  managed identity, tenant id, server URL, ingest-key presence, content-script
+  coverage, policy cache, version, and failed check IDs without exposing secrets.
 - Use MCP guard install validation to prove runtime files, shared engine,
   Node version, server URL, and ingest-key presence without exposing secrets.
 - Keep technician validation output in the dashboard and evidence export:
-  endpoint env, ingest-key presence, handoff readiness, last seen time, version,
-  and failed check IDs.
+  browser managed config, endpoint env, ingest-key presence, handoff readiness,
+  last seen time, version, and failed check IDs.
 - Prepare Chrome Web Store private/unlisted release checklist and update docs.
 - Add endpoint package manifest verification to install-day runbook output.
 
 Acceptance evidence:
-- `node --test test/sensor-heartbeat.test.js test/endpoint-install-check.test.js test/mcp-install-check.test.js test/coverage.test.js test/extension-package.test.js test/endpoint-agent-package.test.js test/mcp-guard-package.test.js`
+- `node --test test/extension.test.js test/sensor-heartbeat.test.js test/endpoint-install-check.test.js test/mcp-install-check.test.js test/coverage.test.js test/extension-package.test.js test/endpoint-agent-package.test.js test/mcp-guard-package.test.js`
 - `npm run package:extension -- <temp>`
 - `npm run package:endpoint-agent -- <temp>`
 - Browser E2E shows coverage posture without page overflow on desktop and mobile.

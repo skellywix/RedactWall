@@ -18,8 +18,10 @@ For a sales demo, `chrome://extensions` plus Load unpacked is fine. For a client
    - `ingestKey`
    - `orgId`
    - `email` or `user`
-5. Confirm the dashboard receives attributed events.
-6. Confirm the extension is active on governed AI destinations.
+5. Confirm the dashboard Coverage tab receives the browser install-health
+   heartbeat for the correct user, org, version, and failed-check state.
+6. Confirm the dashboard receives attributed prompt/file events.
+7. Confirm the extension is active on governed AI destinations.
 
 ## Build The Package
 
@@ -37,6 +39,8 @@ dist/browser-extension/promptwall-extension-v<version>.manifest.json
 ```
 
 The manifest records the package SHA-256, every packaged file hash, the app and extension versions, the synced engine hashes, and packaging checks. It intentionally contains no prompt bodies or real keys.
+The package check also verifies that the browser install-health heartbeat code
+is present in the service worker.
 
 The command fails if:
 
@@ -44,6 +48,7 @@ The command fails if:
 - The extension version differs from `package.json`.
 - Required service worker, popup, content scripts, or managed schema files are missing.
 - The copied detection engine under `sensors/browser-extension/lib/` drifted from `detection-engine/`.
+- Browser install-health heartbeat support is missing from the service worker.
 - A development ingest key is present in packaged extension files.
 
 ## Extension Settings Example
@@ -79,9 +84,13 @@ On a managed test device:
 3. Confirm managed storage is present.
 4. Open the PromptWall popup and confirm protection is enabled.
 5. Open ChatGPT or Claude and send a benign prompt.
-6. Confirm the dashboard shows the correct user and org.
-7. Paste synthetic PII and confirm a block or redaction.
-8. Visit an unreviewed AI host and confirm PromptWall blocks it by default, then
+6. Confirm the dashboard Coverage tab shows `browser_extension` install health.
+   A healthy managed install should show passing checks for managed config,
+   managed identity, tenant id, server URL, ingest-key presence, content-script
+   coverage, and policy cache availability.
+7. Confirm the dashboard shows the correct user and org.
+8. Paste synthetic PII and confirm a block or redaction.
+9. Visit an unreviewed AI host and confirm PromptWall blocks it by default, then
    records the reviewed allow/govern/block decision after a Security Admin enters
    a reason.
 
@@ -93,3 +102,6 @@ On a managed test device:
 - Keep the extension ID stable across updates.
 - Treat managed policy as secret-bearing configuration because it contains the ingest key.
 - Do not embed ingest keys in the extension package. The packaged extension fails closed until local or managed storage supplies a tenant key.
+- Browser install-health heartbeats post only check IDs, boolean results, short
+  details, sensor metadata, user, and org id. The ingest key is used only in the
+  `x-api-key` header.

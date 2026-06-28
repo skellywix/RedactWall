@@ -101,6 +101,12 @@ function validatePackageContents(files) {
     { label: 'development ingest key', pattern: /dev-ingest-key/ },
     { label: 'environment assignment', pattern: /\b(?:INGEST_API_KEY|SENTINEL_SECRET|SENTINEL_DATA_KEY)\s*=/ },
   ];
+  const background = files.find((file) => file.relPath === 'background.js');
+  if (!background) throw new Error('Extension package is missing background.js');
+  const backgroundText = fs.readFileSync(background.absPath, 'utf8');
+  if (!/api\/v1\/heartbeat/.test(backgroundText) || !/buildInstallChecks/.test(backgroundText) || !/managed_identity/.test(backgroundText)) {
+    throw new Error('Extension package must include browser install validation with heartbeat support');
+  }
 
   for (const file of files) {
     const body = fs.readFileSync(file.absPath);
@@ -155,6 +161,7 @@ function packageExtension(opts = {}) {
       manifestV3: true,
       managedStorageSchema: true,
       syncedEngine: true,
+      installValidationIncluded: true,
       developmentIngestKeyAbsent: true,
       broadHostPermissionsAbsent: true,
     },

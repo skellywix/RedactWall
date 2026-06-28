@@ -237,7 +237,7 @@ For a Windows pilot, install the endpoint sensor as a logon task:
 ```
 
 The native handoff writer is a safe collector shim for pilots and future OS/app hooks. It signs a bounded upload-intent JSON file with the local endpoint config secret, references only an absolute local file path, and never reads file bytes or accepts the handoff secret as a command-line argument.
-`npm run endpoint:check` validates the endpoint env file, server URL, ingest-key presence, watch directory, runtime scripts, and optional desktop collector handoff setup. `npm run mcp:check` validates the MCP guard runtime, shared detection engine, Node version, and control-plane config. With `--emit-heartbeat`, both post only bounded check IDs and status to `/api/v1/heartbeat` so Coverage and the examiner export can prove install health without exposing keys, handoff secrets, prompt text, or file content.
+The browser extension automatically posts sanitized install-health heartbeats on install, startup, and a low-frequency alarm when it has managed or local server config. `npm run endpoint:check` validates the endpoint env file, server URL, ingest-key presence, watch directory, runtime scripts, and optional desktop collector handoff setup. `npm run mcp:check` validates the MCP guard runtime, shared detection engine, Node version, and control-plane config. All three sensor paths post only bounded check IDs and status to `/api/v1/heartbeat` so Coverage and the examiner export can prove install health without exposing keys, handoff secrets, prompt text, tool output, or file content.
 
 ### Test the product
 
@@ -300,7 +300,7 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 | Destination controls | Working — governed destination coverage, default-deny unapproved AI, full destination blocking, and file-upload-only blocking across browser, endpoint, gate, file, and response paths |
 | Output scanning | Working — `/api/v1/scan-response` flags PII/secrets in AI replies |
 | MCP guard / Endpoint agent | Working references - inline/MCP redaction; local endpoint folder watch plus signed native file-flow handoff prototype; redacted companion files for structured-only findings |
-| Auth & ops | Working: login lockout, password-confirmed raw reveal and release approval, release-token scoped polling, stable secret, `/healthz` · `/readyz` · `/api/metrics`, policy-driven sensor version and endpoint/MCP install-health posture, sanitized examiner export with coverage and lineage, Docker, CI |
+| Auth & ops | Working: login lockout, password-confirmed raw reveal and release approval, release-token scoped polling, stable secret, `/healthz` · `/readyz` · `/api/metrics`, policy-driven sensor version and browser/endpoint/MCP install-health posture, sanitized examiner export with coverage and lineage, Docker, CI |
 
 ## Shipped since the skeleton (see `ITERATIONS.md`)
 
@@ -309,7 +309,7 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 - **Backup/verify/restore** tooling for the SQLite evidence store with prompt-free manifests.
 - **Reversible redaction / Redact-&-Send**, sealed token vault, local response re-hydration.
 - **MDM identity**, reliable per-site send, **Man-in-the-Prompt** guard, **shadow-AI** discovery and default-deny unapproved AI blocking.
-- **Coverage posture** showing governed destinations, required sensors, desired sensor versions, endpoint and MCP install-health checks, shadow-AI sightings, and stale or missing sensor coverage.
+- **Coverage posture** showing governed destinations, required sensors, desired sensor versions, browser/endpoint/MCP install-health checks, shadow-AI sightings, and stale or missing sensor coverage.
 - **Sanitized examiner export** with audit integrity, policy diffs, coverage posture, and lineage by user, destination, sensor, channel, category, and decision.
 - **Login lockout**, stable session secret, regulation **templates**, **/healthz · /readyz · /api/metrics**, Docker + CI.
 

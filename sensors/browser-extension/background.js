@@ -15,28 +15,35 @@ const DEFAULTS = {
   enabled: true,
   policy: { enforcementMode: 'block', blockMinSeverity: 2, blockRiskScore: 25, governedDestinations: [], allowedDestinations: [], blockedDestinations: [], blockedFileUploadDestinations: [], blockUnapprovedAiDestinations: true, alwaysBlock: ['US_SSN', 'CREDIT_CARD', 'BANK_ACCOUNT', 'ROUTING_NUMBER', 'US_ITIN', 'US_NPI', 'MEMBER_ID', 'LOAN_NUMBER', 'MEDICAL_RECORD_NUMBER', 'HEALTH_INSURANCE_ID', 'SECRET_KEY', 'PRIVATE_KEY', 'CANARY_TOKEN'] },
 };
+const MANAGED_KEYS = ['user', 'email', 'orgId', 'serverUrl', 'ingestKey'];
+const IDENTITY_KEYS = ['user', 'email', 'orgId'];
+const INSTALL_HEARTBEAT_DESTINATION = 'browser-install';
 
 async function cfg() {
   const c = await chrome.storage.local.get(Object.keys(DEFAULTS));
   return { ...DEFAULTS, ...c };
 }
 
-// Identity precedence: MDM-managed (enterprise force-install) > local override >
-// an explicit "unmanaged" marker (so unattributed events are visible as a gap,
-// never silently mislabeled as a real person).
-async function identity() {
-  let managed = {};
-  try { managed = (await chrome.storage.managed.get(['user', 'email', 'orgId'])) || {}; } catch (e) {}
-  const local = await chrome.storage.local.get(['user', 'email', 'orgId']);
+async function managedConfig() {
+  try { return (await chrome.storage.managed.get(MANAGED_KEYS)) || {}; } catch (e) { return {}; }
+}
+
+function resolveIdentity(managed = {}, local = {}) {
   const user = managed.email || managed.user || local.email || local.user || 'unattributed@unmanaged';
   const orgId = managed.orgId || local.orgId || null;
   return { user, orgId, managed: !!(managed.email || managed.user) };
 }
 
+// Identity precedence: MDM-managed (enterprise force-install) > local override >
+// an explicit "unmanaged" marker (so unattributed events are visible as a gap,
+// never silently mislabeled as a real person).
+async function identity() {
+  const [managed, local] = await Promise.all([managedConfig(), chrome.storage.local.get(IDENTITY_KEYS)]);
+  return resolveIdentity(managed, local);
+}
+
 async function serverCfg() {
-  let managed = {};
-  try { managed = (await chrome.storage.managed.get(['serverUrl', 'ingestKey'])) || {}; } catch (e) {}
-  const c = await cfg();
+  const [managed, c] = await Promise.all([managedConfig(), cfg()]);
   return { serverUrl: managed.serverUrl || c.serverUrl, ingestKey: managed.ingestKey || c.ingestKey, enabled: c.enabled, requestTimeoutMs: c.requestTimeoutMs };
 }
 
@@ -60,12 +67,78 @@ function missingServerConfigReason(c) {
   return null;
 }
 
+function validServerOrigin(value) {
+  try {
+    const url = new URL(String(value || ''));
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
+    return `${url.protocol}//${url.host}`;
+  } catch (e) {
+    return null;
+  }
+}
+
 function sensorMetadata() {
   const manifest = (chrome.runtime && chrome.runtime.getManifest) ? chrome.runtime.getManifest() : {};
   return {
     name: 'browser_extension',
     version: manifest.version || 'unknown',
     platform: 'chrome_mv3',
+  };
+}
+
+function installCheck(id, ok, detail) {
+  return {
+    id,
+    ok: ok === true,
+    detail: String(detail || (ok ? 'ok' : 'attention')).slice(0, 160),
+  };
+}
+
+function manifestInfo() {
+  return (chrome.runtime && chrome.runtime.getManifest) ? chrome.runtime.getManifest() : {};
+}
+
+function hasContentScriptCoverage(manifest = manifestInfo()) {
+  return (manifest.content_scripts || []).some((script) => (
+    Array.isArray(script.matches)
+    && script.matches.length > 0
+    && Array.isArray(script.js)
+    && script.js.includes('lib/detect.js')
+    && script.js.includes('content.js')
+  ));
+}
+
+function buildInstallChecks({ config = DEFAULTS, server = {}, identity: who = {}, managed = {}, manifest = manifestInfo() } = {}) {
+  const origin = validServerOrigin(server.serverUrl);
+  const hasManagedServer = !!(managed.serverUrl && managed.ingestKey);
+  const hasManagedIdentity = !!(managed.email || managed.user);
+  const hasManagedTenant = !!managed.orgId;
+  return [
+    installCheck('extension_manifest', manifest.manifest_version === 3 && !!manifest.version, `mv${manifest.manifest_version || 'unknown'} v${manifest.version || 'unknown'}`),
+    installCheck('background_worker', !!(manifest.background && manifest.background.service_worker), 'service worker configured'),
+    installCheck('content_script_coverage', hasContentScriptCoverage(manifest), 'content scripts cover AI hosts'),
+    installCheck('protection_enabled', config.enabled !== false, config.enabled === false ? 'disabled locally' : 'enabled'),
+    installCheck('server_url', !!origin, origin || 'missing or invalid'),
+    installCheck('ingest_key', !!(server.ingestKey && String(server.ingestKey).length >= 16), 'configured'),
+    installCheck('managed_config', hasManagedServer, hasManagedServer ? 'managed server config present' : 'local or missing server config'),
+    installCheck('managed_identity', who.managed === true && hasManagedIdentity, who.managed === true ? 'managed identity present' : 'unmanaged identity'),
+    installCheck('org_id', !!(who.orgId && hasManagedTenant), who.orgId ? 'configured' : 'missing'),
+    installCheck('policy_cache', !!(config.policy && typeof config.policy === 'object'), 'policy available'),
+  ];
+}
+
+function buildHeartbeatBody(checks, who, opts = {}) {
+  return {
+    user: (who && who.user) || 'unattributed@unmanaged',
+    orgId: (who && who.orgId) || null,
+    source: 'browser_extension',
+    destination: opts.destination || INSTALL_HEARTBEAT_DESTINATION,
+    sensor: sensorMetadata(),
+    checks: (checks || []).map((item) => ({
+      id: item.id,
+      ok: item.ok === true,
+      detail: item.detail,
+    })),
   };
 }
 
@@ -85,6 +158,31 @@ async function fetchJsonWithTimeout(url, options, timeoutMs) {
   }
 }
 
+async function reportInstallHealth() {
+  const [config, managed, localIdentity] = await Promise.all([
+    cfg(),
+    managedConfig(),
+    chrome.storage.local.get(IDENTITY_KEYS),
+  ]);
+  const who = resolveIdentity(managed, localIdentity);
+  const server = {
+    serverUrl: managed.serverUrl || config.serverUrl,
+    ingestKey: managed.ingestKey || config.ingestKey,
+    enabled: config.enabled,
+    requestTimeoutMs: config.requestTimeoutMs,
+  };
+  const checks = buildInstallChecks({ config, server, identity: who, managed });
+  if (!server.enabled) return { ok: false, reason: 'disabled', checks };
+  const missing = missingServerConfigReason(server);
+  if (missing) return { ok: false, reason: missing, checks };
+  if (!validServerOrigin(server.serverUrl)) return { ok: false, reason: 'invalid_server_url', checks };
+  return fetchJsonWithTimeout(String(server.serverUrl).replace(/\/+$/, '') + '/api/v1/heartbeat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-api-key': server.ingestKey },
+    body: JSON.stringify(buildHeartbeatBody(checks, who)),
+  }, server.requestTimeoutMs);
+}
+
 async function refreshPolicy() {
   const c = await serverCfg();
   if (!c.enabled) return;
@@ -98,10 +196,23 @@ async function refreshPolicy() {
   } catch (e) { /* offline → keep cached/default policy (fail-safe to block) */ }
 }
 
-chrome.runtime.onInstalled.addListener(refreshPolicy);
-chrome.runtime.onStartup.addListener(refreshPolicy);
+async function refreshPolicyAndHealth() {
+  await refreshPolicy();
+  await reportInstallHealth();
+}
+
+function runAsync(fn) {
+  try { Promise.resolve(fn()).catch(() => {}); } catch (e) {}
+}
+
+chrome.runtime.onInstalled.addListener(() => runAsync(refreshPolicyAndHealth));
+chrome.runtime.onStartup.addListener(() => runAsync(refreshPolicyAndHealth));
 chrome.alarms?.create('refreshPolicy', { periodInMinutes: 15 });
-chrome.alarms?.onAlarm.addListener((a) => { if (a.name === 'refreshPolicy') refreshPolicy(); });
+chrome.alarms?.create('installHeartbeat', { periodInMinutes: 60 });
+chrome.alarms?.onAlarm.addListener((a) => {
+  if (a.name === 'refreshPolicy') runAsync(refreshPolicy);
+  if (a.name === 'installHeartbeat') runAsync(reportInstallHealth);
+});
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'getConfig') {
