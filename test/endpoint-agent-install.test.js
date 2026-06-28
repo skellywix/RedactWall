@@ -25,6 +25,8 @@ test('installer registers a restarting scheduled task without putting the ingest
   assert.match(install, /BUILTIN\\Administrators/);
   assert.match(install, /ENDPOINT_AGENT_HANDOFF_SECRET=\$HandoffSecret/);
   assert.match(install, /InstallDesktopCollector/);
+  assert.match(install, /DesktopCollectorKeyName/);
+  assert.match(install, /ENDPOINT_AGENT_DESKTOP_DESTINATION=\$DesktopCollectorDestination/);
   assert.match(install, /install-desktop-collector\.ps1/);
   assert.match(install, /InstallDesktopCollector requires HandoffSecret/);
   assert.match(install, /Set-Acl -LiteralPath \$handoffRoot/);
@@ -57,12 +59,14 @@ test('desktop collector shell action is per-user and secret-free', () => {
   assert.match(desktopRun, /\[string\[\]\]\$FilePath/);
   assert.match(desktopRun, /foreach \(\$file in \$FilePath\)/);
   assert.match(desktopRun, /protected-upload\.js/);
+  assert.match(desktopRun, /if \(\$Destination\)/);
   assert.match(desktopRun, /--wait/);
   assert.match(desktopRun, /--json/);
   assert.match(desktopUninstall, /HKEY_CURRENT_USER\\Software\\Classes\\\*\\shell/);
 });
 
 test('uninstaller removes task and can remove endpoint config', () => {
+  assert.match(uninstall, /Stop-ScheduledTask/);
   assert.match(uninstall, /Unregister-ScheduledTask/);
   assert.match(uninstall, /\$RemoveConfig/);
   assert.match(uninstall, /\$RemoveDesktopCollector/);

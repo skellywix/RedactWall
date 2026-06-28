@@ -10,6 +10,7 @@ const {
   processNativeHandoffFile,
   refreshPolicy,
   fetchPolicy,
+  sensorPolicy,
   scannerConfig,
   ignoredByScanner,
   postJson,
@@ -354,6 +355,12 @@ test('refreshes scanner policy from the control plane', async () => {
   assert.ok(scanner.ignoreFilenames.has('skip-me.txt'));
   assert.ok(scanner.ignoreExtensions.has('.blocked'));
   assert.strictEqual(scanner.maxFileBytes, 4096);
+});
+
+test('sensor policy keeps the desktop collector destination label', () => {
+  const pol = sensorPolicy({ desktopCollectorDestination: 'Copilot Desktop' });
+  assert.strictEqual(pol.desktopCollectorDestination, 'Copilot Desktop');
+  assert.strictEqual(sensorPolicy({ desktopCollectorDestination: '   ' }).desktopCollectorDestination, 'Desktop AI');
 });
 
 test('policy refresh times out and keeps the current scanner config', async () => {

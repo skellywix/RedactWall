@@ -52,6 +52,7 @@
   "allowedDestinations": [],
   "blockedDestinations": [],
   "blockedFileUploadDestinations": [],
+  "desktopCollectorDestination": "Desktop AI",
   "scanner": {
     "ignoreDirectories": [
       "node_modules",

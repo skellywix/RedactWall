@@ -17,6 +17,33 @@ test('destination policy matches hosts, URLs, labels, and wildcards', () => {
   assert.strictEqual(policy.fileUploadBlocked('https://chatgpt.com/c/abc', { blockedFileUploadDestinations: ['chatgpt.com'] }), true);
 });
 
+test('destination review moves normalized destinations between policy lists', () => {
+  const current = {
+    governedDestinations: ['poe.com', 'chatgpt.com'],
+    allowedDestinations: ['chatgpt.com'],
+    blockedDestinations: ['poe.com'],
+    blockedFileUploadDestinations: ['poe.com'],
+  };
+
+  const allowed = policy.reviewDestination(current, 'https://www.Poe.com/chat', 'allow');
+  assert.strictEqual(allowed.destination, 'poe.com');
+  assert.strictEqual(allowed.decision, 'allow');
+  assert.deepStrictEqual(allowed.policy.governedDestinations, ['chatgpt.com']);
+  assert.deepStrictEqual(allowed.policy.allowedDestinations, ['chatgpt.com', 'poe.com']);
+  assert.deepStrictEqual(allowed.policy.blockedDestinations, []);
+  assert.deepStrictEqual(allowed.policy.blockedFileUploadDestinations, []);
+
+  const blocked = policy.reviewDestination(allowed.policy, 'poe.com', 'block');
+  assert.deepStrictEqual(blocked.policy.allowedDestinations, ['chatgpt.com']);
+  assert.deepStrictEqual(blocked.policy.blockedDestinations, ['poe.com']);
+
+  const governed = policy.reviewDestination(blocked.policy, 'poe.com', 'govern');
+  assert.deepStrictEqual(governed.policy.blockedDestinations, []);
+  assert.ok(governed.policy.governedDestinations.includes('poe.com'));
+  assert.throws(() => policy.reviewDestination(current, '', 'allow'), /destination required/);
+  assert.throws(() => policy.reviewDestination(current, 'poe.com', 'ignore'), /unknown destination decision/);
+});
+
 test('policy change detail records normalized before-after changes', () => {
   const before = {
     enforcementMode: 'block',
@@ -77,6 +104,28 @@ test('evidence exports parsed policy changes but not raw audit detail text', () 
     { field: 'blockedFileUploadDestinations', before: [], after: ['chatgpt.com'] },
   ]);
   assert.ok(!JSON.stringify(entry).includes('"type":"policy_change"'));
+});
+
+test('evidence exports destination-review policy changes', () => {
+  const detail = policy.policyChangeDetail(
+    { governedDestinations: ['poe.com'], allowedDestinations: [], blockedDestinations: [] },
+    { governedDestinations: [], allowedDestinations: ['poe.com'], blockedDestinations: [] },
+  );
+  const entry = evidence.safeAuditEntry({
+    id: 'a_destination',
+    ts: '2026-06-26T12:00:00.000Z',
+    action: 'DESTINATION_REVIEWED',
+    actor: 'admin',
+    detail,
+    prevHash: '0'.repeat(64),
+    hash: '1'.repeat(64),
+  });
+
+  assert.deepStrictEqual(entry.policyChange.changed, [
+    { field: 'governedDestinations', before: ['poe.com'], after: [] },
+    { field: 'allowedDestinations', before: [], after: ['poe.com'] },
+  ]);
+  assert.ok(entry.detailHash);
 });
 
 test('evidence ignores arbitrary policy audit detail shapes', () => {

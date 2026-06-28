@@ -678,6 +678,7 @@ app.get('/api/v1/policy', checkIngestKey, (req, res) => {
     allowedDestinations: p.allowedDestinations || [],
     blockedDestinations: p.blockedDestinations || [],
     blockedFileUploadDestinations: p.blockedFileUploadDestinations || [],
+    desktopCollectorDestination: p.desktopCollectorDestination || policy.DEFAULT_POLICY.desktopCollectorDestination,
     scanner: p.scanner || {},
   });
 });
@@ -1046,6 +1047,30 @@ app.get('/api/risk', auth.requireAuth, (req, res) => {
 
 app.get('/api/coverage', auth.requireAuth, (req, res) => {
   res.json(coverage.summarize(db.listQueries({ limit: 5000 }), policy.loadPolicy()));
+});
+
+app.get('/api/destinations/review', auth.requireAuth, (req, res) => {
+  const report = coverage.summarize(db.listQueries({ limit: 5000 }), policy.loadPolicy());
+  res.json({ destinations: report.shadowDestinations || [], coverage: report });
+});
+
+app.post('/api/destinations/review', ...adminWrite, validation.validateBody(validation.destinationReviewSchema), (req, res) => {
+  const before = policy.loadPolicy();
+  let reviewed;
+  try {
+    reviewed = policy.reviewDestination(before, req.body.destination, req.body.decision);
+  } catch (e) {
+    return res.status(400).json({ error: 'invalid destination review' });
+  }
+  policy.savePolicy(reviewed.policy);
+  db.appendAudit({
+    action: 'DESTINATION_REVIEWED',
+    actor: req.user.user,
+    detail: policy.policyChangeDetail(before, reviewed.policy),
+  });
+  const report = coverage.summarize(db.listQueries({ limit: 5000 }), reviewed.policy);
+  broadcast('stats', db.stats());
+  res.json({ destination: reviewed.destination, decision: reviewed.decision, policy: reviewed.policy, coverage: report });
 });
 
 // Regulation policy templates (list + one-click apply).

@@ -239,6 +239,7 @@ test('packaged endpoint agent runs a package-to-install pilot smoke', async (t) 
           alwaysBlock: ['US_SSN', 'CREDIT_CARD'],
           ignore: [],
           disabledDetectors: [],
+          desktopCollectorDestination: 'Copilot Desktop',
           scanner: {
             ignoreDirectories: [],
             ignoreFilenames: [],

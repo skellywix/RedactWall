@@ -14,6 +14,7 @@ const nativeHandoff = require('../native-handoff');
 const DEFAULT_DESTINATION = 'Desktop AI';
 const DEFAULT_TIMEOUT_MS = 30000;
 const DEFAULT_POLL_MS = 250;
+const DEFAULT_POLICY_TIMEOUT_MS = 5000;
 const MAX_FILES_PER_INVOCATION = 20;
 
 function usage() {
@@ -22,7 +23,7 @@ function usage() {
     '',
     'Options:',
     '  --file <path>                 Local file path selected for protected upload; repeat for multi-select',
-    '  --destination <app>           Desktop AI app or destination name',
+    '  --destination <app>           Override the policy/default desktop AI app name',
     '  --destination-process <name>  Optional destination process name',
     '  --destination-url <url>       Optional destination URL',
     '  --user <id>                   Optional managed user identity',
@@ -45,7 +46,6 @@ function parseArgs(argv = process.argv.slice(2)) {
   const args = [...argv];
   const parsed = {
     files: [],
-    destination: DEFAULT_DESTINATION,
     timeoutMs: DEFAULT_TIMEOUT_MS,
     pollMs: DEFAULT_POLL_MS,
   };
@@ -83,6 +83,61 @@ function publicError(err) {
   if (/must reference a file|path must be a local path|file path is required/i.test(message)) return message;
   if (/native handoff secret|endpoint env|already exists|unsupported|requires a value|Unknown option|Unexpected argument/i.test(message)) return message;
   return 'protected upload failed';
+}
+
+function cleanDestination(value) {
+  const destination = String(value || '').trim();
+  return destination || '';
+}
+
+function configuredServer(opts = {}) {
+  return cleanDestination(opts.server || process.env.SENTINEL_URL || process.env.PROMPTWALL_URL);
+}
+
+function configuredKey(opts = {}) {
+  return cleanDestination(opts.key || process.env.INGEST_API_KEY || process.env.PROMPTWALL_INGEST_API_KEY);
+}
+
+function policyRequestTimeoutMs(opts = {}) {
+  return boundedNumber(opts.policyTimeoutMs ?? process.env.SENTINEL_REQUEST_TIMEOUT_MS, DEFAULT_POLICY_TIMEOUT_MS, 50, 120000);
+}
+
+async function fetchWithTimeout(fetchImpl, url, options, opts = {}) {
+  if (!globalThis.AbortController) return fetchImpl(url, options);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), policyRequestTimeoutMs(opts));
+  try {
+    return await fetchImpl(url, { ...(options || {}), signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function fetchPolicyDestination(opts = {}) {
+  const fetchImpl = opts.fetchImpl || globalThis.fetch;
+  const server = configuredServer(opts);
+  const key = configuredKey(opts);
+  if (!fetchImpl || !server || !key) return '';
+  try {
+    const res = await fetchWithTimeout(fetchImpl, server.replace(/\/+$/, '') + '/api/v1/policy', {
+      headers: { 'x-api-key': key },
+    }, opts);
+    if (!res || !res.ok) return '';
+    const body = await res.json();
+    return cleanDestination(body && body.desktopCollectorDestination);
+  } catch {
+    return '';
+  }
+}
+
+async function resolveDestination(opts = {}) {
+  const explicit = cleanDestination(opts.destination);
+  if (explicit) return explicit;
+  writer.loadEndpointEnv(opts.envPath);
+  return (await fetchPolicyDestination(opts))
+    || cleanDestination(process.env.ENDPOINT_AGENT_DESKTOP_DESTINATION)
+    || cleanDestination(process.env.PROMPTWALL_DESKTOP_DESTINATION)
+    || DEFAULT_DESTINATION;
 }
 
 function normalizeFiles(files) {
@@ -151,10 +206,22 @@ function publicResult(record) {
 async function collectProtectedUploads(opts = {}) {
   const files = normalizeFiles(opts.files || (opts.filePath ? [opts.filePath] : []));
   const results = [];
+  let destination;
+  try {
+    destination = await resolveDestination(opts);
+  } catch (err) {
+    const error = publicError(err);
+    return {
+      status: 'failed',
+      count: files.length,
+      failed: files.length,
+      results: files.map(() => ({ status: 'failed', error })),
+    };
+  }
   for (const file of files) {
     try {
       assertLocalFile(file);
-      const written = writer.writeHandoffFile(handoffOptions(file, opts));
+      const written = writer.writeHandoffFile(handoffOptions(file, { ...opts, destination }));
       let consumed = false;
       let reason;
       if (opts.wait) {
@@ -220,9 +287,13 @@ module.exports = {
   DEFAULT_DESTINATION,
   MAX_FILES_PER_INVOCATION,
   collectProtectedUploads,
+  configuredKey,
+  configuredServer,
+  fetchPolicyDestination,
   normalizeFiles,
   parseArgs,
   publicError,
+  resolveDestination,
   exitCodeForResult,
   usage,
   waitForHandoffConsumption,

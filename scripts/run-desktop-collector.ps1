@@ -8,7 +8,7 @@ param(
   [Parameter(Mandatory = $true)]
   [string[]]$FilePath,
 
-  [string]$Destination = "Desktop AI",
+  [string]$Destination = "",
   [string]$User = "",
   [string]$LogPath = "$env:LOCALAPPDATA\PromptWall\logs\desktop-collector.log",
   [int]$TimeoutMs = 30000
@@ -34,12 +34,14 @@ foreach ($file in $FilePath) {
   $collectorArgs += @("--file", $file)
 }
 $collectorArgs += @(
-  "--destination", $Destination,
   "--env", $config,
   "--wait",
   "--timeout-ms", [string]$TimeoutMs,
   "--json"
 )
+if ($Destination) {
+  $collectorArgs += @("--destination", $Destination)
+}
 if ($User) {
   $collectorArgs += @("--user", $User)
 }

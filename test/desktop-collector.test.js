@@ -17,7 +17,18 @@ function tempDir(t, prefix = 'ps-desktop-collector-') {
 }
 
 function withCleanHandoffEnv(t) {
-  const keys = ['SENTINEL_ENV_PATH', 'ENDPOINT_AGENT_HANDOFF_SECRET', 'ENDPOINT_AGENT_HANDOFF_DIR'];
+  const keys = [
+    'SENTINEL_ENV_PATH',
+    'ENDPOINT_AGENT_HANDOFF_SECRET',
+    'ENDPOINT_AGENT_HANDOFF_DIR',
+    'ENDPOINT_AGENT_DESKTOP_DESTINATION',
+    'PROMPTWALL_DESKTOP_DESTINATION',
+    'SENTINEL_URL',
+    'PROMPTWALL_URL',
+    'INGEST_API_KEY',
+    'PROMPTWALL_INGEST_API_KEY',
+    'SENTINEL_REQUEST_TIMEOUT_MS',
+  ];
   const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
   for (const key of keys) delete process.env[key];
   t.after(() => {
@@ -41,6 +52,54 @@ test('parseArgs accepts repeated files and rejects secret argv handling', () => 
   assert.strictEqual(parsed.wait, true);
   assert.strictEqual(parsed.json, true);
   assert.throws(() => collector.parseArgs(['--secret', SECRET]), /Unknown option/);
+});
+
+test('collector resolves desktop destination from control-plane policy', async (t) => {
+  withCleanHandoffEnv(t);
+  const dir = tempDir(t);
+  const envPath = path.join(dir, 'endpoint-agent.env');
+  fs.writeFileSync(envPath, [
+    `ENDPOINT_AGENT_HANDOFF_SECRET=${SECRET}`,
+    `ENDPOINT_AGENT_HANDOFF_DIR=${path.join(dir, 'handoff')}`,
+    'SENTINEL_URL=http://sentinel.unit.test',
+    'INGEST_API_KEY=policy-key',
+  ].join('\n') + '\n');
+
+  let request;
+  const destination = await collector.resolveDestination({
+    envPath,
+    fetchImpl: async (url, opts) => {
+      request = { url, headers: opts.headers };
+      return { ok: true, json: async () => ({ desktopCollectorDestination: 'Copilot Desktop' }) };
+    },
+  });
+
+  assert.strictEqual(destination, 'Copilot Desktop');
+  assert.strictEqual(request.url, 'http://sentinel.unit.test/api/v1/policy');
+  assert.strictEqual(request.headers['x-api-key'], 'policy-key');
+});
+
+test('explicit collector destination overrides policy and local fallback', async (t) => {
+  withCleanHandoffEnv(t);
+  const dir = tempDir(t);
+  const envPath = path.join(dir, 'endpoint-agent.env');
+  fs.writeFileSync(envPath, [
+    `ENDPOINT_AGENT_HANDOFF_SECRET=${SECRET}`,
+    `ENDPOINT_AGENT_HANDOFF_DIR=${path.join(dir, 'handoff')}`,
+    'SENTINEL_URL=http://sentinel.unit.test',
+    'INGEST_API_KEY=policy-key',
+    'ENDPOINT_AGENT_DESKTOP_DESTINATION=Local Fallback',
+  ].join('\n') + '\n');
+
+  const destination = await collector.resolveDestination({
+    envPath,
+    destination: 'Explicit Desktop',
+    fetchImpl: async () => {
+      throw new Error('policy should not be fetched for explicit destinations');
+    },
+  });
+
+  assert.strictEqual(destination, 'Explicit Desktop');
 });
 
 test('protected upload writes signed handoff events without file content or file path in public result', async (t) => {

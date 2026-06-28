@@ -1,7 +1,7 @@
 param(
   [string]$MenuName = "PromptWall Protected Upload",
   [string]$KeyName = "PromptWallProtectedUpload",
-  [string]$Destination = "Desktop AI",
+  [string]$Destination = "",
   [string]$ConfigDir = "$env:LOCALAPPDATA\PromptWall",
   [string]$RepoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path,
   [string]$LogPath = "$env:LOCALAPPDATA\PromptWall\logs\desktop-collector.log",
@@ -69,7 +69,7 @@ New-Item -Path (Join-Path $commandKey "command") -Force | Out-Null
 (Get-Item -LiteralPath $commandKey).SetValue("MultiSelectModel", "Player")
 Set-ItemProperty -LiteralPath $commandKey -Name "Icon" -Value "powershell.exe"
 
-$taskArgs = @(
+$taskParts = @(
   "-NoProfile",
   "-ExecutionPolicy", "Bypass",
   "-WindowStyle", "Hidden",
@@ -77,9 +77,12 @@ $taskArgs = @(
   "-RepoRoot", "`"$repo`"",
   "-ConfigPath", "`"$configPath`"",
   "-FilePath", '"%1"',
-  "-Destination", "`"$Destination`"",
   "-LogPath", "`"$LogPath`""
-) -join " "
+)
+if ($Destination) {
+  $taskParts += @("-Destination", "`"$Destination`"")
+}
+$taskArgs = $taskParts -join " "
 $command = "powershell.exe $taskArgs"
 (Get-Item -LiteralPath (Join-Path $commandKey "command")).SetValue("", $command)
 

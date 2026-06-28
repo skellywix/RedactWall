@@ -7,8 +7,9 @@ param(
   [string]$HandoffDir = "$env:LOCALAPPDATA\PromptWall\native-handoff",
   [string]$HandoffSecret = "",
   [switch]$InstallDesktopCollector,
-  [string]$DesktopCollectorDestination = "Desktop AI",
+  [string]$DesktopCollectorDestination = "",
   [string]$DesktopCollectorMenuName = "PromptWall Protected Upload",
+  [string]$DesktopCollectorKeyName = "PromptWallProtectedUpload",
   [string]$ConfigDir = "$env:LOCALAPPDATA\PromptWall",
   [string]$RepoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path,
   [switch]$Force
@@ -58,6 +59,9 @@ if ($HandoffSecret) {
   $configLines += "ENDPOINT_AGENT_HANDOFF_DIR=$handoffRoot"
   $configLines += "ENDPOINT_AGENT_HANDOFF_SECRET=$HandoffSecret"
 }
+if ($DesktopCollectorDestination) {
+  $configLines += "ENDPOINT_AGENT_DESKTOP_DESTINATION=$DesktopCollectorDestination"
+}
 $configLines | Set-Content -LiteralPath $configPath -Encoding utf8
 
 $acl = Get-Acl -LiteralPath $configPath
@@ -79,6 +83,7 @@ if ($HandoffSecret) {
 }
 
 if ($Force) {
+  Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
   Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
 }
 
@@ -108,6 +113,7 @@ if ($InstallDesktopCollector) {
     -RepoRoot $repo `
     -Destination $DesktopCollectorDestination `
     -MenuName $DesktopCollectorMenuName `
+    -KeyName $DesktopCollectorKeyName `
     -Force:$Force.IsPresent
 }
 

@@ -31,6 +31,7 @@ const DEFAULT_POLICY = {
   allowedDestinations: [],
   blockedDestinations: [],
   blockedFileUploadDestinations: [],
+  desktopCollectorDestination: 'Desktop AI',
   scanner: {
     ignoreDirectories: ['node_modules', '.git', 'Library', 'Applications', 'AppData'],
     ignoreFilenames: ['thumbs.db', '.ds_store', 'package.json', 'package-lock.json'],
@@ -52,6 +53,7 @@ const AUDIT_FIELDS = [
   'allowedDestinations',
   'blockedDestinations',
   'blockedFileUploadDestinations',
+  'desktopCollectorDestination',
   'scanner',
 ];
 
@@ -141,6 +143,49 @@ function destinationMatches(destination, patterns) {
   });
 }
 
+function destinationListWithout(list, destination) {
+  const target = normalizeDestination(destination);
+  const out = [];
+  const seen = new Set();
+  for (const item of list || []) {
+    const normalized = normalizeDestination(item);
+    if (!normalized || normalized === 'unknown' || normalized === target || seen.has(normalized)) continue;
+    seen.add(normalized);
+    out.push(normalized);
+  }
+  return out;
+}
+
+function destinationListWith(list, destination) {
+  const target = normalizeDestination(destination);
+  const out = destinationListWithout(list, target);
+  if (target && target !== 'unknown') out.push(target);
+  return out;
+}
+
+function reviewDestination(currentPolicy, destination, decision) {
+  const normalized = normalizeDestination(destination);
+  if (!normalized || normalized === 'unknown') {
+    throw new Error('destination required');
+  }
+  const action = String(decision || '').toLowerCase();
+  if (!['govern', 'allow', 'block'].includes(action)) {
+    throw new Error('unknown destination decision');
+  }
+  const next = {
+    ...DEFAULT_POLICY,
+    ...(currentPolicy || {}),
+    governedDestinations: destinationListWithout((currentPolicy || {}).governedDestinations, normalized),
+    allowedDestinations: destinationListWithout((currentPolicy || {}).allowedDestinations, normalized),
+    blockedDestinations: destinationListWithout((currentPolicy || {}).blockedDestinations, normalized),
+    blockedFileUploadDestinations: destinationListWithout((currentPolicy || {}).blockedFileUploadDestinations, normalized),
+  };
+  if (action === 'govern') next.governedDestinations = destinationListWith(next.governedDestinations, normalized);
+  if (action === 'allow') next.allowedDestinations = destinationListWith(next.allowedDestinations, normalized);
+  if (action === 'block') next.blockedDestinations = destinationListWith(next.blockedDestinations, normalized);
+  return { destination: normalized, decision: action, policy: next };
+}
+
 function destinationBlocked(destination, policy = loadPolicy()) {
   if (destinationAllowed(destination, policy)) return false;
   return destinationMatches(destination, policy.blockedDestinations || []);
@@ -182,6 +227,7 @@ module.exports = {
   rawRetentionDays,
   normalizeDestination,
   destinationMatches,
+  reviewDestination,
   destinationAllowed,
   destinationBlocked,
   fileUploadBlocked,
