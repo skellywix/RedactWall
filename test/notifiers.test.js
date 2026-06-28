@@ -64,13 +64,18 @@ test('approval notification is disabled without configured channels', async () =
   assert.deepStrictEqual(result, { sent: false, reason: 'disabled', channels: [], results: [] });
 });
 
-test('generic, Slack, and Teams adapters send sanitized payloads', async () => {
+test('generic, Slack, Teams, and ticket adapters send sanitized payloads', async () => {
   const requests = [];
   const env = {
     APPROVAL_NOTIFY_WEBHOOK_URL: 'https://notify.example.test/hook',
     APPROVAL_NOTIFY_WEBHOOK_TOKEN: 'unit-token',
     APPROVAL_SLACK_WEBHOOK_URL: 'https://hooks.slack.example.test/unit',
     APPROVAL_TEAMS_WEBHOOK_URL: 'https://teams.example.test/unit',
+    APPROVAL_TICKET_WEBHOOK_URL: 'https://tickets.example.test/unit',
+    APPROVAL_TICKET_WEBHOOK_TOKEN: 'ticket-token',
+    APPROVAL_TICKET_SYSTEM: 'jira',
+    APPROVAL_TICKET_PROJECT: 'SEC',
+    APPROVAL_TICKET_ISSUE_TYPE: 'Incident',
   };
 
   const result = await notifiers.emitApprovalNotification(sampleQuery(), {
@@ -83,16 +88,50 @@ test('generic, Slack, and Teams adapters send sanitized payloads', async () => {
 
   assert.strictEqual(result.sent, true);
   assert.strictEqual(result.status, 'sent');
-  assert.deepStrictEqual(result.channels, ['webhook', 'slack', 'teams']);
-  assert.strictEqual(requests.length, 3);
+  assert.deepStrictEqual(result.channels, ['webhook', 'slack', 'teams', 'ticket']);
+  assert.strictEqual(requests.length, 4);
   assert.strictEqual(requests[0].opts.headers.Authorization, 'Bearer unit-token');
+  assert.strictEqual(requests[3].opts.headers.Authorization, 'Bearer ticket-token');
   assert.ok(requests[1].opts.body.includes('PromptWall approval routed'));
   assert.ok(requests[2].opts.body.includes('MessageCard'));
+  const ticket = JSON.parse(requests[3].opts.body);
+  assert.strictEqual(ticket.eventType, 'promptwall.approval_ticket');
+  assert.strictEqual(ticket.dedupeKey, 'promptwall:q_notify:APPROVAL_ROUTED');
+  assert.strictEqual(ticket.priority, 'critical');
+  assert.deepStrictEqual(ticket.ticket, {
+    system: 'jira',
+    project: 'SEC',
+    issueType: 'Incident',
+  });
+  assert.strictEqual(ticket.query.labels[0], 'US_SSN');
+  assert.strictEqual(ticket.workflow.assignedGroup, 'compliance');
   const wire = requests.map((request) => request.opts.body).join('\n');
   assert.ok(!wire.includes('524-71-9043'));
   assert.ok(!wire.includes('Member Jane'));
   assert.ok(!wire.includes('sealed-vault'));
   assert.match(wire, /US_SSN/);
+});
+
+test('ticket payload builder produces a bridge-safe issue shape', () => {
+  const payload = notifiers.sanitizedApprovalNotification(sampleQuery({
+    riskScore: 54,
+    maxSeverity: 3,
+    maxSeverityLabel: 'high',
+  }));
+  const ticket = notifiers.ticketPayload({
+    system: 'linear',
+    project: 'security-alerts',
+    issueType: 'Security Review',
+  }, payload);
+
+  assert.strictEqual(ticket.priority, 'high');
+  assert.strictEqual(ticket.ticket.system, 'linear');
+  assert.strictEqual(ticket.query.id, 'q_notify');
+  assert.strictEqual(ticket.query.destination, 'chatgpt.com');
+  assert.deepStrictEqual(ticket.query.labels, ['US_SSN']);
+  assert.ok(!JSON.stringify(ticket).includes('524-71-9043'));
+  assert.ok(!JSON.stringify(ticket).includes('Member Jane'));
+  assert.ok(!JSON.stringify(ticket).includes('sealed-vault'));
 });
 
 test('SMTP adapter sends sanitized approval email through a relay', async (t) => {

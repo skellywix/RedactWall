@@ -48,12 +48,16 @@ Build next:
 - Native desktop collector feeding the existing metadata-only endpoint handoff.
 - Broader app/action policy controls beyond the current destination,
   file-upload, response-scanning, and browser-paste controls.
-- Ticketing adapters on top of provisioned users, groups, identity-backed
-  ownership, direct SMTP, and the sanitized approval workflow.
+- Native Jira/Linear issue-creation adapters when pilots need direct API
+  tickets beyond the generic sanitized ticket bridge.
 
 ## Recent Completed Passes
 
 - Rebrand the visible project from PromptSentinel to PromptWall.
+- Add a sanitized approval ticket bridge with deterministic dedupe keys,
+  ticket system/project metadata, and no prompt bodies so Jira, Linear, SOAR, or
+  internal middleware can create reviewer-owned tickets from the approval
+  workflow.
 - Add owner group, reviewer role, review-after metadata, dashboard builder
   fields, and sanitized examiner evidence for time-bound exception lifecycle
   review.
