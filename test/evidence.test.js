@@ -10,6 +10,20 @@ test('evidence pack omits raw prompt, redacted prompt body, token vault, and aud
     generatedAt: '2026-06-26T12:00:00.000Z',
     queryLimit: 1,
     auditLimit: 1,
+    report: {
+      id: 'quarterly-examiner-pack',
+      generatedBy: 'compliance',
+      periodStart: '2026-04-01T00:00:00.000Z',
+      periodEnd: '2026-06-30T23:59:59.999Z',
+      scheduled: true,
+      schedule: {
+        id: 'quarterly',
+        cadence: 'quarterly',
+        nextRunAt: '2026-09-30T23:00:00.000Z',
+        retentionDays: 730,
+        secret: 'schedule-secret-should-not-export',
+      },
+    },
     policy: { enforcementMode: 'block' },
     stats: { total: 1 },
     auditIntegrity: { ok: true, count: 1 },
@@ -59,6 +73,27 @@ test('evidence pack omits raw prompt, redacted prompt body, token vault, and aud
         },
         secret: 'fleet-secret-should-not-export',
       }],
+    },
+    backup: {
+      ok: true,
+      file: 'C:\\secret\\backups\\sentinel-2026-06-26.db',
+      bytes: 4096,
+      backupSha256: '2'.repeat(64),
+      manifestOk: true,
+      auditIntegrity: { ok: true, count: 1 },
+      sourceIntegrity: { ok: true, count: 1 },
+      manifest: {
+        backupFile: 'sentinel-2026-06-26.db',
+        secret: 'backup-secret-should-not-export',
+      },
+    },
+    restoreDrill: {
+      ok: true,
+      file: 'C:\\secret\\restore\\restored-sentinel.db',
+      backupSha256: '3'.repeat(64),
+      manifestOk: true,
+      auditIntegrity: { ok: true, count: 1 },
+      secret: 'restore-secret-should-not-export',
     },
     detectors: [{ id: 'US_SSN', severity: 4 }],
     queries: [{
@@ -115,8 +150,17 @@ test('evidence pack omits raw prompt, redacted prompt body, token vault, and aud
   });
 
   const wire = JSON.stringify(pack);
+  assert.strictEqual(pack.schemaVersion, 2);
+  assert.strictEqual(pack.report.scheduled, true);
+  assert.strictEqual(pack.report.schedule.cadence, 'quarterly');
   assert.strictEqual(pack.scope.rawPromptBodiesIncluded, false);
   assert.strictEqual(pack.scope.auditDetailsIncluded, false);
+  assert.strictEqual(pack.scope.backupEvidenceIncluded, true);
+  assert.strictEqual(pack.scope.restoreDrillEvidenceIncluded, true);
+  assert.strictEqual(pack.backup.ok, true);
+  assert.strictEqual(pack.backup.backupFile, 'sentinel-2026-06-26.db');
+  assert.strictEqual(pack.restoreDrill.restoredFile, 'restored-sentinel.db');
+  assert.ok(pack.controlMappings.some((item) => item.id === 'backup_recoverability' && item.state === 'covered'));
   assert.ok(pack.queries[0].promptHash);
   assert.ok(pack.audit[0].detailHash);
   assert.strictEqual(pack.coverage.score, 82);
@@ -156,6 +200,10 @@ test('evidence pack omits raw prompt, redacted prompt body, token vault, and aud
   assert.ok(!wire.includes('query-check-secret-should-not-export'));
   assert.ok(!wire.includes('fleet-secret-should-not-export'));
   assert.ok(!wire.includes('fleet-check-secret-should-not-export'));
+  assert.ok(!wire.includes('schedule-secret-should-not-export'));
+  assert.ok(!wire.includes('backup-secret-should-not-export'));
+  assert.ok(!wire.includes('restore-secret-should-not-export'));
+  assert.ok(!wire.includes('C:\\secret'));
   assert.ok(!wire.includes('sealed-vault'));
   assert.ok(!wire.includes('contains member SSN'));
   assert.ok(!wire.includes('ps_ingest_should_not_export'));

@@ -560,6 +560,21 @@ Document:
 - Retention owner.
 - Restore test status, if performed.
 
+Generate the sanitized examiner pack after backup verification. Include the
+restore-drill path only when a restore test was actually performed:
+
+```bash
+sudo docker exec promptwall npm run evidence:pack:zip -- /data/evidence-packs \
+  /data/backups/sentinel-YYYY-MM-DDTHH-MM-SS-sssZ.db \
+  /data/restored-sentinel.db
+```
+
+For recurring reporting, copy `config/evidence-schedule.example.json` to a
+customer-specific file, set the cadence and output folder, and invoke
+`npm run evidence:pack:scheduled -- <file>` from Task Scheduler, cron, or the
+customer's runbook scheduler. Keep the generated JSON or zip in the approved
+evidence location, not in email or a synced personal folder.
+
 ## Production Handoff Packet
 
 Deliver a packet with:
@@ -572,8 +587,9 @@ Deliver a packet with:
 - Extension release-readiness report.
 - `/healthz` and `/readyz` evidence.
 - Preflight status evidence.
-- Sanitized examiner export from `/api/export/evidence`, including coverage,
-  policy diffs, approval routing metadata, and lineage summaries.
+- Sanitized examiner pack from `npm run evidence:pack`, including coverage,
+  policy diffs, approval routing metadata, lineage summaries, control mappings,
+  backup status, and restore-drill status when available.
 - Fleet Install Health evidence from Coverage showing each required sensor by
   user, org, current state, version, and failed check ID.
 - Audit-chain verification output.

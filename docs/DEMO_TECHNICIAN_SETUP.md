@@ -55,6 +55,9 @@ This section is generated from the app by `npm run docs:demo-guide`. Do not hand
 | `npm run backup` | `node scripts/backup-store.js create` |
 | `npm run backup:verify` | `node scripts/backup-store.js verify` |
 | `npm run backup:restore` | `node scripts/backup-store.js restore` |
+| `npm run evidence:pack` | `node scripts/export-evidence-pack.js` |
+| `npm run evidence:pack:zip` | `node scripts/export-evidence-pack.js --zip` |
+| `npm run evidence:pack:scheduled` | `node scripts/export-evidence-pack.js --schedule` |
 | `npm run package:extension` | `node scripts/package-extension.js` |
 | `npm run release:extension:check` | `node scripts/check-extension-release.js` |
 | `npm run package:endpoint-agent` | `node scripts/package-endpoint-agent.js` |

@@ -58,8 +58,9 @@ Build next:
   local member IDs and scanned documents before shipping a heavier OCR runtime.
 - MCP connector SDK patterns that force tool-output sanitization before model
   use, with connector health represented in coverage posture.
-- Backup-status evidence inside the examiner export pack, including last backup
-  verification and restore-drill evidence without prompt bodies.
+- Automated schedule ownership around the examiner evidence pack, now that the
+  pack itself includes report metadata, control mappings, backup verification,
+  and restore-drill evidence without prompt bodies.
 
 ## Recent Completed Passes
 

@@ -473,9 +473,33 @@ The examiner export at `/api/export/evidence` includes:
   notification status.
 - Prompt/file lineage summaries by user, destination, sensor, channel,
   category, and decision, plus per-event sanitized findings and prompt hashes.
+- Report metadata, control mappings, and optional backup verification plus
+  restore-drill status when generated with the evidence-pack CLI.
 
 It does not include raw prompt bodies, retained sealed prompts, token vaults,
 release tokens, decision notes, or uploaded file bytes.
+
+Generate a dated examiner pack from the local evidence store:
+
+```bash
+npm run evidence:pack -- evidence-packs
+```
+
+Attach backup verification and a restore-drill check when those artifacts exist:
+
+```bash
+npm run evidence:pack:zip -- evidence-packs \
+  backups/sentinel-YYYY-MM-DDTHH-MM-SS-sssZ.db \
+  data/restored-sentinel.db
+```
+
+For scheduled customer-silo reporting, copy
+`config/evidence-schedule.example.json`, set the output folder and cadence, and
+invoke it from the platform scheduler:
+
+```bash
+npm run evidence:pack:scheduled -- config/evidence-schedule.json
+```
 
 ## SIEM Alerts
 
@@ -600,6 +624,15 @@ npm run backup:verify -- data/restored-sentinel.db
 ```
 
 Use `--force` only when intentionally replacing an existing restore target.
+
+After backup verification and any restore drill, generate an examiner pack that
+records both statuses without embedding the `.db` content:
+
+```bash
+npm run evidence:pack -- evidence-packs \
+  backups/sentinel-YYYY-MM-DDTHH-MM-SS-sssZ.db \
+  data/restored-sentinel.db
+```
 
 ## Validation Gate
 

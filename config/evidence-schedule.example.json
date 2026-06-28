@@ -1,0 +1,11 @@
+{
+  "id": "quarterly-examiner-pack",
+  "enabled": true,
+  "cadence": "quarterly",
+  "outDir": "evidence-packs",
+  "queryLimit": 5000,
+  "auditLimit": 5000,
+  "nextRunAt": "2026-09-30T23:00:00.000Z",
+  "retentionDays": 730,
+  "generatedBy": "scheduled-evidence-export"
+}
