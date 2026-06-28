@@ -309,9 +309,11 @@ Acceptance evidence:
 
 ### 8. First Real MCP Content Connectors
 
-Current state: MCP guard redacts local tool output through a reference guard, but
-PromptWall does not yet ship first-party connectors for Microsoft 365, Google
-Drive, Slack, Teams, or Jira content.
+Current state: MCP guard redacts local tool output through a reference guard, and
+PromptWall now ships a small connector SDK that forces future content connectors
+through `sanitizeToolResult()` before tool output reaches a model. PromptWall
+does not yet ship first-party connectors for Microsoft 365, Google Drive, Slack,
+Teams, or Jira content.
 
 Customer ask: "Can it protect agents that pull documents from SharePoint,
 OneDrive, Google Drive, Slack, or Teams before the model sees them?"
@@ -319,9 +321,13 @@ OneDrive, Google Drive, Slack, or Teams before the model sees them?"
 Why it matters: agent workflows are where customers will move next. Do not chase
 30 connectors; ship one or two integrations that prove the reusable pattern.
 
-Implementation connection:
-- Keep `sensors/mcp-guard/guard.js` as the redaction boundary.
-- Add a small MCP connector SDK with a required `sanitizeToolResult()` wrapper.
+Implemented:
+- Kept `sensors/mcp-guard/guard.js` as the redaction boundary.
+- Added `sensors/mcp-guard/sdk.js` with `sanitizeToolResult()`,
+  `wrapConnectorTool()`, and `connectorHealthCheck()`.
+- Included the connector SDK in the MCP guard package and install-health check.
+
+Remaining:
 - First connector recommendation: Microsoft 365 file content via Graph because
   credit unions are likely to standardize on Microsoft identity and storage.
 - Second connector: Google Drive only if an early prospect needs it.
@@ -340,8 +346,7 @@ Acceptance evidence:
 3. Signed update channel and commercial rollout posture.
 4. Scheduled examiner evidence pack with backup and restore-drill status.
 5. Customer-defined detectors plus OCR-required handling.
-6. First real MCP content connector SDK and one Microsoft 365 file-content
-   connector.
+6. First Microsoft 365 file-content connector using the MCP connector SDK.
 
 This order closes the most embarrassing buyer gap first, then turns the product
 from a strong demo into something IT and compliance can operate. It avoids

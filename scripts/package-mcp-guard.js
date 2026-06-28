@@ -14,6 +14,7 @@ const PACKAGE_FILES = [
   'server/env.js',
   'detection-engine/detect.js',
   'sensors/mcp-guard/guard.js',
+  'sensors/mcp-guard/sdk.js',
   'scripts/check-mcp-guard-install.js',
 ];
 
@@ -69,6 +70,11 @@ function validateRuntimeFiles(files) {
     throw new Error('MCP guard package must exclude direct-run demo code');
   }
 
+  const sdk = files.find((file) => file.path === 'sensors/mcp-guard/sdk.js').body.toString('utf8');
+  if (!/sanitizeToolResult/.test(sdk) || !/wrapConnectorTool/.test(sdk) || !/connectorHealthCheck/.test(sdk)) {
+    throw new Error('MCP guard package must include connector SDK sanitization and health helpers');
+  }
+
   const installCheck = files.find((file) => file.path === 'scripts/check-mcp-guard-install.js').body.toString('utf8');
   if (!/api\/v1\/heartbeat/.test(installCheck) || !/buildInstallReport/.test(installCheck) || !/INGEST_API_KEY/.test(installCheck)) {
     throw new Error('MCP guard package must include install validation with heartbeat support');
@@ -113,6 +119,7 @@ function packageMcpGuard(opts = {}) {
     checks: {
       explicitIngestKeyRequired: true,
       sharedEngineIncluded: true,
+      connectorSdkIncluded: true,
       demoCodeExcluded: true,
       installValidationIncluded: true,
       developmentIngestKeyAbsent: true,
