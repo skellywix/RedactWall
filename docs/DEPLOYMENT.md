@@ -374,17 +374,18 @@ override.
 
 The shell action command does not include the ingest key or handoff secret. It
 loads `%LOCALAPPDATA%\PromptWall\endpoint-agent.env` through
-`SENTINEL_ENV_PATH`, invokes
+`PROMPTWALL_ENV_PATH`, invokes
 `sensors\endpoint-agent\collectors\protected-upload.js`, and passes only the
 selected local file paths to the collector process. The Explorer verb is marked
 with `MultiSelectModel=Player` so it remains available for multi-file
-selections. The collector verifies each path is a local file, writes signed
-events through the packaged writer, and never reads file bytes.
+selections. The legacy `SENTINEL_ENV_PATH` alias remains accepted for existing
+scripts. The collector verifies each path is a local file, writes signed events
+through the packaged writer, and never reads file bytes.
 
 For automation or app-specific integrations, call the collector directly:
 
 ```powershell
-$env:SENTINEL_ENV_PATH = "$env:LOCALAPPDATA\PromptWall\endpoint-agent.env"
+$env:PROMPTWALL_ENV_PATH = "$env:LOCALAPPDATA\PromptWall\endpoint-agent.env"
 node .\sensors\endpoint-agent\collectors\protected-upload.js `
   --file "$env:USERPROFILE\Downloads\loan-file.pdf" `
   --destination "Desktop AI" `
@@ -398,7 +399,7 @@ produce one signed upload-intent event without putting the handoff secret on the
 command line:
 
 ```powershell
-$env:SENTINEL_ENV_PATH = "$env:LOCALAPPDATA\PromptWall\endpoint-agent.env"
+$env:PROMPTWALL_ENV_PATH = "$env:LOCALAPPDATA\PromptWall\endpoint-agent.env"
 node .\sensors\endpoint-agent\write-handoff.js `
   --file "$env:USERPROFILE\Downloads\loan-file.pdf" `
   --destination "Desktop AI" `

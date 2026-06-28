@@ -19,6 +19,7 @@ function tempDir(t, prefix = 'ps-desktop-collector-') {
 function withCleanHandoffEnv(t) {
   const keys = [
     'SENTINEL_ENV_PATH',
+    'PROMPTWALL_ENV_PATH',
     'ENDPOINT_AGENT_HANDOFF_SECRET',
     'ENDPOINT_AGENT_HANDOFF_DIR',
     'ENDPOINT_AGENT_DESKTOP_DESTINATION',

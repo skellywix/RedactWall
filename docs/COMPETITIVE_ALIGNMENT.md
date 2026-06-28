@@ -58,6 +58,8 @@ Build next:
 - Rebrand the visible project from PromptSentinel to PromptWall.
 - Rename the endpoint installer surface to `-PromptWallUrl` while keeping
   `-SentinelUrl` as a compatibility alias for existing technician scripts.
+- Rename fresh endpoint runner config handoff to `PROMPTWALL_ENV_PATH` while
+  keeping `SENTINEL_ENV_PATH` accepted for existing installs.
 - Add a Chrome extension release-readiness gate and private or unlisted Web
   Store checklist so managed browser rollout has package, policy, update URL,
   generated ExtensionSettings force-install policy, and install-health evidence

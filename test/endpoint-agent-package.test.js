@@ -59,11 +59,11 @@ function minimalFiles(agentBody) {
     },
     {
       path: 'scripts/run-desktop-collector.ps1',
-      body: Buffer.from('[string[]]$FilePath\n$env:SENTINEL_ENV_PATH = $config\nprotected-upload.js\n'),
+      body: Buffer.from('[string[]]$FilePath\n$env:PROMPTWALL_ENV_PATH = $config\nprotected-upload.js\n'),
     },
     {
       path: 'scripts/run-endpoint-agent.ps1',
-      body: Buffer.from('$env:SENTINEL_ENV_PATH = $config\n'),
+      body: Buffer.from('$env:PROMPTWALL_ENV_PATH = $config\n'),
     },
     { path: 'scripts/uninstall-desktop-collector.ps1', body: Buffer.from('Remove-Item\n') },
     { path: 'scripts/uninstall-endpoint-agent.ps1', body: Buffer.from('Unregister-ScheduledTask\n') },
@@ -199,18 +199,20 @@ test('packaged endpoint agent runs a package-to-install pilot smoke', async (t) 
   assert.doesNotMatch(desktopInstallScript, /"-HandoffSecret"/);
   assert.match(desktopRunnerScript, /protected-upload\.js/);
   assert.match(desktopRunnerScript, /\[string\[\]\]\$FilePath/);
-  assert.match(desktopRunnerScript, /\$env:SENTINEL_ENV_PATH = \$config/);
-  assert.match(runnerScript, /\$env:SENTINEL_ENV_PATH = \$config/);
+  assert.match(desktopRunnerScript, /\$env:PROMPTWALL_ENV_PATH = \$config/);
+  assert.match(runnerScript, /\$env:PROMPTWALL_ENV_PATH = \$config/);
+  assert.doesNotMatch(desktopRunnerScript, /\$env:SENTINEL_ENV_PATH = \$config/);
+  assert.doesNotMatch(runnerScript, /\$env:SENTINEL_ENV_PATH = \$config/);
   assert.match(uninstallScript, /Unregister-ScheduledTask/);
   assert.match(uninstallScript, /RemoveDesktopCollector/);
   assert.match(uninstallScript, /endpoint-agent\.env/);
 
   const previousEnv = {};
-  for (const key of ['SENTINEL_ENV_PATH', 'SENTINEL_URL', 'PROMPTWALL_URL', 'INGEST_API_KEY', 'ENDPOINT_AGENT_WATCH_DIR', 'SENTINEL_REQUEST_TIMEOUT_MS']) {
+  for (const key of ['SENTINEL_ENV_PATH', 'PROMPTWALL_ENV_PATH', 'SENTINEL_URL', 'PROMPTWALL_URL', 'INGEST_API_KEY', 'ENDPOINT_AGENT_WATCH_DIR', 'SENTINEL_REQUEST_TIMEOUT_MS']) {
     previousEnv[key] = process.env[key];
     delete process.env[key];
   }
-  process.env.SENTINEL_ENV_PATH = configPath;
+  process.env.PROMPTWALL_ENV_PATH = configPath;
   t.after(() => {
     for (const [key, value] of Object.entries(previousEnv)) {
       if (value === undefined) delete process.env[key];

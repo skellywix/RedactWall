@@ -140,6 +140,9 @@ For this alignment track, completion requires evidence for every area below:
   for fresh installs while keeping `-SentinelUrl` as a tested compatibility
   alias, and made endpoint/MCP install-health messaging name `PROMPTWALL_URL`
   first.
+- Changed fresh endpoint runner and protected-upload launcher paths to set
+  `PROMPTWALL_ENV_PATH` while still accepting legacy `SENTINEL_ENV_PATH` in the
+  shared env loader.
 
 ## Open Decisions
 

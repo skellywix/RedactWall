@@ -136,12 +136,12 @@ function validateRuntimeFiles(files) {
   }
 
   const runner = files.find((file) => file.path === 'scripts/run-endpoint-agent.ps1').body.toString('utf8');
-  if (!/\$env:SENTINEL_ENV_PATH = \$config/.test(runner)) {
-    throw new Error('Endpoint agent runner must load local config through SENTINEL_ENV_PATH');
+  if (!/\$env:PROMPTWALL_ENV_PATH = \$config/.test(runner) || /\$env:SENTINEL_ENV_PATH = \$config/.test(runner)) {
+    throw new Error('Endpoint agent runner must load local config through PROMPTWALL_ENV_PATH');
   }
 
   const collectorRunner = files.find((file) => file.path === 'scripts/run-desktop-collector.ps1').body.toString('utf8');
-  if (!/\$env:SENTINEL_ENV_PATH = \$config/.test(collectorRunner) || !/protected-upload\.js/.test(collectorRunner) || !/\[string\[\]\]\$FilePath/.test(collectorRunner)) {
+  if (!/\$env:PROMPTWALL_ENV_PATH = \$config/.test(collectorRunner) || /\$env:SENTINEL_ENV_PATH = \$config/.test(collectorRunner) || !/protected-upload\.js/.test(collectorRunner) || !/\[string\[\]\]\$FilePath/.test(collectorRunner)) {
     throw new Error('Endpoint desktop collector runner must load config and invoke the protected-upload collector');
   }
 }
