@@ -39,6 +39,8 @@ const AUDITOR_USER = String(process.env.AUDITOR_USER || '').trim();
 const AUDITOR_PASSWORD = process.env.AUDITOR_PASSWORD || '';
 const AUDITOR_DISTINCT = !!AUDITOR_USER && AUDITOR_USER !== ADMIN_USER;
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000; // 8h
+const SESSION_COOKIE_NAME = 'promptwall_session';
+const LEGACY_SESSION_COOKIE_NAME = 'sentinel_session';
 const TOTP_STEP_MS = 30 * 1000;
 const TOTP_WINDOW = Number(process.env.ADMIN_TOTP_WINDOW || 1);
 
@@ -198,8 +200,13 @@ function verifyCsrfToken(sessionToken, token) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
+function sessionTokenFromRequest(req) {
+  const cookies = (req && req.cookies) || {};
+  return cookies[SESSION_COOKIE_NAME] || cookies[LEGACY_SESSION_COOKIE_NAME] || '';
+}
+
 function requireAuth(req, res, next) {
-  const session = verify(req.cookies && req.cookies.sentinel_session);
+  const session = verify(sessionTokenFromRequest(req));
   if (!session) {
     if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'unauthenticated' });
     return res.redirect('/login.html');
@@ -220,18 +227,19 @@ function requireRole(...roles) {
 function requireCsrf(req, res, next) {
   const method = String(req.method || 'GET').toUpperCase();
   if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return next();
-  const sessionToken = req.cookies && req.cookies.sentinel_session;
+  const sessionToken = sessionTokenFromRequest(req);
   const token = req.get('x-csrf-token');
   if (!verifyCsrfToken(sessionToken, token)) return res.status(403).json({ error: 'invalid csrf token' });
   next();
 }
 
 module.exports = {
-  authenticate, verifyPassword, verifyTotpCode, totpCode, createSession, verify, createCsrfToken, verifyCsrfToken, requireAuth, requireRole, requireCsrf,
+  authenticate, verifyPassword, verifyTotpCode, totpCode, createSession, verify, createCsrfToken, verifyCsrfToken, sessionTokenFromRequest, requireAuth, requireRole, requireCsrf,
   loginStatus, registerFail, registerSuccess,
   ADMIN_USER, ADMIN_PASSWORD_IS_DEFAULT: ADMIN_PASSWORD === DEFAULT_ADMIN_PASSWORD,
   ADMIN_MFA_REQUIRED: !!ADMIN_TOTP_SECRET,
   ADMIN_MFA_CONFIGURED: !!ADMIN_TOTP_KEY && ADMIN_TOTP_KEY.length >= 10,
   AUDITOR_ENABLED: AUDITOR_DISTINCT && ACCOUNTS.some((account) => account.role === 'auditor'),
   SECRET_SOURCE, SECRET_IS_STABLE: SECRET_SOURCE === 'env' || SECRET_SOURCE === 'file',
+  SESSION_COOKIE_NAME, LEGACY_SESSION_COOKIE_NAME,
 };

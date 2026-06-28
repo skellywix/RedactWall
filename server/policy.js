@@ -36,9 +36,30 @@ const DEFAULT_POLICY = {
     ignoreDirectories: ['node_modules', '.git', 'Library', 'Applications', 'AppData'],
     ignoreFilenames: ['thumbs.db', '.ds_store', 'package.json', 'package-lock.json'],
     ignoreExtensions: ['.tmp', '.log', '.lock'],
-    maxFileBytes: 6.3 * 1024 * 1024,
+    maxFileBytes: Math.round(6.3 * 1024 * 1024),
   },
 };
+
+function normalizePolicy(p = {}) {
+  const scanner = {
+    ...DEFAULT_POLICY.scanner,
+    ...((p && p.scanner) || {}),
+  };
+  const rawMaxFileBytes = scanner.maxFileBytes;
+  const hasConfiguredMaxFileBytes = rawMaxFileBytes !== undefined
+    && rawMaxFileBytes !== null
+    && rawMaxFileBytes !== ''
+    && typeof rawMaxFileBytes !== 'boolean';
+  const maxFileBytes = Number(rawMaxFileBytes);
+  scanner.maxFileBytes = hasConfiguredMaxFileBytes && Number.isFinite(maxFileBytes)
+    ? Math.max(1024, Math.min(50 * 1024 * 1024, Math.round(maxFileBytes)))
+    : DEFAULT_POLICY.scanner.maxFileBytes;
+  return {
+    ...DEFAULT_POLICY,
+    ...(p || {}),
+    scanner,
+  };
+}
 
 const AUDIT_FIELDS = [
   'enforcementMode',
@@ -92,16 +113,16 @@ function policyChangeDetail(before, after, meta = {}) {
 function loadPolicy() {
   try {
     if (fs.existsSync(CONFIG_PATH)) {
-      return { ...DEFAULT_POLICY, ...JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')) };
+      return normalizePolicy(JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')));
     }
   } catch (e) { /* default */ }
-  return { ...DEFAULT_POLICY };
+  return normalizePolicy();
 }
 
 function savePolicy(p) {
   const dir = path.dirname(CONFIG_PATH);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(p, null, 2));
+  fs.writeFileSync(CONFIG_PATH, JSON.stringify(normalizePolicy(p), null, 2));
 }
 
 function analyzeOpts(policy = loadPolicy()) {

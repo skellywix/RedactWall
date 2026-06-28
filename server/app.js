@@ -43,6 +43,11 @@ const SESSION_COOKIE_OPTIONS = {
   path: '/',
   maxAge: 8 * 3600 * 1000,
 };
+const SESSION_COOKIE_CLEAR_OPTIONS = {
+  path: SESSION_COOKIE_OPTIONS.path,
+  sameSite: SESSION_COOKIE_OPTIONS.sameSite,
+  secure: SESSION_COOKIE_OPTIONS.secure,
+};
 
 app.disable('x-powered-by');
 
@@ -863,7 +868,8 @@ app.post('/api/login', validation.validateBody(validation.loginSchema), (req, re
   }
   auth.registerSuccess(key);
   const token = auth.createSession(account.user, account.role);
-  res.cookie('sentinel_session', token, SESSION_COOKIE_OPTIONS);
+  res.cookie(auth.SESSION_COOKIE_NAME, token, SESSION_COOKIE_OPTIONS);
+  res.clearCookie(auth.LEGACY_SESSION_COOKIE_NAME, SESSION_COOKIE_CLEAR_OPTIONS);
   db.appendAudit({
     action: account.role === 'security_admin' ? 'ADMIN_LOGIN' : 'AUDITOR_LOGIN',
     actor: account.user,
@@ -876,15 +882,12 @@ const sessionWrite = [auth.requireAuth, auth.requireCsrf];
 const adminWrite = [auth.requireAuth, auth.requireCsrf, auth.requireRole('security_admin')];
 
 app.get('/api/csrf', auth.requireAuth, (req, res) => {
-  res.json({ csrfToken: auth.createCsrfToken(req.cookies && req.cookies.sentinel_session) });
+  res.json({ csrfToken: auth.createCsrfToken(auth.sessionTokenFromRequest(req)) });
 });
 
 app.post('/api/logout', ...sessionWrite, (req, res) => {
-  res.clearCookie('sentinel_session', {
-    path: SESSION_COOKIE_OPTIONS.path,
-    sameSite: SESSION_COOKIE_OPTIONS.sameSite,
-    secure: SESSION_COOKIE_OPTIONS.secure,
-  });
+  res.clearCookie(auth.SESSION_COOKIE_NAME, SESSION_COOKIE_CLEAR_OPTIONS);
+  res.clearCookie(auth.LEGACY_SESSION_COOKIE_NAME, SESSION_COOKIE_CLEAR_OPTIONS);
   res.json({ ok: true });
 });
 

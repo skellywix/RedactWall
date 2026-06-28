@@ -54,7 +54,7 @@ async function login(port) {
   });
   assert.strictEqual(res.status, 200);
   const cookie = (res.headers.get('set-cookie') || '').split(';')[0];
-  assert.ok(cookie.includes('sentinel_session='));
+  assert.ok(cookie.includes('promptwall_session='));
   const csrfRes = await fetch(`http://127.0.0.1:${port}/api/csrf`, {
     headers: { cookie },
   });
@@ -572,6 +572,64 @@ test('sensor policy endpoint publishes detector and scanner controls', async () 
   assert.strictEqual(typeof body.scanner.maxFileBytes, 'number');
   assert.strictEqual(body.storeRawForApproval, undefined);
   assert.strictEqual(body.rawRetentionDays, undefined);
+}));
+
+test('admin policy accepts its own full policy payload', async () => withServer(async (port) => {
+  const originalPolicy = fs.readFileSync(policyPath, 'utf8');
+  const { cookie, csrfToken } = await login(port);
+  try {
+    const policyRes = await jsonFetch(port, '/api/policy', {
+      method: 'GET',
+      headers: { cookie },
+    });
+    assert.strictEqual(policyRes.status, 200);
+    const body = await policyRes.json();
+    assert.strictEqual(Number.isInteger(body.scanner.maxFileBytes), true);
+
+    const save = await jsonFetch(port, '/api/policy', {
+      method: 'PUT',
+      headers: {
+        cookie,
+        'x-csrf-token': csrfToken,
+      },
+      body,
+    });
+    assert.strictEqual(save.status, 200);
+  } finally {
+    fs.writeFileSync(policyPath, originalPolicy);
+  }
+}));
+
+test('admin auth accepts legacy session cookie during PromptWall migration', async () => withServer(async (port) => {
+  const { cookie } = await login(port);
+  const legacyCookie = cookie.replace(/^promptwall_session=/, 'sentinel_session=');
+
+  const me = await jsonFetch(port, '/api/me', {
+    method: 'GET',
+    headers: { cookie: legacyCookie },
+  });
+  assert.strictEqual(me.status, 200);
+  const body = await me.json();
+  assert.strictEqual(body.user, 'admin');
+
+  const csrfRes = await jsonFetch(port, '/api/csrf', {
+    method: 'GET',
+    headers: { cookie: legacyCookie },
+  });
+  assert.strictEqual(csrfRes.status, 200);
+  const csrf = await csrfRes.json();
+  assert.match(csrf.csrfToken, /^[A-Za-z0-9_-]+$/);
+
+  const logout = await jsonFetch(port, '/api/logout', {
+    headers: {
+      cookie: legacyCookie,
+      'x-csrf-token': csrf.csrfToken,
+    },
+  });
+  assert.strictEqual(logout.status, 200);
+  const setCookie = logout.headers.get('set-cookie') || '';
+  assert.ok(setCookie.includes('promptwall_session='));
+  assert.ok(setCookie.includes('sentinel_session='));
 }));
 
 test('malformed json returns sanitized json error', async () => withServer(async (port) => {

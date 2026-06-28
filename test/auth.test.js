@@ -126,6 +126,21 @@ test('csrf token is bound to the signed session token', () => {
   assert.strictEqual(auth.verifyCsrfToken(auth.createSession('other-admin'), csrf), false);
 });
 
+test('session token lookup prefers PromptWall cookie with legacy fallback', () => {
+  const promptwall = auth.createSession('admin');
+  const legacy = auth.createSession('auditor', 'auditor');
+
+  assert.strictEqual(auth.sessionTokenFromRequest({ cookies: { promptwall_session: promptwall } }), promptwall);
+  assert.strictEqual(auth.sessionTokenFromRequest({ cookies: { sentinel_session: legacy } }), legacy);
+  assert.strictEqual(auth.sessionTokenFromRequest({
+    cookies: {
+      promptwall_session: promptwall,
+      sentinel_session: legacy,
+    },
+  }), promptwall);
+  assert.strictEqual(auth.sessionTokenFromRequest({ cookies: {} }), '');
+});
+
 test('secret from env is reported stable (survives restarts / multi-instance)', () => {
   assert.strictEqual(auth.SECRET_IS_STABLE, true);
 });

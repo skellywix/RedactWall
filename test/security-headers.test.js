@@ -24,6 +24,7 @@ test('admin session cookie uses strict same-site and httpOnly attributes', () =>
   assert.match(server, /httpOnly: true/);
   assert.match(server, /sameSite: 'strict'/);
   assert.match(server, /path: '\/'/);
-  assert.match(server, /res\.cookie\('sentinel_session', token, SESSION_COOKIE_OPTIONS\)/);
-  assert.match(server, /res\.clearCookie\('sentinel_session', \{/);
+  assert.match(server, /res\.cookie\(auth\.SESSION_COOKIE_NAME, token, SESSION_COOKIE_OPTIONS\)/);
+  assert.match(server, /res\.clearCookie\(auth\.SESSION_COOKIE_NAME, SESSION_COOKIE_CLEAR_OPTIONS\)/);
+  assert.match(server, /res\.clearCookie\(auth\.LEGACY_SESSION_COOKIE_NAME, SESSION_COOKIE_CLEAR_OPTIONS\)/);
 });
