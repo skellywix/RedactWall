@@ -281,10 +281,15 @@ npm run mcp:check -- --env ".env" --emit-heartbeat  # validate MCP guard runtime
 For a Windows pilot, install the endpoint sensor as a logon task:
 
 ```powershell
-.\scripts\install-endpoint-agent.ps1 -SentinelUrl "https://promptwall.example.com" -IngestKey "<pilot-ingest-key>"
+.\scripts\install-endpoint-agent.ps1 -PromptWallUrl "https://promptwall.example.com" -IngestKey "<pilot-ingest-key>"
 ```
 
-The native handoff writer is a safe collector shim for pilots and future OS/app hooks. It signs a bounded upload-intent JSON file with the local endpoint config secret, references only an absolute local file path, and never reads file bytes or accepts the handoff secret as a command-line argument.
+The installer writes `PROMPTWALL_URL` for fresh installs and still accepts the
+legacy `-SentinelUrl` parameter name for existing technician scripts. The native
+handoff writer is a safe collector shim for pilots and future OS/app hooks. It
+signs a bounded upload-intent JSON file with the local endpoint config secret,
+references only an absolute local file path, and never reads file bytes or
+accepts the handoff secret as a command-line argument.
 The browser extension automatically posts sanitized install-health heartbeats on install, startup, and a low-frequency alarm when it has managed or local server config. `npm run endpoint:check` validates the endpoint env file, server URL, ingest-key presence, watch directory, runtime scripts, and optional desktop collector handoff setup. `npm run mcp:check` validates the MCP guard runtime, connector SDK, Microsoft 365 connector, shared detection engine, Node version, and control-plane config. All three sensor paths post only bounded check IDs and status to `/api/v1/heartbeat` so Coverage and the examiner export can prove install health by user, org, sensor, version, and failed check without exposing keys, handoff secrets, prompt text, tool output, or file content.
 
 ### Test the product

@@ -1,6 +1,7 @@
 param(
   [string]$TaskName = "PromptWallEndpointAgent",
-  [string]$SentinelUrl = "http://localhost:4000",
+  [Alias("SentinelUrl")]
+  [string]$PromptWallUrl = "http://localhost:4000",
   [Parameter(Mandatory = $true)]
   [string]$IngestKey,
   [string]$WatchDir = "$env:USERPROFILE\PromptWallWatch",
@@ -51,7 +52,7 @@ if ((Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) -and -
 
 $configLines = @(
   "# PromptWall endpoint agent local config",
-  "SENTINEL_URL=$SentinelUrl",
+  "PROMPTWALL_URL=$PromptWallUrl",
   "INGEST_API_KEY=$IngestKey",
   "ENDPOINT_AGENT_WATCH_DIR=$watchRoot",
   "SENTINEL_REQUEST_TIMEOUT_MS=10000"

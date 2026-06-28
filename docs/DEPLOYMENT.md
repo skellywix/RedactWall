@@ -209,10 +209,11 @@ engine, policy evaluator, env loader, file-type processor registry, signed
 native handoff prototype, metadata-only handoff writer, Windows protected-upload
 desktop collector, and scheduled-task plus shell-action install/run/uninstall
 scripts, plus the endpoint install validation checker. It refuses synthetic
-prompt bodies and packaged development ingest keys. Set the real `SENTINEL_URL`,
-`INGEST_API_KEY`, and watch directory during install; the agent inspects
-supported files locally and does not contact the control plane without an
-explicit ingest key.
+prompt bodies and packaged development ingest keys. Set the real
+`PROMPTWALL_URL`, `INGEST_API_KEY`, and watch directory during install; the
+legacy `SENTINEL_URL` key remains accepted for existing configs. The agent
+inspects supported files locally and does not contact the control plane without
+an explicit ingest key.
 
 ## MCP Guard Package
 
@@ -226,10 +227,10 @@ The command writes a zip and adjacent SHA-256 manifest under `dist/mcp-guard/`.
 It includes the guard runtime, connector SDK, Microsoft 365 Graph file-content
 connector, shared detection engine, env loader, version metadata, and MCP guard
 install validation checker. It excludes the local direct-run demo and refuses
-synthetic prompt bodies or development ingest keys. Set `SENTINEL_URL` and
-`INGEST_API_KEY` in the host MCP runtime environment; do not bake them into the
-package. The guard does not contact the control plane without an explicit ingest
-key.
+synthetic prompt bodies or development ingest keys. Set `PROMPTWALL_URL` and
+`INGEST_API_KEY` in the host MCP runtime environment; the legacy `SENTINEL_URL`
+key remains accepted for existing configs. Do not bake secrets into the package.
+The guard does not contact the control plane without an explicit ingest key.
 
 Validate the unpacked MCP guard runtime and optionally emit sanitized health
 evidence:
@@ -268,7 +269,7 @@ Run PowerShell from the project folder:
 
 ```powershell
 .\scripts\install-endpoint-agent.ps1 `
-  -SentinelUrl "https://promptwall.example.com" `
+  -PromptWallUrl "https://promptwall.example.com" `
   -IngestKey "<pilot-ingest-key>" `
   -WatchDir "$env:USERPROFILE\PromptWallWatch"
 ```
@@ -281,7 +282,7 @@ Config: %LOCALAPPDATA%\PromptWall\endpoint-agent.env
 Log:    %LOCALAPPDATA%\PromptWall\logs\endpoint-agent.log
 ```
 
-The config file carries `SENTINEL_URL`, `INGEST_API_KEY`, and `ENDPOINT_AGENT_WATCH_DIR`. Keep it restricted to the installing user, Administrators, and SYSTEM. For an all-user managed install, pass an explicit `-ConfigDir "$env:ProgramData\PromptWall"` from an elevated PowerShell session.
+The config file carries `PROMPTWALL_URL`, `INGEST_API_KEY`, and `ENDPOINT_AGENT_WATCH_DIR`. Keep it restricted to the installing user, Administrators, and SYSTEM. The installer still accepts the legacy `-SentinelUrl` parameter and existing `SENTINEL_URL` config files remain valid. For an all-user managed install, pass an explicit `-ConfigDir "$env:ProgramData\PromptWall"` from an elevated PowerShell session.
 
 Validate the local install and optionally emit sanitized health evidence:
 
@@ -307,7 +308,7 @@ path.
 
 ```powershell
 .\scripts\install-endpoint-agent.ps1 `
-  -SentinelUrl "https://promptwall.example.com" `
+  -PromptWallUrl "https://promptwall.example.com" `
   -IngestKey "<pilot-ingest-key>" `
   -HandoffSecret "<32-plus-character-local-handoff-secret>"
 ```
@@ -352,7 +353,7 @@ Install it as part of the endpoint agent setup:
 
 ```powershell
 .\scripts\install-endpoint-agent.ps1 `
-  -SentinelUrl "https://promptwall.example.com" `
+  -PromptWallUrl "https://promptwall.example.com" `
   -IngestKey "<pilot-ingest-key>" `
   -HandoffSecret "<32-plus-character-local-handoff-secret>" `
   -InstallDesktopCollector

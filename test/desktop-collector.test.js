@@ -61,7 +61,7 @@ test('collector resolves desktop destination from control-plane policy', async (
   fs.writeFileSync(envPath, [
     `ENDPOINT_AGENT_HANDOFF_SECRET=${SECRET}`,
     `ENDPOINT_AGENT_HANDOFF_DIR=${path.join(dir, 'handoff')}`,
-    'SENTINEL_URL=http://sentinel.unit.test',
+    'PROMPTWALL_URL=http://promptwall.unit.test',
     'INGEST_API_KEY=policy-key',
   ].join('\n') + '\n');
 
@@ -75,7 +75,7 @@ test('collector resolves desktop destination from control-plane policy', async (
   });
 
   assert.strictEqual(destination, 'Copilot Desktop');
-  assert.strictEqual(request.url, 'http://sentinel.unit.test/api/v1/policy');
+  assert.strictEqual(request.url, 'http://promptwall.unit.test/api/v1/policy');
   assert.strictEqual(request.headers['x-api-key'], 'policy-key');
 });
 

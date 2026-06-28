@@ -26,7 +26,7 @@ test('MCP install check validates runtime wiring without exposing secrets', asyn
   const envPath = path.join(dir, 'mcp-guard.env');
   const ingestKey = 'mcp-ingest-key-000000000000000000000000000001';
   fs.writeFileSync(envPath, [
-    'SENTINEL_URL=https://promptwall.customer.example',
+    'PROMPTWALL_URL=https://promptwall.customer.example',
     `INGEST_API_KEY=${ingestKey}`,
     'SENTINEL_TENANT_ID=cu-acme',
   ].join('\n') + '\n');
@@ -87,7 +87,7 @@ test('MCP install check adds optional Microsoft 365 connector health without exp
   const ingestKey = 'mcp-ingest-key-000000000000000000000000000002';
   const graphToken = 'microsoft-graph-token-000000000000000000000001';
   fs.writeFileSync(envPath, [
-    'SENTINEL_URL=https://promptwall.customer.example',
+    'PROMPTWALL_URL=https://promptwall.customer.example',
     `INGEST_API_KEY=${ingestKey}`,
     'SENTINEL_TENANT_ID=cu-acme',
     `M365_GRAPH_ACCESS_TOKEN=${graphToken}`,

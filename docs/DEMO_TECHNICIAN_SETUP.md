@@ -507,7 +507,7 @@ New-Item -ItemType Directory -Force .\demo-watch | Out-Null
 Start the agent in a second terminal:
 
 ```powershell
-$env:SENTINEL_URL = "http://localhost:4000"
+$env:PROMPTWALL_URL = "http://localhost:4000"
 $env:INGEST_API_KEY = "demo-ingest-key"
 node sensors\endpoint-agent\agent.js .\demo-watch
 ```
@@ -531,7 +531,7 @@ For a longer Windows pilot:
 ```powershell
 npm run package:endpoint-agent
 .\scripts\install-endpoint-agent.ps1 `
-  -SentinelUrl "http://localhost:4000" `
+  -PromptWallUrl "http://localhost:4000" `
   -IngestKey "demo-ingest-key" `
   -WatchDir "$env:USERPROFILE\PromptWallWatch"
 ```

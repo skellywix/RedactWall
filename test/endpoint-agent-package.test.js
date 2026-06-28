@@ -169,7 +169,7 @@ test('packaged endpoint agent runs a package-to-install pilot smoke', async (t) 
   const packageHandoffDir = path.join(installRoot, 'configured-native-handoff');
   fs.mkdirSync(configDir, { recursive: true });
   fs.writeFileSync(configPath, [
-    'SENTINEL_URL=http://sentinel.package.test',
+    'PROMPTWALL_URL=http://promptwall.package.test',
     'INGEST_API_KEY=pilot-ingest-key-000000000000000000000000000001',
     `ENDPOINT_AGENT_WATCH_DIR=${watchDir}`,
     `ENDPOINT_AGENT_HANDOFF_SECRET=native-handoff-secret-000000000000000001`,
@@ -187,6 +187,8 @@ test('packaged endpoint agent runs a package-to-install pilot smoke', async (t) 
   const runnerScript = fs.readFileSync(path.join(installRoot, 'scripts', 'run-endpoint-agent.ps1'), 'utf8');
   const uninstallScript = fs.readFileSync(path.join(installRoot, 'scripts', 'uninstall-endpoint-agent.ps1'), 'utf8');
   assert.match(installScript, /Register-ScheduledTask/);
+  assert.match(installScript, /\[Alias\("SentinelUrl"\)\]/);
+  assert.match(installScript, /PROMPTWALL_URL=\$PromptWallUrl/);
   assert.match(installScript, /INGEST_API_KEY=\$IngestKey/);
   assert.match(installScript, /InstallDesktopCollector/);
   assert.doesNotMatch(installScript, /"-IngestKey"/);
@@ -204,7 +206,7 @@ test('packaged endpoint agent runs a package-to-install pilot smoke', async (t) 
   assert.match(uninstallScript, /endpoint-agent\.env/);
 
   const previousEnv = {};
-  for (const key of ['SENTINEL_ENV_PATH', 'SENTINEL_URL', 'INGEST_API_KEY', 'ENDPOINT_AGENT_WATCH_DIR', 'SENTINEL_REQUEST_TIMEOUT_MS']) {
+  for (const key of ['SENTINEL_ENV_PATH', 'SENTINEL_URL', 'PROMPTWALL_URL', 'INGEST_API_KEY', 'ENDPOINT_AGENT_WATCH_DIR', 'SENTINEL_REQUEST_TIMEOUT_MS']) {
     previousEnv[key] = process.env[key];
     delete process.env[key];
   }
@@ -240,7 +242,7 @@ test('packaged endpoint agent runs a package-to-install pilot smoke', async (t) 
   const fetchImpl = async (url, opts = {}) => {
     requests.push({ url, method: opts.method || 'GET', body: opts.body || '' });
     assert.strictEqual(opts.headers['x-api-key'], 'pilot-ingest-key-000000000000000000000000000001');
-    if (url === 'http://sentinel.package.test/api/v1/policy') {
+    if (url === 'http://promptwall.package.test/api/v1/policy') {
       return {
         ok: true,
         json: async () => ({
@@ -260,7 +262,7 @@ test('packaged endpoint agent runs a package-to-install pilot smoke', async (t) 
         }),
       };
     }
-    if (url === 'http://sentinel.package.test/api/v1/gate') {
+    if (url === 'http://promptwall.package.test/api/v1/gate') {
       const body = JSON.parse(opts.body);
       assert.strictEqual(body.clientOutcome, 'redacted_available');
       assert.strictEqual(body.clientPreRedacted, true);

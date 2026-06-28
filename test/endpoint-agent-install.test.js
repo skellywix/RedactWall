@@ -24,6 +24,9 @@ test('installer registers a restarting scheduled task without putting the ingest
   assert.match(install, /Start-EndpointFallbackProcess/);
   assert.match(install, /Scheduled task registration was denied/);
   assert.match(install, /INGEST_API_KEY=\$IngestKey/);
+  assert.match(install, /\[Alias\("SentinelUrl"\)\]/);
+  assert.match(install, /\[string\]\$PromptWallUrl = "http:\/\/localhost:4000"/);
+  assert.match(install, /PROMPTWALL_URL=\$PromptWallUrl/);
   assert.match(install, /\$env:LOCALAPPDATA\\PromptWall/);
   assert.match(install, /BUILTIN\\Administrators/);
   assert.match(install, /ENDPOINT_AGENT_HANDOFF_SECRET=\$HandoffSecret/);
@@ -86,6 +89,7 @@ test('uninstaller removes task and can remove endpoint config', () => {
 
 test('deployment docs include endpoint task install and uninstall flow', () => {
   assert.match(deployment, /install-endpoint-agent\.ps1/);
+  assert.match(deployment, /-PromptWallUrl "https:\/\/promptwall\.example\.com"/);
   assert.match(deployment, /install-desktop-collector\.ps1/);
   assert.match(deployment, /PromptWall Protected Upload/);
   assert.match(deployment, /uninstall-endpoint-agent\.ps1/);
