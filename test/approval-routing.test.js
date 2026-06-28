@@ -124,6 +124,53 @@ test('gate stores and exposes approval routing without prompt content', async ()
   assert.ok(!JSON.stringify(exported).includes(rawCode));
 }));
 
+test('gate applies customer-configured approval routing rules from policy', async () => withServer(async (port) => {
+  const originalPolicy = fs.readFileSync(process.env.SENTINEL_POLICY_PATH, 'utf8');
+  const rawCode = 'function calculateLimit(memberTier) { return memberTier === "gold" ? 5000 : 1000; }';
+  try {
+    fs.writeFileSync(process.env.SENTINEL_POLICY_PATH, JSON.stringify({
+      ...JSON.parse(originalPolicy),
+      approvalRoutingRules: [{
+        id: 'engineering_source_code',
+        categories: ['SOURCE_CODE'],
+        sources: ['browser_extension'],
+        destinations: ['chatgpt.com'],
+        assignedGroup: 'engineering',
+        assignedRole: 'approver',
+        slaMinutes: 90,
+        reason: 'engineering_review',
+      }],
+    }, null, 2));
+
+    const gate = await jsonFetch(port, '/api/v1/gate', {
+      headers: { 'x-api-key': 'unit-ingest-key' },
+      body: {
+        prompt: rawCode,
+        user: 'developer@example.test',
+        destination: 'chatgpt.com',
+        source: 'browser_extension',
+        channel: 'submit',
+      },
+    });
+    assert.strictEqual(gate.status, 200);
+    const body = await gate.json();
+    assert.strictEqual(body.status, 'pending');
+
+    const stored = db.getQuery(body.id);
+    assert.strictEqual(stored.assignedRole, 'approver');
+    assert.strictEqual(stored.assignedGroup, 'engineering');
+    assert.strictEqual(stored.workflowReason, 'rule:engineering_source_code:engineering_review');
+    assert.ok(!JSON.stringify({
+      assignedRole: stored.assignedRole,
+      assignedGroup: stored.assignedGroup,
+      workflowReason: stored.workflowReason,
+      slaDueAt: stored.slaDueAt,
+    }).includes(rawCode));
+  } finally {
+    fs.writeFileSync(process.env.SENTINEL_POLICY_PATH, originalPolicy);
+  }
+}));
+
 test.after(() => {
   for (const suffix of ['', '-wal', '-shm']) {
     try { fs.unlinkSync(process.env.SENTINEL_DB_PATH + suffix); } catch {}

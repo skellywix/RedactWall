@@ -1,10 +1,10 @@
 # Approval Routing
 
-PromptWall assigns held decisions before they become a shared queue problem. The
-first routing pass is deterministic and metadata-only: rules use detector ids,
-semantic categories, source, channel, destination, severity, and risk score.
-They do not read raw prompt bodies, extracted file text, token vaults, decision
-notes, or uploaded file bytes.
+PromptWall assigns held decisions before they become a shared queue problem.
+Routing is metadata-only: rules use detector ids, semantic categories, source,
+channel, destination, severity, and risk score. They do not read raw prompt
+bodies, extracted file text, token vaults, decision notes, or uploaded file
+bytes.
 
 ## Stored Workflow Fields
 
@@ -27,6 +27,61 @@ The dashboard exposes the owner and SLA in the approval queue, all-activity
 table, selected incident detail, queue filters, notification state, and
 escalation state. SIEM alerts and examiner exports include only the sanitized
 workflow summary.
+
+## Customer Routing Rules
+
+Security Admins can configure `approvalRoutingRules` from the Policy tab or via
+`PUT /api/policy`. The rules are evaluated in array order. The first enabled
+matching rule wins; if no rule matches, PromptWall uses the default routing table
+below.
+
+Each rule can match on:
+
+- `detectors`: built-in detector ids such as `MEMBER_ID`, `SOURCE_CODE`, or
+  `SECRET_KEY`.
+- `categories`: semantic detector categories such as `LEGAL_CONTRACT` or
+  `CONFIDENTIAL_BUSINESS`.
+- `sources`: sensor ids such as `browser_extension`, `endpoint_agent`, or
+  `mcp_guard`.
+- `channels`: event channels such as `submit`, `file_upload`, `ai_response`, or
+  `shadow_ai`.
+- `destinations`: governed AI hosts or desktop labels. Wildcards follow the same
+  destination matching rules as block lists.
+- `minSeverity` and `minRiskScore`.
+
+Example:
+
+```json
+[
+  {
+    "id": "member_services_chatgpt",
+    "detectors": ["MEMBER_ID", "LOAN_NUMBER"],
+    "destinations": ["chatgpt.com"],
+    "assignedGroup": "member_services",
+    "assignedRole": "approver",
+    "slaMinutes": 120,
+    "reason": "member_services"
+  },
+  {
+    "id": "engineering_source_code",
+    "categories": ["SOURCE_CODE"],
+    "sources": ["browser_extension"],
+    "assignedGroup": "engineering",
+    "assignedRole": "approver",
+    "slaMinutes": 90,
+    "reason": "engineering_review"
+  }
+]
+```
+
+Rule ids, group ids, and reason codes are bounded identifiers so workflow
+metadata stays clean in the dashboard, SIEM alerts, audit history, and examiner
+exports. Critical-risk items still keep the built-in safety floor:
+`security_admin` ownership and no more than a 60-minute SLA unless the item is
+already routed to legal.
+
+The sensor policy endpoint, `/api/v1/policy`, does not expose
+`approvalRoutingRules`; sensors only need enforcement and scanner controls.
 
 ## Default Routing Rules
 

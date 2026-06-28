@@ -628,6 +628,7 @@ test('sensor policy endpoint publishes detector and scanner controls', async () 
   assert.ok(Array.isArray(body.scanner.ignoreFilenames));
   assert.ok(Array.isArray(body.scanner.ignoreExtensions));
   assert.strictEqual(typeof body.scanner.maxFileBytes, 'number');
+  assert.strictEqual(body.approvalRoutingRules, undefined);
   assert.strictEqual(body.storeRawForApproval, undefined);
   assert.strictEqual(body.rawRetentionDays, undefined);
 }));
@@ -803,6 +804,86 @@ test('admin policy accepts fleet posture settings', async () => withServer(async
   } finally {
     fs.writeFileSync(policyPath, originalPolicy);
   }
+}));
+
+test('admin policy accepts customer approval routing rules', async () => withServer(async (port) => {
+  const originalPolicy = fs.readFileSync(policyPath, 'utf8');
+  const { cookie, csrfToken } = await login(port);
+  try {
+    const res = await jsonFetch(port, '/api/policy', {
+      method: 'PUT',
+      headers: {
+        cookie,
+        'x-csrf-token': csrfToken,
+      },
+      body: {
+        approvalRoutingRules: [{
+          id: 'member_services_chatgpt',
+          detectors: ['MEMBER_ID'],
+          destinations: ['chatgpt.com'],
+          minSeverity: 2,
+          assignedGroup: 'member_services',
+          assignedRole: 'approver',
+          slaMinutes: 120,
+          reason: 'member_services',
+        }],
+      },
+    });
+
+    assert.strictEqual(res.status, 200);
+    const body = await res.json();
+    assert.deepStrictEqual(body.approvalRoutingRules, [{
+      id: 'member_services_chatgpt',
+      enabled: true,
+      assignedGroup: 'member_services',
+      assignedRole: 'approver',
+      slaMinutes: 120,
+      reason: 'member_services',
+      detectors: ['MEMBER_ID'],
+      destinations: ['chatgpt.com'],
+      minSeverity: 2,
+    }]);
+  } finally {
+    fs.writeFileSync(policyPath, originalPolicy);
+  }
+}));
+
+test('admin policy rejects malformed approval routing rules without echoing values', async () => withServer(async (port) => {
+  const originalPolicy = fs.readFileSync(policyPath, 'utf8');
+  const { cookie, csrfToken } = await login(port);
+  const secret = '524-71-9043';
+  const res = await jsonFetch(port, '/api/policy', {
+    method: 'PUT',
+    headers: {
+      cookie,
+      'x-csrf-token': csrfToken,
+    },
+    body: {
+      approvalRoutingRules: [{
+        id: 'bad_member_rule',
+        detectors: ['NOT_REAL_DETECTOR'],
+        assignedGroup: 'member services',
+        assignedRole: 'owner',
+        slaMinutes: 5,
+        reason: `member-${secret}`,
+      }],
+    },
+  });
+
+  assert.strictEqual(res.status, 400);
+  const body = await res.json();
+  assert.deepStrictEqual(body, {
+    error: 'invalid request body',
+    fields: [
+      'approvalRoutingRules.0.assignedGroup',
+      'approvalRoutingRules.0.assignedRole',
+      'approvalRoutingRules.0.detectors.0',
+      'approvalRoutingRules.0.reason',
+      'approvalRoutingRules.0.slaMinutes',
+    ],
+  });
+  assert.ok(!JSON.stringify(body).includes(secret));
+  assert.strictEqual(fs.readFileSync(policyPath, 'utf8'), originalPolicy);
 }));
 
 test('admin policy rejects malformed fleet posture settings without changing policy file', async () => withServer(async (port) => {

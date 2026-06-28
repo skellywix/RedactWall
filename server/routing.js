@@ -6,6 +6,7 @@
  * ids, categories, source, channel, destination, severity, and risk, but never
  * need raw prompt text or file bytes.
  */
+const policy = require('./policy');
 
 const ROUTABLE_STATUSES = new Set([
   'pending',
@@ -54,15 +55,27 @@ const LEGAL_LABELS = new Set([
 ]);
 
 function labelsFor(query = {}) {
+  return [...new Set([
+    ...detectorLabelsFor(query),
+    ...categoryLabelsFor(query),
+  ].filter(Boolean))];
+}
+
+function detectorLabelsFor(query = {}) {
   const labels = [];
   for (const finding of query.findings || []) {
     if (finding && finding.type) labels.push(String(finding.type));
   }
+  for (const key of Object.keys(query.entityCounts || {})) labels.push(String(key));
+  return [...new Set(labels.filter(Boolean))];
+}
+
+function categoryLabelsFor(query = {}) {
+  const labels = [];
   for (const category of query.categories || []) {
     if (typeof category === 'string') labels.push(category);
     else if (category && category.category) labels.push(String(category.category));
   }
-  for (const key of Object.keys(query.entityCounts || {})) labels.push(String(key));
   return [...new Set(labels.filter(Boolean))];
 }
 
@@ -79,15 +92,77 @@ function routeableStatus(status) {
   return ROUTABLE_STATUSES.has(String(status || ''));
 }
 
+function listMatch(ruleValues, queryValues) {
+  if (!Array.isArray(ruleValues) || !ruleValues.length) return true;
+  const values = new Set((queryValues || []).map((value) => String(value || '').trim().toLowerCase()).filter(Boolean));
+  return ruleValues.some((ruleValue) => values.has(String(ruleValue || '').trim().toLowerCase()));
+}
+
+function destinationRuleMatch(ruleValues, destination) {
+  if (!Array.isArray(ruleValues) || !ruleValues.length) return true;
+  return policy.destinationMatches(destination, ruleValues);
+}
+
+function ruleHasMatcher(rule = {}) {
+  return ['detectors', 'categories', 'sources', 'channels', 'destinations'].some((key) => Array.isArray(rule[key]) && rule[key].length)
+    || rule.minSeverity !== undefined
+    || rule.minRiskScore !== undefined;
+}
+
+function ruleMatches(rule = {}, query = {}, facts = {}) {
+  if (rule.enabled === false) return false;
+  if (!ruleHasMatcher(rule)) return false;
+  if (!listMatch(rule.detectors, facts.detectorLabels)) return false;
+  if (!listMatch(rule.categories, facts.categoryLabels)) return false;
+  if (!listMatch(rule.sources, [facts.source])) return false;
+  if (!listMatch(rule.channels, [facts.channel])) return false;
+  if (!destinationRuleMatch(rule.destinations, query.destination)) return false;
+  if (rule.minSeverity !== undefined && facts.maxSeverity < Number(rule.minSeverity)) return false;
+  if (rule.minRiskScore !== undefined && facts.riskScore < Number(rule.minRiskScore)) return false;
+  return true;
+}
+
+function customRoute(query = {}, facts = {}, activePolicy = {}) {
+  const rules = Array.isArray(activePolicy.approvalRoutingRules) ? activePolicy.approvalRoutingRules : [];
+  for (const rule of rules) {
+    if (!ruleMatches(rule, query, facts)) continue;
+    return {
+      assignedRole: rule.assignedRole || 'approver',
+      assignedGroup: rule.assignedGroup || 'compliance',
+      workflowReason: `rule:${rule.id}${rule.reason ? ':' + rule.reason : ''}`,
+      slaMinutes: Number(rule.slaMinutes) || 480,
+      notificationStatus: 'not_configured',
+      escalatedAt: null,
+    };
+  }
+  return null;
+}
+
+function applyCriticalFloor(route, facts) {
+  if (!(facts.maxSeverity >= 4 || facts.riskScore >= 75)) return route;
+  return {
+    ...route,
+    assignedRole: 'security_admin',
+    assignedGroup: route.assignedGroup === 'legal' ? 'legal' : 'security',
+    workflowReason: String(route.workflowReason || 'default_review') + '+critical',
+    slaMinutes: Math.min(Number(route.slaMinutes) || 480, 60),
+  };
+}
+
 function routeDecision(query = {}, opts = {}) {
   const now = opts.now instanceof Date ? opts.now : new Date(opts.now || Date.now());
-  const labels = labelsFor(query);
+  const activePolicy = opts.policy || policy.loadPolicy();
+  const detectorLabels = detectorLabelsFor(query);
+  const categoryLabels = categoryLabelsFor(query);
+  const labels = [...new Set([...detectorLabels, ...categoryLabels])];
   const source = String(query.source || '').toLowerCase();
   const channel = String(query.channel || '').toLowerCase();
   const riskScore = Number(query.riskScore) || 0;
   const maxSeverity = Number(query.maxSeverity) || 0;
+  const facts = { labels, detectorLabels, categoryLabels, source, channel, riskScore, maxSeverity };
 
-  let route = {
+  let route = customRoute(query, facts, activePolicy);
+  if (!route) route = {
     assignedRole: 'approver',
     assignedGroup: 'compliance',
     workflowReason: 'default_compliance_review',
@@ -96,58 +171,52 @@ function routeDecision(query = {}, opts = {}) {
     escalatedAt: null,
   };
 
-  const security = firstMatching(labels, SECURITY_LABELS);
-  const health = firstMatching(labels, HEALTH_LABELS);
-  const financial = firstMatching(labels, FINANCIAL_MEMBER_LABELS);
-  const legal = firstMatching(labels, LEGAL_LABELS);
+  if (route.workflowReason === 'default_compliance_review') {
+    const security = firstMatching(labels, SECURITY_LABELS);
+    const health = firstMatching(labels, HEALTH_LABELS);
+    const financial = firstMatching(labels, FINANCIAL_MEMBER_LABELS);
+    const legal = firstMatching(labels, LEGAL_LABELS);
 
-  if (security) {
-    route = {
-      ...route,
-      assignedRole: 'security_admin',
-      assignedGroup: 'security',
-      workflowReason: `detector:${security}`,
-      slaMinutes: security === 'CANARY_TOKEN' || security === 'CREDENTIALS' || security === 'PRIVATE_KEY' || security === 'SECRET_KEY' ? 30 : 60,
-    };
-  } else if (health) {
-    route = {
-      ...route,
-      assignedGroup: 'privacy',
-      workflowReason: `detector:${health}`,
-      slaMinutes: 240,
-    };
-  } else if (financial) {
-    route = {
-      ...route,
-      assignedGroup: 'compliance',
-      workflowReason: `detector:${financial}`,
-      slaMinutes: 240,
-    };
-  } else if (legal) {
-    route = {
-      ...route,
-      assignedGroup: 'legal',
-      workflowReason: `category:${legal}`,
-      slaMinutes: legal === 'CONFIDENTIAL_BUSINESS' ? 240 : 480,
-    };
-  } else if (source === 'endpoint_agent' || channel === 'file_upload') {
-    route = {
-      ...route,
-      assignedGroup: 'security',
-      workflowReason: 'source:endpoint_file_flow',
-      slaMinutes: 120,
-    };
+    if (security) {
+      route = {
+        ...route,
+        assignedRole: 'security_admin',
+        assignedGroup: 'security',
+        workflowReason: `detector:${security}`,
+        slaMinutes: security === 'CANARY_TOKEN' || security === 'CREDENTIALS' || security === 'PRIVATE_KEY' || security === 'SECRET_KEY' ? 30 : 60,
+      };
+    } else if (health) {
+      route = {
+        ...route,
+        assignedGroup: 'privacy',
+        workflowReason: `detector:${health}`,
+        slaMinutes: 240,
+      };
+    } else if (financial) {
+      route = {
+        ...route,
+        assignedGroup: 'compliance',
+        workflowReason: `detector:${financial}`,
+        slaMinutes: 240,
+      };
+    } else if (legal) {
+      route = {
+        ...route,
+        assignedGroup: 'legal',
+        workflowReason: `category:${legal}`,
+        slaMinutes: legal === 'CONFIDENTIAL_BUSINESS' ? 240 : 480,
+      };
+    } else if (source === 'endpoint_agent' || channel === 'file_upload') {
+      route = {
+        ...route,
+        assignedGroup: 'security',
+        workflowReason: 'source:endpoint_file_flow',
+        slaMinutes: 120,
+      };
+    }
   }
 
-  if (maxSeverity >= 4 || riskScore >= 75) {
-    route = {
-      ...route,
-      assignedRole: 'security_admin',
-      assignedGroup: route.assignedGroup === 'legal' ? 'legal' : 'security',
-      workflowReason: route.workflowReason + '+critical',
-      slaMinutes: Math.min(route.slaMinutes, 60),
-    };
-  }
+  route = applyCriticalFloor(route, facts);
 
   return {
     assignedRole: route.assignedRole,
@@ -186,8 +255,11 @@ function publicWorkflow(query = {}) {
 }
 
 module.exports = {
+  detectorLabelsFor,
+  categoryLabelsFor,
   labelsFor,
   publicWorkflow,
+  ruleMatches,
   routeDecision,
   routeableStatus,
   withWorkflow,

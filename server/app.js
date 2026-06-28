@@ -1234,8 +1234,9 @@ app.put('/api/policy', ...adminWrite, validation.validateBody(validation.policyU
     ...(req.body && req.body.scanner ? { scanner: { ...(before.scanner || {}), ...req.body.scanner } } : {}),
   };
   policy.savePolicy(merged);
-  db.appendAudit({ action: 'POLICY_UPDATED', actor: req.user.user, detail: policy.policyChangeDetail(before, merged) });
-  res.json(merged);
+  const saved = policy.loadPolicy();
+  db.appendAudit({ action: 'POLICY_UPDATED', actor: req.user.user, detail: policy.policyChangeDetail(before, saved) });
+  res.json(saved);
 });
 
 // SSE stream for the dashboard.

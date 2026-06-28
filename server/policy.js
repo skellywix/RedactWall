@@ -12,6 +12,12 @@ const adapters = require('../detection-engine/adapters');
 const CONFIG_PATH = process.env.SENTINEL_POLICY_PATH || path.join(__dirname, '..', 'config', 'policy.json');
 const SENSOR_ID_RE = /^[a-z][a-z0-9_:-]{0,79}$/;
 const SENSOR_VERSION_RE = /^[A-Za-z0-9._+:-]{1,80}$/;
+const ROUTING_RULE_ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+const ROUTING_GROUP_RE = /^[a-z][a-z0-9_-]{0,63}$/;
+const ROUTING_ROLE_RE = /^(security_admin|approver)$/;
+const ROUTING_REASON_RE = /^[a-z0-9][a-z0-9_:-]{0,79}$/;
+const ROUTING_DETECTOR_RE = /^[A-Z0-9_]{1,80}$/;
+const SENSITIVE_ROUTING_CODE_RE = /(?:\d{3}[-_:.]?\d{2}[-_:.]?\d{4}|\d{12,19})/;
 const DEFAULT_REQUIRED_SENSORS = ['browser_extension', 'endpoint_agent', 'mcp_guard'];
 const DEFAULT_DESIRED_SENSOR_VERSIONS = Object.fromEntries(
   DEFAULT_REQUIRED_SENSORS.map((source) => [source, pkg.version]),
@@ -41,6 +47,7 @@ const DEFAULT_POLICY = {
   blockedFileUploadDestinations: [],
   blockUnapprovedAiDestinations: true,
   desktopCollectorDestination: 'Desktop AI',
+  approvalRoutingRules: [],
   requiredSensors: DEFAULT_REQUIRED_SENSORS,
   desiredSensorVersions: DEFAULT_DESIRED_SENSOR_VERSIONS,
   scanner: {
@@ -81,6 +88,78 @@ function normalizeDesiredSensorVersions(value, fallback = DEFAULT_POLICY.desired
   return out;
 }
 
+function normalizeRoutingTextList(value, pattern, maxItems = 40) {
+  const source = Array.isArray(value) ? value : [];
+  const out = [];
+  const seen = new Set();
+  for (const item of source) {
+    const normalized = String(item || '').trim();
+    const key = normalized.toLowerCase();
+    if (!normalized || seen.has(key) || !pattern.test(normalized)) continue;
+    seen.add(key);
+    out.push(normalized);
+    if (out.length >= maxItems) break;
+  }
+  return out;
+}
+
+function safeRoutingCode(value) {
+  const code = String(value || '').trim();
+  return code && !SENSITIVE_ROUTING_CODE_RE.test(code);
+}
+
+function normalizeApprovalRoutingRules(value) {
+  if (!Array.isArray(value)) return [];
+  const out = [];
+  const seen = new Set();
+  for (const item of value) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const id = String(item.id || '').trim().toLowerCase();
+    const assignedGroup = String(item.assignedGroup || '').trim().toLowerCase();
+    const assignedRole = String(item.assignedRole || '').trim();
+    const slaMinutes = Number(item.slaMinutes);
+    if (!ROUTING_RULE_ID_RE.test(id) || seen.has(id)) continue;
+    if (!ROUTING_GROUP_RE.test(assignedGroup) || !ROUTING_ROLE_RE.test(assignedRole)) continue;
+    if (!safeRoutingCode(id) || !safeRoutingCode(assignedGroup)) continue;
+    if (!Number.isFinite(slaMinutes)) continue;
+    const rule = {
+      id,
+      enabled: item.enabled !== false,
+      assignedGroup,
+      assignedRole,
+      slaMinutes: Math.max(15, Math.min(7 * 24 * 60, Math.round(slaMinutes))),
+    };
+    const reason = String(item.reason || '').trim().toLowerCase();
+    if (ROUTING_REASON_RE.test(reason) && safeRoutingCode(reason)) rule.reason = reason;
+    const detectors = normalizeRoutingTextList(item.detectors, ROUTING_DETECTOR_RE).map((v) => v.toUpperCase());
+    const categories = normalizeRoutingTextList(item.categories, ROUTING_DETECTOR_RE).map((v) => v.toUpperCase());
+    const sources = normalizeRoutingTextList(item.sources, SENSOR_ID_RE).map((v) => v.toLowerCase());
+    const channels = normalizeRoutingTextList(item.channels, SENSOR_ID_RE).map((v) => v.toLowerCase());
+    const destinations = normalizeRoutingTextList(item.destinations, /^[A-Za-z0-9.*:_/-]{1,253}$/);
+    if (detectors.length) rule.detectors = detectors;
+    if (categories.length) rule.categories = categories;
+    if (sources.length) rule.sources = sources;
+    if (channels.length) rule.channels = channels;
+    if (destinations.length) rule.destinations = destinations;
+    if (item.minSeverity !== undefined) {
+      const minSeverity = Number(item.minSeverity);
+      if (Number.isFinite(minSeverity)) rule.minSeverity = Math.max(0, Math.min(4, Math.round(minSeverity)));
+    }
+    if (item.minRiskScore !== undefined) {
+      const minRiskScore = Number(item.minRiskScore);
+      if (Number.isFinite(minRiskScore)) rule.minRiskScore = Math.max(0, Math.min(100, Math.round(minRiskScore)));
+    }
+    const hasMatcher = ['detectors', 'categories', 'sources', 'channels', 'destinations'].some((key) => Array.isArray(rule[key]) && rule[key].length)
+      || rule.minSeverity !== undefined
+      || rule.minRiskScore !== undefined;
+    if (!hasMatcher) continue;
+    seen.add(id);
+    out.push(rule);
+    if (out.length >= 40) break;
+  }
+  return out;
+}
+
 function normalizePolicy(p = {}) {
   const scanner = {
     ...DEFAULT_POLICY.scanner,
@@ -98,6 +177,7 @@ function normalizePolicy(p = {}) {
   return {
     ...DEFAULT_POLICY,
     ...(p || {}),
+    approvalRoutingRules: normalizeApprovalRoutingRules((p || {}).approvalRoutingRules),
     requiredSensors: normalizeRequiredSensors((p || {}).requiredSensors),
     desiredSensorVersions: normalizeDesiredSensorVersions((p || {}).desiredSensorVersions),
     scanner,
@@ -119,6 +199,7 @@ const AUDIT_FIELDS = [
   'blockedFileUploadDestinations',
   'blockUnapprovedAiDestinations',
   'desktopCollectorDestination',
+  'approvalRoutingRules',
   'requiredSensors',
   'desiredSensorVersions',
   'scanner',
@@ -319,6 +400,7 @@ module.exports = {
   analyzeOpts,
   rawRetentionDays,
   normalizeDestination,
+  normalizeApprovalRoutingRules,
   destinationMatches,
   reviewDestination,
   destinationAllowed,
