@@ -8,6 +8,17 @@ const { test, expect, chromium } = require('@playwright/test');
 const root = path.join(__dirname, '..');
 const extensionDir = path.join(root, 'sensors', 'browser-extension');
 const artifactDir = path.join(root, 'test-results', 'browser-extension');
+const fixturePolicy = {
+  enforcementMode: 'block',
+  blockMinSeverity: 2,
+  blockRiskScore: 20,
+  governedDestinations: ['chatgpt.com', 'poe.com'],
+  allowedDestinations: [],
+  blockedDestinations: [],
+  blockedFileUploadDestinations: [],
+  blockUnapprovedAiDestinations: true,
+  alwaysBlock: ['US_SSN', 'CREDIT_CARD', 'BANK_ACCOUNT', 'ROUTING_NUMBER', 'IBAN', 'US_PASSPORT', 'SECRET_KEY', 'PRIVATE_KEY', 'CANARY_TOKEN'],
+};
 
 function chatFixture({ host, sendButton }) {
   return `<!doctype html>
@@ -75,15 +86,7 @@ async function launchExtensionContext(baseURL, testInfo) {
       serverUrl: baseURL,
       ingestKey: 'e2e-ingest-key',
       enabled: true,
-      policy: {
-        enforcementMode: 'block',
-        blockMinSeverity: 2,
-        blockRiskScore: 20,
-        governedDestinations: ['chatgpt.com', 'poe.com'],
-        blockedDestinations: [],
-        blockedFileUploadDestinations: [],
-        alwaysBlock: ['US_SSN', 'CREDIT_CARD', 'BANK_ACCOUNT', 'ROUTING_NUMBER', 'IBAN', 'US_PASSPORT', 'SECRET_KEY', 'PRIVATE_KEY', 'CANARY_TOKEN'],
-      },
+      policy: fixturePolicy,
       user: 'browser-smoke@example.test',
       orgId: 'e2e-org',
     }, null, 2),
@@ -91,7 +94,7 @@ async function launchExtensionContext(baseURL, testInfo) {
   });
 
   const serviceWorker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
-  await serviceWorker.evaluate(async ({ serverUrl }) => {
+  await serviceWorker.evaluate(async ({ serverUrl, policy }) => {
     await chrome.storage.local.set({
       serverUrl,
       ingestKey: 'e2e-ingest-key',
@@ -99,19 +102,44 @@ async function launchExtensionContext(baseURL, testInfo) {
       requestTimeoutMs: 3000,
       user: 'browser-smoke@example.test',
       orgId: 'e2e-org',
-      policy: {
-        enforcementMode: 'block',
-        blockMinSeverity: 2,
-        blockRiskScore: 20,
-        governedDestinations: ['chatgpt.com', 'poe.com'],
-        blockedDestinations: [],
-        blockedFileUploadDestinations: [],
-        alwaysBlock: ['US_SSN', 'CREDIT_CARD', 'BANK_ACCOUNT', 'ROUTING_NUMBER', 'IBAN', 'US_PASSPORT', 'SECRET_KEY', 'PRIVATE_KEY', 'CANARY_TOKEN'],
-      },
+      policy,
     });
-  }, { serverUrl: baseURL });
+  }, { serverUrl: baseURL, policy: fixturePolicy });
 
   return { context, userDataDir };
+}
+
+async function applyFixturePolicyToPage(context, page, baseURL, governedHost) {
+  const serviceWorker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
+  await serviceWorker.evaluate(async ({ serverUrl, policy }) => {
+    await chrome.storage.local.set({
+      serverUrl,
+      ingestKey: 'e2e-ingest-key',
+      enabled: true,
+      requestTimeoutMs: 3000,
+      user: 'browser-smoke@example.test',
+      orgId: 'e2e-org',
+      policy,
+    });
+  }, { serverUrl: baseURL, policy: fixturePolicy });
+
+  await expect.poll(async () => serviceWorker.evaluate(async ({ url, host }) => {
+    const tabs = await chrome.tabs.query({});
+    const tab = tabs.find((candidate) => candidate.url === url);
+    if (!tab || !tab.id) return false;
+    try {
+      const state = await chrome.tabs.sendMessage(tab.id, { type: 'getPolicyState' });
+      return !!(
+        state
+        && state.enabled
+        && state.policy
+        && state.policy.blockUnapprovedAiDestinations === true
+        && (state.policy.governedDestinations || []).includes(host)
+      );
+    } catch (_) {
+      return false;
+    }
+  }, { url: page.url(), host: governedHost }), { timeout: 5000 }).toBe(true);
 }
 
 async function openControlledAiPage(context, url, html) {
@@ -150,6 +178,7 @@ test.describe('browser extension live smoke', () => {
 
       await syntheticPaste(page, 'Member test SSN 123-45-6789');
       await expect(page.locator('.ps-toast')).toContainText('Social Security number');
+      await applyFixturePolicyToPage(context, page, baseURL, 'chatgpt.com');
 
       await page.locator('#prompt-textarea').fill('Member test SSN 123-45-6789 needs a payoff letter.');
       await page.locator('button[data-testid="send-button"]').click();
@@ -186,6 +215,7 @@ test.describe('browser extension live smoke', () => {
         }),
       );
 
+      await applyFixturePolicyToPage(context, page, baseURL, 'poe.com');
       await page.locator('#prompt-textarea').fill('Member test SSN 123-45-6789 needs a payoff letter.');
       await page.locator('button.sendButton_demo').click();
 

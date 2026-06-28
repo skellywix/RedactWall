@@ -18,6 +18,8 @@ jobs:
         run: npm audit --omit=dev
       - name: Engine copies in sync
         run: npm run sync-check
+      - name: AI domain coverage current
+        run: npm run ai-domains:check
       - name: Unit and integration tests
         run: npm test
       - name: Install Playwright browser

@@ -52,6 +52,7 @@
   "allowedDestinations": [],
   "blockedDestinations": [],
   "blockedFileUploadDestinations": [],
+  "blockUnapprovedAiDestinations": true,
   "desktopCollectorDestination": "Desktop AI",
   "requiredSensors": [
     "browser_extension",

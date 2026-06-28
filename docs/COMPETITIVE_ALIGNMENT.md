@@ -90,6 +90,12 @@ Build next:
 - Add policy-driven required-sensor and desired-version fleet posture so the
   dashboard, SIEM version-gap alerts, and examiner export can show missing or
   outdated sensors without prompt bodies.
+- Add default-deny unapproved AI destination blocking with an admin review reason
+  so shadow-AI sightings can become explicit govern, allow, or block policy
+  decisions without retaining prompt bodies.
+- Add an AI-domain watchlist and CI check so adapter coverage, browser manifest
+  coverage, and shadow-AI/default-deny inventory do not silently age out as new
+  tools appear.
 - Expand the sanitized examiner evidence export with coverage posture, sensor
   versions, parsed policy history, and prompt/file lineage summaries by user,
   destination, sensor, category, channel, and decision.

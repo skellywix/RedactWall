@@ -73,6 +73,8 @@ test('redact mode blocks category-only hits that cannot be tokenized', () => {
 
 test('active content scripts receive policy updates from storage', () => {
   assert.match(content, /if \(c\.policy\) POLICY = \{ \.\.\.POLICY, \.\.\.c\.policy\.newValue \};/);
+  assert.match(content, /msg\.type !== 'getPolicyState'/);
+  assert.match(content, /blockUnapprovedAiDestinations:\s*POLICY\.blockUnapprovedAiDestinations !== false/);
 });
 
 test('browser local analysis honors centralized detector policy', () => {
@@ -98,6 +100,8 @@ test('browser blocks configured destinations before local prompt or file inspect
   assert.match(content, /POLICY\.allowedDestinations \|\| \[\]/);
   assert.match(content, /POLICY\.blockedDestinations \|\| \[\]/);
   assert.match(content, /POLICY\.blockedFileUploadDestinations \|\| \[\]/);
+  assert.match(content, /POLICY\.blockUnapprovedAiDestinations === false/);
+  assert.match(content, /A\.isAiHost\(SITE\)/);
   assert.match(background, /clientOutcome:\s*msg\.payload\.outcome/);
   assert.match(content, /'destination_blocked'/);
   assert.match(content, /'file_upload_blocked'/);
@@ -105,6 +109,7 @@ test('browser blocks configured destinations before local prompt or file inspect
   assert.match(content, /PromptWall blocked file uploads to/);
   assert.match(background, /blockedDestinations:\s*\[\]/);
   assert.match(background, /blockedFileUploadDestinations:\s*\[\]/);
+  assert.match(background, /blockUnapprovedAiDestinations:\s*true/);
   assert.match(background, /allowedDestinations:\s*\[\]/);
 });
 
@@ -116,6 +121,12 @@ test('browser fallback hard-stops match regulated endpoint defaults before polic
 test('destination allowlist overrides wildcard destination blocks', () => {
   assert.match(content, /A\.isGoverned\(SITE, allowed\)\) return false/);
   assert.match(background, /\.\.\.\(\(c\.policy && c\.policy\.allowedDestinations\) \|\| \[\]\)/);
+});
+
+test('shadow AI reporting blocks unapproved AI destinations by default', () => {
+  assert.match(background, /const blockUnapproved = !c\.policy \|\| c\.policy\.blockUnapprovedAiDestinations !== false/);
+  assert.match(background, /clientOutcome:\s*blockUnapproved \? 'destination_blocked' : 'shadow_ai'/);
+  assert.match(background, /\[unapproved AI blocked\]/);
 });
 
 test('browser block banner includes employee coaching guidance', () => {

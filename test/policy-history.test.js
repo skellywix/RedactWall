@@ -13,6 +13,10 @@ test('destination policy matches hosts, URLs, labels, and wildcards', () => {
   assert.strictEqual(policy.destinationBlocked('poe.com', { blockedDestinations: ['poe.com'] }), true);
   assert.strictEqual(policy.destinationAllowed('chatgpt.com', { allowedDestinations: ['chatgpt.com'] }), true);
   assert.strictEqual(policy.destinationBlocked('chatgpt.com', { blockedDestinations: ['*'], allowedDestinations: ['chatgpt.com'] }), false);
+  assert.strictEqual(policy.unapprovedAiDestination('notebooklm.google.com', { blockUnapprovedAiDestinations: true }), true);
+  assert.strictEqual(policy.destinationBlocked('notebooklm.google.com', { blockUnapprovedAiDestinations: true }), true);
+  assert.strictEqual(policy.destinationBlocked('notebooklm.google.com', { blockUnapprovedAiDestinations: true, allowedDestinations: ['notebooklm.google.com'] }), false);
+  assert.strictEqual(policy.destinationBlockReason('notebooklm.google.com', { blockUnapprovedAiDestinations: true }), 'Unapproved AI destination blocked by policy');
   assert.strictEqual(policy.fileUploadBlocked('chatgpt.com', { blockedFileUploadDestinations: ['*'], allowedDestinations: ['chatgpt.com'] }), false);
   assert.strictEqual(policy.fileUploadBlocked('https://chatgpt.com/c/abc', { blockedFileUploadDestinations: ['chatgpt.com'] }), true);
 });
@@ -116,6 +120,7 @@ test('evidence exports destination-review policy changes', () => {
   const detail = policy.policyChangeDetail(
     { governedDestinations: ['poe.com'], allowedDestinations: [], blockedDestinations: [] },
     { governedDestinations: [], allowedDestinations: ['poe.com'], blockedDestinations: [] },
+    { reason: 'Approved pilot for vendor comparison' },
   );
   const entry = evidence.safeAuditEntry({
     id: 'a_destination',
@@ -127,6 +132,7 @@ test('evidence exports destination-review policy changes', () => {
     hash: '1'.repeat(64),
   });
 
+  assert.strictEqual(entry.policyChange.reason, 'Approved pilot for vendor comparison');
   assert.deepStrictEqual(entry.policyChange.changed, [
     { field: 'governedDestinations', before: ['poe.com'], after: [] },
     { field: 'allowedDestinations', before: [], after: ['poe.com'] },

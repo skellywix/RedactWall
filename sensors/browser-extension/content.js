@@ -15,13 +15,27 @@
 
   const D = window.PSDetect;
   const SITE = location.hostname;
-  let POLICY = { enforcementMode: 'block', blockMinSeverity: 2, blockRiskScore: 25, allowedDestinations: [], alwaysBlock: [] };
+  let POLICY = { enforcementMode: 'block', blockMinSeverity: 2, blockRiskScore: 25, allowedDestinations: [], blockUnapprovedAiDestinations: true, alwaysBlock: [] };
   let ENABLED = true;
 
   // Pull policy + enabled state from the background worker.
   chrome.runtime.sendMessage({ type: 'getConfig' }, (res) => {
     if (res && res.policy) POLICY = res.policy;
     if (res && typeof res.enabled === 'boolean') ENABLED = res.enabled;
+  });
+  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (!msg || msg.type !== 'getPolicyState') return false;
+    sendResponse({
+      enabled: ENABLED,
+      policy: {
+        governedDestinations: POLICY.governedDestinations || [],
+        allowedDestinations: POLICY.allowedDestinations || [],
+        blockedDestinations: POLICY.blockedDestinations || [],
+        blockedFileUploadDestinations: POLICY.blockedFileUploadDestinations || [],
+        blockUnapprovedAiDestinations: POLICY.blockUnapprovedAiDestinations !== false,
+      },
+    });
+    return false;
   });
   chrome.storage.onChanged.addListener((c) => {
     if (c.enabled) ENABLED = c.enabled.newValue;
@@ -63,8 +77,15 @@
     const A = window.PSAdapters;
     if (A && A.isGoverned && A.isGoverned(SITE, allowed)) return false;
     if (allowed.some((host) => SITE === host || SITE.endsWith('.' + host))) return false;
-    if (A && A.isGoverned) return A.isGoverned(SITE, blocked);
-    return blocked.some((host) => SITE === host || SITE.endsWith('.' + host));
+    if (A && A.isGoverned && A.isGoverned(SITE, blocked)) return true;
+    if (blocked.some((host) => SITE === host || SITE.endsWith('.' + host))) return true;
+    if (POLICY.blockUnapprovedAiDestinations === false || !A || !A.isAiHost || !A.isGoverned) return false;
+    return A.isAiHost(SITE) && !A.isGoverned(SITE, [
+      ...(POLICY.governedDestinations || []),
+      ...(POLICY.allowedDestinations || []),
+      ...(POLICY.blockedDestinations || []),
+      ...(POLICY.blockedFileUploadDestinations || []),
+    ]);
   }
 
   function fileUploadBlocked() {

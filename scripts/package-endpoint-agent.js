@@ -12,6 +12,7 @@ const DEFAULT_OUT_DIR = path.join(ROOT, 'dist', 'endpoint-agent');
 const PACKAGE_FILES = [
   'package.json',
   'package-lock.json',
+  'detection-engine/adapters.js',
   'detection-engine/detect.js',
   'server/env.js',
   'server/policy.js',

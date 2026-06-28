@@ -206,6 +206,51 @@ function askApprovePassword() {
   });
 }
 
+function askDestinationReviewReason({ destination, decision }) {
+  const labels = { govern: 'govern', allow: 'allow', block: 'block' };
+  return new Promise((resolve) => {
+    const dialog = document.createElement('dialog');
+    dialog.className = 'stepup-dialog';
+    dialog.innerHTML = `
+      <form method="dialog" class="stepup-panel">
+        <div>
+          <h2>Record destination reason</h2>
+          <p>${escapeHtml(labels[decision] || 'review')} ${escapeHtml(destination)} with a short examiner-facing reason.</p>
+        </div>
+        <label>Admin reason
+          <textarea name="reason" rows="3" maxlength="240" required></textarea>
+        </label>
+        <div class="stepup-actions">
+          <button class="btn" value="cancel" type="button">Cancel</button>
+          <button class="btn approve" value="confirm" type="submit">${icons.check}Save review</button>
+        </div>
+      </form>`;
+    document.body.appendChild(dialog);
+    const input = $('textarea[name=reason]', dialog);
+    const cleanup = (value) => {
+      dialog.close();
+      dialog.remove();
+      resolve(value);
+    };
+    $('.stepup-actions .btn', dialog).onclick = () => cleanup(null);
+    dialog.addEventListener('cancel', (event) => {
+      event.preventDefault();
+      cleanup(null);
+    });
+    $('form', dialog).addEventListener('submit', (event) => {
+      event.preventDefault();
+      const reason = (input.value || '').trim();
+      if (!reason) {
+        input.focus();
+        return;
+      }
+      cleanup(reason);
+    });
+    dialog.showModal();
+    input.focus();
+  });
+}
+
 async function init() {
   const meRes = await api('/api/me');
   if (!meRes) return;
@@ -356,11 +401,13 @@ document.addEventListener('click', async (e) => {
     }
     const destination = destinationReview.dataset.destination;
     const decision = destinationReview.dataset.destinationReview;
+    const reason = await askDestinationReviewReason({ destination, decision });
+    if (!reason) return;
     destinationReview.disabled = true;
     const r = await api('/api/destinations/review', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ destination, decision }),
+      body: JSON.stringify({ destination, decision, reason }),
     });
     if (!r || !r.ok) {
       destinationReview.disabled = false;
@@ -627,6 +674,8 @@ async function loadPolicy() {
       <input id="pol_retention" type="number" min="0" max="3650" value="${escapeHtml(p.rawRetentionDays ?? 30)}" ${readonly ? 'disabled' : ''}/>
       <label for="pol_desktop_destination">Default desktop upload destination</label>
       <input id="pol_desktop_destination" type="text" maxlength="80" value="${escapeHtml(p.desktopCollectorDestination || 'Desktop AI')}" ${readonly ? 'disabled' : ''}/>
+      <label for="pol_block_unapproved_ai">Block unapproved AI destinations</label>
+      <input id="pol_block_unapproved_ai" type="checkbox" ${p.blockUnapprovedAiDestinations !== false ? 'checked' : ''} ${readonly ? 'disabled' : ''}/>
     </div>
     <div class="policy-label">Fleet posture</div>
     <div class="policy-list-grid">
@@ -690,6 +739,7 @@ async function loadPolicy() {
       allowedDestinations: parsePolicyList($('#pol_allowed_destinations').value),
       blockedDestinations: parsePolicyList($('#pol_blocked_destinations').value),
       blockedFileUploadDestinations: parsePolicyList($('#pol_blocked_file_upload_destinations').value),
+      blockUnapprovedAiDestinations: $('#pol_block_unapproved_ai').checked,
     };
     const r = await api('/api/policy', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (!r || !r.ok) return;

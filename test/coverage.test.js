@@ -46,12 +46,13 @@ test('coverage summary aggregates governed apps, sensors, and shadow AI without 
     {
       id: 'q3',
       createdAt: '2026-06-26T12:00:00.000Z',
-      status: 'shadow_ai',
+      status: 'destination_blocked',
       user: 'ops@example.test',
       destination: 'notebooklm.google.com',
       source: 'browser_extension',
+      channel: 'shadow_ai',
       sensor: { name: 'browser_extension', version: '0.2.9', platform: 'chrome_mv3' },
-      redactedPrompt: '[shadow-AI] visit',
+      redactedPrompt: '[unapproved AI blocked] notebooklm.google.com',
     },
     {
       id: 'q4',
@@ -91,6 +92,7 @@ test('coverage summary aggregates governed apps, sensors, and shadow AI without 
   assert.strictEqual(report.governedDestinations.find((d) => d.destination === 'claude.ai').redacted, 1);
   assert.strictEqual(report.governedDestinations.find((d) => d.destination === 'claude.ai').blocked, 1);
   assert.strictEqual(report.shadowDestinations[0].destination, 'notebooklm.google.com');
+  assert.strictEqual(report.shadowDestinations[0].blocked, 1);
   assert.strictEqual(report.shadowDestinations[0].policyState, 'review');
   const browser = report.sensors.find((s) => s.source === 'browser_extension');
   assert.strictEqual(browser.required, true);

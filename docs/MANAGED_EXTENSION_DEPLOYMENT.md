@@ -81,7 +81,9 @@ On a managed test device:
 5. Open ChatGPT or Claude and send a benign prompt.
 6. Confirm the dashboard shows the correct user and org.
 7. Paste synthetic PII and confirm a block or redaction.
-8. Visit an ungoverned AI host and confirm shadow-AI discovery logs the event.
+8. Visit an unreviewed AI host and confirm PromptWall blocks it by default, then
+   records the reviewed allow/govern/block decision after a Security Admin enters
+   a reason.
 
 ## Production Notes
 

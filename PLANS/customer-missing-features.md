@@ -39,7 +39,9 @@ Recent official product pages sharpen the priority order:
 
 Implication: Option B still wins. Build one real desktop/file-flow collector MVP
 first, then routing, identity, fleet posture, scoped policy, scheduled evidence,
-customer detectors/OCR states, and MCP connectors.
+customer detectors/OCR states, and MCP connectors. The browser lane now also
+needs an explicit default-deny control for new AI destinations plus a repeatable
+domain-refresh check so shadow-AI visibility turns into enforceable policy.
 
 ## Non-Negotiable Constraints
 
@@ -153,9 +155,11 @@ Acceptance evidence:
 ### 4. Managed Deployment And Fleet Posture
 
 Current state: extension and endpoint package generation, managed Chrome policy
-docs, required-sensor and desired-version posture, AWS customer-silo deployment,
-and setup preflight exist. Missing pieces are a signed update channel,
-technician install validation in-product, and customer-ready fleet reporting.
+docs, required-sensor and desired-version posture, default-deny unapproved AI
+blocking, AI-domain adapter and browser-manifest coverage checks, AWS
+customer-silo deployment, and setup preflight exist. Missing pieces are a signed
+update channel, technician install validation in-product, and customer-ready
+fleet reporting.
 
 Customer ask: "How do we force-install it, keep it updated, and prove every
 covered user actually has it?"

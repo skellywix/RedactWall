@@ -13,7 +13,7 @@ const DEFAULTS = {
   ingestKey: '',
   requestTimeoutMs: 10000,
   enabled: true,
-  policy: { enforcementMode: 'block', blockMinSeverity: 2, blockRiskScore: 25, governedDestinations: [], allowedDestinations: [], blockedDestinations: [], blockedFileUploadDestinations: [], alwaysBlock: ['US_SSN', 'CREDIT_CARD', 'BANK_ACCOUNT', 'ROUTING_NUMBER', 'US_ITIN', 'US_NPI', 'MEMBER_ID', 'LOAN_NUMBER', 'MEDICAL_RECORD_NUMBER', 'HEALTH_INSURANCE_ID', 'SECRET_KEY', 'PRIVATE_KEY', 'CANARY_TOKEN'] },
+  policy: { enforcementMode: 'block', blockMinSeverity: 2, blockRiskScore: 25, governedDestinations: [], allowedDestinations: [], blockedDestinations: [], blockedFileUploadDestinations: [], blockUnapprovedAiDestinations: true, alwaysBlock: ['US_SSN', 'CREDIT_CARD', 'BANK_ACCOUNT', 'ROUTING_NUMBER', 'US_ITIN', 'US_NPI', 'MEMBER_ID', 'LOAN_NUMBER', 'MEDICAL_RECORD_NUMBER', 'HEALTH_INSURANCE_ID', 'SECRET_KEY', 'PRIVATE_KEY', 'CANARY_TOKEN'] },
 };
 
 async function cfg() {
@@ -192,6 +192,7 @@ chrome.tabs?.onUpdated.addListener(async (tabId, info, tab) => {
     ...((c.policy && c.policy.governedDestinations) || []),
     ...((c.policy && c.policy.allowedDestinations) || []),
     ...((c.policy && c.policy.blockedDestinations) || []),
+    ...((c.policy && c.policy.blockedFileUploadDestinations) || []),
   ];
   if (!self.PSAdapters.isAiHost(host) || self.PSAdapters.isGoverned(host, governed)) return;
   const now = Date.now();
@@ -201,10 +202,21 @@ chrome.tabs?.onUpdated.addListener(async (tabId, info, tab) => {
   if (!sc.enabled) return;
   if (missingServerConfigReason(sc)) return;
   try {
+    const blockUnapproved = !c.policy || c.policy.blockUnapprovedAiDestinations !== false;
     await fetchJsonWithTimeout(sc.serverUrl + '/api/v1/gate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': sc.ingestKey },
-      body: JSON.stringify({ prompt: '[shadow-AI] visit to ungoverned AI tool: ' + host, user: who.user, orgId: who.orgId, destination: host, channel: 'shadow_ai', source: 'browser_extension', sensor: sensorMetadata(), clientOutcome: 'shadow_ai' }),
+      body: JSON.stringify({
+        prompt: (blockUnapproved ? '[unapproved AI blocked] ' : '[shadow-AI] visit to ungoverned AI tool: ') + host,
+        user: who.user,
+        orgId: who.orgId,
+        destination: host,
+        channel: 'shadow_ai',
+        source: 'browser_extension',
+        sensor: sensorMetadata(),
+        clientOutcome: blockUnapproved ? 'destination_blocked' : 'shadow_ai',
+        note: blockUnapproved ? 'blocked locally: unapproved AI destination' : 'ungoverned AI tool',
+      }),
     }, sc.requestTimeoutMs);
   } catch (e) {}
 });
