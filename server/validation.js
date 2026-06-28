@@ -24,6 +24,10 @@ const HOST_OR_LABEL = /^[A-Za-z0-9.*:_/-]+$/;
 const DESKTOP_DESTINATION_LABEL = /^[A-Za-z0-9 .:_/-]+$/;
 const SENSOR_ID = /^[a-z][a-z0-9_:-]{0,79}$/;
 const SENSOR_VERSION = /^[A-Za-z0-9._+:-]+$/;
+const ROUTING_RULE_ID = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+const ROUTING_GROUP = /^[a-z][a-z0-9_-]{0,63}$/;
+const ROUTING_REASON = /^[a-z0-9][a-z0-9_:-]{0,79}$/;
+const SENSITIVE_ROUTING_CODE = /(?:\d{3}[-_:.]?\d{2}[-_:.]?\d{4}|\d{12,19})/;
 const KNOWN_DETECTOR_IDS = new Set(detector.listDetectors().map((d) => d.id));
 
 function nonBlankString(max) {
@@ -234,6 +238,35 @@ const desiredSensorVersionsSchema = z.record(
   message: 'too many desired sensor versions',
 });
 
+function routingCodeSchema(pattern, max) {
+  return z.string().min(1).max(max).regex(pattern).refine((value) => !SENSITIVE_ROUTING_CODE.test(value), {
+    message: 'sensitive identifier not allowed',
+  });
+}
+
+const approvalRoutingRuleSchema = z.object({
+  id: routingCodeSchema(ROUTING_RULE_ID, 64),
+  enabled: z.boolean().optional(),
+  detectors: z.array(detectorIdSchema).max(40).optional(),
+  categories: z.array(detectorIdSchema).max(40).optional(),
+  sources: z.array(sensorIdSchema).max(40).optional(),
+  channels: z.array(sensorIdSchema).max(40).optional(),
+  destinations: z.array(z.string().min(1).max(253).regex(HOST_OR_LABEL)).max(40).optional(),
+  minSeverity: z.number().int().min(0).max(4).optional(),
+  minRiskScore: z.number().int().min(0).max(100).optional(),
+  assignedGroup: routingCodeSchema(ROUTING_GROUP, 64),
+  assignedRole: z.enum(['security_admin', 'approver']),
+  slaMinutes: z.number().int().min(15).max(7 * 24 * 60),
+  reason: routingCodeSchema(ROUTING_REASON, 80).optional(),
+}).strict().refine((rule) => {
+  return ['detectors', 'categories', 'sources', 'channels', 'destinations'].some((key) => Array.isArray(rule[key]) && rule[key].length)
+    || rule.minSeverity !== undefined
+    || rule.minRiskScore !== undefined;
+}, {
+  message: 'at least one matcher required',
+  path: ['id'],
+});
+
 const policyUpdateSchema = z.object({
   enforcementMode: z.enum(['block', 'warn', 'justify', 'redact']).optional(),
   blockMinSeverity: z.number().int().min(1).max(4).optional(),
@@ -251,6 +284,7 @@ const policyUpdateSchema = z.object({
   desktopCollectorDestination: z.string().min(1).max(80).regex(DESKTOP_DESTINATION_LABEL).refine((value) => value.trim().length > 0, {
     message: 'required',
   }).optional(),
+  approvalRoutingRules: z.array(approvalRoutingRuleSchema).max(40).optional(),
   requiredSensors: z.array(sensorIdSchema).min(1).max(20).optional(),
   desiredSensorVersions: desiredSensorVersionsSchema.optional(),
   scanner: scannerPolicySchema.optional(),

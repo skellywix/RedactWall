@@ -127,14 +127,15 @@ Acceptance evidence:
 
 Current state: blocked items enter one queue, approval release requires password
 step-up, SIEM alerts are sanitized, and denied or approved decisions are audited.
-Held decisions receive deterministic owner and SLA routing metadata for
-security, compliance, privacy, or legal review, and the dashboard, SIEM payloads,
-and examiner export expose that sanitized workflow context. PromptWall now
-supports best-effort generic JSON, Slack, and Microsoft Teams approval
-notifications, persists delivery status on the query, audits notification
-outcomes, and escalates overdue routed items into tamper-evident evidence. Direct
-SMTP email, customer-configurable routing rules, identity group mapping, and
-more granular escalation policies are still open.
+Held decisions receive owner and SLA routing metadata for security, compliance,
+privacy, legal, or customer-defined review groups. Security Admins can configure
+metadata-only `approvalRoutingRules` from the Policy tab or admin policy API.
+The dashboard, SIEM payloads, and examiner export expose that sanitized workflow
+context. PromptWall supports best-effort generic JSON, Slack, and Microsoft
+Teams approval notifications, persists delivery status on the query, audits
+notification outcomes, and escalates overdue routed items into tamper-evident
+evidence. Direct SMTP email, identity group mapping, and more granular
+escalation policies are still open.
 
 Customer ask: "Can member-services exceptions route to compliance, source-code
 events route to security, and urgent approvals notify someone immediately?"
@@ -143,9 +144,8 @@ Why it matters: a queue without ownership becomes a backlog. Customers need the
 workflow to fit their org chart, not just prove the gate works.
 
 Implementation connection:
-- Extend `server/routing.js` from the current deterministic detector/source
-  routing into customer-configurable assignment from destination, source, user
-  group, and severity.
+- Extend the current `approvalRoutingRules` matchers with identity/user-group
+  conditions after enterprise identity lands.
 - Build direct SMTP email and ticketing adapters on top of the existing
   sanitized `server/notifiers.js` discipline.
 - Add dashboard queue filters: By category and By destination.

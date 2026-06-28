@@ -68,7 +68,7 @@ This section is generated from the app by `npm run docs:demo-guide`. Do not hand
 | Path | Demo role | Status |
 | --- | --- | --- |
 | `server/app.js` | Control plane, API, dashboard, policy, approval, audit | Present |
-| `server/routing.js` | Approval owner and SLA routing rules | Present |
+| `server/routing.js` | Customer-configurable approval owner and SLA routing rules | Present |
 | `server/notifiers.js` | Sanitized approval workflow notification adapters | Present |
 | `server/workflow.js` | Approval notification status and SLA escalation | Present |
 | `server/public/index.html` | Admin dashboard shell | Present |

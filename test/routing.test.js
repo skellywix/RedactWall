@@ -75,6 +75,115 @@ test('routes member, health, and legal work to the right review groups', () => {
   assert.strictEqual(legal.slaDueAt, '2026-06-28T14:00:00.000Z');
 });
 
+test('customer approval routing rules override default owners using metadata only', () => {
+  const rule = {
+    id: 'engineering_source_code',
+    categories: ['SOURCE_CODE'],
+    sources: ['browser_extension'],
+    destinations: ['chatgpt.com'],
+    assignedGroup: 'engineering',
+    assignedRole: 'approver',
+    slaMinutes: 90,
+    reason: 'engineering_review',
+  };
+  const routed = routing.routeDecision({
+    status: 'pending',
+    destination: 'https://chatgpt.com/c/unit',
+    source: 'browser_extension',
+    channel: 'submit',
+    findings: [],
+    categories: ['SOURCE_CODE'],
+    entityCounts: { SOURCE_CODE: 1 },
+    riskScore: 28,
+    maxSeverity: 3,
+    redactedPrompt: 'function leak() { return secret; }',
+  }, { now: NOW, policy: { approvalRoutingRules: [rule] } });
+
+  assert.strictEqual(routed.assignedRole, 'approver');
+  assert.strictEqual(routed.assignedGroup, 'engineering');
+  assert.strictEqual(routed.workflowReason, 'rule:engineering_source_code:engineering_review');
+  assert.strictEqual(routed.slaDueAt, '2026-06-28T07:30:00.000Z');
+  assert.ok(!JSON.stringify(routed).includes('function leak'));
+});
+
+test('customer routing rules cannot soften critical-risk ownership', () => {
+  const routed = routing.routeDecision({
+    status: 'pending',
+    destination: 'chatgpt.com',
+    source: 'browser_extension',
+    channel: 'submit',
+    findings: [{ type: 'SOURCE_CODE', masked: 'redacted' }],
+    categories: [],
+    entityCounts: { SOURCE_CODE: 1 },
+    riskScore: 90,
+    maxSeverity: 4,
+  }, {
+    now: NOW,
+    policy: {
+      approvalRoutingRules: [{
+        id: 'soft_source_code',
+        detectors: ['SOURCE_CODE'],
+        assignedGroup: 'engineering',
+        assignedRole: 'approver',
+        slaMinutes: 240,
+      }],
+    },
+  });
+
+  assert.strictEqual(routed.assignedRole, 'security_admin');
+  assert.strictEqual(routed.assignedGroup, 'security');
+  assert.strictEqual(routed.workflowReason, 'rule:soft_source_code+critical');
+  assert.strictEqual(routed.slaDueAt, '2026-06-28T07:00:00.000Z');
+});
+
+test('disabled or nonmatching routing rules fall back to deterministic defaults', () => {
+  assert.strictEqual(routing.ruleMatches({
+    id: 'catch_all',
+    assignedGroup: 'security',
+    assignedRole: 'security_admin',
+    slaMinutes: 60,
+  }, {}, { detectorLabels: [], categoryLabels: [], source: '', channel: '', riskScore: 0, maxSeverity: 0 }), false);
+
+  const routed = routing.routeDecision({
+    status: 'pending',
+    destination: 'claude.ai',
+    source: 'browser_extension',
+    channel: 'submit',
+    findings: [{ type: 'MEMBER_ID', masked: '**** 7788' }],
+    categories: [],
+    entityCounts: { MEMBER_ID: 1 },
+    riskScore: 24,
+    maxSeverity: 3,
+  }, {
+    now: NOW,
+    policy: {
+      approvalRoutingRules: [
+        {
+          id: 'disabled_member_rule',
+          enabled: false,
+          detectors: ['MEMBER_ID'],
+          assignedGroup: 'member_services',
+          assignedRole: 'approver',
+          slaMinutes: 60,
+        },
+        {
+          id: 'chatgpt_only_member_rule',
+          detectors: ['MEMBER_ID'],
+          destinations: ['chatgpt.com'],
+          assignedGroup: 'member_services',
+          assignedRole: 'approver',
+          slaMinutes: 60,
+        },
+      ],
+    },
+  });
+
+  assert.strictEqual(routed.assignedRole, 'approver');
+  assert.strictEqual(routed.assignedGroup, 'compliance');
+  assert.strictEqual(routed.workflowReason, 'detector:MEMBER_ID');
+  assert.strictEqual(routed.slaDueAt, '2026-06-28T10:00:00.000Z');
+});
+
 test('withWorkflow only annotates routeable records and omits raw content', () => {
   const allowed = routing.withWorkflow({
     status: 'allowed',

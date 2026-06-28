@@ -61,6 +61,23 @@ function parsePolicyMap(value) {
   return out;
 }
 
+function policyJsonText(value) {
+  return JSON.stringify(value || [], null, 2);
+}
+
+function parsePolicyJsonArray(value, label) {
+  const raw = String(value || '').trim();
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) throw new Error('expected array');
+    return parsed;
+  } catch {
+    alert(`${label} must be valid JSON array syntax.`);
+    return null;
+  }
+}
+
 function statusTone(status) {
   const s = String(status || '').toLowerCase();
   if (['approved', 'allowed', 'justified', 'warned_sent', 'redacted'].includes(s)) return 'good';
@@ -778,6 +795,12 @@ async function loadPolicy() {
     : `<textarea id="pol_desired_sensor_versions" class="policy-textarea" spellcheck="false" placeholder="browser_extension=0.3.0&#10;endpoint_agent=0.3.0">${escapeHtml(policyMapText(p.desiredSensorVersions))}</textarea>`}
       </label>
     </div>
+    <div class="policy-label">Approval routing rules</div>
+    <div class="template-bar">
+      ${readonly
+    ? `<div class="chips">${(p.approvalRoutingRules || []).map((rule) => `<span class="chip"><b>${escapeHtml(rule.id)}</b> ${escapeHtml(rule.assignedGroup || '')} / ${escapeHtml(roleLabel(rule.assignedRole))}</span>`).join('') || '<span class="chip">default routing</span>'}</div>`
+    : `<textarea id="pol_approval_routing_rules" class="policy-textarea" spellcheck="false" style="min-height:160px" placeholder='[{"id":"member_services","detectors":["MEMBER_ID"],"destinations":["chatgpt.com"],"assignedGroup":"compliance","assignedRole":"approver","slaMinutes":120}]'>${escapeHtml(policyJsonText(p.approvalRoutingRules))}</textarea>`}
+    </div>
     <div class="template-bar"><div class="template-title">Hard-stop entities</div>
       <div class="chips">${(p.alwaysBlock || []).map((x) => `<span class="chip"><b>${escapeHtml(x)}</b></span>`).join('')}</div></div>
     <div class="policy-list-grid">
@@ -815,6 +838,8 @@ async function loadPolicy() {
   if (readonly) return;
   $('#savePolicy').onclick = async () => {
     const mode = (document.querySelector('input[name=mode]:checked') || {}).value || p.enforcementMode;
+    const approvalRoutingRules = parsePolicyJsonArray($('#pol_approval_routing_rules').value, 'Approval routing rules');
+    if (approvalRoutingRules == null) return;
     const body = {
       enforcementMode: mode,
       blockMinSeverity: Number($('#pol_sev').value),
@@ -823,6 +848,7 @@ async function loadPolicy() {
       desktopCollectorDestination: ($('#pol_desktop_destination').value || '').trim(),
       requiredSensors: parsePolicyList($('#pol_required_sensors').value),
       desiredSensorVersions: parsePolicyMap($('#pol_desired_sensor_versions').value),
+      approvalRoutingRules,
       governedDestinations: parsePolicyList($('#pol_governed_destinations').value),
       allowedDestinations: parsePolicyList($('#pol_allowed_destinations').value),
       blockedDestinations: parsePolicyList($('#pol_blocked_destinations').value),

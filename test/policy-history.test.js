@@ -72,6 +72,67 @@ test('policy change detail records normalized before-after changes', () => {
   assert.strictEqual(detail.changed[1].after.maxFileBytes, 2048);
 });
 
+test('policy normalizes customer approval routing rules for audit and runtime', () => {
+  const rules = policy.normalizeApprovalRoutingRules([
+    {
+      id: 'Member_Services',
+      detectors: ['member_id', 'MEMBER_ID'],
+      destinations: ['ChatGPT.com'],
+      assignedGroup: 'Member_Services',
+      assignedRole: 'approver',
+      slaMinutes: 120.2,
+      reason: 'member_services',
+    },
+    {
+      id: 'member_services',
+      detectors: ['US_SSN'],
+      assignedGroup: 'compliance',
+      assignedRole: 'approver',
+      slaMinutes: 60,
+    },
+    {
+      id: 'catch_all',
+      assignedGroup: 'security',
+      assignedRole: 'security_admin',
+      slaMinutes: 60,
+    },
+    {
+      id: 'member_524_71_9043',
+      detectors: ['MEMBER_ID'],
+      assignedGroup: 'compliance',
+      assignedRole: 'approver',
+      slaMinutes: 60,
+    },
+    {
+      id: 'bad rule',
+      assignedGroup: 'member services',
+      assignedRole: 'owner',
+      slaMinutes: 5,
+    },
+  ]);
+
+  assert.deepStrictEqual(rules, [{
+    id: 'member_services',
+    enabled: true,
+    assignedGroup: 'member_services',
+    assignedRole: 'approver',
+    slaMinutes: 120,
+    reason: 'member_services',
+    detectors: ['MEMBER_ID'],
+    destinations: ['ChatGPT.com'],
+  }]);
+
+  const detail = JSON.parse(policy.policyChangeDetail(
+    { approvalRoutingRules: [] },
+    { approvalRoutingRules: rules },
+  ));
+  assert.deepStrictEqual(detail.changed, [{
+    field: 'approvalRoutingRules',
+    before: [],
+    after: rules,
+  }]);
+});
+
 test('evidence exports parsed policy changes but not raw audit detail text', () => {
   const detail = policy.policyChangeDetail(
     {

@@ -54,6 +54,7 @@
   "blockedFileUploadDestinations": [],
   "blockUnapprovedAiDestinations": true,
   "desktopCollectorDestination": "Desktop AI",
+  "approvalRoutingRules": [],
   "requiredSensors": [
     "browser_extension",
     "endpoint_agent",
