@@ -127,10 +127,14 @@ Acceptance evidence:
 
 Current state: blocked items enter one queue, approval release requires password
 step-up, SIEM alerts are sanitized, and denied or approved decisions are audited.
-Held decisions now receive deterministic owner and SLA routing metadata for
+Held decisions receive deterministic owner and SLA routing metadata for
 security, compliance, privacy, or legal review, and the dashboard, SIEM payloads,
-and examiner export expose that sanitized workflow context. There is not yet
-persisted escalation state or direct Slack, Teams, or email notifications.
+and examiner export expose that sanitized workflow context. PromptWall now
+supports best-effort generic JSON, Slack, and Microsoft Teams approval
+notifications, persists delivery status on the query, audits notification
+outcomes, and escalates overdue routed items into tamper-evident evidence. Direct
+SMTP email, customer-configurable routing rules, identity group mapping, and
+more granular escalation policies are still open.
 
 Customer ask: "Can member-services exceptions route to compliance, source-code
 events route to security, and urgent approvals notify someone immediately?"
@@ -142,16 +146,12 @@ Implementation connection:
 - Extend `server/routing.js` from the current deterministic detector/source
   routing into customer-configurable assignment from destination, source, user
   group, and severity.
-- Extend query records beyond the current sanitized workflow metadata
-  (`assignedRole`, `assignedGroup`, `slaDueAt`, `escalatedAt`,
-  `notificationStatus`) with persisted escalation history.
-- Build `server/notifiers.js` on top of the existing sanitized alert discipline.
-- Add channel adapters in this order: SMTP email, Slack webhook, Teams webhook.
-- Add dashboard queue filters: Mine, Unassigned, Escalated, By category, By
-  destination.
+- Build direct SMTP email and ticketing adapters on top of the existing
+  sanitized `server/notifiers.js` discipline.
+- Add dashboard queue filters: By category and By destination.
 
 Acceptance evidence:
-- New routing and notifier tests prove sanitized payloads never include prompt
+- Routing and notifier tests prove sanitized payloads never include prompt
   bodies, token vaults, raw findings, passwords, or decision secrets.
 - Browser E2E: blocked synthetic prompt creates an assigned queue item; approve
   and deny remain audited; escalation event appears in evidence export.
@@ -316,13 +316,12 @@ Acceptance evidence:
 ## Recommended Build Order
 
 1. Desktop/file-flow collector MVP.
-2. Notification adapters and persisted escalation on top of approval routing.
-3. Enterprise identity, roles, and SCIM.
-4. Signed update channel and commercial rollout posture.
-5. Group-scoped policy and time-bound exceptions.
-6. Scheduled examiner evidence pack with backup and restore-drill status.
-7. Customer-defined detectors plus OCR-required handling.
-8. First real MCP content connector SDK and one Microsoft 365 file-content
+2. Enterprise identity, roles, and SCIM.
+3. Signed update channel and commercial rollout posture.
+4. Group-scoped policy and time-bound exceptions.
+5. Scheduled examiner evidence pack with backup and restore-drill status.
+6. Customer-defined detectors plus OCR-required handling.
+7. First real MCP content connector SDK and one Microsoft 365 file-content
    connector.
 
 This order closes the most embarrassing buyer gap first, then turns the product

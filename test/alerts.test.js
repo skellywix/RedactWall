@@ -58,7 +58,11 @@ test('sanitized alert omits raw, redacted prompt body, vault, and finding values
     workflowReason: 'detector:US_SSN',
     slaDueAt: '2026-06-26T16:00:00.000Z',
     escalatedAt: null,
+    escalationReason: null,
     notificationStatus: 'not_configured',
+    notificationLastAttemptAt: null,
+    notificationAttemptCount: 0,
+    notificationChannels: [],
   });
 });
 

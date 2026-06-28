@@ -87,7 +87,11 @@ test('evidence pack omits raw prompt, redacted prompt body, token vault, and aud
       workflowReason: 'detector:US_SSN',
       slaDueAt: '2026-06-26T16:00:00.000Z',
       escalatedAt: null,
+      escalationReason: null,
       notificationStatus: 'not_configured',
+      notificationLastAttemptAt: null,
+      notificationAttemptCount: 0,
+      notificationChannels: [],
       installChecks: [
         { id: 'endpoint_env_file', ok: true, detail: 'found', secret: 'query-check-secret-should-not-export' },
       ],
@@ -139,7 +143,11 @@ test('evidence pack omits raw prompt, redacted prompt body, token vault, and aud
     workflowReason: 'detector:US_SSN',
     slaDueAt: '2026-06-26T16:00:00.000Z',
     escalatedAt: null,
+    escalationReason: null,
     notificationStatus: 'not_configured',
+    notificationLastAttemptAt: null,
+    notificationAttemptCount: 0,
+    notificationChannels: [],
   });
   assert.ok(!wire.includes('524-71-9043'));
   assert.ok(!wire.includes('Member John Carter'));

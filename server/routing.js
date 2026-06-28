@@ -175,7 +175,13 @@ function publicWorkflow(query = {}) {
     workflowReason: query.workflowReason || null,
     slaDueAt: query.slaDueAt || null,
     escalatedAt: query.escalatedAt || null,
+    escalationReason: query.escalationReason || null,
     notificationStatus: query.notificationStatus || null,
+    notificationLastAttemptAt: query.notificationLastAttemptAt || null,
+    notificationAttemptCount: Number(query.notificationAttemptCount) || 0,
+    notificationChannels: Array.isArray(query.notificationChannels)
+      ? query.notificationChannels.filter((item) => typeof item === 'string').slice(0, 8)
+      : [],
   };
 }
 

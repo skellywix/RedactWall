@@ -313,7 +313,7 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 - **Reversible redaction / Redact-&-Send**, sealed token vault, local response re-hydration.
 - **MDM identity**, reliable per-site send, **Man-in-the-Prompt** guard, **shadow-AI** discovery and default-deny unapproved AI blocking.
 - **Coverage posture** showing governed destinations, required sensors, desired sensor versions, browser/endpoint/MCP install-health checks, fleet state by user/org/sensor, shadow-AI sightings, and stale or missing sensor coverage.
-- **Approval routing** that assigns held decisions to security, compliance, privacy, or legal with SLA metadata in the queue, SIEM alert payloads, and examiner evidence.
+- **Approval routing** that assigns held decisions to security, compliance, privacy, or legal with SLA metadata in the queue, SIEM alert payloads, examiner evidence, sanitized workflow notifications, and overdue SLA escalation evidence.
 - **Sanitized examiner export** with audit integrity, policy diffs, coverage posture, workflow ownership, and lineage by user, destination, sensor, channel, category, and decision.
 - **Login lockout**, stable session secret, regulation **templates**, **/healthz · /readyz · /api/metrics**, Docker + CI.
 
@@ -357,6 +357,10 @@ Copy `.env.example` to `.env` (or export):
 | `SIEM_WEBHOOK_URL` | Optional sanitized webhook for high-risk security events, sensor version gaps, and failed admin step-up checks |
 | `SIEM_WEBHOOK_TOKEN` | Optional bearer token for the SIEM webhook |
 | `SIEM_ALERT_MIN_RISK` / `SIEM_ALERT_MIN_SEVERITY` | Alert thresholds for allowed-but-risky events; blocked and response-flagged events alert automatically |
+| `PROMPTWALL_APPROVAL_NOTIFY_WEBHOOK_URL` / `APPROVAL_NOTIFY_WEBHOOK_URL` | Optional sanitized approval-workflow JSON webhook |
+| `PROMPTWALL_APPROVAL_NOTIFY_WEBHOOK_TOKEN` / `APPROVAL_NOTIFY_WEBHOOK_TOKEN` | Optional bearer token for the approval JSON webhook |
+| `PROMPTWALL_APPROVAL_SLACK_WEBHOOK_URL` / `APPROVAL_SLACK_WEBHOOK_URL` | Optional Slack incoming webhook for routed approval notifications |
+| `PROMPTWALL_APPROVAL_TEAMS_WEBHOOK_URL` / `APPROVAL_TEAMS_WEBHOOK_URL` | Optional Microsoft Teams webhook for routed approval notifications |
 
 PromptWall also accepts product-prefixed aliases for new deployments while
 preserving the older `SENTINEL_*` and endpoint keys for existing installs. Use
