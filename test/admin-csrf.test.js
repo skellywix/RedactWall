@@ -73,6 +73,8 @@ test('dashboard exposes retention settings and manual purge control', () => {
   assert.match(dashboard, /desktopCollectorDestination: \(\$\(\'#pol_desktop_destination\'\)\.value \|\| ''\)\.trim\(\)/);
   assert.match(dashboard, /id="pol_block_unapproved_ai"/);
   assert.match(dashboard, /blockUnapprovedAiDestinations: \$\('#pol_block_unapproved_ai'\)\.checked/);
+  assert.match(dashboard, /id="pol_response_scan_mode"/);
+  assert.match(dashboard, /responseScanMode: \$\('#pol_response_scan_mode'\)\.value/);
   assert.match(dashboard, /id="pol_required_sensors"/);
   assert.match(dashboard, /requiredSensors: parsePolicyList\(\$\(\'#pol_required_sensors\'\)\.value\)/);
   assert.match(dashboard, /id="pol_desired_sensor_versions"/);

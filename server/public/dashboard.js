@@ -187,8 +187,8 @@ function appendGuidedExceptionRule() {
 
 function statusTone(status) {
   const s = String(status || '').toLowerCase();
-  if (['approved', 'allowed', 'justified', 'warned_sent', 'redacted'].includes(s)) return 'good';
-  if (['denied', 'blocked_by_user', 'destination_blocked', 'file_upload_blocked', 'injection_blocked', 'response_flagged', 'seat_limit_blocked', 'ocr_required'].includes(s)) return 'bad';
+  if (['approved', 'allowed', 'justified', 'warned_sent', 'redacted', 'response_redacted'].includes(s)) return 'good';
+  if (['denied', 'blocked_by_user', 'destination_blocked', 'file_upload_blocked', 'injection_blocked', 'response_flagged', 'response_blocked', 'seat_limit_blocked', 'ocr_required'].includes(s)) return 'bad';
   if (['pending', 'shadow_ai', 'paste_flagged'].includes(s)) return 'warn';
   if (s === 'sensor_heartbeat') return 'good';
   return 'info';
@@ -1061,6 +1061,14 @@ async function loadPolicy() {
       <input id="pol_desktop_destination" type="text" maxlength="80" value="${escapeHtml(p.desktopCollectorDestination || 'Desktop AI')}" ${readonly ? 'disabled' : ''}/>
       <label for="pol_block_unapproved_ai">Block unapproved AI destinations</label>
       <input id="pol_block_unapproved_ai" type="checkbox" ${p.blockUnapprovedAiDestinations !== false ? 'checked' : ''} ${readonly ? 'disabled' : ''}/>
+      <label for="pol_response_scan_mode">When AI responses contain sensitive data</label>
+      <select id="pol_response_scan_mode" ${readonly ? 'disabled' : ''}>
+        ${[
+    ['flag', 'Flag and alert'],
+    ['redact', 'Redact before display'],
+    ['block', 'Block display'],
+  ].map(([v, l]) => `<option value="${v}" ${(p.responseScanMode || 'flag') === v ? 'selected' : ''}>${l}</option>`).join('')}
+      </select>
     </div>
     <div class="policy-label">Fleet posture</div>
     <div class="policy-list-grid">
@@ -1198,6 +1206,7 @@ async function loadPolicy() {
       blockedDestinations: parsePolicyList($('#pol_blocked_destinations').value),
       blockedFileUploadDestinations: parsePolicyList($('#pol_blocked_file_upload_destinations').value),
       blockUnapprovedAiDestinations: $('#pol_block_unapproved_ai').checked,
+      responseScanMode: $('#pol_response_scan_mode').value,
     };
     const r = await api('/api/policy', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (!r || !r.ok) return;

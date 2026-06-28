@@ -221,6 +221,35 @@ test('destination normalization removes schemes, paths, and www prefixes', () =>
   assert.strictEqual(coverage.normalizeDestination(''), 'unknown');
 });
 
+test('coverage counts response scan block and redaction outcomes', () => {
+  const report = coverage.summarize([
+    {
+      id: 'q_response_redacted',
+      createdAt: '2026-06-26T12:00:00.000Z',
+      status: 'response_redacted',
+      user: 'analyst@example.test',
+      destination: 'chatgpt.com',
+      source: 'mcp_guard',
+      channel: 'ai_response',
+      redactedPrompt: '[AI response] [REDACTED: CONFIDENTIAL_BUSINESS]',
+    },
+    {
+      id: 'q_response_blocked',
+      createdAt: '2026-06-26T12:01:00.000Z',
+      status: 'response_blocked',
+      user: 'analyst@example.test',
+      destination: 'chatgpt.com',
+      source: 'mcp_guard',
+      channel: 'ai_response',
+      redactedPrompt: '[AI response] SSN **** 9043',
+    },
+  ], policy);
+
+  const chatgpt = report.governedDestinations.find((d) => d.destination === 'chatgpt.com');
+  assert.strictEqual(chatgpt.redacted, 1);
+  assert.strictEqual(chatgpt.blocked, 1);
+});
+
 test('coverage route stays session protected', () => {
   assert.match(serverSource, /app\.get\('\/api\/coverage', auth\.requireAuth/);
 });

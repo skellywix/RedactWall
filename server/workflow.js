@@ -18,6 +18,7 @@ const ACTIVE_WORKFLOW_STATUSES = new Set([
   'ocr_required',
   'injection_blocked',
   'response_flagged',
+  'response_blocked',
 ]);
 
 function resultStatus(result) {

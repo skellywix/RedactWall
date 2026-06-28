@@ -252,6 +252,39 @@ test('lineage groups user, destination, sensor, category, and decision without p
   assert.ok(!wire.includes('Card **** 1111'));
 });
 
+test('lineage classifies response scan policy outcomes without response text', () => {
+  const lineage = evidence.buildLineage([
+    {
+      status: 'response_redacted',
+      user: 'analyst@example.test',
+      destination: 'chatgpt.com',
+      source: 'mcp_guard',
+      channel: 'ai_response',
+      categories: ['CONFIDENTIAL_BUSINESS'],
+      riskScore: 24,
+      maxSeverity: 2,
+      redactedPrompt: '[AI response] [REDACTED: CONFIDENTIAL_BUSINESS]',
+    },
+    {
+      status: 'response_blocked',
+      user: 'analyst@example.test',
+      destination: 'chatgpt.com',
+      source: 'mcp_guard',
+      channel: 'ai_response',
+      findings: [{ type: 'US_SSN', severity: 4, score: 1, masked: '**** 9043', value: '524-71-9043' }],
+      riskScore: 40,
+      maxSeverity: 4,
+      redactedPrompt: '[AI response] SSN **** 9043',
+    },
+  ]);
+
+  const decisions = Object.fromEntries(lineage.byDecision.map((item) => [item.key, item.events]));
+  assert.strictEqual(decisions.redacted, 1);
+  assert.strictEqual(decisions.blocked, 1);
+  const wire = JSON.stringify(lineage);
+  assert.ok(!wire.includes('524-71-9043'));
+});
+
 test('server exposes protected evidence export route', () => {
   const fs = require('fs');
   const path = require('path');

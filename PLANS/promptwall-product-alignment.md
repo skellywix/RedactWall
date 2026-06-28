@@ -64,7 +64,7 @@ evidence stable until a separate migration plan exists.
    PromptWall session cookie with legacy fallback, and stable encrypted-data
    compatibility.
 5. Next product gap: native desktop collector or deeper app/action policy
-   controls beyond destination and file-upload blocking.
+   controls beyond destination, file-upload, and response scanning.
 6. Final audit: current-state search, docs check, package generation, tests,
    eval, sync-check, audit chain, and browser evidence.
 
@@ -131,10 +131,14 @@ For this alignment track, completion requires evidence for every area below:
   artifact for managed rollout handoff.
 - Added direct SMTP approval notifications for reviewer distribution lists while
   keeping workflow notification payloads prompt-free and secret-free.
+- Added `responseScanMode` so Security Admins can flag, redact, or block
+  sensitive AI replies through `/api/v1/scan-response` without retaining raw
+  response text.
 
 ## Open Decisions
 
 - The local checkout folder has been renamed to `promptwall/`; the remaining
   GitHub repository has also been renamed to `skellywix/promptwall`.
 - Whether the next product build should prioritize deeper desktop interception,
-  IdP-specific setup UX, signed-update operations, or app/action policy controls.
+  IdP-specific setup UX, signed-update operations, or broader app/action policy
+  controls.

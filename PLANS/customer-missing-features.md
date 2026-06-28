@@ -304,9 +304,10 @@ Acceptance evidence:
 ### 7. Customer-Defined Sensitive Types And Better File Modalities
 
 Current state: structured detectors, semantic categories, held-out eval, file
-processors, response scanning, customer-owned detector packs, and image
-`ocr_required` handling exist. Remaining gaps are an actual endpoint-local OCR
-runtime and heavier detector-quality upgrades for scanned PDFs and screenshots.
+processors, response scanning with flag/redact/block policy controls,
+customer-owned detector packs, and image `ocr_required` handling exist.
+Remaining gaps are an actual endpoint-local OCR runtime and heavier
+detector-quality upgrades for scanned PDFs and screenshots.
 
 Customer ask: "Can we detect our member numbers, loan IDs, internal project
 codes, screenshots, and scanned loan packets?"

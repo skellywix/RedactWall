@@ -68,13 +68,13 @@ test('legitimate state transition keeps evidence binding intact', () => {
 
 test('stats count only real blocked statuses for todayBlocked', () => {
   const before = db.stats().todayBlocked;
-  for (const status of ['pending', 'file_blocked_unscanned', 'response_flagged']) {
+  for (const status of ['pending', 'file_blocked_unscanned', 'response_flagged', 'response_blocked']) {
     db.createQuery({ status, user: 'metric', redactedPrompt: '[' + status + ']' });
   }
-  for (const status of ['allowed', 'redacted', 'paste_flagged', 'shadow_ai', 'warned_sent', 'justified']) {
+  for (const status of ['allowed', 'redacted', 'response_redacted', 'paste_flagged', 'shadow_ai', 'warned_sent', 'justified']) {
     db.createQuery({ status, user: 'metric', redactedPrompt: '[' + status + ']' });
   }
-  assert.strictEqual(db.stats().todayBlocked - before, 3);
+  assert.strictEqual(db.stats().todayBlocked - before, 4);
 });
 
 test('seat stats count unique billable users by tenant', () => {

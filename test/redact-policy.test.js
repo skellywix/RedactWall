@@ -180,6 +180,8 @@ test('scan-response stores category hits as whole-chunk redacted previews', asyn
   assert.strictEqual(res.status, 200);
   const body = await res.json();
   assert.strictEqual(body.leaked, true);
+  assert.strictEqual(body.decision, 'flag');
+  assert.strictEqual(body.status, 'response_flagged');
   assert.deepStrictEqual(body.categories, ['CONFIDENTIAL_BUSINESS']);
   assert.strictEqual(body.redacted, '[REDACTED: CONFIDENTIAL_BUSINESS]');
   const stored = db.listQueries({ status: 'response_flagged', limit: 1 })[0];
