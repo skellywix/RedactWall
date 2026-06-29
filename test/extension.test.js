@@ -54,7 +54,7 @@ function loadBackground(opts = {}) {
     self: {},
     setTimeout,
   };
-  vm.runInNewContext(background + '\nself.__test = { requestTimeoutMs, fetchJsonWithTimeout, failClosed, scanUnavailable, browserPlatform, buildHeartbeatBody, buildInstallChecks, reportInstallHealth };', context);
+  vm.runInNewContext(background + '\nself.__test = { requestTimeoutMs, fetchJsonWithTimeout, failClosed, browserPlatform, buildHeartbeatBody, buildInstallChecks, reportInstallHealth };', context);
   return {
     context,
     createdAlarms,
@@ -97,13 +97,33 @@ test('browser local analysis honors centralized detector policy', () => {
   assert.doesNotMatch(content, /const a = D\.analyze\(pasted\)/);
 });
 
-test('browser file uploads use scan-file API with base64 content', () => {
-  assert.match(content, /type:\s*'scanFile'/);
-  assert.match(content, /contentBase64:\s*bytesToBase64/);
-  assert.match(content, /function handleFileScanResponse/);
-  assert.match(content, /Ext\.sendMessage\(\{\s*type:\s*'scanFile'/);
-  assert.match(background, /\/api\/v1\/scan-file/);
-  assert.match(background, /if \(!c\.enabled\) \{\s*sendResponse && sendResponse\(null\);/);
+test('browser file uploads inspect locally and never send file bytes to the control plane', () => {
+  assert.match(content, /function inspectTextUpload\(file, text\)/);
+  assert.match(content, /D\.analyze\(text,\s*detectionPolicy\(\)\)/);
+  assert.match(content, /reader\.readAsText\(f\)/);
+  assert.match(content, /TEXT_UPLOAD_EXTENSIONS/);
+  assert.match(content, /OCR_UPLOAD_EXTENSIONS/);
+  assert.match(content, /CLEAN_UPLOAD_BYPASS_MS/);
+  assert.match(content, /function textLooksReadable\(text\)/);
+  assert.match(content, /if \(!textLooksReadable\(text\)\)/);
+  assert.match(content, /function filesHaveCleanBypass\(files\)/);
+  assert.match(content, /function consumeCleanUploadBypass\(files\)/);
+  assert.match(content, /if \(destinationBlocked\(\)\)[\s\S]+if \(fileUploadBlocked\(\)\)[\s\S]+if \(filesHaveCleanBypass\(files\)\)/);
+  assert.match(content, /if \(filesHaveCleanBypass\(files\)\) \{\s*consumeCleanUploadBypass\(files\);\s*return;/);
+  assert.match(content, /String\(file\.name \|\| ''\)/);
+  assert.match(content, /recordedEvidenceResponse\(res,\s*'allowed'\)\) rememberCleanUpload\(file\)/);
+  assert.match(content, /function fileLabel\(file\)/);
+  assert.match(content, /safeFileFindingPrompt\(file, analysis\)/);
+  assert.match(content, /\[browser file blocked locally\]/);
+  assert.match(content, /\[browser file inspected clean\] ' \+ fileLabel\(file\)/);
+  assert.match(content, /\[browser file blocked\] ' \+ fileLabel\(file\)/);
+  assert.match(content, /'awaiting_approval'/);
+  assert.match(content, /clientPreRedacted:\s*true/);
+  assert.match(content, /'file_unsupported'/);
+  assert.match(content, /'ocr_required'/);
+  assert.doesNotMatch(content, /type:\s*'scanFile'/);
+  assert.doesNotMatch(content, /contentBase64|bytesToBase64|readAsArrayBuffer/);
+  assert.doesNotMatch(background, /\/api\/v1\/scan-file|contentBase64|scanUnavailable/);
 });
 
 test('browser blocks configured destinations before local prompt or file inspection', () => {
@@ -285,58 +305,6 @@ test('background report includes browser extension version metadata', async () =
   assert.strictEqual(res.decision, 'allow');
   assert.strictEqual(outbound.url, 'http://localhost:4000/api/v1/gate');
   assert.strictEqual(outbound.headers['x-api-key'], 'unit-key');
-  assert.deepStrictEqual(outbound.body.sensor, {
-    name: 'browser_extension',
-    version: manifest.version,
-    platform: 'chrome_mv3',
-  });
-});
-
-test('background file scan fails closed on control-plane errors', async () => {
-  const bg = loadBackground({
-    local: { ingestKey: 'unit-ingest-key' },
-    fetch: async () => ({ ok: false, status: 503, json: async () => ({ error: 'unavailable' }) }),
-  });
-  const res = await bg.sendMessage({
-    type: 'scanFile',
-    payload: {
-      filename: 'loan.txt',
-      contentBase64: Buffer.from('synthetic').toString('base64'),
-      destination: 'chatgpt.com',
-      channel: 'file_upload',
-      source: 'browser_extension',
-    },
-  });
-  assert.strictEqual(res.decision, 'block');
-  assert.strictEqual(res.status, 'scan_unavailable');
-  assert.strictEqual(res.supported, true);
-  assert.strictEqual(res.inspected, false);
-  assert.strictEqual(res.reason, 'scan_file_http_503');
-});
-
-test('background file scan includes browser extension version metadata', async () => {
-  let outbound;
-  const bg = loadBackground({
-    local: { ingestKey: 'unit-ingest-key' },
-    fetch: async (url, options) => {
-      outbound = { url, body: JSON.parse(options.body) };
-      return { ok: true, json: async () => ({ decision: 'allow', supported: true }) };
-    },
-  });
-
-  const res = await bg.sendMessage({
-    type: 'scanFile',
-    payload: {
-      filename: 'loan.txt',
-      contentBase64: Buffer.from('synthetic').toString('base64'),
-      destination: 'chatgpt.com',
-      channel: 'file_upload',
-      source: 'browser_extension',
-    },
-  });
-
-  assert.strictEqual(res.decision, 'allow');
-  assert.strictEqual(outbound.url, 'http://localhost:4000/api/v1/scan-file');
   assert.deepStrictEqual(outbound.body.sensor, {
     name: 'browser_extension',
     version: manifest.version,

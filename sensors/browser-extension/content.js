@@ -347,6 +347,10 @@
     return report('[browser action blocked] ' + action + ' ' + SITE, emptyAnalysis(), action, 'action_blocked', reason);
   }
 
+  function reportLocalFileEvent(file, outcome, note) {
+    return report('[browser file blocked] ' + fileLabel(file), emptyAnalysis(), 'file_upload', outcome, note);
+  }
+
   // ---- inline banner UI -----------------------------------------------------
   let banner;
   function clearBanner() { if (banner) { banner.remove(); banner = null; } }
@@ -645,9 +649,26 @@
     if (!ENABLED) return;
     if (e.target && e.target.type === 'file' && e.target.files && e.target.files.length) scanFiles(e.target.files, e);
   }, true);
+  const MAX_BROWSER_FILE_BYTES = 6_300_000;
+  const TEXT_UPLOAD_EXTENSIONS = new Set([
+    '.txt', '.text', '.csv', '.tsv', '.json', '.jsonl', '.ndjson', '.xml', '.html', '.htm',
+    '.md', '.markdown', '.log', '.ini', '.conf', '.cfg', '.env', '.yaml', '.yml',
+    '.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.css', '.scss', '.less',
+    '.py', '.rb', '.php', '.java', '.kt', '.kts', '.go', '.rs', '.c', '.cc', '.cpp', '.h', '.hpp',
+    '.cs', '.swift', '.scala', '.sh', '.bash', '.zsh', '.ps1', '.bat', '.cmd', '.sql',
+  ]);
+  const TEXT_UPLOAD_MIME_TYPES = new Set([
+    'application/json', 'application/ld+json', 'application/xml', 'application/javascript',
+    'application/x-javascript', 'application/typescript', 'application/x-typescript',
+    'application/x-ndjson', 'application/yaml', 'application/x-yaml',
+  ]);
+  const OCR_UPLOAD_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.tif', '.tiff', '.bmp', '.webp', '.gif']);
+  const CLEAN_UPLOAD_BYPASS_MS = 120000;
+  const cleanUploadBypass = new Map();
+
   function scanFiles(files, e) {
-    try { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation(); } catch (_) {}
     if (destinationBlocked()) {
+      try { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation(); } catch (_) {}
       const reports = [...files].map(() => reportBlockedDestination('file_upload'));
       toast('PromptWall blocked file uploads to ' + SITE + ' by policy. Recording evidence...');
       updateBatchEvidenceToast(
@@ -659,6 +680,7 @@
       return;
     }
     if (fileUploadBlocked()) {
+      try { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation(); } catch (_) {}
       const reports = [...files].map(() => reportBlockedFileUpload());
       toast('PromptWall blocked file uploads to ' + SITE + ' by file policy. Recording evidence...');
       updateBatchEvidenceToast(
@@ -669,69 +691,167 @@
       );
       return;
     }
+    if (filesHaveCleanBypass(files)) {
+      consumeCleanUploadBypass(files);
+      return;
+    }
+    try { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation(); } catch (_) {}
     [...files].forEach(scanOneFile);
   }
   function scanOneFile(f) {
-    if (f.size > 6_300_000) {
-      reportUnscannedFile(f.name, 'file_too_large', 'blocked locally: file too large to inspect');
+    if (f.size > MAX_BROWSER_FILE_BYTES) {
+      updateEvidenceToast(
+        reportLocalFileEvent(f, 'file_too_large', 'blocked locally: browser upload file too large to inspect'),
+        'file_blocked_unscanned',
+        'PromptWall blocked ' + f.name + ': file is too large to inspect and evidence was recorded.',
+        'PromptWall blocked ' + f.name + ': file is too large to inspect.',
+      );
       toast('PromptWall blocked ' + f.name + ': file is too large to inspect.');
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => sendFileScan(f.name, new Uint8Array(reader.result || []));
-    reader.readAsArrayBuffer(f);
-  }
-  function sendFileScan(filename, bytes) {
-    Ext.sendMessage({
-      type: 'scanFile',
-      payload: {
-        filename,
-        contentBase64: bytesToBase64(bytes),
-        destination: SITE,
-        channel: 'file_upload',
-        source: 'browser_extension',
-      },
-    }).then((res) => handleFileScanResponse(filename, res)).catch(() => handleFileScanResponse(filename, null));
-  }
-  function handleFileScanResponse(filename, res) {
-    if (!res) {
-      toast('PromptWall could not verify ' + filename + '. Upload blocked.');
+    if (ocrRequiredUpload(f)) {
+      updateEvidenceToast(
+        reportLocalFileEvent(f, 'ocr_required', 'blocked locally: browser upload requires OCR before inspection'),
+        'ocr_required',
+        'PromptWall blocked ' + f.name + ': OCR is required and evidence was recorded.',
+        'PromptWall blocked ' + f.name + ': OCR is required before inspection.',
+      );
+      toast('PromptWall blocked ' + f.name + ': OCR is required before inspection.');
       return;
     }
-    const items = (res.findings || []).map((x) => x.type).concat(res.categories || []);
-    if (res.decision === 'allow' && res.supported !== false) {
-      toast('PromptWall scanned ' + filename + ' clean. Attach it again to upload.');
-    } else if (res.status === 'ocr_required') {
-      toast('PromptWall blocked ' + filename + ': OCR is required before inspection.');
-    } else if (res.status === 'scan_unavailable') {
-      toast('PromptWall could not verify ' + filename + '. Upload blocked until the control plane is reachable.');
-    } else if (res.supported === false || res.inspected === false) {
-      toast('PromptWall could not inspect ' + filename + '. Upload blocked and recorded.');
-    } else {
-      toast('PromptWall blocked ' + filename + ': ' + listForScreen(items.slice(0, 3)));
+    if (!textReadableUpload(f)) {
+      updateEvidenceToast(
+        reportLocalFileEvent(f, 'file_unsupported', 'blocked locally: browser upload scanner supports text-readable files only'),
+        'file_blocked_unscanned',
+        'PromptWall blocked ' + f.name + ': this file type needs endpoint inspection and evidence was recorded.',
+        'PromptWall blocked ' + f.name + ': this file type needs endpoint inspection.',
+      );
+      toast('PromptWall blocked ' + f.name + ': this file type needs endpoint inspection.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => inspectTextUpload(f, String(reader.result || ''));
+    reader.onerror = () => {
+      updateEvidenceToast(
+        reportLocalFileEvent(f, 'scan_unavailable', 'blocked locally: browser could not read file for inspection'),
+        'file_blocked_unscanned',
+        'PromptWall could not verify ' + f.name + ' and recorded the block.',
+        'PromptWall could not verify ' + f.name + '. Upload blocked.',
+      );
+      toast('PromptWall could not verify ' + f.name + '. Upload blocked.');
+    };
+    reader.readAsText(f);
+  }
+  function inspectTextUpload(file, text) {
+    if (!textLooksReadable(text)) {
+      updateEvidenceToast(
+        reportLocalFileEvent(file, 'file_unsupported', 'blocked locally: browser upload is not text-readable'),
+        'file_blocked_unscanned',
+        'PromptWall blocked ' + file.name + ': this file is not text-readable and evidence was recorded.',
+        'PromptWall blocked ' + file.name + ': this file is not text-readable.',
+      );
+      toast('PromptWall blocked ' + file.name + ': this file is not text-readable.');
+      return;
+    }
+    const analysis = D.analyze(text, detectionPolicy());
+    const items = summarize(analysis);
+    if (!items.length) {
+      const reportPromise = report(
+        '[browser file inspected clean] ' + fileLabel(file),
+        emptyAnalysis(),
+        'file_upload',
+        'allowed',
+        'browser upload inspected locally; no sensitive content detected',
+      );
+      reportPromise.then((res) => {
+        if (recordedEvidenceResponse(res, 'allowed')) rememberCleanUpload(file);
+      });
+      updateEvidenceToast(
+        reportPromise,
+        'allowed',
+        'PromptWall scanned ' + file.name + ' locally. Attach it again within 2 minutes to upload.',
+        'PromptWall scanned ' + file.name + ' locally, but evidence was not recorded yet.',
+      );
+      toast('PromptWall scanned ' + file.name + ' locally. Attach it again within 2 minutes to upload.');
+      return;
+    }
+    updateEvidenceToast(
+      report(safeFileFindingPrompt(file, analysis), analysis, 'file_upload', 'awaiting_approval', 'browser upload inspected locally; sensitive content blocked before upload', { clientPreRedacted: true }),
+      'pending',
+      'PromptWall blocked ' + file.name + ': ' + listForScreen(items.slice(0, 3)) + '. Security Admin review is queued.',
+      'PromptWall blocked ' + file.name + ': ' + listForScreen(items.slice(0, 3)) + '. Control-plane evidence was not recorded yet.',
+    );
+    toast('PromptWall blocked ' + file.name + ': ' + listForScreen(items.slice(0, 3)));
+  }
+
+  function fileExtension(name) {
+    const base = String(name || '').toLowerCase().split(/[\\/]/).pop() || '';
+    const idx = base.lastIndexOf('.');
+    return idx > 0 ? base.slice(idx) : '';
+  }
+  function fileLabel(file) {
+    const ext = fileExtension(file && file.name);
+    if (ext) return ext.slice(0, 16) + ' file';
+    const type = String((file && file.type) || '').toLowerCase().split(';')[0].replace(/[^a-z0-9/_.+-]+/g, '');
+    return type ? type.slice(0, 48) + ' file' : 'file';
+  }
+  function textReadableUpload(file) {
+    const type = String((file && file.type) || '').toLowerCase().split(';')[0];
+    if (type.startsWith('text/')) return true;
+    if (TEXT_UPLOAD_MIME_TYPES.has(type)) return true;
+    return TEXT_UPLOAD_EXTENSIONS.has(fileExtension(file && file.name));
+  }
+  function ocrRequiredUpload(file) {
+    const type = String((file && file.type) || '').toLowerCase().split(';')[0];
+    return type.startsWith('image/') || OCR_UPLOAD_EXTENSIONS.has(fileExtension(file && file.name));
+  }
+  function textLooksReadable(text) {
+    const sample = String(text || '').slice(0, 8192);
+    if (!sample) return true;
+    let suspicious = 0;
+    for (let i = 0; i < sample.length; i += 1) {
+      const code = sample.charCodeAt(i);
+      if (code === 0 || code === 0xfffd || (code < 32 && code !== 9 && code !== 10 && code !== 13)) suspicious += 1;
+    }
+    return suspicious / sample.length <= 0.02;
+  }
+  function cleanUploadKey(file) {
+    if (!file) return '';
+    return [
+      String(file.name || ''),
+      Number(file.size) || 0,
+      String(file.type || '').toLowerCase().split(';')[0],
+      Number(file.lastModified) || 0,
+      fileExtension(file.name),
+    ].join('|');
+  }
+  function pruneCleanUploadBypass(now) {
+    for (const [key, expiresAt] of cleanUploadBypass.entries()) {
+      if (expiresAt <= now) cleanUploadBypass.delete(key);
     }
   }
-  function reportUnscannedFile(filename, outcome, note) {
-    Ext.sendMessage({
-      type: 'report',
-      payload: {
-        prompt: '[file blocked unscanned] ' + filename,
-        destination: SITE,
-        channel: 'file_upload',
-        source: 'browser_extension',
-        categories: [],
-        outcome,
-        note,
-      },
+  function rememberCleanUpload(file) {
+    const key = cleanUploadKey(file);
+    if (!key) return;
+    const now = Date.now();
+    pruneCleanUploadBypass(now);
+    cleanUploadBypass.set(key, now + CLEAN_UPLOAD_BYPASS_MS);
+  }
+  function filesHaveCleanBypass(files) {
+    const now = Date.now();
+    pruneCleanUploadBypass(now);
+    const list = [...files];
+    return !!list.length && list.every((file) => {
+      const expiresAt = cleanUploadBypass.get(cleanUploadKey(file));
+      return expiresAt && expiresAt > now;
     });
   }
-  function bytesToBase64(bytes) {
-    let binary = '';
-    const chunk = 0x8000;
-    for (let i = 0; i < bytes.length; i += chunk) {
-      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
-    }
-    return btoa(binary);
+  function consumeCleanUploadBypass(files) {
+    [...files].forEach((file) => cleanUploadBypass.delete(cleanUploadKey(file)));
+  }
+  function safeFileFindingPrompt(file, analysis) {
+    const items = summarize(analysis);
+    return '[browser file blocked locally] ' + (items.length ? items.join(', ') : 'sensitive content') + ' in ' + fileLabel(file);
   }
 
   // ---- tiny toast -----------------------------------------------------------

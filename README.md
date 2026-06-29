@@ -94,9 +94,9 @@ The Policy tab maintains two destination lists:
   uploaded files, and response scans short-circuit as `destination_blocked`
   before prompt or file content is analyzed or retained.
 - `blockedFileUploadDestinations`: AI hosts or desktop app labels where normal
-  chat is allowed but file uploads are forbidden. Browser/API uploads and
-  endpoint file flows short-circuit as `file_upload_blocked` before uploaded
-  bytes, extracted text, or sensitive filenames are retained.
+  chat is allowed but file uploads are forbidden. Browser uploads, API upload
+  calls, and endpoint file flows short-circuit as `file_upload_blocked` before
+  uploaded bytes, extracted text, or sensitive filenames are retained.
 - `blockedBrowserActions`: destination-scoped browser action rules. Supported
   actions are `paste`, `drop`, and `copy`, so a customer can allow normal chat
   while blocking clipboard paste, drag-and-drop file uploads, or copying AI
@@ -179,17 +179,23 @@ write content-free upload-intent events for absolute local files, so the agent
 can scan files headed to desktop AI apps without relying only on a watched
 folder. A one-shot endpoint clipboard guard can inspect the current clipboard
 locally, report only masked findings, and optionally clear the clipboard when
-sensitive content is detected. Browser/API sensors can also call `POST /api/v1/scan-file`
-with a base64 file. Add a new file type by pushing a processor with
-`{ supports(name), extract(buffer) }`. Supported files fail closed if extraction
-times out or the parser cannot inspect the file, and the audit log records the
-blocked unscanned file without storing the file bytes.
+sensitive content is detected. The managed browser extension inspects
+text-readable uploads locally and reports only synthetic file labels, masked
+findings, categories, and client outcomes to `/api/v1/gate`; it does not send
+file bytes, raw filenames, `contentBase64`, or extracted text to the control
+plane. Direct API integrations can still call `POST /api/v1/scan-file` with a
+base64 file. Add a new file type by pushing a processor with `{ supports(name),
+extract(buffer) }`. Supported files fail closed if extraction times out or the
+parser cannot inspect the file, and the audit log records the blocked unscanned
+file without storing the file bytes.
 Image uploads (`.png`, `.jpg`, `.jpeg`, `.tif`, `.tiff`, `.bmp`, `.webp`) are
-recognized as supported. Browser/API uploads still fail closed as
-`ocr_required`. Endpoint agents can optionally run a local OCR command through
-`ENDPOINT_AGENT_OCR_COMMAND`, then feed the extracted text into the same local
-detection path. Image bytes and raw OCR text are not sent to the control plane;
-only masked findings, categories, and sanitized evidence are reported.
+recognized as supported. Browser image uploads fail closed locally as
+`ocr_required` without uploading bytes, and API image uploads return
+`ocr_required` through `/api/v1/scan-file`. Endpoint agents can optionally run a
+local OCR command through `ENDPOINT_AGENT_OCR_COMMAND`, then feed the extracted
+text into the same local detection path. Image bytes and raw OCR text are not
+sent to the control plane; only masked findings, categories, and sanitized
+evidence are reported.
 
 ---
 

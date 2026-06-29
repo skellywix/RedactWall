@@ -129,7 +129,7 @@ policy, and gives Security Admins an examiner-ready audit trail.
 A complete client demo should prove:
 
 - Browser prompts are inspected before send.
-- File uploads are scanned before file bytes leave.
+- Browser text uploads are scanned locally before file bytes leave.
 - High-risk structured identifiers hard stop or tokenize.
 - Confidential business context can be caught even without an SSN or card.
 - Employees can proceed with warning, justification, redaction, or approval,
@@ -430,9 +430,11 @@ In ChatGPT or Claude:
 
 Expected:
 
-- Supported uploads are scanned before upload.
-- Text, PDF, Word, Excel, and PowerPoint formats are covered.
-- Browser upload scanning uses `/api/v1/scan-file`.
+- Browser text uploads are inspected locally by the extension before upload.
+- Endpoint/API scanning covers text, PDF, Word, Excel, and PowerPoint formats.
+- Browser upload scanning reports only sanitized labels and masked findings to
+  `/api/v1/gate`; it does not send file bytes or raw filenames to
+  `/api/v1/scan-file`.
 - Endpoint scanning inspects watched files locally and reports sanitized
   evidence.
 

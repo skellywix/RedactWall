@@ -382,7 +382,7 @@ names, prompt text, or file content.
 The endpoint checker still prints unapproved tool checks as attention, but it
 does not fail install readiness when runtime and configuration checks pass.
 
-The agent inspects supported watched files locally. Under redact policy, structured-only findings write a safe companion text file under `.promptwall-redacted` and report `redacted_available` evidence to the control plane; semantic or mixed findings remain held for Security Admin review. Image files (`.png`, `.jpg`, `.jpeg`, `.tif`, `.tiff`, `.bmp`, `.webp`) are supported as a fail-closed modality. Browser/API uploads still return `ocr_required`; endpoint agents can optionally run a workstation-local OCR command and then send only sanitized detector evidence to the control plane.
+The agent inspects supported watched files locally. Under redact policy, structured-only findings write a safe companion text file under `.promptwall-redacted` and report `redacted_available` evidence to the control plane; semantic or mixed findings remain held for Security Admin review. The managed browser extension also inspects text-readable file selections and drops locally before upload. It sends only synthetic file labels, masked detector evidence, categories, risk metadata, and client outcomes to `/api/v1/gate`; it does not send file bytes, raw filenames, `contentBase64`, or extracted text to the control plane. Unsupported, oversized, unreadable, or OCR-needed browser uploads fail closed as `file_blocked_unscanned` or `ocr_required`. Direct API uploads through `/api/v1/scan-file` still return `ocr_required` for images until an endpoint-local OCR path is in scope. Endpoint agents can optionally run a workstation-local OCR command and then send only sanitized detector evidence to the control plane.
 
 Optional endpoint-local OCR:
 
@@ -879,7 +879,8 @@ to govern, allow, or block policy state.
 
 Security Admins can also edit `blockedFileUploadDestinations` when a customer
 wants chat allowed but document upload forbidden for a destination. Browser
-uploads, endpoint file flows, and `/api/v1/scan-file` return
+uploads report `file_upload_blocked` through `/api/v1/gate` before local file
+bytes are read. Endpoint file flows and `/api/v1/scan-file` also return
 `file_upload_blocked` before uploaded bytes, extracted text, or sensitive
 filenames are retained.
 

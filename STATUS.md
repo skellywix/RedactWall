@@ -2,11 +2,13 @@
 
 ## Open
 
-- Next pass: move from shortcut-triggered endpoint coverage into active app/file-flow interception, such as native messaging from browser upload surfaces or app-specific upload collectors.
-- Keep an eye on the remaining product gap: the endpoint package now has tested protected-upload and clipboard guard pilot paths, but it is not yet universal drag/drop or file-open interception for every desktop AI app.
+- Next pass: move desktop app/file-open interception beyond the protected-upload shell action, clipboard guard, and browser-local upload path, such as app-specific native collectors or a native messaging handoff where a browser can safely expose local file intent.
+- Keep an eye on the remaining product gap: the endpoint package now has tested protected-upload, clipboard guard, and browser text-upload coverage, but it is not yet universal drag/drop or file-open interception for every desktop AI app.
 
 ## Done
 
+- 2026-06-29: Moved managed browser text-upload inspection into the extension. Text-readable browser uploads now run the shared detector locally, report only synthetic file labels and masked detector metadata through `/api/v1/gate`, block unsupported/OCR-needed/oversized files without uploading bytes, and keep `/api/v1/scan-file` out of the browser background worker.
+  Evidence: `node scripts/run-node-tests.js test/extension.test.js test/validation.test.js test/coverage.test.js`, `npm run sync-check`, `npm run package:extension -- <temp>`, `npm run release:extension:check`, `$env:PLAYWRIGHT_PORT='4329'; npm run test:browser-extension`, `npm run review:ci`, `node -e "const v=require('./server/db').verifyAuditChain(); console.log(JSON.stringify(v)); if(!v.ok) process.exit(1)"`.
 - 2026-06-29: Added a per-user Clipboard Guard install path to the endpoint package. The endpoint installer can add a secret-free Start Menu or Desktop shortcut with an optional hotkey, the runner loads the endpoint config through `PROMPTWALL_ENV_PATH`, inspects clipboard content locally through the shared detector, optionally clears blocked clipboard content, and logs only sanitized JSON guard results.
   Evidence: `node scripts/run-node-tests.js test/endpoint-agent-install.test.js test/endpoint-agent-package.test.js test/endpoint-clipboard-collector.test.js`, `npm run package:endpoint-agent -- <temp>`, `node scripts/check-endpoint-install.js --env <temp>/endpoint-agent.env --repo-root . --json`, `npm run review:ci`, `node -e "const v=require('./server/db').verifyAuditChain(); console.log(JSON.stringify(v)); if(!v.ok) process.exit(1)"`.
 - 2026-06-28: Added a Windows protected-upload desktop collector path for pilots. The endpoint package now includes a per-user Explorer shell action, a secret-free runner, metadata-only collector events through the signed handoff writer, package validation, install/uninstall docs, and package-to-install smoke coverage.

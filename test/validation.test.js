@@ -147,6 +147,44 @@ test('gate preserves pre-redacted endpoint file findings without raw file text',
   assert.ok(!JSON.stringify(stored).includes(rawSecret));
 }));
 
+test('gate preserves browser-local file findings without raw filenames or bytes', async () => withServer(async (port) => {
+  const rawSecret = '524-71-9043';
+  const rawFilename = 'member-carter-loan-524-71-9043.txt';
+  const rawFileText = 'Synthetic member SSN ' + rawSecret + ' in a browser upload.';
+  const res = await jsonFetch(port, '/api/v1/gate', {
+    headers: { 'x-api-key': 'unit-ingest-key' },
+    body: {
+      prompt: '[browser file blocked locally] US_SSN in .txt file',
+      user: 'browser-user',
+      destination: 'chatgpt.com',
+      source: 'browser_extension',
+      channel: 'file_upload',
+      clientOutcome: 'awaiting_approval',
+      clientPreRedacted: true,
+      clientFindings: [{ type: 'US_SSN', severity: 4, score: 0.92, masked: '**** 9043' }],
+      clientCategories: [],
+      clientEntityCounts: { US_SSN: 1 },
+      clientRiskScore: 30,
+      clientMaxSeverity: 4,
+      clientMaxSeverityLabel: 'critical',
+      note: 'browser upload inspected locally; sensitive content blocked before upload',
+    },
+  });
+
+  assert.strictEqual(res.status, 200);
+  const body = await res.json();
+  const stored = db.getQuery(body.id);
+  assert.strictEqual(body.decision, 'block');
+  assert.strictEqual(body.status, 'pending');
+  assert.ok(body.findings.some((f) => f.type === 'US_SSN'));
+  assert.ok(!JSON.stringify(body).includes(rawFilename));
+  assert.ok(!JSON.stringify(stored).includes(rawFilename));
+  assert.ok(!JSON.stringify(body).includes(rawFileText));
+  assert.ok(!JSON.stringify(stored).includes(rawFileText));
+  assert.ok(!JSON.stringify(body).includes(rawSecret));
+  assert.ok(!JSON.stringify(stored).includes(rawSecret));
+}));
+
 test('gate records endpoint redacted companion availability as redacted without a vault', async () => withServer(async (port) => {
   const rawSecret = '524-71-9043';
   const prompt = '[file:loan.txt] [[US_SSN_1]]';

@@ -58,10 +58,6 @@ function failClosed(reason) {
   return { decision: 'block', status: 'control_plane_unavailable', reason };
 }
 
-function scanUnavailable(reason) {
-  return { decision: 'block', status: 'scan_unavailable', supported: true, inspected: false, reason };
-}
-
 function missingServerConfigReason(c) {
   if (!c.serverUrl) return 'missing_server_url';
   if (!c.ingestKey) return 'missing_ingest_key';
@@ -265,37 +261,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }, c.requestTimeoutMs);
         sendResponse && sendResponse(r.ok ? r.body : failClosed('gate_' + r.reason));
       } catch (e) { sendResponse && sendResponse(failClosed('gate_unreachable')); }
-    });
-    return true;
-  }
-  if (msg.type === 'scanFile') {
-    Promise.all([serverCfg(), identity()]).then(async ([c, who]) => {
-      if (!c.enabled) {
-        sendResponse && sendResponse(null);
-        return;
-      }
-      const missing = missingServerConfigReason(c);
-      if (missing) {
-        sendResponse && sendResponse(scanUnavailable(missing));
-        return;
-      }
-      try {
-        const r = await fetchJsonWithTimeout(c.serverUrl + '/api/v1/scan-file', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-api-key': c.ingestKey },
-          body: JSON.stringify({
-            filename: msg.payload.filename,
-            contentBase64: msg.payload.contentBase64,
-            user: who.user,
-            orgId: who.orgId,
-            destination: msg.payload.destination,
-            channel: msg.payload.channel,
-            source: msg.payload.source,
-            sensor: sensorMetadata(),
-          }),
-        }, c.requestTimeoutMs);
-        sendResponse && sendResponse(r.ok ? r.body : scanUnavailable('scan_file_' + r.reason));
-      } catch (e) { sendResponse && sendResponse(scanUnavailable('scan_file_unreachable')); }
     });
     return true;
   }

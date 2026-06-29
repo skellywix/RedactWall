@@ -63,6 +63,10 @@ Build next:
 - Extend destination-scoped browser action controls from paste-only to
   drag-and-drop file uploads, with sanitized `action_blocked` evidence before
   the browser reads file bytes.
+- Move browser text upload inspection into the extension so managed browser
+  uploads report only sanitized labels and masked findings to `/api/v1/gate`
+  without sending file bytes, raw filenames, or `contentBase64` to the control
+  plane.
 - Extend destination-scoped browser action controls to AI response copy events,
   with sanitized `action_blocked` evidence before selected response text reaches
   the clipboard.
