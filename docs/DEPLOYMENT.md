@@ -885,14 +885,17 @@ bytes are read. Endpoint file flows and `/api/v1/scan-file` also return
 filenames are retained.
 
 Security Admins can edit `blockedBrowserActions` for destination-scoped browser
-action blocks. Supported actions are `paste`, `drop`, and `copy`: when a
-configured destination matches, the browser prevents clipboard paste before text
-lands in the composer, prevents drag-and-drop file uploads before the file is
-read, or prevents copying AI response content from the page. These paths report
-only sanitized `action_blocked` evidence. The extension only tells the user that
-a local browser block was recorded after `/api/v1/gate` returns the expected
-evidence id and status. If the control plane is unreachable, the browser action
-still stays blocked and the toast says evidence was not recorded yet.
+action blocks. Supported actions are `paste`, `drop`, `copy`, and `download`:
+when a configured destination matches, the browser prevents clipboard paste
+before text lands in the composer, prevents drag-and-drop file uploads before
+the file is read, prevents copying AI response content from the page, or cancels
+downloads attributed to that AI destination. These paths report only sanitized
+`action_blocked` evidence. Download blocks record host-only attribution and do
+not report raw filenames, file bytes, MIME types, or download URLs. The
+extension only tells the user that a local browser block was recorded after
+`/api/v1/gate` returns the expected evidence id and status. If the control plane
+is unreachable, the browser action still stays blocked and the toast says
+evidence was not recorded yet.
 
 Security Admins can set `responseScanMode` from the Policy tab to choose how
 AI replies are handled when `/api/v1/scan-response` detects sensitive content.

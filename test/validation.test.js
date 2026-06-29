@@ -580,6 +580,40 @@ test('gate accepts blocked browser copies without retaining selected text', asyn
   assert.ok(db.listAudit(20).some((entry) => entry.action === 'BROWSER_ACTION_BLOCKED' && entry.detail === 'browser_extension/copy: chatgpt.com'));
 }));
 
+test('gate accepts blocked browser downloads without retaining URLs or filenames', async () => withServer(async (port) => {
+  const secret = '524-71-9043';
+  const res = await jsonFetch(port, '/api/v1/gate', {
+    headers: { 'x-api-key': 'unit-ingest-key' },
+    body: {
+      prompt: '[browser action blocked] download chatgpt.com',
+      user: 'analyst@example.test',
+      destination: 'chatgpt.com',
+      source: 'browser_extension',
+      channel: 'download',
+      clientOutcome: 'action_blocked',
+      note: 'download blocked by policy',
+    },
+  });
+
+  assert.strictEqual(res.status, 200);
+  const body = await res.json();
+  assert.strictEqual(body.decision, 'block');
+  assert.strictEqual(body.status, 'action_blocked');
+  assert.deepStrictEqual(body.findings, []);
+  assert.deepStrictEqual(body.categories, []);
+  assert.ok(!JSON.stringify(body).includes(secret));
+
+  const stored = db.getQuery(body.id);
+  assert.strictEqual(stored.status, 'action_blocked');
+  assert.strictEqual(stored.mode, 'browser_action_block');
+  assert.strictEqual(stored.channel, 'download');
+  assert.strictEqual(stored._rawPrompt, undefined);
+  assert.deepStrictEqual(stored.findings, []);
+  assert.ok(!JSON.stringify(stored).includes(secret));
+  assert.ok(!JSON.stringify(stored).includes('member-loan'));
+  assert.ok(db.listAudit(20).some((entry) => entry.action === 'BROWSER_ACTION_BLOCKED' && entry.detail === 'browser_extension/download: chatgpt.com'));
+}));
+
 test('gate sanitizes malformed browser action labels without retaining channel text', async () => withServer(async (port) => {
   const secret = '524-71-9043';
   const res = await jsonFetch(port, '/api/v1/gate', {
@@ -755,6 +789,46 @@ test('gate applies configured copy browser action blocks before prompt analysis'
     const stored = db.getQuery(body.id);
     assert.strictEqual(stored.status, 'action_blocked');
     assert.strictEqual(stored.channel, 'copy');
+    assert.deepStrictEqual(stored.findings, []);
+    assert.ok(!JSON.stringify(stored).includes(secret));
+  } finally {
+    fs.writeFileSync(policyPath, originalPolicy);
+  }
+}));
+
+test('gate applies configured download browser action blocks before prompt analysis', async () => withServer(async (port) => {
+  const originalPolicy = fs.readFileSync(policyPath, 'utf8');
+  const secret = '524-71-9043';
+  try {
+    const next = {
+      ...JSON.parse(originalPolicy),
+      blockedBrowserActions: [{
+        id: 'block_download_chatgpt',
+        action: 'download',
+        destinations: ['chatgpt.com'],
+        reason: 'download_blocked',
+      }],
+    };
+    fs.writeFileSync(policyPath, JSON.stringify(next, null, 2));
+
+    const res = await jsonFetch(port, '/api/v1/gate', {
+      headers: { 'x-api-key': 'unit-ingest-key' },
+      body: {
+        prompt: '[browser action blocked] download chatgpt.com ' + secret,
+        user: 'analyst@example.test',
+        destination: 'https://chatgpt.com/c/unit',
+        source: 'browser_extension',
+        channel: 'download',
+      },
+    });
+
+    assert.strictEqual(res.status, 200);
+    const body = await res.json();
+    assert.strictEqual(body.status, 'action_blocked');
+    assert.deepStrictEqual(body.reasons, ['download_blocked']);
+    const stored = db.getQuery(body.id);
+    assert.strictEqual(stored.status, 'action_blocked');
+    assert.strictEqual(stored.channel, 'download');
     assert.deepStrictEqual(stored.findings, []);
     assert.ok(!JSON.stringify(stored).includes(secret));
   } finally {
@@ -1215,6 +1289,12 @@ test('admin policy accepts browser action block rules', async () => withServer(a
             destinations: ['chatgpt.com'],
             reason: 'response_copy_blocked',
           },
+          {
+            id: 'block_download_chatgpt',
+            action: 'download',
+            destinations: ['chatgpt.com'],
+            reason: 'download_blocked',
+          },
         ],
       },
     });
@@ -1243,6 +1323,13 @@ test('admin policy accepts browser action block rules', async () => withServer(a
         destinations: ['chatgpt.com'],
         reason: 'response_copy_blocked',
       },
+      {
+        id: 'block_download_chatgpt',
+        enabled: true,
+        action: 'download',
+        destinations: ['chatgpt.com'],
+        reason: 'download_blocked',
+      },
     ]);
   } finally {
     fs.writeFileSync(policyPath, originalPolicy);
@@ -1262,7 +1349,7 @@ test('admin policy rejects malformed browser action rules without echoing values
     body: {
       blockedBrowserActions: [{
         id: 'bad_paste',
-        action: 'download',
+        action: 'print',
         destinations: [`member-${secret}.example`],
         reason: `paste-${secret}`,
       }],

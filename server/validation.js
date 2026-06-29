@@ -349,7 +349,7 @@ const policyExceptionSchema = z.object({
 const blockedBrowserActionSchema = z.object({
   id: routingCodeSchema(ROUTING_RULE_ID, 64),
   enabled: z.boolean().optional(),
-  action: z.enum(['paste', 'drop', 'copy']),
+  action: z.enum(['paste', 'drop', 'copy', 'download']),
   destinations: z.array(z.string().min(1).max(253).regex(HOST_OR_LABEL).refine((value) => !SENSITIVE_ROUTING_CODE.test(value), {
     message: 'sensitive identifier not allowed',
   })).min(1).max(40),

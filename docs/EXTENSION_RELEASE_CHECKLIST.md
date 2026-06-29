@@ -86,7 +86,7 @@ Before upload:
   governed AI tools and blocks, redacts, warns, or requires justification by
   policy.
 - Document the permission purpose for `storage`, `activeTab`, `tabs`, `alarms`,
-  and the governed AI host list.
+  `downloads`, and the governed AI host list.
 - Document that managed storage provides `serverUrl`, `ingestKey`, `orgId`, and
   user identity.
 - State that prompt text is inspected locally by the extension before send, and

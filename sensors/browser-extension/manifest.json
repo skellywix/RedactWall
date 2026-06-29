@@ -3,7 +3,7 @@
   "name": "PromptWall - AI Data Guard",
   "version": "0.3.0",
   "description": "Warns, redacts, or blocks sensitive data (PII, source code, credentials, confidential info) before it is sent to ChatGPT, Claude, Copilot, Gemini, and other AI tools.",
-  "permissions": ["storage", "activeTab", "tabs", "alarms"],
+  "permissions": ["storage", "activeTab", "tabs", "alarms", "downloads"],
   "host_permissions": [
     "https://chatgpt.com/*",
     "https://chat.openai.com/*",

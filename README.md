@@ -98,11 +98,11 @@ The Policy tab maintains two destination lists:
   calls, and endpoint file flows short-circuit as `file_upload_blocked` before
   uploaded bytes, extracted text, or sensitive filenames are retained.
 - `blockedBrowserActions`: destination-scoped browser action rules. Supported
-  actions are `paste`, `drop`, and `copy`, so a customer can allow normal chat
-  while blocking clipboard paste, drag-and-drop file uploads, or copying AI
-  response content from selected tools. The browser reports only sanitized
-  `action_blocked` evidence, not clipboard text, selected response text, or file
-  bytes.
+  actions are `paste`, `drop`, `copy`, and `download`, so a customer can allow
+  normal chat while blocking clipboard paste, drag-and-drop file uploads,
+  copying AI response content, or downloads from selected tools. The browser
+  reports only sanitized `action_blocked` evidence, not clipboard text,
+  selected response text, file bytes, raw filenames, or download URLs.
 - `blockUnapprovedAiDestinations`: default-on control that blocks known AI hosts
   that are not yet governed, allowed, blocked, or file-upload-blocked. The
   shadow-AI review queue remains the admin path for turning a newly seen tool
@@ -409,7 +409,7 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
 | Browser extension | Working — warn/justify/**redact**/block, real-button send, MDM identity, Man-in-the-Prompt guard |
 | Shadow-AI discovery | Working — flags use of ungoverned AI tools |
 | Destination controls | Working — governed destination coverage, default-deny unapproved AI, full destination blocking, and file-upload-only blocking across browser, endpoint, gate, file, and response paths |
-| Browser action controls | Working — destination-scoped paste, file-drop, and response-copy blocking records sanitized `action_blocked` evidence without sending clipboard text, selected response text, or file bytes. Local browser blocks now distinguish recorded evidence from control-plane-unreachable blocks in the user toast. |
+| Browser action controls | Working — destination-scoped paste, file-drop, response-copy, and download blocking records sanitized `action_blocked` evidence without sending clipboard text, selected response text, file bytes, raw filenames, or download URLs. Local browser blocks now distinguish recorded evidence from control-plane-unreachable blocks in the user toast. |
 | Output scanning | Working — `/api/v1/scan-response` flags, redacts, or blocks PII/secrets in AI replies by policy |
 | MCP guard / Endpoint agent | Working references - inline/MCP redaction; MCP connector SDK with required tool-result sanitization; Microsoft 365 text-readable file-content connector; local endpoint folder watch plus signed native file-flow handoff prototype, protected-upload shell action, one-shot clipboard guard, optional local OCR, and sanitized endpoint AI tool inventory; redacted companion files for structured-only findings |
 | Auth & ops | Working: login lockout, password-confirmed raw reveal and release approval, release-token scoped polling, stable secret, `/healthz` · `/readyz` · `/api/metrics`, policy-driven sensor version and browser/endpoint/MCP install-health posture, dashboard lineage, sanitized examiner export with coverage, workflow routing, and lineage, Docker, CI |
@@ -437,8 +437,8 @@ For stack decisions and migration rationale, see `STACK_REVIEW.md`.
   category, and decision.
 - **Response scanning controls** that let customers flag, redact, or block
   sensitive AI replies while retaining only sanitized evidence.
-- **Browser action controls** that block clipboard paste, file drops, and
-  response copy actions in selected AI destinations while retaining only
+- **Browser action controls** that block clipboard paste, file drops, response
+  copy, and downloads in selected AI destinations while retaining only
   sanitized action metadata.
 - **Endpoint clipboard guard** that inspects the current clipboard locally,
   records masked `paste_flagged` evidence, and can clear sensitive clipboard

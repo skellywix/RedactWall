@@ -18,8 +18,10 @@ function loadBackground(opts = {}) {
   let onInstalled;
   let onStartup;
   let onAlarm;
+  let onDownloadCreated;
   const storage = { ...(opts.local || {}) };
   const createdAlarms = [];
+  const canceledDownloads = [];
   const chrome = {
     storage: {
       local: {
@@ -42,6 +44,13 @@ function loadBackground(opts = {}) {
       lastError: null,
     },
     alarms: { create(name, spec) { createdAlarms.push({ name, spec }); }, onAlarm: { addListener(fn) { onAlarm = fn; } } },
+    downloads: {
+      onCreated: { addListener(fn) { onDownloadCreated = fn; } },
+      cancel(id, cb) {
+        canceledDownloads.push(id);
+        if (cb) cb();
+      },
+    },
     tabs: { onUpdated: { addListener() {} } },
   };
   const context = {
@@ -51,14 +60,16 @@ function loadBackground(opts = {}) {
     clearTimeout,
     console,
     fetch: opts.fetch || (async () => ({ ok: true, json: async () => ({}) })),
-    self: {},
+    self: { PSAdapters: opts.adapters || adapters },
     setTimeout,
   };
-  vm.runInNewContext(background + '\nself.__test = { requestTimeoutMs, fetchJsonWithTimeout, failClosed, browserPlatform, buildHeartbeatBody, buildInstallChecks, reportInstallHealth };', context);
+  vm.runInNewContext(background + '\nself.__test = { requestTimeoutMs, fetchJsonWithTimeout, failClosed, browserPlatform, buildHeartbeatBody, buildInstallChecks, reportInstallHealth, normalizeDestinationHost, downloadHostCandidates, downloadDestinationForPolicy, browserActionBlockRule, handleDownloadCreated };', context);
   return {
     context,
     createdAlarms,
+    canceledDownloads,
     runAlarm: (name) => onAlarm && onAlarm({ name }),
+    runDownloadCreated: (item) => onDownloadCreated && onDownloadCreated(item),
     runInstalled: () => onInstalled && onInstalled(),
     runStartup: () => onStartup && onStartup(),
     storage,
@@ -155,7 +166,7 @@ test('browser blocks configured destinations before local prompt or file inspect
   assert.match(background, /allowedDestinations:\s*\[\]/);
 });
 
-test('browser blocks configured paste, drop, and copy actions without reporting sensitive text', () => {
+test('browser blocks configured paste, drop, copy, and download actions without reporting sensitive text', () => {
   assert.match(content, /function browserActionBlockRule\(action\)/);
   assert.match(content, /const actionRule = browserActionBlockRule\('paste'\)/);
   assert.match(content, /const actionRule = browserActionBlockRule\('drop'\)/);
@@ -171,7 +182,61 @@ test('browser blocks configured paste, drop, and copy actions without reporting 
   assert.match(content, /PromptWall blocked paste into/);
   assert.match(content, /PromptWall blocked file drops into/);
   assert.match(content, /PromptWall blocked copy from/);
+  assert.match(background, /chrome\.downloads\?\.onCreated\?\.addListener/);
+  assert.match(background, /function downloadDestinationForPolicy\(item = \{\}, pol = \{\}\)/);
+  assert.match(background, /chrome\.downloads\.cancel\(id/);
+  assert.match(background, /prompt:\s*'\[browser action blocked\] download ' \+ host/);
+  assert.match(background, /channel:\s*'download'/);
+  assert.match(background, /clientOutcome:\s*'action_blocked'/);
   assert.match(background, /\.\.\.\(\(c\.policy && c\.policy\.blockedBrowserActions\) \|\| \[\]\)\.flatMap/);
+});
+
+test('browser download blocks use host-only evidence and never report URLs or filenames', async () => {
+  const fetchCalls = [];
+  const bg = loadBackground({
+    local: {
+      ingestKey: 'unit-ingest-key-000',
+      policy: {
+        blockedBrowserActions: [{
+          id: 'block_download_chatgpt',
+          action: 'download',
+          destinations: ['chatgpt.com'],
+          reason: 'download_blocked',
+        }],
+      },
+    },
+    managed: { email: 'analyst@example.test', orgId: 'credit-union-1' },
+    fetch: async (url, options) => {
+      fetchCalls.push({ url, body: JSON.parse(options.body) });
+      return { ok: true, json: async () => ({ id: 'q-download', status: 'action_blocked' }) };
+    },
+  });
+
+  const result = await bg.context.self.__test.handleDownloadCreated({
+    id: 42,
+    referrer: 'https://chatgpt.com/c/member-case',
+    url: 'https://files.example.test/member-loan-524-71-9043.pdf',
+  });
+
+  assert.strictEqual(result.ok, true);
+  assert.deepStrictEqual(bg.canceledDownloads, [42]);
+  assert.strictEqual(fetchCalls.length, 1);
+  assert.strictEqual(fetchCalls[0].body.destination, 'chatgpt.com');
+  assert.strictEqual(fetchCalls[0].body.channel, 'download');
+  assert.strictEqual(fetchCalls[0].body.clientOutcome, 'action_blocked');
+  assert.strictEqual(fetchCalls[0].body.prompt, '[browser action blocked] download chatgpt.com');
+  assert.strictEqual(fetchCalls[0].body.note, 'download_blocked');
+  assert.ok(!JSON.stringify(fetchCalls[0].body).includes('member-loan'));
+  assert.ok(!JSON.stringify(fetchCalls[0].body).includes('524-71-9043'));
+  assert.strictEqual(
+    bg.context.self.__test.downloadDestinationForPolicy({
+      referrer: 'https://unrelated.example/',
+      finalUrl: 'blob:https://claude.ai/download-id',
+    }, {
+      blockedBrowserActions: [{ action: 'download', destinations: ['claude.ai'] }],
+    }),
+    'claude.ai',
+  );
 });
 
 test('browser fallback hard-stops match regulated endpoint defaults before policy sync', () => {
@@ -224,6 +289,10 @@ test('browser click interception uses shared send-button adapters', () => {
 test('manifest permits local control-plane URLs used by browser smoke tests', () => {
   assert.ok(manifest.host_permissions.includes('http://localhost/*'));
   assert.ok(manifest.host_permissions.includes('http://127.0.0.1/*'));
+});
+
+test('manifest declares download permission for policy-controlled browser egress blocks', () => {
+  assert.ok(manifest.permissions.includes('downloads'));
 });
 
 test('manifest loads WebExtension API bridge before content runtime', () => {

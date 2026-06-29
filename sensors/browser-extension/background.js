@@ -7,7 +7,7 @@
  * Detection itself happens locally in the content script.
  */
 try { importScripts('lib/browser-api.js'); } catch (e) { /* optional browser namespace bridge */ }
-try { importScripts('lib/adapters.js'); } catch (e) { /* PSAdapters used only for shadow-AI */ }
+try { importScripts('lib/adapters.js'); } catch (e) { /* optional shared host catalog */ }
 
 const DEFAULTS = {
   serverUrl: 'http://localhost:4000',
@@ -211,8 +211,123 @@ function runAsync(fn) {
   try { Promise.resolve(fn()).catch(() => {}); } catch (e) {}
 }
 
+function normalizeDestinationHost(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return '';
+  try {
+    const url = raw.includes('://') ? new URL(raw) : new URL('https://' + raw);
+    if ((url.protocol === 'blob:' || url.protocol === 'filesystem:') && url.pathname) {
+      return normalizeDestinationHost(url.pathname);
+    }
+    return (url.hostname || '').replace(/^www\./, '');
+  } catch (e) {
+    return raw.replace(/^www\./, '').split(/[/?#]/)[0];
+  }
+}
+
+function hostMatchesDestination(host, patterns) {
+  const normalizedHost = normalizeDestinationHost(host);
+  const destinations = Array.isArray(patterns) ? patterns : [];
+  const A = self.PSAdapters;
+  if (A && A.isGoverned && A.isGoverned(normalizedHost, destinations)) return true;
+  return destinations.some((pattern) => {
+    const target = normalizeDestinationHost(pattern);
+    if (!normalizedHost || !target) return false;
+    if (target === '*') return true;
+    if (target.startsWith('*.')) {
+      const base = target.slice(2);
+      return normalizedHost === base || normalizedHost.endsWith('.' + base);
+    }
+    if (target.startsWith('*')) {
+      const base = target.slice(1).replace(/^\./, '');
+      return normalizedHost === base || normalizedHost.endsWith('.' + base);
+    }
+    return normalizedHost === target || normalizedHost.endsWith('.' + target);
+  });
+}
+
+function browserActionBlockRule(action, destination, pol = {}) {
+  const normalizedAction = String(action || '').trim().toLowerCase();
+  for (const rule of (pol.blockedBrowserActions || [])) {
+    if (!rule || rule.enabled === false) continue;
+    if (String(rule.action || '').trim().toLowerCase() !== normalizedAction) continue;
+    if (hostMatchesDestination(destination, rule.destinations || [])) return rule;
+  }
+  return null;
+}
+
+function downloadHostCandidates(item = {}) {
+  const out = [];
+  const seen = new Set();
+  for (const field of ['referrer', 'finalUrl', 'url']) {
+    const host = normalizeDestinationHost(item[field]);
+    if (!host || seen.has(host)) continue;
+    seen.add(host);
+    out.push(host);
+  }
+  return out;
+}
+
+function downloadDestinationForPolicy(item = {}, pol = {}) {
+  for (const host of downloadHostCandidates(item)) {
+    if (browserActionBlockRule('download', host, pol)) return host;
+  }
+  return null;
+}
+
+function cancelDownload(id) {
+  return new Promise((resolve) => {
+    try {
+      if (!chrome.downloads || !chrome.downloads.cancel || id == null) {
+        resolve(false);
+        return;
+      }
+      chrome.downloads.cancel(id, () => {
+        resolve(!(chrome.runtime && chrome.runtime.lastError));
+      });
+    } catch (e) {
+      resolve(false);
+    }
+  });
+}
+
+async function reportBlockedDownload(destination, rule) {
+  const [sc, who] = await Promise.all([serverCfg(), identity()]);
+  if (!sc.enabled) return { ok: false, reason: 'disabled' };
+  const missing = missingServerConfigReason(sc);
+  if (missing) return { ok: false, reason: missing };
+  const host = normalizeDestinationHost(destination) || 'unknown';
+  const reason = (rule && rule.reason) || 'download blocked by policy';
+  return fetchJsonWithTimeout(sc.serverUrl + '/api/v1/gate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-api-key': sc.ingestKey },
+    body: JSON.stringify({
+      prompt: '[browser action blocked] download ' + host,
+      user: who.user,
+      orgId: who.orgId,
+      destination: host,
+      channel: 'download',
+      source: 'browser_extension',
+      sensor: sensorMetadata(),
+      clientOutcome: 'action_blocked',
+      note: reason,
+    }),
+  }, sc.requestTimeoutMs);
+}
+
+async function handleDownloadCreated(item = {}) {
+  const c = await cfg();
+  if (!c.enabled) return { ok: false, reason: 'disabled' };
+  const destination = downloadDestinationForPolicy(item, c.policy || {});
+  if (!destination) return { ok: false, reason: 'not_configured' };
+  const rule = browserActionBlockRule('download', destination, c.policy || {});
+  await cancelDownload(item.id);
+  return reportBlockedDownload(destination, rule);
+}
+
 chrome.runtime.onInstalled.addListener(() => runAsync(refreshPolicyAndHealth));
 chrome.runtime.onStartup.addListener(() => runAsync(refreshPolicyAndHealth));
+chrome.downloads?.onCreated?.addListener((item) => runAsync(() => handleDownloadCreated(item)));
 chrome.alarms?.create('refreshPolicy', { periodInMinutes: 15 });
 chrome.alarms?.create('installHeartbeat', { periodInMinutes: 60 });
 chrome.alarms?.onAlarm.addListener((a) => {

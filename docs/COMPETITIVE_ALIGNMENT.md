@@ -49,7 +49,7 @@ Build next:
   metadata-only endpoint handoff, and one-shot clipboard guard.
 - Broader app/action policy controls beyond the current destination,
   file-upload, response-scanning, browser paste, browser file-drop, and browser
-  response-copy controls.
+  response-copy/download controls.
 - Deeper desktop/file-flow collection once protected upload needs to expand
   into app-specific upload paths.
 
@@ -70,6 +70,9 @@ Build next:
 - Extend destination-scoped browser action controls to AI response copy events,
   with sanitized `action_blocked` evidence before selected response text reaches
   the clipboard.
+- Extend destination-scoped browser action controls to browser downloads, with
+  host-only `action_blocked` evidence and no raw filename, URL, MIME, or file
+  bytes in the control plane.
 - Add a sanitized approval ticket bridge with deterministic dedupe keys,
   ticket system/project metadata, and no prompt bodies so Jira, Linear, SOAR, or
   internal middleware can create reviewer-owned tickets from the approval
@@ -99,13 +102,13 @@ Build next:
 - Add Policy-tab response scanning controls so `/api/v1/scan-response` can
   flag, redact, or block sensitive AI replies while storing only sanitized
   evidence.
-- Add destination-scoped browser paste, file-drop, and response-copy blocking so
-  admins can stop high-risk browser actions in selected AI tools while storing
-  only sanitized `action_blocked` evidence.
+- Add destination-scoped browser paste, file-drop, response-copy, and download
+  blocking so admins can stop high-risk browser actions in selected AI tools
+  while storing only sanitized `action_blocked` evidence.
 - Make local browser blocks evidence-aware: sends, sensitive paste blocks,
-  destination/file-upload blocks, file-drop blocks, and response-copy blocks now
-  only claim a recorded decision after the control plane returns the expected
-  evidence id and status.
+  destination/file-upload blocks, file-drop blocks, response-copy blocks, and
+  download blocks now only claim a recorded decision after the control plane
+  returns the expected evidence id and status.
 - Add approval owner and SLA routing so held decisions reach security,
   compliance, privacy, or legal queues with sanitized workflow metadata in the
   dashboard, SIEM alerts, and examiner evidence.
