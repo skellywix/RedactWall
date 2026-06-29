@@ -3,6 +3,9 @@ param(
   [string]$ConfigDir = "$env:LOCALAPPDATA\PromptWall",
   [switch]$RemoveDesktopCollector,
   [string]$DesktopCollectorKeyName = "PromptWallProtectedUpload",
+  [switch]$RemoveClipboardGuard,
+  [string]$ClipboardGuardShortcutName = "PromptWall Clipboard Guard",
+  [switch]$ClipboardGuardDesktopShortcut,
   [switch]$RemoveConfig
 )
 
@@ -30,6 +33,13 @@ if ($RemoveDesktopCollector) {
   $collectorUninstaller = Join-Path $PSScriptRoot "uninstall-desktop-collector.ps1"
   if (Test-Path -LiteralPath $collectorUninstaller) {
     & $collectorUninstaller -KeyName $DesktopCollectorKeyName
+  }
+}
+
+if ($RemoveClipboardGuard) {
+  $clipboardUninstaller = Join-Path $PSScriptRoot "uninstall-clipboard-guard.ps1"
+  if (Test-Path -LiteralPath $clipboardUninstaller) {
+    & $clipboardUninstaller -ShortcutName $ClipboardGuardShortcutName -DesktopShortcut:$ClipboardGuardDesktopShortcut.IsPresent
   }
 }
 

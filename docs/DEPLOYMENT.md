@@ -456,7 +456,9 @@ Install it as part of the endpoint agent setup:
   -PromptWallUrl "https://promptwall.example.com" `
   -IngestKey "<pilot-ingest-key>" `
   -HandoffSecret "<32-plus-character-local-handoff-secret>" `
-  -InstallDesktopCollector
+  -InstallDesktopCollector `
+  -InstallClipboardGuard `
+  -ClipboardGuardClearOnBlock
 ```
 
 Or install only the shell action after endpoint setup:
@@ -539,18 +541,47 @@ text to disk and never sends `contentBase64`, raw clipboard text, or raw documen
 content to the control plane. If Windows refuses the clear operation, the guard
 records sanitized `paste_flagged` evidence and exits nonzero.
 
+Install the clipboard guard as a Start Menu shortcut for pilot users:
+
+```powershell
+.\scripts\install-clipboard-guard.ps1 `
+  -ConfigDir "$env:LOCALAPPDATA\PromptWall" `
+  -ShortcutName "PromptWall Clipboard Guard" `
+  -Destination "Desktop AI" `
+  -ClearOnBlock
+```
+
+The shortcut runs `scripts\run-clipboard-guard.ps1` with the local endpoint
+config path and writes only the guard's sanitized JSON result to
+`%LOCALAPPDATA%\PromptWall\logs\clipboard-guard.log`. The shortcut arguments do
+not contain the ingest key, native handoff secret, clipboard text, or prompt
+content. Use `-DesktopShortcut` if the pilot wants a desktop shortcut as well;
+use `-HotKey "CTRL+ALT+P"` only when the customer explicitly wants a keyboard
+shortcut.
+
+Run the packaged launcher directly:
+
+```powershell
+.\scripts\run-clipboard-guard.ps1 `
+  -RepoRoot (Get-Location).Path `
+  -ConfigPath "$env:LOCALAPPDATA\PromptWall\endpoint-agent.env" `
+  -Destination "Desktop AI" `
+  -ClearOnBlock
+```
+
 Check status:
 
 ```powershell
 Get-ScheduledTask -TaskName PromptWallEndpointAgent
 Get-Content "$env:LOCALAPPDATA\PromptWall\logs\endpoint-agent.log" -Tail 40
 Get-Content "$env:LOCALAPPDATA\PromptWall\logs\desktop-collector.log" -Tail 40
+Get-Content "$env:LOCALAPPDATA\PromptWall\logs\clipboard-guard.log" -Tail 40
 ```
 
 Uninstall:
 
 ```powershell
-.\scripts\uninstall-endpoint-agent.ps1 -RemoveDesktopCollector
+.\scripts\uninstall-endpoint-agent.ps1 -RemoveDesktopCollector -RemoveClipboardGuard
 ```
 
 Remove local endpoint config too:

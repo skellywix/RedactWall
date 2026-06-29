@@ -9,6 +9,9 @@ const root = path.join(__dirname, '..');
 const install = fs.readFileSync(path.join(root, 'scripts', 'install-endpoint-agent.ps1'), 'utf8');
 const run = fs.readFileSync(path.join(root, 'scripts', 'run-endpoint-agent.ps1'), 'utf8');
 const uninstall = fs.readFileSync(path.join(root, 'scripts', 'uninstall-endpoint-agent.ps1'), 'utf8');
+const clipboardInstall = fs.readFileSync(path.join(root, 'scripts', 'install-clipboard-guard.ps1'), 'utf8');
+const clipboardRun = fs.readFileSync(path.join(root, 'scripts', 'run-clipboard-guard.ps1'), 'utf8');
+const clipboardUninstall = fs.readFileSync(path.join(root, 'scripts', 'uninstall-clipboard-guard.ps1'), 'utf8');
 const desktopInstall = fs.readFileSync(path.join(root, 'scripts', 'install-desktop-collector.ps1'), 'utf8');
 const desktopRun = fs.readFileSync(path.join(root, 'scripts', 'run-desktop-collector.ps1'), 'utf8');
 const desktopUninstall = fs.readFileSync(path.join(root, 'scripts', 'uninstall-desktop-collector.ps1'), 'utf8');
@@ -31,9 +34,13 @@ test('installer registers a restarting scheduled task without putting the ingest
   assert.match(install, /BUILTIN\\Administrators/);
   assert.match(install, /ENDPOINT_AGENT_HANDOFF_SECRET=\$HandoffSecret/);
   assert.match(install, /InstallDesktopCollector/);
+  assert.match(install, /InstallClipboardGuard/);
+  assert.match(install, /ClipboardGuardClearOnBlock/);
+  assert.match(install, /ClipboardGuardShortcutName/);
   assert.match(install, /DesktopCollectorKeyName/);
   assert.match(install, /ENDPOINT_AGENT_DESKTOP_DESTINATION=\$DesktopCollectorDestination/);
   assert.match(install, /install-desktop-collector\.ps1/);
+  assert.match(install, /install-clipboard-guard\.ps1/);
   assert.match(install, /InstallDesktopCollector requires HandoffSecret/);
   assert.match(install, /Set-Acl -LiteralPath \$handoffRoot/);
   assert.doesNotMatch(install, /"-IngestKey"/);
@@ -79,6 +86,28 @@ test('desktop collector shell action is per-user and secret-free', () => {
   assert.match(desktopUninstall, /HKEY_CURRENT_USER\\Software\\Classes\\\*\\shell/);
 });
 
+test('clipboard guard shortcut is per-user and secret-free', () => {
+  assert.match(clipboardInstall, /WScript\.Shell/);
+  assert.match(clipboardInstall, /GetFolderPath\("Programs"\)/);
+  assert.match(clipboardInstall, /PromptWall Clipboard Guard/);
+  assert.match(clipboardInstall, /run-clipboard-guard\.ps1/);
+  assert.match(clipboardInstall, /WindowStyle = 7/);
+  assert.match(clipboardInstall, /DesktopShortcut/);
+  assert.match(clipboardInstall, /HotKey/);
+  assert.match(clipboardInstall, /Assert-SafeShortcutName/);
+  assert.match(clipboardInstall, /Assert-SafeShortcutArgument/);
+  assert.doesNotMatch(clipboardInstall, /INGEST_API_KEY|ENDPOINT_AGENT_HANDOFF_SECRET|"-IngestKey"|"-HandoffSecret"/);
+  assert.match(clipboardRun, /\$env:PROMPTWALL_ENV_PATH = \$config/);
+  assert.match(clipboardRun, /Remove-Item Env:\\SENTINEL_ENV_PATH/);
+  assert.doesNotMatch(clipboardRun, /\$env:SENTINEL_ENV_PATH = \$config/);
+  assert.match(clipboardRun, /clipboard-guard\.js/);
+  assert.match(clipboardRun, /--clear-on-block/);
+  assert.match(clipboardRun, /\$guardOutput \| Out-File -Append/);
+  assert.doesNotMatch(clipboardRun, /Get-Clipboard|Set-Clipboard|contentBase64/);
+  assert.match(clipboardUninstall, /PromptWall Clipboard Guard/);
+  assert.match(clipboardUninstall, /GetFolderPath\("Programs"\)/);
+});
+
 test('uninstaller removes task and can remove endpoint config', () => {
   assert.match(uninstall, /Stop-ScheduledTask/);
   assert.match(uninstall, /Unregister-ScheduledTask/);
@@ -87,7 +116,9 @@ test('uninstaller removes task and can remove endpoint config', () => {
   assert.ok(uninstall.includes("sensors[\\\\/]endpoint-agent[\\\\/]agent\\.js"));
   assert.match(uninstall, /\$RemoveConfig/);
   assert.match(uninstall, /\$RemoveDesktopCollector/);
+  assert.match(uninstall, /\$RemoveClipboardGuard/);
   assert.match(uninstall, /uninstall-desktop-collector\.ps1/);
+  assert.match(uninstall, /uninstall-clipboard-guard\.ps1/);
   assert.match(uninstall, /endpoint-agent\.env/);
 });
 
@@ -95,8 +126,11 @@ test('deployment docs include endpoint task install and uninstall flow', () => {
   assert.match(deployment, /install-endpoint-agent\.ps1/);
   assert.match(deployment, /-PromptWallUrl "https:\/\/promptwall\.example\.com"/);
   assert.match(deployment, /install-desktop-collector\.ps1/);
+  assert.match(deployment, /install-clipboard-guard\.ps1/);
   assert.match(deployment, /PromptWall Protected Upload/);
+  assert.match(deployment, /PromptWall Clipboard Guard/);
   assert.match(deployment, /uninstall-endpoint-agent\.ps1/);
+  assert.match(deployment, /clipboard-guard\.log/);
   assert.match(deployment, /desktop-collector\.log/);
   assert.match(deployment, /PromptWallEndpointAgent/);
   assert.match(deployment, /%LOCALAPPDATA%\\PromptWall\\endpoint-agent\.env/);

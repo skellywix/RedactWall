@@ -26,10 +26,13 @@ const PACKAGE_FILES = [
   'sensors/endpoint-agent/collectors/clipboard-guard.js',
   'sensors/endpoint-agent/collectors/protected-upload.js',
   'scripts/check-endpoint-install.js',
+  'scripts/install-clipboard-guard.ps1',
   'scripts/install-desktop-collector.ps1',
   'scripts/install-endpoint-agent.ps1',
+  'scripts/run-clipboard-guard.ps1',
   'scripts/run-desktop-collector.ps1',
   'scripts/run-endpoint-agent.ps1',
+  'scripts/uninstall-clipboard-guard.ps1',
   'scripts/uninstall-desktop-collector.ps1',
   'scripts/uninstall-endpoint-agent.ps1',
 ];
@@ -153,6 +156,9 @@ function validateRuntimeFiles(files) {
   if (/"-HandoffSecret"/.test(install) || /\$HandoffSecret[\s\S]{0,120}\$taskArgs/.test(install)) {
     throw new Error('Endpoint agent installer must not put the native handoff secret in scheduled-task arguments');
   }
+  if (!/InstallClipboardGuard/.test(install) || !/install-clipboard-guard\.ps1/.test(install)) {
+    throw new Error('Endpoint agent installer must be able to install the clipboard guard shortcut');
+  }
 
   const collectorInstall = files.find((file) => file.path === 'scripts/install-desktop-collector.ps1').body.toString('utf8');
   if (!collectorInstall.includes(String.raw`HKEY_CURRENT_USER\Software\Classes\*\shell`) || !collectorInstall.includes('%1') || !/MultiSelectModel/.test(collectorInstall)) {
@@ -165,9 +171,28 @@ function validateRuntimeFiles(files) {
     throw new Error('Endpoint desktop collector installer must not put secrets in shell commands');
   }
 
+  const clipboardInstall = files.find((file) => file.path === 'scripts/install-clipboard-guard.ps1').body.toString('utf8');
+  if (!/WScript\.Shell/.test(clipboardInstall) || !/run-clipboard-guard\.ps1/.test(clipboardInstall) || !/Clipboard Guard/.test(clipboardInstall)) {
+    throw new Error('Endpoint clipboard guard installer must create a per-user shortcut');
+  }
+  if (!/Assert-SafeShortcutName/.test(clipboardInstall) || !/Assert-SafeShortcutArgument/.test(clipboardInstall)) {
+    throw new Error('Endpoint clipboard guard installer must validate shortcut labels and arguments');
+  }
+  if (/"-IngestKey"|"-HandoffSecret"|INGEST_API_KEY|ENDPOINT_AGENT_HANDOFF_SECRET/.test(clipboardInstall)) {
+    throw new Error('Endpoint clipboard guard installer must not put secrets in shortcuts');
+  }
+
   const runner = files.find((file) => file.path === 'scripts/run-endpoint-agent.ps1').body.toString('utf8');
   if (!/\$env:PROMPTWALL_ENV_PATH = \$config/.test(runner) || /\$env:SENTINEL_ENV_PATH = \$config/.test(runner)) {
     throw new Error('Endpoint agent runner must load local config through PROMPTWALL_ENV_PATH');
+  }
+
+  const clipboardRunner = files.find((file) => file.path === 'scripts/run-clipboard-guard.ps1').body.toString('utf8');
+  if (!/\$env:PROMPTWALL_ENV_PATH = \$config/.test(clipboardRunner) || /\$env:SENTINEL_ENV_PATH = \$config/.test(clipboardRunner) || !/clipboard-guard\.js/.test(clipboardRunner) || !/--clear-on-block/.test(clipboardRunner)) {
+    throw new Error('Endpoint clipboard guard runner must load config and invoke the clipboard guard collector');
+  }
+  if (/contentBase64|Get-Clipboard|Set-Clipboard/.test(clipboardRunner)) {
+    throw new Error('Endpoint clipboard guard runner must delegate clipboard access to the collector');
   }
 
   const collectorRunner = files.find((file) => file.path === 'scripts/run-desktop-collector.ps1').body.toString('utf8');
@@ -218,6 +243,8 @@ function packageEndpointAgent(opts = {}) {
       nativeHandoffWriterIncluded: true,
       protectedUploadCollectorIncluded: true,
       clipboardGuardIncluded: true,
+      clipboardGuardRunnerIncluded: true,
+      clipboardGuardInstallerIncluded: true,
       desktopCollectorInstallerIncluded: true,
       installValidationIncluded: true,
       scheduledTaskInstallerIncluded: true,

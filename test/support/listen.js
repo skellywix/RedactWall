@@ -133,6 +133,7 @@ function closeServer(server) {
 }
 
 function hardenServer(server) {
+  if (server.__promptWallHardened) return server;
   const sockets = new Set();
   server.keepAliveTimeout = 1;
   server.headersTimeout = 2000;
@@ -146,6 +147,7 @@ function hardenServer(server) {
     for (const socket of sockets) socket.destroy();
     return originalClose(callback);
   };
+  Object.defineProperty(server, '__promptWallHardened', { value: true });
   return server;
 }
 
@@ -153,6 +155,27 @@ function startServer(appUnderTest, host, port) {
   return new Promise((resolve, reject) => {
     const server = hardenServer(appUnderTest.listen(port, host, () => resolve(server)));
     server.once('error', reject);
+  });
+}
+
+function startNetServer(server, host, port) {
+  return new Promise((resolve, reject) => {
+    const hardened = hardenServer(server);
+    const cleanup = () => {
+      hardened.off('error', onError);
+      hardened.off('listening', onListening);
+    };
+    const onError = (err) => {
+      cleanup();
+      reject(err);
+    };
+    const onListening = () => {
+      cleanup();
+      resolve(hardened);
+    };
+    hardened.once('error', onError);
+    hardened.once('listening', onListening);
+    hardened.listen({ host, port, exclusive: true });
   });
 }
 
@@ -214,4 +237,25 @@ async function listen(appUnderTest, opts = {}) {
   throw lastError || new Error('failed to bind loopback test server');
 }
 
-module.exports = { listen, loopbackHttpFetch };
+async function listenNet(server, opts = {}) {
+  const host = opts.host || '127.0.0.1';
+  const attempts = opts.attempts || 8;
+  const timeoutMs = positiveNumber(
+    opts.timeoutMs,
+    positiveNumber(process.env.PROMPTWALL_LOOPBACK_LISTEN_TIMEOUT_MS, DEFAULT_LOOPBACK_LISTEN_TIMEOUT_MS),
+  );
+  let lastError;
+  for (let i = 0; i < attempts; i += 1) {
+    try {
+      await startNetServer(server, host, opts.port == null ? 0 : Number(opts.port));
+      await probePort(server.address().port, host, timeoutMs);
+      return server;
+    } catch (err) {
+      lastError = err;
+      await closeServer(server).catch(() => {});
+    }
+  }
+  throw lastError || new Error('failed to bind loopback test server');
+}
+
+module.exports = { listen, listenNet, loopbackHttpFetch };

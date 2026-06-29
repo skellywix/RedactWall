@@ -117,6 +117,7 @@ function buildInstallReport(opts = {}) {
     configured(settings.ocrCommand) ? 'configured' : 'disabled'));
   checks.push(check('endpoint_runner', existsFile(repoRoot, 'scripts/run-endpoint-agent.ps1'), 'runner present'));
   checks.push(check('clipboard_guard_runtime', existsFile(repoRoot, 'sensors/endpoint-agent/collectors/clipboard-guard.js'), 'clipboard guard present'));
+  checks.push(check('clipboard_guard_runner', existsFile(repoRoot, 'scripts/run-clipboard-guard.ps1'), 'clipboard guard runner present'));
   checks.push(check('ai_tool_inventory_runtime', existsFile(repoRoot, 'sensors/endpoint-agent/collectors/ai-tool-inventory.js'), 'AI tool inventory present'));
   checks.push(...aiToolInventory.collectAiToolInventorySync({
     env: configInfo.config,

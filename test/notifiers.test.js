@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const net = require('node:net');
 const notifiers = require('../server/notifiers');
+const { listenNet } = require('./support/listen');
 
 function sampleQuery(overrides = {}) {
   return {
@@ -229,6 +230,7 @@ test('SMTP adapter sends sanitized approval email through a relay', async (t) =>
     let buffer = '';
     let dataMode = false;
     let message = '';
+    socket.on('error', () => {});
     socket.write('220 smtp.test ESMTP\r\n');
     socket.on('data', (chunk) => {
       buffer += chunk.toString('utf8');
@@ -262,7 +264,7 @@ test('SMTP adapter sends sanitized approval email through a relay', async (t) =>
       }
     });
   });
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  await listenNet(server);
   t.after(() => new Promise((resolve) => server.close(resolve)));
 
   const port = server.address().port;

@@ -11,6 +11,11 @@ param(
   [string]$DesktopCollectorDestination = "",
   [string]$DesktopCollectorMenuName = "PromptWall Protected Upload",
   [string]$DesktopCollectorKeyName = "PromptWallProtectedUpload",
+  [switch]$InstallClipboardGuard,
+  [switch]$ClipboardGuardClearOnBlock,
+  [string]$ClipboardGuardDestination = "",
+  [string]$ClipboardGuardShortcutName = "PromptWall Clipboard Guard",
+  [switch]$ClipboardGuardDesktopShortcut,
   [string]$ConfigDir = "$env:LOCALAPPDATA\PromptWall",
   [string]$RepoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path,
   [switch]$Force
@@ -192,10 +197,30 @@ if ($InstallDesktopCollector) {
     -Force:$Force.IsPresent
 }
 
+if ($InstallClipboardGuard) {
+  $clipboardInstaller = Join-Path $repo "scripts\install-clipboard-guard.ps1"
+  if (-not (Test-Path -LiteralPath $clipboardInstaller)) {
+    throw "Clipboard guard installer not found: $clipboardInstaller"
+  }
+  $clipboardDestination = $ClipboardGuardDestination
+  if (-not $clipboardDestination) {
+    $clipboardDestination = $DesktopCollectorDestination
+  }
+  & $clipboardInstaller `
+    -ConfigDir $configRoot `
+    -RepoRoot $repo `
+    -Destination $clipboardDestination `
+    -ShortcutName $ClipboardGuardShortcutName `
+    -ClearOnBlock:$ClipboardGuardClearOnBlock.IsPresent `
+    -DesktopShortcut:$ClipboardGuardDesktopShortcut.IsPresent `
+    -Force:$Force.IsPresent
+}
+
 Write-Host "Installed $TaskName"
 Write-Host "Startup mode: $startupMode"
 Write-Host "Watch directory: $watchRoot"
 if ($HandoffSecret) { Write-Host "Native handoff directory: $handoffRoot" }
 if ($InstallDesktopCollector) { Write-Host "Desktop collector: $DesktopCollectorMenuName" }
+if ($InstallClipboardGuard) { Write-Host "Clipboard guard shortcut: $ClipboardGuardShortcutName" }
 Write-Host "Config file: $configPath"
 Write-Host "Log file: $logPath"

@@ -14,7 +14,7 @@ process.env.INGEST_API_KEY = 'unit-ingest-key';
 process.env.SENTINEL_DB_PATH = path.join(os.tmpdir(), 'ps-heartbeat-test-' + crypto.randomBytes(6).toString('hex') + '.db');
 
 const app = require('../server/app');
-const { listen } = require('./support/listen');
+const { listen, loopbackHttpFetch } = require('./support/listen');
 const db = require('../server/db');
 const coverage = require('../server/coverage');
 const evidence = require('../server/evidence');
@@ -34,7 +34,7 @@ async function withServer(fn) {
 }
 
 async function heartbeat(port, body, key = 'unit-ingest-key') {
-  return fetch(`http://127.0.0.1:${port}/api/v1/heartbeat`, {
+  return loopbackHttpFetch(`http://127.0.0.1:${port}/api/v1/heartbeat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-api-key': key },
     body: JSON.stringify(body),

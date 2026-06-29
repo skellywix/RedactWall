@@ -62,12 +62,20 @@ function minimalFiles(agentBody) {
       body: Buffer.from("const api = '/api/v1/heartbeat';\nfunction buildInstallReport() {}\nconst key = 'INGEST_API_KEY';\n"),
     },
     {
+      path: 'scripts/install-clipboard-guard.ps1',
+      body: Buffer.from('WScript.Shell\nrun-clipboard-guard.ps1\nPromptWall Clipboard Guard\nAssert-SafeShortcutName\nAssert-SafeShortcutArgument\n'),
+    },
+    {
       path: 'scripts/install-desktop-collector.ps1',
       body: Buffer.from('HKEY_CURRENT_USER\\Software\\Classes\\*\\shell\n"%1"\nMultiSelectModel\nPROMPTWALL_ENDPOINT_AGENT_HANDOFF_DIR\nPROMPTWALL_ENDPOINT_AGENT_HANDOFF_SECRET\n'),
     },
     {
       path: 'scripts/install-endpoint-agent.ps1',
-      body: Buffer.from('[Parameter(Mandatory = $true)]\n[string]$IngestKey\n$taskArgs = "-File runner.ps1"\n'),
+      body: Buffer.from('[Parameter(Mandatory = $true)]\n[string]$IngestKey\n$taskArgs = "-File runner.ps1"\nInstallClipboardGuard\ninstall-clipboard-guard.ps1\n'),
+    },
+    {
+      path: 'scripts/run-clipboard-guard.ps1',
+      body: Buffer.from('$env:PROMPTWALL_ENV_PATH = $config\nclipboard-guard.js\n--clear-on-block\n'),
     },
     {
       path: 'scripts/run-desktop-collector.ps1',
@@ -78,6 +86,7 @@ function minimalFiles(agentBody) {
       body: Buffer.from('$env:PROMPTWALL_ENV_PATH = $config\n'),
     },
     { path: 'scripts/uninstall-desktop-collector.ps1', body: Buffer.from('Remove-Item\n') },
+    { path: 'scripts/uninstall-clipboard-guard.ps1', body: Buffer.from('Remove-Item\n') },
     { path: 'scripts/uninstall-endpoint-agent.ps1', body: Buffer.from('Unregister-ScheduledTask\n') },
   ];
 }
@@ -102,6 +111,8 @@ test('package script writes a prompt-free endpoint agent zip and integrity manif
   assert.strictEqual(manifest.checks.nativeHandoffWriterIncluded, true);
   assert.strictEqual(manifest.checks.protectedUploadCollectorIncluded, true);
   assert.strictEqual(manifest.checks.clipboardGuardIncluded, true);
+  assert.strictEqual(manifest.checks.clipboardGuardRunnerIncluded, true);
+  assert.strictEqual(manifest.checks.clipboardGuardInstallerIncluded, true);
   assert.strictEqual(manifest.checks.desktopCollectorInstallerIncluded, true);
   assert.strictEqual(manifest.checks.installValidationIncluded, true);
   assert.strictEqual(manifest.checks.scheduledTaskInstallerIncluded, true);
@@ -129,10 +140,13 @@ test('package script writes a prompt-free endpoint agent zip and integrity manif
     'sensors/endpoint-agent/collectors/clipboard-guard.js',
     'sensors/endpoint-agent/collectors/protected-upload.js',
     'scripts/check-endpoint-install.js',
+    'scripts/install-clipboard-guard.ps1',
     'scripts/install-desktop-collector.ps1',
     'scripts/install-endpoint-agent.ps1',
+    'scripts/run-clipboard-guard.ps1',
     'scripts/run-desktop-collector.ps1',
     'scripts/run-endpoint-agent.ps1',
+    'scripts/uninstall-clipboard-guard.ps1',
     'scripts/uninstall-desktop-collector.ps1',
     'scripts/uninstall-endpoint-agent.ps1',
   ]) {
@@ -154,6 +168,8 @@ test('package script writes a prompt-free endpoint agent zip and integrity manif
   assert.match(zip.readAsText('sensors/endpoint-agent/collectors/clipboard-guard.js'), /collectClipboard/);
   assert.match(zip.readAsText('sensors/endpoint-agent/collectors/protected-upload.js'), /collectProtectedUploads/);
   assert.match(zip.readAsText('scripts/check-endpoint-install.js'), /\/api\/v1\/heartbeat/);
+  assert.match(zip.readAsText('scripts/install-clipboard-guard.ps1'), /PromptWall Clipboard Guard/);
+  assert.match(zip.readAsText('scripts/run-clipboard-guard.ps1'), /clipboard-guard\.js/);
   assert.match(zip.readAsText('scripts/install-desktop-collector.ps1'), /HKEY_CURRENT_USER\\Software\\Classes\\\*\\shell/);
   assert.match(zip.readAsText('scripts/run-desktop-collector.ps1'), /protected-upload\.js/);
   assert.doesNotMatch(agent, /dev-ingest-key|524-71-9043|4111 1111 1111 1111/);
@@ -205,6 +221,8 @@ test('packaged endpoint agent runs a package-to-install pilot smoke', async (t) 
   zip.extractAllTo(installRoot, true);
 
   const installScript = fs.readFileSync(path.join(installRoot, 'scripts', 'install-endpoint-agent.ps1'), 'utf8');
+  const clipboardInstallScript = fs.readFileSync(path.join(installRoot, 'scripts', 'install-clipboard-guard.ps1'), 'utf8');
+  const clipboardRunnerScript = fs.readFileSync(path.join(installRoot, 'scripts', 'run-clipboard-guard.ps1'), 'utf8');
   const desktopInstallScript = fs.readFileSync(path.join(installRoot, 'scripts', 'install-desktop-collector.ps1'), 'utf8');
   const desktopRunnerScript = fs.readFileSync(path.join(installRoot, 'scripts', 'run-desktop-collector.ps1'), 'utf8');
   const runnerScript = fs.readFileSync(path.join(installRoot, 'scripts', 'run-endpoint-agent.ps1'), 'utf8');
@@ -214,12 +232,23 @@ test('packaged endpoint agent runs a package-to-install pilot smoke', async (t) 
   assert.match(installScript, /PROMPTWALL_URL=\$PromptWallUrl/);
   assert.match(installScript, /INGEST_API_KEY=\$IngestKey/);
   assert.match(installScript, /InstallDesktopCollector/);
+  assert.match(installScript, /InstallClipboardGuard/);
+  assert.match(installScript, /install-clipboard-guard\.ps1/);
   assert.doesNotMatch(installScript, /"-IngestKey"/);
   assert.ok(desktopInstallScript.includes(String.raw`HKEY_CURRENT_USER\Software\Classes\*\shell`));
   assert.ok(desktopInstallScript.includes('%1'));
   assert.match(desktopInstallScript, /MultiSelectModel/);
   assert.match(desktopInstallScript, /PROMPTWALL_ENDPOINT_AGENT_HANDOFF_SECRET/);
   assert.doesNotMatch(desktopInstallScript, /"-HandoffSecret"/);
+  assert.match(clipboardInstallScript, /WScript\.Shell/);
+  assert.match(clipboardInstallScript, /run-clipboard-guard\.ps1/);
+  assert.match(clipboardInstallScript, /PromptWall Clipboard Guard/);
+  assert.doesNotMatch(clipboardInstallScript, /INGEST_API_KEY|ENDPOINT_AGENT_HANDOFF_SECRET/);
+  assert.match(clipboardRunnerScript, /clipboard-guard\.js/);
+  assert.match(clipboardRunnerScript, /\$env:PROMPTWALL_ENV_PATH = \$config/);
+  assert.match(clipboardRunnerScript, /--clear-on-block/);
+  assert.doesNotMatch(clipboardRunnerScript, /\$env:SENTINEL_ENV_PATH = \$config/);
+  assert.doesNotMatch(clipboardRunnerScript, /Get-Clipboard|Set-Clipboard|contentBase64/);
   assert.match(desktopRunnerScript, /protected-upload\.js/);
   assert.match(desktopRunnerScript, /\[string\[\]\]\$FilePath/);
   assert.match(desktopRunnerScript, /\$env:PROMPTWALL_ENV_PATH = \$config/);
