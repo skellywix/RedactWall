@@ -341,7 +341,8 @@ The browser extension automatically posts sanitized install-health heartbeats on
 
 ```bash
 npm test              # Node unit/integration coverage
-npm run test:browser  # Playwright: login, approval, policy save, evidence export
+npm run test:admin-console  # Playwright: admin login, approvals, policy, audit export
+npm run test:browser  # Playwright: full browser suite
 npm run sync-check    # shared detection engine parity
 npm run backup -- backups  # SQLite audit-store backup + verification manifest
 npm run evidence:pack -- evidence-packs  # Sanitized examiner JSON pack
@@ -359,7 +360,10 @@ This repo is configured with a review-first workflow:
 - Run `npm run hooks:install` once (or after cloning to future team members).
 - `npm run review:ci` runs the full local gate:
   - `git diff --check`
+  - `npm run docs:demo-guide:check`
+  - `npm run ai-domains:check`
   - `npm test`
+  - `npm run test:admin-console`
   - `npm run sync-check`
   - `npm run eval`
 - The `pre-commit` hook runs `npm run review:agent` and blocks commits if checks fail.

@@ -21,6 +21,7 @@ const DEMO_COMMANDS = [
   'fire-drill',
   'test',
   'test:browser',
+  'test:admin-console',
   'test:browser-extension',
   'sync-check',
   'eval',

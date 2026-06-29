@@ -47,9 +47,10 @@ This section is generated from the app by `npm run docs:demo-guide`. Do not hand
 | `npm run start` | `node server/app.js` |
 | `npm run simulate` | `node scripts/simulate.js` |
 | `npm run fire-drill` | `node scripts/fire-drill.js` |
-| `npm run test` | `node --test --test-concurrency=1` |
-| `npm run test:browser` | `playwright test` |
-| `npm run test:browser-extension` | `playwright test browser-extension.spec.js --project=chromium` |
+| `npm run test` | `node scripts/run-node-tests.js` |
+| `npm run test:browser` | `node scripts/run-playwright.js` |
+| `npm run test:admin-console` | `node scripts/run-playwright.js admin-console.spec.js` |
+| `npm run test:browser-extension` | `node scripts/run-playwright.js browser-extension.spec.js --project=chromium` |
 | `npm run sync-check` | `node scripts/sync-check.js` |
 | `npm run eval` | `node scripts/eval-detect.js` |
 | `npm run backup` | `node scripts/backup-store.js create` |
