@@ -40,6 +40,10 @@ npm start
 
 The dashboard and API run on `http://localhost:4000` by default. The generated admin credentials and ingest API key are written to `.env`.
 
+## Admin Console
+
+The browser console is the operator-facing control plane. It uses a dark SOC-style interface across login, approval queue, Signal Monitor, activity, coverage, identity, lineage, audit, and configuration tabs. The queue and monitor views are optimized for anomaly-score triage, redacted evidence review, sensor posture, and fast approval or denial decisions without exposing raw prompt content by default.
+
 Run the default test suite:
 
 ```bash

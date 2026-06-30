@@ -296,6 +296,11 @@ Show:
 6. Password-confirmed release for held prompts.
 7. Audit entry after action.
 
+The dashboard should read as one dark SOC console across tabs. Keep the queue,
+Signal Monitor, and audit trail in the same browser window so the buyer sees
+held prompts, anomaly-style scoring, sensor posture, and evidence history as
+one operating loop.
+
 Expected:
 
 - Approval and denial actions are audit logged.

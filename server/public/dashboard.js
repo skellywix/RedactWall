@@ -30,7 +30,6 @@ let monitorInspectorTimer = null;
 let monitorExpandedPanelId = '';
 let monitorExpandedEventId = '';
 let monitorRefreshing = false;
-let monitorHoldLoading = false;
 let monitorUpdateSequence = 0;
 let monitorLastUpdated = new Date().toISOString();
 let monitorRecentEventId = 'evt-7902';
@@ -47,11 +46,10 @@ const monitorStatusOptions = [
   { id: 'all', label: 'All' },
   { id: 'online', label: 'Online' },
   { id: 'idle', label: 'Idle' },
-  { id: 'warning', label: 'Warning' },
+  { id: 'warning', label: 'Warn' },
   { id: 'error', label: 'Critical' },
-  { id: 'loading', label: 'Resolving' },
+  { id: 'loading', label: 'Syncing' },
   { id: 'offline', label: 'Offline' },
-  { id: 'archived', label: 'Archived', disabled: true },
 ];
 
 const monitorItems = [
@@ -67,12 +65,6 @@ const monitorItems = [
     relatedMetric: 'Protected sessions',
     lastUpdated: '22 sec ago',
     description: 'Inline prompt inspection is connected for governed AI destinations.',
-    metadata: {
-      tenant: 'cu-acme',
-      policy: 'block',
-      destinations: ['chatgpt.com', 'claude.ai', 'gemini.google.com'],
-      sampledEvents: 184,
-    },
   },
   {
     id: 'node-endpoint-upload',
@@ -86,12 +78,6 @@ const monitorItems = [
     relatedMetric: 'File path coverage',
     lastUpdated: '1 min ago',
     description: 'Desktop upload collector is active, but two seats reported delayed inventory.',
-    metadata: {
-      tenant: 'cu-acme',
-      delayedSeats: 2,
-      collector: 'protected-upload',
-      action: 'review install health',
-    },
   },
   {
     id: 'node-mcp-drive',
@@ -105,12 +91,6 @@ const monitorItems = [
     relatedMetric: 'Redaction path',
     lastUpdated: '35 sec ago',
     description: 'Connector payloads are redacted before model access and recorded without raw bodies.',
-    metadata: {
-      tenant: 'cu-acme',
-      connector: 'microsoft365',
-      redactedDocuments: 31,
-      mode: 'metadata only',
-    },
   },
   {
     id: 'node-approval-gate',
@@ -124,12 +104,6 @@ const monitorItems = [
     relatedMetric: 'Pending queue',
     lastUpdated: '3 min ago',
     description: 'Held prompts are waiting for assigned reviewers without breaching SLA.',
-    metadata: {
-      tenant: 'cu-acme',
-      pending: 4,
-      escalated: 0,
-      route: 'security_admin',
-    },
   },
   {
     id: 'node-audit-verifier',
@@ -143,12 +117,6 @@ const monitorItems = [
     relatedMetric: 'Verifier lag',
     lastUpdated: '7 min ago',
     description: 'Regional evidence worker missed its verification window and needs operator review.',
-    metadata: {
-      tenant: 'cu-acme',
-      lagSeconds: 412,
-      affectedWorker: 'evidence-pack-2',
-      recommendedAction: 'rerun verifier',
-    },
   },
   {
     id: 'node-shadow-inventory',
@@ -162,12 +130,6 @@ const monitorItems = [
     relatedMetric: 'Shadow AI scan',
     lastUpdated: '18 min ago',
     description: 'Inventory heartbeat stopped for one monitored segment.',
-    metadata: {
-      tenant: 'cu-acme',
-      segment: 'lending operations',
-      lastToolSeen: 'unapproved-desktop-ai.example',
-      seatsMissing: 1,
-    },
   },
   {
     id: 'node-policy-compiler',
@@ -179,14 +141,8 @@ const monitorItems = [
     health: 67,
     confidence: 80,
     relatedMetric: 'Rule propagation',
-    lastUpdated: 'resolving',
+    lastUpdated: 'syncing',
     description: 'Scoped policy rules are being reconciled against the latest destination list.',
-    metadata: {
-      tenant: 'cu-acme',
-      scopes: 6,
-      exceptions: 2,
-      state: 'reconciling',
-    },
   },
 ];
 
@@ -201,7 +157,6 @@ const monitorEvents = [
     confidence: 99,
     relatedMetric: 'Critical holds',
     status: 'error',
-    metadata: { destination: 'chatgpt.com', detector: 'US_SSN', policy: 'alwaysBlock', rawRetained: false },
   },
   {
     id: 'evt-7899',
@@ -213,7 +168,6 @@ const monitorEvents = [
     confidence: 82,
     relatedMetric: 'Shadow AI scan',
     status: 'warning',
-    metadata: { destination: 'unapproved-desktop-ai.example', sensor: 'desktop inventory', action: 'review' },
   },
   {
     id: 'evt-7894',
@@ -221,11 +175,10 @@ const monitorEvents = [
     severity: 'info',
     source: 'mcp_guard',
     title: 'Drive connector redacted document context',
-    description: 'Connector payload was transformed before model access and recorded with structured metadata.',
+    description: 'Connector payload was transformed before model access.',
     confidence: 91,
     relatedMetric: 'Redaction path',
     status: 'online',
-    metadata: { connector: 'microsoft365', redactedFields: 6, promptBodyStored: false },
   },
   {
     id: 'evt-7890',
@@ -237,7 +190,6 @@ const monitorEvents = [
     confidence: 97,
     relatedMetric: 'Verifier lag',
     status: 'error',
-    metadata: { worker: 'evidence-pack-2', lagSeconds: 412, auditChainTampered: false },
   },
   {
     id: 'evt-7886',
@@ -245,11 +197,10 @@ const monitorEvents = [
     severity: 'info',
     source: 'approval_queue',
     title: 'Reviewer assignment confirmed',
-    description: 'Held prompt routed to the Security Admin queue with SLA metadata.',
+    description: 'Held prompt routed to the Security Admin queue.',
     confidence: 86,
     relatedMetric: 'Pending queue',
     status: 'idle',
-    metadata: { queue: 'security_admin', pending: 4, slaMinutes: 60 },
   },
 ];
 
@@ -265,52 +216,41 @@ function monitorStatusLabel(status) {
     idle: 'Idle',
     warning: 'Warning',
     error: 'Critical',
-    loading: 'Resolving',
+    loading: 'Syncing',
     offline: 'Offline',
   })[status] || 'Unknown';
 }
 
 function monitorPulseStatus(status) {
-  return ['online', 'loading', 'warning', 'error'].includes(status);
+  return ['loading', 'warning', 'error'].includes(status);
 }
 
-function monitorStatusDot(status, label) {
-  const pulse = monitorPulseStatus(status) ? ' is-pulsing' : '';
+function monitorStatusDot(status, label, options = {}) {
+  const pulse = monitorPulseStatus(status) || options.pulse ? ' is-pulsing' : '';
   return `<span class="signal-dot status-${escapeHtml(status)}${pulse}" role="img" aria-label="${escapeHtml(label || monitorStatusLabel(status))}"></span>`;
-}
-
-function monitorJson(value) {
-  return escapeHtml(JSON.stringify(value || {}, null, 2));
-}
-
-function monitorMetadataLines(metadata) {
-  return Object.entries(metadata || {}).map(([key, value]) => {
-    const rendered = Array.isArray(value) ? value.join(', ') : value;
-    return `${escapeHtml(humanize(key))}: ${escapeHtml(rendered)}`;
-  }).join('<br>');
 }
 
 function monitorSearchState() {
   if (monitorRefreshing) {
-    return { state: 'disabled', message: 'Search is locked while signal refresh is in progress.' };
+    return { state: 'disabled', message: 'Refreshing.' };
   }
   const q = monitorSearchTerm;
   if (!q && monitorSearchFocused) {
-    return { state: 'focus', message: 'Search is ready. Use node, source, location, event, or metadata terms.' };
+    return { state: 'focus', message: 'Ready.' };
   }
   if (!q) {
-    return { state: 'default', message: 'Type two or more characters to narrow live signals.' };
+    return { state: 'default', message: 'Type to filter.' };
   }
   if (q.length > 64) {
-    return { state: 'error', message: 'Query is too long. Keep monitoring filters under 64 characters.' };
+    return { state: 'error', message: 'Query too long.' };
   }
   if (/[<>`{}]/.test(q)) {
-    return { state: 'error', message: 'Unsupported characters detected. Use letters, numbers, dots, dashes, spaces, and underscores.' };
+    return { state: 'error', message: 'Unsupported characters.' };
   }
   if (q.length < 2) {
-    return { state: 'warning', message: 'One character is too broad for this console. Add at least one more character.' };
+    return { state: 'warning', message: 'Too broad.' };
   }
-  return { state: 'valid', message: `Filtering signals for "${q}".` };
+  return { state: 'valid', message: `Filtered: "${q}".` };
 }
 
 function monitorSearchText(record) {
@@ -325,7 +265,6 @@ function monitorSearchText(record) {
     record.title,
     record.description,
     record.relatedMetric,
-    JSON.stringify(record.metadata || {}),
   ].join(' ').toLowerCase();
 }
 
@@ -338,7 +277,6 @@ function monitorMatchesSearch(record) {
 
 function monitorMatchesStatus(record) {
   if (monitorStatusFilter === 'all') return true;
-  if (monitorStatusFilter === 'archived') return false;
   if (record.status === monitorStatusFilter) return true;
   if (monitorStatusFilter === 'error' && record.severity === 'critical') return true;
   if (monitorStatusFilter === 'warning' && record.severity === 'warning') return true;
@@ -352,16 +290,13 @@ function monitorAllEvents() {
   const refreshEvent = {
     id,
     timestamp: monitorLastUpdated,
-    severity: monitorHoldLoading ? 'warning' : 'info',
+    severity: 'info',
     source: 'signal_console',
-    title: monitorHoldLoading ? 'Critical stream hold pending' : 'Signal refresh completed',
-    description: monitorHoldLoading
-      ? 'Operator hold request is being written into the local console state.'
-      : 'Mock telemetry refresh updated metrics, timestamps, and recent activity.',
-    confidence: monitorHoldLoading ? 76 : 93,
+    title: 'Signal refresh completed',
+    description: 'Telemetry refresh updated metrics, timestamps, and recent activity.',
+    confidence: 93,
     relatedMetric: 'Refresh cadence',
-    status: monitorHoldLoading ? 'warning' : 'online',
-    metadata: { sequence: monitorUpdateSequence, duplicatePrevented: monitorRefreshing || monitorHoldLoading, localOnly: true },
+    status: 'online',
   };
   return [refreshEvent, ...monitorEvents];
 }
@@ -378,7 +313,7 @@ function monitorStatusCounts() {
   const counts = monitorItems.reduce((acc, item) => {
     acc[item.status] = (acc[item.status] || 0) + 1;
     return acc;
-  }, { all: monitorItems.length, archived: 0 });
+  }, { all: monitorItems.length });
   return counts;
 }
 
@@ -408,12 +343,12 @@ function monitorMetrics() {
     {
       id: 'critical-holds',
       label: 'Critical holds',
-      value: 3 + (monitorHoldLoading ? 1 : 0),
+      value: 3,
       unit: '',
-      trend: monitorHoldLoading ? 'increased' : 'neutral',
+      trend: 'neutral',
       status: 'critical',
       lastUpdated: monitorLastUpdated,
-      updating: monitorHoldLoading,
+      updating: false,
     },
     {
       id: 'audit-lag',
@@ -455,7 +390,7 @@ function renderMonitorMetrics() {
       neutral: 'Stable',
     })[metric.trend] || 'Stable';
     return `<article class="metric-card${statusClass}${metric.updating ? ' is-updating' : ''}" aria-busy="${metric.status === 'loading' ? 'true' : 'false'}">
-      <div class="metric-card-head"><span>${escapeHtml(metric.label)}</span>${monitorStatusDot(metric.status === 'normal' ? 'online' : metric.status === 'critical' ? 'error' : metric.status, `${metric.label} ${metric.status}`)}</div>
+      <div class="metric-card-head"><span>${escapeHtml(metric.label)}</span>${monitorStatusDot(metric.status === 'normal' ? 'online' : metric.status === 'critical' ? 'error' : metric.status, `${metric.label} ${metric.status}`, { pulse: metric.updating })}</div>
       <div class="metric-value">${value}</div>
       <div class="metric-meta"><span class="metric-trend ${escapeHtml(metric.trend)}">${escapeHtml(trendLabel)}</span><span>${escapeHtml(fmtTime(metric.lastUpdated))}</span></div>
     </article>`;
@@ -471,29 +406,23 @@ function renderMonitorPanel(item) {
       <div class="surveillance-title">
         ${monitorStatusDot(item.status, `${item.name} ${monitorStatusLabel(item.status)}`)}
         <strong>${escapeHtml(item.name)}</strong>
-        <code>${escapeHtml(item.id)}</code>
       </div>
-      <p class="surveillance-copy">${escapeHtml(item.description)}</p>
-      <div class="surveillance-facts">
-        <div class="surveillance-fact"><span>Status</span><b>${escapeHtml(monitorStatusLabel(item.status))}</b></div>
-        <div class="surveillance-fact"><span>Health</span><b>${escapeHtml(item.health)}%</b></div>
-        <div class="surveillance-fact"><span>Seen</span><b>${escapeHtml(item.lastUpdated)}</b></div>
-      </div>
+      <div class="surveillance-line"><b>${escapeHtml(monitorStatusLabel(item.status))}</b><span>${escapeHtml(item.health)}%</span><span>${escapeHtml(item.lastUpdated)}</span></div>
     </button>
-    <div class="surveillance-metadata">${monitorMetadataLines(item.metadata)}</div>
-    <button class="panel-expand" type="button" data-monitor-expand="${escapeHtml(item.id)}" aria-expanded="${expanded ? 'true' : 'false'}">${expanded ? 'Hide details' : 'Show details'}</button>
+    <span class="surveillance-hover-meta">${escapeHtml(sourceLabel(item.source))}</span>
+    <button class="panel-expand" type="button" data-monitor-expand="${escapeHtml(item.id)}" aria-expanded="${expanded ? 'true' : 'false'}">${expanded ? 'Hide' : 'Inspect'}</button>
     <div class="surveillance-expanded">
-      <b>${escapeHtml(sourceLabel(item.source))}</b> at ${escapeHtml(item.location)}. Confidence ${escapeHtml(item.confidence)}%. Related metric: ${escapeHtml(item.relatedMetric)}.
+      ${escapeHtml(sourceLabel(item.source))} / ${escapeHtml(item.location)} / ${escapeHtml(item.confidence)}% confidence
     </div>
   </article>`;
 }
 
 function renderMonitorPanels() {
   const rows = monitorFilteredItems();
-  $('#monitorPanelSummary').textContent = rows.length ? `${rows.length} matching monitored surface(s)` : 'No matching monitored surfaces';
+  $('#monitorPanelSummary').textContent = rows.length ? `${rows.length} visible` : 'No matches';
   $('#monitorPanelGrid').innerHTML = rows.length
     ? rows.map(renderMonitorPanel).join('')
-    : '<div class="signal-empty"><b>No monitored surface matches</b><p>Change the status chip or search query to inspect another segment.</p></div>';
+    : '<div class="signal-empty"><b>No matches</b><p>Adjust status or search.</p></div>';
 }
 
 function severityLabel(severity) {
@@ -506,25 +435,23 @@ function renderMonitorEvent(event) {
   const isRecent = monitorRecentEventId === event.id;
   const severityIcon = event.severity === 'critical' ? '!' : event.severity === 'warning' ? '!' : 'i';
   return `<div class="activity-feed-row severity-${escapeHtml(event.severity)}${selectedEvent ? ' is-selected' : ''}${isRecent ? ' is-new' : ''}" role="option" tabindex="0" aria-selected="${selectedEvent ? 'true' : 'false'}" data-monitor-event-id="${escapeHtml(event.id)}">
-      <code>${escapeHtml(event.id)}</code>
       <span>${escapeHtml(fmtTime(event.timestamp))}</span>
       <span class="severity-label ${escapeHtml(event.severity)}"><span aria-hidden="true">${severityIcon}</span>${escapeHtml(severityLabel(event.severity))}</span>
+      <span>${escapeHtml(sourceLabel(event.source))}</span>
       <b>${escapeHtml(event.title)}</b>
-      <span>${escapeHtml(event.confidence)}% conf.</span>
       <button class="activity-expand" type="button" data-monitor-event-expand="${escapeHtml(event.id)}" aria-expanded="${expanded ? 'true' : 'false'}">${expanded ? 'Hide' : 'Details'}</button>
     </div>
     <div class="activity-detail-block${expanded ? ' is-expanded' : ''}">
       <div>${escapeHtml(event.description)}</div>
-      <div class="raw-metadata">${monitorJson(event.metadata)}</div>
     </div>`;
 }
 
 function renderMonitorEvents() {
   const events = monitorFilteredEvents();
-  $('#monitorFeedSummary').textContent = events.length ? `${events.length} event(s), newest first` : 'No activity matches current filters';
+  $('#monitorFeedSummary').textContent = events.length ? `${events.length} visible` : 'No matches';
   $('#monitorActivityFeed').innerHTML = events.length
     ? events.map(renderMonitorEvent).join('')
-    : '<div class="signal-empty"><b>No feed events match</b><p>Clear the search input or choose a broader status filter.</p></div>';
+    : '<div class="signal-empty"><b>No events</b><p>Clear search or broaden status.</p></div>';
 }
 
 function monitorSelectedRecord() {
@@ -540,19 +467,16 @@ function monitorSelectedRecord() {
 function renderMonitorInspector() {
   const inspector = $('#monitorInspector');
   const record = monitorSelectedRecord();
-  $('#monitorClearSelection').disabled = !record && !monitorInspectorLoading;
   if (monitorInspectorLoading) {
     inspector.className = 'signal-inspector';
     inspector.setAttribute('aria-busy', 'true');
-    inspector.innerHTML = `<div class="signal-inspector-head"><div><h3>Detail Inspector</h3><p>Resolving selected signal metadata.</p></div><div class="button-spinner" aria-hidden="true"></div></div>
-      <div class="signal-empty"><b>Loading</b><p>Fetching the selected record context from local state.</p></div>`;
+    inspector.innerHTML = `<div class="signal-inspector-head"><div><h3>Inspector</h3><p>Loading selection.</p></div><div class="button-spinner" aria-hidden="true"></div></div>`;
     return;
   }
   inspector.removeAttribute('aria-busy');
   if (!record) {
     inspector.className = 'signal-inspector';
-    inspector.innerHTML = `<div class="signal-inspector-head"><div><h3>Detail Inspector</h3><p>Select a monitored surface or feed event to inspect source, confidence, metric linkage, and raw metadata.</p></div></div>
-      <div class="signal-empty"><b>No selection</b><p>The inspector opens here after a panel or activity row is selected.</p></div>`;
+    inspector.innerHTML = `<div class="signal-inspector-head"><div><h3>Inspector</h3><p>No selection.</p></div></div>`;
     return;
   }
   const isEvent = monitorSelectedKind === 'event';
@@ -560,7 +484,8 @@ function renderMonitorInspector() {
     : record.status === 'warning' || record.severity === 'warning' ? 'state-warning' : '';
   const status = isEvent ? severityLabel(record.severity) : monitorStatusLabel(record.status);
   const timestamp = isEvent ? fmt(record.timestamp) : record.lastUpdated;
-  const confidence = isEvent ? `${record.confidence}%` : `${record.confidence}% confidence / ${record.health}% health`;
+  const health = isEvent ? `${record.confidence}% confidence` : `${record.health}% health / ${record.confidence}% confidence`;
+  const healthLabel = isEvent ? 'Confidence' : 'Health';
   const title = isEvent ? record.title : record.name;
   inspector.className = `signal-inspector ${state}`;
   inspector.innerHTML = `<div class="signal-inspector-head">
@@ -575,10 +500,9 @@ function renderMonitorInspector() {
       <div class="inspector-field"><span>Status</span><b>${escapeHtml(status)}</b></div>
       <div class="inspector-field"><span>Source</span><b>${escapeHtml(sourceLabel(record.source))}</b></div>
       <div class="inspector-field"><span>Timestamp</span><b>${escapeHtml(timestamp)}</b></div>
-      <div class="inspector-field"><span>Confidence</span><b>${escapeHtml(confidence)}</b></div>
-      <div class="inspector-field"><span>Related metric</span><b>${escapeHtml(record.relatedMetric)}</b></div>
+      <div class="inspector-field"><span>${escapeHtml(healthLabel)}</span><b>${escapeHtml(health)}</b></div>
     </div>
-    <div class="raw-metadata">${monitorJson(record.metadata)}</div>`;
+    <div class="inspector-id">${escapeHtml(record.relatedMetric || '')}</div>`;
 }
 
 function updateMonitorSearchUi() {
@@ -608,13 +532,7 @@ function renderMonitor() {
   if (refreshButton) {
     refreshButton.disabled = monitorRefreshing;
     refreshButton.setAttribute('aria-busy', monitorRefreshing ? 'true' : 'false');
-    refreshButton.innerHTML = monitorRefreshing ? '<span class="button-spinner" aria-hidden="true"></span>Refreshing' : 'Refresh Signals';
-  }
-  const holdButton = $('#monitorHoldAction');
-  if (holdButton) {
-    holdButton.disabled = monitorHoldLoading;
-    holdButton.setAttribute('aria-busy', monitorHoldLoading ? 'true' : 'false');
-    holdButton.innerHTML = monitorHoldLoading ? '<span class="button-spinner" aria-hidden="true"></span>Holding stream' : 'Hold Critical Stream';
+    refreshButton.innerHTML = monitorRefreshing ? '<span class="button-spinner" aria-hidden="true"></span>Refreshing' : 'Refresh';
   }
 }
 
@@ -650,19 +568,6 @@ function refreshMonitorSignals() {
     renderMonitor();
     markUpdated('SIGNALS UPDATED');
   }, 700);
-}
-
-function holdCriticalStream() {
-  if (monitorHoldLoading) return;
-  monitorHoldLoading = true;
-  monitorUpdateSequence += 1;
-  monitorLastUpdated = new Date().toISOString();
-  monitorRecentEventId = `evt-refresh-${monitorUpdateSequence}`;
-  renderMonitor();
-  setTimeout(() => {
-    monitorHoldLoading = false;
-    renderMonitor();
-  }, 650);
 }
 
 function statusToneClass(tone) {
@@ -921,6 +826,10 @@ function sourceLabel(source) {
     browser_extension: 'Browser',
     endpoint_agent: 'Endpoint',
     mcp_guard: 'MCP',
+    audit_log: 'Audit',
+    approval_queue: 'Approval',
+    policy: 'Policy',
+    signal_console: 'Console',
     api: 'API',
     proxy: 'Proxy',
   })[source] || source || 'API';
@@ -1102,6 +1011,19 @@ async function api(path, opts = {}) {
   if (r.status === 401 && !allowAuthError) { location.href = '/login.html'; return null; }
   if (r.status === 403) alert('Request not allowed for this session. Refresh or use a Security Admin account.');
   return r;
+}
+
+function boundedPromise(promise, timeoutMs, fallback) {
+  return Promise.race([
+    Promise.resolve(promise).catch(() => fallback),
+    new Promise((resolve) => setTimeout(() => resolve(fallback), timeoutMs)),
+  ]);
+}
+
+async function optionalDashboardJson(path, fallback = null, timeoutMs = 1800) {
+  const response = await boundedPromise(api(path), timeoutMs, null);
+  if (!response || !response.ok) return fallback;
+  return boundedPromise(response.json(), timeoutMs, fallback);
 }
 
 async function loadCsrf() {
@@ -1484,6 +1406,12 @@ function renderIncident(q) {
 }
 
 document.addEventListener('click', async (e) => {
+  const selectableQueueRow = e.target.closest('.q[data-id]');
+  if (selectableQueueRow && !e.target.closest('textarea,input,button,select,a')) {
+    selected = selectableQueueRow.dataset.id;
+    renderQueueView();
+    return;
+  }
   const metadataTarget = e.target.closest('[data-status-detail]');
   if (metadataTarget) {
     e.preventDefault();
@@ -1642,12 +1570,6 @@ document.addEventListener('click', async (e) => {
   const jump = e.target.closest('[data-tab-jump]');
   if (jump) {
     activateTab(jump.dataset.tabJump);
-    return;
-  }
-  const row = e.target.closest('.q[data-id]');
-  if (row && !e.target.closest('textarea,input,button,select,a')) {
-    selected = row.dataset.id;
-    renderQueueView();
     return;
   }
   const activityRow = e.target.closest('.activity-row[data-activity-id]');
@@ -2262,17 +2184,16 @@ function renderPolicyTemplates(tpls, readonly) {
 async function loadPolicy() {
   setBusy('#tab-policy .config-shell', true, 'VERIFYING');
   try {
-  const [pRes, tRes, preflightRes, coverageRes] = await Promise.all([
+  const preflightPromise = optionalDashboardJson('/api/preflight');
+  const coveragePromise = optionalDashboardJson('/api/coverage', currentCoverage);
+  const [pRes, tRes] = await Promise.all([
     api('/api/policy'),
     api('/api/policy/templates'),
-    api('/api/preflight'),
-    api('/api/coverage'),
   ]);
   if (!pRes || !tRes) return;
   const p = await pRes.json();
   const tpls = await tRes.json();
-  const preflight = preflightRes && preflightRes.ok ? await preflightRes.json() : null;
-  const coverage = coverageRes && coverageRes.ok ? await coverageRes.json() : currentCoverage;
+  const [preflight, coverage] = await Promise.all([preflightPromise, coveragePromise]);
   currentCoverage = coverage || currentCoverage;
   const readonly = !canAdminWrite();
   const modes = [
@@ -2478,9 +2399,11 @@ async function loadPolicy() {
   $('#testConfiguration').onclick = async () => {
     const status = $('#polSaved');
     status.textContent = 'VERIFYING';
-    const [nextPreflightRes, nextCoverageRes] = await Promise.all([api('/api/preflight'), api('/api/coverage')]);
-    const nextPreflight = nextPreflightRes && nextPreflightRes.ok ? await nextPreflightRes.json() : null;
-    if (nextCoverageRes && nextCoverageRes.ok) currentCoverage = await nextCoverageRes.json();
+    const [nextPreflight, nextCoverage] = await Promise.all([
+      optionalDashboardJson('/api/preflight'),
+      optionalDashboardJson('/api/coverage', currentCoverage),
+    ]);
+    if (nextCoverage) currentCoverage = nextCoverage;
     const nextHealth = configHealth(nextPreflight);
     const configStatus = $('#configurationStatus');
     if (configStatus) configStatus.innerHTML = statePill(nextHealth.state, `${nextHealth.score}/100 ready`);
@@ -2552,8 +2475,8 @@ const pageHeadings = {
     body: 'Review held prompts, enforce AI-use policy, and export examiner-ready evidence from one control plane.',
   },
   monitor: {
-    title: 'System Monitor',
-    body: 'Inspect live signal posture, sensor health, and critical AI egress activity across PromptWall controls.',
+    title: 'Signal Monitor',
+    body: 'Live signal posture across PromptWall controls.',
   },
 };
 
@@ -2595,14 +2518,6 @@ $('#logout').onclick = async () => { await api('/api/logout', { method: 'POST' }
 $('#exportEvidence').onclick = exportEvidence;
 $('#globalSearch').addEventListener('input', (e) => updateSearch(e.target.value));
 $('#monitorRefresh').onclick = refreshMonitorSignals;
-$('#monitorHoldAction').onclick = holdCriticalStream;
-$('#monitorClearSelection').onclick = clearMonitorSelection;
-$('#monitorExpandFirst').onclick = () => {
-  const [first] = monitorFilteredItems();
-  if (!first) return;
-  monitorExpandedPanelId = monitorExpandedPanelId === first.id ? '' : first.id;
-  renderMonitor();
-};
 $('#monitorSearch').addEventListener('input', (e) => {
   monitorSearchTerm = String(e.target.value || '').trim();
   renderMonitor();
