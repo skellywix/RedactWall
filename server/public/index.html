@@ -26,6 +26,12 @@
     --yellow:#916f00;
     --green:#0b8f56;
     --cyan:#087c99;
+    --ice:#4fb6ff;
+    --ice2:#d9ecff;
+    --ice-bg:#eef7ff;
+    --glow:rgba(79,182,255,.38);
+    --fast:160ms ease;
+    --scan:1500ms;
     --shadow:0 14px 36px rgba(16,24,39,.08);
     --radius:8px;
   }
@@ -698,6 +704,235 @@
   .settings-row{padding:9px 0;border-top:0;border-bottom:1px solid var(--line)}
   .configuration-status{min-height:22px;color:var(--green);font-size:12.5px}
   .advanced-toggle{margin-top:10px}
+  .panel,.config-card,.sensor-card,.stat,.mini-kpi,.datum,.risk-meter,.score-panel{
+    transition:border-color var(--fast),background-color var(--fast),box-shadow var(--fast);
+  }
+  .panel{position:relative}
+  .panel:hover,.panel:focus-within,.config-card:hover,.sensor-card:hover,.stat:hover{
+    border-color:var(--glow);
+    background-color:#fbfdff;
+    box-shadow:0 16px 42px rgba(16,48,86,.12);
+  }
+  .panel.is-active,.inspector-panel{
+    box-shadow:inset 3px 0 0 var(--ice),var(--shadow);
+  }
+  .panel-head span{transition:color var(--fast),opacity var(--fast)}
+  .panel:hover .panel-head span{color:#355c88}
+  .panel-body{
+    overflow:hidden;
+    max-height:2200px;
+    opacity:1;
+    transition:max-height 190ms ease,opacity 190ms ease;
+  }
+  .panel.collapsed .panel-body{max-height:0;opacity:0}
+  .panel-toggle{
+    min-height:28px;
+    border:1px solid var(--line);
+    border-radius:7px;
+    background:#fff;
+    color:#385571;
+    padding:5px 8px;
+    font-size:10.5px;
+    font-weight:780;
+    letter-spacing:.06em;
+    text-transform:uppercase;
+    transition:border-color var(--fast),background var(--fast),color var(--fast);
+  }
+  .panel-toggle:hover,.panel-toggle:focus-visible{border-color:var(--glow);background:var(--ice-bg);color:#074b99;outline:none}
+  .panel-toggle:before{content:"";display:inline-block;width:6px;height:6px;margin-right:7px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(45deg) translateY(-1px)}
+  .panel.collapsed .panel-toggle:before{transform:rotate(-45deg) translateY(-1px)}
+  .status-chip{
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    border:1px solid var(--line);
+    border-radius:7px;
+    background:#fff;
+    color:#304158;
+    min-height:24px;
+    padding:3px 8px;
+    font-size:11px;
+    font-weight:780;
+    letter-spacing:.04em;
+    text-transform:uppercase;
+    transition:border-color var(--fast),box-shadow var(--fast),color var(--fast),background var(--fast);
+  }
+  button.status-chip{cursor:pointer}
+  .status-chip:hover,.status-chip:focus-visible,.chip:hover,.chip:focus-visible,.pill:hover,.pill:focus-visible{
+    border-color:var(--glow);
+    box-shadow:0 0 0 2px rgba(79,182,255,.12);
+    color:#074b99;
+    outline:none;
+  }
+  .status-chip.tone-live{color:#075d87;border-color:#a9d9ff;background:#f1f9ff}
+  .status-chip.tone-secure{color:#076b40;border-color:#a8dfc2;background:#e8f7ef}
+  .status-chip.tone-warn{color:#935600;border-color:#efc27b;background:#fff6e6}
+  .status-chip.tone-critical{color:#a8242d;border-color:#f0a4aa;background:#fff1f2}
+  .status-light{
+    width:7px;
+    height:7px;
+    border-radius:999px;
+    display:inline-block;
+    flex:0 0 auto;
+    background:var(--ice);
+    box-shadow:0 0 0 3px rgba(79,182,255,.12);
+  }
+  .status-light.tone-live{background:var(--ice)}
+  .status-light.tone-secure{background:var(--green)}
+  .status-light.tone-warn{background:#d99931}
+  .status-light.tone-critical{background:var(--red)}
+  .status-light.is-live{animation:statusPulse 2.2s ease-out infinite}
+  @keyframes statusPulse{
+    0%{box-shadow:0 0 0 0 rgba(79,182,255,.35)}
+    70%{box-shadow:0 0 0 7px rgba(79,182,255,0)}
+    100%{box-shadow:0 0 0 0 rgba(79,182,255,0)}
+  }
+  .dot,.pin{background:var(--ice);box-shadow:0 0 0 3px rgba(79,182,255,.12);animation:statusPulse 2.2s ease-out infinite}
+  .live{
+    border:0;
+    background:transparent;
+    padding:0;
+  }
+  .live .status-chip{min-height:28px}
+  .last-updated{
+    color:var(--mut);
+    font-size:11.5px;
+    font-variant-numeric:tabular-nums;
+    white-space:nowrap;
+  }
+  .btn,.ghost{
+    position:relative;
+    overflow:hidden;
+    transition:border-color var(--fast),background var(--fast),color var(--fast),transform 120ms ease,box-shadow var(--fast);
+  }
+  .btn:hover,.ghost:hover{border-color:var(--glow);box-shadow:0 0 0 2px rgba(79,182,255,.1)}
+  .btn:active,.ghost:active{transform:translateY(1px);background:#eaf3ff}
+  .btn:hover:after,.ghost:hover:after{
+    content:"";
+    position:absolute;
+    inset:0;
+    transform:translateX(-120%);
+    background:linear-gradient(90deg,transparent,rgba(255,255,255,.48),transparent);
+    animation:buttonSweep 620ms ease-out 1;
+    pointer-events:none;
+  }
+  @keyframes buttonSweep{to{transform:translateX(120%)}}
+  .btn:disabled,.ghost:disabled{
+    opacity:.56;
+    cursor:not-allowed;
+    color:#8796a8;
+    background:#eef2f7;
+    box-shadow:none;
+  }
+  .panel.is-loading:before,.stats.is-loading:before{
+    content:attr(data-loading-label);
+    position:absolute;
+    right:12px;
+    top:9px;
+    z-index:2;
+    border:1px solid rgba(79,182,255,.28);
+    border-radius:7px;
+    background:#f4faff;
+    color:#075d87;
+    padding:3px 7px;
+    font-size:10px;
+    font-weight:780;
+    letter-spacing:.06em;
+  }
+  .panel.is-loading:after,.stats.is-loading:after{
+    content:"";
+    position:absolute;
+    inset:0;
+    z-index:1;
+    pointer-events:none;
+    background:linear-gradient(100deg,transparent 0%,rgba(79,182,255,.12) 45%,transparent 70%);
+    transform:translateX(-100%);
+    animation:scanSweep var(--scan) ease-out infinite;
+  }
+  .stats{position:relative}
+  @keyframes scanSweep{to{transform:translateX(100%)}}
+  .activity-row{
+    cursor:pointer;
+    transition:background var(--fast),box-shadow var(--fast),color var(--fast);
+  }
+  .activity-row:hover,.activity-row:focus-visible,.activity-row.selected{
+    background:#f3f8ff;
+    box-shadow:inset 3px 0 0 var(--ice);
+    outline:none;
+  }
+  .activity-row.warning{box-shadow:inset 3px 0 0 rgba(217,153,49,.7)}
+  .activity-row.critical{box-shadow:inset 3px 0 0 rgba(211,60,69,.72)}
+  .activity-row.warning:hover,.activity-row.warning.selected{background:#fff9ee}
+  .activity-row.critical:hover,.activity-row.critical.selected{background:#fff5f6}
+  .row-affordance{
+    display:inline-flex;
+    margin-left:8px;
+    color:#5f8fba;
+    font-size:10px;
+    font-weight:800;
+    letter-spacing:.08em;
+    opacity:0;
+    transition:opacity var(--fast),color var(--fast);
+  }
+  .activity-row:hover .row-affordance,.activity-row:focus-visible .row-affordance,.activity-row.selected .row-affordance{opacity:1;color:#074b99}
+  .activity-detail{
+    background:#f8fbff;
+    border-left:3px solid var(--ice);
+    padding:13px 14px;
+  }
+  .activity-detail-grid{
+    display:grid;
+    grid-template-columns:repeat(4,minmax(0,1fr));
+    gap:10px;
+  }
+  .activity-detail-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+  .meta-popover,.ui-tooltip{
+    position:fixed;
+    z-index:50;
+    max-width:min(320px,calc(100vw - 24px));
+    border:1px solid #243347;
+    border-radius:8px;
+    background:#07111d;
+    color:#d8e8f8;
+    box-shadow:0 16px 48px rgba(0,0,0,.28);
+  }
+  .meta-popover{padding:11px 12px}
+  .meta-popover b{display:block;margin-bottom:6px;color:#fff;font-size:11px;text-transform:uppercase;letter-spacing:.07em}
+  .meta-popover p{margin:0;color:#b8cbe0;font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace;font-size:11.5px;line-height:1.45;white-space:pre-wrap}
+  .ui-tooltip{padding:7px 9px;font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace;font-size:11px;line-height:1.35}
+  label:focus-within,.policy-list-field:focus-within,.stepup-panel label:focus-within,.queue-filter-row label:focus-within{
+    color:#074b99;
+  }
+  input:focus,select:focus,textarea:focus{
+    box-shadow:0 0 0 3px rgba(79,182,255,.16);
+  }
+  .stat .l{display:flex;align-items:center;gap:7px}
+  .config-shell{position:relative}
+  .config-shell.is-loading:before{
+    content:attr(data-loading-label);
+    position:absolute;
+    right:12px;
+    top:8px;
+    z-index:2;
+    border:1px solid rgba(79,182,255,.28);
+    border-radius:7px;
+    background:#f4faff;
+    color:#075d87;
+    padding:3px 7px;
+    font-size:10px;
+    font-weight:780;
+    letter-spacing:.06em;
+  }
+  .config-shell.is-loading:after{
+    content:"";
+    position:absolute;
+    inset:0;
+    z-index:1;
+    pointer-events:none;
+    background:linear-gradient(100deg,transparent 0%,rgba(79,182,255,.1) 45%,transparent 70%);
+    transform:translateX(-100%);
+    animation:scanSweep var(--scan) ease-out infinite;
+  }
   body[data-active-tab="policy"] .hero-row,
   body[data-active-tab="policy"] .stats{display:none}
   body[data-active-tab="policy"] .content-tabs{margin-top:18px}
@@ -744,6 +979,8 @@
   }
   @media(prefers-reduced-motion:reduce){
     *,*:before,*:after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition:none!important}
+    .status-light.is-live,.dot,.pin{animation:none!important}
+    .panel.is-loading:after,.stats.is-loading:after,.config-shell.is-loading:after,.btn:hover:after,.ghost:hover:after{display:none!important}
   }
 </style>
 </head>
@@ -790,8 +1027,18 @@
     </nav>
     <div class="rail-section">Monitoring</div>
     <div class="rail-status">
-      <div class="status-line"><span>Hash chain</span><b>Active</b></div>
-      <div class="status-line"><span>Local scan</span><span class="pin" aria-hidden="true"></span></div>
+      <div class="status-line">
+        <span>Hash chain</span>
+        <button class="status-chip tone-secure" type="button" data-tooltip="Tamper-evident audit chain" data-status-detail="SECURE: append-only audit chain is enabled for admin and policy activity.">
+          <span class="status-light tone-secure" aria-hidden="true"></span>SECURE
+        </button>
+      </div>
+      <div class="status-line">
+        <span>Local scan</span>
+        <button class="status-chip tone-live" type="button" data-tooltip="Local inspection loop" data-status-detail="MONITORING: local prompt inspection is active for connected sensors.">
+          <span class="status-light tone-live is-live" aria-hidden="true"></span>MONITORING
+        </button>
+      </div>
       <div class="status-line"><span>Version</span><b>0.3.0</b></div>
     </div>
   </aside>
@@ -800,10 +1047,13 @@
     <header class="topbar">
       <label class="search" for="globalSearch">
         <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m21 21-4.35-4.35M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
-        <input id="globalSearch" type="search" autocomplete="off" placeholder="Search users, destinations, findings" />
+        <input id="globalSearch" type="search" autocomplete="off" placeholder="Search users or destinations" />
       </label>
       <div class="spacer"></div>
-      <div class="live"><span class="dot"></span><span id="liveTxt">Live</span></div>
+      <button class="live" type="button" data-tooltip="Server event stream" data-status-detail="LIVE: session telemetry stream is connected.">
+        <span class="status-chip tone-live"><span class="status-light tone-live is-live" aria-hidden="true"></span><span id="liveTxt">LIVE</span></span>
+      </button>
+      <span class="last-updated" id="lastUpdated">LAST UPDATED -</span>
       <span class="who" id="who"></span>
       <button class="ghost" id="logout" type="button">
         <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M10 6H6v12h4m4-3 3-3-3-3m3 3H9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -872,7 +1122,7 @@
             <div id="queueList" class="queue-list"></div>
           </div>
           <div class="side-stack">
-            <div class="panel">
+            <div class="panel inspector-panel is-active">
               <div class="panel-head">
                 <div>
                   <h2>Selected Incident</h2>
@@ -881,7 +1131,7 @@
               </div>
               <div id="incidentDetail" class="incident-detail"></div>
             </div>
-            <div class="panel">
+            <div class="panel" data-collapsible="true">
               <div class="panel-head">
                 <div>
                   <h2>Top PII Detected</h2>
@@ -890,7 +1140,7 @@
               </div>
               <div id="topEntities"></div>
             </div>
-            <div class="panel">
+            <div class="panel" data-collapsible="true">
               <div class="panel-head">
                 <div>
                   <h2>Control Posture</h2>
@@ -939,7 +1189,7 @@
               <div class="posture-list" id="coveragePosture"></div>
             </div>
           </div>
-          <div class="panel">
+          <div class="panel" data-collapsible="true">
             <div class="panel-head">
               <div>
                 <h2>Sensor Mix</h2>
@@ -948,7 +1198,7 @@
             </div>
             <div id="sensorMix"></div>
           </div>
-          <div class="panel wide-panel">
+          <div class="panel wide-panel" data-collapsible="true">
             <div class="panel-head">
               <div>
                 <h2>Fleet Install Health</h2>
@@ -958,7 +1208,7 @@
             <table><thead><tr><th>User</th><th>Org</th><th>Sensor</th><th>State</th><th>Version</th><th>Failed Checks</th><th>Last Seen</th></tr></thead>
               <tbody id="fleetRows"></tbody></table>
           </div>
-          <div class="panel">
+          <div class="panel" data-collapsible="true">
             <div class="panel-head">
               <div>
                 <h2>Endpoint AI Tools</h2>
@@ -967,7 +1217,7 @@
             </div>
             <div id="endpointAiToolRows"></div>
           </div>
-          <div class="panel wide-panel">
+          <div class="panel wide-panel" data-collapsible="true">
             <div class="panel-head">
               <div>
                 <h2>Governed AI Destinations</h2>
@@ -977,7 +1227,7 @@
             <table><thead><tr><th>Destination</th><th>Events</th><th>Blocked</th><th>Redacted</th><th>Users</th><th>Last Seen</th></tr></thead>
               <tbody id="governedRows"></tbody></table>
           </div>
-          <div class="panel">
+          <div class="panel" data-collapsible="true">
             <div class="panel-head">
               <div>
                 <h2>Shadow AI</h2>

@@ -16,6 +16,9 @@ let currentUser = '';
 let queueFilter = 'all';
 let queueCategoryFilter = 'all';
 let queueDestinationFilter = 'all';
+let expandedActivityId = '';
+let statusPopover = null;
+let tooltipEl = null;
 
 const icons = {
   check: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m5 12 4 4L19 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
@@ -29,6 +32,36 @@ function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[c]));
+}
+
+function statusToneClass(tone) {
+  if (tone === 'good') return 'secure';
+  if (tone === 'warn') return 'warn';
+  if (tone === 'bad') return 'critical';
+  return 'live';
+}
+
+function statusChip(tone, label, detail, options = {}) {
+  const chipTone = statusToneClass(tone);
+  const lightTone = options.lightTone || chipTone;
+  const light = options.light
+    ? `<span class="status-light tone-${escapeHtml(lightTone)} ${options.live ? 'is-live' : ''}" aria-hidden="true"></span>`
+    : '';
+  return `<span class="pill ${escapeHtml(tone)} status-chip tone-${escapeHtml(chipTone)}" tabindex="0" role="button" data-status-detail="${escapeHtml(detail || label)}" data-tooltip="${escapeHtml(detail || label)}">${light}${escapeHtml(label)}</span>`;
+}
+
+function markUpdated(label = 'LAST UPDATED') {
+  const el = $('#lastUpdated');
+  if (!el) return;
+  el.textContent = `${label} ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
+}
+
+function setBusy(selector, busy, label = 'SYNCING') {
+  const el = $(selector);
+  if (!el) return;
+  el.classList.toggle('is-loading', !!busy);
+  if (busy) el.dataset.loadingLabel = label;
+  else delete el.dataset.loadingLabel;
 }
 
 function humanize(s) {
@@ -381,11 +414,11 @@ function syncQueueFilterOptions() {
 
 function workflowChips(q) {
   const chips = [];
-  if (q.assignedGroup || q.assignedRole) chips.push(`<span class="chip"><b>Owner</b> ${escapeHtml(workflowOwner(q))}</span>`);
-  if (q.slaDueAt) chips.push(`<span class="chip ${isEscalated(q) ? 'category' : ''}"><b>SLA</b> ${escapeHtml(fmt(q.slaDueAt))}</span>`);
-  if (q.escalationReason) chips.push(`<span class="chip category"><b>Escalated</b> ${escapeHtml(humanize(q.escalationReason))}</span>`);
-  if (q.notificationStatus) chips.push(`<span class="chip"><b>Notify</b> ${escapeHtml(humanize(q.notificationStatus))}</span>`);
-  if ((q.notificationChannels || []).length) chips.push(`<span class="chip"><b>Channels</b> ${escapeHtml((q.notificationChannels || []).join(', '))}</span>`);
+  if (q.assignedGroup || q.assignedRole) chips.push(`<span class="chip status-chip tone-live" tabindex="0" role="button" data-status-detail="${escapeHtml(`Owner: ${workflowOwner(q)}\nPermission level: ${q.assignedRole ? roleLabel(q.assignedRole) : 'Unassigned'}`)}"><b>Owner</b> ${escapeHtml(workflowOwner(q))}</span>`);
+  if (q.slaDueAt) chips.push(`<span class="chip status-chip ${isEscalated(q) ? 'category tone-warn' : 'tone-live'}" tabindex="0" role="button" data-status-detail="${escapeHtml(`SLA: ${fmt(q.slaDueAt)}\nState: ${isEscalated(q) ? 'DEGRADED' : 'SYNCED'}`)}"><b>SLA</b> ${escapeHtml(fmt(q.slaDueAt))}</span>`);
+  if (q.escalationReason) chips.push(`<span class="chip category status-chip tone-warn" tabindex="0" role="button" data-status-detail="${escapeHtml(`Escalation reason: ${humanize(q.escalationReason)}`)}"><b>Escalated</b> ${escapeHtml(humanize(q.escalationReason))}</span>`);
+  if (q.notificationStatus) chips.push(`<span class="chip status-chip tone-live" tabindex="0" role="button" data-status-detail="${escapeHtml(`Notification state: ${humanize(q.notificationStatus)}`)}"><b>Notify</b> ${escapeHtml(humanize(q.notificationStatus))}</span>`);
+  if ((q.notificationChannels || []).length) chips.push(`<span class="chip status-chip tone-live" tabindex="0" role="button" data-status-detail="${escapeHtml(`Notification channels: ${(q.notificationChannels || []).join(', ')}`)}"><b>Channels</b> ${escapeHtml((q.notificationChannels || []).join(', '))}</span>`);
   return chips.join('');
 }
 
@@ -445,6 +478,93 @@ async function loadCsrf() {
   if (!r) return;
   const body = await r.json();
   csrfToken = body.csrfToken || '';
+}
+
+function placeFloating(el, target, gap = 8) {
+  const rect = target.getBoundingClientRect();
+  const width = el.offsetWidth || 280;
+  const left = Math.min(Math.max(12, rect.left), Math.max(12, window.innerWidth - width - 12));
+  const top = rect.bottom + gap + el.offsetHeight > window.innerHeight
+    ? Math.max(12, rect.top - gap - el.offsetHeight)
+    : rect.bottom + gap;
+  el.style.left = `${left}px`;
+  el.style.top = `${top}px`;
+}
+
+function closeStatusPopover() {
+  if (statusPopover) statusPopover.remove();
+  statusPopover = null;
+}
+
+function showStatusPopover(target) {
+  hideTooltip();
+  closeStatusPopover();
+  const detail = target.dataset.statusDetail;
+  if (!detail) return;
+  statusPopover = document.createElement('div');
+  statusPopover.className = 'meta-popover';
+  statusPopover.innerHTML = `<b>Metadata</b><p>${escapeHtml(detail)}</p>`;
+  document.body.appendChild(statusPopover);
+  placeFloating(statusPopover, target);
+}
+
+function showTooltip(target) {
+  const text = target.dataset.tooltip;
+  if (!text || statusPopover) return;
+  if (tooltipEl) tooltipEl.remove();
+  tooltipEl = document.createElement('div');
+  tooltipEl.className = 'ui-tooltip';
+  tooltipEl.textContent = text;
+  document.body.appendChild(tooltipEl);
+  placeFloating(tooltipEl, target, 6);
+}
+
+function hideTooltip() {
+  if (tooltipEl) tooltipEl.remove();
+  tooltipEl = null;
+}
+
+function setupPanelChrome() {
+  $$('.panel[data-collapsible="true"]').forEach((panel, index) => {
+    if (panel.dataset.chromeReady) return;
+    const head = $('.panel-head', panel);
+    if (!head) return;
+    const body = document.createElement('div');
+    body.className = 'panel-body';
+    body.id = panel.id ? `${panel.id}_body` : `panel_body_${index}`;
+    while (head.nextSibling) body.appendChild(head.nextSibling);
+    panel.appendChild(body);
+    const toggle = document.createElement('button');
+    toggle.className = 'panel-toggle';
+    toggle.type = 'button';
+    toggle.dataset.panelToggle = '';
+    toggle.setAttribute('aria-expanded', 'true');
+    toggle.setAttribute('aria-controls', body.id);
+    toggle.textContent = 'HIDE';
+    toggle.dataset.tooltip = 'Collapse or expand diagnostics';
+    head.appendChild(toggle);
+    panel.dataset.chromeReady = 'true';
+  });
+}
+
+function setLiveState(state) {
+  const live = $('.live');
+  const chip = $('.live .status-chip');
+  const light = $('.live .status-light');
+  const label = state === 'reconnecting' ? 'SYNCING' : 'LIVE';
+  const detail = state === 'reconnecting'
+    ? 'SYNCING: session telemetry stream is reconnecting.'
+    : 'LIVE: session telemetry stream is connected.';
+  if ($('#liveTxt')) $('#liveTxt').textContent = label;
+  if (live) live.dataset.statusDetail = detail;
+  if (chip) {
+    chip.classList.toggle('tone-warn', state === 'reconnecting');
+    chip.classList.toggle('tone-live', state !== 'reconnecting');
+  }
+  if (light) {
+    light.classList.toggle('tone-warn', state === 'reconnecting');
+    light.classList.toggle('tone-live', state !== 'reconnecting');
+  }
 }
 
 function askStepUpPassword({ title, message, confirmText, icon = '', buttonClass = 'reveal' }) {
@@ -551,6 +671,7 @@ function askDestinationReviewReason({ destination, decision }) {
 }
 
 async function init() {
+  setupPanelChrome();
   const meRes = await api('/api/me');
   if (!meRes) return;
   const me = await meRes.json();
@@ -572,51 +693,63 @@ async function refreshAll() {
 }
 
 async function loadStats() {
-  const [r, seatRes] = await Promise.all([api('/api/stats'), api('/api/billing/seats')]);
-  if (!r) return;
-  const s = await r.json();
-  const seats = seatRes && seatRes.ok ? await seatRes.json() : null;
-  const totalDecisions = (s.approved || 0) + (s.denied || 0);
-  const approveRate = totalDecisions ? `${Math.round(((s.approved || 0) / totalDecisions) * 100)}%` : '-';
-  const seatValue = seats && seats.seatLimit ? `${seats.seatsUsed}/${seats.seatLimit}` : (seats ? seats.seatsUsed : '-');
-  const seatMeta = seats && seats.seatLimit ? `${seats.seatsRemaining} remaining` : 'billable users';
-  const cards = [
-    ['pending', s.pending, 'Pending approval', 'held for review'],
-    ['alert', s.todayBlocked, 'Blocked today', 'policy stops'],
-    ['good', s.approved, 'Approved', 'released by admin'],
-    ['', s.denied, 'Denied', 'never released'],
-    ['', approveRate, 'Approval rate', 'admin decisions'],
-    [seats && seats.overLimit ? 'alert' : '', seatValue, seats && seats.saasMode ? 'Seats used' : 'Users observed', seatMeta],
-  ];
-  $('#stats').innerHTML = cards.map(([c, n, l, m]) => `
-    <div class="stat ${c}">
-      <div class="l">${escapeHtml(l)}</div>
-      <div class="n">${escapeHtml(n)}</div>
-      <div class="m">${escapeHtml(m)}</div>
-      <div class="stat-rule"></div>
-    </div>`).join('');
-  const b = $('#qBadge');
-  if (s.pending > 0) { b.classList.remove('hidden'); b.textContent = s.pending; }
-  else b.classList.add('hidden');
-  $('#topEntities').innerHTML = (s.topEntities.length ? s.topEntities : []).map(([k, v]) => {
-    const max = s.topEntities[0][1] || 1;
-    return `<div class="barrow"><div class="name">${escapeHtml(k)}</div><div class="bar"><i style="--w:${Math.round((v / max) * 100)}%"></i></div><div class="v">${escapeHtml(v)}</div></div>`;
-  }).join('') || '<div class="empty"><div class="big">No detections</div>Current data set has no classified prompt findings.</div>';
+  setBusy('#stats', true, 'SYNCING');
+  try {
+    const [r, seatRes] = await Promise.all([api('/api/stats'), api('/api/billing/seats')]);
+    if (!r) return;
+    const s = await r.json();
+    const seats = seatRes && seatRes.ok ? await seatRes.json() : null;
+    const totalDecisions = (s.approved || 0) + (s.denied || 0);
+    const approveRate = totalDecisions ? `${Math.round(((s.approved || 0) / totalDecisions) * 100)}%` : '-';
+    const seatValue = seats && seats.seatLimit ? `${seats.seatsUsed}/${seats.seatLimit}` : (seats ? seats.seatsUsed : '-');
+    const seatMeta = seats && seats.seatLimit ? `${seats.seatsRemaining} remaining` : 'billable users';
+    const cards = [
+      ['pending', s.pending, 'Pending approval', 'held for review', 'critical'],
+      ['alert', s.todayBlocked, 'Blocked today', 'policy stops', 'warn'],
+      ['good', s.approved, 'Approved', 'released by admin', 'secure'],
+      ['', s.denied, 'Denied', 'never released', 'critical'],
+      ['', approveRate, 'Approval rate', 'admin decisions', 'live'],
+      [seats && seats.overLimit ? 'alert' : '', seatValue, seats && seats.saasMode ? 'Seats used' : 'Users observed', seatMeta, seats && seats.overLimit ? 'warn' : 'secure'],
+    ];
+    $('#stats').innerHTML = cards.map(([c, n, l, m, tone]) => `
+      <div class="stat ${c}" data-tooltip="${escapeHtml(`${l}: ${m}`)}">
+        <div class="l"><span class="status-light tone-${escapeHtml(tone)}" aria-hidden="true"></span>${escapeHtml(l)}</div>
+        <div class="n">${escapeHtml(n)}</div>
+        <div class="m">${escapeHtml(m)}</div>
+        <div class="stat-rule"></div>
+      </div>`).join('');
+    const b = $('#qBadge');
+    if (s.pending > 0) { b.classList.remove('hidden'); b.textContent = s.pending; }
+    else b.classList.add('hidden');
+    $('#topEntities').innerHTML = (s.topEntities.length ? s.topEntities : []).map(([k, v]) => {
+      const max = s.topEntities[0][1] || 1;
+      return `<div class="barrow"><div class="name">${escapeHtml(k)}</div><div class="bar"><i style="--w:${Math.round((v / max) * 100)}%"></i></div><div class="v">${escapeHtml(v)}</div></div>`;
+    }).join('') || '<div class="empty"><div class="big">No detections</div>Current data set has no classified prompt findings.</div>';
+    markUpdated();
+  } finally {
+    setBusy('#stats', false);
+  }
 }
 
 function findingChips(findings, categories) {
-  const fc = (findings || []).map((f) => `<span class="chip"><b>${escapeHtml(f.type)}</b> ${escapeHtml(f.masked || '')}</span>`).join('');
-  const cc = (categories || []).map((c) => `<span class="chip category"><b>${escapeHtml(c)}</b></span>`).join('');
+  const fc = (findings || []).map((f) => `<span class="chip status-chip tone-warn" tabindex="0" role="button" data-status-detail="${escapeHtml(`Detected type: ${f.type}\nMasked value: ${f.masked || 'redacted'}`)}"><b>${escapeHtml(f.type)}</b> ${escapeHtml(f.masked || '')}</span>`).join('');
+  const cc = (categories || []).map((c) => `<span class="chip category status-chip tone-warn" tabindex="0" role="button" data-status-detail="${escapeHtml(`Policy category: ${c}`)}"><b>${escapeHtml(c)}</b></span>`).join('');
   return fc + cc;
 }
 
 async function loadQueue() {
-  const r = await api('/api/queries?status=pending');
-  if (!r) return;
-  currentQueue = await r.json();
-  if (currentQueue.length && !currentQueue.some((q) => q.id === selected)) selected = currentQueue[0].id;
-  if (!currentQueue.length) selected = null;
-  renderQueueView();
+  setBusy('#tab-queue .panel', true, 'SYNCING');
+  try {
+    const r = await api('/api/queries?status=pending');
+    if (!r) return;
+    currentQueue = await r.json();
+    if (currentQueue.length && !currentQueue.some((q) => q.id === selected)) selected = currentQueue[0].id;
+    if (!currentQueue.length) selected = null;
+    renderQueueView();
+    markUpdated();
+  } finally {
+    setBusy('#tab-queue .panel', false);
+  }
 }
 
 function renderQueueView() {
@@ -702,6 +835,23 @@ function renderIncident(q) {
 }
 
 document.addEventListener('click', async (e) => {
+  const metadataTarget = e.target.closest('[data-status-detail]');
+  if (metadataTarget) {
+    e.preventDefault();
+    e.stopPropagation();
+    showStatusPopover(metadataTarget);
+    return;
+  }
+  closeStatusPopover();
+  const panelToggle = e.target.closest('[data-panel-toggle]');
+  if (panelToggle) {
+    const panel = panelToggle.closest('.panel');
+    const collapsed = !panel.classList.contains('collapsed');
+    panel.classList.toggle('collapsed', collapsed);
+    panelToggle.setAttribute('aria-expanded', String(!collapsed));
+    panelToggle.textContent = collapsed ? 'DETAILS' : 'HIDE';
+    return;
+  }
   const filterButton = e.target.closest('[data-queue-filter]');
   if (filterButton) {
     queueFilter = filterButton.dataset.queueFilter || 'all';
@@ -811,6 +961,12 @@ document.addEventListener('click', async (e) => {
   if (row && !e.target.closest('textarea,input,button,select,a')) {
     selected = row.dataset.id;
     renderQueueView();
+    return;
+  }
+  const activityRow = e.target.closest('.activity-row[data-activity-id]');
+  if (activityRow && !e.target.closest('textarea,input,button,select,a')) {
+    expandedActivityId = expandedActivityId === activityRow.dataset.activityId ? '' : activityRow.dataset.activityId;
+    renderActivityRows(currentActivity);
   }
 });
 
@@ -827,6 +983,23 @@ document.addEventListener('change', (e) => {
 });
 
 document.addEventListener('keydown', (e) => {
+  const metadataTarget = e.target.closest('[data-status-detail]');
+  if (metadataTarget && ['Enter', ' '].includes(e.key)) {
+    e.preventDefault();
+    showStatusPopover(metadataTarget);
+    return;
+  }
+  if (e.key === 'Escape') {
+    closeStatusPopover();
+    hideTooltip();
+  }
+  const activityRow = e.target.closest('.activity-row[data-activity-id]');
+  if (activityRow && ['Enter', ' '].includes(e.key)) {
+    e.preventDefault();
+    expandedActivityId = expandedActivityId === activityRow.dataset.activityId ? '' : activityRow.dataset.activityId;
+    renderActivityRows(currentActivity);
+    return;
+  }
   const row = e.target.closest('.q[data-id]');
   if (!row || !['Enter', ' '].includes(e.key)) return;
   if (e.target.closest('textarea,input,button,select,a')) return;
@@ -835,16 +1008,76 @@ document.addEventListener('keydown', (e) => {
   renderQueueView();
 });
 
+document.addEventListener('pointerover', (e) => {
+  const target = e.target.closest('[data-tooltip]');
+  if (target) showTooltip(target);
+});
+
+document.addEventListener('pointerout', (e) => {
+  if (e.target.closest('[data-tooltip]')) hideTooltip();
+});
+
+document.addEventListener('focusin', (e) => {
+  const target = e.target.closest('[data-tooltip]');
+  if (target) showTooltip(target);
+});
+
+document.addEventListener('focusout', (e) => {
+  if (e.target.closest('[data-tooltip]')) hideTooltip();
+});
+
 async function loadActivity() {
-  const r = await api('/api/queries?limit=200');
-  if (!r) return;
-  currentActivity = await r.json();
-  renderActivityRows(currentActivity);
+  setBusy('#tab-activity .panel', true, 'SYNCING');
+  try {
+    const r = await api('/api/queries?limit=200');
+    if (!r) return;
+    currentActivity = await r.json();
+    renderActivityRows(currentActivity);
+    markUpdated();
+  } finally {
+    setBusy('#tab-activity .panel', false);
+  }
+}
+
+function activitySeverityClass(q) {
+  const tone = statusTone(q.status);
+  if (tone === 'bad') return 'critical';
+  if (tone === 'warn') return 'warning';
+  return '';
+}
+
+function activityDetail(q) {
+  const expanded = expandedActivityId === q.id;
+  if (!expanded) return '<tr class="activity-detail-row hidden"><td colspan="9"></td></tr>';
+  const detected = Object.keys(q.entityCounts || {}).join(', ') || (q.categories || []).join(', ') || '-';
+  return `<tr class="activity-detail-row">
+    <td colspan="9">
+      <div class="activity-detail">
+        <div class="activity-detail-grid">
+          <div class="datum"><label>Object</label><b>${escapeHtml(q.id || '-')}</b></div>
+          <div class="datum"><label>Status</label><b>${escapeHtml(humanize(q.status))}</b></div>
+          <div class="datum"><label>Timestamp</label><b>${escapeHtml(fmt(q.createdAt))}</b></div>
+          <div class="datum"><label>Source</label><b>${escapeHtml(sourceLabel(q.source))}</b></div>
+          <div class="datum"><label>Owner</label><b>${escapeHtml(workflowOwner(q))}</b></div>
+          <div class="datum"><label>Destination</label><b>${escapeHtml(q.destination || '-')}</b></div>
+          <div class="datum"><label>Detected</label><b>${escapeHtml(detected)}</b></div>
+          <div class="datum"><label>Risk</label><b>${escapeHtml(q.riskScore ?? 0)}/100</b></div>
+        </div>
+        <div class="activity-detail-actions">
+          ${q.status === 'pending' ? '<button class="ghost mini" data-tab-jump="queue" type="button">INSPECT</button>' : ''}
+          <button class="ghost mini" data-tab-jump="audit" type="button">VIEW AUDIT</button>
+        </div>
+      </div>
+    </td>
+  </tr>`;
 }
 
 function renderActivityRows(rows) {
   const filtered = (rows || []).filter(matchesSearch);
-  $('#activityRows').innerHTML = filtered.map((q) => `<tr>
+  $('#activityRows').innerHTML = filtered.map((q) => {
+    const tone = statusTone(q.status);
+    const detail = `Status: ${humanize(q.status)}\nSession ID: ${q.id || '-'}\nOwner: ${workflowOwner(q)}\nRisk: ${q.riskScore ?? 0}/100`;
+    return `<tr class="activity-row ${activitySeverityClass(q)} ${expandedActivityId === q.id ? 'selected' : ''}" data-activity-id="${escapeHtml(q.id)}" tabindex="0">
     <td class="mono">${escapeHtml(fmt(q.createdAt))}</td>
     <td>${escapeHtml(sourceLabel(q.source))}</td>
     <td>${escapeHtml(q.user || '-')}</td>
@@ -853,15 +1086,22 @@ function renderActivityRows(rows) {
     <td><span class="sev ${sevClass(q.maxSeverityLabel)}">${escapeHtml(q.maxSeverityLabel || 'low')}</span></td>
     <td class="mono">${escapeHtml(q.riskScore ?? 0)}</td>
     <td>${escapeHtml(Object.keys(q.entityCounts || {}).join(', ') || '-')}</td>
-    <td><span class="pill ${statusTone(q.status)}">${escapeHtml(humanize(q.status))}</span></td>
-  </tr>`).join('') || '<tr><td colspan="9" class="empty">No matching activity</td></tr>';
+    <td>${statusChip(tone, humanize(q.status), detail)}<span class="row-affordance">VIEW</span></td>
+  </tr>${activityDetail(q)}`;
+  }).join('') || '<tr><td colspan="9" class="empty">No matching activity</td></tr>';
 }
 
 async function loadCoverage() {
-  const r = await api('/api/coverage');
-  if (!r) return;
-  currentCoverage = await r.json();
-  renderCoverage(currentCoverage);
+  setBusy('#tab-coverage .panel', true, 'RECONCILING');
+  try {
+    const r = await api('/api/coverage');
+    if (!r) return;
+    currentCoverage = await r.json();
+    renderCoverage(currentCoverage);
+    markUpdated();
+  } finally {
+    setBusy('#tab-coverage .panel', false);
+  }
 }
 
 function renderCoverage(c) {
@@ -910,7 +1150,7 @@ function renderCoverage(c) {
     </div>`;
   $('#coveragePosture').innerHTML = (c.posture || []).map((p) => `
     <div class="posture-item">
-      <span>${escapeHtml(p.label)} <span class="pill ${postureTone(p.state)}">${escapeHtml(p.state)}</span></span>
+      <span>${escapeHtml(p.label)} ${statusChip(postureTone(p.state), p.state, `System health: ${p.label}\nState: ${p.state}\nDetail: ${p.detail}`)}</span>
       <b>${escapeHtml(p.detail)}</b>
     </div>`).join('');
   $('#sensorMix').innerHTML = (c.sensors || []).map((s) => `
@@ -922,7 +1162,7 @@ function renderCoverage(c) {
     <td>${escapeHtml(row.user || 'unknown')}</td>
     <td class="mono">${escapeHtml(row.orgId || '-')}</td>
     <td>${escapeHtml(row.label || sourceLabel(row.source))}</td>
-    <td><span class="pill ${fleetTone(row.state)}">${escapeHtml(row.state || 'unknown')}</span></td>
+    <td>${statusChip(fleetTone(row.state), row.state || 'unknown', `Verification state: ${row.state || 'unknown'}\nUser: ${row.user || 'unknown'}\nFailed checks: ${fleetFailedChecks(row)}\nLast seen: ${row.lastSeen ? fmt(row.lastSeen) : '-'}`)}</td>
     <td class="mono">${escapeHtml(fleetVersionLine(row))}</td>
     <td>${escapeHtml(fleetFailedChecks(row))}</td>
     <td class="mono">${escapeHtml(row.lastSeen ? fmt(row.lastSeen) : '-')}</td>
@@ -937,7 +1177,7 @@ function renderCoverage(c) {
     return `<div class="tool-row">
       <div><strong>${escapeHtml(tool.label || tool.id || 'Unknown AI tool')}</strong><span>${escapeHtml(meta || '-')}</span></div>
       <div class="tool-state">
-        <span class="pill ${endpointAiToolTone(tool.state)}">${escapeHtml(tool.state || 'unknown')}</span>
+        ${statusChip(endpointAiToolTone(tool.state), tool.state || 'unknown', `Endpoint tool: ${tool.label || tool.id || 'unknown'}\nPermission state: ${tool.state || 'unknown'}\nLast seen: ${tool.lastSeen ? fmt(tool.lastSeen) : '-'}`)}
         <span>${escapeHtml(tool.detail || '-')}</span>
       </div>
     </div>`;
@@ -954,7 +1194,7 @@ function renderCoverage(c) {
     <div class="shadow-row">
       <div><strong>${escapeHtml(d.destination)}</strong><span>${escapeHtml(d.users)} users / last ${escapeHtml(d.lastSeen ? fmt(d.lastSeen) : '-')}</span></div>
       <div class="destination-review">
-        <span class="pill ${destinationPolicyTone(d.policyState)}">${escapeHtml(destinationPolicyLabel(d.policyState))}</span>
+        ${statusChip(destinationPolicyTone(d.policyState), destinationPolicyLabel(d.policyState), `Destination: ${d.destination}\nPolicy: ${destinationPolicyLabel(d.policyState)}\nSource count: ${d.users} users\nLast seen: ${d.lastSeen ? fmt(d.lastSeen) : '-'}`)}
         <span class="count">${escapeHtml(d.shadow)}</span>
         ${(d.policyState || 'review') === 'review' && canAdminWrite()
     ? `<div class="destination-actions">
@@ -979,14 +1219,20 @@ async function loadIdentitySetup() {
   const tenantId = ($('#identityTenant') && $('#identityTenant').value.trim()) || '';
   const params = new URLSearchParams({ provider });
   if (tenantId) params.set('tenantId', tenantId);
-  const r = await api(`/api/identity/setup-guide?${params.toString()}`);
-  if (!r) return;
-  currentIdentitySetup = await r.json();
-  if (currentIdentitySetup.error) {
-    $('#identitySummary').innerHTML = `<div class="empty"><div class="big">Identity setup unavailable</div>${escapeHtml(currentIdentitySetup.error)}</div>`;
-    return;
+  setBusy('#tab-identity .panel', true, 'VERIFYING');
+  try {
+    const r = await api(`/api/identity/setup-guide?${params.toString()}`);
+    if (!r) return;
+    currentIdentitySetup = await r.json();
+    if (currentIdentitySetup.error) {
+      $('#identitySummary').innerHTML = `<div class="empty"><div class="big">Identity setup unavailable</div>${escapeHtml(currentIdentitySetup.error)}</div>`;
+      return;
+    }
+    renderIdentitySetup(currentIdentitySetup);
+    markUpdated();
+  } finally {
+    setBusy('#tab-identity .panel', false);
   }
-  renderIdentitySetup(currentIdentitySetup);
 }
 
 function identityValueRows(rows) {
@@ -1026,7 +1272,7 @@ function renderIdentityTables(guide) {
     <td class="mono">${escapeHtml(row.value)}</td>
   </tr>`).join('');
   $('#identityRoleRows').innerHTML = (guide.roleGroups || []).map((row) => `<tr>
-    <td><span class="pill info">${escapeHtml(roleLabel(row.role))}</span></td>
+    <td>${statusChip('info', roleLabel(row.role), `Permission level: ${roleLabel(row.role)}\nGroups: ${(row.groups || []).join(', ') || '-'}`)}</td>
     <td>${escapeHtml((row.groups || []).join(', '))}</td>
   </tr>`).join('');
 }
@@ -1047,11 +1293,17 @@ function renderIdentitySetup(guide) {
 }
 
 async function loadLineage() {
-  const r = await api('/api/lineage?limit=1000');
-  if (!r) return;
-  const body = await r.json();
-  currentLineage = body.lineage || {};
-  renderLineage(currentLineage);
+  setBusy('#tab-lineage .panel', true, 'ANALYZING');
+  try {
+    const r = await api('/api/lineage?limit=1000');
+    if (!r) return;
+    const body = await r.json();
+    currentLineage = body.lineage || {};
+    renderLineage(currentLineage);
+    markUpdated();
+  } finally {
+    setBusy('#tab-lineage .panel', false);
+  }
 }
 
 function renderLineageRows(selector, rows, emptyLabel) {
@@ -1102,28 +1354,34 @@ function renderLineage(lineage) {
 }
 
 async function loadAudit() {
-  const r = await api('/api/audit');
-  if (!r) return;
-  const d = await r.json();
-  const ig = d.integrity;
-  $('#integrity').className = `integrity ${ig.ok ? 'ok' : 'bad'}`;
-  $('#integrity').innerHTML = ig.ok
-    ? `${icons.shield}<span>Chain verified: ${escapeHtml(ig.count)} cryptographically linked entries.</span>`
-    : `${icons.shield}<span>Integrity check failed at ${escapeHtml(ig.brokenAt)}.</span>`;
-  $('#auditRows').innerHTML = d.entries.map((a) => `<tr>
-    <td class="mono">${escapeHtml(fmt(a.ts))}</td>
-    <td><span class="pill ${statusTone(a.action)}">${escapeHtml(humanize(a.action))}</span></td>
-    <td>${escapeHtml(a.actor || '-')}</td>
-    <td class="mono">${escapeHtml(a.queryId || '-')}</td>
-    <td>${escapeHtml(a.detail || '')}</td>
-  </tr>`).join('');
+  setBusy('#tab-audit .panel', true, 'VERIFYING');
+  try {
+    const r = await api('/api/audit');
+    if (!r) return;
+    const d = await r.json();
+    const ig = d.integrity;
+    $('#integrity').className = `integrity ${ig.ok ? 'ok' : 'bad'}`;
+    $('#integrity').innerHTML = ig.ok
+      ? `${icons.shield}<span>Chain verified: ${escapeHtml(ig.count)} cryptographically linked entries.</span>`
+      : `${icons.shield}<span>Integrity check failed at ${escapeHtml(ig.brokenAt)}.</span>`;
+    $('#auditRows').innerHTML = d.entries.map((a) => `<tr>
+      <td class="mono">${escapeHtml(fmt(a.ts))}</td>
+      <td>${statusChip(statusTone(a.action), humanize(a.action), `Audit action: ${humanize(a.action)}\nActor: ${a.actor || '-'}\nQuery: ${a.queryId || '-'}\nTimestamp: ${fmt(a.ts)}`)}</td>
+      <td>${escapeHtml(a.actor || '-')}</td>
+      <td class="mono">${escapeHtml(a.queryId || '-')}</td>
+      <td>${escapeHtml(a.detail || '')}</td>
+    </tr>`).join('');
+    markUpdated();
+  } finally {
+    setBusy('#tab-audit .panel', false);
+  }
 }
 
 async function exportEvidence(){
   const btn = $('#exportEvidence');
   const status = $('#exportStatus');
   btn.disabled = true;
-  status.textContent = 'Preparing...';
+  status.textContent = 'PROCESSING';
   try {
     const r = await api('/api/export/evidence?queryLimit=1000&auditLimit=1000');
     if (!r || !r.ok) throw new Error('export failed');
@@ -1138,7 +1396,7 @@ async function exportEvidence(){
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
-    status.textContent = 'Downloaded';
+    status.textContent = 'DATA VERIFIED';
     setTimeout(() => { status.textContent = ''; }, 2200);
   } catch (err) {
     status.textContent = 'Export failed';
@@ -1166,7 +1424,7 @@ function stateLabel(state) {
 
 function statePill(state, label = stateLabel(state)) {
   const tone = state === 'bad' ? 'bad' : state === 'warn' ? 'warn' : 'good';
-  return `<span class="pill ${tone}">${escapeHtml(label)}</span>`;
+  return statusChip(tone, label, `Verification state: ${label}\nSystem health: ${stateLabel(state)}`);
 }
 
 function configHealth(preflight) {
@@ -1206,7 +1464,7 @@ function renderSetupChecklist(p, preflight, coverage) {
   return `<div class="config-card pad">
     <div class="sensor-head">
       <div><h3>Setup Checklist</h3><p>Fast path from install to governed pilot.</p></div>
-      <span class="pill ${checklist.done === checklist.total ? 'good' : 'warn'}">${escapeHtml(checklist.done)}/${escapeHtml(checklist.total)} ready</span>
+      ${statusChip(checklist.done === checklist.total ? 'good' : 'warn', `${checklist.done}/${checklist.total} ready`, `System health: ${checklist.done}/${checklist.total} setup checks ready`)}
     </div>
     <div class="setup-list">${checklist.items.map(([label, state, detail]) => `
       <div class="setup-item">
@@ -1305,6 +1563,8 @@ function renderPolicyTemplates(tpls, readonly) {
 }
 
 async function loadPolicy() {
+  setBusy('#tab-policy .config-shell', true, 'VERIFYING');
+  try {
   const [pRes, tRes, preflightRes, coverageRes] = await Promise.all([
     api('/api/policy'),
     api('/api/policy/templates'),
@@ -1520,7 +1780,7 @@ async function loadPolicy() {
   $('#discardPolicy').onclick = loadPolicy;
   $('#testConfiguration').onclick = async () => {
     const status = $('#polSaved');
-    status.textContent = 'Testing...';
+    status.textContent = 'VERIFYING';
     const [nextPreflightRes, nextCoverageRes] = await Promise.all([api('/api/preflight'), api('/api/coverage')]);
     const nextPreflight = nextPreflightRes && nextPreflightRes.ok ? await nextPreflightRes.json() : null;
     if (nextCoverageRes && nextCoverageRes.ok) currentCoverage = await nextCoverageRes.json();
@@ -1532,6 +1792,7 @@ async function loadPolicy() {
       : `${nextHealth.failed} warning(s), ${nextHealth.ok}/${nextHealth.total || 0} checks ready`;
     setTimeout(() => { status.textContent = ''; }, 3600);
   };
+  markUpdated();
   if (readonly) return;
   $('#addScopeRule').onclick = appendGuidedScopeRule;
   $('#addExceptionRule').onclick = appendGuidedExceptionRule;
@@ -1582,6 +1843,10 @@ async function loadPolicy() {
       loadPolicy();
     };
   });
+  markUpdated();
+  } finally {
+    setBusy('#tab-policy .config-shell', false);
+  }
 }
 
 function activateTab(name) {
@@ -1617,14 +1882,19 @@ function connectStream() {
   es.addEventListener('query', () => { loadStats(); loadQueue(); if (!$('#tab-coverage').classList.contains('hidden')) loadCoverage(); if (!$('#tab-lineage').classList.contains('hidden')) loadLineage(); flash(); });
   es.addEventListener('decision', () => { loadStats(); loadQueue(); loadActivity(); if (!$('#tab-lineage').classList.contains('hidden')) loadLineage(); });
   es.addEventListener('stats', () => loadStats());
-  es.onerror = () => { $('#liveTxt').textContent = 'Reconnecting'; };
-  es.onopen = () => { $('#liveTxt').textContent = 'Live'; };
+  es.onerror = () => { setLiveState('reconnecting'); };
+  es.onopen = () => { setLiveState('live'); };
 }
 
 function flash() {
-  const d = document.querySelector('.dot');
-  d.style.background = '#f6a21a';
-  setTimeout(() => { d.style.background = '#40d98a'; }, 500);
+  const d = document.querySelector('.live .status-light');
+  if (!d) return;
+  d.classList.remove('tone-live');
+  d.classList.add('tone-warn');
+  setTimeout(() => {
+    d.classList.remove('tone-warn');
+    d.classList.add('tone-live');
+  }, 500);
 }
 
 init();

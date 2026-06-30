@@ -134,6 +134,22 @@ test('admin console login, approval, policy save, and evidence export work in a 
 
   await login(page);
 
+  await expect(page.locator('.live .status-chip')).toContainText('LIVE');
+  await expect(page.locator('#lastUpdated')).toContainText('LAST UPDATED');
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await expect(page.locator('.live .status-light')).toHaveCSS('animation-name', 'none');
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.locator('.live').click();
+  await expect(page.locator('.meta-popover')).toContainText('session telemetry stream');
+  await page.keyboard.press('Escape');
+
+  const topPiiPanel = page.locator('.panel', { has: page.getByRole('heading', { name: 'Top PII Detected' }) });
+  await expect(topPiiPanel.getByRole('button', { name: 'HIDE' })).toBeVisible();
+  await topPiiPanel.getByRole('button', { name: 'HIDE' }).click();
+  await expect(topPiiPanel).toHaveClass(/collapsed/);
+  await topPiiPanel.getByRole('button', { name: 'DETAILS' }).click();
+  await expect(topPiiPanel).not.toHaveClass(/collapsed/);
+
   const queueItem = page.locator(`.q[data-id="${gated.id}"]`);
   await expect(queueItem).toBeVisible();
   await expect(queueItem).toContainText('US_SSN');
@@ -149,6 +165,14 @@ test('admin console login, approval, policy save, and evidence export work in a 
   await page.locator('.content-tabs .tab[data-tab="activity"]').click();
   await expect(page.locator('#activityRows')).toContainText('approved');
   await expect(page.locator('#activityRows')).toContainText('analyst@example.test');
+  const activityRow = page.locator(`tr.activity-row[data-activity-id="${gated.id}"]`);
+  await activityRow.hover();
+  await expect(activityRow.locator('.row-affordance')).toHaveCSS('opacity', '1');
+  await activityRow.click();
+  await expect(page.locator(`.activity-detail-row:has-text("${gated.id}")`)).toBeVisible();
+  await activityRow.locator('.status-chip').click();
+  await expect(page.locator('.meta-popover')).toContainText(`Session ID: ${gated.id}`);
+  await page.keyboard.press('Escape');
   await page.locator('#globalSearch').fill('analyst@example.test');
   await expect(page.locator('#activityRows')).toContainText('approved');
   await page.locator('#globalSearch').fill('no-such-user');
