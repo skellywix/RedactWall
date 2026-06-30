@@ -270,10 +270,13 @@
     display:flex;
     align-items:center;
     justify-content:space-between;
+    flex-wrap:wrap;
     gap:12px;
     padding:12px 14px;
     border-bottom:1px solid var(--line);
   }
+  .panel-head > div{min-width:0}
+  .panel-head .ghost,.panel-head .system-button{flex:0 0 auto}
   .panel-head h2{margin:0;font-size:13px;font-weight:760}
   .panel-head span{color:var(--mut);font-size:12px}
   .queue-list{display:grid}
@@ -444,7 +447,9 @@
   .lineage-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;padding:14px}
   .lineage-summary .mini-kpi{min-height:76px}
   .lineage-grid table{table-layout:fixed}
+  .lineage-grid th{font-size:10px;letter-spacing:.04em}
   .lineage-grid th:first-child,.lineage-grid td:first-child{width:42%;overflow-wrap:anywhere}
+  .lineage-grid th:not(:first-child){font-size:9px;letter-spacing:0}
   .lineage-grid th:not(:first-child),.lineage-grid td:not(:first-child){width:14.5%;text-align:right}
   .identity-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;padding:14px}
   .identity-summary .mini-kpi{min-height:86px}
@@ -1792,10 +1797,10 @@
     .barrow{grid-template-columns:96px minmax(0,1fr) 28px}
     th,td{padding:10px 9px}
     table{min-width:760px}
-    .lineage-grid table{min-width:0;font-size:11px}
+    .lineage-grid table{min-width:560px;font-size:11px}
     .lineage-grid th,.lineage-grid td{padding:9px 7px}
-    .lineage-grid th:first-child,.lineage-grid td:first-child{width:40%}
-    .lineage-grid th:not(:first-child),.lineage-grid td:not(:first-child){width:15%}
+    .lineage-grid th:first-child,.lineage-grid td:first-child{width:42%}
+    .lineage-grid th:not(:first-child),.lineage-grid td:not(:first-child){width:14.5%}
     .signal-console{padding:10px}
     .signal-console-header{padding:12px}
     .signal-console-title{gap:9px}
