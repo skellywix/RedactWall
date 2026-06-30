@@ -1358,7 +1358,7 @@ function renderQueueItem(q) {
     </div>`
     : `<div class="readonly-note">${escapeHtml(queueDecisionLabel(q))}</div>`;
   return `<article class="q ${selected === q.id ? 'selected' : ''}" data-id="${escapeHtml(q.id)}" tabindex="0">
-    <div class="top">
+    <div class="top risk-meta-row">
       <span class="select-dot" aria-hidden="true"></span>
       <span class="sev ${sev}">${escapeHtml(q.maxSeverityLabel || 'low')}</span>
       <span class="risk">Risk <b>${escapeHtml(q.riskScore ?? 0)}</b>/100</span>
@@ -1398,7 +1398,7 @@ function renderIncident(q) {
       <div class="datum"><label>Escalation</label><b>${escapeHtml(q.escalatedAt ? fmt(q.escalatedAt) : '-')}</b></div>
     </div>
     <div class="risk-meter" style="--risk-width:${risk}%">
-      <div class="top"><span class="sev ${sev}">${escapeHtml(q.maxSeverityLabel || 'low')}</span><span class="risk">Risk <b>${risk}</b>/100</span></div>
+      <div class="risk-meta-row"><span class="sev ${sev}">${escapeHtml(q.maxSeverityLabel || 'low')}</span><span class="risk">Risk <b>${risk}</b>/100</span></div>
       <div class="risk-track"><i></i></div>
     </div>
     <div class="prompt">${escapeHtml(q.redactedPrompt)}</div>

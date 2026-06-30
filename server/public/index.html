@@ -289,6 +289,12 @@
   .q:hover,.q:focus-visible{background:#0f1b29;outline:none}
   .q.selected{background:linear-gradient(90deg,rgba(47,125,246,.16),rgba(47,125,246,.04));box-shadow:inset 3px 0 0 var(--blue)}
   .q .top{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+  .risk-meta-row{
+    display:flex;
+    align-items:center;
+    gap:12px;
+    flex-wrap:wrap;
+  }
   .select-dot{
     width:18px;
     height:18px;
@@ -317,8 +323,19 @@
   .sev.high{background:rgba(246,162,26,.13);border-color:rgba(246,162,26,.42);color:#ffd28a}
   .sev.medium{background:rgba(228,196,65,.13);border-color:rgba(228,196,65,.38);color:#f5e48a}
   .sev.low{background:rgba(148,163,184,.12);border-color:rgba(148,163,184,.25);color:#d6deeb}
-  .risk{margin-left:auto;color:var(--mut);font-size:12px;font-variant-numeric:tabular-nums}
+  .risk{
+    margin-left:auto;
+    display:inline-flex;
+    align-items:baseline;
+    gap:5px;
+    color:var(--mut);
+    font-size:12px;
+    font-variant-numeric:tabular-nums;
+    white-space:nowrap;
+  }
   .risk b{color:#fff;font-size:17px}
+  .risk-meta-row .risk{margin-left:0}
+  .q .risk-meta-row .risk{margin-left:auto}
   .queue-mainline{display:grid;grid-template-columns:minmax(130px,.6fr) minmax(160px,1fr) auto;gap:12px;align-items:center;margin-bottom:9px}
   .queue-mainline strong{font-weight:720;color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .queue-mainline span{color:var(--mut);font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
