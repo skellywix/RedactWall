@@ -315,10 +315,18 @@ test('dashboard-backed API actions accept the payloads built by forms and button
 
   const queue = await jsonFetch(port, '/api/queries?status=pending', { method: 'GET', headers: { cookie } });
   assert.strictEqual(queue.status, 200);
-  assert.ok((await queue.json()).length >= 3);
+  const queued = await queue.json();
+  assert.ok(queued.length >= 3);
+  const revealQueueRow = queued.find((row) => row.id === reveal.id);
+  assert.ok(revealQueueRow);
+  assert.strictEqual(revealQueueRow.rawRetained, true);
+  assert.strictEqual(revealQueueRow._rawPrompt, undefined);
 
   const detail = await jsonFetch(port, `/api/queries/${reveal.id}`, { method: 'GET', headers: { cookie } });
   assert.strictEqual(detail.status, 200);
+  const detailBody = await detail.json();
+  assert.strictEqual(detailBody.rawRetained, true);
+  assert.strictEqual(detailBody._rawPrompt, undefined);
 
   const revealRes = await jsonFetch(port, `/api/queries/${reveal.id}/reveal`, {
     headers,

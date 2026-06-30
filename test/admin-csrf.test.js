@@ -143,3 +143,22 @@ test('dashboard filters approval queue by workflow state, category, and destinat
   assert.match(dashboard, /e\.target\.matches\('#queueCategoryFilter'\)/);
   assert.match(dashboard, /e\.target\.matches\('#queueDestinationFilter'\)/);
 });
+
+test('dashboard recovers approval queue from a stalled pending fetch', () => {
+  assert.match(dashboard, /async function dashboardJsonWithTimeout/);
+  assert.match(dashboard, /new AbortController\(\)/);
+  assert.match(dashboard, /controller\.abort\(\)/);
+  assert.match(dashboard, /async function pendingQueueRows/);
+  assert.match(dashboard, /\/api\/queries\?status=pending/);
+  assert.match(dashboard, /currentActivity\.filter\(\(q\) => q\.status === 'pending'\)/);
+  assert.match(dashboard, /\/api\/queries\?limit=200/);
+  assert.match(dashboard, /currentQueue = await pendingQueueRows\(\)/);
+});
+
+test('dashboard exposes compact queue viewing controls', () => {
+  assert.match(index, /id="toggleQueueDensity"/);
+  assert.match(index, /queue-density-compact/);
+  assert.match(dashboard, /function applyQueueDensity/);
+  assert.match(dashboard, /promptwall\.queueDensity/);
+  assert.match(dashboard, /aria-pressed/);
+});

@@ -1331,7 +1331,8 @@ app.get('/api/me', auth.requireAuth, (req, res) => {
 // =============================================================================
 function publicQuery(q, { includeRaw = false } = {}) {
   const { _rawPrompt, _tokenVault, _releaseTokenHash, ...rest } = q;
-  return includeRaw ? { ...rest, rawPrompt: _rawPrompt } : rest;
+  const sanitized = { ...rest, rawRetained: Boolean(_rawPrompt) };
+  return includeRaw ? { ...sanitized, rawPrompt: _rawPrompt } : sanitized;
 }
 
 app.get('/api/queries', auth.requireAuth, (req, res) => {

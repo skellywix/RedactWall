@@ -234,11 +234,17 @@
   .stat.pending .n{color:#ff7b84}
   .stat.good .n{color:#7be7ae}
   .content-tabs{
+    position:sticky;
+    top:62px;
+    z-index:8;
     display:flex;
     align-items:center;
     gap:4px;
     border-bottom:1px solid var(--line);
     margin-bottom:14px;
+    padding-top:8px;
+    background:rgba(5,7,11,.88);
+    backdrop-filter:blur(18px);
     scrollbar-width:none;
   }
   .rail::-webkit-scrollbar,.content-tabs::-webkit-scrollbar{display:none}
@@ -398,6 +404,16 @@
     font-weight:720;
   }
   .actions{display:flex;gap:8px;margin-top:11px;flex-wrap:wrap}
+  body.queue-density-compact .console-frame .queue-list{gap:6px;padding:8px}
+  body.queue-density-compact .console-frame .q{padding:9px 10px}
+  body.queue-density-compact .q .top{margin-bottom:6px}
+  body.queue-density-compact .queue-mainline{margin-bottom:6px}
+  body.queue-density-compact .prompt{max-height:45px;overflow:hidden;padding:7px 9px}
+  body.queue-density-compact .chips{gap:5px;margin-top:7px}
+  body.queue-density-compact .chip{min-height:21px;padding:2px 7px}
+  body.queue-density-compact .reasons{max-height:34px;overflow:hidden}
+  body.queue-density-compact .note{min-height:32px;margin-top:8px;padding:7px 9px}
+  body.queue-density-compact .actions{margin-top:8px}
   .btn{
     min-height:36px;
     display:inline-flex;
@@ -1692,7 +1708,8 @@
   }
   .content-tabs{
     border-bottom-color:#182a3d;
-    background:transparent;
+    background:rgba(2,5,10,.92);
+    backdrop-filter:blur(18px);
   }
   .content-tabs .tab{
     color:#87a2b8;
@@ -1768,7 +1785,7 @@
     .topbar{position:static}
     .hero-row{display:block;padding-top:18px}
     .control-cluster{justify-content:flex-start;margin-top:12px}
-    .content-tabs{overflow:auto}
+    .content-tabs{top:0;overflow:auto}
     .queue-grid{grid-template-columns:1fr}
     .coverage-grid,.lineage-grid,.identity-grid{grid-template-columns:1fr}
     .config-grid,.config-two,.sensor-cards{grid-template-columns:1fr}
@@ -1788,7 +1805,7 @@
     .topbar{flex-wrap:wrap;padding:10px 0}
     .search{order:3;flex-basis:100%;min-width:0}
     .stats{grid-template-columns:1fr}
-    .content-tabs{overflow:auto}
+    .content-tabs{top:0;overflow:auto}
     .coverage-body,.coverage-kpis,.lineage-summary,.identity-summary{grid-template-columns:1fr}
     .shadow-row{grid-template-columns:1fr}
     .destination-review{justify-items:start}
@@ -1964,6 +1981,10 @@
                 <button class="ghost mini" data-queue-filter="mine" type="button">Mine</button>
                 <button class="ghost mini" data-queue-filter="unassigned" type="button">Unassigned</button>
                 <button class="ghost mini" data-queue-filter="escalated" type="button">Escalated</button>
+                <button class="ghost mini" id="toggleQueueDensity" type="button" aria-pressed="false">
+                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 7h14M5 12h14M5 17h14" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+                  <span>Compact view</span>
+                </button>
                 <button class="ghost" id="refreshQueue" type="button">
                   <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v6h-6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
                   Refresh

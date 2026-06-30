@@ -16,6 +16,7 @@ let currentUser = '';
 let queueFilter = 'all';
 let queueCategoryFilter = 'all';
 let queueDestinationFilter = 'all';
+let queueDensity = savedQueueDensity();
 let revealedPrompts = new Map();
 let expandedActivityId = '';
 let statusPopover = null;
@@ -859,7 +860,33 @@ function canDecide(q = {}) {
 }
 
 function canReveal(q = {}) {
-  return currentRole === 'security_admin' && !!q;
+  return currentRole === 'security_admin' && !!q && q.rawRetained === true;
+}
+
+function savedQueueDensity() {
+  try {
+    return localStorage.getItem('promptwall.queueDensity') === 'compact' ? 'compact' : 'comfortable';
+  } catch {
+    return 'comfortable';
+  }
+}
+
+function saveQueueDensity(value) {
+  try {
+    localStorage.setItem('promptwall.queueDensity', value);
+  } catch {}
+}
+
+function applyQueueDensity() {
+  const compact = queueDensity === 'compact';
+  document.body.classList.toggle('queue-density-compact', compact);
+  const button = $('#toggleQueueDensity');
+  if (!button) return;
+  button.classList.toggle('active', compact);
+  button.setAttribute('aria-pressed', String(compact));
+  const label = $('span', button);
+  if (label) label.textContent = compact ? 'Comfort view' : 'Compact view';
+  button.dataset.tooltip = compact ? 'Show full queue details' : 'Fit more queue items';
 }
 
 function queueDecisionLabel(q = {}) {
@@ -1024,6 +1051,32 @@ async function optionalDashboardJson(path, fallback = null, timeoutMs = 1800) {
   const response = await boundedPromise(api(path), timeoutMs, null);
   if (!response || !response.ok) return fallback;
   return boundedPromise(response.json(), timeoutMs, fallback);
+}
+
+async function dashboardJsonWithTimeout(path, timeoutMs = 1800) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await api(path, { signal: controller.signal });
+    if (!response || !response.ok) return null;
+    return await response.json();
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function pendingQueueRows() {
+  const directRows = await dashboardJsonWithTimeout('/api/queries?status=pending', 2200);
+  if (Array.isArray(directRows)) return directRows;
+
+  if (Array.isArray(currentActivity) && currentActivity.length) {
+    return currentActivity.filter((q) => q.status === 'pending');
+  }
+
+  const activityRows = await dashboardJsonWithTimeout('/api/queries?limit=200', 2200);
+  return Array.isArray(activityRows) ? activityRows.filter((q) => q.status === 'pending') : [];
 }
 
 async function loadCsrf() {
@@ -1226,6 +1279,7 @@ function askDestinationReviewReason({ destination, decision }) {
 async function init() {
   setupPanelChrome();
   renderMonitor();
+  applyQueueDensity();
   const meRes = await api('/api/me');
   if (!meRes) return;
   const me = await meRes.json();
@@ -1299,12 +1353,32 @@ function pruneRevealedPrompts() {
   }
 }
 
+function revealedPromptState(id) {
+  const value = revealedPrompts.get(id);
+  if (!value) return null;
+  if (typeof value === 'string') return { text: value, rawRetained: true };
+  return {
+    text: String(value.text || ''),
+    rawRetained: value.rawRetained === true,
+  };
+}
+
+function revealControlFor(q, revealState) {
+  if (currentRole !== 'security_admin') return '';
+  if (revealState) {
+    const label = revealState.rawRetained ? 'Raw shown and logged' : 'Raw unavailable, event logged';
+    return `<button class="btn reveal" data-act="reveal" data-id="${escapeHtml(q.id)}" type="button" disabled>${escapeHtml(label)}</button>`;
+  }
+  if (q.rawRetained !== true) {
+    return `<button class="btn reveal" data-act="reveal" data-id="${escapeHtml(q.id)}" type="button" disabled>Raw not retained</button>`;
+  }
+  return `<button class="btn reveal" data-act="reveal" data-id="${escapeHtml(q.id)}" type="button">${icons.eye}Reveal raw</button>`;
+}
+
 async function loadQueue() {
   setBusy('#tab-queue .panel', true, 'SYNCING');
   try {
-    const r = await api('/api/queries?status=pending');
-    if (!r) return;
-    currentQueue = await r.json();
+    currentQueue = await pendingQueueRows();
     pruneRevealedPrompts();
     if (currentQueue.length && !currentQueue.some((q) => q.id === selected)) selected = currentQueue[0].id;
     if (!currentQueue.length) selected = null;
@@ -1340,14 +1414,10 @@ function renderQueueView() {
 function renderQueueItem(q) {
   const sev = sevClass(q.maxSeverityLabel);
   const detected = Object.keys(q.entityCounts || {}).join(', ') || (q.categories || []).join(', ') || 'policy match';
-  const isRevealed = revealedPrompts.has(q.id);
-  const revealedPrompt = revealedPrompts.get(q.id);
-  const promptText = isRevealed ? revealedPrompt : q.redactedPrompt;
-  const revealControl = canReveal(q)
-    ? isRevealed
-      ? `<button class="btn reveal" data-act="reveal" data-id="${escapeHtml(q.id)}" type="button" disabled>Raw shown and logged</button>`
-      : `<button class="btn reveal" data-act="reveal" data-id="${escapeHtml(q.id)}" type="button">${icons.eye}Reveal gated</button>`
-    : '';
+  const revealState = revealedPromptState(q.id);
+  const isRevealed = !!(revealState && revealState.rawRetained);
+  const promptText = revealState ? revealState.text : q.redactedPrompt;
+  const revealControl = revealControlFor(q, revealState);
   const controls = canAdminWrite()
     || canDecide(q)
     ? `<textarea class="note" id="note_${escapeHtml(q.id)}" placeholder="Decision note, recorded in audit log"></textarea>
@@ -1469,6 +1539,14 @@ document.addEventListener('click', async (e) => {
     renderQueueView();
     return;
   }
+  const densityButton = e.target.closest('#toggleQueueDensity');
+  if (densityButton) {
+    queueDensity = queueDensity === 'compact' ? 'comfortable' : 'compact';
+    saveQueueDensity(queueDensity);
+    hideTooltip();
+    applyQueueDensity();
+    return;
+  }
   const destinationReview = e.target.closest('[data-destination-review]');
   if (destinationReview) {
     if (!canAdminWrite()) {
@@ -1504,7 +1582,9 @@ document.addEventListener('click', async (e) => {
     const q = currentQueue.find((item) => item.id === id) || {};
     if (act === 'reveal') {
       if (!canReveal(q)) {
-        alert('Request not allowed for this session. Use a Security Admin account.');
+        alert(q.rawRetained === false
+          ? 'Raw prompt was not retained for this item.'
+          : 'Request not allowed for this session. Use a Security Admin account.');
         return;
       }
       const password = await askRevealPassword();
@@ -1525,10 +1605,14 @@ document.addEventListener('click', async (e) => {
       if (r.status === 429) { alert('Too many confirmation attempts. Try again later.'); return; }
       if (!r.ok) return;
       const body = await r.json();
-      revealedPrompts.set(id, body.rawPrompt || '');
+      const rawRetained = body.rawRetained === true;
+      revealedPrompts.set(id, { text: body.rawPrompt || '', rawRetained });
       const p = $(`#p_${CSS.escape(id)}`);
-      if (p) { p.textContent = body.rawPrompt; p.classList.add('revealed'); }
-      actionButton.textContent = 'Raw shown and logged';
+      if (p) {
+        p.textContent = body.rawPrompt || '';
+        p.classList.toggle('revealed', rawRetained);
+      }
+      actionButton.textContent = rawRetained ? 'Raw shown and logged' : 'Raw unavailable, event logged';
       actionButton.disabled = true;
       return;
     }

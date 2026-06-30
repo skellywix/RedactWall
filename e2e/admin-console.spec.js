@@ -87,6 +87,23 @@ async function recordHeartbeat(request, { user, source, destination, sensor }) {
   expect(response.ok()).toBeTruthy();
 }
 
+async function setStoreRawForApproval(page, enabled) {
+  await page.evaluate(async (storeRawForApproval) => {
+    const csrfResponse = await fetch('/api/csrf');
+    if (!csrfResponse.ok) throw new Error(`csrf failed: ${csrfResponse.status}`);
+    const { csrfToken } = await csrfResponse.json();
+    const response = await fetch('/api/policy', {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-csrf-token': csrfToken,
+      },
+      body: JSON.stringify({ storeRawForApproval }),
+    });
+    if (!response.ok) throw new Error(`policy update failed: ${response.status}`);
+  }, enabled);
+}
+
 test('admin console login, approval, policy save, and evidence export work in a browser', async ({ page, request }) => {
   const problems = collectUiProblems(page);
   const gateResponse = await request.post('/api/v1/gate', {
@@ -322,6 +339,13 @@ test('admin console controls and forms are wired end to end', async ({ page, req
   await expect(page.locator(`.q[data-id="${deny.id}"]`)).toHaveCount(0);
   await page.locator('#queueDestinationFilter').selectOption('all');
   await page.locator('#queueCategoryFilter').selectOption('all');
+  await page.locator('#toggleQueueDensity').click();
+  await expect(page.locator('body')).toHaveClass(/queue-density-compact/);
+  await expect(page.locator('#toggleQueueDensity')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#toggleQueueDensity')).toContainText('Comfort view');
+  await page.locator('#toggleQueueDensity').click();
+  await expect(page.locator('body')).not.toHaveClass(/queue-density-compact/);
+  await expect(page.locator('#toggleQueueDensity')).toHaveAttribute('aria-pressed', 'false');
 
   const revealRow = page.locator(`.q[data-id="${reveal.id}"]`);
   await revealRow.click();
@@ -332,6 +356,23 @@ test('admin console controls and forms are wired end to end', async ({ page, req
   await page.locator('.stepup-dialog').getByRole('button', { name: 'Reveal' }).click();
   await expect(page.locator(`#p_${reveal.id}`)).toContainText('524-71-9101');
   await expect(revealRow.locator('[data-act="reveal"]')).toHaveText('Raw shown and logged');
+
+  await setStoreRawForApproval(page, false);
+  const noRaw = await createHeldPrompt(request, {
+    suffix: '9104',
+    user: 'no-raw-ui@example.test',
+    destination: 'claude.ai',
+  });
+  await page.locator('#refreshQueue').click();
+  const noRawRow = page.locator(`.q[data-id="${noRaw.id}"]`);
+  await expect(noRawRow).toBeVisible();
+  await expect(noRawRow).not.toContainText('524-71-9104');
+  await expect(noRawRow.locator('[data-act="reveal"]')).toHaveText('Raw not retained');
+  await expect(noRawRow.locator('[data-act="reveal"]')).toBeDisabled();
+  await setStoreRawForApproval(page, true);
+  await noRawRow.locator('textarea.note').fill('Cleanup non-retained raw UI check');
+  await noRawRow.locator('[data-act="deny"]').click();
+  await expect(noRawRow).toHaveCount(0);
 
   const denyRow = page.locator(`.q[data-id="${deny.id}"]`);
   await denyRow.locator('textarea.note').fill('Deny from full UI wiring sweep');
@@ -575,14 +616,14 @@ test('signal operations monitoring console supports adaptive states', async ({ p
 
   await page.locator('.content-tabs .tab[data-tab="monitor"]').click();
   await expect(page.locator('#tab-monitor')).toBeVisible();
-  await expect(page.locator('.signal-console')).toContainText('Signal Operations');
+  await expect(page.locator('.signal-console')).toContainText('Signal Monitor');
   await expect(page.locator('#monitorInspector')).toContainText('No selection');
 
   await page.locator('#monitorSearch').focus();
   await expect(page.locator('#monitorSearchWrap')).toHaveAttribute('data-state', 'focus');
   await page.locator('#monitorSearch').fill('a');
   await expect(page.locator('#monitorSearchWrap')).toHaveAttribute('data-state', 'warning');
-  await expect(page.locator('#monitorSearchHelp')).toContainText('too broad');
+  await expect(page.locator('#monitorSearchHelp')).toContainText('Too broad.');
   await page.locator('#monitorSearch').fill('<bad');
   await expect(page.locator('#monitorSearchWrap')).toHaveAttribute('data-state', 'error');
   await expect(page.locator('#monitorSearch')).toHaveAttribute('aria-invalid', 'true');
@@ -595,11 +636,10 @@ test('signal operations monitoring console supports adaptive states', async ({ p
   await expect(page.locator('#monitorPanelGrid')).not.toContainText('Browser Chat Sensor');
 
   await page.locator('[data-monitor-select="item"][data-monitor-id="node-audit-verifier"]').click();
-  await expect(page.locator('#monitorInspector')).toContainText('Resolving selected signal metadata');
   await expect(page.locator('#monitorInspector')).toContainText('Audit Chain Verifier');
   await page.locator('[data-monitor-expand="node-audit-verifier"]').click();
   await expect(page.locator('[data-monitor-panel="node-audit-verifier"]')).toHaveClass(/is-expanded/);
-  await expect(page.locator('[data-monitor-panel="node-audit-verifier"]')).toContainText('Confidence 97%');
+  await expect(page.locator('[data-monitor-panel="node-audit-verifier"]')).toContainText('97% confidence');
   await page.locator('[data-monitor-close-inspector]').click();
   await expect(page.locator('#monitorInspector')).toContainText('No selection');
 
@@ -607,10 +647,9 @@ test('signal operations monitoring console supports adaptive states', async ({ p
   await page.locator('[data-monitor-status="all"]').click();
   const eventRow = page.locator('.activity-feed-row[data-monitor-event-id="evt-7902"]');
   await eventRow.click();
-  await expect(page.locator('#monitorInspector')).toContainText('Resolving selected signal metadata');
   await expect(page.locator('#monitorInspector')).toContainText('SSN paste blocked before egress');
   await eventRow.locator('[data-monitor-event-expand="evt-7902"]').click();
-  await expect(page.locator('.activity-detail-block:has-text("alwaysBlock")')).toBeVisible();
+  await expect(page.locator('.activity-detail-block:has-text("hard-stop identifier")')).toBeVisible();
 
   await page.locator('#monitorRefresh').click();
   await expect(page.locator('#monitorRefresh')).toBeDisabled();
