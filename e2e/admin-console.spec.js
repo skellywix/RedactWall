@@ -569,6 +569,61 @@ test('admin console secondary controls and dialog cancels are wired end to end',
   expect(problems).toEqual([]);
 });
 
+test('signal operations monitoring console supports adaptive states', async ({ page }) => {
+  const problems = collectUiProblems(page);
+  await login(page);
+
+  await page.locator('.content-tabs .tab[data-tab="monitor"]').click();
+  await expect(page.locator('#tab-monitor')).toBeVisible();
+  await expect(page.locator('.signal-console')).toContainText('Signal Operations');
+  await expect(page.locator('#monitorInspector')).toContainText('No selection');
+
+  await page.locator('#monitorSearch').focus();
+  await expect(page.locator('#monitorSearchWrap')).toHaveAttribute('data-state', 'focus');
+  await page.locator('#monitorSearch').fill('a');
+  await expect(page.locator('#monitorSearchWrap')).toHaveAttribute('data-state', 'warning');
+  await expect(page.locator('#monitorSearchHelp')).toContainText('too broad');
+  await page.locator('#monitorSearch').fill('<bad');
+  await expect(page.locator('#monitorSearchWrap')).toHaveAttribute('data-state', 'error');
+  await expect(page.locator('#monitorSearch')).toHaveAttribute('aria-invalid', 'true');
+  await page.locator('#monitorSearch').fill('audit');
+  await expect(page.locator('#monitorSearchWrap')).toHaveAttribute('data-state', 'valid');
+
+  await page.locator('[data-monitor-status="error"]').click();
+  await expect(page.locator('[data-monitor-status="error"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#monitorPanelGrid')).toContainText('Audit Chain Verifier');
+  await expect(page.locator('#monitorPanelGrid')).not.toContainText('Browser Chat Sensor');
+
+  await page.locator('[data-monitor-select="item"][data-monitor-id="node-audit-verifier"]').click();
+  await expect(page.locator('#monitorInspector')).toContainText('Resolving selected signal metadata');
+  await expect(page.locator('#monitorInspector')).toContainText('Audit Chain Verifier');
+  await page.locator('[data-monitor-expand="node-audit-verifier"]').click();
+  await expect(page.locator('[data-monitor-panel="node-audit-verifier"]')).toHaveClass(/is-expanded/);
+  await expect(page.locator('[data-monitor-panel="node-audit-verifier"]')).toContainText('Confidence 97%');
+  await page.locator('[data-monitor-close-inspector]').click();
+  await expect(page.locator('#monitorInspector')).toContainText('No selection');
+
+  await page.locator('#monitorSearch').fill('');
+  await page.locator('[data-monitor-status="all"]').click();
+  const eventRow = page.locator('.activity-feed-row[data-monitor-event-id="evt-7902"]');
+  await eventRow.click();
+  await expect(page.locator('#monitorInspector')).toContainText('Resolving selected signal metadata');
+  await expect(page.locator('#monitorInspector')).toContainText('SSN paste blocked before egress');
+  await eventRow.locator('[data-monitor-event-expand="evt-7902"]').click();
+  await expect(page.locator('.activity-detail-block:has-text("alwaysBlock")')).toBeVisible();
+
+  await page.locator('#monitorRefresh').click();
+  await expect(page.locator('#monitorRefresh')).toBeDisabled();
+  await expect(page.locator('#monitorRefresh')).toContainText('Refreshing');
+  await expect(page.locator('#monitorSearch')).toBeDisabled();
+  await expect(page.locator('#monitorRefresh')).toBeEnabled();
+  await expect(page.locator('#monitorActivityFeed')).toContainText('Signal refresh completed');
+
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await expect(page.locator('.signal-dot.is-pulsing').first()).toHaveCSS('animation-name', 'none');
+  expect(problems).toEqual([]);
+});
+
 test('admin console mobile layout keeps content tabs usable', async ({ page }) => {
   const problems = collectUiProblems(page);
   await page.setViewportSize({ width: 390, height: 844 });

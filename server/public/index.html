@@ -886,6 +886,417 @@
     gap:10px;
   }
   .activity-detail-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+  .signal-console{
+    --sig-bg:#05080c;
+    --sig-surface:#091017;
+    --sig-surface-2:#0d1720;
+    --sig-surface-3:#121f2a;
+    --sig-text:#e6f1f5;
+    --sig-muted:#8fa5b3;
+    --sig-border:#223240;
+    --sig-border-strong:#3f6070;
+    --sig-focus:#78dbff;
+    --sig-hover:#122331;
+    --sig-active:#173143;
+    --sig-selected:#102f3d;
+    --sig-disabled:#526472;
+    --sig-online:#67e6a1;
+    --sig-idle:#9fb2bf;
+    --sig-warning:#f0b94d;
+    --sig-error:#ff6978;
+    --sig-loading:#78dbff;
+    --sig-offline:#687884;
+    --sig-shadow:0 18px 54px rgba(0,0,0,.2);
+    display:grid;
+    gap:14px;
+    color:var(--sig-text);
+    border:1px solid var(--sig-border);
+    border-radius:8px;
+    background:
+      linear-gradient(180deg,rgba(10,18,25,.98),rgba(5,8,12,.99)),
+      var(--sig-bg);
+    box-shadow:var(--sig-shadow);
+    padding:14px;
+  }
+  .signal-console *{letter-spacing:0}
+  .signal-console button,.signal-console input{font:inherit}
+  .signal-console button:focus-visible,.signal-console input:focus-visible{
+    outline:2px solid var(--sig-focus);
+    outline-offset:2px;
+    box-shadow:0 0 0 4px rgba(120,219,255,.12);
+  }
+  .signal-console-header{
+    display:grid;
+    grid-template-columns:minmax(0,1fr) auto;
+    gap:14px;
+    align-items:start;
+    border:1px solid var(--sig-border);
+    border-radius:8px;
+    background:linear-gradient(180deg,rgba(18,31,42,.82),rgba(9,16,23,.96));
+    padding:14px;
+  }
+  .signal-console-title{display:flex;align-items:flex-start;gap:12px;min-width:0}
+  .signal-console-title h2{margin:0;color:var(--sig-text);font-size:22px;line-height:1.12;font-weight:790}
+  .signal-console-title p{margin:6px 0 0;color:var(--sig-muted);font-size:12.5px;line-height:1.45;max-width:720px}
+  .signal-console-mark{
+    width:36px;
+    height:36px;
+    display:grid;
+    place-items:center;
+    border:1px solid var(--sig-border-strong);
+    border-radius:8px;
+    color:var(--sig-focus);
+    background:#071018;
+    font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace;
+    font-size:12px;
+    font-weight:800;
+  }
+  .signal-header-actions{display:flex;gap:8px;align-items:center;justify-content:flex-end;flex-wrap:wrap}
+  .signal-live-summary{
+    min-height:34px;
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    border:1px solid rgba(103,230,161,.36);
+    border-radius:8px;
+    background:rgba(103,230,161,.08);
+    color:#c9f9de;
+    padding:7px 10px;
+    font-size:12px;
+    font-weight:780;
+    text-transform:uppercase;
+  }
+  .signal-updated{color:var(--sig-muted);font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace;font-size:11px}
+  .signal-toolbar{
+    display:grid;
+    grid-template-columns:minmax(240px,420px) minmax(0,1fr);
+    gap:12px;
+    align-items:start;
+  }
+  .signal-input-wrap{display:grid;gap:6px}
+  .signal-input-wrap label{color:var(--sig-text);font-size:11px;font-weight:790;text-transform:uppercase}
+  .signal-input-box{
+    min-height:42px;
+    display:flex;
+    align-items:center;
+    gap:9px;
+    border:1px solid var(--sig-border);
+    border-radius:8px;
+    background:var(--sig-surface);
+    padding:0 11px;
+    color:var(--sig-muted);
+  }
+  .signal-input-box svg{width:16px;height:16px;flex:0 0 auto}
+  .signal-input-box input{
+    width:100%;
+    min-width:0;
+    border:0;
+    outline:0;
+    background:transparent;
+    color:var(--sig-text);
+    font-size:13px;
+  }
+  .signal-input-box input::placeholder{color:#637988}
+  .signal-input-wrap[data-state="focus"] .signal-input-box,
+  .signal-input-box:focus-within{border-color:var(--sig-focus);background:#0b1822}
+  .signal-input-wrap[data-state="valid"] .signal-input-box{border-color:rgba(103,230,161,.48)}
+  .signal-input-wrap[data-state="warning"] .signal-input-box{border-color:rgba(240,185,77,.62);background:rgba(240,185,77,.08)}
+  .signal-input-wrap[data-state="error"] .signal-input-box{border-color:rgba(255,105,120,.7);background:rgba(255,105,120,.08)}
+  .signal-input-wrap[data-state="disabled"] .signal-input-box{opacity:.58;cursor:not-allowed}
+  .signal-input-help{min-height:18px;color:var(--sig-muted);font-size:11.5px;line-height:1.35}
+  .signal-input-wrap[data-state="valid"] .signal-input-help{color:#a8f2c8}
+  .signal-input-wrap[data-state="warning"] .signal-input-help{color:#f5d086}
+  .signal-input-wrap[data-state="error"] .signal-input-help{color:#ffb1ba}
+  .signal-filters{display:flex;align-items:end;justify-content:flex-end;gap:7px;flex-wrap:wrap}
+  .signal-chip{
+    min-height:36px;
+    display:inline-flex;
+    align-items:center;
+    gap:7px;
+    border:1px solid var(--sig-border);
+    border-radius:8px;
+    background:var(--sig-surface);
+    color:var(--sig-muted);
+    padding:7px 10px;
+    font-size:12px;
+    font-weight:760;
+  }
+  .signal-chip:hover{border-color:var(--sig-border-strong);background:var(--sig-hover);color:var(--sig-text)}
+  .signal-chip:active,.signal-chip.is-active{background:var(--sig-active);transform:translateY(1px)}
+  .signal-chip[aria-pressed="true"],.signal-chip.is-selected{
+    border-color:var(--sig-focus);
+    background:var(--sig-selected);
+    color:#e9fbff;
+    box-shadow:0 0 0 2px rgba(120,219,255,.12);
+  }
+  .signal-chip.status-warning{border-color:rgba(240,185,77,.58);color:#f5d086;background:rgba(240,185,77,.08)}
+  .signal-chip.status-error{border-color:rgba(255,105,120,.62);color:#ffb1ba;background:rgba(255,105,120,.09)}
+  .signal-chip:disabled,.signal-chip[aria-disabled="true"]{
+    opacity:.48;
+    color:var(--sig-disabled);
+    cursor:not-allowed;
+    pointer-events:none;
+  }
+  .signal-dot{
+    --dot-color:var(--sig-idle);
+    position:relative;
+    width:9px;
+    height:9px;
+    display:inline-block;
+    border-radius:999px;
+    background:var(--dot-color);
+    box-shadow:0 0 0 3px rgba(159,178,191,.12);
+    flex:0 0 auto;
+  }
+  .signal-dot.status-online{--dot-color:var(--sig-online);box-shadow:0 0 0 3px rgba(103,230,161,.14)}
+  .signal-dot.status-idle{--dot-color:var(--sig-idle)}
+  .signal-dot.status-warning{--dot-color:var(--sig-warning);box-shadow:0 0 0 3px rgba(240,185,77,.15)}
+  .signal-dot.status-error{--dot-color:var(--sig-error);box-shadow:0 0 0 3px rgba(255,105,120,.15)}
+  .signal-dot.status-loading{--dot-color:var(--sig-loading);box-shadow:0 0 0 3px rgba(120,219,255,.14)}
+  .signal-dot.status-offline{--dot-color:var(--sig-offline)}
+  .signal-dot.is-pulsing:after{
+    content:"";
+    position:absolute;
+    inset:-1px;
+    border-radius:999px;
+    border:1px solid var(--dot-color);
+    animation:signalPulse 1.8s ease-out infinite;
+  }
+  @keyframes signalPulse{
+    0%{transform:scale(1);opacity:.65}
+    70%{transform:scale(2.4);opacity:0}
+    100%{transform:scale(2.4);opacity:0}
+  }
+  .system-button{
+    min-height:36px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    gap:8px;
+    border:1px solid var(--sig-border);
+    border-radius:8px;
+    background:var(--sig-surface);
+    color:var(--sig-text);
+    padding:8px 11px;
+    font-size:12.5px;
+    font-weight:790;
+  }
+  .system-button.primary{border-color:rgba(120,219,255,.52);background:#123141;color:#e7fbff}
+  .system-button.secondary{background:var(--sig-surface-2)}
+  .system-button.danger{border-color:rgba(255,105,120,.58);background:rgba(255,105,120,.12);color:#ffd2d6}
+  .system-button.ghost{background:transparent}
+  .system-button:hover{border-color:var(--sig-focus);background:var(--sig-hover)}
+  .system-button:active{background:var(--sig-active);transform:translateY(1px)}
+  .system-button:disabled{opacity:.55;cursor:not-allowed;transform:none}
+  .button-spinner{
+    width:13px;
+    height:13px;
+    border-radius:999px;
+    border:2px solid rgba(230,241,245,.28);
+    border-top-color:var(--sig-focus);
+    animation:buttonSpin .8s linear infinite;
+  }
+  @keyframes buttonSpin{to{transform:rotate(360deg)}}
+  .metric-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+  .metric-card{
+    min-height:126px;
+    display:grid;
+    gap:9px;
+    align-content:start;
+    border:1px solid var(--sig-border);
+    border-radius:8px;
+    background:var(--sig-surface);
+    padding:12px;
+  }
+  .metric-card.is-updating{border-color:var(--sig-focus);background:#0b1a24}
+  .metric-card.status-warning{border-color:rgba(240,185,77,.52)}
+  .metric-card.status-critical{border-color:rgba(255,105,120,.58);box-shadow:0 0 0 2px rgba(255,105,120,.08)}
+  .metric-card.status-loading{border-color:rgba(120,219,255,.45)}
+  .metric-card-head{display:flex;align-items:center;justify-content:space-between;gap:8px;color:var(--sig-muted);font-size:11px;text-transform:uppercase;font-weight:790}
+  .metric-value{display:flex;align-items:baseline;gap:5px;color:var(--sig-text);font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace;font-size:29px;font-weight:820;line-height:1}
+  .metric-unit{color:var(--sig-muted);font-size:12px}
+  .metric-meta{display:flex;align-items:center;justify-content:space-between;gap:8px;color:var(--sig-muted);font-size:11.5px}
+  .metric-trend{font-weight:790}
+  .metric-trend.increased{color:#a8f2c8}
+  .metric-trend.decreased{color:#f5d086}
+  .metric-trend.neutral{color:var(--sig-muted)}
+  .metric-skeleton{
+    height:31px;
+    width:68%;
+    border-radius:7px;
+    background:linear-gradient(90deg,#10202b,#183243,#10202b);
+    opacity:.7;
+  }
+  .signal-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(318px,.36fr);gap:14px;align-items:start}
+  .signal-main-stack{display:grid;gap:14px;min-width:0}
+  .signal-section{border:1px solid var(--sig-border);border-radius:8px;background:var(--sig-surface);overflow:hidden}
+  .signal-section-head{
+    min-height:48px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    border-bottom:1px solid var(--sig-border);
+    padding:11px 12px;
+  }
+  .signal-section-head h3{margin:0;color:var(--sig-text);font-size:13px;font-weight:790}
+  .signal-section-head span{color:var(--sig-muted);font-size:11.5px}
+  .surveillance-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:12px}
+  .surveillance-panel{
+    position:relative;
+    display:grid;
+    gap:9px;
+    border:1px solid var(--sig-border);
+    border-radius:8px;
+    background:var(--sig-surface-2);
+    padding:10px;
+  }
+  .surveillance-panel.status-warning{border-color:rgba(240,185,77,.56)}
+  .surveillance-panel.status-error{border-color:rgba(255,105,120,.62)}
+  .surveillance-panel.status-loading{border-color:rgba(120,219,255,.48)}
+  .surveillance-panel.is-selected{
+    border-color:var(--sig-focus);
+    background:linear-gradient(180deg,#0f2633,#0b1822);
+    box-shadow:inset 3px 0 0 var(--sig-focus);
+  }
+  .surveillance-panel.is-expanded{background:#0d1b25}
+  .surveillance-panel.is-loading:after{
+    content:"Resolving";
+    position:absolute;
+    top:8px;
+    right:8px;
+    border:1px solid rgba(120,219,255,.4);
+    border-radius:7px;
+    color:#c8f5ff;
+    background:rgba(120,219,255,.1);
+    padding:3px 7px;
+    font-size:10px;
+    font-weight:800;
+    text-transform:uppercase;
+  }
+  .surveillance-main{
+    width:100%;
+    display:grid;
+    gap:8px;
+    border:0;
+    background:transparent;
+    color:inherit;
+    text-align:left;
+    padding:0;
+  }
+  .surveillance-title{display:flex;align-items:center;gap:8px;min-width:0}
+  .surveillance-title strong{color:var(--sig-text);font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .surveillance-title code{margin-left:auto;color:var(--sig-muted);font-size:11px}
+  .surveillance-copy{margin:0;color:var(--sig-muted);font-size:12px;line-height:1.42}
+  .surveillance-facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+  .surveillance-fact{border:1px solid var(--sig-border);border-radius:7px;background:#09131b;padding:7px}
+  .surveillance-fact span{display:block;color:var(--sig-muted);font-size:10px;text-transform:uppercase}
+  .surveillance-fact b{display:block;margin-top:4px;color:var(--sig-text);font-size:12px;font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace}
+  .surveillance-metadata{
+    display:none;
+    border:1px solid var(--sig-border);
+    border-radius:7px;
+    background:#071018;
+    color:#b9ced9;
+    padding:8px;
+    font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace;
+    font-size:11px;
+    line-height:1.45;
+  }
+  .surveillance-panel:hover .surveillance-metadata,
+  .surveillance-panel:focus-within .surveillance-metadata,
+  .surveillance-panel.is-selected .surveillance-metadata{display:block}
+  .surveillance-expanded{display:none;border-top:1px solid var(--sig-border);padding-top:8px;color:#c7d8e0;font-size:12px;line-height:1.45}
+  .surveillance-panel.is-expanded .surveillance-expanded{display:block}
+  .panel-expand{
+    justify-self:start;
+    min-height:30px;
+    border:1px solid var(--sig-border);
+    border-radius:7px;
+    background:#09131b;
+    color:var(--sig-muted);
+    padding:5px 8px;
+    font-size:11.5px;
+    font-weight:780;
+  }
+  .panel-expand:hover{border-color:var(--sig-focus);color:var(--sig-text);background:var(--sig-hover)}
+  .activity-feed{display:grid}
+  .activity-feed-row{
+    display:grid;
+    grid-template-columns:96px 92px minmax(120px,.72fr) minmax(180px,1fr) 86px auto;
+    gap:10px;
+    align-items:center;
+    min-height:54px;
+    border-bottom:1px solid var(--sig-border);
+    background:transparent;
+    color:var(--sig-muted);
+    padding:10px 12px;
+    text-align:left;
+  }
+  .activity-feed-row:hover,.activity-feed-row:focus-visible{background:var(--sig-hover);outline:none}
+  .activity-feed-row.is-selected{background:var(--sig-selected);box-shadow:inset 3px 0 0 var(--sig-focus)}
+  .activity-feed-row.is-new{box-shadow:inset 3px 0 0 var(--sig-online)}
+  .activity-feed-row.severity-warning{background:linear-gradient(90deg,rgba(240,185,77,.08),transparent)}
+  .activity-feed-row.severity-critical{background:linear-gradient(90deg,rgba(255,105,120,.09),transparent)}
+  .activity-feed-row b{color:var(--sig-text);font-weight:760}
+  .activity-feed-row code{color:#a9c3cf;font-size:11px}
+  .activity-feed-row .severity-label{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:790;text-transform:uppercase}
+  .activity-feed-row .severity-label.warning{color:#f5d086}
+  .activity-feed-row .severity-label.critical{color:#ffb1ba}
+  .activity-feed-row .severity-label.info{color:#b6d4e0}
+  .activity-expand{
+    min-height:28px;
+    border:1px solid var(--sig-border);
+    border-radius:7px;
+    background:#09131b;
+    color:var(--sig-muted);
+    padding:4px 7px;
+    font-size:11px;
+    font-weight:780;
+  }
+  .activity-detail-block{
+    display:none;
+    border-bottom:1px solid var(--sig-border);
+    background:#071018;
+    padding:11px 12px 12px 22px;
+    color:#c5d7df;
+  }
+  .activity-detail-block.is-expanded{display:grid;gap:8px}
+  .signal-inspector{
+    position:sticky;
+    top:76px;
+    display:grid;
+    gap:12px;
+    border:1px solid var(--sig-border);
+    border-radius:8px;
+    background:var(--sig-surface);
+    padding:12px;
+  }
+  .signal-inspector.state-warning{border-color:rgba(240,185,77,.56)}
+  .signal-inspector.state-error{border-color:rgba(255,105,120,.62)}
+  .signal-inspector-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+  .signal-inspector h3{margin:0;color:var(--sig-text);font-size:14px;font-weight:790}
+  .signal-inspector p{margin:5px 0 0;color:var(--sig-muted);font-size:12px;line-height:1.45}
+  .inspector-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  .inspector-field{border:1px solid var(--sig-border);border-radius:7px;background:#071018;padding:8px}
+  .inspector-field span{display:block;color:var(--sig-muted);font-size:10px;text-transform:uppercase;font-weight:780}
+  .inspector-field b{display:block;margin-top:5px;color:var(--sig-text);font-size:12px;word-break:break-word}
+  .raw-metadata{
+    border:1px solid var(--sig-border);
+    border-radius:7px;
+    background:#05090d;
+    color:#bad2dd;
+    padding:9px;
+    font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace;
+    font-size:11px;
+    line-height:1.45;
+    white-space:pre-wrap;
+    overflow:auto;
+    max-height:210px;
+  }
+  .signal-empty{display:grid;gap:7px;place-items:start;padding:22px 12px;color:var(--sig-muted)}
+  .signal-empty b{color:var(--sig-text);font-size:13px;text-transform:uppercase}
+  .signal-empty p{margin:0;font-size:12.5px;line-height:1.45}
   .meta-popover,.ui-tooltip{
     position:fixed;
     z-index:50;
@@ -936,6 +1347,7 @@
   body[data-active-tab="policy"] .hero-row,
   body[data-active-tab="policy"] .stats{display:none}
   body[data-active-tab="policy"] .content-tabs{margin-top:18px}
+  body[data-active-tab="monitor"] .stats{display:none}
   @media(max-width:1180px){
     .app-shell{grid-template-columns:1fr}
     .rail{position:static;height:auto;flex-direction:row;align-items:center;overflow:auto}
@@ -944,11 +1356,18 @@
     .tab{white-space:nowrap}
     .rail-section,.rail-status{display:none}
     .workspace{padding:0 16px 24px}
+    .topbar{position:static}
+    .hero-row{display:block;padding-top:18px}
+    .control-cluster{justify-content:flex-start;margin-top:12px}
+    .content-tabs{overflow:auto}
     .queue-grid{grid-template-columns:1fr}
     .coverage-grid,.lineage-grid,.identity-grid{grid-template-columns:1fr}
     .config-grid,.config-two,.sensor-cards{grid-template-columns:1fr}
     .wide-panel{grid-column:auto}
     .stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+    .signal-console-header,.signal-toolbar,.signal-layout{grid-template-columns:1fr}
+    .signal-header-actions,.signal-filters{justify-content:flex-start}
+    .signal-inspector{position:static}
   }
   @media(max-width:760px){
     body{font-size:13px}
@@ -958,8 +1377,6 @@
     .brand{min-width:0}
     .topbar{flex-wrap:wrap;padding:10px 0}
     .search{order:3;flex-basis:100%;min-width:0}
-    .hero-row{display:block;padding-top:18px}
-    .control-cluster{justify-content:flex-start;margin-top:12px}
     .stats{grid-template-columns:1fr}
     .content-tabs{overflow:auto}
     .coverage-body,.coverage-kpis,.lineage-summary,.identity-summary{grid-template-columns:1fr}
@@ -974,12 +1391,19 @@
     .lineage-grid th,.lineage-grid td{padding:9px 7px}
     .lineage-grid th:first-child,.lineage-grid td:first-child{width:40%}
     .lineage-grid th:not(:first-child),.lineage-grid td:not(:first-child){width:15%}
+    .signal-console{padding:10px}
+    .signal-console-header{padding:12px}
+    .signal-console-title{gap:9px}
+    .metric-grid,.surveillance-grid,.inspector-grid,.surveillance-facts{grid-template-columns:1fr}
+    .activity-feed-row{grid-template-columns:1fr;gap:5px;align-items:start}
+    .activity-expand{justify-self:start}
+    .signal-section-head{align-items:flex-start;flex-direction:column}
     .panel{overflow:auto}
     .who{display:none}
   }
   @media(prefers-reduced-motion:reduce){
     *,*:before,*:after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition:none!important}
-    .status-light.is-live,.dot,.pin{animation:none!important}
+    .status-light.is-live,.dot,.pin,.signal-dot.is-pulsing:after,.button-spinner{animation:none!important}
     .panel.is-loading:after,.stats.is-loading:after,.config-shell.is-loading:after,.btn:hover:after,.ghost:hover:after{display:none!important}
   }
 </style>
@@ -999,6 +1423,10 @@
       <button class="tab active" data-tab="queue" type="button">
         <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M5 5h14v5H5V5Zm0 9h14v5H5v-5Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg></span>
         Approval Queue <span class="badge hidden" id="qBadge">0</span>
+      </button>
+      <button class="tab" data-tab="monitor" type="button">
+        <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M4 12h4l2-6 4 12 2-6h4M5 19h14" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        Signal Operations
       </button>
       <button class="tab" data-tab="activity" type="button">
         <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M4 7h16M4 12h16M4 17h10" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></span>
@@ -1083,6 +1511,7 @@
 
     <div class="content-tabs">
       <button class="tab active" data-tab="queue" type="button">Approval Queue</button>
+      <button class="tab" data-tab="monitor" type="button">Signal Operations</button>
       <button class="tab" data-tab="activity" type="button">All Activity</button>
       <button class="tab" data-tab="coverage" type="button">Coverage</button>
       <button class="tab" data-tab="identity" type="button">Identity</button>
@@ -1153,6 +1582,71 @@
                 <div class="posture-item"><span>Admin workflow</span><b>Approval gated</b></div>
               </div>
             </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="tab-monitor" class="hidden">
+        <div class="signal-console" aria-label="Signal Operations monitoring console">
+          <div class="signal-console-header">
+            <div class="signal-console-title">
+              <div class="signal-console-mark" aria-hidden="true">SO</div>
+              <div>
+                <h2>Signal Operations</h2>
+                <p>Monitor sensor health, policy pressure, and suspicious AI egress signals across the control plane.</p>
+              </div>
+            </div>
+            <div class="signal-header-actions">
+              <div class="signal-live-summary" id="monitorLiveSummary">
+                <span class="signal-dot status-online is-pulsing" role="img" aria-label="Live monitoring online"></span>
+                LIVE
+              </div>
+              <span class="signal-updated" id="monitorUpdated">UPDATED -</span>
+              <button class="system-button primary" id="monitorRefresh" type="button">Refresh Signals</button>
+              <button class="system-button ghost" id="monitorClearSelection" type="button" disabled>Dismiss Inspector</button>
+            </div>
+          </div>
+
+          <div class="signal-toolbar">
+            <div class="signal-input-wrap" id="monitorSearchWrap" data-state="default">
+              <label for="monitorSearch">Signal Search</label>
+              <div class="signal-input-box">
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m21 21-4.35-4.35M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+                <input id="monitorSearch" type="search" autocomplete="off" placeholder="Filter by node, source, location, event, or metadata" aria-describedby="monitorSearchHelp" />
+              </div>
+              <div class="signal-input-help" id="monitorSearchHelp">Type two or more characters to narrow live signals.</div>
+            </div>
+            <div class="signal-filters" id="monitorStatusFilters" aria-label="Status filters"></div>
+          </div>
+
+          <div class="metric-grid" id="monitorMetrics" aria-live="polite"></div>
+
+          <div class="signal-layout">
+            <div class="signal-main-stack">
+              <div class="signal-section">
+                <div class="signal-section-head">
+                  <div>
+                    <h3>Monitored Surface</h3>
+                    <span id="monitorPanelSummary">Inspectable entities</span>
+                  </div>
+                  <button class="system-button secondary" id="monitorExpandFirst" type="button">Expand First Signal</button>
+                </div>
+                <div class="surveillance-grid" id="monitorPanelGrid" role="list" aria-label="Monitored systems"></div>
+              </div>
+
+              <div class="signal-section">
+                <div class="signal-section-head">
+                  <div>
+                    <h3>Activity Feed</h3>
+                    <span id="monitorFeedSummary">Recent signal events</span>
+                  </div>
+                  <button class="system-button danger" id="monitorHoldAction" type="button">Hold Critical Stream</button>
+                </div>
+                <div class="activity-feed" id="monitorActivityFeed" role="listbox" aria-label="Signal event timeline"></div>
+              </div>
+            </div>
+
+            <aside class="signal-inspector" id="monitorInspector" aria-live="polite"></aside>
           </div>
         </div>
       </section>

@@ -16,9 +16,24 @@ let currentUser = '';
 let queueFilter = 'all';
 let queueCategoryFilter = 'all';
 let queueDestinationFilter = 'all';
+let revealedPrompts = new Map();
 let expandedActivityId = '';
 let statusPopover = null;
 let tooltipEl = null;
+let monitorStatusFilter = 'all';
+let monitorSearchTerm = '';
+let monitorSearchFocused = false;
+let monitorSelectedKind = '';
+let monitorSelectedId = '';
+let monitorInspectorLoading = false;
+let monitorInspectorTimer = null;
+let monitorExpandedPanelId = '';
+let monitorExpandedEventId = '';
+let monitorRefreshing = false;
+let monitorHoldLoading = false;
+let monitorUpdateSequence = 0;
+let monitorLastUpdated = new Date().toISOString();
+let monitorRecentEventId = 'evt-7902';
 
 const icons = {
   check: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m5 12 4 4L19 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
@@ -28,10 +43,626 @@ const icons = {
   shield: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 4l7 3v5c0 4.2-2.6 6.8-7 8-4.4-1.2-7-3.8-7-8V7l7-3Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
 };
 
+const monitorStatusOptions = [
+  { id: 'all', label: 'All' },
+  { id: 'online', label: 'Online' },
+  { id: 'idle', label: 'Idle' },
+  { id: 'warning', label: 'Warning' },
+  { id: 'error', label: 'Critical' },
+  { id: 'loading', label: 'Resolving' },
+  { id: 'offline', label: 'Offline' },
+  { id: 'archived', label: 'Archived', disabled: true },
+];
+
+const monitorItems = [
+  {
+    id: 'node-browser-chat',
+    name: 'Browser Chat Sensor',
+    type: 'browser extension',
+    status: 'online',
+    source: 'browser_extension',
+    location: 'Managed Chrome fleet',
+    health: 98,
+    confidence: 94,
+    relatedMetric: 'Protected sessions',
+    lastUpdated: '22 sec ago',
+    description: 'Inline prompt inspection is connected for governed AI destinations.',
+    metadata: {
+      tenant: 'cu-acme',
+      policy: 'block',
+      destinations: ['chatgpt.com', 'claude.ai', 'gemini.google.com'],
+      sampledEvents: 184,
+    },
+  },
+  {
+    id: 'node-endpoint-upload',
+    name: 'Endpoint Upload Watch',
+    type: 'endpoint agent',
+    status: 'warning',
+    source: 'endpoint_agent',
+    location: 'Windows desktop collectors',
+    health: 72,
+    confidence: 88,
+    relatedMetric: 'File path coverage',
+    lastUpdated: '1 min ago',
+    description: 'Desktop upload collector is active, but two seats reported delayed inventory.',
+    metadata: {
+      tenant: 'cu-acme',
+      delayedSeats: 2,
+      collector: 'protected-upload',
+      action: 'review install health',
+    },
+  },
+  {
+    id: 'node-mcp-drive',
+    name: 'MCP Drive Redactor',
+    type: 'mcp guard',
+    status: 'online',
+    source: 'mcp_guard',
+    location: 'SharePoint and Drive connectors',
+    health: 91,
+    confidence: 90,
+    relatedMetric: 'Redaction path',
+    lastUpdated: '35 sec ago',
+    description: 'Connector payloads are redacted before model access and recorded without raw bodies.',
+    metadata: {
+      tenant: 'cu-acme',
+      connector: 'microsoft365',
+      redactedDocuments: 31,
+      mode: 'metadata only',
+    },
+  },
+  {
+    id: 'node-approval-gate',
+    name: 'Approval Release Gate',
+    type: 'workflow',
+    status: 'idle',
+    source: 'approval_queue',
+    location: 'Security admin console',
+    health: 84,
+    confidence: 86,
+    relatedMetric: 'Pending queue',
+    lastUpdated: '3 min ago',
+    description: 'Held prompts are waiting for assigned reviewers without breaching SLA.',
+    metadata: {
+      tenant: 'cu-acme',
+      pending: 4,
+      escalated: 0,
+      route: 'security_admin',
+    },
+  },
+  {
+    id: 'node-audit-verifier',
+    name: 'Audit Chain Verifier',
+    type: 'audit integrity',
+    status: 'error',
+    source: 'audit_log',
+    location: 'Evidence pack worker',
+    health: 41,
+    confidence: 97,
+    relatedMetric: 'Verifier lag',
+    lastUpdated: '7 min ago',
+    description: 'Regional evidence worker missed its verification window and needs operator review.',
+    metadata: {
+      tenant: 'cu-acme',
+      lagSeconds: 412,
+      affectedWorker: 'evidence-pack-2',
+      recommendedAction: 'rerun verifier',
+    },
+  },
+  {
+    id: 'node-shadow-inventory',
+    name: 'Desktop AI Inventory',
+    type: 'shadow ai',
+    status: 'offline',
+    source: 'endpoint_agent',
+    location: 'Mac and Windows inventory',
+    health: 0,
+    confidence: 62,
+    relatedMetric: 'Shadow AI scan',
+    lastUpdated: '18 min ago',
+    description: 'Inventory heartbeat stopped for one monitored segment.',
+    metadata: {
+      tenant: 'cu-acme',
+      segment: 'lending operations',
+      lastToolSeen: 'unapproved-desktop-ai.example',
+      seatsMissing: 1,
+    },
+  },
+  {
+    id: 'node-policy-compiler',
+    name: 'Policy Compiler',
+    type: 'policy engine',
+    status: 'loading',
+    source: 'policy',
+    location: 'Scoped rule resolver',
+    health: 67,
+    confidence: 80,
+    relatedMetric: 'Rule propagation',
+    lastUpdated: 'resolving',
+    description: 'Scoped policy rules are being reconciled against the latest destination list.',
+    metadata: {
+      tenant: 'cu-acme',
+      scopes: 6,
+      exceptions: 2,
+      state: 'reconciling',
+    },
+  },
+];
+
+const monitorEvents = [
+  {
+    id: 'evt-7902',
+    timestamp: new Date(Date.now() - 30000).toISOString(),
+    severity: 'critical',
+    source: 'browser_extension',
+    title: 'SSN paste blocked before egress',
+    description: 'A governed chat destination received a hard-stop identifier and the prompt was held.',
+    confidence: 99,
+    relatedMetric: 'Critical holds',
+    status: 'error',
+    metadata: { destination: 'chatgpt.com', detector: 'US_SSN', policy: 'alwaysBlock', rawRetained: false },
+  },
+  {
+    id: 'evt-7899',
+    timestamp: new Date(Date.now() - 105000).toISOString(),
+    severity: 'warning',
+    source: 'endpoint_agent',
+    title: 'Ungoverned desktop AI tool observed',
+    description: 'Endpoint inventory reported an AI client not present in the governed destination list.',
+    confidence: 82,
+    relatedMetric: 'Shadow AI scan',
+    status: 'warning',
+    metadata: { destination: 'unapproved-desktop-ai.example', sensor: 'desktop inventory', action: 'review' },
+  },
+  {
+    id: 'evt-7894',
+    timestamp: new Date(Date.now() - 165000).toISOString(),
+    severity: 'info',
+    source: 'mcp_guard',
+    title: 'Drive connector redacted document context',
+    description: 'Connector payload was transformed before model access and recorded with structured metadata.',
+    confidence: 91,
+    relatedMetric: 'Redaction path',
+    status: 'online',
+    metadata: { connector: 'microsoft365', redactedFields: 6, promptBodyStored: false },
+  },
+  {
+    id: 'evt-7890',
+    timestamp: new Date(Date.now() - 235000).toISOString(),
+    severity: 'critical',
+    source: 'audit_log',
+    title: 'Verifier lag crossed evidence threshold',
+    description: 'Audit chain verification is delayed for one evidence worker.',
+    confidence: 97,
+    relatedMetric: 'Verifier lag',
+    status: 'error',
+    metadata: { worker: 'evidence-pack-2', lagSeconds: 412, auditChainTampered: false },
+  },
+  {
+    id: 'evt-7886',
+    timestamp: new Date(Date.now() - 315000).toISOString(),
+    severity: 'info',
+    source: 'approval_queue',
+    title: 'Reviewer assignment confirmed',
+    description: 'Held prompt routed to the Security Admin queue with SLA metadata.',
+    confidence: 86,
+    relatedMetric: 'Pending queue',
+    status: 'idle',
+    metadata: { queue: 'security_admin', pending: 4, slaMinutes: 60 },
+  },
+];
+
 function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[c]));
+}
+
+function monitorStatusLabel(status) {
+  return ({
+    online: 'Online',
+    idle: 'Idle',
+    warning: 'Warning',
+    error: 'Critical',
+    loading: 'Resolving',
+    offline: 'Offline',
+  })[status] || 'Unknown';
+}
+
+function monitorPulseStatus(status) {
+  return ['online', 'loading', 'warning', 'error'].includes(status);
+}
+
+function monitorStatusDot(status, label) {
+  const pulse = monitorPulseStatus(status) ? ' is-pulsing' : '';
+  return `<span class="signal-dot status-${escapeHtml(status)}${pulse}" role="img" aria-label="${escapeHtml(label || monitorStatusLabel(status))}"></span>`;
+}
+
+function monitorJson(value) {
+  return escapeHtml(JSON.stringify(value || {}, null, 2));
+}
+
+function monitorMetadataLines(metadata) {
+  return Object.entries(metadata || {}).map(([key, value]) => {
+    const rendered = Array.isArray(value) ? value.join(', ') : value;
+    return `${escapeHtml(humanize(key))}: ${escapeHtml(rendered)}`;
+  }).join('<br>');
+}
+
+function monitorSearchState() {
+  if (monitorRefreshing) {
+    return { state: 'disabled', message: 'Search is locked while signal refresh is in progress.' };
+  }
+  const q = monitorSearchTerm;
+  if (!q && monitorSearchFocused) {
+    return { state: 'focus', message: 'Search is ready. Use node, source, location, event, or metadata terms.' };
+  }
+  if (!q) {
+    return { state: 'default', message: 'Type two or more characters to narrow live signals.' };
+  }
+  if (q.length > 64) {
+    return { state: 'error', message: 'Query is too long. Keep monitoring filters under 64 characters.' };
+  }
+  if (/[<>`{}]/.test(q)) {
+    return { state: 'error', message: 'Unsupported characters detected. Use letters, numbers, dots, dashes, spaces, and underscores.' };
+  }
+  if (q.length < 2) {
+    return { state: 'warning', message: 'One character is too broad for this console. Add at least one more character.' };
+  }
+  return { state: 'valid', message: `Filtering signals for "${q}".` };
+}
+
+function monitorSearchText(record) {
+  return [
+    record.id,
+    record.name,
+    record.type,
+    record.status,
+    record.severity,
+    record.source,
+    record.location,
+    record.title,
+    record.description,
+    record.relatedMetric,
+    JSON.stringify(record.metadata || {}),
+  ].join(' ').toLowerCase();
+}
+
+function monitorMatchesSearch(record) {
+  const state = monitorSearchState();
+  if (state.state === 'error') return false;
+  if (!monitorSearchTerm) return true;
+  return monitorSearchText(record).includes(monitorSearchTerm.toLowerCase());
+}
+
+function monitorMatchesStatus(record) {
+  if (monitorStatusFilter === 'all') return true;
+  if (monitorStatusFilter === 'archived') return false;
+  if (record.status === monitorStatusFilter) return true;
+  if (monitorStatusFilter === 'error' && record.severity === 'critical') return true;
+  if (monitorStatusFilter === 'warning' && record.severity === 'warning') return true;
+  if (monitorStatusFilter === 'online' && record.severity === 'info') return true;
+  return false;
+}
+
+function monitorAllEvents() {
+  if (!monitorUpdateSequence) return monitorEvents;
+  const id = `evt-refresh-${monitorUpdateSequence}`;
+  const refreshEvent = {
+    id,
+    timestamp: monitorLastUpdated,
+    severity: monitorHoldLoading ? 'warning' : 'info',
+    source: 'signal_console',
+    title: monitorHoldLoading ? 'Critical stream hold pending' : 'Signal refresh completed',
+    description: monitorHoldLoading
+      ? 'Operator hold request is being written into the local console state.'
+      : 'Mock telemetry refresh updated metrics, timestamps, and recent activity.',
+    confidence: monitorHoldLoading ? 76 : 93,
+    relatedMetric: 'Refresh cadence',
+    status: monitorHoldLoading ? 'warning' : 'online',
+    metadata: { sequence: monitorUpdateSequence, duplicatePrevented: monitorRefreshing || monitorHoldLoading, localOnly: true },
+  };
+  return [refreshEvent, ...monitorEvents];
+}
+
+function monitorFilteredItems() {
+  return monitorItems.filter(monitorMatchesStatus).filter(monitorMatchesSearch);
+}
+
+function monitorFilteredEvents() {
+  return monitorAllEvents().filter(monitorMatchesStatus).filter(monitorMatchesSearch);
+}
+
+function monitorStatusCounts() {
+  const counts = monitorItems.reduce((acc, item) => {
+    acc[item.status] = (acc[item.status] || 0) + 1;
+    return acc;
+  }, { all: monitorItems.length, archived: 0 });
+  return counts;
+}
+
+function monitorMetrics() {
+  const seq = monitorUpdateSequence;
+  return [
+    {
+      id: 'active-sensors',
+      label: 'Active sensors',
+      value: 14 + (seq ? 1 : 0),
+      unit: '',
+      trend: seq ? 'increased' : 'neutral',
+      status: 'normal',
+      lastUpdated: monitorLastUpdated,
+      updating: seq > 0,
+    },
+    {
+      id: 'risk-pressure',
+      label: 'Risk pressure',
+      value: Math.max(54, 61 - seq),
+      unit: '%',
+      trend: seq ? 'decreased' : 'neutral',
+      status: 'warning',
+      lastUpdated: monitorLastUpdated,
+      updating: seq > 0,
+    },
+    {
+      id: 'critical-holds',
+      label: 'Critical holds',
+      value: 3 + (monitorHoldLoading ? 1 : 0),
+      unit: '',
+      trend: monitorHoldLoading ? 'increased' : 'neutral',
+      status: 'critical',
+      lastUpdated: monitorLastUpdated,
+      updating: monitorHoldLoading,
+    },
+    {
+      id: 'audit-lag',
+      label: 'Verifier lag',
+      value: monitorRefreshing ? '' : Math.max(38, 412 - (seq * 46)),
+      unit: monitorRefreshing ? '' : 'sec',
+      trend: seq ? 'decreased' : 'neutral',
+      status: monitorRefreshing ? 'loading' : 'critical',
+      lastUpdated: monitorLastUpdated,
+      updating: monitorRefreshing,
+    },
+  ];
+}
+
+function renderMonitorStatusFilters() {
+  const counts = monitorStatusCounts();
+  $('#monitorStatusFilters').innerHTML = monitorStatusOptions.map((option) => {
+    const disabled = option.disabled || !counts[option.id];
+    const selectedChip = monitorStatusFilter === option.id;
+    const statusClass = option.id === 'warning' ? ' status-warning' : option.id === 'error' ? ' status-error' : '';
+    const dot = option.id === 'all' || option.id === 'archived'
+      ? ''
+      : monitorStatusDot(option.id, `${option.label} status filter`);
+    return `<button class="signal-chip${statusClass} ${selectedChip ? 'is-selected' : ''}" type="button" data-monitor-status="${escapeHtml(option.id)}" aria-pressed="${selectedChip ? 'true' : 'false'}" ${disabled ? 'disabled aria-disabled="true"' : ''}>
+      ${dot}<span>${escapeHtml(option.label)}</span><b>${escapeHtml(counts[option.id] || 0)}</b>
+    </button>`;
+  }).join('');
+}
+
+function renderMonitorMetrics() {
+  $('#monitorMetrics').innerHTML = monitorMetrics().map((metric) => {
+    const statusClass = metric.status === 'normal' ? '' : ` status-${escapeHtml(metric.status)}`;
+    const value = metric.status === 'loading'
+      ? '<div class="metric-skeleton" aria-hidden="true"></div><span class="metric-unit">Loading</span>'
+      : `<span>${escapeHtml(metric.value)}</span><span class="metric-unit">${escapeHtml(metric.unit || '')}</span>`;
+    const trendLabel = ({
+      increased: 'Increased',
+      decreased: 'Decreased',
+      neutral: 'Stable',
+    })[metric.trend] || 'Stable';
+    return `<article class="metric-card${statusClass}${metric.updating ? ' is-updating' : ''}" aria-busy="${metric.status === 'loading' ? 'true' : 'false'}">
+      <div class="metric-card-head"><span>${escapeHtml(metric.label)}</span>${monitorStatusDot(metric.status === 'normal' ? 'online' : metric.status === 'critical' ? 'error' : metric.status, `${metric.label} ${metric.status}`)}</div>
+      <div class="metric-value">${value}</div>
+      <div class="metric-meta"><span class="metric-trend ${escapeHtml(metric.trend)}">${escapeHtml(trendLabel)}</span><span>${escapeHtml(fmtTime(metric.lastUpdated))}</span></div>
+    </article>`;
+  }).join('');
+}
+
+function renderMonitorPanel(item) {
+  const selectedItem = monitorSelectedKind === 'item' && monitorSelectedId === item.id;
+  const expanded = monitorExpandedPanelId === item.id;
+  const toneClass = ['warning', 'error', 'loading'].includes(item.status) ? ` status-${item.status}` : '';
+  return `<article class="surveillance-panel${toneClass}${selectedItem ? ' is-selected' : ''}${expanded ? ' is-expanded' : ''}${item.status === 'loading' ? ' is-loading' : ''}" role="listitem" data-monitor-panel="${escapeHtml(item.id)}" aria-busy="${item.status === 'loading' ? 'true' : 'false'}">
+    <button class="surveillance-main" type="button" data-monitor-select="item" data-monitor-id="${escapeHtml(item.id)}" aria-pressed="${selectedItem ? 'true' : 'false'}">
+      <div class="surveillance-title">
+        ${monitorStatusDot(item.status, `${item.name} ${monitorStatusLabel(item.status)}`)}
+        <strong>${escapeHtml(item.name)}</strong>
+        <code>${escapeHtml(item.id)}</code>
+      </div>
+      <p class="surveillance-copy">${escapeHtml(item.description)}</p>
+      <div class="surveillance-facts">
+        <div class="surveillance-fact"><span>Status</span><b>${escapeHtml(monitorStatusLabel(item.status))}</b></div>
+        <div class="surveillance-fact"><span>Health</span><b>${escapeHtml(item.health)}%</b></div>
+        <div class="surveillance-fact"><span>Seen</span><b>${escapeHtml(item.lastUpdated)}</b></div>
+      </div>
+    </button>
+    <div class="surveillance-metadata">${monitorMetadataLines(item.metadata)}</div>
+    <button class="panel-expand" type="button" data-monitor-expand="${escapeHtml(item.id)}" aria-expanded="${expanded ? 'true' : 'false'}">${expanded ? 'Hide details' : 'Show details'}</button>
+    <div class="surveillance-expanded">
+      <b>${escapeHtml(sourceLabel(item.source))}</b> at ${escapeHtml(item.location)}. Confidence ${escapeHtml(item.confidence)}%. Related metric: ${escapeHtml(item.relatedMetric)}.
+    </div>
+  </article>`;
+}
+
+function renderMonitorPanels() {
+  const rows = monitorFilteredItems();
+  $('#monitorPanelSummary').textContent = rows.length ? `${rows.length} matching monitored surface(s)` : 'No matching monitored surfaces';
+  $('#monitorPanelGrid').innerHTML = rows.length
+    ? rows.map(renderMonitorPanel).join('')
+    : '<div class="signal-empty"><b>No monitored surface matches</b><p>Change the status chip or search query to inspect another segment.</p></div>';
+}
+
+function severityLabel(severity) {
+  return severity === 'critical' ? 'Critical' : severity === 'warning' ? 'Warning' : 'Info';
+}
+
+function renderMonitorEvent(event) {
+  const selectedEvent = monitorSelectedKind === 'event' && monitorSelectedId === event.id;
+  const expanded = monitorExpandedEventId === event.id;
+  const isRecent = monitorRecentEventId === event.id;
+  const severityIcon = event.severity === 'critical' ? '!' : event.severity === 'warning' ? '!' : 'i';
+  return `<div class="activity-feed-row severity-${escapeHtml(event.severity)}${selectedEvent ? ' is-selected' : ''}${isRecent ? ' is-new' : ''}" role="option" tabindex="0" aria-selected="${selectedEvent ? 'true' : 'false'}" data-monitor-event-id="${escapeHtml(event.id)}">
+      <code>${escapeHtml(event.id)}</code>
+      <span>${escapeHtml(fmtTime(event.timestamp))}</span>
+      <span class="severity-label ${escapeHtml(event.severity)}"><span aria-hidden="true">${severityIcon}</span>${escapeHtml(severityLabel(event.severity))}</span>
+      <b>${escapeHtml(event.title)}</b>
+      <span>${escapeHtml(event.confidence)}% conf.</span>
+      <button class="activity-expand" type="button" data-monitor-event-expand="${escapeHtml(event.id)}" aria-expanded="${expanded ? 'true' : 'false'}">${expanded ? 'Hide' : 'Details'}</button>
+    </div>
+    <div class="activity-detail-block${expanded ? ' is-expanded' : ''}">
+      <div>${escapeHtml(event.description)}</div>
+      <div class="raw-metadata">${monitorJson(event.metadata)}</div>
+    </div>`;
+}
+
+function renderMonitorEvents() {
+  const events = monitorFilteredEvents();
+  $('#monitorFeedSummary').textContent = events.length ? `${events.length} event(s), newest first` : 'No activity matches current filters';
+  $('#monitorActivityFeed').innerHTML = events.length
+    ? events.map(renderMonitorEvent).join('')
+    : '<div class="signal-empty"><b>No feed events match</b><p>Clear the search input or choose a broader status filter.</p></div>';
+}
+
+function monitorSelectedRecord() {
+  if (monitorSelectedKind === 'item') {
+    return monitorItems.find((item) => item.id === monitorSelectedId) || null;
+  }
+  if (monitorSelectedKind === 'event') {
+    return monitorAllEvents().find((event) => event.id === monitorSelectedId) || null;
+  }
+  return null;
+}
+
+function renderMonitorInspector() {
+  const inspector = $('#monitorInspector');
+  const record = monitorSelectedRecord();
+  $('#monitorClearSelection').disabled = !record && !monitorInspectorLoading;
+  if (monitorInspectorLoading) {
+    inspector.className = 'signal-inspector';
+    inspector.setAttribute('aria-busy', 'true');
+    inspector.innerHTML = `<div class="signal-inspector-head"><div><h3>Detail Inspector</h3><p>Resolving selected signal metadata.</p></div><div class="button-spinner" aria-hidden="true"></div></div>
+      <div class="signal-empty"><b>Loading</b><p>Fetching the selected record context from local state.</p></div>`;
+    return;
+  }
+  inspector.removeAttribute('aria-busy');
+  if (!record) {
+    inspector.className = 'signal-inspector';
+    inspector.innerHTML = `<div class="signal-inspector-head"><div><h3>Detail Inspector</h3><p>Select a monitored surface or feed event to inspect source, confidence, metric linkage, and raw metadata.</p></div></div>
+      <div class="signal-empty"><b>No selection</b><p>The inspector opens here after a panel or activity row is selected.</p></div>`;
+    return;
+  }
+  const isEvent = monitorSelectedKind === 'event';
+  const state = record.status === 'error' || record.severity === 'critical' ? 'state-error'
+    : record.status === 'warning' || record.severity === 'warning' ? 'state-warning' : '';
+  const status = isEvent ? severityLabel(record.severity) : monitorStatusLabel(record.status);
+  const timestamp = isEvent ? fmt(record.timestamp) : record.lastUpdated;
+  const confidence = isEvent ? `${record.confidence}%` : `${record.confidence}% confidence / ${record.health}% health`;
+  const title = isEvent ? record.title : record.name;
+  inspector.className = `signal-inspector ${state}`;
+  inspector.innerHTML = `<div class="signal-inspector-head">
+      <div>
+        <h3>${escapeHtml(title)}</h3>
+        <p>${escapeHtml(record.description)}</p>
+      </div>
+      <button class="system-button ghost" type="button" data-monitor-close-inspector>Close</button>
+    </div>
+    <div class="inspector-grid">
+      <div class="inspector-field"><span>ID</span><b>${escapeHtml(record.id)}</b></div>
+      <div class="inspector-field"><span>Status</span><b>${escapeHtml(status)}</b></div>
+      <div class="inspector-field"><span>Source</span><b>${escapeHtml(sourceLabel(record.source))}</b></div>
+      <div class="inspector-field"><span>Timestamp</span><b>${escapeHtml(timestamp)}</b></div>
+      <div class="inspector-field"><span>Confidence</span><b>${escapeHtml(confidence)}</b></div>
+      <div class="inspector-field"><span>Related metric</span><b>${escapeHtml(record.relatedMetric)}</b></div>
+    </div>
+    <div class="raw-metadata">${monitorJson(record.metadata)}</div>`;
+}
+
+function updateMonitorSearchUi() {
+  const search = $('#monitorSearch');
+  const wrap = $('#monitorSearchWrap');
+  const help = $('#monitorSearchHelp');
+  if (!search || !wrap || !help) return;
+  const state = monitorSearchState();
+  wrap.dataset.state = state.state;
+  help.textContent = state.message;
+  search.disabled = state.state === 'disabled';
+  search.setAttribute('aria-invalid', state.state === 'error' ? 'true' : 'false');
+  if (search.value !== monitorSearchTerm) search.value = monitorSearchTerm;
+}
+
+function renderMonitor() {
+  if (!$('#tab-monitor')) return;
+  updateMonitorSearchUi();
+  renderMonitorStatusFilters();
+  renderMonitorMetrics();
+  renderMonitorPanels();
+  renderMonitorEvents();
+  renderMonitorInspector();
+  const updated = $('#monitorUpdated');
+  if (updated) updated.textContent = `UPDATED ${fmtTime(monitorLastUpdated)}`;
+  const refreshButton = $('#monitorRefresh');
+  if (refreshButton) {
+    refreshButton.disabled = monitorRefreshing;
+    refreshButton.setAttribute('aria-busy', monitorRefreshing ? 'true' : 'false');
+    refreshButton.innerHTML = monitorRefreshing ? '<span class="button-spinner" aria-hidden="true"></span>Refreshing' : 'Refresh Signals';
+  }
+  const holdButton = $('#monitorHoldAction');
+  if (holdButton) {
+    holdButton.disabled = monitorHoldLoading;
+    holdButton.setAttribute('aria-busy', monitorHoldLoading ? 'true' : 'false');
+    holdButton.innerHTML = monitorHoldLoading ? '<span class="button-spinner" aria-hidden="true"></span>Holding stream' : 'Hold Critical Stream';
+  }
+}
+
+function selectMonitorRecord(kind, id) {
+  monitorSelectedKind = kind;
+  monitorSelectedId = id;
+  monitorInspectorLoading = true;
+  if (monitorInspectorTimer) clearTimeout(monitorInspectorTimer);
+  renderMonitor();
+  monitorInspectorTimer = setTimeout(() => {
+    monitorInspectorLoading = false;
+    renderMonitor();
+  }, 220);
+}
+
+function clearMonitorSelection() {
+  monitorSelectedKind = '';
+  monitorSelectedId = '';
+  monitorInspectorLoading = false;
+  if (monitorInspectorTimer) clearTimeout(monitorInspectorTimer);
+  renderMonitor();
+}
+
+function refreshMonitorSignals() {
+  if (monitorRefreshing) return;
+  monitorRefreshing = true;
+  renderMonitor();
+  setTimeout(() => {
+    monitorRefreshing = false;
+    monitorUpdateSequence += 1;
+    monitorLastUpdated = new Date().toISOString();
+    monitorRecentEventId = `evt-refresh-${monitorUpdateSequence}`;
+    renderMonitor();
+    markUpdated('SIGNALS UPDATED');
+  }, 700);
+}
+
+function holdCriticalStream() {
+  if (monitorHoldLoading) return;
+  monitorHoldLoading = true;
+  monitorUpdateSequence += 1;
+  monitorLastUpdated = new Date().toISOString();
+  monitorRecentEventId = `evt-refresh-${monitorUpdateSequence}`;
+  renderMonitor();
+  setTimeout(() => {
+    monitorHoldLoading = false;
+    renderMonitor();
+  }, 650);
 }
 
 function statusToneClass(tone) {
@@ -672,6 +1303,7 @@ function askDestinationReviewReason({ destination, decision }) {
 
 async function init() {
   setupPanelChrome();
+  renderMonitor();
   const meRes = await api('/api/me');
   if (!meRes) return;
   const me = await meRes.json();
@@ -737,12 +1369,21 @@ function findingChips(findings, categories) {
   return fc + cc;
 }
 
+function pruneRevealedPrompts() {
+  if (!revealedPrompts.size) return;
+  const pendingIds = new Set(currentQueue.map((q) => q.id));
+  for (const id of revealedPrompts.keys()) {
+    if (!pendingIds.has(id)) revealedPrompts.delete(id);
+  }
+}
+
 async function loadQueue() {
   setBusy('#tab-queue .panel', true, 'SYNCING');
   try {
     const r = await api('/api/queries?status=pending');
     if (!r) return;
     currentQueue = await r.json();
+    pruneRevealedPrompts();
     if (currentQueue.length && !currentQueue.some((q) => q.id === selected)) selected = currentQueue[0].id;
     if (!currentQueue.length) selected = null;
     renderQueueView();
@@ -777,13 +1418,21 @@ function renderQueueView() {
 function renderQueueItem(q) {
   const sev = sevClass(q.maxSeverityLabel);
   const detected = Object.keys(q.entityCounts || {}).join(', ') || (q.categories || []).join(', ') || 'policy match';
+  const isRevealed = revealedPrompts.has(q.id);
+  const revealedPrompt = revealedPrompts.get(q.id);
+  const promptText = isRevealed ? revealedPrompt : q.redactedPrompt;
+  const revealControl = canReveal(q)
+    ? isRevealed
+      ? `<button class="btn reveal" data-act="reveal" data-id="${escapeHtml(q.id)}" type="button" disabled>Raw shown and logged</button>`
+      : `<button class="btn reveal" data-act="reveal" data-id="${escapeHtml(q.id)}" type="button">${icons.eye}Reveal gated</button>`
+    : '';
   const controls = canAdminWrite()
     || canDecide(q)
     ? `<textarea class="note" id="note_${escapeHtml(q.id)}" placeholder="Decision note, recorded in audit log"></textarea>
     <div class="actions">
       <button class="btn approve" data-act="approve" data-id="${escapeHtml(q.id)}" type="button">${icons.check}Approve release</button>
       <button class="btn deny" data-act="deny" data-id="${escapeHtml(q.id)}" type="button">${icons.deny}Deny</button>
-      ${canReveal(q) ? `<button class="btn reveal" data-act="reveal" data-id="${escapeHtml(q.id)}" type="button">${icons.eye}Reveal gated</button>` : ''}
+      ${revealControl}
     </div>`
     : `<div class="readonly-note">${escapeHtml(queueDecisionLabel(q))}</div>`;
   return `<article class="q ${selected === q.id ? 'selected' : ''}" data-id="${escapeHtml(q.id)}" tabindex="0">
@@ -797,7 +1446,7 @@ function renderQueueItem(q) {
       <span>${escapeHtml(sourceLabel(q.source))} -> ${escapeHtml(q.destination || 'unknown destination')}</span>
       <span>${escapeHtml(fmtTime(q.createdAt))}</span>
     </div>
-    <div class="prompt" id="p_${escapeHtml(q.id)}">${escapeHtml(q.redactedPrompt)}</div>
+    <div class="prompt ${isRevealed ? 'revealed' : ''}" id="p_${escapeHtml(q.id)}">${escapeHtml(promptText)}</div>
     <div class="chips">${findingChips(q.findings, q.categories)}${workflowChips(q)}</div>
     <div class="reasons">Detected: ${escapeHtml(detected)}${(q.reasons || []).length ? `; ${escapeHtml((q.reasons || []).join('; '))}` : ''}</div>
     ${controls}
@@ -850,6 +1499,40 @@ document.addEventListener('click', async (e) => {
     panel.classList.toggle('collapsed', collapsed);
     panelToggle.setAttribute('aria-expanded', String(!collapsed));
     panelToggle.textContent = collapsed ? 'DETAILS' : 'HIDE';
+    return;
+  }
+  const monitorStatusButton = e.target.closest('[data-monitor-status]');
+  if (monitorStatusButton) {
+    if (monitorStatusButton.disabled) return;
+    monitorStatusFilter = monitorStatusButton.dataset.monitorStatus || 'all';
+    renderMonitor();
+    return;
+  }
+  const monitorSelect = e.target.closest('[data-monitor-select]');
+  if (monitorSelect) {
+    selectMonitorRecord(monitorSelect.dataset.monitorSelect, monitorSelect.dataset.monitorId);
+    return;
+  }
+  const monitorExpand = e.target.closest('[data-monitor-expand]');
+  if (monitorExpand) {
+    monitorExpandedPanelId = monitorExpandedPanelId === monitorExpand.dataset.monitorExpand ? '' : monitorExpand.dataset.monitorExpand;
+    renderMonitor();
+    return;
+  }
+  const monitorEventExpand = e.target.closest('[data-monitor-event-expand]');
+  if (monitorEventExpand) {
+    monitorExpandedEventId = monitorExpandedEventId === monitorEventExpand.dataset.monitorEventExpand ? '' : monitorEventExpand.dataset.monitorEventExpand;
+    renderMonitor();
+    return;
+  }
+  const monitorClose = e.target.closest('[data-monitor-close-inspector]');
+  if (monitorClose) {
+    clearMonitorSelection();
+    return;
+  }
+  const monitorEventRow = e.target.closest('.activity-feed-row[data-monitor-event-id]');
+  if (monitorEventRow && !e.target.closest('button,a,input,select,textarea')) {
+    selectMonitorRecord('event', monitorEventRow.dataset.monitorEventId);
     return;
   }
   const filterButton = e.target.closest('[data-queue-filter]');
@@ -914,6 +1597,7 @@ document.addEventListener('click', async (e) => {
       if (r.status === 429) { alert('Too many confirmation attempts. Try again later.'); return; }
       if (!r.ok) return;
       const body = await r.json();
+      revealedPrompts.set(id, body.rawPrompt || '');
       const p = $(`#p_${CSS.escape(id)}`);
       if (p) { p.textContent = body.rawPrompt; p.classList.add('revealed'); }
       actionButton.textContent = 'Raw shown and logged';
@@ -947,7 +1631,10 @@ document.addEventListener('click', async (e) => {
         actionButton.disabled = false;
         return;
       }
-      if (r && r.ok) await refreshAll();
+      if (r && r.ok) {
+        revealedPrompts.delete(id);
+        await refreshAll();
+      }
       else actionButton.disabled = false;
     }
     return;
@@ -992,6 +1679,16 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     closeStatusPopover();
     hideTooltip();
+    if (document.body.dataset.activeTab === 'monitor' && (monitorSelectedId || monitorInspectorLoading)) {
+      clearMonitorSelection();
+      return;
+    }
+  }
+  const monitorEventRow = e.target.closest('.activity-feed-row[data-monitor-event-id]');
+  if (monitorEventRow && ['Enter', ' '].includes(e.key)) {
+    e.preventDefault();
+    selectMonitorRecord('event', monitorEventRow.dataset.monitorEventId);
+    return;
   }
   const activityRow = e.target.closest('.activity-row[data-activity-id]');
   if (activityRow && ['Enter', ' '].includes(e.key)) {
@@ -1849,12 +2546,33 @@ async function loadPolicy() {
   }
 }
 
+const pageHeadings = {
+  queue: {
+    title: 'Security Console',
+    body: 'Review held prompts, enforce AI-use policy, and export examiner-ready evidence from one control plane.',
+  },
+  monitor: {
+    title: 'System Monitor',
+    body: 'Inspect live signal posture, sensor health, and critical AI egress activity across PromptWall controls.',
+  },
+};
+
+function renderPageHeading(name) {
+  const copy = pageHeadings[name] || pageHeadings.queue;
+  const title = $('.page-title h2');
+  const body = $('.page-title p');
+  if (title) title.textContent = copy.title;
+  if (body) body.textContent = copy.body;
+}
+
 function activateTab(name) {
   document.body.dataset.activeTab = name;
+  renderPageHeading(name);
   $$('.tab').forEach((x) => x.classList.toggle('active', x.dataset.tab === name));
   $$('section[id^=tab-]').forEach((s) => s.classList.add('hidden'));
   $(`#tab-${CSS.escape(name)}`).classList.remove('hidden');
   window.scrollTo(0, 0);
+  if (name === 'monitor') renderMonitor();
   if (name === 'audit') loadAudit();
   if (name === 'policy') loadPolicy();
   if (name === 'activity') loadActivity();
@@ -1876,6 +2594,27 @@ $('#refreshLineage').onclick = loadLineage;
 $('#logout').onclick = async () => { await api('/api/logout', { method: 'POST' }); location.href = '/login.html'; };
 $('#exportEvidence').onclick = exportEvidence;
 $('#globalSearch').addEventListener('input', (e) => updateSearch(e.target.value));
+$('#monitorRefresh').onclick = refreshMonitorSignals;
+$('#monitorHoldAction').onclick = holdCriticalStream;
+$('#monitorClearSelection').onclick = clearMonitorSelection;
+$('#monitorExpandFirst').onclick = () => {
+  const [first] = monitorFilteredItems();
+  if (!first) return;
+  monitorExpandedPanelId = monitorExpandedPanelId === first.id ? '' : first.id;
+  renderMonitor();
+};
+$('#monitorSearch').addEventListener('input', (e) => {
+  monitorSearchTerm = String(e.target.value || '').trim();
+  renderMonitor();
+});
+$('#monitorSearch').addEventListener('focus', () => {
+  monitorSearchFocused = true;
+  updateMonitorSearchUi();
+});
+$('#monitorSearch').addEventListener('blur', () => {
+  monitorSearchFocused = false;
+  updateMonitorSearchUi();
+});
 
 function connectStream() {
   const es = new EventSource('/api/stream');
