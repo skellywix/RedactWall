@@ -356,6 +356,7 @@ test('admin console controls and forms are wired end to end', async ({ page, req
   await page.locator('.stepup-dialog').getByRole('button', { name: 'Reveal' }).click();
   await expect(page.locator(`#p_${reveal.id}`)).toContainText('524-71-9101');
   await expect(revealRow.locator('[data-act="reveal"]')).toHaveText('Raw shown and logged');
+  await expect(revealRow.locator('.prompt-reveal-status.raw')).toContainText('Raw prompt revealed');
 
   await setStoreRawForApproval(page, false);
   const noRaw = await createHeldPrompt(request, {

@@ -1356,18 +1356,54 @@ function pruneRevealedPrompts() {
 function revealedPromptState(id) {
   const value = revealedPrompts.get(id);
   if (!value) return null;
-  if (typeof value === 'string') return { text: value, rawRetained: true };
+  if (typeof value === 'string') return { text: value, rawRetained: true, rawDiffersFromRedacted: true };
   return {
     text: String(value.text || ''),
     rawRetained: value.rawRetained === true,
+    rawDiffersFromRedacted: typeof value.rawDiffersFromRedacted === 'boolean'
+      ? value.rawDiffersFromRedacted
+      : null,
+  };
+}
+
+function revealDisplayState(q, revealState) {
+  if (!revealState) return null;
+  const rawRetained = revealState.rawRetained === true;
+  const rawDiffersFromRedacted = rawRetained && (typeof revealState.rawDiffersFromRedacted === 'boolean'
+    ? revealState.rawDiffersFromRedacted
+    : String(revealState.text || '') !== String((q || {}).redactedPrompt || ''));
+  if (rawRetained && rawDiffersFromRedacted) {
+    return {
+      kind: 'raw',
+      promptClass: 'revealed',
+      buttonLabel: 'Raw shown and logged',
+      statusLabel: 'Raw prompt revealed',
+      statusDetail: 'Audit logged',
+    };
+  }
+  if (rawRetained) {
+    return {
+      kind: 'retained',
+      promptClass: 'retained',
+      buttonLabel: 'Retained copy shown',
+      statusLabel: 'Retained copy matches preview',
+      statusDetail: 'Audit logged',
+    };
+  }
+  return {
+    kind: 'unavailable',
+    promptClass: 'unavailable',
+    buttonLabel: 'Raw unavailable, event logged',
+    statusLabel: 'Raw unavailable',
+    statusDetail: 'Redacted preview shown',
   };
 }
 
 function revealControlFor(q, revealState) {
   if (currentRole !== 'security_admin') return '';
   if (revealState) {
-    const label = revealState.rawRetained ? 'Raw shown and logged' : 'Raw unavailable, event logged';
-    return `<button class="btn reveal" data-act="reveal" data-id="${escapeHtml(q.id)}" type="button" disabled>${escapeHtml(label)}</button>`;
+    const displayState = revealDisplayState(q, revealState);
+    return `<button class="btn reveal" data-act="reveal" data-id="${escapeHtml(q.id)}" type="button" disabled>${escapeHtml(displayState.buttonLabel)}</button>`;
   }
   if (q.rawRetained !== true) {
     return `<button class="btn reveal" data-act="reveal" data-id="${escapeHtml(q.id)}" type="button" disabled>Raw not retained</button>`;
@@ -1415,9 +1451,12 @@ function renderQueueItem(q) {
   const sev = sevClass(q.maxSeverityLabel);
   const detected = Object.keys(q.entityCounts || {}).join(', ') || (q.categories || []).join(', ') || 'policy match';
   const revealState = revealedPromptState(q.id);
-  const isRevealed = !!(revealState && revealState.rawRetained);
+  const revealDisplay = revealDisplayState(q, revealState);
   const promptText = revealState ? revealState.text : q.redactedPrompt;
   const revealControl = revealControlFor(q, revealState);
+  const revealStatus = revealDisplay
+    ? `<div class="prompt-reveal-status ${escapeHtml(revealDisplay.kind)}"><b>${escapeHtml(revealDisplay.statusLabel)}</b><span>${escapeHtml(revealDisplay.statusDetail)}</span></div>`
+    : '';
   const controls = canAdminWrite()
     || canDecide(q)
     ? `<textarea class="note" id="note_${escapeHtml(q.id)}" placeholder="Decision note, recorded in audit log"></textarea>
@@ -1438,7 +1477,8 @@ function renderQueueItem(q) {
       <span>${escapeHtml(sourceLabel(q.source))} -> ${escapeHtml(q.destination || 'unknown destination')}</span>
       <span>${escapeHtml(fmtTime(q.createdAt))}</span>
     </div>
-    <div class="prompt ${isRevealed ? 'revealed' : ''}" id="p_${escapeHtml(q.id)}">${escapeHtml(promptText)}</div>
+    ${revealStatus}
+    <div class="prompt ${revealDisplay ? escapeHtml(revealDisplay.promptClass) : ''}" id="p_${escapeHtml(q.id)}">${escapeHtml(promptText)}</div>
     <div class="chips">${findingChips(q.findings, q.categories)}${workflowChips(q)}</div>
     <div class="reasons">Detected: ${escapeHtml(detected)}${(q.reasons || []).length ? `; ${escapeHtml((q.reasons || []).join('; '))}` : ''}</div>
     ${controls}
@@ -1606,14 +1646,17 @@ document.addEventListener('click', async (e) => {
       if (!r.ok) return;
       const body = await r.json();
       const rawRetained = body.rawRetained === true;
-      revealedPrompts.set(id, { text: body.rawPrompt || '', rawRetained });
-      const p = $(`#p_${CSS.escape(id)}`);
-      if (p) {
-        p.textContent = body.rawPrompt || '';
-        p.classList.toggle('revealed', rawRetained);
-      }
-      actionButton.textContent = rawRetained ? 'Raw shown and logged' : 'Raw unavailable, event logged';
-      actionButton.disabled = true;
+      const rawPrompt = String(body.rawPrompt || '');
+      const rawDiffersFromRedacted = typeof body.rawDiffersFromRedacted === 'boolean'
+        ? body.rawDiffersFromRedacted
+        : (rawRetained && rawPrompt !== String(q.redactedPrompt || ''));
+      revealedPrompts.set(id, {
+        text: rawPrompt,
+        rawRetained,
+        rawDiffersFromRedacted,
+      });
+      selected = id;
+      renderQueueView();
       return;
     }
     if (act === 'approve' || act === 'deny') {

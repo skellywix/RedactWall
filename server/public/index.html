@@ -361,6 +361,28 @@
     word-break:break-word;
   }
   .prompt.revealed{border-color:rgba(255,90,102,.55);background:#170b0f}
+  .prompt.retained{border-color:rgba(246,162,26,.58);background:#1a1408}
+  .prompt.unavailable{border-color:rgba(148,163,184,.3);background:#0b121c}
+  .prompt-reveal-status{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    margin:0 0 6px;
+    min-height:26px;
+    border:1px solid rgba(255,90,102,.36);
+    border-radius:7px;
+    background:rgba(255,90,102,.1);
+    color:#ffc2ca;
+    padding:4px 8px;
+    font-size:11px;
+    font-weight:760;
+    text-transform:uppercase;
+    letter-spacing:.04em;
+  }
+  .prompt-reveal-status span{color:var(--mut);font-weight:680}
+  .prompt-reveal-status.retained{border-color:rgba(246,162,26,.42);background:rgba(246,162,26,.1);color:#ffd393}
+  .prompt-reveal-status.unavailable{border-color:rgba(148,163,184,.28);background:rgba(148,163,184,.08);color:#d6deeb}
   .chips{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}
   .chip{
     display:inline-flex;
@@ -664,6 +686,8 @@
   .select-dot{border-color:#2a4660}
   .prompt{background:#0a1724;color:#dcedff}
   .prompt.revealed{background:#221019;border-color:#ff4f6d}
+  .prompt.retained{background:#211908;border-color:#ffb24a}
+  .prompt.unavailable{background:#0a1724;border-color:#2a4660}
   .chip{background:#0a1724;color:#b5c8d9}
   .chip b{color:#e8f7ff}
   .chip.category{background:#211908;color:#ffd393;border-color:#ffb24a}
@@ -1518,6 +1542,8 @@
     color:var(--sig-text);
   }
   .console-frame .prompt.revealed{background:#221019;border-color:rgba(255,79,109,.64)}
+  .console-frame .prompt.retained{background:#211908;border-color:rgba(255,178,74,.62)}
+  .console-frame .prompt.unavailable{background:var(--sig-surface-2);border-color:var(--sig-border)}
   .console-frame .chip,
   .console-frame .status-chip,
   .console-frame .pill{

@@ -17,6 +17,8 @@ process.env.SENTINEL_POLICY_PATH = path.join(os.tmpdir(), 'ps-dashboard-linkage-
 fs.copyFileSync(path.join(__dirname, '..', 'config', 'policy.json'), process.env.SENTINEL_POLICY_PATH);
 
 const app = require('../server/app');
+const db = require('../server/db');
+const dataCrypto = require('../server/crypto');
 const { listen } = require('./support/listen');
 
 function readProjectFile(...parts) {
@@ -333,7 +335,38 @@ test('dashboard-backed API actions accept the payloads built by forms and button
     body: { password: 'unit-pass' },
   });
   assert.strictEqual(revealRes.status, 200);
-  assert.match((await revealRes.json()).rawPrompt, /524-71-9043/);
+  const revealBody = await revealRes.json();
+  assert.match(revealBody.rawPrompt, /524-71-9043/);
+  assert.strictEqual(revealBody.rawRetained, true);
+  assert.strictEqual(revealBody.rawDiffersFromRedacted, true);
+
+  const retainedPreview = 'Debug this deploy script. Here is the AWS key [SECRET_KEY] and secret we use.';
+  const retainedPreviewRow = db.createQuery({
+    status: 'pending',
+    user: 'redacted-api@example.test',
+    destination: 'claude.ai',
+    source: 'api',
+    channel: 'submit',
+    redactedPrompt: retainedPreview,
+    findings: [{ type: 'SECRET_KEY', severity: 4, score: 0.95, masked: 'AK***EF' }],
+    categories: [],
+    entityCounts: { SECRET_KEY: 1 },
+    riskScore: 30,
+    maxSeverity: 4,
+    maxSeverityLabel: 'critical',
+    reasons: ['client-redacted test fixture'],
+    _rawPrompt: dataCrypto.seal(retainedPreview),
+  });
+  assert.ok(retainedPreviewRow._rawPrompt);
+  const retainedPreviewRevealRes = await jsonFetch(port, `/api/queries/${retainedPreviewRow.id}/reveal`, {
+    headers,
+    body: { password: 'unit-pass' },
+  });
+  assert.strictEqual(retainedPreviewRevealRes.status, 200);
+  const retainedPreviewReveal = await retainedPreviewRevealRes.json();
+  assert.strictEqual(retainedPreviewReveal.rawPrompt, retainedPreview);
+  assert.strictEqual(retainedPreviewReveal.rawRetained, true);
+  assert.strictEqual(retainedPreviewReveal.rawDiffersFromRedacted, false);
 
   const approveRes = await jsonFetch(port, `/api/queries/${approve.id}/approve`, {
     headers,

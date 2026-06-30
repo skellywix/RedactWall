@@ -1367,7 +1367,12 @@ app.post(
     } else {
       rawPrompt = q.redactedPrompt;
     }
-    res.json({ id: q.id, rawPrompt, rawRetained });
+    res.json({
+      id: q.id,
+      rawPrompt,
+      rawRetained,
+      rawDiffersFromRedacted: rawRetained && String(rawPrompt || '') !== String(q.redactedPrompt || ''),
+    });
   },
 );
 
