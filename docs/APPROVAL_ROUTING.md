@@ -175,6 +175,31 @@ environment or secret-manager configuration only. SMTP requires TLS by default
 and will only use an insecure relay when the explicit insecure-local-relay
 opt-in is set.
 
+Native Linear delivery requires a Linear personal API key in
+`PROMPTWALL_APPROVAL_LINEAR_API_KEY` or `APPROVAL_LINEAR_API_KEY` plus a Linear
+team id. Discovery tooling can help find team, state, project, and label ids,
+but the running PromptWall process needs its own secret-manager value for the
+GraphQL call. If `PROMPTWALL_APPROVAL_LINEAR_API_URL` is overridden for a test
+tenant, it must be an `https://` URL so the API key is never sent over cleartext.
+
+Dry-run the native Linear payload without sending:
+
+```powershell
+npm run smoke:linear-approval -- -- --team-id=<linear-team-id>
+```
+
+Create a real sanitized smoke issue:
+
+```powershell
+$env:PROMPTWALL_APPROVAL_LINEAR_API_KEY = '<linear-personal-api-key>'
+npm run smoke:linear-approval -- -- --team-id=<linear-team-id> --send
+```
+
+The smoke command builds the same `issueCreate` body as `server/notifiers.js`,
+checks that synthetic raw prompt markers, token vaults, release tokens, and
+ingest secrets are absent from the wire payload, and prints only the created
+issue identifier and URL when Linear accepts the ticket.
+
 ## SLA Escalation
 
 `startServer()` checks overdue routed approvals at startup and then every five

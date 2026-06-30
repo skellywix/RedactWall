@@ -463,6 +463,112 @@ test('admin console controls and forms are wired end to end', async ({ page, req
   expect(problems).toEqual([]);
 });
 
+test('admin console secondary controls and dialog cancels are wired end to end', async ({ page, request }) => {
+  const problems = collectUiProblems(page);
+  const reveal = await createHeldPrompt(request, {
+    suffix: '9201',
+    user: 'cancel-reveal-ui@example.test',
+    destination: 'chatgpt.com',
+  });
+  const approve = await createHeldPrompt(request, {
+    suffix: '9202',
+    user: 'cancel-approve-ui@example.test',
+    destination: 'claude.ai',
+  });
+  const destinations = {
+    govern: 'govern-secondary.example',
+    allow: 'allow-secondary.example',
+    block: 'block-secondary.example',
+  };
+  for (const destination of Object.values(destinations)) {
+    await createShadowAi(request, destination);
+  }
+
+  await login(page);
+
+  for (const tabName of ['activity', 'coverage', 'identity', 'lineage', 'audit', 'policy', 'queue']) {
+    await page.locator(`.rail .tab[data-tab="${tabName}"]`).click();
+    await expect(page.locator(`#tab-${tabName}`)).toBeVisible();
+  }
+
+  await page.locator('.content-tabs .tab[data-tab="queue"]').click();
+  const revealRow = page.locator(`.q[data-id="${reveal.id}"]`);
+  await revealRow.click();
+  await revealRow.locator('[data-act="reveal"]').click();
+  await expect(page.getByRole('heading', { name: 'Confirm raw reveal' })).toBeVisible();
+  await page.locator('.stepup-dialog').getByRole('button', { name: 'Cancel' }).click();
+  await expect(page.locator('.stepup-dialog')).toHaveCount(0);
+  await expect(page.locator(`#p_${reveal.id}`)).not.toContainText('524-71-9201');
+  await expect(revealRow.locator('[data-act="reveal"]')).toBeEnabled();
+
+  const approveRow = page.locator(`.q[data-id="${approve.id}"]`);
+  await approveRow.locator('textarea.note').fill('Cancel path should keep the item queued');
+  await approveRow.locator('[data-act="approve"]').click();
+  await expect(page.getByRole('heading', { name: 'Confirm release' })).toBeVisible();
+  await page.locator('.stepup-dialog').getByRole('button', { name: 'Cancel' }).click();
+  await expect(page.locator('.stepup-dialog')).toHaveCount(0);
+  await expect(approveRow).toBeVisible();
+  await expect(approveRow.locator('[data-act="approve"]')).toBeEnabled();
+
+  await page.locator('.content-tabs .tab[data-tab="coverage"]').click();
+  await page.locator('#refreshCoverage').click();
+  for (const [decision, destination] of Object.entries(destinations)) {
+    await page.locator(`[data-destination-review="${decision}"][data-destination="${destination}"]`).click();
+    await expect(page.getByRole('heading', { name: 'Record destination reason' })).toBeVisible();
+    await page.locator('.stepup-dialog textarea[name="reason"]').fill(`secondary_${decision}_review`);
+    await page.locator('.stepup-dialog').getByRole('button', { name: 'Save review' }).click();
+    await expect(page.locator('#shadowRows')).toContainText(destination);
+  }
+  await expect(page.locator('#shadowRows')).toContainText('Governed');
+  await expect(page.locator('#shadowRows')).toContainText('Allowed');
+  await expect(page.locator('#shadowRows')).toContainText('Blocked');
+  const destinationPolicy = await page.evaluate(async () => (await fetch('/api/policy')).json());
+  expect(destinationPolicy.governedDestinations).toContain(destinations.govern);
+  expect(destinationPolicy.allowedDestinations).toContain(destinations.allow);
+  expect(destinationPolicy.blockedDestinations).toContain(destinations.block);
+
+  await page.locator('.content-tabs .tab[data-tab="policy"]').click();
+  for (const [mode, label] of [
+    ['warn', 'Monitor'],
+    ['justify', 'Justify'],
+    ['redact', 'Redact'],
+    ['block', 'Enforce'],
+  ]) {
+    await page.locator(`input[name="mode"][value="${mode}"]`).check();
+    await expect(page.locator(`label.policy-option:has(input[name="mode"][value="${mode}"])`)).toHaveClass(/selected/);
+    await expect(page.locator(`label.policy-option:has(input[name="mode"][value="${mode}"])`)).toContainText(label);
+  }
+
+  const originalBlockUnapproved = await page.locator('#pol_block_unapproved_ai').isChecked();
+  await page.locator('#pol_block_unapproved_ai').setChecked(!originalBlockUnapproved);
+  await page.getByRole('button', { name: 'Save changes' }).click();
+  await expect(page.locator('#polSaved')).toHaveText('Saved');
+  let savedPolicy = await page.evaluate(async () => (await fetch('/api/policy')).json());
+  expect(savedPolicy.blockUnapprovedAiDestinations).toBe(!originalBlockUnapproved);
+  await page.locator('#pol_block_unapproved_ai').setChecked(originalBlockUnapproved);
+  await page.getByRole('button', { name: 'Save changes' }).click();
+  await expect(page.locator('#polSaved')).toHaveText('Saved');
+
+  const templates = [
+    ['baseline', 'block'],
+    ['ncua_glba', 'block'],
+    ['pci_dss', 'block'],
+    ['hipaa', 'block'],
+    ['redact_first', 'redact'],
+  ];
+  for (const [templateId, expectedMode] of templates) {
+    await page.locator(`.ps-tpl[data-tpl="${templateId}"]`).click();
+    await expect(page.locator(`input[name="mode"][value="${expectedMode}"]`)).toBeChecked();
+    savedPolicy = await page.evaluate(async () => (await fetch('/api/policy')).json());
+    expect(savedPolicy.enforcementMode).toBe(expectedMode);
+  }
+
+  await page.getByRole('button', { name: 'View coverage' }).click();
+  await expect(page.locator('#tab-coverage')).toBeVisible();
+
+  expect(problems).toEqual([]);
+});
+
 test('admin console mobile layout keeps content tabs usable', async ({ page }) => {
   const problems = collectUiProblems(page);
   await page.setViewportSize({ width: 390, height: 844 });

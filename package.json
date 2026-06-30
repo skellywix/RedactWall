@@ -21,6 +21,7 @@
     "test:browser-extension": "node scripts/run-playwright.js browser-extension.spec.js --project=chromium",
     "simulate": "node scripts/simulate.js",
     "fire-drill": "node scripts/fire-drill.js",
+    "smoke:linear-approval": "node scripts/smoke-linear-approval.js",
     "backup": "node scripts/backup-store.js create",
     "backup:verify": "node scripts/backup-store.js verify",
     "backup:restore": "node scripts/backup-store.js restore",

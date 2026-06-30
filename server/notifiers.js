@@ -50,6 +50,19 @@ function jiraIssueUrl(baseUrl) {
   }
 }
 
+function linearApiUrl(value) {
+  const raw = trimmed(value);
+  if (!raw) return DEFAULT_LINEAR_API_URL;
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== 'https:') return '';
+    url.hash = '';
+    return url.toString();
+  } catch {
+    return '';
+  }
+}
+
 function parseBool(value, fallback = false) {
   if (typeof value !== 'string' || !value.trim()) return fallback;
   return /^(1|true|yes|on)$/i.test(value.trim());
@@ -80,11 +93,12 @@ function configuredJiraChannel(env) {
 function configuredLinearChannel(env) {
   const token = envValue(env, 'PROMPTWALL_APPROVAL_LINEAR_API_KEY', 'APPROVAL_LINEAR_API_KEY');
   const teamId = envValue(env, 'PROMPTWALL_APPROVAL_LINEAR_TEAM_ID', 'APPROVAL_LINEAR_TEAM_ID');
-  if (!token || !teamId) return null;
+  const url = linearApiUrl(envValue(env, 'PROMPTWALL_APPROVAL_LINEAR_API_URL', 'APPROVAL_LINEAR_API_URL'));
+  if (!token || !teamId || !url) return null;
   return {
     type: 'linear',
     name: 'linear',
-    url: envValue(env, 'PROMPTWALL_APPROVAL_LINEAR_API_URL', 'APPROVAL_LINEAR_API_URL') || DEFAULT_LINEAR_API_URL,
+    url,
     token,
     teamId,
     stateId: envValue(env, 'PROMPTWALL_APPROVAL_LINEAR_STATE_ID', 'APPROVAL_LINEAR_STATE_ID'),
@@ -403,14 +417,27 @@ function headersForChannel(channel) {
   return headers;
 }
 
-async function linearFailureReason(res) {
-  if (!res || !res.ok || typeof res.json !== 'function') return null;
+async function linearResponseResult(res) {
+  if (!res || !res.ok || typeof res.json !== 'function') return { reason: null, issue: null };
   try {
     const data = await res.json();
-    if (data && ((Array.isArray(data.errors) && data.errors.length) || data.data?.issueCreate?.success === false)) return 'graphql_error';
-    return null;
+    if (data && ((Array.isArray(data.errors) && data.errors.length) || data.data?.issueCreate?.success === false)) {
+      return { reason: 'graphql_error', issue: null };
+    }
+    const issue = data && data.data && data.data.issueCreate && data.data.issueCreate.issue;
+    return {
+      reason: null,
+      issue: issue && typeof issue === 'object'
+        ? {
+          id: boundedText(issue.id, 120),
+          identifier: boundedText(issue.identifier, 120),
+          url: boundedText(issue.url, 2048),
+          title: boundedText(issue.title, 240),
+        }
+        : null,
+    };
   } catch {
-    return 'invalid_graphql_response';
+    return { reason: 'invalid_graphql_response', issue: null };
   }
 }
 
@@ -421,8 +448,18 @@ async function postJson(channel, payload, opts = {}) {
     headers: headersForChannel(channel),
     body: JSON.stringify(bodyForChannel(channel, payload)),
   });
-  const linearReason = channel.type === 'linear' ? await linearFailureReason(res) : null;
-  if (linearReason) return { channel: channel.name || channel.type, sent: false, reason: linearReason };
+  const linearResult = channel.type === 'linear' ? await linearResponseResult(res) : { reason: null, issue: null };
+  if (linearResult.reason) return { channel: channel.name || channel.type, sent: false, reason: linearResult.reason };
+  if (channel.type === 'linear' && res && res.ok) {
+    const issue = linearResult.issue || {};
+    return {
+      channel: channel.name || channel.type,
+      sent: true,
+      status: res.status,
+      externalId: issue.identifier || issue.id || null,
+      url: issue.url || null,
+    };
+  }
   return res && res.ok
     ? { channel: channel.name || channel.type, sent: true, status: res.status }
     : { channel: channel.name || channel.type, sent: false, reason: 'http_' + (res && res.status) };
@@ -466,7 +503,9 @@ module.exports = {
   deliveryStatus,
   emitApprovalNotification,
   jiraIssuePayload,
+  linearApiUrl,
   linearIssuePayload,
+  linearResponseResult,
   sanitizedApprovalNotification,
   shouldNotifyApproval,
   smtpMessageForPayload,

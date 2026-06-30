@@ -13,6 +13,7 @@ place.
 | Start server | `npm start` |
 | Full local gate | `npm run review:ci` |
 | Detection eval | `npm run eval` |
+| Native Linear approval smoke | `npm run smoke:linear-approval -- -- --team-id=<linear-team-id>` |
 | Demo guide drift check | `npm run docs:demo-guide:check` |
 
 ## Packaging And Release

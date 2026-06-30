@@ -215,6 +215,20 @@ async function syntheticCopyFromResponse(page, value) {
   }, value);
 }
 
+async function loginAdminApi(request) {
+  const response = await request.post('/api/login', {
+    data: { user: 'admin', password: 'e2e-pass' },
+  });
+  expect(response.ok()).toBeTruthy();
+}
+
+async function queryStatusesFor(request, status) {
+  const response = await request.get('/api/queries?limit=100');
+  expect(response.ok()).toBeTruthy();
+  const rows = await response.json();
+  return rows.filter((row) => row.user === 'browser-smoke@example.test' && row.status === status).length;
+}
+
 test.describe('browser extension live smoke', () => {
   test.setTimeout(90000);
 
@@ -243,6 +257,12 @@ test.describe('browser extension live smoke', () => {
       await expect(page.locator('.ps-chip')).toContainText('Social Security number');
       await expect(page.locator('.ps-banner')).not.toContainText('US_SSN');
       await expect(page.locator('.ps-coach')).toContainText('member ID');
+      await page.getByRole('button', { name: 'Edit prompt' }).click();
+      await expect(page.locator('.ps-banner')).toHaveCount(0);
+      await expect(page.locator('[data-sent]')).toHaveCount(0);
+
+      await page.locator('button[data-testid="send-button"]').click();
+      await expect(page.locator('.ps-banner')).toBeVisible();
       await expect(page.locator('[data-sent]')).toHaveCount(0);
       await page.waitForTimeout(200);
       fs.mkdirSync(artifactDir, { recursive: true });
@@ -386,6 +406,117 @@ test.describe('browser extension live smoke', () => {
       await page.waitForTimeout(200);
       fs.mkdirSync(artifactDir, { recursive: true });
       await page.screenshot({ path: path.join(artifactDir, 'chatgpt-copy-blocked.png'), fullPage: true });
+    } finally {
+      await context.close();
+      fs.rmSync(userDataDir, { recursive: true, force: true });
+    }
+  });
+
+  test('warn banner buttons dismiss, edit, and send after backend recording', async ({ baseURL, request }, testInfo) => {
+    const policy = { ...fixturePolicy, enforcementMode: 'warn' };
+    const { context, userDataDir } = await launchExtensionContext(baseURL, testInfo, policy);
+    try {
+      const page = await openControlledAiPage(
+        context,
+        'https://chatgpt.com/',
+        chatFixture({
+          host: 'chatgpt.com',
+          sendButton: '<button data-testid="send-button" aria-label="Send prompt">Send</button>',
+        }),
+      );
+
+      await applyFixturePolicyToPage(context, page, baseURL, 'chatgpt.com', policy);
+      await page.locator('#prompt-textarea').fill('Email qa-warning@example.test about the account update.');
+      await page.locator('button[data-testid="send-button"]').click();
+      await expect(page.locator('.ps-title')).toContainText('Review before sending');
+      await page.getByRole('button', { name: 'Dismiss' }).click();
+      await expect(page.locator('.ps-banner')).toHaveCount(0);
+      await expect(page.locator('[data-sent]')).toHaveCount(0);
+
+      await page.locator('button[data-testid="send-button"]').click();
+      await expect(page.locator('.ps-title')).toContainText('Review before sending');
+      await page.getByRole('button', { name: 'Edit prompt' }).click();
+      await expect(page.locator('.ps-banner')).toHaveCount(0);
+      await expect(page.locator('[data-sent]')).toHaveCount(0);
+      await expect(page.locator('#prompt-textarea')).toHaveValue('Email qa-warning@example.test about the account update.');
+
+      await loginAdminApi(request);
+      await page.locator('button[data-testid="send-button"]').click();
+      await expect(page.locator('.ps-title')).toContainText('Review before sending');
+      await page.getByRole('button', { name: 'Send anyway' }).click();
+      await expect(page.locator('[data-sent]')).toContainText('qa-warning@example.test');
+      await expect.poll(() => queryStatusesFor(request, 'warned_sent')).toBeGreaterThan(0);
+    } finally {
+      await context.close();
+      fs.rmSync(userDataDir, { recursive: true, force: true });
+    }
+  });
+
+  test('justify banner buttons validate, cancel, and submit reasons to the backend', async ({ baseURL, request }, testInfo) => {
+    const policy = { ...fixturePolicy, enforcementMode: 'justify' };
+    const { context, userDataDir } = await launchExtensionContext(baseURL, testInfo, policy);
+    try {
+      const page = await openControlledAiPage(
+        context,
+        'https://chatgpt.com/',
+        chatFixture({
+          host: 'chatgpt.com',
+          sendButton: '<button data-testid="send-button" aria-label="Send prompt">Send</button>',
+        }),
+      );
+
+      await applyFixturePolicyToPage(context, page, baseURL, 'chatgpt.com', policy);
+      await loginAdminApi(request);
+      await page.locator('#prompt-textarea').fill('Email qa-justify@example.test about the account update.');
+      await page.locator('button[data-testid="send-button"]').click();
+      await expect(page.locator('.ps-title')).toContainText('Business reason required');
+      await page.getByRole('button', { name: 'Submit reason' }).click();
+      await expect(page.locator('.ps-banner')).toBeVisible();
+      await expect(page.locator('[data-sent]')).toHaveCount(0);
+      await page.getByRole('button', { name: 'Cancel' }).click();
+      await expect(page.locator('.ps-banner')).toHaveCount(0);
+      await expect(page.locator('[data-sent]')).toHaveCount(0);
+      await expect.poll(() => queryStatusesFor(request, 'blocked_by_user')).toBeGreaterThan(0);
+
+      await page.locator('button[data-testid="send-button"]').click();
+      await expect(page.locator('.ps-title')).toContainText('Business reason required');
+      await page.locator('.ps-just').fill('Member support follow-up');
+      await page.getByRole('button', { name: 'Submit reason' }).click();
+      await expect(page.locator('[data-sent]')).toContainText('qa-justify@example.test');
+      await expect.poll(() => queryStatusesFor(request, 'justified')).toBeGreaterThan(0);
+    } finally {
+      await context.close();
+      fs.rmSync(userDataDir, { recursive: true, force: true });
+    }
+  });
+
+  test('popup toggle and dashboard link are wired to extension storage and backend', async ({ baseURL }, testInfo) => {
+    const policy = { ...fixturePolicy, enforcementMode: 'redact' };
+    const { context, userDataDir } = await launchExtensionContext(baseURL, testInfo, policy);
+    try {
+      const serviceWorker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
+      const extensionId = new URL(serviceWorker.url()).host;
+      const popup = await context.newPage();
+      await popup.goto(`chrome-extension://${extensionId}/popup.html`);
+
+      await expect(popup.locator('#state')).toHaveText('Protecting this browser');
+      await expect(popup.locator('#mode')).toHaveText('redact');
+      await expect(popup.locator('#dash')).toHaveAttribute('href', `${baseURL}/index.html`);
+
+      await popup.locator('.switch .slider').click();
+      await expect(popup.locator('#state')).toHaveText('Paused');
+      await expect.poll(() => serviceWorker.evaluate(() => chrome.storage.local.get('enabled'))).toEqual({ enabled: false });
+
+      await popup.locator('.switch .slider').click();
+      await expect(popup.locator('#state')).toHaveText('Protecting this browser');
+      await expect.poll(() => serviceWorker.evaluate(() => chrome.storage.local.get('enabled'))).toEqual({ enabled: true });
+
+      const dashboardPromise = context.waitForEvent('page');
+      await popup.locator('#dash').click();
+      const dashboard = await dashboardPromise;
+      await dashboard.waitForLoadState('domcontentloaded');
+      await expect(dashboard).toHaveURL(`${baseURL}/login.html`);
+      await expect(dashboard.getByRole('heading', { name: 'PromptWall' })).toBeVisible();
     } finally {
       await context.close();
       fs.rmSync(userDataDir, { recursive: true, force: true });
