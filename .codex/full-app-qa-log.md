@@ -1,0 +1,99 @@
+# Full Application QA Log
+
+Branch: `codex/full-app-qa`
+Base: `origin/main`
+Local timestamp: `2026-06-30T22:35:08-05:00`
+
+## Required Setup Evidence
+
+- Active repo: `C:\Users\Eric\Desktop\Coding_Projects\promptsentinel-app\promptwall`
+- Wrapper note: the workspace root is routing only; source, npm, Git, and GitHub work are in `promptwall/`.
+- Base branch: `origin/main`
+- Requested work branch: `codex/full-app-qa`
+- Package manager: npm with `package-lock.json`
+- Runtime discovered: Node `v22.22.3`, npm `11.17.0`
+- Installed dependency surface: Express 5, better-sqlite3, helmet, cookie-parser, zod, adm-zip, pdf-parse, Playwright.
+- Lint/typecheck/build scripts: no dedicated `lint`, `typecheck`, or `build` scripts are defined in `package.json`.
+- Primary local gate: `npm run review:ci`
+- GitHub workflows read: `.github/workflows/ci.yml`, `.github/workflows/ai-domain-refresh.yml`
+- Docs read: `AGENTS.md`, `README.md`, `CONTRIBUTING.md`, `test/README.md`, `scripts/README.md`, `server/README.md`, `docs/README.md`, `.env.example`
+
+## Section 1 - Baseline Install, Tooling, And Test Discovery
+
+Status: Passed
+
+### Inspection
+
+- Confirmed current branch was initially `codex/qa-ui-ux-evidence` and clean except for untracked QA evidence files.
+- Fetched `origin`, created `codex/full-app-qa` from `origin/main`, and fast-forward pulled.
+- Confirmed current branch is `codex/full-app-qa...origin/main`.
+- Confirmed `origin` is `https://github.com/skellywix/promptwall.git`.
+- Confirmed `origin/HEAD` resolves to `origin/main`.
+- Confirmed only npm lockfile present is `package-lock.json`.
+- Ran `npm run` to enumerate available scripts.
+
+### Commands Run
+
+- `git fetch --prune origin` - passed.
+- `git switch -c codex/full-app-qa origin/main` - passed.
+- `git pull --ff-only` - passed, already up to date.
+- `node -v` - `v22.22.3`.
+- `npm -v` - `11.17.0`.
+- `npm ls --depth=0 --omit=optional` - passed.
+- `npm ci` - passed; 114 packages installed and 0 vulnerabilities reported by npm install audit.
+- `npm run` - passed; discovered the scripts listed in `package.json`.
+- `npm run review:ci` - passed.
+
+### Baseline Gate Result
+
+`npm run review:ci` passed and covered:
+
+- `git diff --check`
+- `npm run docs:demo-guide:check` - demo guides current.
+- `npm run ai-domains:check` - 75 domains, Cloudflare Radar skipped because no `CLOUDFLARE_API_TOKEN` is configured.
+- `npm test` - 76 Node test files run sequentially.
+- `npm run test:admin-console` - 6 Chromium Playwright tests passed.
+- `npm run sync-check` - engine copies identical.
+- `npm run eval` - all held-out detector floors met; semantic micro precision 100.0%, recall 94.4%, F1 97.1%; structured PII micro precision/recall/F1 100.0%; benign category false positives 0; ordinary-id PII false positives 0.
+
+### Notes
+
+- `npm ci` printed npm's `allow-scripts` warning for `better-sqlite3@12.11.1`, which uses a native install path. The package installed and the Node test suite passed against the installed binding.
+- There is no separate project lint/typecheck/build command to run in this repo.
+- Existing untracked `.codex/qa-log.md` and `.codex/qa-pr.md` were preserved and not staged in this section.
+
+## Carried-Forward Evidence From Prior Merged UI/UX Slice
+
+PR #53, `test(ui): verify UI/UX implementation`, is already merged into `main` at `98449e788bfdaf46ebb2f0f2582daddec56a2a53`.
+
+Tracked artifacts already present on `main`:
+
+- `.codex/ui-ux-qa-log.md`
+- `.codex/ui-ux-pr.md`
+
+That slice covered dashboard shortcut controls, active tab accessibility state, global search accessible naming, admin-console Playwright coverage, full browser Playwright coverage, npm audit, Docker build, and GitHub CI. This evidence is useful for the navigation/accessibility sections, but the full application QA objective remains open.
+
+## Section Queue
+
+1. Baseline install/lint/typecheck/build/test discovery - passed.
+2. Navigation and routing - next.
+3. Authentication and authorization - pending.
+4. Forms and validation - pending.
+5. Buttons, controls, overlays, and interactive states - pending.
+6. Loading, empty, error, and success states - pending.
+7. API integration and data fetching - pending.
+8. Backend API behavior - pending.
+9. Database/persistence/migrations if present - pending.
+10. State management and cache - pending.
+11. Tables, search, filters, and pagination - pending.
+12. File/media flows if present - pending.
+13. Payments/billing if present - not yet assessed.
+14. Admin/RBAC if present - pending.
+15. Accessibility - pending.
+16. Responsive/cross-browser behavior - pending.
+17. Motion/effects/reduced-motion behavior - pending.
+18. Performance and bundle health - pending.
+19. Security and privacy - pending.
+20. Analytics/observability if present - pending.
+21. CI/CD and release readiness - pending.
+22. Final e2e regression - pending.
