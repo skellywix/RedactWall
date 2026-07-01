@@ -783,7 +783,7 @@ The systemd unit writes status to `/var/log/promptwall/evidence-pack.log`, uses
 
 ## SIEM Alerts
 
-Set `SIEM_WEBHOOK_URL` to send sanitized security events to a SOC or SIEM webhook. Payloads omit prompt bodies, raw retained prompts, token vaults, and raw finding values. Alert payloads include bounded workflow metadata so a SOC can see the assigned group and SLA without receiving sensitive content.
+Set `SIEM_WEBHOOK_URL` to send sanitized security events to a SOC or SIEM webhook. The URL must be `https://` and must not include URL username or password credentials. Payloads omit prompt bodies, raw retained prompts, token vaults, and raw finding values. Alert payloads include bounded workflow metadata so a SOC can see the assigned group and SLA without receiving sensitive content.
 
 Blocked prompt/file events, response leakage, hidden-instruction blocks, and failed or locked admin step-up confirmations for raw reveal and approval release are alertable. Webhook delivery is best-effort and never blocks the user-facing request.
 
@@ -853,7 +853,9 @@ names on the query, then writes an audit event such as
 `APPROVAL_NOTIFICATION_SENT` or `APPROVAL_NOTIFICATION_FAILED`. Webhook URLs,
 ticket bridge tokens, Jira API tokens, Linear API keys, SMTP credentials, and
 reviewer distribution lists are operational secrets; do not commit them to
-policy files, `.env.example`, docs with real values, or support tickets. SMTP
+policy files, `.env.example`, docs with real values, or support tickets.
+Webhook-style URLs and native Jira/Linear API URLs must be `https://` and must
+not include URL username or password credentials. SMTP
 requires TLS by default. Use the insecure relay opt-in only for a trusted local
 mail relay inside the customer network.
 

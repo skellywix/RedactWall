@@ -206,6 +206,34 @@ test('native Jira and Linear adapters create sanitized issue requests', async ()
   assert.match(wire, /US_SSN/);
 });
 
+test('approval outbound URLs require HTTPS without URL credentials', () => {
+  const channels = notifiers.configuredChannels({
+    APPROVAL_NOTIFY_WEBHOOK_URL: 'http://notify.example.test/hook',
+    APPROVAL_NOTIFY_WEBHOOK_TOKEN: 'unit-token',
+    APPROVAL_SLACK_WEBHOOK_URL: 'https://user:secret@hooks.slack.example.test/unit',
+    APPROVAL_TEAMS_WEBHOOK_URL: 'not a url',
+    APPROVAL_TICKET_WEBHOOK_URL: 'https://tickets.example.test/unit#fragment-secret',
+    PROMPTWALL_APPROVAL_JIRA_BASE_URL: 'http://acme.atlassian.net',
+    PROMPTWALL_APPROVAL_JIRA_EMAIL: 'secops@example.test',
+    PROMPTWALL_APPROVAL_JIRA_API_TOKEN: 'jira-secret-token',
+    PROMPTWALL_APPROVAL_JIRA_PROJECT_KEY: 'SEC',
+  });
+
+  assert.deepStrictEqual(channels.map((channel) => channel.type), ['ticket']);
+  assert.strictEqual(channels[0].url, 'https://tickets.example.test/unit');
+  assert.deepStrictEqual(notifiers.configuredChannels({}, {
+    channels: [
+      { type: 'webhook', name: 'cleartext', url: 'http://notify.example.test/hook' },
+      { type: 'ticket', name: 'credentialed', url: 'https://token:secret@tickets.example.test/unit' },
+      { type: 'webhook', name: 'safe', url: 'https://notify.example.test/hook#frag' },
+      { type: 'smtp', name: 'smtp', host: '127.0.0.1' },
+    ],
+  }).map((channel) => [channel.type, channel.name, channel.url || null]), [
+    ['webhook', 'safe', 'https://notify.example.test/hook'],
+    ['smtp', 'smtp', null],
+  ]);
+});
+
 test('Linear adapter treats GraphQL errors as failed notification delivery', async () => {
   const result = await notifiers.emitApprovalNotification(sampleQuery(), {
     env: {
@@ -275,6 +303,7 @@ test('Linear smoke command builds a sanitized native request', () => {
 test('native Linear adapter rejects unsafe API URL overrides', () => {
   assert.strictEqual(notifiers.linearApiUrl('http://api.linear.test/graphql'), '');
   assert.strictEqual(notifiers.linearApiUrl('not a url'), '');
+  assert.strictEqual(notifiers.linearApiUrl('https://api-key:secret@api.linear.app/graphql'), '');
   assert.strictEqual(
     notifiers.configuredChannels({
       PROMPTWALL_APPROVAL_LINEAR_API_KEY: 'linear-secret-key',

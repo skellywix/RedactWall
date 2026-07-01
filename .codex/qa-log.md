@@ -794,6 +794,47 @@ Status: Passed
 - The new package-size check writes extension zips to a temporary directory and deletes them during test cleanup.
 - The dashboard status fix changes transient client-side feedback only; it does not change auth, CSRF, RBAC, raw reveal, approval release, detector, persistence, evidence export, tenant, billing, logging, or network behavior.
 
+## Section 19 - Security and privacy
+
+Status: Passed
+
+### Inspection
+
+- Reviewed auth, CSRF, MFA, RBAC, security-header, validation, raw-reveal, evidence-export, detector privacy, alerting, notification, endpoint, MCP, and browser-extension coverage.
+- Confirmed existing tests cover session-cookie failure behavior, CSRF-protected admin mutations, role-limited billing-seat data, sanitized validation errors, sanitized file evidence, sanitized SIEM alerts, sanitized approval notifications, SMTP header injection stripping, and Linear unsafe API URL rejection.
+- Reviewed outbound SIEM alert and approval-notification delivery paths because they carry bearer/API tokens and sanitized workflow metadata to external systems.
+- Confirmed GitHub `test` and `docker` checks were green on PR head `d81b5c7` before the local Section 19 edits.
+
+### Issues Found
+
+1. SIEM alert webhooks accepted non-HTTPS or credential-bearing URLs before fetch, so a misconfigured `SIEM_WEBHOOK_URL` could send alert bearer tokens and sanitized event metadata over cleartext or with URL-embedded credentials.
+2. Generic approval webhooks, Slack/Teams webhooks, ticket bridge webhooks, and direct Jira base URLs did not enforce the same HTTPS-only policy that the Linear adapter already enforced.
+3. Operator docs did not state the runtime HTTPS/no-URL-credentials requirement for webhook-style URLs.
+
+### Fix Made
+
+- Added shared outbound URL normalization that accepts only `https://` URLs without URL username/password credentials and strips URL fragments before delivery.
+- Applied the policy to SIEM alert webhooks, approval notification webhooks, Slack/Teams webhooks, ticket bridge webhooks, direct Jira delivery, direct Linear overrides, and test-injected notification channels.
+- Added alert and notification regressions proving cleartext and credential-bearing URLs are rejected before fetch and URL fragments are not sent.
+- Updated deployment and approval-routing docs to document the HTTPS/no-URL-credentials contract for webhook-style URLs and native Jira/Linear API URLs.
+
+### Commands Run
+
+- `node --check server\notifiers.js` - passed after section 19 edit.
+- `node --check server\alerts.js` - passed after section 19 edit.
+- `node --check server\url-policy.js` - passed after section 19 edit.
+- `node --test --test-concurrency=1 test\alerts.test.js test\notifiers.test.js test\workflow-notifications.test.js test\workflow.test.js` - passed after section 19 edit, 25 tests.
+- `git diff --check` - passed after section 19 edit with the repo's usual CRLF working-copy warnings.
+- `npm run docs:demo-guide:check` - passed after section 19 docs edit.
+- `npm test` - passed after section 19 edit, 80 node test files.
+- `$env:PLAYWRIGHT_PORT='4309'; npm run review:ci` - passed after section 19 edit, including docs demo guide check, AI domain coverage check, 80 node test files, 13 admin-console Chromium tests, `sync-check`, and `eval`.
+
+### Security Review Notes
+
+- Section 19 changes outbound notification and alert URL validation only. It does not change auth, CSRF, RBAC, raw reveal, approval release, detector decisions, persistence, evidence export, tenant resolution, or browser-extension behavior.
+- The runtime now fails closed for unsafe SIEM and approval webhook-style URLs before fetch, preventing bearer/API tokens and sanitized workflow metadata from being sent over cleartext HTTP or URL-credential endpoints.
+- SMTP retains its documented TLS controls and explicit insecure-local-relay opt-in; this section does not change SMTP transport behavior.
+
 ## Section Queue
 
 1. Baseline install/lint/typecheck/build/test discovery - passed.
@@ -814,7 +855,7 @@ Status: Passed
 16. Responsive/cross-browser behavior - passed.
 17. Motion/effects/reduced-motion behavior - passed.
 18. Performance and bundle health - passed.
-19. Security and privacy - pending.
+19. Security and privacy - passed.
 20. Analytics/observability if present - pending.
 21. CI/CD and release readiness - pending.
 22. Final e2e regression - pending.

@@ -126,6 +126,27 @@ test('webhook emit is disabled without url and swallows network failures', async
   const disabled = await alerts.emitSecurityAlert(sampleQuery(), { url: '' });
   assert.deepStrictEqual(disabled, { sent: false, reason: 'disabled' });
 
+  let called = false;
+  const cleartext = await alerts.emitSecurityAlert(sampleQuery(), {
+    url: 'http://siem.example.test/hook',
+    fetch: async () => {
+      called = true;
+      return { ok: true, status: 202 };
+    },
+  });
+  assert.deepStrictEqual(cleartext, { sent: false, reason: 'invalid_url' });
+  assert.strictEqual(called, false);
+
+  const credentialed = await alerts.emitSecurityAlert(sampleQuery(), {
+    url: 'https://user:secret@siem.example.test/hook',
+    fetch: async () => {
+      called = true;
+      return { ok: true, status: 202 };
+    },
+  });
+  assert.deepStrictEqual(credentialed, { sent: false, reason: 'invalid_url' });
+  assert.strictEqual(called, false);
+
   const failed = await alerts.emitSecurityAlert(sampleQuery(), {
     url: 'https://siem.example.test/hook',
     fetch: async () => { throw new Error('offline'); },
@@ -136,7 +157,7 @@ test('webhook emit is disabled without url and swallows network failures', async
 test('webhook emit sends authorization and sanitized json', async () => {
   let request;
   const sent = await alerts.emitSecurityAlert(sampleQuery(), {
-    url: 'https://siem.example.test/hook',
+    url: 'https://siem.example.test/hook#secret-fragment',
     token: 'unit-token',
     fetch: async (url, opts) => {
       request = { url, opts };
