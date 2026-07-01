@@ -336,11 +336,12 @@ test.describe('browser extension live smoke', () => {
       await page.locator('#prompt-textarea').fill('Member test SSN 123-45-6789 needs a payoff letter.');
       await page.locator('button[data-testid="send-button"]').click();
 
-      await expect(page.locator('.ps-banner')).toBeVisible();
+      const blockBanner = page.getByRole('alertdialog', { name: 'Sensitive data blocked' });
+      await expect(blockBanner).toBeVisible();
       await expect(page.locator('.ps-title')).toContainText('Sensitive data blocked');
-      await expect(page.locator('.ps-banner')).toContainText('before it could leave this browser');
+      await expect(blockBanner).toContainText('before it could leave this browser');
       await expect(page.locator('.ps-chip')).toContainText('Social Security number');
-      await expect(page.locator('.ps-banner')).not.toContainText('US_SSN');
+      await expect(blockBanner).not.toContainText('US_SSN');
       await expect(page.locator('.ps-coach')).toContainText('member ID');
       await page.getByRole('button', { name: 'Edit prompt' }).click();
       await expect(page.locator('.ps-banner')).toHaveCount(0);
@@ -513,6 +514,7 @@ test.describe('browser extension live smoke', () => {
       await applyFixturePolicyToPage(context, page, baseURL, 'chatgpt.com', policy);
       await page.locator('#prompt-textarea').fill('Email qa-warning@example.test about the account update.');
       await page.locator('button[data-testid="send-button"]').click();
+      await expect(page.getByRole('alertdialog', { name: 'Review before sending' })).toBeVisible();
       await expect(page.locator('.ps-title')).toContainText('Review before sending');
       await page.getByRole('button', { name: 'Dismiss' }).click();
       await expect(page.locator('.ps-banner')).toHaveCount(0);
@@ -554,9 +556,11 @@ test.describe('browser extension live smoke', () => {
       await loginAdminApi(request);
       await page.locator('#prompt-textarea').fill('Email qa-justify@example.test about the account update.');
       await page.locator('button[data-testid="send-button"]').click();
+      await expect(page.getByRole('alertdialog', { name: 'Business reason required' })).toBeVisible();
       await expect(page.locator('.ps-title')).toContainText('Business reason required');
       await page.getByRole('button', { name: 'Submit reason' }).click();
       await expect(page.locator('.ps-banner')).toBeVisible();
+      await expect(page.getByRole('textbox', { name: 'Business reason' })).toHaveAttribute('aria-invalid', 'true');
       await expect(page.locator('[data-sent]')).toHaveCount(0);
       await page.getByRole('button', { name: 'Cancel' }).click();
       await expect(page.locator('.ps-banner')).toHaveCount(0);
@@ -565,7 +569,9 @@ test.describe('browser extension live smoke', () => {
 
       await page.locator('button[data-testid="send-button"]').click();
       await expect(page.locator('.ps-title')).toContainText('Business reason required');
-      await page.locator('.ps-just').fill('Member support follow-up');
+      const reasonBox = page.getByRole('textbox', { name: 'Business reason' });
+      await reasonBox.fill('Member support follow-up');
+      await expect(reasonBox).toHaveAttribute('aria-invalid', 'false');
       await page.getByRole('button', { name: 'Submit reason' }).click();
       await expect(page.locator('[data-sent]')).toContainText('qa-justify@example.test');
       await expect.poll(() => queryStatusesFor(request, 'justified')).toBeGreaterThan(0);

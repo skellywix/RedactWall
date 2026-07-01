@@ -317,6 +317,14 @@ test('browser block banner includes employee coaching guidance', () => {
   assert.match(content, /function chipHtml\(items\)/);
   assert.match(content, /Sensitive data blocked/);
   assert.match(content, /before it could leave this browser/);
+  assert.match(content, /setAttribute\('role', 'alertdialog'\)/);
+  assert.match(content, /setAttribute\('aria-labelledby', titleId\)/);
+  assert.match(content, /setAttribute\('aria-describedby', detailId\)/);
+  assert.match(content, /aria-label="Business reason"/);
+  assert.match(content, /reasonInput\.setAttribute\('aria-invalid', 'true'\)/);
+  assert.match(content, /reasonInput\.addEventListener\('input'/);
+  assert.match(content, /reasonInput\.setAttribute\('aria-invalid', 'false'\)/);
+  assert.match(content, /initialFocus\.focus\(\{ preventScroll: true \}\)/);
   assert.match(content, /'<div class="ps-coach">' \+ escapeHtml\(coach\) \+ '<\/div>'/);
   assert.match(content, /PromptWall found sensitive data: ' \+ listForScreen/);
   assert.doesNotMatch(content, /this prompt contains <b>' \+ items\.join/);

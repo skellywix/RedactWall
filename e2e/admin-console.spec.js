@@ -110,6 +110,23 @@ async function savePolicyMode(page, mode) {
   await expect(page.locator('#polSaved')).toHaveText('Saved');
 }
 
+test('login form announces authentication errors accessibly', async ({ page }) => {
+  await page.goto('/login.html?oidc=failed');
+  await expect(page.getByRole('alert')).toHaveText('SSO sign-in failed. Try again or use a local account.');
+
+  await page.locator('#user').fill('admin');
+  await page.locator('#password').fill('wrong-password');
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await expect(page.getByRole('alert')).toHaveText('Invalid credentials. Try again.');
+  await expect(page.locator('#user')).toHaveAttribute('aria-invalid', 'true');
+  await expect(page.locator('#password')).toHaveAttribute('aria-invalid', 'true');
+  await expect(page.locator('#otp')).toHaveAttribute('aria-invalid', 'false');
+
+  await page.locator('#password').fill('e2e-pass');
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await expect(page).toHaveURL(/\/index\.html$/);
+});
+
 test('admin console theme toggle defaults light and persists dark mode', async ({ page }) => {
   const problems = collectUiProblems(page);
   await login(page);
@@ -623,12 +640,17 @@ test('admin console controls and forms are wired end to end', async ({ page, req
   await expect(page.locator(`.q[data-id="${approve.id}"]`)).toBeVisible();
   await page.locator('[data-queue-filter="mine"]').click();
   await expect(page.locator('[data-queue-filter="mine"]')).toHaveClass(/active/);
+  await expect(page.locator('[data-queue-filter="mine"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('[data-queue-filter="all"]')).toHaveAttribute('aria-pressed', 'false');
   await page.locator('[data-queue-filter="unassigned"]').click();
   await expect(page.locator('[data-queue-filter="unassigned"]')).toHaveClass(/active/);
+  await expect(page.locator('[data-queue-filter="unassigned"]')).toHaveAttribute('aria-pressed', 'true');
   await page.locator('[data-queue-filter="escalated"]').click();
   await expect(page.locator('[data-queue-filter="escalated"]')).toHaveClass(/active/);
+  await expect(page.locator('[data-queue-filter="escalated"]')).toHaveAttribute('aria-pressed', 'true');
   await page.locator('[data-queue-filter="all"]').click();
   await expect(page.locator('[data-queue-filter="all"]')).toHaveClass(/active/);
+  await expect(page.locator('[data-queue-filter="all"]')).toHaveAttribute('aria-pressed', 'true');
   await page.locator('#queueCategoryFilter').selectOption('us_ssn');
   await expect(page.locator(`.q[data-id="${approve.id}"]`)).toBeVisible();
   await page.locator('#queueDestinationFilter').selectOption('claude.ai');
@@ -645,12 +667,19 @@ test('admin console controls and forms are wired end to end', async ({ page, req
   await expect(page.locator('#toggleQueueDensity')).toHaveAttribute('aria-pressed', 'false');
 
   const revealRow = page.locator(`.q[data-id="${reveal.id}"]`);
-  await revealRow.click();
+  await expect(page.locator('#queueList')).toHaveAttribute('role', 'list');
+  await expect(page.locator('#incidentDetail')).toHaveAttribute('aria-live', 'polite');
+  await expect(revealRow).toHaveAttribute('role', 'listitem');
+  await revealRow.focus();
+  await page.keyboard.press('Enter');
   await expect(revealRow).toHaveClass(/selected/);
+  await expect(revealRow).toHaveAttribute('aria-current', 'true');
   await revealRow.locator('[data-act="reveal"]').click();
-  await expect(page.getByRole('heading', { name: 'Confirm raw reveal' })).toBeVisible();
-  await page.getByLabel('Account password').fill('e2e-pass');
-  await page.locator('.stepup-dialog').getByRole('button', { name: 'Reveal' }).click();
+  const revealDialog = page.getByRole('dialog', { name: 'Confirm raw reveal' });
+  await expect(revealDialog).toBeVisible();
+  await expect(revealDialog).toContainText('This action is audit-logged');
+  await revealDialog.getByLabel('Account password').fill('e2e-pass');
+  await revealDialog.getByRole('button', { name: 'Reveal' }).click();
   await expect(page.locator(`#p_${reveal.id}`)).toContainText('524-71-9101');
   await expect(revealRow.locator('[data-act="reveal"]')).toHaveText('Raw shown and logged');
   await expect(revealRow.locator('.prompt-reveal-status.raw')).toContainText('Raw prompt revealed');
@@ -680,9 +709,11 @@ test('admin console controls and forms are wired end to end', async ({ page, req
   const approveRow = page.locator(`.q[data-id="${approve.id}"]`);
   await approveRow.locator('textarea.note').fill('Approve from full UI wiring sweep');
   await approveRow.locator('[data-act="approve"]').click();
-  await expect(page.getByRole('heading', { name: 'Confirm release' })).toBeVisible();
-  await page.getByLabel('Account password').fill('e2e-pass');
-  await page.locator('.stepup-dialog').getByRole('button', { name: 'Approve release' }).click();
+  const approveDialog = page.getByRole('dialog', { name: 'Confirm release' });
+  await expect(approveDialog).toBeVisible();
+  await expect(approveDialog).toContainText('Approving releases this held prompt');
+  await approveDialog.getByLabel('Account password').fill('e2e-pass');
+  await approveDialog.getByRole('button', { name: 'Approve release' }).click();
   await expect(approveRow).toHaveCount(0);
 
   await page.locator('.content-tabs .tab[data-tab="activity"]').click();
@@ -701,9 +732,11 @@ test('admin console controls and forms are wired end to end', async ({ page, req
   await expect(page.locator('#fleetRows')).toContainText('endpoint-health@example.test');
   await expect(page.locator('#shadowRows')).toContainText(shadowDestination);
   await page.locator(`[data-destination-review="block"][data-destination="${shadowDestination}"]`).click();
-  await expect(page.getByRole('heading', { name: 'Record destination reason' })).toBeVisible();
-  await page.locator('.stepup-dialog textarea[name="reason"]').fill('full_ui_wiring_review');
-  await page.locator('.stepup-dialog').getByRole('button', { name: 'Save review' }).click();
+  const destinationDialog = page.getByRole('dialog', { name: 'Record destination reason' });
+  await expect(destinationDialog).toBeVisible();
+  await expect(destinationDialog).toContainText(`block ${shadowDestination}`);
+  await destinationDialog.locator('textarea[name="reason"]').fill('full_ui_wiring_review');
+  await destinationDialog.getByRole('button', { name: 'Save review' }).click();
   await expect(page.locator('#shadowRows')).toContainText('Blocked');
 
   await page.locator('.content-tabs .tab[data-tab="identity"]').click();

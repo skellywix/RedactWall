@@ -82,7 +82,7 @@ That slice covered dashboard shortcut controls, active tab accessibility state, 
 - Branch: `codex/full-app-qa`
 - PR: `https://github.com/skellywix/promptwall/pull/54`
 - Latest observed CI status: GitHub `test` and `docker` checks are watched after each pushed QA slice.
-- Merge status: not merged. The full application QA objective remains open and the next section is Accessibility.
+- Merge status: not merged. The full application QA objective remains open and the next section is Responsive/cross-browser behavior.
 
 ## Section 2 - Navigation And Routing
 
@@ -615,6 +615,56 @@ Status: Passed
 - The assigned-user normalization does not broaden role access: the request still requires an authenticated approver, `assignedRole: "approver"`, and matching normalized principal, or a Security Admin.
 - Approvers and auditors continue to read sanitized evidence and remain blocked from raw reveal, retention purge, policy mutation, destination review, and unassigned security-admin decisions.
 
+## Section 15 - Accessibility
+
+Status: Passed
+
+### Inspection
+
+- Reviewed login, dashboard alert, step-up dialog, destination review dialog, browser-extension banner, queue filter, approval queue, selected incident, activity row, status-chip, and Signal Monitor keyboard/accessibility semantics.
+- Confirmed existing coverage already exercised active content-tab `aria-current`, reduced-motion pulse behavior, status-chip keyboard activation, activity-row keyboard expansion, Signal Monitor listbox rows, invalid monitor-search `aria-invalid`, and modal Escape/cancel paths.
+- Focused on approval queue and authentication feedback surfaces because they are high-frequency operator workflows and carry state that must be announced without relying on visual styling.
+
+### Issues Found
+
+1. Login and dashboard error feedback rendered visually but did not consistently expose an alert/live-region contract or mark the invalid login fields.
+2. Step-up and destination-review `<dialog>` elements had visible headings/descriptions but no explicit `aria-labelledby` / `aria-describedby` wiring.
+3. Queue filter buttons used visual active state without synchronized `aria-pressed`.
+4. Approval queue rows were keyboard-selectable but exposed only as generic focusable articles, so the selected row and controlled incident-detail region were not announced clearly.
+5. Browser-extension block/warn/justify banners interrupted page sends but did not expose an alertdialog contract, initial focus, or invalid state on the required business-reason textbox.
+
+### Fix Made
+
+- Added live alert semantics to login errors and the dashboard banner.
+- Added `aria-describedby` on login inputs and `aria-invalid` updates for invalid credential, MFA-required, and cleared-error states.
+- Added generated dialog heading/description ids and explicit ARIA wiring for password step-up and destination review dialogs.
+- Synchronized approval queue filter `aria-pressed` with the active filter state.
+- Exposed approval queue rows as list items with accessible row labels, `aria-current` on the selected row, and `aria-controls="incidentDetail"`.
+- Exposed the selected incident detail pane as a polite live region.
+- Added browser-extension banner `alertdialog` semantics, title/detail relationships, initial focus, an accessible business-reason textbox, and `aria-invalid` feedback for short justifications.
+- Added browser coverage for login error announcements, keyboard selection of approval queue rows, and extension banner accessibility.
+
+### Commands Run
+
+- `node --check server\public\login.js` - passed after section 15 edit.
+- `node --check server\public\dashboard.js` - passed after section 15 edit.
+- `node --check sensors\browser-extension\content.js` - passed after section 15 edit.
+- `node --check e2e\admin-console.spec.js` - passed after section 15 edit.
+- `node --check e2e\browser-extension.spec.js` - passed after section 15 edit.
+- `node --test --test-concurrency=1 test\admin-csrf.test.js test\dashboard-linkage.test.js` - passed after section 15 edit, 18 tests.
+- `node --test --test-concurrency=1 test\extension.test.js` - passed after section 15 edit, 31 tests.
+- `$env:PLAYWRIGHT_PORT='4274'; npx playwright test admin-console.spec.js --grep "login form announces|controls and forms" --reporter=line` - passed after section 15 edit, 2 Chromium tests.
+- `$env:PLAYWRIGHT_PORT='4277'; npm run test:browser-extension` - passed after section 15 edit, 8 Chromium tests.
+- `$env:PLAYWRIGHT_PORT='4278'; npm run review:ci` - passed after section 15 edit, including docs demo guide check, AI domain coverage check, 79 node test files, 12 admin-console Chromium tests, `sync-check`, and `eval`.
+
+### Security Review Notes
+
+- Section 15 changes UI accessibility semantics and client-side invalid-field state only.
+- Login error text remains generic and does not reveal whether a username, password, or MFA secret exists.
+- Dialog ARIA wiring does not change step-up auth, CSRF, RBAC, raw reveal, destination review, detector, evidence export, or persistence behavior.
+- Approval queue accessibility labels are built from already-rendered sanitized row metadata and do not expose raw prompts or hidden billing/user rosters.
+- Extension banner labels and descriptions are built from already-sanitized detector labels and coaching guidance, not raw prompt text.
+
 ## Section Queue
 
 1. Baseline install/lint/typecheck/build/test discovery - passed.
@@ -631,7 +681,7 @@ Status: Passed
 12. File/media flows if present - passed.
 13. Payments/billing if present - passed.
 14. Admin/RBAC if present - passed.
-15. Accessibility - pending.
+15. Accessibility - passed.
 16. Responsive/cross-browser behavior - pending.
 17. Motion/effects/reduced-motion behavior - pending.
 18. Performance and bundle health - pending.

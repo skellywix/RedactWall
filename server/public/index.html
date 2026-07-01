@@ -2651,7 +2651,7 @@
         Sign out
       </button>
     </header>
-    <div class="banner" id="banner"></div>
+    <div class="banner" id="banner" role="alert" aria-live="polite"></div>
 
     <div class="hero-row">
       <div class="page-title">
@@ -2713,10 +2713,10 @@
                 <span>Blocked prompts awaiting Security Admin review</span>
               </div>
               <div class="queue-tools">
-                <button class="ghost mini active" data-queue-filter="all" type="button">All</button>
-                <button class="ghost mini" data-queue-filter="mine" type="button">Mine</button>
-                <button class="ghost mini" data-queue-filter="unassigned" type="button">Unassigned</button>
-                <button class="ghost mini" data-queue-filter="escalated" type="button">Escalated</button>
+                <button class="ghost mini active" data-queue-filter="all" type="button" aria-pressed="true">All</button>
+                <button class="ghost mini" data-queue-filter="mine" type="button" aria-pressed="false">Mine</button>
+                <button class="ghost mini" data-queue-filter="unassigned" type="button" aria-pressed="false">Unassigned</button>
+                <button class="ghost mini" data-queue-filter="escalated" type="button" aria-pressed="false">Escalated</button>
                 <button class="ghost mini" id="toggleQueueDensity" type="button" aria-pressed="false">
                   <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 7h14M5 12h14M5 17h14" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
                   <span>Compact view</span>
@@ -2735,7 +2735,7 @@
                 <select id="queueDestinationFilter"></select>
               </label>
             </div>
-            <div id="queueList" class="queue-list"></div>
+            <div id="queueList" class="queue-list" role="list" aria-label="Pending approval prompts"></div>
           </div>
           <div class="side-stack">
             <div class="panel inspector-panel is-active">
@@ -2745,7 +2745,7 @@
                   <span>Redacted review context</span>
                 </div>
               </div>
-              <div id="incidentDetail" class="incident-detail"></div>
+              <div id="incidentDetail" class="incident-detail" role="region" aria-live="polite" aria-label="Selected incident details"></div>
             </div>
             <div class="panel" data-collapsible="true">
               <div class="panel-head">

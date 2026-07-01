@@ -6,7 +6,23 @@ const errorBox = document.getElementById('err');
 const oidcButton = document.getElementById('oidc');
 
 if (new URLSearchParams(location.search).get('oidc') === 'failed') {
-  errorBox.textContent = 'SSO sign-in failed. Try again or use a local account.';
+  showError('SSO sign-in failed. Try again or use a local account.');
+}
+
+function setInvalidFields(fields = []) {
+  const invalid = new Set(fields);
+  [
+    ['user', userInput],
+    ['password', passwordInput],
+    ['otp', otpInput],
+  ].forEach(([name, input]) => {
+    input.setAttribute('aria-invalid', invalid.has(name) ? 'true' : 'false');
+  });
+}
+
+function showError(message, fields = []) {
+  errorBox.textContent = message || '';
+  setInvalidFields(fields);
 }
 
 async function loadLoginOptions() {
@@ -27,7 +43,7 @@ loadLoginOptions();
 
 f.addEventListener('submit', async (e) => {
   e.preventDefault();
-  errorBox.textContent = '';
+  showError('');
   const r = await fetch('/api/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -36,8 +52,7 @@ f.addEventListener('submit', async (e) => {
   if (r.ok) location.href = '/index.html';
   else {
     const body = await r.json().catch(() => ({}));
-    errorBox.textContent = body.mfaRequired
-      ? 'Enter the current authenticator code.'
-      : 'Invalid credentials. Try again.';
+    if (body.mfaRequired) showError('Enter the current authenticator code.', ['otp']);
+    else showError('Invalid credentials. Try again.', ['user', 'password']);
   }
 });

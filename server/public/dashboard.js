@@ -1318,15 +1318,23 @@ function setLiveState(state) {
   }
 }
 
+function uniqueDialogId(prefix) {
+  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
 function askStepUpPassword({ title, message, confirmText, icon = '', buttonClass = 'reveal' }) {
   return new Promise((resolve) => {
     const dialog = document.createElement('dialog');
+    const titleId = uniqueDialogId('stepup_title');
+    const descriptionId = uniqueDialogId('stepup_description');
     dialog.className = 'stepup-dialog';
+    dialog.setAttribute('aria-labelledby', titleId);
+    dialog.setAttribute('aria-describedby', descriptionId);
     dialog.innerHTML = `
       <form method="dialog" class="stepup-panel">
         <div>
-          <h2>${escapeHtml(title)}</h2>
-          <p>${escapeHtml(message)}</p>
+          <h2 id="${titleId}">${escapeHtml(title)}</h2>
+          <p id="${descriptionId}">${escapeHtml(message)}</p>
         </div>
         <label>Account password
           <input name="password" type="password" autocomplete="current-password" required />
@@ -1380,12 +1388,16 @@ function askDestinationReviewReason({ destination, decision }) {
   const labels = { govern: 'govern', allow: 'allow', block: 'block' };
   return new Promise((resolve) => {
     const dialog = document.createElement('dialog');
+    const titleId = uniqueDialogId('destination_review_title');
+    const descriptionId = uniqueDialogId('destination_review_description');
     dialog.className = 'stepup-dialog';
+    dialog.setAttribute('aria-labelledby', titleId);
+    dialog.setAttribute('aria-describedby', descriptionId);
     dialog.innerHTML = `
       <form method="dialog" class="stepup-panel">
         <div>
-          <h2>Record destination reason</h2>
-          <p>${escapeHtml(labels[decision] || 'review')} ${escapeHtml(destination)} with a short examiner-facing reason.</p>
+          <h2 id="${titleId}">Record destination reason</h2>
+          <p id="${descriptionId}">${escapeHtml(labels[decision] || 'review')} ${escapeHtml(destination)} with a short examiner-facing reason.</p>
         </div>
         <label>Admin reason
           <textarea name="reason" rows="3" maxlength="240" required></textarea>
@@ -1581,7 +1593,9 @@ async function loadQueue() {
 function renderQueueView() {
   const el = $('#queueList');
   $$('.queue-tools [data-queue-filter]').forEach((button) => {
-    button.classList.toggle('active', button.dataset.queueFilter === queueFilter);
+    const active = button.dataset.queueFilter === queueFilter;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
   });
   syncQueueFilterOptions();
   const rows = currentQueue.filter(queueMetadataMatches).filter(matchesSearch);
@@ -1601,12 +1615,14 @@ function renderQueueView() {
 }
 
 function renderQueueItem(q) {
+  const isSelected = selected === q.id;
   const sev = sevClass(q.maxSeverityLabel);
   const detected = Object.keys(q.entityCounts || {}).join(', ') || (q.categories || []).join(', ') || 'policy match';
   const revealState = revealedPromptState(q.id);
   const revealDisplay = revealDisplayState(q, revealState);
   const promptText = revealState ? revealState.text : q.redactedPrompt;
   const revealControl = revealControlFor(q, revealState);
+  const rowLabel = `${q.user || 'unknown user'} ${sourceLabel(q.source)} to ${q.destination || 'unknown destination'}, ${q.maxSeverityLabel || 'low'} severity, risk ${q.riskScore ?? 0}`;
   const revealStatus = revealDisplay
     ? `<div class="prompt-reveal-status ${escapeHtml(revealDisplay.kind)}"><b>${escapeHtml(revealDisplay.statusLabel)}</b><span>${escapeHtml(revealDisplay.statusDetail)}</span></div>`
     : '';
@@ -1619,7 +1635,7 @@ function renderQueueItem(q) {
       ${revealControl}
     </div>`
     : `<div class="readonly-note">${escapeHtml(queueDecisionLabel(q))}</div>`;
-  return `<article class="q ${selected === q.id ? 'selected' : ''}" data-id="${escapeHtml(q.id)}" tabindex="0">
+  return `<article class="q ${isSelected ? 'selected' : ''}" data-id="${escapeHtml(q.id)}" tabindex="0" role="listitem" ${isSelected ? 'aria-current="true"' : ''} aria-controls="incidentDetail" aria-label="${escapeHtml(rowLabel)}">
     <div class="top risk-meta-row">
       <span class="select-dot" aria-hidden="true"></span>
       <span class="sev ${sev}">${escapeHtml(q.maxSeverityLabel || 'low')}</span>

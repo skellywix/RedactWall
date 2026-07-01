@@ -18,7 +18,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - File/media flows if present - passed.
 - Payments/billing if present - passed.
 - Admin/RBAC if present - passed.
-- Accessibility - pending.
+- Accessibility - passed.
 - Responsive/cross-browser behavior - pending.
 - Motion/effects/reduced-motion behavior - pending.
 - Performance and bundle health - pending.
@@ -59,6 +59,10 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - SaaS/customer-silo billing surface has no payment-provider integration; paid-seat enforcement now fails closed when seat-limit config is missing or invalid, and the admin stats card surfaces invalid paid-seat configuration.
 - Admin/RBAC seat reporting is Security Admin-only, while auditor and approver sessions remain limited to sanitized evidence and assigned decisions.
 - Approver assigned-user ownership is normalized for casing and whitespace across server and dashboard checks.
+- Login and dashboard error feedback now exposes alert/live-region semantics and invalid login fields through `aria-invalid`.
+- Password step-up and destination-review dialogs now have explicit `aria-labelledby` / `aria-describedby` wiring.
+- Approval queue filters, keyboard row selection, selected row state, and selected incident details are exposed through ARIA state in the browser flow.
+- Browser-extension block/warn/justify banners now expose alertdialog semantics, initial focus, and accessible business-reason validation.
 
 # Bugs Fixed
 
@@ -78,6 +82,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Section 13 follow-up stabilized the full browser export-failure assertion after GitHub exposed a race in the existing secondary-controls test.
 - Section 14 fixed `/api/billing/seats` RBAC so billing-seat user identities are no longer available to every authenticated dashboard role.
 - Section 14 fixed approver assigned-user matching so casing or whitespace differences from IdP/routing data do not block legitimate assigned decisions.
+- Section 15 fixed accessibility feedback gaps for login/dashboard alerts, step-up dialogs, destination-review dialogs, browser-extension banners, queue filters, and keyboard-selected approval rows.
 
 # Tests Added Or Updated
 
@@ -119,6 +124,13 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Updated `server/roles.js` and `server/public/dashboard.js` to normalize assigned-user principal comparisons for approver ownership.
 - Added `test/roles.test.js` for normalized approver ownership and non-decider role checks.
 - Updated `test/admin-csrf.test.js`, `test/approver-role.test.js`, and `test/auditor-role.test.js` with Section 14 RBAC regressions.
+- Updated `server/public/login.html` and `server/public/login.js` with accessible login error announcements and invalid-field state.
+- Updated `server/public/index.html` and `server/public/dashboard.js` with dashboard alert, dialog, queue filter, selected queue row, and selected incident accessibility semantics.
+- Updated `sensors/browser-extension/content.js` with alertdialog and business-reason textbox semantics for the browser banner.
+- Updated `test/admin-csrf.test.js` with Section 15 accessibility wiring regressions.
+- Updated `test/extension.test.js` with browser-extension banner accessibility wiring checks.
+- Updated `e2e/admin-console.spec.js` with login alert and keyboard queue-selection browser coverage.
+- Updated `e2e/browser-extension.spec.js` with alertdialog and business-reason textbox browser coverage.
 
 # Commands Run
 
@@ -217,20 +229,30 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - `node --test --test-concurrency=1 test\roles.test.js test\approver-role.test.js test\auditor-role.test.js test\auth.test.js test\admin-mfa.test.js test\approval-stepup.test.js test\reveal-stepup.test.js test\oidc-login.test.js test\scim.test.js test\admin-csrf.test.js` - passed after section 14 edit, 38 tests.
 - `$env:PLAYWRIGHT_PORT='4272'; npm run test:admin-console` - passed after section 14 edit, 11 Chromium tests.
 - `npm run review:ci` - passed after section 14 edit, including docs demo guide check, AI domain coverage check, 79 node test files, 11 admin-console Chromium tests, `sync-check`, and `eval`.
+- `node --check server\public\login.js` - passed after section 15 edit.
+- `node --check server\public\dashboard.js` - passed after section 15 edit.
+- `node --check sensors\browser-extension\content.js` - passed after section 15 edit.
+- `node --check e2e\admin-console.spec.js` - passed after section 15 edit.
+- `node --check e2e\browser-extension.spec.js` - passed after section 15 edit.
+- `node --test --test-concurrency=1 test\admin-csrf.test.js test\dashboard-linkage.test.js` - passed after section 15 edit, 18 tests.
+- `node --test --test-concurrency=1 test\extension.test.js` - passed after section 15 edit, 31 tests.
+- `$env:PLAYWRIGHT_PORT='4274'; npx playwright test admin-console.spec.js --grep "login form announces|controls and forms" --reporter=line` - passed after section 15 edit, 2 Chromium tests.
+- `$env:PLAYWRIGHT_PORT='4277'; npm run test:browser-extension` - passed after section 15 edit, 8 Chromium tests.
+- `$env:PLAYWRIGHT_PORT='4278'; npm run review:ci` - passed after section 15 edit, including docs demo guide check, AI domain coverage check, 79 node test files, 12 admin-console Chromium tests, `sync-check`, and `eval`.
 
 # CI Status
 
 - PR #54 is open: `https://github.com/skellywix/promptwall/pull/54`
 - GitHub `test` and `docker` checks were passing on the latest pushed PR head before the local Section 14 update.
 - Existing merged PR #53 is on `main` and also had passing GitHub `test` and `docker` checks.
-- Merge status: not merged. The full application QA objective remains open and the next section is Accessibility.
+- Merge status: not merged. The full application QA objective remains open and the next section is Responsive/cross-browser behavior.
 
 # Accessibility Notes
 
 - Baseline review gate includes the admin-console Playwright suite.
 - Prior merged UI/UX slice added active tab `aria-current="page"` state and an explicit global search accessible name.
 - Section 2 browser validation rechecked dashboard tab, shortcut, logout, and mobile navigation through the admin-console suite.
-- Dedicated accessibility section remains pending for this branch.
+- Section 15 passed with accessible login errors, dashboard alerts, step-up and destination-review dialog labels/descriptions, extension banner alertdialogs, queue filter `aria-pressed`, keyboard-selected approval rows, and a live selected-incident region.
 
 # Security And Privacy Notes
 
@@ -250,6 +272,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Section 12 replaces sensitive direct scan-file filenames with `[sensitive filename]` in response, storage, broadcast, raw-retained prefixes, tokenized prompts, and audit evidence while keeping original filenames transient for processor selection only.
 - Section 13 adds no payment provider, card data, checkout, billing webhook, or external billing network path. It fails closed for malformed paid-seat config before accepting SaaS sensor events and renders only aggregate billing config state in the stats card.
 - Section 14 keeps billing-seat user identities Security Admin-only, preserves auditor/approver sanitized evidence boundaries, and normalizes approver ownership without broadening role access.
+- Section 15 changes UI accessibility semantics and client-side invalid-field state only; login errors remain generic, queue row labels use already-rendered sanitized metadata, and extension banner labels use sanitized detector/coaching text.
 - Baseline tests include auth, CSRF, MFA, RBAC, validation, sanitized alerting, evidence export, retention, and detector privacy checks.
 - `npm ci` reported 0 vulnerabilities in npm's install audit.
 
@@ -270,7 +293,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - `.codex/full-app-qa-log.md`
 - `.codex/full-app-qa-pr.md`
 - Existing carried-forward artifacts: `.codex/ui-ux-qa-log.md`, `.codex/ui-ux-pr.md`
-- Section 2 through section 14 test evidence is recorded in `.codex/full-app-qa-log.md`.
+- Section 2 through section 15 test evidence is recorded in `.codex/full-app-qa-log.md`.
 
 # Risks
 

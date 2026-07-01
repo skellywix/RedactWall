@@ -357,7 +357,14 @@
   function showBanner({ mode, items, risk, onProceed, onBlock, justify }) {
     clearBanner();
     banner = document.createElement('div');
+    const idBase = 'ps_banner_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+    const titleId = idBase + '_title';
+    const detailId = idBase + '_detail';
     banner.className = 'ps-banner ps-' + mode;
+    banner.tabIndex = -1;
+    banner.setAttribute('role', 'alertdialog');
+    banner.setAttribute('aria-labelledby', titleId);
+    banner.setAttribute('aria-describedby', detailId);
     const title = mode === 'block' ? 'Sensitive data blocked' : mode === 'justify' ? 'Business reason required' : 'Review before sending';
     const detail = mode === 'block'
       ? 'PromptWall found ' + listForScreen(items) + ' before it could leave this browser.'
@@ -366,15 +373,24 @@
     const coach = coachingFor(items);
     const chips = chipHtml(items);
     banner.innerHTML =
-      '<div class="ps-row"><span class="ps-status-dot"></span>' +
-      '<div class="ps-msg"><div class="ps-title">' + escapeHtml(title) + '</div>' +
-      '<div class="ps-detail">' + escapeHtml(detail + riskText) + '</div></div>' +
+      '<div class="ps-row"><span class="ps-status-dot" aria-hidden="true"></span>' +
+      '<div class="ps-msg"><div class="ps-title" id="' + titleId + '">' + escapeHtml(title) + '</div>' +
+      '<div class="ps-detail" id="' + detailId + '">' + escapeHtml(detail + riskText) + '</div></div>' +
       '<button class="ps-x" title="Dismiss" aria-label="Dismiss">x</button></div>' +
       '<div class="ps-chips">' + chips + '</div>' +
       '<div class="ps-coach">' + escapeHtml(coach) + '</div>' +
-      (justify ? '<textarea class="ps-just" placeholder="Business reason required to proceed. Recorded for compliance."></textarea>' : '') +
+      (justify ? '<textarea class="ps-just" aria-label="Business reason" aria-describedby="' + detailId + '" aria-invalid="false" placeholder="Business reason required to proceed. Recorded for compliance."></textarea>' : '') +
       '<div class="ps-actions"></div>';
     const actions = banner.querySelector('.ps-actions');
+    const reasonInput = justify ? banner.querySelector('.ps-just') : null;
+    if (reasonInput) {
+      reasonInput.addEventListener('input', () => {
+        if (reasonInput.value.trim().length >= 4) {
+          reasonInput.style.borderColor = '';
+          reasonInput.setAttribute('aria-invalid', 'false');
+        }
+      });
+    }
     banner.querySelector('.ps-x').onclick = clearBanner;
 
     if (mode === 'warn') {
@@ -384,8 +400,13 @@
     } else if (mode === 'justify') {
       const edit = mk('button', 'ps-btn ps-secondary', 'Cancel'); edit.onclick = () => { clearBanner(); onBlock(); };
       const go = mk('button', 'ps-btn ps-primary', 'Submit reason'); go.onclick = () => {
-        const note = banner.querySelector('.ps-just').value.trim();
-        if (note.length < 4) { banner.querySelector('.ps-just').style.borderColor = '#dc2626'; return; }
+        const note = reasonInput.value.trim();
+        if (note.length < 4) {
+          reasonInput.style.borderColor = '#dc2626';
+          reasonInput.setAttribute('aria-invalid', 'true');
+          reasonInput.focus();
+          return;
+        }
         clearBanner(); onProceed(note);
       };
       actions.append(edit, go);
@@ -395,6 +416,8 @@
       actions.append(req, ok);
     }
     document.body.appendChild(banner);
+    const initialFocus = justify ? banner.querySelector('.ps-just') : banner;
+    if (initialFocus && initialFocus.focus) initialFocus.focus({ preventScroll: true });
   }
   function mk(tag, cls, txt) { const e = document.createElement(tag); e.className = cls; e.textContent = txt; return e; }
 

@@ -50,7 +50,19 @@ test('login page discovers optional OIDC without exposing secrets', () => {
   assert.doesNotMatch(loginJs, /OIDC_CLIENT_SECRET|client_secret/i);
 });
 
+test('login and dashboard alerts expose accessible live feedback', () => {
+  assert.match(loginHtml, /aria-describedby="err"/);
+  assert.match(loginHtml, /id="err" role="alert" aria-live="polite"/);
+  assert.match(loginJs, /function showError\(message, fields = \[\]\)/);
+  assert.match(loginJs, /function setInvalidFields\(fields = \[\]\)/);
+  assert.match(loginJs, /setAttribute\('aria-invalid'/);
+  assert.match(index, /id="banner" role="alert" aria-live="polite"/);
+});
+
 test('dashboard requires masked password confirmation before raw reveal', () => {
+  assert.match(dashboard, /function uniqueDialogId\(prefix\)/);
+  assert.match(dashboard, /dialog\.setAttribute\('aria-labelledby', titleId\)/);
+  assert.match(dashboard, /dialog\.setAttribute\('aria-describedby', descriptionId\)/);
   assert.match(dashboard, /function askStepUpPassword/);
   assert.match(dashboard, /function askRevealPassword\(\)/);
   assert.match(dashboard, /type="password"/);
@@ -134,6 +146,22 @@ test('dashboard renders auditors as read-only users', () => {
   assert.match(dashboard, /Read-only auditor view/);
   assert.match(dashboard, /if \(!canAdminWrite\(\)\)/);
   assert.match(dashboard, /canAdminWrite\(\) \? api\('\/api\/billing\/seats'\) : Promise\.resolve\(null\)/);
+});
+
+test('dashboard exposes queue filter selection state to assistive technology', () => {
+  assert.match(index, /data-queue-filter="all" type="button" aria-pressed="true"/);
+  assert.match(index, /data-queue-filter="mine" type="button" aria-pressed="false"/);
+  assert.match(dashboard, /button\.setAttribute\('aria-pressed', String\(active\)\)/);
+});
+
+test('dashboard exposes selected queue rows and incident details accessibly', () => {
+  assert.match(index, /id="queueList" class="queue-list" role="list" aria-label="Pending approval prompts"/);
+  assert.match(index, /id="incidentDetail" class="incident-detail" role="region" aria-live="polite" aria-label="Selected incident details"/);
+  assert.match(dashboard, /const isSelected = selected === q\.id/);
+  assert.match(dashboard, /role="listitem"/);
+  assert.match(dashboard, /aria-current="true"/);
+  assert.match(dashboard, /aria-controls="incidentDetail"/);
+  assert.match(dashboard, /aria-label="\$\{escapeHtml\(rowLabel\)\}"/);
 });
 
 test('dashboard filters approval queue by workflow state, category, and destination', () => {
