@@ -81,8 +81,8 @@ That slice covered dashboard shortcut controls, active tab accessibility state, 
 
 - Branch: `codex/full-app-qa`
 - PR: `https://github.com/skellywix/promptwall/pull/54`
-- Latest observed CI status: GitHub `test` and `docker` passed on head `d3a173f`.
-- Merge status: not merged. The full application QA objective remains open and the next section is payments/billing if present.
+- Latest observed CI status: GitHub `test` and `docker` passed on head `b64f98a`.
+- Merge status: not merged. The full application QA objective remains open and the next section is Admin/RBAC if present.
 
 ## Section 2 - Navigation And Routing
 
@@ -530,6 +530,42 @@ The direct `/api/v1/scan-file` route sanitized prompt/file content, and browser/
 - Original filenames are still used transiently inside the request handler to select the extraction processor; they are not intentionally stored or broadcast after this change.
 - Browser, endpoint, native handoff, MCP, and OCR flows continue to avoid sending file bytes or raw local filenames through sanitized evidence paths covered by the focused tests.
 
+## Section 13 - Payments/Billing If Present
+
+Status: Passed
+
+### Inspection
+
+- Searched source, docs, config, and tests for payment-provider, checkout, invoice, subscription, pricing, license, quota, and seat-limit surfaces.
+- Confirmed there is no Stripe, checkout, card-payment, invoice, webhook, or subscription-provider integration in this codebase.
+- Reviewed the billing-adjacent paid customer surface: SaaS/customer-silo tenant config, `SENTINEL_SEAT_LIMIT` / `PROMPTWALL_SEAT_LIMIT`, `/api/billing/seats`, dashboard seat KPI rendering, preflight checks, deployment docs, and seat-limit enforcement on sensor ingest routes.
+- Reviewed `test/tenant.test.js`, `test/saas-tenancy.test.js`, `test/preflight.test.js`, `test/db.test.js`, `test/dashboard-linkage.test.js`, and deployment coverage for seat reporting and paid-seat blocking.
+
+### Issue Found
+
+Production preflight already rejects missing or invalid SaaS seat limits, but runtime tenant parsing converted missing, non-numeric, fractional, zero, and negative `SENTINEL_SEAT_LIMIT` values to `0`. If a paid customer stack started despite failed preflight, sensor ingest could silently run without paid-seat enforcement.
+
+### Fix Made
+
+- Added explicit seat-limit presence and validity tracking in `server/tenant.js`.
+- Aligned runtime validity with preflight: SaaS mode now requires a positive integer paid-seat limit.
+- Updated sensor access validation to fail closed with `seat_limit_not_configured` and `503` when SaaS billing configuration is missing or invalid.
+- Added tenant unit coverage for missing, zero, negative, fractional, and non-numeric seat limits, plus seat-report validity state.
+
+### Commands Run
+
+- `node --test --test-concurrency=1 test\tenant.test.js test\saas-tenancy.test.js test\preflight.test.js` - passed before section 13 edit, 34 tests.
+- `node --test --test-concurrency=1 test\tenant.test.js test\saas-tenancy.test.js test\preflight.test.js` - passed after section 13 edit, 35 tests.
+- `node --check server\tenant.js` - passed after section 13 edit.
+- `node --test --test-concurrency=1 test\tenant.test.js test\saas-tenancy.test.js test\preflight.test.js test\setup.test.js test\dashboard-linkage.test.js test\db.test.js` - passed after section 13 edit, 52 tests.
+- `npm run review:ci` - passed after section 13 edit, including 78 node test files, 10 admin-console Chromium tests, `sync-check`, and `eval`.
+
+### Security Review Notes
+
+- This section adds no payment provider, card data, billing webhook, checkout, or external billing network path.
+- Runtime paid-seat enforcement now fails closed when billing configuration is malformed instead of silently disabling seat limits.
+- No auth, CSRF, RBAC, raw reveal, evidence export, detector, or persistence schema behavior changed in this section.
+
 ## Section Queue
 
 1. Baseline install/lint/typecheck/build/test discovery - passed.
@@ -544,7 +580,7 @@ The direct `/api/v1/scan-file` route sanitized prompt/file content, and browser/
 10. State management and cache - passed.
 11. Tables, search, filters, and pagination - passed.
 12. File/media flows if present - passed.
-13. Payments/billing if present - pending.
+13. Payments/billing if present - passed.
 14. Admin/RBAC if present - pending.
 15. Accessibility - pending.
 16. Responsive/cross-browser behavior - pending.

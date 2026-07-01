@@ -16,7 +16,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - State management and cache - passed.
 - Tables, search, filters, and pagination - passed.
 - File/media flows if present - passed.
-- Payments/billing if present - pending.
+- Payments/billing if present - passed.
 - Admin/RBAC if present - pending.
 - Accessibility - pending.
 - Responsive/cross-browser behavior - pending.
@@ -56,6 +56,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Browser file drops and local file-upload scanning block configured drop/file-upload paths before upload.
 - Direct `/api/v1/scan-file` sanitizes sensitive filenames in responses, stored query rows, redacted previews, tokenized prompts, raw-retained prefixes, and audit details.
 - Endpoint watched-file, endpoint-local OCR, signed native handoff, and MCP file-content guard flows keep file bytes and raw local filenames out of sanitized control-plane evidence.
+- SaaS/customer-silo billing surface has no payment-provider integration; paid-seat enforcement now fails closed when seat-limit config is missing or invalid.
 
 # Bugs Fixed
 
@@ -71,6 +72,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Section 10 fixed dashboard queue fallback ordering so stale activity cache cannot repopulate a decided approval item after a transient pending-refresh failure.
 - Section 11 fixed audit log global-search behavior so unrelated audit rows are hidden when searching by query ID or actor, and added pager controls for long activity, lineage, and audit tables.
 - Section 12 fixed direct scan-file filename retention so sensitive submitted filenames are replaced with `[sensitive filename]` in response, storage, broadcast, and audit evidence.
+- Section 13 fixed runtime paid-seat enforcement so malformed SaaS seat-limit config cannot silently disable billing controls after preflight failure.
 
 # Tests Added Or Updated
 
@@ -104,6 +106,8 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Updated `e2e/admin-console.spec.js` with browser coverage for audit table filtering, empty search results, and searchable table pagination.
 - Updated `server/app.js` with direct scan-file filename sanitization.
 - Updated `test/validation.test.js` with direct scan-file filename privacy coverage for text and OCR-needed image files.
+- Updated `server/tenant.js` with explicit paid-seat limit validity tracking and fail-closed runtime enforcement.
+- Updated `test/tenant.test.js` with missing, zero, negative, fractional, and non-numeric SaaS seat-limit coverage.
 
 # Commands Run
 
@@ -186,14 +190,19 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - `node --test --test-concurrency=1 test\processors.test.js test\validation.test.js` - passed after duplicate-test cleanup, 56 tests.
 - `npm run review:ci` - passed after section 12 edit, including 78 node test files, 10 admin-console Chromium tests, `sync-check`, and `eval`.
 - `$env:PLAYWRIGHT_PORT='4265'; npm run review:ci` - passed after section 12 edit, including docs demo guide check, AI domain coverage check, 78 node test files, 10 admin-console Chromium tests, `sync-check`, and `eval`.
+- `node --test --test-concurrency=1 test\tenant.test.js test\saas-tenancy.test.js test\preflight.test.js` - passed before section 13 edit, 34 tests.
+- `node --test --test-concurrency=1 test\tenant.test.js test\saas-tenancy.test.js test\preflight.test.js` - passed after section 13 edit, 35 tests.
+- `node --check server\tenant.js` - passed after section 13 edit.
+- `node --test --test-concurrency=1 test\tenant.test.js test\saas-tenancy.test.js test\preflight.test.js test\setup.test.js test\dashboard-linkage.test.js test\db.test.js` - passed after section 13 edit, 52 tests.
+- `npm run review:ci` - passed after section 13 edit, including 78 node test files, 10 admin-console Chromium tests, `sync-check`, and `eval`.
 
 # CI Status
 
 - PR #54 is open: `https://github.com/skellywix/promptwall/pull/54`
-- GitHub `test` checks passed on head `d3a173f`.
-- GitHub `docker` checks passed on head `d3a173f`.
+- GitHub `test` checks passed on head `b64f98a`.
+- GitHub `docker` checks passed on head `b64f98a`.
 - Existing merged PR #53 is on `main` and also had passing GitHub `test` and `docker` checks.
-- Merge status: not merged. The full application QA objective remains open and the next section is payments/billing if present.
+- Merge status: not merged. The full application QA objective remains open and the next section is Admin/RBAC if present.
 
 # Accessibility Notes
 
@@ -218,6 +227,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Section 10 changes dashboard cache fallback ordering and extension tests only. It does not change auth, CSRF, raw reveal, evidence export, detector, or persistence behavior.
 - Section 11 filters and paginates already-loaded sanitized dashboard rows client-side only. It does not call reveal/raw-prompt APIs or change auth, CSRF, RBAC, evidence export, detector, or persistence behavior.
 - Section 12 replaces sensitive direct scan-file filenames with `[sensitive filename]` in response, storage, broadcast, raw-retained prefixes, tokenized prompts, and audit evidence while keeping original filenames transient for processor selection only.
+- Section 13 adds no payment provider, card data, checkout, billing webhook, or external billing network path. It fails closed for malformed paid-seat config before accepting SaaS sensor events.
 - Baseline tests include auth, CSRF, MFA, RBAC, validation, sanitized alerting, evidence export, retention, and detector privacy checks.
 - `npm ci` reported 0 vulnerabilities in npm's install audit.
 
@@ -238,7 +248,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - `.codex/full-app-qa-log.md`
 - `.codex/full-app-qa-pr.md`
 - Existing carried-forward artifacts: `.codex/ui-ux-qa-log.md`, `.codex/ui-ux-pr.md`
-- Section 2 through section 12 test evidence is recorded in `.codex/full-app-qa-log.md`.
+- Section 2 through section 13 test evidence is recorded in `.codex/full-app-qa-log.md`.
 
 # Risks
 
@@ -248,6 +258,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - One local `npm run review:ci` attempt failed when `better-sqlite3` could not resolve its native binding during `test/oidc-login.test.js`; the focused OIDC test and a full rerun passed without code changes.
 - One section 2 admin-console rerun failed before tests because the local Playwright health URL on port `4211` was briefly occupied during parallel validation. A listener check showed no stale server, and the serial rerun passed.
 - Broader manual auth abuse, rate-limit, and cross-session checks remain for later security/privacy coverage.
+- This repo has no payment-provider integration; section 13 covers the existing billing-adjacent paid-seat controls only.
 - Section 4 intentionally triggered a local validation `400` in Playwright; the final rerun passed after the test explicitly scoped that expected response.
 - GitHub `test` failed on PR heads `a638063` and `1d85101` in the browser-extension smoke job before the policy-sync test fix; the fixed head `6fccc30` passed GitHub `test` and `docker`.
 - Local `test:browser` showed shared-state interference with multiple Playwright workers before the single-worker config fix.
