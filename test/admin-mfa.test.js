@@ -53,23 +53,36 @@ async function login(port, body) {
   });
 }
 
+function setCookieHeader(response) {
+  return response.headers.get('set-cookie') || '';
+}
+
 test('security admin login requires totp while auditor login remains password-only', async () => withServer(async (port) => {
+  const badPassword = await login(port, { user: 'admin', password: 'wrong-pass' });
+  assert.strictEqual(badPassword.status, 401);
+  assert.strictEqual((await badPassword.json()).error, 'invalid credentials');
+  assert.doesNotMatch(setCookieHeader(badPassword), /promptwall_session=/);
+
   const missing = await login(port, { user: 'admin', password: 'unit-pass' });
   assert.strictEqual(missing.status, 401);
   assert.strictEqual((await missing.json()).mfaRequired, true);
+  assert.doesNotMatch(setCookieHeader(missing), /promptwall_session=/);
 
   const wrongCode = auth.totpCode(totpSecret) === '000000' ? '000001' : '000000';
   const wrong = await login(port, { user: 'admin', password: 'unit-pass', otp: wrongCode });
   assert.strictEqual(wrong.status, 401);
   assert.strictEqual((await wrong.json()).mfaRequired, true);
+  assert.doesNotMatch(setCookieHeader(wrong), /promptwall_session=/);
 
   const ok = await login(port, { user: 'admin', password: 'unit-pass', otp: auth.totpCode(totpSecret) });
   assert.strictEqual(ok.status, 200);
   assert.strictEqual((await ok.json()).role, 'security_admin');
+  assert.match(setCookieHeader(ok), /promptwall_session=/);
 
   const auditor = await login(port, { user: 'auditor', password: 'auditor-pass' });
   assert.strictEqual(auditor.status, 200);
   assert.strictEqual((await auditor.json()).role, 'auditor');
+  assert.match(setCookieHeader(auditor), /promptwall_session=/);
 }));
 
 test.after(() => {

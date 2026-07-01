@@ -45,8 +45,8 @@ Status: Passed
 - `node --test --test-concurrency=1 test\oidc-login.test.js` - passed after one later transient local full-suite native binding load failure.
 - `npm run review:ci` - passed again after the transient local failure.
 - `git commit -m "test(qa): align full-app audit artifacts"` - passed; pre-commit and post-commit hooks both ran `npm run review:ci`, and the post-commit hook pushed `codex/full-app-qa`.
-- `gh pr create --base main --head codex/full-app-qa --title "test: verify full-app baseline behavior" --body-file .codex/qa-pr.md` - passed, opened PR #54.
-- `gh pr checks 54 --watch` - passed; GitHub `test` and `docker` checks were green for the pushed branch and pull_request runs.
+- `gh pr view 54 --json number,title,url,state,baseRefName,headRefName,mergeStateStatus,isDraft,commits,statusCheckRollup` - verified PR #54 exists for `codex/full-app-qa` into `main`.
+- `gh pr status` - verified PR #54 is the current branch PR and checks were pending at the time checked.
 
 ### Baseline Gate Result
 
@@ -81,8 +81,8 @@ That slice covered dashboard shortcut controls, active tab accessibility state, 
 
 - Branch: `codex/full-app-qa`
 - PR: `https://github.com/skellywix/promptwall/pull/54`
-- Latest observed CI status: passed for GitHub `test` and `docker`.
-- Merge status: not merged. The full application QA objective remains open and the next section is navigation and routing.
+- Latest observed CI status: pending for GitHub `test` and `docker` on the latest pushed head.
+- Merge status: not merged. The full application QA objective remains open and the next section is forms and validation.
 
 ## Section 2 - Navigation And Routing
 
@@ -123,11 +123,47 @@ Added `test/server-integration.test.js` coverage for:
 - The transient Playwright failure was local harness timing, not an application routing regression. The serial rerun passed without code changes.
 - Runtime server routing/auth code was not changed in this section.
 
+## Section 3 - Authentication And Authorization
+
+Status: Passed
+
+### Inspection
+
+- Reviewed `server/auth.js` session cookie signing, verification, MFA/TOTP helpers, OIDC state handling, API-vs-page unauthenticated behavior, and audit logging hooks.
+- Reviewed `server/roles.js` role constants and admin capability helpers.
+- Reviewed auth and authorization coverage across `test/auth.test.js`, `test/admin-mfa.test.js`, `test/admin-csrf.test.js`, `test/approver-role.test.js`, `test/auditor-role.test.js`, `test/approval-stepup.test.js`, `test/reveal-stepup.test.js`, `test/oidc-login.test.js`, `test/scim.test.js`, and `test/security-headers.test.js`.
+- Checked coverage for security-admin, approver, auditor, SCIM bearer, CSRF, step-up, MFA, OIDC callback, and session-protected API behavior.
+
+### Issue Found
+
+The MFA login test verified status codes and response bodies for bad credentials, missing MFA, and wrong MFA, but did not explicitly lock the session-cookie contract for failed login attempts.
+
+### Fix Made
+
+Updated `test/admin-mfa.test.js` to assert:
+
+- Bad password responses do not set `promptwall_session`.
+- Missing security-admin MFA responses do not set `promptwall_session`.
+- Wrong security-admin MFA responses do not set `promptwall_session`.
+- Successful security-admin and auditor logins do set `promptwall_session`.
+
+### Commands Run
+
+- `node scripts/run-node-tests.js test\auth.test.js test\admin-mfa.test.js test\admin-csrf.test.js test\approver-role.test.js test\auditor-role.test.js test\approval-stepup.test.js test\reveal-stepup.test.js test\oidc-login.test.js test\scim.test.js test\security-headers.test.js` - passed before edit, 36 tests.
+- `node --test --test-concurrency=1 test\admin-mfa.test.js` - passed after edit, 1 test.
+- `node scripts/run-node-tests.js test\auth.test.js test\admin-mfa.test.js test\admin-csrf.test.js test\approver-role.test.js test\auditor-role.test.js test\approval-stepup.test.js test\reveal-stepup.test.js test\oidc-login.test.js test\scim.test.js test\security-headers.test.js` - passed after edit, 36 tests.
+
+### Security Review Notes
+
+- No runtime auth, session, RBAC, CSRF, OIDC, MFA, SCIM, or audit behavior changed in this section.
+- The added regression coverage reduces auth bypass risk by proving failed login and failed MFA paths do not issue a reusable session cookie.
+- Residual auth/security work remains for later full-application sections, including broader manual cross-session checks, API abuse/rate-limit review, and final security/privacy review.
+
 ## Section Queue
 
 1. Baseline install/lint/typecheck/build/test discovery - passed.
 2. Navigation and routing - passed.
-3. Authentication and authorization - pending.
+3. Authentication and authorization - passed.
 4. Forms and validation - pending.
 5. Buttons, controls, overlays, and interactive states - pending.
 6. Loading, empty, error, and success states - pending.

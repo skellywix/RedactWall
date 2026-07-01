@@ -6,7 +6,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 
 - Baseline install/lint/typecheck/build/test discovery - passed.
 - Navigation and routing - passed.
-- Authentication and authorization - pending.
+- Authentication and authorization - passed.
 - Forms and validation - pending.
 - Buttons, controls, overlays, and interactive states - pending.
 - Loading, empty, error, and success states - pending.
@@ -37,11 +37,14 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Root, dashboard, login, and unauthenticated API route behavior.
 - Dashboard tab, rail, shortcut, logout, and mobile navigation coverage.
 - Deterministic approval-routing ownership behavior.
+- Failed password, missing MFA, and wrong MFA login paths do not issue session cookies; successful admin and auditor logins do.
+- Auth, CSRF, MFA, RBAC, approver, auditor, step-up, OIDC, SCIM, and security-header test coverage.
 
 # Bugs Fixed
 
 - No runtime bugs fixed so far.
 - Section 2 fixed a test coverage gap for unauthenticated page/API route contracts.
+- Section 3 fixed a test coverage gap for failed login and failed MFA session-cookie behavior.
 
 # Tests Added Or Updated
 
@@ -50,6 +53,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Added `.codex/full-app-qa-log.md`.
 - Added `.codex/full-app-qa-pr.md`.
 - Updated `test/server-integration.test.js` with root redirect, dashboard auth redirect, login page, and unauthenticated API 401 coverage.
+- Updated `test/admin-mfa.test.js` with failed-login, failed-MFA, and successful-login session-cookie assertions.
 
 # Commands Run
 
@@ -71,14 +75,17 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - `npm run test:admin-console` - passed on serial rerun, 6 Chromium tests.
 - `node --test --test-concurrency=1 test\server-integration.test.js` - passed after section 2 edit, 3 tests.
 - `node --test --test-concurrency=1 test\dashboard-linkage.test.js test\routing.test.js` - passed after section 2 edit, 9 tests.
+- `node scripts/run-node-tests.js test\auth.test.js test\admin-mfa.test.js test\admin-csrf.test.js test\approver-role.test.js test\auditor-role.test.js test\approval-stepup.test.js test\reveal-stepup.test.js test\oidc-login.test.js test\scim.test.js test\security-headers.test.js` - passed before section 3 edit, 36 tests.
+- `node --test --test-concurrency=1 test\admin-mfa.test.js` - passed after section 3 edit, 1 test.
+- `node scripts/run-node-tests.js test\auth.test.js test\admin-mfa.test.js test\admin-csrf.test.js test\approver-role.test.js test\auditor-role.test.js test\approval-stepup.test.js test\reveal-stepup.test.js test\oidc-login.test.js test\scim.test.js test\security-headers.test.js` - passed after section 3 edit, 36 tests.
 
 # CI Status
 
 - PR #54 is open: `https://github.com/skellywix/promptwall/pull/54`
-- GitHub `test` passed for the pushed branch and pull_request runs.
-- GitHub `docker` passed for the pushed branch and pull_request runs.
+- GitHub `test` checks were pending on the latest pushed head when last checked.
+- GitHub `docker` checks were pending on the latest pushed head when last checked.
 - Existing merged PR #53 is on `main` and also had passing GitHub `test` and `docker` checks.
-- Merge status: not merged. The full application QA objective remains open and the next section is navigation and routing.
+- Merge status: not merged. The full application QA objective remains open and the next section is forms and validation.
 
 # Accessibility Notes
 
@@ -91,6 +98,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 
 - No runtime security, auth, policy, detector, persistence, or logging behavior changed in section 1.
 - Section 2 did not change runtime auth/routing code. It added regression coverage that unauthenticated browser routes redirect while unauthenticated API routes return JSON `401`.
+- Section 3 did not change runtime auth/session/RBAC code. It added regression coverage proving failed password and failed MFA paths do not issue `promptwall_session`.
 - Baseline tests include auth, CSRF, MFA, RBAC, validation, sanitized alerting, evidence export, retention, and detector privacy checks.
 - `npm ci` reported 0 vulnerabilities in npm's install audit.
 
@@ -120,3 +128,4 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Cloudflare Radar enrichment in `ai-domains:check` was skipped locally because `CLOUDFLARE_API_TOKEN` is not configured; static AI-domain coverage still passed.
 - One local `npm run review:ci` attempt failed when `better-sqlite3` could not resolve its native binding during `test/oidc-login.test.js`; the focused OIDC test and a full rerun passed without code changes.
 - One section 2 admin-console rerun failed before tests because the local Playwright health URL on port `4211` was briefly occupied during parallel validation. A listener check showed no stale server, and the serial rerun passed.
+- Broader manual auth abuse, rate-limit, and cross-session checks remain for later security/privacy coverage.
