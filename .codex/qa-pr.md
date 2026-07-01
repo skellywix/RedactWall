@@ -270,6 +270,11 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - `npm test` - passed after section 18 edit, 80 node test files.
 - `git diff --check` - passed after section 18 edit with the repo's usual CRLF working-copy warnings.
 - `$env:PLAYWRIGHT_PORT='4303'; npm run review:ci` - passed after section 18 edit, including docs demo guide check, AI domain coverage check, 80 node test files, 13 admin-console Chromium tests, `sync-check`, and `eval`.
+- `node --check server\public\dashboard.js` - passed after section 18 CI follow-up fix.
+- `node --test --test-concurrency=1 test\admin-csrf.test.js` - passed after section 18 CI follow-up fix, 17 tests.
+- `$env:PLAYWRIGHT_PORT='4305'; npx playwright test admin-console.spec.js --grep "secondary controls and dialog cancels" --reporter=line` - passed after section 18 CI follow-up fix, 1 Chromium test.
+- `$env:PLAYWRIGHT_PORT='4306'; npm run test:admin-console` - passed after section 18 CI follow-up fix, 13 Chromium tests.
+- `$env:PLAYWRIGHT_PORT='4307'; npm run review:ci` - passed after section 18 CI follow-up fix, including docs demo guide check, AI domain coverage check, 80 node test files, 13 admin-console Chromium tests, `sync-check`, and `eval`.
 
 # CI Status
 
@@ -306,7 +311,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Section 15 changes UI accessibility semantics and client-side invalid-field state only; login errors remain generic, queue row labels use already-rendered sanitized metadata, and extension banner labels use sanitized detector/coaching text.
 - Section 16 changes extension CSS sizing and browser regression tests only; no auth, CSRF, RBAC, detector, persistence, evidence export, tenant, billing, or network behavior changed.
 - Section 17 changes CSS motion preferences and browser regression tests only; no auth, CSRF, RBAC, detector, persistence, evidence export, tenant, billing, or network behavior changed.
-- Section 18 changes tests only; it packages extension zips into a temp directory for size checks and deletes them during cleanup, with no runtime auth, detector, persistence, logging, or network behavior changed.
+- Section 18 adds asset-budget tests and fixes dashboard policy-save status timing; the runtime change is client-side feedback only and does not change auth, detector, persistence, logging, or network behavior.
 - Baseline tests include auth, CSRF, MFA, RBAC, validation, sanitized alerting, evidence export, retention, and detector privacy checks.
 - `npm ci` reported 0 vulnerabilities in npm's install audit.
 
@@ -315,6 +320,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Section 18 measured shipped admin and browser-extension assets by raw and gzip bytes.
 - Section 18 added budgets for admin public assets, browser-extension assets, aggregate extension payload size, and generated Chrome/Edge/Firefox extension zip size.
 - Current measured largest assets were `dashboard.js` at 130,759 raw bytes / 30,414 gzip bytes and `index.html` at 124,804 raw bytes / 21,212 gzip bytes; current generated Chrome extension zip measured 52,300 bytes.
+- GitHub push CI on `d37c04f` exposed and drove a dashboard status timer fix: rapid policy saves now cancel stale clear timers before setting a newer status.
 
 # Reduced-Motion Notes
 

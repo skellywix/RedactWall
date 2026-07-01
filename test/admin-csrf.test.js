@@ -41,6 +41,15 @@ test('dashboard fetches and sends csrf token on unsafe admin requests', () => {
   assert.match(dashboard, /body: JSON\.stringify\(\{ destination, decision, reason \}\)/);
 });
 
+test('dashboard policy status clears only the latest transient message', () => {
+  assert.match(dashboard, /let policyStatusTimer = null/);
+  assert.match(dashboard, /function setPolicyStatus\(message, clearAfterMs = 0\)/);
+  assert.match(dashboard, /clearTimeout\(policyStatusTimer\)/);
+  assert.match(dashboard, /if \(status\.textContent === message\) status\.textContent = ''/);
+  assert.match(dashboard, /setPolicyStatus\('Saved', 4000\)/);
+  assert.doesNotMatch(dashboard, /\$\('#polSaved'\)\.textContent = 'Saved';\s*setTimeout/);
+});
+
 test('login page discovers optional OIDC without exposing secrets', () => {
   assert.match(server, /app\.get\('\/api\/login-options'/);
   assert.match(server, /oidc\.publicOptions\(\)/);

@@ -39,6 +39,7 @@ let monitorRefreshing = false;
 let monitorUpdateSequence = 0;
 let monitorLastUpdated = new Date().toISOString();
 let monitorRecentEventId = 'evt-7902';
+let policyStatusTimer = null;
 
 const icons = {
   check: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m5 12 4 4L19 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
@@ -756,7 +757,7 @@ function appendGuidedScopeRule() {
   const reason = cleanPolicyId($('#scope_builder_reason').value, '');
   if (reason) rule.reason = reason;
   if (addPolicyRuleToTextarea('#pol_policy_scopes', rule, 'Scoped enforcement rules')) {
-    $('#polSaved').textContent = `Added scoped rule ${rule.id}`;
+    setPolicyStatus(`Added scoped rule ${rule.id}`);
   }
 }
 
@@ -786,7 +787,23 @@ function appendGuidedExceptionRule() {
   const reason = cleanPolicyId($('#exception_builder_reason').value, '');
   if (reason) rule.reason = reason;
   if (addPolicyRuleToTextarea('#pol_policy_exceptions', rule, 'Time-bound exceptions')) {
-    $('#polSaved').textContent = `Added exception ${rule.id}`;
+    setPolicyStatus(`Added exception ${rule.id}`);
+  }
+}
+
+function setPolicyStatus(message, clearAfterMs = 0) {
+  const status = $('#polSaved');
+  if (!status) return;
+  if (policyStatusTimer) {
+    clearTimeout(policyStatusTimer);
+    policyStatusTimer = null;
+  }
+  status.textContent = message;
+  if (clearAfterMs > 0) {
+    policyStatusTimer = setTimeout(() => {
+      if (status.textContent === message) status.textContent = '';
+      policyStatusTimer = null;
+    }, clearAfterMs);
   }
 }
 
@@ -2733,8 +2750,7 @@ async function loadPolicy() {
   });
   $('#discardPolicy').onclick = loadPolicy;
   $('#testConfiguration').onclick = async () => {
-    const status = $('#polSaved');
-    status.textContent = 'VERIFYING';
+    setPolicyStatus('VERIFYING');
     const [nextPreflight, nextCoverage] = await Promise.all([
       optionalDashboardJson('/api/preflight'),
       optionalDashboardJson('/api/coverage', currentCoverage),
@@ -2743,10 +2759,9 @@ async function loadPolicy() {
     const nextHealth = configHealth(nextPreflight);
     const configStatus = $('#configurationStatus');
     if (configStatus) configStatus.innerHTML = statePill(nextHealth.state, `${nextHealth.score}/100 ready`);
-    status.textContent = nextHealth.state === 'bad'
+    setPolicyStatus(nextHealth.state === 'bad'
       ? `${nextHealth.failed} blocking check(s)`
-      : `${nextHealth.failed} warning(s), ${nextHealth.ok}/${nextHealth.total || 0} checks ready`;
-    setTimeout(() => { status.textContent = ''; }, 3600);
+      : `${nextHealth.failed} warning(s), ${nextHealth.ok}/${nextHealth.total || 0} checks ready`, 3600);
   };
   markUpdated();
   if (readonly) return;
@@ -2781,22 +2796,20 @@ async function loadPolicy() {
       blockUnapprovedAiDestinations: $('#pol_block_unapproved_ai').checked,
       responseScanMode: $('#pol_response_scan_mode').value,
     };
-    $('#polSaved').textContent = 'Saving';
+    setPolicyStatus('Saving');
     const r = await api('/api/policy', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (!r) return;
     if (!r.ok) {
-      $('#polSaved').textContent = await apiErrorSummary(r, 'Could not save');
+      setPolicyStatus(await apiErrorSummary(r, 'Could not save'));
       return;
     }
-    $('#polSaved').textContent = 'Saved';
-    setTimeout(() => { $('#polSaved').textContent = ''; }, 2000);
+    setPolicyStatus('Saved', 4000);
   };
   $('#runRetentionPurge').onclick = async () => {
     const r = await api('/api/retention/purge', { method: 'POST' });
     if (!r || !r.ok) return;
     const body = await r.json();
-    $('#polSaved').textContent = `Purged ${body.purged || 0} record(s)`;
-    setTimeout(() => { $('#polSaved').textContent = ''; }, 3000);
+    setPolicyStatus(`Purged ${body.purged || 0} record(s)`, 4000);
   };
   $$('.ps-tpl').forEach((b) => {
     b.onclick = async () => {

@@ -765,6 +765,7 @@ Status: Passed
 
 1. The repo had no regression guard for accidental dashboard, login, or browser-extension asset bloat.
 2. Browser-extension store package size was not checked in the normal Node test gate.
+3. GitHub push CI on `d37c04f` exposed a dashboard status race: rapid policy saves scheduled independent clear timers, so an older timer could erase a newer `Saved` status before the E2E assertion observed it. The duplicate pull-request CI run passed, but the UI race was real.
 
 ### Fix Made
 
@@ -772,6 +773,8 @@ Status: Passed
 - Added raw and gzip budgets for admin public assets: `index.html`, `dashboard.js`, `login.html`, and `login.js`.
 - Added raw and gzip budgets for the browser-extension payload, including aggregate extension asset budgets.
 - Added generated extension zip-size budgets for Chrome, Edge, and Firefox targets using the existing package helper in a temp directory.
+- Added centralized dashboard policy status handling so new status messages cancel stale clear timers and timers only clear the message they created.
+- Added a static dashboard regression proving policy status clears only the latest transient message.
 
 ### Commands Run
 
@@ -779,12 +782,17 @@ Status: Passed
 - `npm test` - passed after section 18 edit, 80 node test files.
 - `git diff --check` - passed after section 18 edit with the repo's usual CRLF working-copy warnings.
 - `$env:PLAYWRIGHT_PORT='4303'; npm run review:ci` - passed after section 18 edit, including docs demo guide check, AI domain coverage check, 80 node test files, 13 admin-console Chromium tests, `sync-check`, and `eval`.
+- `node --check server\public\dashboard.js` - passed after section 18 CI follow-up fix.
+- `node --test --test-concurrency=1 test\admin-csrf.test.js` - passed after section 18 CI follow-up fix, 17 tests.
+- `$env:PLAYWRIGHT_PORT='4305'; npx playwright test admin-console.spec.js --grep "secondary controls and dialog cancels" --reporter=line` - passed after section 18 CI follow-up fix, 1 Chromium test.
+- `$env:PLAYWRIGHT_PORT='4306'; npm run test:admin-console` - passed after section 18 CI follow-up fix, 13 Chromium tests.
+- `$env:PLAYWRIGHT_PORT='4307'; npm run review:ci` - passed after section 18 CI follow-up fix, including docs demo guide check, AI domain coverage check, 80 node test files, 13 admin-console Chromium tests, `sync-check`, and `eval`.
 
 ### Security Review Notes
 
-- Section 18 changes tests only.
+- Section 18 primarily adds tests; the CI follow-up also changes dashboard policy-save status presentation.
 - The new package-size check writes extension zips to a temporary directory and deletes them during test cleanup.
-- No auth, CSRF, RBAC, raw reveal, approval release, detector, persistence, evidence export, tenant, billing, logging, or network behavior changed.
+- The dashboard status fix changes transient client-side feedback only; it does not change auth, CSRF, RBAC, raw reveal, approval release, detector, persistence, evidence export, tenant, billing, logging, or network behavior.
 
 ## Section Queue
 
