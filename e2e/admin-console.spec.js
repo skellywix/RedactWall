@@ -161,6 +161,36 @@ test('admin console theme toggle defaults light and persists dark mode', async (
   expect(problems).toEqual([]);
 });
 
+test('admin console flags invalid SaaS seat-limit configuration', async ({ page }) => {
+  const problems = collectUiProblems(page);
+  await page.route('**/api/billing/seats', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      tenantId: 'cu-acme',
+      saasMode: true,
+      seatLimit: 0,
+      seatLimitValid: false,
+      seatsUsed: 2,
+      seatsRemaining: null,
+      overLimit: false,
+      users: [
+        { user: 'analyst@example.test', orgId: 'cu-acme' },
+        { user: 'reviewer@example.test', orgId: 'cu-acme' },
+      ],
+    }),
+  }));
+
+  await login(page);
+
+  const seatCard = page.locator('#stats .stat', { hasText: 'Seat config' });
+  await expect(seatCard).toContainText('Invalid');
+  await expect(seatCard).toContainText('set paid seat limit');
+  await expect(seatCard).toHaveClass(/alert/);
+  await expect(seatCard.locator('.status-light')).toHaveClass(/tone-warn/);
+  expect(problems).toEqual([]);
+});
+
 test('admin console login, approval, policy save, and evidence export work in a browser', async ({ page, request }) => {
   const problems = collectUiProblems(page);
   const gateResponse = await request.post('/api/v1/gate', {

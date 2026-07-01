@@ -116,20 +116,24 @@ test('SaaS seat limit allows known users and blocks new users', () => {
 });
 
 test('SaaS sensor access fails closed when paid seat limit is missing or invalid', () => {
-  for (const seatLimit of ['', '0', '-1', '1.5', 'not-a-number']) {
+  for (const seatLimit of [undefined, '', '0', '-1', '1.5', 'not-a-number']) {
+    const env = {
+      SENTINEL_SAAS_MODE: 'true',
+      SENTINEL_TENANT_ID: 'cu-acme',
+    };
+    if (seatLimit !== undefined) {
+      env.SENTINEL_SEAT_LIMIT = seatLimit;
+    }
     const result = tenant.validateSensorAccess({
       body: { orgId: 'cu-acme', user: 'analyst@example.test' },
       db: fakeDb(),
-      env: {
-        SENTINEL_SAAS_MODE: 'true',
-        SENTINEL_TENANT_ID: 'cu-acme',
-        SENTINEL_SEAT_LIMIT: seatLimit,
-      },
+      env,
     });
-    assert.strictEqual(result.ok, false, seatLimit);
-    assert.strictEqual(result.statusCode, 503, seatLimit);
-    assert.strictEqual(result.status, 'seat_limit_not_configured', seatLimit);
-    assert.strictEqual(result.audit, false, seatLimit);
+    const label = seatLimit === undefined ? 'missing' : seatLimit;
+    assert.strictEqual(result.ok, false, label);
+    assert.strictEqual(result.statusCode, 503, label);
+    assert.strictEqual(result.status, 'seat_limit_not_configured', label);
+    assert.strictEqual(result.audit, false, label);
   }
 
   const report = tenant.seatReport(fakeDb(['analyst@example.test']), {

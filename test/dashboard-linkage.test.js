@@ -293,6 +293,8 @@ test('dashboard static controls, generated policy controls, and API routes stay 
   ].forEach((endpoint) => {
     assert.ok(dashboard.includes(endpoint), `dashboard.js no longer calls ${endpoint}`);
   });
+  assert.ok(dashboard.includes('seatLimitValid'), 'dashboard.js no longer surfaces invalid SaaS seat-limit configuration');
+  assert.ok(dashboard.includes('Seat config'), 'dashboard.js no longer labels invalid SaaS seat-limit configuration');
 });
 
 test('dashboard-backed API actions accept the payloads built by forms and buttons', async () => withServer(async (port) => {

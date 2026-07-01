@@ -56,7 +56,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Browser file drops and local file-upload scanning block configured drop/file-upload paths before upload.
 - Direct `/api/v1/scan-file` sanitizes sensitive filenames in responses, stored query rows, redacted previews, tokenized prompts, raw-retained prefixes, and audit details.
 - Endpoint watched-file, endpoint-local OCR, signed native handoff, and MCP file-content guard flows keep file bytes and raw local filenames out of sanitized control-plane evidence.
-- SaaS/customer-silo billing surface has no payment-provider integration; paid-seat enforcement now fails closed when seat-limit config is missing or invalid.
+- SaaS/customer-silo billing surface has no payment-provider integration; paid-seat enforcement now fails closed when seat-limit config is missing or invalid, and the admin stats card surfaces invalid paid-seat configuration.
 
 # Bugs Fixed
 
@@ -107,7 +107,9 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Updated `server/app.js` with direct scan-file filename sanitization.
 - Updated `test/validation.test.js` with direct scan-file filename privacy coverage for text and OCR-needed image files.
 - Updated `server/tenant.js` with explicit paid-seat limit validity tracking and fail-closed runtime enforcement.
+- Updated `server/public/dashboard.js` with invalid paid-seat configuration rendering.
 - Updated `test/tenant.test.js` with missing, zero, negative, fractional, and non-numeric SaaS seat-limit coverage.
+- Updated `test/dashboard-linkage.test.js` and `e2e/admin-console.spec.js` with invalid seat-limit dashboard coverage.
 
 # Commands Run
 
@@ -190,10 +192,10 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - `node --test --test-concurrency=1 test\processors.test.js test\validation.test.js` - passed after duplicate-test cleanup, 56 tests.
 - `npm run review:ci` - passed after section 12 edit, including 78 node test files, 10 admin-console Chromium tests, `sync-check`, and `eval`.
 - `$env:PLAYWRIGHT_PORT='4265'; npm run review:ci` - passed after section 12 edit, including docs demo guide check, AI domain coverage check, 78 node test files, 10 admin-console Chromium tests, `sync-check`, and `eval`.
-- `node --test --test-concurrency=1 test\tenant.test.js test\saas-tenancy.test.js test\preflight.test.js` - passed before section 13 edit, 34 tests.
-- `node --test --test-concurrency=1 test\tenant.test.js test\saas-tenancy.test.js test\preflight.test.js` - passed after section 13 edit, 35 tests.
 - `node --check server\tenant.js` - passed after section 13 edit.
+- `node --check server\public\dashboard.js` - passed after section 13 edit.
 - `node --test --test-concurrency=1 test\tenant.test.js test\saas-tenancy.test.js test\preflight.test.js test\setup.test.js test\dashboard-linkage.test.js test\db.test.js` - passed after section 13 edit, 52 tests.
+- `$env:PLAYWRIGHT_PORT='4267'; npx playwright test admin-console.spec.js --grep "invalid SaaS seat-limit" --reporter=line` - passed after section 13 edit, 1 Chromium test.
 - `npm run review:ci` - passed after section 13 edit, including 78 node test files, 10 admin-console Chromium tests, `sync-check`, and `eval`.
 
 # CI Status
@@ -227,7 +229,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Section 10 changes dashboard cache fallback ordering and extension tests only. It does not change auth, CSRF, raw reveal, evidence export, detector, or persistence behavior.
 - Section 11 filters and paginates already-loaded sanitized dashboard rows client-side only. It does not call reveal/raw-prompt APIs or change auth, CSRF, RBAC, evidence export, detector, or persistence behavior.
 - Section 12 replaces sensitive direct scan-file filenames with `[sensitive filename]` in response, storage, broadcast, raw-retained prefixes, tokenized prompts, and audit evidence while keeping original filenames transient for processor selection only.
-- Section 13 adds no payment provider, card data, checkout, billing webhook, or external billing network path. It fails closed for malformed paid-seat config before accepting SaaS sensor events.
+- Section 13 adds no payment provider, card data, checkout, billing webhook, or external billing network path. It fails closed for malformed paid-seat config before accepting SaaS sensor events and renders only aggregate billing config state in the stats card.
 - Baseline tests include auth, CSRF, MFA, RBAC, validation, sanitized alerting, evidence export, retention, and detector privacy checks.
 - `npm ci` reported 0 vulnerabilities in npm's install audit.
 

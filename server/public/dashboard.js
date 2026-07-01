@@ -1451,15 +1451,19 @@ async function loadStats() {
     const topEntities = Array.isArray(s.topEntities) ? s.topEntities : [];
     const totalDecisions = (s.approved || 0) + (s.denied || 0);
     const approveRate = totalDecisions ? `${Math.round(((s.approved || 0) / totalDecisions) * 100)}%` : '-';
-    const seatValue = seats && seats.seatLimit ? `${seats.seatsUsed}/${seats.seatLimit}` : (seats ? seats.seatsUsed : '-');
-    const seatMeta = seats && seats.seatLimit ? `${seats.seatsRemaining} remaining` : 'billable users';
+    const invalidSeatConfig = !!(seats && seats.saasMode && seats.seatLimitValid === false);
+    const hasSeatLimit = !!(seats && seats.seatLimit);
+    const seatValue = invalidSeatConfig ? 'Invalid' : (hasSeatLimit ? `${seats.seatsUsed}/${seats.seatLimit}` : (seats ? seats.seatsUsed : '-'));
+    const seatMeta = invalidSeatConfig ? 'set paid seat limit' : (hasSeatLimit ? `${seats.seatsRemaining} remaining` : 'billable users');
+    const seatLabel = invalidSeatConfig ? 'Seat config' : (seats && seats.saasMode ? 'Seats used' : 'Users observed');
+    const seatTone = invalidSeatConfig || (seats && seats.overLimit) ? 'warn' : 'secure';
     const cards = [
       ['pending', s.pending, 'Pending approval', 'held for review', 'critical'],
       ['alert', s.todayBlocked, 'Blocked today', 'policy stops', 'warn'],
       ['good', s.approved, 'Approved', 'released by admin', 'secure'],
       ['', s.denied, 'Denied', 'never released', 'critical'],
       ['', approveRate, 'Approval rate', 'admin decisions', 'live'],
-      [seats && seats.overLimit ? 'alert' : '', seatValue, seats && seats.saasMode ? 'Seats used' : 'Users observed', seatMeta, seats && seats.overLimit ? 'warn' : 'secure'],
+      [invalidSeatConfig || (seats && seats.overLimit) ? 'alert' : '', seatValue, seatLabel, seatMeta, seatTone],
     ];
     $('#stats').innerHTML = cards.map(([c, n, l, m, tone]) => `
       <div class="stat ${c}" data-tooltip="${escapeHtml(`${l}: ${m}`)}">
