@@ -172,9 +172,31 @@ async function openControlledAiPage(context, url, html) {
 }
 
 async function syntheticPaste(page, value) {
-  await page.evaluate((text) => navigator.clipboard.writeText(text), value);
-  await page.locator('#prompt-textarea').focus();
-  await page.keyboard.press('ControlOrMeta+V');
+  return page.locator('#prompt-textarea').evaluate((composer, text) => {
+    composer.focus();
+    const data = new DataTransfer();
+    data.setData('text/plain', text);
+    data.setData('text', text);
+    const event = new ClipboardEvent('paste', {
+      bubbles: true,
+      cancelable: true,
+      clipboardData: data,
+    });
+    const defaultAllowed = composer.dispatchEvent(event);
+    if (!defaultAllowed) return true;
+    if ('value' in composer) {
+      composer.value += text;
+    } else {
+      composer.textContent = `${composer.textContent || ''}${text}`;
+    }
+    composer.dispatchEvent(new InputEvent('input', {
+      bubbles: true,
+      cancelable: true,
+      data: text,
+      inputType: 'insertFromPaste',
+    }));
+    return false;
+  }, value);
 }
 
 async function installDraftSyncRecorder(page) {

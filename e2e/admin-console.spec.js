@@ -104,6 +104,63 @@ async function setStoreRawForApproval(page, enabled) {
   }, enabled);
 }
 
+test('admin console theme toggle defaults light and persists dark mode', async ({ page }) => {
+  const problems = collectUiProblems(page);
+  await login(page);
+
+  await expect(page.locator('body')).toHaveAttribute('data-theme', 'light');
+  await expect(page.locator('#themeLight')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#themeDark')).toHaveAttribute('aria-pressed', 'false');
+  const lightTheme = await page.evaluate(() => {
+    const styles = getComputedStyle(document.body);
+    return {
+      bg: styles.getPropertyValue('--bg').trim(),
+      glow: styles.getPropertyValue('--glow').trim(),
+      panel: styles.getPropertyValue('--panel').trim(),
+      colorScheme: styles.colorScheme,
+    };
+  });
+  expect(lightTheme).toMatchObject({
+    bg: '#fff8ed',
+    panel: '#fffbf4',
+    colorScheme: 'light',
+  });
+  expect(lightTheme.glow).toContain('245,158,11');
+
+  await page.locator('#themeDark').click();
+  await expect(page.locator('body')).toHaveAttribute('data-theme', 'dark');
+  await expect(page.locator('#themeDark')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#themeLight')).toHaveAttribute('aria-pressed', 'false');
+  const darkTheme = await page.evaluate(() => {
+    const styles = getComputedStyle(document.body);
+    return {
+      bg: styles.getPropertyValue('--bg').trim(),
+      glow: styles.getPropertyValue('--glow').trim(),
+      panel: styles.getPropertyValue('--panel').trim(),
+      stored: localStorage.getItem('promptwall.theme'),
+      colorScheme: styles.colorScheme,
+    };
+  });
+  expect(darkTheme).toMatchObject({
+    bg: '#150f0a',
+    panel: '#20150c',
+    stored: 'dark',
+    colorScheme: 'dark',
+  });
+  expect(darkTheme.glow).toContain('255,178,74');
+
+  await page.reload();
+  await expect(page.locator('body')).toHaveAttribute('data-theme', 'dark');
+  await expect(page.locator('#themeDark')).toHaveAttribute('aria-pressed', 'true');
+
+  await page.locator('#themeLight').click();
+  await expect(page.locator('body')).toHaveAttribute('data-theme', 'light');
+  await expect(page.locator('#themeLight')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#themeDark')).toHaveAttribute('aria-pressed', 'false');
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('promptwall.theme'))).toBe('light');
+  expect(problems).toEqual([]);
+});
+
 test('admin console login, approval, policy save, and evidence export work in a browser', async ({ page, request }) => {
   const problems = collectUiProblems(page);
   const gateResponse = await request.post('/api/v1/gate', {
