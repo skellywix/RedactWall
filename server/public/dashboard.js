@@ -9,6 +9,7 @@ let currentQueue = [];
 let currentActivity = [];
 let currentCoverage = null;
 let currentLineage = null;
+let currentAuditEntries = [];
 let currentIdentitySetup = null;
 let searchTerm = '';
 let currentRole = 'auditor';
@@ -20,6 +21,9 @@ let queueDensity = savedQueueDensity();
 let colorTheme = savedColorTheme();
 let revealedPrompts = new Map();
 let expandedActivityId = '';
+let activityPage = 1;
+let auditPage = 1;
+let lineagePages = {};
 let statusPopover = null;
 let tooltipEl = null;
 let monitorStatusFilter = 'all';
@@ -43,6 +47,9 @@ const icons = {
   refresh: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 12a8 8 0 0 1-13.7 5.6M4 12A8 8 0 0 1 17.7 6.4M17.7 6.4H14M17.7 6.4V2.7M6.3 17.6H10M6.3 17.6v3.7" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   shield: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 4l7 3v5c0 4.2-2.6 6.8-7 8-4.4-1.2-7-3.8-7-8V7l7-3Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
 };
+const ACTIVITY_PAGE_SIZE = 10;
+const LINEAGE_PAGE_SIZE = 10;
+const AUDIT_PAGE_SIZE = 10;
 
 const monitorStatusOptions = [
   { id: 'all', label: 'All' },
@@ -1055,11 +1062,72 @@ function matchesLineage(bucket) {
   return !searchTerm || lineageText(bucket || {}).includes(searchTerm);
 }
 
+function auditText(entry = {}) {
+  return [
+    entry.id,
+    entry.ts,
+    entry.action,
+    entry.actor,
+    entry.queryId,
+    entry.detail,
+  ].join(' ').toLowerCase();
+}
+
+function matchesAudit(entry) {
+  return !searchTerm || auditText(entry || {}).includes(searchTerm);
+}
+
+function resetTablePages() {
+  activityPage = 1;
+  auditPage = 1;
+  lineagePages = {};
+}
+
+function paginatedRows(rows, page, pageSize) {
+  const total = rows.length;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const safePage = Math.min(Math.max(1, Number(page) || 1), totalPages);
+  const start = (safePage - 1) * pageSize;
+  const end = Math.min(start + pageSize, total);
+  return {
+    rows: rows.slice(start, end),
+    page: safePage,
+    total,
+    totalPages,
+    start,
+    end,
+  };
+}
+
+function renderTablePager(selector, { target, page, total, totalPages, start, end }) {
+  const el = $(selector);
+  if (!el) return;
+  if (!total) {
+    el.innerHTML = '<span>No rows</span>';
+    return;
+  }
+  const prevPage = Math.max(1, page - 1);
+  const nextPage = Math.min(totalPages, page + 1);
+  el.innerHTML = `<span>Showing ${start + 1}-${end} of ${total}</span>
+    <div class="pager-controls" aria-label="Pagination controls">
+      <button class="ghost mini pager-button" type="button" data-pager-target="${escapeHtml(target)}" data-pager-page="${prevPage}" ${page === 1 ? 'disabled' : ''} aria-label="Previous page">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m15 6-6 6 6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <span class="pager-page">Page ${page} of ${totalPages}</span>
+      <button class="ghost mini pager-button" type="button" data-pager-target="${escapeHtml(target)}" data-pager-page="${nextPage}" ${page === totalPages ? 'disabled' : ''} aria-label="Next page">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m9 6 6 6-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+    </div>`;
+}
+
 function updateSearch(value) {
-  searchTerm = String(value || '').trim().toLowerCase();
+  const next = String(value || '').trim().toLowerCase();
+  if (next !== searchTerm) resetTablePages();
+  searchTerm = next;
   renderQueueView();
   renderActivityRows(currentActivity);
   renderLineage(currentLineage);
+  renderAuditRows(currentAuditEntries);
 }
 
 async function api(path, opts = {}) {
@@ -1653,6 +1721,26 @@ document.addEventListener('click', async (e) => {
     renderQueueView();
     return;
   }
+  const pagerButton = e.target.closest('[data-pager-target][data-pager-page]');
+  if (pagerButton) {
+    const page = Number(pagerButton.dataset.pagerPage) || 1;
+    const target = pagerButton.dataset.pagerTarget || '';
+    if (target === 'activity') {
+      activityPage = page;
+      renderActivityRows(currentActivity);
+      return;
+    }
+    if (target === 'audit') {
+      auditPage = page;
+      renderAuditRows(currentAuditEntries);
+      return;
+    }
+    if (target.startsWith('lineage')) {
+      lineagePages[target] = page;
+      renderLineage(currentLineage);
+      return;
+    }
+  }
   const densityButton = e.target.closest('#toggleQueueDensity');
   if (densityButton) {
     queueDensity = queueDensity === 'compact' ? 'comfortable' : 'compact';
@@ -1895,7 +1983,9 @@ function activityDetail(q) {
 
 function renderActivityRows(rows) {
   const filtered = (rows || []).filter(matchesSearch);
-  $('#activityRows').innerHTML = filtered.map((q) => {
+  const page = paginatedRows(filtered, activityPage, ACTIVITY_PAGE_SIZE);
+  activityPage = page.page;
+  $('#activityRows').innerHTML = page.rows.map((q) => {
     const tone = statusTone(q.status);
     const detail = `Status: ${humanize(q.status)}\nSession ID: ${q.id || '-'}\nOwner: ${workflowOwner(q)}\nRisk: ${q.riskScore ?? 0}/100`;
     return `<tr class="activity-row ${activitySeverityClass(q)} ${expandedActivityId === q.id ? 'selected' : ''}" data-activity-id="${escapeHtml(q.id)}" tabindex="0">
@@ -1910,6 +2000,7 @@ function renderActivityRows(rows) {
     <td>${statusChip(tone, humanize(q.status), detail)}<span class="row-affordance">VIEW</span></td>
   </tr>${activityDetail(q)}`;
   }).join('') || '<tr><td colspan="9" class="empty">No matching activity</td></tr>';
+  renderTablePager('#activityPager', { target: 'activity', ...page });
 }
 
 async function loadCoverage() {
@@ -2131,15 +2222,18 @@ async function loadLineage() {
   }
 }
 
-function renderLineageRows(selector, rows, emptyLabel) {
+function renderLineageRows(tbodyId, rows, emptyLabel) {
   const filtered = (rows || []).filter(matchesLineage);
-  $(selector).innerHTML = filtered.map((row) => `<tr>
+  const page = paginatedRows(filtered, lineagePages[tbodyId] || 1, LINEAGE_PAGE_SIZE);
+  lineagePages[tbodyId] = page.page;
+  $(`#${tbodyId}`).innerHTML = page.rows.map((row) => `<tr>
     <td class="mono">${escapeHtml(row.key || '-')}</td>
     <td class="mono">${escapeHtml(row.events || 0)}</td>
     <td class="mono">${escapeHtml(row.blocked || 0)}</td>
     <td class="mono">${escapeHtml(row.redacted || 0)}</td>
     <td class="mono">${escapeHtml(row.maxRiskScore || 0)}</td>
   </tr>`).join('') || `<tr><td colspan="5" class="empty">${escapeHtml(emptyLabel)}</td></tr>`;
+  renderTablePager(`#${tbodyId}Pager`, { target: tbodyId, ...page });
 }
 
 function lineageTotals(lineage = {}) {
@@ -2170,12 +2264,12 @@ function renderLineage(lineage) {
     ['Allowed', totals.allowed, 'below thresholds'],
   ].map(([label, value, meta]) => `
     <div class="mini-kpi"><b>${escapeHtml(value)}</b><span>${escapeHtml(label)}</span><em>${escapeHtml(meta)}</em></div>`).join('');
-  renderLineageRows('#lineageUsers', lineage.byUser, 'No user lineage yet.');
-  renderLineageRows('#lineageDestinations', lineage.byDestination, 'No destination lineage yet.');
-  renderLineageRows('#lineageSensors', lineage.bySensor, 'No sensor lineage yet.');
-  renderLineageRows('#lineageCategories', lineage.byCategory, 'No category lineage yet.');
-  renderLineageRows('#lineageChannels', lineage.byChannel, 'No channel lineage yet.');
-  renderLineageRows('#lineageDecisions', lineage.byDecision, 'No decision lineage yet.');
+  renderLineageRows('lineageUsers', lineage.byUser, 'No user lineage yet.');
+  renderLineageRows('lineageDestinations', lineage.byDestination, 'No destination lineage yet.');
+  renderLineageRows('lineageSensors', lineage.bySensor, 'No sensor lineage yet.');
+  renderLineageRows('lineageCategories', lineage.byCategory, 'No category lineage yet.');
+  renderLineageRows('lineageChannels', lineage.byChannel, 'No channel lineage yet.');
+  renderLineageRows('lineageDecisions', lineage.byDecision, 'No decision lineage yet.');
 }
 
 async function loadAudit() {
@@ -2189,17 +2283,26 @@ async function loadAudit() {
     $('#integrity').innerHTML = ig.ok
       ? `${icons.shield}<span>Chain verified: ${escapeHtml(ig.count)} cryptographically linked entries.</span>`
       : `${icons.shield}<span>Integrity check failed at ${escapeHtml(ig.brokenAt)}.</span>`;
-    $('#auditRows').innerHTML = d.entries.map((a) => `<tr>
+    currentAuditEntries = d.entries;
+    renderAuditRows(currentAuditEntries);
+    markUpdated();
+  } finally {
+    setBusy('#tab-audit .panel', false);
+  }
+}
+
+function renderAuditRows(entries) {
+  const filtered = (entries || []).filter(matchesAudit);
+  const page = paginatedRows(filtered, auditPage, AUDIT_PAGE_SIZE);
+  auditPage = page.page;
+  $('#auditRows').innerHTML = page.rows.map((a) => `<tr>
       <td class="mono">${escapeHtml(fmt(a.ts))}</td>
       <td>${statusChip(statusTone(a.action), humanize(a.action), `Audit action: ${humanize(a.action)}\nActor: ${a.actor || '-'}\nQuery: ${a.queryId || '-'}\nTimestamp: ${fmt(a.ts)}`)}</td>
       <td>${escapeHtml(a.actor || '-')}</td>
       <td class="mono">${escapeHtml(a.queryId || '-')}</td>
       <td>${escapeHtml(a.detail || '')}</td>
-    </tr>`).join('');
-    markUpdated();
-  } finally {
-    setBusy('#tab-audit .panel', false);
-  }
+    </tr>`).join('') || `<tr><td colspan="5" class="empty">${searchTerm ? 'No matching audit entries' : 'No audit entries yet'}</td></tr>`;
+  renderTablePager('#auditPager', { target: 'audit', ...page });
 }
 
 async function exportEvidence(){

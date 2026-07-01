@@ -653,6 +653,21 @@
   th{color:var(--mut);font-weight:720;font-size:10.5px;text-transform:uppercase;letter-spacing:.08em}
   td{color:#d9e3f0}
   td.mono,.mono{font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace;font-variant-numeric:tabular-nums;color:#aecaef}
+  .table-pager{
+    min-height:44px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    padding:10px 12px;
+    border-top:1px solid var(--line);
+    color:var(--mut);
+    font-size:12px;
+  }
+  .pager-controls{display:flex;align-items:center;gap:8px}
+  .pager-page{min-width:82px;text-align:center;color:var(--soft);font-variant-numeric:tabular-nums}
+  .pager-button{width:34px;padding:0}
+  .pager-button svg{width:15px;height:15px}
   .pill{
     display:inline-flex;
     align-items:center;
@@ -1717,6 +1732,12 @@
   .console-frame th{color:var(--sig-muted)}
   .console-frame td.mono,
   .console-frame .mono{color:#8fdfff}
+  .console-frame .table-pager{
+    border-top-color:var(--sig-border);
+    color:var(--sig-muted);
+    background:var(--sig-surface);
+  }
+  .console-frame .pager-page{color:var(--sig-text)}
   .console-frame .activity-row:hover,
   .console-frame .activity-row:focus-visible,
   .console-frame .activity-row.selected{
@@ -2836,6 +2857,7 @@
           <table><thead><tr>
             <th>Time</th><th>Source</th><th>User</th><th>Destination</th><th>Owner</th><th>Severity</th><th>Risk</th><th>Detected</th><th>Status</th>
           </tr></thead><tbody id="activityRows"></tbody></table>
+          <div id="activityPager" class="table-pager" aria-live="polite"></div>
         </div>
       </section>
 
@@ -3006,26 +3028,32 @@
           <div class="panel">
             <div class="panel-head"><div><h2>Users</h2><span>Observed activity without prompt bodies</span></div></div>
             <table><thead><tr><th>User</th><th>Events</th><th>Blocked</th><th>Redacted</th><th>Max Risk</th></tr></thead><tbody id="lineageUsers"></tbody></table>
+            <div id="lineageUsersPager" class="table-pager" aria-live="polite"></div>
           </div>
           <div class="panel">
             <div class="panel-head"><div><h2>Destinations</h2><span>AI tools and apps involved</span></div></div>
             <table><thead><tr><th>Destination</th><th>Events</th><th>Blocked</th><th>Redacted</th><th>Max Risk</th></tr></thead><tbody id="lineageDestinations"></tbody></table>
+            <div id="lineageDestinationsPager" class="table-pager" aria-live="polite"></div>
           </div>
           <div class="panel">
             <div class="panel-head"><div><h2>Sensors</h2><span>Control points that saw traffic</span></div></div>
             <table><thead><tr><th>Sensor</th><th>Events</th><th>Blocked</th><th>Redacted</th><th>Max Risk</th></tr></thead><tbody id="lineageSensors"></tbody></table>
+            <div id="lineageSensorsPager" class="table-pager" aria-live="polite"></div>
           </div>
           <div class="panel">
             <div class="panel-head"><div><h2>Categories</h2><span>Detected sensitive-data themes</span></div></div>
             <table><thead><tr><th>Category</th><th>Events</th><th>Blocked</th><th>Redacted</th><th>Max Risk</th></tr></thead><tbody id="lineageCategories"></tbody></table>
+            <div id="lineageCategoriesPager" class="table-pager" aria-live="polite"></div>
           </div>
           <div class="panel">
             <div class="panel-head"><div><h2>Channels</h2><span>Prompt, file, response, and agent paths</span></div></div>
             <table><thead><tr><th>Channel</th><th>Events</th><th>Blocked</th><th>Redacted</th><th>Max Risk</th></tr></thead><tbody id="lineageChannels"></tbody></table>
+            <div id="lineageChannelsPager" class="table-pager" aria-live="polite"></div>
           </div>
           <div class="panel">
             <div class="panel-head"><div><h2>Decisions</h2><span>How policy resolved the traffic</span></div></div>
             <table><thead><tr><th>Decision</th><th>Events</th><th>Blocked</th><th>Redacted</th><th>Max Risk</th></tr></thead><tbody id="lineageDecisions"></tbody></table>
+            <div id="lineageDecisionsPager" class="table-pager" aria-live="polite"></div>
           </div>
         </div>
       </section>
@@ -3060,6 +3088,7 @@
           <div class="integrity" id="integrity"></div>
           <table><thead><tr><th>Timestamp</th><th>Action</th><th>Actor</th><th>Query</th><th>Detail</th></tr></thead>
             <tbody id="auditRows"></tbody></table>
+          <div id="auditPager" class="table-pager" aria-live="polite"></div>
         </div>
       </section>
 

@@ -14,7 +14,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Backend API behavior - passed.
 - Database/persistence/migrations if present - passed.
 - State management and cache - passed.
-- Tables, search, filters, and pagination - pending.
+- Tables, search, filters, and pagination - passed.
 - File/media flows if present - pending.
 - Payments/billing if present - not yet assessed.
 - Admin/RBAC if present - pending.
@@ -51,6 +51,8 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - SQLite persistence, backup/restore, retention, evidence-pack, and legacy JSON migration contracts, including explicit database path migration opt-out.
 - Backup verification detects adjacent manifest hash mismatches and restore refuses mismatched backup evidence.
 - Dashboard queue refresh fallbacks avoid stale approval-queue cache after decisions, and extension policy refresh preserves cached policy on disabled or failed refresh.
+- Global search filters audit log table rows consistently with queue, activity, and lineage surfaces.
+- Activity, lineage, and audit tables expose client-side pagination controls with search reset behavior.
 
 # Bugs Fixed
 
@@ -64,6 +66,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Section 8 fixed backend limit parsing so evidence exports no longer report negative scope limits and list APIs do not accept unbounded work.
 - Section 9 fixed test coverage gaps for the legacy JSON to SQLite migration path and tampered backup manifests before restore.
 - Section 10 fixed dashboard queue fallback ordering so stale activity cache cannot repopulate a decided approval item after a transient pending-refresh failure.
+- Section 11 fixed audit log global-search behavior so unrelated audit rows are hidden when searching by query ID or actor, and added pager controls for long activity, lineage, and audit tables.
 
 # Tests Added Or Updated
 
@@ -89,6 +92,12 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Updated `server/public/dashboard.js` to prefer fresh activity fallback over stale activity cache for pending queue refreshes.
 - Updated `e2e/admin-console.spec.js` with stale pending-queue cache coverage after an approval decision.
 - Updated `test/extension.test.js` with browser-extension policy-cache refresh coverage.
+- Updated `server/public/dashboard.js` with cached audit-row filtering for global search.
+- Updated `server/public/dashboard.js` with shared client-side table pagination helpers.
+- Updated `server/public/index.html` with activity, lineage, and audit pager containers and styling.
+- Updated `test/admin-csrf.test.js` with static audit-search wiring coverage.
+- Updated `test/dashboard-linkage.test.js` with pager element linkage checks.
+- Updated `e2e/admin-console.spec.js` with browser coverage for audit table filtering, empty search results, and searchable table pagination.
 
 # Commands Run
 
@@ -155,14 +164,21 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - `$env:PLAYWRIGHT_PORT='4258'; npm run test:browser-extension` - passed after section 10 edit, 8 Chromium tests.
 - `npm run review:ci` - failed first after section 10 edit at the admin-console step because the default local Playwright health URL on port `4211` was still in use; listener inspection showed only `TIME_WAIT` sockets afterward.
 - `npm run review:ci` - passed on rerun after the port cleared, including 78 node test files, 8 admin-console Chromium tests, `sync-check`, and `eval`.
+- `node --check server\public\dashboard.js` - passed after section 11 edit.
+- `node --test --test-concurrency=1 test\dashboard-linkage.test.js test\coverage.test.js` - passed after section 11 edit, 12 tests.
+- `$env:PLAYWRIGHT_PORT='4261'; npx playwright test admin-console.spec.js --grep "paginates searchable activity" --reporter=line` - passed after section 11 edit, 1 Chromium test.
+- `$env:PLAYWRIGHT_PORT='4262'; npm run test:admin-console` - passed after section 11 edit, 10 Chromium tests.
+- `node --test --test-concurrency=1 test\admin-csrf.test.js test\dashboard-linkage.test.js` - passed after section 11 edit, 15 tests.
+- `git diff --check` - passed after section 11 edit with the repo's usual CRLF working-copy warnings.
+- `npm run review:ci` - passed after section 11 edit, including 78 node test files, 10 admin-console Chromium tests, `sync-check`, and `eval`.
 
 # CI Status
 
 - PR #54 is open: `https://github.com/skellywix/promptwall/pull/54`
-- GitHub `test` checks passed on head `7911eea`.
-- GitHub `docker` checks passed on head `7911eea`.
+- GitHub `test` checks passed on head `9f1cb40`.
+- GitHub `docker` checks passed on head `9f1cb40`.
 - Existing merged PR #53 is on `main` and also had passing GitHub `test` and `docker` checks.
-- Merge status: not merged. The full application QA objective remains open and the next section is tables, search, filters, and pagination.
+- Merge status: not merged. The full application QA objective remains open and the next section is file/media flows if present.
 
 # Accessibility Notes
 
@@ -185,6 +201,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Section 8 clamps backend list/export query limits before storage access and does not change auth, CSRF, RBAC, release-token, raw reveal, detector, or tenant-access behavior.
 - Section 9 changed tests only. Migration coverage runs against a copied temp DB runtime and synthetic data, not the ignored local runtime database. Backup-manifest tamper coverage also uses temp SQLite backups and synthetic rows.
 - Section 10 changes dashboard cache fallback ordering and extension tests only. It does not change auth, CSRF, raw reveal, evidence export, detector, or persistence behavior.
+- Section 11 filters and paginates already-loaded sanitized dashboard rows client-side only. It does not call reveal/raw-prompt APIs or change auth, CSRF, RBAC, evidence export, detector, or persistence behavior.
 - Baseline tests include auth, CSRF, MFA, RBAC, validation, sanitized alerting, evidence export, retention, and detector privacy checks.
 - `npm ci` reported 0 vulnerabilities in npm's install audit.
 
@@ -205,7 +222,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - `.codex/full-app-qa-log.md`
 - `.codex/full-app-qa-pr.md`
 - Existing carried-forward artifacts: `.codex/ui-ux-qa-log.md`, `.codex/ui-ux-pr.md`
-- Section 2 through section 10 test evidence is recorded in `.codex/full-app-qa-log.md`.
+- Section 2 through section 11 test evidence is recorded in `.codex/full-app-qa-log.md`.
 
 # Risks
 

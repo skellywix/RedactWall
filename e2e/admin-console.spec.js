@@ -457,6 +457,80 @@ test('admin console avoids stale queue cache when pending refresh fails after a 
   await page.unroute(pendingRoute);
 });
 
+test('admin console global search filters audit table rows', async ({ page, request }) => {
+  const problems = collectUiProblems(page);
+  const auditRows = [];
+  for (let index = 0; index < 12; index += 1) {
+    auditRows.push(await createHeldPrompt(request, {
+      suffix: String(9411 + index),
+      user: `audit-search-${index}@example.test`,
+      destination: index % 2 ? 'claude.ai' : 'chatgpt.com',
+    }));
+  }
+  const hidden = auditRows[0];
+  const visible = auditRows[auditRows.length - 1];
+
+  await login(page);
+  await page.locator('.content-tabs .tab[data-tab="audit"]').click();
+  await expect(page.locator('#auditRows')).toContainText(visible.id);
+  await expect(page.locator('#auditPager')).toContainText('Showing 1-10');
+  await page.locator('#auditPager').getByRole('button', { name: 'Next page' }).click();
+  await expect(page.locator('#auditPager')).toContainText('Page 2');
+  await expect(page.locator('#auditRows')).toContainText(hidden.id);
+
+  await page.getByRole('searchbox', { name: 'Search users or destinations' }).fill(visible.id);
+  await expect(page.locator('#auditRows')).toContainText(visible.id);
+  await expect(page.locator('#auditRows')).not.toContainText(hidden.id);
+  await expect(page.locator('#auditPager')).toContainText('Page 1 of 1');
+
+  await page.getByRole('searchbox', { name: 'Search users or destinations' }).fill('missing-audit-row-id');
+  await expect(page.locator('#auditRows')).toContainText('No matching audit entries');
+  await expect(page.locator('#auditPager')).toContainText('No rows');
+
+  await page.getByRole('searchbox', { name: 'Search users or destinations' }).clear();
+  await expect(page.locator('#auditPager')).toContainText('Page 1');
+  await expect(page.locator('#auditRows')).toContainText(visible.id);
+  expect(problems).toEqual([]);
+});
+
+test('admin console paginates searchable activity and lineage tables', async ({ page, request }) => {
+  const problems = collectUiProblems(page);
+  for (let i = 0; i < 13; i += 1) {
+    await createHeldPrompt(request, {
+      suffix: String(9500 + i),
+      user: `pager-${String(i).padStart(2, '0')}@example.test`,
+      destination: i % 2 ? 'claude.ai' : 'chatgpt.com',
+    });
+  }
+
+  await login(page);
+  const globalSearch = page.getByRole('searchbox', { name: 'Search users or destinations' });
+
+  await page.locator('.content-tabs .tab[data-tab="activity"]').click();
+  await expect(page.locator('#activityPager')).toContainText('Page 1 of');
+  await expect(page.locator('#activityRows tr.activity-row')).toHaveCount(10);
+  await page.locator('#activityPager').getByLabel('Next page').click();
+  await expect(page.locator('#activityPager')).toContainText('Page 2 of');
+  await globalSearch.fill('pager-00@example.test');
+  await expect(page.locator('#activityPager')).toContainText('Page 1 of 1');
+  await expect(page.locator('#activityRows tr.activity-row')).toHaveCount(1);
+  await expect(page.locator('#activityRows')).toContainText('pager-00@example.test');
+  await globalSearch.fill('');
+
+  await page.locator('.content-tabs .tab[data-tab="lineage"]').click();
+  await page.locator('#refreshLineage').click();
+  await expect(page.locator('#lineageUsersPager')).toContainText('Page 1 of');
+  await expect(page.locator('#lineageUsers tr')).toHaveCount(10);
+  await page.locator('#lineageUsersPager').getByLabel('Next page').click();
+  await expect(page.locator('#lineageUsersPager')).toContainText('Page 2 of');
+  await globalSearch.fill('pager-00@example.test');
+  await expect(page.locator('#lineageUsersPager')).toContainText('Page 1 of 1');
+  await expect(page.locator('#lineageUsers tr')).toHaveCount(1);
+  await expect(page.locator('#lineageUsers')).toContainText('pager-00@example.test');
+
+  expect(problems).toEqual([]);
+});
+
 test('admin console controls and forms are wired end to end', async ({ page, request }) => {
   const problems = collectUiProblems(page);
   const reveal = await createHeldPrompt(request, {

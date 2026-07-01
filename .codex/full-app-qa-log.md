@@ -81,8 +81,8 @@ That slice covered dashboard shortcut controls, active tab accessibility state, 
 
 - Branch: `codex/full-app-qa`
 - PR: `https://github.com/skellywix/promptwall/pull/54`
-- Latest observed CI status: GitHub `test` and `docker` passed on head `7911eea`.
-- Merge status: not merged. The full application QA objective remains open and the next section is tables, search, filters, and pagination.
+- Latest observed CI status: GitHub `test` and `docker` passed on head `9f1cb40`.
+- Merge status: not merged. The full application QA objective remains open and the next section is file/media flows if present.
 
 ## Section 2 - Navigation And Routing
 
@@ -451,6 +451,45 @@ Status: Passed
 - Extension cache tests use synthetic policy data and do not send secrets or prompt bodies.
 - No auth, CSRF, raw reveal, evidence export, detector, or persistence behavior changed in this section.
 
+## Section 11 - Tables, Search, Filters, And Pagination
+
+Status: Passed
+
+### Inspection
+
+- Reviewed approval queue metadata filters, global search, activity rows, lineage aggregate tables, audit log rows, monitor search, table pagination, and backend list/audit/evidence limit handling.
+- Existing backend API coverage already clamps hostile list limits before storage access, and queue, activity, lineage, and monitor surfaces already had search or metadata filtering.
+- Found that the audit log table loaded `/api/audit` entries but did not apply the dashboard global search term.
+- Found that long activity, lineage, and audit tables did not expose operator paging controls even though their APIs return bounded recent rows.
+
+### Issue Found
+
+Global search rerendered the approval queue, activity table, and lineage tables, but not audit rows. On the Audit Log tab, searching for a query ID or actor left unrelated audit entries visible. Long activity, lineage, and audit result sets also rendered as one uninterrupted table.
+
+### Fix Made
+
+- Added cached audit entry state plus `auditText`, `matchesAudit`, and `renderAuditRows`.
+- Updated `updateSearch()` to rerender audit rows from cache and show a clear empty state when no audit entry matches.
+- Added shared client-side paging helpers for activity, lineage, and audit tables, with page reset when global search changes.
+- Added pager containers and table-linkage coverage for activity, lineage, and audit surfaces.
+- Added static and Playwright coverage proving global search filters one audit query ID while hiding another and that searchable tables page correctly.
+
+### Commands Run
+
+- `node --check server\public\dashboard.js` - passed after section 11 edit.
+- `node --test --test-concurrency=1 test\dashboard-linkage.test.js test\coverage.test.js` - passed after section 11 edit, 12 tests.
+- `$env:PLAYWRIGHT_PORT='4261'; npx playwright test admin-console.spec.js --grep "paginates searchable activity" --reporter=line` - passed after section 11 edit, 1 Chromium test.
+- `$env:PLAYWRIGHT_PORT='4262'; npm run test:admin-console` - passed after section 11 edit, 10 Chromium tests.
+- `node --test --test-concurrency=1 test\admin-csrf.test.js test\dashboard-linkage.test.js` - passed after section 11 edit, 15 tests.
+- `git diff --check` - passed with the repo's usual CRLF working-copy warnings.
+- `npm run review:ci` - passed after section 11 edit, including 78 node test files, 10 admin-console Chromium tests, `sync-check`, and `eval`.
+
+### Security Review Notes
+
+- Audit filtering is client-side over already-loaded sanitized audit rows visible to the authenticated dashboard session.
+- Table pagination is client-side over already-loaded sanitized dashboard rows.
+- The change does not call reveal/raw-prompt APIs and does not change auth, CSRF, RBAC, evidence export, detector, or persistence behavior.
+
 ## Section Queue
 
 1. Baseline install/lint/typecheck/build/test discovery - passed.
@@ -463,7 +502,7 @@ Status: Passed
 8. Backend API behavior - passed.
 9. Database/persistence/migrations if present - passed.
 10. State management and cache - passed.
-11. Tables, search, filters, and pagination - pending.
+11. Tables, search, filters, and pagination - passed.
 12. File/media flows if present - pending.
 13. Payments/billing if present - not yet assessed.
 14. Admin/RBAC if present - pending.

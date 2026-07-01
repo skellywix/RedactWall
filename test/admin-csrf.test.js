@@ -162,3 +162,27 @@ test('dashboard exposes compact queue viewing controls', () => {
   assert.match(dashboard, /promptwall\.queueDensity/);
   assert.match(dashboard, /aria-pressed/);
 });
+
+test('dashboard global search filters audit table rows', () => {
+  assert.match(index, /id="globalSearch"/);
+  assert.match(index, /id="auditRows"/);
+  assert.match(dashboard, /let currentAuditEntries = \[\]/);
+  assert.match(dashboard, /function auditText\(entry = \{\}\)/);
+  assert.match(dashboard, /function matchesAudit\(entry\)/);
+  assert.match(dashboard, /renderAuditRows\(currentAuditEntries\)/);
+  assert.match(dashboard, /currentAuditEntries = d\.entries/);
+  assert.match(dashboard, /\(entries \|\| \[\]\)\.filter\(matchesAudit\)/);
+});
+
+test('dashboard paginates activity lineage and audit tables', () => {
+  assert.match(index, /id="activityPager"/);
+  assert.match(index, /id="lineageUsersPager"/);
+  assert.match(index, /id="auditPager"/);
+  assert.match(dashboard, /const ACTIVITY_PAGE_SIZE = 10/);
+  assert.match(dashboard, /const LINEAGE_PAGE_SIZE = 10/);
+  assert.match(dashboard, /const AUDIT_PAGE_SIZE = 10/);
+  assert.match(dashboard, /function paginatedRows\(rows, page, pageSize\)/);
+  assert.match(dashboard, /function renderTablePager\(selector/);
+  assert.match(dashboard, /data-pager-target/);
+  assert.match(dashboard, /resetTablePages\(\)/);
+});
