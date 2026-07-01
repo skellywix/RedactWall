@@ -4,6 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { test, expect, chromium } = require('@playwright/test');
+const pkg = require('../package.json');
 
 const root = path.join(__dirname, '..');
 const extensionDir = path.join(root, 'sensors', 'browser-extension');
@@ -20,6 +21,45 @@ const fixturePolicy = {
   blockUnapprovedAiDestinations: true,
   alwaysBlock: ['US_SSN', 'CREDIT_CARD', 'BANK_ACCOUNT', 'ROUTING_NUMBER', 'IBAN', 'US_PASSPORT', 'SECRET_KEY', 'PRIVATE_KEY', 'CANARY_TOKEN'],
 };
+
+function serverPolicyFromFixture(policy) {
+  return {
+    enforcementMode: policy.enforcementMode,
+    blockMinSeverity: policy.blockMinSeverity,
+    blockRiskScore: policy.blockRiskScore,
+    alwaysBlock: policy.alwaysBlock || [],
+    governedDestinations: policy.governedDestinations || [],
+    allowedDestinations: policy.allowedDestinations || [],
+    blockedDestinations: policy.blockedDestinations || [],
+    blockedFileUploadDestinations: policy.blockedFileUploadDestinations || [],
+    blockedBrowserActions: policy.blockedBrowserActions || [],
+    blockUnapprovedAiDestinations: policy.blockUnapprovedAiDestinations !== false,
+    storeRawForApproval: true,
+    rawRetentionDays: 30,
+    ignore: [],
+    disabledDetectors: [],
+    responseScanMode: 'flag',
+    desktopCollectorDestination: 'Desktop AI',
+    approvalRoutingRules: [],
+    policyScopes: [],
+    policyExceptions: [],
+    requiredSensors: ['browser_extension', 'endpoint_agent', 'mcp_guard'],
+    desiredSensorVersions: {
+      browser_extension: pkg.version,
+      endpoint_agent: pkg.version,
+      mcp_guard: pkg.version,
+    },
+  };
+}
+
+function comparableBrowserActions(rules) {
+  return (rules || []).map((rule) => ({
+    id: rule.id,
+    action: rule.action,
+    destinations: rule.destinations || [],
+    reason: rule.reason,
+  }));
+}
 
 function chatFixture({ host, sendButton }) {
   return `<!doctype html>
@@ -69,7 +109,8 @@ function chatFixture({ host, sendButton }) {
 </html>`;
 }
 
-async function launchExtensionContext(baseURL, testInfo, policy = fixturePolicy) {
+async function launchExtensionContext(baseURL, testInfo, policy = fixturePolicy, request = null) {
+  if (request) await syncServerPolicy(request, policy);
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'promptwall-extension-e2e-'));
   await testInfo.attach('user-data-dir', { body: userDataDir, contentType: 'text/plain' });
   const context = await chromium.launchPersistentContext(userDataDir, {
@@ -242,6 +283,28 @@ async function loginAdminApi(request) {
     data: { user: 'admin', password: 'e2e-pass' },
   });
   expect(response.ok()).toBeTruthy();
+  const csrf = await request.get('/api/csrf');
+  expect(csrf.ok()).toBeTruthy();
+  const { csrfToken } = await csrf.json();
+  return csrfToken;
+}
+
+async function syncServerPolicy(request, policy) {
+  const csrfToken = await loginAdminApi(request);
+  const response = await request.put('/api/policy', {
+    headers: { 'x-csrf-token': csrfToken },
+    data: serverPolicyFromFixture(policy),
+  });
+  expect(response.ok()).toBeTruthy();
+  const sensorPolicy = await request.get('/api/v1/policy', {
+    headers: { 'x-api-key': 'e2e-ingest-key' },
+  });
+  expect(sensorPolicy.ok()).toBeTruthy();
+  const body = await sensorPolicy.json();
+  expect(body.enforcementMode).toBe(policy.enforcementMode);
+  expect(body.blockUnapprovedAiDestinations).toBe(policy.blockUnapprovedAiDestinations !== false);
+  expect(body.governedDestinations || []).toEqual(policy.governedDestinations || []);
+  expect(comparableBrowserActions(body.blockedBrowserActions)).toEqual(comparableBrowserActions(policy.blockedBrowserActions));
 }
 
 async function queryStatusesFor(request, status) {
@@ -254,8 +317,8 @@ async function queryStatusesFor(request, status) {
 test.describe('browser extension live smoke', () => {
   test.setTimeout(90000);
 
-  test('blocks a synthetic SSN before ChatGPT fixture send and records approval request', async ({ baseURL }, testInfo) => {
-    const { context, userDataDir } = await launchExtensionContext(baseURL, testInfo);
+  test('blocks a synthetic SSN before ChatGPT fixture send and records approval request', async ({ baseURL, request }, testInfo) => {
+    const { context, userDataDir } = await launchExtensionContext(baseURL, testInfo, fixturePolicy, request);
     try {
       const page = await openControlledAiPage(
         context,
@@ -299,8 +362,8 @@ test.describe('browser extension live smoke', () => {
     }
   });
 
-  test('prevents hard-stop paste before a live page can draft-sync it', async ({ baseURL }, testInfo) => {
-    const { context, userDataDir } = await launchExtensionContext(baseURL, testInfo);
+  test('prevents hard-stop paste before a live page can draft-sync it', async ({ baseURL, request }, testInfo) => {
+    const { context, userDataDir } = await launchExtensionContext(baseURL, testInfo, fixturePolicy, request);
     try {
       const page = await openControlledAiPage(
         context,
@@ -326,8 +389,8 @@ test.describe('browser extension live smoke', () => {
     }
   });
 
-  test('uses adapter send-button selectors on Poe-style click targets', async ({ baseURL }, testInfo) => {
-    const { context, userDataDir } = await launchExtensionContext(baseURL, testInfo);
+  test('uses adapter send-button selectors on Poe-style click targets', async ({ baseURL, request }, testInfo) => {
+    const { context, userDataDir } = await launchExtensionContext(baseURL, testInfo, fixturePolicy, request);
     try {
       const page = await openControlledAiPage(
         context,
@@ -357,7 +420,7 @@ test.describe('browser extension live smoke', () => {
     }
   });
 
-  test('blocks configured file drops before browser upload scanning', async ({ baseURL }, testInfo) => {
+  test('blocks configured file drops before browser upload scanning', async ({ baseURL, request }, testInfo) => {
     const policy = {
       ...fixturePolicy,
       blockedBrowserActions: [{
@@ -367,7 +430,7 @@ test.describe('browser extension live smoke', () => {
         reason: 'file_drop_blocked',
       }],
     };
-    const { context, userDataDir } = await launchExtensionContext(baseURL, testInfo, policy);
+    const { context, userDataDir } = await launchExtensionContext(baseURL, testInfo, policy, request);
     try {
       const page = await openControlledAiPage(
         context,
@@ -397,7 +460,7 @@ test.describe('browser extension live smoke', () => {
     }
   });
 
-  test('blocks configured response copies without reading selected text', async ({ baseURL }, testInfo) => {
+  test('blocks configured response copies without reading selected text', async ({ baseURL, request }, testInfo) => {
     const policy = {
       ...fixturePolicy,
       blockedBrowserActions: [{
@@ -407,7 +470,7 @@ test.describe('browser extension live smoke', () => {
         reason: 'response_copy_blocked',
       }],
     };
-    const { context, userDataDir } = await launchExtensionContext(baseURL, testInfo, policy);
+    const { context, userDataDir } = await launchExtensionContext(baseURL, testInfo, policy, request);
     try {
       const page = await openControlledAiPage(
         context,
@@ -436,7 +499,7 @@ test.describe('browser extension live smoke', () => {
 
   test('warn banner buttons dismiss, edit, and send after backend recording', async ({ baseURL, request }, testInfo) => {
     const policy = { ...fixturePolicy, enforcementMode: 'warn' };
-    const { context, userDataDir } = await launchExtensionContext(baseURL, testInfo, policy);
+    const { context, userDataDir } = await launchExtensionContext(baseURL, testInfo, policy, request);
     try {
       const page = await openControlledAiPage(
         context,
@@ -476,7 +539,7 @@ test.describe('browser extension live smoke', () => {
 
   test('justify banner buttons validate, cancel, and submit reasons to the backend', async ({ baseURL, request }, testInfo) => {
     const policy = { ...fixturePolicy, enforcementMode: 'justify' };
-    const { context, userDataDir } = await launchExtensionContext(baseURL, testInfo, policy);
+    const { context, userDataDir } = await launchExtensionContext(baseURL, testInfo, policy, request);
     try {
       const page = await openControlledAiPage(
         context,
@@ -512,9 +575,9 @@ test.describe('browser extension live smoke', () => {
     }
   });
 
-  test('popup toggle and dashboard link are wired to extension storage and backend', async ({ baseURL }, testInfo) => {
+  test('popup toggle and dashboard link are wired to extension storage and backend', async ({ baseURL, request }, testInfo) => {
     const policy = { ...fixturePolicy, enforcementMode: 'redact' };
-    const { context, userDataDir } = await launchExtensionContext(baseURL, testInfo, policy);
+    const { context, userDataDir } = await launchExtensionContext(baseURL, testInfo, policy, request);
     try {
       const serviceWorker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
       const extensionId = new URL(serviceWorker.url()).host;

@@ -45,6 +45,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Destination review overlay blank/cancel/Escape path does not mutate governed destination policy.
 - Evidence export processing, failure, and button re-enable states when the export endpoint fails.
 - Queue, activity, monitor, policy save, purge, export, and search empty/error/success states.
+- Browser-extension smoke policy fixture is synced through admin policy and verified through `/api/v1/policy` before content-script assertions.
 
 # Bugs Fixed
 
@@ -67,6 +68,8 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Updated `e2e/admin-console.spec.js` with invalid policy form save coverage.
 - Updated `e2e/admin-console.spec.js` with destination review overlay blank/cancel/Escape coverage.
 - Updated `e2e/admin-console.spec.js` with delayed export failure coverage for processing/error/re-enabled states.
+- Updated `e2e/browser-extension.spec.js` to remove the server-policy refresh race in extension smoke tests.
+- Updated `playwright.config.js` to run shared-server browser E2E specs with one worker.
 
 # Commands Run
 
@@ -100,6 +103,12 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - `npm run test:admin-console` - failed first after the section 6 test addition because the test stayed on the audit tab before clicking the policy tab's `View coverage` button.
 - `npm run test:admin-console` - passed after returning to the policy tab before the existing `View coverage` assertion, 6 Chromium tests.
 - `node --test --test-concurrency=1 test\evidence-export-ui.test.js` - passed after section 6 edit, 2 tests.
+- `npm run test:browser-extension` - failed first after the policy sync addition because the assertion did not account for server-normalized `enabled: true`.
+- `npm run test:browser-extension` - passed after comparing normalized browser-action contract fields, 8 Chromium tests.
+- `npm run test:browser` - failed locally with admin-console setup prompts returning `destination_blocked` while extension policy sync ran in a parallel worker against the same temp server.
+- `npm run test:browser` - failed once after serialization when a local Windows Playwright worker crashed and left a stale Playwright server on port `4211`; exact stale `playwright-server` and `promptwall-extension-e2e` Chromium processes were stopped.
+- `npm run test:browser` - passed after stale harness cleanup, 14 Chromium tests.
+- `npm run review:ci` - passed after browser-suite stabilization.
 
 # CI Status
 
@@ -124,6 +133,8 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Section 4 changed dashboard validation feedback only. It displays sanitized validation field names returned by the server and does not echo rejected field values.
 - Section 5 did not change runtime code. It added browser coverage that canceling destination review overlays does not mutate governed destination policy.
 - Section 6 did not change runtime code. It added export failure UI coverage and confirmed the dashboard export helper does not call reveal/raw-prompt APIs.
+- Browser-extension CI stabilization changed test code only; it drives policy through authenticated admin policy updates and the ingest-key protected sensor policy endpoint before extension assertions.
+- Browser-suite isolation changed Playwright test configuration only; it serializes specs that share mutable temp server state.
 - Baseline tests include auth, CSRF, MFA, RBAC, validation, sanitized alerting, evidence export, retention, and detector privacy checks.
 - `npm ci` reported 0 vulnerabilities in npm's install audit.
 
@@ -155,3 +166,5 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - One section 2 admin-console rerun failed before tests because the local Playwright health URL on port `4211` was briefly occupied during parallel validation. A listener check showed no stale server, and the serial rerun passed.
 - Broader manual auth abuse, rate-limit, and cross-session checks remain for later security/privacy coverage.
 - Section 4 intentionally triggered a local validation `400` in Playwright; the final rerun passed after the test explicitly scoped that expected response.
+- GitHub `test` failed on PR heads `a638063` and `1d85101` in the browser-extension smoke job before the policy-sync test fix; a GitHub rerun on the fixed head is still required.
+- Local `test:browser` showed shared-state interference with multiple Playwright workers before the single-worker config fix.

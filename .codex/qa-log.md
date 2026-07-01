@@ -261,6 +261,43 @@ Updated `e2e/admin-console.spec.js` to route `/api/export/evidence` to a delayed
 - The added static export check confirms dashboard evidence export does not call reveal or raw-prompt APIs.
 - The new browser failure route uses a synthetic error body and does not introduce or log sensitive prompt content.
 
+## GitHub CI Follow-Up - Browser Extension Policy Sync
+
+Status: Passed locally, pending GitHub rerun
+
+### Failure Captured
+
+- GitHub PR #54 `test` failed on heads `a638063` and `1d85101` in `npm run test:browser`.
+- The blocking failure was `e2e/browser-extension.spec.js` file-drop policy coverage timing out while waiting for the content script to observe the configured `drop` browser-action rule.
+- The same CI run also showed flaky extension tests where page behavior briefly reflected a different policy than the fixture policy.
+
+### Root Cause
+
+The browser-extension background worker refreshes `/api/v1/policy` during startup. The Playwright fixture seeded `chrome.storage.local.policy`, but the test server policy could differ from that fixture after earlier E2E policy mutations, so the startup refresh could overwrite the fixture policy before or after the content-script handshake.
+
+The local full-browser suite also showed that admin-console and browser-extension specs can interfere when Playwright uses multiple workers, because both files share the same temp server policy and database.
+
+### Fix Made
+
+- Updated `e2e/browser-extension.spec.js` to sync the Playwright server's admin policy to the same fixture policy before launching each extension context.
+- Added a `/api/v1/policy` verification step so the sensor policy endpoint must match the fixture before the content script is exercised.
+- Compared browser-action contract fields only, because the server normalizes configured rules with `enabled: true`.
+- Set Playwright `workers: 1` so browser E2E specs that mutate shared temp policy/database state run serially in local and CI environments.
+
+### Commands Run
+
+- `npm run test:browser-extension` - failed first after the policy sync addition because the assertion did not account for server-normalized `enabled: true`.
+- `npm run test:browser-extension` - passed after comparing normalized browser-action contract fields, 8 Chromium tests.
+- `npm run test:browser` - failed locally with admin-console setup prompts returning `destination_blocked` while extension policy sync ran in a parallel worker against the same temp server.
+- `npm run test:browser` - failed once after serialization when a local Windows Playwright worker crashed and left a stale Playwright server on port `4211`; exact stale `playwright-server` and `promptwall-extension-e2e` Chromium processes were stopped.
+- `npm run test:browser` - passed after stale harness cleanup, 14 Chromium tests.
+- `npm run review:ci` - passed after browser-suite stabilization.
+
+### Security Review Notes
+
+- No runtime extension or server code changed.
+- The test now drives extension policy through the same authenticated admin policy path and ingest-key protected sensor policy endpoint used by production sensors.
+
 ## Section Queue
 
 1. Baseline install/lint/typecheck/build/test discovery - passed.
