@@ -65,6 +65,7 @@ npm run setup -- --with-browser
 Run focused browser checks:
 
 ```bash
+npm run test:browser
 npm run test:admin-console
 npm run test:browser-extension
 ```
@@ -99,11 +100,14 @@ docker compose up -d --build
 | `npm run setup` | Installs dependencies, writes `.env`, initializes SQLite, and checks local readiness. |
 | `npm start` | Starts `server/app.js`. |
 | `npm test` | Runs all `test/**/*.test.js` files sequentially through `scripts/run-node-tests.js`. |
-| `npm run review:ci` | Runs whitespace checks, generated demo-doc checks, AI-domain checks, Node tests, Playwright admin-console checks, detector sync, and detection eval. |
+| `npm run review:ci` | Runs whitespace checks, generated demo-doc checks, AI-domain checks, Node tests, the Playwright browser suite, detector sync, and detection eval. |
+| `npm run ai-domains:check` | Verifies the reviewed AI-host catalog stays covered by destination policy and browser adapter tests. |
 | `npm run sync-engine` | Copies `detection-engine/detect.js` into the browser extension detector copy. |
 | `npm run sync-check` | Verifies the shared detector and browser detector copy match. |
 | `npm run eval` | Runs held-out detector evaluation from `test/fixtures/semantic-eval.json`. |
 | `npm run simulate` | Sends sample prompts through the API path. |
+| `npm run endpoint:handoff` | Writes a signed, metadata-only native endpoint handoff event for a local file path. |
+| `npm run desktop:collect` | Runs the protected-upload desktop collector and records handoff intent for endpoint scanning. |
 | `npm run package:extension` | Packages browser-extension artifacts. |
 | `npm run package:endpoint-agent` | Packages the endpoint agent. |
 | `npm run package:mcp-guard` | Packages the MCP guard. |

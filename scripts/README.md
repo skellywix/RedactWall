@@ -12,6 +12,7 @@ place.
 | Production-style setup | `npm run setup:prod` |
 | Start server | `npm start` |
 | Full local gate | `npm run review:ci` |
+| AI-domain coverage guard | `npm run ai-domains:check` |
 | Detection eval | `npm run eval` |
 | Native Linear approval smoke | `npm run smoke:linear-approval -- -- --team-id=<linear-team-id>` |
 | Demo guide drift check | `npm run docs:demo-guide:check` |
@@ -32,6 +33,13 @@ place.
 | Endpoint agent | `npm run endpoint:check` |
 | MCP guard | `npm run mcp:check` |
 | Deployment preflight | `npm run setup:check` |
+
+## Endpoint Operator Helpers
+
+| Job | Command |
+|-----|---------|
+| Write a metadata-only native handoff event | `npm run endpoint:handoff -- --file <path> --destination <app>` |
+| Run the protected-upload desktop collector | `npm run desktop:collect -- --file <path> --destination <app>` |
 
 ## Evidence And Maintenance
 

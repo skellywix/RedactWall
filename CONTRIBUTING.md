@@ -23,7 +23,9 @@ to activate the local hooks.
 
 - `git diff --check`
 - `npm run docs:demo-guide:check`
+- `npm run ai-domains:check`
 - `npm test`
+- `npm run test:browser`
 - `npm run sync-check`
 - `npm run eval`
 

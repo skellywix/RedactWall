@@ -18,7 +18,7 @@ Plan → Implement → Validate. Spend most effort planning. See `.claude/skills
 - `npm run train-semantic` — regenerate the on-device semantic model in `detection-engine/detect.js`. Deterministic; CI fails on drift.
 - `npm run hooks:install` — install local review hooks into `.githooks`.
 - `npm run review:agent` — run the pre-commit review alias locally.
-- `npm run review:ci` — full local gate (`git diff --check`, `npm test`, `npm run sync-check`, `npm run eval`).
+- `npm run review:ci` — full local gate (`git diff --check`, generated demo-doc drift check, AI-domain coverage check, `npm test`, Playwright browser tests, `npm run sync-check`, `npm run eval`).
 - `npm run eval` — precision/recall/F1 on the HELD-OUT labeled corpus (`test/fixtures/semantic-eval.json`). Floors enforced by `test/eval.test.js`; **zero benign false positives** is the hard gate.
 - `npm run simulate` — end-to-end detection over the sample corpus.
 - `npm start` — run the server. `docker build -t promptwall .` — CI also builds the image.

@@ -25,7 +25,7 @@ The detection false positives and the raw-prompt privacy gap have been fixed and
 
 - **Detection FPs (#1–#3):** SSN split into a separator-required hard-block detector plus a bare-9-digit detector that now requires context; credit cards require a valid issuer (BIN) prefix plus separators-or-context; routing numbers require banking context. Measured false-positive rate on random ids dropped from ~88% (SSN) and ~10% (card) to **0%**, with true positives still caught.
 - **Raw-prompt privacy (#4):** new `server/crypto.js` (AES-256-GCM). The server now retains the raw prompt only for items *held for approval*, encrypted at rest, decrypted only on an audit-logged reveal; with no key configured it stores no raw at all. Added a `storeRawForApproval` policy toggle and `SENTINEL_DATA_KEY`. README privacy claim corrected to match.
-- **Tests:** `test/detect.test.js` + `test/crypto.test.js` (run with `npm test`). 11 pass, 0 fail; the 3 semantic-paraphrase gaps below are tracked as `todo`. Also fixed the broken `npm run seed` reference and added `npm run sync-engine` to keep the two engine copies identical.
+- **Tests:** `test/detect.test.js` + `test/crypto.test.js` (run with `npm test`). 11 pass, 0 fail; the 3 semantic-paraphrase gaps below are tracked as `todo`. Also removed the legacy seed-command reference and added `npm run sync-engine` to keep the two engine copies identical.
 
 Everything from **#5 onward is still open** (audit-chain coverage, datastore concurrency, reliable re-send, user identity, network backstop, and the semantic model).
 
@@ -110,7 +110,7 @@ The extension guards listed sites in one browser. A user can disable it, switch 
 
 ## P2 — Hygiene and smaller items.
 
-- **`npm run seed` is broken.** `package.json` and the README reference `scripts/seed.js`, which doesn't exist. Add it or remove the reference.
+- **Resolved legacy seed reference.** The old package/README seed-command reference was removed because `scripts/seed.js` was not part of the product surface.
 - **No tests.** A security product needs a labeled precision/recall fixture for the detector (true positives, evasions, false-positive bait) wired into CI, plus unit tests on `policy.evaluate`. I can scaffold this directly from the probe I ran for this review.
 - **Semantic detection is brittle keyword matching** and empirically misses realistic paraphrases: `"we're thinking about switching away from Acme… keep this internal"`, `"reduce headcount by 15% before the merger closes"`, and ordinary code without keyword tokens all scored **0**. Your README's own example (`"considering leaving our vendor, do not share"`) lands at exactly 0.34 against a 0.34 threshold — one word away from missing. This is the known roadmap item (real on-device model); the misses above make the case concrete and are worth keeping as the eval set for whatever model replaces it.
 - **Two copies of the engine drift by hand.** `detection-engine/detect.js` and `sensors/browser-extension/lib/detect.js` are byte-identical today but kept in sync manually. Add a build/copy step or a CI check that fails if they differ.
