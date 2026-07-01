@@ -44,6 +44,9 @@ Status: Passed
 - `npm run review:ci` - passed.
 - `node --test --test-concurrency=1 test\oidc-login.test.js` - passed after one later transient local full-suite native binding load failure.
 - `npm run review:ci` - passed again after the transient local failure.
+- `git commit -m "test(qa): align full-app audit artifacts"` - passed; pre-commit and post-commit hooks both ran `npm run review:ci`, and the post-commit hook pushed `codex/full-app-qa`.
+- `gh pr create --base main --head codex/full-app-qa --title "test: verify full-app baseline behavior" --body-file .codex/qa-pr.md` - passed, opened PR #54.
+- `gh pr checks 54 --watch` - passed; GitHub `test` and `docker` checks were green for the pushed branch and pull_request runs.
 
 ### Baseline Gate Result
 
@@ -73,6 +76,13 @@ Tracked artifacts already present on `main`:
 - `.codex/ui-ux-pr.md`
 
 That slice covered dashboard shortcut controls, active tab accessibility state, global search accessible naming, admin-console Playwright coverage, full browser Playwright coverage, npm audit, Docker build, and GitHub CI. This evidence is useful for the navigation/accessibility sections, but the full application QA objective remains open.
+
+## GitHub Delivery
+
+- Branch: `codex/full-app-qa`
+- PR: `https://github.com/skellywix/promptwall/pull/54`
+- Latest observed CI status: passed for GitHub `test` and `docker`.
+- Merge status: not merged. The full application QA objective remains open and the next section is navigation and routing.
 
 ## Section 2 - Navigation And Routing
 

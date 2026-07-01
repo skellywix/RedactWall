@@ -74,8 +74,11 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 
 # CI Status
 
-- PR not opened yet for `codex/full-app-qa`.
-- Existing merged PR #53 is on `main` and had passing GitHub `test` and `docker` checks.
+- PR #54 is open: `https://github.com/skellywix/promptwall/pull/54`
+- GitHub `test` passed for the pushed branch and pull_request runs.
+- GitHub `docker` passed for the pushed branch and pull_request runs.
+- Existing merged PR #53 is on `main` and also had passing GitHub `test` and `docker` checks.
+- Merge status: not merged. The full application QA objective remains open and the next section is navigation and routing.
 
 # Accessibility Notes
 
