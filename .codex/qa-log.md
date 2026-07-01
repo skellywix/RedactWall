@@ -750,6 +750,42 @@ Status: Passed
 - No auth, CSRF, RBAC, raw reveal, approval release, detector, persistence, evidence export, tenant, billing, or network behavior changed.
 - The new extension reduced-motion smoke uses synthetic SSN data and verifies the prompt remains unsent.
 
+## Section 18 - Performance and bundle health
+
+Status: Passed
+
+### Inspection
+
+- Reviewed `package.json` scripts and confirmed there is no bundler, minifier, Lighthouse, or dedicated performance script in this repo.
+- Measured shipped admin assets and browser-extension assets locally by raw bytes and gzip bytes.
+- Largest measured assets before the section fix were `server/public/dashboard.js` at 130,759 raw bytes / 30,414 gzip bytes and `server/public/index.html` at 124,804 raw bytes / 21,212 gzip bytes.
+- Measured the Chrome extension zip through the existing package helper at 52,300 bytes.
+
+### Issues Found
+
+1. The repo had no regression guard for accidental dashboard, login, or browser-extension asset bloat.
+2. Browser-extension store package size was not checked in the normal Node test gate.
+
+### Fix Made
+
+- Added `test/asset-budget.test.js`.
+- Added raw and gzip budgets for admin public assets: `index.html`, `dashboard.js`, `login.html`, and `login.js`.
+- Added raw and gzip budgets for the browser-extension payload, including aggregate extension asset budgets.
+- Added generated extension zip-size budgets for Chrome, Edge, and Firefox targets using the existing package helper in a temp directory.
+
+### Commands Run
+
+- `node --test --test-concurrency=1 test\asset-budget.test.js` - passed after section 18 edit, 3 tests.
+- `npm test` - passed after section 18 edit, 80 node test files.
+- `git diff --check` - passed after section 18 edit with the repo's usual CRLF working-copy warnings.
+- `$env:PLAYWRIGHT_PORT='4303'; npm run review:ci` - passed after section 18 edit, including docs demo guide check, AI domain coverage check, 80 node test files, 13 admin-console Chromium tests, `sync-check`, and `eval`.
+
+### Security Review Notes
+
+- Section 18 changes tests only.
+- The new package-size check writes extension zips to a temporary directory and deletes them during test cleanup.
+- No auth, CSRF, RBAC, raw reveal, approval release, detector, persistence, evidence export, tenant, billing, logging, or network behavior changed.
+
 ## Section Queue
 
 1. Baseline install/lint/typecheck/build/test discovery - passed.
@@ -769,7 +805,7 @@ Status: Passed
 15. Accessibility - passed.
 16. Responsive/cross-browser behavior - passed.
 17. Motion/effects/reduced-motion behavior - passed.
-18. Performance and bundle health - pending.
+18. Performance and bundle health - passed.
 19. Security and privacy - pending.
 20. Analytics/observability if present - pending.
 21. CI/CD and release readiness - pending.

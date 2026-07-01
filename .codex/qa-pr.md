@@ -21,7 +21,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Accessibility - passed.
 - Responsive/cross-browser behavior - passed.
 - Motion/effects/reduced-motion behavior - passed.
-- Performance and bundle health - pending.
+- Performance and bundle health - passed.
 - Security and privacy - pending.
 - Analytics/observability if present - pending.
 - CI/CD and release readiness - pending.
@@ -266,13 +266,17 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - `$env:PLAYWRIGHT_PORT='4300'; npm run test:browser-extension` - passed after section 17 edit, 10 Chromium tests.
 - `git diff --check` - passed after section 17 edit with the repo's usual CRLF working-copy warnings.
 - `$env:PLAYWRIGHT_PORT='4301'; npm run review:ci` - passed after section 17 edit, including docs demo guide check, AI domain coverage check, 79 node test files, 13 admin-console Chromium tests, `sync-check`, and `eval`.
+- `node --test --test-concurrency=1 test\asset-budget.test.js` - passed after section 18 edit, 3 tests.
+- `npm test` - passed after section 18 edit, 80 node test files.
+- `git diff --check` - passed after section 18 edit with the repo's usual CRLF working-copy warnings.
+- `$env:PLAYWRIGHT_PORT='4303'; npm run review:ci` - passed after section 18 edit, including docs demo guide check, AI domain coverage check, 80 node test files, 13 admin-console Chromium tests, `sync-check`, and `eval`.
 
 # CI Status
 
 - PR #54 is open: `https://github.com/skellywix/promptwall/pull/54`
-- GitHub `test` and `docker` checks were passing on PR head `98c8dbb` before the local Section 17 update.
+- GitHub `test` and `docker` checks were passing on PR head `d3c0488` before the local Section 18 update.
 - Existing merged PR #53 is on `main` and also had passing GitHub `test` and `docker` checks.
-- Merge status: not merged. The full application QA objective remains open and the next section is Performance and bundle health.
+- Merge status: not merged. The full application QA objective remains open and the next section is Security and privacy.
 
 # Accessibility Notes
 
@@ -302,8 +306,15 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Section 15 changes UI accessibility semantics and client-side invalid-field state only; login errors remain generic, queue row labels use already-rendered sanitized metadata, and extension banner labels use sanitized detector/coaching text.
 - Section 16 changes extension CSS sizing and browser regression tests only; no auth, CSRF, RBAC, detector, persistence, evidence export, tenant, billing, or network behavior changed.
 - Section 17 changes CSS motion preferences and browser regression tests only; no auth, CSRF, RBAC, detector, persistence, evidence export, tenant, billing, or network behavior changed.
+- Section 18 changes tests only; it packages extension zips into a temp directory for size checks and deletes them during cleanup, with no runtime auth, detector, persistence, logging, or network behavior changed.
 - Baseline tests include auth, CSRF, MFA, RBAC, validation, sanitized alerting, evidence export, retention, and detector privacy checks.
 - `npm ci` reported 0 vulnerabilities in npm's install audit.
+
+# Performance And Bundle Notes
+
+- Section 18 measured shipped admin and browser-extension assets by raw and gzip bytes.
+- Section 18 added budgets for admin public assets, browser-extension assets, aggregate extension payload size, and generated Chrome/Edge/Firefox extension zip size.
+- Current measured largest assets were `dashboard.js` at 130,759 raw bytes / 30,414 gzip bytes and `index.html` at 124,804 raw bytes / 21,212 gzip bytes; current generated Chrome extension zip measured 52,300 bytes.
 
 # Reduced-Motion Notes
 
@@ -324,7 +335,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - `.codex/full-app-qa-log.md`
 - `.codex/full-app-qa-pr.md`
 - Existing carried-forward artifacts: `.codex/ui-ux-qa-log.md`, `.codex/ui-ux-pr.md`
-- Section 2 through section 17 test evidence is recorded in `.codex/full-app-qa-log.md`.
+- Section 2 through section 18 test evidence is recorded in `.codex/full-app-qa-log.md`.
 
 # Risks
 
