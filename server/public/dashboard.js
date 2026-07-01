@@ -2653,7 +2653,12 @@ function renderPageHeading(name) {
 function activateTab(name) {
   document.body.dataset.activeTab = name;
   renderPageHeading(name);
-  $$('.tab').forEach((x) => x.classList.toggle('active', x.dataset.tab === name));
+  $$('.tab').forEach((x) => {
+    const active = x.dataset.tab === name;
+    x.classList.toggle('active', active);
+    if (active) x.setAttribute('aria-current', 'page');
+    else x.removeAttribute('aria-current');
+  });
   $$('section[id^=tab-]').forEach((s) => s.classList.add('hidden'));
   $(`#tab-${CSS.escape(name)}`).classList.remove('hidden');
   window.scrollTo(0, 0);

@@ -2552,7 +2552,7 @@
     </div>
     <div class="rail-section">Console</div>
     <nav class="tabs" aria-label="Primary">
-      <button class="tab active" data-tab="queue" type="button">
+      <button class="tab active" data-tab="queue" type="button" aria-current="page">
         <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M5 5h14v5H5V5Zm0 9h14v5H5v-5Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg></span>
         Approval Queue <span class="badge hidden" id="qBadge">0</span>
       </button>
@@ -2607,7 +2607,7 @@
     <header class="topbar">
       <label class="search" for="globalSearch">
         <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m21 21-4.35-4.35M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
-        <input id="globalSearch" type="search" autocomplete="off" placeholder="Search users or destinations" />
+        <input id="globalSearch" type="search" autocomplete="off" placeholder="Search users or destinations" aria-label="Search users or destinations" />
       </label>
       <div class="spacer"></div>
       <button class="live" type="button" data-tooltip="Server event stream" data-status-detail="LIVE: session telemetry stream is connected.">
@@ -2638,11 +2638,11 @@
         <p>Review held prompts, enforce AI-use policy, and export examiner-ready evidence from one control plane.</p>
       </div>
       <div class="control-cluster">
-        <button class="ghost" type="button">
+        <button class="ghost" type="button" data-tab-jump="audit" data-tooltip="Open evidence exports">
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
           Evidence
         </button>
-        <button class="ghost" type="button">
+        <button class="ghost" type="button" data-tab-jump="policy" data-tooltip="Open policy configuration">
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 4l7 3v5c0 4.2-2.6 6.8-7 8-4.4-1.2-7-3.8-7-8V7l7-3Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
           Configure
         </button>
@@ -2652,7 +2652,7 @@
     <div class="stats" id="stats"></div>
 
     <div class="content-tabs">
-      <button class="tab active" data-tab="queue" type="button">Approval Queue</button>
+      <button class="tab active" data-tab="queue" type="button" aria-current="page">Approval Queue</button>
       <button class="tab" data-tab="monitor" type="button">Signal Monitor</button>
       <button class="tab" data-tab="activity" type="button">All Activity</button>
       <button class="tab" data-tab="coverage" type="button">Coverage</button>
