@@ -17,5 +17,8 @@
 - Dependency validation result: Passed, 0 production vulnerabilities.
 - Docker validation command: `docker build -t promptwall:ui-ux-qa .`
 - Docker validation result: Passed.
+- Full browser validation command: `npm run test:browser`
+- Full browser validation result: Passed, 14 Playwright tests.
+- GitHub CI result: Push and pull_request `docker` and `test` checks passed on PR #53. The pull_request browser-extension job initially flaked in existing smoke coverage, then passed on rerun without code changes.
 - Artifacts: Playwright console output in current run.
 - Risks: Low. Change is limited to existing dashboard markup and existing tab routing behavior.
