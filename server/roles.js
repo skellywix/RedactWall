@@ -12,12 +12,16 @@ function normalizeRole(role) {
   return ALL_ROLES.includes(value) ? value : '';
 }
 
+function normalizePrincipal(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
 function canDecideQuery(user = {}, query = {}) {
   const role = normalizeRole(user.role);
   if (role === SECURITY_ADMIN) return true;
   if (role !== APPROVER) return false;
   if (query.assignedRole !== APPROVER) return false;
-  return !query.assignedUser || query.assignedUser === user.user;
+  return !query.assignedUser || normalizePrincipal(query.assignedUser) === normalizePrincipal(user.user);
 }
 
 function loginAuditAction(role) {
@@ -36,6 +40,7 @@ module.exports = {
   AUDITOR,
   ALL_ROLES,
   normalizeRole,
+  normalizePrincipal,
   canDecideQuery,
   loginAuditAction,
 };

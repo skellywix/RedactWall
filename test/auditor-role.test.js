@@ -117,6 +117,13 @@ test('auditor can inspect evidence but cannot reveal, decide, purge, or edit pol
     assert.ok(!text.includes(secret), apiPath);
   }
 
+  for (const apiPath of [
+    '/api/billing/seats',
+  ]) {
+    const res = await fetch(`http://127.0.0.1:${port}${apiPath}`, { headers: { cookie: auditor.cookie } });
+    assert.strictEqual(res.status, 403, apiPath);
+  }
+
   const templates = await fetch(`http://127.0.0.1:${port}/api/policy/templates`, { headers: { cookie: auditor.cookie } });
   const templateId = (await templates.json())[0].id;
   const forbidden = [
@@ -145,6 +152,11 @@ test('auditor can inspect evidence but cannot reveal, decide, purge, or edit pol
 
   const admin = await login(port, 'admin', 'unit-pass');
   assert.strictEqual(admin.body.role, 'security_admin');
+  const seatReport = await fetch(`http://127.0.0.1:${port}/api/billing/seats`, { headers: { cookie: admin.cookie } });
+  assert.strictEqual(seatReport.status, 200);
+  const seatBody = await seatReport.json();
+  assert.strictEqual(seatBody.saasMode, false);
+  assert.strictEqual(seatBody.seatLimitValid, true);
   const approve = await jsonFetch(port, `/api/queries/${held.id}/approve`, {
     headers: { cookie: admin.cookie, 'x-csrf-token': admin.csrfToken },
     body: { note: 'Synthetic approval after auditor review', password: 'unit-pass' },

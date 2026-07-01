@@ -100,8 +100,10 @@ test('approver can decide assigned items but cannot reveal, edit policy, or deci
     clientCategories: [{ category: 'SOURCE_CODE', score: 0.94 }],
   });
   const security = await createHeldPrompt(port, rawSsn, 'claude.ai');
+  db.updateQuery(assigned.id, { assignedUser: ' APPROVER ' });
 
   assert.strictEqual(db.getQuery(assigned.id).assignedRole, 'approver');
+  assert.strictEqual(db.getQuery(assigned.id).assignedUser, ' APPROVER ');
   assert.strictEqual(db.getQuery(security.id).assignedRole, 'security_admin');
 
   const approver = await login(port, 'approver', 'approver-pass');
@@ -118,6 +120,13 @@ test('approver can decide assigned items but cannot reveal, edit policy, or deci
   assert.ok(queueText.includes(security.id));
   assert.ok(!queueText.includes(rawCode));
   assert.ok(!queueText.includes(rawSsn));
+
+  for (const apiPath of [
+    '/api/billing/seats',
+  ]) {
+    const res = await fetch(`http://127.0.0.1:${port}${apiPath}`, { headers: { cookie: approver.cookie } });
+    assert.strictEqual(res.status, 403, apiPath);
+  }
 
   for (const [apiPath, body, method = 'POST'] of [
     ['/api/queries/' + assigned.id + '/reveal', { password: 'approver-pass' }],

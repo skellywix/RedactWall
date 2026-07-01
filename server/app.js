@@ -1274,6 +1274,7 @@ app.get('/auth/oidc/callback', async (req, res) => {
 });
 
 const sessionWrite = [auth.requireAuth, auth.requireCsrf];
+const adminRead = [auth.requireAuth, auth.requireRole(roles.SECURITY_ADMIN)];
 const adminWrite = [auth.requireAuth, auth.requireCsrf, auth.requireRole(roles.SECURITY_ADMIN)];
 const decisionWrite = [auth.requireAuth, auth.requireCsrf, auth.requireRole(roles.SECURITY_ADMIN, roles.APPROVER)];
 const API_MAX_LIST_LIMIT = 5000;
@@ -1430,7 +1431,7 @@ app.post('/api/queries/:id/deny', ...decisionWrite, validation.validateBody(vali
 
 app.get('/api/stats', auth.requireAuth, (req, res) => res.json(db.stats()));
 
-app.get('/api/billing/seats', auth.requireAuth, (req, res) => {
+app.get('/api/billing/seats', ...adminRead, (req, res) => {
   res.json(tenant.seatReport(db));
 });
 

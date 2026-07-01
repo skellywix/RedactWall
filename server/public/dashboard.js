@@ -861,10 +861,14 @@ function canAdminWrite() {
   return currentRole === 'security_admin';
 }
 
+function samePrincipal(left, right) {
+  return String(left || '').trim().toLowerCase() === String(right || '').trim().toLowerCase();
+}
+
 function canDecide(q = {}) {
   if (currentRole === 'security_admin') return true;
   if (currentRole !== 'approver') return false;
-  return q.assignedRole === 'approver' && (!q.assignedUser || q.assignedUser === currentUser);
+  return q.assignedRole === 'approver' && (!q.assignedUser || samePrincipal(q.assignedUser, currentUser));
 }
 
 function canReveal(q = {}) {
@@ -951,7 +955,7 @@ function isEscalated(q) {
 }
 
 function queueFilterMatches(q) {
-  if (queueFilter === 'mine') return q.assignedRole === currentRole || q.assignedUser === currentUser;
+  if (queueFilter === 'mine') return q.assignedRole === currentRole || samePrincipal(q.assignedUser, currentUser);
   if (queueFilter === 'unassigned') return !q.assignedRole && !q.assignedGroup;
   if (queueFilter === 'escalated') return isEscalated(q);
   return true;
@@ -1444,7 +1448,10 @@ async function refreshAll() {
 async function loadStats() {
   setBusy('#stats', true, 'SYNCING');
   try {
-    const [r, seatRes] = await Promise.all([api('/api/stats'), api('/api/billing/seats')]);
+    const [r, seatRes] = await Promise.all([
+      api('/api/stats'),
+      canAdminWrite() ? api('/api/billing/seats') : Promise.resolve(null),
+    ]);
     const s = await responseJsonObject(r, null);
     if (!s) return;
     const seats = await responseJsonObject(seatRes, null);

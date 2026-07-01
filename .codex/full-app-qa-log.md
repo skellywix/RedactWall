@@ -575,6 +575,46 @@ Production preflight already rejects missing or invalid SaaS seat limits, but ru
 - Invalid seat-limit dashboard rendering uses aggregate billing config state only and does not expose billable user lists in the stat card.
 - No auth, CSRF, RBAC, raw reveal, evidence export, detector, or persistence schema behavior changed in this section.
 
+## Section 14 - Admin/RBAC If Present
+
+Status: Passed
+
+### Inspection
+
+- Reviewed the Security Admin, approver, auditor, and operator role surfaces in `server/auth.js`, `server/roles.js`, `server/app.js`, `server/oidc.js`, `server/scim.js`, and `server/public/dashboard.js`.
+- Rechecked dashboard role gating for decision controls, raw reveal, policy edits, retention purge, destination review, read-only policy rendering, queue filters, and billing stats.
+- Reviewed SCIM/OIDC username mapping and approval-routing docs for `assignedUser` ownership semantics.
+- Reviewed existing role coverage in `test/auth.test.js`, `test/admin-mfa.test.js`, `test/admin-csrf.test.js`, `test/approver-role.test.js`, `test/auditor-role.test.js`, `test/approval-stepup.test.js`, `test/reveal-stepup.test.js`, `test/oidc-login.test.js`, and `test/scim.test.js`.
+
+### Issues Found
+
+1. `/api/billing/seats` returned the paid-seat report, including billable user identities, to any authenticated dashboard role. Approver and auditor sessions need sanitized evidence review, not tenant billing rosters.
+2. Approval ownership compared `assignedUser` with the session user by exact string. SCIM lookup and OIDC login already treat provisioned usernames case-insensitively, so a casing or whitespace mismatch could block a legitimate approver from deciding an item explicitly assigned to them.
+
+### Fix Made
+
+- Added an `adminRead` middleware and restricted `/api/billing/seats` to Security Admin sessions.
+- Updated the dashboard stats loader to fetch billing-seat data only when the current role can perform admin writes, avoiding a guaranteed 403 for read-only sessions.
+- Normalized assigned-user principal comparison in `roles.canDecideQuery()` and the dashboard `canDecide()` / `mine` queue filter.
+- Added `test/roles.test.js` for normalized approver ownership and non-decider role checks.
+- Extended approver and auditor role tests to prove `/api/billing/seats` is forbidden to non-admin roles, still available to Security Admins, and that mixed-case assigned-user ownership can still be approved.
+- Extended static dashboard checks to keep the normalized principal gate and admin-only billing fetch wired.
+
+### Commands Run
+
+- `node --check server\roles.js` - passed after section 14 edit.
+- `node --check server\app.js` - passed after section 14 edit.
+- `node --check server\public\dashboard.js` - passed after section 14 edit.
+- `node --test --test-concurrency=1 test\roles.test.js test\approver-role.test.js test\auditor-role.test.js test\auth.test.js test\admin-mfa.test.js test\approval-stepup.test.js test\reveal-stepup.test.js test\oidc-login.test.js test\scim.test.js test\admin-csrf.test.js` - passed after section 14 edit, 38 tests.
+- `$env:PLAYWRIGHT_PORT='4272'; npm run test:admin-console` - passed after section 14 edit, 11 Chromium tests.
+- `$env:PLAYWRIGHT_PORT='4273'; npm run review:ci` - passed after section 14 edit, including docs demo guide check, AI domain coverage check, 79 node test files, 11 admin-console Chromium tests, `sync-check`, and `eval`.
+
+### Security Review Notes
+
+- Seat reports include billable user identities and SaaS capacity state, so they are now Security Admin-only.
+- The assigned-user normalization does not broaden role access: the request still requires an authenticated approver, `assignedRole: "approver"`, and matching normalized principal, or a Security Admin.
+- Approvers and auditors continue to read sanitized evidence and remain blocked from raw reveal, retention purge, policy mutation, destination review, and unassigned security-admin decisions.
+
 ## Section Queue
 
 1. Baseline install/lint/typecheck/build/test discovery - passed.
@@ -590,7 +630,7 @@ Production preflight already rejects missing or invalid SaaS seat limits, but ru
 11. Tables, search, filters, and pagination - passed.
 12. File/media flows if present - passed.
 13. Payments/billing if present - passed.
-14. Admin/RBAC if present - pending.
+14. Admin/RBAC if present - passed.
 15. Accessibility - pending.
 16. Responsive/cross-browser behavior - pending.
 17. Motion/effects/reduced-motion behavior - pending.
