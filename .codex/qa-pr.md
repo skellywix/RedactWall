@@ -196,7 +196,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - `node --check server\public\dashboard.js` - passed after section 13 edit.
 - `node --test --test-concurrency=1 test\tenant.test.js test\saas-tenancy.test.js test\preflight.test.js test\setup.test.js test\dashboard-linkage.test.js test\db.test.js` - passed after section 13 edit, 52 tests.
 - `$env:PLAYWRIGHT_PORT='4267'; npx playwright test admin-console.spec.js --grep "invalid SaaS seat-limit" --reporter=line` - passed after section 13 edit, 1 Chromium test.
-- `npm run review:ci` - passed after section 13 edit, including 78 node test files, 10 admin-console Chromium tests, `sync-check`, and `eval`.
+- `$env:PLAYWRIGHT_PORT='4268'; npm run review:ci` - passed after section 13 edit, including docs demo guide check, AI domain coverage check, 78 node test files, 11 admin-console Chromium tests, `sync-check`, and `eval`.
 
 # CI Status
 
