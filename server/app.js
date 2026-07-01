@@ -42,6 +42,7 @@ const roles = require('./roles');
 const scim = require('./scim');
 const oidc = require('./oidc');
 const identitySetup = require('./identity-setup');
+const updater = require('./updater');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -1442,6 +1443,89 @@ app.get('/api/metrics', ...adminRead, (req, res) => {
 });
 
 app.get('/api/preflight', auth.requireAuth, (req, res) => res.json(currentPreflight()));
+
+function updateAuditDetail(result = {}) {
+  const source = result.check || result;
+  const config = result.config || source.config || {};
+  const parts = [];
+  if (config.remoteName || source.remoteRef) parts.push(`remote=${config.remoteName || source.remoteRef}`);
+  if (config.branch) parts.push(`branch=${config.branch}`);
+  if (config.installMode) parts.push(`install=${config.installMode}`);
+  if (source.currentShortCommit) parts.push(`current=${source.currentShortCommit}`);
+  if (source.latestShortCommit) parts.push(`latest=${source.latestShortCommit}`);
+  if (Number.isFinite(source.behind)) parts.push(`behind=${source.behind}`);
+  if (result.updated === true) parts.push('updated=true');
+  if (result.updated === false) parts.push('updated=false');
+  if (result.restartScheduled === true) parts.push('restart=scheduled');
+  return parts.join('; ');
+}
+
+function updateConfigAuditDetail(config = {}) {
+  return [
+    `remote=${config.remoteName || 'origin'}`,
+    `branch=${config.branch || 'main'}`,
+    `install=${config.installMode || 'npm-ci-omit-dev'}`,
+    `restart=${config.restartCommand ? 'configured' : 'manual'}`,
+    `autoRestart=${config.restartAfterUpdate === true}`,
+  ].join('; ');
+}
+
+function sendUpdateError(res, err) {
+  res.status(err && err.statusCode ? err.statusCode : 500).json({ error: updater.publicError(err) });
+}
+
+app.get('/api/update/status', ...adminRead, async (req, res) => {
+  try {
+    res.json(await updater.status());
+  } catch (err) {
+    sendUpdateError(res, err);
+  }
+});
+
+app.put('/api/update/config', ...adminWrite, validation.validateBody(validation.updateConfigSchema), async (req, res) => {
+  try {
+    const config = updater.saveConfig(req.body);
+    db.appendAudit({ action: 'APP_UPDATE_CONFIGURED', actor: req.user.user, detail: updateConfigAuditDetail(config) });
+    res.json(await updater.status());
+  } catch (err) {
+    db.appendAudit({ action: 'APP_UPDATE_CONFIG_FAILED', actor: req.user.user, detail: updater.publicError(err) });
+    sendUpdateError(res, err);
+  }
+});
+
+app.post('/api/update/check', ...adminWrite, async (req, res) => {
+  try {
+    const result = await updater.checkForUpdates();
+    db.appendAudit({ action: 'APP_UPDATE_CHECKED', actor: req.user.user, detail: updateAuditDetail(result) });
+    res.json(result);
+  } catch (err) {
+    db.appendAudit({ action: 'APP_UPDATE_CHECK_FAILED', actor: req.user.user, detail: updater.publicError(err) });
+    sendUpdateError(res, err);
+  }
+});
+
+app.post('/api/update/apply', ...adminWrite, validation.validateBody(validation.updateApplySchema), async (req, res) => {
+  db.appendAudit({ action: 'APP_UPDATE_STARTED', actor: req.user.user, detail: 'backup=true; fastForwardOnly=true' });
+  try {
+    const result = await updater.applyUpdate({ confirmBackup: req.body.confirmBackup === true });
+    db.appendAudit({ action: 'APP_UPDATE_APPLIED', actor: req.user.user, detail: updateAuditDetail(result) });
+    res.json(result);
+  } catch (err) {
+    db.appendAudit({ action: 'APP_UPDATE_FAILED', actor: req.user.user, detail: updater.publicError(err) });
+    sendUpdateError(res, err);
+  }
+});
+
+app.post('/api/update/restart', ...adminWrite, async (req, res) => {
+  try {
+    const result = updater.scheduleRestart();
+    db.appendAudit({ action: 'APP_UPDATE_RESTART_SCHEDULED', actor: req.user.user, detail: 'restart command scheduled' });
+    res.json(result);
+  } catch (err) {
+    db.appendAudit({ action: 'APP_UPDATE_RESTART_FAILED', actor: req.user.user, detail: updater.publicError(err) });
+    sendUpdateError(res, err);
+  }
+});
 
 app.get('/api/identity/setup-guide', auth.requireAuth, (req, res) => {
   try {

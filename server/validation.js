@@ -18,6 +18,7 @@ const LIMITS = {
   base64Chars: 12 * 1024 * 1024,
   policyListItems: 200,
   destinationReviewReasonChars: 240,
+  updateCommandChars: 256,
 };
 
 const DETECTOR_ID = /^[A-Z0-9_]+$/;
@@ -30,6 +31,9 @@ const ROUTING_GROUP = /^[a-z][a-z0-9_-]{0,63}$/;
 const ROUTING_ROLE = /^(security_admin|approver)$/;
 const ROUTING_REASON = /^[a-z0-9][a-z0-9_:-]{0,79}$/;
 const POLICY_MATCH_TEXT = /^[A-Za-z0-9 ._@:+/-]+$/;
+const UPDATE_REMOTE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/;
+const UPDATE_BRANCH_NAME = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/;
+const SAFE_OPERATOR_COMMAND = /^[A-Za-z0-9 ._:/\\@+=,-]+$/;
 const SENSITIVE_ROUTING_CODE = /(?:\d{3}[-_:.]?\d{2}[-_:.]?\d{4}|\d{12,19})/;
 function knownDetectorIds() {
   return new Set(detector.listDetectors({
@@ -383,6 +387,35 @@ const policyUpdateSchema = z.object({
   scanner: scannerPolicySchema.optional(),
 }).strict();
 
+function safeGitBranchName(value) {
+  const text = String(value || '');
+  return !text.startsWith('-')
+    && !text.includes('..')
+    && !text.includes('//')
+    && !text.endsWith('/')
+    && !text.endsWith('.')
+    && !text.endsWith('.lock');
+}
+
+const updateConfigSchema = z.object({
+  remoteName: z.string().min(1).max(80).regex(UPDATE_REMOTE_NAME).default('origin'),
+  branch: z.string().min(1).max(128).regex(UPDATE_BRANCH_NAME).refine(safeGitBranchName, {
+    message: 'invalid branch',
+  }).default('main'),
+  installMode: z.enum(['npm-ci-omit-dev', 'npm-ci', 'skip']).default('npm-ci-omit-dev'),
+  restartCommand: z.preprocess(
+    (value) => (value == null ? '' : value),
+    z.string().max(LIMITS.updateCommandChars).refine((value) => value === '' || SAFE_OPERATOR_COMMAND.test(value), {
+      message: 'unsupported characters',
+    }).default(''),
+  ),
+  restartAfterUpdate: z.boolean().default(false),
+}).strict();
+
+const updateApplySchema = z.object({
+  confirmBackup: z.literal(true),
+}).strict();
+
 function validationFields(error) {
   const fields = new Set();
   for (const issue of error.issues || []) {
@@ -425,4 +458,6 @@ module.exports = {
   applyTemplateSchema,
   destinationReviewSchema,
   policyUpdateSchema,
+  updateConfigSchema,
+  updateApplySchema,
 };

@@ -14,6 +14,8 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
+      - name: Native binding smoke
+        run: npm run native:check:repair
       - name: Dependency audit
         run: npm audit --omit=dev
       - name: Generated demo guides current

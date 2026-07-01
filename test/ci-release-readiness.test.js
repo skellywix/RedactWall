@@ -14,6 +14,7 @@ test('local review gate runs generated docs, release-critical tests, and all bro
   assert.match(reviewCi, /git diff --check/);
   assert.match(reviewCi, /npm run docs:demo-guide:check/);
   assert.match(reviewCi, /npm run ai-domains:check/);
+  assert.match(reviewCi, /npm run native:check/);
   assert.match(reviewCi, /npm test/);
   assert.match(reviewCi, /npm run test:browser/);
   assert.match(reviewCi, /npm run sync-check/);
@@ -22,6 +23,7 @@ test('local review gate runs generated docs, release-critical tests, and all bro
 });
 
 test('GitHub CI keeps the generated docs and browser E2E gates in the protected workflow', () => {
+  assert.match(ci, /npm run native:check:repair/);
   assert.match(ci, /npm audit --omit=dev/);
   assert.match(ci, /npm run docs:demo-guide:check/);
   assert.match(ci, /npm run sync-check/);

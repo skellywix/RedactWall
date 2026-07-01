@@ -161,6 +161,55 @@ http://localhost:4000/api/metrics
 entry count, and a timestamp. It does not include prompt bodies or raw finding
 values.
 
+## In-App Updates From GitHub
+
+Security Admins can open **Updates** in the dashboard to configure and run a
+source-clone update from GitHub. The updater uses the existing Git remote, so a
+production source install should have `origin` pointed at the approved
+PromptWall GitHub repo and should track the production branch, normally `main`.
+
+The update button is deliberately conservative:
+
+1. Verifies the configured remote is GitHub.
+2. Blocks if the checked-out branch does not match the configured update branch.
+3. Blocks if the source tree has local edits or untracked source files.
+4. Verifies the SQLite audit chain.
+5. Creates a database backup under the active data root, for example
+   `/data/backups/updates` or `data/backups/updates`.
+6. Fetches the configured branch and fast-forwards only.
+7. Runs the configured dependency step, usually `npm ci --omit=dev`.
+8. Marks restart required, or schedules the configured restart command when the
+   host explicitly enables backend restart execution.
+
+The updater never runs `git reset`, `git clean`, or volume-delete commands.
+Runtime state should still live outside source, using:
+
+```text
+SENTINEL_DB_PATH=/data/sentinel.db
+SENTINEL_POLICY_PATH=/data/policy.json
+SENTINEL_CUSTOM_DETECTORS_PATH=/data/custom-detectors.json
+```
+
+For Docker image deployments, rebuild and roll the image through your normal
+host or CloudFormation process instead of using the source-clone updater inside
+a read-only container. The MECHA standing test stack can use this restart
+command after an update is applied from the host checkout:
+
+```text
+npm run docker:mecha:restart
+```
+
+Backend execution of that command is disabled unless the host sets:
+
+```text
+PROMPTWALL_UPDATE_RESTART_ENABLED=true
+```
+
+For stricter production hosts, set `PROMPTWALL_UPDATE_RESTART_COMMAND` in the
+service environment and leave the dashboard restart command blank. Otherwise the
+dashboard command is treated as an operator hint and the update will finish with
+`restart required`.
+
 ## SCIM Provisioning And OIDC Login
 
 Set `SCIM_BEARER_TOKEN` to enable customer identity provisioning at

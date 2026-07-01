@@ -871,8 +871,9 @@ test('admin console controls and forms are wired end to end', async ({ page, req
   expect(problems).toEqual([]);
 });
 
-test('admin console secondary controls and dialog cancels are wired end to end', async ({ page, request }) => {
+test('admin console secondary controls and dialog cancels are wired end to end', async ({ page, request }, testInfo) => {
   const problems = collectUiProblems(page);
+  const retryScope = `r${testInfo.retry}-p${testInfo.repeatEachIndex}-w${testInfo.workerIndex}`;
   const reveal = await createHeldPrompt(request, {
     suffix: '9201',
     user: 'cancel-reveal-ui@example.test',
@@ -884,11 +885,11 @@ test('admin console secondary controls and dialog cancels are wired end to end',
     destination: 'claude.ai',
   });
   const destinations = {
-    govern: 'govern-secondary.example',
-    allow: 'allow-secondary.example',
-    block: 'block-secondary.example',
+    govern: `govern-secondary-${retryScope}.example`,
+    allow: `allow-secondary-${retryScope}.example`,
+    block: `block-secondary-${retryScope}.example`,
   };
-  const cancelDestination = 'cancel-secondary.example';
+  const cancelDestination = `cancel-secondary-${retryScope}.example`;
   for (const destination of Object.values(destinations)) {
     await createShadowAi(request, destination);
   }
@@ -1040,6 +1041,7 @@ test('signal operations monitoring console supports adaptive states', async ({ p
   await page.locator('.content-tabs .tab[data-tab="monitor"]').click();
   await expect(page.locator('#tab-monitor')).toBeVisible();
   await expect(page.locator('.signal-console')).toContainText('Signal Monitor');
+  await expect(page.locator('#monitorDataScope')).toContainText('Sanitized event stream');
   await expect(page.locator('#monitorInspector')).toContainText('No selection');
 
   await page.locator('#monitorSearch').focus();
@@ -1072,7 +1074,8 @@ test('signal operations monitoring console supports adaptive states', async ({ p
   await eventRow.click();
   await expect(page.locator('#monitorInspector')).toContainText('SSN paste blocked before egress');
   await eventRow.locator('[data-monitor-event-expand="evt-7902"]').click();
-  await expect(page.locator('.activity-detail-block:has-text("hard-stop identifier")')).toBeVisible();
+  await expect(page.locator('.activity-detail-block:has-text("Signal Monitor records sanitized metadata")')).toBeVisible();
+  await expect(page.locator('#monitorActivityFeed')).not.toContainText('prompt was held');
 
   await page.locator('#monitorRefresh').click();
   await expect(page.locator('#monitorRefresh')).toBeDisabled();
@@ -1110,5 +1113,26 @@ test('admin console mobile layout keeps content tabs usable', async ({ page }) =
   await expect(page.locator('#tab-audit')).toBeVisible();
 
   await expectNoHorizontalOverflow(page);
+  expect(problems).toEqual([]);
+});
+
+test('admin console updates tab saves GitHub update configuration', async ({ page }) => {
+  const problems = collectUiProblems(page);
+  await login(page);
+
+  await page.locator('.content-tabs .tab[data-tab="updates"]').click();
+  await expect(page.locator('#tab-updates')).toBeVisible();
+  await expect(page.locator('#updateBox')).toContainText('GitHub Update');
+  await expect(page.locator('#runUpdate')).toContainText('Update from GitHub');
+
+  await page.locator('#updateRemoteName').fill('origin');
+  await page.locator('#updateBranch').fill('main');
+  await page.locator('#updateInstallMode').selectOption('skip');
+  await page.locator('#updateRestartCommand').fill('');
+  await page.locator('#saveUpdateConfig').click();
+  await expect(page.locator('#updateSaveStatus')).toContainText('Saved');
+  await expect(page.locator('#updateBox')).toContainText('Skip dependency install');
+  await expect(page.locator('#updateConsoleStatus')).not.toContainText('Unavailable');
+
   expect(problems).toEqual([]);
 });

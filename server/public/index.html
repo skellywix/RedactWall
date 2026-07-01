@@ -857,6 +857,12 @@
   .settings-list{margin-top:12px}
   .settings-row{padding:9px 0;border-top:0;border-bottom:1px solid var(--line)}
   .configuration-status{min-height:22px;color:var(--green);font-size:12.5px}
+  .update-grid{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(320px,.8fr);gap:12px;align-items:start}
+  .update-action-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+  .update-log{display:grid;gap:8px;margin-top:10px}
+  .update-log-row{display:grid;grid-template-columns:120px minmax(0,1fr);gap:10px;border-bottom:1px solid var(--line);padding:8px 0;color:var(--mut);font-size:12px}
+  .update-log-row b{color:var(--txt);font-weight:720;overflow-wrap:anywhere}
+  .update-status-line{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
   .advanced-toggle{margin-top:10px}
   .panel,.config-card,.sensor-card,.stat,.mini-kpi,.datum,.risk-meter,.score-panel{
     transition:border-color var(--fast),background-color var(--fast),box-shadow var(--fast);
@@ -1137,6 +1143,7 @@
   }
   .signal-console-title{display:flex;align-items:flex-start;gap:12px;min-width:0}
   .signal-console-title h2{margin:0;color:var(--sig-text);font-size:22px;line-height:1.12;font-weight:790}
+  .signal-console-title p{margin:5px 0 0;color:var(--sig-muted);font-size:12px;line-height:1.35;font-weight:650}
   .signal-console-mark{
     width:36px;
     height:36px;
@@ -2514,7 +2521,7 @@
     .content-tabs{top:0;overflow:auto}
     .queue-grid{grid-template-columns:1fr}
     .coverage-grid,.lineage-grid,.identity-grid{grid-template-columns:1fr}
-    .config-grid,.config-two,.sensor-cards{grid-template-columns:1fr}
+    .config-grid,.config-two,.sensor-cards,.update-grid{grid-template-columns:1fr}
     .wide-panel{grid-column:auto}
     .stats{grid-template-columns:repeat(2,minmax(0,1fr))}
     .signal-console-header,.signal-toolbar,.signal-layout,.console-frame-header{grid-template-columns:1fr}
@@ -2605,6 +2612,10 @@
         <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M12 4l7 3v5c0 4.2-2.6 6.8-7 8-4.4-1.2-7-3.8-7-8V7l7-3Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg></span>
         Configuration
       </button>
+      <button class="tab" data-tab="updates" type="button">
+        <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M20 12a8 8 0 0 1-13.7 5.6M4 12A8 8 0 0 1 17.7 6.4M17.7 6.4H14M17.7 6.4V3M6.3 17.6H10M6.3 17.6V21" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        Updates
+      </button>
     </nav>
     <div class="rail-section">Monitoring</div>
     <div class="rail-status">
@@ -2681,6 +2692,7 @@
       <button class="tab" data-tab="lineage" type="button">Lineage</button>
       <button class="tab" data-tab="audit" type="button">Audit Log</button>
       <button class="tab" data-tab="policy" type="button">Configuration</button>
+      <button class="tab" data-tab="updates" type="button">Updates</button>
     </div>
 
     <div class="wrap">
@@ -2780,6 +2792,7 @@
               <div class="signal-console-mark" aria-hidden="true">SM</div>
               <div>
                 <h2>Signal Monitor</h2>
+                <p id="monitorDataScope">Sanitized event stream. Raw approval text stays behind step-up reveal.</p>
               </div>
             </div>
             <div class="signal-header-actions">
@@ -3107,6 +3120,24 @@
         </div>
         <div class="config-shell">
           <div class="policy-box" id="policyBox"></div>
+        </div>
+      </section>
+
+      <section id="tab-updates" class="hidden console-frame" aria-label="Updates">
+        <div class="console-frame-header">
+          <div class="console-frame-title">
+            <div class="console-frame-mark" aria-hidden="true">UP</div>
+            <div>
+              <h2>Updates</h2>
+              <p>Pull approved PromptWall releases from GitHub while preserving evidence data, logs, and backups.</p>
+            </div>
+          </div>
+          <div class="console-frame-actions">
+            <div class="configuration-status" id="updateConsoleStatus"></div>
+          </div>
+        </div>
+        <div class="config-shell">
+          <div class="policy-box" id="updateBox"></div>
         </div>
       </section>
     </div>

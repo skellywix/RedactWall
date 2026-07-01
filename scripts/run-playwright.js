@@ -36,8 +36,8 @@ async function main() {
   const port = await findAvailablePort(startPort);
   const env = { ...process.env, PLAYWRIGHT_PORT: String(port) };
 
-  if (requestedPort && requestedPort !== port) {
-    console.warn(`[playwright] port ${requestedPort} is busy; using ${port}`);
+  if (port !== startPort) {
+    console.warn(`[playwright] port ${startPort} is busy; using ${port}`);
   } else {
     console.log(`[playwright] using port ${port}`);
   }
@@ -63,7 +63,17 @@ async function main() {
   });
 }
 
-main().catch((err) => {
-  console.error(err.message || err);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((err) => {
+    console.error(err.message || err);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  DEFAULT_START_PORT,
+  MAX_PORT_PROBES,
+  parsePort,
+  canBind,
+  findAvailablePort,
+};

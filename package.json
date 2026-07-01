@@ -8,7 +8,7 @@
   },
   "scripts": {
     "hooks:install": "git config core.hooksPath .githooks",
-    "review:ci": "git diff --check && npm run docs:demo-guide:check && npm run ai-domains:check && npm test && npm run test:browser && npm run sync-check && npm run eval",
+    "review:ci": "git diff --check && npm run docs:demo-guide:check && npm run ai-domains:check && npm run native:check && npm test && npm run test:browser && npm run sync-check && npm run eval",
     "review:agent": "npm run review:ci",
     "setup": "node scripts/setup.js",
     "setup:prod": "node scripts/setup.js --production",
@@ -16,6 +16,8 @@
     "mfa:uri": "node scripts/mfa-uri.js",
     "start": "node server/app.js",
     "test": "node scripts/run-node-tests.js",
+    "native:check": "node scripts/ensure-native-bindings.js",
+    "native:check:repair": "node scripts/ensure-native-bindings.js --repair",
     "test:browser": "node scripts/run-playwright.js",
     "test:admin-console": "node scripts/run-playwright.js admin-console.spec.js",
     "test:browser-extension": "node scripts/run-playwright.js browser-extension.spec.js --project=chromium",

@@ -100,7 +100,7 @@ const monitorItems = [
     confidence: 90,
     relatedMetric: 'Redaction path',
     lastUpdated: '35 sec ago',
-    description: 'Connector payloads are redacted before model access and recorded without raw bodies.',
+    description: 'Connector payloads are redacted before model access; only masked findings and category metadata are recorded.',
   },
   {
     id: 'node-approval-gate',
@@ -163,7 +163,7 @@ const monitorEvents = [
     severity: 'critical',
     source: 'browser_extension',
     title: 'SSN paste blocked before egress',
-    description: 'A governed chat destination received a hard-stop identifier and the prompt was held.',
+    description: 'A governed chat destination triggered a hard-stop detector. Signal Monitor records sanitized metadata; retained raw text stays behind Queue reveal.',
     confidence: 99,
     relatedMetric: 'Critical holds',
     status: 'error',
@@ -185,7 +185,7 @@ const monitorEvents = [
     severity: 'info',
     source: 'mcp_guard',
     title: 'Drive connector redacted document context',
-    description: 'Connector payload was transformed before model access.',
+    description: 'Connector payload was transformed before model access; raw document text was not logged in Signal Monitor.',
     confidence: 91,
     relatedMetric: 'Redaction path',
     status: 'online',
@@ -303,7 +303,7 @@ function monitorAllEvents() {
     severity: 'info',
     source: 'signal_console',
     title: 'Signal refresh completed',
-    description: 'Telemetry refresh updated metrics, timestamps, and recent activity.',
+    description: 'Telemetry refresh updated sanitized metrics, timestamps, and recent activity.',
     confidence: 93,
     relatedMetric: 'Refresh cadence',
     status: 'online',
@@ -2813,14 +2813,263 @@ async function loadPolicy() {
   };
   $$('.ps-tpl').forEach((b) => {
     b.onclick = async () => {
-      await api('/api/policy/apply-template', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: b.dataset.tpl }) });
-      loadPolicy();
+      const r = await api('/api/policy/apply-template', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: b.dataset.tpl }) });
+      if (!r || !r.ok) {
+        setPolicyStatus(r ? await apiErrorSummary(r, 'Could not apply template') : 'Could not apply template');
+        return;
+      }
+      await loadPolicy();
     };
   });
   markUpdated();
   } finally {
     setBusy('#tab-policy .config-shell', false);
   }
+}
+
+function installModeLabel(mode) {
+  return ({
+    'npm-ci-omit-dev': 'Install runtime dependencies',
+    'npm-ci': 'Install all dependencies',
+    skip: 'Skip dependency install',
+  })[mode] || humanize(mode);
+}
+
+function updateStatusState(status = {}) {
+  if (status.inProgress) return ['warn', 'Running'];
+  if (status.error) return ['bad', 'Needs setup'];
+  const safety = status.safety || {};
+  if (!safety.githubRemote || !safety.sourceTreeClean || safety.configuredBranch === false || (safety.auditIntegrity && safety.auditIntegrity.ok === false)) return ['bad', 'Blocked'];
+  const last = status.lastRun || {};
+  if (last.status === 'failed' || last.status === 'restart-failed') return ['bad', 'Failed'];
+  if (last.restartRequired) return ['warn', 'Restart required'];
+  return ['good', 'Ready'];
+}
+
+function updateShortCommit(value) {
+  return String(value || '').slice(0, 12) || '-';
+}
+
+function updateLogRow(label, value) {
+  return `<div class="update-log-row"><span>${escapeHtml(label)}</span><b>${escapeHtml(value || '-')}</b></div>`;
+}
+
+function updateSafetyRow(label, ok, detail) {
+  return `<div class="posture-item"><span>${escapeHtml(label)}</span><b>${statePill(ok ? 'good' : 'bad', detail || (ok ? 'Ready' : 'Blocked'))}</b></div>`;
+}
+
+function renderUpdateLastRun(last = {}) {
+  if (!last || !last.status) {
+    return '<div class="empty"><div class="big">No update runs</div>Check GitHub before the first production update.</div>';
+  }
+  return `<div class="update-log">
+    ${updateLogRow('Status', humanize(last.status))}
+    ${updateLogRow('Stage', humanize(last.stage || 'complete'))}
+    ${updateLogRow('Started', fmt(last.startedAt))}
+    ${updateLogRow('Completed', fmt(last.completedAt))}
+    ${updateLogRow('From', updateShortCommit(last.fromCommit))}
+    ${updateLogRow('To', updateShortCommit(last.toCommit))}
+    ${updateLogRow('Backup', last.backup && last.backup.manifestFile ? last.backup.manifestFile : '')}
+    ${last.error ? updateLogRow('Error', last.error) : ''}
+  </div>`;
+}
+
+function renderUpdateConfigForm(config = {}, disabled = false) {
+  const installMode = config.installMode || 'npm-ci-omit-dev';
+  return `<div class="config-card pad">
+    <h3>Update Configuration</h3>
+    <p>Fill these once for the production host. Settings are stored beside the active evidence database, not in source.</p>
+    <div class="field-grid" style="margin-top:14px">
+      <label for="updateRemoteName">Git remote</label>
+      <input id="updateRemoteName" type="text" maxlength="80" value="${escapeHtml(config.remoteName || 'origin')}" ${disabled ? 'disabled' : ''}/>
+      <label for="updateBranch">GitHub branch</label>
+      <input id="updateBranch" type="text" maxlength="128" value="${escapeHtml(config.branch || 'main')}" ${disabled ? 'disabled' : ''}/>
+      <label for="updateInstallMode">Dependency step</label>
+      <select id="updateInstallMode" ${disabled ? 'disabled' : ''}>
+        ${[
+    ['npm-ci-omit-dev', 'npm ci --omit=dev'],
+    ['npm-ci', 'npm ci'],
+    ['skip', 'Skip install'],
+  ].map(([value, label]) => `<option value="${value}" ${installMode === value ? 'selected' : ''}>${label}</option>`).join('')}
+      </select>
+      <label for="updateRestartCommand">Restart command</label>
+      <input id="updateRestartCommand" type="text" maxlength="256" placeholder="systemctl restart promptwall" value="${escapeHtml(config.restartCommand || '')}" ${disabled ? 'disabled' : ''}/>
+      <label for="updateRestartAfter">Auto-run restart command</label>
+      <input id="updateRestartAfter" type="checkbox" ${config.restartAfterUpdate ? 'checked' : ''} ${disabled ? 'disabled' : ''}/>
+    </div>
+    <p class="config-subtitle">Backend restart execution requires PROMPTWALL_UPDATE_RESTART_ENABLED=true on the host.</p>
+    <div class="update-action-row">
+      <button class="btn approve" id="saveUpdateConfig" type="button" ${disabled ? 'disabled' : ''}>${icons.check}Save configuration</button>
+      <span class="save-status" id="updateSaveStatus"></span>
+    </div>
+  </div>`;
+}
+
+function renderUpdates(status = {}) {
+  const box = $('#updateBox');
+  const [state, label] = updateStatusState(status);
+  const repo = status.repo || {};
+  const config = status.config || {};
+  const safety = status.safety || {};
+  const last = status.lastRun || {};
+  const dirtyFiles = repo.dirtyFiles || [];
+  const blocked = state === 'bad' || status.inProgress;
+  const restartConfigured = !!config.restartCommand || config.restartCommandSource === 'env';
+  const restartExecutable = !!config.restartEnabled && restartConfigured;
+  const restartRequired = !!(last && last.restartRequired);
+  const dirtyDetail = dirtyFiles.length
+    ? `${dirtyFiles.length} source change(s): ${dirtyFiles.slice(0, 3).map((item) => item.path).join(', ')}`
+    : 'Clean';
+  const updateDisabled = blocked || (safety.auditIntegrity && safety.auditIntegrity.ok === false);
+  $('#updateConsoleStatus').innerHTML = statePill(state, label);
+  box.innerHTML = `<div class="update-grid">
+    <div class="config-card pad wide-panel">
+      <div class="sensor-head">
+        <div><h3>GitHub Update</h3><p>Fast-forward source from the configured GitHub branch after a verified evidence-store backup.</p></div>
+        ${statePill(state, label)}
+      </div>
+      <div class="update-log">
+        ${updateLogRow('Remote', repo.remoteUrl || `${config.remoteName || 'origin'} (not verified)`)}
+        ${updateLogRow('Branch', `${repo.branch || '-'} -> ${config.remoteName || 'origin'}/${config.branch || 'main'}`)}
+        ${updateLogRow('Current', updateShortCommit(repo.head))}
+        ${updateLogRow('Install', installModeLabel(config.installMode))}
+        ${updateLogRow('Config path', config.configPath)}
+      </div>
+      <div class="update-action-row">
+        <button class="ghost" id="checkUpdate" type="button" ${blocked ? 'disabled' : ''}>${icons.refresh}Check GitHub</button>
+        <button class="btn approve" id="runUpdate" type="button" ${updateDisabled ? 'disabled' : ''}>${icons.refresh}Update from GitHub</button>
+        <button class="ghost" id="restartUpdate" type="button" ${(!restartExecutable || !restartRequired || status.inProgress) ? 'disabled' : ''}>Restart service</button>
+      </div>
+      ${status.error ? `<div class="readonly-note">${escapeHtml(status.error)}</div>` : ''}
+    </div>
+
+    <div class="config-card pad">
+      <h3>Preservation Checks</h3>
+      <p>Runtime state is protected before source files move.</p>
+      <div class="posture-list">
+        ${updateSafetyRow('GitHub remote', !!safety.githubRemote, safety.githubRemote ? 'GitHub' : 'Not GitHub')}
+        ${updateSafetyRow('Checked-out branch', safety.configuredBranch !== false, safety.configuredBranch === false ? `${repo.branch || '-'} does not match ${config.branch || 'main'}` : (repo.branch || config.branch || 'main'))}
+        ${updateSafetyRow('Source tree', !!safety.sourceTreeClean, dirtyDetail)}
+        ${updateSafetyRow('Audit chain', !!(safety.auditIntegrity && safety.auditIntegrity.ok), safety.auditIntegrity && safety.auditIntegrity.ok ? `${safety.auditIntegrity.count} entries` : 'Failed')}
+        ${updateSafetyRow('Backup target', !!safety.backupDir, safety.backupDir || config.backupDir || '-')}
+        ${updateSafetyRow('Backend restart', true, config.restartEnabled ? `Enabled via ${config.restartCommandSource}` : 'Manual restart')}
+      </div>
+    </div>
+
+    ${renderUpdateConfigForm(config, status.inProgress)}
+
+    <div class="config-card pad">
+      <h3>Last Run</h3>
+      <p>Update activity is also written to the tamper-evident audit log.</p>
+      ${renderUpdateLastRun(last)}
+    </div>
+  </div>`;
+  wireUpdateButtons();
+}
+
+async function loadUpdates() {
+  const box = $('#updateBox');
+  if (!box) return;
+  if (!canAdminWrite()) {
+    $('#updateConsoleStatus').innerHTML = statePill('warn', 'Admin only');
+    box.innerHTML = '<div class="readonly-note">Use a Security Admin account to configure and run application updates.</div>';
+    return;
+  }
+  setBusy('#tab-updates .config-shell', true, 'CHECKING');
+  try {
+    const r = await api('/api/update/status');
+    const body = await responseJsonObjectBody(r, null);
+    if (!r || !r.ok || !body) {
+      $('#updateConsoleStatus').innerHTML = statePill('bad', 'Unavailable');
+      box.innerHTML = `<div class="readonly-note">${escapeHtml(body && body.error ? body.error : 'Update status unavailable.')}</div>`;
+      return;
+    }
+    renderUpdates(body);
+    markUpdated();
+  } finally {
+    setBusy('#tab-updates .config-shell', false);
+  }
+}
+
+function collectUpdateConfig() {
+  return {
+    remoteName: ($('#updateRemoteName') || {}).value || 'origin',
+    branch: ($('#updateBranch') || {}).value || 'main',
+    installMode: ($('#updateInstallMode') || {}).value || 'npm-ci-omit-dev',
+    restartCommand: ($('#updateRestartCommand') || {}).value || '',
+    restartAfterUpdate: !!(($('#updateRestartAfter') || {}).checked),
+  };
+}
+
+async function saveUpdateConfig() {
+  const status = $('#updateSaveStatus');
+  if (status) status.textContent = 'Saving';
+  const r = await api('/api/update/config', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(collectUpdateConfig()),
+  });
+  if (!r || !r.ok) {
+    if (status) status.textContent = r ? await apiErrorSummary(r, 'Could not save') : 'Could not save';
+    return;
+  }
+  const body = await r.json();
+  renderUpdates(body);
+  if ($('#updateSaveStatus')) $('#updateSaveStatus').textContent = 'Saved';
+}
+
+async function checkUpdate() {
+  $('#updateConsoleStatus').innerHTML = statePill('warn', 'Checking');
+  const r = await api('/api/update/check', { method: 'POST' });
+  if (!r || !r.ok) {
+    $('#updateConsoleStatus').innerHTML = statePill('bad', 'Check failed');
+    alert(r ? await apiErrorSummary(r, 'Could not check GitHub') : 'Could not check GitHub');
+    await loadUpdates();
+    return;
+  }
+  const result = await r.json();
+  $('#updateConsoleStatus').innerHTML = statePill(result.updateAvailable ? 'warn' : 'good', result.updateAvailable ? 'Update available' : 'Current');
+  await loadUpdates();
+}
+
+async function runUpdate() {
+  const proceed = confirm('PromptWall will verify the audit chain, create a database backup, fast-forward source from GitHub, and install dependencies. Continue?');
+  if (!proceed) return;
+  $('#updateConsoleStatus').innerHTML = statePill('warn', 'Updating');
+  const r = await api('/api/update/apply', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ confirmBackup: true }),
+  });
+  if (!r || !r.ok) {
+    $('#updateConsoleStatus').innerHTML = statePill('bad', 'Update failed');
+    alert(r ? await apiErrorSummary(r, 'Update failed') : 'Update failed');
+    await loadUpdates();
+    return;
+  }
+  await loadUpdates();
+}
+
+async function restartUpdatedService() {
+  const proceed = confirm('Run the configured restart command now? The dashboard may briefly disconnect.');
+  if (!proceed) return;
+  const r = await api('/api/update/restart', { method: 'POST' });
+  if (!r || !r.ok) {
+    alert(r ? await apiErrorSummary(r, 'Restart failed') : 'Restart failed');
+    return;
+  }
+  $('#updateConsoleStatus').innerHTML = statePill('warn', 'Restarting');
+}
+
+function wireUpdateButtons() {
+  const save = $('#saveUpdateConfig');
+  const check = $('#checkUpdate');
+  const run = $('#runUpdate');
+  const restart = $('#restartUpdate');
+  if (save) save.onclick = saveUpdateConfig;
+  if (check) check.onclick = checkUpdate;
+  if (run) run.onclick = runUpdate;
+  if (restart) restart.onclick = restartUpdatedService;
 }
 
 const pageHeadings = {
@@ -2831,6 +3080,10 @@ const pageHeadings = {
   monitor: {
     title: 'Signal Monitor',
     body: 'Live signal posture across PromptWall controls.',
+  },
+  updates: {
+    title: 'Updates',
+    body: 'Safely pull PromptWall releases from GitHub without erasing evidence data or logs.',
   },
 };
 
@@ -2861,6 +3114,7 @@ function activateTab(name) {
   if (name === 'coverage') loadCoverage();
   if (name === 'identity') loadIdentitySetup();
   if (name === 'lineage') loadLineage();
+  if (name === 'updates') loadUpdates();
 }
 
 $$('.tab').forEach((t) => {
