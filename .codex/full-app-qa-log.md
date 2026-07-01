@@ -435,10 +435,15 @@ Status: Passed
 
 - `node --test --test-concurrency=1 test\extension.test.js` - failed first because the new VM-backed assertion compared cross-realm arrays.
 - `node --test --test-concurrency=1 test\extension.test.js` - passed after normalizing cross-realm arrays, 31 tests.
-- `node --test --test-concurrency=1 test\extension.test.js test\dashboard-linkage.test.js test\policy-scope.test.js test\policy-history.test.js` - passed, 49 tests.
-- `$env:PLAYWRIGHT_PORT='4241'; npm run test:admin-console` - passed after section 10 edit, 8 Chromium tests.
-- `$env:PLAYWRIGHT_PORT='4241'; npm run test:browser-extension` - passed after section 10 edit, 8 Chromium tests.
-- `npm run review:ci` - passed after section 10 edit.
+- `node --test --test-concurrency=1 test\extension.test.js test\dashboard-linkage.test.js test\policy-scope.test.js test\policy-history.test.js` - passed after section 10 edit, 49 tests.
+- `$env:PLAYWRIGHT_PORT='4241'; npx playwright test admin-console.spec.js --grep "avoids stale queue cache" --reporter=line` - failed before tests because a stale local Playwright harness still held the port.
+- `$env:PLAYWRIGHT_PORT='4257'; npx playwright test admin-console.spec.js --grep "avoids stale queue cache" --reporter=line` - passed, 1 Chromium test.
+- `node --test --test-concurrency=1 test\dashboard-linkage.test.js test\admin-csrf.test.js` - passed after section 10 dashboard edit, 13 tests.
+- `$env:PLAYWRIGHT_PORT='4257'; npm run test:admin-console` - failed while tightening the new regression selector and target-specific queue assertion.
+- `$env:PLAYWRIGHT_PORT='4257'; npm run test:admin-console` - passed after the selector/assertion fixes, 8 Chromium tests.
+- `$env:PLAYWRIGHT_PORT='4258'; npm run test:browser-extension` - passed after section 10 edit, 8 Chromium tests.
+- `npm run review:ci` - failed first after section 10 edit at the admin-console step because the default local Playwright health URL on port `4211` was still in use; listener inspection showed only `TIME_WAIT` sockets afterward.
+- `npm run review:ci` - passed on rerun after the port cleared, including 78 node test files, 8 admin-console Chromium tests, `sync-check`, and `eval`.
 
 ### Security Review Notes
 
