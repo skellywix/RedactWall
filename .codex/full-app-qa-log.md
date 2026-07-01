@@ -81,8 +81,8 @@ That slice covered dashboard shortcut controls, active tab accessibility state, 
 
 - Branch: `codex/full-app-qa`
 - PR: `https://github.com/skellywix/promptwall/pull/54`
-- Latest observed CI status: GitHub `test` and `docker` passed on head `b64f98a`.
-- Merge status: not merged. The full application QA objective remains open and the next section is Admin/RBAC if present.
+- Latest observed CI status: GitHub `test` and `docker` checks are watched after each pushed QA slice.
+- Merge status: not merged. The full application QA objective remains open and the next section is Accessibility.
 
 ## Section 2 - Navigation And Routing
 
@@ -607,7 +607,7 @@ Status: Passed
 - `node --check server\public\dashboard.js` - passed after section 14 edit.
 - `node --test --test-concurrency=1 test\roles.test.js test\approver-role.test.js test\auditor-role.test.js test\auth.test.js test\admin-mfa.test.js test\approval-stepup.test.js test\reveal-stepup.test.js test\oidc-login.test.js test\scim.test.js test\admin-csrf.test.js` - passed after section 14 edit, 38 tests.
 - `$env:PLAYWRIGHT_PORT='4272'; npm run test:admin-console` - passed after section 14 edit, 11 Chromium tests.
-- `$env:PLAYWRIGHT_PORT='4273'; npm run review:ci` - passed after section 14 edit, including docs demo guide check, AI domain coverage check, 79 node test files, 11 admin-console Chromium tests, `sync-check`, and `eval`.
+- `npm run review:ci` - passed after section 14 edit, including docs demo guide check, AI domain coverage check, 79 node test files, 11 admin-console Chromium tests, `sync-check`, and `eval`.
 
 ### Security Review Notes
 

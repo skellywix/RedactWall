@@ -17,7 +17,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Tables, search, filters, and pagination - passed.
 - File/media flows if present - passed.
 - Payments/billing if present - passed.
-- Admin/RBAC if present - pending.
+- Admin/RBAC if present - passed.
 - Accessibility - pending.
 - Responsive/cross-browser behavior - pending.
 - Motion/effects/reduced-motion behavior - pending.
@@ -57,6 +57,8 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Direct `/api/v1/scan-file` sanitizes sensitive filenames in responses, stored query rows, redacted previews, tokenized prompts, raw-retained prefixes, and audit details.
 - Endpoint watched-file, endpoint-local OCR, signed native handoff, and MCP file-content guard flows keep file bytes and raw local filenames out of sanitized control-plane evidence.
 - SaaS/customer-silo billing surface has no payment-provider integration; paid-seat enforcement now fails closed when seat-limit config is missing or invalid, and the admin stats card surfaces invalid paid-seat configuration.
+- Admin/RBAC seat reporting is Security Admin-only, while auditor and approver sessions remain limited to sanitized evidence and assigned decisions.
+- Approver assigned-user ownership is normalized for casing and whitespace across server and dashboard checks.
 
 # Bugs Fixed
 
@@ -74,6 +76,8 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Section 12 fixed direct scan-file filename retention so sensitive submitted filenames are replaced with `[sensitive filename]` in response, storage, broadcast, and audit evidence.
 - Section 13 fixed runtime paid-seat enforcement so malformed SaaS seat-limit config cannot silently disable billing controls after preflight failure.
 - Section 13 follow-up stabilized the full browser export-failure assertion after GitHub exposed a race in the existing secondary-controls test.
+- Section 14 fixed `/api/billing/seats` RBAC so billing-seat user identities are no longer available to every authenticated dashboard role.
+- Section 14 fixed approver assigned-user matching so casing or whitespace differences from IdP/routing data do not block legitimate assigned decisions.
 
 # Tests Added Or Updated
 
@@ -111,6 +115,10 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Updated `server/public/dashboard.js` with invalid paid-seat configuration rendering.
 - Updated `test/tenant.test.js` with missing, zero, negative, fractional, and non-numeric SaaS seat-limit coverage.
 - Updated `test/dashboard-linkage.test.js` and `e2e/admin-console.spec.js` with invalid seat-limit dashboard coverage and deterministic export-failure browser coverage.
+- Updated `server/app.js` and `server/public/dashboard.js` to keep billing-seat reports Security Admin-only and avoid non-admin dashboard fetches.
+- Updated `server/roles.js` and `server/public/dashboard.js` to normalize assigned-user principal comparisons for approver ownership.
+- Added `test/roles.test.js` for normalized approver ownership and non-decider role checks.
+- Updated `test/admin-csrf.test.js`, `test/approver-role.test.js`, and `test/auditor-role.test.js` with Section 14 RBAC regressions.
 
 # Commands Run
 
@@ -203,14 +211,19 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - `$env:PLAYWRIGHT_PORT='4269'; $env:CI='1'; npx playwright test admin-console.spec.js --grep "secondary controls" --reporter=line` - passed after GitHub browser-test failure reproduction fix, 1 Chromium test with retry behavior enabled.
 - `$env:PLAYWRIGHT_PORT='4271'; npm run test:browser` - passed after GitHub browser-test failure reproduction fix, 19 Chromium tests.
 - `npm run review:ci` - passed after GitHub browser-test failure reproduction fix, including docs demo guide check, AI domain coverage check, 78 node test files, 11 admin-console Chromium tests, `sync-check`, and `eval`.
+- `node --check server\roles.js` - passed after section 14 edit.
+- `node --check server\app.js` - passed after section 14 edit.
+- `node --check server\public\dashboard.js` - passed after section 14 edit.
+- `node --test --test-concurrency=1 test\roles.test.js test\approver-role.test.js test\auditor-role.test.js test\auth.test.js test\admin-mfa.test.js test\approval-stepup.test.js test\reveal-stepup.test.js test\oidc-login.test.js test\scim.test.js test\admin-csrf.test.js` - passed after section 14 edit, 38 tests.
+- `$env:PLAYWRIGHT_PORT='4272'; npm run test:admin-console` - passed after section 14 edit, 11 Chromium tests.
+- `npm run review:ci` - passed after section 14 edit, including docs demo guide check, AI domain coverage check, 79 node test files, 11 admin-console Chromium tests, `sync-check`, and `eval`.
 
 # CI Status
 
 - PR #54 is open: `https://github.com/skellywix/promptwall/pull/54`
-- GitHub `test` checks passed on head `b64f98a`.
-- GitHub `docker` checks passed on head `b64f98a`.
+- GitHub `test` and `docker` checks were passing on the latest pushed PR head before the local Section 14 update.
 - Existing merged PR #53 is on `main` and also had passing GitHub `test` and `docker` checks.
-- Merge status: not merged. The full application QA objective remains open and the next section is Admin/RBAC if present.
+- Merge status: not merged. The full application QA objective remains open and the next section is Accessibility.
 
 # Accessibility Notes
 
@@ -236,6 +249,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Section 11 filters and paginates already-loaded sanitized dashboard rows client-side only. It does not call reveal/raw-prompt APIs or change auth, CSRF, RBAC, evidence export, detector, or persistence behavior.
 - Section 12 replaces sensitive direct scan-file filenames with `[sensitive filename]` in response, storage, broadcast, raw-retained prefixes, tokenized prompts, and audit evidence while keeping original filenames transient for processor selection only.
 - Section 13 adds no payment provider, card data, checkout, billing webhook, or external billing network path. It fails closed for malformed paid-seat config before accepting SaaS sensor events and renders only aggregate billing config state in the stats card.
+- Section 14 keeps billing-seat user identities Security Admin-only, preserves auditor/approver sanitized evidence boundaries, and normalizes approver ownership without broadening role access.
 - Baseline tests include auth, CSRF, MFA, RBAC, validation, sanitized alerting, evidence export, retention, and detector privacy checks.
 - `npm ci` reported 0 vulnerabilities in npm's install audit.
 
@@ -256,7 +270,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - `.codex/full-app-qa-log.md`
 - `.codex/full-app-qa-pr.md`
 - Existing carried-forward artifacts: `.codex/ui-ux-qa-log.md`, `.codex/ui-ux-pr.md`
-- Section 2 through section 13 test evidence is recorded in `.codex/full-app-qa-log.md`.
+- Section 2 through section 14 test evidence is recorded in `.codex/full-app-qa-log.md`.
 
 # Risks
 
