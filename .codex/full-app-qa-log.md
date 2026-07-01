@@ -1,4 +1,4 @@
-# Full Application QA Log
+# QA Log
 
 Branch: `codex/full-app-qa`
 Base: `origin/main`
@@ -9,7 +9,7 @@ Local timestamp: `2026-06-30T22:35:08-05:00`
 - Active repo: `C:\Users\Eric\Desktop\Coding_Projects\promptsentinel-app\promptwall`
 - Wrapper note: the workspace root is routing only; source, npm, Git, and GitHub work are in `promptwall/`.
 - Base branch: `origin/main`
-- Requested work branch: `codex/full-app-qa`
+- Work branch: `codex/full-app-qa`
 - Package manager: npm with `package-lock.json`
 - Runtime discovered: Node `v22.22.3`, npm `11.17.0`
 - Installed dependency surface: Express 5, better-sqlite3, helmet, cookie-parser, zod, adm-zip, pdf-parse, Playwright.
@@ -24,18 +24,17 @@ Status: Passed
 
 ### Inspection
 
-- Confirmed current branch was initially `codex/qa-ui-ux-evidence` and clean except for untracked QA evidence files.
-- Fetched `origin`, created `codex/full-app-qa` from `origin/main`, and fast-forward pulled.
-- Confirmed current branch is `codex/full-app-qa...origin/main`.
+- Confirmed the active repo is the nested `promptwall/` checkout.
 - Confirmed `origin` is `https://github.com/skellywix/promptwall.git`.
 - Confirmed `origin/HEAD` resolves to `origin/main`.
 - Confirmed only npm lockfile present is `package-lock.json`.
+- Confirmed the current branch is `codex/full-app-qa`.
 - Ran `npm run` to enumerate available scripts.
 
 ### Commands Run
 
 - `git fetch --prune origin` - passed.
-- `git switch -c codex/full-app-qa origin/main` - passed.
+- `git switch -c codex/full-app-qa origin/main` - passed in the baseline setup pass.
 - `git pull --ff-only` - passed, already up to date.
 - `node -v` - `v22.22.3`.
 - `npm -v` - `11.17.0`.
@@ -43,6 +42,8 @@ Status: Passed
 - `npm ci` - passed; 114 packages installed and 0 vulnerabilities reported by npm install audit.
 - `npm run` - passed; discovered the scripts listed in `package.json`.
 - `npm run review:ci` - passed.
+- `node --test --test-concurrency=1 test\oidc-login.test.js` - passed after one later transient local full-suite native binding load failure.
+- `npm run review:ci` - passed again after the transient local failure.
 
 ### Baseline Gate Result
 
@@ -50,7 +51,7 @@ Status: Passed
 
 - `git diff --check`
 - `npm run docs:demo-guide:check` - demo guides current.
-- `npm run ai-domains:check` - 75 domains, Cloudflare Radar skipped because no `CLOUDFLARE_API_TOKEN` is configured.
+- `npm run ai-domains:check` - 75 domains; Cloudflare Radar enrichment skipped because no `CLOUDFLARE_API_TOKEN` is configured.
 - `npm test` - 76 Node test files run sequentially.
 - `npm run test:admin-console` - 6 Chromium Playwright tests passed.
 - `npm run sync-check` - engine copies identical.
@@ -60,7 +61,7 @@ Status: Passed
 
 - `npm ci` printed npm's `allow-scripts` warning for `better-sqlite3@12.11.1`, which uses a native install path. The package installed and the Node test suite passed against the installed binding.
 - There is no separate project lint/typecheck/build command to run in this repo.
-- Existing untracked `.codex/qa-log.md` and `.codex/qa-pr.md` were preserved and not staged in this section.
+- One later local `npm run review:ci` attempt failed when `better-sqlite3` could not resolve its native binding during `test/oidc-login.test.js`; the focused OIDC test and a subsequent full `review:ci` rerun passed without code changes.
 
 ## Carried-Forward Evidence From Prior Merged UI/UX Slice
 

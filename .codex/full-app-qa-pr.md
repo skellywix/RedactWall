@@ -33,20 +33,23 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Existing repo review gate through `npm run review:ci`.
 - Current admin-console Playwright baseline through the review gate.
 - Detector sync and held-out eval through the review gate.
+- Focused OIDC login test after one transient local native binding load failure.
 
 # Bugs Fixed
 
-- None in section 1. This commit records baseline discovery and validation evidence.
+- None in section 1. This pass records baseline discovery and validation evidence.
 
 # Tests Added Or Updated
 
+- Added `.codex/qa-log.md`.
+- Added `.codex/qa-pr.md`.
 - Added `.codex/full-app-qa-log.md`.
 - Added `.codex/full-app-qa-pr.md`.
 
 # Commands Run
 
 - `git fetch --prune origin` - passed.
-- `git switch -c codex/full-app-qa origin/main` - passed.
+- `git switch -c codex/full-app-qa origin/main` - passed in the baseline setup pass.
 - `git pull --ff-only` - passed, already up to date.
 - `node -v` - `v22.22.3`.
 - `npm -v` - `11.17.0`.
@@ -54,10 +57,12 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - `npm ci` - passed; 0 vulnerabilities reported by npm install audit.
 - `npm run` - passed.
 - `npm run review:ci` - passed.
+- `node --test --test-concurrency=1 test\oidc-login.test.js` - passed after one transient local full-suite native binding load failure.
+- `npm run review:ci` - passed again after the transient local failure.
 
 # CI Status
 
-- Not opened yet for `codex/full-app-qa`.
+- PR not opened yet for `codex/full-app-qa`.
 - Existing merged PR #53 is on `main` and had passing GitHub `test` and `docker` checks.
 
 # Accessibility Notes
@@ -66,7 +71,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Prior merged UI/UX slice added active tab `aria-current="page"` state and an explicit global search accessible name.
 - Dedicated accessibility section remains pending for this branch.
 
-# Security / Privacy Notes
+# Security And Privacy Notes
 
 - No runtime security, auth, policy, detector, persistence, or logging behavior changed in section 1.
 - Baseline tests include auth, CSRF, MFA, RBAC, validation, sanitized alerting, evidence export, retention, and detector privacy checks.
@@ -84,6 +89,8 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 
 # Artifacts / Screenshots / Traces
 
+- `.codex/qa-log.md`
+- `.codex/qa-pr.md`
 - `.codex/full-app-qa-log.md`
 - `.codex/full-app-qa-pr.md`
 - Existing carried-forward artifacts: `.codex/ui-ux-qa-log.md`, `.codex/ui-ux-pr.md`
@@ -93,3 +100,4 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Full 22-section application QA is not complete yet.
 - No separate lint/typecheck/build scripts exist in `package.json`; current baseline relies on the repo's Node tests, Playwright tests, detector checks, docs drift checks, and CI workflow.
 - Cloudflare Radar enrichment in `ai-domains:check` was skipped locally because `CLOUDFLARE_API_TOKEN` is not configured; static AI-domain coverage still passed.
+- One local `npm run review:ci` attempt failed when `better-sqlite3` could not resolve its native binding during `test/oidc-login.test.js`; the focused OIDC test and a full rerun passed without code changes.
