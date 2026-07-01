@@ -489,8 +489,24 @@ test('admin console controls and forms are wired end to end', async ({ page, req
   await page.locator('.content-tabs .tab[data-tab="policy"]').click();
   await expect(page.locator('#pol_desktop_destination')).toBeVisible();
   const originalRisk = await page.locator('#pol_risk').inputValue();
+  const originalRetention = await page.locator('#pol_retention').inputValue();
   await page.locator('#testConfiguration').click();
   await expect(page.locator('#polSaved')).toContainText(/check|warning|ready/);
+  await page.locator('#pol_retention').fill('3651');
+  const validationProblemStart = problems.length;
+  await page.getByRole('button', { name: 'Save changes' }).click();
+  await expect(page.locator('#polSaved')).toContainText('rawRetentionDays');
+  const unchangedPolicyAfterInvalidSave = await page.evaluate(async () => (await fetch('/api/policy')).json());
+  expect(unchangedPolicyAfterInvalidSave.rawRetentionDays).not.toBe(3651);
+  const validationProblems = problems.splice(validationProblemStart);
+  const unexpectedValidationProblems = validationProblems.filter((problem) => {
+    if (/^api 400: .*\/api\/policy$/.test(problem)) return false;
+    if (problem.includes('console error: Failed to load resource') && problem.includes('400')) return false;
+    return true;
+  });
+  expect(unexpectedValidationProblems).toEqual([]);
+  expect(validationProblems.some((problem) => /^api 400: .*\/api\/policy$/.test(problem))).toBe(true);
+  await page.locator('#pol_retention').fill(originalRetention);
   await page.locator('#pol_risk').fill(String(Number(originalRisk || 20) + 1));
   await page.locator('#discardPolicy').click();
   await expect(page.locator('#pol_risk')).toHaveValue(originalRisk);

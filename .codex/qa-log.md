@@ -82,7 +82,7 @@ That slice covered dashboard shortcut controls, active tab accessibility state, 
 - Branch: `codex/full-app-qa`
 - PR: `https://github.com/skellywix/promptwall/pull/54`
 - Latest observed CI status: pending for GitHub `test` and `docker` on the latest pushed head.
-- Merge status: not merged. The full application QA objective remains open and the next section is forms and validation.
+- Merge status: not merged. The full application QA objective remains open and the next section is buttons, controls, overlays, and interactive states.
 
 ## Section 2 - Navigation And Routing
 
@@ -159,12 +159,44 @@ Updated `test/admin-mfa.test.js` to assert:
 - The added regression coverage reduces auth bypass risk by proving failed login and failed MFA paths do not issue a reusable session cookie.
 - Residual auth/security work remains for later full-application sections, including broader manual cross-session checks, API abuse/rate-limit review, and final security/privacy review.
 
+## Section 4 - Forms And Validation
+
+Status: Passed
+
+### Inspection
+
+- Reviewed `server/validation.js` Zod request-body schemas, strict unknown-field handling, length limits, detector-id validation, policy rule validation, and sanitized validation field reporting.
+- Reviewed `server/public/dashboard.js` policy form parsers, guided scope/exception builders, step-up password dialogs, destination review reason dialog, decision note handling, and policy save flow.
+- Reviewed `test/validation.test.js`, `test/dashboard-linkage.test.js`, and `e2e/admin-console.spec.js` coverage for server-side validation, dashboard payload construction, browser form wiring, JSON-array errors, and dialog required fields.
+
+### Issue Found
+
+The dashboard policy save flow returned silently when `/api/policy` rejected a form payload with a server-side `400` validation error. Because the save button is a button handler rather than a native form submit, an operator could enter an out-of-range numeric value and see no field-level feedback after the server rejected it.
+
+### Fix Made
+
+- Added `apiErrorSummary()` in `server/public/dashboard.js` to extract sanitized server error fields from a cloned response body.
+- Updated policy save handling to show `Could not save: <field>` in `#polSaved` when the server returns a validation error.
+- Added Playwright coverage that enters `3651` for raw-retention days, verifies `rawRetentionDays` appears in the dashboard save status, and verifies the invalid value does not mutate policy.
+
+### Commands Run
+
+- `node --test --test-concurrency=1 test\validation.test.js test\dashboard-linkage.test.js` - passed after edit, 48 tests.
+- `npm run test:admin-console` - failed first after the UI change because the expected `/api/policy` validation `400` was still counted as an unexpected UI problem by the shared Playwright collector.
+- `npm run test:admin-console` - passed after scoping that expected validation `400`, 6 Chromium tests.
+- `git diff --check` - passed with the repo's usual CRLF working-copy warnings.
+
+### Security Review Notes
+
+- The server remains the authority for policy validation and policy mutation.
+- The new dashboard feedback displays only sanitized server field names from `server/validation.js`; it does not echo rejected form values, prompt text, secrets, or policy payload contents.
+
 ## Section Queue
 
 1. Baseline install/lint/typecheck/build/test discovery - passed.
 2. Navigation and routing - passed.
 3. Authentication and authorization - passed.
-4. Forms and validation - pending.
+4. Forms and validation - passed.
 5. Buttons, controls, overlays, and interactive states - pending.
 6. Loading, empty, error, and success states - pending.
 7. API integration and data fetching - pending.

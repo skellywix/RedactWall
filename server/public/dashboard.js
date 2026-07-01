@@ -1075,6 +1075,15 @@ async function api(path, opts = {}) {
   return r;
 }
 
+async function apiErrorSummary(response, fallback) {
+  try {
+    const body = await response.clone().json();
+    if (Array.isArray(body.fields) && body.fields.length) return `${fallback}: ${body.fields.join(', ')}`;
+    if (body.error) return `${fallback}: ${body.error}`;
+  } catch {}
+  return fallback;
+}
+
 function boundedPromise(promise, timeoutMs, fallback) {
   return Promise.race([
     Promise.resolve(promise).catch(() => fallback),
@@ -2607,8 +2616,13 @@ async function loadPolicy() {
       blockUnapprovedAiDestinations: $('#pol_block_unapproved_ai').checked,
       responseScanMode: $('#pol_response_scan_mode').value,
     };
+    $('#polSaved').textContent = 'Saving';
     const r = await api('/api/policy', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    if (!r || !r.ok) return;
+    if (!r) return;
+    if (!r.ok) {
+      $('#polSaved').textContent = await apiErrorSummary(r, 'Could not save');
+      return;
+    }
     $('#polSaved').textContent = 'Saved';
     setTimeout(() => { $('#polSaved').textContent = ''; }, 2000);
   };
