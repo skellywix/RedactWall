@@ -328,7 +328,6 @@ Several dashboard loaders parsed JSON from non-OK API responses and then treated
 - `$env:PLAYWRIGHT_PORT='4241'; npx playwright test admin-console.spec.js --grep "preserves loaded API data" --reporter=line` - passed, 1 Chromium test.
 - `$env:PLAYWRIGHT_PORT='4241'; npm run test:admin-console` - passed, 7 Chromium tests.
 - `node --test --test-concurrency=1 test\dashboard-linkage.test.js test\admin-csrf.test.js` - passed, 13 tests.
-- `node --test --test-concurrency=1 test\dashboard-linkage.test.js test\evidence-export-ui.test.js` - passed, 4 tests.
 - `npm run review:ci` - passed after section 7 edit.
 
 ### Security Review Notes
