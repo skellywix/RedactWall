@@ -417,6 +417,46 @@ test('admin console preserves loaded API data when refresh endpoints fail', asyn
   expect(problems).toEqual([]);
 });
 
+test('admin console avoids stale queue cache when pending refresh fails after a decision', async ({ page, request }) => {
+  const problems = collectUiProblems(page);
+  const gated = await createHeldPrompt(request, {
+    suffix: '9311',
+    user: 'state-cache-ui@example.test',
+    destination: 'chatgpt.com',
+  });
+
+  await login(page);
+  await expect(page.locator(`.q[data-id="${gated.id}"]`)).toContainText('state-cache-ui@example.test');
+
+  const pendingRoute = /\/api\/queries\?status=pending$/;
+  await page.route(pendingRoute, (route) => route.fulfill({
+    status: 500,
+    contentType: 'application/json',
+    body: JSON.stringify({ error: 'synthetic pending queue refresh failure' }),
+  }));
+
+  const problemStart = problems.length;
+  await page.locator(`#note_${gated.id}`).fill('Synthetic approval after queue fallback');
+  await page.locator(`.q[data-id="${gated.id}"]`).getByRole('button', { name: 'Approve release' }).click();
+  await expect(page.getByRole('heading', { name: 'Confirm release' })).toBeVisible();
+  await page.getByLabel('Account password').fill('e2e-pass');
+  await page.locator('.stepup-dialog').getByRole('button', { name: 'Approve release' }).click();
+
+  await expect(page.locator('#queueList')).not.toContainText('state-cache-ui@example.test');
+  await expect(page.locator(`.q[data-id="${gated.id}"]`)).toHaveCount(0);
+
+  await page.locator('.content-tabs .tab[data-tab="activity"]').click();
+  await expect(page.locator(`tr.activity-row[data-activity-id="${gated.id}"]`)).toContainText('approved');
+
+  const pendingProblems = problems.splice(problemStart);
+  expect(pendingProblems.filter((problem) => {
+    if (/^api 500: .*\/api\/queries\?status=pending$/.test(problem)) return false;
+    if (problem.includes('console error: Failed to load resource') && problem.includes('500')) return false;
+    return true;
+  })).toEqual([]);
+  await page.unroute(pendingRoute);
+});
+
 test('admin console controls and forms are wired end to end', async ({ page, request }) => {
   const problems = collectUiProblems(page);
   const reveal = await createHeldPrompt(request, {

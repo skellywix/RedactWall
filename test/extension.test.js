@@ -63,7 +63,7 @@ function loadBackground(opts = {}) {
     self: { PSAdapters: opts.adapters || adapters },
     setTimeout,
   };
-  vm.runInNewContext(background + '\nself.__test = { requestTimeoutMs, fetchJsonWithTimeout, failClosed, browserPlatform, buildHeartbeatBody, buildInstallChecks, reportInstallHealth, normalizeDestinationHost, downloadHostCandidates, downloadDestinationForPolicy, browserActionBlockRule, handleDownloadCreated };', context);
+  vm.runInNewContext(background + '\nself.__test = { requestTimeoutMs, fetchJsonWithTimeout, failClosed, browserPlatform, buildHeartbeatBody, buildInstallChecks, reportInstallHealth, refreshPolicy, normalizeDestinationHost, downloadHostCandidates, downloadDestinationForPolicy, browserActionBlockRule, handleDownloadCreated };', context);
   return {
     context,
     createdAlarms,
@@ -242,6 +242,57 @@ test('browser download blocks use host-only evidence and never report URLs or fi
 test('browser fallback hard-stops match regulated endpoint defaults before policy sync', () => {
   assert.match(background, /MEDICAL_RECORD_NUMBER/);
   assert.match(background, /HEALTH_INSURANCE_ID/);
+});
+
+test('browser policy refresh preserves cached state on disabled or failed refresh', async () => {
+  const cachedPolicy = {
+    enforcementMode: 'justify',
+    governedDestinations: ['chatgpt.com'],
+    blockedBrowserActions: [{ action: 'paste', destinations: ['chatgpt.com'] }],
+  };
+  const disabled = loadBackground({
+    local: {
+      enabled: false,
+      ingestKey: 'unit-ingest-key-000',
+      policy: cachedPolicy,
+    },
+    fetch: async () => {
+      throw new Error('disabled refresh should not call fetch');
+    },
+  });
+  await disabled.context.self.__test.refreshPolicy();
+  assert.deepStrictEqual(disabled.storage.policy, cachedPolicy);
+
+  const failed = loadBackground({
+    local: {
+      serverUrl: 'https://control.example.test',
+      ingestKey: 'unit-ingest-key-000',
+      policy: cachedPolicy,
+    },
+    fetch: async () => ({ ok: false, json: async () => ({ error: 'offline' }) }),
+  });
+  await failed.context.self.__test.refreshPolicy();
+  assert.deepStrictEqual(failed.storage.policy, cachedPolicy);
+
+  const refreshed = loadBackground({
+    local: {
+      serverUrl: 'https://control.example.test',
+      ingestKey: 'unit-ingest-key-000',
+      policy: cachedPolicy,
+    },
+    fetch: async () => ({
+      ok: true,
+      json: async () => ({
+        enforcementMode: 'redact',
+        governedDestinations: ['claude.ai'],
+      }),
+    }),
+  });
+  await refreshed.context.self.__test.refreshPolicy();
+  assert.strictEqual(refreshed.storage.policy.enforcementMode, 'redact');
+  assert.deepStrictEqual(Array.from(refreshed.storage.policy.governedDestinations), ['claude.ai']);
+  assert.deepStrictEqual(Array.from(refreshed.storage.policy.blockedBrowserActions), []);
+  assert.ok(Array.from(refreshed.storage.policy.alwaysBlock).includes('US_SSN'));
 });
 
 test('destination allowlist overrides wildcard destination blocks', () => {

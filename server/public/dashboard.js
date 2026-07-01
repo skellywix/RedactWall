@@ -1142,12 +1142,14 @@ async function pendingQueueRows() {
   const directRows = await dashboardJsonWithTimeout('/api/queries?status=pending', 2200);
   if (Array.isArray(directRows)) return directRows;
 
+  const activityRows = await dashboardJsonWithTimeout('/api/queries?limit=200', 2200);
+  if (Array.isArray(activityRows)) return activityRows.filter((q) => q.status === 'pending');
+
   if (Array.isArray(currentActivity) && currentActivity.length) {
     return currentActivity.filter((q) => q.status === 'pending');
   }
 
-  const activityRows = await dashboardJsonWithTimeout('/api/queries?limit=200', 2200);
-  return Array.isArray(activityRows) ? activityRows.filter((q) => q.status === 'pending') : [];
+  return [];
 }
 
 async function loadCsrf() {

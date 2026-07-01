@@ -81,8 +81,8 @@ That slice covered dashboard shortcut controls, active tab accessibility state, 
 
 - Branch: `codex/full-app-qa`
 - PR: `https://github.com/skellywix/promptwall/pull/54`
-- Latest observed CI status: GitHub `test` and `docker` passed on head `939430a`.
-- Merge status: not merged. The full application QA objective remains open and the next section is state management and cache.
+- Latest observed CI status: GitHub `test` and `docker` passed on head `7911eea`.
+- Merge status: not merged. The full application QA objective remains open and the next section is tables, search, filters, and pagination.
 
 ## Section 2 - Navigation And Routing
 
@@ -411,6 +411,41 @@ Status: Passed
 - The backup-manifest tamper test uses temp SQLite backups and synthetic rows; no production data, real secrets, or repo `data/` files are touched.
 - Backup, restore, retention, audit-chain, and evidence-pack tests continued to pass with the migration coverage included.
 
+## Section 10 - State Management And Cache
+
+Status: Passed
+
+### Inspection
+
+- Reviewed dashboard in-memory state for selected queue item, activity cache, coverage cache, lineage cache, identity setup cache, queue filters, queue density, theme persistence, revealed prompt pruning, SSE refresh handlers, and failed-refresh fallbacks.
+- Reviewed browser-extension cached policy and enabled state in background, content, popup, storage-change listeners, policy refresh, popup toggle persistence, shadow-AI throttle state, and clean-upload bypass cache.
+- Reviewed existing admin-console and browser-extension Playwright coverage for theme persistence, queue density, API refresh failures, popup toggle storage, and content-script policy sync.
+
+### Issue Found
+
+`pendingQueueRows()` used stale `currentActivity` as the first fallback when `/api/queries?status=pending` failed. After an approval or denial, a transient pending-queue refresh failure could repopulate the approval queue from the old activity cache before trying a fresh activity query.
+
+### Fix Made
+
+- Reordered `pendingQueueRows()` so it tries the direct pending query, then a fresh bounded activity query, and only then falls back to the in-memory activity cache.
+- Added Playwright coverage that approves a held prompt while the pending refresh endpoint returns a synthetic `500`, then verifies the decided row stays out of the queue and the activity row shows the approved state.
+- Added extension unit coverage proving policy refresh preserves cached policy when protection is disabled or the control plane fails, and merges server policy with defaults on success.
+
+### Commands Run
+
+- `node --test --test-concurrency=1 test\extension.test.js` - failed first because the new VM-backed assertion compared cross-realm arrays.
+- `node --test --test-concurrency=1 test\extension.test.js` - passed after normalizing cross-realm arrays, 31 tests.
+- `node --test --test-concurrency=1 test\extension.test.js test\dashboard-linkage.test.js test\policy-scope.test.js test\policy-history.test.js` - passed, 49 tests.
+- `$env:PLAYWRIGHT_PORT='4241'; npm run test:admin-console` - passed after section 10 edit, 8 Chromium tests.
+- `$env:PLAYWRIGHT_PORT='4241'; npm run test:browser-extension` - passed after section 10 edit, 8 Chromium tests.
+- `npm run review:ci` - passed after section 10 edit.
+
+### Security Review Notes
+
+- Dashboard fallback behavior now avoids resurrecting stale approval-queue state after a decision.
+- Extension cache tests use synthetic policy data and do not send secrets or prompt bodies.
+- No auth, CSRF, raw reveal, evidence export, detector, or persistence behavior changed in this section.
+
 ## Section Queue
 
 1. Baseline install/lint/typecheck/build/test discovery - passed.
@@ -422,7 +457,7 @@ Status: Passed
 7. API integration and data fetching - passed.
 8. Backend API behavior - passed.
 9. Database/persistence/migrations if present - passed.
-10. State management and cache - pending.
+10. State management and cache - passed.
 11. Tables, search, filters, and pagination - pending.
 12. File/media flows if present - pending.
 13. Payments/billing if present - not yet assessed.
