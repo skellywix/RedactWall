@@ -68,6 +68,7 @@ function chatFixture({ host, sendButton }) {
     <title>${host} fixture</title>
     <style>
       body { font: 14px system-ui, sans-serif; margin: 24px; }
+      *, *::before, *::after { box-sizing: border-box; }
       main { max-width: 760px; margin: 0 auto; }
       textarea, [contenteditable="true"] {
         display: block; width: 100%; min-height: 120px; margin: 16px 0;
@@ -314,6 +315,20 @@ async function queryStatusesFor(request, status) {
   return rows.filter((row) => row.user === 'browser-smoke@example.test' && row.status === status).length;
 }
 
+async function expectNoHorizontalOverflow(page, allowance = 1) {
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(allowance);
+}
+
+async function expectElementInsideViewport(page, locator) {
+  const box = await locator.boundingBox();
+  const viewport = page.viewportSize();
+  expect(box).toBeTruthy();
+  expect(viewport).toBeTruthy();
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(viewport.width + 1);
+}
+
 test.describe('browser extension live smoke', () => {
   test.setTimeout(90000);
 
@@ -383,6 +398,36 @@ test.describe('browser extension live smoke', () => {
       await expect(page.locator('#prompt-textarea')).toHaveValue('');
       const drafts = await page.evaluate(() => window.__draftSync || []);
       expect(drafts.join('\n')).not.toContain('123-45-6789');
+      await expect(page.locator('[data-sent]')).toHaveCount(0);
+    } finally {
+      await context.close();
+      fs.rmSync(userDataDir, { recursive: true, force: true });
+    }
+  });
+
+  test('block banner fits narrow AI pages without horizontal overflow', async ({ baseURL, request }, testInfo) => {
+    const { context, userDataDir } = await launchExtensionContext(baseURL, testInfo, fixturePolicy, request);
+    try {
+      const page = await openControlledAiPage(
+        context,
+        'https://chatgpt.com/',
+        chatFixture({
+          host: 'chatgpt.com',
+          sendButton: '<button data-testid="send-button" aria-label="Send prompt">Send</button>',
+        }),
+      );
+
+      await page.setViewportSize({ width: 360, height: 740 });
+      await applyFixturePolicyToPage(context, page, baseURL, 'chatgpt.com');
+      await page.locator('#prompt-textarea').fill('Member test SSN 123-45-6789 needs a payoff letter.');
+      await page.locator('button[data-testid="send-button"]').click();
+
+      const blockBanner = page.getByRole('alertdialog', { name: 'Sensitive data blocked' });
+      await expect(blockBanner).toBeVisible();
+      await expectElementInsideViewport(page, blockBanner);
+      await expect(page.getByRole('button', { name: 'Edit prompt' })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Request approval' })).toBeVisible();
+      await expectNoHorizontalOverflow(page);
       await expect(page.locator('[data-sent]')).toHaveCount(0);
     } finally {
       await context.close();

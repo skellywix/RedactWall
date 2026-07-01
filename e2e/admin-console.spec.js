@@ -35,6 +35,11 @@ function collectUiProblems(page) {
   return problems;
 }
 
+async function expectNoHorizontalOverflow(page, allowance = 1) {
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(allowance);
+}
+
 async function createHeldPrompt(request, { suffix, user, destination, source = 'browser_extension', channel = 'submit' }) {
   const response = await request.post('/api/v1/gate', {
     headers: { 'x-api-key': 'e2e-ingest-key' },
@@ -125,6 +130,21 @@ test('login form announces authentication errors accessibly', async ({ page }) =
   await page.locator('#password').fill('e2e-pass');
   await page.getByRole('button', { name: 'Continue' }).click();
   await expect(page).toHaveURL(/\/index\.html$/);
+});
+
+test('login page fits mobile viewport without horizontal overflow', async ({ page }) => {
+  const problems = collectUiProblems(page);
+  await page.setViewportSize({ width: 360, height: 740 });
+  await page.goto('/login.html?oidc=failed');
+
+  await expect(page.getByRole('heading', { name: 'PromptWall' })).toBeVisible();
+  await expect(page.getByRole('alert')).toHaveText('SSO sign-in failed. Try again or use a local account.');
+  await expect(page.getByLabel('Username')).toBeVisible();
+  await expect(page.getByLabel('Password')).toBeVisible();
+  await expect(page.getByLabel('Authenticator code')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Continue' })).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+  expect(problems).toEqual([]);
 });
 
 test('admin console theme toggle defaults light and persists dark mode', async ({ page }) => {
@@ -1068,11 +1088,20 @@ test('signal operations monitoring console supports adaptive states', async ({ p
 
 test('admin console mobile layout keeps content tabs usable', async ({ page }) => {
   const problems = collectUiProblems(page);
-  await page.setViewportSize({ width: 390, height: 844 });
+  await page.setViewportSize({ width: 1024, height: 768 });
   await login(page);
 
   await expect(page.locator('.content-tabs .tab[data-tab="queue"]')).toBeVisible();
-  const railTabsDisplay = await page.locator('.rail .tabs').evaluate((el) => getComputedStyle(el).display);
+  await expect(page.locator('.content-tabs .tab[data-tab="monitor"]')).toBeVisible();
+  let railTabsDisplay = await page.locator('.rail .tabs').evaluate((el) => getComputedStyle(el).display);
+  expect(railTabsDisplay).not.toBe('none');
+  await page.locator('.content-tabs .tab[data-tab="monitor"]').click();
+  await expect(page.locator('#tab-monitor')).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.locator('.content-tabs .tab[data-tab="queue"]')).toBeVisible();
+  railTabsDisplay = await page.locator('.rail .tabs').evaluate((el) => getComputedStyle(el).display);
   expect(railTabsDisplay).toBe('none');
 
   await page.locator('.content-tabs .tab[data-tab="policy"]').click();
@@ -1080,7 +1109,6 @@ test('admin console mobile layout keeps content tabs usable', async ({ page }) =
   await page.locator('.content-tabs .tab[data-tab="audit"]').click();
   await expect(page.locator('#tab-audit')).toBeVisible();
 
-  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-  expect(overflow).toBeLessThanOrEqual(1);
+  await expectNoHorizontalOverflow(page);
   expect(problems).toEqual([]);
 });

@@ -9,6 +9,7 @@ const vm = require('vm');
 const root = path.join(__dirname, '..');
 const extensionDir = path.join(root, 'sensors', 'browser-extension');
 const content = fs.readFileSync(path.join(extensionDir, 'content.js'), 'utf8');
+const contentCss = fs.readFileSync(path.join(extensionDir, 'content.css'), 'utf8');
 const background = fs.readFileSync(path.join(extensionDir, 'background.js'), 'utf8');
 const manifest = JSON.parse(fs.readFileSync(path.join(extensionDir, 'manifest.json'), 'utf8'));
 const adapters = require('../detection-engine/adapters');
@@ -315,6 +316,7 @@ test('browser block banner includes employee coaching guidance', () => {
   assert.match(content, /function coachingFor\(items\)/);
   assert.match(content, /function listForScreen\(items\)/);
   assert.match(content, /function chipHtml\(items\)/);
+  assert.match(contentCss, /\.ps-banner\{[^}]*box-sizing:border-box/);
   assert.match(content, /Sensitive data blocked/);
   assert.match(content, /before it could leave this browser/);
   assert.match(content, /setAttribute\('role', 'alertdialog'\)/);

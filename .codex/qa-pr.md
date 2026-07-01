@@ -19,7 +19,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Payments/billing if present - passed.
 - Admin/RBAC if present - passed.
 - Accessibility - passed.
-- Responsive/cross-browser behavior - pending.
+- Responsive/cross-browser behavior - passed.
 - Motion/effects/reduced-motion behavior - pending.
 - Performance and bundle health - pending.
 - Security and privacy - pending.
@@ -63,6 +63,8 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Password step-up and destination-review dialogs now have explicit `aria-labelledby` / `aria-describedby` wiring.
 - Approval queue filters, keyboard row selection, selected row state, and selected incident details are exposed through ARIA state in the browser flow.
 - Browser-extension block/warn/justify banners now expose alertdialog semantics, initial focus, and accessible business-reason validation.
+- Mobile login, tablet dashboard, mobile dashboard, and narrow browser-extension gate banners now have no-horizontal-overflow browser coverage.
+- Runtime Playwright E2E remains Chromium-only because CI installs Chromium only; Chrome/Edge/Firefox extension packaging and platform metadata remain covered by existing package/release and unit tests.
 
 # Bugs Fixed
 
@@ -83,6 +85,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Section 14 fixed `/api/billing/seats` RBAC so billing-seat user identities are no longer available to every authenticated dashboard role.
 - Section 14 fixed approver assigned-user matching so casing or whitespace differences from IdP/routing data do not block legitimate assigned decisions.
 - Section 15 fixed accessibility feedback gaps for login/dashboard alerts, step-up dialogs, destination-review dialogs, browser-extension banners, queue filters, and keyboard-selected approval rows.
+- Section 16 fixed browser-extension banner sizing so padding and borders cannot push the fixed gate banner slightly off-screen on narrow AI pages.
 
 # Tests Added Or Updated
 
@@ -131,6 +134,10 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Updated `test/extension.test.js` with browser-extension banner accessibility wiring checks.
 - Updated `e2e/admin-console.spec.js` with login alert and keyboard queue-selection browser coverage.
 - Updated `e2e/browser-extension.spec.js` with alertdialog and business-reason textbox browser coverage.
+- Updated `sensors/browser-extension/content.css` with border-box sizing for fixed gate banners.
+- Updated `e2e/admin-console.spec.js` with mobile login, tablet dashboard, and mobile dashboard no-overflow coverage.
+- Updated `e2e/browser-extension.spec.js` with narrow AI-page banner fit coverage.
+- Updated `test/extension.test.js` with a static banner sizing regression.
 
 # Commands Run
 
@@ -236,16 +243,29 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - `node --check e2e\browser-extension.spec.js` - passed after section 15 edit.
 - `node --test --test-concurrency=1 test\admin-csrf.test.js test\dashboard-linkage.test.js` - passed after section 15 edit, 18 tests.
 - `node --test --test-concurrency=1 test\extension.test.js` - passed after section 15 edit, 31 tests.
-- `$env:PLAYWRIGHT_PORT='4274'; npx playwright test admin-console.spec.js --grep "login form announces|controls and forms" --reporter=line` - passed after section 15 edit, 2 Chromium tests.
-- `$env:PLAYWRIGHT_PORT='4277'; npm run test:browser-extension` - passed after section 15 edit, 8 Chromium tests.
-- `$env:PLAYWRIGHT_PORT='4278'; npm run review:ci` - passed after section 15 edit, including docs demo guide check, AI domain coverage check, 79 node test files, 12 admin-console Chromium tests, `sync-check`, and `eval`.
+- `$env:PLAYWRIGHT_PORT='4283'; npx playwright test admin-console.spec.js --grep "login form announces|controls and forms" --reporter=line` - passed after section 15 edit, 2 Chromium tests.
+- `$env:PLAYWRIGHT_PORT='4284'; npx playwright test browser-extension.spec.js --grep "warn banner|justify banner" --project=chromium --reporter=line` - passed after section 15 edit, 2 Chromium tests.
+- `$env:PLAYWRIGHT_PORT='4285'; npx playwright test browser-extension.spec.js --grep "blocks a synthetic SSN" --project=chromium --reporter=line` - passed after section 15 edit, 1 Chromium test.
+- `$env:PLAYWRIGHT_PORT='4286'; npm run test:admin-console` - passed after section 15 edit, 12 Chromium tests.
+- `$env:PLAYWRIGHT_PORT='4287'; npm run test:browser-extension` - passed after section 15 edit, 8 Chromium tests.
+- `git diff --check` - passed after section 15 edit with the repo's usual CRLF working-copy warnings.
+- `$env:PLAYWRIGHT_PORT='4288'; npm run review:ci` - passed after section 15 edit, including docs demo guide check, AI domain coverage check, 79 node test files, 12 admin-console Chromium tests, `sync-check`, and `eval`.
+- `node --check e2e\admin-console.spec.js` - passed after section 16 edit.
+- `node --check e2e\browser-extension.spec.js` - passed after section 16 edit.
+- `node --test --test-concurrency=1 test\extension.test.js` - passed after section 16 edit, 31 tests.
+- `$env:PLAYWRIGHT_PORT='4290'; npx playwright test admin-console.spec.js --grep "login page fits mobile|mobile layout" --reporter=line` - passed after section 16 edit, 2 Chromium tests.
+- `$env:PLAYWRIGHT_PORT='4293'; npx playwright test browser-extension.spec.js --grep "block banner fits narrow" --project=chromium --reporter=line` - passed after section 16 edit, 1 Chromium test.
+- `$env:PLAYWRIGHT_PORT='4294'; npm run test:admin-console` - passed after section 16 edit, 13 Chromium tests.
+- `$env:PLAYWRIGHT_PORT='4295'; npm run test:browser-extension` - passed after section 16 edit, 9 Chromium tests.
+- `git diff --check` - passed after section 16 edit with the repo's usual CRLF working-copy warnings.
+- `$env:PLAYWRIGHT_PORT='4296'; npm run review:ci` - passed after section 16 edit, including docs demo guide check, AI domain coverage check, 79 node test files, 13 admin-console Chromium tests, `sync-check`, and `eval`.
 
 # CI Status
 
 - PR #54 is open: `https://github.com/skellywix/promptwall/pull/54`
-- GitHub `test` and `docker` checks were passing on the latest pushed PR head before the local Section 14 update.
+- GitHub `test` and `docker` checks were passing on PR head `059afa7` before the local Section 16 update.
 - Existing merged PR #53 is on `main` and also had passing GitHub `test` and `docker` checks.
-- Merge status: not merged. The full application QA objective remains open and the next section is Responsive/cross-browser behavior.
+- Merge status: not merged. The full application QA objective remains open and the next section is Motion/effects/reduced-motion behavior.
 
 # Accessibility Notes
 
@@ -273,6 +293,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Section 13 adds no payment provider, card data, checkout, billing webhook, or external billing network path. It fails closed for malformed paid-seat config before accepting SaaS sensor events and renders only aggregate billing config state in the stats card.
 - Section 14 keeps billing-seat user identities Security Admin-only, preserves auditor/approver sanitized evidence boundaries, and normalizes approver ownership without broadening role access.
 - Section 15 changes UI accessibility semantics and client-side invalid-field state only; login errors remain generic, queue row labels use already-rendered sanitized metadata, and extension banner labels use sanitized detector/coaching text.
+- Section 16 changes extension CSS sizing and browser regression tests only; no auth, CSRF, RBAC, detector, persistence, evidence export, tenant, billing, or network behavior changed.
 - Baseline tests include auth, CSRF, MFA, RBAC, validation, sanitized alerting, evidence export, retention, and detector privacy checks.
 - `npm ci` reported 0 vulnerabilities in npm's install audit.
 
@@ -284,7 +305,8 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 # Responsive Notes
 
 - Prior merged UI/UX evidence includes mobile dashboard content-tab coverage.
-- Dedicated responsive/cross-browser section remains pending for this branch.
+- Section 16 passed with mobile login, tablet dashboard, mobile dashboard, and narrow extension banner no-overflow coverage.
+- Runtime Playwright E2E remains Chromium-only because CI installs Chromium only; cross-browser extension packaging and browser platform metadata remain covered by package/release and unit tests.
 
 # Artifacts / Screenshots / Traces
 
@@ -293,7 +315,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - `.codex/full-app-qa-log.md`
 - `.codex/full-app-qa-pr.md`
 - Existing carried-forward artifacts: `.codex/ui-ux-qa-log.md`, `.codex/ui-ux-pr.md`
-- Section 2 through section 15 test evidence is recorded in `.codex/full-app-qa-log.md`.
+- Section 2 through section 16 test evidence is recorded in `.codex/full-app-qa-log.md`.
 
 # Risks
 

@@ -653,9 +653,13 @@ Status: Passed
 - `node --check e2e\browser-extension.spec.js` - passed after section 15 edit.
 - `node --test --test-concurrency=1 test\admin-csrf.test.js test\dashboard-linkage.test.js` - passed after section 15 edit, 18 tests.
 - `node --test --test-concurrency=1 test\extension.test.js` - passed after section 15 edit, 31 tests.
-- `$env:PLAYWRIGHT_PORT='4274'; npx playwright test admin-console.spec.js --grep "login form announces|controls and forms" --reporter=line` - passed after section 15 edit, 2 Chromium tests.
-- `$env:PLAYWRIGHT_PORT='4277'; npm run test:browser-extension` - passed after section 15 edit, 8 Chromium tests.
-- `$env:PLAYWRIGHT_PORT='4278'; npm run review:ci` - passed after section 15 edit, including docs demo guide check, AI domain coverage check, 79 node test files, 12 admin-console Chromium tests, `sync-check`, and `eval`.
+- `$env:PLAYWRIGHT_PORT='4283'; npx playwright test admin-console.spec.js --grep "login form announces|controls and forms" --reporter=line` - passed after section 15 edit, 2 Chromium tests.
+- `$env:PLAYWRIGHT_PORT='4284'; npx playwright test browser-extension.spec.js --grep "warn banner|justify banner" --project=chromium --reporter=line` - passed after section 15 edit, 2 Chromium tests.
+- `$env:PLAYWRIGHT_PORT='4285'; npx playwright test browser-extension.spec.js --grep "blocks a synthetic SSN" --project=chromium --reporter=line` - passed after section 15 edit, 1 Chromium test.
+- `$env:PLAYWRIGHT_PORT='4286'; npm run test:admin-console` - passed after section 15 edit, 12 Chromium tests.
+- `$env:PLAYWRIGHT_PORT='4287'; npm run test:browser-extension` - passed after section 15 edit, 8 Chromium tests.
+- `git diff --check` - passed after section 15 edit with the repo's usual CRLF working-copy warnings.
+- `$env:PLAYWRIGHT_PORT='4288'; npm run review:ci` - passed after section 15 edit, including docs demo guide check, AI domain coverage check, 79 node test files, 12 admin-console Chromium tests, `sync-check`, and `eval`.
 
 ### Security Review Notes
 
@@ -664,6 +668,47 @@ Status: Passed
 - Dialog ARIA wiring does not change step-up auth, CSRF, RBAC, raw reveal, destination review, detector, evidence export, or persistence behavior.
 - Approval queue accessibility labels are built from already-rendered sanitized row metadata and do not expose raw prompts or hidden billing/user rosters.
 - Extension banner labels and descriptions are built from already-sanitized detector labels and coaching guidance, not raw prompt text.
+
+## Section 16 - Responsive/cross-browser behavior
+
+Status: Passed
+
+### Inspection
+
+- Reviewed dashboard and login responsive breakpoints for 1180px, 820px, 760px, and narrow mobile viewports.
+- Reviewed browser-extension banner CSS for the 480px narrow-screen breakpoint and fixed-position width behavior.
+- Reviewed `.github/workflows/ci.yml`, `playwright.config.js`, and package scripts: the runtime Playwright gate intentionally installs and runs Chromium only. Chrome/Edge/Firefox extension packaging and browser-platform metadata remain covered by existing packaging/release and unit tests, not live Firefox/WebKit E2E in CI.
+
+### Issues Found
+
+1. Browser-extension gate banners used `width:min(600px,92vw)` without `box-sizing:border-box`, so padding and borders could push the fixed banner slightly off-screen on a 360px AI page.
+2. Mobile login, tablet dashboard, and extension narrow-banner behavior lacked direct no-horizontal-overflow browser regressions.
+
+### Fix Made
+
+- Added `box-sizing:border-box` to `.ps-banner` so the fixed extension banner fits within its viewport width, including padding and borders.
+- Added a mobile login Playwright check that verifies the sign-in form remains usable at 360px without horizontal overflow.
+- Expanded the admin-console responsive test to cover a 1024px tablet layout plus the existing 390px mobile content-tab layout without horizontal overflow.
+- Added a narrow AI-page extension smoke test proving the block banner stays inside the viewport and keeps its primary actions visible.
+- Added a static extension CSS regression for the banner border-box sizing rule.
+
+### Commands Run
+
+- `node --check e2e\admin-console.spec.js` - passed after section 16 edit.
+- `node --check e2e\browser-extension.spec.js` - passed after section 16 edit.
+- `node --test --test-concurrency=1 test\extension.test.js` - passed after section 16 edit, 31 tests.
+- `$env:PLAYWRIGHT_PORT='4290'; npx playwright test admin-console.spec.js --grep "login page fits mobile|mobile layout" --reporter=line` - passed after section 16 edit, 2 Chromium tests.
+- `$env:PLAYWRIGHT_PORT='4293'; npx playwright test browser-extension.spec.js --grep "block banner fits narrow" --project=chromium --reporter=line` - passed after section 16 edit, 1 Chromium test.
+- `$env:PLAYWRIGHT_PORT='4294'; npm run test:admin-console` - passed after section 16 edit, 13 Chromium tests.
+- `$env:PLAYWRIGHT_PORT='4295'; npm run test:browser-extension` - passed after section 16 edit, 9 Chromium tests.
+- `git diff --check` - passed after section 16 edit with the repo's usual CRLF working-copy warnings.
+- `$env:PLAYWRIGHT_PORT='4296'; npm run review:ci` - passed after section 16 edit, including docs demo guide check, AI domain coverage check, 79 node test files, 13 admin-console Chromium tests, `sync-check`, and `eval`.
+
+### Security Review Notes
+
+- Section 16 changes extension CSS sizing and browser regression tests only.
+- No auth, CSRF, RBAC, raw reveal, approval release, detector, persistence, evidence export, tenant, billing, or network behavior changed.
+- The extension narrow-banner test continues to use synthetic SSN data and verifies the prompt remains unsent.
 
 ## Section Queue
 
@@ -682,7 +727,7 @@ Status: Passed
 13. Payments/billing if present - passed.
 14. Admin/RBAC if present - passed.
 15. Accessibility - passed.
-16. Responsive/cross-browser behavior - pending.
+16. Responsive/cross-browser behavior - passed.
 17. Motion/effects/reduced-motion behavior - pending.
 18. Performance and bundle health - pending.
 19. Security and privacy - pending.
