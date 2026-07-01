@@ -282,15 +282,16 @@ The local full-browser suite also showed that admin-console and browser-extensio
 - Updated `e2e/browser-extension.spec.js` to sync the Playwright server's admin policy to the same fixture policy before launching each extension context.
 - Added a `/api/v1/policy` verification step so the sensor policy endpoint must match the fixture before the content script is exercised.
 - Compared browser-action contract fields only, because the server normalizes configured rules with `enabled: true`.
+- Reset merge-persistent policy fields in the test setup so scoped rules, routing rules, response scanning, and sensor requirements cannot leak from earlier browser specs.
 - Set Playwright `workers: 1` so browser E2E specs that mutate shared temp policy/database state run serially in local and CI environments.
 
 ### Commands Run
 
 - `npm run test:browser-extension` - failed first after the policy sync addition because the assertion did not account for server-normalized `enabled: true`.
-- `npm run test:browser-extension` - passed after comparing normalized browser-action contract fields, 8 Chromium tests.
+- `$env:PLAYWRIGHT_PORT='4241'; npm run test:browser-extension` - passed after comparing normalized browser-action contract fields and clearing merge-persistent policy fields, 8 Chromium tests.
 - `npm run test:browser` - failed locally with admin-console setup prompts returning `destination_blocked` while extension policy sync ran in a parallel worker against the same temp server.
 - `npm run test:browser` - failed once after serialization when a local Windows Playwright worker crashed and left a stale Playwright server on port `4211`; exact stale `playwright-server` and `promptwall-extension-e2e` Chromium processes were stopped.
-- `npm run test:browser` - passed after stale harness cleanup, 14 Chromium tests.
+- `$env:PLAYWRIGHT_PORT='4241'; npm run test:browser` - passed after stale harness cleanup and the fuller policy reset, 14 Chromium tests.
 - `npm run review:ci` - passed after browser-suite stabilization.
 
 ### Security Review Notes

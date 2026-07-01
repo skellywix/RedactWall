@@ -69,6 +69,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Updated `e2e/admin-console.spec.js` with destination review overlay blank/cancel/Escape coverage.
 - Updated `e2e/admin-console.spec.js` with delayed export failure coverage for processing/error/re-enabled states.
 - Updated `e2e/browser-extension.spec.js` to remove the server-policy refresh race in extension smoke tests.
+- Reset merge-persistent policy fields in `e2e/browser-extension.spec.js` so earlier browser specs cannot leak scoped policy, routing, response-scan, or sensor-requirement state into extension assertions.
 - Updated `playwright.config.js` to run shared-server browser E2E specs with one worker.
 
 # Commands Run
@@ -104,10 +105,10 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - `npm run test:admin-console` - passed after returning to the policy tab before the existing `View coverage` assertion, 6 Chromium tests.
 - `node --test --test-concurrency=1 test\evidence-export-ui.test.js` - passed after section 6 edit, 2 tests.
 - `npm run test:browser-extension` - failed first after the policy sync addition because the assertion did not account for server-normalized `enabled: true`.
-- `npm run test:browser-extension` - passed after comparing normalized browser-action contract fields, 8 Chromium tests.
+- `$env:PLAYWRIGHT_PORT='4241'; npm run test:browser-extension` - passed after comparing normalized browser-action contract fields and clearing merge-persistent policy fields, 8 Chromium tests.
 - `npm run test:browser` - failed locally with admin-console setup prompts returning `destination_blocked` while extension policy sync ran in a parallel worker against the same temp server.
 - `npm run test:browser` - failed once after serialization when a local Windows Playwright worker crashed and left a stale Playwright server on port `4211`; exact stale `playwright-server` and `promptwall-extension-e2e` Chromium processes were stopped.
-- `npm run test:browser` - passed after stale harness cleanup, 14 Chromium tests.
+- `$env:PLAYWRIGHT_PORT='4241'; npm run test:browser` - passed after stale harness cleanup and the fuller policy reset, 14 Chromium tests.
 - `npm run review:ci` - passed after browser-suite stabilization.
 
 # CI Status
