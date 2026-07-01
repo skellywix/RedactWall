@@ -366,12 +366,17 @@ test('admin console controls and forms are wired end to end', async ({ page, req
 
   await login(page);
   await expect(page.locator('#queueList')).toContainText('approve-ui@example.test');
+  await expect(page.getByRole('searchbox', { name: 'Search users or destinations' })).toBeVisible();
+  await expect(page.locator('.content-tabs .tab[data-tab="queue"]')).toHaveAttribute('aria-current', 'page');
 
-  await page.locator('[data-tab-jump="audit"]').click();
+  await page.locator('#tab-queue').getByRole('button', { name: 'Evidence', exact: true }).click();
   await expect(page.locator('#tab-audit')).toBeVisible();
+  await expect(page.locator('.content-tabs .tab[data-tab="audit"]')).toHaveAttribute('aria-current', 'page');
+  await expect(page.locator('.content-tabs .tab[data-tab="queue"]')).not.toHaveAttribute('aria-current', 'page');
   await page.locator('.content-tabs .tab[data-tab="queue"]').click();
-  await page.locator('[data-tab-jump="policy"]').click();
+  await page.locator('#tab-queue').getByRole('button', { name: 'Configure', exact: true }).click();
   await expect(page.locator('#tab-policy')).toBeVisible();
+  await expect(page.locator('.content-tabs .tab[data-tab="policy"]')).toHaveAttribute('aria-current', 'page');
 
   for (const tabName of ['queue', 'activity', 'coverage', 'identity', 'lineage', 'audit', 'policy']) {
     await page.locator(`.content-tabs .tab[data-tab="${tabName}"]`).click();
