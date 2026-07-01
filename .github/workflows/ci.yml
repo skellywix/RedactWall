@@ -16,6 +16,8 @@ jobs:
       - run: npm ci
       - name: Dependency audit
         run: npm audit --omit=dev
+      - name: Generated demo guides current
+        run: npm run docs:demo-guide:check
       - name: Engine copies in sync
         run: npm run sync-check
       - name: AI domain coverage current

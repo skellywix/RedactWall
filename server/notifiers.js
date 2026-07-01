@@ -11,6 +11,7 @@ require('./env').loadEnv();
 const { safeSensor } = require('./sensor-metadata');
 const routing = require('./routing');
 const smtp = require('./smtp');
+const { outboundHttpsUrl } = require('./url-policy');
 
 const MAX_LABELS = 20;
 const MAX_REASONS = 8;
@@ -39,8 +40,9 @@ function csv(value, limit = 20) {
 
 function jiraIssueUrl(baseUrl) {
   try {
-    const url = new URL(trimmed(baseUrl));
-    if (!/^https?:$/.test(url.protocol)) return '';
+    const normalized = outboundHttpsUrl(baseUrl);
+    if (!normalized) return '';
+    const url = new URL(normalized);
     url.pathname = url.pathname.replace(/\/+$/, '') + '/rest/api/3/issue';
     url.search = '';
     url.hash = '';
@@ -53,14 +55,7 @@ function jiraIssueUrl(baseUrl) {
 function linearApiUrl(value) {
   const raw = trimmed(value);
   if (!raw) return DEFAULT_LINEAR_API_URL;
-  try {
-    const url = new URL(raw);
-    if (url.protocol !== 'https:') return '';
-    url.hash = '';
-    return url.toString();
-  } catch {
-    return '';
-  }
+  return outboundHttpsUrl(raw);
 }
 
 function parseBool(value, fallback = false) {
@@ -108,9 +103,9 @@ function configuredLinearChannel(env) {
 }
 
 function configuredChannels(env = process.env, opts = {}) {
-  if (Array.isArray(opts.channels)) return opts.channels.filter((c) => c && c.type && (c.url || c.type === 'smtp'));
+  if (Array.isArray(opts.channels)) return opts.channels.map(normalizeConfiguredChannel).filter(Boolean);
   const channels = [];
-  const webhookUrl = envValue(env, 'PROMPTWALL_APPROVAL_NOTIFY_WEBHOOK_URL', 'APPROVAL_NOTIFY_WEBHOOK_URL');
+  const webhookUrl = outboundHttpsUrl(envValue(env, 'PROMPTWALL_APPROVAL_NOTIFY_WEBHOOK_URL', 'APPROVAL_NOTIFY_WEBHOOK_URL'));
   if (webhookUrl) {
     channels.push({
       type: 'webhook',
@@ -119,11 +114,11 @@ function configuredChannels(env = process.env, opts = {}) {
       token: envValue(env, 'PROMPTWALL_APPROVAL_NOTIFY_WEBHOOK_TOKEN', 'APPROVAL_NOTIFY_WEBHOOK_TOKEN'),
     });
   }
-  const slackUrl = envValue(env, 'PROMPTWALL_APPROVAL_SLACK_WEBHOOK_URL', 'APPROVAL_SLACK_WEBHOOK_URL');
+  const slackUrl = outboundHttpsUrl(envValue(env, 'PROMPTWALL_APPROVAL_SLACK_WEBHOOK_URL', 'APPROVAL_SLACK_WEBHOOK_URL'));
   if (slackUrl) channels.push({ type: 'slack', name: 'slack', url: slackUrl });
-  const teamsUrl = envValue(env, 'PROMPTWALL_APPROVAL_TEAMS_WEBHOOK_URL', 'APPROVAL_TEAMS_WEBHOOK_URL');
+  const teamsUrl = outboundHttpsUrl(envValue(env, 'PROMPTWALL_APPROVAL_TEAMS_WEBHOOK_URL', 'APPROVAL_TEAMS_WEBHOOK_URL'));
   if (teamsUrl) channels.push({ type: 'teams', name: 'teams', url: teamsUrl });
-  const ticketUrl = envValue(env, 'PROMPTWALL_APPROVAL_TICKET_WEBHOOK_URL', 'APPROVAL_TICKET_WEBHOOK_URL');
+  const ticketUrl = outboundHttpsUrl(envValue(env, 'PROMPTWALL_APPROVAL_TICKET_WEBHOOK_URL', 'APPROVAL_TICKET_WEBHOOK_URL'));
   if (ticketUrl) {
     channels.push({
       type: 'ticket',
@@ -159,6 +154,13 @@ function configuredChannels(env = process.env, opts = {}) {
     });
   }
   return channels;
+}
+
+function normalizeConfiguredChannel(channel) {
+  if (!channel || !channel.type) return null;
+  if (channel.type === 'smtp') return channel;
+  const url = outboundHttpsUrl(channel.url);
+  return url ? { ...channel, url } : null;
 }
 
 function safeReasons(reasons = []) {

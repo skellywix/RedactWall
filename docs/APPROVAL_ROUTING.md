@@ -174,6 +174,8 @@ credentials, and reviewer distribution lists are secrets; keep them in
 environment or secret-manager configuration only. SMTP requires TLS by default
 and will only use an insecure relay when the explicit insecure-local-relay
 opt-in is set.
+Webhook-style URLs and native Jira/Linear API URLs must be `https://` and must
+not include URL username or password credentials.
 
 Native Linear delivery requires a Linear personal API key in
 `PROMPTWALL_APPROVAL_LINEAR_API_KEY` or `APPROVAL_LINEAR_API_KEY` plus a Linear

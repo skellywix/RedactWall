@@ -9,6 +9,7 @@ let currentQueue = [];
 let currentActivity = [];
 let currentCoverage = null;
 let currentLineage = null;
+let currentAuditEntries = [];
 let currentIdentitySetup = null;
 let searchTerm = '';
 let currentRole = 'auditor';
@@ -20,6 +21,9 @@ let queueDensity = savedQueueDensity();
 let colorTheme = savedColorTheme();
 let revealedPrompts = new Map();
 let expandedActivityId = '';
+let activityPage = 1;
+let auditPage = 1;
+let lineagePages = {};
 let statusPopover = null;
 let tooltipEl = null;
 let monitorStatusFilter = 'all';
@@ -35,6 +39,7 @@ let monitorRefreshing = false;
 let monitorUpdateSequence = 0;
 let monitorLastUpdated = new Date().toISOString();
 let monitorRecentEventId = 'evt-7902';
+let policyStatusTimer = null;
 
 const icons = {
   check: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m5 12 4 4L19 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
@@ -43,6 +48,9 @@ const icons = {
   refresh: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 12a8 8 0 0 1-13.7 5.6M4 12A8 8 0 0 1 17.7 6.4M17.7 6.4H14M17.7 6.4V2.7M6.3 17.6H10M6.3 17.6v3.7" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   shield: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 4l7 3v5c0 4.2-2.6 6.8-7 8-4.4-1.2-7-3.8-7-8V7l7-3Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
 };
+const ACTIVITY_PAGE_SIZE = 10;
+const LINEAGE_PAGE_SIZE = 10;
+const AUDIT_PAGE_SIZE = 10;
 
 const monitorStatusOptions = [
   { id: 'all', label: 'All' },
@@ -749,7 +757,7 @@ function appendGuidedScopeRule() {
   const reason = cleanPolicyId($('#scope_builder_reason').value, '');
   if (reason) rule.reason = reason;
   if (addPolicyRuleToTextarea('#pol_policy_scopes', rule, 'Scoped enforcement rules')) {
-    $('#polSaved').textContent = `Added scoped rule ${rule.id}`;
+    setPolicyStatus(`Added scoped rule ${rule.id}`);
   }
 }
 
@@ -779,7 +787,23 @@ function appendGuidedExceptionRule() {
   const reason = cleanPolicyId($('#exception_builder_reason').value, '');
   if (reason) rule.reason = reason;
   if (addPolicyRuleToTextarea('#pol_policy_exceptions', rule, 'Time-bound exceptions')) {
-    $('#polSaved').textContent = `Added exception ${rule.id}`;
+    setPolicyStatus(`Added exception ${rule.id}`);
+  }
+}
+
+function setPolicyStatus(message, clearAfterMs = 0) {
+  const status = $('#polSaved');
+  if (!status) return;
+  if (policyStatusTimer) {
+    clearTimeout(policyStatusTimer);
+    policyStatusTimer = null;
+  }
+  status.textContent = message;
+  if (clearAfterMs > 0) {
+    policyStatusTimer = setTimeout(() => {
+      if (status.textContent === message) status.textContent = '';
+      policyStatusTimer = null;
+    }, clearAfterMs);
   }
 }
 
@@ -854,10 +878,14 @@ function canAdminWrite() {
   return currentRole === 'security_admin';
 }
 
+function samePrincipal(left, right) {
+  return String(left || '').trim().toLowerCase() === String(right || '').trim().toLowerCase();
+}
+
 function canDecide(q = {}) {
   if (currentRole === 'security_admin') return true;
   if (currentRole !== 'approver') return false;
-  return q.assignedRole === 'approver' && (!q.assignedUser || q.assignedUser === currentUser);
+  return q.assignedRole === 'approver' && (!q.assignedUser || samePrincipal(q.assignedUser, currentUser));
 }
 
 function canReveal(q = {}) {
@@ -944,7 +972,7 @@ function isEscalated(q) {
 }
 
 function queueFilterMatches(q) {
-  if (queueFilter === 'mine') return q.assignedRole === currentRole || q.assignedUser === currentUser;
+  if (queueFilter === 'mine') return q.assignedRole === currentRole || samePrincipal(q.assignedUser, currentUser);
   if (queueFilter === 'unassigned') return !q.assignedRole && !q.assignedGroup;
   if (queueFilter === 'escalated') return isEscalated(q);
   return true;
@@ -1055,11 +1083,72 @@ function matchesLineage(bucket) {
   return !searchTerm || lineageText(bucket || {}).includes(searchTerm);
 }
 
+function auditText(entry = {}) {
+  return [
+    entry.id,
+    entry.ts,
+    entry.action,
+    entry.actor,
+    entry.queryId,
+    entry.detail,
+  ].join(' ').toLowerCase();
+}
+
+function matchesAudit(entry) {
+  return !searchTerm || auditText(entry || {}).includes(searchTerm);
+}
+
+function resetTablePages() {
+  activityPage = 1;
+  auditPage = 1;
+  lineagePages = {};
+}
+
+function paginatedRows(rows, page, pageSize) {
+  const total = rows.length;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const safePage = Math.min(Math.max(1, Number(page) || 1), totalPages);
+  const start = (safePage - 1) * pageSize;
+  const end = Math.min(start + pageSize, total);
+  return {
+    rows: rows.slice(start, end),
+    page: safePage,
+    total,
+    totalPages,
+    start,
+    end,
+  };
+}
+
+function renderTablePager(selector, { target, page, total, totalPages, start, end }) {
+  const el = $(selector);
+  if (!el) return;
+  if (!total) {
+    el.innerHTML = '<span>No rows</span>';
+    return;
+  }
+  const prevPage = Math.max(1, page - 1);
+  const nextPage = Math.min(totalPages, page + 1);
+  el.innerHTML = `<span>Showing ${start + 1}-${end} of ${total}</span>
+    <div class="pager-controls" aria-label="Pagination controls">
+      <button class="ghost mini pager-button" type="button" data-pager-target="${escapeHtml(target)}" data-pager-page="${prevPage}" ${page === 1 ? 'disabled' : ''} aria-label="Previous page">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m15 6-6 6 6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <span class="pager-page">Page ${page} of ${totalPages}</span>
+      <button class="ghost mini pager-button" type="button" data-pager-target="${escapeHtml(target)}" data-pager-page="${nextPage}" ${page === totalPages ? 'disabled' : ''} aria-label="Next page">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m9 6 6 6-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+    </div>`;
+}
+
 function updateSearch(value) {
-  searchTerm = String(value || '').trim().toLowerCase();
+  const next = String(value || '').trim().toLowerCase();
+  if (next !== searchTerm) resetTablePages();
+  searchTerm = next;
   renderQueueView();
   renderActivityRows(currentActivity);
   renderLineage(currentLineage);
+  renderAuditRows(currentAuditEntries);
 }
 
 async function api(path, opts = {}) {
@@ -1075,6 +1164,44 @@ async function api(path, opts = {}) {
   return r;
 }
 
+async function apiErrorSummary(response, fallback) {
+  try {
+    const body = await response.clone().json();
+    if (Array.isArray(body.fields) && body.fields.length) return `${fallback}: ${body.fields.join(', ')}`;
+    if (body.error) return `${fallback}: ${body.error}`;
+  } catch {}
+  return fallback;
+}
+
+async function responseJsonBody(response, fallback = null) {
+  if (!response) return fallback;
+  try {
+    return await response.json();
+  } catch {
+    return fallback;
+  }
+}
+
+async function responseJson(response, fallback = null) {
+  if (!response || !response.ok) return fallback;
+  return responseJsonBody(response, fallback);
+}
+
+async function responseJsonObject(response, fallback = null) {
+  const body = await responseJson(response, null);
+  return body && typeof body === 'object' && !Array.isArray(body) ? body : fallback;
+}
+
+async function responseJsonObjectBody(response, fallback = null) {
+  const body = await responseJsonBody(response, null);
+  return body && typeof body === 'object' && !Array.isArray(body) ? body : fallback;
+}
+
+async function responseJsonArray(response, fallback = []) {
+  const body = await responseJson(response, null);
+  return Array.isArray(body) ? body : fallback;
+}
+
 function boundedPromise(promise, timeoutMs, fallback) {
   return Promise.race([
     Promise.resolve(promise).catch(() => fallback),
@@ -1084,8 +1211,7 @@ function boundedPromise(promise, timeoutMs, fallback) {
 
 async function optionalDashboardJson(path, fallback = null, timeoutMs = 1800) {
   const response = await boundedPromise(api(path), timeoutMs, null);
-  if (!response || !response.ok) return fallback;
-  return boundedPromise(response.json(), timeoutMs, fallback);
+  return boundedPromise(responseJson(response, fallback), timeoutMs, fallback);
 }
 
 async function dashboardJsonWithTimeout(path, timeoutMs = 1800) {
@@ -1093,8 +1219,7 @@ async function dashboardJsonWithTimeout(path, timeoutMs = 1800) {
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await api(path, { signal: controller.signal });
-    if (!response || !response.ok) return null;
-    return await response.json();
+    return await responseJson(response, null);
   } catch {
     return null;
   } finally {
@@ -1106,12 +1231,14 @@ async function pendingQueueRows() {
   const directRows = await dashboardJsonWithTimeout('/api/queries?status=pending', 2200);
   if (Array.isArray(directRows)) return directRows;
 
+  const activityRows = await dashboardJsonWithTimeout('/api/queries?limit=200', 2200);
+  if (Array.isArray(activityRows)) return activityRows.filter((q) => q.status === 'pending');
+
   if (Array.isArray(currentActivity) && currentActivity.length) {
     return currentActivity.filter((q) => q.status === 'pending');
   }
 
-  const activityRows = await dashboardJsonWithTimeout('/api/queries?limit=200', 2200);
-  return Array.isArray(activityRows) ? activityRows.filter((q) => q.status === 'pending') : [];
+  return [];
 }
 
 async function loadCsrf() {
@@ -1208,15 +1335,23 @@ function setLiveState(state) {
   }
 }
 
+function uniqueDialogId(prefix) {
+  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
 function askStepUpPassword({ title, message, confirmText, icon = '', buttonClass = 'reveal' }) {
   return new Promise((resolve) => {
     const dialog = document.createElement('dialog');
+    const titleId = uniqueDialogId('stepup_title');
+    const descriptionId = uniqueDialogId('stepup_description');
     dialog.className = 'stepup-dialog';
+    dialog.setAttribute('aria-labelledby', titleId);
+    dialog.setAttribute('aria-describedby', descriptionId);
     dialog.innerHTML = `
       <form method="dialog" class="stepup-panel">
         <div>
-          <h2>${escapeHtml(title)}</h2>
-          <p>${escapeHtml(message)}</p>
+          <h2 id="${titleId}">${escapeHtml(title)}</h2>
+          <p id="${descriptionId}">${escapeHtml(message)}</p>
         </div>
         <label>Account password
           <input name="password" type="password" autocomplete="current-password" required />
@@ -1270,12 +1405,16 @@ function askDestinationReviewReason({ destination, decision }) {
   const labels = { govern: 'govern', allow: 'allow', block: 'block' };
   return new Promise((resolve) => {
     const dialog = document.createElement('dialog');
+    const titleId = uniqueDialogId('destination_review_title');
+    const descriptionId = uniqueDialogId('destination_review_description');
     dialog.className = 'stepup-dialog';
+    dialog.setAttribute('aria-labelledby', titleId);
+    dialog.setAttribute('aria-describedby', descriptionId);
     dialog.innerHTML = `
       <form method="dialog" class="stepup-panel">
         <div>
-          <h2>Record destination reason</h2>
-          <p>${escapeHtml(labels[decision] || 'review')} ${escapeHtml(destination)} with a short examiner-facing reason.</p>
+          <h2 id="${titleId}">Record destination reason</h2>
+          <p id="${descriptionId}">${escapeHtml(labels[decision] || 'review')} ${escapeHtml(destination)} with a short examiner-facing reason.</p>
         </div>
         <label>Admin reason
           <textarea name="reason" rows="3" maxlength="240" required></textarea>
@@ -1338,21 +1477,29 @@ async function refreshAll() {
 async function loadStats() {
   setBusy('#stats', true, 'SYNCING');
   try {
-    const [r, seatRes] = await Promise.all([api('/api/stats'), api('/api/billing/seats')]);
-    if (!r) return;
-    const s = await r.json();
-    const seats = seatRes && seatRes.ok ? await seatRes.json() : null;
+    const [r, seatRes] = await Promise.all([
+      api('/api/stats'),
+      canAdminWrite() ? api('/api/billing/seats') : Promise.resolve(null),
+    ]);
+    const s = await responseJsonObject(r, null);
+    if (!s) return;
+    const seats = await responseJsonObject(seatRes, null);
+    const topEntities = Array.isArray(s.topEntities) ? s.topEntities : [];
     const totalDecisions = (s.approved || 0) + (s.denied || 0);
     const approveRate = totalDecisions ? `${Math.round(((s.approved || 0) / totalDecisions) * 100)}%` : '-';
-    const seatValue = seats && seats.seatLimit ? `${seats.seatsUsed}/${seats.seatLimit}` : (seats ? seats.seatsUsed : '-');
-    const seatMeta = seats && seats.seatLimit ? `${seats.seatsRemaining} remaining` : 'billable users';
+    const invalidSeatConfig = !!(seats && seats.saasMode && seats.seatLimitValid === false);
+    const hasSeatLimit = !!(seats && seats.seatLimit);
+    const seatValue = invalidSeatConfig ? 'Invalid' : (hasSeatLimit ? `${seats.seatsUsed}/${seats.seatLimit}` : (seats ? seats.seatsUsed : '-'));
+    const seatMeta = invalidSeatConfig ? 'set paid seat limit' : (hasSeatLimit ? `${seats.seatsRemaining} remaining` : 'billable users');
+    const seatLabel = invalidSeatConfig ? 'Seat config' : (seats && seats.saasMode ? 'Seats used' : 'Users observed');
+    const seatTone = invalidSeatConfig || (seats && seats.overLimit) ? 'warn' : 'secure';
     const cards = [
       ['pending', s.pending, 'Pending approval', 'held for review', 'critical'],
       ['alert', s.todayBlocked, 'Blocked today', 'policy stops', 'warn'],
       ['good', s.approved, 'Approved', 'released by admin', 'secure'],
       ['', s.denied, 'Denied', 'never released', 'critical'],
       ['', approveRate, 'Approval rate', 'admin decisions', 'live'],
-      [seats && seats.overLimit ? 'alert' : '', seatValue, seats && seats.saasMode ? 'Seats used' : 'Users observed', seatMeta, seats && seats.overLimit ? 'warn' : 'secure'],
+      [invalidSeatConfig || (seats && seats.overLimit) ? 'alert' : '', seatValue, seatLabel, seatMeta, seatTone],
     ];
     $('#stats').innerHTML = cards.map(([c, n, l, m, tone]) => `
       <div class="stat ${c}" data-tooltip="${escapeHtml(`${l}: ${m}`)}">
@@ -1364,8 +1511,8 @@ async function loadStats() {
     const b = $('#qBadge');
     if (s.pending > 0) { b.classList.remove('hidden'); b.textContent = s.pending; }
     else b.classList.add('hidden');
-    $('#topEntities').innerHTML = (s.topEntities.length ? s.topEntities : []).map(([k, v]) => {
-      const max = s.topEntities[0][1] || 1;
+    $('#topEntities').innerHTML = topEntities.map(([k, v]) => {
+      const max = topEntities[0][1] || 1;
       return `<div class="barrow"><div class="name">${escapeHtml(k)}</div><div class="bar"><i style="--w:${Math.round((v / max) * 100)}%"></i></div><div class="v">${escapeHtml(v)}</div></div>`;
     }).join('') || '<div class="empty"><div class="big">No detections</div>Current data set has no classified prompt findings.</div>';
     markUpdated();
@@ -1463,7 +1610,9 @@ async function loadQueue() {
 function renderQueueView() {
   const el = $('#queueList');
   $$('.queue-tools [data-queue-filter]').forEach((button) => {
-    button.classList.toggle('active', button.dataset.queueFilter === queueFilter);
+    const active = button.dataset.queueFilter === queueFilter;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
   });
   syncQueueFilterOptions();
   const rows = currentQueue.filter(queueMetadataMatches).filter(matchesSearch);
@@ -1483,12 +1632,14 @@ function renderQueueView() {
 }
 
 function renderQueueItem(q) {
+  const isSelected = selected === q.id;
   const sev = sevClass(q.maxSeverityLabel);
   const detected = Object.keys(q.entityCounts || {}).join(', ') || (q.categories || []).join(', ') || 'policy match';
   const revealState = revealedPromptState(q.id);
   const revealDisplay = revealDisplayState(q, revealState);
   const promptText = revealState ? revealState.text : q.redactedPrompt;
   const revealControl = revealControlFor(q, revealState);
+  const rowLabel = `${q.user || 'unknown user'} ${sourceLabel(q.source)} to ${q.destination || 'unknown destination'}, ${q.maxSeverityLabel || 'low'} severity, risk ${q.riskScore ?? 0}`;
   const revealStatus = revealDisplay
     ? `<div class="prompt-reveal-status ${escapeHtml(revealDisplay.kind)}"><b>${escapeHtml(revealDisplay.statusLabel)}</b><span>${escapeHtml(revealDisplay.statusDetail)}</span></div>`
     : '';
@@ -1501,7 +1652,7 @@ function renderQueueItem(q) {
       ${revealControl}
     </div>`
     : `<div class="readonly-note">${escapeHtml(queueDecisionLabel(q))}</div>`;
-  return `<article class="q ${selected === q.id ? 'selected' : ''}" data-id="${escapeHtml(q.id)}" tabindex="0">
+  return `<article class="q ${isSelected ? 'selected' : ''}" data-id="${escapeHtml(q.id)}" tabindex="0" role="listitem" ${isSelected ? 'aria-current="true"' : ''} aria-controls="incidentDetail" aria-label="${escapeHtml(rowLabel)}">
     <div class="top risk-meta-row">
       <span class="select-dot" aria-hidden="true"></span>
       <span class="sev ${sev}">${escapeHtml(q.maxSeverityLabel || 'low')}</span>
@@ -1613,6 +1764,26 @@ document.addEventListener('click', async (e) => {
     queueFilter = filterButton.dataset.queueFilter || 'all';
     renderQueueView();
     return;
+  }
+  const pagerButton = e.target.closest('[data-pager-target][data-pager-page]');
+  if (pagerButton) {
+    const page = Number(pagerButton.dataset.pagerPage) || 1;
+    const target = pagerButton.dataset.pagerTarget || '';
+    if (target === 'activity') {
+      activityPage = page;
+      renderActivityRows(currentActivity);
+      return;
+    }
+    if (target === 'audit') {
+      auditPage = page;
+      renderAuditRows(currentAuditEntries);
+      return;
+    }
+    if (target.startsWith('lineage')) {
+      lineagePages[target] = page;
+      renderLineage(currentLineage);
+      return;
+    }
   }
   const densityButton = e.target.closest('#toggleQueueDensity');
   if (densityButton) {
@@ -1811,8 +1982,9 @@ async function loadActivity() {
   setBusy('#tab-activity .panel', true, 'SYNCING');
   try {
     const r = await api('/api/queries?limit=200');
-    if (!r) return;
-    currentActivity = await r.json();
+    const rows = await responseJsonArray(r, null);
+    if (!rows) return;
+    currentActivity = rows;
     renderActivityRows(currentActivity);
     markUpdated();
   } finally {
@@ -1855,7 +2027,9 @@ function activityDetail(q) {
 
 function renderActivityRows(rows) {
   const filtered = (rows || []).filter(matchesSearch);
-  $('#activityRows').innerHTML = filtered.map((q) => {
+  const page = paginatedRows(filtered, activityPage, ACTIVITY_PAGE_SIZE);
+  activityPage = page.page;
+  $('#activityRows').innerHTML = page.rows.map((q) => {
     const tone = statusTone(q.status);
     const detail = `Status: ${humanize(q.status)}\nSession ID: ${q.id || '-'}\nOwner: ${workflowOwner(q)}\nRisk: ${q.riskScore ?? 0}/100`;
     return `<tr class="activity-row ${activitySeverityClass(q)} ${expandedActivityId === q.id ? 'selected' : ''}" data-activity-id="${escapeHtml(q.id)}" tabindex="0">
@@ -1870,14 +2044,16 @@ function renderActivityRows(rows) {
     <td>${statusChip(tone, humanize(q.status), detail)}<span class="row-affordance">VIEW</span></td>
   </tr>${activityDetail(q)}`;
   }).join('') || '<tr><td colspan="9" class="empty">No matching activity</td></tr>';
+  renderTablePager('#activityPager', { target: 'activity', ...page });
 }
 
 async function loadCoverage() {
   setBusy('#tab-coverage .panel', true, 'RECONCILING');
   try {
     const r = await api('/api/coverage');
-    if (!r) return;
-    currentCoverage = await r.json();
+    const nextCoverage = await responseJsonObject(r, null);
+    if (!nextCoverage) return;
+    currentCoverage = nextCoverage;
     renderCoverage(currentCoverage);
     markUpdated();
   } finally {
@@ -2003,8 +2179,11 @@ async function loadIdentitySetup() {
   setBusy('#tab-identity .panel', true, 'VERIFYING');
   try {
     const r = await api(`/api/identity/setup-guide?${params.toString()}`);
-    if (!r) return;
-    currentIdentitySetup = await r.json();
+    const nextSetup = r && r.ok
+      ? await responseJsonObject(r, null)
+      : await responseJsonObjectBody(r, null);
+    if (!nextSetup) return;
+    currentIdentitySetup = nextSetup;
     if (currentIdentitySetup.error) {
       $('#identitySummary').innerHTML = `<div class="empty"><div class="big">Identity setup unavailable</div>${escapeHtml(currentIdentitySetup.error)}</div>`;
       return;
@@ -2077,8 +2256,8 @@ async function loadLineage() {
   setBusy('#tab-lineage .panel', true, 'ANALYZING');
   try {
     const r = await api('/api/lineage?limit=1000');
-    if (!r) return;
-    const body = await r.json();
+    const body = await responseJsonObject(r, null);
+    if (!body) return;
     currentLineage = body.lineage || {};
     renderLineage(currentLineage);
     markUpdated();
@@ -2087,15 +2266,18 @@ async function loadLineage() {
   }
 }
 
-function renderLineageRows(selector, rows, emptyLabel) {
+function renderLineageRows(tbodyId, rows, emptyLabel) {
   const filtered = (rows || []).filter(matchesLineage);
-  $(selector).innerHTML = filtered.map((row) => `<tr>
+  const page = paginatedRows(filtered, lineagePages[tbodyId] || 1, LINEAGE_PAGE_SIZE);
+  lineagePages[tbodyId] = page.page;
+  $(`#${tbodyId}`).innerHTML = page.rows.map((row) => `<tr>
     <td class="mono">${escapeHtml(row.key || '-')}</td>
     <td class="mono">${escapeHtml(row.events || 0)}</td>
     <td class="mono">${escapeHtml(row.blocked || 0)}</td>
     <td class="mono">${escapeHtml(row.redacted || 0)}</td>
     <td class="mono">${escapeHtml(row.maxRiskScore || 0)}</td>
   </tr>`).join('') || `<tr><td colspan="5" class="empty">${escapeHtml(emptyLabel)}</td></tr>`;
+  renderTablePager(`#${tbodyId}Pager`, { target: tbodyId, ...page });
 }
 
 function lineageTotals(lineage = {}) {
@@ -2126,36 +2308,45 @@ function renderLineage(lineage) {
     ['Allowed', totals.allowed, 'below thresholds'],
   ].map(([label, value, meta]) => `
     <div class="mini-kpi"><b>${escapeHtml(value)}</b><span>${escapeHtml(label)}</span><em>${escapeHtml(meta)}</em></div>`).join('');
-  renderLineageRows('#lineageUsers', lineage.byUser, 'No user lineage yet.');
-  renderLineageRows('#lineageDestinations', lineage.byDestination, 'No destination lineage yet.');
-  renderLineageRows('#lineageSensors', lineage.bySensor, 'No sensor lineage yet.');
-  renderLineageRows('#lineageCategories', lineage.byCategory, 'No category lineage yet.');
-  renderLineageRows('#lineageChannels', lineage.byChannel, 'No channel lineage yet.');
-  renderLineageRows('#lineageDecisions', lineage.byDecision, 'No decision lineage yet.');
+  renderLineageRows('lineageUsers', lineage.byUser, 'No user lineage yet.');
+  renderLineageRows('lineageDestinations', lineage.byDestination, 'No destination lineage yet.');
+  renderLineageRows('lineageSensors', lineage.bySensor, 'No sensor lineage yet.');
+  renderLineageRows('lineageCategories', lineage.byCategory, 'No category lineage yet.');
+  renderLineageRows('lineageChannels', lineage.byChannel, 'No channel lineage yet.');
+  renderLineageRows('lineageDecisions', lineage.byDecision, 'No decision lineage yet.');
 }
 
 async function loadAudit() {
   setBusy('#tab-audit .panel', true, 'VERIFYING');
   try {
     const r = await api('/api/audit');
-    if (!r) return;
-    const d = await r.json();
+    const d = await responseJsonObject(r, null);
+    if (!d || !d.integrity || !Array.isArray(d.entries)) return;
     const ig = d.integrity;
     $('#integrity').className = `integrity ${ig.ok ? 'ok' : 'bad'}`;
     $('#integrity').innerHTML = ig.ok
       ? `${icons.shield}<span>Chain verified: ${escapeHtml(ig.count)} cryptographically linked entries.</span>`
       : `${icons.shield}<span>Integrity check failed at ${escapeHtml(ig.brokenAt)}.</span>`;
-    $('#auditRows').innerHTML = d.entries.map((a) => `<tr>
+    currentAuditEntries = d.entries;
+    renderAuditRows(currentAuditEntries);
+    markUpdated();
+  } finally {
+    setBusy('#tab-audit .panel', false);
+  }
+}
+
+function renderAuditRows(entries) {
+  const filtered = (entries || []).filter(matchesAudit);
+  const page = paginatedRows(filtered, auditPage, AUDIT_PAGE_SIZE);
+  auditPage = page.page;
+  $('#auditRows').innerHTML = page.rows.map((a) => `<tr>
       <td class="mono">${escapeHtml(fmt(a.ts))}</td>
       <td>${statusChip(statusTone(a.action), humanize(a.action), `Audit action: ${humanize(a.action)}\nActor: ${a.actor || '-'}\nQuery: ${a.queryId || '-'}\nTimestamp: ${fmt(a.ts)}`)}</td>
       <td>${escapeHtml(a.actor || '-')}</td>
       <td class="mono">${escapeHtml(a.queryId || '-')}</td>
       <td>${escapeHtml(a.detail || '')}</td>
-    </tr>`).join('');
-    markUpdated();
-  } finally {
-    setBusy('#tab-audit .panel', false);
-  }
+    </tr>`).join('') || `<tr><td colspan="5" class="empty">${searchTerm ? 'No matching audit entries' : 'No audit entries yet'}</td></tr>`;
+  renderTablePager('#auditPager', { target: 'audit', ...page });
 }
 
 async function exportEvidence(){
@@ -2352,9 +2543,9 @@ async function loadPolicy() {
     api('/api/policy'),
     api('/api/policy/templates'),
   ]);
-  if (!pRes || !tRes) return;
-  const p = await pRes.json();
-  const tpls = await tRes.json();
+  const p = await responseJsonObject(pRes, null);
+  const tpls = await responseJsonArray(tRes, null);
+  if (!p || !tpls) return;
   const [preflight, coverage] = await Promise.all([preflightPromise, coveragePromise]);
   currentCoverage = coverage || currentCoverage;
   const readonly = !canAdminWrite();
@@ -2559,8 +2750,7 @@ async function loadPolicy() {
   });
   $('#discardPolicy').onclick = loadPolicy;
   $('#testConfiguration').onclick = async () => {
-    const status = $('#polSaved');
-    status.textContent = 'VERIFYING';
+    setPolicyStatus('VERIFYING');
     const [nextPreflight, nextCoverage] = await Promise.all([
       optionalDashboardJson('/api/preflight'),
       optionalDashboardJson('/api/coverage', currentCoverage),
@@ -2569,10 +2759,9 @@ async function loadPolicy() {
     const nextHealth = configHealth(nextPreflight);
     const configStatus = $('#configurationStatus');
     if (configStatus) configStatus.innerHTML = statePill(nextHealth.state, `${nextHealth.score}/100 ready`);
-    status.textContent = nextHealth.state === 'bad'
+    setPolicyStatus(nextHealth.state === 'bad'
       ? `${nextHealth.failed} blocking check(s)`
-      : `${nextHealth.failed} warning(s), ${nextHealth.ok}/${nextHealth.total || 0} checks ready`;
-    setTimeout(() => { status.textContent = ''; }, 3600);
+      : `${nextHealth.failed} warning(s), ${nextHealth.ok}/${nextHealth.total || 0} checks ready`, 3600);
   };
   markUpdated();
   if (readonly) return;
@@ -2607,17 +2796,20 @@ async function loadPolicy() {
       blockUnapprovedAiDestinations: $('#pol_block_unapproved_ai').checked,
       responseScanMode: $('#pol_response_scan_mode').value,
     };
+    setPolicyStatus('Saving');
     const r = await api('/api/policy', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    if (!r || !r.ok) return;
-    $('#polSaved').textContent = 'Saved';
-    setTimeout(() => { $('#polSaved').textContent = ''; }, 2000);
+    if (!r) return;
+    if (!r.ok) {
+      setPolicyStatus(await apiErrorSummary(r, 'Could not save'));
+      return;
+    }
+    setPolicyStatus('Saved', 4000);
   };
   $('#runRetentionPurge').onclick = async () => {
     const r = await api('/api/retention/purge', { method: 'POST' });
     if (!r || !r.ok) return;
     const body = await r.json();
-    $('#polSaved').textContent = `Purged ${body.purged || 0} record(s)`;
-    setTimeout(() => { $('#polSaved').textContent = ''; }, 3000);
+    setPolicyStatus(`Purged ${body.purged || 0} record(s)`, 4000);
   };
   $$('.ps-tpl').forEach((b) => {
     b.onclick = async () => {

@@ -23,11 +23,20 @@ function normalizeUser(value) {
   return String(value || '').trim().toLowerCase();
 }
 
+function hasSeatLimit(value) {
+  return value != null && String(value).trim() !== '';
+}
+
+function validSeatLimit(value) {
+  const n = Number(value);
+  return Number.isInteger(n) && n > 0;
+}
+
 function parseSeatLimit(value) {
   if (value == null || value === '') return 0;
+  if (!validSeatLimit(value)) return 0;
   const n = Number(value);
-  if (!Number.isFinite(n)) return 0;
-  return Math.max(0, Math.floor(n));
+  return n;
 }
 
 function validTenantId(value) {
@@ -45,13 +54,17 @@ function config(env = process.env) {
   const explicitSaasMode = bool(resolved.SENTINEL_SAAS_MODE);
   const requireTenantContext = bool(resolved.SENTINEL_REQUIRE_TENANT_CONTEXT);
   const requireUserIdentity = bool(resolved.SENTINEL_REQUIRE_USER_IDENTITY);
+  const seatLimitConfigured = hasSeatLimit(resolved.SENTINEL_SEAT_LIMIT);
+  const seatLimitValid = seatLimitConfigured && validSeatLimit(resolved.SENTINEL_SEAT_LIMIT);
   const seatLimit = parseSeatLimit(resolved.SENTINEL_SEAT_LIMIT);
-  const saasMode = explicitSaasMode || !!tenantId || seatLimit > 0 || requireTenantContext || requireUserIdentity;
+  const saasMode = explicitSaasMode || !!tenantId || seatLimitConfigured || requireTenantContext || requireUserIdentity;
   return {
     saasMode,
     tenantId,
     tenantIdValid: !tenantId || validTenantId(tenantId),
     seatLimit,
+    seatLimitConfigured,
+    seatLimitValid,
     requireTenantContext: requireTenantContext || saasMode,
     requireUserIdentity: requireUserIdentity || saasMode,
   };
@@ -69,6 +82,7 @@ function seatReport(db, env = process.env) {
     tenantId: cfg.tenantId || null,
     saasMode: cfg.saasMode,
     seatLimit,
+    seatLimitValid: !cfg.saasMode || cfg.seatLimitValid,
     seatsUsed,
     seatsRemaining: seatLimit ? Math.max(0, seatLimit - seatsUsed) : null,
     overLimit: !!(seatLimit && seatsUsed > seatLimit),
@@ -89,6 +103,17 @@ function validateSensorAccess({ body = {}, db, env = process.env } = {}) {
       status: 'tenant_not_configured',
       action: 'TENANT_NOT_CONFIGURED',
       message: 'tenant is not configured',
+      audit: false,
+    };
+  }
+
+  if (!cfg.seatLimitValid) {
+    return {
+      ok: false,
+      statusCode: 503,
+      status: 'seat_limit_not_configured',
+      action: 'SEAT_LIMIT_NOT_CONFIGURED',
+      message: 'seat limit is not configured',
       audit: false,
     };
   }

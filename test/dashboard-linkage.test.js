@@ -149,6 +149,7 @@ test('dashboard static controls, generated policy controls, and API routes stay 
     'topEntities',
     'refreshQueue',
     'activityRows',
+    'activityPager',
     'refreshCoverage',
     'coverageScore',
     'coveragePosture',
@@ -169,15 +170,22 @@ test('dashboard static controls, generated policy controls, and API routes stay 
     'refreshLineage',
     'lineageSummary',
     'lineageUsers',
+    'lineageUsersPager',
     'lineageDestinations',
+    'lineageDestinationsPager',
     'lineageSensors',
+    'lineageSensorsPager',
     'lineageCategories',
+    'lineageCategoriesPager',
     'lineageChannels',
+    'lineageChannelsPager',
     'lineageDecisions',
+    'lineageDecisionsPager',
     'exportEvidence',
     'exportStatus',
     'integrity',
     'auditRows',
+    'auditPager',
     'configurationStatus',
     'policyBox',
     'liveTxt',
@@ -248,6 +256,7 @@ test('dashboard static controls, generated policy controls, and API routes stay 
     ['post', '/api/queries/:id/approve'],
     ['post', '/api/queries/:id/deny'],
     ['get', '/api/stats'],
+    ['get', '/api/metrics'],
     ['get', '/api/billing/seats'],
     ['get', '/api/preflight'],
     ['post', '/api/retention/purge'],
@@ -285,6 +294,8 @@ test('dashboard static controls, generated policy controls, and API routes stay 
   ].forEach((endpoint) => {
     assert.ok(dashboard.includes(endpoint), `dashboard.js no longer calls ${endpoint}`);
   });
+  assert.ok(dashboard.includes('seatLimitValid'), 'dashboard.js no longer surfaces invalid SaaS seat-limit configuration');
+  assert.ok(dashboard.includes('Seat config'), 'dashboard.js no longer labels invalid SaaS seat-limit configuration');
 });
 
 test('dashboard-backed API actions accept the payloads built by forms and buttons', async () => withServer(async (port) => {
@@ -302,6 +313,7 @@ test('dashboard-backed API actions accept the payloads built by forms and button
   for (const apiPath of [
     '/api/me',
     '/api/stats',
+    '/api/metrics',
     '/api/billing/seats',
     '/api/preflight',
     '/api/coverage',

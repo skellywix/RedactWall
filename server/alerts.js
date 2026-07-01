@@ -8,6 +8,7 @@
 require('./env').loadEnv();
 const { safeSensor, safeSensorVersionGap } = require('./sensor-metadata');
 const routing = require('./routing');
+const { outboundHttpsUrl } = require('./url-policy');
 
 function num(v, fallback) {
   const n = Number(v);
@@ -66,8 +67,10 @@ function sanitizedAlert(query, opts = {}) {
 }
 
 async function emitSecurityAlert(query, opts = {}) {
-  const url = Object.prototype.hasOwnProperty.call(opts, 'url') ? opts.url : process.env.SIEM_WEBHOOK_URL;
-  if (!url) return { sent: false, reason: 'disabled' };
+  const rawUrl = Object.prototype.hasOwnProperty.call(opts, 'url') ? opts.url : process.env.SIEM_WEBHOOK_URL;
+  if (!rawUrl) return { sent: false, reason: 'disabled' };
+  const url = outboundHttpsUrl(rawUrl);
+  if (!url) return { sent: false, reason: 'invalid_url' };
   if (!shouldAlert(query, opts)) return { sent: false, reason: 'below_threshold' };
 
   const headers = { 'Content-Type': 'application/json' };

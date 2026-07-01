@@ -460,6 +460,16 @@ function safePreview(text, analysis, prefix = '', limit = 600) {
   return prefix + detector.redact(text, analysis.findings || []).slice(0, limit);
 }
 
+function safeFileLabel(filename) {
+  const raw = String(filename || 'file').split(/[\\/]/).pop() || 'file';
+  const base = path.basename(raw)
+    .replace(/[\r\n\t]/g, ' ')
+    .slice(0, 128)
+    .trim() || 'file';
+  const analysis = detector.analyze(base);
+  return hasSensitivity(analysis) ? '[sensitive filename]' : base;
+}
+
 function responseScanOutcome(mode) {
   const normalized = policy.normalizeResponseScanMode(mode);
   if (normalized === 'block') return { status: 'response_blocked', decision: 'block', action: 'RESPONSE_BLOCKED' };
@@ -1017,6 +1027,7 @@ app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation
   if (!enforceTenantForSensor(req, res)) return;
   const { filename, contentBase64, user = 'unknown', destination = 'unknown', source = 'api', channel = 'file_upload', orgId = null, sensor = null } = req.body || {};
   if (!filename || !contentBase64) return res.status(400).json({ error: 'filename and contentBase64 required' });
+  const fileLabel = safeFileLabel(filename);
   const pol = policy.loadPolicy();
   if (policy.destinationBlocked(destination, pol)) {
     return blockDestinationByPolicy(res, {
@@ -1037,13 +1048,13 @@ app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation
   catch (e) { extracted = { text: '', processor: null, supported: true, extractionOk: false, error: 'extract_failed' }; }
   if (!extracted.supported) {
     const row = createQuery({ status: 'flagged', user, orgId, destination, source, channel, sensor,
-      redactedPrompt: '[unsupported file] ' + filename, findings: [], categories: [], entityCounts: {},
+      redactedPrompt: '[unsupported file] ' + fileLabel, findings: [], categories: [], entityCounts: {},
       riskScore: 0, maxSeverity: 0, maxSeverityLabel: 'none', reasons: ['Unsupported file type recorded'] });
-    db.appendAudit({ action: 'FILE_RECORDED', queryId: row.id, actor: user, detail: filename });
+    db.appendAudit({ action: 'FILE_RECORDED', queryId: row.id, actor: user, detail: fileLabel });
     emitSecurityAlert(row, 'FILE_RECORDED');
     broadcast('query', { type: 'flagged', query: publicQuery(row) });
     broadcast('stats', db.stats());
-    return res.json({ id: row.id, decision: 'allow', supported: false, filename });
+    return res.json({ id: row.id, decision: 'allow', supported: false, filename: fileLabel });
   }
   if (!extracted.extractionOk) {
     const ocrRequired = extracted.error === 'ocr_required' || extracted.ocrRequired === true;
@@ -1052,11 +1063,11 @@ app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation
       : extracted.error === 'timeout' ? 'File extraction timed out before inspection completed'
       : 'File could not be inspected';
     const row = createQuery({ status, user, orgId, destination, source, channel, sensor,
-      filename, processor: extracted.processor, redactedPrompt: (ocrRequired ? '[ocr required file] ' : '[unreadable file] ') + filename,
+      filename: fileLabel, processor: extracted.processor, redactedPrompt: (ocrRequired ? '[ocr required file] ' : '[unreadable file] ') + fileLabel,
       findings: [], categories: [], entityCounts: {}, riskScore: 0, maxSeverity: 0, maxSeverityLabel: 'none',
       reasons: [reason] });
     const action = ocrRequired ? 'FILE_OCR_REQUIRED' : 'FILE_BLOCKED_UNREADABLE';
-    db.appendAudit({ action, queryId: row.id, actor: user, detail: `${filename}: ${extracted.error || 'extract_failed'}` });
+    db.appendAudit({ action, queryId: row.id, actor: user, detail: `${fileLabel}: ${extracted.error || 'extract_failed'}` });
     emitSecurityAlert(row, action);
     broadcast('query', { type: status, query: publicQuery(row) });
     broadcast('stats', db.stats());
@@ -1067,7 +1078,7 @@ app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation
       status,
       supported: true,
       inspected: false,
-      filename,
+      filename: fileLabel,
       processor: extracted.processor,
       ...(ocrRequired ? { ocrRequired: true } : {}),
       reasons: [reason],
@@ -1080,18 +1091,18 @@ app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation
   const decisionPolicy = verdict.policy || pol;
   const findings = analysis.findings.map((x) => ({ type: x.type, severity: x.severity, score: x.score, masked: detector.maskValue(x.type, x.value) }));
   const categories = (analysis.categories || []).map((c) => c.category);
-  const preview = safePreview(extracted.text, analysis, '[file:' + filename + '] ');
-  const base = { user, orgId, destination, source, channel, sensor, filename, processor: extracted.processor,
+  const preview = safePreview(extracted.text, analysis, '[file:' + fileLabel + '] ');
+  const base = { user, orgId, destination, source, channel, sensor, filename: fileLabel, processor: extracted.processor,
     redactedPrompt: preview, findings, categories, entityCounts: analysis.entityCounts,
     riskScore: analysis.riskScore, maxSeverity: analysis.maxSeverity, maxSeverityLabel: analysis.maxSeverityLabel, reasons: verdict.reasons,
     ...policyDecisionMetadata(verdict) };
 
   if (verdict.decision === 'allow') {
     const row = createQuery({ status: 'allowed', ...base });
-    db.appendAudit({ action: 'FILE_ALLOWED', queryId: row.id, actor: user, detail: filename + ' risk ' + analysis.riskScore });
+    db.appendAudit({ action: 'FILE_ALLOWED', queryId: row.id, actor: user, detail: fileLabel + ' risk ' + analysis.riskScore });
     emitSecurityAlert(row, 'FILE_ALLOWED');
     broadcast('query', { type: 'allowed', query: publicQuery(row) }); broadcast('stats', db.stats());
-    return res.json({ id: row.id, decision: 'allow', supported: true, filename, riskScore: analysis.riskScore, findings, categories });
+    return res.json({ id: row.id, decision: 'allow', supported: true, filename: fileLabel, riskScore: analysis.riskScore, findings, categories });
   }
   const hardStop = analysis.findings.some((x) => decisionPolicy.alwaysBlock.includes(x.type));
   const mode = decisionPolicy.enforcementMode === 'redact' ? 'redact' : (hardStop ? 'block' : (decisionPolicy.enforcementMode || 'block'));
@@ -1099,11 +1110,11 @@ app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation
     : mode === 'warn' ? 'warned'
     : mode === 'justify' ? 'pending_justification'
     : 'pending';
-  const rawFile = '[file:' + filename + ']\n' + extracted.text.slice(0, 5000);
+  const rawFile = '[file:' + fileLabel + ']\n' + extracted.text.slice(0, 5000);
   let tokenizedPrompt, tokenVault;
   if (status === 'redacted') {
     const t = detector.tokenize(extracted.text, analysis.findings);
-    tokenizedPrompt = '[file:' + filename + ']\n' + t.text;
+    tokenizedPrompt = '[file:' + fileLabel + ']\n' + t.text;
     tokenVault = dataCrypto.seal(JSON.stringify(t.map));
   }
   const { row, releaseToken } = createQueryWithReleaseToken({
@@ -1112,7 +1123,7 @@ app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation
   const action = status === 'pending' ? 'FILE_BLOCKED'
     : status === 'redacted' ? 'FILE_REDACTED'
     : 'FILE_FLAGGED';
-  db.appendAudit({ action, queryId: row.id, actor: user, detail: filename + ': ' + verdict.reasons.join('; ') });
+  db.appendAudit({ action, queryId: row.id, actor: user, detail: fileLabel + ': ' + verdict.reasons.join('; ') });
   emitSecurityAlert(row, action);
   broadcast('query', { type: status, query: publicQuery(row) }); broadcast('stats', db.stats());
   res.json({
@@ -1122,7 +1133,7 @@ app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation
     status,
     ...releaseTokenPayload(releaseToken),
     supported: true,
-    filename,
+    filename: fileLabel,
     riskScore: analysis.riskScore,
     findings,
     categories,
@@ -1263,8 +1274,17 @@ app.get('/auth/oidc/callback', async (req, res) => {
 });
 
 const sessionWrite = [auth.requireAuth, auth.requireCsrf];
+const adminRead = [auth.requireAuth, auth.requireRole(roles.SECURITY_ADMIN)];
 const adminWrite = [auth.requireAuth, auth.requireCsrf, auth.requireRole(roles.SECURITY_ADMIN)];
 const decisionWrite = [auth.requireAuth, auth.requireCsrf, auth.requireRole(roles.SECURITY_ADMIN, roles.APPROVER)];
+const API_MAX_LIST_LIMIT = 5000;
+
+function boundedApiLimit(value, fallback = 200, max = API_MAX_LIST_LIMIT) {
+  if (value === undefined || value === null || value === '') return fallback;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(1, Math.min(Math.trunc(parsed), max));
+}
 
 app.get('/api/csrf', auth.requireAuth, (req, res) => {
   res.json({ csrfToken: auth.createCsrfToken(auth.sessionTokenFromRequest(req)) });
@@ -1337,7 +1357,7 @@ function publicQuery(q, { includeRaw = false } = {}) {
 
 app.get('/api/queries', auth.requireAuth, (req, res) => {
   const status = req.query.status;
-  const rows = db.listQueries({ status, limit: Number(req.query.limit) || 200 });
+  const rows = db.listQueries({ status, limit: boundedApiLimit(req.query.limit, 200) });
   res.json(rows.map((q) => publicQuery(q)));
 });
 
@@ -1411,12 +1431,12 @@ app.post('/api/queries/:id/deny', ...decisionWrite, validation.validateBody(vali
 
 app.get('/api/stats', auth.requireAuth, (req, res) => res.json(db.stats()));
 
-app.get('/api/billing/seats', auth.requireAuth, (req, res) => {
+app.get('/api/billing/seats', ...adminRead, (req, res) => {
   res.json(tenant.seatReport(db));
 });
 
-// Ops metrics (admin) — counts + live audit-integrity, for dashboards/monitoring.
-app.get('/api/metrics', auth.requireAuth, (req, res) => {
+// Ops metrics (admin) - counts + live audit-integrity, for dashboards/monitoring.
+app.get('/api/metrics', ...adminRead, (req, res) => {
   const integ = db.verifyAuditChain();
   res.json({ uptimeSec: Math.round(process.uptime()), ...db.stats(), auditOk: integ.ok, auditCount: integ.count, ts: new Date().toISOString() });
 });
@@ -1472,7 +1492,7 @@ app.get('/api/coverage', auth.requireAuth, (req, res) => {
 });
 
 app.get('/api/lineage', auth.requireAuth, (req, res) => {
-  const limit = Math.max(1, Math.min(Number(req.query.limit) || 1000, 5000));
+  const limit = boundedApiLimit(req.query.limit, 1000);
   const queries = db.listQueries({ limit });
   res.json({
     limit,
@@ -1517,12 +1537,12 @@ app.put('/api/policy/apply-template', ...adminWrite, validation.validateBody(val
 });
 
 app.get('/api/audit', auth.requireAuth, (req, res) => {
-  res.json({ entries: db.listAudit(Number(req.query.limit) || 200), integrity: db.verifyAuditChain() });
+  res.json({ entries: db.listAudit(boundedApiLimit(req.query.limit, 200)), integrity: db.verifyAuditChain() });
 });
 
 app.get('/api/export/evidence', auth.requireAuth, (req, res) => {
-  const queryLimit = Math.min(Number(req.query.queryLimit) || 500, 5000);
-  const auditLimit = Math.min(Number(req.query.auditLimit) || 500, 5000);
+  const queryLimit = boundedApiLimit(req.query.queryLimit, 500);
+  const auditLimit = boundedApiLimit(req.query.auditLimit, 500);
   const activePolicy = policy.loadPolicy();
   const queries = db.listQueries({ limit: queryLimit });
   const summaryQueries = db.listQueries({ all: true });

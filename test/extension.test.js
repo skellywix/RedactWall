@@ -9,6 +9,8 @@ const vm = require('vm');
 const root = path.join(__dirname, '..');
 const extensionDir = path.join(root, 'sensors', 'browser-extension');
 const content = fs.readFileSync(path.join(extensionDir, 'content.js'), 'utf8');
+const contentCss = fs.readFileSync(path.join(extensionDir, 'content.css'), 'utf8');
+const popupHtml = fs.readFileSync(path.join(extensionDir, 'popup.html'), 'utf8');
 const background = fs.readFileSync(path.join(extensionDir, 'background.js'), 'utf8');
 const manifest = JSON.parse(fs.readFileSync(path.join(extensionDir, 'manifest.json'), 'utf8'));
 const adapters = require('../detection-engine/adapters');
@@ -63,7 +65,7 @@ function loadBackground(opts = {}) {
     self: { PSAdapters: opts.adapters || adapters },
     setTimeout,
   };
-  vm.runInNewContext(background + '\nself.__test = { requestTimeoutMs, fetchJsonWithTimeout, failClosed, browserPlatform, buildHeartbeatBody, buildInstallChecks, reportInstallHealth, normalizeDestinationHost, downloadHostCandidates, downloadDestinationForPolicy, browserActionBlockRule, handleDownloadCreated };', context);
+  vm.runInNewContext(background + '\nself.__test = { requestTimeoutMs, fetchJsonWithTimeout, failClosed, browserPlatform, buildHeartbeatBody, buildInstallChecks, reportInstallHealth, refreshPolicy, normalizeDestinationHost, downloadHostCandidates, downloadDestinationForPolicy, browserActionBlockRule, handleDownloadCreated };', context);
   return {
     context,
     createdAlarms,
@@ -244,6 +246,57 @@ test('browser fallback hard-stops match regulated endpoint defaults before polic
   assert.match(background, /HEALTH_INSURANCE_ID/);
 });
 
+test('browser policy refresh preserves cached state on disabled or failed refresh', async () => {
+  const cachedPolicy = {
+    enforcementMode: 'justify',
+    governedDestinations: ['chatgpt.com'],
+    blockedBrowserActions: [{ action: 'paste', destinations: ['chatgpt.com'] }],
+  };
+  const disabled = loadBackground({
+    local: {
+      enabled: false,
+      ingestKey: 'unit-ingest-key-000',
+      policy: cachedPolicy,
+    },
+    fetch: async () => {
+      throw new Error('disabled refresh should not call fetch');
+    },
+  });
+  await disabled.context.self.__test.refreshPolicy();
+  assert.deepStrictEqual(disabled.storage.policy, cachedPolicy);
+
+  const failed = loadBackground({
+    local: {
+      serverUrl: 'https://control.example.test',
+      ingestKey: 'unit-ingest-key-000',
+      policy: cachedPolicy,
+    },
+    fetch: async () => ({ ok: false, json: async () => ({ error: 'offline' }) }),
+  });
+  await failed.context.self.__test.refreshPolicy();
+  assert.deepStrictEqual(failed.storage.policy, cachedPolicy);
+
+  const refreshed = loadBackground({
+    local: {
+      serverUrl: 'https://control.example.test',
+      ingestKey: 'unit-ingest-key-000',
+      policy: cachedPolicy,
+    },
+    fetch: async () => ({
+      ok: true,
+      json: async () => ({
+        enforcementMode: 'redact',
+        governedDestinations: ['claude.ai'],
+      }),
+    }),
+  });
+  await refreshed.context.self.__test.refreshPolicy();
+  assert.strictEqual(refreshed.storage.policy.enforcementMode, 'redact');
+  assert.deepStrictEqual(Array.from(refreshed.storage.policy.governedDestinations), ['claude.ai']);
+  assert.deepStrictEqual(Array.from(refreshed.storage.policy.blockedBrowserActions), []);
+  assert.ok(Array.from(refreshed.storage.policy.alwaysBlock).includes('US_SSN'));
+});
+
 test('destination allowlist overrides wildcard destination blocks', () => {
   assert.match(content, /A\.isGoverned\(SITE, allowed\)\) return false/);
   assert.match(background, /\.\.\.\(\(c\.policy && c\.policy\.allowedDestinations\) \|\| \[\]\)/);
@@ -264,11 +317,25 @@ test('browser block banner includes employee coaching guidance', () => {
   assert.match(content, /function coachingFor\(items\)/);
   assert.match(content, /function listForScreen\(items\)/);
   assert.match(content, /function chipHtml\(items\)/);
+  assert.match(contentCss, /\.ps-banner\{[^}]*box-sizing:border-box/);
   assert.match(content, /Sensitive data blocked/);
   assert.match(content, /before it could leave this browser/);
+  assert.match(content, /setAttribute\('role', 'alertdialog'\)/);
+  assert.match(content, /setAttribute\('aria-labelledby', titleId\)/);
+  assert.match(content, /setAttribute\('aria-describedby', detailId\)/);
+  assert.match(content, /aria-label="Business reason"/);
+  assert.match(content, /reasonInput\.setAttribute\('aria-invalid', 'true'\)/);
+  assert.match(content, /reasonInput\.addEventListener\('input'/);
+  assert.match(content, /reasonInput\.setAttribute\('aria-invalid', 'false'\)/);
+  assert.match(content, /initialFocus\.focus\(\{ preventScroll: true \}\)/);
   assert.match(content, /'<div class="ps-coach">' \+ escapeHtml\(coach\) \+ '<\/div>'/);
   assert.match(content, /PromptWall found sensitive data: ' \+ listForScreen/);
   assert.doesNotMatch(content, /this prompt contains <b>' \+ items\.join/);
+});
+
+test('browser extension motion CSS honors reduced motion preferences', () => {
+  assert.match(contentCss, /@media\s*\(prefers-reduced-motion:reduce\)\s*\{[^}]*\.ps-banner,\s*\.ps-toast\{animation:none!important\}/);
+  assert.match(popupHtml, /@media\s*\(prefers-reduced-motion:reduce\)\s*\{\s*\.slider,\s*\.slider:before\{transition:none\}\s*\}/);
 });
 
 test('browser sensitive-paste blocks wait for recorded evidence status', () => {

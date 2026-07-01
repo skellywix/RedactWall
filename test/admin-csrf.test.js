@@ -14,6 +14,7 @@ const loginJs = fs.readFileSync(path.join(root, 'server', 'public', 'login.js'),
 
 test('admin write routes include csrf middleware', () => {
   assert.match(server, /const sessionWrite = \[auth\.requireAuth,\s*auth\.requireCsrf\]/);
+  assert.match(server, /const adminRead = \[auth\.requireAuth,\s*auth\.requireRole\(roles\.SECURITY_ADMIN\)\]/);
   assert.match(server, /const adminWrite = \[auth\.requireAuth,\s*auth\.requireCsrf,\s*auth\.requireRole\(roles\.SECURITY_ADMIN\)\]/);
   assert.match(server, /const decisionWrite = \[auth\.requireAuth,\s*auth\.requireCsrf,\s*auth\.requireRole\(roles\.SECURITY_ADMIN,\s*roles\.APPROVER\)\]/);
   assert.match(server, /app\.post\(\s*'\/api\/queries\/:id\/reveal',\s*\.\.\.adminWrite,\s*validation\.validateBody\(validation\.revealSchema\),\s*requireRevealPassword,/);
@@ -28,6 +29,8 @@ test('admin write routes include csrf middleware', () => {
     assert.ok(server.includes(route), route);
   }
   assert.ok(server.includes("app.post('/api/logout', ...sessionWrite"), 'logout remains available to any authenticated session');
+  assert.ok(server.includes("app.get('/api/billing/seats', ...adminRead"), 'billing seat identities remain Security Admin only');
+  assert.ok(server.includes("app.get('/api/metrics', ...adminRead"), 'ops metrics remain Security Admin only');
 });
 
 test('dashboard fetches and sends csrf token on unsafe admin requests', () => {
@@ -39,6 +42,15 @@ test('dashboard fetches and sends csrf token on unsafe admin requests', () => {
   assert.match(dashboard, /body: JSON\.stringify\(\{ destination, decision, reason \}\)/);
 });
 
+test('dashboard policy status clears only the latest transient message', () => {
+  assert.match(dashboard, /let policyStatusTimer = null/);
+  assert.match(dashboard, /function setPolicyStatus\(message, clearAfterMs = 0\)/);
+  assert.match(dashboard, /clearTimeout\(policyStatusTimer\)/);
+  assert.match(dashboard, /if \(status\.textContent === message\) status\.textContent = ''/);
+  assert.match(dashboard, /setPolicyStatus\('Saved', 4000\)/);
+  assert.doesNotMatch(dashboard, /\$\('#polSaved'\)\.textContent = 'Saved';\s*setTimeout/);
+});
+
 test('login page discovers optional OIDC without exposing secrets', () => {
   assert.match(server, /app\.get\('\/api\/login-options'/);
   assert.match(server, /oidc\.publicOptions\(\)/);
@@ -48,7 +60,19 @@ test('login page discovers optional OIDC without exposing secrets', () => {
   assert.doesNotMatch(loginJs, /OIDC_CLIENT_SECRET|client_secret/i);
 });
 
+test('login and dashboard alerts expose accessible live feedback', () => {
+  assert.match(loginHtml, /aria-describedby="err"/);
+  assert.match(loginHtml, /id="err" role="alert" aria-live="polite"/);
+  assert.match(loginJs, /function showError\(message, fields = \[\]\)/);
+  assert.match(loginJs, /function setInvalidFields\(fields = \[\]\)/);
+  assert.match(loginJs, /setAttribute\('aria-invalid'/);
+  assert.match(index, /id="banner" role="alert" aria-live="polite"/);
+});
+
 test('dashboard requires masked password confirmation before raw reveal', () => {
+  assert.match(dashboard, /function uniqueDialogId\(prefix\)/);
+  assert.match(dashboard, /dialog\.setAttribute\('aria-labelledby', titleId\)/);
+  assert.match(dashboard, /dialog\.setAttribute\('aria-describedby', descriptionId\)/);
   assert.match(dashboard, /function askStepUpPassword/);
   assert.match(dashboard, /function askRevealPassword\(\)/);
   assert.match(dashboard, /type="password"/);
@@ -62,6 +86,8 @@ test('dashboard requires password confirmation before approving release', () => 
   assert.match(dashboard, /function askApprovePassword\(\)/);
   assert.match(dashboard, /const password = act === 'approve' \? await askApprovePassword\(\) : ''/);
   assert.match(dashboard, /JSON\.stringify\(act === 'approve' \? \{ note, password \} : \{ note \}\)/);
+  assert.match(dashboard, /function samePrincipal\(left, right\)/);
+  assert.match(dashboard, /samePrincipal\(q\.assignedUser, currentUser\)/);
   assert.match(dashboard, /function canDecide\(q = \{\}\)/);
   assert.match(dashboard, /function canReveal\(q = \{\}\)/);
 });
@@ -129,6 +155,23 @@ test('dashboard renders auditors as read-only users', () => {
   assert.match(dashboard, /\$\('#who'\)\.textContent = `\$\{me\.user\} \/ \$\{roleLabel\(currentRole\)\}`/);
   assert.match(dashboard, /Read-only auditor view/);
   assert.match(dashboard, /if \(!canAdminWrite\(\)\)/);
+  assert.match(dashboard, /canAdminWrite\(\) \? api\('\/api\/billing\/seats'\) : Promise\.resolve\(null\)/);
+});
+
+test('dashboard exposes queue filter selection state to assistive technology', () => {
+  assert.match(index, /data-queue-filter="all" type="button" aria-pressed="true"/);
+  assert.match(index, /data-queue-filter="mine" type="button" aria-pressed="false"/);
+  assert.match(dashboard, /button\.setAttribute\('aria-pressed', String\(active\)\)/);
+});
+
+test('dashboard exposes selected queue rows and incident details accessibly', () => {
+  assert.match(index, /id="queueList" class="queue-list" role="list" aria-label="Pending approval prompts"/);
+  assert.match(index, /id="incidentDetail" class="incident-detail" role="region" aria-live="polite" aria-label="Selected incident details"/);
+  assert.match(dashboard, /const isSelected = selected === q\.id/);
+  assert.match(dashboard, /role="listitem"/);
+  assert.match(dashboard, /aria-current="true"/);
+  assert.match(dashboard, /aria-controls="incidentDetail"/);
+  assert.match(dashboard, /aria-label="\$\{escapeHtml\(rowLabel\)\}"/);
 });
 
 test('dashboard filters approval queue by workflow state, category, and destination', () => {
@@ -161,4 +204,28 @@ test('dashboard exposes compact queue viewing controls', () => {
   assert.match(dashboard, /function applyQueueDensity/);
   assert.match(dashboard, /promptwall\.queueDensity/);
   assert.match(dashboard, /aria-pressed/);
+});
+
+test('dashboard global search filters audit table rows', () => {
+  assert.match(index, /id="globalSearch"/);
+  assert.match(index, /id="auditRows"/);
+  assert.match(dashboard, /let currentAuditEntries = \[\]/);
+  assert.match(dashboard, /function auditText\(entry = \{\}\)/);
+  assert.match(dashboard, /function matchesAudit\(entry\)/);
+  assert.match(dashboard, /renderAuditRows\(currentAuditEntries\)/);
+  assert.match(dashboard, /currentAuditEntries = d\.entries/);
+  assert.match(dashboard, /\(entries \|\| \[\]\)\.filter\(matchesAudit\)/);
+});
+
+test('dashboard paginates activity lineage and audit tables', () => {
+  assert.match(index, /id="activityPager"/);
+  assert.match(index, /id="lineageUsersPager"/);
+  assert.match(index, /id="auditPager"/);
+  assert.match(dashboard, /const ACTIVITY_PAGE_SIZE = 10/);
+  assert.match(dashboard, /const LINEAGE_PAGE_SIZE = 10/);
+  assert.match(dashboard, /const AUDIT_PAGE_SIZE = 10/);
+  assert.match(dashboard, /function paginatedRows\(rows, page, pageSize\)/);
+  assert.match(dashboard, /function renderTablePager\(selector/);
+  assert.match(dashboard, /data-pager-target/);
+  assert.match(dashboard, /resetTablePages\(\)/);
 });

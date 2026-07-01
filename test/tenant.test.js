@@ -26,6 +26,7 @@ test('tenant config normalizes SaaS settings', () => {
   assert.strictEqual(cfg.saasMode, true);
   assert.strictEqual(cfg.tenantId, 'cu-acme');
   assert.strictEqual(cfg.seatLimit, 25);
+  assert.strictEqual(cfg.seatLimitValid, true);
   assert.strictEqual(cfg.requireTenantContext, true);
   assert.strictEqual(cfg.requireUserIdentity, true);
 });
@@ -39,6 +40,7 @@ test('tenant config accepts PromptWall SaaS env aliases', () => {
   assert.strictEqual(cfg.saasMode, true);
   assert.strictEqual(cfg.tenantId, 'cu-acme');
   assert.strictEqual(cfg.seatLimit, 25);
+  assert.strictEqual(cfg.seatLimitValid, true);
   assert.strictEqual(cfg.requireTenantContext, true);
   assert.strictEqual(cfg.requireUserIdentity, true);
 });
@@ -111,4 +113,35 @@ test('SaaS seat limit allows known users and blocks new users', () => {
   assert.strictEqual(blocked.statusCode, 402);
   assert.strictEqual(blocked.status, 'seat_limit_blocked');
   assert.strictEqual(blocked.audit, true);
+});
+
+test('SaaS sensor access fails closed when paid seat limit is missing or invalid', () => {
+  for (const seatLimit of [undefined, '', '0', '-1', '1.5', 'not-a-number']) {
+    const env = {
+      SENTINEL_SAAS_MODE: 'true',
+      SENTINEL_TENANT_ID: 'cu-acme',
+    };
+    if (seatLimit !== undefined) {
+      env.SENTINEL_SEAT_LIMIT = seatLimit;
+    }
+    const result = tenant.validateSensorAccess({
+      body: { orgId: 'cu-acme', user: 'analyst@example.test' },
+      db: fakeDb(),
+      env,
+    });
+    const label = seatLimit === undefined ? 'missing' : seatLimit;
+    assert.strictEqual(result.ok, false, label);
+    assert.strictEqual(result.statusCode, 503, label);
+    assert.strictEqual(result.status, 'seat_limit_not_configured', label);
+    assert.strictEqual(result.audit, false, label);
+  }
+
+  const report = tenant.seatReport(fakeDb(['analyst@example.test']), {
+    SENTINEL_SAAS_MODE: 'true',
+    SENTINEL_TENANT_ID: 'cu-acme',
+    SENTINEL_SEAT_LIMIT: 'not-a-number',
+  });
+  assert.strictEqual(report.saasMode, true);
+  assert.strictEqual(report.seatLimit, 0);
+  assert.strictEqual(report.seatLimitValid, false);
 });

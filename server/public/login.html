@@ -153,14 +153,14 @@
       <h2>Sign in</h2>
       <div class="sub">Security and Audit Console</div>
       <label for="user">Username</label>
-      <input id="user" autocomplete="username" value="admin" />
+      <input id="user" autocomplete="username" value="admin" aria-describedby="err" />
       <label for="password">Password</label>
-      <input id="password" type="password" autocomplete="current-password" placeholder="Password" />
+      <input id="password" type="password" autocomplete="current-password" placeholder="Password" aria-describedby="err" />
       <label for="otp">Authenticator code</label>
-      <input id="otp" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="Required for Security Admin MFA" />
+      <input id="otp" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="Required for Security Admin MFA" aria-describedby="err" />
       <button type="submit">Continue</button>
       <button type="button" class="secondary" id="oidc" hidden>Continue with SSO</button>
-      <div class="err" id="err"></div>
+      <div class="err" id="err" role="alert" aria-live="polite"></div>
       <div class="hint">Local demo credential: <code>admin</code> / <code>ChangeMe!2026</code></div>
     </form>
   </main>

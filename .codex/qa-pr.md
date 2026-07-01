@@ -1,0 +1,405 @@
+# Objective
+
+Audit, test, improve, and deliver PromptWall section by section across UI/UX, navigation, auth, forms, backend/API, data, accessibility, responsiveness, performance, security, CI, and release readiness.
+
+# Sections Tested
+
+- Baseline install/lint/typecheck/build/test discovery - passed.
+- Navigation and routing - passed.
+- Authentication and authorization - passed.
+- Forms and validation - passed.
+- Buttons, controls, overlays, and interactive states - passed.
+- Loading, empty, error, and success states - passed.
+- API integration and data fetching - passed.
+- Backend API behavior - passed.
+- Database/persistence/migrations if present - passed.
+- State management and cache - passed.
+- Tables, search, filters, and pagination - passed.
+- File/media flows if present - passed.
+- Payments/billing if present - passed.
+- Admin/RBAC if present - passed.
+- Accessibility - passed.
+- Responsive/cross-browser behavior - passed.
+- Motion/effects/reduced-motion behavior - passed.
+- Performance and bundle health - passed.
+- Security and privacy - passed.
+- Analytics/observability if present - passed.
+- CI/CD and release readiness - passed.
+- Final e2e regression - passed.
+
+# Critical Flows Tested
+
+- Baseline local install and dependency resolution with `npm ci`.
+- Existing repo review gate through `npm run review:ci`.
+- Current admin-console Playwright baseline through the review gate.
+- Detector sync and held-out eval through the review gate.
+- Focused OIDC login test after one transient local native binding load failure.
+- Root, dashboard, login, and unauthenticated API route behavior.
+- Dashboard tab, rail, shortcut, logout, and mobile navigation coverage.
+- Deterministic approval-routing ownership behavior.
+- Failed password, missing MFA, and wrong MFA login paths do not issue session cookies; successful admin and auditor logins do.
+- Auth, CSRF, MFA, RBAC, approver, auditor, step-up, OIDC, SCIM, and security-header test coverage.
+- Dashboard policy form save, server-side field validation feedback, and invalid raw-retention rejection without policy mutation.
+- Sensor/admin validation rejects malformed payloads with sanitized field-only errors.
+- Dashboard buttons, tabs, filters, theme toggle, queue density toggle, popovers, step-up dialogs, destination review overlays, and monitor controls.
+- Destination review overlay blank/cancel/Escape path does not mutate governed destination policy.
+- Evidence export processing, failure, and button re-enable states when the export endpoint fails.
+- Queue, activity, monitor, policy save, purge, export, and search empty/error/success states.
+- Browser-extension smoke policy fixture is synced through admin policy and verified through `/api/v1/policy` before content-script assertions.
+- Dashboard activity, coverage, and policy refreshes preserve the last good state when API endpoints return transient failures.
+- Backend list/export APIs clamp blank, invalid, negative, non-finite, and oversized limit query parameters before storage access.
+- SQLite persistence, backup/restore, retention, evidence-pack, and legacy JSON migration contracts, including explicit database path migration opt-out.
+- Backup verification detects adjacent manifest hash mismatches and restore refuses mismatched backup evidence.
+- Dashboard queue refresh fallbacks avoid stale approval-queue cache after decisions, and extension policy refresh preserves cached policy on disabled or failed refresh.
+- Global search filters audit log table rows consistently with queue, activity, and lineage surfaces.
+- Activity, lineage, and audit tables expose client-side pagination controls with search reset behavior.
+- Browser file drops and local file-upload scanning block configured drop/file-upload paths before upload.
+- Direct `/api/v1/scan-file` sanitizes sensitive filenames in responses, stored query rows, redacted previews, tokenized prompts, raw-retained prefixes, and audit details.
+- Endpoint watched-file, endpoint-local OCR, signed native handoff, and MCP file-content guard flows keep file bytes and raw local filenames out of sanitized control-plane evidence.
+- SaaS/customer-silo billing surface has no payment-provider integration; paid-seat enforcement now fails closed when seat-limit config is missing or invalid, and the admin stats card surfaces invalid paid-seat configuration.
+- Admin/RBAC seat reporting is Security Admin-only, while auditor and approver sessions remain limited to sanitized evidence and assigned decisions.
+- Approver assigned-user ownership is normalized for casing and whitespace across server and dashboard checks.
+- Login and dashboard error feedback now exposes alert/live-region semantics and invalid login fields through `aria-invalid`.
+- Password step-up and destination-review dialogs now have explicit `aria-labelledby` / `aria-describedby` wiring.
+- Approval queue filters, keyboard row selection, selected row state, and selected incident details are exposed through ARIA state in the browser flow.
+- Browser-extension block/warn/justify banners now expose alertdialog semantics, initial focus, and accessible business-reason validation.
+- Mobile login, tablet dashboard, mobile dashboard, and narrow browser-extension gate banners now have no-horizontal-overflow browser coverage.
+- Runtime Playwright E2E remains Chromium-only because CI installs Chromium only; Chrome/Edge/Firefox extension packaging and platform metadata remain covered by existing package/release and unit tests.
+- SIEM alert webhooks, approval notification webhooks, Slack/Teams webhooks, ticket bridge webhooks, and native Jira/Linear API URLs now reject cleartext or URL-credential endpoints before fetch while preserving sanitized payload behavior.
+- Local observability covers health/readiness, audit-chain state, SIEM alerts, sensor heartbeat evidence, coverage posture, workflow notification status, Signal Monitor behavior, and Security Admin-only aggregate `/api/metrics`.
+- Local `review:ci` and protected GitHub CI now both enforce generated demo-guide freshness plus full browser E2E coverage, including browser-extension smoke tests.
+- CI/CD release readiness coverage includes Docker/Compose, AWS customer-silo deployment, extension package/release checks, endpoint install checks, MCP install checks, sync-check, eval, dependency audit, and Docker image build wiring.
+- Final clean-head regression passed on PR head `930da4c`, with 81 Node test files and 23 Chromium Playwright tests across admin console and browser extension.
+
+# Bugs Fixed
+
+- No runtime bugs fixed so far.
+- Section 2 fixed a test coverage gap for unauthenticated page/API route contracts.
+- Section 3 fixed a test coverage gap for failed login and failed MFA session-cookie behavior.
+- Section 4 fixed dashboard policy-save validation failures that previously returned silently when the server rejected a malformed form payload.
+- Section 5 fixed a test coverage gap for destination review overlay cancel behavior before policy mutation.
+- Section 6 fixed a test coverage gap for evidence export failure and recovery UI states.
+- Section 7 fixed dashboard loader behavior that could parse failed API responses as normal data and throw page errors or overwrite loaded state.
+- Section 8 fixed backend limit parsing so evidence exports no longer report negative scope limits and list APIs do not accept unbounded work.
+- Section 9 fixed test coverage gaps for the legacy JSON to SQLite migration path and tampered backup manifests before restore.
+- Section 10 fixed dashboard queue fallback ordering so stale activity cache cannot repopulate a decided approval item after a transient pending-refresh failure.
+- Section 11 fixed audit log global-search behavior so unrelated audit rows are hidden when searching by query ID or actor, and added pager controls for long activity, lineage, and audit tables.
+- Section 12 fixed direct scan-file filename retention so sensitive submitted filenames are replaced with `[sensitive filename]` in response, storage, broadcast, and audit evidence.
+- Section 13 fixed runtime paid-seat enforcement so malformed SaaS seat-limit config cannot silently disable billing controls after preflight failure.
+- Section 13 follow-up stabilized the full browser export-failure assertion after GitHub exposed a race in the existing secondary-controls test.
+- Section 14 fixed `/api/billing/seats` RBAC so billing-seat user identities are no longer available to every authenticated dashboard role.
+- Section 14 fixed approver assigned-user matching so casing or whitespace differences from IdP/routing data do not block legitimate assigned decisions.
+- Section 15 fixed accessibility feedback gaps for login/dashboard alerts, step-up dialogs, destination-review dialogs, browser-extension banners, queue filters, and keyboard-selected approval rows.
+- Section 16 fixed browser-extension banner sizing so padding and borders cannot push the fixed gate banner slightly off-screen on narrow AI pages.
+- Section 19 fixed outbound webhook and direct Jira URL validation so bearer/API tokens and sanitized event metadata are not sent to cleartext or URL-credential endpoints.
+- Section 20 fixed `/api/metrics` access so aggregate ops counters and audit-chain status are Security Admin-only instead of available to every authenticated role.
+- Section 21 fixed CI/local gate drift so generated demo-guide checks and browser-extension Playwright smoke coverage are enforced by the full local gate and protected GitHub workflow.
+
+# Tests Added Or Updated
+
+- Added `.codex/qa-log.md`.
+- Added `.codex/qa-pr.md`.
+- Added `.codex/full-app-qa-log.md`.
+- Added `.codex/full-app-qa-pr.md`.
+- Updated `test/server-integration.test.js` with root redirect, dashboard auth redirect, login page, and unauthenticated API 401 coverage.
+- Updated `test/admin-mfa.test.js` with failed-login, failed-MFA, and successful-login session-cookie assertions.
+- Updated `server/public/dashboard.js` with sanitized server validation error feedback for policy saves.
+- Updated `e2e/admin-console.spec.js` with invalid policy form save coverage.
+- Updated `e2e/admin-console.spec.js` with destination review overlay blank/cancel/Escape coverage.
+- Updated `e2e/admin-console.spec.js` with delayed export failure coverage for processing/error/re-enabled states.
+- Updated `e2e/browser-extension.spec.js` to remove the server-policy refresh race in extension smoke tests.
+- Reset merge-persistent policy fields in `e2e/browser-extension.spec.js` so earlier browser specs cannot leak scoped policy, routing, response-scan, or sensor-requirement state into extension assertions.
+- Updated `playwright.config.js` to run shared-server browser E2E specs with one worker.
+- Updated `server/public/dashboard.js` with guarded JSON response handling for dashboard data loaders.
+- Updated `e2e/admin-console.spec.js` with API refresh failure coverage for activity, coverage, and policy-template data.
+- Updated `server/app.js` and `server/db.js` with bounded list limit parsing.
+- Added `test/api-limits.test.js` for backend list/export blank, invalid, negative, non-finite, and oversized limit contracts.
+- Added `test/db-migration.test.js` for legacy JSON migration and explicit SQLite path opt-out coverage.
+- Updated `test/backup-store.test.js` with adjacent manifest hash-mismatch verification and restore-refusal coverage.
+- Updated `server/public/dashboard.js` to prefer fresh activity fallback over stale activity cache for pending queue refreshes.
+- Updated `e2e/admin-console.spec.js` with stale pending-queue cache coverage after an approval decision.
+- Updated `test/extension.test.js` with browser-extension policy-cache refresh coverage.
+- Updated `server/public/dashboard.js` with cached audit-row filtering for global search.
+- Updated `server/public/dashboard.js` with shared client-side table pagination helpers.
+- Updated `server/public/index.html` with activity, lineage, and audit pager containers and styling.
+- Updated `test/admin-csrf.test.js` with static audit-search wiring coverage.
+- Updated `test/dashboard-linkage.test.js` with pager element linkage checks.
+- Updated `e2e/admin-console.spec.js` with browser coverage for audit table filtering, empty search results, and searchable table pagination.
+- Updated `server/app.js` with direct scan-file filename sanitization.
+- Updated `test/validation.test.js` with direct scan-file filename privacy coverage for text and OCR-needed image files.
+- Updated `server/tenant.js` with explicit paid-seat limit validity tracking and fail-closed runtime enforcement.
+- Updated `server/public/dashboard.js` with invalid paid-seat configuration rendering.
+- Updated `test/tenant.test.js` with missing, zero, negative, fractional, and non-numeric SaaS seat-limit coverage.
+- Updated `test/dashboard-linkage.test.js` and `e2e/admin-console.spec.js` with invalid seat-limit dashboard coverage and deterministic export-failure browser coverage.
+- Updated `server/app.js` and `server/public/dashboard.js` to keep billing-seat reports Security Admin-only and avoid non-admin dashboard fetches.
+- Updated `server/roles.js` and `server/public/dashboard.js` to normalize assigned-user principal comparisons for approver ownership.
+- Added `test/roles.test.js` for normalized approver ownership and non-decider role checks.
+- Updated `test/admin-csrf.test.js`, `test/approver-role.test.js`, and `test/auditor-role.test.js` with Section 14 RBAC regressions.
+- Updated `server/public/login.html` and `server/public/login.js` with accessible login error announcements and invalid-field state.
+- Updated `server/public/index.html` and `server/public/dashboard.js` with dashboard alert, dialog, queue filter, selected queue row, and selected incident accessibility semantics.
+- Updated `sensors/browser-extension/content.js` with alertdialog and business-reason textbox semantics for the browser banner.
+- Updated `test/admin-csrf.test.js` with Section 15 accessibility wiring regressions.
+- Updated `test/extension.test.js` with browser-extension banner accessibility wiring checks.
+- Updated `e2e/admin-console.spec.js` with login alert and keyboard queue-selection browser coverage.
+- Updated `e2e/browser-extension.spec.js` with alertdialog and business-reason textbox browser coverage.
+- Updated `sensors/browser-extension/content.css` with border-box sizing for fixed gate banners.
+- Updated `e2e/admin-console.spec.js` with mobile login, tablet dashboard, and mobile dashboard no-overflow coverage.
+- Updated `e2e/browser-extension.spec.js` with narrow AI-page banner fit coverage.
+- Updated `test/extension.test.js` with a static banner sizing regression.
+- Added `server/url-policy.js` for shared outbound HTTPS URL normalization.
+- Updated `server/alerts.js` and `server/notifiers.js` to reject unsafe outbound SIEM and approval-notification URLs before fetch.
+- Updated `test/alerts.test.js` and `test/notifiers.test.js` with outbound URL security regressions.
+- Updated `docs/DEPLOYMENT.md` and `docs/APPROVAL_ROUTING.md` with the HTTPS/no-URL-credentials contract for webhook-style URLs and native Jira/Linear API URLs.
+- Updated `server/app.js` so `/api/metrics` uses Security Admin read middleware.
+- Updated `test/admin-csrf.test.js`, `test/auditor-role.test.js`, and `test/dashboard-linkage.test.js` with metrics route, role, and sanitized-payload coverage.
+- Updated `docs/DEPLOYMENT.md` with the Security Admin-only `/api/metrics` operator contract.
+- Updated `package.json` so `review:ci` runs the full `test:browser` Playwright suite instead of only `test:admin-console`.
+- Updated `.github/workflows/ci.yml` with a generated demo-guide drift check.
+- Added `test/ci-release-readiness.test.js` for local/CI gate parity and release packaging/install-check command coverage.
+
+# Commands Run
+
+- `git fetch --prune origin` - passed.
+- `git switch -c codex/full-app-qa origin/main` - passed in the baseline setup pass.
+- `git pull --ff-only` - passed, already up to date.
+- `node -v` - `v22.22.3`.
+- `npm -v` - `11.17.0`.
+- `npm ls --depth=0 --omit=optional` - passed.
+- `npm ci` - passed; 0 vulnerabilities reported by npm install audit.
+- `npm run` - passed.
+- `npm run review:ci` - passed.
+- `node --test --test-concurrency=1 test\oidc-login.test.js` - passed after one transient local full-suite native binding load failure.
+- `npm run review:ci` - passed again after the transient local failure.
+- `node --test --test-concurrency=1 test\server-integration.test.js test\dashboard-linkage.test.js test\routing.test.js` - passed before section 2 edit, 11 tests.
+- `npm run test:admin-console` - first section 2 rerun hit a transient local port `4211` health URL collision before tests.
+- `netstat -ano | Select-String ':4211'` - no active listener after the transient Playwright failure, only `TIME_WAIT` sockets.
+- `Invoke-WebRequest http://127.0.0.1:4211/healthz` - timed out after the transient failure.
+- `npm run test:admin-console` - passed on serial rerun, 6 Chromium tests.
+- `node --test --test-concurrency=1 test\server-integration.test.js` - passed after section 2 edit, 3 tests.
+- `node --test --test-concurrency=1 test\dashboard-linkage.test.js test\routing.test.js` - passed after section 2 edit, 9 tests.
+- `node scripts/run-node-tests.js test\auth.test.js test\admin-mfa.test.js test\admin-csrf.test.js test\approver-role.test.js test\auditor-role.test.js test\approval-stepup.test.js test\reveal-stepup.test.js test\oidc-login.test.js test\scim.test.js test\security-headers.test.js` - passed before section 3 edit, 36 tests.
+- `node --test --test-concurrency=1 test\admin-mfa.test.js` - passed after section 3 edit, 1 test.
+- `node scripts/run-node-tests.js test\auth.test.js test\admin-mfa.test.js test\admin-csrf.test.js test\approver-role.test.js test\auditor-role.test.js test\approval-stepup.test.js test\reveal-stepup.test.js test\oidc-login.test.js test\scim.test.js test\security-headers.test.js` - passed after section 3 edit, 36 tests.
+- `node --test --test-concurrency=1 test\validation.test.js test\dashboard-linkage.test.js` - passed after section 4 edit, 48 tests.
+- `npm run test:admin-console` - failed first after the section 4 UI change because the expected `/api/policy` validation `400` was still counted as an unexpected UI problem by the shared Playwright collector.
+- `npm run test:admin-console` - passed after scoping that expected validation `400`, 6 Chromium tests.
+- `git diff --check` - passed with the repo's usual CRLF working-copy warnings.
+- `npm run test:admin-console` - passed after section 5 edit, 6 Chromium tests.
+- `node --test --test-concurrency=1 test\admin-csrf.test.js test\dashboard-linkage.test.js` - passed after section 5 edit, 13 tests.
+- `npm run test:admin-console` - failed first after the section 6 test addition because the test stayed on the audit tab before clicking the policy tab's `View coverage` button.
+- `npm run test:admin-console` - passed after returning to the policy tab before the existing `View coverage` assertion, 6 Chromium tests.
+- `node --test --test-concurrency=1 test\evidence-export-ui.test.js` - passed after section 6 edit, 2 tests.
+- `npm run test:browser-extension` - failed first after the policy sync addition because the assertion did not account for server-normalized `enabled: true`.
+- `$env:PLAYWRIGHT_PORT='4241'; npm run test:browser-extension` - passed after comparing normalized browser-action contract fields and clearing merge-persistent policy fields, 8 Chromium tests.
+- `npm run test:browser` - failed locally with admin-console setup prompts returning `destination_blocked` while extension policy sync ran in a parallel worker against the same temp server.
+- `npm run test:browser` - failed once after serialization when a local Windows Playwright worker crashed and left a stale Playwright server on port `4211`; exact stale `playwright-server` and `promptwall-extension-e2e` Chromium processes were stopped.
+- `$env:PLAYWRIGHT_PORT='4241'; npm run test:browser` - passed after stale harness cleanup and the fuller policy reset, 14 Chromium tests.
+- `npm run review:ci` - passed after browser-suite stabilization.
+- `gh pr checks 54 --watch --interval 10` - passed on head `6fccc30`, two `test` checks and two `docker` checks.
+- `$env:PLAYWRIGHT_PORT='4241'; npx playwright test admin-console.spec.js --grep "preserves loaded API data" --reporter=line` - passed after section 7 edit, 1 Chromium test.
+- `$env:PLAYWRIGHT_PORT='4241'; npm run test:admin-console` - passed after section 7 edit, 7 Chromium tests.
+- `node --test --test-concurrency=1 test\dashboard-linkage.test.js test\admin-csrf.test.js` - passed after section 7 edit, 13 tests.
+- `npm run review:ci` - passed after section 7 edit.
+- `node --test --test-concurrency=1 test\api-limits.test.js` - passed after section 8 edit, 1 test.
+- `node --test --test-concurrency=1 test\api-limits.test.js test\db.test.js test\dashboard-linkage.test.js test\validation.test.js` - passed after section 8 edit, 58 tests.
+- `npm run review:ci` - passed after section 8 edit.
+- `gh pr checks 54 --watch --interval 10` - passed on head `1fd658c`, two `test` checks and two `docker` checks.
+- `node --test --test-concurrency=1 test\db.test.js test\backup-store.test.js test\retention.test.js test\evidence-pack.test.js test\evidence.test.js` - passed before section 9 backup-manifest edit, 29 tests.
+- `node --test --test-concurrency=1 test\db-migration.test.js` - passed after section 9 edit, 2 tests.
+- `node --test --test-concurrency=1 test\db-migration.test.js test\db.test.js test\backup-store.test.js test\retention.test.js test\evidence-pack.test.js` - passed after section 9 backup-manifest edit, 24 tests.
+- `node --test --test-concurrency=1 test\db.test.js test\db-migration.test.js test\backup-store.test.js test\retention.test.js test\evidence-pack.test.js test\evidence.test.js test\policy-history.test.js test\preflight.test.js test\env.test.js` - passed before section 9 backup-manifest edit, 74 tests.
+- `node --test --test-concurrency=1 test\backup-store.test.js` - passed after section 9 backup-manifest edit, 6 tests.
+- `node --test --test-concurrency=1 test\db.test.js test\db-migration.test.js test\backup-store.test.js test\retention.test.js test\evidence-pack.test.js test\evidence.test.js test\policy-history.test.js test\preflight.test.js test\env.test.js` - passed after section 9 backup-manifest edit, 75 tests.
+- `npm run review:ci` - passed after section 9 edit.
+- `node --test --test-concurrency=1 test\extension.test.js` - failed first after section 10 edit because the new VM-backed assertion compared cross-realm arrays.
+- `node --test --test-concurrency=1 test\extension.test.js` - passed after normalizing cross-realm arrays, 31 tests.
+- `node --test --test-concurrency=1 test\extension.test.js test\dashboard-linkage.test.js test\policy-scope.test.js test\policy-history.test.js` - passed after section 10 edit, 49 tests.
+- `$env:PLAYWRIGHT_PORT='4241'; npx playwright test admin-console.spec.js --grep "avoids stale queue cache" --reporter=line` - failed before tests because a stale local Playwright harness still held the port.
+- `$env:PLAYWRIGHT_PORT='4257'; npx playwright test admin-console.spec.js --grep "avoids stale queue cache" --reporter=line` - passed, 1 Chromium test.
+- `node --test --test-concurrency=1 test\dashboard-linkage.test.js test\admin-csrf.test.js` - passed after section 10 dashboard edit, 13 tests.
+- `$env:PLAYWRIGHT_PORT='4257'; npm run test:admin-console` - failed while tightening the new regression selector and target-specific queue assertion.
+- `$env:PLAYWRIGHT_PORT='4257'; npm run test:admin-console` - passed after the selector/assertion fixes, 8 Chromium tests.
+- `$env:PLAYWRIGHT_PORT='4258'; npm run test:browser-extension` - passed after section 10 edit, 8 Chromium tests.
+- `npm run review:ci` - failed first after section 10 edit at the admin-console step because the default local Playwright health URL on port `4211` was still in use; listener inspection showed only `TIME_WAIT` sockets afterward.
+- `npm run review:ci` - passed on rerun after the port cleared, including 78 node test files, 8 admin-console Chromium tests, `sync-check`, and `eval`.
+- `node --check server\public\dashboard.js` - passed after section 11 edit.
+- `node --test --test-concurrency=1 test\dashboard-linkage.test.js test\coverage.test.js` - passed after section 11 edit, 12 tests.
+- `$env:PLAYWRIGHT_PORT='4261'; npx playwright test admin-console.spec.js --grep "paginates searchable activity" --reporter=line` - passed after section 11 edit, 1 Chromium test.
+- `$env:PLAYWRIGHT_PORT='4262'; npm run test:admin-console` - passed after section 11 edit, 10 Chromium tests.
+- `node --test --test-concurrency=1 test\admin-csrf.test.js test\dashboard-linkage.test.js` - passed after section 11 edit, 15 tests.
+- `git diff --check` - passed after section 11 edit with the repo's usual CRLF working-copy warnings.
+- `npm run review:ci` - passed after section 11 edit, including 78 node test files, 10 admin-console Chromium tests, `sync-check`, and `eval`.
+- `node --check server\app.js` - passed after section 12 edit.
+- `node --test --test-concurrency=1 test\processors.test.js` - passed after section 12 edit, 9 tests.
+- `node --test --test-concurrency=1 test\validation.test.js test\endpoint-agent.test.js test\endpoint-ocr.test.js test\native-handoff.test.js test\native-handoff-writer.test.js test\mcp-guard.test.js test\mcp-connector-sdk.test.js test\mcp-microsoft365-connector.test.js` - passed after section 12 edit, 106 tests.
+- `node --test --test-concurrency=1 test\extension.test.js` - passed after section 12 edit, 31 tests.
+- `$env:PLAYWRIGHT_PORT='4264'; npm run test:browser-extension` - passed after section 12 edit, 8 Chromium tests.
+- `git diff --check` - passed after section 12 edit with the repo's usual CRLF working-copy warnings.
+- `node --test --test-concurrency=1 test\processors.test.js test\validation.test.js` - passed after duplicate-test cleanup, 56 tests.
+- `npm run review:ci` - passed after section 12 edit, including 78 node test files, 10 admin-console Chromium tests, `sync-check`, and `eval`.
+- `$env:PLAYWRIGHT_PORT='4265'; npm run review:ci` - passed after section 12 edit, including docs demo guide check, AI domain coverage check, 78 node test files, 10 admin-console Chromium tests, `sync-check`, and `eval`.
+- `node --check server\tenant.js` - passed after section 13 edit.
+- `node --check server\public\dashboard.js` - passed after section 13 edit.
+- `node --test --test-concurrency=1 test\tenant.test.js test\saas-tenancy.test.js test\preflight.test.js test\setup.test.js test\dashboard-linkage.test.js test\db.test.js` - passed after section 13 edit, 52 tests.
+- `$env:PLAYWRIGHT_PORT='4267'; npx playwright test admin-console.spec.js --grep "invalid SaaS seat-limit" --reporter=line` - passed after section 13 edit, 1 Chromium test.
+- `$env:PLAYWRIGHT_PORT='4268'; npm run review:ci` - passed after section 13 edit, including docs demo guide check, AI domain coverage check, 78 node test files, 11 admin-console Chromium tests, `sync-check`, and `eval`.
+- `node --check e2e\admin-console.spec.js` - passed after GitHub browser-test failure reproduction fix.
+- `$env:PLAYWRIGHT_PORT='4268'; npx playwright test admin-console.spec.js --grep "secondary controls" --reporter=line` - passed after GitHub browser-test failure reproduction fix, 1 Chromium test.
+- `$env:PLAYWRIGHT_PORT='4269'; $env:CI='1'; npx playwright test admin-console.spec.js --grep "secondary controls" --reporter=line` - passed after GitHub browser-test failure reproduction fix, 1 Chromium test with retry behavior enabled.
+- `$env:PLAYWRIGHT_PORT='4271'; npm run test:browser` - passed after GitHub browser-test failure reproduction fix, 19 Chromium tests.
+- `npm run review:ci` - passed after GitHub browser-test failure reproduction fix, including docs demo guide check, AI domain coverage check, 78 node test files, 11 admin-console Chromium tests, `sync-check`, and `eval`.
+- `node --check server\roles.js` - passed after section 14 edit.
+- `node --check server\app.js` - passed after section 14 edit.
+- `node --check server\public\dashboard.js` - passed after section 14 edit.
+- `node --test --test-concurrency=1 test\roles.test.js test\approver-role.test.js test\auditor-role.test.js test\auth.test.js test\admin-mfa.test.js test\approval-stepup.test.js test\reveal-stepup.test.js test\oidc-login.test.js test\scim.test.js test\admin-csrf.test.js` - passed after section 14 edit, 38 tests.
+- `$env:PLAYWRIGHT_PORT='4272'; npm run test:admin-console` - passed after section 14 edit, 11 Chromium tests.
+- `npm run review:ci` - passed after section 14 edit, including docs demo guide check, AI domain coverage check, 79 node test files, 11 admin-console Chromium tests, `sync-check`, and `eval`.
+- `node --check server\public\login.js` - passed after section 15 edit.
+- `node --check server\public\dashboard.js` - passed after section 15 edit.
+- `node --check sensors\browser-extension\content.js` - passed after section 15 edit.
+- `node --check e2e\admin-console.spec.js` - passed after section 15 edit.
+- `node --check e2e\browser-extension.spec.js` - passed after section 15 edit.
+- `node --test --test-concurrency=1 test\admin-csrf.test.js test\dashboard-linkage.test.js` - passed after section 15 edit, 18 tests.
+- `node --test --test-concurrency=1 test\extension.test.js` - passed after section 15 edit, 31 tests.
+- `$env:PLAYWRIGHT_PORT='4283'; npx playwright test admin-console.spec.js --grep "login form announces|controls and forms" --reporter=line` - passed after section 15 edit, 2 Chromium tests.
+- `$env:PLAYWRIGHT_PORT='4284'; npx playwright test browser-extension.spec.js --grep "warn banner|justify banner" --project=chromium --reporter=line` - passed after section 15 edit, 2 Chromium tests.
+- `$env:PLAYWRIGHT_PORT='4285'; npx playwright test browser-extension.spec.js --grep "blocks a synthetic SSN" --project=chromium --reporter=line` - passed after section 15 edit, 1 Chromium test.
+- `$env:PLAYWRIGHT_PORT='4286'; npm run test:admin-console` - passed after section 15 edit, 12 Chromium tests.
+- `$env:PLAYWRIGHT_PORT='4287'; npm run test:browser-extension` - passed after section 15 edit, 8 Chromium tests.
+- `git diff --check` - passed after section 15 edit with the repo's usual CRLF working-copy warnings.
+- `$env:PLAYWRIGHT_PORT='4288'; npm run review:ci` - passed after section 15 edit, including docs demo guide check, AI domain coverage check, 79 node test files, 12 admin-console Chromium tests, `sync-check`, and `eval`.
+- `node --check e2e\admin-console.spec.js` - passed after section 16 edit.
+- `node --check e2e\browser-extension.spec.js` - passed after section 16 edit.
+- `node --test --test-concurrency=1 test\extension.test.js` - passed after section 16 edit, 31 tests.
+- `$env:PLAYWRIGHT_PORT='4290'; npx playwright test admin-console.spec.js --grep "login page fits mobile|mobile layout" --reporter=line` - passed after section 16 edit, 2 Chromium tests.
+- `$env:PLAYWRIGHT_PORT='4293'; npx playwright test browser-extension.spec.js --grep "block banner fits narrow" --project=chromium --reporter=line` - passed after section 16 edit, 1 Chromium test.
+- `$env:PLAYWRIGHT_PORT='4294'; npm run test:admin-console` - passed after section 16 edit, 13 Chromium tests.
+- `$env:PLAYWRIGHT_PORT='4295'; npm run test:browser-extension` - passed after section 16 edit, 9 Chromium tests.
+- `git diff --check` - passed after section 16 edit with the repo's usual CRLF working-copy warnings.
+- `$env:PLAYWRIGHT_PORT='4296'; npm run review:ci` - passed after section 16 edit, including docs demo guide check, AI domain coverage check, 79 node test files, 13 admin-console Chromium tests, `sync-check`, and `eval`.
+- `node --check e2e\browser-extension.spec.js` - passed after section 17 edit.
+- `node --test --test-concurrency=1 test\extension.test.js` - passed after section 17 edit, 32 tests.
+- `$env:PLAYWRIGHT_PORT='4298'; npx playwright test browser-extension.spec.js --grep "block and paste notices honor reduced motion" --project=chromium --reporter=line` - passed after section 17 edit, 1 Chromium test.
+- `$env:PLAYWRIGHT_PORT='4299'; npx playwright test admin-console.spec.js --grep "admin console login, approval|signal operations monitoring" --reporter=line` - passed after section 17 edit, 2 Chromium tests covering the existing admin reduced-motion assertions.
+- `$env:PLAYWRIGHT_PORT='4300'; npm run test:browser-extension` - passed after section 17 edit, 10 Chromium tests.
+- `git diff --check` - passed after section 17 edit with the repo's usual CRLF working-copy warnings.
+- `$env:PLAYWRIGHT_PORT='4301'; npm run review:ci` - passed after section 17 edit, including docs demo guide check, AI domain coverage check, 79 node test files, 13 admin-console Chromium tests, `sync-check`, and `eval`.
+- `node --test --test-concurrency=1 test\asset-budget.test.js` - passed after section 18 edit, 3 tests.
+- `npm test` - passed after section 18 edit, 80 node test files.
+- `git diff --check` - passed after section 18 edit with the repo's usual CRLF working-copy warnings.
+- `$env:PLAYWRIGHT_PORT='4303'; npm run review:ci` - passed after section 18 edit, including docs demo guide check, AI domain coverage check, 80 node test files, 13 admin-console Chromium tests, `sync-check`, and `eval`.
+- `node --check server\public\dashboard.js` - passed after section 18 CI follow-up fix.
+- `node --test --test-concurrency=1 test\admin-csrf.test.js` - passed after section 18 CI follow-up fix, 17 tests.
+- `$env:PLAYWRIGHT_PORT='4305'; npx playwright test admin-console.spec.js --grep "secondary controls and dialog cancels" --reporter=line` - passed after section 18 CI follow-up fix, 1 Chromium test.
+- `$env:PLAYWRIGHT_PORT='4306'; npm run test:admin-console` - passed after section 18 CI follow-up fix, 13 Chromium tests.
+- `$env:PLAYWRIGHT_PORT='4307'; npm run review:ci` - passed after section 18 CI follow-up fix, including docs demo guide check, AI domain coverage check, 80 node test files, 13 admin-console Chromium tests, `sync-check`, and `eval`.
+- `node --check server\notifiers.js` - passed after section 19 edit.
+- `node --check server\alerts.js` - passed after section 19 edit.
+- `node --check server\url-policy.js` - passed after section 19 edit.
+- `node --test --test-concurrency=1 test\alerts.test.js test\notifiers.test.js test\workflow-notifications.test.js test\workflow.test.js` - passed after section 19 edit, 25 tests.
+- `git diff --check` - passed after section 19 edit with the repo's usual CRLF working-copy warnings.
+- `npm run docs:demo-guide:check` - passed after section 19 docs edit.
+- `npm test` - passed after section 19 edit, 80 node test files.
+- `$env:PLAYWRIGHT_PORT='4309'; npm run review:ci` - passed after section 19 edit, including docs demo guide check, AI domain coverage check, 80 node test files, 13 admin-console Chromium tests, `sync-check`, and `eval`.
+- `node --check server\app.js` - passed after section 20 edit.
+- `node --test --test-concurrency=1 test\admin-csrf.test.js test\auditor-role.test.js test\dashboard-linkage.test.js` - passed after section 20 edit, 20 tests.
+- `git diff --check` - passed after section 20 edit with the repo's usual CRLF working-copy warnings.
+- `npm run docs:demo-guide:check` - passed after section 20 docs edit.
+- `npm test` - passed after section 20 edit, 80 node test files.
+- `$env:PLAYWRIGHT_PORT='4311'; npm run review:ci` - passed after section 20 edit, including docs demo guide check, AI domain coverage check, 80 node test files, 13 admin-console Chromium tests, `sync-check`, and `eval`.
+- `node --test --test-concurrency=1 test\ci-release-readiness.test.js test\docker-deployment.test.js test\extension-release-check.test.js test\endpoint-install-check.test.js test\mcp-install-check.test.js test\aws-deployment.test.js` - passed after section 21 edit, 30 tests.
+- `npm run docs:demo-guide:check` - passed after section 21 edit.
+- `npm test` - passed after section 21 edit, 81 node test files.
+- `$env:PLAYWRIGHT_PORT='4313'; npm run review:ci` - passed after section 21 edit, including docs demo guide check, AI domain coverage check, 81 node test files, 23 Chromium Playwright tests across admin console and browser extension, `sync-check`, and `eval`.
+- `git status --short --branch` - clean before final regression on `codex/full-app-qa...origin/codex/full-app-qa`.
+- `git log -1 --oneline` - `930da4c test(ci): align release gates`.
+- `gh pr view 54 --json headRefOid,statusCheckRollup,mergeStateStatus,url` - PR head `930da4c`, merge state `CLEAN`, duplicate `test` and `docker` checks all passed.
+- `$env:PLAYWRIGHT_PORT='4317'; npm run review:ci` - passed for final regression, including `git diff --check`, docs demo guide check, AI domain coverage check, 81 node test files, 23 Chromium Playwright tests across admin console and browser extension, `sync-check`, and `eval`.
+
+# CI Status
+
+- PR #54 is open: `https://github.com/skellywix/promptwall/pull/54`
+- GitHub `test` and `docker` checks were passing on PR head `918eda0` before the local Section 20 update.
+- GitHub `test` and `docker` checks passed on PR head `918eda0` after the Section 19 update.
+- GitHub `test` and `docker` checks passed on PR head `4d9105f` after the Section 20 update.
+- GitHub push CI on `d37c04f` exposed the Section 18 policy-save status race; follow-up head `d81b5c7` fixed it and both duplicate `test` and `docker` checks passed.
+- Existing merged PR #53 is on `main` and also had passing GitHub `test` and `docker` checks.
+- Merge status before the final QA-note update: `CLEAN` on PR head `930da4c`. The final QA-note update is documentation-only and is pushed through the same protected GitHub checks before handoff.
+
+# Accessibility Notes
+
+- Baseline review gate includes the admin-console Playwright suite.
+- Prior merged UI/UX slice added active tab `aria-current="page"` state and an explicit global search accessible name.
+- Section 2 browser validation rechecked dashboard tab, shortcut, logout, and mobile navigation through the admin-console suite.
+- Section 15 passed with accessible login errors, dashboard alerts, step-up and destination-review dialog labels/descriptions, extension banner alertdialogs, queue filter `aria-pressed`, keyboard-selected approval rows, and a live selected-incident region.
+
+# Security And Privacy Notes
+
+- No runtime security, auth, policy, detector, persistence, or logging behavior changed in section 1.
+- Section 2 did not change runtime auth/routing code. It added regression coverage that unauthenticated browser routes redirect while unauthenticated API routes return JSON `401`.
+- Section 3 did not change runtime auth/session/RBAC code. It added regression coverage proving failed password and failed MFA paths do not issue `promptwall_session`.
+- Section 4 changed dashboard validation feedback only. It displays sanitized validation field names returned by the server and does not echo rejected field values.
+- Section 5 did not change runtime code. It added browser coverage that canceling destination review overlays does not mutate governed destination policy.
+- Section 6 did not change runtime code. It added export failure UI coverage and confirmed the dashboard export helper does not call reveal/raw-prompt APIs.
+- Browser-extension CI stabilization changed test code only; it drives policy through authenticated admin policy updates and the ingest-key protected sensor policy endpoint before extension assertions.
+- Browser-suite isolation changed Playwright test configuration only; it serializes specs that share mutable temp server state.
+- Section 7 changed dashboard response handling for existing authenticated routes only. Generic loaders now discard failed response bodies instead of rendering upstream error details, while identity setup keeps its sanitized validation-error display.
+- Section 8 clamps backend list/export query limits before storage access and does not change auth, CSRF, RBAC, release-token, raw reveal, detector, or tenant-access behavior.
+- Section 9 changed tests only. Migration coverage runs against a copied temp DB runtime and synthetic data, not the ignored local runtime database. Backup-manifest tamper coverage also uses temp SQLite backups and synthetic rows.
+- Section 10 changes dashboard cache fallback ordering and extension tests only. It does not change auth, CSRF, raw reveal, evidence export, detector, or persistence behavior.
+- Section 11 filters and paginates already-loaded sanitized dashboard rows client-side only. It does not call reveal/raw-prompt APIs or change auth, CSRF, RBAC, evidence export, detector, or persistence behavior.
+- Section 12 replaces sensitive direct scan-file filenames with `[sensitive filename]` in response, storage, broadcast, raw-retained prefixes, tokenized prompts, and audit evidence while keeping original filenames transient for processor selection only.
+- Section 13 adds no payment provider, card data, checkout, billing webhook, or external billing network path. It fails closed for malformed paid-seat config before accepting SaaS sensor events and renders only aggregate billing config state in the stats card.
+- Section 14 keeps billing-seat user identities Security Admin-only, preserves auditor/approver sanitized evidence boundaries, and normalizes approver ownership without broadening role access.
+- Section 15 changes UI accessibility semantics and client-side invalid-field state only; login errors remain generic, queue row labels use already-rendered sanitized metadata, and extension banner labels use sanitized detector/coaching text.
+- Section 16 changes extension CSS sizing and browser regression tests only; no auth, CSRF, RBAC, detector, persistence, evidence export, tenant, billing, or network behavior changed.
+- Section 17 changes CSS motion preferences and browser regression tests only; no auth, CSRF, RBAC, detector, persistence, evidence export, tenant, billing, or network behavior changed.
+- Section 18 adds asset-budget tests and fixes dashboard policy-save status timing; the runtime change is client-side feedback only and does not change auth, detector, persistence, logging, or network behavior.
+- Section 19 changes outbound notification and alert URL validation only. It now fails closed for unsafe SIEM and approval webhook-style URLs before fetch, preventing bearer/API tokens and sanitized workflow metadata from being sent over cleartext HTTP or URL-credential endpoints. SMTP keeps its documented TLS controls and explicit insecure-local-relay opt-in.
+- Section 20 narrows `/api/metrics` access from any authenticated role to Security Admin-only and keeps the payload aggregate-only. The route returns uptime, aggregate query counts, audit-chain status/count, and timestamp, with live tests asserting held prompt secrets are omitted.
+- Section 21 changes release gates and tests only. It does not change runtime auth, CSRF, RBAC, raw reveal, detector behavior, persistence, logging, alert delivery, evidence export, or network behavior.
+- Section 21 reduces release drift risk by enforcing generated demo-guide freshness in GitHub CI and browser-extension smoke coverage in the local full gate.
+- Section 22 is evidence-only and does not change runtime auth, CSRF, RBAC, raw reveal, detector behavior, persistence, logging, notification delivery, evidence export, deployment, or network behavior.
+- Baseline tests include auth, CSRF, MFA, RBAC, validation, sanitized alerting, evidence export, retention, and detector privacy checks.
+- `npm ci` reported 0 vulnerabilities in npm's install audit.
+
+# Performance And Bundle Notes
+
+- Section 18 measured shipped admin and browser-extension assets by raw and gzip bytes.
+- Section 18 added budgets for admin public assets, browser-extension assets, aggregate extension payload size, and generated Chrome/Edge/Firefox extension zip size.
+- Current measured largest assets were `dashboard.js` at 130,759 raw bytes / 30,414 gzip bytes and `index.html` at 124,804 raw bytes / 21,212 gzip bytes; current generated Chrome extension zip measured 52,300 bytes.
+- GitHub push CI on `d37c04f` exposed and drove a dashboard status timer fix: rapid policy saves now cancel stale clear timers before setting a newer status.
+
+# Reduced-Motion Notes
+
+- Section 17 passed with existing admin-console reduced-motion assertions for live status and Signal Monitor pulse states.
+- Section 17 added extension reduced-motion fallbacks for injected banners/toasts and popup slider transitions.
+- Section 17 added live extension coverage proving reduced-motion notices do not animate while sensitive prompts remain unsent.
+
+# Responsive Notes
+
+- Prior merged UI/UX evidence includes mobile dashboard content-tab coverage.
+- Section 16 passed with mobile login, tablet dashboard, mobile dashboard, and narrow extension banner no-overflow coverage.
+- Runtime Playwright E2E remains Chromium-only because CI installs Chromium only; cross-browser extension packaging and browser platform metadata remain covered by package/release and unit tests.
+
+# Artifacts / Screenshots / Traces
+
+- `.codex/qa-log.md`
+- `.codex/qa-pr.md`
+- `.codex/full-app-qa-log.md`
+- `.codex/full-app-qa-pr.md`
+- Existing carried-forward artifacts: `.codex/ui-ux-qa-log.md`, `.codex/ui-ux-pr.md`
+- Section 2 through section 22 test evidence is recorded in `.codex/full-app-qa-log.md`.
+
+# Risks
+
+- Full 22-section application QA is complete locally; the final QA-note update is documentation-only and is included in the post-push GitHub check watch before merge handoff.
+- No separate lint/typecheck/build scripts exist in `package.json`; current baseline relies on the repo's Node tests, Playwright tests, detector checks, docs drift checks, and CI workflow.
+- Cloudflare Radar enrichment in `ai-domains:check` was skipped locally because `CLOUDFLARE_API_TOKEN` is not configured; static AI-domain coverage still passed.
+- One local `npm run review:ci` attempt failed when `better-sqlite3` could not resolve its native binding during `test/oidc-login.test.js`; the focused OIDC test and a full rerun passed without code changes.
+- One section 2 admin-console rerun failed before tests because the local Playwright health URL on port `4211` was briefly occupied during parallel validation. A listener check showed no stale server, and the serial rerun passed.
+- Broader manual auth abuse, rate-limit, cross-session, and external dependency-audit checks remain possible follow-up security depth beyond Section 19's focused runtime coverage.
+- This repo has no payment-provider integration; section 13 covers the existing billing-adjacent paid-seat controls only.
+- Section 4 intentionally triggered a local validation `400` in Playwright; the final rerun passed after the test explicitly scoped that expected response.
+- GitHub `test` failed on PR heads `a638063` and `1d85101` in the browser-extension smoke job before the policy-sync test fix; the fixed head `6fccc30` passed GitHub `test` and `docker`.
+- Local `test:browser` showed shared-state interference with multiple Playwright workers before the single-worker config fix.

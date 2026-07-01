@@ -35,6 +35,11 @@ function collectUiProblems(page) {
   return problems;
 }
 
+async function expectNoHorizontalOverflow(page, allowance = 1) {
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(allowance);
+}
+
 async function createHeldPrompt(request, { suffix, user, destination, source = 'browser_extension', channel = 'submit' }) {
   const response = await request.post('/api/v1/gate', {
     headers: { 'x-api-key': 'e2e-ingest-key' },
@@ -104,6 +109,44 @@ async function setStoreRawForApproval(page, enabled) {
   }, enabled);
 }
 
+async function savePolicyMode(page, mode) {
+  await page.locator(`input[name="mode"][value="${mode}"]`).check();
+  await page.getByRole('button', { name: 'Save changes' }).click();
+  await expect(page.locator('#polSaved')).toHaveText('Saved');
+}
+
+test('login form announces authentication errors accessibly', async ({ page }) => {
+  await page.goto('/login.html?oidc=failed');
+  await expect(page.getByRole('alert')).toHaveText('SSO sign-in failed. Try again or use a local account.');
+
+  await page.locator('#user').fill('admin');
+  await page.locator('#password').fill('wrong-password');
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await expect(page.getByRole('alert')).toHaveText('Invalid credentials. Try again.');
+  await expect(page.locator('#user')).toHaveAttribute('aria-invalid', 'true');
+  await expect(page.locator('#password')).toHaveAttribute('aria-invalid', 'true');
+  await expect(page.locator('#otp')).toHaveAttribute('aria-invalid', 'false');
+
+  await page.locator('#password').fill('e2e-pass');
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await expect(page).toHaveURL(/\/index\.html$/);
+});
+
+test('login page fits mobile viewport without horizontal overflow', async ({ page }) => {
+  const problems = collectUiProblems(page);
+  await page.setViewportSize({ width: 360, height: 740 });
+  await page.goto('/login.html?oidc=failed');
+
+  await expect(page.getByRole('heading', { name: 'PromptWall' })).toBeVisible();
+  await expect(page.getByRole('alert')).toHaveText('SSO sign-in failed. Try again or use a local account.');
+  await expect(page.getByLabel('Username')).toBeVisible();
+  await expect(page.getByLabel('Password')).toBeVisible();
+  await expect(page.getByLabel('Authenticator code')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Continue' })).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+  expect(problems).toEqual([]);
+});
+
 test('admin console theme toggle defaults light and persists dark mode', async ({ page }) => {
   const problems = collectUiProblems(page);
   await login(page);
@@ -158,6 +201,36 @@ test('admin console theme toggle defaults light and persists dark mode', async (
   await expect(page.locator('#themeLight')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('#themeDark')).toHaveAttribute('aria-pressed', 'false');
   await expect.poll(() => page.evaluate(() => localStorage.getItem('promptwall.theme'))).toBe('light');
+  expect(problems).toEqual([]);
+});
+
+test('admin console flags invalid SaaS seat-limit configuration', async ({ page }) => {
+  const problems = collectUiProblems(page);
+  await page.route('**/api/billing/seats', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      tenantId: 'cu-acme',
+      saasMode: true,
+      seatLimit: 0,
+      seatLimitValid: false,
+      seatsUsed: 2,
+      seatsRemaining: null,
+      overLimit: false,
+      users: [
+        { user: 'analyst@example.test', orgId: 'cu-acme' },
+        { user: 'reviewer@example.test', orgId: 'cu-acme' },
+      ],
+    }),
+  }));
+
+  await login(page);
+
+  const seatCard = page.locator('#stats .stat', { hasText: 'Seat config' });
+  await expect(seatCard).toContainText('Invalid');
+  await expect(seatCard).toContainText('set paid seat limit');
+  await expect(seatCard).toHaveClass(/alert/);
+  await expect(seatCard.locator('.status-light')).toHaveClass(/tone-warn/);
   expect(problems).toEqual([]);
 });
 
@@ -332,6 +405,205 @@ test('admin console login, approval, policy save, and evidence export work in a 
   expect(problems).toEqual([]);
 });
 
+test('admin console preserves loaded API data when refresh endpoints fail', async ({ page, request }) => {
+  const problems = collectUiProblems(page);
+  await createHeldPrompt(request, {
+    suffix: '9301',
+    user: 'api-refresh-ui@example.test',
+    destination: 'chatgpt.com',
+  });
+  await recordHeartbeat(request, {
+    user: 'api-health-ui@example.test',
+    source: 'endpoint_agent',
+    destination: 'endpoint-install',
+    sensor: { name: 'endpoint_agent', version: '0.3.0', platform: 'win32' },
+  });
+
+  await login(page);
+
+  await page.locator('.content-tabs .tab[data-tab="activity"]').click();
+  await expect(page.locator('#activityRows')).toContainText('api-refresh-ui@example.test');
+
+  await page.locator('.content-tabs .tab[data-tab="coverage"]').click();
+  await page.locator('#refreshCoverage').click();
+  await expect(page.locator('#coverageScore')).toContainText('Coverage score');
+  await expect(page.locator('#fleetRows')).toContainText('api-health-ui@example.test');
+
+  await page.locator('.content-tabs .tab[data-tab="policy"]').click();
+  await expect(page.locator('#pol_risk')).toBeVisible();
+  const policyRisk = await page.locator('#pol_risk').inputValue();
+
+  const activityRoute = /\/api\/queries\?limit=200$/;
+  await page.route(activityRoute, (route) => route.fulfill({
+    status: 500,
+    contentType: 'application/json',
+    body: JSON.stringify({ error: 'synthetic activity refresh failure' }),
+  }));
+  const activityProblemStart = problems.length;
+  await page.locator('.content-tabs .tab[data-tab="activity"]').click();
+  await expect(page.locator('#activityRows')).toContainText('api-refresh-ui@example.test');
+  const activityProblems = problems.splice(activityProblemStart);
+  expect(activityProblems.filter((problem) => {
+    if (/^api 500: .*\/api\/queries\?limit=200$/.test(problem)) return false;
+    if (problem.includes('console error: Failed to load resource') && problem.includes('500')) return false;
+    return true;
+  })).toEqual([]);
+  await page.unroute(activityRoute);
+
+  const coverageRoute = /\/api\/coverage$/;
+  await page.route(coverageRoute, (route) => route.fulfill({
+    status: 500,
+    contentType: 'application/json',
+    body: JSON.stringify({ error: 'synthetic coverage refresh failure' }),
+  }));
+  const coverageProblemStart = problems.length;
+  await page.locator('.content-tabs .tab[data-tab="coverage"]').click();
+  await page.locator('#refreshCoverage').click();
+  await expect(page.locator('#coverageScore')).toContainText('Coverage score');
+  await expect(page.locator('#fleetRows')).toContainText('api-health-ui@example.test');
+  const coverageProblems = problems.splice(coverageProblemStart);
+  expect(coverageProblems.filter((problem) => {
+    if (/^api 500: .*\/api\/coverage$/.test(problem)) return false;
+    if (problem.includes('console error: Failed to load resource') && problem.includes('500')) return false;
+    return true;
+  })).toEqual([]);
+  await page.unroute(coverageRoute);
+
+  const templateRoute = /\/api\/policy\/templates$/;
+  await page.route(templateRoute, (route) => route.fulfill({
+    status: 500,
+    contentType: 'application/json',
+    body: JSON.stringify({ error: 'synthetic template refresh failure' }),
+  }));
+  const policyProblemStart = problems.length;
+  await page.locator('.content-tabs .tab[data-tab="policy"]').click();
+  await page.locator('#discardPolicy').click();
+  await expect(page.locator('#pol_risk')).toHaveValue(policyRisk);
+  const policyProblems = problems.splice(policyProblemStart);
+  expect(policyProblems.filter((problem) => {
+    if (/^api 500: .*\/api\/policy\/templates$/.test(problem)) return false;
+    if (problem.includes('console error: Failed to load resource') && problem.includes('500')) return false;
+    return true;
+  })).toEqual([]);
+  await page.unroute(templateRoute);
+
+  expect(problems).toEqual([]);
+});
+
+test('admin console avoids stale queue cache when pending refresh fails after a decision', async ({ page, request }) => {
+  const problems = collectUiProblems(page);
+  const gated = await createHeldPrompt(request, {
+    suffix: '9311',
+    user: 'state-cache-ui@example.test',
+    destination: 'chatgpt.com',
+  });
+
+  await login(page);
+  await expect(page.locator(`.q[data-id="${gated.id}"]`)).toContainText('state-cache-ui@example.test');
+
+  const pendingRoute = /\/api\/queries\?status=pending$/;
+  await page.route(pendingRoute, (route) => route.fulfill({
+    status: 500,
+    contentType: 'application/json',
+    body: JSON.stringify({ error: 'synthetic pending queue refresh failure' }),
+  }));
+
+  const problemStart = problems.length;
+  await page.locator(`#note_${gated.id}`).fill('Synthetic approval after queue fallback');
+  await page.locator(`.q[data-id="${gated.id}"]`).getByRole('button', { name: 'Approve release' }).click();
+  await expect(page.getByRole('heading', { name: 'Confirm release' })).toBeVisible();
+  await page.getByLabel('Account password').fill('e2e-pass');
+  await page.locator('.stepup-dialog').getByRole('button', { name: 'Approve release' }).click();
+
+  await expect(page.locator('#queueList')).not.toContainText('state-cache-ui@example.test');
+  await expect(page.locator(`.q[data-id="${gated.id}"]`)).toHaveCount(0);
+
+  await page.locator('.content-tabs .tab[data-tab="activity"]').click();
+  await expect(page.locator(`tr.activity-row[data-activity-id="${gated.id}"]`)).toContainText('approved');
+
+  const pendingProblems = problems.splice(problemStart);
+  expect(pendingProblems.filter((problem) => {
+    if (/^api 500: .*\/api\/queries\?status=pending$/.test(problem)) return false;
+    if (problem.includes('console error: Failed to load resource') && problem.includes('500')) return false;
+    return true;
+  })).toEqual([]);
+  await page.unroute(pendingRoute);
+});
+
+test('admin console global search filters audit table rows', async ({ page, request }) => {
+  const problems = collectUiProblems(page);
+  const auditRows = [];
+  for (let index = 0; index < 12; index += 1) {
+    auditRows.push(await createHeldPrompt(request, {
+      suffix: String(9411 + index),
+      user: `audit-search-${index}@example.test`,
+      destination: index % 2 ? 'claude.ai' : 'chatgpt.com',
+    }));
+  }
+  const hidden = auditRows[0];
+  const visible = auditRows[auditRows.length - 1];
+
+  await login(page);
+  await page.locator('.content-tabs .tab[data-tab="audit"]').click();
+  await expect(page.locator('#auditRows')).toContainText(visible.id);
+  await expect(page.locator('#auditPager')).toContainText('Showing 1-10');
+  await page.locator('#auditPager').getByRole('button', { name: 'Next page' }).click();
+  await expect(page.locator('#auditPager')).toContainText('Page 2');
+  await expect(page.locator('#auditRows')).toContainText(hidden.id);
+
+  await page.getByRole('searchbox', { name: 'Search users or destinations' }).fill(visible.id);
+  await expect(page.locator('#auditRows')).toContainText(visible.id);
+  await expect(page.locator('#auditRows')).not.toContainText(hidden.id);
+  await expect(page.locator('#auditPager')).toContainText('Page 1 of 1');
+
+  await page.getByRole('searchbox', { name: 'Search users or destinations' }).fill('missing-audit-row-id');
+  await expect(page.locator('#auditRows')).toContainText('No matching audit entries');
+  await expect(page.locator('#auditPager')).toContainText('No rows');
+
+  await page.getByRole('searchbox', { name: 'Search users or destinations' }).clear();
+  await expect(page.locator('#auditPager')).toContainText('Page 1');
+  await expect(page.locator('#auditRows')).toContainText(visible.id);
+  expect(problems).toEqual([]);
+});
+
+test('admin console paginates searchable activity and lineage tables', async ({ page, request }) => {
+  const problems = collectUiProblems(page);
+  for (let i = 0; i < 13; i += 1) {
+    await createHeldPrompt(request, {
+      suffix: String(9500 + i),
+      user: `pager-${String(i).padStart(2, '0')}@example.test`,
+      destination: i % 2 ? 'claude.ai' : 'chatgpt.com',
+    });
+  }
+
+  await login(page);
+  const globalSearch = page.getByRole('searchbox', { name: 'Search users or destinations' });
+
+  await page.locator('.content-tabs .tab[data-tab="activity"]').click();
+  await expect(page.locator('#activityPager')).toContainText('Page 1 of');
+  await expect(page.locator('#activityRows tr.activity-row')).toHaveCount(10);
+  await page.locator('#activityPager').getByLabel('Next page').click();
+  await expect(page.locator('#activityPager')).toContainText('Page 2 of');
+  await globalSearch.fill('pager-00@example.test');
+  await expect(page.locator('#activityPager')).toContainText('Page 1 of 1');
+  await expect(page.locator('#activityRows tr.activity-row')).toHaveCount(1);
+  await expect(page.locator('#activityRows')).toContainText('pager-00@example.test');
+  await globalSearch.fill('');
+
+  await page.locator('.content-tabs .tab[data-tab="lineage"]').click();
+  await page.locator('#refreshLineage').click();
+  await expect(page.locator('#lineageUsersPager')).toContainText('Page 1 of');
+  await expect(page.locator('#lineageUsers tr')).toHaveCount(10);
+  await page.locator('#lineageUsersPager').getByLabel('Next page').click();
+  await expect(page.locator('#lineageUsersPager')).toContainText('Page 2 of');
+  await globalSearch.fill('pager-00@example.test');
+  await expect(page.locator('#lineageUsersPager')).toContainText('Page 1 of 1');
+  await expect(page.locator('#lineageUsers tr')).toHaveCount(1);
+  await expect(page.locator('#lineageUsers')).toContainText('pager-00@example.test');
+
+  expect(problems).toEqual([]);
+});
+
 test('admin console controls and forms are wired end to end', async ({ page, request }) => {
   const problems = collectUiProblems(page);
   const reveal = await createHeldPrompt(request, {
@@ -388,12 +660,17 @@ test('admin console controls and forms are wired end to end', async ({ page, req
   await expect(page.locator(`.q[data-id="${approve.id}"]`)).toBeVisible();
   await page.locator('[data-queue-filter="mine"]').click();
   await expect(page.locator('[data-queue-filter="mine"]')).toHaveClass(/active/);
+  await expect(page.locator('[data-queue-filter="mine"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('[data-queue-filter="all"]')).toHaveAttribute('aria-pressed', 'false');
   await page.locator('[data-queue-filter="unassigned"]').click();
   await expect(page.locator('[data-queue-filter="unassigned"]')).toHaveClass(/active/);
+  await expect(page.locator('[data-queue-filter="unassigned"]')).toHaveAttribute('aria-pressed', 'true');
   await page.locator('[data-queue-filter="escalated"]').click();
   await expect(page.locator('[data-queue-filter="escalated"]')).toHaveClass(/active/);
+  await expect(page.locator('[data-queue-filter="escalated"]')).toHaveAttribute('aria-pressed', 'true');
   await page.locator('[data-queue-filter="all"]').click();
   await expect(page.locator('[data-queue-filter="all"]')).toHaveClass(/active/);
+  await expect(page.locator('[data-queue-filter="all"]')).toHaveAttribute('aria-pressed', 'true');
   await page.locator('#queueCategoryFilter').selectOption('us_ssn');
   await expect(page.locator(`.q[data-id="${approve.id}"]`)).toBeVisible();
   await page.locator('#queueDestinationFilter').selectOption('claude.ai');
@@ -410,12 +687,19 @@ test('admin console controls and forms are wired end to end', async ({ page, req
   await expect(page.locator('#toggleQueueDensity')).toHaveAttribute('aria-pressed', 'false');
 
   const revealRow = page.locator(`.q[data-id="${reveal.id}"]`);
-  await revealRow.click();
+  await expect(page.locator('#queueList')).toHaveAttribute('role', 'list');
+  await expect(page.locator('#incidentDetail')).toHaveAttribute('aria-live', 'polite');
+  await expect(revealRow).toHaveAttribute('role', 'listitem');
+  await revealRow.focus();
+  await page.keyboard.press('Enter');
   await expect(revealRow).toHaveClass(/selected/);
+  await expect(revealRow).toHaveAttribute('aria-current', 'true');
   await revealRow.locator('[data-act="reveal"]').click();
-  await expect(page.getByRole('heading', { name: 'Confirm raw reveal' })).toBeVisible();
-  await page.getByLabel('Account password').fill('e2e-pass');
-  await page.locator('.stepup-dialog').getByRole('button', { name: 'Reveal' }).click();
+  const revealDialog = page.getByRole('dialog', { name: 'Confirm raw reveal' });
+  await expect(revealDialog).toBeVisible();
+  await expect(revealDialog).toContainText('This action is audit-logged');
+  await revealDialog.getByLabel('Account password').fill('e2e-pass');
+  await revealDialog.getByRole('button', { name: 'Reveal' }).click();
   await expect(page.locator(`#p_${reveal.id}`)).toContainText('524-71-9101');
   await expect(revealRow.locator('[data-act="reveal"]')).toHaveText('Raw shown and logged');
   await expect(revealRow.locator('.prompt-reveal-status.raw')).toContainText('Raw prompt revealed');
@@ -445,9 +729,11 @@ test('admin console controls and forms are wired end to end', async ({ page, req
   const approveRow = page.locator(`.q[data-id="${approve.id}"]`);
   await approveRow.locator('textarea.note').fill('Approve from full UI wiring sweep');
   await approveRow.locator('[data-act="approve"]').click();
-  await expect(page.getByRole('heading', { name: 'Confirm release' })).toBeVisible();
-  await page.getByLabel('Account password').fill('e2e-pass');
-  await page.locator('.stepup-dialog').getByRole('button', { name: 'Approve release' }).click();
+  const approveDialog = page.getByRole('dialog', { name: 'Confirm release' });
+  await expect(approveDialog).toBeVisible();
+  await expect(approveDialog).toContainText('Approving releases this held prompt');
+  await approveDialog.getByLabel('Account password').fill('e2e-pass');
+  await approveDialog.getByRole('button', { name: 'Approve release' }).click();
   await expect(approveRow).toHaveCount(0);
 
   await page.locator('.content-tabs .tab[data-tab="activity"]').click();
@@ -466,9 +752,11 @@ test('admin console controls and forms are wired end to end', async ({ page, req
   await expect(page.locator('#fleetRows')).toContainText('endpoint-health@example.test');
   await expect(page.locator('#shadowRows')).toContainText(shadowDestination);
   await page.locator(`[data-destination-review="block"][data-destination="${shadowDestination}"]`).click();
-  await expect(page.getByRole('heading', { name: 'Record destination reason' })).toBeVisible();
-  await page.locator('.stepup-dialog textarea[name="reason"]').fill('full_ui_wiring_review');
-  await page.locator('.stepup-dialog').getByRole('button', { name: 'Save review' }).click();
+  const destinationDialog = page.getByRole('dialog', { name: 'Record destination reason' });
+  await expect(destinationDialog).toBeVisible();
+  await expect(destinationDialog).toContainText(`block ${shadowDestination}`);
+  await destinationDialog.locator('textarea[name="reason"]').fill('full_ui_wiring_review');
+  await destinationDialog.getByRole('button', { name: 'Save review' }).click();
   await expect(page.locator('#shadowRows')).toContainText('Blocked');
 
   await page.locator('.content-tabs .tab[data-tab="identity"]').click();
@@ -489,8 +777,24 @@ test('admin console controls and forms are wired end to end', async ({ page, req
   await page.locator('.content-tabs .tab[data-tab="policy"]').click();
   await expect(page.locator('#pol_desktop_destination')).toBeVisible();
   const originalRisk = await page.locator('#pol_risk').inputValue();
+  const originalRetention = await page.locator('#pol_retention').inputValue();
   await page.locator('#testConfiguration').click();
   await expect(page.locator('#polSaved')).toContainText(/check|warning|ready/);
+  await page.locator('#pol_retention').fill('3651');
+  const validationProblemStart = problems.length;
+  await page.getByRole('button', { name: 'Save changes' }).click();
+  await expect(page.locator('#polSaved')).toContainText('rawRetentionDays');
+  const unchangedPolicyAfterInvalidSave = await page.evaluate(async () => (await fetch('/api/policy')).json());
+  expect(unchangedPolicyAfterInvalidSave.rawRetentionDays).not.toBe(3651);
+  const validationProblems = problems.splice(validationProblemStart);
+  const unexpectedValidationProblems = validationProblems.filter((problem) => {
+    if (/^api 400: .*\/api\/policy$/.test(problem)) return false;
+    if (problem.includes('console error: Failed to load resource') && problem.includes('400')) return false;
+    return true;
+  });
+  expect(unexpectedValidationProblems).toEqual([]);
+  expect(validationProblems.some((problem) => /^api 400: .*\/api\/policy$/.test(problem))).toBe(true);
+  await page.locator('#pol_retention').fill(originalRetention);
   await page.locator('#pol_risk').fill(String(Number(originalRisk || 20) + 1));
   await page.locator('#discardPolicy').click();
   await expect(page.locator('#pol_risk')).toHaveValue(originalRisk);
@@ -584,9 +888,11 @@ test('admin console secondary controls and dialog cancels are wired end to end',
     allow: 'allow-secondary.example',
     block: 'block-secondary.example',
   };
+  const cancelDestination = 'cancel-secondary.example';
   for (const destination of Object.values(destinations)) {
     await createShadowAi(request, destination);
   }
+  await createShadowAi(request, cancelDestination);
 
   await login(page);
 
@@ -616,6 +922,18 @@ test('admin console secondary controls and dialog cancels are wired end to end',
 
   await page.locator('.content-tabs .tab[data-tab="coverage"]').click();
   await page.locator('#refreshCoverage').click();
+  await page.locator(`[data-destination-review="block"][data-destination="${cancelDestination}"]`).click();
+  await expect(page.getByRole('heading', { name: 'Record destination reason' })).toBeVisible();
+  await page.locator('.stepup-dialog').getByRole('button', { name: 'Save review' }).click();
+  await expect(page.locator('.stepup-dialog')).toBeVisible();
+  await page.locator('.stepup-dialog textarea[name="reason"]').fill('cancelled_destination_review');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.stepup-dialog')).toHaveCount(0);
+  let destinationPolicy = await page.evaluate(async () => (await fetch('/api/policy')).json());
+  expect(destinationPolicy.blockedDestinations || []).not.toContain(cancelDestination);
+  expect(destinationPolicy.allowedDestinations || []).not.toContain(cancelDestination);
+  expect(destinationPolicy.governedDestinations || []).not.toContain(cancelDestination);
+
   for (const [decision, destination] of Object.entries(destinations)) {
     await page.locator(`[data-destination-review="${decision}"][data-destination="${destination}"]`).click();
     await expect(page.getByRole('heading', { name: 'Record destination reason' })).toBeVisible();
@@ -626,7 +944,7 @@ test('admin console secondary controls and dialog cancels are wired end to end',
   await expect(page.locator('#shadowRows')).toContainText('Governed');
   await expect(page.locator('#shadowRows')).toContainText('Allowed');
   await expect(page.locator('#shadowRows')).toContainText('Blocked');
-  const destinationPolicy = await page.evaluate(async () => (await fetch('/api/policy')).json());
+  destinationPolicy = await page.evaluate(async () => (await fetch('/api/policy')).json());
   expect(destinationPolicy.governedDestinations).toContain(destinations.govern);
   expect(destinationPolicy.allowedDestinations).toContain(destinations.allow);
   expect(destinationPolicy.blockedDestinations).toContain(destinations.block);
@@ -653,6 +971,7 @@ test('admin console secondary controls and dialog cancels are wired end to end',
   await page.getByRole('button', { name: 'Save changes' }).click();
   await expect(page.locator('#polSaved')).toHaveText('Saved');
 
+  const originalEnforcementMode = savedPolicy.enforcementMode;
   const templates = [
     ['baseline', 'block'],
     ['ncua_glba', 'block'],
@@ -660,13 +979,54 @@ test('admin console secondary controls and dialog cancels are wired end to end',
     ['hipaa', 'block'],
     ['redact_first', 'redact'],
   ];
-  for (const [templateId, expectedMode] of templates) {
-    await page.locator(`.ps-tpl[data-tpl="${templateId}"]`).click();
-    await expect(page.locator(`input[name="mode"][value="${expectedMode}"]`)).toBeChecked();
-    savedPolicy = await page.evaluate(async () => (await fetch('/api/policy')).json());
-    expect(savedPolicy.enforcementMode).toBe(expectedMode);
+  try {
+    for (const [templateId, expectedMode] of templates) {
+      await page.locator(`.ps-tpl[data-tpl="${templateId}"]`).click();
+      await expect(page.locator(`input[name="mode"][value="${expectedMode}"]`)).toBeChecked();
+      savedPolicy = await page.evaluate(async () => (await fetch('/api/policy')).json());
+      expect(savedPolicy.enforcementMode).toBe(expectedMode);
+    }
+  } finally {
+    await savePolicyMode(page, originalEnforcementMode);
   }
 
+  let releaseExport;
+  const releaseExportPromise = new Promise((resolve) => {
+    releaseExport = resolve;
+  });
+  let routeExport;
+  const routeExportPromise = new Promise((resolve) => {
+    routeExport = resolve;
+  });
+  await page.route('**/api/export/evidence?*', async (route) => {
+    routeExport();
+    await releaseExportPromise;
+    await route.fulfill({
+      status: 500,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: 'synthetic export failure' }),
+    });
+  });
+  await page.locator('.content-tabs .tab[data-tab="audit"]').click();
+  const exportProblemStart = problems.length;
+  await page.getByRole('button', { name: 'Export Evidence' }).click();
+  await routeExportPromise;
+  await expect(page.locator('#exportStatus')).toHaveText('PROCESSING');
+  await expect(page.locator('#exportEvidence')).toBeDisabled();
+  releaseExport();
+  await expect(page.locator('#exportStatus')).toHaveText('Export failed');
+  await expect(page.locator('#exportEvidence')).toBeEnabled();
+  const exportProblems = problems.splice(exportProblemStart);
+  const unexpectedExportProblems = exportProblems.filter((problem) => {
+    if (/^api 500: .*\/api\/export\/evidence\?/.test(problem)) return false;
+    if (problem.includes('console error: Failed to load resource') && problem.includes('500')) return false;
+    return true;
+  });
+  expect(unexpectedExportProblems).toEqual([]);
+  expect(exportProblems.some((problem) => /^api 500: .*\/api\/export\/evidence\?/.test(problem))).toBe(true);
+  await page.unroute('**/api/export/evidence?*');
+
+  await page.locator('.content-tabs .tab[data-tab="policy"]').click();
   await page.getByRole('button', { name: 'View coverage' }).click();
   await expect(page.locator('#tab-coverage')).toBeVisible();
 
@@ -728,11 +1088,20 @@ test('signal operations monitoring console supports adaptive states', async ({ p
 
 test('admin console mobile layout keeps content tabs usable', async ({ page }) => {
   const problems = collectUiProblems(page);
-  await page.setViewportSize({ width: 390, height: 844 });
+  await page.setViewportSize({ width: 1024, height: 768 });
   await login(page);
 
   await expect(page.locator('.content-tabs .tab[data-tab="queue"]')).toBeVisible();
-  const railTabsDisplay = await page.locator('.rail .tabs').evaluate((el) => getComputedStyle(el).display);
+  await expect(page.locator('.content-tabs .tab[data-tab="monitor"]')).toBeVisible();
+  let railTabsDisplay = await page.locator('.rail .tabs').evaluate((el) => getComputedStyle(el).display);
+  expect(railTabsDisplay).not.toBe('none');
+  await page.locator('.content-tabs .tab[data-tab="monitor"]').click();
+  await expect(page.locator('#tab-monitor')).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.locator('.content-tabs .tab[data-tab="queue"]')).toBeVisible();
+  railTabsDisplay = await page.locator('.rail .tabs').evaluate((el) => getComputedStyle(el).display);
   expect(railTabsDisplay).toBe('none');
 
   await page.locator('.content-tabs .tab[data-tab="policy"]').click();
@@ -740,7 +1109,6 @@ test('admin console mobile layout keeps content tabs usable', async ({ page }) =
   await page.locator('.content-tabs .tab[data-tab="audit"]').click();
   await expect(page.locator('#tab-audit')).toBeVisible();
 
-  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-  expect(overflow).toBeLessThanOrEqual(1);
+  await expectNoHorizontalOverflow(page);
   expect(problems).toEqual([]);
 });

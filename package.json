@@ -8,7 +8,7 @@
   },
   "scripts": {
     "hooks:install": "git config core.hooksPath .githooks",
-    "review:ci": "git diff --check && npm run docs:demo-guide:check && npm run ai-domains:check && npm test && npm run test:admin-console && npm run sync-check && npm run eval",
+    "review:ci": "git diff --check && npm run docs:demo-guide:check && npm run ai-domains:check && npm test && npm run test:browser && npm run sync-check && npm run eval",
     "review:agent": "npm run review:ci",
     "setup": "node scripts/setup.js",
     "setup:prod": "node scripts/setup.js --production",
