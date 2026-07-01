@@ -104,6 +104,12 @@ async function setStoreRawForApproval(page, enabled) {
   }, enabled);
 }
 
+async function savePolicyMode(page, mode) {
+  await page.locator(`input[name="mode"][value="${mode}"]`).check();
+  await page.getByRole('button', { name: 'Save changes' }).click();
+  await expect(page.locator('#polSaved')).toHaveText('Saved');
+}
+
 test('admin console theme toggle defaults light and persists dark mode', async ({ page }) => {
   const problems = collectUiProblems(page);
   await login(page);
@@ -912,6 +918,7 @@ test('admin console secondary controls and dialog cancels are wired end to end',
   await page.getByRole('button', { name: 'Save changes' }).click();
   await expect(page.locator('#polSaved')).toHaveText('Saved');
 
+  const originalEnforcementMode = savedPolicy.enforcementMode;
   const templates = [
     ['baseline', 'block'],
     ['ncua_glba', 'block'],
@@ -919,15 +926,28 @@ test('admin console secondary controls and dialog cancels are wired end to end',
     ['hipaa', 'block'],
     ['redact_first', 'redact'],
   ];
-  for (const [templateId, expectedMode] of templates) {
-    await page.locator(`.ps-tpl[data-tpl="${templateId}"]`).click();
-    await expect(page.locator(`input[name="mode"][value="${expectedMode}"]`)).toBeChecked();
-    savedPolicy = await page.evaluate(async () => (await fetch('/api/policy')).json());
-    expect(savedPolicy.enforcementMode).toBe(expectedMode);
+  try {
+    for (const [templateId, expectedMode] of templates) {
+      await page.locator(`.ps-tpl[data-tpl="${templateId}"]`).click();
+      await expect(page.locator(`input[name="mode"][value="${expectedMode}"]`)).toBeChecked();
+      savedPolicy = await page.evaluate(async () => (await fetch('/api/policy')).json());
+      expect(savedPolicy.enforcementMode).toBe(expectedMode);
+    }
+  } finally {
+    await savePolicyMode(page, originalEnforcementMode);
   }
 
+  let releaseExport;
+  const releaseExportPromise = new Promise((resolve) => {
+    releaseExport = resolve;
+  });
+  let routeExport;
+  const routeExportPromise = new Promise((resolve) => {
+    routeExport = resolve;
+  });
   await page.route('**/api/export/evidence?*', async (route) => {
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    routeExport();
+    await releaseExportPromise;
     await route.fulfill({
       status: 500,
       contentType: 'application/json',
@@ -937,8 +957,10 @@ test('admin console secondary controls and dialog cancels are wired end to end',
   await page.locator('.content-tabs .tab[data-tab="audit"]').click();
   const exportProblemStart = problems.length;
   await page.getByRole('button', { name: 'Export Evidence' }).click();
+  await routeExportPromise;
   await expect(page.locator('#exportStatus')).toHaveText('PROCESSING');
   await expect(page.locator('#exportEvidence')).toBeDisabled();
+  releaseExport();
   await expect(page.locator('#exportStatus')).toHaveText('Export failed');
   await expect(page.locator('#exportEvidence')).toBeEnabled();
   const exportProblems = problems.splice(exportProblemStart);

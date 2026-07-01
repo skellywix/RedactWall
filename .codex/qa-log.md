@@ -553,6 +553,7 @@ Production preflight already rejects missing or invalid SaaS seat limits, but ru
 - Updated sensor access validation to fail closed with `seat_limit_not_configured` and `503` when SaaS billing configuration is missing or invalid.
 - Updated the dashboard seat stat to show `Seat config / Invalid` when `/api/billing/seats` reports malformed paid-seat configuration.
 - Added tenant, dashboard linkage, and browser coverage for missing, zero, negative, fractional, and non-numeric seat limits, plus seat-report validity state.
+- Stabilized the full browser secondary-controls export-failure path by restoring policy mode after template checks and holding the mocked export response until the disabled state is asserted.
 
 ### Commands Run
 
@@ -561,6 +562,11 @@ Production preflight already rejects missing or invalid SaaS seat limits, but ru
 - `node --test --test-concurrency=1 test\tenant.test.js test\saas-tenancy.test.js test\preflight.test.js test\setup.test.js test\dashboard-linkage.test.js test\db.test.js` - passed after section 13 edit, 52 tests.
 - `$env:PLAYWRIGHT_PORT='4267'; npx playwright test admin-console.spec.js --grep "invalid SaaS seat-limit" --reporter=line` - passed after section 13 edit, 1 Chromium test.
 - `$env:PLAYWRIGHT_PORT='4268'; npm run review:ci` - passed after section 13 edit, including docs demo guide check, AI domain coverage check, 78 node test files, 11 admin-console Chromium tests, `sync-check`, and `eval`.
+- `node --check e2e\admin-console.spec.js` - passed after GitHub browser-test failure reproduction fix.
+- `$env:PLAYWRIGHT_PORT='4268'; npx playwright test admin-console.spec.js --grep "secondary controls" --reporter=line` - passed after GitHub browser-test failure reproduction fix, 1 Chromium test.
+- `$env:PLAYWRIGHT_PORT='4269'; $env:CI='1'; npx playwright test admin-console.spec.js --grep "secondary controls" --reporter=line` - passed after GitHub browser-test failure reproduction fix, 1 Chromium test with retry behavior enabled.
+- `$env:PLAYWRIGHT_PORT='4271'; npm run test:browser` - passed after GitHub browser-test failure reproduction fix, 19 Chromium tests.
+- `npm run review:ci` - passed after GitHub browser-test failure reproduction fix, including docs demo guide check, AI domain coverage check, 78 node test files, 11 admin-console Chromium tests, `sync-check`, and `eval`.
 
 ### Security Review Notes
 

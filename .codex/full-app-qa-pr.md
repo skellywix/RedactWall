@@ -73,6 +73,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Section 11 fixed audit log global-search behavior so unrelated audit rows are hidden when searching by query ID or actor, and added pager controls for long activity, lineage, and audit tables.
 - Section 12 fixed direct scan-file filename retention so sensitive submitted filenames are replaced with `[sensitive filename]` in response, storage, broadcast, and audit evidence.
 - Section 13 fixed runtime paid-seat enforcement so malformed SaaS seat-limit config cannot silently disable billing controls after preflight failure.
+- Section 13 follow-up stabilized the full browser export-failure assertion after GitHub exposed a race in the existing secondary-controls test.
 
 # Tests Added Or Updated
 
@@ -109,7 +110,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Updated `server/tenant.js` with explicit paid-seat limit validity tracking and fail-closed runtime enforcement.
 - Updated `server/public/dashboard.js` with invalid paid-seat configuration rendering.
 - Updated `test/tenant.test.js` with missing, zero, negative, fractional, and non-numeric SaaS seat-limit coverage.
-- Updated `test/dashboard-linkage.test.js` and `e2e/admin-console.spec.js` with invalid seat-limit dashboard coverage.
+- Updated `test/dashboard-linkage.test.js` and `e2e/admin-console.spec.js` with invalid seat-limit dashboard coverage and deterministic export-failure browser coverage.
 
 # Commands Run
 
@@ -197,6 +198,11 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - `node --test --test-concurrency=1 test\tenant.test.js test\saas-tenancy.test.js test\preflight.test.js test\setup.test.js test\dashboard-linkage.test.js test\db.test.js` - passed after section 13 edit, 52 tests.
 - `$env:PLAYWRIGHT_PORT='4267'; npx playwright test admin-console.spec.js --grep "invalid SaaS seat-limit" --reporter=line` - passed after section 13 edit, 1 Chromium test.
 - `$env:PLAYWRIGHT_PORT='4268'; npm run review:ci` - passed after section 13 edit, including docs demo guide check, AI domain coverage check, 78 node test files, 11 admin-console Chromium tests, `sync-check`, and `eval`.
+- `node --check e2e\admin-console.spec.js` - passed after GitHub browser-test failure reproduction fix.
+- `$env:PLAYWRIGHT_PORT='4268'; npx playwright test admin-console.spec.js --grep "secondary controls" --reporter=line` - passed after GitHub browser-test failure reproduction fix, 1 Chromium test.
+- `$env:PLAYWRIGHT_PORT='4269'; $env:CI='1'; npx playwright test admin-console.spec.js --grep "secondary controls" --reporter=line` - passed after GitHub browser-test failure reproduction fix, 1 Chromium test with retry behavior enabled.
+- `$env:PLAYWRIGHT_PORT='4271'; npm run test:browser` - passed after GitHub browser-test failure reproduction fix, 19 Chromium tests.
+- `npm run review:ci` - passed after GitHub browser-test failure reproduction fix, including docs demo guide check, AI domain coverage check, 78 node test files, 11 admin-console Chromium tests, `sync-check`, and `eval`.
 
 # CI Status
 
