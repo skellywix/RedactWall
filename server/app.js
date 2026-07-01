@@ -1265,6 +1265,14 @@ app.get('/auth/oidc/callback', async (req, res) => {
 const sessionWrite = [auth.requireAuth, auth.requireCsrf];
 const adminWrite = [auth.requireAuth, auth.requireCsrf, auth.requireRole(roles.SECURITY_ADMIN)];
 const decisionWrite = [auth.requireAuth, auth.requireCsrf, auth.requireRole(roles.SECURITY_ADMIN, roles.APPROVER)];
+const API_MAX_LIST_LIMIT = 5000;
+
+function boundedApiLimit(value, fallback = 200, max = API_MAX_LIST_LIMIT) {
+  if (value === undefined || value === null || value === '') return fallback;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(1, Math.min(Math.trunc(parsed), max));
+}
 
 app.get('/api/csrf', auth.requireAuth, (req, res) => {
   res.json({ csrfToken: auth.createCsrfToken(auth.sessionTokenFromRequest(req)) });
@@ -1337,7 +1345,7 @@ function publicQuery(q, { includeRaw = false } = {}) {
 
 app.get('/api/queries', auth.requireAuth, (req, res) => {
   const status = req.query.status;
-  const rows = db.listQueries({ status, limit: Number(req.query.limit) || 200 });
+  const rows = db.listQueries({ status, limit: boundedApiLimit(req.query.limit, 200) });
   res.json(rows.map((q) => publicQuery(q)));
 });
 
@@ -1472,7 +1480,7 @@ app.get('/api/coverage', auth.requireAuth, (req, res) => {
 });
 
 app.get('/api/lineage', auth.requireAuth, (req, res) => {
-  const limit = Math.max(1, Math.min(Number(req.query.limit) || 1000, 5000));
+  const limit = boundedApiLimit(req.query.limit, 1000);
   const queries = db.listQueries({ limit });
   res.json({
     limit,
@@ -1517,12 +1525,12 @@ app.put('/api/policy/apply-template', ...adminWrite, validation.validateBody(val
 });
 
 app.get('/api/audit', auth.requireAuth, (req, res) => {
-  res.json({ entries: db.listAudit(Number(req.query.limit) || 200), integrity: db.verifyAuditChain() });
+  res.json({ entries: db.listAudit(boundedApiLimit(req.query.limit, 200)), integrity: db.verifyAuditChain() });
 });
 
 app.get('/api/export/evidence', auth.requireAuth, (req, res) => {
-  const queryLimit = Math.min(Number(req.query.queryLimit) || 500, 5000);
-  const auditLimit = Math.min(Number(req.query.auditLimit) || 500, 5000);
+  const queryLimit = boundedApiLimit(req.query.queryLimit, 500);
+  const auditLimit = boundedApiLimit(req.query.auditLimit, 500);
   const activePolicy = policy.loadPolicy();
   const queries = db.listQueries({ limit: queryLimit });
   const summaryQueries = db.listQueries({ all: true });

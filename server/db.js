@@ -113,6 +113,13 @@ const qInsert = sdb.prepare('INSERT INTO queries (id, createdAt, status, user, d
 const qById = sdb.prepare('SELECT data FROM queries WHERE id = ?');
 const qUpdateById = sdb.prepare('UPDATE queries SET status = @status, user = @user, data = @data WHERE id = @id');
 
+function boundedLimit(value, fallback = 200, max = 5000) {
+  if (value === undefined || value === null || value === '') return fallback;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(1, Math.min(Math.trunc(parsed), max));
+}
+
 function createQuery(q) {
   const row = { id: id('q'), createdAt: new Date().toISOString(), status: 'pending', ...q };
   qInsert.run({ id: row.id, createdAt: row.createdAt, status: row.status, user: row.user || null, data: JSON.stringify(row) });
@@ -124,7 +131,7 @@ function getQuery(qid) {
 }
 function listQueries(filter = {}) {
   const all = filter.all === true;
-  const limit = filter.limit ? Math.max(1, Number(filter.limit)) : 200;
+  const limit = boundedLimit(filter.limit, 200, filter.maxLimit || 5000);
   const rows = all
     ? (filter.status
       ? sdb.prepare('SELECT data FROM queries WHERE status = ? ORDER BY createdAt DESC, seq DESC').all(filter.status)
@@ -239,7 +246,7 @@ const purgeRetainedSensitiveData = sdb.transaction((options = {}) => {
 });
 
 function listAudit(limit = 200) {
-  const rows = sdb.prepare('SELECT entry FROM audit ORDER BY seq DESC LIMIT ?').all(Math.max(1, Number(limit) || 200));
+  const rows = sdb.prepare('SELECT entry FROM audit ORDER BY seq DESC LIMIT ?').all(boundedLimit(limit, 200));
   return rows.map((r) => JSON.parse(r.entry));
 }
 

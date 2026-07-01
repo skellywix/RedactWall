@@ -81,8 +81,8 @@ That slice covered dashboard shortcut controls, active tab accessibility state, 
 
 - Branch: `codex/full-app-qa`
 - PR: `https://github.com/skellywix/promptwall/pull/54`
-- Latest observed CI status: GitHub `test` and `docker` passed on head `6fccc30`.
-- Merge status: not merged. The full application QA objective remains open and the next section is backend API behavior.
+- Latest observed CI status: GitHub `test` and `docker` passed on head `1fd658c`.
+- Merge status: not merged. The full application QA objective remains open and the next section is database/persistence/migrations.
 
 ## Section 2 - Navigation And Routing
 
@@ -336,6 +336,41 @@ Several dashboard loaders parsed JSON from non-OK API responses and then treated
 - Generic dashboard loaders now discard failed response bodies instead of rendering them, while identity setup still shows its existing sanitized validation errors.
 - The new browser failure routes use synthetic error bodies and do not introduce or log prompt content.
 
+## Section 8 - Backend API Behavior
+
+Status: Passed
+
+### Inspection
+
+- Reviewed sensor APIs for gate, heartbeat, rehydrate, policy, detectors, scan-file, scan-response, and status polling.
+- Reviewed session APIs for login, CSRF, logout, current user, queue reads, reveal, approve, deny, stats, audit, policy, evidence export, coverage, lineage, and identity setup.
+- Reviewed existing auth, RBAC, CSRF, validation, release-token, evidence-export, detector, and dashboard-linkage tests.
+- Checked list-style backend API parameters for status-code stability, bounded work, and consistency between reported limits and storage queries.
+
+### Issue Found
+
+List and export endpoints accepted raw numeric query parameters for `limit`, `queryLimit`, and `auditLimit`. Negative values were clamped by storage but still reported as negative in evidence scope, while non-finite or oversized values could either fall back inconsistently or request more rows than an operator-facing API should allow.
+
+### Fix Made
+
+- Added `boundedApiLimit()` in `server/app.js` and applied it to query listing, lineage, audit, and evidence export limits.
+- Added a defensive `boundedLimit()` in `server/db.js` for query and audit listing callers.
+- Evidence exports now report the same clamped query/audit limits they use.
+- Added `test/api-limits.test.js` to exercise blank, invalid, negative, non-finite, and oversized limits across `/api/queries`, `/api/lineage`, `/api/export/evidence`, and `/api/audit`.
+
+### Commands Run
+
+- `node --test --test-concurrency=1 test\api-limits.test.js` - passed, 1 test.
+- `node --test --test-concurrency=1 test\api-limits.test.js test\db.test.js test\dashboard-linkage.test.js test\validation.test.js` - passed, 58 tests.
+- `npm run review:ci` - passed after section 8 edit.
+- `gh pr checks 54 --watch --interval 10` - passed on head `1fd658c`, two `test` checks and two `docker` checks.
+
+### Security Review Notes
+
+- Backend list APIs now reject unbounded work by clamping hostile query limits before storage access.
+- No auth, CSRF, RBAC, release-token, raw reveal, detector, or tenant-access behavior changed.
+- The new test uses synthetic SSNs and confirms export scope metadata is bounded consistently without exposing raw prompt bodies.
+
 ## Section Queue
 
 1. Baseline install/lint/typecheck/build/test discovery - passed.
@@ -345,7 +380,7 @@ Several dashboard loaders parsed JSON from non-OK API responses and then treated
 5. Buttons, controls, overlays, and interactive states - passed.
 6. Loading, empty, error, and success states - passed.
 7. API integration and data fetching - passed.
-8. Backend API behavior - pending.
+8. Backend API behavior - passed.
 9. Database/persistence/migrations if present - pending.
 10. State management and cache - pending.
 11. Tables, search, filters, and pagination - pending.

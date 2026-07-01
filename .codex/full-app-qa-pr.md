@@ -11,7 +11,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Buttons, controls, overlays, and interactive states - passed.
 - Loading, empty, error, and success states - passed.
 - API integration and data fetching - passed.
-- Backend API behavior - pending.
+- Backend API behavior - passed.
 - Database/persistence/migrations if present - pending.
 - State management and cache - pending.
 - Tables, search, filters, and pagination - pending.
@@ -47,6 +47,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Queue, activity, monitor, policy save, purge, export, and search empty/error/success states.
 - Browser-extension smoke policy fixture is synced through admin policy and verified through `/api/v1/policy` before content-script assertions.
 - Dashboard activity, coverage, and policy refreshes preserve the last good state when API endpoints return transient failures.
+- Backend list/export APIs clamp blank, invalid, negative, non-finite, and oversized limit query parameters before storage access.
 
 # Bugs Fixed
 
@@ -57,6 +58,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Section 5 fixed a test coverage gap for destination review overlay cancel behavior before policy mutation.
 - Section 6 fixed a test coverage gap for evidence export failure and recovery UI states.
 - Section 7 fixed dashboard loader behavior that could parse failed API responses as normal data and throw page errors or overwrite loaded state.
+- Section 8 fixed backend limit parsing so evidence exports no longer report negative scope limits and list APIs do not accept unbounded work.
 
 # Tests Added Or Updated
 
@@ -75,6 +77,8 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Updated `playwright.config.js` to run shared-server browser E2E specs with one worker.
 - Updated `server/public/dashboard.js` with guarded JSON response handling for dashboard data loaders.
 - Updated `e2e/admin-console.spec.js` with API refresh failure coverage for activity, coverage, and policy-template data.
+- Updated `server/app.js` and `server/db.js` with bounded list limit parsing.
+- Added `test/api-limits.test.js` for backend list/export blank, invalid, negative, non-finite, and oversized limit contracts.
 
 # Commands Run
 
@@ -119,14 +123,18 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - `$env:PLAYWRIGHT_PORT='4241'; npm run test:admin-console` - passed after section 7 edit, 7 Chromium tests.
 - `node --test --test-concurrency=1 test\dashboard-linkage.test.js test\admin-csrf.test.js` - passed after section 7 edit, 13 tests.
 - `npm run review:ci` - passed after section 7 edit.
+- `node --test --test-concurrency=1 test\api-limits.test.js` - passed after section 8 edit, 1 test.
+- `node --test --test-concurrency=1 test\api-limits.test.js test\db.test.js test\dashboard-linkage.test.js test\validation.test.js` - passed after section 8 edit, 58 tests.
+- `npm run review:ci` - passed after section 8 edit.
+- `gh pr checks 54 --watch --interval 10` - passed on head `1fd658c`, two `test` checks and two `docker` checks.
 
 # CI Status
 
 - PR #54 is open: `https://github.com/skellywix/promptwall/pull/54`
-- GitHub `test` checks passed on head `6fccc30`.
-- GitHub `docker` checks passed on head `6fccc30`.
+- GitHub `test` checks passed on head `1fd658c`.
+- GitHub `docker` checks passed on head `1fd658c`.
 - Existing merged PR #53 is on `main` and also had passing GitHub `test` and `docker` checks.
-- Merge status: not merged. The full application QA objective remains open and the next section is backend API behavior.
+- Merge status: not merged. The full application QA objective remains open and the next section is database/persistence/migrations.
 
 # Accessibility Notes
 
@@ -146,6 +154,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Browser-extension CI stabilization changed test code only; it drives policy through authenticated admin policy updates and the ingest-key protected sensor policy endpoint before extension assertions.
 - Browser-suite isolation changed Playwright test configuration only; it serializes specs that share mutable temp server state.
 - Section 7 changed dashboard response handling for existing authenticated routes only. Generic loaders now discard failed response bodies instead of rendering upstream error details, while identity setup keeps its sanitized validation-error display.
+- Section 8 clamps backend list/export query limits before storage access and does not change auth, CSRF, RBAC, release-token, raw reveal, detector, or tenant-access behavior.
 - Baseline tests include auth, CSRF, MFA, RBAC, validation, sanitized alerting, evidence export, retention, and detector privacy checks.
 - `npm ci` reported 0 vulnerabilities in npm's install audit.
 
