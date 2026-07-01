@@ -909,6 +909,37 @@ Status: Passed
 - The CI workflow now enforces generated demo-guide freshness, which reduces release drift between operator docs and the shipped product surface.
 - The local full gate now includes browser-extension smoke coverage before commits and post-commit pushes, reducing the chance that extension enforcement regressions reach GitHub.
 
+## Section 22 - Final e2e regression
+
+Status: Passed
+
+### Inspection
+
+- Confirmed the worktree was clean on `codex/full-app-qa` and matched `origin/codex/full-app-qa` before the final regression run.
+- Confirmed PR #54 head `930da4c` had merge state `CLEAN` and all duplicate GitHub `test` and `docker` checks passed before the final local regression run.
+- Ran the full local `review:ci` gate from that clean head after Section 21's gate-parity change, so browser-extension smoke coverage was part of the final local regression.
+
+### Issues Found
+
+- None in the final regression pass.
+
+### Fix Made
+
+- No runtime or test-gate fixes were needed in Section 22. This section records final regression evidence only.
+
+### Commands Run
+
+- `git status --short --branch` - clean on `codex/full-app-qa...origin/codex/full-app-qa`.
+- `git log -1 --oneline` - `930da4c test(ci): align release gates`.
+- `gh pr view 54 --json headRefOid,statusCheckRollup,mergeStateStatus,url` - PR head `930da4c`, merge state `CLEAN`, duplicate `test` and `docker` checks all passed.
+- `$env:PLAYWRIGHT_PORT='4317'; npm run review:ci` - passed, including `git diff --check`, docs demo guide check, AI domain coverage check, 81 node test files, 23 Chromium Playwright tests across admin console and browser extension, `sync-check`, and `eval`.
+
+### Security Review Notes
+
+- Section 22 is evidence-only and does not change runtime auth, CSRF, RBAC, raw reveal, detector behavior, persistence, logging, notification delivery, evidence export, deployment, or network behavior.
+- The final local regression includes browser-extension hard-stop, warning, justification, file-drop, response-copy, popup, reduced-motion, and narrow-page banner smoke coverage.
+- The final local regression keeps the known local limitation: Cloudflare Radar enrichment was skipped because `CLOUDFLARE_API_TOKEN` is not configured, while static AI-domain coverage passed.
+
 ## Section Queue
 
 1. Baseline install/lint/typecheck/build/test discovery - passed.
@@ -932,4 +963,4 @@ Status: Passed
 19. Security and privacy - passed.
 20. Analytics/observability if present - passed.
 21. CI/CD and release readiness - passed.
-22. Final e2e regression - pending.
+22. Final e2e regression - passed.

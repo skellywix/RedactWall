@@ -25,7 +25,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Security and privacy - passed.
 - Analytics/observability if present - passed.
 - CI/CD and release readiness - passed.
-- Final e2e regression - pending.
+- Final e2e regression - passed.
 
 # Critical Flows Tested
 
@@ -69,6 +69,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Local observability covers health/readiness, audit-chain state, SIEM alerts, sensor heartbeat evidence, coverage posture, workflow notification status, Signal Monitor behavior, and Security Admin-only aggregate `/api/metrics`.
 - Local `review:ci` and protected GitHub CI now both enforce generated demo-guide freshness plus full browser E2E coverage, including browser-extension smoke tests.
 - CI/CD release readiness coverage includes Docker/Compose, AWS customer-silo deployment, extension package/release checks, endpoint install checks, MCP install checks, sync-check, eval, dependency audit, and Docker image build wiring.
+- Final clean-head regression passed on PR head `930da4c`, with 81 Node test files and 23 Chromium Playwright tests across admin console and browser extension.
 
 # Bugs Fixed
 
@@ -310,6 +311,10 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - `npm run docs:demo-guide:check` - passed after section 21 edit.
 - `npm test` - passed after section 21 edit, 81 node test files.
 - `$env:PLAYWRIGHT_PORT='4313'; npm run review:ci` - passed after section 21 edit, including docs demo guide check, AI domain coverage check, 81 node test files, 23 Chromium Playwright tests across admin console and browser extension, `sync-check`, and `eval`.
+- `git status --short --branch` - clean before final regression on `codex/full-app-qa...origin/codex/full-app-qa`.
+- `git log -1 --oneline` - `930da4c test(ci): align release gates`.
+- `gh pr view 54 --json headRefOid,statusCheckRollup,mergeStateStatus,url` - PR head `930da4c`, merge state `CLEAN`, duplicate `test` and `docker` checks all passed.
+- `$env:PLAYWRIGHT_PORT='4317'; npm run review:ci` - passed for final regression, including `git diff --check`, docs demo guide check, AI domain coverage check, 81 node test files, 23 Chromium Playwright tests across admin console and browser extension, `sync-check`, and `eval`.
 
 # CI Status
 
@@ -319,7 +324,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - GitHub `test` and `docker` checks passed on PR head `4d9105f` after the Section 20 update.
 - GitHub push CI on `d37c04f` exposed the Section 18 policy-save status race; follow-up head `d81b5c7` fixed it and both duplicate `test` and `docker` checks passed.
 - Existing merged PR #53 is on `main` and also had passing GitHub `test` and `docker` checks.
-- Merge status: not merged. The full application QA objective remains open and the next section is final e2e regression.
+- Merge status before the final QA-note update: `CLEAN` on PR head `930da4c`. The final QA-note update is documentation-only and is pushed through the same protected GitHub checks before handoff.
 
 # Accessibility Notes
 
@@ -354,6 +359,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Section 20 narrows `/api/metrics` access from any authenticated role to Security Admin-only and keeps the payload aggregate-only. The route returns uptime, aggregate query counts, audit-chain status/count, and timestamp, with live tests asserting held prompt secrets are omitted.
 - Section 21 changes release gates and tests only. It does not change runtime auth, CSRF, RBAC, raw reveal, detector behavior, persistence, logging, alert delivery, evidence export, or network behavior.
 - Section 21 reduces release drift risk by enforcing generated demo-guide freshness in GitHub CI and browser-extension smoke coverage in the local full gate.
+- Section 22 is evidence-only and does not change runtime auth, CSRF, RBAC, raw reveal, detector behavior, persistence, logging, notification delivery, evidence export, deployment, or network behavior.
 - Baseline tests include auth, CSRF, MFA, RBAC, validation, sanitized alerting, evidence export, retention, and detector privacy checks.
 - `npm ci` reported 0 vulnerabilities in npm's install audit.
 
@@ -383,11 +389,11 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - `.codex/full-app-qa-log.md`
 - `.codex/full-app-qa-pr.md`
 - Existing carried-forward artifacts: `.codex/ui-ux-qa-log.md`, `.codex/ui-ux-pr.md`
-- Section 2 through section 21 test evidence is recorded in `.codex/full-app-qa-log.md`.
+- Section 2 through section 22 test evidence is recorded in `.codex/full-app-qa-log.md`.
 
 # Risks
 
-- Full 22-section application QA is not complete yet.
+- Full 22-section application QA is complete locally; the final QA-note update is documentation-only and is included in the post-push GitHub check watch before merge handoff.
 - No separate lint/typecheck/build scripts exist in `package.json`; current baseline relies on the repo's Node tests, Playwright tests, detector checks, docs drift checks, and CI workflow.
 - Cloudflare Radar enrichment in `ai-domains:check` was skipped locally because `CLOUDFLARE_API_TOKEN` is not configured; static AI-domain coverage still passed.
 - One local `npm run review:ci` attempt failed when `better-sqlite3` could not resolve its native binding during `test/oidc-login.test.js`; the focused OIDC test and a full rerun passed without code changes.
