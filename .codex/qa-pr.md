@@ -24,7 +24,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Performance and bundle health - passed.
 - Security and privacy - passed.
 - Analytics/observability if present - passed.
-- CI/CD and release readiness - pending.
+- CI/CD and release readiness - passed.
 - Final e2e regression - pending.
 
 # Critical Flows Tested
@@ -67,6 +67,8 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Runtime Playwright E2E remains Chromium-only because CI installs Chromium only; Chrome/Edge/Firefox extension packaging and platform metadata remain covered by existing package/release and unit tests.
 - SIEM alert webhooks, approval notification webhooks, Slack/Teams webhooks, ticket bridge webhooks, and native Jira/Linear API URLs now reject cleartext or URL-credential endpoints before fetch while preserving sanitized payload behavior.
 - Local observability covers health/readiness, audit-chain state, SIEM alerts, sensor heartbeat evidence, coverage posture, workflow notification status, Signal Monitor behavior, and Security Admin-only aggregate `/api/metrics`.
+- Local `review:ci` and protected GitHub CI now both enforce generated demo-guide freshness plus full browser E2E coverage, including browser-extension smoke tests.
+- CI/CD release readiness coverage includes Docker/Compose, AWS customer-silo deployment, extension package/release checks, endpoint install checks, MCP install checks, sync-check, eval, dependency audit, and Docker image build wiring.
 
 # Bugs Fixed
 
@@ -90,6 +92,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Section 16 fixed browser-extension banner sizing so padding and borders cannot push the fixed gate banner slightly off-screen on narrow AI pages.
 - Section 19 fixed outbound webhook and direct Jira URL validation so bearer/API tokens and sanitized event metadata are not sent to cleartext or URL-credential endpoints.
 - Section 20 fixed `/api/metrics` access so aggregate ops counters and audit-chain status are Security Admin-only instead of available to every authenticated role.
+- Section 21 fixed CI/local gate drift so generated demo-guide checks and browser-extension Playwright smoke coverage are enforced by the full local gate and protected GitHub workflow.
 
 # Tests Added Or Updated
 
@@ -149,6 +152,9 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Updated `server/app.js` so `/api/metrics` uses Security Admin read middleware.
 - Updated `test/admin-csrf.test.js`, `test/auditor-role.test.js`, and `test/dashboard-linkage.test.js` with metrics route, role, and sanitized-payload coverage.
 - Updated `docs/DEPLOYMENT.md` with the Security Admin-only `/api/metrics` operator contract.
+- Updated `package.json` so `review:ci` runs the full `test:browser` Playwright suite instead of only `test:admin-console`.
+- Updated `.github/workflows/ci.yml` with a generated demo-guide drift check.
+- Added `test/ci-release-readiness.test.js` for local/CI gate parity and release packaging/install-check command coverage.
 
 # Commands Run
 
@@ -300,15 +306,20 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - `npm run docs:demo-guide:check` - passed after section 20 docs edit.
 - `npm test` - passed after section 20 edit, 80 node test files.
 - `$env:PLAYWRIGHT_PORT='4311'; npm run review:ci` - passed after section 20 edit, including docs demo guide check, AI domain coverage check, 80 node test files, 13 admin-console Chromium tests, `sync-check`, and `eval`.
+- `node --test --test-concurrency=1 test\ci-release-readiness.test.js test\docker-deployment.test.js test\extension-release-check.test.js test\endpoint-install-check.test.js test\mcp-install-check.test.js test\aws-deployment.test.js` - passed after section 21 edit, 30 tests.
+- `npm run docs:demo-guide:check` - passed after section 21 edit.
+- `npm test` - passed after section 21 edit, 81 node test files.
+- `$env:PLAYWRIGHT_PORT='4313'; npm run review:ci` - passed after section 21 edit, including docs demo guide check, AI domain coverage check, 81 node test files, 23 Chromium Playwright tests across admin console and browser extension, `sync-check`, and `eval`.
 
 # CI Status
 
 - PR #54 is open: `https://github.com/skellywix/promptwall/pull/54`
 - GitHub `test` and `docker` checks were passing on PR head `918eda0` before the local Section 20 update.
 - GitHub `test` and `docker` checks passed on PR head `918eda0` after the Section 19 update.
+- GitHub `test` and `docker` checks passed on PR head `4d9105f` after the Section 20 update.
 - GitHub push CI on `d37c04f` exposed the Section 18 policy-save status race; follow-up head `d81b5c7` fixed it and both duplicate `test` and `docker` checks passed.
 - Existing merged PR #53 is on `main` and also had passing GitHub `test` and `docker` checks.
-- Merge status: not merged. The full application QA objective remains open and the next section is CI/CD and release readiness.
+- Merge status: not merged. The full application QA objective remains open and the next section is final e2e regression.
 
 # Accessibility Notes
 
@@ -341,6 +352,8 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Section 18 adds asset-budget tests and fixes dashboard policy-save status timing; the runtime change is client-side feedback only and does not change auth, detector, persistence, logging, or network behavior.
 - Section 19 changes outbound notification and alert URL validation only. It now fails closed for unsafe SIEM and approval webhook-style URLs before fetch, preventing bearer/API tokens and sanitized workflow metadata from being sent over cleartext HTTP or URL-credential endpoints. SMTP keeps its documented TLS controls and explicit insecure-local-relay opt-in.
 - Section 20 narrows `/api/metrics` access from any authenticated role to Security Admin-only and keeps the payload aggregate-only. The route returns uptime, aggregate query counts, audit-chain status/count, and timestamp, with live tests asserting held prompt secrets are omitted.
+- Section 21 changes release gates and tests only. It does not change runtime auth, CSRF, RBAC, raw reveal, detector behavior, persistence, logging, alert delivery, evidence export, or network behavior.
+- Section 21 reduces release drift risk by enforcing generated demo-guide freshness in GitHub CI and browser-extension smoke coverage in the local full gate.
 - Baseline tests include auth, CSRF, MFA, RBAC, validation, sanitized alerting, evidence export, retention, and detector privacy checks.
 - `npm ci` reported 0 vulnerabilities in npm's install audit.
 
@@ -370,7 +383,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - `.codex/full-app-qa-log.md`
 - `.codex/full-app-qa-pr.md`
 - Existing carried-forward artifacts: `.codex/ui-ux-qa-log.md`, `.codex/ui-ux-pr.md`
-- Section 2 through section 20 test evidence is recorded in `.codex/full-app-qa-log.md`.
+- Section 2 through section 21 test evidence is recorded in `.codex/full-app-qa-log.md`.
 
 # Risks
 

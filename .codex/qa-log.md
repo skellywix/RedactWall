@@ -874,6 +874,41 @@ Status: Passed
 - The metrics payload includes uptime, aggregate query counts, audit-chain status/count, and timestamp only; live tests assert it does not include the held prompt secret.
 - No external analytics SDK, telemetry export, logging sink, detector behavior, raw reveal, approval release, evidence export, sensor heartbeat ingestion, or persistence behavior changed.
 
+## Section 21 - CI/CD and release readiness
+
+Status: Passed
+
+### Inspection
+
+- Reviewed GitHub workflows, package scripts, git hooks, Playwright runner behavior, Docker and Docker Compose deployment files, AWS customer-silo template coverage, extension packaging checks, endpoint install checks, MCP install checks, and generated demo-guide drift checks.
+- Confirmed GitHub `test` and `docker` checks were green on PR head `4d9105f` after the Section 20 update before the local Section 21 edits.
+- Confirmed protected GitHub CI already runs full browser E2E through `npm run test:browser`, including both admin-console and browser-extension specs.
+
+### Issues Found
+
+1. The local `review:ci` gate described as the full review gate only ran `test:admin-console`, so local hooks could pass while skipping the browser-extension Playwright smoke suite that GitHub CI runs.
+2. GitHub CI did not run `npm run docs:demo-guide:check`, so generated demo guide drift was enforced locally but not in the protected workflow.
+3. There was no static regression test proving the local and protected release gates keep full browser E2E, generated docs, sync, eval, audit, Docker build, and packaging/install-check scripts wired.
+
+### Fix Made
+
+- Updated `review:ci` to run `npm run test:browser`, covering both admin-console and browser-extension Playwright specs in the local full gate.
+- Added a GitHub CI step for `npm run docs:demo-guide:check`.
+- Added `test/ci-release-readiness.test.js` to lock the CI/local gate contract and confirm release packaging plus endpoint/MCP install-check scripts remain available.
+
+### Commands Run
+
+- `node --test --test-concurrency=1 test\ci-release-readiness.test.js test\docker-deployment.test.js test\extension-release-check.test.js test\endpoint-install-check.test.js test\mcp-install-check.test.js test\aws-deployment.test.js` - passed after section 21 edit, 30 tests.
+- `npm run docs:demo-guide:check` - passed after section 21 edit.
+- `npm test` - passed after section 21 edit, 81 node test files.
+- `$env:PLAYWRIGHT_PORT='4313'; npm run review:ci` - passed after section 21 edit, including docs demo guide check, AI domain coverage check, 81 node test files, 23 Chromium Playwright tests across admin console and browser extension, `sync-check`, and `eval`.
+
+### Security Review Notes
+
+- Section 21 changes release gates and tests only; it does not change runtime auth, CSRF, RBAC, raw reveal, detector behavior, persistence, logging, alert delivery, evidence export, or network behavior.
+- The CI workflow now enforces generated demo-guide freshness, which reduces release drift between operator docs and the shipped product surface.
+- The local full gate now includes browser-extension smoke coverage before commits and post-commit pushes, reducing the chance that extension enforcement regressions reach GitHub.
+
 ## Section Queue
 
 1. Baseline install/lint/typecheck/build/test discovery - passed.
@@ -896,5 +931,5 @@ Status: Passed
 18. Performance and bundle health - passed.
 19. Security and privacy - passed.
 20. Analytics/observability if present - passed.
-21. CI/CD and release readiness - pending.
+21. CI/CD and release readiness - passed.
 22. Final e2e regression - pending.
