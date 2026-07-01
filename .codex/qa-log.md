@@ -82,7 +82,7 @@ That slice covered dashboard shortcut controls, active tab accessibility state, 
 - Branch: `codex/full-app-qa`
 - PR: `https://github.com/skellywix/promptwall/pull/54`
 - Latest observed CI status: pending for GitHub `test` and `docker` on the latest pushed head.
-- Merge status: not merged. The full application QA objective remains open and the next section is buttons, controls, overlays, and interactive states.
+- Merge status: not merged. The full application QA objective remains open and the next section is loading, empty, error, and success states.
 
 ## Section 2 - Navigation And Routing
 
@@ -191,13 +191,46 @@ The dashboard policy save flow returned silently when `/api/policy` rejected a f
 - The server remains the authority for policy validation and policy mutation.
 - The new dashboard feedback displays only sanitized server field names from `server/validation.js`; it does not echo rejected form values, prompt text, secrets, or policy payload contents.
 
+## Section 5 - Buttons, Controls, Overlays, And Interactive States
+
+Status: Passed
+
+### Inspection
+
+- Reviewed dashboard tab controls, rail/content navigation, queue filters, queue density toggle, theme toggle, status popovers/tooltips, monitor chips, inspector controls, step-up dialogs, destination review dialog, and policy template/control buttons in `server/public/dashboard.js`.
+- Reviewed Playwright coverage in `e2e/admin-console.spec.js` for theme persistence, popovers, tab controls, queue controls, reveal/approve dialogs, cancel paths, destination review actions, policy buttons, monitor controls, and mobile tabs.
+- Reviewed static/linkage assertions in `test/admin-csrf.test.js` and `test/dashboard-linkage.test.js`.
+
+### Issue Found
+
+The browser suite covered successful destination review actions and cancel paths for reveal/approve dialogs, but did not lock the destination review overlay's required reason and cancel/Escape behavior before policy mutation.
+
+### Fix Made
+
+Updated `e2e/admin-console.spec.js` to verify:
+
+- Blank destination review reason keeps the overlay open.
+- Escape closes the destination review overlay without saving.
+- Canceled destination review does not add the destination to governed, allowed, or blocked policy lists.
+
+### Commands Run
+
+- `npm run test:admin-console` - passed after edit, 6 Chromium tests.
+- `node --test --test-concurrency=1 test\admin-csrf.test.js test\dashboard-linkage.test.js` - passed after edit, 13 tests.
+- `git diff --check` - passed with the repo's usual CRLF working-copy warnings.
+
+### Security Review Notes
+
+- No runtime code changed in this section.
+- The added browser regression proves an overlay cancel path does not mutate governed destination policy before an explicit reasoned save.
+
 ## Section Queue
 
 1. Baseline install/lint/typecheck/build/test discovery - passed.
 2. Navigation and routing - passed.
 3. Authentication and authorization - passed.
 4. Forms and validation - passed.
-5. Buttons, controls, overlays, and interactive states - pending.
+5. Buttons, controls, overlays, and interactive states - passed.
 6. Loading, empty, error, and success states - pending.
 7. API integration and data fetching - pending.
 8. Backend API behavior - pending.

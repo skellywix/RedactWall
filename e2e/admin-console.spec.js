@@ -600,9 +600,11 @@ test('admin console secondary controls and dialog cancels are wired end to end',
     allow: 'allow-secondary.example',
     block: 'block-secondary.example',
   };
+  const cancelDestination = 'cancel-secondary.example';
   for (const destination of Object.values(destinations)) {
     await createShadowAi(request, destination);
   }
+  await createShadowAi(request, cancelDestination);
 
   await login(page);
 
@@ -632,6 +634,18 @@ test('admin console secondary controls and dialog cancels are wired end to end',
 
   await page.locator('.content-tabs .tab[data-tab="coverage"]').click();
   await page.locator('#refreshCoverage').click();
+  await page.locator(`[data-destination-review="block"][data-destination="${cancelDestination}"]`).click();
+  await expect(page.getByRole('heading', { name: 'Record destination reason' })).toBeVisible();
+  await page.locator('.stepup-dialog').getByRole('button', { name: 'Save review' }).click();
+  await expect(page.locator('.stepup-dialog')).toBeVisible();
+  await page.locator('.stepup-dialog textarea[name="reason"]').fill('cancelled_destination_review');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.stepup-dialog')).toHaveCount(0);
+  let destinationPolicy = await page.evaluate(async () => (await fetch('/api/policy')).json());
+  expect(destinationPolicy.blockedDestinations || []).not.toContain(cancelDestination);
+  expect(destinationPolicy.allowedDestinations || []).not.toContain(cancelDestination);
+  expect(destinationPolicy.governedDestinations || []).not.toContain(cancelDestination);
+
   for (const [decision, destination] of Object.entries(destinations)) {
     await page.locator(`[data-destination-review="${decision}"][data-destination="${destination}"]`).click();
     await expect(page.getByRole('heading', { name: 'Record destination reason' })).toBeVisible();
@@ -642,7 +656,7 @@ test('admin console secondary controls and dialog cancels are wired end to end',
   await expect(page.locator('#shadowRows')).toContainText('Governed');
   await expect(page.locator('#shadowRows')).toContainText('Allowed');
   await expect(page.locator('#shadowRows')).toContainText('Blocked');
-  const destinationPolicy = await page.evaluate(async () => (await fetch('/api/policy')).json());
+  destinationPolicy = await page.evaluate(async () => (await fetch('/api/policy')).json());
   expect(destinationPolicy.governedDestinations).toContain(destinations.govern);
   expect(destinationPolicy.allowedDestinations).toContain(destinations.allow);
   expect(destinationPolicy.blockedDestinations).toContain(destinations.block);
