@@ -1084,6 +1084,35 @@ async function apiErrorSummary(response, fallback) {
   return fallback;
 }
 
+async function responseJsonBody(response, fallback = null) {
+  if (!response) return fallback;
+  try {
+    return await response.json();
+  } catch {
+    return fallback;
+  }
+}
+
+async function responseJson(response, fallback = null) {
+  if (!response || !response.ok) return fallback;
+  return responseJsonBody(response, fallback);
+}
+
+async function responseJsonObject(response, fallback = null) {
+  const body = await responseJson(response, null);
+  return body && typeof body === 'object' && !Array.isArray(body) ? body : fallback;
+}
+
+async function responseJsonObjectBody(response, fallback = null) {
+  const body = await responseJsonBody(response, null);
+  return body && typeof body === 'object' && !Array.isArray(body) ? body : fallback;
+}
+
+async function responseJsonArray(response, fallback = []) {
+  const body = await responseJson(response, null);
+  return Array.isArray(body) ? body : fallback;
+}
+
 function boundedPromise(promise, timeoutMs, fallback) {
   return Promise.race([
     Promise.resolve(promise).catch(() => fallback),
@@ -1093,8 +1122,7 @@ function boundedPromise(promise, timeoutMs, fallback) {
 
 async function optionalDashboardJson(path, fallback = null, timeoutMs = 1800) {
   const response = await boundedPromise(api(path), timeoutMs, null);
-  if (!response || !response.ok) return fallback;
-  return boundedPromise(response.json(), timeoutMs, fallback);
+  return boundedPromise(responseJson(response, fallback), timeoutMs, fallback);
 }
 
 async function dashboardJsonWithTimeout(path, timeoutMs = 1800) {
@@ -1102,8 +1130,7 @@ async function dashboardJsonWithTimeout(path, timeoutMs = 1800) {
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await api(path, { signal: controller.signal });
-    if (!response || !response.ok) return null;
-    return await response.json();
+    return await responseJson(response, null);
   } catch {
     return null;
   } finally {
@@ -1348,9 +1375,10 @@ async function loadStats() {
   setBusy('#stats', true, 'SYNCING');
   try {
     const [r, seatRes] = await Promise.all([api('/api/stats'), api('/api/billing/seats')]);
-    if (!r) return;
-    const s = await r.json();
-    const seats = seatRes && seatRes.ok ? await seatRes.json() : null;
+    const s = await responseJsonObject(r, null);
+    if (!s) return;
+    const seats = await responseJsonObject(seatRes, null);
+    const topEntities = Array.isArray(s.topEntities) ? s.topEntities : [];
     const totalDecisions = (s.approved || 0) + (s.denied || 0);
     const approveRate = totalDecisions ? `${Math.round(((s.approved || 0) / totalDecisions) * 100)}%` : '-';
     const seatValue = seats && seats.seatLimit ? `${seats.seatsUsed}/${seats.seatLimit}` : (seats ? seats.seatsUsed : '-');
@@ -1373,8 +1401,8 @@ async function loadStats() {
     const b = $('#qBadge');
     if (s.pending > 0) { b.classList.remove('hidden'); b.textContent = s.pending; }
     else b.classList.add('hidden');
-    $('#topEntities').innerHTML = (s.topEntities.length ? s.topEntities : []).map(([k, v]) => {
-      const max = s.topEntities[0][1] || 1;
+    $('#topEntities').innerHTML = topEntities.map(([k, v]) => {
+      const max = topEntities[0][1] || 1;
       return `<div class="barrow"><div class="name">${escapeHtml(k)}</div><div class="bar"><i style="--w:${Math.round((v / max) * 100)}%"></i></div><div class="v">${escapeHtml(v)}</div></div>`;
     }).join('') || '<div class="empty"><div class="big">No detections</div>Current data set has no classified prompt findings.</div>';
     markUpdated();
@@ -1820,8 +1848,9 @@ async function loadActivity() {
   setBusy('#tab-activity .panel', true, 'SYNCING');
   try {
     const r = await api('/api/queries?limit=200');
-    if (!r) return;
-    currentActivity = await r.json();
+    const rows = await responseJsonArray(r, null);
+    if (!rows) return;
+    currentActivity = rows;
     renderActivityRows(currentActivity);
     markUpdated();
   } finally {
@@ -1885,8 +1914,9 @@ async function loadCoverage() {
   setBusy('#tab-coverage .panel', true, 'RECONCILING');
   try {
     const r = await api('/api/coverage');
-    if (!r) return;
-    currentCoverage = await r.json();
+    const nextCoverage = await responseJsonObject(r, null);
+    if (!nextCoverage) return;
+    currentCoverage = nextCoverage;
     renderCoverage(currentCoverage);
     markUpdated();
   } finally {
@@ -2012,8 +2042,11 @@ async function loadIdentitySetup() {
   setBusy('#tab-identity .panel', true, 'VERIFYING');
   try {
     const r = await api(`/api/identity/setup-guide?${params.toString()}`);
-    if (!r) return;
-    currentIdentitySetup = await r.json();
+    const nextSetup = r && r.ok
+      ? await responseJsonObject(r, null)
+      : await responseJsonObjectBody(r, null);
+    if (!nextSetup) return;
+    currentIdentitySetup = nextSetup;
     if (currentIdentitySetup.error) {
       $('#identitySummary').innerHTML = `<div class="empty"><div class="big">Identity setup unavailable</div>${escapeHtml(currentIdentitySetup.error)}</div>`;
       return;
@@ -2086,8 +2119,8 @@ async function loadLineage() {
   setBusy('#tab-lineage .panel', true, 'ANALYZING');
   try {
     const r = await api('/api/lineage?limit=1000');
-    if (!r) return;
-    const body = await r.json();
+    const body = await responseJsonObject(r, null);
+    if (!body) return;
     currentLineage = body.lineage || {};
     renderLineage(currentLineage);
     markUpdated();
@@ -2147,8 +2180,8 @@ async function loadAudit() {
   setBusy('#tab-audit .panel', true, 'VERIFYING');
   try {
     const r = await api('/api/audit');
-    if (!r) return;
-    const d = await r.json();
+    const d = await responseJsonObject(r, null);
+    if (!d || !d.integrity || !Array.isArray(d.entries)) return;
     const ig = d.integrity;
     $('#integrity').className = `integrity ${ig.ok ? 'ok' : 'bad'}`;
     $('#integrity').innerHTML = ig.ok
@@ -2361,9 +2394,9 @@ async function loadPolicy() {
     api('/api/policy'),
     api('/api/policy/templates'),
   ]);
-  if (!pRes || !tRes) return;
-  const p = await pRes.json();
-  const tpls = await tRes.json();
+  const p = await responseJsonObject(pRes, null);
+  const tpls = await responseJsonArray(tRes, null);
+  if (!p || !tpls) return;
   const [preflight, coverage] = await Promise.all([preflightPromise, coveragePromise]);
   currentCoverage = coverage || currentCoverage;
   const readonly = !canAdminWrite();

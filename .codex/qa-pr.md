@@ -10,7 +10,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Forms and validation - passed.
 - Buttons, controls, overlays, and interactive states - passed.
 - Loading, empty, error, and success states - passed.
-- API integration and data fetching - pending.
+- API integration and data fetching - passed.
 - Backend API behavior - pending.
 - Database/persistence/migrations if present - pending.
 - State management and cache - pending.
@@ -46,6 +46,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Evidence export processing, failure, and button re-enable states when the export endpoint fails.
 - Queue, activity, monitor, policy save, purge, export, and search empty/error/success states.
 - Browser-extension smoke policy fixture is synced through admin policy and verified through `/api/v1/policy` before content-script assertions.
+- Dashboard activity, coverage, and policy refreshes preserve the last good state when API endpoints return transient failures.
 
 # Bugs Fixed
 
@@ -55,6 +56,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Section 4 fixed dashboard policy-save validation failures that previously returned silently when the server rejected a malformed form payload.
 - Section 5 fixed a test coverage gap for destination review overlay cancel behavior before policy mutation.
 - Section 6 fixed a test coverage gap for evidence export failure and recovery UI states.
+- Section 7 fixed dashboard loader behavior that could parse failed API responses as normal data and throw page errors or overwrite loaded state.
 
 # Tests Added Or Updated
 
@@ -71,6 +73,8 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Updated `e2e/browser-extension.spec.js` to remove the server-policy refresh race in extension smoke tests.
 - Reset merge-persistent policy fields in `e2e/browser-extension.spec.js` so earlier browser specs cannot leak scoped policy, routing, response-scan, or sensor-requirement state into extension assertions.
 - Updated `playwright.config.js` to run shared-server browser E2E specs with one worker.
+- Updated `server/public/dashboard.js` with guarded JSON response handling for dashboard data loaders.
+- Updated `e2e/admin-console.spec.js` with API refresh failure coverage for activity, coverage, and policy-template data.
 
 # Commands Run
 
@@ -110,14 +114,20 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - `npm run test:browser` - failed once after serialization when a local Windows Playwright worker crashed and left a stale Playwright server on port `4211`; exact stale `playwright-server` and `promptwall-extension-e2e` Chromium processes were stopped.
 - `$env:PLAYWRIGHT_PORT='4241'; npm run test:browser` - passed after stale harness cleanup and the fuller policy reset, 14 Chromium tests.
 - `npm run review:ci` - passed after browser-suite stabilization.
+- `gh pr checks 54 --watch --interval 10` - passed on head `6fccc30`, two `test` checks and two `docker` checks.
+- `$env:PLAYWRIGHT_PORT='4241'; npx playwright test admin-console.spec.js --grep "preserves loaded API data" --reporter=line` - passed after section 7 edit, 1 Chromium test.
+- `$env:PLAYWRIGHT_PORT='4241'; npm run test:admin-console` - passed after section 7 edit, 7 Chromium tests.
+- `node --test --test-concurrency=1 test\dashboard-linkage.test.js test\admin-csrf.test.js` - passed after section 7 edit, 13 tests.
+- `node --test --test-concurrency=1 test\dashboard-linkage.test.js test\evidence-export-ui.test.js` - passed after section 7 edit, 4 tests.
+- `npm run review:ci` - passed after section 7 edit.
 
 # CI Status
 
 - PR #54 is open: `https://github.com/skellywix/promptwall/pull/54`
-- GitHub `test` checks were pending on the latest pushed head when last checked.
-- GitHub `docker` checks were pending on the latest pushed head when last checked.
+- GitHub `test` checks passed on head `6fccc30`.
+- GitHub `docker` checks passed on head `6fccc30`.
 - Existing merged PR #53 is on `main` and also had passing GitHub `test` and `docker` checks.
-- Merge status: not merged. The full application QA objective remains open and the next section is API integration and data fetching.
+- Merge status: not merged. The full application QA objective remains open and the next section is backend API behavior.
 
 # Accessibility Notes
 
@@ -136,6 +146,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Section 6 did not change runtime code. It added export failure UI coverage and confirmed the dashboard export helper does not call reveal/raw-prompt APIs.
 - Browser-extension CI stabilization changed test code only; it drives policy through authenticated admin policy updates and the ingest-key protected sensor policy endpoint before extension assertions.
 - Browser-suite isolation changed Playwright test configuration only; it serializes specs that share mutable temp server state.
+- Section 7 changed dashboard response handling for existing authenticated routes only. Generic loaders now discard failed response bodies instead of rendering upstream error details, while identity setup keeps its sanitized validation-error display.
 - Baseline tests include auth, CSRF, MFA, RBAC, validation, sanitized alerting, evidence export, retention, and detector privacy checks.
 - `npm ci` reported 0 vulnerabilities in npm's install audit.
 
@@ -167,5 +178,5 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - One section 2 admin-console rerun failed before tests because the local Playwright health URL on port `4211` was briefly occupied during parallel validation. A listener check showed no stale server, and the serial rerun passed.
 - Broader manual auth abuse, rate-limit, and cross-session checks remain for later security/privacy coverage.
 - Section 4 intentionally triggered a local validation `400` in Playwright; the final rerun passed after the test explicitly scoped that expected response.
-- GitHub `test` failed on PR heads `a638063` and `1d85101` in the browser-extension smoke job before the policy-sync test fix; a GitHub rerun on the fixed head is still required.
+- GitHub `test` failed on PR heads `a638063` and `1d85101` in the browser-extension smoke job before the policy-sync test fix; the fixed head `6fccc30` passed GitHub `test` and `docker`.
 - Local `test:browser` showed shared-state interference with multiple Playwright workers before the single-worker config fix.

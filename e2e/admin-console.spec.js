@@ -332,6 +332,91 @@ test('admin console login, approval, policy save, and evidence export work in a 
   expect(problems).toEqual([]);
 });
 
+test('admin console preserves loaded API data when refresh endpoints fail', async ({ page, request }) => {
+  const problems = collectUiProblems(page);
+  await createHeldPrompt(request, {
+    suffix: '9301',
+    user: 'api-refresh-ui@example.test',
+    destination: 'chatgpt.com',
+  });
+  await recordHeartbeat(request, {
+    user: 'api-health-ui@example.test',
+    source: 'endpoint_agent',
+    destination: 'endpoint-install',
+    sensor: { name: 'endpoint_agent', version: '0.3.0', platform: 'win32' },
+  });
+
+  await login(page);
+
+  await page.locator('.content-tabs .tab[data-tab="activity"]').click();
+  await expect(page.locator('#activityRows')).toContainText('api-refresh-ui@example.test');
+
+  await page.locator('.content-tabs .tab[data-tab="coverage"]').click();
+  await page.locator('#refreshCoverage').click();
+  await expect(page.locator('#coverageScore')).toContainText('Coverage score');
+  await expect(page.locator('#fleetRows')).toContainText('api-health-ui@example.test');
+
+  await page.locator('.content-tabs .tab[data-tab="policy"]').click();
+  await expect(page.locator('#pol_risk')).toBeVisible();
+  const policyRisk = await page.locator('#pol_risk').inputValue();
+
+  const activityRoute = /\/api\/queries\?limit=200$/;
+  await page.route(activityRoute, (route) => route.fulfill({
+    status: 500,
+    contentType: 'application/json',
+    body: JSON.stringify({ error: 'synthetic activity refresh failure' }),
+  }));
+  const activityProblemStart = problems.length;
+  await page.locator('.content-tabs .tab[data-tab="activity"]').click();
+  await expect(page.locator('#activityRows')).toContainText('api-refresh-ui@example.test');
+  const activityProblems = problems.splice(activityProblemStart);
+  expect(activityProblems.filter((problem) => {
+    if (/^api 500: .*\/api\/queries\?limit=200$/.test(problem)) return false;
+    if (problem.includes('console error: Failed to load resource') && problem.includes('500')) return false;
+    return true;
+  })).toEqual([]);
+  await page.unroute(activityRoute);
+
+  const coverageRoute = /\/api\/coverage$/;
+  await page.route(coverageRoute, (route) => route.fulfill({
+    status: 500,
+    contentType: 'application/json',
+    body: JSON.stringify({ error: 'synthetic coverage refresh failure' }),
+  }));
+  const coverageProblemStart = problems.length;
+  await page.locator('.content-tabs .tab[data-tab="coverage"]').click();
+  await page.locator('#refreshCoverage').click();
+  await expect(page.locator('#coverageScore')).toContainText('Coverage score');
+  await expect(page.locator('#fleetRows')).toContainText('api-health-ui@example.test');
+  const coverageProblems = problems.splice(coverageProblemStart);
+  expect(coverageProblems.filter((problem) => {
+    if (/^api 500: .*\/api\/coverage$/.test(problem)) return false;
+    if (problem.includes('console error: Failed to load resource') && problem.includes('500')) return false;
+    return true;
+  })).toEqual([]);
+  await page.unroute(coverageRoute);
+
+  const templateRoute = /\/api\/policy\/templates$/;
+  await page.route(templateRoute, (route) => route.fulfill({
+    status: 500,
+    contentType: 'application/json',
+    body: JSON.stringify({ error: 'synthetic template refresh failure' }),
+  }));
+  const policyProblemStart = problems.length;
+  await page.locator('.content-tabs .tab[data-tab="policy"]').click();
+  await page.locator('#discardPolicy').click();
+  await expect(page.locator('#pol_risk')).toHaveValue(policyRisk);
+  const policyProblems = problems.splice(policyProblemStart);
+  expect(policyProblems.filter((problem) => {
+    if (/^api 500: .*\/api\/policy\/templates$/.test(problem)) return false;
+    if (problem.includes('console error: Failed to load resource') && problem.includes('500')) return false;
+    return true;
+  })).toEqual([]);
+  await page.unroute(templateRoute);
+
+  expect(problems).toEqual([]);
+});
+
 test('admin console controls and forms are wired end to end', async ({ page, request }) => {
   const problems = collectUiProblems(page);
   const reveal = await createHeldPrompt(request, {

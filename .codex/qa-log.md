@@ -81,8 +81,8 @@ That slice covered dashboard shortcut controls, active tab accessibility state, 
 
 - Branch: `codex/full-app-qa`
 - PR: `https://github.com/skellywix/promptwall/pull/54`
-- Latest observed CI status: pending for GitHub `test` and `docker` on the latest pushed head.
-- Merge status: not merged. The full application QA objective remains open and the next section is API integration and data fetching.
+- Latest observed CI status: GitHub `test` and `docker` passed on head `6fccc30`.
+- Merge status: not merged. The full application QA objective remains open and the next section is backend API behavior.
 
 ## Section 2 - Navigation And Routing
 
@@ -263,7 +263,7 @@ Updated `e2e/admin-console.spec.js` to route `/api/export/evidence` to a delayed
 
 ## GitHub CI Follow-Up - Browser Extension Policy Sync
 
-Status: Passed locally, pending GitHub rerun
+Status: Passed locally and on GitHub
 
 ### Failure Captured
 
@@ -293,11 +293,49 @@ The local full-browser suite also showed that admin-console and browser-extensio
 - `npm run test:browser` - failed once after serialization when a local Windows Playwright worker crashed and left a stale Playwright server on port `4211`; exact stale `playwright-server` and `promptwall-extension-e2e` Chromium processes were stopped.
 - `$env:PLAYWRIGHT_PORT='4241'; npm run test:browser` - passed after stale harness cleanup and the fuller policy reset, 14 Chromium tests.
 - `npm run review:ci` - passed after browser-suite stabilization.
+- `gh pr checks 54 --watch --interval 10` - passed on head `6fccc30`, two `test` checks and two `docker` checks.
 
 ### Security Review Notes
 
 - No runtime extension or server code changed.
 - The test now drives extension policy through the same authenticated admin policy path and ingest-key protected sensor policy endpoint used by production sensors.
+
+## Section 7 - API Integration And Data Fetching
+
+Status: Passed
+
+### Inspection
+
+- Reviewed the shared dashboard `api()` wrapper, CSRF header injection, auth redirect behavior, and forbidden-session handling.
+- Reviewed timeout/fallback helpers for dashboard JSON reads, including queue fallback behavior from activity data.
+- Reviewed dashboard loaders for stats/seats, queue, activity, coverage, identity setup, lineage, audit, and policy/templates.
+- Reviewed existing browser coverage for successful dashboard data fetches, tab refreshes, and API-driven state updates.
+
+### Issue Found
+
+Several dashboard loaders parsed JSON from non-OK API responses and then treated the error body as normal data. A transient failed refresh could replace loaded state with an error object or throw a page error, for example activity rows calling `.filter()` on a 500 body or policy templates calling `.map()` on an error object.
+
+### Fix Made
+
+- Added guarded JSON helpers for response bodies, object payloads, and array payloads.
+- Updated stats, activity, coverage, identity, lineage, audit, and policy loaders to ignore non-OK or malformed responses instead of overwriting loaded dashboard state.
+- Preserved the previous good activity, coverage, and policy-template UI state when refresh endpoints fail.
+- Preserved the identity setup route's existing sanitized `400` error display for operator input errors.
+- Added a Playwright regression that loads real dashboard data, forces synthetic activity/coverage/policy-template `500` responses, and verifies the console keeps the prior good state without uncaught page errors.
+
+### Commands Run
+
+- `$env:PLAYWRIGHT_PORT='4241'; npx playwright test admin-console.spec.js --grep "preserves loaded API data" --reporter=line` - passed, 1 Chromium test.
+- `$env:PLAYWRIGHT_PORT='4241'; npm run test:admin-console` - passed, 7 Chromium tests.
+- `node --test --test-concurrency=1 test\dashboard-linkage.test.js test\admin-csrf.test.js` - passed, 13 tests.
+- `node --test --test-concurrency=1 test\dashboard-linkage.test.js test\evidence-export-ui.test.js` - passed, 4 tests.
+- `npm run review:ci` - passed after section 7 edit.
+
+### Security Review Notes
+
+- Runtime changes are limited to dashboard response handling for existing authenticated routes.
+- Generic dashboard loaders now discard failed response bodies instead of rendering them, while identity setup still shows its existing sanitized validation errors.
+- The new browser failure routes use synthetic error bodies and do not introduce or log prompt content.
 
 ## Section Queue
 
@@ -307,7 +345,7 @@ The local full-browser suite also showed that admin-console and browser-extensio
 4. Forms and validation - passed.
 5. Buttons, controls, overlays, and interactive states - passed.
 6. Loading, empty, error, and success states - passed.
-7. API integration and data fetching - pending.
+7. API integration and data fetching - passed.
 8. Backend API behavior - pending.
 9. Database/persistence/migrations if present - pending.
 10. State management and cache - pending.
