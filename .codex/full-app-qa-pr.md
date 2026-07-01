@@ -23,7 +23,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Motion/effects/reduced-motion behavior - passed.
 - Performance and bundle health - passed.
 - Security and privacy - passed.
-- Analytics/observability if present - pending.
+- Analytics/observability if present - passed.
 - CI/CD and release readiness - pending.
 - Final e2e regression - pending.
 
@@ -66,6 +66,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Mobile login, tablet dashboard, mobile dashboard, and narrow browser-extension gate banners now have no-horizontal-overflow browser coverage.
 - Runtime Playwright E2E remains Chromium-only because CI installs Chromium only; Chrome/Edge/Firefox extension packaging and platform metadata remain covered by existing package/release and unit tests.
 - SIEM alert webhooks, approval notification webhooks, Slack/Teams webhooks, ticket bridge webhooks, and native Jira/Linear API URLs now reject cleartext or URL-credential endpoints before fetch while preserving sanitized payload behavior.
+- Local observability covers health/readiness, audit-chain state, SIEM alerts, sensor heartbeat evidence, coverage posture, workflow notification status, Signal Monitor behavior, and Security Admin-only aggregate `/api/metrics`.
 
 # Bugs Fixed
 
@@ -88,6 +89,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Section 15 fixed accessibility feedback gaps for login/dashboard alerts, step-up dialogs, destination-review dialogs, browser-extension banners, queue filters, and keyboard-selected approval rows.
 - Section 16 fixed browser-extension banner sizing so padding and borders cannot push the fixed gate banner slightly off-screen on narrow AI pages.
 - Section 19 fixed outbound webhook and direct Jira URL validation so bearer/API tokens and sanitized event metadata are not sent to cleartext or URL-credential endpoints.
+- Section 20 fixed `/api/metrics` access so aggregate ops counters and audit-chain status are Security Admin-only instead of available to every authenticated role.
 
 # Tests Added Or Updated
 
@@ -144,6 +146,9 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Updated `server/alerts.js` and `server/notifiers.js` to reject unsafe outbound SIEM and approval-notification URLs before fetch.
 - Updated `test/alerts.test.js` and `test/notifiers.test.js` with outbound URL security regressions.
 - Updated `docs/DEPLOYMENT.md` and `docs/APPROVAL_ROUTING.md` with the HTTPS/no-URL-credentials contract for webhook-style URLs and native Jira/Linear API URLs.
+- Updated `server/app.js` so `/api/metrics` uses Security Admin read middleware.
+- Updated `test/admin-csrf.test.js`, `test/auditor-role.test.js`, and `test/dashboard-linkage.test.js` with metrics route, role, and sanitized-payload coverage.
+- Updated `docs/DEPLOYMENT.md` with the Security Admin-only `/api/metrics` operator contract.
 
 # Commands Run
 
@@ -289,14 +294,21 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - `npm run docs:demo-guide:check` - passed after section 19 docs edit.
 - `npm test` - passed after section 19 edit, 80 node test files.
 - `$env:PLAYWRIGHT_PORT='4309'; npm run review:ci` - passed after section 19 edit, including docs demo guide check, AI domain coverage check, 80 node test files, 13 admin-console Chromium tests, `sync-check`, and `eval`.
+- `node --check server\app.js` - passed after section 20 edit.
+- `node --test --test-concurrency=1 test\admin-csrf.test.js test\auditor-role.test.js test\dashboard-linkage.test.js` - passed after section 20 edit, 20 tests.
+- `git diff --check` - passed after section 20 edit with the repo's usual CRLF working-copy warnings.
+- `npm run docs:demo-guide:check` - passed after section 20 docs edit.
+- `npm test` - passed after section 20 edit, 80 node test files.
+- `$env:PLAYWRIGHT_PORT='4311'; npm run review:ci` - passed after section 20 edit, including docs demo guide check, AI domain coverage check, 80 node test files, 13 admin-console Chromium tests, `sync-check`, and `eval`.
 
 # CI Status
 
 - PR #54 is open: `https://github.com/skellywix/promptwall/pull/54`
-- GitHub `test` and `docker` checks were passing on PR head `d81b5c7` before the local Section 19 update.
+- GitHub `test` and `docker` checks were passing on PR head `918eda0` before the local Section 20 update.
+- GitHub `test` and `docker` checks passed on PR head `918eda0` after the Section 19 update.
 - GitHub push CI on `d37c04f` exposed the Section 18 policy-save status race; follow-up head `d81b5c7` fixed it and both duplicate `test` and `docker` checks passed.
 - Existing merged PR #53 is on `main` and also had passing GitHub `test` and `docker` checks.
-- Merge status: not merged. The full application QA objective remains open and the next section is Analytics/observability.
+- Merge status: not merged. The full application QA objective remains open and the next section is CI/CD and release readiness.
 
 # Accessibility Notes
 
@@ -328,6 +340,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Section 17 changes CSS motion preferences and browser regression tests only; no auth, CSRF, RBAC, detector, persistence, evidence export, tenant, billing, or network behavior changed.
 - Section 18 adds asset-budget tests and fixes dashboard policy-save status timing; the runtime change is client-side feedback only and does not change auth, detector, persistence, logging, or network behavior.
 - Section 19 changes outbound notification and alert URL validation only. It now fails closed for unsafe SIEM and approval webhook-style URLs before fetch, preventing bearer/API tokens and sanitized workflow metadata from being sent over cleartext HTTP or URL-credential endpoints. SMTP keeps its documented TLS controls and explicit insecure-local-relay opt-in.
+- Section 20 narrows `/api/metrics` access from any authenticated role to Security Admin-only and keeps the payload aggregate-only. The route returns uptime, aggregate query counts, audit-chain status/count, and timestamp, with live tests asserting held prompt secrets are omitted.
 - Baseline tests include auth, CSRF, MFA, RBAC, validation, sanitized alerting, evidence export, retention, and detector privacy checks.
 - `npm ci` reported 0 vulnerabilities in npm's install audit.
 
@@ -357,7 +370,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - `.codex/full-app-qa-log.md`
 - `.codex/full-app-qa-pr.md`
 - Existing carried-forward artifacts: `.codex/ui-ux-qa-log.md`, `.codex/ui-ux-pr.md`
-- Section 2 through section 19 test evidence is recorded in `.codex/full-app-qa-log.md`.
+- Section 2 through section 20 test evidence is recorded in `.codex/full-app-qa-log.md`.
 
 # Risks
 

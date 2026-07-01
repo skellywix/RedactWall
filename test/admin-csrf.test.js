@@ -30,6 +30,7 @@ test('admin write routes include csrf middleware', () => {
   }
   assert.ok(server.includes("app.post('/api/logout', ...sessionWrite"), 'logout remains available to any authenticated session');
   assert.ok(server.includes("app.get('/api/billing/seats', ...adminRead"), 'billing seat identities remain Security Admin only');
+  assert.ok(server.includes("app.get('/api/metrics', ...adminRead"), 'ops metrics remain Security Admin only');
 });
 
 test('dashboard fetches and sends csrf token on unsafe admin requests', () => {

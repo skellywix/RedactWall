@@ -256,6 +256,7 @@ test('dashboard static controls, generated policy controls, and API routes stay 
     ['post', '/api/queries/:id/approve'],
     ['post', '/api/queries/:id/deny'],
     ['get', '/api/stats'],
+    ['get', '/api/metrics'],
     ['get', '/api/billing/seats'],
     ['get', '/api/preflight'],
     ['post', '/api/retention/purge'],
@@ -312,6 +313,7 @@ test('dashboard-backed API actions accept the payloads built by forms and button
   for (const apiPath of [
     '/api/me',
     '/api/stats',
+    '/api/metrics',
     '/api/billing/seats',
     '/api/preflight',
     '/api/coverage',

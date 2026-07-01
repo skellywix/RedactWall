@@ -1435,8 +1435,8 @@ app.get('/api/billing/seats', ...adminRead, (req, res) => {
   res.json(tenant.seatReport(db));
 });
 
-// Ops metrics (admin) — counts + live audit-integrity, for dashboards/monitoring.
-app.get('/api/metrics', auth.requireAuth, (req, res) => {
+// Ops metrics (admin) - counts + live audit-integrity, for dashboards/monitoring.
+app.get('/api/metrics', ...adminRead, (req, res) => {
   const integ = db.verifyAuditChain();
   res.json({ uptimeSec: Math.round(process.uptime()), ...db.stats(), auditOk: integ.ok, auditCount: integ.count, ts: new Date().toISOString() });
 });

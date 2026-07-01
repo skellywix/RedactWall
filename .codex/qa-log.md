@@ -835,6 +835,45 @@ Status: Passed
 - The runtime now fails closed for unsafe SIEM and approval webhook-style URLs before fetch, preventing bearer/API tokens and sanitized workflow metadata from being sent over cleartext HTTP or URL-credential endpoints.
 - SMTP retains its documented TLS controls and explicit insecure-local-relay opt-in; this section does not change SMTP transport behavior.
 
+## Section 20 - Analytics/observability
+
+Status: Passed
+
+### Inspection
+
+- Confirmed PromptWall has no external product-analytics SDK or third-party telemetry sink; observability is local health/readiness, audit-chain state, SIEM alerts, sensor heartbeat evidence, coverage posture, workflow notification status, and the dashboard Signal Monitor.
+- Reviewed `/healthz`, `/readyz`, `/api/stats`, `/api/metrics`, `/api/audit`, `/api/coverage`, sensor heartbeat coverage, SIEM alert coverage, workflow-notification persistence, evidence pack observability fields, and the Signal Monitor Playwright coverage.
+- Confirmed GitHub `test` and `docker` checks were green on PR head `918eda0` before the local Section 20 edits.
+
+### Issues Found
+
+1. `/api/metrics` was the intended ops monitoring endpoint, but its route contract was not covered by route-linkage tests or docs.
+2. The route comment said admin metrics, but the route allowed any authenticated dashboard role rather than the existing Security Admin read middleware.
+3. Live role tests did not verify that metrics remain sanitized and Security Admin-only.
+
+### Fix Made
+
+- Changed `/api/metrics` to use the existing `adminRead` middleware so only Security Admin sessions can read uptime, aggregate counts, audit-chain status, audit entry count, and timestamp.
+- Added static route-regression coverage proving `/api/metrics` stays Security Admin-only.
+- Added live role coverage proving auditors receive `403` for `/api/metrics`, while Security Admins receive sanitized metrics that omit held prompt secrets.
+- Added `/api/metrics` to the route map and direct admin reachability coverage without requiring the dashboard UI to call it.
+- Updated deployment docs to document Security Admin-only `/api/metrics` and its sanitized payload.
+
+### Commands Run
+
+- `node --check server\app.js` - passed after section 20 edit.
+- `node --test --test-concurrency=1 test\admin-csrf.test.js test\auditor-role.test.js test\dashboard-linkage.test.js` - passed after section 20 edit, 20 tests.
+- `git diff --check` - passed after section 20 edit with the repo's usual CRLF working-copy warnings.
+- `npm run docs:demo-guide:check` - passed after section 20 docs edit.
+- `npm test` - passed after section 20 edit, 80 node test files.
+- `$env:PLAYWRIGHT_PORT='4311'; npm run review:ci` - passed after section 20 edit, including docs demo guide check, AI domain coverage check, 80 node test files, 13 admin-console Chromium tests, `sync-check`, and `eval`.
+
+### Security Review Notes
+
+- Section 20 narrows `/api/metrics` access from any authenticated role to Security Admin-only and keeps the payload aggregate-only.
+- The metrics payload includes uptime, aggregate query counts, audit-chain status/count, and timestamp only; live tests assert it does not include the held prompt secret.
+- No external analytics SDK, telemetry export, logging sink, detector behavior, raw reveal, approval release, evidence export, sensor heartbeat ingestion, or persistence behavior changed.
+
 ## Section Queue
 
 1. Baseline install/lint/typecheck/build/test discovery - passed.
@@ -856,6 +895,6 @@ Status: Passed
 17. Motion/effects/reduced-motion behavior - passed.
 18. Performance and bundle health - passed.
 19. Security and privacy - passed.
-20. Analytics/observability if present - pending.
+20. Analytics/observability if present - passed.
 21. CI/CD and release readiness - pending.
 22. Final e2e regression - pending.

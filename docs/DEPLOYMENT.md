@@ -149,11 +149,17 @@ curl http://localhost:4000/readyz
 
 `/healthz` confirms the process is alive. `/readyz` confirms the database opens and production preflight is not blocked.
 
-Logged-in admins can inspect detailed configuration checks at:
+Logged-in Security Admins can inspect detailed configuration checks and
+scrape-friendly operational counters at:
 
 ```text
 http://localhost:4000/api/preflight
+http://localhost:4000/api/metrics
 ```
+
+`/api/metrics` returns uptime, aggregate event counts, audit-chain status, audit
+entry count, and a timestamp. It does not include prompt bodies or raw finding
+values.
 
 ## SCIM Provisioning And OIDC Login
 
