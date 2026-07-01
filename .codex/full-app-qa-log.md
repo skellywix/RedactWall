@@ -514,12 +514,13 @@ The direct `/api/v1/scan-file` route sanitized prompt/file content, and browser/
 ### Commands Run
 
 - `node --check server\app.js` - passed after section 12 edit.
-- `node --test --test-concurrency=1 test\processors.test.js` - passed after section 12 edit, 10 tests before duplicate-test cleanup.
+- `node --test --test-concurrency=1 test\processors.test.js` - passed after section 12 edit, 9 tests.
 - `node --test --test-concurrency=1 test\validation.test.js test\endpoint-agent.test.js test\endpoint-ocr.test.js test\native-handoff.test.js test\native-handoff-writer.test.js test\mcp-guard.test.js test\mcp-connector-sdk.test.js test\mcp-microsoft365-connector.test.js` - passed after section 12 edit, 106 tests.
 - `node --test --test-concurrency=1 test\extension.test.js` - passed after section 12 edit, 31 tests.
 - `$env:PLAYWRIGHT_PORT='4264'; npm run test:browser-extension` - passed after section 12 edit, 8 Chromium tests.
 - `git diff --check` - passed after section 12 edit with the repo's usual CRLF working-copy warnings.
 - `node --test --test-concurrency=1 test\processors.test.js test\validation.test.js` - passed after duplicate-test cleanup, 56 tests.
+- `npm run review:ci` - passed after section 12 edit, including 78 node test files, 10 admin-console Chromium tests, `sync-check`, and `eval`.
 - `$env:PLAYWRIGHT_PORT='4265'; npm run review:ci` - passed after section 12 edit, including docs demo guide check, AI domain coverage check, 78 node test files, 10 admin-console Chromium tests, `sync-check`, and `eval`.
 
 ### Security Review Notes
