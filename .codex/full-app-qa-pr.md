@@ -15,8 +15,8 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Database/persistence/migrations if present - passed.
 - State management and cache - passed.
 - Tables, search, filters, and pagination - passed.
-- File/media flows if present - pending.
-- Payments/billing if present - not yet assessed.
+- File/media flows if present - passed.
+- Payments/billing if present - pending.
 - Admin/RBAC if present - pending.
 - Accessibility - pending.
 - Responsive/cross-browser behavior - pending.
@@ -53,6 +53,9 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Dashboard queue refresh fallbacks avoid stale approval-queue cache after decisions, and extension policy refresh preserves cached policy on disabled or failed refresh.
 - Global search filters audit log table rows consistently with queue, activity, and lineage surfaces.
 - Activity, lineage, and audit tables expose client-side pagination controls with search reset behavior.
+- Browser file drops and local file-upload scanning block configured drop/file-upload paths before upload.
+- Direct `/api/v1/scan-file` sanitizes sensitive filenames in responses, stored query rows, redacted previews, tokenized prompts, raw-retained prefixes, and audit details.
+- Endpoint watched-file, endpoint-local OCR, signed native handoff, and MCP file-content guard flows keep file bytes and raw local filenames out of sanitized control-plane evidence.
 
 # Bugs Fixed
 
@@ -67,6 +70,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Section 9 fixed test coverage gaps for the legacy JSON to SQLite migration path and tampered backup manifests before restore.
 - Section 10 fixed dashboard queue fallback ordering so stale activity cache cannot repopulate a decided approval item after a transient pending-refresh failure.
 - Section 11 fixed audit log global-search behavior so unrelated audit rows are hidden when searching by query ID or actor, and added pager controls for long activity, lineage, and audit tables.
+- Section 12 fixed direct scan-file filename retention so sensitive submitted filenames are replaced with `[sensitive filename]` in response, storage, broadcast, and audit evidence.
 
 # Tests Added Or Updated
 
@@ -98,6 +102,8 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Updated `test/admin-csrf.test.js` with static audit-search wiring coverage.
 - Updated `test/dashboard-linkage.test.js` with pager element linkage checks.
 - Updated `e2e/admin-console.spec.js` with browser coverage for audit table filtering, empty search results, and searchable table pagination.
+- Updated `server/app.js` with direct scan-file filename sanitization.
+- Updated `test/validation.test.js` with direct scan-file filename privacy coverage for text and OCR-needed image files.
 
 # Commands Run
 
@@ -171,14 +177,22 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - `node --test --test-concurrency=1 test\admin-csrf.test.js test\dashboard-linkage.test.js` - passed after section 11 edit, 15 tests.
 - `git diff --check` - passed after section 11 edit with the repo's usual CRLF working-copy warnings.
 - `npm run review:ci` - passed after section 11 edit, including 78 node test files, 10 admin-console Chromium tests, `sync-check`, and `eval`.
+- `node --check server\app.js` - passed after section 12 edit.
+- `node --test --test-concurrency=1 test\processors.test.js` - passed after section 12 edit, 10 tests before duplicate-test cleanup.
+- `node --test --test-concurrency=1 test\validation.test.js test\endpoint-agent.test.js test\endpoint-ocr.test.js test\native-handoff.test.js test\native-handoff-writer.test.js test\mcp-guard.test.js test\mcp-connector-sdk.test.js test\mcp-microsoft365-connector.test.js` - passed after section 12 edit, 106 tests.
+- `node --test --test-concurrency=1 test\extension.test.js` - passed after section 12 edit, 31 tests.
+- `$env:PLAYWRIGHT_PORT='4264'; npm run test:browser-extension` - passed after section 12 edit, 8 Chromium tests.
+- `git diff --check` - passed after section 12 edit with the repo's usual CRLF working-copy warnings.
+- `node --test --test-concurrency=1 test\processors.test.js test\validation.test.js` - passed after duplicate-test cleanup, 56 tests.
+- `$env:PLAYWRIGHT_PORT='4265'; npm run review:ci` - passed after section 12 edit, including docs demo guide check, AI domain coverage check, 78 node test files, 10 admin-console Chromium tests, `sync-check`, and `eval`.
 
 # CI Status
 
 - PR #54 is open: `https://github.com/skellywix/promptwall/pull/54`
-- GitHub `test` checks passed on head `9f1cb40`.
-- GitHub `docker` checks passed on head `9f1cb40`.
+- GitHub `test` checks passed on head `d3a173f`.
+- GitHub `docker` checks passed on head `d3a173f`.
 - Existing merged PR #53 is on `main` and also had passing GitHub `test` and `docker` checks.
-- Merge status: not merged. The full application QA objective remains open and the next section is file/media flows if present.
+- Merge status: not merged. The full application QA objective remains open and the next section is payments/billing if present.
 
 # Accessibility Notes
 
@@ -202,6 +216,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Section 9 changed tests only. Migration coverage runs against a copied temp DB runtime and synthetic data, not the ignored local runtime database. Backup-manifest tamper coverage also uses temp SQLite backups and synthetic rows.
 - Section 10 changes dashboard cache fallback ordering and extension tests only. It does not change auth, CSRF, raw reveal, evidence export, detector, or persistence behavior.
 - Section 11 filters and paginates already-loaded sanitized dashboard rows client-side only. It does not call reveal/raw-prompt APIs or change auth, CSRF, RBAC, evidence export, detector, or persistence behavior.
+- Section 12 replaces sensitive direct scan-file filenames with `[sensitive filename]` in response, storage, broadcast, raw-retained prefixes, tokenized prompts, and audit evidence while keeping original filenames transient for processor selection only.
 - Baseline tests include auth, CSRF, MFA, RBAC, validation, sanitized alerting, evidence export, retention, and detector privacy checks.
 - `npm ci` reported 0 vulnerabilities in npm's install audit.
 
@@ -222,7 +237,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - `.codex/full-app-qa-log.md`
 - `.codex/full-app-qa-pr.md`
 - Existing carried-forward artifacts: `.codex/ui-ux-qa-log.md`, `.codex/ui-ux-pr.md`
-- Section 2 through section 11 test evidence is recorded in `.codex/full-app-qa-log.md`.
+- Section 2 through section 12 test evidence is recorded in `.codex/full-app-qa-log.md`.
 
 # Risks
 

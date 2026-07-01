@@ -81,8 +81,8 @@ That slice covered dashboard shortcut controls, active tab accessibility state, 
 
 - Branch: `codex/full-app-qa`
 - PR: `https://github.com/skellywix/promptwall/pull/54`
-- Latest observed CI status: GitHub `test` and `docker` passed on head `9f1cb40`.
-- Merge status: not merged. The full application QA objective remains open and the next section is file/media flows if present.
+- Latest observed CI status: GitHub `test` and `docker` passed on head `d3a173f`.
+- Merge status: not merged. The full application QA objective remains open and the next section is payments/billing if present.
 
 ## Section 2 - Navigation And Routing
 
@@ -490,6 +490,45 @@ Global search rerendered the approval queue, activity table, and lineage tables,
 - Table pagination is client-side over already-loaded sanitized dashboard rows.
 - The change does not call reveal/raw-prompt APIs and does not change auth, CSRF, RBAC, evidence export, detector, or persistence behavior.
 
+## Section 12 - File/Media Flows If Present
+
+Status: Passed
+
+### Inspection
+
+- Reviewed browser-extension file drop and file selection interception, local text-readable upload scanning, OCR-required handling, unsupported/oversized file blocks, clean-upload bypass, and file-upload destination policy blocks.
+- Reviewed direct `/api/v1/scan-file` extraction paths for text, Office, PDF, image/OCR-needed, unsupported, unreadable, redact, pending, and allow outcomes.
+- Reviewed endpoint-agent watched-file, endpoint-local OCR, signed native handoff, protected-upload, and redacted companion flows.
+- Reviewed MCP guard and Microsoft 365 connector file-content sanitization, bounded content fetching, timeout, and least-privileged scope coverage.
+
+### Issue Found
+
+The direct `/api/v1/scan-file` route sanitized prompt/file content, and browser/endpoint sensors avoided raw filenames, but direct API filenames were still copied into response bodies, stored query fields, redacted previews, raw-retained prefixes, and audit details after file inspection started. A filename containing an SSN or other regulated identifier could therefore appear in dashboard/audit evidence even when file bytes were otherwise sanitized or redacted.
+
+### Fix Made
+
+- Added server-side `safeFileLabel()` handling for direct scan-file requests.
+- Kept the original submitted filename only for processor selection, while using the sanitized label in response `filename`, stored query `filename`, redacted previews, raw-retained file prefixes, tokenized prompts, and audit details.
+- Added validation coverage for a sensitive Windows-path text filename and a sensitive OCR-needed image filename, proving response bodies, stored query rows, and audit entries omit both the raw filename and embedded SSN.
+
+### Commands Run
+
+- `node --check server\app.js` - passed after section 12 edit.
+- `node --test --test-concurrency=1 test\processors.test.js` - passed after section 12 edit, 10 tests before duplicate-test cleanup.
+- `node --test --test-concurrency=1 test\validation.test.js test\endpoint-agent.test.js test\endpoint-ocr.test.js test\native-handoff.test.js test\native-handoff-writer.test.js test\mcp-guard.test.js test\mcp-connector-sdk.test.js test\mcp-microsoft365-connector.test.js` - passed after section 12 edit, 106 tests.
+- `node --test --test-concurrency=1 test\extension.test.js` - passed after section 12 edit, 31 tests.
+- `$env:PLAYWRIGHT_PORT='4264'; npm run test:browser-extension` - passed after section 12 edit, 8 Chromium tests.
+- `git diff --check` - passed after section 12 edit with the repo's usual CRLF working-copy warnings.
+- `node --test --test-concurrency=1 test\processors.test.js test\validation.test.js` - passed after duplicate-test cleanup, 56 tests.
+- `$env:PLAYWRIGHT_PORT='4265'; npm run review:ci` - passed after section 12 edit, including docs demo guide check, AI domain coverage check, 78 node test files, 10 admin-console Chromium tests, `sync-check`, and `eval`.
+
+### Security Review Notes
+
+- Direct scan-file requests still decode uploaded file content only after ingest auth, tenant enforcement, destination policy checks, and size checks.
+- The fix reduces data retained in response, dashboard, and audit evidence by replacing sensitive filenames with `[sensitive filename]`.
+- Original filenames are still used transiently inside the request handler to select the extraction processor; they are not intentionally stored or broadcast after this change.
+- Browser, endpoint, native handoff, MCP, and OCR flows continue to avoid sending file bytes or raw local filenames through sanitized evidence paths covered by the focused tests.
+
 ## Section Queue
 
 1. Baseline install/lint/typecheck/build/test discovery - passed.
@@ -503,8 +542,8 @@ Global search rerendered the approval queue, activity table, and lineage tables,
 9. Database/persistence/migrations if present - passed.
 10. State management and cache - passed.
 11. Tables, search, filters, and pagination - passed.
-12. File/media flows if present - pending.
-13. Payments/billing if present - not yet assessed.
+12. File/media flows if present - passed.
+13. Payments/billing if present - pending.
 14. Admin/RBAC if present - pending.
 15. Accessibility - pending.
 16. Responsive/cross-browser behavior - pending.

@@ -69,6 +69,13 @@ async function waitFor(fn, timeoutMs = 1000) {
   assert.fail('timed out waiting for condition');
 }
 
+function assertJsonOmits(value, ...needles) {
+  const text = JSON.stringify(value);
+  for (const needle of needles) {
+    assert.ok(!text.includes(needle), `expected JSON to omit ${needle}`);
+  }
+}
+
 test('gate rejects invalid client analysis without echoing prompt values', async () => withServer(async (port) => {
   const sensitiveValue = '524-71-9043';
   const res = await jsonFetch(port, '/api/v1/gate', {
@@ -851,6 +858,59 @@ test('scan-file rejects invalid base64 without echoing file content', async () =
   const body = await res.json();
   assert.deepStrictEqual(body.fields, ['contentBase64']);
   assert.ok(!JSON.stringify(body).includes(secretFilePayload));
+}));
+
+test('scan-file sanitizes sensitive filenames in responses storage and audit', async () => withServer(async (port) => {
+  const secret = '524-71-9043';
+  const textFilename = `C:\\Users\\Example\\Downloads\\member-${secret}.txt`;
+  const textRes = await jsonFetch(port, '/api/v1/scan-file', {
+    headers: { 'x-api-key': 'unit-ingest-key' },
+    body: {
+      filename: textFilename,
+      contentBase64: Buffer.from('Ordinary file body with no regulated data.').toString('base64'),
+      user: 'filename-privacy@example.test',
+      destination: 'desktop-ai-app',
+      source: 'api',
+    },
+  });
+
+  assert.strictEqual(textRes.status, 200);
+  const textBody = await textRes.json();
+  assert.strictEqual(textBody.decision, 'allow');
+  assert.strictEqual(textBody.filename, '[sensitive filename]');
+  assertJsonOmits(textBody, textFilename, secret);
+  const textStored = db.getQuery(textBody.id);
+  assert.strictEqual(textStored.filename, '[sensitive filename]');
+  assert.match(textStored.redactedPrompt, /\[file:\[sensitive filename\]\]/);
+  assertJsonOmits(textStored, textFilename, secret);
+  const textAudit = db.listAudit(50).filter((entry) => entry.queryId === textBody.id);
+  assert.ok(textAudit.some((entry) => entry.action === 'FILE_ALLOWED'));
+  assertJsonOmits(textAudit, textFilename, secret);
+
+  const imageFilename = `member-${secret}-scan.png`;
+  const imageRes = await jsonFetch(port, '/api/v1/scan-file', {
+    headers: { 'x-api-key': 'unit-ingest-key' },
+    body: {
+      filename: imageFilename,
+      contentBase64: Buffer.from('synthetic image bytes').toString('base64'),
+      user: 'filename-privacy@example.test',
+      destination: 'desktop-ai-app',
+      source: 'api',
+    },
+  });
+
+  assert.strictEqual(imageRes.status, 200);
+  const imageBody = await imageRes.json();
+  assert.strictEqual(imageBody.status, 'ocr_required');
+  assert.strictEqual(imageBody.filename, '[sensitive filename]');
+  assertJsonOmits(imageBody, imageFilename, secret);
+  const imageStored = db.getQuery(imageBody.id);
+  assert.strictEqual(imageStored.filename, '[sensitive filename]');
+  assert.match(imageStored.redactedPrompt, /\[ocr required file\] \[sensitive filename\]/);
+  assertJsonOmits(imageStored, imageFilename, secret);
+  const imageAudit = db.listAudit(50).filter((entry) => entry.queryId === imageBody.id);
+  assert.ok(imageAudit.some((entry) => entry.action === 'FILE_OCR_REQUIRED'));
+  assertJsonOmits(imageAudit, imageFilename, secret);
 }));
 
 test('gate blocks configured destinations without retaining prompt text', async () => withServer(async (port) => {
