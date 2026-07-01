@@ -37,9 +37,9 @@ Audit and harden PromptWall dashboard UI/UX around controls, convenience shortcu
 
 # CI Status
 
-- Green on latest validated head `d2833d14c0fc5face8a0cc4a20e9324b59c11c12`.
-- GitHub `docker` checks passed.
-- GitHub `test` checks passed on push and pull_request runs after rerunning one flaky browser-extension job.
+- GitHub `docker` checks passed on push and pull_request runs.
+- GitHub `test` checks passed on push and pull_request runs.
+- The live PR body/checks are the source of truth for the final merged head status.
 
 # Accessibility Notes
 
