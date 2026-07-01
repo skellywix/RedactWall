@@ -17,6 +17,7 @@ let queueFilter = 'all';
 let queueCategoryFilter = 'all';
 let queueDestinationFilter = 'all';
 let queueDensity = savedQueueDensity();
+let colorTheme = savedColorTheme();
 let revealedPrompts = new Map();
 let expandedActivityId = '';
 let statusPopover = null;
@@ -875,6 +876,40 @@ function saveQueueDensity(value) {
   try {
     localStorage.setItem('promptwall.queueDensity', value);
   } catch {}
+}
+
+function normalizeColorTheme(value) {
+  return value === 'dark' ? 'dark' : 'light';
+}
+
+function savedColorTheme() {
+  try {
+    return normalizeColorTheme(localStorage.getItem('promptwall.theme'));
+  } catch {
+    return 'light';
+  }
+}
+
+function saveColorTheme(value) {
+  try {
+    localStorage.setItem('promptwall.theme', normalizeColorTheme(value));
+  } catch {}
+}
+
+function updateColorThemeControls() {
+  $$('[data-theme-choice]').forEach((button) => {
+    const selectedTheme = button.dataset.themeChoice === colorTheme;
+    button.classList.toggle('active', selectedTheme);
+    button.setAttribute('aria-pressed', String(selectedTheme));
+  });
+}
+
+function applyColorTheme(value, options = {}) {
+  colorTheme = normalizeColorTheme(value);
+  document.body.dataset.theme = colorTheme;
+  document.documentElement.style.colorScheme = colorTheme;
+  updateColorThemeControls();
+  if (options.persist !== false) saveColorTheme(colorTheme);
 }
 
 function applyQueueDensity() {
@@ -2634,6 +2669,11 @@ function activateTab(name) {
 $$('.tab').forEach((t) => {
   t.onclick = () => activateTab(t.dataset.tab);
 });
+
+$$('[data-theme-choice]').forEach((button) => {
+  button.onclick = () => applyColorTheme(button.dataset.themeChoice);
+});
+applyColorTheme(colorTheme, { persist: false });
 
 $('#refreshQueue').onclick = loadQueue;
 $('#refreshCoverage').onclick = loadCoverage;
