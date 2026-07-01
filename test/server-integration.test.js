@@ -39,3 +39,27 @@ test('readiness endpoint is reachable through the importable app', async (t) => 
   assert.strictEqual(body.database, true);
   assert.ok(['ok', 'warnings'].includes(body.configuration));
 });
+
+test('unauthenticated navigation redirects pages but returns API auth errors', async (t) => {
+  const server = await listen(app);
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const { port } = server.address();
+  const base = `http://127.0.0.1:${port}`;
+
+  const root = await fetch(`${base}/`, { redirect: 'manual' });
+  assert.strictEqual(root.status, 302);
+  assert.strictEqual(root.headers.get('location'), '/index.html');
+
+  const dashboard = await fetch(`${base}/index.html`, { redirect: 'manual' });
+  assert.strictEqual(dashboard.status, 302);
+  assert.strictEqual(dashboard.headers.get('location'), '/login.html');
+
+  const login = await fetch(`${base}/login.html`);
+  assert.strictEqual(login.status, 200);
+  assert.match(login.headers.get('content-type') || '', /text\/html/);
+  assert.match(await login.text(), /PromptWall/);
+
+  const me = await fetch(`${base}/api/me`);
+  assert.strictEqual(me.status, 401);
+  assert.deepStrictEqual(await me.json(), { error: 'unauthenticated' });
+});

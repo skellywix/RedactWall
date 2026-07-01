@@ -74,10 +74,49 @@ Tracked artifacts already present on `main`:
 
 That slice covered dashboard shortcut controls, active tab accessibility state, global search accessible naming, admin-console Playwright coverage, full browser Playwright coverage, npm audit, Docker build, and GitHub CI. This evidence is useful for the navigation/accessibility sections, but the full application QA objective remains open.
 
+## Section 2 - Navigation And Routing
+
+Status: Passed
+
+### Inspection
+
+- Reviewed `server/app.js` route registration for public health/readiness, SCIM, sensor APIs, admin APIs, OIDC, dashboard, and root redirect behavior.
+- Reviewed `server/auth.js` unauthenticated behavior, including browser-page redirects and API JSON 401 responses.
+- Reviewed `e2e/admin-console.spec.js` coverage for login navigation, content tabs, rail tabs, shortcut controls, logout, and mobile tab behavior.
+- Reviewed `test/dashboard-linkage.test.js`, `test/routing.test.js`, and `test/server-integration.test.js`.
+
+### Issue Found
+
+The server HTTP smoke tests covered `/healthz` and `/readyz`, but did not directly lock the route contract for root redirect, unauthenticated dashboard redirect, public login-page availability, and unauthenticated API JSON errors.
+
+### Fix Made
+
+Added `test/server-integration.test.js` coverage for:
+
+- `GET /` returning a `302` redirect to `/index.html`.
+- `GET /index.html` without a session returning a `302` redirect to `/login.html`.
+- `GET /login.html` remaining publicly reachable as HTML.
+- `GET /api/me` without a session returning `401` with `{ error: 'unauthenticated' }`.
+
+### Commands Run
+
+- `node --test --test-concurrency=1 test\server-integration.test.js test\dashboard-linkage.test.js test\routing.test.js` - passed before edit, 11 tests.
+- `npm run test:admin-console` - first focused rerun failed before tests because the Playwright health URL on port `4211` was already in use during the parallel run.
+- `netstat -ano | Select-String ':4211'` - showed no active listener after the failure, only `TIME_WAIT` sockets.
+- `Invoke-WebRequest http://127.0.0.1:4211/healthz` - timed out after the failure, confirming no stale responding Playwright server.
+- `npm run test:admin-console` - passed on serial rerun, 6 Chromium tests.
+- `node --test --test-concurrency=1 test\server-integration.test.js` - passed after edit, 3 tests.
+- `node --test --test-concurrency=1 test\dashboard-linkage.test.js test\routing.test.js` - passed after edit, 9 tests.
+
+### Notes
+
+- The transient Playwright failure was local harness timing, not an application routing regression. The serial rerun passed without code changes.
+- Runtime server routing/auth code was not changed in this section.
+
 ## Section Queue
 
 1. Baseline install/lint/typecheck/build/test discovery - passed.
-2. Navigation and routing - next.
+2. Navigation and routing - passed.
 3. Authentication and authorization - pending.
 4. Forms and validation - pending.
 5. Buttons, controls, overlays, and interactive states - pending.
