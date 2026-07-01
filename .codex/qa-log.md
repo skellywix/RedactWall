@@ -710,6 +710,46 @@ Status: Passed
 - No auth, CSRF, RBAC, raw reveal, approval release, detector, persistence, evidence export, tenant, billing, or network behavior changed.
 - The extension narrow-banner test continues to use synthetic SSN data and verifies the prompt remains unsent.
 
+## Section 17 - Motion/effects/reduced-motion behavior
+
+Status: Passed
+
+### Inspection
+
+- Reviewed admin-console motion CSS for status pulses, sweep effects, spinners, loading shimmer effects, and Signal Monitor pulse states.
+- Confirmed the admin console already has a `prefers-reduced-motion:reduce` rule that disables transitions, disables targeted pulse/spinner animations, and hides decorative sweep effects.
+- Reviewed browser-extension injected banner/toast CSS and popup CSS. The injected banner/toast animation and popup slider transition did not have explicit reduced-motion fallbacks before this section.
+- Reviewed existing Playwright coverage: admin-console tests already assert the live status light and Signal Monitor pulse animation are disabled under reduced motion.
+
+### Issues Found
+
+1. Browser-extension block banners and paste toasts used the `ps-pop` animation even when the browser requested reduced motion.
+2. The browser-extension popup toggle slider had a transition without a reduced-motion fallback.
+3. Browser-extension live smoke coverage did not verify reduced-motion behavior for injected warnings on governed AI pages.
+
+### Fix Made
+
+- Added a `prefers-reduced-motion:reduce` media rule to disable injected extension banner and toast animations.
+- Added a reduced-motion popup CSS rule to disable toggle slider transitions.
+- Added a static extension regression proving the content CSS and popup CSS include reduced-motion fallbacks.
+- Added a live browser-extension Playwright test proving both a hard-stop paste toast and a block banner report `animation-name:none` under reduced motion while the sensitive prompt remains unsent.
+
+### Commands Run
+
+- `node --check e2e\browser-extension.spec.js` - passed after section 17 edit.
+- `node --test --test-concurrency=1 test\extension.test.js` - passed after section 17 edit, 32 tests.
+- `$env:PLAYWRIGHT_PORT='4298'; npx playwright test browser-extension.spec.js --grep "block and paste notices honor reduced motion" --project=chromium --reporter=line` - passed after section 17 edit, 1 Chromium test.
+- `$env:PLAYWRIGHT_PORT='4299'; npx playwright test admin-console.spec.js --grep "admin console login, approval|signal operations monitoring" --reporter=line` - passed after section 17 edit, 2 Chromium tests covering the existing admin reduced-motion assertions.
+- `$env:PLAYWRIGHT_PORT='4300'; npm run test:browser-extension` - passed after section 17 edit, 10 Chromium tests.
+- `git diff --check` - passed after section 17 edit with the repo's usual CRLF working-copy warnings.
+- `$env:PLAYWRIGHT_PORT='4301'; npm run review:ci` - passed after section 17 edit, including docs demo guide check, AI domain coverage check, 79 node test files, 13 admin-console Chromium tests, `sync-check`, and `eval`.
+
+### Security Review Notes
+
+- Section 17 changes CSS motion preferences and browser regression tests only.
+- No auth, CSRF, RBAC, raw reveal, approval release, detector, persistence, evidence export, tenant, billing, or network behavior changed.
+- The new extension reduced-motion smoke uses synthetic SSN data and verifies the prompt remains unsent.
+
 ## Section Queue
 
 1. Baseline install/lint/typecheck/build/test discovery - passed.
@@ -728,7 +768,7 @@ Status: Passed
 14. Admin/RBAC if present - passed.
 15. Accessibility - passed.
 16. Responsive/cross-browser behavior - passed.
-17. Motion/effects/reduced-motion behavior - pending.
+17. Motion/effects/reduced-motion behavior - passed.
 18. Performance and bundle health - pending.
 19. Security and privacy - pending.
 20. Analytics/observability if present - pending.

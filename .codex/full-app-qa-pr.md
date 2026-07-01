@@ -20,7 +20,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Admin/RBAC if present - passed.
 - Accessibility - passed.
 - Responsive/cross-browser behavior - passed.
-- Motion/effects/reduced-motion behavior - pending.
+- Motion/effects/reduced-motion behavior - passed.
 - Performance and bundle health - pending.
 - Security and privacy - pending.
 - Analytics/observability if present - pending.
@@ -259,13 +259,20 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - `$env:PLAYWRIGHT_PORT='4295'; npm run test:browser-extension` - passed after section 16 edit, 9 Chromium tests.
 - `git diff --check` - passed after section 16 edit with the repo's usual CRLF working-copy warnings.
 - `$env:PLAYWRIGHT_PORT='4296'; npm run review:ci` - passed after section 16 edit, including docs demo guide check, AI domain coverage check, 79 node test files, 13 admin-console Chromium tests, `sync-check`, and `eval`.
+- `node --check e2e\browser-extension.spec.js` - passed after section 17 edit.
+- `node --test --test-concurrency=1 test\extension.test.js` - passed after section 17 edit, 32 tests.
+- `$env:PLAYWRIGHT_PORT='4298'; npx playwright test browser-extension.spec.js --grep "block and paste notices honor reduced motion" --project=chromium --reporter=line` - passed after section 17 edit, 1 Chromium test.
+- `$env:PLAYWRIGHT_PORT='4299'; npx playwright test admin-console.spec.js --grep "admin console login, approval|signal operations monitoring" --reporter=line` - passed after section 17 edit, 2 Chromium tests covering the existing admin reduced-motion assertions.
+- `$env:PLAYWRIGHT_PORT='4300'; npm run test:browser-extension` - passed after section 17 edit, 10 Chromium tests.
+- `git diff --check` - passed after section 17 edit with the repo's usual CRLF working-copy warnings.
+- `$env:PLAYWRIGHT_PORT='4301'; npm run review:ci` - passed after section 17 edit, including docs demo guide check, AI domain coverage check, 79 node test files, 13 admin-console Chromium tests, `sync-check`, and `eval`.
 
 # CI Status
 
 - PR #54 is open: `https://github.com/skellywix/promptwall/pull/54`
-- GitHub `test` and `docker` checks were passing on PR head `059afa7` before the local Section 16 update.
+- GitHub `test` and `docker` checks were passing on PR head `98c8dbb` before the local Section 17 update.
 - Existing merged PR #53 is on `main` and also had passing GitHub `test` and `docker` checks.
-- Merge status: not merged. The full application QA objective remains open and the next section is Motion/effects/reduced-motion behavior.
+- Merge status: not merged. The full application QA objective remains open and the next section is Performance and bundle health.
 
 # Accessibility Notes
 
@@ -294,13 +301,15 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Section 14 keeps billing-seat user identities Security Admin-only, preserves auditor/approver sanitized evidence boundaries, and normalizes approver ownership without broadening role access.
 - Section 15 changes UI accessibility semantics and client-side invalid-field state only; login errors remain generic, queue row labels use already-rendered sanitized metadata, and extension banner labels use sanitized detector/coaching text.
 - Section 16 changes extension CSS sizing and browser regression tests only; no auth, CSRF, RBAC, detector, persistence, evidence export, tenant, billing, or network behavior changed.
+- Section 17 changes CSS motion preferences and browser regression tests only; no auth, CSRF, RBAC, detector, persistence, evidence export, tenant, billing, or network behavior changed.
 - Baseline tests include auth, CSRF, MFA, RBAC, validation, sanitized alerting, evidence export, retention, and detector privacy checks.
 - `npm ci` reported 0 vulnerabilities in npm's install audit.
 
 # Reduced-Motion Notes
 
-- Prior merged UI/UX evidence includes reduced-motion coverage for Signal Monitor pulse behavior.
-- Dedicated reduced-motion section remains pending for this branch.
+- Section 17 passed with existing admin-console reduced-motion assertions for live status and Signal Monitor pulse states.
+- Section 17 added extension reduced-motion fallbacks for injected banners/toasts and popup slider transitions.
+- Section 17 added live extension coverage proving reduced-motion notices do not animate while sensitive prompts remain unsent.
 
 # Responsive Notes
 
@@ -315,7 +324,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - `.codex/full-app-qa-log.md`
 - `.codex/full-app-qa-pr.md`
 - Existing carried-forward artifacts: `.codex/ui-ux-qa-log.md`, `.codex/ui-ux-pr.md`
-- Section 2 through section 16 test evidence is recorded in `.codex/full-app-qa-log.md`.
+- Section 2 through section 17 test evidence is recorded in `.codex/full-app-qa-log.md`.
 
 # Risks
 

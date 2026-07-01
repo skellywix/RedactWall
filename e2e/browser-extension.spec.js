@@ -435,6 +435,37 @@ test.describe('browser extension live smoke', () => {
     }
   });
 
+  test('block and paste notices honor reduced motion preference', async ({ baseURL, request }, testInfo) => {
+    const { context, userDataDir } = await launchExtensionContext(baseURL, testInfo, fixturePolicy, request);
+    try {
+      const page = await openControlledAiPage(
+        context,
+        'https://chatgpt.com/',
+        chatFixture({
+          host: 'chatgpt.com',
+          sendButton: '<button data-testid="send-button" aria-label="Send prompt">Send</button>',
+        }),
+      );
+
+      await page.emulateMedia({ reducedMotion: 'reduce' });
+      await applyFixturePolicyToPage(context, page, baseURL, 'chatgpt.com');
+      await syntheticPaste(page, 'Member test SSN 123-45-6789');
+      const pasteToast = page.locator('.ps-toast');
+      await expect(pasteToast).toContainText('blocked sensitive paste');
+      await expect(pasteToast).toHaveCSS('animation-name', 'none');
+
+      await page.locator('#prompt-textarea').fill('Member test SSN 123-45-6789 needs a payoff letter.');
+      await page.locator('button[data-testid="send-button"]').click();
+      const blockBanner = page.getByRole('alertdialog', { name: 'Sensitive data blocked' });
+      await expect(blockBanner).toBeVisible();
+      await expect(blockBanner).toHaveCSS('animation-name', 'none');
+      await expect(page.locator('[data-sent]')).toHaveCount(0);
+    } finally {
+      await context.close();
+      fs.rmSync(userDataDir, { recursive: true, force: true });
+    }
+  });
+
   test('uses adapter send-button selectors on Poe-style click targets', async ({ baseURL, request }, testInfo) => {
     const { context, userDataDir } = await launchExtensionContext(baseURL, testInfo, fixturePolicy, request);
     try {

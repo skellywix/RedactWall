@@ -10,6 +10,7 @@ const root = path.join(__dirname, '..');
 const extensionDir = path.join(root, 'sensors', 'browser-extension');
 const content = fs.readFileSync(path.join(extensionDir, 'content.js'), 'utf8');
 const contentCss = fs.readFileSync(path.join(extensionDir, 'content.css'), 'utf8');
+const popupHtml = fs.readFileSync(path.join(extensionDir, 'popup.html'), 'utf8');
 const background = fs.readFileSync(path.join(extensionDir, 'background.js'), 'utf8');
 const manifest = JSON.parse(fs.readFileSync(path.join(extensionDir, 'manifest.json'), 'utf8'));
 const adapters = require('../detection-engine/adapters');
@@ -330,6 +331,11 @@ test('browser block banner includes employee coaching guidance', () => {
   assert.match(content, /'<div class="ps-coach">' \+ escapeHtml\(coach\) \+ '<\/div>'/);
   assert.match(content, /PromptWall found sensitive data: ' \+ listForScreen/);
   assert.doesNotMatch(content, /this prompt contains <b>' \+ items\.join/);
+});
+
+test('browser extension motion CSS honors reduced motion preferences', () => {
+  assert.match(contentCss, /@media\s*\(prefers-reduced-motion:reduce\)\s*\{[^}]*\.ps-banner,\s*\.ps-toast\{animation:none!important\}/);
+  assert.match(popupHtml, /@media\s*\(prefers-reduced-motion:reduce\)\s*\{\s*\.slider,\s*\.slider:before\{transition:none\}\s*\}/);
 });
 
 test('browser sensitive-paste blocks wait for recorded evidence status', () => {
