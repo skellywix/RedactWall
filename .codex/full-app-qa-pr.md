@@ -9,7 +9,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Authentication and authorization - passed.
 - Forms and validation - passed.
 - Buttons, controls, overlays, and interactive states - passed.
-- Loading, empty, error, and success states - pending.
+- Loading, empty, error, and success states - passed.
 - API integration and data fetching - pending.
 - Backend API behavior - pending.
 - Database/persistence/migrations if present - pending.
@@ -43,6 +43,8 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Sensor/admin validation rejects malformed payloads with sanitized field-only errors.
 - Dashboard buttons, tabs, filters, theme toggle, queue density toggle, popovers, step-up dialogs, destination review overlays, and monitor controls.
 - Destination review overlay blank/cancel/Escape path does not mutate governed destination policy.
+- Evidence export processing, failure, and button re-enable states when the export endpoint fails.
+- Queue, activity, monitor, policy save, purge, export, and search empty/error/success states.
 
 # Bugs Fixed
 
@@ -51,6 +53,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Section 3 fixed a test coverage gap for failed login and failed MFA session-cookie behavior.
 - Section 4 fixed dashboard policy-save validation failures that previously returned silently when the server rejected a malformed form payload.
 - Section 5 fixed a test coverage gap for destination review overlay cancel behavior before policy mutation.
+- Section 6 fixed a test coverage gap for evidence export failure and recovery UI states.
 
 # Tests Added Or Updated
 
@@ -63,6 +66,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Updated `server/public/dashboard.js` with sanitized server validation error feedback for policy saves.
 - Updated `e2e/admin-console.spec.js` with invalid policy form save coverage.
 - Updated `e2e/admin-console.spec.js` with destination review overlay blank/cancel/Escape coverage.
+- Updated `e2e/admin-console.spec.js` with delayed export failure coverage for processing/error/re-enabled states.
 
 # Commands Run
 
@@ -93,6 +97,9 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - `git diff --check` - passed with the repo's usual CRLF working-copy warnings.
 - `npm run test:admin-console` - passed after section 5 edit, 6 Chromium tests.
 - `node --test --test-concurrency=1 test\admin-csrf.test.js test\dashboard-linkage.test.js` - passed after section 5 edit, 13 tests.
+- `npm run test:admin-console` - failed first after the section 6 test addition because the test stayed on the audit tab before clicking the policy tab's `View coverage` button.
+- `npm run test:admin-console` - passed after returning to the policy tab before the existing `View coverage` assertion, 6 Chromium tests.
+- `node --test --test-concurrency=1 test\evidence-export-ui.test.js` - passed after section 6 edit, 2 tests.
 
 # CI Status
 
@@ -100,7 +107,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - GitHub `test` checks were pending on the latest pushed head when last checked.
 - GitHub `docker` checks were pending on the latest pushed head when last checked.
 - Existing merged PR #53 is on `main` and also had passing GitHub `test` and `docker` checks.
-- Merge status: not merged. The full application QA objective remains open and the next section is loading, empty, error, and success states.
+- Merge status: not merged. The full application QA objective remains open and the next section is API integration and data fetching.
 
 # Accessibility Notes
 
@@ -116,6 +123,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Section 3 did not change runtime auth/session/RBAC code. It added regression coverage proving failed password and failed MFA paths do not issue `promptwall_session`.
 - Section 4 changed dashboard validation feedback only. It displays sanitized validation field names returned by the server and does not echo rejected field values.
 - Section 5 did not change runtime code. It added browser coverage that canceling destination review overlays does not mutate governed destination policy.
+- Section 6 did not change runtime code. It added export failure UI coverage and confirmed the dashboard export helper does not call reveal/raw-prompt APIs.
 - Baseline tests include auth, CSRF, MFA, RBAC, validation, sanitized alerting, evidence export, retention, and detector privacy checks.
 - `npm ci` reported 0 vulnerabilities in npm's install audit.
 

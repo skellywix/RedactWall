@@ -697,6 +697,32 @@ test('admin console secondary controls and dialog cancels are wired end to end',
     expect(savedPolicy.enforcementMode).toBe(expectedMode);
   }
 
+  await page.route('**/api/export/evidence?*', async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    await route.fulfill({
+      status: 500,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: 'synthetic export failure' }),
+    });
+  });
+  await page.locator('.content-tabs .tab[data-tab="audit"]').click();
+  const exportProblemStart = problems.length;
+  await page.getByRole('button', { name: 'Export Evidence' }).click();
+  await expect(page.locator('#exportStatus')).toHaveText('PROCESSING');
+  await expect(page.locator('#exportEvidence')).toBeDisabled();
+  await expect(page.locator('#exportStatus')).toHaveText('Export failed');
+  await expect(page.locator('#exportEvidence')).toBeEnabled();
+  const exportProblems = problems.splice(exportProblemStart);
+  const unexpectedExportProblems = exportProblems.filter((problem) => {
+    if (/^api 500: .*\/api\/export\/evidence\?/.test(problem)) return false;
+    if (problem.includes('console error: Failed to load resource') && problem.includes('500')) return false;
+    return true;
+  });
+  expect(unexpectedExportProblems).toEqual([]);
+  expect(exportProblems.some((problem) => /^api 500: .*\/api\/export\/evidence\?/.test(problem))).toBe(true);
+  await page.unroute('**/api/export/evidence?*');
+
+  await page.locator('.content-tabs .tab[data-tab="policy"]').click();
   await page.getByRole('button', { name: 'View coverage' }).click();
   await expect(page.locator('#tab-coverage')).toBeVisible();
 

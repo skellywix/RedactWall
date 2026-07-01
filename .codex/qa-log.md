@@ -82,7 +82,7 @@ That slice covered dashboard shortcut controls, active tab accessibility state, 
 - Branch: `codex/full-app-qa`
 - PR: `https://github.com/skellywix/promptwall/pull/54`
 - Latest observed CI status: pending for GitHub `test` and `docker` on the latest pushed head.
-- Merge status: not merged. The full application QA objective remains open and the next section is loading, empty, error, and success states.
+- Merge status: not merged. The full application QA objective remains open and the next section is API integration and data fetching.
 
 ## Section 2 - Navigation And Routing
 
@@ -224,6 +224,43 @@ Updated `e2e/admin-console.spec.js` to verify:
 - No runtime code changed in this section.
 - The added browser regression proves an overlay cancel path does not mutate governed destination policy before an explicit reasoned save.
 
+## Section 6 - Loading, Empty, Error, And Success States
+
+Status: Passed
+
+### Inspection
+
+- Reviewed dashboard loading states driven by `setBusy()`, including stats, queue, activity, coverage, identity, audit, and policy panels.
+- Reviewed empty states for queue clear, no queue matches, no selected incident, no activity matches, no detections, no coverage/fleet data, no shadow AI, and lineage empty tables.
+- Reviewed success/error states for policy save, policy validation failure, retention purge, evidence export, monitor refresh, monitor search validation, and identity setup unavailable.
+- Reviewed `e2e/admin-console.spec.js` and `test/evidence-export-ui.test.js` coverage for empty, processing, success, failure, and sanitized export behavior.
+
+### Issue Found
+
+The browser suite covered successful evidence export downloads, but did not lock the visible failure path for export processing, failure status, and button re-enable behavior when `/api/export/evidence` fails.
+
+### Fix Made
+
+Updated `e2e/admin-console.spec.js` to route `/api/export/evidence` to a delayed synthetic `500` response and verify:
+
+- `#exportStatus` shows `PROCESSING` while the export request is in flight.
+- `#exportEvidence` is disabled during the in-flight export.
+- `#exportStatus` shows `Export failed` on failure.
+- `#exportEvidence` is re-enabled after failure.
+
+### Commands Run
+
+- `npm run test:admin-console` - failed first after the section 6 test addition because the test stayed on the audit tab before clicking the policy tab's `View coverage` button.
+- `npm run test:admin-console` - passed after returning to the policy tab before the existing `View coverage` assertion, 6 Chromium tests.
+- `node --test --test-concurrency=1 test\evidence-export-ui.test.js` - passed after edit, 2 tests.
+- `git diff --check` - passed with the repo's usual CRLF working-copy warnings.
+
+### Security Review Notes
+
+- No runtime code changed in this section.
+- The added static export check confirms dashboard evidence export does not call reveal or raw-prompt APIs.
+- The new browser failure route uses a synthetic error body and does not introduce or log sensitive prompt content.
+
 ## Section Queue
 
 1. Baseline install/lint/typecheck/build/test discovery - passed.
@@ -231,7 +268,7 @@ Updated `e2e/admin-console.spec.js` to verify:
 3. Authentication and authorization - passed.
 4. Forms and validation - passed.
 5. Buttons, controls, overlays, and interactive states - passed.
-6. Loading, empty, error, and success states - pending.
+6. Loading, empty, error, and success states - passed.
 7. API integration and data fetching - pending.
 8. Backend API behavior - pending.
 9. Database/persistence/migrations if present - pending.
