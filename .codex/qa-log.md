@@ -81,8 +81,8 @@ That slice covered dashboard shortcut controls, active tab accessibility state, 
 
 - Branch: `codex/full-app-qa`
 - PR: `https://github.com/skellywix/promptwall/pull/54`
-- Latest observed CI status: GitHub `test` and `docker` passed on head `1fd658c`.
-- Merge status: not merged. The full application QA objective remains open and the next section is database/persistence/migrations.
+- Latest observed CI status: GitHub `test` and `docker` passed on head `939430a`.
+- Merge status: not merged. The full application QA objective remains open and the next section is state management and cache.
 
 ## Section 2 - Navigation And Routing
 
@@ -371,6 +371,46 @@ List and export endpoints accepted raw numeric query parameters for `limit`, `qu
 - No auth, CSRF, RBAC, release-token, raw reveal, detector, or tenant-access behavior changed.
 - The new test uses synthetic SSNs and confirms export scope metadata is bounded consistently without exposing raw prompt bodies.
 
+## Section 9 - Database/Persistence/Migrations
+
+Status: Passed
+
+### Inspection
+
+- Reviewed the SQLite datastore initialization in `server/db.js`, including WAL setup, local-disk fallback, table/index creation, query writes, transactional query updates, audit appends, retention purges, SCIM tables, stats, and legacy JSON migration.
+- Reviewed `server/audit-integrity.js` for canonical hashing, chain verification, and query content binding.
+- Reviewed `scripts/backup-store.js` for backup, verify, restore, overwrite protection, manifest integrity, manifest contents, and audit-chain gating.
+- Reviewed focused datastore, retention, backup, and evidence-pack tests.
+
+### Coverage Gaps Found
+
+- The one-time legacy JSON to SQLite migration had no regression test. That left the default auto-import path, `.migrated` file handoff, audit re-anchoring, and explicit `SENTINEL_DB_PATH` opt-out behavior unpinned.
+- Backup verification covered valid manifests, but not adjacent manifest hash mismatches blocking restore.
+
+### Fix Made
+
+- Added `test/db-migration.test.js`.
+- The new test copies the DB runtime into a temp mini-runtime so migration uses temp `data/` files and never touches the repo's real local `data/sentinel.db`.
+- Covered default legacy query/audit import, audit-chain verification after re-anchoring, `.migrated` renames, and the explicit SQLite path opt-out.
+- Updated `test/backup-store.test.js` to tamper the adjacent manifest hash, verify `manifestOk: false`, and assert restore refuses the mismatched evidence.
+
+### Commands Run
+
+- `node --test --test-concurrency=1 test\db.test.js test\backup-store.test.js test\retention.test.js test\evidence-pack.test.js test\evidence.test.js` - passed before backup-manifest edit, 29 tests.
+- `node --test --test-concurrency=1 test\db-migration.test.js` - passed, 2 tests.
+- `node --test --test-concurrency=1 test\db-migration.test.js test\db.test.js test\backup-store.test.js test\retention.test.js test\evidence-pack.test.js` - passed after backup-manifest edit, 24 tests.
+- `node --test --test-concurrency=1 test\db.test.js test\db-migration.test.js test\backup-store.test.js test\retention.test.js test\evidence-pack.test.js test\evidence.test.js test\policy-history.test.js test\preflight.test.js test\env.test.js` - passed before backup-manifest edit, 74 tests.
+- `node --test --test-concurrency=1 test\backup-store.test.js` - passed after backup-manifest edit, 6 tests.
+- `node --test --test-concurrency=1 test\db.test.js test\db-migration.test.js test\backup-store.test.js test\retention.test.js test\evidence-pack.test.js test\evidence.test.js test\policy-history.test.js test\preflight.test.js test\env.test.js` - passed after backup-manifest edit, 75 tests.
+- `npm run review:ci` - passed after section 9 edit.
+
+### Security Review Notes
+
+- Runtime persistence code was not changed in this section.
+- The new migration test uses synthetic prompt data and verifies the migration path in a temp runtime rather than the ignored local runtime database.
+- The backup-manifest tamper test uses temp SQLite backups and synthetic rows; no production data, real secrets, or repo `data/` files are touched.
+- Backup, restore, retention, audit-chain, and evidence-pack tests continued to pass with the migration coverage included.
+
 ## Section Queue
 
 1. Baseline install/lint/typecheck/build/test discovery - passed.
@@ -381,7 +421,7 @@ List and export endpoints accepted raw numeric query parameters for `limit`, `qu
 6. Loading, empty, error, and success states - passed.
 7. API integration and data fetching - passed.
 8. Backend API behavior - passed.
-9. Database/persistence/migrations if present - pending.
+9. Database/persistence/migrations if present - passed.
 10. State management and cache - pending.
 11. Tables, search, filters, and pagination - pending.
 12. File/media flows if present - pending.

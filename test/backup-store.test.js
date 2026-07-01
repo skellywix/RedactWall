@@ -48,6 +48,22 @@ test('backup workflow verifies and restores audit evidence without leaking manif
   assert.strictEqual(backup.verifyBackup({ file: restoredPath }).ok, true);
 });
 
+test('manifest hash mismatch makes verification fail and blocks restore', async () => {
+  const result = await backup.createBackup({ outDir: path.join(tempRoot, 'manifest-mismatch'), dbModule: db });
+  const manifest = JSON.parse(fs.readFileSync(result.manifestFile, 'utf8'));
+  manifest.backupSha256 = '0'.repeat(64);
+  fs.writeFileSync(result.manifestFile, JSON.stringify(manifest, null, 2));
+
+  const verified = backup.verifyBackup({ file: result.file });
+  assert.strictEqual(verified.auditIntegrity.ok, true);
+  assert.strictEqual(verified.manifestOk, false);
+  assert.strictEqual(verified.ok, false);
+  assert.throws(
+    () => backup.restoreBackup({ file: result.file, to: path.join(tempRoot, 'mismatched-restore', 'sentinel.db') }),
+    /does not verify/,
+  );
+});
+
 test('restore refuses to overwrite an existing target unless forced', async () => {
   const result = await backup.createBackup({ outDir: path.join(tempRoot, 'overwrite'), dbModule: db });
   const target = path.join(tempRoot, 'existing.db');

@@ -12,7 +12,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Loading, empty, error, and success states - passed.
 - API integration and data fetching - passed.
 - Backend API behavior - passed.
-- Database/persistence/migrations if present - pending.
+- Database/persistence/migrations if present - passed.
 - State management and cache - pending.
 - Tables, search, filters, and pagination - pending.
 - File/media flows if present - pending.
@@ -48,6 +48,8 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Browser-extension smoke policy fixture is synced through admin policy and verified through `/api/v1/policy` before content-script assertions.
 - Dashboard activity, coverage, and policy refreshes preserve the last good state when API endpoints return transient failures.
 - Backend list/export APIs clamp blank, invalid, negative, non-finite, and oversized limit query parameters before storage access.
+- SQLite persistence, backup/restore, retention, evidence-pack, and legacy JSON migration contracts, including explicit database path migration opt-out.
+- Backup verification detects adjacent manifest hash mismatches and restore refuses mismatched backup evidence.
 
 # Bugs Fixed
 
@@ -59,6 +61,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Section 6 fixed a test coverage gap for evidence export failure and recovery UI states.
 - Section 7 fixed dashboard loader behavior that could parse failed API responses as normal data and throw page errors or overwrite loaded state.
 - Section 8 fixed backend limit parsing so evidence exports no longer report negative scope limits and list APIs do not accept unbounded work.
+- Section 9 fixed test coverage gaps for the legacy JSON to SQLite migration path and tampered backup manifests before restore.
 
 # Tests Added Or Updated
 
@@ -79,6 +82,8 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Updated `e2e/admin-console.spec.js` with API refresh failure coverage for activity, coverage, and policy-template data.
 - Updated `server/app.js` and `server/db.js` with bounded list limit parsing.
 - Added `test/api-limits.test.js` for backend list/export blank, invalid, negative, non-finite, and oversized limit contracts.
+- Added `test/db-migration.test.js` for legacy JSON migration and explicit SQLite path opt-out coverage.
+- Updated `test/backup-store.test.js` with adjacent manifest hash-mismatch verification and restore-refusal coverage.
 
 # Commands Run
 
@@ -127,14 +132,21 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - `node --test --test-concurrency=1 test\api-limits.test.js test\db.test.js test\dashboard-linkage.test.js test\validation.test.js` - passed after section 8 edit, 58 tests.
 - `npm run review:ci` - passed after section 8 edit.
 - `gh pr checks 54 --watch --interval 10` - passed on head `1fd658c`, two `test` checks and two `docker` checks.
+- `node --test --test-concurrency=1 test\db.test.js test\backup-store.test.js test\retention.test.js test\evidence-pack.test.js test\evidence.test.js` - passed before section 9 backup-manifest edit, 29 tests.
+- `node --test --test-concurrency=1 test\db-migration.test.js` - passed after section 9 edit, 2 tests.
+- `node --test --test-concurrency=1 test\db-migration.test.js test\db.test.js test\backup-store.test.js test\retention.test.js test\evidence-pack.test.js` - passed after section 9 backup-manifest edit, 24 tests.
+- `node --test --test-concurrency=1 test\db.test.js test\db-migration.test.js test\backup-store.test.js test\retention.test.js test\evidence-pack.test.js test\evidence.test.js test\policy-history.test.js test\preflight.test.js test\env.test.js` - passed before section 9 backup-manifest edit, 74 tests.
+- `node --test --test-concurrency=1 test\backup-store.test.js` - passed after section 9 backup-manifest edit, 6 tests.
+- `node --test --test-concurrency=1 test\db.test.js test\db-migration.test.js test\backup-store.test.js test\retention.test.js test\evidence-pack.test.js test\evidence.test.js test\policy-history.test.js test\preflight.test.js test\env.test.js` - passed after section 9 backup-manifest edit, 75 tests.
+- `npm run review:ci` - passed after section 9 edit.
 
 # CI Status
 
 - PR #54 is open: `https://github.com/skellywix/promptwall/pull/54`
-- GitHub `test` checks passed on head `1fd658c`.
-- GitHub `docker` checks passed on head `1fd658c`.
+- GitHub `test` checks passed on head `939430a`.
+- GitHub `docker` checks passed on head `939430a`.
 - Existing merged PR #53 is on `main` and also had passing GitHub `test` and `docker` checks.
-- Merge status: not merged. The full application QA objective remains open and the next section is database/persistence/migrations.
+- Merge status: not merged. The full application QA objective remains open and the next section is state management and cache.
 
 # Accessibility Notes
 
@@ -155,6 +167,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - Browser-suite isolation changed Playwright test configuration only; it serializes specs that share mutable temp server state.
 - Section 7 changed dashboard response handling for existing authenticated routes only. Generic loaders now discard failed response bodies instead of rendering upstream error details, while identity setup keeps its sanitized validation-error display.
 - Section 8 clamps backend list/export query limits before storage access and does not change auth, CSRF, RBAC, release-token, raw reveal, detector, or tenant-access behavior.
+- Section 9 changed tests only. Migration coverage runs against a copied temp DB runtime and synthetic data, not the ignored local runtime database. Backup-manifest tamper coverage also uses temp SQLite backups and synthetic rows.
 - Baseline tests include auth, CSRF, MFA, RBAC, validation, sanitized alerting, evidence export, retention, and detector privacy checks.
 - `npm ci` reported 0 vulnerabilities in npm's install audit.
 
@@ -175,7 +188,7 @@ Audit, test, improve, and deliver PromptWall section by section across UI/UX, na
 - `.codex/full-app-qa-log.md`
 - `.codex/full-app-qa-pr.md`
 - Existing carried-forward artifacts: `.codex/ui-ux-qa-log.md`, `.codex/ui-ux-pr.md`
-- Section 2 test evidence is recorded in `.codex/full-app-qa-log.md`.
+- Section 2 through section 9 test evidence is recorded in `.codex/full-app-qa-log.md`.
 
 # Risks
 
