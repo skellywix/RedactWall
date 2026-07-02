@@ -3073,29 +3073,6 @@ function wireUpdateButtons() {
   if (restart) restart.onclick = restartUpdatedService;
 }
 
-const pageHeadings = {
-  queue: {
-    title: 'Security Console',
-    body: 'Review held prompts, enforce AI-use policy, and export examiner-ready evidence from one control plane.',
-  },
-  monitor: {
-    title: 'Signal Monitor',
-    body: 'Live signal posture across PromptWall controls.',
-  },
-  updates: {
-    title: 'Updates',
-    body: 'Safely pull PromptWall releases from GitHub without erasing evidence data or logs.',
-  },
-};
-
-function renderPageHeading(name) {
-  const copy = pageHeadings[name] || pageHeadings.queue;
-  const title = $('.page-title h2');
-  const body = $('.page-title p');
-  if (title) title.textContent = copy.title;
-  if (body) body.textContent = copy.body;
-}
-
 function knownTabNames() {
   return $$('.tab[data-tab]')
     .map((tab) => tab.dataset.tab)
@@ -3129,7 +3106,6 @@ function activateTab(name, options = {}) {
   const panel = $(`#tab-${CSS.escape(targetName)}`);
   if (!panel) return;
   document.body.dataset.activeTab = targetName;
-  renderPageHeading(targetName);
   $$('.tab').forEach((x) => {
     const active = x.dataset.tab === targetName;
     x.classList.toggle('active', active);

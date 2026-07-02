@@ -230,6 +230,20 @@ const applyTemplateSchema = z.object({
   id: z.string().min(1).max(80).regex(/^[a-z0-9_/-]+$/),
 }).strict();
 
+const HEX64 = /^[0-9a-f]{64}$/;
+
+const receiptVerifySchema = z.object({
+  v: z.number().int().min(1).max(64),
+  id: z.string().min(1).max(80),
+  status: z.enum(['allowed', 'redacted', 'warned_sent', 'justified']),
+  promptSha256: z.string().regex(HEX64),
+  policySha256: z.string().regex(HEX64),
+  destination: z.string().min(1).max(253),
+  user: z.string().min(1).max(320),
+  issuedAt: z.string().min(1).max(40),
+  sig: z.string().min(1).max(128).regex(/^[A-Za-z0-9_-]+$/),
+}).strict();
+
 const destinationLabelSchema = z.string().min(1).max(253).regex(HOST_OR_LABEL).refine((value) => !SENSITIVE_ROUTING_CODE.test(value), {
   message: 'sensitive identifier not allowed',
 });
@@ -458,6 +472,7 @@ module.exports = {
   approveSchema,
   noteSchema,
   applyTemplateSchema,
+  receiptVerifySchema,
   destinationReviewSchema,
   policyUpdateSchema,
   updateConfigSchema,

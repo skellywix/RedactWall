@@ -15,14 +15,16 @@ function configured(value) {
   return value != null && String(value).trim() !== '';
 }
 
-function defaultMcpEnvPath(env = process.env) {
+function defaultMcpEnvPath(env = process.env, repoRoot = ROOT) {
   if (configured(env.SENTINEL_ENV_PATH)) return env.SENTINEL_ENV_PATH;
   if (configured(env.PROMPTWALL_ENV_PATH)) return env.PROMPTWALL_ENV_PATH;
-  return path.join(__dirname, '..', '.env');
+  // The default env file belongs to the install root being checked, not to
+  // wherever this checker script happens to live.
+  return path.join(repoRoot, '.env');
 }
 
-function readMcpConfig(envPath, env = process.env) {
-  const resolved = path.resolve(envPath || defaultMcpEnvPath(env));
+function readMcpConfig(envPath, env = process.env, repoRoot = ROOT) {
+  const resolved = path.resolve(envPath || defaultMcpEnvPath(env, repoRoot));
   const exists = fs.existsSync(resolved);
   const parsed = exists ? parseEnv(fs.readFileSync(resolved, 'utf8')) : { parsed: {}, errors: [] };
   return {
@@ -87,7 +89,7 @@ function nodeMajor() {
 function buildInstallReport(opts = {}) {
   const repoRoot = path.resolve(opts.repoRoot || ROOT);
   const env = opts.env || process.env;
-  const configInfo = readMcpConfig(opts.envPath, env);
+  const configInfo = readMcpConfig(opts.envPath, env, repoRoot);
   const settings = mcpSettings(configInfo.config);
   const microsoft365 = microsoft365Settings(configInfo.config);
   const envExplicit = configured(opts.envPath)

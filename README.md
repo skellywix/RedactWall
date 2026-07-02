@@ -42,7 +42,7 @@ The dashboard and API run on `http://localhost:4000` by default. The generated a
 
 ## Admin Console
 
-The browser console is the operator-facing control plane. It uses a dark SOC-style interface across login, approval queue, Signal Monitor, activity, coverage, identity, lineage, audit, and configuration tabs. The queue and monitor views are optimized for anomaly-score triage, redacted evidence review, sensor posture, and fast approval or denial decisions without exposing raw prompt content by default.
+The browser console is the operator-facing control plane. It uses a macOS-inspired design system with light and dark themes, a single sidebar navigation, and one focused screen per task: login, approval queue, Signal Monitor, activity, coverage, identity, lineage, audit, configuration, and updates. The queue and monitor views are optimized for anomaly-score triage, redacted evidence review, sensor posture, and fast approval or denial decisions without exposing raw prompt content by default.
 
 Run the default test suite:
 
@@ -183,7 +183,7 @@ See `.env.example` and `docs/DEPLOYMENT.md` for the longer deployment reference.
 
 | Method | Path | Required body or params | Purpose |
 | --- | --- | --- | --- |
-| `POST` | `/api/v1/gate` | `prompt`; optional `user`, `destination`, `source`, `channel`, `orgId`, `sensor`, `clientOutcome`, and client analysis fields | Scans a prompt or sensor event, applies policy, records sanitized evidence, and returns `allow`, `block`, `redact`, or log-style decisions. |
+| `POST` | `/api/v1/gate` | `prompt`; optional `user`, `destination`, `source`, `channel`, `orgId`, `sensor`, `clientOutcome`, and client analysis fields | Scans a prompt or sensor event, applies policy, records sanitized evidence, and returns `allow`, `block`, `redact`, or log-style decisions. Cleared outcomes (`allowed`, `redacted`, `warned_sent`, `justified`) include a signed, prompt-free safe-to-send `receipt`. |
 | `POST` | `/api/v1/heartbeat` | Optional `user`, `destination`, `source`, `orgId`, `sensor`, `checks` | Records bounded sensor install-health and endpoint AI-tool inventory evidence. |
 | `GET` | `/api/v1/policy` | None | Returns the sensor-safe policy, detector controls, destination controls, and scanner config. |
 | `GET` | `/api/v1/detectors` | None | Lists built-in and configured custom detectors. |
@@ -232,6 +232,7 @@ curl -s http://localhost:4000/api/v1/gate \
 | `GET` | `/api/policy/templates` | Lists built-in regulation policy templates. |
 | `PUT` | `/api/policy/apply-template` | Applies a policy template by `id`. |
 | `GET` | `/api/audit` | Lists audit entries and audit-chain integrity. |
+| `POST` | `/api/receipts/verify` | Verifies a safe-to-send receipt was issued by this control plane and has not been edited. |
 | `GET` | `/api/export/evidence` | Builds a sanitized examiner evidence pack. |
 | `GET` | `/api/policy` | Returns full admin policy. |
 | `PUT` | `/api/policy` | Updates policy fields accepted by `server/validation.js`. |
@@ -288,6 +289,15 @@ Exports the Express app. `server/index.js` re-exports `server/app.js`.
 | `publicCustomDetectorConfig(value)` | Returns custom detector config safe for sensors. |
 | Validator helpers | `luhnValid`, `ssnPlausible`, `abaValid`, `ibanValid`, `vinValid`, `bankAccountPlausible`, `itinPlausible`, `npiValid`, `datePlausible`, `ipv6Valid`, and `cardNetwork`. |
 | Constants | `SEVERITY` and `SEVERITY_LABEL`. |
+
+### `require("./server/receipts")`
+
+| Export | Purpose |
+| --- | --- |
+| `issueReceipt({ id, status, outboundText, policy, destination, user })` | Signs a prompt-free safe-to-send receipt binding the exact outbound text hash to the active policy hash. Returns `null` for statuses that are not cleared to send. |
+| `verifyReceipt(receipt)` | Verifies a receipt's shape and HMAC signature. Returns `{ ok }` or `{ ok: false, reason }`. |
+| `policyHash(policy)` / `sha256Hex(text)` | Canonical hashes used inside receipts. |
+| Constants | `RECEIPT_VERSION` and `RECEIPT_STATUSES`. |
 
 ### `require("./detection-engine/adapters")`
 
@@ -396,6 +406,7 @@ Do not hand-edit `sensors/browser-extension/lib/detect.js`.
 - Approval release and raw prompt reveal require password step-up.
 - Raw approval prompt data is encrypted at rest only when a stable data key is configured.
 - Stored and exported evidence is designed to use masked findings, redacted previews, hashes, and metadata instead of raw prompt, file, OCR, clipboard, or token-vault content.
+- Cleared gate outcomes return a signed safe-to-send receipt (hashes and bounded metadata only, never prompt bodies) that `/api/receipts/verify` can check later, so an employee or examiner can prove a specific outbound text was scanned under a specific policy.
 - The audit log is hash-chained. Check it with:
 
 ```bash

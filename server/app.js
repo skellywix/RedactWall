@@ -35,6 +35,7 @@ const {
   failedInstallCheckIds,
 } = require('./install-checks');
 const releaseTokens = require('./release-token');
+const receipts = require('./receipts');
 const tenant = require('./tenant');
 const routing = require('./routing');
 const workflow = require('./workflow');
@@ -837,7 +838,10 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
     emitSecurityAlert(row, 'ALLOWED');
     broadcast('query', { type: 'allowed', query: publicQuery(row) });
     broadcast('stats', db.stats());
-    return res.json({ id: row.id, decision: 'allow', riskScore: analysis.riskScore, findings, categories });
+    return res.json({
+      id: row.id, decision: 'allow', riskScore: analysis.riskScore, findings, categories,
+      receipt: receipts.issueReceipt({ id: row.id, status: 'allowed', outboundText: prompt, policy: decisionPolicy, destination, user }),
+    });
   }
 
   if (clientOutcome === 'paste_flagged') {
@@ -903,11 +907,19 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
   emitSecurityAlert(row, action);
   broadcast('query', { type: status, query: publicQuery(row) });
   broadcast('stats', db.stats());
+  // Safe-to-send receipt: signed proof the outbound text (tokenized for
+  // redact, original for warn/justify paths) was scanned under this policy.
+  const receipt = receipts.issueReceipt({
+    id: row.id, status,
+    outboundText: status === 'redacted' ? tokenizedPrompt : prompt,
+    policy: decisionPolicy, destination, user,
+  });
   return res.json({
     id: row.id, decision: status === 'redacted' ? 'redact' : 'block', mode, status,
     ...releaseTokenPayload(releaseToken),
     riskScore: analysis.riskScore, findings, categories, reasons: verdict.reasons,
     tokenizedPrompt,
+    ...(receipt ? { receipt } : {}),
     message: status === 'redacted' ? 'Sensitive values tokenized — safe to send; re-hydrate the AI response via /api/v1/rehydrate.'
       : mode === 'redact' ? 'Sensitive category cannot be tokenized safely; withheld pending Security Admin approval.'
       : mode === 'block' ? 'Withheld pending Security Admin approval.'
@@ -1233,7 +1245,7 @@ app.post('/api/login', validation.validateBody(validation.loginSchema), (req, re
 });
 
 app.get('/api/login-options', (req, res) => {
-  res.json({ oidc: oidc.publicOptions() });
+  res.json({ oidc: oidc.publicOptions(), defaultAdminCredential: auth.ADMIN_PASSWORD_IS_DEFAULT });
 });
 
 app.get('/auth/oidc/start', async (req, res) => {
@@ -1622,6 +1634,13 @@ app.put('/api/policy/apply-template', ...adminWrite, validation.validateBody(val
 
 app.get('/api/audit', auth.requireAuth, (req, res) => {
   res.json({ entries: db.listAudit(boundedApiLimit(req.query.limit, 200)), integrity: db.verifyAuditChain() });
+});
+
+// Safe-to-send receipt verification: any console session (including read-only
+// auditors) can confirm a receipt was issued by this control plane and has not
+// been edited. Verification is prompt-free — the receipt carries hashes only.
+app.post('/api/receipts/verify', ...sessionWrite, validation.validateBody(validation.receiptVerifySchema), (req, res) => {
+  res.json(receipts.verifyReceipt(req.body));
 });
 
 app.get('/api/export/evidence', auth.requireAuth, (req, res) => {

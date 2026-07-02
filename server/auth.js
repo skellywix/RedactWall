@@ -260,6 +260,15 @@ function requireRole(...roles) {
   };
 }
 
+/**
+ * Derive a purpose-scoped key from the stable session secret so other modules
+ * can sign artifacts (e.g. safe-to-send receipts) without touching the raw
+ * secret. Same namespace + same SENTINEL_SECRET => same key across restarts.
+ */
+function deriveKey(namespace) {
+  return crypto.createHash('sha256').update(String(namespace) + ':' + SECRET).digest();
+}
+
 function requireCsrf(req, res, next) {
   const method = String(req.method || 'GET').toUpperCase();
   if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return next();
@@ -270,7 +279,7 @@ function requireCsrf(req, res, next) {
 }
 
 module.exports = {
-  authenticate, verifyPassword, verifyTotpCode, totpCode, createSession, verify, oidcStepUpSatisfied, createCsrfToken, verifyCsrfToken, sessionTokenFromRequest, requireAuth, requireRole, requireCsrf,
+  authenticate, verifyPassword, verifyTotpCode, totpCode, createSession, verify, oidcStepUpSatisfied, createCsrfToken, verifyCsrfToken, sessionTokenFromRequest, requireAuth, requireRole, requireCsrf, deriveKey,
   loginStatus, registerFail, registerSuccess,
   ADMIN_USER, ADMIN_PASSWORD_IS_DEFAULT: ADMIN_PASSWORD === DEFAULT_ADMIN_PASSWORD,
   ADMIN_MFA_REQUIRED: !!ADMIN_TOTP_SECRET,

@@ -4,6 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>PromptWall - Security Console</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
 <style>
 /* PromptWall Security Console - macOS-inspired design system.
    Light and dark themes share one token set; body[data-theme] switches. */
@@ -315,12 +316,8 @@ body[data-theme="dark"] .theme-toggle button[aria-pressed="true"]{box-shadow:0 1
   font-weight:500;
 }
 
-/* ---- Page heading + stats ------------------------------------------------ */
-.hero-row{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;padding:26px 0 18px}
-.page-title h2{margin:0;font-size:27px;line-height:1.1;font-weight:700;letter-spacing:-.022em}
-.page-title p{margin:7px 0 0;color:var(--mut);max-width:720px;line-height:1.5}
-.control-cluster{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
-.stats{display:grid;grid-template-columns:repeat(6,minmax(130px,1fr));gap:12px;margin-bottom:16px}
+/* ---- Stats --------------------------------------------------------------- */
+.stats{display:grid;grid-template-columns:repeat(6,minmax(130px,1fr));gap:12px}
 .stat{
   min-height:106px;
   position:relative;
@@ -344,12 +341,12 @@ body[data-theme="dark"] .theme-toggle button[aria-pressed="true"]{box-shadow:0 1
 .stat.pending .n{color:var(--red)}
 .stat.good .n{color:var(--green)}
 
-/* ---- Content tabs -------------------------------------------------------- */
+/* ---- Content tabs (compact-viewport navigation; the rail owns desktop) --- */
 .content-tabs{
   position:sticky;
   top:60px;
   z-index:8;
-  display:flex;
+  display:none;
   align-items:center;
   gap:2px;
   margin:0 -24px 16px;
@@ -726,12 +723,12 @@ body.queue-density-compact .actions{margin-top:8px}
 .stepup-actions{display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap}
 
 /* ---- Detail / incident --------------------------------------------------- */
-.incident-detail{display:grid;gap:12px;padding:16px}
-.detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
-.datum{border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--panel2);padding:10px 11px}
-.datum label{display:block;color:var(--mut);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;margin-bottom:5px}
+.incident-detail{display:grid;gap:14px;padding:16px}
+.detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 20px}
+.datum{border-bottom:1px solid var(--line);padding:9px 0}
+.datum label{display:block;color:var(--mut);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;margin-bottom:3px}
 .datum b{font-size:12.5px;font-weight:600;color:var(--txt);word-break:break-word}
-.risk-meter{display:grid;gap:9px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--panel2);padding:12px}
+.risk-meter{display:grid;gap:9px;padding:2px 0}
 .risk-track{height:6px;border-radius:999px;background:var(--panel3);overflow:hidden}
 .risk-track i{display:block;height:100%;width:var(--risk-width);border-radius:999px;background:linear-gradient(90deg,var(--green-vivid),var(--amber-vivid),var(--red-vivid))}
 .posture-list{display:grid;padding:4px 16px 12px}
@@ -1062,33 +1059,15 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
 .console-frame{display:grid;gap:14px}
 .console-frame-header,.signal-console-header{
   display:flex;
-  align-items:center;
+  align-items:flex-end;
   justify-content:space-between;
   flex-wrap:wrap;
   gap:12px;
-  border:1px solid var(--line);
-  border-radius:var(--radius);
-  background:var(--panel);
-  box-shadow:var(--shadow);
-  padding:14px 16px;
+  padding:22px 0 4px;
 }
 .console-frame-title,.signal-console-title{display:flex;align-items:center;gap:12px;min-width:0}
-.console-frame-mark,.signal-console-mark{
-  width:38px;
-  height:38px;
-  flex:0 0 auto;
-  border:1px solid rgba(10,132,255,.3);
-  border-radius:9px;
-  display:grid;
-  place-items:center;
-  color:var(--blue);
-  background:var(--blue-bg);
-  font-size:12px;
-  font-weight:800;
-  letter-spacing:.03em;
-}
-.console-frame-title h2,.signal-console-title h2{margin:0;font-size:16px;font-weight:700;letter-spacing:-.015em}
-.console-frame-title p,.signal-console-title p{margin:3px 0 0;color:var(--mut);font-size:12.5px;line-height:1.45}
+.console-frame-title h2,.signal-console-title h2{margin:0;font-size:23px;font-weight:700;letter-spacing:-.02em;line-height:1.15}
+.console-frame-title p,.signal-console-title p{margin:6px 0 0;color:var(--mut);font-size:13px;line-height:1.5;max-width:720px}
 .console-frame-actions,.signal-header-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
 .signal-live-summary{
   display:inline-flex;
@@ -1404,13 +1383,12 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
 @media(max-width:1180px){
   .app-shell{grid-template-columns:1fr}
   .rail{position:static;height:auto;flex-direction:row;align-items:center;padding:10px 14px;border-right:0;border-bottom:1px solid var(--line)}
-  .rail .tabs{flex-direction:row;overflow-x:auto}
+  .rail .tabs{display:none}
   .rail-section,.rail-status{display:none}
   .workspace{padding:0 16px 24px}
   .topbar{margin:0 -16px;padding:8px 16px}
-  .content-tabs{top:0;margin:0 -16px 16px;padding:6px 16px 0}
+  .content-tabs{display:flex;top:0;margin:0 -16px 16px;padding:6px 16px 0}
   .stats{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .hero-row{align-items:flex-start}
   .queue-grid,.coverage-grid,.lineage-grid,.identity-grid,.config-two,.update-grid,.signal-layout{grid-template-columns:1fr}
   .wide-panel{grid-column:auto}
   .config-grid{grid-template-columns:1fr}
@@ -1427,8 +1405,7 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
   .search{order:3;flex-basis:100%;min-width:0;max-width:none}
   .content-tabs{margin:0 -12px 14px;padding:6px 12px 0}
   .stats{grid-template-columns:1fr}
-  .page-title h2{font-size:23px}
-  .hero-row{display:grid;padding:16px 0 12px}
+  .console-frame-title h2,.signal-console-title h2{font-size:20px}
   .coverage-kpis,.lineage-summary,.identity-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
   .shadow-row{grid-template-columns:1fr}
   .destination-review{justify-items:start}
@@ -1458,7 +1435,7 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
 <div class="app-shell">
   <aside class="rail">
     <div class="brand">
-      <div class="logo" aria-hidden="true">PW</div>
+      <div class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3.2 19 6v5c0 4.3-2.7 6.9-7 8.3-4.3-1.4-7-4-7-8.3V6l7-2.8Z" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/><path d="M5.6 10h12.8M5.9 14h12.2M12 6v4m-3.2 4v3.4M15.2 14v3.4M8.8 10v4m6.4-4v4" stroke="#fff" stroke-width="1.2" stroke-linecap="round"/></svg></div>
       <div>
         <h1>PromptWall</h1>
         <p>AI Prompt DLP Gateway</p>
@@ -1550,25 +1527,6 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
     </header>
     <div class="banner" id="banner" role="alert" aria-live="polite"></div>
 
-    <div class="hero-row">
-      <div class="page-title">
-        <h2>Security Console</h2>
-        <p>Review held prompts, enforce AI-use policy, and export examiner-ready evidence from one control plane.</p>
-      </div>
-      <div class="control-cluster">
-        <button class="ghost" type="button" data-tab-jump="audit" data-tooltip="Open evidence exports">
-          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          Evidence
-        </button>
-        <button class="ghost" type="button" data-tab-jump="policy" data-tooltip="Open policy configuration">
-          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 4l7 3v5c0 4.2-2.6 6.8-7 8-4.4-1.2-7-3.8-7-8V7l7-3Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
-          Configure
-        </button>
-      </div>
-    </div>
-
-    <div class="stats" id="stats"></div>
-
     <div class="content-tabs">
       <button class="tab active" data-tab="queue" type="button" aria-current="page">Approval Queue</button>
       <button class="tab" data-tab="monitor" type="button">Signal Monitor</button>
@@ -1585,14 +1543,12 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
       <section id="tab-queue" class="console-frame" aria-label="Approval Queue">
         <div class="console-frame-header">
           <div class="console-frame-title">
-            <div class="console-frame-mark" aria-hidden="true">AQ</div>
             <div>
               <h2>Approval Queue</h2>
               <p>Review held prompts and record release decisions from the same control surface.</p>
             </div>
           </div>
           <div class="console-frame-actions">
-            <div class="signal-live-summary"><span class="signal-dot status-warning" aria-hidden="true"></span>Review</div>
             <button class="system-button secondary" type="button" data-tab-jump="audit">
               <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
               Evidence
@@ -1603,11 +1559,12 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
             </button>
           </div>
         </div>
+        <div class="stats" id="stats"></div>
         <div class="queue-grid">
           <div class="panel">
             <div class="panel-head">
               <div>
-                <h2>Approval Queue</h2>
+                <h2>Pending review</h2>
                 <span>Blocked prompts awaiting Security Admin review</span>
               </div>
               <div class="queue-tools">
@@ -1675,7 +1632,6 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
         <div class="signal-console" aria-label="Signal Monitor">
           <div class="signal-console-header">
             <div class="signal-console-title">
-              <div class="signal-console-mark" aria-hidden="true">SM</div>
               <div>
                 <h2>Signal Monitor</h2>
                 <p id="monitorDataScope">Sanitized event stream. Raw approval text stays behind step-up reveal.</p>
@@ -1736,14 +1692,10 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
       <section id="tab-activity" class="hidden console-frame" aria-label="All Activity">
         <div class="console-frame-header">
           <div class="console-frame-title">
-            <div class="console-frame-mark" aria-hidden="true">AA</div>
             <div>
               <h2>All Activity</h2>
               <p>Scan recent gated prompts, decisions, owners, and sanitized detection context.</p>
             </div>
-          </div>
-          <div class="console-frame-actions">
-            <div class="signal-live-summary"><span class="signal-dot status-online" aria-hidden="true"></span>Live</div>
           </div>
         </div>
         <div class="panel">
@@ -1763,14 +1715,10 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
       <section id="tab-coverage" class="hidden console-frame" aria-label="Coverage">
         <div class="console-frame-header">
           <div class="console-frame-title">
-            <div class="console-frame-mark" aria-hidden="true">CV</div>
             <div>
               <h2>Coverage</h2>
               <p>Track governed destinations, sensor posture, endpoint inventory, and shadow-AI gaps.</p>
             </div>
-          </div>
-          <div class="console-frame-actions">
-            <div class="signal-live-summary"><span class="signal-dot status-loading" aria-hidden="true"></span>Posture</div>
           </div>
         </div>
         <div class="coverage-grid">
@@ -1843,14 +1791,10 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
       <section id="tab-identity" class="hidden console-frame" aria-label="Identity">
         <div class="console-frame-header">
           <div class="console-frame-title">
-            <div class="console-frame-mark" aria-hidden="true">ID</div>
             <div>
               <h2>Identity</h2>
               <p>Prepare SCIM, OIDC, role mapping, and readiness values without exposing secrets.</p>
             </div>
-          </div>
-          <div class="console-frame-actions">
-            <div class="signal-live-summary"><span class="signal-dot status-idle" aria-hidden="true"></span>Setup</div>
           </div>
         </div>
         <div class="identity-grid">
@@ -1900,14 +1844,10 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
       <section id="tab-lineage" class="hidden console-frame" aria-label="Lineage">
         <div class="console-frame-header">
           <div class="console-frame-title">
-            <div class="console-frame-mark" aria-hidden="true">LN</div>
             <div>
               <h2>Lineage</h2>
               <p>Review sanitized aggregate paths across users, destinations, sensors, and policy decisions.</p>
             </div>
-          </div>
-          <div class="console-frame-actions">
-            <div class="signal-live-summary"><span class="signal-dot status-online" aria-hidden="true"></span>Mapped</div>
           </div>
         </div>
         <div class="lineage-grid">
@@ -1960,14 +1900,10 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
       <section id="tab-audit" class="hidden console-frame" aria-label="Audit Log">
         <div class="console-frame-header">
           <div class="console-frame-title">
-            <div class="console-frame-mark" aria-hidden="true">AL</div>
             <div>
               <h2>Audit Log</h2>
               <p>Verify hash-chain integrity and export examiner-ready evidence from recorded activity.</p>
             </div>
-          </div>
-          <div class="console-frame-actions">
-            <div class="signal-live-summary"><span class="signal-dot status-online" aria-hidden="true"></span>Secure</div>
           </div>
         </div>
         <div class="panel">
@@ -1994,7 +1930,6 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
       <section id="tab-policy" class="hidden console-frame" aria-label="Configuration">
         <div class="console-frame-header">
           <div class="console-frame-title">
-            <div class="console-frame-mark" aria-hidden="true">CF</div>
             <div>
               <h2>Configuration</h2>
               <p>Set up sensors, enforcement policy, destinations, routing, and evidence retention.</p>
@@ -2012,7 +1947,6 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
       <section id="tab-updates" class="hidden console-frame" aria-label="Updates">
         <div class="console-frame-header">
           <div class="console-frame-title">
-            <div class="console-frame-mark" aria-hidden="true">UP</div>
             <div>
               <h2>Updates</h2>
               <p>Pull approved PromptWall releases from GitHub while preserving evidence data, logs, and backups.</p>

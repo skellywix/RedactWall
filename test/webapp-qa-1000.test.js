@@ -453,11 +453,11 @@ for (let i = 0; i < securityStaticCases.length; i += 1) {
 }
 
 const responsiveMarkers = [
-  /@media\(max-width:1180px\)/, /content-tabs\{top:0;overflow:auto\}/, /@media\(max-width:760px\)/,
-  /@media\(max-width:820px\)/, /grid-template-columns:minmax\(0,1fr\)/, /overflow:auto/,
+  /@media\(max-width:1180px\)/, /content-tabs\{display:flex;top:0/, /@media\(max-width:760px\)/,
+  /@media\(max-width:820px\)/, /grid-template-columns:minmax\(0,1fr\)/, /overflow-x:auto/,
   /minmax\(0,1fr\)/, /word-break:break-word/, /overflow-wrap:anywhere/, /scrollbar-width:none/,
-  /position:sticky/, /max-width:560px/, /width:min\(100%,920px\)/, /height:100vh/,
-  /min-height:44px/, /min-height:42px/, /border-radius:8px/, /letter-spacing:0/,
+  /position:sticky/, /max-width:460px/, /width:min\(100%,920px\)/, /height:100vh/,
+  /min-height:44px/, /min-height:40px/, /border-radius:8px/, /letter-spacing:0/,
   /prefers-reduced-motion/, /queue-density-compact/, /body\[data-theme="dark"\]/, /data-theme-choice="light"/,
   /data-theme-choice="dark"/, /aria-hidden="true"/, /viewport/, /device-width/,
   /grid-template-columns:repeat/, /flex-wrap:wrap/, /white-space:nowrap/, /text-overflow:ellipsis/,

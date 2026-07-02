@@ -167,6 +167,7 @@ test('oidc callback issues a PromptWall session for an active SCIM approver', as
       const options = await fetch(`http://127.0.0.1:${port}/api/login-options`);
       assert.deepStrictEqual(await options.json(), {
         oidc: { enabled: true, startUrl: '/auth/oidc/start' },
+        defaultAdminCredential: false,
       });
 
       const { callback } = await followOidcLogin(port);

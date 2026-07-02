@@ -4,6 +4,7 @@ const passwordInput = document.getElementById('password');
 const otpInput = document.getElementById('otp');
 const errorBox = document.getElementById('err');
 const oidcButton = document.getElementById('oidc');
+const demoHint = document.getElementById('demoHint');
 
 if (new URLSearchParams(location.search).get('oidc') === 'failed') {
   showError('SSO sign-in failed. Try again or use a local account.');
@@ -36,6 +37,8 @@ async function loadLoginOptions() {
         location.href = body.oidc.startUrl;
       };
     }
+    // Only advertise the demo credential while it actually works.
+    if (demoHint && body.defaultAdminCredential === true) demoHint.hidden = false;
   } catch {}
 }
 

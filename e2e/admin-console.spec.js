@@ -309,7 +309,7 @@ test('admin console login, approval, policy save, and evidence export work in a 
   await page.locator('.stepup-dialog').getByRole('button', { name: 'Approve release' }).click();
   await expect(page.locator('#queueList')).toContainText('Queue clear');
 
-  await page.locator('.content-tabs .tab[data-tab="activity"]').click();
+  await page.locator('.rail .tab[data-tab="activity"]').click();
   await expect(page.locator('#activityRows')).toContainText('approved');
   await expect(page.locator('#activityRows')).toContainText('analyst@example.test');
   const activityRow = page.locator(`tr.activity-row[data-activity-id="${gated.id}"]`);
@@ -326,7 +326,7 @@ test('admin console login, approval, policy save, and evidence export work in a 
   await expect(page.locator('#activityRows')).toContainText('No matching activity');
   await page.locator('#globalSearch').fill('');
 
-  await page.locator('.content-tabs .tab[data-tab="coverage"]').click();
+  await page.locator('.rail .tab[data-tab="coverage"]').click();
   await expect(page.locator('#tab-coverage')).toBeVisible();
   await expect(page.locator('#coverageScore')).toContainText('Coverage score');
   await expect(page.locator('#shadowRows')).toContainText('notebooklm.google.com');
@@ -336,7 +336,7 @@ test('admin console login, approval, policy save, and evidence export work in a 
   await expect(page.locator('#fleetRows')).toContainText('covered');
   await expect(page.locator('#fleetRows')).toContainText('checks ok');
 
-  await page.locator('.content-tabs .tab[data-tab="identity"]').click();
+  await page.locator('.rail .tab[data-tab="identity"]').click();
   await expect(page.locator('#tab-identity')).toBeVisible();
   await expect(page.locator('#identityScimRows')).toContainText('/scim/v2');
   await page.locator('#identityTenant').fill('contoso.onmicrosoft.com');
@@ -349,7 +349,7 @@ test('admin console login, approval, policy save, and evidence export work in a 
   await expect(page.locator('#identityEnvRows')).toContainText('OIDC_CLIENT_SECRET');
   await expect(page.locator('body')).not.toContainText('e2e-ingest-key');
 
-  await page.locator('.content-tabs .tab[data-tab="policy"]').click();
+  await page.locator('.rail .tab[data-tab="policy"]').click();
   await expect(page.locator('#pol_desktop_destination')).toBeVisible();
   await page.locator('input[name="mode"][value="warn"]').check();
   await page.locator('#pol_risk').fill('35');
@@ -391,7 +391,7 @@ test('admin console login, approval, policy save, and evidence export work in a 
     expiresAt: '2030-01-01T00:00:00.000Z',
   });
 
-  await page.locator('.content-tabs .tab[data-tab="audit"]').click();
+  await page.locator('.rail .tab[data-tab="audit"]').click();
   await expect(page.locator('#integrity')).toContainText('Chain verified');
   const downloadPromise = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Export Evidence' }).click();
@@ -421,15 +421,15 @@ test('admin console preserves loaded API data when refresh endpoints fail', asyn
 
   await login(page);
 
-  await page.locator('.content-tabs .tab[data-tab="activity"]').click();
+  await page.locator('.rail .tab[data-tab="activity"]').click();
   await expect(page.locator('#activityRows')).toContainText('api-refresh-ui@example.test');
 
-  await page.locator('.content-tabs .tab[data-tab="coverage"]').click();
+  await page.locator('.rail .tab[data-tab="coverage"]').click();
   await page.locator('#refreshCoverage').click();
   await expect(page.locator('#coverageScore')).toContainText('Coverage score');
   await expect(page.locator('#fleetRows')).toContainText('api-health-ui@example.test');
 
-  await page.locator('.content-tabs .tab[data-tab="policy"]').click();
+  await page.locator('.rail .tab[data-tab="policy"]').click();
   await expect(page.locator('#pol_risk')).toBeVisible();
   const policyRisk = await page.locator('#pol_risk').inputValue();
 
@@ -440,7 +440,7 @@ test('admin console preserves loaded API data when refresh endpoints fail', asyn
     body: JSON.stringify({ error: 'synthetic activity refresh failure' }),
   }));
   const activityProblemStart = problems.length;
-  await page.locator('.content-tabs .tab[data-tab="activity"]').click();
+  await page.locator('.rail .tab[data-tab="activity"]').click();
   await expect(page.locator('#activityRows')).toContainText('api-refresh-ui@example.test');
   const activityProblems = problems.splice(activityProblemStart);
   expect(activityProblems.filter((problem) => {
@@ -457,7 +457,7 @@ test('admin console preserves loaded API data when refresh endpoints fail', asyn
     body: JSON.stringify({ error: 'synthetic coverage refresh failure' }),
   }));
   const coverageProblemStart = problems.length;
-  await page.locator('.content-tabs .tab[data-tab="coverage"]').click();
+  await page.locator('.rail .tab[data-tab="coverage"]').click();
   await page.locator('#refreshCoverage').click();
   await expect(page.locator('#coverageScore')).toContainText('Coverage score');
   await expect(page.locator('#fleetRows')).toContainText('api-health-ui@example.test');
@@ -476,7 +476,7 @@ test('admin console preserves loaded API data when refresh endpoints fail', asyn
     body: JSON.stringify({ error: 'synthetic template refresh failure' }),
   }));
   const policyProblemStart = problems.length;
-  await page.locator('.content-tabs .tab[data-tab="policy"]').click();
+  await page.locator('.rail .tab[data-tab="policy"]').click();
   await page.locator('#discardPolicy').click();
   await expect(page.locator('#pol_risk')).toHaveValue(policyRisk);
   const policyProblems = problems.splice(policyProblemStart);
@@ -518,7 +518,7 @@ test('admin console avoids stale queue cache when pending refresh fails after a 
   await expect(page.locator('#queueList')).not.toContainText('state-cache-ui@example.test');
   await expect(page.locator(`.q[data-id="${gated.id}"]`)).toHaveCount(0);
 
-  await page.locator('.content-tabs .tab[data-tab="activity"]').click();
+  await page.locator('.rail .tab[data-tab="activity"]').click();
   await expect(page.locator(`tr.activity-row[data-activity-id="${gated.id}"]`)).toContainText('approved');
 
   const pendingProblems = problems.splice(problemStart);
@@ -544,7 +544,7 @@ test('admin console global search filters audit table rows', async ({ page, requ
   const visible = auditRows[auditRows.length - 1];
 
   await login(page);
-  await page.locator('.content-tabs .tab[data-tab="audit"]').click();
+  await page.locator('.rail .tab[data-tab="audit"]').click();
   await expect(page.locator('#auditRows')).toContainText(visible.id);
   await expect(page.locator('#auditPager')).toContainText('Showing 1-10');
   await page.locator('#auditPager').getByRole('button', { name: 'Next page' }).click();
@@ -579,7 +579,7 @@ test('admin console paginates searchable activity and lineage tables', async ({ 
   await login(page);
   const globalSearch = page.getByRole('searchbox', { name: 'Search users or destinations' });
 
-  await page.locator('.content-tabs .tab[data-tab="activity"]').click();
+  await page.locator('.rail .tab[data-tab="activity"]').click();
   await expect(page.locator('#activityPager')).toContainText('Page 1 of');
   await expect(page.locator('#activityRows tr.activity-row')).toHaveCount(10);
   await page.locator('#activityPager').getByLabel('Next page').click();
@@ -590,7 +590,7 @@ test('admin console paginates searchable activity and lineage tables', async ({ 
   await expect(page.locator('#activityRows')).toContainText('pager-00@example.test');
   await globalSearch.fill('');
 
-  await page.locator('.content-tabs .tab[data-tab="lineage"]').click();
+  await page.locator('.rail .tab[data-tab="lineage"]').click();
   await page.locator('#refreshLineage').click();
   await expect(page.locator('#lineageUsersPager')).toContainText('Page 1 of');
   await expect(page.locator('#lineageUsers tr')).toHaveCount(10);
@@ -639,23 +639,23 @@ test('admin console controls and forms are wired end to end', async ({ page, req
   await login(page);
   await expect(page.locator('#queueList')).toContainText('approve-ui@example.test');
   await expect(page.getByRole('searchbox', { name: 'Search users or destinations' })).toBeVisible();
-  await expect(page.locator('.content-tabs .tab[data-tab="queue"]')).toHaveAttribute('aria-current', 'page');
+  await expect(page.locator('.rail .tab[data-tab="queue"]')).toHaveAttribute('aria-current', 'page');
 
   await page.locator('#tab-queue').getByRole('button', { name: 'Evidence', exact: true }).click();
   await expect(page.locator('#tab-audit')).toBeVisible();
-  await expect(page.locator('.content-tabs .tab[data-tab="audit"]')).toHaveAttribute('aria-current', 'page');
-  await expect(page.locator('.content-tabs .tab[data-tab="queue"]')).not.toHaveAttribute('aria-current', 'page');
-  await page.locator('.content-tabs .tab[data-tab="queue"]').click();
+  await expect(page.locator('.rail .tab[data-tab="audit"]')).toHaveAttribute('aria-current', 'page');
+  await expect(page.locator('.rail .tab[data-tab="queue"]')).not.toHaveAttribute('aria-current', 'page');
+  await page.locator('.rail .tab[data-tab="queue"]').click();
   await page.locator('#tab-queue').getByRole('button', { name: 'Configure', exact: true }).click();
   await expect(page.locator('#tab-policy')).toBeVisible();
-  await expect(page.locator('.content-tabs .tab[data-tab="policy"]')).toHaveAttribute('aria-current', 'page');
+  await expect(page.locator('.rail .tab[data-tab="policy"]')).toHaveAttribute('aria-current', 'page');
 
   for (const tabName of ['queue', 'activity', 'coverage', 'identity', 'lineage', 'audit', 'policy']) {
-    await page.locator(`.content-tabs .tab[data-tab="${tabName}"]`).click();
+    await page.locator(`.rail .tab[data-tab="${tabName}"]`).click();
     await expect(page.locator(`#tab-${tabName}`)).toBeVisible();
   }
 
-  await page.locator('.content-tabs .tab[data-tab="queue"]').click();
+  await page.locator('.rail .tab[data-tab="queue"]').click();
   await page.locator('#refreshQueue').click();
   await expect(page.locator(`.q[data-id="${approve.id}"]`)).toBeVisible();
   await page.locator('[data-queue-filter="mine"]').click();
@@ -736,7 +736,7 @@ test('admin console controls and forms are wired end to end', async ({ page, req
   await approveDialog.getByRole('button', { name: 'Approve release' }).click();
   await expect(approveRow).toHaveCount(0);
 
-  await page.locator('.content-tabs .tab[data-tab="activity"]').click();
+  await page.locator('.rail .tab[data-tab="activity"]').click();
   await expect(page.locator('#activityRows')).toContainText('approved');
   await expect(page.locator('#activityRows')).toContainText('denied');
   await page.locator('#globalSearch').fill('approve-ui@example.test');
@@ -745,7 +745,7 @@ test('admin console controls and forms are wired end to end', async ({ page, req
   await expect(page.locator('#activityRows')).toContainText('No matching activity');
   await page.locator('#globalSearch').fill('');
 
-  await page.locator('.content-tabs .tab[data-tab="coverage"]').click();
+  await page.locator('.rail .tab[data-tab="coverage"]').click();
   await page.locator('#refreshCoverage').click();
   await expect(page.locator('#coverageScore')).toContainText('Coverage score');
   await expect(page.locator('#sensorMix')).toContainText('Browser extension');
@@ -759,14 +759,14 @@ test('admin console controls and forms are wired end to end', async ({ page, req
   await destinationDialog.getByRole('button', { name: 'Save review' }).click();
   await expect(page.locator('#shadowRows')).toContainText('Blocked');
 
-  await page.locator('.content-tabs .tab[data-tab="identity"]').click();
+  await page.locator('.rail .tab[data-tab="identity"]').click();
   await page.locator('#identityProvider').selectOption('okta');
   await page.locator('#identityTenant').fill('customer.okta.com');
   await page.locator('#refreshIdentity').click();
   await expect(page.locator('#identityOidcRows')).toContainText('customer.okta.com/oauth2/default');
   await expect(page.locator('#identityEnvRows')).toContainText('OIDC_CLIENT_SECRET');
 
-  await page.locator('.content-tabs .tab[data-tab="lineage"]').click();
+  await page.locator('.rail .tab[data-tab="lineage"]').click();
   await page.locator('#refreshLineage').click();
   await expect(page.locator('#lineageSummary')).toContainText('Events');
   await expect(page.locator('#lineageUsers')).toContainText('approve-ui@example.test');
@@ -774,7 +774,7 @@ test('admin console controls and forms are wired end to end', async ({ page, req
   await expect(page.locator('#lineageDestinations')).toContainText('claude.ai');
   await page.locator('#globalSearch').fill('');
 
-  await page.locator('.content-tabs .tab[data-tab="policy"]').click();
+  await page.locator('.rail .tab[data-tab="policy"]').click();
   await expect(page.locator('#pol_desktop_destination')).toBeVisible();
   const originalRisk = await page.locator('#pol_risk').inputValue();
   const originalRetention = await page.locator('#pol_retention').inputValue();
@@ -854,7 +854,7 @@ test('admin console controls and forms are wired end to end', async ({ page, req
   await page.locator('#runRetentionPurge').click();
   await expect(page.locator('#polSaved')).toContainText('Purged');
 
-  await page.locator('.content-tabs .tab[data-tab="audit"]').click();
+  await page.locator('.rail .tab[data-tab="audit"]').click();
   await expect(page.locator('#integrity')).toContainText('Chain verified');
   const downloadPromise = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Export Evidence' }).click();
@@ -875,28 +875,28 @@ test('admin console tabs honor browser back, forward, and refresh', async ({ pag
   const problems = collectUiProblems(page);
   await login(page);
 
-  await page.locator('.content-tabs .tab[data-tab="policy"]').click();
+  await page.locator('.rail .tab[data-tab="policy"]').click();
   await expect(page).toHaveURL(/\/index\.html\?tab=policy$/);
   await expect(page.locator('#tab-policy')).toBeVisible();
-  await expect(page.locator('.content-tabs .tab[data-tab="policy"]')).toHaveAttribute('aria-current', 'page');
+  await expect(page.locator('.rail .tab[data-tab="policy"]')).toHaveAttribute('aria-current', 'page');
 
   await page.goBack();
   await expect(page).toHaveURL(/\/index\.html$/);
   await expect(page.locator('#tab-queue')).toBeVisible();
-  await expect(page.locator('.content-tabs .tab[data-tab="queue"]')).toHaveAttribute('aria-current', 'page');
+  await expect(page.locator('.rail .tab[data-tab="queue"]')).toHaveAttribute('aria-current', 'page');
 
   await page.goForward();
   await expect(page).toHaveURL(/\/index\.html\?tab=policy$/);
   await expect(page.locator('#tab-policy')).toBeVisible();
-  await expect(page.locator('.content-tabs .tab[data-tab="policy"]')).toHaveAttribute('aria-current', 'page');
+  await expect(page.locator('.rail .tab[data-tab="policy"]')).toHaveAttribute('aria-current', 'page');
 
   await page.reload();
   await expect(page.locator('#who')).toContainText('admin / Security Admin');
   await expect(page).toHaveURL(/\/index\.html\?tab=policy$/);
   await expect(page.locator('#tab-policy')).toBeVisible();
-  await expect(page.locator('.content-tabs .tab[data-tab="policy"]')).toHaveAttribute('aria-current', 'page');
+  await expect(page.locator('.rail .tab[data-tab="policy"]')).toHaveAttribute('aria-current', 'page');
 
-  await page.locator('.content-tabs .tab[data-tab="queue"]').click();
+  await page.locator('.rail .tab[data-tab="queue"]').click();
   await expect(page).toHaveURL(/\/index\.html$/);
   await expect(page.locator('#tab-queue')).toBeVisible();
   await page.locator('#tab-queue').getByRole('button', { name: 'Evidence', exact: true }).click();
@@ -937,7 +937,7 @@ test('admin console secondary controls and dialog cancels are wired end to end',
     await expect(page.locator(`#tab-${tabName}`)).toBeVisible();
   }
 
-  await page.locator('.content-tabs .tab[data-tab="queue"]').click();
+  await page.locator('.rail .tab[data-tab="queue"]').click();
   const revealRow = page.locator(`.q[data-id="${reveal.id}"]`);
   await revealRow.click();
   await revealRow.locator('[data-act="reveal"]').click();
@@ -956,7 +956,7 @@ test('admin console secondary controls and dialog cancels are wired end to end',
   await expect(approveRow).toBeVisible();
   await expect(approveRow.locator('[data-act="approve"]')).toBeEnabled();
 
-  await page.locator('.content-tabs .tab[data-tab="coverage"]').click();
+  await page.locator('.rail .tab[data-tab="coverage"]').click();
   await page.locator('#refreshCoverage').click();
   await page.locator(`[data-destination-review="block"][data-destination="${cancelDestination}"]`).click();
   await expect(page.getByRole('heading', { name: 'Record destination reason' })).toBeVisible();
@@ -985,7 +985,7 @@ test('admin console secondary controls and dialog cancels are wired end to end',
   expect(destinationPolicy.allowedDestinations).toContain(destinations.allow);
   expect(destinationPolicy.blockedDestinations).toContain(destinations.block);
 
-  await page.locator('.content-tabs .tab[data-tab="policy"]').click();
+  await page.locator('.rail .tab[data-tab="policy"]').click();
   for (const [mode, label] of [
     ['warn', 'Monitor'],
     ['justify', 'Justify'],
@@ -1043,7 +1043,7 @@ test('admin console secondary controls and dialog cancels are wired end to end',
       body: JSON.stringify({ error: 'synthetic export failure' }),
     });
   });
-  await page.locator('.content-tabs .tab[data-tab="audit"]').click();
+  await page.locator('.rail .tab[data-tab="audit"]').click();
   const exportProblemStart = problems.length;
   await page.getByRole('button', { name: 'Export Evidence' }).click();
   await routeExportPromise;
@@ -1062,7 +1062,7 @@ test('admin console secondary controls and dialog cancels are wired end to end',
   expect(exportProblems.some((problem) => /^api 500: .*\/api\/export\/evidence\?/.test(problem))).toBe(true);
   await page.unroute('**/api/export/evidence?*');
 
-  await page.locator('.content-tabs .tab[data-tab="policy"]').click();
+  await page.locator('.rail .tab[data-tab="policy"]').click();
   await page.getByRole('button', { name: 'View coverage' }).click();
   await expect(page.locator('#tab-coverage')).toBeVisible();
 
@@ -1073,7 +1073,7 @@ test('signal operations monitoring console supports adaptive states', async ({ p
   const problems = collectUiProblems(page);
   await login(page);
 
-  await page.locator('.content-tabs .tab[data-tab="monitor"]').click();
+  await page.locator('.rail .tab[data-tab="monitor"]').click();
   await expect(page.locator('#tab-monitor')).toBeVisible();
   await expect(page.locator('.signal-console')).toContainText('Signal Monitor');
   await expect(page.locator('#monitorDataScope')).toContainText('Sanitized event stream');
@@ -1124,15 +1124,21 @@ test('signal operations monitoring console supports adaptive states', async ({ p
   expect(problems).toEqual([]);
 });
 
-test('admin console mobile layout keeps content tabs usable', async ({ page }) => {
+test('admin console shows exactly one navigation per viewport', async ({ page }) => {
   const problems = collectUiProblems(page);
-  await page.setViewportSize({ width: 1024, height: 768 });
   await login(page);
 
+  // Desktop: the sidebar rail is the only navigation.
+  await expect(page.locator('.rail .tab[data-tab="queue"]')).toBeVisible();
+  let contentTabsDisplay = await page.locator('.content-tabs').evaluate((el) => getComputedStyle(el).display);
+  expect(contentTabsDisplay).toBe('none');
+
+  // Compact viewports: the rail collapses and the content tab strip takes over.
+  await page.setViewportSize({ width: 1024, height: 768 });
   await expect(page.locator('.content-tabs .tab[data-tab="queue"]')).toBeVisible();
   await expect(page.locator('.content-tabs .tab[data-tab="monitor"]')).toBeVisible();
   let railTabsDisplay = await page.locator('.rail .tabs').evaluate((el) => getComputedStyle(el).display);
-  expect(railTabsDisplay).not.toBe('none');
+  expect(railTabsDisplay).toBe('none');
   await page.locator('.content-tabs .tab[data-tab="monitor"]').click();
   await expect(page.locator('#tab-monitor')).toBeVisible();
   await expectNoHorizontalOverflow(page);
@@ -1155,7 +1161,7 @@ test('admin console updates tab saves GitHub update configuration', async ({ pag
   const problems = collectUiProblems(page);
   await login(page);
 
-  await page.locator('.content-tabs .tab[data-tab="updates"]').click();
+  await page.locator('.rail .tab[data-tab="updates"]').click();
   await expect(page.locator('#tab-updates')).toBeVisible();
   await expect(page.locator('#updateBox')).toContainText('GitHub Update');
   await expect(page.locator('#runUpdate')).toContainText('Update from GitHub');

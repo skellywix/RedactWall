@@ -4,6 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>PromptWall - Sign in</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
 <style>
   :root{
     color-scheme:light;
@@ -101,16 +102,14 @@
   .logo{
     width:38px;
     height:38px;
-    border:1px solid rgba(10,132,255,.38);
-    border-radius:50%;
+    border:1px solid rgba(10,132,255,.35);
+    border-radius:10px;
     display:grid;
     place-items:center;
-    color:var(--blue);
-    background:linear-gradient(180deg,rgba(10,132,255,.22),rgba(10,132,255,.08));
-    box-shadow:inset 0 0 0 8px rgba(10,132,255,.055),0 0 28px var(--glow);
-    font-weight:800;
-    font-size:13px;
+    background:linear-gradient(180deg,#3f9fff,#0a72e8);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.25),0 1px 3px rgba(9,30,66,.2);
   }
+  .logo svg{width:22px;height:22px;display:block}
   h1{margin:0;font-size:22px;line-height:1.08}
   .brand p{margin:4px 0 0;color:var(--mut);font-size:12px}
   .statement{max-width:420px}
@@ -144,15 +143,17 @@
     width:100%;
     min-height:44px;
     margin-top:22px;
-    border:1px solid rgba(10,132,255,.56);
+    border:1px solid transparent;
     border-radius:8px;
-    background:linear-gradient(180deg,rgba(10,132,255,.2),rgba(10,132,255,.09));
-    color:var(--blue);
-    font-weight:800;
+    background:linear-gradient(180deg,#2b91ff,#0a72e8);
+    color:#fff;
+    font-weight:700;
     font-size:14px;
     cursor:pointer;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 1px 3px rgba(9,30,66,.24);
   }
-  button:hover{filter:brightness(1.05)}
+  button:hover{filter:brightness(1.06)}
+  button:active{filter:brightness(.96)}
   button.secondary{
     margin-top:10px;
     border-color:var(--line2);
@@ -161,6 +162,7 @@
   }
   button.secondary:hover{border-color:var(--blue);filter:none;background:rgba(10,132,255,.08)}
   button[hidden]{display:none}
+  .hint[hidden]{display:none}
   .err{color:var(--red);font-size:13px;margin-top:14px;min-height:18px}
   .hint{margin-top:20px;font-size:12px;color:var(--mut);border-top:1px solid var(--line);padding-top:14px;line-height:1.5}
   code{background:var(--panel2);border:1px solid var(--line);padding:2px 6px;border-radius:6px;color:var(--blue)}
@@ -177,7 +179,7 @@
   <main class="login-shell">
     <section class="brand-panel" aria-label="PromptWall">
       <div class="brand">
-        <div class="logo" aria-hidden="true">PW</div>
+        <div class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3.2 19 6v5c0 4.3-2.7 6.9-7 8.3-4.3-1.4-7-4-7-8.3V6l7-2.8Z" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/><path d="M5.6 10h12.8M5.9 14h12.2M12 6v4m-3.2 4v3.4M15.2 14v3.4M8.8 10v4m6.4-4v4" stroke="#fff" stroke-width="1.2" stroke-linecap="round"/></svg></div>
         <div>
           <h1>PromptWall</h1>
           <p>AI Prompt DLP Gateway</p>
@@ -205,7 +207,7 @@
       <button type="submit">Continue</button>
       <button type="button" class="secondary" id="oidc" hidden>Continue with SSO</button>
       <div class="err" id="err" role="alert" aria-live="polite"></div>
-      <div class="hint">Local demo credential: <code>admin</code> / <code>ChangeMe!2026</code></div>
+      <div class="hint" id="demoHint" hidden>Local demo credential: <code>admin</code> / <code>ChangeMe!2026</code></div>
     </form>
   </main>
 <script src="/login.js" defer></script>

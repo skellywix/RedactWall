@@ -122,10 +122,26 @@ test('MCP install check reports attention for bad config', (t) => {
   assert.ok(!JSON.stringify(report).includes('short-key'));
 });
 
-test('MCP install check accepts runtime environment without a default env file', () => {
+test('MCP install check accepts runtime environment without a default env file', (t) => {
+  // A hermetic install root: runtime files present, but no default .env —
+  // the repo checkout may have one from `npm run setup`.
+  const installRoot = tempDir(t, 'ps-mcp-check-runtime-');
+  for (const rel of [
+    'sensors/mcp-guard/guard.js',
+    'sensors/mcp-guard/sdk.js',
+    'sensors/mcp-guard/connectors/microsoft365.js',
+    'detection-engine/detect.js',
+    'server/env.js',
+    'package.json',
+  ]) {
+    const target = path.join(installRoot, rel);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.copyFileSync(path.join(root, rel), target);
+  }
+
   const ingestKey = 'runtime-mcp-key-000000000000000000000000001';
   const report = buildInstallReport({
-    repoRoot: root,
+    repoRoot: installRoot,
     env: {
       SENTINEL_URL: 'https://promptwall.runtime.example',
       INGEST_API_KEY: ingestKey,
