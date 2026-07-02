@@ -1467,6 +1467,7 @@ async function init() {
     b.textContent = 'Default admin password is active. Set ADMIN_PASSWORD before production.';
   }
   await refreshAll();
+  activateTab(tabNameFromLocation(), { replaceHistory: true });
   connectStream();
 }
 
@@ -3095,30 +3096,66 @@ function renderPageHeading(name) {
   if (body) body.textContent = copy.body;
 }
 
-function activateTab(name) {
-  document.body.dataset.activeTab = name;
-  renderPageHeading(name);
+function knownTabNames() {
+  return $$('.tab[data-tab]')
+    .map((tab) => tab.dataset.tab)
+    .filter((name, index, names) => name && names.indexOf(name) === index && $(`#tab-${CSS.escape(name)}`));
+}
+
+function normalizeTabName(name) {
+  const candidate = String(name || '').trim().toLowerCase();
+  return knownTabNames().includes(candidate) ? candidate : 'queue';
+}
+
+function tabNameFromLocation() {
+  const url = new URL(window.location.href);
+  const queryTab = url.searchParams.get('tab');
+  const hashTab = (url.hash || '').replace(/^#\/?/, '');
+  return normalizeTabName(queryTab || hashTab || 'queue');
+}
+
+function syncTabUrl(name, { replace = false } = {}) {
+  const url = new URL(window.location.href);
+  if (name === 'queue') url.searchParams.delete('tab');
+  else url.searchParams.set('tab', name);
+  url.hash = '';
+  if (url.href === window.location.href) return;
+  const method = replace ? 'replaceState' : 'pushState';
+  window.history[method]({ tab: name }, '', url);
+}
+
+function activateTab(name, options = {}) {
+  const targetName = normalizeTabName(name);
+  const panel = $(`#tab-${CSS.escape(targetName)}`);
+  if (!panel) return;
+  document.body.dataset.activeTab = targetName;
+  renderPageHeading(targetName);
   $$('.tab').forEach((x) => {
-    const active = x.dataset.tab === name;
+    const active = x.dataset.tab === targetName;
     x.classList.toggle('active', active);
     if (active) x.setAttribute('aria-current', 'page');
     else x.removeAttribute('aria-current');
   });
   $$('section[id^=tab-]').forEach((s) => s.classList.add('hidden'));
-  $(`#tab-${CSS.escape(name)}`).classList.remove('hidden');
+  panel.classList.remove('hidden');
   window.scrollTo(0, 0);
-  if (name === 'monitor') renderMonitor();
-  if (name === 'audit') loadAudit();
-  if (name === 'policy') loadPolicy();
-  if (name === 'activity') loadActivity();
-  if (name === 'coverage') loadCoverage();
-  if (name === 'identity') loadIdentitySetup();
-  if (name === 'lineage') loadLineage();
-  if (name === 'updates') loadUpdates();
+  if (!options.skipHistory) syncTabUrl(targetName, { replace: options.replaceHistory });
+  if (targetName === 'monitor') renderMonitor();
+  if (targetName === 'audit') loadAudit();
+  if (targetName === 'policy') loadPolicy();
+  if (targetName === 'activity') loadActivity();
+  if (targetName === 'coverage') loadCoverage();
+  if (targetName === 'identity') loadIdentitySetup();
+  if (targetName === 'lineage') loadLineage();
+  if (targetName === 'updates') loadUpdates();
 }
 
 $$('.tab').forEach((t) => {
   t.onclick = () => activateTab(t.dataset.tab);
+});
+
+window.addEventListener('popstate', () => {
+  activateTab(tabNameFromLocation(), { skipHistory: true });
 });
 
 $$('[data-theme-choice]').forEach((button) => {

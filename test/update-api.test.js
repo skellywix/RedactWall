@@ -5,6 +5,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'promptwall-update-api-'));
 process.env.SENTINEL_DB_PATH = path.join(tempRoot, 'sentinel.db');
@@ -13,6 +14,18 @@ process.env.PROMPTWALL_UPDATE_STATE_PATH = path.join(tempRoot, 'update-state.jso
 process.env.PROMPTWALL_UPDATE_DATA_ROOT = tempRoot;
 process.env.ADMIN_PASSWORD = 'unit-pass';
 process.env.SENTINEL_DATA_KEY = 'unit-update-api-data-key-stable-value-32';
+
+const currentBranch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+  cwd: path.join(__dirname, '..'),
+  encoding: 'utf8',
+}).trim() || 'main';
+fs.writeFileSync(process.env.PROMPTWALL_UPDATE_CONFIG_PATH, JSON.stringify({
+  remoteName: 'origin',
+  branch: currentBranch,
+  installMode: 'npm-ci-omit-dev',
+  restartCommand: '',
+  restartAfterUpdate: false,
+}));
 
 const app = require('../server/app');
 const { listen } = require('./support/listen');
@@ -62,7 +75,7 @@ test('admin update config endpoint saves settings and records audit metadata', a
     },
     body: JSON.stringify({
       remoteName: 'origin',
-      branch: 'main',
+      branch: currentBranch,
       installMode: 'skip',
       restartCommand: '',
       restartAfterUpdate: false,

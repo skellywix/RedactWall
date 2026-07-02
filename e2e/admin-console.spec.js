@@ -164,11 +164,11 @@ test('admin console theme toggle defaults light and persists dark mode', async (
     };
   });
   expect(lightTheme).toMatchObject({
-    bg: '#fff8ed',
-    panel: '#fffbf4',
+    bg: '#f5f7fb',
+    panel: '#ffffff',
     colorScheme: 'light',
   });
-  expect(lightTheme.glow).toContain('245,158,11');
+  expect(lightTheme.glow).toContain('10,132,255');
 
   await page.locator('#themeDark').click();
   await expect(page.locator('body')).toHaveAttribute('data-theme', 'dark');
@@ -185,12 +185,12 @@ test('admin console theme toggle defaults light and persists dark mode', async (
     };
   });
   expect(darkTheme).toMatchObject({
-    bg: '#150f0a',
-    panel: '#20150c',
+    bg: '#101114',
+    panel: '#191b20',
     stored: 'dark',
     colorScheme: 'dark',
   });
-  expect(darkTheme.glow).toContain('255,178,74');
+  expect(darkTheme.glow).toContain('99,179,255');
 
   await page.reload();
   await expect(page.locator('body')).toHaveAttribute('data-theme', 'dark');
@@ -867,6 +867,41 @@ test('admin console controls and forms are wired end to end', async ({ page, req
   await page.locator('#logout').click();
   await expect(page).toHaveURL(/\/login\.html$/);
   await expect(page.locator('#password')).toBeVisible();
+
+  expect(problems).toEqual([]);
+});
+
+test('admin console tabs honor browser back, forward, and refresh', async ({ page }) => {
+  const problems = collectUiProblems(page);
+  await login(page);
+
+  await page.locator('.content-tabs .tab[data-tab="policy"]').click();
+  await expect(page).toHaveURL(/\/index\.html\?tab=policy$/);
+  await expect(page.locator('#tab-policy')).toBeVisible();
+  await expect(page.locator('.content-tabs .tab[data-tab="policy"]')).toHaveAttribute('aria-current', 'page');
+
+  await page.goBack();
+  await expect(page).toHaveURL(/\/index\.html$/);
+  await expect(page.locator('#tab-queue')).toBeVisible();
+  await expect(page.locator('.content-tabs .tab[data-tab="queue"]')).toHaveAttribute('aria-current', 'page');
+
+  await page.goForward();
+  await expect(page).toHaveURL(/\/index\.html\?tab=policy$/);
+  await expect(page.locator('#tab-policy')).toBeVisible();
+  await expect(page.locator('.content-tabs .tab[data-tab="policy"]')).toHaveAttribute('aria-current', 'page');
+
+  await page.reload();
+  await expect(page.locator('#who')).toContainText('admin / Security Admin');
+  await expect(page).toHaveURL(/\/index\.html\?tab=policy$/);
+  await expect(page.locator('#tab-policy')).toBeVisible();
+  await expect(page.locator('.content-tabs .tab[data-tab="policy"]')).toHaveAttribute('aria-current', 'page');
+
+  await page.locator('.content-tabs .tab[data-tab="queue"]').click();
+  await expect(page).toHaveURL(/\/index\.html$/);
+  await expect(page.locator('#tab-queue')).toBeVisible();
+  await page.locator('#tab-queue').getByRole('button', { name: 'Evidence', exact: true }).click();
+  await expect(page).toHaveURL(/\/index\.html\?tab=audit$/);
+  await expect(page.locator('#tab-audit')).toBeVisible();
 
   expect(problems).toEqual([]);
 });

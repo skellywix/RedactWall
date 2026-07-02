@@ -95,7 +95,7 @@ test('dashboard and server expose authenticated identity setup UX', () => {
   assert.match(index, /id="identityProvider"/);
   assert.match(dashboard, /async function loadIdentitySetup\(\)/);
   assert.match(dashboard, /api\(`\/api\/identity\/setup-guide\?\$\{params\.toString\(\)\}`\)/);
-  assert.match(dashboard, /if \(name === 'identity'\) loadIdentitySetup\(\)/);
+  assert.match(dashboard, /if \(targetName === 'identity'\) loadIdentitySetup\(\)/);
   assert.match(packageJson, /"identity:setup": "node scripts\/identity-setup\.js"/);
   assert.match(envExample, /OIDC_ISSUER=/);
   assert.match(envExample, /npm run identity:setup/);
