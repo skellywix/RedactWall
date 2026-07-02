@@ -230,8 +230,12 @@ const applyTemplateSchema = z.object({
   id: z.string().min(1).max(80).regex(/^[a-z0-9_/-]+$/),
 }).strict();
 
+const destinationLabelSchema = z.string().min(1).max(253).regex(HOST_OR_LABEL).refine((value) => !SENSITIVE_ROUTING_CODE.test(value), {
+  message: 'sensitive identifier not allowed',
+});
+
 const destinationReviewSchema = z.object({
-  destination: z.string().min(1).max(253).regex(HOST_OR_LABEL),
+  destination: destinationLabelSchema,
   decision: z.enum(['govern', 'allow', 'block']),
   reason: nonBlankString(LIMITS.destinationReviewReasonChars),
 }).strict();
@@ -271,7 +275,7 @@ const approvalRoutingRuleSchema = z.object({
   categories: z.array(detectorIdSchema).max(40).optional(),
   sources: z.array(sensorIdSchema).max(40).optional(),
   channels: z.array(sensorIdSchema).max(40).optional(),
-  destinations: z.array(z.string().min(1).max(253).regex(HOST_OR_LABEL)).max(40).optional(),
+  destinations: z.array(destinationLabelSchema).max(40).optional(),
   minSeverity: z.number().int().min(0).max(4).optional(),
   minRiskScore: z.number().int().min(0).max(100).optional(),
   assignedGroup: routingCodeSchema(ROUTING_GROUP, 64),
@@ -295,7 +299,7 @@ const policyMatcherFields = {
   categories: z.array(detectorIdSchema).max(40).optional(),
   sources: z.array(sensorIdSchema).max(40).optional(),
   channels: z.array(sensorIdSchema).max(40).optional(),
-  destinations: z.array(z.string().min(1).max(253).regex(HOST_OR_LABEL)).max(40).optional(),
+  destinations: z.array(destinationLabelSchema).max(40).optional(),
 };
 
 function hasPolicyMatcher(rule) {
@@ -354,9 +358,7 @@ const blockedBrowserActionSchema = z.object({
   id: routingCodeSchema(ROUTING_RULE_ID, 64),
   enabled: z.boolean().optional(),
   action: z.enum(['paste', 'drop', 'copy', 'download']),
-  destinations: z.array(z.string().min(1).max(253).regex(HOST_OR_LABEL).refine((value) => !SENSITIVE_ROUTING_CODE.test(value), {
-    message: 'sensitive identifier not allowed',
-  })).min(1).max(40),
+  destinations: z.array(destinationLabelSchema).min(1).max(40),
   reason: routingCodeSchema(ROUTING_REASON, 80).optional(),
 }).strict();
 
@@ -369,10 +371,10 @@ const policyUpdateSchema = z.object({
   rawRetentionDays: z.number().int().min(0).max(3650).optional(),
   ignore: z.array(detectorIdSchema).max(LIMITS.policyListItems).optional(),
   disabledDetectors: z.array(detectorIdSchema).max(LIMITS.policyListItems).optional(),
-  governedDestinations: z.array(z.string().min(1).max(253).regex(HOST_OR_LABEL)).max(LIMITS.policyListItems).optional(),
-  allowedDestinations: z.array(z.string().min(1).max(253).regex(HOST_OR_LABEL)).max(LIMITS.policyListItems).optional(),
-  blockedDestinations: z.array(z.string().min(1).max(253).regex(HOST_OR_LABEL)).max(LIMITS.policyListItems).optional(),
-  blockedFileUploadDestinations: z.array(z.string().min(1).max(253).regex(HOST_OR_LABEL)).max(LIMITS.policyListItems).optional(),
+  governedDestinations: z.array(destinationLabelSchema).max(LIMITS.policyListItems).optional(),
+  allowedDestinations: z.array(destinationLabelSchema).max(LIMITS.policyListItems).optional(),
+  blockedDestinations: z.array(destinationLabelSchema).max(LIMITS.policyListItems).optional(),
+  blockedFileUploadDestinations: z.array(destinationLabelSchema).max(LIMITS.policyListItems).optional(),
   blockedBrowserActions: z.array(blockedBrowserActionSchema).max(40).optional(),
   blockUnapprovedAiDestinations: z.boolean().optional(),
   responseScanMode: z.enum(['flag', 'redact', 'block']).optional(),
