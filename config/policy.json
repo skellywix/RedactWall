@@ -57,6 +57,8 @@
   "responseScanMode": "flag",
   "desktopCollectorDestination": "Desktop AI",
   "approvalRoutingRules": [],
+  "policyScopes": [],
+  "policyExceptions": [],
   "requiredSensors": [
     "browser_extension",
     "endpoint_agent",
