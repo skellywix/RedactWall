@@ -58,6 +58,7 @@ test('admin public assets stay within transfer budgets', () => {
   const totals = assertAssetBudgets([
     { path: 'server/public/index.html', maxRawBytes: 180_000, maxGzipBytes: 32_000 },
     { path: 'server/public/dashboard.js', maxRawBytes: 180_000, maxGzipBytes: 45_000 },
+    { path: 'server/public/gatewatch-theme.css', maxRawBytes: 24_000, maxGzipBytes: 6_000 },
     { path: 'server/public/login.html', maxRawBytes: 12_000, maxGzipBytes: 5_000 },
     { path: 'server/public/login.js', maxRawBytes: 6_000, maxGzipBytes: 2_500 },
   ]);

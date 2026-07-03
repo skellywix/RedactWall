@@ -164,11 +164,11 @@ test('admin console theme toggle defaults light and persists dark mode', async (
     };
   });
   expect(lightTheme).toMatchObject({
-    bg: '#f5f7fb',
+    bg: '#f4f5f7',
     panel: '#ffffff',
     colorScheme: 'light',
   });
-  expect(lightTheme.glow).toContain('10,132,255');
+  expect(lightTheme.glow).toContain('79, 70, 229');
 
   await page.locator('#themeDark').click();
   await expect(page.locator('body')).toHaveAttribute('data-theme', 'dark');
@@ -185,12 +185,12 @@ test('admin console theme toggle defaults light and persists dark mode', async (
     };
   });
   expect(darkTheme).toMatchObject({
-    bg: '#101114',
-    panel: '#191b20',
+    bg: '#0b0c10',
+    panel: '#16181d',
     stored: 'dark',
     colorScheme: 'dark',
   });
-  expect(darkTheme.glow).toContain('99,179,255');
+  expect(darkTheme.glow).toContain('129, 140, 248');
 
   await page.reload();
   await expect(page.locator('body')).toHaveAttribute('data-theme', 'dark');
@@ -1128,29 +1128,32 @@ test('admin console shows exactly one navigation per viewport', async ({ page })
   const problems = collectUiProblems(page);
   await login(page);
 
-  // Desktop: the sidebar rail is the only navigation.
+  // Gatewatch shell: the header rail is the only navigation at every viewport.
   await expect(page.locator('.rail .tab[data-tab="queue"]')).toBeVisible();
   let contentTabsDisplay = await page.locator('.content-tabs').evaluate((el) => getComputedStyle(el).display);
   expect(contentTabsDisplay).toBe('none');
 
-  // Compact viewports: the rail collapses and the content tab strip takes over.
   await page.setViewportSize({ width: 1024, height: 768 });
-  await expect(page.locator('.content-tabs .tab[data-tab="queue"]')).toBeVisible();
-  await expect(page.locator('.content-tabs .tab[data-tab="monitor"]')).toBeVisible();
+  await expect(page.locator('.rail .tab[data-tab="queue"]')).toBeVisible();
+  await expect(page.locator('.rail .tab[data-tab="monitor"]')).toBeVisible();
+  contentTabsDisplay = await page.locator('.content-tabs').evaluate((el) => getComputedStyle(el).display);
+  expect(contentTabsDisplay).toBe('none');
   let railTabsDisplay = await page.locator('.rail .tabs').evaluate((el) => getComputedStyle(el).display);
-  expect(railTabsDisplay).toBe('none');
-  await page.locator('.content-tabs .tab[data-tab="monitor"]').click();
+  expect(railTabsDisplay).toBe('grid');
+  await page.locator('.rail .tab[data-tab="monitor"]').click();
   await expect(page.locator('#tab-monitor')).toBeVisible();
   await expectNoHorizontalOverflow(page);
 
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(page.locator('.content-tabs .tab[data-tab="queue"]')).toBeVisible();
+  await expect(page.locator('.rail .tab[data-tab="queue"]')).toBeVisible();
   railTabsDisplay = await page.locator('.rail .tabs').evaluate((el) => getComputedStyle(el).display);
-  expect(railTabsDisplay).toBe('none');
+  expect(railTabsDisplay).toBe('grid');
+  contentTabsDisplay = await page.locator('.content-tabs').evaluate((el) => getComputedStyle(el).display);
+  expect(contentTabsDisplay).toBe('none');
 
-  await page.locator('.content-tabs .tab[data-tab="policy"]').click();
+  await page.locator('.rail .tab[data-tab="policy"]').click();
   await expect(page.locator('#tab-policy')).toBeVisible();
-  await page.locator('.content-tabs .tab[data-tab="audit"]').click();
+  await page.locator('.rail .tab[data-tab="audit"]').click();
   await expect(page.locator('#tab-audit')).toBeVisible();
 
   await expectNoHorizontalOverflow(page);
