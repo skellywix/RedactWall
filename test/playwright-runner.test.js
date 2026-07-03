@@ -7,6 +7,8 @@ const {
   DEFAULT_START_PORT,
   findAvailablePort,
   parsePort,
+  releasePortLock,
+  reserveAvailablePort,
 } = require('../scripts/run-playwright');
 
 function listen(port) {
@@ -39,4 +41,15 @@ test('findAvailablePort skips an occupied starting port', async (t) => {
 
   const probe = await listen(available);
   t.after(() => close(probe));
+});
+
+test('reserveAvailablePort skips a live runner reservation', async (t) => {
+  const first = await reserveAvailablePort(DEFAULT_START_PORT);
+  t.after(() => releasePortLock(first));
+
+  const second = await reserveAvailablePort(first.port);
+  t.after(() => releasePortLock(second));
+
+  assert.notStrictEqual(second.port, first.port);
+  assert.ok(second.port > first.port);
 });
