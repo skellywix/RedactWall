@@ -36,8 +36,26 @@ function loadRaw() {
   return { destinations: [] };
 }
 
+function emailDestination(raw, index) {
+  const to = (Array.isArray(raw.to) ? raw.to : [raw.to]).map((r) => String(r || '').trim()).filter(Boolean);
+  if (!to.length) return null;
+  return {
+    id: String(raw.id || `dest_${index}`).slice(0, 64),
+    name: String(raw.name || raw.id || 'email').slice(0, 120),
+    type: 'email',
+    to,
+    url: null,
+    token: null,
+    minRisk: Number.isFinite(Number(raw.minRisk)) ? Number(raw.minRisk) : 0,
+    minSeverity: Number.isFinite(Number(raw.minSeverity)) ? Number(raw.minSeverity) : 0,
+    eventTypes: Array.isArray(raw.eventTypes) ? raw.eventTypes.map(String) : null,
+    maxAttempts: Math.max(1, Math.min(8, Number(raw.maxAttempts) || DEFAULT_MAX_ATTEMPTS)),
+  };
+}
+
 function normalizeDestination(raw, index) {
   if (!raw || typeof raw !== 'object' || raw.enabled === false) return null;
+  if (raw.type === 'email') return emailDestination(raw, index);
   const type = formats.supportedTypes().includes(raw.type) ? raw.type : 'webhook';
   const url = outboundHttpsUrl(raw.url);
   if (!url) return null;
@@ -86,18 +104,22 @@ async function deliverTo(dest, alert, opts = {}) {
     return db.recordDelivery({ destId: dest.id, destName: dest.name, type: dest.type, dedupeKey, status: 'deduped', attempts: 0 });
   }
 
-  const req = formats.buildRequest(alert, dest);
+  const req = dest.type === 'email' ? null : formats.buildRequest(alert, dest);
+  const sendMail = opts.sendMail || require('./email').send;
   let attempts = 0; let lastError = null; let httpStatus = null;
   const maxAttempts = opts.maxAttempts || dest.maxAttempts;
   while (attempts < maxAttempts) {
     attempts += 1;
     try {
-      const res = await fetchImpl(req.url, { method: req.method, headers: req.headers, body: req.body });
+      // Email relays get the same prompt-free event the SIEM adapters send.
+      const res = dest.type === 'email'
+        ? await sendMail({ to: dest.to, subject: formats.summaryLine(alert), text: JSON.stringify(formats.toEvent(alert), null, 2) })
+        : await fetchImpl(req.url, { method: req.method, headers: req.headers, body: req.body });
       httpStatus = res && res.status;
-      if (res && res.ok) {
+      if (res && (res.ok || res.status === 200)) {
         return db.recordDelivery({ destId: dest.id, destName: dest.name, type: dest.type, dedupeKey, status: 'delivered', attempts, httpStatus });
       }
-      lastError = 'http_' + httpStatus;
+      lastError = dest.type === 'email' ? String(res && res.error || 'smtp_error') : 'http_' + httpStatus;
     } catch (e) {
       lastError = 'network_error';
     }
@@ -118,6 +140,7 @@ function publicDestinations() {
   return destinations().map((d) => ({
     id: d.id, name: d.name, type: d.type, minRisk: d.minRisk, minSeverity: d.minSeverity,
     eventTypes: d.eventTypes, hasToken: !!d.token, urlHost: safeHost(d.url),
+    recipients: d.to ? d.to.length : undefined,
   }));
 }
 
