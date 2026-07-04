@@ -110,7 +110,13 @@ function createGateway(overrides = {}) {
   function rateLimited(id) {
     const now = Date.now();
     const b = buckets.get(id);
-    if (!b || now >= b.resetAt) { buckets.set(id, { count: 1, resetAt: now + 60000 }); return false; }
+    if (!b || now >= b.resetAt) {
+      // Opportunistically evict expired buckets so the map cannot grow without
+      // bound on a long-lived process serving many distinct callers.
+      if (buckets.size > 1000) for (const [k, v] of buckets) if (now >= v.resetAt) buckets.delete(k);
+      buckets.set(id, { count: 1, resetAt: now + 60000 });
+      return false;
+    }
     b.count += 1;
     return b.count > cfg.rateLimitPerMin;
   }

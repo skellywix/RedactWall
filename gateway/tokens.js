@@ -20,15 +20,29 @@ function tokenHash(raw) {
   return crypto.createHash('sha256').update('promptwall:gateway-token:v1:' + String(raw || '')).digest('hex');
 }
 
+// Cache the parsed store per path, keyed on the file's mtime+size, so the hot
+// resolveToken path (called on every authenticated gateway request) does not
+// re-read and JSON.parse the file each time. mint/revoke rewrite the file, which
+// changes the stamp, so revocation still takes effect on the next request.
+const _storeCache = new Map(); // path -> { stamp, store }
 function loadStore(tokensPath) {
   const p = tokensPath || defaultTokensPath();
+  let stamp = 'none';
   try {
-    if (fs.existsSync(p)) {
+    const st = fs.statSync(p);
+    stamp = st.mtimeMs + ':' + st.size;
+  } catch { /* missing file — stamp stays 'none' */ }
+  const cached = _storeCache.get(p);
+  if (cached && cached.stamp === stamp) return cached.store;
+  let store = { tokens: [] };
+  try {
+    if (stamp !== 'none') {
       const parsed = JSON.parse(fs.readFileSync(p, 'utf8'));
-      if (parsed && Array.isArray(parsed.tokens)) return parsed;
+      if (parsed && Array.isArray(parsed.tokens)) store = parsed;
     }
-  } catch (e) { /* empty store */ }
-  return { tokens: [] };
+  } catch (e) { store = { tokens: [] }; }
+  _storeCache.set(p, { stamp, store });
+  return store;
 }
 
 function saveStore(store, tokensPath) {
