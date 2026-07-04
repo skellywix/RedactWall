@@ -255,7 +255,9 @@ test('guardToolResult refreshes live policy before scanning when no explicit pol
     },
   });
 
-  assert.deepStrictEqual(requests.map((r) => r.url), ['http://sentinel.test/api/v1/policy']);
+  assert.strictEqual(requests[0].url, 'http://sentinel.test/api/v1/policy');
+  // The policy refresh also fires a fire-and-forget presence heartbeat.
+  assert.ok(requests.slice(1).every((r) => r.url === 'http://sentinel.test/api/v1/heartbeat'));
   assert.strictEqual(requests[0].headers['x-api-key'], 'policy-key');
   assert.strictEqual(guarded.redacted, false);
   assert.deepStrictEqual(guarded.findings, []);

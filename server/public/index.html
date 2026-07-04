@@ -20,7 +20,7 @@
   --txt:#1d1d1f;
   --soft:#3a3a3c;
   --mut:#6e7380;
-  --blue:#0a84ff;
+  --blue:var(--blue);
   --blue-deep:#0060df;
   --green:#178a42;
   --green-vivid:#30b153;
@@ -29,8 +29,8 @@
   --amber:#b96700;
   --amber-vivid:#ff9f0a;
   --yellow:#9a7a00;
-  --cyan:#0a84ff;
-  --ice:#0a84ff;
+  --cyan:var(--blue);
+  --ice:var(--blue);
   --glow:rgba(10,132,255,.16);
   --glow-soft:rgba(10,132,255,.1);
   --glow-clear:rgba(10,132,255,0);
@@ -43,7 +43,7 @@
   --info-bg:rgba(10,132,255,.1);
   --gray-bg:rgba(110,115,128,.1);
   --ice-bg:rgba(10,132,255,.08);
-  --topbar-bg:rgba(245,247,251,.78);
+  --topbar-bg:rgba(245,247,251,.94);
   --input-bg:#ffffff;
   --code-bg:#f6f8fc;
   --surface-hover:rgba(22,38,66,.045);
@@ -94,7 +94,7 @@ body[data-theme="dark"]{
   --info-bg:rgba(99,179,255,.13);
   --gray-bg:rgba(161,168,182,.12);
   --ice-bg:rgba(99,179,255,.1);
-  --topbar-bg:rgba(16,17,20,.72);
+  --topbar-bg:rgba(16,17,20,.93);
   --input-bg:#14161b;
   --code-bg:#14161b;
   --surface-hover:rgba(190,205,230,.06);
@@ -152,13 +152,12 @@ a{color:var(--blue)}
   width:36px;
   height:36px;
   flex:0 0 auto;
-  border:1px solid rgba(10,132,255,.35);
+  border:1px solid var(--glow);
   border-radius:9px;
   display:grid;
   place-items:center;
   color:#fff;
-  background:linear-gradient(180deg,#3f9fff,#0a72e8);
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.25),0 1px 3px rgba(9,30,66,.2);
+  background:var(--blue);
   font-weight:800;
   font-size:12px;
   letter-spacing:.02em;
@@ -579,6 +578,43 @@ body[data-theme="dark"] .theme-toggle button[aria-pressed="true"]{box-shadow:0 1
 .chip.category b{color:var(--amber)}
 button.chip{transition:border-color var(--fast),background var(--fast)}
 button.chip:hover{border-color:var(--blue);background:var(--blue-bg)}
+.deploy-install{margin-top:8px;font-size:12px;color:var(--mut)}
+.deploy-install b{color:var(--txt);font-weight:600;margin-right:6px}
+#toastStack{position:fixed;right:18px;bottom:18px;z-index:60;display:flex;flex-direction:column;gap:8px;max-width:340px}
+.toast{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--blue);border-radius:var(--radius-sm);box-shadow:var(--shadow-raised);padding:10px 14px;font-size:13px;color:var(--txt);opacity:1;transition:opacity .3s,transform .3s}
+.toast-good{border-left-color:var(--green)}
+.toast-bad{border-left-color:var(--red)}
+.toast.gone{opacity:0;transform:translateY(6px)}
+.catalog-form-body{display:flex;gap:10px;padding:14px 16px;align-items:center;flex-wrap:wrap}
+.catalog-form-body input[type="text"]{max-width:280px}
+.catalog-form-column{flex-direction:column;align-items:stretch}
+.catalog-form-actions{display:flex;gap:10px}
+.catalog-bulk{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.catalog-bulk input{max-width:230px}
+.catalog-check{width:28px}
+.catalog-reason{max-width:180px;display:inline-block;margin-right:6px}
+th[data-catalog-sort]{cursor:pointer;user-select:none}
+th[data-catalog-sort].sorted::after{content:" " attr(data-sort-dir);font-size:9px;text-transform:uppercase;color:var(--blue)}
+.rationale{border:1px solid var(--line);border-radius:var(--radius-sm);margin:12px 16px;overflow:hidden}
+.rationale-head{padding:9px 12px;font-size:12px;font-weight:600;color:var(--mut);border-bottom:1px solid var(--line);text-transform:uppercase;letter-spacing:.06em}
+.rationale-head b{color:var(--txt);font-variant-numeric:tabular-nums}
+.rationale-row{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.rationale-row .rationale-what{min-width:130px}
+.rationale-row .rationale-what i{color:var(--mut);font-style:normal;font-size:11px;margin-left:4px}
+.rationale-conf{color:var(--mut);font-size:12px;white-space:nowrap}
+.rationale-pts{margin-left:auto;font-variant-numeric:tabular-nums;font-weight:600;color:var(--txt)}
+.rationale-regs{display:flex;gap:5px;flex-wrap:wrap;flex-basis:100%;padding-left:2px}
+.reg-chip{font-size:11px;border:1px solid var(--line);border-radius:999px;padding:1px 8px;color:var(--mut);background:var(--gray-bg)}
+.rationale-note{padding:8px 12px;font-size:11.5px;color:var(--mut)}
+.overview-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:14px}
+@media (max-width:1180px){.overview-grid{grid-template-columns:1fr}}
+button.stat{text-align:left;font:inherit;cursor:pointer;border:1px solid var(--line)}
+button.stat:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.overview-row{display:flex;align-items:center;gap:10px;width:100%;text-align:left;font:inherit;cursor:pointer;background:transparent;border:0;border-bottom:1px solid var(--line);padding:10px 16px;color:var(--txt)}
+.overview-row:hover{background:var(--surface-hover)}
+.overview-row .ovr-when{color:var(--mut);font-size:12px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.overview-row .ovr-what{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
+.overview-row .ovr-what b{font-weight:600}
 .reasons{margin-top:8px;color:var(--mut);font-size:12px;line-height:1.5}
 .note{
   width:100%;
@@ -599,7 +635,7 @@ button.chip:hover{border-color:var(--blue);background:var(--blue-bg)}
   align-items:center;
   min-height:28px;
   margin-top:11px;
-  border:1px solid rgba(10,132,255,.3);
+  border:1px solid var(--glow);
   border-radius:var(--radius-sm);
   background:var(--blue-bg);
   color:var(--blue);
@@ -640,19 +676,17 @@ body.queue-density-compact .actions{margin-top:8px}
 }
 .btn:hover{background:var(--surface-hover)}
 .btn.approve{
-  background:linear-gradient(180deg,#3f9fff,#0a72e8);
+  background:var(--green-vivid);
   color:#fff;
-  border-color:rgba(6,86,180,.55);
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 1px 2px rgba(9,30,66,.2);
+  border-color:var(--green);
 }
-.btn.approve:hover{filter:brightness(1.06);background:linear-gradient(180deg,#3f9fff,#0a72e8)}
+.btn.approve:hover{background:var(--green)}
 .btn.deny{
-  background:linear-gradient(180deg,#ff5f57,#e0343c);
+  background:var(--red-vivid);
   color:#fff;
-  border-color:rgba(160,20,28,.55);
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.2),0 1px 2px rgba(9,30,66,.2);
+  border-color:var(--red);
 }
-.btn.deny:hover{filter:brightness(1.06);background:linear-gradient(180deg,#ff5f57,#e0343c)}
+.btn.deny:hover{background:var(--red)}
 .btn.reveal{background:var(--panel);border-color:var(--line2);color:var(--soft)}
 .btn.reveal:hover{background:var(--surface-hover)}
 .btn:disabled{opacity:.55;filter:none}
@@ -674,12 +708,11 @@ body.queue-density-compact .actions{margin-top:8px}
 }
 .system-button:hover{background:var(--surface-hover)}
 .system-button.primary{
-  background:linear-gradient(180deg,#3f9fff,#0a72e8);
+  background:var(--blue);
   color:#fff;
-  border-color:rgba(6,86,180,.55);
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 1px 2px rgba(9,30,66,.2);
+  border-color:var(--blue-deep);
 }
-.system-button.primary:hover{filter:brightness(1.06);background:linear-gradient(180deg,#3f9fff,#0a72e8)}
+.system-button.primary:hover{background:var(--blue-deep)}
 .system-button.secondary{background:var(--panel);color:var(--soft)}
 .system-button.ghost{border-color:transparent;background:transparent;box-shadow:none;color:var(--mut)}
 .system-button.ghost:hover{background:var(--surface-hover);color:var(--txt)}
@@ -738,7 +771,7 @@ body.queue-density-compact .actions{margin-top:8px}
 .barrow{display:grid;grid-template-columns:120px minmax(0,1fr) 34px;gap:10px;align-items:center;padding:8px 16px;color:var(--soft);font-size:12.5px}
 .barrow .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .bar{height:6px;background:var(--panel3);border-radius:999px;overflow:hidden}
-.bar > i{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,var(--blue),#5ac8fa);width:var(--w)}
+.bar > i{display:block;height:100%;border-radius:999px;background:var(--blue);width:var(--w)}
 .barrow .v{text-align:right;color:var(--mut);font-variant-numeric:tabular-nums}
 
 /* ---- Tables + pagers ------------------------------------------------------ */
@@ -781,7 +814,7 @@ td.mono,.mono{font-family:var(--font-mono);font-size:11.5px;font-variant-numeric
 }
 .pill.good{background:var(--green-bg);border-color:rgba(48,177,83,.35);color:var(--green)}
 .pill.bad{background:var(--red-bg);border-color:rgba(255,69,58,.32);color:var(--red)}
-.pill.info{background:var(--info-bg);border-color:rgba(10,132,255,.3);color:var(--blue)}
+.pill.info{background:var(--info-bg);border-color:var(--glow);color:var(--blue)}
 .pill.warn{background:var(--amber-bg);border-color:rgba(255,159,10,.35);color:var(--amber)}
 .status-chip{
   display:inline-flex;
@@ -901,7 +934,7 @@ button.status-chip{cursor:pointer}
 .insights-riskbar-label,.insights-hbar-label{color:var(--soft);font-size:11.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .insights-riskbar-track,.insights-hbar-track{height:9px;border-radius:5px;background:var(--panel3);overflow:hidden}
 .insights-riskbar-fill,.insights-hbar-fill{display:block;height:100%;border-radius:5px}
-.insights-hbar-fill{background:linear-gradient(90deg,var(--blue),var(--blue-deep))}
+.insights-hbar-fill{background:var(--blue)}
 .insights-riskbar-count,.insights-hbar-count{color:var(--txt);font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;text-align:right}
 .insights-empty{padding:16px;color:var(--mut);font-size:12.5px;text-align:center}
 .insights-chip{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:700;text-transform:capitalize}
@@ -928,6 +961,9 @@ button.status-chip{cursor:pointer}
 .compliance-families{display:flex;flex-wrap:wrap;gap:4px}
 .sub-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:11px 16px;border-bottom:1px solid var(--line)}
 .sub-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.sub-test-result{margin-left:auto;font-size:12px;color:var(--mut);white-space:nowrap}
+.sub-test-result.ok{color:var(--green)}
+.sub-test-result.bad{color:var(--red)}
 .sub-host{color:var(--mut);font-size:11.5px}
 .sub-filter{color:var(--mut);font-size:11px}
 .sensor-row,.shadow-row,.tool-row{
@@ -979,7 +1015,7 @@ select{
   padding-right:28px;
 }
 input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;height:15px}
-.queue-tools select,.queue-tools input{width:auto}
+.queue-tools select,.queue-tools input,.toolbar select,.console-frame-actions select{width:auto}
 .policy-card{max-width:980px}
 .policy-box{padding:16px}
 .template-bar{margin-bottom:16px}
@@ -1461,7 +1497,7 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
 .action-severity{border:1px solid var(--line);border-radius:999px;background:var(--panel2);padding:1px 7px;font-size:9.5px;font-weight:700;text-transform:uppercase;white-space:nowrap;color:var(--mut)}
 .action-severity.critical{color:var(--red);border-color:rgba(255,69,58,.32);background:var(--red-bg)}
 .action-severity.warning{color:var(--amber);border-color:rgba(255,159,10,.35);background:var(--amber-bg)}
-.action-severity.info{color:var(--blue);border-color:rgba(10,132,255,.3);background:var(--blue-bg)}
+.action-severity.info{color:var(--blue);border-color:var(--glow);background:var(--blue-bg)}
 .action-workflow-pill{border:1px solid var(--line);border-radius:999px;background:var(--panel2);padding:1px 7px;font-size:9.5px;font-weight:700;text-transform:uppercase;white-space:nowrap;color:var(--mut)}
 .action-workflow-pill.assigned{color:var(--blue);border-color:rgba(10,132,255,.28);background:var(--blue-bg)}
 .action-workflow-pill.snoozed{color:var(--amber);border-color:rgba(255,159,10,.35);background:var(--amber-bg)}
@@ -2174,9 +2210,9 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
   .panel.is-loading:after,.stats.is-loading:after,.config-shell.is-loading:after{animation:none!important}
 }
 </style>
-<link rel="stylesheet" href="/gatewatch-theme.css" />
+<link rel="stylesheet" href="/console-theme.css" />
 </head>
-<body data-theme="light">
+<body data-theme="dark">
 <div class="theme-canvas" aria-hidden="true">
   <span class="ambient-line ambient-line--one"></span>
   <span class="ambient-line ambient-line--two"></span>
@@ -2191,9 +2227,13 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
         <p>AI Prompt DLP Gateway</p>
       </div>
     </div>
-    <div class="rail-section">Console</div>
     <nav class="tabs" aria-label="Primary">
-      <button class="tab active" data-tab="queue" type="button" aria-current="page">
+      <div class="rail-group-label" aria-hidden="true">Operate</div>
+      <button class="tab active" data-tab="overview" type="button" aria-current="page">
+        <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M4 13a8 8 0 0 1 16 0M12 13l3.5-3.5M4 19h16" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        Overview
+      </button>
+      <button class="tab" data-tab="queue" type="button">
         <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M5 5h14v5H5V5Zm0 9h14v5H5v-5Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg></span>
         Approval Queue <span class="badge hidden" id="qBadge">0</span>
       </button>
@@ -2201,18 +2241,24 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
         <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M4 12h4l2-6 4 12 2-6h4M5 19h14" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
         AI Command Center
       </button>
-      <button class="tab" data-tab="insights" type="button">
-        <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M4 20V4m0 16h16M8 20v-6m4 6V8m4 12v-9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-        Insights
-      </button>
       <button class="tab" data-tab="activity" type="button">
         <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M4 7h16M4 12h16M4 17h10" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></span>
         All Activity
       </button>
+      <div class="rail-group-label" aria-hidden="true">Analyze</div>
+      <button class="tab" data-tab="insights" type="button">
+        <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M4 20V4m0 16h16M8 20v-6m4 6V8m4 12v-9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        Insights
+      </button>
       <button class="tab" data-tab="coverage" type="button">
         <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M4 19V5m0 14h16M8 16V9m5 7V6m5 10v-4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-        Coverage
+        Sensor Coverage
       </button>
+      <button class="tab" data-tab="lineage" type="button">
+        <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M4 7h5l2 3h9M4 17h5l2-3h9M9 7v10" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        Data Lineage
+      </button>
+      <div class="rail-group-label" aria-hidden="true">Govern</div>
       <button class="tab" data-tab="catalog" type="button">
         <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M4 6h16M4 12h16M4 18h16M8 6v12" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
         App Catalog
@@ -2221,43 +2267,44 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
         <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M9 12l2 2 4-4M12 3l7 3v5c0 4.2-2.6 6.8-7 8-4.4-1.2-7-3.8-7-8V6l7-3Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg></span>
         Compliance
       </button>
-      <button class="tab" data-tab="integrations" type="button">
-        <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M7 8a3 3 0 0 1 3-3h1v6h-1a3 3 0 0 1-3-3ZM17 16a3 3 0 0 1-3 3h-1v-6h1a3 3 0 0 1 3 3ZM11 8h6M7 16h6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-        Integrations
-      </button>
       <button class="tab" data-tab="identity" type="button">
         <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M12 4a4 4 0 1 1 0 8 4 4 0 0 1 0-8ZM4.5 20c.7-3.4 3.3-5.5 7.5-5.5s6.8 2.1 7.5 5.5M17 8h3m-1.5-1.5v3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
         Identity
       </button>
-      <button class="tab" data-tab="lineage" type="button">
-        <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M4 7h5l2 3h9M4 17h5l2-3h9M9 7v10" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-        Lineage
+      <button class="tab" data-tab="policy" type="button">
+        <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M12 4l7 3v5c0 4.2-2.6 6.8-7 8-4.4-1.2-7-3.8-7-8V7l7-3Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg></span>
+        Configuration
+      </button>
+      <div class="rail-group-label" aria-hidden="true">System</div>
+      <button class="tab" data-tab="deploy" type="button">
+        <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M12 4v10m0 0 4-4m-4 4-4-4M5 19h14" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        Deploy
+      </button>
+      <button class="tab" data-tab="integrations" type="button">
+        <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M7 8a3 3 0 0 1 3-3h1v6h-1a3 3 0 0 1-3-3ZM17 16a3 3 0 0 1-3 3h-1v-6h1a3 3 0 0 1 3 3ZM11 8h6M7 16h6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        Integrations
       </button>
       <button class="tab" data-tab="audit" type="button">
         <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M7 4h10v16H7V4Zm3 4h4m-4 4h6m-6 4h3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
         Audit Log
-      </button>
-      <button class="tab" data-tab="policy" type="button">
-        <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M12 4l7 3v5c0 4.2-2.6 6.8-7 8-4.4-1.2-7-3.8-7-8V7l7-3Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg></span>
-        Configuration
       </button>
       <button class="tab" data-tab="updates" type="button">
         <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M20 12a8 8 0 0 1-13.7 5.6M4 12A8 8 0 0 1 17.7 6.4M17.7 6.4H14M17.7 6.4V3M6.3 17.6H10M6.3 17.6V21" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
         Updates
       </button>
     </nav>
-    <div class="rail-section">Monitoring</div>
     <div class="rail-status">
+      <div class="rail-group-label" aria-hidden="true">System status</div>
       <div class="status-line">
-        <span>Hash chain</span>
-        <button class="status-chip tone-secure" type="button" data-tooltip="Tamper-evident audit chain" data-status-detail="SECURE: append-only audit chain is enabled for admin and policy activity.">
-          <span class="status-light tone-secure" aria-hidden="true"></span>SECURE
+        <span>Audit log</span>
+        <button class="status-chip tone-secure" type="button" data-tooltip="Append-only, hash-chained audit log" data-status-detail="TAMPER-EVIDENT: every admin and policy action is written to an append-only, hash-chained audit log. Verify it on the Audit Log tab.">
+          <span class="status-light tone-secure" aria-hidden="true"></span>TAMPER-EVIDENT
         </button>
       </div>
       <div class="status-line">
-        <span>Local scan</span>
-        <button class="status-chip tone-live" type="button" data-tooltip="Local inspection loop" data-status-detail="MONITORING: local prompt inspection is active for connected sensors.">
-          <span class="status-light tone-live is-live" aria-hidden="true"></span>MONITORING
+        <span>Prompt scanning</span>
+        <button class="status-chip tone-live" type="button" data-tooltip="Prompts are inspected before release" data-status-detail="ACTIVE: prompts from connected sensors are inspected on-device before anything leaves for an AI service.">
+          <span class="status-light tone-live is-live" aria-hidden="true"></span>ACTIVE
         </button>
       </div>
       <div class="status-line"><span>Version</span><b>0.3.0</b></div>
@@ -2269,6 +2316,7 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
       <label class="search" for="globalSearch">
         <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m21 21-4.35-4.35M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
         <input id="globalSearch" type="search" autocomplete="off" placeholder="Search users or destinations" aria-label="Search users or destinations" />
+        <kbd id="cmdkHint" aria-hidden="true">Ctrl K</kbd>
       </label>
       <div class="spacer"></div>
       <button class="live" type="button" data-tooltip="Server event stream" data-status-detail="LIVE: session telemetry stream is connected.">
@@ -2276,13 +2324,11 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
       </button>
       <span class="last-updated" id="lastUpdated">LAST UPDATED -</span>
       <div class="theme-toggle" role="group" aria-label="Color theme">
-        <button id="themeLight" type="button" data-theme-choice="light" aria-pressed="true">
+        <button id="themeLight" type="button" data-theme-choice="light" aria-pressed="false" title="Switch to light" aria-label="Switch to light">
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 4V2m0 20v-2M4.93 4.93 3.51 3.51m16.98 16.98-1.42-1.42M4 12H2m20 0h-2M4.93 19.07l-1.42 1.42M20.49 3.51l-1.42 1.42M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          Light
         </button>
-        <button id="themeDark" type="button" data-theme-choice="dark" aria-pressed="false">
+        <button id="themeDark" type="button" data-theme-choice="dark" aria-pressed="true" title="Switch to dark" aria-label="Switch to dark">
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20.5 15.5A8.5 8.5 0 0 1 8.5 3.5 7 7 0 1 0 20.5 15.5Z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          Dark
         </button>
       </div>
       <span class="who" id="who"></span>
@@ -2294,23 +2340,62 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
     <div class="banner" id="banner" role="alert" aria-live="polite"></div>
 
     <div class="content-tabs">
-      <button class="tab active" data-tab="queue" type="button" aria-current="page">Approval Queue</button>
+      <button class="tab active" data-tab="overview" type="button" aria-current="page">Overview</button>
+      <button class="tab" data-tab="queue" type="button">Approval Queue</button>
       <button class="tab" data-tab="monitor" type="button">AI Command Center</button>
       <button class="tab" data-tab="insights" type="button">Insights</button>
       <button class="tab" data-tab="activity" type="button">All Activity</button>
-      <button class="tab" data-tab="coverage" type="button">Coverage</button>
+      <button class="tab" data-tab="coverage" type="button">Sensor Coverage</button>
       <button class="tab" data-tab="catalog" type="button">App Catalog</button>
       <button class="tab" data-tab="compliance" type="button">Compliance</button>
       <button class="tab" data-tab="integrations" type="button">Integrations</button>
+      <button class="tab" data-tab="deploy" type="button">Deploy</button>
       <button class="tab" data-tab="identity" type="button">Identity</button>
-      <button class="tab" data-tab="lineage" type="button">Lineage</button>
+      <button class="tab" data-tab="lineage" type="button">Data Lineage</button>
       <button class="tab" data-tab="audit" type="button">Audit Log</button>
       <button class="tab" data-tab="policy" type="button">Configuration</button>
       <button class="tab" data-tab="updates" type="button">Updates</button>
     </div>
 
     <div class="wrap">
-      <section id="tab-queue" class="console-frame" aria-label="Approval Queue">
+      <section id="tab-overview" class="console-frame" aria-label="Overview">
+        <div class="console-frame-header">
+          <div class="console-frame-title">
+            <div>
+              <h2>Overview</h2>
+              <p>Live control room: what needs a decision, what sensors are catching, and where delivery needs attention. Every tile jumps to its tab to continue the work.</p>
+            </div>
+          </div>
+          <div class="console-frame-actions">
+            <span class="signal-updated" id="overviewUpdated">UPDATED -</span>
+          </div>
+        </div>
+        <div class="stats" id="overviewTiles" aria-live="polite"></div>
+        <div class="overview-grid">
+          <div class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Waiting on a decision</h2>
+                <span>Oldest held prompts - click to open the Approval Queue</span>
+              </div>
+              <button class="ghost mini" data-tab-jump="queue" type="button">Open queue</button>
+            </div>
+            <div id="overviewQueue" aria-live="polite"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Live activity</h2>
+                <span>Latest gated prompts as they happen - click to open All Activity</span>
+              </div>
+              <button class="ghost mini" data-tab-jump="activity" type="button">Open activity</button>
+            </div>
+            <div id="overviewFeed" aria-live="polite"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="tab-queue" class="hidden console-frame" aria-label="Approval Queue">
         <div class="console-frame-header">
           <div class="console-frame-title">
             <div>
@@ -2447,7 +2532,7 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
           <div class="signal-section">
             <div class="signal-section-head">
               <div>
-                <h3>Market Hardening Flow</h3>
+                <h3>Hardening Focus Areas</h3>
                 <span id="marketHardeningSummary">Waiting for focus</span>
               </div>
             </div>
@@ -2457,7 +2542,7 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
           <div class="signal-section">
             <div class="signal-section-head">
               <div>
-                <h3>Competitive Readiness</h3>
+                <h3>Capability Benchmark</h3>
                 <span id="competitiveReadinessSummary">Waiting for data</span>
               </div>
             </div>
@@ -2661,7 +2746,10 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
               <option value="7">Last 7 days</option>
               <option value="30" selected>Last 30 days</option>
               <option value="90">Last 90 days</option>
+              <option value="180">Last 180 days</option>
+              <option value="365">Last 365 days</option>
             </select>
+            <button class="ghost" id="insightsExportCsv" type="button" title="Download the daily decision series for the selected window">Export CSV</button>
             <button class="system-button secondary" id="refreshInsights" type="button">
               <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v6h-6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
               Refresh
@@ -2716,6 +2804,25 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
               <p>Scan recent gated prompts, decisions, owners, and sanitized detection context.</p>
             </div>
           </div>
+          <div class="console-frame-actions">
+            <select id="savedViews" aria-label="Saved views">
+              <option value="" selected>Saved views&hellip;</option>
+            </select>
+            <button class="ghost" id="saveView" type="button" title="Save the current search, time range, and page size as a named view">Save view</button>
+            <select id="activityRange" aria-label="Activity time range">
+              <option value="1">Last 24 hours</option>
+              <option value="7">Last 7 days</option>
+              <option value="30">Last 30 days</option>
+              <option value="0" selected>All retained</option>
+            </select>
+            <select id="activityPageSize" aria-label="Rows per page">
+              <option value="10" selected>10 rows</option>
+              <option value="25">25 rows</option>
+              <option value="50">50 rows</option>
+              <option value="100">100 rows</option>
+            </select>
+            <button class="ghost" id="exportActivityCsv" type="button">Export CSV</button>
+          </div>
         </div>
         <div class="panel">
           <div class="panel-head">
@@ -2735,10 +2842,20 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
         <div class="console-frame-header">
           <div class="console-frame-title">
             <div>
-              <h2>Coverage</h2>
+              <h2>Sensor Coverage</h2>
               <p>Track governed destinations, sensor posture, endpoint inventory, and shadow-AI gaps.</p>
             </div>
           </div>
+        </div>
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Fleet by user</h2>
+              <span>Sensors report on each other: a user seen by one sensor but not its companions is a coverage gap</span>
+            </div>
+          </div>
+          <table><thead><tr><th>User</th><th>Browser extension</th><th>Endpoint agent</th><th>MCP guard</th><th>Coverage gaps</th></tr></thead>
+            <tbody id="fleetMatrixRows"></tbody></table>
         </div>
         <div class="coverage-grid">
           <div class="panel">
@@ -2834,9 +2951,44 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
           </div>
         </div>
         <div class="insights-kpis" id="catalogKpis"></div>
+        <div class="panel catalog-form hidden" id="catalogAddForm">
+          <div class="panel-head"><div><h2>Add AI app</h2><span>Register an app the sensors have not discovered yet</span></div></div>
+          <div class="catalog-form-body">
+            <input id="catalogAddHost" type="text" placeholder="internal-llm.corp" aria-label="AI app host"/>
+            <input id="catalogAddName" type="text" placeholder="Display name (optional)" aria-label="Display name"/>
+            <button class="system-button primary" id="catalogAddConfirm" type="button">Add app</button>
+            <button class="ghost" id="catalogAddCancel" type="button">Cancel</button>
+          </div>
+        </div>
+        <div class="panel catalog-form hidden" id="catalogImportForm">
+          <div class="panel-head"><div><h2>Import from proxy/DNS log</h2><span>One hostname per line, or host,count pairs - metadata only</span></div></div>
+          <div class="catalog-form-body catalog-form-column">
+            <textarea id="catalogImportCsv" rows="4" placeholder="internal-llm.corp&#10;chat.example.ai,42" aria-label="Hostnames to import"></textarea>
+            <div class="catalog-form-actions">
+              <button class="system-button primary" id="catalogImportConfirm" type="button">Import</button>
+              <button class="ghost" id="catalogImportCancel" type="button">Cancel</button>
+            </div>
+          </div>
+        </div>
         <div class="panel wide-panel">
-          <div class="panel-head"><div><h2>Discovered AI apps</h2><span>Risk score, attributes, discovery source, and governance decision</span></div></div>
-          <table><thead><tr><th>App</th><th>Provider</th><th>Risk</th><th>Attributes</th><th>Status</th><th>Events</th><th>Sources</th><th>Govern</th></tr></thead>
+          <div class="panel-head">
+            <div><h2>Discovered AI apps</h2><span>Risk score, attributes, discovery source, and governance decision - click a column to sort</span></div>
+            <div class="catalog-bulk hidden" id="catalogBulkBar">
+              <span id="catalogBulkCount">0 selected</span>
+              <input id="catalogBulkReason" type="text" placeholder="Reason (recorded in audit)" aria-label="Bulk decision reason"/>
+              <button class="ghost mini" data-catalog-bulk="allow" type="button">Allow</button>
+              <button class="ghost mini" data-catalog-bulk="govern" type="button">Govern</button>
+              <button class="ghost mini danger" data-catalog-bulk="block" type="button">Block</button>
+            </div>
+            <button class="ghost mini" id="catalogExportCsv" type="button">Export CSV</button>
+          </div>
+          <table><thead><tr>
+            <th class="catalog-check"><input type="checkbox" id="catalogSelectAll" aria-label="Select all apps"/></th>
+            <th data-catalog-sort="appName">App</th><th data-catalog-sort="provider">Provider</th>
+            <th data-catalog-sort="riskScore">Risk</th><th>Attributes</th>
+            <th data-catalog-sort="sanctionedStatus">Status</th><th data-catalog-sort="eventCount">Events</th>
+            <th>Sources</th><th>Govern</th>
+          </tr></thead>
             <tbody id="catalogRows"></tbody></table>
         </div>
       </section>
@@ -2890,6 +3042,9 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
             <div class="panel-head"><div><h2>Delivery history</h2><span>Recent outbound deliveries — status only, never payload bodies</span></div></div>
             <table><thead><tr><th>Time</th><th>Destination</th><th>Type</th><th>Status</th><th>Attempts</th><th>HTTP</th></tr></thead>
               <tbody id="deliveryRows"></tbody></table>
+            <div class="integrity" aria-label="Delivery status legend">
+              Status legend: <b>delivered</b> = destination accepted the event &middot; <b>retrying</b> = temporary failure, retried with backoff &middot; <b>failed</b> = gave up after retries; use Send test to re-check the destination.
+            </div>
           </div>
         </div>
       </section>
@@ -3033,6 +3188,16 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
             </div>
           </div>
           <div class="toolbar">
+            <select id="auditActionFilter" aria-label="Filter audit entries by action">
+              <option value="all" selected>All actions</option>
+            </select>
+            <select id="auditPageSize" aria-label="Audit rows per page">
+              <option value="10" selected>10 rows</option>
+              <option value="25">25 rows</option>
+              <option value="50">50 rows</option>
+              <option value="100">100 rows</option>
+            </select>
+            <button class="ghost" id="exportAuditCsv" type="button">Export CSV</button>
             <button class="ghost" id="exportEvidence" type="button">
               <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
               Export Evidence
@@ -3040,6 +3205,7 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
             <span class="status" id="exportStatus"></span>
           </div>
           <div class="integrity" id="integrity"></div>
+          <div class="integrity" id="auditRetention" aria-label="Retention policy"></div>
           <table><thead><tr><th>Timestamp</th><th>Action</th><th>Actor</th><th>Query</th><th>Detail</th></tr></thead>
             <tbody id="auditRows"></tbody></table>
           <div id="auditPager" class="table-pager" aria-live="polite"></div>
@@ -3056,6 +3222,20 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
           </div>
           <div class="console-frame-actions">
             <div class="configuration-status" id="configurationStatus"></div>
+            <button class="ghost" id="policyExportBtn" type="button" title="Download the active policy as JSON for change review">Download policy JSON</button>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Detection Tester</h2>
+              <span>Paste sample text to see exactly how the live policy would score and decide it - the sample is analyzed in memory and never stored or logged</span>
+            </div>
+            <button class="ghost" id="detectorTestRun" type="button">Test detection</button>
+          </div>
+          <div style="padding:14px 16px">
+            <textarea id="detectorTestInput" rows="3" style="width:100%" placeholder="e.g. Please summarize: member SSN 123-45-6789, card 4111 1111 1111 1111" aria-label="Sample text to test"></textarea>
+            <div id="detectorTestResult" aria-live="polite"></div>
           </div>
         </div>
         <div class="config-shell">
@@ -3111,6 +3291,25 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
           <div class="policy-box" id="policyBox"></div>
         </div>
       </section>
+      <section id="tab-deploy" class="console-frame hidden" aria-label="Deploy">
+        <div class="console-frame-header">
+          <div class="console-frame-title">
+            <div>
+              <h2>Deploy</h2>
+              <p>Download signed sensor packages for rollout: browser extension, endpoint agent, and MCP guard.</p>
+            </div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><div><h2>Sensor packages</h2><span>Built on demand from this control plane's exact version; every download is audited.</span></div></div>
+          <div class="panel-body"><div id="deployRows" class="queue-list"></div></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><div><h2>Download history</h2><span>Who pulled which package, straight from the tamper-evident audit chain.</span></div></div>
+          <div class="panel-body"><div id="deployHistory" class="inspector-grid" style="padding:14px 16px"></div></div>
+        </div>
+      </section>
+
 
       <section id="tab-updates" class="hidden console-frame" aria-label="Updates">
         <div class="console-frame-header">

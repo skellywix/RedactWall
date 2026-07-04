@@ -12,6 +12,10 @@ async function login(page) {
   await page.getByRole('button', { name: 'Continue' }).click();
   await expect(page).toHaveURL(/\/index\.html$/);
   await expect(page.locator('#who')).toContainText('admin / Security Admin');
+  // The console lands on the live Overview; most flows here start from the queue.
+  await expect(page.locator('#tab-overview')).toBeVisible();
+  await page.locator('.rail .tab[data-tab="queue"]').click();
+  await expect(page.locator('#tab-queue')).toBeVisible();
 }
 
 function collectUiProblems(page) {
@@ -147,30 +151,10 @@ test('login page fits mobile viewport without horizontal overflow', async ({ pag
   expect(problems).toEqual([]);
 });
 
-test('admin console theme toggle defaults light and persists dark mode', async ({ page }) => {
+test('admin console theme toggle defaults dark and persists light mode', async ({ page }) => {
   const problems = collectUiProblems(page);
   await login(page);
 
-  await expect(page.locator('body')).toHaveAttribute('data-theme', 'light');
-  await expect(page.locator('#themeLight')).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.locator('#themeDark')).toHaveAttribute('aria-pressed', 'false');
-  const lightTheme = await page.evaluate(() => {
-    const styles = getComputedStyle(document.body);
-    return {
-      bg: styles.getPropertyValue('--bg').trim(),
-      glow: styles.getPropertyValue('--glow').trim(),
-      panel: styles.getPropertyValue('--panel').trim(),
-      colorScheme: styles.colorScheme,
-    };
-  });
-  expect(lightTheme).toMatchObject({
-    bg: '#f4f5f7',
-    panel: '#ffffff',
-    colorScheme: 'light',
-  });
-  expect(lightTheme.glow).toContain('79, 70, 229');
-
-  await page.locator('#themeDark').click();
   await expect(page.locator('body')).toHaveAttribute('data-theme', 'dark');
   await expect(page.locator('#themeDark')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('#themeLight')).toHaveAttribute('aria-pressed', 'false');
@@ -180,27 +164,47 @@ test('admin console theme toggle defaults light and persists dark mode', async (
       bg: styles.getPropertyValue('--bg').trim(),
       glow: styles.getPropertyValue('--glow').trim(),
       panel: styles.getPropertyValue('--panel').trim(),
-      stored: localStorage.getItem('promptwall.theme'),
       colorScheme: styles.colorScheme,
     };
   });
   expect(darkTheme).toMatchObject({
     bg: '#0b0c10',
     panel: '#16181d',
-    stored: 'dark',
     colorScheme: 'dark',
   });
   expect(darkTheme.glow).toContain('129, 140, 248');
-
-  await page.reload();
-  await expect(page.locator('body')).toHaveAttribute('data-theme', 'dark');
-  await expect(page.locator('#themeDark')).toHaveAttribute('aria-pressed', 'true');
 
   await page.locator('#themeLight').click();
   await expect(page.locator('body')).toHaveAttribute('data-theme', 'light');
   await expect(page.locator('#themeLight')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('#themeDark')).toHaveAttribute('aria-pressed', 'false');
-  await expect.poll(() => page.evaluate(() => localStorage.getItem('promptwall.theme'))).toBe('light');
+  const lightTheme = await page.evaluate(() => {
+    const styles = getComputedStyle(document.body);
+    return {
+      bg: styles.getPropertyValue('--bg').trim(),
+      glow: styles.getPropertyValue('--glow').trim(),
+      panel: styles.getPropertyValue('--panel').trim(),
+      stored: localStorage.getItem('promptwall.theme'),
+      colorScheme: styles.colorScheme,
+    };
+  });
+  expect(lightTheme).toMatchObject({
+    bg: '#f4f5f7',
+    panel: '#ffffff',
+    stored: 'light',
+    colorScheme: 'light',
+  });
+  expect(lightTheme.glow).toContain('79, 70, 229');
+
+  await page.reload();
+  await expect(page.locator('body')).toHaveAttribute('data-theme', 'light');
+  await expect(page.locator('#themeLight')).toHaveAttribute('aria-pressed', 'true');
+
+  await page.locator('#themeDark').click();
+  await expect(page.locator('body')).toHaveAttribute('data-theme', 'dark');
+  await expect(page.locator('#themeDark')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#themeLight')).toHaveAttribute('aria-pressed', 'false');
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('promptwall.theme'))).toBe('dark');
   expect(problems).toEqual([]);
 });
 
@@ -966,9 +970,18 @@ test('admin console tabs honor browser back, forward, and refresh', async ({ pag
   await expect(page.locator('.rail .tab[data-tab="policy"]')).toHaveAttribute('aria-current', 'page');
 
   await page.goBack();
-  await expect(page).toHaveURL(/\/index\.html$/);
+  await expect(page).toHaveURL(/\/index\.html\?tab=queue$/);
   await expect(page.locator('#tab-queue')).toBeVisible();
   await expect(page.locator('.rail .tab[data-tab="queue"]')).toHaveAttribute('aria-current', 'page');
+
+  await page.goBack();
+  await expect(page).toHaveURL(/\/index\.html$/);
+  await expect(page.locator('#tab-overview')).toBeVisible();
+  await expect(page.locator('.rail .tab[data-tab="overview"]')).toHaveAttribute('aria-current', 'page');
+
+  await page.goForward();
+  await expect(page).toHaveURL(/\/index\.html\?tab=queue$/);
+  await expect(page.locator('#tab-queue')).toBeVisible();
 
   await page.goForward();
   await expect(page).toHaveURL(/\/index\.html\?tab=policy$/);
@@ -982,11 +995,35 @@ test('admin console tabs honor browser back, forward, and refresh', async ({ pag
   await expect(page.locator('.rail .tab[data-tab="policy"]')).toHaveAttribute('aria-current', 'page');
 
   await page.locator('.rail .tab[data-tab="queue"]').click();
-  await expect(page).toHaveURL(/\/index\.html$/);
+  await expect(page).toHaveURL(/\/index\.html\?tab=queue$/);
   await expect(page.locator('#tab-queue')).toBeVisible();
   await page.locator('#tab-queue').getByRole('button', { name: 'Evidence', exact: true }).click();
   await expect(page).toHaveURL(/\/index\.html\?tab=audit$/);
   await expect(page.locator('#tab-audit')).toBeVisible();
+
+  expect(problems).toEqual([]);
+});
+
+test('overview is the landing tab and its tiles jump into the workflow', async ({ page }) => {
+  const problems = collectUiProblems(page);
+  await page.goto('/login.html');
+  await page.locator('#password').fill('e2e-pass');
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await expect(page).toHaveURL(/\/index\.html$/);
+
+  await expect(page.locator('#tab-overview')).toBeVisible();
+  await expect(page.locator('.rail .tab[data-tab="overview"]')).toHaveAttribute('aria-current', 'page');
+  await expect(page.locator('#overviewTiles .stat').first()).toBeVisible();
+  await expect(page.locator('#overviewUpdated')).toContainText('UPDATED');
+
+  await page.locator('#overviewTiles [data-tab-jump="queue"]').click();
+  await expect(page.locator('#tab-queue')).toBeVisible();
+  await expect(page).toHaveURL(/\/index\.html\?tab=queue$/);
+
+  await page.locator('.rail .tab[data-tab="overview"]').click();
+  await expect(page.locator('#tab-overview')).toBeVisible();
+  await page.locator('#tab-overview [data-tab-jump="activity"]').first().click();
+  await expect(page.locator('#tab-activity')).toBeVisible();
 
   expect(problems).toEqual([]);
 });
@@ -1277,7 +1314,7 @@ test('admin console shows exactly one navigation per viewport', async ({ page })
   const problems = collectUiProblems(page);
   await login(page);
 
-  // Gatewatch shell: the header rail is the only navigation at every viewport.
+  // Console shell: exactly one navigation is visible at every viewport.
   await expect(page.locator('.rail .tab[data-tab="queue"]')).toBeVisible();
   let contentTabsDisplay = await page.locator('.content-tabs').evaluate((el) => getComputedStyle(el).display);
   expect(contentTabsDisplay).toBe('none');

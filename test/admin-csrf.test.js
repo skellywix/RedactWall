@@ -215,16 +215,17 @@ test('dashboard global search filters audit table rows', () => {
   assert.match(dashboard, /function matchesAudit\(entry\)/);
   assert.match(dashboard, /renderAuditRows\(currentAuditEntries\)/);
   assert.match(dashboard, /currentAuditEntries = d\.entries/);
-  assert.match(dashboard, /\(entries \|\| \[\]\)\.filter\(matchesAudit\)/);
+  assert.match(dashboard, /function filteredAuditEntries\(entries\)/);
+  assert.match(dashboard, /matchesAudit\(a\)\)/);
 });
 
 test('dashboard paginates activity lineage and audit tables', () => {
   assert.match(index, /id="activityPager"/);
   assert.match(index, /id="lineageUsersPager"/);
   assert.match(index, /id="auditPager"/);
-  assert.match(dashboard, /const ACTIVITY_PAGE_SIZE = 10/);
+  assert.match(dashboard, /let activityPageSize = 10/);
   assert.match(dashboard, /const LINEAGE_PAGE_SIZE = 10/);
-  assert.match(dashboard, /const AUDIT_PAGE_SIZE = 10/);
+  assert.match(dashboard, /let auditPageSize = 10/);
   assert.match(dashboard, /function paginatedRows\(rows, page, pageSize\)/);
   assert.match(dashboard, /function renderTablePager\(selector/);
   assert.match(dashboard, /data-pager-target/);

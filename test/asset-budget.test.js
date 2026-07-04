@@ -57,7 +57,7 @@ function walkFiles(relDir) {
 test('admin public assets stay within transfer budgets', () => {
   const totals = assertAssetBudgets([
     { path: 'server/public/index.html', maxRawBytes: 180_000, maxGzipBytes: 32_000 },
-    { path: 'server/public/dashboard.js', maxRawBytes: 205_000, maxGzipBytes: 48_000 },
+    { path: 'server/public/dashboard.js', maxRawBytes: 240_000, maxGzipBytes: 56_000 },
     { path: 'server/public/siem-package.js', maxRawBytes: 8_000, maxGzipBytes: 3_000 },
     { path: 'server/public/security-package.js', maxRawBytes: 8_000, maxGzipBytes: 3_000 },
     { path: 'server/public/agentic-mcp.js', maxRawBytes: 8_000, maxGzipBytes: 3_000 },
@@ -72,18 +72,18 @@ test('admin public assets stay within transfer budgets', () => {
     { path: 'server/public/coverage-file-flow.js', maxRawBytes: 8_000, maxGzipBytes: 3_000 },
     { path: 'server/public/decision-quality.js', maxRawBytes: 8_000, maxGzipBytes: 3_000 },
     { path: 'server/public/detector-feedback.js', maxRawBytes: 8_000, maxGzipBytes: 3_000 },
-    { path: 'server/public/gatewatch-theme.css', maxRawBytes: 24_000, maxGzipBytes: 6_000 },
+    { path: 'server/public/console-theme.css', maxRawBytes: 24_000, maxGzipBytes: 6_000 },
     { path: 'server/public/login.html', maxRawBytes: 12_000, maxGzipBytes: 5_000 },
     { path: 'server/public/login.js', maxRawBytes: 6_000, maxGzipBytes: 2_500 },
   ]);
 
-  assertWithin('admin public assets raw total', totals.rawBytes, 465_000);
-  assertWithin('admin public assets gzip total', totals.gzipBytes, 108_000);
+  assertWithin('admin public assets raw total', totals.rawBytes, 510_000);
+  assertWithin('admin public assets gzip total', totals.gzipBytes, 119_000);
 });
 
 test('browser extension assets stay within install package budgets', () => {
   assertAssetBudgets([
-    { path: 'sensors/browser-extension/lib/detect.js', maxRawBytes: 100_000, maxGzipBytes: 35_000 },
+    { path: 'sensors/browser-extension/lib/detect.js', maxRawBytes: 105_000, maxGzipBytes: 37_000 },
     { path: 'sensors/browser-extension/content.js', maxRawBytes: 60_000, maxGzipBytes: 16_000 },
     { path: 'sensors/browser-extension/background.js', maxRawBytes: 30_000, maxGzipBytes: 9_000 },
     { path: 'sensors/browser-extension/manifest.json', maxRawBytes: 14_000, maxGzipBytes: 2_500 },

@@ -16,14 +16,18 @@ const express = require('express');
 const cookieParser = require('cookie-parser');
 const helmet = require('helmet');
 const crypto = require('crypto');
+const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
 const detector = require('./detector');
+const fleet = require('./fleet');
 const adapters = require('../detection-engine/adapters');
 const processors = require('./processors');
 const policy = require('./policy');
 const policyImpact = require('./policy-impact');
 const db = require('./db');
+fleet.init(db);
 const auth = require('./auth');
 // SCIM deactivation invalidates already-issued sessions, not just new logins.
 auth.setSessionRevokedCheck((session) => db.identityRevokedSince(session.user, session.iat));
@@ -361,19 +365,22 @@ function routeOptionsFor(query = {}, opts = {}) {
 }
 
 function createQuery(query, opts = {}) {
-  return db.createQuery(routing.withWorkflow(query, routeOptionsFor(query, opts)));
+  const row = db.createQuery(routing.withWorkflow(query, routeOptionsFor(query, opts)));
+  fleet.recordPresence(row);
+  return row;
 }
 
 function createQueryWithReleaseToken(query) {
   const routed = routing.withWorkflow(query, routeOptionsFor(query));
+  let result;
   if (routed && (routed.status === 'pending' || routed._tokenVault)) {
     const release = releaseTokens.issueReleaseToken();
-    return {
-      row: db.createQuery({ ...routed, _releaseTokenHash: release.hash }),
-      releaseToken: release.token,
-    };
+    result = { row: db.createQuery({ ...routed, _releaseTokenHash: release.hash }), releaseToken: release.token };
+  } else {
+    result = { row: db.createQuery(routed), releaseToken: null };
   }
-  return { row: db.createQuery(routed), releaseToken: null };
+  fleet.recordPresence(result.row);
+  return result;
 }
 
 function releaseTokenPayload(releaseToken) {
@@ -524,6 +531,21 @@ function clientCategoriesFrom(body) {
     .map((c) => ({ category: c.category, score: safeNumber(c.score, 0.72, 0, 1) }));
 }
 
+// Rebuild the "why this score" rationale for sensor-computed verdicts, using
+// the same weights the engine applies, so client-scored rows explain
+// themselves in the console exactly like server-scored ones.
+function clientScoreBreakdown(findings, categories) {
+  const entry = (kind, type, severity, score) => ({
+    kind, type, severity,
+    severityLabel: detector.SEVERITY_LABEL[severity] || 'none',
+    confidence: score >= 0.9 ? 'very_likely' : score >= 0.7 ? 'likely' : 'possible',
+    points: Math.round(severity * score * (kind === 'finding' ? 8 : 7)),
+    regulations: detector.regulationsFor(type),
+  });
+  return findings.map((f) => entry('finding', f.type, f.severity, f.score))
+    .concat(categories.map((c) => entry('category', c.category, detector.SEVERITY[c.category] || 2, c.score)));
+}
+
 function clientAnalysisFrom(body) {
   if (!body || (!Array.isArray(body.clientFindings) && !Array.isArray(body.clientCategories))) return null;
   const findings = clientFindingsFrom(body);
@@ -544,6 +566,7 @@ function clientAnalysisFrom(body) {
   const computedRisk = Math.min(100, Math.round(findings.reduce((s, f) => s + f.severity * f.score * 8, 0)
     + categories.reduce((s, c) => s + (detector.SEVERITY[c.category] || 2) * c.score * 7, 0)));
   const riskScore = Math.max(safeNumber(body.clientRiskScore, computedRisk), computedRisk);
+  const scoreBreakdown = clientScoreBreakdown(findings, categories);
   return {
     findings,
     categories,
@@ -551,6 +574,8 @@ function clientAnalysisFrom(body) {
     riskScore,
     maxSeverity,
     maxSeverityLabel: detector.SEVERITY_LABEL[maxSeverity] || 'none',
+    scoreBreakdown,
+    regulations: [...new Set(scoreBreakdown.flatMap((e) => e.regulations))],
   };
 }
 
@@ -1080,6 +1105,7 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
     redactedPrompt, findings, categories, entityCounts: analysis.entityCounts,
     riskScore: analysis.riskScore, maxSeverity: analysis.maxSeverity,
     maxSeverityLabel: analysis.maxSeverityLabel, reasons: verdict.reasons,
+    scoreBreakdown: analysis.scoreBreakdown, regulations: analysis.regulations,
     ...policyDecisionMetadata(verdict),
   };
 
@@ -1290,6 +1316,9 @@ app.post('/api/v1/heartbeat', checkIngestKey, validation.validateBody(validation
     decision: 'recorded',
     status: 'sensor_heartbeat',
     failedChecks,
+    // Tell this sensor about its peers on the same identity, so sensors can
+    // surface each other's absence (extension installed but agent missing, ...).
+    companions: fleet.companionsFor(user, { exclude: source }),
   });
 });
 
@@ -1431,6 +1460,7 @@ app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation
   const base = { user, orgId, destination, source, channel, sensor, filename: fileLabel, processor: extracted.processor,
     redactedPrompt: preview, findings, categories, entityCounts: analysis.entityCounts,
     riskScore: analysis.riskScore, maxSeverity: analysis.maxSeverity, maxSeverityLabel: analysis.maxSeverityLabel, reasons: verdict.reasons,
+    scoreBreakdown: analysis.scoreBreakdown, regulations: analysis.regulations,
     ...policyDecisionMetadata(verdict) };
 
   if (verdict.decision === 'allow') {
@@ -1505,6 +1535,7 @@ app.post('/api/v1/scan-response', checkIngestKey, validation.validateBody(valida
     const row = createQuery({ status: outcome.status, mode: 'response_' + outcome.decision, user, orgId, destination, source, channel: 'ai_response', sensor,
       redactedPrompt: '[AI response] ' + redacted, findings, categories, entityCounts: analysis.entityCounts,
       riskScore: analysis.riskScore, maxSeverity: analysis.maxSeverity, maxSeverityLabel: analysis.maxSeverityLabel,
+      scoreBreakdown: analysis.scoreBreakdown, regulations: analysis.regulations,
       reasons: ['Sensitive data present in AI response', 'Response scan mode: ' + outcome.decision] });
     db.appendAudit({ action: outcome.action, queryId: row.id, actor: user, detail: `${source}: ${findings.map((f) => f.type).join(', ') || categories.join(', ')}` });
     emitSecurityAlert(row, outcome.action);
@@ -1617,6 +1648,11 @@ const sessionWrite = [auth.requireAuth, auth.requireCsrf];
 const adminRead = [auth.requireAuth, auth.requireRole(roles.SECURITY_ADMIN)];
 const adminWrite = [auth.requireAuth, auth.requireCsrf, auth.requireRole(roles.SECURITY_ADMIN)];
 const decisionWrite = [auth.requireAuth, auth.requireCsrf, auth.requireRole(roles.SECURITY_ADMIN, roles.APPROVER)];
+// Compliance evidence exports: the auditor's whole job, without admin power.
+const auditRead = [auth.requireAuth, auth.requireRole(roles.SECURITY_ADMIN, roles.AUDITOR)];
+// Fleet/runtime operations: updates, posture triage, delivery checks - no policy power.
+const operatorRead = [auth.requireAuth, auth.requireRole(roles.SECURITY_ADMIN, roles.OPERATOR)];
+const operatorWrite = [auth.requireAuth, auth.requireCsrf, auth.requireRole(roles.SECURITY_ADMIN, roles.OPERATOR)];
 const API_MAX_LIST_LIMIT = 5000;
 
 function boundedApiLimit(value, fallback = 200, max = API_MAX_LIST_LIMIT) {
@@ -1866,7 +1902,7 @@ function sendUpdateError(res, err) {
   res.status(err && err.statusCode ? err.statusCode : 500).json({ error: updater.publicError(err) });
 }
 
-app.get('/api/update/status', ...adminRead, async (req, res) => {
+app.get('/api/update/status', ...operatorRead, async (req, res) => {
   try {
     res.json(await updater.status());
   } catch (err) {
@@ -1885,7 +1921,7 @@ app.put('/api/update/config', ...adminWrite, validation.validateBody(validation.
   }
 });
 
-app.post('/api/update/check', ...adminWrite, async (req, res) => {
+app.post('/api/update/check', ...operatorWrite, async (req, res) => {
   try {
     const result = await updater.checkForUpdates();
     db.appendAudit({ action: 'APP_UPDATE_CHECKED', actor: req.user.user, detail: updateAuditDetail(result) });
@@ -1896,7 +1932,7 @@ app.post('/api/update/check', ...adminWrite, async (req, res) => {
   }
 });
 
-app.post('/api/update/apply', ...adminWrite, validation.validateBody(validation.updateApplySchema), async (req, res) => {
+app.post('/api/update/apply', ...operatorWrite, validation.validateBody(validation.updateApplySchema), async (req, res) => {
   db.appendAudit({ action: 'APP_UPDATE_STARTED', actor: req.user.user, detail: 'backup=true; fastForwardOnly=true' });
   try {
     const result = await updater.applyUpdate({ confirmBackup: req.body.confirmBackup === true });
@@ -1908,7 +1944,7 @@ app.post('/api/update/apply', ...adminWrite, validation.validateBody(validation.
   }
 });
 
-app.post('/api/update/restart', ...adminWrite, async (req, res) => {
+app.post('/api/update/restart', ...operatorWrite, async (req, res) => {
   try {
     const result = updater.scheduleRestart();
     db.appendAudit({ action: 'APP_UPDATE_RESTART_SCHEDULED', actor: req.user.user, detail: 'restart command scheduled' });
@@ -2017,7 +2053,7 @@ app.post('/api/queries/:id/detector-feedback', ...decisionWrite, validation.vali
   });
 });
 
-app.post('/api/posture/actions', ...adminWrite, validation.validateBody(validation.postureActionSchema), (req, res) => {
+app.post('/api/posture/actions', ...operatorWrite, validation.validateBody(validation.postureActionSchema), (req, res) => {
   const payload = {
     id: req.body.id,
     status: req.body.status,
@@ -2059,7 +2095,7 @@ app.post('/api/posture/notify', ...adminWrite, async (req, res) => {
   });
 });
 
-app.get('/api/integrations/siem/package', ...adminRead, (req, res) => {
+app.get('/api/integrations/siem/package', ...auditRead, (req, res) => {
   try {
     const profile = req.query.profile || 'all';
     const pkg = siemPackage.integrationPackage({ profile });
@@ -2086,7 +2122,7 @@ app.get('/api/integrations/siem/package', ...adminRead, (req, res) => {
   }
 });
 
-app.get('/api/security/package', ...adminRead, (req, res) => {
+app.get('/api/security/package', ...auditRead, (req, res) => {
   const pkg = currentSecurityTrustPackage();
   const format = String(req.query.format || req.query.download || '').toLowerCase();
   if (format === 'zip') {
@@ -2185,16 +2221,16 @@ app.post('/api/catalog/:host/review', ...adminWrite, validation.validateBody(val
 });
 
 // ---- Posture subscriptions (SIEM/SOAR delivery) -----------------------------
-app.get('/api/subscriptions', ...adminRead, (req, res) => {
+app.get('/api/subscriptions', ...operatorRead, (req, res) => {
   res.json({ destinations: subscriptions.publicDestinations(), supportedTypes: require('./siem-formats').supportedTypes() });
 });
 
-app.get('/api/subscriptions/deliveries', ...adminRead, (req, res) => {
+app.get('/api/subscriptions/deliveries', ...operatorRead, (req, res) => {
   res.json({ deliveries: db.listDeliveries(boundedApiLimit(req.query.limit, 200)) });
 });
 
 // Send a synthetic test event to one destination (proves connectivity + auth).
-app.post('/api/subscriptions/:id/test', ...adminWrite, async (req, res) => {
+app.post('/api/subscriptions/:id/test', ...operatorWrite, async (req, res) => {
   const dest = subscriptions.findDestination(req.params.id);
   if (!dest) return res.status(404).json({ error: 'unknown subscription' });
   const testAlert = alerts.sanitizedAlert({
@@ -2207,7 +2243,148 @@ app.post('/api/subscriptions/:id/test', ...adminWrite, async (req, res) => {
   res.json({ result: { destId: result.destId, status: result.status, attempts: result.attempts, httpStatus: result.httpStatus || null } });
 });
 
+// ---- Sensor rollout downloads (Deploy tab) -----------------------------------
+const DEPLOY_ARTIFACTS = Object.freeze({
+  'extension-chrome': {
+    label: 'Browser extension (Chrome/Brave MV3)', kind: 'extension', target: 'chrome',
+    requires: 'Chrome or Brave 88+ (Manifest V3)',
+    install: 'Force-install via browser policy: docs/examples/chrome-extension-settings.example.json',
+  },
+  'extension-edge': {
+    label: 'Browser extension (Microsoft Edge)', kind: 'extension', target: 'edge',
+    requires: 'Microsoft Edge 88+ (Manifest V3)',
+    install: 'Force-install via browser policy: docs/examples/edge-extension-settings.example.json',
+  },
+  'extension-firefox': {
+    label: 'Browser extension (Firefox)', kind: 'extension', target: 'firefox',
+    requires: 'Firefox 109+',
+    install: 'Signed XPI + policy: docs/examples/firefox-extension-settings.example.json',
+  },
+  'endpoint-agent': {
+    label: 'Endpoint agent (desktop file/clipboard sensor)', kind: 'endpoint',
+    requires: 'Windows, macOS, or Linux with Node.js 22+',
+    install: 'Unzip on the endpoint, then follow the technician runbook service-install steps',
+  },
+  'mcp-guard': {
+    label: 'MCP guard (agent/connector sensor)', kind: 'mcp',
+    requires: 'Any MCP-capable client, Node.js 22+',
+    install: 'Wrap each MCP server command per the connector SDK guide',
+  },
+});
+
+function buildDeployArtifact(id) {
+  const spec = DEPLOY_ARTIFACTS[id];
+  if (!spec) return null;
+  const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'promptwall-deploy-'));
+  if (spec.kind === 'extension') {
+    return require('../scripts/package-extension').packageExtension({ outDir, target: spec.target });
+  }
+  if (spec.kind === 'endpoint') {
+    return require('../scripts/package-endpoint-agent').packageEndpointAgent({ outDir });
+  }
+  return require('../scripts/package-mcp-guard').packageMcpGuard({ outDir });
+}
+
+let deployMetadataCache = null;
+
+function deployArtifactMetadata() {
+  if (deployMetadataCache) return deployMetadataCache;
+  deployMetadataCache = Object.entries(DEPLOY_ARTIFACTS).map(([id, spec]) => {
+    try {
+      const built = buildDeployArtifact(id);
+      const manifest = built.packageManifest || {};
+      const meta = {
+        id,
+        label: spec.label,
+        kind: spec.kind,
+        fileName: path.basename(built.zipPath),
+        fileType: 'application/zip',
+        sizeBytes: manifest.sizeBytes || fs.statSync(built.zipPath).size,
+        sha256: manifest.sha256 || null,
+        fileCount: Array.isArray(manifest.files) ? manifest.files.length : null,
+        version: manifest.version || require('../package.json').version,
+        requires: spec.requires,
+        install: spec.install,
+        guide: spec.kind === 'extension' ? 'docs/MANAGED_EXTENSION_DEPLOYMENT.md'
+          : spec.kind === 'endpoint' ? 'docs/TECHNICIAN_DEPLOYMENT_GUIDE.md'
+            : 'docs/MCP_CONNECTOR_SDK.md',
+      };
+      fs.rmSync(path.dirname(built.zipPath), { recursive: true, force: true });
+      return meta;
+    } catch {
+      return { id, label: spec.label, kind: spec.kind, error: 'packaging failed' };
+    }
+  });
+  return deployMetadataCache;
+}
+
+function deployDownloadHistory(limit = 20) {
+  return db.listAudit(500)
+    .filter((entry) => entry.action === 'DEPLOY_ARTIFACT_DOWNLOADED')
+    .slice(0, limit)
+    .map((entry) => ({ ts: entry.ts, actor: entry.actor, detail: entry.detail }));
+}
+
+app.get('/api/deploy/artifacts', ...operatorRead, (req, res) => {
+  res.json({
+    artifacts: deployArtifactMetadata(),
+    history: deployDownloadHistory(),
+    version: require('../package.json').version,
+  });
+});
+
+app.get('/api/deploy/download/:artifact', ...operatorRead, (req, res) => {
+  const id = String(req.params.artifact || '');
+  if (!DEPLOY_ARTIFACTS[id]) return res.status(404).json({ error: 'unknown artifact' });
+  let built;
+  try {
+    built = buildDeployArtifact(id);
+  } catch (err) {
+    return res.status(500).json({ error: 'packaging failed' });
+  }
+  db.appendAudit({ action: 'DEPLOY_ARTIFACT_DOWNLOADED', actor: req.user.user, detail: `${id} v${built.packageManifest.version || 'unknown'} sha256:${(built.packageManifest.sha256 || '').slice(0, 16)}` });
+  res.download(built.zipPath, path.basename(built.zipPath), () => {
+    fs.rm(path.dirname(built.zipPath), { recursive: true, force: true }, () => {});
+  });
+});
+
 // Regulation policy templates (list + one-click apply).
+// Per-user sensor fleet: which sensors cover each identity, with the coverage
+// gaps the sensors reported about each other.
+app.get('/api/fleet', auth.requireAuth, (req, res) => {
+  res.json(fleet.summary());
+});
+
+// Static detector metadata (severity scale + regulation map) so the console
+// can explain historical rows that predate persisted score breakdowns.
+app.get('/api/detectors/meta', auth.requireAuth, (req, res) => {
+  res.json({ severityLabels: detector.SEVERITY_LABEL, regulations: detector.REGULATIONS });
+});
+
+// Detection tester: run a sample through the live engine + policy and return
+// the full rationale. The sample is analyzed in memory only - never stored,
+// never logged, never written to the audit chain.
+app.post('/api/detectors/test', auth.requireAuth, (req, res) => {
+  const text = String((req.body || {}).text || '');
+  if (!text || text.length > 20000) return res.status(400).json({ error: 'provide sample text up to 20k chars' });
+  const pol = policy.loadPolicy();
+  const analysis = detector.analyze(text, policy.analyzeOpts(pol));
+  const verdict = policy.evaluate(analysis, pol, policyContext({ user: req.user.user, source: 'detector_test', channel: 'test' }));
+  res.json({
+    decision: verdict.decision,
+    reasons: verdict.reasons,
+    riskScore: analysis.riskScore,
+    maxSeverityLabel: analysis.maxSeverityLabel,
+    regulations: analysis.regulations,
+    scoreBreakdown: analysis.scoreBreakdown,
+    findings: analysis.findings.map((f) => ({
+      type: f.type, severity: f.severity, severityLabel: detector.SEVERITY_LABEL[f.severity],
+      confidence: f.confidenceLabel, masked: detector.maskValue(f.type, f.value), regulations: f.regulations,
+    })),
+    categories: (analysis.categories || []).map((c) => ({ category: c.category, confidence: c.confidenceLabel })),
+  });
+});
+
 app.get('/api/policy/templates', auth.requireAuth, (req, res) => res.json(templates.list()));
 app.put('/api/policy/apply-template', ...adminWrite, validation.validateBody(validation.applyTemplateSchema), (req, res) => {
   const t = templates.get((req.body || {}).id);
@@ -2220,7 +2397,11 @@ app.put('/api/policy/apply-template', ...adminWrite, validation.validateBody(val
 });
 
 app.get('/api/audit', auth.requireAuth, (req, res) => {
-  res.json({ entries: db.listAudit(boundedApiLimit(req.query.limit, 200)), integrity: db.verifyAuditChain() });
+  res.json({
+    entries: db.listAudit(boundedApiLimit(req.query.limit, 200)),
+    integrity: db.verifyAuditChain(),
+    retention: 'Append-only and hash-chained: entries are never edited or purged for the life of this database. Export an evidence pack for long-term archives.',
+  });
 });
 
 // Safe-to-send receipt verification: any console session (including read-only
@@ -2230,7 +2411,7 @@ app.post('/api/receipts/verify', ...sessionWrite, validation.validateBody(valida
   res.json(receipts.verifyReceipt(req.body));
 });
 
-app.get('/api/export/evidence', auth.requireAuth, (req, res) => {
+app.get('/api/export/evidence', ...auditRead, (req, res) => {
   const queryLimit = boundedApiLimit(req.query.queryLimit, 500);
   const auditLimit = boundedApiLimit(req.query.auditLimit, 500);
   const activePolicy = policy.loadPolicy();

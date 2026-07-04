@@ -58,9 +58,11 @@ const icons = {
   shield: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 4l7 3v5c0 4.2-2.6 6.8-7 8-4.4-1.2-7-3.8-7-8V7l7-3Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
   download: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
 };
-const ACTIVITY_PAGE_SIZE = 10;
 const LINEAGE_PAGE_SIZE = 10;
-const AUDIT_PAGE_SIZE = 10;
+let activityPageSize = 10;
+let auditPageSize = 10;
+let activityRangeDays = 0; // 0 = all retained rows
+let auditActionFilter = 'all';
 
 const monitorStatusOptions = [
   { id: 'all', label: 'All' },
@@ -1074,7 +1076,7 @@ function workflowPatchFor(status) {
 
 async function updatePostureActionWorkflow(id, status, button) {
   if (!canAdminWrite()) {
-    alert('Request not allowed for this session.');
+    toast('Request not allowed for this session.');
     return;
   }
   if (!id) return;
@@ -1091,7 +1093,7 @@ async function updatePostureActionWorkflow(id, status, button) {
     return;
   }
   if (button) button.disabled = false;
-  if (response) alert(await apiErrorSummary(response, 'Action update failed'));
+  if (response) toast(await apiErrorSummary(response, 'Action update failed'));
 }
 
 async function sendPostureSnapshot() {
@@ -1214,7 +1216,7 @@ function parsePolicyJsonArray(value, label) {
     if (!Array.isArray(parsed)) throw new Error('expected array');
     return parsed;
   } catch {
-    alert(`${label} must be valid JSON array syntax.`);
+    toast(`${label} must be valid JSON array syntax.`);
     return null;
   }
 }
@@ -1281,7 +1283,7 @@ function suggestedPolicyId(prefix, matcherPrefix) {
 function appendGuidedScopeRule() {
   const matchers = collectPolicyMatchers('scope_builder');
   if (!Object.keys(matchers).length) {
-    alert('Scoped enforcement needs at least one matcher.');
+    toast('Scoped enforcement needs at least one matcher.');
     return;
   }
   const rule = {
@@ -1309,7 +1311,7 @@ function appendGuidedScopeRule() {
 function appendGuidedExceptionRule() {
   const matchers = collectPolicyMatchers('exception_builder');
   if (!Object.keys(matchers).length) {
-    alert('Time-bound exception needs at least one matcher.');
+    toast('Time-bound exception needs at least one matcher.');
     return;
   }
   const hours = Math.max(1, Math.min(24 * 30, Number($('#exception_builder_hours').value) || 24));
@@ -1459,14 +1461,14 @@ function saveQueueDensity(value) {
 }
 
 function normalizeColorTheme(value) {
-  return value === 'dark' ? 'dark' : 'light';
+  return value === 'light' ? 'light' : 'dark';
 }
 
 function savedColorTheme() {
   try {
     return normalizeColorTheme(localStorage.getItem('promptwall.theme'));
   } catch {
-    return 'light';
+    return 'dark';
   }
 }
 
@@ -1614,8 +1616,40 @@ function queryText(q) {
   ].join(' ').toLowerCase();
 }
 
+// Search grammar: bare words match anywhere; `field:value` tokens match one
+// property (user:, dest:, status:, sev:, source:, action:, actor:).
+const SEARCH_FIELDS = {
+  user: (row) => row.user || row.actor || '',
+  actor: (row) => row.actor || row.user || '',
+  dest: (row) => row.destination || '',
+  destination: (row) => row.destination || '',
+  status: (row) => row.status || '',
+  sev: (row) => row.maxSeverityLabel || '',
+  severity: (row) => row.maxSeverityLabel || '',
+  source: (row) => row.source || '',
+  action: (row) => row.action || '',
+};
+
+function parseSearch(term) {
+  const fields = [];
+  const words = [];
+  for (const token of String(term || '').split(/\s+/).filter(Boolean)) {
+    const m = token.match(/^([a-z]+):(.+)$/);
+    if (m && SEARCH_FIELDS[m[1]]) fields.push({ get: SEARCH_FIELDS[m[1]], value: m[2] });
+    else words.push(token);
+  }
+  return { fields, words };
+}
+
+function matchesParsedSearch(row, text) {
+  if (!searchTerm) return true;
+  const { fields, words } = parseSearch(searchTerm);
+  return fields.every((f) => String(f.get(row)).toLowerCase().includes(f.value))
+    && words.every((w) => text.includes(w));
+}
+
 function matchesSearch(q) {
-  return !searchTerm || queryText(q).includes(searchTerm);
+  return matchesParsedSearch(q, queryText(q));
 }
 
 function lineageText(bucket) {
@@ -1647,7 +1681,116 @@ function auditText(entry = {}) {
 }
 
 function matchesAudit(entry) {
-  return !searchTerm || auditText(entry || {}).includes(searchTerm);
+  return matchesParsedSearch(entry || {}, auditText(entry || {}));
+}
+
+function withinRangeDays(ts, days) {
+  if (!days) return true;
+  const t = Date.parse(ts);
+  return !Number.isFinite(t) || t >= Date.now() - days * 86400000;
+}
+
+function filteredActivityRows(rows) {
+  return (rows || []).filter((q) => withinRangeDays(q.createdAt, activityRangeDays) && matchesSearch(q));
+}
+
+function filteredAuditEntries(entries) {
+  return (entries || []).filter((a) => (auditActionFilter === 'all' || a.action === auditActionFilter) && matchesAudit(a));
+}
+
+function csvCell(value) {
+  const s = String(value ?? '');
+  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
+function downloadCsv(name, header, rows) {
+  const body = [header, ...rows].map((r) => r.map(csvCell).join(',')).join('\n');
+  const url = URL.createObjectURL(new Blob([body], { type: 'text/csv' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function csvStamp() {
+  return new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+}
+
+// ---- Saved views: name the current search + range + page size ---------------
+function savedViews() {
+  try { return JSON.parse(localStorage.getItem('promptwall.savedViews') || '[]'); } catch { return []; }
+}
+
+function refreshSavedViewOptions() {
+  const sel = $('#savedViews');
+  if (!sel) return;
+  sel.innerHTML = '<option value="" selected>Saved views&hellip;</option>'
+    + savedViews().map((v, i) => `<option value="${i}">${escapeHtml(v.name)}</option>`).join('');
+}
+
+function saveCurrentView() {
+  const search = ($('#globalSearch').value || '').trim();
+  const name = search || (activityRangeDays ? `last ${activityRangeDays}d` : 'all activity');
+  const views = savedViews().filter((v) => v.name !== name);
+  views.unshift({ name, search, range: activityRangeDays, pageSize: activityPageSize });
+  localStorage.setItem('promptwall.savedViews', JSON.stringify(views.slice(0, 12)));
+  refreshSavedViewOptions();
+  toast(`View "${name}" saved.`, 'good');
+}
+
+function applySavedView(index) {
+  const view = savedViews()[Number(index)];
+  if (!view) return;
+  $('#globalSearch').value = view.search || '';
+  activityRangeDays = view.range || 0;
+  activityPageSize = view.pageSize || 10;
+  const range = $('#activityRange');
+  if (range) range.value = String(activityRangeDays);
+  const size = $('#activityPageSize');
+  if (size) size.value = String(activityPageSize);
+  updateSearch(view.search || '');
+}
+
+async function exportPolicyJson() {
+  const r = await api('/api/policy');
+  const pol = await responseJsonObject(r, null);
+  if (!pol) { toast('Could not load the policy for export.', 'bad'); return; }
+  const url = URL.createObjectURL(new Blob([JSON.stringify(pol, null, 2)], { type: 'application/json' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `promptwall-policy-${csvStamp()}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function exportInsightsCsv() {
+  const series = (currentInsights && currentInsights.series) || [];
+  if (!series.length) { toast('No insights data loaded yet.', 'bad'); return; }
+  downloadCsv(`promptwall-insights-${insightsWindowDays}d-${csvStamp()}.csv`,
+    ['Day', 'Allowed', 'Redacted', 'Warned', 'Flagged', 'Blocked', 'Shadow', 'Total'],
+    series.map((d) => [d.date, d.allowed || 0, d.redacted || 0, d.warned || 0, d.flagged || 0, d.blocked || 0, d.shadow || 0, d.total || 0]));
+}
+
+function exportActivityCsv() {
+  const rows = filteredActivityRows(currentActivity).map((q) => [
+    fmt(q.createdAt), sourceLabel(q.source), q.user || '', q.destination || '', workflowOwner(q),
+    q.maxSeverityLabel || 'low', q.riskScore ?? 0, Object.keys(q.entityCounts || {}).join('; '), humanize(q.status),
+  ]);
+  downloadCsv(`promptwall-activity-${csvStamp()}.csv`,
+    ['Time', 'Source', 'User', 'Destination', 'Owner', 'Severity', 'Risk', 'Detected', 'Status'], rows);
+}
+
+function exportAuditCsv() {
+  const rows = filteredAuditEntries(currentAuditEntries).map((a) => [
+    fmt(a.ts), a.action || '', a.actor || '', a.queryId || '', a.detail || '',
+  ]);
+  downloadCsv(`promptwall-audit-${csvStamp()}.csv`,
+    ['Timestamp', 'Action', 'Actor', 'Query', 'Detail'], rows);
 }
 
 function resetTablePages() {
@@ -1712,7 +1855,7 @@ async function api(path, opts = {}) {
   next.headers = headers;
   const r = await fetch(path, next);
   if (r.status === 401 && !allowAuthError) { location.href = '/login.html'; return null; }
-  if (r.status === 403) alert('Request not allowed for this session. Refresh or use a Security Admin account.');
+  if (r.status === 403) toast('Request not allowed for this session. Refresh or use a Security Admin account.');
   return r;
 }
 
@@ -2019,6 +2162,7 @@ async function init() {
     b.textContent = 'Default admin password is active. Set ADMIN_PASSWORD before production.';
   }
   await refreshAll();
+  loadDetectorMeta().catch(() => {});
   activateTab(tabNameFromLocation(), { replaceHistory: true });
   connectStream();
 }
@@ -2160,12 +2304,24 @@ async function loadQueue() {
   }
 }
 
+const QUEUE_FILTER_LABEL = { all: 'All', mine: 'Mine', unassigned: 'Unassigned', escalated: 'Escalated' };
+
+function queueFilterCount(filter) {
+  const saved = queueFilter;
+  queueFilter = filter;
+  const count = currentQueue.filter(queueFilterMatches).length;
+  queueFilter = saved;
+  return count;
+}
+
 function renderQueueView() {
   const el = $('#queueList');
   $$('.queue-tools [data-queue-filter]').forEach((button) => {
     const active = button.dataset.queueFilter === queueFilter;
     button.classList.toggle('active', active);
     button.setAttribute('aria-pressed', String(active));
+    const name = button.dataset.queueFilter;
+    if (QUEUE_FILTER_LABEL[name]) button.textContent = `${QUEUE_FILTER_LABEL[name]} (${queueFilterCount(name)})`;
   });
   syncQueueFilterOptions();
   const rows = currentQueue.filter(queueMetadataMatches).filter(matchesSearch);
@@ -2224,6 +2380,58 @@ function renderQueueItem(q) {
   </article>`;
 }
 
+// ---- "Why this score": severity x confidence points + regulation citations ----
+let detectorMeta = null;
+
+async function loadDetectorMeta() {
+  detectorMeta = await dashboardJsonWithTimeout('/api/detectors/meta', 2500);
+}
+
+function rationaleEntries(q) {
+  if (Array.isArray(q.scoreBreakdown) && q.scoreBreakdown.length) return q.scoreBreakdown;
+  const sevLabel = (n) => (detectorMeta && detectorMeta.severityLabels && detectorMeta.severityLabels[n]) || 'medium';
+  const regsFor = (t) => (detectorMeta && detectorMeta.regulations && detectorMeta.regulations[t]) || [];
+  return (q.findings || []).map((f) => ({
+    kind: 'finding', type: f.type, severity: f.severity, severityLabel: sevLabel(f.severity),
+    confidence: f.confidence || ((f.score || 0) >= 0.9 ? 'very_likely' : (f.score || 0) >= 0.7 ? 'likely' : 'possible'),
+    points: Math.round((f.severity || 0) * (f.score || 0) * 8),
+    regulations: regsFor(f.type),
+  }));
+}
+
+function scoreRationale(q) {
+  const entries = rationaleEntries(q);
+  if (!entries.length) return '';
+  const rows = entries.map((e) => `
+    <div class="rationale-row">
+      <span class="sev ${sevClass(e.severityLabel)}">${escapeHtml(e.severityLabel)}</span>
+      <span class="rationale-what"><b>${escapeHtml(e.type)}</b>${e.kind === 'category' ? ' <i>content category</i>' : ''}</span>
+      <span class="rationale-conf" title="How sure the engine is: validated match = very likely, contextual = likely, pattern-only = possible">${escapeHtml(humanize(e.confidence || 'possible'))}</span>
+      <span class="rationale-pts" title="Points this detection added to the risk score (severity x confidence weight)">+${escapeHtml(e.points)}</span>
+      <span class="rationale-regs">${(e.regulations || []).map((r) => `<span class="reg-chip" title="Obligation this data falls under">${escapeHtml(r)}</span>`).join('')}</span>
+    </div>`).join('');
+  return `<div class="rationale">
+    <div class="rationale-head">Why this score: <b>${escapeHtml(q.riskScore ?? 0)}/100</b></div>
+    ${rows}
+    <div class="rationale-note">Each detection adds severity &times; confidence points. Chips cite the law or obligation that makes the data sensitive - these appear in the block reasons and audit trail too.</div>
+  </div>`;
+}
+
+async function runDetectorTest() {
+  const input = $('#detectorTestInput');
+  const out = $('#detectorTestResult');
+  const text = (input.value || '').trim();
+  if (!text) { out.innerHTML = '<div class="empty">Paste some sample text first.</div>'; return; }
+  const r = await api('/api/detectors/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
+  const d = await responseJsonObject(r, null);
+  if (!d) { out.innerHTML = '<div class="empty">Test failed - check your session.</div>'; return; }
+  const tone = d.decision === 'block' ? 'bad' : 'good';
+  out.innerHTML = `
+    <div class="reasons" style="margin-top:10px">${statusChip(tone, d.decision.toUpperCase(), `Decision under current policy\n${(d.reasons || []).join('\n')}`)}
+      ${escapeHtml((d.reasons || []).join('; '))}</div>
+    ${scoreRationale(d)}`;
+}
+
 function renderIncident(q) {
   const el = $('#incidentDetail');
   if (!q) {
@@ -2251,6 +2459,7 @@ function renderIncident(q) {
       <div class="risk-track"><i></i></div>
     </div>
     <div class="prompt">${escapeHtml(q.redactedPrompt)}</div>
+    ${scoreRationale(q)}
     <div class="posture-list">${matches}</div>`;
 }
 
@@ -2341,6 +2550,56 @@ document.addEventListener('click', async (e) => {
     renderQueueView();
     return;
   }
+  const searchPivot = e.target.closest('[data-search-pivot]');
+  if (searchPivot) {
+    const box = $('#globalSearch');
+    box.value = searchPivot.dataset.searchPivot;
+    updateSearch(box.value);
+    return;
+  }
+  const catalogReview = e.target.closest('[data-catalog-review]');
+  if (catalogReview) {
+    catalogPendingReview = { host: catalogReview.dataset.catalogReview, decision: catalogReview.dataset.decision };
+    renderCatalog(catalogApps);
+    return;
+  }
+  const catalogConfirm = e.target.closest('[data-catalog-confirm]');
+  if (catalogConfirm && catalogPendingReview) {
+    const { host, decision } = catalogPendingReview;
+    const reason = ($('#catalogReviewReason').value || '').trim() || `${decision} decision from console`;
+    catalogPendingReview = null;
+    if (await submitCatalogReview(host, decision, reason)) {
+      toast(`${host} is now "${decision}".`, 'good');
+      loadCatalog();
+    } else renderCatalog(catalogApps);
+    return;
+  }
+  if (e.target.closest('[data-catalog-cancel]')) {
+    catalogPendingReview = null;
+    renderCatalog(catalogApps);
+    return;
+  }
+  const catalogBulk = e.target.closest('[data-catalog-bulk]');
+  if (catalogBulk) {
+    runCatalogBulk(catalogBulk.dataset.catalogBulk).catch(() => {});
+    return;
+  }
+  const catalogSortTh = e.target.closest('#tab-catalog th[data-catalog-sort]');
+  if (catalogSortTh) {
+    const key = catalogSortTh.dataset.catalogSort;
+    catalogSort = { key, dir: catalogSort.key === key ? -catalogSort.dir : (key === 'appName' || key === 'provider' ? 1 : -1) };
+    renderCatalog(catalogApps);
+    return;
+  }
+  const copySha = e.target.closest('[data-copy-sha]');
+  if (copySha && navigator.clipboard) {
+    navigator.clipboard.writeText(copySha.dataset.copySha).then(() => {
+      const original = copySha.innerHTML;
+      copySha.innerHTML = '<b>SHA-256</b> copied to clipboard';
+      setTimeout(() => { copySha.innerHTML = original; }, 1400);
+    }).catch(() => {});
+    return;
+  }
   const pagerButton = e.target.closest('[data-pager-target][data-pager-page]');
   if (pagerButton) {
     const page = Number(pagerButton.dataset.pagerPage) || 1;
@@ -2372,7 +2631,7 @@ document.addEventListener('click', async (e) => {
   const destinationReview = e.target.closest('[data-destination-review]');
   if (destinationReview) {
     if (!canAdminWrite()) {
-      alert('Request not allowed for this session. Use a Security Admin account.');
+      toast('Request not allowed for this session. Use a Security Admin account.');
       return;
     }
     const destination = destinationReview.dataset.destination;
@@ -2387,7 +2646,7 @@ document.addEventListener('click', async (e) => {
     });
     if (!r || !r.ok) {
       destinationReview.disabled = false;
-      alert('Destination review could not be saved.');
+      toast('Destination review could not be saved.');
       return;
     }
     const body = await r.json();
@@ -2404,7 +2663,7 @@ document.addEventListener('click', async (e) => {
     const q = currentQueue.find((item) => item.id === id) || {};
     if (act === 'reveal') {
       if (!canReveal(q)) {
-        alert(q.rawRetained === false
+        toast(q.rawRetained === false
           ? 'Raw prompt was not retained for this item.'
           : 'Request not allowed for this session. Use a Security Admin account.');
         return;
@@ -2421,10 +2680,10 @@ document.addEventListener('click', async (e) => {
       if (r.status === 401) {
         const body = await r.json().catch(() => ({}));
         if (body.error === 'unauthenticated') { location.href = '/login.html'; return; }
-        alert('Password confirmation failed.');
+        toast('Password confirmation failed.');
         return;
       }
-      if (r.status === 429) { alert('Too many confirmation attempts. Try again later.'); return; }
+      if (r.status === 429) { toast('Too many confirmation attempts. Try again later.'); return; }
       if (!r.ok) return;
       const body = await r.json();
       const rawRetained = body.rawRetained === true;
@@ -2443,7 +2702,7 @@ document.addEventListener('click', async (e) => {
     }
     if (act === 'approve' || act === 'deny') {
       if (!canDecide(q)) {
-        alert('Request not allowed for this session.');
+        toast('Request not allowed for this session.');
         return;
       }
       const note = ($(`#note_${CSS.escape(id)}`) || {}).value || '';
@@ -2459,12 +2718,12 @@ document.addEventListener('click', async (e) => {
       if (r && r.status === 401 && act === 'approve') {
         const body = await r.json().catch(() => ({}));
         if (body.error === 'unauthenticated') { location.href = '/login.html'; return; }
-        alert('Password confirmation failed.');
+        toast('Password confirmation failed.');
         actionButton.disabled = false;
         return;
       }
       if (r && r.status === 429 && act === 'approve') {
-        alert('Too many confirmation attempts. Try again later.');
+        toast('Too many confirmation attempts. Try again later.');
         actionButton.disabled = false;
         return;
       }
@@ -2498,6 +2757,38 @@ document.addEventListener('click', async (e) => {
 });
 
 document.addEventListener('change', (e) => {
+  const catalogSelect = e.target.closest('[data-catalog-select]');
+  if (catalogSelect) {
+    const host = catalogSelect.dataset.catalogSelect;
+    if (catalogSelect.checked) catalogSelected.add(host);
+    else catalogSelected.delete(host);
+    updateCatalogBulkBar();
+    return;
+  }
+  if (e.target.matches('#activityRange')) {
+    activityRangeDays = Number(e.target.value) || 0;
+    activityPage = 1;
+    renderActivityRows(currentActivity);
+    return;
+  }
+  if (e.target.matches('#activityPageSize')) {
+    activityPageSize = Number(e.target.value) || 10;
+    activityPage = 1;
+    renderActivityRows(currentActivity);
+    return;
+  }
+  if (e.target.matches('#auditActionFilter')) {
+    auditActionFilter = e.target.value || 'all';
+    auditPage = 1;
+    renderAuditRows(currentAuditEntries);
+    return;
+  }
+  if (e.target.matches('#auditPageSize')) {
+    auditPageSize = Number(e.target.value) || 10;
+    auditPage = 1;
+    renderAuditRows(currentAuditEntries);
+    return;
+  }
   if (e.target.matches('#queueCategoryFilter')) {
     queueCategoryFilter = e.target.value || 'all';
     renderQueueView();
@@ -2611,9 +2902,12 @@ function activityDetail(q) {
           <div class="datum"><label>Detected</label><b>${escapeHtml(detected)}</b></div>
           <div class="datum"><label>Risk</label><b>${escapeHtml(q.riskScore ?? 0)}/100</b></div>
         </div>
+        ${scoreRationale(q)}
         <div class="activity-detail-actions">
           ${q.status === 'pending' ? '<button class="ghost mini" data-tab-jump="queue" type="button">INSPECT</button>' : ''}
           <button class="ghost mini" data-tab-jump="audit" type="button">VIEW AUDIT</button>
+          ${q.user ? `<button class="ghost mini" data-search-pivot="user:${escapeHtml(q.user)}" type="button">SAME USER</button>` : ''}
+          ${q.destination ? `<button class="ghost mini" data-search-pivot="dest:${escapeHtml(q.destination)}" type="button">SAME DESTINATION</button>` : ''}
         </div>
       </div>
     </td>
@@ -2621,8 +2915,8 @@ function activityDetail(q) {
 }
 
 function renderActivityRows(rows) {
-  const filtered = (rows || []).filter(matchesSearch);
-  const page = paginatedRows(filtered, activityPage, ACTIVITY_PAGE_SIZE);
+  const filtered = filteredActivityRows(rows);
+  const page = paginatedRows(filtered, activityPage, activityPageSize);
   activityPage = page.page;
   $('#activityRows').innerHTML = page.rows.map((q) => {
     const tone = statusTone(q.status);
@@ -2790,13 +3084,36 @@ const CATALOG_RISK_TONE = { critical: 'tone-critical', high: 'tone-high', modera
 const CATALOG_STATUS_TONE = { blocked: 'tone-critical', unsanctioned: 'tone-high', under_review: 'tone-neutral', tolerated: 'tone-medium', sanctioned: 'tone-low' };
 const CATALOG_ATTR_LABEL = { trains_on_data: 'Trains on data', personal_account_tier: 'Personal tier', data_residency_cn: 'Data in CN', data_residency_eu: 'Data in EU' };
 
+// ---- Toasts: non-blocking notices replacing toast() -------------------------
+function toast(message, tone = 'info') {
+  let stack = $('#toastStack');
+  if (!stack) {
+    stack = document.createElement('div');
+    stack.id = 'toastStack';
+    stack.setAttribute('aria-live', 'polite');
+    document.body.appendChild(stack);
+  }
+  const el = document.createElement('div');
+  el.className = `toast toast-${tone}`;
+  el.textContent = message;
+  stack.appendChild(el);
+  setTimeout(() => { el.classList.add('gone'); setTimeout(() => el.remove(), 300); }, 4200);
+}
+
+let catalogApps = [];
+let catalogSort = { key: 'eventCount', dir: -1 };
+let catalogSelected = new Set();
+let catalogPendingReview = null; // { host, decision }
+
 async function loadCatalog() {
   setBusy('#tab-catalog .panel', true, 'DISCOVERING');
   try {
     const r = await api('/api/catalog');
     const body = await responseJsonObject(r, null);
     if (!body) return;
-    renderCatalog(body.apps || []);
+    catalogApps = body.apps || [];
+    catalogSelected = new Set([...catalogSelected].filter((host) => catalogApps.some((a) => a.destination === host)));
+    renderCatalog(catalogApps);
     markUpdated();
   } finally {
     setBusy('#tab-catalog .panel', false);
@@ -2806,6 +3123,27 @@ async function loadCatalog() {
 function catalogAttrs(app) {
   const flags = (app.riskAttributes && app.riskAttributes.flags) || [];
   return flags.map((f) => `<span class="insights-attr">${escapeHtml(CATALOG_ATTR_LABEL[f] || f)}</span>`).join(' ') || '<span class="insights-attr-muted">—</span>';
+}
+
+function sortedCatalogApps(apps) {
+  const { key, dir } = catalogSort;
+  return [...apps].sort((a, b) => {
+    const va = a[key] == null ? '' : a[key];
+    const vb = b[key] == null ? '' : b[key];
+    if (typeof va === 'number' || typeof vb === 'number') return ((Number(va) || 0) - (Number(vb) || 0)) * dir;
+    return String(va).localeCompare(String(vb)) * dir;
+  });
+}
+
+function catalogGovernCell(a) {
+  if (catalogPendingReview && catalogPendingReview.host === a.destination) {
+    return `<input class="catalog-reason" id="catalogReviewReason" type="text" placeholder="Reason (audited)" value="${escapeHtml(catalogPendingReview.decision)} decision from console" aria-label="Review reason"/>
+      <button class="ghost mini" data-catalog-confirm="1" type="button">Confirm ${escapeHtml(catalogPendingReview.decision)}</button>
+      <button class="ghost mini" data-catalog-cancel="1" type="button">Cancel</button>`;
+  }
+  return `<button class="ghost mini" data-catalog-review="${escapeHtml(a.destination)}" data-decision="allow" type="button">Allow</button>
+    <button class="ghost mini" data-catalog-review="${escapeHtml(a.destination)}" data-decision="govern" type="button">Govern</button>
+    <button class="ghost mini danger" data-catalog-review="${escapeHtml(a.destination)}" data-decision="block" type="button">Block</button>`;
 }
 
 function renderCatalog(apps) {
@@ -2819,8 +3157,13 @@ function renderCatalog(apps) {
     insightsKpi('Elevated / high risk', high, 'by risk tier'),
     insightsKpi('Governed', governed, 'allow / govern / block'),
   ].join('');
-  $('#catalogRows').innerHTML = apps.map((a) => `
+  $$('#tab-catalog th[data-catalog-sort]').forEach((th) => {
+    th.classList.toggle('sorted', th.dataset.catalogSort === catalogSort.key);
+    th.dataset.sortDir = th.dataset.catalogSort === catalogSort.key ? (catalogSort.dir > 0 ? 'asc' : 'desc') : '';
+  });
+  $('#catalogRows').innerHTML = sortedCatalogApps(apps).map((a) => `
     <tr>
+      <td class="catalog-check"><input type="checkbox" data-catalog-select="${escapeHtml(a.destination)}" ${catalogSelected.has(a.destination) ? 'checked' : ''} aria-label="Select ${escapeHtml(a.destination)}"/></td>
       <td>${escapeHtml(a.appName || a.destination)}<div class="catalog-host">${escapeHtml(a.destination)}</div></td>
       <td>${escapeHtml(a.provider || '—')}</td>
       <td><span class="insights-chip ${CATALOG_RISK_TONE[a.riskTier] || 'tone-neutral'}">${escapeHtml(a.riskTier)}</span> <span class="catalog-score">${a.riskScore == null ? '' : a.riskScore}</span></td>
@@ -2828,37 +3171,80 @@ function renderCatalog(apps) {
       <td><span class="insights-chip ${CATALOG_STATUS_TONE[a.sanctionedStatus] || 'tone-neutral'}">${escapeHtml(a.sanctionedStatus.replace(/_/g, ' '))}</span></td>
       <td>${a.eventCount || 0}</td>
       <td class="catalog-sources">${escapeHtml(Object.keys(a.sources || {}).join(', ') || '—')}</td>
-      <td class="catalog-actions">
-        <button class="ghost mini" data-catalog-review="${escapeHtml(a.destination)}" data-decision="allow" type="button">Allow</button>
-        <button class="ghost mini" data-catalog-review="${escapeHtml(a.destination)}" data-decision="govern" type="button">Govern</button>
-        <button class="ghost mini danger" data-catalog-review="${escapeHtml(a.destination)}" data-decision="block" type="button">Block</button>
-      </td>
-    </tr>`).join('') || '<tr><td colspan="8" class="insights-empty">No AI apps discovered yet. Import a proxy/DNS log or wait for sensor sightings.</td></tr>';
-  $$('#catalogRows [data-catalog-review]').forEach((btn) => {
-    btn.onclick = () => reviewCatalogApp(btn.dataset.catalogReview, btn.dataset.decision);
-  });
+      <td class="catalog-actions">${catalogGovernCell(a)}</td>
+    </tr>`).join('') || '<tr><td colspan="9" class="insights-empty">No AI apps discovered yet. Import a proxy/DNS log or wait for sensor sightings.</td></tr>';
+  updateCatalogBulkBar();
+  const reason = $('#catalogReviewReason');
+  if (reason) { reason.focus(); reason.select(); }
 }
 
-async function reviewCatalogApp(host, decision) {
-  const reason = prompt(`Reason for "${decision}" on ${host}:`, `${decision} decision from console`);
-  if (reason == null) return;
+function updateCatalogBulkBar() {
+  const bar = $('#catalogBulkBar');
+  if (!bar) return;
+  bar.classList.toggle('hidden', catalogSelected.size === 0);
+  const count = $('#catalogBulkCount');
+  if (count) count.textContent = `${catalogSelected.size} selected`;
+  const all = $('#catalogSelectAll');
+  if (all) all.checked = catalogApps.length > 0 && catalogSelected.size === catalogApps.length;
+}
+
+async function submitCatalogReview(host, decision, reason) {
   const r = await api(`/api/catalog/${encodeURIComponent(host)}/review`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ decision, reason }) });
-  if (r && r.ok) loadCatalog();
+  if (r && r.ok) return true;
+  toast(`Could not save the ${decision} decision for ${host}.`, 'bad');
+  return false;
+}
+
+async function runCatalogBulk(decision) {
+  const reason = ($('#catalogBulkReason').value || '').trim() || `bulk ${decision} decision from console`;
+  const hosts = [...catalogSelected];
+  let done = 0;
+  for (const host of hosts) {
+    if (await submitCatalogReview(host, decision, reason)) done += 1;
+  }
+  toast(`${decision} applied to ${done} of ${hosts.length} app(s).`, done === hosts.length ? 'good' : 'bad');
+  catalogSelected.clear();
+  loadCatalog();
+}
+
+function exportCatalogCsv() {
+  downloadCsv(`promptwall-ai-apps-${csvStamp()}.csv`,
+    ['App', 'Host', 'Provider', 'Risk tier', 'Risk score', 'Status', 'Events', 'Sources'],
+    sortedCatalogApps(catalogApps).map((a) => [
+      a.appName || a.destination, a.destination, a.provider || '', a.riskTier, a.riskScore ?? '',
+      a.sanctionedStatus, a.eventCount || 0, Object.keys(a.sources || {}).join('; '),
+    ]));
 }
 
 async function importCatalogCsv() {
-  const csv = prompt('Paste AI hostnames (one per line, or host,count from a proxy/DNS log):', '');
-  if (!csv) return;
+  const csv = ($('#catalogImportCsv').value || '').trim();
+  if (!csv) { toast('Paste at least one hostname first.', 'bad'); return; }
   const r = await api('/api/catalog/import', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ csv }) });
-  if (r && r.ok) { const b = await r.json(); alert(`Imported ${b.imported} app(s), skipped ${b.skipped}.`); loadCatalog(); }
+  if (r && r.ok) {
+    const b = await r.json();
+    toast(`Imported ${b.imported} app(s), skipped ${b.skipped}.`, 'good');
+    $('#catalogImportForm').classList.add('hidden');
+    $('#catalogImportCsv').value = '';
+    loadCatalog();
+  } else {
+    toast('Import failed - check the format (host or host,count per line).', 'bad');
+  }
 }
 
 async function addCatalogApp() {
-  const destination = prompt('AI app host to add (e.g. internal-llm.corp):', '');
-  if (!destination) return;
-  const appName = prompt('Display name (optional):', destination) || undefined;
+  const destination = ($('#catalogAddHost').value || '').trim();
+  if (!destination) { toast('Enter the AI app host first.', 'bad'); return; }
+  const appName = ($('#catalogAddName').value || '').trim() || undefined;
   const r = await api('/api/catalog', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ destination, appName }) });
-  if (r && r.ok) loadCatalog();
+  if (r && r.ok) {
+    toast(`${destination} added to the catalog.`, 'good');
+    $('#catalogAddForm').classList.add('hidden');
+    $('#catalogAddHost').value = '';
+    $('#catalogAddName').value = '';
+    loadCatalog();
+  } else {
+    toast(`Could not add ${destination}.`, 'bad');
+  }
 }
 
 // ---- Compliance framework coverage ------------------------------------------
@@ -2949,9 +3335,10 @@ function renderIntegrations(subs, deliveries) {
       <div class="sub-meta"><b>${escapeHtml(d.name)}</b><span class="insights-attr">${escapeHtml(d.type)}</span>
         <span class="sub-host">${escapeHtml(d.urlHost || '—')}</span>
         <span class="sub-filter">risk≥${d.minRisk} · sev≥${d.minSeverity}${d.eventTypes ? ' · ' + escapeHtml(d.eventTypes.join(',')) : ''}</span></div>
+      ${subTestBadge(d.id)}
       <button class="ghost mini" data-sub-test="${escapeHtml(d.id)}" type="button">Send test</button>
     </div>`).join('') || '<div class="insights-empty">No subscriptions configured. Add destinations in config/subscriptions.json.</div>';
-  $$('#subscriptionRows [data-sub-test]').forEach((btn) => { btn.onclick = () => testSubscription(btn.dataset.subTest); });
+  $$('#subscriptionRows [data-sub-test]').forEach((btn) => { btn.onclick = () => testSubscription(btn.dataset.subTest, btn); });
   $('#deliveryRows').innerHTML = deliveries.map((d) => `
     <tr><td>${fmtTime(d.ts)}</td><td>${escapeHtml(d.destName || d.destId)}</td><td>${escapeHtml(d.type || '')}</td>
       <td><span class="insights-chip ${DELIVERY_TONE[d.status] || 'tone-neutral'}">${escapeHtml(d.status)}</span></td>
@@ -2959,16 +3346,61 @@ function renderIntegrations(subs, deliveries) {
     || '<tr><td colspan="6" class="insights-empty">No deliveries yet.</td></tr>';
 }
 
-async function testSubscription(id) {
+const subTestResults = {};
+
+function subTestBadge(id) {
+  const t = subTestResults[id];
+  if (!t) return '';
+  const ok = t.status === 'delivered';
+  return `<span class="sub-test-result ${ok ? 'ok' : 'bad'}">Last test: ${escapeHtml(t.status)} · ${t.attempts} attempt(s) · ${escapeHtml(t.at)}</span>`;
+}
+
+async function testSubscription(id, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
   const r = await api(`/api/subscriptions/${encodeURIComponent(id)}/test`, { method: 'POST' });
-  if (r && r.ok) { const b = await r.json(); alert(`Test to ${id}: ${b.result.status} (attempts ${b.result.attempts})`); loadIntegrations(); }
+  const b = r && r.ok ? await r.json().catch(() => null) : null;
+  subTestResults[id] = b && b.result
+    ? { status: b.result.status, attempts: b.result.attempts || 0, at: new Date().toLocaleTimeString() }
+    : { status: 'failed', attempts: 0, at: new Date().toLocaleTimeString() };
+  loadIntegrations();
+}
+
+const FLEET_STATE_TONE = { active: 'secure', stale: 'warn', missing: 'bad' };
+const FLEET_SENSOR_LABEL = { browser_extension: 'Browser extension', endpoint_agent: 'Endpoint agent', mcp_guard: 'MCP guard' };
+
+function fleetStateChip(info) {
+  const detail = info.state === 'active'
+    ? `Reporting. Last seen ${fmt(info.lastSeen)}${info.version ? ` (v${info.version})` : ''}`
+    : info.state === 'stale'
+      ? `Went quiet. Last seen ${fmt(info.lastSeen)} - sensor may be uninstalled or broken`
+      : 'Never reported for this user';
+  return statusChip(FLEET_STATE_TONE[info.state] || 'neutral', info.state.toUpperCase(), detail);
+}
+
+function renderFleet(data) {
+  const body = $('#fleetMatrixRows');
+  if (!body || !data) return;
+  body.innerHTML = (data.users || []).map((u) => `<tr>
+      <td>${escapeHtml(u.user)}</td>
+      <td>${fleetStateChip(u.sensors.browser_extension)}</td>
+      <td>${fleetStateChip(u.sensors.endpoint_agent)}</td>
+      <td>${fleetStateChip(u.sensors.mcp_guard)}</td>
+      <td>${u.gaps.length
+        ? u.gaps.map((g) => `<span class="sev high">${escapeHtml(`${FLEET_SENSOR_LABEL[g.sensor] || g.sensor} ${g.state}`)}</span>`).join(' ')
+        : '<span class="sev low">covered</span>'}</td>
+    </tr>`).join('')
+    || '<tr><td colspan="5" class="empty">No sensors have reported yet. Fleet coverage appears as soon as a sensor sends its first event or heartbeat.</td></tr>';
 }
 
 async function loadCoverage() {
   setBusy('#tab-coverage .panel', true, 'RECONCILING');
   try {
-    const r = await api('/api/coverage');
+    const [r, fleetData] = await Promise.all([
+      api('/api/coverage'),
+      dashboardJsonWithTimeout('/api/fleet', 2500),
+    ]);
     const nextCoverage = await responseJsonObject(r, null);
+    if (fleetData) renderFleet(fleetData);
     if (!nextCoverage) return;
     currentCoverage = nextCoverage;
     renderCoverage(currentCoverage);
@@ -3249,15 +3681,31 @@ async function loadAudit() {
       : `${icons.shield}<span>Integrity check failed at ${escapeHtml(ig.brokenAt)}.</span>`;
     currentAuditEntries = d.entries;
     renderAuditRows(currentAuditEntries);
+    const retention = $('#auditRetention');
+    if (retention && d.retention) retention.textContent = d.retention;
     markUpdated();
   } finally {
     setBusy('#tab-audit .panel', false);
   }
 }
 
+function refreshAuditActionOptions(entries) {
+  const sel = $('#auditActionFilter');
+  if (!sel) return;
+  const actions = [...new Set((entries || []).map((a) => a.action).filter(Boolean))].sort();
+  const want = 'all,' + actions.join(',');
+  if (sel.dataset.options === want) return;
+  sel.dataset.options = want;
+  sel.innerHTML = '<option value="all">All actions</option>'
+    + actions.map((a) => `<option value="${escapeHtml(a)}">${escapeHtml(humanize(a))}</option>`).join('');
+  if (actions.includes(auditActionFilter)) sel.value = auditActionFilter;
+  else { sel.value = 'all'; auditActionFilter = 'all'; }
+}
+
 function renderAuditRows(entries) {
-  const filtered = (entries || []).filter(matchesAudit);
-  const page = paginatedRows(filtered, auditPage, AUDIT_PAGE_SIZE);
+  refreshAuditActionOptions(entries);
+  const filtered = filteredAuditEntries(entries);
+  const page = paginatedRows(filtered, auditPage, auditPageSize);
   auditPage = page.page;
   $('#auditRows').innerHTML = page.rows.map((a) => `<tr>
       <td class="mono">${escapeHtml(fmt(a.ts))}</td>
@@ -3265,7 +3713,7 @@ function renderAuditRows(entries) {
       <td>${escapeHtml(a.actor || '-')}</td>
       <td class="mono">${escapeHtml(a.queryId || '-')}</td>
       <td>${escapeHtml(a.detail || '')}</td>
-    </tr>`).join('') || `<tr><td colspan="5" class="empty">${searchTerm ? 'No matching audit entries' : 'No audit entries yet'}</td></tr>`;
+    </tr>`).join('') || `<tr><td colspan="5" class="empty">${searchTerm || auditActionFilter !== 'all' ? 'No matching audit entries' : 'No audit entries yet'}</td></tr>`;
   renderTablePager('#auditPager', { target: 'audit', ...page });
 }
 
@@ -3994,7 +4442,7 @@ async function checkUpdate() {
   const r = await api('/api/update/check', { method: 'POST' });
   if (!r || !r.ok) {
     $('#updateConsoleStatus').innerHTML = statePill('bad', 'Check failed');
-    alert(r ? await apiErrorSummary(r, 'Could not check GitHub') : 'Could not check GitHub');
+    toast(r ? await apiErrorSummary(r, 'Could not check GitHub') : 'Could not check GitHub');
     await loadUpdates();
     return;
   }
@@ -4014,7 +4462,7 @@ async function runUpdate() {
   });
   if (!r || !r.ok) {
     $('#updateConsoleStatus').innerHTML = statePill('bad', 'Update failed');
-    alert(r ? await apiErrorSummary(r, 'Update failed') : 'Update failed');
+    toast(r ? await apiErrorSummary(r, 'Update failed') : 'Update failed');
     await loadUpdates();
     return;
   }
@@ -4026,7 +4474,7 @@ async function restartUpdatedService() {
   if (!proceed) return;
   const r = await api('/api/update/restart', { method: 'POST' });
   if (!r || !r.ok) {
-    alert(r ? await apiErrorSummary(r, 'Restart failed') : 'Restart failed');
+    toast(r ? await apiErrorSummary(r, 'Restart failed') : 'Restart failed');
     return;
   }
   $('#updateConsoleStatus').innerHTML = statePill('warn', 'Restarting');
@@ -4043,6 +4491,116 @@ function wireUpdateButtons() {
   if (restart) restart.onclick = restartUpdatedService;
 }
 
+
+function deploySize(bytes) {
+  if (!Number.isFinite(bytes)) return 'size on build';
+  return bytes < 1024 * 1024 ? Math.round(bytes / 1024) + ' KB' : (bytes / 1024 / 1024).toFixed(1) + ' MB';
+}
+
+async function loadDeploy() {
+  const rows = $('#deployRows');
+  if (!rows) return;
+  try {
+    const res = await fetch('/api/deploy/artifacts');
+    if (!res.ok) throw new Error('http_' + res.status);
+    const data = await res.json();
+    rows.innerHTML = data.artifacts.map((item) => item.error ? `
+      <div class="q" style="cursor:default"><div class="queue-mainline">
+        <strong>${escapeHtml(item.label)}</strong><span>packaging unavailable</span><span></span>
+      </div></div>` : `
+      <div class="q" style="cursor:default">
+        <div class="queue-mainline">
+          <strong>${escapeHtml(item.label)}</strong>
+          <span>${escapeHtml(item.fileName)}</span>
+          <a class="btn" href="/api/deploy/download/${escapeHtml(item.id)}" download>Download .zip</a>
+        </div>
+        <div class="chips">
+          <span class="chip"><b>ZIP</b> ${escapeHtml(deploySize(item.sizeBytes))}</span>
+          <span class="chip"><b>v${escapeHtml(item.version)}</b></span>
+          ${item.fileCount ? `<span class="chip">${item.fileCount} files</span>` : ''}
+          ${item.requires ? `<span class="chip"><b>Runs on</b> ${escapeHtml(item.requires)}</span>` : ''}
+          ${item.sha256 ? `<button class="chip mono" type="button" data-copy-sha="${escapeHtml(item.sha256)}" title="Copy full SHA-256 for installer verification"><b>SHA-256</b> ${escapeHtml(item.sha256.slice(0, 16))}&hellip; &#x2398;</button>` : ''}
+          <span class="chip"><b>Guide</b> ${escapeHtml(item.guide)}</span>
+        </div>
+        ${item.install ? `<div class="deploy-install"><b>Rollout</b> ${escapeHtml(item.install)}</div>` : ''}
+      </div>`).join('');
+    const history = $('#deployHistory');
+    if (history) {
+      history.innerHTML = (data.history || []).length
+        ? data.history.map((h) => `
+          <div class="inspector-field"><span>${escapeHtml(new Date(h.ts).toLocaleString())}</span><b>${escapeHtml(h.actor)} - ${escapeHtml(h.detail)}</b></div>`).join('')
+        : '<div class="empty">No downloads recorded yet. Every download is written to the audit chain.</div>';
+    }
+  } catch {
+    rows.innerHTML = '<div class="empty">Deploy packages need the operator or security admin role.</div>';
+  }
+}
+
+// ---- Overview: the always-up control room; every element jumps to its tab ----
+function overviewTile(jump, cls, value, label, meta, tone) {
+  return `<button class="stat ${cls}" type="button" data-tab-jump="${escapeHtml(jump)}" data-tooltip="${escapeHtml(`${label}: ${meta}. Click to open.`)}">
+      <div class="l"><span class="status-light tone-${escapeHtml(tone)}" aria-hidden="true"></span>${escapeHtml(label)}</div>
+      <div class="n">${escapeHtml(String(value))}</div>
+      <div class="m">${escapeHtml(meta)}</div>
+      <div class="stat-rule"></div>
+    </button>`;
+}
+
+function renderOverviewTiles({ stats, coverage, deliveries, audit, fleet }) {
+  const failed = deliveries ? deliveries.filter((d) => d.status === 'failed').length : null;
+  const chainOk = !!(audit && audit.integrity && audit.integrity.ok);
+  const gaps = fleet ? fleet.gapCount : null;
+  const tiles = [
+    stats && overviewTile('queue', stats.pending > 0 ? 'pending' : '', stats.pending, 'Pending approval', 'waiting on a decision', stats.pending > 0 ? 'warn' : 'secure'),
+    stats && overviewTile('activity', stats.todayBlocked > 0 ? 'alert' : '', stats.todayBlocked, 'Blocked today', 'policy stops', stats.todayBlocked > 0 ? 'critical' : 'secure'),
+    coverage && Number.isFinite(coverage.score) && overviewTile('coverage', '', `${coverage.score}/100`, 'Sensor coverage', 'fleet reporting score', coverage.score >= 70 ? 'secure' : 'warn'),
+    gaps !== null && overviewTile('coverage', gaps ? 'alert' : '', gaps, 'Coverage gaps', 'users missing a companion sensor', gaps ? 'warn' : 'secure'),
+    failed !== null && overviewTile('integrations', failed ? 'alert' : '', failed, 'Failed deliveries', 'SIEM and webhook sends', failed ? 'warn' : 'secure'),
+    audit && overviewTile('audit', '', chainOk ? 'Verified' : 'Check', 'Audit log', chainOk ? `${audit.integrity.count} linked entries` : 'integrity needs review', chainOk ? 'secure' : 'warn'),
+  ].filter(Boolean);
+  $('#overviewTiles').innerHTML = tiles.join('') || '<div class="empty">Waiting for the first data from your sensors.</div>';
+}
+
+function overviewRow(q, jump) {
+  const sev = q.maxSeverityLabel || 'low';
+  const tone = statusTone(q.status);
+  return `<button class="overview-row" type="button" data-tab-jump="${escapeHtml(jump)}">
+      <span class="ovr-when">${escapeHtml(fmtTime(q.createdAt))}</span>
+      <span class="sev ${sevClass(sev)}">${escapeHtml(sev)}</span>
+      <span class="ovr-what"><b>${escapeHtml(q.user || 'unknown')}</b> &rarr; ${escapeHtml(q.destination || '-')}</span>
+      <span class="pill ${escapeHtml(tone)} status-chip tone-${escapeHtml(statusToneClass(tone))}">${escapeHtml(humanize(q.status))}</span>
+    </button>`;
+}
+
+function renderOverviewLists(rows) {
+  if (!Array.isArray(rows)) return;
+  const pending = rows.filter((q) => q.status === 'pending').slice(0, 6);
+  $('#overviewQueue').innerHTML = pending.map((q) => overviewRow(q, 'queue')).join('')
+    || '<div class="empty">Nothing is waiting. New held prompts appear here the moment a sensor blocks one.</div>';
+  $('#overviewFeed').innerHTML = rows.slice(0, 8).map((q) => overviewRow(q, 'activity')).join('')
+    || '<div class="empty">No gated prompts yet. Activity streams in live once sensors report.</div>';
+}
+
+async function loadOverview() {
+  const [stats, rows, audit, deliveries, coverage, fleetData] = await Promise.all([
+    dashboardJsonWithTimeout('/api/stats', 2200),
+    dashboardJsonWithTimeout('/api/queries?limit=50', 2200),
+    dashboardJsonWithTimeout('/api/audit?limit=10', 2200),
+    dashboardJsonWithTimeout('/api/subscriptions/deliveries?limit=50', 2200),
+    dashboardJsonWithTimeout('/api/coverage', 2600),
+    dashboardJsonWithTimeout('/api/fleet', 2200),
+  ]);
+  renderOverviewTiles({ stats, coverage, deliveries: deliveries && deliveries.deliveries, audit, fleet: fleetData });
+  renderOverviewLists(rows);
+  const updated = $('#overviewUpdated');
+  if (updated) updated.textContent = 'UPDATED ' + new Date().toLocaleTimeString();
+}
+
+function refreshOverviewIfVisible() {
+  if (!$('#tab-overview').classList.contains('hidden')) loadOverview().catch(() => {});
+}
+setInterval(refreshOverviewIfVisible, 30000);
+
 function knownTabNames() {
   return $$('.tab[data-tab]')
     .map((tab) => tab.dataset.tab)
@@ -4051,19 +4609,19 @@ function knownTabNames() {
 
 function normalizeTabName(name) {
   const candidate = String(name || '').trim().toLowerCase();
-  return knownTabNames().includes(candidate) ? candidate : 'queue';
+  return knownTabNames().includes(candidate) ? candidate : 'overview';
 }
 
 function tabNameFromLocation() {
   const url = new URL(window.location.href);
   const queryTab = url.searchParams.get('tab');
   const hashTab = (url.hash || '').replace(/^#\/?/, '');
-  return normalizeTabName(queryTab || hashTab || 'queue');
+  return normalizeTabName(queryTab || hashTab || 'overview');
 }
 
 function syncTabUrl(name, { replace = false } = {}) {
   const url = new URL(window.location.href);
-  if (name === 'queue') url.searchParams.delete('tab');
+  if (name === 'overview') url.searchParams.delete('tab');
   else url.searchParams.set('tab', name);
   url.hash = '';
   if (url.href === window.location.href) return;
@@ -4086,6 +4644,7 @@ function activateTab(name, options = {}) {
   panel.classList.remove('hidden');
   window.scrollTo(0, 0);
   if (!options.skipHistory) syncTabUrl(targetName, { replace: options.replaceHistory });
+  if (targetName === 'overview') loadOverview();
   if (targetName === 'monitor') { renderMonitor(); loadPosture().catch(() => {}); loadSiemPackage().catch(() => {}); }
   if (targetName === 'audit') loadAudit();
   if (targetName === 'policy') loadPolicy();
@@ -4097,6 +4656,7 @@ function activateTab(name, options = {}) {
   if (targetName === 'integrations') loadIntegrations();
   if (targetName === 'identity') loadIdentitySetup();
   if (targetName === 'lineage') loadLineage();
+  if (targetName === 'deploy') loadDeploy();
   if (targetName === 'updates') loadUpdates();
 }
 
@@ -4117,9 +4677,28 @@ $('#refreshQueue').onclick = loadQueue;
 $('#refreshCoverage').onclick = loadCoverage;
 if ($('#refreshInsights')) $('#refreshInsights').onclick = loadInsights;
 if ($('#insightsWindow')) $('#insightsWindow').addEventListener('change', loadInsights);
+if ($('#exportActivityCsv')) $('#exportActivityCsv').addEventListener('click', exportActivityCsv);
+if ($('#exportAuditCsv')) $('#exportAuditCsv').addEventListener('click', exportAuditCsv);
+if ($('#detectorTestRun')) $('#detectorTestRun').addEventListener('click', () => { runDetectorTest().catch(() => {}); });
+if ($('#saveView')) $('#saveView').addEventListener('click', saveCurrentView);
+if ($('#savedViews')) {
+  refreshSavedViewOptions();
+  $('#savedViews').addEventListener('change', (e) => { if (e.target.value !== '') { applySavedView(e.target.value); e.target.value = ''; } });
+}
+if ($('#policyExportBtn')) $('#policyExportBtn').addEventListener('click', () => { exportPolicyJson().catch(() => {}); });
+if ($('#insightsExportCsv')) $('#insightsExportCsv').addEventListener('click', exportInsightsCsv);
 if ($('#refreshCatalog')) $('#refreshCatalog').onclick = loadCatalog;
-if ($('#catalogImportBtn')) $('#catalogImportBtn').onclick = importCatalogCsv;
-if ($('#catalogAddBtn')) $('#catalogAddBtn').onclick = addCatalogApp;
+if ($('#catalogImportBtn')) $('#catalogImportBtn').onclick = () => { $('#catalogImportForm').classList.toggle('hidden'); $('#catalogAddForm').classList.add('hidden'); };
+if ($('#catalogAddBtn')) $('#catalogAddBtn').onclick = () => { $('#catalogAddForm').classList.toggle('hidden'); $('#catalogImportForm').classList.add('hidden'); };
+if ($('#catalogAddConfirm')) $('#catalogAddConfirm').onclick = () => { addCatalogApp().catch(() => {}); };
+if ($('#catalogAddCancel')) $('#catalogAddCancel').onclick = () => $('#catalogAddForm').classList.add('hidden');
+if ($('#catalogImportConfirm')) $('#catalogImportConfirm').onclick = () => { importCatalogCsv().catch(() => {}); };
+if ($('#catalogImportCancel')) $('#catalogImportCancel').onclick = () => $('#catalogImportForm').classList.add('hidden');
+if ($('#catalogExportCsv')) $('#catalogExportCsv').onclick = exportCatalogCsv;
+if ($('#catalogSelectAll')) $('#catalogSelectAll').addEventListener('change', (e) => {
+  catalogSelected = e.target.checked ? new Set(catalogApps.map((a) => a.destination)) : new Set();
+  renderCatalog(catalogApps);
+});
 if ($('#refreshCompliance')) $('#refreshCompliance').onclick = loadCompliance;
 if ($('#complianceExportBtn')) $('#complianceExportBtn').onclick = () => { window.open('/api/export/evidence', '_blank'); };
 if ($('#refreshIntegrations')) $('#refreshIntegrations').onclick = loadIntegrations;
@@ -4149,9 +4728,9 @@ $('#monitorSearch').addEventListener('blur', () => {
 
 function connectStream() {
   const es = new EventSource('/api/stream');
-  es.addEventListener('query', () => { loadStats(); loadQueue(); loadPosture().catch(() => {}); if (!$('#tab-coverage').classList.contains('hidden')) loadCoverage(); if (!$('#tab-lineage').classList.contains('hidden')) loadLineage(); if (!$('#tab-insights').classList.contains('hidden')) loadInsights(); flash(); });
-  es.addEventListener('decision', () => { loadStats(); loadQueue(); loadActivity(); loadPosture().catch(() => {}); if (!$('#tab-lineage').classList.contains('hidden')) loadLineage(); });
-  es.addEventListener('stats', () => { loadStats(); if (!$('#tab-monitor').classList.contains('hidden')) loadPosture().catch(() => {}); });
+  es.addEventListener('query', () => { loadStats(); loadQueue(); loadPosture().catch(() => {}); refreshOverviewIfVisible(); if (!$('#tab-coverage').classList.contains('hidden')) loadCoverage(); if (!$('#tab-lineage').classList.contains('hidden')) loadLineage(); if (!$('#tab-insights').classList.contains('hidden')) loadInsights(); flash(); });
+  es.addEventListener('decision', () => { loadStats(); loadQueue(); loadActivity(); loadPosture().catch(() => {}); refreshOverviewIfVisible(); if (!$('#tab-lineage').classList.contains('hidden')) loadLineage(); });
+  es.addEventListener('stats', () => { loadStats(); refreshOverviewIfVisible(); if (!$('#tab-monitor').classList.contains('hidden')) loadPosture().catch(() => {}); });
   es.onerror = () => { setLiveState('reconnecting'); };
   es.onopen = () => { setLiveState('live'); };
 }
@@ -4168,3 +4747,120 @@ function flash() {
 }
 
 init();
+
+// ---- Command palette (Ctrl/Cmd+K): jump to any tab or run a console action ----
+const cmdk = { overlay: null, items: [], selected: 0, restoreFocus: null };
+
+function cmdkEntries() {
+  const seen = new Set();
+  const tabs = $$('.rail .tab[data-tab]').filter((tab) => {
+    if (seen.has(tab.dataset.tab)) return false;
+    seen.add(tab.dataset.tab);
+    return true;
+  }).map((tab) => {
+    const badge = tab.querySelector('.badge');
+    const label = tab.textContent.replace(badge ? badge.textContent : '', '').trim();
+    return {
+      group: 'Navigate',
+      label,
+      icon: (tab.querySelector('.tab-icon') || {}).innerHTML || '',
+      run: () => activateTab(tab.dataset.tab),
+    };
+  });
+  const actions = [
+    {
+      group: 'Actions',
+      label: 'Toggle color theme',
+      icon: '',
+      run: () => {
+        const dark = document.body.dataset.theme === 'dark';
+        const target = $(dark ? '#themeLight' : '#themeDark');
+        if (target) target.click();
+      },
+    },
+    { group: 'Actions', label: 'Focus search', icon: '', run: () => { const s = $('#globalSearch'); if (s) s.focus(); } },
+    { group: 'Actions', label: 'Sign out', icon: '', run: () => { const b = $('#logout'); if (b) b.click(); } },
+  ];
+  return tabs.concat(actions);
+}
+
+function cmdkRender(filterText) {
+  const list = cmdk.overlay.querySelector('.cmdk-list');
+  const needle = String(filterText || '').trim().toLowerCase();
+  cmdk.items = cmdkEntries().filter((item) => !needle || item.label.toLowerCase().includes(needle));
+  cmdk.selected = Math.min(cmdk.selected, Math.max(0, cmdk.items.length - 1));
+  if (!cmdk.items.length) {
+    list.innerHTML = '<div class="cmdk-empty">No matching destination or action</div>';
+    return;
+  }
+  let group = '';
+  list.innerHTML = cmdk.items.map((item, index) => {
+    const header = item.group !== group ? `<div class="cmdk-group">${escapeHtml(item.group)}</div>` : '';
+    group = item.group;
+    return `${header}<button type="button" class="cmdk-item${index === cmdk.selected ? ' is-selected' : ''}" data-cmdk-index="${index}">
+      <span class="tab-icon" aria-hidden="true">${item.icon}</span>${escapeHtml(item.label)}
+      ${index === cmdk.selected ? '<kbd>enter</kbd>' : ''}
+    </button>`;
+  }).join('');
+}
+
+function cmdkClose() {
+  if (!cmdk.overlay) return;
+  cmdk.overlay.remove();
+  cmdk.overlay = null;
+  if (cmdk.restoreFocus && document.contains(cmdk.restoreFocus)) cmdk.restoreFocus.focus();
+}
+
+function cmdkOpen() {
+  if (cmdk.overlay) return cmdkClose();
+  cmdk.restoreFocus = document.activeElement;
+  cmdk.selected = 0;
+  const overlay = document.createElement('div');
+  overlay.className = 'cmdk-overlay';
+  overlay.innerHTML = `<div class="cmdk" role="dialog" aria-modal="true" aria-label="Command palette">
+    <input type="text" placeholder="Jump to a tab or run an action" aria-label="Command palette filter" />
+    <div class="cmdk-list" role="listbox"></div>
+  </div>`;
+  document.body.appendChild(overlay);
+  cmdk.overlay = overlay;
+  const input = overlay.querySelector('input');
+  cmdkRender('');
+  input.focus();
+  input.addEventListener('input', () => { cmdk.selected = 0; cmdkRender(input.value); });
+  overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) cmdkClose(); });
+  overlay.addEventListener('click', (e) => {
+    const item = e.target.closest('[data-cmdk-index]');
+    if (!item) return;
+    const entry = cmdk.items[Number(item.dataset.cmdkIndex)];
+    cmdkClose();
+    if (entry) entry.run();
+  });
+  overlay.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); cmdkClose(); return; }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const step = e.key === 'ArrowDown' ? 1 : -1;
+      cmdk.selected = (cmdk.selected + step + cmdk.items.length) % Math.max(1, cmdk.items.length);
+      cmdkRender(input.value);
+      return;
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const entry = cmdk.items[cmdk.selected];
+      cmdkClose();
+      if (entry) entry.run();
+    }
+  });
+}
+
+document.addEventListener('keydown', (e) => {
+  if ((e.metaKey || e.ctrlKey) && String(e.key).toLowerCase() === 'k') {
+    e.preventDefault();
+    cmdkOpen();
+  }
+}, true);
+const cmdkHint = document.getElementById('cmdkHint');
+if (cmdkHint) {
+  cmdkHint.style.cursor = 'pointer';
+  cmdkHint.addEventListener('click', (e) => { e.preventDefault(); cmdkOpen(); });
+}

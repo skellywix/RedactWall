@@ -32,6 +32,7 @@ Use this index when you know the job but not the file name.
 |-------|----------|
 | SCIM provisioning and OIDC login | `SCIM_PROVISIONING.md` |
 | Entra and Okta setup | `IDENTITY_IDP_SETUP.md` |
+| Console access roles and titles | `ACCESS_ROLES.md` |
 | Scoped policy and time-bound exceptions | `POLICY_SCOPES.md` |
 | Approval ownership, notifications, and SLA escalation | `APPROVAL_ROUTING.md` |
 
