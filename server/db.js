@@ -144,6 +144,10 @@ const aLast = sdb.prepare('SELECT hash FROM audit ORDER BY seq DESC LIMIT 1');
 const aInsert = sdb.prepare('INSERT INTO audit (id, ts, action, queryId, actor, prevHash, hash, entry) VALUES (@id, @ts, @action, @queryId, @actor, @prevHash, @hash, @entry)');
 
 function appendAuditRecord(event) {
+  // Serialize concurrent appends on a shared database (Postgres multi-instance)
+  // so the read-head-then-insert below is atomic and the hash chain cannot fork.
+  // No-op on SQLite, whose single-writer transaction already serializes writes.
+  if (typeof sdb.lockAuditAppend === 'function') sdb.lockAuditAppend();
   const last = aLast.get();
   const prevHash = last ? last.hash : ZERO;
   const contentHash = event.queryId ? queryContentHash(event.queryId) : undefined;

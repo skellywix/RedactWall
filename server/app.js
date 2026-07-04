@@ -95,6 +95,19 @@ const OIDC_STATE_COOKIE_CLEAR_OPTIONS = {
 
 app.disable('x-powered-by');
 
+// Behind a load balancer/proxy, req.ip is otherwise the proxy's address, which
+// collapses per-client ingest throttling into one shared bucket (one bad client
+// could lock out the whole sensor fleet) and lets x-forwarded-* be trusted
+// blindly. Default OFF (direct-connect/demo); set TRUST_PROXY when deployed
+// behind a known proxy: a hop count ("1"), "true", or an IP/subnet list.
+(function configureTrustProxy() {
+  const raw = String(process.env.TRUST_PROXY || process.env.PROMPTWALL_TRUST_PROXY || '').trim();
+  if (!raw) return;
+  if (/^\d+$/.test(raw)) app.set('trust proxy', Number(raw));
+  else if (/^(true|false)$/i.test(raw)) app.set('trust proxy', raw.toLowerCase() === 'true');
+  else app.set('trust proxy', raw.split(',').map((s) => s.trim()).filter(Boolean));
+})();
+
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {

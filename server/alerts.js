@@ -68,8 +68,10 @@ function sanitizedAlert(query, opts = {}) {
       score: f.score,
       masked: f.masked,
     })),
-    categories: query.categories || [],
-    reasons: query.reasons || [],
+    // Bound categories/reasons so the outbound SIEM payload stays prompt-free
+    // even if a detector ever embedded a value in a reason string.
+    categories: (query.categories || []).slice(0, 40).map((c) => safeText(typeof c === 'string' ? c : (c && c.category) || '', '', 80)),
+    reasons: (query.reasons || []).slice(0, 20).map((r) => safeText(r, '', 200)),
     workflow,
   };
 }
