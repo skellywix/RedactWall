@@ -2415,17 +2415,15 @@ function assigneeChip(q) {
 
 function assignEditor(q) {
   if (queueAssignOpenId !== q.id || !canAdminWrite()) return '';
+  const id = escapeHtml(q.id);
+  const field = (kind, value, max, label) => `<input type="text" id="assign_${kind}_${id}" value="${escapeHtml(value || '')}" maxlength="${max}" placeholder="${label}" aria-label="${label}"/>`;
   const roleOption = (value, label) => `<option value="${value}" ${String(q.assignedRole || '') === value ? 'selected' : ''}>${label}</option>`;
   return `<div class="assign-editor">
-    <input type="text" id="assign_user_${escapeHtml(q.id)}" value="${escapeHtml(q.assignedUser || '')}" maxlength="128" placeholder="Assignee username (blank = anyone)" aria-label="Assignee username"/>
-    <input type="text" id="assign_group_${escapeHtml(q.id)}" value="${escapeHtml(q.assignedGroup || '')}" maxlength="64" placeholder="Group, e.g. compliance" aria-label="Assigned group"/>
-    <select id="assign_role_${escapeHtml(q.id)}" aria-label="Assigned role">
-      ${roleOption('approver', 'Approver')}
-      ${roleOption('security_admin', 'Security Admin')}
-      ${roleOption('', 'No role (admins only)')}
-    </select>
-    <button class="btn" type="button" data-assign-save="${escapeHtml(q.id)}">Save assignment</button>
-    <button class="btn" type="button" data-assign-toggle="${escapeHtml(q.id)}">Cancel</button>
+    ${field('user', q.assignedUser, 128, 'Assignee username (blank = anyone)')}
+    ${field('group', q.assignedGroup, 64, 'Group, e.g. compliance')}
+    <select id="assign_role_${id}" aria-label="Assigned role">${roleOption('approver', 'Approver')}${roleOption('security_admin', 'Security Admin')}${roleOption('', 'No role (admins only)')}</select>
+    <button class="btn" type="button" data-assign-save="${id}">Save assignment</button>
+    <button class="btn" type="button" data-assign-toggle="${id}">Cancel</button>
   </div>`;
 }
 
@@ -2443,7 +2441,7 @@ async function saveAssignment(id) {
   const updated = await responseJsonObject(r, null);
   if (!updated) { toast('Assignment failed - check the group/role values.', 'bad'); return; }
   queueAssignOpenId = null;
-  toast(`Assigned to ${updated.assignedUser || 'anyone'} (${updated.assignedGroup || 'no group'}${updated.assignedRole ? ' / ' + roleLabel(updated.assignedRole) : ''}).`, 'good');
+  toast(`Assigned to ${updated.assignedUser || 'anyone'} in ${updated.assignedGroup || 'no group'}.`, 'good');
   await loadQueue();
 }
 
