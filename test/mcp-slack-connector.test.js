@@ -272,6 +272,8 @@ test('sanitizeSlackFileContent and file tool return sanitized MCP results only',
       return response('Slack file includes SSN 524-71-9043.');
     },
     guardOptions: {
+      server: 'http://sentinel.test',
+      key: 'unit-ingest-key',
       policy: { ignore: [], disabledDetectors: [] },
       fetchImpl: async (url, request = {}) => {
         outbound = { url, body: request.body };

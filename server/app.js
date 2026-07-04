@@ -19,6 +19,7 @@ const crypto = require('crypto');
 const path = require('path');
 
 const detector = require('./detector');
+const adapters = require('../detection-engine/adapters');
 const processors = require('./processors');
 const policy = require('./policy');
 const policyImpact = require('./policy-impact');
@@ -27,12 +28,16 @@ const auth = require('./auth');
 const dataCrypto = require('./crypto');
 const templates = require('./templates');
 const alerts = require('./alerts');
+const subscriptions = require('./subscriptions');
+const policyBundle = require('./policy-bundle');
 const siemPackage = require('./siem-package');
 const evidence = require('./evidence');
 const securityPackage = require('./security-package');
 const preflight = require('./preflight');
 const validation = require('./validation');
 const coverage = require('./coverage');
+const insights = require('./insights');
+const appCatalog = require('./app-catalog');
 const posture = require('./posture');
 const detectorFeedback = require('./detector-feedback');
 const detectionQuality = require('./detection-quality');
@@ -155,6 +160,12 @@ function emitSecurityAlert(row, action, opts = {}) {
 function fireSecurityAlert(row, opts) {
   try {
     Promise.resolve(alerts.emitSecurityAlert(row, opts)).catch(() => {});
+    // Fan out to configured named SIEM/SOAR subscriptions (retry + delivery
+    // history). Same threshold gate as the single webhook; payloads are the
+    // prompt-free sanitized event.
+    if (alerts.shouldAlert(row, opts)) {
+      Promise.resolve(subscriptions.dispatch(alerts.sanitizedAlert(row, opts))).catch(() => {});
+    }
   } catch {}
 }
 
@@ -835,6 +846,16 @@ function blockBrowserActionByPolicy(res, context = {}, responseExtra = {}) {
   });
 }
 
+// Prompt-free AI-app discovery hook. Records a sighting only for real AI hosts
+// (governed or shadow), never for internal labels like 'gateway:...' or
+// 'sensor-health'. Best-effort — never blocks the gate path.
+function recordAiSighting(destination, source, outcome) {
+  try {
+    const host = adapters.normalizeHost(destination);
+    if (!host || host.includes(':') || !adapters.isAiHost(host)) return;
+    appCatalog.recordSighting({ destination: host, source: source === 'browser_extension' ? 'browser' : source, outcome });
+  } catch (e) { /* discovery is best-effort */ }
+}
 app.post('/api/v1/discovery', checkIngestKey, validation.validateBody(validation.aiDiscoverySchema), (req, res) => {
   if (!enforceTenantForSensor(req, res)) return;
   const {
@@ -1032,7 +1053,8 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
   // Privacy-preserving record: redacted prompt + masked findings + categories.
   const redactedPrompt = clientRedactionResolved && !categoryNames(analysis).length ? prompt : safePreview(prompt, analysis);
   const findings = analysis.findings.map((f) => ({
-    type: f.type, severity: f.severity, score: f.score, masked: f.masked || detector.maskValue(f.type, f.value || ''),
+    type: f.type, severity: f.severity, score: f.score, confidence: f.confidenceLabel || null,
+    masked: f.masked || detector.maskValue(f.type, f.value || ''),
   }));
   const categories = (analysis.categories || []).map((c) => c.category);
 
@@ -1054,9 +1076,15 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
     return res.json({ id: row.id, decision: 'block', status: 'injection_blocked' });
   }
 
+  // One discovery sighting per gate request. Shadow-AI visits are recorded in
+  // their own branch below with the 'shadow' outcome, so skip the 'gated' record
+  // for them to avoid double-counting a single user action.
+  if (clientOutcome !== 'shadow_ai') recordAiSighting(destination, source, 'gated');
+
   // Shadow-AI discovery: a visit to an AI tool policy does not govern. Recorded
   // as an informational event so the examiner sees unmonitored paths, not a leak.
   if (clientOutcome === 'shadow_ai') {
+    recordAiSighting(destination, source, 'shadow');
     if (policy.unapprovedAiDestination(destination, pol)) {
       return blockDestinationByPolicy(res, {
         user,
@@ -1267,9 +1295,9 @@ app.post('/api/v1/rehydrate', checkIngestKey, validation.validateBody(validation
 });
 
 // Public policy for sensors (ingest-key protected).
-app.get('/api/v1/policy', checkIngestKey, (req, res) => {
+function sensorSafePolicy() {
   const p = policy.loadPolicy();
-  res.json({
+  return {
     enforcementMode: p.enforcementMode, blockMinSeverity: p.blockMinSeverity,
     blockRiskScore: p.blockRiskScore, alwaysBlock: p.alwaysBlock,
     ignore: p.ignore || [],
@@ -1289,7 +1317,22 @@ app.get('/api/v1/policy', checkIngestKey, (req, res) => {
     mcpBlockedTools: p.mcpBlockedTools || policy.DEFAULT_POLICY.mcpBlockedTools,
     mcpApprovalRequiredTools: p.mcpApprovalRequiredTools || policy.DEFAULT_POLICY.mcpApprovalRequiredTools,
     scanner: p.scanner || {},
-  });
+  };
+}
+
+app.get('/api/v1/policy', checkIngestKey, (req, res) => {
+  res.json(sensorSafePolicy());
+});
+
+// Signed, versioned, expiring policy bundle. Sensors verify with the public key
+// (GET /api/v1/policy/pubkey) and FAIL CLOSED when the bundle is unverifiable or
+// stale — moving policy trust to the sensor edge.
+app.get('/api/v1/policy/bundle', checkIngestKey, (req, res) => {
+  res.json(policyBundle.buildBundle(sensorSafePolicy()));
+});
+
+app.get('/api/v1/policy/pubkey', checkIngestKey, (req, res) => {
+  res.json({ publicKey: policyBundle.publicKeyPem(), algorithm: 'ed25519', bundleVersion: policyBundle.BUNDLE_VERSION });
 });
 
 // List available detectors (for the console enable/disable UI).
@@ -1718,6 +1761,12 @@ app.post('/api/queries/:id/deny', ...decisionWrite, validation.validateBody(vali
 
 app.get('/api/stats', auth.requireAuth, (req, res) => res.json(db.stats()));
 
+// AI-usage analytics for the Insights dashboard (metadata only; no prompt text).
+app.get('/api/insights', auth.requireAuth, (req, res) => {
+  const windowDays = boundedApiLimit(req.query.windowDays, 30, 90);
+  res.json(insights.summarize(db.listQueries({ limit: 5000 }), { windowDays }));
+});
+
 app.get('/api/billing/seats', ...adminRead, (req, res) => {
   res.json(tenant.seatReport(db));
 });
@@ -2028,6 +2077,79 @@ app.post('/api/destinations/review', ...adminWrite, validation.validateBody(vali
   res.json({ destination: reviewed.destination, decision: reviewed.decision, policy: reviewed.policy, coverage: report });
 });
 
+// ---- AI app catalog ---------------------------------------------------------
+app.get('/api/catalog', auth.requireAuth, (req, res) => {
+  res.json({ apps: appCatalog.publicCatalog() });
+});
+
+app.post('/api/catalog', ...adminWrite, validation.validateBody(validation.catalogAddSchema), (req, res) => {
+  const record = appCatalog.addManual(req.body);
+  if (!record) return res.status(400).json({ error: 'invalid destination' });
+  db.appendAudit({ action: 'CATALOG_ADDED', actor: req.user.user, detail: `manual catalog entry: ${record.canonicalHost}` });
+  res.json({ app: appCatalog.publicCatalog().find((a) => a.destination === record.canonicalHost) || null });
+});
+
+app.post('/api/catalog/import', ...adminWrite, validation.validateBody(validation.catalogImportSchema), (req, res) => {
+  const result = appCatalog.importCsv(req.body.csv, { source: req.body.source || 'csv_import' });
+  db.appendAudit({ action: 'CATALOG_IMPORTED', actor: req.user.user, detail: `discovery import: ${result.imported} host(s), ${result.skipped} skipped` });
+  res.json({ ...result, apps: appCatalog.publicCatalog() });
+});
+
+// Review a catalogued app: apply a govern/allow/block decision to policy (reusing
+// the existing destination-review path) AND update catalog status/ownership.
+app.post('/api/catalog/:host/review', ...adminWrite, validation.validateBody(validation.catalogReviewSchema), (req, res) => {
+  const host = adapters.normalizeHost(req.params.host);
+  if (!host) return res.status(400).json({ error: 'invalid host' });
+  const before = policy.loadPolicy();
+  let reviewed;
+  try {
+    reviewed = policy.reviewDestination(before, host, req.body.decision);
+  } catch (e) {
+    return res.status(400).json({ error: 'invalid catalog review' });
+  }
+  policy.savePolicy(reviewed.policy);
+  const statusMap = { govern: 'tolerated', allow: 'sanctioned', block: 'blocked' };
+  appCatalog.annotate(host, {
+    owner: req.body.owner,
+    notes: req.body.notes,
+    sanctionedStatus: req.body.sanctionedStatus || statusMap[req.body.decision],
+  });
+  db.appendAudit({
+    action: 'CATALOG_REVIEWED',
+    actor: req.user.user,
+    detail: policy.policyChangeDetail(before, reviewed.policy, { reason: req.body.reason }),
+  });
+  broadcast('stats', db.stats());
+  res.json({
+    destination: host,
+    decision: reviewed.decision,
+    app: appCatalog.publicCatalog().find((a) => a.destination === host) || null,
+  });
+});
+
+// ---- Posture subscriptions (SIEM/SOAR delivery) -----------------------------
+app.get('/api/subscriptions', ...adminRead, (req, res) => {
+  res.json({ destinations: subscriptions.publicDestinations(), supportedTypes: require('./siem-formats').supportedTypes() });
+});
+
+app.get('/api/subscriptions/deliveries', ...adminRead, (req, res) => {
+  res.json({ deliveries: db.listDeliveries(boundedApiLimit(req.query.limit, 200)) });
+});
+
+// Send a synthetic test event to one destination (proves connectivity + auth).
+app.post('/api/subscriptions/:id/test', ...adminWrite, async (req, res) => {
+  const dest = subscriptions.findDestination(req.params.id);
+  if (!dest) return res.status(404).json({ error: 'unknown subscription' });
+  const testAlert = alerts.sanitizedAlert({
+    id: 'test_' + Date.now(), createdAt: new Date().toISOString(), status: 'subscription_test',
+    user: req.user.user, orgId: null, source: 'console', channel: 'test', destination: 'promptwall:test',
+    riskScore: 0, maxSeverity: 0, maxSeverityLabel: 'none', findings: [], categories: [], reasons: ['subscription connectivity test'],
+  }, { action: 'SUBSCRIPTION_TEST', force: true });
+  const result = await subscriptions.deliverTo(dest, testAlert, { force: true });
+  db.appendAudit({ action: 'SUBSCRIPTION_TESTED', actor: req.user.user, detail: `subscription ${dest.id} (${dest.type}): ${result.status}` });
+  res.json({ result: { destId: result.destId, status: result.status, attempts: result.attempts, httpStatus: result.httpStatus || null } });
+});
+
 // Regulation policy templates (list + one-click apply).
 app.get('/api/policy/templates', auth.requireAuth, (req, res) => res.json(templates.list()));
 app.put('/api/policy/apply-template', ...adminWrite, validation.validateBody(validation.applyTemplateSchema), (req, res) => {
@@ -2090,6 +2212,22 @@ app.get('/api/export/evidence', auth.requireAuth, (req, res) => {
     lineageQueries: summaryQueries,
     audit: db.listAudit(auditLimit),
   }));
+});
+
+// Compliance framework coverage (lightweight; the full pack is /api/export/evidence).
+app.get('/api/compliance', auth.requireAuth, (req, res) => {
+  const controlMap = require('./control-map');
+  const activePolicy = policy.loadPolicy();
+  const summaryQueries = db.listQueries({ all: true });
+  const mappings = controlMap.buildControlMappings({
+    generatedAt: new Date().toISOString(),
+    scope: { rawPromptBodiesIncluded: false },
+    policy: activePolicy,
+    detectors: detector.listDetectors({ customDetectors: policy.customDetectorsForSensors() }),
+    auditIntegrity: db.verifyAuditChain(),
+    coverage: coverage.summarize(summaryQueries, activePolicy),
+  });
+  res.json({ controlMappings: mappings });
 });
 
 app.get('/api/policy', auth.requireAuth, (req, res) => res.json(policy.loadPolicy()));

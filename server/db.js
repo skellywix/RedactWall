@@ -105,6 +105,28 @@ sdb.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_scim_groups_display ON scim_groups(displayName);
 
+  CREATE TABLE IF NOT EXISTS ai_apps (
+    seq           INTEGER PRIMARY KEY AUTOINCREMENT,
+    id            TEXT UNIQUE NOT NULL,
+    canonicalHost TEXT UNIQUE NOT NULL,
+    firstSeen     TEXT NOT NULL,
+    lastSeen      TEXT NOT NULL,
+    data          TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_ai_apps_host ON ai_apps(canonicalHost);
+
+  CREATE TABLE IF NOT EXISTS deliveries (
+    seq          INTEGER PRIMARY KEY AUTOINCREMENT,
+    id           TEXT UNIQUE NOT NULL,
+    ts           TEXT NOT NULL,
+    destId       TEXT NOT NULL,
+    dedupeKey    TEXT NOT NULL,
+    status       TEXT NOT NULL,
+    data         TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_deliveries_dest ON deliveries(destId);
+  CREATE INDEX IF NOT EXISTS idx_deliveries_dedupe ON deliveries(destId, dedupeKey);
+
   CREATE TABLE IF NOT EXISTS detector_feedback (
     seq        INTEGER PRIMARY KEY AUTOINCREMENT,
     id         TEXT UNIQUE NOT NULL,
@@ -566,6 +588,57 @@ function migrateFromJson(opts = {}) {
 }
 try { migrateFromJson(); } catch (e) { console.error('[db] migration skipped:', e.message); }
 
+// ---- AI app catalog ----------------------------------------------------------
+const aiAppInsert = sdb.prepare('INSERT INTO ai_apps (id, canonicalHost, firstSeen, lastSeen, data) VALUES (@id, @canonicalHost, @firstSeen, @lastSeen, @data)');
+const aiAppByHost = sdb.prepare('SELECT data FROM ai_apps WHERE canonicalHost = ?');
+const aiAppUpdate = sdb.prepare('UPDATE ai_apps SET lastSeen = @lastSeen, data = @data WHERE canonicalHost = @canonicalHost');
+
+function getAiApp(canonicalHost) {
+  const row = aiAppByHost.get(canonicalHost);
+  return row ? JSON.parse(row.data) : null;
+}
+
+function listAiApps() {
+  return sdb.prepare('SELECT data FROM ai_apps ORDER BY lastSeen DESC, seq DESC').all().map((r) => JSON.parse(r.data));
+}
+
+// Insert-or-update a catalog entry keyed by canonical host. `patch` is merged
+// over the stored record; discovery counters are additive via the caller.
+const upsertAiApp = sdb.transaction((canonicalHost, patch, now) => {
+  const existing = getAiApp(canonicalHost);
+  if (existing) {
+    const merged = { ...existing, ...patch, canonicalHost, id: existing.id, firstSeen: existing.firstSeen, lastSeen: now };
+    aiAppUpdate.run({ canonicalHost, lastSeen: now, data: JSON.stringify(merged) });
+    return merged;
+  }
+  const record = { id: id('app'), canonicalHost, firstSeen: now, lastSeen: now, ...patch };
+  aiAppInsert.run({ id: record.id, canonicalHost, firstSeen: now, lastSeen: now, data: JSON.stringify(record) });
+  return record;
+});
+
+// ---- Delivery history (SIEM/SOAR subscriptions) ------------------------------
+const deliveryInsert = sdb.prepare('INSERT INTO deliveries (id, ts, destId, dedupeKey, status, data) VALUES (@id, @ts, @destId, @dedupeKey, @status, @data)');
+
+function recordDelivery(record) {
+  const row = { id: id('dlv'), ts: new Date().toISOString(), destId: record.destId, dedupeKey: record.dedupeKey || '', status: record.status || 'unknown', ...record };
+  deliveryInsert.run({ id: row.id, ts: row.ts, destId: row.destId, dedupeKey: row.dedupeKey, status: row.status, data: JSON.stringify(row) });
+  // Bounded history: keep the most recent 2000 rows.
+  sdb.prepare('DELETE FROM deliveries WHERE seq <= (SELECT MAX(seq) - 2000 FROM deliveries)').run();
+  return row;
+}
+
+function listDeliveries(limit = 200) {
+  const n = Math.max(1, Math.min(2000, Number(limit) || 200));
+  return sdb.prepare('SELECT data FROM deliveries ORDER BY seq DESC LIMIT ?').all(n).map((r) => JSON.parse(r.data));
+}
+
+function recentDeliverySuccess(destId, dedupeKey, sinceIso) {
+  const row = sdb.prepare('SELECT data FROM deliveries WHERE destId = ? AND dedupeKey = ? AND status = ? ORDER BY seq DESC LIMIT 1').get(destId, dedupeKey, 'delivered');
+  if (!row) return false;
+  const rec = JSON.parse(row.data);
+  return !sinceIso || rec.ts >= sinceIso;
+}
+
 module.exports = {
   createQuery, getQuery, listQueries, updateQuery,
   createDetectorFeedback, listDetectorFeedback,
@@ -573,6 +646,8 @@ module.exports = {
   appendAudit, listAudit, verifyAuditChain, stats, seatStats, postureActionStates,
   getScimUser, getScimUserByUserName, listScimUsers, saveScimUser, deactivateScimUser,
   getScimGroup, getScimGroupByDisplayName, listScimGroups, saveScimGroup, deleteScimGroup,
+  getAiApp, listAiApps, upsertAiApp,
+  recordDelivery, listDeliveries, recentDeliverySuccess,
   _canonical: canonical, _db: sdb, _dbPath: DB_PATH,
   _internal: { migrateFromJson, parsePostureActionDetail, POSTURE_ACTION_AUDIT },
 };

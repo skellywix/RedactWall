@@ -2642,6 +2642,328 @@ function renderActivityRows(rows) {
   renderTablePager('#activityPager', { target: 'activity', ...page });
 }
 
+let currentInsights = null;
+let insightsWindowDays = 30;
+
+const INSIGHTS_DECISION_META = {
+  allowed: { label: 'Allowed', tone: '#3fb27f' },
+  redacted: { label: 'Redacted', tone: '#3f8cff' },
+  warned: { label: 'Warned', tone: '#e0a23b' },
+  flagged: { label: 'Flagged', tone: '#c98b2e' },
+  blocked: { label: 'Blocked', tone: '#e0555f' },
+  shadow: { label: 'Shadow AI', tone: '#a15de0' },
+};
+const INSIGHTS_RISK_TONE = { none: '#6b7686', low: '#3fb27f', medium: '#e0a23b', high: '#e07a3b', critical: '#e0555f' };
+
+async function loadInsights() {
+  const sel = $('#insightsWindow');
+  if (sel) insightsWindowDays = Number(sel.value) || 30;
+  setBusy('#tab-insights .panel', true, 'AGGREGATING');
+  try {
+    const r = await api(`/api/insights?windowDays=${encodeURIComponent(insightsWindowDays)}`);
+    const next = await responseJsonObject(r, null);
+    if (!next) return;
+    currentInsights = next;
+    renderInsights(next);
+    markUpdated();
+  } finally {
+    setBusy('#tab-insights .panel', false);
+  }
+}
+
+function insightsKpi(label, value, hint) {
+  return `<div class="insights-kpi"><span class="insights-kpi-value">${escapeHtml(String(value))}</span>`
+    + `<span class="insights-kpi-label">${escapeHtml(label)}</span>`
+    + (hint ? `<span class="insights-kpi-hint">${escapeHtml(hint)}</span>` : '') + '</div>';
+}
+
+// Dependency-free stacked-area time series as inline SVG (CSP-safe).
+function insightsSeriesSvg(series) {
+  const w = 720, h = 200, pad = 24;
+  const days = series.length || 1;
+  const max = Math.max(1, ...series.map((d) => d.total));
+  const order = ['allowed', 'redacted', 'warned', 'flagged', 'blocked', 'shadow'];
+  const x = (i) => pad + (i * (w - pad * 2)) / Math.max(1, days - 1);
+  const y = (v) => h - pad - (v / max) * (h - pad * 2);
+  let bars = '';
+  const bw = Math.max(3, (w - pad * 2) / days - 4);
+  series.forEach((d, i) => {
+    let acc = 0;
+    const cx = x(i) - bw / 2;
+    for (const k of order) {
+      const v = d[k] || 0;
+      if (!v) continue;
+      const yTop = y(acc + v);
+      const seg = ((v / max) * (h - pad * 2));
+      bars += `<rect x="${cx.toFixed(1)}" y="${yTop.toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(1, seg).toFixed(1)}" fill="${INSIGHTS_DECISION_META[k].tone}" rx="1"><title>${escapeHtml(d.date)} · ${INSIGHTS_DECISION_META[k].label}: ${v}</title></rect>`;
+      acc += v;
+    }
+  });
+  const ticks = [0, Math.round(max / 2), max].map((v) => `<text x="4" y="${(y(v) + 3).toFixed(1)}" class="insights-axis">${v}</text>`).join('');
+  const firstLabel = series.length ? `<text x="${pad}" y="${h - 6}" class="insights-axis">${escapeHtml(series[0].date.slice(5))}</text>` : '';
+  const lastLabel = series.length ? `<text x="${w - pad}" y="${h - 6}" text-anchor="end" class="insights-axis">${escapeHtml(series[series.length - 1].date.slice(5))}</text>` : '';
+  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="AI activity over time">${ticks}${bars}${firstLabel}${lastLabel}</svg>`;
+}
+
+// Donut of the decision mix.
+function insightsDonutSvg(decisions) {
+  const total = decisions.reduce((s, d) => s + d.count, 0);
+  const size = 180, r = 64, cx = size / 2, cy = size / 2, C = 2 * Math.PI * r;
+  if (!total) return '<div class="insights-empty">No activity in this window.</div>';
+  let offset = 0;
+  const arcs = decisions.filter((d) => d.count).map((d) => {
+    const frac = d.count / total;
+    const dash = `${(frac * C).toFixed(2)} ${(C - frac * C).toFixed(2)}`;
+    const seg = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${INSIGHTS_DECISION_META[d.id].tone}" stroke-width="20" stroke-dasharray="${dash}" stroke-dashoffset="${(-offset * C).toFixed(2)}" transform="rotate(-90 ${cx} ${cy})"><title>${INSIGHTS_DECISION_META[d.id].label}: ${d.count}</title></circle>`;
+    offset += frac;
+    return seg;
+  }).join('');
+  const legend = decisions.filter((d) => d.count).map((d) =>
+    `<span class="insights-swatch"><i style="background:${INSIGHTS_DECISION_META[d.id].tone}"></i>${INSIGHTS_DECISION_META[d.id].label} <b>${d.count}</b></span>`).join('');
+  return `<svg viewBox="0 0 ${size} ${size}" class="insights-donut" role="img" aria-label="Decision mix">${arcs}`
+    + `<text x="${cx}" y="${cy - 2}" text-anchor="middle" class="insights-donut-total">${total}</text>`
+    + `<text x="${cx}" y="${cy + 16}" text-anchor="middle" class="insights-donut-sub">events</text></svg>`
+    + `<div class="insights-legend">${legend}</div>`;
+}
+
+function insightsRiskSvg(bands) {
+  const max = Math.max(1, ...bands.map((b) => b.count));
+  return '<div class="insights-riskbars">' + bands.map((b) => {
+    const pct = Math.round((b.count / max) * 100);
+    return `<div class="insights-riskbar"><span class="insights-riskbar-label">${escapeHtml(b.label)}</span>`
+      + `<span class="insights-riskbar-track"><span class="insights-riskbar-fill" style="width:${pct}%;background:${INSIGHTS_RISK_TONE[b.id]}"></span></span>`
+      + `<span class="insights-riskbar-count">${b.count}</span></div>`;
+  }).join('') + '</div>';
+}
+
+function insightsHBars(items, keyName) {
+  if (!items || !items.length) return '<div class="insights-empty">None recorded.</div>';
+  const max = Math.max(1, ...items.map((i) => i.count));
+  return items.map((i) => {
+    const pct = Math.round((i.count / max) * 100);
+    return `<div class="insights-hbar"><span class="insights-hbar-label" title="${escapeHtml(i[keyName])}">${escapeHtml(i[keyName])}</span>`
+      + `<span class="insights-hbar-track"><span class="insights-hbar-fill" style="width:${pct}%"></span></span>`
+      + `<span class="insights-hbar-count">${i.count}</span></div>`;
+  }).join('');
+}
+
+function insightsRiskChip(risk) {
+  if (!risk) return '<span class="insights-chip tone-neutral">Unrated</span>';
+  const tone = risk.riskTier >= 4 ? 'tone-critical' : risk.riskTier === 3 ? 'tone-high' : risk.riskTier === 2 ? 'tone-medium' : 'tone-low';
+  return `<span class="insights-chip ${tone}">${escapeHtml(risk.riskTierLabel || 'unknown')}</span>`;
+}
+
+function insightsFlagLabels(flags) {
+  const map = { trains_on_data: 'Trains on data', personal_account_tier: 'Personal tier', data_residency_cn: 'Data in CN', data_residency_eu: 'Data in EU' };
+  return (flags || []).map((f) => `<span class="insights-attr">${escapeHtml(map[f] || f)}</span>`).join(' ');
+}
+
+function renderInsights(d) {
+  if (!d) return;
+  const t = d.totals || {};
+  $('#insightsKpis').innerHTML = [
+    insightsKpi('AI interactions', t.considered || 0, `last ${d.windowDays} days`),
+    insightsKpi('Avg exposure risk', t.avgRisk || 0, 'of 100'),
+    insightsKpi('Blocked', t.blocked || 0, 'held or denied'),
+    insightsKpi('Redacted', t.redacted || 0, 'tokenized & sent'),
+    insightsKpi('Shadow-AI hits', t.shadow || 0, 'ungoverned tools'),
+  ].join('');
+  $('#insightsSeries').innerHTML = insightsSeriesSvg(d.series || []);
+  $('#insightsSeriesLegend').innerHTML = (d.decisions || []).filter((x) => INSIGHTS_DECISION_META[x.id])
+    .map((x) => `<span class="insights-swatch"><i style="background:${INSIGHTS_DECISION_META[x.id].tone}"></i>${INSIGHTS_DECISION_META[x.id].label}</span>`).join('');
+  $('#insightsDecisions').innerHTML = insightsDonutSvg(d.decisions || []);
+  $('#insightsRisk').innerHTML = insightsRiskSvg(d.riskBands || []);
+  $('#insightsDetectors').innerHTML = insightsHBars(d.topDetectors || [], 'key');
+  $('#insightsCategories').innerHTML = insightsHBars(d.topCategories || [], 'key');
+  $('#insightsShadow').innerHTML = insightsHBars(d.shadowByProvider || [], 'key');
+  $('#insightsDestinations').innerHTML = (d.topDestinations || []).map((row) =>
+    `<tr><td>${escapeHtml(row.destination)}</td><td>${escapeHtml(row.risk ? row.risk.provider : '—')}</td>`
+    + `<td>${insightsRiskChip(row.risk)}</td><td>${row.risk ? insightsFlagLabels(row.risk.flags) : '<span class="insights-attr-muted">—</span>'}</td>`
+    + `<td>${row.count}</td></tr>`).join('') || '<tr><td colspan="5" class="insights-empty">No destinations recorded.</td></tr>';
+  $('#insightsUsers').innerHTML = (d.topUsers || []).map((u) =>
+    `<tr><td>${escapeHtml(u.user)}</td><td>${u.events}</td><td>${u.blocked}</td><td>${u.avgRisk}</td></tr>`).join('')
+    || '<tr><td colspan="4" class="insights-empty">No user activity recorded.</td></tr>';
+}
+
+// ---- App Catalog ------------------------------------------------------------
+const CATALOG_RISK_TONE = { critical: 'tone-critical', high: 'tone-high', moderate: 'tone-medium', low: 'tone-low', minimal: 'tone-low', unrated: 'tone-neutral' };
+const CATALOG_STATUS_TONE = { blocked: 'tone-critical', unsanctioned: 'tone-high', under_review: 'tone-neutral', tolerated: 'tone-medium', sanctioned: 'tone-low' };
+const CATALOG_ATTR_LABEL = { trains_on_data: 'Trains on data', personal_account_tier: 'Personal tier', data_residency_cn: 'Data in CN', data_residency_eu: 'Data in EU' };
+
+async function loadCatalog() {
+  setBusy('#tab-catalog .panel', true, 'DISCOVERING');
+  try {
+    const r = await api('/api/catalog');
+    const body = await responseJsonObject(r, null);
+    if (!body) return;
+    renderCatalog(body.apps || []);
+    markUpdated();
+  } finally {
+    setBusy('#tab-catalog .panel', false);
+  }
+}
+
+function catalogAttrs(app) {
+  const flags = (app.riskAttributes && app.riskAttributes.flags) || [];
+  return flags.map((f) => `<span class="insights-attr">${escapeHtml(CATALOG_ATTR_LABEL[f] || f)}</span>`).join(' ') || '<span class="insights-attr-muted">—</span>';
+}
+
+function renderCatalog(apps) {
+  const total = apps.length;
+  const shadow = apps.filter((a) => a.sanctionedStatus === 'under_review').length;
+  const high = apps.filter((a) => a.riskTier === 'critical' || a.riskTier === 'high').length;
+  const governed = apps.filter((a) => ['sanctioned', 'tolerated', 'blocked'].includes(a.sanctionedStatus)).length;
+  $('#catalogKpis').innerHTML = [
+    insightsKpi('AI apps discovered', total, 'across all sources'),
+    insightsKpi('Awaiting review', shadow, 'shadow AI'),
+    insightsKpi('Elevated / high risk', high, 'by risk tier'),
+    insightsKpi('Governed', governed, 'allow / govern / block'),
+  ].join('');
+  $('#catalogRows').innerHTML = apps.map((a) => `
+    <tr>
+      <td>${escapeHtml(a.appName || a.destination)}<div class="catalog-host">${escapeHtml(a.destination)}</div></td>
+      <td>${escapeHtml(a.provider || '—')}</td>
+      <td><span class="insights-chip ${CATALOG_RISK_TONE[a.riskTier] || 'tone-neutral'}">${escapeHtml(a.riskTier)}</span> <span class="catalog-score">${a.riskScore == null ? '' : a.riskScore}</span></td>
+      <td>${catalogAttrs(a)}</td>
+      <td><span class="insights-chip ${CATALOG_STATUS_TONE[a.sanctionedStatus] || 'tone-neutral'}">${escapeHtml(a.sanctionedStatus.replace(/_/g, ' '))}</span></td>
+      <td>${a.eventCount || 0}</td>
+      <td class="catalog-sources">${escapeHtml(Object.keys(a.sources || {}).join(', ') || '—')}</td>
+      <td class="catalog-actions">
+        <button class="ghost mini" data-catalog-review="${escapeHtml(a.destination)}" data-decision="allow" type="button">Allow</button>
+        <button class="ghost mini" data-catalog-review="${escapeHtml(a.destination)}" data-decision="govern" type="button">Govern</button>
+        <button class="ghost mini danger" data-catalog-review="${escapeHtml(a.destination)}" data-decision="block" type="button">Block</button>
+      </td>
+    </tr>`).join('') || '<tr><td colspan="8" class="insights-empty">No AI apps discovered yet. Import a proxy/DNS log or wait for sensor sightings.</td></tr>';
+  $$('#catalogRows [data-catalog-review]').forEach((btn) => {
+    btn.onclick = () => reviewCatalogApp(btn.dataset.catalogReview, btn.dataset.decision);
+  });
+}
+
+async function reviewCatalogApp(host, decision) {
+  const reason = prompt(`Reason for "${decision}" on ${host}:`, `${decision} decision from console`);
+  if (reason == null) return;
+  const r = await api(`/api/catalog/${encodeURIComponent(host)}/review`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ decision, reason }) });
+  if (r && r.ok) loadCatalog();
+}
+
+async function importCatalogCsv() {
+  const csv = prompt('Paste AI hostnames (one per line, or host,count from a proxy/DNS log):', '');
+  if (!csv) return;
+  const r = await api('/api/catalog/import', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ csv }) });
+  if (r && r.ok) { const b = await r.json(); alert(`Imported ${b.imported} app(s), skipped ${b.skipped}.`); loadCatalog(); }
+}
+
+async function addCatalogApp() {
+  const destination = prompt('AI app host to add (e.g. internal-llm.corp):', '');
+  if (!destination) return;
+  const appName = prompt('Display name (optional):', destination) || undefined;
+  const r = await api('/api/catalog', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ destination, appName }) });
+  if (r && r.ok) loadCatalog();
+}
+
+// ---- Compliance framework coverage ------------------------------------------
+const COMPLIANCE_STATE_TONE = { covered: 'tone-low', attention: 'tone-high', not_provided: 'tone-neutral' };
+
+async function loadCompliance() {
+  setBusy('#tab-compliance .panel', true, 'MAPPING');
+  try {
+    const r = await api('/api/compliance');
+    const body = await responseJsonObject(r, null);
+    if (!body) return;
+    renderCompliance(body.controlMappings || []);
+    markUpdated();
+  } finally {
+    setBusy('#tab-compliance .panel', false);
+  }
+}
+
+function renderCompliance(controls) {
+  const covered = controls.filter((c) => c.state === 'covered').length;
+  const attention = controls.filter((c) => c.state === 'attention').length;
+  const pct = controls.length ? Math.round((covered / controls.length) * 100) : 0;
+  $('#complianceKpis').innerHTML = [
+    insightsKpi('Controls covered', `${covered}/${controls.length}`, `${pct}% coverage`),
+    insightsKpi('Needs attention', attention, 'action required'),
+    insightsKpi('AI frameworks', '5', 'NIST/ISO 42001/EU AI Act/OWASP/ATLAS'),
+    insightsKpi('Evidence', 'prompt-free', 'hashes & metadata only'),
+  ].join('');
+  // Framework roll-up: a control "belongs" to a framework if any control family names it.
+  const FRAMEWORKS = [
+    { key: 'NIST AI RMF', match: /NIST AI RMF/i },
+    { key: 'ISO/IEC 42001', match: /ISO\/IEC 42001|ISO 42001/i },
+    { key: 'EU AI Act', match: /EU AI Act/i },
+    { key: 'OWASP LLM Top 10', match: /OWASP LLM/i },
+    { key: 'MITRE ATLAS', match: /MITRE ATLAS/i },
+    { key: 'GLBA / NCUA', match: /GLBA|NCUA/i },
+    { key: 'HIPAA', match: /HIPAA/i },
+    { key: 'PCI DSS', match: /PCI/i },
+  ];
+  $('#complianceFrameworks').innerHTML = FRAMEWORKS.map((fw) => {
+    const rel = controls.filter((c) => (c.controlFamilies || []).some((f) => fw.match.test(f)));
+    if (!rel.length) return '';
+    const cov = rel.filter((c) => c.state === 'covered').length;
+    const p = Math.round((cov / rel.length) * 100);
+    const tone = p >= 100 ? 'tone-low' : p >= 50 ? 'tone-medium' : 'tone-high';
+    return `<div class="compliance-fw"><div class="compliance-fw-head"><span>${escapeHtml(fw.key)}</span><span class="insights-chip ${tone}">${cov}/${rel.length}</span></div>`
+      + `<span class="insights-riskbar-track"><span class="insights-riskbar-fill" style="width:${p}%;background:var(--blue)"></span></span></div>`;
+  }).join('');
+  $('#complianceControls').innerHTML = controls.map((c) => `
+    <div class="panel">
+      <div class="panel-head"><div><h2>${escapeHtml(c.title)}</h2><span>${escapeHtml((c.evidence || []).slice(0, 3).join(', '))}</span></div>
+        <span class="insights-chip ${COMPLIANCE_STATE_TONE[c.state] || 'tone-neutral'}">${escapeHtml((c.state || '').replace('_', ' '))}</span></div>
+      <div class="compliance-body">
+        <p class="compliance-summary">${escapeHtml(c.summary || '')}</p>
+        <div class="compliance-families">${(c.controlFamilies || []).map((f) => `<span class="insights-attr">${escapeHtml(f)}</span>`).join(' ')}</div>
+      </div>
+    </div>`).join('');
+}
+
+// ---- Integrations & delivery ------------------------------------------------
+const DELIVERY_TONE = { delivered: 'tone-low', failed: 'tone-critical', deduped: 'tone-neutral' };
+
+async function loadIntegrations() {
+  setBusy('#tab-integrations .panel', true, 'SYNCING');
+  try {
+    const [subsR, delR] = await Promise.all([api('/api/subscriptions'), api('/api/subscriptions/deliveries')]);
+    const subs = await responseJsonObject(subsR, { destinations: [], supportedTypes: [] });
+    const del = await responseJsonObject(delR, { deliveries: [] });
+    renderIntegrations(subs, del.deliveries || []);
+    markUpdated();
+  } finally {
+    setBusy('#tab-integrations .panel', false);
+  }
+}
+
+function renderIntegrations(subs, deliveries) {
+  const dests = subs.destinations || [];
+  const delivered = deliveries.filter((d) => d.status === 'delivered').length;
+  const failed = deliveries.filter((d) => d.status === 'failed').length;
+  $('#integrationsKpis').innerHTML = [
+    insightsKpi('Subscriptions', dests.length, 'named destinations'),
+    insightsKpi('Delivered', delivered, 'recent events'),
+    insightsKpi('Failed', failed, 'needs attention'),
+    insightsKpi('Supported', (subs.supportedTypes || []).length, 'SIEM/SOAR types'),
+  ].join('');
+  $('#subscriptionRows').innerHTML = dests.map((d) => `
+    <div class="sub-row">
+      <div class="sub-meta"><b>${escapeHtml(d.name)}</b><span class="insights-attr">${escapeHtml(d.type)}</span>
+        <span class="sub-host">${escapeHtml(d.urlHost || '—')}</span>
+        <span class="sub-filter">risk≥${d.minRisk} · sev≥${d.minSeverity}${d.eventTypes ? ' · ' + escapeHtml(d.eventTypes.join(',')) : ''}</span></div>
+      <button class="ghost mini" data-sub-test="${escapeHtml(d.id)}" type="button">Send test</button>
+    </div>`).join('') || '<div class="insights-empty">No subscriptions configured. Add destinations in config/subscriptions.json.</div>';
+  $$('#subscriptionRows [data-sub-test]').forEach((btn) => { btn.onclick = () => testSubscription(btn.dataset.subTest); });
+  $('#deliveryRows').innerHTML = deliveries.map((d) => `
+    <tr><td>${fmtTime(d.ts)}</td><td>${escapeHtml(d.destName || d.destId)}</td><td>${escapeHtml(d.type || '')}</td>
+      <td><span class="insights-chip ${DELIVERY_TONE[d.status] || 'tone-neutral'}">${escapeHtml(d.status)}</span></td>
+      <td>${d.attempts || 0}</td><td>${d.httpStatus || '—'}</td></tr>`).join('')
+    || '<tr><td colspan="6" class="insights-empty">No deliveries yet.</td></tr>';
+}
+
+async function testSubscription(id) {
+  const r = await api(`/api/subscriptions/${encodeURIComponent(id)}/test`, { method: 'POST' });
+  if (r && r.ok) { const b = await r.json(); alert(`Test to ${id}: ${b.result.status} (attempts ${b.result.attempts})`); loadIntegrations(); }
+}
+
 async function loadCoverage() {
   setBusy('#tab-coverage .panel', true, 'RECONCILING');
   try {
@@ -3768,7 +4090,11 @@ function activateTab(name, options = {}) {
   if (targetName === 'audit') loadAudit();
   if (targetName === 'policy') loadPolicy();
   if (targetName === 'activity') loadActivity();
+  if (targetName === 'insights') loadInsights();
   if (targetName === 'coverage') loadCoverage();
+  if (targetName === 'catalog') loadCatalog();
+  if (targetName === 'compliance') loadCompliance();
+  if (targetName === 'integrations') loadIntegrations();
   if (targetName === 'identity') loadIdentitySetup();
   if (targetName === 'lineage') loadLineage();
   if (targetName === 'updates') loadUpdates();
@@ -3789,6 +4115,14 @@ applyColorTheme(colorTheme, { persist: false });
 
 $('#refreshQueue').onclick = loadQueue;
 $('#refreshCoverage').onclick = loadCoverage;
+if ($('#refreshInsights')) $('#refreshInsights').onclick = loadInsights;
+if ($('#insightsWindow')) $('#insightsWindow').addEventListener('change', loadInsights);
+if ($('#refreshCatalog')) $('#refreshCatalog').onclick = loadCatalog;
+if ($('#catalogImportBtn')) $('#catalogImportBtn').onclick = importCatalogCsv;
+if ($('#catalogAddBtn')) $('#catalogAddBtn').onclick = addCatalogApp;
+if ($('#refreshCompliance')) $('#refreshCompliance').onclick = loadCompliance;
+if ($('#complianceExportBtn')) $('#complianceExportBtn').onclick = () => { window.open('/api/export/evidence', '_blank'); };
+if ($('#refreshIntegrations')) $('#refreshIntegrations').onclick = loadIntegrations;
 $('#refreshIdentity').onclick = loadIdentitySetup;
 $('#identityProvider').addEventListener('change', loadIdentitySetup);
 $('#identityTenant').addEventListener('change', loadIdentitySetup);
@@ -3815,7 +4149,7 @@ $('#monitorSearch').addEventListener('blur', () => {
 
 function connectStream() {
   const es = new EventSource('/api/stream');
-  es.addEventListener('query', () => { loadStats(); loadQueue(); loadPosture().catch(() => {}); if (!$('#tab-coverage').classList.contains('hidden')) loadCoverage(); if (!$('#tab-lineage').classList.contains('hidden')) loadLineage(); flash(); });
+  es.addEventListener('query', () => { loadStats(); loadQueue(); loadPosture().catch(() => {}); if (!$('#tab-coverage').classList.contains('hidden')) loadCoverage(); if (!$('#tab-lineage').classList.contains('hidden')) loadLineage(); if (!$('#tab-insights').classList.contains('hidden')) loadInsights(); flash(); });
   es.addEventListener('decision', () => { loadStats(); loadQueue(); loadActivity(); loadPosture().catch(() => {}); if (!$('#tab-lineage').classList.contains('hidden')) loadLineage(); });
   es.addEventListener('stats', () => { loadStats(); if (!$('#tab-monitor').classList.contains('hidden')) loadPosture().catch(() => {}); });
   es.onerror = () => { setLiveState('reconnecting'); };

@@ -1,0 +1,13 @@
+{
+  "_comment": "Documentation of AI Gateway settings. The gateway reads ENV (with SENTINEL_*/PROMPTWALL_* aliases), not this file. Copy values into .env or your process manager.",
+  "GATEWAY_PORT": "4100",
+  "GATEWAY_CONTROL_PLANE_URL": "http://127.0.0.1:4000",
+  "INGEST_API_KEY": "<same ingest key the control plane uses for /api/v1/*>",
+  "GATEWAY_PROVIDER": "openai | anthropic | azure-openai | internal-http | mock",
+  "GATEWAY_UPSTREAM_URL": "https://api.openai.com",
+  "GATEWAY_UPSTREAM_API_KEY": "<upstream provider key>",
+  "GATEWAY_REQUIRE_AGENT_TOKEN": "true",
+  "GATEWAY_RATE_LIMIT_PER_MIN": "120",
+  "GATEWAY_MAX_BODY_BYTES": "2097152",
+  "GATEWAY_TIMEOUT_MS": "60000"
+}

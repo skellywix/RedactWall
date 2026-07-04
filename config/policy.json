@@ -17,10 +17,16 @@
     "LOAN_NUMBER",
     "MEDICAL_RECORD_NUMBER",
     "HEALTH_INSURANCE_ID",
+    "UK_NINO",
+    "UK_NHS_NUMBER",
+    "CANADA_SIN",
+    "AUSTRALIA_TFN",
+    "INDIA_AADHAAR",
     "DOB",
     "SECRET_KEY",
     "PRIVATE_KEY",
-    "CANARY_TOKEN"
+    "CANARY_TOKEN",
+    "EXACT_MATCH"
   ],
   "storeRawForApproval": true,
   "rawRetentionDays": 30,

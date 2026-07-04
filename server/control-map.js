@@ -71,6 +71,38 @@ const CONTROL_MAPPINGS = [
     ],
     evidence: ['backup', 'restoreDrill'],
   },
+  {
+    id: 'ai_usage_governance',
+    title: 'AI usage governance and shadow-AI control',
+    controlFamilies: [
+      'NIST AI RMF GOVERN/MAP evidence',
+      'ISO/IEC 42001 AI management system evidence',
+      'EU AI Act Article 4 AI-literacy and acceptable-use evidence',
+      'GLBA third-party/vendor oversight evidence',
+    ],
+    evidence: ['policy.governedDestinations', 'policy.blockUnapprovedAiDestinations', 'coverage.shadowAi', 'destinations.review'],
+  },
+  {
+    id: 'prompt_threat_defense',
+    title: 'Prompt-injection and jailbreak defense',
+    controlFamilies: [
+      'OWASP LLM01 Prompt Injection evidence',
+      'OWASP LLM02 Sensitive Information Disclosure evidence',
+      'NIST AI RMF MEASURE evidence',
+      'MITRE ATLAS adversarial-ML evidence',
+    ],
+    evidence: ['detectors.PROMPT_ATTACK', 'queries.injection_blocked', 'policy.responseScanMode'],
+  },
+  {
+    id: 'ai_activity_recordkeeping',
+    title: 'AI interaction record-keeping and provenance',
+    controlFamilies: [
+      'EU AI Act Article 12 record-keeping evidence',
+      'ISO/IEC 42001 operational-control evidence',
+      'NIST AI RMF MANAGE evidence',
+    ],
+    evidence: ['auditIntegrity', 'receipts', 'queries.workflow'],
+  },
 ];
 
 function hasObject(value) {
@@ -102,6 +134,22 @@ function stateFromBackup(backup, restoreDrill) {
     : 'attention';
 }
 
+function detectorIds(input) {
+  return new Set((input.detectors || []).map((d) => (d && (d.id || d)) || '').filter(Boolean));
+}
+
+function stateFromUsageGovernance(input) {
+  const p = input.policy;
+  if (!p) return 'attention';
+  const governed = Array.isArray(p.governedDestinations) ? p.governedDestinations.length : 0;
+  return governed > 0 && p.blockUnapprovedAiDestinations !== false ? 'covered' : 'attention';
+}
+
+function stateFromPromptThreat(input) {
+  if (!input.policy) return 'attention';
+  return detectorIds(input).has('PROMPT_ATTACK') ? 'covered' : 'attention';
+}
+
 function stateFor(control, input) {
   if (control.id === 'tamper_evident_audit') return stateFromIntegrity(input.auditIntegrity);
   if (control.id === 'fleet_sensor_coverage') return stateFromCoverage(input.coverage);
@@ -109,6 +157,9 @@ function stateFor(control, input) {
   if (control.id === 'ai_prompt_dlp') return input.policy && (input.detectors || []).length ? 'covered' : 'attention';
   if (control.id === 'approval_workflow') return input.policy ? 'covered' : 'attention';
   if (control.id === 'local_detection_minimization') return input.scope && input.scope.rawPromptBodiesIncluded === false ? 'covered' : 'attention';
+  if (control.id === 'ai_usage_governance') return stateFromUsageGovernance(input);
+  if (control.id === 'prompt_threat_defense') return stateFromPromptThreat(input);
+  if (control.id === 'ai_activity_recordkeeping') return stateFromIntegrity(input.auditIntegrity);
   return 'not_provided';
 }
 
@@ -140,6 +191,22 @@ function summaryFor(control, input, state) {
   }
   if (control.id === 'approval_workflow') {
     return 'Held decisions, policy changes, routing metadata, and exception evidence are exported without raw prompts.';
+  }
+  if (control.id === 'ai_usage_governance') {
+    const governed = Array.isArray(input.policy && input.policy.governedDestinations) ? input.policy.governedDestinations.length : 0;
+    return state === 'covered'
+      ? `${governed} AI destination(s) governed with default-deny for unreviewed AI tools; shadow-AI visits are recorded for review.`
+      : 'Governed AI destinations or default-deny for unreviewed AI tools need configuration.';
+  }
+  if (control.id === 'prompt_threat_defense') {
+    return state === 'covered'
+      ? 'Prompt-injection stripping and jailbreak/instruction-override intent detection run on prompts and AI responses.'
+      : 'Prompt-attack intent detection is not enabled in the active detector set.';
+  }
+  if (control.id === 'ai_activity_recordkeeping') {
+    return state === 'covered'
+      ? 'Every AI interaction decision is recorded in a tamper-evident hash-chained log with signed safe-to-send receipts.'
+      : 'AI interaction record-keeping needs audit-chain verification.';
   }
   return 'Policy, detector inventory, event summaries, and lineage evidence are present for examiner review.';
 }

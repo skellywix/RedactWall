@@ -15,6 +15,7 @@ const PACKAGE_FILES = [
   'detection-engine/adapters.js',
   'detection-engine/detect.js',
   'server/custom-detectors.js',
+  'server/exact-match.js',
   'server/env.js',
   'server/policy.js',
   'server/processors.js',

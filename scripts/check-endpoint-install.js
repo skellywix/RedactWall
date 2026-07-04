@@ -24,10 +24,11 @@ function configured(value) {
 function defaultEndpointEnvPath(env = process.env, platform = process.platform) {
   if (configured(env.SENTINEL_ENV_PATH)) return env.SENTINEL_ENV_PATH;
   if (configured(env.PROMPTWALL_ENV_PATH)) return env.PROMPTWALL_ENV_PATH;
+  const join = platform === 'win32' ? path.win32.join : path.posix.join;
   if (platform === 'win32' && configured(env.LOCALAPPDATA)) {
-    return path.join(env.LOCALAPPDATA, 'PromptWall', 'endpoint-agent.env');
+    return join(env.LOCALAPPDATA, 'PromptWall', 'endpoint-agent.env');
   }
-  return path.join(env.HOME || os.homedir() || '.', '.config', 'promptwall', 'endpoint-agent.env');
+  return join(env.HOME || os.homedir() || '.', '.config', 'promptwall', 'endpoint-agent.env');
 }
 
 function readEndpointConfig(envPath, env = process.env) {

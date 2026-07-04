@@ -1,6 +1,7 @@
 'use strict';
 
 const { safeSensor } = require('./sensor-metadata');
+const aiCatalog = require('./ai-app-catalog');
 const {
   failedInstallCheckIds,
   isEndpointAiToolPolicyCheckId,
@@ -129,7 +130,7 @@ function bumpAggregate(bucket, q) {
 }
 
 function publicAggregate(bucket, extra = {}) {
-  return {
+  const out = {
     destination: bucket.destination,
     policyState: bucket.policyState || 'review',
     events: bucket.events,
@@ -142,6 +143,9 @@ function publicAggregate(bucket, extra = {}) {
     lastSeen: bucket.lastSeen,
     ...extra,
   };
+  const risk = aiCatalog.riskAttributes(bucket.destination);
+  if (risk) out.risk = risk;
+  return out;
 }
 
 function discoveryTimestamp(row) {
