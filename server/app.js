@@ -2216,11 +2216,31 @@ app.post('/api/subscriptions/:id/test', ...operatorWrite, async (req, res) => {
 
 // ---- Sensor rollout downloads (Deploy tab) -----------------------------------
 const DEPLOY_ARTIFACTS = Object.freeze({
-  'extension-chrome': { label: 'Browser extension (Chrome/Brave MV3)', kind: 'extension', target: 'chrome' },
-  'extension-edge': { label: 'Browser extension (Microsoft Edge)', kind: 'extension', target: 'edge' },
-  'extension-firefox': { label: 'Browser extension (Firefox)', kind: 'extension', target: 'firefox' },
-  'endpoint-agent': { label: 'Endpoint agent (desktop file/clipboard sensor)', kind: 'endpoint' },
-  'mcp-guard': { label: 'MCP guard (agent/connector sensor)', kind: 'mcp' },
+  'extension-chrome': {
+    label: 'Browser extension (Chrome/Brave MV3)', kind: 'extension', target: 'chrome',
+    requires: 'Chrome or Brave 88+ (Manifest V3)',
+    install: 'Force-install via browser policy: docs/examples/chrome-extension-settings.example.json',
+  },
+  'extension-edge': {
+    label: 'Browser extension (Microsoft Edge)', kind: 'extension', target: 'edge',
+    requires: 'Microsoft Edge 88+ (Manifest V3)',
+    install: 'Force-install via browser policy: docs/examples/edge-extension-settings.example.json',
+  },
+  'extension-firefox': {
+    label: 'Browser extension (Firefox)', kind: 'extension', target: 'firefox',
+    requires: 'Firefox 109+',
+    install: 'Signed XPI + policy: docs/examples/firefox-extension-settings.example.json',
+  },
+  'endpoint-agent': {
+    label: 'Endpoint agent (desktop file/clipboard sensor)', kind: 'endpoint',
+    requires: 'Windows, macOS, or Linux with Node.js 22+',
+    install: 'Unzip on the endpoint, then follow the technician runbook service-install steps',
+  },
+  'mcp-guard': {
+    label: 'MCP guard (agent/connector sensor)', kind: 'mcp',
+    requires: 'Any MCP-capable client, Node.js 22+',
+    install: 'Wrap each MCP server command per the connector SDK guide',
+  },
 });
 
 function buildDeployArtifact(id) {
@@ -2254,6 +2274,8 @@ function deployArtifactMetadata() {
         sha256: manifest.sha256 || null,
         fileCount: Array.isArray(manifest.files) ? manifest.files.length : null,
         version: manifest.version || require('../package.json').version,
+        requires: spec.requires,
+        install: spec.install,
         guide: spec.kind === 'extension' ? 'docs/MANAGED_EXTENSION_DEPLOYMENT.md'
           : spec.kind === 'endpoint' ? 'docs/TECHNICIAN_DEPLOYMENT_GUIDE.md'
             : 'docs/MCP_CONNECTOR_SDK.md',

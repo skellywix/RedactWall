@@ -578,6 +578,8 @@ body[data-theme="dark"] .theme-toggle button[aria-pressed="true"]{box-shadow:0 1
 .chip.category b{color:var(--amber)}
 button.chip{transition:border-color var(--fast),background var(--fast)}
 button.chip:hover{border-color:var(--blue);background:var(--blue-bg)}
+.deploy-install{margin-top:8px;font-size:12px;color:var(--mut)}
+.deploy-install b{color:var(--txt);font-weight:600;margin-right:6px}
 .reasons{margin-top:8px;color:var(--mut);font-size:12px;line-height:1.5}
 .note{
   width:100%;
@@ -975,7 +977,7 @@ select{
   padding-right:28px;
 }
 input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;height:15px}
-.queue-tools select,.queue-tools input{width:auto}
+.queue-tools select,.queue-tools input,.toolbar select,.console-frame-actions select{width:auto}
 .policy-card{max-width:980px}
 .policy-box{padding:16px}
 .template-bar{margin-bottom:16px}
@@ -2721,6 +2723,21 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
               <p>Scan recent gated prompts, decisions, owners, and sanitized detection context.</p>
             </div>
           </div>
+          <div class="console-frame-actions">
+            <select id="activityRange" aria-label="Activity time range">
+              <option value="1">Last 24 hours</option>
+              <option value="7">Last 7 days</option>
+              <option value="30">Last 30 days</option>
+              <option value="0" selected>All retained</option>
+            </select>
+            <select id="activityPageSize" aria-label="Rows per page">
+              <option value="10" selected>10 rows</option>
+              <option value="25">25 rows</option>
+              <option value="50">50 rows</option>
+              <option value="100">100 rows</option>
+            </select>
+            <button class="ghost" id="exportActivityCsv" type="button">Export CSV</button>
+          </div>
         </div>
         <div class="panel">
           <div class="panel-head">
@@ -3038,6 +3055,16 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
             </div>
           </div>
           <div class="toolbar">
+            <select id="auditActionFilter" aria-label="Filter audit entries by action">
+              <option value="all" selected>All actions</option>
+            </select>
+            <select id="auditPageSize" aria-label="Audit rows per page">
+              <option value="10" selected>10 rows</option>
+              <option value="25">25 rows</option>
+              <option value="50">50 rows</option>
+              <option value="100">100 rows</option>
+            </select>
+            <button class="ghost" id="exportAuditCsv" type="button">Export CSV</button>
             <button class="ghost" id="exportEvidence" type="button">
               <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
               Export Evidence

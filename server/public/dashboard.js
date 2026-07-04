@@ -58,9 +58,11 @@ const icons = {
   shield: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 4l7 3v5c0 4.2-2.6 6.8-7 8-4.4-1.2-7-3.8-7-8V7l7-3Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
   download: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
 };
-const ACTIVITY_PAGE_SIZE = 10;
 const LINEAGE_PAGE_SIZE = 10;
-const AUDIT_PAGE_SIZE = 10;
+let activityPageSize = 10;
+let auditPageSize = 10;
+let activityRangeDays = 0; // 0 = all retained rows
+let auditActionFilter = 'all';
 
 const monitorStatusOptions = [
   { id: 'all', label: 'All' },
@@ -1650,6 +1652,58 @@ function matchesAudit(entry) {
   return !searchTerm || auditText(entry || {}).includes(searchTerm);
 }
 
+function withinRangeDays(ts, days) {
+  if (!days) return true;
+  const t = Date.parse(ts);
+  return !Number.isFinite(t) || t >= Date.now() - days * 86400000;
+}
+
+function filteredActivityRows(rows) {
+  return (rows || []).filter((q) => withinRangeDays(q.createdAt, activityRangeDays) && matchesSearch(q));
+}
+
+function filteredAuditEntries(entries) {
+  return (entries || []).filter((a) => (auditActionFilter === 'all' || a.action === auditActionFilter) && matchesAudit(a));
+}
+
+function csvCell(value) {
+  const s = String(value ?? '');
+  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
+function downloadCsv(name, header, rows) {
+  const body = [header, ...rows].map((r) => r.map(csvCell).join(',')).join('\n');
+  const url = URL.createObjectURL(new Blob([body], { type: 'text/csv' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function csvStamp() {
+  return new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+}
+
+function exportActivityCsv() {
+  const rows = filteredActivityRows(currentActivity).map((q) => [
+    fmt(q.createdAt), sourceLabel(q.source), q.user || '', q.destination || '', workflowOwner(q),
+    q.maxSeverityLabel || 'low', q.riskScore ?? 0, Object.keys(q.entityCounts || {}).join('; '), humanize(q.status),
+  ]);
+  downloadCsv(`promptwall-activity-${csvStamp()}.csv`,
+    ['Time', 'Source', 'User', 'Destination', 'Owner', 'Severity', 'Risk', 'Detected', 'Status'], rows);
+}
+
+function exportAuditCsv() {
+  const rows = filteredAuditEntries(currentAuditEntries).map((a) => [
+    fmt(a.ts), a.action || '', a.actor || '', a.queryId || '', a.detail || '',
+  ]);
+  downloadCsv(`promptwall-audit-${csvStamp()}.csv`,
+    ['Timestamp', 'Action', 'Actor', 'Query', 'Detail'], rows);
+}
+
 function resetTablePages() {
   activityPage = 1;
   auditPage = 1;
@@ -2341,6 +2395,15 @@ document.addEventListener('click', async (e) => {
     renderQueueView();
     return;
   }
+  const copySha = e.target.closest('[data-copy-sha]');
+  if (copySha && navigator.clipboard) {
+    navigator.clipboard.writeText(copySha.dataset.copySha).then(() => {
+      const original = copySha.innerHTML;
+      copySha.innerHTML = '<b>SHA-256</b> copied to clipboard';
+      setTimeout(() => { copySha.innerHTML = original; }, 1400);
+    }).catch(() => {});
+    return;
+  }
   const pagerButton = e.target.closest('[data-pager-target][data-pager-page]');
   if (pagerButton) {
     const page = Number(pagerButton.dataset.pagerPage) || 1;
@@ -2498,6 +2561,30 @@ document.addEventListener('click', async (e) => {
 });
 
 document.addEventListener('change', (e) => {
+  if (e.target.matches('#activityRange')) {
+    activityRangeDays = Number(e.target.value) || 0;
+    activityPage = 1;
+    renderActivityRows(currentActivity);
+    return;
+  }
+  if (e.target.matches('#activityPageSize')) {
+    activityPageSize = Number(e.target.value) || 10;
+    activityPage = 1;
+    renderActivityRows(currentActivity);
+    return;
+  }
+  if (e.target.matches('#auditActionFilter')) {
+    auditActionFilter = e.target.value || 'all';
+    auditPage = 1;
+    renderAuditRows(currentAuditEntries);
+    return;
+  }
+  if (e.target.matches('#auditPageSize')) {
+    auditPageSize = Number(e.target.value) || 10;
+    auditPage = 1;
+    renderAuditRows(currentAuditEntries);
+    return;
+  }
   if (e.target.matches('#queueCategoryFilter')) {
     queueCategoryFilter = e.target.value || 'all';
     renderQueueView();
@@ -2621,8 +2708,8 @@ function activityDetail(q) {
 }
 
 function renderActivityRows(rows) {
-  const filtered = (rows || []).filter(matchesSearch);
-  const page = paginatedRows(filtered, activityPage, ACTIVITY_PAGE_SIZE);
+  const filtered = filteredActivityRows(rows);
+  const page = paginatedRows(filtered, activityPage, activityPageSize);
   activityPage = page.page;
   $('#activityRows').innerHTML = page.rows.map((q) => {
     const tone = statusTone(q.status);
@@ -3255,9 +3342,23 @@ async function loadAudit() {
   }
 }
 
+function refreshAuditActionOptions(entries) {
+  const sel = $('#auditActionFilter');
+  if (!sel) return;
+  const actions = [...new Set((entries || []).map((a) => a.action).filter(Boolean))].sort();
+  const want = 'all,' + actions.join(',');
+  if (sel.dataset.options === want) return;
+  sel.dataset.options = want;
+  sel.innerHTML = '<option value="all">All actions</option>'
+    + actions.map((a) => `<option value="${escapeHtml(a)}">${escapeHtml(humanize(a))}</option>`).join('');
+  if (actions.includes(auditActionFilter)) sel.value = auditActionFilter;
+  else { sel.value = 'all'; auditActionFilter = 'all'; }
+}
+
 function renderAuditRows(entries) {
-  const filtered = (entries || []).filter(matchesAudit);
-  const page = paginatedRows(filtered, auditPage, AUDIT_PAGE_SIZE);
+  refreshAuditActionOptions(entries);
+  const filtered = filteredAuditEntries(entries);
+  const page = paginatedRows(filtered, auditPage, auditPageSize);
   auditPage = page.page;
   $('#auditRows').innerHTML = page.rows.map((a) => `<tr>
       <td class="mono">${escapeHtml(fmt(a.ts))}</td>
@@ -3265,7 +3366,7 @@ function renderAuditRows(entries) {
       <td>${escapeHtml(a.actor || '-')}</td>
       <td class="mono">${escapeHtml(a.queryId || '-')}</td>
       <td>${escapeHtml(a.detail || '')}</td>
-    </tr>`).join('') || `<tr><td colspan="5" class="empty">${searchTerm ? 'No matching audit entries' : 'No audit entries yet'}</td></tr>`;
+    </tr>`).join('') || `<tr><td colspan="5" class="empty">${searchTerm || auditActionFilter !== 'all' ? 'No matching audit entries' : 'No audit entries yet'}</td></tr>`;
   renderTablePager('#auditPager', { target: 'audit', ...page });
 }
 
@@ -4070,9 +4171,11 @@ async function loadDeploy() {
           <span class="chip"><b>ZIP</b> ${escapeHtml(deploySize(item.sizeBytes))}</span>
           <span class="chip"><b>v${escapeHtml(item.version)}</b></span>
           ${item.fileCount ? `<span class="chip">${item.fileCount} files</span>` : ''}
-          ${item.sha256 ? `<span class="chip" title="${escapeHtml(item.sha256)}"><b>SHA-256</b> ${escapeHtml(item.sha256.slice(0, 16))}&hellip;</span>` : ''}
+          ${item.requires ? `<span class="chip"><b>Runs on</b> ${escapeHtml(item.requires)}</span>` : ''}
+          ${item.sha256 ? `<button class="chip mono" type="button" data-copy-sha="${escapeHtml(item.sha256)}" title="Copy full SHA-256 for installer verification"><b>SHA-256</b> ${escapeHtml(item.sha256.slice(0, 16))}&hellip; &#x2398;</button>` : ''}
           <span class="chip"><b>Guide</b> ${escapeHtml(item.guide)}</span>
         </div>
+        ${item.install ? `<div class="deploy-install"><b>Rollout</b> ${escapeHtml(item.install)}</div>` : ''}
       </div>`).join('');
     const history = $('#deployHistory');
     if (history) {
@@ -4161,6 +4264,8 @@ $('#refreshQueue').onclick = loadQueue;
 $('#refreshCoverage').onclick = loadCoverage;
 if ($('#refreshInsights')) $('#refreshInsights').onclick = loadInsights;
 if ($('#insightsWindow')) $('#insightsWindow').addEventListener('change', loadInsights);
+if ($('#exportActivityCsv')) $('#exportActivityCsv').addEventListener('click', exportActivityCsv);
+if ($('#exportAuditCsv')) $('#exportAuditCsv').addEventListener('click', exportAuditCsv);
 if ($('#refreshCatalog')) $('#refreshCatalog').onclick = loadCatalog;
 if ($('#catalogImportBtn')) $('#catalogImportBtn').onclick = importCatalogCsv;
 if ($('#catalogAddBtn')) $('#catalogAddBtn').onclick = addCatalogApp;

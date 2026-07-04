@@ -114,6 +114,7 @@ test('deploy downloads serve audited sensor packages to operators, not approvers
     assert.ok(Number.isFinite(artifact.sizeBytes) && artifact.sizeBytes > 0, `${id} has a size`);
     assert.match(artifact.sha256, /^[0-9a-f]{64}$/, `${id} has a checksum`);
     assert.ok(artifact.guide.startsWith('docs/'), `${id} points at its guide`);
+    assert.ok(artifact.requires && artifact.install, `${id} states requirements and rollout path`);
   }
 
   const download = await get(port, '/api/deploy/download/mcp-guard', 'operator');
