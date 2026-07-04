@@ -57,7 +57,7 @@ function walkFiles(relDir) {
 test('admin public assets stay within transfer budgets', () => {
   const totals = assertAssetBudgets([
     { path: 'server/public/index.html', maxRawBytes: 180_000, maxGzipBytes: 32_000 },
-    { path: 'server/public/dashboard.js', maxRawBytes: 245_000, maxGzipBytes: 58_000 },
+    { path: 'server/public/dashboard.js', maxRawBytes: 255_000, maxGzipBytes: 60_000 },
     { path: 'server/public/siem-package.js', maxRawBytes: 8_000, maxGzipBytes: 3_000 },
     { path: 'server/public/security-package.js', maxRawBytes: 8_000, maxGzipBytes: 3_000 },
     { path: 'server/public/agentic-mcp.js', maxRawBytes: 8_000, maxGzipBytes: 3_000 },
@@ -77,8 +77,8 @@ test('admin public assets stay within transfer budgets', () => {
     { path: 'server/public/login.js', maxRawBytes: 6_000, maxGzipBytes: 2_500 },
   ]);
 
-  assertWithin('admin public assets raw total', totals.rawBytes, 510_000);
-  assertWithin('admin public assets gzip total', totals.gzipBytes, 119_000);
+  assertWithin('admin public assets raw total', totals.rawBytes, 525_000);
+  assertWithin('admin public assets gzip total', totals.gzipBytes, 122_000);
 });
 
 test('browser extension assets stay within install package budgets', () => {

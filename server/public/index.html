@@ -601,6 +601,16 @@ button.chip:hover{border-color:var(--blue);background:var(--blue-bg)}
 .catalog-bulk input{max-width:230px}
 .catalog-check{width:28px}
 .catalog-reason{max-width:180px;display:inline-block;margin-right:6px}
+.col-chooser{position:relative;margin:10px 16px 0;display:inline-block}
+.col-chooser summary{cursor:pointer;font-size:12px;color:var(--mut);list-style:none;border:1px solid var(--line);border-radius:var(--radius-sm);padding:4px 10px;display:inline-block}
+.col-chooser[open] summary{color:var(--txt);border-color:var(--line2)}
+.col-chooser-menu{position:absolute;z-index:12;top:calc(100% + 6px);left:0;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius-sm);box-shadow:var(--shadow-pop);padding:10px 14px;display:grid;gap:6px;min-width:170px}
+.col-chooser-menu label{display:flex;gap:8px;align-items:center;font-size:12.5px;white-space:nowrap}
+.catalog-app-link{background:none;border:0;padding:0;font:inherit;font-weight:600;color:var(--txt);cursor:pointer;text-align:left}
+.catalog-app-link:hover{color:var(--blue);text-decoration:underline}
+.catalog-override{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px;font-size:12.5px}
+.catalog-override input[type="number"]{width:90px}
+.catalog-override input[type="text"]{max-width:320px}
 th[data-catalog-sort]{cursor:pointer;user-select:none}
 th[data-catalog-sort].sorted::after{content:" " attr(data-sort-dir);font-size:9px;text-transform:uppercase;color:var(--blue)}
 .rationale{border:1px solid var(--line);border-radius:var(--radius-sm);margin:12px 16px;overflow:hidden}
@@ -2765,6 +2775,7 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
               <option value="365">Last 365 days</option>
             </select>
             <button class="ghost" id="insightsExportCsv" type="button" title="Download the daily decision series for the selected window">Export CSV</button>
+            <button class="ghost" id="insightsExecCsv" type="button" title="Download an executive summary: decision totals, top destinations and users, risk bands">Executive summary</button>
             <button class="system-button secondary" id="refreshInsights" type="button">
               <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v6h-6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
               Refresh
@@ -2846,8 +2857,12 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
               <span>Recent prompt decisions and held requests</span>
             </div>
           </div>
+          <details class="col-chooser" id="activityColChooser">
+            <summary>Columns</summary>
+            <div class="col-chooser-menu" id="activityColMenu"></div>
+          </details>
           <table><thead><tr>
-            <th>Time</th><th>Source</th><th>User</th><th>Destination</th><th>Owner</th><th>Severity</th><th>Risk</th><th>Detected</th><th>Status</th>
+            <th data-col="time">Time</th><th data-col="source">Source</th><th data-col="user">User</th><th data-col="destination">Destination</th><th data-col="owner">Owner</th><th data-col="severity">Severity</th><th data-col="risk">Risk</th><th data-col="detected">Detected</th><th data-col="status">Status</th>
           </tr></thead><tbody id="activityRows"></tbody></table>
           <div id="activityPager" class="table-pager" aria-live="polite"></div>
         </div>
@@ -3026,6 +3041,13 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
         </div>
         <div class="insights-kpis" id="complianceKpis"></div>
         <div class="panel wide-panel">
+          <div class="panel-head">
+            <div><h2>Recommended next steps</h2><span>Controls needing attention - each card opens Configuration</span></div>
+            <button class="ghost mini" id="complianceCsvBtn" type="button">Export controls CSV</button>
+          </div>
+          <div class="stats" id="complianceRecommendations" style="padding:14px 16px"></div>
+        </div>
+        <div class="panel wide-panel">
           <div class="panel-head"><div><h2>AI-governance frameworks</h2><span>Coverage across the frameworks incumbents do not map in-console</span></div></div>
           <div class="compliance-frameworks" id="complianceFrameworks"></div>
         </div>
@@ -3072,6 +3094,13 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
               <p>Prepare SCIM, OIDC, role mapping, and readiness values without exposing secrets.</p>
             </div>
           </div>
+          <div class="console-frame-actions">
+            <button class="ghost" id="identityTestBtn" type="button" title="Check which sign-in paths are wired; the check is recorded in the audit log">Test configuration</button>
+          </div>
+        </div>
+        <div class="panel hidden" id="identityTestPanel">
+          <div class="panel-head"><div><h2>Configuration check</h2><span>Config completeness only - no calls leave this server</span></div></div>
+          <div id="identityTestResult" style="padding:6px 16px 14px"></div>
         </div>
         <div class="identity-grid">
           <div class="panel wide-panel">

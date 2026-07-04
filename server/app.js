@@ -2392,6 +2392,64 @@ app.get('/api/fleet', auth.requireAuth, (req, res) => {
   res.json(fleet.summary());
 });
 
+// Analyst risk-score override with a required justification, visible to every
+// admin next to the computed score. Null score clears the override.
+app.post('/api/catalog/:host/override', ...adminWrite, (req, res) => {
+  const { score, note } = req.body || {};
+  if (score != null && (!Number.isFinite(Number(score)) || Number(score) < 0 || Number(score) > 100)) {
+    return res.status(400).json({ error: 'score must be 0-100 or null to clear' });
+  }
+  if (score != null && !String(note || '').trim()) {
+    return res.status(400).json({ error: 'a justification note is required for an override' });
+  }
+  const updated = appCatalog.overrideScore(req.params.host, { score, note, actor: req.user.user });
+  if (!updated) return res.status(404).json({ error: 'unknown app' });
+  db.appendAudit({
+    action: score == null ? 'CATALOG_OVERRIDE_CLEARED' : 'CATALOG_SCORE_OVERRIDDEN',
+    actor: req.user.user,
+    detail: score == null ? req.params.host : `${req.params.host} -> ${Math.round(Number(score))}: ${String(note).slice(0, 200)}`,
+  });
+  res.json({ ok: true });
+});
+
+// Identity configuration self-test: reports which sign-in paths are actually
+// wired (config completeness only - no outbound calls), and audits the check.
+app.post('/api/identity/test', ...adminRead, auth.requireCsrf, (req, res) => {
+  const oidcConfig = oidc.config();
+  const scimToken = String(process.env.SCIM_BEARER_TOKEN || '').trim();
+  const checks = [
+    { id: 'oidc', label: 'OIDC single sign-on', ok: !!oidcConfig.enabled,
+      detail: oidcConfig.enabled ? `issuer ${oidcConfig.issuer}` : 'set OIDC_ISSUER, OIDC_CLIENT_ID, and OIDC_CLIENT_SECRET' },
+    { id: 'oidc_redirect', label: 'OIDC redirect URI', ok: !oidcConfig.enabled || !!oidcConfig.redirectUri,
+      detail: oidcConfig.redirectUri || 'set OIDC_REDIRECT_URI to this console\'s /auth/oidc/callback' },
+    { id: 'scim', label: 'SCIM provisioning', ok: scimToken.length >= 32,
+      detail: scimToken ? (scimToken.length >= 32 ? 'bearer token configured' : 'token shorter than 32 chars') : 'set SCIM_BEARER_TOKEN (32+ chars)' },
+    { id: 'break_glass', label: 'Local break-glass account', ok: true, detail: 'ADMIN_USER/ADMIN_PASSWORD active' },
+  ];
+  db.appendAudit({ action: 'IDENTITY_CONFIG_TESTED', actor: req.user.user, detail: checks.filter((c) => !c.ok).map((c) => c.id).join(', ') || 'all ok' });
+  res.json({ checkedAt: new Date().toISOString(), ok: checks.every((c) => c.ok), checks });
+});
+
+// Daily digest: yesterday's decision counts to every destination subscribed to
+// the 'digest' event type. On a 24h timer and on demand for testing.
+async function sendDailyDigest(actor = 'scheduler') {
+  const s = db.stats();
+  const alert = {
+    action: 'digest', status: 'digest', riskScore: 0, maxSeverity: 0,
+    title: 'PromptWall daily digest',
+    summary: { pending: s.pending, todayBlocked: s.todayBlocked, approved: s.approved, denied: s.denied, totalQueries: s.total },
+    generatedAt: new Date().toISOString(),
+  };
+  const results = await subscriptions.dispatch(alert);
+  if (results.length) db.appendAudit({ action: 'DIGEST_SENT', actor, detail: `${results.filter((r) => r.status === 'delivered').length}/${results.length} delivered` });
+  return results;
+}
+setInterval(() => { sendDailyDigest().catch(() => {}); }, 24 * 3600 * 1000).unref();
+
+app.post('/api/reports/digest/send', ...adminWrite, async (req, res) => {
+  res.json({ results: await sendDailyDigest(req.user.user) });
+});
+
 // Static detector metadata (severity scale + regulation map) so the console
 // can explain historical rows that predate persisted score breakdowns.
 app.get('/api/detectors/meta', auth.requireAuth, (req, res) => {

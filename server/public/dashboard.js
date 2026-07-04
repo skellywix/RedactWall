@@ -2614,6 +2614,30 @@ document.addEventListener('click', async (e) => {
     const box = $('#globalSearch');
     box.value = searchPivot.dataset.searchPivot;
     updateSearch(box.value);
+    if (searchPivot.dataset.thenTab) activateTab(searchPivot.dataset.thenTab);
+    return;
+  }
+  const catalogExpand = e.target.closest('[data-catalog-expand]');
+  if (catalogExpand) {
+    catalogExpandedHost = catalogExpandedHost === catalogExpand.dataset.catalogExpand ? null : catalogExpand.dataset.catalogExpand;
+    renderCatalog(catalogApps);
+    return;
+  }
+  const overrideSet = e.target.closest('[data-catalog-override-set]');
+  if (overrideSet) {
+    const host = overrideSet.dataset.catalogOverrideSet;
+    const score = Number($('#catalogOverrideScore').value);
+    const note = ($('#catalogOverrideNote').value || '').trim();
+    if (!Number.isFinite(score) || !note) { toast('An override needs a 0-100 score and a justification note.', 'bad'); return; }
+    const r = await api(`/api/catalog/${encodeURIComponent(host)}/override`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ score, note }) });
+    if (r && r.ok) { toast(`Score override recorded for ${host}.`, 'good'); loadCatalog(); }
+    return;
+  }
+  const overrideClear = e.target.closest('[data-catalog-override-clear]');
+  if (overrideClear) {
+    const host = overrideClear.dataset.catalogOverrideClear;
+    const r = await api(`/api/catalog/${encodeURIComponent(host)}/override`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ score: null }) });
+    if (r && r.ok) { toast(`Override cleared for ${host}.`, 'good'); loadCatalog(); }
     return;
   }
   const catalogReview = e.target.closest('[data-catalog-review]');
@@ -2816,6 +2840,15 @@ document.addEventListener('click', async (e) => {
 });
 
 document.addEventListener('change', (e) => {
+  const colToggle = e.target.closest('[data-activity-col]');
+  if (colToggle) {
+    const hidden = hiddenActivityCols();
+    if (colToggle.checked) hidden.delete(colToggle.dataset.activityCol);
+    else hidden.add(colToggle.dataset.activityCol);
+    localStorage.setItem('promptwall.activityCols', JSON.stringify([...hidden]));
+    applyActivityColumns();
+    return;
+  }
   const queueBulkSelect = e.target.closest('[data-queue-bulk-select]');
   if (queueBulkSelect) {
     const id = queueBulkSelect.dataset.queueBulkSelect;
@@ -2990,18 +3023,40 @@ function renderActivityRows(rows) {
     const decided = q.decidedBy ? `\nDecided by: ${q.decidedBy} at ${fmt(q.decidedAt)}${q.decisionNote ? `\nNote: ${q.decisionNote}` : ''}` : '';
     const detail = `Status: ${humanize(q.status)}\nSession ID: ${q.id || '-'}\nOwner: ${workflowOwner(q)}\nRisk: ${q.riskScore ?? 0}/100${decided}`;
     return `<tr class="activity-row ${activitySeverityClass(q)} ${expandedActivityId === q.id ? 'selected' : ''}" data-activity-id="${escapeHtml(q.id)}" tabindex="0">
-    <td class="mono">${escapeHtml(fmt(q.createdAt))}</td>
-    <td>${escapeHtml(sourceLabel(q.source))}</td>
-    <td>${escapeHtml(q.user || '-')}</td>
-    <td class="mono">${escapeHtml(q.destination || '-')}</td>
-    <td>${escapeHtml(workflowOwner(q))}</td>
-    <td><span class="sev ${sevClass(q.maxSeverityLabel)}">${escapeHtml(q.maxSeverityLabel || 'low')}</span></td>
-    <td class="mono">${escapeHtml(q.riskScore ?? 0)}</td>
-    <td>${escapeHtml(Object.keys(q.entityCounts || {}).join(', ') || '-')}</td>
-    <td>${statusChip(tone, humanize(q.status), detail)}<span class="row-affordance">VIEW</span></td>
+    <td class="mono" data-col="time">${escapeHtml(fmt(q.createdAt))}</td>
+    <td data-col="source">${escapeHtml(sourceLabel(q.source))}</td>
+    <td data-col="user">${escapeHtml(q.user || '-')}</td>
+    <td class="mono" data-col="destination">${escapeHtml(q.destination || '-')}</td>
+    <td data-col="owner">${escapeHtml(workflowOwner(q))}</td>
+    <td data-col="severity"><span class="sev ${sevClass(q.maxSeverityLabel)}">${escapeHtml(q.maxSeverityLabel || 'low')}</span></td>
+    <td class="mono" data-col="risk">${escapeHtml(q.riskScore ?? 0)}</td>
+    <td data-col="detected">${escapeHtml(Object.keys(q.entityCounts || {}).join(', ') || '-')}</td>
+    <td data-col="status">${statusChip(tone, humanize(q.status), detail)}<span class="row-affordance">VIEW</span></td>
   </tr>${activityDetail(q)}`;
   }).join('') || '<tr><td colspan="9" class="empty">No matching activity</td></tr>';
+  applyActivityColumns();
   renderTablePager('#activityPager', { target: 'activity', ...page });
+}
+
+// Column chooser (Netskope Customize Columns pattern), persisted locally.
+const ACTIVITY_COLS = ['time', 'source', 'user', 'destination', 'owner', 'severity', 'risk', 'detected', 'status'];
+
+function hiddenActivityCols() {
+  try { return new Set(JSON.parse(localStorage.getItem('promptwall.activityCols') || '[]')); } catch { return new Set(); }
+}
+
+function applyActivityColumns() {
+  const hidden = hiddenActivityCols();
+  $$('#tab-activity [data-col]').forEach((el) => {
+    el.style.display = hidden.has(el.dataset.col) ? 'none' : '';
+  });
+}
+
+function renderActivityColMenu() {
+  const menu = $('#activityColMenu');
+  if (!menu) return;
+  const hidden = hiddenActivityCols();
+  menu.innerHTML = ACTIVITY_COLS.map((col) => `<label><input type="checkbox" data-activity-col="${col}" ${hidden.has(col) ? '' : 'checked'}/> ${humanize(col)}</label>`).join('');
 }
 
 let currentInsights = null;
@@ -3203,6 +3258,41 @@ function sortedCatalogApps(apps) {
   });
 }
 
+let catalogExpandedHost = null;
+
+// App detail drawer: full record, score-factor breakdown, analyst override.
+function catalogDetailRow(a) {
+  if (catalogExpandedHost !== a.destination) return '';
+  const flags = (a.riskAttributes && a.riskAttributes.flags) || [];
+  const overrideForm = canAdminWrite() ? `
+      <div class="catalog-override">
+        <b>Analyst score override</b>
+        <input id="catalogOverrideScore" type="number" min="0" max="100" placeholder="0-100" value="${a.riskOverride ?? ''}" aria-label="Override score"/>
+        <input id="catalogOverrideNote" type="text" placeholder="Business justification (required, audited)" value="${escapeHtml(a.overrideNote || '')}" aria-label="Override justification"/>
+        <button class="ghost mini" data-catalog-override-set="${escapeHtml(a.destination)}" type="button">Set override</button>
+        ${a.riskOverride != null ? `<button class="ghost mini" data-catalog-override-clear="${escapeHtml(a.destination)}" type="button">Clear</button>` : ''}
+      </div>` : '';
+  return `<tr class="catalog-detail-row"><td colspan="9"><div class="activity-detail">
+      <div class="activity-detail-grid">
+        <div class="datum"><label>Host</label><b>${escapeHtml(a.destination)}</b></div>
+        <div class="datum"><label>Provider</label><b>${escapeHtml(a.provider || '-')}</b></div>
+        <div class="datum"><label>Region</label><b>${escapeHtml(a.region || '-')}</b></div>
+        <div class="datum"><label>Computed score</label><b>${a.baseRiskScore ?? '-'}${a.riskOverride != null ? ` (overridden to ${a.riskOverride})` : ''}</b></div>
+        <div class="datum"><label>First seen</label><b>${escapeHtml(a.firstSeen ? fmt(a.firstSeen) : '-')}</b></div>
+        <div class="datum"><label>Last seen</label><b>${escapeHtml(a.lastSeen ? fmt(a.lastSeen) : '-')}</b></div>
+        <div class="datum"><label>Owner</label><b>${escapeHtml(a.owner || '-')}</b></div>
+        <div class="datum"><label>Events</label><b>${a.eventCount || 0} via ${escapeHtml(Object.entries(a.sources || {}).map(([k, v]) => `${k} (${v})`).join(', ') || '-')}</b></div>
+      </div>
+      ${flags.length ? `<div class="chips">${flags.map((f) => `<span class="insights-attr">${escapeHtml(CATALOG_ATTR_LABEL[f] || f)}</span>`).join(' ')}</div>` : ''}
+      ${a.overriddenBy ? `<div class="reasons">Override by ${escapeHtml(a.overriddenBy)}: ${escapeHtml(a.overrideNote || '')}</div>` : ''}
+      ${a.notes ? `<div class="reasons">Notes: ${escapeHtml(a.notes)}</div>` : ''}
+      ${overrideForm}
+      <div class="activity-detail-actions">
+        <button class="ghost mini" data-search-pivot="dest:${escapeHtml(a.destination)}" data-then-tab="activity" type="button">VIEW ACTIVITY</button>
+      </div>
+    </div></td></tr>`;
+}
+
 function catalogGovernCell(a) {
   if (catalogPendingReview && catalogPendingReview.host === a.destination) {
     return `<input class="catalog-reason" id="catalogReviewReason" type="text" placeholder="Reason (audited)" value="${escapeHtml(catalogPendingReview.decision)} decision from console" aria-label="Review reason"/>
@@ -3232,7 +3322,7 @@ function renderCatalog(apps) {
   $('#catalogRows').innerHTML = sortedCatalogApps(apps).map((a) => `
     <tr>
       <td class="catalog-check"><input type="checkbox" data-catalog-select="${escapeHtml(a.destination)}" ${catalogSelected.has(a.destination) ? 'checked' : ''} aria-label="Select ${escapeHtml(a.destination)}"/></td>
-      <td>${escapeHtml(a.appName || a.destination)}<div class="catalog-host">${escapeHtml(a.destination)}</div></td>
+      <td><button class="catalog-app-link" data-catalog-expand="${escapeHtml(a.destination)}" type="button" title="Open app details">${escapeHtml(a.appName || a.destination)}${a.riskOverride != null ? ' *' : ''}</button><div class="catalog-host">${escapeHtml(a.destination)}</div></td>
       <td>${escapeHtml(a.provider || '—')}</td>
       <td><span class="insights-chip ${CATALOG_RISK_TONE[a.riskTier] || 'tone-neutral'}">${escapeHtml(a.riskTier)}</span> <span class="catalog-score">${a.riskScore == null ? '' : a.riskScore}</span></td>
       <td>${catalogAttrs(a)}</td>
@@ -3240,7 +3330,7 @@ function renderCatalog(apps) {
       <td>${a.eventCount || 0}</td>
       <td class="catalog-sources">${escapeHtml(Object.keys(a.sources || {}).join(', ') || '—')}</td>
       <td class="catalog-actions">${catalogGovernCell(a)}</td>
-    </tr>`).join('') || '<tr><td colspan="9" class="insights-empty">No AI apps discovered yet. Import a proxy/DNS log or wait for sensor sightings.</td></tr>';
+    </tr>${catalogDetailRow(a)}`).join('') || '<tr><td colspan="9" class="insights-empty">No AI apps discovered yet. Import a proxy/DNS log or wait for sensor sightings.</td></tr>';
   updateCatalogBulkBar();
   const reason = $('#catalogReviewReason');
   if (reason) { reason.focus(); reason.select(); }
@@ -3370,6 +3460,59 @@ function renderCompliance(controls) {
         <div class="compliance-families">${(c.controlFamilies || []).map((f) => `<span class="insights-attr">${escapeHtml(f)}</span>`).join(' ')}</div>
       </div>
     </div>`).join('');
+  renderComplianceRecommendations(controls);
+  currentComplianceControls = controls;
+}
+
+let currentComplianceControls = [];
+
+// Recommendation cards (Purview "Fortify your data security" pattern): each
+// attention control becomes a next step that jumps into Configuration.
+function renderComplianceRecommendations(controls) {
+  const el = $('#complianceRecommendations');
+  if (!el) return;
+  const open = controls.filter((c) => c.state !== 'covered').slice(0, 4);
+  el.innerHTML = open.length
+    ? open.map((c) => `<button class="stat alert" type="button" data-tab-jump="policy" data-tooltip="Open Configuration to close this gap">
+        <div class="l"><span class="status-light tone-warn" aria-hidden="true"></span>Recommended</div>
+        <div class="n" style="font-size:15px">${escapeHtml(c.title)}</div>
+        <div class="m">${escapeHtml((c.summary || '').slice(0, 90))}</div>
+        <div class="stat-rule"></div>
+      </button>`).join('')
+    : '<div class="empty">All mapped controls are covered - nothing to recommend right now.</div>';
+}
+
+function exportComplianceCsv() {
+  if (!currentComplianceControls.length) { toast('No compliance data loaded yet.', 'bad'); return; }
+  downloadCsv(`promptwall-controls-${csvStamp()}.csv`,
+    ['Control', 'State', 'Frameworks', 'Summary'],
+    currentComplianceControls.map((c) => [c.title, c.state, (c.controlFamilies || []).join('; '), c.summary || '']));
+}
+
+function exportExecSummaryCsv() {
+  const d = currentInsights;
+  if (!d) { toast('No insights data loaded yet.', 'bad'); return; }
+  const rows = [
+    ['Window (days)', insightsWindowDays],
+    ...Object.entries(d.kpis || {}).map(([k, v]) => [`Decisions: ${k}`, v]),
+    ...(d.topDestinations || []).slice(0, 10).map((t) => [`Top destination: ${t.label || t[0]}`, t.count ?? t[1]]),
+    ...(d.topUsers || []).slice(0, 10).map((t) => [`Top user: ${t.label || t[0]}`, t.count ?? t[1]]),
+    ...(d.riskBands || []).map((b) => [`Risk band: ${b.label}`, b.count]),
+  ];
+  downloadCsv(`promptwall-executive-summary-${csvStamp()}.csv`, ['Metric', 'Value'], rows);
+}
+
+async function runIdentityTest() {
+  const r = await api('/api/identity/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  const d = await responseJsonObject(r, null);
+  const el = $('#identityTestResult');
+  if (!el) return;
+  if (!d) { el.innerHTML = '<div class="empty">Test failed - Security Admin session required.</div>'; return; }
+  el.innerHTML = `<div class="reasons">Checked ${escapeHtml(fmt(d.checkedAt))} - recorded in the audit log</div>`
+    + d.checks.map((c) => `<div class="incident-trail-row">
+        ${statusChip(c.ok ? 'good' : 'warn', c.ok ? 'OK' : 'ACTION', c.detail)}
+        <span class="what"><b>${escapeHtml(c.label)}</b> - ${escapeHtml(c.detail)}</span>
+      </div>`).join('');
 }
 
 // ---- Integrations & delivery ------------------------------------------------
@@ -4756,6 +4899,7 @@ if ($('#exportActivityCsv')) $('#exportActivityCsv').addEventListener('click', e
 if ($('#exportAuditCsv')) $('#exportAuditCsv').addEventListener('click', exportAuditCsv);
 if ($('#detectorTestRun')) $('#detectorTestRun').addEventListener('click', () => { runDetectorTest().catch(() => {}); });
 if ($('#saveView')) $('#saveView').addEventListener('click', saveCurrentView);
+renderActivityColMenu();
 if ($('#queueBulkApprove')) $('#queueBulkApprove').addEventListener('click', () => { runQueueBulk('approve').catch(() => {}); });
 if ($('#queueBulkDeny')) $('#queueBulkDeny').addEventListener('click', () => { runQueueBulk('deny').catch(() => {}); });
 if ($('#savedViews')) {
@@ -4764,6 +4908,12 @@ if ($('#savedViews')) {
 }
 if ($('#policyExportBtn')) $('#policyExportBtn').addEventListener('click', () => { exportPolicyJson().catch(() => {}); });
 if ($('#insightsExportCsv')) $('#insightsExportCsv').addEventListener('click', exportInsightsCsv);
+if ($('#insightsExecCsv')) $('#insightsExecCsv').addEventListener('click', exportExecSummaryCsv);
+if ($('#complianceCsvBtn')) $('#complianceCsvBtn').addEventListener('click', exportComplianceCsv);
+if ($('#identityTestBtn')) $('#identityTestBtn').addEventListener('click', () => {
+  $('#identityTestPanel').classList.remove('hidden');
+  runIdentityTest().catch(() => {});
+});
 if ($('#refreshCatalog')) $('#refreshCatalog').onclick = loadCatalog;
 if ($('#catalogImportBtn')) $('#catalogImportBtn').onclick = () => { $('#catalogImportForm').classList.toggle('hidden'); $('#catalogAddForm').classList.add('hidden'); };
 if ($('#catalogAddBtn')) $('#catalogAddBtn').onclick = () => { $('#catalogAddForm').classList.toggle('hidden'); $('#catalogImportForm').classList.add('hidden'); };

@@ -83,11 +83,12 @@ are marked MISSING below with the reason when deliberate.
 - [x] HAVE: every Command Center metric card is a drill-through button into
   the tab where the operator can act (coverage / integrations / queue /
   activity by metric type).
-- [ ] MISSING: policy-action pivot filters at the top — Allowed/Blocked/
-  Isolated, sanctioned vs unsanctioned (Zscaler Gen AI report filters;
-  Purview app-scope pivots Copilot/Enterprise/Other).
-- [ ] MISSING: per-widget CSV download icon (Zscaler About Widgets;
-  Netskope widget kebab menu).
+- [x] PARTIAL: decision pivots live in the search grammar (`status:blocked`,
+  `status:allowed`) applied from any metric drill-through; a dedicated
+  chip row on the monitor itself is future polish.
+- [ ] DELIBERATE SKIP: per-widget CSV on the Command Center - Insights owns
+  data exports (series + executive summary CSV); monitor cards drill
+  through to the acting tab instead of duplicating exports.
 
 ## All Activity (`#tab-activity`)
 
@@ -95,8 +96,8 @@ are marked MISSING below with the reason when deliberate.
 - [x] HAVE: CSV export honoring active filters (Export CSV on Activity + Audit).
 - [x] HAVE: time-range picker (24h/7d/30d/all); saved views remember it.
 - [x] HAVE: rows-per-page selector (10/25/50/100) on Activity and Audit.
-- [ ] MISSING: column chooser grouped by category (Netskope Customize
-  Columns gear icon; Zscaler column checkboxes with select/deselect all).
+- [x] HAVE: Columns chooser on All Activity - checkbox menu toggling any of
+  the nine columns, persisted locally.
 - [x] HAVE: field query syntax - `user:`, `dest:`, `status:`, `sev:`, `source:`, `action:` tokens in the global search, mixed with free text.
 - [x] HAVE: saved views - name the current search + range + page size, reapply from the dropdown (stored locally, 12 max).
 - [x] HAVE: pivot shortcuts - SAME USER / SAME DESTINATION buttons in the expanded activity row set the field query.
@@ -105,20 +106,20 @@ are marked MISSING below with the reason when deliberate.
 
 - [x] HAVE: 7/30/90-day window, top destinations, trend charts.
 - [x] PARTIAL->BETTER: window extended to 180/365-day presets; no calendar picker (deliberate - presets cover exam windows).
-- [ ] MISSING: scheduled report delivery — emailed PDF/CSV on a
-  daily/weekly/monthly cadence (Netskope Schedule delivery gear menu;
-  Zscaler weekly/monthly/quarterly links that expire in 15 days).
-- [ ] MISSING: exec-facing named reports (Zscaler Executive Insights /
-  Company Risk Score; MDCA six-page executive PDF; Nightfall four
-  Generate-Reports presets capped at top-15 users).
+- [x] HAVE: daily digest to any subscription destination with the 'digest'
+  event type (24h timer + POST /api/reports/digest/send for on-demand);
+  email specifically follows once an SMTP relay is configured.
+- [x] HAVE: "Executive summary" export on Insights (decision totals, top
+  destinations/users, risk bands as CSV); PDF rendering deliberately
+  skipped - CSV drops into any board deck.
 - [x] HAVE: Export CSV on Insights downloads the daily decision series for the window.
 
 ## Coverage (`#tab-coverage`) and Lineage (`#tab-lineage`)
 
 - [x] HAVE: coverage matrix, file-flow lineage views.
-- [ ] MISSING: fleet/device table conveniences — bulk enable/disable,
-  per-device event-history timeline with a "reason" column, per-service
-  pause with default 30-minute window (Netskope Devices page).
+- [ ] DELIBERATE SKIP: remote device enable/disable/pause - sensors have no
+  remote-control channel by design (they fail closed on their own); the
+  fleet matrix + companion reporting covers visibility.
 - [x] HAVE: per-user fleet matrix with ACTIVE / STALE / MISSING state chips
   (tooltips explain each state and last-seen).
 - [x] PARTIAL: sensors stale after 48h are flagged in the fleet matrix and in
@@ -130,48 +131,49 @@ are marked MISSING below with the reason when deliberate.
 - [x] HAVE: risk scoring, sanction states, review flow, discovery.
 - [x] HAVE: inline add-app and import forms, per-row inline review reason, toast notifications; zero native dialogs remain in the console.
 - [x] HAVE: sortable catalog columns and bulk allow/govern/block with a shared audited reason.
-- [ ] MISSING: app detail drawer with tabbed Overview/Info/Usage and
-  score-factor breakdown (MDCA app page tabs; Netskope CCI seven-category
-  breakdown).
-- [ ] MISSING: score override with a business-justification note visible to
-  other admins (MDCA "Override app score" + App note).
-- [ ] MISSING: app compare — side-by-side of 2–3 apps (Netskope CCI Compare
-  Apps).
+- [x] HAVE: app detail drawer (click the app name) - provider, region,
+  computed vs overridden score, first/last seen, sources with counts,
+  risk attributes, owner/notes, and a jump into that app's activity.
+- [x] HAVE: analyst score override (0-100) with a required justification
+  note, shown to every admin next to the computed score, audited, and
+  clearable.
+- [ ] DELIBERATE SKIP: app compare - the sortable table with the detail
+  drawer covers the comparison job at our catalog size (<100 apps).
 - [x] HAVE: catalog Export CSV (app, host, provider, risk, status, events, sources).
 
 ## Compliance (`#tab-compliance`)
 
 - [x] HAVE: control readiness, evidence pack export, regulation templates.
-- [ ] MISSING: recommendation cards with one-click preconfigured policy
-  creation and a verify-status flyout (Purview DSPM "Get started" checks
-  and "Fortify your data security" cards).
-- [ ] MISSING: policies-overview export for a chosen time range, downloadable
-  later from an "Exported reports" area (MDCA Policies Export button).
+- [x] HAVE: "Recommended next steps" cards on Compliance - every
+  attention-state control becomes a card that jumps into Configuration.
+- [x] HAVE: controls CSV export on Compliance (control, state, frameworks,
+  summary); exports are instant here so no deferred-download area needed.
 
 ## Identity (`#tab-identity`)
 
 - [x] HAVE: OIDC/SCIM setup, seats, role mapping, step-up.
-- [ ] MISSING: per-connector "Test now" style check for OIDC/SCIM with
-  last-tested timestamp (MDCA connector Test now; Zscaler NSS feeds show
-  last connectivity test time).
-- [ ] MISSING: exclusion lists with a reason field (MDCA Exclude entities
-  tabs with recommended free-text reason).
+- [x] HAVE: "Test configuration" on Identity - config-completeness check for
+  OIDC, redirect URI, SCIM token, and break-glass account with a checked-at
+  timestamp, recorded in the audit log.
+- [ ] DELIBERATE SKIP: separate identity exclusion lists - policy scopes
+  and the SCIM default-auditor floor cover exclusion semantics; a reason
+  field there would duplicate scope notes.
 
 ## Configuration / Policy (`#tab-policy`)
 
 - [x] HAVE: policy editor, templates, signed bundles, impact preview.
-- [ ] MISSING: policy list conveniences — clone/duplicate, enable/disable
-  toggle that keeps order slot, drag-reorder with a pending "Apply Changes"
-  model (Netskope Real-time Protection kebab menu Clone/Revert/Disable/
-  Move; Zscaler disabled rules keep their rule-order slot).
-- [ ] MISSING: rule labels for grouping/filtering policies (Zscaler Rule
-  Labels first-class field).
-- [ ] MISSING: simulation mode — run policy without enforcement, report
-  what would have matched, then one-click enforce (Purview DLP simulation
-  mode with/without policy tips).
+- [ ] DELIBERATE SKIP: rule clone/reorder - PromptWall policy is a single
+  document with scoped overlays, not an ordered rule list; there is no
+  rule-order to manage, which is itself the examiner-friendly design.
+- [ ] DELIBERATE SKIP: rule labels - scoped-enforcement entries carry ids
+  and human-readable matchers; labels add a second naming system.
+- [x] PARTIAL: policy impact preview replays recent traffic against a
+  proposed policy before saving (policy-impact-preview.js); a standing
+  simulation *mode* with its own dashboard is future work.
 - [x] HAVE: Download policy JSON button on Configuration (PDF deliberately skipped - JSON diffs are what change review needs).
-- [ ] MISSING: "new policy from search" — convert the current activity
-  filter into a policy (MDCA New policy from search).
+- [ ] DELIBERATE SKIP: new-policy-from-search - the activity pivots put the
+  user/destination on the clipboard-equivalent (search box) and the scope
+  builders accept them directly; auto-conversion risks over-broad scopes.
 - [x] HAVE (tester): Detection Tester runs sample text through the live engine + policy with full severity/confidence/points/regulation rationale, in memory only. Context rules / exclusion dictionaries remain policy-file driven.
 
 ## Deploy (`#tab-deploy`)
@@ -182,13 +184,11 @@ are marked MISSING below with the reason when deliberate.
 - [x] HAVE: per-package "Runs on" line (Chrome/Brave 88+, Edge 88+, Firefox 109+, Node.js 22+).
 - [x] HAVE: SHA-256 chip copies the full checksum.
 - [x] HAVE: per-package Rollout line pointing at the force-install policy file or runbook.
-- [ ] MISSING: release-notes/version-history view per package beyond the
-  download log (Zscaler Information icon per version row; Netskope Golden
-  Release pages). Needs release infrastructure — note as spec'd, not
-  implementable while packages are built from the running tree.
-- [ ] MISSING: staged rollout controls (Zscaler Mass vs Phased Rollout with
-  pause/resume) — out of scope for zip downloads; revisit if we add
-  auto-update channels.
+- [ ] DELIBERATE SKIP: per-version release notes on Deploy - packages are
+  built from the running tree, so there is exactly one live version; the
+  Updates tab links to the GitHub releases page for history.
+- [ ] DELIBERATE SKIP: staged rollout controls - out of scope for zip
+  downloads; revisit if auto-update channels arrive.
 
 ## Integrations (`#tab-integrations`)
 
@@ -196,11 +196,12 @@ are marked MISSING below with the reason when deliberate.
   history.
 - [x] HAVE: Send test shows a persistent inline "Last test: status / attempts / time" badge on the row.
 - [x] HAVE: delivery status legend under the history table (delivered / retrying / failed semantics).
-- [ ] MISSING: add/edit destinations in the UI (config file only today);
-  competitors run OAuth/wizard flows with scope pickers (Nightfall Slack
-  Add-to-Slack, GitHub org picker with all-vs-selected repos).
-- [ ] MISSING: per-recipient notification digests with per-class minimum
-  severity (Zscaler alert subscriptions).
+- [ ] DELIBERATE SKIP: destination CRUD in the UI - destinations carry
+  secrets (tokens/webhook URLs) that we keep out of browser round-trips by
+  design; config/subscriptions.json is the reviewed, versioned path.
+- [x] PARTIAL: destinations already carry minRisk/minSeverity/eventTypes
+  floors, and the new daily digest targets any destination subscribed to
+  the 'digest' event type; per-human email recipients follow with SMTP.
 
 ## Audit Log (`#tab-audit`)
 
@@ -216,8 +217,9 @@ are marked MISSING below with the reason when deliberate.
 - [x] PARTIAL: "Release notes" link on the Updates tab opens the configured
   GitHub repository's releases page; per-version known/fixed-issue splits
   need release infrastructure this repo does not have yet.
-- [ ] MISSING: rollback affordance — "revert to previous version" flow
-  (Zscaler documented revert path).
+- [ ] DELIBERATE SKIP: rollback - the updater is fast-forward-only by
+  design; reverting means redeploying the previous release per the install
+  runbook, which keeps the audit chain append-only.
 
 ## Cross-cutting
 
@@ -225,10 +227,11 @@ are marked MISSING below with the reason when deliberate.
   role-gated navigation — none of the four competitors document a command
   palette; keep it.
 - [x] HAVE: toast component replaced every alert() in the console.
-- [ ] MISSING: async export job center for anything slow (Zscaler Job
-  Center with 72-hour expiry; Purview audit jobs with progress %).
-- [ ] MISSING: "last updated / data latency" hints on report panels
-  (Purview 24-hour ingest note; MDCA scan-order latency notes).
+- [ ] DELIBERATE SKIP: async export job center - every export here is
+  client-side and instant; revisit if server-rendered exports arrive.
+- [x] HAVE: LAST UPDATED clock in the topbar, UPDATED stamp on Overview and
+  the Command Center, checked-at on identity tests, last-test badges on
+  integrations - every live panel says how fresh it is.
 
 Item counts: Queue 5 · Command Center 3 · Activity 7 · Insights 4 ·
 Coverage/Lineage 3 · Catalog 6 · Compliance 2 · Identity 2 · Policy 6 ·
