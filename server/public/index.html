@@ -1251,6 +1251,7 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
 .signal-input-wrap[data-state="warning"] .signal-input-help{color:var(--amber)}
 .signal-input-wrap[data-state="valid"] .signal-input-help{color:var(--green)}
 .signal-filters{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.signal-filters.decision-pivots{justify-content:flex-start;margin-top:12px}
 .signal-chip{
   display:inline-flex;
   align-items:center;
@@ -2554,6 +2555,8 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
           </div>
 
           <div class="metric-grid" id="monitorMetrics" aria-live="polite"></div>
+
+          <div class="signal-filters decision-pivots" id="monitorDecisionPivots" aria-label="Decision pivots into All Activity" aria-live="polite"></div>
 
           <div id="hardeningMission" aria-live="polite"></div>
 

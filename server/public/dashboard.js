@@ -419,6 +419,30 @@ function renderMonitorStatusFilters() {
   }).join('');
 }
 
+// Decision pivots: one chip per gate outcome, counting the loaded activity
+// window and drilling into All Activity with the matching status: field query.
+// Tokens match the search grammar's substring rule, so "blocked" covers
+// destination_blocked, file_upload_blocked, response_blocked, and friends.
+const DECISION_PIVOTS = [
+  { token: 'blocked', label: 'Blocked' },
+  { token: 'pending', label: 'Held' },
+  { token: 'redacted', label: 'Redacted' },
+  { token: 'warned', label: 'Warned' },
+  { token: 'allowed', label: 'Allowed' },
+  { token: 'denied', label: 'Denied' },
+  { token: 'approved', label: 'Approved' },
+];
+
+function renderDecisionPivots() {
+  const el = $('#monitorDecisionPivots');
+  if (!el) return;
+  const count = (token) => currentActivity.filter((q) => String(q.status || '').toLowerCase().includes(token)).length;
+  el.innerHTML = DECISION_PIVOTS.map((pivot) => `
+    <button class="signal-chip" type="button" data-search-pivot="status:${escapeHtml(pivot.token)}" data-then-tab="activity" title="Open All Activity filtered to status:${escapeHtml(pivot.token)}">
+      <span>${escapeHtml(pivot.label)}</span><b>${escapeHtml(count(pivot.token))}</b>
+    </button>`).join('');
+}
+
 // Every Command Center metric drills through to the tab where the operator
 // can act on it (Zscaler "Analyze more" pattern).
 function metricJumpTarget(metric) {
@@ -983,6 +1007,7 @@ function renderMonitor() {
   renderMonitorStatusFilters();
   renderPostureSegments();
   renderMonitorMetrics();
+  renderDecisionPivots();
   renderHardeningMission();
   renderOperatorFlow();
   renderHardeningActionQueue();
@@ -3027,6 +3052,7 @@ async function loadActivity() {
     if (!rows) return;
     currentActivity = rows;
     renderActivityRows(currentActivity);
+    renderDecisionPivots();
     markUpdated();
   } finally {
     setBusy('#tab-activity .panel', false);
