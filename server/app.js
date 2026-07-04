@@ -1876,6 +1876,38 @@ app.post(
   },
 );
 
+// Inline reassignment: Security Admins can change who owns a held decision
+// straight from the queue row. Metadata only - the audit line records the new
+// owner, never prompt content. Empty string clears a field; omitted fields
+// keep their routed value.
+function assignmentPatch(body = {}) {
+  const patch = {};
+  for (const key of ['assignedUser', 'assignedGroup', 'assignedRole']) {
+    if (body[key] === undefined) continue;
+    patch[key] = String(body[key]).trim() || null;
+  }
+  return patch;
+}
+
+app.post('/api/queries/:id/assign', ...adminWrite, validation.validateBody(validation.assignSchema), (req, res) => {
+  const q = db.getQuery(req.params.id);
+  if (!q) return res.status(404).json({ error: 'not found' });
+  if (!routing.routeableStatus(q.status)) return res.status(409).json({ error: `not reassignable: ${q.status}` });
+  const updated = db.updateQuery(q.id, assignmentPatch(req.body));
+  db.appendAudit({
+    action: 'APPROVAL_REASSIGNED',
+    queryId: q.id,
+    actor: req.user.user,
+    detail: [
+      `assignedUser=${updated.assignedUser || 'none'}`,
+      `assignedGroup=${updated.assignedGroup || 'none'}`,
+      `assignedRole=${updated.assignedRole || 'none'}`,
+    ].join('; '),
+  });
+  broadcast('query', { type: updated.status, query: publicQuery(updated) });
+  res.json(publicQuery(updated));
+});
+
 app.post('/api/queries/:id/deny', ...decisionWrite, validation.validateBody(validation.noteSchema), requireDecisionAccess, (req, res) => {
   const q = req.queryRecord;
   if (q.status !== 'pending') return res.status(409).json({ error: `already ${q.status}` });

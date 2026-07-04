@@ -232,6 +232,25 @@ const noteSchema = z.object({
   ),
 }).strict();
 
+// Inline reassignment of a held decision. Empty string clears a field so the
+// console can return an item to "anyone in the group"; omitted fields are
+// left unchanged.
+function clearableAssignmentField(max, pattern) {
+  return z.preprocess(
+    (value) => (value === null ? '' : value),
+    z.union([z.literal(''), z.string().max(max).regex(pattern)]).optional(),
+  );
+}
+
+const assignSchema = z.object({
+  assignedUser: clearableAssignmentField(LIMITS.idChars, POLICY_MATCH_TEXT),
+  assignedGroup: clearableAssignmentField(64, ROUTING_GROUP),
+  assignedRole: clearableAssignmentField(16, ROUTING_ROLE),
+}).strict().refine(
+  (body) => ['assignedUser', 'assignedGroup', 'assignedRole'].some((key) => body[key] !== undefined),
+  { message: 'no assignment fields' },
+);
+
 const bulkDecisionSchema = z.object({
   ids: z.array(z.string().min(1).max(80)).min(1).max(50),
   action: z.enum(['approve', 'deny']),
@@ -613,6 +632,7 @@ module.exports = {
   revealSchema,
   approveSchema,
   noteSchema,
+  assignSchema,
   bulkDecisionSchema,
   applyTemplateSchema,
   receiptVerifySchema,
