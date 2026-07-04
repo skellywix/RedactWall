@@ -1839,6 +1839,43 @@ app.post(
   },
 );
 
+// Bulk decision: approve or deny up to 50 held prompts in one audited pass.
+// Same gates as single decisions - role, per-item decision access, and
+// password step-up for approvals - with per-item outcomes so a partial bulk
+// is honest about what it skipped and why.
+function applyBulkDecision(req) {
+  const status = req.body.action === 'approve' ? 'approved' : 'denied';
+  const note = (req.body && req.body.note) || '';
+  const results = [];
+  for (const id of req.body.ids) {
+    const q = db.getQuery(id);
+    if (!q) { results.push({ id, outcome: 'skipped', reason: 'not found' }); continue; }
+    if (q.status !== 'pending') { results.push({ id, outcome: 'skipped', reason: `already ${q.status}` }); continue; }
+    if (!roles.canDecideQuery(req.user, q)) { results.push({ id, outcome: 'skipped', reason: 'not yours to decide' }); continue; }
+    db.updateQuery(id, { status, decidedBy: req.user.user, decidedAt: new Date().toISOString(), decisionNote: note });
+    db.appendAudit({ action: status.toUpperCase(), queryId: id, actor: req.user.user, detail: note ? `${note} (bulk)` : 'bulk decision' });
+    broadcast('decision', { id, status });
+    results.push({ id, outcome: status });
+  }
+  broadcast('stats', db.stats());
+  return results;
+}
+
+app.post(
+  '/api/queries/bulk-decision',
+  ...decisionWrite,
+  validation.validateBody(validation.bulkDecisionSchema),
+  (req, res, next) => (req.body.action === 'approve' ? requireApprovePassword(req, res, next) : next()),
+  (req, res) => {
+    const results = applyBulkDecision(req);
+    res.json({
+      results,
+      decided: results.filter((r) => r.outcome !== 'skipped').length,
+      skipped: results.filter((r) => r.outcome === 'skipped').length,
+    });
+  },
+);
+
 app.post('/api/queries/:id/deny', ...decisionWrite, validation.validateBody(validation.noteSchema), requireDecisionAccess, (req, res) => {
   const q = req.queryRecord;
   if (q.status !== 'pending') return res.status(409).json({ error: `already ${q.status}` });
@@ -2355,6 +2392,64 @@ app.get('/api/fleet', auth.requireAuth, (req, res) => {
   res.json(fleet.summary());
 });
 
+// Analyst risk-score override with a required justification, visible to every
+// admin next to the computed score. Null score clears the override.
+app.post('/api/catalog/:host/override', ...adminWrite, (req, res) => {
+  const { score, note } = req.body || {};
+  if (score != null && (!Number.isFinite(Number(score)) || Number(score) < 0 || Number(score) > 100)) {
+    return res.status(400).json({ error: 'score must be 0-100 or null to clear' });
+  }
+  if (score != null && !String(note || '').trim()) {
+    return res.status(400).json({ error: 'a justification note is required for an override' });
+  }
+  const updated = appCatalog.overrideScore(req.params.host, { score, note, actor: req.user.user });
+  if (!updated) return res.status(404).json({ error: 'unknown app' });
+  db.appendAudit({
+    action: score == null ? 'CATALOG_OVERRIDE_CLEARED' : 'CATALOG_SCORE_OVERRIDDEN',
+    actor: req.user.user,
+    detail: score == null ? req.params.host : `${req.params.host} -> ${Math.round(Number(score))}: ${String(note).slice(0, 200)}`,
+  });
+  res.json({ ok: true });
+});
+
+// Identity configuration self-test: reports which sign-in paths are actually
+// wired (config completeness only - no outbound calls), and audits the check.
+app.post('/api/identity/test', ...adminRead, auth.requireCsrf, (req, res) => {
+  const oidcConfig = oidc.config();
+  const scimToken = String(process.env.SCIM_BEARER_TOKEN || '').trim();
+  const checks = [
+    { id: 'oidc', label: 'OIDC single sign-on', ok: !!oidcConfig.enabled,
+      detail: oidcConfig.enabled ? `issuer ${oidcConfig.issuer}` : 'set OIDC_ISSUER, OIDC_CLIENT_ID, and OIDC_CLIENT_SECRET' },
+    { id: 'oidc_redirect', label: 'OIDC redirect URI', ok: !oidcConfig.enabled || !!oidcConfig.redirectUri,
+      detail: oidcConfig.redirectUri || 'set OIDC_REDIRECT_URI to this console\'s /auth/oidc/callback' },
+    { id: 'scim', label: 'SCIM provisioning', ok: scimToken.length >= 32,
+      detail: scimToken ? (scimToken.length >= 32 ? 'bearer token configured' : 'token shorter than 32 chars') : 'set SCIM_BEARER_TOKEN (32+ chars)' },
+    { id: 'break_glass', label: 'Local break-glass account', ok: true, detail: 'ADMIN_USER/ADMIN_PASSWORD active' },
+  ];
+  db.appendAudit({ action: 'IDENTITY_CONFIG_TESTED', actor: req.user.user, detail: checks.filter((c) => !c.ok).map((c) => c.id).join(', ') || 'all ok' });
+  res.json({ checkedAt: new Date().toISOString(), ok: checks.every((c) => c.ok), checks });
+});
+
+// Daily digest: yesterday's decision counts to every destination subscribed to
+// the 'digest' event type. On a 24h timer and on demand for testing.
+async function sendDailyDigest(actor = 'scheduler') {
+  const s = db.stats();
+  const alert = {
+    action: 'digest', status: 'digest', riskScore: 0, maxSeverity: 0,
+    title: 'PromptWall daily digest',
+    summary: { pending: s.pending, todayBlocked: s.todayBlocked, approved: s.approved, denied: s.denied, totalQueries: s.total },
+    generatedAt: new Date().toISOString(),
+  };
+  const results = await subscriptions.dispatch(alert);
+  if (results.length) db.appendAudit({ action: 'DIGEST_SENT', actor, detail: `${results.filter((r) => r.status === 'delivered').length}/${results.length} delivered` });
+  return results;
+}
+setInterval(() => { sendDailyDigest().catch(() => {}); }, 24 * 3600 * 1000).unref();
+
+app.post('/api/reports/digest/send', ...adminWrite, async (req, res) => {
+  res.json({ results: await sendDailyDigest(req.user.user) });
+});
+
 // Static detector metadata (severity scale + regulation map) so the console
 // can explain historical rows that predate persisted score breakdowns.
 app.get('/api/detectors/meta', auth.requireAuth, (req, res) => {
@@ -2397,8 +2492,12 @@ app.put('/api/policy/apply-template', ...adminWrite, validation.validateBody(val
 });
 
 app.get('/api/audit', auth.requireAuth, (req, res) => {
+  const queryId = String(req.query.queryId || '').trim();
+  const entries = queryId
+    ? db.listAudit(2000).filter((e) => e.queryId === queryId).slice(0, boundedApiLimit(req.query.limit, 50))
+    : db.listAudit(boundedApiLimit(req.query.limit, 200));
   res.json({
-    entries: db.listAudit(boundedApiLimit(req.query.limit, 200)),
+    entries,
     integrity: db.verifyAuditChain(),
     retention: 'Append-only and hash-chained: entries are never edited or purged for the life of this database. Export an evidence pack for long-term archives.',
   });

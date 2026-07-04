@@ -30,6 +30,10 @@ function nowIso() {
 // The formula is examiner-defensible: provider risk tier dominates, then the
 // two attributes buyers ask about most (trains-on-data, personal tier), then
 // non-US data residency. An unseeded host is 'unrated' (50) until reviewed.
+function tierFor(score) {
+  return score >= 80 ? 'critical' : score >= 60 ? 'high' : score >= 40 ? 'moderate' : score >= 20 ? 'low' : 'minimal';
+}
+
 function scoreFor(risk) {
   if (!risk) return { score: 50, tier: 'unrated' };
   let score = (risk.riskTier || 2) * 15;              // 15/30/45/60 for tier 1-4
@@ -37,8 +41,7 @@ function scoreFor(risk) {
   if ((risk.flags || []).includes('personal_account_tier')) score += 8;
   if (risk.region && risk.region !== 'US') score += 8;
   score = Math.max(0, Math.min(100, score));
-  const tier = score >= 80 ? 'critical' : score >= 60 ? 'high' : score >= 40 ? 'moderate' : score >= 20 ? 'low' : 'minimal';
-  return { score, tier };
+  return { score, tier: tierFor(score) };
 }
 
 // A plausible domain: labels of valid chars separated by dots, a real TLD-ish
@@ -124,6 +127,19 @@ function annotate(host, { owner, notes, sanctionedStatus } = {}) {
   }, (existing && existing.lastSeen) || nowIso());
 }
 
+// Analyst score override with a business justification, visible to every
+// admin (cf. Defender for Cloud Apps "Override app score" + app note).
+function overrideScore(host, { score, note, actor } = {}) {
+  const h = normalizeHost(host);
+  if (!h || !db.getAiApp(h)) return null;
+  const clear = score == null;
+  return db.upsertAiApp(h, {
+    riskOverride: clear ? null : Math.max(0, Math.min(100, Math.round(Number(score)))),
+    overrideNote: clear ? null : String(note || '').slice(0, 500),
+    overriddenBy: clear ? null : String(actor || '').slice(0, 160),
+  }, db.getAiApp(h).lastSeen);
+}
+
 // Sensor-safe public view of the whole catalog.
 function publicCatalog() {
   return db.listAiApps().map((a) => ({
@@ -132,8 +148,12 @@ function publicCatalog() {
     appName: a.appName || a.canonicalHost,
     provider: a.provider || null,
     region: a.region || null,
-    riskScore: typeof a.riskScore === 'number' ? a.riskScore : null,
-    riskTier: a.riskTier || 'unrated',
+    riskScore: a.riskOverride != null ? a.riskOverride : (typeof a.riskScore === 'number' ? a.riskScore : null),
+    riskTier: a.riskOverride != null ? tierFor(a.riskOverride) : (a.riskTier || 'unrated'),
+    baseRiskScore: typeof a.riskScore === 'number' ? a.riskScore : null,
+    riskOverride: a.riskOverride != null ? a.riskOverride : null,
+    overrideNote: a.overrideNote || null,
+    overriddenBy: a.overriddenBy || null,
     riskAttributes: a.riskAttributes || null,
     sanctionedStatus: a.sanctionedStatus || 'under_review',
     knownAiHost: !!a.knownAiHost,
@@ -146,4 +166,4 @@ function publicCatalog() {
   }));
 }
 
-module.exports = { recordSighting, addManual, importCsv, annotate, publicCatalog, scoreFor, STATUS, SOURCES };
+module.exports = { recordSighting, addManual, importCsv, annotate, overrideScore, publicCatalog, scoreFor, STATUS, SOURCES };

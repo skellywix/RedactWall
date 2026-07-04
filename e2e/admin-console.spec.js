@@ -1004,6 +1004,33 @@ test('admin console tabs honor browser back, forward, and refresh', async ({ pag
   expect(problems).toEqual([]);
 });
 
+test('bulk deny clears selected held prompts and the incident trail shows history', async ({ page, request }, testInfo) => {
+  const problems = collectUiProblems(page);
+  const scope = `bk${testInfo.workerIndex}${testInfo.retry}`;
+  const first = await createHeldPrompt(request, { suffix: '7301', user: `bulk-one-${scope}@example.test`, destination: 'chatgpt.com' });
+  const second = await createHeldPrompt(request, { suffix: '7302', user: `bulk-two-${scope}@example.test`, destination: 'claude.ai' });
+  await login(page);
+
+  await expect(page.locator(`.q[data-id="${first.id}"]`)).toBeVisible();
+  await expect(page.locator('#incidentTrail')).toContainText('History');
+
+  await page.locator(`[data-queue-bulk-select="${first.id}"]`).check();
+  await page.locator(`[data-queue-bulk-select="${second.id}"]`).check();
+  await expect(page.locator('#queueBulkCount')).toHaveText('2 selected');
+  await page.locator('#queueBulkNote').fill('bulk e2e sweep');
+  await page.locator('#queueBulkDeny').click();
+
+  await expect(page.locator(`.q[data-id="${first.id}"]`)).toHaveCount(0);
+  await expect(page.locator(`.q[data-id="${second.id}"]`)).toHaveCount(0);
+  await expect(page.locator('#queueBulkBar')).toBeHidden();
+
+  await page.locator('.rail .tab[data-tab="audit"]').click();
+  await page.locator('#globalSearch').fill('bulk e2e sweep');
+  await expect(page.locator('#auditRows')).toContainText('bulk e2e sweep (bulk)');
+
+  expect(problems).toEqual([]);
+});
+
 test('overview is the landing tab and its tiles jump into the workflow', async ({ page }) => {
   const problems = collectUiProblems(page);
   await page.goto('/login.html');
