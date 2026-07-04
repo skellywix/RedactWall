@@ -871,6 +871,36 @@ test('admin console controls and forms are wired end to end', async ({ page, req
   expect(problems).toEqual([]);
 });
 
+test('admin console catalog, compliance, and integrations tabs render live data', async ({ page, request }) => {
+  const problems = collectUiProblems(page);
+  await createShadowAi(request, 'chat.deepseek.com');
+  await createHeldPrompt(request, { suffix: '5511', user: 'catalog-a@example.test', destination: 'claude.ai' });
+  await login(page);
+
+  // App Catalog: discovered apps with risk tiers, attributes, and govern controls.
+  await page.locator('.rail .tab[data-tab="catalog"]').click();
+  await expect(page).toHaveURL(/\/index\.html\?tab=catalog$/);
+  await expect(page.locator('#tab-catalog')).toBeVisible();
+  await expect(page.locator('#catalogKpis .insights-kpi')).toHaveCount(4);
+  await expect(page.locator('#catalogRows')).toContainText('deepseek');
+  await expect(page.locator('#catalogRows [data-catalog-review][data-decision="block"]').first()).toBeVisible();
+
+  // Compliance: AI-governance framework coverage matrix + control cards.
+  await page.locator('.rail .tab[data-tab="compliance"]').click();
+  await expect(page.locator('#tab-compliance')).toBeVisible();
+  await expect(page.locator('#complianceFrameworks')).toContainText('NIST AI RMF');
+  await expect(page.locator('#complianceFrameworks')).toContainText('OWASP LLM Top 10');
+  await expect(page.locator('#complianceControls .panel')).not.toHaveCount(0);
+
+  // Integrations: subscriptions + delivery history.
+  await page.locator('.rail .tab[data-tab="integrations"]').click();
+  await expect(page.locator('#tab-integrations')).toBeVisible();
+  await expect(page.locator('#integrationsKpis .insights-kpi')).toHaveCount(4);
+
+  await expectNoHorizontalOverflow(page);
+  expect(problems).toEqual([]);
+});
+
 test('admin console insights dashboard renders analytics from live events', async ({ page, request }) => {
   const problems = collectUiProblems(page);
   await createHeldPrompt(request, { suffix: '4471', user: 'insights-a@example.test', destination: 'chatgpt.com' });

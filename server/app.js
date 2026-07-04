@@ -1771,6 +1771,22 @@ app.get('/api/export/evidence', auth.requireAuth, (req, res) => {
   }));
 });
 
+// Compliance framework coverage (lightweight; the full pack is /api/export/evidence).
+app.get('/api/compliance', auth.requireAuth, (req, res) => {
+  const controlMap = require('./control-map');
+  const activePolicy = policy.loadPolicy();
+  const summaryQueries = db.listQueries({ all: true });
+  const mappings = controlMap.buildControlMappings({
+    generatedAt: new Date().toISOString(),
+    scope: { rawPromptBodiesIncluded: false },
+    policy: activePolicy,
+    detectors: detector.listDetectors({ customDetectors: policy.customDetectorsForSensors() }),
+    auditIntegrity: db.verifyAuditChain(),
+    coverage: coverage.summarize(summaryQueries, activePolicy),
+  });
+  res.json({ controlMappings: mappings });
+});
+
 app.get('/api/policy', auth.requireAuth, (req, res) => res.json(policy.loadPolicy()));
 app.put('/api/policy', ...adminWrite, validation.validateBody(validation.policyUpdateSchema), (req, res) => {
   const before = policy.loadPolicy();
