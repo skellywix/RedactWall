@@ -8,6 +8,26 @@ const pkg = require('../package.json');
 
 const root = path.join(__dirname, '..');
 const extensionDir = path.join(root, 'sensors', 'browser-extension');
+
+// Extensions need a full (non-headless-shell) Chromium. If the exact build
+// @playwright/test resolves by default is absent (common when the bundled
+// browsers under PLAYWRIGHT_BROWSERS_PATH are a different revision), fall back
+// to any installed full chromium build so the suite runs across environments.
+function resolveChromiumExecutable() {
+  const browsersRoot = process.env.PLAYWRIGHT_BROWSERS_PATH;
+  if (!browsersRoot) return undefined;
+  try {
+    const dirs = fs.readdirSync(browsersRoot).filter((n) => /^chromium-\d+$/.test(n));
+    for (const dir of dirs) {
+      for (const rel of ['chrome-linux/chrome', 'chrome-linux64/chrome', 'chrome-mac/Chromium.app/Contents/MacOS/Chromium']) {
+        const candidate = path.join(browsersRoot, dir, rel);
+        if (fs.existsSync(candidate)) return candidate;
+      }
+    }
+  } catch { /* fall through to default resolution */ }
+  return undefined;
+}
+const chromiumExecutablePath = resolveChromiumExecutable();
 const artifactDir = path.join(root, 'test-results', 'browser-extension');
 const fixturePolicy = {
   enforcementMode: 'block',
@@ -116,6 +136,7 @@ async function launchExtensionContext(baseURL, testInfo, policy = fixturePolicy,
   await testInfo.attach('user-data-dir', { body: userDataDir, contentType: 'text/plain' });
   const context = await chromium.launchPersistentContext(userDataDir, {
     headless: false,
+    ...(chromiumExecutablePath ? { executablePath: chromiumExecutablePath } : {}),
     args: [
       `--disable-extensions-except=${extensionDir}`,
       `--load-extension=${extensionDir}`,
