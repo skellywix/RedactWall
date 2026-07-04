@@ -454,15 +454,18 @@ function parseArgs(argv) {
   return { outDir, extensionId, edgeExtensionId, firefoxInstallUrl, firefoxExtensionId, json };
 }
 
-function main() {
+function main(argv = process.argv.slice(2), deps = {}) {
+  const io = deps.console || console;
+  const runCheck = deps.checkExtensionRelease || checkExtensionRelease;
+  const setExitCode = deps.setExitCode || ((code) => { process.exitCode = code; });
   try {
-    const args = parseArgs(process.argv.slice(2));
+    const args = parseArgs(argv);
     if (args.help) {
-      console.log('Usage: node scripts/check-extension-release.js [--out <directory>] [--chrome-extension-id <id>] [--edge-extension-id <id>] [--firefox-install-url <https-url>] [--json]');
-      console.log('   or: node scripts/check-extension-release.js [directory] [chrome-web-store-id]');
+      io.log('Usage: node scripts/check-extension-release.js [--out <directory>] [--chrome-extension-id <id>] [--edge-extension-id <id>] [--firefox-install-url <https-url>] [--json]');
+      io.log('   or: node scripts/check-extension-release.js [directory] [chrome-web-store-id]');
       return;
     }
-    const result = checkExtensionRelease({
+    const result = runCheck({
       outDir: args.outDir,
       extensionId: args.extensionId,
       edgeExtensionId: args.edgeExtensionId,
@@ -470,18 +473,18 @@ function main() {
       firefoxExtensionId: args.firefoxExtensionId,
     });
     if (args.json) {
-      console.log(JSON.stringify(result.releaseReport, null, 2));
+      io.log(JSON.stringify(result.releaseReport, null, 2));
       return;
     }
     for (const packaged of result.packages) {
-      console.log(`Wrote ${packaged.zipPath}`);
-      console.log(`Wrote ${packaged.manifestPath}`);
+      io.log(`Wrote ${packaged.zipPath}`);
+      io.log(`Wrote ${packaged.manifestPath}`);
     }
-    console.log(`Wrote ${result.reportPath}`);
-    console.log(`Release readiness ${result.releaseReport.status}`);
+    io.log(`Wrote ${result.reportPath}`);
+    io.log(`Release readiness ${result.releaseReport.status}`);
   } catch (err) {
-    console.error(err.message || err);
-    process.exitCode = 1;
+    io.error(err.message || err);
+    setExitCode(1);
   }
 }
 
@@ -495,6 +498,7 @@ module.exports = {
   edgeExtensionSettingsPolicy,
   extensionSettingsPolicy,
   firefoxExtensionSettingsPolicy,
+  main,
   parseArgs,
   validateExtensionId,
 };

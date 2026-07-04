@@ -68,6 +68,7 @@ function validServerOrigin(value) {
   try {
     const url = new URL(String(value || ''));
     if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
+    if (url.username || url.password) return null;
     return `${url.protocol}//${url.host}`;
   } catch (e) {
     return null;

@@ -19,6 +19,9 @@ fs.copyFileSync(path.join(__dirname, '..', 'config', 'policy.json'), policyPath)
 const app = require('../server/app');
 const { listen, loopbackHttpFetch } = require('./support/listen');
 const db = require('../server/db');
+const coverage = require('../server/coverage');
+const posture = require('../server/posture');
+const { validationFields } = require('../server/validation');
 
 
 function close(server) {
@@ -76,6 +79,10 @@ function assertJsonOmits(value, ...needles) {
   }
 }
 
+test('validationFields labels root-level schema errors as body', () => {
+  assert.deepStrictEqual(validationFields({ issues: [{ message: 'invalid root' }] }), ['body']);
+});
+
 test('gate rejects invalid client analysis without echoing prompt values', async () => withServer(async (port) => {
   const sensitiveValue = '524-71-9043';
   const res = await jsonFetch(port, '/api/v1/gate', {
@@ -120,6 +127,42 @@ test('valid gate payload from sensors still evaluates normally', async () => wit
   assert.strictEqual(body.decision, 'allow');
   assert.strictEqual(body.riskScore, 0);
   assert.deepStrictEqual(db.getQuery(body.id).sensor, { name: 'browser_extension', version: '0.3.0', platform: 'chrome_mv3' });
+}));
+
+test('git push guard records sanitized blocked endpoint action', async () => withServer(async (port) => {
+  const rawSecret = 'sk-proj-abcdefghijklmnopqrstuvwxyz1234567890';
+  const res = await jsonFetch(port, '/api/v1/gate', {
+    headers: { 'x-api-key': 'unit-ingest-key' },
+    body: {
+      prompt: '[git push blocked locally] SECRET_KEY',
+      user: 'engineer@example.test',
+      destination: 'git:github.com',
+      source: 'endpoint_agent',
+      channel: 'git_push',
+      clientOutcome: 'action_blocked',
+      note: 'endpoint git push blocked locally after sensitive content detection',
+      clientPreRedacted: true,
+      clientFindings: [{ type: 'SECRET_KEY', severity: 4, score: 0.95, masked: 'sk-proj...7890' }],
+      clientCategories: [],
+      clientEntityCounts: { SECRET_KEY: 1 },
+      clientRiskScore: 80,
+      clientMaxSeverity: 4,
+      clientMaxSeverityLabel: 'critical',
+      sensor: { name: 'endpoint_agent', version: '0.3.0', platform: 'node' },
+    },
+  });
+
+  assert.strictEqual(res.status, 200);
+  const body = await res.json();
+  assert.strictEqual(body.status, 'action_blocked');
+  assert.strictEqual(body.decision, 'block');
+  const stored = db.getQuery(body.id);
+  assert.strictEqual(stored.status, 'action_blocked');
+  assert.strictEqual(stored.source, 'endpoint_agent');
+  assert.strictEqual(stored.channel, 'git_push');
+  assert.strictEqual(stored.destination, 'git:github.com');
+  assert.strictEqual(stored.riskScore, 80);
+  assertJsonOmits(stored, rawSecret, 'customer/member-524-71-9043');
 }));
 
 test('gate preserves pre-redacted endpoint file findings without raw file text', async () => withServer(async (port) => {
@@ -318,6 +361,63 @@ test('mixed sensor versions emit sanitized SIEM version-gap alert', async () => 
   }
 }));
 
+test('gate emits automatic sanitized posture feed when enabled', async () => withServer(async (port) => {
+  const originalFetch = global.fetch;
+  const originalWebhook = process.env.SIEM_WEBHOOK_URL;
+  const originalToken = process.env.SIEM_WEBHOOK_TOKEN;
+  const originalPostureFeed = process.env.SIEM_POSTURE_FEED_ENABLED;
+  const originalPostureInterval = process.env.SIEM_POSTURE_MIN_INTERVAL_MS;
+  const sent = [];
+  process.env.SIEM_WEBHOOK_URL = 'https://siem.example.test/hook';
+  process.env.SIEM_WEBHOOK_TOKEN = 'unit-token';
+  process.env.SIEM_POSTURE_FEED_ENABLED = 'true';
+  process.env.SIEM_POSTURE_MIN_INTERVAL_MS = '10000';
+  global.fetch = async (url, opts) => {
+    if (String(url) === process.env.SIEM_WEBHOOK_URL) {
+      sent.push({ url: String(url), headers: opts.headers, body: JSON.parse(opts.body) });
+      return { ok: true, status: 202, json: async () => ({ ok: true }) };
+    }
+    return originalFetch(url, opts);
+  };
+
+  try {
+    const res = await jsonFetch(port, '/api/v1/gate', {
+      headers: { 'x-api-key': 'unit-ingest-key' },
+      body: {
+        prompt: 'Member SSN 524-71-9043 needs a loan note summary.',
+        user: 'analyst@example.test',
+        destination: 'chatgpt.com',
+        source: 'browser_extension',
+        channel: 'submit',
+        sensor: { name: 'browser_extension', version: '0.3.0', platform: 'chrome_mv3' },
+      },
+    });
+    assert.strictEqual(res.status, 200);
+
+    await waitFor(() => sent.some((alert) => alert.body.eventType === 'promptwall.posture_snapshot'), 2000);
+    const postureAlert = sent.find((alert) => alert.body.eventType === 'promptwall.posture_snapshot');
+    const securityAlert = sent.find((alert) => alert.body.eventType === 'promptwall.security_event');
+    assert.ok(securityAlert);
+    assert.strictEqual(postureAlert.url, 'https://siem.example.test/hook');
+    assert.strictEqual(postureAlert.headers.Authorization, 'Bearer unit-token');
+    assert.strictEqual(postureAlert.body.action, 'POSTURE_FEED');
+    assert.strictEqual(postureAlert.body.automatic, true);
+    assert.strictEqual(postureAlert.body.trigger, 'BLOCKED');
+    assert.ok(postureAlert.body.summary.events >= 1);
+    assertJsonOmits(postureAlert.body, '524-71-9043', 'loan note summary');
+  } finally {
+    global.fetch = originalFetch;
+    if (originalWebhook === undefined) delete process.env.SIEM_WEBHOOK_URL;
+    else process.env.SIEM_WEBHOOK_URL = originalWebhook;
+    if (originalToken === undefined) delete process.env.SIEM_WEBHOOK_TOKEN;
+    else process.env.SIEM_WEBHOOK_TOKEN = originalToken;
+    if (originalPostureFeed === undefined) delete process.env.SIEM_POSTURE_FEED_ENABLED;
+    else process.env.SIEM_POSTURE_FEED_ENABLED = originalPostureFeed;
+    if (originalPostureInterval === undefined) delete process.env.SIEM_POSTURE_MIN_INTERVAL_MS;
+    else process.env.SIEM_POSTURE_MIN_INTERVAL_MS = originalPostureInterval;
+  }
+}));
+
 test('api-only events do not emit sensor version-gap alerts', async () => withServer(async (port) => {
   const originalFetch = global.fetch;
   const originalWebhook = process.env.SIEM_WEBHOOK_URL;
@@ -485,6 +585,68 @@ test('gate records locally blocked sensitive pastes from client-redacted evidenc
   assert.strictEqual(stored.channel, 'paste');
   assert.ok(stored.findings.some((f) => f.type === 'US_SSN'));
   assert.ok(!JSON.stringify(stored).includes(secret));
+}));
+
+test('gate records proxy monitor evidence without enforcing destination policy or raw retention', async () => withServer(async (port) => {
+  const secret = '524-71-9043';
+  const res = await jsonFetch(port, '/api/v1/gate', {
+    headers: { 'x-api-key': 'unit-ingest-key' },
+    body: {
+      prompt: '[REDACTED: US_SSN]',
+      user: 'analyst@example.test',
+      destination: 'notebooklm.google.com',
+      source: 'proxy',
+      channel: 'proxy_monitor',
+      clientOutcome: 'proxy_observed',
+      clientPreRedacted: true,
+      clientFindings: [{ type: 'US_SSN', severity: 4, score: 0.95, masked: '***-**-9043' }],
+      clientCategories: [],
+      clientEntityCounts: { US_SSN: 1 },
+      clientRiskScore: 30,
+      clientMaxSeverity: 4,
+      clientMaxSeverityLabel: 'critical',
+    },
+  });
+
+  assert.strictEqual(res.status, 200);
+  const body = await res.json();
+  assert.strictEqual(body.decision, 'log');
+  assert.strictEqual(body.status, 'proxy_observed');
+  assert.strictEqual(body.mode, 'monitor');
+  assert.ok(body.findings.some((f) => f.type === 'US_SSN'));
+  assertJsonOmits(body, secret);
+
+  const stored = db.getQuery(body.id);
+  assert.strictEqual(stored.status, 'proxy_observed');
+  assert.strictEqual(stored.mode, 'monitor');
+  assert.strictEqual(stored.destination, 'notebooklm.google.com');
+  assert.strictEqual(stored._rawPrompt, undefined);
+  assert.ok(stored.findings.some((f) => f.type === 'US_SSN'));
+  assertJsonOmits(stored, secret);
+  assert.ok(db.listAudit(20).some((entry) => entry.action === 'PROXY_OBSERVED' && entry.queryId === body.id));
+}));
+
+test('gate rejects proxy monitor events that still include detectable raw prompt content', async () => withServer(async (port) => {
+  const secret = '524-71-9043';
+  const res = await jsonFetch(port, '/api/v1/gate', {
+    headers: { 'x-api-key': 'unit-ingest-key' },
+    body: {
+      prompt: 'Member SSN ' + secret,
+      user: 'analyst@example.test',
+      destination: 'chatgpt.com',
+      source: 'proxy',
+      channel: 'proxy_monitor',
+      clientOutcome: 'proxy_observed',
+      clientPreRedacted: true,
+      clientFindings: [{ type: 'US_SSN', severity: 4, score: 0.95, masked: '***-**-9043' }],
+      clientCategories: [],
+    },
+  });
+
+  assert.strictEqual(res.status, 400);
+  const body = await res.json();
+  assert.strictEqual(body.error, 'proxy monitor prompt must be pre-redacted');
+  assertJsonOmits(body, secret);
 }));
 
 test('gate accepts browser action blocks without retaining clipboard text', async () => withServer(async (port) => {
@@ -1111,6 +1273,124 @@ test('gate blocks unapproved AI destinations by default with allowlist override'
   }
 }));
 
+test('AI discovery import records weighted shadow inventory without prompt bodies', async () => withServer(async (port) => {
+  const res = await jsonFetch(port, '/api/v1/discovery', {
+    headers: { 'x-api-key': 'unit-ingest-key' },
+    body: {
+      source: 'proxy',
+      vendor: 'zscaler',
+      user: 'proxy-importer@example.test',
+      sightings: [{
+        destination: 'perplexity.ai',
+        user: 'ops@example.test',
+        events: 7,
+        firstSeen: '2026-07-03T09:00:00.000Z',
+        lastSeen: '2026-07-03T10:00:00.000Z',
+        category: 'chatbot',
+        confidence: 0.92,
+      }],
+    },
+  });
+
+  assert.strictEqual(res.status, 202);
+  const body = await res.json();
+  assert.strictEqual(body.status, 'imported');
+  assert.strictEqual(body.imported, 1);
+  assert.strictEqual(body.observations, 7);
+  assert.strictEqual(body.privacy, 'prompt bodies and raw URLs are not accepted');
+  assert.strictEqual(body.destinations[0].destination, 'perplexity.ai');
+  assert.strictEqual(body.destinations[0].observations, 7);
+
+  const stored = db.getQuery(body.destinations[0].id);
+  assert.strictEqual(stored.status, 'shadow_ai');
+  assert.strictEqual(stored.mode, 'discovery');
+  assert.strictEqual(stored.source, 'proxy');
+  assert.strictEqual(stored.channel, 'shadow_ai');
+  assert.strictEqual(stored.user, 'ops@example.test');
+  assert.strictEqual(stored.destination, 'perplexity.ai');
+  assert.strictEqual(stored.discoveryEvents, 7);
+  assert.strictEqual(stored.discoverySource, 'zscaler');
+  assert.strictEqual(stored.discoveryCategory, 'chatbot');
+  assert.strictEqual(stored.redactedPrompt, '[AI discovery import] perplexity.ai');
+  assert.strictEqual(stored._rawPrompt, undefined);
+  assertJsonOmits(stored, '524-71-9043', 'https://perplexity.ai/search/member-file');
+
+  const coverageReport = coverage.summarize([stored], { requiredSensors: ['proxy'], governedDestinations: [] });
+  assert.strictEqual(coverageReport.totals.events, 7);
+  assert.strictEqual(coverageReport.totals.shadowEvents, 7);
+  assert.strictEqual(coverageReport.sensors.find((s) => s.source === 'proxy').events, 7);
+  assert.strictEqual(coverageReport.shadowDestinations[0].destination, 'perplexity.ai');
+  assert.strictEqual(coverageReport.shadowDestinations[0].shadow, 7);
+  assert.strictEqual(coverageReport.shadowDestinations[0].source, 'zscaler');
+  assert.deepStrictEqual(coverageReport.shadowDestinations[0].sources, ['zscaler']);
+
+  const postureReport = posture.summarize({
+    rows: [stored],
+    policy: { requiredSensors: ['proxy'] },
+    coverageReport,
+    auditIntegrity: { ok: true, count: 1 },
+    actionStates: {},
+  });
+  const asset = postureReport.controlGraph.nodes.find((node) => node.label === 'perplexity.ai');
+  assert.ok(asset);
+  assert.strictEqual(asset.events, 7);
+  assert.strictEqual(asset.source, 'zscaler');
+  assert.ok(postureReport.aiInventory.apps.some((item) => item.name === 'perplexity.ai' && item.source === 'zscaler'));
+  assert.ok(postureReport.controlGraph.edges.some((edge) => edge.events === 7 && edge.label === 'inspects'));
+  assert.strictEqual(JSON.stringify(postureReport).includes('524-71-9043'), false);
+}));
+
+test('AI discovery import rejects raw URL paths, unknown fields, and sensitive identifiers', async () => withServer(async (port) => {
+  const noKey = await jsonFetch(port, '/api/v1/discovery', {
+    body: {
+      source: 'proxy',
+      user: 'proxy-importer@example.test',
+      sightings: [{ destination: 'chatgpt.com', events: 1 }],
+    },
+  });
+  assert.strictEqual(noKey.status, 401);
+
+  const rawUrl = await jsonFetch(port, '/api/v1/discovery', {
+    headers: { 'x-api-key': 'unit-ingest-key' },
+    body: {
+      source: 'proxy',
+      user: 'proxy-importer@example.test',
+      sightings: [{ destination: 'https://chatgpt.com/c/member-file', events: 1 }],
+    },
+  });
+  assert.strictEqual(rawUrl.status, 400);
+  const rawUrlBody = await rawUrl.json();
+  assert.ok(rawUrlBody.fields.includes('sightings.0.destination'));
+  assertJsonOmits(rawUrlBody, 'member-file');
+
+  const sensitive = await jsonFetch(port, '/api/v1/discovery', {
+    headers: { 'x-api-key': 'unit-ingest-key' },
+    body: {
+      source: 'proxy',
+      user: 'proxy-importer@example.test',
+      sightings: [{ destination: 'chatgpt-524-71-9043.example', events: 1 }],
+    },
+  });
+  assert.strictEqual(sensitive.status, 400);
+  const sensitiveBody = await sensitive.json();
+  assert.ok(sensitiveBody.fields.includes('sightings.0.destination'));
+  assertJsonOmits(sensitiveBody, '524-71-9043');
+
+  const promptLike = await jsonFetch(port, '/api/v1/discovery', {
+    headers: { 'x-api-key': 'unit-ingest-key' },
+    body: {
+      source: 'proxy',
+      user: 'proxy-importer@example.test',
+      prompt: 'Customer SSN 524-71-9043',
+      sightings: [{ destination: 'chatgpt.com', events: 1 }],
+    },
+  });
+  assert.strictEqual(promptLike.status, 400);
+  const promptLikeBody = await promptLike.json();
+  assert.ok(promptLikeBody.fields.includes('prompt'));
+  assertJsonOmits(promptLikeBody, 'Customer SSN', '524-71-9043');
+}));
+
 test('sensor policy endpoint publishes detector and scanner controls', async () => withServer(async (port) => {
   const res = await jsonFetch(port, '/api/v1/policy', {
     method: 'GET',
@@ -1127,6 +1407,9 @@ test('sensor policy endpoint publishes detector and scanner controls', async () 
   assert.ok(Array.isArray(body.blockedDestinations));
   assert.ok(Array.isArray(body.blockedFileUploadDestinations));
   assert.ok(Array.isArray(body.blockedBrowserActions));
+  assert.ok(Array.isArray(body.mcpAllowedTools));
+  assert.ok(Array.isArray(body.mcpBlockedTools));
+  assert.ok(Array.isArray(body.mcpApprovalRequiredTools));
   assert.strictEqual(body.blockUnapprovedAiDestinations, true);
   assert.strictEqual(body.responseScanMode, 'flag');
   assert.strictEqual(body.desktopCollectorDestination, 'Desktop AI');
@@ -1394,6 +1677,58 @@ test('admin policy accepts browser action block rules', async () => withServer(a
   } finally {
     fs.writeFileSync(policyPath, originalPolicy);
   }
+}));
+
+test('admin policy accepts MCP tool governance lists', async () => withServer(async (port) => {
+  const originalPolicy = fs.readFileSync(policyPath, 'utf8');
+  const { cookie, csrfToken } = await login(port);
+  try {
+    const res = await jsonFetch(port, '/api/policy', {
+      method: 'PUT',
+      headers: {
+        cookie,
+        'x-csrf-token': csrfToken,
+      },
+      body: {
+        mcpAllowedTools: ['sharepoint.fetch*', 'drive.read*'],
+        mcpBlockedTools: ['*.delete*'],
+        mcpApprovalRequiredTools: ['sharepoint.export*'],
+      },
+    });
+
+    assert.strictEqual(res.status, 200);
+    const body = await res.json();
+    assert.deepStrictEqual(body.mcpAllowedTools, ['sharepoint.fetch*', 'drive.read*']);
+    assert.deepStrictEqual(body.mcpBlockedTools, ['*.delete*']);
+    assert.deepStrictEqual(body.mcpApprovalRequiredTools, ['sharepoint.export*']);
+  } finally {
+    fs.writeFileSync(policyPath, originalPolicy);
+  }
+}));
+
+test('admin policy rejects sensitive MCP tool labels without echoing values', async () => withServer(async (port) => {
+  const originalPolicy = fs.readFileSync(policyPath, 'utf8');
+  const { cookie, csrfToken } = await login(port);
+  const secret = '524-71-9043';
+  const res = await jsonFetch(port, '/api/policy', {
+    method: 'PUT',
+    headers: {
+      cookie,
+      'x-csrf-token': csrfToken,
+    },
+    body: {
+      mcpBlockedTools: [`sharepoint.${secret}`],
+    },
+  });
+
+  assert.strictEqual(res.status, 400);
+  const body = await res.json();
+  assert.deepStrictEqual(body, {
+    error: 'invalid request body',
+    fields: ['mcpBlockedTools.0'],
+  });
+  assert.ok(!JSON.stringify(body).includes(secret));
+  fs.writeFileSync(policyPath, originalPolicy);
 }));
 
 test('admin policy rejects malformed browser action rules without echoing values', async () => withServer(async (port) => {

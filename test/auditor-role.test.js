@@ -132,6 +132,7 @@ test('auditor can inspect evidence but cannot reveal, decide, purge, or edit pol
     ['/api/queries/' + held.id + '/approve', { note: 'auditor attempt', password: 'auditor-pass' }],
     ['/api/queries/' + held.id + '/deny', { note: 'auditor attempt' }],
     ['/api/retention/purge', undefined],
+    ['/api/policy/impact', { blockedDestinations: ['chatgpt.com'] }],
     ['/api/policy', { rawRetentionDays: 7 }, 'PUT'],
     ['/api/policy/apply-template', { id: templateId }, 'PUT'],
   ];

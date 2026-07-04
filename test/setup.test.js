@@ -8,10 +8,20 @@ const os = require('node:os');
 const path = require('node:path');
 const { parseEnv } = require('../server/env');
 const {
+  assertNodeVersion,
   buildEnv,
+  installDependencies,
+  main,
   mergeEnv,
+  npmCommand,
   parseArgs,
+  placeholderValue,
+  printHelp,
+  printStatus,
+  quoteEnvValue,
+  readEnvFile,
   renderEnv,
+  run,
   statusFromEnv,
 } = require('../scripts/setup');
 
@@ -49,6 +59,8 @@ const SETUP_ENV_KEYS = [
   'SIEM_WEBHOOK_TOKEN',
   'SIEM_ALERT_MIN_RISK',
   'SIEM_ALERT_MIN_SEVERITY',
+  'SIEM_POSTURE_FEED_ENABLED',
+  'SIEM_POSTURE_MIN_INTERVAL_MS',
   'AUDITOR_USER',
   'AUDITOR_PASSWORD',
   'SENTINEL_ENV_PATH',
@@ -155,13 +167,149 @@ test('renderEnv quotes only values that need quoting', () => {
   assert.match(rendered, /^ADMIN_PASSWORD="has space"$/m);
   assert.match(rendered, /^ADMIN_TOTP_SECRET=JBSWY3DPEHPK3PXP$/m);
   assert.match(rendered, /^INGEST_API_KEY=ps_ingest_safe$/m);
+  assert.strictEqual(quoteEnvValue(''), '');
+  assert.strictEqual(quoteEnvValue('safe-value_1'), 'safe-value_1');
+  assert.strictEqual(quoteEnvValue('has # mark'), '"has # mark"');
 });
 
 test('parseArgs supports check and alternate env file', () => {
-  const opts = parseArgs(['--check', '--skip-install', '--env', 'demo.env']);
+  const opts = parseArgs(['--check', '--skip-install', '--with-browser', '--force', '--prod', '--env', 'demo.env']);
   assert.strictEqual(opts.check, true);
   assert.strictEqual(opts.skipInstall, true);
+  assert.strictEqual(opts.withBrowser, true);
+  assert.strictEqual(opts.force, true);
+  assert.strictEqual(opts.production, true);
   assert.match(opts.envPath, /demo\.env$/);
+  assert.strictEqual(parseArgs(['--help']).help, true);
+  assert.throws(() => parseArgs(['--bad']), /Unknown option: --bad/);
+});
+
+test('setup helpers cover placeholder, env-file, install, and console output branches', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-setup-helpers-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const envPath = path.join(dir, 'setup.env');
+  fs.writeFileSync(envPath, 'ADMIN_PASSWORD=existing-pass\nPROMPTWALL_INGEST_API_KEY=alias-key\n');
+  assert.deepStrictEqual(readEnvFile(path.join(dir, 'missing.env')), {});
+  assert.strictEqual(readEnvFile(envPath).ADMIN_PASSWORD, 'existing-pass');
+  assert.strictEqual(placeholderValue('ADMIN_PASSWORD', 'ChangeMe!2026'), true);
+  assert.strictEqual(placeholderValue('INGEST_API_KEY', 'dev-ingest-key'), true);
+  assert.strictEqual(placeholderValue('SENTINEL_SEAT_LIMIT', ''), false);
+  assert.strictEqual(placeholderValue('CUSTOM', ''), false);
+
+  const commands = [];
+  installDependencies({ production: true }, {
+    existsSync: () => true,
+    npmCommand: () => 'npm-test',
+    run: (command, args) => commands.push([command, args]),
+  });
+  installDependencies({ withBrowser: true }, {
+    existsSync: () => false,
+    npmCommand: () => 'npm-test',
+    run: (command, args) => commands.push([command, args]),
+  });
+  assert.deepStrictEqual(commands, [
+    ['npm-test', ['ci', '--omit=dev']],
+    ['npm-test', ['install']],
+    ['npm-test', ['exec', '--', 'playwright', 'install', 'chromium']],
+  ]);
+
+  const logs = [];
+  const io = { log: (line) => logs.push(String(line)) };
+  printHelp(io);
+  assert.match(logs.join('\n'), /Usage: npm run setup/);
+  logs.length = 0;
+  printStatus({
+    level: 'warn',
+    ready: false,
+    checks: [
+      { id: 'ok_check', ok: true, message: 'good' },
+      { id: 'bad_check', ok: false, severity: 'blocker', remediation: 'fix it' },
+    ],
+  }, io);
+  assert.match(logs.join('\n'), /Preflight: warn \(blocked\)/);
+  assert.match(logs.join('\n'), /ok: ok_check - good/);
+  assert.match(logs.join('\n'), /blocker: bad_check - fix it/);
+});
+
+test('setup command runner reports child-process success, failure, and spawn errors', () => {
+  assert.doesNotThrow(() => assertNodeVersion());
+  const nodeVersionDescriptor = Object.getOwnPropertyDescriptor(process.versions, 'node');
+  Object.defineProperty(process.versions, 'node', { ...nodeVersionDescriptor, value: '16.0.0' });
+  try {
+    assert.throws(() => assertNodeVersion(), /requires Node\.js \d+\+/);
+  } finally {
+    Object.defineProperty(process.versions, 'node', nodeVersionDescriptor);
+  }
+  assert.match(npmCommand(), /^npm(\.cmd)?$/);
+  assert.doesNotThrow(() => run(process.execPath, ['-e', 'process.exit(0)'], { stdio: 'ignore' }));
+  assert.throws(
+    () => run(process.execPath, ['-e', 'process.exit(7)'], { stdio: 'ignore' }),
+    /exited with 7/,
+  );
+  assert.throws(
+    () => run('promptwall-definitely-missing-command', [], { stdio: 'ignore' }),
+    /ENOENT|not found|no such file/i,
+  );
+});
+
+test('setup main supports injected help, check, write, and blocked status flows', () => {
+  const logs = [];
+  const io = { log: (line) => logs.push(String(line)) };
+  assert.strictEqual(main(['--help'], { console: io }), 0);
+  assert.match(logs.join('\n'), /--production/);
+  logs.length = 0;
+
+  const readyStatus = { level: 'ok', ready: true, checks: [] };
+  const blockedStatus = { level: 'error', ready: false, checks: [{ id: 'admin_password', ok: false, severity: 'blocker', remediation: 'rotate' }] };
+  assert.strictEqual(main(['--check', '--env', 'check.env'], {
+    console: io,
+    assertNodeVersion: () => {},
+    effectiveEnv: (envPath) => ({ envPath }),
+    statusFromEnv: (env) => {
+      assert.match(env.envPath, /check\.env$/);
+      return readyStatus;
+    },
+  }), 0);
+  assert.match(logs.join('\n'), /Preflight: ok \(ready\)/);
+  logs.length = 0;
+
+  const writes = [];
+  const code = main(['--skip-install', '--env', 'pilot.env'], {
+    console: io,
+    env: {},
+    assertNodeVersion: () => {},
+    buildEnv: () => ({ SENTINEL_DB_PATH: 'data/test.db', ADMIN_PASSWORD: 'generated' }),
+    readEnvFile: () => ({ ADMIN_PASSWORD: 'ChangeMe!2026' }),
+    mergeEnv: (existing, generated) => ({ ...existing, ...generated }),
+    renderEnv: (values) => `ADMIN_PASSWORD=${values.ADMIN_PASSWORD}\n`,
+    mkdirSync: (dirPath) => writes.push(['mkdir', dirPath]),
+    writeFileSync: (file, body, opts) => writes.push(['write', file, body, opts.mode]),
+    initializeRuntime: (envPath) => {
+      assert.match(envPath, /pilot\.env$/);
+      return { ok: true };
+    },
+    statusFromEnv: () => readyStatus,
+  });
+  assert.strictEqual(code, 0);
+  assert.ok(writes.some((item) => item[0] === 'write' && /pilot\.env$/.test(item[1]) && item[3] === 0o600));
+  assert.match(logs.join('\n'), /Setup complete/);
+  logs.length = 0;
+
+  assert.strictEqual(main(['--skip-install'], {
+    console: io,
+    env: {},
+    assertNodeVersion: () => {},
+    buildEnv: () => ({ SENTINEL_DB_PATH: 'data/test.db' }),
+    readEnvFile: () => ({}),
+    mergeEnv: (existing, generated) => ({ ...existing, ...generated }),
+    renderEnv: () => '',
+    mkdirSync: () => {},
+    writeFileSync: () => {},
+    initializeRuntime: () => ({ ok: false }),
+    statusFromEnv: () => blockedStatus,
+  }), 1);
+  assert.match(logs.join('\n'), /Audit chain: failed/);
+  assert.match(logs.join('\n'), /Preflight: error \(blocked\)/);
 });
 
 test('production setup, mfa enrollment, and setup check work end to end without setup leaking secrets', () => {

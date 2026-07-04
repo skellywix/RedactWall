@@ -56,6 +56,34 @@ test('AI tool inventory marks detected tools as attention when an approval list 
   assert.ok(result.checks.some((check) => check.id === 'ai_tool_claude_desktop' && !check.ok && check.detail === 'unapproved detected'));
 });
 
+test('AI tool inventory fails closed when process enumeration is unavailable', async () => {
+  const processNames = await inventory.listProcessNames({
+    platform: 'linux',
+    execFileAsync: async (command, args, options) => {
+      assert.strictEqual(command, 'ps');
+      assert.deepStrictEqual(args, ['-eo', 'comm=']);
+      assert.strictEqual(options.windowsHide, true);
+      assert.strictEqual(options.maxBuffer > 0, true);
+      throw new Error('process list unavailable: C:\\Users\\analyst\\secret.txt');
+    },
+  });
+  assert.deepStrictEqual(processNames, []);
+
+  const result = await inventory.collectAiToolInventory({
+    env: { PATH: '' },
+    platform: 'linux',
+    execFileAsync: async () => {
+      throw new Error('process list unavailable');
+    },
+  });
+  assert.deepStrictEqual(result.detected, []);
+  assert.deepStrictEqual(result.checks, [{
+    id: 'ai_tool_inventory',
+    ok: true,
+    detail: 'detected:0',
+  }]);
+});
+
 test('AI tool inventory caps per-tool checks for endpoint heartbeat budget', () => {
   const tools = Array.from({ length: 30 }, (_, index) => ({
     id: `tool_${index}`,

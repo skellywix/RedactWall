@@ -40,6 +40,10 @@ test('evidence pack omits raw prompt, redacted prompt body, token vault, and aud
         endpointAiInventoryReports: 1,
         endpointAiToolDetections: 2,
         endpointAiToolUnapproved: 1,
+        discoveryFeeds: 1,
+        freshDiscoveryFeeds: 1,
+        staleDiscoveryFeeds: 0,
+        lastDiscoveryAt: '2026-06-26T12:00:00.000Z',
       },
       sensors: [{
         source: 'browser_extension',
@@ -120,6 +124,40 @@ test('evidence pack omits raw prompt, redacted prompt body, token vault, and aud
           localPath: 'C:\\secret\\Cursor.exe',
         },
       ],
+      endpointFileFlowProfiles: [
+        {
+          id: 'lending',
+          state: 'covered',
+          detail: 'configured directory',
+          user: 'jdoe',
+          orgId: 'cu-acme',
+          lastSeen: '2026-06-26T12:00:00.000Z',
+          platforms: ['win32'],
+          localPath: 'C:\\secret\\lending-drop',
+        },
+        {
+          id: 'call_center',
+          state: 'attention',
+          detail: 'missing directory',
+          user: 'jdoe',
+          orgId: 'cu-acme',
+          lastSeen: '2026-06-26T12:00:00.000Z',
+          platforms: ['win32'],
+          watchedDirectory: 'C:\\secret\\call-center-drop',
+        },
+      ],
+      discoveryFeeds: [{
+        source: 'zscaler',
+        state: 'fresh',
+        observations: 7,
+        destinations: 1,
+        users: 1,
+        categories: ['chatbot'],
+        lastSeen: '2026-06-26T12:00:00.000Z',
+        ageHours: 1,
+        privacy: 'host-only destinations; prompt bodies and URL paths omitted',
+        rawPrompt: '[AI discovery import] member SSN 524-71-9043',
+      }],
     },
     backup: {
       ok: true,
@@ -215,6 +253,10 @@ test('evidence pack omits raw prompt, redacted prompt body, token vault, and aud
   assert.strictEqual(pack.coverage.totals.activeSensorHealthWarnings, 1);
   assert.strictEqual(pack.coverage.totals.endpointAiToolDetections, 2);
   assert.strictEqual(pack.coverage.totals.endpointAiToolUnapproved, 1);
+  assert.strictEqual(pack.coverage.totals.discoveryFeeds, 1);
+  assert.strictEqual(pack.coverage.totals.freshDiscoveryFeeds, 1);
+  assert.strictEqual(pack.coverage.discoveryFeeds[0].source, 'zscaler');
+  assert.strictEqual(pack.coverage.discoveryFeeds[0].privacy, 'host-only destinations; prompt bodies and URL paths omitted');
   assert.strictEqual(pack.coverage.sensors[0].required, true);
   assert.strictEqual(pack.coverage.sensors[0].desiredVersion, '0.3.0');
   assert.strictEqual(pack.coverage.sensors[0].installHealth.state, 'attention');
@@ -226,6 +268,10 @@ test('evidence pack omits raw prompt, redacted prompt body, token vault, and aud
   assert.deepStrictEqual(pack.coverage.endpointAiTools.map((tool) => [tool.id, tool.state, tool.user]), [
     ['claude_desktop', 'unapproved', 'jdoe'],
     ['cursor', 'approved', 'jdoe'],
+  ]);
+  assert.deepStrictEqual(pack.coverage.endpointFileFlowProfiles.map((profile) => [profile.id, profile.state, profile.user]), [
+    ['lending', 'covered', 'jdoe'],
+    ['call_center', 'attention', 'jdoe'],
   ]);
   assert.strictEqual(pack.coverage.fleet[0].user, 'jdoe');
   assert.strictEqual(pack.coverage.fleet[0].orgId, 'cu-acme');
@@ -351,7 +397,7 @@ test('lineage groups user, destination, sensor, category, and decision without p
       source: 'endpoint_agent',
       channel: 'file_upload',
       findings: [],
-      categories: ['CONFIDENTIAL_BUSINESS'],
+      categories: ['CONFIDENTIAL_BUSINESS', { category: 'LEGAL_CONTRACT' }],
       riskScore: 0,
       redactedPrompt: '[destination blocked] poe.com',
     },
@@ -363,6 +409,7 @@ test('lineage groups user, destination, sensor, category, and decision without p
   assert.strictEqual(lineage.byUser[0].events, 2);
   assert.ok(lineage.byCategory.some((item) => item.key === 'CREDIT_CARD'));
   assert.ok(lineage.byCategory.some((item) => item.key === 'CONFIDENTIAL_BUSINESS'));
+  assert.ok(lineage.byCategory.some((item) => item.key === 'LEGAL_CONTRACT'));
   assert.ok(!wire.includes('4111 1111 1111 1111'));
   assert.ok(!wire.includes('Card **** 1111'));
 });
@@ -414,6 +461,335 @@ test('lineage classifies browser action blocks without clipboard text', () => {
   assert.strictEqual(lineage.byChannel[0].key, 'paste');
   assert.strictEqual(lineage.byDestination[0].key, 'chatgpt.com');
   assert.ok(!JSON.stringify(lineage).includes('524-71-9043'));
+});
+
+test('posture evidence sanitizer bounds undefined, array, and object values', () => {
+  const posture = evidence.safePosture({
+    generatedAt: '2026-06-28T12:00:00.000Z',
+    windowDays: 30,
+    summary: {
+      covered: true,
+      missing: undefined,
+    },
+    metrics: [{
+      id: 'metric_1',
+      label: 'Metric',
+      value: [{ nested: 'ok', secret: 'value that should be bounded' }],
+      trend: { direction: 'up', secret: 'hidden-ish metadata' },
+      status: 'covered',
+    }],
+    aiInventory: {
+      summary: {
+        sanctioned: 1,
+        unsanctioned: 0,
+        shadow: 1,
+        localTools: 1,
+        unapprovedLocalTools: 1,
+        activeDestinations: 2,
+        totalEvents: 4,
+      },
+      apps: [{
+        id: 'ai-app-chatgpt-com',
+        name: 'chatgpt.com',
+        kind: 'AI app',
+        state: 'sanctioned',
+        events: 3,
+        detail: '3 events / 1 blocked / 1 user',
+      }],
+      tools: [{
+        id: 'cursor',
+        name: 'Cursor',
+        kind: 'Endpoint tool',
+        state: 'local_unapproved',
+        detail: 'Unapproved local AI tool',
+      }],
+    },
+    threatGuardrails: {
+      summary: {
+        events: 3,
+        detections: 4,
+        activeRules: 2,
+        promptInjection: 1,
+        unsafeOutput: 1,
+        privacy: 'prompt bodies excluded',
+      },
+      rules: [{
+        id: 'prompt_injection',
+        label: 'Prompt injection',
+        framework: 'OWASP LLM01',
+        atlas: 'MITRE ATLAS: prompt injection',
+        control: 'Browser injection sensor',
+        events: 1,
+        blocked: 1,
+        state: 'critical',
+        status: 'error',
+        detail: 'Hidden instructions blocked before submission.',
+        targetTab: 'activity',
+      }],
+      controls: [{
+        id: 'response_scanning',
+        label: 'Response scanning',
+        state: 'ready',
+        detail: 'AI response mode: redact 524-71-9043',
+        targetTab: 'policy',
+      }],
+      recent: [{
+        id: 'q_injection',
+        timestamp: '2026-06-28T12:02:00.000Z',
+        source: 'browser_extension',
+        destination: 'chatgpt.com',
+        severity: 'critical',
+        status: 'error',
+        decision: 'blocked',
+        title: 'Prompt injection blocked',
+        threats: ['Prompt injection'],
+        detail: 'Browser / Prompt submit / raw content excluded',
+      }],
+    },
+    competitiveReadiness: {
+      generatedAt: '2026-06-28T12:00:00.000Z',
+      summary: {
+        score: 78,
+        state: 'pilot_ready',
+        ready: 4,
+        gaps: 1,
+        privacy: 'metadata only; prompt bodies excluded',
+      },
+      matrix: [{
+        id: 'soc_compliance_handoff',
+        label: 'SOC And Examiner Handoff',
+        marketBar: 'SOC package, posture feed, approval workflow routing, evidence export, and audit-chain proof.',
+        score: 82,
+        state: 'pilot_ready',
+        status: 'online',
+        evidence: ['Offline SOC integration ZIP is available'],
+        gaps: ['Do not export 524-71-9043 in this gap'],
+        action: 'Open audit',
+        targetTab: 'audit',
+        source: 'siem',
+        detail: 'SOC handoff is near ready',
+      }],
+      differentiators: ['Local-first detection and redaction before AI egress'],
+      nextGaps: [{
+        id: 'soc_compliance_handoff',
+        priority: 1,
+        label: 'SOC And Examiner Handoff',
+        detail: 'Configure SIEM_WEBHOOK_URL',
+        action: 'Open audit',
+        targetTab: 'audit',
+        score: 82,
+      }],
+    },
+    behaviorBaselines: {
+      generatedAt: '2026-06-28T12:00:00.000Z',
+      privacy: 'metadata only; prompt bodies excluded',
+      summary: {
+        score: 66,
+        state: 'warning',
+        status: 'warning',
+        anomalies: 1,
+        critical: 0,
+        warning: 1,
+        baselineDays: 13,
+        recentWindowHours: 24,
+      },
+      dimensions: [{
+        id: 'user:redacted',
+        kind: 'user',
+        label: 'member-524-71-9043@example.test',
+        title: 'User surge',
+        state: 'warning',
+        status: 'warning',
+        score: 58,
+        recentEvents: 4,
+        previousEvents: 1,
+        baselineDaily: 0.08,
+        surgeRatio: 4,
+        recentSensitive: 4,
+        recentControlled: 3,
+        maxRiskScore: 92,
+        maxSeverity: 4,
+        latestAt: '2026-06-28T12:00:00.000Z',
+        detail: 'Do not export 524-71-9043 in this detail',
+        action: 'Review user activity',
+        targetTab: 'activity',
+        source: 'behavior_baseline',
+      }],
+      playbook: [{
+        id: 'behavior:user:redacted',
+        priority: 1,
+        severity: 'warning',
+        label: 'Review user surge',
+        detail: 'Do not export 524-71-9043 in this playbook',
+        action: 'Review user activity',
+        targetTab: 'activity',
+        score: 58,
+      }],
+    },
+    decisionQuality: {
+      generatedAt: '2026-06-28T12:00:00.000Z',
+      summary: {
+        events: 8,
+        sensitiveEvents: 4,
+        pendingReviews: 1,
+        escalatedReviews: 1,
+        approved: 1,
+        denied: 1,
+        coachingEvents: 2,
+        coachingCompleted: 1,
+        overrideWatch: 1,
+        riskyAllows: 1,
+        controlRate: 100,
+        slaHealthyRate: 50,
+        privacy: 'metadata only; prompt bodies excluded',
+      },
+      cards: [{
+        id: 'approval_sla',
+        label: 'Approval SLA',
+        score: 50,
+        state: 'blocked',
+        status: 'critical',
+        value: '1/2',
+        detail: 'Do not export 524-71-9043 in this detail',
+        action: 'Open queue',
+        targetTab: 'queue',
+      }],
+      hotspots: [{
+        id: 'destination:chatgpt-com',
+        kind: 'destination',
+        label: 'chatgpt.com',
+        events: 4,
+        sensitive: 3,
+        blocked: 1,
+        redacted: 1,
+        allowed: 1,
+        coached: 1,
+        pending: 1,
+        escalated: 1,
+        maxRiskScore: 92,
+        lastSeen: '2026-06-28T12:00:00.000Z',
+        state: 'attention',
+        detail: '3 sensitive / 2 review signals',
+      }],
+    },
+    actionQueue: [{
+      id: 'mission:soc',
+      priority: 1,
+      severity: 'warning',
+      category: 'Current mission',
+      label: 'Configure SIEM posture webhook',
+      detail: 'SOC Posture Feed: Configure SIEM_WEBHOOK_URL',
+      owner: 'security operations',
+      source: 'siem',
+      action: 'Run step',
+      targetTab: 'audit',
+      command: 'Set SIEM_WEBHOOK_URL=https://... and SIEM_WEBHOOK_TOKEN=<token>',
+      workflowStatus: 'assigned',
+      workflowOwner: 'security_admin',
+      workflowActor: 'admin',
+      workflowNote: 'dashboard_linkage',
+      workflowUpdatedAt: '2026-06-28T12:05:00.000Z',
+      workflowProofState: 'assigned',
+    }],
+    hardening: {
+      generatedAt: '2026-06-28T12:00:00.000Z',
+      score: 70,
+      state: 'attention',
+      proofLedger: { verified: 3, attention: 1, missing: 2, total: 6, percent: 50 },
+      mission: {
+        state: 'attention',
+        progress: { done: 1, total: 3, open: 2, percent: 33 },
+        proofLedger: { verified: 3, attention: 1, missing: 2, total: 6, percent: 50 },
+        current: {
+          areaLabel: 'SOC Posture Feed',
+          label: 'Configure SIEM posture webhook',
+          command: 'Set SIEM_WEBHOOK_URL=https://... and SIEM_WEBHOOK_TOKEN=<token>',
+        },
+      },
+      areas: [{
+        id: 'soc_posture_feed',
+        label: 'SOC Posture Feed',
+        description: 'Security operations posture without prompt bodies',
+        score: 70,
+        state: 'attention',
+        status: 'warning',
+        evidence: ['Sanitized posture snapshot feed is available'],
+        gaps: ['Configure SIEM_WEBHOOK_URL for SOC posture snapshots'],
+        action: 'Open audit',
+        targetTab: 'audit',
+        owner: 'security operations',
+        source: 'siem',
+        location: 'SIEM/SOAR webhook',
+        proofLedger: { verified: 1, attention: 0, missing: 1, total: 2, percent: 50 },
+        proofs: [{
+          id: 'soc_siem_webhook',
+          label: 'SIEM/SOAR posture webhook configured',
+          status: 'missing',
+          detail: 'Configure SIEM_WEBHOOK_URL',
+          evidenceAt: null,
+          source: 'siem',
+          action: 'Configure SIEM webhook',
+          targetTab: 'audit',
+        }],
+        playbook: [{
+          id: 'soc_siem_webhook',
+          label: 'Configure SIEM posture webhook',
+          status: 'next',
+          detail: 'Send only sanitized posture metadata.',
+          command: 'Set SIEM_WEBHOOK_URL=https://... and SIEM_WEBHOOK_TOKEN=<token>',
+          validation: 'AI Command Center > Send SOC snapshot returns SENT.',
+          targetTab: 'audit',
+        }],
+      }],
+      nextActions: [{
+        id: 'soc_posture_feed',
+        label: 'SOC Posture Feed',
+        action: 'Configure SIEM posture webhook',
+        detail: 'Configure SIEM_WEBHOOK_URL',
+        targetTab: 'audit',
+        priority: 1,
+      }],
+    },
+  });
+
+  assert.strictEqual(posture.summary.missing, null);
+  assert.deepStrictEqual(posture.metrics[0].value, [{ nested: 'ok', secret: 'value that should be bounded' }]);
+  assert.deepStrictEqual(posture.metrics[0].trend, { direction: 'up', secret: 'hidden-ish metadata' });
+  assert.strictEqual(posture.hardening.areas[0].id, 'soc_posture_feed');
+  assert.strictEqual(posture.hardening.areas[0].proofs[0].status, 'missing');
+  assert.strictEqual(posture.hardening.areas[0].proofLedger.missing, 1);
+  assert.strictEqual(posture.hardening.areas[0].playbook[0].status, 'next');
+  assert.match(posture.hardening.areas[0].playbook[0].command, /SIEM_WEBHOOK_URL/);
+  assert.strictEqual(posture.hardening.proofLedger.missing, 2);
+  assert.strictEqual(posture.hardening.mission.proofLedger.percent, 50);
+  assert.strictEqual(posture.aiInventory.summary.shadow, 1);
+  assert.strictEqual(posture.aiInventory.tools[0].state, 'local_unapproved');
+  assert.strictEqual(posture.threatGuardrails.summary.promptInjection, 1);
+  assert.strictEqual(posture.threatGuardrails.rules[0].framework, 'OWASP LLM01');
+  assert.strictEqual(posture.threatGuardrails.controls[0].state, 'ready');
+  assert.strictEqual(posture.threatGuardrails.controls[0].detail, '[redacted]');
+  assert.deepStrictEqual(posture.threatGuardrails.recent[0].threats, ['Prompt injection']);
+  assert.strictEqual(posture.competitiveReadiness.summary.score, 78);
+  assert.strictEqual(posture.competitiveReadiness.matrix[0].id, 'soc_compliance_handoff');
+  assert.strictEqual(posture.competitiveReadiness.matrix[0].gaps[0], '[redacted]');
+  assert.strictEqual(posture.competitiveReadiness.nextGaps[0].label, 'SOC And Examiner Handoff');
+  assert.strictEqual(posture.behaviorBaselines.summary.anomalies, 1);
+  assert.strictEqual(posture.behaviorBaselines.privacy, 'metadata only; prompt bodies excluded');
+  assert.strictEqual(posture.behaviorBaselines.dimensions[0].label, '[redacted]');
+  assert.strictEqual(posture.behaviorBaselines.dimensions[0].detail, '[redacted]');
+  assert.strictEqual(posture.behaviorBaselines.playbook[0].detail, '[redacted]');
+  assert.strictEqual(posture.decisionQuality.summary.pendingReviews, 1);
+  assert.strictEqual(posture.decisionQuality.cards[0].id, 'approval_sla');
+  assert.strictEqual(posture.decisionQuality.cards[0].detail, '[redacted]');
+  assert.strictEqual(posture.decisionQuality.hotspots[0].label, 'chatgpt.com');
+  assert.strictEqual(posture.actionQueue[0].category, 'Current mission');
+  assert.match(posture.actionQueue[0].command, /SIEM_WEBHOOK_URL/);
+  assert.strictEqual(posture.actionQueue[0].workflowStatus, 'assigned');
+  assert.strictEqual(posture.actionQueue[0].workflowOwner, 'security_admin');
+  assert.strictEqual(posture.hardening.mission.current.label, 'Configure SIEM posture webhook');
+  assert.strictEqual(posture.hardening.mission.progress.open, 2);
+  assert.strictEqual(posture.hardening.nextActions[0].detail, 'Configure SIEM_WEBHOOK_URL');
+  assert.ok(!JSON.stringify(posture).includes('524-71-9043'));
 });
 
 test('evidence exports browser action policy diffs without raw values', () => {

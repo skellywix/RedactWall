@@ -1,0 +1,138 @@
+services:
+  ai-gateway-limiter:
+    build: .
+    image: promptwall:gateway-ha
+    init: true
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    command: ["node", "scripts/ai-gateway-rate-limiter.js", "--host", "0.0.0.0", "--port", "4183"]
+    environment:
+      NODE_ENV: production
+      PROMPTWALL_RATE_LIMITER_TOKEN: ${PROMPTWALL_RATE_LIMITER_TOKEN:?set PROMPTWALL_RATE_LIMITER_TOKEN}
+      PROMPTWALL_RATE_LIMITER_STORE: ${PROMPTWALL_RATE_LIMITER_STORE:-sqlite}
+      PROMPTWALL_RATE_LIMITER_DB: /data/gateway-shared-rate-limiter.db
+      PROMPTWALL_RATE_LIMITER_REDIS_URL: ${PROMPTWALL_RATE_LIMITER_REDIS_URL:-}
+      PROMPTWALL_RATE_LIMITER_REDIS_PREFIX: ${PROMPTWALL_RATE_LIMITER_REDIS_PREFIX:-promptwall:gateway:rl:}
+      PROMPTWALL_RATE_LIMITER_REDIS_TIMEOUT_MS: ${PROMPTWALL_RATE_LIMITER_REDIS_TIMEOUT_MS:-2000}
+    expose:
+      - "4183"
+    volumes:
+      - gateway-limiter-data:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4183/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 4s
+      start_period: 5s
+      retries: 4
+    stop_grace_period: 30s
+    restart: unless-stopped
+
+  ai-gateway-a:
+    build: .
+    image: promptwall:gateway-ha
+    init: true
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    command: ["node", "scripts/ai-llm-gateway.js", "--host", "0.0.0.0", "--port", "4182"]
+    environment: &gateway-env
+      NODE_ENV: production
+      SENTINEL_URL: ${SENTINEL_URL:-http://host.docker.internal:4000}
+      INGEST_API_KEY: ${INGEST_API_KEY:?set INGEST_API_KEY}
+      PROMPTWALL_GATEWAY_TOKEN: ${PROMPTWALL_GATEWAY_TOKEN:?set PROMPTWALL_GATEWAY_TOKEN}
+      PROMPTWALL_GATEWAY_UPSTREAM: ${PROMPTWALL_GATEWAY_UPSTREAM:-https://api.openai.com}
+      PROMPTWALL_GATEWAY_UPSTREAM_API_KEY: ${PROMPTWALL_GATEWAY_UPSTREAM_API_KEY:?set PROMPTWALL_GATEWAY_UPSTREAM_API_KEY}
+      PROMPTWALL_GATEWAY_ALLOWED_MODELS: ${PROMPTWALL_GATEWAY_ALLOWED_MODELS:-}
+      PROMPTWALL_GATEWAY_RATE_LIMIT: ${PROMPTWALL_GATEWAY_RATE_LIMIT:-60}
+      PROMPTWALL_GATEWAY_RATE_WINDOW_MS: ${PROMPTWALL_GATEWAY_RATE_WINDOW_MS:-60000}
+      PROMPTWALL_GATEWAY_RATE_LIMIT_STORE: http
+      PROMPTWALL_GATEWAY_RATE_LIMIT_URL: http://ai-gateway-limiter:4183/check
+      PROMPTWALL_GATEWAY_RATE_LIMIT_TOKEN: ${PROMPTWALL_RATE_LIMITER_TOKEN:?set PROMPTWALL_RATE_LIMITER_TOKEN}
+      PROMPTWALL_GATEWAY_RATE_LIMIT_TIMEOUT_MS: ${PROMPTWALL_GATEWAY_RATE_LIMIT_TIMEOUT_MS:-2000}
+    expose:
+      - "4182"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      ai-gateway-limiter:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4182/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 4s
+      start_period: 5s
+      retries: 4
+    stop_grace_period: 30s
+    restart: unless-stopped
+
+  ai-gateway-b:
+    build: .
+    image: promptwall:gateway-ha
+    init: true
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    command: ["node", "scripts/ai-llm-gateway.js", "--host", "0.0.0.0", "--port", "4182"]
+    environment:
+      <<: *gateway-env
+    expose:
+      - "4182"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      ai-gateway-limiter:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4182/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 4s
+      start_period: 5s
+      retries: 4
+    stop_grace_period: 30s
+    restart: unless-stopped
+
+  ai-gateway-lb:
+    image: nginx:1.27-alpine
+    init: true
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /var/cache/nginx:rw,noexec,nosuid,size=32m
+      - /var/run:rw,noexec,nosuid,size=8m
+      - /tmp:rw,noexec,nosuid,size=16m
+    ports:
+      - "${PROMPTWALL_GATEWAY_PUBLIC_PORT:-4182}:4182"
+    volumes:
+      - ./infra/ai-gateway-ha/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      ai-gateway-a:
+        condition: service_healthy
+      ai-gateway-b:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:4182/healthz >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 4s
+      start_period: 5s
+      retries: 4
+    stop_grace_period: 30s
+    restart: unless-stopped
+
+volumes:
+  gateway-limiter-data:

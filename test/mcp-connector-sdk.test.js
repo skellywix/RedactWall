@@ -144,3 +144,33 @@ test('toolResultText handles circular connector output without throwing', () => 
   circularOnly.self = circularOnly;
   assert.match(toolResultText(circularOnly), /\[Circular\]/);
 });
+
+test('SDK handles resource text and preserves redacted non-content result shapes', async () => {
+  assert.strictEqual(toolResultText({
+    content: [
+      null,
+      { resource: { text: 'resource text' } },
+      { type: 'image', data: 'not-text' },
+    ],
+  }), 'resource text');
+
+  const textEnvelope = await sanitizeToolResult({ text: 'Member SSN 524-71-9043' }, {
+    connector: 'microsoft365',
+    tool: 'search',
+  }, {
+    fetchImpl: noOpFetch,
+    policy: cleanPolicy,
+  });
+  assert.deepStrictEqual(textEnvelope.result, { text: textEnvelope.text });
+  assert.ok(textEnvelope.text.includes('[US_SSN]'));
+
+  const plainObject = await sanitizeToolResult({ value: 'Member SSN 524-71-9043' }, {
+    connector: 'microsoft365',
+    tool: 'search',
+  }, {
+    fetchImpl: noOpFetch,
+    policy: cleanPolicy,
+  });
+  assert.deepStrictEqual(plainObject.result, { content: [{ type: 'text', text: plainObject.text }] });
+  assert.ok(!JSON.stringify(plainObject.result).includes('524-71-9043'));
+});

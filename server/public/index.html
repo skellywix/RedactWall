@@ -400,7 +400,7 @@ body[data-theme="dark"] .theme-toggle button[aria-pressed="true"]{box-shadow:0 1
 .panel-head .ghost,.panel-head .system-button{flex:0 0 auto}
 .panel-head h2{margin:0;font-size:13.5px;font-weight:600;letter-spacing:-.01em}
 .panel-head span{color:var(--mut);font-size:12px}
-.panel-body{overflow:hidden;max-height:2400px;opacity:1;transition:max-height 220ms ease,opacity 220ms ease}
+.panel-body{overflow:hidden;max-height:6000px;opacity:1;transition:max-height 220ms ease,opacity 220ms ease}
 .panel.collapsed .panel-body{max-height:0;opacity:0}
 .panel-toggle{
   min-height:26px;
@@ -1032,6 +1032,20 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
 .config-page-head h2{margin:0;font-size:26px;line-height:1.1;color:var(--txt);letter-spacing:-.02em}
 .config-page-head p{margin:8px 0 0;color:var(--mut);line-height:1.5}
 .config-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end;margin-bottom:14px}
+.policy-impact-card{margin-bottom:14px}
+.policy-impact-empty{margin-top:12px;color:var(--mut);font-size:12.5px}
+.policy-impact-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:14px}
+.policy-impact-metrics div{border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--panel2);padding:10px;display:grid;gap:4px;min-width:0}
+.policy-impact-metrics span,.policy-impact-row small,.policy-impact-deltas p{color:var(--mut);font-size:11.5px}
+.policy-impact-metrics b{color:var(--txt);font-size:20px;line-height:1;font-variant-numeric:tabular-nums}
+.policy-impact-metrics small{color:var(--soft);font-size:11px;overflow-wrap:anywhere}
+.policy-impact-deltas{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:12px}
+.policy-impact-deltas section{border-top:1px solid var(--line);padding-top:10px;display:grid;gap:7px;align-content:start}
+.policy-impact-deltas strong{color:var(--txt);font-size:12px}
+.policy-impact-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 8px;color:var(--soft);font-size:12px}
+.policy-impact-row span{overflow-wrap:anywhere}
+.policy-impact-row b{color:var(--txt);font-size:12px;font-weight:600;white-space:nowrap}
+.policy-impact-row small{grid-column:1/-1}
 .config-grid{display:grid;grid-template-columns:minmax(240px,.7fr) minmax(420px,1.45fr) minmax(280px,.85fr);gap:12px;align-items:stretch;margin-bottom:14px}
 .config-two{display:grid;grid-template-columns:minmax(0,1fr) minmax(330px,.75fr);gap:12px;align-items:start;margin-bottom:14px}
 .config-card{
@@ -1199,6 +1213,118 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
 .signal-chip.is-selected{border-color:var(--blue);background:var(--blue-bg);color:var(--blue);font-weight:600}
 .signal-chip.is-selected b{color:var(--blue)}
 .signal-chip:disabled{opacity:.45}
+.segment-lens{
+  display:grid;
+  grid-template-columns:minmax(240px,.9fr) minmax(220px,.38fr);
+  gap:10px;
+  align-items:stretch;
+  border:1px solid var(--line);
+  border-radius:var(--radius);
+  background:var(--panel);
+  box-shadow:var(--shadow);
+  padding:12px;
+}
+.segment-lens.is-empty{opacity:.82}
+.segment-lens-summary{
+  display:grid;
+  gap:4px;
+  min-width:0;
+  color:var(--mut);
+  font-size:12px;
+  line-height:1.35;
+}
+.segment-lens-summary b{
+  color:var(--txt);
+  font-size:13.5px;
+  font-weight:700;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.segment-lens-summary span{min-width:0}
+.segment-select{
+  display:grid;
+  gap:6px;
+  align-content:start;
+  color:var(--mut);
+  font-size:10.5px;
+  font-weight:700;
+  text-transform:uppercase;
+  letter-spacing:.06em;
+}
+.segment-select select{
+  width:100%;
+  min-width:0;
+  min-height:34px;
+  border:1px solid var(--line);
+  border-radius:8px;
+  background:var(--input-bg);
+  color:var(--txt);
+  padding:0 10px;
+  font-size:12.5px;
+  letter-spacing:0;
+  text-transform:none;
+}
+.segment-matrix{
+  grid-column:1 / -1;
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:8px;
+}
+.segment-card{
+  min-width:0;
+  min-height:92px;
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  grid-template-rows:auto auto 1fr;
+  gap:4px 8px;
+  text-align:left;
+  border:1px solid var(--line);
+  border-radius:8px;
+  background:var(--panel2);
+  color:var(--soft);
+  padding:10px;
+  transition:border-color var(--fast),background var(--fast),box-shadow var(--fast);
+}
+.segment-card:hover{border-color:var(--line2);background:var(--surface-hover)}
+.segment-card.is-selected{border-color:var(--blue);box-shadow:inset 0 2px 0 var(--blue)}
+.segment-card.warning{box-shadow:inset 0 2px 0 var(--amber-vivid)}
+.segment-card.critical{box-shadow:inset 0 2px 0 var(--red-vivid)}
+.segment-card span{
+  grid-column:1 / 2;
+  color:var(--mut);
+  font-size:10.5px;
+  font-weight:700;
+  text-transform:uppercase;
+  letter-spacing:.05em;
+}
+.segment-card strong{
+  grid-column:1 / 2;
+  min-width:0;
+  color:var(--txt);
+  font-size:13px;
+  font-weight:700;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.segment-card small{
+  grid-column:1 / -1;
+  color:var(--mut);
+  font-size:11.5px;
+  line-height:1.35;
+}
+.segment-card b{
+  grid-column:2 / 3;
+  grid-row:1 / 3;
+  align-self:start;
+  color:var(--txt);
+  font-size:22px;
+  font-weight:700;
+  font-variant-numeric:tabular-nums;
+  line-height:1;
+}
+.segment-card em{font-style:normal;color:var(--mut);font-size:11px}
 .signal-dot{width:8px;height:8px;border-radius:999px;display:inline-block;flex:0 0 auto;position:relative;background:var(--mut)}
 .signal-dot.status-online{background:var(--green-vivid)}
 .signal-dot.status-idle{background:var(--mut)}
@@ -1240,6 +1366,7 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
 .metric-trend.neutral{color:var(--mut)}
 .signal-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,.42fr);gap:14px;align-items:start}
 .signal-main-stack{display:grid;gap:14px;min-width:0}
+.signal-insight-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(320px,.48fr);gap:14px;align-items:stretch}
 .signal-section{
   border:1px solid var(--line);
   border-radius:var(--radius);
@@ -1257,6 +1384,440 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
 }
 .signal-section-head h3{margin:0;font-size:13.5px;font-weight:600}
 .signal-section-head span{color:var(--mut);font-size:12px}
+.hardening-mission{
+  border:1px solid var(--line);
+  border-radius:var(--radius);
+  background:var(--panel);
+  box-shadow:var(--shadow);
+  padding:14px 16px;
+  display:grid;
+  grid-template-columns:minmax(0,1fr) minmax(340px,.52fr);
+  gap:14px;
+  align-items:stretch;
+}
+.hardening-mission.ready{box-shadow:inset 3px 0 0 var(--green-vivid),var(--shadow)}
+.hardening-mission.attention{box-shadow:inset 3px 0 0 var(--amber-vivid),var(--shadow)}
+.hardening-mission.blocked{box-shadow:inset 3px 0 0 var(--red-vivid),var(--shadow)}
+.mission-primary{display:grid;gap:8px;align-content:start;min-width:0}
+.mission-kicker{display:flex;align-items:center;gap:8px;color:var(--mut);font-size:11px;text-transform:uppercase;letter-spacing:.06em;font-weight:700}
+.mission-kicker b{margin-left:auto;color:var(--txt);font-size:13px;font-variant-numeric:tabular-nums}
+.mission-primary h3{margin:0;color:var(--txt);font-size:20px;line-height:1.2;font-weight:750}
+.mission-primary p{margin:0;color:var(--mut);font-size:12.5px;line-height:1.45}
+.mission-primary small{color:var(--mut);font-size:11.5px;line-height:1.4}
+.mission-command{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center}
+.mission-command code{display:block;max-width:100%;overflow-wrap:anywhere;border:1px solid var(--line);border-radius:6px;background:var(--panel2);padding:7px 8px;color:var(--txt);font-size:11px;line-height:1.35}
+.mission-proof-ledger{
+  display:grid;
+  gap:4px;
+  border:1px solid var(--line);
+  border-radius:var(--radius-sm);
+  background:var(--panel2);
+  padding:9px 10px;
+  min-width:0;
+}
+.mission-proof-ledger b{
+  color:var(--txt);
+  font-size:11px;
+  text-transform:uppercase;
+  letter-spacing:.06em;
+}
+.mission-proof-ledger span{color:var(--soft);font-size:12px;line-height:1.35}
+.mission-proof-ledger small{color:var(--mut);font-size:11px;line-height:1.35;overflow-wrap:anywhere}
+.mission-progress{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;align-content:stretch}
+.mission-lane{border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--panel2);color:inherit;text-align:left;padding:10px;display:grid;gap:6px;min-width:0;cursor:pointer;transition:border-color var(--fast),background var(--fast),transform var(--fast)}
+.mission-lane:hover{border-color:var(--line2);background:var(--surface-hover);transform:translateY(-1px)}
+.mission-lane.ready{box-shadow:inset 3px 0 0 var(--green-vivid)}
+.mission-lane.attention{box-shadow:inset 3px 0 0 var(--amber-vivid)}
+.mission-lane.blocked{box-shadow:inset 3px 0 0 var(--red-vivid)}
+.mission-lane span{font-size:11.5px;color:var(--txt);font-weight:700;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mission-lane b{font-size:20px;color:var(--txt);font-variant-numeric:tabular-nums;line-height:1}
+.mission-lane small{color:var(--mut);font-size:10.5px;line-height:1.35}
+.action-queue{display:grid;padding:6px 16px}
+.action-row{
+  display:grid;
+  grid-template-columns:34px minmax(0,1fr) minmax(130px,auto);
+  gap:12px;
+  align-items:center;
+  min-height:64px;
+  border-bottom:1px solid var(--line);
+}
+.action-row:last-child{border-bottom:0}
+.action-rank{
+  width:26px;
+  height:26px;
+  display:grid;
+  place-items:center;
+  border:1px solid var(--line);
+  border-radius:50%;
+  background:var(--panel2);
+  color:var(--mut);
+  font-size:11px;
+  font-weight:700;
+  font-variant-numeric:tabular-nums;
+}
+.action-main{display:grid;gap:4px;min-width:0}
+.action-kicker{display:flex;align-items:center;gap:7px;min-width:0}
+.action-kicker span{color:var(--mut);font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.action-severity{border:1px solid var(--line);border-radius:999px;background:var(--panel2);padding:1px 7px;font-size:9.5px;font-weight:700;text-transform:uppercase;white-space:nowrap;color:var(--mut)}
+.action-severity.critical{color:var(--red);border-color:rgba(255,69,58,.32);background:var(--red-bg)}
+.action-severity.warning{color:var(--amber);border-color:rgba(255,159,10,.35);background:var(--amber-bg)}
+.action-severity.info{color:var(--blue);border-color:rgba(10,132,255,.3);background:var(--blue-bg)}
+.action-workflow-pill{border:1px solid var(--line);border-radius:999px;background:var(--panel2);padding:1px 7px;font-size:9.5px;font-weight:700;text-transform:uppercase;white-space:nowrap;color:var(--mut)}
+.action-workflow-pill.assigned{color:var(--blue);border-color:rgba(10,132,255,.28);background:var(--blue-bg)}
+.action-workflow-pill.snoozed{color:var(--amber);border-color:rgba(255,159,10,.35);background:var(--amber-bg)}
+.action-workflow-pill.resolved{color:var(--green);border-color:rgba(48,209,88,.35);background:var(--green-bg)}
+.action-main strong{color:var(--txt);font-size:13px;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.action-main small{color:var(--mut);font-size:11.5px;line-height:1.35;overflow-wrap:anywhere}
+.action-main .action-workflow-meta{color:var(--soft);font-size:10.8px}
+.action-controls{display:grid;justify-items:end;gap:6px;min-width:0}
+.action-controls code{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:1px solid var(--line);border-radius:6px;background:var(--panel2);padding:4px 6px;color:var(--soft);font-size:10px}
+.action-workflow-controls{display:flex;justify-content:flex-end;gap:5px;flex-wrap:wrap}
+.action-workflow-controls .ghost{padding:4px 7px;font-size:10px}
+.siem-package-board{display:grid;grid-template-columns:minmax(280px,.36fr) minmax(0,1fr);gap:14px;padding:14px 16px;align-items:start}
+.siem-package-sidebar,.siem-profile-row{
+  border:1px solid var(--line);
+  border-radius:var(--radius-sm);
+  background:var(--panel2);
+  min-width:0;
+}
+.siem-package-sidebar{display:grid;gap:12px;padding:12px}
+.siem-profile-select{display:flex;align-items:center;gap:8px;color:var(--mut);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em}
+.siem-profile-select select{min-width:170px;border:1px solid var(--line);border-radius:7px;background:var(--panel);color:var(--txt);padding:6px 8px;font:inherit;text-transform:none;letter-spacing:0}
+.siem-kpi-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.siem-kpi{display:grid;gap:4px;border:1px solid var(--line);border-radius:7px;background:var(--panel);padding:8px}
+.siem-kpi span{font-size:10px;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;font-weight:700}
+.siem-kpi b{color:var(--txt);font-size:18px;line-height:1;font-variant-numeric:tabular-nums}
+.siem-privacy-list{display:grid;gap:6px}
+.siem-privacy-list span{display:flex;align-items:center;justify-content:space-between;gap:8px;color:var(--soft);font-size:11.5px}
+.siem-privacy-list b{color:var(--green-vivid);font-size:10.5px;text-transform:uppercase;letter-spacing:.05em}
+.siem-profile-list{display:grid;gap:10px;min-width:0}
+.siem-profile-row{padding:12px;display:grid;gap:10px}
+.siem-profile-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.siem-profile-head div{display:grid;gap:4px;min-width:0}
+.siem-profile-head strong{color:var(--txt);font-size:13px;line-height:1.3}
+.siem-profile-head span,.siem-profile-row p{color:var(--mut);font-size:11.5px;line-height:1.4;margin:0}
+.siem-profile-meta{display:flex;flex-wrap:wrap;gap:6px}
+.siem-profile-meta span{border:1px solid var(--line);border-radius:999px;background:var(--panel);padding:2px 7px;color:var(--mut);font-size:10.5px;font-weight:700;white-space:nowrap}
+.siem-search-list{display:grid;gap:6px}
+.siem-search-list b{color:var(--txt);font-size:11px;text-transform:uppercase;letter-spacing:.06em}
+.siem-search-list ul{margin:0;padding-left:17px;color:var(--soft);font-size:11.5px;line-height:1.45}
+.trust-package-board{display:grid;grid-template-columns:minmax(260px,.34fr) minmax(0,1fr);gap:14px;padding:14px 16px;align-items:start;border-top:1px solid var(--line)}
+.trust-package-sidebar{display:grid;gap:12px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--panel2);padding:12px;box-shadow:var(--shadow);min-width:0}
+.trust-control-list{display:grid;gap:10px;min-width:0}
+.trust-control-row{border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--panel2);padding:12px;display:grid;gap:8px;box-shadow:var(--shadow);min-width:0}
+.trust-control-row.verified{box-shadow:inset 3px 0 0 var(--green-vivid),var(--shadow)}
+.trust-control-row.attention{box-shadow:inset 3px 0 0 var(--amber-vivid),var(--shadow)}
+.trust-control-row.missing{box-shadow:inset 3px 0 0 var(--red-vivid),var(--shadow)}
+.trust-control-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.trust-control-head strong{color:var(--txt);font-size:13px;line-height:1.3}
+.trust-control-row p{margin:0;color:var(--mut);font-size:11.5px;line-height:1.45}
+.posture-objectives{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:14px 16px}
+.objective-card{
+  min-height:112px;
+  display:flex;
+  gap:12px;
+  border:1px solid var(--line);
+  border-radius:var(--radius-sm);
+  background:var(--panel2);
+  padding:12px;
+  transition:border-color var(--fast),background var(--fast);
+}
+.objective-card.good{box-shadow:inset 3px 0 0 var(--green-vivid)}
+.objective-card.warn{box-shadow:inset 3px 0 0 var(--amber-vivid)}
+.objective-score{width:54px;height:54px;display:grid;place-items:center;border-radius:50%;background:var(--panel);border:1px solid var(--line);font-variant-numeric:tabular-nums;flex:0 0 auto}
+.objective-score b{font-size:20px;line-height:1;font-weight:700}
+.objective-score span{font-size:10px;color:var(--mut);margin-top:-10px}
+.objective-body{display:grid;gap:6px;min-width:0;align-content:start}
+.objective-title{font-weight:700;color:var(--txt);font-size:12.5px}
+.objective-detail{color:var(--mut);font-size:11.5px;line-height:1.45}
+.ai-inventory-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:14px 16px}
+.ai-inventory-row{
+  border:1px solid var(--line);
+  border-radius:var(--radius-sm);
+  background:var(--panel2);
+  padding:12px;
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  gap:10px;
+  min-height:108px;
+  align-content:start;
+}
+.ai-inventory-row.online{box-shadow:inset 3px 0 0 var(--green-vivid)}
+.ai-inventory-row.warning{box-shadow:inset 3px 0 0 var(--amber-vivid)}
+.ai-inventory-row.idle{box-shadow:inset 3px 0 0 var(--line2)}
+.ai-inventory-main{display:grid;gap:5px;min-width:0}
+.ai-inventory-main strong{font-size:13px;color:var(--txt);line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ai-inventory-main span{color:var(--mut);font-size:11.5px;line-height:1.4;overflow-wrap:anywhere}
+.ai-inventory-main small{color:var(--mut);font-size:10.5px;text-transform:uppercase;letter-spacing:.05em}
+.ai-inventory-risk{display:inline-flex;align-items:center;width:max-content;max-width:100%;border:1px solid var(--line);border-radius:999px;background:var(--panel);padding:2px 7px;font-size:10.5px;font-weight:700;color:var(--mut)}
+.ai-inventory-risk.critical{color:var(--red-vivid);border-color:rgba(255,69,58,.34);background:var(--red-bg)}
+.ai-inventory-risk.high,.ai-inventory-risk.medium{color:var(--amber-vivid);border-color:rgba(255,159,10,.34);background:var(--amber-bg)}
+.ai-inventory-risk.low{color:var(--green-vivid);border-color:rgba(48,177,83,.3);background:var(--green-bg)}
+.ai-inventory-side{display:grid;justify-items:end;align-content:start;gap:7px;min-width:82px}
+.ai-inventory-state{border:1px solid var(--line);border-radius:999px;background:var(--panel);padding:2px 8px;font-size:10px;font-weight:700;text-transform:uppercase;color:var(--mut);white-space:nowrap}
+.ai-inventory-state.sanctioned,.ai-inventory-state.local_approved{color:var(--green-vivid);border-color:rgba(48,177,83,.32);background:var(--green-bg)}
+.ai-inventory-state.shadow,.ai-inventory-state.unsanctioned,.ai-inventory-state.local_unapproved{color:var(--amber-vivid);border-color:rgba(255,159,10,.35);background:var(--amber-bg)}
+.ai-inventory-state.allowed_registry,.ai-inventory-state.observed{color:var(--green-vivid);border-color:rgba(48,177,83,.32);background:var(--green-bg)}
+.ai-inventory-state.approval_required{color:var(--amber-vivid);border-color:rgba(255,159,10,.35);background:var(--amber-bg)}
+.ai-inventory-state.outside_registry,.ai-inventory-state.blocked{color:var(--red-vivid);border-color:rgba(255,69,58,.34);background:var(--red-bg)}
+.ai-inventory-side b{color:var(--txt);font-size:18px;line-height:1;font-variant-numeric:tabular-nums}
+.agentic-mcp-board{display:grid;gap:12px;padding:14px 16px}
+.agentic-mcp-readiness{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.agentic-mcp-readiness div{
+  border:1px solid var(--line);
+  border-radius:var(--radius-sm);
+  background:var(--panel2);
+  padding:10px 11px;
+  min-width:0;
+  display:grid;
+  gap:4px;
+}
+.agentic-mcp-readiness span{color:var(--mut);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.agentic-mcp-readiness b{color:var(--txt);font-size:20px;line-height:1;font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.agentic-mcp-readiness small{color:var(--mut);font-size:10.5px;line-height:1.35;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.agentic-mcp-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.agentic-mcp-kpi{
+  border:1px solid var(--line);
+  border-radius:var(--radius-sm);
+  background:var(--panel2);
+  padding:10px 11px;
+  display:grid;
+  gap:4px;
+  min-width:0;
+}
+.agentic-mcp-kpi span{color:var(--mut);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.agentic-mcp-kpi b{color:var(--txt);font-size:22px;line-height:1;font-variant-numeric:tabular-nums}
+.agentic-mcp-kpi em{font-style:normal;color:var(--mut);font-size:10.5px;line-height:1.35;overflow-wrap:anywhere}
+.agentic-mcp-layout{display:grid;grid-template-columns:minmax(280px,1.4fr) minmax(0,.9fr) minmax(0,1fr) minmax(220px,.8fr);gap:10px;align-items:start}
+.agentic-mcp-columns{display:grid;grid-template-columns:minmax(0,.95fr) minmax(0,1.05fr) minmax(0,1.15fr) minmax(220px,.74fr);gap:10px;align-items:start}
+.agentic-mcp-panel{
+  border:1px solid var(--line);
+  border-radius:var(--radius-sm);
+  background:var(--panel2);
+  overflow:hidden;
+  min-width:0;
+}
+.agentic-mcp-panel-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;border-bottom:1px solid var(--line);padding:10px 11px}
+.agentic-mcp-panel-head strong{color:var(--txt);font-size:12px;line-height:1.3}
+.agentic-mcp-panel-head span{color:var(--mut);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.agentic-mcp-connectors{min-height:100%}
+.agentic-mcp-category{border-bottom:1px solid var(--line)}
+.agentic-mcp-category:last-child{border-bottom:0}
+.agentic-mcp-category-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 11px 0}
+.agentic-mcp-category-head strong{color:var(--soft);font-size:11px;line-height:1.25;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.agentic-mcp-category-head span{color:var(--mut);font-size:10.5px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.agentic-mcp-list{display:grid;gap:7px;padding:10px}
+.agentic-mcp-row{
+  display:grid;
+  grid-template-columns:minmax(82px,.28fr) minmax(0,1fr) 52px;
+  gap:7px 9px;
+  align-items:center;
+  border:1px solid var(--line);
+  border-radius:8px;
+  background:var(--panel);
+  color:inherit;
+  text-align:left;
+  padding:8px 9px;
+  min-width:0;
+  transition:border-color var(--fast),background var(--fast);
+}
+.agentic-mcp-row:hover{border-color:var(--line2);background:var(--surface-hover)}
+.agentic-mcp-row.online{box-shadow:inset 3px 0 0 var(--green-vivid)}
+.agentic-mcp-row.warning{box-shadow:inset 3px 0 0 var(--amber-vivid)}
+.agentic-mcp-row.error{box-shadow:inset 3px 0 0 var(--red-vivid)}
+.agentic-mcp-row.idle{box-shadow:inset 3px 0 0 var(--line2)}
+.agentic-mcp-row span{align-self:start;border:1px solid var(--line);border-radius:999px;background:var(--panel2);padding:2px 7px;color:var(--mut);font-size:9.5px;font-weight:700;text-transform:uppercase;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.agentic-mcp-row.online span{color:var(--green-vivid);border-color:rgba(48,177,83,.3);background:var(--green-bg)}
+.agentic-mcp-row.warning span{color:var(--amber-vivid);border-color:rgba(255,159,10,.34);background:var(--amber-bg)}
+.agentic-mcp-row.error span{color:var(--red-vivid);border-color:rgba(255,69,58,.34);background:var(--red-bg)}
+.agentic-mcp-row strong{color:var(--txt);font-size:12px;line-height:1.25;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.agentic-mcp-row small{grid-column:2 / 3;color:var(--mut);font-size:10.5px;line-height:1.35;overflow-wrap:anywhere}
+.agentic-mcp-row b{justify-self:end;color:var(--txt);font-size:15px;font-variant-numeric:tabular-nums;line-height:1}
+.agentic-mcp-row.connector{grid-template-columns:minmax(88px,.3fr) minmax(0,1fr) 42px}
+.agentic-mcp-policy,.agentic-mcp-requests{display:grid;padding:10px;gap:7px;border-bottom:1px solid var(--line)}
+.agentic-mcp-requests{border-bottom:0;border-top:1px solid var(--line)}
+.agentic-mcp-policy-row,.agentic-mcp-request{
+  display:grid;
+  grid-template-columns:minmax(74px,.45fr) 42px minmax(0,1fr);
+  gap:8px;
+  align-items:center;
+  border:1px solid var(--line);
+  border-radius:8px;
+  background:var(--panel);
+  padding:8px 9px;
+  min-width:0;
+}
+.agentic-mcp-policy-row span,.agentic-mcp-request span{color:var(--soft);font-size:11px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.agentic-mcp-policy-row b,.agentic-mcp-request b{color:var(--txt);font-size:15px;font-variant-numeric:tabular-nums;text-align:right}
+.agentic-mcp-policy-row small,.agentic-mcp-request small{color:var(--mut);font-size:10.5px;line-height:1.35;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.control-graph{display:grid;gap:12px;padding:14px 16px}
+.control-graph-lanes{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;align-items:start}
+.control-graph-lane{
+  border:1px solid var(--line);
+  border-radius:var(--radius-sm);
+  background:var(--panel2);
+  min-width:0;
+  overflow:hidden;
+}
+.control-graph-lane-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;border-bottom:1px solid var(--line);padding:10px 11px}
+.control-graph-lane-head div{display:grid;gap:3px;min-width:0}
+.control-graph-lane-head strong{font-size:12px;color:var(--txt);line-height:1.25}
+.control-graph-lane-head small{font-size:10.5px;color:var(--mut);line-height:1.35}
+.control-graph-lane-head b{font-size:18px;line-height:1;font-variant-numeric:tabular-nums;color:var(--txt)}
+.control-graph-node-list{display:grid;gap:7px;padding:10px}
+.control-graph-node{
+  display:grid;
+  gap:4px;
+  border:1px solid var(--line);
+  border-radius:8px;
+  background:var(--panel);
+  color:inherit;
+  text-align:left;
+  padding:8px 9px;
+  min-width:0;
+  transition:border-color var(--fast),background var(--fast);
+}
+.control-graph-node:hover{border-color:var(--line2);background:var(--surface-hover)}
+.control-graph-node.online{box-shadow:inset 3px 0 0 var(--green-vivid)}
+.control-graph-node.warning{box-shadow:inset 3px 0 0 var(--amber-vivid)}
+.control-graph-node.error{box-shadow:inset 3px 0 0 var(--red-vivid)}
+.control-graph-node.idle{box-shadow:inset 3px 0 0 var(--line2)}
+.control-graph-node span{color:var(--mut);font-size:9.8px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.control-graph-node strong{color:var(--txt);font-size:12px;line-height:1.25;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.control-graph-node small{color:var(--mut);font-size:10.5px;line-height:1.35;overflow-wrap:anywhere}
+.control-graph-edges{
+  border:1px solid var(--line);
+  border-radius:var(--radius-sm);
+  background:var(--panel2);
+  overflow:hidden;
+}
+.control-graph-edges-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;border-bottom:1px solid var(--line);padding:10px 12px}
+.control-graph-edges-head strong{font-size:12px;color:var(--txt)}
+.control-graph-edges-head span{font-size:11px;color:var(--mut)}
+.control-graph-edge{display:grid;grid-template-columns:88px minmax(0,1fr) 92px;gap:10px;align-items:center;padding:9px 12px;border-bottom:1px solid var(--line)}
+.control-graph-edge:last-child{border-bottom:0}
+.control-graph-edge>span{justify-self:start;border:1px solid var(--line);border-radius:999px;background:var(--panel);padding:2px 7px;color:var(--mut);font-size:9.5px;font-weight:700;text-transform:uppercase}
+.control-graph-edge.warning>span{color:var(--amber-vivid);border-color:rgba(255,159,10,.34);background:var(--amber-bg)}
+.control-graph-edge.error>span{color:var(--red-vivid);border-color:rgba(255,69,58,.34);background:var(--red-bg)}
+.control-graph-edge.online>span{color:var(--green-vivid);border-color:rgba(48,177,83,.3);background:var(--green-bg)}
+.control-graph-edge div{display:grid;gap:3px;min-width:0}
+.control-graph-edge strong{color:var(--txt);font-size:12px;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.control-graph-edge small{color:var(--mut);font-size:10.5px;line-height:1.35;overflow-wrap:anywhere}
+.control-graph-edge b{justify-self:end;color:var(--txt);font-size:16px;font-variant-numeric:tabular-nums}
+.hardening-board{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:14px 16px}
+.hardening-card{
+  border:1px solid var(--line);
+  border-radius:var(--radius-sm);
+  background:var(--panel2);
+  padding:13px;
+  display:grid;
+  gap:10px;
+  min-height:236px;
+}
+.hardening-card.ready{box-shadow:inset 3px 0 0 var(--green-vivid)}
+.hardening-card.attention{box-shadow:inset 3px 0 0 var(--amber-vivid)}
+.hardening-card.blocked{box-shadow:inset 3px 0 0 var(--red-vivid)}
+.hardening-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.hardening-title{display:flex;align-items:center;gap:8px;min-width:0}
+.hardening-title strong{font-size:13px;font-weight:700;color:var(--txt);line-height:1.3}
+.hardening-score{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1;color:var(--txt)}
+.hardening-score span{font-size:11px;color:var(--mut);font-weight:600}
+.hardening-desc{color:var(--mut);font-size:11.5px;line-height:1.45;margin:0}
+.hardening-meta{display:flex;flex-wrap:wrap;gap:6px;color:var(--mut);font-size:10.5px;text-transform:uppercase;letter-spacing:.05em}
+.hardening-meta span{border:1px solid var(--line);border-radius:999px;padding:2px 8px;background:var(--panel)}
+.hardening-lists{display:grid;grid-template-columns:1fr;gap:8px}
+.hardening-list{display:grid;gap:5px}
+.hardening-list b{font-size:11px;color:var(--soft);font-weight:700;text-transform:uppercase;letter-spacing:.06em}
+.hardening-list ul{margin:0;padding-left:15px;color:var(--mut);font-size:11.5px;line-height:1.45}
+.hardening-list li+li{margin-top:2px}
+.hardening-proof-ledger{display:grid;gap:6px;border-top:1px solid var(--line);padding-top:8px;min-width:0}
+.proof-ledger-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;min-width:0}
+.proof-ledger-head b{font-size:11px;color:var(--soft);font-weight:700;text-transform:uppercase;letter-spacing:.06em}
+.proof-ledger-head span{font-size:10.5px;color:var(--mut);text-align:right;line-height:1.35}
+.proof-row{
+  display:grid;
+  grid-template-columns:70px minmax(0,1fr);
+  gap:8px;
+  align-items:start;
+  border-top:1px solid var(--line);
+  padding-top:6px;
+  min-width:0;
+}
+.proof-ledger-head+.proof-row{border-top:0;padding-top:0}
+.proof-row>span{
+  align-self:start;
+  border:1px solid var(--line);
+  border-radius:999px;
+  background:var(--panel);
+  padding:2px 7px;
+  text-align:center;
+  color:var(--mut);
+  font-size:9.5px;
+  line-height:1.35;
+  font-weight:700;
+  text-transform:uppercase;
+}
+.proof-row.verified>span{color:var(--green-vivid);border-color:rgba(48,177,83,.3);background:var(--green-bg)}
+.proof-row.attention>span{color:var(--amber-vivid);border-color:rgba(255,159,10,.32);background:var(--amber-bg)}
+.proof-row.missing>span{color:var(--red-vivid);border-color:rgba(255,69,58,.32);background:var(--red-bg)}
+.proof-row strong{display:block;color:var(--txt);font-size:11.5px;line-height:1.35}
+.proof-row small{display:block;color:var(--mut);font-size:10.5px;line-height:1.35;overflow-wrap:anywhere;margin-top:2px}
+.hardening-runbook{display:grid;gap:6px;border-top:1px solid var(--line);padding-top:8px}
+.hardening-runbook>b{font-size:11px;color:var(--soft);font-weight:700;text-transform:uppercase;letter-spacing:.06em}
+.hardening-step{display:grid;gap:4px;border-top:1px solid var(--line);padding-top:6px;min-width:0}
+.hardening-runbook>b+.hardening-step{border-top:0;padding-top:0}
+.hardening-step-head{display:flex;align-items:center;gap:6px;min-width:0}
+.hardening-step-head span{border-radius:999px;padding:2px 7px;background:var(--panel);border:1px solid var(--line);color:var(--mut);font-size:10px;text-transform:uppercase;font-weight:700;flex:0 0 auto}
+.hardening-step.done .hardening-step-head span{color:var(--green-vivid)}
+.hardening-step.next .hardening-step-head span{color:var(--amber-vivid)}
+.hardening-step.todo .hardening-step-head span{color:var(--mut)}
+.hardening-step-head strong{font-size:11.5px;color:var(--txt);line-height:1.35;min-width:0}
+.hardening-step p{margin:0;color:var(--mut);font-size:11px;line-height:1.4}
+.hardening-step code{display:block;max-width:100%;overflow-wrap:anywhere;border:1px solid var(--line);border-radius:6px;background:var(--panel);padding:5px 6px;color:var(--txt);font-size:10.5px;line-height:1.35}
+.hardening-step small{color:var(--mut);font-size:10.5px;line-height:1.35}
+.hardening-step-empty{margin:0;color:var(--mut);font-size:11px}
+.trend-chart{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px;align-items:end;min-height:210px;padding:16px 16px 12px}
+.trend-day{height:178px;display:grid;grid-template-rows:1fr auto;gap:8px;align-items:end;color:var(--mut);font-size:10px;text-align:center}
+.trend-stack{height:var(--h);min-height:5px;border:1px solid var(--line);border-radius:7px 7px 3px 3px;background:var(--panel2);overflow:hidden;display:flex;flex-direction:column-reverse;justify-content:flex-start}
+.trend-stack i{display:block;min-height:0;flex:0 0 var(--share)}
+.trend-blocked{background:var(--red-vivid)}
+.trend-redacted{background:var(--blue)}
+.trend-coached{background:var(--amber-vivid)}
+.trend-allowed{background:var(--green-vivid)}
+.control-breakdown{display:grid;gap:10px;padding:14px 16px}
+.control-row{display:grid;gap:6px}
+.control-row div:first-child{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.control-row strong{font-size:12.5px;font-weight:600;color:var(--txt);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.control-row span{color:var(--mut);font-size:11.5px;text-align:right}
+.control-bar{height:9px;border:1px solid var(--line);border-radius:999px;background:var(--panel2);overflow:hidden}
+.control-bar i{display:block;height:100%;width:var(--w);border-radius:999px;background:var(--blue)}
+.control-bar i.tone-secure{background:var(--green-vivid)}
+.control-bar i.tone-warn{background:var(--amber-vivid)}
+.control-bar i.tone-critical{background:var(--red-vivid)}
+.behavior-baselines{gap:8px}
+.behavior-baseline-row{
+  appearance:none;
+  width:100%;
+  border:1px solid var(--line);
+  border-radius:8px;
+  background:var(--panel2);
+  color:var(--txt);
+  padding:10px;
+  display:grid;
+  grid-template-columns:auto minmax(0,1fr) auto;
+  gap:5px 8px;
+  text-align:left;
+  cursor:pointer;
+  transition:border-color var(--fast),background var(--fast);
+}
+.behavior-baseline-row:hover,.behavior-baseline-row:focus-visible{border-color:var(--blue);background:var(--surface-hover)}
+.behavior-baseline-row span{border:1px solid var(--line);border-radius:999px;padding:2px 7px;font-size:10px;font-weight:800;text-transform:uppercase;color:var(--mut);background:var(--panel)}
+.behavior-baseline-row.critical span{color:var(--red-vivid);border-color:rgba(255,69,58,.3);background:var(--red-bg)}
+.behavior-baseline-row.attention span{color:var(--amber-vivid);border-color:rgba(255,159,10,.32);background:var(--amber-bg)}
+.behavior-baseline-row.ready span{color:var(--green-vivid);border-color:rgba(48,177,83,.3);background:var(--green-bg)}
+.behavior-baseline-row strong{min-width:0;color:var(--txt);font-size:12.5px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.behavior-baseline-row small{grid-column:1/-1;color:var(--mut);font-size:11.5px;line-height:1.35;overflow-wrap:anywhere}
+.behavior-baseline-row b{color:var(--txt);font-size:13px;font-variant-numeric:tabular-nums}
 .surveillance-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:14px 16px}
 .surveillance-panel{
   position:relative;
@@ -1365,6 +1926,125 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
 .signal-empty{padding:34px 18px;text-align:center;color:var(--mut)}
 .signal-empty b{display:block;color:var(--txt);font-size:13px;font-weight:700;margin-bottom:5px}
 .signal-empty p{margin:0;font-size:12px}
+.market-hardening-brief{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  gap:12px;
+  align-items:center;
+  border-bottom:1px solid var(--line);
+  padding:14px 16px;
+  background:var(--panel2);
+}
+.market-hardening-brief strong{display:block;color:var(--txt);font-size:14px;line-height:1.3}
+.market-hardening-brief span{display:block;margin-top:3px;color:var(--mut);font-size:12px;line-height:1.35}
+.market-hardening-brief b,.market-hardening-head b{color:var(--txt);font-size:28px;line-height:1;font-variant-numeric:tabular-nums}
+.market-hardening-brief small,.market-hardening-head small{color:var(--mut);font-size:12px;font-weight:700}
+.market-hardening-board{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:10px;
+  padding:12px 16px 16px;
+}
+.market-hardening-card{
+  min-width:0;
+  display:grid;
+  gap:10px;
+  align-content:start;
+  border:1px solid var(--line);
+  border-radius:8px;
+  background:var(--panel2);
+  padding:12px;
+}
+.market-hardening-card.ready{box-shadow:inset 3px 0 0 var(--green)}
+.market-hardening-card.attention{box-shadow:inset 3px 0 0 var(--amber-vivid)}
+.market-hardening-card.blocked{box-shadow:inset 3px 0 0 var(--red-vivid)}
+.market-hardening-head{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:start}
+.market-hardening-head span{
+  display:block;
+  color:var(--mut);
+  font-size:10px;
+  font-weight:800;
+  letter-spacing:.06em;
+  text-transform:uppercase;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.market-hardening-head strong{display:block;margin-top:3px;color:var(--txt);font-size:15px;line-height:1.2}
+.market-hardening-card p{margin:0;color:var(--soft);font-size:12px;line-height:1.45}
+.market-hardening-state{display:flex;gap:6px;flex-wrap:wrap}
+.market-hardening-state span{
+  border:1px solid var(--line);
+  border-radius:999px;
+  background:var(--panel);
+  color:var(--mut);
+  padding:2px 7px;
+  font-size:10px;
+  font-weight:800;
+  text-transform:uppercase;
+  letter-spacing:.05em;
+}
+.market-hardening-columns{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.market-hardening-list{
+  display:grid;
+  gap:5px;
+  align-content:start;
+  min-width:0;
+  border:1px solid var(--line);
+  border-radius:7px;
+  background:var(--panel);
+  padding:8px;
+}
+.market-hardening-list b{color:var(--txt);font-size:11px;line-height:1.2}
+.market-hardening-list span{color:var(--mut);font-size:11px;line-height:1.35;overflow-wrap:anywhere}
+.market-hardening-actions{display:flex;gap:6px;flex-wrap:wrap}
+.operator-flow-board{
+  display:grid;
+  grid-template-columns:repeat(6,minmax(0,1fr));
+  gap:10px;
+  padding:14px 16px 16px;
+}
+.operator-flow-card{
+  appearance:none;
+  display:grid;
+  gap:8px;
+  align-content:start;
+  min-height:126px;
+  width:100%;
+  border:1px solid var(--line);
+  border-radius:8px;
+  background:var(--panel2);
+  color:var(--txt);
+  padding:12px;
+  text-align:left;
+  cursor:pointer;
+  transition:border-color var(--fast),background var(--fast),transform var(--fast);
+}
+.operator-flow-card:hover,.operator-flow-card:focus-visible{border-color:var(--blue);background:var(--surface-hover);transform:translateY(-1px)}
+.operator-flow-card.critical{box-shadow:inset 3px 0 0 var(--red-vivid)}
+.operator-flow-card.attention{box-shadow:inset 3px 0 0 var(--amber-vivid)}
+.operator-flow-card.ready{box-shadow:inset 3px 0 0 var(--green)}
+.operator-flow-card.idle{box-shadow:inset 3px 0 0 var(--mut)}
+.operator-flow-card span{
+  color:var(--mut);
+  font-size:10px;
+  font-weight:700;
+  letter-spacing:.06em;
+  text-transform:uppercase;
+}
+.operator-flow-card strong{font-size:15px;font-weight:700;line-height:1.15;overflow-wrap:anywhere}
+.operator-flow-card small{color:var(--soft);font-size:11.5px;line-height:1.35}
+.operator-flow-card b{
+  justify-self:start;
+  border:1px solid var(--line);
+  border-radius:999px;
+  padding:3px 8px;
+  color:var(--blue);
+  font-size:10px;
+  font-weight:800;
+  letter-spacing:.05em;
+  text-transform:uppercase;
+}
 .signal-inspector{
   position:sticky;
   top:118px;
@@ -1440,16 +2120,18 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
   .rail .tabs{display:none}
   .rail-section,.rail-status{display:none}
   .workspace{padding:0 16px 24px}
-  .topbar{margin:0 -16px;padding:8px 16px}
+  .topbar{margin:0 -16px;padding:8px 16px;flex-wrap:wrap}
   .content-tabs{display:flex;top:0;margin:0 -16px 16px;padding:6px 16px 0}
   .stats{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .queue-grid,.coverage-grid,.lineage-grid,.identity-grid,.config-two,.update-grid,.signal-layout{grid-template-columns:1fr}
+  .queue-grid,.coverage-grid,.lineage-grid,.identity-grid,.config-two,.update-grid,.signal-layout,.signal-insight-grid{grid-template-columns:1fr}
   .wide-panel{grid-column:auto}
   .config-grid{grid-template-columns:1fr}
   .signal-inspector{position:static}
   .coverage-body{grid-template-columns:1fr}
   .sensor-cards{grid-template-columns:1fr}
-  .metric-grid,.surveillance-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .metric-grid,.surveillance-grid,.posture-objectives,.ai-inventory-grid,.agentic-mcp-readiness,.agentic-mcp-kpis,.agentic-mcp-layout,.agentic-mcp-columns,.policy-impact-metrics,.policy-impact-deltas,.control-graph-lanes,.segment-matrix,.hardening-board,.hardening-mission,.market-hardening-board,.operator-flow-board{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .siem-package-board,.trust-package-board{grid-template-columns:1fr}
+  .mission-progress{grid-template-columns:1fr}
   .activity-detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 @media(max-width:760px){
@@ -1459,12 +2141,20 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
   .search{order:3;flex-basis:100%;min-width:0;max-width:none}
   .content-tabs{margin:0 -12px 14px;padding:6px 12px 0}
   .stats{grid-template-columns:1fr}
+  .market-hardening-board,.operator-flow-board{grid-template-columns:1fr}
   .console-frame-title h2,.signal-console-title h2{font-size:20px}
   .coverage-kpis,.lineage-summary,.identity-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
   .shadow-row{grid-template-columns:1fr}
   .destination-review{justify-items:start}
   .destination-actions{justify-content:flex-start}
-  .queue-mainline,.detail-grid,.policy-options,.field-grid,.policy-list-grid,.policy-advanced-grid,.policy-builder-grid,.policy-builder .mini-grid,.queue-filter-row,.mode-grid,.metric-grid,.surveillance-grid,.inspector-grid,.activity-detail-grid{grid-template-columns:1fr}
+  .queue-mainline,.detail-grid,.policy-options,.field-grid,.policy-list-grid,.policy-advanced-grid,.policy-builder-grid,.policy-builder .mini-grid,.queue-filter-row,.mode-grid,.segment-lens,.segment-matrix,.metric-grid,.surveillance-grid,.posture-objectives,.ai-inventory-grid,.agentic-mcp-readiness,.agentic-mcp-kpis,.agentic-mcp-layout,.agentic-mcp-columns,.agentic-mcp-row,.agentic-mcp-policy-row,.agentic-mcp-request,.policy-impact-metrics,.policy-impact-deltas,.control-graph-lanes,.control-graph-edge,.hardening-board,.hardening-mission,.market-hardening-brief,.market-hardening-board,.market-hardening-columns,.siem-package-board,.trust-package-board,.mission-command,.mission-progress,.action-row,.inspector-grid,.activity-detail-grid{grid-template-columns:1fr}
+  .action-row{align-items:start;padding:10px 0}
+  .action-controls{justify-items:start}
+  .action-controls code{max-width:100%}
+  .action-workflow-controls{justify-content:flex-start}
+  .control-graph-edge b{justify-self:start}
+  .agentic-mcp-row small{grid-column:1}
+  .agentic-mcp-row b,.agentic-mcp-policy-row b,.agentic-mcp-request b{justify-self:start;text-align:left}
   .barrow{grid-template-columns:96px minmax(0,1fr) 28px}
   th,td{padding:9px 10px}
   .panel{overflow-x:auto}
@@ -1509,7 +2199,7 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
       </button>
       <button class="tab" data-tab="monitor" type="button">
         <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M4 12h4l2-6 4 12 2-6h4M5 19h14" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-        Signal Monitor
+        AI Command Center
       </button>
       <button class="tab" data-tab="insights" type="button">
         <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M4 20V4m0 16h16M8 20v-6m4 6V8m4 12v-9" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
@@ -1605,7 +2295,7 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
 
     <div class="content-tabs">
       <button class="tab active" data-tab="queue" type="button" aria-current="page">Approval Queue</button>
-      <button class="tab" data-tab="monitor" type="button">Signal Monitor</button>
+      <button class="tab" data-tab="monitor" type="button">AI Command Center</button>
       <button class="tab" data-tab="insights" type="button">Insights</button>
       <button class="tab" data-tab="activity" type="button">All Activity</button>
       <button class="tab" data-tab="coverage" type="button">Coverage</button>
@@ -1709,12 +2399,12 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
       </section>
 
       <section id="tab-monitor" class="hidden">
-        <div class="signal-console" aria-label="Signal Monitor">
+        <div class="signal-console" aria-label="AI Command Center">
           <div class="signal-console-header">
             <div class="signal-console-title">
               <div>
-                <h2>Signal Monitor</h2>
-                <p id="monitorDataScope">Sanitized event stream. Raw approval text stays behind step-up reveal.</p>
+                <h2>AI Security Command Center</h2>
+                <p id="monitorDataScope">Live posture objectives, sanitized AI activity, and control outcomes without prompt bodies.</p>
               </div>
             </div>
             <div class="signal-header-actions">
@@ -1739,7 +2429,195 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
             <div class="signal-filters" id="monitorStatusFilters" aria-label="Status filters"></div>
           </div>
 
+          <div class="segment-lens" id="postureSegmentBar" aria-label="Posture segment lens">
+            <div class="segment-lens-summary" id="postureSegmentSummary">Segments will appear after sanitized activity arrives.</div>
+            <label class="segment-select" for="postureSegmentSelect">
+              <span>Posture segment</span>
+              <select id="postureSegmentSelect" aria-label="Posture segment">
+                <option value="all">All segments</option>
+              </select>
+            </label>
+            <div class="segment-matrix" id="postureSegmentMatrix" aria-live="polite"></div>
+          </div>
+
           <div class="metric-grid" id="monitorMetrics" aria-live="polite"></div>
+
+          <div id="hardeningMission" aria-live="polite"></div>
+
+          <div class="signal-section">
+            <div class="signal-section-head">
+              <div>
+                <h3>Market Hardening Flow</h3>
+                <span id="marketHardeningSummary">Waiting for focus</span>
+              </div>
+            </div>
+            <div id="marketHardeningRows" aria-live="polite"></div>
+          </div>
+
+          <div class="signal-section">
+            <div class="signal-section-head">
+              <div>
+                <h3>Competitive Readiness</h3>
+                <span id="competitiveReadinessSummary">Waiting for data</span>
+              </div>
+            </div>
+            <div id="competitiveReadinessRows" aria-live="polite"></div>
+          </div>
+
+          <div class="signal-section" aria-label="Operator flow">
+            <div class="signal-section-head">
+              <div>
+                <h3>Operator Flow</h3>
+                <span id="operatorFlowSummary">Waiting for data</span>
+              </div>
+            </div>
+            <div class="operator-flow-board" id="operatorFlowRows" aria-live="polite"></div>
+          </div>
+
+          <div class="signal-section">
+            <div class="signal-section-head">
+              <div>
+                <h3>Action Queue</h3>
+                <span id="hardeningActionSummary">Waiting for data</span>
+              </div>
+            </div>
+            <div class="action-queue" id="hardeningActionQueue" aria-live="polite"></div>
+          </div>
+
+          <div class="signal-section">
+            <div class="signal-section-head">
+              <div>
+                <h3>Posture Objectives</h3>
+                <span id="postureObjectiveSummary">Waiting for data</span>
+              </div>
+            </div>
+            <div class="posture-objectives" id="postureObjectives"></div>
+          </div>
+
+          <div class="signal-section">
+            <div class="signal-section-head">
+              <div>
+                <h3>AI App Inventory</h3>
+                <span id="aiInventorySummary">Waiting for data</span>
+              </div>
+            </div>
+            <div class="ai-inventory-grid" id="aiInventoryRows" aria-live="polite"></div>
+          </div>
+
+          <div class="signal-section">
+            <div class="signal-section-head">
+              <div>
+                <h3>Agentic MCP Control</h3>
+                <span id="agenticMcpSummary">Waiting for data</span>
+              </div>
+            </div>
+            <div class="agentic-mcp-board" id="agenticMcpRows" aria-live="polite"></div>
+          </div>
+
+          <div class="signal-section">
+            <div class="signal-section-head">
+              <div>
+                <h3>AI Threat Guardrails</h3>
+                <span id="threatGuardrailsSummary">Waiting for data</span>
+              </div>
+            </div>
+            <div class="agentic-mcp-board" id="threatGuardrailsRows" aria-live="polite"></div>
+          </div>
+
+          <div class="signal-section">
+            <div class="signal-section-head">
+              <div>
+                <h3>AI Control Graph</h3>
+                <span id="controlGraphSummary">Waiting for data</span>
+              </div>
+            </div>
+            <div class="control-graph" id="controlGraphMap" aria-live="polite"></div>
+          </div>
+
+          <div class="signal-section">
+            <div class="signal-section-head">
+              <div>
+                <h3>Hardening Workbench</h3>
+                <span id="hardeningReadinessSummary">Waiting for data</span>
+              </div>
+              <div class="signal-header-actions">
+                <span class="signal-updated" id="postureSnapshotStatus">SOC SNAPSHOT READY</span>
+                <button class="system-button secondary" id="sendPostureSnapshot" type="button">Send SOC snapshot</button>
+              </div>
+            </div>
+            <div class="hardening-board" id="hardeningReadinessBoard" aria-live="polite"></div>
+          </div>
+
+          <div class="signal-section">
+            <div class="signal-section-head">
+              <div>
+                <h3>SOC Integration Pack</h3>
+                <span id="siemPackageSummary">Waiting for package</span>
+              </div>
+              <div class="signal-header-actions">
+                <label class="siem-profile-select" for="siemPackageProfile">
+                  Profile
+                  <select id="siemPackageProfile" aria-label="SIEM package profile">
+                    <option value="all">All profiles</option>
+                    <option value="splunk">Splunk</option>
+                    <option value="sentinel">Microsoft Sentinel</option>
+                    <option value="chronicle">Google SecOps</option>
+                    <option value="servicenow">ServiceNow</option>
+                  </select>
+                </label>
+                <button class="system-button secondary" id="downloadSiemPackage" type="button">Download ZIP</button>
+              </div>
+            </div>
+            <div class="siem-package-board" id="siemPackagePreview" aria-live="polite"></div>
+          </div>
+
+          <div class="signal-insight-grid">
+            <div class="signal-section">
+              <div class="signal-section-head">
+                <div>
+                  <h3>Risk Trend</h3>
+                  <span id="postureTrendSummary">Waiting for data</span>
+                </div>
+              </div>
+              <div class="trend-chart" id="postureTrendChart" aria-live="polite"></div>
+            </div>
+            <div class="signal-section">
+              <div class="signal-section-head">
+                <div>
+                  <h3>Control Outcomes</h3>
+                  <span id="controlOutcomeSummary">Waiting for data</span>
+                </div>
+              </div>
+              <div class="control-breakdown" id="controlOutcomeRows" aria-live="polite"></div>
+            </div>
+            <div class="signal-section">
+              <div class="signal-section-head">
+                <div>
+                  <h3>Behavior Baselines</h3>
+                  <span id="behaviorBaselineSummary">Waiting for data</span>
+                </div>
+              </div>
+              <div class="control-breakdown behavior-baselines" id="behaviorBaselineRows" aria-live="polite"></div>
+            </div>
+            <div class="signal-section">
+              <div class="signal-section-head">
+                <div>
+                  <h3>Decision Quality</h3>
+                  <span id="decisionQualitySummary">Waiting for data</span>
+                </div>
+              </div>
+              <div class="control-breakdown" id="decisionQualityRows" aria-live="polite"></div>
+            </div>
+            <div class="signal-section">
+              <div class="signal-section-head">
+                <div>
+                  <h3>Detection Feedback</h3>
+                  <span id="detectorFeedbackSummary">Waiting for data</span>
+                </div>
+              </div>
+              <div class="control-breakdown" id="detectorFeedbackRows" aria-live="polite"></div>
+            </div>
+          </div>
 
           <div class="signal-layout">
             <div class="signal-main-stack">
@@ -1906,6 +2784,15 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
               </div>
             </div>
             <div id="endpointAiToolRows"></div>
+          </div>
+          <div class="panel" data-collapsible="true">
+            <div class="panel-head">
+              <div>
+                <h2>Endpoint File Flow</h2>
+                <span>Named watcher profiles without local paths</span>
+              </div>
+            </div>
+            <div id="endpointFileFlowRows"></div>
           </div>
           <div class="panel wide-panel" data-collapsible="true">
             <div class="panel-head">
@@ -2128,6 +3015,19 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
         <div class="panel">
           <div class="panel-head">
             <div>
+              <h2>Security Trust Package</h2>
+              <span id="securityPackageSummary">Waiting for package</span>
+            </div>
+            <button class="system-button secondary" id="downloadSecurityPackage" type="button">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              Download Trust Package
+            </button>
+          </div>
+          <div class="trust-package-board" id="securityPackagePreview" aria-live="polite"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head">
+            <div>
               <h2>Tamper-evident Audit Log</h2>
               <span>Hash-chained admin and policy activity</span>
             </div>
@@ -2159,6 +3059,55 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
           </div>
         </div>
         <div class="config-shell">
+          <div class="policy-builder-grid policy-guided-controls hidden" id="policyGuidedControls" aria-live="polite">
+            <div class="policy-builder" id="mcpToolBuilder">
+              <h3>MCP Tool Builder</h3>
+              <div class="mini-grid">
+                <label for="mcp_builder_pattern">Tool pattern<input id="mcp_builder_pattern" type="text" placeholder="sharepoint.export*"/></label>
+                <label for="mcp_builder_decision">Decision<select id="mcp_builder_decision">
+                  <option value="approval">Require approval</option>
+                  <option value="blocked">Block</option>
+                  <option value="allowed">Allow registry</option>
+                </select></label>
+                <label for="mcp_builder_preset">Preset<select id="mcp_builder_preset">
+                  <option value="">Custom</option>
+                  <option value="sharepoint.fetch*">SharePoint read</option>
+                  <option value="drive.read*">Drive read</option>
+                  <option value="sharepoint.export*">SharePoint export</option>
+                  <option value="drive.share*">Drive share</option>
+                  <option value="*.delete*">Delete tools</option>
+                  <option value="database.write*">Database writes</option>
+                </select></label>
+              </div>
+              <button class="btn" id="addMcpToolRule" type="button">Apply MCP rule</button>
+            </div>
+            <div class="policy-builder" id="approvalRouteBuilder">
+              <h3>Approval Route Builder</h3>
+              <div class="mini-grid">
+                <label for="route_builder_id">Route id<input id="route_builder_id" type="text" placeholder="lending_high_risk"/></label>
+                <label for="route_builder_group">Assigned group<input id="route_builder_group" type="text" placeholder="lending"/></label>
+                <label for="route_builder_role">Role<select id="route_builder_role">
+                  <option value="approver">Approver</option>
+                  <option value="security_admin">Security Admin</option>
+                </select></label>
+                <label for="route_builder_sla">SLA minutes<input id="route_builder_sla" type="number" min="15" max="10080" value="60"/></label>
+                <label for="route_builder_groups">SCIM groups<input id="route_builder_groups" type="text" placeholder="PromptWall Lending"/></label>
+                <label for="route_builder_destinations">Destinations<input id="route_builder_destinations" type="text" placeholder="claude.ai"/></label>
+                <label for="route_builder_categories">Categories<input id="route_builder_categories" type="text" placeholder="LEGAL_CONTRACT"/></label>
+                <label for="route_builder_detectors">Detectors<input id="route_builder_detectors" type="text" placeholder="SECRET_KEY"/></label>
+                <label for="route_builder_severity">Min severity<select id="route_builder_severity">
+                  <option value="">Any</option>
+                  <option value="1">low</option>
+                  <option value="2">medium</option>
+                  <option value="3" selected>high</option>
+                  <option value="4">critical</option>
+                </select></label>
+                <label for="route_builder_risk">Min risk<input id="route_builder_risk" type="number" min="0" max="100" placeholder="60"/></label>
+                <label for="route_builder_reason">Reason<input id="route_builder_reason" type="text" placeholder="lending_review"/></label>
+              </div>
+              <button class="btn" id="addApprovalRoute" type="button">Add route</button>
+            </div>
+          </div>
           <div class="policy-box" id="policyBox"></div>
         </div>
       </section>
@@ -2183,6 +3132,20 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
   </main>
 </div>
 
+<script src="/siem-package.js" defer></script>
+<script src="/security-package.js" defer></script>
+<script src="/agentic-mcp.js" defer></script>
+<script src="/ai-threat-guardrails.js" defer></script>
+<script src="/operator-flow.js" defer></script>
+<script src="/policy-guides.js" defer></script>
+<script src="/policy-impact-preview.js" defer></script>
+<script src="/behavior-baselines.js" defer></script>
+<script src="/market-hardening.js" defer></script>
+<script src="/competitive-readiness.js" defer></script>
+<script src="/control-graph.js" defer></script>
+<script src="/coverage-file-flow.js" defer></script>
+<script src="/decision-quality.js" defer></script>
+<script src="/detector-feedback.js" defer></script>
 <script src="/dashboard.js" defer></script>
 </body>
 </html>

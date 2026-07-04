@@ -26,6 +26,7 @@ const app = require('../server/app');
 const { listen } = require('./support/listen');
 const db = require('../server/db');
 const releaseTokens = require('../server/release-token');
+const dataCrypto = require('../server/crypto');
 
 
 function close(server) {
@@ -150,6 +151,25 @@ test('held file scan returns a release token for approval polling', async () => 
   assert.strictEqual(body.status, 'pending');
   assert.match(body.releaseToken, /^[A-Za-z0-9_-]{32,}$/);
   assert.ok(!JSON.stringify(db.getQuery(body.id)).includes(body.releaseToken));
+}));
+
+test('rehydrate fails closed for token vault rows without a release-token hash', async () => withServer(async (port) => {
+  const row = db.createQuery({
+    status: 'redacted',
+    user: 'legacy@example.test',
+    destination: 'desktop-ai-app',
+    source: 'endpoint_agent',
+    channel: 'file_upload',
+    prompt: 'Reviewed [[US_SSN_1]].',
+    _tokenVault: dataCrypto.seal(JSON.stringify({ '[[US_SSN_1]]': '524-71-9043' })),
+  });
+
+  const res = await jsonFetch(port, '/api/v1/rehydrate', {
+    headers: { 'x-api-key': 'unit-ingest-key', 'x-release-token': 'anything' },
+    body: { id: row.id, text: 'Reviewed [[US_SSN_1]].' },
+  });
+  assert.strictEqual(res.status, 401);
+  assert.deepStrictEqual(await res.json(), { error: 'invalid release token' });
 }));
 
 test('release token helper verifies hashes and fails closed on malformed stored hashes', () => {

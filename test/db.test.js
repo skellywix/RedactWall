@@ -103,6 +103,58 @@ test('seat stats count unique billable users by tenant', () => {
   assert.ok(seats.users.every((u) => u.orgId === 'cu-acme'));
 });
 
+test('SCIM users persist, update, list, and deactivate in the SQLite store', () => {
+  const created = db.saveScimUser({
+    externalId: 'entra-db-user',
+    userName: 'db-user@example.test',
+    displayName: 'DB User',
+    active: true,
+    role: 'operator',
+  });
+  assert.ok(created.id.startsWith('su_'));
+  assert.strictEqual(db.getScimUser(created.id).userName, 'db-user@example.test');
+  assert.strictEqual(db.getScimUserByUserName('DB-USER@example.test').id, created.id);
+
+  const updated = db.saveScimUser({
+    id: created.id,
+    userName: 'db-user@example.test',
+    displayName: 'DB User Updated',
+    active: true,
+    role: 'auditor',
+  });
+  assert.strictEqual(updated.createdAt, created.createdAt);
+  assert.strictEqual(updated.displayName, 'DB User Updated');
+  assert.ok(db.listScimUsers().some((user) => user.id === created.id));
+
+  const deactivated = db.deactivateScimUser(created.id);
+  assert.strictEqual(deactivated.active, false);
+  assert.strictEqual(db.deactivateScimUser('su_missing'), null);
+});
+
+test('SCIM groups persist, update, list, and delete in the SQLite store', () => {
+  const created = db.saveScimGroup({
+    externalId: 'entra-db-group',
+    displayName: 'DB Operators',
+    members: [{ value: 'su_member', display: 'member@example.test' }],
+  });
+  assert.ok(created.id.startsWith('sg_'));
+  assert.strictEqual(db.getScimGroup(created.id).displayName, 'DB Operators');
+  assert.strictEqual(db.getScimGroupByDisplayName('DB Operators').id, created.id);
+
+  const updated = db.saveScimGroup({
+    id: created.id,
+    displayName: 'DB Reviewers',
+    members: [{ value: 'su_second', display: 'second@example.test' }],
+  });
+  assert.strictEqual(updated.createdAt, created.createdAt);
+  assert.deepStrictEqual(updated.members.map((member) => member.value), ['su_second']);
+  assert.ok(db.listScimGroups().some((group) => group.id === created.id));
+
+  const deleted = db.deleteScimGroup(created.id);
+  assert.strictEqual(deleted.displayName, 'DB Reviewers');
+  assert.strictEqual(db.deleteScimGroup('sg_missing'), null);
+});
+
 test('retention purge removes sealed raw/vault fields and preserves audit integrity', () => {
   const createdAt = '2026-01-01T00:00:00.000Z';
   const approved = db.createQuery({

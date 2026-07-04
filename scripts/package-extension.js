@@ -231,7 +231,7 @@ function packageExtensions(opts = {}) {
   return targets.map((target) => packageExtension({ ...opts, target }));
 }
 
-function parseArgs(argv) {
+function parseArgs(argv = process.argv.slice(2)) {
   const args = [...argv];
   let outDir = DEFAULT_OUT_DIR;
   let target = 'all';
@@ -253,24 +253,30 @@ function parseArgs(argv) {
   return { outDir, target };
 }
 
-function main() {
+function main(argv = process.argv.slice(2), deps = {}) {
+  const io = deps.console || console;
+  const packageOne = deps.packageExtension || packageExtension;
+  const packageAll = deps.packageExtensions || packageExtensions;
+  const setExitCode = deps.setExitCode || ((code) => { process.exitCode = code; });
   try {
-    const args = parseArgs(process.argv.slice(2));
+    const args = parseArgs(argv);
     if (args.help) {
-      console.log('Usage: node scripts/package-extension.js [--out <directory>] [--target chrome|edge|firefox|all]');
-      return;
+      io.log('Usage: node scripts/package-extension.js [--out <directory>] [--target chrome|edge|firefox|all]');
+      return [];
     }
     const results = args.target === 'all'
-      ? packageExtensions({ outDir: args.outDir })
-      : [packageExtension({ outDir: args.outDir, target: args.target })];
+      ? packageAll({ outDir: args.outDir })
+      : [packageOne({ outDir: args.outDir, target: args.target })];
     for (const result of results) {
-      console.log(`Wrote ${result.zipPath}`);
-      console.log(`Wrote ${result.manifestPath}`);
-      console.log(`SHA-256 ${result.packageManifest.sha256}`);
+      io.log(`Wrote ${result.zipPath}`);
+      io.log(`Wrote ${result.manifestPath}`);
+      io.log(`SHA-256 ${result.packageManifest.sha256}`);
     }
+    return results;
   } catch (err) {
-    console.error(err.message || err);
-    process.exitCode = 1;
+    io.error(err.message || err);
+    setExitCode(1);
+    return [];
   }
 }
 
@@ -278,7 +284,9 @@ if (require.main === module) main();
 
 module.exports = {
   BROWSER_TARGETS,
+  backgroundModel,
   collectExtensionFiles,
+  main,
   manifestForTarget,
   packageExtension,
   packageExtensions,

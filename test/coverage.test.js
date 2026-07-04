@@ -9,6 +9,7 @@ const coverage = require('../server/coverage');
 const serverSource = fs.readFileSync(path.join(__dirname, '..', 'server/app.js'), 'utf8');
 const dashboardHtml = fs.readFileSync(path.join(__dirname, '..', 'server/public/index.html'), 'utf8');
 const dashboardJs = fs.readFileSync(path.join(__dirname, '..', 'server/public/dashboard.js'), 'utf8');
+const coverageFileFlowJs = fs.readFileSync(path.join(__dirname, '..', 'server/public/coverage-file-flow.js'), 'utf8');
 
 const policy = {
   governedDestinations: ['chatgpt.com', 'claude.ai', 'copilot.microsoft.com'],
@@ -108,6 +109,9 @@ test('coverage summary aggregates governed apps, sensors, and shadow AI without 
         { id: 'ai_tool_inventory', ok: true, detail: 'detected:2' },
         { id: 'ai_tool_cursor', ok: true, detail: 'detected' },
         { id: 'ai_tool_claude_desktop', ok: false, detail: 'unapproved detected' },
+        { id: 'endpoint_file_flow_profiles', ok: true, detail: 'configured:2' },
+        { id: 'endpoint_file_flow_profile_lending', ok: true, detail: 'configured directory' },
+        { id: 'endpoint_file_flow_profile_call_center', ok: false, detail: 'missing directory' },
         { id: 'handoff_secret', ok: false, detail: 'missing handoff secret' },
       ],
     },
@@ -144,7 +148,7 @@ test('coverage summary aggregates governed apps, sensors, and shadow AI without 
   assert.strictEqual(endpoint.events, 2);
   assert.strictEqual(endpoint.versionHealth, 'current');
   assert.strictEqual(endpoint.installHealth.state, 'attention');
-  assert.deepStrictEqual(endpoint.installHealth.failedChecks, ['handoff_secret']);
+  assert.deepStrictEqual(endpoint.installHealth.failedChecks, ['endpoint_file_flow_profile_call_center', 'handoff_secret']);
   assert.deepStrictEqual(endpoint.installHealth.aiToolInventory, {
     detected: 2,
     reported: 2,
@@ -156,6 +160,16 @@ test('coverage summary aggregates governed apps, sensors, and shadow AI without 
       { id: 'cursor', label: 'Cursor', approved: true, state: 'approved', detail: 'detected' },
     ],
   });
+  assert.deepStrictEqual(endpoint.installHealth.fileFlowProfiles, {
+    configured: 2,
+    reported: 2,
+    attention: 1,
+    state: 'attention',
+    profiles: [
+      { id: 'call_center', state: 'attention', detail: 'missing directory' },
+      { id: 'lending', state: 'covered', detail: 'configured directory' },
+    ],
+  });
   assert.strictEqual(report.sensors.find((s) => s.source === 'proxy').versionHealth, 'missing');
   assert.deepStrictEqual(report.desktopCollector, {
     events: 1,
@@ -165,6 +179,7 @@ test('coverage summary aggregates governed apps, sensors, and shadow AI without 
   assert.ok(report.posture.some((p) => p.id === 'desktop_collector' && p.state === 'covered'));
   assert.ok(report.posture.some((p) => p.id === 'endpoint_agent' && p.state === 'attention' && /failed checks/.test(p.detail)));
   assert.ok(report.posture.some((p) => p.id === 'endpoint_ai_tools' && p.state === 'attention' && /1 unapproved/.test(p.detail)));
+  assert.ok(report.posture.some((p) => p.id === 'endpoint_file_flow_profiles' && p.state === 'attention' && /2 configured \/ 1 missing/.test(p.detail)));
   assert.ok(report.posture.some((p) => p.id === 'proxy' && p.state === 'attention' && /required/.test(p.detail)));
   assert.ok(report.posture.some((p) => p.id === 'sensor_versions' && p.state === 'attention'));
   assert.ok(report.posture.some((p) => p.id === 'sensor_health' && p.state === 'attention'));
@@ -177,13 +192,20 @@ test('coverage summary aggregates governed apps, sensors, and shadow AI without 
   assert.strictEqual(opsBrowser.latestVersion, '0.2.9');
   const techEndpoint = report.fleet.find((item) => item.user === 'tech@example.test' && item.source === 'endpoint_agent');
   assert.strictEqual(techEndpoint.state, 'attention');
-  assert.deepStrictEqual(techEndpoint.installHealth.failedChecks, ['handoff_secret']);
+  assert.deepStrictEqual(techEndpoint.installHealth.failedChecks, ['endpoint_file_flow_profile_call_center', 'handoff_secret']);
   assert.strictEqual(report.totals.endpointAiInventoryReports, 1);
   assert.strictEqual(report.totals.endpointAiToolDetections, 2);
   assert.strictEqual(report.totals.endpointAiToolUnapproved, 1);
+  assert.strictEqual(report.totals.endpointFileFlowReports, 1);
+  assert.strictEqual(report.totals.endpointFileFlowProfiles, 2);
+  assert.strictEqual(report.totals.endpointFileFlowAttention, 1);
   assert.deepStrictEqual(report.endpointAiTools.map((tool) => [tool.id, tool.user, tool.approved]), [
     ['claude_desktop', 'tech@example.test', false],
     ['cursor', 'tech@example.test', true],
+  ]);
+  assert.deepStrictEqual(report.endpointFileFlowProfiles.map((profile) => [profile.id, profile.user, profile.state, profile.detail]), [
+    ['call_center', 'tech@example.test', 'attention', 'missing directory'],
+    ['lending', 'tech@example.test', 'covered', 'configured directory'],
   ]);
   assert.ok(report.fleet.some((item) => item.user === 'analyst@example.test' && item.source === 'proxy' && item.state === 'missing'));
   assert.ok(report.score > 0 && report.score < 100);
@@ -216,6 +238,67 @@ test('coverage marks reviewed shadow AI as governed by policy state', () => {
   assert.ok(report.posture.some((p) => p.id === 'shadow_ai' && p.state === 'covered'));
 });
 
+test('coverage reports discovery feed freshness without prompt bodies', () => {
+  const now = new Date().toISOString();
+  const report = coverage.summarize([
+    {
+      id: 'q_fresh_discovery',
+      createdAt: now,
+      lastSeen: now,
+      status: 'shadow_ai',
+      mode: 'discovery',
+      user: 'discovery-import',
+      destination: 'perplexity.ai',
+      source: 'proxy',
+      channel: 'shadow_ai',
+      discoverySource: 'zscaler',
+      discoveryEvents: 7,
+      discoveryCategory: 'chatbot',
+      redactedPrompt: '[AI discovery import] perplexity.ai',
+    },
+    {
+      id: 'q_stale_discovery',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      lastSeen: '2026-01-01T00:00:00.000Z',
+      status: 'shadow_ai',
+      mode: 'discovery',
+      user: 'discovery-import',
+      destination: 'old-ai.example',
+      source: 'proxy',
+      channel: 'shadow_ai',
+      discoverySource: 'netskope',
+      discoveryEvents: 3,
+      discoveryCategory: 'chatbot',
+      redactedPrompt: '[AI discovery import] old-ai.example',
+    },
+    {
+      id: 'q_missing_timestamp_discovery',
+      status: 'shadow_ai',
+      mode: 'discovery',
+      user: 'discovery-import',
+      destination: 'unknown-ai.example',
+      source: 'proxy',
+      channel: 'shadow_ai',
+      discoverySource: 'cloudflare',
+      discoveryEvents: 2,
+      discoveryCategory: 'chatbot',
+      redactedPrompt: '[AI discovery import] unknown-ai.example',
+    },
+  ], { requiredSensors: ['proxy'] });
+
+  assert.strictEqual(report.totals.discoveryFeeds, 3);
+  assert.strictEqual(report.totals.freshDiscoveryFeeds, 1);
+  assert.strictEqual(report.totals.staleDiscoveryFeeds, 2);
+  assert.strictEqual(report.totals.lastDiscoveryAt, now);
+  assert.deepStrictEqual(report.discoveryFeeds.map((feed) => [feed.source, feed.state, feed.observations]), [
+    ['netskope', 'stale', 3],
+    ['cloudflare', 'missing', 2],
+    ['zscaler', 'fresh', 7],
+  ]);
+  assert.ok(report.posture.some((p) => p.id === 'discovery_freshness' && p.state === 'attention' && /1\/3 fresh feeds/.test(p.detail)));
+  assert.ok(!JSON.stringify(report.discoveryFeeds).includes('[AI discovery import]'));
+});
+
 test('fleet posture reports required sensors instead of API source rows', () => {
   const report = coverage.summarize([{
     id: 'q1',
@@ -240,7 +323,37 @@ test('fleet posture reports required sensors instead of API source rows', () => 
 test('destination normalization removes schemes, paths, and www prefixes', () => {
   assert.strictEqual(coverage.normalizeDestination('https://www.chatgpt.com/g/g-test'), 'chatgpt.com');
   assert.strictEqual(coverage.normalizeDestination('claude.ai/chat'), 'claude.ai');
+  assert.strictEqual(coverage.normalizeDestination('www.bad host/path?x=1'), 'bad host');
   assert.strictEqual(coverage.normalizeDestination(''), 'unknown');
+});
+
+test('coverage policy matching supports wildcard destination patterns', () => {
+  const report = coverage.summarize([
+    {
+      id: 'q_allowed_wildcard',
+      createdAt: '2026-06-26T12:00:00.000Z',
+      status: 'shadow_ai',
+      user: 'analyst@example.test',
+      destination: 'sub.example.com',
+      source: 'browser_extension',
+    },
+    {
+      id: 'q_blocked_wildcard',
+      createdAt: '2026-06-26T12:01:00.000Z',
+      status: 'shadow_ai',
+      user: 'analyst@example.test',
+      destination: 'team.example.org',
+      source: 'browser_extension',
+    },
+  ], {
+    allowedDestinations: ['*.example.com'],
+    blockedDestinations: ['*example.org'],
+  });
+
+  const byDestination = Object.fromEntries(report.shadowDestinations.map((item) => [item.destination, item]));
+  assert.strictEqual(byDestination['sub.example.com'].policyState, 'allowed');
+  assert.strictEqual(byDestination['team.example.org'].policyState, 'blocked');
+  assert.strictEqual(report.totals.unresolvedShadowDestinations, 0);
 });
 
 test('coverage counts response scan block and redaction outcomes', () => {
@@ -315,8 +428,14 @@ test('coverage dashboard renders fleet install health posture', () => {
   assert.match(dashboardHtml, /id="fleetRows"/);
   assert.match(dashboardHtml, /Endpoint AI Tools/);
   assert.match(dashboardHtml, /id="endpointAiToolRows"/);
+  assert.match(dashboardHtml, /Endpoint File Flow/);
+  assert.match(dashboardHtml, /id="endpointFileFlowRows"/);
   assert.match(dashboardJs, /totals\.fleetAttention/);
+  assert.match(dashboardJs, /totals\.freshDiscoveryFeeds/);
+  assert.match(dashboardJs, /Feeds fresh/);
   assert.match(dashboardJs, /endpointAiTools/);
+  assert.match(coverageFileFlowJs, /endpointFileFlowProfiles/);
+  assert.match(coverageFileFlowJs, /Local path: not reported/);
   assert.match(dashboardJs, /function endpointAiToolTone/);
   assert.match(dashboardJs, /function fleetTone/);
   assert.match(dashboardJs, /no install-health heartbeat/);

@@ -17,17 +17,21 @@ const roles = require('./roles');
 
 const DATA_DIR = path.join(__dirname, '..', 'data');
 
-function resolveSecret() {
-  if (process.env.SENTINEL_SECRET) return { secret: process.env.SENTINEL_SECRET, source: 'env' };
+function resolveSecret(opts = {}) {
+  const env = opts.env || process.env;
+  const fsImpl = opts.fs || fs;
+  const dataDir = opts.dataDir || DATA_DIR;
+  const randomBytes = opts.randomBytes || crypto.randomBytes;
+  if (env.SENTINEL_SECRET) return { secret: env.SENTINEL_SECRET, source: 'env' };
   try {
-    const f = path.join(DATA_DIR, '.session-secret');
-    if (fs.existsSync(f)) { const v = fs.readFileSync(f, 'utf8').trim(); if (v) return { secret: v, source: 'file' }; }
-    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-    const sec = crypto.randomBytes(32).toString('hex');
-    fs.writeFileSync(f, sec, { mode: 0o600 });
+    const f = path.join(dataDir, '.session-secret');
+    if (fsImpl.existsSync(f)) { const v = fsImpl.readFileSync(f, 'utf8').trim(); if (v) return { secret: v, source: 'file' }; }
+    if (!fsImpl.existsSync(dataDir)) fsImpl.mkdirSync(dataDir, { recursive: true });
+    const sec = randomBytes(32).toString('hex');
+    fsImpl.writeFileSync(f, sec, { mode: 0o600 });
     return { secret: sec, source: 'generated' };
   } catch (e) {
-    return { secret: crypto.randomBytes(32).toString('hex'), source: 'ephemeral' };
+    return { secret: randomBytes(32).toString('hex'), source: 'ephemeral' };
   }
 }
 const { secret: SECRET, source: SECRET_SOURCE } = resolveSecret();
@@ -288,4 +292,5 @@ module.exports = {
   AUDITOR_ENABLED: AUDITOR_DISTINCT && ACCOUNTS.some((account) => account.role === roles.AUDITOR),
   SECRET_SOURCE, SECRET_IS_STABLE: SECRET_SOURCE === 'env' || SECRET_SOURCE === 'file',
   SESSION_COOKIE_NAME, LEGACY_SESSION_COOKIE_NAME,
+  _internal: { resolveSecret },
 };

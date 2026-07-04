@@ -198,13 +198,15 @@ async function runInstall(config, opts = {}) {
     return { skipped: true, command: 'skip' };
   }
   const args = config.installMode === 'npm-ci' ? ['ci'] : ['ci', '--omit=dev'];
-  await runCommand(npmExecutable(), args, {
+  const npm = opts.npmExecutable || npmExecutable();
+  const exec = opts.runCommand || runCommand;
+  await exec(npm, args, {
     cwd: opts.repoRoot || ROOT,
     timeoutMs: UPDATE_TIMEOUT_MS,
     maxBuffer: 1024 * 1024,
     publicError: 'dependency install failed',
   });
-  return { skipped: false, command: [npmExecutable(), ...args].join(' ') };
+  return { skipped: false, command: [npm, ...args].join(' ') };
 }
 
 function parseStatus(output) {
@@ -337,7 +339,8 @@ async function checkForUpdates(opts = {}) {
 
 async function createBackup(config, opts = {}) {
   if (opts.createBackup) return opts.createBackup({ outDir: updateBackupDir(opts), config });
-  return backupStore.createBackup({ outDir: updateBackupDir(opts), dbModule: activeDb(opts) });
+  const store = opts.backupStore || backupStore;
+  return store.createBackup({ outDir: updateBackupDir(opts), dbModule: activeDb(opts) });
 }
 
 function writeState(patch, opts = {}) {
@@ -524,9 +527,12 @@ module.exports = {
   _internal: {
     githubRemoteInfo,
     normalizeConfig,
+    npmExecutable,
     parseRestartCommand,
     redactCommandText,
     redactRemoteUrl,
+    runInstall,
+    createBackup,
     runCommand,
   },
 };

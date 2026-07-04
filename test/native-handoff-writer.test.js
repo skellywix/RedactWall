@@ -16,6 +16,15 @@ function tempDir(t, prefix = 'ps-native-handoff-writer-') {
   return dir;
 }
 
+function captureConsole() {
+  const lines = [];
+  return {
+    lines,
+    log(message) { lines.push(['log', message]); },
+    error(message) { lines.push(['error', message]); },
+  };
+}
+
 test('writes signed native handoff files without reading file content into the event', (t) => {
   const dir = tempDir(t);
   const handoffDir = path.join(dir, 'handoff');
@@ -89,7 +98,37 @@ test('loads the handoff secret from endpoint config instead of argv', (t) => {
 
 test('rejects unsafe writer arguments and non-file references', (t) => {
   const dir = tempDir(t);
+  const sourceFile = path.join(dir, 'loan-file.txt');
+  fs.writeFileSync(sourceFile, 'Local file body.');
+
+  assert.match(writer.usage(), /--destination-process/);
+  assert.strictEqual(writer.parseArgs(['--help']).help, true);
+  assert.deepStrictEqual(writer.parseArgs([
+    '--file', sourceFile,
+    '--destination', 'Desktop AI',
+    '--destination-process', 'desktop-ai.exe',
+    '--destination-url', 'https://desktop.example/upload',
+    '--user', 'analyst@example.test',
+    '--dir', path.join(dir, 'handoff'),
+    '--env', path.join(dir, 'endpoint.env'),
+    '--id', 'evt_args',
+    '--nonce', 'nonce_args',
+  ]), {
+    filePath: sourceFile,
+    destination: 'Desktop AI',
+    destinationProcess: 'desktop-ai.exe',
+    destinationUrl: 'https://desktop.example/upload',
+    user: 'analyst@example.test',
+    dir: path.join(dir, 'handoff'),
+    envPath: path.join(dir, 'endpoint.env'),
+    id: 'evt_args',
+    nonce: 'nonce_args',
+  });
+  assert.throws(() => writer.parseArgs(['--file']), /requires a value/);
+  assert.throws(() => writer.parseArgs(['unexpected']), /Unexpected argument/);
   assert.throws(() => writer.parseArgs(['--secret', SECRET]), /Unknown option/);
+  assert.throws(() => writer.absoluteLocalFilePath(), /file path is required/);
+  assert.throws(() => writer.absoluteLocalFilePath('\\\\server\\share\\loan-file.txt'), /must be a local path/);
   assert.throws(() => writer.writeHandoffFile({
     filePath: dir,
     dir: path.join(dir, 'handoff'),
@@ -102,6 +141,68 @@ test('rejects unsafe writer arguments and non-file references', (t) => {
     secret: SECRET,
     destination: 'Desktop AI',
   }), /ENOENT|no such file/i);
+});
+
+test('writer helper defaults and env parse failures are explicit', (t) => {
+  const dir = tempDir(t);
+  const badEnv = path.join(dir, 'bad.env');
+  fs.writeFileSync(badEnv, 'BROKEN LINE\n');
+  const previous = {
+    SENTINEL_ENV_PATH: process.env.SENTINEL_ENV_PATH,
+    PROMPTWALL_ENV_PATH: process.env.PROMPTWALL_ENV_PATH,
+  };
+  delete process.env.SENTINEL_ENV_PATH;
+  delete process.env.PROMPTWALL_ENV_PATH;
+  t.after(() => {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+
+  assert.deepStrictEqual(writer.loadEndpointEnv(), { loaded: false, path: null, keys: [], skipped: [], errors: [] });
+  assert.throws(() => writer.loadEndpointEnv(badEnv), /parse error/);
+  assert.deepStrictEqual(writer.destinationFromOptions(), { app: 'desktop-ai-app' });
+  assert.deepStrictEqual(writer.destinationFromOptions({
+    destination: 'Claude Desktop',
+    destinationProcess: 'claude.exe',
+    destinationUrl: 'https://claude.ai',
+  }), {
+    app: 'Claude Desktop',
+    process: 'claude.exe',
+    url: 'https://claude.ai',
+  });
+  assert.strictEqual(writer.safeEventFileName('evt:/bad id'), 'evt__bad_id');
+  assert.match(writer.safeEventFileName(''), /^handoff-\d+$/);
+});
+
+test('writer CLI main prints help, success JSON, and sanitized failures', () => {
+  const helpIo = captureConsole();
+  assert.strictEqual(writer.main(['--help'], { console: helpIo }), 0);
+  assert.ok(helpIo.lines.some(([, message]) => message.includes('Usage: node')));
+
+  const okIo = captureConsole();
+  assert.strictEqual(writer.main(['--file', 'loan.txt', '--destination', 'Desktop AI'], {
+    console: okIo,
+    writeHandoffFile(opts) {
+      assert.strictEqual(opts.filePath, 'loan.txt');
+      return {
+        path: 'C:\\handoff\\evt_cli.json',
+        event: {
+          id: 'evt_cli',
+          destination: { app: 'Desktop AI', process: 'desktop-ai.exe' },
+        },
+      };
+    },
+  }), 0);
+  const body = JSON.parse(okIo.lines[0][1]);
+  assert.strictEqual(body.status, 'written');
+  assert.strictEqual(body.id, 'evt_cli');
+  assert.strictEqual(body.destination, 'Desktop AI');
+
+  const badIo = captureConsole();
+  assert.strictEqual(writer.main(['--file'], { console: badIo }), 1);
+  assert.ok(badIo.lines.some(([level, message]) => level === 'error' && /requires a value/.test(message)));
 });
 
 test('refuses to overwrite an existing event id in the handoff spool', (t) => {
@@ -118,4 +219,41 @@ test('refuses to overwrite an existing event id in the handoff spool', (t) => {
   };
   writer.writeHandoffFile(opts);
   assert.throws(() => writer.writeHandoffFile(opts), /already exists/);
+});
+
+test('writer rejects oversized events and cleans up failed atomic writes', (t) => {
+  const dir = tempDir(t);
+  const sourceFile = path.join(dir, 'loan-file.txt');
+  fs.writeFileSync(sourceFile, 'Local file body.');
+  const originalMax = handoff.MAX_EVENT_BYTES;
+  handoff.MAX_EVENT_BYTES = 10;
+  try {
+    assert.throws(() => writer.writeHandoffFile({
+      filePath: sourceFile,
+      dir: path.join(dir, 'handoff'),
+      secret: SECRET,
+      id: 'evt_too_large',
+      destination: 'Desktop AI',
+    }), /too large/);
+  } finally {
+    handoff.MAX_EVENT_BYTES = originalMax;
+  }
+
+  const atomicDir = path.join(dir, 'atomic');
+  fs.mkdirSync(atomicDir);
+  const target = path.join(atomicDir, 'atomic.json');
+  const originalRename = fs.renameSync;
+  fs.renameSync = () => {
+    throw new Error('rename denied');
+  };
+  try {
+    assert.throws(
+      () => writer._internal.writeAtomicJson(target, '{"ok":true}\n'),
+      /rename denied/,
+    );
+  } finally {
+    fs.renameSync = originalRename;
+  }
+  assert.deepStrictEqual(fs.readdirSync(atomicDir), []);
+  assert.deepStrictEqual(fs.readdirSync(path.join(dir, 'handoff')), []);
 });

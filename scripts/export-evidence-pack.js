@@ -189,11 +189,14 @@ function cliOptionsFromArgs(args, schedule = {}) {
   };
 }
 
-async function main(argv = process.argv.slice(2)) {
+async function main(argv = process.argv.slice(2), deps = {}) {
+  const io = deps.console || console;
+  const loadSchedule = deps.loadScheduleConfig || loadScheduleConfig;
+  const writePack = deps.writeEvidencePack || writeEvidencePack;
   const args = parseArgs(argv);
-  const schedule = loadScheduleConfig(args.schedule);
-  const result = writeEvidencePack(cliOptionsFromArgs(args, schedule));
-  console.log(JSON.stringify({
+  const schedule = loadSchedule(args.schedule);
+  const result = writePack(cliOptionsFromArgs(args, schedule));
+  io.log(JSON.stringify({
     file: result.file,
     bytes: result.bytes,
     sha256: result.sha256,
@@ -206,18 +209,15 @@ async function main(argv = process.argv.slice(2)) {
   }, null, 2));
 }
 
-if (require.main === module) {
-  main().catch((e) => {
-    console.error(e.message);
-    process.exit(1);
-  });
-}
+if (require.main === module) main().catch((e) => { console.error(e.message); process.exit(1); });
 
 module.exports = {
   parseArgs,
+  boundedNumber,
   loadScheduleConfig,
   buildEvidencePackFromRuntime,
   writeEvidencePack,
   writeZip,
   cliOptionsFromArgs,
+  main,
 };

@@ -13,12 +13,14 @@ require('../../server/env').loadEnv();
  *   INGEST_API_KEY or PROMPTWALL_INGEST_API_KEY (required for control-plane calls)
  *   ENDPOINT_AGENT_WATCH_DIR or PROMPTWALL_ENDPOINT_AGENT_WATCH_DIR
  *   ENDPOINT_AGENT_HANDOFF_SECRET or PROMPTWALL_ENDPOINT_AGENT_HANDOFF_SECRET enables signed native file-flow handoff events
+ *   ENDPOINT_AGENT_FILE_FLOW_PROFILES or PROMPTWALL_ENDPOINT_AGENT_FILE_FLOW_PROFILES enables named extra watch roots
  */
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 const nativeHandoff = require('./native-handoff');
+const fileFlowProfiles = require('./file-flow-profiles');
 const endpointOcr = require('./ocr');
 const processors = require('../../server/processors');
 const policyEngine = require('../../server/policy');
@@ -583,21 +585,66 @@ function processHandoffDirectory(dir = HANDOFF_DIR, opts = {}) {
   });
 }
 
-function start() {
-  console.log('PromptWall endpoint agent');
-  console.log('  watching:', WATCH);
-  console.log('  native handoff:', handoffSecretReady(HANDOFF_SECRET) ? HANDOFF_DIR : 'disabled (set 32+ char ENDPOINT_AGENT_HANDOFF_SECRET)');
-  console.log('  server  :', SERVER);
-  console.log('  ingest  :', KEY ? 'configured' : 'not configured (control-plane calls disabled)');
-  console.log('  Supported: pdf, docx, xlsx, pptx, and text files. Drop a file in to scan.\n');
-
-  refreshPolicy({ silent: true }).finally(() => {
-    for (const f of fs.readdirSync(WATCH)) scanFile(f);
+function startWatchedRoot(profile, deps = {}) {
+  const readDir = deps.readdirSync || fs.readdirSync;
+  const watch = deps.watch || fs.watch;
+  const setTimeoutFn = deps.setTimeout || setTimeout;
+  const scan = deps.scanFile || scanFile;
+  const scanOpts = {
+    ...(profile.scanOptions || {}),
+    watchDir: profile.dir,
+    destination: profile.destination,
+    ...(profile.user ? { user: profile.user } : {}),
+  };
+  const scanQueuedFile = (filename) => scan(filename, scanOpts);
+  for (const f of readDir(profile.dir)) scanQueuedFile(f);
+  return watch(profile.dir, (event, filename) => {
+    if (filename && event === 'rename') setTimeoutFn(() => scanQueuedFile(filename), HANDOFF_RETRY_DELAY_MS);
   });
-  const refreshTimer = setInterval(() => refreshPolicy({ silent: true }), POLICY_REFRESH_MS);
+}
+
+function start(opts = {}) {
+  const io = opts.console || console;
+  const watchDir = opts.watchDir || WATCH;
+  const server = Object.prototype.hasOwnProperty.call(opts, 'server') ? opts.server : SERVER;
+  const key = Object.prototype.hasOwnProperty.call(opts, 'key') ? opts.key : KEY;
+  const handoffDir = opts.handoffDir || HANDOFF_DIR;
+  const handoffSecret = Object.prototype.hasOwnProperty.call(opts, 'handoffSecret') ? opts.handoffSecret : HANDOFF_SECRET;
+  const refresh = opts.refreshPolicy || refreshPolicy;
+  const scan = opts.scanFile || scanFile;
+  const processHandoff = opts.processHandoffDirectory || processHandoffDirectory;
+  const watch = opts.watch || fs.watch;
+  const readDir = opts.readdirSync || fs.readdirSync;
+  const setIntervalFn = opts.setInterval || setInterval;
+  const setTimeoutFn = opts.setTimeout || setTimeout;
+  const scanOpts = opts.scanOptions || (opts.watchDir ? { watchDir } : undefined);
+  const scanQueuedFile = (filename) => (scanOpts ? scan(filename, scanOpts) : scan(filename));
+  const profiles = opts.fileFlowProfiles
+    ? fileFlowProfiles.normalizeFileFlowProfiles(opts.fileFlowProfiles)
+    : fileFlowProfiles.fileFlowProfilesFromEnv();
+
+  io.log('PromptWall endpoint agent');
+  io.log('  watching:', watchDir);
+  io.log('  file-flow profiles:', profiles.length ? profiles.map((profile) => profile.id).join(', ') : 'disabled');
+  io.log('  native handoff:', handoffSecretReady(handoffSecret) ? handoffDir : 'disabled (set 32+ char ENDPOINT_AGENT_HANDOFF_SECRET)');
+  io.log('  server  :', server);
+  io.log('  ingest  :', key ? 'configured' : 'not configured (control-plane calls disabled)');
+  io.log('  Supported: pdf, docx, xlsx, pptx, and text files. Drop a file in to scan.\n');
+
+  const initialRefresh = Promise.resolve(refresh({ silent: true })).finally(() => {
+    for (const f of readDir(watchDir)) scanQueuedFile(f);
+  });
+  const refreshTimer = setIntervalFn(() => refresh({ silent: true }), POLICY_REFRESH_MS);
   if (refreshTimer.unref) refreshTimer.unref();
-  fs.watch(WATCH, (event, filename) => { if (filename && event === 'rename') setTimeout(() => scanFile(filename), 200); });
-  if (handoffSecretReady(HANDOFF_SECRET)) processHandoffDirectory(HANDOFF_DIR, { secret: HANDOFF_SECRET });
+  const watcher = watch(watchDir, (event, filename) => { if (filename && event === 'rename') setTimeoutFn(() => scanQueuedFile(filename), 200); });
+  const fileFlowWatchers = profiles.map((profile) => startWatchedRoot(profile, {
+    readdirSync: readDir,
+    watch,
+    setTimeout: setTimeoutFn,
+    scanFile: scan,
+  }));
+  const handoffWatcher = handoffSecretReady(handoffSecret) ? processHandoff(handoffDir, { secret: handoffSecret }) : undefined;
+  return { refreshTimer, watcher, fileFlowWatchers, handoffWatcher, initialRefresh };
 }
 
 if (require.main === module) start();
@@ -626,5 +673,7 @@ module.exports = {
   configuredKey,
   handoffSecretReady,
   nativeHandoff,
+  fileFlowProfiles,
+  startWatchedRoot,
   start,
 };

@@ -217,4 +217,5 @@ module.exports = {
   buildIdentitySetupGuide,
   normalizeProvider,
   renderTextGuide,
+  _internal: { providerIssuer },
 };

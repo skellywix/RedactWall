@@ -5,8 +5,8 @@
  */
 const { spawnSync } = require('node:child_process');
 
-function checkNativeBinding() {
-  const Database = require('better-sqlite3');
+function checkNativeBinding(DatabaseImpl) {
+  const Database = DatabaseImpl || require('better-sqlite3');
   const db = new Database(':memory:');
   try {
     const row = db.prepare('select 1 as ok').get();
@@ -31,48 +31,52 @@ function npmCommand() {
   return process.platform === 'win32' ? 'npm.cmd' : 'npm';
 }
 
-function rebuildNativeBinding() {
-  return spawnSync(npmCommand(), ['rebuild', 'better-sqlite3'], {
+function rebuildNativeBinding(deps = {}) {
+  const spawn = deps.spawnSync || spawnSync;
+  const npm = deps.npmCommand || npmCommand;
+  return spawn(npm(), ['rebuild', 'better-sqlite3'], {
     stdio: 'inherit',
     windowsHide: true,
   });
 }
 
-function main(argv = process.argv.slice(2)) {
+function main(argv = process.argv.slice(2), deps = {}) {
+  const check = deps.checkNativeBinding || checkNativeBinding;
+  const rebuild = deps.rebuildNativeBinding || rebuildNativeBinding;
+  const io = deps.console || console;
   const repair = argv.includes('--repair');
   try {
-    checkNativeBinding();
-    console.log('[native] better-sqlite3 binding ok');
+    check();
+    io.log('[native] better-sqlite3 binding ok');
     return 0;
   } catch (err) {
-    console.error(`[native] better-sqlite3 binding check failed: ${err && err.message ? err.message : err}`);
+    io.error(`[native] better-sqlite3 binding check failed: ${err && err.message ? err.message : err}`);
     if (!repair || !isNativeBindingFailure(err)) {
-      console.error('[native] Run npm rebuild better-sqlite3, then rerun npm run native:check.');
+      io.error('[native] Run npm rebuild better-sqlite3, then rerun npm run native:check.');
       return 1;
     }
   }
 
-  console.warn('[native] retrying better-sqlite3 native install via npm rebuild');
-  const rebuilt = rebuildNativeBinding();
+  io.warn('[native] retrying better-sqlite3 native install via npm rebuild');
+  const rebuilt = rebuild();
   if (rebuilt.status !== 0) return rebuilt.status || 1;
 
   try {
-    checkNativeBinding();
-    console.log('[native] better-sqlite3 binding ok after rebuild');
+    check();
+    io.log('[native] better-sqlite3 binding ok after rebuild');
     return 0;
   } catch (err) {
-    console.error(`[native] better-sqlite3 binding still fails after rebuild: ${err && err.message ? err.message : err}`);
+    io.error(`[native] better-sqlite3 binding still fails after rebuild: ${err && err.message ? err.message : err}`);
     return 1;
   }
 }
 
-if (require.main === module) {
-  process.exitCode = main();
-}
+if (require.main === module) process.exitCode = main();
 
 module.exports = {
   checkNativeBinding,
   isNativeBindingFailure,
   main,
   npmCommand,
+  rebuildNativeBinding,
 };

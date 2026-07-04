@@ -91,6 +91,21 @@ test('custom detector IDs are listed and accepted by policy validation', () => {
   }).success, true);
 });
 
+test('custom detector loader accepts array configs and falls back on invalid JSON', () => {
+  fs.writeFileSync(customDetectorPath, JSON.stringify([{
+    id: 'BRANCH_MEMBER_ID',
+    label: 'Branch member id',
+    severity: 3,
+    pattern: '\\bBR-[0-9]{6}\\b',
+  }]));
+  assert.deepStrictEqual(customDetectors.loadRaw().detectors.map((item) => item.id), ['BRANCH_MEMBER_ID']);
+  assert.deepStrictEqual(customDetectors.listDetectorIds(), ['BRANCH_MEMBER_ID']);
+
+  fs.writeFileSync(customDetectorPath, '{not json');
+  assert.deepStrictEqual(customDetectors.loadRaw(), { detectors: [] });
+  assert.deepStrictEqual(customDetectors.loadCustomDetectors(), []);
+});
+
 test.after(() => {
   for (const file of [customDetectorPath, process.env.SENTINEL_POLICY_PATH]) {
     try { fs.unlinkSync(file); } catch {}

@@ -2,7 +2,18 @@
 /** MCP guard must never pass sensitive tool output to the model unchanged. */
 const test = require('node:test');
 const assert = require('node:assert');
-const { fetchPolicy, guardToolResult, reportBody, refreshPolicy, requestTimeoutMs } = require('../sensors/mcp-guard/guard');
+const {
+  demo,
+  fetchPolicy,
+  guardToolRequest,
+  guardToolResult,
+  mcpToolDecision,
+  reportToolPolicyBody,
+  reportBody,
+  refreshPolicy,
+  requestTimeoutMs,
+  wrapTool,
+} = require('../sensors/mcp-guard/guard');
 const pkg = require('../package.json');
 
 const noOpFetch = async () => ({ ok: true });
@@ -110,6 +121,69 @@ test('MCP control-plane request timeout is bounded', () => {
   assert.strictEqual(requestTimeoutMs({ timeoutMs: 'bad' }), 10000);
 });
 
+test('blocks disallowed MCP tools before the handler runs and logs sanitized evidence', async () => {
+  let handlerCalled = false;
+  let outbound;
+  const wrapped = wrapTool(async () => {
+    handlerCalled = true;
+    return 'SharePoint record SSN 524-71-9043.';
+  }, {
+    agent: 'mcp-unit',
+    tool: 'sharepoint.deleteRecord',
+  }, {
+    server: 'http://sentinel.test',
+    key: 'unit-key',
+    policy: { ignore: [], disabledDetectors: [], mcpAllowedTools: ['sharepoint.fetch*'] },
+    fetchImpl: async (url, opts) => {
+      outbound = { url, body: JSON.parse(opts.body), headers: opts.headers };
+      return { ok: true };
+    },
+  });
+
+  const result = await wrapped({ memberSsn: '524-71-9043' });
+  assert.strictEqual(handlerCalled, false);
+  assert.match(result, /\[BLOCKED: MCP tool is outside the allowed registry\]/);
+  assert.strictEqual(outbound.url, 'http://sentinel.test/api/v1/gate');
+  assert.strictEqual(outbound.body.source, 'mcp_guard');
+  assert.strictEqual(outbound.body.channel, 'mcp_tool');
+  assert.strictEqual(outbound.body.clientOutcome, 'action_blocked');
+  assert.strictEqual(outbound.body.destination, 'sharepoint.deleteRecord');
+  assert.ok(!JSON.stringify(outbound.body).includes('524-71-9043'));
+
+  const decision = await guardToolRequest({ agent: 'mcp-unit', tool: 'drive.fetchDoc' }, {
+    policy: { mcpBlockedTools: ['drive.*'] },
+    fetchImpl: async () => ({ ok: true }),
+  });
+  assert.strictEqual(decision.allowed, false);
+  assert.strictEqual(mcpToolDecision({ tool: 'drive.fetchDoc' }, { mcpBlockedTools: ['drive.*'] }).status, 'blocked');
+  assert.strictEqual(mcpToolDecision({ tool: 'sharepoint.deleteRecord' }, { mcpBlockedTools: ['*.delete*'] }).status, 'blocked');
+  assert.strictEqual(reportToolPolicyBody({ decision, ctx: { agent: 'mcp-unit', tool: 'drive.fetchDoc' } }).prompt, '[MCP tool blocked] drive.fetchDoc');
+  assert.strictEqual(reportToolPolicyBody({ decision: { reason: 'blocked' }, ctx: null }).user, 'mcp-agent');
+});
+
+test('policy refresh failures log sanitized errors only when requested', async () => {
+  const errors = [];
+  const originalError = console.error;
+  console.error = (...args) => errors.push(args.join(' '));
+  try {
+    const policy = await fetchPolicy({
+      server: 'http://sentinel.test',
+      key: 'policy-key',
+      silent: false,
+      fetchImpl: async () => {
+        throw new Error('network down for policy-key');
+      },
+    });
+
+    assert.strictEqual(policy, null);
+    assert.strictEqual(errors.length, 1);
+    assert.match(errors[0], /policy refresh failed/);
+    assert.ok(!errors[0].includes('SSN 524-71-9043'));
+  } finally {
+    console.error = originalError;
+  }
+});
+
 test('redaction still works without implicit development ingest key logging', async () => {
   let called = false;
   const guarded = await guardToolResult('Member SSN 524-71-9043 must be redacted.', { agent: 'test', tool: 'drive.fetch' }, {
@@ -160,6 +234,82 @@ test('honors detector ignore policy for MCP tool output', async () => {
   assert.strictEqual(guarded.redacted, false);
   assert.deepStrictEqual(guarded.findings, []);
   assert.strictEqual(guarded.text, raw);
+});
+
+test('guardToolResult refreshes live policy before scanning when no explicit policy is supplied', async () => {
+  const requests = [];
+  const guarded = await guardToolResult('Member SSN 524-71-9043 should follow live policy.', {
+    agent: 'mcp-unit',
+    tool: 'sharepoint.fetchDoc',
+  }, {
+    server: 'http://sentinel.test',
+    key: 'policy-key',
+    policyRefreshMs: 0,
+    fetchImpl: async (url, opts = {}) => {
+      requests.push({ url, headers: opts.headers });
+      assert.ok(!JSON.stringify(opts).includes('524-71-9043'));
+      return {
+        ok: true,
+        json: async () => ({ ignore: ['US_SSN'], disabledDetectors: [], customDetectors: [] }),
+      };
+    },
+  });
+
+  assert.deepStrictEqual(requests.map((r) => r.url), ['http://sentinel.test/api/v1/policy']);
+  assert.strictEqual(requests[0].headers['x-api-key'], 'policy-key');
+  assert.strictEqual(guarded.redacted, false);
+  assert.deepStrictEqual(guarded.findings, []);
+});
+
+test('wrapTool returns only guarded text for string and structured tool results', async () => {
+  await refreshPolicy({
+    server: 'http://sentinel.test',
+    key: 'policy-key',
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => ({ ignore: [], disabledDetectors: [], customDetectors: [] }),
+    }),
+  });
+
+  const stringTool = wrapTool(async () => 'SharePoint record SSN 524-71-9043.', {
+    agent: 'mcp-unit',
+    tool: 'sharepoint.fetchDoc',
+  });
+  const structuredTool = wrapTool(async () => ({
+    content: [{ type: 'text', text: 'Card 4111 1111 1111 1111' }],
+  }), {
+    agent: 'mcp-unit',
+    tool: 'drive.fetch',
+  });
+
+  const stringResult = await stringTool({});
+  const structuredResult = await structuredTool({});
+
+  assert.ok(stringResult.includes('[US_SSN]'));
+  assert.ok(!stringResult.includes('524-71-9043'));
+  assert.ok(structuredResult.includes('[CREDIT_CARD]'));
+  assert.ok(!structuredResult.includes('4111 1111 1111 1111'));
+});
+
+test('demo path prints raw and guarded MCP examples for operator verification', async () => {
+  const lines = [];
+  const result = await demo({
+    console: {
+      log(...args) {
+        lines.push(args.join(' '));
+      },
+    },
+    guardToolResult: async (text, ctx) => {
+      assert.ok(text.includes('PS-CANARY-MCPDEMO123456'));
+      assert.deepStrictEqual(ctx, { agent: 'claude-desktop', tool: 'sharepoint.fetchDoc' });
+      return { text: '[CANARY_TOKEN]', redacted: true, findings: ['CANARY_TOKEN'] };
+    },
+  });
+
+  assert.strictEqual(result.redacted, true);
+  assert.ok(lines.some((line) => /raw MCP tool result/.test(line)));
+  assert.ok(lines.some((line) => /guarded result/.test(line)));
+  assert.ok(lines.some((line) => /detected: CANARY_TOKEN/.test(line)));
 });
 
 test('refreshes MCP detection policy from the control plane', async () => {

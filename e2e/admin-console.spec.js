@@ -821,6 +821,24 @@ test('admin console controls and forms are wired end to end', async ({ page, req
   await page.locator('#addExceptionRule').click();
   await expect(page.locator('#pol_policy_exceptions')).toHaveValue(/ui_exception_rule/);
 
+  await expect(page.locator('#policyGuidedControls')).toBeVisible();
+  await page.locator('#mcp_builder_pattern').fill('sharepoint.export*');
+  await page.locator('#mcp_builder_decision').selectOption('approval');
+  await page.locator('#addMcpToolRule').click();
+  await expect(page.locator('#pol_mcp_approval_required_tools')).toHaveValue(/sharepoint\.export\*/);
+
+  await page.locator('#route_builder_id').fill('ui_lending_route');
+  await page.locator('#route_builder_group').fill('lending');
+  await page.locator('#route_builder_role').selectOption('approver');
+  await page.locator('#route_builder_sla').fill('90');
+  await page.locator('#route_builder_groups').fill('PromptWall Lending');
+  await page.locator('#route_builder_destinations').fill('claude.ai');
+  await page.locator('#route_builder_categories').fill('LEGAL_CONTRACT');
+  await page.locator('#route_builder_risk').fill('55');
+  await page.locator('#route_builder_reason').fill('lending_review');
+  await page.locator('#addApprovalRoute').click();
+  await expect(page.locator('#pol_approval_routing_rules')).toHaveValue(/ui_lending_route/);
+
   await page.locator('input[name="mode"][value="justify"]').check();
   await page.locator('#pol_sev').selectOption('3');
   await page.locator('#pol_risk').fill('42');
@@ -847,6 +865,8 @@ test('admin console controls and forms are wired end to end', async ({ page, req
   expect(savedPolicy.responseScanMode).toBe('block');
   expect(savedPolicy.policyScopes.some((rule) => rule.id === 'ui_scope_rule')).toBe(true);
   expect(savedPolicy.policyExceptions.some((rule) => rule.id === 'ui_exception_rule')).toBe(true);
+  expect(savedPolicy.mcpApprovalRequiredTools).toContain('sharepoint.export*');
+  expect(savedPolicy.approvalRoutingRules.some((rule) => rule.id === 'ui_lending_route' && rule.assignedGroup === 'lending')).toBe(true);
   expect(savedPolicy.blockedBrowserActions.some((rule) => rule.id === 'ui_block_paste')).toBe(true);
 
   await page.locator('.ps-tpl[data-tpl="baseline"]').click();
@@ -1109,6 +1129,12 @@ test('admin console secondary controls and dialog cancels are wired end to end',
     });
   });
   await page.locator('.rail .tab[data-tab="audit"]').click();
+  await expect(page.locator('#securityPackagePreview')).toContainText('Raw prompts');
+  await expect(page.locator('#securityPackagePreview')).toContainText('SBOM');
+  const trustDownloadPromise = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download Trust Package' }).click();
+  const trustDownload = await trustDownloadPromise;
+  expect(trustDownload.suggestedFilename()).toBe('promptwall-security-trust-package.zip');
   const exportProblemStart = problems.length;
   await page.getByRole('button', { name: 'Export Evidence' }).click();
   await routeExportPromise;
@@ -1134,15 +1160,74 @@ test('admin console secondary controls and dialog cancels are wired end to end',
   expect(problems).toEqual([]);
 });
 
-test('signal operations monitoring console supports adaptive states', async ({ page }) => {
+test('signal operations monitoring console supports adaptive states', async ({ page, request }) => {
   const problems = collectUiProblems(page);
+  await createHeldPrompt(request, {
+    suffix: '9401',
+    user: 'monitor-ui@example.test',
+    destination: 'chatgpt.com',
+  });
+  await recordHeartbeat(request, {
+    user: 'monitor-health@example.test',
+    source: 'browser_extension',
+    destination: 'browser-install',
+    sensor: { name: 'browser_extension', version: '0.3.0', platform: 'chrome_mv3' },
+  });
+
   await login(page);
 
   await page.locator('.rail .tab[data-tab="monitor"]').click();
   await expect(page.locator('#tab-monitor')).toBeVisible();
-  await expect(page.locator('.signal-console')).toContainText('Signal Monitor');
-  await expect(page.locator('#monitorDataScope')).toContainText('Sanitized event stream');
+  await expect(page.locator('.signal-console')).toContainText('AI Security Command Center');
+  await expect(page.locator('#monitorDataScope')).toContainText('without prompt bodies');
+  await expect(page.locator('#hardeningMission')).toContainText('Hardening mission');
+  await expect(page.locator('#hardeningMission')).toContainText('AI Gateway Enforcement');
+  await expect(page.locator('#hardeningMission')).toContainText('Proof ledger');
+  await expect(page.locator('#hardeningMission .mission-lane')).toHaveCount(3);
+  await expect(page.locator('#marketHardeningRows .market-hardening-card')).toHaveCount(3);
+  await expect(page.locator('#marketHardeningRows')).toContainText('Continuous Shadow-AI Discovery');
+  await expect(page.locator('#marketHardeningRows')).toContainText('MCP And SaaS Connector Coverage');
+  await expect(page.locator('#marketHardeningRows')).toContainText('Detection Quality Proof');
+  await expect(page.locator('#marketHardeningSummary')).toContainText('/100');
+  await expect(page.locator('#operatorFlowRows .operator-flow-card')).toHaveCount(6);
+  await expect(page.locator('#operatorFlowRows')).toContainText('Threat triage');
+  await expect(page.locator('#operatorFlowRows')).toContainText('Behavior baselines');
+  await expect(page.locator('#operatorFlowRows')).toContainText('SOC handoff');
+  await expect(page.locator('#operatorFlowSummary')).toContainText('/');
+  await expect(page.locator('#behaviorBaselineSummary')).toContainText('anomalies');
+  await expect(page.locator('#behaviorBaselineRows')).toContainText('Destination Activity');
+  await expect(page.locator('#hardeningActionQueue')).toContainText('Current mission');
+  await expect(page.locator('#hardeningActionQueue')).toContainText('Run step');
+  await page.locator('#hardeningActionQueue [data-action-workflow="assigned"]').first().click();
+  await expect(page.locator('#hardeningActionQueue .action-row').first()).toContainText('Assigned');
+  await expect(page.locator('#hardeningActionSummary')).toContainText('routed');
+  await expect(page.locator('#postureObjectives')).toContainText('Prevent sensitive AI egress');
+  await expect(page.locator('#aiInventoryRows')).toContainText('AI app');
+  await expect(page.locator('#aiInventoryRows')).toContainText('Sanctioned');
+  await expect(page.locator('#aiInventoryRows')).toContainText('risk');
+  await expect(page.locator('#agenticMcpRows')).toContainText('Connector Catalog');
+  await expect(page.locator('#agenticMcpRows')).toContainText('Microsoft 365 Graph');
+  await expect(page.locator('#agenticMcpRows')).toContainText('Google Drive');
+  await expect(page.locator('#agenticMcpRows')).toContainText('Slack');
+  await expect(page.locator('#agenticMcpRows')).toContainText('Microsoft Teams');
+  await expect(page.locator('#agenticMcpRows')).toContainText('Jira And Confluence');
+  await expect(page.locator('#agenticMcpRows')).toContainText('Database Read-Only');
+  await expect(page.locator('#controlGraphMap')).toContainText('People');
+  await expect(page.locator('#controlGraphMap')).toContainText('AI assets');
+  await expect(page.locator('#controlGraphMap')).toContainText('Highest-risk links');
+  await expect(page.locator('#hardeningReadinessBoard')).toContainText('AI Gateway Enforcement');
+  await expect(page.locator('#hardeningReadinessBoard')).toContainText('AI Asset Discovery');
+  await expect(page.locator('#hardeningReadinessBoard')).toContainText('MCP / Agent Gateway');
+  await expect(page.locator('#hardeningReadinessBoard')).toContainText('Evidence ledger');
+  await expect(page.locator('#hardeningReadinessBoard')).toContainText('Runbook');
+  await expect(page.locator('#hardeningReadinessBoard')).toContainText('npm run proxy:lab');
+  await expect(page.locator('#postureTrendChart .trend-day')).toHaveCount(7);
+  await expect(page.locator('#controlOutcomeRows')).toContainText('Prompt submit');
+  await expect(page.locator('#detectorFeedbackRows')).toContainText('Held-out Eval');
+  await expect(page.locator('#detectorFeedbackRows')).toContainText('Semantic Recall');
   await expect(page.locator('#monitorInspector')).toContainText('No selection');
+  await page.locator('#sendPostureSnapshot').click();
+  await expect(page.locator('#postureSnapshotStatus')).toContainText('NOT SENT');
 
   await page.locator('#monitorSearch').focus();
   await expect(page.locator('#monitorSearchWrap')).toHaveAttribute('data-state', 'focus');
@@ -1155,32 +1240,31 @@ test('signal operations monitoring console supports adaptive states', async ({ p
   await page.locator('#monitorSearch').fill('audit');
   await expect(page.locator('#monitorSearchWrap')).toHaveAttribute('data-state', 'valid');
 
+  await page.locator('#monitorSearch').fill('');
   await page.locator('[data-monitor-status="error"]').click();
   await expect(page.locator('[data-monitor-status="error"]')).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.locator('#monitorPanelGrid')).toContainText('Audit Chain Verifier');
-  await expect(page.locator('#monitorPanelGrid')).not.toContainText('Browser Chat Sensor');
+  await expect(page.locator('#monitorActivityFeed')).toContainText('Prompt held for approval');
+  await expect(page.locator('#monitorPanelGrid')).not.toContainText('Policy Guardrails');
 
-  await page.locator('[data-monitor-select="item"][data-monitor-id="node-audit-verifier"]').click();
-  await expect(page.locator('#monitorInspector')).toContainText('Audit Chain Verifier');
-  await page.locator('[data-monitor-expand="node-audit-verifier"]').click();
-  await expect(page.locator('[data-monitor-panel="node-audit-verifier"]')).toHaveClass(/is-expanded/);
-  await expect(page.locator('[data-monitor-panel="node-audit-verifier"]')).toContainText('97% confidence');
+  await page.locator('[data-monitor-status="all"]').click();
+  await page.locator('[data-monitor-select="item"][data-monitor-id="surface-audit-evidence"]').click();
+  await expect(page.locator('#monitorInspector')).toContainText('Audit Evidence');
+  await page.locator('[data-monitor-expand="surface-audit-evidence"]').click();
+  await expect(page.locator('[data-monitor-panel="surface-audit-evidence"]')).toHaveClass(/is-expanded/);
+  await expect(page.locator('[data-monitor-panel="surface-audit-evidence"]')).toContainText('99% confidence');
   await page.locator('[data-monitor-close-inspector]').click();
   await expect(page.locator('#monitorInspector')).toContainText('No selection');
 
   await page.locator('#monitorSearch').fill('');
   await page.locator('[data-monitor-status="all"]').click();
-  const eventRow = page.locator('.activity-feed-row[data-monitor-event-id="evt-7902"]');
+  const eventRow = page.locator('.activity-feed-row', { hasText: 'Prompt held for approval' }).first();
   await eventRow.click();
-  await expect(page.locator('#monitorInspector')).toContainText('SSN paste blocked before egress');
-  await eventRow.locator('[data-monitor-event-expand="evt-7902"]').click();
-  await expect(page.locator('.activity-detail-block:has-text("Signal Monitor records sanitized metadata")')).toBeVisible();
+  await expect(page.locator('#monitorInspector')).toContainText('Prompt held for approval');
+  await eventRow.locator('[data-monitor-event-expand]').click();
+  await expect(page.locator('.activity-detail-block.is-expanded:has-text("raw content excluded")')).toBeVisible();
   await expect(page.locator('#monitorActivityFeed')).not.toContainText('prompt was held');
 
   await page.locator('#monitorRefresh').click();
-  await expect(page.locator('#monitorRefresh')).toBeDisabled();
-  await expect(page.locator('#monitorRefresh')).toContainText('Refreshing');
-  await expect(page.locator('#monitorSearch')).toBeDisabled();
   await expect(page.locator('#monitorRefresh')).toBeEnabled();
   await expect(page.locator('#monitorActivityFeed')).toContainText('Signal refresh completed');
 

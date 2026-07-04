@@ -71,6 +71,41 @@ test('native handoff rejects bad signatures, stale events, and raw payload keys'
   );
 });
 
+test('native handoff validates the event schema before trusting file metadata', () => {
+  assert.throws(
+    () => handoff.validateHandoffEvent([], { secret: SECRET }),
+    /JSON object/,
+  );
+  assert.throws(
+    () => handoff.signHandoffEvent(event({ destination: [] }), SECRET),
+    /destination is not allowed/,
+  );
+  assert.throws(
+    () => handoff.signHandoffEvent(event({ version: 2 }), SECRET),
+    /version is unsupported/,
+  );
+  assert.throws(
+    () => handoff.signHandoffEvent(event({ operation: 'download' }), SECRET),
+    /operation is unsupported/,
+  );
+  assert.throws(
+    () => handoff.signHandoffEvent(event({ filePath: 'loan.txt' }), SECRET),
+    /filePath must be absolute/,
+  );
+  assert.throws(
+    () => handoff.signHandoffEvent(event({ filePath: '\\\\server\\share\\loan.txt' }), SECRET),
+    /local path/,
+  );
+  assert.throws(
+    () => handoff.signHandoffEvent(event({ createdAt: 'not-a-date' }), SECRET),
+    /createdAt is invalid/,
+  );
+
+  const signed = handoff.signHandoffEvent(event({ destination: 'Desktop AI\r\nApp' }), SECRET);
+  assert.deepStrictEqual(signed.destination, { app: 'Desktop AI  App' });
+  assert.strictEqual(handoff.publicDestination('Claude Desktop'), 'Claude Desktop');
+});
+
 test('native handoff files are size-bounded and require a configured secret', (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-native-handoff-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));

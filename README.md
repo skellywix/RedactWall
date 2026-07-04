@@ -42,7 +42,7 @@ The dashboard and API run on `http://localhost:4000` by default. The generated a
 
 ## Admin Console
 
-The browser console is the operator-facing control plane. It uses a macOS-inspired design system with light and dark themes, a single sidebar navigation, and one focused screen per task: login, approval queue, Signal Monitor, activity, coverage, identity, lineage, audit, configuration, and updates. The queue and monitor views are optimized for anomaly-score triage, redacted evidence review, sensor posture, and fast approval or denial decisions without exposing raw prompt content by default.
+The browser console is the operator-facing control plane. It uses a macOS-inspired design system with light and dark themes, a single sidebar navigation, and one focused screen per task: login, approval queue, AI Security Command Center, activity, coverage, identity, lineage, audit, configuration, and updates. The queue, command-center, and configuration views are optimized for guided operator flow, guided policy setup, anomaly-score triage, redacted evidence review, live posture objectives, AI threat guardrails, AI control graph mapping, Agentic MCP Control, control outcomes, sensor posture, and fast approval or denial decisions without exposing raw prompt content by default.
 
 Run the default test suite:
 
@@ -108,6 +108,10 @@ docker compose up -d --build
 | `npm run simulate` | Sends sample prompts through the API path. |
 | `npm run endpoint:handoff` | Writes a signed, metadata-only native endpoint handoff event for a local file path. |
 | `npm run desktop:collect` | Runs the protected-upload desktop collector and records handoff intent for endpoint scanning. |
+| `npm run desktop:git-push` | Runs the local git pre-push guard and records only sanitized blocked-push evidence. |
+| `npm run desktop:git-push:install` | Installs the local git pre-push guard into a selected repository. |
+| `npm run security:package` | Exports a sanitized vendor-risk security trust package. |
+| `npm run security:package:zip` | Exports the trust package as JSON plus ZIP with SBOM inventory. |
 | `npm run package:extension` | Packages browser-extension artifacts. |
 | `npm run package:endpoint-agent` | Packages the endpoint agent. |
 | `npm run package:mcp-guard` | Packages the MCP guard. |
@@ -132,7 +136,7 @@ promptwall/
 |-- sensors/
 |   |-- browser-extension/  MV3 browser sensor
 |   |-- endpoint-agent/     Local file, clipboard, OCR, and handoff sensor
-|   `-- mcp-guard/          MCP tool-result guard and connector SDK
+|   `-- mcp-guard/          MCP tool-result guard, connector SDK, and shipped connectors
 |-- server/                 Express app, policy, auth, database, evidence, and dashboard
 |-- test/                   Node test suite and fixtures
 |-- package.json            Scripts, package metadata, and dependencies
@@ -156,9 +160,15 @@ Important settings:
 | `INGEST_API_KEY` or `PROMPTWALL_INGEST_API_KEY` | API key used by sensors for `/api/v1/*` ingest routes. |
 | `SCIM_BEARER_TOKEN` or `PROMPTWALL_SCIM_BEARER_TOKEN` | Enables `/scim/v2/*` provisioning routes when set. |
 | `OIDC_*` or `PROMPTWALL_OIDC_*` | Optional console SSO settings. |
+| `SIEM_WEBHOOK_URL` / `SIEM_WEBHOOK_TOKEN` | Optional HTTPS-only sanitized SOC/SIEM webhook for high-risk events and posture snapshots. |
+| `SIEM_POSTURE_FEED_ENABLED` / `SIEM_POSTURE_MIN_INTERVAL_MS` | Enables throttled automatic posture snapshots for SOC/SIEM subscriptions. |
+| `PROMPTWALL_GATEWAY_TOKEN` | Client token required by the enforced AI LLM gateway. |
+| `PROMPTWALL_GATEWAY_UPSTREAM` / `PROMPTWALL_GATEWAY_UPSTREAM_API_KEY` | Provider base URL and gateway-held provider key for OpenAI-compatible, Anthropic, Gemini, or private model upstreams. |
+| `PROMPTWALL_GATEWAY_UPSTREAM_AUTH_SCHEME` / `PROMPTWALL_GATEWAY_AWS_REGION` | Use `aws-sigv4` plus an AWS region for direct Amazon Bedrock Runtime gateway enforcement. |
+| `PROMPTWALL_RATE_LIMITER_TOKEN` / `PROMPTWALL_RATE_LIMITER_STORE` | Shared AI gateway limiter token and backend, `sqlite` for one limiter service or `redis`/`valkey` for active-active limiter replicas. |
 | `ENDPOINT_AGENT_OCR_COMMAND` or `PROMPTWALL_ENDPOINT_AGENT_OCR_COMMAND` | Optional local OCR command for endpoint image files. |
 
-See `.env.example` and `docs/DEPLOYMENT.md` for the longer deployment reference.
+See `.env.example`, `docs/AI_LLM_GATEWAY.md`, and `docs/DEPLOYMENT.md` for the longer deployment reference.
 
 ## HTTP API Reference
 
@@ -184,12 +194,13 @@ See `.env.example` and `docs/DEPLOYMENT.md` for the longer deployment reference.
 | Method | Path | Required body or params | Purpose |
 | --- | --- | --- | --- |
 | `POST` | `/api/v1/gate` | `prompt`; optional `user`, `destination`, `source`, `channel`, `orgId`, `sensor`, `clientOutcome`, and client analysis fields | Scans a prompt or sensor event, applies policy, records sanitized evidence, and returns `allow`, `block`, `redact`, or log-style decisions. Cleared outcomes (`allowed`, `redacted`, `warned_sent`, `justified`) include a signed, prompt-free safe-to-send `receipt`. |
+| `POST` | `/api/v1/discovery` | `source`, `user`, and `sightings[]` with host-only `destination`; optional `vendor`, `orgId`, `sensor`, `events`, `firstSeen`, `lastSeen`, `category`, `confidence` | Imports privacy-safe AI asset sightings from proxy, firewall, SSE, or browser-isolation inventory. Raw prompts, raw URLs, and URL paths are rejected; imported observations feed shadow-AI coverage, posture, and the control graph. |
 | `POST` | `/api/v1/heartbeat` | Optional `user`, `destination`, `source`, `orgId`, `sensor`, `checks` | Records bounded sensor install-health and endpoint AI-tool inventory evidence. |
 | `GET` | `/api/v1/policy` | None | Returns the sensor-safe policy, detector controls, destination controls, and scanner config. |
 | `GET` | `/api/v1/detectors` | None | Lists built-in and configured custom detectors. |
 | `POST` | `/api/v1/scan-file` | `filename`, `contentBase64`; optional sensor context | Extracts supported file text, scans it, and returns an allow/block/redact decision. |
 | `POST` | `/api/v1/scan-response` | `text`; optional sensor context | Scans AI response text for sensitive output and returns allow, flag, redact, or block state. |
-| `POST` | `/api/v1/rehydrate` | `id`, `text` | Replaces redaction tokens in an AI response using the sealed token vault for the query. |
+| `POST` | `/api/v1/rehydrate` | `id`, `text`, `x-release-token` header | Replaces redaction tokens in an AI response using the sealed token vault for the query. |
 | `GET` | `/api/v1/status/:id` | `x-release-token` header | Lets a sensor poll whether a held item was approved or denied. |
 
 Example prompt scan:
@@ -200,6 +211,12 @@ curl -s http://localhost:4000/api/v1/gate \
   -H "content-type: application/json" \
   -H "x-api-key: ${INGEST_API_KEY}" \
   -d "{\"prompt\":\"Member SSN is 123-45-6789\",\"user\":\"demo@example.com\",\"destination\":\"chatgpt.com\"}"
+```
+
+Example discovery import dry run:
+
+```bash
+npm run discovery:import -- --input ./proxy-ai-export.csv --vendor zscaler --dry-run
 ```
 
 ### Admin API
@@ -226,6 +243,10 @@ curl -s http://localhost:4000/api/v1/gate \
 | `POST` | `/api/retention/purge` | Runs retention purge for finalized raw approval data. |
 | `GET` | `/api/risk` | Summarizes per-user risk from recorded evidence. |
 | `GET` | `/api/coverage` | Returns governed-destination and sensor coverage posture. |
+| `GET` | `/api/posture` | Returns sanitized AI security posture objectives, threat guardrails, trends, segment comparisons, surfaces, and control outcomes. Optional `segment=<id>` filters the command center to an organization, SCIM group, workflow queue, or sensor surface. |
+| `POST` | `/api/posture/notify` | Sends a manual sanitized posture snapshot to the configured SIEM/SOC webhook. |
+| `GET` | `/api/integrations/siem/package` | Returns a Security Admin-only offline SIEM/SOAR package for `profile=all`, `splunk`, `sentinel`, `chronicle`, or `servicenow`. Add `download=1` for a JSON attachment. Packages include sanitized mappings, searches, dashboards, sample payloads, and setup checklists only. |
+| `GET` | `/api/security/package` | Returns a Security Admin-only vendor-risk trust package with sanitized control coverage, validation commands, and a CycloneDX-style SBOM inventory. Add `download=1` for JSON or `format=zip` for the ZIP bundle. |
 | `GET` | `/api/lineage` | Returns sanitized lineage summaries. |
 | `GET` | `/api/destinations/review` | Lists shadow-AI destination review candidates. |
 | `POST` | `/api/destinations/review` | Applies a govern, allow, or block decision to a destination. |
@@ -235,6 +256,7 @@ curl -s http://localhost:4000/api/v1/gate \
 | `POST` | `/api/receipts/verify` | Verifies a safe-to-send receipt was issued by this control plane and has not been edited. |
 | `GET` | `/api/export/evidence` | Builds a sanitized examiner evidence pack. |
 | `GET` | `/api/policy` | Returns full admin policy. |
+| `POST` | `/api/policy/impact` | Previews a draft policy against recent metadata-only evidence before saving. Prompt bodies, masked values, and raw approval fields are excluded. |
 | `PUT` | `/api/policy` | Updates policy fields accepted by `server/validation.js`. |
 | `GET` | `/api/stream` | Server-sent events stream for dashboard updates. |
 
@@ -342,6 +364,11 @@ Exports the Express app. `server/index.js` re-exports `server/app.js`.
 | `toolResultText(result)` | Converts tool results to text for scanning. |
 | `connectorContext(ctx)` | Normalizes connector context for guard reporting. |
 | `connectorHealthCheck(connector, ok, detail)` | Builds sanitized MCP connector health checks. |
+
+Shipped connector runtimes live under `sensors/mcp-guard/connectors/` for
+Microsoft 365, Google Drive, Slack, Microsoft Teams, Atlassian Jira/Confluence,
+and read-only SQLite database access. Start with `docs/MCP_CONNECTOR_SDK.md`
+and the connector-specific docs in `docs/` before wiring a pilot MCP server.
 
 ### `require("./sensors/endpoint-agent/agent")`
 

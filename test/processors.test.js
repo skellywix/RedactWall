@@ -6,6 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const fs = require('node:fs');
 const crypto = require('node:crypto');
+const Module = require('node:module');
 
 process.env.ADMIN_PASSWORD = 'unit-pass';
 process.env.SENTINEL_SECRET = 'unit-secret-stable';
@@ -30,6 +31,18 @@ const processors = require('../server/processors');
 const app = require('../server/app');
 const { listen } = require('./support/listen');
 
+async function withFakePdfParse(fakeModule, fn) {
+  const originalLoad = Module._load;
+  Module._load = function patchedLoad(request, parent, isMain) {
+    if (request === 'pdf-parse') return fakeModule;
+    return originalLoad.call(this, request, parent, isMain);
+  };
+  try {
+    return await fn();
+  } finally {
+    Module._load = originalLoad;
+  }
+}
 
 function close(server) {
   return new Promise((resolve) => server.close(resolve));
@@ -79,6 +92,80 @@ test('image files return ocr_required without attempting text extraction', async
   assert.strictEqual(result.error, 'ocr_required');
   assert.strictEqual(result.ocrRequired, true);
   assert.strictEqual(result.text, '');
+});
+
+test('unsupported files fail closed with typed extraction metadata', async () => {
+  const result = await processors.extractText('archive.bin', Buffer.from('SSN 524-71-9043'));
+
+  assert.strictEqual(processors.supported('archive.bin'), false);
+  assert.strictEqual(result.supported, false);
+  assert.strictEqual(result.extractionOk, false);
+  assert.strictEqual(result.error, 'unsupported');
+  assert.strictEqual(result.processor, null);
+  assert.strictEqual(result.text, '');
+});
+
+test('office processor extracts visible document text from zip XML parts', async () => {
+  const AdmZip = require('adm-zip');
+  const zip = new AdmZip();
+  zip.addFile('word/document.xml', Buffer.from('<w:t>Member &amp; loan SSN 524-71-9043</w:t>'));
+  zip.addFile('docProps/core.xml', Buffer.from('<dc:title>ignored metadata</dc:title>'));
+
+  const result = await processors.extractText('member-loan.docx', zip.toBuffer());
+
+  assert.strictEqual(result.supported, true);
+  assert.strictEqual(result.processor, 'office');
+  assert.strictEqual(result.extractionOk, true);
+  assert.strictEqual(result.text, 'Member & loan SSN 524-71-9043');
+});
+
+test('pdf processor supports v2 class API and v1 function API modules', async () => {
+  await withFakePdfParse({
+    PDFParse: class FakePDFParse {
+      constructor(opts) {
+        assert.ok(Buffer.isBuffer(opts.data));
+      }
+      async getText() {
+        return { text: 'PDF v2 member SSN 524-71-9043' };
+      }
+    },
+  }, async () => {
+    const result = await processors.extractText('member-loan.pdf', Buffer.from('pdf bytes'));
+    assert.strictEqual(result.extractionOk, true);
+    assert.strictEqual(result.processor, 'pdf');
+    assert.strictEqual(result.text, 'PDF v2 member SSN 524-71-9043');
+  });
+
+  await withFakePdfParse(async (buf) => {
+    assert.ok(Buffer.isBuffer(buf));
+    return { text: 'PDF v1 member SSN 524-71-9043' };
+  }, async () => {
+    const result = await processors.extractText('member-loan.pdf', Buffer.from('pdf bytes'));
+    assert.strictEqual(result.extractionOk, true);
+    assert.strictEqual(result.processor, 'pdf');
+    assert.strictEqual(result.text, 'PDF v1 member SSN 524-71-9043');
+  });
+});
+
+test('pdf processor converts parser failures to typed extraction errors', async () => {
+  await withFakePdfParse(async () => {
+    throw new Error('parse failed');
+  }, async () => {
+    const result = await processors.extractText('member-loan.pdf', Buffer.from('bad pdf'));
+    assert.strictEqual(result.supported, true);
+    assert.strictEqual(result.processor, 'pdf');
+    assert.strictEqual(result.extractionOk, false);
+    assert.strictEqual(result.error, 'extract_failed');
+  });
+});
+
+test('ocr-required processor throws a typed error when called directly', async () => {
+  const ocr = processors.PROCESSORS.find((processor) => processor.id === 'ocr_required');
+
+  await assert.rejects(() => ocr.extract(), (err) => {
+    assert.strictEqual(err.code, 'OCR_REQUIRED');
+    return true;
+  });
 });
 
 test('slow processors time out with a typed extraction error', async (t) => {
@@ -181,14 +268,26 @@ test('scan-file redacts structured findings under redact policy', async () => wi
   assert.strictEqual(body.status, 'redacted');
   assert.strictEqual(body.supported, true);
   assert.match(body.tokenizedPrompt, /\[\[US_SSN_1\]\]/);
+  assert.match(body.releaseToken, /^[A-Za-z0-9_-]{32,}$/);
   assert.ok(!JSON.stringify(body).includes(secret));
   assert.ok(!JSON.stringify(body).includes(Buffer.from(fileText).toString('base64')));
+
+  const noToken = await fetch(`http://127.0.0.1:${port}/api/v1/rehydrate`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': 'unit-ingest-key',
+    },
+    body: JSON.stringify({ id: body.id, text: 'Reviewed [[US_SSN_1]].' }),
+  });
+  assert.strictEqual(noToken.status, 401);
 
   const rehydrate = await fetch(`http://127.0.0.1:${port}/api/v1/rehydrate`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'x-api-key': 'unit-ingest-key',
+      'x-release-token': body.releaseToken,
     },
     body: JSON.stringify({ id: body.id, text: 'Reviewed [[US_SSN_1]].' }),
   });

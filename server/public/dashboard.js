@@ -9,6 +9,7 @@ let currentQueue = [];
 let currentActivity = [];
 let currentCoverage = null;
 let currentLineage = null;
+let currentPosture = null;
 let currentAuditEntries = [];
 let currentIdentitySetup = null;
 let searchTerm = '';
@@ -27,6 +28,7 @@ let lineagePages = {};
 let statusPopover = null;
 let tooltipEl = null;
 let monitorStatusFilter = 'all';
+let monitorSegmentFilter = 'all';
 let monitorSearchTerm = '';
 let monitorSearchFocused = false;
 let monitorSelectedKind = '';
@@ -39,6 +41,13 @@ let monitorRefreshing = false;
 let monitorUpdateSequence = 0;
 let monitorLastUpdated = new Date().toISOString();
 let monitorRecentEventId = 'evt-7902';
+let currentSiemPackage = null;
+let siemPackageProfile = 'all';
+let siemPackageLoading = false;
+let siemPackageError = '';
+let currentSecurityPackage = null;
+let securityPackageLoading = false;
+let securityPackageError = '';
 let policyStatusTimer = null;
 
 const icons = {
@@ -47,6 +56,7 @@ const icons = {
   eye: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" stroke="currentColor" stroke-width="1.7"/><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" stroke="currentColor" stroke-width="1.7"/></svg>',
   refresh: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 12a8 8 0 0 1-13.7 5.6M4 12A8 8 0 0 1 17.7 6.4M17.7 6.4H14M17.7 6.4V2.7M6.3 17.6H10M6.3 17.6v3.7" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   shield: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 4l7 3v5c0 4.2-2.6 6.8-7 8-4.4-1.2-7-3.8-7-8V7l7-3Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
+  download: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
 };
 const ACTIVITY_PAGE_SIZE = 10;
 const LINEAGE_PAGE_SIZE = 10;
@@ -163,7 +173,7 @@ const monitorEvents = [
     severity: 'critical',
     source: 'browser_extension',
     title: 'SSN paste blocked before egress',
-    description: 'A governed chat destination triggered a hard-stop detector. Signal Monitor records sanitized metadata; retained raw text stays behind Queue reveal.',
+    description: 'A governed chat destination triggered a hard-stop detector. AI Command Center records sanitized metadata; retained raw text stays behind Queue reveal.',
     confidence: 99,
     relatedMetric: 'Critical holds',
     status: 'error',
@@ -185,7 +195,7 @@ const monitorEvents = [
     severity: 'info',
     source: 'mcp_guard',
     title: 'Drive connector redacted document context',
-    description: 'Connector payload was transformed before model access; raw document text was not logged in Signal Monitor.',
+    description: 'Connector payload was transformed before model access; raw document text was not logged in AI Command Center.',
     confidence: 91,
     relatedMetric: 'Redaction path',
     status: 'online',
@@ -295,7 +305,10 @@ function monitorMatchesStatus(record) {
 }
 
 function monitorAllEvents() {
-  if (!monitorUpdateSequence) return monitorEvents;
+  const sourceEvents = currentPosture && Array.isArray(currentPosture.events) && currentPosture.events.length
+    ? currentPosture.events
+    : monitorEvents;
+  if (!monitorUpdateSequence) return sourceEvents;
   const id = `evt-refresh-${monitorUpdateSequence}`;
   const refreshEvent = {
     id,
@@ -308,11 +321,17 @@ function monitorAllEvents() {
     relatedMetric: 'Refresh cadence',
     status: 'online',
   };
-  return [refreshEvent, ...monitorEvents];
+  return [refreshEvent, ...sourceEvents];
+}
+
+function monitorItemsSource() {
+  return currentPosture && Array.isArray(currentPosture.surfaces) && currentPosture.surfaces.length
+    ? currentPosture.surfaces
+    : monitorItems;
 }
 
 function monitorFilteredItems() {
-  return monitorItems.filter(monitorMatchesStatus).filter(monitorMatchesSearch);
+  return monitorItemsSource().filter(monitorMatchesStatus).filter(monitorMatchesSearch);
 }
 
 function monitorFilteredEvents() {
@@ -320,14 +339,24 @@ function monitorFilteredEvents() {
 }
 
 function monitorStatusCounts() {
-  const counts = monitorItems.reduce((acc, item) => {
+  const records = [...monitorItemsSource(), ...monitorAllEvents()];
+  const counts = records.reduce((acc, item) => {
     acc[item.status] = (acc[item.status] || 0) + 1;
+    if (item.severity === 'critical' && item.status !== 'error') acc.error = (acc.error || 0) + 1;
+    if (item.severity === 'warning' && item.status !== 'warning') acc.warning = (acc.warning || 0) + 1;
     return acc;
-  }, { all: monitorItems.length });
+  }, { all: records.length });
   return counts;
 }
 
 function monitorMetrics() {
+  if (currentPosture && Array.isArray(currentPosture.metrics) && currentPosture.metrics.length) {
+    return currentPosture.metrics.map((metric) => ({
+      ...metric,
+      updating: monitorRefreshing,
+      lastUpdated: metric.lastUpdated || currentPosture.generatedAt || monitorLastUpdated,
+    }));
+  }
   const seq = monitorUpdateSequence;
   return [
     {
@@ -407,6 +436,57 @@ function renderMonitorMetrics() {
   }).join('');
 }
 
+function segmentStateTone(state) {
+  const value = String(state || 'ready');
+  if (value === 'critical') return 'critical';
+  if (value === 'attention') return 'warning';
+  return 'ready';
+}
+
+function renderPostureSegments() {
+  const segments = currentPosture && currentPosture.segments && typeof currentPosture.segments === 'object'
+    ? currentPosture.segments
+    : null;
+  const bar = $('#postureSegmentBar');
+  const summary = $('#postureSegmentSummary');
+  const select = $('#postureSegmentSelect');
+  const matrixTarget = $('#postureSegmentMatrix');
+  if (!bar || !summary || !select || !matrixTarget) return;
+  if (!segments) {
+    bar.classList.add('is-empty');
+    summary.textContent = 'Segments will appear after sanitized activity arrives.';
+    select.innerHTML = '<option value="all">All segments</option>';
+    matrixTarget.innerHTML = '';
+    return;
+  }
+  bar.classList.remove('is-empty');
+  const segSummary = segments.summary || {};
+  const active = segments.active || null;
+  const filters = Array.isArray(segments.filters) ? segments.filters : [];
+  const matrix = Array.isArray(segments.matrix) ? segments.matrix : [];
+  const selectedId = segSummary.selectedId || (active && active.id) || 'all';
+  if (monitorSegmentFilter !== selectedId && (monitorSegmentFilter !== 'all' || selectedId !== 'all')) {
+    monitorSegmentFilter = selectedId;
+  }
+  const activeLabel = active ? `${active.typeLabel || 'Segment'}: ${active.label || 'Unknown'}` : 'All segments';
+  const privacy = segSummary.privacy || 'metadata only; prompt bodies excluded';
+  summary.innerHTML = `<b>${escapeHtml(activeLabel)}</b><span>${escapeHtml(segSummary.visibleEvents || 0)} visible events / ${escapeHtml(segSummary.attention || 0)} attention / ${escapeHtml(privacy)}</span>`;
+  const options = filters.length ? filters : [{ id: 'all', label: 'All segments', typeLabel: 'All' }];
+  select.innerHTML = options.map((item) => `<option value="${escapeHtml(item.id)}" ${item.id === selectedId ? 'selected' : ''}>${escapeHtml(item.typeLabel || 'Segment')} - ${escapeHtml(item.label || item.id)}</option>`).join('');
+  matrixTarget.innerHTML = matrix.length
+    ? matrix.slice(0, 8).map((item) => {
+      const tone = segmentStateTone(item.state);
+      const selected = item.id === selectedId;
+      return `<button class="segment-card ${escapeHtml(tone)}${selected ? ' is-selected' : ''}" type="button" data-posture-segment="${escapeHtml(item.id)}" aria-pressed="${selected ? 'true' : 'false'}">
+        <span>${escapeHtml(item.typeLabel || 'Segment')}</span>
+        <strong>${escapeHtml(item.label || 'Unknown')}</strong>
+        <small>${escapeHtml(item.detail || '')}</small>
+        <b>${escapeHtml(item.score || 0)}<em>/100</em></b>
+      </button>`;
+    }).join('')
+    : '<div class="signal-empty"><b>No segments</b><p>Awaiting activity.</p></div>';
+}
+
 function renderMonitorPanel(item) {
   const selectedItem = monitorSelectedKind === 'item' && monitorSelectedId === item.id;
   const expanded = monitorExpandedPanelId === item.id;
@@ -464,9 +544,365 @@ function renderMonitorEvents() {
     : '<div class="signal-empty"><b>No events</b><p>Clear search or broaden status.</p></div>';
 }
 
+function renderHardeningMission() {
+  const mission = currentPosture && currentPosture.hardening && currentPosture.hardening.mission
+    ? currentPosture.hardening.mission
+    : null;
+  const target = $('#hardeningMission');
+  if (!target) return;
+  if (!mission) {
+    target.innerHTML = '<div class="signal-empty"><b>No mission</b><p>Refresh posture.</p></div>';
+    return;
+  }
+  const progress = mission.progress || {};
+  const current = mission.current || null;
+  const lanes = Array.isArray(mission.lanes) ? mission.lanes : [];
+  const proofLedger = mission.proofLedger && typeof mission.proofLedger === 'object' ? mission.proofLedger : {};
+  const proofCurrent = proofLedger.current && typeof proofLedger.current === 'object' ? proofLedger.current : null;
+  const missionState = readinessTone(mission.state || 'attention');
+  const title = current ? current.label : 'Deployment proof complete';
+  const area = current ? current.areaLabel : 'Gateway, AI assets, and MCP agents';
+  const detail = current ? current.detail : 'All hardening steps are proven from sanitized telemetry and policy state.';
+  const command = current && current.command ? current.command : '';
+  const validation = current && current.validation ? current.validation : 'Evidence export and SOC posture state are ready.';
+  const proofSummary = proofLedger.total
+    ? `${proofLedger.verified || 0} verified / ${proofLedger.attention || 0} attention / ${proofLedger.missing || 0} missing`
+    : 'No proof items';
+  target.innerHTML = `<div class="hardening-mission ${escapeHtml(missionState)}">
+      <div class="mission-primary">
+        <div class="mission-kicker">
+          ${monitorStatusDot(mission.status || 'warning', `${mission.title || 'Hardening mission'} ${mission.state || 'attention'}`)}
+          <span>${escapeHtml(mission.title || 'Hardening mission')}</span>
+          <b>${escapeHtml(progress.percent || 0)}%</b>
+        </div>
+        <h3>${escapeHtml(title)}</h3>
+        <p>${escapeHtml(area)} · ${escapeHtml(detail)}</p>
+        ${command ? `<div class="mission-command"><code>${escapeHtml(command)}</code><button class="ghost mini" type="button" data-copy-command="${escapeHtml(command)}">Copy</button></div>` : ''}
+        <small>${escapeHtml(validation)}</small>
+        <div class="mission-proof-ledger">
+          <b>Proof ledger</b>
+          <span>${escapeHtml(proofSummary)}</span>
+          ${proofCurrent ? `<small>${escapeHtml(proofCurrent.areaLabel || 'Readiness area')}: ${escapeHtml(proofCurrent.label || 'Evidence item')}</small>` : '<small>All proof rows are verified.</small>'}
+        </div>
+      </div>
+      <div class="mission-progress" role="list" aria-label="Hardening mission lanes">
+        ${lanes.map((lane) => {
+    const laneTone = readinessTone(lane.state || 'attention');
+    return `<button class="mission-lane ${escapeHtml(laneTone)}" type="button" data-tab-jump="${escapeHtml(lane.targetTab || 'coverage')}" role="listitem">
+            <span>${escapeHtml(lane.label || 'Readiness area')}</span>
+            <b>${escapeHtml(lane.done || 0)}/${escapeHtml(lane.total || 0)}</b>
+            <small>${escapeHtml(lane.nextStep || 'Complete')}</small>
+          </button>`;
+  }).join('')}
+      </div>
+    </div>`;
+}
+
+function proofStatusLabel(status) {
+  const value = String(status || 'missing');
+  if (value === 'verified') return 'Verified';
+  if (value === 'attention') return 'Attention';
+  return 'Missing';
+}
+
+function actionWorkflowLabel(status) {
+  const value = String(status || 'open');
+  if (value === 'assigned') return 'Assigned';
+  if (value === 'snoozed') return 'Snoozed';
+  if (value === 'resolved') return 'Resolved';
+  return 'Open';
+}
+
+function actionWorkflowTone(status) {
+  const value = String(status || 'open');
+  if (value === 'resolved') return 'resolved';
+  if (value === 'snoozed') return 'snoozed';
+  if (value === 'assigned') return 'assigned';
+  return 'open';
+}
+
+function actionWorkflowMeta(item = {}) {
+  const parts = [];
+  if (item.workflowOwner) parts.push(item.workflowOwner);
+  if (item.workflowSnoozeUntil && item.workflowStatus === 'snoozed') parts.push(`until ${fmtTime(item.workflowSnoozeUntil)}`);
+  if (item.workflowProofState === 'proof_pending') parts.push('proof pending');
+  if (item.workflowUpdatedAt) parts.push(fmtTime(item.workflowUpdatedAt));
+  return parts.join(' / ');
+}
+
+function renderHardeningActionQueue() {
+  const rows = currentPosture && Array.isArray(currentPosture.actionQueue) ? currentPosture.actionQueue : [];
+  const summary = $('#hardeningActionSummary');
+  const target = $('#hardeningActionQueue');
+  if (!summary || !target) return;
+  const critical = rows.filter((item) => item.severity === 'critical').length;
+  const warning = rows.filter((item) => item.severity === 'warning').length;
+  const assigned = rows.filter((item) => item.workflowStatus === 'assigned').length;
+  const snoozed = rows.filter((item) => item.workflowStatus === 'snoozed').length;
+  summary.textContent = rows.length ? `${rows.length} actions / ${critical} critical / ${warning} warning / ${assigned + snoozed} routed` : 'All clear';
+  target.innerHTML = rows.length
+    ? rows.map((item, index) => {
+      const severity = ['critical', 'warning', 'info'].includes(item.severity) ? item.severity : 'warning';
+      const command = item.command || '';
+      const workflow = actionWorkflowTone(item.workflowStatus);
+      const workflowMeta = actionWorkflowMeta(item);
+      const disabled = canAdminWrite() ? '' : 'disabled aria-disabled="true"';
+      return `<article class="action-row">
+        <div class="action-rank">${escapeHtml(index + 1)}</div>
+        <div class="action-main">
+          <div class="action-kicker">
+            <span>${escapeHtml(item.category || 'Hardening')}</span>
+            <b class="action-severity ${escapeHtml(severity)}">${escapeHtml(severity)}</b>
+            <b class="action-workflow-pill ${escapeHtml(workflow)}">${escapeHtml(actionWorkflowLabel(item.workflowStatus))}</b>
+          </div>
+          <strong>${escapeHtml(item.label || 'Review hardening action')}</strong>
+          <small>${escapeHtml(item.detail || '')}</small>
+          ${workflowMeta ? `<small class="action-workflow-meta">${escapeHtml(workflowMeta)}</small>` : ''}
+        </div>
+        <div class="action-controls">
+          ${command ? `<code>${escapeHtml(command)}</code>` : ''}
+          <button class="ghost mini" type="button" data-tab-jump="${escapeHtml(item.targetTab || 'coverage')}">${escapeHtml(item.action || 'Open')}</button>
+          ${command ? `<button class="ghost mini" type="button" data-copy-command="${escapeHtml(command)}">Copy command</button>` : ''}
+          <div class="action-workflow-controls">
+            <button class="ghost mini" type="button" data-action-workflow="assigned" data-action-id="${escapeHtml(item.id)}" ${disabled}>Assign to me</button>
+            <button class="ghost mini" type="button" data-action-workflow="snoozed" data-action-id="${escapeHtml(item.id)}" ${disabled}>Snooze</button>
+            <button class="ghost mini" type="button" data-action-workflow="resolved" data-action-id="${escapeHtml(item.id)}" ${disabled}>Log resolved</button>
+          </div>
+        </div>
+      </article>`;
+    }).join('')
+    : '<div class="signal-empty"><b>No action gaps</b><p>Hardening gaps are clear.</p></div>';
+}
+
+function renderPostureObjectives() {
+  const objectives = currentPosture && Array.isArray(currentPosture.objectives) ? currentPosture.objectives : [];
+  const summary = $('#postureObjectiveSummary');
+  const target = $('#postureObjectives');
+  if (!summary || !target) return;
+  const covered = objectives.filter((item) => item.state === 'covered').length;
+  summary.textContent = objectives.length ? `${covered}/${objectives.length} covered` : 'Waiting for data';
+  target.innerHTML = objectives.length
+    ? objectives.map((item) => {
+      const tone = postureTone(item.state);
+      return `<article class="objective-card ${escapeHtml(tone)}">
+        <div class="objective-score"><b>${escapeHtml(item.score ?? 0)}</b><span>/100</span></div>
+        <div class="objective-body">
+          <div class="objective-title">${escapeHtml(item.label)}</div>
+          <div class="objective-detail">${escapeHtml(item.detail)}</div>
+          <button class="ghost mini" type="button" data-tab-jump="${escapeHtml(item.targetTab || 'policy')}">${escapeHtml(item.action || 'Open')}</button>
+        </div>
+      </article>`;
+    }).join('')
+    : '<div class="signal-empty"><b>No posture data</b><p>Refresh posture.</p></div>';
+}
+
+function inventoryStateLabel(state) {
+  const value = String(state || 'unknown');
+  if (value === 'sanctioned') return 'Sanctioned';
+  if (value === 'unsanctioned') return 'Unsanctioned';
+  if (value === 'shadow') return 'Shadow';
+  if (value === 'local_approved') return 'Approved';
+  if (value === 'local_unapproved') return 'Unapproved';
+  return value.replace(/_/g, ' ');
+}
+
+function inventoryRiskLabel(level) {
+  const value = String(level || 'low');
+  if (value === 'critical') return 'Critical';
+  if (value === 'high') return 'High';
+  if (value === 'medium') return 'Medium';
+  return 'Low';
+}
+
+function renderAiInventory() {
+  const inventory = currentPosture && currentPosture.aiInventory && typeof currentPosture.aiInventory === 'object'
+    ? currentPosture.aiInventory
+    : null;
+  const summary = $('#aiInventorySummary');
+  const target = $('#aiInventoryRows');
+  if (!summary || !target) return;
+  const invSummary = inventory && inventory.summary && typeof inventory.summary === 'object' ? inventory.summary : {};
+  const apps = inventory && Array.isArray(inventory.apps) ? inventory.apps : [];
+  const tools = inventory && Array.isArray(inventory.tools) ? inventory.tools : [];
+  const rows = [...apps, ...tools].slice(0, 12);
+  summary.textContent = inventory
+    ? `${invSummary.sanctioned || 0} sanctioned / ${invSummary.shadow || 0} shadow / ${invSummary.highRiskAssets || 0} high risk`
+    : 'Waiting for data';
+  target.innerHTML = rows.length
+    ? rows.map((item) => {
+      const status = item.status === 'online' || item.status === 'warning' ? item.status : 'idle';
+      const state = item.state || 'unknown';
+      const events = Number(item.events) || 0;
+      const sideValue = item.kind === 'Endpoint tool'
+        ? (state === 'local_unapproved' ? 'Review' : 'OK')
+        : events;
+      const riskLevel = ['critical', 'high', 'medium', 'low'].includes(item.riskLevel) ? item.riskLevel : 'low';
+      const riskScore = Number(item.riskScore) || 0;
+      return `<article class="ai-inventory-row ${escapeHtml(status)}">
+        <div class="ai-inventory-main">
+          <small>${escapeHtml(item.kind || 'AI app')} / ${escapeHtml(item.source || 'coverage')}</small>
+          <strong>${escapeHtml(item.name || 'AI destination')}</strong>
+          <span>${escapeHtml(item.detail || 'No sanitized detail.')}</span>
+          <span class="ai-inventory-risk ${escapeHtml(riskLevel)}">${escapeHtml(inventoryRiskLabel(riskLevel))} risk / ${escapeHtml(riskScore)}/100${item.riskReason ? ` / ${escapeHtml(item.riskReason)}` : ''}</span>
+        </div>
+        <div class="ai-inventory-side">
+          <span class="ai-inventory-state ${escapeHtml(state)}">${escapeHtml(inventoryStateLabel(state))}</span>
+          <b>${escapeHtml(sideValue)}</b>
+          <button class="ghost mini" type="button" data-tab-jump="${escapeHtml(item.targetTab || 'coverage')}">${escapeHtml(item.action || 'Open')}</button>
+        </div>
+      </article>`;
+    }).join('')
+    : '<div class="signal-empty"><b>No AI inventory</b><p>No governed, shadow, or endpoint AI tools observed.</p></div>';
+}
+
+function renderOperatorFlow(){window.PromptWallOperatorFlow&&window.PromptWallOperatorFlow.render(currentPosture,{$,escapeHtml});}
+function renderAgenticMcp(){window.PromptWallAgenticMcp&&window.PromptWallAgenticMcp.render(currentPosture,{$,escapeHtml,inventoryStateLabel});}
+function renderThreatGuardrails(){window.PromptWallThreatGuardrails&&window.PromptWallThreatGuardrails.render(currentPosture,{$,escapeHtml});}
+function renderControlGraph(){window.PromptWallControlGraph&&window.PromptWallControlGraph.render(currentPosture,{$,escapeHtml});}
+function renderBehaviorBaselines(){window.PromptWallBehaviorBaselines&&window.PromptWallBehaviorBaselines.render(currentPosture,{$,escapeHtml});}
+
+function renderHardeningWorkbench() {
+  const hardening = currentPosture && currentPosture.hardening && typeof currentPosture.hardening === 'object'
+    ? currentPosture.hardening
+    : null;
+  const areas = hardening && Array.isArray(hardening.areas) ? hardening.areas : [];
+  const summary = $('#hardeningReadinessSummary');
+  const target = $('#hardeningReadinessBoard');
+  if (!summary || !target) return;
+  const sendButton = $('#sendPostureSnapshot');
+  if (sendButton) {
+    sendButton.disabled = !canAdminWrite();
+    sendButton.title = canAdminWrite() ? 'Send sanitized posture snapshot' : 'Security Admin required';
+  }
+  const ready = areas.filter((area) => area.state === 'ready').length;
+  summary.textContent = areas.length ? `${ready}/${areas.length} ready / ${hardening.score || 0} overall` : 'Waiting for data';
+  target.innerHTML = areas.length
+    ? areas.map((area) => {
+      const tone = readinessTone(area.state);
+      const evidence = (Array.isArray(area.evidence) ? area.evidence : []).slice(0, 3);
+      const gaps = (Array.isArray(area.gaps) ? area.gaps : []).slice(0, 3);
+      const playbook = (Array.isArray(area.playbook) ? area.playbook : []).slice(0, 5);
+      const proofs = (Array.isArray(area.proofs) ? area.proofs : []).slice(0, 6);
+      const proofLedger = area.proofLedger && typeof area.proofLedger === 'object' ? area.proofLedger : {};
+      const status = area.state === 'ready' ? 'online' : area.state === 'blocked' ? 'error' : 'warning';
+      const list = (label, items, fallback) => `<div class="hardening-list"><b>${escapeHtml(label)}</b><ul>${items.length
+        ? items.map((item) => `<li>${escapeHtml(item)}</li>`).join('')
+        : `<li>${escapeHtml(fallback)}</li>`}</ul></div>`;
+      const proofRows = `<div class="hardening-proof-ledger">
+        <div class="proof-ledger-head">
+          <b>Evidence ledger</b>
+          <span>${escapeHtml(proofLedger.verified || 0)} verified / ${escapeHtml(proofLedger.attention || 0)} attention / ${escapeHtml(proofLedger.missing || 0)} missing</span>
+        </div>
+        ${proofs.length ? proofs.map((proof) => `<div class="proof-row ${escapeHtml(proof.status || 'missing')}">
+          <span>${escapeHtml(proofStatusLabel(proof.status))}</span>
+          <div>
+            <strong>${escapeHtml(proof.label || 'Evidence item')}</strong>
+            <small>${escapeHtml(proof.detail || '')}${proof.evidenceAt ? ` / ${escapeHtml(fmt(proof.evidenceAt))}` : ''}</small>
+          </div>
+        </div>`).join('') : '<p class="hardening-step-empty">No proof rows published.</p>'}
+      </div>`;
+      const runbook = `<div class="hardening-runbook"><b>Runbook</b>${playbook.length
+        ? playbook.map((step) => `<div class="hardening-step ${escapeHtml(step.status || 'todo')}">
+          <div class="hardening-step-head">
+            <span>${escapeHtml(step.status || 'todo')}</span>
+            <strong>${escapeHtml(step.label || 'Remediation step')}</strong>
+          </div>
+          <p>${escapeHtml(step.detail || '')}</p>
+          ${step.command ? `<code>${escapeHtml(step.command)}</code>` : ''}
+          <small>${escapeHtml(step.validation || '')}</small>
+        </div>`).join('')
+        : '<p class="hardening-step-empty">No remediation steps published.</p>'}</div>`;
+      return `<article class="hardening-card ${escapeHtml(tone)}">
+        <div class="hardening-head">
+          <div class="hardening-title">
+            ${monitorStatusDot(status, `${area.label} ${area.state}`)}
+            <strong>${escapeHtml(area.label)}</strong>
+          </div>
+          <div class="hardening-score">${escapeHtml(area.score || 0)}<span>/100</span></div>
+        </div>
+        <p class="hardening-desc">${escapeHtml(area.description || '')}</p>
+        <div class="hardening-meta">
+          <span>${escapeHtml(area.owner || 'security')}</span>
+          <span>${escapeHtml(area.source || 'control')}</span>
+        </div>
+        <div class="hardening-lists">
+          ${list('Proof', evidence, 'Awaiting proof')}
+          ${list('Gaps', gaps, 'No open gaps')}
+        </div>
+        ${proofRows}
+        ${runbook}
+        <button class="ghost mini" type="button" data-tab-jump="${escapeHtml(area.targetTab || 'coverage')}">${escapeHtml(area.action || 'Open')}</button>
+      </article>`;
+    }).join('')
+    : '<div class="signal-empty"><b>No hardening data</b><p>Refresh readiness.</p></div>';
+}
+
+function siemState(){return{currentSiemPackage,siemPackageProfile,siemPackageLoading,siemPackageError};}
+function setSiemState(patch){if('currentSiemPackage'in patch)currentSiemPackage=patch.currentSiemPackage;if('siemPackageLoading'in patch)siemPackageLoading=patch.siemPackageLoading;if('siemPackageError'in patch)siemPackageError=patch.siemPackageError;}
+function siemDeps(){return{$,api,apiErrorSummary,canAdminWrite,escapeHtml,humanize,markUpdated,renderSiemPackage,responseJsonObject,setState:setSiemState,statusChip};}
+function renderSiemPackage(){const m=window.PromptWallSiemPackage;if(m)m.render(siemState(),siemDeps());}
+async function loadSiemPackage(){const m=window.PromptWallSiemPackage;return m?m.load(siemState(),siemDeps()):null;}
+async function downloadSiemPackage(){const m=window.PromptWallSiemPackage;return m?m.download(siemState(),siemDeps()):null;}
+function securityPackageState(){return{currentSecurityPackage,securityPackageLoading,securityPackageError};}
+function setSecurityPackageState(patch){if('currentSecurityPackage'in patch)currentSecurityPackage=patch.currentSecurityPackage;if('securityPackageLoading'in patch)securityPackageLoading=patch.securityPackageLoading;if('securityPackageError'in patch)securityPackageError=patch.securityPackageError;}
+function securityPackageDeps(){return{$,api,apiErrorSummary,canAdminWrite,escapeHtml,humanize,icons,markUpdated,renderSecurityPackage,responseJsonObject,setState:setSecurityPackageState,statusChip};}
+function renderSecurityPackage(){const m=window.PromptWallSecurityPackage;if(m)m.render(securityPackageState(),securityPackageDeps());}
+async function loadSecurityPackage(){const m=window.PromptWallSecurityPackage;return m?m.load(securityPackageState(),securityPackageDeps()):null;}
+async function downloadSecurityPackage(){const m=window.PromptWallSecurityPackage;return m?m.download(securityPackageState(),securityPackageDeps()):null;}
+
+function renderPostureTrend() {
+  const rows = currentPosture && Array.isArray(currentPosture.trend) ? currentPosture.trend : [];
+  const target = $('#postureTrendChart');
+  const summary = $('#postureTrendSummary');
+  if (!target || !summary) return;
+  const max = Math.max(1, ...rows.map((row) => Number(row.events) || 0));
+  const total = rows.reduce((sum, row) => sum + (Number(row.events) || 0), 0);
+  summary.textContent = rows.length ? `${total} events / ${rows.length} days` : 'Waiting for data';
+  target.innerHTML = rows.length
+    ? rows.map((row) => {
+      const blocked = Number(row.blocked) || 0;
+      const redacted = Number(row.redacted) || 0;
+      const allowed = Number(row.allowed) || 0;
+      const coached = Number(row.coached) || 0;
+      const events = Number(row.events) || 0;
+      const height = Math.max(5, Math.round((events / max) * 100));
+      const detail = `${row.date}: ${events} events, ${blocked} blocked, ${redacted} redacted, ${coached} coached, ${allowed} allowed`;
+      return `<div class="trend-day" tabindex="0" role="img" aria-label="${escapeHtml(detail)}" data-tooltip="${escapeHtml(detail)}">
+        <div class="trend-stack" style="--h:${height}%">
+          <i class="trend-blocked" style="--share:${events ? Math.max(4, Math.round((blocked / events) * height)) : 0}%"></i>
+          <i class="trend-redacted" style="--share:${events ? Math.max(4, Math.round((redacted / events) * height)) : 0}%"></i>
+          <i class="trend-coached" style="--share:${events ? Math.max(4, Math.round((coached / events) * height)) : 0}%"></i>
+          <i class="trend-allowed" style="--share:${events ? Math.max(4, Math.round((allowed / events) * height)) : 0}%"></i>
+        </div>
+        <span>${escapeHtml(String(row.date || '').slice(5))}</span>
+      </div>`;
+    }).join('')
+    : '<div class="signal-empty"><b>No trend data</b><p>Recent activity appears here.</p></div>';
+}
+
+function renderControlOutcomes() {
+  const rows = currentPosture && Array.isArray(currentPosture.controls) ? currentPosture.controls : [];
+  const target = $('#controlOutcomeRows');
+  const summary = $('#controlOutcomeSummary');
+  if (!target || !summary) return;
+  const total = rows.reduce((sum, row) => sum + (Number(row.events) || 0), 0);
+  summary.textContent = rows.length ? `${rows.length} control paths` : 'Waiting for data';
+  target.innerHTML = rows.length
+    ? rows.map((row) => {
+      const events = Number(row.events) || 0;
+      const controlled = (Number(row.blocked) || 0) + (Number(row.redacted) || 0) + (Number(row.coached) || 0);
+      const width = total ? Math.max(5, Math.round((events / total) * 100)) : 0;
+      return `<div class="control-row">
+        <div><strong>${escapeHtml(row.label)}</strong><span>${escapeHtml(controlled)} controlled / ${escapeHtml(events)} events</span></div>
+        <div class="control-bar" role="img" aria-label="${escapeHtml(row.label)} ${events} events"><i style="--w:${width}%"></i></div>
+      </div>`;
+    }).join('')
+    : '<div class="signal-empty"><b>No outcomes</b><p>Awaiting controls.</p></div>';
+}
+
 function monitorSelectedRecord() {
   if (monitorSelectedKind === 'item') {
-    return monitorItems.find((item) => item.id === monitorSelectedId) || null;
+    return monitorItemsSource().find((item) => item.id === monitorSelectedId) || null;
   }
   if (monitorSelectedKind === 'event') {
     return monitorAllEvents().find((event) => event.id === monitorSelectedId) || null;
@@ -532,7 +968,21 @@ function renderMonitor() {
   if (!$('#tab-monitor')) return;
   updateMonitorSearchUi();
   renderMonitorStatusFilters();
+  renderPostureSegments();
   renderMonitorMetrics();
+  renderHardeningMission();
+  renderOperatorFlow();
+  renderHardeningActionQueue();
+  renderPostureObjectives();
+  renderAiInventory();
+  renderAgenticMcp();
+  renderThreatGuardrails();
+  renderControlGraph();
+  renderHardeningWorkbench();
+  renderSiemPackage();
+  renderPostureTrend();
+  renderControlOutcomes();
+  renderBehaviorBaselines();
   renderMonitorPanels();
   renderMonitorEvents();
   renderMonitorInspector();
@@ -566,18 +1016,113 @@ function clearMonitorSelection() {
   renderMonitor();
 }
 
-function refreshMonitorSignals() {
+async function loadPosture() {
+  try {
+    const segment = monitorSegmentFilter && monitorSegmentFilter !== 'all'
+      ? `&segment=${encodeURIComponent(monitorSegmentFilter)}`
+      : '';
+    const r = await api('/api/posture?limit=5000' + segment);
+    const body = await responseJsonObject(r, null);
+    if (!body) return null;
+    currentPosture = body;
+    monitorLastUpdated = body.generatedAt || new Date().toISOString();
+    const live = $('#monitorLiveSummary');
+    if (live) {
+      const critical = (body.surfaces || []).some((item) => item.status === 'error')
+        || (body.events || []).some((item) => item.severity === 'critical');
+      live.innerHTML = `${monitorStatusDot(critical ? 'error' : 'online', critical ? 'Command center has critical signals' : 'Command center online', { pulse: true })}${critical ? 'ATTENTION' : 'LIVE'}`;
+    }
+    renderMonitor();
+    return body;
+  } catch {
+    return null;
+  }
+}
+
+async function refreshMonitorSignals() {
   if (monitorRefreshing) return;
   monitorRefreshing = true;
   renderMonitor();
-  setTimeout(() => {
+  try {
+    await Promise.all([loadPosture(), loadSiemPackage()]);
     monitorRefreshing = false;
     monitorUpdateSequence += 1;
-    monitorLastUpdated = new Date().toISOString();
+    monitorLastUpdated = (currentPosture && currentPosture.generatedAt) || new Date().toISOString();
     monitorRecentEventId = `evt-refresh-${monitorUpdateSequence}`;
     renderMonitor();
     markUpdated('SIGNALS UPDATED');
-  }, 700);
+  } catch {
+    monitorRefreshing = false;
+    renderMonitor();
+  }
+}
+
+function workflowPatchFor(status) {
+  const now = new Date();
+  if (status === 'assigned') {
+    return { status, owner: currentUser || 'security_admin', note: 'assigned_from_command_center' };
+  }
+  if (status === 'snoozed') {
+    const until = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
+    return { status, snoozeUntil: until, note: 'snoozed_24h_from_command_center' };
+  }
+  if (status === 'resolved') {
+    return { status, note: 'remediation_logged_waiting_for_proof' };
+  }
+  return { status: 'open', note: 'reopened_from_command_center' };
+}
+
+async function updatePostureActionWorkflow(id, status, button) {
+  if (!canAdminWrite()) {
+    alert('Request not allowed for this session.');
+    return;
+  }
+  if (!id) return;
+  const payload = { id, ...workflowPatchFor(status) };
+  if (button) button.disabled = true;
+  const response = await api('/api/posture/actions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (response && response.ok) {
+    await loadPosture();
+    markUpdated('ACTION UPDATED');
+    return;
+  }
+  if (button) button.disabled = false;
+  if (response) alert(await apiErrorSummary(response, 'Action update failed'));
+}
+
+async function sendPostureSnapshot() {
+  if (!canAdminWrite()) return;
+  const button = $('#sendPostureSnapshot');
+  const status = $('#postureSnapshotStatus');
+  if (button) {
+    button.disabled = true;
+    button.setAttribute('aria-busy', 'true');
+    button.innerHTML = '<span class="button-spinner" aria-hidden="true"></span>Sending';
+  }
+  if (status) status.textContent = 'SENDING';
+  try {
+    const response = await api('/api/posture/notify', { method: 'POST' });
+    const body = await responseJsonBody(response, {});
+    if (response && response.ok && body.sent) {
+      if (status) status.textContent = 'SENT TO SOC';
+      await loadAudit();
+      return;
+    }
+    const reason = body && body.reason ? humanize(body.reason) : 'not configured';
+    if (status) status.textContent = `NOT SENT - ${reason}`.slice(0, 80);
+  } catch {
+    if (status) status.textContent = 'SEND FAILED';
+  } finally {
+    if (button) {
+      button.removeAttribute('aria-busy');
+      button.innerHTML = 'Send SOC snapshot';
+    }
+    renderHardeningWorkbench();
+  }
 }
 
 function statusToneClass(tone) {
@@ -817,7 +1362,14 @@ function statusTone(status) {
 }
 
 function postureTone(state) {
-  return state === 'covered' ? 'good' : 'warn';
+  return String(state || '').toLowerCase() === 'covered' ? 'good' : 'warn';
+}
+
+function readinessTone(state) {
+  const s = String(state || '').toLowerCase();
+  if (s === 'ready') return 'ready';
+  if (s === 'blocked') return 'blocked';
+  return 'attention';
 }
 
 function fleetTone(state) {
@@ -1472,7 +2024,7 @@ async function init() {
 }
 
 async function refreshAll() {
-  await Promise.all([loadStats(), loadQueue(), loadActivity()]);
+  await Promise.all([loadStats(), loadQueue(), loadActivity(), loadPosture(), loadSiemPackage()]);
 }
 
 async function loadStats() {
@@ -1703,10 +2255,21 @@ function renderIncident(q) {
 }
 
 document.addEventListener('click', async (e) => {
-  const selectableQueueRow = e.target.closest('.q[data-id]');
-  if (selectableQueueRow && !e.target.closest('textarea,input,button,select,a')) {
-    selected = selectableQueueRow.dataset.id;
-    renderQueueView();
+  const copyCommand = e.target.closest('[data-copy-command]');
+  if (copyCommand) {
+    e.preventDefault();
+    e.stopPropagation();
+    const command = copyCommand.dataset.copyCommand || '';
+    try {
+      if (!navigator.clipboard || !navigator.clipboard.writeText) throw new Error('clipboard unavailable');
+      await navigator.clipboard.writeText(command);
+      copyCommand.textContent = 'Copied';
+    } catch {
+      copyCommand.textContent = 'Copy failed';
+    }
+    setTimeout(() => {
+      copyCommand.textContent = 'Copy';
+    }, 1600);
     return;
   }
   const metadataTarget = e.target.closest('[data-status-detail]');
@@ -1717,6 +2280,12 @@ document.addEventListener('click', async (e) => {
     return;
   }
   closeStatusPopover();
+  const selectableQueueRow = e.target.closest('.q[data-id]');
+  if (selectableQueueRow && !e.target.closest('textarea,input,button,select,a')) {
+    selected = selectableQueueRow.dataset.id;
+    renderQueueView();
+    return;
+  }
   const panelToggle = e.target.closest('[data-panel-toggle]');
   if (panelToggle) {
     const panel = panelToggle.closest('.panel');
@@ -1731,6 +2300,12 @@ document.addEventListener('click', async (e) => {
     if (monitorStatusButton.disabled) return;
     monitorStatusFilter = monitorStatusButton.dataset.monitorStatus || 'all';
     renderMonitor();
+    return;
+  }
+  const postureSegmentButton = e.target.closest('[data-posture-segment]');
+  if (postureSegmentButton) {
+    monitorSegmentFilter = postureSegmentButton.dataset.postureSegment || 'all';
+    await loadPosture();
     return;
   }
   const monitorSelect = e.target.closest('[data-monitor-select]');
@@ -1901,6 +2476,15 @@ document.addEventListener('click', async (e) => {
     }
     return;
   }
+  const workflowButton = e.target.closest('[data-action-workflow][data-action-id]');
+  if (workflowButton) {
+    await updatePostureActionWorkflow(
+      workflowButton.dataset.actionId,
+      workflowButton.dataset.actionWorkflow,
+      workflowButton,
+    );
+    return;
+  }
   const jump = e.target.closest('[data-tab-jump]');
   if (jump) {
     activateTab(jump.dataset.tabJump);
@@ -1922,6 +2506,16 @@ document.addEventListener('change', (e) => {
   if (e.target.matches('#queueDestinationFilter')) {
     queueDestinationFilter = e.target.value || 'all';
     renderQueueView();
+    return;
+  }
+  if (e.target.matches('#postureSegmentSelect')) {
+    monitorSegmentFilter = e.target.value || 'all';
+    loadPosture().catch(() => {});
+    return;
+  }
+  if (e.target.matches('#siemPackageProfile')) {
+    siemPackageProfile = e.target.value || 'all';
+    loadSiemPackage().catch(() => {});
   }
 });
 
@@ -2425,6 +3019,7 @@ function renderCoverage(c) {
       <div class="mini-kpi"><b>${escapeHtml(totals.events || 0)}</b><span>Events</span></div>
       <div class="mini-kpi"><b>${escapeHtml(totals.governedActive || 0)}/${escapeHtml(totals.governedDestinations || 0)}</b><span>Governed</span></div>
       <div class="mini-kpi"><b>${escapeHtml(totals.shadowEvents || 0)}</b><span>Shadow AI</span></div>
+      <div class="mini-kpi"><b>${escapeHtml(totals.freshDiscoveryFeeds || 0)}/${escapeHtml(totals.discoveryFeeds || 0)}</b><span>Feeds fresh</span></div>
       <div class="mini-kpi"><b>${escapeHtml(totals.blocked || 0)}</b><span>Blocked</span></div>
       <div class="mini-kpi"><b>${escapeHtml(totals.fleetAttention || 0)}</b><span>Fleet gaps</span></div>
     </div>`;
@@ -2461,7 +3056,7 @@ function renderCoverage(c) {
         <span>${escapeHtml(tool.detail || '-')}</span>
       </div>
     </div>`;
-  }).join('') || '<div class="empty"><div class="big">No endpoint AI tools</div>No endpoint AI tool inventory has been reported.</div>';
+  }).join('') || '<div class="empty"><div class="big">No endpoint AI tools</div>No endpoint AI inventory reported.</div>';
   $('#governedRows').innerHTML = (c.governedDestinations || []).map((d) => `<tr>
     <td class="mono">${escapeHtml(d.destination)}</td>
     <td class="mono">${escapeHtml(d.events)}</td>
@@ -2472,7 +3067,7 @@ function renderCoverage(c) {
   </tr>`).join('') || '<tr><td colspan="6" class="empty">No governed destinations are configured.</td></tr>';
   $('#shadowRows').innerHTML = (c.shadowDestinations || []).map((d) => `
     <div class="shadow-row">
-      <div><strong>${escapeHtml(d.destination)}</strong><span>${escapeHtml(d.users)} users / last ${escapeHtml(d.lastSeen ? fmt(d.lastSeen) : '-')}</span></div>
+      <div><strong>${escapeHtml(d.destination)}</strong><span>${escapeHtml(d.users)} users / ${escapeHtml((d.sources || []).join(', ') || d.source || 'source unknown')} / last ${escapeHtml(d.lastSeen ? fmt(d.lastSeen) : '-')}</span></div>
       <div class="destination-review">
         ${statusChip(destinationPolicyTone(d.policyState), destinationPolicyLabel(d.policyState), `Destination: ${d.destination}\nPolicy: ${destinationPolicyLabel(d.policyState)}\nSource count: ${d.users} users\nLast seen: ${d.lastSeen ? fmt(d.lastSeen) : '-'}`)}
         <span class="count">${escapeHtml(d.shadow)}</span>
@@ -2484,7 +3079,8 @@ function renderCoverage(c) {
         </div>`
     : ''}
       </div>
-    </div>`).join('') || '<div class="empty"><div class="big">No shadow AI</div>No ungoverned AI tools have been reported.</div>';
+    </div>`).join('') || '<div class="empty"><div class="big">No shadow AI</div>No ungoverned AI tools reported.</div>';
+  dispatchEvent(new CustomEvent('pw:c',{detail:c}));
 }
 
 function identityProviderLabel(provider) {
@@ -2642,6 +3238,7 @@ function renderLineage(lineage) {
 async function loadAudit() {
   setBusy('#tab-audit .panel', true, 'VERIFYING');
   try {
+    loadSecurityPackage();
     const r = await api('/api/audit');
     const d = await responseJsonObject(r, null);
     if (!d || !d.integrity || !Array.isArray(d.entries)) return;
@@ -2857,6 +3454,45 @@ function renderPolicyTemplates(tpls, readonly) {
   </div>`;
 }
 
+function policyFormBody(p) {
+  const approvalRoutingRules = parsePolicyJsonArray($('#pol_approval_routing_rules').value, 'Approval routing rules');
+  if (approvalRoutingRules == null) return null;
+  const blockedBrowserActions = parsePolicyJsonArray($('#pol_blocked_browser_actions').value, 'Browser action controls');
+  if (blockedBrowserActions == null) return null;
+  const policyScopes = parsePolicyJsonArray($('#pol_policy_scopes').value, 'Scoped enforcement rules');
+  if (policyScopes == null) return null;
+  const policyExceptions = parsePolicyJsonArray($('#pol_policy_exceptions').value, 'Time-bound exceptions');
+  if (policyExceptions == null) return null;
+  return {
+    enforcementMode: (document.querySelector('input[name=mode]:checked') || {}).value || p.enforcementMode,
+    blockMinSeverity: Number($('#pol_sev').value),
+    blockRiskScore: Number($('#pol_risk').value),
+    rawRetentionDays: Number($('#pol_retention').value),
+    desktopCollectorDestination: ($('#pol_desktop_destination').value || '').trim(),
+    requiredSensors: parsePolicyList($('#pol_required_sensors').value),
+    desiredSensorVersions: parsePolicyMap($('#pol_desired_sensor_versions').value),
+    approvalRoutingRules,
+    policyScopes,
+    policyExceptions,
+    governedDestinations: parsePolicyList($('#pol_governed_destinations').value),
+    allowedDestinations: parsePolicyList($('#pol_allowed_destinations').value),
+    blockedDestinations: parsePolicyList($('#pol_blocked_destinations').value),
+    blockedFileUploadDestinations: parsePolicyList($('#pol_blocked_file_upload_destinations').value),
+    blockedBrowserActions,
+    mcpAllowedTools: parsePolicyList($('#pol_mcp_allowed_tools').value),
+    mcpBlockedTools: parsePolicyList($('#pol_mcp_blocked_tools').value),
+    mcpApprovalRequiredTools: parsePolicyList($('#pol_mcp_approval_required_tools').value),
+    blockUnapprovedAiDestinations: $('#pol_block_unapproved_ai').checked,
+    responseScanMode: $('#pol_response_scan_mode').value,
+  };
+}
+
+function renderPolicyImpactPreview(result) {
+  if (window.PromptWallPolicyImpact && typeof window.PromptWallPolicyImpact.render === 'function') {
+    window.PromptWallPolicyImpact.render(result);
+  }
+}
+
 async function loadPolicy() {
   setBusy('#tab-policy .config-shell', true, 'VERIFYING');
   try {
@@ -2887,6 +3523,10 @@ async function loadPolicy() {
       <button class="ghost" id="testConfiguration" type="button">${icons.refresh}Test configuration</button>
       ${readonly ? '<span class="readonly-note">Read-only auditor view</span>' : `<button class="btn approve" id="savePolicy" type="button">${icons.check}Save changes</button>`}
       <span id="polSaved" class="save-status"></span>
+    </div>
+    <div class="config-card pad policy-impact-card" id="policyImpactPreview" aria-live="polite">
+      <div class="sensor-head"><div><h3>Policy Impact Preview</h3><p>Test a draft policy against recent sanitized evidence before saving.</p></div>${statePill('warn', 'Not run')}</div>
+      <div class="policy-impact-empty">Run Test configuration to preview changed outcomes. Prompt bodies are excluded.</div>
     </div>
     <div class="config-grid">
       ${renderSetupChecklist(p, preflight, coverage)}
@@ -2993,6 +3633,27 @@ async function loadPolicy() {
       </div>
     </div>
     <div class="config-card pad">
+      <h3>MCP Tool Governance</h3>
+      <p>Restrict agent tools before execution and require review for high-impact connectors.</p>
+      <div class="policy-list-grid" style="margin-top:14px">
+        <label class="policy-list-field">Allowed MCP tools
+          ${readonly
+    ? `<div class="chips">${(p.mcpAllowedTools || []).map((x) => `<span class="chip">${escapeHtml(x)}</span>`).join('') || '<span class="chip">all tools unless blocked</span>'}</div>`
+    : `<textarea id="pol_mcp_allowed_tools" class="policy-textarea" spellcheck="false" placeholder="sharepoint.fetch*&#10;drive.read*">${escapeHtml(policyListText(p.mcpAllowedTools))}</textarea>`}
+        </label>
+        <label class="policy-list-field">Blocked MCP tools
+          ${readonly
+    ? `<div class="chips">${(p.mcpBlockedTools || []).map((x) => `<span class="chip">${escapeHtml(x)}</span>`).join('') || '<span class="chip">none</span>'}</div>`
+    : `<textarea id="pol_mcp_blocked_tools" class="policy-textarea" spellcheck="false" placeholder="*.delete*&#10;database.write*">${escapeHtml(policyListText(p.mcpBlockedTools))}</textarea>`}
+        </label>
+        <label class="policy-list-field">Approval-required MCP tools
+          ${readonly
+    ? `<div class="chips">${(p.mcpApprovalRequiredTools || []).map((x) => `<span class="chip">${escapeHtml(x)}</span>`).join('') || '<span class="chip">none</span>'}</div>`
+    : `<textarea id="pol_mcp_approval_required_tools" class="policy-textarea" spellcheck="false" placeholder="sharepoint.export*&#10;drive.share*">${escapeHtml(policyListText(p.mcpApprovalRequiredTools))}</textarea>`}
+        </label>
+      </div>
+    </div>
+    <div class="config-card pad">
       <h3>Approval Routing</h3>
       <p>Route held prompts to the right group and role with SLA context.</p>
       ${readonly
@@ -3074,51 +3735,38 @@ async function loadPolicy() {
   $('#discardPolicy').onclick = loadPolicy;
   $('#testConfiguration').onclick = async () => {
     setPolicyStatus('VERIFYING');
-    const [nextPreflight, nextCoverage] = await Promise.all([
+    const body = readonly ? null : policyFormBody(p);
+    if (!readonly && !body) return;
+    const [nextPreflight, nextCoverage, impactRes] = await Promise.all([
       optionalDashboardJson('/api/preflight'),
       optionalDashboardJson('/api/coverage', currentCoverage),
+      body ? api('/api/policy/impact?limit=1000', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }) : Promise.resolve(null),
     ]);
     if (nextCoverage) currentCoverage = nextCoverage;
+    let impact;
+    if (impactRes) {
+      if (!impactRes.ok) {
+        setPolicyStatus(await apiErrorSummary(impactRes, 'Could not preview impact'));
+        return;
+      }
+      impact = await impactRes.json();
+      renderPolicyImpactPreview(impact);
+    }
     const nextHealth = configHealth(nextPreflight);
     const configStatus = $('#configurationStatus');
     if (configStatus) configStatus.innerHTML = statePill(nextHealth.state, `${nextHealth.score}/100 ready`);
-    setPolicyStatus(nextHealth.state === 'bad'
+    const impactText = impact && impact.summary ? ` / ${impact.summary.changed || 0} policy impact change(s)` : '';
+    setPolicyStatus((nextHealth.state === 'bad'
       ? `${nextHealth.failed} blocking check(s)`
-      : `${nextHealth.failed} warning(s), ${nextHealth.ok}/${nextHealth.total || 0} checks ready`, 3600);
+      : `${nextHealth.failed} warning(s), ${nextHealth.ok}/${nextHealth.total || 0} checks ready`) + impactText, 3600);
   };
   markUpdated();
   if (readonly) return;
   $('#addScopeRule').onclick = appendGuidedScopeRule;
   $('#addExceptionRule').onclick = appendGuidedExceptionRule;
   $('#savePolicy').onclick = async () => {
-    const mode = (document.querySelector('input[name=mode]:checked') || {}).value || p.enforcementMode;
-    const approvalRoutingRules = parsePolicyJsonArray($('#pol_approval_routing_rules').value, 'Approval routing rules');
-    if (approvalRoutingRules == null) return;
-    const blockedBrowserActions = parsePolicyJsonArray($('#pol_blocked_browser_actions').value, 'Browser action controls');
-    if (blockedBrowserActions == null) return;
-    const policyScopes = parsePolicyJsonArray($('#pol_policy_scopes').value, 'Scoped enforcement rules');
-    if (policyScopes == null) return;
-    const policyExceptions = parsePolicyJsonArray($('#pol_policy_exceptions').value, 'Time-bound exceptions');
-    if (policyExceptions == null) return;
-    const body = {
-      enforcementMode: mode,
-      blockMinSeverity: Number($('#pol_sev').value),
-      blockRiskScore: Number($('#pol_risk').value),
-      rawRetentionDays: Number($('#pol_retention').value),
-      desktopCollectorDestination: ($('#pol_desktop_destination').value || '').trim(),
-      requiredSensors: parsePolicyList($('#pol_required_sensors').value),
-      desiredSensorVersions: parsePolicyMap($('#pol_desired_sensor_versions').value),
-      approvalRoutingRules,
-      policyScopes,
-      policyExceptions,
-      governedDestinations: parsePolicyList($('#pol_governed_destinations').value),
-      allowedDestinations: parsePolicyList($('#pol_allowed_destinations').value),
-      blockedDestinations: parsePolicyList($('#pol_blocked_destinations').value),
-      blockedFileUploadDestinations: parsePolicyList($('#pol_blocked_file_upload_destinations').value),
-      blockedBrowserActions,
-      blockUnapprovedAiDestinations: $('#pol_block_unapproved_ai').checked,
-      responseScanMode: $('#pol_response_scan_mode').value,
-    };
+    const body = policyFormBody(p);
+    if (!body) return;
     setPolicyStatus('Saving');
     const r = await api('/api/policy', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (!r) return;
@@ -3438,7 +4086,7 @@ function activateTab(name, options = {}) {
   panel.classList.remove('hidden');
   window.scrollTo(0, 0);
   if (!options.skipHistory) syncTabUrl(targetName, { replace: options.replaceHistory });
-  if (targetName === 'monitor') renderMonitor();
+  if (targetName === 'monitor') { renderMonitor(); loadPosture().catch(() => {}); loadSiemPackage().catch(() => {}); }
   if (targetName === 'audit') loadAudit();
   if (targetName === 'policy') loadPolicy();
   if (targetName === 'activity') loadActivity();
@@ -3481,8 +4129,11 @@ $('#identityTenant').addEventListener('change', loadIdentitySetup);
 $('#refreshLineage').onclick = loadLineage;
 $('#logout').onclick = async () => { await api('/api/logout', { method: 'POST' }); location.href = '/login.html'; };
 $('#exportEvidence').onclick = exportEvidence;
+$('#downloadSecurityPackage').onclick = downloadSecurityPackage;
 $('#globalSearch').addEventListener('input', (e) => updateSearch(e.target.value));
 $('#monitorRefresh').onclick = refreshMonitorSignals;
+$('#sendPostureSnapshot').onclick = sendPostureSnapshot;
+$('#downloadSiemPackage').onclick = downloadSiemPackage;
 $('#monitorSearch').addEventListener('input', (e) => {
   monitorSearchTerm = String(e.target.value || '').trim();
   renderMonitor();
@@ -3498,9 +4149,9 @@ $('#monitorSearch').addEventListener('blur', () => {
 
 function connectStream() {
   const es = new EventSource('/api/stream');
-  es.addEventListener('query', () => { loadStats(); loadQueue(); if (!$('#tab-coverage').classList.contains('hidden')) loadCoverage(); if (!$('#tab-lineage').classList.contains('hidden')) loadLineage(); if (!$('#tab-insights').classList.contains('hidden')) loadInsights(); flash(); });
-  es.addEventListener('decision', () => { loadStats(); loadQueue(); loadActivity(); if (!$('#tab-lineage').classList.contains('hidden')) loadLineage(); });
-  es.addEventListener('stats', () => loadStats());
+  es.addEventListener('query', () => { loadStats(); loadQueue(); loadPosture().catch(() => {}); if (!$('#tab-coverage').classList.contains('hidden')) loadCoverage(); if (!$('#tab-lineage').classList.contains('hidden')) loadLineage(); if (!$('#tab-insights').classList.contains('hidden')) loadInsights(); flash(); });
+  es.addEventListener('decision', () => { loadStats(); loadQueue(); loadActivity(); loadPosture().catch(() => {}); if (!$('#tab-lineage').classList.contains('hidden')) loadLineage(); });
+  es.addEventListener('stats', () => { loadStats(); if (!$('#tab-monitor').classList.contains('hidden')) loadPosture().catch(() => {}); });
   es.onerror = () => { setLiveState('reconnecting'); };
   es.onopen = () => { setLiveState('live'); };
 }

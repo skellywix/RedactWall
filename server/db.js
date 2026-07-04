@@ -126,6 +126,20 @@ sdb.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_deliveries_dest ON deliveries(destId);
   CREATE INDEX IF NOT EXISTS idx_deliveries_dedupe ON deliveries(destId, dedupeKey);
+
+  CREATE TABLE IF NOT EXISTS detector_feedback (
+    seq        INTEGER PRIMARY KEY AUTOINCREMENT,
+    id         TEXT UNIQUE NOT NULL,
+    createdAt  TEXT NOT NULL,
+    queryId    TEXT NOT NULL,
+    detectorId TEXT NOT NULL,
+    verdict    TEXT NOT NULL,
+    actor      TEXT,
+    data       TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_detector_feedback_query ON detector_feedback(queryId);
+  CREATE INDEX IF NOT EXISTS idx_detector_feedback_detector ON detector_feedback(detectorId);
+  CREATE INDEX IF NOT EXISTS idx_detector_feedback_verdict ON detector_feedback(verdict);
 `);
 
 const id = (p) => p + '_' + crypto.randomBytes(8).toString('hex');
@@ -134,6 +148,7 @@ const id = (p) => p + '_' + crypto.randomBytes(8).toString('hex');
 const qInsert = sdb.prepare('INSERT INTO queries (id, createdAt, status, user, data) VALUES (@id, @createdAt, @status, @user, @data)');
 const qById = sdb.prepare('SELECT data FROM queries WHERE id = ?');
 const qUpdateById = sdb.prepare('UPDATE queries SET status = @status, user = @user, data = @data WHERE id = @id');
+const detectorFeedbackInsert = sdb.prepare('INSERT INTO detector_feedback (id, createdAt, queryId, detectorId, verdict, actor, data) VALUES (@id, @createdAt, @queryId, @detectorId, @verdict, @actor, @data)');
 
 function boundedLimit(value, fallback = 200, max = 5000) {
   if (value === undefined || value === null || value === '') return fallback;
@@ -172,6 +187,46 @@ const updateQuery = sdb.transaction((qid, patch) => {
   return merged;
 });
 
+function createDetectorFeedback(input = {}) {
+  const now = new Date().toISOString();
+  const record = {
+    id: input.id || id('df'),
+    createdAt: input.createdAt || now,
+    queryId: String(input.queryId || '').trim(),
+    detectorId: String(input.detectorId || '').trim(),
+    verdict: String(input.verdict || '').trim(),
+    reason: String(input.reason || '').trim().slice(0, 240),
+    actor: String(input.actor || '').trim().slice(0, 120),
+    role: String(input.role || '').trim().slice(0, 80),
+    queryUser: String(input.queryUser || '').trim().slice(0, 160),
+    orgId: String(input.orgId || '').trim().slice(0, 120),
+    source: String(input.source || '').trim().slice(0, 80),
+    channel: String(input.channel || '').trim().slice(0, 80),
+    destination: String(input.destination || '').trim().slice(0, 253),
+    queryStatus: String(input.queryStatus || '').trim().slice(0, 80),
+    riskScore: Number.isFinite(Number(input.riskScore)) ? Math.max(0, Math.min(100, Math.round(Number(input.riskScore)))) : 0,
+    maxSeverity: Number.isFinite(Number(input.maxSeverity)) ? Math.max(0, Math.min(4, Math.round(Number(input.maxSeverity)))) : 0,
+  };
+  detectorFeedbackInsert.run({
+    id: record.id,
+    createdAt: record.createdAt,
+    queryId: record.queryId,
+    detectorId: record.detectorId,
+    verdict: record.verdict,
+    actor: record.actor || null,
+    data: JSON.stringify(record),
+  });
+  return record;
+}
+
+function listDetectorFeedback(filter = {}) {
+  const limit = boundedLimit(filter.limit, 500, filter.maxLimit || 5000);
+  const rows = filter.queryId
+    ? sdb.prepare('SELECT data FROM detector_feedback WHERE queryId = ? ORDER BY createdAt DESC, seq DESC LIMIT ?').all(String(filter.queryId), limit)
+    : sdb.prepare('SELECT data FROM detector_feedback ORDER BY createdAt DESC, seq DESC LIMIT ?').all(limit);
+  return rows.map((r) => JSON.parse(r.data));
+}
+
 /** Hash of a query's current full state — binds the evidence into the chain. */
 function queryContentHash(qid) {
   return integrity.queryContentHash(sdb, qid);
@@ -207,6 +262,44 @@ function appendAuditRecord(event) {
 const appendAudit = sdb.transaction((event) => {
   return appendAuditRecord(event);
 });
+
+const POSTURE_ACTION_AUDIT = 'POSTURE_ACTION_UPDATED';
+const POSTURE_ACTION_STATUSES = new Set(['open', 'assigned', 'snoozed', 'resolved']);
+
+function parsePostureActionDetail(detail) {
+  try {
+    const payload = JSON.parse(String(detail || '{}'));
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+    const actionId = String(payload.id || '').trim();
+    const status = String(payload.status || '').trim();
+    if (!actionId || !POSTURE_ACTION_STATUSES.has(status)) return null;
+    return {
+      id: actionId.slice(0, 160),
+      status,
+      owner: String(payload.owner || '').trim().slice(0, 120),
+      note: String(payload.note || '').trim().slice(0, 240),
+      snoozeUntil: payload.snoozeUntil ? String(payload.snoozeUntil).slice(0, 80) : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function postureActionStates(limit = 1000) {
+  const rows = listAudit(limit).reverse();
+  const states = {};
+  for (const entry of rows) {
+    if (!entry || entry.action !== POSTURE_ACTION_AUDIT) continue;
+    const parsed = parsePostureActionDetail(entry.detail);
+    if (!parsed) continue;
+    states[parsed.id] = {
+      ...parsed,
+      actor: entry.actor || '',
+      updatedAt: entry.ts || null,
+    };
+  }
+  return states;
+}
 
 const RETENTION_FINAL_STATUSES = ['approved', 'denied', 'redacted'];
 const SEAT_EXCLUDED_STATUSES = new Set(['seat_limit_blocked']);
@@ -455,35 +548,41 @@ function stats() {
 }
 
 // ---- One-time migration from the legacy JSON store ---------------------------
-function migrateFromJson() {
-  if (process.env.SENTINEL_DB_PATH) return; // explicit path: caller owns its data, no legacy auto-import
-  if (sdb.prepare('SELECT COUNT(*) n FROM queries').get().n > 0) return;
-  const qf = path.join(DATA_DIR, 'queries.json');
-  const af = path.join(DATA_DIR, 'audit.json');
+function migrateFromJson(opts = {}) {
+  const env = opts.env || process.env;
+  const db = opts.db || sdb;
+  const queryInsert = opts.qInsert || qInsert;
+  const append = opts.appendAudit || appendAudit;
+  const fsModule = opts.fs || fs;
+  const dataDir = opts.dataDir || DATA_DIR;
+  if (env.SENTINEL_DB_PATH) return; // explicit path: caller owns its data, no legacy auto-import
+  if (db.prepare('SELECT COUNT(*) n FROM queries').get().n > 0) return;
+  const qf = path.join(dataDir, 'queries.json');
+  const af = path.join(dataDir, 'audit.json');
   let importedQ = 0, importedA = 0;
-  const tx = sdb.transaction(() => {
-    if (fs.existsSync(qf)) {
+  const tx = db.transaction(() => {
+    if (fsModule.existsSync(qf)) {
       let rows = [];
-      try { rows = JSON.parse(fs.readFileSync(qf, 'utf8')); } catch {}
+      try { rows = JSON.parse(fsModule.readFileSync(qf, 'utf8')); } catch {}
       for (const r of rows) {
         if (!r || !r.id) continue;
-        qInsert.run({ id: r.id, createdAt: r.createdAt || new Date().toISOString(), status: r.status || 'pending', user: r.user || null, data: JSON.stringify(r) });
+        queryInsert.run({ id: r.id, createdAt: r.createdAt || new Date().toISOString(), status: r.status || 'pending', user: r.user || null, data: JSON.stringify(r) });
         importedQ++;
       }
     }
-    if (fs.existsSync(af)) {
+    if (fsModule.existsSync(af)) {
       let rows = [];
-      try { rows = JSON.parse(fs.readFileSync(af, 'utf8')); } catch {}
+      try { rows = JSON.parse(fsModule.readFileSync(af, 'utf8')); } catch {}
       rows.sort((a, b) => (a.ts < b.ts ? -1 : 1));
-      for (const e of rows) { appendAudit({ action: e.action, queryId: e.queryId, actor: e.actor, detail: e.detail }); importedA++; }
+      for (const e of rows) { append({ action: e.action, queryId: e.queryId, actor: e.actor, detail: e.detail }); importedA++; }
     }
   });
   tx();
   if (importedQ || importedA) {
-    appendAudit({ action: 'STORE_MIGRATED', actor: 'system', detail: `imported ${importedQ} queries, ${importedA} audit events from JSON store (re-anchored)` });
+    append({ action: 'STORE_MIGRATED', actor: 'system', detail: `imported ${importedQ} queries, ${importedA} audit events from JSON store (re-anchored)` });
     try {
-      if (fs.existsSync(qf)) fs.renameSync(qf, qf + '.migrated');
-      if (fs.existsSync(af)) fs.renameSync(af, af + '.migrated');
+      if (fsModule.existsSync(qf)) fsModule.renameSync(qf, qf + '.migrated');
+      if (fsModule.existsSync(af)) fsModule.renameSync(af, af + '.migrated');
     } catch {}
   }
 }
@@ -542,11 +641,13 @@ function recentDeliverySuccess(destId, dedupeKey, sinceIso) {
 
 module.exports = {
   createQuery, getQuery, listQueries, updateQuery,
+  createDetectorFeedback, listDetectorFeedback,
   purgeRetainedSensitiveData,
-  appendAudit, listAudit, verifyAuditChain, stats, seatStats,
+  appendAudit, listAudit, verifyAuditChain, stats, seatStats, postureActionStates,
   getScimUser, getScimUserByUserName, listScimUsers, saveScimUser, deactivateScimUser,
   getScimGroup, getScimGroupByDisplayName, listScimGroups, saveScimGroup, deleteScimGroup,
   getAiApp, listAiApps, upsertAiApp,
   recordDelivery, listDeliveries, recentDeliverySuccess,
   _canonical: canonical, _db: sdb, _dbPath: DB_PATH,
+  _internal: { migrateFromJson, parsePostureActionDetail, POSTURE_ACTION_AUDIT },
 };

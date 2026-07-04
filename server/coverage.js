@@ -14,11 +14,14 @@ const SENSOR_LABELS = {
   api: 'API gateway',
   proxy: 'Network proxy',
 };
+const DISCOVERY_STATE_RANK = { stale: 0, missing: 0, fresh: 1 };
 
 const DEFAULT_REQUIRED_SENSORS = ['browser_extension', 'endpoint_agent', 'mcp_guard'];
 const SENSOR_ID_RE = /^[a-z][a-z0-9_:-]{0,79}$/;
 const FLEET_LIMIT = 150;
 const ENDPOINT_AI_TOOL_LIMIT = 100;
+const ENDPOINT_FILE_FLOW_PROFILE_LIMIT = 120;
+const DISCOVERY_FRESH_HOURS = 72;
 const AI_TOOL_LABELS = {
   chatgpt_desktop: 'ChatGPT Desktop',
   claude_desktop: 'Claude Desktop',
@@ -103,16 +106,26 @@ function emptyAggregate(destination, policyState = 'review') {
     redacted: 0,
     shadow: 0,
     users: new Set(),
+    sources: new Set(),
     lastSeen: null,
   };
 }
 
+function eventWeight(q) {
+  const value = Number(q && q.discoveryEvents);
+  if (!Number.isFinite(value)) return 1;
+  return Math.max(1, Math.min(100000, Math.trunc(value)));
+}
+
 function bumpAggregate(bucket, q) {
-  bucket.events += 1;
-  if (BLOCKED_STATUSES.has(q.status)) bucket.blocked += 1;
-  if (REDACTED_STATUSES.has(q.status)) bucket.redacted += 1;
-  if (isShadowAiEvent(q)) bucket.shadow += 1;
+  const events = eventWeight(q);
+  bucket.events += events;
+  if (BLOCKED_STATUSES.has(q.status)) bucket.blocked += events;
+  if (REDACTED_STATUSES.has(q.status)) bucket.redacted += events;
+  if (isShadowAiEvent(q)) bucket.shadow += events;
   if (q.user) bucket.users.add(q.user);
+  if (q.discoverySource) bucket.sources.add(String(q.discoverySource).slice(0, 80));
+  else if (q.source) bucket.sources.add(String(q.source).slice(0, 80));
   if (!bucket.lastSeen || String(q.createdAt || '') > bucket.lastSeen) bucket.lastSeen = q.createdAt || null;
 }
 
@@ -125,12 +138,77 @@ function publicAggregate(bucket, extra = {}) {
     redacted: bucket.redacted,
     shadow: bucket.shadow,
     users: bucket.users.size,
+    source: [...bucket.sources][0] || null,
+    sources: [...bucket.sources].sort().slice(0, 5),
     lastSeen: bucket.lastSeen,
     ...extra,
   };
   const risk = aiCatalog.riskAttributes(bucket.destination);
   if (risk) out.risk = risk;
   return out;
+}
+
+function discoveryTimestamp(row) {
+  const candidates = [row && row.lastSeen, row && row.createdAt, row && row.firstSeen];
+  for (const value of candidates) {
+    const parsed = Date.parse(value || '');
+    if (Number.isFinite(parsed)) return new Date(parsed).toISOString();
+  }
+  return null;
+}
+
+function discoveryFreshness(lastSeen, nowMs = Date.now()) {
+  const parsed = Date.parse(lastSeen || '');
+  if (!Number.isFinite(parsed)) return { state: 'missing', ageHours: null };
+  const ageHours = Math.max(0, Math.round((nowMs - parsed) / 360_000) / 10);
+  return {
+    ageHours,
+    state: ageHours <= DISCOVERY_FRESH_HOURS ? 'fresh' : 'stale',
+  };
+}
+
+function discoveryFeedRows(rows = [], nowMs = Date.now()) {
+  const feeds = new Map();
+  for (const row of rows || []) {
+    if (!row || !(row.mode === 'discovery' || row.discoverySource)) continue;
+    if (!isShadowAiEvent(row)) continue;
+    const source = safeFleetText(row.discoverySource || row.source || 'discovery', 'discovery');
+    const current = feeds.get(source) || {
+      source,
+      observations: 0,
+      destinations: new Set(),
+      users: new Set(),
+      categories: new Set(),
+      lastSeen: null,
+    };
+    current.observations += eventWeight(row);
+    current.destinations.add(normalizeDestination(row.destination));
+    if (row.user) current.users.add(safeFleetText(row.user));
+    if (row.discoveryCategory) current.categories.add(safeFleetText(row.discoveryCategory));
+    const timestamp = discoveryTimestamp(row);
+    if (timestamp && (!current.lastSeen || timestamp > current.lastSeen)) current.lastSeen = timestamp;
+    feeds.set(source, current);
+  }
+  return [...feeds.values()]
+    .map((feed) => {
+      const freshness = discoveryFreshness(feed.lastSeen, nowMs);
+      return {
+        source: feed.source,
+        state: freshness.state,
+        observations: feed.observations,
+        destinations: [...feed.destinations].filter((item) => item && item !== 'unknown').length,
+        users: feed.users.size,
+        categories: [...feed.categories].filter(Boolean).sort().slice(0, 6),
+        lastSeen: feed.lastSeen,
+        ageHours: freshness.ageHours,
+        privacy: 'host-only destinations; prompt bodies and URL paths omitted',
+      };
+    })
+    .sort((a, b) => ((DISCOVERY_STATE_RANK[a.state] ?? 2) - (DISCOVERY_STATE_RANK[b.state] ?? 2))
+      || String(b.lastSeen || '').localeCompare(String(a.lastSeen || ''))
+      || b.observations - a.observations
+      || a.source.localeCompare(b.source))
+    .slice(0, 12);
 }
 
 function isDesktopCollectorEvent(q) {
@@ -213,6 +291,32 @@ function aiToolInventoryForChecks(checks = []) {
   };
 }
 
+function fileFlowProfilesForChecks(checks = []) {
+  const summary = checks.find((check) => check.id === 'endpoint_file_flow_profiles');
+  const profiles = checks
+    .filter((check) => check && /^endpoint_file_flow_profile_[a-z][a-z0-9_]{0,39}$/.test(check.id))
+    .map((check) => {
+      const id = String(check.id).slice('endpoint_file_flow_profile_'.length);
+      return {
+        id,
+        state: check.ok === true ? 'covered' : 'attention',
+        detail: String(check.detail || (check.ok ? 'configured directory' : 'missing directory')).slice(0, 160),
+      };
+    })
+    .sort((a, b) => a.state.localeCompare(b.state) || a.id.localeCompare(b.id));
+  if (!summary && !profiles.length) return null;
+  const configuredMatch = String((summary && summary.detail) || '').match(/^configured:(\d+)$/);
+  const configured = configuredMatch ? Number(configuredMatch[1]) : profiles.length;
+  const attention = profiles.filter((profile) => profile.state === 'attention').length;
+  return {
+    configured,
+    reported: profiles.length,
+    attention,
+    state: attention ? 'attention' : configured ? 'covered' : 'disabled',
+    profiles,
+  };
+}
+
 function installHealthFor(q) {
   const checks = cleanInstallChecks(q && q.installChecks);
   if (!checks.length) return null;
@@ -225,6 +329,8 @@ function installHealthFor(q) {
   };
   const aiToolInventory = aiToolInventoryForChecks(checks);
   if (aiToolInventory) health.aiToolInventory = aiToolInventory;
+  const fileFlowProfiles = fileFlowProfilesForChecks(checks);
+  if (fileFlowProfiles) health.fileFlowProfiles = fileFlowProfiles;
   return health;
 }
 
@@ -269,11 +375,12 @@ function desiredSensorVersions(policy = {}) {
 }
 
 function bumpVersion(sensor, q) {
+  const events = eventWeight(q);
   const meta = cleanSensorMetadata(q.sensor);
   const version = meta.version || meta.packageVersion || null;
   if (version) {
     const bucket = sensor._versions.get(version) || { version, events: 0, lastSeen: null };
-    bucket.events += 1;
+    bucket.events += events;
     if (!bucket.lastSeen || String(q.createdAt || '') > bucket.lastSeen) bucket.lastSeen = q.createdAt || null;
     sensor._versions.set(version, bucket);
   }
@@ -329,13 +436,14 @@ function emptyFleetRow({ source, user, orgId, label }) {
 }
 
 function bumpFleetRow(row, q) {
-  row.events += 1;
+  const events = eventWeight(q);
+  row.events += events;
   if (!row.lastSeen || String(q.createdAt || '') > row.lastSeen) row.lastSeen = q.createdAt || null;
   const meta = cleanSensorMetadata(q.sensor);
   const version = meta.version || meta.packageVersion || null;
   if (version) {
     const bucket = row._versions.get(version) || { version, events: 0, lastSeen: null };
-    bucket.events += 1;
+    bucket.events += events;
     if (!bucket.lastSeen || String(q.createdAt || '') > bucket.lastSeen) bucket.lastSeen = q.createdAt || null;
     row._versions.set(version, bucket);
   }
@@ -407,6 +515,31 @@ function endpointAiToolRows(rows) {
     .slice(0, ENDPOINT_AI_TOOL_LIMIT);
 }
 
+function endpointFileFlowProfileRows(rows) {
+  const out = [];
+  for (const row of rows || []) {
+    if (!row || row.source !== 'endpoint_agent') continue;
+    const inventory = row.installHealth && row.installHealth.fileFlowProfiles;
+    if (!inventory || !Array.isArray(inventory.profiles)) continue;
+    for (const profile of inventory.profiles) {
+      out.push({
+        id: profile.id,
+        state: profile.state,
+        detail: profile.detail,
+        user: row.user || 'unknown',
+        orgId: row.orgId || null,
+        lastSeen: (row.installHealth && row.installHealth.at) || row.lastSeen || null,
+        platforms: Array.isArray(row.platforms) ? row.platforms.slice(0, 5) : [],
+      });
+    }
+  }
+  return out
+    .sort((a, b) => stateRank(a.state) - stateRank(b.state)
+      || String(a.user || '').localeCompare(String(b.user || ''))
+      || String(a.id || '').localeCompare(String(b.id || '')))
+    .slice(0, ENDPOINT_FILE_FLOW_PROFILE_LIMIT);
+}
+
 function summarize(rows, pol) {
   const policy = pol || {};
   const configured = configuredDestinations(policy);
@@ -431,6 +564,7 @@ function summarize(rows, pol) {
   }
 
   for (const q of rows || []) {
+    const events = eventWeight(q);
     const destination = normalizeDestination(q.destination);
     const policyState = destinationPolicyState(destination, policy);
     const source = q.source || 'api';
@@ -439,7 +573,7 @@ function summarize(rows, pol) {
     const userKey = [user, orgId || ''].join('\u0000');
     if (user !== 'unknown') fleetUsers.set(userKey, { user, orgId });
     const sensor = sensorCounts.get(source) || { source, label: SENSOR_LABELS[source] || source, events: 0, lastSeen: null, _versions: new Map(), _platforms: new Set() };
-    sensor.events += 1;
+    sensor.events += events;
     if (!sensor.lastSeen || String(q.createdAt || '') > sensor.lastSeen) sensor.lastSeen = q.createdAt || null;
     bumpVersion(sensor, q);
     bumpInstallHealth(sensor, q);
@@ -448,10 +582,10 @@ function summarize(rows, pol) {
     const fleetRow = fleetRows.get(fk) || emptyFleetRow({ source, user, orgId, label: SENSOR_LABELS[source] || source });
     bumpFleetRow(fleetRow, q);
     fleetRows.set(fk, fleetRow);
-    statuses[q.status || 'unknown'] = (statuses[q.status || 'unknown'] || 0) + 1;
+    statuses[q.status || 'unknown'] = (statuses[q.status || 'unknown'] || 0) + events;
 
     if (isDesktopCollectorEvent(q)) {
-      desktopCollector.events += 1;
+      desktopCollector.events += events;
       desktopCollector.destinations.add(destination);
       if (!desktopCollector.lastSeen || String(q.createdAt || '') > desktopCollector.lastSeen) {
         desktopCollector.lastSeen = q.createdAt || null;
@@ -501,12 +635,27 @@ function summarize(rows, pol) {
       || String(a.source || '').localeCompare(String(b.source || '')))
     .slice(0, FLEET_LIMIT);
   const endpointAiTools = endpointAiToolRows(allFleet);
+  const endpointFileFlowProfilesRows = endpointFileFlowProfileRows(allFleet);
   const endpointInventories = allFleet
     .filter((row) => row.source === 'endpoint_agent' && row.installHealth && row.installHealth.aiToolInventory)
     .map((row) => row.installHealth.aiToolInventory);
+  const endpointFileFlowInventories = allFleet
+    .filter((row) => row.source === 'endpoint_agent' && row.installHealth && row.installHealth.fileFlowProfiles)
+    .map((row) => row.installHealth.fileFlowProfiles);
   const endpointAiInventoryReports = endpointInventories.length;
   const endpointAiToolDetections = endpointInventories.reduce((sum, inventory) => sum + (Number(inventory.detected) || 0), 0);
   const endpointAiToolUnapproved = endpointInventories.reduce((sum, inventory) => sum + (Number(inventory.unapproved) || 0), 0);
+  const endpointFileFlowReports = endpointFileFlowInventories.length;
+  const endpointFileFlowProfiles = endpointFileFlowInventories.reduce((sum, inventory) => sum + (Number(inventory.configured) || 0), 0);
+  const endpointFileFlowAttention = endpointFileFlowInventories.reduce((sum, inventory) => sum + (Number(inventory.attention) || 0), 0);
+  const discoveryFeeds = discoveryFeedRows(rows);
+  const freshDiscoveryFeeds = discoveryFeeds.filter((feed) => feed.state === 'fresh').length;
+  const staleDiscoveryFeeds = discoveryFeeds.filter((feed) => feed.state !== 'fresh').length;
+  const lastDiscoveryAt = discoveryFeeds
+    .map((feed) => feed.lastSeen)
+    .filter(Boolean)
+    .sort()
+    .pop() || null;
   const fleetAttention = fleet.filter((row) => ['attention', 'missing', 'outdated', 'unknown'].includes(row.state)).length;
   const fleetCovered = fleet.filter((row) => row.state === 'covered').length;
   const activeSensorVersionGaps = sensors.filter((s) => s.events > 0 && s.versionHealth !== 'current').length;
@@ -526,7 +675,7 @@ function summarize(rows, pol) {
     generatedAt: new Date().toISOString(),
     score: Math.max(0, Math.min(100, score)),
     totals: {
-      events: (rows || []).length,
+      events: (rows || []).reduce((sum, q) => sum + eventWeight(q), 0),
       governedDestinations: governedTotal,
       governedActive,
       shadowEvents,
@@ -541,13 +690,22 @@ function summarize(rows, pol) {
       endpointAiInventoryReports,
       endpointAiToolDetections,
       endpointAiToolUnapproved,
+      endpointFileFlowReports,
+      endpointFileFlowProfiles,
+      endpointFileFlowAttention,
+      discoveryFeeds: discoveryFeeds.length,
+      freshDiscoveryFeeds,
+      staleDiscoveryFeeds,
+      lastDiscoveryAt,
       fleetRows: fleet.length,
       fleetCovered,
       fleetAttention,
     },
     sensors,
     fleet,
+    discoveryFeeds,
     endpointAiTools,
+    endpointFileFlowProfiles: endpointFileFlowProfilesRows,
     governedDestinations: [...governed.values()]
       .map((bucket) => publicAggregate(bucket, { governed: true }))
       .sort((a, b) => b.events - a.events || a.destination.localeCompare(b.destination)),
@@ -594,6 +752,14 @@ function summarize(rows, pol) {
         detail: `${unresolvedShadowDestinations} pending reviews / ${shadowEvents} sightings`,
       },
       {
+        id: 'discovery_freshness',
+        label: 'Discovery freshness',
+        state: staleDiscoveryFeeds || !discoveryFeeds.length ? 'attention' : 'covered',
+        detail: discoveryFeeds.length
+          ? `${freshDiscoveryFeeds}/${discoveryFeeds.length} fresh feeds${lastDiscoveryAt ? ` / last ${lastDiscoveryAt.slice(0, 10)}` : ''}`
+          : 'no proxy, SSE, firewall, or browser-isolation import feed',
+      },
+      {
         id: 'sensor_versions',
         label: 'Sensor versions',
         state: activeSensorVersionGaps ? 'attention' : 'covered',
@@ -612,6 +778,14 @@ function summarize(rows, pol) {
         detail: endpointAiInventoryReports
           ? `${endpointAiToolDetections} detected tools / ${endpointAiToolUnapproved} unapproved`
           : 'no endpoint inventory heartbeat',
+      },
+      {
+        id: 'endpoint_file_flow_profiles',
+        label: 'Endpoint file-flow profiles',
+        state: endpointFileFlowAttention ? 'attention' : (endpointFileFlowProfiles ? 'covered' : 'attention'),
+        detail: endpointFileFlowReports
+          ? `${endpointFileFlowProfiles} configured / ${endpointFileFlowAttention} missing`
+          : 'no file-flow profile heartbeat',
       },
       {
         id: 'governed_destinations',

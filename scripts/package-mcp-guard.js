@@ -15,8 +15,13 @@ const PACKAGE_FILES = [
   'detection-engine/detect.js',
   'sensors/mcp-guard/guard.js',
   'sensors/mcp-guard/sdk.js',
+  'sensors/mcp-guard/connector-registry.js',
   'sensors/mcp-guard/connectors/microsoft365.js',
-  'sensors/mcp-guard/connectors/googledrive.js',
+  'sensors/mcp-guard/connectors/google-drive.js',
+  'sensors/mcp-guard/connectors/slack.js',
+  'sensors/mcp-guard/connectors/teams.js',
+  'sensors/mcp-guard/connectors/atlassian.js',
+  'sensors/mcp-guard/connectors/database-readonly.js',
   'scripts/check-mcp-guard-install.js',
 ];
 
@@ -77,18 +82,43 @@ function validateRuntimeFiles(files) {
     throw new Error('MCP guard package must include connector SDK sanitization and health helpers');
   }
 
+  const registry = files.find((file) => file.path === 'sensors/mcp-guard/connector-registry.js').body.toString('utf8');
+  if (!/CONNECTOR_PROFILES/.test(registry) || !/connectorRegistryStatus/.test(registry) || !/connectorRegistryChecks/.test(registry)) {
+    throw new Error('MCP guard package must include connector registry profiles and install checks');
+  }
+
   const microsoft365 = files.find((file) => file.path === 'sensors/mcp-guard/connectors/microsoft365.js').body.toString('utf8');
   if (!/sanitizeDriveItemContent/.test(microsoft365) || !/createDriveItemContentTool/.test(microsoft365) || !/microsoft365ConnectorHealth/.test(microsoft365)) {
     throw new Error('MCP guard package must include Microsoft 365 connector sanitization and health helpers');
   }
 
-  const googledrive = files.find((file) => file.path === 'sensors/mcp-guard/connectors/googledrive.js').body.toString('utf8');
-  if (!/sanitizeFileContent/.test(googledrive) || !/createFileContentTool/.test(googledrive) || !/googleDriveConnectorHealth/.test(googledrive)) {
+  const googleDrive = files.find((file) => file.path === 'sensors/mcp-guard/connectors/google-drive.js').body.toString('utf8');
+  if (!/sanitizeDriveFileContent/.test(googleDrive) || !/createDriveFileContentTool/.test(googleDrive) || !/googleDriveConnectorHealth/.test(googleDrive)) {
     throw new Error('MCP guard package must include Google Drive connector sanitization and health helpers');
   }
 
+  const slack = files.find((file) => file.path === 'sensors/mcp-guard/connectors/slack.js').body.toString('utf8');
+  if (!/sanitizeConversationHistory/.test(slack) || !/createSlackConversationHistoryTool/.test(slack) || !/sanitizeSlackFileContent/.test(slack) || !/slackConnectorHealth/.test(slack)) {
+    throw new Error('MCP guard package must include Slack connector sanitization and health helpers');
+  }
+
+  const teams = files.find((file) => file.path === 'sensors/mcp-guard/connectors/teams.js').body.toString('utf8');
+  if (!/sanitizeTeamsChannelMessages/.test(teams) || !/createTeamsChannelMessagesTool/.test(teams) || !/sanitizeTeamsChatMessages/.test(teams) || !/teamsConnectorHealth/.test(teams)) {
+    throw new Error('MCP guard package must include Microsoft Teams connector sanitization and health helpers');
+  }
+
+  const atlassian = files.find((file) => file.path === 'sensors/mcp-guard/connectors/atlassian.js').body.toString('utf8');
+  if (!/sanitizeJiraIssue/.test(atlassian) || !/createJiraIssueTool/.test(atlassian) || !/sanitizeConfluencePage/.test(atlassian) || !/atlassianConnectorHealth/.test(atlassian)) {
+    throw new Error('MCP guard package must include Atlassian connector sanitization and health helpers');
+  }
+
+  const databaseReadonly = files.find((file) => file.path === 'sensors/mcp-guard/connectors/database-readonly.js').body.toString('utf8');
+  if (!/sanitizeDatabaseRows/.test(databaseReadonly) || !/createDatabaseReadonlyQueryTool/.test(databaseReadonly) || !/sanitizeDatabaseSchema/.test(databaseReadonly) || !/databaseReadonlyConnectorHealth/.test(databaseReadonly)) {
+    throw new Error('MCP guard package must include database read-only connector sanitization and health helpers');
+  }
+
   const installCheck = files.find((file) => file.path === 'scripts/check-mcp-guard-install.js').body.toString('utf8');
-  if (!/api\/v1\/heartbeat/.test(installCheck) || !/buildInstallReport/.test(installCheck) || !/INGEST_API_KEY/.test(installCheck)) {
+  if (!/api\/v1\/heartbeat/.test(installCheck) || !/buildInstallReport/.test(installCheck) || !/INGEST_API_KEY/.test(installCheck) || !/connectorRegistryStatus/.test(installCheck)) {
     throw new Error('MCP guard package must include install validation with heartbeat support');
   }
   if (/contentBase64|readFileSync\(filePath|dev-ingest-key|524-71-9043|4111 1111 1111 1111/.test(installCheck)) {
@@ -132,8 +162,13 @@ function packageMcpGuard(opts = {}) {
       explicitIngestKeyRequired: true,
       sharedEngineIncluded: true,
       connectorSdkIncluded: true,
+      connectorRegistryIncluded: true,
       microsoft365ConnectorIncluded: true,
       googleDriveConnectorIncluded: true,
+      slackConnectorIncluded: true,
+      teamsConnectorIncluded: true,
+      atlassianConnectorIncluded: true,
+      databaseReadonlyConnectorIncluded: true,
       demoCodeExcluded: true,
       installValidationIncluded: true,
       developmentIngestKeyAbsent: true,
@@ -162,26 +197,32 @@ function parseArgs(argv = process.argv.slice(2)) {
   return { outDir };
 }
 
-function main() {
+function main(argv = process.argv.slice(2), deps = {}) {
+  const io = deps.console || console;
+  const packageFn = deps.packageMcpGuard || packageMcpGuard;
+  const setExitCode = deps.setExitCode || ((code) => { process.exitCode = code; });
   try {
-    const args = parseArgs();
+    const args = parseArgs(argv);
     if (args.help) {
-      console.log('Usage: node scripts/package-mcp-guard.js [--out <directory>]');
-      return;
+      io.log('Usage: node scripts/package-mcp-guard.js [--out <directory>]');
+      return null;
     }
-    const result = packageMcpGuard({ outDir: args.outDir });
-    console.log(`Wrote ${result.zipPath}`);
-    console.log(`Wrote ${result.manifestPath}`);
-    console.log(`SHA-256 ${result.packageManifest.sha256}`);
+    const result = packageFn({ outDir: args.outDir });
+    io.log(`Wrote ${result.zipPath}`);
+    io.log(`Wrote ${result.manifestPath}`);
+    io.log(`SHA-256 ${result.packageManifest.sha256}`);
+    return result;
   } catch (err) {
-    console.error(err.message || err);
-    process.exitCode = 1;
+    io.error(err.message || err);
+    setExitCode(1);
+    return null;
   }
 }
 
 if (require.main === module) main();
 
 module.exports = {
+  main,
   packageMcpGuard,
   parseArgs,
   runtimeBody,

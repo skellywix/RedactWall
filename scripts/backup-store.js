@@ -129,37 +129,38 @@ function restoreBackup({ file, to, force = false } = {}) {
   return { ...restored, restoredTo: target };
 }
 
-async function main(argv = process.argv.slice(2)) {
+async function main(argv = process.argv.slice(2), deps = {}) {
+  const io = deps.console || console;
+  const create = deps.createBackup || createBackup;
+  const verify = deps.verifyBackup || verifyBackup;
+  const restore = deps.restoreBackup || restoreBackup;
   const args = parseArgs(argv);
   const command = args._[0] || 'create';
   const positional = args._.slice(1);
   let result;
   if (command === 'create') {
-    result = await createBackup({
+    result = await create({
       outDir: args.out || positional[0],
       file: args.file,
       manifestFile: args.manifest,
       force: args.force,
     });
   } else if (command === 'verify') {
-    result = verifyBackup({ file: args.file || positional[0], manifestFile: args.manifest });
+    result = verify({ file: args.file || positional[0], manifestFile: args.manifest });
   } else if (command === 'restore') {
-    result = restoreBackup({ file: args.file || positional[0], to: args.to || positional[1], force: args.force });
+    result = restore({ file: args.file || positional[0], to: args.to || positional[1], force: args.force });
   }
   else throw new Error(`unknown command: ${command}`);
-  console.log(JSON.stringify(result, null, 2));
+  io.log(JSON.stringify(result, null, 2));
+  return result;
 }
 
-if (require.main === module) {
-  main().catch((e) => {
-    console.error(e.message);
-    process.exit(1);
-  });
-}
+if (require.main === module) main().catch((e) => { console.error(e.message); process.exit(1); });
 
 module.exports = {
   parseArgs,
   createBackup,
+  main,
   verifyBackup,
   restoreBackup,
 };

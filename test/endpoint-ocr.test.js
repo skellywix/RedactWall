@@ -92,3 +92,53 @@ test('endpoint OCR can call a local command without a shell', async (t) => {
   assert.strictEqual(extracted.processor, 'endpoint_ocr');
   assert.match(extracted.text, /OCR command SSN/);
 });
+
+test('endpoint OCR supplies safe default command arguments', async (t) => {
+  const file = tempImage(t);
+  const calls = [];
+  const execFileAsync = async (command, args, options) => {
+    calls.push({ command, args, options });
+    return { stdout: 'local OCR text' };
+  };
+
+  assert.strictEqual(await endpointOcr.runOcrCommand(file, {
+    command: 'tesseract.exe',
+    args: null,
+    timeoutMs: 1200,
+    maxChars: 2000,
+  }, { execFileAsync }), 'local OCR text');
+  assert.deepStrictEqual(calls[0].args, [file, 'stdout']);
+  assert.strictEqual(calls[0].options.windowsHide, true);
+  assert.strictEqual(calls[0].options.timeout, 1200);
+  assert.strictEqual(calls[0].options.maxBuffer, 8000);
+
+  await endpointOcr.runOcrCommand(file, {
+    command: 'ocr-cli',
+    timeoutMs: 1200,
+    maxChars: 2000,
+  }, { execFileAsync });
+  assert.deepStrictEqual(calls[1].args, [file]);
+});
+
+test('endpoint OCR fails closed on invalid config and local extraction errors', async (t) => {
+  const file = tempImage(t);
+
+  const invalidConfig = await endpointOcr.extractImageFile(path.basename(file), file, {
+    argsJson: '{bad',
+    command: 'ocr-cli',
+    env: {},
+  });
+  assert.strictEqual(invalidConfig.extractionOk, false);
+  assert.strictEqual(invalidConfig.error, 'ocr_config_invalid');
+  assert.strictEqual(invalidConfig.ocrConfigured, true);
+
+  const failedExtraction = await endpointOcr.extractImageFile(path.basename(file), file, {
+    extractImageText: async () => {
+      throw new Error('boom');
+    },
+  });
+  assert.strictEqual(failedExtraction.extractionOk, false);
+  assert.strictEqual(failedExtraction.error, 'extract_failed');
+  assert.strictEqual(failedExtraction.ocrConfigured, true);
+  assert.strictEqual(failedExtraction.ocrApplied, false);
+});

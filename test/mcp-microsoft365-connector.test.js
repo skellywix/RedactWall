@@ -29,6 +29,28 @@ function response(text, opts = {}) {
   };
 }
 
+function streamResponse(chunks, opts = {}) {
+  const encoder = new TextEncoder();
+  const encoded = chunks.map((chunk) => encoder.encode(chunk));
+  let index = 0;
+  return {
+    ok: true,
+    status: 200,
+    headers: headers({
+      'content-type': opts.contentType || 'text/plain',
+      'content-length': opts.contentLength || '',
+    }),
+    body: {
+      getReader: () => ({
+        read: async () => {
+          if (index >= encoded.length) return { done: true };
+          return { done: false, value: encoded[index++] };
+        },
+      }),
+    },
+  };
+}
+
 test('buildDriveItemContentUrl targets Graph driveItem content and encodes ids', () => {
   assert.strictEqual(
     buildDriveItemContentUrl({
@@ -70,6 +92,34 @@ test('fetchDriveItemContent downloads text-readable Graph file content with bear
     contentType: 'text/plain',
     sizeBytes: 20,
   });
+});
+
+test('fetchDriveItemContent reads bounded streaming and arrayBuffer Graph responses', async () => {
+  const streamed = await fetchDriveItemContent({
+    driveId: 'drive-stream',
+    itemId: 'item-stream',
+  }, {
+    accessToken: 'unit-graph-token',
+    fetchImpl: async () => streamResponse(['branch ', 'hours']),
+  });
+  assert.strictEqual(streamed.content[0].text, 'branch hours');
+  assert.strictEqual(streamed.structuredContent.sizeBytes, 12);
+
+  const buffered = await fetchDriveItemContent({
+    driveId: 'drive-buffer',
+    itemId: 'item-buffer',
+  }, {
+    accessToken: 'unit-graph-token',
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      headers: headers({ 'content-type': 'application/json' }),
+      arrayBuffer: async () => Buffer.from('{"status":"public"}', 'utf8'),
+    }),
+  });
+  assert.strictEqual(buffered.content[0].text, '{"status":"public"}');
+  assert.strictEqual(buffered.structuredContent.contentType, 'application/json');
+  assert.strictEqual(buffered.structuredContent.sizeBytes, 19);
 });
 
 test('sanitizeDriveItemContent redacts Graph content before returning MCP output', async () => {
@@ -125,6 +175,19 @@ test('createDriveItemContentTool returns sanitized MCP result only', async () =>
 });
 
 test('connector refuses unsupported or oversized content without returning body data', async () => {
+  await assert.rejects(
+    () => fetchDriveItemContent({ driveId: 'drive1', itemId: 'item1' }, {
+      accessToken: 'unit-graph-token',
+      fetchImpl: async () => response('SSN 524-71-9043', { status: 403 }),
+    }),
+    (err) => {
+      assert.match(err.message, /HTTP 403/);
+      assert.ok(!err.message.includes('524-71-9043'));
+      assert.ok(!err.message.includes('unit-graph-token'));
+      return true;
+    }
+  );
+
   await assert.rejects(
     () => fetchDriveItemContent({ driveId: 'drive1', itemId: 'item1' }, {
       accessToken: 'unit-graph-token',
