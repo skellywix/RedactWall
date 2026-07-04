@@ -30,6 +30,23 @@ test('rejects URLs carrying embedded credentials (SSRF/credential leak guard)', 
   assert.strictEqual(outboundHttpsUrl('https://user:pass@example.test/x'), '');
 });
 
+test('blocks loopback and link-local hosts (SSRF / cloud-metadata guard)', () => {
+  assert.strictEqual(outboundHttpsUrl('https://169.254.169.254/latest/meta-data/'), '', 'cloud metadata endpoint');
+  assert.strictEqual(outboundHttpsUrl('https://127.0.0.1/x'), '', 'ipv4 loopback');
+  assert.strictEqual(outboundHttpsUrl('https://localhost/x'), '', 'localhost');
+  assert.strictEqual(outboundHttpsUrl('https://[::1]/x'), '', 'ipv6 loopback');
+  assert.strictEqual(outboundHttpsUrl('https://[::ffff:127.0.0.1]/x'), '', 'ipv4-mapped ipv6 loopback');
+  assert.strictEqual(outboundHttpsUrl('https://[fe80::1]/x'), '', 'ipv6 link-local');
+  assert.strictEqual(outboundHttpsUrl('https://0.0.0.0/x'), '', 'unspecified address');
+});
+
+test('still allows RFC1918 private hosts (on-prem SIEM/webhook target)', () => {
+  // This is a self-hosted product; internal SIEM/webhooks legitimately live on
+  // private networks, so private ranges must not be blanket-blocked.
+  assert.strictEqual(outboundHttpsUrl('https://10.20.30.40/hec'), 'https://10.20.30.40/hec');
+  assert.strictEqual(outboundHttpsUrl('https://192.168.1.5/webhook'), 'https://192.168.1.5/webhook');
+});
+
 test('rejects empty, non-string, and unparseable values', () => {
   assert.strictEqual(outboundHttpsUrl(''), '');
   assert.strictEqual(outboundHttpsUrl('   '), '');

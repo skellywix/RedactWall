@@ -25,6 +25,15 @@ const CONFIG_PATH = process.env.SENTINEL_SUBSCRIPTIONS_PATH
 
 const DEFAULT_MAX_ATTEMPTS = 4;
 const DEDUPE_WINDOW_MS = 5 * 60 * 1000;
+// Bound each delivery attempt so a hung destination cannot freeze the retry
+// loop (which otherwise waits on fetch with no timeout across all attempts).
+const OUTBOUND_TIMEOUT_MS = (() => {
+  const n = Number(process.env.PROMPTWALL_SUBSCRIPTION_TIMEOUT_MS);
+  return Number.isFinite(n) && n > 0 ? n : 8000;
+})();
+function outboundSignal() {
+  return typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(OUTBOUND_TIMEOUT_MS) : undefined;
+}
 
 function loadRaw() {
   try {
@@ -150,7 +159,7 @@ async function deliverTo(dest, alert, opts = {}) {
       // Email relays get the same prompt-free event the SIEM adapters send.
       const res = dest.type === 'email'
         ? await sendMail({ to: dest.to, subject: formats.summaryLine(alert), text: emailBody(alert) })
-        : await fetchImpl(req.url, { method: req.method, headers: req.headers, body: req.body });
+        : await fetchImpl(req.url, { method: req.method, headers: req.headers, body: req.body, signal: outboundSignal() });
       httpStatus = res && res.status;
       if (res && (res.ok || res.status === 200)) {
         return db.recordDelivery({ destId: dest.id, destName: dest.name, type: dest.type, dedupeKey, status: 'delivered', attempts, httpStatus });

@@ -16,6 +16,13 @@ function num(v, fallback) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+// Bound every outbound webhook so a slow/hung SIEM endpoint cannot stall the
+// caller (posture snapshots, alert emission) indefinitely.
+const OUTBOUND_TIMEOUT_MS = num(process.env.SIEM_WEBHOOK_TIMEOUT_MS, 8000);
+function outboundSignal() {
+  return typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(OUTBOUND_TIMEOUT_MS) : undefined;
+}
+
 function alertThresholds(opts = {}) {
   return {
     minRisk: num(opts.minRisk ?? process.env.SIEM_ALERT_MIN_RISK, 25),
@@ -291,6 +298,7 @@ async function emitSecurityAlert(query, opts = {}) {
       method: 'POST',
       headers,
       body: JSON.stringify(sanitizedAlert(query, opts)),
+      signal: outboundSignal(),
     });
     return res && res.ok ? { sent: true, status: res.status } : { sent: false, reason: 'http_' + (res && res.status) };
   } catch (e) {
@@ -314,6 +322,7 @@ async function emitPostureAlert(report, opts = {}) {
       method: 'POST',
       headers,
       body: JSON.stringify(sanitizedPostureAlert(report, opts)),
+      signal: outboundSignal(),
     });
     return res && res.ok ? { sent: true, status: res.status } : { sent: false, reason: 'http_' + (res && res.status) };
   } catch (e) {
