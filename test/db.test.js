@@ -45,14 +45,31 @@ test('audit chain verifies over many sequential appends (no dropped links)', () 
   assert.ok(v.count >= 1000);
 });
 
+test('audit table is append-only: SQL tampering is refused outright', () => {
+  const e = db.appendAudit({ action: 'BLOCKED', actor: 'x', detail: 'immutable detail' });
+  assert.throws(
+    () => db._db.prepare('UPDATE audit SET entry = ? WHERE id = ?').run('{}', e.id),
+    /append-only/,
+  );
+  assert.throws(
+    () => db._db.prepare('DELETE FROM audit WHERE id = ?').run(e.id),
+    /append-only/,
+  );
+  assert.strictEqual(db.verifyAuditChain().ok, true, 'refused tampering leaves the chain clean');
+});
+
 test('tampering with an audit detail breaks the chain (then restores)', () => {
+  // Simulate OUT-OF-BAND tampering (file editor, other tooling): the trigger
+  // guards SQL, the hash chain must still catch everything else.
   const e = db.appendAudit({ action: 'BLOCKED', actor: 'x', detail: 'original detail' });
   const original = db._db.prepare('SELECT entry FROM audit WHERE id = ?').get(e.id).entry;
+  db._db.exec('DROP TRIGGER audit_append_only_update');
   db._db.prepare('UPDATE audit SET entry = ? WHERE id = ?').run(JSON.stringify({ ...e, detail: 'rewritten' }), e.id);
   const v = db.verifyAuditChain();
   assert.strictEqual(v.ok, false, 'edited detail must fail verification');
   assert.strictEqual(v.reason, 'chain');
   db._db.prepare('UPDATE audit SET entry = ? WHERE id = ?').run(original, e.id); // restore for later subtests
+  db._db.exec("CREATE TRIGGER audit_append_only_update BEFORE UPDATE ON audit BEGIN SELECT RAISE(ABORT, 'audit log is append-only'); END");
   assert.strictEqual(db.verifyAuditChain().ok, true, 'chain clean after restore');
 });
 

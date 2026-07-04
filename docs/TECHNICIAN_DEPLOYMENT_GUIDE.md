@@ -664,8 +664,10 @@ The handoff packet must not contain:
 - Ingest key.
 - `SENTINEL_SECRET`.
 - `SENTINEL_DATA_KEY`.
+- `SENTINEL_DATA_KEY_PREVIOUS`.
 - `PROMPTWALL_SECRET`.
 - `PROMPTWALL_DATA_KEY`.
+- `PROMPTWALL_DATA_KEY_PREVIOUS`.
 - SIEM token.
 - Raw prompts.
 - Real customer data.
@@ -687,6 +689,22 @@ If a secret is exposed:
 3. Redeploy or restart the container so it receives the new value.
 4. Update managed sensor policy or endpoint/MCP config if the ingest key changed.
 5. Record the rotation evidence in the handoff packet.
+
+If `SENTINEL_DATA_KEY` (or `SENTINEL_SECRET` while no dedicated data key is
+set) is the exposed value, rotate it without losing sealed evidence:
+
+1. Set `SENTINEL_DATA_KEY` to the new key and `SENTINEL_DATA_KEY_PREVIOUS` to
+   the exposed key in Secrets Manager or the customer vault, then restart the
+   container. Sealed records stay readable during the transition.
+2. Run `node scripts/rotate-data-key.js --dry-run` inside the container to
+   preview, then run it without `--dry-run` to re-encrypt retained raw prompts
+   and token vaults under the new key. Output is counts only; it never prints
+   prompt text or key material, and it appends a `DATA_KEY_ROTATED` audit
+   entry.
+3. When the run reports `unreadable: 0`, remove `SENTINEL_DATA_KEY_PREVIOUS`
+   and restart. A non-zero exit means some sealed values opened with neither
+   key — keep the old key configured and escalate before retiring it.
+4. Record the rotation evidence in the handoff packet.
 
 If production is live and unhealthy:
 

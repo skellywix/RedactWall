@@ -87,6 +87,9 @@ function verifyBackup({ file, manifestFile } = {}) {
 
 async function createBackup({ outDir, file, manifestFile, dbModule, force = false } = {}) {
   const db = dbModule || require('../server/db');
+  if (db._driverKind && db._driverKind !== 'sqlite') {
+    throw new Error(`this backup tool covers the SQLite store only; on ${db._driverKind} use pg_dump / managed snapshots (see docs/DEPLOYMENT.md)`);
+  }
   const sourceIntegrity = db.verifyAuditChain();
   if (!sourceIntegrity.ok) {
     throw new Error(`refusing to back up a database with broken audit integrity: ${sourceIntegrity.reason || 'unknown'}`);
