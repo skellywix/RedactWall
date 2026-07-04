@@ -2236,9 +2236,48 @@ function buildDeployArtifact(id) {
   return require('../scripts/package-mcp-guard').packageMcpGuard({ outDir });
 }
 
+let deployMetadataCache = null;
+
+function deployArtifactMetadata() {
+  if (deployMetadataCache) return deployMetadataCache;
+  deployMetadataCache = Object.entries(DEPLOY_ARTIFACTS).map(([id, spec]) => {
+    try {
+      const built = buildDeployArtifact(id);
+      const manifest = built.packageManifest || {};
+      const meta = {
+        id,
+        label: spec.label,
+        kind: spec.kind,
+        fileName: path.basename(built.zipPath),
+        fileType: 'application/zip',
+        sizeBytes: manifest.sizeBytes || fs.statSync(built.zipPath).size,
+        sha256: manifest.sha256 || null,
+        fileCount: Array.isArray(manifest.files) ? manifest.files.length : null,
+        version: manifest.version || require('../package.json').version,
+        guide: spec.kind === 'extension' ? 'docs/MANAGED_EXTENSION_DEPLOYMENT.md'
+          : spec.kind === 'endpoint' ? 'docs/TECHNICIAN_DEPLOYMENT_GUIDE.md'
+            : 'docs/MCP_CONNECTOR_SDK.md',
+      };
+      fs.rmSync(path.dirname(built.zipPath), { recursive: true, force: true });
+      return meta;
+    } catch {
+      return { id, label: spec.label, kind: spec.kind, error: 'packaging failed' };
+    }
+  });
+  return deployMetadataCache;
+}
+
+function deployDownloadHistory(limit = 20) {
+  return db.listAudit(500)
+    .filter((entry) => entry.action === 'DEPLOY_ARTIFACT_DOWNLOADED')
+    .slice(0, limit)
+    .map((entry) => ({ ts: entry.ts, actor: entry.actor, detail: entry.detail }));
+}
+
 app.get('/api/deploy/artifacts', ...operatorRead, (req, res) => {
   res.json({
-    artifacts: Object.entries(DEPLOY_ARTIFACTS).map(([id, spec]) => ({ id, label: spec.label, kind: spec.kind })),
+    artifacts: deployArtifactMetadata(),
+    history: deployDownloadHistory(),
     version: require('../package.json').version,
   });
 });

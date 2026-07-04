@@ -4044,6 +4044,11 @@ function wireUpdateButtons() {
 }
 
 
+function deploySize(bytes) {
+  if (!Number.isFinite(bytes)) return 'size on build';
+  return bytes < 1024 * 1024 ? Math.round(bytes / 1024) + ' KB' : (bytes / 1024 / 1024).toFixed(1) + ' MB';
+}
+
 async function loadDeploy() {
   const rows = $('#deployRows');
   if (!rows) return;
@@ -4051,14 +4056,31 @@ async function loadDeploy() {
     const res = await fetch('/api/deploy/artifacts');
     if (!res.ok) throw new Error('http_' + res.status);
     const data = await res.json();
-    rows.innerHTML = data.artifacts.map((item) => `
+    rows.innerHTML = data.artifacts.map((item) => item.error ? `
+      <div class="q" style="cursor:default"><div class="queue-mainline">
+        <strong>${escapeHtml(item.label)}</strong><span>packaging unavailable</span><span></span>
+      </div></div>` : `
       <div class="q" style="cursor:default">
         <div class="queue-mainline">
           <strong>${escapeHtml(item.label)}</strong>
-          <span>v${escapeHtml(data.version)} - built on demand, SHA-256 in the bundled manifest</span>
-          <a class="btn" href="/api/deploy/download/${escapeHtml(item.id)}" download>Download</a>
+          <span>${escapeHtml(item.fileName)}</span>
+          <a class="btn" href="/api/deploy/download/${escapeHtml(item.id)}" download>Download .zip</a>
+        </div>
+        <div class="chips">
+          <span class="chip"><b>ZIP</b> ${escapeHtml(deploySize(item.sizeBytes))}</span>
+          <span class="chip"><b>v${escapeHtml(item.version)}</b></span>
+          ${item.fileCount ? `<span class="chip">${item.fileCount} files</span>` : ''}
+          ${item.sha256 ? `<span class="chip" title="${escapeHtml(item.sha256)}"><b>SHA-256</b> ${escapeHtml(item.sha256.slice(0, 16))}&hellip;</span>` : ''}
+          <span class="chip"><b>Guide</b> ${escapeHtml(item.guide)}</span>
         </div>
       </div>`).join('');
+    const history = $('#deployHistory');
+    if (history) {
+      history.innerHTML = (data.history || []).length
+        ? data.history.map((h) => `
+          <div class="inspector-field"><span>${escapeHtml(new Date(h.ts).toLocaleString())}</span><b>${escapeHtml(h.actor)} - ${escapeHtml(h.detail)}</b></div>`).join('')
+        : '<div class="empty">No downloads recorded yet. Every download is written to the audit chain.</div>';
+    }
   } catch {
     rows.innerHTML = '<div class="empty">Deploy packages need the operator or security admin role.</div>';
   }

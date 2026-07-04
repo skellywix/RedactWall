@@ -104,15 +104,27 @@ test('security_admin retains every capability', async () => withServer(async (po
 test('deploy downloads serve audited sensor packages to operators, not approvers', async () => withServer(async (port) => {
   const list = await get(port, '/api/deploy/artifacts', 'operator');
   assert.strictEqual(list.status, 200, 'artifacts list: ' + (list.status === 200 ? 'ok' : await list.text()));
-  const { artifacts } = await list.json();
-  assert.ok(artifacts.some((a) => a.id === 'extension-chrome'));
-  assert.ok(artifacts.some((a) => a.id === 'endpoint-agent'));
-  assert.ok(artifacts.some((a) => a.id === 'mcp-guard'));
+  const { artifacts, version } = await list.json();
+  assert.ok(typeof version === 'string' && version.length > 0);
+  for (const id of ['extension-chrome', 'extension-edge', 'extension-firefox', 'endpoint-agent', 'mcp-guard']) {
+    const artifact = artifacts.find((a) => a.id === id);
+    assert.ok(artifact, `${id} listed`);
+    assert.ok(artifact.fileName.endsWith('.zip'), `${id} names its file`);
+    assert.strictEqual(artifact.fileType, 'application/zip');
+    assert.ok(Number.isFinite(artifact.sizeBytes) && artifact.sizeBytes > 0, `${id} has a size`);
+    assert.match(artifact.sha256, /^[0-9a-f]{64}$/, `${id} has a checksum`);
+    assert.ok(artifact.guide.startsWith('docs/'), `${id} points at its guide`);
+  }
 
   const download = await get(port, '/api/deploy/download/mcp-guard', 'operator');
   assert.strictEqual(download.status, 200);
   const body = Buffer.from(await download.arrayBuffer());
   assert.strictEqual(body.slice(0, 2).toString(), 'PK', 'download is a real zip');
+
+  const after = await (await get(port, '/api/deploy/artifacts', 'admin')).json();
+  const entry = after.history.find((h) => h.detail && h.detail.includes('mcp-guard'));
+  assert.ok(entry, 'download lands in the audited history');
+  assert.strictEqual(entry.actor, 'operator@example.test');
 
   assert.strictEqual((await get(port, '/api/deploy/download/extension-chrome', 'approver')).status, 403);
   assert.strictEqual((await get(port, '/api/deploy/download/nope', 'admin')).status, 404);
