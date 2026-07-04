@@ -20,6 +20,9 @@ process.env.SENTINEL_SUBSCRIPTIONS_PATH = SUBS_PATH;
 
 const email = require('../server/email');
 const subscriptions = require('../server/subscriptions');
+const app = require('../server/app');
+const auth = require('../server/auth');
+const { listen } = require('./support/listen');
 
 // A tiny in-process SMTP relay that records the whole conversation.
 function fakeSmtpServer() {
@@ -102,4 +105,65 @@ test('email destinations load without a URL and deliver prompt-free events', asy
     { sendMail: async () => ({ ok: false, error: 'smtp_not_configured' }), force: true, sleep: async () => {} });
   assert.strictEqual(failed.status, 'failed');
   assert.strictEqual(failed.lastError, 'smtp_not_configured');
+});
+
+test('an alert storm is rate-limited per destination, never silently dropped', async () => {
+  fs.writeFileSync(SUBS_PATH, JSON.stringify({
+    destinations: [{ id: 'storm-inbox', type: 'email', to: ['soc@example.test'], maxPerHour: 3, maxAttempts: 1 }],
+  }));
+  const dest = subscriptions.destinations().find((d) => d.id === 'storm-inbox');
+  const sent = [];
+  const sendMail = async () => { sent.push(1); return { ok: true }; };
+  const outcomes = [];
+  for (let i = 0; i < 5; i += 1) {
+    const record = await subscriptions.deliverTo(dest, { action: 'BLOCKED', riskScore: 50 + i, maxSeverity: 4, user: `u${i}` }, { sendMail, force: true });
+    outcomes.push(record.status === 'failed' ? record.lastError : record.status);
+  }
+  assert.deepStrictEqual(outcomes, ['delivered', 'delivered', 'delivered', 'rate_limited', 'rate_limited']);
+  assert.strictEqual(sent.length, 3, 'the relay never sees the storm overflow');
+});
+
+test('digest emails are human-readable, not raw JSON', async () => {
+  fs.writeFileSync(SUBS_PATH, JSON.stringify({
+    destinations: [{ id: 'digest-inbox', type: 'email', to: ['ciso@example.test'], eventTypes: ['digest'], maxAttempts: 1 }],
+  }));
+  const dest = subscriptions.destinations().find((d) => d.id === 'digest-inbox');
+  const sent = [];
+  await subscriptions.deliverTo(dest,
+    { action: 'digest', status: 'digest', riskScore: 0, maxSeverity: 0, summary: { pending: 3, todayBlocked: 7, approved: 12, denied: 2, totalQueries: 40 } },
+    { sendMail: async (mail) => { sent.push(mail); return { ok: true }; }, force: true });
+  assert.ok(sent[0].text.includes('Pending approvals: 3'));
+  assert.ok(sent[0].text.includes('Blocked today:     7'));
+  assert.ok(!sent[0].text.trim().startsWith('{'), 'digest body is prose, not JSON');
+});
+
+test('notification status and test-email routes are admin-gated and secret-free', async () => {
+  const server = await listen(app);
+  const port = server.address().port;
+  const admin = `${auth.SESSION_COOKIE_NAME}=${auth.createSession('admin', 'security_admin')}`;
+  try {
+    const status = await (await fetch(`http://127.0.0.1:${port}/api/notifications/status`, { headers: { cookie: admin } })).json();
+    assert.strictEqual(status.smtp.configured, false, 'unit env has no SMTP relay');
+    assert.ok(!('pass' in status.smtp) && !('user' in status.smtp), 'credentials never leave the server');
+    assert.strictEqual(status.digest.intervalHours, 24);
+
+    const csrf = await (await fetch(`http://127.0.0.1:${port}/api/csrf`, { headers: { cookie: admin } })).json();
+    const bad = await fetch(`http://127.0.0.1:${port}/api/notifications/test-email`, {
+      method: 'POST', headers: { cookie: admin, 'Content-Type': 'application/json', 'x-csrf-token': csrf.csrfToken }, body: JSON.stringify({ to: 'not-an-address' }),
+    });
+    assert.strictEqual(bad.status, 400);
+    const unconfigured = await fetch(`http://127.0.0.1:${port}/api/notifications/test-email`, {
+      method: 'POST', headers: { cookie: admin, 'Content-Type': 'application/json', 'x-csrf-token': csrf.csrfToken }, body: JSON.stringify({ to: 'ciso@example.test' }),
+    });
+    assert.deepStrictEqual(await unconfigured.json(), { ok: false, error: 'smtp_not_configured' });
+
+    const audit = await (await fetch(`http://127.0.0.1:${port}/api/audit`, { headers: { cookie: admin } })).json();
+    const entry = audit.entries.find((e) => e.action === 'EMAIL_TEST_SENT');
+    assert.ok(entry && entry.detail.startsWith('c***@example.test'), 'recipient audited masked');
+
+    const auditor = `${auth.SESSION_COOKIE_NAME}=${auth.createSession('aud@x', 'auditor')}`;
+    assert.strictEqual((await fetch(`http://127.0.0.1:${port}/api/notifications/status`, { headers: { cookie: auditor } })).status, 403);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
 });

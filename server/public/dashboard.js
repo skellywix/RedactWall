@@ -3544,7 +3544,7 @@ function renderIntegrations(subs, deliveries) {
   $('#subscriptionRows').innerHTML = dests.map((d) => `
     <div class="sub-row">
       <div class="sub-meta"><b>${escapeHtml(d.name)}</b><span class="insights-attr">${escapeHtml(d.type)}</span>
-        <span class="sub-host">${escapeHtml(d.urlHost || '—')}</span>
+        <span class="sub-host">${escapeHtml(d.type === 'email' ? `${d.recipients} recipient${d.recipients === 1 ? '' : 's'}` : (d.urlHost || '—'))}</span>
         <span class="sub-filter">risk≥${d.minRisk} · sev≥${d.minSeverity}${d.eventTypes ? ' · ' + escapeHtml(d.eventTypes.join(',')) : ''}</span></div>
       ${subTestBadge(d.id)}
       <button class="ghost mini" data-sub-test="${escapeHtml(d.id)}" type="button">Send test</button>
@@ -3555,6 +3555,44 @@ function renderIntegrations(subs, deliveries) {
       <td><span class="insights-chip ${DELIVERY_TONE[d.status] || 'tone-neutral'}">${escapeHtml(d.status)}</span></td>
       <td>${d.attempts || 0}</td><td>${d.httpStatus || '—'}</td></tr>`).join('')
     || '<tr><td colspan="6" class="insights-empty">No deliveries yet.</td></tr>';
+}
+
+// ---- Email & digest status (SMTP relay health, storm limits, last digest) ----
+async function loadNotificationsStatus() {
+  const d = await dashboardJsonWithTimeout('/api/notifications/status', 2500);
+  const el = $('#smtpStatus');
+  if (!el) return;
+  if (!d) { el.innerHTML = '<div class="empty">Notification status needs a Security Admin session.</div>'; return; }
+  const smtp = d.smtp || {};
+  const digest = (d.digest && d.digest.last) || null;
+  el.innerHTML = [
+    ['SMTP relay', smtp.configured ? `${smtp.host}:${smtp.port} (${smtp.secure}${smtp.authConfigured ? ', authenticated' : ''})` : 'not configured - set SMTP_HOST to enable email'],
+    ['From address', smtp.from || '-'],
+    ['Email destinations', d.emailDestinations.length
+      ? d.emailDestinations.map((x) => `${x.name} (${x.recipients} recipient${x.recipients === 1 ? '' : 's'})`).join(' · ')
+      : 'none - add { "type": "email", "to": [...] } to config/subscriptions.json'],
+    ['Daily digest', digest ? `last sent ${fmt(digest.at)} by ${digest.actor} - ${digest.delivered}/${digest.total} delivered` : `every ${d.digest.intervalHours}h - not sent yet this run`],
+  ].map(([label, value]) => `<div class="inspector-field"><span>${escapeHtml(label)}</span><b>${escapeHtml(value)}</b></div>`).join('');
+}
+
+async function sendTestEmail() {
+  const to = ($('#testEmailTo').value || '').trim();
+  const out = $('#testEmailResult');
+  if (!to) { out.textContent = 'Enter a recipient address first.'; return; }
+  out.textContent = 'Sending...';
+  const r = await api('/api/notifications/test-email', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to }) });
+  const d = await responseJsonObject(r, null);
+  out.textContent = d && d.ok ? `Delivered to ${to}.` : `Failed: ${(d && d.error) || 'check the SMTP settings'}.`;
+  toast(d && d.ok ? 'Test email delivered.' : 'Test email failed - see the panel for the reason.', d && d.ok ? 'good' : 'bad');
+}
+
+async function sendDigestNow() {
+  const r = await api('/api/reports/digest/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  const d = await responseJsonObject(r, null);
+  const delivered = d ? d.results.filter((x) => x.status === 'delivered').length : 0;
+  toast(d ? `Digest dispatched: ${delivered}/${d.results.length} destination(s) delivered.` : 'Digest send failed.', d ? 'good' : 'bad');
+  loadNotificationsStatus().catch(() => {});
+  loadIntegrations().catch(() => {});
 }
 
 const subTestResults = {};
@@ -4871,7 +4909,7 @@ function activateTab(name, options = {}) {
   if (targetName === 'coverage') loadCoverage();
   if (targetName === 'catalog') loadCatalog();
   if (targetName === 'compliance') loadCompliance();
-  if (targetName === 'integrations') loadIntegrations();
+  if (targetName === 'integrations') { loadIntegrations(); loadNotificationsStatus().catch(() => {}); }
   if (targetName === 'identity') loadIdentitySetup();
   if (targetName === 'lineage') loadLineage();
   if (targetName === 'deploy') loadDeploy();
@@ -4899,6 +4937,8 @@ if ($('#exportActivityCsv')) $('#exportActivityCsv').addEventListener('click', e
 if ($('#exportAuditCsv')) $('#exportAuditCsv').addEventListener('click', exportAuditCsv);
 if ($('#detectorTestRun')) $('#detectorTestRun').addEventListener('click', () => { runDetectorTest().catch(() => {}); });
 if ($('#saveView')) $('#saveView').addEventListener('click', saveCurrentView);
+if ($('#testEmailBtn')) $('#testEmailBtn').addEventListener('click', () => { sendTestEmail().catch(() => {}); });
+if ($('#digestSendBtn')) $('#digestSendBtn').addEventListener('click', () => { sendDigestNow().catch(() => {}); });
 renderActivityColMenu();
 if ($('#queueBulkApprove')) $('#queueBulkApprove').addEventListener('click', () => { runQueueBulk('approve').catch(() => {}); });
 if ($('#queueBulkDeny')) $('#queueBulkDeny').addEventListener('click', () => { runQueueBulk('deny').catch(() => {}); });

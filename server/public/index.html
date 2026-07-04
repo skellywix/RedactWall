@@ -3070,6 +3070,21 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
           </div>
         </div>
         <div class="insights-kpis" id="integrationsKpis"></div>
+        <div class="panel wide-panel">
+          <div class="panel-head">
+            <div>
+              <h2>Email &amp; Digest</h2>
+              <span>Human notifications: SMTP relay health, storm-limited email destinations, and the daily digest</span>
+            </div>
+            <button class="ghost mini" id="digestSendBtn" type="button" title="Dispatch the daily digest to every destination subscribed to the digest event type">Send digest now</button>
+          </div>
+          <div class="inspector-grid" id="smtpStatus" style="padding:12px 16px" aria-live="polite"></div>
+          <div class="catalog-form-body">
+            <input id="testEmailTo" type="text" placeholder="you@example.test" aria-label="Test email recipient"/>
+            <button class="ghost" id="testEmailBtn" type="button">Send test email</button>
+            <span class="reasons" id="testEmailResult" style="padding:0"></span>
+          </div>
+        </div>
         <div class="insights-grid">
           <div class="panel wide-panel">
             <div class="panel-head"><div><h2>SIEM / SOAR subscriptions</h2><span>Named destinations from config/subscriptions.json</span></div></div>

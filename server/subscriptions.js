@@ -36,6 +36,8 @@ function loadRaw() {
   return { destinations: [] };
 }
 
+const DEFAULT_EMAIL_PER_HOUR = 30;
+
 function emailDestination(raw, index) {
   const to = (Array.isArray(raw.to) ? raw.to : [raw.to]).map((r) => String(r || '').trim()).filter(Boolean);
   if (!to.length) return null;
@@ -50,7 +52,38 @@ function emailDestination(raw, index) {
     minSeverity: Number.isFinite(Number(raw.minSeverity)) ? Number(raw.minSeverity) : 0,
     eventTypes: Array.isArray(raw.eventTypes) ? raw.eventTypes.map(String) : null,
     maxAttempts: Math.max(1, Math.min(8, Number(raw.maxAttempts) || DEFAULT_MAX_ATTEMPTS)),
+    maxPerHour: Math.max(1, Math.min(500, Number(raw.maxPerHour) || DEFAULT_EMAIL_PER_HOUR)),
   };
+}
+
+// Alert-storm guard: a burst of blocks must not flood an inbox. Per-destination
+// sliding hour window; excess is recorded as rate_limited, never silently lost.
+const emailSendTimes = new Map();
+
+function emailRateLimited(dest, now = Date.now()) {
+  const times = (emailSendTimes.get(dest.id) || []).filter((t) => now - t < 3600 * 1000);
+  if (times.length >= dest.maxPerHour) { emailSendTimes.set(dest.id, times); return true; }
+  times.push(now);
+  emailSendTimes.set(dest.id, times);
+  return false;
+}
+
+// Digests get a readable body; everything else sends the same prompt-free
+// event JSON the SIEM adapters send.
+function emailBody(alert) {
+  if ((alert.action || alert.status) !== 'digest') return JSON.stringify(formats.toEvent(alert), null, 2);
+  const s = alert.summary || {};
+  return [
+    'PromptWall daily digest',
+    '',
+    `Pending approvals: ${s.pending ?? 0}`,
+    `Blocked today:     ${s.todayBlocked ?? 0}`,
+    `Approved (total):  ${s.approved ?? 0}`,
+    `Denied (total):    ${s.denied ?? 0}`,
+    `Prompts gated:     ${s.totalQueries ?? 0}`,
+    '',
+    'Open the console for the live Overview and approval queue.',
+  ].join('\n');
 }
 
 function normalizeDestination(raw, index) {
@@ -104,6 +137,9 @@ async function deliverTo(dest, alert, opts = {}) {
     return db.recordDelivery({ destId: dest.id, destName: dest.name, type: dest.type, dedupeKey, status: 'deduped', attempts: 0 });
   }
 
+  if (dest.type === 'email' && emailRateLimited(dest, opts.now)) {
+    return db.recordDelivery({ destId: dest.id, destName: dest.name, type: dest.type, dedupeKey, status: 'failed', attempts: 0, lastError: 'rate_limited' });
+  }
   const req = dest.type === 'email' ? null : formats.buildRequest(alert, dest);
   const sendMail = opts.sendMail || require('./email').send;
   let attempts = 0; let lastError = null; let httpStatus = null;
@@ -113,7 +149,7 @@ async function deliverTo(dest, alert, opts = {}) {
     try {
       // Email relays get the same prompt-free event the SIEM adapters send.
       const res = dest.type === 'email'
-        ? await sendMail({ to: dest.to, subject: formats.summaryLine(alert), text: JSON.stringify(formats.toEvent(alert), null, 2) })
+        ? await sendMail({ to: dest.to, subject: formats.summaryLine(alert), text: emailBody(alert) })
         : await fetchImpl(req.url, { method: req.method, headers: req.headers, body: req.body });
       httpStatus = res && res.status;
       if (res && (res.ok || res.status === 200)) {
