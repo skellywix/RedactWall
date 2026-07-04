@@ -2305,6 +2305,33 @@ async function loadQueue() {
 }
 
 const QUEUE_FILTER_LABEL = { all: 'All', mine: 'Mine', unassigned: 'Unassigned', escalated: 'Escalated' };
+let queueBulkSelected = new Set();
+
+function updateQueueBulkBar() {
+  const bar = $('#queueBulkBar');
+  if (!bar) return;
+  queueBulkSelected = new Set([...queueBulkSelected].filter((id) => currentQueue.some((q) => q.id === id && q.status === 'pending')));
+  bar.classList.toggle('hidden', queueBulkSelected.size === 0);
+  const count = $('#queueBulkCount');
+  if (count) count.textContent = `${queueBulkSelected.size} selected`;
+}
+
+async function runQueueBulk(action) {
+  const ids = [...queueBulkSelected];
+  if (!ids.length) return;
+  const body = { ids, action, note: ($('#queueBulkNote').value || '').trim() };
+  const password = ($('#queueBulkPassword').value || '').trim();
+  if (password) body.password = password;
+  const r = await api('/api/queries/bulk-decision', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (r && r.status === 401) { toast('Bulk approval needs your password - enter it in the bulk bar.', 'bad'); return; }
+  const result = await responseJsonObject(r, null);
+  if (!result) { toast('Bulk decision failed.', 'bad'); return; }
+  const skippedNote = result.skipped ? ` ${result.skipped} skipped (${[...new Set(result.results.filter((x) => x.reason).map((x) => x.reason))].join(', ')}).` : '';
+  toast(`${result.decided} prompt(s) ${action === 'approve' ? 'approved' : 'denied'}.${skippedNote}`, result.skipped ? 'info' : 'good');
+  queueBulkSelected.clear();
+  $('#queueBulkPassword').value = '';
+  await Promise.all([loadQueue(), loadStats()]);
+}
 
 function queueFilterCount(filter) {
   const saved = queueFilter;
@@ -2324,6 +2351,7 @@ function renderQueueView() {
     if (QUEUE_FILTER_LABEL[name]) button.textContent = `${QUEUE_FILTER_LABEL[name]} (${queueFilterCount(name)})`;
   });
   syncQueueFilterOptions();
+  updateQueueBulkBar();
   const rows = currentQueue.filter(queueMetadataMatches).filter(matchesSearch);
   if (!currentQueue.length) {
     el.innerHTML = '<div class="empty"><div class="big">Queue clear</div>No prompts are awaiting approval.</div>';
@@ -2361,8 +2389,12 @@ function renderQueueItem(q) {
       ${revealControl}
     </div>`
     : `<div class="readonly-note">${escapeHtml(queueDecisionLabel(q))}</div>`;
+  const bulkBox = canDecide(q) || canAdminWrite()
+    ? `<input type="checkbox" class="queue-bulk-box" data-queue-bulk-select="${escapeHtml(q.id)}" ${queueBulkSelected.has(q.id) ? 'checked' : ''} aria-label="Select for bulk decision"/>`
+    : '';
   return `<article class="q ${isSelected ? 'selected' : ''}" data-id="${escapeHtml(q.id)}" tabindex="0" role="listitem" ${isSelected ? 'aria-current="true"' : ''} aria-controls="incidentDetail" aria-label="${escapeHtml(rowLabel)}">
     <div class="top risk-meta-row">
+      ${bulkBox}
       <span class="select-dot" aria-hidden="true"></span>
       <span class="sev ${sev}">${escapeHtml(q.maxSeverityLabel || 'low')}</span>
       <span class="risk">Risk <b>${escapeHtml(q.riskScore ?? 0)}</b>/100</span>
@@ -2460,7 +2492,23 @@ function renderIncident(q) {
     </div>
     <div class="prompt">${escapeHtml(q.redactedPrompt)}</div>
     ${scoreRationale(q)}
-    <div class="posture-list">${matches}</div>`;
+    <div class="posture-list">${matches}</div>
+    <div class="incident-trail" id="incidentTrail" aria-live="polite"></div>`;
+  renderIncidentTrail(q.id).catch(() => {});
+}
+
+// Everything that has happened to this incident, straight from the
+// tamper-evident audit chain (created, escalations, reveals, decision).
+async function renderIncidentTrail(id) {
+  const d = await dashboardJsonWithTimeout(`/api/audit?queryId=${encodeURIComponent(id)}&limit=20`, 2200);
+  const el = $('#incidentTrail');
+  if (!el || !d || !Array.isArray(d.entries)) return;
+  el.innerHTML = '<h3>History</h3>' + (d.entries.slice().reverse().map((a) => `
+    <div class="incident-trail-row">
+      <span class="when">${escapeHtml(fmt(a.ts))}</span>
+      <span class="what"><b>${escapeHtml(humanize(a.action))}</b> by ${escapeHtml(a.actor || '-')}${a.detail ? ` - ${escapeHtml(a.detail)}` : ''}</span>
+    </div>`).join('')
+    || '<div class="incident-trail-row"><span class="what">No audit entries yet for this incident.</span></div>');
 }
 
 document.addEventListener('click', async (e) => {
@@ -2757,6 +2805,14 @@ document.addEventListener('click', async (e) => {
 });
 
 document.addEventListener('change', (e) => {
+  const queueBulkSelect = e.target.closest('[data-queue-bulk-select]');
+  if (queueBulkSelect) {
+    const id = queueBulkSelect.dataset.queueBulkSelect;
+    if (queueBulkSelect.checked) queueBulkSelected.add(id);
+    else queueBulkSelected.delete(id);
+    updateQueueBulkBar();
+    return;
+  }
   const catalogSelect = e.target.closest('[data-catalog-select]');
   if (catalogSelect) {
     const host = catalogSelect.dataset.catalogSelect;
@@ -2920,7 +2976,8 @@ function renderActivityRows(rows) {
   activityPage = page.page;
   $('#activityRows').innerHTML = page.rows.map((q) => {
     const tone = statusTone(q.status);
-    const detail = `Status: ${humanize(q.status)}\nSession ID: ${q.id || '-'}\nOwner: ${workflowOwner(q)}\nRisk: ${q.riskScore ?? 0}/100`;
+    const decided = q.decidedBy ? `\nDecided by: ${q.decidedBy} at ${fmt(q.decidedAt)}${q.decisionNote ? `\nNote: ${q.decisionNote}` : ''}` : '';
+    const detail = `Status: ${humanize(q.status)}\nSession ID: ${q.id || '-'}\nOwner: ${workflowOwner(q)}\nRisk: ${q.riskScore ?? 0}/100${decided}`;
     return `<tr class="activity-row ${activitySeverityClass(q)} ${expandedActivityId === q.id ? 'selected' : ''}" data-activity-id="${escapeHtml(q.id)}" tabindex="0">
     <td class="mono">${escapeHtml(fmt(q.createdAt))}</td>
     <td>${escapeHtml(sourceLabel(q.source))}</td>
@@ -4681,6 +4738,8 @@ if ($('#exportActivityCsv')) $('#exportActivityCsv').addEventListener('click', e
 if ($('#exportAuditCsv')) $('#exportAuditCsv').addEventListener('click', exportAuditCsv);
 if ($('#detectorTestRun')) $('#detectorTestRun').addEventListener('click', () => { runDetectorTest().catch(() => {}); });
 if ($('#saveView')) $('#saveView').addEventListener('click', saveCurrentView);
+if ($('#queueBulkApprove')) $('#queueBulkApprove').addEventListener('click', () => { runQueueBulk('approve').catch(() => {}); });
+if ($('#queueBulkDeny')) $('#queueBulkDeny').addEventListener('click', () => { runQueueBulk('deny').catch(() => {}); });
 if ($('#savedViews')) {
   refreshSavedViewOptions();
   $('#savedViews').addEventListener('change', (e) => { if (e.target.value !== '') { applySavedView(e.target.value); e.target.value = ''; } });

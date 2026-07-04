@@ -590,6 +590,14 @@ button.chip:hover{border-color:var(--blue);background:var(--blue-bg)}
 .catalog-form-column{flex-direction:column;align-items:stretch}
 .catalog-form-actions{display:flex;gap:10px}
 .catalog-bulk{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.queue-bulk{padding:10px 16px;border-bottom:1px solid var(--line)}
+.queue-bulk-box{width:15px;height:15px;accent-color:var(--blue);margin-right:2px}
+.incident-trail{border-top:1px solid var(--line);margin-top:12px;padding:10px 0 0}
+.incident-trail h3{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut)}
+.incident-trail-row{display:flex;gap:8px;align-items:baseline;font-size:12.5px;padding:4px 0}
+.incident-trail-row .when{color:var(--mut);white-space:nowrap;font-variant-numeric:tabular-nums}
+.incident-trail-row .what{min-width:0}
+.incident-trail-row .what b{font-weight:600}
 .catalog-bulk input{max-width:230px}
 .catalog-check{width:28px}
 .catalog-reason{max-width:180px;display:inline-block;margin-right:6px}
@@ -2444,6 +2452,13 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
               <label for="queueDestinationFilter">Destination
                 <select id="queueDestinationFilter"></select>
               </label>
+            </div>
+            <div class="catalog-bulk queue-bulk hidden" id="queueBulkBar" aria-label="Bulk decision bar">
+              <span id="queueBulkCount">0 selected</span>
+              <input id="queueBulkNote" type="text" placeholder="Decision note (audited)" aria-label="Bulk decision note"/>
+              <input id="queueBulkPassword" type="password" autocomplete="current-password" placeholder="Password (approvals)" aria-label="Password for bulk approval"/>
+              <button class="btn approve mini" id="queueBulkApprove" type="button">Approve selected</button>
+              <button class="btn deny mini" id="queueBulkDeny" type="button">Deny selected</button>
             </div>
             <div id="queueList" class="queue-list" role="list" aria-label="Pending approval prompts"></div>
           </div>

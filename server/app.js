@@ -1839,6 +1839,43 @@ app.post(
   },
 );
 
+// Bulk decision: approve or deny up to 50 held prompts in one audited pass.
+// Same gates as single decisions - role, per-item decision access, and
+// password step-up for approvals - with per-item outcomes so a partial bulk
+// is honest about what it skipped and why.
+function applyBulkDecision(req) {
+  const status = req.body.action === 'approve' ? 'approved' : 'denied';
+  const note = (req.body && req.body.note) || '';
+  const results = [];
+  for (const id of req.body.ids) {
+    const q = db.getQuery(id);
+    if (!q) { results.push({ id, outcome: 'skipped', reason: 'not found' }); continue; }
+    if (q.status !== 'pending') { results.push({ id, outcome: 'skipped', reason: `already ${q.status}` }); continue; }
+    if (!roles.canDecideQuery(req.user, q)) { results.push({ id, outcome: 'skipped', reason: 'not yours to decide' }); continue; }
+    db.updateQuery(id, { status, decidedBy: req.user.user, decidedAt: new Date().toISOString(), decisionNote: note });
+    db.appendAudit({ action: status.toUpperCase(), queryId: id, actor: req.user.user, detail: note ? `${note} (bulk)` : 'bulk decision' });
+    broadcast('decision', { id, status });
+    results.push({ id, outcome: status });
+  }
+  broadcast('stats', db.stats());
+  return results;
+}
+
+app.post(
+  '/api/queries/bulk-decision',
+  ...decisionWrite,
+  validation.validateBody(validation.bulkDecisionSchema),
+  (req, res, next) => (req.body.action === 'approve' ? requireApprovePassword(req, res, next) : next()),
+  (req, res) => {
+    const results = applyBulkDecision(req);
+    res.json({
+      results,
+      decided: results.filter((r) => r.outcome !== 'skipped').length,
+      skipped: results.filter((r) => r.outcome === 'skipped').length,
+    });
+  },
+);
+
 app.post('/api/queries/:id/deny', ...decisionWrite, validation.validateBody(validation.noteSchema), requireDecisionAccess, (req, res) => {
   const q = req.queryRecord;
   if (q.status !== 'pending') return res.status(409).json({ error: `already ${q.status}` });
@@ -2397,8 +2434,12 @@ app.put('/api/policy/apply-template', ...adminWrite, validation.validateBody(val
 });
 
 app.get('/api/audit', auth.requireAuth, (req, res) => {
+  const queryId = String(req.query.queryId || '').trim();
+  const entries = queryId
+    ? db.listAudit(2000).filter((e) => e.queryId === queryId).slice(0, boundedApiLimit(req.query.limit, 50))
+    : db.listAudit(boundedApiLimit(req.query.limit, 200));
   res.json({
-    entries: db.listAudit(boundedApiLimit(req.query.limit, 200)),
+    entries,
     integrity: db.verifyAuditChain(),
     retention: 'Append-only and hash-chained: entries are never edited or purged for the life of this database. Export an evidence pack for long-term archives.',
   });

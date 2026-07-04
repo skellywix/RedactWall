@@ -232,6 +232,18 @@ const noteSchema = z.object({
   ),
 }).strict();
 
+const bulkDecisionSchema = z.object({
+  ids: z.array(z.string().min(1).max(80)).min(1).max(50),
+  action: z.enum(['approve', 'deny']),
+  note: z.preprocess(
+    (value) => (value == null ? '' : value),
+    z.string().max(LIMITS.noteChars).default(''),
+  ),
+  // Verified by the approve step-up middleware; optional here so an already
+  // elevated session can bulk-approve without retyping it.
+  password: z.string().max(512).optional(),
+}).strict();
+
 const applyTemplateSchema = z.object({
   id: z.string().min(1).max(80).regex(/^[a-z0-9_/-]+$/),
 }).strict();
@@ -601,6 +613,7 @@ module.exports = {
   revealSchema,
   approveSchema,
   noteSchema,
+  bulkDecisionSchema,
   applyTemplateSchema,
   receiptVerifySchema,
   aiDiscoverySchema,

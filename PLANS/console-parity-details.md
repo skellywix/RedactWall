@@ -66,15 +66,16 @@ are marked MISSING below with the reason when deliberate.
 - [x] HAVE: one-click approve/deny with reason, severity chips, redacted
   preview (core parity with Nightfall event actions).
 - [x] HAVE: queue filter chips show live counts (All/Mine/Unassigned/Escalated).
-- [ ] MISSING: bulk actions with a scope picker — "50 on screen" vs "all
-  matching filter", single-integration guard (Nightfall Applying Bulk Actions).
-- [ ] MISSING: hover on a status showing who set it and when (Nightfall
-  Events status cell hover).
+- [x] HAVE: bulk approve/deny - row checkboxes + bulk bar with a shared
+  audited note; approvals require the same password step-up as single
+  decisions; per-item outcomes report what was skipped and why (50 max).
+- [x] HAVE: activity status chips show who decided, when, and the note on
+  hover/click.
 - [ ] PARTIAL: assignment exists (approver routing) but no inline-editable
   "Assigned to" on the row like MDCA/Netskope incident bulk-edit of severity
   and assignee (Netskope DLP Incidents).
-- [ ] MISSING: per-row activity log section in the detail view — what
-  happened to this event so far (Nightfall event side panel section 3).
+- [x] HAVE: History section in the incident inspector - every audit-chain
+  entry for the selected incident (created, reveals, escalations, decision).
 
 ## AI Command Center (`#tab-monitor`)
 
