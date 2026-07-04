@@ -1617,6 +1617,11 @@ const sessionWrite = [auth.requireAuth, auth.requireCsrf];
 const adminRead = [auth.requireAuth, auth.requireRole(roles.SECURITY_ADMIN)];
 const adminWrite = [auth.requireAuth, auth.requireCsrf, auth.requireRole(roles.SECURITY_ADMIN)];
 const decisionWrite = [auth.requireAuth, auth.requireCsrf, auth.requireRole(roles.SECURITY_ADMIN, roles.APPROVER)];
+// Compliance evidence exports: the auditor's whole job, without admin power.
+const auditRead = [auth.requireAuth, auth.requireRole(roles.SECURITY_ADMIN, roles.AUDITOR)];
+// Fleet/runtime operations: updates, posture triage, delivery checks - no policy power.
+const operatorRead = [auth.requireAuth, auth.requireRole(roles.SECURITY_ADMIN, roles.OPERATOR)];
+const operatorWrite = [auth.requireAuth, auth.requireCsrf, auth.requireRole(roles.SECURITY_ADMIN, roles.OPERATOR)];
 const API_MAX_LIST_LIMIT = 5000;
 
 function boundedApiLimit(value, fallback = 200, max = API_MAX_LIST_LIMIT) {
@@ -1866,7 +1871,7 @@ function sendUpdateError(res, err) {
   res.status(err && err.statusCode ? err.statusCode : 500).json({ error: updater.publicError(err) });
 }
 
-app.get('/api/update/status', ...adminRead, async (req, res) => {
+app.get('/api/update/status', ...operatorRead, async (req, res) => {
   try {
     res.json(await updater.status());
   } catch (err) {
@@ -1885,7 +1890,7 @@ app.put('/api/update/config', ...adminWrite, validation.validateBody(validation.
   }
 });
 
-app.post('/api/update/check', ...adminWrite, async (req, res) => {
+app.post('/api/update/check', ...operatorWrite, async (req, res) => {
   try {
     const result = await updater.checkForUpdates();
     db.appendAudit({ action: 'APP_UPDATE_CHECKED', actor: req.user.user, detail: updateAuditDetail(result) });
@@ -1896,7 +1901,7 @@ app.post('/api/update/check', ...adminWrite, async (req, res) => {
   }
 });
 
-app.post('/api/update/apply', ...adminWrite, validation.validateBody(validation.updateApplySchema), async (req, res) => {
+app.post('/api/update/apply', ...operatorWrite, validation.validateBody(validation.updateApplySchema), async (req, res) => {
   db.appendAudit({ action: 'APP_UPDATE_STARTED', actor: req.user.user, detail: 'backup=true; fastForwardOnly=true' });
   try {
     const result = await updater.applyUpdate({ confirmBackup: req.body.confirmBackup === true });
@@ -1908,7 +1913,7 @@ app.post('/api/update/apply', ...adminWrite, validation.validateBody(validation.
   }
 });
 
-app.post('/api/update/restart', ...adminWrite, async (req, res) => {
+app.post('/api/update/restart', ...operatorWrite, async (req, res) => {
   try {
     const result = updater.scheduleRestart();
     db.appendAudit({ action: 'APP_UPDATE_RESTART_SCHEDULED', actor: req.user.user, detail: 'restart command scheduled' });
@@ -2017,7 +2022,7 @@ app.post('/api/queries/:id/detector-feedback', ...decisionWrite, validation.vali
   });
 });
 
-app.post('/api/posture/actions', ...adminWrite, validation.validateBody(validation.postureActionSchema), (req, res) => {
+app.post('/api/posture/actions', ...operatorWrite, validation.validateBody(validation.postureActionSchema), (req, res) => {
   const payload = {
     id: req.body.id,
     status: req.body.status,
@@ -2059,7 +2064,7 @@ app.post('/api/posture/notify', ...adminWrite, async (req, res) => {
   });
 });
 
-app.get('/api/integrations/siem/package', ...adminRead, (req, res) => {
+app.get('/api/integrations/siem/package', ...auditRead, (req, res) => {
   try {
     const profile = req.query.profile || 'all';
     const pkg = siemPackage.integrationPackage({ profile });
@@ -2086,7 +2091,7 @@ app.get('/api/integrations/siem/package', ...adminRead, (req, res) => {
   }
 });
 
-app.get('/api/security/package', ...adminRead, (req, res) => {
+app.get('/api/security/package', ...auditRead, (req, res) => {
   const pkg = currentSecurityTrustPackage();
   const format = String(req.query.format || req.query.download || '').toLowerCase();
   if (format === 'zip') {
@@ -2185,16 +2190,16 @@ app.post('/api/catalog/:host/review', ...adminWrite, validation.validateBody(val
 });
 
 // ---- Posture subscriptions (SIEM/SOAR delivery) -----------------------------
-app.get('/api/subscriptions', ...adminRead, (req, res) => {
+app.get('/api/subscriptions', ...operatorRead, (req, res) => {
   res.json({ destinations: subscriptions.publicDestinations(), supportedTypes: require('./siem-formats').supportedTypes() });
 });
 
-app.get('/api/subscriptions/deliveries', ...adminRead, (req, res) => {
+app.get('/api/subscriptions/deliveries', ...operatorRead, (req, res) => {
   res.json({ deliveries: db.listDeliveries(boundedApiLimit(req.query.limit, 200)) });
 });
 
 // Send a synthetic test event to one destination (proves connectivity + auth).
-app.post('/api/subscriptions/:id/test', ...adminWrite, async (req, res) => {
+app.post('/api/subscriptions/:id/test', ...operatorWrite, async (req, res) => {
   const dest = subscriptions.findDestination(req.params.id);
   if (!dest) return res.status(404).json({ error: 'unknown subscription' });
   const testAlert = alerts.sanitizedAlert({
@@ -2230,7 +2235,7 @@ app.post('/api/receipts/verify', ...sessionWrite, validation.validateBody(valida
   res.json(receipts.verifyReceipt(req.body));
 });
 
-app.get('/api/export/evidence', auth.requireAuth, (req, res) => {
+app.get('/api/export/evidence', ...auditRead, (req, res) => {
   const queryLimit = boundedApiLimit(req.query.queryLimit, 500);
   const auditLimit = boundedApiLimit(req.query.auditLimit, 500);
   const activePolicy = policy.loadPolicy();

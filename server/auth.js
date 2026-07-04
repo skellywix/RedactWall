@@ -44,8 +44,11 @@ const APPROVER_USER = String(process.env.APPROVER_USER || '').trim();
 const APPROVER_PASSWORD = process.env.APPROVER_PASSWORD || '';
 const AUDITOR_USER = String(process.env.AUDITOR_USER || '').trim();
 const AUDITOR_PASSWORD = process.env.AUDITOR_PASSWORD || '';
+const OPERATOR_USER = String(process.env.OPERATOR_USER || '').trim();
+const OPERATOR_PASSWORD = process.env.OPERATOR_PASSWORD || '';
 const APPROVER_DISTINCT = !!APPROVER_USER && APPROVER_USER !== ADMIN_USER;
 const AUDITOR_DISTINCT = !!AUDITOR_USER && AUDITOR_USER !== ADMIN_USER && AUDITOR_USER !== APPROVER_USER;
+const OPERATOR_DISTINCT = !!OPERATOR_USER && ![ADMIN_USER, APPROVER_USER, AUDITOR_USER].includes(OPERATOR_USER);
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000; // 8h
 const SESSION_COOKIE_NAME = 'promptwall_session';
 const LEGACY_SESSION_COOKIE_NAME = 'sentinel_session';
@@ -67,6 +70,7 @@ const ACCOUNTS = [
   buildAccount(ADMIN_USER, ADMIN_PASSWORD, roles.SECURITY_ADMIN),
   APPROVER_DISTINCT ? buildAccount(APPROVER_USER, APPROVER_PASSWORD, roles.APPROVER) : null,
   AUDITOR_DISTINCT ? buildAccount(AUDITOR_USER, AUDITOR_PASSWORD, roles.AUDITOR) : null,
+  OPERATOR_DISTINCT ? buildAccount(OPERATOR_USER, OPERATOR_PASSWORD, roles.OPERATOR) : null,
 ].filter(Boolean);
 
 function findAccount(user) {
@@ -349,6 +353,7 @@ module.exports = {
   ADMIN_MFA_CONFIGURED: !!ADMIN_TOTP_KEY && ADMIN_TOTP_KEY.length >= 10,
   APPROVER_ENABLED: APPROVER_DISTINCT && ACCOUNTS.some((account) => account.role === roles.APPROVER),
   AUDITOR_ENABLED: AUDITOR_DISTINCT && ACCOUNTS.some((account) => account.role === roles.AUDITOR),
+  OPERATOR_ENABLED: OPERATOR_DISTINCT && ACCOUNTS.some((account) => account.role === roles.OPERATOR),
   SECRET_SOURCE, SECRET_IS_STABLE: SECRET_SOURCE === 'env' || SECRET_SOURCE === 'file',
   SESSION_COOKIE_NAME, LEGACY_SESSION_COOKIE_NAME,
   _internal: { resolveSecret },
