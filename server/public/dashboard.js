@@ -419,6 +419,16 @@ function renderMonitorStatusFilters() {
   }).join('');
 }
 
+// Every Command Center metric drills through to the tab where the operator
+// can act on it (Zscaler "Analyze more" pattern).
+function metricJumpTarget(metric) {
+  const id = String(metric.id || '').toLowerCase();
+  if (id.includes('sensor') || id.includes('coverage')) return 'coverage';
+  if (id.includes('deliver') || id.includes('subscription')) return 'integrations';
+  if (id.includes('pending') || id.includes('approval') || id.includes('queue')) return 'queue';
+  return 'activity';
+}
+
 function renderMonitorMetrics() {
   $('#monitorMetrics').innerHTML = monitorMetrics().map((metric) => {
     const statusClass = metric.status === 'normal' ? '' : ` status-${escapeHtml(metric.status)}`;
@@ -430,11 +440,12 @@ function renderMonitorMetrics() {
       decreased: 'Decreased',
       neutral: 'Stable',
     })[metric.trend] || 'Stable';
-    return `<article class="metric-card${statusClass}${metric.updating ? ' is-updating' : ''}" aria-busy="${metric.status === 'loading' ? 'true' : 'false'}">
+    const jump = metricJumpTarget(metric);
+    return `<button class="metric-card${statusClass}${metric.updating ? ' is-updating' : ''}" type="button" data-tab-jump="${escapeHtml(jump)}" title="Open ${escapeHtml(jump)}" aria-busy="${metric.status === 'loading' ? 'true' : 'false'}">
       <div class="metric-card-head"><span>${escapeHtml(metric.label)}</span>${monitorStatusDot(metric.status === 'normal' ? 'online' : metric.status === 'critical' ? 'error' : metric.status, `${metric.label} ${metric.status}`, { pulse: metric.updating })}</div>
       <div class="metric-value">${value}</div>
       <div class="metric-meta"><span class="metric-trend ${escapeHtml(metric.trend)}">${escapeHtml(trendLabel)}</span><span>${escapeHtml(fmtTime(metric.lastUpdated))}</span></div>
-    </article>`;
+    </button>`;
   }).join('');
 }
 
@@ -4311,6 +4322,12 @@ function installModeLabel(mode) {
   })[mode] || humanize(mode);
 }
 
+// git@github.com:o/r.git or https://github.com/o/r.git -> https://github.com/o/r
+function githubWebUrl(remoteUrl) {
+  const m = String(remoteUrl || '').match(/github\.com[:/]([^/\s]+)\/([^/\s]+?)(?:\.git)?$/);
+  return m ? `https://github.com/${m[1]}/${m[2]}` : null;
+}
+
 function updateStatusState(status = {}) {
   if (status.inProgress) return ['warn', 'Running'];
   if (status.error) return ['bad', 'Needs setup'];
@@ -4412,6 +4429,7 @@ function renderUpdates(status = {}) {
         ${updateLogRow('Config path', config.configPath)}
       </div>
       <div class="update-action-row">
+        ${githubWebUrl(repo.remoteUrl) ? `<a class="ghost" href="${escapeHtml(githubWebUrl(repo.remoteUrl))}/releases" target="_blank" rel="noopener">Release notes &nearr;</a>` : ''}
         <button class="ghost" id="checkUpdate" type="button" ${blocked ? 'disabled' : ''}>${icons.refresh}Check GitHub</button>
         <button class="btn approve" id="runUpdate" type="button" ${updateDisabled ? 'disabled' : ''}>${icons.refresh}Update from GitHub</button>
         <button class="ghost" id="restartUpdate" type="button" ${(!restartExecutable || !restartRequired || status.inProgress) ? 'disabled' : ''}>Restart service</button>

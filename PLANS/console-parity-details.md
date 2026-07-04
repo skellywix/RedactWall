@@ -80,9 +80,9 @@ are marked MISSING below with the reason when deliberate.
 ## AI Command Center (`#tab-monitor`)
 
 - [x] HAVE: live posture actions, severity glyph legend, real-time counters.
-- [ ] MISSING: "Analyze more" drill-through links from every widget into the
-  filtered activity view (Zscaler Gen AI Security Report widgets; Purview
-  reports drill into Activity explorer).
+- [x] HAVE: every Command Center metric card is a drill-through button into
+  the tab where the operator can act (coverage / integrations / queue /
+  activity by metric type).
 - [ ] MISSING: policy-action pivot filters at the top — Allowed/Blocked/
   Isolated, sanctioned vs unsanctioned (Zscaler Gen AI report filters;
   Purview app-scope pivots Copilot/Enterprise/Other).
@@ -213,9 +213,9 @@ are marked MISSING below with the reason when deliberate.
 ## Updates (`#tab-updates`)
 
 - [x] HAVE: update check/apply/restart with role gating.
-- [ ] MISSING: release-notes link per available version and a
-  known-issues/fixed-issues split (Netskope versioned release-note pages
-  with issue IDs; Zscaler per-version Information icon).
+- [x] PARTIAL: "Release notes" link on the Updates tab opens the configured
+  GitHub repository's releases page; per-version known/fixed-issue splits
+  need release infrastructure this repo does not have yet.
 - [ ] MISSING: rollback affordance — "revert to previous version" flow
   (Zscaler documented revert path).
 
