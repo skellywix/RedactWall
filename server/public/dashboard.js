@@ -1459,14 +1459,14 @@ function saveQueueDensity(value) {
 }
 
 function normalizeColorTheme(value) {
-  return value === 'dark' ? 'dark' : 'light';
+  return value === 'light' ? 'light' : 'dark';
 }
 
 function savedColorTheme() {
   try {
     return normalizeColorTheme(localStorage.getItem('promptwall.theme'));
   } catch {
-    return 'light';
+    return 'dark';
   }
 }
 
@@ -4168,3 +4168,120 @@ function flash() {
 }
 
 init();
+
+// ---- Command palette (Ctrl/Cmd+K): jump to any tab or run a console action ----
+const cmdk = { overlay: null, items: [], selected: 0, restoreFocus: null };
+
+function cmdkEntries() {
+  const seen = new Set();
+  const tabs = $$('.rail .tab[data-tab]').filter((tab) => {
+    if (seen.has(tab.dataset.tab)) return false;
+    seen.add(tab.dataset.tab);
+    return true;
+  }).map((tab) => {
+    const badge = tab.querySelector('.badge');
+    const label = tab.textContent.replace(badge ? badge.textContent : '', '').trim();
+    return {
+      group: 'Navigate',
+      label,
+      icon: (tab.querySelector('.tab-icon') || {}).innerHTML || '',
+      run: () => activateTab(tab.dataset.tab),
+    };
+  });
+  const actions = [
+    {
+      group: 'Actions',
+      label: 'Toggle color theme',
+      icon: '',
+      run: () => {
+        const dark = document.body.dataset.theme === 'dark';
+        const target = $(dark ? '#themeLight' : '#themeDark');
+        if (target) target.click();
+      },
+    },
+    { group: 'Actions', label: 'Focus search', icon: '', run: () => { const s = $('#globalSearch'); if (s) s.focus(); } },
+    { group: 'Actions', label: 'Sign out', icon: '', run: () => { const b = $('#logout'); if (b) b.click(); } },
+  ];
+  return tabs.concat(actions);
+}
+
+function cmdkRender(filterText) {
+  const list = cmdk.overlay.querySelector('.cmdk-list');
+  const needle = String(filterText || '').trim().toLowerCase();
+  cmdk.items = cmdkEntries().filter((item) => !needle || item.label.toLowerCase().includes(needle));
+  cmdk.selected = Math.min(cmdk.selected, Math.max(0, cmdk.items.length - 1));
+  if (!cmdk.items.length) {
+    list.innerHTML = '<div class="cmdk-empty">No matching destination or action</div>';
+    return;
+  }
+  let group = '';
+  list.innerHTML = cmdk.items.map((item, index) => {
+    const header = item.group !== group ? `<div class="cmdk-group">${escapeHtml(item.group)}</div>` : '';
+    group = item.group;
+    return `${header}<button type="button" class="cmdk-item${index === cmdk.selected ? ' is-selected' : ''}" data-cmdk-index="${index}">
+      <span class="tab-icon" aria-hidden="true">${item.icon}</span>${escapeHtml(item.label)}
+      ${index === cmdk.selected ? '<kbd>enter</kbd>' : ''}
+    </button>`;
+  }).join('');
+}
+
+function cmdkClose() {
+  if (!cmdk.overlay) return;
+  cmdk.overlay.remove();
+  cmdk.overlay = null;
+  if (cmdk.restoreFocus && document.contains(cmdk.restoreFocus)) cmdk.restoreFocus.focus();
+}
+
+function cmdkOpen() {
+  if (cmdk.overlay) return cmdkClose();
+  cmdk.restoreFocus = document.activeElement;
+  cmdk.selected = 0;
+  const overlay = document.createElement('div');
+  overlay.className = 'cmdk-overlay';
+  overlay.innerHTML = `<div class="cmdk" role="dialog" aria-modal="true" aria-label="Command palette">
+    <input type="text" placeholder="Jump to a tab or run an action" aria-label="Command palette filter" />
+    <div class="cmdk-list" role="listbox"></div>
+  </div>`;
+  document.body.appendChild(overlay);
+  cmdk.overlay = overlay;
+  const input = overlay.querySelector('input');
+  cmdkRender('');
+  input.focus();
+  input.addEventListener('input', () => { cmdk.selected = 0; cmdkRender(input.value); });
+  overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) cmdkClose(); });
+  overlay.addEventListener('click', (e) => {
+    const item = e.target.closest('[data-cmdk-index]');
+    if (!item) return;
+    const entry = cmdk.items[Number(item.dataset.cmdkIndex)];
+    cmdkClose();
+    if (entry) entry.run();
+  });
+  overlay.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); cmdkClose(); return; }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const step = e.key === 'ArrowDown' ? 1 : -1;
+      cmdk.selected = (cmdk.selected + step + cmdk.items.length) % Math.max(1, cmdk.items.length);
+      cmdkRender(input.value);
+      return;
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const entry = cmdk.items[cmdk.selected];
+      cmdkClose();
+      if (entry) entry.run();
+    }
+  });
+}
+
+document.addEventListener('keydown', (e) => {
+  if ((e.metaKey || e.ctrlKey) && String(e.key).toLowerCase() === 'k') {
+    e.preventDefault();
+    cmdkOpen();
+  }
+}, true);
+const cmdkHint = document.getElementById('cmdkHint');
+if (cmdkHint) {
+  cmdkHint.style.cursor = 'pointer';
+  cmdkHint.addEventListener('click', (e) => { e.preventDefault(); cmdkOpen(); });
+}

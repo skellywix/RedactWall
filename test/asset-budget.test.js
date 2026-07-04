@@ -72,7 +72,7 @@ test('admin public assets stay within transfer budgets', () => {
     { path: 'server/public/coverage-file-flow.js', maxRawBytes: 8_000, maxGzipBytes: 3_000 },
     { path: 'server/public/decision-quality.js', maxRawBytes: 8_000, maxGzipBytes: 3_000 },
     { path: 'server/public/detector-feedback.js', maxRawBytes: 8_000, maxGzipBytes: 3_000 },
-    { path: 'server/public/gatewatch-theme.css', maxRawBytes: 24_000, maxGzipBytes: 6_000 },
+    { path: 'server/public/console-theme.css', maxRawBytes: 24_000, maxGzipBytes: 6_000 },
     { path: 'server/public/login.html', maxRawBytes: 12_000, maxGzipBytes: 5_000 },
     { path: 'server/public/login.js', maxRawBytes: 6_000, maxGzipBytes: 2_500 },
   ]);

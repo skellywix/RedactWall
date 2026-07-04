@@ -147,30 +147,10 @@ test('login page fits mobile viewport without horizontal overflow', async ({ pag
   expect(problems).toEqual([]);
 });
 
-test('admin console theme toggle defaults light and persists dark mode', async ({ page }) => {
+test('admin console theme toggle defaults dark and persists light mode', async ({ page }) => {
   const problems = collectUiProblems(page);
   await login(page);
 
-  await expect(page.locator('body')).toHaveAttribute('data-theme', 'light');
-  await expect(page.locator('#themeLight')).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.locator('#themeDark')).toHaveAttribute('aria-pressed', 'false');
-  const lightTheme = await page.evaluate(() => {
-    const styles = getComputedStyle(document.body);
-    return {
-      bg: styles.getPropertyValue('--bg').trim(),
-      glow: styles.getPropertyValue('--glow').trim(),
-      panel: styles.getPropertyValue('--panel').trim(),
-      colorScheme: styles.colorScheme,
-    };
-  });
-  expect(lightTheme).toMatchObject({
-    bg: '#f4f5f7',
-    panel: '#ffffff',
-    colorScheme: 'light',
-  });
-  expect(lightTheme.glow).toContain('79, 70, 229');
-
-  await page.locator('#themeDark').click();
   await expect(page.locator('body')).toHaveAttribute('data-theme', 'dark');
   await expect(page.locator('#themeDark')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('#themeLight')).toHaveAttribute('aria-pressed', 'false');
@@ -180,27 +160,47 @@ test('admin console theme toggle defaults light and persists dark mode', async (
       bg: styles.getPropertyValue('--bg').trim(),
       glow: styles.getPropertyValue('--glow').trim(),
       panel: styles.getPropertyValue('--panel').trim(),
-      stored: localStorage.getItem('promptwall.theme'),
       colorScheme: styles.colorScheme,
     };
   });
   expect(darkTheme).toMatchObject({
     bg: '#0b0c10',
     panel: '#16181d',
-    stored: 'dark',
     colorScheme: 'dark',
   });
   expect(darkTheme.glow).toContain('129, 140, 248');
-
-  await page.reload();
-  await expect(page.locator('body')).toHaveAttribute('data-theme', 'dark');
-  await expect(page.locator('#themeDark')).toHaveAttribute('aria-pressed', 'true');
 
   await page.locator('#themeLight').click();
   await expect(page.locator('body')).toHaveAttribute('data-theme', 'light');
   await expect(page.locator('#themeLight')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('#themeDark')).toHaveAttribute('aria-pressed', 'false');
-  await expect.poll(() => page.evaluate(() => localStorage.getItem('promptwall.theme'))).toBe('light');
+  const lightTheme = await page.evaluate(() => {
+    const styles = getComputedStyle(document.body);
+    return {
+      bg: styles.getPropertyValue('--bg').trim(),
+      glow: styles.getPropertyValue('--glow').trim(),
+      panel: styles.getPropertyValue('--panel').trim(),
+      stored: localStorage.getItem('promptwall.theme'),
+      colorScheme: styles.colorScheme,
+    };
+  });
+  expect(lightTheme).toMatchObject({
+    bg: '#f4f5f7',
+    panel: '#ffffff',
+    stored: 'light',
+    colorScheme: 'light',
+  });
+  expect(lightTheme.glow).toContain('79, 70, 229');
+
+  await page.reload();
+  await expect(page.locator('body')).toHaveAttribute('data-theme', 'light');
+  await expect(page.locator('#themeLight')).toHaveAttribute('aria-pressed', 'true');
+
+  await page.locator('#themeDark').click();
+  await expect(page.locator('body')).toHaveAttribute('data-theme', 'dark');
+  await expect(page.locator('#themeDark')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#themeLight')).toHaveAttribute('aria-pressed', 'false');
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('promptwall.theme'))).toBe('dark');
   expect(problems).toEqual([]);
 });
 
@@ -1277,7 +1277,7 @@ test('admin console shows exactly one navigation per viewport', async ({ page })
   const problems = collectUiProblems(page);
   await login(page);
 
-  // Gatewatch shell: the header rail is the only navigation at every viewport.
+  // Console shell: exactly one navigation is visible at every viewport.
   await expect(page.locator('.rail .tab[data-tab="queue"]')).toBeVisible();
   let contentTabsDisplay = await page.locator('.content-tabs').evaluate((el) => getComputedStyle(el).display);
   expect(contentTabsDisplay).toBe('none');

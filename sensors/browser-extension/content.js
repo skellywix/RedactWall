@@ -11,8 +11,8 @@
  */
 (function () {
   'use strict';
-  if (window.__promptSentinelLoaded) return;
-  window.__promptSentinelLoaded = true;
+  if (window.__promptwallLoaded) return;
+  window.__promptwallLoaded = true;
 
   const D = window.PSDetect;
   const Ext = window.PWBrowserApi;
