@@ -818,7 +818,7 @@ test('server exposes protected evidence export route', () => {
   const fs = require('fs');
   const path = require('path');
   const server = fs.readFileSync(path.join(__dirname, '..', 'server/app.js'), 'utf8');
-  assert.match(server, /app\.get\('\/api\/export\/evidence', auth\.requireAuth/);
+  assert.match(server, /app\.get\('\/api\/export\/evidence', \.\.\.auditRead/);
   assert.match(server, /evidence\.buildEvidencePack/);
   assert.match(server, /summaryQueries = db\.listQueries\(\{ all: true \}\)/);
   assert.match(server, /coverage\.summarize\(summaryQueries, activePolicy\)/);
