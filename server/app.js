@@ -2482,6 +2482,32 @@ app.post('/api/reports/digest/send', ...adminWrite, async (req, res) => {
   res.json({ results: await sendDailyDigest(req.user.user) });
 });
 
+// Sensor staleness: when a tracked sensor goes silent past the fleet's 48h
+// threshold, tell destinations subscribed to the SENSOR_STALE event type.
+// Payload is metadata only - user, sensor name, last-seen timestamp - and each
+// silence period alerts once (a sensor re-qualifies only after reporting again).
+async function runSensorStaleSweep(actor = 'scheduler', opts = {}) {
+  const stale = fleet.staleTransitions({ now: opts.now || Date.now() });
+  if (!stale.length) return { stale: 0, results: [] };
+  const alert = {
+    action: 'SENSOR_STALE',
+    status: 'sensor_stale',
+    riskScore: 0,
+    maxSeverity: 0,
+    staleAfterHours: fleet.STALE_MS / 3600000,
+    staleCount: stale.length,
+    sensors: stale.slice(0, 50),
+    generatedAt: new Date().toISOString(),
+  };
+  const results = await subscriptions.dispatch(alert, opts.dispatch || {});
+  db.appendAudit({
+    action: 'SENSOR_STALE_ALERTED',
+    actor,
+    detail: `${stale.length} sensor(s) stale; ${results.filter((r) => r.status === 'delivered').length}/${results.length} delivered`,
+  });
+  return { stale: stale.length, results };
+}
+
 // Static detector metadata (severity scale + regulation map) so the console
 // can explain historical rows that predate persisted score breakdowns.
 app.get('/api/detectors/meta', auth.requireAuth, (req, res) => {
@@ -2670,6 +2696,7 @@ function startServer(port = PORT, opts = {}) {
   const preflightModule = opts.preflight || preflight;
   const retentionPurge = opts.runRetentionPurge || runRetentionPurge;
   const workflowEscalation = opts.runWorkflowEscalation || runWorkflowEscalation;
+  const staleSweep = opts.runSensorStaleSweep || ((...args) => runSensorStaleSweep(...args).catch(() => {}));
   const setIntervalFn = opts.setInterval || setInterval;
   const clearIntervalFn = opts.clearInterval || clearInterval;
   const appToListen = opts.app || app;
@@ -2688,11 +2715,14 @@ function startServer(port = PORT, opts = {}) {
   });
   const retentionTimer = setIntervalFn(() => retentionPurge(), 60 * 60 * 1000);
   const workflowTimer = setIntervalFn(() => workflowEscalation(), 5 * 60 * 1000);
+  const staleTimer = setIntervalFn(() => staleSweep(), 60 * 60 * 1000);
   retentionTimer.unref();
   workflowTimer.unref();
+  staleTimer.unref();
   server.on('close', () => {
     clearIntervalFn(retentionTimer);
     clearIntervalFn(workflowTimer);
+    clearIntervalFn(staleTimer);
   });
   return server;
 }
@@ -2722,6 +2752,7 @@ if (require.main === module) installShutdownHandlers(startServer());
 app.startServer = startServer;
 app.runRetentionPurge = runRetentionPurge;
 app.runWorkflowEscalation = runWorkflowEscalation;
+app.runSensorStaleSweep = runSensorStaleSweep;
 app.currentPreflight = currentPreflight;
 app.currentSecurityTrustPackage = currentSecurityTrustPackage;
 app._internal = {

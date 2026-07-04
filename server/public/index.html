@@ -2884,7 +2884,7 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
           <div class="panel-head">
             <div>
               <h2>Fleet by user</h2>
-              <span>Sensors report on each other: a user seen by one sensor but not its companions is a coverage gap</span>
+              <span>Sensors report on each other: a user seen by one sensor but not its companions is a coverage gap. Sensors silent past 48h are flagged STALE and fire a SENSOR_STALE alert to subscribed SIEM destinations.</span>
             </div>
           </div>
           <table><thead><tr><th>User</th><th>Browser extension</th><th>Endpoint agent</th><th>MCP guard</th><th>Coverage gaps</th></tr></thead>

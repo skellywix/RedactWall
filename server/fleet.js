@@ -14,10 +14,12 @@ const STALE_MS = 48 * 3600 * 1000;
 
 let db = null;
 let presence = null; // Map<user, { [source]: { lastSeen, version, platform } }>
+let alertedStale = new Map(); // `${user}|${sensor}` -> lastSeen ms already alerted on
 
 function init(database) {
   db = database;
   presence = null;
+  alertedStale = new Map();
 }
 
 function ensure() {
@@ -94,6 +96,24 @@ function userSummary(user, bySensor, now) {
   return { user, sensors, gaps };
 }
 
+// Sensors that crossed the stale threshold since the last sweep. Each silence
+// period alerts once: a sensor only re-qualifies after it reports again
+// (lastSeen advances) and then goes silent past the threshold again.
+function staleTransitions({ now = Date.now() } = {}) {
+  const out = [];
+  for (const [user, bySensor] of ensure().entries()) {
+    for (const sensor of TRACKED) {
+      const entry = bySensor[sensor];
+      if (!entry || now - entry.lastSeen <= STALE_MS) continue;
+      const key = `${user}|${sensor}`;
+      if (alertedStale.get(key) === entry.lastSeen) continue;
+      alertedStale.set(key, entry.lastSeen);
+      out.push({ user, sensor, lastSeen: new Date(entry.lastSeen).toISOString() });
+    }
+  }
+  return out;
+}
+
 function summary({ now = Date.now() } = {}) {
   const users = [...ensure().entries()]
     .map(([user, bySensor]) => userSummary(user, bySensor, now))
@@ -106,4 +126,4 @@ function summary({ now = Date.now() } = {}) {
   };
 }
 
-module.exports = { init, recordPresence, companionsFor, summary, TRACKED, STALE_MS };
+module.exports = { init, recordPresence, companionsFor, staleTransitions, summary, TRACKED, STALE_MS };
