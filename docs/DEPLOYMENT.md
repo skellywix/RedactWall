@@ -644,6 +644,38 @@ The writer loads `ENDPOINT_AGENT_HANDOFF_SECRET` and
 config, verifies the referenced path is a local file, writes the event
 atomically, and never reads the file body.
 
+### Browser File-Intent Native Messaging Host
+
+The managed browser extension blocks uploads it cannot inspect locally (too
+large, OCR required, or not text-readable) and tells the user the file needs
+endpoint inspection. With the file-intent host installed, the extension also
+hands the endpoint agent that file's NAME and SIZE - never bytes - over Chrome
+native messaging. The host resolves the intent against the user's staging
+folders (`Downloads`, `Desktop`, `Documents` by default, or
+`ENDPOINT_AGENT_INTENT_SEARCH_DIRS` from endpoint config), and on exactly one
+name+size match writes the same signed metadata-only handoff event the desktop
+collectors use. The endpoint agent then scans the real file locally, including
+the OCR path, and reports only sanitized evidence.
+
+Install it per user after endpoint agent setup, bound to the deployed
+extension id:
+
+```powershell
+.\scripts\install-file-intent-host.ps1 `
+  -ExtensionId "<32-character-extension-id>" `
+  -ConfigDir "$env:LOCALAPPDATA\PromptWall" `
+  -Browser both
+```
+
+The installer writes a secret-free launcher (`file-intent-host.cmd`), the
+`com.promptwall.file_intent` host manifest bound to that one extension origin,
+and per-user `NativeMessagingHosts` registry keys for Chrome and/or Edge. The
+ingest key and handoff secret stay in `endpoint-agent.env`; the launcher only
+points `PROMPTWALL_ENV_PATH` at it. Host replies to the browser carry only
+sanitized statuses (`handoff_written`, `not_found`, `ambiguous`) - never local
+paths. Ambiguous matches (the same name+size in two roots) write nothing.
+Remove the registration with `.\scripts\uninstall-file-intent-host.ps1`.
+
 ### Clipboard Guard
 
 The packaged endpoint runtime also includes a one-shot clipboard guard for
