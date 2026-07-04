@@ -173,6 +173,65 @@ test('gateway enforces per-token rate limits', async (t) => {
   assert.strictEqual((await send()).status, 429);
 });
 
+test('gateway tokenizes array-form (content parts) messages on redact — no raw PII upstream', async (t) => {
+  const tp = tmpTokens(t);
+  const { token } = tokens.mintToken({ user: 'a@x' }, tp);
+  let forwarded = '';
+  const adapter = {
+    requestText: require('../gateway/canonical').requestText,
+    applyRedactedRequest: (b) => b,
+    responseText: () => '',
+    applyResponseText: (j) => j,
+    callUpstream: async (kind, b) => { forwarded = JSON.stringify(b); return { ok: true, json: {} }; },
+  };
+  const { app } = createGateway({ client: stubClient({ verdict: { decision: 'redact' } }), adapter, agentTokensPath: tp });
+  const res = await listenAndRequest(app, { headers: { authorization: 'Bearer ' + token }, body: { model: 'x', messages: [
+    { role: 'user', content: [{ type: 'text', text: 'member SSN 524-71-3312 here' }, { type: 'text', text: 'card 4012888888881881' }] },
+  ] } });
+  assert.strictEqual(res.status, 200);
+  assert.ok(!forwarded.includes('524-71-3312'), 'array-part SSN must not reach upstream');
+  assert.ok(!forwarded.includes('4012888888881881'), 'array-part card must not reach upstream');
+});
+
+test('gateway tokenizes tool-call arguments on redact — no raw PII upstream', async (t) => {
+  const tp = tmpTokens(t);
+  const { token } = tokens.mintToken({ user: 'a@x' }, tp);
+  let forwarded = '';
+  const adapter = {
+    requestText: require('../gateway/canonical').requestText,
+    applyRedactedRequest: (b) => b,
+    responseText: () => '',
+    applyResponseText: (j) => j,
+    callUpstream: async (kind, b) => { forwarded = JSON.stringify(b); return { ok: true, json: {} }; },
+  };
+  const { app } = createGateway({ client: stubClient({ verdict: { decision: 'redact' } }), adapter, agentTokensPath: tp });
+  const res = await listenAndRequest(app, { headers: { authorization: 'Bearer ' + token }, body: { model: 'x', messages: [
+    { role: 'assistant', tool_calls: [{ id: 't1', type: 'function', function: { name: 'lookup', arguments: '{"ssn":"524-71-3312"}' } }] },
+  ] } });
+  assert.strictEqual(res.status, 200);
+  assert.ok(!forwarded.includes('524-71-3312'), 'tool-call SSN must not reach upstream');
+});
+
+test('gateway fails closed on content it cannot scan (image parts) — upstream never called', async (t) => {
+  const tp = tmpTokens(t);
+  const { token } = tokens.mintToken({ user: 'a@x' }, tp);
+  let upstreamCalls = 0;
+  const adapter = {
+    requestText: require('../gateway/canonical').requestText,
+    applyRedactedRequest: (b) => b,
+    responseText: () => '',
+    applyResponseText: (j) => j,
+    callUpstream: async () => { upstreamCalls++; return { ok: true, json: {} }; },
+  };
+  const { app } = createGateway({ client: stubClient({ verdict: { decision: 'allow' } }), adapter, agentTokensPath: tp });
+  const res = await listenAndRequest(app, { headers: { authorization: 'Bearer ' + token }, body: { model: 'x', messages: [
+    { role: 'user', content: [{ type: 'image_url', image_url: { url: 'data:image/png;base64,AAAA' } }] },
+  ] } });
+  assert.strictEqual(res.status, 403);
+  assert.strictEqual(res.json.error.type, 'unscannable_content');
+  assert.strictEqual(upstreamCalls, 0, 'unscannable content must not be forwarded upstream');
+});
+
 test('agent tokens are stored hashed and revocation takes effect', async (t) => {
   const tp = tmpTokens(t);
   const { token, id } = tokens.mintToken({ user: 'a@x' }, tp);

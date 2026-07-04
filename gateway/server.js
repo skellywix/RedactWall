@@ -20,6 +20,7 @@ const { config } = require('./config');
 const { makeClient } = require('./client');
 const { getAdapter } = require('./adapters');
 const tokens = require('./tokens');
+const canonical = require('./canonical');
 
 // Role-faithful local redaction: tokenize EVERY message/content (system,
 // assistant, user) with a shared value->token map so no raw PII in any role
@@ -47,9 +48,39 @@ function redactBodyLocally(body) {
     }
     return out;
   }
+  // Tokenize every scannable surface so no raw PII in any message reaches
+  // upstream — string content, array text parts, and tool/function-call
+  // arguments (all of which requestText/messageText also scan).
+  function tokMessage(m) {
+    if (!m || typeof m !== 'object') return m;
+    let next = m;
+    const patch = (obj, key, val) => { if (next === obj) next = { ...obj }; next[key] = val; };
+    if (typeof m.content === 'string') patch(m, 'content', tok(m.content));
+    else if (Array.isArray(m.content)) {
+      let touched = false;
+      const parts = m.content.map((part) => {
+        if (part && typeof part.text === 'string') { touched = true; return { ...part, text: tok(part.text) }; }
+        return part;
+      });
+      if (touched) patch(m, 'content', parts);
+    }
+    if (Array.isArray(m.tool_calls)) {
+      let touched = false;
+      const calls = m.tool_calls.map((tc) => {
+        const args = tc && tc.function && tc.function.arguments;
+        if (typeof args === 'string' && args) { touched = true; return { ...tc, function: { ...tc.function, arguments: tok(args) } }; }
+        return tc;
+      });
+      if (touched) patch(m, 'tool_calls', calls);
+    }
+    if (m.function_call && typeof m.function_call.arguments === 'string') {
+      patch(m, 'function_call', { ...m.function_call, arguments: tok(m.function_call.arguments) });
+    }
+    return next;
+  }
   const out = { ...body };
   if (Array.isArray(body.messages)) {
-    out.messages = body.messages.map((m) => (m && typeof m.content === 'string' ? { ...m, content: tok(m.content) } : m));
+    out.messages = body.messages.map(tokMessage);
   } else if (typeof body.prompt === 'string') { out.prompt = tok(body.prompt); }
   else if (typeof body.input === 'string') { out.input = tok(body.input); }
   return { body: out, map, tokenCount: Object.keys(map).length };
@@ -131,6 +162,12 @@ function createGateway(overrides = {}) {
       } else {
         metrics.allowed += 1;
       }
+    } else if (canonical.carriesUnscannableContent(body)) {
+      // Content present but no scannable text (e.g. image parts). Fail closed —
+      // never forward ungated content upstream.
+      metrics.blocked += 1;
+      metrics.failClosed += 1;
+      return res.status(403).json(openAiError('Request carries content PromptWall could not scan; blocked', 'unscannable_content'));
     } else {
       metrics.allowed += 1;
     }
@@ -150,7 +187,7 @@ function createGateway(overrides = {}) {
         text: respText, user: identity.user, orgId: identity.orgId,
         destination: destinationLabel(), source: 'ai_gateway',
       });
-      if (scan.blocked) {
+      if (scan.blocked || scan.decision === 'block') {
         metrics.responseBlocked += 1;
         return res.status(403).json(openAiError('Model response blocked by PromptWall policy', 'response_blocked_by_promptwall', scan.reasons));
       }

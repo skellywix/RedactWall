@@ -22,11 +22,37 @@ function requestText(body) {
 
 function messageText(m) {
   if (!m) return '';
-  if (typeof m.content === 'string') return m.content;
-  if (Array.isArray(m.content)) {
-    return m.content.map((part) => (part && typeof part.text === 'string' ? part.text : '')).filter(Boolean).join('\n');
+  const parts = [];
+  if (typeof m.content === 'string') parts.push(m.content);
+  else if (Array.isArray(m.content)) {
+    for (const part of m.content) if (part && typeof part.text === 'string') parts.push(part.text);
   }
-  return '';
+  // Tool/function-call arguments are user-influenced JSON strings that can carry
+  // PII; they must be scanned (and tokenized) too, not forwarded raw upstream.
+  if (Array.isArray(m.tool_calls)) {
+    for (const tc of m.tool_calls) {
+      const args = tc && tc.function && tc.function.arguments;
+      if (typeof args === 'string' && args) parts.push(args);
+    }
+  }
+  if (m.function_call && typeof m.function_call.arguments === 'string') parts.push(m.function_call.arguments);
+  return parts.filter(Boolean).join('\n');
+}
+
+// True when a request carries user-authored content but requestText extracted no
+// scannable text from it (e.g. image parts) — the gateway must fail closed
+// rather than forward such content ungated.
+function carriesUnscannableContent(body) {
+  if (!body || typeof body !== 'object') return false;
+  if (Array.isArray(body.messages)) {
+    return body.messages.some((m) => {
+      if (!m || m.role === 'system' || m.role === 'assistant') return false;
+      if (typeof m.content === 'string') return false;
+      if (Array.isArray(m.content)) return m.content.length > 0;
+      return m.content != null;
+    });
+  }
+  return false;
 }
 
 // Replace user-authored content with the tokenized text. System/assistant
@@ -71,4 +97,4 @@ function applyResponseText(json, newText) {
   return out;
 }
 
-module.exports = { requestText, messageText, applyRedactedRequest, responseText, applyResponseText };
+module.exports = { requestText, messageText, carriesUnscannableContent, applyRedactedRequest, responseText, applyResponseText };
