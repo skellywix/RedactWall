@@ -73,6 +73,10 @@ Legend: ● full · ◐ partial · ○ none.
 | Browser sensor | ● | ● | ● | ● |
 | Endpoint sensor | ● | ● | ◐ | ◐ |
 | MCP / agent tool-output guard | ● | ● | ● | ○ |
+| API/agent gateway (fail-closed prompt + response) | ● | ● | ◐ | ◐ |
+| Reviewable app catalog + one-click govern | ● | ◐ | ● | ● |
+| Multi-target SIEM/SOAR subscriptions + delivery history | ● | ◐ | ◐ | ● |
+| Signed edge-verified policy bundles | ● | ○ | ○ | ○ |
 | Shadow-AI discovery | ● | ● | ● | ● |
 | App-risk attributes (trains-on-data, tier, residency) | ● | ◐ | ● | ◐ |
 | AI-usage analytics dashboard | ● | ● | ● | ● |

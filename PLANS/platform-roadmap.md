@@ -87,15 +87,31 @@ provable, and so no slice weakens the audit/privacy guarantees the product sells
 
 ## Milestones (deployable slices, in order)
 
-- **M1 — Platform Core:** AI Gateway service + persistent App Catalog & review
-  workflow + posture subscriptions with delivery history. These are the clearest
-  competitor-backed gaps and together constitute the first "platform" proof.
-- **M2 — Coverage Depth:** desktop file-flow collectors + two more first-party
-  connectors + turnkey OCR.
-- **M3 — Trust & Scale:** signed/versioned sensor policy bundles + identity
-  lifecycle hardening + commercial extension rollout + compliance packaging.
+- **M1 — Platform Core [SHIPPED]:** AI Gateway service (`gateway/`), persistent
+  App Catalog + discovery + review workflow, and posture subscriptions with
+  retry + delivery history. Plus the console front-end for all three (App
+  Catalog, Compliance framework matrix, Integrations tabs) and a left-sidebar
+  navigation. These were the clearest competitor-backed gaps and together
+  constitute the first "platform" proof.
+- **M2 — Coverage Depth [PARTIAL]:** Google Drive MCP connector shipped;
+  desktop file-flow collectors and turnkey-OCR-engine bundling remain.
+- **M3 — Trust & Scale [PARTIAL]:** Ed25519 signed/versioned sensor policy
+  bundles shipped (routes + verification); identity lifecycle hardening,
+  commercial extension rollout, and compliance packaging remain.
 - **M4 — Scale-Out (staged):** on-device semantic (ONNX/WASM) model path +
-  Postgres multi-tenant control plane + HA/DR.
+  Postgres multi-tenant control plane + HA/DR. Deliberately deferred — these
+  need real infrastructure and must not be half-built.
+
+### Shipped in this cycle (all behind a green `npm run review:ci`)
+
+| Slice | Where | Verified by |
+| --- | --- | --- |
+| AI Gateway (OpenAI-compatible, fail-closed gate + response scan, streaming, agent tokens, rate limits, provider adapters) | `gateway/`, `docs/AI_GATEWAY.md` | `test/gateway.test.js`, live control-plane+gateway smoke |
+| Persistent App Catalog + prompt-free discovery + risk scoring + review | `server/app-catalog.js`, `server/db.js`, `/api/catalog*` | `test/app-catalog.test.js`, `test/catalog-api.test.js` |
+| Posture subscriptions (Splunk/Sentinel/Chronicle/QRadar/Datadog/Slack/Teams/webhook) with retry, dedupe, delivery history | `server/siem-formats.js`, `server/subscriptions.js` | `test/subscriptions.test.js` |
+| Console: App Catalog, Compliance (AI-framework matrix), Integrations tabs; **left-sidebar nav** | `server/public/` | `e2e/admin-console.spec.js`, screenshots |
+| Ed25519 signed policy bundles (edge verification, fail-closed on tamper/stale) | `server/policy-bundle.js`, `/api/v1/policy/bundle` | `test/policy-bundle.test.js` |
+| Google Drive MCP connector (sanitize-before-model) | `sensors/mcp-guard/connectors/googledrive.js` | `test/mcp-googledrive-connector.test.js` |
 
 Detailed priorities follow; each notes competitor parity, the PromptWall build,
 the "better than" angle, and acceptance.
