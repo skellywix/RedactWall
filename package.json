@@ -72,7 +72,11 @@
     "docker:mecha:status": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/mecha-docker.ps1 status",
     "docker:mecha:check": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/mecha-docker.ps1 check",
     "docker:mecha:smoke": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/mecha-docker.ps1 smoke",
-    "docker:mecha:logs": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/mecha-docker.ps1 logs"
+    "docker:mecha:logs": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/mecha-docker.ps1 logs",
+    "rotate:data-key": "node scripts/rotate-data-key.js",
+    "backup:drill": "node scripts/backup-drill.js",
+    "backup:install-task": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/install-backup-task.ps1",
+    "backup:install-systemd": "bash scripts/install-backup-systemd.sh"
   },
   "license": "UNLICENSED",
   "private": true,
@@ -83,6 +87,7 @@
     "express": "^5.2.1",
     "helmet": "^8.2.0",
     "pdf-parse": "^2.4.5",
+    "pg": "^8.22.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

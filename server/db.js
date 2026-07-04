@@ -26,7 +26,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
-const Database = require('better-sqlite3');
+const storage = require('./storage');
 const integrity = require('./audit-integrity');
 
 const DATA_DIR = path.join(__dirname, '..', 'data');
@@ -35,129 +35,25 @@ const sha = integrity.sha;
 const canonical = integrity.canonical;
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
-// Open a DB at `p`, preferring WAL, and force a real write so a filesystem that
-// cannot host SQLite fails HERE (where we can fall back) rather than later.
-function openAt(p) {
-  fs.mkdirSync(path.dirname(p), { recursive: true });
-  const d = new Database(p);
-  try { d.pragma('journal_mode = WAL'); } catch { try { d.pragma('journal_mode = DELETE'); } catch {} }
-  try { d.pragma('synchronous = NORMAL'); } catch {}
-  try { d.pragma('foreign_keys = ON'); } catch {}
-  d.exec('CREATE TABLE IF NOT EXISTS _probe (x); DROP TABLE _probe;'); // throws on a bad FS
-  return d;
+const store = storage.openStore({ env: process.env, dataDir: DATA_DIR });
+const sdb = store.driver;
+const DB_PATH = store.dbPath;
+const DRIVER_KIND = store.kind;
+storage.runMigrations(sdb, DRIVER_KIND);
+
+/** Postgres row-level security context; no-op on single-node SQLite. */
+function setTenantContext(orgId) {
+  if (typeof sdb.setTenantContext === 'function') sdb.setTenantContext(orgId);
 }
 
-let DB_PATH = process.env.SENTINEL_DB_PATH || path.join(DATA_DIR, 'sentinel.db');
-let sdb;
-try {
-  sdb = openAt(DB_PATH);
-} catch (e) {
-  const fallback = path.join(os.tmpdir(), 'promptwall', 'sentinel.db');
-  console.error(`[db] store at ${DB_PATH} unusable (${e.code || e.message}); falling back to ${fallback}. ` +
-    'Set SENTINEL_DB_PATH to a local-disk path in production (never a cloud-synced folder).');
-  DB_PATH = fallback;
-  sdb = openAt(DB_PATH);
-}
-
-sdb.exec(`
-  CREATE TABLE IF NOT EXISTS queries (
-    seq        INTEGER PRIMARY KEY AUTOINCREMENT,
-    id         TEXT UNIQUE NOT NULL,
-    createdAt  TEXT NOT NULL,
-    status     TEXT NOT NULL,
-    user       TEXT,
-    data       TEXT NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_queries_status ON queries(status);
-  CREATE INDEX IF NOT EXISTS idx_queries_created ON queries(createdAt);
-
-  CREATE TABLE IF NOT EXISTS audit (
-    seq       INTEGER PRIMARY KEY AUTOINCREMENT,
-    id        TEXT UNIQUE NOT NULL,
-    ts        TEXT NOT NULL,
-    action    TEXT,
-    queryId   TEXT,
-    actor     TEXT,
-    prevHash  TEXT NOT NULL,
-    hash      TEXT NOT NULL,
-    entry     TEXT NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_audit_query ON audit(queryId);
-
-  CREATE TABLE IF NOT EXISTS scim_users (
-    seq       INTEGER PRIMARY KEY AUTOINCREMENT,
-    id        TEXT UNIQUE NOT NULL,
-    userName  TEXT UNIQUE NOT NULL,
-    active    INTEGER NOT NULL DEFAULT 1,
-    createdAt TEXT NOT NULL,
-    updatedAt TEXT NOT NULL,
-    data      TEXT NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_scim_users_username ON scim_users(userName);
-
-  CREATE TABLE IF NOT EXISTS scim_groups (
-    seq         INTEGER PRIMARY KEY AUTOINCREMENT,
-    id          TEXT UNIQUE NOT NULL,
-    displayName TEXT UNIQUE NOT NULL,
-    createdAt   TEXT NOT NULL,
-    updatedAt   TEXT NOT NULL,
-    data        TEXT NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_scim_groups_display ON scim_groups(displayName);
-
-  CREATE TABLE IF NOT EXISTS ai_apps (
-    seq           INTEGER PRIMARY KEY AUTOINCREMENT,
-    id            TEXT UNIQUE NOT NULL,
-    canonicalHost TEXT UNIQUE NOT NULL,
-    firstSeen     TEXT NOT NULL,
-    lastSeen      TEXT NOT NULL,
-    data          TEXT NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_ai_apps_host ON ai_apps(canonicalHost);
-
-  CREATE TABLE IF NOT EXISTS deliveries (
-    seq          INTEGER PRIMARY KEY AUTOINCREMENT,
-    id           TEXT UNIQUE NOT NULL,
-    ts           TEXT NOT NULL,
-    destId       TEXT NOT NULL,
-    dedupeKey    TEXT NOT NULL,
-    status       TEXT NOT NULL,
-    data         TEXT NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_deliveries_dest ON deliveries(destId);
-  CREATE INDEX IF NOT EXISTS idx_deliveries_dedupe ON deliveries(destId, dedupeKey);
-
-  CREATE TABLE IF NOT EXISTS detector_feedback (
-    seq        INTEGER PRIMARY KEY AUTOINCREMENT,
-    id         TEXT UNIQUE NOT NULL,
-    createdAt  TEXT NOT NULL,
-    queryId    TEXT NOT NULL,
-    detectorId TEXT NOT NULL,
-    verdict    TEXT NOT NULL,
-    actor      TEXT,
-    data       TEXT NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_detector_feedback_query ON detector_feedback(queryId);
-  CREATE INDEX IF NOT EXISTS idx_detector_feedback_detector ON detector_feedback(detectorId);
-  CREATE INDEX IF NOT EXISTS idx_detector_feedback_verdict ON detector_feedback(verdict);
-
-  CREATE TABLE IF NOT EXISTS identity_revocations (
-    identity  TEXT PRIMARY KEY,
-    revokedAt INTEGER NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS mfa_recovery_used (
-    codeIndex INTEGER PRIMARY KEY,
-    usedAt    TEXT NOT NULL
-  );
-`);
 
 const id = (p) => p + '_' + crypto.randomBytes(8).toString('hex');
+const orgColumn = (value) => String(value || '').trim().toLowerCase() || null;
 
 // ---- Queries -----------------------------------------------------------------
-const qInsert = sdb.prepare('INSERT INTO queries (id, createdAt, status, user, data) VALUES (@id, @createdAt, @status, @user, @data)');
+const qInsert = sdb.prepare('INSERT INTO queries (id, createdAt, status, user, orgId, data) VALUES (@id, @createdAt, @status, @user, @orgId, @data)');
 const qById = sdb.prepare('SELECT data FROM queries WHERE id = ?');
-const qUpdateById = sdb.prepare('UPDATE queries SET status = @status, user = @user, data = @data WHERE id = @id');
+const qUpdateById = sdb.prepare('UPDATE queries SET status = @status, user = @user, orgId = @orgId, data = @data WHERE id = @id');
 const detectorFeedbackInsert = sdb.prepare('INSERT INTO detector_feedback (id, createdAt, queryId, detectorId, verdict, actor, data) VALUES (@id, @createdAt, @queryId, @detectorId, @verdict, @actor, @data)');
 
 function boundedLimit(value, fallback = 200, max = 5000) {
@@ -169,7 +65,7 @@ function boundedLimit(value, fallback = 200, max = 5000) {
 
 function createQuery(q) {
   const row = { id: id('q'), createdAt: new Date().toISOString(), status: 'pending', ...q };
-  qInsert.run({ id: row.id, createdAt: row.createdAt, status: row.status, user: row.user || null, data: JSON.stringify(row) });
+  qInsert.run({ id: row.id, createdAt: row.createdAt, status: row.status, user: row.user || null, orgId: orgColumn(row.orgId), data: JSON.stringify(row) });
   return row;
 }
 function getQuery(qid) {
@@ -179,13 +75,14 @@ function getQuery(qid) {
 function listQueries(filter = {}) {
   const all = filter.all === true;
   const limit = boundedLimit(filter.limit, 200, filter.maxLimit || 5000);
-  const rows = all
-    ? (filter.status
-      ? sdb.prepare('SELECT data FROM queries WHERE status = ? ORDER BY createdAt DESC, seq DESC').all(filter.status)
-      : sdb.prepare('SELECT data FROM queries ORDER BY createdAt DESC, seq DESC').all())
-    : (filter.status
-      ? sdb.prepare('SELECT data FROM queries WHERE status = ? ORDER BY createdAt DESC, seq DESC LIMIT ?').all(filter.status, limit)
-      : sdb.prepare('SELECT data FROM queries ORDER BY createdAt DESC, seq DESC LIMIT ?').all(limit));
+  const where = [];
+  const params = [];
+  if (filter.status) { where.push('status = ?'); params.push(filter.status); }
+  if (filter.orgId) { where.push('orgId = ?'); params.push(String(filter.orgId).trim().toLowerCase()); }
+  const clause = where.length ? ` WHERE ${where.join(' AND ')}` : '';
+  const tail = all ? '' : ' LIMIT ?';
+  if (!all) params.push(limit);
+  const rows = sdb.prepare(`SELECT data FROM queries${clause} ORDER BY createdAt DESC, seq DESC${tail}`).all(...params);
   return rows.map((r) => JSON.parse(r.data));
 }
 // Read-modify-write wrapped in a transaction so concurrent updates can't race.
@@ -193,7 +90,7 @@ const updateQuery = sdb.transaction((qid, patch) => {
   const cur = qById.get(qid);
   if (!cur) return null;
   const merged = { ...JSON.parse(cur.data), ...patch };
-  qUpdateById.run({ id: qid, status: merged.status, user: merged.user || null, data: JSON.stringify(merged) });
+  qUpdateById.run({ id: qid, status: merged.status, user: merged.user || null, orgId: orgColumn(merged.orgId), data: JSON.stringify(merged) });
   return merged;
 });
 
@@ -358,7 +255,7 @@ const purgeRetainedSensitiveData = sdb.transaction((options = {}) => {
     q.retentionPurgedAt = now;
     q.retentionPurgedFields = fields;
     q.retentionPurgeReason = options.reason || 'retention window elapsed';
-    qUpdateById.run({ id: q.id, status: q.status, user: q.user || null, data: JSON.stringify(q) });
+    qUpdateById.run({ id: q.id, status: q.status, user: q.user || null, orgId: orgColumn(q.orgId), data: JSON.stringify(q) });
     appendAuditRecord({
       action: 'RETENTION_PURGED',
       queryId: q.id,
@@ -652,7 +549,7 @@ function migrateFromJson(opts = {}) {
       try { rows = JSON.parse(fsModule.readFileSync(qf, 'utf8')); } catch {}
       for (const r of rows) {
         if (!r || !r.id) continue;
-        queryInsert.run({ id: r.id, createdAt: r.createdAt || new Date().toISOString(), status: r.status || 'pending', user: r.user || null, data: JSON.stringify(r) });
+        queryInsert.run({ id: r.id, createdAt: r.createdAt || new Date().toISOString(), status: r.status || 'pending', user: r.user || null, orgId: orgColumn(r.orgId), data: JSON.stringify(r) });
         importedQ++;
       }
     }
@@ -736,6 +633,7 @@ module.exports = {
   getScimGroup, getScimGroupByDisplayName, listScimGroups, saveScimGroup, deleteScimGroup,
   getAiApp, listAiApps, upsertAiApp,
   recordDelivery, listDeliveries, recentDeliverySuccess,
-  _canonical: canonical, _db: sdb, _dbPath: DB_PATH,
+  setTenantContext,
+  _canonical: canonical, _db: sdb, _dbPath: DB_PATH, _driverKind: DRIVER_KIND,
   _internal: { migrateFromJson, parsePostureActionDetail, POSTURE_ACTION_AUDIT },
 };

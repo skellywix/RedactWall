@@ -111,9 +111,20 @@ provable, and so no slice weakens the audit/privacy guarantees the product sells
   state); fail-closed ICAP REQMOD network backstop (`npm run icap:bridge`).
   Commercial extension-store publishing remains an external process
   (checklists shipped in `docs/EXTENSION_RELEASE_CHECKLIST.md`).
-- **M4 — Scale-Out (staged):** on-device semantic (ONNX/WASM) model path +
-  Postgres multi-tenant control plane + HA/DR. Deliberately deferred — these
-  need real infrastructure and must not be half-built.
+- **M4 — Scale-Out [SHIPPED except managed-infra drills]:** Postgres control
+  plane behind the unchanged synchronous db seam (`server/storage/`: driver
+  selection, worker-thread sync bridge, shared migration history, verified
+  against a real Postgres 16 in tests and CI); database-enforced append-only
+  audit (both drivers); row-level tenant isolation (indexed `orgId` +
+  Postgres FORCE ROW LEVEL SECURITY); supported data-key rotation
+  (`npm run rotate:data-key` with previous-key fallback); scheduled backups +
+  one-command DR drill (`npm run backup:drill`); restart-chaos and
+  concurrency recovery tests. The ONNX on-device model was replaced by
+  decision with a **cloud classifier seam** (`SENTINEL_SEMANTIC_REMOTE_URL`,
+  fail-closed to the on-device engine) so detection can move to a
+  Nightfall/Strac-style cloud model by configuration. Remaining for real
+  infrastructure: multi-AZ Postgres failover drills and load-balancer
+  cutover, which need the AWS environment.
 
 ### Shipped in this cycle (all behind a green `npm run review:ci`)
 

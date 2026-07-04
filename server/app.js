@@ -44,6 +44,7 @@ const posture = require('./posture');
 const detectorFeedback = require('./detector-feedback');
 const detectionQuality = require('./detection-quality');
 const ticketSync = require('./ticket-sync');
+const semanticRemote = require('./semantic-remote');
 const {
   endpointAiToolAttentionIds,
   failedInstallCheckIds,
@@ -930,7 +931,7 @@ app.post('/api/v1/discovery', checkIngestKey, validation.validateBody(validation
   });
 });
 
-app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gateSchema), (req, res) => {
+app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gateSchema), async (req, res) => {
   if (!enforceTenantForSensor(req, res)) return;
   const {
     prompt, user = 'unknown', destination = 'unknown', sourceIp = null,
@@ -1058,7 +1059,7 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
     });
   }
   const analyzeOpts = policy.analyzeOpts(pol);
-  const serverAnalysis = detector.analyze(prompt, analyzeOpts);
+  const serverAnalysis = await semanticRemote.augmentAnalysis(prompt, detector.analyze(prompt, analyzeOpts));
   const clientPreRedacted = declaredClientPreRedacted && clientAnalysis && !hasSensitivity(serverAnalysis);
   const clientRedactionResolved = (clientOutcome === 'redacted_sent' || clientOutcome === 'redacted_available') && clientPreRedacted;
   const analysis = clientPreRedacted ? clientAnalysis : serverAnalysis;
@@ -1482,7 +1483,7 @@ app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation
 
 // Scan an AI RESPONSE for sensitive data leaking back to the user (e.g. an MCP
 // tool pulled PII, or the model echoed it). Parity with output-scanning DLP.
-app.post('/api/v1/scan-response', checkIngestKey, validation.validateBody(validation.scanResponseSchema), (req, res) => {
+app.post('/api/v1/scan-response', checkIngestKey, validation.validateBody(validation.scanResponseSchema), async (req, res) => {
   if (!enforceTenantForSensor(req, res)) return;
   const { text, user = 'unknown', destination = 'unknown', source = 'api', orgId = null, sensor = null } = req.body || {};
   if (typeof text !== 'string' || !text.trim()) return res.status(400).json({ error: 'text (string) required' });
@@ -1494,7 +1495,7 @@ app.post('/api/v1/scan-response', checkIngestKey, validation.validateBody(valida
       reason: policy.destinationBlockReason(destination, pol),
     }, { leaked: false, findings: [], categories: [], redacted: '' });
   }
-  const analysis = detector.analyze(text, policy.analyzeOpts(pol));
+  const analysis = await semanticRemote.augmentAnalysis(text, detector.analyze(text, policy.analyzeOpts(pol)));
   const findings = analysis.findings.map((f) => ({ type: f.type, severity: f.severity, score: f.score, masked: detector.maskValue(f.type, f.value) }));
   const categories = (analysis.categories || []).map((c) => c.category);
   const redacted = safePreview(text, analysis);

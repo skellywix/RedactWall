@@ -1275,6 +1275,37 @@ Invoke-RestMethod `
 
 Purge events keep the redacted metadata and hash-chained audit trail intact, and evidence exports show purge timestamps and the non-sensitive field names removed.
 
+## Postgres Control Plane (Scale-Out)
+
+The default store is SQLite on local disk - right for a single-node
+customer-silo stack. For a shared or highly available control plane, the same
+synchronous storage interface runs on Postgres:
+
+```
+SENTINEL_DB_DRIVER=postgres
+SENTINEL_DATABASE_URL=postgresql://promptwall_app@db.internal:5432/promptwall
+```
+
+What you get on the Postgres driver:
+
+- **Schema migrations apply automatically on startup** (both drivers share one
+  ordered migration history; `schema_migrations` records what ran).
+- **Append-only audit is enforced in the database** - `UPDATE`/`DELETE` on the
+  audit table raise, and the hash chain still verifies end to end.
+- **Row-level tenant isolation**: the `queries` table carries an indexed
+  `orgId` column with `FORCE ROW LEVEL SECURITY`; setting the
+  `promptwall.org_id` session context confines reads and writes to one tenant.
+  Run the application as a NON-superuser role (superusers bypass RLS).
+- **Multiple control-plane replicas** can share one Postgres; set the same
+  `SENTINEL_SECRET` on every instance so sessions and receipts stay valid
+  across replicas, and put the replicas behind your load balancer.
+
+Backups on Postgres are the database's job: use `pg_dump` or your managed
+provider's snapshots (`npm run backup` covers the SQLite store only and will
+say so). After restoring a Postgres backup, `node -e
+"console.log(JSON.stringify(require('./server/db').verifyAuditChain()))"`
+must report `ok: true` before the restored plane serves traffic.
+
 ## Backup And Restore
 
 Back up the SQLite evidence store to local encrypted storage or a managed backup target:
@@ -1308,6 +1339,75 @@ npm run evidence:pack -- evidence-packs \
   backups/sentinel-YYYY-MM-DDTHH-MM-SS-sssZ.db \
   data/restored-sentinel.db
 ```
+
+### Scheduled Backups
+
+Install a recurring backup with retention pruning. On Windows, register a
+scheduled task (defaults: daily at 2:00 AM, `backups/` under the repo,
+30-day retention):
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install-backup-task.ps1 `
+  -Cadence Daily -At '2:00 AM' -BackupDir 'D:\promptwall-backups' -RetentionDays 30
+```
+
+Remove it with the same script and `-Uninstall`.
+
+On Linux, install a systemd service + timer pair (`promptwall-backup.timer`).
+`npm` mode runs `npm run backup` from a repo checkout; `docker` mode runs the
+backup inside the customer-silo container against the `/data` mount:
+
+```bash
+sudo bash scripts/install-backup-systemd.sh --mode npm \
+  --project-dir /opt/promptwall --backup-dir /var/backups/promptwall \
+  --retention-days 30 --on-calendar daily
+```
+
+Remove it with `sudo bash scripts/install-backup-systemd.sh --uninstall`. Both
+installers prune backups older than the retention window only after a
+successful backup, so a failing backup never deletes the last good copies.
+Point the backup directory at local disk that your existing encrypted backup
+tooling then ships off-host; the `.db` files are sensitive runtime state.
+
+### Disaster-Recovery Drill
+
+Run the one-command restore drill on a schedule (quarterly at minimum, and
+after any storage or host change):
+
+```bash
+npm run backup:drill
+```
+
+The drill creates a fresh backup, verifies the manifest hash, restores the
+backup to a scratch path, re-opens the restored database read-only, and
+checks that the restored audit hash-chain verifies and that the restored row
+counts match the manifest. It prints a prompt-free JSON report (hashes,
+counts, and PASS/FAIL checks only) and exits non-zero on any mismatch — wire
+it into monitoring so a failed drill pages someone. Use
+`-- --backup-dir <dir>` to run the drill against a specific backup location
+and `-- --keep` to retain the drill backup and restored copy for inspection;
+without `--keep` the drill removes everything it created.
+
+A passing drill proves the backup path works end to end: the live store's
+audit chain is intact, the backup is byte-identical to what the manifest
+recorded, and a restore of that backup yields a database whose evidence and
+tamper-evident chain still verify.
+
+### What Backups Do Not Cover
+
+The backup and drill cover only the SQLite evidence store. A full
+disaster-recovery kit must also capture, through your configuration
+management or secret manager:
+
+- `.env` secrets — above all `SENTINEL_DATA_KEY` / `SENTINEL_SECRET`
+  (without them, sealed raw prompts in a restored store cannot be revealed),
+  plus `ADMIN_PASSWORD`, `INGEST_API_KEY`, and any SCIM/OIDC credentials.
+- The policy file (`config/policy.json` or the `SENTINEL_POLICY_PATH`
+  target) and custom detectors (`SENTINEL_CUSTOM_DETECTORS_PATH`).
+- Other `config/` artifacts such as `evidence-schedule.json`.
+
+Store those artifacts alongside the `.db` backups and include them when you
+rehearse the restore.
 
 ## Validation Gate
 
