@@ -21,6 +21,7 @@ const path = require('path');
 const os = require('os');
 
 const detector = require('./detector');
+const email = require('./email');
 const fleet = require('./fleet');
 const adapters = require('../detection-engine/adapters');
 const processors = require('./processors');
@@ -2464,6 +2465,8 @@ app.post('/api/identity/test', ...adminRead, auth.requireCsrf, (req, res) => {
 
 // Daily digest: yesterday's decision counts to every destination subscribed to
 // the 'digest' event type. On a 24h timer and on demand for testing.
+let lastDigest = null;
+
 async function sendDailyDigest(actor = 'scheduler') {
   const s = db.stats();
   const alert = {
@@ -2473,13 +2476,48 @@ async function sendDailyDigest(actor = 'scheduler') {
     generatedAt: new Date().toISOString(),
   };
   const results = await subscriptions.dispatch(alert);
-  if (results.length) db.appendAudit({ action: 'DIGEST_SENT', actor, detail: `${results.filter((r) => r.status === 'delivered').length}/${results.length} delivered` });
+  lastDigest = { at: alert.generatedAt, delivered: results.filter((r) => r.status === 'delivered').length, total: results.length, actor };
+  if (results.length) db.appendAudit({ action: 'DIGEST_SENT', actor, detail: `${lastDigest.delivered}/${results.length} delivered` });
   return results;
 }
 setInterval(() => { sendDailyDigest().catch(() => {}); }, 24 * 3600 * 1000).unref();
 
 app.post('/api/reports/digest/send', ...adminWrite, async (req, res) => {
   res.json({ results: await sendDailyDigest(req.user.user) });
+});
+
+// Notification plumbing status for the console: SMTP relay wiring (secrets
+// redacted), email destinations, and the last digest run.
+app.get('/api/notifications/status', ...adminRead, (req, res) => {
+  const smtp = email.config();
+  const emailDests = subscriptions.publicDestinations().filter((d) => d.type === 'email');
+  res.json({
+    smtp: {
+      configured: smtp.enabled,
+      host: smtp.enabled ? smtp.host : null,
+      port: smtp.enabled ? smtp.port : null,
+      secure: smtp.secure,
+      from: smtp.enabled ? smtp.from : null,
+      authConfigured: !!smtp.user,
+    },
+    emailDestinations: emailDests.map((d) => ({ id: d.id, name: d.name, recipients: d.recipients, eventTypes: d.eventTypes })),
+    digest: { intervalHours: 24, last: lastDigest },
+  });
+});
+
+// Prove the relay end to end with a synthetic message. The recipient address
+// is audited masked; message content is fixed and prompt-free.
+app.post('/api/notifications/test-email', ...adminWrite, async (req, res) => {
+  const to = String((req.body || {}).to || '').trim();
+  if (!/^[^\s@]+@[^\s@]+$/.test(to)) return res.status(400).json({ error: 'provide a recipient address' });
+  const result = await email.send({
+    to,
+    subject: 'PromptWall test notification',
+    text: 'This is a test notification from your PromptWall console. Delivery works.',
+  });
+  const masked = to.replace(/^(.).*(@.*)$/, '$1***$2');
+  db.appendAudit({ action: 'EMAIL_TEST_SENT', actor: req.user.user, detail: `${masked}: ${result.ok ? 'delivered' : result.error}` });
+  res.json(result);
 });
 
 // Sensor staleness: when a tracked sensor goes silent past the fleet's 48h
