@@ -4204,6 +4204,68 @@ async function loadDeploy() {
   }
 }
 
+// ---- Overview: the always-up control room; every element jumps to its tab ----
+function overviewTile(jump, cls, value, label, meta, tone) {
+  return `<button class="stat ${cls}" type="button" data-tab-jump="${escapeHtml(jump)}" data-tooltip="${escapeHtml(`${label}: ${meta}. Click to open.`)}">
+      <div class="l"><span class="status-light tone-${escapeHtml(tone)}" aria-hidden="true"></span>${escapeHtml(label)}</div>
+      <div class="n">${escapeHtml(String(value))}</div>
+      <div class="m">${escapeHtml(meta)}</div>
+      <div class="stat-rule"></div>
+    </button>`;
+}
+
+function renderOverviewTiles({ stats, coverage, deliveries, audit }) {
+  const failed = deliveries ? deliveries.filter((d) => d.status === 'failed').length : null;
+  const chainOk = !!(audit && audit.integrity && audit.integrity.ok);
+  const tiles = [
+    stats && overviewTile('queue', stats.pending > 0 ? 'pending' : '', stats.pending, 'Pending approval', 'waiting on a decision', stats.pending > 0 ? 'warn' : 'secure'),
+    stats && overviewTile('activity', stats.todayBlocked > 0 ? 'alert' : '', stats.todayBlocked, 'Blocked today', 'policy stops', stats.todayBlocked > 0 ? 'critical' : 'secure'),
+    coverage && Number.isFinite(coverage.score) && overviewTile('coverage', '', `${coverage.score}/100`, 'Sensor coverage', 'fleet reporting score', coverage.score >= 70 ? 'secure' : 'warn'),
+    failed !== null && overviewTile('integrations', failed ? 'alert' : '', failed, 'Failed deliveries', 'SIEM and webhook sends', failed ? 'warn' : 'secure'),
+    audit && overviewTile('audit', '', chainOk ? 'Verified' : 'Check', 'Audit log', chainOk ? `${audit.integrity.count} linked entries` : 'integrity needs review', chainOk ? 'secure' : 'warn'),
+  ].filter(Boolean);
+  $('#overviewTiles').innerHTML = tiles.join('') || '<div class="empty">Waiting for the first data from your sensors.</div>';
+}
+
+function overviewRow(q, jump) {
+  const sev = q.maxSeverityLabel || 'low';
+  const tone = statusTone(q.status);
+  return `<button class="overview-row" type="button" data-tab-jump="${escapeHtml(jump)}">
+      <span class="ovr-when">${escapeHtml(fmtTime(q.createdAt))}</span>
+      <span class="sev ${sevClass(sev)}">${escapeHtml(sev)}</span>
+      <span class="ovr-what"><b>${escapeHtml(q.user || 'unknown')}</b> &rarr; ${escapeHtml(q.destination || '-')}</span>
+      <span class="pill ${escapeHtml(tone)} status-chip tone-${escapeHtml(statusToneClass(tone))}">${escapeHtml(humanize(q.status))}</span>
+    </button>`;
+}
+
+function renderOverviewLists(rows) {
+  if (!Array.isArray(rows)) return;
+  const pending = rows.filter((q) => q.status === 'pending').slice(0, 6);
+  $('#overviewQueue').innerHTML = pending.map((q) => overviewRow(q, 'queue')).join('')
+    || '<div class="empty">Nothing is waiting. New held prompts appear here the moment a sensor blocks one.</div>';
+  $('#overviewFeed').innerHTML = rows.slice(0, 8).map((q) => overviewRow(q, 'activity')).join('')
+    || '<div class="empty">No gated prompts yet. Activity streams in live once sensors report.</div>';
+}
+
+async function loadOverview() {
+  const [stats, rows, audit, deliveries, coverage] = await Promise.all([
+    dashboardJsonWithTimeout('/api/stats', 2200),
+    dashboardJsonWithTimeout('/api/queries?limit=50', 2200),
+    dashboardJsonWithTimeout('/api/audit?limit=10', 2200),
+    dashboardJsonWithTimeout('/api/subscriptions/deliveries?limit=50', 2200),
+    dashboardJsonWithTimeout('/api/coverage', 2600),
+  ]);
+  renderOverviewTiles({ stats, coverage, deliveries: deliveries && deliveries.deliveries, audit });
+  renderOverviewLists(rows);
+  const updated = $('#overviewUpdated');
+  if (updated) updated.textContent = 'UPDATED ' + new Date().toLocaleTimeString();
+}
+
+function refreshOverviewIfVisible() {
+  if (!$('#tab-overview').classList.contains('hidden')) loadOverview().catch(() => {});
+}
+setInterval(refreshOverviewIfVisible, 30000);
+
 function knownTabNames() {
   return $$('.tab[data-tab]')
     .map((tab) => tab.dataset.tab)
@@ -4212,19 +4274,19 @@ function knownTabNames() {
 
 function normalizeTabName(name) {
   const candidate = String(name || '').trim().toLowerCase();
-  return knownTabNames().includes(candidate) ? candidate : 'queue';
+  return knownTabNames().includes(candidate) ? candidate : 'overview';
 }
 
 function tabNameFromLocation() {
   const url = new URL(window.location.href);
   const queryTab = url.searchParams.get('tab');
   const hashTab = (url.hash || '').replace(/^#\/?/, '');
-  return normalizeTabName(queryTab || hashTab || 'queue');
+  return normalizeTabName(queryTab || hashTab || 'overview');
 }
 
 function syncTabUrl(name, { replace = false } = {}) {
   const url = new URL(window.location.href);
-  if (name === 'queue') url.searchParams.delete('tab');
+  if (name === 'overview') url.searchParams.delete('tab');
   else url.searchParams.set('tab', name);
   url.hash = '';
   if (url.href === window.location.href) return;
@@ -4247,6 +4309,7 @@ function activateTab(name, options = {}) {
   panel.classList.remove('hidden');
   window.scrollTo(0, 0);
   if (!options.skipHistory) syncTabUrl(targetName, { replace: options.replaceHistory });
+  if (targetName === 'overview') loadOverview();
   if (targetName === 'monitor') { renderMonitor(); loadPosture().catch(() => {}); loadSiemPackage().catch(() => {}); }
   if (targetName === 'audit') loadAudit();
   if (targetName === 'policy') loadPolicy();
@@ -4313,9 +4376,9 @@ $('#monitorSearch').addEventListener('blur', () => {
 
 function connectStream() {
   const es = new EventSource('/api/stream');
-  es.addEventListener('query', () => { loadStats(); loadQueue(); loadPosture().catch(() => {}); if (!$('#tab-coverage').classList.contains('hidden')) loadCoverage(); if (!$('#tab-lineage').classList.contains('hidden')) loadLineage(); if (!$('#tab-insights').classList.contains('hidden')) loadInsights(); flash(); });
-  es.addEventListener('decision', () => { loadStats(); loadQueue(); loadActivity(); loadPosture().catch(() => {}); if (!$('#tab-lineage').classList.contains('hidden')) loadLineage(); });
-  es.addEventListener('stats', () => { loadStats(); if (!$('#tab-monitor').classList.contains('hidden')) loadPosture().catch(() => {}); });
+  es.addEventListener('query', () => { loadStats(); loadQueue(); loadPosture().catch(() => {}); refreshOverviewIfVisible(); if (!$('#tab-coverage').classList.contains('hidden')) loadCoverage(); if (!$('#tab-lineage').classList.contains('hidden')) loadLineage(); if (!$('#tab-insights').classList.contains('hidden')) loadInsights(); flash(); });
+  es.addEventListener('decision', () => { loadStats(); loadQueue(); loadActivity(); loadPosture().catch(() => {}); refreshOverviewIfVisible(); if (!$('#tab-lineage').classList.contains('hidden')) loadLineage(); });
+  es.addEventListener('stats', () => { loadStats(); refreshOverviewIfVisible(); if (!$('#tab-monitor').classList.contains('hidden')) loadPosture().catch(() => {}); });
   es.onerror = () => { setLiveState('reconnecting'); };
   es.onopen = () => { setLiveState('live'); };
 }

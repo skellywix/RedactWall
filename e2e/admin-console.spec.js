@@ -12,6 +12,10 @@ async function login(page) {
   await page.getByRole('button', { name: 'Continue' }).click();
   await expect(page).toHaveURL(/\/index\.html$/);
   await expect(page.locator('#who')).toContainText('admin / Security Admin');
+  // The console lands on the live Overview; most flows here start from the queue.
+  await expect(page.locator('#tab-overview')).toBeVisible();
+  await page.locator('.rail .tab[data-tab="queue"]').click();
+  await expect(page.locator('#tab-queue')).toBeVisible();
 }
 
 function collectUiProblems(page) {
@@ -966,9 +970,18 @@ test('admin console tabs honor browser back, forward, and refresh', async ({ pag
   await expect(page.locator('.rail .tab[data-tab="policy"]')).toHaveAttribute('aria-current', 'page');
 
   await page.goBack();
-  await expect(page).toHaveURL(/\/index\.html$/);
+  await expect(page).toHaveURL(/\/index\.html\?tab=queue$/);
   await expect(page.locator('#tab-queue')).toBeVisible();
   await expect(page.locator('.rail .tab[data-tab="queue"]')).toHaveAttribute('aria-current', 'page');
+
+  await page.goBack();
+  await expect(page).toHaveURL(/\/index\.html$/);
+  await expect(page.locator('#tab-overview')).toBeVisible();
+  await expect(page.locator('.rail .tab[data-tab="overview"]')).toHaveAttribute('aria-current', 'page');
+
+  await page.goForward();
+  await expect(page).toHaveURL(/\/index\.html\?tab=queue$/);
+  await expect(page.locator('#tab-queue')).toBeVisible();
 
   await page.goForward();
   await expect(page).toHaveURL(/\/index\.html\?tab=policy$/);
@@ -982,11 +995,35 @@ test('admin console tabs honor browser back, forward, and refresh', async ({ pag
   await expect(page.locator('.rail .tab[data-tab="policy"]')).toHaveAttribute('aria-current', 'page');
 
   await page.locator('.rail .tab[data-tab="queue"]').click();
-  await expect(page).toHaveURL(/\/index\.html$/);
+  await expect(page).toHaveURL(/\/index\.html\?tab=queue$/);
   await expect(page.locator('#tab-queue')).toBeVisible();
   await page.locator('#tab-queue').getByRole('button', { name: 'Evidence', exact: true }).click();
   await expect(page).toHaveURL(/\/index\.html\?tab=audit$/);
   await expect(page.locator('#tab-audit')).toBeVisible();
+
+  expect(problems).toEqual([]);
+});
+
+test('overview is the landing tab and its tiles jump into the workflow', async ({ page }) => {
+  const problems = collectUiProblems(page);
+  await page.goto('/login.html');
+  await page.locator('#password').fill('e2e-pass');
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await expect(page).toHaveURL(/\/index\.html$/);
+
+  await expect(page.locator('#tab-overview')).toBeVisible();
+  await expect(page.locator('.rail .tab[data-tab="overview"]')).toHaveAttribute('aria-current', 'page');
+  await expect(page.locator('#overviewTiles .stat').first()).toBeVisible();
+  await expect(page.locator('#overviewUpdated')).toContainText('UPDATED');
+
+  await page.locator('#overviewTiles [data-tab-jump="queue"]').click();
+  await expect(page.locator('#tab-queue')).toBeVisible();
+  await expect(page).toHaveURL(/\/index\.html\?tab=queue$/);
+
+  await page.locator('.rail .tab[data-tab="overview"]').click();
+  await expect(page.locator('#tab-overview')).toBeVisible();
+  await page.locator('#tab-overview [data-tab-jump="activity"]').first().click();
+  await expect(page.locator('#tab-activity')).toBeVisible();
 
   expect(problems).toEqual([]);
 });

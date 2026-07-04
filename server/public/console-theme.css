@@ -480,6 +480,18 @@ tbody tr { transition: background var(--fast); }
   -webkit-backdrop-filter: blur(14px);
   backdrop-filter: blur(14px);
 }
+/* Opaque strip riding above the floating bar: scrolled content must never
+   peek through the sticky gap between the bar and the viewport edge. */
+.topbar::before {
+  content: '';
+  position: absolute;
+  left: -1px;
+  right: -1px;
+  top: -14px;
+  height: 22px; /* gap plus the corner radius, so the notches stay clean */
+  background: var(--bg);
+  z-index: -1;
+}
 .wrap { display: grid; gap: 12px; }
 
 @media (max-width: 1180px) {

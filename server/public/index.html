@@ -43,7 +43,7 @@
   --info-bg:rgba(10,132,255,.1);
   --gray-bg:rgba(110,115,128,.1);
   --ice-bg:rgba(10,132,255,.08);
-  --topbar-bg:rgba(245,247,251,.78);
+  --topbar-bg:rgba(245,247,251,.94);
   --input-bg:#ffffff;
   --code-bg:#f6f8fc;
   --surface-hover:rgba(22,38,66,.045);
@@ -94,7 +94,7 @@ body[data-theme="dark"]{
   --info-bg:rgba(99,179,255,.13);
   --gray-bg:rgba(161,168,182,.12);
   --ice-bg:rgba(99,179,255,.1);
-  --topbar-bg:rgba(16,17,20,.72);
+  --topbar-bg:rgba(16,17,20,.93);
   --input-bg:#14161b;
   --code-bg:#14161b;
   --surface-hover:rgba(190,205,230,.06);
@@ -580,6 +580,15 @@ button.chip{transition:border-color var(--fast),background var(--fast)}
 button.chip:hover{border-color:var(--blue);background:var(--blue-bg)}
 .deploy-install{margin-top:8px;font-size:12px;color:var(--mut)}
 .deploy-install b{color:var(--txt);font-weight:600;margin-right:6px}
+.overview-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:14px}
+@media (max-width:1180px){.overview-grid{grid-template-columns:1fr}}
+button.stat{text-align:left;font:inherit;cursor:pointer;border:1px solid var(--line)}
+button.stat:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.overview-row{display:flex;align-items:center;gap:10px;width:100%;text-align:left;font:inherit;cursor:pointer;background:transparent;border:0;border-bottom:1px solid var(--line);padding:10px 16px;color:var(--txt)}
+.overview-row:hover{background:var(--surface-hover)}
+.overview-row .ovr-when{color:var(--mut);font-size:12px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.overview-row .ovr-what{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
+.overview-row .ovr-what b{font-weight:600}
 .reasons{margin-top:8px;color:var(--mut);font-size:12px;line-height:1.5}
 .note{
   width:100%;
@@ -2194,7 +2203,11 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
     </div>
     <nav class="tabs" aria-label="Primary">
       <div class="rail-group-label" aria-hidden="true">Operate</div>
-      <button class="tab active" data-tab="queue" type="button" aria-current="page">
+      <button class="tab active" data-tab="overview" type="button" aria-current="page">
+        <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M4 13a8 8 0 0 1 16 0M12 13l3.5-3.5M4 19h16" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        Overview
+      </button>
+      <button class="tab" data-tab="queue" type="button">
         <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M5 5h14v5H5V5Zm0 9h14v5H5v-5Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg></span>
         Approval Queue <span class="badge hidden" id="qBadge">0</span>
       </button>
@@ -2213,11 +2226,11 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
       </button>
       <button class="tab" data-tab="coverage" type="button">
         <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M4 19V5m0 14h16M8 16V9m5 7V6m5 10v-4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-        Coverage
+        Sensor Coverage
       </button>
       <button class="tab" data-tab="lineage" type="button">
         <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M4 7h5l2 3h9M4 17h5l2-3h9M9 7v10" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-        Lineage
+        Data Lineage
       </button>
       <div class="rail-group-label" aria-hidden="true">Govern</div>
       <button class="tab" data-tab="catalog" type="button">
@@ -2255,17 +2268,17 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
       </button>
     </nav>
     <div class="rail-status">
-      <div class="rail-group-label" aria-hidden="true">Monitoring</div>
+      <div class="rail-group-label" aria-hidden="true">System status</div>
       <div class="status-line">
-        <span>Hash chain</span>
-        <button class="status-chip tone-secure" type="button" data-tooltip="Tamper-evident audit chain" data-status-detail="SECURE: append-only audit chain is enabled for admin and policy activity.">
-          <span class="status-light tone-secure" aria-hidden="true"></span>SECURE
+        <span>Audit log</span>
+        <button class="status-chip tone-secure" type="button" data-tooltip="Append-only, hash-chained audit log" data-status-detail="TAMPER-EVIDENT: every admin and policy action is written to an append-only, hash-chained audit log. Verify it on the Audit Log tab.">
+          <span class="status-light tone-secure" aria-hidden="true"></span>TAMPER-EVIDENT
         </button>
       </div>
       <div class="status-line">
-        <span>Local scan</span>
-        <button class="status-chip tone-live" type="button" data-tooltip="Local inspection loop" data-status-detail="MONITORING: local prompt inspection is active for connected sensors.">
-          <span class="status-light tone-live is-live" aria-hidden="true"></span>MONITORING
+        <span>Prompt scanning</span>
+        <button class="status-chip tone-live" type="button" data-tooltip="Prompts are inspected before release" data-status-detail="ACTIVE: prompts from connected sensors are inspected on-device before anything leaves for an AI service.">
+          <span class="status-light tone-live is-live" aria-hidden="true"></span>ACTIVE
         </button>
       </div>
       <div class="status-line"><span>Version</span><b>0.3.0</b></div>
@@ -2285,13 +2298,11 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
       </button>
       <span class="last-updated" id="lastUpdated">LAST UPDATED -</span>
       <div class="theme-toggle" role="group" aria-label="Color theme">
-        <button id="themeLight" type="button" data-theme-choice="light" aria-pressed="false" title="Switch to light">
+        <button id="themeLight" type="button" data-theme-choice="light" aria-pressed="false" title="Switch to light" aria-label="Switch to light">
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 4V2m0 20v-2M4.93 4.93 3.51 3.51m16.98 16.98-1.42-1.42M4 12H2m20 0h-2M4.93 19.07l-1.42 1.42M20.49 3.51l-1.42 1.42M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          Light
         </button>
-        <button id="themeDark" type="button" data-theme-choice="dark" aria-pressed="true" title="Switch to dark">
+        <button id="themeDark" type="button" data-theme-choice="dark" aria-pressed="true" title="Switch to dark" aria-label="Switch to dark">
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20.5 15.5A8.5 8.5 0 0 1 8.5 3.5 7 7 0 1 0 20.5 15.5Z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          Dark
         </button>
       </div>
       <span class="who" id="who"></span>
@@ -2303,24 +2314,62 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
     <div class="banner" id="banner" role="alert" aria-live="polite"></div>
 
     <div class="content-tabs">
-      <button class="tab active" data-tab="queue" type="button" aria-current="page">Approval Queue</button>
+      <button class="tab active" data-tab="overview" type="button" aria-current="page">Overview</button>
+      <button class="tab" data-tab="queue" type="button">Approval Queue</button>
       <button class="tab" data-tab="monitor" type="button">AI Command Center</button>
       <button class="tab" data-tab="insights" type="button">Insights</button>
       <button class="tab" data-tab="activity" type="button">All Activity</button>
-      <button class="tab" data-tab="coverage" type="button">Coverage</button>
+      <button class="tab" data-tab="coverage" type="button">Sensor Coverage</button>
       <button class="tab" data-tab="catalog" type="button">App Catalog</button>
       <button class="tab" data-tab="compliance" type="button">Compliance</button>
       <button class="tab" data-tab="integrations" type="button">Integrations</button>
       <button class="tab" data-tab="deploy" type="button">Deploy</button>
       <button class="tab" data-tab="identity" type="button">Identity</button>
-      <button class="tab" data-tab="lineage" type="button">Lineage</button>
+      <button class="tab" data-tab="lineage" type="button">Data Lineage</button>
       <button class="tab" data-tab="audit" type="button">Audit Log</button>
       <button class="tab" data-tab="policy" type="button">Configuration</button>
       <button class="tab" data-tab="updates" type="button">Updates</button>
     </div>
 
     <div class="wrap">
-      <section id="tab-queue" class="console-frame" aria-label="Approval Queue">
+      <section id="tab-overview" class="console-frame" aria-label="Overview">
+        <div class="console-frame-header">
+          <div class="console-frame-title">
+            <div>
+              <h2>Overview</h2>
+              <p>Live control room: what needs a decision, what sensors are catching, and where delivery needs attention. Every tile jumps to its tab to continue the work.</p>
+            </div>
+          </div>
+          <div class="console-frame-actions">
+            <span class="signal-updated" id="overviewUpdated">UPDATED -</span>
+          </div>
+        </div>
+        <div class="stats" id="overviewTiles" aria-live="polite"></div>
+        <div class="overview-grid">
+          <div class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Waiting on a decision</h2>
+                <span>Oldest held prompts - click to open the Approval Queue</span>
+              </div>
+              <button class="ghost mini" data-tab-jump="queue" type="button">Open queue</button>
+            </div>
+            <div id="overviewQueue" aria-live="polite"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>Live activity</h2>
+                <span>Latest gated prompts as they happen - click to open All Activity</span>
+              </div>
+              <button class="ghost mini" data-tab-jump="activity" type="button">Open activity</button>
+            </div>
+            <div id="overviewFeed" aria-live="polite"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="tab-queue" class="hidden console-frame" aria-label="Approval Queue">
         <div class="console-frame-header">
           <div class="console-frame-title">
             <div>
@@ -2457,7 +2506,7 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
           <div class="signal-section">
             <div class="signal-section-head">
               <div>
-                <h3>Market Hardening Flow</h3>
+                <h3>Hardening Focus Areas</h3>
                 <span id="marketHardeningSummary">Waiting for focus</span>
               </div>
             </div>
@@ -2467,7 +2516,7 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
           <div class="signal-section">
             <div class="signal-section-head">
               <div>
-                <h3>Competitive Readiness</h3>
+                <h3>Capability Benchmark</h3>
                 <span id="competitiveReadinessSummary">Waiting for data</span>
               </div>
             </div>
