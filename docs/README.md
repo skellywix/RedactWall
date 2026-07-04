@@ -53,6 +53,8 @@ Use this index when you know the job but not the file name.
 |-------|----------|
 | Competitive positioning and product direction | `COMPETITIVE_ALIGNMENT.md` |
 | Vendor-risk security trust package | `SECURITY_TRUST_PACKAGE.md` |
+| Architecture, crypto inventory, threat model | `SECURITY_WHITEPAPER.md` |
+| Security incident response runbook | `INCIDENT_RESPONSE.md` |
 | Examiner evidence, backup, restore, retention | `DEPLOYMENT.md` |
 
 ## Generated Docs

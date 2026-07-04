@@ -557,6 +557,7 @@ function summarize(rows, pol) {
     destinations: new Set(),
   };
   const statuses = {};
+  let unattributedEvents = 0;
 
   for (const item of configured) {
     if (!item.destination || item.destination === 'unknown' || governed.has(item.destination)) continue;
@@ -583,6 +584,7 @@ function summarize(rows, pol) {
     bumpFleetRow(fleetRow, q);
     fleetRows.set(fk, fleetRow);
     statuses[q.status || 'unknown'] = (statuses[q.status || 'unknown'] || 0) + events;
+    if (String(q.user || '').trim().toLowerCase() === 'unattributed@unmanaged') unattributedEvents += events;
 
     if (isDesktopCollectorEvent(q)) {
       desktopCollector.events += events;
@@ -671,11 +673,16 @@ function summarize(rows, pol) {
     + (unresolvedShadowDestinations ? 0 : 20),
   );
 
+  const totalEvents = (rows || []).reduce((sum, q) => sum + eventWeight(q), 0);
+  const unmanagedInstallMode = ['allow', 'flag', 'block'].includes(policy.unmanagedInstalls)
+    ? policy.unmanagedInstalls
+    : 'allow';
+
   return {
     generatedAt: new Date().toISOString(),
     score: Math.max(0, Math.min(100, score)),
     totals: {
-      events: (rows || []).reduce((sum, q) => sum + eventWeight(q), 0),
+      events: totalEvents,
       governedDestinations: governedTotal,
       governedActive,
       shadowEvents,
@@ -700,6 +707,9 @@ function summarize(rows, pol) {
       fleetRows: fleet.length,
       fleetCovered,
       fleetAttention,
+      unattributedEvents,
+      unattributedRate: totalEvents ? Math.round((unattributedEvents / totalEvents) * 1000) / 1000 : 0,
+      unmanagedInstallMode,
     },
     sensors,
     fleet,
@@ -786,6 +796,14 @@ function summarize(rows, pol) {
         detail: endpointFileFlowReports
           ? `${endpointFileFlowProfiles} configured / ${endpointFileFlowAttention} missing`
           : 'no file-flow profile heartbeat',
+      },
+      {
+        id: 'identity_attribution',
+        label: 'Identity attribution',
+        state: unattributedEvents ? 'attention' : 'covered',
+        detail: unattributedEvents
+          ? `${unattributedEvents} unattributed events / policy ${unmanagedInstallMode}`
+          : `every event attributed / policy ${unmanagedInstallMode}`,
       },
       {
         id: 'governed_destinations',

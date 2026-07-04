@@ -10,6 +10,21 @@ the product's security posture before they connect a live environment.
   tamper-evident audit, Security Admin MFA, secure sessions, encrypted retained
   approval data, default-deny AI apps, response scanning, required sensors,
   provider-runtime gateway coverage, and SOC handoff.
+- A SOC 2 readiness mapping (`soc2Readiness`): each control is tagged with the
+  Trust Services Criteria it supports (CC6.x access and boundary, CC7.x
+  monitoring and incident response, CC8.1 change management), and each
+  criterion inherits the worst status of its mapped controls. Self-attested,
+  not an audit opinion.
+- A vulnerability and patch policy (`vulnerabilityPolicy`): severity-based
+  patch SLAs (critical 72 hours, high 7 days, medium 30 days, low 90 days),
+  the CI `npm audit` cadence, and the dependency pinning posture.
+- A DPA/BAA posture block (`dpaBaaPosture`): local-first customer-silo
+  deployment, no prompt egress, no vendor telemetry, no default
+  sub-processors, and per-customer DPA and HIPAA BAA execution.
+- Retention and legal-hold state (`retentionLegalHold`): the active
+  `rawRetentionDays`, AES-256-GCM sealing posture, and an honest statement
+  that automated legal hold is not yet supported (purge suspension requires
+  operator action).
 - A bounded CycloneDX-style dependency inventory generated from
   `package-lock.json`.
 - Security questionnaire answers that map directly to package controls.
@@ -17,7 +32,9 @@ the product's security posture before they connect a live environment.
   review:ci`, audit-chain verification, examiner evidence export, and this trust
   package export.
 - Documentation pointers for deployment, managed extension rollout, gateway
-  enforcement, competitive alignment, and scheduled evidence packs.
+  enforcement, competitive alignment, scheduled evidence packs, the security
+  whitepaper (`SECURITY_WHITEPAPER.md`), and the incident response runbook
+  (`INCIDENT_RESPONSE.md`).
 
 ## What It Excludes
 

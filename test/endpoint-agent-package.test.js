@@ -56,6 +56,14 @@ function minimalFiles(agentBody) {
       body: Buffer.from('function collectAiToolInventory() {}\nfunction parseApprovedTools() {}\nmodule.exports = { collectAiToolInventory, parseApprovedTools };\n'),
     },
     {
+      path: 'sensors/endpoint-agent/collectors/desktop-app-flow.js',
+      body: Buffer.from('function desktopAppFlowProfiles() {}\nfunction publicAppFlowChecks() {}\nmodule.exports = { desktopAppFlowProfiles, publicAppFlowChecks };\n'),
+    },
+    {
+      path: 'sensors/endpoint-agent/fixtures/ocr-sample.png',
+      body: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    },
+    {
       path: 'sensors/endpoint-agent/collectors/clipboard-guard.js',
       body: Buffer.from('async function collectClipboard() { return { clientPreRedacted: true, cleared: true }; }\nconst cmd = "Set-Clipboard";\n'),
     },

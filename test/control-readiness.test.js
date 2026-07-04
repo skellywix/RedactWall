@@ -164,7 +164,7 @@ test('readiness calls out monitor-only proxy and missing MCP governance', () => 
   assert.strictEqual(report.mission.state, 'blocked');
   assert.strictEqual(report.mission.current.areaId, 'ai_gateway_enforcement');
   assert.strictEqual(report.mission.current.label, 'Record block, redact, or hold evidence');
-  assert.match(report.mission.current.command, /squid-icap/);
+  assert.match(report.mission.current.command, /icap:bridge/);
   assert.ok(report.mission.progress.open > 0);
   assert.ok(report.mission.proofLedger.missing > 0);
   assert.strictEqual(report.mission.proofLedger.current.areaId, 'ai_gateway_enforcement');

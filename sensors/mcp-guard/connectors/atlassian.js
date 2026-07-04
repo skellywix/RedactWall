@@ -6,7 +6,7 @@
  * result through the MCP connector SDK before any model receives it.
  */
 const { fetchWithTimeout } = require('../guard');
-const { connectorHealthCheck, sanitizeToolResult } = require('../sdk');
+const { connectorHealthCheck, htmlToText, sanitizeToolResult } = require('../sdk');
 
 const DEFAULT_MAX_BYTES = 512 * 1024;
 const DEFAULT_SCOPES = ['read:jira-work', 'read:page:confluence'];
@@ -160,33 +160,6 @@ async function fetchJson(url, method, opts = {}) {
   }
   const body = await readBoundedText(response, opts);
   return JSON.parse(body.text || '{}');
-}
-
-function decodeHtmlEntities(text) {
-  return String(text || '')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&#(\d+);/g, (_, code) => {
-      const n = Number(code);
-      return Number.isFinite(n) && n >= 32 && n <= 0xffff ? String.fromCharCode(n) : '';
-    });
-}
-
-function htmlToText(html) {
-  return decodeHtmlEntities(String(html || '')
-    .replace(/<\s*br\s*\/?>/gi, '\n')
-    .replace(/<\s*\/p\s*>/gi, '\n')
-    .replace(/<\s*\/div\s*>/gi, '\n')
-    .replace(/<[^>]+>/g, ' '))
-    .replace(/\r\n/g, '\n')
-    .replace(/[ \t]+/g, ' ')
-    .replace(/\n\s+/g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
 }
 
 function adfToText(value) {

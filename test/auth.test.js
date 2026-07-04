@@ -190,6 +190,7 @@ test('session verification preserves legacy admin cookies and rejects unknown ro
     role: 'security_admin',
     iat: verifiedLegacy.iat,
     exp: verifiedLegacy.exp,
+    stepUpUntil: 0,
   });
 
   const unknownRole = signedSession({ user: 'admin', role: 'owner', iat: Date.now(), exp: Date.now() + 60000 });

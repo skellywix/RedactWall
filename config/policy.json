@@ -64,6 +64,7 @@
   "mcpApprovalRequiredTools": [],
   "blockUnapprovedAiDestinations": true,
   "responseScanMode": "flag",
+  "unmanagedInstalls": "allow",
   "desktopCollectorDestination": "Desktop AI",
   "approvalRoutingRules": [],
   "policyScopes": [],

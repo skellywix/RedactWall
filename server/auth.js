@@ -151,6 +151,38 @@ function verifyTotpCode(code, now = Date.now()) {
   return false;
 }
 
+// ---- MFA recovery codes --------------------------------------------------------
+// Deterministically derived from the enrolled TOTP secret so operators can print
+// them at enrollment time (scripts/mfa-uri.js --recovery) without another secret
+// to distribute. Single-use enforcement lives in the db layer.
+const MFA_RECOVERY_CODE_COUNT = 8;
+
+function recoveryCodeAt(index, secret = ADMIN_TOTP_SECRET) {
+  const key = decodeBase32(secret);
+  if (!key || key.length < 10 || index < 0 || index >= MFA_RECOVERY_CODE_COUNT) return null;
+  const digest = crypto.createHmac('sha256', key).update(`recovery:${index}`).digest('hex');
+  return `${digest.slice(0, 5)}-${digest.slice(5, 10)}`.toUpperCase();
+}
+
+function recoveryCodes(secret = ADMIN_TOTP_SECRET) {
+  const codes = [];
+  for (let index = 0; index < MFA_RECOVERY_CODE_COUNT; index += 1) {
+    const code = recoveryCodeAt(index, secret);
+    if (code) codes.push(code);
+  }
+  return codes;
+}
+
+/** @returns {number} matching code index, or -1 when the code is unknown. */
+function recoveryCodeIndex(code, secret = ADMIN_TOTP_SECRET) {
+  const submitted = String(code || '').trim().toUpperCase();
+  if (!/^[0-9A-F]{5}-[0-9A-F]{5}$/.test(submitted)) return -1;
+  for (let index = 0; index < MFA_RECOVERY_CODE_COUNT; index += 1) {
+    if (safeCodeEqual(recoveryCodeAt(index, secret), submitted)) return index;
+  }
+  return -1;
+}
+
 // ---- brute-force throttling --------------------------------------------------
 const MAX_ATTEMPTS = Number(process.env.LOGIN_MAX_ATTEMPTS || 7);
 const WINDOW_MS = Number(process.env.LOGIN_WINDOW_MS || 15 * 60 * 1000);
@@ -177,6 +209,13 @@ function sign(payload) {
   const mac = crypto.createHmac('sha256', SECRET).update(body).digest('base64url');
   return `${body}.${mac}`;
 }
+// Deployment hook: app wiring registers a db-backed check so SCIM deactivation
+// invalidates already-issued session cookies, not just future logins.
+let sessionRevokedCheck = null;
+function setSessionRevokedCheck(fn) {
+  sessionRevokedCheck = typeof fn === 'function' ? fn : null;
+}
+
 function verify(token) {
   if (!token || !token.includes('.')) return null;
   const [body, mac] = token.split('.');
@@ -191,26 +230,27 @@ function verify(token) {
     const role = roles.normalizeRole(payload.role);
     if (!role) return null;
     payload.role = role;
+    payload.stepUpUntil = Number(payload.stepUpUntil) || 0;
     if (payload.provider !== 'oidc') {
       delete payload.provider;
       delete payload.idpSubject;
       delete payload.idpIssuer;
-      delete payload.stepUpUntil;
     } else {
       payload.idpSubject = String(payload.idpSubject || '').slice(0, 256);
       payload.idpIssuer = String(payload.idpIssuer || '').slice(0, 512);
-      payload.stepUpUntil = Number(payload.stepUpUntil) || 0;
     }
+    if (sessionRevokedCheck && sessionRevokedCheck(payload)) return null;
     return payload;
   } catch { return null; }
 }
 function sessionExtras(extras = {}) {
-  if (!extras || extras.provider !== 'oidc') return {};
+  const stepUp = { stepUpUntil: Number((extras || {}).stepUpUntil) || 0 };
+  if (!extras || extras.provider !== 'oidc') return stepUp;
   return {
+    ...stepUp,
     provider: 'oidc',
     idpSubject: String(extras.idpSubject || '').slice(0, 256),
     idpIssuer: String(extras.idpIssuer || '').slice(0, 512),
-    stepUpUntil: Number(extras.stepUpUntil) || 0,
   };
 }
 function createSession(user, role = roles.SECURITY_ADMIN, extras = {}) {
@@ -223,8 +263,25 @@ function createSession(user, role = roles.SECURITY_ADMIN, extras = {}) {
   });
 }
 
+const STEP_UP_TTL_MS = 5 * 60 * 1000;
+
+function stepUpSatisfied(session = {}, now = Date.now()) {
+  return Number(session.stepUpUntil) > now;
+}
+
 function oidcStepUpSatisfied(session = {}, now = Date.now()) {
-  return session.provider === 'oidc' && Number(session.stepUpUntil) > now;
+  return session.provider === 'oidc' && stepUpSatisfied(session, now);
+}
+
+/** Re-issue the caller's session with a short-lived elevation window. */
+function elevateSession(session = {}, now = Date.now()) {
+  if (!session || !session.user) return null;
+  return sign({
+    ...session,
+    stepUpUntil: now + STEP_UP_TTL_MS,
+    iat: session.iat || now,
+    exp: session.exp || (now + SESSION_TTL_MS),
+  });
 }
 
 function createCsrfToken(sessionToken) {
@@ -285,6 +342,8 @@ function requireCsrf(req, res, next) {
 module.exports = {
   authenticate, verifyPassword, verifyTotpCode, totpCode, createSession, verify, oidcStepUpSatisfied, createCsrfToken, verifyCsrfToken, sessionTokenFromRequest, requireAuth, requireRole, requireCsrf, deriveKey,
   loginStatus, registerFail, registerSuccess,
+  setSessionRevokedCheck, stepUpSatisfied, elevateSession, STEP_UP_TTL_MS,
+  recoveryCodes, recoveryCodeIndex, MFA_RECOVERY_CODE_COUNT,
   ADMIN_USER, ADMIN_PASSWORD_IS_DEFAULT: ADMIN_PASSWORD === DEFAULT_ADMIN_PASSWORD,
   ADMIN_MFA_REQUIRED: !!ADMIN_TOTP_SECRET,
   ADMIN_MFA_CONFIGURED: !!ADMIN_TOTP_KEY && ADMIN_TOTP_KEY.length >= 10,

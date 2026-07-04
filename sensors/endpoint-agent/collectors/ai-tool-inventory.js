@@ -37,6 +37,12 @@ const KNOWN_AI_TOOLS = [
     processNames: ['claude', 'claude.exe'],
   },
   {
+    id: 'copilot',
+    label: 'Microsoft Copilot',
+    executables: ['Copilot.exe', 'copilot'],
+    processNames: ['Copilot.exe', 'Copilot'],
+  },
+  {
     id: 'cursor',
     label: 'Cursor',
     executables: ['Cursor.exe', 'cursor'],

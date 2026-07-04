@@ -278,16 +278,16 @@ test('admin routes cover login failures, OIDC errors, update actions, identity e
     maxSeverityLabel: 'critical',
     reasons: ['unit pending approval'],
   });
-  const originalStepUpSatisfied = auth.oidcStepUpSatisfied;
+  const originalStepUpSatisfied = auth.stepUpSatisfied;
   try {
-    auth.oidcStepUpSatisfied = () => true;
+    auth.stepUpSatisfied = () => true;
     res = await jsonFetch(base, `/api/queries/${pending.id}/approve`, {
       headers: { cookie, 'x-csrf-token': csrfToken },
-      body: { password: 'wrong-but-oidc-fresh', note: 'fresh oidc step-up' },
+      body: { password: 'wrong-but-step-up-fresh', note: 'fresh step-up window' },
     });
     assert.strictEqual(res.status, 200);
   } finally {
-    auth.oidcStepUpSatisfied = originalStepUpSatisfied;
+    auth.stepUpSatisfied = originalStepUpSatisfied;
   }
 
   const originalUpdater = {

@@ -1,0 +1,74 @@
+# PromptWall network backstop: Squid + ICAP REQMOD bridge.
+#
+# Usage (from the repo root):
+#   cp infra/icap/squid.conf.example infra/icap/squid.conf
+#   # edit squid.conf: point the icap_service line at icap://icap-bridge:1344/reqmod
+#   docker compose -f infra/icap/docker-compose.icap.yml up --build
+#
+# Hardening mirrors docker-compose.gateway-ha.yml: read-only rootfs, all
+# capabilities dropped, no privilege escalation, tmpfs-only writable paths.
+services:
+  icap-bridge:
+    build: ../..
+    image: promptwall:icap-bridge
+    init: true
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
+    command: ["node", "scripts/squid-icap-bridge.js", "--host", "0.0.0.0", "--port", "1344"]
+    environment:
+      NODE_ENV: production
+      SENTINEL_URL: ${SENTINEL_URL:-http://host.docker.internal:4000}
+      INGEST_API_KEY: ${INGEST_API_KEY:?set INGEST_API_KEY}
+      ICAP_BRIDGE_MAX_BODY_BYTES: ${ICAP_BRIDGE_MAX_BODY_BYTES:-2097152}
+      ICAP_BRIDGE_RELEASE_WAIT_MS: ${ICAP_BRIDGE_RELEASE_WAIT_MS:-300000}
+    expose:
+      - "1344"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('net').connect(1344,'127.0.0.1').once('connect',function(){process.exit(0)}).once('error',function(){process.exit(1)})"]
+      interval: 15s
+      timeout: 4s
+      start_period: 5s
+      retries: 4
+    stop_grace_period: 30s
+    restart: unless-stopped
+
+  squid:
+    image: ubuntu/squid:6.10-24.10_edge
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETUID
+      - SETGID
+    read_only: true
+    tmpfs:
+      - /var/spool/squid:rw,size=128m
+      - /var/log/squid:rw,size=32m
+      - /var/run:rw,size=8m
+      - /tmp:rw,noexec,nosuid,size=16m
+    ports:
+      - "${PROMPTWALL_SQUID_PUBLIC_PORT:-3128}:3128"
+    volumes:
+      # Copy squid.conf.example to squid.conf first and point icap_service at
+      # icap://icap-bridge:1344/reqmod for this compose network.
+      - ./squid.conf:/etc/squid/squid.conf:ro
+    depends_on:
+      icap-bridge:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "squid -k check || exit 1"]
+      interval: 15s
+      timeout: 4s
+      start_period: 10s
+      retries: 4
+    stop_grace_period: 30s
+    restart: unless-stopped
