@@ -580,6 +580,17 @@ button.chip{transition:border-color var(--fast),background var(--fast)}
 button.chip:hover{border-color:var(--blue);background:var(--blue-bg)}
 .deploy-install{margin-top:8px;font-size:12px;color:var(--mut)}
 .deploy-install b{color:var(--txt);font-weight:600;margin-right:6px}
+.rationale{border:1px solid var(--line);border-radius:var(--radius-sm);margin:12px 16px;overflow:hidden}
+.rationale-head{padding:9px 12px;font-size:12px;font-weight:600;color:var(--mut);border-bottom:1px solid var(--line);text-transform:uppercase;letter-spacing:.06em}
+.rationale-head b{color:var(--txt);font-variant-numeric:tabular-nums}
+.rationale-row{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.rationale-row .rationale-what{min-width:130px}
+.rationale-row .rationale-what i{color:var(--mut);font-style:normal;font-size:11px;margin-left:4px}
+.rationale-conf{color:var(--mut);font-size:12px;white-space:nowrap}
+.rationale-pts{margin-left:auto;font-variant-numeric:tabular-nums;font-weight:600;color:var(--txt)}
+.rationale-regs{display:flex;gap:5px;flex-wrap:wrap;flex-basis:100%;padding-left:2px}
+.reg-chip{font-size:11px;border:1px solid var(--line);border-radius:999px;padding:1px 8px;color:var(--mut);background:var(--gray-bg)}
+.rationale-note{padding:8px 12px;font-size:11.5px;color:var(--mut)}
 .overview-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:14px}
 @media (max-width:1180px){.overview-grid{grid-template-columns:1fr}}
 button.stat{text-align:left;font:inherit;cursor:pointer;border:1px solid var(--line)}
@@ -2809,10 +2820,20 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
         <div class="console-frame-header">
           <div class="console-frame-title">
             <div>
-              <h2>Coverage</h2>
+              <h2>Sensor Coverage</h2>
               <p>Track governed destinations, sensor posture, endpoint inventory, and shadow-AI gaps.</p>
             </div>
           </div>
+        </div>
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Fleet by user</h2>
+              <span>Sensors report on each other: a user seen by one sensor but not its companions is a coverage gap</span>
+            </div>
+          </div>
+          <table><thead><tr><th>User</th><th>Browser extension</th><th>Endpoint agent</th><th>MCP guard</th><th>Coverage gaps</th></tr></thead>
+            <tbody id="fleetRows"></tbody></table>
         </div>
         <div class="coverage-grid">
           <div class="panel">
@@ -3140,6 +3161,19 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
           </div>
           <div class="console-frame-actions">
             <div class="configuration-status" id="configurationStatus"></div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Detection Tester</h2>
+              <span>Paste sample text to see exactly how the live policy would score and decide it - the sample is analyzed in memory and never stored or logged</span>
+            </div>
+            <button class="ghost" id="detectorTestRun" type="button">Test detection</button>
+          </div>
+          <div style="padding:14px 16px">
+            <textarea id="detectorTestInput" rows="3" style="width:100%" placeholder="e.g. Please summarize: member SSN 123-45-6789, card 4111 1111 1111 1111" aria-label="Sample text to test"></textarea>
+            <div id="detectorTestResult" aria-live="polite"></div>
           </div>
         </div>
         <div class="config-shell">

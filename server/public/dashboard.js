@@ -2073,6 +2073,7 @@ async function init() {
     b.textContent = 'Default admin password is active. Set ADMIN_PASSWORD before production.';
   }
   await refreshAll();
+  loadDetectorMeta().catch(() => {});
   activateTab(tabNameFromLocation(), { replaceHistory: true });
   connectStream();
 }
@@ -2278,6 +2279,58 @@ function renderQueueItem(q) {
   </article>`;
 }
 
+// ---- "Why this score": severity x confidence points + regulation citations ----
+let detectorMeta = null;
+
+async function loadDetectorMeta() {
+  detectorMeta = await dashboardJsonWithTimeout('/api/detectors/meta', 2500);
+}
+
+function rationaleEntries(q) {
+  if (Array.isArray(q.scoreBreakdown) && q.scoreBreakdown.length) return q.scoreBreakdown;
+  const sevLabel = (n) => (detectorMeta && detectorMeta.severityLabels && detectorMeta.severityLabels[n]) || 'medium';
+  const regsFor = (t) => (detectorMeta && detectorMeta.regulations && detectorMeta.regulations[t]) || [];
+  return (q.findings || []).map((f) => ({
+    kind: 'finding', type: f.type, severity: f.severity, severityLabel: sevLabel(f.severity),
+    confidence: f.confidence || ((f.score || 0) >= 0.9 ? 'very_likely' : (f.score || 0) >= 0.7 ? 'likely' : 'possible'),
+    points: Math.round((f.severity || 0) * (f.score || 0) * 8),
+    regulations: regsFor(f.type),
+  }));
+}
+
+function scoreRationale(q) {
+  const entries = rationaleEntries(q);
+  if (!entries.length) return '';
+  const rows = entries.map((e) => `
+    <div class="rationale-row">
+      <span class="sev ${sevClass(e.severityLabel)}">${escapeHtml(e.severityLabel)}</span>
+      <span class="rationale-what"><b>${escapeHtml(e.type)}</b>${e.kind === 'category' ? ' <i>content category</i>' : ''}</span>
+      <span class="rationale-conf" title="How sure the engine is: validated match = very likely, contextual = likely, pattern-only = possible">${escapeHtml(humanize(e.confidence || 'possible'))}</span>
+      <span class="rationale-pts" title="Points this detection added to the risk score (severity x confidence weight)">+${escapeHtml(e.points)}</span>
+      <span class="rationale-regs">${(e.regulations || []).map((r) => `<span class="reg-chip" title="Obligation this data falls under">${escapeHtml(r)}</span>`).join('')}</span>
+    </div>`).join('');
+  return `<div class="rationale">
+    <div class="rationale-head">Why this score: <b>${escapeHtml(q.riskScore ?? 0)}/100</b></div>
+    ${rows}
+    <div class="rationale-note">Each detection adds severity &times; confidence points. Chips cite the law or obligation that makes the data sensitive - these appear in the block reasons and audit trail too.</div>
+  </div>`;
+}
+
+async function runDetectorTest() {
+  const input = $('#detectorTestInput');
+  const out = $('#detectorTestResult');
+  const text = (input.value || '').trim();
+  if (!text) { out.innerHTML = '<div class="empty">Paste some sample text first.</div>'; return; }
+  const r = await api('/api/detectors/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
+  const d = await responseJsonObject(r, null);
+  if (!d) { out.innerHTML = '<div class="empty">Test failed - check your session.</div>'; return; }
+  const tone = d.decision === 'block' ? 'bad' : 'good';
+  out.innerHTML = `
+    <div class="reasons" style="margin-top:10px">${statusChip(tone, d.decision.toUpperCase(), `Decision under current policy\n${(d.reasons || []).join('\n')}`)}
+      ${escapeHtml((d.reasons || []).join('; '))}</div>
+    ${scoreRationale(d)}`;
+}
+
 function renderIncident(q) {
   const el = $('#incidentDetail');
   if (!q) {
@@ -2305,6 +2358,7 @@ function renderIncident(q) {
       <div class="risk-track"><i></i></div>
     </div>
     <div class="prompt">${escapeHtml(q.redactedPrompt)}</div>
+    ${scoreRationale(q)}
     <div class="posture-list">${matches}</div>`;
 }
 
@@ -2698,6 +2752,7 @@ function activityDetail(q) {
           <div class="datum"><label>Detected</label><b>${escapeHtml(detected)}</b></div>
           <div class="datum"><label>Risk</label><b>${escapeHtml(q.riskScore ?? 0)}/100</b></div>
         </div>
+        ${scoreRationale(q)}
         <div class="activity-detail-actions">
           ${q.status === 'pending' ? '<button class="ghost mini" data-tab-jump="queue" type="button">INSPECT</button>' : ''}
           <button class="ghost mini" data-tab-jump="audit" type="button">VIEW AUDIT</button>
@@ -3066,11 +3121,42 @@ async function testSubscription(id, btn) {
   loadIntegrations();
 }
 
+const FLEET_STATE_TONE = { active: 'secure', stale: 'warn', missing: 'bad' };
+const FLEET_SENSOR_LABEL = { browser_extension: 'Browser extension', endpoint_agent: 'Endpoint agent', mcp_guard: 'MCP guard' };
+
+function fleetStateChip(info) {
+  const detail = info.state === 'active'
+    ? `Reporting. Last seen ${fmt(info.lastSeen)}${info.version ? ` (v${info.version})` : ''}`
+    : info.state === 'stale'
+      ? `Went quiet. Last seen ${fmt(info.lastSeen)} - sensor may be uninstalled or broken`
+      : 'Never reported for this user';
+  return statusChip(FLEET_STATE_TONE[info.state] || 'neutral', info.state.toUpperCase(), detail);
+}
+
+function renderFleet(data) {
+  const body = $('#fleetRows');
+  if (!body || !data) return;
+  body.innerHTML = (data.users || []).map((u) => `<tr>
+      <td>${escapeHtml(u.user)}</td>
+      <td>${fleetStateChip(u.sensors.browser_extension)}</td>
+      <td>${fleetStateChip(u.sensors.endpoint_agent)}</td>
+      <td>${fleetStateChip(u.sensors.mcp_guard)}</td>
+      <td>${u.gaps.length
+        ? u.gaps.map((g) => `<span class="sev high">${escapeHtml(`${FLEET_SENSOR_LABEL[g.sensor] || g.sensor} ${g.state}`)}</span>`).join(' ')
+        : '<span class="sev low">covered</span>'}</td>
+    </tr>`).join('')
+    || '<tr><td colspan="5" class="empty">No sensors have reported yet. Fleet coverage appears as soon as a sensor sends its first event or heartbeat.</td></tr>';
+}
+
 async function loadCoverage() {
   setBusy('#tab-coverage .panel', true, 'RECONCILING');
   try {
-    const r = await api('/api/coverage');
+    const [r, fleetData] = await Promise.all([
+      api('/api/coverage'),
+      dashboardJsonWithTimeout('/api/fleet', 2500),
+    ]);
     const nextCoverage = await responseJsonObject(r, null);
+    if (fleetData) renderFleet(fleetData);
     if (!nextCoverage) return;
     currentCoverage = nextCoverage;
     renderCoverage(currentCoverage);
@@ -4214,13 +4300,15 @@ function overviewTile(jump, cls, value, label, meta, tone) {
     </button>`;
 }
 
-function renderOverviewTiles({ stats, coverage, deliveries, audit }) {
+function renderOverviewTiles({ stats, coverage, deliveries, audit, fleet }) {
   const failed = deliveries ? deliveries.filter((d) => d.status === 'failed').length : null;
   const chainOk = !!(audit && audit.integrity && audit.integrity.ok);
+  const gaps = fleet ? fleet.gapCount : null;
   const tiles = [
     stats && overviewTile('queue', stats.pending > 0 ? 'pending' : '', stats.pending, 'Pending approval', 'waiting on a decision', stats.pending > 0 ? 'warn' : 'secure'),
     stats && overviewTile('activity', stats.todayBlocked > 0 ? 'alert' : '', stats.todayBlocked, 'Blocked today', 'policy stops', stats.todayBlocked > 0 ? 'critical' : 'secure'),
     coverage && Number.isFinite(coverage.score) && overviewTile('coverage', '', `${coverage.score}/100`, 'Sensor coverage', 'fleet reporting score', coverage.score >= 70 ? 'secure' : 'warn'),
+    gaps !== null && overviewTile('coverage', gaps ? 'alert' : '', gaps, 'Coverage gaps', 'users missing a companion sensor', gaps ? 'warn' : 'secure'),
     failed !== null && overviewTile('integrations', failed ? 'alert' : '', failed, 'Failed deliveries', 'SIEM and webhook sends', failed ? 'warn' : 'secure'),
     audit && overviewTile('audit', '', chainOk ? 'Verified' : 'Check', 'Audit log', chainOk ? `${audit.integrity.count} linked entries` : 'integrity needs review', chainOk ? 'secure' : 'warn'),
   ].filter(Boolean);
@@ -4248,14 +4336,15 @@ function renderOverviewLists(rows) {
 }
 
 async function loadOverview() {
-  const [stats, rows, audit, deliveries, coverage] = await Promise.all([
+  const [stats, rows, audit, deliveries, coverage, fleetData] = await Promise.all([
     dashboardJsonWithTimeout('/api/stats', 2200),
     dashboardJsonWithTimeout('/api/queries?limit=50', 2200),
     dashboardJsonWithTimeout('/api/audit?limit=10', 2200),
     dashboardJsonWithTimeout('/api/subscriptions/deliveries?limit=50', 2200),
     dashboardJsonWithTimeout('/api/coverage', 2600),
+    dashboardJsonWithTimeout('/api/fleet', 2200),
   ]);
-  renderOverviewTiles({ stats, coverage, deliveries: deliveries && deliveries.deliveries, audit });
+  renderOverviewTiles({ stats, coverage, deliveries: deliveries && deliveries.deliveries, audit, fleet: fleetData });
   renderOverviewLists(rows);
   const updated = $('#overviewUpdated');
   if (updated) updated.textContent = 'UPDATED ' + new Date().toLocaleTimeString();
@@ -4344,6 +4433,7 @@ if ($('#refreshInsights')) $('#refreshInsights').onclick = loadInsights;
 if ($('#insightsWindow')) $('#insightsWindow').addEventListener('change', loadInsights);
 if ($('#exportActivityCsv')) $('#exportActivityCsv').addEventListener('click', exportActivityCsv);
 if ($('#exportAuditCsv')) $('#exportAuditCsv').addEventListener('click', exportAuditCsv);
+if ($('#detectorTestRun')) $('#detectorTestRun').addEventListener('click', () => { runDetectorTest().catch(() => {}); });
 if ($('#refreshCatalog')) $('#refreshCatalog').onclick = loadCatalog;
 if ($('#catalogImportBtn')) $('#catalogImportBtn').onclick = importCatalogCsv;
 if ($('#catalogAddBtn')) $('#catalogAddBtn').onclick = addCatalogApp;

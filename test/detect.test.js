@@ -158,6 +158,8 @@ test('analyze returns a safe empty result for non-string input', () => {
     maxSeverityLabel: 'none',
     riskScore: 0,
     entityCounts: {},
+    scoreBreakdown: [],
+    regulations: [],
   });
 });
 

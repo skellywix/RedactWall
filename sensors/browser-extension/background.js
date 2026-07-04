@@ -183,11 +183,17 @@ async function reportInstallHealth() {
   const missing = missingServerConfigReason(server);
   if (missing) return { ok: false, reason: missing, checks };
   if (!validServerOrigin(server.serverUrl)) return { ok: false, reason: 'invalid_server_url', checks };
-  return fetchJsonWithTimeout(String(server.serverUrl).replace(/\/+$/, '') + '/api/v1/heartbeat', {
+  const result = await fetchJsonWithTimeout(String(server.serverUrl).replace(/\/+$/, '') + '/api/v1/heartbeat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-api-key': server.ingestKey },
     body: JSON.stringify(buildHeartbeatBody(checks, who)),
   }, server.requestTimeoutMs);
+  // The control plane answers with the state of this user's OTHER sensors, so
+  // the extension can surface a missing/stale endpoint agent (and vice versa).
+  if (result.ok && result.body && result.body.companions) {
+    await chrome.storage.local.set({ fleetCompanions: { at: Date.now(), companions: result.body.companions } });
+  }
+  return result;
 }
 
 async function refreshPolicy() {

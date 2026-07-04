@@ -8,6 +8,7 @@ const fs = require('fs');
 const path = require('path');
 const pkg = require('../package.json');
 const adapters = require('../detection-engine/adapters');
+const detector = require('./detector');
 const customDetectors = require('./custom-detectors');
 const exactMatch = require('./exact-match');
 
@@ -713,6 +714,13 @@ function activePolicyException(policy = loadPolicy(), analysis = {}, context = {
   return null;
 }
 
+// Append the regulations behind a finding type to a verdict reason, so block
+// banners and audit entries say WHICH obligation the data fell under.
+function citedReason(label, type) {
+  const regs = type ? detector.regulationsFor(type) : [];
+  return regs.length ? label + ' [' + regs.join('; ') + ']' : label;
+}
+
 function evaluate(analysis, policy = loadPolicy(), context = {}, options = {}) {
   const effective = effectivePolicyForContext(policy, analysis, context, options);
   const reasons = [];
@@ -724,8 +732,11 @@ function evaluate(analysis, policy = loadPolicy(), context = {}, options = {}) {
   }
   if (categories.length) reasons.push('Sensitive content: ' + categories.map((c) => c && (c.category || c)).join(', '));
   const hardStop = findings.find((f) => (effective.alwaysBlock || []).includes(f.type));
-  if (hardStop) reasons.push('Hard-stop entity present: ' + hardStop.type);
-  if (analysis.maxSeverity >= effective.blockMinSeverity) reasons.push('Severity ' + analysis.maxSeverityLabel + ' >= policy minimum');
+  if (hardStop) reasons.push(citedReason('Hard-stop entity present: ' + hardStop.type, hardStop.type));
+  if (analysis.maxSeverity >= effective.blockMinSeverity) {
+    const driver = findings.find((f) => f.severity === analysis.maxSeverity && f.type !== (hardStop && hardStop.type));
+    reasons.push(citedReason('Severity ' + analysis.maxSeverityLabel + ' >= policy minimum', driver && driver.type));
+  }
   if (analysis.riskScore >= effective.blockRiskScore) reasons.push('Risk score ' + analysis.riskScore + ' >= ' + effective.blockRiskScore);
   if ((effective.appliedPolicyScopes || []).length) reasons.push('Policy scope matched: ' + effective.appliedPolicyScopes.join(', '));
 

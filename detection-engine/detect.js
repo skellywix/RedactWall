@@ -180,6 +180,54 @@
     PROMPT_ATTACK: 3,
   };
   const SEVERITY_LABEL = { 0: 'none', 1: 'low', 2: 'medium', 3: 'high', 4: 'critical' };
+  // Which laws/frameworks make each detection sensitive. These drive the
+  // examiner-facing "why was this blocked" rationale in sensors and console.
+  // Citations are the obligation the data falls under, not legal advice.
+  const REGULATIONS = Object.freeze({
+    US_SSN: Object.freeze(['GLBA 501(b)', 'NCUA 12 CFR 748', 'FTC Safeguards Rule']),
+    CREDIT_CARD: Object.freeze(['PCI-DSS Req 3', 'GLBA 501(b)']),
+    BANK_ACCOUNT: Object.freeze(['GLBA 501(b)', 'NCUA 12 CFR 748']),
+    ROUTING_NUMBER: Object.freeze(['GLBA 501(b)', 'NCUA 12 CFR 748']),
+    IBAN: Object.freeze(['GLBA 501(b)', 'GDPR Art. 32']),
+    SWIFT_BIC: Object.freeze(['GLBA 501(b)']),
+    MEMBER_ID: Object.freeze(['GLBA 501(b)', 'NCUA 12 CFR 748']),
+    LOAN_NUMBER: Object.freeze(['GLBA 501(b)', 'NCUA 12 CFR 748']),
+    US_TIN_EIN: Object.freeze(['IRS Pub 1075', 'GLBA 501(b)']),
+    US_ITIN: Object.freeze(['IRS Pub 1075', 'GLBA 501(b)']),
+    US_PASSPORT: Object.freeze(['GLBA 501(b)', 'state breach-notification laws']),
+    US_DRIVERS_LICENSE: Object.freeze(['DPPA 18 USC 2721', 'state breach-notification laws']),
+    US_LICENSE_PLATE: Object.freeze(['DPPA 18 USC 2721']),
+    DOB: Object.freeze(['GLBA 501(b)', 'GDPR Art. 4']),
+    MEDICAL_RECORD_NUMBER: Object.freeze(['HIPAA 45 CFR 164']),
+    HEALTH_INSURANCE_ID: Object.freeze(['HIPAA 45 CFR 164']),
+    HEALTH_RECORD: Object.freeze(['HIPAA 45 CFR 164']),
+    US_NPI: Object.freeze(['HIPAA 45 CFR 164 (context)']),
+    UK_NINO: Object.freeze(['UK GDPR / DPA 2018']),
+    UK_NHS_NUMBER: Object.freeze(['UK GDPR special category']),
+    CANADA_SIN: Object.freeze(['PIPEDA']),
+    AUSTRALIA_TFN: Object.freeze(['Privacy Act 1988 (TFN Rule)']),
+    INDIA_AADHAAR: Object.freeze(['Aadhaar Act 2016']),
+    INDIA_PAN: Object.freeze(['India IT Act']),
+    EMAIL_ADDRESS: Object.freeze(['GDPR Art. 4', 'CCPA']),
+    PHONE_NUMBER: Object.freeze(['GDPR Art. 4', 'CCPA']),
+    US_ADDRESS: Object.freeze(['GDPR Art. 4', 'CCPA']),
+    PERSON_NAME: Object.freeze(['GDPR Art. 4']),
+    IP_ADDRESS: Object.freeze(['GDPR Art. 4 (online identifier)']),
+    IPV6_ADDRESS: Object.freeze(['GDPR Art. 4 (online identifier)']),
+    SECRET_KEY: Object.freeze(['GLBA Safeguards', 'SOC 2 CC6']),
+    PRIVATE_KEY: Object.freeze(['GLBA Safeguards', 'SOC 2 CC6']),
+    CREDENTIALS: Object.freeze(['GLBA Safeguards', 'SOC 2 CC6']),
+    PASSWORD: Object.freeze(['GLBA Safeguards', 'SOC 2 CC6']),
+    CANARY_TOKEN: Object.freeze(['internal security control']),
+    EXACT_MATCH: Object.freeze(['organization-designated sensitive data']),
+    SOURCE_CODE: Object.freeze(['trade secret (DTSA)', 'company confidentiality']),
+    LEGAL_CONTRACT: Object.freeze(['company confidentiality', 'attorney-client privilege risk']),
+    CONFIDENTIAL_BUSINESS: Object.freeze(['trade secret (DTSA)', 'company confidentiality']),
+    VIN: Object.freeze(['DPPA 18 USC 2721']),
+    PROMPT_ATTACK: Object.freeze(['AI security guardrail']),
+  });
+  const NO_REGULATIONS = Object.freeze([]);
+  function regulationsFor(type) { return REGULATIONS[type] || NO_REGULATIONS; }
   // Graded confidence per finding (cf. Nightfall's Possible/Likely/Very Likely),
   // so an operator can tune policy on confidence, not just severity.
   const CONFIDENCE_LABEL = { 1: 'possible', 2: 'likely', 3: 'very_likely' };
@@ -655,11 +703,23 @@
     return cats;
   }
 
+  // One line of the "why this score" rationale: what was found, how sure the
+  // engine is, how many points it contributed, and which obligations apply.
+  function breakdownEntry(kind, type, severity, score) {
+    return {
+      kind, type, severity,
+      severityLabel: SEVERITY_LABEL[severity] || 'none',
+      confidence: CONFIDENCE_LABEL[confidenceTier(score)],
+      points: Math.round(severity * score * (kind === 'finding' ? 8 : 7)),
+      regulations: regulationsFor(type),
+    };
+  }
+
   function analyze(text, opts) {
     opts = opts || {};
     const disabled = new Set([].concat(opts.ignore || [], opts.disabledDetectors || []));
     if (!text || typeof text !== 'string') {
-      return { findings: [], categories: [], maxSeverity: 0, maxSeverityLabel: 'none', riskScore: 0, entityCounts: {} };
+      return { findings: [], categories: [], maxSeverity: 0, maxSeverityLabel: 'none', riskScore: 0, entityCounts: {}, scoreBreakdown: [], regulations: [] };
     }
     let findings = detectStructured(text, disabled, opts.customDetectors);
     if (opts.exactMatch && !disabled.has('EXACT_MATCH')) findings = findings.concat(detectExactMatch(text, opts.exactMatch));
@@ -669,18 +729,26 @@
     accepted.sort((a, b) => a.start - b.start);
     const categories = classifySemantic(text, disabled);
     const entityCounts = {};
+    const scoreBreakdown = [];
     let maxSeverity = 0;
     for (const f of accepted) {
       const tier = confidenceTier(f.score);
-      f.confidence = tier; f.confidenceLabel = CONFIDENCE_LABEL[tier];
+      f.confidence = tier; f.confidenceLabel = CONFIDENCE_LABEL[tier]; f.regulations = regulationsFor(f.type);
+      scoreBreakdown.push(breakdownEntry('finding', f.type, f.severity, f.score));
       entityCounts[f.type] = (entityCounts[f.type] || 0) + 1; if (f.severity > maxSeverity) maxSeverity = f.severity;
     }
-    for (const c of categories) { const sv = SEVERITY[c.category] || 2; if (sv > maxSeverity) maxSeverity = sv; entityCounts[c.category] = 1; c.confidence = confidenceTier(c.score); c.confidenceLabel = CONFIDENCE_LABEL[c.confidence]; }
+    for (const c of categories) {
+      const sv = SEVERITY[c.category] || 2;
+      if (sv > maxSeverity) maxSeverity = sv;
+      entityCounts[c.category] = 1; c.confidence = confidenceTier(c.score); c.confidenceLabel = CONFIDENCE_LABEL[c.confidence];
+      scoreBreakdown.push(breakdownEntry('category', c.category, sv, c.score));
+    }
     let raw = 0;
     for (const f of accepted) raw += f.severity * f.score * 8;
     for (const c of categories) raw += (SEVERITY[c.category] || 2) * c.score * 7;
     const riskScore = Math.min(100, Math.round(raw));
-    return { findings: accepted, categories, maxSeverity, maxSeverityLabel: SEVERITY_LABEL[maxSeverity] || 'none', riskScore, entityCounts };
+    const regulations = [...new Set(scoreBreakdown.flatMap((e) => e.regulations))];
+    return { findings: accepted, categories, maxSeverity, maxSeverityLabel: SEVERITY_LABEL[maxSeverity] || 'none', riskScore, entityCounts, scoreBreakdown, regulations };
   }
 
   function redact(text, findings) {
@@ -749,7 +817,7 @@
     return normalizeCustomDetectors(value).map(publicCustomDetector);
   }
 
-  const api = { analyze, redact, maskValue, tokenize, detokenize, tokenizePrompt, classifySemantic, _featurize, _lrProb, listDetectors, normalizeCustomDetectors, publicCustomDetectorConfig, edmFingerprint, normalizeExactMatchConfig, luhnValid, ssnPlausible, abaValid, ibanValid, vinValid, bankAccountPlausible, itinPlausible, npiValid, datePlausible, ipv6Valid, cardNetwork, ninoValid, nhsValid, sinValid, tfnValid, aadhaarValid, SEVERITY, SEVERITY_LABEL, CONFIDENCE_LABEL };
+  const api = { analyze, redact, maskValue, tokenize, detokenize, tokenizePrompt, classifySemantic, _featurize, _lrProb, listDetectors, normalizeCustomDetectors, publicCustomDetectorConfig, edmFingerprint, normalizeExactMatchConfig, luhnValid, ssnPlausible, abaValid, ibanValid, vinValid, bankAccountPlausible, itinPlausible, npiValid, datePlausible, ipv6Valid, cardNetwork, ninoValid, nhsValid, sinValid, tfnValid, aadhaarValid, regulationsFor, SEVERITY, SEVERITY_LABEL, CONFIDENCE_LABEL, REGULATIONS };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (root) root.PSDetect = api;
 })(typeof window !== 'undefined' ? window : (typeof self !== 'undefined' ? self : null));

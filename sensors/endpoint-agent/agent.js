@@ -262,6 +262,19 @@ async function report(rec, opts = {}) {
   return postJson('/api/v1/gate', rec, opts);
 }
 
+// Presence heartbeat: registers this agent with the control plane and learns
+// which companion sensors (browser extension, MCP guard) cover the same user.
+async function sendHeartbeat(opts = {}) {
+  const user = opts.user || os.userInfo().username;
+  const body = { user, source: 'endpoint_agent', sensor: sensorMetadata() };
+  const response = await postJson('/api/v1/heartbeat', body, opts);
+  const companions = response && response.companions;
+  if (companions && companions.browser_extension && companions.browser_extension !== 'active') {
+    (opts.console || console).log('  coverage gap: browser extension is ' + companions.browser_extension + ' for ' + user + ' (reported to console)');
+  }
+  return response;
+}
+
 function unscannedFileEvent(filename, user, outcome, note, opts = {}) {
   return {
     prompt: '[file blocked unscanned] ' + safeFileLabel(filename),
@@ -636,10 +649,15 @@ function start(opts = {}) {
   io.log('  ingest  :', key ? 'configured' : 'not configured (control-plane calls disabled)');
   io.log('  Supported: pdf, docx, xlsx, pptx, and text files. Drop a file in to scan.\n');
 
+  const heartbeat = opts.sendHeartbeat || sendHeartbeat;
   const initialRefresh = Promise.resolve(refresh({ silent: true })).finally(() => {
     for (const f of readDir(watchDir)) scanQueuedFile(f);
   });
-  const refreshTimer = setIntervalFn(() => refresh({ silent: true }), POLICY_REFRESH_MS);
+  Promise.resolve(heartbeat({ server, key })).catch(() => {});
+  const refreshTimer = setIntervalFn(() => {
+    refresh({ silent: true });
+    Promise.resolve(heartbeat({ server, key })).catch(() => {});
+  }, POLICY_REFRESH_MS);
   if (refreshTimer.unref) refreshTimer.unref();
   const watcher = watch(watchDir, (event, filename) => { if (filename && event === 'rename') setTimeoutFn(() => scanQueuedFile(filename), 200); });
   const fileFlowWatchers = profiles.concat(appFlowProfiles).map((profile) => startWatchedRoot(profile, {
@@ -661,6 +679,7 @@ module.exports = {
   processNativeHandoffFileSafe,
   processHandoffDirectory,
   report,
+  sendHeartbeat,
   postJson,
   fetchPolicy,
   refreshPolicy,

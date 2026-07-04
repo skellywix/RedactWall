@@ -121,6 +121,27 @@ async function maybeRefreshPolicy(opts = {}) {
   if (opts.policy || opts.skipPolicyRefresh) return;
   if (Date.now() - lastPolicyRefresh < (opts.policyRefreshMs || POLICY_REFRESH_MS)) return;
   await refreshPolicy({ ...opts, silent: opts.silentPolicyRefresh !== false });
+  sendHeartbeat(opts).catch(() => {});
+}
+
+// Presence heartbeat: registers this guard with the control plane and returns
+// the companion view (is the browser extension / endpoint agent also active
+// for this identity), so wrapped agents can surface coverage gaps.
+async function sendHeartbeat(opts = {}) {
+  const fetchImpl = opts.fetchImpl || globalThis.fetch;
+  const server = opts.server || SERVER;
+  const key = configuredKey(opts);
+  if (!fetchImpl || !key) return null;
+  try {
+    const r = await fetchWithTimeout(fetchImpl, server + '/api/v1/heartbeat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': key },
+      body: JSON.stringify({ user: opts.agent || 'mcp-agent', source: 'mcp_guard', sensor: sensorMetadata() }),
+    }, opts);
+    return await r.json().catch(() => null);
+  } catch (e) {
+    return null;
+  }
 }
 
 function publicFindings(analysis) {
@@ -313,6 +334,7 @@ module.exports = {
   requestTimeoutMs,
   fetchWithTimeout,
   sensorMetadata,
+  sendHeartbeat,
 };
 
 // ---- demo when run directly ------------------------------------------------
