@@ -239,6 +239,32 @@ test('POST /api/receipts/verify checks receipts for any console session', async 
   assert.strictEqual(malformed.status, 400);
 }));
 
+test('verifyReceipt rejects every malformed receipt shape with a specific reason', () => {
+  const valid = receipts.issueReceipt({
+    id: 'q_reason', status: 'allowed', outboundText: 'cleared text',
+    policy: { enforcementMode: 'block' }, destination: 'chat.example.com', user: 'u@example.test',
+  });
+  assert.deepStrictEqual(receipts.verifyReceipt(valid), { ok: true }, 'baseline receipt verifies');
+
+  const reasonFor = (receipt) => receipts.verifyReceipt(receipt).reason;
+  assert.strictEqual(reasonFor(null), 'not a receipt object');
+  assert.strictEqual(reasonFor('a-string'), 'not a receipt object');
+  assert.strictEqual(reasonFor({ ...valid, v: 99 }), 'unsupported receipt version');
+  assert.strictEqual(reasonFor({ ...valid, status: 'blocked' }), 'unknown receipt status');
+  assert.strictEqual(reasonFor({ ...valid, policySha256: 'zz' }), 'malformed policy hash');
+  assert.strictEqual(reasonFor({ ...valid, issuedAt: 'not-a-time' }), 'malformed issue time');
+  assert.strictEqual(reasonFor({ ...valid, sig: '' }), 'signature mismatch', 'missing signature (length mismatch)');
+  assert.strictEqual(reasonFor({ ...valid, sig: valid.sig.slice(0, -2) }), 'signature mismatch', 'truncated signature');
+});
+
+test('issueReceipt refuses unknown statuses and empty outbound text', () => {
+  assert.strictEqual(receipts.issueReceipt({ id: 'q_x', status: 'blocked', outboundText: 'text', policy: {} }), null);
+  assert.strictEqual(receipts.issueReceipt({ id: 'q_x', status: 'allowed', outboundText: '', policy: {} }), null);
+  const defaulted = receipts.issueReceipt({ id: 'q_x', status: 'allowed', outboundText: 'text', policy: {} });
+  assert.strictEqual(defaulted.destination, 'unknown');
+  assert.strictEqual(defaulted.user, 'unknown');
+});
+
 test.after(() => {
   for (const suffix of ['', '-wal', '-shm']) {
     try { fs.unlinkSync(process.env.SENTINEL_DB_PATH + suffix); } catch {}

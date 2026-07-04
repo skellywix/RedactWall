@@ -181,6 +181,21 @@ test('release token helper verifies hashes and fails closed on malformed stored 
   assert.strictEqual(releaseTokens.verifyReleaseToken({ status: 'allowed' }, ''), true);
 });
 
+test('a release token for one hold is rejected against every other hold', () => {
+  // Confused-deputy isolation: each hold verifies only its own token.
+  const holdA = releaseTokens.issueReleaseToken();
+  const holdB = releaseTokens.issueReleaseToken();
+
+  assert.strictEqual(releaseTokens.verifyReleaseToken({ _releaseTokenHash: holdA.hash }, holdA.token), true);
+  assert.strictEqual(releaseTokens.verifyReleaseToken({ _releaseTokenHash: holdB.hash }, holdA.token), false, "hold A's token must not open hold B");
+  assert.strictEqual(releaseTokens.verifyReleaseToken({ _releaseTokenHash: holdA.hash }, holdB.token), false, "hold B's token must not open hold A");
+});
+
+test('release token verification tolerates uppercase stored hashes', () => {
+  const issued = releaseTokens.issueReleaseToken();
+  assert.strictEqual(releaseTokens.verifyReleaseToken({ _releaseTokenHash: issued.hash.toUpperCase() }, issued.token), true);
+});
+
 test.after(() => {
   for (const suffix of ['', '-wal', '-shm']) {
     try { fs.unlinkSync(process.env.SENTINEL_DB_PATH + suffix); } catch {}
