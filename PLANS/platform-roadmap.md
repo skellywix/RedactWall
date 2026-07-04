@@ -38,20 +38,25 @@ buyers now expect.
 
 ## Current baseline (honest starting point, updated)
 
-What already exists in the repo, so this plan builds on reality, not aspiration:
+What already exists in the repo, so this plan builds on reality, not aspiration.
+This table was fact-checked against a full read of the codebase on branch
+`claude/promptwall-competitive-analysis-h9hjt8` (2 commits ahead of `main`; no
+open PRs or other in-flight remote branches at the time of writing — any local
+fixes not yet pushed are not reflected here and should be reconciled when they
+land). No `TODO`/`FIXME`/`stub` markers indicate partially-built features.
 
 | Area | Shipped today |
 | --- | --- |
 | Detection engine | Regex+validator PII; on-device logistic-regression semantic classifier; **prompt-attack/jailbreak intent (`PROMPT_ATTACK`)**; **international PII (UK/CA/AU/IN) with real checksums**; **Exact Data Match via salted fingerprints (`EXACT_MATCH`)**; expanded secrets; **tiered confidence**; unicode-injection stripping. Byte-identical browser copy via `sync-engine`. |
 | Enforcement | block / redact(tokenize+local rehydrate) / warn / justify / approve; hard-stop `alwaysBlock`; policy scopes + time-bound exceptions; response scanning (`/api/v1/scan-response`); MCP tool-output guard. |
-| Gateway primitives | `/api/v1/gate`, `/api/v1/scan-response`, `/api/v1/rehydrate`, `/api/v1/status/:id`, release tokens, fail-closed sensor policy cache, Squid/ICAP bridge script. **No first-class reverse-proxy LLM gateway service yet.** |
-| Discovery | Shadow-AI events; coverage posture; **AI app-risk catalog (`server/ai-app-catalog.js`)** with trains-on-data / personal-tier / data-residency attributes. **Catalog is static + in-memory; no persistence, ingestion, or review workflow yet.** |
+| Gateway primitives | `/api/v1/gate`, `/api/v1/scan-response`, `/api/v1/rehydrate`, `/api/v1/status/:id`, release tokens, fail-closed sensor policy cache. `scripts/squid-icap-bridge.js` is a **reference sketch, not a running service** (the ICAP REQMOD handler is only an outline). **No first-class reverse-proxy LLM gateway service yet.** |
+| Discovery | Shadow-AI events (browser + coverage); coverage posture; an existing **`/api/destinations/review`** govern/allow/block endpoint over discovered destinations; **AI app-risk catalog (`server/ai-app-catalog.js`)** with trains-on-data / personal-tier / data-residency attributes. **Catalog is a static in-memory list — no DB table, ingestion pipeline, or catalog-level review workflow yet; the review endpoint acts on the policy destination lists, not the catalog.** |
 | Console | 10 tabs incl. **new Insights dashboard** (`/api/insights`): activity-over-time, decision mix, risk distribution, top data types, categories, destinations w/ risk, shadow-AI by provider, top users. Dependency-free SVG charts. |
-| Sensors | Browser MV3 extension; endpoint agent (protected-upload, clipboard-guard, ai-tool-inventory, metadata-only native handoff); MCP guard + connector SDK (Microsoft 365 only). |
-| Enterprise | Local admin + distinct approver/auditor; OIDC; SCIM 2.0; RBAC; TOTP MFA + password step-up; hash-chained audit; signed safe-to-send receipts; single SIEM webhook (`schemaVersion 1`); notifiers (Slack/Teams/Jira/Linear/SMTP/webhook); retention purge; AES-256-GCM at rest; customer-silo AWS. |
-| Compliance | Evidence pack with control mappings for GLBA/NCUA/HIPAA/PCI **plus new AI-framework mappings** (NIST AI RMF, ISO 42001, EU AI Act, OWASP LLM Top 10, MITRE ATLAS). |
-| Data store | `better-sqlite3` single-node. Customer-silo only; no shared multi-tenant. |
-| OCR | `ocr.js` bridge exists but unbundled (needs `ENDPOINT_AGENT_OCR_COMMAND`). |
+| Sensors | Browser MV3 extension (identity from MDM managed storage, `unattributed@unmanaged` fallback, `managed_identity` install check); endpoint agent (protected-upload, clipboard-guard, ai-tool-inventory, metadata-only native handoff); MCP guard + connector SDK (Microsoft 365 only). All sensors **fail closed to block** when the control plane is unreachable. |
+| Enterprise | Local admin + distinct approver/auditor; OIDC (SCIM-backed); SCIM 2.0; RBAC; TOTP MFA + password step-up; hash-chained audit; signed safe-to-send receipts; **approval notifiers already multi-channel** (webhook/Slack/Teams/ticket/Jira/Linear/SMTP) with an idempotency `dedupeKey` and `deliveryStatus` (sent/partial/failed), but **synchronous best-effort — no retry queue or persisted delivery history**; **SIEM is a single webhook** (`server/alerts.js`, `schemaVersion 1`); retention purge; AES-256-GCM at rest; seat enforcement (`seat_limit_blocked`); customer-silo AWS. |
+| Compliance | Evidence pack (`schemaVersion 2`, `rawPromptBodiesIncluded:false`) with 9 control mappings for GLBA/NCUA/HIPAA/PCI **plus AI-framework mappings** (NIST AI RMF, ISO 42001, EU AI Act, OWASP LLM Top 10, MITRE ATLAS). |
+| Data store | `better-sqlite3` single-node (tables: `queries`, `audit`, `scim_users`, `scim_groups`; WAL). Tenancy is an `orgId` column, not row-isolated. No Postgres, no migration framework (only a one-time legacy-JSON importer). |
+| OCR | The `ocr.js` bridge **is** bundled and enforced by the endpoint packager (`endpointOcrIncluded:true`). Only the external OCR **engine/command** is unshipped and optional (`ENDPOINT_AGENT_OCR_COMMAND`); with none configured, image files return `ocr_required`. |
 
 Everything below is sequenced so each slice is independently deployable and
 provable, and so no slice weakens the audit/privacy guarantees the product sells.
@@ -134,6 +139,13 @@ deployable reverse-proxy service, `gateway/` (own process, shares
   latency, upstream, token id), Prometheus-style `/metrics`, config via env +
   `gateway/config.example.json`, Docker service in compose, operator runbook
   `docs/AI_GATEWAY.md`.
+- **Network backstop (unmanaged paths).** In parallel, promote
+  `scripts/squid-icap-bridge.js` from its current reference-sketch state into a
+  first-class, documented ICAP/proxy deployment (the REQMOD handler is only an
+  outline today). This is the honest answer to "the browser extension is
+  bypassable": managed sensors cover the common case; the ICAP bridge + gateway
+  cover unmanaged browsers/profiles/direct-API paths. Both call the same
+  `/api/v1/gate` so policy and evidence stay unified. (Tracks REVIEW.md item 9.)
 
 **Better than competitors:** the gateway inherits PromptWall's on-device
 detection and **hash-chained receipts** — every gated request produces a signed,
@@ -160,7 +172,13 @@ traffic-log discovery, risk scores, sanctioned status, custom apps, and review
 workflow.
 
 **What we build.** Promote the static `server/ai-app-catalog.js` into a
-persistent, reviewable catalog.
+persistent, reviewable catalog. Build on what exists: the browser + coverage
+shadow-AI discovery already produces prompt-free sightings, and
+`/api/destinations/review` + `policy.reviewDestination` already apply
+govern/allow/block decisions to the policy destination lists. The gap is that
+these operate on ad-hoc destinations, not a first-class catalog with risk
+metadata, aliases, ownership, and lifecycle — so this priority persists the
+catalog, wires discovery into it, and reuses the existing review decision path.
 
 - **Schema (`ai_apps` table / `server/app-catalog.js`).** `id, canonicalHost,
   aliases[], appName, provider, category, riskTier(1-4), riskAttributes{trains
@@ -175,10 +193,12 @@ persistent, reviewable catalog.
   is prompt-free (host + count + first/last seen + source), matched to a catalog
   entry via the existing `normalizeHost`/alias logic.
 - **Review workflow.** `GET/POST /api/catalog`, `/api/catalog/:id/review`
-  (govern | allow | block | mark-sanctioned | assign-owner). A decision writes
-  policy (governed/allowed/blocked destinations) atomically, is audited, and
-  emits a posture event. Surfaced as a new **App Catalog** console tab and woven
-  into the Insights "Top Destinations" and shadow-AI panels.
+  (govern | allow | block | mark-sanctioned | assign-owner). Reuse the existing
+  `policy.reviewDestination` path so a decision writes the policy
+  governed/allowed/blocked destination lists atomically, is audited, and emits a
+  posture event — then extend it to also update catalog sanctioned-status and
+  ownership. Surfaced as a new **App Catalog** console tab and woven into the
+  Insights "Top Destinations" and shadow-AI panels.
 - **Risk scoring.** Deterministic score from attributes (trains-on-data +
   personal-tier + non-US residency + unsanctioned) so it's explainable to an
   examiner — no opaque ML score.
@@ -204,22 +224,31 @@ export (Sentinel/Splunk/Chronicle/QRadar/Datadog) and SOAR/ticket integration.
 
 **What we build.**
 
-- **Posture subscriptions (`server/subscriptions.js`, M1).** Named destinations
-  (Sentinel, Splunk HEC, Chronicle, QRadar, Datadog, Slack/Teams, Jira/
-  ServiceNow, generic SOAR webhook), each with filters (min risk/severity, event
-  types), an **outbound queue with retry + exponential backoff + dedupe key**,
-  **delivery history** (status, attempts, last error — no payload bodies), and a
-  console **delivery dashboard**. Reuse `url-policy.js` HTTPS enforcement and the
-  existing sanitized `alerts.js` shape; bump to `schemaVersion 2` with an
-  explicit versioned event contract (`docs/EVENT_SCHEMA.md`).
+- **Posture subscriptions (`server/subscriptions.js`, M1).** This is an
+  *extension of existing pieces, not a from-scratch build*: `server/notifiers.js`
+  already sanitizes and delivers to multiple channels (webhook/Slack/Teams/
+  ticket/Jira/Linear/SMTP) and already computes an idempotency `dedupeKey` and a
+  `deliveryStatus` (sent/partial/failed); `server/alerts.js` already does the
+  sanitized SIEM webhook shape (`promptwall.security_event`, `schemaVersion 1`);
+  `url-policy.js` already enforces HTTPS-only. What's missing and what we add:
+  (a) a **named-destination registry** unifying SIEM targets (Sentinel, Splunk
+  HEC, Chronicle, QRadar, Datadog) and the existing notifier channels, each with
+  filters (min risk/severity, event types); (b) an **async outbound queue with
+  retry + exponential backoff** (today both paths are synchronous best-effort);
+  (c) a **persisted delivery-history store** (status, attempts, last error — no
+  payload bodies) with a console **delivery dashboard**; (d) bump the event
+  contract to `schemaVersion 2` with an explicit versioned schema
+  (`docs/EVENT_SCHEMA.md`). Reuse the existing `dedupeKey` for de-duplication.
 - **Two-way ticket state (M3).** Where the connector supports it (Jira/
   ServiceNow), poll/receive ticket status back onto the query so an approval's
-  external lifecycle is visible — metadata only.
-- **Compliance packaging (M3).** Expand evidence packs with SOC 2 readiness
-  matrix, SBOM (from `package-lock`), vulnerability/patch policy, DPA/BAA
-  posture, GLBA/NCUA control mappings (already partly present), incident-response
-  runbook pointer, retention/legal-hold state, and a security whitepaper
-  artifact. All generated, prompt-free, examiner-addressed.
+  external lifecycle is visible — metadata only. Builds on the existing native
+  Jira/Linear approval-ticket adapters.
+- **Compliance packaging (M3).** Extend the existing `schemaVersion 2` evidence
+  pack (`server/evidence.js`, already `rawPromptBodiesIncluded:false` with 9
+  control mappings) with SOC 2 readiness matrix, SBOM (from `package-lock`),
+  vulnerability/patch policy, DPA/BAA posture, incident-response runbook pointer,
+  retention/legal-hold state, and a security whitepaper artifact. All generated,
+  prompt-free, examiner-addressed.
 
 **Better than competitors:** every exported event and posture artifact is
 prompt-free by default and cross-checkable against the hash-chained audit log —
@@ -287,9 +316,15 @@ SLMs.
 
 **What we build.**
 
-- **Turnkey OCR (M2).** Packaged OCR install/check flow (bundled tesseract WASM
-  or a vetted binary) so `ENDPOINT_AGENT_OCR_COMMAND` is set up by the installer,
-  with `endpoint:check` verifying it. Closes the screenshot/image-paste bypass.
+- **Turnkey OCR (M2).** The plumbing already exists: `sensors/endpoint-agent/
+  ocr.js` is bundled by the packager (`endpointOcrIncluded:true`), routes image
+  files through OCR, and returns `ocr_required` when no engine is configured; the
+  gap is purely that the OCR **engine** is BYO via `ENDPOINT_AGENT_OCR_COMMAND`.
+  Ship a vetted default engine (bundled tesseract WASM or a pinned binary) and
+  have the installer set `ENDPOINT_AGENT_OCR_COMMAND` automatically, with
+  `endpoint:check` verifying an image actually extracts text. Closes the
+  screenshot/image-paste bypass and eliminates the `ocr_required` dead-end for
+  default installs.
 - **On-device semantic upgrade (M4).** Add an ONNX/WASM small-model path behind
   the existing `classifySemantic` seam (max-combine with current heuristics +
   logistic regression), for confidential-business, contracts, source code,
@@ -317,14 +352,28 @@ scalable multi-tenant control plane.
 
 **What we build.**
 
-- **Identity lifecycle (M3).** Harden SCIM/OIDC: durable provisioned-identity
-  state, deactivation → session/seat revocation, seat lifecycle, MFA
-  enrollment/recovery flow, step-up reauth as a dedicated flow (not inline).
-- **Signed/versioned sensor policy bundles (M3).** A signed, versioned policy
-  bundle (`server/policy-bundle.js`, Ed25519 or HMAC over canonical policy +
-  version + issuedAt + expiry) that browser/endpoint/MCP sensors verify and
-  evaluate **locally**, with offline expiry and fail-closed rules when a bundle
-  is stale or unverifiable. Moves scope evaluation to the sensor edge.
+- **Identity lifecycle (M3).** SCIM 2.0, OIDC (SCIM-backed), RBAC, TOTP MFA, and
+  password step-up already exist. Harden the lifecycle: durable
+  provisioned-identity state, deactivation → session/seat revocation (today
+  deactivation flips the SCIM `active` flag but session teardown is not
+  guaranteed), seat lifecycle, MFA enrollment/recovery flow, step-up reauth as a
+  dedicated flow (the current step-up is an inline password/OIDC `max_age` check).
+- **Guaranteed per-user attribution (M3).** Browser identity now resolves from
+  MDM managed storage and falls back to `unattributed@unmanaged`. For the
+  examiner story ("prove employee X didn't paste member data"), make managed
+  identity **first-class**: a policy option to flag or block `unmanaged`
+  installs, surface `unattributed@unmanaged` rate in Coverage, and treat it as a
+  posture gap — so per-user evidence is guaranteed, not best-effort. (The old
+  hardcoded `browser-user` gap in REVIEW.md item 8 is already resolved; this is
+  the next step.)
+- **Signed/versioned sensor policy bundles (M3).** Today sensors fetch plain
+  policy from `GET /api/v1/policy` and scope/exception evaluation happens
+  server-side; the only signing in the product is release tokens (SHA-256) and
+  HMAC receipts. Add a signed, versioned policy bundle
+  (`server/policy-bundle.js`, Ed25519 or HMAC over canonical policy + version +
+  issuedAt + expiry) that browser/endpoint/MCP sensors verify and evaluate
+  **locally**, with offline expiry and fail-closed rules when a bundle is stale
+  or unverifiable. Moves scope evaluation to the sensor edge.
 - **Commercial extension rollout (M3).** Stable extension IDs; Chrome/Edge/
   Firefox publishing checklist; MDM force-install packets (existing managed
   schema); signed update flow + rollback; adoption dashboard (from heartbeats);
