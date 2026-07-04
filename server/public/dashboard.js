@@ -3036,9 +3036,10 @@ function renderIntegrations(subs, deliveries) {
       <div class="sub-meta"><b>${escapeHtml(d.name)}</b><span class="insights-attr">${escapeHtml(d.type)}</span>
         <span class="sub-host">${escapeHtml(d.urlHost || '—')}</span>
         <span class="sub-filter">risk≥${d.minRisk} · sev≥${d.minSeverity}${d.eventTypes ? ' · ' + escapeHtml(d.eventTypes.join(',')) : ''}</span></div>
+      ${subTestBadge(d.id)}
       <button class="ghost mini" data-sub-test="${escapeHtml(d.id)}" type="button">Send test</button>
     </div>`).join('') || '<div class="insights-empty">No subscriptions configured. Add destinations in config/subscriptions.json.</div>';
-  $$('#subscriptionRows [data-sub-test]').forEach((btn) => { btn.onclick = () => testSubscription(btn.dataset.subTest); });
+  $$('#subscriptionRows [data-sub-test]').forEach((btn) => { btn.onclick = () => testSubscription(btn.dataset.subTest, btn); });
   $('#deliveryRows').innerHTML = deliveries.map((d) => `
     <tr><td>${fmtTime(d.ts)}</td><td>${escapeHtml(d.destName || d.destId)}</td><td>${escapeHtml(d.type || '')}</td>
       <td><span class="insights-chip ${DELIVERY_TONE[d.status] || 'tone-neutral'}">${escapeHtml(d.status)}</span></td>
@@ -3046,9 +3047,23 @@ function renderIntegrations(subs, deliveries) {
     || '<tr><td colspan="6" class="insights-empty">No deliveries yet.</td></tr>';
 }
 
-async function testSubscription(id) {
+const subTestResults = {};
+
+function subTestBadge(id) {
+  const t = subTestResults[id];
+  if (!t) return '';
+  const ok = t.status === 'delivered';
+  return `<span class="sub-test-result ${ok ? 'ok' : 'bad'}">Last test: ${escapeHtml(t.status)} · ${t.attempts} attempt(s) · ${escapeHtml(t.at)}</span>`;
+}
+
+async function testSubscription(id, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
   const r = await api(`/api/subscriptions/${encodeURIComponent(id)}/test`, { method: 'POST' });
-  if (r && r.ok) { const b = await r.json(); alert(`Test to ${id}: ${b.result.status} (attempts ${b.result.attempts})`); loadIntegrations(); }
+  const b = r && r.ok ? await r.json().catch(() => null) : null;
+  subTestResults[id] = b && b.result
+    ? { status: b.result.status, attempts: b.result.attempts || 0, at: new Date().toLocaleTimeString() }
+    : { status: 'failed', attempts: 0, at: new Date().toLocaleTimeString() };
+  loadIntegrations();
 }
 
 async function loadCoverage() {
