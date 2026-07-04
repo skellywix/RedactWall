@@ -34,6 +34,11 @@ reconstructed from `ITERATIONS.md` and git history.
 
 - Stale one-time QA artifacts (`.codex/`), the superseded project review
   (`REVIEW.md`), and the dead `server/index.js` re-export shim.
+- Machine-specific personal helper scripts and their npm aliases and docs:
+  the MECHA standing Docker test environment (`scripts/mecha-docker.ps1`,
+  `docker:mecha*`) and the Windows daily docs-sync scheduled task
+  (`scripts/sync-docs.ps1`, `scripts/install-docs-sync-task.ps1`,
+  `docs:sync*`, `docs/DOCUMENTATION_SYNC_TASK.md`).
 
 ## [0.3.0] - 2026-07-02
 

@@ -107,39 +107,6 @@ SENTINEL_POLICY_PATH=/data/policy.json
 SENTINEL_CUSTOM_DETECTORS_PATH=/data/custom-detectors.json
 ```
 
-## MECHA Standing Docker Test Environment
-
-The permanent local Docker test environment on MECHA uses:
-
-```text
-Compose project: promptwall-mecha-20260628
-URL: http://localhost:4027
-Env file: .env.mecha.local
-Volume: promptwall-mecha-20260628_promptwall-data
-```
-
-`.env.mecha.local` is ignored by Git and holds generated synthetic local test
-secrets. The standing volume is the reusable test store for mock SaaS events,
-local policy edits, backup drills, and evidence packs.
-
-Use these commands from the repo root:
-
-```bash
-npm run docker:mecha:status
-npm run docker:mecha
-npm run docker:mecha:rebuild
-npm run docker:mecha:restart
-npm run docker:mecha:check
-npm run docker:mecha:smoke
-npm run docker:mecha:logs
-npm run docker:mecha:stop
-```
-
-`docker:mecha:stop` stops the container without deleting the container, network,
-or named volume. Do not use `docker compose down -v` for this standing test
-stack unless you intentionally want to erase the MECHA test database and
-evidence files.
-
 ## Health Checks
 
 ```bash
@@ -192,14 +159,9 @@ SENTINEL_CUSTOM_DETECTORS_PATH=/data/custom-detectors.json
 
 For Docker image deployments, rebuild and roll the image through your normal
 host or CloudFormation process instead of using the source-clone updater inside
-a read-only container. The MECHA standing test stack can use this restart
-command after an update is applied from the host checkout:
-
-```text
-npm run docker:mecha:restart
-```
-
-Backend execution of that command is disabled unless the host sets:
+a read-only container. A host checkout can schedule a restart command after an
+update is applied, but backend execution of that command is disabled unless
+the host sets:
 
 ```text
 PROMPTWALL_UPDATE_RESTART_ENABLED=true

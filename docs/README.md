@@ -24,7 +24,6 @@ Use this index when you know the job but not the file name.
 | Endpoint agent, MCP guard, Docker, secrets, health checks | `DEPLOYMENT.md` |
 | Evidence pack schedule automation | `EVIDENCE_PACK_TASK.md` |
 | Security trust package export | `SECURITY_TRUST_PACKAGE.md` |
-| Daily docs sync automation | `DOCUMENTATION_SYNC_TASK.md` |
 
 ## Identity, Policy, And Workflow
 

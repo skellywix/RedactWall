@@ -122,7 +122,6 @@ docker compose up -d --build
 | `npm run endpoint:check` | Validates endpoint-agent runtime/config health. |
 | `npm run mcp:check` | Validates MCP guard runtime/config health. |
 | `npm run docs:demo-guide` | Refreshes generated current-state demo documentation sections. |
-| `npm run docs:sync:check` | Checks local documentation sync state. |
 
 ## Project Structure
 
