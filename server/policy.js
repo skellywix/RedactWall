@@ -8,7 +8,7 @@ const fs = require('fs');
 const path = require('path');
 const pkg = require('../package.json');
 const adapters = require('../detection-engine/adapters');
-const detector = require('./detector');
+const detector = require('../detection-engine/detect');
 const customDetectors = require('./custom-detectors');
 const exactMatch = require('./exact-match');
 

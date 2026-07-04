@@ -1076,7 +1076,7 @@ function workflowPatchFor(status) {
 
 async function updatePostureActionWorkflow(id, status, button) {
   if (!canAdminWrite()) {
-    alert('Request not allowed for this session.');
+    toast('Request not allowed for this session.');
     return;
   }
   if (!id) return;
@@ -1093,7 +1093,7 @@ async function updatePostureActionWorkflow(id, status, button) {
     return;
   }
   if (button) button.disabled = false;
-  if (response) alert(await apiErrorSummary(response, 'Action update failed'));
+  if (response) toast(await apiErrorSummary(response, 'Action update failed'));
 }
 
 async function sendPostureSnapshot() {
@@ -1216,7 +1216,7 @@ function parsePolicyJsonArray(value, label) {
     if (!Array.isArray(parsed)) throw new Error('expected array');
     return parsed;
   } catch {
-    alert(`${label} must be valid JSON array syntax.`);
+    toast(`${label} must be valid JSON array syntax.`);
     return null;
   }
 }
@@ -1283,7 +1283,7 @@ function suggestedPolicyId(prefix, matcherPrefix) {
 function appendGuidedScopeRule() {
   const matchers = collectPolicyMatchers('scope_builder');
   if (!Object.keys(matchers).length) {
-    alert('Scoped enforcement needs at least one matcher.');
+    toast('Scoped enforcement needs at least one matcher.');
     return;
   }
   const rule = {
@@ -1311,7 +1311,7 @@ function appendGuidedScopeRule() {
 function appendGuidedExceptionRule() {
   const matchers = collectPolicyMatchers('exception_builder');
   if (!Object.keys(matchers).length) {
-    alert('Time-bound exception needs at least one matcher.');
+    toast('Time-bound exception needs at least one matcher.');
     return;
   }
   const hours = Math.max(1, Math.min(24 * 30, Number($('#exception_builder_hours').value) || 24));
@@ -1616,8 +1616,40 @@ function queryText(q) {
   ].join(' ').toLowerCase();
 }
 
+// Search grammar: bare words match anywhere; `field:value` tokens match one
+// property (user:, dest:, status:, sev:, source:, action:, actor:).
+const SEARCH_FIELDS = {
+  user: (row) => row.user || row.actor || '',
+  actor: (row) => row.actor || row.user || '',
+  dest: (row) => row.destination || '',
+  destination: (row) => row.destination || '',
+  status: (row) => row.status || '',
+  sev: (row) => row.maxSeverityLabel || '',
+  severity: (row) => row.maxSeverityLabel || '',
+  source: (row) => row.source || '',
+  action: (row) => row.action || '',
+};
+
+function parseSearch(term) {
+  const fields = [];
+  const words = [];
+  for (const token of String(term || '').split(/\s+/).filter(Boolean)) {
+    const m = token.match(/^([a-z]+):(.+)$/);
+    if (m && SEARCH_FIELDS[m[1]]) fields.push({ get: SEARCH_FIELDS[m[1]], value: m[2] });
+    else words.push(token);
+  }
+  return { fields, words };
+}
+
+function matchesParsedSearch(row, text) {
+  if (!searchTerm) return true;
+  const { fields, words } = parseSearch(searchTerm);
+  return fields.every((f) => String(f.get(row)).toLowerCase().includes(f.value))
+    && words.every((w) => text.includes(w));
+}
+
 function matchesSearch(q) {
-  return !searchTerm || queryText(q).includes(searchTerm);
+  return matchesParsedSearch(q, queryText(q));
 }
 
 function lineageText(bucket) {
@@ -1649,7 +1681,7 @@ function auditText(entry = {}) {
 }
 
 function matchesAudit(entry) {
-  return !searchTerm || auditText(entry || {}).includes(searchTerm);
+  return matchesParsedSearch(entry || {}, auditText(entry || {}));
 }
 
 function withinRangeDays(ts, days) {
@@ -1685,6 +1717,63 @@ function downloadCsv(name, header, rows) {
 
 function csvStamp() {
   return new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+}
+
+// ---- Saved views: name the current search + range + page size ---------------
+function savedViews() {
+  try { return JSON.parse(localStorage.getItem('promptwall.savedViews') || '[]'); } catch { return []; }
+}
+
+function refreshSavedViewOptions() {
+  const sel = $('#savedViews');
+  if (!sel) return;
+  sel.innerHTML = '<option value="" selected>Saved views&hellip;</option>'
+    + savedViews().map((v, i) => `<option value="${i}">${escapeHtml(v.name)}</option>`).join('');
+}
+
+function saveCurrentView() {
+  const search = ($('#globalSearch').value || '').trim();
+  const name = search || (activityRangeDays ? `last ${activityRangeDays}d` : 'all activity');
+  const views = savedViews().filter((v) => v.name !== name);
+  views.unshift({ name, search, range: activityRangeDays, pageSize: activityPageSize });
+  localStorage.setItem('promptwall.savedViews', JSON.stringify(views.slice(0, 12)));
+  refreshSavedViewOptions();
+  toast(`View "${name}" saved.`, 'good');
+}
+
+function applySavedView(index) {
+  const view = savedViews()[Number(index)];
+  if (!view) return;
+  $('#globalSearch').value = view.search || '';
+  activityRangeDays = view.range || 0;
+  activityPageSize = view.pageSize || 10;
+  const range = $('#activityRange');
+  if (range) range.value = String(activityRangeDays);
+  const size = $('#activityPageSize');
+  if (size) size.value = String(activityPageSize);
+  updateSearch(view.search || '');
+}
+
+async function exportPolicyJson() {
+  const r = await api('/api/policy');
+  const pol = await responseJsonObject(r, null);
+  if (!pol) { toast('Could not load the policy for export.', 'bad'); return; }
+  const url = URL.createObjectURL(new Blob([JSON.stringify(pol, null, 2)], { type: 'application/json' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `promptwall-policy-${csvStamp()}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function exportInsightsCsv() {
+  const series = (currentInsights && currentInsights.series) || [];
+  if (!series.length) { toast('No insights data loaded yet.', 'bad'); return; }
+  downloadCsv(`promptwall-insights-${insightsWindowDays}d-${csvStamp()}.csv`,
+    ['Day', 'Allowed', 'Redacted', 'Warned', 'Flagged', 'Blocked', 'Shadow', 'Total'],
+    series.map((d) => [d.date, d.allowed || 0, d.redacted || 0, d.warned || 0, d.flagged || 0, d.blocked || 0, d.shadow || 0, d.total || 0]));
 }
 
 function exportActivityCsv() {
@@ -1766,7 +1855,7 @@ async function api(path, opts = {}) {
   next.headers = headers;
   const r = await fetch(path, next);
   if (r.status === 401 && !allowAuthError) { location.href = '/login.html'; return null; }
-  if (r.status === 403) alert('Request not allowed for this session. Refresh or use a Security Admin account.');
+  if (r.status === 403) toast('Request not allowed for this session. Refresh or use a Security Admin account.');
   return r;
 }
 
@@ -2215,12 +2304,24 @@ async function loadQueue() {
   }
 }
 
+const QUEUE_FILTER_LABEL = { all: 'All', mine: 'Mine', unassigned: 'Unassigned', escalated: 'Escalated' };
+
+function queueFilterCount(filter) {
+  const saved = queueFilter;
+  queueFilter = filter;
+  const count = currentQueue.filter(queueFilterMatches).length;
+  queueFilter = saved;
+  return count;
+}
+
 function renderQueueView() {
   const el = $('#queueList');
   $$('.queue-tools [data-queue-filter]').forEach((button) => {
     const active = button.dataset.queueFilter === queueFilter;
     button.classList.toggle('active', active);
     button.setAttribute('aria-pressed', String(active));
+    const name = button.dataset.queueFilter;
+    if (QUEUE_FILTER_LABEL[name]) button.textContent = `${QUEUE_FILTER_LABEL[name]} (${queueFilterCount(name)})`;
   });
   syncQueueFilterOptions();
   const rows = currentQueue.filter(queueMetadataMatches).filter(matchesSearch);
@@ -2449,6 +2550,47 @@ document.addEventListener('click', async (e) => {
     renderQueueView();
     return;
   }
+  const searchPivot = e.target.closest('[data-search-pivot]');
+  if (searchPivot) {
+    const box = $('#globalSearch');
+    box.value = searchPivot.dataset.searchPivot;
+    updateSearch(box.value);
+    return;
+  }
+  const catalogReview = e.target.closest('[data-catalog-review]');
+  if (catalogReview) {
+    catalogPendingReview = { host: catalogReview.dataset.catalogReview, decision: catalogReview.dataset.decision };
+    renderCatalog(catalogApps);
+    return;
+  }
+  const catalogConfirm = e.target.closest('[data-catalog-confirm]');
+  if (catalogConfirm && catalogPendingReview) {
+    const { host, decision } = catalogPendingReview;
+    const reason = ($('#catalogReviewReason').value || '').trim() || `${decision} decision from console`;
+    catalogPendingReview = null;
+    if (await submitCatalogReview(host, decision, reason)) {
+      toast(`${host} is now "${decision}".`, 'good');
+      loadCatalog();
+    } else renderCatalog(catalogApps);
+    return;
+  }
+  if (e.target.closest('[data-catalog-cancel]')) {
+    catalogPendingReview = null;
+    renderCatalog(catalogApps);
+    return;
+  }
+  const catalogBulk = e.target.closest('[data-catalog-bulk]');
+  if (catalogBulk) {
+    runCatalogBulk(catalogBulk.dataset.catalogBulk).catch(() => {});
+    return;
+  }
+  const catalogSortTh = e.target.closest('#tab-catalog th[data-catalog-sort]');
+  if (catalogSortTh) {
+    const key = catalogSortTh.dataset.catalogSort;
+    catalogSort = { key, dir: catalogSort.key === key ? -catalogSort.dir : (key === 'appName' || key === 'provider' ? 1 : -1) };
+    renderCatalog(catalogApps);
+    return;
+  }
   const copySha = e.target.closest('[data-copy-sha]');
   if (copySha && navigator.clipboard) {
     navigator.clipboard.writeText(copySha.dataset.copySha).then(() => {
@@ -2489,7 +2631,7 @@ document.addEventListener('click', async (e) => {
   const destinationReview = e.target.closest('[data-destination-review]');
   if (destinationReview) {
     if (!canAdminWrite()) {
-      alert('Request not allowed for this session. Use a Security Admin account.');
+      toast('Request not allowed for this session. Use a Security Admin account.');
       return;
     }
     const destination = destinationReview.dataset.destination;
@@ -2504,7 +2646,7 @@ document.addEventListener('click', async (e) => {
     });
     if (!r || !r.ok) {
       destinationReview.disabled = false;
-      alert('Destination review could not be saved.');
+      toast('Destination review could not be saved.');
       return;
     }
     const body = await r.json();
@@ -2521,7 +2663,7 @@ document.addEventListener('click', async (e) => {
     const q = currentQueue.find((item) => item.id === id) || {};
     if (act === 'reveal') {
       if (!canReveal(q)) {
-        alert(q.rawRetained === false
+        toast(q.rawRetained === false
           ? 'Raw prompt was not retained for this item.'
           : 'Request not allowed for this session. Use a Security Admin account.');
         return;
@@ -2538,10 +2680,10 @@ document.addEventListener('click', async (e) => {
       if (r.status === 401) {
         const body = await r.json().catch(() => ({}));
         if (body.error === 'unauthenticated') { location.href = '/login.html'; return; }
-        alert('Password confirmation failed.');
+        toast('Password confirmation failed.');
         return;
       }
-      if (r.status === 429) { alert('Too many confirmation attempts. Try again later.'); return; }
+      if (r.status === 429) { toast('Too many confirmation attempts. Try again later.'); return; }
       if (!r.ok) return;
       const body = await r.json();
       const rawRetained = body.rawRetained === true;
@@ -2560,7 +2702,7 @@ document.addEventListener('click', async (e) => {
     }
     if (act === 'approve' || act === 'deny') {
       if (!canDecide(q)) {
-        alert('Request not allowed for this session.');
+        toast('Request not allowed for this session.');
         return;
       }
       const note = ($(`#note_${CSS.escape(id)}`) || {}).value || '';
@@ -2576,12 +2718,12 @@ document.addEventListener('click', async (e) => {
       if (r && r.status === 401 && act === 'approve') {
         const body = await r.json().catch(() => ({}));
         if (body.error === 'unauthenticated') { location.href = '/login.html'; return; }
-        alert('Password confirmation failed.');
+        toast('Password confirmation failed.');
         actionButton.disabled = false;
         return;
       }
       if (r && r.status === 429 && act === 'approve') {
-        alert('Too many confirmation attempts. Try again later.');
+        toast('Too many confirmation attempts. Try again later.');
         actionButton.disabled = false;
         return;
       }
@@ -2615,6 +2757,14 @@ document.addEventListener('click', async (e) => {
 });
 
 document.addEventListener('change', (e) => {
+  const catalogSelect = e.target.closest('[data-catalog-select]');
+  if (catalogSelect) {
+    const host = catalogSelect.dataset.catalogSelect;
+    if (catalogSelect.checked) catalogSelected.add(host);
+    else catalogSelected.delete(host);
+    updateCatalogBulkBar();
+    return;
+  }
   if (e.target.matches('#activityRange')) {
     activityRangeDays = Number(e.target.value) || 0;
     activityPage = 1;
@@ -2756,6 +2906,8 @@ function activityDetail(q) {
         <div class="activity-detail-actions">
           ${q.status === 'pending' ? '<button class="ghost mini" data-tab-jump="queue" type="button">INSPECT</button>' : ''}
           <button class="ghost mini" data-tab-jump="audit" type="button">VIEW AUDIT</button>
+          ${q.user ? `<button class="ghost mini" data-search-pivot="user:${escapeHtml(q.user)}" type="button">SAME USER</button>` : ''}
+          ${q.destination ? `<button class="ghost mini" data-search-pivot="dest:${escapeHtml(q.destination)}" type="button">SAME DESTINATION</button>` : ''}
         </div>
       </div>
     </td>
@@ -2932,13 +3084,36 @@ const CATALOG_RISK_TONE = { critical: 'tone-critical', high: 'tone-high', modera
 const CATALOG_STATUS_TONE = { blocked: 'tone-critical', unsanctioned: 'tone-high', under_review: 'tone-neutral', tolerated: 'tone-medium', sanctioned: 'tone-low' };
 const CATALOG_ATTR_LABEL = { trains_on_data: 'Trains on data', personal_account_tier: 'Personal tier', data_residency_cn: 'Data in CN', data_residency_eu: 'Data in EU' };
 
+// ---- Toasts: non-blocking notices replacing toast() -------------------------
+function toast(message, tone = 'info') {
+  let stack = $('#toastStack');
+  if (!stack) {
+    stack = document.createElement('div');
+    stack.id = 'toastStack';
+    stack.setAttribute('aria-live', 'polite');
+    document.body.appendChild(stack);
+  }
+  const el = document.createElement('div');
+  el.className = `toast toast-${tone}`;
+  el.textContent = message;
+  stack.appendChild(el);
+  setTimeout(() => { el.classList.add('gone'); setTimeout(() => el.remove(), 300); }, 4200);
+}
+
+let catalogApps = [];
+let catalogSort = { key: 'eventCount', dir: -1 };
+let catalogSelected = new Set();
+let catalogPendingReview = null; // { host, decision }
+
 async function loadCatalog() {
   setBusy('#tab-catalog .panel', true, 'DISCOVERING');
   try {
     const r = await api('/api/catalog');
     const body = await responseJsonObject(r, null);
     if (!body) return;
-    renderCatalog(body.apps || []);
+    catalogApps = body.apps || [];
+    catalogSelected = new Set([...catalogSelected].filter((host) => catalogApps.some((a) => a.destination === host)));
+    renderCatalog(catalogApps);
     markUpdated();
   } finally {
     setBusy('#tab-catalog .panel', false);
@@ -2948,6 +3123,27 @@ async function loadCatalog() {
 function catalogAttrs(app) {
   const flags = (app.riskAttributes && app.riskAttributes.flags) || [];
   return flags.map((f) => `<span class="insights-attr">${escapeHtml(CATALOG_ATTR_LABEL[f] || f)}</span>`).join(' ') || '<span class="insights-attr-muted">—</span>';
+}
+
+function sortedCatalogApps(apps) {
+  const { key, dir } = catalogSort;
+  return [...apps].sort((a, b) => {
+    const va = a[key] == null ? '' : a[key];
+    const vb = b[key] == null ? '' : b[key];
+    if (typeof va === 'number' || typeof vb === 'number') return ((Number(va) || 0) - (Number(vb) || 0)) * dir;
+    return String(va).localeCompare(String(vb)) * dir;
+  });
+}
+
+function catalogGovernCell(a) {
+  if (catalogPendingReview && catalogPendingReview.host === a.destination) {
+    return `<input class="catalog-reason" id="catalogReviewReason" type="text" placeholder="Reason (audited)" value="${escapeHtml(catalogPendingReview.decision)} decision from console" aria-label="Review reason"/>
+      <button class="ghost mini" data-catalog-confirm="1" type="button">Confirm ${escapeHtml(catalogPendingReview.decision)}</button>
+      <button class="ghost mini" data-catalog-cancel="1" type="button">Cancel</button>`;
+  }
+  return `<button class="ghost mini" data-catalog-review="${escapeHtml(a.destination)}" data-decision="allow" type="button">Allow</button>
+    <button class="ghost mini" data-catalog-review="${escapeHtml(a.destination)}" data-decision="govern" type="button">Govern</button>
+    <button class="ghost mini danger" data-catalog-review="${escapeHtml(a.destination)}" data-decision="block" type="button">Block</button>`;
 }
 
 function renderCatalog(apps) {
@@ -2961,8 +3157,13 @@ function renderCatalog(apps) {
     insightsKpi('Elevated / high risk', high, 'by risk tier'),
     insightsKpi('Governed', governed, 'allow / govern / block'),
   ].join('');
-  $('#catalogRows').innerHTML = apps.map((a) => `
+  $$('#tab-catalog th[data-catalog-sort]').forEach((th) => {
+    th.classList.toggle('sorted', th.dataset.catalogSort === catalogSort.key);
+    th.dataset.sortDir = th.dataset.catalogSort === catalogSort.key ? (catalogSort.dir > 0 ? 'asc' : 'desc') : '';
+  });
+  $('#catalogRows').innerHTML = sortedCatalogApps(apps).map((a) => `
     <tr>
+      <td class="catalog-check"><input type="checkbox" data-catalog-select="${escapeHtml(a.destination)}" ${catalogSelected.has(a.destination) ? 'checked' : ''} aria-label="Select ${escapeHtml(a.destination)}"/></td>
       <td>${escapeHtml(a.appName || a.destination)}<div class="catalog-host">${escapeHtml(a.destination)}</div></td>
       <td>${escapeHtml(a.provider || '—')}</td>
       <td><span class="insights-chip ${CATALOG_RISK_TONE[a.riskTier] || 'tone-neutral'}">${escapeHtml(a.riskTier)}</span> <span class="catalog-score">${a.riskScore == null ? '' : a.riskScore}</span></td>
@@ -2970,37 +3171,80 @@ function renderCatalog(apps) {
       <td><span class="insights-chip ${CATALOG_STATUS_TONE[a.sanctionedStatus] || 'tone-neutral'}">${escapeHtml(a.sanctionedStatus.replace(/_/g, ' '))}</span></td>
       <td>${a.eventCount || 0}</td>
       <td class="catalog-sources">${escapeHtml(Object.keys(a.sources || {}).join(', ') || '—')}</td>
-      <td class="catalog-actions">
-        <button class="ghost mini" data-catalog-review="${escapeHtml(a.destination)}" data-decision="allow" type="button">Allow</button>
-        <button class="ghost mini" data-catalog-review="${escapeHtml(a.destination)}" data-decision="govern" type="button">Govern</button>
-        <button class="ghost mini danger" data-catalog-review="${escapeHtml(a.destination)}" data-decision="block" type="button">Block</button>
-      </td>
-    </tr>`).join('') || '<tr><td colspan="8" class="insights-empty">No AI apps discovered yet. Import a proxy/DNS log or wait for sensor sightings.</td></tr>';
-  $$('#catalogRows [data-catalog-review]').forEach((btn) => {
-    btn.onclick = () => reviewCatalogApp(btn.dataset.catalogReview, btn.dataset.decision);
-  });
+      <td class="catalog-actions">${catalogGovernCell(a)}</td>
+    </tr>`).join('') || '<tr><td colspan="9" class="insights-empty">No AI apps discovered yet. Import a proxy/DNS log or wait for sensor sightings.</td></tr>';
+  updateCatalogBulkBar();
+  const reason = $('#catalogReviewReason');
+  if (reason) { reason.focus(); reason.select(); }
 }
 
-async function reviewCatalogApp(host, decision) {
-  const reason = prompt(`Reason for "${decision}" on ${host}:`, `${decision} decision from console`);
-  if (reason == null) return;
+function updateCatalogBulkBar() {
+  const bar = $('#catalogBulkBar');
+  if (!bar) return;
+  bar.classList.toggle('hidden', catalogSelected.size === 0);
+  const count = $('#catalogBulkCount');
+  if (count) count.textContent = `${catalogSelected.size} selected`;
+  const all = $('#catalogSelectAll');
+  if (all) all.checked = catalogApps.length > 0 && catalogSelected.size === catalogApps.length;
+}
+
+async function submitCatalogReview(host, decision, reason) {
   const r = await api(`/api/catalog/${encodeURIComponent(host)}/review`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ decision, reason }) });
-  if (r && r.ok) loadCatalog();
+  if (r && r.ok) return true;
+  toast(`Could not save the ${decision} decision for ${host}.`, 'bad');
+  return false;
+}
+
+async function runCatalogBulk(decision) {
+  const reason = ($('#catalogBulkReason').value || '').trim() || `bulk ${decision} decision from console`;
+  const hosts = [...catalogSelected];
+  let done = 0;
+  for (const host of hosts) {
+    if (await submitCatalogReview(host, decision, reason)) done += 1;
+  }
+  toast(`${decision} applied to ${done} of ${hosts.length} app(s).`, done === hosts.length ? 'good' : 'bad');
+  catalogSelected.clear();
+  loadCatalog();
+}
+
+function exportCatalogCsv() {
+  downloadCsv(`promptwall-ai-apps-${csvStamp()}.csv`,
+    ['App', 'Host', 'Provider', 'Risk tier', 'Risk score', 'Status', 'Events', 'Sources'],
+    sortedCatalogApps(catalogApps).map((a) => [
+      a.appName || a.destination, a.destination, a.provider || '', a.riskTier, a.riskScore ?? '',
+      a.sanctionedStatus, a.eventCount || 0, Object.keys(a.sources || {}).join('; '),
+    ]));
 }
 
 async function importCatalogCsv() {
-  const csv = prompt('Paste AI hostnames (one per line, or host,count from a proxy/DNS log):', '');
-  if (!csv) return;
+  const csv = ($('#catalogImportCsv').value || '').trim();
+  if (!csv) { toast('Paste at least one hostname first.', 'bad'); return; }
   const r = await api('/api/catalog/import', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ csv }) });
-  if (r && r.ok) { const b = await r.json(); alert(`Imported ${b.imported} app(s), skipped ${b.skipped}.`); loadCatalog(); }
+  if (r && r.ok) {
+    const b = await r.json();
+    toast(`Imported ${b.imported} app(s), skipped ${b.skipped}.`, 'good');
+    $('#catalogImportForm').classList.add('hidden');
+    $('#catalogImportCsv').value = '';
+    loadCatalog();
+  } else {
+    toast('Import failed - check the format (host or host,count per line).', 'bad');
+  }
 }
 
 async function addCatalogApp() {
-  const destination = prompt('AI app host to add (e.g. internal-llm.corp):', '');
-  if (!destination) return;
-  const appName = prompt('Display name (optional):', destination) || undefined;
+  const destination = ($('#catalogAddHost').value || '').trim();
+  if (!destination) { toast('Enter the AI app host first.', 'bad'); return; }
+  const appName = ($('#catalogAddName').value || '').trim() || undefined;
   const r = await api('/api/catalog', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ destination, appName }) });
-  if (r && r.ok) loadCatalog();
+  if (r && r.ok) {
+    toast(`${destination} added to the catalog.`, 'good');
+    $('#catalogAddForm').classList.add('hidden');
+    $('#catalogAddHost').value = '';
+    $('#catalogAddName').value = '';
+    loadCatalog();
+  } else {
+    toast(`Could not add ${destination}.`, 'bad');
+  }
 }
 
 // ---- Compliance framework coverage ------------------------------------------
@@ -3134,7 +3378,7 @@ function fleetStateChip(info) {
 }
 
 function renderFleet(data) {
-  const body = $('#fleetRows');
+  const body = $('#fleetMatrixRows');
   if (!body || !data) return;
   body.innerHTML = (data.users || []).map((u) => `<tr>
       <td>${escapeHtml(u.user)}</td>
@@ -3437,6 +3681,8 @@ async function loadAudit() {
       : `${icons.shield}<span>Integrity check failed at ${escapeHtml(ig.brokenAt)}.</span>`;
     currentAuditEntries = d.entries;
     renderAuditRows(currentAuditEntries);
+    const retention = $('#auditRetention');
+    if (retention && d.retention) retention.textContent = d.retention;
     markUpdated();
   } finally {
     setBusy('#tab-audit .panel', false);
@@ -4196,7 +4442,7 @@ async function checkUpdate() {
   const r = await api('/api/update/check', { method: 'POST' });
   if (!r || !r.ok) {
     $('#updateConsoleStatus').innerHTML = statePill('bad', 'Check failed');
-    alert(r ? await apiErrorSummary(r, 'Could not check GitHub') : 'Could not check GitHub');
+    toast(r ? await apiErrorSummary(r, 'Could not check GitHub') : 'Could not check GitHub');
     await loadUpdates();
     return;
   }
@@ -4216,7 +4462,7 @@ async function runUpdate() {
   });
   if (!r || !r.ok) {
     $('#updateConsoleStatus').innerHTML = statePill('bad', 'Update failed');
-    alert(r ? await apiErrorSummary(r, 'Update failed') : 'Update failed');
+    toast(r ? await apiErrorSummary(r, 'Update failed') : 'Update failed');
     await loadUpdates();
     return;
   }
@@ -4228,7 +4474,7 @@ async function restartUpdatedService() {
   if (!proceed) return;
   const r = await api('/api/update/restart', { method: 'POST' });
   if (!r || !r.ok) {
-    alert(r ? await apiErrorSummary(r, 'Restart failed') : 'Restart failed');
+    toast(r ? await apiErrorSummary(r, 'Restart failed') : 'Restart failed');
     return;
   }
   $('#updateConsoleStatus').innerHTML = statePill('warn', 'Restarting');
@@ -4434,9 +4680,25 @@ if ($('#insightsWindow')) $('#insightsWindow').addEventListener('change', loadIn
 if ($('#exportActivityCsv')) $('#exportActivityCsv').addEventListener('click', exportActivityCsv);
 if ($('#exportAuditCsv')) $('#exportAuditCsv').addEventListener('click', exportAuditCsv);
 if ($('#detectorTestRun')) $('#detectorTestRun').addEventListener('click', () => { runDetectorTest().catch(() => {}); });
+if ($('#saveView')) $('#saveView').addEventListener('click', saveCurrentView);
+if ($('#savedViews')) {
+  refreshSavedViewOptions();
+  $('#savedViews').addEventListener('change', (e) => { if (e.target.value !== '') { applySavedView(e.target.value); e.target.value = ''; } });
+}
+if ($('#policyExportBtn')) $('#policyExportBtn').addEventListener('click', () => { exportPolicyJson().catch(() => {}); });
+if ($('#insightsExportCsv')) $('#insightsExportCsv').addEventListener('click', exportInsightsCsv);
 if ($('#refreshCatalog')) $('#refreshCatalog').onclick = loadCatalog;
-if ($('#catalogImportBtn')) $('#catalogImportBtn').onclick = importCatalogCsv;
-if ($('#catalogAddBtn')) $('#catalogAddBtn').onclick = addCatalogApp;
+if ($('#catalogImportBtn')) $('#catalogImportBtn').onclick = () => { $('#catalogImportForm').classList.toggle('hidden'); $('#catalogAddForm').classList.add('hidden'); };
+if ($('#catalogAddBtn')) $('#catalogAddBtn').onclick = () => { $('#catalogAddForm').classList.toggle('hidden'); $('#catalogImportForm').classList.add('hidden'); };
+if ($('#catalogAddConfirm')) $('#catalogAddConfirm').onclick = () => { addCatalogApp().catch(() => {}); };
+if ($('#catalogAddCancel')) $('#catalogAddCancel').onclick = () => $('#catalogAddForm').classList.add('hidden');
+if ($('#catalogImportConfirm')) $('#catalogImportConfirm').onclick = () => { importCatalogCsv().catch(() => {}); };
+if ($('#catalogImportCancel')) $('#catalogImportCancel').onclick = () => $('#catalogImportForm').classList.add('hidden');
+if ($('#catalogExportCsv')) $('#catalogExportCsv').onclick = exportCatalogCsv;
+if ($('#catalogSelectAll')) $('#catalogSelectAll').addEventListener('change', (e) => {
+  catalogSelected = e.target.checked ? new Set(catalogApps.map((a) => a.destination)) : new Set();
+  renderCatalog(catalogApps);
+});
 if ($('#refreshCompliance')) $('#refreshCompliance').onclick = loadCompliance;
 if ($('#complianceExportBtn')) $('#complianceExportBtn').onclick = () => { window.open('/api/export/evidence', '_blank'); };
 if ($('#refreshIntegrations')) $('#refreshIntegrations').onclick = loadIntegrations;

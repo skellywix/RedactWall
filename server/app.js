@@ -2397,7 +2397,11 @@ app.put('/api/policy/apply-template', ...adminWrite, validation.validateBody(val
 });
 
 app.get('/api/audit', auth.requireAuth, (req, res) => {
-  res.json({ entries: db.listAudit(boundedApiLimit(req.query.limit, 200)), integrity: db.verifyAuditChain() });
+  res.json({
+    entries: db.listAudit(boundedApiLimit(req.query.limit, 200)),
+    integrity: db.verifyAuditChain(),
+    retention: 'Append-only and hash-chained: entries are never edited or purged for the life of this database. Export an evidence pack for long-term archives.',
+  });
 });
 
 // Safe-to-send receipt verification: any console session (including read-only

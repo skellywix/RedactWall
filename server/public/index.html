@@ -580,6 +580,21 @@ button.chip{transition:border-color var(--fast),background var(--fast)}
 button.chip:hover{border-color:var(--blue);background:var(--blue-bg)}
 .deploy-install{margin-top:8px;font-size:12px;color:var(--mut)}
 .deploy-install b{color:var(--txt);font-weight:600;margin-right:6px}
+#toastStack{position:fixed;right:18px;bottom:18px;z-index:60;display:flex;flex-direction:column;gap:8px;max-width:340px}
+.toast{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--blue);border-radius:var(--radius-sm);box-shadow:var(--shadow-raised);padding:10px 14px;font-size:13px;color:var(--txt);opacity:1;transition:opacity .3s,transform .3s}
+.toast-good{border-left-color:var(--green)}
+.toast-bad{border-left-color:var(--red)}
+.toast.gone{opacity:0;transform:translateY(6px)}
+.catalog-form-body{display:flex;gap:10px;padding:14px 16px;align-items:center;flex-wrap:wrap}
+.catalog-form-body input[type="text"]{max-width:280px}
+.catalog-form-column{flex-direction:column;align-items:stretch}
+.catalog-form-actions{display:flex;gap:10px}
+.catalog-bulk{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.catalog-bulk input{max-width:230px}
+.catalog-check{width:28px}
+.catalog-reason{max-width:180px;display:inline-block;margin-right:6px}
+th[data-catalog-sort]{cursor:pointer;user-select:none}
+th[data-catalog-sort].sorted::after{content:" " attr(data-sort-dir);font-size:9px;text-transform:uppercase;color:var(--blue)}
 .rationale{border:1px solid var(--line);border-radius:var(--radius-sm);margin:12px 16px;overflow:hidden}
 .rationale-head{padding:9px 12px;font-size:12px;font-weight:600;color:var(--mut);border-bottom:1px solid var(--line);text-transform:uppercase;letter-spacing:.06em}
 .rationale-head b{color:var(--txt);font-variant-numeric:tabular-nums}
@@ -2731,7 +2746,10 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
               <option value="7">Last 7 days</option>
               <option value="30" selected>Last 30 days</option>
               <option value="90">Last 90 days</option>
+              <option value="180">Last 180 days</option>
+              <option value="365">Last 365 days</option>
             </select>
+            <button class="ghost" id="insightsExportCsv" type="button" title="Download the daily decision series for the selected window">Export CSV</button>
             <button class="system-button secondary" id="refreshInsights" type="button">
               <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v6h-6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
               Refresh
@@ -2787,6 +2805,10 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
             </div>
           </div>
           <div class="console-frame-actions">
+            <select id="savedViews" aria-label="Saved views">
+              <option value="" selected>Saved views&hellip;</option>
+            </select>
+            <button class="ghost" id="saveView" type="button" title="Save the current search, time range, and page size as a named view">Save view</button>
             <select id="activityRange" aria-label="Activity time range">
               <option value="1">Last 24 hours</option>
               <option value="7">Last 7 days</option>
@@ -2833,7 +2855,7 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
             </div>
           </div>
           <table><thead><tr><th>User</th><th>Browser extension</th><th>Endpoint agent</th><th>MCP guard</th><th>Coverage gaps</th></tr></thead>
-            <tbody id="fleetRows"></tbody></table>
+            <tbody id="fleetMatrixRows"></tbody></table>
         </div>
         <div class="coverage-grid">
           <div class="panel">
@@ -2929,9 +2951,44 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
           </div>
         </div>
         <div class="insights-kpis" id="catalogKpis"></div>
+        <div class="panel catalog-form hidden" id="catalogAddForm">
+          <div class="panel-head"><div><h2>Add AI app</h2><span>Register an app the sensors have not discovered yet</span></div></div>
+          <div class="catalog-form-body">
+            <input id="catalogAddHost" type="text" placeholder="internal-llm.corp" aria-label="AI app host"/>
+            <input id="catalogAddName" type="text" placeholder="Display name (optional)" aria-label="Display name"/>
+            <button class="system-button primary" id="catalogAddConfirm" type="button">Add app</button>
+            <button class="ghost" id="catalogAddCancel" type="button">Cancel</button>
+          </div>
+        </div>
+        <div class="panel catalog-form hidden" id="catalogImportForm">
+          <div class="panel-head"><div><h2>Import from proxy/DNS log</h2><span>One hostname per line, or host,count pairs - metadata only</span></div></div>
+          <div class="catalog-form-body catalog-form-column">
+            <textarea id="catalogImportCsv" rows="4" placeholder="internal-llm.corp&#10;chat.example.ai,42" aria-label="Hostnames to import"></textarea>
+            <div class="catalog-form-actions">
+              <button class="system-button primary" id="catalogImportConfirm" type="button">Import</button>
+              <button class="ghost" id="catalogImportCancel" type="button">Cancel</button>
+            </div>
+          </div>
+        </div>
         <div class="panel wide-panel">
-          <div class="panel-head"><div><h2>Discovered AI apps</h2><span>Risk score, attributes, discovery source, and governance decision</span></div></div>
-          <table><thead><tr><th>App</th><th>Provider</th><th>Risk</th><th>Attributes</th><th>Status</th><th>Events</th><th>Sources</th><th>Govern</th></tr></thead>
+          <div class="panel-head">
+            <div><h2>Discovered AI apps</h2><span>Risk score, attributes, discovery source, and governance decision - click a column to sort</span></div>
+            <div class="catalog-bulk hidden" id="catalogBulkBar">
+              <span id="catalogBulkCount">0 selected</span>
+              <input id="catalogBulkReason" type="text" placeholder="Reason (recorded in audit)" aria-label="Bulk decision reason"/>
+              <button class="ghost mini" data-catalog-bulk="allow" type="button">Allow</button>
+              <button class="ghost mini" data-catalog-bulk="govern" type="button">Govern</button>
+              <button class="ghost mini danger" data-catalog-bulk="block" type="button">Block</button>
+            </div>
+            <button class="ghost mini" id="catalogExportCsv" type="button">Export CSV</button>
+          </div>
+          <table><thead><tr>
+            <th class="catalog-check"><input type="checkbox" id="catalogSelectAll" aria-label="Select all apps"/></th>
+            <th data-catalog-sort="appName">App</th><th data-catalog-sort="provider">Provider</th>
+            <th data-catalog-sort="riskScore">Risk</th><th>Attributes</th>
+            <th data-catalog-sort="sanctionedStatus">Status</th><th data-catalog-sort="eventCount">Events</th>
+            <th>Sources</th><th>Govern</th>
+          </tr></thead>
             <tbody id="catalogRows"></tbody></table>
         </div>
       </section>
@@ -2985,6 +3042,9 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
             <div class="panel-head"><div><h2>Delivery history</h2><span>Recent outbound deliveries — status only, never payload bodies</span></div></div>
             <table><thead><tr><th>Time</th><th>Destination</th><th>Type</th><th>Status</th><th>Attempts</th><th>HTTP</th></tr></thead>
               <tbody id="deliveryRows"></tbody></table>
+            <div class="integrity" aria-label="Delivery status legend">
+              Status legend: <b>delivered</b> = destination accepted the event &middot; <b>retrying</b> = temporary failure, retried with backoff &middot; <b>failed</b> = gave up after retries; use Send test to re-check the destination.
+            </div>
           </div>
         </div>
       </section>
@@ -3145,6 +3205,7 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
             <span class="status" id="exportStatus"></span>
           </div>
           <div class="integrity" id="integrity"></div>
+          <div class="integrity" id="auditRetention" aria-label="Retention policy"></div>
           <table><thead><tr><th>Timestamp</th><th>Action</th><th>Actor</th><th>Query</th><th>Detail</th></tr></thead>
             <tbody id="auditRows"></tbody></table>
           <div id="auditPager" class="table-pager" aria-live="polite"></div>
@@ -3161,6 +3222,7 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
           </div>
           <div class="console-frame-actions">
             <div class="configuration-status" id="configurationStatus"></div>
+            <button class="ghost" id="policyExportBtn" type="button" title="Download the active policy as JSON for change review">Download policy JSON</button>
           </div>
         </div>
         <div class="panel">
