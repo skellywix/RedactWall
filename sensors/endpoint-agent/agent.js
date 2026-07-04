@@ -21,6 +21,7 @@ const os = require('os');
 const crypto = require('crypto');
 const nativeHandoff = require('./native-handoff');
 const fileFlowProfiles = require('./file-flow-profiles');
+const desktopAppFlow = require('./collectors/desktop-app-flow');
 const endpointOcr = require('./ocr');
 const processors = require('../../server/processors');
 const policyEngine = require('../../server/policy');
@@ -622,10 +623,14 @@ function start(opts = {}) {
   const profiles = opts.fileFlowProfiles
     ? fileFlowProfiles.normalizeFileFlowProfiles(opts.fileFlowProfiles)
     : fileFlowProfiles.fileFlowProfilesFromEnv();
+  const appFlowProfiles = Array.isArray(opts.appFlowProfiles)
+    ? fileFlowProfiles.normalizeFileFlowProfiles(opts.appFlowProfiles)
+    : desktopAppFlow.desktopAppFlowProfiles({ watchDir });
 
   io.log('PromptWall endpoint agent');
   io.log('  watching:', watchDir);
   io.log('  file-flow profiles:', profiles.length ? profiles.map((profile) => profile.id).join(', ') : 'disabled');
+  io.log('  app file-flow:', appFlowProfiles.length ? appFlowProfiles.map((profile) => profile.id).join(', ') : 'disabled');
   io.log('  native handoff:', handoffSecretReady(handoffSecret) ? handoffDir : 'disabled (set 32+ char ENDPOINT_AGENT_HANDOFF_SECRET)');
   io.log('  server  :', server);
   io.log('  ingest  :', key ? 'configured' : 'not configured (control-plane calls disabled)');
@@ -637,7 +642,7 @@ function start(opts = {}) {
   const refreshTimer = setIntervalFn(() => refresh({ silent: true }), POLICY_REFRESH_MS);
   if (refreshTimer.unref) refreshTimer.unref();
   const watcher = watch(watchDir, (event, filename) => { if (filename && event === 'rename') setTimeoutFn(() => scanQueuedFile(filename), 200); });
-  const fileFlowWatchers = profiles.map((profile) => startWatchedRoot(profile, {
+  const fileFlowWatchers = profiles.concat(appFlowProfiles).map((profile) => startWatchedRoot(profile, {
     readdirSync: readDir,
     watch,
     setTimeout: setTimeoutFn,
@@ -674,6 +679,7 @@ module.exports = {
   handoffSecretReady,
   nativeHandoff,
   fileFlowProfiles,
+  desktopAppFlow,
   startWatchedRoot,
   start,
 };

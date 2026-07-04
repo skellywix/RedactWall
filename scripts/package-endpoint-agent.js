@@ -26,8 +26,10 @@ const PACKAGE_FILES = [
   'sensors/endpoint-agent/write-handoff.js',
   'sensors/endpoint-agent/collectors/ai-tool-inventory.js',
   'sensors/endpoint-agent/collectors/clipboard-guard.js',
+  'sensors/endpoint-agent/collectors/desktop-app-flow.js',
   'sensors/endpoint-agent/collectors/git-push-guard.js',
   'sensors/endpoint-agent/collectors/protected-upload.js',
+  'sensors/endpoint-agent/fixtures/ocr-sample.png',
   'scripts/check-endpoint-install.js',
   'scripts/install-clipboard-guard.ps1',
   'scripts/install-desktop-collector.ps1',
@@ -115,6 +117,14 @@ function validateRuntimeFiles(files) {
   }
   if (/contentBase64|fetch\(|https?:\/\/|shell:\s*true|readFileSync/.test(ocr)) {
     throw new Error('Endpoint OCR bridge must stay local and must not upload, shell, or read unrelated file bodies');
+  }
+
+  const appFlow = files.find((file) => file.path === 'sensors/endpoint-agent/collectors/desktop-app-flow.js').body.toString('utf8');
+  if (!/publicAppFlowChecks/.test(appFlow) || !/desktopAppFlowProfiles/.test(appFlow)) {
+    throw new Error('Endpoint agent package must include the per-app guarded folder collector');
+  }
+  if (/contentBase64|fetch\(|https?:\/\/|readFileSync|writeFileSync|console\./.test(appFlow)) {
+    throw new Error('Endpoint app file-flow collector must not upload, persist, or log local path data');
   }
 
   const aiToolInventory = files.find((file) => file.path === 'sensors/endpoint-agent/collectors/ai-tool-inventory.js').body.toString('utf8');

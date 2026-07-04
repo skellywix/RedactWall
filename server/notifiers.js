@@ -458,6 +458,15 @@ async function postJson(channel, payload, opts = {}) {
       url: issue.url || null,
     };
   }
+  if (channel.type === 'jira' && res && res.ok) {
+    const issue = typeof res.json === 'function' ? await res.json().catch(() => ({})) : {};
+    return {
+      channel: channel.name || channel.type,
+      sent: true,
+      status: res.status,
+      externalId: (issue && (issue.key || issue.id)) || null,
+    };
+  }
   return res && res.ok
     ? { channel: channel.name || channel.type, sent: true, status: res.status }
     : { channel: channel.name || channel.type, sent: false, reason: 'http_' + (res && res.status) };
@@ -499,6 +508,7 @@ async function emitApprovalNotification(query, opts = {}) {
 module.exports = {
   configuredChannels,
   deliveryStatus,
+  headersForChannel,
   emitApprovalNotification,
   jiraIssuePayload,
   linearApiUrl,

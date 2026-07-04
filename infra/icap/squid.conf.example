@@ -1,0 +1,55 @@
+# PromptWall network backstop - minimal Squid REQMOD example.
+#
+# Sends every client request through the PromptWall ICAP bridge
+# (scripts/squid-icap-bridge.js) BEFORE it leaves the network. The bridge
+# gates prompts via POST /api/v1/gate and replaces blocked requests with a
+# synthesized HTTP 403, so policy and evidence stay unified with the other
+# PromptWall sensors.
+#
+# Copy this file to squid.conf and adjust the ICAP URI for your deployment:
+#   - host install:   icap://127.0.0.1:1344/reqmod   (npm run icap:bridge)
+#   - docker compose: icap://icap-bridge:1344/reqmod (infra/icap/docker-compose.icap.yml)
+
+http_port 3128
+
+# --- ICAP adaptation (fail closed) -----------------------------------------
+icap_enable on
+
+# bypass=off: if the ICAP service fails or times out, Squid returns an error
+# to the client instead of silently forwarding the request. This is the
+# fail-closed backstop guarantee - do NOT set bypass=on.
+icap_service promptwall_reqmod reqmod_precache icap://127.0.0.1:1344/reqmod bypass=off
+adaptation_access promptwall_reqmod allow all
+
+# Never suspend the service after repeated failures; keep failing closed
+# rather than drifting into an unprotected open state.
+icap_service_failure_limit -1
+
+# The bridge does not negotiate ICAP Preview; send complete messages.
+icap_preview_enable off
+
+# Forward client identity so PromptWall evidence records who sent the prompt.
+icap_send_client_ip on
+icap_send_client_username on
+
+# Give held prompts time to be approved/denied in the PromptWall queue.
+# Must exceed the bridge's ICAP_BRIDGE_RELEASE_WAIT_MS (default 5 minutes).
+icap_io_timeout 6 minutes
+
+# --- Basic access control (tighten for your network) ------------------------
+acl localnet src 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 127.0.0.1/32
+http_access allow localnet
+http_access deny all
+
+# --- TLS interception (deployment-specific, intentionally not configured) ---
+# AI chat endpoints are HTTPS, so REQMOD only sees prompt bodies if this Squid
+# terminates TLS (ssl-bump) with an enterprise CA that managed endpoints trust:
+#
+#   http_port 3128 ssl-bump tls-cert=/etc/squid/ca.pem generate-host-certificates=on
+#   acl ai_hosts ssl::server_name .chatgpt.com .openai.com .claude.ai .anthropic.com .gemini.google.com
+#   ssl_bump bump ai_hosts
+#   ssl_bump splice all
+#
+# Certificate generation, CA distribution (MDM/GPO), and pinning exceptions
+# are organization-specific; see docs/ICAP_NETWORK_BACKSTOP.md. Without
+# ssl-bump, only plain-HTTP traffic is gated by this backstop.

@@ -93,11 +93,24 @@ provable, and so no slice weakens the audit/privacy guarantees the product sells
   Catalog, Compliance framework matrix, Integrations tabs) and a left-sidebar
   navigation. These were the clearest competitor-backed gaps and together
   constitute the first "platform" proof.
-- **M2 — Coverage Depth [PARTIAL]:** Google Drive MCP connector shipped;
-  desktop file-flow collectors and turnkey-OCR-engine bundling remain.
-- **M3 — Trust & Scale [PARTIAL]:** Ed25519 signed/versioned sensor policy
-  bundles shipped (routes + verification); identity lifecycle hardening,
-  commercial extension rollout, and compliance packaging remain.
+- **M2 — Coverage Depth [SHIPPED]:** Google Drive/Slack/Teams/Atlassian/
+  database-readonly MCP connectors; Microsoft 365 deepened beyond driveItem
+  text (SharePoint site pages + list items); per-app guarded drop folders for
+  detected desktop AI apps (`sensors/endpoint-agent/collectors/desktop-app-flow.js`);
+  turnkey OCR (tesseract auto-discovery + installer wiring + real-extraction
+  install check against a bundled fixture image).
+- **M3 — Trust & Scale [SHIPPED except extension-store rollout]:** Ed25519
+  signed/versioned sensor policy bundles; identity lifecycle hardening (SCIM
+  deactivation revokes live sessions + seats + sensor ingest, dedicated
+  step-up flow via `/api/auth/step-up`, single-use MFA recovery codes);
+  guaranteed per-user attribution (`unmanagedInstalls` allow/flag/block policy,
+  unattributed-rate coverage metric, posture objective); two-way approval
+  ticket state (Jira/Linear status sync onto queries, metadata only);
+  compliance packaging (SOC 2 TSC matrix, vulnerability/patch policy, DPA/BAA
+  posture, incident-response runbook, security whitepaper, retention/legal-hold
+  state); fail-closed ICAP REQMOD network backstop (`npm run icap:bridge`).
+  Commercial extension-store publishing remains an external process
+  (checklists shipped in `docs/EXTENSION_RELEASE_CHECKLIST.md`).
 - **M4 — Scale-Out (staged):** on-device semantic (ONNX/WASM) model path +
   Postgres multi-tenant control plane + HA/DR. Deliberately deferred — these
   need real infrastructure and must not be half-built.

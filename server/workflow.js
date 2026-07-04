@@ -7,6 +7,7 @@
  */
 const notifiers = require('./notifiers');
 const routing = require('./routing');
+const ticketSync = require('./ticket-sync');
 
 const ACTIVE_WORKFLOW_STATUSES = new Set([
   'pending',
@@ -33,6 +34,7 @@ function notificationPatch(query, result, now = new Date()) {
     notificationLastAttemptAt: now.toISOString(),
     notificationChannels: (result.channels || []).slice(0, 8),
     notificationAttemptCount: (Number(query.notificationAttemptCount) || 0) + 1,
+    ...(ticketSync.ticketRefsFromDelivery(query, result, now) || {}),
   };
 }
 

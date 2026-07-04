@@ -25,6 +25,7 @@
     "test:browser-extension": "node scripts/run-playwright.js browser-extension.spec.js --project=chromium",
     "simulate": "node scripts/simulate.js",
     "proxy:lab": "node scripts/ai-chat-dlp-proxy-lab.js",
+    "icap:bridge": "node scripts/squid-icap-bridge.js",
     "gateway:rate-limiter": "node scripts/ai-gateway-rate-limiter.js",
     "gateway:ha:smoke": "node scripts/smoke-ai-gateway-ha.js",
     "discovery:import": "node scripts/import-ai-discovery.js",

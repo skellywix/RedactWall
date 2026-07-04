@@ -25,6 +25,8 @@ const policy = require('./policy');
 const policyImpact = require('./policy-impact');
 const db = require('./db');
 const auth = require('./auth');
+// SCIM deactivation invalidates already-issued sessions, not just new logins.
+auth.setSessionRevokedCheck((session) => db.identityRevokedSince(session.user, session.iat));
 const dataCrypto = require('./crypto');
 const templates = require('./templates');
 const alerts = require('./alerts');
@@ -41,6 +43,7 @@ const appCatalog = require('./app-catalog');
 const posture = require('./posture');
 const detectorFeedback = require('./detector-feedback');
 const detectionQuality = require('./detection-quality');
+const ticketSync = require('./ticket-sync');
 const {
   endpointAiToolAttentionIds,
   failedInstallCheckIds,
@@ -1021,6 +1024,19 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
   if (clientOutcome === 'file_upload_blocked') {
     return blockFileUploadByPolicy(res, { user, orgId, destination, sourceIp, source, channel, sensor });
   }
+  if (policy.unmanagedInstallBlocked(user, pol)) {
+    return blockDestinationByPolicy(res, {
+      user,
+      orgId,
+      destination,
+      sourceIp,
+      source,
+      channel,
+      sensor,
+      redactedPrompt: '[unmanaged install blocked] ' + policy.normalizeDestination(destination),
+      reason: 'Unmanaged browser install blocked by policy; enroll the device for managed identity',
+    });
+  }
   if (declaredClientPreRedacted && !clientAnalysis) {
     return res.status(400).json({ error: 'client redaction analysis required' });
   }
@@ -1310,6 +1326,7 @@ function sensorSafePolicy() {
     blockedBrowserActions: p.blockedBrowserActions || [],
     blockUnapprovedAiDestinations: p.blockUnapprovedAiDestinations !== false,
     responseScanMode: p.responseScanMode || policy.DEFAULT_POLICY.responseScanMode,
+    unmanagedInstalls: p.unmanagedInstalls || policy.DEFAULT_POLICY.unmanagedInstalls,
     desktopCollectorDestination: p.desktopCollectorDestination || policy.DEFAULT_POLICY.desktopCollectorDestination,
     requiredSensors: p.requiredSensors || policy.DEFAULT_POLICY.requiredSensors,
     desiredSensorVersions: p.desiredSensorVersions || policy.DEFAULT_POLICY.desiredSensorVersions,
@@ -1533,9 +1550,13 @@ app.post('/api/login', validation.validateBody(validation.loginSchema), (req, re
     return res.status(401).json({ error: 'invalid credentials', remaining: r.remaining });
   }
   if (account.role === 'security_admin' && auth.ADMIN_MFA_REQUIRED && !auth.verifyTotpCode(otp)) {
-    const r = auth.registerFail(key);
-    db.appendAudit({ action: 'ADMIN_MFA_FAILED', actor: account.user, detail: r.locked ? 'locked out' : (r.remaining + ' attempts left') });
-    return res.status(401).json({ error: 'invalid mfa code', mfaRequired: true, remaining: r.remaining });
+    const recoveryIndex = auth.recoveryCodeIndex(otp);
+    if (recoveryIndex < 0 || !db.consumeMfaRecoveryCode(recoveryIndex)) {
+      const r = auth.registerFail(key);
+      db.appendAudit({ action: 'ADMIN_MFA_FAILED', actor: account.user, detail: r.locked ? 'locked out' : (r.remaining + ' attempts left') });
+      return res.status(401).json({ error: 'invalid mfa code', mfaRequired: true, remaining: r.remaining });
+    }
+    db.appendAudit({ action: 'ADMIN_MFA_RECOVERY_USED', actor: account.user, detail: `recovery code ${recoveryIndex + 1} of ${auth.MFA_RECOVERY_CODE_COUNT} consumed` });
   }
   auth.registerSuccess(key);
   const token = auth.createSession(account.user, account.role);
@@ -1614,6 +1635,32 @@ app.post('/api/logout', ...sessionWrite, (req, res) => {
   res.json({ ok: true });
 });
 
+// Dedicated step-up flow: verify the password once, then re-issue the session
+// with a short-lived elevation window that reveal/approve actions accept.
+app.post('/api/auth/step-up', ...sessionWrite, (req, res) => {
+  const user = req.user && req.user.user;
+  const key = stepUpKey('STEP_UP', user, req);
+  const st = auth.loginStatus(key);
+  if (st.locked) {
+    db.appendAudit({ action: 'STEP_UP_LOCKED', actor: user || '?', detail: 'too many attempts' });
+    return res.status(429).json({ error: 'too many attempts - temporarily locked', retryMs: st.retryMs });
+  }
+  if (req.user.provider === 'oidc') {
+    if (auth.stepUpSatisfied(req.user)) return res.json({ ok: true, stepUpUntil: req.user.stepUpUntil });
+    return res.status(409).json({ error: 'reauthenticate with your identity provider to elevate', oidc: true });
+  }
+  if (!auth.verifyPassword(user, req.body && req.body.password)) {
+    const r = auth.registerFail(key);
+    db.appendAudit({ action: 'STEP_UP_FAILED', actor: user || '?', detail: r.locked ? 'locked out' : (r.remaining + ' attempts left') });
+    return res.status(401).json({ error: 'invalid credentials', remaining: r.remaining });
+  }
+  auth.registerSuccess(key);
+  const elevated = auth.elevateSession(req.user);
+  res.cookie(auth.SESSION_COOKIE_NAME, elevated, SESSION_COOKIE_OPTIONS);
+  db.appendAudit({ action: 'STEP_UP_GRANTED', actor: user, detail: `elevated for ${Math.round(auth.STEP_UP_TTL_MS / 60000)} min` });
+  res.json({ ok: true, stepUpUntil: Date.now() + auth.STEP_UP_TTL_MS });
+});
+
 function stepUpKey(scope, user, req) {
   return String(scope || 'admin').toLowerCase() + '|' + (user || '?') + '|' + (req.ip || (req.connection && req.connection.remoteAddress) || '');
 }
@@ -1629,7 +1676,7 @@ function requireStepUpPassword(scope) {
       emitAdminSecurityAlert(req, auditScope + '_LOCKED', user, auditScope);
       return res.status(429).json({ error: 'too many attempts - temporarily locked', retryMs: st.retryMs });
     }
-    if (auth.oidcStepUpSatisfied(req.user)) {
+    if (auth.stepUpSatisfied(req.user)) {
       auth.registerSuccess(key);
       return next();
     }
@@ -1689,6 +1736,15 @@ app.get('/api/queries', auth.requireAuth, (req, res) => {
   const status = req.query.status;
   const rows = db.listQueries({ status, limit: boundedApiLimit(req.query.limit, 200) });
   res.json(rows.map((q) => publicQuery(q)));
+});
+
+// Two-way ticket state: pull Jira/Linear issue status back onto queries.
+app.post('/api/tickets/sync', ...adminWrite, async (req, res) => {
+  const result = await ticketSync.syncTicketStatuses({
+    db,
+    onUpdate: (updated) => broadcast('query', { type: 'ticket_synced', query: publicQuery(updated) }),
+  });
+  res.json(result);
 });
 
 app.get('/api/queries/:id', auth.requireAuth, (req, res) => {

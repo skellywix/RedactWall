@@ -63,6 +63,8 @@ function buildFixturePackage() {
       responseScanMode: 'block',
       requiredSensors: ['browser_extension', 'endpoint_agent', 'mcp_guard'],
       approvalRoutingRules: [{ id: 'privacy_route' }],
+      rawRetentionDays: 45,
+      storeRawForApproval: true,
     },
     auditIntegrity: { ok: true, count: 12 },
     preflight: {
@@ -108,6 +110,84 @@ test('security trust package contains controls and SBOM without sensitive values
   assert.strictEqual(wire.includes(tempRoot), false);
   assert.strictEqual(wire.includes('secret-local-cache'), false);
   assert.strictEqual(wire.includes('unit-data-key-stable-should-not-export'), false);
+
+  const complianceWire = JSON.stringify({
+    soc2Readiness: pack.soc2Readiness,
+    vulnerabilityPolicy: pack.vulnerabilityPolicy,
+    dpaBaaPosture: pack.dpaBaaPosture,
+    retentionLegalHold: pack.retentionLegalHold,
+  });
+  assert.strictEqual(complianceWire.includes(ssn), false);
+  assert.strictEqual(complianceWire.includes(apiKey), false);
+  assert.strictEqual(complianceWire.includes(tempRoot), false);
+  assert.strictEqual(complianceWire.includes('unit-data-key-stable-should-not-export'), false);
+});
+
+test('security trust package maps controls to SOC 2 criteria with worst-status rollup', () => {
+  const pack = buildFixturePackage();
+  const controlIds = new Set(pack.controls.map((item) => item.id));
+  const soc2 = pack.soc2Readiness;
+
+  assert.ok(soc2.criteria.length >= 5);
+  assert.ok(pack.controls.every((item) => Array.isArray(item.soc2Criteria) && item.soc2Criteria.length >= 1));
+  for (const criterion of soc2.criteria) {
+    assert.match(criterion.id, /^CC[1-9]\.\d+$/);
+    assert.ok(criterion.title.length > 0);
+    assert.ok(criterion.controls.length >= 1);
+    assert.ok(criterion.controls.every((id) => controlIds.has(id)));
+    assert.ok(['verified', 'attention', 'missing'].includes(criterion.status));
+  }
+  assert.strictEqual(soc2.summary.criteria, soc2.criteria.length);
+  assert.strictEqual(
+    soc2.summary.verified + soc2.summary.attention + soc2.summary.missing,
+    soc2.criteria.length,
+  );
+  assert.match(soc2.summary.note, /not a SOC 2 report/i);
+  assert.ok(soc2.criteria.every((criterion) => criterion.status === 'verified'));
+});
+
+test('SOC 2 criterion status inherits the worst mapped control state', () => {
+  const soc2 = securityPackage.soc2Readiness([
+    { id: 'admin_mfa', status: 'missing', soc2Criteria: ['CC6.1'] },
+    { id: 'secure_sessions', status: 'verified', soc2Criteria: ['CC6.1'] },
+    { id: 'audit_chain', status: 'attention', soc2Criteria: ['CC7.2'] },
+  ]);
+
+  assert.strictEqual(soc2.criteria.find((item) => item.id === 'CC6.1').status, 'missing');
+  assert.strictEqual(soc2.criteria.find((item) => item.id === 'CC7.2').status, 'attention');
+});
+
+test('security trust package states vulnerability policy, DPA/BAA posture, and retention', () => {
+  const pack = buildFixturePackage();
+
+  const severities = pack.vulnerabilityPolicy.patchSlas.map((item) => item.severity);
+  assert.deepStrictEqual(severities, ['critical', 'high', 'medium', 'low']);
+  assert.strictEqual(pack.vulnerabilityPolicy.patchSlas[0].patchWithin, '72 hours');
+  assert.match(pack.vulnerabilityPolicy.scanning.cadence, /npm audit/);
+  assert.strictEqual(pack.vulnerabilityPolicy.dependencyPolicy.lockfilePinned, true);
+  assert.strictEqual(pack.vulnerabilityPolicy.lastValidatedAt, '2026-07-04T12:00:00.000Z');
+
+  assert.strictEqual(pack.dpaBaaPosture.dataHandling.promptEgress, false);
+  assert.deepStrictEqual(pack.dpaBaaPosture.subProcessors, []);
+  assert.strictEqual(pack.dpaBaaPosture.dpa.offered, true);
+  assert.strictEqual(pack.dpaBaaPosture.hipaaBaa.available, true);
+
+  assert.strictEqual(pack.retentionLegalHold.retention.rawRetentionDays, 45);
+  assert.strictEqual(pack.retentionLegalHold.retention.storeRawForApproval, true);
+  assert.strictEqual(pack.retentionLegalHold.legalHold.supported, false);
+  assert.match(pack.retentionLegalHold.legalHold.note, /operator action/i);
+});
+
+test('security trust package lists whitepaper and incident-response docs that exist', () => {
+  const pack = buildFixturePackage();
+  const docPaths = pack.documents.map((item) => item.path);
+
+  assert.ok(docPaths.includes('docs/SECURITY_WHITEPAPER.md'));
+  assert.ok(docPaths.includes('docs/INCIDENT_RESPONSE.md'));
+  for (const docPath of docPaths) {
+    assert.ok(fs.existsSync(path.join(__dirname, '..', docPath)), `${docPath} should exist`);
+  }
+  assert.match(securityPackage.packageReadme(pack), /SOC 2 readiness/);
 });
 
 test('security trust package archive has manifest, package, SBOM, and readme files', () => {

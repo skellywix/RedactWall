@@ -140,6 +140,16 @@ sdb.exec(`
   CREATE INDEX IF NOT EXISTS idx_detector_feedback_query ON detector_feedback(queryId);
   CREATE INDEX IF NOT EXISTS idx_detector_feedback_detector ON detector_feedback(detectorId);
   CREATE INDEX IF NOT EXISTS idx_detector_feedback_verdict ON detector_feedback(verdict);
+
+  CREATE TABLE IF NOT EXISTS identity_revocations (
+    identity  TEXT PRIMARY KEY,
+    revokedAt INTEGER NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS mfa_recovery_used (
+    codeIndex INTEGER PRIMARY KEY,
+    usedAt    TEXT NOT NULL
+  );
 `);
 
 const id = (p) => p + '_' + crypto.randomBytes(8).toString('hex');
@@ -379,6 +389,7 @@ function seatStats(filter = {}) {
   const wantedOrg = normalizedSeatOrg(filter.orgId);
   const rows = sdb.prepare('SELECT data FROM queries ORDER BY createdAt ASC, seq ASC').all();
   const users = new Map();
+  const inactiveIdentities = inactiveScimIdentitySet();
   for (const r of rows) {
     const q = JSON.parse(r.data);
     if (SEAT_EXCLUDED_STATUSES.has(q.status)) continue;
@@ -386,6 +397,7 @@ function seatStats(filter = {}) {
     if (wantedOrg && orgId !== wantedOrg) continue;
     const user = normalizedSeatUser(q.user);
     if (!user) continue;
+    if (inactiveIdentities.has(user)) continue; // deactivation releases the seat
     const current = users.get(user) || {
       user,
       orgId: orgId || null,
@@ -460,6 +472,10 @@ function saveScimUser(user) {
   };
   if (existing) scimUserUpdate.run(row);
   else scimUserInsert.run({ ...row, createdAt: merged.createdAt });
+  inactiveIdentityCache = null;
+  if ((!existing || existing.active !== false) && merged.active === false) {
+    for (const identity of scimIdentities(merged)) revokeIdentity(identity);
+  }
   return merged;
 }
 
@@ -467,6 +483,76 @@ function deactivateScimUser(scimId) {
   const existing = getScimUser(scimId);
   if (!existing) return null;
   return saveScimUser({ ...existing, active: false });
+}
+
+// ---- Identity lifecycle -------------------------------------------------------
+const revocationUpsert = sdb.prepare(
+  'INSERT INTO identity_revocations (identity, revokedAt) VALUES (@identity, @revokedAt) '
+  + 'ON CONFLICT(identity) DO UPDATE SET revokedAt = @revokedAt',
+);
+const revocationByIdentity = sdb.prepare('SELECT revokedAt FROM identity_revocations WHERE identity = ?');
+
+function normalizedIdentity(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function scimIdentities(user = {}) {
+  const identities = new Set();
+  const userName = normalizedIdentity(user.userName);
+  if (userName) identities.add(userName);
+  for (const email of Array.isArray(user.emails) ? user.emails : []) {
+    const value = normalizedIdentity(email && email.value);
+    if (value) identities.add(value);
+  }
+  return [...identities];
+}
+
+function revokeIdentity(identity, revokedAt = Date.now()) {
+  const normalized = normalizedIdentity(identity);
+  if (!normalized) return false;
+  revocationUpsert.run({ identity: normalized, revokedAt: Math.floor(revokedAt) });
+  return true;
+}
+
+function identityRevokedSince(identity, issuedAtMs) {
+  const row = revocationByIdentity.get(normalizedIdentity(identity));
+  if (!row) return false;
+  return Number(issuedAtMs || 0) <= Number(row.revokedAt);
+}
+
+// Cached because the sensor gate consults it on every event; saveScimUser
+// invalidates so provisioning changes apply immediately.
+let inactiveIdentityCache = null;
+
+function inactiveScimIdentitySet() {
+  if (inactiveIdentityCache) return inactiveIdentityCache;
+  const inactive = new Set();
+  for (const user of listScimUsers()) {
+    if (user.active === false) for (const identity of scimIdentities(user)) inactive.add(identity);
+  }
+  inactiveIdentityCache = inactive;
+  return inactive;
+}
+
+function scimIdentityInactive(identity) {
+  const normalized = normalizedIdentity(identity);
+  if (!normalized) return false;
+  return inactiveScimIdentitySet().has(normalized);
+}
+
+// ---- MFA recovery codes --------------------------------------------------------
+const recoveryCodeInsert = sdb.prepare('INSERT INTO mfa_recovery_used (codeIndex, usedAt) VALUES (?, ?)');
+const recoveryCodeUsedRow = sdb.prepare('SELECT usedAt FROM mfa_recovery_used WHERE codeIndex = ?');
+
+function mfaRecoveryCodeUsed(codeIndex) {
+  return !!recoveryCodeUsedRow.get(Math.floor(Number(codeIndex)));
+}
+
+function consumeMfaRecoveryCode(codeIndex) {
+  const index = Math.floor(Number(codeIndex));
+  if (!Number.isFinite(index) || index < 0 || mfaRecoveryCodeUsed(index)) return false;
+  recoveryCodeInsert.run(index, new Date().toISOString());
+  return true;
 }
 
 function getScimGroup(scimId) {
@@ -645,6 +731,8 @@ module.exports = {
   purgeRetainedSensitiveData,
   appendAudit, listAudit, verifyAuditChain, stats, seatStats, postureActionStates,
   getScimUser, getScimUserByUserName, listScimUsers, saveScimUser, deactivateScimUser,
+  revokeIdentity, identityRevokedSince, scimIdentityInactive,
+  mfaRecoveryCodeUsed, consumeMfaRecoveryCode,
   getScimGroup, getScimGroupByDisplayName, listScimGroups, saveScimGroup, deleteScimGroup,
   getAiApp, listAiApps, upsertAiApp,
   recordDelivery, listDeliveries, recentDeliverySuccess,

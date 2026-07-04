@@ -521,6 +521,7 @@ const policyUpdateSchema = z.object({
   mcpApprovalRequiredTools: z.array(mcpToolLabelSchema).max(LIMITS.policyListItems).optional(),
   blockUnapprovedAiDestinations: z.boolean().optional(),
   responseScanMode: z.enum(['flag', 'redact', 'block']).optional(),
+  unmanagedInstalls: z.enum(['allow', 'flag', 'block']).optional(),
   desktopCollectorDestination: z.string().min(1).max(80).regex(DESKTOP_DESTINATION_LABEL).refine((value) => value.trim().length > 0, {
     message: 'required',
   }).optional(),

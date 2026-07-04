@@ -15,6 +15,29 @@ const AdmZip = require('adm-zip');
 const SCHEMA_VERSION = 'promptwall.security-trust-package.v1';
 const DEFAULT_LOCKFILE = path.join(__dirname, '..', 'package-lock.json');
 const CONTROL_STATES = new Set(['verified', 'attention', 'missing']);
+const SOC2_CONTROL_CRITERIA = Object.freeze({
+  local_detection: ['CC6.7', 'CC8.1'],
+  privacy_minimization: ['CC6.7'],
+  audit_chain: ['CC7.2'],
+  admin_mfa: ['CC6.1'],
+  secure_sessions: ['CC6.1'],
+  encrypted_retention: ['CC6.1'],
+  default_deny_ai: ['CC6.6'],
+  response_scanning: ['CC6.7'],
+  required_sensors: ['CC7.1'],
+  llm_gateway: ['CC6.6'],
+  soc_handoff: ['CC7.3', 'CC7.4'],
+});
+const SOC2_CRITERIA_TITLES = Object.freeze({
+  'CC6.1': 'Logical access controls and protection of data at rest',
+  'CC6.6': 'Boundary protection against external threats',
+  'CC6.7': 'Restriction of information transmission, movement, and removal',
+  'CC7.1': 'Monitoring for configuration and vulnerability exposure',
+  'CC7.2': 'Anomaly and security-event monitoring',
+  'CC7.3': 'Security-event evaluation',
+  'CC7.4': 'Security incident response',
+  'CC8.1': 'Change management over system components',
+});
 const PRIVACY_CONTRACT = Object.freeze({
   rawPromptBodies: false,
   redactedPromptBodies: false,
@@ -162,6 +185,7 @@ function control(id, label, status, detail, evidence = [], owner = 'security') {
     owner,
     detail: safeText(detail, '', 260),
     evidence: (Array.isArray(evidence) ? evidence : [evidence]).filter(Boolean).map((item) => safeText(item, '', 180)).slice(0, 8),
+    soc2Criteria: [...(SOC2_CONTROL_CRITERIA[id] || [])],
   };
 }
 
@@ -290,6 +314,99 @@ function summarizeControls(controls) {
   };
 }
 
+function worstControlStatus(statuses) {
+  if (statuses.includes('missing')) return 'missing';
+  if (statuses.includes('attention')) return 'attention';
+  return 'verified';
+}
+
+function soc2Readiness(controls) {
+  const byCriterion = new Map();
+  for (const item of controls) {
+    for (const criterionId of item.soc2Criteria || []) {
+      if (!byCriterion.has(criterionId)) byCriterion.set(criterionId, []);
+      byCriterion.get(criterionId).push(item);
+    }
+  }
+  const criteria = [...byCriterion.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([id, mapped]) => ({
+      id,
+      title: SOC2_CRITERIA_TITLES[id] || 'SOC 2 Trust Services Criteria',
+      controls: mapped.map((item) => item.id),
+      status: worstControlStatus(mapped.map((item) => item.status)),
+    }));
+  return {
+    framework: 'SOC 2 Trust Services Criteria (2017), common criteria',
+    criteria,
+    summary: {
+      criteria: criteria.length,
+      verified: criteria.filter((item) => item.status === 'verified').length,
+      attention: criteria.filter((item) => item.status === 'attention').length,
+      missing: criteria.filter((item) => item.status === 'missing').length,
+      note: 'Self-attested readiness mapping derived from package controls; not a SOC 2 report or audit opinion.',
+    },
+  };
+}
+
+function vulnerabilityPolicy(generatedAt) {
+  return {
+    patchSlas: [
+      { severity: 'critical', patchWithin: '72 hours' },
+      { severity: 'high', patchWithin: '7 days' },
+      { severity: 'medium', patchWithin: '30 days' },
+      { severity: 'low', patchWithin: '90 days' },
+    ],
+    scanning: {
+      cadence: 'npm audit --omit=dev runs in CI on every push and pull request',
+      pipeline: '.github/workflows/ci.yml dependency-audit step',
+    },
+    dependencyPolicy: {
+      lockfilePinned: true,
+      productionDependenciesAudited: true,
+      inventory: 'CycloneDX dependency inventory included in this package under sbom',
+    },
+    lastValidatedAt: generatedAt,
+  };
+}
+
+function dpaBaaPosture() {
+  return {
+    attestation: 'self-attested posture; agreements are executed per customer through sales',
+    dataHandling: {
+      deploymentModel: 'local-first customer silo; the control plane runs inside the customer environment',
+      promptEgress: false,
+      vendorTelemetry: false,
+      dataResidency: 'determined by the operator hosting the deployment',
+    },
+    subProcessors: [],
+    subProcessorNote: 'PromptWall introduces no sub-processors by default; self-hosted deployments add only the hosting and SIEM vendors they choose.',
+    dpa: { offered: true, executedPerCustomer: true, contact: 'sales' },
+    hipaaBaa: { available: true, executedPerCustomer: true, contact: 'sales' },
+  };
+}
+
+function retainedRetentionDays(policy) {
+  const days = Number(policy && policy.rawRetentionDays);
+  if (!Number.isFinite(days)) return 30;
+  return Math.max(0, Math.min(3650, Math.floor(days)));
+}
+
+function retentionLegalHold(policy = {}) {
+  return {
+    retention: {
+      rawRetentionDays: retainedRetentionDays(policy),
+      storeRawForApproval: policy.storeRawForApproval !== false,
+      purge: 'Retained raw approval prompts and token vaults past rawRetentionDays are purged; each purge is recorded in the tamper-evident audit chain.',
+      encryptionAtRest: 'Retained approval prompts are sealed with AES-256-GCM; without a stable data key, raw retention is refused.',
+    },
+    legalHold: {
+      supported: false,
+      note: 'No automated legal-hold flag exists today. Suspending retention purges requires operator action: export an evidence pack before the purge window and raise rawRetentionDays for the affected period.',
+    },
+  };
+}
+
 function validationCommands() {
   return [
     { id: 'review_ci', command: 'npm run review:ci', proves: 'Full repo gate: formatting, docs drift, AI domain coverage, native binding, Node tests, browser tests, sync-check, and detection eval.' },
@@ -339,6 +456,8 @@ function docs() {
     { label: 'Competitive alignment', path: 'docs/COMPETITIVE_ALIGNMENT.md' },
     { label: 'Managed extension deployment', path: 'docs/MANAGED_EXTENSION_DEPLOYMENT.md' },
     { label: 'Scheduled evidence packs', path: 'docs/EVIDENCE_PACK_TASK.md' },
+    { label: 'Security whitepaper', path: 'docs/SECURITY_WHITEPAPER.md' },
+    { label: 'Incident response runbook', path: 'docs/INCIDENT_RESPONSE.md' },
   ];
 }
 
@@ -379,6 +498,10 @@ function trustPackage(input = {}) {
     },
     privacyContract: { ...PRIVACY_CONTRACT },
     controls,
+    soc2Readiness: soc2Readiness(controls),
+    vulnerabilityPolicy: vulnerabilityPolicy(generatedAt),
+    dpaBaaPosture: dpaBaaPosture(),
+    retentionLegalHold: retentionLegalHold(input.policy || {}),
     validation: {
       generatedEvidence: input.validation && Array.isArray(input.validation.generatedEvidence) ? input.validation.generatedEvidence.slice(0, 20) : [],
       recommendedCommands: validationCommands(),
@@ -388,6 +511,18 @@ function trustPackage(input = {}) {
     documents: docs(),
     exclusions: limitations(),
   };
+}
+
+function readmePostureLines(pkg) {
+  const soc2 = pkg.soc2Readiness.summary;
+  const criticalSla = pkg.vulnerabilityPolicy.patchSlas.find((item) => item.severity === 'critical');
+  const retention = pkg.retentionLegalHold.retention;
+  return [
+    `SOC 2 readiness: ${soc2.verified}/${soc2.criteria} mapped criteria verified (self-attested, not an audit opinion).`,
+    `Vulnerability policy: critical patches within ${criticalSla ? criticalSla.patchWithin : 'defined SLA'}; npm audit runs in CI on every push.`,
+    `Retention: raw approval retention ${retention.rawRetentionDays} days, AES-256-GCM sealed; automated legal hold: ${pkg.retentionLegalHold.legalHold.supported ? 'supported' : 'not supported (operator action required)'}.`,
+    'DPA/BAA posture: local-first, no prompt egress, no default sub-processors; agreements executed per customer.',
+  ];
 }
 
 function packageReadme(pkg) {
@@ -404,6 +539,8 @@ function packageReadme(pkg) {
     '',
     `Control coverage: ${pkg.summary.controlCoverage.verified}/${pkg.summary.controlCoverage.total} verified (${pkg.summary.controlCoverage.percent}%).`,
     `Dependency inventory: ${pkg.sbom.summary.components} components from package-lock.json.`,
+    '',
+    ...readmePostureLines(pkg),
     '',
     'Recommended validation:',
     ...pkg.validation.recommendedCommands.map((item) => `- ${item.command}`),
@@ -434,6 +571,10 @@ module.exports = {
   buildSbom,
   buildControls,
   summarizeControls,
+  soc2Readiness,
+  vulnerabilityPolicy,
+  dpaBaaPosture,
+  retentionLegalHold,
   trustPackage,
   packageFiles,
   packageArchive,

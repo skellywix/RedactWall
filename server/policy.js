@@ -23,6 +23,7 @@ const POLICY_MATCH_TEXT_RE = /^[A-Za-z0-9 ._@:+/-]{1,128}$/;
 const MCP_TOOL_RE = /^[A-Za-z0-9.*:_/-]{1,160}$/;
 const POLICY_MODE_RANK = { warn: 1, redact: 2, justify: 2, block: 3 };
 const RESPONSE_SCAN_MODES = new Set(['flag', 'redact', 'block']);
+const UNMANAGED_INSTALL_MODES = new Set(['allow', 'flag', 'block']);
 const BROWSER_ACTIONS = new Set(['paste', 'drop', 'copy', 'download']);
 const SENSITIVE_ROUTING_CODE_RE = /(?:\d{3}[-_:.]?\d{2}[-_:.]?\d{4}|\d{12,19})/;
 const DEFAULT_REQUIRED_SENSORS = ['browser_extension', 'endpoint_agent', 'mcp_guard'];
@@ -59,6 +60,7 @@ const DEFAULT_POLICY = {
   mcpApprovalRequiredTools: [],
   blockUnapprovedAiDestinations: true,
   responseScanMode: 'flag',
+  unmanagedInstalls: 'allow',
   desktopCollectorDestination: 'Desktop AI',
   approvalRoutingRules: [],
   policyScopes: [],
@@ -106,6 +108,11 @@ function normalizeDesiredSensorVersions(value, fallback = DEFAULT_POLICY.desired
 function normalizeResponseScanMode(value) {
   const mode = String(value || '').trim().toLowerCase();
   return RESPONSE_SCAN_MODES.has(mode) ? mode : DEFAULT_POLICY.responseScanMode;
+}
+
+function normalizeUnmanagedInstalls(value) {
+  const mode = String(value || '').trim().toLowerCase();
+  return UNMANAGED_INSTALL_MODES.has(mode) ? mode : DEFAULT_POLICY.unmanagedInstalls;
 }
 
 function normalizeBrowserAction(value) {
@@ -394,6 +401,7 @@ function normalizePolicy(p = {}) {
     requiredSensors: normalizeRequiredSensors((p || {}).requiredSensors),
     desiredSensorVersions: normalizeDesiredSensorVersions((p || {}).desiredSensorVersions),
     responseScanMode: normalizeResponseScanMode((p || {}).responseScanMode),
+    unmanagedInstalls: normalizeUnmanagedInstalls((p || {}).unmanagedInstalls),
     scanner,
   };
 }
@@ -417,6 +425,7 @@ const AUDIT_FIELDS = [
   'mcpApprovalRequiredTools',
   'blockUnapprovedAiDestinations',
   'responseScanMode',
+  'unmanagedInstalls',
   'desktopCollectorDestination',
   'approvalRoutingRules',
   'policyScopes',
@@ -540,6 +549,11 @@ function unapprovedAiDestination(destination, policy = loadPolicy()) {
   if (destinationAllowed(normalized, policy)) return false;
   if (!adapters.isAiHost(normalized)) return false;
   return !destinationReviewed(normalized, policy);
+}
+
+function unmanagedInstallBlocked(user, policy = loadPolicy()) {
+  if (((policy || {}).unmanagedInstalls || DEFAULT_POLICY.unmanagedInstalls) !== 'block') return false;
+  return String(user || '').trim().toLowerCase() === 'unattributed@unmanaged';
 }
 
 function destinationBlockReason(destination, policy = loadPolicy()) {
@@ -757,7 +771,9 @@ module.exports = {
   browserActionBlocked,
   browserActionBlockReason,
   unapprovedAiDestination,
+  unmanagedInstallBlocked,
   normalizeResponseScanMode,
+  normalizeUnmanagedInstalls,
   normalizeBrowserAction,
   normalizeBlockedBrowserActions,
   normalizeMcpToolList,

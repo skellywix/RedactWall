@@ -57,6 +57,35 @@ function contentTextParts(content = []) {
     .filter(Boolean);
 }
 
+/** Decode the small HTML entity set Graph/Confluence payloads actually emit. */
+function decodeHtmlEntities(text) {
+  return String(text || '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&#(\d+);/g, (_, code) => {
+      const n = Number(code);
+      return Number.isFinite(n) && n >= 32 && n <= 0xffff ? String.fromCharCode(n) : '';
+    });
+}
+
+/** Strip markup from connector HTML into detector-ready plain text. */
+function htmlToText(html) {
+  return decodeHtmlEntities(String(html || '')
+    .replace(/<\s*br\s*\/?>/gi, '\n')
+    .replace(/<\s*\/p\s*>/gi, '\n')
+    .replace(/<\s*\/div\s*>/gi, '\n')
+    .replace(/<[^>]+>/g, ' '))
+    .replace(/\r\n/g, '\n')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n\s+/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 function toolResultText(result) {
   if (result == null) return '';
   if (typeof result === 'string') return result;
@@ -141,6 +170,8 @@ function connectorHealthCheck(connector = {}, ok = false, detail = '') {
 module.exports = {
   connectorContext,
   connectorHealthCheck,
+  decodeHtmlEntities,
+  htmlToText,
   sanitizeToolResult,
   toolResultText,
   wrapConnectorTool,

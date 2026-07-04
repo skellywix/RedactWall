@@ -90,8 +90,25 @@ function seatReport(db, env = process.env) {
   };
 }
 
+function deactivatedIdentityResult(user, cfg) {
+  return {
+    ok: false,
+    statusCode: 403,
+    status: 'user_deactivated',
+    action: 'USER_DEACTIVATED',
+    message: 'user identity is deactivated',
+    audit: true,
+    orgId: cfg.tenantId || null,
+    user,
+  };
+}
+
 function validateSensorAccess({ body = {}, db, env = process.env } = {}) {
   const cfg = config(env);
+  const sensorUser = normalizeUser(body.user);
+  if (sensorUser && db && typeof db.scimIdentityInactive === 'function' && db.scimIdentityInactive(sensorUser)) {
+    return deactivatedIdentityResult(sensorUser, cfg);
+  }
   if (!cfg.saasMode) {
     return { ok: true, orgId: body.orgId || null };
   }
@@ -140,8 +157,7 @@ function validateSensorAccess({ body = {}, db, env = process.env } = {}) {
     };
   }
 
-  const user = normalizeUser(body.user);
-  if (cfg.requireUserIdentity && !isBillableUser(user)) {
+  if (cfg.requireUserIdentity && !isBillableUser(sensorUser)) {
     return {
       ok: false,
       statusCode: 400,
@@ -152,9 +168,9 @@ function validateSensorAccess({ body = {}, db, env = process.env } = {}) {
     };
   }
 
-  if (cfg.seatLimit > 0 && isBillableUser(user)) {
+  if (cfg.seatLimit > 0 && isBillableUser(sensorUser)) {
     const report = seatReport(db, env);
-    const known = report.users.some((item) => normalizeUser(item.user) === user);
+    const known = report.users.some((item) => normalizeUser(item.user) === sensorUser);
     if (!known && report.seatsUsed >= cfg.seatLimit) {
       return {
         ok: false,
@@ -164,7 +180,7 @@ function validateSensorAccess({ body = {}, db, env = process.env } = {}) {
         message: 'seat limit exceeded',
         audit: true,
         orgId: cfg.tenantId,
-        user,
+        user: sensorUser,
         seatLimit: cfg.seatLimit,
         seatsUsed: report.seatsUsed,
       };

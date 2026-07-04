@@ -47,6 +47,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     const arg = argv[i];
     if (arg === '--') continue;
     if (arg === '--env') opts.envPath = path.resolve(argv[++i] || DEFAULT_ENV_PATH);
+    else if (arg === '--recovery') opts.recovery = true;
     else if (arg === '--issuer') opts.issuer = argv[++i] || opts.issuer;
     else if (arg === '--account') opts.account = argv[++i] || '';
     else if (arg === '--help' || arg === '-h') opts.help = true;
@@ -65,6 +66,7 @@ function printHelp(io = console) {
     '  --env <path>       Read a non-default env file',
     '  --issuer <name>    Authenticator issuer label (default PromptWall)',
     '  --account <name>   Authenticator account label (default ADMIN_USER)',
+    '  --recovery         Print single-use MFA recovery codes instead of the URI',
   ].join('\n'));
 }
 
@@ -78,6 +80,14 @@ function main(argv = process.argv.slice(2), deps = {}) {
   }
   const env = loadEnv(opts.envPath);
   const account = opts.account || env.ADMIN_USER || 'admin';
+  if (opts.recovery) {
+    const auth = deps.auth || require('../server/auth');
+    const codes = auth.recoveryCodes(env.ADMIN_TOTP_SECRET);
+    if (!codes.length) throw new Error('ADMIN_TOTP_SECRET must be valid base32 and at least 16 characters.');
+    io.log('Store these single-use MFA recovery codes offline. Each works exactly once at the admin login.');
+    for (const code of codes) io.log(code);
+    return 0;
+  }
   const uri = otpauthUri({
     secret: env.ADMIN_TOTP_SECRET,
     account,
