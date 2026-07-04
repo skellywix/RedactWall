@@ -19,6 +19,7 @@ const crypto = require('crypto');
 const path = require('path');
 
 const detector = require('./detector');
+const adapters = require('../detection-engine/adapters');
 const processors = require('./processors');
 const policy = require('./policy');
 const db = require('./db');
@@ -31,6 +32,7 @@ const preflight = require('./preflight');
 const validation = require('./validation');
 const coverage = require('./coverage');
 const insights = require('./insights');
+const appCatalog = require('./app-catalog');
 const {
   endpointAiToolAttentionIds,
   failedInstallCheckIds,
@@ -715,6 +717,17 @@ function blockBrowserActionByPolicy(res, context = {}, responseExtra = {}) {
   });
 }
 
+// Prompt-free AI-app discovery hook. Records a sighting only for real AI hosts
+// (governed or shadow), never for internal labels like 'gateway:...' or
+// 'sensor-health'. Best-effort — never blocks the gate path.
+function recordAiSighting(destination, source, outcome) {
+  try {
+    const host = adapters.normalizeHost(destination);
+    if (!host || host.includes(':') || !adapters.isAiHost(host)) return;
+    appCatalog.recordSighting({ destination: host, source: source === 'browser_extension' ? 'browser' : source, outcome });
+  } catch (e) { /* discovery is best-effort */ }
+}
+
 app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gateSchema), (req, res) => {
   if (!enforceTenantForSensor(req, res)) return;
   const {
@@ -799,9 +812,12 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
     return res.json({ id: row.id, decision: 'block', status: 'injection_blocked' });
   }
 
+  recordAiSighting(destination, source, 'gated');
+
   // Shadow-AI discovery: a visit to an AI tool policy does not govern. Recorded
   // as an informational event so the examiner sees unmonitored paths, not a leak.
   if (clientOutcome === 'shadow_ai') {
+    recordAiSighting(destination, source, 'shadow');
     if (policy.unapprovedAiDestination(destination, pol)) {
       return blockDestinationByPolicy(res, {
         user,
@@ -1626,6 +1642,56 @@ app.post('/api/destinations/review', ...adminWrite, validation.validateBody(vali
   const report = coverage.summarize(db.listQueries({ limit: 5000 }), reviewed.policy);
   broadcast('stats', db.stats());
   res.json({ destination: reviewed.destination, decision: reviewed.decision, policy: reviewed.policy, coverage: report });
+});
+
+// ---- AI app catalog ---------------------------------------------------------
+app.get('/api/catalog', auth.requireAuth, (req, res) => {
+  res.json({ apps: appCatalog.publicCatalog() });
+});
+
+app.post('/api/catalog', ...adminWrite, validation.validateBody(validation.catalogAddSchema), (req, res) => {
+  const record = appCatalog.addManual(req.body);
+  if (!record) return res.status(400).json({ error: 'invalid destination' });
+  db.appendAudit({ action: 'CATALOG_ADDED', actor: req.user.user, detail: `manual catalog entry: ${record.canonicalHost}` });
+  res.json({ app: appCatalog.publicCatalog().find((a) => a.destination === record.canonicalHost) || null });
+});
+
+app.post('/api/catalog/import', ...adminWrite, validation.validateBody(validation.catalogImportSchema), (req, res) => {
+  const result = appCatalog.importCsv(req.body.csv, { source: req.body.source || 'csv_import' });
+  db.appendAudit({ action: 'CATALOG_IMPORTED', actor: req.user.user, detail: `discovery import: ${result.imported} host(s), ${result.skipped} skipped` });
+  res.json({ ...result, apps: appCatalog.publicCatalog() });
+});
+
+// Review a catalogued app: apply a govern/allow/block decision to policy (reusing
+// the existing destination-review path) AND update catalog status/ownership.
+app.post('/api/catalog/:host/review', ...adminWrite, validation.validateBody(validation.catalogReviewSchema), (req, res) => {
+  const host = adapters.normalizeHost(req.params.host);
+  if (!host) return res.status(400).json({ error: 'invalid host' });
+  const before = policy.loadPolicy();
+  let reviewed;
+  try {
+    reviewed = policy.reviewDestination(before, host, req.body.decision);
+  } catch (e) {
+    return res.status(400).json({ error: 'invalid catalog review' });
+  }
+  policy.savePolicy(reviewed.policy);
+  const statusMap = { govern: 'tolerated', allow: 'sanctioned', block: 'blocked' };
+  appCatalog.annotate(host, {
+    owner: req.body.owner,
+    notes: req.body.notes,
+    sanctionedStatus: req.body.sanctionedStatus || statusMap[req.body.decision],
+  });
+  db.appendAudit({
+    action: 'CATALOG_REVIEWED',
+    actor: req.user.user,
+    detail: policy.policyChangeDetail(before, reviewed.policy, { reason: req.body.reason }),
+  });
+  broadcast('stats', db.stats());
+  res.json({
+    destination: host,
+    decision: reviewed.decision,
+    app: appCatalog.publicCatalog().find((a) => a.destination === host) || null,
+  });
 });
 
 // Regulation policy templates (list + one-click apply).

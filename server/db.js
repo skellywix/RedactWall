@@ -104,6 +104,16 @@ sdb.exec(`
     data        TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_scim_groups_display ON scim_groups(displayName);
+
+  CREATE TABLE IF NOT EXISTS ai_apps (
+    seq           INTEGER PRIMARY KEY AUTOINCREMENT,
+    id            TEXT UNIQUE NOT NULL,
+    canonicalHost TEXT UNIQUE NOT NULL,
+    firstSeen     TEXT NOT NULL,
+    lastSeen      TEXT NOT NULL,
+    data          TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_ai_apps_host ON ai_apps(canonicalHost);
 `);
 
 const id = (p) => p + '_' + crypto.randomBytes(8).toString('hex');
@@ -467,11 +477,40 @@ function migrateFromJson() {
 }
 try { migrateFromJson(); } catch (e) { console.error('[db] migration skipped:', e.message); }
 
+// ---- AI app catalog ----------------------------------------------------------
+const aiAppInsert = sdb.prepare('INSERT INTO ai_apps (id, canonicalHost, firstSeen, lastSeen, data) VALUES (@id, @canonicalHost, @firstSeen, @lastSeen, @data)');
+const aiAppByHost = sdb.prepare('SELECT data FROM ai_apps WHERE canonicalHost = ?');
+const aiAppUpdate = sdb.prepare('UPDATE ai_apps SET lastSeen = @lastSeen, data = @data WHERE canonicalHost = @canonicalHost');
+
+function getAiApp(canonicalHost) {
+  const row = aiAppByHost.get(canonicalHost);
+  return row ? JSON.parse(row.data) : null;
+}
+
+function listAiApps() {
+  return sdb.prepare('SELECT data FROM ai_apps ORDER BY lastSeen DESC, seq DESC').all().map((r) => JSON.parse(r.data));
+}
+
+// Insert-or-update a catalog entry keyed by canonical host. `patch` is merged
+// over the stored record; discovery counters are additive via the caller.
+const upsertAiApp = sdb.transaction((canonicalHost, patch, now) => {
+  const existing = getAiApp(canonicalHost);
+  if (existing) {
+    const merged = { ...existing, ...patch, canonicalHost, id: existing.id, firstSeen: existing.firstSeen, lastSeen: now };
+    aiAppUpdate.run({ canonicalHost, lastSeen: now, data: JSON.stringify(merged) });
+    return merged;
+  }
+  const record = { id: id('app'), canonicalHost, firstSeen: now, lastSeen: now, ...patch };
+  aiAppInsert.run({ id: record.id, canonicalHost, firstSeen: now, lastSeen: now, data: JSON.stringify(record) });
+  return record;
+});
+
 module.exports = {
   createQuery, getQuery, listQueries, updateQuery,
   purgeRetainedSensitiveData,
   appendAudit, listAudit, verifyAuditChain, stats, seatStats,
   getScimUser, getScimUserByUserName, listScimUsers, saveScimUser, deactivateScimUser,
   getScimGroup, getScimGroupByDisplayName, listScimGroups, saveScimGroup, deleteScimGroup,
+  getAiApp, listAiApps, upsertAiApp,
   _canonical: canonical, _db: sdb, _dbPath: DB_PATH,
 };

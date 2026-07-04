@@ -254,6 +254,26 @@ const destinationReviewSchema = z.object({
   reason: nonBlankString(LIMITS.destinationReviewReasonChars),
 }).strict();
 
+const CATALOG_STATUS = ['under_review', 'sanctioned', 'tolerated', 'unsanctioned', 'blocked'];
+const catalogAddSchema = z.object({
+  destination: destinationLabelSchema,
+  appName: optionalString(120),
+  sanctionedStatus: z.enum(CATALOG_STATUS).optional(),
+}).strict();
+
+const catalogReviewSchema = z.object({
+  decision: z.enum(['govern', 'allow', 'block']),
+  reason: nonBlankString(LIMITS.destinationReviewReasonChars),
+  sanctionedStatus: z.enum(CATALOG_STATUS).optional(),
+  owner: optionalString(200),
+  notes: optionalString(2000),
+}).strict();
+
+const catalogImportSchema = z.object({
+  csv: z.string().min(1).max(1024 * 1024),
+  source: z.enum(['browser', 'gateway', 'endpoint', 'mcp', 'csv_import', 'manual']).optional(),
+}).strict();
+
 const scannerPolicySchema = z.object({
   ignoreDirectories: z.array(nonBlankString(128)).max(LIMITS.policyListItems).optional(),
   ignoreFilenames: z.array(nonBlankString(128)).max(LIMITS.policyListItems).optional(),
@@ -474,6 +494,9 @@ module.exports = {
   applyTemplateSchema,
   receiptVerifySchema,
   destinationReviewSchema,
+  catalogAddSchema,
+  catalogReviewSchema,
+  catalogImportSchema,
   policyUpdateSchema,
   updateConfigSchema,
   updateApplySchema,
