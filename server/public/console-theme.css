@@ -560,43 +560,67 @@ tbody tr { transition: background var(--fast); }
   .status-line { border: 0; background: transparent; padding: 2px 8px; }
 }
 
-/* ---- Celestial theme dial: the moon turns over into the sun ---------------- */
+/* ---- Celestial theme dial: shows the current sky; one turn flips it -------
+   The pressed button (current theme) renders the visible body — moon in dark,
+   sun in light. The other button is stacked on top, fully transparent, so any
+   click on the dial lands on it and turns the sky over. Both buttons stay in
+   the accessibility tree with their names and pressed states. */
 .theme-toggle {
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--panel2);
-  padding: 2px;
-}
-/* The pressed (current) side hides; the visible button is the invitation to
-   switch, so the dial always shows the celestial body you can turn to. */
-.theme-toggle button[aria-pressed="true"] { display: none; }
-.theme-toggle button {
-  width: 30px;
-  min-height: 30px;
+  position: relative;
+  width: 32px;
+  height: 32px;
   padding: 0;
+  border: 1px solid var(--line);
   border-radius: 50%;
-  display: inline-grid;
+  background: var(--panel2);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+.theme-toggle button {
+  grid-area: 1 / 1;
+  width: 32px;
+  height: 32px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  display: grid;
   place-items: center;
   font-size: 0;
   line-height: 0;
-  color: var(--soft);
-  overflow: hidden;
 }
 .theme-toggle button svg {
   width: 16px;
   height: 16px;
+  display: block;
+}
+/* Current theme's body is the visible face of the dial. */
+.theme-toggle button[aria-pressed="true"] {
+  z-index: 0;
+  box-shadow: none;
+  background: transparent;
+}
+.theme-toggle button[aria-pressed="true"] svg {
   animation: celestialTurn 420ms cubic-bezier(0.3, 0.7, 0.2, 1.1);
 }
-.theme-toggle button:hover { color: var(--txt); background: var(--surface-hover); }
-#themeLight svg { color: var(--amber-vivid); }
-#themeDark svg { color: var(--blue); }
+/* The other body waits invisibly on top and catches the click. */
+.theme-toggle button[aria-pressed="false"] {
+  z-index: 1;
+  opacity: 0;
+}
+.theme-toggle:hover { border-color: var(--line2); background: var(--surface-hover); }
+#themeLight svg { color: var(--amber-vivid); }  /* the sun */
+#themeDark svg { color: var(--soft); }          /* the moon */
 @keyframes celestialTurn {
   from { transform: rotate(-200deg) scale(0.3); opacity: 0; }
   60% { transform: rotate(12deg) scale(1.06); opacity: 1; }
   to { transform: rotate(0deg) scale(1); }
 }
 @media (max-width: 760px) {
-  .theme-toggle { width: auto; display: inline-flex; }
+  .theme-toggle { width: 32px; display: grid; grid-template-columns: none; justify-self: end; }
 }
 
 /* ---- Login: same instrument, quieter room ----------------------------------- */
