@@ -659,3 +659,82 @@ tr:hover td { background: var(--surface-hover); }
   }
   .ghost#logout { width: 100%; }
 }
+
+/* ============================================================================
+   Left sidebar navigation (desktop). Overrides the Gatewatch top-nav so the
+   console reads like Purview/Netskope/Nightfall: a vertical rail on the left
+   with grouped, scannable tabs. Collapses back to the top grid on mobile so the
+   single-navigation-per-viewport invariant holds. Appended last so it wins the
+   cascade over the base theme rules above.
+   ========================================================================== */
+@media (min-width: 861px) {
+  .app-shell {
+    grid-template-columns: 244px minmax(0, 1fr);
+    align-content: stretch;
+    gap: 16px;
+  }
+  /* Grid items default to min-width:auto, which lets content force the content
+     column wider than the viewport. Pin it to 0 and clip decorative bleed so the
+     column tracks the sidebar exactly (wide tables still scroll inside .panel). */
+  .workspace {
+    min-width: 0;
+    overflow-x: clip;
+  }
+  .rail {
+    position: sticky;
+    top: 18px;
+    height: calc(100vh - 36px);
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    padding: 16px 14px;
+    overflow-y: auto;
+    scrollbar-width: none;
+  }
+  .rail .brand {
+    flex-direction: row;
+    align-items: center;
+    gap: 12px;
+    padding: 2px 6px 8px;
+  }
+  .rail .logo { width: 40px; height: 40px; flex: 0 0 40px; }
+  .rail .brand h1 { font-size: 19px; }
+  .rail .brand p { font-size: 10px; }
+  .rail-section {
+    display: block;
+    padding: 8px 8px 2px;
+    color: var(--mut);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+  }
+  .rail .tabs {
+    display: flex;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    gap: 2px;
+    border: 0;
+    background: transparent;
+    padding: 0;
+  }
+  .rail .tab {
+    width: 100%;
+    min-width: 0;
+    justify-content: flex-start;
+    min-height: 38px;
+    padding: 8px 11px;
+  }
+  .rail .tab .badge { margin-left: auto; }
+  .rail-status {
+    margin-top: auto;
+    display: grid;
+    gap: 9px;
+    grid-template-columns: 1fr;
+    border-top: 1px solid var(--line);
+    padding-top: 12px;
+  }
+}

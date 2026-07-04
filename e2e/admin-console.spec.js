@@ -1198,20 +1198,22 @@ test('admin console shows exactly one navigation per viewport', async ({ page })
   let contentTabsDisplay = await page.locator('.content-tabs').evaluate((el) => getComputedStyle(el).display);
   expect(contentTabsDisplay).toBe('none');
 
+  // Desktop widths: the rail is a vertical LEFT sidebar (one nav, content-tabs hidden).
   await page.setViewportSize({ width: 1024, height: 768 });
   await expect(page.locator('.rail .tab[data-tab="queue"]')).toBeVisible();
   await expect(page.locator('.rail .tab[data-tab="monitor"]')).toBeVisible();
   contentTabsDisplay = await page.locator('.content-tabs').evaluate((el) => getComputedStyle(el).display);
   expect(contentTabsDisplay).toBe('none');
-  let railTabsDisplay = await page.locator('.rail .tabs').evaluate((el) => getComputedStyle(el).display);
-  expect(railTabsDisplay).toBe('grid');
+  let railTabsLayout = await page.locator('.rail .tabs').evaluate((el) => getComputedStyle(el).display + '/' + getComputedStyle(el).flexDirection);
+  expect(railTabsLayout).toBe('flex/column');
   await page.locator('.rail .tab[data-tab="monitor"]').click();
   await expect(page.locator('#tab-monitor')).toBeVisible();
   await expectNoHorizontalOverflow(page);
 
+  // Mobile width: the rail collapses to the top grid (still the only nav).
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.locator('.rail .tab[data-tab="queue"]')).toBeVisible();
-  railTabsDisplay = await page.locator('.rail .tabs').evaluate((el) => getComputedStyle(el).display);
+  const railTabsDisplay = await page.locator('.rail .tabs').evaluate((el) => getComputedStyle(el).display);
   expect(railTabsDisplay).toBe('grid');
   contentTabsDisplay = await page.locator('.content-tabs').evaluate((el) => getComputedStyle(el).display);
   expect(contentTabsDisplay).toBe('none');
