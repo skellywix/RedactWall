@@ -49,6 +49,7 @@
     "mcp:check": "node scripts/check-mcp-guard-install.js",
     "identity:setup": "node scripts/identity-setup.js",
     "train-semantic": "node scripts/train-semantic.js",
+    "edm:fingerprint": "node scripts/edm-fingerprint.js",
     "sync-engine": "node scripts/sync-engine.js",
     "sync-check": "node scripts/sync-check.js",
     "ai-domains:check": "node scripts/check-ai-domain-coverage.js",

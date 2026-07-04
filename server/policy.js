@@ -9,6 +9,7 @@ const path = require('path');
 const pkg = require('../package.json');
 const adapters = require('../detection-engine/adapters');
 const customDetectors = require('./custom-detectors');
+const exactMatch = require('./exact-match');
 
 const CONFIG_PATH = process.env.SENTINEL_POLICY_PATH || path.join(__dirname, '..', 'config', 'policy.json');
 const SENSOR_ID_RE = /^[a-z][a-z0-9_:-]{0,79}$/;
@@ -33,7 +34,7 @@ const DEFAULT_POLICY = {
   enforcementMode: 'block',
   blockMinSeverity: 2,
   blockRiskScore: 25,
-  alwaysBlock: ['US_SSN', 'CREDIT_CARD', 'BANK_ACCOUNT', 'ROUTING_NUMBER', 'IBAN', 'US_PASSPORT', 'US_ITIN', 'US_NPI', 'MEMBER_ID', 'LOAN_NUMBER', 'MEDICAL_RECORD_NUMBER', 'HEALTH_INSURANCE_ID', 'SECRET_KEY', 'PRIVATE_KEY', 'CANARY_TOKEN'],
+  alwaysBlock: ['US_SSN', 'CREDIT_CARD', 'BANK_ACCOUNT', 'ROUTING_NUMBER', 'IBAN', 'US_PASSPORT', 'US_ITIN', 'US_NPI', 'MEMBER_ID', 'LOAN_NUMBER', 'MEDICAL_RECORD_NUMBER', 'HEALTH_INSURANCE_ID', 'UK_NINO', 'UK_NHS_NUMBER', 'CANADA_SIN', 'AUSTRALIA_TFN', 'INDIA_AADHAAR', 'SECRET_KEY', 'PRIVATE_KEY', 'CANARY_TOKEN', 'EXACT_MATCH'],
   // When true, the raw prompt of an item held for approval is retained
   // (encrypted at rest) so an admin can review it. Set false for institutions
   // that forbid any server-side raw retention — reveal then shows redacted only.
@@ -460,11 +461,14 @@ function savePolicy(p) {
 }
 
 function analyzeOpts(policy = loadPolicy()) {
-  return {
+  const opts = {
     ignore: policy.ignore || [],
     disabledDetectors: policy.disabledDetectors || [],
     customDetectors: customDetectors.loadCustomDetectors(),
   };
+  const edm = exactMatch.exactMatchConfig();
+  if (edm) opts.exactMatch = edm;
+  return opts;
 }
 
 function customDetectorsForSensors() {

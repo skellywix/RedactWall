@@ -30,6 +30,7 @@ const evidence = require('./evidence');
 const preflight = require('./preflight');
 const validation = require('./validation');
 const coverage = require('./coverage');
+const insights = require('./insights');
 const {
   endpointAiToolAttentionIds,
   failedInstallCheckIds,
@@ -775,7 +776,8 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
   // Privacy-preserving record: redacted prompt + masked findings + categories.
   const redactedPrompt = clientRedactionResolved && !categoryNames(analysis).length ? prompt : safePreview(prompt, analysis);
   const findings = analysis.findings.map((f) => ({
-    type: f.type, severity: f.severity, score: f.score, masked: f.masked || detector.maskValue(f.type, f.value || ''),
+    type: f.type, severity: f.severity, score: f.score, confidence: f.confidenceLabel || null,
+    masked: f.masked || detector.maskValue(f.type, f.value || ''),
   }));
   const categories = (analysis.categories || []).map((c) => c.category);
 
@@ -1443,6 +1445,12 @@ app.post('/api/queries/:id/deny', ...decisionWrite, validation.validateBody(vali
 });
 
 app.get('/api/stats', auth.requireAuth, (req, res) => res.json(db.stats()));
+
+// AI-usage analytics for the Insights dashboard (metadata only; no prompt text).
+app.get('/api/insights', auth.requireAuth, (req, res) => {
+  const windowDays = boundedApiLimit(req.query.windowDays, 30, 90);
+  res.json(insights.summarize(db.listQueries({ limit: 5000 }), { windowDays }));
+});
 
 app.get('/api/billing/seats', ...adminRead, (req, res) => {
   res.json(tenant.seatReport(db));

@@ -2048,6 +2048,149 @@ function renderActivityRows(rows) {
   renderTablePager('#activityPager', { target: 'activity', ...page });
 }
 
+let currentInsights = null;
+let insightsWindowDays = 30;
+
+const INSIGHTS_DECISION_META = {
+  allowed: { label: 'Allowed', tone: '#3fb27f' },
+  redacted: { label: 'Redacted', tone: '#3f8cff' },
+  warned: { label: 'Warned', tone: '#e0a23b' },
+  flagged: { label: 'Flagged', tone: '#c98b2e' },
+  blocked: { label: 'Blocked', tone: '#e0555f' },
+  shadow: { label: 'Shadow AI', tone: '#a15de0' },
+};
+const INSIGHTS_RISK_TONE = { none: '#6b7686', low: '#3fb27f', medium: '#e0a23b', high: '#e07a3b', critical: '#e0555f' };
+
+async function loadInsights() {
+  const sel = $('#insightsWindow');
+  if (sel) insightsWindowDays = Number(sel.value) || 30;
+  setBusy('#tab-insights .panel', true, 'AGGREGATING');
+  try {
+    const r = await api(`/api/insights?windowDays=${encodeURIComponent(insightsWindowDays)}`);
+    const next = await responseJsonObject(r, null);
+    if (!next) return;
+    currentInsights = next;
+    renderInsights(next);
+    markUpdated();
+  } finally {
+    setBusy('#tab-insights .panel', false);
+  }
+}
+
+function insightsKpi(label, value, hint) {
+  return `<div class="insights-kpi"><span class="insights-kpi-value">${escapeHtml(String(value))}</span>`
+    + `<span class="insights-kpi-label">${escapeHtml(label)}</span>`
+    + (hint ? `<span class="insights-kpi-hint">${escapeHtml(hint)}</span>` : '') + '</div>';
+}
+
+// Dependency-free stacked-area time series as inline SVG (CSP-safe).
+function insightsSeriesSvg(series) {
+  const w = 720, h = 200, pad = 24;
+  const days = series.length || 1;
+  const max = Math.max(1, ...series.map((d) => d.total));
+  const order = ['allowed', 'redacted', 'warned', 'flagged', 'blocked', 'shadow'];
+  const x = (i) => pad + (i * (w - pad * 2)) / Math.max(1, days - 1);
+  const y = (v) => h - pad - (v / max) * (h - pad * 2);
+  let bars = '';
+  const bw = Math.max(3, (w - pad * 2) / days - 4);
+  series.forEach((d, i) => {
+    let acc = 0;
+    const cx = x(i) - bw / 2;
+    for (const k of order) {
+      const v = d[k] || 0;
+      if (!v) continue;
+      const yTop = y(acc + v);
+      const seg = ((v / max) * (h - pad * 2));
+      bars += `<rect x="${cx.toFixed(1)}" y="${yTop.toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(1, seg).toFixed(1)}" fill="${INSIGHTS_DECISION_META[k].tone}" rx="1"><title>${escapeHtml(d.date)} · ${INSIGHTS_DECISION_META[k].label}: ${v}</title></rect>`;
+      acc += v;
+    }
+  });
+  const ticks = [0, Math.round(max / 2), max].map((v) => `<text x="4" y="${(y(v) + 3).toFixed(1)}" class="insights-axis">${v}</text>`).join('');
+  const firstLabel = series.length ? `<text x="${pad}" y="${h - 6}" class="insights-axis">${escapeHtml(series[0].date.slice(5))}</text>` : '';
+  const lastLabel = series.length ? `<text x="${w - pad}" y="${h - 6}" text-anchor="end" class="insights-axis">${escapeHtml(series[series.length - 1].date.slice(5))}</text>` : '';
+  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="AI activity over time">${ticks}${bars}${firstLabel}${lastLabel}</svg>`;
+}
+
+// Donut of the decision mix.
+function insightsDonutSvg(decisions) {
+  const total = decisions.reduce((s, d) => s + d.count, 0);
+  const size = 180, r = 64, cx = size / 2, cy = size / 2, C = 2 * Math.PI * r;
+  if (!total) return '<div class="insights-empty">No activity in this window.</div>';
+  let offset = 0;
+  const arcs = decisions.filter((d) => d.count).map((d) => {
+    const frac = d.count / total;
+    const dash = `${(frac * C).toFixed(2)} ${(C - frac * C).toFixed(2)}`;
+    const seg = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${INSIGHTS_DECISION_META[d.id].tone}" stroke-width="20" stroke-dasharray="${dash}" stroke-dashoffset="${(-offset * C).toFixed(2)}" transform="rotate(-90 ${cx} ${cy})"><title>${INSIGHTS_DECISION_META[d.id].label}: ${d.count}</title></circle>`;
+    offset += frac;
+    return seg;
+  }).join('');
+  const legend = decisions.filter((d) => d.count).map((d) =>
+    `<span class="insights-swatch"><i style="background:${INSIGHTS_DECISION_META[d.id].tone}"></i>${INSIGHTS_DECISION_META[d.id].label} <b>${d.count}</b></span>`).join('');
+  return `<svg viewBox="0 0 ${size} ${size}" class="insights-donut" role="img" aria-label="Decision mix">${arcs}`
+    + `<text x="${cx}" y="${cy - 2}" text-anchor="middle" class="insights-donut-total">${total}</text>`
+    + `<text x="${cx}" y="${cy + 16}" text-anchor="middle" class="insights-donut-sub">events</text></svg>`
+    + `<div class="insights-legend">${legend}</div>`;
+}
+
+function insightsRiskSvg(bands) {
+  const max = Math.max(1, ...bands.map((b) => b.count));
+  return '<div class="insights-riskbars">' + bands.map((b) => {
+    const pct = Math.round((b.count / max) * 100);
+    return `<div class="insights-riskbar"><span class="insights-riskbar-label">${escapeHtml(b.label)}</span>`
+      + `<span class="insights-riskbar-track"><span class="insights-riskbar-fill" style="width:${pct}%;background:${INSIGHTS_RISK_TONE[b.id]}"></span></span>`
+      + `<span class="insights-riskbar-count">${b.count}</span></div>`;
+  }).join('') + '</div>';
+}
+
+function insightsHBars(items, keyName) {
+  if (!items || !items.length) return '<div class="insights-empty">None recorded.</div>';
+  const max = Math.max(1, ...items.map((i) => i.count));
+  return items.map((i) => {
+    const pct = Math.round((i.count / max) * 100);
+    return `<div class="insights-hbar"><span class="insights-hbar-label" title="${escapeHtml(i[keyName])}">${escapeHtml(i[keyName])}</span>`
+      + `<span class="insights-hbar-track"><span class="insights-hbar-fill" style="width:${pct}%"></span></span>`
+      + `<span class="insights-hbar-count">${i.count}</span></div>`;
+  }).join('');
+}
+
+function insightsRiskChip(risk) {
+  if (!risk) return '<span class="insights-chip tone-neutral">Unrated</span>';
+  const tone = risk.riskTier >= 4 ? 'tone-critical' : risk.riskTier === 3 ? 'tone-high' : risk.riskTier === 2 ? 'tone-medium' : 'tone-low';
+  return `<span class="insights-chip ${tone}">${escapeHtml(risk.riskTierLabel || 'unknown')}</span>`;
+}
+
+function insightsFlagLabels(flags) {
+  const map = { trains_on_data: 'Trains on data', personal_account_tier: 'Personal tier', data_residency_cn: 'Data in CN', data_residency_eu: 'Data in EU' };
+  return (flags || []).map((f) => `<span class="insights-attr">${escapeHtml(map[f] || f)}</span>`).join(' ');
+}
+
+function renderInsights(d) {
+  if (!d) return;
+  const t = d.totals || {};
+  $('#insightsKpis').innerHTML = [
+    insightsKpi('AI interactions', t.considered || 0, `last ${d.windowDays} days`),
+    insightsKpi('Avg exposure risk', t.avgRisk || 0, 'of 100'),
+    insightsKpi('Blocked', t.blocked || 0, 'held or denied'),
+    insightsKpi('Redacted', t.redacted || 0, 'tokenized & sent'),
+    insightsKpi('Shadow-AI hits', t.shadow || 0, 'ungoverned tools'),
+  ].join('');
+  $('#insightsSeries').innerHTML = insightsSeriesSvg(d.series || []);
+  $('#insightsSeriesLegend').innerHTML = (d.decisions || []).filter((x) => INSIGHTS_DECISION_META[x.id])
+    .map((x) => `<span class="insights-swatch"><i style="background:${INSIGHTS_DECISION_META[x.id].tone}"></i>${INSIGHTS_DECISION_META[x.id].label}</span>`).join('');
+  $('#insightsDecisions').innerHTML = insightsDonutSvg(d.decisions || []);
+  $('#insightsRisk').innerHTML = insightsRiskSvg(d.riskBands || []);
+  $('#insightsDetectors').innerHTML = insightsHBars(d.topDetectors || [], 'key');
+  $('#insightsCategories').innerHTML = insightsHBars(d.topCategories || [], 'key');
+  $('#insightsShadow').innerHTML = insightsHBars(d.shadowByProvider || [], 'key');
+  $('#insightsDestinations').innerHTML = (d.topDestinations || []).map((row) =>
+    `<tr><td>${escapeHtml(row.destination)}</td><td>${escapeHtml(row.risk ? row.risk.provider : '—')}</td>`
+    + `<td>${insightsRiskChip(row.risk)}</td><td>${row.risk ? insightsFlagLabels(row.risk.flags) : '<span class="insights-attr-muted">—</span>'}</td>`
+    + `<td>${row.count}</td></tr>`).join('') || '<tr><td colspan="5" class="insights-empty">No destinations recorded.</td></tr>';
+  $('#insightsUsers').innerHTML = (d.topUsers || []).map((u) =>
+    `<tr><td>${escapeHtml(u.user)}</td><td>${u.events}</td><td>${u.blocked}</td><td>${u.avgRisk}</td></tr>`).join('')
+    || '<tr><td colspan="4" class="insights-empty">No user activity recorded.</td></tr>';
+}
+
 async function loadCoverage() {
   setBusy('#tab-coverage .panel', true, 'RECONCILING');
   try {
@@ -3120,6 +3263,7 @@ function activateTab(name, options = {}) {
   if (targetName === 'audit') loadAudit();
   if (targetName === 'policy') loadPolicy();
   if (targetName === 'activity') loadActivity();
+  if (targetName === 'insights') loadInsights();
   if (targetName === 'coverage') loadCoverage();
   if (targetName === 'identity') loadIdentitySetup();
   if (targetName === 'lineage') loadLineage();
@@ -3141,6 +3285,8 @@ applyColorTheme(colorTheme, { persist: false });
 
 $('#refreshQueue').onclick = loadQueue;
 $('#refreshCoverage').onclick = loadCoverage;
+if ($('#refreshInsights')) $('#refreshInsights').onclick = loadInsights;
+if ($('#insightsWindow')) $('#insightsWindow').addEventListener('change', loadInsights);
 $('#refreshIdentity').onclick = loadIdentitySetup;
 $('#identityProvider').addEventListener('change', loadIdentitySetup);
 $('#identityTenant').addEventListener('change', loadIdentitySetup);
@@ -3164,7 +3310,7 @@ $('#monitorSearch').addEventListener('blur', () => {
 
 function connectStream() {
   const es = new EventSource('/api/stream');
-  es.addEventListener('query', () => { loadStats(); loadQueue(); if (!$('#tab-coverage').classList.contains('hidden')) loadCoverage(); if (!$('#tab-lineage').classList.contains('hidden')) loadLineage(); flash(); });
+  es.addEventListener('query', () => { loadStats(); loadQueue(); if (!$('#tab-coverage').classList.contains('hidden')) loadCoverage(); if (!$('#tab-lineage').classList.contains('hidden')) loadLineage(); if (!$('#tab-insights').classList.contains('hidden')) loadInsights(); flash(); });
   es.addEventListener('decision', () => { loadStats(); loadQueue(); loadActivity(); if (!$('#tab-lineage').classList.contains('hidden')) loadLineage(); });
   es.addEventListener('stats', () => loadStats());
   es.onerror = () => { setLiveState('reconnecting'); };

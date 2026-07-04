@@ -29,6 +29,7 @@ function minimalFiles(agentBody) {
     { path: 'detection-engine/adapters.js', body: Buffer.from('module.exports = {};') },
     { path: 'detection-engine/detect.js', body: Buffer.from('module.exports = {};') },
     { path: 'server/custom-detectors.js', body: Buffer.from('module.exports = {};') },
+    { path: 'server/exact-match.js', body: Buffer.from('module.exports = {};') },
     { path: 'server/env.js', body: Buffer.from('module.exports = {};') },
     { path: 'server/policy.js', body: Buffer.from('module.exports = {};') },
     { path: 'server/processors.js', body: Buffer.from('module.exports = {};') },

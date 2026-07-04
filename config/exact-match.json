@@ -1,0 +1,7 @@
+{
+  "salt": "",
+  "minLen": 6,
+  "severity": 4,
+  "enabled": false,
+  "fingerprints": []
+}
