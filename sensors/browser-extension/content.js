@@ -347,7 +347,27 @@
     return report('[browser action blocked] ' + action + ' ' + SITE, emptyAnalysis(), action, 'action_blocked', reason);
   }
 
+  // Outcomes where the browser blocked an upload it could not inspect: hand
+  // the file's name+size to the endpoint agent (via the background worker and
+  // native messaging) so the real file is scanned on the device. Best-effort
+  // only - the upload is already blocked before this fires.
+  const ENDPOINT_INTENT_OUTCOMES = new Set(['file_too_large', 'ocr_required', 'file_unsupported', 'scan_unavailable']);
+
+  function sendEndpointFileIntent(file, outcome) {
+    if (!ENDPOINT_INTENT_OUTCOMES.has(outcome)) return;
+    try {
+      Promise.resolve(Ext.sendMessage({
+        type: 'fileIntent',
+        payload: {
+          fileName: String((file && file.name) || '').slice(0, 255),
+          sizeBytes: Number((file && file.size) || 0),
+        },
+      })).catch(() => {});
+    } catch (_) { /* endpoint intent is optional */ }
+  }
+
   function reportLocalFileEvent(file, outcome, note) {
+    sendEndpointFileIntent(file, outcome);
     return report('[browser file blocked] ' + fileLabel(file), emptyAnalysis(), 'file_upload', outcome, note);
   }
 
