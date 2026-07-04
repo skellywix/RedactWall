@@ -199,13 +199,28 @@ test('policy exception review summarizes ownership and expiry state without cont
       action: 'allow',
       expiresAt: '2026-06-01T00:00:00.000Z',
       users: ['counsel@example.test'],
+    }, {
+      id: 'vendor_expiring',
+      enabled: true,
+      action: 'allow',
+      expiresAt: '2026-06-30T00:00:00.000Z',
+      users: ['vendor@example.test'],
+    }, {
+      id: 'vendor_active',
+      enabled: true,
+      action: 'allow',
+      expiresAt: '2026-07-31T00:00:00.000Z',
+      users: ['active@example.test'],
     }],
   }, { now: new Date('2026-06-28T12:00:00.000Z') });
 
-  assert.strictEqual(review.total, 2);
-  assert.strictEqual(review.active, 1);
+  assert.strictEqual(review.total, 4);
+  assert.strictEqual(review.active, 3);
   assert.strictEqual(review.reviewDue, 1);
   assert.strictEqual(review.expired, 1);
+  assert.strictEqual(review.expiringSoon, 1);
+  assert.strictEqual(review.items.find((item) => item.id === 'vendor_expiring').status, 'expiring_soon');
+  assert.strictEqual(review.items.find((item) => item.id === 'vendor_active').status, 'active');
   assert.deepStrictEqual(review.items[0], {
     id: 'legal_vendor_24h',
     enabled: true,
@@ -217,4 +232,5 @@ test('policy exception review summarizes ownership and expiry state without cont
     status: 'review_due',
   });
   assert.ok(!JSON.stringify(review).includes('counsel@example.test'));
+  assert.ok(!JSON.stringify(review).includes('vendor@example.test'));
 });

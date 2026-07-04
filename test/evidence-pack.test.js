@@ -253,6 +253,71 @@ test('schedule config loader accepts Windows UTF-8 BOM files', () => {
   assert.strictEqual(schedule.schedule.cadence, 'quarterly');
 });
 
+test('CLI main prints a metadata-only summary with schedule options', async () => {
+  assert.strictEqual(packer.boundedNumber('0', 100), 100);
+  assert.strictEqual(packer.boundedNumber('9999', 100), 5000);
+  assert.strictEqual(packer.boundedNumber('42.9', 100), 42);
+
+  const logs = [];
+  let optionsSeen;
+  await packer.main([
+    '--schedule',
+    'config/evidence-schedule.json',
+    '--zip',
+    '--zip-file',
+    'pack.zip',
+    '--force',
+    'backup.db',
+    'restore.db',
+  ], {
+    console: { log: (line) => logs.push(String(line)) },
+    loadScheduleConfig(file) {
+      assert.strictEqual(file, 'config/evidence-schedule.json');
+      return {
+        outDir: 'scheduled-packs',
+        queryLimit: 25,
+        auditLimit: 50,
+        generatedBy: 'scheduler',
+        scheduled: true,
+        schedule: { id: 'quarterly' },
+      };
+    },
+    writeEvidencePack(options) {
+      optionsSeen = options;
+      return {
+        file: path.join(tempRoot, 'pack.json'),
+        bytes: 123,
+        sha256: 'pack-sha',
+        zipFile: path.join(tempRoot, 'pack.zip'),
+        zipBytes: 456,
+        zipSha256: 'zip-sha',
+        pack: {
+          schemaVersion: 2,
+          scope: {
+            rawPromptBodiesIncluded: false,
+            auditDetailsIncluded: false,
+          },
+        },
+      };
+    },
+  });
+
+  assert.strictEqual(optionsSeen.outDir, 'scheduled-packs');
+  assert.strictEqual(optionsSeen.backupFile, 'backup.db');
+  assert.strictEqual(optionsSeen.restoreDrillFile, 'restore.db');
+  assert.strictEqual(optionsSeen.queryLimit, 25);
+  assert.strictEqual(optionsSeen.auditLimit, 50);
+  assert.strictEqual(optionsSeen.generatedBy, 'scheduler');
+  assert.strictEqual(optionsSeen.scheduled, true);
+  assert.deepStrictEqual(optionsSeen.schedule, { id: 'quarterly' });
+  const summary = JSON.parse(logs[0]);
+  assert.strictEqual(summary.schemaVersion, 2);
+  assert.strictEqual(summary.rawPromptBodiesIncluded, false);
+  assert.strictEqual(summary.auditDetailsIncluded, false);
+  assert.strictEqual(summary.sha256, 'pack-sha');
+  assert.strictEqual(summary.zipSha256, 'zip-sha');
+});
+
 test.after(() => {
   try { db._db.close(); } catch {}
   fs.rmSync(tempRoot, { recursive: true, force: true });

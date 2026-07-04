@@ -9,9 +9,25 @@ const {
   buildIdentitySetupGuide,
   normalizeProvider,
   renderTextGuide,
+  _internal,
 } = require('../server/identity-setup');
+const identityCli = require('../scripts/identity-setup');
 
 const root = path.join(__dirname, '..');
+
+function captureOutput() {
+  const logs = [];
+  const writes = [];
+  return {
+    logs,
+    writes,
+    console: {
+      log(message) { logs.push(message); },
+      error(message) { logs.push(message); },
+    },
+    stdout: { write(message) { writes.push(message); } },
+  };
+}
 
 test('identity setup guide renders Microsoft Entra SCIM and OIDC values', () => {
   const guide = buildIdentitySetupGuide({
@@ -50,6 +66,8 @@ test('identity setup guide accepts provider aliases and rejects invalid base url
   assert.strictEqual(normalizeProvider('microsoft'), 'entra');
   assert.strictEqual(normalizeProvider('azuread'), 'entra');
   assert.strictEqual(normalizeProvider('okta'), 'okta');
+  assert.throws(() => normalizeProvider('github'), /unsupported identity provider/);
+  assert.throws(() => _internal.providerIssuer('github', 'tenant'), /unsupported identity provider/);
   assert.throws(() => buildIdentitySetupGuide({ provider: 'entra', baseUrl: 'promptwall.example.test' }), /baseUrl/);
 });
 
@@ -80,6 +98,57 @@ test('identity setup CLI prints text and json without secrets', () => {
   const parsed = JSON.parse(json);
   assert.strictEqual(parsed.provider, 'entra');
   assert.strictEqual(parsed.oidc.issuer, 'https://login.microsoftonline.com/contoso.onmicrosoft.com/v2.0');
+});
+
+test('identity setup CLI parser and injectable main cover help, text, json, and errors', () => {
+  assert.deepStrictEqual(identityCli.parseArgs([
+    '--provider', 'okta',
+    '--base-url', 'https://promptwall.customer.example',
+    '--okta-domain', 'customer.okta.com',
+    '--format', 'json',
+  ]), {
+    provider: 'okta',
+    baseUrl: 'https://promptwall.customer.example',
+    tenantId: 'customer.okta.com',
+    format: 'json',
+  });
+  assert.strictEqual(identityCli.parseArgs(['--tenant', 'contoso.onmicrosoft.com']).tenantId, 'contoso.onmicrosoft.com');
+  assert.strictEqual(identityCli.parseArgs(['--json']).format, 'json');
+  assert.strictEqual(identityCli.parseArgs(['--help']).help, true);
+  assert.throws(() => identityCli.parseArgs(['--format', 'xml']), /text or json/);
+  assert.throws(() => identityCli.parseArgs(['--unknown']), /Unknown option/);
+
+  const help = captureOutput();
+  assert.strictEqual(identityCli.main(['--help'], { console: help.console, stdout: help.stdout }), 0);
+  assert.match(help.logs[0], /Usage: npm run identity:setup/);
+
+  const text = captureOutput();
+  assert.strictEqual(identityCli.main([
+    '--provider', 'entra',
+    '--base-url', 'https://promptwall.customer.example',
+    '--tenant-id', 'contoso.onmicrosoft.com',
+  ], { console: text.console, stdout: text.stdout }), 0);
+  assert.match(text.writes.join(''), /Microsoft Entra ID setup for PromptWall/);
+
+  const json = captureOutput();
+  assert.strictEqual(identityCli.main([
+    '--provider', 'okta',
+    '--base-url', 'https://promptwall.customer.example',
+    '--tenant-id', 'customer.okta.com',
+    '--json',
+  ], { console: json.console, stdout: json.stdout }), 0);
+  assert.strictEqual(JSON.parse(json.logs[0]).provider, 'okta');
+  assert.strictEqual(json.writes.length, 0);
+
+  const failure = captureOutput();
+  let exitCode = 0;
+  assert.strictEqual(identityCli.cli(['--format', 'xml'], {
+    console: failure.console,
+    stdout: failure.stdout,
+    setExitCode(code) { exitCode = code; },
+  }), 1);
+  assert.strictEqual(exitCode, 1);
+  assert.match(failure.logs[0], /Identity setup failed: --format must be text or json/);
 });
 
 test('dashboard and server expose authenticated identity setup UX', () => {

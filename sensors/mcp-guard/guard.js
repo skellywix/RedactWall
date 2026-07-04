@@ -18,7 +18,14 @@ const SERVER = process.env.SENTINEL_URL || 'http://localhost:4000';
 const KEY = process.env.INGEST_API_KEY || '';
 const POLICY_REFRESH_MS = 15 * 60 * 1000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 10000;
-const DEFAULT_DETECTION_POLICY = { ignore: [], disabledDetectors: [], customDetectors: [] };
+const DEFAULT_DETECTION_POLICY = {
+  ignore: [],
+  disabledDetectors: [],
+  customDetectors: [],
+  mcpAllowedTools: [],
+  mcpBlockedTools: [],
+  mcpApprovalRequiredTools: [],
+};
 let detectionPolicy = normalizeDetectionPolicy(DEFAULT_DETECTION_POLICY);
 let lastPolicyRefresh = 0;
 
@@ -32,11 +39,29 @@ function lowerDetectorList(value) {
   return value.filter((item) => typeof item === 'string' && item.trim()).map((item) => item.trim());
 }
 
+function normalizeToolList(value) {
+  if (!Array.isArray(value)) return [];
+  const out = [];
+  const seen = new Set();
+  for (const item of value) {
+    const text = String(item || '').trim();
+    if (!text || text.length > 160 || !/^[A-Za-z0-9.*:_/-]+$/.test(text)) continue;
+    const key = text.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(text);
+  }
+  return out;
+}
+
 function normalizeDetectionPolicy(policy = {}) {
   return {
     ignore: lowerDetectorList(policy.ignore),
     disabledDetectors: lowerDetectorList(policy.disabledDetectors),
     customDetectors: Array.isArray(policy.customDetectors) ? policy.customDetectors : [],
+    mcpAllowedTools: normalizeToolList(policy.mcpAllowedTools),
+    mcpBlockedTools: normalizeToolList(policy.mcpBlockedTools),
+    mcpApprovalRequiredTools: normalizeToolList(policy.mcpApprovalRequiredTools),
   };
 }
 
@@ -115,6 +140,45 @@ function sensorMetadata() {
   return { name: 'mcp_guard', version: VERSION, platform: 'node' };
 }
 
+function safeToolName(value) {
+  const text = String(value || 'mcp-tool').replace(/[\r\n\t]/g, ' ').trim();
+  return (text || 'mcp-tool').slice(0, 160);
+}
+
+function wildcardRegex(pattern) {
+  const escaped = String(pattern)
+    .replace(/[.+?^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*/g, '.*');
+  return new RegExp(`^${escaped}$`);
+}
+
+function toolPatternMatches(tool, pattern) {
+  const target = safeToolName(tool).toLowerCase();
+  const rule = safeToolName(pattern).toLowerCase();
+  if (rule === '*') return true;
+  if (rule.includes('*')) return wildcardRegex(rule).test(target);
+  return target === rule;
+}
+
+function toolMatchesAny(tool, patterns = []) {
+  return patterns.some((pattern) => toolPatternMatches(tool, pattern));
+}
+
+function mcpToolDecision(ctx = {}, policy = detectionPolicy) {
+  const tool = safeToolName(ctx.tool || ctx.destination || 'mcp-tool');
+  const normalized = normalizeDetectionPolicy(policy || DEFAULT_DETECTION_POLICY);
+  if (toolMatchesAny(tool, normalized.mcpBlockedTools)) {
+    return { allowed: false, status: 'blocked', tool, reason: 'MCP tool blocked by policy' };
+  }
+  if (toolMatchesAny(tool, normalized.mcpApprovalRequiredTools)) {
+    return { allowed: false, status: 'approval_required', tool, reason: 'MCP tool requires approval before execution' };
+  }
+  if (normalized.mcpAllowedTools.length && !toolMatchesAny(tool, normalized.mcpAllowedTools)) {
+    return { allowed: false, status: 'not_allowed', tool, reason: 'MCP tool is outside the allowed registry' };
+  }
+  return { allowed: true, status: 'allowed', tool, reason: 'MCP tool allowed by policy' };
+}
+
 function reportBody({ safeText, analysis, ctx }) {
   return {
     prompt: String(safeText || '').slice(0, 1000),
@@ -135,6 +199,21 @@ function reportBody({ safeText, analysis, ctx }) {
   };
 }
 
+function reportToolPolicyBody({ decision, ctx }) {
+  const context = ctx && typeof ctx === 'object' ? ctx : {};
+  const tool = safeToolName(decision && decision.tool || context.tool || 'mcp-tool');
+  return {
+    prompt: `[MCP tool blocked] ${tool}`,
+    user: context.agent || 'mcp-agent',
+    destination: tool,
+    source: 'mcp_guard',
+    channel: 'mcp_tool',
+    sensor: sensorMetadata(),
+    clientOutcome: 'action_blocked',
+    note: decision.reason || 'MCP tool policy blocked execution',
+  };
+}
+
 async function logEvent(rec, opts = {}) {
   const fetchImpl = opts.fetchImpl || globalThis.fetch;
   if (!fetchImpl) return;
@@ -150,12 +229,33 @@ async function logEvent(rec, opts = {}) {
   } catch (e) { /* logging best-effort */ }
 }
 
+async function logToolPolicyBlock(decision, ctx = {}, opts = {}) {
+  await logEvent(reportToolPolicyBody({ decision, ctx }), opts);
+}
+
+async function guardToolRequest(ctx = {}, opts = {}) {
+  await maybeRefreshPolicy(opts);
+  const decision = mcpToolDecision(ctx, opts.policy || detectionPolicy);
+  if (!decision.allowed) await logToolPolicyBlock(decision, ctx, opts);
+  return decision;
+}
+
 /**
  * Inspect+redact a tool result string before returning it to the model.
  * @returns {Promise<{ text:string, redacted:boolean, findings:string[] }>}
  */
 async function guardToolResult(text, ctx = {}, opts = {}) {
   await maybeRefreshPolicy(opts);
+  const toolDecision = mcpToolDecision(ctx, opts.policy || detectionPolicy);
+  if (!toolDecision.allowed) {
+    await logToolPolicyBlock(toolDecision, ctx, opts);
+    return {
+      text: `[BLOCKED: ${toolDecision.reason}]`,
+      redacted: true,
+      blocked: true,
+      findings: ['MCP_TOOL_POLICY'],
+    };
+  }
   const a = D.analyze(text || '', detectionOptions(opts.policy || detectionPolicy));
   const findings = [...new Set(a.findings.map(f => f.type).concat(a.categories.map(c => c.category)))];
   if (!a.findings.length && !a.categories.length) {
@@ -169,21 +269,44 @@ async function guardToolResult(text, ctx = {}, opts = {}) {
 }
 
 /** Higher-order wrapper for an MCP tool handler. */
-function wrapTool(handler, ctx = {}) {
+function wrapTool(handler, ctx = {}, opts = {}) {
   return async function (args) {
+    const decision = await guardToolRequest(ctx, opts);
+    if (!decision.allowed) return `[BLOCKED: ${decision.reason}]`;
     const result = await handler(args);
     const asText = typeof result === 'string' ? result : JSON.stringify(result);
-    const guarded = await guardToolResult(asText, ctx);
+    const guarded = await guardToolResult(asText, ctx, opts);
     return guarded.text;
   };
 }
 
+async function demo(deps = {}) {
+  const io = deps.console || console;
+  const guard = deps.guardToolResult || guardToolResult;
+  const canary = ['PS', 'CANARY', 'MCPDEMO123456'].join('-');
+  const fakeDoc = `Member record pulled from SharePoint:
+Name: Sarah Jones
+Canary: ${canary}
+Notes: confidential - account under review, do not share externally.`;
+  io.log('--- raw MCP tool result (what the model WOULD see) ---');
+  io.log(fakeDoc);
+  const g = await guard(fakeDoc, { agent: 'claude-desktop', tool: 'sharepoint.fetchDoc' });
+  io.log('\n--- guarded result (what the model ACTUALLY sees) ---');
+  io.log(g.text);
+  io.log('\nredacted:', g.redacted, '| detected:', g.findings.join(', '));
+  return g;
+}
+
 module.exports = {
   guardToolResult,
+  guardToolRequest,
   wrapTool,
+  demo,
   reportBody,
+  reportToolPolicyBody,
   publicFindings,
   publicCategories,
+  mcpToolDecision,
   fetchPolicy,
   refreshPolicy,
   detectionOptions,
@@ -193,18 +316,4 @@ module.exports = {
 };
 
 // ---- demo when run directly ------------------------------------------------
-if (require.main === module) {
-  (async () => {
-    const fakeDoc = `Member record pulled from SharePoint:
-Name: Sarah Jones
-SSN: 524-71-9043
-Card on file: 4111 1111 1111 1111
-Notes: confidential — account under review, do not share externally.`;
-    console.log('--- raw MCP tool result (what the model WOULD see) ---');
-    console.log(fakeDoc);
-    const g = await guardToolResult(fakeDoc, { agent: 'claude-desktop', tool: 'sharepoint.fetchDoc' });
-    console.log('\n--- guarded result (what the model ACTUALLY sees) ---');
-    console.log(g.text);
-    console.log('\nredacted:', g.redacted, '| detected:', g.findings.join(', '));
-  })();
-}
+if (require.main === module) demo();

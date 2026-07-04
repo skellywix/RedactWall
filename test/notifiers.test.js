@@ -134,6 +134,13 @@ test('ticket payload builder produces a bridge-safe issue shape', () => {
   assert.ok(!JSON.stringify(ticket).includes('524-71-9043'));
   assert.ok(!JSON.stringify(ticket).includes('Member Jane'));
   assert.ok(!JSON.stringify(ticket).includes('sealed-vault'));
+
+  const normal = notifiers.ticketPayload({ system: 'jira' }, notifiers.sanitizedApprovalNotification(sampleQuery({
+    riskScore: 12,
+    maxSeverity: 1,
+    maxSeverityLabel: 'low',
+  })));
+  assert.strictEqual(normal.priority, 'normal');
 });
 
 test('native Jira and Linear adapters create sanitized issue requests', async () => {
@@ -253,6 +260,31 @@ test('Linear adapter treats GraphQL errors as failed notification delivery', asy
   assert.strictEqual(result.results[0].reason, 'graphql_error');
 });
 
+test('Linear adapter treats malformed JSON as failed notification delivery', async () => {
+  const result = await notifiers.linearResponseResult({
+    ok: true,
+    json: async () => {
+      throw new Error('not json');
+    },
+  });
+
+  assert.deepStrictEqual(result, { reason: 'invalid_graphql_response', issue: null });
+});
+
+test('notification delivery records sanitized adapter exceptions', async () => {
+  const result = await notifiers.emitApprovalNotification(sampleQuery(), {
+    channels: [{ type: 'webhook', name: 'webhook', url: 'https://notify.example.test/hook' }],
+    fetch: async () => {
+      throw new Error('network down with SSN 524-71-9043');
+    },
+  });
+
+  assert.strictEqual(result.sent, false);
+  assert.strictEqual(result.status, 'failed');
+  assert.deepStrictEqual(result.results, [{ channel: 'webhook', sent: false, reason: 'error' }]);
+  assert.ok(!JSON.stringify(result).includes('524-71-9043'));
+});
+
 test('native Linear adapter returns created issue metadata', async () => {
   const result = await notifiers.emitApprovalNotification(sampleQuery(), {
     env: {
@@ -284,6 +316,35 @@ test('native Linear adapter returns created issue metadata', async () => {
 });
 
 test('Linear smoke command builds a sanitized native request', () => {
+  const parsed = linearSmoke.parseArgs([
+    '--send',
+    '--team-id=team-security',
+    '--state-id',
+    'state-review',
+    '--project-id',
+    'project-ai',
+    '--label-ids',
+    'risk,ai',
+    '--api-url',
+    'https://api.linear.app/graphql',
+    '--query-id',
+    'linear_smoke_test',
+  ]);
+  assert.strictEqual(parsed.send, true);
+  assert.strictEqual(parsed.teamId, 'team-security');
+  assert.strictEqual(parsed.stateId, 'state-review');
+  assert.strictEqual(parsed.projectId, 'project-ai');
+  assert.strictEqual(parsed.labelIds, 'risk,ai');
+  assert.strictEqual(parsed.apiUrl, 'https://api.linear.app/graphql');
+  assert.strictEqual(parsed.queryId, 'linear_smoke_test');
+  assert.deepStrictEqual(linearSmoke.linearEnv({}, parsed), {
+    PROMPTWALL_APPROVAL_LINEAR_API_URL: 'https://api.linear.app/graphql',
+    PROMPTWALL_APPROVAL_LINEAR_TEAM_ID: 'team-security',
+    PROMPTWALL_APPROVAL_LINEAR_STATE_ID: 'state-review',
+    PROMPTWALL_APPROVAL_LINEAR_PROJECT_ID: 'project-ai',
+    PROMPTWALL_APPROVAL_LINEAR_LABEL_IDS: 'risk,ai',
+  });
+
   const smoke = linearSmoke.buildSmokeRequest({
     env: {},
     argv: ['--team-id', 'team-security', '--query-id', 'linear_smoke_test'],
@@ -319,6 +380,40 @@ test('native Linear adapter rejects unsafe API URL overrides', () => {
     }),
     /invalid Linear API URL/,
   );
+  assert.throws(
+    () => linearSmoke.linearChannelForPayload({}),
+    /missing Linear team id/,
+  );
+  assert.throws(
+    () => linearSmoke.assertSanitizedWire('payload sealed-linear-smoke-vault'),
+    /leaked marker/,
+  );
+});
+
+test('Linear smoke command supports dry-run and CLI output without sending', async () => {
+  const result = await linearSmoke.runSmoke({
+    env: {},
+    argv: ['--team-id', 'team-security', '--query-id', 'linear_smoke_dry'],
+    now: new Date('2026-06-29T12:00:00.000Z'),
+  });
+  assert.strictEqual(result.dryRun, true);
+  assert.strictEqual(result.sent, false);
+  assert.strictEqual(result.queryId, 'linear_smoke_dry');
+  assert.strictEqual(result.teamId, 'team-security');
+
+  const logs = [];
+  await linearSmoke.main(['--team-id', 'team-security'], {
+    console: { log: (line) => logs.push(String(line)) },
+    runSmoke: async () => ({
+      dryRun: true,
+      queryId: 'linear_smoke_main',
+      teamId: 'team-security',
+      url: 'https://api.linear.app/graphql',
+      title: 'PromptWall approval',
+    }),
+  });
+  assert.match(logs.join('\n'), /LINEAR_APPROVAL_SMOKE_DRY_RUN query=linear_smoke_main/);
+  assert.match(logs.join('\n'), /wire=sanitized send=false/);
 });
 
 test('Linear smoke command requires an API key before sending', async () => {
@@ -330,6 +425,28 @@ test('Linear smoke command requires an API key before sending', async () => {
       fetchImpl: async () => ({ ok: true, status: 200 }),
     }),
     /missing Linear API key/,
+  );
+});
+
+test('Linear smoke command reports adapter send failures', async () => {
+  await assert.rejects(
+    () => linearSmoke.runSmoke({
+      env: { PROMPTWALL_APPROVAL_LINEAR_API_KEY: 'linear-secret-key' },
+      argv: ['--send', '--team-id', 'team-security'],
+      now: new Date('2026-06-29T12:00:00.000Z'),
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: {
+            issueCreate: {
+              success: false,
+            },
+          },
+        }),
+      }),
+    }),
+    /Linear approval smoke failed/,
   );
 });
 
@@ -368,6 +485,20 @@ test('Linear smoke command sends through the native adapter', async () => {
   assert.strictEqual(requests[0].opts.headers.Authorization, 'linear-secret-key');
   assert.ok(!requests[0].opts.body.includes('000-00-0000'));
   assert.ok(!requests[0].opts.body.includes('sealed-linear-smoke-vault'));
+
+  const logs = [];
+  await linearSmoke.main(['--send'], {
+    console: { log: (line) => logs.push(String(line)) },
+    runSmoke: async () => ({
+      dryRun: false,
+      queryId: 'linear_smoke_main',
+      externalId: '',
+      status: 'approval_ticket_sent',
+      url: 'https://linear.app/example/issue/OPS-8/promptwall-smoke',
+    }),
+  });
+  assert.match(logs.join('\n'), /LINEAR_APPROVAL_SMOKE_OK query=linear_smoke_main issue=created/);
+  assert.match(logs.join('\n'), /url=https:\/\/linear\.app\/example\/issue\/OPS-8/);
 });
 
 test('SMTP adapter sends sanitized approval email through a relay', async (t) => {

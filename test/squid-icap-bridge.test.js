@@ -31,6 +31,10 @@ test('extracts user prompt text from chat-style JSON bodies', () => {
     extractPrompt('api.example.test', 'application/json', body),
     'first user prompt\nsecond user prompt',
   );
+  assert.strictEqual(
+    extractPrompt('api.example.test', 'application/json', JSON.stringify({ input: 'single input prompt' })),
+    'single input prompt',
+  );
 });
 
 test('gate sends proxy context and returns a usable control-plane verdict', async () => {
@@ -97,6 +101,23 @@ test('gate fails closed on timeout, non-ok response, or invalid JSON', async () 
     status: 'control_plane_unavailable',
     reason: 'gate_invalid_json',
   });
+
+  const malformedJson = await gate({
+    host: 'chatgpt.com',
+    body: 'synthetic prompt',
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => {
+        throw new Error('not json');
+      },
+    }),
+  });
+  assert.deepStrictEqual(malformedJson, {
+    decision: 'block',
+    status: 'control_plane_unavailable',
+    reason: 'gate_invalid_json',
+  });
 });
 
 test('awaitRelease releases only approved or allowed statuses', async () => {
@@ -136,6 +157,24 @@ test('awaitRelease fails closed on missing id and status API failure', async () 
     fetchImpl: async () => jsonResponse(500, { error: 'down' }),
   });
   assert.deepStrictEqual(down, { released: false, reason: 'status_http_500' });
+
+  const unreachable = await awaitRelease('q_unreachable', {
+    fetchImpl: async () => {
+      throw new Error('network down');
+    },
+  });
+  assert.deepStrictEqual(unreachable, { released: false, reason: 'status_unreachable' });
+});
+
+test('awaitRelease times out pending release decisions', async () => {
+  const result = await awaitRelease('q_pending', {
+    timeoutMs: 20,
+    intervalMs: 5,
+    sleepImpl: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    fetchImpl: async () => jsonResponse(200, { status: 'pending' }),
+  });
+
+  assert.deepStrictEqual(result, { released: false, reason: 'timeout' });
 });
 
 test('request timeout bounds invalid values', () => {

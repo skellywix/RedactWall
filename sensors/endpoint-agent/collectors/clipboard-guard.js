@@ -77,8 +77,9 @@ function publicError(err) {
 
 async function readClipboard(opts = {}) {
   if (opts.readClipboard) return opts.readClipboard();
-  if (process.platform !== 'win32') throw new Error('clipboard guard is not supported on this platform');
-  const result = await execFileAsync('powershell.exe', [
+  if ((opts.platform || process.platform) !== 'win32') throw new Error('clipboard guard is not supported on this platform');
+  const run = opts.execFileAsync || execFileAsync;
+  const result = await run('powershell.exe', [
     '-NoProfile',
     '-ExecutionPolicy', 'Bypass',
     '-Command',
@@ -89,8 +90,9 @@ async function readClipboard(opts = {}) {
 
 async function clearClipboard(opts = {}) {
   if (opts.clearClipboard) return opts.clearClipboard();
-  if (process.platform !== 'win32') throw new Error('clipboard guard is not supported on this platform');
-  await execFileAsync('powershell.exe', [
+  if ((opts.platform || process.platform) !== 'win32') throw new Error('clipboard guard is not supported on this platform');
+  const run = opts.execFileAsync || execFileAsync;
+  await run('powershell.exe', [
     '-NoProfile',
     '-ExecutionPolicy', 'Bypass',
     '-Command',
@@ -211,16 +213,16 @@ async function collectClipboard(opts = {}) {
   });
 }
 
-function printHuman(result) {
+function printHuman(result, io = console) {
   if (result.status === 'clean' || result.status === 'empty') {
-    console.log(`PromptWall clipboard guard ${result.status}`);
+    io.log(`PromptWall clipboard guard ${result.status}`);
     return;
   }
   const parts = [`PromptWall clipboard guard ${result.status}`];
   if (result.labels && result.labels.length) parts.push(result.labels.join(', '));
   if (result.cleared) parts.push('clipboard cleared');
   if (!result.recorded) parts.push('not recorded');
-  console.log(parts.join(': '));
+  io.log(parts.join(': '));
 }
 
 function exitCodeForResult(result) {
@@ -229,26 +231,28 @@ function exitCodeForResult(result) {
   return 0;
 }
 
-async function main() {
+async function main(argv = process.argv.slice(2), deps = {}) {
+  const io = deps.console || console;
+  const collect = deps.collectClipboard || collectClipboard;
   try {
-    const opts = parseArgs();
+    const opts = parseArgs(argv);
     if (opts.help) {
-      console.log(usage());
-      return;
+      io.log(usage());
+      return 0;
     }
-    const result = await collectClipboard(opts);
-    if (opts.json) console.log(JSON.stringify(result, null, 2));
-    else if (!opts.quiet) printHuman(result);
-    process.exitCode = exitCodeForResult(result);
+    const result = await collect(opts);
+    if (opts.json) io.log(JSON.stringify(result, null, 2));
+    else if (!opts.quiet) printHuman(result, io);
+    return exitCodeForResult(result);
   } catch (err) {
     const error = publicError(err);
-    if (!process.argv.includes('--quiet')) console.error(error);
-    if (process.argv.includes('--json')) console.log(JSON.stringify({ status: 'failed', error }, null, 2));
-    process.exitCode = 1;
+    if (!argv.includes('--quiet')) io.error(error);
+    if (argv.includes('--json')) io.log(JSON.stringify({ status: 'failed', error }, null, 2));
+    return 1;
   }
 }
 
-if (require.main === module) main();
+if (require.main === module) main().then((code) => { process.exitCode = code; });
 
 module.exports = {
   DEFAULT_DESTINATION,
@@ -257,8 +261,14 @@ module.exports = {
   clipboardRecord,
   collectClipboard,
   exitCodeForResult,
+  main,
   parseArgs,
+  printHuman,
   publicError,
   sensitivityLabels,
   usage,
+  _internal: {
+    clearClipboard,
+    readClipboard,
+  },
 };

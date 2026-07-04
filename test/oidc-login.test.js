@@ -43,6 +43,43 @@ function signJwt(privateKey, kid, claims) {
   return `${signingInput}.${signature}`;
 }
 
+function signedStateCookieBody(body) {
+  const mac = crypto.createHmac('sha256', process.env.SENTINEL_SECRET).update(body).digest('base64url');
+  return `${body}.${mac}`;
+}
+
+function idTokenFixture(claimOverrides = {}) {
+  const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const kid = 'oidc-validation-key';
+  const jwk = publicKey.export({ format: 'jwk' });
+  jwk.kid = kid;
+  jwk.use = 'sig';
+  jwk.alg = 'RS256';
+  const nowSec = Math.floor(Date.parse('2026-06-28T13:00:00.000Z') / 1000);
+  const config = {
+    issuer: 'https://login.example.test',
+    clientId: process.env.OIDC_CLIENT_ID,
+    clientSecret: process.env.OIDC_CLIENT_SECRET,
+    jwksUri: 'https://login.example.test/jwks',
+    enabled: true,
+  };
+  const claims = {
+    iss: config.issuer,
+    sub: 'subject-1',
+    aud: config.clientId,
+    nonce: 'nonce-1',
+    iat: nowSec,
+    exp: nowSec + 300,
+    ...claimOverrides,
+  };
+  return {
+    token: signJwt(privateKey, kid, claims),
+    config,
+    now: nowSec * 1000,
+    fetchImpl: async () => ({ ok: true, json: async () => ({ keys: [jwk] }) }),
+  };
+}
+
 async function startIssuer() {
   const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
   const kid = 'oidc-unit-key';
@@ -237,6 +274,110 @@ test('oidc fresh step-up window is bounded by the IdP auth_time claim', () => {
   assert.strictEqual(extras.provider, 'oidc');
   assert.strictEqual(extras.stepUpUntil, authTime * 1000 + oidc.STEP_UP_TTL_MS);
   assert.ok(extras.stepUpUntil < now + oidc.STEP_UP_TTL_MS);
+});
+
+test('oidc discovery and state cookies fail closed on mismatches and tampering', async () => {
+  await assert.rejects(
+    () => oidc.resolvedConfig({
+      env: {
+        OIDC_ISSUER: 'https://issuer.example.test',
+        OIDC_CLIENT_ID: 'promptwall-console',
+        OIDC_CLIENT_SECRET: 'secret',
+      },
+      fetchImpl: async () => ({
+        ok: true,
+        json: async () => ({
+          issuer: 'https://other-issuer.example.test',
+          authorization_endpoint: 'https://issuer.example.test/auth',
+          token_endpoint: 'https://issuer.example.test/token',
+          jwks_uri: 'https://issuer.example.test/jwks',
+        }),
+      }),
+    }),
+    /issuer mismatch/,
+  );
+
+  const badJsonBody = Buffer.from('{bad-json').toString('base64url');
+  assert.throws(
+    () => oidc.readStateCookie(signedStateCookieBody(badJsonBody), Date.now()),
+    /state cookie is invalid/,
+  );
+
+  const expired = oidc.signState({
+    state: 'state-1',
+    nonce: 'nonce-1',
+    exp: Date.parse('2026-06-28T12:00:00.000Z') - 1,
+  });
+  assert.throws(
+    () => oidc.readStateCookie(expired, Date.parse('2026-06-28T12:00:00.000Z')),
+    /state cookie expired/,
+  );
+
+  assert.strictEqual(oidc.safeReturnTo('/dashboard.html'), '/dashboard.html');
+  assert.strictEqual(oidc.safeReturnTo('https://evil.example/'), '/index.html');
+});
+
+test('oidc id token validation rejects malformed and out-of-window signed claims', async () => {
+  const malformed = idTokenFixture();
+  await assert.rejects(
+    () => oidc.validateIdToken('not-json.not-json.not-signature', {
+      config: malformed.config,
+      fetchImpl: malformed.fetchImpl,
+      nonce: 'nonce-1',
+      now: malformed.now,
+    }),
+    /cannot be decoded/,
+  );
+
+  const expired = idTokenFixture({ exp: Math.floor(Date.parse('2026-06-28T13:00:00.000Z') / 1000) - 61 });
+  await assert.rejects(
+    () => oidc.validateIdToken(expired.token, {
+      config: expired.config,
+      fetchImpl: expired.fetchImpl,
+      nonce: 'nonce-1',
+      now: expired.now,
+    }),
+    /expired/,
+  );
+
+  const futureNbf = idTokenFixture({ nbf: Math.floor(Date.parse('2026-06-28T13:00:00.000Z') / 1000) + 120 });
+  await assert.rejects(
+    () => oidc.validateIdToken(futureNbf.token, {
+      config: futureNbf.config,
+      fetchImpl: futureNbf.fetchImpl,
+      nonce: 'nonce-1',
+      now: futureNbf.now,
+    }),
+    /not yet valid/,
+  );
+
+  const futureIat = idTokenFixture({ iat: Math.floor(Date.parse('2026-06-28T13:00:00.000Z') / 1000) + 120 });
+  await assert.rejects(
+    () => oidc.validateIdToken(futureIat.token, {
+      config: futureIat.config,
+      fetchImpl: futureIat.fetchImpl,
+      nonce: 'nonce-1',
+      now: futureIat.now,
+    }),
+    /issued in the future/,
+  );
+
+  const nonce = idTokenFixture();
+  await assert.rejects(
+    () => oidc.validateIdToken(nonce.token, {
+      config: nonce.config,
+      fetchImpl: nonce.fetchImpl,
+      nonce: 'other-nonce',
+      now: nonce.now,
+    }),
+    /nonce mismatch/,
+  );
+});
+
+test('oidc public errors stay generic except for operator-safe categories', () => {
+  assert.strictEqual(oidc.publicError(new Error('OIDC login is not enabled')), 'oidc login is not enabled');
+  assert.strictEqual(oidc.publicError(new Error('OIDC user is not active in SCIM')), 'oidc user is not provisioned');
+  assert.strictEqual(oidc.publicError(new Error('OIDC token exchange failed with private details')), 'oidc login failed');
 });
 
 test.after(() => {

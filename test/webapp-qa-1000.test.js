@@ -30,6 +30,15 @@ const { listen, loopbackHttpFetch } = require('./support/listen');
 const root = path.join(__dirname, '..');
 const dashboardHtml = fs.readFileSync(path.join(root, 'server', 'public', 'index.html'), 'utf8');
 const dashboardJs = fs.readFileSync(path.join(root, 'server', 'public', 'dashboard.js'), 'utf8');
+const siemPackageJs = fs.readFileSync(path.join(root, 'server', 'public', 'siem-package.js'), 'utf8');
+const threatGuardrailsJs = fs.readFileSync(path.join(root, 'server', 'public', 'ai-threat-guardrails.js'), 'utf8');
+const operatorFlowJs = fs.readFileSync(path.join(root, 'server', 'public', 'operator-flow.js'), 'utf8');
+const policyGuidesJs = fs.readFileSync(path.join(root, 'server', 'public', 'policy-guides.js'), 'utf8');
+const behaviorBaselinesJs = fs.readFileSync(path.join(root, 'server', 'public', 'behavior-baselines.js'), 'utf8');
+const competitiveReadinessJs = fs.readFileSync(path.join(root, 'server', 'public', 'competitive-readiness.js'), 'utf8');
+const coverageFileFlowJs = fs.readFileSync(path.join(root, 'server', 'public', 'coverage-file-flow.js'), 'utf8');
+const decisionQualityJs = fs.readFileSync(path.join(root, 'server', 'public', 'decision-quality.js'), 'utf8');
+const detectorFeedbackJs = fs.readFileSync(path.join(root, 'server', 'public', 'detector-feedback.js'), 'utf8');
 const loginHtml = fs.readFileSync(path.join(root, 'server', 'public', 'login.html'), 'utf8');
 const loginJs = fs.readFileSync(path.join(root, 'server', 'public', 'login.js'), 'utf8');
 const manifest = JSON.parse(fs.readFileSync(path.join(root, 'sensors', 'browser-extension', 'manifest.json'), 'utf8'));
@@ -389,7 +398,7 @@ const selectorMarkers = [
   'id="exportEvidence"', 'id="exportStatus"', 'id="integrity"', 'id="auditRows"', 'id="auditPager"', 'id="policyBox"', 'id="configurationStatus"',
   'id="updateBox"', 'id="updateConsoleStatus"', 'id="logout"', 'data-tab="queue"', 'data-tab="monitor"', 'data-tab="activity"', 'data-tab="coverage"',
   'data-tab="identity"', 'data-tab="lineage"', 'data-tab="audit"', 'data-tab="policy"', 'data-tab="updates"', 'aria-label="Pending approval prompts"',
-  'aria-label="Signal Monitor"', 'aria-label="All Activity"', 'aria-label="Coverage"', 'aria-label="Identity"', 'aria-label="Lineage"', 'aria-label="Audit Log"',
+  'aria-label="AI Command Center"', 'aria-label="All Activity"', 'aria-label="Coverage"', 'aria-label="Identity"', 'aria-label="Lineage"', 'aria-label="Audit Log"',
 ];
 for (const marker of selectorMarkers) {
   add('static-ui', `ui marker ${marker}`, () => expectContains(dashboardHtml + loginHtml, marker));
@@ -416,7 +425,42 @@ const securityStaticCases = [
   () => assert.strictEqual(/\son[a-z]+\s*=/.test(loginHtml), false),
   () => assert.strictEqual(/<script>\s*\S/.test(dashboardHtml), false),
   () => assert.strictEqual(/<script>\s*\S/.test(loginHtml), false),
-  () => expectContains(dashboardHtml, '<script src="/dashboard.js" defer></script>'),
+  () => {
+    expectContains(dashboardHtml, '<script src="/siem-package.js" defer></script>');
+    expectContains(dashboardHtml, '<script src="/ai-threat-guardrails.js" defer></script>');
+    expectContains(dashboardHtml, '<script src="/operator-flow.js" defer></script>');
+    expectContains(dashboardHtml, '<script src="/policy-guides.js" defer></script>');
+    expectContains(dashboardHtml, '<script src="/behavior-baselines.js" defer></script>');
+    expectContains(dashboardHtml, '<script src="/competitive-readiness.js" defer></script>');
+    expectContains(dashboardHtml, '<script src="/coverage-file-flow.js" defer></script>');
+    expectContains(dashboardHtml, '<script src="/decision-quality.js" defer></script>');
+    expectContains(dashboardHtml, '<script src="/detector-feedback.js" defer></script>');
+    expectContains(dashboardHtml, '<script src="/dashboard.js" defer></script>');
+    expectContains(dashboardHtml, 'id="endpointFileFlowRows"');
+    expectContains(dashboardHtml, 'Endpoint File Flow');
+    expectContains(dashboardHtml, 'id="decisionQualityRows"');
+    expectContains(dashboardHtml, 'Decision Quality');
+    expectContains(dashboardHtml, 'id="behaviorBaselineRows"');
+    expectContains(dashboardHtml, 'Behavior Baselines');
+    expectContains(dashboardHtml, 'id="detectorFeedbackRows"');
+    expectContains(dashboardHtml, 'Detection Feedback');
+    expectContains(threatGuardrailsJs, 'PromptWallThreatGuardrails');
+    expectContains(operatorFlowJs, 'PromptWallOperatorFlow');
+    expectContains(operatorFlowJs, 'data-flow-target');
+    expectContains(operatorFlowJs, 'Behavior baselines');
+    expectContains(policyGuidesJs, 'addApprovalRoute');
+    expectContains(policyGuidesJs, 'addMcpToolRule');
+    expectContains(behaviorBaselinesJs, 'PromptWallBehaviorBaselines');
+    expectContains(behaviorBaselinesJs, 'behavior-baseline-row');
+    expectContains(competitiveReadinessJs, 'competitiveReadiness');
+    expectContains(competitiveReadinessJs, '/api/posture?limit=5000');
+    expectContains(coverageFileFlowJs, 'endpointFileFlowProfiles');
+    expectContains(coverageFileFlowJs, 'Local path: not reported');
+    expectContains(decisionQualityJs, 'decisionQuality');
+    expectContains(decisionQualityJs, 'PromptWallDecisionQuality');
+    expectContains(detectorFeedbackJs, '/api/detector-feedback/report');
+    expectContains(detectorFeedbackJs, 'PromptWallDetectorFeedback');
+  },
   () => expectContains(loginHtml, '<script src="/login.js" defer></script>'),
   () => expectContains(dashboardJs, 'escapeHtml'),
   () => expectContains(dashboardJs, 'csrfToken'),
@@ -434,10 +478,10 @@ const securityStaticCases = [
   () => expectContains(dashboardJs, 'Read-only auditor view'),
   () => expectContains(dashboardHtml, 'Security Console'),
   () => expectContains(dashboardHtml, 'Tamper-evident Audit Log'),
-  () => expectContains(dashboardHtml, 'Sanitized event stream'),
+  () => expectContains(dashboardHtml, 'Live posture objectives, sanitized AI activity, and control outcomes without prompt bodies.'),
   () => expectContains(loginHtml, 'Hash-chained audit history'),
   () => expectContains(loginHtml, 'Local-first detection posture'),
-  () => expectContains(dashboardHtml, 'Raw approval text stays behind step-up reveal'),
+  () => expectContains(dashboardJs, 'prompt-reveal-status'),
   () => expectContains(dashboardJs, 'rawPrompt'),
   () => expectContains(dashboardJs, 'policyExceptions'),
   () => expectContains(dashboardJs, 'blockedBrowserActions'),
@@ -446,7 +490,11 @@ const securityStaticCases = [
   () => expectContains(dashboardJs, 'loadCoverage'),
   () => expectContains(dashboardJs, 'loadIdentitySetup'),
   () => expectContains(dashboardJs, 'loadLineage'),
-  () => expectContains(dashboardJs, 'loadUpdates'),
+  () => {
+    expectContains(dashboardJs, 'loadUpdates');
+    expectContains(siemPackageJs, '/api/integrations/siem/package?profile=');
+    expectContains(siemPackageJs, 'siem-profile-row');
+  },
 ];
 for (let i = 0; i < securityStaticCases.length; i += 1) {
   add('static-ui', `static security marker ${i + 1}`, securityStaticCases[i]);
@@ -494,12 +542,12 @@ function addHttpCases(ctx) {
     ['/api/me', 401], ['/api/queries', 401], ['/api/stats', 401], ['/api/policy', 401], ['/api/audit', 401],
     ['/api/coverage', 401], ['/api/lineage', 401], ['/api/risk', 401], ['/api/preflight', 401], ['/api/export/evidence', 401],
     ['/api/billing/seats', 401], ['/api/metrics', 401], ['/api/update/status', 401], ['/api/identity/setup-guide', 401],
-    ['/api/policy/templates', 401], ['/api/destinations/review', 401], ['/api/v1/policy', 401], ['/api/v1/detectors', 401],
+    ['/api/policy/templates', 401], ['/api/policy/impact', 401], ['/api/destinations/review', 401], ['/api/v1/policy', 401], ['/api/v1/detectors', 401],
     ['/api/login-options', 200], ['/missing-page', 404], ['/dashboard.js', 200], ['/login.js', 200], ['/api/stream', 401],
     ['/api/queries/not-real-id', 401], ['/api/v1/status/not-real-id', 401], ['/api/update/check', 401], ['/api/update/apply', 401],
     ['/api/update/restart', 401], ['/api/logout', 401], ['/api/retention/purge', 401],
   ];
-  const postRoutes = new Set(['/api/update/check', '/api/update/apply', '/api/update/restart', '/api/logout', '/api/retention/purge']);
+  const postRoutes = new Set(['/api/update/check', '/api/update/apply', '/api/update/restart', '/api/logout', '/api/retention/purge', '/api/policy/impact']);
   for (const [route, status] of publicRoutes) {
     add('http-webapp', `unauth route ${route}`, async () => {
       const res = await jsonFetch(ctx.port, route, { method: postRoutes.has(route) ? 'POST' : 'GET' });
@@ -520,7 +568,7 @@ function addHttpCases(ctx) {
     });
   }
 
-  for (let i = 0; i < 25; i += 1) {
+  for (let i = 0; i < 24; i += 1) {
     add('http-webapp', `ingest boundary ${i + 1}`, async () => {
       if (i % 5 === 0) {
         const res = await jsonFetch(ctx.port, '/api/v1/gate', { method: 'POST', body: { prompt: 'safe prompt' } });
@@ -544,7 +592,7 @@ function addHttpCases(ctx) {
     });
   }
 
-  const headerRoutes = ['/healthz', '/readyz', '/login.html', '/dashboard.js', '/login.js'];
+  const headerRoutes = ['/healthz', '/readyz', '/login.html', '/dashboard.js', '/siem-package.js', '/policy-guides.js', '/behavior-baselines.js', '/login.js'];
   for (let i = 0; i < 20; i += 1) {
     const route = headerRoutes[i % headerRoutes.length];
     add('http-webapp', `security header ${i + 1} ${route}`, async () => {

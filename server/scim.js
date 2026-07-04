@@ -409,4 +409,7 @@ module.exports = {
   GROUP_SCHEMA,
   LIST_SCHEMA,
   PATCH_SCHEMA,
+  _internal: {
+    saveOrConflict,
+  },
 };

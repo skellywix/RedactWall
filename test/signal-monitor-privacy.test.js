@@ -1,5 +1,5 @@
 'use strict';
-/** Signal Monitor must describe and render sanitized telemetry, not raw prompt logs. */
+/** AI Command Center must describe and render sanitized telemetry, not raw prompt logs. */
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
@@ -18,18 +18,19 @@ function sourceBetween(text, startNeedle, endNeedle) {
   return text.slice(start, end);
 }
 
-test('Signal Monitor labels its feed as sanitized metadata', () => {
-  assert.match(index, /id="monitorDataScope"[\s\S]*Sanitized event stream/);
+test('AI Command Center labels its feed as sanitized metadata', () => {
+  assert.match(index, /id="monitorDataScope"[\s\S]*without prompt bodies/);
+  assert.match(index, /AI Security Command Center/);
 
   const monitorDefinitions = sourceBetween(dashboard, 'const monitorItems = [', 'function escapeHtml');
-  assert.match(monitorDefinitions, /Signal Monitor records sanitized metadata/);
+  assert.match(monitorDefinitions, /AI Command Center records sanitized metadata/);
   assert.match(monitorDefinitions, /only masked findings and category metadata are recorded/);
-  assert.match(monitorDefinitions, /raw document text was not logged in Signal Monitor/);
+  assert.match(monitorDefinitions, /raw document text was not logged in AI Command Center/);
   assert.doesNotMatch(monitorDefinitions, /prompt was held/i);
   assert.doesNotMatch(monitorDefinitions, /\brawPrompt\b|_rawPrompt|\/reveal/);
 });
 
-test('Signal Monitor stream handling stays separate from raw reveal', () => {
+test('AI Command Center stream handling stays separate from raw reveal', () => {
   const publicQuery = sourceBetween(server, 'function publicQuery', "app.get('/api/queries'");
   assert.match(publicQuery, /rawRetained: Boolean\(_rawPrompt\)/);
   assert.match(publicQuery, /includeRaw/);

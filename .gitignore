@@ -7,6 +7,7 @@ node_modules/
 data/
 backups/
 dist/
+output/
 test-results/
 playwright-report/
 # cloud-sync (ProtonDrive/FUSE) leftovers — never source

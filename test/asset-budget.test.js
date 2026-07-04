@@ -58,13 +58,27 @@ test('admin public assets stay within transfer budgets', () => {
   const totals = assertAssetBudgets([
     { path: 'server/public/index.html', maxRawBytes: 180_000, maxGzipBytes: 32_000 },
     { path: 'server/public/dashboard.js', maxRawBytes: 180_000, maxGzipBytes: 45_000 },
+    { path: 'server/public/siem-package.js', maxRawBytes: 8_000, maxGzipBytes: 3_000 },
+    { path: 'server/public/security-package.js', maxRawBytes: 8_000, maxGzipBytes: 3_000 },
+    { path: 'server/public/agentic-mcp.js', maxRawBytes: 8_000, maxGzipBytes: 3_000 },
+    { path: 'server/public/ai-threat-guardrails.js', maxRawBytes: 8_000, maxGzipBytes: 3_000 },
+    { path: 'server/public/operator-flow.js', maxRawBytes: 8_000, maxGzipBytes: 3_000 },
+    { path: 'server/public/policy-guides.js', maxRawBytes: 8_000, maxGzipBytes: 3_000 },
+    { path: 'server/public/policy-impact-preview.js', maxRawBytes: 8_000, maxGzipBytes: 3_000 },
+    { path: 'server/public/behavior-baselines.js', maxRawBytes: 8_000, maxGzipBytes: 3_000 },
+    { path: 'server/public/market-hardening.js', maxRawBytes: 8_000, maxGzipBytes: 3_000 },
+    { path: 'server/public/competitive-readiness.js', maxRawBytes: 8_000, maxGzipBytes: 3_000 },
+    { path: 'server/public/control-graph.js', maxRawBytes: 8_000, maxGzipBytes: 3_000 },
+    { path: 'server/public/coverage-file-flow.js', maxRawBytes: 8_000, maxGzipBytes: 3_000 },
+    { path: 'server/public/decision-quality.js', maxRawBytes: 8_000, maxGzipBytes: 3_000 },
+    { path: 'server/public/detector-feedback.js', maxRawBytes: 8_000, maxGzipBytes: 3_000 },
     { path: 'server/public/gatewatch-theme.css', maxRawBytes: 24_000, maxGzipBytes: 6_000 },
     { path: 'server/public/login.html', maxRawBytes: 12_000, maxGzipBytes: 5_000 },
     { path: 'server/public/login.js', maxRawBytes: 6_000, maxGzipBytes: 2_500 },
   ]);
 
-  assertWithin('admin public assets raw total', totals.rawBytes, 330_000);
-  assertWithin('admin public assets gzip total', totals.gzipBytes, 90_000);
+  assertWithin('admin public assets raw total', totals.rawBytes, 408_000);
+  assertWithin('admin public assets gzip total', totals.gzipBytes, 100_000);
 });
 
 test('browser extension assets stay within install package budgets', () => {

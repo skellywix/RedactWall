@@ -23,6 +23,7 @@ test('admin write routes include csrf middleware', () => {
     "app.post('/api/queries/:id/deny', ...decisionWrite",
     "app.post('/api/retention/purge', ...adminWrite",
     "app.post('/api/destinations/review', ...adminWrite",
+    "app.post('/api/policy/impact', ...adminWrite",
     "app.put('/api/policy/apply-template', ...adminWrite",
     "app.put('/api/policy', ...adminWrite",
   ]) {

@@ -11,6 +11,7 @@ const {
   failedInstallCheckIds,
 } = require('../server/install-checks');
 const aiToolInventory = require('../sensors/endpoint-agent/collectors/ai-tool-inventory');
+const fileFlowProfiles = require('../sensors/endpoint-agent/file-flow-profiles');
 
 const ROOT = path.join(__dirname, '..');
 const VERSION = require('../package.json').version;
@@ -88,6 +89,7 @@ function endpointSettings(config = {}) {
     handoffSecret: config.ENDPOINT_AGENT_HANDOFF_SECRET || config.PROMPTWALL_ENDPOINT_AGENT_HANDOFF_SECRET || '',
     ocrCommand: config.ENDPOINT_AGENT_OCR_COMMAND || config.PROMPTWALL_ENDPOINT_AGENT_OCR_COMMAND || '',
     approvedAiTools: config.ENDPOINT_AGENT_APPROVED_AI_TOOLS || config.PROMPTWALL_ENDPOINT_AGENT_APPROVED_AI_TOOLS || '',
+    fileFlowProfiles: config.ENDPOINT_AGENT_FILE_FLOW_PROFILES || config.PROMPTWALL_ENDPOINT_AGENT_FILE_FLOW_PROFILES || '',
     orgId: config.SENTINEL_TENANT_ID || config.PROMPTWALL_TENANT_ID || '',
   };
 }
@@ -119,6 +121,11 @@ function buildInstallReport(opts = {}) {
   checks.push(check('clipboard_guard_runtime', existsFile(repoRoot, 'sensors/endpoint-agent/collectors/clipboard-guard.js'), 'clipboard guard present'));
   checks.push(check('clipboard_guard_runner', existsFile(repoRoot, 'scripts/run-clipboard-guard.ps1'), 'clipboard guard runner present'));
   checks.push(check('ai_tool_inventory_runtime', existsFile(repoRoot, 'sensors/endpoint-agent/collectors/ai-tool-inventory.js'), 'AI tool inventory present'));
+  try {
+    checks.push(...fileFlowProfiles.publicProfileChecks(settings.fileFlowProfiles, isDirectory));
+  } catch (err) {
+    checks.push(check('endpoint_file_flow_profiles', false, err.message || 'invalid profile configuration'));
+  }
   checks.push(...aiToolInventory.collectAiToolInventorySync({
     env: configInfo.config,
     platform: opts.platform || process.platform,
@@ -236,46 +243,51 @@ function usage() {
   ].join('\n');
 }
 
-function printHuman(report) {
-  console.log(`PromptWall endpoint install: ${report.status}`);
+function printHuman(report, io = console) {
+  io.log(`PromptWall endpoint install: ${report.status}`);
   for (const item of report.checks) {
-    console.log(`[${item.ok ? 'ok' : 'attention'}] ${item.id} - ${item.detail}`);
+    io.log(`[${item.ok ? 'ok' : 'attention'}] ${item.id} - ${item.detail}`);
   }
   if (report.heartbeat) {
-    console.log(`[${report.heartbeat.ok ? 'ok' : 'attention'}] heartbeat - ${report.heartbeat.detail}`);
+    io.log(`[${report.heartbeat.ok ? 'ok' : 'attention'}] heartbeat - ${report.heartbeat.detail}`);
   }
 }
 
-async function main() {
+async function main(argv = process.argv.slice(2), deps = {}) {
+  const io = deps.console || console;
+  const setExitCode = deps.setExitCode || ((code) => { process.exitCode = code; });
+  const listProcessNames = deps.listProcessNames || aiToolInventory.listProcessNames;
+  const buildReport = deps.buildInstallReport || buildInstallReport;
+  const sendHeartbeat = deps.emitHeartbeat || emitHeartbeat;
   try {
-    const opts = parseArgs();
+    const opts = parseArgs(argv, deps.env || process.env);
     if (opts.help) {
-      console.log(usage());
-      return;
+      io.log(usage());
+      return null;
     }
-    opts.processNames = await aiToolInventory.listProcessNames({ platform: process.platform });
-    const report = buildInstallReport(opts);
+    opts.processNames = await listProcessNames({ platform: deps.platform || process.platform });
+    const report = buildReport(opts);
     if (opts.emitHeartbeat) {
       try {
-        const response = await emitHeartbeat(report, opts);
+        const response = await sendHeartbeat(report, opts);
         report.heartbeat = { ok: true, detail: response.id || 'recorded', response };
       } catch (err) {
         report.status = 'attention';
         report.heartbeat = { ok: false, detail: err.message || String(err) };
       }
     }
-    if (opts.json) console.log(JSON.stringify(report, null, 2));
-    else printHuman(report);
-    if (report.status !== 'ok') process.exitCode = 1;
+    if (opts.json) io.log(JSON.stringify(report, null, 2));
+    else printHuman(report, io);
+    if (report.status !== 'ok') setExitCode(1);
+    return report;
   } catch (err) {
-    console.error(err.message || err);
-    process.exitCode = 1;
+    io.error(err.message || err);
+    setExitCode(1);
+    return null;
   }
 }
 
-if (require.main === module) {
-  main();
-}
+if (require.main === module) main();
 
 module.exports = {
   buildHeartbeatBody,
@@ -283,6 +295,9 @@ module.exports = {
   defaultEndpointEnvPath,
   emitHeartbeat,
   endpointSettings,
+  main,
   parseArgs,
+  printHuman,
   readEndpointConfig,
+  usage,
 };

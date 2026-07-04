@@ -41,6 +41,8 @@ test('true positives — structured PII is caught', () => {
 test('true positives - regulated customer identifiers are caught', () => {
   assert.ok(hasType('ITIN 912-70-1234 belongs to this taxpayer', 'US_ITIN'), 'ITIN');
   assert.ok(hasType('NPI 1234567893 is listed for the provider', 'US_NPI'), 'NPI');
+  assert.ok(hasType('International wire uses IBAN GB82 WEST 1234 5698 7654 32', 'IBAN'), 'IBAN');
+  assert.ok(hasType('Vehicle VIN 1HGCM82633A004352 appears on the collateral file', 'VIN'), 'VIN');
   assert.ok(hasType('member id MBR-123456 needs review', 'MEMBER_ID'), 'member ID');
   assert.ok(hasType('loan number LN-98765432 is on the payoff request', 'LOAN_NUMBER'), 'loan number');
   assert.ok(hasType('MRN MRN-1234567 appears in the chart', 'MEDICAL_RECORD_NUMBER'), 'medical record number');
@@ -63,6 +65,9 @@ test('masking keeps only the last four digits for expanded identifier types', ()
   assert.strictEqual(D.maskValue('MEMBER_ID', 'MBR-123456'), '**** 3456');
   assert.strictEqual(D.maskValue('LOAN_NUMBER', 'LN-98765432'), '**** 5432');
   assert.strictEqual(D.maskValue('HEALTH_INSURANCE_ID', 'INS-1234567'), '**** 4567');
+  assert.strictEqual(D.maskValue('EMAIL_ADDRESS', 'jane.doe@example.com'), 'j***@example.com');
+  assert.strictEqual(D.maskValue('SECRET_KEY', 'abcdefghi'), 'ab***hi');
+  assert.strictEqual(D.maskValue('SECRET_KEY', 'abc'), '****');
 });
 
 test('true positives — hard-stop entities reach critical severity', () => {
@@ -102,6 +107,11 @@ test('false-positive bait — random 16-digit ids are NOT credit cards', () => {
   assert.ok(!hasType('ticket 6011000000000004 escalated', 'CREDIT_CARD'), 'valid BIN but no separators/context');
 });
 
+test('false-positive bait - invalid IBANs and VINs are rejected by checksums', () => {
+  assert.ok(!hasType('International wire uses IBAN GB82 TEST 1234 5698 7654 32', 'IBAN'), 'bad IBAN checksum');
+  assert.ok(!hasType('Vehicle VIN JH4KA4650MC000000 appears on the file', 'VIN'), 'bad VIN checksum');
+});
+
 test('false-positive bait - custom-looking ids do not swallow trailing prose', () => {
   const member = find('member id MBR-123456 needs review').findings.find((f) => f.type === 'MEMBER_ID');
   const insurance = find('medical insurance number INS-1234567 for the health plan').findings.find((f) => f.type === 'HEALTH_INSURANCE_ID');
@@ -128,6 +138,48 @@ test('false-positive rate on random ids stays low', () => {
   assert.ok(ssn / N < 0.001, `SSN FP rate ${(100 * ssn / N).toFixed(3)}% should be < 0.1%`);
   assert.ok(rt / N < 0.001, `ROUTING FP rate ${(100 * rt / N).toFixed(3)}% should be < 0.1%`);
   assert.ok(cc / N < 0.005, `CREDIT_CARD FP rate ${(100 * cc / N).toFixed(3)}% should be < 0.5%`);
+});
+
+test('name context detector is policy-addressable and avoids disabled categories', () => {
+  const hit = find('Customer name is Ada Lovelace and the account is ready.');
+  const disabled = D.analyze('Customer name is Ada Lovelace and the account is ready.', {
+    disabledDetectors: ['PERSON_NAME'],
+  });
+
+  assert.deepStrictEqual(hit.findings.filter((f) => f.type === 'PERSON_NAME').map((f) => f.value), ['Ada Lovelace']);
+  assert.strictEqual(disabled.findings.some((f) => f.type === 'PERSON_NAME'), false);
+});
+
+test('analyze returns a safe empty result for non-string input', () => {
+  assert.deepStrictEqual(D.analyze(null), {
+    findings: [],
+    categories: [],
+    maxSeverity: 0,
+    maxSeverityLabel: 'none',
+    riskScore: 0,
+    entityCounts: {},
+  });
+});
+
+test('custom detectors support context windows and luhn checksum validators', () => {
+  const customDetectors = [{
+    id: 'CUSTOM_CARD',
+    pattern: '\\bCC-([0-9]{16})\\b',
+    group: 1,
+    context: 'customer',
+    validators: { checksum: 'luhn', minDigits: 16, maxDigits: 16 },
+  }];
+
+  const hit = D.analyze('customer CC-4111111111111111 requires review', { customDetectors });
+  const badChecksum = D.analyze('customer CC-4111111111111112 requires review', { customDetectors });
+  const badContext = D.analyze('ticket CC-4111111111111111 requires review', { customDetectors });
+  const publicConfig = D.publicCustomDetectorConfig(customDetectors)[0];
+
+  assert.strictEqual(hit.findings.find((f) => f.type === 'CUSTOM_CARD').value, '4111111111111111');
+  assert.strictEqual(badChecksum.findings.some((f) => f.type === 'CUSTOM_CARD'), false);
+  assert.strictEqual(badContext.findings.some((f) => f.type === 'CUSTOM_CARD'), false);
+  assert.strictEqual(publicConfig.context, 'customer');
+  assert.strictEqual(publicConfig.validators.checksum, 'luhn');
 });
 
 // ---------------------------------------------------------------------------

@@ -8,29 +8,189 @@ DLP platforms. The product should not chase every connector first. It should
 prove that prompt, file, and agent traffic headed to AI tools is governed by one
 policy, one local detection engine, and one tamper-evident evidence trail.
 
-## Current Market Bar
+## July 4, 2026 Market Bar
 
-- Strac sets the browser-DLP expectation: monitor and block uploads, downloads,
-  forms, prompt entry, and GenAI leakage in real time, with admin reporting.
-  PromptWall should keep its lighter install story, but browser prompts and file
-  uploads must remain first-class policy surfaces.
-- Nightfall sets the buyer expectation for fast browser rollout, broad sensitive
-  data coverage, real-time redaction, and employee education. PromptWall should
-  keep category-specific coaching inline and make every block teach the safe
-  substitute, without expanding into a broad cloud-DLP project first.
-- Check Point AI Security / Lakera raises the bar for LLM-native controls:
-  data-leakage checks apply to LLM inputs, outputs, tool calls, and tool
-  responses; prompt attacks can arrive from user messages, reference documents,
-  tool responses, and tool descriptions. PromptWall should keep prompt-injection
-  defense, response scanning, MCP redaction, and tool-output sanitization inside
-  the core acceptance gate.
-- Cyberhaven raises the visibility bar beyond chat-only browser tools: security
-  teams need shadow-AI, agent, endpoint, developer-tool, and data-flow visibility
-  plus risk-based controls. PromptWall should make coverage posture and lineage
-  visible without storing raw prompt bodies.
-- OWASP's LLM risk work reinforces that prompt injection and sensitive
-  information disclosure are first-class product risks, not edge cases. The
-  acceptance gate must keep testing both.
+The current leaders set a broader bar than "ChatGPT prompt scanner." They are
+selling AI usage visibility, real-time DLP, shadow-AI discovery, guided posture
+dashboards, agent and MCP controls, and compliance reporting.
+
+- Microsoft Purview sets the posture-management bar: AI app governance is
+  framed as data security objectives, guided workflows, posture metrics,
+  trends, activity explorer, audit, DLP, insider risk, retention, eDiscovery,
+  and compliance templates for third-party AI apps.
+- Netskope sets the unified AI-control bar: the platform markets visibility and
+  control across users, apps, private models, MCP, and agents, including an AI
+  Command Center, GenAI app security, AI Gateway, AI Guardrails, prompt and
+  response sanitization, shadow-AI discovery, and access controls.
+- Nightfall sets the fast browser DLP bar: secure browser plugins,
+  pre-submission filtering, real-time redaction, broad sensitive-data
+  detection, and employee coaching before prompts are submitted.
+- Zscaler sets the SSE/browser-isolation bar: interactive dashboards, AI app
+  trend visibility, granular DLP controls, prompt categorization, and controls
+  over how users interact with generative AI tools.
+- SentinelOne Prompt Security sets the AI-security-platform bar: real-time
+  governance, DLP, threat protection, shadow-AI discovery, prompt injection,
+  unsafe output, autonomous agent, code assistant, and homegrown app coverage.
+- OWASP's LLM risk work reinforces that prompt injection, sensitive
+  information disclosure, and unsafe tool behavior remain first-class product
+  risks that the acceptance gate must continuously test.
+
+PromptWall's wedge is not to outspend the platforms on every cloud connector.
+It should beat the top three for regulated credit-union pilots by making the
+examiner story clearer: one local detection engine, browser plus endpoint plus
+MCP sensors, default-deny AI destinations, privacy-preserving evidence, and a
+dashboard that proves control without storing prompt bodies by default.
+
+## Gap Closure Added In This Pass
+
+- Added `/api/posture`, a sanitized AI security posture API that combines live
+  query evidence, coverage posture, policy controls, shadow-AI sightings,
+  approval SLA state, and audit-chain integrity without returning raw prompt
+  bodies.
+- Reworked the former Signal Monitor into an AI Security Command Center with
+  live objective cards, control-outcome breakdowns, seven-day activity trends,
+  sensor surfaces, shadow-AI posture, and action buttons into Queue, Coverage,
+  Policy, Lineage, and Audit.
+- Added a guided Operator Flow rail that turns the command center into a
+  five-step triage path: threat review, hardening actions, AI surface review,
+  control-graph mapping, and SOC handoff. It lets an admin move through the
+  strongest competitive surfaces without hunting through the dashboard.
+- Added guided Configuration builders for MCP tool decisions and approval
+  routing, so admins can turn agent/tool governance and queue ownership into
+  validated policy without hand-authoring JSON.
+- Added a privacy-safe AI Control Graph that connects people, gateways, AI
+  assets, controls, and the three competitive hardening lanes from sanitized
+  metadata only. This gives operators the "360-degree AI footprint" view
+  competitors sell without adding prompt-body exposure to the dashboard.
+- Added an Agentic MCP Control posture surface that turns MCP guard rows into
+  active agents, invoked tools, policy-registry state, blocked tool actions,
+  redacted tool-output counts, and request-class summaries. This closes the
+  Netskope-style MCP dashboard gap while keeping prompt and tool bodies out of
+  the posture API.
+- Added an AI Threat Guardrails posture surface that maps prompt injection,
+  sensitive disclosure, unsafe AI responses, excessive agent/tool agency,
+  shadow AI, and unscanned-content holds into OWASP-style categories, MITRE
+  ATLAS-style labels, readiness controls, recent threat metadata, SOC posture
+  fields, and evidence-pack exports without returning prompt or response
+  bodies.
+- Added posture data to examiner evidence packs through an allowlisted export
+  shape, so regulated buyers get the same executive posture story offline
+  without leaked prompts, secrets, file names, paths, or raw audit details.
+- Added a dedicated Endpoint File Flow coverage surface and evidence export so
+  admins can review named desktop watcher profiles, missing-profile gaps, and
+  deployment state without exposing local file paths.
+- Added a Decision Quality posture surface that tracks approval SLA health,
+  coaching completion, override watch, sensitive-control quality, and
+  metadata-only hotspots for operator and examiner review.
+- Added a Detection Feedback loop so authorized reviewers can mark detections
+  valid, noisy, too sensitive, or missed, then see detector-level tuning signals
+  and auditor-safe evidence without storing prompt bodies.
+- Added a monitor-only AI chat proxy lab that scans AI-domain cleartext request
+  bodies locally, records `proxy_observed` evidence, and forwards traffic while
+  sending only redacted labels and masked metadata to the control plane.
+- Added a deployable AI LLM Gateway with OpenAI-compatible, Anthropic Messages,
+  Gemini `generateContent`, and Amazon Bedrock Runtime Converse/InvokeModel
+  coverage; client auth; fail-closed prompt gating; buffered streamed-response
+  scanning; response scanning; rate-limit headers; model allowlists; readiness
+  probes; AWS SigV4 upstream signing; upstream credential isolation; non-text
+  payload blocking; and sanitized model/content-block evidence.
+- Added an opt-in SQLite-backed AI LLM Gateway rate limiter that shares
+  hashed per-client counters across same-host gateway workers, exposes limiter
+  readiness metadata, and keeps the default memory limiter for simple pilots.
+- Added an opt-in HTTP-backed AI LLM Gateway limiter mode for multi-host
+  deployments. It delegates only hashed gateway-client keys to a shared
+  Redis/KV/Postgres-backed limiter service, returns rate-limit headers, and
+  fails closed before control-plane or upstream model calls if the shared
+  limiter is unavailable.
+- Added a shipped reference shared limiter service via
+  `npm run gateway:rate-limiter`. It exposes authenticated `/check`, `/healthz`,
+  and `/readyz` endpoints, centralizes AI gateway counters for multi-worker and
+  multi-host deployments, persists only hashed limiter keys, and is covered by
+  direct and gateway-integration tests.
+- Added a pilot-ready AI gateway HA compose stack with two gateway replicas, a
+  private shared limiter, a no-access-log Nginx balancer, read-only hardened
+  containers, and `npm run gateway:ha:smoke` proving cross-replica limiter
+  sharing without calling an external LLM provider.
+- Added a built-in Redis/Valkey backend for the shared limiter service so
+  pilots can run active-active private limiter replicas behind the same HTTP
+  contract. The backend uses atomic Redis `EVAL`, TTL-bound prefixed hashed
+  keys, readiness reporting, and no new production dependency.
+- Added `/api/v1/discovery`, a sensor-key protected AI asset discovery import
+  path for proxy, firewall, SSE, and browser-isolation inventories. It accepts
+  host-only destinations and bounded observation counts, rejects prompt bodies
+  and raw URL paths, and feeds shadow-AI coverage, posture trends, and the AI
+  Control Graph as sanitized evidence.
+- Added `npm run discovery:import`, a local CSV/JSON importer with Zscaler,
+  Netskope, Purview, firewall, and generic export profiles. It strips URL paths
+  before upload, aggregates duplicate observations, supports dry-run review, and
+  posts only sanitized host-level sightings to `/api/v1/discovery`.
+- Added automatic sanitized posture subscriptions for SOC/SIEM use. When
+  enabled, meaningful control-posture changes emit a throttled
+  `POSTURE_FEED` snapshot to the existing HTTPS webhook without prompt bodies,
+  raw findings, token vaults, freeform gap text, or audit details.
+- Added `/api/integrations/siem/package`, a Security Admin-only offline SOC
+  integration package generator for Splunk, Microsoft Sentinel, Google
+  Security Operations/Chronicle, and ServiceNow. The command center can preview
+  and download sanitized field mappings, saved searches, dashboard/workbook
+  panels, UDM/incident mappings, sample payloads, and setup checklists without
+  calling any external SIEM or exposing secrets.
+- Promoted the SOC integration package from a single JSON blob to a
+  marketplace-style offline ZIP with a manifest, README, privacy contract, and
+  per-vendor artifacts for Splunk, Microsoft Sentinel, Google Security
+  Operations, and ServiceNow while keeping the JSON API for automation.
+- Added metadata-only posture segmentation for organization ids, SCIM identity
+  groups, workflow review queues, and sensor surfaces. The AI Security Command
+  Center can compare segments, then filter objectives, inventory, graph,
+  trends, and controls through one segment lens without exposing prompt bodies.
+- Added saved owner views for Security Ops, Lending, Call Center, IT, and the
+  Executive Office on top of the same metadata-only segment lens. Each view
+  maps to the best available segment and carries reviewer-role/owner hints
+  without creating another prompt-body exposure path.
+- Added a live Competitive Readiness matrix in `/api/posture`, examiner
+  evidence packs, and the AI Security Command Center. It scores PromptWall
+  against six market bars: real-time AI DLP, AI usage visibility, shadow-AI
+  governance, agent/MCP controls, desktop/file-flow coverage, and SOC/examiner
+  handoff, then shows the next gaps without returning prompt bodies.
+- Added a Market Hardening Flow that narrows the top competitive push to three
+  evidence-backed lanes: continuous shadow-AI discovery, MCP/SaaS connector
+  coverage, and detection quality proof. Each lane shows competitor context,
+  proof, remaining gaps, and the next operator action from sanitized posture
+  metadata.
+- Added a metadata-only MCP connector registry that distinguishes shipped
+  runtime from connector profile templates. Microsoft 365 Graph and Google
+  Drive are shipped document-repository connectors, Slack and Microsoft Teams
+  are shipped collaboration connectors, Atlassian Jira/Confluence is a shipped
+  knowledge-base connector, and database read-only is a shipped bounded SQLite
+  query/schema connector. The current catalog has no template-only profiles.
+  MCP install checks can now emit registry proof through heartbeat evidence
+  without tokens, DSNs, SQL text, document IDs, message IDs, raw tool output,
+  private file URLs, or request bodies.
+- Added a held-out detector quality scoreboard to posture, evidence exports,
+  and the Detection Feedback panel. It summarizes semantic precision/recall,
+  structured recall, false-positive floors, and eval floor status from the
+  synthetic held-out corpus without returning eval prompt text.
+- Added discovery-feed freshness to coverage, posture, evidence exports, and
+  the coverage dashboard. PromptWall now reports fresh versus stale proxy/SSE/
+  firewall/browser-isolation import feeds, last discovery import time, source
+  labels, and host-only observation counts without URL paths or prompt bodies.
+- Added a local endpoint git pre-push guard that scans outbound diffs before
+  source code leaves the workstation, blocks unbounded or sensitive pushes,
+  supports sanctioned Git host allowlists, ships with a managed pre-push hook
+  installer, and records only masked `action_blocked` evidence with
+  `channel: "git_push"`.
+- Added a Security Trust Package for vendor-risk and procurement review. The
+  dashboard, `/api/security/package`, and `npm run security:package:zip` now
+  export sanitized control coverage, validation commands, security
+  questionnaire answers, documentation pointers, and a CycloneDX-style SBOM
+  inventory without prompt bodies, secrets, token vaults, raw audit details,
+  raw URLs, local file paths, or package-lock filesystem paths.
+- Added named endpoint file-flow watcher profiles so pilots can map multiple
+  local app/drop/staging folders to explicit AI destinations, validate them via
+  install-health, and see `Endpoint file-flow profiles` posture in Coverage
+  without posting watched paths, file names, file bytes, or extracted text.
+- Added regression coverage proving posture summaries, dashboard/API linkage,
+  proxy-lab sanitization, evidence-pack sanitization, posture-feed privacy, and
+  monitor privacy behavior.
 
 ## Product Direction
 
@@ -45,12 +205,16 @@ Keep:
 
 Build next:
 
-- Native desktop collectors beyond the current protected-upload shell action,
-  metadata-only endpoint handoff, and one-shot clipboard guard.
-- Broader app/action policy controls beyond the current destination,
-  file-upload, response-scanning, browser paste, browser file-drop, and browser
-  response-copy/download controls.
-- Deeper desktop/file-flow collection once protected upload needs to expand
+- Add managed KV/Postgres limiter adapters for customers whose preferred
+  control plane is not Redis/Valkey, plus region-aware failover guidance after
+  pilot infrastructure choices are known.
+- Turn the marketplace-style SOC package into vendor-native app submissions
+  once pilot customers choose their exact SOC toolchain and app-store
+  requirements.
+- Add native desktop collectors beyond the current protected-upload shell
+  action, metadata-only endpoint handoff, named file-flow profile watchers,
+  one-shot clipboard guard, and local git pre-push guard.
+- Add deeper desktop/file-flow collection once protected upload needs to expand
   into app-specific upload paths.
 
 ## Recent Completed Passes
@@ -230,6 +394,59 @@ npm test -- test/evidence.test.js test/policy-history.test.js
 ```
 
 ## Works Cited
+
+Microsoft. "Microsoft Purview data security and compliance protections for
+Microsoft 365 Copilot and other generative AI apps." *Microsoft Learn*,
+https://learn.microsoft.com/en-us/purview/ai-microsoft-purview. Accessed 4 July
+2026.
+
+Microsoft. "Learn about Microsoft Purview Data Security Posture Management
+(DSPM)." *Microsoft Learn*,
+https://learn.microsoft.com/en-us/purview/data-security-posture-management-learn-about.
+Accessed 4 July 2026.
+
+Microsoft. "Use Microsoft Purview to manage data security & compliance for
+other AI apps." *Microsoft Learn*,
+https://learn.microsoft.com/en-us/purview/ai-other-apps. Accessed 4 July 2026.
+
+Netskope. "AI Security." *Netskope Knowledge Portal*,
+https://docs.netskope.com/en/ai-security/. Accessed 4 July 2026.
+
+Netskope. "AI Guardrails Dashboard." *Netskope Knowledge Portal*,
+https://docs.netskope.com/en/ai-guardrails-dashboard. Accessed 4 July 2026.
+
+Netskope. "Securing AI with Netskope One." *Netskope*,
+https://www.netskope.com/solutions/netskope-one-ai-security. Accessed 4 July
+2026.
+
+Nightfall AI. "AI applications." *Nightfall AI*,
+https://www.nightfall.ai/integrations/ai-applications. Accessed 4 July 2026.
+
+Zscaler. "Securely Use Generative AI with Zscaler Zero Trust Exchange."
+*Zscaler*, https://www.zscaler.com/products-and-solutions/securing-generative-ai.
+Accessed 4 July 2026.
+
+SentinelOne. "Prompt Security." *SentinelOne AI Security Platform*,
+https://www.sentinelone.com/platform/securing-ai-prompt/. Accessed 4 July 2026.
+
+OWASP. "LLM01:2025 Prompt Injection." *OWASP GenAI Security Project*,
+https://genai.owasp.org/llmrisk/llm01-prompt-injection/. Accessed 4 July 2026.
+
+Splunk. "Format events for HTTP Event Collector." *Splunk Enterprise
+Documentation*, https://help.splunk.com/en/splunk-enterprise/get-started/get-data-in/10.4/get-data-with-http-event-collector/format-events-for-http-event-collector.
+Accessed 4 July 2026.
+
+Microsoft. "Custom data ingestion and transformation in Microsoft Sentinel."
+*Microsoft Learn*, https://learn.microsoft.com/en-us/azure/sentinel/data-transformation.
+Accessed 4 July 2026.
+
+Google Cloud. "UDM overview." *Google Security Operations Documentation*,
+https://docs.cloud.google.com/chronicle/docs/event-processing/udm-overview.
+Accessed 4 July 2026.
+
+ServiceNow. "Table API." *ServiceNow REST API Reference*,
+https://www.servicenow.com/docs/r/api-reference/rest-apis/c_TableAPI.html.
+Accessed 4 July 2026.
 
 Check Point AI Security. "Data Leakage Prevention." *Check Point AI Security
 Docs*, Check Point, https://docs.lakera.ai/docs/data-leakage-prevention.

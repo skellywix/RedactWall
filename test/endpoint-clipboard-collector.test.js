@@ -4,15 +4,29 @@ const test = require('node:test');
 const assert = require('node:assert');
 
 const {
+  analyzeClipboard,
   clipboardRecord,
   collectClipboard,
   exitCodeForResult,
+  main,
   parseArgs,
+  printHuman,
   publicError,
+  usage,
+  _internal,
 } = require('../sensors/endpoint-agent/collectors/clipboard-guard');
 
 const RAW_SSN = '524-71-9043';
 const RAW_CARD = '4111 1111 1111 1111';
+
+function captureConsole() {
+  const lines = [];
+  return {
+    lines,
+    log(message) { lines.push(['log', message]); },
+    error(message) { lines.push(['error', message]); },
+  };
+}
 
 test('report-only clipboard guard posts masked findings without raw clipboard text', async () => {
   let reportRequest;
@@ -89,6 +103,36 @@ test('clean and empty clipboard values do not report to the control plane', asyn
   assert.strictEqual(calls, 0);
 });
 
+test('default clipboard PowerShell commands are hidden and bounded', async () => {
+  const calls = [];
+  const text = await _internal.readClipboard({
+    platform: 'win32',
+    execFileAsync: async (file, args, opts) => {
+      calls.push({ file, args, opts });
+      return { stdout: 'clipboard text' };
+    },
+  });
+  await _internal.clearClipboard({
+    platform: 'win32',
+    execFileAsync: async (file, args, opts) => {
+      calls.push({ file, args, opts });
+      return { stdout: '' };
+    },
+  });
+
+  assert.strictEqual(text, 'clipboard text');
+  assert.strictEqual(calls[0].file, 'powershell.exe');
+  assert.ok(calls[0].args.includes('Get-Clipboard -Raw'));
+  assert.strictEqual(calls[0].opts.windowsHide, true);
+  assert.strictEqual(calls[0].opts.maxBuffer, 2 * 1024 * 1024);
+  assert.ok(calls[1].args.includes("Set-Clipboard -Value ''"));
+  assert.strictEqual(calls[1].opts.windowsHide, true);
+  await assert.rejects(
+    () => _internal.readClipboard({ platform: 'linux', execFileAsync: async () => ({ stdout: '' }) }),
+    /not supported/
+  );
+});
+
 test('clipboard guard keeps blocked result local even when recording fails', async () => {
   let cleared = 0;
   const result = await collectClipboard({
@@ -102,6 +146,19 @@ test('clipboard guard keeps blocked result local even when recording fails', asy
   assert.strictEqual(cleared, 1);
   assert.strictEqual(result.status, 'blocked');
   assert.strictEqual(result.cleared, true);
+  assert.strictEqual(result.recorded, false);
+  assert.match(result.error, /control plane recording unavailable/);
+  assert.ok(!JSON.stringify(result).includes(RAW_SSN));
+});
+
+test('default policy/report path fails closed without an ingest key', async () => {
+  const result = await collectClipboard({
+    readClipboard: async () => `Member SSN ${RAW_SSN}`,
+    key: '',
+  });
+
+  assert.strictEqual(result.status, 'flagged');
+  assert.strictEqual(result.sensitive, true);
   assert.strictEqual(result.recorded, false);
   assert.match(result.error, /control plane recording unavailable/);
   assert.ok(!JSON.stringify(result).includes(RAW_SSN));
@@ -136,11 +193,104 @@ test('helpers keep CLI parsing and public errors bounded', () => {
     destination: 'Desktop AI',
     maxChars: 4096,
   });
+  assert.deepStrictEqual(parseArgs([
+    '--user', 'analyst@example.test',
+    '--env', 'endpoint.env',
+    '--json',
+    '--quiet',
+    '--max-chars', 'not-a-number',
+  ]), {
+    user: 'analyst@example.test',
+    envPath: 'endpoint.env',
+    json: true,
+    quiet: true,
+    maxChars: 200000,
+  });
+  assert.match(usage(), /--clear-on-block/);
   assert.strictEqual(parseArgs(['--help']).help, true);
   assert.throws(() => parseArgs(['--destination']), /requires a value/);
+  assert.throws(() => parseArgs(['--bad']), /Unknown option/);
+  assert.throws(() => parseArgs(['unexpected']), /Unexpected argument/);
   assert.strictEqual(publicError(new Error('clipboard guard is not supported on this platform')), 'clipboard guard is only supported on Windows');
+  assert.strictEqual(publicError(new Error('EACCES denied')), 'clipboard cannot be accessed');
+  assert.strictEqual(publicError(new Error('raw private failure detail')), 'clipboard guard failed');
+  assert.strictEqual(exitCodeForResult(null), 1);
   assert.strictEqual(exitCodeForResult({ status: 'blocked' }), 1);
   assert.strictEqual(exitCodeForResult({ status: 'flagged' }), 0);
+});
+
+test('analyzeClipboard honors max character bounds before detection', () => {
+  const analysis = analyzeClipboard(`Member SSN ${RAW_SSN}`, {
+    ignore: [],
+    disabledDetectors: [],
+    customDetectors: [],
+  }, { maxChars: 1024 });
+
+  assert.ok(analysis.findings.some((finding) => finding.type === 'US_SSN'));
+});
+
+test('printHuman summarizes clean, empty, and recorded states without raw content', () => {
+  const io = captureConsole();
+
+  printHuman({ status: 'clean' }, io);
+  printHuman({ status: 'empty' }, io);
+  printHuman({
+    status: 'blocked',
+    labels: ['US_SSN'],
+    cleared: true,
+    recorded: false,
+  }, io);
+
+  assert.deepStrictEqual(io.lines.map(([, message]) => message), [
+    'PromptWall clipboard guard clean',
+    'PromptWall clipboard guard empty',
+    'PromptWall clipboard guard blocked: US_SSN: clipboard cleared: not recorded',
+  ]);
+  assert.ok(!JSON.stringify(io.lines).includes(RAW_SSN));
+});
+
+test('clipboard guard main prints help, JSON, human output, quiet output, and sanitized errors', async () => {
+  const helpIo = captureConsole();
+  assert.strictEqual(await main(['--help'], { console: helpIo }), 0);
+  assert.ok(helpIo.lines.some(([, message]) => message.includes('Usage: node')));
+
+  const jsonIo = captureConsole();
+  assert.strictEqual(await main(['--json'], {
+    console: jsonIo,
+    collectClipboard: async () => ({ status: 'flagged', labels: ['US_SSN'], recorded: true, riskScore: 55 }),
+  }), 0);
+  assert.deepStrictEqual(JSON.parse(jsonIo.lines[0][1]), {
+    status: 'flagged',
+    labels: ['US_SSN'],
+    recorded: true,
+    riskScore: 55,
+  });
+
+  const humanIo = captureConsole();
+  assert.strictEqual(await main([], {
+    console: humanIo,
+    collectClipboard: async () => ({ status: 'blocked', labels: ['US_SSN'], cleared: true, recorded: false }),
+  }), 1);
+  assert.strictEqual(humanIo.lines[0][1], 'PromptWall clipboard guard blocked: US_SSN: clipboard cleared: not recorded');
+
+  const quietIo = captureConsole();
+  assert.strictEqual(await main(['--quiet'], {
+    console: quietIo,
+    collectClipboard: async () => ({ status: 'clean', recorded: false }),
+  }), 0);
+  assert.deepStrictEqual(quietIo.lines, []);
+
+  const errIo = captureConsole();
+  assert.strictEqual(await main(['--json', '--destination'], { console: errIo }), 1);
+  assert.ok(errIo.lines.some(([level, message]) => level === 'error' && /requires a value/.test(message)));
+  assert.deepStrictEqual(JSON.parse(errIo.lines.find(([level]) => level === 'log')[1]), {
+    status: 'failed',
+    error: '--destination requires a value',
+  });
+
+  const quietErrIo = captureConsole();
+  assert.strictEqual(await main(['--quiet', '--destination'], { console: quietErrIo }), 1);
+  assert.deepStrictEqual(quietErrIo.lines, []);
 });
 
 test('clipboardRecord never includes raw content fields', () => {

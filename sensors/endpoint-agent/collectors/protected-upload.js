@@ -250,13 +250,13 @@ async function collectProtectedUploads(opts = {}) {
   };
 }
 
-function printHuman(result) {
+function printHuman(result, io = console) {
   const parts = [`PromptWall protected upload ${result.status}: ${result.count} file(s)`];
   if (result.failed) parts.push(`${result.failed} failed`);
-  console.log(parts.join(', '));
+  io.log(parts.join(', '));
   for (const item of result.results) {
-    if (item.status === 'failed') console.log(`  - failed: ${item.error}`);
-    else console.log(`  - ${item.status}: ${item.id} -> ${item.destination}${item.consumed ? ' (consumed)' : ''}`);
+    if (item.status === 'failed') io.log(`  - failed: ${item.error}`);
+    else io.log(`  - ${item.status}: ${item.id} -> ${item.destination}${item.consumed ? ' (consumed)' : ''}`);
   }
 }
 
@@ -264,24 +264,26 @@ function exitCodeForResult(result) {
   return result && result.status === 'written' ? 0 : 1;
 }
 
-async function main() {
+async function main(argv = process.argv.slice(2), deps = {}) {
+  const io = deps.console || console;
+  const collect = deps.collectProtectedUploads || collectProtectedUploads;
   try {
-    const opts = parseArgs();
+    const opts = parseArgs(argv);
     if (opts.help) {
-      console.log(usage());
-      return;
+      io.log(usage());
+      return 0;
     }
-    const result = await collectProtectedUploads(opts);
-    if (opts.json) console.log(JSON.stringify(result, null, 2));
-    else if (!opts.quiet) printHuman(result);
-    process.exitCode = exitCodeForResult(result);
+    const result = await collect(opts);
+    if (opts.json) io.log(JSON.stringify(result, null, 2));
+    else if (!opts.quiet) printHuman(result, io);
+    return exitCodeForResult(result);
   } catch (err) {
-    console.error(publicError(err));
-    process.exitCode = 1;
+    io.error(publicError(err));
+    return 1;
   }
 }
 
-if (require.main === module) main();
+if (require.main === module) main().then((code) => { process.exitCode = code; });
 
 module.exports = {
   DEFAULT_DESTINATION,
@@ -290,8 +292,10 @@ module.exports = {
   configuredKey,
   configuredServer,
   fetchPolicyDestination,
+  main,
   normalizeFiles,
   parseArgs,
+  printHuman,
   publicError,
   resolveDestination,
   exitCodeForResult,

@@ -166,6 +166,7 @@ On a managed test device:
 ## Production Notes
 
 - Use HTTPS for `serverUrl`.
+- Do not include URL username or password credentials in `serverUrl`.
 - Use a stable, rotated `INGEST_API_KEY`.
 - Use `docs/EXTENSION_RELEASE_CHECKLIST.md` before uploading or distributing a
   managed browser package.

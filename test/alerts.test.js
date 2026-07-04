@@ -40,6 +40,82 @@ function sampleQuery(overrides = {}) {
   };
 }
 
+function samplePostureReport(overrides = {}) {
+  return {
+    generatedAt: '2026-07-04T12:00:00.000Z',
+    windowDays: 7,
+    summary: {
+      events: 12,
+      sensitiveEvents: 4,
+      blocked: 3,
+      redacted: 1,
+      pending: 2,
+      controlRate: 92,
+      shadowEvents: 7,
+      unresolvedShadowDestinations: 1,
+      activeRequiredSensors: 3,
+      requiredSensors: 4,
+    },
+    hardening: {
+      score: 81,
+      state: 'attention',
+      summary: { ready: 2, attention: 1, blocked: 0, total: 3 },
+      mission: {
+        state: 'attention',
+        progress: { percent: 70, open: 2 },
+        current: { areaLabel: 'SOC Posture Feed', label: 'Configure SIEM posture webhook' },
+        proofLedger: { verified: 5, attention: 1, missing: 1, total: 7, percent: 71 },
+      },
+      areas: [{
+        id: 'soc_posture_feed',
+        label: 'SOC Posture Feed',
+        score: 67,
+        state: 'attention',
+        status: 'warning',
+        owner: 'security',
+        source: 'soc',
+        evidence: ['Sanitized posture snapshot feed is available'],
+        gaps: ['Configure SIEM_WEBHOOK_URL for SOC posture snapshots', 'Do not send Member SSN 524-71-9043'],
+        playbook: [{ status: 'next', label: 'Enable SIEM posture feed' }],
+        proofLedger: { verified: 1, attention: 1, missing: 0, total: 2 },
+      }],
+    },
+    aiInventory: {
+      summary: {
+        sanctioned: 3,
+        unsanctioned: 1,
+        shadow: 1,
+        localTools: 2,
+        unapprovedLocalTools: 1,
+        activeDestinations: 5,
+        totalEvents: 19,
+        highRiskAssets: 2,
+      },
+    },
+    threatGuardrails: {
+      summary: {
+        events: 4,
+        detections: 5,
+        activeRules: 3,
+        promptInjection: 1,
+        sensitiveDisclosure: 2,
+        unsafeOutput: 1,
+        agentActions: 1,
+        shadowAi: 1,
+        unscannedContent: 0,
+      },
+    },
+    actionQueue: [{
+      severity: 'high',
+      category: 'soc',
+      workflowStatus: 'open',
+      workflowProofState: 'proof_pending',
+      detail: 'Member John SSN 524-71-9043 must not leave',
+    }],
+    ...overrides,
+  };
+}
+
 test('sanitized alert omits raw, redacted prompt body, vault, and finding values', () => {
   const payload = alerts.sanitizedAlert(sampleQuery(), { action: 'BLOCKED' });
   const wire = JSON.stringify(payload);
@@ -170,4 +246,90 @@ test('webhook emit sends authorization and sanitized json', async () => {
   assert.strictEqual(request.opts.headers.Authorization, 'Bearer unit-token');
   assert.ok(!request.opts.body.includes('524-71-9043'));
   assert.match(request.opts.body, /US_SSN/);
+});
+
+test('posture snapshot payload and fingerprint stay sanitized and stable', () => {
+  const payload = alerts.sanitizedPostureAlert(samplePostureReport(), {
+    action: 'POSTURE_FEED',
+    automatic: true,
+    trigger: 'BLOCKED',
+  });
+  const wire = JSON.stringify(payload);
+  assert.strictEqual(payload.eventType, 'promptwall.posture_snapshot');
+  assert.strictEqual(payload.action, 'POSTURE_FEED');
+  assert.strictEqual(payload.automatic, true);
+  assert.strictEqual(payload.trigger, 'BLOCKED');
+  assert.strictEqual(payload.hardening.areas[0].gapCount, 2);
+  assert.strictEqual(payload.threatGuardrails.promptInjection, 1);
+  assert.strictEqual(payload.threatGuardrails.unsafeOutput, 1);
+  assert.strictEqual(payload.threatGuardrails.agentActions, 1);
+  assert.ok(!wire.includes('524-71-9043'));
+  assert.ok(!wire.includes('Member John'));
+
+  const first = alerts.postureFingerprint(samplePostureReport());
+  const same = alerts.postureFingerprint(samplePostureReport({ generatedAt: '2026-07-04T12:05:00.000Z' }));
+  const changed = alerts.postureFingerprint(samplePostureReport({ hardening: { ...samplePostureReport().hardening, score: 55 } }));
+  assert.strictEqual(first, same);
+  assert.notStrictEqual(first, changed);
+});
+
+test('automatic posture feed dedupes, rate limits, and sends sanitized snapshots', async () => {
+  assert.strictEqual(alerts.postureFeedEnabled({ SIEM_POSTURE_FEED_ENABLED: 'true', SIEM_WEBHOOK_URL: 'http://siem.example.test/hook' }), false);
+  assert.strictEqual(alerts.postureFeedEnabled({ SIEM_POSTURE_FEED_ENABLED: 'true', SIEM_WEBHOOK_URL: 'https://siem.example.test/hook' }), true);
+  assert.deepStrictEqual(alerts.postureFeedConfig({ SIEM_POSTURE_FEED_ENABLED: 'true', SIEM_POSTURE_MIN_INTERVAL_MS: '15000' }), {
+    enabled: true,
+    minIntervalMs: 15000,
+  });
+
+  const state = {};
+  let request;
+  const sent = await alerts.emitPostureFeed(samplePostureReport(), {
+    env: { SIEM_POSTURE_FEED_ENABLED: 'true' },
+    url: 'https://siem.example.test/hook#fragment',
+    token: 'unit-token',
+    state,
+    nowMs: 100000,
+    trigger: 'BLOCKED',
+    fetch: async (url, opts) => {
+      request = { url, opts };
+      return { ok: true, status: 202 };
+    },
+  });
+  assert.strictEqual(sent.sent, true);
+  assert.strictEqual(sent.attempted, true);
+  assert.strictEqual(request.url, 'https://siem.example.test/hook');
+  assert.strictEqual(request.opts.headers.Authorization, 'Bearer unit-token');
+  const body = JSON.parse(request.opts.body);
+  assert.strictEqual(body.action, 'POSTURE_FEED');
+  assert.strictEqual(body.automatic, true);
+  assert.strictEqual(body.trigger, 'BLOCKED');
+  assert.ok(!request.opts.body.includes('524-71-9043'));
+
+  const unchanged = await alerts.emitPostureFeed(samplePostureReport({ generatedAt: '2026-07-04T12:10:00.000Z' }), {
+    env: { SIEM_POSTURE_FEED_ENABLED: 'true' },
+    url: 'https://siem.example.test/hook',
+    state,
+    nowMs: 500000,
+    fetch: async () => assert.fail('unchanged posture should not send'),
+  });
+  assert.strictEqual(unchanged.reason, 'unchanged');
+  assert.strictEqual(unchanged.attempted, false);
+
+  const rateLimited = await alerts.emitPostureFeed(samplePostureReport({ hardening: { ...samplePostureReport().hardening, score: 60 } }), {
+    env: { SIEM_POSTURE_FEED_ENABLED: 'true', SIEM_POSTURE_MIN_INTERVAL_MS: '300000' },
+    url: 'https://siem.example.test/hook',
+    state,
+    nowMs: 101000,
+    fetch: async () => assert.fail('rate limited posture should not send'),
+  });
+  assert.strictEqual(rateLimited.reason, 'rate_limited');
+  assert.strictEqual(rateLimited.attempted, false);
+
+  const disabled = await alerts.emitPostureFeed(samplePostureReport(), {
+    env: {},
+    url: 'https://siem.example.test/hook',
+    state: {},
+    fetch: async () => assert.fail('disabled posture feed should not send'),
+  });
+  assert.strictEqual(disabled.reason, 'disabled');
 });

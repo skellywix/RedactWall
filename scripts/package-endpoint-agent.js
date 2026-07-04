@@ -19,22 +19,26 @@ const PACKAGE_FILES = [
   'server/policy.js',
   'server/processors.js',
   'sensors/endpoint-agent/agent.js',
+  'sensors/endpoint-agent/file-flow-profiles.js',
   'sensors/endpoint-agent/ocr.js',
   'sensors/endpoint-agent/native-handoff.js',
   'sensors/endpoint-agent/write-handoff.js',
   'sensors/endpoint-agent/collectors/ai-tool-inventory.js',
   'sensors/endpoint-agent/collectors/clipboard-guard.js',
+  'sensors/endpoint-agent/collectors/git-push-guard.js',
   'sensors/endpoint-agent/collectors/protected-upload.js',
   'scripts/check-endpoint-install.js',
   'scripts/install-clipboard-guard.ps1',
   'scripts/install-desktop-collector.ps1',
   'scripts/install-endpoint-agent.ps1',
+  'scripts/install-git-push-guard.ps1',
   'scripts/run-clipboard-guard.ps1',
   'scripts/run-desktop-collector.ps1',
   'scripts/run-endpoint-agent.ps1',
   'scripts/uninstall-clipboard-guard.ps1',
   'scripts/uninstall-desktop-collector.ps1',
   'scripts/uninstall-endpoint-agent.ps1',
+  'scripts/uninstall-git-push-guard.ps1',
 ];
 
 function posixPath(value) {
@@ -89,8 +93,19 @@ function validateRuntimeFiles(files) {
   if (!/native-handoff/.test(agent) || !/ENDPOINT_AGENT_HANDOFF_SECRET/.test(agent)) {
     throw new Error('Endpoint agent package must include the signed native handoff prototype');
   }
+  if (!/file-flow-profiles/.test(agent) || !/startWatchedRoot/.test(agent)) {
+    throw new Error('Endpoint agent package must include named file-flow watcher profiles');
+  }
   if (!/\.\/ocr/.test(agent) || !/extractEndpointFile/.test(agent)) {
     throw new Error('Endpoint agent package must route image files through endpoint-local OCR');
+  }
+
+  const fileFlowProfiles = files.find((file) => file.path === 'sensors/endpoint-agent/file-flow-profiles.js').body.toString('utf8');
+  if (!/publicProfileChecks/.test(fileFlowProfiles) || !/MAX_FILE_FLOW_PROFILES/.test(fileFlowProfiles)) {
+    throw new Error('Endpoint agent package must include file-flow profile validation');
+  }
+  if (/contentBase64|fetch\(|https?:\/\/|readFileSync|writeFileSync|console\./.test(fileFlowProfiles)) {
+    throw new Error('Endpoint file-flow profile validation must not upload, persist, or log local path data');
   }
 
   const ocr = files.find((file) => file.path === 'sensors/endpoint-agent/ocr.js').body.toString('utf8');
@@ -138,6 +153,14 @@ function validateRuntimeFiles(files) {
     throw new Error('Endpoint clipboard guard must not upload, persist, or log raw clipboard content');
   }
 
+  const gitPushGuard = files.find((file) => file.path === 'sensors/endpoint-agent/collectors/git-push-guard.js').body.toString('utf8');
+  if (!/collectGitPush/.test(gitPushGuard) || !/clientPreRedacted/.test(gitPushGuard) || !/git_push/.test(gitPushGuard)) {
+    throw new Error('Endpoint agent package must include the local git push guard collector');
+  }
+  if (/contentBase64|writeFileSync|readFileSync|shell:\s*true|console\.log\([^)]*diff|console\.error\([^)]*diff/.test(gitPushGuard)) {
+    throw new Error('Endpoint git push guard must not upload, persist, shell, or log raw git diff content');
+  }
+
   const installCheck = files.find((file) => file.path === 'scripts/check-endpoint-install.js').body.toString('utf8');
   if (!/api\/v1\/heartbeat/.test(installCheck) || !/buildInstallReport/.test(installCheck) || !/INGEST_API_KEY/.test(installCheck)) {
     throw new Error('Endpoint agent package must include install validation with heartbeat support');
@@ -169,6 +192,19 @@ function validateRuntimeFiles(files) {
   }
   if (/"-HandoffSecret"|INGEST_API_KEY=\$IngestKey/.test(collectorInstall)) {
     throw new Error('Endpoint desktop collector installer must not put secrets in shell commands');
+  }
+
+  const gitPushInstall = files.find((file) => file.path === 'scripts/install-git-push-guard.ps1').body.toString('utf8');
+  if (!/git-push-guard\.js/.test(gitPushInstall) || !/PROMPTWALL_ENV_PATH/.test(gitPushInstall) || !/PromptWall Git Push Guard/.test(gitPushInstall)) {
+    throw new Error('Endpoint git push guard installer must write a managed pre-push hook');
+  }
+  if (/"-IngestKey"|"-HandoffSecret"|INGEST_API_KEY|ENDPOINT_AGENT_HANDOFF_SECRET|contentBase64/.test(gitPushInstall)) {
+    throw new Error('Endpoint git push guard installer must not put secrets or prompt content in hooks');
+  }
+
+  const gitPushUninstall = files.find((file) => file.path === 'scripts/uninstall-git-push-guard.ps1').body.toString('utf8');
+  if (!/pre-push/.test(gitPushUninstall) || !/PromptWall Git Push Guard/.test(gitPushUninstall) || !/Remove-Item/.test(gitPushUninstall)) {
+    throw new Error('Endpoint git push guard uninstaller must remove only managed hooks by default');
   }
 
   const clipboardInstall = files.find((file) => file.path === 'scripts/install-clipboard-guard.ps1').body.toString('utf8');
@@ -237,12 +273,15 @@ function packageEndpointAgent(opts = {}) {
       explicitIngestKeyRequired: true,
       localDetectionEngineIncluded: true,
       endpointRedactionHandoffIncluded: true,
+      endpointFileFlowProfilesIncluded: true,
       endpointOcrIncluded: true,
       aiToolInventoryIncluded: true,
       nativeHandoffPrototypeIncluded: true,
       nativeHandoffWriterIncluded: true,
       protectedUploadCollectorIncluded: true,
       clipboardGuardIncluded: true,
+      gitPushGuardIncluded: true,
+      gitPushGuardInstallerIncluded: true,
       clipboardGuardRunnerIncluded: true,
       clipboardGuardInstallerIncluded: true,
       desktopCollectorInstallerIncluded: true,
@@ -276,26 +315,32 @@ function parseArgs(argv = process.argv.slice(2)) {
   return { outDir };
 }
 
-function main() {
+function main(argv = process.argv.slice(2), deps = {}) {
+  const io = deps.console || console;
+  const packageFn = deps.packageEndpointAgent || packageEndpointAgent;
+  const setExitCode = deps.setExitCode || ((code) => { process.exitCode = code; });
   try {
-    const args = parseArgs();
+    const args = parseArgs(argv);
     if (args.help) {
-      console.log('Usage: node scripts/package-endpoint-agent.js [--out <directory>]');
-      return;
+      io.log('Usage: node scripts/package-endpoint-agent.js [--out <directory>]');
+      return null;
     }
-    const result = packageEndpointAgent({ outDir: args.outDir });
-    console.log(`Wrote ${result.zipPath}`);
-    console.log(`Wrote ${result.manifestPath}`);
-    console.log(`SHA-256 ${result.packageManifest.sha256}`);
+    const result = packageFn({ outDir: args.outDir });
+    io.log(`Wrote ${result.zipPath}`);
+    io.log(`Wrote ${result.manifestPath}`);
+    io.log(`SHA-256 ${result.packageManifest.sha256}`);
+    return result;
   } catch (err) {
-    console.error(err.message || err);
-    process.exitCode = 1;
+    io.error(err.message || err);
+    setExitCode(1);
+    return null;
   }
 }
 
 if (require.main === module) main();
 
 module.exports = {
+  main,
   packageEndpointAgent,
   parseArgs,
   runtimeBody,

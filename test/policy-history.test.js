@@ -9,7 +9,10 @@ test('destination policy matches hosts, URLs, labels, and wildcards', () => {
   assert.strictEqual(policy.destinationMatches('https://www.chatgpt.com/c/abc', ['chatgpt.com']), true);
   assert.strictEqual(policy.destinationMatches('chat.deepseek.com', ['*.deepseek.com']), true);
   assert.strictEqual(policy.destinationMatches('deepseek.com', ['*.deepseek.com']), false);
+  assert.strictEqual(policy.destinationMatches('chat.openai.com', ['*openai.com']), true);
+  assert.strictEqual(policy.destinationMatches('openai.com', ['*openai.com']), true);
   assert.strictEqual(policy.destinationMatches('Desktop AI', ['desktop-ai']), true);
+  assert.strictEqual(policy.normalizeDestination('www.bad host%%%/prompt#frag'), 'bad-host%%%');
   assert.strictEqual(policy.destinationBlocked('poe.com', { blockedDestinations: ['poe.com'] }), true);
   assert.strictEqual(policy.destinationAllowed('chatgpt.com', { allowedDestinations: ['chatgpt.com'] }), true);
   assert.strictEqual(policy.destinationBlocked('chatgpt.com', { blockedDestinations: ['*'], allowedDestinations: ['chatgpt.com'] }), false);
@@ -17,6 +20,7 @@ test('destination policy matches hosts, URLs, labels, and wildcards', () => {
   assert.strictEqual(policy.destinationBlocked('notebooklm.google.com', { blockUnapprovedAiDestinations: true }), true);
   assert.strictEqual(policy.destinationBlocked('notebooklm.google.com', { blockUnapprovedAiDestinations: true, allowedDestinations: ['notebooklm.google.com'] }), false);
   assert.strictEqual(policy.destinationBlockReason('notebooklm.google.com', { blockUnapprovedAiDestinations: true }), 'Unapproved AI destination blocked by policy');
+  assert.strictEqual(policy.destinationBlockReason('internal-ai.example', { blockedDestinations: [] }), 'Destination blocked by policy');
   assert.strictEqual(policy.fileUploadBlocked('chatgpt.com', { blockedFileUploadDestinations: ['*'], allowedDestinations: ['chatgpt.com'] }), false);
   assert.strictEqual(policy.fileUploadBlocked('https://chatgpt.com/c/abc', { blockedFileUploadDestinations: ['chatgpt.com'] }), true);
 });

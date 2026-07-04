@@ -26,8 +26,8 @@ function parseArgs(argv = process.argv.slice(2)) {
   return opts;
 }
 
-function printHelp() {
-  console.log([
+function printHelp(io = console) {
+  io.log([
     'Usage: npm run identity:setup -- [options]',
     '',
     'Options:',
@@ -39,28 +39,37 @@ function printHelp() {
   ].join('\n'));
 }
 
-function main(argv = process.argv.slice(2)) {
+function main(argv = process.argv.slice(2), deps = {}) {
+  const io = deps.console || console;
+  const stdout = deps.stdout || process.stdout;
   const opts = parseArgs(argv);
   if (opts.help) {
-    printHelp();
+    printHelp(io);
     return 0;
   }
   const guide = buildIdentitySetupGuide(opts);
   if (opts.format === 'json') {
-    console.log(JSON.stringify(guide, null, 2));
+    io.log(JSON.stringify(guide, null, 2));
   } else {
-    process.stdout.write(renderTextGuide(guide));
+    stdout.write(renderTextGuide(guide));
   }
   return 0;
 }
 
-if (require.main === module) {
+function cli(argv = process.argv.slice(2), deps = {}) {
+  const io = deps.console || console;
+  const setExitCode = deps.setExitCode || ((code) => { process.exitCode = code; });
   try {
-    process.exitCode = main();
+    const code = main(argv, deps);
+    setExitCode(code);
+    return code;
   } catch (e) {
-    console.error('Identity setup failed: ' + (e && e.message ? e.message : e));
-    process.exitCode = 1;
+    io.error('Identity setup failed: ' + (e && e.message ? e.message : e));
+    setExitCode(1);
+    return 1;
   }
 }
 
-module.exports = { main, parseArgs };
+if (require.main === module) cli();
+
+module.exports = { cli, main, parseArgs, printHelp };

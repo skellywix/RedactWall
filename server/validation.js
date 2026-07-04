@@ -18,7 +18,10 @@ const LIMITS = {
   base64Chars: 12 * 1024 * 1024,
   policyListItems: 200,
   destinationReviewReasonChars: 240,
+  postureActionNoteChars: 240,
+  detectorFeedbackReasonChars: 240,
   updateCommandChars: 256,
+  discoverySightings: 100,
 };
 
 const DETECTOR_ID = /^[A-Z0-9_]+$/;
@@ -34,6 +37,8 @@ const POLICY_MATCH_TEXT = /^[A-Za-z0-9 ._@:+/-]+$/;
 const UPDATE_REMOTE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/;
 const UPDATE_BRANCH_NAME = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/;
 const SAFE_OPERATOR_COMMAND = /^[A-Za-z0-9 ._:/\\@+=,-]+$/;
+const POSTURE_ACTION_ID = /^[A-Za-z0-9._:@/-]+$/;
+const DISCOVERY_DESTINATION_LABEL = /^[A-Za-z0-9.*:-]+$/;
 const SENSITIVE_ROUTING_CODE = /(?:\d{3}[-_:.]?\d{2}[-_:.]?\d{4}|\d{12,19})/;
 function knownDetectorIds() {
   return new Set(detector.listDetectors({
@@ -125,6 +130,7 @@ const clientOutcomeSchema = z.enum([
   'justified',
   'blocked_by_user',
   'awaiting_approval',
+  'proxy_observed',
 ]).nullable().optional();
 
 const commonSensorContext = {
@@ -247,11 +253,50 @@ const receiptVerifySchema = z.object({
 const destinationLabelSchema = z.string().min(1).max(253).regex(HOST_OR_LABEL).refine((value) => !SENSITIVE_ROUTING_CODE.test(value), {
   message: 'sensitive identifier not allowed',
 });
+const mcpToolLabelSchema = z.string().min(1).max(160).regex(/^[A-Za-z0-9.*:_/-]+$/).refine((value) => !SENSITIVE_ROUTING_CODE.test(value), {
+  message: 'sensitive identifier not allowed',
+});
 
 const destinationReviewSchema = z.object({
   destination: destinationLabelSchema,
   decision: z.enum(['govern', 'allow', 'block']),
   reason: nonBlankString(LIMITS.destinationReviewReasonChars),
+}).strict();
+
+function safeOperatorText(value) {
+  const text = String(value || '');
+  return !/[\u0000-\u001F]/.test(text) && !SENSITIVE_ROUTING_CODE.test(text);
+}
+
+const postureActionSchema = z.object({
+  id: z.string().min(1).max(160).regex(POSTURE_ACTION_ID),
+  status: z.enum(['open', 'assigned', 'snoozed', 'resolved']),
+  owner: z.preprocess(
+    (value) => (value == null ? '' : value),
+    z.string().max(120).refine(safeOperatorText, { message: 'sensitive identifier not allowed' }).default(''),
+  ),
+  note: z.preprocess(
+    (value) => (value == null ? '' : value),
+    z.string().max(LIMITS.postureActionNoteChars).refine(safeOperatorText, { message: 'sensitive identifier not allowed' }).default(''),
+  ),
+  snoozeUntil: z.preprocess(
+    (value) => (value == null || value === '' ? null : value),
+    z.string().min(1).max(80).refine((value) => Number.isFinite(Date.parse(value)), {
+      message: 'invalid datetime',
+    }).nullable().default(null),
+  ),
+}).strict().refine((value) => value.status !== 'snoozed' || !!value.snoozeUntil, {
+  message: 'snoozeUntil required',
+  path: ['snoozeUntil'],
+});
+
+const detectorFeedbackSchema = z.object({
+  detectorId: detectorIdSchema,
+  verdict: z.enum(['valid', 'false_positive', 'too_sensitive', 'missed']),
+  reason: z.preprocess(
+    (value) => (value == null ? '' : value),
+    z.string().max(LIMITS.detectorFeedbackReasonChars).refine(safeOperatorText, { message: 'sensitive identifier not allowed' }).default(''),
+  ),
 }).strict();
 
 const scannerPolicySchema = z.object({
@@ -278,6 +323,67 @@ function routingCodeSchema(pattern, max) {
 const safePolicyMatchTextSchema = z.string().min(1).max(128).regex(POLICY_MATCH_TEXT).refine((value) => !SENSITIVE_ROUTING_CODE.test(value), {
   message: 'sensitive identifier not allowed',
 });
+
+function safePolicyTextDefault(defaultValue) {
+  return z.preprocess(
+    (value) => (value == null || value === '' ? defaultValue : value),
+    safePolicyMatchTextSchema,
+  );
+}
+
+function optionalSafePolicyText() {
+  return z.preprocess(
+    (value) => (value == null || value === '' ? undefined : value),
+    safePolicyMatchTextSchema.optional(),
+  );
+}
+
+const discoveryTimestampSchema = z.preprocess(
+  (value) => (value == null || value === '' ? null : value),
+  z.string().min(1).max(40).refine((value) => Number.isFinite(Date.parse(value)), {
+    message: 'invalid datetime',
+  }).nullable().default(null),
+);
+
+const discoveryDestinationSchema = z.string().min(1).max(253).regex(DISCOVERY_DESTINATION_LABEL).refine((value) => !SENSITIVE_ROUTING_CODE.test(value), {
+  message: 'sensitive identifier not allowed',
+});
+
+const aiDiscoverySightingSchema = z.object({
+  destination: discoveryDestinationSchema,
+  user: optionalSafePolicyText(),
+  orgId: optionalSafePolicyText(),
+  events: z.preprocess(
+    (value) => (value == null || value === '' ? 1 : Number(value)),
+    z.number().int().min(1).max(100000).default(1),
+  ),
+  firstSeen: discoveryTimestampSchema,
+  lastSeen: discoveryTimestampSchema,
+  category: z.enum(['chatbot', 'llm', 'agent', 'coding', 'image', 'audio', 'unknown']).default('unknown'),
+  confidence: z.number().min(0).max(1).optional(),
+}).strict();
+
+const aiDiscoverySchema = z.object({
+  source: z.preprocess(
+    (value) => (value == null || value === '' ? 'proxy' : value),
+    sensorIdSchema,
+  ),
+  user: safePolicyTextDefault('discovery-import'),
+  orgId: z.preprocess(
+    (value) => (value == null || value === '' ? null : value),
+    safePolicyMatchTextSchema.nullable().default(null),
+  ),
+  vendor: z.preprocess(
+    (value) => (value == null || value === '' ? '' : value),
+    z.string().max(80).refine((value) => value === '' || POLICY_MATCH_TEXT.test(value), {
+      message: 'invalid',
+    }).refine(safeOperatorText, {
+      message: 'sensitive identifier not allowed',
+    }).default(''),
+  ),
+  sensor: sensorMetadataSchema.optional(),
+  sightings: z.array(aiDiscoverySightingSchema).min(1).max(LIMITS.discoverySightings),
+}).strict();
 
 const approvalRoutingRuleSchema = z.object({
   id: routingCodeSchema(ROUTING_RULE_ID, 64),
@@ -390,6 +496,9 @@ const policyUpdateSchema = z.object({
   blockedDestinations: z.array(destinationLabelSchema).max(LIMITS.policyListItems).optional(),
   blockedFileUploadDestinations: z.array(destinationLabelSchema).max(LIMITS.policyListItems).optional(),
   blockedBrowserActions: z.array(blockedBrowserActionSchema).max(40).optional(),
+  mcpAllowedTools: z.array(mcpToolLabelSchema).max(LIMITS.policyListItems).optional(),
+  mcpBlockedTools: z.array(mcpToolLabelSchema).max(LIMITS.policyListItems).optional(),
+  mcpApprovalRequiredTools: z.array(mcpToolLabelSchema).max(LIMITS.policyListItems).optional(),
   blockUnapprovedAiDestinations: z.boolean().optional(),
   responseScanMode: z.enum(['flag', 'redact', 'block']).optional(),
   desktopCollectorDestination: z.string().min(1).max(80).regex(DESKTOP_DESTINATION_LABEL).refine((value) => value.trim().length > 0, {
@@ -473,7 +582,10 @@ module.exports = {
   noteSchema,
   applyTemplateSchema,
   receiptVerifySchema,
+  aiDiscoverySchema,
   destinationReviewSchema,
+  postureActionSchema,
+  detectorFeedbackSchema,
   policyUpdateSchema,
   updateConfigSchema,
   updateApplySchema,

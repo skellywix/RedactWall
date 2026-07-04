@@ -10,10 +10,11 @@ const DEFAULT_START_PORT = 4211;
 const MAX_PORT_PROBES = 50;
 const LOCK_DIR = path.join(os.tmpdir(), 'promptwall-playwright-ports');
 
-function isProcessAlive(pid) {
+function isProcessAlive(pid, deps = {}) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
+  const kill = deps.kill || process.kill;
   try {
-    process.kill(pid, 0);
+    kill(pid, 0);
     return true;
   } catch (err) {
     return err && err.code === 'EPERM';
@@ -28,13 +29,20 @@ function readLockOwner(lockPath) {
   }
 }
 
-function acquirePortLock(port) {
-  fs.mkdirSync(LOCK_DIR, { recursive: true });
-  const lockPath = path.join(LOCK_DIR, `${port}.lock`);
+function acquirePortLock(port, deps = {}) {
+  const lockDir = deps.lockDir || LOCK_DIR;
+  const alive = deps.isProcessAlive || isProcessAlive;
+  const mkdirSync = deps.mkdirSync || fs.mkdirSync;
+  const openSync = deps.openSync || fs.openSync;
+  const writeFileSync = deps.writeFileSync || fs.writeFileSync;
+  const remove = deps.rmSync || fs.rmSync;
+  const readOwner = deps.readLockOwner || readLockOwner;
+  mkdirSync(lockDir, { recursive: true });
+  const lockPath = path.join(lockDir, `${port}.lock`);
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      const fd = fs.openSync(lockPath, 'wx');
-      fs.writeFileSync(fd, JSON.stringify({
+      const fd = openSync(lockPath, 'wx');
+      writeFileSync(fd, JSON.stringify({
         pid: process.pid,
         port,
         createdAt: new Date().toISOString(),
@@ -42,9 +50,9 @@ function acquirePortLock(port) {
       return { fd, lockPath, port, released: false };
     } catch (err) {
       if (!err || err.code !== 'EEXIST') throw err;
-      const owner = readLockOwner(lockPath);
-      if (!isProcessAlive(Number(owner && owner.pid))) {
-        try { fs.rmSync(lockPath, { force: true }); } catch (_) {}
+      const owner = readOwner(lockPath);
+      if (!alive(Number(owner && owner.pid))) {
+        try { remove(lockPath, { force: true }); } catch (_) {}
         continue;
       }
       return null;
@@ -75,70 +83,86 @@ function canBind(port) {
   });
 }
 
-async function findAvailablePort(startPort) {
-  for (let offset = 0; offset < MAX_PORT_PROBES; offset += 1) {
+async function findAvailablePort(startPort, deps = {}) {
+  const probe = deps.canBind || canBind;
+  const maxPortProbes = deps.maxPortProbes || MAX_PORT_PROBES;
+  for (let offset = 0; offset < maxPortProbes; offset += 1) {
     const port = startPort + offset;
     if (port > 65535) break;
-    if (await canBind(port)) return port;
+    if (await probe(port)) return port;
   }
   throw new Error(`No available Playwright port found from ${startPort}`);
 }
 
-async function reserveAvailablePort(startPort) {
-  for (let offset = 0; offset < MAX_PORT_PROBES; offset += 1) {
+async function reserveAvailablePort(startPort, deps = {}) {
+  const acquire = deps.acquirePortLock || acquirePortLock;
+  const probe = deps.canBind || canBind;
+  const maxPortProbes = deps.maxPortProbes || MAX_PORT_PROBES;
+  for (let offset = 0; offset < maxPortProbes; offset += 1) {
     const port = startPort + offset;
     if (port > 65535) break;
-    const lock = acquirePortLock(port);
+    const lock = acquire(port);
     if (!lock) continue;
-    if (await canBind(port)) return lock;
+    if (await probe(port)) return lock;
     releasePortLock(lock);
   }
   throw new Error(`No available Playwright port found from ${startPort}`);
 }
 
-async function main() {
-  const requestedPort = parsePort(process.env.PLAYWRIGHT_PORT);
+async function main(argv = process.argv.slice(2), deps = {}) {
+  const proc = deps.process || process;
+  const envSource = deps.env || proc.env || process.env;
+  const io = deps.console || console;
+  const reserve = deps.reserveAvailablePort || reserveAvailablePort;
+  const spawnImpl = deps.spawn || spawn;
+  const resolveCli = deps.resolveCli || (() => require.resolve('@playwright/test/cli'));
+  const onExit = deps.onExit || ((handler) => proc.once('exit', handler));
+  const exit = deps.exit || ((code) => proc.exit(code));
+
+  const requestedPort = parsePort(envSource.PLAYWRIGHT_PORT);
   const startPort = requestedPort || DEFAULT_START_PORT;
-  const portLock = await reserveAvailablePort(startPort);
+  const portLock = await reserve(startPort);
   const port = portLock.port;
-  const env = { ...process.env, PLAYWRIGHT_PORT: String(port) };
-  process.once('exit', () => releasePortLock(portLock));
+  const env = { ...envSource, PLAYWRIGHT_PORT: String(port) };
+  onExit(() => releasePortLock(portLock));
 
   if (port !== startPort) {
-    console.warn(`[playwright] port ${startPort} is busy; using ${port}`);
+    io.warn(`[playwright] port ${startPort} is busy; using ${port}`);
   } else {
-    console.log(`[playwright] using port ${port}`);
+    io.log(`[playwright] using port ${port}`);
   }
 
-  const cli = require.resolve('@playwright/test/cli');
-  const child = spawn(process.execPath, [cli, 'test', ...process.argv.slice(2)], {
+  const cli = resolveCli();
+  const child = spawnImpl(proc.execPath, [cli, 'test', ...argv], {
     env,
     stdio: 'inherit',
     windowsHide: true,
   });
 
-  child.once('error', (err) => {
-    releasePortLock(portLock);
-    console.error(err.message || err);
-    process.exit(1);
-  });
+  return await new Promise((resolve) => {
+    child.once('error', (err) => {
+      releasePortLock(portLock);
+      io.error(err.message || err);
+      exit(1);
+      resolve(1);
+    });
 
-  child.on('exit', (code, signal) => {
-    releasePortLock(portLock);
-    if (signal) {
-      console.error(`[playwright] exited on signal ${signal}`);
-      process.exit(1);
-    }
-    process.exit(code == null ? 1 : code);
+    child.on('exit', (code, signal) => {
+      releasePortLock(portLock);
+      if (signal) {
+        io.error(`[playwright] exited on signal ${signal}`);
+        exit(1);
+        resolve(1);
+        return;
+      }
+      const exitCode = code == null ? 1 : code;
+      exit(exitCode);
+      resolve(exitCode);
+    });
   });
 }
 
-if (require.main === module) {
-  main().catch((err) => {
-    console.error(err.message || err);
-    process.exit(1);
-  });
-}
+if (require.main === module) main().catch((err) => { console.error(err.message || err); process.exit(1); });
 
 module.exports = {
   DEFAULT_START_PORT,
@@ -146,6 +170,13 @@ module.exports = {
   parsePort,
   canBind,
   findAvailablePort,
+  main,
   reserveAvailablePort,
   releasePortLock,
+  _internal: {
+    LOCK_DIR,
+    acquirePortLock,
+    isProcessAlive,
+    readLockOwner,
+  },
 };

@@ -126,44 +126,50 @@ async function fetchRadarServices({
   return { skipped: false, services: top.map((row) => row.service).filter(Boolean) };
 }
 
-async function main() {
-  const watchlistPath = process.argv.includes('--watchlist')
-    ? path.resolve(process.argv[process.argv.indexOf('--watchlist') + 1])
+async function main(argv = process.argv.slice(2), deps = {}) {
+  const io = deps.console || console;
+  const setExitCode = deps.setExitCode || ((code) => { process.exitCode = code; });
+  const read = deps.readJson || readJson;
+  const fetchRadar = deps.fetchRadarServices || fetchRadarServices;
+  const check = deps.checkCoverage || checkCoverage;
+  const watchlistPath = argv.includes('--watchlist')
+    ? path.resolve(argv[argv.indexOf('--watchlist') + 1])
     : DEFAULT_WATCHLIST;
-  const watchlist = readJson(watchlistPath);
+  const watchlist = read(watchlistPath);
   let radar = { skipped: true, services: [] };
   try {
-    radar = await fetchRadarServices();
+    radar = await fetchRadar();
   } catch (err) {
-    console.error(err.message);
-    process.exitCode = 1;
-    return;
+    io.error(err.message);
+    setExitCode(1);
+    return null;
   }
-  const manifest = readJson(DEFAULT_MANIFEST);
-  const result = checkCoverage({ watchlist, radarServices: radar.services, manifest });
-  console.log(`AI domain coverage check: ${result.checkedDomains.length} domains`);
-  if (radar.skipped) console.log('Cloudflare Radar skipped: set CLOUDFLARE_API_TOKEN to include weekly popularity data.');
+  const manifest = read(deps.manifestPath || DEFAULT_MANIFEST);
+  const result = check({ watchlist, radarServices: radar.services, manifest });
+  let failed = false;
+  io.log(`AI domain coverage check: ${result.checkedDomains.length} domains`);
+  if (radar.skipped) io.log('Cloudflare Radar skipped: set CLOUDFLARE_API_TOKEN to include weekly popularity data.');
   if (result.unknownServices.length) {
-    console.error('Cloudflare Radar services need mapping:');
-    for (const service of result.unknownServices) console.error('  - ' + service);
-    process.exitCode = 1;
+    io.error('Cloudflare Radar services need mapping:');
+    for (const service of result.unknownServices) io.error('  - ' + service);
+    failed = true;
   }
   if (result.missingDomains.length) {
-    console.error('AI domains missing from detection-engine/adapters.js AI_HOSTS:');
-    for (const domain of result.missingDomains) console.error('  - ' + domain);
-    process.exitCode = 1;
+    io.error('AI domains missing from detection-engine/adapters.js AI_HOSTS:');
+    for (const domain of result.missingDomains) io.error('  - ' + domain);
+    failed = true;
   }
   if (result.missingManifestDomains.length) {
-    console.error('AI adapter hosts missing from browser extension manifest coverage:');
-    for (const domain of result.missingManifestDomains) console.error('  - ' + domain);
-    process.exitCode = 1;
+    io.error('AI adapter hosts missing from browser extension manifest coverage:');
+    for (const domain of result.missingManifestDomains) io.error('  - ' + domain);
+    failed = true;
   }
-  if (!process.exitCode) console.log('AI domain coverage current.');
+  if (failed) setExitCode(1);
+  else io.log('AI domain coverage current.');
+  return result;
 }
 
-if (require.main === module) {
-  main();
-}
+if (require.main === module) main();
 
 module.exports = {
   RADAR_TOP_URL,
@@ -171,6 +177,7 @@ module.exports = {
   checkCoverage,
   fetchRadarServices,
   hostCovered,
+  main,
   manifestCovered,
   manifestHosts,
   normalizeDomain,

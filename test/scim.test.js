@@ -66,6 +66,12 @@ test('scim endpoints require configured bearer token', async () => withServer(as
   }
 }));
 
+test('scim role helpers map known groups and reject unknown display names', () => {
+  assert.strictEqual(scim.roleFromDisplayName('PromptWall Security Admins'), 'security_admin');
+  assert.strictEqual(scim.roleFromDisplayName('read only'), 'auditor');
+  assert.strictEqual(scim.roleFromDisplayName('Facilities Team'), '');
+});
+
 test('scim provisions users and groups, maps promptwall approver group to approver role, and deactivates users', async () => withServer(async (port) => {
   const groupRes = await scimFetch(port, '/Groups', {
     method: 'POST',
@@ -180,6 +186,146 @@ test('scim provisions users and groups, maps promptwall approver group to approv
   assert.ok(audit.some((entry) => entry.action === 'SCIM_GROUP_PATCHED'));
   assert.strictEqual(db.verifyAuditChain().ok, true);
 }));
+
+test('scim supports user and group lifecycle routes without leaking identity secrets', async () => withServer(async (port) => {
+  const groupRes = await scimFetch(port, '/Groups', {
+    method: 'POST',
+    body: {
+      schemas: [scim.GROUP_SCHEMA],
+      externalId: 'entra-group-lifecycle',
+      displayName: 'Operations',
+    },
+  });
+  assert.strictEqual(groupRes.status, 201);
+  const group = await groupRes.json();
+
+  const userRes = await scimFetch(port, '/Users', {
+    method: 'POST',
+    body: {
+      schemas: [scim.USER_SCHEMA],
+      externalId: 'entra-user-lifecycle',
+      userName: 'operator@example.test',
+      displayName: 'Lifecycle Operator',
+      roles: [{ value: 'operator', display: 'Operator' }],
+    },
+  });
+  assert.strictEqual(userRes.status, 201);
+  const user = await userRes.json();
+  assert.strictEqual(user.roles[0].value, 'operator');
+
+  const putUser = await scimFetch(port, `/Users/${user.id}`, {
+    method: 'PUT',
+    body: {
+      schemas: [scim.USER_SCHEMA],
+      externalId: 'entra-user-lifecycle-updated',
+      userName: 'operator@example.test',
+      displayName: 'Updated Operator',
+      active: true,
+      roles: [{ display: 'auditor' }],
+    },
+  });
+  assert.strictEqual(putUser.status, 200);
+  const updatedUser = await putUser.json();
+  assert.strictEqual(updatedUser.externalId, 'entra-user-lifecycle-updated');
+  assert.strictEqual(updatedUser.displayName, 'Updated Operator');
+  assert.strictEqual(updatedUser.roles[0].value, 'auditor');
+
+  const putGroup = await scimFetch(port, `/Groups/${group.id}`, {
+    method: 'PUT',
+    body: {
+      schemas: [scim.GROUP_SCHEMA],
+      externalId: 'entra-group-lifecycle-updated',
+      displayName: 'PromptWall Operators',
+      members: [{ value: user.id, display: updatedUser.userName }],
+    },
+  });
+  assert.strictEqual(putGroup.status, 200);
+  const updatedGroup = await putGroup.json();
+  assert.strictEqual(updatedGroup.externalId, 'entra-group-lifecycle-updated');
+  assert.strictEqual(updatedGroup.members[0].value, user.id);
+
+  const groupLookup = await scimFetch(port, `/Groups/${group.id}`);
+  assert.strictEqual(groupLookup.status, 200);
+  assert.strictEqual((await groupLookup.json()).displayName, 'PromptWall Operators');
+
+  const filteredGroups = await scimFetch(port, '/Groups?filter=displayName%20eq%20%22PromptWall%20Operators%22');
+  assert.strictEqual(filteredGroups.status, 200);
+  const filteredGroupsBody = await filteredGroups.json();
+  assert.strictEqual(filteredGroupsBody.totalResults, 1);
+  assert.strictEqual(filteredGroupsBody.Resources[0].id, group.id);
+
+  const removeAllMembers = await scimFetch(port, `/Groups/${group.id}`, {
+    method: 'PATCH',
+    body: {
+      schemas: [scim.PATCH_SCHEMA],
+      Operations: [{ op: 'remove', path: 'members' }],
+    },
+  });
+  assert.strictEqual(removeAllMembers.status, 200);
+  assert.deepStrictEqual((await removeAllMembers.json()).members, []);
+
+  const deleteUser = await scimFetch(port, `/Users/${user.id}`, { method: 'DELETE' });
+  assert.strictEqual(deleteUser.status, 204);
+  assert.strictEqual(db.getScimUser(user.id).active, false);
+
+  const deleteGroup = await scimFetch(port, `/Groups/${group.id}`, { method: 'DELETE' });
+  assert.strictEqual(deleteGroup.status, 204);
+
+  const missingGroup = await scimFetch(port, `/Groups/${group.id}`);
+  assert.strictEqual(missingGroup.status, 404);
+
+  const wire = JSON.stringify({ updatedUser, updatedGroup, filteredGroupsBody });
+  assert.ok(!wire.includes(process.env.SCIM_BEARER_TOKEN));
+}));
+
+test('scim converts datastore uniqueness races into SCIM conflict responses', async () => withServer(async (port) => {
+  const originalLookup = db.getScimUserByUserName;
+  const originalSave = db.saveScimUser;
+  try {
+    db.getScimUserByUserName = () => null;
+    db.saveScimUser = () => {
+      const err = new Error('UNIQUE constraint failed: scim_users.userName');
+      err.code = 'SQLITE_CONSTRAINT_UNIQUE';
+      throw err;
+    };
+
+    const response = await scimFetch(port, '/Users', {
+      method: 'POST',
+      body: {
+        schemas: [scim.USER_SCHEMA],
+        userName: 'race@example.test',
+      },
+    });
+
+    assert.strictEqual(response.status, 409);
+    const body = await response.json();
+    assert.strictEqual(body.scimType, 'uniqueness');
+    assert.ok(!JSON.stringify(body).includes(process.env.SCIM_BEARER_TOKEN));
+  } finally {
+    db.getScimUserByUserName = originalLookup;
+    db.saveScimUser = originalSave;
+  }
+}));
+
+test('scim save conflict helper rethrows unexpected datastore failures', () => {
+  const calls = [];
+  const res = {
+    status: (code) => {
+      calls.push(['status', code]);
+      return {
+        json: (body) => calls.push(['json', body]),
+      };
+    },
+  };
+
+  assert.throws(
+    () => scim._internal.saveOrConflict(res, 'userName already exists', () => {
+      throw new Error('database unavailable');
+    }),
+    /database unavailable/
+  );
+  assert.deepStrictEqual(calls, []);
+});
 
 test.after(() => {
   for (const suffix of ['', '-wal', '-shm']) {

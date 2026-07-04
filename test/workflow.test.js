@@ -84,3 +84,35 @@ test('ticket notification channel persists delivery status without prompt conten
   assert.ok(!bodies.join('\n').includes('Member Jane'));
   assert.ok(!bodies.join('\n').includes('sealed raw'));
 });
+
+test('partial notification delivery is audited distinctly', async () => {
+  const db = fakeDb({
+    id: 'q_partial',
+    status: 'pending',
+    destination: 'chatgpt.com',
+    assignedGroup: 'compliance',
+    assignedRole: 'approver',
+    workflowReason: 'detector:US_SSN',
+    notificationAttemptCount: 2,
+  });
+  let calls = 0;
+
+  const result = await workflow.emitAndPersistApprovalNotification(db.getQuery(), {
+    db,
+    channels: [
+      { type: 'webhook', name: 'sent', url: 'https://notify.example.test/sent' },
+      { type: 'webhook', name: 'failed', url: 'https://notify.example.test/failed' },
+    ],
+    fetch: async () => {
+      calls += 1;
+      return { ok: calls === 1, status: calls === 1 ? 202 : 500 };
+    },
+    now: new Date('2026-06-28T09:00:00.000Z'),
+  });
+
+  assert.strictEqual(result.status, 'partial');
+  assert.strictEqual(db.calls.updates[0].patch.notificationStatus, 'partial');
+  assert.strictEqual(db.calls.updates[0].patch.notificationAttemptCount, 3);
+  assert.strictEqual(db.calls.audits[0].action, 'APPROVAL_NOTIFICATION_PARTIAL');
+  assert.match(db.calls.audits[0].detail, /channels=sent,failed/);
+});
