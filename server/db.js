@@ -509,6 +509,29 @@ function verifyAuditChain() {
 }
 
 // ---- Stats -------------------------------------------------------------------
+// topEntities requires scanning and JSON-parsing every query row, and stats()
+// is broadcast after essentially every ingest event. Cache the result for a
+// short interval so this O(N) scan runs at most once per window instead of once
+// per request; the "top data types" widget tolerates a few seconds of lag.
+const TOP_ENTITIES_TTL_MS = (() => {
+  const n = Number(process.env.PROMPTWALL_TOP_ENTITIES_TTL_MS);
+  return Number.isFinite(n) && n >= 0 ? n : 10000;
+})();
+let _topEntitiesCache = null;
+let _topEntitiesAt = 0;
+function topEntities() {
+  const now = Date.now();
+  if (_topEntitiesCache && now - _topEntitiesAt < TOP_ENTITIES_TTL_MS) return _topEntitiesCache;
+  const entity = {};
+  for (const r of sdb.prepare('SELECT data FROM queries').all()) {
+    const ec = JSON.parse(r.data).entityCounts || {};
+    for (const [k, v] of Object.entries(ec)) entity[k] = (entity[k] || 0) + v;
+  }
+  _topEntitiesCache = Object.entries(entity).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  _topEntitiesAt = now;
+  return _topEntitiesCache;
+}
+
 function stats() {
   const counts = {};
   for (const r of sdb.prepare('SELECT status, COUNT(*) n FROM queries GROUP BY status').all()) counts[r.status] = r.n;
@@ -518,11 +541,6 @@ function stats() {
   const todayBlocked = sdb.prepare(
     `SELECT COUNT(*) n FROM queries WHERE substr(createdAt,1,10) = ? AND status IN (${blockedPlaceholders})`,
   ).get(today, ...STATS_BLOCKED_STATUSES).n;
-  const entity = {};
-  for (const r of sdb.prepare('SELECT data FROM queries').all()) {
-    const ec = JSON.parse(r.data).entityCounts || {};
-    for (const [k, v] of Object.entries(ec)) entity[k] = (entity[k] || 0) + v;
-  }
   return {
     total,
     pending: counts.pending || 0,
@@ -530,7 +548,7 @@ function stats() {
     denied: counts.denied || 0,
     allowed: counts.allowed || 0,
     todayBlocked,
-    topEntities: Object.entries(entity).sort((a, b) => b[1] - a[1]).slice(0, 8),
+    topEntities: topEntities(),
   };
 }
 
