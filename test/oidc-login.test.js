@@ -374,6 +374,97 @@ test('oidc id token validation rejects malformed and out-of-window signed claims
   );
 });
 
+test('oidc id token validation rejects wrong keys, issuers, audiences, and missing subjects', async () => {
+  const foreignKey = idTokenFixture();
+  const advertised = idTokenFixture();
+  await assert.rejects(
+    () => oidc.validateIdToken(foreignKey.token, {
+      config: foreignKey.config,
+      fetchImpl: advertised.fetchImpl,
+      nonce: 'nonce-1',
+      now: foreignKey.now,
+    }),
+    /signature is invalid/,
+  );
+
+  const issuer = idTokenFixture({ iss: 'https://intruder.example.test' });
+  await assert.rejects(
+    () => oidc.validateIdToken(issuer.token, {
+      config: issuer.config,
+      fetchImpl: issuer.fetchImpl,
+      nonce: 'nonce-1',
+      now: issuer.now,
+    }),
+    /issuer mismatch/,
+  );
+
+  const stringAud = idTokenFixture({ aud: 'other-client' });
+  await assert.rejects(
+    () => oidc.validateIdToken(stringAud.token, {
+      config: stringAud.config,
+      fetchImpl: stringAud.fetchImpl,
+      nonce: 'nonce-1',
+      now: stringAud.now,
+    }),
+    /audience mismatch/,
+  );
+
+  const arrayAud = idTokenFixture({
+    aud: [process.env.OIDC_CLIENT_ID, 'other-audience'],
+    azp: 'other-audience',
+  });
+  await assert.rejects(
+    () => oidc.validateIdToken(arrayAud.token, {
+      config: arrayAud.config,
+      fetchImpl: arrayAud.fetchImpl,
+      nonce: 'nonce-1',
+      now: arrayAud.now,
+    }),
+    /audience mismatch/,
+  );
+
+  const missingSub = idTokenFixture({ sub: '' });
+  await assert.rejects(
+    () => oidc.validateIdToken(missingSub.token, {
+      config: missingSub.config,
+      fetchImpl: missingSub.fetchImpl,
+      nonce: 'nonce-1',
+      now: missingSub.now,
+    }),
+    /subject is missing/,
+  );
+});
+
+test('oidc callback rejects state mismatches and provider errors without issuing a session', async () => {
+  await withServer(async (port) => {
+    const stateCookie = `${oidc.STATE_COOKIE_NAME}=` + oidc.signState({
+      state: 'expected-state',
+      nonce: 'nonce-1',
+      exp: Date.now() + 60000,
+    });
+
+    const mismatch = await fetch(`http://127.0.0.1:${port}/auth/oidc/callback?code=code-1&state=other-state`, {
+      redirect: 'manual',
+      headers: { cookie: stateCookie },
+    });
+    assert.strictEqual(mismatch.status, 302);
+    assert.strictEqual(mismatch.headers.get('location'), '/login.html?oidc=failed');
+    assert.doesNotMatch(mismatch.headers.get('set-cookie') || '', /promptwall_session=/);
+
+    const denied = await fetch(`http://127.0.0.1:${port}/auth/oidc/callback?error=access_denied&state=expected-state`, {
+      redirect: 'manual',
+      headers: { cookie: stateCookie },
+    });
+    assert.strictEqual(denied.status, 302);
+    assert.strictEqual(denied.headers.get('location'), '/login.html?oidc=failed');
+    assert.doesNotMatch(denied.headers.get('set-cookie') || '', /promptwall_session=/);
+
+    const audit = db.listAudit(10);
+    assert.ok(audit.some((entry) => entry.action === 'OIDC_LOGIN_FAILED' && entry.detail === 'oidc login failed'));
+    assert.strictEqual(db.verifyAuditChain().ok, true);
+  });
+});
+
 test('oidc public errors stay generic except for operator-safe categories', () => {
   assert.strictEqual(oidc.publicError(new Error('OIDC login is not enabled')), 'oidc login is not enabled');
   assert.strictEqual(oidc.publicError(new Error('OIDC user is not active in SCIM')), 'oidc user is not provisioned');
