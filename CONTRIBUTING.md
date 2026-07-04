@@ -43,8 +43,19 @@ If push fails, the commit stays local and you can retry `git push` after the iss
 ## Required evidence
 
 For any change you can reference:
+- `CHANGELOG.md` for customer-visible history (add an `[Unreleased]` entry
+  for any change with user impact).
 - `ITERATIONS.md` for what was done and when.
-- `STATUS.md` for current execution and evidence.
+- `STATUS.md` for the live TODO list and current execution state.
 - `DECISIONS.md` for strategic guardrails.
+
+## Process references
+
+- Documentation rules: `docs/DOCUMENTATION_STANDARDS.md` — docs change in the
+  same commit as the code they describe.
+- Testing rules and where a new test belongs: `docs/TESTING_STRATEGY.md`.
+  The standalone regression suite in `suite/` runs with `npm run suite:smoke`
+  (every change) and `npm run suite` (before release).
+- Releases: `docs/RELEASE_PROCESS.md`. Security reports: `SECURITY.md`.
 
 Keep all outputs synthetic and avoid real member/personal data.

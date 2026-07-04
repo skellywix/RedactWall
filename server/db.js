@@ -5,7 +5,7 @@
  * Why SQLite, not the old JSON file: the JSON store did unlocked
  * read-modify-write — two near-simultaneous writes last-write-win the whole
  * file, silently dropping an entry and breaking the audit hash-chain linkage
- * (REVIEW.md #6). With three sensors + SSE + polling that race is real even at
+ * With three sensors + SSE + polling that race is real even at
  * tiny scale, and a corrupted audit log is the one thing this product cannot
  * ship. better-sqlite3 gives real ACID transactions and WAL concurrency.
  *
@@ -15,7 +15,7 @@
  * OS dir and log loudly. Set SENTINEL_DB_PATH to a real local-disk path (or a
  * managed Postgres in front of this interface) in production.
  *
- * Tamper-evidence (REVIEW.md #5): every audit entry's hash covers a CANONICAL
+ * Tamper-evidence: every audit entry's hash covers a CANONICAL
  * serialization of the FULL entry (action, queryId, actor, detail, ts,
  * prevHash, and — when the event names a query — a contentHash of that query's
  * current state). Editing a query's findings, decisionNote, or an audit detail

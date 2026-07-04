@@ -52,11 +52,25 @@ Use this index when you know the job but not the file name.
 
 | Topic | Document |
 |-------|----------|
+| Product roadmap | `../ROADMAP.md` |
 | Competitive positioning and product direction | `COMPETITIVE_ALIGNMENT.md` |
+| Feature benchmark vs. market leaders | `COMPETITIVE_BENCHMARK_2026.md` |
 | Vendor-risk security trust package | `SECURITY_TRUST_PACKAGE.md` |
 | Architecture, crypto inventory, threat model | `SECURITY_WHITEPAPER.md` |
 | Security incident response runbook | `INCIDENT_RESPONSE.md` |
 | Examiner evidence, backup, restore, retention | `DEPLOYMENT.md` |
+
+## Engineering And Commercial Processes
+
+| Topic | Document |
+|-------|----------|
+| Versioning, release train, artifacts, SBOM | `RELEASE_PROCESS.md` |
+| Test tiers, gates, flaky policy, coverage | `TESTING_STRATEGY.md` |
+| Documentation types, style, lifecycle | `DOCUMENTATION_STANDARDS.md` |
+| License files, seats, expiry, pricing shape | `CUSTOMER_LICENSING.md` |
+| Support severities, response targets, versions | `SUPPORT_POLICY.md` |
+| Vulnerability disclosure policy | `../SECURITY.md` |
+| Release history | `../CHANGELOG.md` |
 
 ## Generated Docs
 

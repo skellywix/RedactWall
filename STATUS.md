@@ -1,156 +1,65 @@
-# PromptWall Production Loop Status
+# PromptWall Status
 
-## Open
+Live working state for the production loop. Durable goals live in `PLAN.md`,
+decision rationale in `DECISIONS.md`, the product roadmap in `ROADMAP.md`, and
+release history in `CHANGELOG.md` and `ITERATIONS.md`. Older per-pass evidence
+logs were pruned on 2026-07-04; they are preserved in git history
+(`git log --follow STATUS.md`).
 
-- Next pass: move desktop app/file-open interception beyond the protected-upload shell action, clipboard guard, and browser-local upload path, such as app-specific native collectors or a native messaging handoff where a browser can safely expose local file intent.
-- Keep an eye on the remaining product gap: the endpoint package now has tested protected-upload, clipboard guard, and browser text-upload coverage, but it is not yet universal drag/drop or file-open interception for every desktop AI app.
+## Open (the TODO list, ordered)
 
-## Done
+Roadmap references (N*/X*) point at `ROADMAP.md`.
 
-- 2026-07-02: Added safe-to-send receipts, the planned examiner-facing differentiator: cleared gate outcomes (`allowed`, `redacted`, `warned_sent`, `justified`) now return a signed, prompt-free receipt binding the exact outbound-text hash to the active policy hash, `POST /api/receipts/verify` lets any console session (including read-only auditors) confirm a receipt is authentic and unedited, and `/api/login-options` now reports whether the default admin credential is still active. Receipt signatures JSON-encode the signed field list so delimiter characters in user or destination values cannot shift content across field boundaries and re-verify. Also fixed MCP install-check isolation: the checker resolves the default `.env` against the install root under check (not the checker script's location), so `npm test` passes on checkouts where `npm run setup` already wrote a repo `.env`.
-  Evidence: `npm test -- test/receipts.test.js test/validation.test.js test/dashboard-linkage.test.js test/auth.test.js test/server-integration.test.js test/extension.test.js test/oidc-login.test.js test/redact-policy.test.js`, `npm run test:browser`, `npm run sync-check`, `npm run eval`, `node -e "const v=require('./server/db').verifyAuditChain(); console.log(JSON.stringify(v)); if(!v.ok) process.exit(1)"`.
-- 2026-07-02: Simplified the console to one navigation and one title per screen: the sidebar rail is the only desktop navigation (the horizontal tab strip now serves compact viewports only), the duplicated global "Security Console" hero and its duplicate Evidence/Configure buttons are gone, per-tab headers dropped the letter tiles and decorative status chips, the KPI stat band moved into the Approval Queue tab, the incident detail panel flattened from nested boxes to hairline rows, the login page only shows the demo credential while the default admin password is actually active, and PromptWall got a proper shield-wall logo mark and favicon across console and login. The webapp QA matrix responsive markers were refreshed to the current design contract (they still asserted pre-redesign CSS and failed against the prior commit's tree as well).
-  Evidence: `npm run test:browser` (25/25, including the new one-navigation-per-viewport e2e), `npm test` (full suite, true exit code), `git diff --check`, `npm run docs:demo-guide:check`, `npm run ai-domains:check`, `npm run sync-check`, `npm run eval`.
-- 2026-06-29: Added destination-scoped browser download blocking. The MV3 extension now requests the `downloads` permission, cancels configured AI-destination downloads in the background worker, and records host-only `action_blocked` evidence without download URLs, raw filenames, MIME types, or file bytes.
-  Evidence: `node scripts/run-node-tests.js test/extension.test.js test/validation.test.js test/policy-history.test.js test/coverage.test.js test/admin-csrf.test.js` (initial run hit one local connect timeout, `test/validation.test.js` passed on isolated rerun), `npm run package:extension -- <temp>`, `npm run release:extension:check`, `npm run sync-check`, `$env:PLAYWRIGHT_PORT='4333'; npm run test:browser-extension`, `$env:PLAYWRIGHT_PORT='4336'; npm run test:admin-console`, `$env:PLAYWRIGHT_PORT='4338'; npm run review:ci`, `node -e "const v=require('./server/db').verifyAuditChain(); console.log(JSON.stringify(v)); if(!v.ok) process.exit(1)"`.
-- 2026-06-29: Moved managed browser text-upload inspection into the extension. Text-readable browser uploads now run the shared detector locally, report only synthetic file labels and masked detector metadata through `/api/v1/gate`, block unsupported/OCR-needed/oversized files without uploading bytes, and keep `/api/v1/scan-file` out of the browser background worker.
-  Evidence: `node scripts/run-node-tests.js test/extension.test.js test/validation.test.js test/coverage.test.js`, `npm run sync-check`, `npm run package:extension -- <temp>`, `npm run release:extension:check`, `$env:PLAYWRIGHT_PORT='4329'; npm run test:browser-extension`, `npm run review:ci`, `node -e "const v=require('./server/db').verifyAuditChain(); console.log(JSON.stringify(v)); if(!v.ok) process.exit(1)"`.
-- 2026-06-29: Added a per-user Clipboard Guard install path to the endpoint package. The endpoint installer can add a secret-free Start Menu or Desktop shortcut with an optional hotkey, the runner loads the endpoint config through `PROMPTWALL_ENV_PATH`, inspects clipboard content locally through the shared detector, optionally clears blocked clipboard content, and logs only sanitized JSON guard results.
-  Evidence: `node scripts/run-node-tests.js test/endpoint-agent-install.test.js test/endpoint-agent-package.test.js test/endpoint-clipboard-collector.test.js`, `npm run package:endpoint-agent -- <temp>`, `node scripts/check-endpoint-install.js --env <temp>/endpoint-agent.env --repo-root . --json`, `npm run review:ci`, `node -e "const v=require('./server/db').verifyAuditChain(); console.log(JSON.stringify(v)); if(!v.ok) process.exit(1)"`.
-- 2026-06-28: Added a Windows protected-upload desktop collector path for pilots. The endpoint package now includes a per-user Explorer shell action, a secret-free runner, metadata-only collector events through the signed handoff writer, package validation, install/uninstall docs, and package-to-install smoke coverage.
-  Evidence: `npm test -- test/desktop-collector.test.js test/endpoint-agent-install.test.js test/endpoint-agent-package.test.js`, `npm run review:ci`, `node -e "const v=require('./server/db').verifyAuditChain(); console.log(JSON.stringify(v)); if(!v.ok) process.exit(1)"`.
-- 2026-06-28: Added inline employee coaching to the browser extension block/warn/justify banner. The banner now gives category-specific safe alternatives for SSNs, payment data, credentials, source code, legal contracts, confidential business context, and canary tokens while preserving the existing local detection and fail-closed enforcement path.
-  Evidence: `npm test -- test/detect.test.js test/extension.test.js test/policy-history.test.js test/coverage.test.js test/adapters.test.js`, `$env:PLAYWRIGHT_PORT='4327'; npm run test:browser-extension`, `npm run review:ci`, `node -e "const v=require('./server/db').verifyAuditChain(); console.log(JSON.stringify(v)); if(!v.ok) process.exit(1)"`.
-- 2026-06-27: Added a review-gated local Git workflow for this repo: pre-commit runs `npm run review:agent`, post-commit runs `npm run review:ci` and pushes only after checks pass, and `.githooks` is the canonical hook path for the same flow (`npm run hooks:install`). This keeps local commits aligned with GitHub sync expectations for every change.
-  Evidence: [package scripts and hooks updated], `npm run review:agent`/`npm run review:ci` availability, `.githooks/pre-commit`, `.githooks/post-commit`, `core.hooksPath` configuration.
-- 2026-06-26: Added a metadata-only native handoff writer for pilots and future desktop hooks: the packaged helper loads the endpoint env config, signs a bounded upload-intent event, writes it atomically into the handoff spool, refuses `--secret` command-line handling, and never reads referenced file bytes into the event.
-  Evidence: `node --test test/native-handoff-writer.test.js test/native-handoff.test.js test/endpoint-agent-package.test.js test/endpoint-agent-install.test.js`, `npm run package:endpoint-agent -- <temp>`, `npm test`, `npm run test:browser`, `npm run setup:check`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Tightened the signed native handoff contract and SaaS file-scan boundary: native handoff JSON now uses an explicit allowlist for event and destination fields, the endpoint watcher ignores cleanup races instead of reprocessing removed handoff files, and `/api/v1/scan-file` enforces SaaS tenant checks before decoding uploaded file bodies.
-  Evidence: `node --test test/native-handoff.test.js test/endpoint-agent.test.js test/endpoint-agent-package.test.js test/endpoint-agent-install.test.js`, `npm run package:endpoint-agent -- <temp>`, `npm test`, `npm run test:browser`, `npm run setup:check`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Added a signed native endpoint file-flow handoff prototype: the endpoint agent can validate content-free HMAC-signed upload-intent JSON events, scan the referenced absolute local file through the shared local processor/detector path, report only sanitized placeholders and bounded destination metadata, and package the native handoff helper with installer/docs coverage.
-  Evidence: `node --test test/native-handoff.test.js test/endpoint-agent.test.js test/endpoint-agent-package.test.js test/endpoint-agent-install.test.js`, `npm run package:endpoint-agent -- <temp>`, `npm test`, `npm run test:browser`, `npm run setup:check`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Added the first paid-customer SaaS deployment shape: customer-silo AWS docs/template, SaaS preflight requirements, runtime tenant and managed-identity enforcement, paid seat-limit blocking, seat usage reporting in the dashboard, Docker/setup env propagation, and tests covering API enforcement, seat accounting, and deployment artifacts.
-  Evidence: `node --test test/tenant.test.js test/saas-tenancy.test.js test/preflight.test.js test/db.test.js test/aws-deployment.test.js test/docker-deployment.test.js test/setup.test.js`, `npm test`, `npm run test:browser`, `npm run setup:check`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Added a package-to-install endpoint pilot smoke: the endpoint zip is extracted into a temp install root, the scheduled-task scripts are inspected, config is loaded through `SENTINEL_ENV_PATH`, policy refresh is exercised, a watched file is locally extracted and redacted, sanitized `redacted_available` telemetry is sent, and the companion file is verified to contain placeholders only.
-  Evidence: `node --test test/endpoint-agent-package.test.js`, `npm run package:endpoint-agent`, `git diff --check`.
-- 2026-06-26: Added an explicit endpoint redaction handoff for structured-only watched-file findings: redact policy now writes a sanitized `.promptwall-redacted/*.txt` companion file with typed placeholders, reports `redacted_available` evidence to `/api/v1/gate`, ignores generated companions in the watcher, and removes the companion if control-plane recording fails or does not resolve as redacted.
-  Evidence: `node --test test/endpoint-agent.test.js test/redact-policy.test.js test/validation.test.js test/endpoint-agent-package.test.js`, `npm run package:endpoint-agent`, `npm test`, `npm run test:browser`, `npm run setup:check`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Moved endpoint-agent supported-file inspection to the local sensor path: watched files now extract and analyze locally with the shared detector and policy evaluator, then report only sanitized placeholders, masked findings, sanitized filename labels, and client analysis to `/api/v1/gate`; the endpoint package now includes the shared detector/policy files and refuses regressions to file-body upload calls.
-  Evidence: `node --test test/endpoint-agent.test.js test/endpoint-agent-package.test.js test/validation.test.js test/redact-policy.test.js test/release-token.test.js`, `npm run package:endpoint-agent`, `npm test`, `npm run test:browser`, `npm run setup:check`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Added repeatable endpoint-agent pilot packaging: `npm run package:endpoint-agent` writes a prompt-free zip plus SHA-256 manifest with the endpoint runtime, file processor registry, env loader, and scheduled-task install/run/uninstall scripts; the endpoint agent now requires an explicit ingest key before control-plane calls and reports that state at startup without printing secrets.
-  Evidence: `node --test test/endpoint-agent-package.test.js test/endpoint-agent.test.js test/endpoint-agent-install.test.js`, `npm run package:endpoint-agent -- <temp>`, `npm test`, `npm run test:browser`, `npm run setup:check`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Hardened Docker Compose pilot readiness: Compose now passes generated Security Admin MFA and auditor credentials into the container, keeps SQLite evidence on the named `/data` volume, has a `/readyz` healthcheck that catches blocked preflight or database readiness, and static Docker deployment tests guard the contract.
-  Evidence: `node --test test/docker-deployment.test.js test/setup.test.js test/preflight.test.js`, `docker compose config`, `npm test`, `npm run test:browser`, `npm run setup:check`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Added an end-to-end production setup smoke test: a temp env now runs `setup.js --production --skip-install`, confirms generated secrets and a local SQLite store, proves setup/check output do not print admin, MFA, or ingest secrets, then verifies `mfa-uri.js` is the explicit enrollment-only reveal path.
-  Evidence: `node --test test/setup.test.js test/mfa-uri.test.js test/preflight.test.js`, `npm test`, `npm run test:browser`, `npm run setup:check`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Tightened MFA enrollment helper verification: corrected the npm argument examples, fixed the helper usage text, and added child-process tests proving the CLI reads an explicit env file and exits nonzero for invalid TOTP seeds.
-  Evidence: `node --test test/mfa-uri.test.js test/setup.test.js test/auth.test.js test/admin-mfa.test.js test/preflight.test.js`, `npm test`, `npm run test:browser`, `npm run setup:check`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Added explicit Security Admin MFA enrollment tooling: `npm run mfa:uri` reads `ADMIN_TOTP_SECRET` from `.env`, validates the base32 seed, prints a standard `otpauth://` URI only on operator request, supports alternate env/issuer/account labels, and docs now show the enrollment step for native and Docker production setup.
-  Evidence: `node --test test/mfa-uri.test.js test/setup.test.js test/auth.test.js test/admin-mfa.test.js test/preflight.test.js`, `npm test`, `npm run test:browser`, `npm run setup:check`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Added production Security Admin MFA: production preflight now requires a valid base32 `ADMIN_TOTP_SECRET`, `npm run setup:prod` generates one, admin login requires a current TOTP code when configured, auditor login stays password-only, and malformed MFA secrets warn in demos but block production readiness.
-  Evidence: `node --test test/auth.test.js test/admin-mfa.test.js test/preflight.test.js test/setup.test.js test/frontend-csp.test.js test/validation.test.js test/server-integration.test.js`, `npm test`, `npm run test:browser`, `npm run setup:check`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Hardened auditor-role configuration edges: `.env.example` now documents optional auditor credentials, production preflight rejects duplicate auditor/admin usernames, runtime refuses to enable a duplicate auditor account, legacy admin session cookies get a safe `security_admin` role, unknown session roles are rejected, and the dashboard defaults to read-only until `/api/me` proves admin authority.
-  Evidence: `node --test test/auth.test.js test/auditor-role.test.js test/admin-csrf.test.js test/preflight.test.js test/setup.test.js test/server-integration.test.js`, `npm test`, `npm run test:browser`, `npm run setup:check`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Added an optional read-only auditor console role for demos and examiner reviews: `AUDITOR_USER`/`AUDITOR_PASSWORD` can log in with role `auditor`, read dashboard evidence and policy, but cannot perform CSRF-protected admin writes. Production preflight requires both auditor credential fields, a distinct auditor username, and a 16-character auditor password when configured.
-  Evidence: `node --test test/auth.test.js test/auditor-role.test.js test/admin-csrf.test.js test/preflight.test.js test/setup.test.js test/server-integration.test.js test/approval-stepup.test.js test/reveal-stepup.test.js test/retention.test.js test/validation.test.js`, `npm test`, `npm run test:browser`, `npm run setup:check`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Added production preflight strength checks for custom secrets: non-default admin passwords must be at least 16 characters, and ingest keys, session secrets, and raw-prompt data-key sources must be at least 32 characters. Development mode reports weak custom secrets as warnings.
-  Evidence: `node --test test/preflight.test.js test/setup.test.js test/server-integration.test.js`, `npm test`, `npm run test:browser`, `npm run setup:check`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Scoped approval-status polling with per-query release tokens: held prompt and file responses now return a release token, the server stores only its hash, `/api/v1/status/:id` requires the matching token for held rows, and the reference proxy bridge forwards it while polling.
-  Evidence: `node --test test/release-token.test.js test/squid-icap-bridge.test.js test/approval-stepup.test.js test/validation.test.js`, `npm test`, `npm run test:browser`, `npm run sync-check`, `npm run setup:check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Added a production preflight blocker for unsafe SQLite evidence-store paths: missing, cloud-synced, or UNC/network `SENTINEL_DB_PATH` values now fail production readiness while local demo mode keeps running with warnings.
-  Evidence: `node --test test/preflight.test.js test/setup.test.js test/server-integration.test.js`, `npm test`, `npm run test:browser`, `npm run setup:check`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Added sanitized SIEM alerts for sensor version posture gaps: mixed or missing browser/endpoint/MCP sensor versions now emit forced `SENSOR_VERSION_GAP` webhook events with bounded source/version/platform metadata, while API/proxy traffic is excluded.
-  Evidence: `node --test test/validation.test.js test/alerts.test.js test/coverage.test.js`, `npm test`, `npm run test:browser`, `npm run sync-check`, `npm run setup:check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Added sensor version posture across the control plane: browser extension, endpoint agent, and MCP guard now send bounded name/version/platform metadata; ingest validation stores it safely; the Coverage tab summarizes latest and mixed sensor versions without prompt bodies.
-  Evidence: `node --test test/coverage.test.js test/validation.test.js test/extension.test.js test/endpoint-agent.test.js test/mcp-guard.test.js test/alerts.test.js test/evidence.test.js`, `npm test`, `npm run test:browser`, `npm run package:extension -- <temp>`, `npm run sync-check`, `npm run setup:check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Added repeatable Chrome extension packaging for managed pilots: `npm run package:extension` writes a zip plus SHA-256 manifest, verifies Manifest V3 wiring, synced engine copies, managed-storage schema coverage, and refuses packaged development ingest keys. The extension now fails closed until local or managed storage supplies the ingest key.
-  Evidence: `npm run package:extension -- <temp>`, `node --test test/extension-package.test.js test/extension.test.js test/managed-extension-docs.test.js`, `npm test`, `npm run test:browser`, `npm run sync-check`, `npm run setup:check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Tightened the dashboard blocked-today metric so it counts only held or blocked statuses, not audit-only paste warnings, shadow-AI sightings, warnings, justifications, or successful redactions.
-  Evidence: `node --test test/db.test.js`, `npm run sync-check`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Closed the browser paste-audit gap: `paste_flagged` reports from the extension now pass API validation, create audit-only `PASTE_FLAGGED` evidence with masked findings, avoid raw prompt retention, and show as warning activity in the admin dashboard instead of disappearing as rejected sensor traffic.
-  Evidence: focused syntax checks, `node --test test/validation.test.js test/extension.test.js test/alerts.test.js`, `npm test`, `npm run test:browser`, `npm run sync-check`, `npm run setup:check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Added sanitized SIEM/webhook alerts for failed and locked admin step-up confirmations: reveal and approval failures now force best-effort admin security alerts with actor/scope metadata while omitting prompt bodies, raw retained prompts, token vaults, and raw finding values.
-  Evidence: `node --test test/alerts.test.js test/approval-stepup.test.js test/reveal-stepup.test.js test/admin-csrf.test.js`, `npm test`, `npm run sync-check`, `npm run setup:check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Added password step-up for approval release: approving a held prompt now requires admin password confirmation in the dashboard and API, failed confirmations are audit-logged without releasing content, repeated failures lock out the release path, and browser E2E covers the approval dialog.
-  Evidence: `node --test test/approval-stepup.test.js test/reveal-stepup.test.js test/retention.test.js test/admin-csrf.test.js test/validation.test.js`, `npm test`, `npm run test:browser`, `npm run sync-check`, `npm run setup:check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Added password step-up for raw prompt reveal: the dashboard now collects a masked admin password before reveal, the API validates it with lockout-backed auth, failed confirmations are audit-logged without prompt leakage, and successful raw reveals remain explicit audit events.
-  Evidence: `node --test test/reveal-stepup.test.js test/retention.test.js test/admin-csrf.test.js test/auth.test.js test/validation.test.js`, `npm test`, `npm run test:browser`, `npm run sync-check`, `npm run setup:check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Added verifier-first backup/restore tooling for the SQLite evidence store: `npm run backup`, `npm run backup:verify`, and `npm run backup:restore` create prompt-free manifests, verify audit-chain integrity on backup files, and refuse unsafe overwrites unless explicitly forced.
-  Evidence: `node --test test/backup-store.test.js test/db.test.js`, `npm test`, `npm run sync-check`, `npm run setup:check`, `npm audit --omit=dev`, `npm run backup -- <temp>`, `npm run backup:verify -- <backup.db>`, `npm run backup:restore -- <backup.db> <temp/restored.db>`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Added policy-backed retained-data disposal for finalized approval/redact records: `rawRetentionDays` now drives audited purging of sealed raw prompts and token vaults, reveal falls back to safe redacted text after purge, evidence exports show purge metadata without prompt bodies, and the admin policy form exposes the retention window.
-  Evidence: `node --test test/db.test.js test/retention.test.js test/policy-history.test.js test/admin-csrf.test.js test/validation.test.js`, `node --test test/evidence.test.js`, `npm test`, `PLAYWRIGHT_PORT=4310 npm run test:browser`, `npm run sync-check`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Sanitized semantic-category previews so held prompts, scanned files, and flagged AI responses store whole-chunk `[REDACTED: ...]` evidence instead of retaining confidential business context with only structured values masked.
-  Evidence: `node --test test/redact-policy.test.js test/processors.test.js test/evidence.test.js`, `npm test`, `PLAYWRIGHT_PORT=4310 npm run test:browser`, `npm run sync-check`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Added a Windows endpoint-agent scheduled-task install path for pilots: per-user logon task, restart-on-failure settings, least-privilege interactive principal, restricted local config, `SENTINEL_ENV_PATH` loading, uninstall support, and client-demo docs.
-  Evidence: `node --test test/env.test.js test/endpoint-agent.test.js test/endpoint-agent-install.test.js`, PowerShell parser checks for endpoint install/run/uninstall scripts, `npm test`, `npm run test:browser`, `npm run sync-check`, `npm run setup:check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Closed the mixed-content redact-mode leak path: prompt and file flows now tokenize only structured-only findings, hold semantic or mixed semantic+structured content for Security Admin review, and preserve MCP whole-chunk redaction telemetry as redacted.
-  Evidence: `node --test test/redact-policy.test.js test/processors.test.js test/extension.test.js test/mcp-guard.test.js`, `npm test`, `npm run sync-check`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Aligned `/api/v1/scan-file` with redact-mode policy for structured file findings: supported file uploads now return a tokenized safe prompt plus sealed rehydrate vault, while category-only file hits remain held for Security Admin review.
-  Evidence: `node --test test/processors.test.js`, `npm test`, `npm run sync-check`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Hardened sensor/admin validation so client-reported redaction evidence and policy detector lists can only reference detector IDs published by the shared engine, preventing invented labels from polluting policy decisions or examiner evidence.
-  Evidence: `node --test test/validation.test.js`, `npm test`, `npm run sync-check`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Added repeatable deployment setup tooling: `.env` loading, generated setup/preflight scripts, Docker Compose path, deployment docs, and tests that keep copied example credentials flagged as unsafe.
-  Evidence: `node --test test/env.test.js test/setup.test.js test/auth.test.js test/preflight.test.js`, `npm run setup:check`, `npm test`, `npm run test:browser`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Bounded MCP guard control-plane requests so policy refresh and best-effort audit logging cannot stall redacted tool output delivery when the control plane is slow or unavailable.
-  Evidence: `node --test test/mcp-guard.test.js`, `npm test`, `npm run test:browser`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Published full sensor policy from `/api/v1/policy` and made browser local analysis honor centralized detector `ignore` and `disabledDetectors` settings, aligning browser, endpoint, MCP, and server policy behavior.
-  Evidence: `node --test test/extension.test.js`, `node --test test/validation.test.js`, live temp-server sensor-policy smoke through endpoint and MCP refresh, `npm test`, `npm run test:browser`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Hardened the browser extension control-plane path with bounded background-worker requests, fail-closed gate/file-scan outage verdicts, and warn/justify resend logic that waits for a recorded server decision before allowing a sensitive prompt to proceed.
-  Evidence: `node --test test/extension.test.js`, live temp-server extension background smoke, `npm run test:browser`, `npm test`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Added an AI coverage posture dashboard and protected `/api/coverage` summary so admins can see governed AI destinations, sensor mix, shadow-AI sightings, and coverage score without exposing prompt bodies.
-  Evidence: `node --test test/coverage.test.js`, `npm run test:browser`, `npm test`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Hardened the reference Squid/ICAP bridge with bounded control-plane requests, explicit fail-closed gate verdicts, and fail-closed release polling for API/proxy enforcement.
-  Evidence: `node --test test/squid-icap-bridge.test.js`, live temp-DB proxy bridge smoke through `/api/v1/gate`, `npm test`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Updated GitHub Actions workflow dependencies to maintained current major lines for checkout, setup-node, and artifact upload after CI reported Node 20 action deprecation warnings.
-  Evidence: upstream release tags verified through GitHub API; `npm test`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Hardened the endpoint agent to fail closed when supported-file scans or policy refreshes stall or return unusable control-plane responses. Scan outages now block locally and can be recorded as sanitized `scan_unavailable` unscanned-file events.
-  Evidence: `node --test test/endpoint-agent.test.js`, `node --test test/validation.test.js`, `npm test`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Added permanent Playwright coverage for the mobile admin console layout so CI verifies collapsed rail tabs, usable content tabs, and no page-level horizontal overflow.
-  Evidence: `npm run test:browser`, `npm test`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Made the MCP guard detection path policy-aware so tool-output redaction honors centralized `ignore` and `disabledDetectors` settings before reporting sanitized evidence.
-  Evidence: `node --test test/mcp-guard.test.js`, `npm test`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Improved mobile admin-console layout by hiding duplicated side-rail tabs under narrow viewports while keeping content tabs reachable and preventing horizontal page overflow.
-  Evidence: `npm run test:browser`, mobile Playwright smoke at 390x844 viewport; earlier same-worktree gate passed `npm test`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, and `verifyAuditChain()`.
-- 2026-06-26: Synced the endpoint agent with centralized scanner policy from `/api/v1/policy`, including managed ignore directories, filenames, extensions, and max file size enforcement.
-  Evidence: `node --test test/endpoint-agent.test.js`, `npm test`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Polished the redesigned admin console tab rails by hiding native scrollbars while preserving horizontal scrolling for dense operations layouts.
-  Evidence: `npm run test:browser`; earlier same-worktree gate for this UI delta also passed `npm test`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, and `verifyAuditChain()`.
-- 2026-06-26: Hardened MCP guard telemetry so locally redacted tool output reports masked client findings/categories to the control plane while keeping raw tool content out of the logged prompt body.
-  Evidence: `node --test test/mcp-guard.test.js`, `npm test`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, live temp-DB client-redacted ingest smoke, `verifyAuditChain()`.
-- 2026-06-26: Verified and adopted the redesigned admin console UI: denser operations layout, redesigned login surface, selected-incident detail panel, icon command buttons, and functional global search across queue/activity data.
-  Evidence: `npm run test:browser`, `npm test`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Upgraded GitHub Actions CI so branch pushes under `codex/**` run the production gate: dependency audit, sync-check, Node tests, Playwright browser E2E, audit-chain verification, detection eval, semantic determinism, config drift check, and Docker build.
-  Evidence: local non-Docker CI-equivalent commands passed; Docker build remains enforced in GitHub Actions because the local Docker daemon was unavailable.
-- 2026-06-26: Added Playwright browser E2E coverage for the admin console login, pending prompt approval, policy save, audit integrity display, and sanitized evidence export. The E2E server uses temp DB and policy files so tests do not mutate demo config.
-  Evidence: `npm run test:browser`, `npm test`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Hardened sensor ingest authentication with constant-time API-key comparison and a bounded invalid-key throttle that still lets a correct key through from the same client.
-  Evidence: `node --test test/ingest-auth.test.js`, `npm test`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, live HTTP ingest auth smoke, `verifyAuditChain()`.
-- 2026-06-26: Added fail-closed file extraction guardrails: corrupt supported files and extraction timeouts are recorded as blocked unscanned files, extracted text is bounded before detection, and browser/endpoint clients surface unreadable files as blocked.
-  Evidence: `node --test test/processors.test.js`, `npm test`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, live HTTP file extraction smoke, `verifyAuditChain()`.
-- 2026-06-26: Added Zod request-body validation for sensor ingest, file scanning, response scanning, login, approval notes, template application, and policy updates. Validation responses name fields only, malformed JSON returns sanitized JSON, bad base64 is rejected before decoding, and unknown policy keys fail closed.
-  Evidence: `node --test test/validation.test.js`, `npm test`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, live HTTP validation smoke, `verifyAuditChain()`.
-- 2026-06-26: Reviewed the app stack, upgraded Express 4 to Express 5, added Helmet-managed security headers, externalized admin/login JavaScript for stricter CSP, added frontend CSP regression tests, and documented stack decisions in `STACK_REVIEW.md`.
-  Evidence: `npm test`, `npm run sync-check`, `npm audit --omit=dev`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Added a `npm run fire-drill` canary-control script that sends a synthetic tripwire prompt through the gate API and fails if `CANARY_TOKEN` is missed or the raw canary leaks in the response.
-  Evidence: `npm test`, `npm run sync-check`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Added deployment preflight checks for default admin credentials, dev ingest key, session secret source, raw-prompt encryption readiness, and secure cookies; wired checks into production startup, `/readyz`, and `/api/preflight`.
-  Evidence: `npm test`, `npm run sync-check`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Refactored server startup behind a `require.main` guard and added real HTTP integration tests for health, readiness, and security headers on an ephemeral port.
-  Evidence: `npm test`, `npm run sync-check`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Added structured policy-change diffs for manual and template policy updates, and exposed parsed allowlisted policy changes in evidence exports while keeping general audit detail text hashed.
-  Evidence: `npm test`, `npm run sync-check`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Added an admin dashboard evidence export button that downloads the sanitized examiner pack from `/api/export/evidence`, plus static UI tests to keep it away from raw-prompt APIs.
-  Evidence: `npm test`, `npm run sync-check`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Added managed Chrome extension deployment guide, force-install policy example, managed storage policy example, and schema-alignment tests for pilot deployment docs.
-  Evidence: `npm test`, `npm run sync-check`, `git diff --check`, `verifyAuditChain()`.
-- 2026-06-26: Added planted canary token detector, policy/template hard-stop defaults, extension default policy support, full masking, docs, and false-positive counterexamples.
-  Evidence: `npm test`, `npm run sync-check`, `npm run eval`, `verifyAuditChain()`.
-- 2026-06-26: Added session-protected examiner evidence export with policy, stats, audit integrity, detector inventory, query metadata, masked findings, prompt hashes, and audit hashes. Prompt bodies and audit detail text are omitted.
-  Evidence: `npm test`, `npm run sync-check`, `verifyAuditChain()`.
-- 2026-06-26: Added optional sanitized SIEM/webhook alerts for high-risk events; payloads omit raw prompt text, redacted prompt body, token vaults, and raw finding values.
-  Evidence: `npm test`, `npm run sync-check`, `verifyAuditChain()`.
-- 2026-06-26: Added baseline production HTTP security headers, disabled Express fingerprinting, and tightened admin session cookie attributes.
-  Evidence: `npm test`, `npm run sync-check`, `verifyAuditChain()`.
-- 2026-06-26: Added signed CSRF tokens for admin unsafe actions; dashboard fetch wrapper sends `x-csrf-token`; tests cover token binding and route wiring.
-  Evidence: `npm test`, `npm run sync-check`, `verifyAuditChain()`.
-- 2026-06-26: Created durable production loop plan and status files.
+1. **Inline redaction + coaching UX in the browser sensor** (N1) — replace
+   sensitive spans in the composer with typed tokens, explain why, allow
+   proceed-with-redacted. Detector spans and tokenization already exist.
+2. **Examiner report pack** (N2) — quarterly generated report mapping usage,
+   enforcement, and evidence to NCUA 2026 exam priorities / FFIEC / GLBA /
+   NIST AI RMF. Extends `server/evidence.js`.
+3. **Coaching acknowledgment audit trail** (N3) — record warn/acknowledge/
+   proceed/cancel into the hash-chained audit.
+4. **Personal vs. corporate AI account detection** (N4) — detect the logged-in
+   account identity on AI sites; policy to flag/block personal logins.
+5. **GenAI browser-extension inventory** (N5) — surface installed GenAI
+   extensions in Coverage/posture.
+6. **Published detection benchmarks + red-team harness** (N6) — publish
+   held-out eval numbers; ship a self-service detector test kit. Builds on
+   `npm run eval` and `suite/`.
+7. **Customer licensing implementation** (N7) — offline Ed25519-signed license
+   file, seat counting with renewal true-up, 30-day grace, never block
+   detection for billing reasons. Design in `docs/CUSTOMER_LICENSING.md`.
+8. **First tagged release on the new process** (N7) — cut `v0.4.0` per
+   `docs/RELEASE_PROCESS.md`: CHANGELOG cut, signed artifacts, SBOM.
+9. **Desktop app file-open/drag-drop interception** (X7) — move beyond the
+   protected-upload shell action, clipboard guard, and browser-local upload
+   path (app-specific native collectors or native-messaging handoff). The
+   longest-standing product gap: the endpoint package is not yet universal
+   file-open interception for every desktop AI app.
+10. **MCP server catalog + per-tool RBAC** (X1), **gateway prompt-injection
+    benchmark** (X2), **Copilot ingestion** (X3) — next-quarter items; see
+    `ROADMAP.md` for acceptance sketches.
+
+## Ongoing invariants (every pass)
+
+- `npm run review:ci` green before commit; audit chain `ok:true`.
+- `suite/` regression tiers green before release (`npm run suite:smoke` on
+  every PR-sized change, `npm run suite` before a tag).
+- Detector changes keep `npm run eval` floors: zero benign false positives.
+
+## Done (recent highlights)
+
+- 2026-07-04: Documentation/process overhaul — removed stale QA logs
+  (`.codex/`), superseded `REVIEW.md`, dead `server/index.js`; added
+  `ROADMAP.md`, `CHANGELOG.md`, `SECURITY.md`, engineering process docs
+  (release, testing, licensing, support, documentation standards); added the
+  standalone black-box regression suite in `suite/` with contract, security,
+  detector, and UI-flow tiers.
+- 2026-07-02: Safe-to-send receipts shipped (signed, prompt-free,
+  `POST /api/receipts/verify`); console simplified to one navigation and one
+  title per screen; PromptWall logo/favicon.
+- 2026-06-29: Destination-scoped browser download blocking; managed browser
+  text-upload inspection moved into the extension; per-user Clipboard Guard
+  install path.
+- 2026-06-28: Windows protected-upload desktop collector; inline employee
+  coaching in the block/warn/justify banner.
+- Full pass-by-pass history: `ITERATIONS.md` and git history of this file.
