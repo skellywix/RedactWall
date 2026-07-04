@@ -28,6 +28,7 @@ const dataCrypto = require('./crypto');
 const templates = require('./templates');
 const alerts = require('./alerts');
 const subscriptions = require('./subscriptions');
+const policyBundle = require('./policy-bundle');
 const evidence = require('./evidence');
 const preflight = require('./preflight');
 const validation = require('./validation');
@@ -1033,9 +1034,9 @@ app.post('/api/v1/rehydrate', checkIngestKey, validation.validateBody(validation
 });
 
 // Public policy for sensors (ingest-key protected).
-app.get('/api/v1/policy', checkIngestKey, (req, res) => {
+function sensorSafePolicy() {
   const p = policy.loadPolicy();
-  res.json({
+  return {
     enforcementMode: p.enforcementMode, blockMinSeverity: p.blockMinSeverity,
     blockRiskScore: p.blockRiskScore, alwaysBlock: p.alwaysBlock,
     ignore: p.ignore || [],
@@ -1052,7 +1053,22 @@ app.get('/api/v1/policy', checkIngestKey, (req, res) => {
     requiredSensors: p.requiredSensors || policy.DEFAULT_POLICY.requiredSensors,
     desiredSensorVersions: p.desiredSensorVersions || policy.DEFAULT_POLICY.desiredSensorVersions,
     scanner: p.scanner || {},
-  });
+  };
+}
+
+app.get('/api/v1/policy', checkIngestKey, (req, res) => {
+  res.json(sensorSafePolicy());
+});
+
+// Signed, versioned, expiring policy bundle. Sensors verify with the public key
+// (GET /api/v1/policy/pubkey) and FAIL CLOSED when the bundle is unverifiable or
+// stale — moving policy trust to the sensor edge.
+app.get('/api/v1/policy/bundle', checkIngestKey, (req, res) => {
+  res.json(policyBundle.buildBundle(sensorSafePolicy()));
+});
+
+app.get('/api/v1/policy/pubkey', checkIngestKey, (req, res) => {
+  res.json({ publicKey: policyBundle.publicKeyPem(), algorithm: 'ed25519', bundleVersion: policyBundle.BUNDLE_VERSION });
 });
 
 // List available detectors (for the console enable/disable UI).

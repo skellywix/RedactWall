@@ -37,6 +37,7 @@ test('package script writes a prompt-free MCP guard zip and integrity manifest',
   assert.strictEqual(manifest.checks.sharedEngineIncluded, true);
   assert.strictEqual(manifest.checks.connectorSdkIncluded, true);
   assert.strictEqual(manifest.checks.microsoft365ConnectorIncluded, true);
+  assert.strictEqual(manifest.checks.googleDriveConnectorIncluded, true);
   assert.strictEqual(manifest.checks.demoCodeExcluded, true);
   assert.strictEqual(manifest.checks.installValidationIncluded, true);
   assert.strictEqual(manifest.checks.developmentIngestKeyAbsent, true);
@@ -70,6 +71,7 @@ test('package validation refuses prompt bodies or development keys', () => {
       { path: 'sensors/mcp-guard/guard.js', body: Buffer.from("const KEY = process.env.INGEST_API_KEY || '';\nconst sample = '524-71-9043';") },
       { path: 'sensors/mcp-guard/sdk.js', body: Buffer.from('function sanitizeToolResult() {}\nfunction wrapConnectorTool() {}\nfunction connectorHealthCheck() {}\nmodule.exports = { sanitizeToolResult, wrapConnectorTool, connectorHealthCheck };') },
       { path: 'sensors/mcp-guard/connectors/microsoft365.js', body: Buffer.from('function sanitizeDriveItemContent() {}\nfunction createDriveItemContentTool() {}\nfunction microsoft365ConnectorHealth() {}\nmodule.exports = { sanitizeDriveItemContent, createDriveItemContentTool, microsoft365ConnectorHealth };') },
+      { path: 'sensors/mcp-guard/connectors/googledrive.js', body: Buffer.from('function sanitizeFileContent() {}\nfunction createFileContentTool() {}\nfunction googleDriveConnectorHealth() {}\nmodule.exports = { sanitizeFileContent, createFileContentTool, googleDriveConnectorHealth };') },
       { path: 'scripts/check-mcp-guard-install.js', body: Buffer.from("const api = '/api/v1/heartbeat';\nfunction buildInstallReport() {}\nconst key = 'INGEST_API_KEY';") },
     ]),
     /synthetic SSN demo value/
@@ -83,6 +85,7 @@ test('package validation refuses prompt bodies or development keys', () => {
       { path: 'sensors/mcp-guard/guard.js', body: Buffer.from("const KEY = process.env.INGEST_API_KEY || 'dev-ingest-key';") },
       { path: 'sensors/mcp-guard/sdk.js', body: Buffer.from('function sanitizeToolResult() {}\nfunction wrapConnectorTool() {}\nfunction connectorHealthCheck() {}\nmodule.exports = { sanitizeToolResult, wrapConnectorTool, connectorHealthCheck };') },
       { path: 'sensors/mcp-guard/connectors/microsoft365.js', body: Buffer.from('function sanitizeDriveItemContent() {}\nfunction createDriveItemContentTool() {}\nfunction microsoft365ConnectorHealth() {}\nmodule.exports = { sanitizeDriveItemContent, createDriveItemContentTool, microsoft365ConnectorHealth };') },
+      { path: 'sensors/mcp-guard/connectors/googledrive.js', body: Buffer.from('function sanitizeFileContent() {}\nfunction createFileContentTool() {}\nfunction googleDriveConnectorHealth() {}\nmodule.exports = { sanitizeFileContent, createFileContentTool, googleDriveConnectorHealth };') },
       { path: 'scripts/check-mcp-guard-install.js', body: Buffer.from("const api = '/api/v1/heartbeat';\nfunction buildInstallReport() {}\nconst key = 'INGEST_API_KEY';") },
     ]),
     /development ingest key/

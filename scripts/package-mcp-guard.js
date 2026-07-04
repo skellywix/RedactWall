@@ -16,6 +16,7 @@ const PACKAGE_FILES = [
   'sensors/mcp-guard/guard.js',
   'sensors/mcp-guard/sdk.js',
   'sensors/mcp-guard/connectors/microsoft365.js',
+  'sensors/mcp-guard/connectors/googledrive.js',
   'scripts/check-mcp-guard-install.js',
 ];
 
@@ -81,6 +82,11 @@ function validateRuntimeFiles(files) {
     throw new Error('MCP guard package must include Microsoft 365 connector sanitization and health helpers');
   }
 
+  const googledrive = files.find((file) => file.path === 'sensors/mcp-guard/connectors/googledrive.js').body.toString('utf8');
+  if (!/sanitizeFileContent/.test(googledrive) || !/createFileContentTool/.test(googledrive) || !/googleDriveConnectorHealth/.test(googledrive)) {
+    throw new Error('MCP guard package must include Google Drive connector sanitization and health helpers');
+  }
+
   const installCheck = files.find((file) => file.path === 'scripts/check-mcp-guard-install.js').body.toString('utf8');
   if (!/api\/v1\/heartbeat/.test(installCheck) || !/buildInstallReport/.test(installCheck) || !/INGEST_API_KEY/.test(installCheck)) {
     throw new Error('MCP guard package must include install validation with heartbeat support');
@@ -127,6 +133,7 @@ function packageMcpGuard(opts = {}) {
       sharedEngineIncluded: true,
       connectorSdkIncluded: true,
       microsoft365ConnectorIncluded: true,
+      googleDriveConnectorIncluded: true,
       demoCodeExcluded: true,
       installValidationIncluded: true,
       developmentIngestKeyAbsent: true,
