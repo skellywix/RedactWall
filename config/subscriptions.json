@@ -1,0 +1,4 @@
+{
+  "_comment": "Named SIEM/SOAR delivery destinations for PromptWall security events. Each event is prompt-free. type is one of: splunk_hec, sentinel, chronicle, qradar, datadog, slack, teams, webhook. url must be HTTPS. token/customerId/logType are per-type auth. minRisk/minSeverity/eventTypes filter which events are delivered. Delivery is async with retry + backoff; outcomes appear in the console delivery dashboard.",
+  "destinations": []
+}

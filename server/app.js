@@ -27,6 +27,7 @@ const auth = require('./auth');
 const dataCrypto = require('./crypto');
 const templates = require('./templates');
 const alerts = require('./alerts');
+const subscriptions = require('./subscriptions');
 const evidence = require('./evidence');
 const preflight = require('./preflight');
 const validation = require('./validation');
@@ -146,6 +147,12 @@ function emitSecurityAlert(row, action, opts = {}) {
 function fireSecurityAlert(row, opts) {
   try {
     Promise.resolve(alerts.emitSecurityAlert(row, opts)).catch(() => {});
+    // Fan out to configured named SIEM/SOAR subscriptions (retry + delivery
+    // history). Same threshold gate as the single webhook; payloads are the
+    // prompt-free sanitized event.
+    if (alerts.shouldAlert(row, opts)) {
+      Promise.resolve(subscriptions.dispatch(alerts.sanitizedAlert(row, opts))).catch(() => {});
+    }
   } catch {}
 }
 
@@ -1692,6 +1699,29 @@ app.post('/api/catalog/:host/review', ...adminWrite, validation.validateBody(val
     decision: reviewed.decision,
     app: appCatalog.publicCatalog().find((a) => a.destination === host) || null,
   });
+});
+
+// ---- Posture subscriptions (SIEM/SOAR delivery) -----------------------------
+app.get('/api/subscriptions', ...adminRead, (req, res) => {
+  res.json({ destinations: subscriptions.publicDestinations(), supportedTypes: require('./siem-formats').supportedTypes() });
+});
+
+app.get('/api/subscriptions/deliveries', ...adminRead, (req, res) => {
+  res.json({ deliveries: db.listDeliveries(boundedApiLimit(req.query.limit, 200)) });
+});
+
+// Send a synthetic test event to one destination (proves connectivity + auth).
+app.post('/api/subscriptions/:id/test', ...adminWrite, async (req, res) => {
+  const dest = subscriptions.findDestination(req.params.id);
+  if (!dest) return res.status(404).json({ error: 'unknown subscription' });
+  const testAlert = alerts.sanitizedAlert({
+    id: 'test_' + Date.now(), createdAt: new Date().toISOString(), status: 'subscription_test',
+    user: req.user.user, orgId: null, source: 'console', channel: 'test', destination: 'promptwall:test',
+    riskScore: 0, maxSeverity: 0, maxSeverityLabel: 'none', findings: [], categories: [], reasons: ['subscription connectivity test'],
+  }, { action: 'SUBSCRIPTION_TEST', force: true });
+  const result = await subscriptions.deliverTo(dest, testAlert, { force: true });
+  db.appendAudit({ action: 'SUBSCRIPTION_TESTED', actor: req.user.user, detail: `subscription ${dest.id} (${dest.type}): ${result.status}` });
+  res.json({ result: { destId: result.destId, status: result.status, attempts: result.attempts, httpStatus: result.httpStatus || null } });
 });
 
 // Regulation policy templates (list + one-click apply).

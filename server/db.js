@@ -114,6 +114,18 @@ sdb.exec(`
     data          TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_ai_apps_host ON ai_apps(canonicalHost);
+
+  CREATE TABLE IF NOT EXISTS deliveries (
+    seq          INTEGER PRIMARY KEY AUTOINCREMENT,
+    id           TEXT UNIQUE NOT NULL,
+    ts           TEXT NOT NULL,
+    destId       TEXT NOT NULL,
+    dedupeKey    TEXT NOT NULL,
+    status       TEXT NOT NULL,
+    data         TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_deliveries_dest ON deliveries(destId);
+  CREATE INDEX IF NOT EXISTS idx_deliveries_dedupe ON deliveries(destId, dedupeKey);
 `);
 
 const id = (p) => p + '_' + crypto.randomBytes(8).toString('hex');
@@ -505,6 +517,29 @@ const upsertAiApp = sdb.transaction((canonicalHost, patch, now) => {
   return record;
 });
 
+// ---- Delivery history (SIEM/SOAR subscriptions) ------------------------------
+const deliveryInsert = sdb.prepare('INSERT INTO deliveries (id, ts, destId, dedupeKey, status, data) VALUES (@id, @ts, @destId, @dedupeKey, @status, @data)');
+
+function recordDelivery(record) {
+  const row = { id: id('dlv'), ts: new Date().toISOString(), destId: record.destId, dedupeKey: record.dedupeKey || '', status: record.status || 'unknown', ...record };
+  deliveryInsert.run({ id: row.id, ts: row.ts, destId: row.destId, dedupeKey: row.dedupeKey, status: row.status, data: JSON.stringify(row) });
+  // Bounded history: keep the most recent 2000 rows.
+  sdb.prepare('DELETE FROM deliveries WHERE seq <= (SELECT MAX(seq) - 2000 FROM deliveries)').run();
+  return row;
+}
+
+function listDeliveries(limit = 200) {
+  const n = Math.max(1, Math.min(2000, Number(limit) || 200));
+  return sdb.prepare('SELECT data FROM deliveries ORDER BY seq DESC LIMIT ?').all(n).map((r) => JSON.parse(r.data));
+}
+
+function recentDeliverySuccess(destId, dedupeKey, sinceIso) {
+  const row = sdb.prepare('SELECT data FROM deliveries WHERE destId = ? AND dedupeKey = ? AND status = ? ORDER BY seq DESC LIMIT 1').get(destId, dedupeKey, 'delivered');
+  if (!row) return false;
+  const rec = JSON.parse(row.data);
+  return !sinceIso || rec.ts >= sinceIso;
+}
+
 module.exports = {
   createQuery, getQuery, listQueries, updateQuery,
   purgeRetainedSensitiveData,
@@ -512,5 +547,6 @@ module.exports = {
   getScimUser, getScimUserByUserName, listScimUsers, saveScimUser, deactivateScimUser,
   getScimGroup, getScimGroupByDisplayName, listScimGroups, saveScimGroup, deleteScimGroup,
   getAiApp, listAiApps, upsertAiApp,
+  recordDelivery, listDeliveries, recentDeliverySuccess,
   _canonical: canonical, _db: sdb, _dbPath: DB_PATH,
 };
