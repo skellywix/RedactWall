@@ -62,5 +62,49 @@ services:
     stop_grace_period: 30s
     restart: unless-stopped
 
+  # Optional AI Gateway: an OpenAI-compatible reverse proxy that gates every
+  # prompt and scans every response through the control plane above. Enable with
+  # `docker compose --profile gateway up`. Point applications/agents at it
+  # instead of the raw provider; it fails closed when the control plane is down.
+  gateway:
+    build: .
+    image: promptwall:local
+    init: true
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    command: ["node", "gateway/server.js"]
+    profiles: ["gateway"]
+    depends_on:
+      - promptwall
+    environment:
+      GATEWAY_PORT: 4100
+      GATEWAY_CONTROL_PLANE_URL: ${GATEWAY_CONTROL_PLANE_URL:-http://promptwall:4000}
+      INGEST_API_KEY: ${INGEST_API_KEY:-}
+      PROMPTWALL_INGEST_API_KEY: ${PROMPTWALL_INGEST_API_KEY:-}
+      GATEWAY_PROVIDER: ${GATEWAY_PROVIDER:-openai}
+      GATEWAY_UPSTREAM_URL: ${GATEWAY_UPSTREAM_URL:-}
+      GATEWAY_UPSTREAM_API_KEY: ${GATEWAY_UPSTREAM_API_KEY:-}
+      GATEWAY_REQUIRE_AGENT_TOKEN: ${GATEWAY_REQUIRE_AGENT_TOKEN:-true}
+      GATEWAY_RATE_LIMIT_PER_MIN: ${GATEWAY_RATE_LIMIT_PER_MIN:-120}
+      GATEWAY_AGENT_TOKENS_PATH: /data/gateway-agent-tokens.json
+      SENTINEL_DATA_DIR: /data
+    ports:
+      - "${GATEWAY_PORT:-4100}:4100"
+    volumes:
+      - promptwall-data:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:4100/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 4s
+      start_period: 5s
+      retries: 3
+    stop_grace_period: 15s
+    restart: unless-stopped
+
 volumes:
   promptwall-data:
