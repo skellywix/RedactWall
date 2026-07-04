@@ -15,10 +15,45 @@
  *   GET  /healthz   GET /readyz   GET /metrics
  */
 const express = require('express');
+const detect = require('../detection-engine/detect');
 const { config } = require('./config');
 const { makeClient } = require('./client');
 const { getAdapter } = require('./adapters');
 const tokens = require('./tokens');
+
+// Role-faithful local redaction: tokenize EVERY message/content (system,
+// assistant, user) with a shared value->token map so no raw PII in any role
+// reaches the upstream model, and the response can be rehydrated locally. This
+// replaces relying on the control plane's single joined tokenized string, which
+// dropped non-user roles.
+function redactBodyLocally(body) {
+  const byValue = new Map();
+  const map = {};
+  const counters = {};
+  function tokenFor(type, value) {
+    if (byValue.has(value)) return byValue.get(value);
+    const n = (counters[type] = (counters[type] || 0) + 1);
+    const t = '[[' + type + '_' + n + ']]';
+    byValue.set(value, t); map[t] = value;
+    return t;
+  }
+  function tok(text) {
+    if (typeof text !== 'string' || !text) return text;
+    const findings = detect.analyze(text).findings;
+    if (!findings.length) return text;
+    let out = text;
+    for (const f of findings.slice().sort((a, b) => b.start - a.start)) {
+      out = out.slice(0, f.start) + tokenFor(f.type, f.value) + out.slice(f.end);
+    }
+    return out;
+  }
+  const out = { ...body };
+  if (Array.isArray(body.messages)) {
+    out.messages = body.messages.map((m) => (m && typeof m.content === 'string' ? { ...m, content: tok(m.content) } : m));
+  } else if (typeof body.prompt === 'string') { out.prompt = tok(body.prompt); }
+  else if (typeof body.input === 'string') { out.input = tok(body.input); }
+  return { body: out, map, tokenCount: Object.keys(map).length };
+}
 
 const BLOCK_STATUSES = new Set([
   'control_plane_unavailable', 'destination_blocked', 'injection_blocked',
@@ -74,7 +109,7 @@ function createGateway(overrides = {}) {
     const promptText = adapter.requestText(body);
 
     // 1. Gate the prompt (fail-closed).
-    let redactId = null;
+    let redactMap = null;
     let outboundBody = body;
     if (promptText && promptText.trim()) {
       const verdict = await client.gate({
@@ -87,9 +122,11 @@ function createGateway(overrides = {}) {
         metrics.blocked += 1;
         return res.status(403).json(openAiError('Prompt blocked by PromptWall policy', 'blocked_by_promptwall', verdict.reasons));
       }
-      if (verdict.decision === 'redact' && verdict.tokenizedPrompt) {
-        outboundBody = adapter.applyRedactedRequest(body, verdict.tokenizedPrompt);
-        redactId = verdict.id;
+      if (verdict.decision === 'redact') {
+        // Tokenize every role locally so no raw PII in any message reaches upstream.
+        const redacted = redactBodyLocally(body);
+        outboundBody = redacted.body;
+        redactMap = redacted.tokenCount ? redacted.map : null;
         metrics.redacted += 1;
       } else {
         metrics.allowed += 1;
@@ -124,10 +161,11 @@ function createGateway(overrides = {}) {
       }
     }
 
-    // 4. If the request was tokenized, rehydrate the (scanned) response locally.
-    if (redactId) {
-      const rehy = await client.rehydrate(redactId, respText);
-      if (rehy && rehy.rehydrated) outJson = adapter.applyResponseText(outJson, rehy.text);
+    // 4. If the request was tokenized, rehydrate the (scanned) response locally —
+    // the token map never left the gateway.
+    if (redactMap) {
+      const rehydrated = detect.detokenize(respText, redactMap);
+      if (rehydrated !== respText) outJson = adapter.applyResponseText(outJson, rehydrated);
     }
 
     if (wantsStream) return streamJson(res, outJson, kind);

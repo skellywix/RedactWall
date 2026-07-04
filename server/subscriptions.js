@@ -62,11 +62,10 @@ function destinations() {
 }
 
 function matches(dest, alert) {
-  if ((alert.riskScore || 0) < dest.minRisk && (alert.maxSeverity || 0) < dest.minSeverity) {
-    // Threshold gate: allow if EITHER risk or severity clears its floor. When
-    // both floors are 0 this always passes.
-    if (dest.minRisk > 0 || dest.minSeverity > 0) return false;
-  }
+  // Each threshold is an independent floor: a set floor must be cleared; an
+  // unset (0) floor is no constraint. (AND-ing them made a lone floor a no-op.)
+  if (dest.minRisk > 0 && (alert.riskScore || 0) < dest.minRisk) return false;
+  if (dest.minSeverity > 0 && (alert.maxSeverity || 0) < dest.minSeverity) return false;
   if (dest.eventTypes && dest.eventTypes.length) {
     const t = alert.action || alert.status;
     if (!dest.eventTypes.includes(t)) return false;

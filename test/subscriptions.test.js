@@ -87,6 +87,16 @@ test('dispatch fans out only to destinations whose filters match', async () => {
   assert.ok(!hit.some((u) => u.includes('low.example.com')), 'event type BLOCKED does not match eventTypes [ALLOWED]');
 });
 
+test('a lone minRisk floor filters on its own (not a no-op)', async () => {
+  writeSubs([{ id: 'r50', name: 'R50', type: 'webhook', url: 'https://r50.example.com', minRisk: 50 }]);
+  const hit = [];
+  const fakeFetch = async (url) => { hit.push(url); return { ok: true, status: 200 }; };
+  await subscriptions.dispatch(alert({ riskScore: 20, maxSeverity: 0, action: 'FLAGGED' }), { fetch: fakeFetch, sleep: async () => {}, force: true });
+  assert.strictEqual(hit.length, 0, 'a risk-20 event is below the risk-50 floor and must not deliver');
+  await subscriptions.dispatch(alert({ riskScore: 90, maxSeverity: 0, action: 'BLOCKED' }), { fetch: fakeFetch, sleep: async () => {}, force: true });
+  assert.strictEqual(hit.length, 1, 'a risk-90 event clears the floor and delivers');
+});
+
 test('non-HTTPS destinations are rejected at load', () => {
   writeSubs([{ id: 'insecure', type: 'webhook', url: 'http://plaintext.example.com' }]);
   assert.strictEqual(subscriptions.destinations().length, 0);

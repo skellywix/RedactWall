@@ -51,6 +51,15 @@ test('manual entry can pre-sanction an internal app', () => {
   assert.strictEqual(app.appName, 'Internal LLM');
 });
 
+test('annotating a never-sighted host creates the catalog entry (review is not dropped)', () => {
+  assert.strictEqual(catalog.publicCatalog().some((a) => a.destination === 'never-seen.ai'), false);
+  const rec = catalog.annotate('never-seen.ai', { sanctionedStatus: 'blocked', owner: 'sec@cu.org' });
+  assert.ok(rec, 'a record is created for the reviewed host');
+  const app = catalog.publicCatalog().find((a) => a.destination === 'never-seen.ai');
+  assert.strictEqual(app.sanctionedStatus, 'blocked');
+  assert.strictEqual(app.owner, 'sec@cu.org');
+});
+
 test('annotate sets owner/notes/status without duplicating the entry', () => {
   const before = catalog.publicCatalog().length;
   catalog.annotate('poe.com', { owner: 'security@cu.org', notes: 'personal-tier risk', sanctionedStatus: 'unsanctioned' });

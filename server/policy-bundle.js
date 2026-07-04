@@ -73,7 +73,8 @@ function verifyBundle(bundle, publicKeyPemStr, { now = new Date().toISOString() 
   if (!bundle.signature) return { ok: false, reason: 'no_signature' };
   let pub;
   try { pub = crypto.createPublicKey(publicKeyPemStr); } catch (e) { return { ok: false, reason: 'bad_public_key' }; }
-  const input = Buffer.from(signingInput(bundle));
+  let input;
+  try { input = Buffer.from(signingInput(bundle)); } catch (e) { return { ok: false, reason: 'malformed_bundle' }; }
   let valid = false;
   try { valid = crypto.verify(null, input, pub, Buffer.from(bundle.signature, 'base64')); } catch (e) { valid = false; }
   if (!valid) return { ok: false, reason: 'bad_signature' };

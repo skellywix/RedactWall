@@ -820,7 +820,10 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
     return res.json({ id: row.id, decision: 'block', status: 'injection_blocked' });
   }
 
-  recordAiSighting(destination, source, 'gated');
+  // One discovery sighting per gate request. Shadow-AI visits are recorded in
+  // their own branch below with the 'shadow' outcome, so skip the 'gated' record
+  // for them to avoid double-counting a single user action.
+  if (clientOutcome !== 'shadow_ai') recordAiSighting(destination, source, 'gated');
 
   // Shadow-AI discovery: a visit to an AI tool policy does not govern. Recorded
   // as an informational event so the examiner sees unmonitored paths, not a leak.

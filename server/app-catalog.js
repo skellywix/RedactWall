@@ -109,16 +109,19 @@ function importCsv(text, { source = 'csv_import', max = 5000 } = {}) {
   return { imported, skipped, total: lines.length };
 }
 
-// Set catalog metadata (owner/notes/status) without touching the policy lists.
+// Set catalog metadata (owner/notes/status). Upserts a seeded record when the
+// host was never sighted, so a review decision is always reflected in the
+// catalog (keeping catalog and policy consistent, not silently dropped).
 function annotate(host, { owner, notes, sanctionedStatus } = {}) {
   const h = normalizeHost(host);
+  if (!h) return null;
   const existing = db.getAiApp(h);
-  if (!existing) return null;
   return db.upsertAiApp(h, {
+    ...(existing ? {} : { ...seededRecord(h), appName: h, sanctionedStatus: 'under_review', eventCount: 0, sources: {} }),
     ...(owner !== undefined ? { owner: String(owner).slice(0, 200) } : {}),
     ...(notes !== undefined ? { notes: String(notes).slice(0, 2000) } : {}),
     ...(sanctionedStatus && STATUS.includes(sanctionedStatus) ? { sanctionedStatus } : {}),
-  }, existing.lastSeen || nowIso());
+  }, (existing && existing.lastSeen) || nowIso());
 }
 
 // Sensor-safe public view of the whole catalog.

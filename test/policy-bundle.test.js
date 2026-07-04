@@ -53,3 +53,12 @@ test('a version mismatch is rejected', () => {
   const bundle = pb.buildBundle(POLICY);
   assert.strictEqual(pb.verifyBundle({ ...bundle, version: 99 }, pb.publicKeyPem()).reason, 'version_mismatch');
 });
+
+test('a malformed bundle returns {ok:false} and never throws (fail closed)', () => {
+  const bundle = pb.buildBundle(POLICY);
+  for (const bad of [{ ...bundle, policy: undefined }, { version: pb.BUNDLE_VERSION, signature: 'x' }, {}, null, 'nope']) {
+    let result;
+    assert.doesNotThrow(() => { result = pb.verifyBundle(bad, pb.publicKeyPem()); });
+    assert.strictEqual(result.ok, false);
+  }
+});
