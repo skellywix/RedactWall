@@ -115,7 +115,7 @@ function loadContent(opts = {}) {
     clearTimeout() {},
     Date,
   };
-  vm.runInNewContext(instrumented, context);
+  vm.runInNewContext(instrumented, context, { filename: path.join(extensionDir, 'content.js') });
   return {
     T: windowObj.__test,
     sent,
