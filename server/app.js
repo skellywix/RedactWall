@@ -1207,6 +1207,15 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
   else if (mode === 'justify') status = 'pending_justification';
   else status = 'pending';
 
+  // alwaysBlock invariant: when the prompt still contains a raw hard-stop value
+  // (serverAnalysis found it — so this is NOT a genuine client pre-redaction),
+  // a sensor-declared outcome can never clear it as sent/justified/warned. Hold
+  // it for Security Admin approval so no raw regulated value is recorded as
+  // cleared or issued a safe-to-send receipt. 'redacted' is exempt because the
+  // server re-tokenizes it below (real values never leave); 'blocked_by_user'
+  // already withholds.
+  if (hardStop && status !== 'redacted' && status !== 'blocked_by_user') status = 'pending';
+
   // Reversible tokenization: replace each detected value with a stable typed
   // placeholder and seal the token->value map (the "vault") at rest. The caller
   // sends `tokenizedPrompt` to the AI; POST /api/v1/rehydrate restores the real

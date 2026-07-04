@@ -149,7 +149,11 @@ test('gate issues verifiable receipts on allow, warn-sent, and redact paths only
   assert.strictEqual(held.status, 'pending');
   assert.strictEqual(held.receipt, undefined, 'held prompts must not get a safe-to-send receipt');
 
-  const warnedPrompt = 'Member SSN 524-71-3011 sent after an explicit warning.';
+  // warn-sent is a legitimate outcome only for sensitive content that is NOT a
+  // hard-stop entity (a raw alwaysBlock value can never be cleared to send — see
+  // test/alwaysblock-invariant.test.js). Use non-hard-stop PII so the warn-sent
+  // receipt path is exercised without asserting the fixed bypass.
+  const warnedPrompt = 'Employee home phone 555-234-5678 and personal email jane.doe@example.com sent after a warning.';
   const warned = await gate(port, {
     prompt: warnedPrompt,
     user: 'receipt-warn@example.test',

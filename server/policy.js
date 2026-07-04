@@ -724,8 +724,13 @@ function citedReason(label, type) {
 function evaluate(analysis, policy = loadPolicy(), context = {}, options = {}) {
   const effective = effectivePolicyForContext(policy, analysis, context, options);
   const reasons = [];
-  const findings = (analysis.findings || []).filter((f) => !(effective.ignore || []).includes(f.type));
-  const categories = (analysis.categories || []).filter((c) => !(effective.ignore || []).includes(c && (c.category || c)));
+  const ignore = effective.ignore || [];
+  const alwaysBlock = effective.alwaysBlock || [];
+  // Hard-stop (alwaysBlock) types can never be suppressed by the ignore list:
+  // an ignored finding is dropped for scoring, but an ignored hard-stop entity
+  // must still force a block, or raw regulated PII could be cleared to send.
+  const findings = (analysis.findings || []).filter((f) => alwaysBlock.includes(f.type) || !ignore.includes(f.type));
+  const categories = (analysis.categories || []).filter((c) => !ignore.includes(c && (c.category || c)));
 
   if (findings.length === 0 && categories.length === 0) {
     return { decision: 'allow', reasons: ['Nothing sensitive detected'], policy: effective, policyScopeIds: effective.appliedPolicyScopes || [] };
