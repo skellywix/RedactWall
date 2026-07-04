@@ -100,3 +100,20 @@ test('security_admin retains every capability', async () => withServer(async (po
   assert.strictEqual((await get(port, '/api/update/status', 'admin')).status, 200);
   assert.strictEqual((await get(port, '/api/subscriptions', 'admin')).status, 200);
 }));
+
+test('deploy downloads serve audited sensor packages to operators, not approvers', async () => withServer(async (port) => {
+  const list = await get(port, '/api/deploy/artifacts', 'operator');
+  assert.strictEqual(list.status, 200, 'artifacts list: ' + (list.status === 200 ? 'ok' : await list.text()));
+  const { artifacts } = await list.json();
+  assert.ok(artifacts.some((a) => a.id === 'extension-chrome'));
+  assert.ok(artifacts.some((a) => a.id === 'endpoint-agent'));
+  assert.ok(artifacts.some((a) => a.id === 'mcp-guard'));
+
+  const download = await get(port, '/api/deploy/download/mcp-guard', 'operator');
+  assert.strictEqual(download.status, 200);
+  const body = Buffer.from(await download.arrayBuffer());
+  assert.strictEqual(body.slice(0, 2).toString(), 'PK', 'download is a real zip');
+
+  assert.strictEqual((await get(port, '/api/deploy/download/extension-chrome', 'approver')).status, 403);
+  assert.strictEqual((await get(port, '/api/deploy/download/nope', 'admin')).status, 404);
+}));

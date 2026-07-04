@@ -2232,6 +2232,10 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
         Configuration
       </button>
       <div class="rail-group-label" aria-hidden="true">System</div>
+      <button class="tab" data-tab="deploy" type="button">
+        <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M12 4v10m0 0 4-4m-4 4-4-4M5 19h14" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        Deploy
+      </button>
       <button class="tab" data-tab="integrations" type="button">
         <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M7 8a3 3 0 0 1 3-3h1v6h-1a3 3 0 0 1-3-3ZM17 16a3 3 0 0 1-3 3h-1v-6h1a3 3 0 0 1 3 3ZM11 8h6M7 16h6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
         Integrations
@@ -2245,8 +2249,8 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
         Updates
       </button>
     </nav>
-    <div class="rail-section">Monitoring</div>
     <div class="rail-status">
+      <div class="rail-group-label" aria-hidden="true">Monitoring</div>
       <div class="status-line">
         <span>Hash chain</span>
         <button class="status-chip tone-secure" type="button" data-tooltip="Tamper-evident audit chain" data-status-detail="SECURE: append-only audit chain is enabled for admin and policy activity.">
@@ -2302,6 +2306,7 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
       <button class="tab" data-tab="catalog" type="button">App Catalog</button>
       <button class="tab" data-tab="compliance" type="button">Compliance</button>
       <button class="tab" data-tab="integrations" type="button">Integrations</button>
+      <button class="tab" data-tab="deploy" type="button">Deploy</button>
       <button class="tab" data-tab="identity" type="button">Identity</button>
       <button class="tab" data-tab="lineage" type="button">Lineage</button>
       <button class="tab" data-tab="audit" type="button">Audit Log</button>
@@ -3111,6 +3116,21 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
           <div class="policy-box" id="policyBox"></div>
         </div>
       </section>
+      <section id="tab-deploy" class="console-frame hidden" aria-label="Deploy">
+        <div class="console-frame-header">
+          <div class="console-frame-title">
+            <div>
+              <h2>Deploy</h2>
+              <p>Download signed sensor packages for rollout: browser extension, endpoint agent, and MCP guard.</p>
+            </div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><div><h2>Sensor packages</h2><span>Built on demand from this control plane's exact version; every download is audited.</span></div></div>
+          <div class="panel-body"><div id="deployRows" class="queue-list"></div></div>
+        </div>
+      </section>
+
 
       <section id="tab-updates" class="hidden console-frame" aria-label="Updates">
         <div class="console-frame-header">

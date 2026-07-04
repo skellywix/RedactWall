@@ -16,7 +16,9 @@ const express = require('express');
 const cookieParser = require('cookie-parser');
 const helmet = require('helmet');
 const crypto = require('crypto');
+const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
 const detector = require('./detector');
 const adapters = require('../detection-engine/adapters');
@@ -2210,6 +2212,50 @@ app.post('/api/subscriptions/:id/test', ...operatorWrite, async (req, res) => {
   const result = await subscriptions.deliverTo(dest, testAlert, { force: true });
   db.appendAudit({ action: 'SUBSCRIPTION_TESTED', actor: req.user.user, detail: `subscription ${dest.id} (${dest.type}): ${result.status}` });
   res.json({ result: { destId: result.destId, status: result.status, attempts: result.attempts, httpStatus: result.httpStatus || null } });
+});
+
+// ---- Sensor rollout downloads (Deploy tab) -----------------------------------
+const DEPLOY_ARTIFACTS = Object.freeze({
+  'extension-chrome': { label: 'Browser extension (Chrome/Brave MV3)', kind: 'extension', target: 'chrome' },
+  'extension-edge': { label: 'Browser extension (Microsoft Edge)', kind: 'extension', target: 'edge' },
+  'extension-firefox': { label: 'Browser extension (Firefox)', kind: 'extension', target: 'firefox' },
+  'endpoint-agent': { label: 'Endpoint agent (desktop file/clipboard sensor)', kind: 'endpoint' },
+  'mcp-guard': { label: 'MCP guard (agent/connector sensor)', kind: 'mcp' },
+});
+
+function buildDeployArtifact(id) {
+  const spec = DEPLOY_ARTIFACTS[id];
+  if (!spec) return null;
+  const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'promptwall-deploy-'));
+  if (spec.kind === 'extension') {
+    return require('../scripts/package-extension').packageExtension({ outDir, target: spec.target });
+  }
+  if (spec.kind === 'endpoint') {
+    return require('../scripts/package-endpoint-agent').packageEndpointAgent({ outDir });
+  }
+  return require('../scripts/package-mcp-guard').packageMcpGuard({ outDir });
+}
+
+app.get('/api/deploy/artifacts', ...operatorRead, (req, res) => {
+  res.json({
+    artifacts: Object.entries(DEPLOY_ARTIFACTS).map(([id, spec]) => ({ id, label: spec.label, kind: spec.kind })),
+    version: require('../package.json').version,
+  });
+});
+
+app.get('/api/deploy/download/:artifact', ...operatorRead, (req, res) => {
+  const id = String(req.params.artifact || '');
+  if (!DEPLOY_ARTIFACTS[id]) return res.status(404).json({ error: 'unknown artifact' });
+  let built;
+  try {
+    built = buildDeployArtifact(id);
+  } catch (err) {
+    return res.status(500).json({ error: 'packaging failed' });
+  }
+  db.appendAudit({ action: 'DEPLOY_ARTIFACT_DOWNLOADED', actor: req.user.user, detail: `${id} v${built.packageManifest.version || 'unknown'} sha256:${(built.packageManifest.sha256 || '').slice(0, 16)}` });
+  res.download(built.zipPath, path.basename(built.zipPath), () => {
+    fs.rm(path.dirname(built.zipPath), { recursive: true, force: true }, () => {});
+  });
 });
 
 // Regulation policy templates (list + one-click apply).

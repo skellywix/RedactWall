@@ -4043,6 +4043,27 @@ function wireUpdateButtons() {
   if (restart) restart.onclick = restartUpdatedService;
 }
 
+
+async function loadDeploy() {
+  const rows = $('#deployRows');
+  if (!rows) return;
+  try {
+    const res = await fetch('/api/deploy/artifacts');
+    if (!res.ok) throw new Error('http_' + res.status);
+    const data = await res.json();
+    rows.innerHTML = data.artifacts.map((item) => `
+      <div class="q" style="cursor:default">
+        <div class="queue-mainline">
+          <strong>${escapeHtml(item.label)}</strong>
+          <span>v${escapeHtml(data.version)} - built on demand, SHA-256 in the bundled manifest</span>
+          <a class="btn" href="/api/deploy/download/${escapeHtml(item.id)}" download>Download</a>
+        </div>
+      </div>`).join('');
+  } catch {
+    rows.innerHTML = '<div class="empty">Deploy packages need the operator or security admin role.</div>';
+  }
+}
+
 function knownTabNames() {
   return $$('.tab[data-tab]')
     .map((tab) => tab.dataset.tab)
@@ -4097,6 +4118,7 @@ function activateTab(name, options = {}) {
   if (targetName === 'integrations') loadIntegrations();
   if (targetName === 'identity') loadIdentitySetup();
   if (targetName === 'lineage') loadLineage();
+  if (targetName === 'deploy') loadDeploy();
   if (targetName === 'updates') loadUpdates();
 }
 
