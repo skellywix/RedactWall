@@ -57,17 +57,27 @@ async function runFireDrill({ baseUrl, ingestKey, fetchImpl = fetch, token = mak
   return assertFireDrillResponse(body, token);
 }
 
-async function main() {
-  const baseUrl = process.argv[2] || process.env.SENTINEL_URL || 'http://localhost:4000';
-  const result = await runFireDrill({ baseUrl });
-  console.log(`FIRE_DRILL_OK ${result.id || ''} decision=${result.decision} status=${result.status || 'unknown'} risk=${result.riskScore}`);
+async function main(argv = process.argv.slice(2), deps = {}) {
+  const io = deps.console || console;
+  const run = deps.runFireDrill || runFireDrill;
+  const baseUrl = argv[0] || process.env.SENTINEL_URL || 'http://localhost:4000';
+  const result = await run({ baseUrl });
+  io.log(`FIRE_DRILL_OK ${result.id || ''} decision=${result.decision} status=${result.status || 'unknown'} risk=${result.riskScore}`);
+  return result;
 }
 
-if (require.main === module) {
-  main().catch((err) => {
-    console.error(err.message || err);
-    process.exitCode = 1;
-  });
+async function cli(argv = process.argv.slice(2), deps = {}) {
+  const io = deps.console || console;
+  const setExitCode = deps.setExitCode || ((code) => { process.exitCode = code; });
+  try {
+    return await main(argv, deps);
+  } catch (err) {
+    io.error(err.message || err);
+    setExitCode(1);
+    return null;
+  }
 }
 
-module.exports = { makeCanaryToken, makePrompt, assertFireDrillResponse, runFireDrill };
+if (require.main === module) cli();
+
+module.exports = { makeCanaryToken, makePrompt, assertFireDrillResponse, runFireDrill, main, cli };

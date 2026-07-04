@@ -9,8 +9,12 @@ const path = require('node:path');
 const {
   buildHeartbeatBody,
   buildInstallReport,
+  defaultEndpointEnvPath,
   emitHeartbeat,
+  main,
   parseArgs,
+  printHuman,
+  readEndpointConfig,
 } = require('../scripts/check-endpoint-install');
 
 const root = path.join(__dirname, '..');
@@ -25,17 +29,23 @@ test('endpoint install check validates runtime wiring without exposing secrets',
   const dir = tempDir(t);
   const watchDir = path.join(dir, 'watch');
   const handoffDir = path.join(dir, 'handoff');
+  const lendingFlowDir = path.join(dir, 'lending-flow');
   fs.mkdirSync(watchDir, { recursive: true });
   fs.mkdirSync(handoffDir, { recursive: true });
+  fs.mkdirSync(lendingFlowDir, { recursive: true });
   const envPath = path.join(dir, 'endpoint-agent.env');
   const ingestKey = 'pilot-ingest-key-000000000000000000000000000002';
   const handoffSecret = 'native-handoff-secret-000000000000000002';
+  const profiles = JSON.stringify([
+    { id: 'lending', dir: lendingFlowDir, destination: 'Copilot Desktop' },
+  ]);
   fs.writeFileSync(envPath, [
     'PROMPTWALL_URL=https://promptwall.customer.example',
     `INGEST_API_KEY=${ingestKey}`,
     `ENDPOINT_AGENT_WATCH_DIR=${watchDir}`,
     `ENDPOINT_AGENT_HANDOFF_DIR=${handoffDir}`,
     `ENDPOINT_AGENT_HANDOFF_SECRET=${handoffSecret}`,
+    `ENDPOINT_AGENT_FILE_FLOW_PROFILES=${profiles}`,
     'SENTINEL_TENANT_ID=cu-acme',
   ].join('\n') + '\n');
 
@@ -53,8 +63,11 @@ test('endpoint install check validates runtime wiring without exposing secrets',
   assert.ok(report.checks.some((item) => item.id === 'endpoint_ocr_config' && item.ok && item.detail === 'disabled'));
   assert.ok(report.checks.some((item) => item.id === 'ai_tool_inventory_runtime'));
   assert.ok(report.checks.some((item) => item.id === 'ai_tool_inventory' && item.ok));
+  assert.ok(report.checks.some((item) => item.id === 'endpoint_file_flow_profiles' && item.ok && item.detail === 'configured:1'));
+  assert.ok(report.checks.some((item) => item.id === 'endpoint_file_flow_profile_lending' && item.ok));
   assert.ok(!JSON.stringify(report).includes(ingestKey));
   assert.ok(!JSON.stringify(report).includes(handoffSecret));
+  assert.ok(!JSON.stringify(report).includes(lendingFlowDir));
 
   const heartbeat = buildHeartbeatBody(report, {
     envPath,
@@ -85,6 +98,7 @@ test('endpoint install check validates runtime wiring without exposing secrets',
       const body = JSON.parse(opts.body);
       assert.strictEqual(body.source, 'endpoint_agent');
       assert.ok(body.checks.every((item) => item.ok));
+      assert.ok(!opts.body.includes(lendingFlowDir));
       return {
         ok: true,
         status: 200,
@@ -171,6 +185,101 @@ test('endpoint install check reports attention for unusable explicit OCR command
   assert.ok(!JSON.stringify(report).includes('pilot-ingest-key'));
 });
 
+test('endpoint install check reports missing file-flow profile directories without leaking paths', (t) => {
+  const dir = tempDir(t, 'ps-endpoint-check-file-flow-');
+  const watchDir = path.join(dir, 'watch');
+  const missingFlowDir = path.join(dir, 'member-524-71-9043-flow');
+  fs.mkdirSync(watchDir, { recursive: true });
+  const envPath = path.join(dir, 'endpoint-agent.env');
+  fs.writeFileSync(envPath, [
+    'PROMPTWALL_URL=https://promptwall.customer.example',
+    'INGEST_API_KEY=pilot-ingest-key-000000000000000000000000000005',
+    `ENDPOINT_AGENT_WATCH_DIR=${watchDir}`,
+    `ENDPOINT_AGENT_FILE_FLOW_PROFILES=${JSON.stringify([{ id: 'member-flow', dir: missingFlowDir, destination: 'Desktop AI' }])}`,
+  ].join('\n') + '\n');
+
+  const report = buildInstallReport({ envPath, repoRoot: root, env: {} });
+  assert.strictEqual(report.status, 'attention');
+  assert.ok(report.failedChecks.includes('endpoint_file_flow_profile_member_flow'));
+  assert.ok(report.checks.some((item) => item.id === 'endpoint_file_flow_profiles' && item.detail === 'configured:1'));
+  assert.ok(report.checks.some((item) => item.id === 'endpoint_file_flow_profile_member_flow' && !item.ok && item.detail === 'missing directory'));
+  assert.ok(!JSON.stringify(report).includes(missingFlowDir));
+  assert.ok(!JSON.stringify(report).includes('524-71-9043'));
+});
+
+test('endpoint install check accepts env aliases, default paths, and shell OCR commands', (t) => {
+  const dir = tempDir(t, 'ps-endpoint-check-aliases-');
+  const watchDir = path.join(dir, 'watch');
+  fs.mkdirSync(watchDir, { recursive: true });
+  const envPath = path.join(dir, 'endpoint-agent.env');
+  const aliasKey = 'alias-ingest-key-0000000000000000000000000001';
+  fs.writeFileSync(envPath, [
+    'PROMPTWALL_URL=https://promptwall.alias.example/path',
+    `PROMPTWALL_INGEST_API_KEY=${aliasKey}`,
+    `PROMPTWALL_ENDPOINT_AGENT_WATCH_DIR=${watchDir}`,
+    'PROMPTWALL_ENDPOINT_AGENT_OCR_COMMAND=tesseract',
+    'PROMPTWALL_TENANT_ID=cu-alias',
+  ].join('\n') + '\n');
+
+  const config = readEndpointConfig(envPath, {}).config;
+  assert.strictEqual(config.INGEST_API_KEY, aliasKey);
+  assert.strictEqual(defaultEndpointEnvPath({ LOCALAPPDATA: 'C:\\Temp' }, 'win32'), 'C:\\Temp\\PromptWall\\endpoint-agent.env');
+  assert.match(defaultEndpointEnvPath({ HOME: '/tmp/home' }, 'linux').replace(/\\/g, '/'), /\/tmp\/home\/.config\/promptwall\/endpoint-agent\.env$/);
+
+  const report = buildInstallReport({ envPath, repoRoot: root, env: {} });
+  assert.strictEqual(report.status, 'ok');
+  assert.ok(report.checks.some((item) => item.id === 'server_url' && item.detail === 'https://promptwall.alias.example'));
+  assert.ok(report.checks.some((item) => item.id === 'endpoint_ocr_config' && item.ok && item.detail === 'configured'));
+  assert.ok(!JSON.stringify(report).includes(aliasKey));
+
+  const invalidEnvPath = path.join(dir, 'invalid-endpoint-agent.env');
+  fs.writeFileSync(invalidEnvPath, [
+    'PROMPTWALL_URL=https://bad host%%%/prompt',
+    `PROMPTWALL_INGEST_API_KEY=${aliasKey}`,
+    `PROMPTWALL_ENDPOINT_AGENT_WATCH_DIR=${watchDir}`,
+  ].join('\n') + '\n');
+  const invalidUrlReport = buildInstallReport({
+    envPath: invalidEnvPath,
+    repoRoot: root,
+    env: {},
+  });
+  assert.ok(invalidUrlReport.checks.some((item) => item.id === 'server_url' && !item.ok && item.detail === 'missing or invalid'));
+});
+
+test('endpoint heartbeat and human output cover failure branches without leaking secrets', async () => {
+  const report = { status: 'ok', checks: [{ id: 'ingest_key', ok: true, detail: 'configured' }] };
+  await assert.rejects(() => emitHeartbeat(report, { config: { INGEST_API_KEY: 'key-0000000000000001' } }), /PROMPTWALL_URL/);
+  await assert.rejects(() => emitHeartbeat(report, { config: { PROMPTWALL_URL: 'https://promptwall.example' } }), /INGEST_API_KEY/);
+  const originalFetch = globalThis.fetch;
+  delete globalThis.fetch;
+  try {
+    await assert.rejects(() => emitHeartbeat(report, {
+      config: {
+        PROMPTWALL_URL: 'https://promptwall.example',
+        INGEST_API_KEY: 'key-0000000000000001',
+      },
+    }), /fetch is not available/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  await assert.rejects(() => emitHeartbeat(report, {
+    config: {
+      PROMPTWALL_URL: 'https://promptwall.example',
+      INGEST_API_KEY: 'key-0000000000000001',
+    },
+    fetchImpl: async () => ({
+      ok: false,
+      status: 503,
+      json: async () => ({ error: 'maintenance' }),
+    }),
+  }), /HTTP 503: maintenance/);
+
+  const logs = [];
+  printHuman({ ...report, heartbeat: { ok: false, detail: 'offline' } }, { log: (line) => logs.push(line) });
+  assert.match(logs.join('\n'), /PromptWall endpoint install: ok/);
+  assert.match(logs.join('\n'), /\[attention\] heartbeat - offline/);
+});
+
 test('endpoint install check args cover validation and heartbeat options', () => {
   const parsed = parseArgs([
     '--env', 'custom.env',
@@ -190,4 +299,52 @@ test('endpoint install check args cover validation and heartbeat options', () =>
   assert.strictEqual(parsed.user, 'tech@example.test');
   assert.strictEqual(parsed.orgId, 'cu-acme');
   assert.strictEqual(parsed.destination, 'install-check');
+  assert.strictEqual(parseArgs(['--help'], {}).help, true);
+  assert.throws(() => parseArgs(['--bad'], {}), /Unknown option: --bad/);
+});
+
+test('endpoint install check CLI main reports json, help, heartbeat errors, and parse errors', async () => {
+  const logs = [];
+  const errors = [];
+  const exitCodes = [];
+  const io = {
+    log: (line) => logs.push(String(line)),
+    error: (line) => errors.push(String(line)),
+  };
+  const okReport = { status: 'ok', checks: [{ id: 'server_url', ok: true, detail: 'ok' }] };
+  const report = await main(['--json', '--emit-heartbeat'], {
+    console: io,
+    env: {},
+    listProcessNames: async () => ['Cursor.exe'],
+    buildInstallReport: (opts) => {
+      assert.deepStrictEqual(opts.processNames, ['Cursor.exe']);
+      return { ...okReport };
+    },
+    emitHeartbeat: async () => ({ id: 'q_endpoint_cli' }),
+    setExitCode: (code) => exitCodes.push(code),
+  });
+  assert.strictEqual(report.heartbeat.detail, 'q_endpoint_cli');
+  assert.match(logs.join('\n'), /"heartbeat"/);
+  assert.deepStrictEqual(exitCodes, []);
+
+  logs.length = 0;
+  const attention = await main(['--emit-heartbeat'], {
+    console: io,
+    env: {},
+    listProcessNames: async () => [],
+    buildInstallReport: () => ({ ...okReport }),
+    emitHeartbeat: async () => { throw new Error('offline'); },
+    setExitCode: (code) => exitCodes.push(code),
+  });
+  assert.strictEqual(attention.status, 'attention');
+  assert.strictEqual(attention.heartbeat.ok, false);
+  assert.ok(exitCodes.includes(1));
+  assert.match(logs.join('\n'), /\[attention\] heartbeat - offline/);
+
+  logs.length = 0;
+  assert.strictEqual(await main(['--help'], { console: io, env: {}, setExitCode: (code) => exitCodes.push(code) }), null);
+  assert.match(logs.join('\n'), /Usage: node scripts\/check-endpoint-install\.js/);
+
+  assert.strictEqual(await main(['--bad'], { console: io, env: {}, setExitCode: (code) => exitCodes.push(code) }), null);
+  assert.ok(errors.some((line) => /Unknown option: --bad/.test(line)));
 });

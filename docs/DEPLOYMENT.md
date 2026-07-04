@@ -346,12 +346,15 @@ npm run package:mcp-guard
 
 The command writes a zip and adjacent SHA-256 manifest under `dist/mcp-guard/`.
 It includes the guard runtime, connector SDK, Microsoft 365 Graph file-content
-connector, shared detection engine, env loader, version metadata, and MCP guard
-install validation checker. It excludes the local direct-run demo and refuses
-synthetic prompt bodies or development ingest keys. Set `PROMPTWALL_URL` and
-`INGEST_API_KEY` in the host MCP runtime environment; the legacy `SENTINEL_URL`
-key remains accepted for existing configs. Do not bake secrets into the package.
-The guard does not contact the control plane without an explicit ingest key.
+connector, Google Drive connector, Slack connector, Microsoft Teams connector,
+Atlassian Jira/Confluence connector, database read-only connector, shared
+detection engine, env loader, version metadata, and MCP guard install
+validation checker. It excludes
+the local direct-run demo and refuses synthetic prompt bodies or development
+ingest keys. Set `PROMPTWALL_URL` and `INGEST_API_KEY` in the host MCP runtime
+environment; the legacy `SENTINEL_URL` key remains accepted for existing
+configs. Do not bake secrets into the package. The guard does not contact the
+control plane without an explicit ingest key.
 
 Validate the unpacked MCP guard runtime and optionally emit sanitized health
 evidence:
@@ -366,9 +369,11 @@ npm run mcp:check -- `
 
 The checker verifies the MCP env file or runtime environment, server URL,
 ingest-key presence, Node version, guard runtime, connector SDK, Microsoft 365
-connector, shared detection engine, env loader, and package manifest. It posts
-only check IDs, boolean status, and short details; it does not print or post
-ingest keys, prompt text, tool output, or document content.
+connector, Google Drive connector, Slack connector, Microsoft Teams connector,
+Atlassian Jira/Confluence connector, database read-only connector, shared
+detection engine, env loader, and package manifest. It posts only check IDs,
+boolean status, and short details; it does not print or post ingest keys,
+prompt text, tool output, DSNs, SQL text, document IDs, or document content.
 
 Future MCP content connectors must wrap every tool handler with
 `sanitizeToolResult()` or `wrapConnectorTool()` from `sensors/mcp-guard/sdk.js`
@@ -381,6 +386,60 @@ unsupported binary content by default. See `docs/MCP_MICROSOFT365_CONNECTOR.md`.
 When Microsoft 365 environment values are present, `npm run mcp:check` also
 adds sanitized connector health checks for token presence, tenant ID, and scope
 count without printing or posting the token.
+
+For the shipped Google Drive connector, provide a Google Drive access token
+through the host MCP runtime environment and prefer
+`https://www.googleapis.com/auth/drive.readonly` for delegated pilots. The
+connector uses Drive media downloads for blob files and text-oriented exports
+for Google Workspace documents, then redacts before returning MCP output. See
+`docs/MCP_GOOGLE_DRIVE_CONNECTOR.md`. When Google Drive environment values are
+present, `npm run mcp:check` adds sanitized token, optional tenant, and scope
+count health checks without printing or posting the token.
+
+For the shipped Slack connector, provide a Slack bot token through the host MCP
+runtime environment as `SLACK_BOT_TOKEN` or `SLACK_CONNECTOR_TOKEN`. Prefer the
+narrowest approved scopes for the pilot: `channels:history` for public channel
+history, `groups:history` for private channels, and `files:read` for private
+file reads. The connector defaults conversation fetches to 15 messages, rejects
+non-Slack private file URLs, rejects unsupported binary file content, and redacts
+before returning MCP output. See `docs/MCP_SLACK_CONNECTOR.md`. When Slack
+environment values are present, `npm run mcp:check` adds sanitized token,
+optional team or enterprise ID, and scope count health checks without printing
+or posting the token.
+
+For the shipped Microsoft Teams connector, provide a Graph access token through
+the host MCP runtime environment as `TEAMS_GRAPH_ACCESS_TOKEN`,
+`M365_GRAPH_ACCESS_TOKEN`, or `MICROSOFT_GRAPH_ACCESS_TOKEN`. Prefer
+resource-specific read scopes for the pilot, such as
+`ChannelMessage.Read.Group` and `ChatMessage.Read.Chat`, and use broader Graph
+read scopes only after customer approval. The connector reads channel or chat
+messages, converts HTML message bodies to plain text, caps Graph page size at
+50, and redacts before returning MCP output. See
+`docs/MCP_TEAMS_CONNECTOR.md`. When Teams environment values are present,
+`npm run mcp:check` adds sanitized token, optional tenant, and scope count
+health checks without printing or posting the token.
+
+For the shipped Atlassian connector, provide an Atlassian Cloud site URL and
+access token through the host MCP runtime environment as `ATLASSIAN_SITE_URL`
+plus `ATLASSIAN_ACCESS_TOKEN` or `ATLASSIAN_API_TOKEN`. Set
+`ATLASSIAN_EMAIL` when using API-token Basic auth. Prefer
+`read:jira-work` and `read:page:confluence` for pilots. The connector reads
+bounded Jira issue fields and Confluence page bodies, converts them to plain
+text, and redacts before returning MCP output. See
+`docs/MCP_ATLASSIAN_CONNECTOR.md`. When Atlassian environment values are
+present, `npm run mcp:check` adds sanitized token, tenant, and scope count
+health checks without printing or posting the token, issue key, or page id.
+
+For the shipped database read-only connector, provide a SQLite DSN through the
+host MCP runtime environment as `MCP_DATABASE_DSN` or `DATABASE_READONLY_DSN`.
+Set `MCP_DATABASE_LABEL` for bounded health evidence and
+`MCP_DATABASE_SCOPES` when a pilot wants a custom scope label. The connector
+opens SQLite with read-only options, accepts only single-statement `SELECT` or
+`WITH` queries, wraps results in an outer `LIMIT`, and redacts rows before
+returning MCP output. See `docs/MCP_DATABASE_READONLY_CONNECTOR.md`. When
+database environment values are present, `npm run mcp:check` adds sanitized DSN
+presence, label, and scope count checks without printing or posting the DSN,
+absolute file path, SQL text, row values, or schema output.
 
 ## Endpoint Agent On Windows
 
@@ -436,6 +495,23 @@ visibility show up in Coverage without sending local paths, process args, docume
 names, prompt text, or file content.
 The endpoint checker still prints unapproved tool checks as attention, but it
 does not fail install readiness when runtime and configuration checks pass.
+
+Optional named endpoint file-flow profiles:
+
+```powershell
+Add-Content "$env:LOCALAPPDATA\PromptWall\endpoint-agent.env" @'
+ENDPOINT_AGENT_FILE_FLOW_PROFILES=[{"id":"lending","dir":"C:\\PromptWall\\Flows\\Lending","destination":"Copilot Desktop"},{"id":"call_center","dir":"C:\\PromptWall\\Flows\\CallCenter","destination":"ChatGPT Desktop"}]
+'@
+```
+
+Profiles let a pilot watch multiple local app, drop, or staging folders and map
+each one to the AI destination that should appear in policy and evidence. The
+endpoint agent scans files locally through the same processor path as the main
+watch folder and native handoff spool. Install-health heartbeats report only
+profile ids, counts, and `configured directory` or `missing directory` status;
+they do not print or post watched paths, file names, file bytes, extracted text,
+or prompts. The Coverage tab summarizes the profile count as `Endpoint
+file-flow profiles` so operators can see which workstation flows are ready.
 
 The agent inspects supported watched files locally. Under redact policy, structured-only findings write a safe companion text file under `.promptwall-redacted` and report `redacted_available` evidence to the control plane; semantic or mixed findings remain held for Security Admin review. The managed browser extension also inspects text-readable file selections and drops locally before upload. It sends only synthetic file labels, masked detector evidence, categories, risk metadata, and client outcomes to `/api/v1/gate`; it does not send file bytes, raw filenames, `contentBase64`, or extracted text to the control plane. Unsupported, oversized, unreadable, or OCR-needed browser uploads fail closed as `file_blocked_unscanned` or `ocr_required`. Direct API uploads through `/api/v1/scan-file` still return `ocr_required` for images until an endpoint-local OCR path is in scope. Endpoint agents can optionally run a workstation-local OCR command and then send only sanitized detector evidence to the control plane.
 
@@ -624,6 +700,48 @@ Run the packaged launcher directly:
   -ClearOnBlock
 ```
 
+### Git Push Guard
+
+The endpoint package includes a local git pre-push guard for source-code and
+secret exfiltration checks. It inspects outbound diffs before `git push`
+transfers objects, blocks sensitive or unbounded pushes locally, and reports
+only masked detector evidence through `/api/v1/gate` as `action_blocked` with
+`channel: "git_push"`. It never sends raw source, patch text, repository paths,
+remote repository names, or remote URL paths to the control plane.
+
+Run a manual staged-diff check:
+
+```powershell
+$env:PROMPTWALL_ENV_PATH = "$env:LOCALAPPDATA\PromptWall\endpoint-agent.env"
+npm run desktop:git-push -- --staged --remote-url "https://github.com/customer/repo.git" --user "engineer@example.com" --json
+```
+
+Install it into one pilot repository:
+
+```powershell
+npm run desktop:git-push:install -- `
+  -RepoPath "C:\Work\lending-app" `
+  -ConfigPath "$env:LOCALAPPDATA\PromptWall\endpoint-agent.env" `
+  -AllowedHost github.com
+```
+
+The installer writes a managed `.git/hooks/pre-push` hook that loads only
+`PROMPTWALL_ENV_PATH` and invokes the collector with Git's remote name, remote
+URL, and pre-push ref updates. Existing branches are scanned as
+`remote_sha..local_sha`; new branches are scanned against Git's empty tree so
+first pushes do not bypass inspection. Use `-AllowedHost` or
+`PROMPTWALL_GIT_ALLOWED_HOSTS` for sanctioned corporate Git hosts: source-code
+only pushes to those hosts are allowed, but detected secrets, regulated member
+data, contracts, health data, or confidential business context still block. The
+hook does not contain the ingest key, native handoff secret, prompt text, source
+code, or repository remote path.
+
+Uninstall from that repository:
+
+```powershell
+.\scripts\uninstall-git-push-guard.ps1 -RepoPath "C:\Work\lending-app"
+```
+
 Check status:
 
 ```powershell
@@ -680,6 +798,7 @@ Set these through `.env`, container environment, or a deployment secret manager:
 | `ENDPOINT_AGENT_OCR_TIMEOUT_MS` / `PROMPTWALL_ENDPOINT_AGENT_OCR_TIMEOUT_MS` | Optional OCR command timeout, defaulting to 15000 ms. |
 | `ENDPOINT_AGENT_OCR_MAX_CHARS` / `PROMPTWALL_ENDPOINT_AGENT_OCR_MAX_CHARS` | Optional OCR output cap before detection, defaulting to 1000000 chars. |
 | `ENDPOINT_AGENT_APPROVED_AI_TOOLS` / `PROMPTWALL_ENDPOINT_AGENT_APPROVED_AI_TOOLS` | Optional comma-separated sanctioned endpoint AI tool ids. Detected local AI tools outside this list report endpoint AI-tool inventory attention using sanitized ids only. |
+| `ENDPOINT_AGENT_FILE_FLOW_PROFILES` / `PROMPTWALL_ENDPOINT_AGENT_FILE_FLOW_PROFILES` | Optional JSON array of named endpoint file-flow watcher profiles. Heartbeats report profile ids/status only. |
 
 PromptWall accepts product-prefixed aliases for new deployments while keeping
 the existing `SENTINEL_*`, `INGEST_API_KEY`, and endpoint-agent names valid for
@@ -719,6 +838,7 @@ set.
 | `ENDPOINT_AGENT_OCR_TIMEOUT_MS` | `PROMPTWALL_ENDPOINT_AGENT_OCR_TIMEOUT_MS` |
 | `ENDPOINT_AGENT_OCR_MAX_CHARS` | `PROMPTWALL_ENDPOINT_AGENT_OCR_MAX_CHARS` |
 | `ENDPOINT_AGENT_APPROVED_AI_TOOLS` | `PROMPTWALL_ENDPOINT_AGENT_APPROVED_AI_TOOLS` |
+| `ENDPOINT_AGENT_FILE_FLOW_PROFILES` | `PROMPTWALL_ENDPOINT_AGENT_FILE_FLOW_PROFILES` |
 
 Never bind `SENTINEL_DB_PATH` to a cloud-synced folder or network share. SQLite locking must be backed by local disk semantics, and production preflight blocks missing, cloud-synced, or UNC/network SQLite paths before startup readiness passes.
 
@@ -836,6 +956,20 @@ The systemd unit writes status to `/var/log/promptwall/evidence-pack.log`, uses
 `Persistent=true` for missed runs, and stores only scheduler metadata in
 `/etc/promptwall/evidence-pack.env`.
 
+For vendor-risk or procurement review, export the Security Trust Package. It is
+not a live examiner evidence pack; it is a sanitized control and dependency
+artifact with validation commands, security questionnaire answers, documentation
+pointers, and a CycloneDX-style SBOM inventory:
+
+```powershell
+npm run security:package:zip -- C:\PromptWall\security-packages
+```
+
+Security Admins can also download it from **Audit Log > Security Trust Package**
+or through `GET /api/security/package?format=zip`. The trust package excludes
+prompt bodies, secrets, token vaults, raw audit details, raw URLs, local file
+paths, and package-lock filesystem paths.
+
 ## SIEM Alerts
 
 Set `SIEM_WEBHOOK_URL` to send sanitized security events to a SOC or SIEM webhook. The URL must be `https://` and must not include URL username or password credentials. Payloads omit prompt bodies, raw retained prompts, token vaults, and raw finding values. Alert payloads include bounded workflow metadata so a SOC can see the assigned group and SLA without receiving sensitive content.
@@ -846,6 +980,43 @@ Sensor version posture gaps are also alertable. If browser extension, endpoint
 agent, or MCP guard events show mixed versions or missing version metadata,
 PromptWall sends a forced `SENSOR_VERSION_GAP` alert with bounded source,
 version, and platform metadata only.
+
+Set `SIEM_POSTURE_FEED_ENABLED=true` to emit automatic sanitized
+`POSTURE_FEED` snapshots when control posture changes. The feed reuses
+`SIEM_WEBHOOK_URL`, deduplicates unchanged snapshots, rate-limits attempts with
+`SIEM_POSTURE_MIN_INTERVAL_MS`, and omits prompt bodies, raw findings, token
+vaults, freeform gap text, and audit details. Use `POST /api/posture/notify`
+from an authenticated admin session for a manual one-shot `POSTURE_SNAPSHOT`.
+
+Security Admins can also generate an offline SOC integration package from the
+command center or with `GET /api/integrations/siem/package?profile=all`. Use
+`profile=splunk`, `profile=sentinel`, `profile=chronicle`, or
+`profile=servicenow` to narrow the package. Add `format=zip` to receive a
+marketplace-style ZIP with `README.md`, `manifest.json`, the privacy contract,
+profile-specific mappings, saved searches/detections, dashboard/workbook
+panels, sample payloads, incident templates, and setup checklists. Add
+`download=1` or `format=json` when an automation needs the raw JSON package.
+The package does not call the SIEM, read webhook tokens, or include secrets.
+It is aligned to Splunk HEC event metadata, Microsoft Sentinel DCR/custom table
+ingestion, Google Security Operations UDM mapping, and the ServiceNow Table
+API. Treat it as install content for the customer's SOC owner to import into
+their tool.
+
+The command center also supports posture segment lenses. `GET /api/posture`
+returns a sanitized `segments` matrix for organization ids, SCIM identity
+groups, workflow review queues, and sensor surfaces. Passing
+`segment=<segment-id>` filters posture objectives, inventory, graph, trends,
+and controls to that segment. Segment labels come only from deployment metadata;
+prompt bodies, raw findings, file paths, and audit details are excluded.
+
+| Setting | Purpose |
+| --- | --- |
+| `SIEM_WEBHOOK_URL` | HTTPS-only SOC/SIEM webhook for sanitized security and posture events. |
+| `SIEM_WEBHOOK_TOKEN` | Optional bearer token sent to the webhook. |
+| `SIEM_ALERT_MIN_RISK` | Minimum risk score for non-blocking security-event alerts. |
+| `SIEM_ALERT_MIN_SEVERITY` | Minimum detector severity for non-blocking security-event alerts. |
+| `SIEM_POSTURE_FEED_ENABLED` | Enables automatic posture snapshot subscription delivery when `true`. |
+| `SIEM_POSTURE_MIN_INTERVAL_MS` | Minimum interval between changed posture-feed attempts. Defaults to five minutes. |
 
 ## Approval Workflow Notifications
 
@@ -934,6 +1105,120 @@ and stop as `destination_blocked`. Security Admins can review a shadow-AI
 destination from the Coverage tab and must enter a short reason before moving it
 to govern, allow, or block policy state.
 
+Proxy, firewall, SSE, and browser-isolation products can import sanitized AI
+asset sightings with `POST /api/v1/discovery`. The endpoint uses the same
+`x-api-key` sensor boundary as other `/api/v1/*` routes and accepts only
+host-style destinations such as `perplexity.ai` or `*.example-ai.com`, plus
+bounded observation counts and timestamps. Do not send prompt text, full URLs,
+URL paths, file paths, request payloads, or log samples. The server rejects raw
+URL paths and unknown fields, stores `[AI discovery import] <host>` as the
+evidence label, and rolls the observation count into Coverage, Posture, and the
+AI Control Graph.
+
+Use the local importer when a customer hands you CSV or JSON exports from
+Zscaler, Netskope, Microsoft Purview, a firewall, or a secure web gateway. It
+normalizes common destination/user/count/timestamp columns, strips URL paths
+locally, aggregates repeated observations, and posts only sanitized host-level
+sightings:
+
+```powershell
+$env:INGEST_API_KEY = '<sensor-ingest-key>'
+npm run discovery:import -- --input .\proxy-ai-export.csv --vendor zscaler --dry-run
+npm run discovery:import -- --input .\proxy-ai-export.csv --vendor zscaler --sentinel-url http://localhost:4000
+```
+
+Prefer `--dry-run` first. Dry-run output lists only host names and counts, never
+raw URLs, prompt text, file paths, or request payloads.
+
+## AI LLM Gateway
+
+Use the enforced AI LLM Gateway for private apps and internal agents that can
+point at a local OpenAI-compatible, Anthropic Messages, or Gemini
+`generateContent` endpoint. The gateway requires a client token, keeps provider
+API keys on the gateway host, gates prompts through PromptWall before upstream
+traffic, scans model responses before release, and fails closed when required
+inspection is unavailable.
+
+For a single local worker:
+
+```powershell
+$env:PROMPTWALL_GATEWAY_TOKEN = '<client-token>'
+$env:PROMPTWALL_GATEWAY_UPSTREAM_API_KEY = '<provider-key>'
+node scripts/ai-llm-gateway.js --sentinel http://127.0.0.1:4000 --upstream https://api.openai.com --port 4182
+```
+
+For direct Amazon Bedrock Runtime, configure SigV4 signing on the gateway host
+and keep AWS credentials out of caller requests:
+
+```powershell
+$env:PROMPTWALL_GATEWAY_TOKEN = '<client-token>'
+$env:AWS_ACCESS_KEY_ID = '<bedrock-runtime-access-key>'
+$env:AWS_SECRET_ACCESS_KEY = '<bedrock-runtime-secret-key>'
+$env:AWS_SESSION_TOKEN = '<optional-session-token>'
+node scripts/ai-llm-gateway.js --sentinel http://127.0.0.1:4000 --upstream https://bedrock-runtime.us-east-1.amazonaws.com --upstream-auth-scheme aws-sigv4 --aws-region us-east-1 --allowed-models 'anthropic.claude-*,amazon.nova-*'
+```
+
+Supported Bedrock paths are `/model/{modelId}/converse`,
+`/model/{modelId}/converse-stream`, `/model/{modelId}/invoke`, and
+`/model/{modelId}/invoke-with-response-stream`. PromptWall inspects text
+content blocks and blocks Bedrock image/document/video/tool blocks by default
+because those bytes are not locally inspected by this gateway.
+
+For multiple gateway workers or hosts, start the shared limiter service first:
+
+```powershell
+$env:PROMPTWALL_RATE_LIMITER_TOKEN = '<shared-limiter-token>'
+$env:PROMPTWALL_RATE_LIMITER_DB = 'C:\PromptWall\data\gateway-shared-rate-limiter.db'
+npm run gateway:rate-limiter -- --host 127.0.0.1 --port 4183
+```
+
+Then point each gateway at it:
+
+```powershell
+$env:PROMPTWALL_GATEWAY_RATE_LIMIT_STORE = 'http'
+$env:PROMPTWALL_GATEWAY_RATE_LIMIT_URL = 'http://127.0.0.1:4183/check'
+$env:PROMPTWALL_GATEWAY_RATE_LIMIT_TOKEN = '<shared-limiter-token>'
+node scripts/ai-llm-gateway.js --sentinel http://127.0.0.1:4000 --upstream https://api.openai.com --port 4182
+```
+
+For a pilot HA gateway layer, run the dedicated compose stack:
+
+```powershell
+$env:PROMPTWALL_GATEWAY_TOKEN = '<client-token>'
+$env:PROMPTWALL_RATE_LIMITER_TOKEN = '<shared-limiter-token>'
+$env:INGEST_API_KEY = '<sensor-ingest-key>'
+$env:PROMPTWALL_GATEWAY_UPSTREAM_API_KEY = '<provider-key>'
+docker compose -f docker-compose.gateway-ha.yml up -d --build
+Invoke-RestMethod http://127.0.0.1:4182/readyz
+npm run gateway:ha:smoke
+```
+
+`docker-compose.gateway-ha.yml` publishes only the gateway load balancer,
+keeps the limiter private, persists hashed limiter counters in
+`gateway-limiter-data`, disables load-balancer access logs, and uses the same
+read-only/no-new-privileges container posture as the main PromptWall compose
+path.
+
+When a pilot needs active-active limiter replicas, use a managed Redis or Valkey
+backend and scale the private limiter service:
+
+```powershell
+$env:PROMPTWALL_RATE_LIMITER_STORE = 'redis'
+$env:PROMPTWALL_RATE_LIMITER_REDIS_URL = 'rediss://:<password>@redis.internal.example:6380/0'
+docker compose -f docker-compose.gateway-ha.yml up -d --build --scale ai-gateway-limiter=2
+Invoke-RestMethod http://127.0.0.1:4182/readyz
+```
+
+The Redis backend stores only prefixed SHA-256 limiter keys with TTLs. Do not
+put raw gateway client tokens, user ids, prompts, destinations, or model output
+in the Redis key prefix.
+
+The shared limiter receives only SHA-256 gateway-client limiter keys, requested
+limits, windows, and timestamps. It does not receive raw client tokens, prompts,
+users, destinations, or model output. Check `/healthz` and `/readyz` on both the
+gateway and limiter before routing traffic. See `docs/AI_LLM_GATEWAY.md` for
+provider-specific headers, model allowlists, and streaming behavior.
+
 Security Admins can also edit `blockedFileUploadDestinations` when a customer
 wants chat allowed but document upload forbidden for a destination. Browser
 uploads report `file_upload_blocked` through `/api/v1/gate` before local file
@@ -971,8 +1256,9 @@ PromptWall retains raw approval prompts and token vaults only for records that n
 
 Revealing a retained raw prompt requires an active Security Admin session, a CSRF token, and password confirmation. Approving a held prompt release requires an active Security Admin session or an optional approver session assigned to that item, plus CSRF and password confirmation. Successful reveals, failed reveal confirmations, approved releases, and failed approval confirmations are written to the audit log.
 
-Sensors or proxy bridges that poll `/api/v1/status/:id` for a held prompt must
-send the `x-release-token` header returned by the original gate response.
+Sensors or proxy bridges that poll `/api/v1/status/:id` for a held prompt, or
+call `/api/v1/rehydrate` for a tokenized response, must send the
+`x-release-token` header returned by the original gate or file-scan response.
 PromptWall stores only the token hash, rejects query-string release tokens,
 and the reference Squid/ICAP bridge forwards the header automatically through
 `awaitRelease`.

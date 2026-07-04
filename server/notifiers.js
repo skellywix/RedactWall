@@ -39,17 +39,13 @@ function csv(value, limit = 20) {
 }
 
 function jiraIssueUrl(baseUrl) {
-  try {
-    const normalized = outboundHttpsUrl(baseUrl);
-    if (!normalized) return '';
-    const url = new URL(normalized);
-    url.pathname = url.pathname.replace(/\/+$/, '') + '/rest/api/3/issue';
-    url.search = '';
-    url.hash = '';
-    return url.toString();
-  } catch {
-    return '';
-  }
+  const normalized = outboundHttpsUrl(baseUrl);
+  if (!normalized) return '';
+  const url = new URL(normalized);
+  url.pathname = url.pathname.replace(/\/+$/, '') + '/rest/api/3/issue';
+  url.search = '';
+  url.hash = '';
+  return url.toString();
 }
 
 function linearApiUrl(value) {

@@ -127,16 +127,33 @@ function report(r) {
   return L.join('\n');
 }
 
-if (require.main === module) {
-  const r = evaluate();
-  if (process.argv.includes('--json')) {
-    console.log(JSON.stringify({ semantic: r.semantic, structured: r.structured, microSem: r.microSem, microStruct: r.microStruct, benignFPs: r.benignFPs.length, baitFPs: r.baitFPs.length }, null, 2));
-  } else {
-    console.log(report(r));
-    const f = failures(r);
-    console.log('\n' + (f.length ? 'FLOORS UNMET:\n  - ' + f.join('\n  - ') : 'All floors met.'));
-  }
-  if (process.argv.includes('--ci') && failures(r).length) process.exit(1);
+function summaryJson(r) {
+  return {
+    semantic: r.semantic,
+    structured: r.structured,
+    microSem: r.microSem,
+    microStruct: r.microStruct,
+    benignFPs: r.benignFPs.length,
+    baitFPs: r.baitFPs.length,
+  };
 }
 
-module.exports = { evaluate, failures, report, FLOORS, SEM_CATS };
+function main(argv = process.argv.slice(2), deps = {}) {
+  const io = deps.console || console;
+  const setExitCode = deps.setExitCode || ((code) => { process.exitCode = code; });
+  const runEvaluate = deps.evaluate || evaluate;
+  const r = runEvaluate();
+  const f = failures(r);
+  if (argv.includes('--json')) {
+    io.log(JSON.stringify(summaryJson(r), null, 2));
+  } else {
+    io.log(report(r));
+    io.log('\n' + (f.length ? 'FLOORS UNMET:\n  - ' + f.join('\n  - ') : 'All floors met.'));
+  }
+  if (argv.includes('--ci') && f.length) setExitCode(1);
+  return { result: r, failures: f };
+}
+
+if (require.main === module) main();
+
+module.exports = { evaluate, failures, main, report, summaryJson, FLOORS, SEM_CATS };

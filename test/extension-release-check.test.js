@@ -14,6 +14,7 @@ const {
   edgeExtensionSettingsPolicy,
   extensionSettingsPolicy,
   firefoxExtensionSettingsPolicy,
+  main,
   parseArgs,
   validateExtensionId,
 } = require('../scripts/check-extension-release');
@@ -22,6 +23,42 @@ function tempDir(t, prefix = 'ps-extension-release-') {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   return dir;
+}
+
+function captureConsole() {
+  const lines = [];
+  return {
+    lines,
+    log(message) { lines.push(['log', message]); },
+    error(message) { lines.push(['error', message]); },
+  };
+}
+
+function releaseRootFixture(t) {
+  const sourceRoot = path.join(__dirname, '..');
+  const root = tempDir(t, 'ps-extension-release-root-');
+  fs.mkdirSync(path.join(root, 'sensors'), { recursive: true });
+  fs.mkdirSync(path.join(root, 'docs', 'examples'), { recursive: true });
+  fs.copyFileSync(path.join(sourceRoot, 'package.json'), path.join(root, 'package.json'));
+  fs.cpSync(path.join(sourceRoot, 'detection-engine'), path.join(root, 'detection-engine'), { recursive: true });
+  fs.cpSync(
+    path.join(sourceRoot, 'sensors', 'browser-extension'),
+    path.join(root, 'sensors', 'browser-extension'),
+    { recursive: true },
+  );
+  for (const relPath of [
+    'docs/MANAGED_EXTENSION_DEPLOYMENT.md',
+    'docs/EXTENSION_RELEASE_CHECKLIST.md',
+    'docs/TECHNICIAN_DEPLOYMENT_GUIDE.md',
+    'docs/examples/browser-managed-storage.policy.json',
+    'docs/examples/firefox-managed-storage.policy.json',
+    'docs/examples/chrome-extension-settings.example.json',
+    'docs/examples/edge-extension-settings.example.json',
+    'docs/examples/firefox-extension-settings.example.json',
+  ]) {
+    fs.copyFileSync(path.join(sourceRoot, relPath), path.join(root, relPath));
+  }
+  return root;
 }
 
 test('release checker writes a prompt-free readiness report', (t) => {
@@ -105,6 +142,43 @@ test('release checker accepts only Chromium extension id shape', () => {
   assert.throws(() => validateExtensionId('zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz'), /Chromium extension id/);
 });
 
+test('release checker rejects mismatched Firefox policy metadata before packaging', (t) => {
+  const outDir = tempDir(t);
+  assert.throws(
+    () => checkExtensionRelease({ outDir, firefoxExtensionId: 'different@example.com' }),
+    /Firefox extension id must match/,
+  );
+  assert.throws(
+    () => checkExtensionRelease({ outDir, firefoxInstallUrl: 'http://downloads.customer.example/promptwall.xpi' }),
+    /must be HTTPS/,
+  );
+});
+
+test('release checker returns a blocked report when release examples drift', (t) => {
+  const root = releaseRootFixture(t);
+  const outDir = path.join(root, 'dist', 'browser-extension');
+  fs.writeFileSync(
+    path.join(root, 'docs', 'examples', 'browser-managed-storage.policy.json'),
+    JSON.stringify({
+      serverUrl: 'https://promptwall.example.test',
+      ingestKey: 'not-the-placeholder',
+      orgId: 'credit-union-1',
+    }, null, 2) + '\n',
+  );
+
+  assert.throws(
+    () => checkExtensionRelease({ root, outDir }),
+    (err) => {
+      assert.match(err.message, /Extension release readiness failed/);
+      assert.ok(err.problems.some((problem) => /managed_storage_uses_placeholder_secret/.test(problem)));
+      assert.strictEqual(err.report.status, 'blocked');
+      assert.strictEqual(err.report.checks.managed_storage_uses_placeholder_secret.passed, false);
+      assert.doesNotMatch(JSON.stringify(err.report), /not-the-placeholder/);
+      return true;
+    },
+  );
+});
+
 test('release checker cli args parse output, id, and json mode', () => {
   const parsed = parseArgs([
     '--out',
@@ -126,4 +200,59 @@ test('release checker cli args parse output, id, and json mode', () => {
   const npmStyle = parseArgs(['tmp-release', 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb']);
   assert.strictEqual(path.basename(npmStyle.outDir), 'tmp-release');
   assert.strictEqual(npmStyle.extensionId, 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
+
+  const alias = parseArgs([
+    '--extension-id',
+    'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    '--firefox-extension-id',
+    FIREFOX_EXTENSION_ID,
+  ]);
+  assert.strictEqual(alias.extensionId, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+  assert.strictEqual(alias.firefoxExtensionId, FIREFOX_EXTENSION_ID);
+
+  assert.strictEqual(parseArgs(['--help']).help, true);
+  assert.throws(() => parseArgs(['--bogus']), /Unknown option/);
+  assert.throws(() => parseArgs(['one', 'two', 'three']), /Too many positional/);
+});
+
+test('release checker main prints help, JSON, text summaries, and sanitized errors', () => {
+  const helpIo = captureConsole();
+  main(['--help'], { console: helpIo });
+  assert.ok(helpIo.lines.some(([, message]) => /Usage: node/.test(message)));
+
+  const result = {
+    packages: [
+      { zipPath: 'dist/chrome.zip', manifestPath: 'dist/chrome.manifest.json' },
+      { zipPath: 'dist/edge.zip', manifestPath: 'dist/edge.manifest.json' },
+    ],
+    reportPath: 'dist/release-readiness.json',
+    releaseReport: { status: 'ready', packages: [] },
+  };
+
+  const jsonIo = captureConsole();
+  main(['--json'], {
+    console: jsonIo,
+    checkExtensionRelease(opts) {
+      assert.strictEqual(opts.firefoxExtensionId, FIREFOX_EXTENSION_ID);
+      return result;
+    },
+  });
+  assert.deepStrictEqual(JSON.parse(jsonIo.lines[0][1]), result.releaseReport);
+
+  const textIo = captureConsole();
+  main([], {
+    console: textIo,
+    checkExtensionRelease: () => result,
+  });
+  assert.ok(textIo.lines.some(([, message]) => /Wrote dist\/chrome\.zip/.test(message)));
+  assert.ok(textIo.lines.some(([, message]) => /Release readiness ready/.test(message)));
+
+  let exitCode = 0;
+  const errorIo = captureConsole();
+  main(['--bogus'], {
+    console: errorIo,
+    setExitCode(code) { exitCode = code; },
+  });
+  assert.strictEqual(exitCode, 1);
+  assert.ok(errorIo.lines.some(([level, message]) => level === 'error' && /Unknown option/.test(message)));
 });

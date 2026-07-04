@@ -7,24 +7,134 @@ const os = require('os');
 const path = require('path');
 const {
   scanFile,
+  scanAbsoluteFile,
   processNativeHandoffFile,
+  processNativeHandoffFileSafe,
+  processHandoffDirectory,
   refreshPolicy,
   fetchPolicy,
   sensorPolicy,
   scannerConfig,
   ignoredByScanner,
   postJson,
+  start,
   defaultWatchDir,
   configuredKey,
+  handoffSecretReady,
   nativeHandoff,
+  fileFlowProfiles,
+  startWatchedRoot,
 } = require('../sensors/endpoint-agent/agent');
 const pkg = require('../package.json');
+const D = require('../detection-engine/detect');
 
 test('watch directory prefers CLI argument, then endpoint env, then temp default', () => {
   assert.strictEqual(defaultWatchDir(['node', 'agent.js', 'C:\\Watch'], { ENDPOINT_AGENT_WATCH_DIR: 'D:\\FromEnv' }), 'C:\\Watch');
   assert.strictEqual(defaultWatchDir(['node', 'agent.js'], { ENDPOINT_AGENT_WATCH_DIR: 'D:\\FromEnv' }), 'D:\\FromEnv');
   assert.strictEqual(defaultWatchDir(['node', 'agent.js'], { PROMPTWALL_ENDPOINT_AGENT_WATCH_DIR: 'E:\\PromptWallWatch' }), 'E:\\PromptWallWatch');
   assert.match(defaultWatchDir(['node', 'agent.js'], {}), /promptwall-watch$/);
+});
+
+test('endpoint agent start wires refresh, file watch, scans, and native handoff watcher', async () => {
+  const logs = [];
+  const scans = [];
+  const handoffs = [];
+  let unrefCalled = false;
+  let watchCallback;
+  let intervalCallback;
+  const started = start({
+    console: { log: (...args) => logs.push(args.join(' ')) },
+    watchDir: 'C:\\PromptWall\\watch',
+    handoffDir: 'C:\\PromptWall\\handoff',
+    handoffSecret: 'native-handoff-secret-000000000000000001',
+    server: 'https://promptwall.example',
+    key: 'ingest-key-configured',
+    refreshPolicy: async () => {},
+    scanFile: (filename, opts) => scans.push({ filename, opts }),
+    readdirSync: () => ['existing.txt'],
+    setInterval: (fn, ms) => {
+      intervalCallback = fn;
+      assert.strictEqual(ms, 15 * 60 * 1000);
+      return { unref: () => { unrefCalled = true; } };
+    },
+    setTimeout: (fn, ms) => {
+      assert.strictEqual(ms, 200);
+      fn();
+      return null;
+    },
+    watch: (dir, cb) => {
+      assert.strictEqual(dir, 'C:\\PromptWall\\watch');
+      watchCallback = cb;
+      return { close() {} };
+    },
+    processHandoffDirectory: (dir, opts) => {
+      handoffs.push({ dir, opts });
+      return { close() {} };
+    },
+  });
+
+  await started.initialRefresh;
+  intervalCallback();
+  watchCallback('rename', 'new.txt');
+  watchCallback('change', 'ignored.txt');
+
+  assert.ok(unrefCalled);
+  assert.deepStrictEqual(scans, [
+    { filename: 'existing.txt', opts: { watchDir: 'C:\\PromptWall\\watch' } },
+    { filename: 'new.txt', opts: { watchDir: 'C:\\PromptWall\\watch' } },
+  ]);
+  assert.deepStrictEqual(handoffs, [{
+    dir: 'C:\\PromptWall\\handoff',
+    opts: { secret: 'native-handoff-secret-000000000000000001' },
+  }]);
+  assert.ok(logs.some((line) => line.includes('PromptWall endpoint agent')));
+  assert.ok(logs.some((line) => line.includes('file-flow profiles: disabled')));
+  assert.ok(logs.some((line) => line.includes('ingest  : configured')));
+});
+
+test('file-flow profiles scan named roots with destination context and public checks hide paths', () => {
+  const raw = JSON.stringify([
+    { id: 'Lending Files', dir: 'C:\\Sensitive\\LendingFlow', destination: 'Copilot Desktop', user: 'lending@example.test' },
+  ]);
+  const profiles = fileFlowProfiles.normalizeFileFlowProfiles(raw);
+  assert.strictEqual(profiles.length, 1);
+  assert.strictEqual(profiles[0].id, 'lending_files');
+  assert.strictEqual(profiles[0].destination, 'Copilot Desktop');
+  assert.strictEqual(profiles[0].user, 'lending@example.test');
+
+  const scans = [];
+  let watchCallback;
+  startWatchedRoot(profiles[0], {
+    readdirSync: () => ['queued.pdf'],
+    scanFile: (filename, opts) => scans.push({ filename, opts }),
+    setTimeout: (fn, ms) => {
+      assert.strictEqual(ms, 200);
+      fn();
+      return null;
+    },
+    watch: (dir, cb) => {
+      assert.strictEqual(dir, profiles[0].dir);
+      watchCallback = cb;
+      return { close() {} };
+    },
+  });
+  watchCallback('rename', 'new.docx');
+  watchCallback('change', 'ignored.docx');
+
+  assert.deepStrictEqual(scans.map((scan) => scan.filename), ['queued.pdf', 'new.docx']);
+  assert.deepStrictEqual(scans[0].opts, {
+    watchDir: profiles[0].dir,
+    destination: 'Copilot Desktop',
+    user: 'lending@example.test',
+  });
+
+  const checks = fileFlowProfiles.publicProfileChecks(profiles, (dir) => dir === profiles[0].dir);
+  assert.deepStrictEqual(checks, [
+    { id: 'endpoint_file_flow_profiles', ok: true, detail: 'configured:1' },
+    { id: 'endpoint_file_flow_profile_lending_files', ok: true, detail: 'configured directory' },
+  ]);
+  assert.ok(!JSON.stringify(checks).includes('Sensitive'));
+  assert.throws(() => fileFlowProfiles.normalizeFileFlowProfiles('[{"id":"bad"}]'), /directory is required/);
 });
 
 test('analyzes supported files locally and reports sanitized findings to gate', async () => {
@@ -115,6 +225,62 @@ test('removes redacted companion files when control-plane recording fails', asyn
   assert.ok(!JSON.stringify(requests).includes('524-71-9043'));
 
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('redacted companion names fall back after deterministic suffix exhaustion', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-agent-companion-'));
+  const handoffDir = path.join(dir, '.promptwall-redacted');
+  fs.mkdirSync(handoffDir, { recursive: true });
+  const filename = 'loan.txt';
+  fs.writeFileSync(path.join(dir, filename), 'Member SSN 524-71-9043 needs a summary.');
+  for (let i = 0; i < 100; i += 1) {
+    const suffix = i ? `-${i + 1}` : '';
+    fs.writeFileSync(path.join(handoffDir, `loan.promptwall-redacted${suffix}.txt`), 'occupied');
+  }
+
+  const res = await scanFile(filename, {
+    watchDir: dir,
+    user: 'unit-user',
+    policy: { enforcementMode: 'redact', alwaysBlock: ['US_SSN'], ignore: [], disabledDetectors: [] },
+    report: async () => ({ decision: 'redact', mode: 'redact', status: 'redacted', id: 'q_redacted_random' }),
+  });
+
+  assert.strictEqual(res.decision, 'redact');
+  assert.match(path.basename(res.redactionHandoff.path), /^loan\.promptwall-redacted-[0-9a-f]{8}\.txt$/);
+  assert.ok(!fs.readFileSync(res.redactionHandoff.path, 'utf8').includes('524-71-9043'));
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('redaction handoff self-check falls back to approval if tokenization leaves raw values', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-agent-raw-handoff-'));
+  const filename = 'loan.txt';
+  fs.writeFileSync(path.join(dir, filename), 'Member SSN 524-71-9043 needs a summary.');
+  const originalTokenize = D.tokenize;
+  let reportRequest;
+  try {
+    D.tokenize = () => ({
+      text: 'unsafe 524-71-9043',
+      tokens: 1,
+      map: { US_SSN_1: '524-71-9043' },
+    });
+    const res = await scanFile(filename, {
+      watchDir: dir,
+      user: 'unit-user',
+      policy: { enforcementMode: 'redact', alwaysBlock: ['US_SSN'], ignore: [], disabledDetectors: [] },
+      report: async (req) => {
+        reportRequest = req;
+        return { decision: 'block', mode: 'redact', status: 'pending', id: 'q_raw_handoff' };
+      },
+    });
+
+    assert.strictEqual(res.decision, 'block');
+    assert.strictEqual(reportRequest.clientOutcome, 'awaiting_approval');
+    assert.match(reportRequest.note, /redacted companion unavailable/);
+    assert.ok(!JSON.stringify(reportRequest).includes('unsafe 524-71-9043'));
+  } finally {
+    D.tokenize = originalTokenize;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('falls back to approval when redacted companion creation fails', async () => {
@@ -383,7 +549,43 @@ test('does not contact the control plane without an ingest key', async () => {
   assert.strictEqual(configuredKey({ key: '  unit-key  ' }), 'unit-key');
   assert.strictEqual(await fetchPolicy({ key: '', fetchImpl }), null);
   assert.strictEqual(await postJson('/api/v1/gate', { prompt: 'blocked locally' }, { key: '', fetchImpl }), null);
+  assert.deepStrictEqual(await postJson('/api/v1/gate', { prompt: 'safe' }, {
+    server: 'http://sentinel.test',
+    key: 'unit-key',
+    fetchImpl: async () => ({ ok: true, json: async () => ({ decision: 'allow', id: 'q_ok' }) }),
+  }), { decision: 'allow', id: 'q_ok' });
   assert.strictEqual(calls, 0);
+});
+
+test('endpoint helper paths fail closed without leaking local content', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-agent-helper-'));
+  const filename = 'safe.txt';
+  fs.writeFileSync(path.join(dir, filename), 'Public branch schedule.');
+  const requests = [];
+
+  assert.strictEqual(handoffSecretReady('short'), false);
+  assert.strictEqual(handoffSecretReady('native-handoff-secret-000000000000000001'), true);
+  assert.strictEqual(await scanFile('../outside.txt', { watchDir: dir }), undefined);
+  assert.strictEqual(await postJson('/api/v1/gate', { prompt: 'safe' }, {
+    server: 'http://sentinel.test',
+    key: 'unit-key',
+    fetchImpl: async () => ({ ok: false, json: async () => ({ error: 'denied' }) }),
+  }), null);
+
+  const res = await scanAbsoluteFile(path.join(dir, filename), {
+    report: async (req) => {
+      requests.push(req);
+      return null;
+    },
+  });
+
+  assert.strictEqual(res.decision, 'block');
+  assert.strictEqual(res.status, 'scan_unavailable');
+  assert.strictEqual(res.inspectedLocally, true);
+  assert.strictEqual(requests[0].clientOutcome, 'allowed');
+  assert.ok(!JSON.stringify(requests).includes('Public branch schedule.'));
+
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 test('refreshes scanner policy from the control plane', async () => {
@@ -567,5 +769,88 @@ test('rejects invalid native handoff events without scanning files', async () =>
   assert.strictEqual(reportCalled, false);
   assert.strictEqual(fs.existsSync(handoffPath), false);
 
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('native handoff cleanup failures are logged without throwing', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-agent-native-cleanup-'));
+  const handoffPath = path.join(dir, 'bad.json');
+  fs.writeFileSync(handoffPath, JSON.stringify({ version: nativeHandoff.EVENT_VERSION, signature: '0'.repeat(64) }));
+  const originalRmSync = fs.rmSync;
+  const originalError = console.error;
+  const errors = [];
+  try {
+    fs.rmSync = (target, opts) => {
+      if (target === handoffPath && opts && opts.force) throw new Error('cleanup denied');
+      return originalRmSync(target, opts);
+    };
+    console.error = (...args) => errors.push(args.join(' '));
+    const res = await processNativeHandoffFile(handoffPath, {
+      secret: 'native-handoff-secret-000000000000000001',
+      removeRejected: true,
+    });
+    assert.strictEqual(res.status, 'rejected');
+    assert.ok(errors.some((line) => /native handoff cleanup failed/.test(line)));
+  } finally {
+    console.error = originalError;
+    fs.rmSync = originalRmSync;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('native handoff safe wrapper logs unexpected async failures', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-agent-native-safe-'));
+  const sourceDir = path.join(dir, 'source');
+  fs.mkdirSync(sourceDir, { recursive: true });
+  const filePath = path.join(sourceDir, 'member.txt');
+  fs.writeFileSync(filePath, 'Loan file. SSN 524-71-9043.');
+  const handoffPath = path.join(dir, 'evt.json');
+  const secret = 'native-handoff-secret-000000000000000001';
+  const event = nativeHandoff.signHandoffEvent({
+    version: nativeHandoff.EVENT_VERSION,
+    id: 'evt_native_safe',
+    createdAt: '2026-06-26T15:00:00.000Z',
+    operation: 'upload',
+    filePath,
+    destination: { app: 'Desktop AI' },
+    user: 'native-user@example.test',
+    nonce: 'nonce-safe',
+  }, secret);
+  fs.writeFileSync(handoffPath, JSON.stringify(event));
+  const originalError = console.error;
+  const errors = [];
+  try {
+    console.error = (...args) => errors.push(args.join(' '));
+    processNativeHandoffFileSafe(handoffPath, {
+      secret,
+      now: new Date('2026-06-26T15:01:00.000Z'),
+      report: async () => { throw new Error('control plane unavailable'); },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  } finally {
+    console.error = originalError;
+  }
+
+  assert.ok(errors.some((line) => /native handoff failed: control plane unavailable/.test(line)));
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('native handoff directory watcher processes existing and new event files', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-agent-native-watch-'));
+  assert.strictEqual(processHandoffDirectory(dir, { secret: 'short' }), undefined);
+  fs.writeFileSync(path.join(dir, 'existing.json'), JSON.stringify({ version: nativeHandoff.EVENT_VERSION }));
+
+  const watcher = processHandoffDirectory(dir, {
+    secret: 'native-handoff-secret-000000000000000001',
+    removeRejected: true,
+    silent: true,
+  });
+  assert.ok(watcher && typeof watcher.close === 'function');
+  fs.writeFileSync(path.join(dir, 'new.json'), JSON.stringify({ version: nativeHandoff.EVENT_VERSION }));
+  await new Promise((resolve) => setTimeout(resolve, 260));
+  watcher.close();
+
+  assert.strictEqual(fs.existsSync(path.join(dir, 'existing.json')), false);
+  assert.strictEqual(fs.existsSync(path.join(dir, 'new.json')), false);
   fs.rmSync(dir, { recursive: true, force: true });
 });

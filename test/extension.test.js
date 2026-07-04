@@ -567,6 +567,24 @@ test('background install health does not throw on invalid server URL', async () 
   assert.ok(res.checks.some((item) => item.id === 'server_url' && !item.ok));
 });
 
+test('background install health rejects server URLs with embedded credentials', async () => {
+  const bg = loadBackground({
+    managed: {
+      serverUrl: 'https://user:pass@promptwall.customer.example',
+      ingestKey: 'browser-ingest-key-0000000000000000000001',
+      email: 'analyst@example.test',
+      orgId: 'cu-acme',
+    },
+    fetch: async () => {
+      throw new Error('fetch should not run with URL credentials');
+    },
+  });
+  const res = await bg.context.self.__test.reportInstallHealth();
+  assert.strictEqual(res.ok, false);
+  assert.strictEqual(res.reason, 'invalid_server_url');
+  assert.ok(res.checks.some((item) => item.id === 'server_url' && !item.ok));
+});
+
 test('background schedules browser install-health heartbeats', () => {
   const bg = loadBackground();
   assert.ok(bg.createdAlarms.some((item) => item.name === 'installHeartbeat' && item.spec.periodInMinutes === 60));

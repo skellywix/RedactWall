@@ -55,8 +55,8 @@ function parseArgs(argv = process.argv.slice(2)) {
   return opts;
 }
 
-function printHelp() {
-  console.log([
+function printHelp(io = console) {
+  io.log([
     'Usage: npm run mfa:uri',
     '       npm run mfa:uri -- [options]',
     '       node scripts/mfa-uri.js [options]',
@@ -68,21 +68,23 @@ function printHelp() {
   ].join('\n'));
 }
 
-function main(argv = process.argv.slice(2)) {
+function main(argv = process.argv.slice(2), deps = {}) {
+  const io = deps.console || console;
+  const loadEnv = deps.effectiveEnv || effectiveEnv;
   const opts = parseArgs(argv);
   if (opts.help) {
-    printHelp();
+    printHelp(io);
     return 0;
   }
-  const env = effectiveEnv(opts.envPath);
+  const env = loadEnv(opts.envPath);
   const account = opts.account || env.ADMIN_USER || 'admin';
   const uri = otpauthUri({
     secret: env.ADMIN_TOTP_SECRET,
     account,
     issuer: opts.issuer,
   });
-  console.log('Treat this MFA enrollment URI as a secret. Enroll it once, then keep ADMIN_TOTP_SECRET protected.');
-  console.log(uri);
+  io.log('Treat this MFA enrollment URI as a secret. Enroll it once, then keep ADMIN_TOTP_SECRET protected.');
+  io.log(uri);
   return 0;
 }
 
@@ -96,8 +98,10 @@ if (require.main === module) {
 }
 
 module.exports = {
+  main,
   normalizeBase32,
   otpauthUri,
   parseArgs,
+  printHelp,
   validateSecret,
 };

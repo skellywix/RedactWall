@@ -21,15 +21,21 @@ const path = require('path');
 const detector = require('./detector');
 const processors = require('./processors');
 const policy = require('./policy');
+const policyImpact = require('./policy-impact');
 const db = require('./db');
 const auth = require('./auth');
 const dataCrypto = require('./crypto');
 const templates = require('./templates');
 const alerts = require('./alerts');
+const siemPackage = require('./siem-package');
 const evidence = require('./evidence');
+const securityPackage = require('./security-package');
 const preflight = require('./preflight');
 const validation = require('./validation');
 const coverage = require('./coverage');
+const posture = require('./posture');
+const detectorFeedback = require('./detector-feedback');
+const detectionQuality = require('./detection-quality');
 const {
   endpointAiToolAttentionIds,
   failedInstallCheckIds,
@@ -100,11 +106,12 @@ app.use((req, res, next) => {
 
 app.use(express.json({ limit: '12mb', type: ['application/json', 'application/*+json'] }));
 app.use('/scim/v2', scim.router());
-app.use((err, req, res, next) => {
+function jsonErrorHandler(err, req, res, next) {
   if (err && err.type === 'entity.too.large') return res.status(413).json({ error: 'request body too large' });
   if (err instanceof SyntaxError && err.status === 400 && 'body' in err) return res.status(400).json({ error: 'invalid json' });
   return next(err);
-});
+}
+app.use(jsonErrorHandler);
 app.use(cookieParser());
 
 // ---- Health / readiness (public, no sensitive data) -------------------------
@@ -126,6 +133,8 @@ function broadcast(event, data) {
   for (const res of sseClients) { try { res.write(payload); } catch {} }
 }
 
+const postureFeedState = { lastAttemptAt: 0, lastSentAt: 0, fingerprint: '' };
+
 function emitSecurityAlert(row, action, opts = {}) {
   fireSecurityAlert(row, { action, ...opts });
   if (!opts.adminEvent) {
@@ -136,6 +145,9 @@ function emitSecurityAlert(row, action, opts = {}) {
     });
     try {
       emitSensorVersionGapAlert(row);
+    } catch {}
+    try {
+      emitAutomaticPostureFeed(action);
     } catch {}
   }
 }
@@ -339,7 +351,7 @@ function createQuery(query, opts = {}) {
 
 function createQueryWithReleaseToken(query) {
   const routed = routing.withWorkflow(query, routeOptionsFor(query));
-  if (routed && routed.status === 'pending') {
+  if (routed && (routed.status === 'pending' || routed._tokenVault)) {
     const release = releaseTokens.issueReleaseToken();
     return {
       row: db.createQuery({ ...routed, _releaseTokenHash: release.hash }),
@@ -525,6 +537,115 @@ function clientAnalysisFrom(body) {
     maxSeverity,
     maxSeverityLabel: detector.SEVERITY_LABEL[maxSeverity] || 'none',
   };
+}
+
+function identityGroupsForRows(rows = []) {
+  const wantedUsers = new Set((Array.isArray(rows) ? rows : [])
+    .map((row) => String(row && row.user || '').trim().toLowerCase())
+    .filter(Boolean));
+  if (!wantedUsers.size) return {};
+  const usersById = new Map();
+  for (const user of db.listScimUsers()) {
+    const userName = String(user && user.userName || '').trim();
+    if (!userName || user.active === false || !wantedUsers.has(userName.toLowerCase())) continue;
+    usersById.set(user.id, userName.toLowerCase());
+  }
+  const groupsByUser = {};
+  if (!usersById.size) return groupsByUser;
+  for (const group of db.listScimGroups()) {
+    const displayName = String(group && group.displayName || '').trim();
+    if (!displayName) continue;
+    for (const member of group.members || []) {
+      const userName = usersById.get(member && member.value);
+      if (!userName) continue;
+      if (!groupsByUser[userName]) groupsByUser[userName] = [];
+      if (!groupsByUser[userName].includes(displayName)) groupsByUser[userName].push(displayName);
+    }
+  }
+  return groupsByUser;
+}
+
+function currentPostureReport(limit = 5000, opts = {}) {
+  const pol = policy.loadPolicy();
+  const rows = db.listQueries({ limit });
+  const feedbackReport = detectorFeedback.report({
+    rows,
+    feedback: db.listDetectorFeedback({ limit: 1000 }),
+  });
+  const detectionQualityReport = detectionQuality.report();
+  return posture.summarize({
+    rows,
+    policy: pol,
+    auditIntegrity: db.verifyAuditChain(),
+    actionStates: db.postureActionStates(),
+    segmentId: posture.normalizedSegmentId(opts.segmentId),
+    identityGroups: identityGroupsForRows(rows),
+    detectorFeedbackReport: feedbackReport,
+    detectionQualityReport,
+  });
+}
+
+function currentSecurityTrustPackage() {
+  const activePolicy = policy.loadPolicy();
+  const rows = db.listQueries({ all: true });
+  const auditIntegrity = db.verifyAuditChain();
+  const coverageReport = coverage.summarize(rows, activePolicy);
+  return securityPackage.trustPackage({
+    packageInfo: require('../package.json'),
+    policy: activePolicy,
+    auditIntegrity,
+    preflight: currentPreflight(),
+    coverage: coverageReport,
+    posture: posture.summarize({
+      rows,
+      policy: activePolicy,
+      coverageReport,
+      auditIntegrity,
+      actionStates: db.postureActionStates(1000),
+      detectorFeedbackReport: detectorFeedback.report({
+        rows,
+        feedback: db.listDetectorFeedback({ limit: 1000 }),
+      }),
+      detectionQualityReport: detectionQuality.report(),
+    }),
+    env: process.env,
+  });
+}
+
+function emitAutomaticPostureFeed(trigger = 'evidence') {
+  if (!alerts.postureFeedEnabled(process.env)) return;
+  const report = currentPostureReport(5000);
+  Promise.resolve(alerts.emitPostureFeed(report, {
+    state: postureFeedState,
+    action: 'POSTURE_FEED',
+    trigger,
+  })).then((result) => {
+    if (!result || !result.attempted) return;
+    db.appendAudit({
+      action: result.sent ? 'POSTURE_FEED_SENT' : 'POSTURE_FEED_FAILED',
+      actor: 'system',
+      detail: result.sent ? `sent:${result.status || 'ok'}` : `not_sent:${result.reason || 'unknown'}`,
+    });
+  }).catch(() => {});
+}
+
+function isoOrNow(value) {
+  const parsed = value ? new Date(value) : null;
+  return parsed && Number.isFinite(parsed.getTime()) ? parsed.toISOString() : new Date().toISOString();
+}
+
+function isoOrNull(value) {
+  const parsed = value ? new Date(value) : null;
+  return parsed && Number.isFinite(parsed.getTime()) ? parsed.toISOString() : null;
+}
+
+function discoveryEvidenceReasons({ source, vendor, events }) {
+  const sourceLabel = vendor || source || 'proxy';
+  return [
+    'AI asset discovered from sanitized inventory',
+    `Source: ${sourceLabel}`,
+    `${events} observation${events === 1 ? '' : 's'}`,
+  ];
 }
 
 function blockDestinationByPolicy(res, context = {}, responseExtra = {}) {
@@ -714,6 +835,77 @@ function blockBrowserActionByPolicy(res, context = {}, responseExtra = {}) {
   });
 }
 
+app.post('/api/v1/discovery', checkIngestKey, validation.validateBody(validation.aiDiscoverySchema), (req, res) => {
+  if (!enforceTenantForSensor(req, res)) return;
+  const {
+    source = 'proxy',
+    user = 'discovery-import',
+    orgId = null,
+    vendor = '',
+    sensor = null,
+    sightings = [],
+  } = req.body || {};
+  const rows = [];
+  let observations = 0;
+
+  for (const sighting of sightings) {
+    const destination = policy.normalizeDestination(sighting.destination);
+    const events = Math.max(1, Math.min(100000, Number(sighting.events) || 1));
+    const createdAt = isoOrNow(sighting.lastSeen);
+    observations += events;
+    const row = createQuery({
+      createdAt,
+      status: 'shadow_ai',
+      mode: 'discovery',
+      user: sighting.user || user,
+      orgId: sighting.orgId || orgId || null,
+      destination,
+      source,
+      channel: 'shadow_ai',
+      sensor,
+      redactedPrompt: `[AI discovery import] ${destination}`,
+      findings: [],
+      categories: [],
+      entityCounts: {},
+      riskScore: 0,
+      maxSeverity: 0,
+      maxSeverityLabel: 'none',
+      reasons: discoveryEvidenceReasons({ source, vendor, events }),
+      discoveryEvents: events,
+      discoverySource: vendor || source,
+      discoveryCategory: sighting.category || 'unknown',
+      discoveryConfidence: Number.isFinite(Number(sighting.confidence)) ? Number(sighting.confidence) : null,
+      firstSeen: isoOrNull(sighting.firstSeen),
+      lastSeen: createdAt,
+    });
+    rows.push(row);
+  }
+
+  const first = rows[0] || null;
+  db.appendAudit({
+    action: 'AI_DISCOVERY_IMPORTED',
+    queryId: first ? first.id : null,
+    actor: user,
+    detail: `${source}: ${rows.length} destinations / ${observations} observations`,
+  });
+  for (const row of rows) {
+    broadcast('query', { type: 'shadow_ai', query: publicQuery(row) });
+  }
+  broadcast('stats', db.stats());
+  return res.status(202).json({
+    status: 'imported',
+    imported: rows.length,
+    observations,
+    privacy: 'prompt bodies and raw URLs are not accepted',
+    destinations: rows.map((row) => ({
+      id: row.id,
+      destination: row.destination,
+      observations: row.discoveryEvents || 1,
+      status: row.status,
+    })),
+  });
+});
+
 app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gateSchema), (req, res) => {
   if (!enforceTenantForSensor(req, res)) return;
   const {
@@ -721,11 +913,78 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
     source = 'api', channel = 'submit', clientOutcome = null, note = '', orgId = null,
     sensor = null,
   } = req.body || {};
-  if (typeof prompt !== 'string' || !prompt.trim()) {
-    return res.status(400).json({ error: 'prompt (string) required' });
-  }
+  if (typeof prompt !== 'string' || !prompt.trim()) return res.status(400).json({ error: 'prompt (string) required' });
 
   const pol = policy.loadPolicy();
+  const declaredClientPreRedacted = req.body && req.body.clientPreRedacted === true;
+  const clientAnalysis = declaredClientPreRedacted ? clientAnalysisFrom(req.body) : null;
+  if (clientOutcome === 'proxy_observed') {
+    if (source !== 'proxy' || channel !== 'proxy_monitor') {
+      return res.status(400).json({ error: 'proxy monitor source required' });
+    }
+    if (!declaredClientPreRedacted) {
+      return res.status(400).json({ error: 'proxy monitor requires pre-redacted evidence' });
+    }
+    const normalized = policy.normalizeDestination(destination);
+    const safePrompt = String(prompt || '').trim();
+    const isProxyObservationLabel = safePrompt === `[proxy observed] ${normalized}`;
+    const isRedactedEvidenceLabel = /^\[REDACTED: [A-Z0-9_, ]+\]$/.test(safePrompt);
+    if (!isProxyObservationLabel && !isRedactedEvidenceLabel) {
+      return res.status(400).json({ error: 'proxy monitor prompt must be pre-redacted' });
+    }
+    const safePromptAnalysis = detector.analyze(prompt, policy.analyzeOpts(pol));
+    if (hasSensitivity(safePromptAnalysis)) {
+      return res.status(400).json({ error: 'proxy monitor prompt must be pre-redacted' });
+    }
+    const analysis = clientAnalysis || {
+      findings: [],
+      categories: [],
+      entityCounts: {},
+      riskScore: 0,
+      maxSeverity: 0,
+      maxSeverityLabel: 'none',
+    };
+    const findings = analysis.findings.map((f) => ({
+      type: f.type, severity: f.severity, score: f.score, masked: f.masked,
+    }));
+    const categories = (analysis.categories || []).map((c) => c.category);
+    const reasons = hasSensitivity(analysis)
+      ? ['AI-domain request observed by monitor proxy', 'Sensitive content observed locally by proxy monitor']
+      : ['AI-domain request observed by monitor proxy'];
+    const row = createQuery({
+      status: 'proxy_observed',
+      mode: 'monitor',
+      user,
+      orgId,
+      destination: normalized,
+      sourceIp,
+      source,
+      channel,
+      sensor,
+      redactedPrompt: String(prompt || '').slice(0, 600),
+      findings,
+      categories,
+      entityCounts: analysis.entityCounts || {},
+      riskScore: analysis.riskScore || 0,
+      maxSeverity: analysis.maxSeverity || 0,
+      maxSeverityLabel: analysis.maxSeverityLabel || 'none',
+      reasons,
+    });
+    db.appendAudit({ action: 'PROXY_OBSERVED', queryId: row.id, actor: user, detail: `${source}/${channel}: ${normalized}` });
+    emitSecurityAlert(row, 'PROXY_OBSERVED');
+    broadcast('query', { type: 'proxy_observed', query: publicQuery(row) });
+    broadcast('stats', db.stats());
+    return res.json({
+      id: row.id,
+      decision: 'log',
+      mode: 'monitor',
+      status: 'proxy_observed',
+      riskScore: analysis.riskScore || 0,
+      findings,
+      categories,
+      reasons,
+    });
+  }
   if (policy.destinationBlocked(destination, pol) || clientOutcome === 'destination_blocked') {
     return blockDestinationByPolicy(res, {
       user,
@@ -741,8 +1000,6 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
   if (clientOutcome === 'file_upload_blocked') {
     return blockFileUploadByPolicy(res, { user, orgId, destination, sourceIp, source, channel, sensor });
   }
-  const declaredClientPreRedacted = req.body && req.body.clientPreRedacted === true;
-  const clientAnalysis = declaredClientPreRedacted ? clientAnalysisFrom(req.body) : null;
   if (declaredClientPreRedacted && !clientAnalysis) {
     return res.status(400).json({ error: 'client redaction analysis required' });
   }
@@ -999,6 +1256,8 @@ app.post('/api/v1/rehydrate', checkIngestKey, validation.validateBody(validation
   const q = id && db.getQuery(id);
   if (!q) return res.status(404).json({ error: 'not found' });
   if (!q._tokenVault) return res.json({ id, text: text || '', rehydrated: false, reason: 'no vault for this item' });
+  const releaseToken = req.get('x-release-token') || '';
+  if (!q._releaseTokenHash || !releaseTokens.verifyReleaseToken(q, releaseToken)) return res.status(401).json({ error: 'invalid release token' });
   const mapJson = dataCrypto.open(q._tokenVault);
   if (mapJson == null) return res.status(409).json({ error: 'vault unavailable (no/incorrect data key)' });
   let map; try { map = JSON.parse(mapJson); } catch { return res.status(500).json({ error: 'vault corrupt' }); }
@@ -1026,6 +1285,9 @@ app.get('/api/v1/policy', checkIngestKey, (req, res) => {
     desktopCollectorDestination: p.desktopCollectorDestination || policy.DEFAULT_POLICY.desktopCollectorDestination,
     requiredSensors: p.requiredSensors || policy.DEFAULT_POLICY.requiredSensors,
     desiredSensorVersions: p.desiredSensorVersions || policy.DEFAULT_POLICY.desiredSensorVersions,
+    mcpAllowedTools: p.mcpAllowedTools || policy.DEFAULT_POLICY.mcpAllowedTools,
+    mcpBlockedTools: p.mcpBlockedTools || policy.DEFAULT_POLICY.mcpBlockedTools,
+    mcpApprovalRequiredTools: p.mcpApprovalRequiredTools || policy.DEFAULT_POLICY.mcpApprovalRequiredTools,
     scanner: p.scanner || {},
   });
 });
@@ -1350,6 +1612,18 @@ function requireDecisionAccess(req, res, next) {
   next();
 }
 
+function requireFeedbackAccess(req, res, next) {
+  const q = db.getQuery(req.params.id);
+  if (!q) return res.status(404).json({ error: 'not found' });
+  if (req.user && req.user.role === roles.SECURITY_ADMIN) {
+    req.queryRecord = q;
+    return next();
+  }
+  if (!roles.canDecideQuery(req.user, q)) return res.status(403).json({ error: 'forbidden' });
+  req.queryRecord = q;
+  return next();
+}
+
 app.get('/api/me', auth.requireAuth, (req, res) => {
   res.json({
     user: req.user.user,
@@ -1587,6 +1861,140 @@ app.get('/api/coverage', auth.requireAuth, (req, res) => {
   res.json(coverage.summarize(db.listQueries({ limit: 5000 }), policy.loadPolicy()));
 });
 
+app.get('/api/posture', auth.requireAuth, (req, res) => {
+  res.json(currentPostureReport(boundedApiLimit(req.query.limit, 5000), {
+    segmentId: req.query.segment,
+  }));
+});
+
+app.get('/api/detector-feedback/report', auth.requireAuth, (req, res) => {
+  res.json({
+    ...detectorFeedback.report({
+      rows: db.listQueries({ limit: boundedApiLimit(req.query.queryLimit, 1000) }),
+      feedback: db.listDetectorFeedback({ limit: boundedApiLimit(req.query.feedbackLimit, 1000) }),
+    }),
+    quality: detectionQuality.report(),
+  });
+});
+
+app.post('/api/queries/:id/detector-feedback', ...decisionWrite, validation.validateBody(validation.detectorFeedbackSchema), requireFeedbackAccess, (req, res) => {
+  const q = req.queryRecord;
+  const observed = detectorFeedback.detectorIdsForQuery(q);
+  if (req.body.verdict !== 'missed' && !observed.includes(req.body.detectorId)) {
+    return res.status(400).json({ error: 'detector_not_on_query' });
+  }
+  const record = db.createDetectorFeedback({
+    queryId: q.id,
+    detectorId: req.body.detectorId,
+    verdict: req.body.verdict,
+    reason: req.body.reason || '',
+    actor: req.user.user,
+    role: req.user.role,
+    queryUser: q.user || '',
+    orgId: q.orgId || '',
+    source: q.source || '',
+    channel: q.channel || '',
+    destination: coverage.normalizeDestination(q.destination || 'unknown'),
+    queryStatus: q.status || '',
+    riskScore: q.riskScore || 0,
+    maxSeverity: q.maxSeverity || 0,
+  });
+  const audit = db.appendAudit({
+    action: 'DETECTOR_FEEDBACK_RECORDED',
+    queryId: q.id,
+    actor: req.user.user,
+    detail: `${record.detectorId}:${record.verdict}`,
+  });
+  res.json({
+    feedback: detectorFeedback.publicFeedback(record),
+    audit: { id: audit.id, ts: audit.ts, hash: audit.hash },
+  });
+});
+
+app.post('/api/posture/actions', ...adminWrite, validation.validateBody(validation.postureActionSchema), (req, res) => {
+  const payload = {
+    id: req.body.id,
+    status: req.body.status,
+    owner: req.body.owner || (req.body.status === 'assigned' ? req.user.user : ''),
+    note: req.body.note || '',
+    snoozeUntil: req.body.status === 'snoozed' ? req.body.snoozeUntil : null,
+  };
+  const audit = db.appendAudit({
+    action: db._internal.POSTURE_ACTION_AUDIT,
+    actor: req.user.user,
+    detail: JSON.stringify(payload),
+  });
+  broadcast('stats', db.stats());
+  res.json({
+    action: payload,
+    audit: {
+      id: audit.id,
+      ts: audit.ts,
+      hash: audit.hash,
+    },
+  });
+});
+
+app.post('/api/posture/notify', ...adminWrite, async (req, res) => {
+  const report = currentPostureReport(5000);
+  const result = await alerts.emitPostureAlert(report, { action: 'POSTURE_SNAPSHOT' });
+  db.appendAudit({
+    action: 'POSTURE_SNAPSHOT_SENT',
+    actor: req.user.user,
+    detail: result.sent ? `sent:${result.status || 'ok'}` : `not_sent:${result.reason || 'unknown'}`,
+  });
+  res.status(result.sent ? 200 : 202).json({
+    ...result,
+    posture: {
+      generatedAt: report.generatedAt,
+      score: report.hardening && report.hardening.score,
+      state: report.hardening && report.hardening.state,
+    },
+  });
+});
+
+app.get('/api/integrations/siem/package', ...adminRead, (req, res) => {
+  try {
+    const profile = req.query.profile || 'all';
+    const pkg = siemPackage.integrationPackage({ profile });
+    const suffix = pkg.requestedProfile === 'all' ? 'all' : pkg.profiles[0].id;
+    const format = String(req.query.format || req.query.download || '').toLowerCase();
+    if (format === 'zip') {
+      const archive = siemPackage.packageArchive(pkg);
+      res.setHeader('Content-Type', 'application/zip');
+      res.setHeader('Content-Disposition', `attachment; filename="promptwall-siem-${suffix}-package.zip"`);
+      return res.send(archive);
+    }
+    if (format === '1' || format === 'true' || format === 'json') {
+      res.setHeader('Content-Disposition', `attachment; filename="promptwall-siem-${suffix}-package.json"`);
+    }
+    res.json(pkg);
+  } catch (err) {
+    if (err && err.code === 'UNSUPPORTED_PROFILE') {
+      return res.status(400).json({
+        error: 'unsupported_profile',
+        supportedProfiles: siemPackage.SUPPORTED_PROFILES,
+      });
+    }
+    throw err;
+  }
+});
+
+app.get('/api/security/package', ...adminRead, (req, res) => {
+  const pkg = currentSecurityTrustPackage();
+  const format = String(req.query.format || req.query.download || '').toLowerCase();
+  if (format === 'zip') {
+    const archive = securityPackage.packageArchive(pkg);
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', 'attachment; filename="promptwall-security-trust-package.zip"');
+    return res.send(archive);
+  }
+  if (format === '1' || format === 'true' || format === 'json') {
+    res.setHeader('Content-Disposition', 'attachment; filename="promptwall-security-trust-package.json"');
+  }
+  res.json(pkg);
+});
+
 app.get('/api/lineage', auth.requireAuth, (req, res) => {
   const limit = boundedApiLimit(req.query.limit, 1000);
   const queries = db.listQueries({ limit });
@@ -1649,6 +2057,13 @@ app.get('/api/export/evidence', auth.requireAuth, (req, res) => {
   const activePolicy = policy.loadPolicy();
   const queries = db.listQueries({ limit: queryLimit });
   const summaryQueries = db.listQueries({ all: true });
+  const coverageReport = coverage.summarize(summaryQueries, activePolicy);
+  const auditIntegrity = db.verifyAuditChain();
+  const detectorFeedbackReport = detectorFeedback.report({
+    rows: summaryQueries,
+    feedback: db.listDetectorFeedback({ limit: auditLimit }),
+  });
+  const detectionQualityReport = detectionQuality.report();
   res.json(evidence.buildEvidencePack({
     version: require('../package.json').version,
     queryLimit,
@@ -1657,9 +2072,19 @@ app.get('/api/export/evidence', auth.requireAuth, (req, res) => {
     summariesUseFullHistory: true,
     policy: activePolicy,
     stats: db.stats(),
-    auditIntegrity: db.verifyAuditChain(),
-    coverage: coverage.summarize(summaryQueries, activePolicy),
+    auditIntegrity,
+    coverage: coverageReport,
+    posture: posture.summarize({
+      rows: summaryQueries,
+      policy: activePolicy,
+      coverageReport,
+      auditIntegrity,
+      actionStates: db.postureActionStates(auditLimit),
+      detectorFeedbackReport,
+      detectionQualityReport,
+    }),
     policyExceptionReview: policy.policyExceptionReview(activePolicy),
+    detectorFeedback: detectorFeedbackReport,
     detectors: detector.listDetectors({ customDetectors: policy.customDetectorsForSensors() }),
     queries,
     lineageQueries: summaryQueries,
@@ -1668,6 +2093,21 @@ app.get('/api/export/evidence', auth.requireAuth, (req, res) => {
 });
 
 app.get('/api/policy', auth.requireAuth, (req, res) => res.json(policy.loadPolicy()));
+app.post('/api/policy/impact', ...adminWrite, validation.validateBody(validation.policyUpdateSchema), (req, res) => {
+  const before = policy.loadPolicy();
+  const proposed = policy.normalizePolicy({
+    ...before,
+    ...(req.body || {}),
+    ...(req.body && req.body.scanner ? { scanner: { ...(before.scanner || {}), ...req.body.scanner } } : {}),
+  });
+  const limit = boundedApiLimit(req.query.limit, 1000);
+  res.json(policyImpact.buildPolicyImpact({
+    rows: db.listQueries({ limit }),
+    currentPolicy: before,
+    proposedPolicy: proposed,
+    limit,
+  }));
+});
 app.put('/api/policy', ...adminWrite, validation.validateBody(validation.policyUpdateSchema), (req, res) => {
   const before = policy.loadPolicy();
   const merged = {
@@ -1696,64 +2136,97 @@ app.get('/index.html', auth.requireAuth, (req, res) =>
   res.sendFile(path.join(__dirname, 'public', 'index.html')));
 app.use(express.static(path.join(__dirname, 'public')));
 
-function logStartup(port) {
-  console.log(`PromptWall running on http://localhost:${port}`);
-  if (auth.ADMIN_PASSWORD_IS_DEFAULT) {
-    console.log('  [!] Using DEFAULT admin password. Set ADMIN_PASSWORD before production.');
+function logStartup(port, deps = {}) {
+  const io = deps.console || console;
+  const authModule = deps.auth || auth;
+  const cryptoModule = deps.dataCrypto || dataCrypto;
+  const policyModule = deps.policy || policy;
+  const ingestKey = Object.prototype.hasOwnProperty.call(deps, 'ingestKey') ? deps.ingestKey : INGEST_KEY;
+  io.log(`PromptWall running on http://localhost:${port}`);
+  if (authModule.ADMIN_PASSWORD_IS_DEFAULT) {
+    io.log('  [!] Using DEFAULT admin password. Set ADMIN_PASSWORD before production.');
   }
-  if (!auth.SECRET_IS_STABLE) {
-    console.log('  [!] Session secret is ' + auth.SECRET_SOURCE + ' — set SENTINEL_SECRET (stable) for multi-instance deployments.');
+  if (!authModule.SECRET_IS_STABLE) {
+    io.log('  [!] Session secret is ' + authModule.SECRET_SOURCE + ' — set SENTINEL_SECRET (stable) for multi-instance deployments.');
   }
-  if (!dataCrypto.ENABLED) {
-    console.log('  [!] No SENTINEL_DATA_KEY/SENTINEL_SECRET set — raw prompts are NOT stored (reveal shows redacted). Set a key to enable encrypted raw retention for approvals.');
+  if (!cryptoModule.ENABLED) {
+    io.log('  [!] No SENTINEL_DATA_KEY/SENTINEL_SECRET set — raw prompts are NOT stored (reveal shows redacted). Set a key to enable encrypted raw retention for approvals.');
   } else {
-    const days = policy.rawRetentionDays(policy.loadPolicy());
-    console.log(`  Raw-prompt retention: encrypted at rest (AES-256-GCM), held items only; finalized records purge after ${days} day(s).`);
+    const days = policyModule.rawRetentionDays(policyModule.loadPolicy());
+    io.log(`  Raw-prompt retention: encrypted at rest (AES-256-GCM), held items only; finalized records purge after ${days} day(s).`);
   }
-  console.log(`  Ingest key: ${INGEST_KEY === 'dev-ingest-key' ? 'dev-ingest-key (override with INGEST_API_KEY)' : 'configured'}`);
+  io.log(`  Ingest key: ${ingestKey === 'dev-ingest-key' ? 'dev-ingest-key (override with INGEST_API_KEY)' : 'configured'}`);
 }
 
-function startServer(port = PORT) {
-  const cfg = currentPreflight();
-  const blockers = preflight.summarizeFailures(cfg);
+function startServer(port = PORT, opts = {}) {
+  const preflightCheck = opts.currentPreflight || currentPreflight;
+  const preflightModule = opts.preflight || preflight;
+  const retentionPurge = opts.runRetentionPurge || runRetentionPurge;
+  const workflowEscalation = opts.runWorkflowEscalation || runWorkflowEscalation;
+  const setIntervalFn = opts.setInterval || setInterval;
+  const clearIntervalFn = opts.clearInterval || clearInterval;
+  const appToListen = opts.app || app;
+  const log = opts.logStartup || logStartup;
+  const cfg = preflightCheck();
+  const blockers = preflightModule.summarizeFailures(cfg);
   if (blockers.length) {
     for (const blocker of blockers) console.error('[preflight] ' + blocker);
     throw new Error('Production preflight failed');
   }
-  runRetentionPurge();
-  runWorkflowEscalation();
-  const server = app.listen(port, () => {
+  retentionPurge();
+  workflowEscalation();
+  const server = appToListen.listen(port, () => {
     const address = server.address();
-    logStartup(address && address.port ? address.port : port);
+    log(address && address.port ? address.port : port);
   });
-  const retentionTimer = setInterval(() => runRetentionPurge(), 60 * 60 * 1000);
-  const workflowTimer = setInterval(() => runWorkflowEscalation(), 5 * 60 * 1000);
+  const retentionTimer = setIntervalFn(() => retentionPurge(), 60 * 60 * 1000);
+  const workflowTimer = setIntervalFn(() => workflowEscalation(), 5 * 60 * 1000);
   retentionTimer.unref();
   workflowTimer.unref();
   server.on('close', () => {
-    clearInterval(retentionTimer);
-    clearInterval(workflowTimer);
+    clearIntervalFn(retentionTimer);
+    clearIntervalFn(workflowTimer);
   });
   return server;
 }
 
-if (require.main === module) {
-  const server = startServer();
+function installShutdownHandlers(server, deps = {}) {
+  const proc = deps.process || process;
+  const io = deps.console || console;
+  const setTimeoutFn = deps.setTimeout || setTimeout;
+  const clearTimeoutFn = deps.clearTimeout || clearTimeout;
+  const exit = deps.exit || ((code) => process.exit(code));
   const shutdown = (signal) => {
-    console.log(`PromptWall received ${signal}; shutting down`);
-    const timeout = setTimeout(() => process.exit(1), 10000);
-    timeout.unref();
+    io.log(`PromptWall received ${signal}; shutting down`);
+    const timeout = setTimeoutFn(() => exit(1), 10000);
+    if (timeout.unref) timeout.unref();
     server.close(() => {
-      clearTimeout(timeout);
-      process.exit(0);
+      clearTimeoutFn(timeout);
+      exit(0);
     });
   };
-  process.once('SIGTERM', () => shutdown('SIGTERM'));
-  process.once('SIGINT', () => shutdown('SIGINT'));
+  proc.once('SIGTERM', () => shutdown('SIGTERM'));
+  proc.once('SIGINT', () => shutdown('SIGINT'));
+  return shutdown;
 }
+
+if (require.main === module) installShutdownHandlers(startServer());
 
 app.startServer = startServer;
 app.runRetentionPurge = runRetentionPurge;
 app.runWorkflowEscalation = runWorkflowEscalation;
+app.currentPreflight = currentPreflight;
+app.currentSecurityTrustPackage = currentSecurityTrustPackage;
+app._internal = {
+  jsonErrorHandler,
+  registerIngestFailure,
+  pruneIngestFailures,
+  ingestFailures,
+  logStartup,
+  startServer,
+  currentPreflight,
+  currentSecurityTrustPackage,
+  installShutdownHandlers,
+};
 
 module.exports = app;

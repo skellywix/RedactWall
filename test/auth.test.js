@@ -3,6 +3,8 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const crypto = require('node:crypto');
+const fs = require('node:fs');
+const os = require('node:os');
 const { execFileSync } = require('node:child_process');
 const path = require('node:path');
 
@@ -21,6 +23,26 @@ function signedSession(payload) {
   const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
   const mac = crypto.createHmac('sha256', process.env.SENTINEL_SECRET).update(body).digest('base64url');
   return `${body}.${mac}`;
+}
+
+function responseCapture() {
+  return {
+    statusCode: null,
+    body: null,
+    redirectTo: null,
+    status(code) {
+      this.statusCode = code;
+      return this;
+    },
+    json(body) {
+      this.body = body;
+      return this;
+    },
+    redirect(url) {
+      this.redirectTo = url;
+      return this;
+    },
+  };
 }
 
 test('verifyPassword accepts only the right user+password', () => {
@@ -91,6 +113,56 @@ test('session token signs and verifies; tampered/none rejected', () => {
   assert.strictEqual(auth.verify(null), null);
 });
 
+test('session secret resolution uses stable storage before ephemeral fallback', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-auth-secret-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  assert.deepStrictEqual(auth._internal.resolveSecret({
+    env: { SENTINEL_SECRET: 'env-secret' },
+    dataDir: dir,
+  }), {
+    secret: 'env-secret',
+    source: 'env',
+  });
+
+  const existingDir = path.join(dir, 'existing');
+  fs.mkdirSync(existingDir);
+  fs.writeFileSync(path.join(existingDir, '.session-secret'), ' file-secret \n');
+  assert.deepStrictEqual(auth._internal.resolveSecret({
+    env: {},
+    dataDir: existingDir,
+  }), {
+    secret: 'file-secret',
+    source: 'file',
+  });
+
+  const generatedDir = path.join(dir, 'generated');
+  const generated = auth._internal.resolveSecret({
+    env: {},
+    dataDir: generatedDir,
+    randomBytes: () => Buffer.alloc(32, 0xab),
+  });
+  assert.deepStrictEqual(generated, {
+    secret: 'ab'.repeat(32),
+    source: 'generated',
+  });
+  assert.strictEqual(fs.readFileSync(path.join(generatedDir, '.session-secret'), 'utf8'), generated.secret);
+
+  const ephemeral = auth._internal.resolveSecret({
+    env: {},
+    fs: {
+      existsSync() {
+        throw new Error('storage denied');
+      },
+    },
+    randomBytes: () => Buffer.alloc(32, 0xcd),
+  });
+  assert.deepStrictEqual(ephemeral, {
+    secret: 'cd'.repeat(32),
+    source: 'ephemeral',
+  });
+});
+
 test('oidc session extras are signed and can satisfy fresh step-up', () => {
   const now = Date.now();
   const token = auth.createSession('reviewer@example.test', 'approver', {
@@ -156,6 +228,69 @@ test('csrf token is bound to the signed session token', () => {
   assert.strictEqual(auth.verifyCsrfToken(t, csrf), true);
   assert.strictEqual(auth.verifyCsrfToken(t, csrf + 'x'), false);
   assert.strictEqual(auth.verifyCsrfToken(auth.createSession('other-admin'), csrf), false);
+});
+
+test('auth middleware protects API and page routes and enforces roles', () => {
+  const apiRes = responseCapture();
+  auth.requireAuth({ path: '/api/audit', cookies: {} }, apiRes, () => {
+    throw new Error('unauthenticated API should not continue');
+  });
+  assert.strictEqual(apiRes.statusCode, 401);
+  assert.deepStrictEqual(apiRes.body, { error: 'unauthenticated' });
+
+  const pageRes = responseCapture();
+  auth.requireAuth({ path: '/index.html', cookies: {} }, pageRes, () => {
+    throw new Error('unauthenticated page should not continue');
+  });
+  assert.strictEqual(pageRes.redirectTo, '/login.html');
+
+  const req = { path: '/api/me', cookies: { [auth.SESSION_COOKIE_NAME]: auth.createSession('admin') } };
+  let continued = false;
+  auth.requireAuth(req, responseCapture(), () => { continued = true; });
+  assert.strictEqual(continued, true);
+  assert.strictEqual(req.user.role, 'security_admin');
+
+  const forbidden = responseCapture();
+  auth.requireRole('auditor')(req, forbidden, () => {
+    throw new Error('wrong role should not continue');
+  });
+  assert.strictEqual(forbidden.statusCode, 403);
+  assert.deepStrictEqual(forbidden.body, { error: 'forbidden' });
+
+  let allowed = false;
+  auth.requireRole('security_admin')(req, responseCapture(), () => { allowed = true; });
+  assert.strictEqual(allowed, true);
+});
+
+test('csrf middleware allows safe methods and rejects missing or wrong tokens', () => {
+  const session = auth.createSession('admin');
+  let safeContinued = false;
+  auth.requireCsrf({ method: 'GET', cookies: {}, get: () => '' }, responseCapture(), () => { safeContinued = true; });
+  assert.strictEqual(safeContinued, true);
+
+  const rejected = responseCapture();
+  auth.requireCsrf({
+    method: 'POST',
+    cookies: { [auth.SESSION_COOKIE_NAME]: session },
+    get: () => '',
+  }, rejected, () => {
+    throw new Error('missing csrf should not continue');
+  });
+  assert.strictEqual(rejected.statusCode, 403);
+  assert.deepStrictEqual(rejected.body, { error: 'invalid csrf token' });
+
+  let unsafeContinued = false;
+  auth.requireCsrf({
+    method: 'POST',
+    cookies: { [auth.SESSION_COOKIE_NAME]: session },
+    get: (name) => (name === 'x-csrf-token' ? auth.createCsrfToken(session) : ''),
+  }, responseCapture(), () => { unsafeContinued = true; });
+  assert.strictEqual(unsafeContinued, true);
+});
+
+test('derived auth keys are purpose scoped and deterministic', () => {
+  assert.strictEqual(auth.deriveKey('receipts').equals(auth.deriveKey('receipts')), true);
+  assert.strictEqual(auth.deriveKey('receipts').equals(auth.deriveKey('other-purpose')), false);
 });
 
 test('session token lookup prefers PromptWall cookie with legacy fallback', () => {

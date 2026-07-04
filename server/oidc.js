@@ -24,10 +24,6 @@ function cleanString(value, max = 512) {
   return String(value == null ? '' : value).trim().slice(0, max);
 }
 
-function configured(value) {
-  return cleanString(value).length > 0;
-}
-
 function config(env = process.env) {
   const issuer = cleanString(env.OIDC_ISSUER || env.PROMPTWALL_OIDC_ISSUER, 512).replace(/\/+$/, '');
   const clientId = cleanString(env.OIDC_CLIENT_ID || env.PROMPTWALL_OIDC_CLIENT_ID, 256);

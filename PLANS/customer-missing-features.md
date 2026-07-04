@@ -377,14 +377,15 @@ Acceptance evidence:
 ### 8. First Real MCP Content Connectors
 
 Current state: MCP guard redacts local tool output through a reference guard,
-PromptWall ships a small connector SDK that forces future content connectors
-through `sanitizeToolResult()` before tool output reaches a model, and
-PromptWall now includes a first Microsoft 365 Graph connector for text-readable
-OneDrive and SharePoint driveItem content. PromptWall does not yet ship
-first-party connectors for Google Drive, Slack, Teams, or Jira content.
+PromptWall ships a connector SDK that forces content connectors through
+`sanitizeToolResult()` before tool output reaches a model, and PromptWall now
+includes first-party Microsoft 365 Graph, Google Drive, Slack, Microsoft Teams,
+Atlassian Jira/Confluence, and database read-only connectors. The gap is no
+longer first runtime coverage. The gap is pilot-specific scope, live connector
+traffic, and richer connector policy operations.
 
-Customer ask: "Can it protect agents that pull documents from SharePoint,
-OneDrive, Google Drive, Slack, or Teams before the model sees them?"
+Customer ask: "Can it protect agents that pull documents, tickets, pages,
+messages, or database rows before the model sees them?"
 
 Why it matters: agent workflows are where customers will move next. Do not chase
 30 connectors; ship one or two integrations that prove the reusable pattern.
@@ -396,16 +397,28 @@ Implemented:
 - Included the connector SDK in the MCP guard package and install-health check.
 - Added `sensors/mcp-guard/connectors/microsoft365.js` for Graph driveItem
   content with local SDK sanitization before model delivery.
+- Added `sensors/mcp-guard/connectors/google-drive.js` for Google Drive blob
+  downloads and Google Workspace document export.
+- Added `sensors/mcp-guard/connectors/slack.js` for Slack conversation history
+  and text-readable private file content.
+- Added `sensors/mcp-guard/connectors/teams.js` for Microsoft Teams channel and
+  chat messages through Microsoft Graph.
+- Added `sensors/mcp-guard/connectors/atlassian.js` for bounded Jira issue and
+  Confluence page reads.
+- Added `sensors/mcp-guard/connectors/database-readonly.js` for bounded
+  read-only SQLite query and schema inspection.
 
 Remaining:
 - Extend Microsoft 365 support to Office/PDF conversion, site search, and
   selected-site grants only after pilot needs are clear.
-- Add Google Drive only if an early prospect needs it.
-- Require OAuth scopes, tenant ID, and connector health to appear in coverage
-  posture without storing raw document content.
+- Require live connector traffic, OAuth scopes, tenant/workspace labels, and
+  connector health to appear in coverage posture without storing raw document,
+  message, issue, page, row, SQL, or DSN content.
+- Add connector-specific policy templates only after pilot users prove which
+  tools need allow, block, or approval-required workflows.
 
 Acceptance evidence:
-- `node --test test/mcp-guard.test.js test/mcp-connector-sdk.test.js`
+- `node --test test/mcp-guard.test.js test/mcp-connector-sdk.test.js test/mcp-microsoft365-connector.test.js test/mcp-google-drive-connector.test.js test/mcp-slack-connector.test.js test/mcp-teams-connector.test.js test/mcp-atlassian-connector.test.js test/mcp-database-readonly-connector.test.js`
 - Connector smoke with synthetic docs proves local redaction before tool output
   reaches the model and sanitized evidence in the control plane.
 
@@ -418,7 +431,8 @@ Acceptance evidence:
 3. Signed update channel and commercial rollout posture.
 4. Scheduled examiner evidence pack with backup and restore-drill status.
 5. Customer-defined detectors plus OCR-required handling.
-6. Broaden MCP connectors only after Microsoft 365 pilot scope is clear.
+6. Add richer MCP connector workflows only after pilot traffic proves which
+   shipped connectors need more operations or policy templates.
 
 This order closes the most embarrassing buyer gap first, then turns the product
 from a strong demo into something IT and compliance can operate. It avoids
@@ -457,7 +471,9 @@ Cons:
 
 ### Option C: Connector Breadth First
 
-Build Microsoft 365, Google Drive, Slack, Teams, and Jira connectors immediately.
+Build deeper connector workflows, starting with site search, selected grants,
+ticket/page bulk reads, and database policy templates now that the first six
+connector runtimes are shipped.
 
 Pros:
 - Broad coverage story.
@@ -479,7 +495,8 @@ connector breadth until the operating model is strong enough to support it.
 - First notification target: email, Slack, or Microsoft Teams.
 - Next desktop collector scope: app-specific upload collector or native
   messaging bridge.
-- First content connector: Microsoft 365/SharePoint/OneDrive or Google Drive.
+- First connector workflow to deepen after pilots: document search, ticket/page
+  bulk reads, or database policy templates.
 - Whether group-scoped policy should use IdP groups only or also local groups.
 - Whether scheduled evidence packs should be generated by the app process or an
   external technician-managed task.

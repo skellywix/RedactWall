@@ -175,30 +175,30 @@ async function runSmoke({ env = process.env, argv = process.argv.slice(2), fetch
   };
 }
 
-async function main() {
-  const result = await runSmoke();
+async function main(argv = process.argv.slice(2), deps = {}) {
+  const io = deps.console || console;
+  const run = deps.runSmoke || ((options) => runSmoke(options));
+  const result = await run({ argv, env: deps.env || process.env, fetchImpl: deps.fetchImpl || fetch, now: deps.now || new Date() });
   if (result.dryRun) {
-    console.log(`LINEAR_APPROVAL_SMOKE_DRY_RUN query=${result.queryId} team=${result.teamId} endpoint=${result.url}`);
-    console.log(`title=${result.title}`);
-    console.log('wire=sanitized send=false');
-    console.log('Add --send after setting PROMPTWALL_APPROVAL_LINEAR_API_KEY to create a real Linear issue.');
+    io.log(`LINEAR_APPROVAL_SMOKE_DRY_RUN query=${result.queryId} team=${result.teamId} endpoint=${result.url}`);
+    io.log(`title=${result.title}`);
+    io.log('wire=sanitized send=false');
+    io.log('Add --send after setting PROMPTWALL_APPROVAL_LINEAR_API_KEY to create a real Linear issue.');
     return;
   }
-  console.log(`LINEAR_APPROVAL_SMOKE_OK query=${result.queryId} issue=${result.externalId || 'created'} status=${result.status}`);
-  if (result.url) console.log(`url=${result.url}`);
+  io.log(`LINEAR_APPROVAL_SMOKE_OK query=${result.queryId} issue=${result.externalId || 'created'} status=${result.status}`);
+  if (result.url) io.log(`url=${result.url}`);
 }
 
-if (require.main === module) {
-  main().catch((err) => {
-    console.error(err && err.message ? err.message : err);
-    process.exitCode = 1;
-  });
-}
+if (require.main === module) main().catch((err) => { console.error(err && err.message ? err.message : err); process.exitCode = 1; });
 
 module.exports = {
   assertSanitizedWire,
   buildSmokeRequest,
+  linearChannelForPayload,
   linearEnv,
+  main,
+  parseArgs,
   runSmoke,
   syntheticApprovalQuery,
 };

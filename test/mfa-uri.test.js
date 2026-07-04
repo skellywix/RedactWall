@@ -7,9 +7,11 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const {
+  main,
   normalizeBase32,
   otpauthUri,
   parseArgs,
+  printHelp,
   validateSecret,
 } = require('../scripts/mfa-uri');
 
@@ -39,6 +41,7 @@ test('builds a standard otpauth uri for authenticator enrollment', () => {
 
 test('rejects invalid enrollment secrets and parses cli options', () => {
   assert.throws(() => otpauthUri({ secret: 'bad-*' }), /ADMIN_TOTP_SECRET/);
+  assert.match(otpauthUri({ secret: 'jbswy3dpehpk3pxp', issuer: '  ', account: '  ' }), /PromptWall%3Aadmin/);
   const opts = parseArgs(['--env', 'pilot.env', '--issuer', 'Pilot CU', '--account', 'admin@pilot.test']);
   assert.match(opts.envPath, /pilot\.env$/);
   assert.strictEqual(opts.issuer, 'Pilot CU');
@@ -46,6 +49,32 @@ test('rejects invalid enrollment secrets and parses cli options', () => {
 
   const separated = parseArgs(['--', '--env', 'pilot.env']);
   assert.match(separated.envPath, /pilot\.env$/);
+  assert.strictEqual(parseArgs(['--help']).help, true);
+  assert.throws(() => parseArgs(['--bad']), /Unknown option: --bad/);
+});
+
+test('main and help can be exercised without child processes', () => {
+  const logs = [];
+  const io = { log: (line) => logs.push(String(line)) };
+  printHelp(io);
+  assert.match(logs.join('\n'), /Usage: npm run mfa:uri/);
+  logs.length = 0;
+
+  const code = main(['--issuer', 'PromptWall Test'], {
+    console: io,
+    effectiveEnv: () => ({
+      ADMIN_USER: 'admin@example.test',
+      ADMIN_TOTP_SECRET: 'jbsw y3dp-ehpk3pxp=',
+    }),
+  });
+  assert.strictEqual(code, 0);
+  assert.match(logs.join('\n'), /Treat this MFA enrollment URI as a secret/);
+  assert.match(logs.join('\n'), /otpauth:\/\/totp\/PromptWall%20Test%3Aadmin%40example\.test/);
+  assert.match(logs.join('\n'), /secret=JBSWY3DPEHPK3PXP/);
+  logs.length = 0;
+
+  assert.strictEqual(main(['--help'], { console: io }), 0);
+  assert.match(logs.join('\n'), /node scripts\/mfa-uri\.js/);
 });
 
 function childEnv() {

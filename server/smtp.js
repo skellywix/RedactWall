@@ -82,11 +82,13 @@ function dotStuff(message) {
   return String(message).replace(/\r?\n/g, '\r\n').replace(/^\./gm, '..');
 }
 
-function openSocket(channel) {
+function openSocket(channel, deps = {}) {
   const timeoutMs = channel.timeoutMs || 10000;
   return new Promise((resolve, reject) => {
     const options = { host: channel.host, port: channel.port, servername: channel.host };
-    const socket = channel.secure ? tls.connect(options) : net.createConnection(options);
+    const tlsConnect = deps.tlsConnect || tls.connect;
+    const netCreateConnection = deps.netCreateConnection || net.createConnection;
+    const socket = channel.secure ? tlsConnect(options) : netCreateConnection(options);
     const event = channel.secure ? 'secureConnect' : 'connect';
     const cleanup = () => {
       socket.off('error', onError);
@@ -179,9 +181,10 @@ async function hello(io, host) {
   return expect(await io.command(`HELO ${domain}`), [250], 'smtp_helo');
 }
 
-function startTls(socket, channel) {
+function startTls(socket, channel, deps = {}) {
   return new Promise((resolve, reject) => {
-    const secureSocket = tls.connect({ socket, servername: channel.host }, () => resolve(secureSocket));
+    const tlsConnect = deps.tlsConnect || tls.connect;
+    const secureSocket = tlsConnect({ socket, servername: channel.host }, () => resolve(secureSocket));
     secureSocket.once('error', reject);
   });
 }
@@ -190,8 +193,10 @@ async function send(channel, payload, opts = {}) {
   if (typeof opts.smtpSend === 'function') {
     return opts.smtpSend(channel, payload, messageForPayload(channel, payload, opts.now || new Date()));
   }
-  let socket = await openSocket(channel);
-  let io = transport(socket, channel.timeoutMs);
+  const open = opts.openSocket || ((smtpChannel) => openSocket(smtpChannel, opts));
+  const makeTransport = opts.transport || transport;
+  let socket = await open(channel);
+  let io = makeTransport(socket, channel.timeoutMs);
   let encrypted = !!channel.secure;
   try {
     expect(await io.command(), [220], 'smtp_connect');
@@ -199,9 +204,9 @@ async function send(channel, payload, opts = {}) {
     if (!encrypted && /\bSTARTTLS\b/i.test(helloResponse.text)) {
       expect(await io.command('STARTTLS'), [220], 'smtp_starttls');
       io.detach();
-      socket = await startTls(socket, channel);
+      socket = opts.startTls ? await opts.startTls(socket, channel) : await startTls(socket, channel, opts);
       encrypted = true;
-      io = transport(socket, channel.timeoutMs);
+      io = makeTransport(socket, channel.timeoutMs);
       await hello(io, channel.host);
     }
     if (!encrypted && channel.requireTls) throw new Error('smtp_tls_required');
@@ -229,4 +234,14 @@ module.exports = {
   messageForPayload,
   parseRecipients,
   send,
+  _internal: {
+    cleanHeader,
+    dotStuff,
+    expect,
+    hello,
+    mailboxPath,
+    openSocket,
+    startTls,
+    transport,
+  },
 };

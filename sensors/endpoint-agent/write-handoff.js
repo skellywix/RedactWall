@@ -139,34 +139,39 @@ function writeHandoffFile(opts = {}) {
   return { path: handoffPath, event };
 }
 
-function main() {
+function main(argv = process.argv.slice(2), deps = {}) {
+  const io = deps.console || console;
+  const write = deps.writeHandoffFile || writeHandoffFile;
   try {
-    const opts = parseArgs();
+    const opts = parseArgs(argv);
     if (opts.help) {
-      console.log(usage());
-      return;
+      io.log(usage());
+      return 0;
     }
-    const result = writeHandoffFile(opts);
-    console.log(JSON.stringify({
+    const result = write(opts);
+    io.log(JSON.stringify({
       status: 'written',
       handoffPath: result.path,
       id: result.event.id,
       destination: nativeHandoff.publicDestination(result.event.destination),
     }, null, 2));
+    return 0;
   } catch (err) {
-    console.error(err.message || err);
-    process.exitCode = 1;
+    io.error(err.message || err);
+    return 1;
   }
 }
 
-if (require.main === module) main();
+if (require.main === module) process.exitCode = main();
 
 module.exports = {
   absoluteLocalFilePath,
   destinationFromOptions,
   loadEndpointEnv,
+  main,
   parseArgs,
   safeEventFileName,
   usage,
   writeHandoffFile,
+  _internal: { writeAtomicJson },
 };

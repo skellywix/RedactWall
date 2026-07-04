@@ -25,6 +25,9 @@ const POLICY_AUDIT_FIELDS = new Set([
   'blockedDestinations',
   'blockedFileUploadDestinations',
   'blockedBrowserActions',
+  'mcpAllowedTools',
+  'mcpBlockedTools',
+  'mcpApprovalRequiredTools',
   'blockUnapprovedAiDestinations',
   'responseScanMode',
   'approvalRoutingRules',
@@ -270,6 +273,10 @@ function safeCoverageTotals(totals = {}) {
     endpointAiInventoryReports: safeCoverageNumber(totals.endpointAiInventoryReports),
     endpointAiToolDetections: safeCoverageNumber(totals.endpointAiToolDetections),
     endpointAiToolUnapproved: safeCoverageNumber(totals.endpointAiToolUnapproved),
+    discoveryFeeds: safeCoverageNumber(totals.discoveryFeeds),
+    freshDiscoveryFeeds: safeCoverageNumber(totals.freshDiscoveryFeeds),
+    staleDiscoveryFeeds: safeCoverageNumber(totals.staleDiscoveryFeeds),
+    lastDiscoveryAt: safeCoverageText(totals.lastDiscoveryAt),
     fleetRows: safeCoverageNumber(totals.fleetRows),
     fleetCovered: safeCoverageNumber(totals.fleetCovered),
     fleetAttention: safeCoverageNumber(totals.fleetAttention),
@@ -370,6 +377,20 @@ function safeEndpointAiTools(tools = []) {
   }));
 }
 
+function safeEndpointFileFlowProfiles(profiles = []) {
+  return (Array.isArray(profiles) ? profiles : []).slice(0, 120).map((profile) => ({
+    id: safeCoverageText(profile && profile.id),
+    state: safeCoverageText(profile && profile.state),
+    detail: safeCoverageText(profile && profile.detail),
+    user: safeCoverageText(profile && profile.user),
+    orgId: safeCoverageText(profile && profile.orgId),
+    lastSeen: safeCoverageText(profile && profile.lastSeen),
+    platforms: (Array.isArray(profile && profile.platforms) ? profile.platforms : [])
+      .filter((item) => typeof item === 'string')
+      .slice(0, 5),
+  }));
+}
+
 function safeCoverageDestinations(destinations = []) {
   return (Array.isArray(destinations) ? destinations : []).slice(0, 50).map((destination) => ({
     destination: safeCoverageText(destination && destination.destination),
@@ -380,6 +401,20 @@ function safeCoverageDestinations(destinations = []) {
     users: safeCoverageNumber(destination && destination.users),
     lastSeen: safeCoverageText(destination && destination.lastSeen),
     governed: destination && destination.governed === true,
+  }));
+}
+
+function safeCoverageDiscoveryFeeds(feeds = []) {
+  return (Array.isArray(feeds) ? feeds : []).slice(0, 12).map((feed) => ({
+    source: safeCoverageText(feed && feed.source),
+    state: safeCoverageText(feed && feed.state),
+    observations: safeCoverageNumber(feed && feed.observations),
+    destinations: safeCoverageNumber(feed && feed.destinations),
+    users: safeCoverageNumber(feed && feed.users),
+    categories: (Array.isArray(feed && feed.categories) ? feed.categories : []).slice(0, 6).map((item) => safeCoverageText(item)),
+    lastSeen: safeCoverageText(feed && feed.lastSeen),
+    ageHours: feed && feed.ageHours == null ? null : safeCoverageNumber(feed && feed.ageHours),
+    privacy: safeCoverageText(feed && feed.privacy),
   }));
 }
 
@@ -401,6 +436,8 @@ function safeCoverage(report) {
     sensors: safeCoverageSensors(report.sensors),
     fleet: safeCoverageFleet(report.fleet),
     endpointAiTools: safeEndpointAiTools(report.endpointAiTools),
+    endpointFileFlowProfiles: safeEndpointFileFlowProfiles(report.endpointFileFlowProfiles),
+    discoveryFeeds: safeCoverageDiscoveryFeeds(report.discoveryFeeds),
     governedDestinations: safeCoverageDestinations(report.governedDestinations),
     ungovernedDestinations: safeCoverageDestinations(report.ungovernedDestinations),
     shadowDestinations: safeCoverageDestinations(report.shadowDestinations),
@@ -430,6 +467,217 @@ function safePolicyExceptionReview(report) {
     reviewDue: safeCoverageNumber(report.reviewDue),
     expiringSoon: safeCoverageNumber(report.expiringSoon),
     items,
+  };
+}
+
+function safePostureText(value, limit = 160) {
+  return safeBoundedText(value, limit);
+}
+
+function safePostureItems(items = [], fields = []) {
+  return (Array.isArray(items) ? items : []).slice(0, 50).map((item) => {
+    const row = {};
+    for (const field of fields) {
+      const value = item && item[field];
+      if (typeof value === 'number' || typeof value === 'boolean') row[field] = value;
+      else if (typeof value === 'string') row[field] = safePostureText(value, field === 'description' || field === 'detail' ? 240 : 120);
+      else if (Array.isArray(value)) row[field] = value.slice(0, 20).map((entry) => safePolicyValue(entry));
+      else if (value && typeof value === 'object') row[field] = safePolicyValue(value);
+      else row[field] = null;
+    }
+    return row;
+  });
+}
+
+function safePostureHardening(hardening) {
+  if (!hardening || typeof hardening !== 'object') return null;
+  return {
+    generatedAt: safePostureText(hardening.generatedAt, 80),
+    score: safeCoverageNumber(hardening.score),
+    state: safePostureText(hardening.state, 80),
+    status: safePostureText(hardening.status, 80),
+    summary: safePolicyValue(hardening.summary || {}),
+    areas: safePostureItems(hardening.areas, [
+      'id',
+      'label',
+      'description',
+      'score',
+      'state',
+      'status',
+      'evidence',
+      'gaps',
+      'action',
+      'targetTab',
+      'owner',
+      'source',
+      'location',
+      'proofs',
+      'proofLedger',
+      'playbook',
+    ]),
+    proofLedger: safePolicyValue(hardening.proofLedger || {}),
+    mission: safePolicyValue(hardening.mission || {}),
+    nextActions: safePostureItems(hardening.nextActions, ['id', 'label', 'action', 'detail', 'targetTab', 'priority']),
+  };
+}
+
+function safeThreatText(value, limit = 160) {
+  const text = safePostureText(value, limit);
+  if (!text) return text;
+  if (/\b\d{3}-\d{2}-\d{4}\b/.test(text)) return '[redacted]';
+  if (/\b(?:\d[ -]?){13,19}\b/.test(text)) return '[redacted]';
+  if (/\b(?:sk|pk|rk|ghp|gho|github_pat|xox[baprs])[-_a-z0-9]{8,}\b/i.test(text)) return '[redacted]';
+  return text;
+}
+
+function safeThreatItems(items = [], fields = []) {
+  return (Array.isArray(items) ? items : []).slice(0, 50).map((item) => {
+    const row = {};
+    for (const field of fields) {
+      const value = item && item[field];
+      if (typeof value === 'number' || typeof value === 'boolean') row[field] = value;
+      else if (typeof value === 'string') row[field] = safeThreatText(value, field === 'description' || field === 'detail' ? 240 : 120);
+      else if (Array.isArray(value)) row[field] = value.slice(0, 20).map((entry) => (typeof entry === 'string' ? safeThreatText(entry, 120) : safePolicyValue(entry)));
+      else if (value && typeof value === 'object') row[field] = safePolicyValue(value);
+      else row[field] = null;
+    }
+    return row;
+  });
+}
+
+function safePostureThreatGuardrails(threats) {
+  if (!threats || typeof threats !== 'object') return null;
+  return {
+    summary: safePolicyValue(threats.summary || {}),
+    rules: safeThreatItems(threats.rules, ['id', 'label', 'framework', 'atlas', 'control', 'events', 'blocked', 'redacted', 'critical', 'lastSeen', 'state', 'status', 'detail', 'action', 'targetTab']),
+    controls: safeThreatItems(threats.controls, ['id', 'label', 'state', 'detail', 'targetTab']),
+    recent: safeThreatItems(threats.recent, ['id', 'timestamp', 'source', 'destination', 'severity', 'status', 'decision', 'title', 'threats', 'detail']),
+  };
+}
+
+function safePostureCompetitiveReadiness(readiness) {
+  if (!readiness || typeof readiness !== 'object') return null;
+  return {
+    generatedAt: safePostureText(readiness.generatedAt, 80),
+    summary: safePolicyValue(readiness.summary || {}),
+    matrix: safeThreatItems(readiness.matrix, ['id', 'label', 'marketBar', 'score', 'state', 'status', 'evidence', 'gaps', 'action', 'targetTab', 'source', 'detail']),
+    differentiators: (Array.isArray(readiness.differentiators) ? readiness.differentiators : [])
+      .slice(0, 10)
+      .map((item) => safeThreatText(item, 180)),
+    nextGaps: safeThreatItems(readiness.nextGaps, ['id', 'priority', 'label', 'detail', 'action', 'targetTab', 'score']),
+  };
+}
+
+function safePostureBehaviorBaselines(baselines) {
+  if (!baselines || typeof baselines !== 'object') return null;
+  return {
+    generatedAt: safeThreatText(baselines.generatedAt, 80),
+    privacy: safeThreatText(baselines.privacy, 120),
+    summary: safePolicyValue(baselines.summary || {}),
+    dimensions: safeThreatItems(baselines.dimensions, [
+      'id',
+      'kind',
+      'label',
+      'title',
+      'state',
+      'status',
+      'score',
+      'recentEvents',
+      'previousEvents',
+      'baselineDaily',
+      'surgeRatio',
+      'recentSensitive',
+      'recentControlled',
+      'maxRiskScore',
+      'maxSeverity',
+      'latestAt',
+      'detail',
+      'action',
+      'targetTab',
+      'source',
+    ]),
+    playbook: safeThreatItems(baselines.playbook, ['id', 'priority', 'severity', 'label', 'detail', 'action', 'targetTab', 'score']),
+  };
+}
+
+function safePostureCompetitiveFocus(focus) {
+  if (!focus || typeof focus !== 'object') return null;
+  return {
+    summary: safePolicyValue(focus.summary || {}),
+    lanes: safeThreatItems(focus.lanes, ['id', 'label', 'competitors', 'marketBar', 'score', 'state', 'status', 'evidence', 'gaps', 'action', 'targetTab', 'anchor']),
+    playbook: safeThreatItems(focus.playbook, ['id', 'priority', 'label', 'detail', 'targetTab', 'anchor', 'validation']),
+  };
+}
+
+function safePostureDecisionQuality(quality) {
+  if (!quality || typeof quality !== 'object') return null;
+  const summary = quality.summary || {};
+  return {
+    generatedAt: safeThreatText(quality.generatedAt, 80),
+    summary: {
+      events: safeCoverageNumber(summary.events),
+      sensitiveEvents: safeCoverageNumber(summary.sensitiveEvents),
+      pendingReviews: safeCoverageNumber(summary.pendingReviews),
+      escalatedReviews: safeCoverageNumber(summary.escalatedReviews),
+      approved: safeCoverageNumber(summary.approved),
+      denied: safeCoverageNumber(summary.denied),
+      coachingEvents: safeCoverageNumber(summary.coachingEvents),
+      coachingCompleted: safeCoverageNumber(summary.coachingCompleted),
+      overrideWatch: safeCoverageNumber(summary.overrideWatch),
+      riskyAllows: safeCoverageNumber(summary.riskyAllows),
+      controlRate: safeCoverageNumber(summary.controlRate),
+      slaHealthyRate: safeCoverageNumber(summary.slaHealthyRate),
+      privacy: safeThreatText(summary.privacy, 120),
+    },
+    cards: safeThreatItems(quality.cards, ['id', 'label', 'score', 'state', 'status', 'value', 'detail', 'action', 'targetTab']),
+    hotspots: safeThreatItems(quality.hotspots, ['id', 'kind', 'label', 'events', 'sensitive', 'blocked', 'redacted', 'allowed', 'coached', 'pending', 'escalated', 'maxRiskScore', 'lastSeen', 'state', 'detail']),
+  };
+}
+
+function safePostureDetectionQuality(quality) {
+  if (!quality || typeof quality !== 'object') return null;
+  return {
+    generatedAt: safeThreatText(quality.generatedAt, 80),
+    summary: safePolicyValue(quality.summary || {}),
+    gates: safeThreatItems(quality.gates, ['id', 'label', 'value', 'floor', 'state']),
+    semantic: safeThreatItems(quality.semantic, ['id', 'kind', 'precision', 'recall', 'f1', 'tp', 'fp', 'fn', 'state', 'status', 'detail']),
+    structured: safeThreatItems(quality.structured, ['id', 'kind', 'precision', 'recall', 'f1', 'tp', 'fp', 'fn', 'state', 'status', 'detail']),
+    failures: (Array.isArray(quality.failures) ? quality.failures : []).slice(0, 12).map((item) => safeThreatText(item, 160)),
+  };
+}
+
+function safeDetectorFeedbackReport(report) {
+  if (!report || typeof report !== 'object') return null;
+  return {
+    generatedAt: safeThreatText(report.generatedAt, 80),
+    summary: safePolicyValue(report.summary || {}),
+    detectors: safeThreatItems(report.detectors, ['detectorId', 'label', 'total', 'valid', 'falsePositive', 'tooSensitive', 'missed', 'affectedQueries', 'maxRiskScore', 'lastSeen', 'state', 'detail']),
+    reviewQueue: safeThreatItems(report.reviewQueue, ['queryId', 'createdAt', 'detectorId', 'detectorIds', 'destination', 'source', 'channel', 'status', 'riskScore', 'maxSeverity', 'feedbackCount', 'reviewed']),
+    recent: safeThreatItems(report.recent, ['id', 'createdAt', 'queryId', 'detectorId', 'verdict', 'verdictLabel', 'actor', 'role', 'source', 'channel', 'destination', 'queryStatus', 'riskScore', 'maxSeverity']),
+  };
+}
+
+function safePosture(report) {
+  if (!report || typeof report !== 'object') return null;
+  return {
+    generatedAt: safePostureText(report.generatedAt, 80),
+    windowDays: safeCoverageNumber(report.windowDays),
+    summary: safePolicyValue(report.summary || {}),
+    metrics: safePostureItems(report.metrics, ['id', 'label', 'value', 'unit', 'trend', 'status']),
+    objectives: safePostureItems(report.objectives, ['id', 'label', 'score', 'state', 'detail', 'action', 'targetTab']),
+    aiInventory: safePolicyValue(report.aiInventory || {}),
+    threatGuardrails: safePostureThreatGuardrails(report.threatGuardrails),
+    behaviorBaselines: safePostureBehaviorBaselines(report.behaviorBaselines),
+    competitiveReadiness: safePostureCompetitiveReadiness(report.competitiveReadiness),
+    competitiveFocus: safePostureCompetitiveFocus(report.competitiveFocus),
+    decisionQuality: safePostureDecisionQuality(report.decisionQuality),
+    detectionQuality: safePostureDetectionQuality(report.detectionQuality),
+    actionQueue: safePostureItems(report.actionQueue, ['id', 'priority', 'severity', 'category', 'label', 'detail', 'owner', 'source', 'action', 'targetTab', 'command', 'workflowStatus', 'workflowOwner', 'workflowActor', 'workflowNote', 'workflowSnoozeUntil', 'workflowUpdatedAt', 'workflowProofState']),
+    surfaces: safePostureItems(report.surfaces, ['id', 'name', 'type', 'status', 'source', 'location', 'health', 'confidence', 'relatedMetric', 'lastUpdated', 'description']),
+    trend: safePostureItems(report.trend, ['date', 'events', 'blocked', 'redacted', 'allowed', 'coached', 'shadow', 'maxRiskScore']),
+    controls: safePostureItems(report.controls, ['label', 'events', 'blocked', 'redacted', 'allowed', 'coached', 'shadow']),
+    hardening: safePostureHardening(report.hardening),
+    events: safePostureItems(report.events, ['id', 'timestamp', 'severity', 'source', 'title', 'description', 'confidence', 'relatedMetric', 'status']),
   };
 }
 
@@ -543,6 +791,8 @@ function buildEvidencePack(input) {
     ? input.lineageQueries
     : (Array.isArray(input.summaryQueries) ? input.summaryQueries : queries);
   const coverageReport = safeCoverage(input.coverage);
+  const postureReport = safePosture(input.posture);
+  const detectorFeedbackReport = safeDetectorFeedbackReport(input.detectorFeedback);
   const policyExceptionReview = safePolicyExceptionReview(input.policyExceptionReview);
   const backup = safeBackupEvidence(input.backup);
   const restoreDrill = safeRestoreDrillEvidence(input.restoreDrill);
@@ -569,6 +819,8 @@ function buildEvidencePack(input) {
     stats: input.stats,
     auditIntegrity: input.auditIntegrity,
     coverage: coverageReport,
+    posture: postureReport,
+    detectorFeedback: detectorFeedbackReport,
     policyExceptionReview,
     backup,
     restoreDrill,
@@ -599,6 +851,8 @@ module.exports = {
   safeBackupEvidence,
   safeRestoreDrillEvidence,
   safeReport,
+  safePosture,
+  safeDetectorFeedbackReport,
   buildLineage,
   hashText,
 };

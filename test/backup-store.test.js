@@ -15,6 +15,14 @@ process.env.SENTINEL_DATA_KEY = 'unit-data-key-stable';
 const db = require('../server/db');
 const backup = require('../scripts/backup-store');
 
+function captureConsole() {
+  const lines = [];
+  return {
+    lines,
+    log(message) { lines.push(message); },
+  };
+}
+
 test('backup workflow verifies and restores audit evidence without leaking manifest prompt data', async () => {
   const secret = '524-71-9043';
   const q = db.createQuery({
@@ -93,15 +101,63 @@ test('create refuses existing manifest before writing a backup file', async () =
   assert.strictEqual(fs.existsSync(target), false);
 });
 
+test('create refuses to back up a database with broken audit integrity', async () => {
+  await assert.rejects(() => backup.createBackup({
+    dbModule: {
+      verifyAuditChain() {
+        return { ok: false, reason: 'hash_mismatch' };
+      },
+    },
+  }), /broken audit integrity: hash_mismatch/);
+});
+
 test('argument parser preserves positional paths for npm-run portability', () => {
   assert.deepStrictEqual(
     backup.parseArgs(['create', 'backups']),
     { _: ['create', 'backups'] },
   );
   assert.deepStrictEqual(
+    backup.parseArgs(['verify', '--file', 'backups/sentinel.db', '--manifest', 'manifest.json']),
+    { _: ['verify'], file: 'backups/sentinel.db', manifest: 'manifest.json' },
+  );
+  assert.deepStrictEqual(
     backup.parseArgs(['restore', 'backups/sentinel.db', 'data/restored.db', '--force']),
     { _: ['restore', 'backups/sentinel.db', 'data/restored.db'], force: true },
   );
+});
+
+test('main dispatches create, verify, and restore commands with JSON output', async () => {
+  const io = captureConsole();
+  const calls = [];
+  const deps = {
+    console: io,
+    async createBackup(opts) {
+      calls.push(['create', opts]);
+      return { ok: true, command: 'create' };
+    },
+    verifyBackup(opts) {
+      calls.push(['verify', opts]);
+      return { ok: true, command: 'verify' };
+    },
+    restoreBackup(opts) {
+      calls.push(['restore', opts]);
+      return { ok: true, command: 'restore' };
+    },
+  };
+
+  assert.deepStrictEqual(await backup.main(['create', 'out-dir', '--file', 'backup.db', '--manifest', 'manifest.json', '--force'], deps), { ok: true, command: 'create' });
+  assert.deepStrictEqual(await backup.main(['verify', 'backup.db', '--manifest', 'manifest.json'], deps), { ok: true, command: 'verify' });
+  assert.deepStrictEqual(await backup.main(['restore', 'backup.db', 'restore.db', '--force'], deps), { ok: true, command: 'restore' });
+  await assert.rejects(() => backup.main(['unknown'], deps), /unknown command/);
+
+  assert.deepStrictEqual(calls, [
+    ['create', { outDir: 'out-dir', file: 'backup.db', manifestFile: 'manifest.json', force: true }],
+    ['verify', { file: 'backup.db', manifestFile: 'manifest.json' }],
+    ['restore', { file: 'backup.db', to: 'restore.db', force: true }],
+  ]);
+  assert.strictEqual(JSON.parse(io.lines[0]).command, 'create');
+  assert.strictEqual(JSON.parse(io.lines[1]).command, 'verify');
+  assert.strictEqual(JSON.parse(io.lines[2]).command, 'restore');
 });
 
 test.after(() => {

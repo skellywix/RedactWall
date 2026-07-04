@@ -23,6 +23,23 @@ test('parseEnv supports comments, export prefix, and quoted values', () => {
   assert.strictEqual(parsed.parsed.INGEST_API_KEY, 'abc123');
 });
 
+test('parseEnv reports invalid keys without loading their values', () => {
+  const parsed = env.parseEnv('BROKEN\n1BAD=secret\nGOOD=value\\#literal # comment\n');
+  assert.deepStrictEqual(parsed.errors, [
+    { line: 1, error: 'missing equals sign' },
+    { line: 2, error: 'invalid key' },
+  ]);
+  assert.strictEqual(parsed.parsed['1BAD'], undefined);
+  assert.strictEqual(parsed.parsed.GOOD, 'value\\#literal');
+});
+
+test('withEnvAliases returns an aliased copy without mutating the source', () => {
+  const source = { PROMPTWALL_URL: 'https://promptwall.example.test' };
+  const copy = env.withEnvAliases(source);
+  assert.strictEqual(copy.SENTINEL_URL, 'https://promptwall.example.test');
+  assert.strictEqual(source.SENTINEL_URL, undefined);
+});
+
 test('loadEnv keeps existing process values unless override is requested', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-env-test-'));
   const file = path.join(dir, '.env');

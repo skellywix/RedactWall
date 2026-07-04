@@ -66,6 +66,17 @@ test('tenant config treats requirement flags as SaaS mode', () => {
   assert.strictEqual(cfg.requireUserIdentity, true);
 });
 
+test('non-SaaS sensor access passes through optional org id', () => {
+  assert.deepStrictEqual(tenant.validateSensorAccess({
+    body: { orgId: 'pilot-org', user: '' },
+    db: fakeDb(),
+    env: {},
+  }), {
+    ok: true,
+    orgId: 'pilot-org',
+  });
+});
+
 test('SaaS sensor access requires tenant and managed user identity', () => {
   const missingTenant = tenant.validateSensorAccess({
     body: { user: 'analyst@example.test' },
@@ -82,6 +93,26 @@ test('SaaS sensor access requires tenant and managed user identity', () => {
   });
   assert.strictEqual(unmanaged.ok, false);
   assert.strictEqual(unmanaged.status, 'user_identity_required');
+});
+
+test('SaaS sensor access fails closed without a valid configured tenant id', () => {
+  for (const tenantId of [undefined, '', 'Invalid Tenant!']) {
+    const env = {
+      SENTINEL_SAAS_MODE: 'true',
+      SENTINEL_SEAT_LIMIT: '1',
+    };
+    if (tenantId !== undefined) env.SENTINEL_TENANT_ID = tenantId;
+    const result = tenant.validateSensorAccess({
+      body: { orgId: 'cu-acme', user: 'analyst@example.test' },
+      db: fakeDb(),
+      env,
+    });
+    const label = tenantId === undefined ? 'missing' : tenantId;
+    assert.strictEqual(result.ok, false, label);
+    assert.strictEqual(result.statusCode, 503, label);
+    assert.strictEqual(result.status, 'tenant_not_configured', label);
+    assert.strictEqual(result.audit, false, label);
+  }
 });
 
 test('SaaS sensor access rejects cross-tenant events', () => {

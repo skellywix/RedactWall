@@ -15,7 +15,13 @@ test('send-button selectors are site-specific then generic', () => {
 test('governance + AI-host matching handles subdomains', () => {
   assert.ok(A.isGoverned('chatgpt.com', ['chatgpt.com']));
   assert.ok(A.isGoverned('sub.openai.com', ['openai.com']), 'subdomain governed');
+  assert.ok(A.isGoverned('team.openai.com', ['*.openai.com']), 'wildcard subdomain governed');
+  assert.ok(A.isGoverned('openai.com', ['*openai.com']), 'suffix wildcard governs root');
+  assert.ok(A.isGoverned('labs.openai.com', ['*openai.com']), 'suffix wildcard governs subdomain');
+  assert.ok(A.isGoverned('anything.example', ['*']), 'catch-all governs any normalized host');
+  assert.strictEqual(A.normalizeHost('https://%'), 'https:');
   assert.ok(!A.isGoverned('evil.com', ['openai.com']));
+  assert.ok(!A.hostMatches('openai.com', ''), 'empty base does not govern');
   assert.ok(A.isAiHost('claude.ai') && A.isAiHost('chat.deepseek.com'));
   assert.ok(!A.isAiHost('example.com'));
 });

@@ -49,6 +49,8 @@ const ENV_ORDER = [
   'SIEM_WEBHOOK_TOKEN',
   'SIEM_ALERT_MIN_RISK',
   'SIEM_ALERT_MIN_SEVERITY',
+  'SIEM_POSTURE_FEED_ENABLED',
+  'SIEM_POSTURE_MIN_INTERVAL_MS',
 ];
 
 function randomText(bytes = 32) {
@@ -106,6 +108,8 @@ function buildEnv(opts = {}) {
     SIEM_WEBHOOK_TOKEN: '',
     SIEM_ALERT_MIN_RISK: '25',
     SIEM_ALERT_MIN_SEVERITY: '3',
+    SIEM_POSTURE_FEED_ENABLED: 'false',
+    SIEM_POSTURE_MIN_INTERVAL_MS: '300000',
   };
 }
 
@@ -167,7 +171,7 @@ function renderEnv(values, opts = {}) {
   lines.push('', '# Customer identity provisioning and console SSO');
   ['SCIM_BEARER_TOKEN', 'OIDC_ISSUER', 'OIDC_CLIENT_ID', 'OIDC_CLIENT_SECRET', 'OIDC_REDIRECT_URI', 'OIDC_SCOPE', 'OIDC_AUTHORIZATION_ENDPOINT', 'OIDC_TOKEN_ENDPOINT', 'OIDC_JWKS_URI'].forEach(add);
   lines.push('', '# Optional sanitized SIEM/SOC webhook');
-  ['SIEM_WEBHOOK_URL', 'SIEM_WEBHOOK_TOKEN', 'SIEM_ALERT_MIN_RISK', 'SIEM_ALERT_MIN_SEVERITY'].forEach(add);
+  ['SIEM_WEBHOOK_URL', 'SIEM_WEBHOOK_TOKEN', 'SIEM_ALERT_MIN_RISK', 'SIEM_ALERT_MIN_SEVERITY', 'SIEM_POSTURE_FEED_ENABLED', 'SIEM_POSTURE_MIN_INTERVAL_MS'].forEach(add);
   for (const key of Object.keys(values).sort()) add(key);
   return lines.join('\n') + '\n';
 }
@@ -233,12 +237,15 @@ function run(command, args, opts = {}) {
   if (result.status !== 0) throw new Error(`${command} ${args.join(' ')} exited with ${result.status}`);
 }
 
-function installDependencies(opts = {}) {
-  const args = fs.existsSync(path.join(ROOT, 'package-lock.json')) ? ['ci'] : ['install'];
+function installDependencies(opts = {}, deps = {}) {
+  const exists = deps.existsSync || fs.existsSync;
+  const execute = deps.run || run;
+  const npm = deps.npmCommand || npmCommand;
+  const args = exists(path.join(ROOT, 'package-lock.json')) ? ['ci'] : ['install'];
   if (opts.production) args.push('--omit=dev');
-  run(npmCommand(), args);
+  execute(npm(), args);
   if (opts.withBrowser && !opts.production) {
-    run(npmCommand(), ['exec', '--', 'playwright', 'install', 'chromium']);
+    execute(npm(), ['exec', '--', 'playwright', 'install', 'chromium']);
   }
 }
 
@@ -250,16 +257,16 @@ function initializeRuntime(envPath) {
   return db.verifyAuditChain();
 }
 
-function printStatus(status) {
-  console.log(`Preflight: ${status.level}${status.ready ? ' (ready)' : ' (blocked)'}`);
+function printStatus(status, io = console) {
+  io.log(`Preflight: ${status.level}${status.ready ? ' (ready)' : ' (blocked)'}`);
   for (const item of status.checks) {
     const mark = item.ok ? 'ok' : item.severity;
-    console.log(`  ${mark}: ${item.id} - ${item.ok ? item.message : item.remediation}`);
+    io.log(`  ${mark}: ${item.id} - ${item.ok ? item.message : item.remediation}`);
   }
 }
 
-function printHelp() {
-  console.log([
+function printHelp(io = console) {
+  io.log([
     'Usage: npm run setup -- [options]',
     '',
     'Options:',
@@ -272,54 +279,69 @@ function printHelp() {
   ].join('\n'));
 }
 
-function main(argv = process.argv.slice(2)) {
+function main(argv = process.argv.slice(2), deps = {}) {
+  const io = deps.console || console;
+  const checkNodeVersion = deps.assertNodeVersion || assertNodeVersion;
+  const install = deps.installDependencies || installDependencies;
+  const initRuntime = deps.initializeRuntime || initializeRuntime;
+  const loadEffectiveEnv = deps.effectiveEnv || effectiveEnv;
+  const readEnv = deps.readEnvFile || readEnvFile;
+  const build = deps.buildEnv || buildEnv;
+  const merge = deps.mergeEnv || mergeEnv;
+  const render = deps.renderEnv || renderEnv;
+  const statusForEnv = deps.statusFromEnv || statusFromEnv;
+  const mkdir = deps.mkdirSync || fs.mkdirSync;
+  const writeFile = deps.writeFileSync || fs.writeFileSync;
+  const env = deps.env || process.env;
   const opts = parseArgs(argv);
   if (opts.help) {
-    printHelp();
+    printHelp(io);
     return 0;
   }
-  assertNodeVersion();
+  checkNodeVersion();
 
   if (opts.check) {
-    const status = statusFromEnv(effectiveEnv(opts.envPath));
-    printStatus(status);
+    const status = statusForEnv(loadEffectiveEnv(opts.envPath));
+    printStatus(status, io);
     return status.ready ? 0 : 1;
   }
 
-  if (!opts.skipInstall) installDependencies(opts);
+  if (!opts.skipInstall) install(opts);
 
-  const generated = buildEnv(opts);
-  const merged = mergeEnv(readEnvFile(opts.envPath), generated, opts);
-  fs.mkdirSync(path.dirname(opts.envPath), { recursive: true });
-  fs.writeFileSync(opts.envPath, renderEnv(merged, opts), { mode: 0o600 });
+  const generated = build(opts);
+  const merged = merge(readEnv(opts.envPath), generated, opts);
+  mkdir(path.dirname(opts.envPath), { recursive: true });
+  writeFile(opts.envPath, render(merged, opts), { mode: 0o600 });
 
-  const audit = initializeRuntime(opts.envPath);
-  const status = statusFromEnv({ ...merged, ...process.env });
-  console.log(`Wrote ${opts.envPath}`);
-  console.log(`Initialized SQLite store at ${merged.SENTINEL_DB_PATH}`);
-  console.log(`Audit chain: ${audit.ok ? 'ok' : 'failed'}`);
-  printStatus(status);
+  const audit = initRuntime(opts.envPath);
+  const status = statusForEnv({ ...merged, ...env });
+  io.log(`Wrote ${opts.envPath}`);
+  io.log(`Initialized SQLite store at ${merged.SENTINEL_DB_PATH}`);
+  io.log(`Audit chain: ${audit.ok ? 'ok' : 'failed'}`);
+  printStatus(status, io);
   if (!status.ready) return 1;
-  console.log('Setup complete. Start with: npm start');
+  io.log('Setup complete. Start with: npm start');
   return 0;
 }
 
-if (require.main === module) {
-  try {
-    process.exitCode = main();
-  } catch (e) {
-    console.error('Setup failed: ' + (e && e.message ? e.message : e));
-    process.exitCode = 1;
-  }
-}
+if (require.main === module) { try { process.exitCode = main(); } catch (e) { console.error('Setup failed: ' + (e && e.message ? e.message : e)); process.exitCode = 1; } }
 
 module.exports = {
+  assertNodeVersion,
   buildEnv,
   effectiveEnv,
+  initializeRuntime,
+  installDependencies,
+  main,
   mergeEnv,
+  npmCommand,
   parseArgs,
   placeholderValue,
+  printHelp,
+  printStatus,
   quoteEnvValue,
+  readEnvFile,
   renderEnv,
+  run,
   statusFromEnv,
 };

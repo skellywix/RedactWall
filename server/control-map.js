@@ -159,4 +159,4 @@ function buildControlMappings(input = {}) {
   });
 }
 
-module.exports = { CONTROL_MAPPINGS, buildControlMappings };
+module.exports = { CONTROL_MAPPINGS, buildControlMappings, _internal: { stateFor } };

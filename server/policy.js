@@ -19,6 +19,7 @@ const ROUTING_ROLE_RE = /^(security_admin|approver)$/;
 const ROUTING_REASON_RE = /^[a-z0-9][a-z0-9_:-]{0,79}$/;
 const ROUTING_DETECTOR_RE = /^[A-Z0-9_]{1,80}$/;
 const POLICY_MATCH_TEXT_RE = /^[A-Za-z0-9 ._@:+/-]{1,128}$/;
+const MCP_TOOL_RE = /^[A-Za-z0-9.*:_/-]{1,160}$/;
 const POLICY_MODE_RANK = { warn: 1, redact: 2, justify: 2, block: 3 };
 const RESPONSE_SCAN_MODES = new Set(['flag', 'redact', 'block']);
 const BROWSER_ACTIONS = new Set(['paste', 'drop', 'copy', 'download']);
@@ -52,6 +53,9 @@ const DEFAULT_POLICY = {
   blockedDestinations: [],
   blockedFileUploadDestinations: [],
   blockedBrowserActions: [],
+  mcpAllowedTools: [],
+  mcpBlockedTools: [],
+  mcpApprovalRequiredTools: [],
   blockUnapprovedAiDestinations: true,
   responseScanMode: 'flag',
   desktopCollectorDestination: 'Desktop AI',
@@ -358,6 +362,10 @@ function normalizeBlockedBrowserActions(value) {
   return out;
 }
 
+function normalizeMcpToolList(value) {
+  return normalizeSafeRoutingTextList(value, MCP_TOOL_RE, 200);
+}
+
 function normalizePolicy(p = {}) {
   const scanner = {
     ...DEFAULT_POLICY.scanner,
@@ -379,6 +387,9 @@ function normalizePolicy(p = {}) {
     policyScopes: normalizePolicyScopes((p || {}).policyScopes),
     policyExceptions: normalizePolicyExceptions((p || {}).policyExceptions),
     blockedBrowserActions: normalizeBlockedBrowserActions((p || {}).blockedBrowserActions),
+    mcpAllowedTools: normalizeMcpToolList((p || {}).mcpAllowedTools),
+    mcpBlockedTools: normalizeMcpToolList((p || {}).mcpBlockedTools),
+    mcpApprovalRequiredTools: normalizeMcpToolList((p || {}).mcpApprovalRequiredTools),
     requiredSensors: normalizeRequiredSensors((p || {}).requiredSensors),
     desiredSensorVersions: normalizeDesiredSensorVersions((p || {}).desiredSensorVersions),
     responseScanMode: normalizeResponseScanMode((p || {}).responseScanMode),
@@ -400,6 +411,9 @@ const AUDIT_FIELDS = [
   'blockedDestinations',
   'blockedFileUploadDestinations',
   'blockedBrowserActions',
+  'mcpAllowedTools',
+  'mcpBlockedTools',
+  'mcpApprovalRequiredTools',
   'blockUnapprovedAiDestinations',
   'responseScanMode',
   'desktopCollectorDestination',
@@ -720,6 +734,7 @@ module.exports = {
   analyzeOpts,
   customDetectorsForSensors,
   rawRetentionDays,
+  normalizePolicy,
   normalizeDestination,
   normalizeApprovalRoutingRules,
   normalizePolicyScopes,
@@ -741,6 +756,7 @@ module.exports = {
   normalizeResponseScanMode,
   normalizeBrowserAction,
   normalizeBlockedBrowserActions,
+  normalizeMcpToolList,
   policyChangeSummary,
   policyChangeDetail,
   DEFAULT_POLICY,
