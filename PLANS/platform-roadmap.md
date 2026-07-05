@@ -185,7 +185,7 @@ deployable reverse-proxy service, `gateway/` (own process, shares
   outline today). This is the honest answer to "the browser extension is
   bypassable": managed sensors cover the common case; the ICAP bridge + gateway
   cover unmanaged browsers/profiles/direct-API paths. Both call the same
-  `/api/v1/gate` so policy and evidence stay unified. (Tracks REVIEW.md item 9.)
+  `/api/v1/gate` so policy and evidence stay unified.
 
 **Better than competitors:** the gateway inherits PromptWall's on-device
 detection and **hash-chained receipts** — every gated request produces a signed,
@@ -404,8 +404,8 @@ scalable multi-tenant control plane.
   identity **first-class**: a policy option to flag or block `unmanaged`
   installs, surface `unattributed@unmanaged` rate in Coverage, and treat it as a
   posture gap — so per-user evidence is guaranteed, not best-effort. (The old
-  hardcoded `browser-user` gap in REVIEW.md item 8 is already resolved; this is
-  the next step.)
+  hardcoded `browser-user` attribution gap is already resolved; this is the
+  next step.)
 - **Signed/versioned sensor policy bundles (M3).** Today sensors fetch plain
   policy from `GET /api/v1/policy` and scope/exception evaluation happens
   server-side; the only signing in the product is release tokens (SHA-256) and

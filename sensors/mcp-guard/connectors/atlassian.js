@@ -80,7 +80,10 @@ function cleanFields(value) {
 }
 
 function buildJiraIssueUrl(args = {}, opts = {}) {
-  const site = normalizeAtlassianSiteUrl(opts.siteUrl || opts.atlassianSiteUrl || args.siteUrl, opts.env);
+  // Site is derived ONLY from operator config/env, never from model-controlled
+  // args: a caller-supplied siteUrl would send the Atlassian credential to an
+  // attacker-chosen host (credential exfiltration / SSRF).
+  const site = normalizeAtlassianSiteUrl(opts.siteUrl || opts.atlassianSiteUrl, opts.env);
   const issueIdOrKey = opaqueId(args.issueIdOrKey || args.issueKey || opts.issueIdOrKey || opts.issueKey, 'issueIdOrKey');
   const search = new URLSearchParams();
   search.set('fields', cleanFields(args.fields || opts.fields).join(','));
@@ -95,7 +98,9 @@ function bodyFormat(value) {
 }
 
 function buildConfluencePageUrl(args = {}, opts = {}) {
-  const site = normalizeAtlassianSiteUrl(opts.siteUrl || opts.atlassianSiteUrl || args.siteUrl, opts.env);
+  // Site is derived ONLY from operator config/env, never from model-controlled
+  // args (see buildJiraIssueUrl — prevents credential exfiltration / SSRF).
+  const site = normalizeAtlassianSiteUrl(opts.siteUrl || opts.atlassianSiteUrl, opts.env);
   const pageId = confluencePageId(args.pageId || args.id || opts.pageId || opts.id);
   const search = new URLSearchParams();
   search.set('body-format', bodyFormat(args.bodyFormat || opts.bodyFormat));

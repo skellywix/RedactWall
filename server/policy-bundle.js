@@ -78,7 +78,11 @@ function verifyBundle(bundle, publicKeyPemStr, { now = new Date().toISOString() 
   let valid = false;
   try { valid = crypto.verify(null, input, pub, Buffer.from(bundle.signature, 'base64')); } catch (e) { valid = false; }
   if (!valid) return { ok: false, reason: 'bad_signature' };
-  if (Date.parse(bundle.expiresAt) <= Date.parse(now)) return { ok: false, reason: 'expired' };
+  // Fail closed on a missing/unparseable expiry: NaN comparisons are always
+  // false, which would otherwise treat an unbounded-lifetime bundle as fresh.
+  const exp = Date.parse(bundle.expiresAt);
+  const ref = Date.parse(now);
+  if (!Number.isFinite(exp) || !Number.isFinite(ref) || exp <= ref) return { ok: false, reason: 'expired' };
   return { ok: true };
 }
 

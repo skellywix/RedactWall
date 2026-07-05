@@ -5,7 +5,7 @@
  * Why SQLite, not the old JSON file: the JSON store did unlocked
  * read-modify-write — two near-simultaneous writes last-write-win the whole
  * file, silently dropping an entry and breaking the audit hash-chain linkage
- * (REVIEW.md #6). With three sensors + SSE + polling that race is real even at
+ * With three sensors + SSE + polling that race is real even at
  * tiny scale, and a corrupted audit log is the one thing this product cannot
  * ship. better-sqlite3 gives real ACID transactions and WAL concurrency.
  *
@@ -15,7 +15,7 @@
  * OS dir and log loudly. Set SENTINEL_DB_PATH to a real local-disk path (or a
  * managed Postgres in front of this interface) in production.
  *
- * Tamper-evidence (REVIEW.md #5): every audit entry's hash covers a CANONICAL
+ * Tamper-evidence: every audit entry's hash covers a CANONICAL
  * serialization of the FULL entry (action, queryId, actor, detail, ts,
  * prevHash, and — when the event names a query — a contentHash of that query's
  * current state). Editing a query's findings, decisionNote, or an audit detail
@@ -144,6 +144,10 @@ const aLast = sdb.prepare('SELECT hash FROM audit ORDER BY seq DESC LIMIT 1');
 const aInsert = sdb.prepare('INSERT INTO audit (id, ts, action, queryId, actor, prevHash, hash, entry) VALUES (@id, @ts, @action, @queryId, @actor, @prevHash, @hash, @entry)');
 
 function appendAuditRecord(event) {
+  // Serialize concurrent appends on a shared database (Postgres multi-instance)
+  // so the read-head-then-insert below is atomic and the hash chain cannot fork.
+  // No-op on SQLite, whose single-writer transaction already serializes writes.
+  if (typeof sdb.lockAuditAppend === 'function') sdb.lockAuditAppend();
   const last = aLast.get();
   const prevHash = last ? last.hash : ZERO;
   const contentHash = event.queryId ? queryContentHash(event.queryId) : undefined;
@@ -505,6 +509,29 @@ function verifyAuditChain() {
 }
 
 // ---- Stats -------------------------------------------------------------------
+// topEntities requires scanning and JSON-parsing every query row, and stats()
+// is broadcast after essentially every ingest event. Cache the result for a
+// short interval so this O(N) scan runs at most once per window instead of once
+// per request; the "top data types" widget tolerates a few seconds of lag.
+const TOP_ENTITIES_TTL_MS = (() => {
+  const n = Number(process.env.PROMPTWALL_TOP_ENTITIES_TTL_MS);
+  return Number.isFinite(n) && n >= 0 ? n : 10000;
+})();
+let _topEntitiesCache = null;
+let _topEntitiesAt = 0;
+function topEntities() {
+  const now = Date.now();
+  if (_topEntitiesCache && now - _topEntitiesAt < TOP_ENTITIES_TTL_MS) return _topEntitiesCache;
+  const entity = {};
+  for (const r of sdb.prepare('SELECT data FROM queries').all()) {
+    const ec = JSON.parse(r.data).entityCounts || {};
+    for (const [k, v] of Object.entries(ec)) entity[k] = (entity[k] || 0) + v;
+  }
+  _topEntitiesCache = Object.entries(entity).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  _topEntitiesAt = now;
+  return _topEntitiesCache;
+}
+
 function stats() {
   const counts = {};
   for (const r of sdb.prepare('SELECT status, COUNT(*) n FROM queries GROUP BY status').all()) counts[r.status] = r.n;
@@ -514,11 +541,6 @@ function stats() {
   const todayBlocked = sdb.prepare(
     `SELECT COUNT(*) n FROM queries WHERE substr(createdAt,1,10) = ? AND status IN (${blockedPlaceholders})`,
   ).get(today, ...STATS_BLOCKED_STATUSES).n;
-  const entity = {};
-  for (const r of sdb.prepare('SELECT data FROM queries').all()) {
-    const ec = JSON.parse(r.data).entityCounts || {};
-    for (const [k, v] of Object.entries(ec)) entity[k] = (entity[k] || 0) + v;
-  }
   return {
     total,
     pending: counts.pending || 0,
@@ -526,7 +548,7 @@ function stats() {
     denied: counts.denied || 0,
     allowed: counts.allowed || 0,
     todayBlocked,
-    topEntities: Object.entries(entity).sort((a, b) => b[1] - a[1]).slice(0, 8),
+    topEntities: topEntities(),
   };
 }
 

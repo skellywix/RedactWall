@@ -16,6 +16,13 @@ function num(v, fallback) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+// Bound every outbound webhook so a slow/hung SIEM endpoint cannot stall the
+// caller (posture snapshots, alert emission) indefinitely.
+const OUTBOUND_TIMEOUT_MS = num(process.env.SIEM_WEBHOOK_TIMEOUT_MS, 8000);
+function outboundSignal() {
+  return typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(OUTBOUND_TIMEOUT_MS) : undefined;
+}
+
 function alertThresholds(opts = {}) {
   return {
     minRisk: num(opts.minRisk ?? process.env.SIEM_ALERT_MIN_RISK, 25),
@@ -61,8 +68,10 @@ function sanitizedAlert(query, opts = {}) {
       score: f.score,
       masked: f.masked,
     })),
-    categories: query.categories || [],
-    reasons: query.reasons || [],
+    // Bound categories/reasons so the outbound SIEM payload stays prompt-free
+    // even if a detector ever embedded a value in a reason string.
+    categories: (query.categories || []).slice(0, 40).map((c) => safeText(typeof c === 'string' ? c : (c && c.category) || '', '', 80)),
+    reasons: (query.reasons || []).slice(0, 20).map((r) => safeText(r, '', 200)),
     workflow,
   };
 }
@@ -291,6 +300,7 @@ async function emitSecurityAlert(query, opts = {}) {
       method: 'POST',
       headers,
       body: JSON.stringify(sanitizedAlert(query, opts)),
+      signal: outboundSignal(),
     });
     return res && res.ok ? { sent: true, status: res.status } : { sent: false, reason: 'http_' + (res && res.status) };
   } catch (e) {
@@ -314,6 +324,7 @@ async function emitPostureAlert(report, opts = {}) {
       method: 'POST',
       headers,
       body: JSON.stringify(sanitizedPostureAlert(report, opts)),
+      signal: outboundSignal(),
     });
     return res && res.ok ? { sent: true, status: res.status } : { sent: false, reason: 'http_' + (res && res.status) };
   } catch (e) {

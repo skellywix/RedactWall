@@ -95,6 +95,19 @@ const OIDC_STATE_COOKIE_CLEAR_OPTIONS = {
 
 app.disable('x-powered-by');
 
+// Behind a load balancer/proxy, req.ip is otherwise the proxy's address, which
+// collapses per-client ingest throttling into one shared bucket (one bad client
+// could lock out the whole sensor fleet) and lets x-forwarded-* be trusted
+// blindly. Default OFF (direct-connect/demo); set TRUST_PROXY when deployed
+// behind a known proxy: a hop count ("1"), "true", or an IP/subnet list.
+(function configureTrustProxy() {
+  const raw = String(process.env.TRUST_PROXY || process.env.PROMPTWALL_TRUST_PROXY || '').trim();
+  if (!raw) return;
+  if (/^\d+$/.test(raw)) app.set('trust proxy', Number(raw));
+  else if (/^(true|false)$/i.test(raw)) app.set('trust proxy', raw.toLowerCase() === 'true');
+  else app.set('trust proxy', raw.split(',').map((s) => s.trim()).filter(Boolean));
+})();
+
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -1206,6 +1219,15 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
   else if (mode === 'warn') status = 'warned';
   else if (mode === 'justify') status = 'pending_justification';
   else status = 'pending';
+
+  // alwaysBlock invariant: when the prompt still contains a raw hard-stop value
+  // (serverAnalysis found it — so this is NOT a genuine client pre-redaction),
+  // a sensor-declared outcome can never clear it as sent/justified/warned. Hold
+  // it for Security Admin approval so no raw regulated value is recorded as
+  // cleared or issued a safe-to-send receipt. 'redacted' is exempt because the
+  // server re-tokenizes it below (real values never leave); 'blocked_by_user'
+  // already withholds.
+  if (hardStop && status !== 'redacted' && status !== 'blocked_by_user') status = 'pending';
 
   // Reversible tokenization: replace each detected value with a stable typed
   // placeholder and seal the token->value map (the "vault") at rest. The caller

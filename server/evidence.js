@@ -105,9 +105,12 @@ function safeQuery(q) {
     maxSeverity: q.maxSeverity || 0,
     maxSeverityLabel: q.maxSeverityLabel || 'none',
     findings: (q.findings || []).map(safeFinding),
-    categories: q.categories || [],
+    // Bound and scrub categories/reasons so a future detector that ever embedded
+    // a matched value in a reason/category string cannot leak it into the
+    // examiner pack (defense-in-depth; today these are label-shaped).
+    categories: (q.categories || []).slice(0, 40).map((c) => safeThreatText(typeof c === 'string' ? c : (c && c.category) || '', 80)),
     entityCounts: q.entityCounts || {},
-    reasons: q.reasons || [],
+    reasons: (q.reasons || []).slice(0, 20).map((r) => safeThreatText(r, 200)),
     promptHash: hashText(q.redactedPrompt || q.tokenizedPrompt || ''),
     decidedBy: q.decidedBy || null,
     decidedAt: q.decidedAt || null,

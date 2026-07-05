@@ -724,8 +724,22 @@
     let findings = detectStructured(text, disabled, opts.customDetectors);
     if (opts.exactMatch && !disabled.has('EXACT_MATCH')) findings = findings.concat(detectExactMatch(text, opts.exactMatch));
     findings.sort((a, b) => (b.severity - a.severity) || (b.score - a.score));
+    // Greedy overlap resolution: accept findings in priority order, skipping any
+    // that overlap an already-accepted span. Accepted spans are kept sorted by
+    // start so each overlap test only checks the two positional neighbours
+    // (O(log k)) instead of scanning every accepted span (was O(k^2), which
+    // blocked the event loop on large pastes on this per-keystroke hot path).
     const accepted = [];
-    for (const f of findings) if (!accepted.some((a) => a.start < f.end && f.start < a.end)) accepted.push(f);
+    const byStart = [];
+    for (const f of findings) {
+      let lo = 0, hi = byStart.length;
+      while (lo < hi) { const mid = (lo + hi) >> 1; if (byStart[mid].start < f.start) lo = mid + 1; else hi = mid; }
+      const left = byStart[lo - 1];
+      const right = byStart[lo];
+      const overlaps = (left && left.start < f.end && f.start < left.end)
+        || (right && right.start < f.end && f.start < right.end);
+      if (!overlaps) { accepted.push(f); byStart.splice(lo, 0, f); }
+    }
     accepted.sort((a, b) => a.start - b.start);
     const categories = classifySemantic(text, disabled);
     const entityCounts = {};

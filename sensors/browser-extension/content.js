@@ -295,6 +295,7 @@
     if (res.decision === 'allow') return true;
     if (outcome === 'sent_after_warning') return res.status === 'warned_sent';
     if (outcome === 'justified') return res.status === 'justified';
+    if (outcome === 'redacted_sent') return res.status === 'redacted';
     return false;
   }
   function recordedEvidenceResponse(res, expectedStatus) {
@@ -319,6 +320,19 @@
     const res = await report(text, analysis, 'submit', outcome, note);
     if (!recordedProceedResponse(res, outcome)) {
       toast('PromptWall could not record this decision. Send blocked until the control plane is reachable.');
+      return;
+    }
+    bypassOnce = true;
+    resend(el);
+  }
+
+  // Redact path: the composer is already tokenized (PII-free). Only resend once
+  // the control plane has recorded the redacted-send, so an outage cannot
+  // produce a send with no compliance evidence (fail closed).
+  async function proceedRedactedAfterRecorded(tokenText, analysis, el) {
+    const res = await report(tokenText, analysis, 'submit', 'redacted_sent', '', { clientPreRedacted: true });
+    if (!recordedProceedResponse(res, 'redacted_sent')) {
+      toast('PromptWall could not record this redacted send. Held until the control plane is reachable — press send again to retry.');
       return;
     }
     bypassOnce = true;
@@ -486,10 +500,8 @@
       const t = D.tokenize(text, verdict.analysis.findings);
       mergeRehydrate(t.map);
       setComposerText(el, t.text);
-      report(t.text, verdict.analysis, 'submit', 'redacted_sent', '', { clientPreRedacted: true });
       toast('PromptWall: ' + Object.keys(t.map).length + ' sensitive value(s) tokenized before sending — the reply is restored here automatically.');
-      bypassOnce = true;
-      resend(el);
+      proceedRedactedAfterRecorded(t.text, verdict.analysis, el);
       return false;
     }
 

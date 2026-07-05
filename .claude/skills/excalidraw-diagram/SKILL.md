@@ -22,4 +22,4 @@ A regulator/board won't read `server/`. The architecture and audit diagrams are 
 ## Rules
 - Use the skill's `references/color-palette.md` and align with `frontend-design` severity colors.
 - Diagrams use synthetic/illustrative data only.
-- Commit diagrams next to the docs they support (`README.md`, `REVIEW.md`).
+- Commit diagrams next to the docs they support (`README.md`, `docs/`).

@@ -11,7 +11,7 @@ Two groups:
 ## Memory convention (read this first)
 Loops share three repo-root files, owned by `durable-memory-loop`:
 - `PLAN.md` — durable goals. `STATUS.md` — live `## Open` / `## Done`. `DECISIONS.md` — why, dated.
-Long-form history stays in the existing `ITERATIONS.md` / `REVIEW.md`.
+Long-form history stays in the existing `ITERATIONS.md` / `CHANGELOG.md`.
 
 ## General loops
 | Skill | What it does |

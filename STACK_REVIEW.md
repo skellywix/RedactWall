@@ -2,6 +2,14 @@
 
 Reviewed: 26 June 2026
 
+> **Update (4 July 2026):** the Postgres control-plane seam this review
+> anticipated has since shipped (`server/storage/`: driver selection,
+> migrations, row-level tenant isolation, CI coverage against Postgres 16).
+> SQLite remains the default for demos, pilots, and customer-silo
+> deployments; the "move to Postgres when multi-tenant hosted operation
+> becomes real" recommendation below is now a configuration choice rather
+> than future work. See `PLANS/platform-roadmap.md` (M4).
+
 ## Decision Summary
 
 PromptWall should optimize for a regulated pilot that installs quickly, proves control effectiveness, and avoids unnecessary moving parts. The right stack is not the most fashionable one. It is the one that keeps browser, endpoint, MCP, and server behavior easy to verify.

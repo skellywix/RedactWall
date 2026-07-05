@@ -91,7 +91,7 @@ function escalationPatch(query, now) {
   return {
     escalatedAt: now.toISOString(),
     escalationReason: 'sla_due',
-    assignedRole: query.assignedRole === 'security_admin' ? query.assignedRole : 'security_admin',
+    assignedRole: 'security_admin',
   };
 }
 

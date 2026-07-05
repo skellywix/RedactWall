@@ -134,6 +134,11 @@ function createPgDriver(connectionString) {
     prepare,
     exec: (sql) => { call('query', quoteCamelIdentifiers(sql), []); },
     transaction,
+    // Serialize audit-chain appends across app instances sharing one database:
+    // a transaction-scoped advisory lock makes the read-head-then-insert append
+    // atomic, so two instances cannot both link a new entry to the same
+    // prevHash and permanently fork the chain. Released on COMMIT/ROLLBACK.
+    lockAuditAppend: () => { call('query', 'SELECT pg_advisory_xact_lock($1)', [4021990]); },
     pragma: () => undefined,
     setTenantContext: (orgId) => {
       call('query', 'SELECT set_config($1, $2, false)', ['promptwall.org_id', String(orgId || '')]);

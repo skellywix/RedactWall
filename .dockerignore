@@ -8,8 +8,8 @@ test-results
 .githooks
 .agents
 .claude
-.codex
 test
+suite
 e2e
 docs
 PLANS

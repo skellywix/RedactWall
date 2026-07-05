@@ -4,6 +4,7 @@
  * Validation errors intentionally include field names only, never submitted
  * values, because those values may be prompts, files, passwords, or notes.
  */
+const fs = require('fs');
 const { z } = require('zod');
 const detector = require('./detector');
 const customDetectors = require('./custom-detectors');
@@ -40,10 +41,25 @@ const SAFE_OPERATOR_COMMAND = /^[A-Za-z0-9 ._:/\\@+=,-]+$/;
 const POSTURE_ACTION_ID = /^[A-Za-z0-9._:@/-]+$/;
 const DISCOVERY_DESTINATION_LABEL = /^[A-Za-z0-9.*:-]+$/;
 const SENSITIVE_ROUTING_CODE = /(?:\d{3}[-_:.]?\d{2}[-_:.]?\d{4}|\d{12,19})/;
+// Memoized: a single /api/v1/gate request validates up to ~500 detector ids
+// (clientFindings + clientCategories + clientEntityCounts keys), and Zod runs
+// this refine once per value. Rebuilding the id set — which reads and parses the
+// custom-detector config file each time — per value turned one hot-path request
+// into hundreds of synchronous disk reads. Cache on the config file's mtime+size.
+let _detectorIdsCache = null;
+let _detectorIdsStamp = '';
 function knownDetectorIds() {
-  return new Set(detector.listDetectors({
+  let stamp = 'none';
+  try {
+    const st = fs.statSync(customDetectors.CONFIG_PATH);
+    stamp = st.mtimeMs + ':' + st.size;
+  } catch { /* no config file — stamp stays 'none' */ }
+  if (_detectorIdsCache && _detectorIdsStamp === stamp) return _detectorIdsCache;
+  _detectorIdsCache = new Set(detector.listDetectors({
     customDetectors: customDetectors.loadCustomDetectors(),
   }).map((d) => d.id));
+  _detectorIdsStamp = stamp;
+  return _detectorIdsCache;
 }
 
 function nonBlankString(max) {

@@ -80,11 +80,21 @@ function loadBackground(opts = {}) {
 }
 
 test('redacted browser sends report tokenized text, not original prompt', () => {
-  assert.match(content, /report\(t\.text,\s*verdict\.analysis,\s*'submit',\s*'redacted_sent'/);
+  // The redact path reports the tokenized text through the recorded-confirmation
+  // helper (fail closed: resend only after the control plane records the send).
+  assert.match(content, /proceedRedactedAfterRecorded\(t\.text,\s*verdict\.analysis,\s*el\)/);
+  assert.match(content, /report\(tokenText,\s*analysis,\s*'submit',\s*'redacted_sent',\s*'',\s*\{ clientPreRedacted: true \}\)/);
   assert.doesNotMatch(content, /report\(text,\s*verdict\.analysis,\s*'submit',\s*'redacted_sent'/);
   assert.match(content, /clientPreRedacted:\s*true/);
   assert.match(background, /clientFindings:\s*msg\.payload\.clientFindings/);
   assert.match(background, /clientCategories:\s*msg\.payload\.clientCategories \|\| msg\.payload\.categories/);
+});
+
+test('redact path resends only after the control plane records the redacted send (fail closed)', () => {
+  assert.match(content, /async function proceedRedactedAfterRecorded/);
+  assert.match(content, /recordedProceedResponse\(res,\s*'redacted_sent'\)/);
+  // On an unrecorded response the function returns before bypassOnce/resend.
+  assert.match(content, /Held until the control plane is reachable/);
 });
 
 test('redact mode blocks category-only hits that cannot be tokenized', () => {

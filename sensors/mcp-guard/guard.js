@@ -285,7 +285,11 @@ async function guardToolResult(text, ctx = {}, opts = {}) {
   const safe = a.categories.length
     ? '[REDACTED: ' + findings.join(', ') + ']'
     : D.redact(text, a.findings); // structured PII replaced with [TYPE]
-  await logEvent(reportBody({ safeText: safe, analysis: a, ctx }), opts);
+  // Telemetry to the control plane is always a label-only summary — never the
+  // fetched document prose, even with structured PII masked. The model still
+  // receives the full redacted `safe` text below.
+  const telemetryText = '[REDACTED: ' + findings.join(', ') + ']';
+  await logEvent(reportBody({ safeText: telemetryText, analysis: a, ctx }), opts);
   return { text: safe, redacted: true, findings };
 }
 

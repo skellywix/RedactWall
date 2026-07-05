@@ -3346,7 +3346,7 @@ function catalogDetailRow(a) {
   const overrideForm = canAdminWrite() ? `
       <div class="catalog-override">
         <b>Analyst score override</b>
-        <input id="catalogOverrideScore" type="number" min="0" max="100" placeholder="0-100" value="${a.riskOverride ?? ''}" aria-label="Override score"/>
+        <input id="catalogOverrideScore" type="number" min="0" max="100" placeholder="0-100" value="${escapeHtml(a.riskOverride ?? '')}" aria-label="Override score"/>
         <input id="catalogOverrideNote" type="text" placeholder="Business justification (required, audited)" value="${escapeHtml(a.overrideNote || '')}" aria-label="Override justification"/>
         <button class="ghost mini" data-catalog-override-set="${escapeHtml(a.destination)}" type="button">Set override</button>
         ${a.riskOverride != null ? `<button class="ghost mini" data-catalog-override-clear="${escapeHtml(a.destination)}" type="button">Clear</button>` : ''}
