@@ -1,5 +1,33 @@
 # Competitive Improvement Plan: PromptWall vs. Nightfall AI
 
+## Implementation status (2026-07-05)
+
+All 13 engineering work items are shipped on branch
+`claude/competition-analysis-plan-x43u6v`; item 14 remains a design-only
+placeholder by decision (not fed to implementation).
+
+| # | Item | Status |
+| --- | --- | --- |
+| 1 | secrets-vendor-labeling | ✅ shipped |
+| 2 | doc-class-categories (FINANCIAL_STATEMENT, TAX_FILING, HR_RECORD) | ✅ shipped |
+| 3 | eval-corpus-expansion (→ 500+, decontaminated, floors raised) | ✅ shipped |
+| 4 | bench-latency (benchmark + CI budget + doc) | ✅ shipped |
+| 5 | agent-hooks-sensor (Claude Code hooks) | ✅ shipped |
+| 6 | shadow-mcp-discovery | ✅ shipped |
+| 7 | n4-account-detection (personal vs corporate) | ✅ shipped |
+| 8 | competitive-refresh (benchmark docs + battlecard) | ✅ shipped |
+| 9 | otel-audit-export (OTLP/HTTP) | ✅ shipped |
+| 10 | clipboard-provenance (origin-app metadata) | ✅ shipped |
+| 11 | license-verifier (Ed25519 offline license) | ✅ shipped |
+| 12 | bundled-ocr (WASM tesseract + strict mode) | ✅ shipped |
+| 13 | openapi-devsurface (OpenAPI 3.1 + API reference) | ✅ shipped |
+| 14 | compliance-ingestion | ⏸ design-only, deferred by plan |
+
+Item 12 was briefly blocked (the agent proxy denies the raw GitHub tessdata
+download); it was unblocked by vendoring the language data through the allowed
+npm registry (`@tesseract.js-data/eng`, `best_int` build) and confirming the
+WASM engine runs fully offline with hard-pinned local model paths.
+
 ## Context
 
 We received a 20-page technical research report on Nightfall AI, a direct competitor in the DLP / AI-data-security space. The goal is to mine that report for concrete, prioritized improvements to PromptWall — engineering work items implementable by Claude Code — that play to our strengths rather than chasing Nightfall feature-for-feature.
