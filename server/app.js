@@ -826,6 +826,7 @@ function blockedActionEvidence(analysis) {
       severity: f.severity,
       score: f.score,
       masked: f.masked || detector.maskValue(f.type, f.value || ''),
+      ...(f.vendor ? { vendor: f.vendor, vendorLabel: f.vendorLabel } : {}),
     })),
     categories: (analysis.categories || []).map((c) => c.category),
     entityCounts: analysis.entityCounts || {},
@@ -1111,6 +1112,7 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
   const findings = analysis.findings.map((f) => ({
     type: f.type, severity: f.severity, score: f.score, confidence: f.confidenceLabel || null,
     masked: f.masked || detector.maskValue(f.type, f.value || ''),
+    ...(f.vendor ? { vendor: f.vendor, vendorLabel: f.vendorLabel } : {}),
   }));
   const categories = (analysis.categories || []).map((c) => c.category);
 
@@ -1477,7 +1479,7 @@ app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation
   const ctx = policyContext({ user, orgId, destination, source, channel });
   const verdict = policy.evaluate(analysis, pol, ctx);
   const decisionPolicy = verdict.policy || pol;
-  const findings = analysis.findings.map((x) => ({ type: x.type, severity: x.severity, score: x.score, masked: detector.maskValue(x.type, x.value) }));
+  const findings = analysis.findings.map((x) => ({ type: x.type, severity: x.severity, score: x.score, masked: detector.maskValue(x.type, x.value), ...(x.vendor ? { vendor: x.vendor, vendorLabel: x.vendorLabel } : {}) }));
   const categories = (analysis.categories || []).map((c) => c.category);
   const preview = safePreview(extracted.text, analysis, '[file:' + fileLabel + '] ');
   const base = { user, orgId, destination, source, channel, sensor, filename: fileLabel, processor: extracted.processor,
@@ -1549,7 +1551,7 @@ app.post('/api/v1/scan-response', checkIngestKey, validation.validateBody(valida
     }, { leaked: false, findings: [], categories: [], redacted: '' });
   }
   const analysis = await semanticRemote.augmentAnalysis(text, detector.analyze(text, policy.analyzeOpts(pol)));
-  const findings = analysis.findings.map((f) => ({ type: f.type, severity: f.severity, score: f.score, masked: detector.maskValue(f.type, f.value) }));
+  const findings = analysis.findings.map((f) => ({ type: f.type, severity: f.severity, score: f.score, masked: detector.maskValue(f.type, f.value), ...(f.vendor ? { vendor: f.vendor, vendorLabel: f.vendorLabel } : {}) }));
   const categories = (analysis.categories || []).map((c) => c.category);
   const redacted = safePreview(text, analysis);
   const leaked = findings.length > 0 || categories.length > 0;
@@ -2593,6 +2595,7 @@ app.post('/api/detectors/test', auth.requireAuth, (req, res) => {
     findings: analysis.findings.map((f) => ({
       type: f.type, severity: f.severity, severityLabel: detector.SEVERITY_LABEL[f.severity],
       confidence: f.confidenceLabel, masked: detector.maskValue(f.type, f.value), regulations: f.regulations,
+      ...(f.vendor ? { vendor: f.vendor, vendorLabel: f.vendorLabel } : {}),
     })),
     categories: (analysis.categories || []).map((c) => ({ category: c.category, confidence: c.confidenceLabel })),
   });

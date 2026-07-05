@@ -259,6 +259,72 @@ test('custom detectors support context windows and luhn checksum validators', ()
 });
 
 // ---------------------------------------------------------------------------
+// SECRETS — expanded provider catalog + vendor labeling. All values below are
+// synthetic (documented example keys or obviously fake fillers).
+const SECRET_CASES = [
+  ['sk_live_a1B2c3D4e5F6g7H8i9J0', 'stripe', 'live'],
+  ['sk_test_a1B2c3D4e5F6g7H8i9J0', 'stripe', 'test'],
+  ['xapp-1-A0EXAMPLE1-1234567890123-' + 'abcdef0123456789abcdef0123456789', 'slack', null],
+  ['dapi0123456789abcdef0123456789abcdef', 'databricks', null],
+  ['PMAK-0123456789abcdef01234567-0123456789abcdef0123456789abcdef01', 'postman', null],
+  ['ExampleTeam001.atlasv1.' + 'A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8S9t0', 'terraform', null],
+  ['ya29.a0ExampleOAuthTokenFiller_1234567890', 'google', null],
+  ['sk-ant-api03-exampleExampleExample', 'anthropic', null],
+  ['sk-proj-exampleExampleExample1234', 'openai', null],
+];
+
+test('secrets — expanded provider token catalog fires SECRET_KEY', () => {
+  for (const [value] of SECRET_CASES) {
+    assert.ok(hasType('the credential ' + value + ' was pasted', 'SECRET_KEY'), 'should fire: ' + value.slice(0, 12) + '…');
+  }
+  assert.ok(hasType('storage conn AccountKey=' + 'A1b2C3d4'.repeat(6) + '== end', 'SECRET_KEY'), 'Azure AccountKey');
+  assert.ok(hasType('the aws secret access key wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY was shared', 'SECRET_KEY'), 'AWS secret access key with context');
+  assert.ok(hasType('the file had "type": "service_account" and a private_key field', 'SECRET_KEY'), 'GCP service-account marker');
+});
+
+test('secrets — vendor labeling attributes the provider without the value', () => {
+  for (const [value, vendor, env] of SECRET_CASES) {
+    const f = find('the credential ' + value + ' was pasted').findings.find((x) => x.type === 'SECRET_KEY');
+    assert.ok(f, 'finding exists for ' + vendor);
+    assert.strictEqual(f.vendor, vendor, value.slice(0, 12) + '… should label ' + vendor);
+    assert.ok(f.vendorLabel && !f.vendorLabel.includes(value), 'label never contains the value');
+    if (env) assert.ok(f.vendorLabel.includes(env), 'Stripe label should carry ' + env);
+  }
+  const azure = find('storage conn AccountKey=' + 'A1b2C3d4'.repeat(6) + '== end').findings.find((x) => x.type === 'SECRET_KEY');
+  assert.strictEqual(azure && azure.vendor, 'azure');
+  const aws = find('aws secret access key: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY').findings.find((x) => x.type === 'SECRET_KEY');
+  assert.strictEqual(aws && aws.vendor, 'aws');
+  const gcp = find('config: "type": "service_account"').findings.find((x) => x.type === 'SECRET_KEY');
+  assert.strictEqual(gcp && gcp.vendor, 'gcp');
+});
+
+test('secrets — vendor precedence pins ambiguous prefixes', () => {
+  assert.strictEqual(D.secretVendor('sk-ant-api03-x').vendor, 'anthropic', 'sk-ant- wins over sk-');
+  assert.strictEqual(D.secretVendor('sk-proj-xyz').vendor, 'openai');
+  assert.strictEqual(D.secretVendor('sk_live_xyz').vendor, 'stripe');
+  assert.strictEqual(D.secretVendor('AKIAIOSFODNN7EXAMPLE').vendor, 'aws');
+  assert.strictEqual(D.secretVendor('xoxb-123-abc').vendor, 'slack');
+  assert.strictEqual(D.secretVendor('github_pat_abc').vendor, 'github');
+  assert.strictEqual(D.secretVendor('eyJhbGciOi.eyJzdWIi.sig').vendor, 'jwt');
+  assert.strictEqual(D.secretVendor('no-vendor-here'), null);
+});
+
+test('secrets — env-var branch and non-secret findings carry no vendor fields', () => {
+  const env = find('MY_APP_SECRET=supersecretvalue123').findings.find((f) => f.type === 'SECRET_KEY');
+  assert.ok(env, 'env-var secret still fires');
+  assert.strictEqual(env.vendor, undefined);
+  const ssn = find('member SSN 123-45-6789').findings.find((f) => f.type === 'US_SSN');
+  assert.strictEqual(ssn.vendor, undefined);
+});
+
+test('secrets — false-positive bait for context-gated formats', () => {
+  assert.ok(!hasType('build hash q9WvZx3JmT5rKpN8dHcYbLgF2sV6wA1eUoQi4XnR is cached', 'SECRET_KEY'), '40-char blob without aws context');
+  assert.ok(!hasType('tracking code dapi12345 printed on the label', 'SECRET_KEY'), 'short dapi lookalike');
+  assert.ok(!hasType('reference PMAK-2024-001 attached to the ticket', 'SECRET_KEY'), 'PMAK lookalike with wrong shape');
+  assert.ok(!hasType('the word dapidary is not a token', 'SECRET_KEY'), 'dapi as substring of a longer word');
+});
+
+// ---------------------------------------------------------------------------
 // SEMANTIC MODEL — the compact on-device classifier (detection-engine/detect.js, trained
 // by scripts/train-semantic.js) catches paraphrased meaning the keyword
 // heuristic misses, while keeping zero false positives on benign prompts.

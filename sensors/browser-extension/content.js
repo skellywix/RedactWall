@@ -256,6 +256,7 @@
       severity: f.severity,
       score: f.score,
       masked: D.maskValue(f.type, f.value),
+      ...(f.vendor ? { vendor: f.vendor, vendorLabel: f.vendorLabel } : {}),
     }));
   }
   function publicCategories(analysis) {

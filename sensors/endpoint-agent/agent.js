@@ -151,6 +151,7 @@ function publicFindings(analysis) {
     severity: f.severity,
     score: f.score,
     masked: D.maskValue(f.type, f.value),
+    ...(f.vendor ? { vendor: f.vendor, vendorLabel: f.vendorLabel } : {}),
   }));
 }
 

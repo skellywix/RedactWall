@@ -233,6 +233,50 @@
   const CONFIDENCE_LABEL = { 1: 'possible', 2: 'likely', 3: 'very_likely' };
   function confidenceTier(score) { return score >= 0.9 ? 3 : score >= 0.7 ? 2 : 1; }
 
+  // Vendor attribution for SECRET_KEY findings (cf. Nightfall's vendor
+  // labeling), derived offline from the matched value's shape. Never verified
+  // against vendor APIs — live-key probing would ship a captured secret
+  // off-box (see DECISIONS.md). Order matters: more specific prefixes first
+  // (sk-ant- before sk-, sk_live_ before nothing else claims sk_).
+  const _sv = (vendor, label) => Object.freeze({ vendor, label });
+  const SECRET_VENDOR_PREFIXES = Object.freeze([
+    ['sk-ant-', _sv('anthropic', 'Anthropic API key')],
+    ['sk_live_', _sv('stripe', 'Stripe secret key (live)')],
+    ['sk_test_', _sv('stripe', 'Stripe secret key (test)')],
+    ['sk-', _sv('openai', 'OpenAI-style API key')],
+    ['rk_live_', _sv('stripe', 'Stripe restricted key (live)')],
+    ['rk_test_', _sv('stripe', 'Stripe restricted key (test)')],
+    ['AKIA', _sv('aws', 'AWS access key id')],
+    ['ASIA', _sv('aws', 'AWS temporary access key id')],
+    ['github_pat_', _sv('github', 'GitHub fine-grained token')],
+    ['ghp_', _sv('github', 'GitHub personal access token')],
+    ['glpat-', _sv('gitlab', 'GitLab personal access token')],
+    ['xapp-', _sv('slack', 'Slack app-level token')],
+    ['xox', _sv('slack', 'Slack token')],
+    ['SG.', _sv('sendgrid', 'SendGrid API key')],
+    ['AIza', _sv('google', 'Google API key')],
+    ['ya29.', _sv('google', 'Google OAuth access token')],
+    ['npm_', _sv('npm', 'npm access token')],
+    ['hf_', _sv('huggingface', 'Hugging Face token')],
+    ['dop_v1_', _sv('digitalocean', 'DigitalOcean token')],
+    ['shpat_', _sv('shopify', 'Shopify private app token')],
+    ['shpss_', _sv('shopify', 'Shopify shared secret')],
+    ['pypi-', _sv('pypi', 'PyPI API token')],
+    ['PMAK-', _sv('postman', 'Postman API key')],
+    ['dapi', _sv('databricks', 'Databricks token')],
+  ]);
+  const SECRET_VENDOR_TWILIO = _sv('twilio', 'Twilio API key');
+  const SECRET_VENDOR_TERRAFORM = _sv('terraform', 'Terraform Cloud token');
+  const SECRET_VENDOR_JWT = _sv('jwt', 'JSON Web Token');
+  function secretVendor(value) {
+    const v = String(value || '');
+    for (const entry of SECRET_VENDOR_PREFIXES) { if (v.startsWith(entry[0])) return entry[1]; }
+    if (v.startsWith('eyJ')) return SECRET_VENDOR_JWT;
+    if (v.indexOf('.atlasv1.') !== -1) return SECRET_VENDOR_TERRAFORM;
+    if (/^SK[0-9a-fA-F]{32}$/.test(v)) return SECRET_VENDOR_TWILIO;
+    return null;
+  }
+
   // ---------- structured detector registry -----------------------------------
   // Each: { id, score, re, validate?(match,fullText)?, ctx?:RegExp (requires nearby word) }
   const DETECTORS = [
@@ -278,8 +322,15 @@
     { id: 'IPV6_ADDRESS', score: 0.75, re: /\b(?:[0-9A-Fa-f]{1,4}:){2,7}[0-9A-Fa-f]{1,4}\b/g, validate: (m) => ipv6Valid(m) },
     { id: 'DOB', score: 0.72, re: /\b(?:0?[1-9]|1[0-2])[/\-](?:0?[1-9]|[12]\d|3[01])[/\-](?:19|20)\d{2}\b/g, ctx: /\b(dob|date of birth|birthdate|born|birthday|patient|member|customer)\b/i, validate: (m) => datePlausible(m) },
     { id: 'PRIVATE_KEY', score: 0.99, re: /-----BEGIN (?:RSA |EC |OPENSSH |PGP )?PRIVATE KEY-----/g },
-    { id: 'SECRET_KEY', score: 0.95, re: /\b(?:sk-(?:live|test|proj)?-?[A-Za-z0-9_-]{16,}|rk_(?:live|test)_[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{22,}|glpat-[A-Za-z0-9_-]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|SG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}|AIza[0-9A-Za-z\-_]{20,}|npm_[A-Za-z0-9]{36}|hf_[A-Za-z0-9]{30,}|dop_v1_[a-f0-9]{64}|shp(?:at|ss)_[a-fA-F0-9]{32}|pypi-AgEIcHlwaS5vcmc[A-Za-z0-9_-]{20,}|SK[0-9a-fA-F]{32}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})\b/g },
+    { id: 'SECRET_KEY', score: 0.95, re: /\b(?:sk-(?:live|test|proj)?-?[A-Za-z0-9_-]{16,}|sk_(?:live|test)_[A-Za-z0-9]{16,}|rk_(?:live|test)_[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{22,}|glpat-[A-Za-z0-9_-]{20,}|xapp-\d-[A-Z0-9]+-\d+-[a-f0-9]{32,}|xox[baprs]-[A-Za-z0-9-]{10,}|SG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}|AIza[0-9A-Za-z\-_]{20,}|ya29\.[A-Za-z0-9_-]{30,}|npm_[A-Za-z0-9]{36}|hf_[A-Za-z0-9]{30,}|dop_v1_[a-f0-9]{64}|shp(?:at|ss)_[a-fA-F0-9]{32}|pypi-AgEIcHlwaS5vcmc[A-Za-z0-9_-]{20,}|PMAK-[0-9a-f]{24}-[0-9a-f]{34}|dapi[0-9a-f]{32}(?:-\d)?|[A-Za-z0-9]{14}\.atlasv1\.[A-Za-z0-9_=-]{40,}|SK[0-9a-fA-F]{32}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})\b/g },
     { id: 'SECRET_KEY', score: 0.9, re: /\b[A-Z][A-Z0-9_]*(?:SECRET|TOKEN|API_KEY|ACCESS_KEY|PASSWORD|PRIVATE_KEY)\s*[:=]\s*["']?([A-Za-z0-9_./+=@%:-]{8,})["']?/g, group: 1 },
+    // Cloud secrets that need context or key=value shape rather than a prefix.
+    // vendorTag supplies the vendor label the value alone cannot (see secretVendor).
+    { id: 'SECRET_KEY', score: 0.9, re: /\b(?:AccountKey|SharedAccessKey)\s*=\s*([A-Za-z0-9+/=]{40,})/g, group: 1, vendorTag: _sv('azure', 'Azure storage/connection key') },
+    // AWS secret access keys are bare 40-char base64 — context-gated, and
+    // anchored with lookarounds because \b is unreliable next to + and /.
+    { id: 'SECRET_KEY', score: 0.85, re: /(?<![A-Za-z0-9/+=])[A-Za-z0-9/+]{40}(?![A-Za-z0-9/+=])/g, ctx: /\b(?:aws.{0,12}secret|secret[_ ]?access[_ ]?key)\b/i, vendorTag: _sv('aws', 'AWS secret access key') },
+    { id: 'SECRET_KEY', score: 0.9, re: /"type"\s*:\s*"service_account"/g, vendorTag: _sv('gcp', 'GCP service-account key file') },
     // Org-planted tripwire values for fake records, demos, and leak drills.
     { id: 'CANARY_TOKEN', score: 0.99, re: /\b(?:PS|PROMPTWALL|PROMPTSENTINEL)[-_]CANARY[-_][A-Z0-9][A-Z0-9_-]{11,63}\b/gi },
     { id: 'PASSWORD', score: 0.8, re: /\b(?:pass(?:word|wd)?|pwd|passphrase)\s*[:=]\s*\S{4,}/gi },
@@ -550,7 +601,12 @@
         if (!ctxOk(det, text, start)) continue;
         const key = det.id + '|' + v + '|' + start;
         if (seen.has(key)) continue; seen.add(key);
-        out.push({ type: det.id, value: v, start, end: start + v.length, score: det.score, severity: det.severity || SEVERITY[det.id] || 1 });
+        const finding = { type: det.id, value: v, start, end: start + v.length, score: det.score, severity: det.severity || SEVERITY[det.id] || 1 };
+        if (det.id === 'SECRET_KEY') {
+          const vt = det.vendorTag || secretVendor(v);
+          if (vt) { finding.vendor = vt.vendor; finding.vendorLabel = vt.label; }
+        }
+        out.push(finding);
       }
     }
     if (!disabled.has('PERSON_NAME')) {
@@ -831,7 +887,7 @@
     return normalizeCustomDetectors(value).map(publicCustomDetector);
   }
 
-  const api = { analyze, redact, maskValue, tokenize, detokenize, tokenizePrompt, classifySemantic, _featurize, _lrProb, listDetectors, normalizeCustomDetectors, publicCustomDetectorConfig, edmFingerprint, normalizeExactMatchConfig, luhnValid, ssnPlausible, abaValid, ibanValid, vinValid, bankAccountPlausible, itinPlausible, npiValid, datePlausible, ipv6Valid, cardNetwork, ninoValid, nhsValid, sinValid, tfnValid, aadhaarValid, regulationsFor, SEVERITY, SEVERITY_LABEL, CONFIDENCE_LABEL, REGULATIONS };
+  const api = { analyze, redact, maskValue, tokenize, detokenize, tokenizePrompt, classifySemantic, _featurize, _lrProb, listDetectors, normalizeCustomDetectors, publicCustomDetectorConfig, edmFingerprint, normalizeExactMatchConfig, secretVendor, luhnValid, ssnPlausible, abaValid, ibanValid, vinValid, bankAccountPlausible, itinPlausible, npiValid, datePlausible, ipv6Valid, cardNetwork, ninoValid, nhsValid, sinValid, tfnValid, aadhaarValid, regulationsFor, SEVERITY, SEVERITY_LABEL, CONFIDENCE_LABEL, REGULATIONS };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (root) root.PSDetect = api;
 })(typeof window !== 'undefined' ? window : (typeof self !== 'undefined' ? self : null));

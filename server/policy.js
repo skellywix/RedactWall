@@ -737,7 +737,12 @@ function evaluate(analysis, policy = loadPolicy(), context = {}, options = {}) {
   }
   if (categories.length) reasons.push('Sensitive content: ' + categories.map((c) => c && (c.category || c)).join(', '));
   const hardStop = findings.find((f) => (effective.alwaysBlock || []).includes(f.type));
-  if (hardStop) reasons.push(citedReason('Hard-stop entity present: ' + hardStop.type, hardStop.type));
+  if (hardStop) {
+    // Vendor label (never the value) sharpens the reason: "SECRET_KEY (Stripe
+    // secret key (live))" tells the approver what leaked without revealing it.
+    const hardStopLabel = 'Hard-stop entity present: ' + hardStop.type + (hardStop.vendorLabel ? ' (' + hardStop.vendorLabel + ')' : '');
+    reasons.push(citedReason(hardStopLabel, hardStop.type));
+  }
   if (analysis.maxSeverity >= effective.blockMinSeverity) {
     const driver = findings.find((f) => f.severity === analysis.maxSeverity && f.type !== (hardStop && hardStop.type));
     reasons.push(citedReason('Severity ' + analysis.maxSeverityLabel + ' >= policy minimum', driver && driver.type));

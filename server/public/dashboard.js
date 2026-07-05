@@ -2080,7 +2080,7 @@ async function loadStats() {
 }
 
 function findingChips(findings, categories) {
-  const fc = (findings || []).map((f) => `<span class="chip status-chip tone-warn" tabindex="0" role="button" data-status-detail="${escapeHtml(`Detected type: ${f.type}\nMasked value: ${f.masked || 'redacted'}`)}"><b>${escapeHtml(f.type)}</b> ${escapeHtml(f.masked || '')}</span>`).join('');
+  const fc = (findings || []).map((f) => `<span class="chip status-chip tone-warn" tabindex="0" role="button" data-status-detail="${escapeHtml(`Detected type: ${f.type}${f.vendorLabel ? ` (${f.vendorLabel})` : ''}\nMasked value: ${f.masked || 'redacted'}`)}"><b>${escapeHtml(f.type)}${f.vendorLabel ? ` · ${escapeHtml(f.vendorLabel)}` : ''}</b> ${escapeHtml(f.masked || '')}</span>`).join('');
   const cc = (categories || []).map((c) => `<span class="chip category status-chip tone-warn" tabindex="0" role="button" data-status-detail="${escapeHtml(`Policy category: ${c}`)}"><b>${escapeHtml(c)}</b></span>`).join('');
   return fc + cc;
 }
