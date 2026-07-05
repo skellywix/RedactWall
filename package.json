@@ -66,6 +66,7 @@
     "package:endpoint-agent": "node scripts/package-endpoint-agent.js",
     "package:mcp-guard": "node scripts/package-mcp-guard.js",
     "package:agent-hooks": "node scripts/package-agent-hooks.js",
+    "license:issue": "node scripts/license-issue.js",
     "agent-hooks:install": "node scripts/install-agent-hooks.js",
     "agent-hooks:check": "node scripts/check-agent-hooks-install.js",
     "docs:demo-guide": "node scripts/update-demo-guide.js",

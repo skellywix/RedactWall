@@ -58,9 +58,12 @@ drag/drop or file-open interception inside every desktop AI app.
 6. **Published detection benchmarks + red-team harness** (N6) — publish
    held-out eval numbers; ship a self-service detector test kit. Builds on
    `npm run eval` and `suite/`.
-7. **Customer licensing implementation** (N7) — offline Ed25519-signed license
-   file, seat counting with renewal true-up, 30-day grace, never block
-   detection for billing reasons. Design in `docs/CUSTOMER_LICENSING.md`.
+7. **Customer licensing implementation** (N7) — DONE. Offline Ed25519-signed
+   license verified at boot + daily (`server/license.js`), issued with
+   `npm run license:issue`, installed via `POST /api/billing/license`; 30-day
+   grace, admin console goes read-only past grace but detection/enforcement/
+   approvals/audit never stop. Replace the placeholder public key before the
+   first commercial release. Docs in `docs/CUSTOMER_LICENSING.md`.
 8. **First tagged release on the new process** (N7) — cut `v0.4.0` per
    `docs/RELEASE_PROCESS.md`: CHANGELOG cut, signed artifacts, SBOM.
 9. **Desktop app file-open/drag-drop interception** (X7) — see the browser→

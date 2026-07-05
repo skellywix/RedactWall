@@ -2051,6 +2051,7 @@ async function loadStats() {
     const seatMeta = invalidSeatConfig ? 'set paid seat limit' : (hasSeatLimit ? `${seats.seatsRemaining} remaining` : 'billable users');
     const seatLabel = invalidSeatConfig ? 'Seat config' : (seats && seats.saasMode ? 'Seats used' : 'Users observed');
     const seatTone = invalidSeatConfig || (seats && seats.overLimit) ? 'warn' : 'secure';
+    const lic = seats && seats.license;
     const cards = [
       ['pending', s.pending, 'Pending approval', 'held for review', 'critical'],
       ['alert', s.todayBlocked, 'Blocked today', 'policy stops', 'warn'],
@@ -2059,6 +2060,15 @@ async function loadStats() {
       ['', approveRate, 'Approval rate', 'admin decisions', 'live'],
       [invalidSeatConfig || (seats && seats.overLimit) ? 'alert' : '', seatValue, seatLabel, seatMeta, seatTone],
     ];
+    if (lic) {
+      const licTone = lic.state === 'readonly' ? 'critical' : (lic.state === 'grace' ? 'warn' : (lic.state === 'unlicensed' ? 'live' : 'secure'));
+      const licValue = lic.state === 'unlicensed' ? 'Demo' : (lic.plan || lic.state);
+      const licMeta = lic.state === 'unlicensed' ? 'no license installed'
+        : (lic.state === 'readonly' ? 'past grace — config read-only'
+          : (lic.state === 'grace' ? `expired; grace ends ${(lic.graceEndsAt || '').slice(0, 10)}`
+            : `expires ${(lic.expires || '').slice(0, 10)}`));
+      cards.push([lic.state === 'readonly' || lic.state === 'grace' ? 'alert' : '', licValue, 'License', licMeta, licTone]);
+    }
     $('#stats').innerHTML = cards.map(([c, n, l, m, tone]) => `
       <div class="stat ${c}" data-tooltip="${escapeHtml(`${l}: ${m}`)}">
         <div class="l"><span class="status-light tone-${escapeHtml(tone)}" aria-hidden="true"></span>${escapeHtml(l)}</div>

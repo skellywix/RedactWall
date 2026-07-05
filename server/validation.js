@@ -122,6 +122,10 @@ const sensorMetadataSchema = z.object({
   platform: optionalString(80),
 }).strict();
 
+const licenseInstallSchema = z.object({
+  license: z.string().min(1).max(20000),
+}).strict();
+
 const heartbeatCheckSchema = z.object({
   id: z.string().min(1).max(80).regex(SENSOR_ID),
   ok: z.boolean(),
@@ -654,6 +658,7 @@ module.exports = {
   validateBody,
   validationFields,
   gateSchema,
+  licenseInstallSchema,
   rehydrateSchema,
   scanFileSchema,
   scanResponseSchema,

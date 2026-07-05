@@ -58,6 +58,7 @@ const {
 const releaseTokens = require('./release-token');
 const receipts = require('./receipts');
 const tenant = require('./tenant');
+const license = require('./license');
 const routing = require('./routing');
 const workflow = require('./workflow');
 const roles = require('./roles');
@@ -1704,13 +1705,18 @@ app.get('/auth/oidc/callback', async (req, res) => {
 
 const sessionWrite = [auth.requireAuth, auth.requireCsrf];
 const adminRead = [auth.requireAuth, auth.requireRole(roles.SECURITY_ADMIN)];
-const adminWrite = [auth.requireAuth, auth.requireCsrf, auth.requireRole(roles.SECURITY_ADMIN)];
+// license.requireWritable is appended LAST: past the license grace window it
+// returns 403 license_readonly for config writes, but exempts /api/queries/
+// (reveal/assign keep the approval workflow alive) and the license-install
+// route. It never gates ingest, SCIM, or decision routes — the security
+// function must never be disabled for billing.
+const adminWrite = [auth.requireAuth, auth.requireCsrf, auth.requireRole(roles.SECURITY_ADMIN), license.requireWritable];
 const decisionWrite = [auth.requireAuth, auth.requireCsrf, auth.requireRole(roles.SECURITY_ADMIN, roles.APPROVER)];
 // Compliance evidence exports: the auditor's whole job, without admin power.
 const auditRead = [auth.requireAuth, auth.requireRole(roles.SECURITY_ADMIN, roles.AUDITOR)];
 // Fleet/runtime operations: updates, posture triage, delivery checks - no policy power.
 const operatorRead = [auth.requireAuth, auth.requireRole(roles.SECURITY_ADMIN, roles.OPERATOR)];
-const operatorWrite = [auth.requireAuth, auth.requireCsrf, auth.requireRole(roles.SECURITY_ADMIN, roles.OPERATOR)];
+const operatorWrite = [auth.requireAuth, auth.requireCsrf, auth.requireRole(roles.SECURITY_ADMIN, roles.OPERATOR), license.requireWritable];
 const API_MAX_LIST_LIMIT = 5000;
 
 function boundedApiLimit(value, fallback = 200, max = API_MAX_LIST_LIMIT) {
@@ -1988,8 +1994,39 @@ app.get('/api/insights', auth.requireAuth, (req, res) => {
 });
 
 app.get('/api/billing/seats', ...adminRead, (req, res) => {
-  res.json(tenant.seatReport(db));
+  res.json({ ...tenant.seatReport(db), license: license.publicStatus() });
 });
+
+app.get('/api/billing/license', ...adminRead, (req, res) => {
+  res.json(license.publicStatus());
+});
+
+// Installing a renewal must always work, even in readonly state — so this is
+// NOT gated by license.requireWritable (adminRead has no requireWritable; the
+// POST uses an explicit chain without it).
+app.post('/api/billing/license',
+  auth.requireAuth, auth.requireCsrf, auth.requireRole(roles.SECURITY_ADMIN),
+  validation.validateBody(validation.licenseInstallSchema),
+  (req, res) => {
+    const text = String(req.body.license || '');
+    const v = license.verifyLicenseText(text);
+    if (!v.ok) {
+      db.appendAudit({ action: 'LICENSE_INSTALL_REJECTED', actor: req.user.user, detail: `reason=${v.reason}` });
+      return res.status(400).json({ error: 'invalid_license', reason: v.reason });
+    }
+    try {
+      fs.writeFileSync(license.licensePath(), text.trim() + '\n', { mode: 0o600 });
+    } catch (e) {
+      return res.status(500).json({ error: 'license_write_failed' });
+    }
+    license.refresh({ appendAudit: (rec) => db.appendAudit(rec) });
+    db.appendAudit({
+      action: 'LICENSE_INSTALLED',
+      actor: req.user.user,
+      detail: `customerId=${v.payload.customerId}; plan=${v.payload.plan}; seats=${v.payload.seats}; expires=${v.payload.expires}`,
+    });
+    res.json(license.publicStatus());
+  });
 
 // Ops metrics (admin) - counts + live audit-integrity, for dashboards/monitoring.
 app.get('/api/metrics', ...adminRead, (req, res) => {
@@ -2792,6 +2829,11 @@ function logStartup(port, deps = {}) {
     io.log(`  Raw-prompt retention: encrypted at rest (AES-256-GCM), held items only; finalized records purge after ${days} day(s).`);
   }
   io.log(`  Ingest key: ${ingestKey === 'dev-ingest-key' ? 'dev-ingest-key (override with INGEST_API_KEY)' : 'configured'}`);
+  const lic = (deps.license || license).publicStatus();
+  if (lic.state === 'unlicensed') io.log('  License: unlicensed (demo mode) — detection and enforcement run; install a license to unlock the admin console fully.');
+  else if (lic.state === 'grace') io.log(`  [!] License expired ${lic.expires} — in grace until ${lic.graceEndsAt}; admin console goes read-only after that.`);
+  else if (lic.state === 'readonly') io.log('  [!] License past grace — admin console is READ-ONLY. Detection, enforcement, approvals, and evidence export still run. Install a renewal to restore config writes.');
+  else io.log(`  License: ${lic.plan} plan, ${lic.seats} seats, expires ${lic.expires}.`);
 }
 
 function startServer(port = PORT, opts = {}) {
@@ -2812,6 +2854,7 @@ function startServer(port = PORT, opts = {}) {
   }
   retentionPurge();
   workflowEscalation();
+  (opts.runLicenseRefresh || (() => license.refresh({ appendAudit: (rec) => db.appendAudit(rec) })))();
   const server = appToListen.listen(port, () => {
     const address = server.address();
     log(address && address.port ? address.port : port);
@@ -2819,13 +2862,16 @@ function startServer(port = PORT, opts = {}) {
   const retentionTimer = setIntervalFn(() => retentionPurge(), 60 * 60 * 1000);
   const workflowTimer = setIntervalFn(() => workflowEscalation(), 5 * 60 * 1000);
   const staleTimer = setIntervalFn(() => staleSweep(), 60 * 60 * 1000);
+  const licenseTimer = setIntervalFn(() => license.refresh({ appendAudit: (rec) => db.appendAudit(rec) }), 24 * 60 * 60 * 1000);
   retentionTimer.unref();
   workflowTimer.unref();
   staleTimer.unref();
+  licenseTimer.unref();
   server.on('close', () => {
     clearIntervalFn(retentionTimer);
     clearIntervalFn(workflowTimer);
     clearIntervalFn(staleTimer);
+    clearIntervalFn(licenseTimer);
   });
   return server;
 }
