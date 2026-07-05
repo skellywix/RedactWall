@@ -130,7 +130,67 @@ function webhook(event, dest) {
   return { url: dest.url, method: 'POST', headers, body: JSON.stringify(event) };
 }
 
-const ADAPTERS = { splunk_hec: splunkHec, datadog, sentinel, chronicle, qradar: qradarLeef, slack, teams, webhook };
+// OpenTelemetry OTLP/HTTP (JSON) logs. Maps a sanitized event to a LogRecord.
+// int64 fields (timeUnixNano, intValue) MUST be JSON strings per the proto3
+// JSON mapping, or strict collectors reject the payload. Attributes use the
+// promptwall.* namespace (not the still-evolving gen_ai.*) and carry only
+// label-shaped metadata — never masked values or reasons.
+function otlpAttr(key, value) {
+  if (typeof value === 'number') {
+    return Number.isInteger(value)
+      ? { key, value: { intValue: String(value) } }
+      : { key, value: { doubleValue: value } };
+  }
+  if (typeof value === 'boolean') return { key, value: { boolValue: value } };
+  return { key, value: { stringValue: String(value == null ? '' : value) } };
+}
+
+function otlpSeverity(event) {
+  const s = event.maxSeverity || 0;
+  if (s >= 4) return { number: 21, text: 'FATAL' };
+  if (s >= 3) return { number: 17, text: 'ERROR' };
+  if (s >= 2) return { number: 13, text: 'WARN' };
+  return { number: 9, text: 'INFO' };
+}
+
+function otlp(event, dest) {
+  const sev = otlpSeverity(event);
+  const ts = String((Date.parse(event.createdAt || '') || Date.now()) * 1e6);
+  const record = {
+    timeUnixNano: ts,
+    severityNumber: sev.number,
+    severityText: sev.text,
+    body: { stringValue: summaryLine(event) },
+    attributes: [
+      otlpAttr('promptwall.event_type', 'security_event'),
+      otlpAttr('promptwall.action', event.action || event.status || ''),
+      otlpAttr('promptwall.query_id', event.queryId || ''),
+      otlpAttr('promptwall.schema_version', event.schemaVersion || 2),
+      otlpAttr('enduser.id', event.user || ''),
+      otlpAttr('promptwall.destination', event.destination || ''),
+      otlpAttr('promptwall.source', event.source || ''),
+      otlpAttr('promptwall.channel', event.channel || ''),
+      otlpAttr('promptwall.risk_score', event.riskScore || 0),
+      otlpAttr('promptwall.max_severity', event.maxSeverity || 0),
+      otlpAttr('promptwall.finding_types', (event.findings || []).map((f) => f.type).join(',')),
+    ],
+  };
+  const headers = { 'content-type': 'application/json' };
+  if (dest.token) headers.authorization = 'Bearer ' + dest.token;
+  return {
+    url: joinUrl(dest.url, '/v1/logs'),
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      resourceLogs: [{
+        resource: { attributes: [otlpAttr('service.name', dest.serviceName || 'promptwall')] },
+        scopeLogs: [{ scope: { name: 'promptwall.subscriptions' }, logRecords: [record] }],
+      }],
+    }),
+  };
+}
+
+const ADAPTERS = { splunk_hec: splunkHec, datadog, sentinel, chronicle, qradar: qradarLeef, slack, teams, otlp, webhook };
 
 function statusLevel(event) {
   const s = event.maxSeverity || 0;

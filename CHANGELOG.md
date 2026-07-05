@@ -11,6 +11,9 @@ reconstructed from `ITERATIONS.md` and git history.
 
 ### Added
 
+- OTLP/HTTP (JSON) subscription destination type (`otlp`): stream sanitized AI
+  activity events to a self-hosted OpenTelemetry collector at `<url>/v1/logs`,
+  with an optional `serviceName` resource attribute. Label-only, prompt-free.
 - `ROADMAP.md`: competitor-grounded product roadmap (Now / Next / Later).
 - Standalone black-box regression suite in `suite/` with smoke/full tiers:
   API contract, security (authz/IDOR, CSRF, PII-leak, audit tamper), detector
