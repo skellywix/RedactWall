@@ -634,6 +634,9 @@ button.stat:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
 .overview-row .ovr-what{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
 .overview-row .ovr-what b{font-weight:600}
 .reasons{margin-top:8px;color:var(--mut);font-size:12px;line-height:1.5}
+.assign-editor{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center}
+.assign-editor input{max-width:230px}
+.assign-editor select{max-width:180px}
 .note{
   width:100%;
   min-height:38px;
@@ -1248,6 +1251,7 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
 .signal-input-wrap[data-state="warning"] .signal-input-help{color:var(--amber)}
 .signal-input-wrap[data-state="valid"] .signal-input-help{color:var(--green)}
 .signal-filters{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.signal-filters.decision-pivots{justify-content:flex-start;margin-top:12px}
 .signal-chip{
   display:inline-flex;
   align-items:center;
@@ -2553,6 +2557,8 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
 
           <div class="metric-grid" id="monitorMetrics" aria-live="polite"></div>
 
+          <div class="signal-filters decision-pivots" id="monitorDecisionPivots" aria-label="Decision pivots into All Activity" aria-live="polite"></div>
+
           <div id="hardeningMission" aria-live="polite"></div>
 
           <div class="signal-section">
@@ -2882,7 +2888,7 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
           <div class="panel-head">
             <div>
               <h2>Fleet by user</h2>
-              <span>Sensors report on each other: a user seen by one sensor but not its companions is a coverage gap</span>
+              <span>Sensors report on each other: a user seen by one sensor but not its companions is a coverage gap. Sensors silent past 48h are flagged STALE and fire a SENSOR_STALE alert to subscribed SIEM destinations.</span>
             </div>
           </div>
           <table><thead><tr><th>User</th><th>Browser extension</th><th>Endpoint agent</th><th>MCP guard</th><th>Coverage gaps</th></tr></thead>

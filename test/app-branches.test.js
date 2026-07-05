@@ -470,6 +470,7 @@ test('app internals cover ingest throttle, startup logging, server timers, and s
     preflight: { summarizeFailures: () => [] },
     runRetentionPurge: () => calls.push('retention'),
     runWorkflowEscalation: () => calls.push('workflow'),
+    runSensorStaleSweep: () => calls.push('stale-sweep'),
     app: fakeApp,
     logStartup: (port) => calls.push(`log:${port}`),
     setInterval: (fn, ms) => {
@@ -485,8 +486,9 @@ test('app internals cover ingest throttle, startup logging, server timers, and s
   closeHandler();
   assert.ok(calls.includes('retention'));
   assert.ok(calls.includes('workflow'));
+  assert.ok(calls.includes('stale-sweep'));
   assert.ok(calls.includes('log:4521'));
-  assert.deepStrictEqual(cleared.sort((a, b) => a - b), [5 * 60 * 1000, 60 * 60 * 1000].sort((a, b) => a - b));
+  assert.deepStrictEqual(cleared.sort((a, b) => a - b), [5 * 60 * 1000, 60 * 60 * 1000, 60 * 60 * 1000].sort((a, b) => a - b));
 
   const signals = {};
   const exits = [];

@@ -111,6 +111,12 @@ The sensor policy endpoint, `/api/v1/policy`, does not expose
   approve or deny only items assigned to `assignedRole: "approver"` and their
   `assignedUser`, when present. Approvers cannot reveal raw prompts, purge
   retention, edit policy, or review governed destinations.
+- Security Admins can reassign a held item inline from the queue row (or via
+  `POST /api/queries/:id/assign`) to change `assignedUser`, `assignedGroup`,
+  or `assignedRole` after automatic routing. Every reassignment is recorded in
+  the audit chain as `APPROVAL_REASSIGNED` with the new owner metadata only.
+  An empty value clears the field, returning the item to "anyone in the
+  group"; decided items cannot be reassigned.
 - Do not use free-form prompt text or file names in routing reasons.
 - Configure external notifications only after the destination is approved for
   sanitized security events. Notification payloads include query id, owner,

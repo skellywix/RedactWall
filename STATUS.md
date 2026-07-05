@@ -18,7 +18,8 @@ Roadmap references (N*/X*) point at `ROADMAP.md`.
   `coverage-file-flow.js`, `ai-threat-guardrails.js`, plus posture/catalog/
   compliance/lineage/identity views). Follow the conventions in
   `console/src/views/` (typed api module + view + co-located CSS; `Queue.tsx`
-  is the richest example).
+  is the richest example). Carry the recently-landed legacy queue assignee
+  editor and Command Center decision pivots over to the `/app` Queue/Overview.
 - WS1 A4 (after A3): cutover — flip `SENTINEL_CONSOLE_DEFAULT=app` as deploy
   default, serve legacy at `/legacy/` for one release, port remaining
   Playwright specs, then delete `server/public/dashboard.js`, `index.html`,
@@ -29,6 +30,16 @@ Roadmap references (N*/X*) point at `ROADMAP.md`.
 - WS4.4 (SaaS-gated): tenant lifecycle tooling (org create, suspend,
   offboard-with-export, deletion with audit-chain preservation) — triggered by
   a signed shared-SaaS customer, not calendar.
+
+**Next pass — browser→endpoint file-intent:** extend the new file-intent
+handoff loop end to end in a pilot — add the file-intent host to
+`scripts/check-endpoint-install.js` (a `--require-file-intent-host` check
+mirroring `--require-desktop-collector`) and surface intent-resolved scans
+distinctly in lineage so an examiner can see browser-intent-triggered endpoint
+scans. Remaining product gap: desktop coverage is protected-upload, clipboard
+guard, git-push guard, per-app guarded drop folders, browser text-upload
+inspection, and browser→endpoint file-intent handoff — but still not universal
+drag/drop or file-open interception inside every desktop AI app.
 
 **Product roadmap:**
 
@@ -52,11 +63,9 @@ Roadmap references (N*/X*) point at `ROADMAP.md`.
    detection for billing reasons. Design in `docs/CUSTOMER_LICENSING.md`.
 8. **First tagged release on the new process** (N7) — cut `v0.4.0` per
    `docs/RELEASE_PROCESS.md`: CHANGELOG cut, signed artifacts, SBOM.
-9. **Desktop app file-open/drag-drop interception** (X7) — move beyond the
-   protected-upload shell action, clipboard guard, and browser-local upload
-   path (app-specific native collectors or native-messaging handoff). The
-   longest-standing product gap: the endpoint package is not yet universal
-   file-open interception for every desktop AI app.
+9. **Desktop app file-open/drag-drop interception** (X7) — see the browser→
+   endpoint file-intent next pass above; the endpoint package is not yet
+   universal file-open interception for every desktop AI app.
 10. **MCP server catalog + per-tool RBAC** (X1), **gateway prompt-injection
     benchmark** (X2), **Copilot ingestion** (X3) — next-quarter items; see
     `ROADMAP.md` for acceptance sketches.
@@ -84,6 +93,14 @@ Roadmap references (N*/X*) point at `ROADMAP.md`.
   fixed three `alwaysBlock` hard-stop bypasses, an Atlassian connector
   credential leak, outbound SSRF, and hot-path perf (overlap resolution
   O(k²)→O(k log k)); detail in `docs/SECURITY_REVIEW_2026-07.md`.
+- 2026-07-04: Browser→endpoint file-intent handoff — when the extension blocks
+  an upload it cannot inspect (too large / OCR-required / unsupported), it
+  sends name+size (never bytes) through a `com.promptwall.file_intent` native
+  messaging host that resolves the file in local staging roots and writes the
+  signed metadata-only handoff so the endpoint agent scans it locally.
+- 2026-07-04: Console-parity checklist closed — inline queue reassignment
+  (`POST /api/queries/:id/assign`, audited `APPROVAL_REASSIGNED`), hourly
+  `SENSOR_STALE` sweep, and Command Center decision-pivot chips.
 - 2026-07-04: Stack-upgrade plan WS1–WS5 (`PLANS/stack-upgrade-plan.md`) —
   killable child-process parse pool for attacker-controlled file extraction
   (`server/parse-pool.js`); Node 22/24 CI matrix + node24/postgres17 lane;

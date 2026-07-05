@@ -37,6 +37,11 @@ module.exports = defineConfig({
   use: {
     baseURL,
     trace: 'retain-on-failure',
+    // Sandboxes with a pre-installed Chromium (e.g. remote agent containers)
+    // can point at it instead of downloading the pinned build. Unset = default.
+    ...(process.env.PLAYWRIGHT_CHROMIUM_PATH
+      ? { launchOptions: { executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH } }
+      : {}),
   },
   webServer: {
     command: 'node scripts/playwright-server.js',
