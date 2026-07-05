@@ -42,7 +42,7 @@ The dashboard and API run on `http://localhost:4000` by default. The generated a
 
 ## Admin Console
 
-The browser console is the operator-facing control plane. It uses a macOS-inspired design system with light and dark themes, a single sidebar navigation, and one focused screen per task: login, approval queue, AI Data Leak Exposure Map (the command-center overview), activity, coverage, identity, lineage, audit, configuration, and updates. The queue, command-center, and configuration views are optimized for an interactive leak path map with Before/With PromptWall lenses, guided operator flow, guided policy setup, anomaly-score triage, redacted evidence review, live posture objectives, AI threat guardrails, AI control graph mapping, Agentic MCP Control, control outcomes, sensor posture, and fast approval or denial decisions without exposing raw prompt content by default.
+The browser console is the operator-facing control plane. It uses a macOS-inspired design system with light and dark themes, a single sidebar navigation, and one focused screen per task: login, approval queue, AI Data Leak Exposure Map (the command-center overview), activity, coverage, identity, lineage, audit, configuration, and updates. The queue, command-center, and configuration views are optimized for an interactive AI leak exposure map that attributes sanitized flows to departments, guided operator flow, guided policy setup, anomaly-score triage, redacted evidence review, live posture objectives, AI threat guardrails, AI control graph mapping, Agentic MCP Control, control outcomes, sensor posture, and fast approval or denial decisions without exposing raw prompt content by default.
 
 Run the default test suite:
 

@@ -446,11 +446,13 @@ test('dashboard static controls, generated policy controls, and API routes stay 
   assert.ok(controlGraphJs.includes('control-graph-edge'), 'control-graph.js no longer renders control graph links');
   assert.ok(dashboard.includes('renderLeakPathMap'), 'dashboard.js no longer renders the AI leak path map');
   assert.ok(leakPathMapJs.includes('PromptWallLeakPathMap'), 'leak-path-map.js no longer exports the leak path map renderer');
-  assert.ok(leakPathMapJs.includes('leak-node'), 'leak-path-map.js no longer renders leak path nodes');
-  assert.ok(leakPathMapJs.includes('data-leak-lens'), 'leak-path-map.js no longer exposes the Before/With PromptWall lens');
-  assert.ok(leakPathMapJs.includes('data-leak-pick'), 'leak-path-map.js no longer exposes scenario toggles');
+  assert.ok(leakPathMapJs.includes('leakMap'), 'leak-path-map.js no longer reads the posture leakMap contract');
+  assert.ok(leakPathMapJs.includes('leak-node'), 'leak-path-map.js no longer renders leak map nodes');
+  assert.ok(leakPathMapJs.includes('data-leak-edge'), 'leak-path-map.js no longer renders clickable leak edges');
+  assert.ok(leakPathMapJs.includes('data-leak-filter'), 'leak-path-map.js no longer exposes exposure filters');
+  assert.ok(leakPathMapJs.includes('data-leak-category'), 'leak-path-map.js no longer exposes data-type filters');
   assert.ok(leakPathMapJs.includes('prefers-reduced-motion'), 'leak-path-map.js no longer respects reduced motion');
-  assert.ok(leakPathMapJs.includes('MCP document pull'), 'leak-path-map.js no longer covers the MCP document pull scenario');
+  assert.ok(leakPathMapJs.includes('leak-wall'), 'leak-path-map.js no longer draws the PromptWall barrier');
   assert.ok(dashboard.includes('MCP Tool Governance'), 'dashboard.js no longer exposes MCP tool governance policy');
   assert.ok(dashboard.includes('mission-proof-ledger'), 'dashboard.js no longer renders the mission proof ledger');
   assert.ok(dashboard.includes('hardening-proof-ledger'), 'dashboard.js no longer renders hardening proof rows');
@@ -491,7 +493,8 @@ test('dashboard static controls, generated policy controls, and API routes stay 
   assert.ok(index.includes('control-graph-lanes'), 'index.html no longer styles AI control graph lanes');
   assert.ok(index.includes('control-graph-edge'), 'index.html no longer styles AI control graph edges');
   assert.ok(index.includes('leak-map-stage'), 'index.html no longer styles the leak path map stage');
-  assert.ok(index.includes('leak-path-row'), 'index.html no longer styles leak path rows');
+  assert.ok(index.includes('leak-wall'), 'index.html no longer styles the PromptWall barrier');
+  assert.ok(index.includes('leak-edge'), 'index.html no longer styles leak map edges');
   assert.ok(index.includes('leak-inspector-grid'), 'index.html no longer styles the leak map inspector');
   assert.ok(index.includes('<script src="/leak-path-map.js" defer></script>'), 'index.html no longer loads the leak path map renderer');
   assert.ok(index.includes('action-queue'), 'index.html no longer styles the hardening action queue');

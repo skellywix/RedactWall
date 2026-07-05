@@ -24,12 +24,12 @@ test('AI Command Center labels its feed as sanitized metadata', () => {
   assert.match(index, /AI Data Leak Exposure Map/);
   assert.match(index, /See Every Path Sensitive Data Can Take to AI/);
 
-  const monitorDefinitions = sourceBetween(dashboard, 'const monitorItems = [', 'function escapeHtml');
-  assert.match(monitorDefinitions, /AI Command Center records sanitized metadata/);
-  assert.match(monitorDefinitions, /only masked findings and category metadata are recorded/);
-  assert.match(monitorDefinitions, /raw document text was not logged in AI Command Center/);
-  assert.doesNotMatch(monitorDefinitions, /prompt was held/i);
-  assert.doesNotMatch(monitorDefinitions, /\brawPrompt\b|_rawPrompt|\/reveal/);
+  assert.doesNotMatch(dashboard, /const monitorItems = \[/, 'dashboard.js reintroduced canned monitor fixtures');
+  assert.doesNotMatch(dashboard, /const monitorEvents = \[/, 'dashboard.js reintroduced canned monitor events');
+  const monitorSources = sourceBetween(dashboard, 'function monitorAllEvents', 'function monitorStatusCounts');
+  assert.match(monitorSources, /currentPosture\.events/);
+  assert.match(monitorSources, /currentPosture\.surfaces/);
+  assert.doesNotMatch(monitorSources, /\brawPrompt\b|_rawPrompt|\/reveal/);
 });
 
 test('leak path map renders sanitized scenario evidence only', () => {

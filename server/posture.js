@@ -2493,6 +2493,160 @@ function postureSegments({ rows = [], selectedRows = [], segment = '', identityG
   };
 }
 
+const LEAK_MAP_LIMITS = Object.freeze({ segments: 6, destinations: 8, edges: 18, categories: 6 });
+
+function leakSegmentFor(row, groupsByUser) {
+  const segments = rowSegments(row, groupsByUser);
+  return segments.find((item) => item.type === 'group')
+    || segments.find((item) => item.type === 'org')
+    || { id: 'org:unassigned', type: 'org', typeLabel: SEGMENT_TYPES.org, label: 'Unassigned' };
+}
+
+function leakBucket(extra = {}) {
+  return {
+    events: 0, sensitive: 0, controlled: 0, blocked: 0, redacted: 0, coached: 0,
+    pending: 0, shadow: 0, uncontrolled: 0, maxRiskScore: 0, lastSeen: null, ...extra,
+  };
+}
+
+function leakTally(bucket, row, events) {
+  const sensitive = isSensitive(row);
+  const controlled = sensitive && (isBlocked(row) || isRedacted(row) || COACHING_STATUSES.has(String(row.status || '')) || row.status === 'approved' || row.status === 'denied');
+  bucket.events += events;
+  bucket.sensitive += sensitive ? events : 0;
+  bucket.controlled += controlled ? events : 0;
+  bucket.blocked += isBlocked(row) ? events : 0;
+  bucket.redacted += isRedacted(row) ? events : 0;
+  bucket.coached += COACHING_STATUSES.has(String(row.status || '')) ? events : 0;
+  bucket.pending += row.status === 'pending' ? events : 0;
+  bucket.shadow += isShadowAi(row) ? events : 0;
+  bucket.uncontrolled += sensitive && !controlled && row.status !== 'pending' ? events : 0;
+  bucket.maxRiskScore = Math.max(n(bucket.maxRiskScore), n(row.riskScore), n(row.maxSeverity) >= 4 ? 80 : 0);
+  if (row.createdAt && (!bucket.lastSeen || String(row.createdAt) > String(bucket.lastSeen))) bucket.lastSeen = row.createdAt;
+}
+
+function leakStatus(item) {
+  if (n(item.uncontrolled) > 0 || n(item.shadow) > 0 || n(item.maxRiskScore) >= 80) return 'error';
+  if (n(item.pending) > 0 || n(item.maxRiskScore) >= 40) return 'warning';
+  if (n(item.events) > 0) return 'online';
+  return 'idle';
+}
+
+function leakNode(bucket) {
+  const users = bucket.users instanceof Set ? bucket.users.size : n(bucket.users);
+  const { users: _users, via: _via, categories: _categories, ...rest } = bucket;
+  return {
+    ...rest,
+    users,
+    maxRiskScore: bound(bucket.maxRiskScore),
+    controlRate: n(bucket.sensitive) ? pct(bucket.controlled, bucket.sensitive) : 100,
+    status: leakStatus(bucket),
+  };
+}
+
+function leakRank(a, b) {
+  return (n(b.uncontrolled) + n(b.shadow)) - (n(a.uncontrolled) + n(a.shadow))
+    || n(b.sensitive) - n(a.sensitive)
+    || n(b.events) - n(a.events)
+    || String(a.label || a.id).localeCompare(String(b.label || b.id));
+}
+
+function leakEdgeFinalize(edge) {
+  const via = [...edge.via.entries()].sort((a, b) => b[1] - a[1]);
+  const categories = [...edge.categories.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([label, events]) => ({ label, events }));
+  const node = leakNode(edge);
+  return {
+    ...node,
+    via: via.length ? via[0][0] : 'api',
+    viaLabel: via.length ? sourceLabel(via[0][0]) : sourceLabel('api'),
+    categories,
+  };
+}
+
+function leakMapGraph({ rows = [], identityGroups = {}, inventory = {} } = {}) {
+  const groupsByUser = identityGroupMap(identityGroups);
+  const appState = new Map((inventory.apps || []).map((app) => [coverage.normalizeDestination(app.name), app.state]));
+  const segments = new Map();
+  const channels = new Map();
+  const destinations = new Map();
+  const edges = new Map();
+  const categoryTotals = new Map();
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (!row || EVENTLESS_STATUSES.has(row.status)) continue;
+    const destination = coverage.normalizeDestination(row.destination || '');
+    if (!destination || NON_AI_INVENTORY_DESTINATIONS.has(destination)) continue;
+    const events = eventWeight(row);
+    const seg = leakSegmentFor(row, groupsByUser);
+    const source = safeText(row.source || 'api', 'api', 40);
+    const segBucket = segments.get(seg.id)
+      || leakBucket({ id: seg.id, label: seg.label || 'Unassigned', typeLabel: seg.typeLabel, users: new Set() });
+    leakTally(segBucket, row, events);
+    if (row.user && row.user !== 'unknown') segBucket.users.add(String(row.user).toLowerCase());
+    segments.set(seg.id, segBucket);
+    const chBucket = channels.get(source) || leakBucket({ id: source, label: sourceLabel(source) });
+    leakTally(chBucket, row, events);
+    channels.set(source, chBucket);
+    const destBucket = destinations.get(destination)
+      || leakBucket({ id: destination, label: destination, state: appState.get(destination) || 'observed' });
+    if (isShadowAi(row) && !appState.get(destination)) destBucket.state = 'shadow';
+    leakTally(destBucket, row, events);
+    destinations.set(destination, destBucket);
+    const edgeKey = `${seg.id}->${destination}`;
+    const edge = edges.get(edgeKey)
+      || leakBucket({ id: edgeKey, from: seg.id, to: destination, via: new Map(), categories: new Map() });
+    leakTally(edge, row, events);
+    edge.via.set(source, (edge.via.get(source) || 0) + events);
+    for (const label of categoryLabels(row).slice(0, 4)) {
+      edge.categories.set(label, (edge.categories.get(label) || 0) + events);
+      categoryTotals.set(label, (categoryTotals.get(label) || 0) + events);
+    }
+    edges.set(edgeKey, edge);
+  }
+  const segmentRows = [...segments.values()].map(leakNode).sort(leakRank).slice(0, LEAK_MAP_LIMITS.segments);
+  const destinationRows = [...destinations.values()].map(leakNode).sort(leakRank).slice(0, LEAK_MAP_LIMITS.destinations);
+  const channelRows = [...channels.values()].map(leakNode).sort((a, b) => n(b.events) - n(a.events));
+  const keptSegments = new Set(segmentRows.map((item) => item.id));
+  const keptDestinations = new Set(destinationRows.map((item) => item.id));
+  const edgeRows = [...edges.values()]
+    .filter((edge) => keptSegments.has(edge.from) && keptDestinations.has(edge.to))
+    .map(leakEdgeFinalize)
+    .sort(leakRank)
+    .slice(0, LEAK_MAP_LIMITS.edges);
+  const categories = [...categoryTotals.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, LEAK_MAP_LIMITS.categories)
+    .map(([label, events]) => ({ label, events }));
+  const totals = leakNode([...edges.values()].reduce((acc, edge) => {
+    for (const key of ['events', 'sensitive', 'controlled', 'blocked', 'redacted', 'coached', 'pending', 'shadow', 'uncontrolled']) acc[key] += n(edge[key]);
+    return acc;
+  }, leakBucket({ id: 'all', label: 'All flows' })));
+  return {
+    segments: segmentRows,
+    channels: channelRows,
+    destinations: destinationRows,
+    edges: edgeRows,
+    categories,
+    summary: {
+      segments: segments.size,
+      destinations: destinations.size,
+      edges: edges.size,
+      shownEdges: edgeRows.length,
+      events: totals.events,
+      sensitive: totals.sensitive,
+      controlled: totals.controlled,
+      uncontrolled: totals.uncontrolled,
+      pending: totals.pending,
+      shadow: totals.shadow,
+      controlRate: totals.controlRate,
+      status: totals.status,
+      privacy: 'prompt bodies excluded',
+    },
+  };
+}
+
 function competitiveState(score) {
   const value = bound(score);
   if (value >= 90) return 'leader';
@@ -3209,6 +3363,7 @@ function summarize({
       controls: controlRows,
       hardening,
     }),
+    leakMap: leakMapGraph({ rows: cleanRows, identityGroups: groupsByUser, inventory }),
     surfaces: surfaceRows,
     events: recentEvents(cleanRows, nowMs),
     trend: riskTrend(cleanRows, new Date(nowMs), WINDOW_DAYS),
@@ -3221,6 +3376,7 @@ module.exports = {
   riskTrend,
   controlOutcomes,
   controlGraph,
+  leakMapGraph,
   aiInventory,
   agenticMcpPosture,
   threatGuardrails,

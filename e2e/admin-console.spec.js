@@ -1115,7 +1115,7 @@ test('signal operations monitoring console supports adaptive states', async ({ p
   await expect(page.locator('#tab-monitor')).toBeVisible();
   await expect(page.locator('.signal-console')).toContainText('AI Data Leak Exposure Map');
   await expect(page.locator('#monitorDataScope')).toContainText('without prompt bodies');
-  await expect(page.locator('#leakMapStage .leak-path-row')).toHaveCount(5);
+  await expect(page.locator('#leakMapStage svg')).toBeVisible();
   await expect(page.locator('#hardeningMission')).toContainText('Hardening mission');
   await expect(page.locator('#hardeningMission')).toContainText('AI Gateway Enforcement');
   await expect(page.locator('#hardeningMission')).toContainText('Proof ledger');
@@ -1202,72 +1202,79 @@ test('signal operations monitoring console supports adaptive states', async ({ p
 
   await page.locator('#monitorRefresh').click();
   await expect(page.locator('#monitorRefresh')).toBeEnabled();
-  await expect(page.locator('#monitorActivityFeed')).toContainText('Signal refresh completed');
+  await expect(page.locator('#monitorUpdated')).toContainText('UPDATED');
+  await expect(page.locator('#monitorActivityFeed .activity-feed-row.is-new').first()).toBeVisible();
+  await expect(page.locator('#monitorActivityFeed')).not.toContainText('Signal refresh completed');
 
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await expect(page.locator('.signal-dot.is-pulsing').first()).toHaveCSS('animation-name', 'none');
   expect(problems).toEqual([]);
 });
 
-test('leak path map walks buyers through exposure scenarios', async ({ page, request }) => {
+test('leak exposure map attributes flows to departments and destinations', async ({ page, request }) => {
   const problems = collectUiProblems(page);
   await createHeldPrompt(request, {
     suffix: '9412',
     user: 'leak-map@example.test',
     destination: 'chatgpt.com',
   });
+  await createShadowAi(request, 'novel-ai.example');
   await login(page);
 
   await page.locator('.rail .tab[data-tab="monitor"]').click();
   await expect(page.locator('#tab-monitor')).toBeVisible();
   await expect(page.locator('.signal-console')).toContainText('See Every Path Sensitive Data Can Take to AI');
   await expect(page.locator('#leakMapSummary')).toContainText('prompt bodies excluded');
-  await expect(page.locator('#leakMapScenarios .leak-scenario-chip')).toHaveCount(5);
-  await expect(page.locator('#leakMapStage .leak-path-row')).toHaveCount(5);
+  await expect(page.locator('#leakMapSummary')).toContainText('department');
+
+  // The map is a real graph: departments -> PromptWall barrier -> destinations.
+  await expect(page.locator('#leakMapStage svg')).toBeVisible();
+  await expect(page.locator('#leakMapStage .leak-wall')).toBeVisible();
+  await expect(page.locator('#leakMapStage')).toContainText('DEPARTMENTS & TEAMS');
+  await expect(page.locator('#leakMapStage')).toContainText('PROMPTWALL');
+  await expect(page.locator('#leakMapStage')).toContainText('AI DESTINATIONS');
+  await expect(page.locator('#leakMapStage [data-leak-node="segment:org:e2e-org"]')).toBeVisible();
+  await expect(page.locator('#leakMapStage [data-leak-node="destination:chatgpt.com"]')).toBeVisible();
+  await expect(page.locator('#leakMapStage [data-leak-node="destination:novel-ai.example"]')).toBeVisible();
+  await expect(page.locator('#leakMapStage .leak-edge').first()).toBeVisible();
   await expect(page.locator('#leakMapStage')).not.toHaveClass(/is-static/);
-  await expect(page.locator('[data-leak-lens="with"]')).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.locator('#leakMapStage .leak-path-row.is-selected')).toHaveAttribute('data-leak-scenario', 'member-data');
-  await expect(page.locator('#leakMapInspector')).toContainText('What happened');
-  await expect(page.locator('#leakMapInspector')).toContainText('What would have leaked');
-  await expect(page.locator('#leakMapInspector')).toContainText('What stopped it');
-  await expect(page.locator('#leakMapInspector')).toContainText('What proof exists');
-  await expect(page.locator('#leakMapInspector')).toContainText('Hard stop before egress');
 
-  // Scenario toggle updates the selected path and inspector.
-  await page.locator('#leakMapScenarios [data-leak-pick="mcp-pull"]').click();
-  await expect(page.locator('#leakMapStage .leak-path-row.is-selected')).toHaveAttribute('data-leak-scenario', 'mcp-pull');
-  await expect(page.locator('#leakMapInspector')).toContainText('MCP document pull path — with PromptWall');
-  await expect(page.locator('#leakMapStage .leak-path-row.is-selected .leak-verdict')).toContainText('Redacted');
+  // The riskiest edge is inspected by default with sanitized detail.
+  await expect(page.locator('#leakMapInspector')).toContainText('What is flowing');
+  await expect(page.locator('#leakMapInspector')).toContainText('Control outcome');
+  await expect(page.locator('#leakMapInspector')).toContainText('Exposure');
+  await expect(page.locator('#leakMapInspector')).toContainText('Proof');
+  await expect(page.locator('#leakMapInspector')).toContainText('masked findings only');
 
-  // Before PromptWall lens removes the control point and the proof.
-  await page.locator('[data-leak-lens="before"]').click();
-  await expect(page.locator('[data-leak-lens="before"]')).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.locator('#leakMapStage .leak-path-row.is-selected .leak-node.is-absent')).toContainText('No control point');
-  await expect(page.locator('#leakMapInspector')).toContainText('no control point exists on this path');
-  await expect(page.locator('#leakMapInspector')).toContainText('Without a gateway there is no record');
+  // Data-type chips are live findings, not canned scenarios.
+  await expect(page.locator('#leakMapScenarios [data-leak-category="US_SSN"]')).toBeVisible();
 
-  // Node click drills into the clicked hop.
-  await page.locator('#leakMapStage .leak-path-row.is-selected [data-leak-node="outcome"]').click();
-  await expect(page.locator('#leakMapInspector')).toContainText('Outcome with no control in the path');
+  // Clicking a department node focuses the inspector on that segment.
+  await page.locator('#leakMapStage [data-leak-node="segment:org:e2e-org"]').click();
+  await expect(page.locator('#leakMapInspector')).toContainText('e2e-org');
+  await expect(page.locator('#leakMapInspector')).toContainText('held for approval');
 
-  await page.locator('[data-leak-lens="with"]').click();
-  await expect(page.locator('#leakMapInspector')).toContainText('Connector payload transformed before model access');
+  // Exposure filter narrows the graph to shadow AI flows.
+  await page.locator('[data-leak-filter="shadow"]').click();
+  await expect(page.locator('[data-leak-filter="shadow"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#leakMapStage .leak-edge.is-shadow').first()).toBeVisible();
+  await expect(page.locator('#leakMapStage .leak-edge.is-held')).toHaveCount(0);
+  await page.locator('[data-leak-filter="all"]').click();
 
   // Sanitized only: the held prompt's SSN must never surface in the map.
   expect(await page.locator('#tab-monitor').textContent()).not.toContain('524-71-');
 
   // CTA routes into the approval queue.
-  await page.locator('#leakMapScenarios [data-leak-pick="member-data"]').click();
   await page.locator('#leakMapInspector [data-tab-jump="queue"]').click();
   await expect(page.locator('#tab-queue')).toBeVisible();
   await page.locator('.rail .tab[data-tab="monitor"]').click();
   await expect(page.locator('#tab-monitor')).toBeVisible();
 
-  // Reduced motion disables the payload pulse on re-render.
+  // Reduced motion stops the animated flow on re-render.
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.locator('[data-leak-lens="before"]').click();
+  await page.locator('[data-leak-filter="risk"]').click();
   await expect(page.locator('#leakMapStage')).toHaveClass(/is-static/);
-  await expect(page.locator('.leak-pulse').first()).toHaveCSS('animation-name', 'none');
+  expect(await page.locator('#leakMapStage .leak-flow').count()).toBe(0);
 
   expect(problems).toEqual([]);
 });

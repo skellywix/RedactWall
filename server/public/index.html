@@ -1660,36 +1660,34 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
 .leak-scenario-chip b{font-variant-numeric:tabular-nums;color:var(--txt)}
 .leak-scenario-chip:hover{border-color:var(--line2);background:var(--surface-hover)}
 .leak-scenario-chip.is-active{border-color:var(--blue);background:var(--blue-bg);color:var(--txt)}
-.leak-map-stage{display:grid;gap:9px;padding:12px 16px}
-.leak-map-legend,.leak-path-row{display:grid;grid-template-columns:minmax(0,1fr) 26px minmax(0,1fr) 26px minmax(0,1fr) 26px minmax(0,1.15fr);align-items:stretch}
-.leak-map-legend{color:var(--mut);font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em}
-.leak-path-row{opacity:.55;transition:opacity var(--fast)}
-.leak-path-row.is-selected{opacity:1}
-.leak-node{border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--panel2);color:inherit;text-align:left;padding:9px 10px;display:grid;gap:4px;align-content:start;min-width:0;cursor:pointer;transition:border-color var(--fast),background var(--fast),transform var(--fast)}
-.leak-node:hover{border-color:var(--line2);background:var(--surface-hover);transform:translateY(-1px)}
-.leak-node[aria-pressed="true"]{border-color:var(--blue);box-shadow:var(--focus-ring)}
-.leak-node span{display:flex;align-items:center;gap:5px;color:var(--mut);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
-.leak-node span svg{width:12px;height:12px;flex:none}
-.leak-node strong{color:var(--txt);font-size:12px;line-height:1.3;font-weight:650}
-.leak-node small{color:var(--mut);font-size:10.5px;line-height:1.35}
-.leak-node.is-absent{border-style:dashed;background:transparent}
-.leak-node.is-shadow{box-shadow:inset 3px 0 0 var(--amber-vivid)}
-.leak-node.is-proof{box-shadow:inset 3px 0 0 var(--green-vivid)}
-.leak-node.is-loss{box-shadow:inset 3px 0 0 var(--red-vivid)}
-.leak-verdict{display:inline-flex;align-items:center;justify-self:start;border-radius:999px;padding:2px 9px;font-size:11px;font-weight:700;font-style:normal}
-.leak-verdict.blocked{background:var(--red-bg);color:var(--red)}
-.leak-verdict.redacted{background:var(--blue-bg);color:var(--blue)}
-.leak-verdict.approval{background:var(--amber-bg);color:var(--amber)}
-.leak-verdict.logged{background:var(--green-bg);color:var(--green)}
-.leak-link{position:relative;display:block;align-self:center;height:2px;margin:0 3px;background:repeating-linear-gradient(90deg,var(--line2) 0 6px,transparent 6px 12px)}
-.leak-link.is-leak{background:repeating-linear-gradient(90deg,var(--red) 0 6px,transparent 6px 12px)}
-.leak-link.is-safe{background:repeating-linear-gradient(90deg,var(--green) 0 6px,transparent 6px 12px)}
-.leak-link.is-cut{opacity:.45;background:repeating-linear-gradient(90deg,var(--line2) 0 3px,transparent 3px 9px)}
-.leak-pulse{position:absolute;top:-3px;left:0;width:8px;height:8px;border-radius:50%;opacity:0}
-.leak-path-row.is-selected .leak-link.is-leak .leak-pulse{background:var(--red);opacity:1;animation:leakflow 1.6s linear infinite}
-.leak-path-row.is-selected .leak-link.is-safe .leak-pulse{background:var(--green);opacity:1;animation:leakflow 2.2s linear infinite}
-.leak-map-stage.is-static .leak-pulse{animation:none!important;opacity:0!important}
-@keyframes leakflow{from{left:0}to{left:calc(100% - 8px)}}
+.leak-map-stage{padding:10px 16px 4px}
+.leak-map-stage svg{display:block;width:100%;height:auto}
+.leak-col-label{fill:var(--mut);font-size:10px;font-weight:700;letter-spacing:.08em}
+.leak-wall{fill:var(--blue-bg);stroke:var(--blue);stroke-opacity:.4;stroke-dasharray:3 5}
+.leak-node{cursor:pointer}
+.leak-node rect{fill:var(--panel2);stroke:var(--line);transition:stroke var(--fast)}
+.leak-node:hover rect{stroke:var(--line2)}
+.leak-node:focus-visible{outline:none}
+.leak-node:focus-visible rect,.leak-node.is-active rect{stroke:var(--blue);stroke-width:1.6}
+.leak-node.online rect{stroke:var(--green-vivid);stroke-opacity:.5}
+.leak-node.warning rect{stroke:var(--amber-vivid);stroke-opacity:.6}
+.leak-node.error rect{stroke:var(--red-vivid);stroke-opacity:.6}
+.leak-node.is-dim{opacity:.3}
+.leak-node-kicker{fill:var(--mut);font-size:8.5px;font-weight:700;letter-spacing:.06em}
+.leak-node-title{fill:var(--txt);font-size:12px;font-weight:650}
+.leak-node-sub{fill:var(--mut);font-size:9.5px}
+.leak-channel rect{fill:var(--panel)}
+.leak-edge .leak-line{fill:none;stroke-linecap:round;opacity:.8}
+.leak-edge.is-clean .leak-line{stroke:var(--blue)}
+.leak-edge.is-held .leak-line{stroke:var(--amber-vivid)}
+.leak-edge.is-leak .leak-line{stroke:var(--red-vivid)}
+.leak-edge.is-shadow .leak-line{stroke:var(--red-vivid);stroke-dasharray:3 5}
+.leak-edge .leak-hit{fill:none;stroke:transparent;stroke-width:16;cursor:pointer}
+.leak-line.leak-flow{stroke-dasharray:7 9;animation:leakdash 1.1s linear infinite}
+.leak-stop{fill:var(--red-vivid);opacity:.9}
+@keyframes leakdash{to{stroke-dashoffset:-16}}
+.leak-map-stage.is-static .leak-flow{animation:none!important}
+.leak-chip-empty{color:var(--mut);font-size:11.5px}
 .leak-map-inspector{border-top:1px solid var(--line);padding:12px 16px;display:grid;gap:10px}
 .leak-inspector-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap}
 .leak-inspector-head h4{margin:0;font-size:13px;font-weight:650}
@@ -1697,16 +1695,12 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
 .leak-inspector-ctas{display:flex;gap:6px;flex-wrap:wrap}
 .leak-inspector-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
 .leak-inspector-field{border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--panel2);padding:8px 10px;display:grid;gap:4px;align-content:start;min-width:0}
+.leak-inspector-field.is-alert{border-color:var(--red-vivid);background:var(--red-bg)}
 .leak-inspector-field span{color:var(--mut);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
 .leak-inspector-field b{color:var(--soft);font-size:11.5px;line-height:1.4;font-weight:500}
-.leak-inspector-evidence{color:var(--mut);font-size:11.5px}
 @media(max-width:900px){
-  .leak-map-legend{display:none}
-  .leak-path-row{grid-template-columns:minmax(0,1fr)}
-  .leak-link{width:2px;height:18px;margin:0;justify-self:center;background:repeating-linear-gradient(180deg,var(--line2) 0 6px,transparent 6px 12px)}
-  .leak-link.is-leak{background:repeating-linear-gradient(180deg,var(--red) 0 6px,transparent 6px 12px)}
-  .leak-link.is-safe{background:repeating-linear-gradient(180deg,var(--green) 0 6px,transparent 6px 12px)}
-  .leak-link .leak-pulse{display:none}
+  .leak-map-stage{overflow-x:auto}
+  .leak-map-stage svg{min-width:820px}
   .leak-inspector-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 .hardening-board{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:14px 16px}
@@ -2176,7 +2170,7 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
 @media(prefers-reduced-motion:reduce){
   *,*:before,*:after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition:none!important}
   .status-light.is-live,.dot,.pin,.signal-dot.is-pulsing,.signal-dot.is-pulsing:after,.button-spinner,.activity-feed-row.is-new,.metric-card.is-updating,.metric-skeleton,.surveillance-panel.is-loading{animation:none!important}
-  .leak-pulse{animation:none!important;opacity:0!important}
+  .leak-flow{animation:none!important}
   .panel.is-loading:after,.stats.is-loading:after,.config-shell.is-loading:after{animation:none!important}
 }
 </style>
@@ -2240,17 +2234,17 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
     <div class="rail-status">
       <div class="status-line">
         <span>Hash chain</span>
-        <button class="status-chip tone-secure" type="button" data-tooltip="Tamper-evident audit chain" data-status-detail="SECURE: append-only audit chain is enabled for admin and policy activity.">
-          <span class="status-light tone-secure" aria-hidden="true"></span>SECURE
+        <button class="status-chip tone-live" type="button" id="railHashChain" data-tooltip="Tamper-evident audit chain" data-status-detail="CHECKING: audit chain status loads with posture telemetry.">
+          <span class="status-light tone-live" aria-hidden="true"></span>CHECKING
         </button>
       </div>
       <div class="status-line">
         <span>Local scan</span>
-        <button class="status-chip tone-live" type="button" data-tooltip="Local inspection loop" data-status-detail="MONITORING: local prompt inspection is active for connected sensors.">
-          <span class="status-light tone-live is-live" aria-hidden="true"></span>MONITORING
+        <button class="status-chip tone-live" type="button" id="railLocalScan" data-tooltip="Local inspection loop" data-status-detail="CHECKING: sensor scan status loads with posture telemetry.">
+          <span class="status-light tone-live" aria-hidden="true"></span>CHECKING
         </button>
       </div>
-      <div class="status-line"><span>Version</span><b>0.3.0</b></div>
+      <div class="status-line"><span>Version</span><b id="railVersion">-</b></div>
     </div>
   </aside>
 
@@ -2409,9 +2403,9 @@ input[type="checkbox"],input[type="radio"]{accent-color:var(--blue);width:15px;h
                 <h3>See Every Path Sensitive Data Can Take to AI</h3>
                 <span id="leakMapSummary">Waiting for posture data</span>
               </div>
-              <div class="leak-map-lens" id="leakMapLens" role="group" aria-label="PromptWall lens"></div>
+              <div class="leak-map-lens" id="leakMapLens" role="group" aria-label="Exposure filter"></div>
             </div>
-            <div class="leak-map-scenarios" id="leakMapScenarios" aria-label="Leak scenarios"></div>
+            <div class="leak-map-scenarios" id="leakMapScenarios" aria-label="Data type filters"></div>
             <div class="leak-map-stage" id="leakMapStage"></div>
             <div class="leak-map-inspector" id="leakMapInspector" aria-live="polite"></div>
           </div>

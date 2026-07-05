@@ -472,3 +472,92 @@ test('posture covers low-risk, coaching, shadow-only, and missing-sensor edge st
     && item.gaps.includes('Run live sensor traffic before behavioral baselines can learn normal activity')
   )));
 });
+
+test('posture leak map attributes sanitized flows to identity segments', () => {
+  const coverageReport = coverage.summarize(rows, policy);
+  const report = posture.summarize({
+    rows,
+    policy,
+    coverageReport,
+    auditIntegrity: { ok: true, count: 8 },
+    now: '2026-07-03T00:00:00.000Z',
+    identityGroups: {
+      'analyst@example.test': ['PromptWall Lending'],
+      'ops@example.test': ['PromptWall Operations'],
+    },
+    env: {},
+  });
+  const map = report.leakMap;
+  assert.ok(map && Array.isArray(map.segments) && Array.isArray(map.edges));
+  assert.ok(map.segments.some((item) => item.label === 'PromptWall Lending'));
+  assert.ok(map.segments.some((item) => item.label === 'PromptWall Operations'));
+  assert.ok(map.destinations.some((item) => item.id === 'chatgpt.com'));
+  const lendingEdge = map.edges.find((item) => item.from === 'group:promptwall-lending' && item.to === 'chatgpt.com');
+  assert.ok(lendingEdge, 'lending -> chatgpt edge missing');
+  assert.strictEqual(lendingEdge.via, 'browser_extension');
+  assert.ok(lendingEdge.pending >= 1);
+  assert.ok(lendingEdge.categories.some((item) => item.label === 'US_SSN'));
+  assert.ok(map.channels.some((item) => item.id === 'browser_extension' && item.events > 0));
+  assert.ok(map.categories.some((item) => item.label === 'US_SSN'));
+  assert.strictEqual(map.summary.privacy, 'prompt bodies excluded');
+  assert.ok(map.summary.controlRate >= 0 && map.summary.controlRate <= 100);
+  const serialized = JSON.stringify(map);
+  assert.strictEqual(serialized.includes('524-71-9043'), false);
+  assert.strictEqual(serialized.includes('rawPrompt'), false);
+});
+
+test('posture leak map flags uncontrolled and shadow flows per segment', () => {
+  const map = posture.leakMapGraph({
+    rows: [
+      {
+        id: 'q_uncontrolled',
+        createdAt: '2026-07-02T11:00:00.000Z',
+        status: 'allowed',
+        user: 'support@example.test',
+        destination: 'chatgpt.com',
+        source: 'browser_extension',
+        channel: 'submit',
+        findings: [{ type: 'US_SSN', severity: 4, score: 0.9, masked: '***' }],
+        riskScore: 88,
+        maxSeverity: 4,
+      },
+      {
+        id: 'q_shadow_flow',
+        createdAt: '2026-07-01T09:00:00.000Z',
+        status: 'shadow_ai',
+        user: 'support@example.test',
+        destination: 'unknown-ai.example',
+        source: 'proxy',
+        channel: 'shadow_ai',
+      },
+      {
+        id: 'q_heartbeat',
+        status: 'sensor_heartbeat',
+        destination: 'endpoint-install',
+        source: 'endpoint_agent',
+      },
+    ],
+    identityGroups: { 'support@example.test': ['Customer Support'] },
+    inventory: { apps: [{ name: 'chatgpt.com', state: 'sanctioned' }] },
+  });
+  const support = map.segments.find((item) => item.label === 'Customer Support');
+  assert.ok(support, 'customer support segment missing');
+  assert.strictEqual(support.uncontrolled, 1);
+  assert.strictEqual(support.shadow, 1);
+  assert.strictEqual(support.status, 'error');
+  const shadowDest = map.destinations.find((item) => item.id === 'unknown-ai.example');
+  assert.ok(shadowDest && shadowDest.state === 'shadow');
+  const riskyEdge = map.edges.find((item) => item.to === 'chatgpt.com');
+  assert.ok(riskyEdge && riskyEdge.uncontrolled === 1 && riskyEdge.status === 'error');
+  assert.strictEqual(map.edges.some((item) => item.to === 'endpoint-install'), false);
+});
+
+test('posture leak map degrades to an empty graph without activity', () => {
+  const empty = posture.leakMapGraph({ rows: [], identityGroups: {}, inventory: {} });
+  assert.deepStrictEqual(empty.segments, []);
+  assert.deepStrictEqual(empty.edges, []);
+  assert.strictEqual(empty.summary.events, 0);
+  assert.strictEqual(empty.summary.controlRate, 100);
+  assert.strictEqual(empty.summary.status, 'idle');
+  assert.strictEqual(empty.summary.privacy, 'prompt bodies excluded');
+});

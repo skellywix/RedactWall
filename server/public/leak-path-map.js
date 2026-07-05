@@ -1,145 +1,210 @@
 (function(){
 'use strict';
-const LENSES=[{id:'before',label:'Before PromptWall'},{id:'with',label:'With PromptWall'}];
-const LOCK='<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 10V8a5 5 0 0 1 10 0v2m-11 0h12v10H6V10Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>';
-const SCENARIOS=[
-  {id:'member-data',label:'Member data',payload:'Member SSN and account numbers (masked findings only)',
-    actor:'Member services rep',via:'Browser paste into governed chat',sourceKey:'browser_extension',
-    dest:'ChatGPT (governed)',destKind:'Governed app',verdict:'Blocked',tone:'blocked',
-    leak:'Member SSN leaves the device inside a chat prompt',
-    saved:'Hard stop before egress; the prompt never reached the model',
-    statKey:'blocked',statLabel:'blocked',cta:{label:'Open approval queue',tab:'queue'}},
-  {id:'loan-file',label:'Loan file',payload:'Loan application with income and SSN fields (masked findings only)',
-    actor:'Lending analyst',via:'Desktop file upload',sourceKey:'endpoint_agent',
-    dest:'Claude (governed)',destKind:'Governed app',verdict:'Approval required',tone:'approval',
-    leak:'A full loan file is uploaded to an AI tool with no review',
-    saved:'Held in the approval queue until a security admin releases it',
-    statKey:'pending',statLabel:'awaiting review',cta:{label:'Open approval queue',tab:'queue'}},
-  {id:'source-code',label:'Source code',payload:'Proprietary code with an embedded credential (masked finding only)',
-    actor:'Engineer',via:'Desktop AI app paste',sourceKey:'endpoint_agent',
-    dest:'Unapproved desktop AI',destKind:'Shadow AI',verdict:'Redacted',tone:'redacted',
-    leak:'Source code and a live credential reach an ungoverned tool',
-    saved:'Credential masked on-device before anything left the endpoint',
-    statKey:'redacted',statLabel:'redacted',cta:{label:'Review shadow AI',tab:'coverage'}},
-  {id:'contract',label:'Contract',payload:'Customer contract terms and counterparty PII (masked findings only)',
-    actor:'Legal team',via:'Document upload to AI assistant',sourceKey:'browser_extension',
-    dest:'Gemini (governed)',destKind:'Governed app',verdict:'Logged',tone:'logged',
-    leak:'Confidential contract context is exposed to a third-party model',
-    saved:'User coached; sanitized receipt captured for examiners',
-    statKey:'coached',statLabel:'coached',cta:{label:'Export evidence pack',tab:'audit'}},
-  {id:'mcp-pull',label:'MCP document pull',payload:'Drive/SharePoint document context pulled by an agent (sanitized metadata only)',
-    actor:'AI agent (MCP)',via:'Connector tool call',sourceKey:'mcp_guard',
-    dest:'Drive connector to LLM',destKind:'MCP connector',verdict:'Redacted',tone:'redacted',
-    leak:'An agent pulls whole customer documents into model context',
-    saved:'Connector payload transformed before model access',
-    statKey:'mcpControlled',statLabel:'controlled',cta:{label:'Review MCP policy',tab:'policy'}},
-];
-const state={scenario:'member-data',lens:'with',node:'control'};
+const FILTERS=[{id:'all',label:'All flows'},{id:'risk',label:'At-risk'},{id:'shadow',label:'Shadow AI'}];
+const W=1000,SEG_X=234,CH_L=436,CH_R=564,DEST_X=766,NODE_W=224,NODE_H=52,CH_W=128,CH_H=46,PAD_TOP=52,PAD_BOT=18,ROW_H=78;
+const state={filter:'all',category:'',selected:null};
 let last=null,bound=false;
 const num=(v)=>{const x=Number(v);return Number.isFinite(x)&&x>0?Math.round(x):0;};
 function reduceMotion(){try{return Boolean(window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches);}catch{return false;}}
-function stats(p){
-  const s=(p&&p.summary)||{};const inv=(p&&p.aiInventory&&p.aiInventory.summary)||{};const mcp=(p&&p.agenticMcp&&p.agenticMcp.summary)||{};
-  return{blocked:num(s.blocked),redacted:num(s.redacted),pending:num(s.pending),coached:num(s.coached),
-    events:num(s.events),sensitive:num(s.sensitiveEvents),shadowApps:num(inv.shadow),shadowEvents:num(s.shadowEvents),
-    mcpControlled:num(mcp.controlled),mcpEvents:num(mcp.events)};
+function trim(value,max){const text=String(value||'');return text.length>max?`${text.slice(0,max-1)}…`:text;}
+function graph(posture){return posture&&posture.leakMap&&typeof posture.leakMap==='object'?posture.leakMap:null;}
+function edgeVisible(edge,dests){
+  if(state.filter==='risk'&&!(num(edge.uncontrolled)||num(edge.shadow)||num(edge.pending)))return false;
+  if(state.filter==='shadow'&&!(num(edge.shadow)||(dests.get(edge.to)||{}).state==='shadow'))return false;
+  if(state.category&&!(edge.categories||[]).some((item)=>item.label===state.category))return false;
+  return true;
 }
-function surfaceBy(p,source){return ((p&&p.surfaces)||[]).find((item)=>item&&item.source===source&&item.id!=='surface-shadow-ai')||null;}
-function auditSurface(p){return ((p&&p.surfaces)||[]).find((item)=>item&&item.id==='surface-audit-evidence')||null;}
-function latestSignal(p,sourceKey){return ((p&&p.events)||[]).find((item)=>item&&item.source===sourceKey)||null;}
-function destDetail(s,st){
-  if(s.destKind==='Shadow AI')return `${st.shadowApps} shadow apps / ${st.shadowEvents} sightings`;
-  if(s.destKind==='MCP connector')return `${st.mcpEvents} connector events observed`;
-  return `${st.events} sanitized events in window`;
+function edgeTone(edge,dests){
+  if(num(edge.shadow)||(dests.get(edge.to)||{}).state==='shadow')return 'is-shadow';
+  if(num(edge.uncontrolled))return 'is-leak';
+  if(num(edge.pending))return 'is-held';
+  return 'is-clean';
 }
-function controlNode(s,p,withLens,safe){
-  const surface=surfaceBy(p,s.sourceKey);
-  const health=surface?`${surface.name} / ${num(surface.health)}% health`:'Awaiting sensor evidence';
-  if(!withLens)return `<span>PromptWall</span><strong>No control point</strong><small>Uninspected path — nothing stands between the data and the model</small>`;
-  return `<span>PromptWall ${LOCK}</span><em class="leak-verdict ${safe(s.tone)}">${safe(s.verdict)}</em><small>${safe(health)}</small>`;
+function edgeWidth(edge){return (1.6+Math.min(4.4,Math.log2(num(edge.events)+1))).toFixed(1);}
+function yFor(index,count,height){const usable=height-PAD_TOP-PAD_BOT;return PAD_TOP+usable*((index+0.5)/Math.max(1,count));}
+function destKicker(dest){
+  const stateName=String(dest.state||'observed');
+  if(stateName==='sanctioned')return 'GOVERNED';
+  if(stateName==='shadow')return 'SHADOW AI';
+  if(stateName==='unsanctioned')return 'UNSANCTIONED';
+  return stateName.toUpperCase();
 }
-function rowHtml(s,p,st,safe){
-  const withLens=state.lens==='with';
-  const selected=state.scenario===s.id;
-  const cut=withLens&&s.tone==='blocked';
-  const linkTone=withLens?(cut?'is-cut':'is-safe'):'is-leak';
-  const link=(cls)=>`<span class="leak-link ${cls}" aria-hidden="true"><i class="leak-pulse"></i></span>`;
-  const outcome=withLens
-    ?`<span>Prevented + proven</span><strong>${safe(s.saved)}</strong><small>${safe(s.verdict)} / sanitized receipt captured</small>`
-    :`<span>Exposure</span><strong>${safe(s.leak)}</strong><small>No block, no redaction, no audit trail</small>`;
-  const node=(kind,body,cls)=>`<button class="leak-node ${cls||''}" type="button" data-leak-pick="${safe(s.id)}" data-leak-node="${kind}" aria-pressed="${selected&&state.node===kind}">${body}</button>`;
-  return `<div class="leak-path-row ${withLens?safe(s.tone):'leaking'}${selected?' is-selected':''}" data-leak-scenario="${safe(s.id)}">
-    ${node('source',`<span>Source</span><strong>${safe(s.actor)}</strong><small>${safe(s.via)}</small>`)}
-    ${link(linkTone)}
-    ${node('control',controlNode(s,p,withLens,safe),withLens?'is-armed':'is-absent')}
-    ${link(cut?'is-cut is-ends':linkTone)}
-    ${node('destination',`<span>${safe(s.destKind)}</span><strong>${safe(s.dest)}</strong><small>${safe(destDetail(s,st))}</small>`,s.destKind==='Shadow AI'?'is-shadow':'')}
-    ${link(cut?'is-cut is-ends':linkTone)}
-    ${node('outcome',outcome,withLens?'is-proof':'is-loss')}
-  </div>`;
+function nodeSub(item){
+  const parts=[];
+  if(num(item.uncontrolled))parts.push(`${num(item.uncontrolled)} uncontrolled`);
+  if(num(item.shadow))parts.push(`${num(item.shadow)} shadow`);
+  if(num(item.pending))parts.push(`${num(item.pending)} held`);
+  if(!parts.length&&num(item.redacted))parts.push(`${num(item.redacted)} redacted`);
+  if(!parts.length&&num(item.blocked))parts.push(`${num(item.blocked)} stopped`);
+  if(!parts.length)parts.push(`${num(item.events)} events`);
+  return parts.slice(0,2).join(' / ');
 }
-function nodeContext(s,withLens){
-  if(state.node==='source')return `${s.actor} — ${s.via}.`;
-  if(state.node==='destination')return `Destination: ${s.dest} (${s.destKind}).`;
-  if(state.node==='outcome')return withLens?'Outcome with PromptWall in the path.':'Outcome with no control in the path.';
-  return withLens?'PromptWall control point on this path.':'The missing control point on this path.';
+function boxNode(item,kind,x,y,kicker,safe,dim){
+  const cls=`leak-node ${safe(item.status||'idle')}${dim?' is-dim':''}${state.selected&&state.selected.id===`${kind}:${item.id}`?' is-active':''}`;
+  return `<g class="${cls}" data-leak-node="${safe(kind)}:${safe(item.id)}" role="button" tabindex="0" aria-label="${safe(`${item.label}: ${nodeSub(item)}`)}">
+    <rect x="${x}" y="${y-NODE_H/2}" width="${NODE_W}" height="${NODE_H}" rx="9"></rect>
+    <text class="leak-node-kicker" x="${x+12}" y="${y-9}">${safe(kicker)}</text>
+    <text class="leak-node-title" x="${x+12}" y="${y+7}">${safe(trim(item.label,30))}</text>
+    <text class="leak-node-sub" x="${x+12}" y="${y+21}">${safe(nodeSub(item))}</text>
+  </g>`;
 }
-function inspectorHtml(s,p,st,safe){
-  const withLens=state.lens==='with';
-  const audit=auditSurface(p);
-  const signal=latestSignal(p,s.sourceKey);
-  const count=num(st[s.statKey]);
-  const happened=withLens
-    ?`${s.actor} tried "${s.via}" toward ${s.dest}. PromptWall verdict: ${s.verdict}. ${count} ${s.statLabel} in the current window.`
-    :`${s.actor}: "${s.via}" toward ${s.dest} with no inspection in the path. ${count} events like this were caught once PromptWall was in place.`;
-  const stopped=withLens
-    ?`${s.verdict} at the ${surfaceBy(p,s.sourceKey)?surfaceBy(p,s.sourceKey).name:'PromptWall'} control point. ${s.saved}.`
-    :'Nothing. This is the exposure view — no control point exists on this path.';
-  const proof=withLens
-    ?(audit&&audit.status==='online'?`Tamper-evident audit chain: ${audit.description} No prompt bodies stored.`:'Audit chain needs review — evidence integrity is degraded.')
-    :'None. Without a gateway there is no record this ever happened.';
-  const ctas=[`<button class="ghost mini" type="button" data-tab-jump="${safe(s.cta.tab)}">${safe(s.cta.label)}</button>`];
-  if(s.cta.tab!=='audit')ctas.push('<button class="ghost mini" type="button" data-tab-jump="audit">Export evidence pack</button>');
+function channelNode(item,y,safe){
+  const x=(CH_L+CH_R)/2-CH_W/2;
+  const cls=`leak-node leak-channel ${safe(item.status||'idle')}${state.selected&&state.selected.id===`channel:${item.id}`?' is-active':''}`;
+  return `<g class="${cls}" data-leak-node="channel:${safe(item.id)}" role="button" tabindex="0" aria-label="${safe(`${item.label} control point: ${nodeSub(item)}`)}">
+    <rect x="${x}" y="${y-CH_H/2}" width="${CH_W}" height="${CH_H}" rx="9"></rect>
+    <text class="leak-node-title" x="${x+CH_W/2}" y="${y-3}" text-anchor="middle">${safe(trim(item.label,14))}</text>
+    <text class="leak-node-sub" x="${x+CH_W/2}" y="${y+13}" text-anchor="middle">${safe(nodeSub(item))}</text>
+  </g>`;
+}
+function flowPath(x1,y1,x2,y2){const mid=(x1+x2)/2;return `M ${x1} ${y1} C ${mid} ${y1}, ${mid} ${y2}, ${x2} ${y2}`;}
+function edgePaths(edge,pos,dests,safe,still){
+  const from=pos.segments.get(edge.from),via=pos.channels.get(edge.via)||pos.channels.get('api')||[...pos.channels.values()][0],to=pos.destinations.get(edge.to);
+  if(from===undefined||via===undefined||to===undefined)return '';
+  const tone=edgeTone(edge,dests);
+  const width=edgeWidth(edge);
+  const flow=still?'':' leak-flow';
+  const inbound=flowPath(SEG_X,from,CH_L,via);
+  const escapes=num(edge.uncontrolled)||num(edge.shadow)||num(edge.events)>num(edge.blocked)+num(edge.coached);
+  const outbound=escapes?flowPath(CH_R,via,DEST_X,to):'';
+  const stop=escapes?'':`<circle class="leak-stop" cx="${CH_R+10}" cy="${via}" r="5"></circle>`;
+  return `<g class="leak-edge ${tone}" data-leak-edge="${safe(edge.id)}">
+    <path class="leak-line${flow}" d="${inbound}" stroke-width="${width}"></path>
+    ${outbound?`<path class="leak-line${flow}" d="${outbound}" stroke-width="${width}"></path>`:stop}
+    <path class="leak-hit" d="${inbound}"></path>
+    ${outbound?`<path class="leak-hit" d="${outbound}"></path>`:''}
+    <title>${safe(`${edge.from.split(':').pop()} -> ${edge.to}: ${nodeSub(edge)}`)}</title>
+  </g>`;
+}
+function stageSvg(map,safe,still){
+  const rows=Math.max(map.segments.length,map.channels.length,map.destinations.length,3);
+  const height=PAD_TOP+PAD_BOT+rows*ROW_H;
+  const dests=new Map(map.destinations.map((item)=>[item.id,item]));
+  const pos={
+    segments:new Map(map.segments.map((item,i)=>[item.id,yFor(i,map.segments.length,height)])),
+    channels:new Map(map.channels.map((item,i)=>[item.id,yFor(i,map.channels.length,height)])),
+    destinations:new Map(map.destinations.map((item,i)=>[item.id,yFor(i,map.destinations.length,height)])),
+  };
+  const visible=map.edges.filter((edge)=>edgeVisible(edge,dests));
+  const touched=new Set();
+  visible.forEach((edge)=>{touched.add(`segment:${edge.from}`);touched.add(`channel:${edge.via}`);touched.add(`destination:${edge.to}`);});
+  const dim=(kind,id)=>visible.length>0&&!touched.has(`${kind}:${id}`);
+  return `<svg viewBox="0 0 ${W} ${height}" role="img" aria-label="Map of sensitive data paths from departments through PromptWall to AI destinations">
+    <text class="leak-col-label" x="10" y="24">DEPARTMENTS &amp; TEAMS</text>
+    <text class="leak-col-label" x="${(CH_L+CH_R)/2}" y="24" text-anchor="middle">PROMPTWALL</text>
+    <text class="leak-col-label" x="${W-10}" y="24" text-anchor="end">AI DESTINATIONS</text>
+    <rect class="leak-wall" x="${(CH_L+CH_R)/2-23}" y="${PAD_TOP-18}" width="46" height="${height-PAD_TOP-PAD_BOT+30}" rx="14"></rect>
+    ${visible.map((edge)=>edgePaths(edge,pos,dests,safe,still)).join('')}
+    ${map.segments.map((item)=>boxNode(item,'segment',10,pos.segments.get(item.id),`${item.typeLabel||'Segment'}${num(item.users)?` · ${num(item.users)} user${num(item.users)===1?'':'s'}`:''}`,safe,dim('segment',item.id))).join('')}
+    ${map.channels.map((item)=>channelNode(item,pos.channels.get(item.id),safe)).join('')}
+    ${map.destinations.map((item)=>boxNode(item,'destination',DEST_X,pos.destinations.get(item.id),destKicker(item),safe,dim('destination',item.id))).join('')}
+  </svg>`;
+}
+function findSelected(map){
+  if(state.selected){
+    if(state.selected.kind==='edge'){const edge=map.edges.find((item)=>item.id===state.selected.id);if(edge)return{kind:'edge',edge};}
+    else{
+      const[kind,...rest]=state.selected.id.split(':');const id=rest.join(':');
+      const list=kind==='segment'?map.segments:kind==='channel'?map.channels:map.destinations;
+      const node=list.find((item)=>item.id===id);if(node)return{kind,node};
+    }
+  }
+  return map.edges.length?{kind:'edge',edge:map.edges[0]}:null;
+}
+function inspectorFlows(item){
+  const categories=(item.categories||[]).map((cat)=>`${cat.label} ×${num(cat.events)}`).join(', ');
+  return categories?`${categories} — masked findings only, never raw values.`:`${num(item.sensitive)} sensitive of ${num(item.events)} events — masked findings only, never raw values.`;
+}
+function inspectorOutcome(item){
+  const parts=[];
+  if(num(item.blocked))parts.push(`${num(item.blocked)} stopped at the wall`);
+  if(num(item.redacted))parts.push(`${num(item.redacted)} redacted before the model`);
+  if(num(item.pending))parts.push(`${num(item.pending)} held for approval`);
+  if(num(item.coached))parts.push(`${num(item.coached)} coached`);
+  if(num(item.uncontrolled))parts.push(`${num(item.uncontrolled)} reached the destination uncontrolled`);
+  if(num(item.shadow))parts.push(`${num(item.shadow)} shadow AI sightings`);
+  return parts.length?`${parts.join('; ')}.`:'No sensitive findings on this path yet.';
+}
+function inspectorCtas(map,sel,safe){
+  const ctas=[];
+  const item=sel.kind==='edge'?sel.edge:sel.node;
+  if(num(item.pending))ctas.push('<button class="ghost mini" type="button" data-tab-jump="queue">Open approval queue</button>');
+  if((sel.kind==='edge'&&(map.destinations.find((d)=>d.id===sel.edge.to)||{}).state==='shadow')||num(item.shadow))ctas.push('<button class="ghost mini" type="button" data-tab-jump="coverage">Review shadow AI</button>');
+  if((sel.kind==='edge'?sel.edge.via:item.id)==='mcp_guard')ctas.push('<button class="ghost mini" type="button" data-tab-jump="policy">Review MCP policy</button>');
+  ctas.push('<button class="ghost mini" type="button" data-tab-jump="audit">Export evidence pack</button>');
+  return ctas.join('');
+}
+function inspectorHtml(map,posture,safe){
+  const sel=findSelected(map);
+  if(!sel)return '<div class="signal-empty"><b>No flows yet</b><p>The map draws itself as sensors report sanitized activity.</p></div>';
+  const item=sel.kind==='edge'?sel.edge:sel.node;
+  const audit=((posture&&posture.surfaces)||[]).find((surface)=>surface&&surface.id==='surface-audit-evidence');
+  const title=sel.kind==='edge'
+    ?`${sel.edge.from.split(':').pop().replace(/-/g,' ')} → ${sel.edge.to}`
+    :`${item.label} (${sel.kind==='segment'?item.typeLabel||'segment':sel.kind==='channel'?'control point':destKicker(item).toLowerCase()})`;
+  const route=sel.kind==='edge'
+    ?`Via the ${sel.edge.viaLabel||'API'} control point / ${num(item.users)||''}${num(item.users)?' users / ':''}last seen ${item.lastSeen?new Date(item.lastSeen).toLocaleString():'—'}`
+    :`${num(item.events)} events in the ${sel.kind} / last seen ${item.lastSeen?new Date(item.lastSeen).toLocaleString():'—'}`;
+  const proof=audit&&audit.status==='online'
+    ?`Tamper-evident audit chain verified: ${audit.description||'linked entries verified.'} Sanitized receipts only.`
+    :'Audit chain needs review before this path can be evidenced.';
   return `<div class="leak-inspector-head">
-      <div><h4>${safe(s.label)} path — ${safe(withLens?'with PromptWall':'before PromptWall')}</h4><p>${safe(nodeContext(s,withLens))}</p></div>
-      <div class="leak-inspector-ctas">${ctas.join('')}</div>
+      <div><h4>${safe(trim(title,72))}</h4><p>${safe(route)}</p></div>
+      <div class="leak-inspector-ctas">${inspectorCtas(map,sel,safe)}</div>
     </div>
     <div class="leak-inspector-grid">
-      <div class="leak-inspector-field"><span>What happened</span><b>${safe(happened)}</b></div>
-      <div class="leak-inspector-field"><span>What would have leaked</span><b>${safe(s.payload)}</b></div>
-      <div class="leak-inspector-field"><span>What stopped it</span><b>${safe(stopped)}</b></div>
-      <div class="leak-inspector-field"><span>What proof exists</span><b>${safe(proof)}</b></div>
-    </div>
-    <div class="leak-inspector-evidence">${signal?`Latest sanitized signal: ${safe(signal.title)} (${safe(signal.severity)} / ${safe(signal.relatedMetric||'sanitized metadata')})`:'No sanitized signals for this path in the current window.'}</div>`;
+      <div class="leak-inspector-field"><span>What is flowing</span><b>${safe(inspectorFlows(item))}</b></div>
+      <div class="leak-inspector-field"><span>Control outcome</span><b>${safe(inspectorOutcome(item))}</b></div>
+      <div class="leak-inspector-field${num(item.uncontrolled)||num(item.shadow)?' is-alert':''}"><span>Exposure</span><b>${safe(num(item.uncontrolled)?`${num(item.uncontrolled)} sensitive events left with no control applied.`:num(item.shadow)?`${num(item.shadow)} sightings of ungoverned AI on this path.`:'No uncontrolled egress recorded on this path.')}</b></div>
+      <div class="leak-inspector-field"><span>Proof</span><b>${safe(proof)}</b></div>
+    </div>`;
+}
+function plural(count,word){return `${count} ${word}${count===1?'':'s'}`;}
+function summaryText(map){
+  if(!map)return 'Waiting for posture data';
+  const s=map.summary||{};
+  if(!num(s.events))return `No sanitized activity yet — the map draws as sensors report flows / ${s.privacy||'prompt bodies excluded'}`;
+  return `${plural(num(s.segments),'department')} / ${plural(num(s.destinations),'AI destination')} / ${num(s.uncontrolled)} uncontrolled / ${num(s.shadow)} shadow / ${num(s.controlRate)}% controlled / ${s.privacy||'prompt bodies excluded'}`;
 }
 function rerender(){if(last)render(last.posture,last.deps);}
+function pick(target){
+  const node=target.closest('[data-leak-node]');
+  if(node){state.selected={kind:'node',id:node.dataset.leakNode};rerender();return true;}
+  const edge=target.closest('[data-leak-edge]');
+  if(edge){state.selected={kind:'edge',id:edge.dataset.leakEdge};rerender();return true;}
+  return false;
+}
 function bind(){
   if(bound)return;bound=true;
   document.addEventListener('click',(e)=>{
-    const lens=e.target.closest('[data-leak-lens]');
-    if(lens){state.lens=lens.dataset.leakLens==='before'?'before':'with';rerender();return;}
-    const node=e.target.closest('[data-leak-node]');
-    if(node){state.scenario=node.dataset.leakPick||state.scenario;state.node=node.dataset.leakNode||'control';rerender();return;}
-    const pick=e.target.closest('[data-leak-pick]');
-    if(pick){state.scenario=pick.dataset.leakPick;state.node='control';rerender();}
+    const filter=e.target.closest('[data-leak-filter]');
+    if(filter){state.filter=filter.dataset.leakFilter;rerender();return;}
+    const category=e.target.closest('[data-leak-category]');
+    if(category){state.category=state.category===category.dataset.leakCategory?'':category.dataset.leakCategory;rerender();return;}
+    pick(e.target);
+  });
+  document.addEventListener('keydown',(e)=>{
+    if((e.key==='Enter'||e.key===' ')&&e.target.closest&&e.target.closest('[data-leak-node]')){e.preventDefault();pick(e.target);}
   });
 }
 function render(currentPosture,deps){
   const q=deps.$,safe=deps.escapeHtml;
-  const summary=q('#leakMapSummary'),lensEl=q('#leakMapLens'),chips=q('#leakMapScenarios'),stage=q('#leakMapStage'),inspector=q('#leakMapInspector');
-  if(!summary||!lensEl||!chips||!stage||!inspector)return;
+  const summary=q('#leakMapSummary'),filters=q('#leakMapLens'),chips=q('#leakMapScenarios'),stage=q('#leakMapStage'),inspector=q('#leakMapInspector');
+  if(!summary||!filters||!chips||!stage||!inspector)return;
   last={posture:currentPosture,deps};bind();
-  const st=stats(currentPosture);
-  const scenario=SCENARIOS.find((item)=>item.id===state.scenario)||SCENARIOS[0];
-  summary.textContent=currentPosture
-    ?(st.events?`${st.sensitive} sensitive events / ${st.blocked+st.redacted} stopped or transformed / ${st.pending} awaiting approval / prompt bodies excluded`:'No sanitized activity yet — showing every potential leak path / prompt bodies excluded')
-    :'Waiting for posture data — showing every potential leak path';
-  lensEl.innerHTML=LENSES.map((lens)=>`<button class="leak-lens-button${state.lens===lens.id?' is-active':''}" type="button" data-leak-lens="${lens.id}" aria-pressed="${state.lens===lens.id}">${lens.label}</button>`).join('');
-  chips.innerHTML=SCENARIOS.map((item)=>`<button class="leak-scenario-chip${state.scenario===item.id?' is-active':''}" type="button" data-leak-pick="${safe(item.id)}" aria-pressed="${state.scenario===item.id}">${safe(item.label)}<b>${num(st[item.statKey])}</b></button>`).join('');
-  stage.className=`leak-map-stage lens-${state.lens}${reduceMotion()?' is-static':''}`;
-  stage.innerHTML=`<div class="leak-map-legend" aria-hidden="true"><span>Where it starts</span><i></i><span>PromptWall control</span><i></i><span>AI destination</span><i></i><span>Consequence &amp; proof</span></div>`
-    +SCENARIOS.map((item)=>rowHtml(item,currentPosture,st,safe)).join('');
-  inspector.innerHTML=inspectorHtml(scenario,currentPosture,st,safe);
+  const map=graph(currentPosture);
+  summary.textContent=summaryText(map);
+  filters.innerHTML=FILTERS.map((item)=>`<button class="leak-lens-button${state.filter===item.id?' is-active':''}" type="button" data-leak-filter="${item.id}" aria-pressed="${state.filter===item.id}">${item.label}</button>`).join('');
+  const categories=(map&&map.categories)||[];
+  chips.innerHTML=categories.length
+    ?categories.map((item)=>`<button class="leak-scenario-chip${state.category===item.label?' is-active':''}" type="button" data-leak-category="${safe(item.label)}" aria-pressed="${state.category===item.label}">${safe(trim(item.label,26))}<b>${num(item.events)}</b></button>`).join('')
+    :'<span class="leak-chip-empty">Data types appear as sanitized findings arrive.</span>';
+  const still=reduceMotion();
+  stage.className=`leak-map-stage${still?' is-static':''}`;
+  stage.innerHTML=map&&(map.segments.length||map.destinations.length)
+    ?stageSvg(map,safe,still)
+    :'<div class="signal-empty"><b>No paths mapped yet</b><p>Connect sensors and the exposure map draws every department-to-AI flow from sanitized events.</p></div>';
+  inspector.innerHTML=map?inspectorHtml(map,currentPosture,safe):'';
 }
 window.PromptWallLeakPathMap={render};
 }());

@@ -38,9 +38,8 @@ let monitorInspectorTimer = null;
 let monitorExpandedPanelId = '';
 let monitorExpandedEventId = '';
 let monitorRefreshing = false;
-let monitorUpdateSequence = 0;
 let monitorLastUpdated = new Date().toISOString();
-let monitorRecentEventId = 'evt-7902';
+let monitorRecentEventId = '';
 let currentSiemPackage = null;
 let siemPackageProfile = 'all';
 let siemPackageLoading = false;
@@ -70,158 +69,6 @@ const monitorStatusOptions = [
   { id: 'error', label: 'Critical' },
   { id: 'loading', label: 'Syncing' },
   { id: 'offline', label: 'Offline' },
-];
-
-const monitorItems = [
-  {
-    id: 'node-browser-chat',
-    name: 'Browser Chat Sensor',
-    type: 'browser extension',
-    status: 'online',
-    source: 'browser_extension',
-    location: 'Managed Chrome fleet',
-    health: 98,
-    confidence: 94,
-    relatedMetric: 'Protected sessions',
-    lastUpdated: '22 sec ago',
-    description: 'Inline prompt inspection is connected for governed AI destinations.',
-  },
-  {
-    id: 'node-endpoint-upload',
-    name: 'Endpoint Upload Watch',
-    type: 'endpoint agent',
-    status: 'warning',
-    source: 'endpoint_agent',
-    location: 'Windows desktop collectors',
-    health: 72,
-    confidence: 88,
-    relatedMetric: 'File path coverage',
-    lastUpdated: '1 min ago',
-    description: 'Desktop upload collector is active, but two seats reported delayed inventory.',
-  },
-  {
-    id: 'node-mcp-drive',
-    name: 'MCP Drive Redactor',
-    type: 'mcp guard',
-    status: 'online',
-    source: 'mcp_guard',
-    location: 'SharePoint and Drive connectors',
-    health: 91,
-    confidence: 90,
-    relatedMetric: 'Redaction path',
-    lastUpdated: '35 sec ago',
-    description: 'Connector payloads are redacted before model access; only masked findings and category metadata are recorded.',
-  },
-  {
-    id: 'node-approval-gate',
-    name: 'Approval Release Gate',
-    type: 'workflow',
-    status: 'idle',
-    source: 'approval_queue',
-    location: 'Security admin console',
-    health: 84,
-    confidence: 86,
-    relatedMetric: 'Pending queue',
-    lastUpdated: '3 min ago',
-    description: 'Held prompts are waiting for assigned reviewers without breaching SLA.',
-  },
-  {
-    id: 'node-audit-verifier',
-    name: 'Audit Chain Verifier',
-    type: 'audit integrity',
-    status: 'error',
-    source: 'audit_log',
-    location: 'Evidence pack worker',
-    health: 41,
-    confidence: 97,
-    relatedMetric: 'Verifier lag',
-    lastUpdated: '7 min ago',
-    description: 'Regional evidence worker missed its verification window and needs operator review.',
-  },
-  {
-    id: 'node-shadow-inventory',
-    name: 'Desktop AI Inventory',
-    type: 'shadow ai',
-    status: 'offline',
-    source: 'endpoint_agent',
-    location: 'Mac and Windows inventory',
-    health: 0,
-    confidence: 62,
-    relatedMetric: 'Shadow AI scan',
-    lastUpdated: '18 min ago',
-    description: 'Inventory heartbeat stopped for one monitored segment.',
-  },
-  {
-    id: 'node-policy-compiler',
-    name: 'Policy Compiler',
-    type: 'policy engine',
-    status: 'loading',
-    source: 'policy',
-    location: 'Scoped rule resolver',
-    health: 67,
-    confidence: 80,
-    relatedMetric: 'Rule propagation',
-    lastUpdated: 'syncing',
-    description: 'Scoped policy rules are being reconciled against the latest destination list.',
-  },
-];
-
-const monitorEvents = [
-  {
-    id: 'evt-7902',
-    timestamp: new Date(Date.now() - 30000).toISOString(),
-    severity: 'critical',
-    source: 'browser_extension',
-    title: 'SSN paste blocked before egress',
-    description: 'A governed chat destination triggered a hard-stop detector. AI Command Center records sanitized metadata; retained raw text stays behind Queue reveal.',
-    confidence: 99,
-    relatedMetric: 'Critical holds',
-    status: 'error',
-  },
-  {
-    id: 'evt-7899',
-    timestamp: new Date(Date.now() - 105000).toISOString(),
-    severity: 'warning',
-    source: 'endpoint_agent',
-    title: 'Ungoverned desktop AI tool observed',
-    description: 'Endpoint inventory reported an AI client not present in the governed destination list.',
-    confidence: 82,
-    relatedMetric: 'Shadow AI scan',
-    status: 'warning',
-  },
-  {
-    id: 'evt-7894',
-    timestamp: new Date(Date.now() - 165000).toISOString(),
-    severity: 'info',
-    source: 'mcp_guard',
-    title: 'Drive connector redacted document context',
-    description: 'Connector payload was transformed before model access; raw document text was not logged in AI Command Center.',
-    confidence: 91,
-    relatedMetric: 'Redaction path',
-    status: 'online',
-  },
-  {
-    id: 'evt-7890',
-    timestamp: new Date(Date.now() - 235000).toISOString(),
-    severity: 'critical',
-    source: 'audit_log',
-    title: 'Verifier lag crossed evidence threshold',
-    description: 'Audit chain verification is delayed for one evidence worker.',
-    confidence: 97,
-    relatedMetric: 'Verifier lag',
-    status: 'error',
-  },
-  {
-    id: 'evt-7886',
-    timestamp: new Date(Date.now() - 315000).toISOString(),
-    severity: 'info',
-    source: 'approval_queue',
-    title: 'Reviewer assignment confirmed',
-    description: 'Held prompt routed to the Security Admin queue.',
-    confidence: 86,
-    relatedMetric: 'Pending queue',
-    status: 'idle',
-  },
 ];
 
 function escapeHtml(s) {
@@ -305,29 +152,11 @@ function monitorMatchesStatus(record) {
 }
 
 function monitorAllEvents() {
-  const sourceEvents = currentPosture && Array.isArray(currentPosture.events) && currentPosture.events.length
-    ? currentPosture.events
-    : monitorEvents;
-  if (!monitorUpdateSequence) return sourceEvents;
-  const id = `evt-refresh-${monitorUpdateSequence}`;
-  const refreshEvent = {
-    id,
-    timestamp: monitorLastUpdated,
-    severity: 'info',
-    source: 'signal_console',
-    title: 'Signal refresh completed',
-    description: 'Telemetry refresh updated sanitized metrics, timestamps, and recent activity.',
-    confidence: 93,
-    relatedMetric: 'Refresh cadence',
-    status: 'online',
-  };
-  return [refreshEvent, ...sourceEvents];
+  return currentPosture && Array.isArray(currentPosture.events) ? currentPosture.events : [];
 }
 
 function monitorItemsSource() {
-  return currentPosture && Array.isArray(currentPosture.surfaces) && currentPosture.surfaces.length
-    ? currentPosture.surfaces
-    : monitorItems;
+  return currentPosture && Array.isArray(currentPosture.surfaces) ? currentPosture.surfaces : [];
 }
 
 function monitorFilteredItems() {
@@ -350,56 +179,12 @@ function monitorStatusCounts() {
 }
 
 function monitorMetrics() {
-  if (currentPosture && Array.isArray(currentPosture.metrics) && currentPosture.metrics.length) {
-    return currentPosture.metrics.map((metric) => ({
-      ...metric,
-      updating: monitorRefreshing,
-      lastUpdated: metric.lastUpdated || currentPosture.generatedAt || monitorLastUpdated,
-    }));
-  }
-  const seq = monitorUpdateSequence;
-  return [
-    {
-      id: 'active-sensors',
-      label: 'Active sensors',
-      value: 14 + (seq ? 1 : 0),
-      unit: '',
-      trend: seq ? 'increased' : 'neutral',
-      status: 'normal',
-      lastUpdated: monitorLastUpdated,
-      updating: seq > 0,
-    },
-    {
-      id: 'risk-pressure',
-      label: 'Risk pressure',
-      value: Math.max(54, 61 - seq),
-      unit: '%',
-      trend: seq ? 'decreased' : 'neutral',
-      status: 'warning',
-      lastUpdated: monitorLastUpdated,
-      updating: seq > 0,
-    },
-    {
-      id: 'critical-holds',
-      label: 'Critical holds',
-      value: 3,
-      unit: '',
-      trend: 'neutral',
-      status: 'critical',
-      lastUpdated: monitorLastUpdated,
-      updating: false,
-    },
-    {
-      id: 'audit-lag',
-      label: 'Verifier lag',
-      value: monitorRefreshing ? '' : Math.max(38, 412 - (seq * 46)),
-      unit: monitorRefreshing ? '' : 'sec',
-      trend: seq ? 'decreased' : 'neutral',
-      status: monitorRefreshing ? 'loading' : 'critical',
-      lastUpdated: monitorLastUpdated,
-      updating: monitorRefreshing,
-    },
-  ];
+  if (!currentPosture || !Array.isArray(currentPosture.metrics)) return [];
+  return currentPosture.metrics.map((metric) => ({
+    ...metric,
+    updating: monitorRefreshing,
+    lastUpdated: metric.lastUpdated || currentPosture.generatedAt || monitorLastUpdated,
+  }));
 }
 
 function renderMonitorStatusFilters() {
@@ -418,7 +203,12 @@ function renderMonitorStatusFilters() {
 }
 
 function renderMonitorMetrics() {
-  $('#monitorMetrics').innerHTML = monitorMetrics().map((metric) => {
+  const metricRows = monitorMetrics();
+  if (!metricRows.length) {
+    $('#monitorMetrics').innerHTML = '<div class="signal-empty"><b>Awaiting telemetry</b><p>Metrics appear once posture data loads.</p></div>';
+    return;
+  }
+  $('#monitorMetrics').innerHTML = metricRows.map((metric) => {
     const statusClass = metric.status === 'normal' ? '' : ` status-${escapeHtml(metric.status)}`;
     const value = metric.status === 'loading'
       ? '<div class="metric-skeleton" aria-hidden="true"></div><span class="metric-unit">Loading</span>'
@@ -1018,6 +808,38 @@ function clearMonitorSelection() {
   renderMonitor();
 }
 
+function railChip(chip, tone, label, detail, live) {
+  if (!chip) return;
+  chip.className = `status-chip tone-${tone}`;
+  chip.dataset.statusDetail = detail;
+  chip.innerHTML = `<span class="status-light tone-${escapeHtml(tone)}${live ? ' is-live' : ''}" aria-hidden="true"></span>${escapeHtml(label)}`;
+}
+
+function renderRailStatus() {
+  const surfaceRows = (currentPosture && currentPosture.surfaces) || [];
+  const audit = surfaceRows.find((item) => item.id === 'surface-audit-evidence');
+  if (audit) {
+    const ok = audit.status === 'online';
+    railChip($('#railHashChain'), ok ? 'secure' : 'critical', ok ? 'SECURE' : 'REVIEW', `${ok ? 'SECURE' : 'REVIEW'}: ${audit.description}`, false);
+  }
+  const sensors = surfaceRows.filter((item) => /^surface-(browser_extension|endpoint_agent|mcp_guard|proxy)$/.test(String(item.id)));
+  if (sensors.length) {
+    const online = sensors.filter((item) => item.status === 'online').length;
+    const label = online ? 'MONITORING' : 'IDLE';
+    railChip($('#railLocalScan'), online ? 'live' : 'warn', label, `${label}: ${online}/${sensors.length} local sensors reporting scan traffic.`, online > 0);
+  }
+}
+
+async function loadServerVersion() {
+  const el = $('#railVersion');
+  if (!el) return;
+  try {
+    const r = await fetch('/healthz');
+    const body = await r.json();
+    if (body && body.version) el.textContent = body.version;
+  } catch {}
+}
+
 async function loadPosture() {
   try {
     const segment = monitorSegmentFilter && monitorSegmentFilter !== 'all'
@@ -1028,6 +850,7 @@ async function loadPosture() {
     if (!body) return null;
     currentPosture = body;
     monitorLastUpdated = body.generatedAt || new Date().toISOString();
+    renderRailStatus();
     const live = $('#monitorLiveSummary');
     if (live) {
       const critical = (body.surfaces || []).some((item) => item.status === 'error')
@@ -1048,9 +871,8 @@ async function refreshMonitorSignals() {
   try {
     await Promise.all([loadPosture(), loadSiemPackage()]);
     monitorRefreshing = false;
-    monitorUpdateSequence += 1;
     monitorLastUpdated = (currentPosture && currentPosture.generatedAt) || new Date().toISOString();
-    monitorRecentEventId = `evt-refresh-${monitorUpdateSequence}`;
+    monitorRecentEventId = (monitorAllEvents()[0] || {}).id || '';
     renderMonitor();
     markUpdated('SIGNALS UPDATED');
   } catch {
@@ -2008,6 +1830,7 @@ async function init() {
   setupPanelChrome();
   renderMonitor();
   applyQueueDensity();
+  loadServerVersion();
   const meRes = await api('/api/me');
   if (!meRes) return;
   const me = await meRes.json();
