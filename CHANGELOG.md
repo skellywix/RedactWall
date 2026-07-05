@@ -11,6 +11,9 @@ reconstructed from `ITERATIONS.md` and git history.
 
 ### Added
 
+- OpenAPI 3.1 spec for the `/api/v1` sensor & scan surface at
+  `GET /api/v1/openapi.json` (request schemas generated from the Zod validators;
+  zero new dependencies) plus `docs/API_REFERENCE.md`.
 - OTLP/HTTP (JSON) subscription destination type (`otlp`): stream sanitized AI
   activity events to a self-hosted OpenTelemetry collector at `<url>/v1/logs`,
   with an optional `serviceName` resource attribute. Label-only, prompt-free.

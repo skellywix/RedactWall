@@ -59,6 +59,7 @@ const releaseTokens = require('./release-token');
 const receipts = require('./receipts');
 const tenant = require('./tenant');
 const license = require('./license');
+const openapi = require('./openapi');
 const routing = require('./routing');
 const workflow = require('./workflow');
 const roles = require('./roles');
@@ -1622,6 +1623,10 @@ app.get('/api/v1/status/:id', checkIngestKey, (req, res) => {
   const released = q.status === 'approved' || q.status === 'allowed';
   res.json({ id: q.id, status: q.status, released });
 });
+
+// Machine-readable API spec. Public like /healthz — the route inventory is
+// already public in docs, and the spec carries no data. Built once and cached.
+app.get('/api/v1/openapi.json', (req, res) => res.json(openapi.document()));
 
 // =============================================================================
 // AUTH

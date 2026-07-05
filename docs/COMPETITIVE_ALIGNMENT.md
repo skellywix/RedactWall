@@ -24,7 +24,20 @@ dashboards, agent and MCP controls, and compliance reporting.
   response sanitization, shadow-AI discovery, and access controls.
 - Nightfall sets the fast browser DLP bar: secure browser plugins,
   pre-submission filtering, real-time redaction, broad sensitive-data
-  detection, and employee coaching before prompts are submitted.
+  detection, and employee coaching before prompts are submitted. It is now a
+  five-pillar platform (SaaS DLP, exfiltration prevention, discovery/audit,
+  Gmail encryption, developer APIs) plus **MCP & AI Agent Security** (IDE/CLI
+  hooks, shell-command blocking, shadow-MCP discovery, OpenTelemetry audit
+  trails, Claude Compliance API) and the **Nyx** LLM analyst. Its
+  prompt-sanitization sample repo advertises ≤100 ms p99 / ≥1000 rps, while the
+  customer API is rate-limited to 5–10 rps; raw LLM responses are **monitor-only
+  (no inline block)**; hosting is US-only AWS multi-tenant with 24 h encrypted
+  retention of uploaded developer-platform files; endpoint rollout is MDM-heavy
+  (Full-Disk-Access mobileconfig). Commercially it ships four masked-price
+  bundles metered on users/apps/TB-scanned/API-calls with an enterprise-led,
+  MSSP/VAR go-to-market. PromptWall's counters: on-device zero-egress detection,
+  a gateway that **blocks** responses, transparent per-seat pricing, and a
+  lighter force-install browser rollout.
 - Zscaler sets the SSE/browser-isolation bar: interactive dashboards, AI app
   trend visibility, granular DLP controls, prompt categorization, and controls
   over how users interact with generative AI tools.
@@ -468,6 +481,10 @@ Nightfall AI, https://www.nightfall.ai/lp/chatgpt-dlp. Accessed 28 June 2026.
 
 Nightfall AI. "AI Applications." *Nightfall AI*, Nightfall AI,
 https://www.nightfall.ai/integrations/ai-applications. Accessed 28 June 2026.
+
+"Nightfall AI Technical Research Report." Competitive research report (internal;
+public-documentation analysis of nightfall.ai, help.nightfall.ai, and the
+Developer Platform). Accessed 5 July 2026.
 
 OWASP Foundation. "OWASP Top 10 for Large Language Model Applications." *OWASP
 GenAI Security Project*, OWASP Foundation, https://genai.owasp.org/llm-top-10/.
