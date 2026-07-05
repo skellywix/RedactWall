@@ -64,6 +64,10 @@ function tableExists(driver, kind, table) {
   return !!row;
 }
 
+function baselineTables(kind) {
+  return [...MIGRATIONS[0][kind].matchAll(/CREATE TABLE IF NOT EXISTS (\w+)/g)].map((m) => m[1]);
+}
+
 /**
  * Apply pending migrations in order. A store created before this framework
  * existed (has `queries`, no migration rows) is stamped at the baseline
@@ -96,6 +100,17 @@ function runMigrations(driver, kind) {
       record.run(migration.version, migration.name, new Date().toISOString());
     })();
     results.push({ version: migration.version, name: migration.name });
+  }
+
+  // Self-heal stores whose baseline stamp predates some baseline tables:
+  // pre-framework databases were stamped at v1 without executing it, so a DB
+  // from an older lineage can claim the baseline while missing tables added to
+  // it later. The baseline is pure IF NOT EXISTS DDL, so re-running it fills
+  // exactly the gaps and never touches existing data.
+  const missing = baselineTables(kind).filter((table) => !tableExists(driver, kind, table));
+  if (missing.length) {
+    driver.exec(MIGRATIONS[0][kind]);
+    results.push({ version: 1, name: `baseline-heal:${missing.join(',')}` });
   }
   return results;
 }

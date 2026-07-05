@@ -210,6 +210,32 @@ test('injectable JSON migration skips non-empty stores and re-anchors imported a
   }
 });
 
+test('runMigrations heals stores stamped at baseline without its newer tables', (t) => {
+  const Database = require('better-sqlite3');
+  const storage = require('../server/storage');
+  const d = new Database(':memory:');
+  t.after(() => d.close());
+  // Old-lineage store: core tables only, then a blind v1-v3 stamp (the
+  // pre-2026-07 upgrade bug) leaving newer baseline tables missing.
+  d.exec(`
+    CREATE TABLE queries (seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT UNIQUE NOT NULL, createdAt TEXT NOT NULL, status TEXT NOT NULL, user TEXT, data TEXT NOT NULL, orgId TEXT);
+    CREATE TABLE audit (seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT UNIQUE NOT NULL, ts TEXT NOT NULL, action TEXT, queryId TEXT, actor TEXT, prevHash TEXT NOT NULL, hash TEXT NOT NULL, entry TEXT NOT NULL);
+    CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, appliedAt TEXT NOT NULL);
+    INSERT INTO schema_migrations VALUES (1, 'baseline', '2026-07-05T00:00:00.000Z'), (2, 'audit-append-only', '2026-07-05T00:00:00.000Z'), (3, 'tenant-scoping', '2026-07-05T00:00:00.000Z');
+    INSERT INTO queries (id, createdAt, status, user, data) VALUES ('q1', '2026-07-01T00:00:00.000Z', 'pending', 'a@example.test', '{}');
+  `);
+
+  const results = storage.runMigrations(d, 'sqlite');
+
+  assert.ok(results.some((r) => String(r.name).startsWith('baseline-heal:')), 'heal step reported');
+  const hasTable = d.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?");
+  for (const table of ['identity_revocations', 'mfa_recovery_used', 'ai_apps', 'deliveries', 'detector_feedback']) {
+    assert.ok(hasTable.get(table), `${table} healed into place`);
+  }
+  assert.strictEqual(d.prepare('SELECT COUNT(*) AS n FROM queries').get().n, 1, 'existing rows untouched');
+  assert.deepStrictEqual(storage.runMigrations(d, 'sqlite'), [], 'second run is a no-op');
+});
+
 test('unusable configured SQLite path falls back to local temp storage with a warning', (t) => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-db-fallback-'));
   t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
