@@ -151,7 +151,7 @@ test('sanitizeDriveItemContent redacts Graph content before returning MCP output
       return response('SharePoint record: SSN 524-71-9043 and card 4111 1111 1111 1111.');
     },
     guardOptions: {
-      server: 'http://sentinel.test',
+      server: 'http://redactwall.test',
       key: 'unit-ingest-key',
       policy: { ignore: [], disabledDetectors: [] },
       fetchImpl: async (url, opts = {}) => {
@@ -167,7 +167,7 @@ test('sanitizeDriveItemContent redacts Graph content before returning MCP output
   assert.ok(sanitized.findings.includes('CREDIT_CARD'));
   assert.ok(!JSON.stringify(sanitized.result).includes('524-71-9043'));
   assert.ok(!JSON.stringify(sanitized.result).includes('4111 1111 1111 1111'));
-  assert.strictEqual(outbound.url, 'http://sentinel.test/api/v1/gate');
+  assert.strictEqual(outbound.url, 'http://redactwall.test/api/v1/gate');
   assert.strictEqual(outbound.body.destination, 'microsoft365.driveItem.getContent');
   assert.strictEqual(outbound.body.source, 'mcp_guard');
   assert.ok(!JSON.stringify(outbound.body).includes('524-71-9043'));
@@ -180,7 +180,7 @@ test('createDriveItemContentTool returns sanitized MCP result only', async () =>
     accessToken: 'unit-graph-token',
     fetchImpl: async () => response('Member SSN 524-71-9043.'),
     guardOptions: {
-      server: 'http://sentinel.test',
+      server: 'http://redactwall.test',
       key: 'unit-ingest-key',
       policy: { ignore: [], disabledDetectors: [] },
       fetchImpl: async () => ({ ok: true }),
@@ -368,7 +368,7 @@ test('sanitizeSitePageContent redacts SharePoint page text before returning MCP 
       },
     }),
     guardOptions: {
-      server: 'http://sentinel.test',
+      server: 'http://redactwall.test',
       key: 'unit-ingest-key',
       policy: { ignore: [], disabledDetectors: [] },
       fetchImpl: async (url, opts = {}) => {
@@ -381,7 +381,7 @@ test('sanitizeSitePageContent redacts SharePoint page text before returning MCP 
   assert.strictEqual(sanitized.redacted, true);
   assert.ok(sanitized.findings.includes('US_SSN'));
   assert.ok(!JSON.stringify(sanitized.result).includes('524-71-9043'));
-  assert.strictEqual(outbound.url, 'http://sentinel.test/api/v1/gate');
+  assert.strictEqual(outbound.url, 'http://redactwall.test/api/v1/gate');
   assert.strictEqual(outbound.body.destination, 'microsoft365.sites.page.get');
   assert.strictEqual(outbound.body.source, 'mcp_guard');
   assert.ok(!JSON.stringify(outbound.body).includes('524-71-9043'));
@@ -396,7 +396,7 @@ test('sanitizeListItemFields redacts SharePoint list item fields before returnin
       fields: { Title: 'Member record', MemberSSN: 'SSN 524-71-9043' },
     }),
     guardOptions: {
-      server: 'http://sentinel.test',
+      server: 'http://redactwall.test',
       key: 'unit-ingest-key',
       policy: { ignore: [], disabledDetectors: [] },
       fetchImpl: async (url, opts = {}) => {
@@ -409,7 +409,7 @@ test('sanitizeListItemFields redacts SharePoint list item fields before returnin
   assert.strictEqual(sanitized.redacted, true);
   assert.ok(sanitized.findings.includes('US_SSN'));
   assert.ok(!JSON.stringify(sanitized.result).includes('524-71-9043'));
-  assert.strictEqual(outbound.url, 'http://sentinel.test/api/v1/gate');
+  assert.strictEqual(outbound.url, 'http://redactwall.test/api/v1/gate');
   assert.strictEqual(outbound.body.destination, 'microsoft365.sites.listItem.get');
   assert.ok(!JSON.stringify(outbound.body).includes('524-71-9043'));
   assert.ok(!JSON.stringify(outbound.body).includes('unit-graph-token'));
@@ -417,7 +417,7 @@ test('sanitizeListItemFields redacts SharePoint list item fields before returnin
 
 test('createSitePageContentTool and createListItemFieldsTool return sanitized MCP results only', async () => {
   const guardOptions = {
-    server: 'http://sentinel.test',
+    server: 'http://redactwall.test',
     key: 'unit-ingest-key',
     policy: { ignore: [], disabledDetectors: [] },
     fetchImpl: async () => ({ ok: true }),

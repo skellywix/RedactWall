@@ -66,6 +66,6 @@ export async function exportEvidencePack(): Promise<string | null> {
     return 'Evidence export failed';
   }
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  downloadJson(pack, `promptwall-evidence-${stamp}.json`);
+  downloadJson(pack, `redactwall-evidence-${stamp}.json`);
   return null;
 }

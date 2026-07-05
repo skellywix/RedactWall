@@ -21,20 +21,21 @@ const ROOT = path.join(__dirname, '..');
 const VERSION = require('../package.json').version;
 const DEVELOPMENT_INGEST_KEY = ['dev', 'ingest', 'key'].join('-');
 const OCR_FIXTURE_PATH = path.join(ROOT, 'sensors', 'endpoint-agent', 'fixtures', 'ocr-sample.png');
-const OCR_FIXTURE_TEXT = /PROMPTWALL/i;
+const OCR_FIXTURE_TEXT = /REDACTWALL/i;
 
 function configured(value) {
   return value != null && String(value).trim() !== '';
 }
 
 function defaultEndpointEnvPath(env = process.env, platform = process.platform) {
-  if (configured(env.SENTINEL_ENV_PATH)) return env.SENTINEL_ENV_PATH;
+  if (configured(env.REDACTWALL_ENV_PATH)) return env.REDACTWALL_ENV_PATH;
   if (configured(env.PROMPTWALL_ENV_PATH)) return env.PROMPTWALL_ENV_PATH;
+  if (configured(env.SENTINEL_ENV_PATH)) return env.SENTINEL_ENV_PATH;
   const join = platform === 'win32' ? path.win32.join : path.posix.join;
   if (platform === 'win32' && configured(env.LOCALAPPDATA)) {
-    return join(env.LOCALAPPDATA, 'PromptWall', 'endpoint-agent.env');
+    return join(env.LOCALAPPDATA, 'RedactWall', 'endpoint-agent.env');
   }
-  return join(env.HOME || os.homedir() || '.', '.config', 'promptwall', 'endpoint-agent.env');
+  return join(env.HOME || os.homedir() || '.', '.config', 'redactwall', 'endpoint-agent.env');
 }
 
 function readEndpointConfig(envPath, env = process.env) {
@@ -89,16 +90,16 @@ function check(id, ok, detail) {
 
 function endpointSettings(config = {}) {
   return {
-    serverUrl: config.SENTINEL_URL || config.PROMPTWALL_URL || '',
-    ingestKey: config.INGEST_API_KEY || config.PROMPTWALL_INGEST_API_KEY || '',
-    watchDir: config.ENDPOINT_AGENT_WATCH_DIR || config.PROMPTWALL_ENDPOINT_AGENT_WATCH_DIR || '',
-    handoffDir: config.ENDPOINT_AGENT_HANDOFF_DIR || config.PROMPTWALL_ENDPOINT_AGENT_HANDOFF_DIR || '',
-    handoffSecret: config.ENDPOINT_AGENT_HANDOFF_SECRET || config.PROMPTWALL_ENDPOINT_AGENT_HANDOFF_SECRET || '',
-    ocrCommand: config.ENDPOINT_AGENT_OCR_COMMAND || config.PROMPTWALL_ENDPOINT_AGENT_OCR_COMMAND || '',
-    approvedAiTools: config.ENDPOINT_AGENT_APPROVED_AI_TOOLS || config.PROMPTWALL_ENDPOINT_AGENT_APPROVED_AI_TOOLS || '',
-    approvedMcpServers: config.ENDPOINT_AGENT_APPROVED_MCP_SERVERS || config.PROMPTWALL_ENDPOINT_AGENT_APPROVED_MCP_SERVERS || '',
-    fileFlowProfiles: config.ENDPOINT_AGENT_FILE_FLOW_PROFILES || config.PROMPTWALL_ENDPOINT_AGENT_FILE_FLOW_PROFILES || '',
-    orgId: config.SENTINEL_TENANT_ID || config.PROMPTWALL_TENANT_ID || '',
+    serverUrl: config.REDACTWALL_URL || config.PROMPTWALL_URL || config.SENTINEL_URL || '',
+    ingestKey: config.INGEST_API_KEY || config.REDACTWALL_INGEST_API_KEY || '',
+    watchDir: config.ENDPOINT_AGENT_WATCH_DIR || config.REDACTWALL_ENDPOINT_AGENT_WATCH_DIR || '',
+    handoffDir: config.ENDPOINT_AGENT_HANDOFF_DIR || config.REDACTWALL_ENDPOINT_AGENT_HANDOFF_DIR || '',
+    handoffSecret: config.ENDPOINT_AGENT_HANDOFF_SECRET || config.REDACTWALL_ENDPOINT_AGENT_HANDOFF_SECRET || '',
+    ocrCommand: config.ENDPOINT_AGENT_OCR_COMMAND || config.REDACTWALL_ENDPOINT_AGENT_OCR_COMMAND || '',
+    approvedAiTools: config.ENDPOINT_AGENT_APPROVED_AI_TOOLS || config.REDACTWALL_ENDPOINT_AGENT_APPROVED_AI_TOOLS || '',
+    approvedMcpServers: config.ENDPOINT_AGENT_APPROVED_MCP_SERVERS || config.REDACTWALL_ENDPOINT_AGENT_APPROVED_MCP_SERVERS || '',
+    fileFlowProfiles: config.ENDPOINT_AGENT_FILE_FLOW_PROFILES || config.REDACTWALL_ENDPOINT_AGENT_FILE_FLOW_PROFILES || '',
+    orgId: config.REDACTWALL_TENANT_ID || config.PROMPTWALL_TENANT_ID || config.SENTINEL_TENANT_ID || '',
   };
 }
 
@@ -225,7 +226,7 @@ async function emitHeartbeat(report, opts = {}) {
   const settings = endpointSettings(envConfig);
   const serverUrl = opts.serverUrl || settings.serverUrl;
   const ingestKey = opts.ingestKey || settings.ingestKey;
-  if (!configured(serverUrl)) throw new Error('PROMPTWALL_URL or SENTINEL_URL is required to emit a heartbeat');
+  if (!configured(serverUrl)) throw new Error('REDACTWALL_URL is required to emit a heartbeat');
   if (!configured(ingestKey)) throw new Error('INGEST_API_KEY is required to emit a heartbeat');
   const fetchImpl = opts.fetchImpl || globalThis.fetch;
   if (!fetchImpl) throw new Error('fetch is not available');
@@ -277,7 +278,7 @@ function usage() {
     '',
     'Options:',
     '  --env <path>                    Endpoint env file path',
-    '  --repo-root <path>              PromptWall repo or extracted package root',
+    '  --repo-root <path>              RedactWall repo or extracted package root',
     '  --json                         Print JSON output',
     '  --emit-heartbeat               POST sanitized checks to /api/v1/heartbeat',
     '  --require-desktop-collector    Fail if native handoff collector is not configured',
@@ -288,7 +289,7 @@ function usage() {
 }
 
 function printHuman(report, io = console) {
-  io.log(`PromptWall endpoint install: ${report.status}`);
+  io.log(`RedactWall endpoint install: ${report.status}`);
   for (const item of report.checks) {
     io.log(`[${item.ok ? 'ok' : 'attention'}] ${item.id} - ${item.detail}`);
   }

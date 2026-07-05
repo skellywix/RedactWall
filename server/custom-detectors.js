@@ -11,8 +11,7 @@ const fs = require('fs');
 const path = require('path');
 const detector = require('../detection-engine/detect');
 
-const CONFIG_PATH = process.env.SENTINEL_CUSTOM_DETECTORS_PATH
-  || process.env.PROMPTWALL_CUSTOM_DETECTORS_PATH
+const CONFIG_PATH = process.env.REDACTWALL_CUSTOM_DETECTORS_PATH || process.env.PROMPTWALL_CUSTOM_DETECTORS_PATH || process.env.SENTINEL_CUSTOM_DETECTORS_PATH
   || path.join(__dirname, '..', 'config', 'custom-detectors.json');
 
 function loadRaw() {

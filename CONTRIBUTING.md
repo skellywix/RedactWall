@@ -1,10 +1,10 @@
-# Contributing to PromptWall
+# Contributing to RedactWall
 
 This repository uses a single source-of-truth and review-gated workflow.
 
 ## Local source and hooks
 
-- Work only inside the active app repo folder (`promptwall/` in this checkout).
+- Work only inside the active app repo folder (`redactwall/` in this checkout).
 - Run:
 
 ```bash

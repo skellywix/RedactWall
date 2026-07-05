@@ -206,7 +206,7 @@ test('evidence exports scoped-policy metadata without raw prompt bodies', () => 
 test('evidence exports scoped policy changes', () => {
   const scope = [{
     id: 'legal_contract_review',
-    groups: ['promptwall legal'],
+    groups: ['redactwall legal'],
     categories: ['LEGAL_CONTRACT'],
     destinations: ['claude.ai'],
     enforcementMode: 'block',

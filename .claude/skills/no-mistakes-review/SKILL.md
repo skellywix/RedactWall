@@ -21,5 +21,5 @@ Scan the diff (`git diff main...HEAD` or neogit). If the agent went in a complet
 ## Escalate to the human (don't auto-fix everything)
 Ambiguous or **product-changing** decisions stay with you — e.g. changing an enforcement default, relaxing a detector threshold, altering what counts as `alwaysBlock`. Auto-fixing those lets the agent drift from intent. Log every auto-fix on the PR so you can audit.
 
-## PromptWall gate (must pass before the PR is "green")
+## RedactWall gate (must pass before the PR is "green")
 `npm test` · `npm run sync-check` · semantic determinism (`npm run train-semantic && git diff --exit-code`) · `verifyAuditChain()` = ok · no raw PII in logs/audit. For the security-sensitive surface, hand to `security-scan-loop`.

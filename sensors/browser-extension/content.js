@@ -1,4 +1,4 @@
-/* PromptWall content script — pre-send inspection on AI chat sites.
+/* RedactWall content script — pre-send inspection on AI chat sites.
  *
  * Strategy: catch the prompt BEFORE it leaves the page.
  *   - Enter keydown (capture phase) on the composer
@@ -11,8 +11,8 @@
  */
 (function () {
   'use strict';
-  if (window.__promptwallLoaded) return;
-  window.__promptwallLoaded = true;
+  if (window.__redactwallLoaded) return;
+  window.__redactwallLoaded = true;
 
   const D = window.PSDetect;
   const Ext = window.PWBrowserApi;
@@ -85,7 +85,7 @@
     try {
       const el = document.createElement('div');
       el.className = 'ps-account-coach';
-      el.textContent = 'PromptWall: you appear to be signed into a personal account on this AI site. '
+      el.textContent = 'RedactWall: you appear to be signed into a personal account on this AI site. '
         + 'Use your corporate workspace account for work data.';
       el.style.cssText = 'position:fixed;bottom:16px;right:16px;max-width:320px;z-index:2147483647;'
         + 'background:#3b2f00;color:#ffe9a8;border:1px solid #7a5c00;border-radius:8px;padding:12px 14px;'
@@ -396,7 +396,7 @@
   async function proceedAfterRecorded(text, analysis, outcome, note, el) {
     const res = await report(text, analysis, 'submit', outcome, note);
     if (!recordedProceedResponse(res, outcome)) {
-      toast('PromptWall could not record this decision. Send blocked until the control plane is reachable.');
+      toast('RedactWall could not record this decision. Send blocked until the control plane is reachable.');
       return;
     }
     bypassOnce = true;
@@ -409,7 +409,7 @@
   async function proceedRedactedAfterRecorded(tokenText, analysis, el) {
     const res = await report(tokenText, analysis, 'submit', 'redacted_sent', '', { clientPreRedacted: true });
     if (!recordedProceedResponse(res, 'redacted_sent')) {
-      toast('PromptWall could not record this redacted send. Held until the control plane is reachable — press send again to retry.');
+      toast('RedactWall could not record this redacted send. Held until the control plane is reachable — press send again to retry.');
       return;
     }
     bypassOnce = true;
@@ -422,7 +422,7 @@
       toast('Sent to your Security Admin for approval.');
       return;
     }
-    toast('PromptWall could not reach the control plane. Approval request blocked for now.');
+    toast('RedactWall could not reach the control plane. Approval request blocked for now.');
   }
 
   function reportBlockedDestination(channel) {
@@ -478,8 +478,8 @@
     banner.setAttribute('aria-describedby', detailId);
     const title = mode === 'block' ? 'Sensitive data blocked' : mode === 'justify' ? 'Business reason required' : 'Review before sending';
     const detail = mode === 'block'
-      ? 'PromptWall found ' + listForScreen(items) + ' before it could leave this browser.'
-      : 'PromptWall found ' + listForScreen(items) + ' in this prompt. Review it before sending to ' + SITE + '.';
+      ? 'RedactWall found ' + listForScreen(items) + ' before it could leave this browser.'
+      : 'RedactWall found ' + listForScreen(items) + ' in this prompt. Review it before sending to ' + SITE + '.';
     const riskText = mode === 'block' ? '' : ' Risk ' + risk + '/100.';
     const coach = coachingFor(items);
     const chips = chipHtml(items);
@@ -541,12 +541,12 @@
     if (!text) return true;
     if (destinationBlocked()) {
       e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
-      toast('PromptWall blocked sends to ' + SITE + ' by policy. Recording evidence...');
+      toast('RedactWall blocked sends to ' + SITE + ' by policy. Recording evidence...');
       updateEvidenceToast(
         reportBlockedDestination('submit'),
         'destination_blocked',
-        'PromptWall blocked sends to ' + SITE + ' by policy and recorded the decision.',
-        'PromptWall blocked sends to ' + SITE + ' by policy. Control-plane evidence was not recorded yet.',
+        'RedactWall blocked sends to ' + SITE + ' by policy and recorded the decision.',
+        'RedactWall blocked sends to ' + SITE + ' by policy. Control-plane evidence was not recorded yet.',
       );
       return false;
     }
@@ -560,7 +560,7 @@
         if (inj.reasons.some((r) => /bidi|tag/i.test(r))) {
           e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
           report(text, { findings: [], categories: [] }, 'submit', 'injection_blocked', inj.reasons.join(', '));
-          toast('PromptWall blocked hidden instructions in this prompt (' + inj.reasons.join(', ') + ').');
+          toast('RedactWall blocked hidden instructions in this prompt (' + inj.reasons.join(', ') + ').');
           return false;
         }
         text = inj.stripped;
@@ -577,7 +577,7 @@
       const t = D.tokenize(text, verdict.analysis.findings);
       mergeRehydrate(t.map);
       setComposerText(el, t.text);
-      toast('PromptWall: ' + Object.keys(t.map).length + ' sensitive value(s) tokenized before sending — the reply is restored here automatically.');
+      toast('RedactWall: ' + Object.keys(t.map).length + ' sensitive value(s) tokenized before sending — the reply is restored here automatically.');
       proceedRedactedAfterRecorded(t.text, verdict.analysis, el);
       return false;
     }
@@ -707,7 +707,7 @@
     if (actionRule) {
       e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
       reportBlockedBrowserAction('paste', actionRule);
-      toast('PromptWall blocked paste into ' + SITE + ' by policy.');
+      toast('RedactWall blocked paste into ' + SITE + ' by policy.');
       return;
     }
     const t = (e.clipboardData || window.clipboardData);
@@ -726,17 +726,17 @@
           'blocked locally: sensitive paste prevented before insertion',
           { clientPreRedacted: true },
         );
-        toast('PromptWall blocked sensitive paste: ' + listForScreen(items) + '. Recording evidence...');
+        toast('RedactWall blocked sensitive paste: ' + listForScreen(items) + '. Recording evidence...');
         updateEvidenceToast(
           reportPromise,
           'paste_flagged',
-          'PromptWall blocked sensitive paste and recorded the decision.',
-          'PromptWall blocked sensitive paste. Control-plane evidence was not recorded yet.',
+          'RedactWall blocked sensitive paste and recorded the decision.',
+          'RedactWall blocked sensitive paste. Control-plane evidence was not recorded yet.',
         );
         return;
       }
       report(pasted, verdict.analysis, 'paste', 'paste_flagged');
-      toast('PromptWall found sensitive data: ' + listForScreen(items));
+      toast('RedactWall found sensitive data: ' + listForScreen(items));
     }
   }, true);
 
@@ -747,12 +747,12 @@
     const actionRule = browserActionBlockRule('copy');
     if (actionRule) {
       e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
-      toast('PromptWall blocked copy from ' + SITE + ' by policy. Recording evidence...');
+      toast('RedactWall blocked copy from ' + SITE + ' by policy. Recording evidence...');
       updateEvidenceToast(
         reportBlockedBrowserAction('copy', actionRule),
         'action_blocked',
-        'PromptWall blocked copy from ' + SITE + ' by policy and recorded the decision.',
-        'PromptWall blocked copy from ' + SITE + ' by policy. Control-plane evidence was not recorded yet.',
+        'RedactWall blocked copy from ' + SITE + ' by policy and recorded the decision.',
+        'RedactWall blocked copy from ' + SITE + ' by policy. Control-plane evidence was not recorded yet.',
       );
     }
   }, true);
@@ -765,12 +765,12 @@
       const actionRule = browserActionBlockRule('drop');
       if (actionRule) {
         e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
-        toast('PromptWall blocked file drops into ' + SITE + ' by policy. Recording evidence...');
+        toast('RedactWall blocked file drops into ' + SITE + ' by policy. Recording evidence...');
         updateEvidenceToast(
           reportBlockedBrowserAction('drop', actionRule),
           'action_blocked',
-          'PromptWall blocked file drops into ' + SITE + ' by policy and recorded the decision.',
-          'PromptWall blocked file drops into ' + SITE + ' by policy. Control-plane evidence was not recorded yet.',
+          'RedactWall blocked file drops into ' + SITE + ' by policy and recorded the decision.',
+          'RedactWall blocked file drops into ' + SITE + ' by policy. Control-plane evidence was not recorded yet.',
         );
         return;
       }
@@ -802,24 +802,24 @@
     if (destinationBlocked()) {
       try { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation(); } catch (_) {}
       const reports = [...files].map(() => reportBlockedDestination('file_upload'));
-      toast('PromptWall blocked file uploads to ' + SITE + ' by policy. Recording evidence...');
+      toast('RedactWall blocked file uploads to ' + SITE + ' by policy. Recording evidence...');
       updateBatchEvidenceToast(
         reports,
         'destination_blocked',
-        'PromptWall blocked file uploads to ' + SITE + ' by policy and recorded the decision.',
-        'PromptWall blocked file uploads to ' + SITE + ' by policy. Control-plane evidence was not recorded yet.',
+        'RedactWall blocked file uploads to ' + SITE + ' by policy and recorded the decision.',
+        'RedactWall blocked file uploads to ' + SITE + ' by policy. Control-plane evidence was not recorded yet.',
       );
       return;
     }
     if (fileUploadBlocked()) {
       try { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation(); } catch (_) {}
       const reports = [...files].map(() => reportBlockedFileUpload());
-      toast('PromptWall blocked file uploads to ' + SITE + ' by file policy. Recording evidence...');
+      toast('RedactWall blocked file uploads to ' + SITE + ' by file policy. Recording evidence...');
       updateBatchEvidenceToast(
         reports,
         'file_upload_blocked',
-        'PromptWall blocked file uploads to ' + SITE + ' by file policy and recorded the decision.',
-        'PromptWall blocked file uploads to ' + SITE + ' by file policy. Control-plane evidence was not recorded yet.',
+        'RedactWall blocked file uploads to ' + SITE + ' by file policy and recorded the decision.',
+        'RedactWall blocked file uploads to ' + SITE + ' by file policy. Control-plane evidence was not recorded yet.',
       );
       return;
     }
@@ -835,30 +835,30 @@
       updateEvidenceToast(
         reportLocalFileEvent(f, 'file_too_large', 'blocked locally: browser upload file too large to inspect'),
         'file_blocked_unscanned',
-        'PromptWall blocked ' + f.name + ': file is too large to inspect and evidence was recorded.',
-        'PromptWall blocked ' + f.name + ': file is too large to inspect.',
+        'RedactWall blocked ' + f.name + ': file is too large to inspect and evidence was recorded.',
+        'RedactWall blocked ' + f.name + ': file is too large to inspect.',
       );
-      toast('PromptWall blocked ' + f.name + ': file is too large to inspect.');
+      toast('RedactWall blocked ' + f.name + ': file is too large to inspect.');
       return;
     }
     if (ocrRequiredUpload(f)) {
       updateEvidenceToast(
         reportLocalFileEvent(f, 'ocr_required', 'blocked locally: browser upload requires OCR before inspection'),
         'ocr_required',
-        'PromptWall blocked ' + f.name + ': OCR is required and evidence was recorded.',
-        'PromptWall blocked ' + f.name + ': OCR is required before inspection.',
+        'RedactWall blocked ' + f.name + ': OCR is required and evidence was recorded.',
+        'RedactWall blocked ' + f.name + ': OCR is required before inspection.',
       );
-      toast('PromptWall blocked ' + f.name + ': OCR is required before inspection.');
+      toast('RedactWall blocked ' + f.name + ': OCR is required before inspection.');
       return;
     }
     if (!textReadableUpload(f)) {
       updateEvidenceToast(
         reportLocalFileEvent(f, 'file_unsupported', 'blocked locally: browser upload scanner supports text-readable files only'),
         'file_blocked_unscanned',
-        'PromptWall blocked ' + f.name + ': this file type needs endpoint inspection and evidence was recorded.',
-        'PromptWall blocked ' + f.name + ': this file type needs endpoint inspection.',
+        'RedactWall blocked ' + f.name + ': this file type needs endpoint inspection and evidence was recorded.',
+        'RedactWall blocked ' + f.name + ': this file type needs endpoint inspection.',
       );
-      toast('PromptWall blocked ' + f.name + ': this file type needs endpoint inspection.');
+      toast('RedactWall blocked ' + f.name + ': this file type needs endpoint inspection.');
       return;
     }
     const reader = new FileReader();
@@ -867,10 +867,10 @@
       updateEvidenceToast(
         reportLocalFileEvent(f, 'scan_unavailable', 'blocked locally: browser could not read file for inspection'),
         'file_blocked_unscanned',
-        'PromptWall could not verify ' + f.name + ' and recorded the block.',
-        'PromptWall could not verify ' + f.name + '. Upload blocked.',
+        'RedactWall could not verify ' + f.name + ' and recorded the block.',
+        'RedactWall could not verify ' + f.name + '. Upload blocked.',
       );
-      toast('PromptWall could not verify ' + f.name + '. Upload blocked.');
+      toast('RedactWall could not verify ' + f.name + '. Upload blocked.');
     };
     reader.readAsText(f);
   }
@@ -879,10 +879,10 @@
       updateEvidenceToast(
         reportLocalFileEvent(file, 'file_unsupported', 'blocked locally: browser upload is not text-readable'),
         'file_blocked_unscanned',
-        'PromptWall blocked ' + file.name + ': this file is not text-readable and evidence was recorded.',
-        'PromptWall blocked ' + file.name + ': this file is not text-readable.',
+        'RedactWall blocked ' + file.name + ': this file is not text-readable and evidence was recorded.',
+        'RedactWall blocked ' + file.name + ': this file is not text-readable.',
       );
-      toast('PromptWall blocked ' + file.name + ': this file is not text-readable.');
+      toast('RedactWall blocked ' + file.name + ': this file is not text-readable.');
       return;
     }
     const analysis = D.analyze(text, detectionPolicy());
@@ -901,19 +901,19 @@
       updateEvidenceToast(
         reportPromise,
         'allowed',
-        'PromptWall scanned ' + file.name + ' locally. Attach it again within 2 minutes to upload.',
-        'PromptWall scanned ' + file.name + ' locally, but evidence was not recorded yet.',
+        'RedactWall scanned ' + file.name + ' locally. Attach it again within 2 minutes to upload.',
+        'RedactWall scanned ' + file.name + ' locally, but evidence was not recorded yet.',
       );
-      toast('PromptWall scanned ' + file.name + ' locally. Attach it again within 2 minutes to upload.');
+      toast('RedactWall scanned ' + file.name + ' locally. Attach it again within 2 minutes to upload.');
       return;
     }
     updateEvidenceToast(
       report(safeFileFindingPrompt(file, analysis), analysis, 'file_upload', 'awaiting_approval', 'browser upload inspected locally; sensitive content blocked before upload', { clientPreRedacted: true }),
       'pending',
-      'PromptWall blocked ' + file.name + ': ' + listForScreen(items.slice(0, 3)) + '. Security Admin review is queued.',
-      'PromptWall blocked ' + file.name + ': ' + listForScreen(items.slice(0, 3)) + '. Control-plane evidence was not recorded yet.',
+      'RedactWall blocked ' + file.name + ': ' + listForScreen(items.slice(0, 3)) + '. Security Admin review is queued.',
+      'RedactWall blocked ' + file.name + ': ' + listForScreen(items.slice(0, 3)) + '. Control-plane evidence was not recorded yet.',
     );
-    toast('PromptWall blocked ' + file.name + ': ' + listForScreen(items.slice(0, 3)));
+    toast('RedactWall blocked ' + file.name + ': ' + listForScreen(items.slice(0, 3)));
   }
 
   function fileExtension(name) {
@@ -997,5 +997,5 @@
     setTimeout(() => { if (toastEl) { toastEl.remove(); toastEl = null; } }, 4200);
   }
 
-  console.log('[PromptWall] active on ' + SITE + ' — pre-send inspection enabled.');
+  console.log('[RedactWall] active on ' + SITE + ' — pre-send inspection enabled.');
 })();

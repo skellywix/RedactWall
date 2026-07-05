@@ -1,14 +1,14 @@
 param(
-  [string]$ConfigDir = "$env:LOCALAPPDATA\PromptWall"
+  [string]$ConfigDir = "$env:LOCALAPPDATA\RedactWall"
 )
 
-# Removes the PromptWall browser file-intent native messaging host for the
+# Removes the RedactWall browser file-intent native messaging host for the
 # current user: the Chrome/Edge registry keys, the host manifest JSON, and the
 # secret-free launcher. Endpoint config (endpoint-agent.env) is left in place.
 
 $ErrorActionPreference = "Stop"
 
-$HostName = "com.promptwall.file_intent"
+$HostName = "com.redactwall.file_intent"
 $configRoot = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ConfigDir)
 
 foreach ($registryPath in @(

@@ -19,8 +19,7 @@ const db = require('./db');
 const formats = require('./siem-formats');
 const { outboundHttpsUrl } = require('./url-policy');
 
-const CONFIG_PATH = process.env.SENTINEL_SUBSCRIPTIONS_PATH
-  || process.env.PROMPTWALL_SUBSCRIPTIONS_PATH
+const CONFIG_PATH = process.env.REDACTWALL_SUBSCRIPTIONS_PATH || process.env.PROMPTWALL_SUBSCRIPTIONS_PATH || process.env.SENTINEL_SUBSCRIPTIONS_PATH
   || path.join(__dirname, '..', 'config', 'subscriptions.json');
 
 const DEFAULT_MAX_ATTEMPTS = 4;
@@ -28,7 +27,7 @@ const DEDUPE_WINDOW_MS = 5 * 60 * 1000;
 // Bound each delivery attempt so a hung destination cannot freeze the retry
 // loop (which otherwise waits on fetch with no timeout across all attempts).
 const OUTBOUND_TIMEOUT_MS = (() => {
-  const n = Number(process.env.PROMPTWALL_SUBSCRIPTION_TIMEOUT_MS);
+  const n = Number(process.env.REDACTWALL_SUBSCRIPTION_TIMEOUT_MS);
   return Number.isFinite(n) && n > 0 ? n : 8000;
 })();
 function outboundSignal() {
@@ -83,7 +82,7 @@ function emailBody(alert) {
   if ((alert.action || alert.status) !== 'digest') return JSON.stringify(formats.toEvent(alert), null, 2);
   const s = alert.summary || {};
   return [
-    'PromptWall daily digest',
+    'RedactWall daily digest',
     '',
     `Pending approvals: ${s.pending ?? 0}`,
     `Blocked today:     ${s.todayBlocked ?? 0}`,

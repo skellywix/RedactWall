@@ -37,5 +37,5 @@ function render(currentPosture,deps){
   </section>`;
   target.innerHTML=`<div class="control-graph-lanes">${laneHtml}</div>${edgeHtml}`;
 }
-window.PromptWallControlGraph={render};
+window.RedactWallControlGraph={render};
 }());

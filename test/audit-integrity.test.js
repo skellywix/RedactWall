@@ -23,7 +23,7 @@ test('canonical handles arrays, nulls, and primitives without reordering arrays'
 });
 
 test('sha matches a straight sha256 hex digest and ZERO is 64 zeroes', () => {
-  assert.strictEqual(integrity.sha('promptwall'), sha256('promptwall'));
+  assert.strictEqual(integrity.sha('redactwall'), sha256('redactwall'));
   assert.strictEqual(integrity.ZERO, '0'.repeat(64));
 });
 

@@ -5,7 +5,7 @@
       "url": "https://developers.cloudflare.com/api/resources/radar/subresources/ranking/subresources/internet_services/methods/top/"
     },
     {
-      "name": "PromptWall reviewed AI destination watchlist",
+      "name": "RedactWall reviewed AI destination watchlist",
       "url": "config/ai-domain-watchlist.json"
     }
   ],

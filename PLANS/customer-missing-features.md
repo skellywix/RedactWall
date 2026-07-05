@@ -2,11 +2,11 @@
 
 ## Goal And Context
 
-Identify the customer-facing features PromptWall still needs for credible paid
+Identify the customer-facing features RedactWall still needs for credible paid
 pilots, then connect each feature to the existing architecture so implementation
 can happen in scoped, testable passes.
 
-PromptWall already has the right product spine: local browser, endpoint, and MCP
+RedactWall already has the right product spine: local browser, endpoint, and MCP
 sensors; one shared detection engine; warn, justify, redact, block, approval
 release; MFA-backed Security Admin actions; sanitized SIEM events; seat
 enforcement; AWS customer-silo deployment; coverage posture; and examiner export.
@@ -21,20 +21,20 @@ paths they use.
 Recent official product pages sharpen the priority order:
 
 - Strac emphasizes browser controls across uploads, downloads, forms, GenAI
-  prompts and responses, shadow IT, and admin-managed blocking. PromptWall's
+  prompts and responses, shadow IT, and admin-managed blocking. RedactWall's
   browser prompt and file-upload controls are now directionally right; the
   remaining paid-pilot gap is proving desktop and file-flow coverage outside the
   browser.
 - Nightfall emphasizes fast browser rollout, broad sensitive-data detection,
-  real-time redaction, and employee education for AI applications. PromptWall
+  real-time redaction, and employee education for AI applications. RedactWall
   should keep inline coaching in the leak moment and add customer-defined
   detector packs before chasing a large connector catalog.
 - Check Point AI Security / Lakera treats data leakage and prompt attacks as
   LLM-native risks across user prompts, documents, tool calls, tool responses,
-  and tool descriptions. PromptWall's MCP guard should become a connector SDK
+  and tool descriptions. RedactWall's MCP guard should become a connector SDK
   pattern, not just a reference example.
 - Cyberhaven emphasizes shadow AI, autonomous agents, endpoint/developer-tool
-  use, and data movement visibility. PromptWall should keep lineage, sensor
+  use, and data movement visibility. RedactWall should keep lineage, sensor
   health, and coverage posture near the top of the commercial roadmap.
 
 Implication: Option B still wins. Build one real desktop/file-flow collector MVP
@@ -115,10 +115,10 @@ Acceptance evidence:
 Current state: local admin login, optional assignment-aware approver login,
 optional auditor login, MFA for Security Admin, managed sensor user identity,
 seat-limit enforcement, minimal SCIM user/group provisioning, and SCIM-backed
-OIDC login exist. SCIM can deactivate users and map PromptWall group names to
+OIDC login exist. SCIM can deactivate users and map RedactWall group names to
 local roles. OIDC validates authorization-code callbacks, state, nonce, RS256
 ID-token signatures, issuer, audience, expiry, and active SCIM users before
-issuing PromptWall sessions. PromptWall now also renders secret-free Microsoft
+issuing RedactWall sessions. RedactWall now also renders secret-free Microsoft
 Entra and Okta setup values from the dashboard Identity tab and
 `npm run identity:setup`, plus a dedicated IdP setup guide. Full IdP session
 lifecycle management, IdP-driven seat lifecycle enforcement, and polished MFA
@@ -177,7 +177,7 @@ payloads, and examiner export expose that sanitized workflow context. The
 dashboard approval queue can now filter held items by workflow state,
 detector/category, and destination so reviewers can work member-data,
 source-code, legal, or app-specific queues without opening every incident.
-PromptWall supports best-effort generic JSON, Slack, Microsoft Teams, SMTP, and
+RedactWall supports best-effort generic JSON, Slack, Microsoft Teams, SMTP, and
 sanitized ticket-bridge approval notifications, plus native Jira and Linear
 issue creation for customers that do not want ticketing middleware. It persists
 delivery status on the query, audits notification outcomes, and escalates
@@ -311,7 +311,7 @@ Docker or local-npm hosts.
 Customer ask: "Can we hand an examiner a quarterly pack that maps to GLBA, NCUA,
 PCI, and HIPAA controls without exporting sensitive prompts?"
 
-Why it matters: this is the wedge. PromptWall should be easier to defend in an
+Why it matters: this is the wedge. RedactWall should be easier to defend in an
 exam than a broad DLP platform that takes months to tune.
 
 Implementation connection:
@@ -377,8 +377,8 @@ Acceptance evidence:
 ### 8. First Real MCP Content Connectors
 
 Current state: MCP guard redacts local tool output through a reference guard,
-PromptWall ships a connector SDK that forces content connectors through
-`sanitizeToolResult()` before tool output reaches a model, and PromptWall now
+RedactWall ships a connector SDK that forces content connectors through
+`sanitizeToolResult()` before tool output reaches a model, and RedactWall now
 includes first-party Microsoft 365 Graph, Google Drive, Slack, Microsoft Teams,
 Atlassian Jira/Confluence, and database read-only connectors. The gap is no
 longer first runtime coverage. The gap is pilot-specific scope, live connector
@@ -481,7 +481,7 @@ Pros:
 
 Cons:
 - High integration surface before identity and policy scoping are ready.
-- Risks becoming the broad DLP platform PromptWall is trying not to be.
+- Risks becoming the broad DLP platform RedactWall is trying not to be.
 
 ## Recommendation
 

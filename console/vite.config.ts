@@ -4,7 +4,7 @@ import react from '@vitejs/plugin-react';
 // Dev-only proxy so the session cookie and CSRF double-submit stay same-origin.
 // Production serves the built bundle from Express behind the same auth gate as
 // the legacy console; nothing here runs in production.
-const backend = process.env.PROMPTWALL_DEV_PROXY || 'http://localhost:4000';
+const backend = process.env.REDACTWALL_DEV_PROXY || 'http://localhost:4000';
 
 export default defineConfig({
   base: '/app/',

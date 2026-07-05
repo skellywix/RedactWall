@@ -52,7 +52,7 @@ const OWNER_VIEW_TEMPLATES = Object.freeze([
     label: 'Lending',
     ownerGroup: 'Lending',
     reviewerRole: 'approver',
-    segmentCandidates: ['group:promptwall-lending', 'org:cu-lending', 'workflow:lending'],
+    segmentCandidates: ['group:redactwall-lending', 'org:cu-lending', 'workflow:lending'],
     assignmentHint: 'Own loan-file and member-data prompts from lending teams.',
   },
   {
@@ -60,7 +60,7 @@ const OWNER_VIEW_TEMPLATES = Object.freeze([
     label: 'Call Center',
     ownerGroup: 'Member Services',
     reviewerRole: 'approver',
-    segmentCandidates: ['group:promptwall-call-center', 'group:call-center', 'workflow:member-services'],
+    segmentCandidates: ['group:redactwall-call-center', 'group:call-center', 'workflow:member-services'],
     assignmentHint: 'Watch member-service queues and coached paste activity.',
   },
   {

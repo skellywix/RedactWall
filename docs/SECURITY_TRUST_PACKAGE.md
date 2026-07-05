@@ -1,6 +1,6 @@
 # Security Trust Package
 
-PromptWall's security trust package is the vendor-risk and procurement companion
+RedactWall's security trust package is the vendor-risk and procurement companion
 to the examiner evidence pack. It gives a regulated buyer a prompt-free view of
 the product's security posture before they connect a live environment.
 
@@ -79,10 +79,10 @@ npm run security:package:zip
 Choose an output directory:
 
 ```powershell
-npm run security:package:zip -- C:\PromptWall\security-packages
+npm run security:package:zip -- C:\RedactWall\security-packages
 ```
 
-The CLI uses the active PromptWall environment, database, policy, audit chain,
+The CLI uses the active RedactWall environment, database, policy, audit chain,
 coverage summary, posture summary, preflight state, and package lockfile. It
 prints the output path, byte count, SHA-256, schema version, dependency count,
 and control coverage.
@@ -107,6 +107,6 @@ contract.
 3. Run `npm run evidence:pack:zip` if the reviewer also needs live examiner
    evidence.
 4. Send the ZIP files through the customer's approved secure file-transfer path.
-5. Keep the raw PromptWall database and `.env` files out of vendor-risk
+5. Keep the raw RedactWall database and `.env` files out of vendor-risk
    handoff unless the customer explicitly asks for a supervised technical
    review.

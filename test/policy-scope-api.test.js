@@ -8,13 +8,13 @@ const fs = require('node:fs');
 const crypto = require('node:crypto');
 
 process.env.ADMIN_PASSWORD = 'unit-pass';
-process.env.SENTINEL_SECRET = 'unit-secret-stable';
-process.env.SENTINEL_DATA_KEY = 'unit-data-key-stable';
+process.env.REDACTWALL_SECRET = 'unit-secret-stable';
+process.env.REDACTWALL_DATA_KEY = 'unit-data-key-stable';
 process.env.INGEST_API_KEY = 'unit-ingest-key';
-process.env.SENTINEL_DB_PATH = path.join(os.tmpdir(), 'ps-policy-scope-api-' + crypto.randomBytes(6).toString('hex') + '.db');
-process.env.SENTINEL_POLICY_PATH = path.join(os.tmpdir(), 'ps-policy-scope-api-' + crypto.randomBytes(6).toString('hex') + '.json');
+process.env.REDACTWALL_DB_PATH = path.join(os.tmpdir(), 'ps-policy-scope-api-' + crypto.randomBytes(6).toString('hex') + '.db');
+process.env.REDACTWALL_POLICY_PATH = path.join(os.tmpdir(), 'ps-policy-scope-api-' + crypto.randomBytes(6).toString('hex') + '.json');
 
-fs.writeFileSync(process.env.SENTINEL_POLICY_PATH, JSON.stringify({
+fs.writeFileSync(process.env.REDACTWALL_POLICY_PATH, JSON.stringify({
   enforcementMode: 'warn',
   blockMinSeverity: 4,
   blockRiskScore: 90,
@@ -22,7 +22,7 @@ fs.writeFileSync(process.env.SENTINEL_POLICY_PATH, JSON.stringify({
   storeRawForApproval: false,
   policyScopes: [{
     id: 'legal_contract_review',
-    groups: ['PromptWall Legal'],
+    groups: ['RedactWall Legal'],
     destinations: ['claude.ai'],
     categories: ['LEGAL_CONTRACT'],
     enforcementMode: 'block',
@@ -81,7 +81,7 @@ function provisionLegalUser() {
     active: true,
   });
   db.saveScimGroup({
-    displayName: 'PromptWall Legal',
+    displayName: 'RedactWall Legal',
     members: [{ value: user.id, display: user.userName }],
   });
 }
@@ -103,8 +103,8 @@ test('gate applies scoped policy from SCIM group membership', async () => withSe
 
 test('gate records a time-bound exception id for matched non-hard-stop content', async () => withServer(async (port) => {
   provisionLegalUser();
-  const current = JSON.parse(fs.readFileSync(process.env.SENTINEL_POLICY_PATH, 'utf8'));
-  fs.writeFileSync(process.env.SENTINEL_POLICY_PATH, JSON.stringify({
+  const current = JSON.parse(fs.readFileSync(process.env.REDACTWALL_POLICY_PATH, 'utf8'));
+  fs.writeFileSync(process.env.REDACTWALL_POLICY_PATH, JSON.stringify({
     ...current,
     policyExceptions: [{
       id: 'legal_vendor_24h',
@@ -128,7 +128,7 @@ test('gate records a time-bound exception id for matched non-hard-stop content',
 
 test.after(() => {
   for (const suffix of ['', '-wal', '-shm']) {
-    try { fs.unlinkSync(process.env.SENTINEL_DB_PATH + suffix); } catch {}
+    try { fs.unlinkSync(process.env.REDACTWALL_DB_PATH + suffix); } catch {}
   }
-  try { fs.unlinkSync(process.env.SENTINEL_POLICY_PATH); } catch {}
+  try { fs.unlinkSync(process.env.REDACTWALL_POLICY_PATH); } catch {}
 });

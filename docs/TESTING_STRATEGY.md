@@ -1,6 +1,6 @@
 # Testing Strategy
 
-How PromptWall is tested, which gate runs when, and the rules that keep the
+How RedactWall is tested, which gate runs when, and the rules that keep the
 suites meaningful. Modeled on Google's test-size discipline and GitLab's
 smoke/regression tiers and flaky-test quarantine policy, scaled to a small
 team.
@@ -14,7 +14,7 @@ team.
 | Detector quality gate | `test/fixtures/semantic-eval.json` | `npm run eval` (`scripts/eval-detect.js --ci` in CI) | Every detector change; CI |
 | Engine parity | `detection-engine/detect.js` vs browser copy | `npm run sync-check` | Every commit; CI |
 | **Standalone regression suite (black box)** | `suite/` | `npm run suite:smoke` / `npm run suite` | Smoke on every PR-sized change; full before every release |
-| Postgres battery | `test/storage-postgres.test.js` | `npm test` with `SENTINEL_TEST_PG_URL` | CI (Postgres 16 service) |
+| Postgres battery | `test/storage-postgres.test.js` | `npm test` with `REDACTWALL_TEST_PG_URL` | CI (Postgres 16 service) |
 
 The `suite/` directory is deliberately **separate from `test/`**: it drives
 the running web app over HTTP and a real browser only, so it survives internal

@@ -1,12 +1,12 @@
 # Release Process
 
-How PromptWall versions, builds, and ships releases. Modeled on the release
+How RedactWall versions, builds, and ships releases. Modeled on the release
 practices of GitLab (self-managed release trains, backport policy) and
 HashiCorp (signed artifacts, checksums), scaled to a small team.
 
 ## Versioning
 
-PromptWall follows [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html):
+RedactWall follows [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html):
 
 - **MAJOR** — breaking change: config schema, HTTP API, sensor policy
   contract, or an upgrade that requires operator action beyond
@@ -61,7 +61,7 @@ integrity, and config schema before and after upgrade.
    npm run package:endpoint-agent   # endpoint agent zip + SHA-256 manifest
    npm run package:mcp-guard        # MCP guard zip + SHA-256 manifest
    npm run security:package:zip     # trust package with CycloneDX-style SBOM
-   docker build -t promptwall:vX.Y.Z .
+   docker build -t redactwall:vX.Y.Z .
    ```
    Attach the zips, their SHA-256 manifests, and the SBOM to the release.
 6. Announce to Ring 1, then Ring 2.

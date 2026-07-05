@@ -242,9 +242,9 @@ test('printHuman summarizes clean, empty, and recorded states without raw conten
   }, io);
 
   assert.deepStrictEqual(io.lines.map(([, message]) => message), [
-    'PromptWall clipboard guard clean',
-    'PromptWall clipboard guard empty',
-    'PromptWall clipboard guard blocked: US_SSN: clipboard cleared: not recorded',
+    'RedactWall clipboard guard clean',
+    'RedactWall clipboard guard empty',
+    'RedactWall clipboard guard blocked: US_SSN: clipboard cleared: not recorded',
   ]);
   assert.ok(!JSON.stringify(io.lines).includes(RAW_SSN));
 });
@@ -271,7 +271,7 @@ test('clipboard guard main prints help, JSON, human output, quiet output, and sa
     console: humanIo,
     collectClipboard: async () => ({ status: 'blocked', labels: ['US_SSN'], cleared: true, recorded: false }),
   }), 1);
-  assert.strictEqual(humanIo.lines[0][1], 'PromptWall clipboard guard blocked: US_SSN: clipboard cleared: not recorded');
+  assert.strictEqual(humanIo.lines[0][1], 'RedactWall clipboard guard blocked: US_SSN: clipboard cleared: not recorded');
 
   const quietIo = captureConsole();
   assert.strictEqual(await main(['--quiet'], {

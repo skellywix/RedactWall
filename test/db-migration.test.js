@@ -71,7 +71,7 @@ function runCopiedDb(tempRoot, envOverrides = {}) {
       audit: db.listAudit(20),
       integrity: db.verifyAuditChain(),
       files: {
-        sqlite: fs.existsSync(path.join(dataDir, 'sentinel.db')),
+        sqlite: fs.existsSync(path.join(dataDir, 'redactwall.db')),
         queriesJson: fs.existsSync(path.join(dataDir, 'queries.json')),
         auditJson: fs.existsSync(path.join(dataDir, 'audit.json')),
         queriesMigrated: fs.existsSync(path.join(dataDir, 'queries.json.migrated')),
@@ -87,10 +87,8 @@ function runCopiedDb(tempRoot, envOverrides = {}) {
     env: {
       ...process.env,
       NODE_PATH: path.join(root, 'node_modules'),
-      SENTINEL_ENV_PATH: path.join(tempRoot, 'missing.env'),
-      PROMPTWALL_ENV_PATH: '',
-      SENTINEL_DB_PATH: '',
-      PROMPTWALL_DB_PATH: '',
+      REDACTWALL_ENV_PATH: path.join(tempRoot, 'missing.env'),
+      REDACTWALL_DB_PATH: '',
       ...envOverrides,
     },
   });
@@ -125,9 +123,9 @@ test('explicit SQLite path disables legacy JSON auto-migration', (t) => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-db-explicit-path-'));
   t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
   writeLegacyStore(tempRoot);
-  const explicitDb = path.join(tempRoot, 'custom', 'sentinel.db');
+  const explicitDb = path.join(tempRoot, 'custom', 'redactwall.db');
 
-  const snapshot = runCopiedDb(tempRoot, { SENTINEL_DB_PATH: explicitDb });
+  const snapshot = runCopiedDb(tempRoot, { REDACTWALL_DB_PATH: explicitDb });
 
   assert.strictEqual(snapshot.dbPath, explicitDb);
   assert.deepStrictEqual(snapshot.queries, []);
@@ -158,9 +156,9 @@ test('injectable JSON migration skips non-empty stores and re-anchors imported a
   ]));
 
   const dbModulePath = require.resolve('../server/db');
-  const previousDbPath = process.env.SENTINEL_DB_PATH;
+  const previousDbPath = process.env.REDACTWALL_DB_PATH;
   delete require.cache[dbModulePath];
-  process.env.SENTINEL_DB_PATH = path.join(tempRoot, 'current.db');
+  process.env.REDACTWALL_DB_PATH = path.join(tempRoot, 'current.db');
   const db = require('../server/db');
   try {
     let skippedTransaction = false;
@@ -205,8 +203,8 @@ test('injectable JSON migration skips non-empty stores and re-anchors imported a
   } finally {
     db._db.close();
     delete require.cache[dbModulePath];
-    if (previousDbPath === undefined) delete process.env.SENTINEL_DB_PATH;
-    else process.env.SENTINEL_DB_PATH = previousDbPath;
+    if (previousDbPath === undefined) delete process.env.REDACTWALL_DB_PATH;
+    else process.env.REDACTWALL_DB_PATH = previousDbPath;
   }
 });
 
@@ -242,7 +240,7 @@ test('unusable configured SQLite path falls back to local temp storage with a wa
   const dbPath = copyDbRuntime(tempRoot);
   const blockingFile = path.join(tempRoot, 'not-a-directory');
   fs.writeFileSync(blockingFile, 'blocks mkdir');
-  const badPath = path.join(blockingFile, 'sentinel.db');
+  const badPath = path.join(blockingFile, 'redactwall.db');
   const script = `
     const fs = require('node:fs');
     const db = require(process.argv[1]);
@@ -257,10 +255,8 @@ test('unusable configured SQLite path falls back to local temp storage with a wa
     env: {
       ...process.env,
       NODE_PATH: path.join(root, 'node_modules'),
-      SENTINEL_ENV_PATH: path.join(tempRoot, 'missing.env'),
-      PROMPTWALL_ENV_PATH: '',
-      SENTINEL_DB_PATH: badPath,
-      PROMPTWALL_DB_PATH: '',
+      REDACTWALL_ENV_PATH: path.join(tempRoot, 'missing.env'),
+      REDACTWALL_DB_PATH: badPath,
       TMP: tempRoot,
       TEMP: tempRoot,
       TMPDIR: tempRoot,
@@ -270,7 +266,7 @@ test('unusable configured SQLite path falls back to local temp storage with a wa
   assert.strictEqual(child.status, 0, child.stderr || child.stdout);
   const snapshot = JSON.parse(child.stdout);
   assert.notStrictEqual(snapshot.dbPath, badPath);
-  assert.match(snapshot.dbPath.replace(/\\/g, '/'), /promptwall\/sentinel\.db$/);
+  assert.match(snapshot.dbPath.replace(/\\/g, '/'), /redactwall\/redactwall\.db$/);
   assert.strictEqual(snapshot.exists, true);
   assert.deepStrictEqual(snapshot.integrity, { ok: true, count: 0 });
   assert.match(child.stderr, /falling back/);
@@ -281,13 +277,11 @@ test('original DB module falls back in-process when configured SQLite path is un
   t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
   const blockingFile = path.join(tempRoot, 'not-a-directory');
   fs.writeFileSync(blockingFile, 'blocks mkdir');
-  const badPath = path.join(blockingFile, 'sentinel.db');
+  const badPath = path.join(blockingFile, 'redactwall.db');
   const dbModulePath = require.resolve('../server/db');
   const previous = {
-    SENTINEL_DB_PATH: process.env.SENTINEL_DB_PATH,
-    PROMPTWALL_DB_PATH: process.env.PROMPTWALL_DB_PATH,
-    SENTINEL_ENV_PATH: process.env.SENTINEL_ENV_PATH,
-    PROMPTWALL_ENV_PATH: process.env.PROMPTWALL_ENV_PATH,
+    REDACTWALL_DB_PATH: process.env.REDACTWALL_DB_PATH,
+    REDACTWALL_ENV_PATH: process.env.REDACTWALL_ENV_PATH,
     TMP: process.env.TMP,
     TEMP: process.env.TEMP,
     TMPDIR: process.env.TMPDIR,
@@ -296,10 +290,8 @@ test('original DB module falls back in-process when configured SQLite path is un
   const errors = [];
   try {
     delete require.cache[dbModulePath];
-    process.env.SENTINEL_DB_PATH = badPath;
-    process.env.PROMPTWALL_DB_PATH = '';
-    process.env.SENTINEL_ENV_PATH = path.join(tempRoot, 'missing.env');
-    process.env.PROMPTWALL_ENV_PATH = '';
+    process.env.REDACTWALL_DB_PATH = badPath;
+    process.env.REDACTWALL_ENV_PATH = path.join(tempRoot, 'missing.env');
     process.env.TMP = tempRoot;
     process.env.TEMP = tempRoot;
     process.env.TMPDIR = tempRoot;
@@ -308,7 +300,7 @@ test('original DB module falls back in-process when configured SQLite path is un
     const db = require('../server/db');
 
     assert.notStrictEqual(db._dbPath, badPath);
-    assert.match(db._dbPath.replace(/\\/g, '/'), /promptwall\/sentinel\.db$/);
+    assert.match(db._dbPath.replace(/\\/g, '/'), /redactwall\/redactwall\.db$/);
     assert.deepStrictEqual(db.verifyAuditChain(), { ok: true, count: 0 });
     assert.match(errors.join('\n'), /falling back/);
     db._db.close();

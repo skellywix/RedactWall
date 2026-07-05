@@ -1,6 +1,6 @@
 # Server
 
-The server is the PromptWall control plane: policy, ingest, approval workflow,
+The server is the RedactWall control plane: policy, ingest, approval workflow,
 dashboard, evidence, and the tamper-evident audit log.
 
 ## Main Entry Points

@@ -2,14 +2,14 @@
 /**
  * Sync-bridge hardening for the Postgres driver: session statement_timeout,
  * bounded connect retry/backoff, and reconnect after connection loss.
- * Config tests always run; live tests need SENTINEL_TEST_PG_URL and skip
+ * Config tests always run; live tests need REDACTWALL_TEST_PG_URL and skip
  * cleanly otherwise (same convention as test/storage-postgres.test.js).
  */
 const test = require('node:test');
 const assert = require('node:assert');
 const { resolveBridgeConfig, createPgDriver } = require('../server/storage/pg-driver');
 
-const ADMIN_URL = process.env.SENTINEL_TEST_PG_URL || '';
+const ADMIN_URL = process.env.REDACTWALL_TEST_PG_URL || '';
 
 function withEnv(overrides, fn) {
   const previous = {};
@@ -38,33 +38,33 @@ test('bridge config defaults keep the DB cancel below the Atomics.wait cap', () 
 });
 
 test('bridge config clamps env values and keeps the cancel-before-bridge invariant', () => {
-  const raised = resolveBridgeConfig({ SENTINEL_PG_STATEMENT_TIMEOUT_MS: '120000' });
+  const raised = resolveBridgeConfig({ REDACTWALL_PG_STATEMENT_TIMEOUT_MS: '120000' });
   assert.strictEqual(raised.statementTimeoutMs, 120000);
   assert.strictEqual(raised.callTimeoutMs, 125000);
 
   const floored = resolveBridgeConfig({
-    SENTINEL_PG_STATEMENT_TIMEOUT_MS: '1',
-    SENTINEL_PG_CONNECT_ATTEMPTS: '0',
-    SENTINEL_PG_CONNECT_BASE_DELAY_MS: '-5',
-    SENTINEL_PG_CONNECT_TIMEOUT_MS: '1',
+    REDACTWALL_PG_STATEMENT_TIMEOUT_MS: '1',
+    REDACTWALL_PG_CONNECT_ATTEMPTS: '0',
+    REDACTWALL_PG_CONNECT_BASE_DELAY_MS: '-5',
+    REDACTWALL_PG_CONNECT_TIMEOUT_MS: '1',
   });
   assert.strictEqual(floored.statementTimeoutMs, 1000);
   assert.strictEqual(floored.connectAttempts, 1);
   assert.strictEqual(floored.connectBaseDelayMs, 10);
   assert.strictEqual(floored.connectTimeoutMs, 500);
 
-  assert.strictEqual(resolveBridgeConfig({ SENTINEL_PG_STATEMENT_TIMEOUT_MS: 'soon' }).statementTimeoutMs, 25000);
-  assert.strictEqual(resolveBridgeConfig({ SENTINEL_PG_CONNECT_ATTEMPTS: '999' }).connectAttempts, 20);
+  assert.strictEqual(resolveBridgeConfig({ REDACTWALL_PG_STATEMENT_TIMEOUT_MS: 'soon' }).statementTimeoutMs, 25000);
+  assert.strictEqual(resolveBridgeConfig({ REDACTWALL_PG_CONNECT_ATTEMPTS: '999' }).connectAttempts, 20);
 });
 
 test('connect retry is bounded and fails with a clear error, never an infinite loop', () => {
   withEnv({
-    SENTINEL_PG_CONNECT_ATTEMPTS: '2',
-    SENTINEL_PG_CONNECT_BASE_DELAY_MS: '10',
-    SENTINEL_PG_CONNECT_TIMEOUT_MS: '500',
+    REDACTWALL_PG_CONNECT_ATTEMPTS: '2',
+    REDACTWALL_PG_CONNECT_BASE_DELAY_MS: '10',
+    REDACTWALL_PG_CONNECT_TIMEOUT_MS: '500',
   }, () => {
     // Port 1 refuses immediately; no Postgres needed for this path.
-    const driver = createPgDriver('postgresql://nobody@127.0.0.1:1/promptwall_nowhere');
+    const driver = createPgDriver('postgresql://nobody@127.0.0.1:1/redactwall_nowhere');
     try {
       const started = Date.now();
       assert.throws(() => driver.prepare('SELECT 1 AS n').get(), /connect failed after 2 attempt/);
@@ -75,8 +75,8 @@ test('connect retry is bounded and fails with a clear error, never an infinite l
   });
 });
 
-test('statement_timeout is set on the session and cancels runaway statements', { skip: !ADMIN_URL && 'SENTINEL_TEST_PG_URL not set' }, () => {
-  withEnv({ SENTINEL_PG_STATEMENT_TIMEOUT_MS: '1500' }, () => {
+test('statement_timeout is set on the session and cancels runaway statements', { skip: !ADMIN_URL && 'REDACTWALL_TEST_PG_URL not set' }, () => {
+  withEnv({ REDACTWALL_PG_STATEMENT_TIMEOUT_MS: '1500' }, () => {
     const driver = createPgDriver(ADMIN_URL);
     try {
       assert.strictEqual(driver.prepare('SHOW statement_timeout').get().statement_timeout, '1500ms');
@@ -91,7 +91,7 @@ test('statement_timeout is set on the session and cancels runaway statements', {
   });
 });
 
-test('bridge reconnects after connection loss without replaying statements', { skip: !ADMIN_URL && 'SENTINEL_TEST_PG_URL not set' }, async () => {
+test('bridge reconnects after connection loss without replaying statements', { skip: !ADMIN_URL && 'REDACTWALL_TEST_PG_URL not set' }, async () => {
   const driver = createPgDriver(ADMIN_URL);
   const { Client } = require('pg');
   const admin = new Client({ connectionString: ADMIN_URL });

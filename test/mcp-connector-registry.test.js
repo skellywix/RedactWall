@@ -81,7 +81,7 @@ test('connector registry reports shipped runtime and template breadth without se
 
 test('registry marks shipped runtime attention separately from roadmap profiles', () => {
   const missing = profileStatus(CONNECTOR_PROFILES.find((profile) => profile.id === 'microsoft365'), {
-    repoRoot: path.join(os.tmpdir(), 'missing-promptwall-root'),
+    repoRoot: path.join(os.tmpdir(), 'missing-redactwall-root'),
     envConfig: {},
   });
   assert.strictEqual(missing.stage, 'shipped');
@@ -89,7 +89,7 @@ test('registry marks shipped runtime attention separately from roadmap profiles'
   assert.strictEqual(missing.status, 'runtime_missing');
 
   const googleDrive = profileStatus(CONNECTOR_PROFILES.find((profile) => profile.id === 'google_drive'), {
-    repoRoot: path.join(os.tmpdir(), 'missing-promptwall-root'),
+    repoRoot: path.join(os.tmpdir(), 'missing-redactwall-root'),
     envConfig: { GOOGLE_DRIVE_ACCESS_TOKEN: 'google-token-000000000000000000000000001' },
   });
   assert.strictEqual(googleDrive.stage, 'shipped');
@@ -98,7 +98,7 @@ test('registry marks shipped runtime attention separately from roadmap profiles'
   assert.strictEqual(googleDrive.status, 'runtime_missing');
 
   const slack = profileStatus(CONNECTOR_PROFILES.find((profile) => profile.id === 'slack'), {
-    repoRoot: path.join(os.tmpdir(), 'missing-promptwall-root'),
+    repoRoot: path.join(os.tmpdir(), 'missing-redactwall-root'),
     envConfig: { SLACK_BOT_TOKEN: 'fixture-slack-token-000000000000000000000001' },
   });
   assert.strictEqual(slack.stage, 'shipped');
@@ -107,7 +107,7 @@ test('registry marks shipped runtime attention separately from roadmap profiles'
   assert.strictEqual(slack.status, 'runtime_missing');
 
   const teams = profileStatus(CONNECTOR_PROFILES.find((profile) => profile.id === 'teams'), {
-    repoRoot: path.join(os.tmpdir(), 'missing-promptwall-root'),
+    repoRoot: path.join(os.tmpdir(), 'missing-redactwall-root'),
     envConfig: { TEAMS_GRAPH_ACCESS_TOKEN: 'teams-graph-token-000000000000000000000001' },
   });
   assert.strictEqual(teams.stage, 'shipped');
@@ -116,7 +116,7 @@ test('registry marks shipped runtime attention separately from roadmap profiles'
   assert.strictEqual(teams.status, 'runtime_missing');
 
   const atlassian = profileStatus(CONNECTOR_PROFILES.find((profile) => profile.id === 'jira_confluence'), {
-    repoRoot: path.join(os.tmpdir(), 'missing-promptwall-root'),
+    repoRoot: path.join(os.tmpdir(), 'missing-redactwall-root'),
     envConfig: {
       ATLASSIAN_ACCESS_TOKEN: 'atlassian-token-000000000000000000000001',
       ATLASSIAN_SITE_URL: 'https://acme.atlassian.net',
@@ -128,7 +128,7 @@ test('registry marks shipped runtime attention separately from roadmap profiles'
   assert.strictEqual(atlassian.status, 'runtime_missing');
 
   const database = profileStatus(CONNECTOR_PROFILES.find((profile) => profile.id === 'database_readonly'), {
-    repoRoot: path.join(os.tmpdir(), 'missing-promptwall-root'),
+    repoRoot: path.join(os.tmpdir(), 'missing-redactwall-root'),
     envConfig: { MCP_DATABASE_DSN: 'sqlite:///C:/data/read-only.db' },
   });
   assert.strictEqual(database.stage, 'shipped');

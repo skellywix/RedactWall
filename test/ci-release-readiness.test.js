@@ -32,7 +32,7 @@ test('GitHub CI keeps the generated docs and browser E2E gates in the protected 
   assert.match(ci, /npm run test:browser/);
   assert.match(ci, /node scripts\/eval-detect\.js --ci/);
   assert.match(ci, /git diff --exit-code -- config\/policy\.json/);
-  assert.match(ci, /docker build -t promptwall:ci \./);
+  assert.match(ci, /docker build -t redactwall:ci \./);
   assert.doesNotMatch(ci, /npm run test:admin-console\b/, 'protected CI should run the full browser suite');
 });
 

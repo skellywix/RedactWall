@@ -35,7 +35,7 @@ function channel(port, overrides = {}) {
   return {
     host: '127.0.0.1',
     port,
-    from: 'PromptWall <alerts@example.test>',
+    from: 'RedactWall <alerts@example.test>',
     to: ['compliance@example.test'],
     secure: false,
     requireTls: false,
@@ -90,9 +90,9 @@ test('smtpSend hook receives a sanitized generated message', async () => {
 
   assert.strictEqual(result.sent, true);
   assert.strictEqual(result.status, 202);
-  assert.strictEqual(captured.smtpChannel.from, 'PromptWall <alerts@example.test>');
+  assert.strictEqual(captured.smtpChannel.from, 'RedactWall <alerts@example.test>');
   assert.doesNotMatch(captured.message, /^Bcc:/m);
-  assert.match(captured.message, /Subject: \[PromptWall\] Approval routed: q_smtp/);
+  assert.match(captured.message, /Subject: \[RedactWall\] Approval routed: q_smtp/);
 });
 
 test('SMTP delivery falls back to HELO when EHLO is refused', async (t) => {
@@ -211,7 +211,7 @@ test('SMTP STARTTLS path re-issues EHLO, authenticates only after upgrade, and s
   assert.ok(commands.filter((line) => /^EHLO\b/.test(line)).length >= 2);
   assert.match(authCommand, /^AUTH PLAIN /);
   assert.strictEqual(Buffer.from(authCommand.split(' ').pop(), 'base64').toString('utf8'), '\u0000smtp-user\u0000smtp-secret');
-  assert.ok(writes.join('').includes('Subject: [PromptWall] Approval routed: q_smtp'));
+  assert.ok(writes.join('').includes('Subject: [RedactWall] Approval routed: q_smtp'));
 });
 
 test('SMTP internals expose deterministic timeout and TLS-upgrade seams', async () => {

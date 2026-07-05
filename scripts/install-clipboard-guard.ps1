@@ -1,9 +1,9 @@
 param(
-  [string]$ShortcutName = "PromptWall Clipboard Guard",
+  [string]$ShortcutName = "RedactWall Clipboard Guard",
   [string]$Destination = "",
-  [string]$ConfigDir = "$env:LOCALAPPDATA\PromptWall",
+  [string]$ConfigDir = "$env:LOCALAPPDATA\RedactWall",
   [string]$RepoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path,
-  [string]$LogPath = "$env:LOCALAPPDATA\PromptWall\logs\clipboard-guard.log",
+  [string]$LogPath = "$env:LOCALAPPDATA\RedactWall\logs\clipboard-guard.log",
   [string]$HotKey = "",
   [switch]$ClearOnBlock,
   [switch]$DesktopShortcut,
@@ -13,7 +13,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
-  throw "Node.js is required on PATH before installing the PromptWall clipboard guard."
+  throw "Node.js is required on PATH before installing the RedactWall clipboard guard."
 }
 
 $repo = (Resolve-Path -LiteralPath $RepoRoot).Path
@@ -75,7 +75,7 @@ function New-ClipboardGuardShortcut {
   $shortcut.Arguments = $Arguments
   $shortcut.WorkingDirectory = $WorkingDirectory
   $shortcut.WindowStyle = 7
-  $shortcut.Description = "PromptWall one-shot clipboard guard"
+  $shortcut.Description = "RedactWall one-shot clipboard guard"
   if ($HotKey) {
     $shortcut.Hotkey = $HotKey
   }

@@ -31,8 +31,8 @@ const D = require('../detection-engine/detect');
 test('watch directory prefers CLI argument, then endpoint env, then temp default', () => {
   assert.strictEqual(defaultWatchDir(['node', 'agent.js', 'C:\\Watch'], { ENDPOINT_AGENT_WATCH_DIR: 'D:\\FromEnv' }), 'C:\\Watch');
   assert.strictEqual(defaultWatchDir(['node', 'agent.js'], { ENDPOINT_AGENT_WATCH_DIR: 'D:\\FromEnv' }), 'D:\\FromEnv');
-  assert.strictEqual(defaultWatchDir(['node', 'agent.js'], { PROMPTWALL_ENDPOINT_AGENT_WATCH_DIR: 'E:\\PromptWallWatch' }), 'E:\\PromptWallWatch');
-  assert.match(defaultWatchDir(['node', 'agent.js'], {}), /promptwall-watch$/);
+  assert.strictEqual(defaultWatchDir(['node', 'agent.js'], { REDACTWALL_ENDPOINT_AGENT_WATCH_DIR: 'E:\\RedactWallWatch' }), 'E:\\RedactWallWatch');
+  assert.match(defaultWatchDir(['node', 'agent.js'], {}), /redactwall-watch$/);
 });
 
 test('endpoint agent start wires refresh, file watch, scans, and native handoff watcher', async () => {
@@ -44,10 +44,10 @@ test('endpoint agent start wires refresh, file watch, scans, and native handoff 
   let intervalCallback;
   const started = start({
     console: { log: (...args) => logs.push(args.join(' ')) },
-    watchDir: 'C:\\PromptWall\\watch',
-    handoffDir: 'C:\\PromptWall\\handoff',
+    watchDir: 'C:\\RedactWall\\watch',
+    handoffDir: 'C:\\RedactWall\\handoff',
     handoffSecret: 'native-handoff-secret-000000000000000001',
-    server: 'https://promptwall.example',
+    server: 'https://redactwall.example',
     key: 'ingest-key-configured',
     refreshPolicy: async () => {},
     scanFile: (filename, opts) => scans.push({ filename, opts }),
@@ -63,7 +63,7 @@ test('endpoint agent start wires refresh, file watch, scans, and native handoff 
       return null;
     },
     watch: (dir, cb) => {
-      assert.strictEqual(dir, 'C:\\PromptWall\\watch');
+      assert.strictEqual(dir, 'C:\\RedactWall\\watch');
       watchCallback = cb;
       return { close() {} };
     },
@@ -80,14 +80,14 @@ test('endpoint agent start wires refresh, file watch, scans, and native handoff 
 
   assert.ok(unrefCalled);
   assert.deepStrictEqual(scans, [
-    { filename: 'existing.txt', opts: { watchDir: 'C:\\PromptWall\\watch' } },
-    { filename: 'new.txt', opts: { watchDir: 'C:\\PromptWall\\watch' } },
+    { filename: 'existing.txt', opts: { watchDir: 'C:\\RedactWall\\watch' } },
+    { filename: 'new.txt', opts: { watchDir: 'C:\\RedactWall\\watch' } },
   ]);
   assert.deepStrictEqual(handoffs, [{
-    dir: 'C:\\PromptWall\\handoff',
+    dir: 'C:\\RedactWall\\handoff',
     opts: { secret: 'native-handoff-secret-000000000000000001' },
   }]);
-  assert.ok(logs.some((line) => line.includes('PromptWall endpoint agent')));
+  assert.ok(logs.some((line) => line.includes('RedactWall endpoint agent')));
   assert.ok(logs.some((line) => line.includes('file-flow profiles: disabled')));
   assert.ok(logs.some((line) => line.includes('ingest  : configured')));
 });
@@ -188,7 +188,7 @@ test('redact policy writes a sanitized companion file for structured findings', 
   assert.match(reportRequest.prompt, /\[\[US_SSN_1\]\]/);
   assert.ok(!JSON.stringify(reportRequest).includes('524-71-9043'));
   assert.ok(res.redactionHandoff);
-  assert.match(res.redactionHandoff.relativePath, /^\.promptwall-redacted[\\/]/);
+  assert.match(res.redactionHandoff.relativePath, /^\.redactwall-redacted[\\/]/);
   assert.ok(!res.redactionHandoff.relativePath.includes('524-71-9043'));
   assert.strictEqual(ignoredByScanner(res.redactionHandoff.relativePath, scannerConfig({
     ignoreDirectories: [],
@@ -220,7 +220,7 @@ test('removes redacted companion files when control-plane recording fails', asyn
   assert.strictEqual(res.decision, 'block');
   assert.strictEqual(res.status, 'scan_unavailable');
   assert.strictEqual(requests[0].clientOutcome, 'redacted_available');
-  const handoffDir = path.join(dir, '.promptwall-redacted');
+  const handoffDir = path.join(dir, '.redactwall-redacted');
   assert.deepStrictEqual(fs.existsSync(handoffDir) ? fs.readdirSync(handoffDir) : [], []);
   assert.ok(!JSON.stringify(requests).includes('524-71-9043'));
 
@@ -229,13 +229,13 @@ test('removes redacted companion files when control-plane recording fails', asyn
 
 test('redacted companion names fall back after deterministic suffix exhaustion', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-agent-companion-'));
-  const handoffDir = path.join(dir, '.promptwall-redacted');
+  const handoffDir = path.join(dir, '.redactwall-redacted');
   fs.mkdirSync(handoffDir, { recursive: true });
   const filename = 'loan.txt';
   fs.writeFileSync(path.join(dir, filename), 'Member SSN 524-71-9043 needs a summary.');
   for (let i = 0; i < 100; i += 1) {
     const suffix = i ? `-${i + 1}` : '';
-    fs.writeFileSync(path.join(handoffDir, `loan.promptwall-redacted${suffix}.txt`), 'occupied');
+    fs.writeFileSync(path.join(handoffDir, `loan.redactwall-redacted${suffix}.txt`), 'occupied');
   }
 
   const res = await scanFile(filename, {
@@ -246,7 +246,7 @@ test('redacted companion names fall back after deterministic suffix exhaustion',
   });
 
   assert.strictEqual(res.decision, 'redact');
-  assert.match(path.basename(res.redactionHandoff.path), /^loan\.promptwall-redacted-[0-9a-f]{8}\.txt$/);
+  assert.match(path.basename(res.redactionHandoff.path), /^loan\.redactwall-redacted-[0-9a-f]{8}\.txt$/);
   assert.ok(!fs.readFileSync(res.redactionHandoff.path, 'utf8').includes('524-71-9043'));
   fs.rmSync(dir, { recursive: true, force: true });
 });
@@ -287,7 +287,7 @@ test('falls back to approval when redacted companion creation fails', async () =
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-agent-'));
   const filename = 'loan.txt';
   fs.writeFileSync(path.join(dir, filename), 'Member SSN 524-71-9043 needs a summary.');
-  fs.writeFileSync(path.join(dir, '.promptwall-redacted'), 'not a directory');
+  fs.writeFileSync(path.join(dir, '.redactwall-redacted'), 'not a directory');
 
   let reportRequest;
   const res = await scanFile(filename, {
@@ -521,11 +521,11 @@ test('blocks supported files locally without an ingest key or network call', asy
 test('postJson times out stalled control-plane requests', async () => {
   const started = Date.now();
   const res = await postJson('/api/v1/gate', { prompt: '[file inspected locally] loan.txt' }, {
-    server: 'http://sentinel.test',
+    server: 'http://redactwall.test',
     key: 'unit-key',
     timeoutMs: 10,
     fetchImpl: async (url, opts) => new Promise((resolve, reject) => {
-      assert.strictEqual(url, 'http://sentinel.test/api/v1/gate');
+      assert.strictEqual(url, 'http://redactwall.test/api/v1/gate');
       assert.strictEqual(opts.headers['x-api-key'], 'unit-key');
       opts.signal.addEventListener('abort', () => {
         const e = new Error('aborted');
@@ -550,7 +550,7 @@ test('does not contact the control plane without an ingest key', async () => {
   assert.strictEqual(await fetchPolicy({ key: '', fetchImpl }), null);
   assert.strictEqual(await postJson('/api/v1/gate', { prompt: 'blocked locally' }, { key: '', fetchImpl }), null);
   assert.deepStrictEqual(await postJson('/api/v1/gate', { prompt: 'safe' }, {
-    server: 'http://sentinel.test',
+    server: 'http://redactwall.test',
     key: 'unit-key',
     fetchImpl: async () => ({ ok: true, json: async () => ({ decision: 'allow', id: 'q_ok' }) }),
   }), { decision: 'allow', id: 'q_ok' });
@@ -567,7 +567,7 @@ test('endpoint helper paths fail closed without leaking local content', async ()
   assert.strictEqual(handoffSecretReady('native-handoff-secret-000000000000000001'), true);
   assert.strictEqual(await scanFile('../outside.txt', { watchDir: dir }), undefined);
   assert.strictEqual(await postJson('/api/v1/gate', { prompt: 'safe' }, {
-    server: 'http://sentinel.test',
+    server: 'http://redactwall.test',
     key: 'unit-key',
     fetchImpl: async () => ({ ok: false, json: async () => ({ error: 'denied' }) }),
   }), null);
@@ -591,7 +591,7 @@ test('endpoint helper paths fail closed without leaking local content', async ()
 test('refreshes scanner policy from the control plane', async () => {
   let request;
   const scanner = await refreshPolicy({
-    server: 'http://sentinel.test',
+    server: 'http://redactwall.test',
     key: 'policy-key',
     fetchImpl: async (url, opts) => {
       request = { url, headers: opts.headers };
@@ -609,7 +609,7 @@ test('refreshes scanner policy from the control plane', async () => {
     },
   });
 
-  assert.strictEqual(request.url, 'http://sentinel.test/api/v1/policy');
+  assert.strictEqual(request.url, 'http://redactwall.test/api/v1/policy');
   assert.strictEqual(request.headers['x-api-key'], 'policy-key');
   assert.ok(scanner.ignoreDirectories.has('secrets'));
   assert.ok(scanner.ignoreFilenames.has('skip-me.txt'));
@@ -641,12 +641,12 @@ test('sensor policy preserves reviewed AI destination controls', () => {
 test('policy refresh times out and keeps the current scanner config', async () => {
   const started = Date.now();
   const scanner = await refreshPolicy({
-    server: 'http://sentinel.test',
+    server: 'http://redactwall.test',
     key: 'policy-key',
     timeoutMs: 10,
     silent: true,
     fetchImpl: async (url, opts) => new Promise((resolve, reject) => {
-      assert.strictEqual(url, 'http://sentinel.test/api/v1/policy');
+      assert.strictEqual(url, 'http://redactwall.test/api/v1/policy');
       opts.signal.addEventListener('abort', () => {
         const e = new Error('aborted');
         e.name = 'AbortError';
@@ -672,7 +672,8 @@ test('scanner policy controls endpoint ignores and size blocking', async () => {
   });
 
   assert.strictEqual(ignoredByScanner(ignored, scanner), true);
-  assert.strictEqual(ignoredByScanner('.promptsentinel-redacted/loan.promptsentinel-redacted.txt', scanner), true);
+  assert.strictEqual(ignoredByScanner('.redactwall-redacted/loan.redactwall-redacted.txt', scanner), true);
+  assert.strictEqual(ignoredByScanner('.promptwall-redacted/loan.promptwall-redacted.txt', scanner), true);
   let reportCalled = false;
   const ignoredRes = await scanFile(ignored, {
     watchDir: dir,
@@ -743,7 +744,7 @@ test('processes signed native file-flow handoff events without raw payloads', as
   assert.match(reportRequest.prompt, /\[\[US_SSN_1\]\]/);
   assert.ok(!JSON.stringify(reportRequest).includes('524-71-9043'));
   assert.strictEqual(fs.existsSync(handoffPath), false);
-  assert.match(res.result.redactionHandoff.relativePath, /^\.promptwall-redacted[\\/]/);
+  assert.match(res.result.redactionHandoff.relativePath, /^\.redactwall-redacted[\\/]/);
   const companion = fs.readFileSync(res.result.redactionHandoff.path, 'utf8');
   assert.match(companion, /\[\[US_SSN_1\]\]/);
   assert.ok(!companion.includes('524-71-9043'));

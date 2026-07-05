@@ -8,10 +8,10 @@ const fs = require('node:fs');
 const { spawnSync } = require('node:child_process');
 
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-drill-test-'));
-process.env.SENTINEL_ENV_PATH = path.join(tempRoot, 'no.env');
-process.env.SENTINEL_DB_PATH = path.join(tempRoot, 'sentinel.db');
-process.env.SENTINEL_SECRET = 'unit-secret-stable';
-process.env.SENTINEL_DATA_KEY = 'unit-data-key-stable';
+process.env.REDACTWALL_ENV_PATH = path.join(tempRoot, 'no.env');
+process.env.REDACTWALL_DB_PATH = path.join(tempRoot, 'redactwall.db');
+process.env.REDACTWALL_SECRET = 'unit-secret-stable';
+process.env.REDACTWALL_DATA_KEY = 'unit-data-key-stable';
 
 const db = require('../server/db');
 const backup = require('../scripts/backup-store');
@@ -31,10 +31,10 @@ function captureConsole() {
 function childEnv(dbPath) {
   return {
     ...process.env,
-    SENTINEL_ENV_PATH: path.join(tempRoot, 'no.env'),
-    SENTINEL_DB_PATH: dbPath,
-    SENTINEL_SECRET: 'unit-secret-stable',
-    SENTINEL_DATA_KEY: 'unit-data-key-stable',
+    REDACTWALL_ENV_PATH: path.join(tempRoot, 'no.env'),
+    REDACTWALL_DB_PATH: dbPath,
+    REDACTWALL_SECRET: 'unit-secret-stable',
+    REDACTWALL_DATA_KEY: 'unit-data-key-stable',
   };
 }
 
@@ -68,7 +68,7 @@ test('drill passes end-to-end and prints a prompt-free PASS report', async () =>
   assert.ok(!output.includes(SECRET));
   assert.ok(!output.includes('Member SSN'));
   assert.ok(fs.readdirSync(drillDir).some((name) => name.endsWith('.db')));
-  assert.ok(fs.existsSync(path.join(drillDir, 'drill-restore', 'restored-sentinel.db')));
+  assert.ok(fs.existsSync(path.join(drillDir, 'drill-restore', 'restored-redactwall.db')));
 });
 
 test('drill without --keep cleans up every artifact it created', async () => {
@@ -102,13 +102,13 @@ test('drill CLI exits zero on PASS and non-zero on a tampered store', () => {
   const pass = spawnSync(process.execPath, [
     path.join(REPO_ROOT, 'scripts', 'backup-drill.js'),
     '--backup-dir', path.join(tempRoot, 'cli-pass'),
-  ], { cwd: REPO_ROOT, env: childEnv(process.env.SENTINEL_DB_PATH), encoding: 'utf8' });
+  ], { cwd: REPO_ROOT, env: childEnv(process.env.REDACTWALL_DB_PATH), encoding: 'utf8' });
   assert.strictEqual(pass.status, 0, pass.stderr);
   const cliReport = JSON.parse(pass.stdout);
   assert.strictEqual(cliReport.result, 'PASS');
   assert.ok(!pass.stdout.includes(SECRET));
 
-  const tamperedDb = path.join(tempRoot, 'tampered', 'sentinel.db');
+  const tamperedDb = path.join(tempRoot, 'tampered', 'redactwall.db');
   const seed = spawnSync(process.execPath, ['-e', `
     const db = require('./server/db');
     const q = db.createQuery({ status: 'allowed', redactedPrompt: 'benign', findings: [] });

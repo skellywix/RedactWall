@@ -1,6 +1,6 @@
 # Access Roles
 
-PromptWall ships exactly four console roles. Every session carries one role;
+RedactWall ships exactly four console roles. Every session carries one role;
 there are no per-permission toggles to misconfigure, and the audit log records
 which role took every action. The set is deliberately small: each role is a
 distinct job, and together they cover separation-of-duties for a regulated

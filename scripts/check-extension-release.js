@@ -10,7 +10,7 @@ const { BROWSER_TARGETS, packageExtensions, sha256 } = require('./package-extens
 const ROOT = path.join(__dirname, '..');
 const CHROME_WEB_STORE_UPDATE_URL = 'https://clients2.google.com/service/update2/crx';
 const EDGE_ADDONS_UPDATE_URL = 'https://edge.microsoft.com/extensionwebstorebase/v1/crx';
-const FIREFOX_EXTENSION_ID = 'promptwall@example.com';
+const FIREFOX_EXTENSION_ID = 'redactwall@example.com';
 const EXTENSION_ID_RE = /^[a-p]{32}$/;
 
 function readJson(root, relPath) {
@@ -77,14 +77,14 @@ function writeJsonFile(filePath, value) {
 
 function writeExtensionSettingsPolicy({ outDir, extensionVersion, extensionId, target }) {
   if (!extensionId) return null;
-  const policyPath = path.join(outDir, `promptwall-${target}-extension-v${extensionVersion}.extension-settings.json`);
+  const policyPath = path.join(outDir, `redactwall-${target}-extension-v${extensionVersion}.extension-settings.json`);
   const policy = target === 'edge' ? edgeExtensionSettingsPolicy(extensionId) : extensionSettingsPolicy(extensionId);
   return writeJsonFile(policyPath, policy);
 }
 
 function writeFirefoxExtensionSettingsPolicy({ outDir, extensionVersion, extensionId, installUrl }) {
   if (!installUrl) return null;
-  const policyPath = path.join(outDir, `promptwall-firefox-extension-v${extensionVersion}.extension-settings.json`);
+  const policyPath = path.join(outDir, `redactwall-firefox-extension-v${extensionVersion}.extension-settings.json`);
   return writeJsonFile(policyPath, firefoxExtensionSettingsPolicy({ extensionId, installUrl }));
 }
 
@@ -195,7 +195,7 @@ function validatePackageManifest(packageManifest, checks, problems) {
   requireCheck(
     checks,
     `package_${packageManifest.browserTarget}_kind`,
-    packageManifest.kind === 'promptwall-browser-extension-package',
+    packageManifest.kind === 'redactwall-browser-extension-package',
     `${packageManifest.browserTarget} package manifest has the expected kind`,
     problems,
   );
@@ -238,7 +238,7 @@ function validateRenderedExtensionSettingsPolicy(policyPath, extensionId, checks
   requireCheck(
     checks,
     `generated_${target}_extension_settings_prompt_free`,
-    !/REPLACE_WITH_LONG_RANDOM_INGEST_KEY|dev-ingest-key|promptwall\.example\.org|524-71-9043|4111 1111/i.test(JSON.stringify(policy)),
+    !/REPLACE_WITH_LONG_RANDOM_INGEST_KEY|dev-ingest-key|redactwall\.example\.org|524-71-9043|4111 1111/i.test(JSON.stringify(policy)),
     `generated ${target} ExtensionSettings policy contains no managed-storage secrets or prompt examples`,
     problems,
   );
@@ -258,7 +258,7 @@ function validateRenderedFirefoxPolicy(policyPath, checks, problems) {
   requireCheck(
     checks,
     'generated_firefox_extension_settings_prompt_free',
-    !/REPLACE_WITH_LONG_RANDOM_INGEST_KEY|dev-ingest-key|promptwall\.example\.org|524-71-9043|4111 1111/i.test(JSON.stringify(policy)),
+    !/REPLACE_WITH_LONG_RANDOM_INGEST_KEY|dev-ingest-key|redactwall\.example\.org|524-71-9043|4111 1111/i.test(JSON.stringify(policy)),
     'generated Firefox ExtensionSettings policy contains no managed-storage secrets or prompt examples',
     problems,
   );
@@ -267,7 +267,7 @@ function validateRenderedFirefoxPolicy(policyPath, checks, problems) {
 function releaseReportFor({ now, extensionIdStatus, extensionId, edgeExtensionIdStatus, edgeExtensionId, firefoxInstallUrl, extensionSettingsPolicyPaths, packaged, checks, problems }) {
   const byTarget = Object.fromEntries(packaged.map((item) => [item.packageManifest.browserTarget, item]));
   return {
-    kind: 'promptwall-extension-release-readiness',
+    kind: 'redactwall-extension-release-readiness',
     status: problems.length ? 'blocked' : 'ready',
     createdAt: now.toISOString(),
     extensionIdStatus,
@@ -401,7 +401,7 @@ function checkExtensionRelease(opts = {}) {
     throw err;
   }
 
-  const reportPath = path.join(outDir, `promptwall-browser-extension-v${packaged[0].packageManifest.extensionVersion}.release-readiness.json`);
+  const reportPath = path.join(outDir, `redactwall-browser-extension-v${packaged[0].packageManifest.extensionVersion}.release-readiness.json`);
   fs.writeFileSync(reportPath, JSON.stringify(releaseReport, null, 2) + '\n');
   return {
     packages: packaged,

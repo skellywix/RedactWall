@@ -19,7 +19,7 @@ const DEFAULT_LINEAR_API_URL = 'https://api.linear.app/graphql';
 // Bound outbound notifier requests so a hung webhook/ticket endpoint cannot
 // stall an approval action that awaits notification delivery.
 const OUTBOUND_TIMEOUT_MS = (() => {
-  const n = Number(process.env.PROMPTWALL_NOTIFIER_TIMEOUT_MS || process.env.APPROVAL_NOTIFIER_TIMEOUT_MS);
+  const n = Number(process.env.REDACTWALL_NOTIFIER_TIMEOUT_MS || process.env.APPROVAL_NOTIFIER_TIMEOUT_MS);
   return Number.isFinite(n) && n > 0 ? n : 8000;
 })();
 function outboundSignal() {
@@ -74,10 +74,10 @@ function parsePort(value, fallback) {
 }
 
 function configuredJiraChannel(env) {
-  const url = jiraIssueUrl(envValue(env, 'PROMPTWALL_APPROVAL_JIRA_BASE_URL', 'APPROVAL_JIRA_BASE_URL'));
-  const email = envValue(env, 'PROMPTWALL_APPROVAL_JIRA_EMAIL', 'APPROVAL_JIRA_EMAIL');
-  const token = envValue(env, 'PROMPTWALL_APPROVAL_JIRA_API_TOKEN', 'APPROVAL_JIRA_API_TOKEN');
-  const projectKey = envValue(env, 'PROMPTWALL_APPROVAL_JIRA_PROJECT_KEY', 'APPROVAL_JIRA_PROJECT_KEY');
+  const url = jiraIssueUrl(envValue(env, 'REDACTWALL_APPROVAL_JIRA_BASE_URL', 'APPROVAL_JIRA_BASE_URL'));
+  const email = envValue(env, 'REDACTWALL_APPROVAL_JIRA_EMAIL', 'APPROVAL_JIRA_EMAIL');
+  const token = envValue(env, 'REDACTWALL_APPROVAL_JIRA_API_TOKEN', 'APPROVAL_JIRA_API_TOKEN');
+  const projectKey = envValue(env, 'REDACTWALL_APPROVAL_JIRA_PROJECT_KEY', 'APPROVAL_JIRA_PROJECT_KEY');
   if (!url || !email || !token || !projectKey) return null;
   return {
     type: 'jira',
@@ -86,14 +86,14 @@ function configuredJiraChannel(env) {
     email,
     token,
     projectKey,
-    issueType: envValue(env, 'PROMPTWALL_APPROVAL_JIRA_ISSUE_TYPE', 'APPROVAL_JIRA_ISSUE_TYPE') || 'Task',
+    issueType: envValue(env, 'REDACTWALL_APPROVAL_JIRA_ISSUE_TYPE', 'APPROVAL_JIRA_ISSUE_TYPE') || 'Task',
   };
 }
 
 function configuredLinearChannel(env) {
-  const token = envValue(env, 'PROMPTWALL_APPROVAL_LINEAR_API_KEY', 'APPROVAL_LINEAR_API_KEY');
-  const teamId = envValue(env, 'PROMPTWALL_APPROVAL_LINEAR_TEAM_ID', 'APPROVAL_LINEAR_TEAM_ID');
-  const url = linearApiUrl(envValue(env, 'PROMPTWALL_APPROVAL_LINEAR_API_URL', 'APPROVAL_LINEAR_API_URL'));
+  const token = envValue(env, 'REDACTWALL_APPROVAL_LINEAR_API_KEY', 'APPROVAL_LINEAR_API_KEY');
+  const teamId = envValue(env, 'REDACTWALL_APPROVAL_LINEAR_TEAM_ID', 'APPROVAL_LINEAR_TEAM_ID');
+  const url = linearApiUrl(envValue(env, 'REDACTWALL_APPROVAL_LINEAR_API_URL', 'APPROVAL_LINEAR_API_URL'));
   if (!token || !teamId || !url) return null;
   return {
     type: 'linear',
@@ -101,61 +101,61 @@ function configuredLinearChannel(env) {
     url,
     token,
     teamId,
-    stateId: envValue(env, 'PROMPTWALL_APPROVAL_LINEAR_STATE_ID', 'APPROVAL_LINEAR_STATE_ID'),
-    projectId: envValue(env, 'PROMPTWALL_APPROVAL_LINEAR_PROJECT_ID', 'APPROVAL_LINEAR_PROJECT_ID'),
-    labelIds: csv(envValue(env, 'PROMPTWALL_APPROVAL_LINEAR_LABEL_IDS', 'APPROVAL_LINEAR_LABEL_IDS')),
+    stateId: envValue(env, 'REDACTWALL_APPROVAL_LINEAR_STATE_ID', 'APPROVAL_LINEAR_STATE_ID'),
+    projectId: envValue(env, 'REDACTWALL_APPROVAL_LINEAR_PROJECT_ID', 'APPROVAL_LINEAR_PROJECT_ID'),
+    labelIds: csv(envValue(env, 'REDACTWALL_APPROVAL_LINEAR_LABEL_IDS', 'APPROVAL_LINEAR_LABEL_IDS')),
   };
 }
 
 function configuredChannels(env = process.env, opts = {}) {
   if (Array.isArray(opts.channels)) return opts.channels.map(normalizeConfiguredChannel).filter(Boolean);
   const channels = [];
-  const webhookUrl = outboundHttpsUrl(envValue(env, 'PROMPTWALL_APPROVAL_NOTIFY_WEBHOOK_URL', 'APPROVAL_NOTIFY_WEBHOOK_URL'));
+  const webhookUrl = outboundHttpsUrl(envValue(env, 'REDACTWALL_APPROVAL_NOTIFY_WEBHOOK_URL', 'APPROVAL_NOTIFY_WEBHOOK_URL'));
   if (webhookUrl) {
     channels.push({
       type: 'webhook',
       name: 'webhook',
       url: webhookUrl,
-      token: envValue(env, 'PROMPTWALL_APPROVAL_NOTIFY_WEBHOOK_TOKEN', 'APPROVAL_NOTIFY_WEBHOOK_TOKEN'),
+      token: envValue(env, 'REDACTWALL_APPROVAL_NOTIFY_WEBHOOK_TOKEN', 'APPROVAL_NOTIFY_WEBHOOK_TOKEN'),
     });
   }
-  const slackUrl = outboundHttpsUrl(envValue(env, 'PROMPTWALL_APPROVAL_SLACK_WEBHOOK_URL', 'APPROVAL_SLACK_WEBHOOK_URL'));
+  const slackUrl = outboundHttpsUrl(envValue(env, 'REDACTWALL_APPROVAL_SLACK_WEBHOOK_URL', 'APPROVAL_SLACK_WEBHOOK_URL'));
   if (slackUrl) channels.push({ type: 'slack', name: 'slack', url: slackUrl });
-  const teamsUrl = outboundHttpsUrl(envValue(env, 'PROMPTWALL_APPROVAL_TEAMS_WEBHOOK_URL', 'APPROVAL_TEAMS_WEBHOOK_URL'));
+  const teamsUrl = outboundHttpsUrl(envValue(env, 'REDACTWALL_APPROVAL_TEAMS_WEBHOOK_URL', 'APPROVAL_TEAMS_WEBHOOK_URL'));
   if (teamsUrl) channels.push({ type: 'teams', name: 'teams', url: teamsUrl });
-  const ticketUrl = outboundHttpsUrl(envValue(env, 'PROMPTWALL_APPROVAL_TICKET_WEBHOOK_URL', 'APPROVAL_TICKET_WEBHOOK_URL'));
+  const ticketUrl = outboundHttpsUrl(envValue(env, 'REDACTWALL_APPROVAL_TICKET_WEBHOOK_URL', 'APPROVAL_TICKET_WEBHOOK_URL'));
   if (ticketUrl) {
     channels.push({
       type: 'ticket',
       name: 'ticket',
       url: ticketUrl,
-      token: envValue(env, 'PROMPTWALL_APPROVAL_TICKET_WEBHOOK_TOKEN', 'APPROVAL_TICKET_WEBHOOK_TOKEN'),
-      system: envValue(env, 'PROMPTWALL_APPROVAL_TICKET_SYSTEM', 'APPROVAL_TICKET_SYSTEM'),
-      project: envValue(env, 'PROMPTWALL_APPROVAL_TICKET_PROJECT', 'APPROVAL_TICKET_PROJECT'),
-      issueType: envValue(env, 'PROMPTWALL_APPROVAL_TICKET_ISSUE_TYPE', 'APPROVAL_TICKET_ISSUE_TYPE'),
+      token: envValue(env, 'REDACTWALL_APPROVAL_TICKET_WEBHOOK_TOKEN', 'APPROVAL_TICKET_WEBHOOK_TOKEN'),
+      system: envValue(env, 'REDACTWALL_APPROVAL_TICKET_SYSTEM', 'APPROVAL_TICKET_SYSTEM'),
+      project: envValue(env, 'REDACTWALL_APPROVAL_TICKET_PROJECT', 'APPROVAL_TICKET_PROJECT'),
+      issueType: envValue(env, 'REDACTWALL_APPROVAL_TICKET_ISSUE_TYPE', 'APPROVAL_TICKET_ISSUE_TYPE'),
     });
   }
   const jira = configuredJiraChannel(env);
   if (jira) channels.push(jira);
   const linear = configuredLinearChannel(env);
   if (linear) channels.push(linear);
-  const smtpHost = envValue(env, 'PROMPTWALL_APPROVAL_SMTP_HOST', 'APPROVAL_SMTP_HOST');
-  const smtpFrom = envValue(env, 'PROMPTWALL_APPROVAL_SMTP_FROM', 'APPROVAL_SMTP_FROM');
-  const smtpTo = smtp.parseRecipients(envValue(env, 'PROMPTWALL_APPROVAL_SMTP_TO', 'APPROVAL_SMTP_TO'));
+  const smtpHost = envValue(env, 'REDACTWALL_APPROVAL_SMTP_HOST', 'APPROVAL_SMTP_HOST');
+  const smtpFrom = envValue(env, 'REDACTWALL_APPROVAL_SMTP_FROM', 'APPROVAL_SMTP_FROM');
+  const smtpTo = smtp.parseRecipients(envValue(env, 'REDACTWALL_APPROVAL_SMTP_TO', 'APPROVAL_SMTP_TO'));
   if (smtpHost && smtp.extractEmailAddress(smtpFrom) && smtpTo.length) {
-    const secure = parseBool(envValue(env, 'PROMPTWALL_APPROVAL_SMTP_SECURE', 'APPROVAL_SMTP_SECURE'), false);
+    const secure = parseBool(envValue(env, 'REDACTWALL_APPROVAL_SMTP_SECURE', 'APPROVAL_SMTP_SECURE'), false);
     channels.push({
       type: 'smtp',
       name: 'smtp',
       host: smtpHost,
-      port: parsePort(envValue(env, 'PROMPTWALL_APPROVAL_SMTP_PORT', 'APPROVAL_SMTP_PORT'), secure ? 465 : 587),
+      port: parsePort(envValue(env, 'REDACTWALL_APPROVAL_SMTP_PORT', 'APPROVAL_SMTP_PORT'), secure ? 465 : 587),
       from: smtpFrom,
       to: smtpTo,
-      username: envValue(env, 'PROMPTWALL_APPROVAL_SMTP_USERNAME', 'APPROVAL_SMTP_USERNAME'),
-      password: envValue(env, 'PROMPTWALL_APPROVAL_SMTP_PASSWORD', 'APPROVAL_SMTP_PASSWORD'),
+      username: envValue(env, 'REDACTWALL_APPROVAL_SMTP_USERNAME', 'APPROVAL_SMTP_USERNAME'),
+      password: envValue(env, 'REDACTWALL_APPROVAL_SMTP_PASSWORD', 'APPROVAL_SMTP_PASSWORD'),
       secure,
-      requireTls: !parseBool(envValue(env, 'PROMPTWALL_APPROVAL_SMTP_ALLOW_INSECURE', 'APPROVAL_SMTP_ALLOW_INSECURE'), false),
-      timeoutMs: parsePort(envValue(env, 'PROMPTWALL_APPROVAL_SMTP_TIMEOUT_MS', 'APPROVAL_SMTP_TIMEOUT_MS'), 10000),
+      requireTls: !parseBool(envValue(env, 'REDACTWALL_APPROVAL_SMTP_ALLOW_INSECURE', 'APPROVAL_SMTP_ALLOW_INSECURE'), false),
+      timeoutMs: parsePort(envValue(env, 'REDACTWALL_APPROVAL_SMTP_TIMEOUT_MS', 'APPROVAL_SMTP_TIMEOUT_MS'), 10000),
     });
   }
   return channels;
@@ -180,8 +180,8 @@ function safeFindingLabels(query = {}) {
 }
 
 function notificationTitle(action) {
-  if (action === 'APPROVAL_ESCALATED') return 'PromptWall approval escalated';
-  return 'PromptWall approval routed';
+  if (action === 'APPROVAL_ESCALATED') return 'RedactWall approval escalated';
+  return 'RedactWall approval routed';
 }
 
 function sanitizedApprovalNotification(query = {}, opts = {}) {
@@ -189,7 +189,7 @@ function sanitizedApprovalNotification(query = {}, opts = {}) {
   const action = opts.action || 'APPROVAL_ROUTED';
   return {
     schemaVersion: 1,
-    eventType: 'promptwall.approval_workflow',
+    eventType: 'redactwall.approval_workflow',
     action,
     title: notificationTitle(action),
     queryId: query.id || null,
@@ -294,11 +294,11 @@ function ticketQuery(payload) {
 function ticketPayload(channel, payload) {
   return {
     schemaVersion: 1,
-    eventType: 'promptwall.approval_ticket',
+    eventType: 'redactwall.approval_ticket',
     action: payload.action,
     title: payload.title,
     summary: oneLine(payload),
-    dedupeKey: `promptwall:${payload.queryId || 'unknown'}:${payload.action}`,
+    dedupeKey: `redactwall:${payload.queryId || 'unknown'}:${payload.action}`,
     priority: priorityForTicket(payload),
     ticket: {
       system: boundedText(channel.system) || 'generic',
@@ -314,7 +314,7 @@ function issueSummary(payload) {
   const owner = [payload.workflow.assignedGroup, payload.workflow.assignedRole].filter(Boolean).join('/');
   const destination = payload.destination || 'unknown';
   const label = payload.labels[0] || payload.maxSeverityLabel || 'review';
-  return boundedText(`PromptWall ${payload.action === 'APPROVAL_ESCALATED' ? 'escalation' : 'approval'}: ${label} at ${destination}${owner ? ' for ' + owner : ''}`, 240);
+  return boundedText(`RedactWall ${payload.action === 'APPROVAL_ESCALATED' ? 'escalation' : 'approval'}: ${label} at ${destination}${owner ? ' for ' + owner : ''}`, 240);
 }
 
 function issueDescription(payload) {
@@ -332,7 +332,7 @@ function issueDescription(payload) {
     `Labels: ${payload.labels.join(', ') || 'none'}`,
     `Reasons: ${payload.reasons.join('; ') || 'none'}`,
     '',
-    'This issue was generated from sanitized PromptWall workflow metadata only. It intentionally omits prompt bodies, redacted previews, raw findings, token vaults, release tokens, decision notes, and uploaded file bytes.',
+    'This issue was generated from sanitized RedactWall workflow metadata only. It intentionally omits prompt bodies, redacted previews, raw findings, token vaults, release tokens, decision notes, and uploaded file bytes.',
   ].join('\n').slice(0, 8000);
 }
 
@@ -347,7 +347,7 @@ function issueLabel(value) {
 }
 
 function issueLabels(payload) {
-  return ['promptwall', 'approval', priorityForTicket(payload), ...payload.labels]
+  return ['redactwall', 'approval', priorityForTicket(payload), ...payload.labels]
     .map(issueLabel)
     .filter(Boolean)
     .slice(0, 12);
@@ -388,7 +388,7 @@ function linearIssuePayload(channel, payload) {
     input.labelIds = channel.labelIds.map((id) => boundedText(id, 80)).filter(Boolean).slice(0, 20);
   }
   return {
-    query: 'mutation PromptWallIssueCreate($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { id identifier url title } } }',
+    query: 'mutation RedactWallIssueCreate($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { id identifier url title } } }',
     variables: { input },
   };
 }

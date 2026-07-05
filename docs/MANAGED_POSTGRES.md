@@ -1,6 +1,6 @@
 # Managed Postgres Operations
 
-This runbook is for operating the PromptWall control plane on Postgres —
+This runbook is for operating the RedactWall control plane on Postgres —
 normally a managed service such as Amazon RDS/Aurora, Cloud SQL, or Azure
 Database for PostgreSQL. It covers enabling the driver, application-role
 setup, schema migrations, timeout and retry tuning, backups and restore
@@ -23,31 +23,31 @@ Postgres 16 and 17 are exercised in CI.
 ## Enabling The Driver
 
 ```text
-SENTINEL_DB_DRIVER=postgres
-SENTINEL_DATABASE_URL=postgresql://promptwall_app:<password>@db.internal:5432/promptwall?sslmode=require
+REDACTWALL_DB_DRIVER=postgres
+REDACTWALL_DATABASE_URL=postgresql://redactwall_app:<password>@db.internal:5432/redactwall?sslmode=require
 ```
 
-`DATABASE_URL` is accepted as a fallback when `SENTINEL_DATABASE_URL` is not
+`DATABASE_URL` is accepted as a fallback when `REDACTWALL_DATABASE_URL` is not
 set. Always require TLS (`sslmode=require`, or `verify-full` with a CA bundle
 when your provider supports it); the connection string carries credentials, so
 keep it in your secret manager and never in shell history, logs, or manifests.
-PromptWall's own tooling never echoes it.
+RedactWall's own tooling never echoes it.
 
-All control-plane replicas must also share the same `SENTINEL_SECRET` and
-`SENTINEL_DATA_KEY` so sessions, receipts, and sealed prompts stay valid
+All control-plane replicas must also share the same `REDACTWALL_SECRET` and
+`REDACTWALL_DATA_KEY` so sessions, receipts, and sealed prompts stay valid
 across replicas.
 
 ## Application Role Setup
 
-Run PromptWall as a dedicated, least-privileged role. The tenant-scoping
+Run RedactWall as a dedicated, least-privileged role. The tenant-scoping
 migration applies `FORCE ROW LEVEL SECURITY`, so RLS binds even the table
 owner — but **superusers and any role with `BYPASSRLS` silently bypass RLS**.
-Never point `SENTINEL_DATABASE_URL` at one.
+Never point `REDACTWALL_DATABASE_URL` at one.
 
 ```sql
-CREATE ROLE promptwall_app LOGIN PASSWORD '<from-secret-manager>'
+CREATE ROLE redactwall_app LOGIN PASSWORD '<from-secret-manager>'
   NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
-CREATE DATABASE promptwall OWNER promptwall_app;
+CREATE DATABASE redactwall OWNER redactwall_app;
 ```
 
 The app role owns its database because schema migrations run automatically at
@@ -56,13 +56,13 @@ startup (see below) and must be able to create tables, triggers, and policies.
 still policy-bound. Verify the runtime role cannot bypass RLS:
 
 ```sql
-SELECT rolname, rolsuper, rolbypassrls FROM pg_roles WHERE rolname = 'promptwall_app';
+SELECT rolname, rolsuper, rolbypassrls FROM pg_roles WHERE rolname = 'redactwall_app';
 -- rolsuper and rolbypassrls must both be false
 ```
 
 `test/storage-postgres-rls.test.js` pins this contract in CI: tenant contexts
 cannot read, update, delete, or re-tag each other's rows, and a blank
-`promptwall.org_id` context is the documented operator mode that sees all
+`redactwall.org_id` context is the documented operator mode that sees all
 tenants. Set the tenant context per request through the storage layer only;
 do not hand out this role for ad-hoc human access.
 
@@ -95,7 +95,7 @@ migration — one more reason the drill below should already be routine.
 
 Migration statements run under the same session `statement_timeout` as normal
 traffic (default 25 s). If a future migration rewrites a very large table,
-raise `SENTINEL_PG_STATEMENT_TIMEOUT_MS` for that deploy — the bridge's call
+raise `REDACTWALL_PG_STATEMENT_TIMEOUT_MS` for that deploy — the bridge's call
 timeout follows it automatically — and lower it again afterwards.
 
 ## Statement Timeout And Connect Retry
@@ -106,18 +106,18 @@ tunable by environment variable:
 
 | Variable | Default | Bounds | Purpose |
 | --- | --- | --- | --- |
-| `SENTINEL_PG_STATEMENT_TIMEOUT_MS` | `25000` | 1000–600000 | Session `statement_timeout`. The bridge's own call timeout is always this value + 5000 ms, so the database cancels a runaway statement (error code `57014`) and keeps the connection alive before the bridge gives up. |
-| `SENTINEL_PG_CONNECT_ATTEMPTS` | `5` | 1–20 | Connection attempts per retry cycle, on initial connect and after connection loss. A cycle that exhausts its attempts fails the calling operation with `postgres connect failed after N attempt(s)`; it never loops forever. |
-| `SENTINEL_PG_CONNECT_BASE_DELAY_MS` | `200` | 10–10000 | Base delay for exponential backoff between attempts (200, 400, 800, 1600 ms...; individual delays cap at 15 s). |
-| `SENTINEL_PG_CONNECT_TIMEOUT_MS` | `5000` | 500–60000 | Per-attempt TCP/startup timeout, so a black-holed connect cannot hang a cycle. |
+| `REDACTWALL_PG_STATEMENT_TIMEOUT_MS` | `25000` | 1000–600000 | Session `statement_timeout`. The bridge's own call timeout is always this value + 5000 ms, so the database cancels a runaway statement (error code `57014`) and keeps the connection alive before the bridge gives up. |
+| `REDACTWALL_PG_CONNECT_ATTEMPTS` | `5` | 1–20 | Connection attempts per retry cycle, on initial connect and after connection loss. A cycle that exhausts its attempts fails the calling operation with `postgres connect failed after N attempt(s)`; it never loops forever. |
+| `REDACTWALL_PG_CONNECT_BASE_DELAY_MS` | `200` | 10–10000 | Base delay for exponential backoff between attempts (200, 400, 800, 1600 ms...; individual delays cap at 15 s). |
+| `REDACTWALL_PG_CONNECT_TIMEOUT_MS` | `5000` | 500–60000 | Per-attempt TCP/startup timeout, so a black-holed connect cannot hang a cycle. |
 
 With defaults, a full failed reconnect cycle costs about 28 seconds; requests
 issued while the database is down fail with the clear error above rather than
 queueing. After the database returns, the next call reconnects automatically.
-If you raise `SENTINEL_PG_CONNECT_ATTEMPTS` or the per-attempt timeout, a
+If you raise `REDACTWALL_PG_CONNECT_ATTEMPTS` or the per-attempt timeout, a
 cycle can exceed the bridge call timeout and callers will see
 `postgres bridge timeout` instead of the retry error — keep
-attempts × connect timeout below `SENTINEL_PG_STATEMENT_TIMEOUT_MS` + 5000 ms.
+attempts × connect timeout below `REDACTWALL_PG_STATEMENT_TIMEOUT_MS` + 5000 ms.
 
 ## Backups And Restore Drills
 
@@ -126,8 +126,8 @@ The standard backup tooling works on Postgres when the driver is Postgres
 
 ```bash
 npm run backup -- backups          # pg_dump custom-format .dump + manifest
-npm run backup:verify -- backups/sentinel-<stamp>.dump
-npm run backup:restore -- backups/sentinel-<stamp>.dump <database-name-or-url>
+npm run backup:verify -- backups/redactwall-<stamp>.dump
+npm run backup:restore -- backups/redactwall-<stamp>.dump <database-name-or-url>
 npm run backup:drill               # dump, restore to a scratch DB, verify, drop
 ```
 
@@ -151,11 +151,11 @@ Behavior on Postgres:
   also accepted), then verifies the restored audit chain through the
   production driver. `--force` adds `--clean --if-exists`.
 - `backup:drill` restores into a uniquely named scratch database
-  (`promptwall_drill_<hex>`), verifies the audit hash-chain and row counts
+  (`redactwall_drill_<hex>`), verifies the audit hash-chain and row counts
   there, and always drops the scratch database — `--keep` retains only the
   dump and manifest. The connecting role therefore needs `CREATEDB` for
   drills; either grant it to a dedicated maintenance role or run the drill
-  with a separate elevated `SENTINEL_DATABASE_URL`.
+  with a separate elevated `REDACTWALL_DATABASE_URL`.
 - `pg_dump`/`pg_restore` must be on `PATH` with a major version at least the
   server's (Debian/Ubuntu: `apt-get install postgresql-client`; RHEL/Amazon
   Linux: `dnf install postgresql16`; macOS: `brew install libpq`). If they
@@ -173,7 +173,7 @@ traffic until:
 node -e "const v=require('./server/db').verifyAuditChain(); console.log(JSON.stringify(v)); if(!v.ok) process.exit(1)"
 ```
 
-As with SQLite, backups do not cover `.env` secrets (`SENTINEL_DATA_KEY`
+As with SQLite, backups do not cover `.env` secrets (`REDACTWALL_DATA_KEY`
 above all — sealed prompts in a restored store cannot be revealed without
 it), the policy file, or custom detector packs. Capture those through your
 secret/configuration management (see "What Backups Do Not Cover" in

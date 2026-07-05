@@ -1,11 +1,11 @@
 # Security Policy
 
-PromptWall is a data-loss-prevention product sold to regulated financial
+RedactWall is a data-loss-prevention product sold to regulated financial
 institutions. We treat vulnerability reports as a first-class input.
 
 ## Reporting a vulnerability
 
-- Email **security@promptwall.example** (replace with the monitored security
+- Email **security@redactwall.example** (replace with the monitored security
   contact before publishing this repository) with a description, reproduction
   steps, and impact assessment. Use synthetic data only in reproductions —
   never real member, patient, or cardholder data.

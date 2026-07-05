@@ -89,9 +89,9 @@ function stageSvg(map,safe,still){
   const touched=new Set();
   visible.forEach((edge)=>{touched.add(`segment:${edge.from}`);touched.add(`channel:${edge.via}`);touched.add(`destination:${edge.to}`);});
   const dim=(kind,id)=>visible.length>0&&!touched.has(`${kind}:${id}`);
-  return `<svg viewBox="0 0 ${W} ${height}" role="img" aria-label="Map of sensitive data paths from departments through PromptWall to AI destinations">
+  return `<svg viewBox="0 0 ${W} ${height}" role="img" aria-label="Map of sensitive data paths from departments through RedactWall to AI destinations">
     <text class="leak-col-label" x="10" y="24">DEPARTMENTS &amp; TEAMS</text>
-    <text class="leak-col-label" x="${(CH_L+CH_R)/2}" y="24" text-anchor="middle">PROMPTWALL</text>
+    <text class="leak-col-label" x="${(CH_L+CH_R)/2}" y="24" text-anchor="middle">REDACTWALL</text>
     <text class="leak-col-label" x="${W-10}" y="24" text-anchor="end">AI DESTINATIONS</text>
     <rect class="leak-wall" x="${(CH_L+CH_R)/2-23}" y="${PAD_TOP-18}" width="46" height="${height-PAD_TOP-PAD_BOT+30}" rx="14"></rect>
     ${visible.map((edge)=>edgePaths(edge,pos,dests,safe,still)).join('')}
@@ -206,5 +206,5 @@ function render(currentPosture,deps){
     :'<div class="signal-empty"><b>No paths mapped yet</b><p>Connect sensors and the exposure map draws every department-to-AI flow from sanitized events.</p></div>';
   inspector.innerHTML=map?inspectorHtml(map,currentPosture,safe):'';
 }
-window.PromptWallLeakPathMap={render};
+window.RedactWallLeakPathMap={render};
 }());

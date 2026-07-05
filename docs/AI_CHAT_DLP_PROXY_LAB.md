@@ -1,7 +1,7 @@
 # AI Chat DLP Proxy Lab
 
 This lab is the smallest network-proxy spike for AI chat monitoring in
-PromptWall. It is monitor-only: it observes cleartext request bodies, scans them
+RedactWall. It is monitor-only: it observes cleartext request bodies, scans them
 locally, reports sanitized evidence to the existing control plane, and does not
 block, redact, approve, deny, or wait on upstream traffic.
 
@@ -48,7 +48,7 @@ block, redact, approve, deny, or wait on upstream traffic.
 
 ## Run A Sample Observation
 
-Start PromptWall in another terminal with a lab ingest key:
+Start RedactWall in another terminal with a lab ingest key:
 
 ```powershell
 $env:INGEST_API_KEY = "dev-ingest-key"
@@ -59,11 +59,11 @@ Then run the sample observer:
 
 ```powershell
 $env:INGEST_API_KEY = "dev-ingest-key"
-npm run proxy:lab -- --sample --sentinel http://127.0.0.1:4000
+npm run proxy:lab -- --sample --redactwall http://127.0.0.1:4000
 ```
 
 The console output is sanitized. It shows the destination, masked finding types,
-and the control-plane `proxy_observed` id if PromptWall is reachable. If the
+and the control-plane `proxy_observed` id if RedactWall is reachable. If the
 control plane is down, the result still reports `forward: true` because this lab
 is monitor-only.
 
@@ -71,7 +71,7 @@ is monitor-only.
 
 ```powershell
 $env:INGEST_API_KEY = "dev-ingest-key"
-npm run proxy:lab -- --port 4181 --sentinel http://127.0.0.1:4000
+npm run proxy:lab -- --port 4181 --redactwall http://127.0.0.1:4000
 ```
 
 For a local upstream fixture, send an absolute-form HTTP request through

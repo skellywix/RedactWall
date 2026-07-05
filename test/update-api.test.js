@@ -7,19 +7,19 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
-const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'promptwall-update-api-'));
-process.env.SENTINEL_DB_PATH = path.join(tempRoot, 'sentinel.db');
-process.env.PROMPTWALL_UPDATE_CONFIG_PATH = path.join(tempRoot, 'update-settings.json');
-process.env.PROMPTWALL_UPDATE_STATE_PATH = path.join(tempRoot, 'update-state.json');
-process.env.PROMPTWALL_UPDATE_DATA_ROOT = tempRoot;
+const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-update-api-'));
+process.env.REDACTWALL_DB_PATH = path.join(tempRoot, 'redactwall.db');
+process.env.REDACTWALL_UPDATE_CONFIG_PATH = path.join(tempRoot, 'update-settings.json');
+process.env.REDACTWALL_UPDATE_STATE_PATH = path.join(tempRoot, 'update-state.json');
+process.env.REDACTWALL_UPDATE_DATA_ROOT = tempRoot;
 process.env.ADMIN_PASSWORD = 'unit-pass';
-process.env.SENTINEL_DATA_KEY = 'unit-update-api-data-key-stable-value-32';
+process.env.REDACTWALL_DATA_KEY = 'unit-update-api-data-key-stable-value-32';
 
 const currentBranch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
   cwd: path.join(__dirname, '..'),
   encoding: 'utf8',
 }).trim() || 'main';
-fs.writeFileSync(process.env.PROMPTWALL_UPDATE_CONFIG_PATH, JSON.stringify({
+fs.writeFileSync(process.env.REDACTWALL_UPDATE_CONFIG_PATH, JSON.stringify({
   remoteName: 'origin',
   branch: currentBranch,
   installMode: 'npm-ci-omit-dev',
@@ -43,7 +43,7 @@ async function login(base) {
   });
   assert.strictEqual(loginRes.status, 200);
   const cookie = String(loginRes.headers.get('set-cookie') || '').split(';')[0];
-  assert.match(cookie, /^promptwall_session=/);
+  assert.match(cookie, /^redactwall_session=/);
   const csrfRes = await fetch(`${base}/api/csrf`, { headers: { cookie } });
   assert.strictEqual(csrfRes.status, 200);
   const csrf = await csrfRes.json();
@@ -85,7 +85,7 @@ test('admin update config endpoint saves settings and records audit metadata', a
   const saved = await saveRes.json();
   assert.strictEqual(saved.config.installMode, 'skip');
   assert.strictEqual(saved.safety.configuredBranch, true);
-  assert.strictEqual(JSON.parse(fs.readFileSync(process.env.PROMPTWALL_UPDATE_CONFIG_PATH, 'utf8')).installMode, 'skip');
+  assert.strictEqual(JSON.parse(fs.readFileSync(process.env.REDACTWALL_UPDATE_CONFIG_PATH, 'utf8')).installMode, 'skip');
 
   const auditRes = await fetch(`${base}/api/audit?limit=20`, { headers: { cookie } });
   assert.strictEqual(auditRes.status, 200);

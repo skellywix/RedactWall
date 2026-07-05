@@ -1,6 +1,6 @@
 ---
 name: ci-failure-fix-loop
-description: Turns a red CI run into a merged fix. Reproduces the failure locally, fixes one root cause on a branch in an isolated worktree, verifies against the full PromptWall gate (tests, engine sync, semantic determinism, audit chain), and opens a PR. Invoke with /ci-failure-fix-loop after daily-triage-loop flags a failure.
+description: Turns a red CI run into a merged fix. Reproduces the failure locally, fixes one root cause on a branch in an isolated worktree, verifies against the full RedactWall gate (tests, engine sync, semantic determinism, audit chain), and opens a PR. Invoke with /ci-failure-fix-loop after daily-triage-loop flags a failure.
 ---
 
 # CI Failure → Fix Loop
@@ -16,7 +16,7 @@ Consumes a failure from `STATUS.md` and drives it to a reviewable PR. One root c
    - `npm test`
    - `npm run sync-check`
    - `npm run train-semantic && npm run sync-check && git diff --exit-code -- detection-engine/detect.js sensors/browser-extension/lib/detect.js`
-   - `docker build -t promptwall:loop .` (CI builds the image too)
+   - `docker build -t redactwall:loop .` (CI builds the image too)
 6. **Open the PR:** `gh pr create --fill`. Link the failing run. Update `STATUS.md`.
 
 ## Stop condition (contract)

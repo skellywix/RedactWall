@@ -27,17 +27,19 @@ function captureConsole() {
 
 function withCleanHandoffEnv(t) {
   const keys = [
-    'SENTINEL_ENV_PATH',
+    'REDACTWALL_ENV_PATH',
     'PROMPTWALL_ENV_PATH',
+    'SENTINEL_ENV_PATH',
     'ENDPOINT_AGENT_HANDOFF_SECRET',
     'ENDPOINT_AGENT_HANDOFF_DIR',
     'ENDPOINT_AGENT_DESKTOP_DESTINATION',
-    'PROMPTWALL_DESKTOP_DESTINATION',
-    'SENTINEL_URL',
+    'REDACTWALL_DESKTOP_DESTINATION',
+    'REDACTWALL_URL',
     'PROMPTWALL_URL',
+    'SENTINEL_URL',
     'INGEST_API_KEY',
-    'PROMPTWALL_INGEST_API_KEY',
-    'SENTINEL_REQUEST_TIMEOUT_MS',
+    'REDACTWALL_INGEST_API_KEY',
+    'REDACTWALL_REQUEST_TIMEOUT_MS',
   ];
   const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
   for (const key of keys) delete process.env[key];
@@ -90,7 +92,7 @@ test('collector resolves desktop destination from control-plane policy', async (
   fs.writeFileSync(envPath, [
     `ENDPOINT_AGENT_HANDOFF_SECRET=${SECRET}`,
     `ENDPOINT_AGENT_HANDOFF_DIR=${path.join(dir, 'handoff')}`,
-    'PROMPTWALL_URL=http://promptwall.unit.test',
+    'REDACTWALL_URL=http://redactwall.unit.test',
     'INGEST_API_KEY=policy-key',
   ].join('\n') + '\n');
 
@@ -104,7 +106,7 @@ test('collector resolves desktop destination from control-plane policy', async (
   });
 
   assert.strictEqual(destination, 'Copilot Desktop');
-  assert.strictEqual(request.url, 'http://promptwall.unit.test/api/v1/policy');
+  assert.strictEqual(request.url, 'http://redactwall.unit.test/api/v1/policy');
   assert.strictEqual(request.headers['x-api-key'], 'policy-key');
 });
 
@@ -115,7 +117,7 @@ test('explicit collector destination overrides policy and local fallback', async
   fs.writeFileSync(envPath, [
     `ENDPOINT_AGENT_HANDOFF_SECRET=${SECRET}`,
     `ENDPOINT_AGENT_HANDOFF_DIR=${path.join(dir, 'handoff')}`,
-    'SENTINEL_URL=http://sentinel.unit.test',
+    'REDACTWALL_URL=http://redactwall.unit.test',
     'INGEST_API_KEY=policy-key',
     'ENDPOINT_AGENT_DESKTOP_DESTINATION=Local Fallback',
   ].join('\n') + '\n');
@@ -134,10 +136,10 @@ test('explicit collector destination overrides policy and local fallback', async
 test('collector destination falls back through env and handles policy fetch misses', async (t) => {
   withCleanHandoffEnv(t);
   process.env.ENDPOINT_AGENT_DESKTOP_DESTINATION = 'Env Desktop';
-  process.env.SENTINEL_URL = 'http://promptwall.unit.test/';
+  process.env.REDACTWALL_URL = 'http://redactwall.unit.test/';
   process.env.INGEST_API_KEY = 'policy-key';
 
-  assert.strictEqual(collector.configuredServer(), 'http://promptwall.unit.test/');
+  assert.strictEqual(collector.configuredServer(), 'http://redactwall.unit.test/');
   assert.strictEqual(collector.configuredKey(), 'policy-key');
   assert.strictEqual(await collector.fetchPolicyDestination({
     fetchImpl: async () => ({ ok: false, json: async () => ({ desktopCollectorDestination: 'Ignored' }) }),
@@ -351,7 +353,7 @@ test('collector public errors and human output are bounded', () => {
   }, io);
 
   assert.deepStrictEqual(io.lines.map(([, message]) => message), [
-    'PromptWall protected upload failed: 2 file(s), 1 failed',
+    'RedactWall protected upload failed: 2 file(s), 1 failed',
     '  - failed: file is not available',
     '  - written: evt_1 -> Desktop AI (consumed)',
   ]);
@@ -380,7 +382,7 @@ test('collector main prints help, JSON, human output, quiet output, and sanitize
     console: humanIo,
     collectProtectedUploads: async () => ({ ...result, status: 'queued' }),
   }), 1);
-  assert.strictEqual(humanIo.lines[0][1], 'PromptWall protected upload queued: 1 file(s)');
+  assert.strictEqual(humanIo.lines[0][1], 'RedactWall protected upload queued: 1 file(s)');
 
   const quietIo = captureConsole();
   assert.strictEqual(await collector.main(['--quiet'], {

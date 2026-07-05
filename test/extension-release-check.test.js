@@ -70,7 +70,7 @@ test('release checker writes a prompt-free readiness report', (t) => {
   assert.ok(fs.existsSync(result.zipPath));
   assert.ok(fs.existsSync(result.manifestPath));
   assert.ok(fs.existsSync(result.reportPath));
-  assert.strictEqual(result.releaseReport.kind, 'promptwall-extension-release-readiness');
+  assert.strictEqual(result.releaseReport.kind, 'redactwall-extension-release-readiness');
   assert.strictEqual(result.releaseReport.status, 'ready');
   assert.deepStrictEqual(result.releaseReport.packages.map((item) => item.browserTarget), ['chrome', 'edge', 'firefox']);
   assert.strictEqual(result.releaseReport.browserStores.chrome.updateUrl, CHROME_WEB_STORE_UPDATE_URL);
@@ -112,7 +112,7 @@ test('release checker writes final Chromium force-install policies when ids are 
   assert.deepStrictEqual(policy, extensionSettingsPolicy(extensionId));
   assert.strictEqual(policy.ExtensionSettings[extensionId].installation_mode, 'force_installed');
   assert.strictEqual(policy.ExtensionSettings[extensionId].update_url, CHROME_WEB_STORE_UPDATE_URL);
-  assert.doesNotMatch(JSON.stringify(policy), /REPLACE_WITH_LONG_RANDOM_INGEST_KEY|dev-ingest-key|promptwall\.example\.org/i);
+  assert.doesNotMatch(JSON.stringify(policy), /REPLACE_WITH_LONG_RANDOM_INGEST_KEY|dev-ingest-key|redactwall\.example\.org/i);
 
   const edgePolicy = JSON.parse(fs.readFileSync(result.edgeExtensionSettingsPolicyPath, 'utf8'));
   assert.deepStrictEqual(edgePolicy, edgeExtensionSettingsPolicy(edgeExtensionId));
@@ -121,7 +121,7 @@ test('release checker writes final Chromium force-install policies when ids are 
 
 test('release checker writes Firefox force-install policy when HTTPS install URL is supplied', (t) => {
   const outDir = tempDir(t);
-  const installUrl = 'https://downloads.customer.example/promptwall-firefox.xpi';
+  const installUrl = 'https://downloads.customer.example/redactwall-firefox.xpi';
   const result = checkExtensionRelease({
     outDir,
     firefoxInstallUrl: installUrl,
@@ -149,7 +149,7 @@ test('release checker rejects mismatched Firefox policy metadata before packagin
     /Firefox extension id must match/,
   );
   assert.throws(
-    () => checkExtensionRelease({ outDir, firefoxInstallUrl: 'http://downloads.customer.example/promptwall.xpi' }),
+    () => checkExtensionRelease({ outDir, firefoxInstallUrl: 'http://downloads.customer.example/redactwall.xpi' }),
     /must be HTTPS/,
   );
 });
@@ -160,7 +160,7 @@ test('release checker returns a blocked report when release examples drift', (t)
   fs.writeFileSync(
     path.join(root, 'docs', 'examples', 'browser-managed-storage.policy.json'),
     JSON.stringify({
-      serverUrl: 'https://promptwall.example.test',
+      serverUrl: 'https://redactwall.example.test',
       ingestKey: 'not-the-placeholder',
       orgId: 'credit-union-1',
     }, null, 2) + '\n',
@@ -188,13 +188,13 @@ test('release checker cli args parse output, id, and json mode', () => {
     '--edge-extension-id',
     'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
     '--firefox-install-url',
-    'https://downloads.customer.example/promptwall.xpi',
+    'https://downloads.customer.example/redactwall.xpi',
     '--json',
   ]);
   assert.strictEqual(path.basename(parsed.outDir), 'tmp-release');
   assert.strictEqual(parsed.extensionId, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
   assert.strictEqual(parsed.edgeExtensionId, 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
-  assert.strictEqual(parsed.firefoxInstallUrl, 'https://downloads.customer.example/promptwall.xpi');
+  assert.strictEqual(parsed.firefoxInstallUrl, 'https://downloads.customer.example/redactwall.xpi');
   assert.strictEqual(parsed.json, true);
 
   const npmStyle = parseArgs(['tmp-release', 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb']);

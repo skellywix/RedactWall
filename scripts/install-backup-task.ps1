@@ -1,6 +1,6 @@
 param(
-  [string]$TaskName = 'PromptWall Evidence Store Backup',
-  [string]$TaskPath = '\PromptWall\',
+  [string]$TaskName = 'RedactWall Evidence Store Backup',
+  [string]$TaskPath = '\RedactWall\',
   [ValidateSet('Daily', 'Weekly')]
   [string]$Cadence = 'Daily',
   [ValidateSet('Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday')]
@@ -41,7 +41,7 @@ New-Item -ItemType Directory -Path $BackupDir -Force | Out-Null
 $resolvedBackupDir = (Resolve-Path -LiteralPath $BackupDir).Path
 
 if ([string]::IsNullOrWhiteSpace($LogPath)) {
-  $LogPath = Join-Path $env:LOCALAPPDATA 'PromptWall\logs\backup.log'
+  $LogPath = Join-Path $env:LOCALAPPDATA 'RedactWall\logs\backup.log'
 }
 
 $logDir = Split-Path -Parent $LogPath
@@ -60,7 +60,7 @@ $backupCommand = (
   "Set-Location -LiteralPath '$repoRoot'; " +
   "npm run backup -- --out '$resolvedBackupDir' *>> '$LogPath'; " +
   "if (`$LASTEXITCODE -ne 0) { exit `$LASTEXITCODE }; " +
-  "Get-ChildItem -LiteralPath '$resolvedBackupDir' -File -Filter 'sentinel-*' | " +
+  "Get-ChildItem -LiteralPath '$resolvedBackupDir' -File -Filter 'redactwall-*' | " +
   "Where-Object { `$_.LastWriteTime -lt (Get-Date).AddDays(-$RetentionDays) } | Remove-Item -Force"
 )
 
@@ -100,7 +100,7 @@ Register-ScheduledTask `
   -Trigger $trigger `
   -Settings $settings `
   -Principal $principal `
-  -Description 'Back up the PromptWall SQLite evidence store and prune backups older than the retention window.' `
+  -Description 'Back up the RedactWall SQLite evidence store and prune backups older than the retention window.' `
   -Force | Out-Null
 
 $task = Get-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath

@@ -43,7 +43,7 @@ function sanitizedAlert(query, opts = {}) {
   const workflow = routing.publicWorkflow(query);
   return {
     schemaVersion: 1,
-    eventType: 'promptwall.security_event',
+    eventType: 'redactwall.security_event',
     action: opts.action || null,
     adminEvent: !!opts.adminEvent,
     adminActor: opts.adminActor || null,
@@ -184,7 +184,7 @@ function sanitizedPostureAlert(report = {}, opts = {}) {
     : hardening.proofLedger && typeof hardening.proofLedger === 'object' ? hardening.proofLedger : {};
   return {
     schemaVersion: 1,
-    eventType: 'promptwall.posture_snapshot',
+    eventType: 'redactwall.posture_snapshot',
     action: opts.action || 'POSTURE_SNAPSHOT',
     automatic: opts.automatic === true,
     trigger: safeText(opts.trigger, null, 80),

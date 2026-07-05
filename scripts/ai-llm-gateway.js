@@ -14,25 +14,25 @@ const path = require('node:path');
 const { URL } = require('node:url');
 const { extractPrompt, fetchWithTimeout, awaitRelease } = require('./squid-icap-bridge');
 
-const SENTINEL = process.env.SENTINEL_URL || 'http://localhost:4000';
+const REDACTWALL = process.env.REDACTWALL_URL || 'http://localhost:4000';
 const KEY = process.env.INGEST_API_KEY || 'dev-ingest-key';
 const DEFAULT_PORT = 4182;
-const DEFAULT_HOST = process.env.PROMPTWALL_GATEWAY_HOST || '127.0.0.1';
-const DEFAULT_UPSTREAM = process.env.PROMPTWALL_GATEWAY_UPSTREAM || 'https://api.openai.com';
+const DEFAULT_HOST = process.env.REDACTWALL_GATEWAY_HOST || '127.0.0.1';
+const DEFAULT_UPSTREAM = process.env.REDACTWALL_GATEWAY_UPSTREAM || 'https://api.openai.com';
 const DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
 const DEFAULT_MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 const DEFAULT_RATE_LIMIT = 60;
 const DEFAULT_RATE_WINDOW_MS = 60000;
-const DEFAULT_RATE_LIMIT_STORE = process.env.PROMPTWALL_GATEWAY_RATE_LIMIT_STORE || 'memory';
-const DEFAULT_RATE_LIMIT_DB = process.env.PROMPTWALL_GATEWAY_RATE_LIMIT_DB || path.join(process.cwd(), 'data', 'gateway-rate-limits.db');
-const DEFAULT_RATE_LIMIT_URL = process.env.PROMPTWALL_GATEWAY_RATE_LIMIT_URL || '';
-const DEFAULT_RATE_LIMIT_TOKEN = process.env.PROMPTWALL_GATEWAY_RATE_LIMIT_TOKEN || '';
+const DEFAULT_RATE_LIMIT_STORE = process.env.REDACTWALL_GATEWAY_RATE_LIMIT_STORE || 'memory';
+const DEFAULT_RATE_LIMIT_DB = process.env.REDACTWALL_GATEWAY_RATE_LIMIT_DB || path.join(process.cwd(), 'data', 'gateway-rate-limits.db');
+const DEFAULT_RATE_LIMIT_URL = process.env.REDACTWALL_GATEWAY_RATE_LIMIT_URL || '';
+const DEFAULT_RATE_LIMIT_TOKEN = process.env.REDACTWALL_GATEWAY_RATE_LIMIT_TOKEN || '';
 const DEFAULT_RATE_LIMIT_TIMEOUT_MS = 2000;
 const DEFAULT_APPROVAL_WAIT_MS = 0;
-const DEFAULT_ALLOWED_MODELS = process.env.PROMPTWALL_GATEWAY_ALLOWED_MODELS || '';
-const DEFAULT_UPSTREAM_AUTH_HEADER = process.env.PROMPTWALL_GATEWAY_UPSTREAM_AUTH_HEADER || 'authorization';
-const DEFAULT_UPSTREAM_AUTH_SCHEME = process.env.PROMPTWALL_GATEWAY_UPSTREAM_AUTH_SCHEME || 'Bearer';
-const DEFAULT_AWS_SIGV4_SERVICE = process.env.PROMPTWALL_GATEWAY_AWS_SERVICE || 'bedrock';
+const DEFAULT_ALLOWED_MODELS = process.env.REDACTWALL_GATEWAY_ALLOWED_MODELS || '';
+const DEFAULT_UPSTREAM_AUTH_HEADER = process.env.REDACTWALL_GATEWAY_UPSTREAM_AUTH_HEADER || 'authorization';
+const DEFAULT_UPSTREAM_AUTH_SCHEME = process.env.REDACTWALL_GATEWAY_UPSTREAM_AUTH_SCHEME || 'Bearer';
+const DEFAULT_AWS_SIGV4_SERVICE = process.env.REDACTWALL_GATEWAY_AWS_SERVICE || 'bedrock';
 const SENSOR = { name: 'ai_llm_gateway', version: '0.1.0', platform: 'node_reverse_gateway' };
 const PROMPT_METHODS = new Set(['POST', 'PUT', 'PATCH']);
 const HOP_BY_HOP_HEADERS = new Set([
@@ -50,9 +50,9 @@ const PRIVATE_HEADERS = new Set([
   'authorization',
   'cookie',
   'x-api-key',
-  'x-promptwall-gateway-token',
-  'x-promptwall-user',
-  'x-promptwall-org',
+  'x-redactwall-gateway-token',
+  'x-redactwall-user',
+  'x-redactwall-org',
 ]);
 
 function boundedInt(value, fallback, min, max) {
@@ -62,7 +62,7 @@ function boundedInt(value, fallback, min, max) {
 }
 
 function configuredClientTokens(opts = {}) {
-  const raw = opts.clientTokens || opts.clientToken || process.env.PROMPTWALL_GATEWAY_TOKEN || '';
+  const raw = opts.clientTokens || opts.clientToken || process.env.REDACTWALL_GATEWAY_TOKEN || '';
   const values = Array.isArray(raw) ? raw : String(raw).split(',');
   return values.map((item) => String(item || '').trim()).filter(Boolean);
 }
@@ -118,7 +118,7 @@ function safeHeaderName(value, fallback = '') {
 }
 
 function clientTokenFromRequest(req) {
-  return safeHeaderValue(req.headers['x-promptwall-gateway-token'] || bearerToken(req.headers.authorization || ''), '', 4096);
+  return safeHeaderValue(req.headers['x-redactwall-gateway-token'] || bearerToken(req.headers.authorization || ''), '', 4096);
 }
 
 function authenticateGatewayClient(req, opts = {}) {
@@ -238,7 +238,7 @@ function unavailableRateLimit(limit, store, error) {
 function createHttpRateLimiter({ limit, windowMs, url, token, fetchImpl, timeoutMs }) {
   const target = normalizeRateLimitServiceUrl(url);
   const authToken = String(token || '').trim();
-  const timeout = boundedInt(timeoutMs ?? process.env.PROMPTWALL_GATEWAY_RATE_LIMIT_TIMEOUT_MS, DEFAULT_RATE_LIMIT_TIMEOUT_MS, 100, 30000);
+  const timeout = boundedInt(timeoutMs ?? process.env.REDACTWALL_GATEWAY_RATE_LIMIT_TIMEOUT_MS, DEFAULT_RATE_LIMIT_TIMEOUT_MS, 100, 30000);
   return {
     store: 'http',
     endpoint: target.origin,
@@ -280,8 +280,8 @@ function createHttpRateLimiter({ limit, windowMs, url, token, fetchImpl, timeout
 }
 
 function createRateLimiter(opts = {}) {
-  const limit = boundedInt(opts.rateLimit ?? process.env.PROMPTWALL_GATEWAY_RATE_LIMIT, DEFAULT_RATE_LIMIT, 1, 100000);
-  const windowMs = boundedInt(opts.rateWindowMs ?? process.env.PROMPTWALL_GATEWAY_RATE_WINDOW_MS, DEFAULT_RATE_WINDOW_MS, 1000, 3600000);
+  const limit = boundedInt(opts.rateLimit ?? process.env.REDACTWALL_GATEWAY_RATE_LIMIT, DEFAULT_RATE_LIMIT, 1, 100000);
+  const windowMs = boundedInt(opts.rateWindowMs ?? process.env.REDACTWALL_GATEWAY_RATE_WINDOW_MS, DEFAULT_RATE_WINDOW_MS, 1000, 3600000);
   const store = rateLimitStoreMode(opts);
   if (store === 'sqlite') return createSqliteRateLimiter({ limit, windowMs, dbPath: rateLimitDbPath(opts) });
   if (store === 'http') {
@@ -582,7 +582,7 @@ async function postGate({ prompt, user, orgId, destination, sourceIp, clientOutc
   const fetchImpl = opts.fetchImpl || globalThis.fetch;
   if (!fetchImpl) return { ok: false, status: 0, body: { decision: 'block', status: 'control_plane_unavailable', reasons: ['fetch unavailable'] } };
   try {
-    const res = await fetchWithTimeout(fetchImpl, `${opts.sentinel || SENTINEL}/api/v1/gate`, {
+    const res = await fetchWithTimeout(fetchImpl, `${opts.redactwall || REDACTWALL}/api/v1/gate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': opts.key || KEY },
       body: JSON.stringify({
@@ -610,7 +610,7 @@ async function postGate({ prompt, user, orgId, destination, sourceIp, clientOutc
       body: {
         decision: 'block',
         status: 'control_plane_unavailable',
-        reasons: [e && e.code === 'SENTINEL_TIMEOUT' ? 'gate_timeout' : 'gate_unreachable'],
+        reasons: [e && e.code === 'REDACTWALL_TIMEOUT' ? 'gate_timeout' : 'gate_unreachable'],
       },
     };
   }
@@ -631,7 +631,7 @@ function promptForwardPlan(verdict = {}, opts = {}) {
 }
 
 function configuredUpstreamExtraHeaders(opts = {}) {
-  const raw = opts.upstreamHeaders || opts.upstreamHeader || process.env.PROMPTWALL_GATEWAY_UPSTREAM_HEADERS || '';
+  const raw = opts.upstreamHeaders || opts.upstreamHeader || process.env.REDACTWALL_GATEWAY_UPSTREAM_HEADERS || '';
   const values = Array.isArray(raw) ? raw : String(raw).split(',');
   const out = {};
   for (const item of values) {
@@ -648,7 +648,7 @@ function configuredUpstreamExtraHeaders(opts = {}) {
 }
 
 function upstreamAuthHeader(opts = {}) {
-  const apiKey = opts.upstreamApiKey || process.env.PROMPTWALL_GATEWAY_UPSTREAM_API_KEY;
+  const apiKey = opts.upstreamApiKey || process.env.REDACTWALL_GATEWAY_UPSTREAM_API_KEY;
   if (upstreamAuthMode(opts) === 'aws-sigv4') return {};
   if (!apiKey) return {};
   const name = safeHeaderName(opts.upstreamAuthHeader || DEFAULT_UPSTREAM_AUTH_HEADER, 'authorization');
@@ -667,10 +667,10 @@ function upstreamAuthMode(opts = {}) {
 
 function awsSigningConfig(opts = {}) {
   return {
-    accessKeyId: String(opts.awsAccessKeyId || process.env.PROMPTWALL_GATEWAY_AWS_ACCESS_KEY_ID || process.env.AWS_ACCESS_KEY_ID || '').trim(),
-    secretAccessKey: String(opts.awsSecretAccessKey || process.env.PROMPTWALL_GATEWAY_AWS_SECRET_ACCESS_KEY || process.env.AWS_SECRET_ACCESS_KEY || '').trim(),
-    sessionToken: String(opts.awsSessionToken || process.env.PROMPTWALL_GATEWAY_AWS_SESSION_TOKEN || process.env.AWS_SESSION_TOKEN || '').trim(),
-    region: safeHeaderValue(opts.awsRegion || process.env.PROMPTWALL_GATEWAY_AWS_REGION || process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || '', '', 80),
+    accessKeyId: String(opts.awsAccessKeyId || process.env.REDACTWALL_GATEWAY_AWS_ACCESS_KEY_ID || process.env.AWS_ACCESS_KEY_ID || '').trim(),
+    secretAccessKey: String(opts.awsSecretAccessKey || process.env.REDACTWALL_GATEWAY_AWS_SECRET_ACCESS_KEY || process.env.AWS_SECRET_ACCESS_KEY || '').trim(),
+    sessionToken: String(opts.awsSessionToken || process.env.REDACTWALL_GATEWAY_AWS_SESSION_TOKEN || process.env.AWS_SESSION_TOKEN || '').trim(),
+    region: safeHeaderValue(opts.awsRegion || process.env.REDACTWALL_GATEWAY_AWS_REGION || process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || '', '', 80),
     service: safeHeaderValue(opts.awsService || DEFAULT_AWS_SIGV4_SERVICE, 'bedrock', 80),
   };
 }
@@ -891,14 +891,14 @@ function rewriteResponseJson(bodyJson, replacement) {
     }
   }
   if (replaced > 0) {
-    clone.promptwall = { ...(clone.promptwall || {}), responseRedacted: true };
+    clone.redactwall = { ...(clone.redactwall || {}), responseRedacted: true };
     return clone;
   }
   return {
     id: clone.id || undefined,
-    object: clone.object || 'promptwall.redacted_response',
+    object: clone.object || 'redactwall.redacted_response',
     choices: [{ index: 0, message: { role: 'assistant', content: replacement }, finish_reason: 'content_filter' }],
-    promptwall: { responseRedacted: true, fallbackShape: true },
+    redactwall: { responseRedacted: true, fallbackShape: true },
   };
 }
 
@@ -920,7 +920,7 @@ async function scanResponseText({ text, user, orgId, destination }, opts = {}) {
   const fetchImpl = opts.fetchImpl || globalThis.fetch;
   if (!fetchImpl) return { ok: false, body: { decision: 'block', status: 'response_scan_unavailable', blocked: true } };
   try {
-    const res = await fetchWithTimeout(fetchImpl, `${opts.sentinel || SENTINEL}/api/v1/scan-response`, {
+    const res = await fetchWithTimeout(fetchImpl, `${opts.redactwall || REDACTWALL}/api/v1/scan-response`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': opts.key || KEY },
       body: JSON.stringify({
@@ -964,8 +964,8 @@ function gatewayHealth(opts = {}) {
   const authConfigured = configuredClientTokens(opts).length > 0 || opts.allowInsecureDev === true;
   const rateLimitStore = rateLimitStoreMode(opts);
   const rateLimit = {
-    limit: boundedInt(opts.rateLimit ?? process.env.PROMPTWALL_GATEWAY_RATE_LIMIT, DEFAULT_RATE_LIMIT, 1, 100000),
-    windowMs: boundedInt(opts.rateWindowMs ?? process.env.PROMPTWALL_GATEWAY_RATE_WINDOW_MS, DEFAULT_RATE_WINDOW_MS, 1000, 3600000),
+    limit: boundedInt(opts.rateLimit ?? process.env.REDACTWALL_GATEWAY_RATE_LIMIT, DEFAULT_RATE_LIMIT, 1, 100000),
+    windowMs: boundedInt(opts.rateWindowMs ?? process.env.REDACTWALL_GATEWAY_RATE_WINDOW_MS, DEFAULT_RATE_WINDOW_MS, 1000, 3600000),
     store: rateLimitStore,
     shared: rateLimitStore !== 'memory',
   };
@@ -994,11 +994,11 @@ function gatewayHealth(opts = {}) {
   const authMode = upstreamAuthMode(opts);
   const upstreamAuth = authMode === 'aws-sigv4'
     ? { mode: 'aws-sigv4', configured: awsSigningConfigured(opts), service: awsSigningConfig(opts).service, region: awsSigningConfig(opts).region || 'unset' }
-    : { mode: 'header', configured: !!(opts.upstreamApiKey || process.env.PROMPTWALL_GATEWAY_UPSTREAM_API_KEY), header: safeHeaderName(opts.upstreamAuthHeader || DEFAULT_UPSTREAM_AUTH_HEADER, 'authorization') };
+    : { mode: 'header', configured: !!(opts.upstreamApiKey || process.env.REDACTWALL_GATEWAY_UPSTREAM_API_KEY), header: safeHeaderName(opts.upstreamAuthHeader || DEFAULT_UPSTREAM_AUTH_HEADER, 'authorization') };
   const upstreamAuthReady = authMode !== 'aws-sigv4' || upstreamAuth.configured === true;
   return {
     status: authConfigured && upstreamReady && rateLimitReady && upstreamAuthReady ? 'ready' : 'attention',
-    service: 'promptwall-ai-llm-gateway',
+    service: 'redactwall-ai-llm-gateway',
     authConfigured,
     upstream,
     upstreamReady,
@@ -1028,11 +1028,11 @@ function isBufferedStreamingRequest(target, bodyJson) {
 }
 
 async function handleGatewayRequest(req, res, opts = {}, state = {}) {
-  const requestId = safeHeaderValue(req.headers['x-promptwall-request-id'] || req.headers['x-request-id'] || (crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex')), 'gateway-request', 80);
-  res.setHeader('x-promptwall-request-id', requestId);
-  res.setHeader('x-promptwall-gateway', 'ai-llm-gateway');
+  const requestId = safeHeaderValue(req.headers['x-redactwall-request-id'] || req.headers['x-request-id'] || (crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex')), 'gateway-request', 80);
+  res.setHeader('x-redactwall-request-id', requestId);
+  res.setHeader('x-redactwall-gateway', 'ai-llm-gateway');
   if (req.method === 'GET' && req.url === '/healthz') {
-    return jsonResponse(res, 200, { status: 'ok', service: 'promptwall-ai-llm-gateway', requestId });
+    return jsonResponse(res, 200, { status: 'ok', service: 'redactwall-ai-llm-gateway', requestId });
   }
   if (req.method === 'GET' && req.url === '/readyz') {
     const health = gatewayHealth(opts);
@@ -1071,11 +1071,11 @@ async function handleGatewayRequest(req, res, opts = {}, state = {}) {
   const parsed = parseJsonBody(collected.body.toString('utf8'));
   if (!parsed.ok) return jsonResponse(res, 400, { error: parsed.error });
   const requestJson = parsed.value;
-  if (isBufferedStreamingRequest(target, requestJson)) res.setHeader('x-promptwall-stream-buffered', 'true');
+  if (isBufferedStreamingRequest(target, requestJson)) res.setHeader('x-redactwall-stream-buffered', 'true');
 
   const destination = safeHeaderValue(target.hostname, 'unknown', 253);
-  const user = safeHeaderValue(req.headers['x-promptwall-user'], auth.principal, 320);
-  const orgId = req.headers['x-promptwall-org'] ? safeHeaderValue(req.headers['x-promptwall-org'], '', 160) : null;
+  const user = safeHeaderValue(req.headers['x-redactwall-user'], auth.principal, 320);
+  const orgId = req.headers['x-redactwall-org'] ? safeHeaderValue(req.headers['x-redactwall-org'], '', 160) : null;
   const requestInspection = inspectRequestContent(requestJson);
   if (!requestInspection.inspectable && opts.allowMultimodal !== true) {
     await postGate({
@@ -1107,7 +1107,7 @@ async function handleGatewayRequest(req, res, opts = {}, state = {}) {
       note: modelDecision.reason,
     }, opts);
     return jsonResponse(res, 403, {
-      error: 'LLM model blocked by PromptWall gateway policy',
+      error: 'LLM model blocked by RedactWall gateway policy',
       decision: 'block',
       status: 'model_blocked',
       model: modelDecision.model,
@@ -1126,14 +1126,14 @@ async function handleGatewayRequest(req, res, opts = {}, state = {}) {
     sourceIp: req.socket && req.socket.remoteAddress,
   }, opts);
   const verdict = gateResult.body;
-  const approvalWaitMs = boundedInt(opts.approvalWaitMs ?? process.env.PROMPTWALL_GATEWAY_APPROVAL_WAIT_MS, DEFAULT_APPROVAL_WAIT_MS, 0, 10 * 60 * 1000);
+  const approvalWaitMs = boundedInt(opts.approvalWaitMs ?? process.env.REDACTWALL_GATEWAY_APPROVAL_WAIT_MS, DEFAULT_APPROVAL_WAIT_MS, 0, 10 * 60 * 1000);
   const plan = promptForwardPlan(verdict, { approvalWaitMs });
   if (plan.forward === 'await_release') {
     const release = await awaitRelease(verdict.id, {
       releaseToken: verdict.releaseToken,
       timeoutMs: approvalWaitMs,
       intervalMs: boundedInt(opts.approvalPollMs, 2000, 100, 60000),
-      sentinel: opts.sentinel || SENTINEL,
+      redactwall: opts.redactwall || REDACTWALL,
       key: opts.key || KEY,
       fetchImpl: opts.fetchImpl || globalThis.fetch,
       requestTimeoutMs: opts.controlPlaneTimeoutMs,
@@ -1141,7 +1141,7 @@ async function handleGatewayRequest(req, res, opts = {}, state = {}) {
     });
     if (!release.released) {
       return jsonResponse(res, 403, {
-        error: 'prompt withheld by PromptWall',
+        error: 'prompt withheld by RedactWall',
         id: verdict.id,
         decision: 'block',
         status: verdict.status,
@@ -1152,7 +1152,7 @@ async function handleGatewayRequest(req, res, opts = {}, state = {}) {
     }
   } else if (!plan.forward) {
     return jsonResponse(res, plan.statusCode || 403, {
-      error: gateResult.ok ? 'prompt blocked by PromptWall' : 'PromptWall control plane unavailable',
+      error: gateResult.ok ? 'prompt blocked by RedactWall' : 'RedactWall control plane unavailable',
       id: verdict.id || undefined,
       decision: 'block',
       status: verdict.status || 'blocked',
@@ -1167,7 +1167,7 @@ async function handleGatewayRequest(req, res, opts = {}, state = {}) {
   let outboundJson = requestJson;
   if (plan.bodyMode === 'redacted') {
     const replaced = replacePromptPayload(requestJson, plan.prompt);
-    if (!replaced.replaced) return jsonResponse(res, 409, { error: 'unable to apply PromptWall redaction to request payload', requestId });
+    if (!replaced.replaced) return jsonResponse(res, 409, { error: 'unable to apply RedactWall redaction to request payload', requestId });
     outboundJson = replaced.body;
   }
 
@@ -1185,11 +1185,11 @@ async function handleGatewayRequest(req, res, opts = {}, state = {}) {
   const responseScan = await scanResponseText({ text: responseText, user, orgId, destination }, opts);
   const scanBody = responseScan.body;
   if (!responseScan.ok) {
-    return jsonResponse(res, 502, { error: 'PromptWall response scan unavailable', decision: 'block', status: scanBody.status, requestId });
+    return jsonResponse(res, 502, { error: 'RedactWall response scan unavailable', decision: 'block', status: scanBody.status, requestId });
   }
   if (scanBody.blocked || scanBody.decision === 'block') {
     return jsonResponse(res, 403, {
-      error: 'AI response blocked by PromptWall',
+      error: 'AI response blocked by RedactWall',
       decision: 'block',
       status: scanBody.status,
       findings: scanBody.findings,
@@ -1233,7 +1233,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     const item = argv[i];
     if (item === '--port') out.port = Number(argv[++i]);
     else if (item === '--host') out.host = argv[++i];
-    else if (item === '--sentinel') out.sentinel = argv[++i];
+    else if (item === '--redactwall' || item === '--sentinel') out.redactwall = argv[++i];
     else if (item === '--key') out.key = argv[++i];
     else if (item === '--upstream') out.upstream = argv[++i];
     else if (item === '--upstream-key') out.upstreamApiKey = argv[++i];
@@ -1264,13 +1264,13 @@ function parseArgs(argv = process.argv.slice(2)) {
 async function main(argv = process.argv.slice(2), io = process) {
   const args = parseArgs(argv);
   if (!configuredClientTokens(args).length && args.allowInsecureDev !== true) {
-    throw new Error('Set PROMPTWALL_GATEWAY_TOKEN or pass --token before starting the AI gateway.');
+    throw new Error('Set REDACTWALL_GATEWAY_TOKEN or pass --token before starting the AI gateway.');
   }
   const port = Number.isFinite(args.port) ? args.port : DEFAULT_PORT;
   const host = args.host || DEFAULT_HOST;
   const server = createGatewayServer(args).listen(port, host, () => {
     const address = server.address();
-    io.stdout.write(`PromptWall AI LLM gateway listening on http://${host}:${address && address.port ? address.port : port}\n`);
+    io.stdout.write(`RedactWall AI LLM gateway listening on http://${host}:${address && address.port ? address.port : port}\n`);
   });
   return server;
 }

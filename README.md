@@ -1,10 +1,10 @@
-# PromptWall
+# RedactWall
 
-PromptWall is a Node.js control plane and set of local sensors that scan prompts, files, clipboard content, and MCP tool results for sensitive data before they reach AI tools.
+RedactWall is a Node.js control plane and set of local sensors that scan prompts, files, clipboard content, and MCP tool results for sensitive data before they reach AI tools.
 
 ## What It Does
 
-PromptWall has three main parts:
+RedactWall has three main parts:
 
 - A server in `server/` that owns policy, the admin dashboard, approvals, evidence export, and the hash-chained audit log.
 - A shared detector in `detection-engine/` that finds structured sensitive data and semantic risk categories.
@@ -42,7 +42,7 @@ The dashboard and API run on `http://localhost:4000` by default. The generated a
 
 ## Admin Console
 
-The browser console is the operator-facing control plane. It uses a macOS-inspired design system with light and dark themes, a single sidebar navigation, and one focused screen per task: login, overview, approval queue, AI Security Command Center, activity, insights, coverage, lineage, app catalog, compliance, identity, configuration, deploy, integrations, audit, and updates. The overview opens on the AI Data Leak Exposure Map, an interactive graph that attributes sanitized flows to departments as they pass PromptWall controls on the way to AI destinations. The queue, command-center, and configuration views are optimized for guided operator flow, guided policy setup, anomaly-score triage, redacted evidence review, live posture objectives, AI threat guardrails, AI control graph mapping, Agentic MCP Control, control outcomes, sensor posture, and fast approval or denial decisions without exposing raw prompt content by default.
+The browser console is the operator-facing control plane. It uses a macOS-inspired design system with light and dark themes, a single sidebar navigation, and one focused screen per task: login, overview, approval queue, AI Security Command Center, activity, insights, coverage, lineage, app catalog, compliance, identity, configuration, deploy, integrations, audit, and updates. The overview opens on the AI Data Leak Exposure Map, an interactive graph that attributes sanitized flows to departments as they pass RedactWall controls on the way to AI destinations. The queue, command-center, and configuration views are optimized for guided operator flow, guided policy setup, anomaly-score triage, redacted evidence review, live posture objectives, AI threat guardrails, AI control graph mapping, Agentic MCP Control, control outcomes, sensor posture, and fast approval or denial decisions without exposing raw prompt content by default.
 
 Run the default test suite:
 
@@ -126,7 +126,7 @@ docker compose up -d --build
 ## Project Structure
 
 ```text
-promptwall/
+redactwall/
 |-- config/                 Runtime policy and detector configuration
 |-- data/                   Local SQLite data path for development
 |-- detection-engine/       Shared detector and AI-site adapter helpers
@@ -154,21 +154,21 @@ Important settings:
 | Variable | Purpose |
 | --- | --- |
 | `PORT` | Server port. Defaults to `4000`. |
-| `SENTINEL_DB_PATH` or `PROMPTWALL_DB_PATH` | SQLite database path. Keep production data on local disk. |
+| `REDACTWALL_DB_PATH` or `REDACTWALL_DB_PATH` | SQLite database path. Keep production data on local disk. |
 | `ADMIN_USER` / `ADMIN_PASSWORD` | Local admin login. |
 | `ADMIN_TOTP_SECRET` | Security Admin MFA secret. Required by production preflight. |
-| `SENTINEL_SECRET` or `PROMPTWALL_SECRET` | Session signing secret. |
-| `SENTINEL_DATA_KEY` or `PROMPTWALL_DATA_KEY` | Encryption key for retained approval prompt data. |
-| `INGEST_API_KEY` or `PROMPTWALL_INGEST_API_KEY` | API key used by sensors for `/api/v1/*` ingest routes. |
-| `SCIM_BEARER_TOKEN` or `PROMPTWALL_SCIM_BEARER_TOKEN` | Enables `/scim/v2/*` provisioning routes when set. |
-| `OIDC_*` or `PROMPTWALL_OIDC_*` | Optional console SSO settings. |
+| `REDACTWALL_SECRET` or `REDACTWALL_SECRET` | Session signing secret. |
+| `REDACTWALL_DATA_KEY` or `REDACTWALL_DATA_KEY` | Encryption key for retained approval prompt data. |
+| `INGEST_API_KEY` or `REDACTWALL_INGEST_API_KEY` | API key used by sensors for `/api/v1/*` ingest routes. |
+| `SCIM_BEARER_TOKEN` or `REDACTWALL_SCIM_BEARER_TOKEN` | Enables `/scim/v2/*` provisioning routes when set. |
+| `OIDC_*` or `REDACTWALL_OIDC_*` | Optional console SSO settings. |
 | `SIEM_WEBHOOK_URL` / `SIEM_WEBHOOK_TOKEN` | Optional HTTPS-only sanitized SOC/SIEM webhook for high-risk events and posture snapshots. |
 | `SIEM_POSTURE_FEED_ENABLED` / `SIEM_POSTURE_MIN_INTERVAL_MS` | Enables throttled automatic posture snapshots for SOC/SIEM subscriptions. |
-| `PROMPTWALL_GATEWAY_TOKEN` | Client token required by the enforced AI LLM gateway. |
-| `PROMPTWALL_GATEWAY_UPSTREAM` / `PROMPTWALL_GATEWAY_UPSTREAM_API_KEY` | Provider base URL and gateway-held provider key for OpenAI-compatible, Anthropic, Gemini, or private model upstreams. |
-| `PROMPTWALL_GATEWAY_UPSTREAM_AUTH_SCHEME` / `PROMPTWALL_GATEWAY_AWS_REGION` | Use `aws-sigv4` plus an AWS region for direct Amazon Bedrock Runtime gateway enforcement. |
-| `PROMPTWALL_RATE_LIMITER_TOKEN` / `PROMPTWALL_RATE_LIMITER_STORE` | Shared AI gateway limiter token and backend, `sqlite` for one limiter service or `redis`/`valkey` for active-active limiter replicas. |
-| `ENDPOINT_AGENT_OCR_COMMAND` or `PROMPTWALL_ENDPOINT_AGENT_OCR_COMMAND` | Optional local OCR command for endpoint image files. Without one, the agent falls back to a bundled offline WASM OCR engine (`ENDPOINT_AGENT_OCR_WASM`, default on). |
+| `REDACTWALL_GATEWAY_TOKEN` | Client token required by the enforced AI LLM gateway. |
+| `REDACTWALL_GATEWAY_UPSTREAM` / `REDACTWALL_GATEWAY_UPSTREAM_API_KEY` | Provider base URL and gateway-held provider key for OpenAI-compatible, Anthropic, Gemini, or private model upstreams. |
+| `REDACTWALL_GATEWAY_UPSTREAM_AUTH_SCHEME` / `REDACTWALL_GATEWAY_AWS_REGION` | Use `aws-sigv4` plus an AWS region for direct Amazon Bedrock Runtime gateway enforcement. |
+| `REDACTWALL_RATE_LIMITER_TOKEN` / `REDACTWALL_RATE_LIMITER_STORE` | Shared AI gateway limiter token and backend, `sqlite` for one limiter service or `redis`/`valkey` for active-active limiter replicas. |
+| `ENDPOINT_AGENT_OCR_COMMAND` or `REDACTWALL_ENDPOINT_AGENT_OCR_COMMAND` | Optional local OCR command for endpoint image files. Without one, the agent falls back to a bundled offline WASM OCR engine (`ENDPOINT_AGENT_OCR_WASM`, default on). |
 
 See `.env.example`, `docs/AI_LLM_GATEWAY.md`, and `docs/DEPLOYMENT.md` for the longer deployment reference.
 

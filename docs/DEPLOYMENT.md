@@ -1,6 +1,6 @@
-# PromptWall Deployment
+# RedactWall Deployment
 
-PromptWall has three supported deployment paths:
+RedactWall has three supported deployment paths:
 
 1. Native Node.js for demos, pilots, and single-host installs.
 2. Docker Compose for repeatable container installs.
@@ -35,7 +35,7 @@ npm start
 
 1. Installs dependencies from `package-lock.json`.
 2. Creates `.env` with stable admin, MFA, ingest, session, and data-encryption secrets.
-3. Initializes `data/sentinel.db`.
+3. Initializes `data/redactwall.db`.
 4. Runs the same deployment preflight used by `/readyz`.
 
 For production-safe defaults:
@@ -73,8 +73,8 @@ docker compose up -d --build
 ```
 
 The Compose file mounts a named volume at `/data`, overrides
-`SENTINEL_DB_PATH` to `/data/sentinel.db`, `SENTINEL_POLICY_PATH` to
-`/data/policy.json`, and `SENTINEL_CUSTOM_DETECTORS_PATH` to
+`REDACTWALL_DB_PATH` to `/data/redactwall.db`, `REDACTWALL_POLICY_PATH` to
+`/data/policy.json`, and `REDACTWALL_CUSTOM_DETECTORS_PATH` to
 `/data/custom-detectors.json`. It checks `/readyz` for container health, so the
 container keeps runtime state outside the image and reports unhealthy if
 database or production preflight readiness is blocked. The container runs with a
@@ -102,9 +102,9 @@ For paid customer Docker installs, keep these paths on the mounted local-disk
 volume:
 
 ```text
-SENTINEL_DB_PATH=/data/sentinel.db
-SENTINEL_POLICY_PATH=/data/policy.json
-SENTINEL_CUSTOM_DETECTORS_PATH=/data/custom-detectors.json
+REDACTWALL_DB_PATH=/data/redactwall.db
+REDACTWALL_POLICY_PATH=/data/policy.json
+REDACTWALL_CUSTOM_DETECTORS_PATH=/data/custom-detectors.json
 ```
 
 ## Health Checks
@@ -133,7 +133,7 @@ values.
 Security Admins can open **Updates** in the dashboard to configure and run a
 source-clone update from GitHub. The updater uses the existing Git remote, so a
 production source install should have `origin` pointed at the approved
-PromptWall GitHub repo and should track the production branch, normally `main`.
+RedactWall GitHub repo and should track the production branch, normally `main`.
 
 The update button is deliberately conservative:
 
@@ -152,9 +152,9 @@ The updater never runs `git reset`, `git clean`, or volume-delete commands.
 Runtime state should still live outside source, using:
 
 ```text
-SENTINEL_DB_PATH=/data/sentinel.db
-SENTINEL_POLICY_PATH=/data/policy.json
-SENTINEL_CUSTOM_DETECTORS_PATH=/data/custom-detectors.json
+REDACTWALL_DB_PATH=/data/redactwall.db
+REDACTWALL_POLICY_PATH=/data/policy.json
+REDACTWALL_CUSTOM_DETECTORS_PATH=/data/custom-detectors.json
 ```
 
 For Docker image deployments, rebuild and roll the image through your normal
@@ -164,10 +164,10 @@ update is applied, but backend execution of that command is disabled unless
 the host sets:
 
 ```text
-PROMPTWALL_UPDATE_RESTART_ENABLED=true
+REDACTWALL_UPDATE_RESTART_ENABLED=true
 ```
 
-For stricter production hosts, set `PROMPTWALL_UPDATE_RESTART_COMMAND` in the
+For stricter production hosts, set `REDACTWALL_UPDATE_RESTART_COMMAND` in the
 service environment and leave the dashboard restart command blank. Otherwise the
 dashboard command is treated as an operator hint and the update will finish with
 `restart required`.
@@ -177,13 +177,13 @@ dashboard command is treated as an operator hint and the update will finish with
 Set `SCIM_BEARER_TOKEN` to enable customer identity provisioning at
 `/scim/v2/*`; leave it empty to disable the surface. The endpoint accepts
 `application/scim+json`, uses bearer auth, stores provisioned users and groups in
-the local evidence database, and maps known PromptWall group display names onto
+the local evidence database, and maps known RedactWall group display names onto
 the local `security_admin`, `approver`, `auditor`, and `operator` roles.
 
 Set `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, and
 `OIDC_REDIRECT_URI` to enable the console SSO button. OIDC login validates the
 authorization-code callback, state, nonce, RS256 ID-token signature, issuer,
-audience, expiry, and active SCIM user before issuing the normal PromptWall
+audience, expiry, and active SCIM user before issuing the normal RedactWall
 session cookie. Keep local Security Admin credentials as the break-glass console
 path. See `docs/SCIM_PROVISIONING.md` for endpoint details and
 `docs/IDENTITY_IDP_SETUP.md` for Microsoft Entra and Okta setup recipes. Logged
@@ -191,8 +191,8 @@ in operators can also open the dashboard Identity tab, or print the same
 secret-free handoff from the CLI:
 
 ```bash
-npm run identity:setup -- --provider entra --base-url https://promptwall.customer.example --tenant-id <tenant-id-or-domain>
-npm run identity:setup -- --provider okta --base-url https://promptwall.customer.example --tenant-id <customer.okta.com>
+npm run identity:setup -- --provider entra --base-url https://redactwall.customer.example --tenant-id <tenant-id-or-domain>
+npm run identity:setup -- --provider okta --base-url https://redactwall.customer.example --tenant-id <customer.okta.com>
 ```
 
 ## Scoped Policy And Exceptions
@@ -259,10 +259,10 @@ After browser store items or signed Firefox install URLs exist, rerun the same
 gate with the final values:
 
 ```bash
-npm run release:extension:check -- dist/browser-extension --chrome-extension-id <chrome-web-store-id> --edge-extension-id <edge-addons-id> --firefox-install-url https://downloads.customer.example/promptwall-firefox.xpi
+npm run release:extension:check -- dist/browser-extension --chrome-extension-id <chrome-web-store-id> --edge-extension-id <edge-addons-id> --firefox-install-url https://downloads.customer.example/redactwall-firefox.xpi
 ```
 
-That adds prompt-free `promptwall-<browser>-extension-v<version>.extension-settings.json`
+That adds prompt-free `redactwall-<browser>-extension-v<version>.extension-settings.json`
 artifacts for browser force-install policy. They contain extension IDs, install
 or update URLs, and `force_installed` mode only; managed storage with
 `serverUrl`, `orgId`, user identity, and the ingest key stays in the customer's
@@ -293,8 +293,8 @@ and scheduled-task plus
 shell-action install/run/uninstall scripts, plus the endpoint install validation
 checker. It refuses synthetic
 prompt bodies and packaged development ingest keys. Set the real
-`PROMPTWALL_URL`, `INGEST_API_KEY`, and watch directory during install; the
-legacy `SENTINEL_URL` key remains accepted for existing configs. The agent
+`REDACTWALL_URL`, `INGEST_API_KEY`, and watch directory during install; the
+legacy `REDACTWALL_URL` key remains accepted for existing configs. The agent
 inspects supported files locally and does not contact the control plane without
 an explicit ingest key.
 
@@ -313,8 +313,8 @@ Atlassian Jira/Confluence connector, database read-only connector, shared
 detection engine, env loader, version metadata, and MCP guard install
 validation checker. It excludes
 the local direct-run demo and refuses synthetic prompt bodies or development
-ingest keys. Set `PROMPTWALL_URL` and `INGEST_API_KEY` in the host MCP runtime
-environment; the legacy `SENTINEL_URL` key remains accepted for existing
+ingest keys. Set `REDACTWALL_URL` and `INGEST_API_KEY` in the host MCP runtime
+environment; the legacy `REDACTWALL_URL` key remains accepted for existing
 configs. Do not bake secrets into the package. The guard does not contact the
 control plane without an explicit ingest key.
 
@@ -411,26 +411,26 @@ Run PowerShell from the project folder:
 
 ```powershell
 .\scripts\install-endpoint-agent.ps1 `
-  -PromptWallUrl "https://promptwall.example.com" `
+  -RedactWallUrl "https://redactwall.example.com" `
   -IngestKey "<pilot-ingest-key>" `
-  -WatchDir "$env:USERPROFILE\PromptWallWatch"
+  -WatchDir "$env:USERPROFILE\RedactWallWatch"
 ```
 
 This creates:
 
 ```text
-Task:   PromptWallEndpointAgent
-Config: %LOCALAPPDATA%\PromptWall\endpoint-agent.env
-Log:    %LOCALAPPDATA%\PromptWall\logs\endpoint-agent.log
+Task:   RedactWallEndpointAgent
+Config: %LOCALAPPDATA%\RedactWall\endpoint-agent.env
+Log:    %LOCALAPPDATA%\RedactWall\logs\endpoint-agent.log
 ```
 
-The config file carries `PROMPTWALL_URL`, `INGEST_API_KEY`, and `ENDPOINT_AGENT_WATCH_DIR`. Keep it restricted to the installing user, Administrators, and SYSTEM. The installer still accepts the legacy `-SentinelUrl` parameter and existing `SENTINEL_URL` config files remain valid. For an all-user managed install, pass an explicit `-ConfigDir "$env:ProgramData\PromptWall"` from an elevated PowerShell session.
+The config file carries `REDACTWALL_URL`, `INGEST_API_KEY`, and `ENDPOINT_AGENT_WATCH_DIR`. Keep it restricted to the installing user, Administrators, and SYSTEM. The installer still accepts the legacy `-SentinelUrl` parameter and existing `REDACTWALL_URL` config files remain valid. For an all-user managed install, pass an explicit `-ConfigDir "$env:ProgramData\RedactWall"` from an elevated PowerShell session.
 
 Validate the local install and optionally emit sanitized health evidence:
 
 ```powershell
 npm run endpoint:check -- `
-  --env "$env:LOCALAPPDATA\PromptWall\endpoint-agent.env" `
+  --env "$env:LOCALAPPDATA\RedactWall\endpoint-agent.env" `
   --emit-heartbeat `
   --user "tech@example.test" `
   --org-id "cu-acme"
@@ -447,7 +447,7 @@ reported as stable check ids such as `ai_tool_cursor` or
 Optional sanctioned endpoint AI tools:
 
 ```powershell
-Add-Content "$env:LOCALAPPDATA\PromptWall\endpoint-agent.env" "ENDPOINT_AGENT_APPROVED_AI_TOOLS=cursor,claude_desktop"
+Add-Content "$env:LOCALAPPDATA\RedactWall\endpoint-agent.env" "ENDPOINT_AGENT_APPROVED_AI_TOOLS=cursor,claude_desktop"
 ```
 
 When `ENDPOINT_AGENT_APPROVED_AI_TOOLS` is set, detected endpoint AI tools not
@@ -461,8 +461,8 @@ does not fail install readiness when runtime and configuration checks pass.
 Optional named endpoint file-flow profiles:
 
 ```powershell
-Add-Content "$env:LOCALAPPDATA\PromptWall\endpoint-agent.env" @'
-ENDPOINT_AGENT_FILE_FLOW_PROFILES=[{"id":"lending","dir":"C:\\PromptWall\\Flows\\Lending","destination":"Copilot Desktop"},{"id":"call_center","dir":"C:\\PromptWall\\Flows\\CallCenter","destination":"ChatGPT Desktop"}]
+Add-Content "$env:LOCALAPPDATA\RedactWall\endpoint-agent.env" @'
+ENDPOINT_AGENT_FILE_FLOW_PROFILES=[{"id":"lending","dir":"C:\\RedactWall\\Flows\\Lending","destination":"Copilot Desktop"},{"id":"call_center","dir":"C:\\RedactWall\\Flows\\CallCenter","destination":"ChatGPT Desktop"}]
 '@
 ```
 
@@ -475,12 +475,12 @@ they do not print or post watched paths, file names, file bytes, extracted text,
 or prompts. The Coverage tab summarizes the profile count as `Endpoint
 file-flow profiles` so operators can see which workstation flows are ready.
 
-The agent inspects supported watched files locally. Under redact policy, structured-only findings write a safe companion text file under `.promptwall-redacted` and report `redacted_available` evidence to the control plane; semantic or mixed findings remain held for Security Admin review. The managed browser extension also inspects text-readable file selections and drops locally before upload. It sends only synthetic file labels, masked detector evidence, categories, risk metadata, and client outcomes to `/api/v1/gate`; it does not send file bytes, raw filenames, `contentBase64`, or extracted text to the control plane. Unsupported, oversized, unreadable, or OCR-needed browser uploads fail closed as `file_blocked_unscanned` or `ocr_required`. Direct API uploads through `/api/v1/scan-file` still return `ocr_required` for images until an endpoint-local OCR path is in scope. Endpoint agents can optionally run a workstation-local OCR command and then send only sanitized detector evidence to the control plane.
+The agent inspects supported watched files locally. Under redact policy, structured-only findings write a safe companion text file under `.redactwall-redacted` and report `redacted_available` evidence to the control plane; semantic or mixed findings remain held for Security Admin review. The managed browser extension also inspects text-readable file selections and drops locally before upload. It sends only synthetic file labels, masked detector evidence, categories, risk metadata, and client outcomes to `/api/v1/gate`; it does not send file bytes, raw filenames, `contentBase64`, or extracted text to the control plane. Unsupported, oversized, unreadable, or OCR-needed browser uploads fail closed as `file_blocked_unscanned` or `ocr_required`. Direct API uploads through `/api/v1/scan-file` still return `ocr_required` for images until an endpoint-local OCR path is in scope. Endpoint agents can optionally run a workstation-local OCR command and then send only sanitized detector evidence to the control plane.
 
 Optional endpoint-local OCR:
 
 ```powershell
-Add-Content "$env:LOCALAPPDATA\PromptWall\endpoint-agent.env" @'
+Add-Content "$env:LOCALAPPDATA\RedactWall\endpoint-agent.env" @'
 ENDPOINT_AGENT_OCR_COMMAND=C:\Program Files\Tesseract-OCR\tesseract.exe
 ENDPOINT_AGENT_OCR_ARGS_JSON=["{file}","stdout"]
 ENDPOINT_AGENT_OCR_TIMEOUT_MS=15000
@@ -515,7 +515,7 @@ path.
 
 ```powershell
 .\scripts\install-endpoint-agent.ps1 `
-  -PromptWallUrl "https://promptwall.example.com" `
+  -RedactWallUrl "https://redactwall.example.com" `
   -IngestKey "<pilot-ingest-key>" `
   -HandoffSecret "<32-plus-character-local-handoff-secret>"
 ```
@@ -533,7 +533,7 @@ install kernel drivers or universal app hooks.
 ### Customer Detector Packs
 
 Put customer-specific sensitive types in `config/custom-detectors.json`, or set
-`PROMPTWALL_CUSTOM_DETECTORS_PATH` / `SENTINEL_CUSTOM_DETECTORS_PATH` to an
+`REDACTWALL_CUSTOM_DETECTORS_PATH` / `REDACTWALL_CUSTOM_DETECTORS_PATH` to an
 alternate JSON file for a customer silo. Detector packs are data-only. Each
 enabled detector supplies an uppercase `id`, bounded `pattern`, optional
 `context`, `severity`, `score`, `group`, and validator knobs such as
@@ -551,7 +551,7 @@ exceptions, and approval routing.
 
 The packaged desktop collector installs a per-user Windows Explorer shell action
 for a production pilot. A user right-clicks one or more selected files and chooses
-`PromptWall Protected Upload`; the collector writes a signed metadata-only
+`RedactWall Protected Upload`; the collector writes a signed metadata-only
 handoff event for each selected file, waits for the endpoint agent to consume it, and logs only
 sanitized collector status. The endpoint agent then scans the referenced file
 locally and reports sanitized evidence through the normal control-plane path.
@@ -560,7 +560,7 @@ Install it as part of the endpoint agent setup:
 
 ```powershell
 .\scripts\install-endpoint-agent.ps1 `
-  -PromptWallUrl "https://promptwall.example.com" `
+  -RedactWallUrl "https://redactwall.example.com" `
   -IngestKey "<pilot-ingest-key>" `
   -HandoffSecret "<32-plus-character-local-handoff-secret>" `
   -InstallDesktopCollector `
@@ -572,7 +572,7 @@ Or install only the shell action after endpoint setup:
 
 ```powershell
 .\scripts\install-desktop-collector.ps1 `
-  -ConfigDir "$env:LOCALAPPDATA\PromptWall"
+  -ConfigDir "$env:LOCALAPPDATA\RedactWall"
 ```
 
 The collector uses the Policy tab's `Default desktop upload destination` value
@@ -582,19 +582,19 @@ offline fallback, then `Desktop AI`. Use `-DesktopCollectorDestination` or
 override.
 
 The shell action command does not include the ingest key or handoff secret. It
-loads `%LOCALAPPDATA%\PromptWall\endpoint-agent.env` through
-`PROMPTWALL_ENV_PATH`, invokes
+loads `%LOCALAPPDATA%\RedactWall\endpoint-agent.env` through
+`REDACTWALL_ENV_PATH`, invokes
 `sensors\endpoint-agent\collectors\protected-upload.js`, and passes only the
 selected local file paths to the collector process. The Explorer verb is marked
 with `MultiSelectModel=Player` so it remains available for multi-file
-selections. The legacy `SENTINEL_ENV_PATH` alias remains accepted for existing
+selections. The legacy `REDACTWALL_ENV_PATH` alias remains accepted for existing
 scripts. The collector verifies each path is a local file, writes signed events
 through the packaged writer, and never reads file bytes.
 
 For automation or app-specific integrations, call the collector directly:
 
 ```powershell
-$env:PROMPTWALL_ENV_PATH = "$env:LOCALAPPDATA\PromptWall\endpoint-agent.env"
+$env:REDACTWALL_ENV_PATH = "$env:LOCALAPPDATA\RedactWall\endpoint-agent.env"
 node .\sensors\endpoint-agent\collectors\protected-upload.js `
   --file "$env:USERPROFILE\Downloads\loan-file.pdf" `
   --destination "Desktop AI" `
@@ -608,7 +608,7 @@ produce one signed upload-intent event without putting the handoff secret on the
 command line:
 
 ```powershell
-$env:PROMPTWALL_ENV_PATH = "$env:LOCALAPPDATA\PromptWall\endpoint-agent.env"
+$env:REDACTWALL_ENV_PATH = "$env:LOCALAPPDATA\RedactWall\endpoint-agent.env"
 node .\sensors\endpoint-agent\write-handoff.js `
   --file "$env:USERPROFILE\Downloads\loan-file.pdf" `
   --destination "Desktop AI" `
@@ -616,7 +616,7 @@ node .\sensors\endpoint-agent\write-handoff.js `
 ```
 
 The writer loads `ENDPOINT_AGENT_HANDOFF_SECRET` and
-`ENDPOINT_AGENT_HANDOFF_DIR`, or their `PROMPTWALL_*` aliases, from the endpoint
+`ENDPOINT_AGENT_HANDOFF_DIR`, or their `REDACTWALL_*` aliases, from the endpoint
 config, verifies the referenced path is a local file, writes the event
 atomically, and never reads the file body.
 
@@ -639,15 +639,15 @@ extension id:
 ```powershell
 .\scripts\install-file-intent-host.ps1 `
   -ExtensionId "<32-character-extension-id>" `
-  -ConfigDir "$env:LOCALAPPDATA\PromptWall" `
+  -ConfigDir "$env:LOCALAPPDATA\RedactWall" `
   -Browser both
 ```
 
 The installer writes a secret-free launcher (`file-intent-host.cmd`), the
-`com.promptwall.file_intent` host manifest bound to that one extension origin,
+`com.redactwall.file_intent` host manifest bound to that one extension origin,
 and per-user `NativeMessagingHosts` registry keys for Chrome and/or Edge. The
 ingest key and handoff secret stay in `endpoint-agent.env`; the launcher only
-points `PROMPTWALL_ENV_PATH` at it. Host replies to the browser carry only
+points `REDACTWALL_ENV_PATH` at it. Host replies to the browser carry only
 sanitized statuses (`handoff_written`, `not_found`, `ambiguous`) - never local
 paths. Ambiguous matches (the same name+size in two roots) write nothing.
 Remove the registration with `.\scripts\uninstall-file-intent-host.ps1`.
@@ -662,14 +662,14 @@ severity to the control plane. Clean or empty clipboard values are not reported.
 Run in report-only mode:
 
 ```powershell
-$env:PROMPTWALL_ENV_PATH = "$env:LOCALAPPDATA\PromptWall\endpoint-agent.env"
+$env:REDACTWALL_ENV_PATH = "$env:LOCALAPPDATA\RedactWall\endpoint-agent.env"
 npm run desktop:clipboard -- --destination "Desktop AI" --user "analyst@example.com" --json
 ```
 
 Run in block mode:
 
 ```powershell
-$env:PROMPTWALL_ENV_PATH = "$env:LOCALAPPDATA\PromptWall\endpoint-agent.env"
+$env:REDACTWALL_ENV_PATH = "$env:LOCALAPPDATA\RedactWall\endpoint-agent.env"
 npm run desktop:clipboard -- --clear-on-block --destination "Desktop AI" --user "analyst@example.com" --json
 ```
 
@@ -684,15 +684,15 @@ Install the clipboard guard as a Start Menu shortcut for pilot users:
 
 ```powershell
 .\scripts\install-clipboard-guard.ps1 `
-  -ConfigDir "$env:LOCALAPPDATA\PromptWall" `
-  -ShortcutName "PromptWall Clipboard Guard" `
+  -ConfigDir "$env:LOCALAPPDATA\RedactWall" `
+  -ShortcutName "RedactWall Clipboard Guard" `
   -Destination "Desktop AI" `
   -ClearOnBlock
 ```
 
 The shortcut runs `scripts\run-clipboard-guard.ps1` with the local endpoint
 config path and writes only the guard's sanitized JSON result to
-`%LOCALAPPDATA%\PromptWall\logs\clipboard-guard.log`. The shortcut arguments do
+`%LOCALAPPDATA%\RedactWall\logs\clipboard-guard.log`. The shortcut arguments do
 not contain the ingest key, native handoff secret, clipboard text, or prompt
 content. Use `-DesktopShortcut` if the pilot wants a desktop shortcut as well;
 use `-HotKey "CTRL+ALT+P"` only when the customer explicitly wants a keyboard
@@ -703,7 +703,7 @@ Run the packaged launcher directly:
 ```powershell
 .\scripts\run-clipboard-guard.ps1 `
   -RepoRoot (Get-Location).Path `
-  -ConfigPath "$env:LOCALAPPDATA\PromptWall\endpoint-agent.env" `
+  -ConfigPath "$env:LOCALAPPDATA\RedactWall\endpoint-agent.env" `
   -Destination "Desktop AI" `
   -ClearOnBlock
 ```
@@ -720,7 +720,7 @@ remote repository names, or remote URL paths to the control plane.
 Run a manual staged-diff check:
 
 ```powershell
-$env:PROMPTWALL_ENV_PATH = "$env:LOCALAPPDATA\PromptWall\endpoint-agent.env"
+$env:REDACTWALL_ENV_PATH = "$env:LOCALAPPDATA\RedactWall\endpoint-agent.env"
 npm run desktop:git-push -- --staged --remote-url "https://github.com/customer/repo.git" --user "engineer@example.com" --json
 ```
 
@@ -729,16 +729,16 @@ Install it into one pilot repository:
 ```powershell
 npm run desktop:git-push:install -- `
   -RepoPath "C:\Work\lending-app" `
-  -ConfigPath "$env:LOCALAPPDATA\PromptWall\endpoint-agent.env" `
+  -ConfigPath "$env:LOCALAPPDATA\RedactWall\endpoint-agent.env" `
   -AllowedHost github.com
 ```
 
 The installer writes a managed `.git/hooks/pre-push` hook that loads only
-`PROMPTWALL_ENV_PATH` and invokes the collector with Git's remote name, remote
+`REDACTWALL_ENV_PATH` and invokes the collector with Git's remote name, remote
 URL, and pre-push ref updates. Existing branches are scanned as
 `remote_sha..local_sha`; new branches are scanned against Git's empty tree so
 first pushes do not bypass inspection. Use `-AllowedHost` or
-`PROMPTWALL_GIT_ALLOWED_HOSTS` for sanctioned corporate Git hosts: source-code
+`REDACTWALL_GIT_ALLOWED_HOSTS` for sanctioned corporate Git hosts: source-code
 only pushes to those hosts are allowed, but detected secrets, regulated member
 data, contracts, health data, or confidential business context still block. The
 hook does not contain the ingest key, native handoff secret, prompt text, source
@@ -753,10 +753,10 @@ Uninstall from that repository:
 Check status:
 
 ```powershell
-Get-ScheduledTask -TaskName PromptWallEndpointAgent
-Get-Content "$env:LOCALAPPDATA\PromptWall\logs\endpoint-agent.log" -Tail 40
-Get-Content "$env:LOCALAPPDATA\PromptWall\logs\desktop-collector.log" -Tail 40
-Get-Content "$env:LOCALAPPDATA\PromptWall\logs\clipboard-guard.log" -Tail 40
+Get-ScheduledTask -TaskName RedactWallEndpointAgent
+Get-Content "$env:LOCALAPPDATA\RedactWall\logs\endpoint-agent.log" -Tail 40
+Get-Content "$env:LOCALAPPDATA\RedactWall\logs\desktop-collector.log" -Tail 40
+Get-Content "$env:LOCALAPPDATA\RedactWall\logs\clipboard-guard.log" -Tail 40
 ```
 
 Uninstall:
@@ -781,78 +781,78 @@ Set these through `.env`, container environment, or a deployment secret manager:
 | `ADMIN_TOTP_SECRET` | Base32 authenticator secret for Security Admin MFA. Production preflight requires it, and admin login requires a current 6-digit code when it is set. |
 | `APPROVER_USER` / `APPROVER_PASSWORD` | Optional reviewer console account that can approve or deny items assigned to the approver role. Set both together, keep `APPROVER_USER` distinct from admin and auditor users, and use at least 16 characters for `APPROVER_PASSWORD`. |
 | `AUDITOR_USER` / `AUDITOR_PASSWORD` | Optional read-only console account for examiner or client-demo access. Set both together, keep `AUDITOR_USER` distinct from `ADMIN_USER`, and use at least 16 characters for `AUDITOR_PASSWORD`. |
-| `SENTINEL_SECRET` | Stable session-signing secret shared by all instances. Production preflight requires at least 32 characters from environment. |
-| `SENTINEL_DATA_KEY` | Stable AES-256-GCM data key source for retained approval prompts. Production preflight requires this key, or the `SENTINEL_SECRET` fallback, to be at least 32 characters. |
+| `REDACTWALL_SECRET` | Stable session-signing secret shared by all instances. Production preflight requires at least 32 characters from environment. |
+| `REDACTWALL_DATA_KEY` | Stable AES-256-GCM data key source for retained approval prompts. Production preflight requires this key, or the `REDACTWALL_SECRET` fallback, to be at least 32 characters. |
 | `INGEST_API_KEY` | Sensor and proxy key for `/api/v1/*` ingest endpoints. Production preflight requires non-default, at least 32 characters. |
 | `SCIM_BEARER_TOKEN` | Optional bearer token for `/scim/v2/*` provisioning. Leave empty to disable SCIM. Production preflight requires at least 32 characters when set. |
 | `OIDC_ISSUER` | Optional OIDC issuer URL for console SSO. When any OIDC value is set, production preflight requires issuer, client id, client secret, redirect URI, and SCIM provisioning. |
 | `OIDC_CLIENT_ID` | OIDC web application client id. |
 | `OIDC_CLIENT_SECRET` | OIDC web application client secret. Production preflight requires at least 32 characters when OIDC is configured. |
-| `OIDC_REDIRECT_URI` | OIDC callback URL, usually `https://promptwall.customer.example/auth/oidc/callback`. |
+| `OIDC_REDIRECT_URI` | OIDC callback URL, usually `https://redactwall.customer.example/auth/oidc/callback`. |
 | `OIDC_SCOPE` | OIDC scopes requested by console SSO, defaulting to `openid email profile`. |
 | `OIDC_AUTHORIZATION_ENDPOINT` / `OIDC_TOKEN_ENDPOINT` / `OIDC_JWKS_URI` | Optional explicit endpoints. Leave all three empty for issuer discovery, or set all three together. |
-| `SENTINEL_DB_PATH` | SQLite path on local persistent disk. |
-| `SENTINEL_SAAS_MODE` | Set to `true` for a paid customer stack. Production preflight then requires tenant id and seat limit. |
-| `SENTINEL_TENANT_ID` | Lowercase customer tenant slug accepted from sensors, for example `cu-acme`. |
-| `SENTINEL_SEAT_LIMIT` | Purchased seat count. New managed users beyond this count are blocked and recorded as `SEAT_LIMIT_BLOCKED`. |
-| `SENTINEL_REQUIRE_TENANT_CONTEXT` | Requires sensors to send the matching `orgId`. Enabled automatically by SaaS mode. |
-| `SENTINEL_REQUIRE_USER_IDENTITY` | Requires sensors to send managed user identity instead of `unknown` or `unattributed@unmanaged`. Enabled automatically by SaaS mode. |
-| `SENTINEL_POLICY_PATH` | Optional policy file path for isolated tests, pilots, or customer-silo policy storage. Docker customer silos default to `/data/policy.json`. |
-| `SENTINEL_CUSTOM_DETECTORS_PATH` / `PROMPTWALL_CUSTOM_DETECTORS_PATH` | Optional customer detector-pack path. Docker customer silos default to `/data/custom-detectors.json`; native Node defaults to `config/custom-detectors.json`. |
+| `REDACTWALL_DB_PATH` | SQLite path on local persistent disk. |
+| `REDACTWALL_SAAS_MODE` | Set to `true` for a paid customer stack. Production preflight then requires tenant id and seat limit. |
+| `REDACTWALL_TENANT_ID` | Lowercase customer tenant slug accepted from sensors, for example `cu-acme`. |
+| `REDACTWALL_SEAT_LIMIT` | Purchased seat count. New managed users beyond this count are blocked and recorded as `SEAT_LIMIT_BLOCKED`. |
+| `REDACTWALL_REQUIRE_TENANT_CONTEXT` | Requires sensors to send the matching `orgId`. Enabled automatically by SaaS mode. |
+| `REDACTWALL_REQUIRE_USER_IDENTITY` | Requires sensors to send managed user identity instead of `unknown` or `unattributed@unmanaged`. Enabled automatically by SaaS mode. |
+| `REDACTWALL_POLICY_PATH` | Optional policy file path for isolated tests, pilots, or customer-silo policy storage. Docker customer silos default to `/data/policy.json`. |
+| `REDACTWALL_CUSTOM_DETECTORS_PATH` / `REDACTWALL_CUSTOM_DETECTORS_PATH` | Optional customer detector-pack path. Docker customer silos default to `/data/custom-detectors.json`; native Node defaults to `config/custom-detectors.json`. |
 | `ENDPOINT_AGENT_HANDOFF_DIR` | Optional local spool for signed native endpoint upload-intent events. |
 | `ENDPOINT_AGENT_HANDOFF_SECRET` | Optional 32-plus-character local HMAC secret required before the endpoint agent accepts native handoff events. |
-| `ENDPOINT_AGENT_OCR_COMMAND` / `PROMPTWALL_ENDPOINT_AGENT_OCR_COMMAND` | Optional endpoint-local OCR command for image files. Disabled by default. |
-| `ENDPOINT_AGENT_OCR_ARGS_JSON` / `PROMPTWALL_ENDPOINT_AGENT_OCR_ARGS_JSON` | Optional JSON string array of OCR command args. Include `{file}` where the image path belongs; otherwise the file path is appended. |
-| `ENDPOINT_AGENT_OCR_TIMEOUT_MS` / `PROMPTWALL_ENDPOINT_AGENT_OCR_TIMEOUT_MS` | Optional OCR command timeout, defaulting to 15000 ms (30000 ms for the WASM engine). |
-| `ENDPOINT_AGENT_OCR_MAX_CHARS` / `PROMPTWALL_ENDPOINT_AGENT_OCR_MAX_CHARS` | Optional OCR output cap before detection, defaulting to 1000000 chars. |
-| `ENDPOINT_AGENT_OCR_WASM` / `PROMPTWALL_ENDPOINT_AGENT_OCR_WASM` | Bundled offline WASM OCR fallback used when no native tesseract is present. Enabled by default; set to `off` to disable. Never fetches model weights from the network. |
-| `ENDPOINT_AGENT_OCR_STRICT` / `PROMPTWALL_ENDPOINT_AGENT_OCR_STRICT` | When `on` (default off), images whose OCR yields little or no text are routed to `ocr_required` instead of allowed on sparse extraction. |
-| `ENDPOINT_AGENT_APPROVED_AI_TOOLS` / `PROMPTWALL_ENDPOINT_AGENT_APPROVED_AI_TOOLS` | Optional comma-separated sanctioned endpoint AI tool ids. Detected local AI tools outside this list report endpoint AI-tool inventory attention using sanitized ids only. |
-| `ENDPOINT_AGENT_FILE_FLOW_PROFILES` / `PROMPTWALL_ENDPOINT_AGENT_FILE_FLOW_PROFILES` | Optional JSON array of named endpoint file-flow watcher profiles. Heartbeats report profile ids/status only. |
+| `ENDPOINT_AGENT_OCR_COMMAND` / `REDACTWALL_ENDPOINT_AGENT_OCR_COMMAND` | Optional endpoint-local OCR command for image files. Disabled by default. |
+| `ENDPOINT_AGENT_OCR_ARGS_JSON` / `REDACTWALL_ENDPOINT_AGENT_OCR_ARGS_JSON` | Optional JSON string array of OCR command args. Include `{file}` where the image path belongs; otherwise the file path is appended. |
+| `ENDPOINT_AGENT_OCR_TIMEOUT_MS` / `REDACTWALL_ENDPOINT_AGENT_OCR_TIMEOUT_MS` | Optional OCR command timeout, defaulting to 15000 ms (30000 ms for the WASM engine). |
+| `ENDPOINT_AGENT_OCR_MAX_CHARS` / `REDACTWALL_ENDPOINT_AGENT_OCR_MAX_CHARS` | Optional OCR output cap before detection, defaulting to 1000000 chars. |
+| `ENDPOINT_AGENT_OCR_WASM` / `REDACTWALL_ENDPOINT_AGENT_OCR_WASM` | Bundled offline WASM OCR fallback used when no native tesseract is present. Enabled by default; set to `off` to disable. Never fetches model weights from the network. |
+| `ENDPOINT_AGENT_OCR_STRICT` / `REDACTWALL_ENDPOINT_AGENT_OCR_STRICT` | When `on` (default off), images whose OCR yields little or no text are routed to `ocr_required` instead of allowed on sparse extraction. |
+| `ENDPOINT_AGENT_APPROVED_AI_TOOLS` / `REDACTWALL_ENDPOINT_AGENT_APPROVED_AI_TOOLS` | Optional comma-separated sanctioned endpoint AI tool ids. Detected local AI tools outside this list report endpoint AI-tool inventory attention using sanitized ids only. |
+| `ENDPOINT_AGENT_FILE_FLOW_PROFILES` / `REDACTWALL_ENDPOINT_AGENT_FILE_FLOW_PROFILES` | Optional JSON array of named endpoint file-flow watcher profiles. Heartbeats report profile ids/status only. |
 
-PromptWall accepts product-prefixed aliases for new deployments while keeping
-the existing `SENTINEL_*`, `INGEST_API_KEY`, and endpoint-agent names valid for
+RedactWall accepts product-prefixed aliases for new deployments while keeping
+the existing `REDACTWALL_*`, `INGEST_API_KEY`, and endpoint-agent names valid for
 upgrades. Use one family per setting; a non-empty legacy key wins when both are
 set.
 
-| Existing key | PromptWall alias |
+| Existing key | RedactWall alias |
 | --- | --- |
-| `SENTINEL_ENV_PATH` | `PROMPTWALL_ENV_PATH` |
-| `SENTINEL_URL` | `PROMPTWALL_URL` |
-| `SENTINEL_DB_PATH` | `PROMPTWALL_DB_PATH` |
-| `SENTINEL_POLICY_PATH` | `PROMPTWALL_POLICY_PATH` |
-| `SENTINEL_CUSTOM_DETECTORS_PATH` | `PROMPTWALL_CUSTOM_DETECTORS_PATH` |
-| `SENTINEL_SAAS_MODE` | `PROMPTWALL_SAAS_MODE` |
-| `SENTINEL_TENANT_ID` | `PROMPTWALL_TENANT_ID` |
-| `SENTINEL_SEAT_LIMIT` | `PROMPTWALL_SEAT_LIMIT` |
-| `SENTINEL_REQUIRE_TENANT_CONTEXT` | `PROMPTWALL_REQUIRE_TENANT_CONTEXT` |
-| `SENTINEL_REQUIRE_USER_IDENTITY` | `PROMPTWALL_REQUIRE_USER_IDENTITY` |
-| `SENTINEL_SECRET` | `PROMPTWALL_SECRET` |
-| `SENTINEL_DATA_KEY` | `PROMPTWALL_DATA_KEY` |
-| `SENTINEL_REQUEST_TIMEOUT_MS` | `PROMPTWALL_REQUEST_TIMEOUT_MS` |
-| `INGEST_API_KEY` | `PROMPTWALL_INGEST_API_KEY` |
-| `SCIM_BEARER_TOKEN` | `PROMPTWALL_SCIM_BEARER_TOKEN` |
-| `OIDC_ISSUER` | `PROMPTWALL_OIDC_ISSUER` |
-| `OIDC_CLIENT_ID` | `PROMPTWALL_OIDC_CLIENT_ID` |
-| `OIDC_CLIENT_SECRET` | `PROMPTWALL_OIDC_CLIENT_SECRET` |
-| `OIDC_REDIRECT_URI` | `PROMPTWALL_OIDC_REDIRECT_URI` |
-| `OIDC_AUTHORIZATION_ENDPOINT` | `PROMPTWALL_OIDC_AUTHORIZATION_ENDPOINT` |
-| `OIDC_TOKEN_ENDPOINT` | `PROMPTWALL_OIDC_TOKEN_ENDPOINT` |
-| `OIDC_JWKS_URI` | `PROMPTWALL_OIDC_JWKS_URI` |
-| `OIDC_SCOPE` | `PROMPTWALL_OIDC_SCOPE` |
-| `ENDPOINT_AGENT_WATCH_DIR` | `PROMPTWALL_ENDPOINT_AGENT_WATCH_DIR` |
-| `ENDPOINT_AGENT_HANDOFF_DIR` | `PROMPTWALL_ENDPOINT_AGENT_HANDOFF_DIR` |
-| `ENDPOINT_AGENT_HANDOFF_SECRET` | `PROMPTWALL_ENDPOINT_AGENT_HANDOFF_SECRET` |
-| `ENDPOINT_AGENT_OCR_WASM` | `PROMPTWALL_ENDPOINT_AGENT_OCR_WASM` |
-| `ENDPOINT_AGENT_OCR_STRICT` | `PROMPTWALL_ENDPOINT_AGENT_OCR_STRICT` |
-| `ENDPOINT_AGENT_OCR_COMMAND` | `PROMPTWALL_ENDPOINT_AGENT_OCR_COMMAND` |
-| `ENDPOINT_AGENT_OCR_ARGS_JSON` | `PROMPTWALL_ENDPOINT_AGENT_OCR_ARGS_JSON` |
-| `ENDPOINT_AGENT_OCR_TIMEOUT_MS` | `PROMPTWALL_ENDPOINT_AGENT_OCR_TIMEOUT_MS` |
-| `ENDPOINT_AGENT_OCR_MAX_CHARS` | `PROMPTWALL_ENDPOINT_AGENT_OCR_MAX_CHARS` |
-| `ENDPOINT_AGENT_APPROVED_AI_TOOLS` | `PROMPTWALL_ENDPOINT_AGENT_APPROVED_AI_TOOLS` |
-| `ENDPOINT_AGENT_FILE_FLOW_PROFILES` | `PROMPTWALL_ENDPOINT_AGENT_FILE_FLOW_PROFILES` |
+| `REDACTWALL_ENV_PATH` | `REDACTWALL_ENV_PATH` |
+| `REDACTWALL_URL` | `REDACTWALL_URL` |
+| `REDACTWALL_DB_PATH` | `REDACTWALL_DB_PATH` |
+| `REDACTWALL_POLICY_PATH` | `REDACTWALL_POLICY_PATH` |
+| `REDACTWALL_CUSTOM_DETECTORS_PATH` | `REDACTWALL_CUSTOM_DETECTORS_PATH` |
+| `REDACTWALL_SAAS_MODE` | `REDACTWALL_SAAS_MODE` |
+| `REDACTWALL_TENANT_ID` | `REDACTWALL_TENANT_ID` |
+| `REDACTWALL_SEAT_LIMIT` | `REDACTWALL_SEAT_LIMIT` |
+| `REDACTWALL_REQUIRE_TENANT_CONTEXT` | `REDACTWALL_REQUIRE_TENANT_CONTEXT` |
+| `REDACTWALL_REQUIRE_USER_IDENTITY` | `REDACTWALL_REQUIRE_USER_IDENTITY` |
+| `REDACTWALL_SECRET` | `REDACTWALL_SECRET` |
+| `REDACTWALL_DATA_KEY` | `REDACTWALL_DATA_KEY` |
+| `REDACTWALL_REQUEST_TIMEOUT_MS` | `REDACTWALL_REQUEST_TIMEOUT_MS` |
+| `INGEST_API_KEY` | `REDACTWALL_INGEST_API_KEY` |
+| `SCIM_BEARER_TOKEN` | `REDACTWALL_SCIM_BEARER_TOKEN` |
+| `OIDC_ISSUER` | `REDACTWALL_OIDC_ISSUER` |
+| `OIDC_CLIENT_ID` | `REDACTWALL_OIDC_CLIENT_ID` |
+| `OIDC_CLIENT_SECRET` | `REDACTWALL_OIDC_CLIENT_SECRET` |
+| `OIDC_REDIRECT_URI` | `REDACTWALL_OIDC_REDIRECT_URI` |
+| `OIDC_AUTHORIZATION_ENDPOINT` | `REDACTWALL_OIDC_AUTHORIZATION_ENDPOINT` |
+| `OIDC_TOKEN_ENDPOINT` | `REDACTWALL_OIDC_TOKEN_ENDPOINT` |
+| `OIDC_JWKS_URI` | `REDACTWALL_OIDC_JWKS_URI` |
+| `OIDC_SCOPE` | `REDACTWALL_OIDC_SCOPE` |
+| `ENDPOINT_AGENT_WATCH_DIR` | `REDACTWALL_ENDPOINT_AGENT_WATCH_DIR` |
+| `ENDPOINT_AGENT_HANDOFF_DIR` | `REDACTWALL_ENDPOINT_AGENT_HANDOFF_DIR` |
+| `ENDPOINT_AGENT_HANDOFF_SECRET` | `REDACTWALL_ENDPOINT_AGENT_HANDOFF_SECRET` |
+| `ENDPOINT_AGENT_OCR_WASM` | `REDACTWALL_ENDPOINT_AGENT_OCR_WASM` |
+| `ENDPOINT_AGENT_OCR_STRICT` | `REDACTWALL_ENDPOINT_AGENT_OCR_STRICT` |
+| `ENDPOINT_AGENT_OCR_COMMAND` | `REDACTWALL_ENDPOINT_AGENT_OCR_COMMAND` |
+| `ENDPOINT_AGENT_OCR_ARGS_JSON` | `REDACTWALL_ENDPOINT_AGENT_OCR_ARGS_JSON` |
+| `ENDPOINT_AGENT_OCR_TIMEOUT_MS` | `REDACTWALL_ENDPOINT_AGENT_OCR_TIMEOUT_MS` |
+| `ENDPOINT_AGENT_OCR_MAX_CHARS` | `REDACTWALL_ENDPOINT_AGENT_OCR_MAX_CHARS` |
+| `ENDPOINT_AGENT_APPROVED_AI_TOOLS` | `REDACTWALL_ENDPOINT_AGENT_APPROVED_AI_TOOLS` |
+| `ENDPOINT_AGENT_FILE_FLOW_PROFILES` | `REDACTWALL_ENDPOINT_AGENT_FILE_FLOW_PROFILES` |
 
-Never bind `SENTINEL_DB_PATH` to a cloud-synced folder or network share. SQLite locking must be backed by local disk semantics, and production preflight blocks missing, cloud-synced, or UNC/network SQLite paths before startup readiness passes.
+Never bind `REDACTWALL_DB_PATH` to a cloud-synced folder or network share. SQLite locking must be backed by local disk semantics, and production preflight blocks missing, cloud-synced, or UNC/network SQLite paths before startup readiness passes.
 
 `npm run setup:prod` generates values that meet these floors. When values come from a deployment secret manager, keep the same minimum lengths or `/readyz` will report production readiness as blocked.
 
@@ -862,7 +862,7 @@ secrets. Use a base32 `ADMIN_TOTP_SECRET` at least 16 characters long, at least
 configured, and `AUDITOR_PASSWORD` when auditor login is configured; use at
 least 32 random characters for `INGEST_API_KEY`,
 `SCIM_BEARER_TOKEN` when SCIM is enabled, `OIDC_CLIENT_SECRET` when OIDC is
-enabled, `SENTINEL_SECRET`, and `SENTINEL_DATA_KEY` when retained raw approval
+enabled, `REDACTWALL_SECRET`, and `REDACTWALL_DATA_KEY` when retained raw approval
 data is enabled.
 `npm run setup:prod` generates a TOTP secret; enroll it in the operator's
 authenticator app before serving the console to pilot users:
@@ -876,7 +876,7 @@ password because it contains the MFA seed. For a non-default env file or
 white-label issuer, use:
 
 ```bash
-npm run mfa:uri -- --env pilot.env --issuer "PromptWall Pilot"
+npm run mfa:uri -- --env pilot.env --issuer "RedactWall Pilot"
 ```
 
 Auditor sessions can read sanitized dashboard evidence, audit status, policy,
@@ -924,8 +924,8 @@ Attach backup verification and a restore-drill check when those artifacts exist:
 
 ```bash
 npm run evidence:pack:zip -- evidence-packs \
-  backups/sentinel-YYYY-MM-DDTHH-MM-SS-sssZ.db \
-  data/restored-sentinel.db
+  backups/redactwall-YYYY-MM-DDTHH-MM-SS-sssZ.db \
+  data/restored-redactwall.db
 ```
 
 For scheduled customer-silo reporting, copy
@@ -944,7 +944,7 @@ npm run evidence:pack:install-task
 ```
 
 The task runs `scripts/run-evidence-pack.ps1`, writes run status to
-`%LOCALAPPDATA%\PromptWall\logs\evidence-pack.log`, and passes only the repo
+`%LOCALAPPDATA%\RedactWall\logs\evidence-pack.log`, and passes only the repo
 path, schedule config path, and log path as task arguments. It does not place
 environment secrets, prompt bodies, release tokens, or upload contents in the
 scheduled task definition.
@@ -954,19 +954,19 @@ runbook, keep the schedule config in the mounted data folder and install the
 systemd timer:
 
 ```bash
-sudo cp config/evidence-schedule.example.json /var/lib/promptwall/evidence-schedule.json
-sudo editor /var/lib/promptwall/evidence-schedule.json
+sudo cp config/evidence-schedule.example.json /var/lib/redactwall/evidence-schedule.json
+sudo editor /var/lib/redactwall/evidence-schedule.json
 sudo npm run evidence:pack:install-systemd -- \
   --mode docker \
-  --container promptwall \
+  --container redactwall \
   --config /data/evidence-schedule.json \
   --on-calendar quarterly
 ```
 
 Set the schedule config `outDir` to `/data/evidence-packs` for Docker hosts.
-The systemd unit writes status to `/var/log/promptwall/evidence-pack.log`, uses
+The systemd unit writes status to `/var/log/redactwall/evidence-pack.log`, uses
 `Persistent=true` for missed runs, and stores only scheduler metadata in
-`/etc/promptwall/evidence-pack.env`.
+`/etc/redactwall/evidence-pack.env`.
 
 For vendor-risk or procurement review, export the Security Trust Package. It is
 not a live examiner evidence pack; it is a sanitized control and dependency
@@ -974,7 +974,7 @@ artifact with validation commands, security questionnaire answers, documentation
 pointers, and a CycloneDX-style SBOM inventory:
 
 ```powershell
-npm run security:package:zip -- C:\PromptWall\security-packages
+npm run security:package:zip -- C:\RedactWall\security-packages
 ```
 
 Security Admins can also download it from **Audit Log > Security Trust Package**
@@ -990,7 +990,7 @@ Blocked prompt/file events, response leakage, hidden-instruction blocks, and fai
 
 Sensor version posture gaps are also alertable. If browser extension, endpoint
 agent, or MCP guard events show mixed versions or missing version metadata,
-PromptWall sends a forced `SENSOR_VERSION_GAP` alert with bounded source,
+RedactWall sends a forced `SENSOR_VERSION_GAP` alert with bounded source,
 version, and platform metadata only.
 
 Set `SIEM_POSTURE_FEED_ENABLED=true` to emit automatic sanitized
@@ -1045,33 +1045,33 @@ approvals to notify a queue, chat channel, SOAR workflow, or ticketing bridge:
 
 | Setting | Purpose |
 | --- | --- |
-| `PROMPTWALL_APPROVAL_NOTIFY_WEBHOOK_URL` or `APPROVAL_NOTIFY_WEBHOOK_URL` | Generic sanitized JSON webhook. |
-| `PROMPTWALL_APPROVAL_NOTIFY_WEBHOOK_TOKEN` or `APPROVAL_NOTIFY_WEBHOOK_TOKEN` | Optional bearer token for the generic webhook. |
-| `PROMPTWALL_APPROVAL_SLACK_WEBHOOK_URL` or `APPROVAL_SLACK_WEBHOOK_URL` | Slack incoming webhook. |
-| `PROMPTWALL_APPROVAL_TEAMS_WEBHOOK_URL` or `APPROVAL_TEAMS_WEBHOOK_URL` | Microsoft Teams webhook. |
-| `PROMPTWALL_APPROVAL_TICKET_WEBHOOK_URL` or `APPROVAL_TICKET_WEBHOOK_URL` | Sanitized ticket bridge webhook for Jira, Linear, ServiceNow, SOAR, or internal ticketing middleware. |
-| `PROMPTWALL_APPROVAL_TICKET_WEBHOOK_TOKEN` or `APPROVAL_TICKET_WEBHOOK_TOKEN` | Optional bearer token for the ticket bridge. |
-| `PROMPTWALL_APPROVAL_TICKET_SYSTEM` or `APPROVAL_TICKET_SYSTEM` | Optional system label such as `jira`, `linear`, `servicenow`, or `generic`. |
-| `PROMPTWALL_APPROVAL_TICKET_PROJECT` or `APPROVAL_TICKET_PROJECT` | Optional project or queue key passed to the ticket bridge. |
-| `PROMPTWALL_APPROVAL_TICKET_ISSUE_TYPE` or `APPROVAL_TICKET_ISSUE_TYPE` | Optional issue type; defaults to `Security Review`. |
-| `PROMPTWALL_APPROVAL_JIRA_BASE_URL` or `APPROVAL_JIRA_BASE_URL` | Optional Jira Cloud base URL for direct sanitized issue creation. |
-| `PROMPTWALL_APPROVAL_JIRA_EMAIL` or `APPROVAL_JIRA_EMAIL` | Jira account email used with an API token. |
-| `PROMPTWALL_APPROVAL_JIRA_API_TOKEN` or `APPROVAL_JIRA_API_TOKEN` | Jira API token; keep in deployment secrets. |
-| `PROMPTWALL_APPROVAL_JIRA_PROJECT_KEY` or `APPROVAL_JIRA_PROJECT_KEY` | Jira project key for approval workflow issues. |
-| `PROMPTWALL_APPROVAL_JIRA_ISSUE_TYPE` or `APPROVAL_JIRA_ISSUE_TYPE` | Jira issue type, defaulting to `Task`. |
-| `PROMPTWALL_APPROVAL_LINEAR_API_KEY` or `APPROVAL_LINEAR_API_KEY` | Optional Linear API key for direct sanitized issue creation. |
-| `PROMPTWALL_APPROVAL_LINEAR_TEAM_ID` or `APPROVAL_LINEAR_TEAM_ID` | Linear team id for approval workflow issues. |
-| `PROMPTWALL_APPROVAL_LINEAR_STATE_ID` or `APPROVAL_LINEAR_STATE_ID` | Optional Linear state id. |
-| `PROMPTWALL_APPROVAL_LINEAR_PROJECT_ID` or `APPROVAL_LINEAR_PROJECT_ID` | Optional Linear project id. |
-| `PROMPTWALL_APPROVAL_LINEAR_LABEL_IDS` or `APPROVAL_LINEAR_LABEL_IDS` | Optional comma-separated Linear label ids. |
-| `PROMPTWALL_APPROVAL_SMTP_HOST` or `APPROVAL_SMTP_HOST` | SMTP relay host for plain-text sanitized approval email. |
-| `PROMPTWALL_APPROVAL_SMTP_PORT` or `APPROVAL_SMTP_PORT` | SMTP relay port; defaults to `587`, or `465` when implicit TLS is enabled. |
-| `PROMPTWALL_APPROVAL_SMTP_FROM` or `APPROVAL_SMTP_FROM` | Sender address for approval notifications. |
-| `PROMPTWALL_APPROVAL_SMTP_TO` or `APPROVAL_SMTP_TO` | Comma- or semicolon-separated reviewer distribution-list addresses. |
-| `PROMPTWALL_APPROVAL_SMTP_USERNAME` or `APPROVAL_SMTP_USERNAME` | Optional SMTP username. |
-| `PROMPTWALL_APPROVAL_SMTP_PASSWORD` or `APPROVAL_SMTP_PASSWORD` | Optional SMTP password. |
-| `PROMPTWALL_APPROVAL_SMTP_SECURE` or `APPROVAL_SMTP_SECURE` | Set `true` for implicit TLS, usually port `465`. |
-| `PROMPTWALL_APPROVAL_SMTP_ALLOW_INSECURE` or `APPROVAL_SMTP_ALLOW_INSECURE` | Set `true` only for a trusted local relay without TLS. |
+| `REDACTWALL_APPROVAL_NOTIFY_WEBHOOK_URL` or `APPROVAL_NOTIFY_WEBHOOK_URL` | Generic sanitized JSON webhook. |
+| `REDACTWALL_APPROVAL_NOTIFY_WEBHOOK_TOKEN` or `APPROVAL_NOTIFY_WEBHOOK_TOKEN` | Optional bearer token for the generic webhook. |
+| `REDACTWALL_APPROVAL_SLACK_WEBHOOK_URL` or `APPROVAL_SLACK_WEBHOOK_URL` | Slack incoming webhook. |
+| `REDACTWALL_APPROVAL_TEAMS_WEBHOOK_URL` or `APPROVAL_TEAMS_WEBHOOK_URL` | Microsoft Teams webhook. |
+| `REDACTWALL_APPROVAL_TICKET_WEBHOOK_URL` or `APPROVAL_TICKET_WEBHOOK_URL` | Sanitized ticket bridge webhook for Jira, Linear, ServiceNow, SOAR, or internal ticketing middleware. |
+| `REDACTWALL_APPROVAL_TICKET_WEBHOOK_TOKEN` or `APPROVAL_TICKET_WEBHOOK_TOKEN` | Optional bearer token for the ticket bridge. |
+| `REDACTWALL_APPROVAL_TICKET_SYSTEM` or `APPROVAL_TICKET_SYSTEM` | Optional system label such as `jira`, `linear`, `servicenow`, or `generic`. |
+| `REDACTWALL_APPROVAL_TICKET_PROJECT` or `APPROVAL_TICKET_PROJECT` | Optional project or queue key passed to the ticket bridge. |
+| `REDACTWALL_APPROVAL_TICKET_ISSUE_TYPE` or `APPROVAL_TICKET_ISSUE_TYPE` | Optional issue type; defaults to `Security Review`. |
+| `REDACTWALL_APPROVAL_JIRA_BASE_URL` or `APPROVAL_JIRA_BASE_URL` | Optional Jira Cloud base URL for direct sanitized issue creation. |
+| `REDACTWALL_APPROVAL_JIRA_EMAIL` or `APPROVAL_JIRA_EMAIL` | Jira account email used with an API token. |
+| `REDACTWALL_APPROVAL_JIRA_API_TOKEN` or `APPROVAL_JIRA_API_TOKEN` | Jira API token; keep in deployment secrets. |
+| `REDACTWALL_APPROVAL_JIRA_PROJECT_KEY` or `APPROVAL_JIRA_PROJECT_KEY` | Jira project key for approval workflow issues. |
+| `REDACTWALL_APPROVAL_JIRA_ISSUE_TYPE` or `APPROVAL_JIRA_ISSUE_TYPE` | Jira issue type, defaulting to `Task`. |
+| `REDACTWALL_APPROVAL_LINEAR_API_KEY` or `APPROVAL_LINEAR_API_KEY` | Optional Linear API key for direct sanitized issue creation. |
+| `REDACTWALL_APPROVAL_LINEAR_TEAM_ID` or `APPROVAL_LINEAR_TEAM_ID` | Linear team id for approval workflow issues. |
+| `REDACTWALL_APPROVAL_LINEAR_STATE_ID` or `APPROVAL_LINEAR_STATE_ID` | Optional Linear state id. |
+| `REDACTWALL_APPROVAL_LINEAR_PROJECT_ID` or `APPROVAL_LINEAR_PROJECT_ID` | Optional Linear project id. |
+| `REDACTWALL_APPROVAL_LINEAR_LABEL_IDS` or `APPROVAL_LINEAR_LABEL_IDS` | Optional comma-separated Linear label ids. |
+| `REDACTWALL_APPROVAL_SMTP_HOST` or `APPROVAL_SMTP_HOST` | SMTP relay host for plain-text sanitized approval email. |
+| `REDACTWALL_APPROVAL_SMTP_PORT` or `APPROVAL_SMTP_PORT` | SMTP relay port; defaults to `587`, or `465` when implicit TLS is enabled. |
+| `REDACTWALL_APPROVAL_SMTP_FROM` or `APPROVAL_SMTP_FROM` | Sender address for approval notifications. |
+| `REDACTWALL_APPROVAL_SMTP_TO` or `APPROVAL_SMTP_TO` | Comma- or semicolon-separated reviewer distribution-list addresses. |
+| `REDACTWALL_APPROVAL_SMTP_USERNAME` or `APPROVAL_SMTP_USERNAME` | Optional SMTP username. |
+| `REDACTWALL_APPROVAL_SMTP_PASSWORD` or `APPROVAL_SMTP_PASSWORD` | Optional SMTP password. |
+| `REDACTWALL_APPROVAL_SMTP_SECURE` or `APPROVAL_SMTP_SECURE` | Set `true` for implicit TLS, usually port `465`. |
+| `REDACTWALL_APPROVAL_SMTP_ALLOW_INSECURE` or `APPROVAL_SMTP_ALLOW_INSECURE` | Set `true` only for a trusted local relay without TLS. |
 
 Approval notifications are separate from SIEM alerts. They include query id,
 owner group, owner role, SLA, source, channel, destination, severity, detector
@@ -1085,7 +1085,7 @@ from the same sanitized summary and description when customers do not want to
 operate middleware. SMTP email uses the same sanitized routing fields as the
 webhook payload and strips mail-header newlines before delivery.
 
-Delivery is best-effort. PromptWall records `notificationStatus`,
+Delivery is best-effort. RedactWall records `notificationStatus`,
 `notificationLastAttemptAt`, `notificationAttemptCount`, and bounded channel
 names on the query, then writes an audit event such as
 `APPROVAL_NOTIFICATION_SENT` or `APPROVAL_NOTIFICATION_FAILED`. Webhook URLs,
@@ -1136,7 +1136,7 @@ sightings:
 ```powershell
 $env:INGEST_API_KEY = '<sensor-ingest-key>'
 npm run discovery:import -- --input .\proxy-ai-export.csv --vendor zscaler --dry-run
-npm run discovery:import -- --input .\proxy-ai-export.csv --vendor zscaler --sentinel-url http://localhost:4000
+npm run discovery:import -- --input .\proxy-ai-export.csv --vendor zscaler --redactwall-url http://localhost:4000
 ```
 
 Prefer `--dry-run` first. Dry-run output lists only host names and counts, never
@@ -1147,59 +1147,59 @@ raw URLs, prompt text, file paths, or request payloads.
 Use the enforced AI LLM Gateway for private apps and internal agents that can
 point at a local OpenAI-compatible, Anthropic Messages, or Gemini
 `generateContent` endpoint. The gateway requires a client token, keeps provider
-API keys on the gateway host, gates prompts through PromptWall before upstream
+API keys on the gateway host, gates prompts through RedactWall before upstream
 traffic, scans model responses before release, and fails closed when required
 inspection is unavailable.
 
 For a single local worker:
 
 ```powershell
-$env:PROMPTWALL_GATEWAY_TOKEN = '<client-token>'
-$env:PROMPTWALL_GATEWAY_UPSTREAM_API_KEY = '<provider-key>'
-node scripts/ai-llm-gateway.js --sentinel http://127.0.0.1:4000 --upstream https://api.openai.com --port 4182
+$env:REDACTWALL_GATEWAY_TOKEN = '<client-token>'
+$env:REDACTWALL_GATEWAY_UPSTREAM_API_KEY = '<provider-key>'
+node scripts/ai-llm-gateway.js --redactwall http://127.0.0.1:4000 --upstream https://api.openai.com --port 4182
 ```
 
 For direct Amazon Bedrock Runtime, configure SigV4 signing on the gateway host
 and keep AWS credentials out of caller requests:
 
 ```powershell
-$env:PROMPTWALL_GATEWAY_TOKEN = '<client-token>'
+$env:REDACTWALL_GATEWAY_TOKEN = '<client-token>'
 $env:AWS_ACCESS_KEY_ID = '<bedrock-runtime-access-key>'
 $env:AWS_SECRET_ACCESS_KEY = '<bedrock-runtime-secret-key>'
 $env:AWS_SESSION_TOKEN = '<optional-session-token>'
-node scripts/ai-llm-gateway.js --sentinel http://127.0.0.1:4000 --upstream https://bedrock-runtime.us-east-1.amazonaws.com --upstream-auth-scheme aws-sigv4 --aws-region us-east-1 --allowed-models 'anthropic.claude-*,amazon.nova-*'
+node scripts/ai-llm-gateway.js --redactwall http://127.0.0.1:4000 --upstream https://bedrock-runtime.us-east-1.amazonaws.com --upstream-auth-scheme aws-sigv4 --aws-region us-east-1 --allowed-models 'anthropic.claude-*,amazon.nova-*'
 ```
 
 Supported Bedrock paths are `/model/{modelId}/converse`,
 `/model/{modelId}/converse-stream`, `/model/{modelId}/invoke`, and
-`/model/{modelId}/invoke-with-response-stream`. PromptWall inspects text
+`/model/{modelId}/invoke-with-response-stream`. RedactWall inspects text
 content blocks and blocks Bedrock image/document/video/tool blocks by default
 because those bytes are not locally inspected by this gateway.
 
 For multiple gateway workers or hosts, start the shared limiter service first:
 
 ```powershell
-$env:PROMPTWALL_RATE_LIMITER_TOKEN = '<shared-limiter-token>'
-$env:PROMPTWALL_RATE_LIMITER_DB = 'C:\PromptWall\data\gateway-shared-rate-limiter.db'
+$env:REDACTWALL_RATE_LIMITER_TOKEN = '<shared-limiter-token>'
+$env:REDACTWALL_RATE_LIMITER_DB = 'C:\RedactWall\data\gateway-shared-rate-limiter.db'
 npm run gateway:rate-limiter -- --host 127.0.0.1 --port 4183
 ```
 
 Then point each gateway at it:
 
 ```powershell
-$env:PROMPTWALL_GATEWAY_RATE_LIMIT_STORE = 'http'
-$env:PROMPTWALL_GATEWAY_RATE_LIMIT_URL = 'http://127.0.0.1:4183/check'
-$env:PROMPTWALL_GATEWAY_RATE_LIMIT_TOKEN = '<shared-limiter-token>'
-node scripts/ai-llm-gateway.js --sentinel http://127.0.0.1:4000 --upstream https://api.openai.com --port 4182
+$env:REDACTWALL_GATEWAY_RATE_LIMIT_STORE = 'http'
+$env:REDACTWALL_GATEWAY_RATE_LIMIT_URL = 'http://127.0.0.1:4183/check'
+$env:REDACTWALL_GATEWAY_RATE_LIMIT_TOKEN = '<shared-limiter-token>'
+node scripts/ai-llm-gateway.js --redactwall http://127.0.0.1:4000 --upstream https://api.openai.com --port 4182
 ```
 
 For a pilot HA gateway layer, run the dedicated compose stack:
 
 ```powershell
-$env:PROMPTWALL_GATEWAY_TOKEN = '<client-token>'
-$env:PROMPTWALL_RATE_LIMITER_TOKEN = '<shared-limiter-token>'
+$env:REDACTWALL_GATEWAY_TOKEN = '<client-token>'
+$env:REDACTWALL_RATE_LIMITER_TOKEN = '<shared-limiter-token>'
 $env:INGEST_API_KEY = '<sensor-ingest-key>'
-$env:PROMPTWALL_GATEWAY_UPSTREAM_API_KEY = '<provider-key>'
+$env:REDACTWALL_GATEWAY_UPSTREAM_API_KEY = '<provider-key>'
 docker compose -f docker-compose.gateway-ha.yml up -d --build
 Invoke-RestMethod http://127.0.0.1:4182/readyz
 npm run gateway:ha:smoke
@@ -1208,15 +1208,15 @@ npm run gateway:ha:smoke
 `docker-compose.gateway-ha.yml` publishes only the gateway load balancer,
 keeps the limiter private, persists hashed limiter counters in
 `gateway-limiter-data`, disables load-balancer access logs, and uses the same
-read-only/no-new-privileges container posture as the main PromptWall compose
+read-only/no-new-privileges container posture as the main RedactWall compose
 path.
 
 When a pilot needs active-active limiter replicas, use a managed Redis or Valkey
 backend and scale the private limiter service:
 
 ```powershell
-$env:PROMPTWALL_RATE_LIMITER_STORE = 'redis'
-$env:PROMPTWALL_RATE_LIMITER_REDIS_URL = 'rediss://:<password>@redis.internal.example:6380/0'
+$env:REDACTWALL_RATE_LIMITER_STORE = 'redis'
+$env:REDACTWALL_RATE_LIMITER_REDIS_URL = 'rediss://:<password>@redis.internal.example:6380/0'
 docker compose -f docker-compose.gateway-ha.yml up -d --build --scale ai-gateway-limiter=2
 Invoke-RestMethod http://127.0.0.1:4182/readyz
 ```
@@ -1264,14 +1264,14 @@ destination of `Desktop AI` matches `desktop-ai`.
 
 ## Retention Operations
 
-PromptWall retains raw approval prompts and token vaults only for records that need review or rehydration. Set `rawRetentionDays` in policy to define how long finalized `approved`, `denied`, and `redacted` records keep those sealed fields. The default is 30 days.
+RedactWall retains raw approval prompts and token vaults only for records that need review or rehydration. Set `rawRetentionDays` in policy to define how long finalized `approved`, `denied`, and `redacted` records keep those sealed fields. The default is 30 days.
 
 Revealing a retained raw prompt requires an active Security Admin session, a CSRF token, and password confirmation. Approving a held prompt release requires an active Security Admin session or an optional approver session assigned to that item, plus CSRF and password confirmation. Successful reveals, failed reveal confirmations, approved releases, and failed approval confirmations are written to the audit log.
 
 Sensors or proxy bridges that poll `/api/v1/status/:id` for a held prompt, or
 call `/api/v1/rehydrate` for a tokenized response, must send the
 `x-release-token` header returned by the original gate or file-scan response.
-PromptWall stores only the token hash, rejects query-string release tokens,
+RedactWall stores only the token hash, rejects query-string release tokens,
 and the reference Squid/ICAP bridge forwards the header automatically through
 `awaitRelease`.
 
@@ -1280,7 +1280,7 @@ The server runs a retention purge on startup and then hourly. Security Admins ca
 ```powershell
 Invoke-RestMethod `
   -Method Post `
-  -Uri "https://promptwall.example.com/api/retention/purge" `
+  -Uri "https://redactwall.example.com/api/retention/purge" `
   -WebSession $adminSession `
   -Headers @{ "x-csrf-token" = $csrfToken }
 ```
@@ -1294,8 +1294,8 @@ customer-silo stack. For a shared or highly available control plane, the same
 synchronous storage interface runs on Postgres:
 
 ```
-SENTINEL_DB_DRIVER=postgres
-SENTINEL_DATABASE_URL=postgresql://promptwall_app@db.internal:5432/promptwall
+REDACTWALL_DB_DRIVER=postgres
+REDACTWALL_DATABASE_URL=postgresql://redactwall_app@db.internal:5432/redactwall
 ```
 
 For the full operator runbook — application-role setup, migration workflow,
@@ -1310,10 +1310,10 @@ What you get on the Postgres driver:
   audit table raise, and the hash chain still verifies end to end.
 - **Row-level tenant isolation**: the `queries` table carries an indexed
   `orgId` column with `FORCE ROW LEVEL SECURITY`; setting the
-  `promptwall.org_id` session context confines reads and writes to one tenant.
+  `redactwall.org_id` session context confines reads and writes to one tenant.
   Run the application as a NON-superuser role (superusers bypass RLS).
 - **Multiple control-plane replicas** can share one Postgres; set the same
-  `SENTINEL_SECRET` on every instance so sessions and receipts stay valid
+  `REDACTWALL_SECRET` on every instance so sessions and receipts stay valid
   across replicas, and put the replicas behind your load balancer.
 
 Backups on Postgres work through the same tooling as SQLite: `npm run backup`
@@ -1337,14 +1337,14 @@ The command writes a `.db` backup plus a `.manifest.json` file with the backup h
 Verify a backup before you rely on it:
 
 ```bash
-npm run backup:verify -- backups/sentinel-YYYY-MM-DDTHH-MM-SS-sssZ.db
+npm run backup:verify -- backups/redactwall-YYYY-MM-DDTHH-MM-SS-sssZ.db
 ```
 
-For an offline restore, stop the PromptWall process, restore to a new local-disk path, verify it, and then point `SENTINEL_DB_PATH` at the restored file:
+For an offline restore, stop the RedactWall process, restore to a new local-disk path, verify it, and then point `REDACTWALL_DB_PATH` at the restored file:
 
 ```bash
-npm run backup:restore -- backups/sentinel-YYYY-MM-DDTHH-MM-SS-sssZ.db data/restored-sentinel.db
-npm run backup:verify -- data/restored-sentinel.db
+npm run backup:restore -- backups/redactwall-YYYY-MM-DDTHH-MM-SS-sssZ.db data/restored-redactwall.db
+npm run backup:verify -- data/restored-redactwall.db
 ```
 
 Use `--force` only when intentionally replacing an existing restore target.
@@ -1354,8 +1354,8 @@ records both statuses without embedding the `.db` content:
 
 ```bash
 npm run evidence:pack -- evidence-packs \
-  backups/sentinel-YYYY-MM-DDTHH-MM-SS-sssZ.db \
-  data/restored-sentinel.db
+  backups/redactwall-YYYY-MM-DDTHH-MM-SS-sssZ.db \
+  data/restored-redactwall.db
 ```
 
 ### Scheduled Backups
@@ -1366,18 +1366,18 @@ scheduled task (defaults: daily at 2:00 AM, `backups/` under the repo,
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install-backup-task.ps1 `
-  -Cadence Daily -At '2:00 AM' -BackupDir 'D:\promptwall-backups' -RetentionDays 30
+  -Cadence Daily -At '2:00 AM' -BackupDir 'D:\redactwall-backups' -RetentionDays 30
 ```
 
 Remove it with the same script and `-Uninstall`.
 
-On Linux, install a systemd service + timer pair (`promptwall-backup.timer`).
+On Linux, install a systemd service + timer pair (`redactwall-backup.timer`).
 `npm` mode runs `npm run backup` from a repo checkout; `docker` mode runs the
 backup inside the customer-silo container against the `/data` mount:
 
 ```bash
 sudo bash scripts/install-backup-systemd.sh --mode npm \
-  --project-dir /opt/promptwall --backup-dir /var/backups/promptwall \
+  --project-dir /opt/redactwall --backup-dir /var/backups/redactwall \
   --retention-days 30 --on-calendar daily
 ```
 
@@ -1417,11 +1417,11 @@ The backup and drill cover only the SQLite evidence store. A full
 disaster-recovery kit must also capture, through your configuration
 management or secret manager:
 
-- `.env` secrets — above all `SENTINEL_DATA_KEY` / `SENTINEL_SECRET`
+- `.env` secrets — above all `REDACTWALL_DATA_KEY` / `REDACTWALL_SECRET`
   (without them, sealed raw prompts in a restored store cannot be revealed),
   plus `ADMIN_PASSWORD`, `INGEST_API_KEY`, and any SCIM/OIDC credentials.
-- The policy file (`config/policy.json` or the `SENTINEL_POLICY_PATH`
-  target) and custom detectors (`SENTINEL_CUSTOM_DETECTORS_PATH`).
+- The policy file (`config/policy.json` or the `REDACTWALL_POLICY_PATH`
+  target) and custom detectors (`REDACTWALL_CUSTOM_DETECTORS_PATH`).
 - Other `config/` artifacts such as `evidence-schedule.json`.
 
 Store those artifacts alongside the `.db` backups and include them when you

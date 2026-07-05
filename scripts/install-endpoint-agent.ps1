@@ -1,22 +1,22 @@
 param(
-  [string]$TaskName = "PromptWallEndpointAgent",
+  [string]$TaskName = "RedactWallEndpointAgent",
   [Alias("SentinelUrl")]
-  [string]$PromptWallUrl = "http://localhost:4000",
+  [string]$RedactWallUrl = "http://localhost:4000",
   [Parameter(Mandatory = $true)]
   [string]$IngestKey,
-  [string]$WatchDir = "$env:USERPROFILE\PromptWallWatch",
-  [string]$HandoffDir = "$env:LOCALAPPDATA\PromptWall\native-handoff",
+  [string]$WatchDir = "$env:USERPROFILE\RedactWallWatch",
+  [string]$HandoffDir = "$env:LOCALAPPDATA\RedactWall\native-handoff",
   [string]$HandoffSecret = "",
   [switch]$InstallDesktopCollector,
   [string]$DesktopCollectorDestination = "",
-  [string]$DesktopCollectorMenuName = "PromptWall Protected Upload",
-  [string]$DesktopCollectorKeyName = "PromptWallProtectedUpload",
+  [string]$DesktopCollectorMenuName = "RedactWall Protected Upload",
+  [string]$DesktopCollectorKeyName = "RedactWallProtectedUpload",
   [switch]$InstallClipboardGuard,
   [switch]$ClipboardGuardClearOnBlock,
   [string]$ClipboardGuardDestination = "",
-  [string]$ClipboardGuardShortcutName = "PromptWall Clipboard Guard",
+  [string]$ClipboardGuardShortcutName = "RedactWall Clipboard Guard",
   [switch]$ClipboardGuardDesktopShortcut,
-  [string]$ConfigDir = "$env:LOCALAPPDATA\PromptWall",
+  [string]$ConfigDir = "$env:LOCALAPPDATA\RedactWall",
   [string]$RepoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path,
   [string]$OcrCommand = "",
   [switch]$SkipOcr,
@@ -59,11 +59,11 @@ if ((Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) -and -
 }
 
 $configLines = @(
-  "# PromptWall endpoint agent local config",
-  "PROMPTWALL_URL=$PromptWallUrl",
+  "# RedactWall endpoint agent local config",
+  "REDACTWALL_URL=$RedactWallUrl",
   "INGEST_API_KEY=$IngestKey",
   "ENDPOINT_AGENT_WATCH_DIR=$watchRoot",
-  "SENTINEL_REQUEST_TIMEOUT_MS=10000"
+  "REDACTWALL_REQUEST_TIMEOUT_MS=10000"
 )
 if ($HandoffSecret) {
   $configLines += "ENDPOINT_AGENT_HANDOFF_DIR=$handoffRoot"
@@ -148,7 +148,7 @@ function Install-EndpointStartupShortcut {
   $shortcut.Arguments = $Arguments
   $shortcut.WorkingDirectory = $WorkingDirectory
   $shortcut.WindowStyle = 7
-  $shortcut.Description = "PromptWall endpoint file sensor"
+  $shortcut.Description = "RedactWall endpoint file sensor"
   $shortcut.Save()
   return $shortcutPath
 }
@@ -171,17 +171,17 @@ function Start-EndpointFallbackProcess {
   $node = Get-Command node -ErrorAction Stop
   $agent = Join-Path $RepoRoot "sensors\endpoint-agent\agent.js"
   $errLog = Join-Path (Split-Path -Parent $LogPath) "endpoint-agent.err.log"
-  $previousEnvPath = $env:PROMPTWALL_ENV_PATH
-  $previousLegacyEnvPath = $env:SENTINEL_ENV_PATH
-  $env:PROMPTWALL_ENV_PATH = $ConfigPath
-  Remove-Item Env:\SENTINEL_ENV_PATH -ErrorAction SilentlyContinue
+  $previousEnvPath = $env:REDACTWALL_ENV_PATH
+  $previousLegacyEnvPath = $env:REDACTWALL_ENV_PATH
+  $env:REDACTWALL_ENV_PATH = $ConfigPath
+  Remove-Item Env:\REDACTWALL_ENV_PATH -ErrorAction SilentlyContinue
   try {
     $proc = Start-Process -FilePath $node.Source -ArgumentList "`"$agent`"" -WorkingDirectory $RepoRoot -WindowStyle Hidden -RedirectStandardOutput $LogPath -RedirectStandardError $errLog -PassThru
   } finally {
-    if ($null -eq $previousEnvPath) { Remove-Item Env:\PROMPTWALL_ENV_PATH -ErrorAction SilentlyContinue }
-    else { $env:PROMPTWALL_ENV_PATH = $previousEnvPath }
-    if ($null -eq $previousLegacyEnvPath) { Remove-Item Env:\SENTINEL_ENV_PATH -ErrorAction SilentlyContinue }
-    else { $env:SENTINEL_ENV_PATH = $previousLegacyEnvPath }
+    if ($null -eq $previousEnvPath) { Remove-Item Env:\REDACTWALL_ENV_PATH -ErrorAction SilentlyContinue }
+    else { $env:REDACTWALL_ENV_PATH = $previousEnvPath }
+    if ($null -eq $previousLegacyEnvPath) { Remove-Item Env:\REDACTWALL_ENV_PATH -ErrorAction SilentlyContinue }
+    else { $env:REDACTWALL_ENV_PATH = $previousLegacyEnvPath }
   }
   Set-Content -LiteralPath $PidPath -Encoding ascii -Value ([string]$proc.Id)
   return $proc
@@ -193,7 +193,7 @@ $settings = New-ScheduledTaskSettingsSet -RestartCount 3 -RestartInterval (New-T
 $principal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType Interactive -RunLevel Limited
 $startupMode = "scheduled task"
 try {
-  Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Description "PromptWall endpoint file sensor" | Out-Null
+  Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Description "RedactWall endpoint file sensor" | Out-Null
   Start-ScheduledTask -TaskName $TaskName
 } catch {
   if ($_.Exception.Message -notmatch "Access is denied|0x80070005") {

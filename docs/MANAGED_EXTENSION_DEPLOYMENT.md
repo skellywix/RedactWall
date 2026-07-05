@@ -5,7 +5,7 @@ This guide bridges the local demo extension to a controlled client pilot.
 For a sales demo, `chrome://extensions` plus Load unpacked is fine. For a
 client pilot, use managed deployment so users cannot silently disable
 protection and so identity/server configuration comes from IT instead of the
-employee. PromptWall now builds browser-specific packages for Chrome, Edge, and Firefox
+employee. RedactWall now builds browser-specific packages for Chrome, Edge, and Firefox
 from the same source extension.
 
 ## Pilot Deployment Shape
@@ -46,13 +46,13 @@ managed-storage examples, checks the browser release checklist, and writes a
 prompt-free release-readiness JSON file. It builds all three target packages:
 
 ```text
-dist/browser-extension/promptwall-chrome-extension-v<version>.zip
-dist/browser-extension/promptwall-chrome-extension-v<version>.manifest.json
-dist/browser-extension/promptwall-edge-extension-v<version>.zip
-dist/browser-extension/promptwall-edge-extension-v<version>.manifest.json
-dist/browser-extension/promptwall-firefox-extension-v<version>.zip
-dist/browser-extension/promptwall-firefox-extension-v<version>.manifest.json
-dist/browser-extension/promptwall-browser-extension-v<version>.release-readiness.json
+dist/browser-extension/redactwall-chrome-extension-v<version>.zip
+dist/browser-extension/redactwall-chrome-extension-v<version>.manifest.json
+dist/browser-extension/redactwall-edge-extension-v<version>.zip
+dist/browser-extension/redactwall-edge-extension-v<version>.manifest.json
+dist/browser-extension/redactwall-firefox-extension-v<version>.zip
+dist/browser-extension/redactwall-firefox-extension-v<version>.manifest.json
+dist/browser-extension/redactwall-browser-extension-v<version>.release-readiness.json
 ```
 
 For package-only development checks, run:
@@ -100,20 +100,20 @@ npm run release:extension:check -- dist/browser-extension --chrome-extension-id 
 That writes prompt-free force-install policies:
 
 ```text
-dist/browser-extension/promptwall-chrome-extension-v<version>.extension-settings.json
-dist/browser-extension/promptwall-edge-extension-v<version>.extension-settings.json
+dist/browser-extension/redactwall-chrome-extension-v<version>.extension-settings.json
+dist/browser-extension/redactwall-edge-extension-v<version>.extension-settings.json
 ```
 
 For Firefox, provide the customer-approved signed XPI HTTPS URL:
 
 ```bash
-npm run release:extension:check -- dist/browser-extension --firefox-install-url https://downloads.customer.example/promptwall-firefox.xpi
+npm run release:extension:check -- dist/browser-extension --firefox-install-url https://downloads.customer.example/redactwall-firefox.xpi
 ```
 
 That writes:
 
 ```text
-dist/browser-extension/promptwall-firefox-extension-v<version>.extension-settings.json
+dist/browser-extension/redactwall-firefox-extension-v<version>.extension-settings.json
 ```
 
 Generated force-install files contain only extension IDs, install or update
@@ -126,7 +126,7 @@ Use `docs/examples/browser-managed-storage.policy.json` for Chrome and Edge
 managed storage values consumed by `sensors/browser-extension/schema.json`.
 
 Use `docs/examples/firefox-managed-storage.policy.json` for Firefox enterprise
-policies. The packaged Firefox extension id is `promptwall@example.com`, so the
+policies. The packaged Firefox extension id is `redactwall@example.com`, so the
 managed-storage policy must use the same key.
 
 Never put a real ingest key in source control or a screenshot. Generate a long
@@ -134,7 +134,7 @@ random ingest key per pilot and rotate it after demos.
 
 Recommended values:
 
-- `serverUrl`: HTTPS URL of the PromptWall control plane.
+- `serverUrl`: HTTPS URL of the RedactWall control plane.
 - `ingestKey`: pilot-specific ingest key, stored in MDM or browser policy.
 - `orgId`: institution or tenant identifier.
 - `email`: end-user email from directory attributes, preferred for the audit log.
@@ -150,7 +150,7 @@ On a managed test device:
    - Firefox: `about:policies`
 2. Confirm the extension is force-installed.
 3. Confirm managed storage is present.
-4. Open the PromptWall popup and confirm protection is enabled.
+4. Open the RedactWall popup and confirm protection is enabled.
 5. Open ChatGPT or Claude and send a benign prompt.
 6. Confirm the dashboard Coverage tab shows `browser_extension` install health.
    A healthy managed install should show passing checks for managed config,
@@ -159,7 +159,7 @@ On a managed test device:
 7. Confirm the dashboard shows the correct user, org, version, and platform
    (`chrome_mv3`, `edge_mv3`, or `firefox_mv3`).
 8. Paste synthetic PII and confirm a block or redaction.
-9. Visit an unreviewed AI host and confirm PromptWall blocks it by default, then
+9. Visit an unreviewed AI host and confirm RedactWall blocks it by default, then
    records the reviewed allow/govern/block decision after a Security Admin
    enters a reason.
 

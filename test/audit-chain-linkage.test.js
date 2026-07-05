@@ -14,7 +14,7 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 
-process.env.SENTINEL_DB_PATH = path.join(os.tmpdir(), 'ps-audit-link-test-' + crypto.randomBytes(6).toString('hex') + '.db');
+process.env.REDACTWALL_DB_PATH = path.join(os.tmpdir(), 'ps-audit-link-test-' + crypto.randomBytes(6).toString('hex') + '.db');
 const db = require('../server/db');
 const integrity = require('../server/audit-integrity');
 

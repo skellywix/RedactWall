@@ -27,51 +27,41 @@ function composeEnvironment() {
 test('docker compose passes production setup secrets into the container', () => {
   const env = composeEnvironment();
   for (const key of [
-    'SENTINEL_SAAS_MODE',
-    'PROMPTWALL_SAAS_MODE',
-    'SENTINEL_TENANT_ID',
-    'PROMPTWALL_TENANT_ID',
-    'SENTINEL_SEAT_LIMIT',
-    'PROMPTWALL_SEAT_LIMIT',
-    'SENTINEL_REQUIRE_TENANT_CONTEXT',
-    'PROMPTWALL_REQUIRE_TENANT_CONTEXT',
-    'SENTINEL_REQUIRE_USER_IDENTITY',
-    'PROMPTWALL_REQUIRE_USER_IDENTITY',
+    'REDACTWALL_SAAS_MODE',
+    'REDACTWALL_TENANT_ID',
+    'REDACTWALL_SEAT_LIMIT',
+    'REDACTWALL_REQUIRE_TENANT_CONTEXT',
+    'REDACTWALL_REQUIRE_USER_IDENTITY',
     'ADMIN_USER',
     'ADMIN_PASSWORD',
     'ADMIN_TOTP_SECRET',
     'AUDITOR_USER',
     'AUDITOR_PASSWORD',
-    'SENTINEL_SECRET',
-    'PROMPTWALL_SECRET',
-    'SENTINEL_DATA_KEY',
-    'PROMPTWALL_DATA_KEY',
+    'REDACTWALL_SECRET',
+    'REDACTWALL_DATA_KEY',
     'INGEST_API_KEY',
-    'PROMPTWALL_INGEST_API_KEY',
-    'SENTINEL_POLICY_PATH',
-    'PROMPTWALL_POLICY_PATH',
-    'SENTINEL_CUSTOM_DETECTORS_PATH',
-    'PROMPTWALL_CUSTOM_DETECTORS_PATH',
+    'REDACTWALL_INGEST_API_KEY',
+    'REDACTWALL_POLICY_PATH',
+    'REDACTWALL_CUSTOM_DETECTORS_PATH',
     'SCIM_BEARER_TOKEN',
-    'PROMPTWALL_SCIM_BEARER_TOKEN',
-    'SENTINEL_REQUEST_TIMEOUT_MS',
-    'PROMPTWALL_REQUEST_TIMEOUT_MS',
+    'REDACTWALL_SCIM_BEARER_TOKEN',
+    'REDACTWALL_REQUEST_TIMEOUT_MS',
   ]) {
     assert.ok(env.has(key), key);
     assert.match(env.get(key), new RegExp(`\\$\\{${key}`), key);
   }
   assert.doesNotMatch(env.get('INGEST_API_KEY'), /dev-ingest-key/);
-  assert.doesNotMatch(env.get('SENTINEL_SAAS_MODE'), /false/);
-  assert.doesNotMatch(env.get('SENTINEL_REQUEST_TIMEOUT_MS'), /10000/);
+  assert.doesNotMatch(env.get('REDACTWALL_SAAS_MODE'), /false/);
+  assert.doesNotMatch(env.get('REDACTWALL_REQUEST_TIMEOUT_MS'), /10000/);
 });
 
 test('docker compose keeps sqlite state on a named local volume', () => {
   const env = composeEnvironment();
-  assert.strictEqual(env.get('SENTINEL_DB_PATH'), '/data/sentinel.db');
-  assert.strictEqual(env.get('SENTINEL_POLICY_PATH'), '${SENTINEL_POLICY_PATH:-/data/policy.json}');
-  assert.strictEqual(env.get('SENTINEL_CUSTOM_DETECTORS_PATH'), '${SENTINEL_CUSTOM_DETECTORS_PATH:-/data/custom-detectors.json}');
-  assert.match(compose, /-\s*promptwall-data:\/data/);
-  assert.match(compose, /^volumes:\r?\n\s+promptwall-data:/m);
+  assert.strictEqual(env.get('REDACTWALL_DB_PATH'), '/data/redactwall.db');
+  assert.strictEqual(env.get('REDACTWALL_POLICY_PATH'), '${REDACTWALL_POLICY_PATH:-/data/policy.json}');
+  assert.strictEqual(env.get('REDACTWALL_CUSTOM_DETECTORS_PATH'), '${REDACTWALL_CUSTOM_DETECTORS_PATH:-/data/custom-detectors.json}');
+  assert.match(compose, /-\s*redactwall-data:\/data/);
+  assert.match(compose, /^volumes:\r?\n\s+redactwall-data:/m);
   assert.doesNotMatch(compose, /\.\.?:\/data/);
 });
 
@@ -94,7 +84,7 @@ test('docker runtime is hardened for customer-silo operation', () => {
 test('docker image copies runtime files instead of the whole builder tree', () => {
   assert.doesNotMatch(dockerfile, /COPY --from=builder \/app \/app/);
   assert.match(dockerfile, /COPY --from=builder --chown=node:node \/app\/node_modules \.\/node_modules/);
-  assert.match(dockerfile, /SENTINEL_POLICY_PATH=\/data\/policy\.json/);
+  assert.match(dockerfile, /REDACTWALL_POLICY_PATH=\/data\/policy\.json/);
   assert.match(dockerfile, /NPM_CONFIG_CACHE=\/tmp\/\.npm/);
   for (const pattern of [/^test$/m, /^e2e$/m, /^docs$/m, /^PLANS$/m, /^dist$/m, /^data$/m]) {
     assert.match(dockerignore, pattern);
@@ -103,8 +93,8 @@ test('docker image copies runtime files instead of the whole builder tree', () =
 
 test('deployment docs describe compose readiness and persistent state', () => {
   assert.match(deployment, /Docker Compose/);
-  assert.match(deployment, /SENTINEL_DB_PATH` to\s+`\/data\/sentinel\.db`/);
-  assert.match(deployment, /SENTINEL_POLICY_PATH` to\s+`\/data\/policy\.json`/);
+  assert.match(deployment, /REDACTWALL_DB_PATH` to\s+`\/data\/redactwall\.db`/);
+  assert.match(deployment, /REDACTWALL_POLICY_PATH` to\s+`\/data\/policy\.json`/);
   assert.match(deployment, /checks `\/readyz` for container\s+health/);
   assert.match(deployment, /production preflight readiness is blocked/);
   assert.match(deployment, /read-only root filesystem/);

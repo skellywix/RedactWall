@@ -9,7 +9,7 @@ const fs = require('node:fs');
 
 // Isolate the SQLite store BEFORE requiring db.
 const dbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pw-catalog-'));
-process.env.SENTINEL_DB_PATH = path.join(dbDir, 'test.db');
+process.env.REDACTWALL_DB_PATH = path.join(dbDir, 'test.db');
 // Close the SQLite handle before deleting: Windows cannot unlink open files.
 test.after(() => {
   try { db._db.close(); } catch {}

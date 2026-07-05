@@ -1,6 +1,6 @@
 # Technician Production Deployment Guide
 
-This guide is for the technicians who install PromptWall for a paying
+This guide is for the technicians who install RedactWall for a paying
 customer and hand the environment over as production ready.
 
 Use it as the install-day runbook. `docs/DEPLOYMENT.md` and
@@ -41,23 +41,23 @@ The supported paid-customer deployment today is one AWS stack per customer:
 - Application Load Balancer at the edge.
 - Amazon Linux 2023 EC2 host running the Docker image.
 - Encrypted EBS-backed local disk mounted into the container at `/data`.
-- SQLite evidence store at `/data/sentinel.db`.
+- SQLite evidence store at `/data/redactwall.db`.
 - AWS Secrets Manager for admin, MFA, session, data encryption, and ingest
   secrets.
 - CloudWatch Logs for container logs.
 - Systems Manager Session Manager for operator access. No SSH ingress is
   required by the template.
 - App-level SaaS controls:
-  - `SENTINEL_SAAS_MODE=true`
-  - `SENTINEL_TENANT_ID=<customer-slug>`
-  - `SENTINEL_SEAT_LIMIT=<paid-seat-count>`
-  - `SENTINEL_REQUIRE_TENANT_CONTEXT=true`
-  - `SENTINEL_REQUIRE_USER_IDENTITY=true`
+  - `REDACTWALL_SAAS_MODE=true`
+  - `REDACTWALL_TENANT_ID=<customer-slug>`
+  - `REDACTWALL_SEAT_LIMIT=<paid-seat-count>`
+  - `REDACTWALL_REQUIRE_TENANT_CONTEXT=true`
+  - `REDACTWALL_REQUIRE_USER_IDENTITY=true`
 
-PromptWall also accepts `PROMPTWALL_*` aliases for those `SENTINEL_*` runtime
-keys, plus `PROMPTWALL_INGEST_API_KEY`, `PROMPTWALL_ENDPOINT_AGENT_WATCH_DIR`,
-`PROMPTWALL_SCIM_BEARER_TOKEN`, `PROMPTWALL_ENDPOINT_AGENT_HANDOFF_DIR`, and
-`PROMPTWALL_ENDPOINT_AGENT_HANDOFF_SECRET`. Use one key family per setting in a
+RedactWall also accepts `REDACTWALL_*` aliases for those `REDACTWALL_*` runtime
+keys, plus `REDACTWALL_INGEST_API_KEY`, `REDACTWALL_ENDPOINT_AGENT_WATCH_DIR`,
+`REDACTWALL_SCIM_BEARER_TOKEN`, `REDACTWALL_ENDPOINT_AGENT_HANDOFF_DIR`, and
+`REDACTWALL_ENDPOINT_AGENT_HANDOFF_SECRET`. Use one key family per setting in a
 customer env file.
 
 Do not deploy the current product as a shared multi-tenant stack for paid
@@ -70,7 +70,7 @@ local disk semantics.
 - Run all repo commands from the active repo root:
 
   ```powershell
-  cd C:\Source\promptwall
+  cd C:\Source\redactwall
   ```
 
 - Never commit `.env`, customer secret JSON, ingest keys, MFA seeds, screenshots
@@ -82,7 +82,7 @@ local disk semantics.
   endpoint deployment is the watched-folder agent plus the signed native
   handoff contract.
 - Do not delete retained AWS volumes, backups, logs, or evidence stores without
-  written approval from the customer owner and PromptWall owner.
+  written approval from the customer owner and RedactWall owner.
 
 ## Customer Intake Worksheet
 
@@ -92,12 +92,12 @@ Collect this before install day:
 | --- | --- |
 | Customer display name | Legal or operating name. |
 | Tenant slug | Lowercase, 2-63 chars, `a-z`, `0-9`, `_`, or `-`; example `cu-acme`. |
-| Paid seat count | Positive integer for `SENTINEL_SEAT_LIMIT`. |
+| Paid seat count | Positive integer for `REDACTWALL_SEAT_LIMIT`. |
 | AWS account id and region | Region must have ACM, ECR, EC2, ELB, CloudWatch, Secrets Manager, and SSM. |
 | VPC id | VPC for the customer stack. |
 | Public subnet ids | At least two public subnets for the ALB. |
 | Instance subnet id | Subnet with outbound internet access to pull from ECR. |
-| Customer DNS name | Example `promptwall.customer.example`. |
+| Customer DNS name | Example `redactwall.customer.example`. |
 | ACM certificate ARN | Required for production HTTPS. |
 | Security Admin owner | Name, email, phone, and MFA enrollment window. |
 | Optional approver account | Username owner, assignment scope, and password delivery path. |
@@ -153,9 +153,9 @@ outside the repo:
 
 ```powershell
 $TenantId = "cu-acme"
-$EnvPath = Join-Path $env:TEMP "promptwall-$TenantId.env"
+$EnvPath = Join-Path $env:TEMP "redactwall-$TenantId.env"
 npm run setup:prod -- --skip-install --env $EnvPath
-npm run mfa:uri -- --env $EnvPath --issuer "PromptWall $TenantId"
+npm run mfa:uri -- --env $EnvPath --issuer "RedactWall $TenantId"
 npm run setup:check -- --env $EnvPath
 ```
 
@@ -178,7 +178,7 @@ extension gate with the final values so the handoff packet includes exact
 force-install policies:
 
 ```powershell
-npm run release:extension:check -- dist/browser-extension --chrome-extension-id <chrome-web-store-id> --edge-extension-id <edge-addons-id> --firefox-install-url https://downloads.customer.example/promptwall-firefox.xpi
+npm run release:extension:check -- dist/browser-extension --chrome-extension-id <chrome-web-store-id> --edge-extension-id <edge-addons-id> --firefox-install-url https://downloads.customer.example/redactwall-firefox.xpi
 ```
 
 Record the generated artifact names and SHA-256 manifests:
@@ -190,7 +190,7 @@ Record the generated artifact names and SHA-256 manifests:
 The browser extension folder should include Chrome, Edge, and Firefox zips,
 integrity manifests, and the shared release-readiness report. When browser store
 IDs or a Firefox install URL are supplied, it should also include target-specific
-`promptwall-<browser>-extension-v<version>.extension-settings.json` files with
+`redactwall-<browser>-extension-v<version>.extension-settings.json` files with
 the real extension id or install URL and no managed-storage secrets.
 
 The manifests belong in the handoff packet. The packages must not contain real
@@ -206,15 +206,15 @@ $AwsRegion = "us-east-1"
 $ImageTag = "0.3.0"
 $AccountId = aws sts get-caller-identity --query Account --output text
 $Registry = "$AccountId.dkr.ecr.$AwsRegion.amazonaws.com"
-$Image = "$Registry/promptwall:$ImageTag"
+$Image = "$Registry/redactwall:$ImageTag"
 ```
 
 Create the ECR repository once if it does not already exist:
 
 ```powershell
-aws ecr describe-repositories --repository-names promptwall --region $AwsRegion 2>$null
+aws ecr describe-repositories --repository-names redactwall --region $AwsRegion 2>$null
 if ($LASTEXITCODE -ne 0) {
-  aws ecr create-repository --repository-name promptwall --region $AwsRegion
+  aws ecr create-repository --repository-name redactwall --region $AwsRegion
 }
 ```
 
@@ -237,12 +237,12 @@ the customer's approved vault-generated values. Create a temporary secret JSON
 outside the repo:
 
 ```powershell
-$SecretPath = Join-Path $env:TEMP "promptwall-$TenantId-secret.json"
+$SecretPath = Join-Path $env:TEMP "redactwall-$TenantId-secret.json"
 $SecretJson = @{
   ADMIN_PASSWORD = "<16-plus-random-chars>"
   ADMIN_TOTP_SECRET = "<base32-totp-secret>"
-  SENTINEL_SECRET = "<32-plus-random-chars>"
-  SENTINEL_DATA_KEY = "<32-plus-random-chars>"
+  REDACTWALL_SECRET = "<32-plus-random-chars>"
+  REDACTWALL_DATA_KEY = "<32-plus-random-chars>"
   INGEST_API_KEY = "<32-plus-random-chars>"
   SCIM_BEARER_TOKEN = "<32-plus-random-chars-or-empty>"
   OIDC_ISSUER = "<tenant-specific-issuer-or-empty>"
@@ -267,7 +267,7 @@ $SecretJson = @{
 Create or update the AWS secret:
 
 ```powershell
-$SecretName = "promptwall/$TenantId"
+$SecretName = "redactwall/$TenantId"
 aws secretsmanager create-secret `
   --name $SecretName `
   --secret-string file://$SecretPath `
@@ -284,14 +284,14 @@ customer's secure deletion process.
 Set the stack parameters:
 
 ```powershell
-$StackName = "promptwall-$TenantId"
+$StackName = "redactwall-$TenantId"
 $VpcId = "vpc-xxxxxxxx"
 $PublicSubnetIds = "subnet-aaaaaaa,subnet-bbbbbbb"
 $InstanceSubnetId = "subnet-aaaaaaa"
 $CertificateArn = "arn:aws:acm:us-east-1:123456789012:certificate/example"
 $SeatLimit = 25
 $SecretArn = aws secretsmanager describe-secret `
-  --secret-id "promptwall/$TenantId" `
+  --secret-id "redactwall/$TenantId" `
   --query ARN `
   --output text `
   --region $AwsRegion
@@ -380,15 +380,15 @@ Inside the SSM session:
 
 ```bash
 sudo docker ps
-sudo docker logs --tail 100 promptwall
-sudo docker exec promptwall node -e "const v=require('./server/db').verifyAuditChain(); console.log(JSON.stringify(v)); if(!v.ok) process.exit(1)"
-sudo docker exec promptwall npm run backup -- /data/backups
+sudo docker logs --tail 100 redactwall
+sudo docker exec redactwall node -e "const v=require('./server/db').verifyAuditChain(); console.log(JSON.stringify(v)); if(!v.ok) process.exit(1)"
+sudo docker exec redactwall npm run backup -- /data/backups
 ```
 
 Also check CloudWatch logs:
 
 ```powershell
-aws logs tail "/promptwall/$TenantId" --since 30m --region $AwsRegion
+aws logs tail "/redactwall/$TenantId" --since 30m --region $AwsRegion
 ```
 
 Save health, readiness, audit-chain, backup, and log evidence in the handoff
@@ -432,7 +432,7 @@ For install day, the technician must confirm these values in managed storage:
 
 ```json
 {
-  "serverUrl": "https://promptwall.customer.example",
+  "serverUrl": "https://redactwall.customer.example",
   "ingestKey": "customer-ingest-key-from-approved-vault",
   "orgId": "cu-acme",
   "email": "${user_email}"
@@ -471,9 +471,9 @@ For a per-user Windows pilot install:
 
 ```powershell
 .\scripts\install-endpoint-agent.ps1 `
-  -PromptWallUrl "https://promptwall.customer.example" `
+  -RedactWallUrl "https://redactwall.customer.example" `
   -IngestKey "<customer-ingest-key>" `
-  -WatchDir "$env:USERPROFILE\PromptWallWatch"
+  -WatchDir "$env:USERPROFILE\RedactWallWatch"
 ```
 
 For an all-user managed install from elevated PowerShell, use a managed config
@@ -481,19 +481,19 @@ directory:
 
 ```powershell
 .\scripts\install-endpoint-agent.ps1 `
-  -PromptWallUrl "https://promptwall.customer.example" `
+  -RedactWallUrl "https://redactwall.customer.example" `
   -IngestKey "<customer-ingest-key>" `
-  -WatchDir "C:\PromptWallWatch" `
-  -ConfigDir "$env:ProgramData\PromptWall"
+  -WatchDir "C:\RedactWallWatch" `
+  -ConfigDir "$env:ProgramData\RedactWall"
 ```
 
 Validate:
 
 ```powershell
-Get-ScheduledTask -TaskName PromptWallEndpointAgent
-Get-Content "$env:LOCALAPPDATA\PromptWall\logs\endpoint-agent.log" -Tail 40
+Get-ScheduledTask -TaskName RedactWallEndpointAgent
+Get-Content "$env:LOCALAPPDATA\RedactWall\logs\endpoint-agent.log" -Tail 40
 npm run endpoint:check -- `
-  --env "$env:LOCALAPPDATA\PromptWall\endpoint-agent.env" `
+  --env "$env:LOCALAPPDATA\RedactWall\endpoint-agent.env" `
   --emit-heartbeat `
   --user "tech@example.test" `
   --org-id "<tenant-slug>"
@@ -524,7 +524,7 @@ For MCP guard hosts:
 
 1. Install the packaged MCP guard artifact from `dist/mcp-guard/`.
 2. Configure the host runtime environment with:
-   - `PROMPTWALL_URL=https://promptwall.customer.example`
+   - `REDACTWALL_URL=https://redactwall.customer.example`
    - `INGEST_API_KEY=<customer-ingest-key>`
    - Managed user identity, if the host runtime supports it.
    - `orgId` or equivalent tenant value set to the customer tenant slug.
@@ -566,8 +566,8 @@ production use.
 Create and verify at least one backup before handoff:
 
 ```bash
-sudo docker exec promptwall npm run backup -- /data/backups
-sudo docker exec promptwall ls -l /data/backups
+sudo docker exec redactwall npm run backup -- /data/backups
+sudo docker exec redactwall ls -l /data/backups
 ```
 
 Copy the backup manifest, not the sensitive `.db` file, into the handoff packet.
@@ -587,9 +587,9 @@ Generate the sanitized examiner pack after backup verification. Include the
 restore-drill path only when a restore test was actually performed:
 
 ```bash
-sudo docker exec promptwall npm run evidence:pack:zip -- /data/evidence-packs \
-  /data/backups/sentinel-YYYY-MM-DDTHH-MM-SS-sssZ.db \
-  /data/restored-sentinel.db
+sudo docker exec redactwall npm run evidence:pack:zip -- /data/evidence-packs \
+  /data/backups/redactwall-YYYY-MM-DDTHH-MM-SS-sssZ.db \
+  /data/restored-redactwall.db
 ```
 
 For recurring reporting, copy `config/evidence-schedule.example.json` to
@@ -602,7 +602,7 @@ npm run evidence:pack:install-task
 ```
 
 The task writes run status to
-`%LOCALAPPDATA%\PromptWall\logs\evidence-pack.log` and keeps raw prompt bodies,
+`%LOCALAPPDATA%\RedactWall\logs\evidence-pack.log` and keeps raw prompt bodies,
 environment secrets, release tokens, and uploaded file bytes out of the task
 definition and generated pack. Keep the generated JSON or zip in the approved
 evidence location, not in email or a synced personal folder.
@@ -611,17 +611,17 @@ On Linux or AWS Docker hosts, put the schedule config in the mounted data folder
 and install the standard systemd timer:
 
 ```bash
-sudo cp config/evidence-schedule.example.json /var/lib/promptwall/evidence-schedule.json
-sudo editor /var/lib/promptwall/evidence-schedule.json
+sudo cp config/evidence-schedule.example.json /var/lib/redactwall/evidence-schedule.json
+sudo editor /var/lib/redactwall/evidence-schedule.json
 sudo npm run evidence:pack:install-systemd -- \
   --mode docker \
-  --container promptwall \
+  --container redactwall \
   --config /data/evidence-schedule.json \
   --on-calendar quarterly
 ```
 
 Set `outDir` to `/data/evidence-packs`. The timer writes status to
-`/var/log/promptwall/evidence-pack.log`, uses `Persistent=true` for missed
+`/var/log/redactwall/evidence-pack.log`, uses `Persistent=true` for missed
 runs, and keeps raw prompt bodies, environment secrets, release tokens, and
 uploaded file bytes out of the systemd unit.
 
@@ -662,12 +662,12 @@ The handoff packet must not contain:
 - Admin password.
 - MFA seed or `otpauth://` URI.
 - Ingest key.
-- `SENTINEL_SECRET`.
-- `SENTINEL_DATA_KEY`.
-- `SENTINEL_DATA_KEY_PREVIOUS`.
-- `PROMPTWALL_SECRET`.
-- `PROMPTWALL_DATA_KEY`.
-- `PROMPTWALL_DATA_KEY_PREVIOUS`.
+- `REDACTWALL_SECRET`.
+- `REDACTWALL_DATA_KEY`.
+- `REDACTWALL_DATA_KEY_PREVIOUS`.
+- `REDACTWALL_SECRET`.
+- `REDACTWALL_DATA_KEY`.
+- `REDACTWALL_DATA_KEY_PREVIOUS`.
 - SIEM token.
 - Raw prompts.
 - Real customer data.
@@ -690,10 +690,10 @@ If a secret is exposed:
 4. Update managed sensor policy or endpoint/MCP config if the ingest key changed.
 5. Record the rotation evidence in the handoff packet.
 
-If `SENTINEL_DATA_KEY` (or `SENTINEL_SECRET` while no dedicated data key is
+If `REDACTWALL_DATA_KEY` (or `REDACTWALL_SECRET` while no dedicated data key is
 set) is the exposed value, rotate it without losing sealed evidence:
 
-1. Set `SENTINEL_DATA_KEY` to the new key and `SENTINEL_DATA_KEY_PREVIOUS` to
+1. Set `REDACTWALL_DATA_KEY` to the new key and `REDACTWALL_DATA_KEY_PREVIOUS` to
    the exposed key in Secrets Manager or the customer vault, then restart the
    container. Sealed records stay readable during the transition.
 2. Run `node scripts/rotate-data-key.js --dry-run` inside the container to
@@ -701,7 +701,7 @@ set) is the exposed value, rotate it without losing sealed evidence:
    and token vaults under the new key. Output is counts only; it never prints
    prompt text or key material, and it appends a `DATA_KEY_ROTATED` audit
    entry.
-3. When the run reports `unreadable: 0`, remove `SENTINEL_DATA_KEY_PREVIOUS`
+3. When the run reports `unreadable: 0`, remove `REDACTWALL_DATA_KEY_PREVIOUS`
    and restart. A non-zero exit means some sealed values opened with neither
    key — keep the old key configured and escalate before retiring it.
 4. Record the rotation evidence in the handoff packet.

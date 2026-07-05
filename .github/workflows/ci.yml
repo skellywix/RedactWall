@@ -20,12 +20,12 @@ jobs:
       postgres:
         image: postgres:${{ matrix.postgres }}
         env:
-          POSTGRES_USER: promptwall
+          POSTGRES_USER: redactwall
           POSTGRES_HOST_AUTH_METHOD: trust
         ports:
           - 55432:5432
         options: >-
-          --health-cmd "pg_isready -U promptwall"
+          --health-cmd "pg_isready -U redactwall"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
@@ -56,7 +56,7 @@ jobs:
       - name: Unit and integration tests
         run: npm test
         env:
-          SENTINEL_TEST_PG_URL: postgresql://promptwall@127.0.0.1:55432/postgres
+          REDACTWALL_TEST_PG_URL: postgresql://redactwall@127.0.0.1:55432/postgres
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium
       - name: Browser E2E tests
@@ -86,4 +86,4 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - run: docker build -t promptwall:ci .
+      - run: docker build -t redactwall:ci .

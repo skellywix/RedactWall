@@ -39,7 +39,7 @@ export default function App() {
     <div className="app-shell">
       <aside className="app-rail">
         <div className="app-brand">
-          <span className="app-brand-name">PromptWall</span>
+          <span className="app-brand-name">RedactWall</span>
           <span className="app-brand-sub">Security Console</span>
         </div>
         <nav aria-label="Console sections">

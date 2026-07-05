@@ -62,7 +62,7 @@ function writeFixture(rootDir, opts = {}) {
   });
   writeJson(path.join(rootDir, 'sensors', 'browser-extension', 'manifest.json'), {
     manifest_version: 3,
-    name: 'PromptWall',
+    name: 'RedactWall',
     version,
     description: 'Fixture package',
     permissions: ['storage'],
@@ -88,7 +88,7 @@ test('package script writes browser target zips and prompt-free integrity manife
 
   const manifest = JSON.parse(fs.readFileSync(result.manifestPath, 'utf8'));
   const zipBody = fs.readFileSync(result.zipPath);
-  assert.strictEqual(manifest.kind, 'promptwall-browser-extension-package');
+  assert.strictEqual(manifest.kind, 'redactwall-browser-extension-package');
   assert.strictEqual(manifest.browserTarget, 'chrome');
   assert.strictEqual(manifest.sha256, sha256(zipBody));
   assert.strictEqual(manifest.extensionVersion, JSON.parse(fs.readFileSync(path.join(root, 'sensors', 'browser-extension', 'manifest.json'), 'utf8')).version);
@@ -119,7 +119,7 @@ test('Firefox target manifest uses gecko id and background scripts', () => {
   const source = JSON.parse(fs.readFileSync(path.join(root, 'sensors', 'browser-extension', 'manifest.json'), 'utf8'));
   const manifest = manifestForTarget(source, 'firefox');
   assert.deepStrictEqual(manifest.background, { scripts: ['background.js'] });
-  assert.strictEqual(manifest.browser_specific_settings.gecko.id, 'promptwall@example.com');
+  assert.strictEqual(manifest.browser_specific_settings.gecko.id, 'redactwall@example.com');
   assert.ok(manifest.content_scripts[0].js.includes('lib/browser-api.js'));
   assert.strictEqual(backgroundModel(manifest), 'background_scripts');
   assert.strictEqual(backgroundModel({}), 'missing');
@@ -146,7 +146,7 @@ test('package script refuses packaged development ingest keys', (t) => {
 function validManifest() {
   return {
     manifest_version: 3,
-    name: 'PromptWall',
+    name: 'RedactWall',
     version: '9.9.9',
     description: 'Fixture package',
     permissions: ['storage'],

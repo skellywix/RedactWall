@@ -7,7 +7,7 @@ test.setTimeout(90000);
 
 async function login(page) {
   await page.goto('/login.html');
-  await expect(page.getByRole('heading', { name: 'PromptWall' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'RedactWall' })).toBeVisible();
   await page.locator('#password').fill('e2e-pass');
   await page.getByRole('button', { name: 'Continue' }).click();
   await expect(page).toHaveURL(/\/index\.html$/);
@@ -141,7 +141,7 @@ test('login page fits mobile viewport without horizontal overflow', async ({ pag
   await page.setViewportSize({ width: 360, height: 740 });
   await page.goto('/login.html?oidc=failed');
 
-  await expect(page.getByRole('heading', { name: 'PromptWall' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'RedactWall' })).toBeVisible();
   await expect(page.getByRole('alert')).toHaveText('SSO sign-in failed. Try again or use a local account.');
   await expect(page.getByLabel('Username')).toBeVisible();
   await expect(page.getByLabel('Password')).toBeVisible();
@@ -184,7 +184,7 @@ test('admin console theme toggle defaults dark and persists light mode', async (
       bg: styles.getPropertyValue('--bg').trim(),
       glow: styles.getPropertyValue('--glow').trim(),
       panel: styles.getPropertyValue('--panel').trim(),
-      stored: localStorage.getItem('promptwall.theme'),
+      stored: localStorage.getItem('redactwall.theme'),
       colorScheme: styles.colorScheme,
     };
   });
@@ -204,7 +204,7 @@ test('admin console theme toggle defaults dark and persists light mode', async (
   await expect(page.locator('body')).toHaveAttribute('data-theme', 'dark');
   await expect(page.locator('#themeDark')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('#themeLight')).toHaveAttribute('aria-pressed', 'false');
-  await expect.poll(() => page.evaluate(() => localStorage.getItem('promptwall.theme'))).toBe('dark');
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('redactwall.theme'))).toBe('dark');
   expect(problems).toEqual([]);
 });
 
@@ -360,7 +360,7 @@ test('admin console login, approval, policy save, and evidence export work in a 
   await page.locator('#pol_desktop_destination').fill('Copilot Desktop');
   await page.locator('#pol_policy_scopes').fill(JSON.stringify([{
     id: 'legal_contract_review',
-    groups: ['PromptWall Legal'],
+    groups: ['RedactWall Legal'],
     destinations: ['claude.ai'],
     categories: ['LEGAL_CONTRACT'],
     enforcementMode: 'block',
@@ -381,7 +381,7 @@ test('admin console login, approval, policy save, and evidence export work in a 
   expect(policy.desktopCollectorDestination).toBe('Copilot Desktop');
   expect(policy.policyScopes[0]).toMatchObject({
     id: 'legal_contract_review',
-    groups: ['promptwall legal'],
+    groups: ['redactwall legal'],
     destinations: ['claude.ai'],
     categories: ['LEGAL_CONTRACT'],
     enforcementMode: 'block',
@@ -400,7 +400,7 @@ test('admin console login, approval, policy save, and evidence export work in a 
   const downloadPromise = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Export Evidence' }).click();
   const download = await downloadPromise;
-  expect(download.suggestedFilename()).toMatch(/^promptwall-evidence-/);
+  expect(download.suggestedFilename()).toMatch(/^redactwall-evidence-/);
   const exportedPath = await download.path();
   const pack = JSON.parse(await fs.readFile(exportedPath, 'utf8'));
   expect(pack.auditIntegrity.ok).toBe(true);
@@ -804,7 +804,7 @@ test('admin console controls and forms are wired end to end', async ({ page, req
   await expect(page.locator('#pol_risk')).toHaveValue(originalRisk);
 
   await page.locator('#scope_builder_id').fill('ui_scope_rule');
-  await page.locator('#scope_builder_groups').fill('PromptWall Legal');
+  await page.locator('#scope_builder_groups').fill('RedactWall Legal');
   await page.locator('#scope_builder_destinations').fill('claude.ai');
   await page.locator('#scope_builder_categories').fill('LEGAL_CONTRACT');
   await page.locator('#scope_builder_mode').selectOption('block');
@@ -835,7 +835,7 @@ test('admin console controls and forms are wired end to end', async ({ page, req
   await page.locator('#route_builder_group').fill('lending');
   await page.locator('#route_builder_role').selectOption('approver');
   await page.locator('#route_builder_sla').fill('90');
-  await page.locator('#route_builder_groups').fill('PromptWall Lending');
+  await page.locator('#route_builder_groups').fill('RedactWall Lending');
   await page.locator('#route_builder_destinations').fill('claude.ai');
   await page.locator('#route_builder_categories').fill('LEGAL_CONTRACT');
   await page.locator('#route_builder_risk').fill('55');
@@ -883,7 +883,7 @@ test('admin console controls and forms are wired end to end', async ({ page, req
   const downloadPromise = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Export Evidence' }).click();
   const download = await downloadPromise;
-  expect(download.suggestedFilename()).toMatch(/^promptwall-evidence-/);
+  expect(download.suggestedFilename()).toMatch(/^redactwall-evidence-/);
   const pack = JSON.parse(await fs.readFile(await download.path(), 'utf8'));
   expect(pack.auditIntegrity.ok).toBe(true);
   expect(JSON.stringify(pack)).not.toContain('524-71-9101');
@@ -1198,7 +1198,7 @@ test('admin console secondary controls and dialog cancels are wired end to end',
   const trustDownloadPromise = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Download Trust Package' }).click();
   const trustDownload = await trustDownloadPromise;
-  expect(trustDownload.suggestedFilename()).toBe('promptwall-security-trust-package.zip');
+  expect(trustDownload.suggestedFilename()).toBe('redactwall-security-trust-package.zip');
   const exportProblemStart = problems.length;
   await page.getByRole('button', { name: 'Export Evidence' }).click();
   await routeExportPromise;
@@ -1356,11 +1356,11 @@ test('leak exposure map attributes flows to departments and destinations', async
   await expect(page.locator('#leakMapSummary')).toContainText('prompt bodies excluded');
   await expect(page.locator('#leakMapSummary')).toContainText('department');
 
-  // The map is a real graph: departments -> PromptWall barrier -> destinations.
+  // The map is a real graph: departments -> RedactWall barrier -> destinations.
   await expect(page.locator('#leakMapStage svg')).toBeVisible();
   await expect(page.locator('#leakMapStage .leak-wall')).toBeVisible();
   await expect(page.locator('#leakMapStage')).toContainText('DEPARTMENTS & TEAMS');
-  await expect(page.locator('#leakMapStage')).toContainText('PROMPTWALL');
+  await expect(page.locator('#leakMapStage')).toContainText('REDACTWALL');
   await expect(page.locator('#leakMapStage')).toContainText('AI DESTINATIONS');
   await expect(page.locator('#leakMapStage [data-leak-node="segment:org:e2e-org"]')).toBeVisible();
   // Destinations are ranked and capped, so assert shape rather than specific hosts.

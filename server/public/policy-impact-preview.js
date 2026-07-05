@@ -43,5 +43,5 @@
       + '</div>';
   }
 
-  window.PromptWallPolicyImpact = { render: render };
+  window.RedactWallPolicyImpact = { render: render };
 }());

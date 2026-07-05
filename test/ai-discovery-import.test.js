@@ -81,7 +81,7 @@ test('discovery importer batches sanitized sightings and posts with ingest auth 
 
   const calls = [];
   const body = await importer.postBatch(batches[0], {
-    sentinelUrl: 'http://127.0.0.1:4000/',
+    redactwallUrl: 'http://127.0.0.1:4000/',
     apiKey: 'unit-ingest-key',
     fetchImpl: async (url, options) => {
       calls.push({ url, options });
@@ -167,7 +167,7 @@ test('discovery importer surfaces missing input and posting failures without lea
 
   const err = new Error('should not be called');
   await assert.rejects(() => importer.postBatch({ sightings: [] }, {
-    sentinelUrl: 'http://127.0.0.1:4000',
+    redactwallUrl: 'http://127.0.0.1:4000',
     apiKey: '',
     fetchImpl: async () => { throw err; },
   }), /INGEST_API_KEY/);

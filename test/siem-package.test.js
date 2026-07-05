@@ -41,7 +41,7 @@ test('integration package includes all supported profiles with sanitized samples
 test('integration package emits marketplace-style files and a sanitized zip archive', () => {
   const pkg = siemPackage.integrationPackage({ profile: 'sentinel', generatedAt: '2026-07-04T12:00:00.000Z' });
   const files = siemPackage.packageFiles(pkg);
-  assert.ok(files.some((file) => file.path === 'README.md' && /PromptWall SOC Integration Package/.test(file.body)));
+  assert.ok(files.some((file) => file.path === 'README.md' && /RedactWall SOC Integration Package/.test(file.body)));
   assert.ok(files.some((file) => file.path === 'manifest.json'));
   assert.ok(files.some((file) => file.path === 'privacy-contract.json'));
   assert.ok(files.some((file) => file.path === 'profiles/sentinel/sentinel-dcr-transform.kql'));
@@ -65,9 +65,9 @@ test('splunk profile emits HEC shape, sourcetypes, and SPL searches', () => {
   const profile = pkg.profiles[0];
   assert.strictEqual(profile.id, 'splunk');
   assert.strictEqual(profile.transport.endpointPath, '/services/collector/event');
-  assert.ok(profile.transport.sourcetypes.includes('promptwall:security'));
-  assert.ok(profile.savedSearches.some((item) => item.spl.includes('sourcetype=promptwall:security')));
-  assert.ok(profile.samplePayloads[0].payload.event.eventType === 'promptwall.security_event');
+  assert.ok(profile.transport.sourcetypes.includes('redactwall:security'));
+  assert.ok(profile.savedSearches.some((item) => item.spl.includes('sourcetype=redactwall:security')));
+  assert.ok(profile.samplePayloads[0].payload.event.eventType === 'redactwall.security_event');
   assertSanitized(pkg);
 });
 
@@ -75,19 +75,19 @@ test('sentinel profile includes DCR transform hint, custom table, and KQL', () =
   const pkg = siemPackage.integrationPackage({ profile: 'sentinel', generatedAt: '2026-07-04T12:00:00.000Z' });
   const profile = pkg.profiles[0];
   assert.strictEqual(profile.id, 'sentinel');
-  assert.strictEqual(profile.transport.customTable, 'PromptWall_CL');
+  assert.strictEqual(profile.transport.customTable, 'RedactWall_CL');
   assert.match(profile.transformKql, /project-away rawPrompt/);
-  assert.ok(profile.savedSearches.some((item) => item.kql.includes('PromptWall_CL')));
+  assert.ok(profile.savedSearches.some((item) => item.kql.includes('RedactWall_CL')));
   assert.ok(profile.fieldMappings.some((item) => item.commonSecurityLog === 'DeviceAction'));
   assertSanitized(pkg);
 });
 
-test('chronicle profile maps PromptWall events into UDM fields', () => {
+test('chronicle profile maps RedactWall events into UDM fields', () => {
   const pkg = siemPackage.integrationPackage({ profile: 'chronicle', generatedAt: '2026-07-04T12:00:00.000Z' });
   const profile = pkg.profiles[0];
   assert.strictEqual(profile.id, 'chronicle');
   assert.ok(profile.fieldMappings.some((item) => item.udm === 'security_result.action'));
-  assert.strictEqual(profile.samplePayloads[0].payload.metadata.vendor_name, 'PromptWall');
+  assert.strictEqual(profile.samplePayloads[0].payload.metadata.vendor_name, 'RedactWall');
   assert.strictEqual(profile.samplePayloads[0].payload.security_result[0].action, 'BLOCK');
   assertSanitized(pkg);
 });

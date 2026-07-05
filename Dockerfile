@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-# PromptWall production image. Native better-sqlite3 is built in the builder;
+# RedactWall production image. Native better-sqlite3 is built in the builder;
 # the runtime contains only production dependencies and runtime source.
 FROM node:22-bookworm-slim AS builder
 WORKDIR /app
@@ -17,9 +17,9 @@ RUN npm run build --prefix console
 FROM node:22-bookworm-slim AS runtime
 ENV NODE_ENV=production \
     PORT=4000 \
-    SENTINEL_DB_PATH=/data/sentinel.db \
-    SENTINEL_POLICY_PATH=/data/policy.json \
-    SENTINEL_CUSTOM_DETECTORS_PATH=/data/custom-detectors.json \
+    REDACTWALL_DB_PATH=/data/redactwall.db \
+    REDACTWALL_POLICY_PATH=/data/policy.json \
+    REDACTWALL_CUSTOM_DETECTORS_PATH=/data/custom-detectors.json \
     NPM_CONFIG_CACHE=/tmp/.npm \
     NPM_CONFIG_UPDATE_NOTIFIER=false
 WORKDIR /app
@@ -33,9 +33,9 @@ COPY --chown=node:node config ./config
 COPY --chown=node:node scripts ./scripts
 COPY --chown=node:node sensors ./sensors
 # Persistent, local-disk runtime state. Keep /data mounted outside the image.
-RUN mkdir -p /data /app/data /tmp/promptwall \
-    && chown -R node:node /data /app /tmp/promptwall \
-    && chmod 700 /data /tmp/promptwall
+RUN mkdir -p /data /app/data /tmp/redactwall \
+    && chown -R node:node /data /app /tmp/redactwall \
+    && chmod 700 /data /tmp/redactwall
 USER node
 EXPOSE 4000
 VOLUME ["/data"]

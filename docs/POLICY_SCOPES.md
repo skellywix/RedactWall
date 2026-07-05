@@ -1,6 +1,6 @@
-# PromptWall Scoped Policy And Exceptions
+# RedactWall Scoped Policy And Exceptions
 
-PromptWall supports server-side scoped policy for customer-silo deployments that
+RedactWall supports server-side scoped policy for customer-silo deployments that
 need stricter rules for specific users, SCIM groups, orgs, sources, channels,
 destinations, detectors, or semantic categories.
 
@@ -25,7 +25,7 @@ Example:
   "policyScopes": [
     {
       "id": "legal_contract_review",
-      "groups": ["PromptWall Legal"],
+      "groups": ["RedactWall Legal"],
       "destinations": ["claude.ai"],
       "categories": ["LEGAL_CONTRACT"],
       "enforcementMode": "block",
@@ -121,9 +121,9 @@ validated by the authenticated admin policy API.
 The same fields can also be managed directly through the API:
 
 ```bash
-curl -X PUT https://promptwall.customer.example/api/policy \
+curl -X PUT https://redactwall.customer.example/api/policy \
   -H "Content-Type: application/json" \
-  -H "Cookie: promptwall_session=<session>" \
+  -H "Cookie: redactwall_session=<session>" \
   -H "x-csrf-token: <csrf-token>" \
   -d @scoped-policy.json
 ```

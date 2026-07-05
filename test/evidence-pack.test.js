@@ -8,9 +8,9 @@ const fs = require('node:fs');
 const AdmZip = require('adm-zip');
 
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-evidence-pack-test-'));
-process.env.SENTINEL_DB_PATH = path.join(tempRoot, 'sentinel.db');
-process.env.SENTINEL_SECRET = 'unit-secret-stable';
-process.env.SENTINEL_DATA_KEY = 'unit-data-key-stable';
+process.env.REDACTWALL_DB_PATH = path.join(tempRoot, 'redactwall.db');
+process.env.REDACTWALL_SECRET = 'unit-secret-stable';
+process.env.REDACTWALL_DATA_KEY = 'unit-data-key-stable';
 
 const db = require('../server/db');
 const backup = require('../scripts/backup-store');
@@ -49,7 +49,7 @@ test('writes examiner pack with backup and restore evidence without raw prompt c
   });
 
   const backupResult = await backup.createBackup({ outDir: path.join(tempRoot, 'backups'), dbModule: db });
-  const restoredPath = path.join(tempRoot, 'restore-drill', 'sentinel.db');
+  const restoredPath = path.join(tempRoot, 'restore-drill', 'redactwall.db');
   backup.restoreBackup({ file: backupResult.file, to: restoredPath });
 
   const schedulePath = path.join(tempRoot, 'evidence-schedule.json');
@@ -177,17 +177,17 @@ test('runtime pack uses full query history for summaries while bounding exported
 
 test('argument parser supports npm-run paths and optional evidence inputs', () => {
   assert.deepStrictEqual(
-    packer.parseArgs(['evidence-packs', '--backup', 'backups/sentinel.db', '--restore-drill', 'restore/sentinel.db', '--zip']),
+    packer.parseArgs(['evidence-packs', '--backup', 'backups/redactwall.db', '--restore-drill', 'restore/redactwall.db', '--zip']),
     {
       _: ['evidence-packs'],
-      backup: 'backups/sentinel.db',
-      'restore-drill': 'restore/sentinel.db',
+      backup: 'backups/redactwall.db',
+      'restore-drill': 'restore/redactwall.db',
       zip: true,
     },
   );
   assert.deepStrictEqual(
     packer.cliOptionsFromArgs(
-      packer.parseArgs(['evidence-packs', 'backups/sentinel.db', 'restore/sentinel.db']),
+      packer.parseArgs(['evidence-packs', 'backups/redactwall.db', 'restore/redactwall.db']),
       {},
     ),
     {
@@ -196,9 +196,9 @@ test('argument parser supports npm-run paths and optional evidence inputs', () =
       zipFile: undefined,
       force: undefined,
       zip: undefined,
-      backupFile: 'backups/sentinel.db',
+      backupFile: 'backups/redactwall.db',
       backupManifestFile: undefined,
-      restoreDrillFile: 'restore/sentinel.db',
+      restoreDrillFile: 'restore/redactwall.db',
       queryLimit: undefined,
       auditLimit: undefined,
       reportId: undefined,
@@ -211,7 +211,7 @@ test('argument parser supports npm-run paths and optional evidence inputs', () =
   );
   assert.deepStrictEqual(
     packer.cliOptionsFromArgs(
-      packer.parseArgs(['--schedule', 'config/evidence-schedule.json', 'backups/sentinel.db', 'restore/sentinel.db']),
+      packer.parseArgs(['--schedule', 'config/evidence-schedule.json', 'backups/redactwall.db', 'restore/redactwall.db']),
       { outDir: 'scheduled-packs', scheduled: true, schedule: { id: 'quarterly' } },
     ),
     {
@@ -220,9 +220,9 @@ test('argument parser supports npm-run paths and optional evidence inputs', () =
       zipFile: undefined,
       force: undefined,
       zip: undefined,
-      backupFile: 'backups/sentinel.db',
+      backupFile: 'backups/redactwall.db',
       backupManifestFile: undefined,
-      restoreDrillFile: 'restore/sentinel.db',
+      restoreDrillFile: 'restore/redactwall.db',
       queryLimit: undefined,
       auditLimit: undefined,
       reportId: undefined,

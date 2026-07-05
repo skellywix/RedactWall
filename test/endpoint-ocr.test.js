@@ -25,7 +25,7 @@ test('endpoint OCR args parse as bounded JSON string arrays', () => {
 });
 
 test('endpoint OCR materializes file args without shell interpolation', () => {
-  const file = path.join('C:\\', 'PromptWall', 'scan one.png');
+  const file = path.join('C:\\', 'RedactWall', 'scan one.png');
   assert.deepStrictEqual(
     endpointOcr.materializeArgs(['--input', '{file}', '--stdout'], file),
     ['--input', file, '--stdout'],
@@ -33,13 +33,13 @@ test('endpoint OCR materializes file args without shell interpolation', () => {
   assert.deepStrictEqual(endpointOcr.materializeArgs(['--stdout'], file), ['--stdout', file]);
 });
 
-test('endpoint OCR settings accept PromptWall aliases', () => {
+test('endpoint OCR settings accept RedactWall aliases', () => {
   const settings = endpointOcr.ocrSettings({
     env: {
-      PROMPTWALL_ENDPOINT_AGENT_OCR_COMMAND: 'ocr-cli',
-      PROMPTWALL_ENDPOINT_AGENT_OCR_ARGS_JSON: '["{file}","stdout"]',
-      PROMPTWALL_ENDPOINT_AGENT_OCR_TIMEOUT_MS: '20000',
-      PROMPTWALL_ENDPOINT_AGENT_OCR_MAX_CHARS: '250000',
+      REDACTWALL_ENDPOINT_AGENT_OCR_COMMAND: 'ocr-cli',
+      REDACTWALL_ENDPOINT_AGENT_OCR_ARGS_JSON: '["{file}","stdout"]',
+      REDACTWALL_ENDPOINT_AGENT_OCR_TIMEOUT_MS: '20000',
+      REDACTWALL_ENDPOINT_AGENT_OCR_MAX_CHARS: '250000',
     },
   });
 

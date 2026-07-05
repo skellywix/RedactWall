@@ -7,9 +7,9 @@ const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 
-const customDetectorPath = path.join(os.tmpdir(), 'promptwall-custom-detectors-' + crypto.randomBytes(6).toString('hex') + '.json');
-process.env.PROMPTWALL_CUSTOM_DETECTORS_PATH = customDetectorPath;
-process.env.SENTINEL_POLICY_PATH = path.join(os.tmpdir(), 'promptwall-custom-policy-' + crypto.randomBytes(6).toString('hex') + '.json');
+const customDetectorPath = path.join(os.tmpdir(), 'redactwall-custom-detectors-' + crypto.randomBytes(6).toString('hex') + '.json');
+process.env.REDACTWALL_CUSTOM_DETECTORS_PATH = customDetectorPath;
+process.env.REDACTWALL_POLICY_PATH = path.join(os.tmpdir(), 'redactwall-custom-policy-' + crypto.randomBytes(6).toString('hex') + '.json');
 
 fs.writeFileSync(customDetectorPath, JSON.stringify({
   detectors: [
@@ -107,7 +107,7 @@ test('custom detector loader accepts array configs and falls back on invalid JSO
 });
 
 test.after(() => {
-  for (const file of [customDetectorPath, process.env.SENTINEL_POLICY_PATH]) {
+  for (const file of [customDetectorPath, process.env.REDACTWALL_POLICY_PATH]) {
     try { fs.unlinkSync(file); } catch {}
   }
 });

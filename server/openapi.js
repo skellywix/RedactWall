@@ -128,8 +128,8 @@ function document() {
   for (const name of Object.keys(REQUEST_SCHEMAS)) components.schemas[name] = REQUEST_SCHEMAS[name]();
   _cache = {
     openapi: '3.1.0',
-    info: { title: 'PromptWall Sensor & Scan API', version: pkg.version, description: 'On-device DLP gateway for AI prompts. Sensors authenticate with an ingest key; nothing but sanitized, masked findings is sent to the control plane.' },
-    servers: [{ url: '/', description: 'This PromptWall instance' }],
+    info: { title: 'RedactWall Sensor & Scan API', version: pkg.version, description: 'On-device DLP gateway for AI prompts. Sensors authenticate with an ingest key; nothing but sanitized, masked findings is sent to the control plane.' },
+    servers: [{ url: '/', description: 'This RedactWall instance' }],
     security: [{ IngestKey: [] }],
     tags: [{ name: 'sensor-api', description: 'Sensor ingestion and scan endpoints' }],
     paths: buildPaths(),

@@ -16,14 +16,14 @@ const { privateKey, publicKey } = crypto.generateKeyPairSync('ed25519');
 const PUB = publicKey.export({ type: 'spki', format: 'pem' }).toString();
 
 process.env.ADMIN_PASSWORD = 'unit-pass';
-process.env.SENTINEL_SECRET = 'unit-secret-stable';
+process.env.REDACTWALL_SECRET = 'unit-secret-stable';
 process.env.INGEST_API_KEY = 'unit-ingest-key';
-process.env.SENTINEL_LICENSE_PUBLIC_KEY = PUB;
+process.env.REDACTWALL_LICENSE_PUBLIC_KEY = PUB;
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pw-license-api-'));
-process.env.SENTINEL_DB_PATH = path.join(tmp, 'test.db');
-process.env.SENTINEL_LICENSE_PATH = path.join(tmp, 'promptwall.lic');
-process.env.SENTINEL_POLICY_PATH = path.join(tmp, 'policy.json');
-fs.writeFileSync(process.env.SENTINEL_POLICY_PATH, JSON.stringify({ enforcementMode: 'block', blockMinSeverity: 2, blockRiskScore: 20 }));
+process.env.REDACTWALL_DB_PATH = path.join(tmp, 'test.db');
+process.env.REDACTWALL_LICENSE_PATH = path.join(tmp, 'redactwall.lic');
+process.env.REDACTWALL_POLICY_PATH = path.join(tmp, 'policy.json');
+fs.writeFileSync(process.env.REDACTWALL_POLICY_PATH, JSON.stringify({ enforcementMode: 'block', blockMinSeverity: 2, blockRiskScore: 20 }));
 
 const app = require('../server/app');
 const db = require('../server/db');

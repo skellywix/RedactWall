@@ -27,10 +27,10 @@ const children = new Set();
 function serverEnv(dbPath, port) {
   return {
     ...process.env,
-    SENTINEL_ENV_PATH: path.join(tempRoot, 'no.env'),
-    SENTINEL_DB_PATH: dbPath,
-    SENTINEL_SECRET: 'chaos-secret-stable',
-    SENTINEL_DATA_KEY: 'chaos-data-key-stable',
+    REDACTWALL_ENV_PATH: path.join(tempRoot, 'no.env'),
+    REDACTWALL_DB_PATH: dbPath,
+    REDACTWALL_SECRET: 'chaos-secret-stable',
+    REDACTWALL_DATA_KEY: 'chaos-data-key-stable',
     ADMIN_PASSWORD: 'chaos-admin-password-1',
     INGEST_API_KEY: INGEST_KEY,
     NODE_ENV: 'test',
@@ -119,7 +119,7 @@ function inspectStore(dbPath) {
 }
 
 test('server recovers after SIGKILL mid-burst with an intact audit chain', async (t) => {
-  const dbPath = path.join(tempRoot, 'crash', 'sentinel.db');
+  const dbPath = path.join(tempRoot, 'crash', 'redactwall.db');
   const port = await getFreePort();
 
   const first = startServer(dbPath, port);
@@ -154,7 +154,7 @@ test('server recovers after SIGKILL mid-burst with an intact audit chain', async
 });
 
 test('100 concurrent gate posts all respond and land exactly once in the store', async (t) => {
-  const dbPath = path.join(tempRoot, 'load', 'sentinel.db');
+  const dbPath = path.join(tempRoot, 'load', 'redactwall.db');
   const port = await getFreePort();
 
   const server = startServer(dbPath, port);

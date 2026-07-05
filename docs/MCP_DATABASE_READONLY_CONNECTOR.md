@@ -1,7 +1,7 @@
 # MCP Database Read-Only Connector
 
 The database connector gives MCP agents bounded, read-only SQLite access for
-pilot reporting and internal lookup workflows. PromptWall opens the database in
+pilot reporting and internal lookup workflows. RedactWall opens the database in
 read-only mode, rejects write-capable SQL, bounds the result, runs rows through
 the shared MCP guard, and returns only the sanitized MCP result to the model.
 

@@ -74,7 +74,7 @@ test('gateway blocks a prompt the control plane blocks — upstream is never cal
   const { app } = createGateway({ client: stubClient({ verdict: { decision: 'block', status: 'pending', reasons: ['Hard-stop entity present: US_SSN'] } }), adapter, agentTokensPath: tp });
   const res = await listenAndRequest(app, { headers: { authorization: 'Bearer ' + token }, body: chatBody('SSN 412-22-7843') });
   assert.strictEqual(res.status, 403);
-  assert.strictEqual(res.json.error.type, 'blocked_by_promptwall');
+  assert.strictEqual(res.json.error.type, 'blocked_by_redactwall');
   assert.strictEqual(upstreamCalls, 0, 'upstream must not be called on a blocked prompt');
 });
 
@@ -95,7 +95,7 @@ test('gateway blocks a model response the control plane flags as a leak', async 
   const { app } = createGateway({ provider: 'mock', client: stubClient({ verdict: { decision: 'allow' }, scan: { leaked: true, decision: 'block', blocked: true, reasons: ['Sensitive data present in AI response'] } }), agentTokensPath: tp });
   const res = await listenAndRequest(app, { headers: { authorization: 'Bearer ' + token }, body: chatBody('tell me a secret') });
   assert.strictEqual(res.status, 403);
-  assert.strictEqual(res.json.error.type, 'response_blocked_by_promptwall');
+  assert.strictEqual(res.json.error.type, 'response_blocked_by_redactwall');
 });
 
 test('gateway tokenizes EVERY role on redact (no raw PII upstream) and rehydrates locally', async (t) => {

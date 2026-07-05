@@ -1,6 +1,6 @@
 # Detection Benchmarks
 
-Reference latency, throughput, and accuracy for PromptWall's shared detection
+Reference latency, throughput, and accuracy for RedactWall's shared detection
 engine (`detection-engine/detect.js`). Reproduce locally with `npm run bench`
 and `npm run eval`.
 
@@ -8,7 +8,7 @@ and `npm run eval`.
 
 These are **in-process, on-device** measurements: the cost of a single
 `analyze()` call on the machine doing the scanning, with **no network hop**.
-That is the real cost PromptWall pays per keystroke, paste, or file scan,
+That is the real cost RedactWall pays per keystroke, paste, or file scan,
 because detection runs locally in the browser extension, the endpoint agent,
 the MCP guard, and the gateway — prompt text never leaves the institution to
 be classified.

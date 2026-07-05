@@ -3,7 +3,7 @@
  * Storage driver selection + schema migrations for the control plane.
  *
  * Default driver is better-sqlite3 on local disk (single-node, WAL). Setting
- * SENTINEL_DB_DRIVER=postgres with SENTINEL_DATABASE_URL routes the same
+ * REDACTWALL_DB_DRIVER=postgres with REDACTWALL_DATABASE_URL routes the same
  * synchronous db.js interface onto Postgres via a worker-thread bridge —
  * the scale-out path for a shared multi-tenant control plane.
  */
@@ -23,15 +23,23 @@ function sqliteDriverAt(dbPath) {
   return d;
 }
 
+function defaultSqlitePath(dataDir) {
+  const preferred = path.join(dataDir, 'redactwall.db');
+  const legacy = path.join(dataDir, 'sentinel.db');
+  // Installs created before the RedactWall rebrand keep their existing store.
+  if (!fs.existsSync(preferred) && fs.existsSync(legacy)) return legacy;
+  return preferred;
+}
+
 function openSqlite(env, dataDir) {
-  let dbPath = env.SENTINEL_DB_PATH || path.join(dataDir, 'sentinel.db');
+  let dbPath = env.REDACTWALL_DB_PATH || defaultSqlitePath(dataDir);
   let driver;
   try {
     driver = sqliteDriverAt(dbPath);
   } catch (e) {
-    const fallback = path.join(os.tmpdir(), 'promptwall', 'sentinel.db');
+    const fallback = path.join(os.tmpdir(), 'redactwall', 'redactwall.db');
     console.error(`[db] store at ${dbPath} unusable (${e.code || e.message}); falling back to ${fallback}. ` +
-      'Set SENTINEL_DB_PATH to a local-disk path in production (never a cloud-synced folder).');
+      'Set REDACTWALL_DB_PATH to a local-disk path in production (never a cloud-synced folder).');
     dbPath = fallback;
     driver = sqliteDriverAt(dbPath);
   }
@@ -39,16 +47,16 @@ function openSqlite(env, dataDir) {
 }
 
 function openPostgres(env) {
-  const connectionString = env.SENTINEL_DATABASE_URL || env.DATABASE_URL;
+  const connectionString = env.REDACTWALL_DATABASE_URL || env.DATABASE_URL;
   if (!connectionString) {
-    throw new Error('SENTINEL_DB_DRIVER=postgres requires SENTINEL_DATABASE_URL');
+    throw new Error('REDACTWALL_DB_DRIVER=postgres requires REDACTWALL_DATABASE_URL');
   }
   const { createPgDriver } = require('./pg-driver');
   return { driver: createPgDriver(connectionString), kind: 'postgres', dbPath: 'postgres' };
 }
 
 function openStore({ env = process.env, dataDir } = {}) {
-  const requested = String(env.SENTINEL_DB_DRIVER || 'sqlite').trim().toLowerCase();
+  const requested = String(env.REDACTWALL_DB_DRIVER || 'sqlite').trim().toLowerCase();
   if (requested === 'postgres' || requested === 'postgresql' || requested === 'pg') {
     return openPostgres(env);
   }

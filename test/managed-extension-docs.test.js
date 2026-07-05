@@ -23,7 +23,7 @@ test('managed storage example uses only schema-backed keys', () => {
 });
 
 test('Firefox managed storage example uses schema-backed keys', () => {
-  const values = firefoxManaged.policies['3rdparty'].Extensions['promptwall@example.com'];
+  const values = firefoxManaged.policies['3rdparty'].Extensions['redactwall@example.com'];
   const allowed = new Set(Object.keys(schema.properties));
   for (const key of Object.keys(values)) assert.ok(allowed.has(key), key);
   assert.strictEqual(values.ingestKey, 'REPLACE_WITH_LONG_RANDOM_INGEST_KEY');
@@ -36,8 +36,8 @@ test('extension force-install examples have placeholder ids and update/install u
   assert.ok(edgeExtensionSettings.ExtensionSettings['<extension-id>']);
   assert.strictEqual(edgeExtensionSettings.ExtensionSettings['<extension-id>'].installation_mode, 'force_installed');
   assert.match(edgeExtensionSettings.ExtensionSettings['<extension-id>'].update_url, /edge\.microsoft\.com/);
-  assert.strictEqual(firefoxExtensionSettings.policies.ExtensionSettings['promptwall@example.com'].installation_mode, 'force_installed');
-  assert.match(firefoxExtensionSettings.policies.ExtensionSettings['promptwall@example.com'].install_url, /^https:\/\//);
+  assert.strictEqual(firefoxExtensionSettings.policies.ExtensionSettings['redactwall@example.com'].installation_mode, 'force_installed');
+  assert.match(firefoxExtensionSettings.policies.ExtensionSettings['redactwall@example.com'].install_url, /^https:\/\//);
 });
 
 test('managed deployment guide warns about secret-bearing policy', () => {
@@ -54,7 +54,7 @@ test('release checklist covers private rollout, update channel, and rollback', (
   assert.match(releaseChecklist, /npm run release:extension:check/);
   assert.match(releaseChecklist, /https:\/\/clients2\.google\.com\/service\/update2\/crx/);
   assert.match(releaseChecklist, /https:\/\/edge\.microsoft\.com\/extensionwebstorebase\/v1\/crx/);
-  assert.match(releaseChecklist, /promptwall@example\.com/);
+  assert.match(releaseChecklist, /redactwall@example\.com/);
   assert.match(releaseChecklist, /Fleet Install Health/);
   assert.match(releaseChecklist, /Rollback/);
 });

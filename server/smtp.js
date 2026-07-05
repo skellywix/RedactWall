@@ -31,7 +31,7 @@ function parseRecipients(value) {
 
 function subject(payload) {
   const action = payload.action === 'APPROVAL_ESCALATED' ? 'Approval escalated' : 'Approval routed';
-  return `[PromptWall] ${action}: ${payload.queryId || 'unknown'}`;
+  return `[RedactWall] ${action}: ${payload.queryId || 'unknown'}`;
 }
 
 function body(payload) {
@@ -52,7 +52,7 @@ function body(payload) {
     `Labels: ${payload.labels && payload.labels.length ? payload.labels.join(', ') : 'none'}`,
     `Reasons: ${payload.reasons && payload.reasons.length ? payload.reasons.join('; ') : 'none'}`,
     '',
-    'Review this item in the PromptWall dashboard.',
+    'Review this item in the RedactWall dashboard.',
   ].map((line) => cleanHeader(line, 1000)).join('\n');
 }
 
@@ -64,7 +64,7 @@ function messageForPayload(channel, payload, now = new Date()) {
     `To: ${to}`,
     `Subject: ${cleanHeader(subject(payload), 180)}`,
     `Date: ${now.toUTCString()}`,
-    `Message-ID: <promptwall-${crypto.randomBytes(12).toString('hex')}@${messageIdHost}>`,
+    `Message-ID: <redactwall-${crypto.randomBytes(12).toString('hex')}@${messageIdHost}>`,
     'MIME-Version: 1.0',
     'Content-Type: text/plain; charset=utf-8',
     'Content-Transfer-Encoding: 8bit',

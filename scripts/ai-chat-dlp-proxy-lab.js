@@ -5,7 +5,7 @@ require('../server/env').loadEnv();
  *
  * This is a thin spike, not a production TLS interception proxy. It observes
  * captured cleartext HTTP request bodies for known AI chat domains, scans them
- * locally, sends only pre-redacted evidence to PromptWall, and always forwards
+ * locally, sends only pre-redacted evidence to RedactWall, and always forwards
  * the request path from the proxy's point of view.
  */
 const http = require('node:http');
@@ -15,7 +15,7 @@ const detector = require('../server/detector');
 const policy = require('../server/policy');
 const { extractPrompt, fetchWithTimeout } = require('./squid-icap-bridge');
 
-const SENTINEL = process.env.SENTINEL_URL || 'http://localhost:4000';
+const REDACTWALL = process.env.REDACTWALL_URL || 'http://localhost:4000';
 const KEY = process.env.INGEST_API_KEY || 'dev-ingest-key';
 const DEFAULT_PORT = 4181;
 const DEFAULT_MAX_BODY_BYTES = 256 * 1024;
@@ -128,14 +128,14 @@ function sanitizeControlPlaneBody(body = {}) {
 }
 
 async function postMonitorEvidence(payload, {
-  sentinel = SENTINEL,
+  redactwall = REDACTWALL,
   key = KEY,
   fetchImpl = globalThis.fetch,
   timeoutMs,
 } = {}) {
   if (!fetchImpl) return { ok: false, status: 0, reason: 'fetch_unavailable' };
   try {
-    const res = await fetchWithTimeout(fetchImpl, `${sentinel}/api/v1/gate`, {
+    const res = await fetchWithTimeout(fetchImpl, `${redactwall}/api/v1/gate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': key },
       body: JSON.stringify(payload),
@@ -146,7 +146,7 @@ async function postMonitorEvidence(payload, {
     return {
       ok: false,
       status: 0,
-      reason: e && e.code === 'SENTINEL_TIMEOUT' ? 'gate_timeout' : 'gate_unreachable',
+      reason: e && e.code === 'REDACTWALL_TIMEOUT' ? 'gate_timeout' : 'gate_unreachable',
     };
   }
 }
@@ -160,7 +160,7 @@ async function observeAiChatRequest(input = {}, opts = {}) {
 
   const built = buildMonitorPayload({
     host: destination,
-    user: input.user || (input.headers && (input.headers['x-promptwall-user'] || input.headers['x-user'])) || 'unknown',
+    user: input.user || (input.headers && (input.headers['x-redactwall-user'] || input.headers['x-user'])) || 'unknown',
     sourceIp: input.sourceIp || null,
     contentType: input.contentType || (input.headers && input.headers['content-type']) || '',
     body: input.body || '',
@@ -281,7 +281,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (item === '--port') out.port = Number(argv[++i]);
     else if (item === '--host') out.host = argv[++i];
     else if (item === '--prompt') out.prompt = argv[++i];
-    else if (item === '--sentinel') out.sentinel = argv[++i];
+    else if (item === '--redactwall' || item === '--sentinel') out.redactwall = argv[++i];
     else if (item === '--key') out.key = argv[++i];
   }
   return out;
@@ -297,15 +297,15 @@ async function main(argv = process.argv.slice(2), io = process) {
       body: JSON.stringify({ prompt: args.prompt || 'Synthetic member SSN 524-71-9043 for lab validation.' }),
       user: 'proxy-lab@example.test',
       sourceIp: '127.0.0.1',
-    }, { sentinel: args.sentinel || SENTINEL, key: args.key || KEY });
+    }, { redactwall: args.redactwall || REDACTWALL, key: args.key || KEY });
     io.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     return null;
   }
 
   const port = Number.isFinite(args.port) ? args.port : DEFAULT_PORT;
-  return createProxyServer({ sentinel: args.sentinel || SENTINEL, key: args.key || KEY })
+  return createProxyServer({ redactwall: args.redactwall || REDACTWALL, key: args.key || KEY })
     .listen(port, '127.0.0.1', () => {
-      io.stdout.write(`PromptWall AI chat proxy lab listening on http://127.0.0.1:${port}\n`);
+      io.stdout.write(`RedactWall AI chat proxy lab listening on http://127.0.0.1:${port}\n`);
     });
 }
 

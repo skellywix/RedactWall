@@ -26,7 +26,7 @@ function initRepo(cwd) {
     git(cwd, ['checkout', '-b', 'main']);
   }
   git(cwd, ['config', 'user.email', 'test@example.test']);
-  git(cwd, ['config', 'user.name', 'PromptWall Test']);
+  git(cwd, ['config', 'user.name', 'RedactWall Test']);
 }
 
 function commitFile(cwd, file, content, message) {
@@ -36,7 +36,7 @@ function commitFile(cwd, file, content, message) {
 }
 
 function makeRemoteFixture(t) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'promptwall-updater-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-updater-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const source = path.join(root, 'source');
   const remote = path.join(root, 'remote.git');
@@ -50,9 +50,9 @@ function makeRemoteFixture(t) {
   git(root, ['clone', remote, app]);
   git(app, ['checkout', 'main']);
 
-  process.env.PROMPTWALL_UPDATE_STATE_PATH = path.join(root, 'update-state.json');
-  process.env.PROMPTWALL_UPDATE_CONFIG_PATH = path.join(root, 'update-settings.json');
-  process.env.PROMPTWALL_UPDATE_DATA_ROOT = root;
+  process.env.REDACTWALL_UPDATE_STATE_PATH = path.join(root, 'update-state.json');
+  process.env.REDACTWALL_UPDATE_CONFIG_PATH = path.join(root, 'update-settings.json');
+  process.env.REDACTWALL_UPDATE_DATA_ROOT = root;
 
   return { root, source, remote, app };
 }
@@ -70,8 +70,8 @@ function testConfig() {
 function fakeBackup() {
   return {
     ok: true,
-    file: 'sentinel-backup.db',
-    manifestFile: 'sentinel-backup.db.manifest.json',
+    file: 'redactwall-backup.db',
+    manifestFile: 'redactwall-backup.db.manifest.json',
     bytes: 12,
     backupSha256: 'abc123',
     auditIntegrity: { ok: true, count: 0 },
@@ -118,11 +118,11 @@ test('updater fast-forwards a clean checkout after backup', async (t) => {
 
 test('updater marks restart scheduled after a fast-forward when host opt-in is enabled', async (t) => {
   const fixture = makeRemoteFixture(t);
-  const previousEnabled = process.env.PROMPTWALL_UPDATE_RESTART_ENABLED;
-  const previousCommand = process.env.PROMPTWALL_UPDATE_RESTART_COMMAND;
+  const previousEnabled = process.env.REDACTWALL_UPDATE_RESTART_ENABLED;
+  const previousCommand = process.env.REDACTWALL_UPDATE_RESTART_COMMAND;
   try {
-    process.env.PROMPTWALL_UPDATE_RESTART_ENABLED = 'true';
-    process.env.PROMPTWALL_UPDATE_RESTART_COMMAND = 'node -v';
+    process.env.REDACTWALL_UPDATE_RESTART_ENABLED = 'true';
+    process.env.REDACTWALL_UPDATE_RESTART_COMMAND = 'node -v';
     commitFile(fixture.source, 'version.txt', 'two\n', 'update');
     git(fixture.source, ['push']);
 
@@ -143,10 +143,10 @@ test('updater marks restart scheduled after a fast-forward when host opt-in is e
     assert.strictEqual(result.restartScheduled, true);
     assert.strictEqual(result.state.autoRestartRequested, true);
   } finally {
-    if (previousEnabled === undefined) delete process.env.PROMPTWALL_UPDATE_RESTART_ENABLED;
-    else process.env.PROMPTWALL_UPDATE_RESTART_ENABLED = previousEnabled;
-    if (previousCommand === undefined) delete process.env.PROMPTWALL_UPDATE_RESTART_COMMAND;
-    else process.env.PROMPTWALL_UPDATE_RESTART_COMMAND = previousCommand;
+    if (previousEnabled === undefined) delete process.env.REDACTWALL_UPDATE_RESTART_ENABLED;
+    else process.env.REDACTWALL_UPDATE_RESTART_ENABLED = previousEnabled;
+    if (previousCommand === undefined) delete process.env.REDACTWALL_UPDATE_RESTART_COMMAND;
+    else process.env.REDACTWALL_UPDATE_RESTART_COMMAND = previousCommand;
   }
 });
 
@@ -221,10 +221,10 @@ test('updater refuses production checks from non-GitHub remotes', async (t) => {
 });
 
 test('updater recognizes only GitHub remotes for production API use', () => {
-  assert.strictEqual(updater._internal.githubRemoteInfo('https://github.com/skellywix/promptwall.git').ok, true);
-  assert.strictEqual(updater._internal.githubRemoteInfo('git@github.com:skellywix/promptwall.git').ok, true);
-  assert.strictEqual(updater._internal.githubRemoteInfo('https://example.com/skellywix/promptwall.git').ok, false);
-  assert.strictEqual(updater._internal.githubRemoteInfo('C:/repos/promptwall.git').ok, false);
+  assert.strictEqual(updater._internal.githubRemoteInfo('https://github.com/skellywix/redactwall.git').ok, true);
+  assert.strictEqual(updater._internal.githubRemoteInfo('git@github.com:skellywix/redactwall.git').ok, true);
+  assert.strictEqual(updater._internal.githubRemoteInfo('https://example.com/skellywix/redactwall.git').ok, false);
+  assert.strictEqual(updater._internal.githubRemoteInfo('C:/repos/redactwall.git').ok, false);
 });
 
 test('updater install and backup helpers keep commands explicit and injectable', async () => {
@@ -232,7 +232,7 @@ test('updater install and backup helpers keep commands explicit and injectable',
 
   const installCalls = [];
   const install = await updater._internal.runInstall({ installMode: 'npm-ci' }, {
-    repoRoot: path.join(os.tmpdir(), 'promptwall-install-root'),
+    repoRoot: path.join(os.tmpdir(), 'redactwall-install-root'),
     npmExecutable: 'npm-test',
     runCommand: async (file, args, opts) => {
       installCalls.push({ file, args, opts });
@@ -243,13 +243,13 @@ test('updater install and backup helpers keep commands explicit and injectable',
   assert.deepStrictEqual(installCalls[0].args, ['ci']);
   assert.strictEqual(installCalls[0].opts.publicError, 'dependency install failed');
 
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'promptwall-updater-backup-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-updater-backup-'));
   try {
     let captured = null;
     const backup = await updater._internal.createBackup(testConfig(), {
       dataRoot: root,
       dbModule: {
-        _dbPath: path.join(root, 'sentinel.db'),
+        _dbPath: path.join(root, 'redactwall.db'),
         verifyAuditChain: () => ({ ok: true, count: 0 }),
       },
       backupStore: {
@@ -261,14 +261,14 @@ test('updater install and backup helpers keep commands explicit and injectable',
     });
     assert.deepStrictEqual(backup, { ok: true, file: 'backup.db' });
     assert.strictEqual(captured.outDir, path.join(root, 'backups', 'updates'));
-    assert.strictEqual(captured.dbModule._dbPath, path.join(root, 'sentinel.db'));
+    assert.strictEqual(captured.dbModule._dbPath, path.join(root, 'redactwall.db'));
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
 test('updater rejects unsafe config values before writing settings', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'promptwall-updater-config-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-updater-config-'));
   const opts = { dataRoot: root };
   try {
     assert.throws(
@@ -290,11 +290,11 @@ test('updater rejects unsafe config values before writing settings', () => {
 });
 
 test('updater falls back safely when saved settings JSON is corrupt', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'promptwall-updater-corrupt-config-'));
-  const previousConfigPath = process.env.PROMPTWALL_UPDATE_CONFIG_PATH;
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-updater-corrupt-config-'));
+  const previousConfigPath = process.env.REDACTWALL_UPDATE_CONFIG_PATH;
   try {
-    process.env.PROMPTWALL_UPDATE_CONFIG_PATH = path.join(root, 'update-settings.json');
-    fs.writeFileSync(process.env.PROMPTWALL_UPDATE_CONFIG_PATH, '{not-json');
+    process.env.REDACTWALL_UPDATE_CONFIG_PATH = path.join(root, 'update-settings.json');
+    fs.writeFileSync(process.env.REDACTWALL_UPDATE_CONFIG_PATH, '{not-json');
 
     const config = updater.loadConfig({ dataRoot: root });
 
@@ -302,17 +302,17 @@ test('updater falls back safely when saved settings JSON is corrupt', () => {
     assert.strictEqual(config.branch, 'main');
     assert.strictEqual(config.installMode, 'npm-ci-omit-dev');
   } finally {
-    if (previousConfigPath === undefined) delete process.env.PROMPTWALL_UPDATE_CONFIG_PATH;
-    else process.env.PROMPTWALL_UPDATE_CONFIG_PATH = previousConfigPath;
+    if (previousConfigPath === undefined) delete process.env.REDACTWALL_UPDATE_CONFIG_PATH;
+    else process.env.REDACTWALL_UPDATE_CONFIG_PATH = previousConfigPath;
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
 test('updater redacts credentialed URLs from public command errors', () => {
   const text = updater._internal.redactCommandText(
-    "fatal: Authentication failed for 'https://ghp_secret-token@github.com/acme/promptwall.git/'",
+    "fatal: Authentication failed for 'https://ghp_secret-token@github.com/acme/redactwall.git/'",
   );
-  assert.match(text, /https:\/\/redacted@github\.com\/acme\/promptwall\.git/);
+  assert.match(text, /https:\/\/redacted@github\.com\/acme\/redactwall\.git/);
   assert.doesNotMatch(text, /ghp_secret-token/);
   assert.strictEqual(
     updater._internal.redactRemoteUrl('not a url //oauth-token@example.test/private/repo.git'),
@@ -323,7 +323,7 @@ test('updater redacts credentialed URLs from public command errors', () => {
 test('updater command failures are public, bounded, and credential-redacted', async () => {
   await assert.rejects(
     updater._internal.runCommand(process.execPath, ['-e', `
-      console.error('https://ghp_secret-token@github.com/acme/promptwall.git');
+      console.error('https://ghp_secret-token@github.com/acme/redactwall.git');
       console.error('x'.repeat(7000));
       process.exit(3);
     `], {
@@ -348,13 +348,13 @@ test('updater command failures are public, bounded, and credential-redacted', as
 });
 
 test('updater status returns sanitized repo errors instead of throwing', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'promptwall-updater-status-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-updater-status-'));
   try {
     const report = await updater.status({
       repoRoot: root,
       dataRoot: root,
       dbModule: {
-        _dbPath: path.join(root, 'sentinel.db'),
+        _dbPath: path.join(root, 'redactwall.db'),
         verifyAuditChain: () => ({ ok: true, count: 0 }),
       },
     });
@@ -374,7 +374,7 @@ test('updater status reports existing non-GitHub remotes as a production safety 
     repoRoot: fixture.app,
     dataRoot: fixture.root,
     dbModule: {
-      _dbPath: path.join(fixture.root, 'sentinel.db'),
+      _dbPath: path.join(fixture.root, 'redactwall.db'),
       verifyAuditChain: () => ({ ok: true, count: 0 }),
     },
   });
@@ -386,14 +386,14 @@ test('updater status reports existing non-GitHub remotes as a production safety 
 });
 
 test('updater schedules an opt-in restart and records the command result', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'promptwall-updater-restart-'));
-  const previousEnabled = process.env.PROMPTWALL_UPDATE_RESTART_ENABLED;
-  const previousCommand = process.env.PROMPTWALL_UPDATE_RESTART_COMMAND;
-  const previousState = process.env.PROMPTWALL_UPDATE_STATE_PATH;
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-updater-restart-'));
+  const previousEnabled = process.env.REDACTWALL_UPDATE_RESTART_ENABLED;
+  const previousCommand = process.env.REDACTWALL_UPDATE_RESTART_COMMAND;
+  const previousState = process.env.REDACTWALL_UPDATE_STATE_PATH;
   try {
-    process.env.PROMPTWALL_UPDATE_RESTART_ENABLED = 'true';
-    process.env.PROMPTWALL_UPDATE_RESTART_COMMAND = 'node -v';
-    process.env.PROMPTWALL_UPDATE_STATE_PATH = path.join(root, 'update-state.json');
+    process.env.REDACTWALL_UPDATE_RESTART_ENABLED = 'true';
+    process.env.REDACTWALL_UPDATE_RESTART_COMMAND = 'node -v';
+    process.env.REDACTWALL_UPDATE_STATE_PATH = path.join(root, 'update-state.json');
 
     const scheduled = updater.scheduleRestart({ restartCommand: 'ignored-command' }, {
       dataRoot: root,
@@ -405,7 +405,7 @@ test('updater schedules an opt-in restart and records the command result', async
 
     const state = await waitFor(() => {
       try {
-        const current = JSON.parse(fs.readFileSync(process.env.PROMPTWALL_UPDATE_STATE_PATH, 'utf8'));
+        const current = JSON.parse(fs.readFileSync(process.env.REDACTWALL_UPDATE_STATE_PATH, 'utf8'));
         return current.status === 'restart-command-ran' ? current : null;
       } catch {
         return null;
@@ -417,26 +417,26 @@ test('updater schedules an opt-in restart and records the command result', async
     assert.deepStrictEqual(updater._internal.parseRestartCommand('node -v'), { file: 'node', args: ['-v'] });
     assert.throws(() => updater._internal.parseRestartCommand(''), /restart command is not configured/);
   } finally {
-    if (previousEnabled === undefined) delete process.env.PROMPTWALL_UPDATE_RESTART_ENABLED;
-    else process.env.PROMPTWALL_UPDATE_RESTART_ENABLED = previousEnabled;
-    if (previousCommand === undefined) delete process.env.PROMPTWALL_UPDATE_RESTART_COMMAND;
-    else process.env.PROMPTWALL_UPDATE_RESTART_COMMAND = previousCommand;
-    if (previousState === undefined) delete process.env.PROMPTWALL_UPDATE_STATE_PATH;
-    else process.env.PROMPTWALL_UPDATE_STATE_PATH = previousState;
+    if (previousEnabled === undefined) delete process.env.REDACTWALL_UPDATE_RESTART_ENABLED;
+    else process.env.REDACTWALL_UPDATE_RESTART_ENABLED = previousEnabled;
+    if (previousCommand === undefined) delete process.env.REDACTWALL_UPDATE_RESTART_COMMAND;
+    else process.env.REDACTWALL_UPDATE_RESTART_COMMAND = previousCommand;
+    if (previousState === undefined) delete process.env.REDACTWALL_UPDATE_STATE_PATH;
+    else process.env.REDACTWALL_UPDATE_STATE_PATH = previousState;
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
 test('backend restart execution requires a host opt-in', () => {
-  const previous = process.env.PROMPTWALL_UPDATE_RESTART_ENABLED;
-  delete process.env.PROMPTWALL_UPDATE_RESTART_ENABLED;
+  const previous = process.env.REDACTWALL_UPDATE_RESTART_ENABLED;
+  delete process.env.REDACTWALL_UPDATE_RESTART_ENABLED;
   try {
     assert.throws(
       () => updater.scheduleRestart({ restartCommand: 'node -v' }, { restartDelayMs: 1 }),
       /backend restart command execution is disabled/,
     );
   } finally {
-    if (previous === undefined) delete process.env.PROMPTWALL_UPDATE_RESTART_ENABLED;
-    else process.env.PROMPTWALL_UPDATE_RESTART_ENABLED = previous;
+    if (previous === undefined) delete process.env.REDACTWALL_UPDATE_RESTART_ENABLED;
+    else process.env.REDACTWALL_UPDATE_RESTART_ENABLED = previous;
   }
 });

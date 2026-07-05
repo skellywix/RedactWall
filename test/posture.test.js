@@ -199,8 +199,8 @@ test('posture summarizes live AI security objectives without prompt bodies', () 
     },
     now: '2026-07-03T00:00:00.000Z',
     identityGroups: {
-      'analyst@example.test': ['PromptWall Lending'],
-      'ops@example.test': ['PromptWall Operations'],
+      'analyst@example.test': ['RedactWall Lending'],
+      'ops@example.test': ['RedactWall Operations'],
     },
     detectorFeedbackReport: {
       summary: { total: 2, valid: 1, noisy: 1, missed: 0, reviewCandidates: 3, privacy: 'metadata only; prompt bodies excluded' },
@@ -209,7 +209,7 @@ test('posture summarizes live AI security objectives without prompt bodies', () 
     },
     env: {
       SIEM_WEBHOOK_URL: 'https://siem.example.test/events',
-      PROMPTWALL_APPROVAL_TEAMS_WEBHOOK_URL: 'https://teams.example.test/webhook',
+      REDACTWALL_APPROVAL_TEAMS_WEBHOOK_URL: 'https://teams.example.test/webhook',
     },
   });
 
@@ -317,11 +317,11 @@ test('posture summarizes live AI security objectives without prompt bodies', () 
   assert.strictEqual(report.segments.summary.selectedId, 'all');
   assert.strictEqual(report.segments.summary.privacy, 'metadata only; prompt bodies excluded');
   assert.strictEqual(report.segments.summary.ownerViews, 5);
-  assert.ok(report.segments.views.some((item) => item.id === 'owner:lending' && item.segmentId === 'group:promptwall-lending' && item.reviewerRole === 'approver'));
+  assert.ok(report.segments.views.some((item) => item.id === 'owner:lending' && item.segmentId === 'group:redactwall-lending' && item.reviewerRole === 'approver'));
   assert.ok(report.segments.views.some((item) => item.id === 'owner:it' && item.reviewerRole === 'operator'));
   assert.ok(report.segments.matrix.some((item) => item.type === 'owner' && item.label === 'Lending' && item.ownerGroup === 'Lending'));
   assert.ok(report.segments.matrix.some((item) => item.id === 'org:cu-lending' && item.events === 4 && item.controlRate === 100));
-  assert.ok(report.segments.matrix.some((item) => item.id === 'group:promptwall-lending' && item.events === 3));
+  assert.ok(report.segments.matrix.some((item) => item.id === 'group:redactwall-lending' && item.events === 3));
   assert.ok(report.segments.matrix.some((item) => item.id === 'workflow:member-services' && item.sensitive === 2));
   assert.ok(report.segments.filters.some((item) => item.id === 'source:browser'));
   assert.ok(report.actionQueue.some((item) => item.category === 'Current mission' && item.label === 'Require the proxy sensor'));
@@ -350,22 +350,22 @@ test('posture summarizes live AI security objectives without prompt bodies', () 
     rows,
     policy,
     auditIntegrity: { ok: true, count: 8 },
-    segmentId: 'group:promptwall-lending',
+    segmentId: 'group:redactwall-lending',
     identityGroups: {
-      'analyst@example.test': ['PromptWall Lending'],
-      'ops@example.test': ['PromptWall Operations'],
+      'analyst@example.test': ['RedactWall Lending'],
+      'ops@example.test': ['RedactWall Operations'],
     },
     now: '2026-07-03T00:00:00.000Z',
     env: {},
   });
-  assert.strictEqual(lending.segments.active.id, 'group:promptwall-lending');
-  assert.strictEqual(lending.segments.active.label, 'PromptWall Lending');
+  assert.strictEqual(lending.segments.active.id, 'group:redactwall-lending');
+  assert.strictEqual(lending.segments.active.label, 'RedactWall Lending');
   assert.strictEqual(lending.summary.events, 3);
   assert.strictEqual(lending.summary.blocked, 2);
   assert.strictEqual(lending.summary.redacted, 1);
   assert.strictEqual(lending.summary.controlRate, 100);
   assert.ok(lending.events.every((item) => ['q_pending', 'q_response', 'q_injection'].includes(item.id)));
-  assert.ok(lending.segments.matrix.some((item) => item.id === 'group:promptwall-operations'));
+  assert.ok(lending.segments.matrix.some((item) => item.id === 'group:redactwall-operations'));
   assert.ok(!JSON.stringify(lending).includes('524-71-9043'));
   assert.ok(!JSON.stringify(lending).includes('Member SSN'));
 });
@@ -482,17 +482,17 @@ test('posture leak map attributes sanitized flows to identity segments', () => {
     auditIntegrity: { ok: true, count: 8 },
     now: '2026-07-03T00:00:00.000Z',
     identityGroups: {
-      'analyst@example.test': ['PromptWall Lending'],
-      'ops@example.test': ['PromptWall Operations'],
+      'analyst@example.test': ['RedactWall Lending'],
+      'ops@example.test': ['RedactWall Operations'],
     },
     env: {},
   });
   const map = report.leakMap;
   assert.ok(map && Array.isArray(map.segments) && Array.isArray(map.edges));
-  assert.ok(map.segments.some((item) => item.label === 'PromptWall Lending'));
-  assert.ok(map.segments.some((item) => item.label === 'PromptWall Operations'));
+  assert.ok(map.segments.some((item) => item.label === 'RedactWall Lending'));
+  assert.ok(map.segments.some((item) => item.label === 'RedactWall Operations'));
   assert.ok(map.destinations.some((item) => item.id === 'chatgpt.com'));
-  const lendingEdge = map.edges.find((item) => item.from === 'group:promptwall-lending' && item.to === 'chatgpt.com');
+  const lendingEdge = map.edges.find((item) => item.from === 'group:redactwall-lending' && item.to === 'chatgpt.com');
   assert.ok(lendingEdge, 'lending -> chatgpt edge missing');
   assert.strictEqual(lendingEdge.via, 'browser_extension');
   assert.ok(lendingEdge.pending >= 1);

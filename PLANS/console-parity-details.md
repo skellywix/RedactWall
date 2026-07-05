@@ -166,7 +166,7 @@ its reason inline - the buildable checklist is complete.
 ## Configuration / Policy (`#tab-policy`)
 
 - [x] HAVE: policy editor, templates, signed bundles, impact preview.
-- [ ] DELIBERATE SKIP: rule clone/reorder - PromptWall policy is a single
+- [ ] DELIBERATE SKIP: rule clone/reorder - RedactWall policy is a single
   document with scoped overlays, not an ordered rule list; there is no
   rule-order to manage, which is itself the examiner-friendly design.
 - [ ] DELIBERATE SKIP: rule labels - scoped-enforcement entries carry ids

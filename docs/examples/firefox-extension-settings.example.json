@@ -1,9 +1,9 @@
 {
   "policies": {
     "ExtensionSettings": {
-      "promptwall@example.com": {
+      "redactwall@example.com": {
         "installation_mode": "force_installed",
-        "install_url": "https://downloads.example.org/promptwall/promptwall-firefox-extension-latest.xpi"
+        "install_url": "https://downloads.example.org/redactwall/redactwall-firefox-extension-latest.xpi"
       }
     }
   }

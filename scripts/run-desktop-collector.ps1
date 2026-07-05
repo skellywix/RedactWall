@@ -10,7 +10,7 @@ param(
 
   [string]$Destination = "",
   [string]$User = "",
-  [string]$LogPath = "$env:LOCALAPPDATA\PromptWall\logs\desktop-collector.log",
+  [string]$LogPath = "$env:LOCALAPPDATA\RedactWall\logs\desktop-collector.log",
   [int]$TimeoutMs = 30000
 )
 
@@ -19,15 +19,15 @@ $repo = (Resolve-Path -LiteralPath $RepoRoot).Path
 $config = (Resolve-Path -LiteralPath $ConfigPath).Path
 $collector = Join-Path $repo "sensors\endpoint-agent\collectors\protected-upload.js"
 if (-not (Test-Path -LiteralPath $collector)) {
-  throw "PromptWall desktop collector not found: $collector"
+  throw "RedactWall desktop collector not found: $collector"
 }
 
 $logDir = Split-Path -Parent $LogPath
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 
 $node = Get-Command node -ErrorAction Stop
-$env:PROMPTWALL_ENV_PATH = $config
-Remove-Item Env:\SENTINEL_ENV_PATH -ErrorAction SilentlyContinue
+$env:REDACTWALL_ENV_PATH = $config
+Remove-Item Env:\REDACTWALL_ENV_PATH -ErrorAction SilentlyContinue
 Set-Location -LiteralPath $repo
 
 $collectorArgs = @($collector)

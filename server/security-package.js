@@ -12,7 +12,7 @@ const fs = require('fs');
 const path = require('path');
 const AdmZip = require('adm-zip');
 
-const SCHEMA_VERSION = 'promptwall.security-trust-package.v1';
+const SCHEMA_VERSION = 'redactwall.security-trust-package.v1';
 const DEFAULT_LOCKFILE = path.join(__dirname, '..', 'package-lock.json');
 const CONTROL_STATES = new Set(['verified', 'attention', 'missing']);
 const SOC2_CONTROL_CRITERIA = Object.freeze({
@@ -148,7 +148,7 @@ function buildSbom({ lockfile = null, lockfilePath = DEFAULT_LOCKFILE, packageIn
     metadata: {
       component: {
         type: 'application',
-        name: safeText(packageInfo.name || root.name || 'promptwall', 'promptwall', 80),
+        name: safeText(packageInfo.name || root.name || 'redactwall', 'redactwall', 80),
         version: safeText(packageInfo.version || root.version || '0.0.0', '0.0.0', 40),
       },
       lockfile: {
@@ -206,7 +206,7 @@ function buildControls({ policy = {}, auditIntegrity = {}, preflight = {}, postu
       'local_detection',
       'Local shared detection engine',
       'verified',
-      'Browser, endpoint, MCP, proxy, and gateway paths use PromptWall detector outputs before outbound AI use.',
+      'Browser, endpoint, MCP, proxy, and gateway paths use RedactWall detector outputs before outbound AI use.',
       ['Detector sync-check is part of review:ci', 'Evidence pack exports detector ids and masked findings only'],
       'security engineering',
     ),
@@ -249,9 +249,9 @@ function buildControls({ policy = {}, auditIntegrity = {}, preflight = {}, postu
     control(
       'encrypted_retention',
       'Encrypted retained approval data',
-      boolState(dataKey.ok || env.SENTINEL_DATA_KEY || env.PROMPTWALL_DATA_KEY),
+      boolState(dataKey.ok || env.REDACTWALL_DATA_KEY || env.PROMPTWALL_DATA_KEY || env.SENTINEL_DATA_KEY),
       'Held approval prompts use AES-256-GCM sealing when a stable data key is configured; no key means raw retention is refused.',
-      ['SENTINEL_DATA_KEY/PROMPTWALL_DATA_KEY preflight', 'server/crypto.js AES-256-GCM'],
+      ['REDACTWALL_DATA_KEY/REDACTWALL_DATA_KEY preflight', 'server/crypto.js AES-256-GCM'],
       'privacy',
     ),
     control(
@@ -380,7 +380,7 @@ function dpaBaaPosture() {
       dataResidency: 'determined by the operator hosting the deployment',
     },
     subProcessors: [],
-    subProcessorNote: 'PromptWall introduces no sub-processors by default; self-hosted deployments add only the hosting and SIEM vendors they choose.',
+    subProcessorNote: 'RedactWall introduces no sub-processors by default; self-hosted deployments add only the hosting and SIEM vendors they choose.',
     dpa: { offered: true, executedPerCustomer: true, contact: 'sales' },
     hipaaBaa: { available: true, executedPerCustomer: true, contact: 'sales' },
   };
@@ -422,7 +422,7 @@ function questionnaire(controls) {
   const answer = (id, yes, no) => byId.get(id) && byId.get(id).status === 'verified' ? yes : no;
   return [
     {
-      question: 'Does PromptWall retain raw prompt bodies in vendor-risk exports?',
+      question: 'Does RedactWall retain raw prompt bodies in vendor-risk exports?',
       answer: 'No. Security packages, SIEM packages, and examiner evidence packs omit raw prompts, redacted prompts, token vaults, raw findings, raw audit details, raw URLs, and local paths.',
       evidence: 'privacyContract',
     },
@@ -484,7 +484,7 @@ function trustPackage(input = {}) {
     schemaVersion: SCHEMA_VERSION,
     generatedAt,
     product: {
-      name: safeText(packageInfo.name || 'promptwall', 'promptwall', 80),
+      name: safeText(packageInfo.name || 'redactwall', 'redactwall', 80),
       version: safeText(packageInfo.version || '0.0.0', '0.0.0', 40),
       description: safeText(packageInfo.description || 'Inline DLP gateway for AI chat prompts.', '', 220),
       nodeEngine: safeText(packageInfo.engines && packageInfo.engines.node || '>=22', '>=22', 40),
@@ -527,7 +527,7 @@ function readmePostureLines(pkg) {
 
 function packageReadme(pkg) {
   return [
-    '# PromptWall Security Trust Package',
+    '# RedactWall Security Trust Package',
     '',
     `Generated: ${pkg.generatedAt}`,
     `Product: ${pkg.product.name} ${pkg.product.version}`,

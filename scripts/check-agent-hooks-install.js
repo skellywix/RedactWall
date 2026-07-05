@@ -35,7 +35,7 @@ function settingsInstalled(opts = {}) {
 
 function buildInstallReport(opts = {}) {
   const key = opts.ingestKey || process.env.INGEST_API_KEY || '';
-  const server = opts.serverUrl || process.env.SENTINEL_URL || process.env.PROMPTWALL_URL || '';
+  const server = opts.serverUrl || process.env.REDACTWALL_URL || process.env.PROMPTWALL_URL || process.env.SENTINEL_URL || '';
   return {
     checks: [
       check('agent_hooks_runtime', existsFile('sensors/agent-hooks/hook.js'), 'hook runtime present'),
@@ -50,7 +50,7 @@ function buildInstallReport(opts = {}) {
 
 function buildHeartbeatBody(report, opts = {}) {
   return {
-    user: opts.user || process.env.PROMPTWALL_AGENT_USER || os.userInfo().username || 'agent-technician',
+    user: opts.user || process.env.REDACTWALL_AGENT_USER || os.userInfo().username || 'agent-technician',
     source: 'agent_hooks',
     destination: 'agent-hooks-install',
     sensor: { name: 'agent_hooks', version: VERSION, platform: 'node' },
@@ -59,9 +59,9 @@ function buildHeartbeatBody(report, opts = {}) {
 }
 
 async function emitHeartbeat(report, opts = {}) {
-  const server = opts.serverUrl || process.env.SENTINEL_URL || process.env.PROMPTWALL_URL;
+  const server = opts.serverUrl || process.env.REDACTWALL_URL || process.env.PROMPTWALL_URL || process.env.SENTINEL_URL;
   const key = opts.ingestKey || process.env.INGEST_API_KEY;
-  if (!server) throw new Error('SENTINEL_URL or PROMPTWALL_URL is required to emit a heartbeat');
+  if (!server) throw new Error('REDACTWALL_URL is required to emit a heartbeat');
   if (!key) throw new Error('INGEST_API_KEY is required to emit a heartbeat');
   const fetchImpl = opts.fetchImpl || globalThis.fetch;
   const r = await fetchImpl(String(server).replace(/\/+$/, '') + '/api/v1/heartbeat', {

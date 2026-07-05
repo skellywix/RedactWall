@@ -12,7 +12,7 @@ const detector = require('../detection-engine/detect');
 const customDetectors = require('./custom-detectors');
 const exactMatch = require('./exact-match');
 
-const CONFIG_PATH = process.env.SENTINEL_POLICY_PATH || path.join(__dirname, '..', 'config', 'policy.json');
+const CONFIG_PATH = process.env.REDACTWALL_POLICY_PATH || path.join(__dirname, '..', 'config', 'policy.json');
 const SENSOR_ID_RE = /^[a-z][a-z0-9_:-]{0,79}$/;
 const SENSOR_VERSION_RE = /^[A-Za-z0-9._+:-]{1,80}$/;
 const ROUTING_RULE_ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;

@@ -8,10 +8,10 @@ const fs = require('node:fs');
 const crypto = require('node:crypto');
 
 process.env.ADMIN_PASSWORD = 'unit-pass';
-process.env.SENTINEL_SECRET = 'unit-secret-stable';
-process.env.SENTINEL_DATA_KEY = 'unit-data-key-stable';
+process.env.REDACTWALL_SECRET = 'unit-secret-stable';
+process.env.REDACTWALL_DATA_KEY = 'unit-data-key-stable';
 process.env.INGEST_API_KEY = 'unit-ingest-key';
-process.env.SENTINEL_DB_PATH = path.join(os.tmpdir(), 'ps-heartbeat-test-' + crypto.randomBytes(6).toString('hex') + '.db');
+process.env.REDACTWALL_DB_PATH = path.join(os.tmpdir(), 'ps-heartbeat-test-' + crypto.randomBytes(6).toString('hex') + '.db');
 
 const app = require('../server/app');
 const { listen, loopbackHttpFetch } = require('./support/listen');
@@ -198,6 +198,6 @@ test('heartbeat endpoint rejects unknown prompt-like fields without echoing valu
 
 test.after(() => {
   for (const suffix of ['', '-wal', '-shm']) {
-    try { fs.unlinkSync(process.env.SENTINEL_DB_PATH + suffix); } catch {}
+    try { fs.unlinkSync(process.env.REDACTWALL_DB_PATH + suffix); } catch {}
   }
 });

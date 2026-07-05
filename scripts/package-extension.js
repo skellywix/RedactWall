@@ -47,7 +47,7 @@ function manifestForTarget(manifest, target = 'chrome') {
     next.background = { scripts: ['background.js'] };
     next.browser_specific_settings = {
       gecko: {
-        id: 'promptwall@example.com',
+        id: 'redactwall@example.com',
         strict_min_version: '109.0',
       },
     };
@@ -131,7 +131,7 @@ function validateManifest({ manifest, schema, appVersion, files, target = 'chrom
       throw new Error('Every content script must declare match patterns');
     }
     if (!(script.js || []).includes('lib/browser-api.js')) {
-      throw new Error('Every content script must load lib/browser-api.js before PromptWall runtime code');
+      throw new Error('Every content script must load lib/browser-api.js before RedactWall runtime code');
     }
   }
 
@@ -147,7 +147,7 @@ function validateManifest({ manifest, schema, appVersion, files, target = 'chrom
 function validatePackageContents(files) {
   const disallowed = [
     { label: 'development ingest key', pattern: /dev-ingest-key/ },
-    { label: 'environment assignment', pattern: /\b(?:INGEST_API_KEY|SENTINEL_SECRET|SENTINEL_DATA_KEY)\s*=/ },
+    { label: 'environment assignment', pattern: /\b(?:INGEST_API_KEY|REDACTWALL_SECRET|REDACTWALL_DATA_KEY)\s*=/ },
   ];
   const background = files.find((file) => file.relPath === 'background.js');
   if (!background) throw new Error('Extension package is missing background.js');
@@ -184,7 +184,7 @@ function packageExtension(opts = {}) {
   const engineCopies = validateSyncedEngine(root);
 
   fs.mkdirSync(outDir, { recursive: true });
-  const baseName = `promptwall-${target}-extension-v${manifest.version}`;
+  const baseName = `redactwall-${target}-extension-v${manifest.version}`;
   const zipPath = path.join(outDir, `${baseName}.zip`);
   const manifestPath = path.join(outDir, `${baseName}.manifest.json`);
   const zip = new AdmZip();
@@ -199,7 +199,7 @@ function packageExtension(opts = {}) {
   zip.writeZip(zipPath);
   const zipBody = fs.readFileSync(zipPath);
   const packageManifest = {
-    kind: 'promptwall-browser-extension-package',
+    kind: 'redactwall-browser-extension-package',
     browserTarget: target,
     packageName: path.basename(zipPath),
     extensionVersion: manifest.version,

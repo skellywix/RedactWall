@@ -119,7 +119,7 @@ function samplePostureReport(overrides = {}) {
 test('sanitized alert omits raw, redacted prompt body, vault, and finding values', () => {
   const payload = alerts.sanitizedAlert(sampleQuery(), { action: 'BLOCKED' });
   const wire = JSON.stringify(payload);
-  assert.strictEqual(payload.eventType, 'promptwall.security_event');
+  assert.strictEqual(payload.eventType, 'redactwall.security_event');
   assert.strictEqual(payload.action, 'BLOCKED');
   assert.ok(!wire.includes('524-71-9043'));
   assert.ok(!wire.includes('sealed-secret'));
@@ -255,7 +255,7 @@ test('posture snapshot payload and fingerprint stay sanitized and stable', () =>
     trigger: 'BLOCKED',
   });
   const wire = JSON.stringify(payload);
-  assert.strictEqual(payload.eventType, 'promptwall.posture_snapshot');
+  assert.strictEqual(payload.eventType, 'redactwall.posture_snapshot');
   assert.strictEqual(payload.action, 'POSTURE_FEED');
   assert.strictEqual(payload.automatic, true);
   assert.strictEqual(payload.trigger, 'BLOCKED');

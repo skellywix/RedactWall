@@ -15,7 +15,7 @@ Working with agents is delegation. The same failure modes that sink new tech lea
 ## When it errs, fix the system not the symptom
 Write the correction into the agent-memory file (`AGENTS.md` / `CLAUDE.md`), or ask the agent to reflect on the mistake and update that file, so it never repeats. (See `AGENTS.md` mistake log.) This is how the team gets better over time instead of you re-explaining.
 
-## PromptWall examples
+## RedactWall examples
 - Weak: "add a routing-number regex." → Strong: "Reduce false negatives on bank routing numbers without adding false positives; keep the banking-context guard; prove it with a new `test/detect.test.js` case and `npm run simulate`."
 - Weak: silently fixing a bad diff yourself. → Strong: tell the agent what was wrong and add a line to `AGENTS.md` so the next session avoids it.
 

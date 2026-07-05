@@ -11,9 +11,9 @@ const fs = require('fs');
 const crypto = require('crypto');
 
 // Isolate the DB BEFORE requiring the module (it opens the file at load time).
-// An explicit SENTINEL_DB_PATH also disables legacy JSON auto-migration, so the
+// An explicit REDACTWALL_DB_PATH also disables legacy JSON auto-migration, so the
 // test store is hermetic.
-process.env.SENTINEL_DB_PATH = path.join(os.tmpdir(), 'ps-db-test-' + crypto.randomBytes(6).toString('hex') + '.db');
+process.env.REDACTWALL_DB_PATH = path.join(os.tmpdir(), 'ps-db-test-' + crypto.randomBytes(6).toString('hex') + '.db');
 const db = require('../server/db');
 
 test('queries round-trip and update transactionally', () => {
@@ -223,4 +223,4 @@ test('retention purge removes sealed raw/vault fields and preserves audit integr
   assert.strictEqual(db.verifyAuditChain().ok, true, 'purge audit event should rebind changed evidence');
 });
 
-test.after(() => { try { for (const s of ['', '-wal', '-shm']) fs.unlinkSync(process.env.SENTINEL_DB_PATH + s); } catch {} });
+test.after(() => { try { for (const s of ['', '-wal', '-shm']) fs.unlinkSync(process.env.REDACTWALL_DB_PATH + s); } catch {} });

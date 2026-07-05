@@ -164,8 +164,8 @@ test('browser blocks configured destinations before local prompt or file inspect
   assert.match(background, /clientOutcome:\s*msg\.payload\.outcome/);
   assert.match(content, /'destination_blocked'/);
   assert.match(content, /'file_upload_blocked'/);
-  assert.match(content, /PromptWall blocked sends to/);
-  assert.match(content, /PromptWall blocked file uploads to/);
+  assert.match(content, /RedactWall blocked sends to/);
+  assert.match(content, /RedactWall blocked file uploads to/);
   assert.match(content, /Recording evidence/);
   assert.match(content, /Control-plane evidence was not recorded yet/);
   assert.match(content, /updateEvidenceToast\(\s*reportBlockedDestination\('submit'\),\s*'destination_blocked'/);
@@ -191,9 +191,9 @@ test('browser blocks configured paste, drop, copy, and download actions without 
   assert.match(content, /updateEvidenceToast\(\s*reportBlockedBrowserAction\('drop', actionRule\),\s*'action_blocked'/);
   assert.match(content, /'\[browser action blocked\] ' \+ action \+ ' ' \+ SITE/);
   assert.match(content, /'action_blocked'/);
-  assert.match(content, /PromptWall blocked paste into/);
-  assert.match(content, /PromptWall blocked file drops into/);
-  assert.match(content, /PromptWall blocked copy from/);
+  assert.match(content, /RedactWall blocked paste into/);
+  assert.match(content, /RedactWall blocked file drops into/);
+  assert.match(content, /RedactWall blocked copy from/);
   assert.match(background, /chrome\.downloads\?\.onCreated\?\.addListener/);
   assert.match(background, /function downloadDestinationForPolicy\(item = \{\}, pol = \{\}\)/);
   assert.match(background, /chrome\.downloads\.cancel\(id/);
@@ -220,7 +220,7 @@ test('unscannable browser uploads hand name+size file intent to the endpoint nat
   assert.strictEqual(ack && ack.queued, true);
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.strictEqual(sent.length, 1);
-  assert.strictEqual(sent[0].hostName, 'com.promptwall.file_intent');
+  assert.strictEqual(sent[0].hostName, 'com.redactwall.file_intent');
   assert.strictEqual(sent[0].message.type, 'upload_intent');
   assert.strictEqual(sent[0].message.fileName, 'member-report.pdf');
   assert.strictEqual(sent[0].message.sizeBytes, 42);
@@ -373,7 +373,7 @@ test('browser block banner includes employee coaching guidance', () => {
   assert.match(content, /reasonInput\.setAttribute\('aria-invalid', 'false'\)/);
   assert.match(content, /initialFocus\.focus\(\{ preventScroll: true \}\)/);
   assert.match(content, /'<div class="ps-coach">' \+ escapeHtml\(coach\) \+ '<\/div>'/);
-  assert.match(content, /PromptWall found sensitive data: ' \+ listForScreen/);
+  assert.match(content, /RedactWall found sensitive data: ' \+ listForScreen/);
   assert.doesNotMatch(content, /this prompt contains <b>' \+ items\.join/);
 });
 
@@ -387,8 +387,8 @@ test('browser sensitive-paste blocks wait for recorded evidence status', () => {
   assert.match(content, /safeClientPrompt\(pasted, verdict\.analysis\)/);
   assert.match(content, /'paste_flagged'/);
   assert.match(content, /updateEvidenceToast\(\s*reportPromise,\s*'paste_flagged'/);
-  assert.match(content, /PromptWall blocked sensitive paste and recorded the decision/);
-  assert.match(content, /PromptWall blocked sensitive paste\. Control-plane evidence was not recorded yet/);
+  assert.match(content, /RedactWall blocked sensitive paste and recorded the decision/);
+  assert.match(content, /RedactWall blocked sensitive paste\. Control-plane evidence was not recorded yet/);
 });
 
 test('browser click interception uses shared send-button adapters', () => {
@@ -509,7 +509,7 @@ test('background install health posts secret-free browser heartbeat', async () =
   let outbound;
   const bg = loadBackground({
     managed: {
-      serverUrl: 'https://promptwall.customer.example',
+      serverUrl: 'https://redactwall.customer.example',
       ingestKey,
       email: 'analyst@example.test',
       orgId: 'cu-acme',
@@ -526,7 +526,7 @@ test('background install health posts secret-free browser heartbeat', async () =
 
   const res = await bg.context.self.__test.reportInstallHealth();
   assert.strictEqual(res.ok, true);
-  assert.strictEqual(outbound.url, 'https://promptwall.customer.example/api/v1/heartbeat');
+  assert.strictEqual(outbound.url, 'https://redactwall.customer.example/api/v1/heartbeat');
   assert.strictEqual(outbound.headers['x-api-key'], ingestKey);
   assert.strictEqual(outbound.body.source, 'browser_extension');
   assert.strictEqual(outbound.body.destination, 'browser-install');
@@ -549,7 +549,7 @@ test('browser platform metadata distinguishes Firefox manifest and Edge user age
   assert.strictEqual(bg.context.self.__test.browserPlatform(manifest), 'chrome_mv3');
   assert.strictEqual(bg.context.self.__test.browserPlatform({
     ...manifest,
-    browser_specific_settings: { gecko: { id: 'promptwall@example.com' } },
+    browser_specific_settings: { gecko: { id: 'redactwall@example.com' } },
   }), 'firefox_mv3');
   bg.context.navigator = { userAgent: 'Mozilla/5.0 AppleWebKit/537.36 Chrome/128.0.0.0 Safari/537.36 Edg/128.0.0.0' };
   assert.strictEqual(bg.context.self.__test.browserPlatform(manifest), 'edge_mv3');
@@ -582,7 +582,7 @@ test('background install health flags unmanaged local config without leaking key
 
 test('background install health does not post without ingest key', async () => {
   const bg = loadBackground({
-    managed: { serverUrl: 'https://promptwall.customer.example', email: 'analyst@example.test', orgId: 'cu-acme' },
+    managed: { serverUrl: 'https://redactwall.customer.example', email: 'analyst@example.test', orgId: 'cu-acme' },
     fetch: async () => {
       throw new Error('fetch should not run without an ingest key');
     },
@@ -614,7 +614,7 @@ test('background install health does not throw on invalid server URL', async () 
 test('background install health rejects server URLs with embedded credentials', async () => {
   const bg = loadBackground({
     managed: {
-      serverUrl: 'https://user:pass@promptwall.customer.example',
+      serverUrl: 'https://user:pass@redactwall.customer.example',
       ingestKey: 'browser-ingest-key-0000000000000000000001',
       email: 'analyst@example.test',
       orgId: 'cu-acme',

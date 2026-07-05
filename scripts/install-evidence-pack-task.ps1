@@ -1,6 +1,6 @@
 param(
-  [string]$TaskName = 'PromptWall Examiner Evidence Pack',
-  [string]$TaskPath = '\PromptWall\',
+  [string]$TaskName = 'RedactWall Examiner Evidence Pack',
+  [string]$TaskPath = '\RedactWall\',
   [ValidateSet('Daily', 'Weekly', 'Quarterly')]
   [string]$Cadence = 'Quarterly',
   [ValidateSet('Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday')]
@@ -36,7 +36,7 @@ if (-not (Test-Path -LiteralPath $ConfigPath)) {
 $resolvedConfig = (Resolve-Path -LiteralPath $ConfigPath).Path
 
 if ([string]::IsNullOrWhiteSpace($LogPath)) {
-  $LogPath = Join-Path $env:LOCALAPPDATA 'PromptWall\logs\evidence-pack.log'
+  $LogPath = Join-Path $env:LOCALAPPDATA 'RedactWall\logs\evidence-pack.log'
 }
 
 $logDir = Split-Path -Parent $LogPath
@@ -90,7 +90,7 @@ Register-ScheduledTask `
   -Trigger $trigger `
   -Settings $settings `
   -Principal $principal `
-  -Description 'Generate sanitized PromptWall examiner evidence packs from the configured schedule file.' `
+  -Description 'Generate sanitized RedactWall examiner evidence packs from the configured schedule file.' `
   -Force | Out-Null
 
 $task = Get-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath

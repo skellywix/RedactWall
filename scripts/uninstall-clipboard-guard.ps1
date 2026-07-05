@@ -1,5 +1,5 @@
 param(
-  [string]$ShortcutName = "PromptWall Clipboard Guard",
+  [string]$ShortcutName = "RedactWall Clipboard Guard",
   [switch]$DesktopShortcut
 )
 
@@ -13,4 +13,4 @@ if ($DesktopShortcut) {
 foreach ($shortcutPath in $shortcutPaths) {
   Remove-Item -LiteralPath $shortcutPath -Force -ErrorAction SilentlyContinue
 }
-Write-Host "Uninstalled PromptWall clipboard guard shortcut"
+Write-Host "Uninstalled RedactWall clipboard guard shortcut"

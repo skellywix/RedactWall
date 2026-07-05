@@ -1,6 +1,6 @@
 ---
 name: browser-use
-description: Give the agent a real browser to run end-to-end checks. For PromptWall, use it to verify the Chrome extension actually blocks/warns on live AI sites (ChatGPT, Claude, Gemini, Copilot) — paste a synthetic SSN, confirm the modal fires and nothing leaves the device. Wraps the external browser-use skill.
+description: Give the agent a real browser to run end-to-end checks. For RedactWall, use it to verify the Chrome extension actually blocks/warns on live AI sites (ChatGPT, Claude, Gemini, Copilot) — paste a synthetic SSN, confirm the modal fires and nothing leaves the device. Wraps the external browser-use skill.
 ---
 
 # Browser Use
@@ -12,7 +12,7 @@ Coding agents are blind to the live web; this gives them eyes and hands for true
 
 > In Cowork specifically, the built-in **Claude-in-Chrome** tools already provide live browser control — prefer those here; use the external skill in plain Claude Code / CI.
 
-## PromptWall E2E checks
+## RedactWall E2E checks
 1. **Paste block:** load the unpacked `sensors/browser-extension/` in a test Chrome profile, open chatgpt.com, paste a **synthetic** SSN (`123-45-6789`). Expect the blocking modal from `sensors/browser-extension/content.js`; confirm the request to the AI site is NOT sent.
 2. **Warn / justify modes:** switch `config/policy.json` enforcementMode, repeat, and confirm the nudge vs justification prompt matches the mode.
 3. **Redact mode:** paste synthetic PII, confirm only tokens leave and the reply is de-tokenized locally.

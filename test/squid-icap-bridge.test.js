@@ -49,7 +49,7 @@ test('gate sends proxy context and returns a usable control-plane verdict', asyn
     sourceIp: '10.0.0.9',
     contentType: 'application/json',
     body: JSON.stringify({ prompt: 'Synthetic SSN 524-71-9043' }),
-    sentinel: 'http://sentinel.test',
+    redactwall: 'http://redactwall.test',
     key: 'proxy-key',
     fetchImpl: async (url, opts) => {
       outbound = { url, headers: opts.headers, body: JSON.parse(opts.body) };
@@ -58,7 +58,7 @@ test('gate sends proxy context and returns a usable control-plane verdict', asyn
   });
 
   assert.deepStrictEqual(verdict, { id: 'q_proxy', decision: 'block', status: 'pending' });
-  assert.strictEqual(outbound.url, 'http://sentinel.test/api/v1/gate');
+  assert.strictEqual(outbound.url, 'http://redactwall.test/api/v1/gate');
   assert.strictEqual(outbound.headers['x-api-key'], 'proxy-key');
   assert.strictEqual(outbound.body.destination, 'chatgpt.com');
   assert.strictEqual(outbound.body.source, 'proxy');
@@ -132,7 +132,7 @@ test('awaitRelease releases only approved or allowed statuses', async () => {
   ];
   const result = await awaitRelease('q_1/needs encoding', {
     releaseToken: 'release-token-unit',
-    sentinel: 'http://sentinel.test',
+    redactwall: 'http://redactwall.test',
     key: 'proxy-key',
     intervalMs: 1,
     timeoutMs: 1000,
@@ -144,7 +144,7 @@ test('awaitRelease releases only approved or allowed statuses', async () => {
   });
 
   assert.deepStrictEqual(result, { released: true });
-  assert.strictEqual(seen[0].url, 'http://sentinel.test/api/v1/status/q_1%2Fneeds%20encoding');
+  assert.strictEqual(seen[0].url, 'http://redactwall.test/api/v1/status/q_1%2Fneeds%20encoding');
   assert.strictEqual(seen[0].key, 'proxy-key');
   assert.strictEqual(seen[0].releaseToken, 'release-token-unit');
 });
@@ -302,7 +302,7 @@ function reqmodMessage({ host = 'chatgpt.com', prompt, body, allow204 = true } =
 
 test('ICAP server end-to-end: OPTIONS, allow, hold-release, block, and hygiene', async (t) => {
   const stub = await startControlPlaneStub();
-  const bridge = await startBridge({ sentinel: stub.url });
+  const bridge = await startBridge({ redactwall: stub.url });
   t.after(() => { bridge.server.close(); bridge.server.destroyConnections(); stub.server.close(); });
 
   await t.test('OPTIONS handshake advertises REQMOD without Preview', async () => {
@@ -354,7 +354,7 @@ test('ICAP server end-to-end: OPTIONS, allow, hold-release, block, and hygiene',
 });
 
 test('ICAP server fails closed when the control plane is down', async (t) => {
-  const bridge = await startBridge({ sentinel: 'http://127.0.0.1:9', gateTimeoutMs: 200 });
+  const bridge = await startBridge({ redactwall: 'http://127.0.0.1:9', gateTimeoutMs: 200 });
   t.after(() => { bridge.server.close(); bridge.server.destroyConnections(); });
 
   const res = await icapExchange(bridge.port, reqmodMessage({ prompt: 'anything at all' }));
@@ -364,7 +364,7 @@ test('ICAP server fails closed when the control plane is down', async (t) => {
 
 test('ICAP server blocks oversized bodies without calling the control plane', async (t) => {
   const stub = await startControlPlaneStub();
-  const bridge = await startBridge({ sentinel: stub.url, maxBodyBytes: 2048 });
+  const bridge = await startBridge({ redactwall: stub.url, maxBodyBytes: 2048 });
   t.after(() => { bridge.server.close(); bridge.server.destroyConnections(); stub.server.close(); });
 
   const res = await icapExchange(bridge.port, reqmodMessage({ body: JSON.stringify({ prompt: 'A'.repeat(4096) }) }));
@@ -374,7 +374,7 @@ test('ICAP server blocks oversized bodies without calling the control plane', as
 });
 
 test('ICAP server rejects malformed input without crashing', async (t) => {
-  const bridge = await startBridge({ sentinel: 'http://127.0.0.1:9' });
+  const bridge = await startBridge({ redactwall: 'http://127.0.0.1:9' });
   t.after(() => { bridge.server.close(); bridge.server.destroyConnections(); });
 
   const garbage = await icapExchange(bridge.port, 'THIS IS NOT ICAP\r\n\r\n');

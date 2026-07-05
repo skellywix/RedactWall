@@ -1,6 +1,6 @@
 ---
 name: pr-review-loop
-description: Adversarial automated review pass over a PR or diff before a human looks. Checks correctness, security, performance, and PromptWall-specific invariants (no PII in logs, engine parity, audit integrity, alwaysBlock intact), and posts a PASS/FAIL review with evidence. Invoke with /pr-review-loop on a PR number or diff.
+description: Adversarial automated review pass over a PR or diff before a human looks. Checks correctness, security, performance, and RedactWall-specific invariants (no PII in logs, engine parity, audit integrity, alwaysBlock intact), and posts a PASS/FAIL review with evidence. Invoke with /pr-review-loop on a PR number or diff.
 ---
 
 # PR Review Loop
@@ -15,7 +15,7 @@ A PR number (`gh pr diff <n>`) or local diff (`git diff main...HEAD`).
 - Functions doing one thing; no logic duplicated more than twice; no dead code or unused imports; names communicate intent.
 - Async paths handle errors; no `N+1` over the SQLite layer.
 
-**PromptWall invariants (block-level)**
+**RedactWall invariants (block-level)**
 - `npm run sync-check` is green — detector edits propagated via `npm run sync-engine`, not hand-copied.
 - No raw sensitive value (prompt text, detected PII) written to logs, errors, or the audit `entry`. Audit stores redacted detections + hashes only.
 - No `alwaysBlock` type (SSN, cards, bank/routing, IBAN, passport, secret/private keys) removed or down-graded.

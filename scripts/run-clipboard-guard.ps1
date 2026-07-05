@@ -7,7 +7,7 @@ param(
 
   [string]$Destination = "",
   [string]$User = "",
-  [string]$LogPath = "$env:LOCALAPPDATA\PromptWall\logs\clipboard-guard.log",
+  [string]$LogPath = "$env:LOCALAPPDATA\RedactWall\logs\clipboard-guard.log",
   [int]$MaxChars = 200000,
   [switch]$ClearOnBlock
 )
@@ -17,15 +17,15 @@ $repo = (Resolve-Path -LiteralPath $RepoRoot).Path
 $config = (Resolve-Path -LiteralPath $ConfigPath).Path
 $guard = Join-Path $repo "sensors\endpoint-agent\collectors\clipboard-guard.js"
 if (-not (Test-Path -LiteralPath $guard)) {
-  throw "PromptWall clipboard guard not found: $guard"
+  throw "RedactWall clipboard guard not found: $guard"
 }
 
 $logDir = Split-Path -Parent $LogPath
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 
 $node = Get-Command node -ErrorAction Stop
-$env:PROMPTWALL_ENV_PATH = $config
-Remove-Item Env:\SENTINEL_ENV_PATH -ErrorAction SilentlyContinue
+$env:REDACTWALL_ENV_PATH = $config
+Remove-Item Env:\REDACTWALL_ENV_PATH -ErrorAction SilentlyContinue
 Set-Location -LiteralPath $repo
 
 $guardArgs = @(

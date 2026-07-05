@@ -31,13 +31,13 @@ npm run release:extension:check -- dist/browser-extension
 The command builds the browser extension packages and writes:
 
 ```text
-dist/browser-extension/promptwall-chrome-extension-v<version>.zip
-dist/browser-extension/promptwall-chrome-extension-v<version>.manifest.json
-dist/browser-extension/promptwall-edge-extension-v<version>.zip
-dist/browser-extension/promptwall-edge-extension-v<version>.manifest.json
-dist/browser-extension/promptwall-firefox-extension-v<version>.zip
-dist/browser-extension/promptwall-firefox-extension-v<version>.manifest.json
-dist/browser-extension/promptwall-browser-extension-v<version>.release-readiness.json
+dist/browser-extension/redactwall-chrome-extension-v<version>.zip
+dist/browser-extension/redactwall-chrome-extension-v<version>.manifest.json
+dist/browser-extension/redactwall-edge-extension-v<version>.zip
+dist/browser-extension/redactwall-edge-extension-v<version>.manifest.json
+dist/browser-extension/redactwall-firefox-extension-v<version>.zip
+dist/browser-extension/redactwall-firefox-extension-v<version>.manifest.json
+dist/browser-extension/redactwall-browser-extension-v<version>.release-readiness.json
 ```
 
 After Chrome and Edge store items exist, rerun with the final store IDs:
@@ -49,20 +49,20 @@ npm run release:extension:check -- dist/browser-extension --chrome-extension-id 
 That writes:
 
 ```text
-dist/browser-extension/promptwall-chrome-extension-v<version>.extension-settings.json
-dist/browser-extension/promptwall-edge-extension-v<version>.extension-settings.json
+dist/browser-extension/redactwall-chrome-extension-v<version>.extension-settings.json
+dist/browser-extension/redactwall-edge-extension-v<version>.extension-settings.json
 ```
 
 For Firefox, rerun with the customer-approved signed XPI URL:
 
 ```bash
-npm run release:extension:check -- dist/browser-extension --firefox-install-url https://downloads.customer.example/promptwall-firefox.xpi
+npm run release:extension:check -- dist/browser-extension --firefox-install-url https://downloads.customer.example/redactwall-firefox.xpi
 ```
 
 That writes:
 
 ```text
-dist/browser-extension/promptwall-firefox-extension-v<version>.extension-settings.json
+dist/browser-extension/redactwall-firefox-extension-v<version>.extension-settings.json
 ```
 
 Generated ExtensionSettings files are safe to attach to the handoff packet
@@ -78,11 +78,11 @@ ingest keys.
 Before upload:
 
 - Confirm the store or signing account belongs to the customer, reseller, or
-  controlled PromptWall release account.
+  controlled RedactWall release account.
 - Set visibility to private, unlisted, or organization-scoped for pilot
   releases.
 - Keep the version equal to `package.json` and `sensors/browser-extension/manifest.json`.
-- Include a short single-purpose description: PromptWall inspects data headed to
+- Include a short single-purpose description: RedactWall inspects data headed to
   governed AI tools and blocks, redacts, warns, or requires justification by
   policy.
 - Document the permission purpose for `storage`, `activeTab`, `tabs`, `alarms`,
@@ -108,7 +108,7 @@ After store items or signed install URLs exist:
   for Microsoft Edge Add-ons installs.
 - Keep Firefox `install_url` set to the customer-approved signed XPI HTTPS URL.
 - Keep Firefox managed policy keyed to the packaged Gecko extension id,
-  `promptwall@example.com`.
+  `redactwall@example.com`.
 - Configure managed storage from the customer MDM or browser enterprise policy.
 - Store the real `ingestKey` only in the customer's policy system or vault.
 - Export the final force-install policy and include it in the handoff packet.
@@ -121,7 +121,7 @@ On a managed test device:
   `about:policies`) and reload policies.
 - Confirm the extension is force-installed.
 - Confirm the extension receives managed storage.
-- Open the PromptWall popup and confirm protection is enabled.
+- Open the RedactWall popup and confirm protection is enabled.
 - Send a benign prompt to a governed AI destination.
 - Confirm Coverage shows the managed test user and org in Fleet Install Health
   with `browser_extension`, the released version, expected platform, `covered`,

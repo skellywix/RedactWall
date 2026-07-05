@@ -8,11 +8,11 @@ const fs = require('node:fs');
 const crypto = require('node:crypto');
 
 process.env.ADMIN_PASSWORD = 'unit-pass';
-process.env.SENTINEL_SECRET = 'unit-secret-stable';
-process.env.SENTINEL_DATA_KEY = 'unit-data-key-stable';
+process.env.REDACTWALL_SECRET = 'unit-secret-stable';
+process.env.REDACTWALL_DATA_KEY = 'unit-data-key-stable';
 process.env.INGEST_API_KEY = 'unit-ingest-key';
-process.env.SENTINEL_DB_PATH = path.join(os.tmpdir(), 'ps-response-policy-test-' + crypto.randomBytes(6).toString('hex') + '.db');
-process.env.SENTINEL_POLICY_PATH = path.join(os.tmpdir(), 'ps-response-policy-' + crypto.randomBytes(6).toString('hex') + '.json');
+process.env.REDACTWALL_DB_PATH = path.join(os.tmpdir(), 'ps-response-policy-test-' + crypto.randomBytes(6).toString('hex') + '.db');
+process.env.REDACTWALL_POLICY_PATH = path.join(os.tmpdir(), 'ps-response-policy-' + crypto.randomBytes(6).toString('hex') + '.json');
 
 const basePolicy = {
   enforcementMode: 'block',
@@ -20,7 +20,7 @@ const basePolicy = {
   blockRiskScore: 20,
   storeRawForApproval: true,
 };
-fs.writeFileSync(process.env.SENTINEL_POLICY_PATH, JSON.stringify({ ...basePolicy, responseScanMode: 'flag' }, null, 2));
+fs.writeFileSync(process.env.REDACTWALL_POLICY_PATH, JSON.stringify({ ...basePolicy, responseScanMode: 'flag' }, null, 2));
 
 const app = require('../server/app');
 const db = require('../server/db');
@@ -40,7 +40,7 @@ async function withServer(fn) {
 }
 
 function writePolicy(responseScanMode) {
-  fs.writeFileSync(process.env.SENTINEL_POLICY_PATH, JSON.stringify({ ...basePolicy, responseScanMode }, null, 2));
+  fs.writeFileSync(process.env.REDACTWALL_POLICY_PATH, JSON.stringify({ ...basePolicy, responseScanMode }, null, 2));
 }
 
 async function scanResponse(port, text = 'The answer includes member SSN 524-71-9043 in the draft.') {
@@ -128,7 +128,7 @@ test('safe response output stays allowed and does not create incident evidence',
 
 test.after(() => {
   for (const suffix of ['', '-wal', '-shm']) {
-    try { fs.unlinkSync(process.env.SENTINEL_DB_PATH + suffix); } catch {}
+    try { fs.unlinkSync(process.env.REDACTWALL_DB_PATH + suffix); } catch {}
   }
-  try { fs.unlinkSync(process.env.SENTINEL_POLICY_PATH); } catch {}
+  try { fs.unlinkSync(process.env.REDACTWALL_POLICY_PATH); } catch {}
 });

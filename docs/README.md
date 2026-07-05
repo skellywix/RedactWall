@@ -1,4 +1,4 @@
-# PromptWall Documentation
+# RedactWall Documentation
 
 Use this index when you know the job but not the file name.
 
@@ -6,7 +6,7 @@ Use this index when you know the job but not the file name.
 
 | Job | Document |
 |-----|----------|
-| Install or operate PromptWall | `DEPLOYMENT.md` |
+| Install or operate RedactWall | `DEPLOYMENT.md` |
 | Run a production pilot handoff | `TECHNICIAN_DEPLOYMENT_GUIDE.md` |
 | Deploy the customer-silo AWS shape | `AWS_SAAS_DEPLOYMENT.md` |
 | Run a sales or customer demo | `../DEMO_INSTALL_GUIDE.md` |

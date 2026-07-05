@@ -1,6 +1,6 @@
 # MCP Connector SDK
 
-PromptWall's MCP connector SDK is the required boundary for connector tool
+RedactWall's MCP connector SDK is the required boundary for connector tool
 results. It keeps `sensors/mcp-guard/guard.js` as the detection and redaction
 boundary, then returns a model-safe MCP result shape to the caller.
 
@@ -67,7 +67,7 @@ data, raw document text, or connector request bodies in health details.
 
 ## Connector Registry
 
-PromptWall ships a metadata-only connector registry at
+RedactWall ships a metadata-only connector registry at
 `sensors/mcp-guard/connector-registry.js`. It records which connector profiles
 are shipped runtime versus profile templates:
 
@@ -102,7 +102,7 @@ checks.
 
 ## Shipped Connectors
 
-PromptWall now includes six first-party connector runtimes:
+RedactWall now includes six first-party connector runtimes:
 
 - Microsoft 365 Graph driveItem content for text-readable OneDrive and
   SharePoint files. It fetches the file body, applies

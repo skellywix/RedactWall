@@ -51,5 +51,5 @@ document.addEventListener('click',(event)=>{
   const target=document.querySelector(button.getAttribute('data-flow-target')||'');
   if(target)target.scrollIntoView({block:'start',behavior:prefersReduce()?'auto':'smooth'});
 });
-window.PromptWallOperatorFlow={render};
+window.RedactWallOperatorFlow={render};
 }());

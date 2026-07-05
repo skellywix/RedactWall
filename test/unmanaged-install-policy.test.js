@@ -8,11 +8,11 @@ const fs = require('node:fs');
 const crypto = require('node:crypto');
 
 process.env.ADMIN_PASSWORD = 'unit-pass';
-process.env.SENTINEL_SECRET = 'unit-secret-stable';
-process.env.SENTINEL_DATA_KEY = 'unit-data-key-stable';
+process.env.REDACTWALL_SECRET = 'unit-secret-stable';
+process.env.REDACTWALL_DATA_KEY = 'unit-data-key-stable';
 process.env.INGEST_API_KEY = 'unit-ingest-key';
-process.env.SENTINEL_DB_PATH = path.join(os.tmpdir(), 'ps-unmanaged-test-' + crypto.randomBytes(6).toString('hex') + '.db');
-process.env.SENTINEL_POLICY_PATH = path.join(os.tmpdir(), 'ps-unmanaged-policy-' + crypto.randomBytes(6).toString('hex') + '.json');
+process.env.REDACTWALL_DB_PATH = path.join(os.tmpdir(), 'ps-unmanaged-test-' + crypto.randomBytes(6).toString('hex') + '.db');
+process.env.REDACTWALL_POLICY_PATH = path.join(os.tmpdir(), 'ps-unmanaged-policy-' + crypto.randomBytes(6).toString('hex') + '.json');
 
 const basePolicy = {
   enforcementMode: 'block',
@@ -20,7 +20,7 @@ const basePolicy = {
   blockRiskScore: 20,
   governedDestinations: ['chatgpt.com'],
 };
-fs.writeFileSync(process.env.SENTINEL_POLICY_PATH, JSON.stringify(basePolicy, null, 2));
+fs.writeFileSync(process.env.REDACTWALL_POLICY_PATH, JSON.stringify(basePolicy, null, 2));
 
 const app = require('../server/app');
 const db = require('../server/db');
@@ -44,7 +44,7 @@ async function withServer(fn) {
 }
 
 function writePolicy(unmanagedInstalls) {
-  fs.writeFileSync(process.env.SENTINEL_POLICY_PATH, JSON.stringify({ ...basePolicy, unmanagedInstalls }, null, 2));
+  fs.writeFileSync(process.env.REDACTWALL_POLICY_PATH, JSON.stringify({ ...basePolicy, unmanagedInstalls }, null, 2));
 }
 
 async function gate(port, user) {

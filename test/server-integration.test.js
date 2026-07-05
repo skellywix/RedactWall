@@ -7,9 +7,9 @@ const os = require('node:os');
 const path = require('node:path');
 
 // Isolate the SQLite store BEFORE requiring the app so the smoke tests never
-// open (or mutate) a developer's live data/sentinel.db.
+// open (or mutate) a developer's live data/redactwall.db.
 const dbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pw-server-integration-'));
-process.env.SENTINEL_DB_PATH = path.join(dbDir, 'test.db');
+process.env.REDACTWALL_DB_PATH = path.join(dbDir, 'test.db');
 
 const app = require('../server/app');
 const db = require('../server/db');
@@ -40,7 +40,7 @@ test('server module exports an app without requiring a fixed listening port', as
 
   const body = await res.json();
   assert.strictEqual(body.status, 'ok');
-  assert.strictEqual(body.service, 'promptwall');
+  assert.strictEqual(body.service, 'redactwall');
 });
 
 test('readiness endpoint is reachable through the importable app', async (t) => {
@@ -66,7 +66,7 @@ test('unauthenticated navigation redirects pages but returns API auth errors', a
   assert.strictEqual(root.status, 302);
   assert.strictEqual(root.headers.get('location'), '/index.html');
 
-  process.env.SENTINEL_CONSOLE_DEFAULT = 'app';
+  process.env.REDACTWALL_CONSOLE_DEFAULT = 'app';
   try {
     const newConsoleRoot = await fetch(`${base}/`, { redirect: 'manual' });
     assert.strictEqual(newConsoleRoot.status, 302);
@@ -75,7 +75,7 @@ test('unauthenticated navigation redirects pages but returns API auth errors', a
     assert.strictEqual(gatedApp.status, 302);
     assert.strictEqual(gatedApp.headers.get('location'), '/login.html');
   } finally {
-    delete process.env.SENTINEL_CONSOLE_DEFAULT;
+    delete process.env.REDACTWALL_CONSOLE_DEFAULT;
   }
 
   const dashboard = await fetch(`${base}/index.html`, { redirect: 'manual' });
@@ -85,7 +85,7 @@ test('unauthenticated navigation redirects pages but returns API auth errors', a
   const login = await fetch(`${base}/login.html`);
   assert.strictEqual(login.status, 200);
   assert.match(login.headers.get('content-type') || '', /text\/html/);
-  assert.match(await login.text(), /PromptWall/);
+  assert.match(await login.text(), /RedactWall/);
 
   const me = await fetch(`${base}/api/me`);
   assert.strictEqual(me.status, 401);

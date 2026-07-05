@@ -1,24 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-MODE="${PROMPTWALL_EVIDENCE_MODE:-npm}"
-PROJECT_DIR="${PROMPTWALL_EVIDENCE_PROJECT_DIR:-/opt/promptwall}"
-CONFIG_PATH="${PROMPTWALL_EVIDENCE_CONFIG:-config/evidence-schedule.json}"
-LOG_PATH="${PROMPTWALL_EVIDENCE_LOG:-/var/log/promptwall/evidence-pack.log}"
-CONTAINER_NAME="${PROMPTWALL_EVIDENCE_CONTAINER:-promptwall}"
+MODE="${REDACTWALL_EVIDENCE_MODE:-npm}"
+PROJECT_DIR="${REDACTWALL_EVIDENCE_PROJECT_DIR:-/opt/redactwall}"
+CONFIG_PATH="${REDACTWALL_EVIDENCE_CONFIG:-config/evidence-schedule.json}"
+LOG_PATH="${REDACTWALL_EVIDENCE_LOG:-/var/log/redactwall/evidence-pack.log}"
+CONTAINER_NAME="${REDACTWALL_EVIDENCE_CONTAINER:-redactwall}"
 
 usage() {
   cat <<'USAGE'
 Usage: run-evidence-pack.sh [options]
 
-Runs a scheduled sanitized PromptWall examiner evidence pack.
+Runs a scheduled sanitized RedactWall examiner evidence pack.
 
 Options:
   --mode npm|docker       Run from a local repo checkout or inside a Docker container.
-  --project-dir <path>    Repo checkout for npm mode. Default: /opt/promptwall.
+  --project-dir <path>    Repo checkout for npm mode. Default: /opt/redactwall.
   --config <path>         Schedule config path. Relative npm paths resolve under project dir.
-  --log <path>            Log path. Default: /var/log/promptwall/evidence-pack.log.
-  --container <name>      Docker container name for docker mode. Default: promptwall.
+  --log <path>            Log path. Default: /var/log/redactwall/evidence-pack.log.
+  --container <name>      Docker container name for docker mode. Default: redactwall.
   -h, --help              Show this help.
 USAGE
 }
@@ -78,7 +78,7 @@ resolve_npm_config() {
 }
 
 run_npm_mode() {
-  [[ -d "$PROJECT_DIR" ]] || die "PromptWall project dir not found: $PROJECT_DIR"
+  [[ -d "$PROJECT_DIR" ]] || die "RedactWall project dir not found: $PROJECT_DIR"
   local resolved_config
   resolved_config="$(resolve_npm_config)"
   [[ -f "$resolved_config" ]] || die "Evidence schedule config not found: $resolved_config"
@@ -91,14 +91,14 @@ run_npm_mode() {
 
 run_docker_mode() {
   command -v docker >/dev/null 2>&1 || die "docker command not found"
-  docker inspect "$CONTAINER_NAME" >/dev/null 2>&1 || die "PromptWall container not found: $CONTAINER_NAME"
+  docker inspect "$CONTAINER_NAME" >/dev/null 2>&1 || die "RedactWall container not found: $CONTAINER_NAME"
   docker exec "$CONTAINER_NAME" test -f "$CONFIG_PATH" >/dev/null 2>&1 \
     || die "Evidence schedule config not found inside $CONTAINER_NAME: $CONFIG_PATH"
 
   docker exec "$CONTAINER_NAME" npm run evidence:pack:scheduled -- "$CONFIG_PATH" >> "$LOG_PATH" 2>&1
 }
 
-log "Starting PromptWall scheduled evidence pack in $MODE mode with config $CONFIG_PATH"
+log "Starting RedactWall scheduled evidence pack in $MODE mode with config $CONFIG_PATH"
 case "$MODE" in
   npm)
     if run_npm_mode; then

@@ -12,16 +12,16 @@ function fakeDb(users = []) {
 }
 
 const saasEnv = {
-  SENTINEL_SAAS_MODE: 'true',
-  SENTINEL_TENANT_ID: 'cu-acme',
-  SENTINEL_SEAT_LIMIT: '1',
+  REDACTWALL_SAAS_MODE: 'true',
+  REDACTWALL_TENANT_ID: 'cu-acme',
+  REDACTWALL_SEAT_LIMIT: '1',
 };
 
 test('tenant config normalizes SaaS settings', () => {
   const cfg = tenant.config({
-    SENTINEL_SAAS_MODE: 'true',
-    SENTINEL_TENANT_ID: ' CU-Acme ',
-    SENTINEL_SEAT_LIMIT: '25',
+    REDACTWALL_SAAS_MODE: 'true',
+    REDACTWALL_TENANT_ID: ' CU-Acme ',
+    REDACTWALL_SEAT_LIMIT: '25',
   });
   assert.strictEqual(cfg.saasMode, true);
   assert.strictEqual(cfg.tenantId, 'cu-acme');
@@ -31,11 +31,11 @@ test('tenant config normalizes SaaS settings', () => {
   assert.strictEqual(cfg.requireUserIdentity, true);
 });
 
-test('tenant config accepts PromptWall SaaS env aliases', () => {
+test('tenant config accepts RedactWall SaaS env aliases', () => {
   const cfg = tenant.config({
-    PROMPTWALL_SAAS_MODE: 'true',
-    PROMPTWALL_TENANT_ID: ' CU-Acme ',
-    PROMPTWALL_SEAT_LIMIT: '25',
+    REDACTWALL_SAAS_MODE: 'true',
+    REDACTWALL_TENANT_ID: ' CU-Acme ',
+    REDACTWALL_SEAT_LIMIT: '25',
   });
   assert.strictEqual(cfg.saasMode, true);
   assert.strictEqual(cfg.tenantId, 'cu-acme');
@@ -47,8 +47,8 @@ test('tenant config accepts PromptWall SaaS env aliases', () => {
 
 test('tenant config fails closed when SaaS settings are partially present', () => {
   const cfg = tenant.config({
-    SENTINEL_TENANT_ID: 'cu-acme',
-    SENTINEL_SAAS_MODE: 'false',
+    REDACTWALL_TENANT_ID: 'cu-acme',
+    REDACTWALL_SAAS_MODE: 'false',
   });
 
   assert.strictEqual(cfg.saasMode, true);
@@ -58,7 +58,7 @@ test('tenant config fails closed when SaaS settings are partially present', () =
 
 test('tenant config treats requirement flags as SaaS mode', () => {
   const cfg = tenant.config({
-    SENTINEL_REQUIRE_TENANT_CONTEXT: 'true',
+    REDACTWALL_REQUIRE_TENANT_CONTEXT: 'true',
   });
 
   assert.strictEqual(cfg.saasMode, true);
@@ -98,10 +98,10 @@ test('SaaS sensor access requires tenant and managed user identity', () => {
 test('SaaS sensor access fails closed without a valid configured tenant id', () => {
   for (const tenantId of [undefined, '', 'Invalid Tenant!']) {
     const env = {
-      SENTINEL_SAAS_MODE: 'true',
-      SENTINEL_SEAT_LIMIT: '1',
+      REDACTWALL_SAAS_MODE: 'true',
+      REDACTWALL_SEAT_LIMIT: '1',
     };
-    if (tenantId !== undefined) env.SENTINEL_TENANT_ID = tenantId;
+    if (tenantId !== undefined) env.REDACTWALL_TENANT_ID = tenantId;
     const result = tenant.validateSensorAccess({
       body: { orgId: 'cu-acme', user: 'analyst@example.test' },
       db: fakeDb(),
@@ -149,11 +149,11 @@ test('SaaS seat limit allows known users and blocks new users', () => {
 test('SaaS sensor access fails closed when paid seat limit is missing or invalid', () => {
   for (const seatLimit of [undefined, '', '0', '-1', '1.5', 'not-a-number']) {
     const env = {
-      SENTINEL_SAAS_MODE: 'true',
-      SENTINEL_TENANT_ID: 'cu-acme',
+      REDACTWALL_SAAS_MODE: 'true',
+      REDACTWALL_TENANT_ID: 'cu-acme',
     };
     if (seatLimit !== undefined) {
-      env.SENTINEL_SEAT_LIMIT = seatLimit;
+      env.REDACTWALL_SEAT_LIMIT = seatLimit;
     }
     const result = tenant.validateSensorAccess({
       body: { orgId: 'cu-acme', user: 'analyst@example.test' },
@@ -168,9 +168,9 @@ test('SaaS sensor access fails closed when paid seat limit is missing or invalid
   }
 
   const report = tenant.seatReport(fakeDb(['analyst@example.test']), {
-    SENTINEL_SAAS_MODE: 'true',
-    SENTINEL_TENANT_ID: 'cu-acme',
-    SENTINEL_SEAT_LIMIT: 'not-a-number',
+    REDACTWALL_SAAS_MODE: 'true',
+    REDACTWALL_TENANT_ID: 'cu-acme',
+    REDACTWALL_SEAT_LIMIT: 'not-a-number',
   });
   assert.strictEqual(report.saasMode, true);
   assert.strictEqual(report.seatLimit, 0);

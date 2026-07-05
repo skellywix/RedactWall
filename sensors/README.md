@@ -1,6 +1,6 @@
 # Sensors
 
-PromptWall has three sensor surfaces. They all run the shared detector locally
+RedactWall has three sensor surfaces. They all run the shared detector locally
 and send bounded evidence to the control plane.
 
 | Sensor | Path | What it covers |

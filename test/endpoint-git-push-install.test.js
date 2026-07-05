@@ -69,9 +69,9 @@ test('install and uninstall git push guard hook in a pilot repository', (t) => {
   const hookPath = path.join(repo, '.git', 'hooks', 'pre-push');
   const hook = fs.readFileSync(hookPath, 'utf8');
   assert.strictEqual(hook.charCodeAt(0), '#'.charCodeAt(0));
-  assert.match(hook, /PromptWall Git Push Guard/);
+  assert.match(hook, /RedactWall Git Push Guard/);
   assert.match(hook, /git-push-guard\.js/);
-  assert.match(hook, /PROMPTWALL_ENV_PATH/);
+  assert.match(hook, /REDACTWALL_ENV_PATH/);
   assert.match(hook, /--pre-push/);
   assert.match(hook, /--allowed-host 'github\.com'/);
   assert.match(hook, /--remote-url "\$2" \\\r?\n\s+--allowed-host 'github\.com'/);

@@ -134,7 +134,7 @@ function chatFixture({ host, sendButton, accountRegion = '' }) {
 
 async function launchExtensionContext(baseURL, testInfo, policy = fixturePolicy, request = null) {
   if (request) await syncServerPolicy(request, policy);
-  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'promptwall-extension-e2e-'));
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-extension-e2e-'));
   await testInfo.attach('user-data-dir', { body: userDataDir, contentType: 'text/plain' });
   const context = await chromium.launchPersistentContext(userDataDir, {
     headless: false,
@@ -739,7 +739,7 @@ test.describe('browser extension live smoke', () => {
       const dashboard = await dashboardPromise;
       await dashboard.waitForLoadState('domcontentloaded');
       await expect(dashboard).toHaveURL(`${baseURL}/login.html`);
-      await expect(dashboard.getByRole('heading', { name: 'PromptWall' })).toBeVisible();
+      await expect(dashboard.getByRole('heading', { name: 'RedactWall' })).toBeVisible();
     } finally {
       await context.close();
       fs.rmSync(userDataDir, { recursive: true, force: true });

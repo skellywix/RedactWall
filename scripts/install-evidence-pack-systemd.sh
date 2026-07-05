@@ -1,33 +1,33 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SERVICE_NAME="promptwall-evidence-pack"
+SERVICE_NAME="redactwall-evidence-pack"
 MODE="docker"
-PROJECT_DIR="/opt/promptwall"
+PROJECT_DIR="/opt/redactwall"
 CONFIG_PATH=""
-LOG_PATH="/var/log/promptwall/evidence-pack.log"
-CONTAINER_NAME="promptwall"
+LOG_PATH="/var/log/redactwall/evidence-pack.log"
+CONTAINER_NAME="redactwall"
 ON_CALENDAR="quarterly"
 RANDOMIZED_DELAY="1h"
-INSTALL_BIN="/usr/local/bin/promptwall-run-evidence-pack"
-ENV_FILE="/etc/promptwall/evidence-pack.env"
+INSTALL_BIN="/usr/local/bin/redactwall-run-evidence-pack"
+ENV_FILE="/etc/redactwall/evidence-pack.env"
 
 usage() {
   cat <<'USAGE'
 Usage: install-evidence-pack-systemd.sh [options]
 
-Installs a systemd timer for recurring sanitized PromptWall examiner evidence
-packs. Defaults target the Docker customer-silo shape where /var/lib/promptwall
+Installs a systemd timer for recurring sanitized RedactWall examiner evidence
+packs. Defaults target the Docker customer-silo shape where /var/lib/redactwall
 is mounted into the container at /data.
 
 Options:
-  --service-name <name>       systemd service/timer base name. Default: promptwall-evidence-pack.
+  --service-name <name>       systemd service/timer base name. Default: redactwall-evidence-pack.
   --mode npm|docker          Runner mode. Default: docker.
-  --project-dir <path>       Repo checkout for npm mode. Default: /opt/promptwall.
+  --project-dir <path>       Repo checkout for npm mode. Default: /opt/redactwall.
   --config <path>            Schedule config path. Docker default: /data/evidence-schedule.json.
                              npm default: config/evidence-schedule.json.
-  --log <path>               Log path. Default: /var/log/promptwall/evidence-pack.log.
-  --container <name>         Docker container for docker mode. Default: promptwall.
+  --log <path>               Log path. Default: /var/log/redactwall/evidence-pack.log.
+  --container <name>         Docker container for docker mode. Default: redactwall.
   --on-calendar <expr>       systemd OnCalendar expression. Default: quarterly.
   --randomized-delay <span>  systemd RandomizedDelaySec. Default: 1h.
   -h, --help                 Show this help.
@@ -125,16 +125,16 @@ tmp_timer="$(mktemp)"
 trap 'rm -f "$tmp_env" "$tmp_service" "$tmp_timer"' EXIT
 
 cat > "$tmp_env" <<EOF
-PROMPTWALL_EVIDENCE_MODE=$(quote_env "$MODE")
-PROMPTWALL_EVIDENCE_PROJECT_DIR=$(quote_env "$PROJECT_DIR")
-PROMPTWALL_EVIDENCE_CONFIG=$(quote_env "$CONFIG_PATH")
-PROMPTWALL_EVIDENCE_LOG=$(quote_env "$LOG_PATH")
-PROMPTWALL_EVIDENCE_CONTAINER=$(quote_env "$CONTAINER_NAME")
+REDACTWALL_EVIDENCE_MODE=$(quote_env "$MODE")
+REDACTWALL_EVIDENCE_PROJECT_DIR=$(quote_env "$PROJECT_DIR")
+REDACTWALL_EVIDENCE_CONFIG=$(quote_env "$CONFIG_PATH")
+REDACTWALL_EVIDENCE_LOG=$(quote_env "$LOG_PATH")
+REDACTWALL_EVIDENCE_CONTAINER=$(quote_env "$CONTAINER_NAME")
 EOF
 
 cat > "$tmp_service" <<EOF
 [Unit]
-Description=Generate sanitized PromptWall examiner evidence pack
+Description=Generate sanitized RedactWall examiner evidence pack
 After=$after_units
 Wants=network-online.target
 
@@ -149,7 +149,7 @@ EOF
 
 cat > "$tmp_timer" <<EOF
 [Unit]
-Description=Run sanitized PromptWall examiner evidence pack on schedule
+Description=Run sanitized RedactWall examiner evidence pack on schedule
 
 [Timer]
 OnCalendar=$ON_CALENDAR

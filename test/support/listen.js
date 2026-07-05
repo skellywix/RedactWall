@@ -74,7 +74,7 @@ function loopbackHttpFetchOnce(url, opts = {}) {
         req.setTimeout(0);
       }
     });
-    req.setTimeout(Number(process.env.PROMPTWALL_LOOPBACK_FETCH_TIMEOUT_MS || DEFAULT_LOOPBACK_FETCH_TIMEOUT_MS), () => {
+    req.setTimeout(Number(process.env.REDACTWALL_LOOPBACK_FETCH_TIMEOUT_MS || DEFAULT_LOOPBACK_FETCH_TIMEOUT_MS), () => {
       if (connected) return;
       const err = new Error(`loopback fetch connect timed out on ${target.host}`);
       err.code = 'ETIMEDOUT';
@@ -91,7 +91,7 @@ function loopbackHttpFetchOnce(url, opts = {}) {
 
 async function loopbackHttpFetch(url, opts = {}) {
   let lastError;
-  const attempts = positiveNumber(process.env.PROMPTWALL_LOOPBACK_FETCH_ATTEMPTS, DEFAULT_LOOPBACK_FETCH_ATTEMPTS);
+  const attempts = positiveNumber(process.env.REDACTWALL_LOOPBACK_FETCH_ATTEMPTS, DEFAULT_LOOPBACK_FETCH_ATTEMPTS);
   for (let i = 0; i < attempts; i += 1) {
     try {
       return await loopbackHttpFetchOnce(url, opts);
@@ -115,7 +115,7 @@ function isLoopbackHttp(url) {
 }
 
 function installLoopbackFetch() {
-  if (global.fetch && global.fetch.__promptWallLoopbackFetch) return;
+  if (global.fetch && global.fetch.__redactWallLoopbackFetch) return;
   const originalFetch = global.fetch;
   // Windows can intermittently time out through built-in fetch for loopback test ports.
   const loopbackFetch = async (url, opts = {}) => {
@@ -123,8 +123,8 @@ function installLoopbackFetch() {
     if (typeof originalFetch !== 'function') throw new Error('fetch is not available');
     return originalFetch(url, opts);
   };
-  loopbackFetch.__promptWallLoopbackFetch = true;
-  loopbackFetch.__promptWallOriginalFetch = originalFetch;
+  loopbackFetch.__redactWallLoopbackFetch = true;
+  loopbackFetch.__redactWallOriginalFetch = originalFetch;
   global.fetch = loopbackFetch;
 }
 
@@ -133,7 +133,7 @@ function closeServer(server) {
 }
 
 function hardenServer(server) {
-  if (server.__promptWallHardened) return server;
+  if (server.__redactWallHardened) return server;
   const sockets = new Set();
   server.keepAliveTimeout = 1;
   server.headersTimeout = 2000;
@@ -147,7 +147,7 @@ function hardenServer(server) {
     for (const socket of sockets) socket.destroy();
     return originalClose(callback);
   };
-  Object.defineProperty(server, '__promptWallHardened', { value: true });
+  Object.defineProperty(server, '__redactWallHardened', { value: true });
   return server;
 }
 
@@ -217,7 +217,7 @@ async function listen(appUnderTest, opts = {}) {
   const attempts = opts.attempts || 8;
   const timeoutMs = positiveNumber(
     opts.timeoutMs,
-    positiveNumber(process.env.PROMPTWALL_LOOPBACK_LISTEN_TIMEOUT_MS, DEFAULT_LOOPBACK_LISTEN_TIMEOUT_MS),
+    positiveNumber(process.env.REDACTWALL_LOOPBACK_LISTEN_TIMEOUT_MS, DEFAULT_LOOPBACK_LISTEN_TIMEOUT_MS),
   );
   let lastError;
   for (let i = 0; i < attempts; i += 1) {
@@ -242,7 +242,7 @@ async function listenNet(server, opts = {}) {
   const attempts = opts.attempts || 8;
   const timeoutMs = positiveNumber(
     opts.timeoutMs,
-    positiveNumber(process.env.PROMPTWALL_LOOPBACK_LISTEN_TIMEOUT_MS, DEFAULT_LOOPBACK_LISTEN_TIMEOUT_MS),
+    positiveNumber(process.env.REDACTWALL_LOOPBACK_LISTEN_TIMEOUT_MS, DEFAULT_LOOPBACK_LISTEN_TIMEOUT_MS),
   );
   let lastError;
   for (let i = 0; i < attempts; i += 1) {

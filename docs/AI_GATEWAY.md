@@ -1,8 +1,8 @@
-# PromptWall AI Gateway
+# RedactWall AI Gateway
 
 The AI Gateway is an OpenAI-compatible reverse proxy that sits between an
 application (or agent) and an upstream LLM provider. It gates every prompt and
-scans every response through the PromptWall control plane **before** anything
+scans every response through the RedactWall control plane **before** anything
 reaches the model or returns to the caller. It is the enforcement point for
 private/homegrown apps and agents that call an LLM API directly — the paths a
 browser extension or endpoint agent cannot see.
@@ -78,7 +78,7 @@ curl http://localhost:4100/v1/chat/completions \
 ```
 
 A prompt containing a hard-stop entity (SSN, card, secret, …) returns `403` with
-`error.type = blocked_by_promptwall` and never reaches the upstream.
+`error.type = blocked_by_redactwall` and never reaches the upstream.
 
 ## Docker
 
@@ -88,7 +88,7 @@ The gateway ships as an opt-in compose profile:
 docker compose --profile gateway up -d --build
 ```
 
-It talks to the `promptwall` service over the compose network and shares the
+It talks to the `redactwall` service over the compose network and shares the
 data volume for its agent-token store.
 
 ## Configuration
@@ -107,7 +107,7 @@ data volume for its agent-token store.
 | `GATEWAY_MAX_BODY_BYTES` | Max request body | `2097152` |
 | `GATEWAY_TIMEOUT_MS` | Control-plane + upstream timeout | `60000` |
 
-All settings honor the `SENTINEL_` / `PROMPTWALL_` env aliasing used elsewhere.
+All settings honor the `REDACTWALL_` env names (with legacy `PROMPTWALL_`/`SENTINEL_` aliases) used elsewhere.
 
 ## Agent tokens
 

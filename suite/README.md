@@ -1,4 +1,4 @@
-# PromptWall Regression Suite (`suite/`)
+# RedactWall Regression Suite (`suite/`)
 
 A standalone, black-box regression suite the team runs against the evolving web
 app. It is **separate from the unit suite in `test/`**: it boots the real

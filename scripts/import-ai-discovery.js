@@ -8,7 +8,7 @@ require('../server/env').loadEnv();
 const fs = require('node:fs');
 const path = require('node:path');
 
-const DEFAULT_SENTINEL_URL = process.env.SENTINEL_URL || process.env.PROMPTWALL_URL || 'http://localhost:4000';
+const DEFAULT_REDACTWALL_URL = process.env.REDACTWALL_URL || process.env.PROMPTWALL_URL || process.env.SENTINEL_URL || 'http://localhost:4000';
 const DEFAULT_SOURCE = 'proxy';
 const DEFAULT_VENDOR = 'generic';
 const API_BATCH_SIZE = 100;
@@ -78,8 +78,8 @@ function printHelp(io = console) {
     '  --input, -i <file>       CSV or JSON export to read',
     '  --vendor <name>          zscaler, netskope, purview, firewall, or generic',
     '  --source <id>            Sensor source id to record, default proxy',
-    '  --sentinel-url <url>     PromptWall base URL, default SENTINEL_URL or http://localhost:4000',
-    '  --api-key <key>          Ingest key; prefer INGEST_API_KEY or PROMPTWALL_INGEST_API_KEY env',
+    '  --redactwall-url <url>     RedactWall base URL, default REDACTWALL_URL or http://localhost:4000',
+    '  --api-key <key>          Ingest key; prefer INGEST_API_KEY or REDACTWALL_INGEST_API_KEY env',
     '  --user <identity>        Import actor, default discovery-import',
     '  --org-id <id>            Optional tenant id',
     '  --dry-run                Build sanitized batches without posting',
@@ -106,8 +106,8 @@ function parseArgs(argv = process.argv.slice(2)) {
     input: readOption(argv, '--input', '-i') || '',
     vendor: safeText((readOption(argv, '--vendor') || DEFAULT_VENDOR).trim().toLowerCase(), DEFAULT_VENDOR, 80),
     source: safeSensorId(readOption(argv, '--source') || DEFAULT_SOURCE),
-    sentinelUrl: readOption(argv, '--sentinel-url') || DEFAULT_SENTINEL_URL,
-    apiKey: readOption(argv, '--api-key') || process.env.INGEST_API_KEY || process.env.PROMPTWALL_INGEST_API_KEY || '',
+    redactwallUrl: readOption(argv, '--redactwall-url') || readOption(argv, '--sentinel-url') || DEFAULT_REDACTWALL_URL,
+    apiKey: readOption(argv, '--api-key') || process.env.INGEST_API_KEY || process.env.REDACTWALL_INGEST_API_KEY || '',
     user: safeText(readOption(argv, '--user') || 'discovery-import', 'discovery-import', 128),
     orgId: safeText(readOption(argv, '--org-id') || '', '', 128),
     dryRun: argv.includes('--dry-run'),
@@ -336,7 +336,7 @@ function buildBatches(records = [], opts = {}) {
 }
 
 async function postBatch(batch, opts = {}) {
-  const base = String(opts.sentinelUrl || DEFAULT_SENTINEL_URL).replace(/\/+$/, '');
+  const base = String(opts.redactwallUrl || DEFAULT_REDACTWALL_URL).replace(/\/+$/, '');
   const fetchImpl = opts.fetchImpl || globalThis.fetch;
   if (typeof fetchImpl !== 'function') throw new Error('fetch unavailable');
   if (!opts.apiKey) throw new Error('INGEST_API_KEY is required unless --dry-run is used');

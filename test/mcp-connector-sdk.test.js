@@ -35,7 +35,7 @@ test('sanitizeToolResult redacts MCP content before returning it to the model', 
       outbound = { url, headers: opts.headers, body: JSON.parse(opts.body) };
       return { ok: true };
     },
-    server: 'http://sentinel.test',
+    server: 'http://redactwall.test',
     key: 'unit-ingest-key',
     policy: cleanPolicy,
   });
@@ -48,7 +48,7 @@ test('sanitizeToolResult redacts MCP content before returning it to the model', 
   });
   assert.ok(!JSON.stringify(sanitized.result).includes('524-71-9043'));
   assert.ok(!JSON.stringify(sanitized.result).includes('4111 1111 1111 1111'));
-  assert.strictEqual(outbound.url, 'http://sentinel.test/api/v1/gate');
+  assert.strictEqual(outbound.url, 'http://redactwall.test/api/v1/gate');
   assert.strictEqual(outbound.headers['x-api-key'], 'unit-ingest-key');
   assert.strictEqual(outbound.body.user, 'claude-desktop');
   assert.strictEqual(outbound.body.destination, 'microsoft365.driveItem.getContent');

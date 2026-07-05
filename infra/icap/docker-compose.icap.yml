@@ -1,4 +1,4 @@
-# PromptWall network backstop: Squid + ICAP REQMOD bridge.
+# RedactWall network backstop: Squid + ICAP REQMOD bridge.
 #
 # Usage (from the repo root):
 #   cp infra/icap/squid.conf.example infra/icap/squid.conf
@@ -10,7 +10,7 @@
 services:
   icap-bridge:
     build: ../..
-    image: promptwall:icap-bridge
+    image: redactwall:icap-bridge
     init: true
     read_only: true
     security_opt:
@@ -22,7 +22,7 @@ services:
     command: ["node", "scripts/squid-icap-bridge.js", "--host", "0.0.0.0", "--port", "1344"]
     environment:
       NODE_ENV: production
-      SENTINEL_URL: ${SENTINEL_URL:-http://host.docker.internal:4000}
+      REDACTWALL_URL: ${REDACTWALL_URL:-http://host.docker.internal:4000}
       INGEST_API_KEY: ${INGEST_API_KEY:?set INGEST_API_KEY}
       ICAP_BRIDGE_MAX_BODY_BYTES: ${ICAP_BRIDGE_MAX_BODY_BYTES:-2097152}
       ICAP_BRIDGE_RELEASE_WAIT_MS: ${ICAP_BRIDGE_RELEASE_WAIT_MS:-300000}
@@ -56,7 +56,7 @@ services:
       - /var/run:rw,size=8m
       - /tmp:rw,noexec,nosuid,size=16m
     ports:
-      - "${PROMPTWALL_SQUID_PUBLIC_PORT:-3128}:3128"
+      - "${REDACTWALL_SQUID_PUBLIC_PORT:-3128}:3128"
     volumes:
       # Copy squid.conf.example to squid.conf first and point icap_service at
       # icap://icap-bridge:1344/reqmod for this compose network.

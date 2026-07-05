@@ -179,9 +179,14 @@ function stalePathProblems(relativePath, guide) {
     'promptsentinel-app\\promptsentinel',
     'promptsentinel-app/promptsentinel',
     'cd promptsentinel',
+    'promptwall-app\\promptwall',
+    'promptwall-app/promptwall',
+    'cd promptwall',
     '-SentinelUrl',
     '$env:SENTINEL_URL',
     '$env:SENTINEL_ENV_PATH',
+    '$env:PROMPTWALL_URL',
+    '$env:PROMPTWALL_ENV_PATH',
   ];
   for (const pattern of stalePatterns) {
     if (guide.includes(pattern)) problems.push(`${relativePath}: stale path remains: ${pattern}`);

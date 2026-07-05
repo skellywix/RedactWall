@@ -5,7 +5,7 @@
  * configured via env. Message bodies are the same prompt-free event payloads
  * the SIEM adapters send; nothing here ever logs message content.
  *
- *   SMTP_HOST, SMTP_PORT (default 587), SMTP_FROM (default promptwall@host),
+ *   SMTP_HOST, SMTP_PORT (default 587), SMTP_FROM (default redactwall@host),
  *   SMTP_USER + SMTP_PASS (optional AUTH LOGIN),
  *   SMTP_SECURE: 'starttls' (default) | 'tls' (implicit) | 'none' (test relays)
  */
@@ -18,7 +18,7 @@ function config(env = process.env) {
   return {
     host,
     port: Number(env.SMTP_PORT) || 587,
-    from: String(env.SMTP_FROM || (host ? `promptwall@${host}` : '')).trim(),
+    from: String(env.SMTP_FROM || (host ? `redactwall@${host}` : '')).trim(),
     user: String(env.SMTP_USER || '').trim(),
     pass: String(env.SMTP_PASS || ''),
     secure: ['tls', 'starttls', 'none'].includes(env.SMTP_SECURE) ? env.SMTP_SECURE : 'starttls',
@@ -77,9 +77,9 @@ function message(cfg, { to, subject, text }) {
   // Dot-stuff body lines per RFC 5321 and keep headers single-line.
   const body = String(text || '').split(/\r?\n/).map((l) => (l.startsWith('.') ? '.' + l : l)).join('\r\n');
   return [
-    `From: PromptWall <${cfg.from}>`,
+    `From: RedactWall <${cfg.from}>`,
     `To: ${to.join(', ')}`,
-    `Subject: ${String(subject || 'PromptWall notification').replace(/[\r\n]/g, ' ').slice(0, 200)}`,
+    `Subject: ${String(subject || 'RedactWall notification').replace(/[\r\n]/g, ' ').slice(0, 200)}`,
     `Date: ${new Date().toUTCString()}`,
     'MIME-Version: 1.0',
     'Content-Type: text/plain; charset=utf-8',
@@ -92,7 +92,7 @@ function message(cfg, { to, subject, text }) {
 async function transact(socket, cfg, mail) {
   const smtp = dialogue(socket, 10000);
   await smtp.expect(220, null);
-  await smtp.expect(250, 'EHLO promptwall');
+  await smtp.expect(250, 'EHLO redactwall');
   if (cfg.secure === 'starttls') {
     await smtp.expect(220, 'STARTTLS');
     socket = await new Promise((resolve, reject) => {
@@ -105,7 +105,7 @@ async function transact(socket, cfg, mail) {
 }
 
 async function transactAuthed(socket, cfg, mail, smtp, resendEhlo) {
-  if (resendEhlo) await smtp.expect(250, 'EHLO promptwall');
+  if (resendEhlo) await smtp.expect(250, 'EHLO redactwall');
   if (cfg.user) {
     await smtp.expect(334, 'AUTH LOGIN');
     await smtp.expect(334, Buffer.from(cfg.user).toString('base64'));

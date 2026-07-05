@@ -5,7 +5,7 @@ param(
   [Parameter(Mandatory = $true)]
   [string]$ConfigPath,
 
-  [string]$LogPath = "$env:LOCALAPPDATA\PromptWall\logs\endpoint-agent.log"
+  [string]$LogPath = "$env:LOCALAPPDATA\RedactWall\logs\endpoint-agent.log"
 )
 
 $ErrorActionPreference = "Stop"
@@ -15,8 +15,8 @@ $logDir = Split-Path -Parent $LogPath
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 
 $node = Get-Command node -ErrorAction Stop
-$env:PROMPTWALL_ENV_PATH = $config
-Remove-Item Env:\SENTINEL_ENV_PATH -ErrorAction SilentlyContinue
+$env:REDACTWALL_ENV_PATH = $config
+Remove-Item Env:\REDACTWALL_ENV_PATH -ErrorAction SilentlyContinue
 Set-Location -LiteralPath $repo
 
 try {

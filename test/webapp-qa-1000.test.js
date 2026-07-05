@@ -12,12 +12,12 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 process.env.ADMIN_PASSWORD = 'unit-pass';
-process.env.SENTINEL_SECRET = 'unit-secret-stable';
-process.env.SENTINEL_DATA_KEY = 'unit-data-key-stable';
+process.env.REDACTWALL_SECRET = 'unit-secret-stable';
+process.env.REDACTWALL_DATA_KEY = 'unit-data-key-stable';
 process.env.INGEST_API_KEY = 'unit-ingest-key';
-process.env.SENTINEL_DB_PATH = path.join(os.tmpdir(), 'ps-webapp-qa-1000-' + crypto.randomBytes(6).toString('hex') + '.db');
+process.env.REDACTWALL_DB_PATH = path.join(os.tmpdir(), 'ps-webapp-qa-1000-' + crypto.randomBytes(6).toString('hex') + '.db');
 const policyPath = path.join(os.tmpdir(), 'ps-webapp-qa-1000-policy-' + crypto.randomBytes(6).toString('hex') + '.json');
-process.env.SENTINEL_POLICY_PATH = policyPath;
+process.env.REDACTWALL_POLICY_PATH = policyPath;
 fs.copyFileSync(path.join(__dirname, '..', 'config', 'policy.json'), policyPath);
 
 const app = require('../server/app');
@@ -444,22 +444,22 @@ const securityStaticCases = [
     expectContains(dashboardHtml, 'Behavior Baselines');
     expectContains(dashboardHtml, 'id="detectorFeedbackRows"');
     expectContains(dashboardHtml, 'Detection Feedback');
-    expectContains(threatGuardrailsJs, 'PromptWallThreatGuardrails');
-    expectContains(operatorFlowJs, 'PromptWallOperatorFlow');
+    expectContains(threatGuardrailsJs, 'RedactWallThreatGuardrails');
+    expectContains(operatorFlowJs, 'RedactWallOperatorFlow');
     expectContains(operatorFlowJs, 'data-flow-target');
     expectContains(operatorFlowJs, 'Behavior baselines');
     expectContains(policyGuidesJs, 'addApprovalRoute');
     expectContains(policyGuidesJs, 'addMcpToolRule');
-    expectContains(behaviorBaselinesJs, 'PromptWallBehaviorBaselines');
+    expectContains(behaviorBaselinesJs, 'RedactWallBehaviorBaselines');
     expectContains(behaviorBaselinesJs, 'behavior-baseline-row');
     expectContains(competitiveReadinessJs, 'competitiveReadiness');
     expectContains(competitiveReadinessJs, '/api/posture?limit=5000');
     expectContains(coverageFileFlowJs, 'endpointFileFlowProfiles');
     expectContains(coverageFileFlowJs, 'Local path: not reported');
     expectContains(decisionQualityJs, 'decisionQuality');
-    expectContains(decisionQualityJs, 'PromptWallDecisionQuality');
+    expectContains(decisionQualityJs, 'RedactWallDecisionQuality');
     expectContains(detectorFeedbackJs, '/api/detector-feedback/report');
-    expectContains(detectorFeedbackJs, 'PromptWallDetectorFeedback');
+    expectContains(detectorFeedbackJs, 'RedactWallDetectorFeedback');
   },
   () => expectContains(loginHtml, '<script src="/login.js" defer></script>'),
   () => expectContains(dashboardJs, 'escapeHtml'),
@@ -529,7 +529,7 @@ async function login(port) {
   });
   assert.strictEqual(res.status, 200);
   const cookie = (res.headers.get('set-cookie') || '').split(';')[0];
-  assert.ok(cookie.includes('promptwall_session='));
+  assert.ok(cookie.includes('redactwall_session='));
   const csrfRes = await jsonFetch(port, '/api/csrf', { headers: { cookie } });
   assert.strictEqual(csrfRes.status, 200);
   const csrf = await csrfRes.json();
@@ -676,7 +676,7 @@ test('1000-case webapp QA matrix passes', async () => {
 
 test.after(() => {
   for (const suffix of ['', '-wal', '-shm']) {
-    try { fs.unlinkSync(process.env.SENTINEL_DB_PATH + suffix); } catch {}
+    try { fs.unlinkSync(process.env.REDACTWALL_DB_PATH + suffix); } catch {}
   }
   try { fs.unlinkSync(policyPath); } catch {}
 });

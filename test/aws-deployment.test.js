@@ -11,19 +11,19 @@ const docs = fs.readFileSync(path.join(root, 'docs', 'AWS_SAAS_DEPLOYMENT.md'), 
 test('AWS customer-silo template enforces tenant and seat parameters', () => {
   assert.match(template, /TenantId:/);
   assert.match(template, /SeatLimit:/);
-  assert.match(template, /SENTINEL_SAAS_MODE=true/);
-  assert.match(template, /SENTINEL_TENANT_ID=\$\{TenantId\}/);
-  assert.match(template, /SENTINEL_SEAT_LIMIT=\$\{SeatLimit\}/);
-  assert.match(template, /SENTINEL_REQUIRE_TENANT_CONTEXT=true/);
-  assert.match(template, /SENTINEL_REQUIRE_USER_IDENTITY=true/);
+  assert.match(template, /REDACTWALL_SAAS_MODE=true/);
+  assert.match(template, /REDACTWALL_TENANT_ID=\$\{TenantId\}/);
+  assert.match(template, /REDACTWALL_SEAT_LIMIT=\$\{SeatLimit\}/);
+  assert.match(template, /REDACTWALL_REQUIRE_TENANT_CONTEXT=true/);
+  assert.match(template, /REDACTWALL_REQUIRE_USER_IDENTITY=true/);
 });
 
 test('AWS customer-silo template uses local EBS-backed data and Secrets Manager', () => {
   assert.match(template, /VolumeType: gp3/);
   assert.match(template, /Encrypted: true/);
-  assert.match(template, /-v \/var\/lib\/promptwall:\/data/);
-  assert.match(template, /SENTINEL_POLICY_PATH=\/data\/policy\.json/);
-  assert.match(template, /SENTINEL_CUSTOM_DETECTORS_PATH=\/data\/custom-detectors\.json/);
+  assert.match(template, /-v \/var\/lib\/redactwall:\/data/);
+  assert.match(template, /REDACTWALL_POLICY_PATH=\/data\/policy\.json/);
+  assert.match(template, /REDACTWALL_CUSTOM_DETECTORS_PATH=\/data\/custom-detectors\.json/);
   assert.match(template, /secretsmanager:GetSecretValue/);
   assert.match(template, /HealthCheckPath: \/readyz/);
 });
@@ -38,18 +38,18 @@ test('AWS customer-silo container runs with hardened Docker flags', () => {
 });
 
 test('AWS customer-silo template bootstraps recurring examiner evidence packs', () => {
-  assert.match(template, /docker cp promptwall:\/app\/scripts\/run-evidence-pack\.sh \/usr\/local\/bin\/promptwall-run-evidence-pack/);
-  assert.match(template, /docker cp promptwall:\/app\/config\/evidence-schedule\.example\.json \/var\/lib\/promptwall\/evidence-schedule\.json/);
-  assert.match(template, /PROMPTWALL_EVIDENCE_MODE='docker'/);
-  assert.match(template, /PROMPTWALL_EVIDENCE_CONFIG='\/data\/evidence-schedule\.json'/);
-  assert.match(template, /PROMPTWALL_EVIDENCE_CONTAINER='promptwall'/);
-  assert.match(template, /ExecStart=\/usr\/local\/bin\/promptwall-run-evidence-pack/);
+  assert.match(template, /docker cp redactwall:\/app\/scripts\/run-evidence-pack\.sh \/usr\/local\/bin\/redactwall-run-evidence-pack/);
+  assert.match(template, /docker cp redactwall:\/app\/config\/evidence-schedule\.example\.json \/var\/lib\/redactwall\/evidence-schedule\.json/);
+  assert.match(template, /REDACTWALL_EVIDENCE_MODE='docker'/);
+  assert.match(template, /REDACTWALL_EVIDENCE_CONFIG='\/data\/evidence-schedule\.json'/);
+  assert.match(template, /REDACTWALL_EVIDENCE_CONTAINER='redactwall'/);
+  assert.match(template, /ExecStart=\/usr\/local\/bin\/redactwall-run-evidence-pack/);
   assert.match(template, /OnCalendar=quarterly/);
   assert.match(template, /Persistent=true/);
-  assert.match(template, /systemctl enable --now promptwall-evidence-pack\.timer/);
-  const unitEnv = template.match(/cat > \/etc\/promptwall\/evidence-pack\.env <<'EOF'([\s\S]*?)EOF/);
+  assert.match(template, /systemctl enable --now redactwall-evidence-pack\.timer/);
+  const unitEnv = template.match(/cat > \/etc\/redactwall\/evidence-pack\.env <<'EOF'([\s\S]*?)EOF/);
   assert.ok(unitEnv);
-  assert.doesNotMatch(unitEnv[1], /SENTINEL_SECRET|SENTINEL_DATA_KEY|INGEST_API_KEY|ADMIN_PASSWORD|AUDITOR_PASSWORD/);
+  assert.doesNotMatch(unitEnv[1], /REDACTWALL_SECRET|REDACTWALL_DATA_KEY|INGEST_API_KEY|ADMIN_PASSWORD|AUDITOR_PASSWORD/);
 });
 
 test('AWS SaaS deployment docs include launch and validation steps', () => {
@@ -58,6 +58,6 @@ test('AWS SaaS deployment docs include launch and validation steps', () => {
   assert.match(docs, /aws cloudformation deploy/);
   assert.match(docs, /\/api\/billing\/seats/);
   assert.match(docs, /Do not run this app on Fargate with SQLite over EFS/);
-  assert.match(docs, /promptwall-evidence-pack\.timer/);
-  assert.match(docs, /\/var\/lib\/promptwall\/evidence-schedule\.json/);
+  assert.match(docs, /redactwall-evidence-pack\.timer/);
+  assert.match(docs, /\/var\/lib\/redactwall\/evidence-schedule\.json/);
 });

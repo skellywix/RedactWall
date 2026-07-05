@@ -10,11 +10,11 @@ const crypto = require('node:crypto');
 
 process.env.ADMIN_USER = 'admin';
 process.env.ADMIN_PASSWORD = 'unit-pass-catalog';
-process.env.SENTINEL_SECRET = 'unit-secret-stable-catalog';
-process.env.SENTINEL_DATA_KEY = 'unit-data-key-stable-catalog';
+process.env.REDACTWALL_SECRET = 'unit-secret-stable-catalog';
+process.env.REDACTWALL_DATA_KEY = 'unit-data-key-stable-catalog';
 process.env.INGEST_API_KEY = 'unit-ingest-key-catalog';
-process.env.SENTINEL_DB_PATH = path.join(os.tmpdir(), 'ps-catalog-api-' + crypto.randomBytes(6).toString('hex') + '.db');
-process.env.SENTINEL_POLICY_PATH = path.join(os.tmpdir(), 'ps-catalog-api-policy-' + crypto.randomBytes(6).toString('hex') + '.json');
+process.env.REDACTWALL_DB_PATH = path.join(os.tmpdir(), 'ps-catalog-api-' + crypto.randomBytes(6).toString('hex') + '.db');
+process.env.REDACTWALL_POLICY_PATH = path.join(os.tmpdir(), 'ps-catalog-api-policy-' + crypto.randomBytes(6).toString('hex') + '.json');
 delete process.env.ADMIN_TOTP_SECRET;
 
 const app = require('../server/app');
@@ -22,7 +22,7 @@ const { listen } = require('./support/listen');
 const policy = require('../server/policy');
 
 test.after(() => {
-  for (const p of [process.env.SENTINEL_DB_PATH, process.env.SENTINEL_POLICY_PATH]) { try { fs.rmSync(p, { force: true }); } catch (e) { /* ignore */ } }
+  for (const p of [process.env.REDACTWALL_DB_PATH, process.env.REDACTWALL_POLICY_PATH]) { try { fs.rmSync(p, { force: true }); } catch (e) { /* ignore */ } }
 });
 
 async function withServer(fn) {

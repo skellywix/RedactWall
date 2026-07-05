@@ -1,6 +1,6 @@
 'use strict';
 /**
- * At-rest encryption for the one piece of cleartext PromptWall must
+ * At-rest encryption for the one piece of cleartext RedactWall must
  * sometimes retain: the raw prompt of an item HELD for admin approval.
  *
  * Everything else stored (redacted prompt, masked findings, categories) is
@@ -8,13 +8,13 @@
  * it, and only ever in sealed form. AES-256-GCM gives confidentiality +
  * tamper-detection (the auth tag).
  *
- * Key: SENTINEL_DATA_KEY (preferred) or derived from SENTINEL_SECRET. Both must
+ * Key: REDACTWALL_DATA_KEY (preferred) or derived from REDACTWALL_SECRET. Both must
  * be STABLE across restarts for sealed data to remain readable — set them in
  * any real deployment. With neither set, encryption is OFF and raw retention is
  * refused (seal() returns null), so we never write cleartext member data by
  * accident.
  *
- * Rotation: set SENTINEL_DATA_KEY to the NEW key and SENTINEL_DATA_KEY_PREVIOUS
+ * Rotation: set REDACTWALL_DATA_KEY to the NEW key and REDACTWALL_DATA_KEY_PREVIOUS
  * to the OLD one, then run `node scripts/rotate-data-key.js` to reseal stored
  * tokens under the new key. open() falls back to the previous key, so sealed
  * data stays readable mid-rotation. The token format deliberately stays
@@ -25,15 +25,15 @@
 require('./env').loadEnv();
 const crypto = require('crypto');
 
-const KEY_SRC = process.env.SENTINEL_DATA_KEY || process.env.SENTINEL_SECRET || '';
-const PREVIOUS_KEY_SRC = process.env.SENTINEL_DATA_KEY_PREVIOUS || process.env.PROMPTWALL_DATA_KEY_PREVIOUS || '';
+const KEY_SRC = process.env.REDACTWALL_DATA_KEY || process.env.REDACTWALL_SECRET || '';
+const PREVIOUS_KEY_SRC = process.env.REDACTWALL_DATA_KEY_PREVIOUS || process.env.PROMPTWALL_DATA_KEY_PREVIOUS || process.env.SENTINEL_DATA_KEY_PREVIOUS || '';
 const ENABLED = KEY_SRC.length > 0;
 
 // Keep the original namespace so renamed deployments can still open retained
-// approval records sealed before the PromptWall rebrand. The previous key MUST
+// approval records sealed before the RedactWall rebrand. The previous key MUST
 // use the same derivation, or rotation could never open pre-rotation tokens.
 function deriveKey(src) {
-  return crypto.createHash('sha256').update('promptsentinel:data-key:v1:' + src).digest();
+  return crypto.createHash('sha256').update('redactwall:data-key:v1:' + src).digest();
 }
 
 const KEY = ENABLED ? deriveKey(KEY_SRC) : null;
@@ -74,7 +74,7 @@ function openWithKey(key, token) {
 
 /**
  * Decrypt a sealed token. Tries the current key, then the previous key when
- * SENTINEL_DATA_KEY_PREVIOUS is set (mid-rotation). Returns the plaintext, or
+ * REDACTWALL_DATA_KEY_PREVIOUS is set (mid-rotation). Returns the plaintext, or
  * null if it can't be opened (no key, wrong key, or tampered ciphertext).
  * Non-sealed input is returned as-is so legacy/plaintext rows keep working
  * during migration.

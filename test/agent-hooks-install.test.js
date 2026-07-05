@@ -1,7 +1,7 @@
 'use strict';
 /**
  * Installer + packager for the agent-hooks sensor. Asserts idempotent merge,
- * uninstall of only PromptWall-owned entries, and that the ingest key is never
+ * uninstall of only RedactWall-owned entries, and that the ingest key is never
  * written into settings.json.
  */
 const test = require('node:test');
@@ -29,7 +29,7 @@ test('merge preserves foreign hook entries', () => {
   assert.ok(merged.hooks.PreToolUse.some(ownsEntry), 'our entry added');
 });
 
-test('uninstall removes only PromptWall-owned entries', () => {
+test('uninstall removes only RedactWall-owned entries', () => {
   const foreign = { hooks: { PreToolUse: [{ matcher: 'Write', hooks: [{ type: 'command', command: 'other-tool' }] }] } };
   const merged = mergeHooks(foreign);
   const removed = removeHooks(merged);

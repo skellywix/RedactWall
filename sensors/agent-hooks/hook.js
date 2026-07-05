@@ -1,7 +1,7 @@
 'use strict';
 require('../../server/env').loadEnv();
 /**
- * PromptWall agent hooks (Claude Code).
+ * RedactWall agent hooks (Claude Code).
  *
  * A local hook shim invoked by Claude Code for UserPromptSubmit and PreToolUse
  * events. It scans the prompt / shell command / MCP tool call ON THE BOX with
@@ -25,7 +25,7 @@ const VERSION = require('../../package.json').version;
 
 const MAX_CHARS = 200000;
 const POLICY_REFRESH_MS = 15 * 60 * 1000;
-const CACHE_DIR = path.join(os.homedir(), '.promptwall');
+const CACHE_DIR = path.join(os.homedir(), '.redactwall');
 const CACHE_FILE = path.join(CACHE_DIR, 'agent-hooks-policy.json');
 
 // Conservative built-in policy when no cache and the control plane is
@@ -149,7 +149,7 @@ function buildRecord(kind, extracted, analysis, action, opts) {
   return {
     prompt: `[agent ${extracted.channel.replace('agent_', '')} ${outcome === 'action_blocked' ? 'blocked' : 'flagged'} locally] `
       + [...new Set((analysis.findings || []).map((f) => f.type).concat((analysis.categories || []).map((c) => c.category)))].join(', '),
-    user: opts.user || process.env.PROMPTWALL_AGENT_USER || os.userInfo().username,
+    user: opts.user || process.env.REDACTWALL_AGENT_USER || os.userInfo().username,
     destination: extracted.tool ? `claude-code:${extracted.tool}` : 'claude-code',
     source: 'agent_hooks',
     channel: extracted.channel,
@@ -177,7 +177,7 @@ async function run(event, opts = {}, deps = {}) {
   if (extracted.tool) {
     const toolDecision = guard.mcpToolDecision({ tool: extracted.tool }, policy);
     if (!toolDecision.allowed) {
-      const reason = `PromptWall blocked MCP tool ${extracted.tool}: ${toolDecision.reason}`;
+      const reason = `RedactWall blocked MCP tool ${extracted.tool}: ${toolDecision.reason}`;
       const action = toolDecision.status === 'approval_required' ? 'warn' : 'block';
       const code = emitDecision(event.hook_event_name, action, reason, io);
       await report(buildToolRecord(extracted, toolDecision, opts), opts, deps);
@@ -192,7 +192,7 @@ async function run(event, opts = {}, deps = {}) {
   const { action } = decide(analysis, policy);
   if (action === 'allow') return { code: 0, action };
 
-  const reason = labelReason(analysis, 'PromptWall blocked');
+  const reason = labelReason(analysis, 'RedactWall blocked');
   const code = emitDecision(event.hook_event_name, action, reason, io);
   await report(buildRecord(event.hook_event_name, extracted, analysis, action, opts), opts, deps);
   return { code, action, reason };
@@ -201,7 +201,7 @@ async function run(event, opts = {}, deps = {}) {
 function buildToolRecord(extracted, toolDecision, opts) {
   return {
     prompt: `[agent mcp blocked locally] ${extracted.tool}`,
-    user: opts.user || process.env.PROMPTWALL_AGENT_USER || os.userInfo().username,
+    user: opts.user || process.env.REDACTWALL_AGENT_USER || os.userInfo().username,
     destination: `claude-code:${extracted.tool}`,
     source: 'agent_hooks',
     channel: 'agent_mcp',

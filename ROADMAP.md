@@ -1,4 +1,4 @@
-# PromptWall Roadmap
+# RedactWall Roadmap
 
 Grounded in a July 2026 competitive sweep of the AI-DLP / GenAI-security market.
 Detailed engineering plans live in `PLANS/platform-roadmap.md` (M1–M4 are
@@ -20,11 +20,11 @@ shipped); this file is the forward-looking product roadmap and the source the
   reporting as a board/examiner deliverable. NCUA made AI an explicit 2026
   supervisory priority.
 - Nobody owns the credit-union/community-bank vertical. Examiner-ready
-  evidence (NCUA/FFIEC/GLBA-mapped) remains PromptWall's open wedge.
+  evidence (NCUA/FFIEC/GLBA-mapped) remains RedactWall's open wedge.
 
 ## Positioning (unchanged, sharpened)
 
-PromptWall competes as: (a) the only **self-hostable** option in a category now
+RedactWall competes as: (a) the only **self-hostable** option in a category now
 owned by cloud platforms — prompt data never leaves the institution; (b) the
 only product with **examiner-ready evidence** as its spine (hash-chained audit,
 signed safe-to-send receipts, regulation-mapped evidence packs); (c) mid-market
@@ -47,12 +47,12 @@ chase Island/Zscaler breadth.
 
 | # | Item | Competitors with it | Why it matters | Effort |
 |---|------|--------------------|----------------|--------|
-| X1 | **MCP server catalog with risk scoring + per-tool RBAC**: approved-server allowlist, tool-level permissions, per-tool audit views. | Prompt Security (13k-server catalog), WitnessAI (OWASP/CVE-scored catalog) | NSA's 2026 MCP guidance makes "which MCP servers are approved and what can each tool do" an audit question. PromptWall already sits in the MCP path. | M |
+| X1 | **MCP server catalog with risk scoring + per-tool RBAC**: approved-server allowlist, tool-level permissions, per-tool audit views. | Prompt Security (13k-server catalog), WitnessAI (OWASP/CVE-scored catalog) | NSA's 2026 MCP guidance makes "which MCP servers are approved and what can each tool do" an audit question. RedactWall already sits in the MCP path. | M |
 | X2 | **Prompt-injection hardening on the gateway path**: benchmark and extend the existing `PROMPT_ATTACK` detector for gateway request/response and MCP tool-result flows; publish accuracy. | Lakera/Check Point, Prompt Security, WitnessAI | As credit unions deploy member-facing chatbots, examiner questions shift from "data out" to "instructions in." | M–L |
 | X3 | **Copilot/M365-native interaction coverage** via Graph/audit-log ingestion through the existing M365 connector. | Microsoft Purview (native) | Credit unions are M365 shops; without Copilot visibility, Purview wins the bake-off by default. Ingest, don't intercept. | M |
 | X4 | **Gateway tokenization with response de-tokenization**: reversible tokens to OpenAI/Anthropic/Bedrock, restored in responses after scanning. | Prompt Security, WitnessAI | Enables safe AI use on real member data instead of blocking it. Vault + rehydrate primitives already exist (`/api/v1/rehydrate`). | M–L |
 | X5 | **Extend Exact Data Match to core-banking exports**: k-anonymized/bloom-filter fingerprints of member records shipped to sensors, raw PII never leaves the control plane. | Island, enterprise DLPs | Regex catches SSN formats; EDM catches *your members'* data — decisive accuracy for FIs. Salted-fingerprint EDM (`EXACT_MATCH`) already shipped; this scales it to member-database size. | L |
-| X6 | **AI-assisted incident triage** in the approval queue: auto-summarized timelines and suggested dispositions, run through PromptWall's own enforced gateway. | Nightfall ("Nyx") | Credit unions run 1–3 person security teams; attacks the alert-fatigue objection. Dogfoods the gateway. | M |
+| X6 | **AI-assisted incident triage** in the approval queue: auto-summarized timelines and suggested dispositions, run through RedactWall's own enforced gateway. | Nightfall ("Nyx") | Credit unions run 1–3 person security teams; attacks the alert-fatigue objection. Dogfoods the gateway. | M |
 | X7 | **Desktop app file-open/drag-drop interception** beyond the protected-upload shell action and clipboard guard (app-specific native collectors, browser native-messaging handoff). | Nightfall, Purview endpoint | The endpoint package is not yet universal file-open interception for every desktop AI app — the longest-standing open product gap (`STATUS.md`). | L |
 
 ## Later

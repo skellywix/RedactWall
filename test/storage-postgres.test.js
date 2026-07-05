@@ -1,7 +1,7 @@
 'use strict';
 /**
  * Full db.js contract against a real Postgres via the sync worker bridge.
- * Runs when SENTINEL_TEST_PG_URL points at a reachable Postgres superuser-ish
+ * Runs when REDACTWALL_TEST_PG_URL points at a reachable Postgres superuser-ish
  * connection (a fresh database is created per run); skips cleanly otherwise.
  */
 const test = require('node:test');
@@ -10,40 +10,40 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { execFileSync } = require('node:child_process');
 
-const ADMIN_URL = process.env.SENTINEL_TEST_PG_URL || '';
+const ADMIN_URL = process.env.REDACTWALL_TEST_PG_URL || '';
 
 async function createFreshDatabase() {
   const { Client } = require('pg');
   const admin = new Client({ connectionString: ADMIN_URL });
   await admin.connect();
-  const name = 'promptwall_t_' + crypto.randomBytes(5).toString('hex');
+  const name = 'redactwall_t_' + crypto.randomBytes(5).toString('hex');
   // Superusers bypass row-level security, so run the battery as the same kind
   // of unprivileged application role a production deployment would use.
   await admin.query(`
     DO $$ BEGIN
-      IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'promptwall_app') THEN
-        CREATE ROLE promptwall_app LOGIN;
+      IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'redactwall_app') THEN
+        CREATE ROLE redactwall_app LOGIN;
       END IF;
     END $$;
   `);
-  await admin.query(`CREATE DATABASE ${name} OWNER promptwall_app`);
+  await admin.query(`CREATE DATABASE ${name} OWNER redactwall_app`);
   await admin.end();
   const url = new URL(ADMIN_URL);
-  url.username = 'promptwall_app';
+  url.username = 'redactwall_app';
   url.pathname = '/' + name;
   return url.toString();
 }
 
-test('db.js contract holds on Postgres (migrations, RLS, immutability, chain)', { skip: !ADMIN_URL && 'SENTINEL_TEST_PG_URL not set' }, async () => {
+test('db.js contract holds on Postgres (migrations, RLS, immutability, chain)', { skip: !ADMIN_URL && 'REDACTWALL_TEST_PG_URL not set' }, async () => {
   const databaseUrl = await createFreshDatabase();
   const output = execFileSync(process.execPath, [path.join(__dirname, 'support', 'pg-battery.js')], {
     cwd: path.join(__dirname, '..'),
     env: {
       ...process.env,
-      SENTINEL_DB_DRIVER: 'postgres',
-      SENTINEL_DATABASE_URL: databaseUrl,
-      SENTINEL_SECRET: 'unit-secret-stable',
-      SENTINEL_DATA_KEY: 'unit-data-key-stable',
+      REDACTWALL_DB_DRIVER: 'postgres',
+      REDACTWALL_DATABASE_URL: databaseUrl,
+      REDACTWALL_SECRET: 'unit-secret-stable',
+      REDACTWALL_DATA_KEY: 'unit-data-key-stable',
       ADMIN_PASSWORD: 'unit-pass',
     },
     encoding: 'utf8',

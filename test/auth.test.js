@@ -14,14 +14,14 @@ process.env.APPROVER_USER = 'approver';
 process.env.APPROVER_PASSWORD = 'approver-pass';
 process.env.AUDITOR_USER = 'auditor';
 process.env.AUDITOR_PASSWORD = 'auditor-pass';
-process.env.SENTINEL_SECRET = 'unit-secret-stable';
+process.env.REDACTWALL_SECRET = 'unit-secret-stable';
 process.env.LOGIN_MAX_ATTEMPTS = '3';
 process.env.LOGIN_WINDOW_MS = '100000';
 const auth = require('../server/auth');
 
 function signedSession(payload) {
   const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
-  const mac = crypto.createHmac('sha256', process.env.SENTINEL_SECRET).update(body).digest('base64url');
+  const mac = crypto.createHmac('sha256', process.env.REDACTWALL_SECRET).update(body).digest('base64url');
   return `${body}.${mac}`;
 }
 
@@ -115,7 +115,7 @@ test('lockout expires after the configured window and a correct login succeeds a
       ...process.env,
       LOGIN_MAX_ATTEMPTS: '3',
       LOGIN_WINDOW_MS: '50',
-      SENTINEL_SECRET: 'unit-secret-stable',
+      REDACTWALL_SECRET: 'unit-secret-stable',
     },
     encoding: 'utf8',
   });
@@ -144,7 +144,7 @@ test('session secret resolution uses stable storage before ephemeral fallback', 
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
 
   assert.deepStrictEqual(auth._internal.resolveSecret({
-    env: { SENTINEL_SECRET: 'env-secret' },
+    env: { REDACTWALL_SECRET: 'env-secret' },
     dataDir: dir,
   }), {
     secret: 'env-secret',
@@ -238,7 +238,7 @@ test('duplicate auditor username is not enabled at runtime', () => {
       ADMIN_PASSWORD: 'unit-pass',
       AUDITOR_USER: ' admin ',
       AUDITOR_PASSWORD: 'auditor-pass',
-      SENTINEL_SECRET: 'unit-secret-stable',
+      REDACTWALL_SECRET: 'unit-secret-stable',
     },
     encoding: 'utf8',
   });
@@ -353,18 +353,18 @@ test('derived auth keys are purpose scoped and deterministic', () => {
   assert.strictEqual(auth.deriveKey('receipts').equals(auth.deriveKey('other-purpose')), false);
 });
 
-test('session token lookup prefers PromptWall cookie with legacy fallback', () => {
-  const promptwall = auth.createSession('admin');
+test('session token lookup prefers RedactWall cookie with legacy fallback', () => {
+  const redactwall = auth.createSession('admin');
   const legacy = auth.createSession('auditor', 'auditor');
 
-  assert.strictEqual(auth.sessionTokenFromRequest({ cookies: { promptwall_session: promptwall } }), promptwall);
+  assert.strictEqual(auth.sessionTokenFromRequest({ cookies: { redactwall_session: redactwall } }), redactwall);
   assert.strictEqual(auth.sessionTokenFromRequest({ cookies: { sentinel_session: legacy } }), legacy);
   assert.strictEqual(auth.sessionTokenFromRequest({
     cookies: {
-      promptwall_session: promptwall,
+      redactwall_session: redactwall,
       sentinel_session: legacy,
     },
-  }), promptwall);
+  }), redactwall);
   assert.strictEqual(auth.sessionTokenFromRequest({ cookies: {} }), '');
 });
 
@@ -381,7 +381,7 @@ test('duplicate approver username is not enabled at runtime', () => {
       ADMIN_PASSWORD: 'unit-pass',
       APPROVER_USER: ' admin ',
       APPROVER_PASSWORD: 'approver-pass',
-      SENTINEL_SECRET: 'unit-secret-stable',
+      REDACTWALL_SECRET: 'unit-secret-stable',
     },
     encoding: 'utf8',
   });

@@ -7,7 +7,7 @@ const { buildIdentitySetupGuide, renderTextGuide } = require('../server/identity
 function parseArgs(argv = process.argv.slice(2)) {
   const opts = {
     provider: 'entra',
-    baseUrl: 'https://promptwall.customer.example',
+    baseUrl: 'https://redactwall.customer.example',
     tenantId: '',
     format: 'text',
   };
@@ -32,7 +32,7 @@ function printHelp(io = console) {
     '',
     'Options:',
     '  --provider <entra|okta>     Identity provider to prepare',
-    '  --base-url <url>            Public PromptWall console URL',
+    '  --base-url <url>            Public RedactWall console URL',
     '  --tenant-id <value>         Entra tenant id/domain or Okta org domain/issuer',
     '  --okta-domain <domain>      Alias for --tenant-id with Okta',
     '  --format <text|json>        Output format',

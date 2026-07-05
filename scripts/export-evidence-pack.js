@@ -1,6 +1,6 @@
 'use strict';
 /**
- * Generate a sanitized examiner evidence pack from the local PromptWall store.
+ * Generate a sanitized examiner evidence pack from the local RedactWall store.
  */
 require('../server/env').loadEnv();
 const fs = require('fs');
@@ -73,7 +73,7 @@ function sha256File(file) {
 function resolveOutputFile({ outDir, file, generatedAt } = {}) {
   const dir = path.resolve(outDir || path.join(process.cwd(), 'evidence-packs'));
   const stamp = stampFor(generatedAt ? new Date(generatedAt) : new Date());
-  return path.resolve(file || path.join(dir, `promptwall-evidence-pack-${stamp}.json`));
+  return path.resolve(file || path.join(dir, `redactwall-evidence-pack-${stamp}.json`));
 }
 
 function verifyBackupEvidence({ backupFile, backupManifestFile, restoreDrillFile, backupModule } = {}) {

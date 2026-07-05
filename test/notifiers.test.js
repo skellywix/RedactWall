@@ -48,7 +48,7 @@ test('sanitized approval notification omits prompt text, secrets, and raw findin
   const payload = notifiers.sanitizedApprovalNotification(sampleQuery());
   const wire = JSON.stringify(payload);
 
-  assert.strictEqual(payload.eventType, 'promptwall.approval_workflow');
+  assert.strictEqual(payload.eventType, 'redactwall.approval_workflow');
   assert.strictEqual(payload.action, 'APPROVAL_ROUTED');
   assert.deepStrictEqual(payload.labels, ['US_SSN']);
   assert.strictEqual(payload.workflow.assignedGroup, 'compliance');
@@ -94,11 +94,11 @@ test('generic, Slack, Teams, and ticket adapters send sanitized payloads', async
   assert.strictEqual(requests.length, 4);
   assert.strictEqual(requests[0].opts.headers.Authorization, 'Bearer unit-token');
   assert.strictEqual(requests[3].opts.headers.Authorization, 'Bearer ticket-token');
-  assert.ok(requests[1].opts.body.includes('PromptWall approval routed'));
+  assert.ok(requests[1].opts.body.includes('RedactWall approval routed'));
   assert.ok(requests[2].opts.body.includes('MessageCard'));
   const ticket = JSON.parse(requests[3].opts.body);
-  assert.strictEqual(ticket.eventType, 'promptwall.approval_ticket');
-  assert.strictEqual(ticket.dedupeKey, 'promptwall:q_notify:APPROVAL_ROUTED');
+  assert.strictEqual(ticket.eventType, 'redactwall.approval_ticket');
+  assert.strictEqual(ticket.dedupeKey, 'redactwall:q_notify:APPROVAL_ROUTED');
   assert.strictEqual(ticket.priority, 'critical');
   assert.deepStrictEqual(ticket.ticket, {
     system: 'jira',
@@ -146,16 +146,16 @@ test('ticket payload builder produces a bridge-safe issue shape', () => {
 test('native Jira and Linear adapters create sanitized issue requests', async () => {
   const requests = [];
   const env = {
-    PROMPTWALL_APPROVAL_JIRA_BASE_URL: 'https://acme.atlassian.net',
-    PROMPTWALL_APPROVAL_JIRA_EMAIL: 'secops@example.test',
-    PROMPTWALL_APPROVAL_JIRA_API_TOKEN: 'jira-secret-token',
-    PROMPTWALL_APPROVAL_JIRA_PROJECT_KEY: 'SEC',
-    PROMPTWALL_APPROVAL_JIRA_ISSUE_TYPE: 'Task',
-    PROMPTWALL_APPROVAL_LINEAR_API_KEY: 'linear-secret-key',
-    PROMPTWALL_APPROVAL_LINEAR_TEAM_ID: 'team-security',
-    PROMPTWALL_APPROVAL_LINEAR_STATE_ID: 'triage-state',
-    PROMPTWALL_APPROVAL_LINEAR_PROJECT_ID: 'promptwall-project',
-    PROMPTWALL_APPROVAL_LINEAR_LABEL_IDS: 'label-dlp,label-approval',
+    REDACTWALL_APPROVAL_JIRA_BASE_URL: 'https://acme.atlassian.net',
+    REDACTWALL_APPROVAL_JIRA_EMAIL: 'secops@example.test',
+    REDACTWALL_APPROVAL_JIRA_API_TOKEN: 'jira-secret-token',
+    REDACTWALL_APPROVAL_JIRA_PROJECT_KEY: 'SEC',
+    REDACTWALL_APPROVAL_JIRA_ISSUE_TYPE: 'Task',
+    REDACTWALL_APPROVAL_LINEAR_API_KEY: 'linear-secret-key',
+    REDACTWALL_APPROVAL_LINEAR_TEAM_ID: 'team-security',
+    REDACTWALL_APPROVAL_LINEAR_STATE_ID: 'triage-state',
+    REDACTWALL_APPROVAL_LINEAR_PROJECT_ID: 'redactwall-project',
+    REDACTWALL_APPROVAL_LINEAR_LABEL_IDS: 'label-dlp,label-approval',
   };
 
   const result = await notifiers.emitApprovalNotification(sampleQuery(), {
@@ -186,8 +186,8 @@ test('native Jira and Linear adapters create sanitized issue requests', async ()
   const jira = JSON.parse(requests[0].opts.body);
   assert.strictEqual(jira.fields.project.key, 'SEC');
   assert.strictEqual(jira.fields.issuetype.name, 'Task');
-  assert.ok(jira.fields.summary.includes('PromptWall approval'));
-  assert.deepStrictEqual(jira.fields.labels.slice(0, 3), ['promptwall', 'approval', 'critical']);
+  assert.ok(jira.fields.summary.includes('RedactWall approval'));
+  assert.deepStrictEqual(jira.fields.labels.slice(0, 3), ['redactwall', 'approval', 'critical']);
 
   assert.strictEqual(requests[1].url, 'https://api.linear.app/graphql');
   assert.strictEqual(requests[1].opts.headers.Authorization, 'linear-secret-key');
@@ -198,10 +198,10 @@ test('native Jira and Linear adapters create sanitized issue requests', async ()
     title: jira.fields.summary,
     description: linear.variables.input.description,
     stateId: 'triage-state',
-    projectId: 'promptwall-project',
+    projectId: 'redactwall-project',
     labelIds: ['label-dlp', 'label-approval'],
   });
-  assert.match(linear.variables.input.description, /sanitized PromptWall workflow metadata only/);
+  assert.match(linear.variables.input.description, /sanitized RedactWall workflow metadata only/);
 
   const wire = requests.map((request) => request.opts.body).join('\n');
   assert.ok(!wire.includes('524-71-9043'));
@@ -220,10 +220,10 @@ test('approval outbound URLs require HTTPS without URL credentials', () => {
     APPROVAL_SLACK_WEBHOOK_URL: 'https://user:secret@hooks.slack.example.test/unit',
     APPROVAL_TEAMS_WEBHOOK_URL: 'not a url',
     APPROVAL_TICKET_WEBHOOK_URL: 'https://tickets.example.test/unit#fragment-secret',
-    PROMPTWALL_APPROVAL_JIRA_BASE_URL: 'http://acme.atlassian.net',
-    PROMPTWALL_APPROVAL_JIRA_EMAIL: 'secops@example.test',
-    PROMPTWALL_APPROVAL_JIRA_API_TOKEN: 'jira-secret-token',
-    PROMPTWALL_APPROVAL_JIRA_PROJECT_KEY: 'SEC',
+    REDACTWALL_APPROVAL_JIRA_BASE_URL: 'http://acme.atlassian.net',
+    REDACTWALL_APPROVAL_JIRA_EMAIL: 'secops@example.test',
+    REDACTWALL_APPROVAL_JIRA_API_TOKEN: 'jira-secret-token',
+    REDACTWALL_APPROVAL_JIRA_PROJECT_KEY: 'SEC',
   });
 
   assert.deepStrictEqual(channels.map((channel) => channel.type), ['ticket']);
@@ -244,8 +244,8 @@ test('approval outbound URLs require HTTPS without URL credentials', () => {
 test('Linear adapter treats GraphQL errors as failed notification delivery', async () => {
   const result = await notifiers.emitApprovalNotification(sampleQuery(), {
     env: {
-      PROMPTWALL_APPROVAL_LINEAR_API_KEY: 'linear-secret-key',
-      PROMPTWALL_APPROVAL_LINEAR_TEAM_ID: 'team-security',
+      REDACTWALL_APPROVAL_LINEAR_API_KEY: 'linear-secret-key',
+      REDACTWALL_APPROVAL_LINEAR_TEAM_ID: 'team-security',
     },
     fetch: async () => ({
       ok: true,
@@ -288,8 +288,8 @@ test('notification delivery records sanitized adapter exceptions', async () => {
 test('native Linear adapter returns created issue metadata', async () => {
   const result = await notifiers.emitApprovalNotification(sampleQuery(), {
     env: {
-      PROMPTWALL_APPROVAL_LINEAR_API_KEY: 'linear-secret-key',
-      PROMPTWALL_APPROVAL_LINEAR_TEAM_ID: 'team-security',
+      REDACTWALL_APPROVAL_LINEAR_API_KEY: 'linear-secret-key',
+      REDACTWALL_APPROVAL_LINEAR_TEAM_ID: 'team-security',
     },
     fetch: async () => ({
       ok: true,
@@ -301,8 +301,8 @@ test('native Linear adapter returns created issue metadata', async () => {
             issue: {
               id: 'lin-id',
               identifier: 'OPS-7',
-              url: 'https://linear.app/example/issue/OPS-7/promptwall-smoke',
-              title: 'PromptWall approval',
+              url: 'https://linear.app/example/issue/OPS-7/redactwall-smoke',
+              title: 'RedactWall approval',
             },
           },
         },
@@ -312,7 +312,7 @@ test('native Linear adapter returns created issue metadata', async () => {
 
   assert.strictEqual(result.sent, true);
   assert.strictEqual(result.results[0].externalId, 'OPS-7');
-  assert.strictEqual(result.results[0].url, 'https://linear.app/example/issue/OPS-7/promptwall-smoke');
+  assert.strictEqual(result.results[0].url, 'https://linear.app/example/issue/OPS-7/redactwall-smoke');
 });
 
 test('Linear smoke command builds a sanitized native request', () => {
@@ -338,11 +338,11 @@ test('Linear smoke command builds a sanitized native request', () => {
   assert.strictEqual(parsed.apiUrl, 'https://api.linear.app/graphql');
   assert.strictEqual(parsed.queryId, 'linear_smoke_test');
   assert.deepStrictEqual(linearSmoke.linearEnv({}, parsed), {
-    PROMPTWALL_APPROVAL_LINEAR_API_URL: 'https://api.linear.app/graphql',
-    PROMPTWALL_APPROVAL_LINEAR_TEAM_ID: 'team-security',
-    PROMPTWALL_APPROVAL_LINEAR_STATE_ID: 'state-review',
-    PROMPTWALL_APPROVAL_LINEAR_PROJECT_ID: 'project-ai',
-    PROMPTWALL_APPROVAL_LINEAR_LABEL_IDS: 'risk,ai',
+    REDACTWALL_APPROVAL_LINEAR_API_URL: 'https://api.linear.app/graphql',
+    REDACTWALL_APPROVAL_LINEAR_TEAM_ID: 'team-security',
+    REDACTWALL_APPROVAL_LINEAR_STATE_ID: 'state-review',
+    REDACTWALL_APPROVAL_LINEAR_PROJECT_ID: 'project-ai',
+    REDACTWALL_APPROVAL_LINEAR_LABEL_IDS: 'risk,ai',
   });
 
   const smoke = linearSmoke.buildSmokeRequest({
@@ -353,7 +353,7 @@ test('Linear smoke command builds a sanitized native request', () => {
 
   assert.strictEqual(smoke.body.variables.input.teamId, 'team-security');
   assert.match(smoke.body.query, /issueCreate/);
-  assert.match(smoke.body.variables.input.description, /sanitized PromptWall workflow metadata only/);
+  assert.match(smoke.body.variables.input.description, /sanitized RedactWall workflow metadata only/);
   assert.ok(!smoke.wire.includes('000-00-0000'));
   assert.ok(!smoke.wire.includes('Synthetic Member'));
   assert.ok(!smoke.wire.includes('sealed-linear-smoke-vault'));
@@ -367,9 +367,9 @@ test('native Linear adapter rejects unsafe API URL overrides', () => {
   assert.strictEqual(notifiers.linearApiUrl('https://api-key:secret@api.linear.app/graphql'), '');
   assert.strictEqual(
     notifiers.configuredChannels({
-      PROMPTWALL_APPROVAL_LINEAR_API_KEY: 'linear-secret-key',
-      PROMPTWALL_APPROVAL_LINEAR_TEAM_ID: 'team-security',
-      PROMPTWALL_APPROVAL_LINEAR_API_URL: 'http://api.linear.test/graphql',
+      REDACTWALL_APPROVAL_LINEAR_API_KEY: 'linear-secret-key',
+      REDACTWALL_APPROVAL_LINEAR_TEAM_ID: 'team-security',
+      REDACTWALL_APPROVAL_LINEAR_API_URL: 'http://api.linear.test/graphql',
     }).length,
     0,
   );
@@ -409,7 +409,7 @@ test('Linear smoke command supports dry-run and CLI output without sending', asy
       queryId: 'linear_smoke_main',
       teamId: 'team-security',
       url: 'https://api.linear.app/graphql',
-      title: 'PromptWall approval',
+      title: 'RedactWall approval',
     }),
   });
   assert.match(logs.join('\n'), /LINEAR_APPROVAL_SMOKE_DRY_RUN query=linear_smoke_main/);
@@ -431,7 +431,7 @@ test('Linear smoke command requires an API key before sending', async () => {
 test('Linear smoke command reports adapter send failures', async () => {
   await assert.rejects(
     () => linearSmoke.runSmoke({
-      env: { PROMPTWALL_APPROVAL_LINEAR_API_KEY: 'linear-secret-key' },
+      env: { REDACTWALL_APPROVAL_LINEAR_API_KEY: 'linear-secret-key' },
       argv: ['--send', '--team-id', 'team-security'],
       now: new Date('2026-06-29T12:00:00.000Z'),
       fetchImpl: async () => ({
@@ -453,7 +453,7 @@ test('Linear smoke command reports adapter send failures', async () => {
 test('Linear smoke command sends through the native adapter', async () => {
   const requests = [];
   const result = await linearSmoke.runSmoke({
-    env: { PROMPTWALL_APPROVAL_LINEAR_API_KEY: 'linear-secret-key' },
+    env: { REDACTWALL_APPROVAL_LINEAR_API_KEY: 'linear-secret-key' },
     argv: ['--send', '--team-id', 'team-security', '--query-id', 'linear_smoke_test'],
     now: new Date('2026-06-29T12:00:00.000Z'),
     fetchImpl: async (url, opts) => {
@@ -468,8 +468,8 @@ test('Linear smoke command sends through the native adapter', async () => {
               issue: {
                 id: 'lin-id',
                 identifier: 'OPS-8',
-                url: 'https://linear.app/example/issue/OPS-8/promptwall-smoke',
-                title: 'PromptWall approval',
+                url: 'https://linear.app/example/issue/OPS-8/redactwall-smoke',
+                title: 'RedactWall approval',
               },
             },
           },
@@ -494,7 +494,7 @@ test('Linear smoke command sends through the native adapter', async () => {
       queryId: 'linear_smoke_main',
       externalId: '',
       status: 'approval_ticket_sent',
-      url: 'https://linear.app/example/issue/OPS-8/promptwall-smoke',
+      url: 'https://linear.app/example/issue/OPS-8/redactwall-smoke',
     }),
   });
   assert.match(logs.join('\n'), /LINEAR_APPROVAL_SMOKE_OK query=linear_smoke_main issue=created/);
@@ -549,7 +549,7 @@ test('SMTP adapter sends sanitized approval email through a relay', async (t) =>
     env: {
       APPROVAL_SMTP_HOST: '127.0.0.1',
       APPROVAL_SMTP_PORT: String(port),
-      APPROVAL_SMTP_FROM: 'PromptWall <alerts@example.test>',
+      APPROVAL_SMTP_FROM: 'RedactWall <alerts@example.test>',
       APPROVAL_SMTP_TO: 'compliance@example.test; security@example.test',
       APPROVAL_SMTP_ALLOW_INSECURE: 'true',
     },
@@ -560,7 +560,7 @@ test('SMTP adapter sends sanitized approval email through a relay', async (t) =>
   assert.deepStrictEqual(result.channels, ['smtp']);
   assert.strictEqual(received.length, 1);
   const wire = received[0];
-  assert.match(wire, /Subject: \[PromptWall\] Approval routed: q_notify/);
+  assert.match(wire, /Subject: \[RedactWall\] Approval routed: q_notify/);
   assert.match(wire, /To: compliance@example.test, security@example.test/);
   assert.match(wire, /Owner: compliance \/ approver/);
   assert.match(wire, /Labels: US_SSN/);
@@ -574,12 +574,12 @@ test('SMTP adapter sends sanitized approval email through a relay', async (t) =>
 test('SMTP message builder strips header injection and sensitive prompt fields', () => {
   const payload = notifiers.sanitizedApprovalNotification(sampleQuery());
   const message = notifiers.smtpMessageForPayload({
-    from: 'PromptWall\r\nBcc: leak@example.test <alerts@example.test>',
+    from: 'RedactWall\r\nBcc: leak@example.test <alerts@example.test>',
     to: ['compliance@example.test'],
   }, payload, new Date('2026-06-28T12:00:00.000Z'));
 
   assert.doesNotMatch(message, /^Bcc:/m);
-  assert.match(message, /Subject: \[PromptWall\] Approval routed: q_notify/);
+  assert.match(message, /Subject: \[RedactWall\] Approval routed: q_notify/);
   assert.ok(!message.includes('524-71-9043'));
   assert.ok(!message.includes('Member Jane'));
   assert.ok(!message.includes('sealed raw'));

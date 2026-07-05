@@ -15,7 +15,7 @@ const { withEnvAliases } = require('../../server/env');
 const EVENT_VERSION = 1;
 const MAX_EVENT_BYTES = 16 * 1024;
 const DEFAULT_TTL_MS = 5 * 60 * 1000;
-const DEFAULT_HANDOFF_DIR = path.join(os.tmpdir(), 'promptwall-native-handoff');
+const DEFAULT_HANDOFF_DIR = path.join(os.tmpdir(), 'redactwall-native-handoff');
 const DISALLOWED_EVENT_KEYS = new Set([
   'body',
   'bytes',

@@ -8,11 +8,11 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 process.env.ADMIN_PASSWORD = 'unit-pass';
-process.env.SENTINEL_SECRET = 'unit-secret-stable';
-process.env.SENTINEL_DATA_KEY = 'unit-data-key-stable';
+process.env.REDACTWALL_SECRET = 'unit-secret-stable';
+process.env.REDACTWALL_DATA_KEY = 'unit-data-key-stable';
 process.env.INGEST_API_KEY = 'unit-ingest-key';
-process.env.SENTINEL_DB_PATH = path.join(os.tmpdir(), 'ps-fleet-' + crypto.randomBytes(6).toString('hex') + '.db');
-process.env.SENTINEL_SUBSCRIPTIONS_PATH = path.join(os.tmpdir(), 'ps-fleet-subs-' + crypto.randomBytes(6).toString('hex') + '.json');
+process.env.REDACTWALL_DB_PATH = path.join(os.tmpdir(), 'ps-fleet-' + crypto.randomBytes(6).toString('hex') + '.db');
+process.env.REDACTWALL_SUBSCRIPTIONS_PATH = path.join(os.tmpdir(), 'ps-fleet-subs-' + crypto.randomBytes(6).toString('hex') + '.json');
 
 const fs = require('node:fs');
 const app = require('../server/app');
@@ -80,7 +80,7 @@ test('gate traffic counts as presence, not just heartbeats', async () => withSer
 
 test('sensors silent past the stale threshold fire one SENSOR_STALE alert per silence period', async () => withServer(async (port) => {
   await heartbeat(port, { user: 'quiet@example.test', source: 'endpoint_agent', sensor: { name: 'endpoint_agent', version: '0.3.0', platform: 'win32' } });
-  fs.writeFileSync(process.env.SENTINEL_SUBSCRIPTIONS_PATH, JSON.stringify({
+  fs.writeFileSync(process.env.REDACTWALL_SUBSCRIPTIONS_PATH, JSON.stringify({
     destinations: [{ id: 'stale_feed', name: 'Stale feed', type: 'webhook', url: 'https://siem.example.test/hook', eventTypes: ['SENSOR_STALE'] }],
   }));
   const sent = [];
@@ -129,5 +129,5 @@ test('agent and guard heartbeat senders post the right shape', async () => {
 });
 
 test.after(() => {
-  try { fs.unlinkSync(process.env.SENTINEL_SUBSCRIPTIONS_PATH); } catch {}
+  try { fs.unlinkSync(process.env.REDACTWALL_SUBSCRIPTIONS_PATH); } catch {}
 });

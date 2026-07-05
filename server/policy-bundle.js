@@ -17,7 +17,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const DATA_DIR = process.env.SENTINEL_DATA_DIR || process.env.PROMPTWALL_DATA_DIR || path.join(__dirname, '..', 'data');
+const DATA_DIR = process.env.REDACTWALL_DATA_DIR || process.env.PROMPTWALL_DATA_DIR || process.env.SENTINEL_DATA_DIR || path.join(__dirname, '..', 'data');
 const KEY_FILE = path.join(DATA_DIR, '.policy-bundle-key.pem');
 const BUNDLE_VERSION = 1;
 const DEFAULT_TTL_MS = 15 * 60 * 1000; // sensors refresh well inside this window

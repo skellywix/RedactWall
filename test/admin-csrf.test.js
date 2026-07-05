@@ -203,7 +203,7 @@ test('dashboard exposes compact queue viewing controls', () => {
   assert.match(index, /id="toggleQueueDensity"/);
   assert.match(index, /queue-density-compact/);
   assert.match(dashboard, /function applyQueueDensity/);
-  assert.match(dashboard, /promptwall\.queueDensity/);
+  assert.match(dashboard, /redactwall\.queueDensity/);
   assert.match(dashboard, /aria-pressed/);
 });
 

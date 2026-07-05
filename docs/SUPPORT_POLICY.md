@@ -1,6 +1,6 @@
 # Support Policy
 
-Support severities, response targets, and maintenance windows for PromptWall
+Support severities, response targets, and maintenance windows for RedactWall
 customers. Modeled on HashiCorp/GitLab severity definitions, sized for a
 small vendor. This is the reference text for order forms and vendor-risk
 questionnaires.
@@ -38,10 +38,10 @@ coverage we cannot staff; Sev1 vulnerability notifications follow the
 
 ## What customers should have ready when reporting
 
-- PromptWall version (`/healthz` reports it), deployment shape (native,
+- RedactWall version (`/healthz` reports it), deployment shape (native,
   Docker, AWS silo), and the output of `npm run setup:check`.
 - Relevant sanitized logs. **Never send raw prompts, member data, or `.env`
-  contents** — PromptWall's own logs are prompt-free by design; if a log
+  contents** — RedactWall's own logs are prompt-free by design; if a log
   excerpt contains sensitive values, something is wrong (report that too).
 
 ## Incident communication

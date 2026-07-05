@@ -1,6 +1,6 @@
 # Google Drive MCP Connector
 
-PromptWall ships a first-party Google Drive connector for MCP runtimes. It
+RedactWall ships a first-party Google Drive connector for MCP runtimes. It
 downloads text-readable Drive blob files or exports Google Workspace documents,
 then calls `sanitizeDriveFileContent()` before returning a tool result to the
 model.
@@ -40,7 +40,7 @@ const fetchGoogleDriveFile = createDriveFileContentTool({
   accessToken: process.env.GOOGLE_DRIVE_ACCESS_TOKEN,
   agent: 'claude-desktop',
   guardOptions: {
-    server: process.env.SENTINEL_URL,
+    server: process.env.REDACTWALL_URL,
     key: process.env.INGEST_API_KEY,
   },
 });
@@ -55,7 +55,7 @@ const health = googleDriveConnectorHealth({
 }, true, 'OAuth probe ok');
 ```
 
-`result` is safe to return to the MCP client. If PromptWall detects sensitive
+`result` is safe to return to the MCP client. If RedactWall detects sensitive
 content, the result contains a single redacted text block. The control plane
 receives sanitized evidence only: redacted text, masked findings, categories,
 risk metadata, destination label, and sensor version.

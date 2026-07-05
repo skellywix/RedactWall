@@ -8,12 +8,12 @@ const crypto = require('node:crypto');
 const http = require('node:http');
 
 process.env.ADMIN_PASSWORD = 'unit-pass';
-process.env.SENTINEL_SECRET = 'unit-secret-stable';
-process.env.SENTINEL_DATA_KEY = 'unit-data-key-stable';
+process.env.REDACTWALL_SECRET = 'unit-secret-stable';
+process.env.REDACTWALL_DATA_KEY = 'unit-data-key-stable';
 process.env.INGEST_API_KEY = 'unit-ingest-key';
-process.env.SENTINEL_DB_PATH = path.join(os.tmpdir(), 'ps-semantic-remote-' + crypto.randomBytes(6).toString('hex') + '.db');
-process.env.SENTINEL_POLICY_PATH = path.join(os.tmpdir(), 'ps-semantic-remote-policy-' + crypto.randomBytes(6).toString('hex') + '.json');
-require('node:fs').writeFileSync(process.env.SENTINEL_POLICY_PATH, JSON.stringify({
+process.env.REDACTWALL_DB_PATH = path.join(os.tmpdir(), 'ps-semantic-remote-' + crypto.randomBytes(6).toString('hex') + '.db');
+process.env.REDACTWALL_POLICY_PATH = path.join(os.tmpdir(), 'ps-semantic-remote-policy-' + crypto.randomBytes(6).toString('hex') + '.json');
+require('node:fs').writeFileSync(process.env.REDACTWALL_POLICY_PATH, JSON.stringify({
   enforcementMode: 'block', blockMinSeverity: 2, blockRiskScore: 20, governedDestinations: ['chatgpt.com'],
 }, null, 2));
 
@@ -37,8 +37,8 @@ function stubClassifier(handler) {
 
 test('remote settings require an explicit https/http opt-in', () => {
   assert.strictEqual(semanticRemote.remoteSettings({}).enabled, false);
-  assert.strictEqual(semanticRemote.remoteSettings({ SENTINEL_SEMANTIC_REMOTE_URL: 'ftp://x' }).enabled, false);
-  const on = semanticRemote.remoteSettings({ SENTINEL_SEMANTIC_REMOTE_URL: 'https://dlp.example/scan', SENTINEL_SEMANTIC_REMOTE_TIMEOUT_MS: '900' });
+  assert.strictEqual(semanticRemote.remoteSettings({ REDACTWALL_SEMANTIC_REMOTE_URL: 'ftp://x' }).enabled, false);
+  const on = semanticRemote.remoteSettings({ REDACTWALL_SEMANTIC_REMOTE_URL: 'https://dlp.example/scan', REDACTWALL_SEMANTIC_REMOTE_TIMEOUT_MS: '900' });
   assert.deepStrictEqual({ enabled: on.enabled, timeoutMs: on.timeoutMs }, { enabled: true, timeoutMs: 900 });
 });
 
@@ -113,13 +113,13 @@ test('gate path consults the cloud classifier only when configured', async () =>
     assert.strictEqual(remoteCalls, 0, 'no remote traffic without opt-in');
     assert.strictEqual(before.decision, 'allow');
 
-    process.env.SENTINEL_SEMANTIC_REMOTE_URL = `http://127.0.0.1:${server.address().port}/scan`;
+    process.env.REDACTWALL_SEMANTIC_REMOTE_URL = `http://127.0.0.1:${server.address().port}/scan`;
     const after = await (await gate({})).json();
     assert.ok(remoteCalls >= 1, 'opt-in routes prompts through the classifier');
     assert.notStrictEqual(after.decision, 'allow', 'remote category drives the verdict');
     assert.ok((after.categories || []).includes('CONFIDENTIAL_BUSINESS'));
   } finally {
-    delete process.env.SENTINEL_SEMANTIC_REMOTE_URL;
+    delete process.env.REDACTWALL_SEMANTIC_REMOTE_URL;
     server.close();
     await new Promise((resolve) => gateServer.close(resolve));
   }

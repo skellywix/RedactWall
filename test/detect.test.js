@@ -33,8 +33,9 @@ test('true positives — structured PII is caught', () => {
   assert.ok(hasType('here is the key AKIAIOSFODNN7EXAMPLE', 'SECRET_KEY'), 'AWS access key id');
   assert.ok(hasType('-----BEGIN RSA PRIVATE KEY-----', 'PRIVATE_KEY'), 'private key header');
   assert.ok(hasType('fake record marker PS-CANARY-DEMO2026ABCDEF should never leave', 'CANARY_TOKEN'), 'planted canary token');
-  assert.ok(hasType('fake record marker PROMPTWALL-CANARY-DEMO2026ABCDEF should never leave', 'CANARY_TOKEN'), 'PromptWall canary token');
-  assert.ok(hasType('legacy marker PROMPTSENTINEL-CANARY-DEMO2026ABCDEF still blocks after rename', 'CANARY_TOKEN'), 'legacy canary token');
+  assert.ok(hasType('fake record marker REDACTWALL-CANARY-DEMO2026ABCDEF should never leave', 'CANARY_TOKEN'), 'RedactWall canary token');
+  assert.ok(hasType('legacy marker PROMPTWALL-CANARY-DEMO2026ABCDEF still blocks after rename', 'CANARY_TOKEN'), 'legacy PromptWall canary token');
+  assert.ok(hasType('older marker PROMPTSENTINEL-CANARY-DEMO2026ABCDEF still blocks after rename', 'CANARY_TOKEN'), 'legacy PromptSentinel canary token');
   assert.ok(hasType('email me at jane.doe@example.com', 'EMAIL_ADDRESS'), 'email');
 });
 

@@ -14,12 +14,12 @@ const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-security-package-test
 
 function fixtureLockfile() {
   return {
-    name: 'promptwall',
+    name: 'redactwall',
     version: '0.3.0',
     lockfileVersion: 3,
     packages: {
       '': {
-        name: 'promptwall',
+        name: 'redactwall',
         version: '0.3.0',
         dependencies: { 'adm-zip': '^0.5.17', express: '^5.2.1' },
         devDependencies: { '@playwright/test': '^1.61.1' },
@@ -51,7 +51,7 @@ function buildFixturePackage() {
   return securityPackage.trustPackage({
     generatedAt: '2026-07-04T12:00:00.000Z',
     packageInfo: {
-      name: 'promptwall',
+      name: 'redactwall',
       version: '0.3.0',
       description: 'Inline DLP gateway for AI chat prompts.',
       engines: { node: '>=22' },
@@ -83,8 +83,8 @@ function buildFixturePackage() {
       },
     },
     env: {
-      SIEM_WEBHOOK_URL: 'https://soc.example.test/promptwall',
-      SENTINEL_DATA_KEY: 'unit-data-key-stable-should-not-export',
+      SIEM_WEBHOOK_URL: 'https://soc.example.test/redactwall',
+      REDACTWALL_DATA_KEY: 'unit-data-key-stable-should-not-export',
     },
   });
 }
@@ -197,7 +197,7 @@ test('security trust package archive has manifest, package, SBOM, and readme fil
 
   assert.deepStrictEqual(entries, ['README.md', 'manifest.json', 'sbom/cyclonedx.json', 'security-trust-package.json']);
   assert.strictEqual(archive.readAsText('security-trust-package.json').includes(tempRoot), false);
-  assert.match(archive.readAsText('README.md'), /PromptWall Security Trust Package/);
+  assert.match(archive.readAsText('README.md'), /RedactWall Security Trust Package/);
 });
 
 test('security package CLI writer emits JSON and ZIP artifacts', () => {

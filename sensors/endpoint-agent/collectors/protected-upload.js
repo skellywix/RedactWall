@@ -91,15 +91,15 @@ function cleanDestination(value) {
 }
 
 function configuredServer(opts = {}) {
-  return cleanDestination(opts.server || process.env.SENTINEL_URL || process.env.PROMPTWALL_URL);
+  return cleanDestination(opts.server || process.env.REDACTWALL_URL || process.env.PROMPTWALL_URL || process.env.SENTINEL_URL);
 }
 
 function configuredKey(opts = {}) {
-  return cleanDestination(opts.key || process.env.INGEST_API_KEY || process.env.PROMPTWALL_INGEST_API_KEY);
+  return cleanDestination(opts.key || process.env.INGEST_API_KEY || process.env.REDACTWALL_INGEST_API_KEY);
 }
 
 function policyRequestTimeoutMs(opts = {}) {
-  return boundedNumber(opts.policyTimeoutMs ?? process.env.SENTINEL_REQUEST_TIMEOUT_MS, DEFAULT_POLICY_TIMEOUT_MS, 50, 120000);
+  return boundedNumber(opts.policyTimeoutMs ?? process.env.REDACTWALL_REQUEST_TIMEOUT_MS, DEFAULT_POLICY_TIMEOUT_MS, 50, 120000);
 }
 
 async function fetchWithTimeout(fetchImpl, url, options, opts = {}) {
@@ -136,7 +136,7 @@ async function resolveDestination(opts = {}) {
   writer.loadEndpointEnv(opts.envPath);
   return (await fetchPolicyDestination(opts))
     || cleanDestination(process.env.ENDPOINT_AGENT_DESKTOP_DESTINATION)
-    || cleanDestination(process.env.PROMPTWALL_DESKTOP_DESTINATION)
+    || cleanDestination(process.env.REDACTWALL_DESKTOP_DESTINATION)
     || DEFAULT_DESTINATION;
 }
 
@@ -251,7 +251,7 @@ async function collectProtectedUploads(opts = {}) {
 }
 
 function printHuman(result, io = console) {
-  const parts = [`PromptWall protected upload ${result.status}: ${result.count} file(s)`];
+  const parts = [`RedactWall protected upload ${result.status}: ${result.count} file(s)`];
   if (result.failed) parts.push(`${result.failed} failed`);
   io.log(parts.join(', '));
   for (const item of result.results) {

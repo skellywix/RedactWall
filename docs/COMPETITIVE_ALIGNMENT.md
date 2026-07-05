@@ -1,8 +1,8 @@
-# PromptWall Competitive Alignment
+# RedactWall Competitive Alignment
 
 ## Goal
 
-PromptWall should win the first regulated pilots by being easier to deploy,
+RedactWall should win the first regulated pilots by being easier to deploy,
 easier to verify, and easier to explain to an examiner than broad enterprise
 DLP platforms. The product should not chase every connector first. It should
 prove that prompt, file, and agent traffic headed to AI tools is governed by one
@@ -35,7 +35,7 @@ dashboards, agent and MCP controls, and compliance reporting.
   retention of uploaded developer-platform files; endpoint rollout is MDM-heavy
   (Full-Disk-Access mobileconfig). Commercially it ships four masked-price
   bundles metered on users/apps/TB-scanned/API-calls with an enterprise-led,
-  MSSP/VAR go-to-market. PromptWall's counters: on-device zero-egress detection,
+  MSSP/VAR go-to-market. RedactWall's counters: on-device zero-egress detection,
   a gateway that **blocks** responses, transparent per-seat pricing, and a
   lighter force-install browser rollout.
 - Zscaler sets the SSE/browser-isolation bar: interactive dashboards, AI app
@@ -48,7 +48,7 @@ dashboards, agent and MCP controls, and compliance reporting.
   information disclosure, and unsafe tool behavior remain first-class product
   risks that the acceptance gate must continuously test.
 
-PromptWall's wedge is not to outspend the platforms on every cloud connector.
+RedactWall's wedge is not to outspend the platforms on every cloud connector.
 It should beat the top three for regulated credit-union pilots by making the
 examiner story clearer: one local detection engine, browser plus endpoint plus
 MCP sensors, default-deny AI destinations, privacy-preserving evidence, and a
@@ -160,7 +160,7 @@ dashboard that proves control without storing prompt bodies by default.
   maps to the best available segment and carries reviewer-role/owner hints
   without creating another prompt-body exposure path.
 - Added a live Competitive Readiness matrix in `/api/posture`, examiner
-  evidence packs, and the AI Security Command Center. It scores PromptWall
+  evidence packs, and the AI Security Command Center. It scores RedactWall
   against six market bars: real-time AI DLP, AI usage visibility, shadow-AI
   governance, agent/MCP controls, desktop/file-flow coverage, and SOC/examiner
   handoff, then shows the next gaps without returning prompt bodies.
@@ -183,7 +183,7 @@ dashboard that proves control without storing prompt bodies by default.
   structured recall, false-positive floors, and eval floor status from the
   synthetic held-out corpus without returning eval prompt text.
 - Added discovery-feed freshness to coverage, posture, evidence exports, and
-  the coverage dashboard. PromptWall now reports fresh versus stale proxy/SSE/
+  the coverage dashboard. RedactWall now reports fresh versus stale proxy/SSE/
   firewall/browser-isolation import feeds, last discovery import time, source
   labels, and host-only observation counts without URL paths or prompt bodies.
 - Added a local endpoint git pre-push guard that scans outbound diffs before
@@ -232,7 +232,7 @@ Build next:
 
 ## Recent Completed Passes
 
-- Rebrand the visible project from PromptSentinel to PromptWall.
+- Rebrand the visible project from RedactWall to RedactWall.
 - Add provider-specific Microsoft Entra and Okta identity setup handoff through
   the dashboard Identity tab, an authenticated secret-free API, and
   `npm run identity:setup`, so SCIM/OIDC pilot setup has exact callback, issuer,
@@ -263,10 +263,10 @@ Build next:
 - Add owner group, reviewer role, review-after metadata, dashboard builder
   fields, and sanitized examiner evidence for time-bound exception lifecycle
   review.
-- Rename the endpoint installer surface to `-PromptWallUrl` while keeping
+- Rename the endpoint installer surface to `-RedactWallUrl` while keeping
   `-SentinelUrl` as a compatibility alias for existing technician scripts.
-- Rename fresh endpoint runner config handoff to `PROMPTWALL_ENV_PATH` while
-  keeping `SENTINEL_ENV_PATH` accepted for existing installs.
+- Rename fresh endpoint runner config handoff to `REDACTWALL_ENV_PATH` while
+  keeping `REDACTWALL_ENV_PATH` accepted for existing installs.
 - Add a browser extension release-readiness gate and managed release checklist
   so Chrome, Edge, and Firefox rollouts have packages, policies, update or
   install URLs, generated ExtensionSettings force-install policies, and
@@ -305,11 +305,11 @@ Build next:
   their own queue items without receiving Security Admin privileges or raw
   prompt reveal access.
 - Add minimal SCIM 2.0 provisioning for users and groups, with bearer auth,
-  deactivation, group membership patches, audit entries, and PromptWall group
+  deactivation, group membership patches, audit entries, and RedactWall group
   display names mapped onto local route roles.
 - Add SCIM-backed OIDC console login that validates authorization-code
   callbacks, state, nonce, RS256 ID-token signatures, issuer, audience, expiry,
-  and active provisioned users before issuing normal PromptWall sessions.
+  and active provisioned users before issuing normal RedactWall sessions.
 - Add server-side scoped policy and time-bound exceptions that use metadata such
   as user, SCIM group, source, channel, destination, detector, and category while
   preserving hard-stop entities.
@@ -330,11 +330,11 @@ Build next:
   user gets a concrete safe alternative for SSNs, credentials, confidential
   business context, source code, contracts, canary tokens, and other sensitive
   categories before anything leaves the page.
-- Preserve legacy canary token compatibility while adding the PromptWall canary
+- Preserve legacy canary token compatibility while adding the RedactWall canary
   prefix.
-- Add tested `PROMPTWALL_*` runtime aliases so new PromptWall deployments can
-  use the renamed prefix without breaking existing `SENTINEL_*` installs.
-- Issue fresh admin sessions as `promptwall_session` while accepting legacy
+- Add tested `REDACTWALL_*` runtime aliases so new RedactWall deployments can
+  use the renamed prefix without breaking existing `REDACTWALL_*` installs.
+- Issue fresh admin sessions as `redactwall_session` while accepting legacy
   `sentinel_session` cookies during migration, and clear both cookie names on
   logout.
 - Normalize scanner byte limits to integers across policy load/save, default

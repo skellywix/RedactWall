@@ -8,9 +8,9 @@ const fs = require('node:fs');
 const crypto = require('node:crypto');
 
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-backup-test-'));
-process.env.SENTINEL_DB_PATH = path.join(tempRoot, 'sentinel.db');
-process.env.SENTINEL_SECRET = 'unit-secret-stable';
-process.env.SENTINEL_DATA_KEY = 'unit-data-key-stable';
+process.env.REDACTWALL_DB_PATH = path.join(tempRoot, 'redactwall.db');
+process.env.REDACTWALL_SECRET = 'unit-secret-stable';
+process.env.REDACTWALL_DATA_KEY = 'unit-data-key-stable';
 
 const db = require('../server/db');
 const backup = require('../scripts/backup-store');
@@ -42,14 +42,14 @@ test('backup workflow verifies and restores audit evidence without leaking manif
   assert.strictEqual(result.manifest.backupSha256, result.backupSha256);
   assert.ok(!JSON.stringify(result.manifest).includes(secret));
   assert.ok(!JSON.stringify(result.manifest).includes(tempRoot));
-  assert.strictEqual(result.manifest.sourceDbFile, 'sentinel.db');
+  assert.strictEqual(result.manifest.sourceDbFile, 'redactwall.db');
   assert.match(result.manifest.sourceDbPathHash, /^[a-f0-9]{64}$/);
 
   const verified = backup.verifyBackup({ file: result.file, manifestFile: result.manifestFile });
   assert.strictEqual(verified.ok, true);
   assert.strictEqual(verified.backupSha256, result.backupSha256);
 
-  const restoredPath = path.join(tempRoot, 'restored', 'sentinel.db');
+  const restoredPath = path.join(tempRoot, 'restored', 'redactwall.db');
   const restored = backup.restoreBackup({ file: result.file, to: restoredPath });
   assert.strictEqual(restored.ok, true);
   assert.strictEqual(restored.restoredTo, restoredPath);
@@ -67,7 +67,7 @@ test('manifest hash mismatch makes verification fail and blocks restore', async 
   assert.strictEqual(verified.manifestOk, false);
   assert.strictEqual(verified.ok, false);
   assert.throws(
-    () => backup.restoreBackup({ file: result.file, to: path.join(tempRoot, 'mismatched-restore', 'sentinel.db') }),
+    () => backup.restoreBackup({ file: result.file, to: path.join(tempRoot, 'mismatched-restore', 'redactwall.db') }),
     /does not verify/,
   );
 });
@@ -81,7 +81,7 @@ test('restore refuses to overwrite an existing target unless forced', async () =
 });
 
 test('create refuses to overwrite an explicit backup target unless forced', async () => {
-  const target = path.join(tempRoot, 'explicit', 'sentinel.db');
+  const target = path.join(tempRoot, 'explicit', 'redactwall.db');
   await backup.createBackup({ file: target, dbModule: db });
   await assert.rejects(() => backup.createBackup({ file: target, dbModule: db }), /already exists/);
   const forced = await backup.createBackup({ file: target, dbModule: db, force: true });
@@ -89,7 +89,7 @@ test('create refuses to overwrite an explicit backup target unless forced', asyn
 });
 
 test('create refuses existing manifest before writing a backup file', async () => {
-  const target = path.join(tempRoot, 'manifest-collision', 'sentinel.db');
+  const target = path.join(tempRoot, 'manifest-collision', 'redactwall.db');
   const manifest = `${target}.manifest.json`;
   fs.mkdirSync(path.dirname(target), { recursive: true });
   fs.writeFileSync(manifest, '{"reserved":true}');
@@ -117,12 +117,12 @@ test('argument parser preserves positional paths for npm-run portability', () =>
     { _: ['create', 'backups'] },
   );
   assert.deepStrictEqual(
-    backup.parseArgs(['verify', '--file', 'backups/sentinel.db', '--manifest', 'manifest.json']),
-    { _: ['verify'], file: 'backups/sentinel.db', manifest: 'manifest.json' },
+    backup.parseArgs(['verify', '--file', 'backups/redactwall.db', '--manifest', 'manifest.json']),
+    { _: ['verify'], file: 'backups/redactwall.db', manifest: 'manifest.json' },
   );
   assert.deepStrictEqual(
-    backup.parseArgs(['restore', 'backups/sentinel.db', 'data/restored.db', '--force']),
-    { _: ['restore', 'backups/sentinel.db', 'data/restored.db'], force: true },
+    backup.parseArgs(['restore', 'backups/redactwall.db', 'data/restored.db', '--force']),
+    { _: ['restore', 'backups/redactwall.db', 'data/restored.db'], force: true },
   );
 });
 

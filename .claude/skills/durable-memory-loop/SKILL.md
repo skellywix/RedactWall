@@ -12,7 +12,7 @@ The model forgets everything between runs; the repo does not. State must live on
 - **STATUS.md** — changing state: `## Open` (newest first) and `## Done`. The spine `daily-triage-loop` writes and the fix loops consume.
 - **DECISIONS.md** — short dated entries for non-obvious choices ("bare 9-digit numbers need banking context before ROUTING_NUMBER fires — too many false positives otherwise"). This is how the loop stops re-litigating settled questions.
 
-> PromptWall already keeps long-form history in `ITERATIONS.md` and `CHANGELOG.md`. Treat those as the archive; PLAN/STATUS/DECISIONS are the live working set. Don't duplicate — link.
+> RedactWall already keeps long-form history in `ITERATIONS.md` and `CHANGELOG.md`. Treat those as the archive; PLAN/STATUS/DECISIONS are the live working set. Don't duplicate — link.
 
 ## The Ralph-style pass
 Each unit of work is a fresh agent with a clean context:

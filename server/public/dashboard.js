@@ -582,12 +582,12 @@ function renderAiInventory() {
     : '<div class="signal-empty"><b>No AI inventory</b><p>No governed, shadow, or endpoint AI tools observed.</p></div>';
 }
 
-function renderOperatorFlow(){window.PromptWallOperatorFlow&&window.PromptWallOperatorFlow.render(currentPosture,{$,escapeHtml});}
-function renderAgenticMcp(){window.PromptWallAgenticMcp&&window.PromptWallAgenticMcp.render(currentPosture,{$,escapeHtml,inventoryStateLabel});}
-function renderThreatGuardrails(){window.PromptWallThreatGuardrails&&window.PromptWallThreatGuardrails.render(currentPosture,{$,escapeHtml});}
-function renderControlGraph(){window.PromptWallControlGraph&&window.PromptWallControlGraph.render(currentPosture,{$,escapeHtml});}
-function renderLeakPathMap(){window.PromptWallLeakPathMap&&window.PromptWallLeakPathMap.render(currentPosture,{$,escapeHtml});}
-function renderBehaviorBaselines(){window.PromptWallBehaviorBaselines&&window.PromptWallBehaviorBaselines.render(currentPosture,{$,escapeHtml});}
+function renderOperatorFlow(){window.RedactWallOperatorFlow&&window.RedactWallOperatorFlow.render(currentPosture,{$,escapeHtml});}
+function renderAgenticMcp(){window.RedactWallAgenticMcp&&window.RedactWallAgenticMcp.render(currentPosture,{$,escapeHtml,inventoryStateLabel});}
+function renderThreatGuardrails(){window.RedactWallThreatGuardrails&&window.RedactWallThreatGuardrails.render(currentPosture,{$,escapeHtml});}
+function renderControlGraph(){window.RedactWallControlGraph&&window.RedactWallControlGraph.render(currentPosture,{$,escapeHtml});}
+function renderLeakPathMap(){window.RedactWallLeakPathMap&&window.RedactWallLeakPathMap.render(currentPosture,{$,escapeHtml});}
+function renderBehaviorBaselines(){window.RedactWallBehaviorBaselines&&window.RedactWallBehaviorBaselines.render(currentPosture,{$,escapeHtml});}
 
 function renderHardeningWorkbench() {
   const hardening = currentPosture && currentPosture.hardening && typeof currentPosture.hardening === 'object'
@@ -668,15 +668,15 @@ function renderHardeningWorkbench() {
 function siemState(){return{currentSiemPackage,siemPackageProfile,siemPackageLoading,siemPackageError};}
 function setSiemState(patch){if('currentSiemPackage'in patch)currentSiemPackage=patch.currentSiemPackage;if('siemPackageLoading'in patch)siemPackageLoading=patch.siemPackageLoading;if('siemPackageError'in patch)siemPackageError=patch.siemPackageError;}
 function siemDeps(){return{$,api,apiErrorSummary,canAdminWrite,escapeHtml,humanize,markUpdated,renderSiemPackage,responseJsonObject,setState:setSiemState,statusChip};}
-function renderSiemPackage(){const m=window.PromptWallSiemPackage;if(m)m.render(siemState(),siemDeps());}
-async function loadSiemPackage(){const m=window.PromptWallSiemPackage;return m?m.load(siemState(),siemDeps()):null;}
-async function downloadSiemPackage(){const m=window.PromptWallSiemPackage;return m?m.download(siemState(),siemDeps()):null;}
+function renderSiemPackage(){const m=window.RedactWallSiemPackage;if(m)m.render(siemState(),siemDeps());}
+async function loadSiemPackage(){const m=window.RedactWallSiemPackage;return m?m.load(siemState(),siemDeps()):null;}
+async function downloadSiemPackage(){const m=window.RedactWallSiemPackage;return m?m.download(siemState(),siemDeps()):null;}
 function securityPackageState(){return{currentSecurityPackage,securityPackageLoading,securityPackageError};}
 function setSecurityPackageState(patch){if('currentSecurityPackage'in patch)currentSecurityPackage=patch.currentSecurityPackage;if('securityPackageLoading'in patch)securityPackageLoading=patch.securityPackageLoading;if('securityPackageError'in patch)securityPackageError=patch.securityPackageError;}
 function securityPackageDeps(){return{$,api,apiErrorSummary,canAdminWrite,escapeHtml,humanize,icons,markUpdated,renderSecurityPackage,responseJsonObject,setState:setSecurityPackageState,statusChip};}
-function renderSecurityPackage(){const m=window.PromptWallSecurityPackage;if(m)m.render(securityPackageState(),securityPackageDeps());}
-async function loadSecurityPackage(){const m=window.PromptWallSecurityPackage;return m?m.load(securityPackageState(),securityPackageDeps()):null;}
-async function downloadSecurityPackage(){const m=window.PromptWallSecurityPackage;return m?m.download(securityPackageState(),securityPackageDeps()):null;}
+function renderSecurityPackage(){const m=window.RedactWallSecurityPackage;if(m)m.render(securityPackageState(),securityPackageDeps());}
+async function loadSecurityPackage(){const m=window.RedactWallSecurityPackage;return m?m.load(securityPackageState(),securityPackageDeps()):null;}
+async function downloadSecurityPackage(){const m=window.RedactWallSecurityPackage;return m?m.download(securityPackageState(),securityPackageDeps()):null;}
 
 function renderPostureTrend() {
   const rows = currentPosture && Array.isArray(currentPosture.trend) ? currentPosture.trend : [];
@@ -1308,7 +1308,7 @@ function canReveal(q = {}) {
 
 function savedQueueDensity() {
   try {
-    return localStorage.getItem('promptwall.queueDensity') === 'compact' ? 'compact' : 'comfortable';
+    return localStorage.getItem('redactwall.queueDensity') === 'compact' ? 'compact' : 'comfortable';
   } catch {
     return 'comfortable';
   }
@@ -1316,7 +1316,7 @@ function savedQueueDensity() {
 
 function saveQueueDensity(value) {
   try {
-    localStorage.setItem('promptwall.queueDensity', value);
+    localStorage.setItem('redactwall.queueDensity', value);
   } catch {}
 }
 
@@ -1326,7 +1326,7 @@ function normalizeColorTheme(value) {
 
 function savedColorTheme() {
   try {
-    return normalizeColorTheme(localStorage.getItem('promptwall.theme'));
+    return normalizeColorTheme(localStorage.getItem('redactwall.theme'));
   } catch {
     return 'dark';
   }
@@ -1334,7 +1334,7 @@ function savedColorTheme() {
 
 function saveColorTheme(value) {
   try {
-    localStorage.setItem('promptwall.theme', normalizeColorTheme(value));
+    localStorage.setItem('redactwall.theme', normalizeColorTheme(value));
   } catch {}
 }
 
@@ -1581,7 +1581,7 @@ function csvStamp() {
 
 // ---- Saved views: name the current search + range + page size ---------------
 function savedViews() {
-  try { return JSON.parse(localStorage.getItem('promptwall.savedViews') || '[]'); } catch { return []; }
+  try { return JSON.parse(localStorage.getItem('redactwall.savedViews') || '[]'); } catch { return []; }
 }
 
 function refreshSavedViewOptions() {
@@ -1596,7 +1596,7 @@ function saveCurrentView() {
   const name = search || (activityRangeDays ? `last ${activityRangeDays}d` : 'all activity');
   const views = savedViews().filter((v) => v.name !== name);
   views.unshift({ name, search, range: activityRangeDays, pageSize: activityPageSize });
-  localStorage.setItem('promptwall.savedViews', JSON.stringify(views.slice(0, 12)));
+  localStorage.setItem('redactwall.savedViews', JSON.stringify(views.slice(0, 12)));
   refreshSavedViewOptions();
   toast(`View "${name}" saved.`, 'good');
 }
@@ -1621,7 +1621,7 @@ async function exportPolicyJson() {
   const url = URL.createObjectURL(new Blob([JSON.stringify(pol, null, 2)], { type: 'application/json' }));
   const a = document.createElement('a');
   a.href = url;
-  a.download = `promptwall-policy-${csvStamp()}.json`;
+  a.download = `redactwall-policy-${csvStamp()}.json`;
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -1631,7 +1631,7 @@ async function exportPolicyJson() {
 function exportInsightsCsv() {
   const series = (currentInsights && currentInsights.series) || [];
   if (!series.length) { toast('No insights data loaded yet.', 'bad'); return; }
-  downloadCsv(`promptwall-insights-${insightsWindowDays}d-${csvStamp()}.csv`,
+  downloadCsv(`redactwall-insights-${insightsWindowDays}d-${csvStamp()}.csv`,
     ['Day', 'Allowed', 'Redacted', 'Warned', 'Flagged', 'Blocked', 'Shadow', 'Total'],
     series.map((d) => [d.date, d.allowed || 0, d.redacted || 0, d.warned || 0, d.flagged || 0, d.blocked || 0, d.shadow || 0, d.total || 0]));
 }
@@ -1641,7 +1641,7 @@ function exportActivityCsv() {
     fmt(q.createdAt), sourceLabel(q.source), q.user || '', q.destination || '', workflowOwner(q),
     q.maxSeverityLabel || 'low', q.riskScore ?? 0, Object.keys(q.entityCounts || {}).join('; '), humanize(q.status),
   ]);
-  downloadCsv(`promptwall-activity-${csvStamp()}.csv`,
+  downloadCsv(`redactwall-activity-${csvStamp()}.csv`,
     ['Time', 'Source', 'User', 'Destination', 'Owner', 'Severity', 'Risk', 'Detected', 'Status'], rows);
 }
 
@@ -1649,7 +1649,7 @@ function exportAuditCsv() {
   const rows = filteredAuditEntries(currentAuditEntries).map((a) => [
     fmt(a.ts), a.action || '', a.actor || '', a.queryId || '', a.detail || '',
   ]);
-  downloadCsv(`promptwall-audit-${csvStamp()}.csv`,
+  downloadCsv(`redactwall-audit-${csvStamp()}.csv`,
     ['Timestamp', 'Action', 'Actor', 'Query', 'Detail'], rows);
 }
 
@@ -2758,7 +2758,7 @@ document.addEventListener('change', (e) => {
     const hidden = hiddenActivityCols();
     if (colToggle.checked) hidden.delete(colToggle.dataset.activityCol);
     else hidden.add(colToggle.dataset.activityCol);
-    localStorage.setItem('promptwall.activityCols', JSON.stringify([...hidden]));
+    localStorage.setItem('redactwall.activityCols', JSON.stringify([...hidden]));
     applyActivityColumns();
     return;
   }
@@ -2956,7 +2956,7 @@ function renderActivityRows(rows) {
 const ACTIVITY_COLS = ['time', 'source', 'user', 'destination', 'owner', 'severity', 'risk', 'detected', 'status'];
 
 function hiddenActivityCols() {
-  try { return new Set(JSON.parse(localStorage.getItem('promptwall.activityCols') || '[]')); } catch { return new Set(); }
+  try { return new Set(JSON.parse(localStorage.getItem('redactwall.activityCols') || '[]')); } catch { return new Set(); }
 }
 
 function applyActivityColumns() {
@@ -3280,7 +3280,7 @@ async function runCatalogBulk(decision) {
 }
 
 function exportCatalogCsv() {
-  downloadCsv(`promptwall-ai-apps-${csvStamp()}.csv`,
+  downloadCsv(`redactwall-ai-apps-${csvStamp()}.csv`,
     ['App', 'Host', 'Provider', 'Risk tier', 'Risk score', 'Status', 'Events', 'Sources'],
     sortedCatalogApps(catalogApps).map((a) => [
       a.appName || a.destination, a.destination, a.provider || '', a.riskTier, a.riskScore ?? '',
@@ -3398,7 +3398,7 @@ function renderComplianceRecommendations(controls) {
 
 function exportComplianceCsv() {
   if (!currentComplianceControls.length) { toast('No compliance data loaded yet.', 'bad'); return; }
-  downloadCsv(`promptwall-controls-${csvStamp()}.csv`,
+  downloadCsv(`redactwall-controls-${csvStamp()}.csv`,
     ['Control', 'State', 'Frameworks', 'Summary'],
     currentComplianceControls.map((c) => [c.title, c.state, (c.controlFamilies || []).join('; '), c.summary || '']));
 }
@@ -3413,7 +3413,7 @@ function exportExecSummaryCsv() {
     ...(d.topUsers || []).slice(0, 10).map((t) => [`Top user: ${t.label || t[0]}`, t.count ?? t[1]]),
     ...(d.riskBands || []).map((b) => [`Risk band: ${b.label}`, b.count]),
   ];
-  downloadCsv(`promptwall-executive-summary-${csvStamp()}.csv`, ['Metric', 'Value'], rows);
+  downloadCsv(`redactwall-executive-summary-${csvStamp()}.csv`, ['Metric', 'Value'], rows);
 }
 
 async function runIdentityTest() {
@@ -3909,7 +3909,7 @@ async function exportEvidence(){
     const a = document.createElement('a');
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     a.href = url;
-    a.download = `promptwall-evidence-${stamp}.json`;
+    a.download = `redactwall-evidence-${stamp}.json`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -4114,8 +4114,8 @@ function policyFormBody(p) {
 }
 
 function renderPolicyImpactPreview(result) {
-  if (window.PromptWallPolicyImpact && typeof window.PromptWallPolicyImpact.render === 'function') {
-    window.PromptWallPolicyImpact.render(result);
+  if (window.RedactWallPolicyImpact && typeof window.RedactWallPolicyImpact.render === 'function') {
+    window.RedactWallPolicyImpact.render(result);
   }
 }
 
@@ -4158,7 +4158,7 @@ async function loadPolicy() {
       ${renderSetupChecklist(p, preflight, coverage)}
       <div class="config-card pad">
         <h3>Policy Mode</h3>
-        <p>Choose what every PromptWall sensor does when it sees sensitive content.</p>
+        <p>Choose what every RedactWall sensor does when it sees sensitive content.</p>
         <div class="policy-options mode-grid">
           ${modes.map(([v, t, d]) => `<label class="policy-option ${p.enforcementMode === v ? 'selected' : ''} ${readonly ? 'readonly' : ''}">
             <span><input type="radio" name="mode" value="${v}" ${p.enforcementMode === v ? 'checked' : ''} ${readonly ? 'disabled' : ''}/>${t}</span>
@@ -4284,14 +4284,14 @@ async function loadPolicy() {
       <p>Route held prompts to the right group and role with SLA context.</p>
       ${readonly
     ? `<div class="chips">${(p.approvalRoutingRules || []).map((rule) => `<span class="chip"><b>${escapeHtml(rule.id)}</b> ${escapeHtml(rule.assignedGroup || '')} / ${escapeHtml(roleLabel(rule.assignedRole))} ${escapeHtml(policyMatcherSummary(rule))}</span>`).join('') || '<span class="chip">default routing</span>'}</div>`
-    : `<textarea id="pol_approval_routing_rules" class="policy-textarea" spellcheck="false" style="min-height:160px;margin-top:12px" placeholder='[{"id":"legal_group_contracts","groups":["PromptWall Legal"],"categories":["LEGAL_CONTRACT"],"destinations":["claude.ai"],"assignedGroup":"legal","assignedRole":"approver","slaMinutes":60}]'>${escapeHtml(policyJsonText(p.approvalRoutingRules))}</textarea>`}
+    : `<textarea id="pol_approval_routing_rules" class="policy-textarea" spellcheck="false" style="min-height:160px;margin-top:12px" placeholder='[{"id":"legal_group_contracts","groups":["RedactWall Legal"],"categories":["LEGAL_CONTRACT"],"destinations":["claude.ai"],"assignedGroup":"legal","assignedRole":"approver","slaMinutes":60}]'>${escapeHtml(policyJsonText(p.approvalRoutingRules))}</textarea>`}
     </div>
     ${readonly ? '' : `<div class="policy-builder-grid">
       <div class="policy-builder" id="scopeRuleBuilder">
         <h3>Guided Scoped Enforcement</h3>
         <div class="mini-grid">
           <label>Rule id<input id="scope_builder_id" type="text" placeholder="legal_contract_review"/></label>
-          <label>SCIM groups<input id="scope_builder_groups" type="text" placeholder="PromptWall Legal"/></label>
+          <label>SCIM groups<input id="scope_builder_groups" type="text" placeholder="RedactWall Legal"/></label>
           <label>Users<input id="scope_builder_users" type="text" placeholder="counsel@example.test"/></label>
           <label>Destinations<input id="scope_builder_destinations" type="text" placeholder="claude.ai"/></label>
           <label>Categories<input id="scope_builder_categories" type="text" placeholder="LEGAL_CONTRACT"/></label>
@@ -4318,7 +4318,7 @@ async function loadPolicy() {
         <h3>Guided Time-bound Exception</h3>
         <div class="mini-grid">
           <label>Exception id<input id="exception_builder_id" type="text" placeholder="legal_vendor_24h"/></label>
-          <label>SCIM groups<input id="exception_builder_groups" type="text" placeholder="PromptWall Legal"/></label>
+          <label>SCIM groups<input id="exception_builder_groups" type="text" placeholder="RedactWall Legal"/></label>
           <label>Users<input id="exception_builder_users" type="text" placeholder="counsel@example.test"/></label>
           <label>Destinations<input id="exception_builder_destinations" type="text" placeholder="claude.ai"/></label>
           <label>Categories<input id="exception_builder_categories" type="text" placeholder="LEGAL_CONTRACT"/></label>
@@ -4343,7 +4343,7 @@ async function loadPolicy() {
         <label class="policy-list-field">Scoped enforcement rules
           ${readonly
     ? `<div class="chips">${(p.policyScopes || []).map((rule) => `<span class="chip"><b>${escapeHtml(rule.id)}</b> ${escapeHtml(rule.enforcementMode || 'scope')} ${escapeHtml(policyMatcherSummary(rule))}</span>`).join('') || '<span class="chip">no scoped rules</span>'}</div>`
-    : `<textarea id="pol_policy_scopes" class="policy-textarea" spellcheck="false" style="min-height:190px" placeholder='[{"id":"legal_contract_review","groups":["PromptWall Legal"],"destinations":["claude.ai"],"categories":["LEGAL_CONTRACT"],"enforcementMode":"block","blockMinSeverity":2}]'>${escapeHtml(policyJsonText(p.policyScopes))}</textarea>`}
+    : `<textarea id="pol_policy_scopes" class="policy-textarea" spellcheck="false" style="min-height:190px" placeholder='[{"id":"legal_contract_review","groups":["RedactWall Legal"],"destinations":["claude.ai"],"categories":["LEGAL_CONTRACT"],"enforcementMode":"block","blockMinSeverity":2}]'>${escapeHtml(policyJsonText(p.policyScopes))}</textarea>`}
         </label>
         <label class="policy-list-field">Time-bound exceptions
           ${readonly
@@ -4496,11 +4496,11 @@ function renderUpdateConfigForm(config = {}, disabled = false) {
   ].map(([value, label]) => `<option value="${value}" ${installMode === value ? 'selected' : ''}>${label}</option>`).join('')}
       </select>
       <label for="updateRestartCommand">Restart command</label>
-      <input id="updateRestartCommand" type="text" maxlength="256" placeholder="systemctl restart promptwall" value="${escapeHtml(config.restartCommand || '')}" ${disabled ? 'disabled' : ''}/>
+      <input id="updateRestartCommand" type="text" maxlength="256" placeholder="systemctl restart redactwall" value="${escapeHtml(config.restartCommand || '')}" ${disabled ? 'disabled' : ''}/>
       <label for="updateRestartAfter">Auto-run restart command</label>
       <input id="updateRestartAfter" type="checkbox" ${config.restartAfterUpdate ? 'checked' : ''} ${disabled ? 'disabled' : ''}/>
     </div>
-    <p class="config-subtitle">Backend restart execution requires PROMPTWALL_UPDATE_RESTART_ENABLED=true on the host.</p>
+    <p class="config-subtitle">Backend restart execution requires REDACTWALL_UPDATE_RESTART_ENABLED=true on the host.</p>
     <div class="update-action-row">
       <button class="btn approve" id="saveUpdateConfig" type="button" ${disabled ? 'disabled' : ''}>${icons.check}Save configuration</button>
       <span class="save-status" id="updateSaveStatus"></span>
@@ -4637,7 +4637,7 @@ async function checkUpdate() {
 }
 
 async function runUpdate() {
-  const proceed = confirm('PromptWall will verify the audit chain, create a database backup, fast-forward source from GitHub, and install dependencies. Continue?');
+  const proceed = confirm('RedactWall will verify the audit chain, create a database backup, fast-forward source from GitHub, and install dependencies. Continue?');
   if (!proceed) return;
   $('#updateConsoleStatus').innerHTML = statePill('warn', 'Updating');
   const r = await api('/api/update/apply', {

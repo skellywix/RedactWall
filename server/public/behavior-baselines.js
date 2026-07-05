@@ -22,5 +22,5 @@ function render(posture,deps){
   summary.textContent=b?`${n(s.anomalies)} anomalies / ${n(s.critical)} critical / ${n(s.warning)} watch`:'Waiting for data';
   target.innerHTML=rows.length?rows.slice(0,6).map(row).join(''):'<div class="signal-empty"><b>No behavior anomalies</b><p>Recent metadata matches the learned baseline.</p></div>';
 }
-window.PromptWallBehaviorBaselines={render};
+window.RedactWallBehaviorBaselines={render};
 }());

@@ -52,7 +52,7 @@ function gatewayRequest(port, token) {
         authorization: `Bearer ${token}`,
         'content-type': 'application/json',
         'content-length': Buffer.byteLength(payload),
-        'x-promptwall-user': 'gateway-ha-smoke@example.test',
+        'x-redactwall-user': 'gateway-ha-smoke@example.test',
       },
     }, (res) => {
       const chunks = [];
@@ -91,7 +91,7 @@ async function runSmoke(opts = {}) {
     const gatewayOpts = {
       clientToken,
       key: 'gateway-ha-smoke-ingest-key',
-      sentinel: 'http://promptwall-control.local',
+      redactwall: 'http://redactwall-control.local',
       upstream: 'http://upstream.local',
       rateLimitStore: 'http',
       rateLimit: 1,

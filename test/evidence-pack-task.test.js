@@ -24,13 +24,13 @@ test('installer registers a limited scheduled task around the evidence-pack runn
   assert.match(install, /Register-ScheduledTask/);
   assert.match(install, /New-ScheduledTaskAction/);
   assert.match(install, /run-evidence-pack\.ps1/);
-  assert.match(install, /PromptWall Examiner Evidence Pack/);
+  assert.match(install, /RedactWall Examiner Evidence Pack/);
   assert.match(install, /New-ScheduledTaskTrigger -Weekly -WeeksInterval 13/);
   assert.match(install, /New-ScheduledTaskPrincipal[\s\S]+-LogonType Interactive[\s\S]+-RunLevel Limited/);
   assert.match(install, /Register-ScheduledTask[\s\S]+-Principal \$principal/);
   assert.match(install, /config\\evidence-schedule\.json/);
   assert.match(install, /Evidence schedule config not found/);
-  assert.match(install, /PromptWall\\logs\\evidence-pack\.log/);
+  assert.match(install, /RedactWall\\logs\\evidence-pack\.log/);
 });
 
 test('runner invokes scheduled evidence export from the repo without passing secrets', () => {
@@ -42,8 +42,8 @@ test('runner invokes scheduled evidence export from the repo without passing sec
   assert.match(run, /\*>> \$LogPath/);
   assert.match(run, /exit \$exitCode/);
   const combined = `${install}\n${run}`;
-  assert.doesNotMatch(combined, /SENTINEL_SECRET/);
-  assert.doesNotMatch(combined, /SENTINEL_DATA_KEY/);
+  assert.doesNotMatch(combined, /REDACTWALL_SECRET/);
+  assert.doesNotMatch(combined, /REDACTWALL_DATA_KEY/);
   assert.doesNotMatch(combined, /INGEST_API_KEY/);
   assert.doesNotMatch(combined, /SMTP_PASS/);
 });

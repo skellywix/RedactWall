@@ -152,7 +152,7 @@ test('sanitizeDriveFileContent redacts Drive content before returning MCP output
       return response('Google Drive record: SSN 524-71-9043 and card 4111 1111 1111 1111.');
     },
     guardOptions: {
-      server: 'http://sentinel.test',
+      server: 'http://redactwall.test',
       key: 'unit-ingest-key',
       policy: { ignore: [], disabledDetectors: [] },
       fetchImpl: async (url, opts = {}) => {
@@ -167,7 +167,7 @@ test('sanitizeDriveFileContent redacts Drive content before returning MCP output
   assert.ok(sanitized.findings.includes('CREDIT_CARD'));
   assert.ok(!JSON.stringify(sanitized.result).includes('524-71-9043'));
   assert.ok(!JSON.stringify(sanitized.result).includes('4111 1111 1111 1111'));
-  assert.strictEqual(outbound.url, 'http://sentinel.test/api/v1/gate');
+  assert.strictEqual(outbound.url, 'http://redactwall.test/api/v1/gate');
   assert.strictEqual(outbound.body.destination, 'google_drive.files.export');
   assert.strictEqual(outbound.body.source, 'mcp_guard');
   assert.ok(!JSON.stringify(outbound.body).includes('524-71-9043'));

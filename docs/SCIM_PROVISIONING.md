@@ -1,8 +1,8 @@
-# PromptWall SCIM Provisioning And OIDC Login
+# RedactWall SCIM Provisioning And OIDC Login
 
-PromptWall exposes a minimal SCIM 2.0 provisioning surface and a SCIM-backed
+RedactWall exposes a minimal SCIM 2.0 provisioning surface and a SCIM-backed
 OpenID Connect login bridge for customer-silo deployments. SCIM stores users and
-groups, deactivates users, maps known PromptWall group names to local roles, and
+groups, deactivates users, maps known RedactWall group names to local roles, and
 writes sanitized audit entries into the hash chain. OIDC then consumes those
 active provisioned identities to issue console sessions with the same
 `security_admin`, `approver`, `auditor`, and `operator` route roles.
@@ -18,11 +18,11 @@ Set one strong bearer token in the customer secret store:
 SCIM_BEARER_TOKEN=<32-plus-random-characters>
 ```
 
-`PROMPTWALL_SCIM_BEARER_TOKEN` is accepted as the product-prefixed alias. Leave
+`REDACTWALL_SCIM_BEARER_TOKEN` is accepted as the product-prefixed alias. Leave
 both unset or empty to disable `/scim/v2/*`; disabled endpoints return 404.
 Production preflight blocks a configured token shorter than 32 characters.
 
-Rotate the token by updating the customer IdP provisioning app and the PromptWall
+Rotate the token by updating the customer IdP provisioning app and the RedactWall
 secret in the same maintenance window. Do not put the token in policy files,
 support tickets, screenshots, or handoff packets.
 
@@ -31,7 +31,7 @@ support tickets, screenshots, or handoff packets.
 Base URL:
 
 ```text
-https://promptwall.customer.example/scim/v2
+https://redactwall.customer.example/scim/v2
 ```
 
 Supported resources:
@@ -57,14 +57,14 @@ for writes.
 
 ## Role Mapping
 
-Group display names map onto the existing PromptWall route roles:
+Group display names map onto the existing RedactWall route roles:
 
-| PromptWall role | Matching group display names |
+| RedactWall role | Matching group display names |
 | --- | --- |
-| `security_admin` | `PromptWall Security Admins`, `Security Admins`, `Admins` |
-| `approver` | `PromptWall Approvers`, `PromptWall Reviewers`, `Approvers`, `Reviewers` |
-| `auditor` | `PromptWall Auditors`, `PromptWall Read-only`, `Auditors`, `Read-only` |
-| `operator` | `PromptWall Operators`, `PromptWall Ops`, `Operators`, `Ops` |
+| `security_admin` | `RedactWall Security Admins`, `Security Admins`, `Admins` |
+| `approver` | `RedactWall Approvers`, `RedactWall Reviewers`, `Approvers`, `Reviewers` |
+| `auditor` | `RedactWall Auditors`, `RedactWall Read-only`, `Auditors`, `Read-only` |
+| `operator` | `RedactWall Operators`, `RedactWall Ops`, `Operators`, `Ops` |
 
 Direct SCIM `roles` values can also set one of the same normalized role names.
 If no direct or group role matches, the user resource returns `auditor` as the
@@ -72,7 +72,7 @@ safe default. OIDC login uses this effective role after the ID token is validate
 and the user is confirmed active in SCIM.
 
 The same provisioned group membership can also drive `approvalRoutingRules`.
-For example, a rule with `groups: ["PromptWall Legal"]` and
+For example, a rule with `groups: ["RedactWall Legal"]` and
 `categories: ["LEGAL_CONTRACT"]` can assign held contract prompts to the legal
 review pool while storing only the sanitized workflow owner, reason, and SLA on
 the evidence record.
@@ -82,7 +82,7 @@ the evidence record.
 Configure the IdP web application with this redirect URI:
 
 ```text
-https://promptwall.customer.example/auth/oidc/callback
+https://redactwall.customer.example/auth/oidc/callback
 ```
 
 Set these server-side secrets:
@@ -91,10 +91,10 @@ Set these server-side secrets:
 OIDC_ISSUER=https://login.customer.example/<tenant-or-org>
 OIDC_CLIENT_ID=<registered-web-client-id>
 OIDC_CLIENT_SECRET=<32-plus-random-characters>
-OIDC_REDIRECT_URI=https://promptwall.customer.example/auth/oidc/callback
+OIDC_REDIRECT_URI=https://redactwall.customer.example/auth/oidc/callback
 ```
 
-`PROMPTWALL_OIDC_*` aliases are accepted for each value. PromptWall discovers
+`REDACTWALL_OIDC_*` aliases are accepted for each value. RedactWall discovers
 `authorization_endpoint`, `token_endpoint`, and `jwks_uri` from the issuer's
 `.well-known/openid-configuration` document by default. If discovery is not
 available, set all three explicit endpoint variables:
@@ -122,14 +122,14 @@ break-glass accounts still use password confirmation.
 ```bash
 curl -sS \
   -H "Authorization: Bearer $SCIM_BEARER_TOKEN" \
-  https://promptwall.customer.example/scim/v2/ServiceProviderConfig
+  https://redactwall.customer.example/scim/v2/ServiceProviderConfig
 
 curl -sS \
   -X POST \
   -H "Authorization: Bearer $SCIM_BEARER_TOKEN" \
   -H "Content-Type: application/scim+json" \
-  -d '{"schemas":["urn:ietf:params:scim:schemas:core:2.0:Group"],"displayName":"PromptWall Approvers"}' \
-  https://promptwall.customer.example/scim/v2/Groups
+  -d '{"schemas":["urn:ietf:params:scim:schemas:core:2.0:Group"],"displayName":"RedactWall Approvers"}' \
+  https://redactwall.customer.example/scim/v2/Groups
 ```
 
 After provisioning and first SSO login, verify the audit chain:
@@ -148,16 +148,16 @@ For Microsoft Entra or Okta provisioning, use `docs/IDENTITY_IDP_SETUP.md`, the
 dashboard Identity tab, or the secret-free CLI handoff:
 
 ```bash
-npm run identity:setup -- --provider entra --base-url https://promptwall.customer.example --tenant-id <tenant-id-or-domain>
-npm run identity:setup -- --provider okta --base-url https://promptwall.customer.example --tenant-id <customer.okta.com>
+npm run identity:setup -- --provider entra --base-url https://redactwall.customer.example --tenant-id <tenant-id-or-domain>
+npm run identity:setup -- --provider okta --base-url https://redactwall.customer.example --tenant-id <customer.okta.com>
 ```
 
 At a minimum, configure:
 
-- Tenant URL: `https://promptwall.customer.example/scim/v2`
+- Tenant URL: `https://redactwall.customer.example/scim/v2`
 - Secret token: the `SCIM_BEARER_TOKEN` value from the approved vault
 - Provision users and groups
-- Assign groups using the PromptWall display names above when role mapping is
+- Assign groups using the RedactWall display names above when role mapping is
   needed
 - Register a web OIDC app with the callback URL above
 - Use a tenant-specific issuer where possible instead of a broad common issuer

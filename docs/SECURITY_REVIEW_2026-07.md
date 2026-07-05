@@ -80,13 +80,13 @@ a dedicated, separately-reviewed change rather than an inline edit.
    a finalized `queries` row and append a covering audit entry (recomputing the
    contentHash themselves) to re-anchor, and `verifyAuditChain()` would still
    pass. Remediation: HMAC the chain with a server-held key (e.g. derived from
-   `SENTINEL_SECRET`) so a covering entry can't be forged. This changes the
+   `REDACTWALL_SECRET`) so a covering entry can't be forged. This changes the
    hash of every existing row, so it needs a versioned migration that re-seals
    the chain once on upgrade — done deliberately, not inline, because a botched
    change would break the product's core tamper-evidence guarantee. Mitigated
    today by the DB-level append-only triggers on the `audit` table.
 2. **Postgres row-level tenant isolation wiring (Medium).** Migration v3
-   installs RLS keyed on `current_setting('promptwall.org_id')`, but
+   installs RLS keyed on `current_setting('redactwall.org_id')`, but
    `setTenantContext` is not called per request, and the shared single worker
    connection means session-level `set_config` would bleed context across
    tenants. Remediation: call `setTenantContext` inside a per-request

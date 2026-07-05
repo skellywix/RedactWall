@@ -10,8 +10,8 @@
  *
  *   node scripts/license-issue.js --key <private.pem> --customer "Example CU" \
  *       --customer-id cu-000123 --plan standard --seats 120 --expires 2027-08-01 \
- *       [--grace-days 30] [--features gateway,mcp-guard] [--out promptwall.lic]
- *       Issue a signed promptwall.lic and self-verify it before exiting.
+ *       [--grace-days 30] [--features gateway,mcp-guard] [--out redactwall.lic]
+ *       Issue a signed redactwall.lic and self-verify it before exiting.
  */
 const fs = require('fs');
 const path = require('path');
@@ -69,7 +69,7 @@ function issue(opts, io, setExitCode) {
   const pubPem = crypto.createPublicKey(priv).export({ type: 'spki', format: 'pem' }).toString();
   const check = license.verifyLicenseText(licText, { publicKeyPem: pubPem });
   if (!check.ok) { io.error(`self-verify failed: ${check.reason}`); return setExitCode(1); }
-  const out = opts.out || 'promptwall.lic';
+  const out = opts.out || 'redactwall.lic';
   fs.writeFileSync(out, licText + '\n');
   io.log(`Wrote ${out} for ${payload.customer} (${payload.plan}, ${payload.seats} seats, expires ${payload.expires})`);
 }
@@ -81,7 +81,7 @@ function main(argv = process.argv.slice(2), deps = {}) {
   try {
     if (opts.initKeypair) return initKeypair(opts.initKeypair, io);
     if (!opts.key || !opts.expires || !opts.plan || !opts.seats) {
-      io.error('Usage: --init-keypair <dir>  OR  --key <pem> --customer <name> --customer-id <id> --plan <standard|enterprise> --seats <n> --expires <YYYY-MM-DD> [--grace-days 30] [--features a,b] [--out promptwall.lic]');
+      io.error('Usage: --init-keypair <dir>  OR  --key <pem> --customer <name> --customer-id <id> --plan <standard|enterprise> --seats <n> --expires <YYYY-MM-DD> [--grace-days 30] [--features a,b] [--out redactwall.lic]');
       return setExitCode(1);
     }
     return issue(opts, io, setExitCode);

@@ -1,8 +1,8 @@
-# PromptWall Platform Roadmap: From AI DLP Control Plane to Regulated AI Security Platform
+# RedactWall Platform Roadmap: From AI DLP Control Plane to Regulated AI Security Platform
 
 ## Summary
 
-PromptWall is already a strong local-first AI DLP control plane. The goal now is
+RedactWall is already a strong local-first AI DLP control plane. The goal now is
 to advance it into a credible **regulated-market AI security platform** — the
 bundle competitors advertise: gateway enforcement, AI app discovery, prompt and
 response governance, SaaS/agent coverage, posture management, identity
@@ -40,7 +40,7 @@ buyers now expect.
 
 What already exists in the repo, so this plan builds on reality, not aspiration.
 This table was fact-checked against a full read of the codebase on branch
-`claude/promptwall-competitive-analysis-h9hjt8` (2 commits ahead of `main`; no
+`claude/redactwall-competitive-analysis-h9hjt8` (2 commits ahead of `main`; no
 open PRs or other in-flight remote branches at the time of writing — any local
 fixes not yet pushed are not reflected here and should be reconciled when they
 land). No `TODO`/`FIXME`/`stub` markers indicate partially-built features.
@@ -120,7 +120,7 @@ provable, and so no slice weakens the audit/privacy guarantees the product sells
   (`npm run rotate:data-key` with previous-key fallback); scheduled backups +
   one-command DR drill (`npm run backup:drill`); restart-chaos and
   concurrency recovery tests. The ONNX on-device model was replaced by
-  decision with a **cloud classifier seam** (`SENTINEL_SEMANTIC_REMOTE_URL`,
+  decision with a **cloud classifier seam** (`REDACTWALL_SEMANTIC_REMOTE_URL`,
   fail-closed to the on-device engine) so detection can move to a
   Nightfall/Strac-style cloud model by configuration. Remaining for real
   infrastructure: multi-AZ Postgres failover drills and load-balancer
@@ -137,7 +137,7 @@ provable, and so no slice weakens the audit/privacy guarantees the product sells
 | Ed25519 signed policy bundles (edge verification, fail-closed on tamper/stale) | `server/policy-bundle.js`, `/api/v1/policy/bundle` | `test/policy-bundle.test.js` |
 | Google Drive MCP connector (sanitize-before-model) | `sensors/mcp-guard/connectors/googledrive.js` | `test/mcp-googledrive-connector.test.js` |
 
-Detailed priorities follow; each notes competitor parity, the PromptWall build,
+Detailed priorities follow; each notes competitor parity, the RedactWall build,
 the "better than" angle, and acceptance.
 
 ---
@@ -162,7 +162,7 @@ deployable reverse-proxy service, `gateway/` (own process, shares
   `/api/v1/gate` → on `block`/`pending` return a structured refusal (or hold +
   `/api/v1/status/:id` poll) **before any upstream call**; on `redact` forward
   the tokenized prompt and keep the vault id; on `allow` forward with a signed
-  receipt header (`x-promptwall-receipt`).
+  receipt header (`x-redactwall-receipt`).
 - **Response path (fail-closed).** Buffer or stream-scan the upstream response
   through `/api/v1/scan-response`; block/redact model output before it reaches
   the caller; auto-`/api/v1/rehydrate` tokenized responses using the sealed
@@ -187,14 +187,14 @@ deployable reverse-proxy service, `gateway/` (own process, shares
   cover unmanaged browsers/profiles/direct-API paths. Both call the same
   `/api/v1/gate` so policy and evidence stay unified.
 
-**Better than competitors:** the gateway inherits PromptWall's on-device
+**Better than competitors:** the gateway inherits RedactWall's on-device
 detection and **hash-chained receipts** — every gated request produces a signed,
 prompt-free proof-of-scan the caller (or examiner) can verify later, which the
 network-proxy incumbents don't offer. And it's deployable as a single container
 next to an app, not a SASE rollout.
 
 **Acceptance.**
-- Private app traffic cannot reach upstream until PromptWall gates it (integration
+- Private app traffic cannot reach upstream until RedactWall gates it (integration
   test: gateway with control plane stopped → request blocked, not forwarded).
 - Model output cannot reach the caller until response scanning passes (test:
   upstream returns seeded SSN → gateway blocks/redacts before returning).
@@ -269,7 +269,7 @@ export (Sentinel/Splunk/Chronicle/QRadar/Datadog) and SOAR/ticket integration.
   already sanitizes and delivers to multiple channels (webhook/Slack/Teams/
   ticket/Jira/Linear/SMTP) and already computes an idempotency `dedupeKey` and a
   `deliveryStatus` (sent/partial/failed); `server/alerts.js` already does the
-  sanitized SIEM webhook shape (`promptwall.security_event`, `schemaVersion 1`);
+  sanitized SIEM webhook shape (`redactwall.security_event`, `schemaVersion 1`);
   `url-policy.js` already enforces HTTPS-only. What's missing and what we add:
   (a) a **named-destination registry** unifying SIEM targets (Sentinel, Splunk
   HEC, Chronicle, QRadar, Datadog) and the existing notifier channels, each with
@@ -457,7 +457,7 @@ audit-chain verification under load.
 
 - **First platform slice = Gateway + Discovery/Catalog + Posture subscriptions
   (M1),** because those are the clearest competitor-backed platform gaps and
-  together they let us say "PromptWall is a platform," not a point product.
+  together they let us say "RedactWall is a platform," not a point product.
 - Desktop file-flow, connectors, and OCR (M2) deepen coverage once the platform
   spine exists.
 - Trust/scale hardening (M3) and the heavy scale-out items — ONNX/WASM semantic

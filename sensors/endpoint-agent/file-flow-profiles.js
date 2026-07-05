@@ -30,7 +30,7 @@ function normalizeProfileId(value, index = 0) {
 function configuredProfilesValue(env = process.env) {
   const resolved = withEnvAliases(env);
   return resolved.ENDPOINT_AGENT_FILE_FLOW_PROFILES
-    || resolved.PROMPTWALL_ENDPOINT_AGENT_FILE_FLOW_PROFILES
+    || resolved.REDACTWALL_ENDPOINT_AGENT_FILE_FLOW_PROFILES
     || '';
 }
 

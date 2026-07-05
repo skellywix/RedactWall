@@ -4,9 +4,9 @@
  * query records) under a new data key.
  *
  * Operator flow:
- *   1. Set SENTINEL_DATA_KEY=<new key> and SENTINEL_DATA_KEY_PREVIOUS=<old key>.
+ *   1. Set REDACTWALL_DATA_KEY=<new key> and REDACTWALL_DATA_KEY_PREVIOUS=<old key>.
  *   2. Run `node scripts/rotate-data-key.js` (add --dry-run to preview).
- *   3. When the run reports `unreadable: 0`, unset SENTINEL_DATA_KEY_PREVIOUS.
+ *   3. When the run reports `unreadable: 0`, unset REDACTWALL_DATA_KEY_PREVIOUS.
  *
  * Output is counts only — this tool NEVER prints prompt plaintext, sealed
  * tokens, or key material. Exits 1 if any sealed value is unreadable with both
@@ -68,8 +68,8 @@ async function main(argv = process.argv.slice(2), deps = {}) {
   const cryptoModule = deps.dataCrypto || dataCrypto;
   const args = parseArgs(argv);
   const status = cryptoModule.rotationStatus();
-  if (!status.enabled) throw new Error('data encryption is not enabled; set SENTINEL_DATA_KEY to the new key first');
-  if (!status.previousKeyConfigured) throw new Error('set SENTINEL_DATA_KEY_PREVIOUS to the old key before rotating');
+  if (!status.enabled) throw new Error('data encryption is not enabled; set REDACTWALL_DATA_KEY to the new key first');
+  if (!status.previousKeyConfigured) throw new Error('set REDACTWALL_DATA_KEY_PREVIOUS to the old key before rotating');
   const db = deps.db || require('../server/db');
   const dryRun = !!args.dryRun;
   const counts = rotate({ db, dryRun });

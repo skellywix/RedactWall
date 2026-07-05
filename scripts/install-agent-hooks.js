@@ -1,14 +1,14 @@
 'use strict';
 /**
- * Install (or remove) the PromptWall agent hooks into Claude Code settings.
+ * Install (or remove) the RedactWall agent hooks into Claude Code settings.
  *
  *   node scripts/install-agent-hooks.js            # merge into ~/.claude/settings.json
  *   node scripts/install-agent-hooks.js --project  # merge into ./.claude/settings.json
  *   node scripts/install-agent-hooks.js --print     # print the JSON snippet, write nothing
- *   node scripts/install-agent-hooks.js --uninstall # remove only PromptWall-owned entries
+ *   node scripts/install-agent-hooks.js --uninstall # remove only RedactWall-owned entries
  *
  * Idempotent. NEVER writes the ingest key into settings.json — the hook reads
- * INGEST_API_KEY / SENTINEL_URL from the environment (or ~/.promptwall/agent-hooks.env).
+ * INGEST_API_KEY / REDACTWALL_URL from the environment (or ~/.redactwall/agent-hooks.env).
  */
 const fs = require('fs');
 const os = require('os');
@@ -99,7 +99,7 @@ function main(argv = process.argv.slice(2), deps = {}) {
   const existing = readSettings(file, deps);
   const next = opts.uninstall ? removeHooks(existing) : mergeHooks(existing, deps.hookPath);
   writeSettings(file, next, deps);
-  io.log(`${opts.uninstall ? 'Removed' : 'Installed'} PromptWall agent hooks in ${file}`);
+  io.log(`${opts.uninstall ? 'Removed' : 'Installed'} RedactWall agent hooks in ${file}`);
   return { file, settings: next };
 }
 

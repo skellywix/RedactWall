@@ -13,10 +13,10 @@ const fs = require('node:fs');
 const crypto = require('node:crypto');
 
 process.env.ADMIN_PASSWORD = 'unit-pass-alwaysblock';
-process.env.SENTINEL_SECRET = 'unit-secret-alwaysblock';
-process.env.SENTINEL_DATA_KEY = 'unit-data-key-alwaysblock';
+process.env.REDACTWALL_SECRET = 'unit-secret-alwaysblock';
+process.env.REDACTWALL_DATA_KEY = 'unit-data-key-alwaysblock';
 process.env.INGEST_API_KEY = 'unit-ingest-alwaysblock';
-process.env.SENTINEL_DB_PATH = path.join(os.tmpdir(), 'ps-alwaysblock-' + crypto.randomBytes(6).toString('hex') + '.db');
+process.env.REDACTWALL_DB_PATH = path.join(os.tmpdir(), 'ps-alwaysblock-' + crypto.randomBytes(6).toString('hex') + '.db');
 
 const app = require('../server/app');
 const policy = require('../server/policy');

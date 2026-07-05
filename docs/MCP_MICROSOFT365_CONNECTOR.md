@@ -1,10 +1,10 @@
 # Microsoft 365 MCP Connector
 
-PromptWall ships a first-party Microsoft 365 Graph connector for MCP runtimes.
+RedactWall ships a first-party Microsoft 365 Graph connector for MCP runtimes.
 It fetches text-readable OneDrive or SharePoint driveItem content, SharePoint
 site page text, and SharePoint list item fields through Microsoft Graph, then
 calls the matching `sanitize*()` helper before returning a tool result to the
-model. Every operation shares the same guarantee: PromptWall scans and redacts
+model. Every operation shares the same guarantee: RedactWall scans and redacts
 the Graph response before any model receives it.
 
 This connector is intentionally narrow. It protects text-readable content
@@ -61,7 +61,7 @@ const shared = {
   accessToken: process.env.M365_GRAPH_ACCESS_TOKEN,
   agent: 'claude-desktop',
   guardOptions: {
-    server: process.env.SENTINEL_URL,
+    server: process.env.REDACTWALL_URL,
     key: process.env.INGEST_API_KEY,
   },
 };
@@ -92,7 +92,7 @@ const health = microsoft365ConnectorHealth({
 }, true, 'OAuth probe ok');
 ```
 
-Every result is safe to return to the MCP client. If PromptWall detects
+Every result is safe to return to the MCP client. If RedactWall detects
 sensitive content, the result contains a single redacted text block. The
 control plane receives sanitized evidence only: redacted text, masked findings,
 categories, risk metadata, destination label, and sensor version.

@@ -17,10 +17,10 @@ const ERROR_SCHEMA = 'urn:ietf:params:scim:api:messages:2.0:Error';
 const PATCH_SCHEMA = 'urn:ietf:params:scim:api:messages:2.0:PatchOp';
 
 const ROLE_GROUPS = [
-  [roles.SECURITY_ADMIN, /^(promptwall[-_\s]*)?(security[-_\s]*)?admins?$/i],
-  [roles.APPROVER, /^(promptwall[-_\s]*)?(approvers?|reviewers?)$/i],
-  [roles.AUDITOR, /^(promptwall[-_\s]*)?(auditors?|read[-_\s]*only)$/i],
-  [roles.OPERATOR, /^(promptwall[-_\s]*)?(operators?|ops)$/i],
+  [roles.SECURITY_ADMIN, /^(redactwall[-_\s]*)?(security[-_\s]*)?admins?$/i],
+  [roles.APPROVER, /^(redactwall[-_\s]*)?(approvers?|reviewers?)$/i],
+  [roles.AUDITOR, /^(redactwall[-_\s]*)?(auditors?|read[-_\s]*only)$/i],
+  [roles.OPERATOR, /^(redactwall[-_\s]*)?(operators?|ops)$/i],
 ];
 
 function configuredToken() {
@@ -48,7 +48,7 @@ function requireScimBearer(req, res, next) {
   const header = String(req.get('authorization') || '');
   const match = header.match(/^Bearer\s+(.+)$/i);
   if (!match || !safeEqual(match[1].trim(), token)) {
-    res.set('WWW-Authenticate', 'Bearer realm="PromptWall SCIM"');
+    res.set('WWW-Authenticate', 'Bearer realm="RedactWall SCIM"');
     return res.status(401).json(scimError(401, 'SCIM bearer token required'));
   }
   next();

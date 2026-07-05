@@ -40,10 +40,10 @@ async function download(state,deps){
   try{
     const response=await deps.api(`${endpoint}?format=zip`);
     if(!response||!response.ok){window.alert(await deps.apiErrorSummary(response,'Security trust package download failed'));return;}
-    const url=URL.createObjectURL(await response.blob()),link=Object.assign(document.createElement('a'),{href:url,download:'promptwall-security-trust-package.zip'});
+    const url=URL.createObjectURL(await response.blob()),link=Object.assign(document.createElement('a'),{href:url,download:'redactwall-security-trust-package.zip'});
     document.body.appendChild(link);link.click();link.remove();URL.revokeObjectURL(url);deps.markUpdated('TRUST PACKAGE READY');
   }catch{window.alert('Security trust package download failed.');}
   finally{if(button){button.removeAttribute('aria-busy');button.innerHTML=`${deps.icons.download}Download Trust Package`;}deps.renderSecurityPackage();}
 }
-window.PromptWallSecurityPackage={render,load,download};
+window.RedactWallSecurityPackage={render,load,download};
 }());

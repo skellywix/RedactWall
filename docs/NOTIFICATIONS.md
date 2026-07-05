@@ -1,6 +1,6 @@
 # Email & Digest Notifications
 
-PromptWall delivers human notifications — held-prompt alerts, posture
+RedactWall delivers human notifications — held-prompt alerts, posture
 events, and the daily digest — through the same prompt-free subscription
 pipeline that feeds SIEM destinations. This guide is the operator setup and
 troubleshooting reference for the email channel. Console home: the
@@ -13,7 +13,7 @@ troubleshooting reference for the email channel. Console home: the
 | `SMTP_HOST` | yes | Relay hostname. Email is disabled until this is set. |
 | `SMTP_PORT` | no | Default `587`. |
 | `SMTP_SECURE` | no | `starttls` (default), `tls` (implicit, use with port 465), or `none` (test relays only). |
-| `SMTP_FROM` | no | From address; defaults to `promptwall@<SMTP_HOST>`. |
+| `SMTP_FROM` | no | From address; defaults to `redactwall@<SMTP_HOST>`. |
 | `SMTP_USER` / `SMTP_PASS` | no | Enables AUTH LOGIN when set. |
 
 The sender is dependency-free (`server/email.js`). It never logs message

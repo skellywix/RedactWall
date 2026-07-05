@@ -215,9 +215,9 @@ test('public errors and human output are bounded', () => {
   guard.printHuman({ status: 'blocked', destination: 'git:unknown.example', labels: ['US_SSN'], recorded: false }, io);
   guard.printHuman({ status: 'failed', error: 'git repository is not available' }, io);
   assert.deepStrictEqual(io.lines.map(([, message]) => message), [
-    'PromptWall git push guard clean: git:github.com',
-    'PromptWall git push guard blocked: git:unknown.example: US_SSN: not recorded',
-    'PromptWall git push guard failed: git repository is not available',
+    'RedactWall git push guard clean: git:github.com',
+    'RedactWall git push guard blocked: git:unknown.example: US_SSN: not recorded',
+    'RedactWall git push guard failed: git repository is not available',
   ]);
   assert.ok(!JSON.stringify(io.lines).includes(RAW_SSN));
 });
@@ -244,7 +244,7 @@ test('main prints help, JSON, human output, quiet output, and sanitized errors',
     console: humanIo,
     collectGitPush: async () => ({ status: 'clean', destination: 'git:github.com' }),
   }), 0);
-  assert.strictEqual(humanIo.lines[0][1], 'PromptWall git push guard clean: git:github.com');
+  assert.strictEqual(humanIo.lines[0][1], 'RedactWall git push guard clean: git:github.com');
 
   const quietIo = captureConsole();
   assert.strictEqual(await guard.main(['--quiet'], {

@@ -1,15 +1,15 @@
 {
-  "name": "promptwall",
+  "name": "redactwall",
   "version": "0.3.0",
   "description": "Inline DLP gateway for AI chat prompts - detects PII, blocks risky prompts, reversibly redacts, and releases only after Security Admin approval. Built for compliance (NCUA/GLBA/PCI/HIPAA) at credit unions and similar.",
   "main": "server/app.js",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/skellywix/promptwall.git"
+    "url": "git+https://github.com/skellywix/redactwall.git"
   },
-  "homepage": "https://github.com/skellywix/promptwall#readme",
+  "homepage": "https://github.com/skellywix/redactwall#readme",
   "bugs": {
-    "url": "https://github.com/skellywix/promptwall/issues"
+    "url": "https://github.com/skellywix/redactwall/issues"
   },
   "engines": {
     "node": ">=22"

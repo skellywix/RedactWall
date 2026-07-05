@@ -9,8 +9,8 @@ sequencing source of truth for stack work; per-pass state lives in
 Two review assumptions were corrected during planning:
 
 - **Postgres support already exists and is CI-tested.** `server/storage/`
-  selects a driver via `SENTINEL_DB_DRIVER` (`sqlite` default, `postgres` +
-  `SENTINEL_DATABASE_URL`), `server/storage/pg-driver.js` mirrors the
+  selects a driver via `REDACTWALL_DB_DRIVER` (`sqlite` default, `postgres` +
+  `REDACTWALL_DATABASE_URL`), `server/storage/pg-driver.js` mirrors the
   better-sqlite3 synchronous surface over a worker-thread bridge, migrations in
   `server/storage/migrations.js` ship dual sqlite/postgres SQL including tenant
   `orgId` + row-level security (migration 3), and CI runs the suite against a
@@ -133,7 +133,7 @@ product needs.
   **approval queue** (list, detail, approve/deny/bulk — best existing e2e
   coverage); policy editor (folds in `policy-impact-preview.js` and
   `policy-guides.js`); audit view + evidence export. After A2 add a "Try the
-  new console" link in the legacy header and `SENTINEL_CONSOLE_DEFAULT=app|legacy`.
+  new console" link in the legacy header and `REDACTWALL_CONSOLE_DEFAULT=app|legacy`.
 - **A3 — Long tail (L, parallelizable).** Port the remaining feature modules
   one PR each (`siem-package.js`, `security-package.js`, `agentic-mcp.js`,
   `operator-flow.js`, `behavior-baselines.js`, `control-graph.js`,
@@ -195,7 +195,7 @@ despite the existing worker idiom in `server/storage/pg-worker.js`:
   `FILE_EXTRACT_TIMEOUT_MS` + grace → `child.kill('SIGKILL')` → respawn →
   return `{extractionOk: false, error: 'timeout'}`. Child crash mid-task →
   `extract_failed`. No new error codes leak into API responses. Recycle
-  children after N tasks. `SENTINEL_PARSE_ISOLATION=off` falls back to direct
+  children after N tasks. `REDACTWALL_PARSE_ISOLATION=off` falls back to direct
   in-process extraction (dev/debug, low-resource demo boxes).
 - New `server/parse-child.js` (child): receive task → call
   `processors.extractText` → post result. Truncation
@@ -260,7 +260,7 @@ Priority order:
 
 1. **RLS verification tests — do now (S, security-critical, cheap).** New
    `test/storage-postgres-rls.test.js` under the existing
-   `SENTINEL_TEST_PG_URL` CI service: for every tenant-scoped table, tenant-A
+   `REDACTWALL_TEST_PG_URL` CI service: for every tenant-scoped table, tenant-A
    context cannot read/update/delete tenant-B rows; missing or blank tenant
    context **fails closed**; the runtime role is not the table owner and lacks
    `BYPASSRLS` (owner silently bypasses RLS — the classic hole).
@@ -278,7 +278,7 @@ Priority order:
    (dovetails with evidence-pack tooling), deletion with audit-chain
    preservation rules.
 5. **Deployment docs (S).** New `docs/MANAGED_POSTGRES.md`:
-   `SENTINEL_DB_DRIVER=postgres` + `SENTINEL_DATABASE_URL` with
+   `REDACTWALL_DB_DRIVER=postgres` + `REDACTWALL_DATABASE_URL` with
    `sslmode=require`, non-owner app role setup, migration runbook, monitoring,
    sizing. Cross-link from `docs/AWS_SAAS_DEPLOYMENT.md` and
    `docs/DEPLOYMENT.md`.
@@ -299,7 +299,7 @@ caution holds. Revisit only when ALL of:
    APIs).
 3. Benchmark within ~20% of better-sqlite3 on the real access pattern
    (audit-chain append + queue reads).
-4. Adopted as a third driver behind `SENTINEL_DB_DRIVER` — the
+4. Adopted as a third driver behind `REDACTWALL_DB_DRIVER` — the
    `server/storage/` abstraction makes this a bounded, trialable swap.
 
 Payoff at adoption: drop python3/make/g++ from the Docker builder and delete

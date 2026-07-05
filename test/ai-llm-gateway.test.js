@@ -1,5 +1,5 @@
 'use strict';
-/** AI LLM gateway enforces PromptWall decisions before and after upstream calls. */
+/** AI LLM gateway enforces RedactWall decisions before and after upstream calls. */
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
@@ -103,7 +103,7 @@ test('utility functions constrain target paths and rewrite known prompt and resp
   assert.strictEqual(pathAllowed('/v1/files'), false);
   assert.throws(() => targetUrl({ url: 'https://evil.test/v1/chat/completions' }, 'https://api.openai.test'), /absolute proxy targets/);
 
-  const parsed = parseArgs(['--port', '4999', '--host', '0.0.0.0', '--token', 'client-token', '--upstream', 'http://upstream.test', '--upstream-auth-header', 'x-goog-api-key', '--upstream-auth-scheme', 'none', '--aws-region', 'us-east-1', '--aws-service', 'bedrock', '--upstream-header', 'anthropic-version=2023-06-01', '--approval-wait-ms', '250', '--rate-store', 'sqlite', '--rate-db-path', 'C:\\PromptWall\\rate.db', '--allowed-models', 'gpt-4o-mini,company-*']);
+  const parsed = parseArgs(['--port', '4999', '--host', '0.0.0.0', '--token', 'client-token', '--upstream', 'http://upstream.test', '--upstream-auth-header', 'x-goog-api-key', '--upstream-auth-scheme', 'none', '--aws-region', 'us-east-1', '--aws-service', 'bedrock', '--upstream-header', 'anthropic-version=2023-06-01', '--approval-wait-ms', '250', '--rate-store', 'sqlite', '--rate-db-path', 'C:\\RedactWall\\rate.db', '--allowed-models', 'gpt-4o-mini,company-*']);
   assert.strictEqual(parsed.port, 4999);
   assert.strictEqual(parsed.host, '0.0.0.0');
   assert.strictEqual(parsed.clientToken, 'client-token');
@@ -115,7 +115,7 @@ test('utility functions constrain target paths and rewrite known prompt and resp
   assert.deepStrictEqual(parsed.upstreamHeader, ['anthropic-version=2023-06-01']);
   assert.strictEqual(parsed.approvalWaitMs, 250);
   assert.strictEqual(parsed.rateLimitStore, 'sqlite');
-  assert.strictEqual(parsed.rateLimitDbPath, 'C:\\PromptWall\\rate.db');
+  assert.strictEqual(parsed.rateLimitDbPath, 'C:\\RedactWall\\rate.db');
   assert.strictEqual(parsed.allowedModels, 'gpt-4o-mini,company-*');
   const parsedHttpLimiter = parseArgs(['--rate-store', 'http', '--rate-url', 'https://limiter.example.test/check', '--rate-token', 'limiter-token', '--rate-timeout-ms', '1500']);
   assert.strictEqual(parsedHttpLimiter.rateLimitStore, 'http');
@@ -216,7 +216,7 @@ test('utility functions constrain target paths and rewrite known prompt and resp
   assert.match(extractResponseText(response), /524-71-9043/);
   const redacted = rewriteResponseJson(response, 'Member SSN ***-**-9043');
   assert.ok(!JSON.stringify(redacted).includes('524-71-9043'));
-  assert.strictEqual(redacted.promptwall.responseRedacted, true);
+  assert.strictEqual(redacted.redactwall.responseRedacted, true);
   const contentArrayResponse = {
     choices: [{ message: { role: 'assistant', content: [{ type: 'text', text: 'Array SSN 524-71-9043' }] } }],
   };
@@ -264,7 +264,7 @@ test('gateway requires client auth, rate-limits callers, and leaves upstream unt
     const missing = await gatewayRequest(port, { token: '' });
     assert.strictEqual(missing.status, 401);
     assert.match(missing.body, /missing gateway client token/);
-    assert.match(missing.headers['x-promptwall-request-id'], /^[A-Za-z0-9_-]/);
+    assert.match(missing.headers['x-redactwall-request-id'], /^[A-Za-z0-9_-]/);
     assert.strictEqual(calls.length, 0);
 
     const first = await gatewayRequest(port);
@@ -281,7 +281,7 @@ test('gateway requires client auth, rate-limits callers, and leaves upstream unt
 });
 
 test('sqlite gateway rate limit store is shared across gateway instances', async (t) => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'promptwall-gateway-rate-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-gateway-rate-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const dbPath = path.join(dir, 'rate-limit.db');
   const calls = [];
@@ -411,13 +411,13 @@ test('gateway publishes readiness and blocks disallowed models without leaking p
     assert.ok(!health.body.includes('client-token'));
 
     const blocked = await gatewayRequest(port, {
-      headers: { 'x-promptwall-user': 'analyst@example.test' },
+      headers: { 'x-redactwall-user': 'analyst@example.test' },
       body: { model: 'unknown-model', messages: [{ role: 'user', content: `Member SSN ${secret}` }] },
     });
     assert.strictEqual(blocked.status, 403);
     assert.match(blocked.body, /model blocked/);
     assert.ok(!blocked.body.includes(secret));
-    assert.match(blocked.headers['x-promptwall-request-id'], /^[A-Za-z0-9_-]/);
+    assert.match(blocked.headers['x-redactwall-request-id'], /^[A-Za-z0-9_-]/);
 
     const gate = calls.find((call) => call.url.includes('/api/v1/gate'));
     assert.ok(gate);
@@ -436,7 +436,7 @@ test('allowed prompts are gated, forwarded with gateway upstream auth, and respo
     clientToken: 'client-token',
     upstream: 'http://upstream.test',
     upstreamApiKey: 'upstream-key',
-    sentinel: 'http://control-plane.test',
+    redactwall: 'http://control-plane.test',
     key: 'ingest-key',
     fetchImpl: async (url, opts = {}) => {
       calls.push({ url: String(url), opts });
@@ -448,12 +448,12 @@ test('allowed prompts are gated, forwarded with gateway upstream auth, and respo
   const port = await listen(server);
   try {
     const res = await gatewayRequest(port, {
-      headers: { 'x-promptwall-user': 'analyst@example.test' },
+      headers: { 'x-redactwall-user': 'analyst@example.test' },
       body: { messages: [{ role: 'user', content: 'Summarize public FAQ copy.' }] },
     });
     assert.strictEqual(res.status, 200);
     assert.match(res.body, /safe answer/);
-    assert.match(res.headers['x-promptwall-request-id'], /^[A-Za-z0-9_-]/);
+    assert.match(res.headers['x-redactwall-request-id'], /^[A-Za-z0-9_-]/);
 
     const gate = calls.find((call) => call.url === 'http://control-plane.test/api/v1/gate');
     assert.strictEqual(gate.opts.headers['x-api-key'], 'ingest-key');
@@ -519,7 +519,7 @@ test('gateway supports provider-native Gemini routes and buffered streaming resp
       body: { model: 'claude-sonnet-4-5', stream: true, messages: [{ role: 'user', content: [{ type: 'text', text: 'Claude native prompt' }] }] },
     });
     assert.strictEqual(streamed.status, 200);
-    assert.strictEqual(streamed.headers['x-promptwall-stream-buffered'], 'true');
+    assert.strictEqual(streamed.headers['x-redactwall-stream-buffered'], 'true');
     assert.match(streamed.headers['content-type'], /text\/event-stream/);
     assert.match(streamed.body, /Claude streamed safe answer/);
     const streamScan = calls.find((call) => call.url.includes('/api/v1/scan-response'));
@@ -742,7 +742,7 @@ test('pending prompts wait for release when configured and block when denied or 
       body: { messages: [{ role: 'user', content: 'Synthetic member SSN 524-71-9043.' }] },
     });
     assert.strictEqual(res.status, 403);
-    assert.match(res.body, /prompt blocked by PromptWall/);
+    assert.match(res.body, /prompt blocked by RedactWall/);
   } finally {
     await close(blockedServer);
   }

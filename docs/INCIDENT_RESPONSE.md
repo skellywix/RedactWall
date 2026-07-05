@@ -1,6 +1,6 @@
 # Incident Response Runbook
 
-This runbook is for the operator of a PromptWall deployment responding to a
+This runbook is for the operator of a RedactWall deployment responding to a
 suspected or confirmed security incident: sensitive data reaching an AI
 destination, a compromised sensor or gateway token, tampering with evidence, or
 compromise of the control plane itself.
@@ -9,7 +9,7 @@ Rules that apply to every step:
 
 - Never paste prompt text, member data, or secrets into tickets, chat, or SIEM
   notes. Reference events by query id, receipt id, prompt hash, or audit entry
-  id. Every PromptWall export is already prompt-free; keep your notes the same.
+  id. Every RedactWall export is already prompt-free; keep your notes the same.
 - Record who did what and when. Admin actions land in the tamper-evident audit
   chain automatically; record out-of-band actions (network blocks, HR steps)
   in your ticket system.
@@ -51,19 +51,19 @@ Apply the steps that match the compromise. All policy changes are audited.
    gateway token store (`gateway-agent-tokens.json` under the data dir). Only
    salted hashes are stored; removal takes effect on the next request. Re-mint
    with `gateway/mint-token.js` for legitimate callers.
-3. **Rotate `SENTINEL_SECRET`.** This invalidates all admin sessions, HMAC
-   receipts keys, and derived keys. If `SENTINEL_DATA_KEY` is not set
-   separately, the data key is derived from `SENTINEL_SECRET`, so also perform
-   the data-key rotation in the next step (with the old `SENTINEL_SECRET`
-   value as the previous key) and set a dedicated `SENTINEL_DATA_KEY` going
+3. **Rotate `REDACTWALL_SECRET`.** This invalidates all admin sessions, HMAC
+   receipts keys, and derived keys. If `REDACTWALL_DATA_KEY` is not set
+   separately, the data key is derived from `REDACTWALL_SECRET`, so also perform
+   the data-key rotation in the next step (with the old `REDACTWALL_SECRET`
+   value as the previous key) and set a dedicated `REDACTWALL_DATA_KEY` going
    forward.
 4. **Rotate the data key without losing sealed evidence.** Set
-   `SENTINEL_DATA_KEY` to the new key and `SENTINEL_DATA_KEY_PREVIOUS` to the
+   `REDACTWALL_DATA_KEY` to the new key and `REDACTWALL_DATA_KEY_PREVIOUS` to the
    key being retired, then run `node scripts/rotate-data-key.js` (use
    `--dry-run` first to preview). The tool re-encrypts retained raw prompts
    and token vaults under the new key and prints counts only — never prompt
    text or key material. When a run reports `unreadable: 0`, unset
-   `SENTINEL_DATA_KEY_PREVIOUS` and restart the server. A non-zero exit means
+   `REDACTWALL_DATA_KEY_PREVIOUS` and restart the server. A non-zero exit means
    some sealed values opened with neither key; keep the old key available and
    investigate before retiring it.
 5. **Rotate ingest and API keys.** Replace `INGEST_API_KEY` on the server and
@@ -84,7 +84,7 @@ Do this before any cleanup, and before the retention window purges data:
 3. Verify and record audit-chain state:
    `node -e "console.log(JSON.stringify(require('./server/db').verifyAuditChain()))"`.
 4. Back up the database file from the data directory to controlled storage.
-5. Mind retention: PromptWall has no automated legal-hold flag today. Purges
+5. Mind retention: RedactWall has no automated legal-hold flag today. Purges
    run against `rawRetentionDays`. To preserve sealed approval prompts relevant
    to the incident, raise `rawRetentionDays` for the affected period and export
    evidence packs before the original purge window elapses.
@@ -104,7 +104,7 @@ advice.
   for security events involving customer information; the FTC rule sets a
   30-day window for qualifying events. Your incident ticket should record the
   determination either way.
-- **Examiner notes**: describe the event using PromptWall's sanitized
+- **Examiner notes**: describe the event using RedactWall's sanitized
   vocabulary — detector ids, categories, counts, destinations, and decisions —
   never the underlying values.
 

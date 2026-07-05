@@ -86,7 +86,7 @@ function resetOcrDiscovery() {
 function ocrSettings(opts = {}) {
   const env = opts.env || process.env;
   const injected = typeof opts.extractImageText === 'function';
-  let command = String(opts.command || env.ENDPOINT_AGENT_OCR_COMMAND || env.PROMPTWALL_ENDPOINT_AGENT_OCR_COMMAND || '').trim();
+  let command = String(opts.command || env.ENDPOINT_AGENT_OCR_COMMAND || env.REDACTWALL_ENDPOINT_AGENT_OCR_COMMAND || '').trim();
   let autoDiscovered = false;
   if (!command && !injected && opts.discover !== false) {
     command = discoverOcrCommand(opts);
@@ -95,20 +95,20 @@ function ocrSettings(opts = {}) {
   if (!command && !injected) return { configured: false };
   const args = Array.isArray(opts.args)
     ? opts.args.map((item) => String(item))
-    : parseArgsJson(opts.argsJson || env.ENDPOINT_AGENT_OCR_ARGS_JSON || env.PROMPTWALL_ENDPOINT_AGENT_OCR_ARGS_JSON);
+    : parseArgsJson(opts.argsJson || env.ENDPOINT_AGENT_OCR_ARGS_JSON || env.REDACTWALL_ENDPOINT_AGENT_OCR_ARGS_JSON);
   return {
     configured: true,
     command: command || '[injected]',
     autoDiscovered,
     args,
     timeoutMs: boundedPositiveInt(
-      opts.timeoutMs || env.ENDPOINT_AGENT_OCR_TIMEOUT_MS || env.PROMPTWALL_ENDPOINT_AGENT_OCR_TIMEOUT_MS,
+      opts.timeoutMs || env.ENDPOINT_AGENT_OCR_TIMEOUT_MS || env.REDACTWALL_ENDPOINT_AGENT_OCR_TIMEOUT_MS,
       DEFAULT_TIMEOUT_MS,
       1000,
       120000,
     ),
     maxChars: boundedPositiveInt(
-      opts.maxChars || env.ENDPOINT_AGENT_OCR_MAX_CHARS || env.PROMPTWALL_ENDPOINT_AGENT_OCR_MAX_CHARS,
+      opts.maxChars || env.ENDPOINT_AGENT_OCR_MAX_CHARS || env.REDACTWALL_ENDPOINT_AGENT_OCR_MAX_CHARS,
       DEFAULT_MAX_CHARS,
       1000,
       5000000,
@@ -161,14 +161,14 @@ const STRICT_MIN_CHARS = 8;
 
 function ocrStrictMode(opts = {}) {
   const env = opts.env || process.env;
-  const raw = env.ENDPOINT_AGENT_OCR_STRICT || env.PROMPTWALL_ENDPOINT_AGENT_OCR_STRICT || '';
+  const raw = env.ENDPOINT_AGENT_OCR_STRICT || env.REDACTWALL_ENDPOINT_AGENT_OCR_STRICT || '';
   return /^(1|on|true|yes|strict)$/i.test(String(raw).trim());
 }
 
 function ocrMaxChars(opts = {}) {
   const env = opts.env || process.env;
   return boundedPositiveInt(
-    opts.maxChars || env.ENDPOINT_AGENT_OCR_MAX_CHARS || env.PROMPTWALL_ENDPOINT_AGENT_OCR_MAX_CHARS,
+    opts.maxChars || env.ENDPOINT_AGENT_OCR_MAX_CHARS || env.REDACTWALL_ENDPOINT_AGENT_OCR_MAX_CHARS,
     DEFAULT_MAX_CHARS, 1000, 5000000,
   );
 }

@@ -19,7 +19,7 @@ const MAX_APP_FLOW_PROFILES = APP_FLOW_TOOL_IDS.length;
 
 function envValue(env, key) {
   const resolved = withEnvAliases(env || process.env);
-  return resolved[key] || resolved[`PROMPTWALL_${key}`] || '';
+  return resolved[key] || resolved[`REDACTWALL_${key}`] || '';
 }
 
 function flagEnabled(value) {

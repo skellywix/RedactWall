@@ -20,8 +20,9 @@ function configured(value) {
 }
 
 function defaultMcpEnvPath(env = process.env, repoRoot = ROOT) {
-  if (configured(env.SENTINEL_ENV_PATH)) return env.SENTINEL_ENV_PATH;
+  if (configured(env.REDACTWALL_ENV_PATH)) return env.REDACTWALL_ENV_PATH;
   if (configured(env.PROMPTWALL_ENV_PATH)) return env.PROMPTWALL_ENV_PATH;
+  if (configured(env.SENTINEL_ENV_PATH)) return env.SENTINEL_ENV_PATH;
   // The default env file belongs to the install root being checked, not to
   // wherever this checker script happens to live.
   return path.join(repoRoot, '.env');
@@ -62,9 +63,9 @@ function check(id, ok, detail) {
 
 function mcpSettings(config = {}) {
   return {
-    serverUrl: config.SENTINEL_URL || config.PROMPTWALL_URL || '',
-    ingestKey: config.INGEST_API_KEY || config.PROMPTWALL_INGEST_API_KEY || '',
-    orgId: config.SENTINEL_TENANT_ID || config.PROMPTWALL_TENANT_ID || '',
+    serverUrl: config.REDACTWALL_URL || config.PROMPTWALL_URL || config.SENTINEL_URL || '',
+    ingestKey: config.INGEST_API_KEY || config.REDACTWALL_INGEST_API_KEY || '',
+    orgId: config.REDACTWALL_TENANT_ID || config.PROMPTWALL_TENANT_ID || config.SENTINEL_TENANT_ID || '',
   };
 }
 
@@ -173,8 +174,8 @@ function buildInstallReport(opts = {}) {
   const databaseReadonly = databaseReadonlySettings(configInfo.config);
   const registry = connectorRegistryStatus({ repoRoot, envConfig: configInfo.config });
   const envExplicit = configured(opts.envPath)
-    || configured(env.SENTINEL_ENV_PATH)
-    || configured(env.PROMPTWALL_ENV_PATH);
+    || configured(env.REDACTWALL_ENV_PATH)
+    || configured(env.REDACTWALL_ENV_PATH);
   const serverUrlValid = configured(settings.serverUrl) && safeOrigin(settings.serverUrl) !== 'invalid URL';
   const keyLooksUsable = configured(settings.ingestKey)
     && settings.ingestKey.length >= 16
@@ -291,7 +292,7 @@ async function emitHeartbeat(report, opts = {}) {
   const settings = mcpSettings(envConfig);
   const serverUrl = opts.serverUrl || settings.serverUrl;
   const ingestKey = opts.ingestKey || settings.ingestKey;
-  if (!configured(serverUrl)) throw new Error('PROMPTWALL_URL or SENTINEL_URL is required to emit a heartbeat');
+  if (!configured(serverUrl)) throw new Error('REDACTWALL_URL is required to emit a heartbeat');
   if (!configured(ingestKey)) throw new Error('INGEST_API_KEY is required to emit a heartbeat');
   const fetchImpl = opts.fetchImpl || globalThis.fetch;
   if (!fetchImpl) throw new Error('fetch is not available');
@@ -340,7 +341,7 @@ function usage() {
     '',
     'Options:',
     '  --env <path>           MCP guard env file path',
-    '  --repo-root <path>     PromptWall repo or extracted package root',
+    '  --repo-root <path>     RedactWall repo or extracted package root',
     '  --json                Print JSON output',
     '  --emit-heartbeat      POST sanitized checks to /api/v1/heartbeat',
     '  --user <id>           User to attach to heartbeat evidence',
@@ -350,7 +351,7 @@ function usage() {
 }
 
 function printHuman(report, io = console) {
-  io.log(`PromptWall MCP guard install: ${report.status}`);
+  io.log(`RedactWall MCP guard install: ${report.status}`);
   for (const item of report.checks) {
     io.log(`[${item.ok ? 'ok' : 'attention'}] ${item.id} - ${item.detail}`);
   }

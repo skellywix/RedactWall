@@ -28,7 +28,7 @@ if (-not (Test-Path -LiteralPath $ConfigPath)) {
 $resolvedConfig = (Resolve-Path -LiteralPath $ConfigPath).Path
 
 if ([string]::IsNullOrWhiteSpace($LogPath)) {
-  $LogPath = Join-Path $env:LOCALAPPDATA 'PromptWall\logs\evidence-pack.log'
+  $LogPath = Join-Path $env:LOCALAPPDATA 'RedactWall\logs\evidence-pack.log'
 }
 
 $logDir = Split-Path -Parent $LogPath
@@ -42,7 +42,7 @@ if (-not $npm) {
 }
 
 $startedAt = Get-Date -Format o
-"[$startedAt] Starting PromptWall scheduled evidence pack: $resolvedConfig" | Out-File -FilePath $LogPath -Append -Encoding utf8
+"[$startedAt] Starting RedactWall scheduled evidence pack: $resolvedConfig" | Out-File -FilePath $LogPath -Append -Encoding utf8
 
 Push-Location $repoRoot
 try {

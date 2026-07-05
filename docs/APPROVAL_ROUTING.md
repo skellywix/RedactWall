@@ -1,6 +1,6 @@
 # Approval Routing
 
-PromptWall assigns held decisions before they become a shared queue problem.
+RedactWall assigns held decisions before they become a shared queue problem.
 Routing is metadata-only: rules use provisioned SCIM user names, SCIM groups,
 org ids, detector ids, semantic categories, source, channel, destination,
 severity, and risk score. They do not read raw prompt bodies, extracted file
@@ -17,7 +17,7 @@ Routeable blocked records carry:
 - `escalatedAt`: when the SLA monitor escalated the record.
 - `escalationReason`: currently `sla_due` for overdue approval items.
 - `notificationStatus`: `not_configured`, `sent`, `partial`, or `failed`.
-- `notificationLastAttemptAt`: when PromptWall last attempted workflow
+- `notificationLastAttemptAt`: when RedactWall last attempted workflow
   notification delivery.
 - `notificationAttemptCount`: number of persisted notification attempts.
 - `notificationChannels`: bounded channel names such as `webhook`, `slack`,
@@ -33,7 +33,7 @@ exports include only the sanitized workflow summary.
 
 Security Admins can configure `approvalRoutingRules` from the Policy tab or via
 `PUT /api/policy`. The rules are evaluated in array order. The first enabled
-matching rule wins; if no rule matches, PromptWall uses the default routing table
+matching rule wins; if no rule matches, RedactWall uses the default routing table
 below.
 
 Each rule can match on:
@@ -41,7 +41,7 @@ Each rule can match on:
 - `users`: provisioned SCIM `userName` values such as
   `counsel@example.test`.
 - `groups`: provisioned SCIM group display names such as
-  `PromptWall Legal`.
+  `RedactWall Legal`.
 - `orgIds`: managed deployment or customer-silo org ids.
 - `detectors`: built-in detector ids such as `MEMBER_ID`, `SOURCE_CODE`, or
   `SECRET_KEY`.
@@ -70,7 +70,7 @@ Example:
   },
   {
     "id": "engineering_source_code",
-    "groups": ["PromptWall Engineers"],
+    "groups": ["RedactWall Engineers"],
     "categories": ["SOURCE_CODE"],
     "sources": ["browser_extension"],
     "assignedGroup": "engineering",
@@ -123,7 +123,7 @@ The sensor policy endpoint, `/api/v1/policy`, does not expose
   source, destination, severity, detector labels, and SLA. They do not include
   prompt bodies, redacted previews, raw findings, token vaults, release tokens,
   decision notes, or uploaded file bytes.
-- SCIM provisioning maps known PromptWall IdP groups onto these stable route
+- SCIM provisioning maps known RedactWall IdP groups onto these stable route
   roles. OIDC login consumes those active provisioned users and group-derived
   roles instead of replacing the stored evidence fields. Approval routing can
   also use the same SCIM group membership to assign held incidents to customer
@@ -131,44 +131,44 @@ The sensor policy endpoint, `/api/v1/policy`, does not expose
 
 ## Notification Channels
 
-PromptWall can notify workflow systems without adding another sensitive data
+RedactWall can notify workflow systems without adding another sensitive data
 sink. The app sends best-effort notifications and records the delivery outcome
 on the query plus an audit event.
 
 | Channel | Env var |
 | --- | --- |
-| Generic JSON webhook | `PROMPTWALL_APPROVAL_NOTIFY_WEBHOOK_URL` or `APPROVAL_NOTIFY_WEBHOOK_URL` |
-| Generic webhook bearer token | `PROMPTWALL_APPROVAL_NOTIFY_WEBHOOK_TOKEN` or `APPROVAL_NOTIFY_WEBHOOK_TOKEN` |
-| Slack incoming webhook | `PROMPTWALL_APPROVAL_SLACK_WEBHOOK_URL` or `APPROVAL_SLACK_WEBHOOK_URL` |
-| Microsoft Teams webhook | `PROMPTWALL_APPROVAL_TEAMS_WEBHOOK_URL` or `APPROVAL_TEAMS_WEBHOOK_URL` |
-| Ticket bridge webhook | `PROMPTWALL_APPROVAL_TICKET_WEBHOOK_URL` or `APPROVAL_TICKET_WEBHOOK_URL` |
-| Ticket bridge bearer token | `PROMPTWALL_APPROVAL_TICKET_WEBHOOK_TOKEN` or `APPROVAL_TICKET_WEBHOOK_TOKEN` |
-| Ticket system label | `PROMPTWALL_APPROVAL_TICKET_SYSTEM` or `APPROVAL_TICKET_SYSTEM`; for example `jira`, `linear`, `servicenow`, or `generic` |
-| Ticket project key | `PROMPTWALL_APPROVAL_TICKET_PROJECT` or `APPROVAL_TICKET_PROJECT` |
-| Ticket issue type | `PROMPTWALL_APPROVAL_TICKET_ISSUE_TYPE` or `APPROVAL_TICKET_ISSUE_TYPE`; defaults to `Security Review` |
-| Jira base URL | `PROMPTWALL_APPROVAL_JIRA_BASE_URL` or `APPROVAL_JIRA_BASE_URL`; for example `https://customer.atlassian.net` |
-| Jira account email | `PROMPTWALL_APPROVAL_JIRA_EMAIL` or `APPROVAL_JIRA_EMAIL` |
-| Jira API token | `PROMPTWALL_APPROVAL_JIRA_API_TOKEN` or `APPROVAL_JIRA_API_TOKEN` |
-| Jira project key | `PROMPTWALL_APPROVAL_JIRA_PROJECT_KEY` or `APPROVAL_JIRA_PROJECT_KEY` |
-| Jira issue type | `PROMPTWALL_APPROVAL_JIRA_ISSUE_TYPE` or `APPROVAL_JIRA_ISSUE_TYPE`; defaults to `Task` |
-| Linear API key | `PROMPTWALL_APPROVAL_LINEAR_API_KEY` or `APPROVAL_LINEAR_API_KEY` |
-| Linear team id | `PROMPTWALL_APPROVAL_LINEAR_TEAM_ID` or `APPROVAL_LINEAR_TEAM_ID` |
-| Linear state id | `PROMPTWALL_APPROVAL_LINEAR_STATE_ID` or `APPROVAL_LINEAR_STATE_ID`; optional |
-| Linear project id | `PROMPTWALL_APPROVAL_LINEAR_PROJECT_ID` or `APPROVAL_LINEAR_PROJECT_ID`; optional |
-| Linear label ids | `PROMPTWALL_APPROVAL_LINEAR_LABEL_IDS` or `APPROVAL_LINEAR_LABEL_IDS`; optional comma-separated label ids |
-| SMTP host | `PROMPTWALL_APPROVAL_SMTP_HOST` or `APPROVAL_SMTP_HOST` |
-| SMTP port | `PROMPTWALL_APPROVAL_SMTP_PORT` or `APPROVAL_SMTP_PORT`; defaults to `587`, or `465` when implicit TLS is enabled |
-| SMTP from address | `PROMPTWALL_APPROVAL_SMTP_FROM` or `APPROVAL_SMTP_FROM` |
-| SMTP recipients | `PROMPTWALL_APPROVAL_SMTP_TO` or `APPROVAL_SMTP_TO`; separate addresses with commas or semicolons |
-| SMTP username | `PROMPTWALL_APPROVAL_SMTP_USERNAME` or `APPROVAL_SMTP_USERNAME` |
-| SMTP password | `PROMPTWALL_APPROVAL_SMTP_PASSWORD` or `APPROVAL_SMTP_PASSWORD` |
-| SMTP implicit TLS | `PROMPTWALL_APPROVAL_SMTP_SECURE=true` or `APPROVAL_SMTP_SECURE=true` |
-| SMTP insecure local relay opt-in | `PROMPTWALL_APPROVAL_SMTP_ALLOW_INSECURE=true` or `APPROVAL_SMTP_ALLOW_INSECURE=true` |
+| Generic JSON webhook | `REDACTWALL_APPROVAL_NOTIFY_WEBHOOK_URL` or `APPROVAL_NOTIFY_WEBHOOK_URL` |
+| Generic webhook bearer token | `REDACTWALL_APPROVAL_NOTIFY_WEBHOOK_TOKEN` or `APPROVAL_NOTIFY_WEBHOOK_TOKEN` |
+| Slack incoming webhook | `REDACTWALL_APPROVAL_SLACK_WEBHOOK_URL` or `APPROVAL_SLACK_WEBHOOK_URL` |
+| Microsoft Teams webhook | `REDACTWALL_APPROVAL_TEAMS_WEBHOOK_URL` or `APPROVAL_TEAMS_WEBHOOK_URL` |
+| Ticket bridge webhook | `REDACTWALL_APPROVAL_TICKET_WEBHOOK_URL` or `APPROVAL_TICKET_WEBHOOK_URL` |
+| Ticket bridge bearer token | `REDACTWALL_APPROVAL_TICKET_WEBHOOK_TOKEN` or `APPROVAL_TICKET_WEBHOOK_TOKEN` |
+| Ticket system label | `REDACTWALL_APPROVAL_TICKET_SYSTEM` or `APPROVAL_TICKET_SYSTEM`; for example `jira`, `linear`, `servicenow`, or `generic` |
+| Ticket project key | `REDACTWALL_APPROVAL_TICKET_PROJECT` or `APPROVAL_TICKET_PROJECT` |
+| Ticket issue type | `REDACTWALL_APPROVAL_TICKET_ISSUE_TYPE` or `APPROVAL_TICKET_ISSUE_TYPE`; defaults to `Security Review` |
+| Jira base URL | `REDACTWALL_APPROVAL_JIRA_BASE_URL` or `APPROVAL_JIRA_BASE_URL`; for example `https://customer.atlassian.net` |
+| Jira account email | `REDACTWALL_APPROVAL_JIRA_EMAIL` or `APPROVAL_JIRA_EMAIL` |
+| Jira API token | `REDACTWALL_APPROVAL_JIRA_API_TOKEN` or `APPROVAL_JIRA_API_TOKEN` |
+| Jira project key | `REDACTWALL_APPROVAL_JIRA_PROJECT_KEY` or `APPROVAL_JIRA_PROJECT_KEY` |
+| Jira issue type | `REDACTWALL_APPROVAL_JIRA_ISSUE_TYPE` or `APPROVAL_JIRA_ISSUE_TYPE`; defaults to `Task` |
+| Linear API key | `REDACTWALL_APPROVAL_LINEAR_API_KEY` or `APPROVAL_LINEAR_API_KEY` |
+| Linear team id | `REDACTWALL_APPROVAL_LINEAR_TEAM_ID` or `APPROVAL_LINEAR_TEAM_ID` |
+| Linear state id | `REDACTWALL_APPROVAL_LINEAR_STATE_ID` or `APPROVAL_LINEAR_STATE_ID`; optional |
+| Linear project id | `REDACTWALL_APPROVAL_LINEAR_PROJECT_ID` or `APPROVAL_LINEAR_PROJECT_ID`; optional |
+| Linear label ids | `REDACTWALL_APPROVAL_LINEAR_LABEL_IDS` or `APPROVAL_LINEAR_LABEL_IDS`; optional comma-separated label ids |
+| SMTP host | `REDACTWALL_APPROVAL_SMTP_HOST` or `APPROVAL_SMTP_HOST` |
+| SMTP port | `REDACTWALL_APPROVAL_SMTP_PORT` or `APPROVAL_SMTP_PORT`; defaults to `587`, or `465` when implicit TLS is enabled |
+| SMTP from address | `REDACTWALL_APPROVAL_SMTP_FROM` or `APPROVAL_SMTP_FROM` |
+| SMTP recipients | `REDACTWALL_APPROVAL_SMTP_TO` or `APPROVAL_SMTP_TO`; separate addresses with commas or semicolons |
+| SMTP username | `REDACTWALL_APPROVAL_SMTP_USERNAME` or `APPROVAL_SMTP_USERNAME` |
+| SMTP password | `REDACTWALL_APPROVAL_SMTP_PASSWORD` or `APPROVAL_SMTP_PASSWORD` |
+| SMTP implicit TLS | `REDACTWALL_APPROVAL_SMTP_SECURE=true` or `APPROVAL_SMTP_SECURE=true` |
+| SMTP insecure local relay opt-in | `REDACTWALL_APPROVAL_SMTP_ALLOW_INSECURE=true` or `APPROVAL_SMTP_ALLOW_INSECURE=true` |
 
 The generic webhook receives the canonical sanitized JSON payload. Slack and
 Teams receive channel-native message shapes built from the same sanitized
 payload. The ticket bridge receives a smaller issue-tracker payload with
-`promptwall.approval_ticket`, a deterministic `dedupeKey`, ticket system/project
+`redactwall.approval_ticket`, a deterministic `dedupeKey`, ticket system/project
 metadata, query id, owner, SLA, detector labels, severity, and routing context.
 Use it for Jira, Linear, ServiceNow, SOAR, or internal middleware that creates
 the customer-specific ticket. The native Jira adapter posts an Atlassian
@@ -184,10 +184,10 @@ Webhook-style URLs and native Jira/Linear API URLs must be `https://` and must
 not include URL username or password credentials.
 
 Native Linear delivery requires a Linear personal API key in
-`PROMPTWALL_APPROVAL_LINEAR_API_KEY` or `APPROVAL_LINEAR_API_KEY` plus a Linear
+`REDACTWALL_APPROVAL_LINEAR_API_KEY` or `APPROVAL_LINEAR_API_KEY` plus a Linear
 team id. Discovery tooling can help find team, state, project, and label ids,
-but the running PromptWall process needs its own secret-manager value for the
-GraphQL call. If `PROMPTWALL_APPROVAL_LINEAR_API_URL` is overridden for a test
+but the running RedactWall process needs its own secret-manager value for the
+GraphQL call. If `REDACTWALL_APPROVAL_LINEAR_API_URL` is overridden for a test
 tenant, it must be an `https://` URL so the API key is never sent over cleartext.
 
 Dry-run the native Linear payload without sending:
@@ -199,7 +199,7 @@ npm run smoke:linear-approval -- -- --team-id=<linear-team-id>
 Create a real sanitized smoke issue:
 
 ```powershell
-$env:PROMPTWALL_APPROVAL_LINEAR_API_KEY = '<linear-personal-api-key>'
+$env:REDACTWALL_APPROVAL_LINEAR_API_KEY = '<linear-personal-api-key>'
 npm run smoke:linear-approval -- -- --team-id=<linear-team-id> --send
 ```
 

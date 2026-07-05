@@ -9,13 +9,13 @@ const os = require('node:os');
 const path = require('node:path');
 
 process.env.ADMIN_PASSWORD = 'unit-pass';
-process.env.SENTINEL_SECRET = 'unit-secret-stable-oidc-000000000000000001';
-process.env.SENTINEL_DATA_KEY = 'unit-data-key-stable-oidc-000000000000001';
+process.env.REDACTWALL_SECRET = 'unit-secret-stable-oidc-000000000000000001';
+process.env.REDACTWALL_DATA_KEY = 'unit-data-key-stable-oidc-000000000000001';
 process.env.INGEST_API_KEY = 'unit-ingest-key-oidc-00000000000000000001';
 process.env.SCIM_BEARER_TOKEN = 'unit-scim-token-oidc-00000000000000000001';
-process.env.OIDC_CLIENT_ID = 'promptwall-console';
+process.env.OIDC_CLIENT_ID = 'redactwall-console';
 process.env.OIDC_CLIENT_SECRET = 'oidc-client-secret-00000000000000000001';
-process.env.SENTINEL_DB_PATH = path.join(os.tmpdir(), 'ps-oidc-login-test-' + crypto.randomBytes(6).toString('hex') + '.db');
+process.env.REDACTWALL_DB_PATH = path.join(os.tmpdir(), 'ps-oidc-login-test-' + crypto.randomBytes(6).toString('hex') + '.db');
 
 const app = require('../server/app');
 const db = require('../server/db');
@@ -44,7 +44,7 @@ function signJwt(privateKey, kid, claims) {
 }
 
 function signedStateCookieBody(body) {
-  const mac = crypto.createHmac('sha256', process.env.SENTINEL_SECRET).update(body).digest('base64url');
+  const mac = crypto.createHmac('sha256', process.env.REDACTWALL_SECRET).update(body).digest('base64url');
   return `${body}.${mac}`;
 }
 
@@ -173,7 +173,7 @@ async function followOidcLogin(appPort, cookie) {
   const start = await fetch(`http://127.0.0.1:${appPort}/auth/oidc/start`, { redirect: 'manual' });
   assert.strictEqual(start.status, 302);
   const stateCookie = cookiePair(start.headers.get('set-cookie'));
-  assert.match(stateCookie, /^promptwall_oidc=/);
+  assert.match(stateCookie, /^redactwall_oidc=/);
 
   const authorize = await fetch(start.headers.get('location'), { redirect: 'manual' });
   assert.strictEqual(authorize.status, 302);
@@ -185,7 +185,7 @@ async function followOidcLogin(appPort, cookie) {
   return { callback, stateCookie };
 }
 
-test('oidc callback issues a PromptWall session for an active SCIM approver', async () => {
+test('oidc callback issues a RedactWall session for an active SCIM approver', async () => {
   const issuer = await startIssuer();
   try {
     process.env.OIDC_ISSUER = issuer.url;
@@ -197,7 +197,7 @@ test('oidc callback issues a PromptWall session for an active SCIM approver', as
         active: true,
       });
       db.saveScimGroup({
-        displayName: 'PromptWall Approvers',
+        displayName: 'RedactWall Approvers',
         members: [{ value: user.id, display: user.userName }],
       });
 
@@ -211,7 +211,7 @@ test('oidc callback issues a PromptWall session for an active SCIM approver', as
       assert.strictEqual(callback.status, 302);
       assert.strictEqual(callback.headers.get('location'), '/index.html');
       const sessionCookie = cookiePair(callback.headers.get('set-cookie'));
-      assert.match(sessionCookie, /^promptwall_session=/);
+      assert.match(sessionCookie, /^redactwall_session=/);
 
       const me = await fetch(`http://127.0.0.1:${port}/api/me`, {
         headers: { cookie: sessionCookie },
@@ -250,7 +250,7 @@ test('oidc callback refuses inactive SCIM users without issuing a session', asyn
       const { callback } = await followOidcLogin(port);
       assert.strictEqual(callback.status, 302);
       assert.strictEqual(callback.headers.get('location'), '/login.html?oidc=failed');
-      assert.doesNotMatch(callback.headers.get('set-cookie') || '', /promptwall_session=/);
+      assert.doesNotMatch(callback.headers.get('set-cookie') || '', /redactwall_session=/);
 
       const audit = db.listAudit(10);
       assert.ok(audit.some((entry) => entry.action === 'OIDC_LOGIN_FAILED' && /not provisioned/.test(entry.detail || '')));
@@ -281,7 +281,7 @@ test('oidc discovery and state cookies fail closed on mismatches and tampering',
     () => oidc.resolvedConfig({
       env: {
         OIDC_ISSUER: 'https://issuer.example.test',
-        OIDC_CLIENT_ID: 'promptwall-console',
+        OIDC_CLIENT_ID: 'redactwall-console',
         OIDC_CLIENT_SECRET: 'secret',
       },
       fetchImpl: async () => ({
@@ -449,7 +449,7 @@ test('oidc callback rejects state mismatches and provider errors without issuing
     });
     assert.strictEqual(mismatch.status, 302);
     assert.strictEqual(mismatch.headers.get('location'), '/login.html?oidc=failed');
-    assert.doesNotMatch(mismatch.headers.get('set-cookie') || '', /promptwall_session=/);
+    assert.doesNotMatch(mismatch.headers.get('set-cookie') || '', /redactwall_session=/);
 
     const denied = await fetch(`http://127.0.0.1:${port}/auth/oidc/callback?error=access_denied&state=expected-state`, {
       redirect: 'manual',
@@ -457,7 +457,7 @@ test('oidc callback rejects state mismatches and provider errors without issuing
     });
     assert.strictEqual(denied.status, 302);
     assert.strictEqual(denied.headers.get('location'), '/login.html?oidc=failed');
-    assert.doesNotMatch(denied.headers.get('set-cookie') || '', /promptwall_session=/);
+    assert.doesNotMatch(denied.headers.get('set-cookie') || '', /redactwall_session=/);
 
     const audit = db.listAudit(10);
     assert.ok(audit.some((entry) => entry.action === 'OIDC_LOGIN_FAILED' && entry.detail === 'oidc login failed'));
@@ -473,6 +473,6 @@ test('oidc public errors stay generic except for operator-safe categories', () =
 
 test.after(() => {
   for (const suffix of ['', '-wal', '-shm']) {
-    try { fs.unlinkSync(process.env.SENTINEL_DB_PATH + suffix); } catch {}
+    try { fs.unlinkSync(process.env.REDACTWALL_DB_PATH + suffix); } catch {}
   }
 });

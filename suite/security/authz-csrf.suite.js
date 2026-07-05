@@ -32,7 +32,7 @@ const app = support.requireApp();
 const Database = require(path.join(support.ROOT, 'node_modules', 'better-sqlite3'));
 
 function assignQueryUser(queryId, assignedUser) {
-  const db = new Database(process.env.SENTINEL_DB_PATH);
+  const db = new Database(process.env.REDACTWALL_DB_PATH);
   try {
     const row = db.prepare('SELECT data FROM queries WHERE id = ?').get(queryId);
     const data = JSON.parse(row.data);

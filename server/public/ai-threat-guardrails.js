@@ -40,5 +40,5 @@ function render(currentPosture,deps){
   const recentRows=recent.length?recent.map((x)=>recentRow(x,safe)).join(''):empty('No recent threats','Recent AI threat events will appear here.',safe);
   target.innerHTML=`<div class="agentic-mcp-kpis">${kpis}</div><div class="agentic-mcp-columns"><section class="agentic-mcp-panel"><div class="agentic-mcp-panel-head"><strong>Guardrails</strong><span>${safe(rules.filter((x)=>x.events).length)}</span></div><div class="agentic-mcp-list">${ruleRows}</div></section><section class="agentic-mcp-panel"><div class="agentic-mcp-panel-head"><strong>Controls</strong><span>${safe(controls.length)}</span></div><div class="agentic-mcp-policy">${controlRows}</div></section><section class="agentic-mcp-panel"><div class="agentic-mcp-panel-head"><strong>Recent</strong><span>${safe(recent.length)}</span></div><div class="agentic-mcp-list">${recentRows}</div></section></div>`;
 }
-window.PromptWallThreatGuardrails={render};
+window.RedactWallThreatGuardrails={render};
 }());

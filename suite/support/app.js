@@ -26,7 +26,7 @@ const SCIM_TOKEN = 'suite-scim-bearer-token-0123456789abcdef';
 
 /** Set env for an isolated app instance. Call before require()ing server/app. */
 function bootEnv(opts = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'promptwall-suite-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-suite-'));
   const policyPath = path.join(dir, 'policy.json');
   if (opts.policy) fs.writeFileSync(policyPath, JSON.stringify(opts.policy, null, 2));
   else fs.copyFileSync(path.join(ROOT, 'config', 'policy.json'), policyPath);
@@ -35,13 +35,13 @@ function bootEnv(opts = {}) {
   process.env.APPROVER_PASSWORD = CREDENTIALS.approver.password;
   process.env.AUDITOR_USER = CREDENTIALS.auditor.user;
   process.env.AUDITOR_PASSWORD = CREDENTIALS.auditor.password;
-  process.env.SENTINEL_SECRET = 'suite-session-secret-stable';
-  process.env.SENTINEL_DATA_KEY = 'suite-data-key-stable';
+  process.env.REDACTWALL_SECRET = 'suite-session-secret-stable';
+  process.env.REDACTWALL_DATA_KEY = 'suite-data-key-stable';
   process.env.INGEST_API_KEY = INGEST_KEY;
-  process.env.SENTINEL_DB_PATH = path.join(dir, 'sentinel.db');
-  process.env.SENTINEL_POLICY_PATH = policyPath;
+  process.env.REDACTWALL_DB_PATH = path.join(dir, 'redactwall.db');
+  process.env.REDACTWALL_POLICY_PATH = policyPath;
   Object.assign(process.env, opts.env || {});
-  return { dir, policyPath, dbPath: process.env.SENTINEL_DB_PATH };
+  return { dir, policyPath, dbPath: process.env.REDACTWALL_DB_PATH };
 }
 
 function requireApp() {

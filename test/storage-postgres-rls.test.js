@@ -8,7 +8,7 @@
  * and would silently bypass RLS). The blank/unset tenant context is pinned as
  * the migration's documented fail-open "operator mode"; store-level RLS via
  * setTenantContext is covered by test/storage-postgres.test.js. Runs when
- * SENTINEL_TEST_PG_URL points at a reachable Postgres (a fresh database is
+ * REDACTWALL_TEST_PG_URL points at a reachable Postgres (a fresh database is
  * created per run); skips cleanly otherwise.
  */
 const test = require('node:test');
@@ -16,12 +16,12 @@ const assert = require('node:assert');
 const crypto = require('node:crypto');
 const { openStore, runMigrations } = require('../server/storage');
 
-const ADMIN_URL = process.env.SENTINEL_TEST_PG_URL || '';
+const ADMIN_URL = process.env.REDACTWALL_TEST_PG_URL || '';
 // Every table carrying an "orgId" column must be listed here; the test
 // cross-checks this list against information_schema AND pg_policies in both
 // directions, so tenant-scoping a table without adding its policy fails.
 const TENANT_SCOPED_TABLES = ['queries'];
-const TENANT_GUC = 'promptwall.org_id';
+const TENANT_GUC = 'redactwall.org_id';
 const SEED_ROWS = [
   ['rls-a-1', 'org-a'],
   ['rls-a-2', 'org-a'],
@@ -43,7 +43,7 @@ async function createFreshDatabase(name) {
 /** Apply the real migration chain through the production store driver. */
 function migrateThroughStore(databaseUrl) {
   const { driver, kind } = openStore({
-    env: { SENTINEL_DB_DRIVER: 'postgres', SENTINEL_DATABASE_URL: databaseUrl },
+    env: { REDACTWALL_DB_DRIVER: 'postgres', REDACTWALL_DATABASE_URL: databaseUrl },
   });
   try {
     const applied = runMigrations(driver, kind);
@@ -146,12 +146,12 @@ async function assertContextEdgeCases(client) {
   await setTenant(client, '');
   const blank = await client.query('SELECT count(*)::int AS n FROM queries');
   assert.strictEqual(blank.rows[0].n, SEED_ROWS.length,
-    'DOCUMENTED FAIL-OPEN: blank promptwall.org_id is operator mode and sees every tenant row; ' +
+    'DOCUMENTED FAIL-OPEN: blank redactwall.org_id is operator mode and sees every tenant row; ' +
     'if this fails the policy went fail-closed — update this test and operator tooling together');
-  await client.query('RESET promptwall.org_id');
+  await client.query('RESET redactwall.org_id');
   const unset = await client.query('SELECT count(*)::int AS n FROM queries');
   assert.strictEqual(unset.rows[0].n, SEED_ROWS.length,
-    "DOCUMENTED FAIL-OPEN: an unset promptwall.org_id also sees every tenant row via COALESCE(..., '') = ''");
+    "DOCUMENTED FAIL-OPEN: an unset redactwall.org_id also sees every tenant row via COALESCE(..., '') = ''");
 }
 
 async function dropTestArtifacts(dbName, role) {
@@ -166,10 +166,10 @@ async function dropTestArtifacts(dbName, role) {
   }
 }
 
-test('migration 3 row-level security isolates tenants for a non-owner role', { skip: !ADMIN_URL && 'SENTINEL_TEST_PG_URL not set' }, async () => {
+test('migration 3 row-level security isolates tenants for a non-owner role', { skip: !ADMIN_URL && 'REDACTWALL_TEST_PG_URL not set' }, async () => {
   const suffix = crypto.randomBytes(5).toString('hex');
-  const dbName = 'promptwall_rls_' + suffix;
-  const workerRole = 'promptwall_rls_worker_' + suffix;
+  const dbName = 'redactwall_rls_' + suffix;
+  const workerRole = 'redactwall_rls_worker_' + suffix;
   const databaseUrl = await createFreshDatabase(dbName);
   try {
     migrateThroughStore(databaseUrl);

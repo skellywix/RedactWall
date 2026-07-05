@@ -13,7 +13,7 @@ test('dashboard exposes a sanitized evidence export download action', () => {
   assert.match(dashboardHtml, /id="exportEvidence"/);
   assert.match(dashboardJs, /async function exportEvidence\(\)/);
   assert.match(dashboardJs, /api\('\/api\/export\/evidence\?queryLimit=1000&auditLimit=1000'\)/);
-  assert.match(dashboardJs, /promptwall-evidence-\$\{stamp\}\.json/);
+  assert.match(dashboardJs, /redactwall-evidence-\$\{stamp\}\.json/);
   assert.match(dashboardJs, /JSON\.stringify\(pack, null, 2\)/);
 });
 

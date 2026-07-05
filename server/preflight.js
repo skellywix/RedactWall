@@ -71,7 +71,7 @@ function configStatus(input = {}) {
   const env = withEnvAliases(input.env || process.env);
   const production = env.NODE_ENV === 'production';
   const severity = production ? 'error' : 'warning';
-  const dbPath = input.dbPath || env.SENTINEL_DB_PATH || '';
+  const dbPath = input.dbPath || env.REDACTWALL_DB_PATH || '';
   const dbPathReason = cloudSyncedPathReason(dbPath);
   const adminUser = String(input.adminUser ?? env.ADMIN_USER ?? 'admin').trim();
   const adminPassword = input.adminPassword ?? env.ADMIN_PASSWORD ?? '';
@@ -84,11 +84,11 @@ function configStatus(input = {}) {
   const auditorPassword = input.auditorPassword ?? env.AUDITOR_PASSWORD ?? '';
   const auditorPasswordSet = !!String(auditorPassword).trim();
   const auditorConfigured = !!auditorUser || auditorPasswordSet;
-  const saasMode = bool(input.saasMode ?? env.SENTINEL_SAAS_MODE);
-  const tenantId = input.tenantId ?? env.SENTINEL_TENANT_ID ?? '';
-  const seatLimit = input.seatLimit ?? env.SENTINEL_SEAT_LIMIT ?? '';
-  const requireTenantContext = input.requireTenantContext ?? env.SENTINEL_REQUIRE_TENANT_CONTEXT;
-  const requireUserIdentity = input.requireUserIdentity ?? env.SENTINEL_REQUIRE_USER_IDENTITY;
+  const saasMode = bool(input.saasMode ?? env.REDACTWALL_SAAS_MODE);
+  const tenantId = input.tenantId ?? env.REDACTWALL_TENANT_ID ?? '';
+  const seatLimit = input.seatLimit ?? env.REDACTWALL_SEAT_LIMIT ?? '';
+  const requireTenantContext = input.requireTenantContext ?? env.REDACTWALL_REQUIRE_TENANT_CONTEXT;
+  const requireUserIdentity = input.requireUserIdentity ?? env.REDACTWALL_REQUIRE_USER_IDENTITY;
   const saasConfigured = saasMode
     || !!String(tenantId || '').trim()
     || !!String(seatLimit || '').trim()
@@ -128,8 +128,8 @@ function configStatus(input = {}) {
     && !!String(oidcTokenEndpoint || '').trim()
     && !!String(oidcJwksUri || '').trim()
   );
-  const sessionSecret = input.sessionSecret ?? env.SENTINEL_SECRET ?? '';
-  const dataKeySource = input.dataKeySource ?? env.SENTINEL_DATA_KEY ?? env.SENTINEL_SECRET ?? '';
+  const sessionSecret = input.sessionSecret ?? env.REDACTWALL_SECRET ?? '';
+  const dataKeySource = input.dataKeySource ?? env.REDACTWALL_DATA_KEY ?? env.REDACTWALL_SECRET ?? '';
   const checks = [
     check(
       'admin_password',
@@ -254,29 +254,29 @@ function configStatus(input = {}) {
       'session_secret',
       input.secretSource === 'env',
       severity,
-      'Session signing secret comes from SENTINEL_SECRET.',
-      'Set SENTINEL_SECRET to a stable random value shared by all server instances.',
+      'Session signing secret comes from REDACTWALL_SECRET.',
+      'Set REDACTWALL_SECRET to a stable random value shared by all server instances.',
     ),
     check(
       'session_secret_strength',
       hasMinLength(sessionSecret, MIN_SECRET_LENGTHS.sessionSecret),
       severity,
       `Session signing secret is at least ${MIN_SECRET_LENGTHS.sessionSecret} characters.`,
-      `Set SENTINEL_SECRET to at least ${MIN_SECRET_LENGTHS.sessionSecret} random characters.`,
+      `Set REDACTWALL_SECRET to at least ${MIN_SECRET_LENGTHS.sessionSecret} random characters.`,
     ),
     check(
       'raw_prompt_encryption',
       !!input.dataCryptoEnabled,
       severity,
       'Retained approval prompts can be encrypted at rest.',
-      'Set SENTINEL_DATA_KEY or SENTINEL_SECRET before enabling raw approval retention.',
+      'Set REDACTWALL_DATA_KEY or REDACTWALL_SECRET before enabling raw approval retention.',
     ),
     check(
       'data_key_strength',
       hasMinLength(dataKeySource, MIN_SECRET_LENGTHS.dataKey),
       severity,
       `Raw-prompt encryption key source is at least ${MIN_SECRET_LENGTHS.dataKey} characters.`,
-      `Set SENTINEL_DATA_KEY, or SENTINEL_SECRET fallback, to at least ${MIN_SECRET_LENGTHS.dataKey} random characters.`,
+      `Set REDACTWALL_DATA_KEY, or REDACTWALL_SECRET fallback, to at least ${MIN_SECRET_LENGTHS.dataKey} random characters.`,
     ),
     check(
       'secure_cookie',
@@ -291,36 +291,36 @@ function configStatus(input = {}) {
       severity,
       'SQLite evidence store is configured on a local disk path.',
       dbPathReason
-        ? `Set SENTINEL_DB_PATH to a local disk path; current path looks like ${dbPathReason}.`
-        : 'Set SENTINEL_DB_PATH to a local disk path outside cloud-synced or network folders.',
+        ? `Set REDACTWALL_DB_PATH to a local disk path; current path looks like ${dbPathReason}.`
+        : 'Set REDACTWALL_DB_PATH to a local disk path outside cloud-synced or network folders.',
     ),
     check(
       'saas_tenant_id',
       !saasConfigured || hasValidTenantId(tenantId),
       severity,
       'SaaS tenant id is configured.',
-      'Set SENTINEL_TENANT_ID to a lowercase customer slug such as cu-acme.',
+      'Set REDACTWALL_TENANT_ID to a lowercase customer slug such as cu-acme.',
     ),
     check(
       'saas_seat_limit',
       !saasConfigured || positiveInteger(seatLimit),
       severity,
       'SaaS seat limit is configured.',
-      'Set SENTINEL_SEAT_LIMIT to the purchased positive seat count.',
+      'Set REDACTWALL_SEAT_LIMIT to the purchased positive seat count.',
     ),
     check(
       'saas_tenant_context',
       !saasConfigured || saasMode || bool(requireTenantContext),
       severity,
       'SaaS sensors must send tenant context.',
-      'Set SENTINEL_REQUIRE_TENANT_CONTEXT=true, or set SENTINEL_SAAS_MODE=true.',
+      'Set REDACTWALL_REQUIRE_TENANT_CONTEXT=true, or set REDACTWALL_SAAS_MODE=true.',
     ),
     check(
       'saas_user_identity',
       !saasConfigured || saasMode || bool(requireUserIdentity),
       severity,
       'SaaS sensors must send managed user identity.',
-      'Set SENTINEL_REQUIRE_USER_IDENTITY=true, or set SENTINEL_SAAS_MODE=true.',
+      'Set REDACTWALL_REQUIRE_USER_IDENTITY=true, or set REDACTWALL_SAAS_MODE=true.',
     ),
   ];
   const failed = checks.filter((c) => !c.ok);

@@ -9,8 +9,8 @@ const fs = require('node:fs');
 const crypto = require('node:crypto');
 
 const dbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pw-subs-'));
-process.env.SENTINEL_DB_PATH = path.join(dbDir, 'test.db');
-process.env.SENTINEL_SUBSCRIPTIONS_PATH = path.join(dbDir, 'subs.json');
+process.env.REDACTWALL_DB_PATH = path.join(dbDir, 'test.db');
+process.env.REDACTWALL_SUBSCRIPTIONS_PATH = path.join(dbDir, 'subs.json');
 // Close the SQLite handle before deleting: Windows cannot unlink open files.
 test.after(() => {
   try { db._db.close(); } catch {}
@@ -22,11 +22,11 @@ const subscriptions = require('../server/subscriptions');
 const db = require('../server/db');
 
 function writeSubs(destinations) {
-  fs.writeFileSync(process.env.SENTINEL_SUBSCRIPTIONS_PATH, JSON.stringify({ destinations }));
+  fs.writeFileSync(process.env.REDACTWALL_SUBSCRIPTIONS_PATH, JSON.stringify({ destinations }));
 }
 
 function alert(over = {}) {
-  return { schemaVersion: 1, eventType: 'promptwall.security_event', action: 'BLOCKED', queryId: 'q_' + crypto.randomBytes(3).toString('hex'), createdAt: new Date().toISOString(), status: 'pending', user: 'a@cu.org', destination: 'chatgpt.com', riskScore: 80, maxSeverity: 4, maxSeverityLabel: 'critical', findings: [{ type: 'US_SSN', severity: 4, score: 0.92, masked: '•••• 7843' }], categories: [], reasons: ['Hard-stop'], ...over };
+  return { schemaVersion: 1, eventType: 'redactwall.security_event', action: 'BLOCKED', queryId: 'q_' + crypto.randomBytes(3).toString('hex'), createdAt: new Date().toISOString(), status: 'pending', user: 'a@cu.org', destination: 'chatgpt.com', riskScore: 80, maxSeverity: 4, maxSeverityLabel: 'critical', findings: [{ type: 'US_SSN', severity: 4, score: 0.92, masked: '•••• 7843' }], categories: [], reasons: ['Hard-stop'], ...over };
 }
 
 test('every SIEM adapter emits a prompt-free, PII-free envelope', () => {
@@ -57,7 +57,7 @@ test('otlp adapter emits a valid OTLP/HTTP JSON logs envelope', () => {
   assert.strictEqual(rec.body.stringValue, formats.summaryLine({ ...a, schemaVersion: 2 }));
   const svc = body.resourceLogs[0].resource.attributes.find((x) => x.key === 'service.name');
   assert.strictEqual(svc.value.stringValue, 'cu-prod');
-  const risk = rec.attributes.find((x) => x.key === 'promptwall.risk_score');
+  const risk = rec.attributes.find((x) => x.key === 'redactwall.risk_score');
   assert.strictEqual(typeof risk.value.intValue, 'string', 'intValue must be a JSON string');
   assert.ok(!req.body.includes('412-22-7843'), 'no raw PII in the OTLP envelope');
 });

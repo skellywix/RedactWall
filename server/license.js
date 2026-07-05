@@ -2,7 +2,7 @@
 /**
  * Offline license verification (ROADMAP N7).
  *
- * A `promptwall.lic` file is `base64(payloadJSON).base64(ed25519Signature)`,
+ * A `redactwall.lic` file is `base64(payloadJSON).base64(ed25519Signature)`,
  * where the signature is over the UTF-8 bytes of the base64-payload string
  * (signing the encoded form avoids any JSON canonicalization question). It is
  * verified at boot and re-checked daily against an EMBEDDED public key — no
@@ -15,7 +15,7 @@
  *
  * The vendor's PRIVATE signing key lives offline (see scripts/license-issue.js
  * --init-keypair) and is never in the repo. Tests inject a throwaway public key
- * via the SENTINEL_LICENSE_PUBLIC_KEY env override or the publicKeyPem param.
+ * via the REDACTWALL_LICENSE_PUBLIC_KEY env override or the publicKeyPem param.
  */
 const fs = require('fs');
 const path = require('path');
@@ -33,14 +33,14 @@ const DEFAULT_GRACE_DAYS = 30;
 const PLANS = ['standard', 'enterprise'];
 
 function embeddedPublicKey() {
-  return process.env.SENTINEL_LICENSE_PUBLIC_KEY || process.env.PROMPTWALL_LICENSE_PUBLIC_KEY || EMBEDDED_PUBLIC_KEY_PEM;
+  return process.env.REDACTWALL_LICENSE_PUBLIC_KEY || process.env.PROMPTWALL_LICENSE_PUBLIC_KEY || process.env.SENTINEL_LICENSE_PUBLIC_KEY || EMBEDDED_PUBLIC_KEY_PEM;
 }
 
 function licensePath() {
-  const explicit = process.env.SENTINEL_LICENSE_PATH || process.env.PROMPTWALL_LICENSE_PATH;
+  const explicit = process.env.REDACTWALL_LICENSE_PATH || process.env.PROMPTWALL_LICENSE_PATH || process.env.SENTINEL_LICENSE_PATH;
   if (explicit) return explicit;
   const base = typeof env.defaultEnvPath === 'function' ? env.defaultEnvPath() : path.join(process.cwd(), '.env');
-  return path.join(path.dirname(base), 'promptwall.lic');
+  return path.join(path.dirname(base), 'redactwall.lic');
 }
 
 // Never throws, never echoes file content. Returns { ok, payload } | { ok:false, reason }.

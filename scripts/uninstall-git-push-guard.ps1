@@ -22,17 +22,17 @@ function Resolve-GitDir {
 $repo = (Resolve-Path -LiteralPath $RepoPath).Path
 $gitDir = Resolve-GitDir -Repo $repo
 $hookPath = Join-Path (Join-Path $gitDir 'hooks') 'pre-push'
-$marker = 'PromptWall Git Push Guard'
+$marker = 'RedactWall Git Push Guard'
 
 if (-not (Test-Path -LiteralPath $hookPath -PathType Leaf)) {
-  Write-Host "PromptWall git push guard hook is not installed"
+  Write-Host "RedactWall git push guard hook is not installed"
   exit 0
 }
 
 $existing = Get-Content -LiteralPath $hookPath -Raw
 if ($existing -notmatch [regex]::Escape($marker) -and -not $Force) {
-  throw "pre-push hook is not managed by PromptWall. Re-run with -Force after reviewing it."
+  throw "pre-push hook is not managed by RedactWall. Re-run with -Force after reviewing it."
 }
 
 Remove-Item -LiteralPath $hookPath -Force
-Write-Host "Removed PromptWall git push guard hook at $hookPath"
+Write-Host "Removed RedactWall git push guard hook at $hookPath"

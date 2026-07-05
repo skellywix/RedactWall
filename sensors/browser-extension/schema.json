@@ -4,7 +4,7 @@
     "user":      { "type": "string", "title": "End-user identifier (username)" },
     "email":     { "type": "string", "title": "End-user email (preferred identity for the audit log)" },
     "orgId":     { "type": "string", "title": "Institution / tenant id" },
-    "serverUrl": { "type": "string", "title": "PromptWall control-plane URL" },
+    "serverUrl": { "type": "string", "title": "RedactWall control-plane URL" },
     "ingestKey": { "type": "string", "title": "Ingest API key the sensor presents to the gate" }
   }
 }

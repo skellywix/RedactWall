@@ -40,18 +40,18 @@ function activeDb(opts = {}) {
 
 function dataRoot(opts = {}) {
   if (opts.dataRoot) return path.resolve(opts.dataRoot);
-  if (process.env.PROMPTWALL_UPDATE_DATA_ROOT) return path.resolve(process.env.PROMPTWALL_UPDATE_DATA_ROOT);
-  if (process.env.PROMPTWALL_UPDATE_CONFIG_PATH) return path.dirname(path.resolve(process.env.PROMPTWALL_UPDATE_CONFIG_PATH));
+  if (process.env.REDACTWALL_UPDATE_DATA_ROOT) return path.resolve(process.env.REDACTWALL_UPDATE_DATA_ROOT);
+  if (process.env.REDACTWALL_UPDATE_CONFIG_PATH) return path.dirname(path.resolve(process.env.REDACTWALL_UPDATE_CONFIG_PATH));
   const db = activeDb(opts);
-  return path.dirname(db._dbPath || path.join(ROOT, 'data', 'sentinel.db'));
+  return path.dirname(db._dbPath || path.join(ROOT, 'data', 'redactwall.db'));
 }
 
 function configPath(opts = {}) {
-  return process.env.PROMPTWALL_UPDATE_CONFIG_PATH || path.join(dataRoot(opts), 'update-settings.json');
+  return process.env.REDACTWALL_UPDATE_CONFIG_PATH || path.join(dataRoot(opts), 'update-settings.json');
 }
 
 function statePath(opts = {}) {
-  return process.env.PROMPTWALL_UPDATE_STATE_PATH || path.join(dataRoot(opts), 'update-state.json');
+  return process.env.REDACTWALL_UPDATE_STATE_PATH || path.join(dataRoot(opts), 'update-state.json');
 }
 
 function updateBackupDir(opts = {}) {
@@ -103,7 +103,7 @@ function publicConfig(config = loadConfig(), opts = {}) {
     restartCommand: config.restartCommand,
     restartAfterUpdate: config.restartAfterUpdate === true,
     restartEnabled: restartEnabled(),
-    restartCommandSource: process.env.PROMPTWALL_UPDATE_RESTART_COMMAND ? 'env' : (config.restartCommand ? 'config' : 'manual'),
+    restartCommandSource: process.env.REDACTWALL_UPDATE_RESTART_COMMAND ? 'env' : (config.restartCommand ? 'config' : 'manual'),
     configPath: configPath(opts),
     backupDir: updateBackupDir(opts),
   };
@@ -450,11 +450,11 @@ function parseRestartCommand(command) {
 }
 
 function restartEnabled() {
-  return ['1', 'true', 'yes', 'on'].includes(String(process.env.PROMPTWALL_UPDATE_RESTART_ENABLED || '').toLowerCase());
+  return ['1', 'true', 'yes', 'on'].includes(String(process.env.REDACTWALL_UPDATE_RESTART_ENABLED || '').toLowerCase());
 }
 
 function effectiveRestartCommand(config = {}) {
-  return String(process.env.PROMPTWALL_UPDATE_RESTART_COMMAND || config.restartCommand || '').trim();
+  return String(process.env.REDACTWALL_UPDATE_RESTART_COMMAND || config.restartCommand || '').trim();
 }
 
 function scheduleRestart(config = loadConfig(), opts = {}) {

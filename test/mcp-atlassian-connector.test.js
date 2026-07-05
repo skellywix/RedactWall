@@ -130,7 +130,7 @@ test('sanitizeJiraIssue redacts Jira text before returning MCP output', async ()
       },
     }),
     guardOptions: {
-      server: 'http://sentinel.test',
+      server: 'http://redactwall.test',
       key: 'unit-ingest-key',
       policy: { ignore: [], disabledDetectors: [] },
       fetchImpl: async (url, opts = {}) => {
@@ -145,7 +145,7 @@ test('sanitizeJiraIssue redacts Jira text before returning MCP output', async ()
   assert.ok(sanitized.findings.includes('CREDIT_CARD'));
   assert.ok(!JSON.stringify(sanitized.result).includes('524-71-9043'));
   assert.ok(!JSON.stringify(sanitized.result).includes('4111 1111 1111 1111'));
-  assert.strictEqual(outbound.url, 'http://sentinel.test/api/v1/gate');
+  assert.strictEqual(outbound.url, 'http://redactwall.test/api/v1/gate');
   assert.strictEqual(outbound.body.destination, 'atlassian.jira.issue.get');
   assert.strictEqual(outbound.body.source, 'mcp_guard');
   assert.ok(!JSON.stringify(outbound.body).includes('unit-atlassian-token'));

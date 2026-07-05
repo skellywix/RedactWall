@@ -19,7 +19,7 @@ test('app flow settings require an explicit opt-in and derive the guarded base d
   const enabled = desktopAppFlow.appFlowSettings({ ENDPOINT_AGENT_APP_FLOW: '1' }, '/tmp/watch');
   assert.strictEqual(enabled.enabled, true);
   assert.strictEqual(enabled.baseDir, path.join('/tmp/watch', 'AI Apps'));
-  const custom = desktopAppFlow.appFlowSettings({ PROMPTWALL_ENDPOINT_AGENT_APP_FLOW_DIR: '/srv/guarded' }, '');
+  const custom = desktopAppFlow.appFlowSettings({ REDACTWALL_ENDPOINT_AGENT_APP_FLOW_DIR: '/srv/guarded' }, '');
   assert.strictEqual(custom.enabled, true);
   assert.strictEqual(custom.baseDir, path.resolve('/srv/guarded'));
 });
@@ -94,7 +94,7 @@ test('endpoint agent start watches guarded app folders alongside file-flow profi
   const started = agent.start({
     console: { log: () => {} },
     watchDir: '/tmp/primary-watch',
-    server: 'https://promptwall.example',
+    server: 'https://redactwall.example',
     key: 'ingest-key-configured',
     refreshPolicy: async () => {},
     scanFile: (filename, opts) => scans.push({ filename, opts }),

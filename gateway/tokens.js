@@ -12,12 +12,12 @@ const crypto = require('crypto');
 const path = require('path');
 
 function defaultTokensPath() {
-  const dataDir = process.env.SENTINEL_DATA_DIR || process.env.PROMPTWALL_DATA_DIR || path.join(__dirname, '..', 'data');
+  const dataDir = process.env.REDACTWALL_DATA_DIR || process.env.PROMPTWALL_DATA_DIR || process.env.SENTINEL_DATA_DIR || path.join(__dirname, '..', 'data');
   return path.join(dataDir, 'gateway-agent-tokens.json');
 }
 
 function tokenHash(raw) {
-  return crypto.createHash('sha256').update('promptwall:gateway-token:v1:' + String(raw || '')).digest('hex');
+  return crypto.createHash('sha256').update('redactwall:gateway-token:v1:' + String(raw || '')).digest('hex');
 }
 
 // Cache the parsed store per path, keyed on the file's mtime+size, so the hot

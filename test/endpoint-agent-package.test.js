@@ -97,11 +97,11 @@ function minimalFiles(agentBody) {
     },
     {
       path: 'scripts/install-clipboard-guard.ps1',
-      body: Buffer.from('WScript.Shell\nrun-clipboard-guard.ps1\nPromptWall Clipboard Guard\nAssert-SafeShortcutName\nAssert-SafeShortcutArgument\n'),
+      body: Buffer.from('WScript.Shell\nrun-clipboard-guard.ps1\nRedactWall Clipboard Guard\nAssert-SafeShortcutName\nAssert-SafeShortcutArgument\n'),
     },
     {
       path: 'scripts/install-desktop-collector.ps1',
-      body: Buffer.from('HKEY_CURRENT_USER\\Software\\Classes\\*\\shell\n"%1"\nMultiSelectModel\nPROMPTWALL_ENDPOINT_AGENT_HANDOFF_DIR\nPROMPTWALL_ENDPOINT_AGENT_HANDOFF_SECRET\n'),
+      body: Buffer.from('HKEY_CURRENT_USER\\Software\\Classes\\*\\shell\n"%1"\nMultiSelectModel\nREDACTWALL_ENDPOINT_AGENT_HANDOFF_DIR\nREDACTWALL_ENDPOINT_AGENT_HANDOFF_SECRET\n'),
     },
     {
       path: 'scripts/install-endpoint-agent.ps1',
@@ -113,32 +113,32 @@ function minimalFiles(agentBody) {
     },
     {
       path: 'scripts/install-git-push-guard.ps1',
-      body: Buffer.from('PromptWall Git Push Guard\ngit-push-guard.js\nPROMPTWALL_ENV_PATH\n'),
+      body: Buffer.from('RedactWall Git Push Guard\ngit-push-guard.js\nREDACTWALL_ENV_PATH\n'),
     },
     {
       path: 'scripts/run-clipboard-guard.ps1',
-      body: Buffer.from('$env:PROMPTWALL_ENV_PATH = $config\nclipboard-guard.js\n--clear-on-block\n'),
+      body: Buffer.from('$env:REDACTWALL_ENV_PATH = $config\nclipboard-guard.js\n--clear-on-block\n'),
     },
     {
       path: 'scripts/run-desktop-collector.ps1',
-      body: Buffer.from('[string[]]$FilePath\n$env:PROMPTWALL_ENV_PATH = $config\nprotected-upload.js\n'),
+      body: Buffer.from('[string[]]$FilePath\n$env:REDACTWALL_ENV_PATH = $config\nprotected-upload.js\n'),
     },
     {
       path: 'scripts/run-endpoint-agent.ps1',
-      body: Buffer.from('$env:PROMPTWALL_ENV_PATH = $config\n'),
+      body: Buffer.from('$env:REDACTWALL_ENV_PATH = $config\n'),
     },
     { path: 'scripts/uninstall-desktop-collector.ps1', body: Buffer.from('Remove-Item\n') },
     { path: 'scripts/uninstall-clipboard-guard.ps1', body: Buffer.from('Remove-Item\n') },
     { path: 'scripts/uninstall-endpoint-agent.ps1', body: Buffer.from('Unregister-ScheduledTask\n') },
     { path: 'scripts/uninstall-file-intent-host.ps1', body: Buffer.from('NativeMessagingHosts\nRemove-Item\n') },
-    { path: 'scripts/uninstall-git-push-guard.ps1', body: Buffer.from('pre-push\nPromptWall Git Push Guard\nRemove-Item\n') },
+    { path: 'scripts/uninstall-git-push-guard.ps1', body: Buffer.from('pre-push\nRedactWall Git Push Guard\nRemove-Item\n') },
   ];
 }
 
 const validAgentBody = [
   "const KEY = process.env.INGEST_API_KEY || '';",
   "const outcome = 'redacted_available';",
-  "const dir = '.promptwall-redacted';",
+  "const dir = '.redactwall-redacted';",
   "require('./native-handoff');",
   "const handoff = 'ENDPOINT_AGENT_HANDOFF_SECRET';",
   "require('./file-flow-profiles');",
@@ -165,7 +165,7 @@ test('package script writes a prompt-free endpoint agent zip and integrity manif
 
   const manifest = JSON.parse(fs.readFileSync(result.manifestPath, 'utf8'));
   const zipBody = fs.readFileSync(result.zipPath);
-  assert.strictEqual(manifest.kind, 'promptwall-endpoint-agent-package');
+  assert.strictEqual(manifest.kind, 'redactwall-endpoint-agent-package');
   assert.strictEqual(manifest.sha256, sha256(zipBody));
   assert.strictEqual(manifest.appVersion, JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version);
   assert.strictEqual(manifest.checks.explicitIngestKeyRequired, true);
@@ -239,7 +239,7 @@ test('package script writes a prompt-free endpoint agent zip and integrity manif
   const agent = zip.readAsText('sensors/endpoint-agent/agent.js');
   assert.match(agent, /process\.env\.INGEST_API_KEY \|\| ''/);
   assert.match(agent, /redacted_available/);
-  assert.match(agent, /\.promptwall-redacted/);
+  assert.match(agent, /\.redactwall-redacted/);
   assert.match(agent, /ENDPOINT_AGENT_HANDOFF_SECRET/);
   assert.match(agent, /file-flow-profiles/);
   assert.match(agent, /startWatchedRoot/);
@@ -256,8 +256,8 @@ test('package script writes a prompt-free endpoint agent zip and integrity manif
   assert.match(zip.readAsText('sensors/endpoint-agent/collectors/git-push-guard.js'), /collectGitPush/);
   assert.match(zip.readAsText('sensors/endpoint-agent/collectors/protected-upload.js'), /collectProtectedUploads/);
   assert.match(zip.readAsText('scripts/check-endpoint-install.js'), /\/api\/v1\/heartbeat/);
-  assert.match(zip.readAsText('scripts/install-clipboard-guard.ps1'), /PromptWall Clipboard Guard/);
-  assert.match(zip.readAsText('scripts/install-git-push-guard.ps1'), /PromptWall Git Push Guard/);
+  assert.match(zip.readAsText('scripts/install-clipboard-guard.ps1'), /RedactWall Clipboard Guard/);
+  assert.match(zip.readAsText('scripts/install-git-push-guard.ps1'), /RedactWall Git Push Guard/);
   assert.match(zip.readAsText('scripts/run-clipboard-guard.ps1'), /clipboard-guard\.js/);
   assert.match(zip.readAsText('scripts/install-desktop-collector.ps1'), /HKEY_CURRENT_USER\\Software\\Classes\\\*\\shell/);
   assert.match(zip.readAsText('scripts/run-desktop-collector.ps1'), /protected-upload\.js/);
@@ -268,17 +268,17 @@ test('package script writes a prompt-free endpoint agent zip and integrity manif
 
 test('package validation refuses prompt bodies or development keys', () => {
   assert.throws(
-    () => validateRuntimeFiles(minimalFiles("const KEY = process.env.INGEST_API_KEY || 'dev-ingest-key';\nconst outcome = 'redacted_available';\nconst dir = '.promptwall-redacted';")),
+    () => validateRuntimeFiles(minimalFiles("const KEY = process.env.INGEST_API_KEY || 'dev-ingest-key';\nconst outcome = 'redacted_available';\nconst dir = '.redactwall-redacted';")),
     /development ingest key/
   );
 
   assert.throws(
-    () => validateRuntimeFiles(minimalFiles("const KEY = process.env.INGEST_API_KEY || '';\nconst outcome = 'redacted_available';\nconst dir = '.promptwall-redacted';\nconst sample = '524-71-9043';")),
+    () => validateRuntimeFiles(minimalFiles("const KEY = process.env.INGEST_API_KEY || '';\nconst outcome = 'redacted_available';\nconst dir = '.redactwall-redacted';\nconst sample = '524-71-9043';")),
     /synthetic SSN demo value/
   );
 
   assert.throws(
-    () => validateRuntimeFiles(minimalFiles("const KEY = process.env.INGEST_API_KEY || '';\nconst outcome = 'redacted_available';\nconst dir = '.promptwall-redacted';\nconst path = '/api/v1/scan-file';\nconst contentBase64 = 'abc';")),
+    () => validateRuntimeFiles(minimalFiles("const KEY = process.env.INGEST_API_KEY || '';\nconst outcome = 'redacted_available';\nconst dir = '.redactwall-redacted';\nconst path = '/api/v1/scan-file';\nconst contentBase64 = 'abc';")),
     /without uploading file bodies/
   );
 
@@ -300,17 +300,17 @@ test('package validation covers endpoint runtime and installer guardrails', () =
     },
     {
       name: 'agent missing explicit key',
-      files: minimalFiles("const KEY = process.env.INGEST_API_KEY || 'fallback';\nredacted_available\n.promptwall-redacted\nnative-handoff\nENDPOINT_AGENT_HANDOFF_SECRET\n./ocr\nextractEndpointFile"),
+      files: minimalFiles("const KEY = process.env.INGEST_API_KEY || 'fallback';\nredacted_available\n.redactwall-redacted\nnative-handoff\nENDPOINT_AGENT_HANDOFF_SECRET\n./ocr\nextractEndpointFile"),
       message: /explicit INGEST_API_KEY/,
     },
     {
       name: 'agent missing native handoff',
-      files: minimalFiles("const KEY = process.env.INGEST_API_KEY || '';\nredacted_available\n.promptwall-redacted\n./ocr\nextractEndpointFile"),
+      files: minimalFiles("const KEY = process.env.INGEST_API_KEY || '';\nredacted_available\n.redactwall-redacted\n./ocr\nextractEndpointFile"),
       message: /signed native handoff/,
     },
     {
       name: 'agent missing file-flow profile watcher',
-      files: minimalFiles("const KEY = process.env.INGEST_API_KEY || '';\nredacted_available\n.promptwall-redacted\nnative-handoff\nENDPOINT_AGENT_HANDOFF_SECRET\n./ocr\nextractEndpointFile"),
+      files: minimalFiles("const KEY = process.env.INGEST_API_KEY || '';\nredacted_available\n.redactwall-redacted\nnative-handoff\nENDPOINT_AGENT_HANDOFF_SECRET\n./ocr\nextractEndpointFile"),
       message: /file-flow watcher profiles/,
     },
     {
@@ -325,7 +325,7 @@ test('package validation covers endpoint runtime and installer guardrails', () =
     },
     {
       name: 'agent missing OCR bridge',
-      files: minimalFiles("const KEY = process.env.INGEST_API_KEY || '';\nredacted_available\n.promptwall-redacted\nnative-handoff\nENDPOINT_AGENT_HANDOFF_SECRET\nfile-flow-profiles\nstartWatchedRoot"),
+      files: minimalFiles("const KEY = process.env.INGEST_API_KEY || '';\nredacted_available\n.redactwall-redacted\nnative-handoff\nENDPOINT_AGENT_HANDOFF_SECRET\nfile-flow-profiles\nstartWatchedRoot"),
       message: /endpoint-local OCR/,
     },
     {
@@ -395,12 +395,12 @@ test('package validation covers endpoint runtime and installer guardrails', () =
     },
     {
       name: 'git push guard installer missing managed hook',
-      files: replaceBody(validFiles, 'scripts/install-git-push-guard.ps1', 'PROMPTWALL_ENV_PATH'),
+      files: replaceBody(validFiles, 'scripts/install-git-push-guard.ps1', 'REDACTWALL_ENV_PATH'),
       message: /managed pre-push hook/,
     },
     {
       name: 'git push guard installer exposes secret',
-      files: replaceBody(validFiles, 'scripts/install-git-push-guard.ps1', 'PromptWall Git Push Guard\ngit-push-guard.js\nPROMPTWALL_ENV_PATH\nINGEST_API_KEY'),
+      files: replaceBody(validFiles, 'scripts/install-git-push-guard.ps1', 'RedactWall Git Push Guard\ngit-push-guard.js\nREDACTWALL_ENV_PATH\nINGEST_API_KEY'),
       message: /must not put secrets or prompt content in hooks/,
     },
     {
@@ -440,17 +440,17 @@ test('package validation covers endpoint runtime and installer guardrails', () =
     },
     {
       name: 'desktop collector installer missing shell action',
-      files: replaceBody(validFiles, 'scripts/install-desktop-collector.ps1', 'PROMPTWALL_ENDPOINT_AGENT_HANDOFF_DIR\nPROMPTWALL_ENDPOINT_AGENT_HANDOFF_SECRET'),
+      files: replaceBody(validFiles, 'scripts/install-desktop-collector.ps1', 'REDACTWALL_ENDPOINT_AGENT_HANDOFF_DIR\nREDACTWALL_ENDPOINT_AGENT_HANDOFF_SECRET'),
       message: /register a per-user file shell action/,
     },
     {
       name: 'desktop collector installer missing env aliases',
       files: replaceBody(validFiles, 'scripts/install-desktop-collector.ps1', 'HKEY_CURRENT_USER\\Software\\Classes\\*\\shell\n"%1"\nMultiSelectModel'),
-      message: /accept PromptWall handoff env aliases/,
+      message: /accept RedactWall handoff env aliases/,
     },
     {
       name: 'desktop collector installer exposes secrets',
-      files: replaceBody(validFiles, 'scripts/install-desktop-collector.ps1', 'HKEY_CURRENT_USER\\Software\\Classes\\*\\shell\n"%1"\nMultiSelectModel\nPROMPTWALL_ENDPOINT_AGENT_HANDOFF_DIR\nPROMPTWALL_ENDPOINT_AGENT_HANDOFF_SECRET\n"-HandoffSecret"'),
+      files: replaceBody(validFiles, 'scripts/install-desktop-collector.ps1', 'HKEY_CURRENT_USER\\Software\\Classes\\*\\shell\n"%1"\nMultiSelectModel\nREDACTWALL_ENDPOINT_AGENT_HANDOFF_DIR\nREDACTWALL_ENDPOINT_AGENT_HANDOFF_SECRET\n"-HandoffSecret"'),
       message: /must not put secrets in shell commands/,
     },
     {
@@ -460,32 +460,32 @@ test('package validation covers endpoint runtime and installer guardrails', () =
     },
     {
       name: 'clipboard installer missing validation',
-      files: replaceBody(validFiles, 'scripts/install-clipboard-guard.ps1', 'WScript.Shell\nrun-clipboard-guard.ps1\nPromptWall Clipboard Guard'),
+      files: replaceBody(validFiles, 'scripts/install-clipboard-guard.ps1', 'WScript.Shell\nrun-clipboard-guard.ps1\nRedactWall Clipboard Guard'),
       message: /validate shortcut labels and arguments/,
     },
     {
       name: 'clipboard installer exposes secrets',
-      files: replaceBody(validFiles, 'scripts/install-clipboard-guard.ps1', 'WScript.Shell\nrun-clipboard-guard.ps1\nPromptWall Clipboard Guard\nAssert-SafeShortcutName\nAssert-SafeShortcutArgument\nINGEST_API_KEY'),
+      files: replaceBody(validFiles, 'scripts/install-clipboard-guard.ps1', 'WScript.Shell\nrun-clipboard-guard.ps1\nRedactWall Clipboard Guard\nAssert-SafeShortcutName\nAssert-SafeShortcutArgument\nINGEST_API_KEY'),
       message: /must not put secrets in shortcuts/,
     },
     {
-      name: 'endpoint runner missing PromptWall env path',
+      name: 'endpoint runner uses legacy env path',
       files: replaceBody(validFiles, 'scripts/run-endpoint-agent.ps1', '$env:SENTINEL_ENV_PATH = $config'),
       message: /runner must load local config/,
     },
     {
       name: 'clipboard runner missing invocation',
-      files: replaceBody(validFiles, 'scripts/run-clipboard-guard.ps1', '$env:PROMPTWALL_ENV_PATH = $config'),
+      files: replaceBody(validFiles, 'scripts/run-clipboard-guard.ps1', '$env:REDACTWALL_ENV_PATH = $config'),
       message: /clipboard guard runner/,
     },
     {
       name: 'clipboard runner touches clipboard directly',
-      files: replaceBody(validFiles, 'scripts/run-clipboard-guard.ps1', '$env:PROMPTWALL_ENV_PATH = $config\nclipboard-guard.js\n--clear-on-block\nGet-Clipboard'),
+      files: replaceBody(validFiles, 'scripts/run-clipboard-guard.ps1', '$env:REDACTWALL_ENV_PATH = $config\nclipboard-guard.js\n--clear-on-block\nGet-Clipboard'),
       message: /must delegate clipboard access/,
     },
     {
       name: 'desktop runner missing file array',
-      files: replaceBody(validFiles, 'scripts/run-desktop-collector.ps1', '$env:PROMPTWALL_ENV_PATH = $config\nprotected-upload.js'),
+      files: replaceBody(validFiles, 'scripts/run-desktop-collector.ps1', '$env:REDACTWALL_ENV_PATH = $config\nprotected-upload.js'),
       message: /desktop collector runner/,
     },
   ];
@@ -534,12 +534,12 @@ test('packaged endpoint agent runs a package-to-install pilot smoke', async (t) 
   const packageHandoffDir = path.join(installRoot, 'configured-native-handoff');
   fs.mkdirSync(configDir, { recursive: true });
   fs.writeFileSync(configPath, [
-    'PROMPTWALL_URL=http://promptwall.package.test',
+    'REDACTWALL_URL=http://redactwall.package.test',
     'INGEST_API_KEY=pilot-ingest-key-000000000000000000000000000001',
     `ENDPOINT_AGENT_WATCH_DIR=${watchDir}`,
     `ENDPOINT_AGENT_HANDOFF_SECRET=native-handoff-secret-000000000000000001`,
     `ENDPOINT_AGENT_HANDOFF_DIR=${packageHandoffDir}`,
-    'SENTINEL_REQUEST_TIMEOUT_MS=250',
+    'REDACTWALL_REQUEST_TIMEOUT_MS=250',
   ].join('\n') + '\n');
 
   const packaged = packageEndpointAgent({ outDir, now: new Date('2026-06-26T13:00:00.000Z') });
@@ -557,7 +557,7 @@ test('packaged endpoint agent runs a package-to-install pilot smoke', async (t) 
   const uninstallScript = fs.readFileSync(path.join(installRoot, 'scripts', 'uninstall-endpoint-agent.ps1'), 'utf8');
   assert.match(installScript, /Register-ScheduledTask/);
   assert.match(installScript, /\[Alias\("SentinelUrl"\)\]/);
-  assert.match(installScript, /PROMPTWALL_URL=\$PromptWallUrl/);
+  assert.match(installScript, /REDACTWALL_URL=\$RedactWallUrl/);
   assert.match(installScript, /INGEST_API_KEY=\$IngestKey/);
   assert.match(installScript, /InstallDesktopCollector/);
   assert.match(installScript, /InstallClipboardGuard/);
@@ -566,39 +566,39 @@ test('packaged endpoint agent runs a package-to-install pilot smoke', async (t) 
   assert.ok(desktopInstallScript.includes(String.raw`HKEY_CURRENT_USER\Software\Classes\*\shell`));
   assert.ok(desktopInstallScript.includes('%1'));
   assert.match(desktopInstallScript, /MultiSelectModel/);
-  assert.match(desktopInstallScript, /PROMPTWALL_ENDPOINT_AGENT_HANDOFF_SECRET/);
+  assert.match(desktopInstallScript, /REDACTWALL_ENDPOINT_AGENT_HANDOFF_SECRET/);
   assert.doesNotMatch(desktopInstallScript, /"-HandoffSecret"/);
   assert.match(clipboardInstallScript, /WScript\.Shell/);
   assert.match(clipboardInstallScript, /run-clipboard-guard\.ps1/);
-  assert.match(clipboardInstallScript, /PromptWall Clipboard Guard/);
+  assert.match(clipboardInstallScript, /RedactWall Clipboard Guard/);
   assert.doesNotMatch(clipboardInstallScript, /INGEST_API_KEY|ENDPOINT_AGENT_HANDOFF_SECRET/);
   assert.match(clipboardRunnerScript, /clipboard-guard\.js/);
-  assert.match(clipboardRunnerScript, /\$env:PROMPTWALL_ENV_PATH = \$config/);
+  assert.match(clipboardRunnerScript, /\$env:REDACTWALL_ENV_PATH = \$config/);
   assert.match(clipboardRunnerScript, /--clear-on-block/);
-  assert.doesNotMatch(clipboardRunnerScript, /\$env:SENTINEL_ENV_PATH = \$config/);
+  assert.doesNotMatch(clipboardRunnerScript, /\$env:(?:PROMPTWALL|SENTINEL)_ENV_PATH = \$config/);
   assert.doesNotMatch(clipboardRunnerScript, /Get-Clipboard|Set-Clipboard|contentBase64/);
   assert.match(desktopRunnerScript, /protected-upload\.js/);
   assert.match(desktopRunnerScript, /\[string\[\]\]\$FilePath/);
-  assert.match(desktopRunnerScript, /\$env:PROMPTWALL_ENV_PATH = \$config/);
+  assert.match(desktopRunnerScript, /\$env:REDACTWALL_ENV_PATH = \$config/);
   assert.match(gitPushInstallScript, /git-push-guard\.js/);
-  assert.match(gitPushInstallScript, /PROMPTWALL_ENV_PATH/);
-  assert.match(gitPushInstallScript, /PromptWall Git Push Guard/);
+  assert.match(gitPushInstallScript, /REDACTWALL_ENV_PATH/);
+  assert.match(gitPushInstallScript, /RedactWall Git Push Guard/);
   assert.doesNotMatch(gitPushInstallScript, /INGEST_API_KEY|ENDPOINT_AGENT_HANDOFF_SECRET|contentBase64/);
-  assert.match(gitPushUninstallScript, /PromptWall Git Push Guard/);
+  assert.match(gitPushUninstallScript, /RedactWall Git Push Guard/);
   assert.match(gitPushUninstallScript, /Remove-Item/);
-  assert.match(runnerScript, /\$env:PROMPTWALL_ENV_PATH = \$config/);
-  assert.doesNotMatch(desktopRunnerScript, /\$env:SENTINEL_ENV_PATH = \$config/);
-  assert.doesNotMatch(runnerScript, /\$env:SENTINEL_ENV_PATH = \$config/);
+  assert.match(runnerScript, /\$env:REDACTWALL_ENV_PATH = \$config/);
+  assert.doesNotMatch(desktopRunnerScript, /\$env:(?:PROMPTWALL|SENTINEL)_ENV_PATH = \$config/);
+  assert.doesNotMatch(runnerScript, /\$env:(?:PROMPTWALL|SENTINEL)_ENV_PATH = \$config/);
   assert.match(uninstallScript, /Unregister-ScheduledTask/);
   assert.match(uninstallScript, /RemoveDesktopCollector/);
   assert.match(uninstallScript, /endpoint-agent\.env/);
 
   const previousEnv = {};
-  for (const key of ['SENTINEL_ENV_PATH', 'PROMPTWALL_ENV_PATH', 'SENTINEL_URL', 'PROMPTWALL_URL', 'INGEST_API_KEY', 'ENDPOINT_AGENT_WATCH_DIR', 'SENTINEL_REQUEST_TIMEOUT_MS']) {
+  for (const key of ['REDACTWALL_ENV_PATH', 'PROMPTWALL_ENV_PATH', 'SENTINEL_ENV_PATH', 'REDACTWALL_URL', 'PROMPTWALL_URL', 'SENTINEL_URL', 'INGEST_API_KEY', 'ENDPOINT_AGENT_WATCH_DIR', 'REDACTWALL_REQUEST_TIMEOUT_MS']) {
     previousEnv[key] = process.env[key];
     delete process.env[key];
   }
-  process.env.PROMPTWALL_ENV_PATH = configPath;
+  process.env.REDACTWALL_ENV_PATH = configPath;
   t.after(() => {
     for (const [key, value] of Object.entries(previousEnv)) {
       if (value === undefined) delete process.env[key];
@@ -634,7 +634,7 @@ test('packaged endpoint agent runs a package-to-install pilot smoke', async (t) 
   const fetchImpl = async (url, opts = {}) => {
     requests.push({ url, method: opts.method || 'GET', body: opts.body || '' });
     assert.strictEqual(opts.headers['x-api-key'], 'pilot-ingest-key-000000000000000000000000000001');
-    if (url === 'http://promptwall.package.test/api/v1/policy') {
+    if (url === 'http://redactwall.package.test/api/v1/policy') {
       return {
         ok: true,
         json: async () => ({
@@ -654,7 +654,7 @@ test('packaged endpoint agent runs a package-to-install pilot smoke', async (t) 
         }),
       };
     }
-    if (url === 'http://promptwall.package.test/api/v1/gate') {
+    if (url === 'http://redactwall.package.test/api/v1/gate') {
       const body = JSON.parse(opts.body);
       if (body.channel === 'clipboard') {
         assert.strictEqual(body.source, 'endpoint_agent');
@@ -689,7 +689,7 @@ test('packaged endpoint agent runs a package-to-install pilot smoke', async (t) 
         assert.match(body.prompt, /\[\[CREDIT_CARD_1\]\]/);
         assert.ok(body.clientFindings.some((finding) => finding.type === 'CREDIT_CARD'));
       }
-      assert.match(body.note, /\.promptwall-redacted/);
+      assert.match(body.note, /\.redactwall-redacted/);
       assert.ok(body.clientFindings.some((finding) => finding.type === 'US_SSN'));
       assert.ok(!JSON.stringify(body).includes('524-71-9043'));
       assert.ok(!JSON.stringify(body).includes('4111 1111 1111 1111'));
@@ -719,7 +719,7 @@ test('packaged endpoint agent runs a package-to-install pilot smoke', async (t) 
   assert.strictEqual(result.decision, 'redact');
   assert.strictEqual(result.status, 'redacted');
   assert.ok(result.redactionHandoff);
-  assert.match(result.redactionHandoff.relativePath, /^\.promptwall-redacted[\\/]/);
+  assert.match(result.redactionHandoff.relativePath, /^\.redactwall-redacted[\\/]/);
   assert.ok(!result.redactionHandoff.relativePath.includes('524-71-9043'));
 
   const companion = fs.readFileSync(result.redactionHandoff.path, 'utf8');

@@ -2,7 +2,7 @@
 
 ## Goal And Context
 
-PromptWall is moving from local pilot software toward a hosted SaaS offer.
+RedactWall is moving from local pilot software toward a hosted SaaS offer.
 The immediate goal is to make the current product deployable on AWS for paying
 customers with tenant identity, paid-seat accounting, and a repeatable launch
 path.
@@ -27,7 +27,7 @@ and privacy guarantees the product sells.
 
 ### Option A: Customer-Silo AWS Stack Now
 
-Each paying customer gets an isolated AWS stack running one PromptWall
+Each paying customer gets an isolated AWS stack running one RedactWall
 control plane with its own encrypted local EBS-backed SQLite store, secrets, ALB,
 and managed extension configuration.
 

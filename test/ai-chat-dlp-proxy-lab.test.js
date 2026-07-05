@@ -129,12 +129,12 @@ test('monitor payload handles safe prompts, category-only evidence, and CLI args
   assert.deepStrictEqual(clientEvidenceFromAnalysis({
     categories: [{ category: 'CONFIDENTIAL_BUSINESS', score: 0.84 }],
   }).clientCategories, [{ category: 'CONFIDENTIAL_BUSINESS', score: 0.84 }]);
-  assert.deepStrictEqual(parseArgs(['--sample', '--port', '4182', '--host', 'claude.ai', '--prompt', 'hello', '--sentinel', 'http://local', '--key', 'k']), {
+  assert.deepStrictEqual(parseArgs(['--sample', '--port', '4182', '--host', 'claude.ai', '--prompt', 'hello', '--redactwall', 'http://local', '--key', 'k']), {
     sample: true,
     port: 4182,
     host: 'claude.ai',
     prompt: 'hello',
-    sentinel: 'http://local',
+    redactwall: 'http://local',
     key: 'k',
   });
 });
@@ -167,7 +167,7 @@ test('proxy observer is AI-domain and body-method scoped', async () => {
   const noPrompt = await observeAiChatRequest({
     method: 'POST',
     url: 'http://claude.ai/v1/messages',
-    headers: { 'content-type': 'application/json', 'x-promptwall-user': 'proxy-user@example.test' },
+    headers: { 'content-type': 'application/json', 'x-redactwall-user': 'proxy-user@example.test' },
     body: JSON.stringify({ messages: [] }),
   }, {
     fetchImpl: async () => {
@@ -195,7 +195,7 @@ test('proxy observer posts only redacted evidence and still forwards on control-
     user: 'analyst@example.test',
     sourceIp: '10.0.0.9',
   }, {
-    sentinel: 'http://sentinel.test',
+    redactwall: 'http://redactwall.test',
     key: 'proxy-key',
     fetchImpl: async (url, opts) => {
       outbound = { url, headers: opts.headers, body: JSON.parse(opts.body) };
@@ -206,7 +206,7 @@ test('proxy observer posts only redacted evidence and still forwards on control-
   assert.strictEqual(observed.forward, true);
   assert.strictEqual(observed.monitored, true);
   assert.strictEqual(observed.controlPlane.ok, true);
-  assert.strictEqual(outbound.url, 'http://sentinel.test/api/v1/gate');
+  assert.strictEqual(outbound.url, 'http://redactwall.test/api/v1/gate');
   assert.strictEqual(outbound.headers['x-api-key'], 'proxy-key');
   assert.strictEqual(outbound.body.destination, 'claude.ai');
   assert.strictEqual(outbound.body.clientOutcome, 'proxy_observed');
@@ -230,7 +230,7 @@ test('proxy observer posts only redacted evidence and still forwards on control-
   assert.ok(!JSON.stringify(failed).includes(secret));
 
   const timeout = new Error('slow gate');
-  timeout.code = 'SENTINEL_TIMEOUT';
+  timeout.code = 'REDACTWALL_TIMEOUT';
   const timedOut = await postMonitorEvidence({ prompt: '[proxy observed] chatgpt.com' }, {
     fetchImpl: async () => {
       throw timeout;
@@ -248,7 +248,7 @@ test('cleartext lab proxy forwards original traffic while posting only sanitized
   const secret = '524-71-9043';
   const calls = [];
   const server = createProxyServer({
-    sentinel: 'http://control-plane.test',
+    redactwall: 'http://control-plane.test',
     key: 'proxy-key',
     fetchImpl: async (url, opts = {}) => {
       calls.push({ url, opts });
@@ -290,7 +290,7 @@ test('cleartext lab proxy skips truncated monitoring and returns upstream failur
   const calls = [];
   const truncatedServer = createProxyServer({
     maxBodyBytes: 8,
-    sentinel: 'http://control-plane.test',
+    redactwall: 'http://control-plane.test',
     fetchImpl: async (url, opts = {}) => {
       calls.push({ url, opts });
       return textResponse(200, 'forwarded');
@@ -367,10 +367,10 @@ test('cli main supports sample mode and returns a closeable lab server', async (
   assert.strictEqual(sample.destination, 'example.com');
 
   output = '';
-  const server = await main(['--port', '0', '--sentinel', 'http://control-plane.test', '--key', 'proxy-key'], io);
+  const server = await main(['--port', '0', '--redactwall', 'http://control-plane.test', '--key', 'proxy-key'], io);
   try {
     await new Promise((resolve) => server.listening ? resolve() : server.once('listening', resolve));
-    assert.match(output, /PromptWall AI chat proxy lab listening/);
+    assert.match(output, /RedactWall AI chat proxy lab listening/);
   } finally {
     await close(server);
   }

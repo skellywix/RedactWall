@@ -97,7 +97,7 @@ function validateRuntimeFiles(files) {
   if (/contentBase64|\/api\/v1\/scan-file/.test(agent)) {
     throw new Error('Endpoint agent package must inspect files locally without uploading file bodies');
   }
-  if (!/redacted_available/.test(agent) || !/\.promptwall-redacted/.test(agent)) {
+  if (!/redacted_available/.test(agent) || !/\.redactwall-redacted/.test(agent)) {
     throw new Error('Endpoint agent package must include the local redacted companion handoff');
   }
   if (!/native-handoff/.test(agent) || !/ENDPOINT_AGENT_HANDOFF_SECRET/.test(agent)) {
@@ -248,15 +248,15 @@ function validateRuntimeFiles(files) {
   if (!collectorInstall.includes(String.raw`HKEY_CURRENT_USER\Software\Classes\*\shell`) || !collectorInstall.includes('%1') || !/MultiSelectModel/.test(collectorInstall)) {
     throw new Error('Endpoint desktop collector installer must register a per-user file shell action');
   }
-  if (!/PROMPTWALL_ENDPOINT_AGENT_HANDOFF_DIR/.test(collectorInstall) || !/PROMPTWALL_ENDPOINT_AGENT_HANDOFF_SECRET/.test(collectorInstall)) {
-    throw new Error('Endpoint desktop collector installer must accept PromptWall handoff env aliases');
+  if (!/REDACTWALL_ENDPOINT_AGENT_HANDOFF_DIR/.test(collectorInstall) || !/REDACTWALL_ENDPOINT_AGENT_HANDOFF_SECRET/.test(collectorInstall)) {
+    throw new Error('Endpoint desktop collector installer must accept RedactWall handoff env aliases');
   }
   if (/"-HandoffSecret"|INGEST_API_KEY=\$IngestKey/.test(collectorInstall)) {
     throw new Error('Endpoint desktop collector installer must not put secrets in shell commands');
   }
 
   const gitPushInstall = files.find((file) => file.path === 'scripts/install-git-push-guard.ps1').body.toString('utf8');
-  if (!/git-push-guard\.js/.test(gitPushInstall) || !/PROMPTWALL_ENV_PATH/.test(gitPushInstall) || !/PromptWall Git Push Guard/.test(gitPushInstall)) {
+  if (!/git-push-guard\.js/.test(gitPushInstall) || !/REDACTWALL_ENV_PATH/.test(gitPushInstall) || !/RedactWall Git Push Guard/.test(gitPushInstall)) {
     throw new Error('Endpoint git push guard installer must write a managed pre-push hook');
   }
   if (/"-IngestKey"|"-HandoffSecret"|INGEST_API_KEY|ENDPOINT_AGENT_HANDOFF_SECRET|contentBase64/.test(gitPushInstall)) {
@@ -264,7 +264,7 @@ function validateRuntimeFiles(files) {
   }
 
   const gitPushUninstall = files.find((file) => file.path === 'scripts/uninstall-git-push-guard.ps1').body.toString('utf8');
-  if (!/pre-push/.test(gitPushUninstall) || !/PromptWall Git Push Guard/.test(gitPushUninstall) || !/Remove-Item/.test(gitPushUninstall)) {
+  if (!/pre-push/.test(gitPushUninstall) || !/RedactWall Git Push Guard/.test(gitPushUninstall) || !/Remove-Item/.test(gitPushUninstall)) {
     throw new Error('Endpoint git push guard uninstaller must remove only managed hooks by default');
   }
 
@@ -280,12 +280,12 @@ function validateRuntimeFiles(files) {
   }
 
   const runner = files.find((file) => file.path === 'scripts/run-endpoint-agent.ps1').body.toString('utf8');
-  if (!/\$env:PROMPTWALL_ENV_PATH = \$config/.test(runner) || /\$env:SENTINEL_ENV_PATH = \$config/.test(runner)) {
-    throw new Error('Endpoint agent runner must load local config through PROMPTWALL_ENV_PATH');
+  if (!/\$env:REDACTWALL_ENV_PATH = \$config/.test(runner) || /\$env:(?:PROMPTWALL|SENTINEL)_ENV_PATH = \$config/.test(runner)) {
+    throw new Error('Endpoint agent runner must load local config through REDACTWALL_ENV_PATH');
   }
 
   const clipboardRunner = files.find((file) => file.path === 'scripts/run-clipboard-guard.ps1').body.toString('utf8');
-  if (!/\$env:PROMPTWALL_ENV_PATH = \$config/.test(clipboardRunner) || /\$env:SENTINEL_ENV_PATH = \$config/.test(clipboardRunner) || !/clipboard-guard\.js/.test(clipboardRunner) || !/--clear-on-block/.test(clipboardRunner)) {
+  if (!/\$env:REDACTWALL_ENV_PATH = \$config/.test(clipboardRunner) || /\$env:(?:PROMPTWALL|SENTINEL)_ENV_PATH = \$config/.test(clipboardRunner) || !/clipboard-guard\.js/.test(clipboardRunner) || !/--clear-on-block/.test(clipboardRunner)) {
     throw new Error('Endpoint clipboard guard runner must load config and invoke the clipboard guard collector');
   }
   if (/contentBase64|Get-Clipboard|Set-Clipboard/.test(clipboardRunner)) {
@@ -293,7 +293,7 @@ function validateRuntimeFiles(files) {
   }
 
   const collectorRunner = files.find((file) => file.path === 'scripts/run-desktop-collector.ps1').body.toString('utf8');
-  if (!/\$env:PROMPTWALL_ENV_PATH = \$config/.test(collectorRunner) || /\$env:SENTINEL_ENV_PATH = \$config/.test(collectorRunner) || !/protected-upload\.js/.test(collectorRunner) || !/\[string\[\]\]\$FilePath/.test(collectorRunner)) {
+  if (!/\$env:REDACTWALL_ENV_PATH = \$config/.test(collectorRunner) || /\$env:(?:PROMPTWALL|SENTINEL)_ENV_PATH = \$config/.test(collectorRunner) || !/protected-upload\.js/.test(collectorRunner) || !/\[string\[\]\]\$FilePath/.test(collectorRunner)) {
     throw new Error('Endpoint desktop collector runner must load config and invoke the protected-upload collector');
   }
 }
@@ -311,7 +311,7 @@ function packageEndpointAgent(opts = {}) {
   validateRuntimeFiles(files);
 
   fs.mkdirSync(outDir, { recursive: true });
-  const baseName = `promptwall-endpoint-agent-v${appVersion}`;
+  const baseName = `redactwall-endpoint-agent-v${appVersion}`;
   const zipPath = path.join(outDir, `${baseName}.zip`);
   const manifestPath = path.join(outDir, `${baseName}.manifest.json`);
   const zip = new AdmZip();
@@ -323,7 +323,7 @@ function packageEndpointAgent(opts = {}) {
   zip.writeZip(zipPath);
   const zipBody = fs.readFileSync(zipPath);
   const packageManifest = {
-    kind: 'promptwall-endpoint-agent-package',
+    kind: 'redactwall-endpoint-agent-package',
     packageName: path.basename(zipPath),
     appVersion,
     createdAt: now.toISOString(),

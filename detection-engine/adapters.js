@@ -1,5 +1,5 @@
 /*
- * PromptWall site adapters + safety helpers (browser-safe, zero deps).
+ * RedactWall site adapters + safety helpers (browser-safe, zero deps).
  * Shared by the content script and the background worker. Pure functions only
  * (no DOM), so they are unit-testable in Node and identical on every sensor.
  *

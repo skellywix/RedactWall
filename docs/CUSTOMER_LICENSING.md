@@ -1,6 +1,6 @@
 # Customer Licensing
 
-How PromptWall licenses are structured, enforced, and priced. Modeled on the
+How RedactWall licenses are structured, enforced, and priced. Modeled on the
 offline license-file patterns used by GitLab (self-managed license + renewal
 true-up) and Keygen (cryptographically signed offline licenses), adapted for
 regulated buyers who often run air-gapped or egress-restricted environments.
@@ -8,7 +8,7 @@ regulated buyers who often run air-gapped or egress-restricted environments.
 Status: SHIPPED. The offline Ed25519 verifier is `server/license.js`
 (verified at boot and re-checked daily); licenses are issued offline with
 `npm run license:issue` and installed via `POST /api/billing/license` or by
-dropping `promptwall.lic` next to `.env`. Absence = demo mode (zero gating);
+dropping `redactwall.lic` next to `.env`. Absence = demo mode (zero gating);
 past the grace window only the admin console's config writes go read-only —
 detection, enforcement, approvals, audit, and evidence export always run. The
 embedded public key in `server/license.js` is a placeholder to be replaced with
@@ -30,7 +30,7 @@ commercial release.
 
 ## License file format
 
-A `promptwall.lic` file: base64-encoded JSON payload plus an Ed25519
+A `redactwall.lic` file: base64-encoded JSON payload plus an Ed25519
 signature, verified at boot and daily against a public key embedded in the
 product.
 
@@ -88,7 +88,7 @@ product.
   Common Paper Software License Agreement): internal-use grant scoped to
   licensed seats/sites, no service-bureau use, warranty disclaimer, liability
   cap at 12 months of fees, audit clause tied to the seat report the product
-  already generates, and data-protection terms reflecting that PromptWall
+  already generates, and data-protection terms reflecting that RedactWall
   processes no member data on vendor infrastructure (self-hosted).
 - The seat report doubles as the audit mechanism — no intrusive vendor audits.
 

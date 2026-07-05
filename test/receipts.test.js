@@ -8,13 +8,13 @@ const os = require('node:os');
 const path = require('node:path');
 
 process.env.ADMIN_PASSWORD = 'unit-pass';
-process.env.SENTINEL_SECRET = 'unit-secret-stable-receipts';
-process.env.SENTINEL_DATA_KEY = 'unit-data-key-stable';
+process.env.REDACTWALL_SECRET = 'unit-secret-stable-receipts';
+process.env.REDACTWALL_DATA_KEY = 'unit-data-key-stable';
 process.env.INGEST_API_KEY = 'unit-ingest-key';
-process.env.SENTINEL_DB_PATH = path.join(os.tmpdir(), 'ps-receipts-test-' + crypto.randomBytes(6).toString('hex') + '.db');
-process.env.SENTINEL_POLICY_PATH = path.join(os.tmpdir(), 'ps-receipts-policy-' + crypto.randomBytes(6).toString('hex') + '.json');
+process.env.REDACTWALL_DB_PATH = path.join(os.tmpdir(), 'ps-receipts-test-' + crypto.randomBytes(6).toString('hex') + '.db');
+process.env.REDACTWALL_POLICY_PATH = path.join(os.tmpdir(), 'ps-receipts-policy-' + crypto.randomBytes(6).toString('hex') + '.json');
 
-fs.copyFileSync(path.join(__dirname, '..', 'config', 'policy.json'), process.env.SENTINEL_POLICY_PATH);
+fs.copyFileSync(path.join(__dirname, '..', 'config', 'policy.json'), process.env.REDACTWALL_POLICY_PATH);
 
 const app = require('../server/app');
 const receipts = require('../server/receipts');
@@ -271,7 +271,7 @@ test('issueReceipt refuses unknown statuses and empty outbound text', () => {
 
 test.after(() => {
   for (const suffix of ['', '-wal', '-shm']) {
-    try { fs.unlinkSync(process.env.SENTINEL_DB_PATH + suffix); } catch {}
+    try { fs.unlinkSync(process.env.REDACTWALL_DB_PATH + suffix); } catch {}
   }
-  try { fs.unlinkSync(process.env.SENTINEL_POLICY_PATH); } catch {}
+  try { fs.unlinkSync(process.env.REDACTWALL_POLICY_PATH); } catch {}
 });

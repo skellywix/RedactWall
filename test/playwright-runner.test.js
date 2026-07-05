@@ -61,7 +61,7 @@ test('reserveAvailablePort skips a live runner reservation', async (t) => {
 });
 
 test('port lock helpers recover stale owners and preserve live owners', () => {
-  const lockDir = fs.mkdtempSync(path.join(os.tmpdir(), 'promptwall-playwright-locks-'));
+  const lockDir = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-playwright-locks-'));
   try {
     assert.doesNotThrow(() => releasePortLock(null));
     assert.doesNotThrow(() => releasePortLock({ released: true }));

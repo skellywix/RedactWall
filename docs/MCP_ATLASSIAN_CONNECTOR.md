@@ -1,7 +1,7 @@
 # MCP Atlassian Connector
 
 The Atlassian connector gives MCP agents guarded, read-only access to Jira
-issues and Confluence pages. PromptWall fetches bounded content from Atlassian,
+issues and Confluence pages. RedactWall fetches bounded content from Atlassian,
 runs it through the shared MCP guard, and returns only the sanitized MCP result
 to the model.
 

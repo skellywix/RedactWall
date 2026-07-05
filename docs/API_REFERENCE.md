@@ -1,6 +1,6 @@
 # Developer API Reference
 
-PromptWall exposes a small REST surface under `/api/v1` for sensors and custom
+RedactWall exposes a small REST surface under `/api/v1` for sensors and custom
 integrations: scan text, scan files, scan model responses, report shadow-AI
 sightings, fetch policy, and poll held-item status. A machine-readable OpenAPI
 3.1 spec is served at **`GET /api/v1/openapi.json`** (public, no key) for

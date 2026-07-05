@@ -28,19 +28,19 @@ test('systemd installer creates a persistent timer and secret-free env file', ()
   assert.match(install, /after_units="network-online\.target docker\.service"/);
   assert.match(install, /After=\$after_units/);
   assert.match(install, /systemctl enable --now "\$SERVICE_NAME\.timer"/);
-  assert.match(install, /PROMPTWALL_EVIDENCE_MODE=/);
-  assert.match(install, /PROMPTWALL_EVIDENCE_CONFIG=/);
-  assert.match(install, /PROMPTWALL_EVIDENCE_CONTAINER=/);
+  assert.match(install, /REDACTWALL_EVIDENCE_MODE=/);
+  assert.match(install, /REDACTWALL_EVIDENCE_CONFIG=/);
+  assert.match(install, /REDACTWALL_EVIDENCE_CONTAINER=/);
   assert.match(install, /\/data\/evidence-schedule\.json/);
   assert.match(install, /config\/evidence-schedule\.json/);
-  assert.doesNotMatch(install, /SENTINEL_SECRET/);
-  assert.doesNotMatch(install, /SENTINEL_DATA_KEY/);
+  assert.doesNotMatch(install, /REDACTWALL_SECRET/);
+  assert.doesNotMatch(install, /REDACTWALL_DATA_KEY/);
   assert.doesNotMatch(install, /INGEST_API_KEY/);
   assert.doesNotMatch(install, /SMTP_PASS/);
 });
 
 test('Linux runner supports npm and Docker modes without logging prompt content', () => {
-  assert.match(run, /MODE="\$\{PROMPTWALL_EVIDENCE_MODE:-npm\}"/);
+  assert.match(run, /MODE="\$\{REDACTWALL_EVIDENCE_MODE:-npm\}"/);
   assert.match(run, /npm run evidence:pack:scheduled -- "\$resolved_config"/);
   assert.match(run, /docker exec "\$CONTAINER_NAME" npm run evidence:pack:scheduled -- "\$CONFIG_PATH"/);
   assert.match(run, /Evidence schedule config not found/);
@@ -54,7 +54,7 @@ test('docs cover Windows and Linux scheduled evidence pack operations', () => {
     assert.match(doc, /evidence-pack\.log/);
     assert.match(doc, /raw prompt bodies/);
   }
-  assert.match(aws, /promptwall-evidence-pack\.timer/);
+  assert.match(aws, /redactwall-evidence-pack\.timer/);
   assert.match(aws, /evidence-pack\.log/);
   assert.match(aws, /raw prompt bodies/);
   assert.match(taskDoc, /Task Scheduler/);

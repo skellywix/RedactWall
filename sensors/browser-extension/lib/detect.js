@@ -1,5 +1,5 @@
 /*
- * PromptWall shared detection engine (browser-safe, zero deps).
+ * RedactWall shared detection engine (browser-safe, zero deps).
  *
  * Plugin architecture (inspired by Strac's auditor): detection is a REGISTRY of
  * self-describing detectors, each with { id, severity, score, scan(text) }.
@@ -335,7 +335,7 @@
     { id: 'SECRET_KEY', score: 0.85, re: /(?<![A-Za-z0-9/+=])[A-Za-z0-9/+]{40}(?![A-Za-z0-9/+=])/g, ctx: /\b(?:aws.{0,12}secret|secret[_ ]?access[_ ]?key)\b/i, vendorTag: _sv('aws', 'AWS secret access key') },
     { id: 'SECRET_KEY', score: 0.9, re: /"type"\s*:\s*"service_account"/g, vendorTag: _sv('gcp', 'GCP service-account key file') },
     // Org-planted tripwire values for fake records, demos, and leak drills.
-    { id: 'CANARY_TOKEN', score: 0.99, re: /\b(?:PS|PROMPTWALL|PROMPTSENTINEL)[-_]CANARY[-_][A-Z0-9][A-Z0-9_-]{11,63}\b/gi },
+    { id: 'CANARY_TOKEN', score: 0.99, re: /\b(?:RW|PS|REDACTWALL|PROMPTWALL|PROMPTSENTINEL)[-_]CANARY[-_][A-Z0-9][A-Z0-9_-]{11,63}\b/gi },
     { id: 'PASSWORD', score: 0.8, re: /\b(?:pass(?:word|wd)?|pwd|passphrase)\s*[:=]\s*\S{4,}/gi },
     { id: 'US_ADDRESS', score: 0.6, re: /\b\d{1,6}\s+(?:[A-Za-z0-9.'-]+\s){0,4}(?:Street|St|Avenue|Ave|Boulevard|Blvd|Road|Rd|Lane|Ln|Drive|Dr|Court|Ct|Way|Place|Pl|Terrace|Ter)\b\.?/gi },
   ];

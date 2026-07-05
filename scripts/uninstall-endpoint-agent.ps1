@@ -1,10 +1,10 @@
 param(
-  [string]$TaskName = "PromptWallEndpointAgent",
-  [string]$ConfigDir = "$env:LOCALAPPDATA\PromptWall",
+  [string]$TaskName = "RedactWallEndpointAgent",
+  [string]$ConfigDir = "$env:LOCALAPPDATA\RedactWall",
   [switch]$RemoveDesktopCollector,
-  [string]$DesktopCollectorKeyName = "PromptWallProtectedUpload",
+  [string]$DesktopCollectorKeyName = "RedactWallProtectedUpload",
   [switch]$RemoveClipboardGuard,
-  [string]$ClipboardGuardShortcutName = "PromptWall Clipboard Guard",
+  [string]$ClipboardGuardShortcutName = "RedactWall Clipboard Guard",
   [switch]$ClipboardGuardDesktopShortcut,
   [switch]$RemoveConfig
 )

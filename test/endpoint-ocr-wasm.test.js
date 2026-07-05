@@ -20,7 +20,7 @@ function fakeTesseract(behavior) {
 
 test('wasmOcrAvailable honors the kill switch, missing module, and missing tessdata', () => {
   assert.strictEqual(ocrWasm.wasmOcrAvailable({ env: { ENDPOINT_AGENT_OCR_WASM: 'off' }, fresh: true }), false);
-  assert.strictEqual(ocrWasm.wasmOcrAvailable({ env: { PROMPTWALL_ENDPOINT_AGENT_OCR_WASM: 'false' }, fresh: true }), false);
+  assert.strictEqual(ocrWasm.wasmOcrAvailable({ env: { REDACTWALL_ENDPOINT_AGENT_OCR_WASM: 'false' }, fresh: true }), false);
   assert.strictEqual(
     ocrWasm.wasmOcrAvailable({ env: {}, fresh: true, resolve: () => { throw new Error('not installed'); } }),
     false,
@@ -169,5 +169,5 @@ test('bundled WASM extracts real fixture text fully offline', async (t) => {
   });
   assert.strictEqual(result.extractionOk, true);
   assert.strictEqual(result.ocrEngine, 'wasm');
-  assert.match(result.text, /PROMPTWALL/i);
+  assert.match(result.text, /REDACTWALL/i);
 });

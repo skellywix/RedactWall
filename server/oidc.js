@@ -12,12 +12,11 @@ const db = require('./db');
 const roles = require('./roles');
 const scim = require('./scim');
 
-const STATE_COOKIE_NAME = 'promptwall_oidc';
+const STATE_COOKIE_NAME = 'redactwall_oidc';
 const STATE_TTL_MS = 10 * 60 * 1000;
 const STEP_UP_TTL_MS = 5 * 60 * 1000;
 const MAX_CLOCK_SKEW_SEC = 60;
-const STATE_SECRET = process.env.SENTINEL_SECRET
-  || process.env.PROMPTWALL_SECRET
+const STATE_SECRET = process.env.REDACTWALL_SECRET || process.env.PROMPTWALL_SECRET || process.env.SENTINEL_SECRET
   || crypto.randomBytes(32).toString('hex');
 
 function cleanString(value, max = 512) {
@@ -25,14 +24,14 @@ function cleanString(value, max = 512) {
 }
 
 function config(env = process.env) {
-  const issuer = cleanString(env.OIDC_ISSUER || env.PROMPTWALL_OIDC_ISSUER, 512).replace(/\/+$/, '');
-  const clientId = cleanString(env.OIDC_CLIENT_ID || env.PROMPTWALL_OIDC_CLIENT_ID, 256);
-  const clientSecret = cleanString(env.OIDC_CLIENT_SECRET || env.PROMPTWALL_OIDC_CLIENT_SECRET, 2048);
-  const redirectUri = cleanString(env.OIDC_REDIRECT_URI || env.PROMPTWALL_OIDC_REDIRECT_URI, 1024);
-  const authorizationEndpoint = cleanString(env.OIDC_AUTHORIZATION_ENDPOINT || env.PROMPTWALL_OIDC_AUTHORIZATION_ENDPOINT, 1024);
-  const tokenEndpoint = cleanString(env.OIDC_TOKEN_ENDPOINT || env.PROMPTWALL_OIDC_TOKEN_ENDPOINT, 1024);
-  const jwksUri = cleanString(env.OIDC_JWKS_URI || env.PROMPTWALL_OIDC_JWKS_URI, 1024);
-  const scope = cleanString(env.OIDC_SCOPE || env.PROMPTWALL_OIDC_SCOPE, 256) || 'openid email profile';
+  const issuer = cleanString(env.OIDC_ISSUER || env.REDACTWALL_OIDC_ISSUER, 512).replace(/\/+$/, '');
+  const clientId = cleanString(env.OIDC_CLIENT_ID || env.REDACTWALL_OIDC_CLIENT_ID, 256);
+  const clientSecret = cleanString(env.OIDC_CLIENT_SECRET || env.REDACTWALL_OIDC_CLIENT_SECRET, 2048);
+  const redirectUri = cleanString(env.OIDC_REDIRECT_URI || env.REDACTWALL_OIDC_REDIRECT_URI, 1024);
+  const authorizationEndpoint = cleanString(env.OIDC_AUTHORIZATION_ENDPOINT || env.REDACTWALL_OIDC_AUTHORIZATION_ENDPOINT, 1024);
+  const tokenEndpoint = cleanString(env.OIDC_TOKEN_ENDPOINT || env.REDACTWALL_OIDC_TOKEN_ENDPOINT, 1024);
+  const jwksUri = cleanString(env.OIDC_JWKS_URI || env.REDACTWALL_OIDC_JWKS_URI, 1024);
+  const scope = cleanString(env.OIDC_SCOPE || env.REDACTWALL_OIDC_SCOPE, 256) || 'openid email profile';
   return {
     issuer,
     clientId,

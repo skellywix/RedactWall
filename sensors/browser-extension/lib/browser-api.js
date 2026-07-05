@@ -1,4 +1,4 @@
-/* PromptWall WebExtension API bridge.
+/* RedactWall WebExtension API bridge.
  * Normalizes Chrome's callback namespace and Firefox's promise namespace for
  * the small API surface the extension uses.
  */

@@ -21,10 +21,10 @@ function validateSecret(secret) {
   return normalized;
 }
 
-function otpauthUri({ secret, account = 'admin', issuer = 'PromptWall' } = {}) {
+function otpauthUri({ secret, account = 'admin', issuer = 'RedactWall' } = {}) {
   const normalized = validateSecret(secret);
   if (!normalized) throw new Error('ADMIN_TOTP_SECRET must be valid base32 and at least 16 characters.');
-  const safeIssuer = String(issuer || 'PromptWall').trim() || 'PromptWall';
+  const safeIssuer = String(issuer || 'RedactWall').trim() || 'RedactWall';
   const safeAccount = String(account || 'admin').trim() || 'admin';
   const label = encodeURIComponent(`${safeIssuer}:${safeAccount}`);
   const params = new URLSearchParams({
@@ -40,7 +40,7 @@ function otpauthUri({ secret, account = 'admin', issuer = 'PromptWall' } = {}) {
 function parseArgs(argv = process.argv.slice(2)) {
   const opts = {
     envPath: DEFAULT_ENV_PATH,
-    issuer: 'PromptWall',
+    issuer: 'RedactWall',
     account: '',
   };
   for (let i = 0; i < argv.length; i += 1) {
@@ -64,7 +64,7 @@ function printHelp(io = console) {
     '',
     'Options:',
     '  --env <path>       Read a non-default env file',
-    '  --issuer <name>    Authenticator issuer label (default PromptWall)',
+    '  --issuer <name>    Authenticator issuer label (default RedactWall)',
     '  --account <name>   Authenticator account label (default ADMIN_USER)',
     '  --recovery         Print single-use MFA recovery codes instead of the URI',
   ].join('\n'));

@@ -1,6 +1,6 @@
-# PromptWall Security Whitepaper
+# RedactWall Security Whitepaper
 
-PromptWall is an inline DLP control for AI usage: it inspects prompts before
+RedactWall is an inline DLP control for AI usage: it inspects prompts before
 they leave a device or workload, blocks or holds sensitive content, and keeps
 tamper-evident evidence — all without shipping prompt bodies to any vendor.
 This paper describes the architecture, data flows, cryptography, and threat
@@ -15,7 +15,7 @@ One control plane, three sensors, and enforcement gateways.
 approval workflow, maintains the hash-chained audit log, serves the admin
 dashboard, and exports evidence, SIEM, and trust packages. It deploys inside
 the customer's environment (single node, Docker, or a customer-silo AWS
-shape) — there is no PromptWall-hosted multi-tenant backend.
+shape) — there is no RedactWall-hosted multi-tenant backend.
 
 **Sensors** (`sensors/`), all running the same shared detection engine
 (`detection-engine/detect.js`) locally:
@@ -41,7 +41,7 @@ shape) — there is no PromptWall-hosted multi-tenant backend.
   keeps upstream provider credentials on the gateway side and requires a
   client token before any app can send traffic.
 - **Squid ICAP bridge** (`scripts/squid-icap-bridge.js`) — a reference REQMOD
-  integration so an explicit proxy can enforce PromptWall verdicts for
+  integration so an explicit proxy can enforce RedactWall verdicts for
   browsers that cannot run the managed extension.
 
 ## 2. Data Flow
@@ -63,7 +63,7 @@ shape) — there is no PromptWall-hosted multi-tenant backend.
                   AES-256-GCM in transit to the control plane)
                                  |
                                  v
-                       PromptWall control plane
+                       RedactWall control plane
               policy verdict | approval queue | audit chain
                                  |
               +------------------+------------------+
@@ -90,7 +90,7 @@ The prompt-free contract, enforced in code and regression-tested:
 | Secrets, credentials, key material | Signed prompt-free receipts |
 | Local file paths and raw URLs (in exports) | Sanitized SIEM/SOAR events |
 
-No telemetry is sent to PromptWall the vendor. SIEM delivery history is
+No telemetry is sent to RedactWall the vendor. SIEM delivery history is
 recorded without payload bodies.
 
 ## 3. Cryptographic Inventory
@@ -104,13 +104,13 @@ recorded without payload bodies.
 | Salted SHA-256 token hashes | `gateway/tokens.js`, release tokens | Gateway agent tokens and release tokens are stored only as salted hashes; raw tokens exist only at mint time. |
 | HMAC-signed sessions + CSRF | `server/auth.js` | Admin sessions are HMAC-signed; unsafe admin writes require a CSRF token; production preflight enforces secret strength and TOTP MFA. |
 
-Key material sources: `SENTINEL_SECRET` (sessions, derived keys) and
-`SENTINEL_DATA_KEY` (data sealing), both required to be stable and at least 32
+Key material sources: `REDACTWALL_SECRET` (sessions, derived keys) and
+`REDACTWALL_DATA_KEY` (data sealing), both required to be stable and at least 32
 characters by production preflight.
 
 ## 4. Threat Model
 
-What PromptWall defends against, and where the honest limits are.
+What RedactWall defends against, and where the honest limits are.
 
 **Covered:**
 
@@ -136,7 +136,7 @@ What PromptWall defends against, and where the honest limits are.
   scope.
 - **Screenshots, photos, retyping.** Content re-entered by a human outside
   monitored input paths is not inspected. This is a policy and training
-  problem, not a technical one; PromptWall does not claim to solve it.
+  problem, not a technical one; RedactWall does not claim to solve it.
 - **Local administrators.** A user with admin rights on their machine can
   disable the endpoint agent or extension. Coverage dashboards and required
   sensor baselines exist to make that visible quickly, not impossible.
@@ -144,7 +144,7 @@ What PromptWall defends against, and where the honest limits are.
   semantic detectors have false-negative rates tracked by the detection eval
   in CI; `alwaysBlock` categories and exact-match packs harden the cases that
   must never leak.
-- **TLS interception is not performed.** PromptWall inspects at the input
+- **TLS interception is not performed.** RedactWall inspects at the input
   surface, MCP layer, and gateway — it does not man-in-the-middle arbitrary
   traffic.
 
@@ -163,7 +163,7 @@ In every model the customer operates the environment and owns the data.
 
 ## 6. Sub-Processor Stance
 
-PromptWall introduces no sub-processors by default. The product makes no
+RedactWall introduces no sub-processors by default. The product makes no
 vendor-bound calls: no telemetry, no cloud detection service, no external
 model calls of its own. Self-hosted deployments add only the vendors the
 operator chooses (hosting provider, SIEM destination), and outbound SIEM

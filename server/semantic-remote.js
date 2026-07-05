@@ -3,7 +3,7 @@
  * Optional cloud semantic classifier seam (Nightfall/Strac-style).
  *
  * The on-device engine stays the default and the source of truth; when an
- * operator EXPLICITLY configures SENTINEL_SEMANTIC_REMOTE_URL, gate-path
+ * operator EXPLICITLY configures REDACTWALL_SEMANTIC_REMOTE_URL, gate-path
  * prompts are ALSO sent to that endpoint and its categories are max-combined
  * into the local analysis. Configuring this means prompt text leaves the box —
  * that is the operator's deliberate, documented choice. Any remote failure,
@@ -19,13 +19,13 @@ const MAX_REMOTE_CATEGORIES = 12;
 
 function remoteSettings(env = process.env) {
   const resolved = withEnvAliases(env);
-  const url = String(resolved.SENTINEL_SEMANTIC_REMOTE_URL || '').trim();
+  const url = String(resolved.REDACTWALL_SEMANTIC_REMOTE_URL || '').trim();
   if (!url || !/^https?:\/\//.test(url)) return { enabled: false };
   return {
     enabled: true,
     url,
-    key: String(resolved.SENTINEL_SEMANTIC_REMOTE_KEY || '').trim(),
-    timeoutMs: Math.max(200, Math.min(10000, Number(resolved.SENTINEL_SEMANTIC_REMOTE_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS)),
+    key: String(resolved.REDACTWALL_SEMANTIC_REMOTE_KEY || '').trim(),
+    timeoutMs: Math.max(200, Math.min(10000, Number(resolved.REDACTWALL_SEMANTIC_REMOTE_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS)),
   };
 }
 

@@ -1,9 +1,9 @@
-# PromptWall Competitive Benchmark (2026)
+# RedactWall Competitive Benchmark (2026)
 
-This document compares PromptWall to the three industry-leading GenAI-DLP /
+This document compares RedactWall to the three industry-leading GenAI-DLP /
 AI-usage-governance products and records the capabilities added to bring
-PromptWall to parity-or-better on the "employees using AI tools safely" use
-case. It is a feature benchmark, not a marketing claim; every PromptWall row
+RedactWall to parity-or-better on the "employees using AI tools safely" use
+case. It is a feature benchmark, not a marketing claim; every RedactWall row
 below is backed by code in this repository and by the test gate (`npm run
 review:ci`).
 
@@ -30,13 +30,13 @@ Runners-up referenced for specific features: WitnessAI (intent classification,
 allow/warn/block/route), Microsoft Purview DSPM for AI (adaptive protection,
 personal-vs-corporate account), Netskope (real-time coaching, app-risk index).
 
-## Where PromptWall already led
+## Where RedactWall already led
 
 - **Fully on-device detection.** No prompt text leaves the org for
   classification — the semantic classifier, PII detectors, and now EDM and
   prompt-attack intent all run locally. Prompt Security, Harmonic, and Nightfall
   all perform at least some inference in their cloud. This is a privacy and
-  data-residency advantage PromptWall keeps.
+  data-residency advantage RedactWall keeps.
 - **Tamper-evident evidence.** Hash-chained audit log plus signed, prompt-free
   "safe-to-send" receipts that an examiner can verify after the fact. None of
   the three publish an equivalent cryptographic proof-of-scan.
@@ -47,7 +47,7 @@ personal-vs-corporate account), Netskope (real-time coaching, app-risk index).
 
 Each closed a specific gap versus a named leader.
 
-| Capability | Leader that had it | PromptWall now | Where |
+| Capability | Leader that had it | RedactWall now | Where |
 | --- | --- | --- | --- |
 | Prompt-injection / **jailbreak intent** detection (direct + indirect) | Prompt Security, WitnessAI, Lakera | `PROMPT_ATTACK` category — instruction-override, persona-jailbreak, guardrail-bypass, and "AI reading this" indirect-injection signals, on prompts **and** AI responses **and** MCP tool output | `detection-engine/detect.js`, `test/prompt-attack.test.js` |
 | **International PII** with real checksums | Nightfall (100+ detectors) | UK NINO, UK NHS (mod-11), Canada SIN (Luhn), Australia TFN (weighted mod-11), India Aadhaar (Verhoeff) + India PAN, all context-anchored | `detection-engine/detect.js`, `test/international-pii.test.js` |
@@ -62,7 +62,7 @@ Each closed a specific gap versus a named leader.
 
 Legend: ● full · ◐ partial · ○ none.
 
-| Capability | PromptWall | Prompt Sec. | Harmonic | Nightfall |
+| Capability | RedactWall | Prompt Sec. | Harmonic | Nightfall |
 | --- | :---: | :---: | :---: | :---: |
 | Structured PII detection (regex + validators) | ● | ● | ● | ● |
 | International PII with checksums | ● | ● | ◐ | ● |
@@ -102,20 +102,20 @@ Legend: ● full · ◐ partial · ○ none.
 Notes:
 
 - **[1]** Nightfall's agent hooks let it scan tool responses, but it does not
-  sanitize MCP tool output *before the model consumes it* the way PromptWall's
+  sanitize MCP tool output *before the model consumes it* the way RedactWall's
   MCP guard `sanitizeToolResult()` does.
 - **[2]** Nightfall is **monitor-only for raw LLM responses** — it can alert but
-  not block a bad model response. PromptWall's gateway returns `403` on a
+  not block a bad model response. RedactWall's gateway returns `403` on a
   blocked response (`gateway/server.js` `BLOCK_STATUSES` / `responseBlocked`).
 - **[3]** Nightfall now hooks agent actions and discovers shadow MCP servers,
   but its tool-output handling is detection/alerting, not pre-model
   sanitization.
 
-## Nightfall AI Agent Security vs PromptWall
+## Nightfall AI Agent Security vs RedactWall
 
-Nightfall's newest pillar and PromptWall's equivalents:
+Nightfall's newest pillar and RedactWall's equivalents:
 
-| Nightfall | PromptWall |
+| Nightfall | RedactWall |
 | --- | --- |
 | IDE/CLI hooks (Cursor, Claude Code, VS Code) scan+block prompts, shell commands, MCP tool calls | `sensors/agent-hooks/` — Claude Code `UserPromptSubmit` + `PreToolUse` (Bash + `mcp__*`) hooks, decided on-box; blocks locally, reports label-only |
 | Shadow-MCP discovery (local stdio + remote) | `sensors/endpoint-agent/collectors/mcp-inventory.js` — enumerates MCP server configs across clients, metadata-only, unapproved-server posture |
@@ -134,23 +134,23 @@ truthful:
 - **CV-model OCR depth.** The endpoint agent now bundles an offline WASM OCR
   engine, so screenshots and document scans are read on-box with no configured
   command and no egress. Nightfall's CV transformers still go deeper on hard
-  inputs — photos, handwriting, and heavily-degraded scans — and PromptWall's OCR
+  inputs — photos, handwriting, and heavily-degraded scans — and RedactWall's OCR
   stays endpoint-only (server-side images remain `ocr_required` by design).
 - **Fine-tuned SLM detectors.** Harmonic's per-category small language models
-  generalize further than PromptWall's logistic-regression classifier on novel
-  phrasings. PromptWall trades some recall on unseen paraphrases for zero
+  generalize further than RedactWall's logistic-regression classifier on novel
+  phrasings. RedactWall trades some recall on unseen paraphrases for zero
   dependencies and a few-KB model.
 - **"Route to sanctioned model" enforcement.** WitnessAI can redirect a risky
-  prompt to an approved internal LLM. PromptWall blocks/redacts but does not yet
+  prompt to an approved internal LLM. RedactWall blocks/redacts but does not yet
   proxy to an alternate model.
 - **LLM security analyst.** Nightfall's Nyx investigates incidents and drafts
-  reports via natural language. PromptWall surfaces analytics and evidence packs
+  reports via natural language. RedactWall surfaces analytics and evidence packs
   but has no built-in agentic analyst — and, by design, never sends prompts to
   any LLM.
 - **Sanctioned-tenant compliance ingestion.** Nightfall ingests the Claude
-  Compliance API to see inside enterprise tenants; PromptWall intercepts at the
+  Compliance API to see inside enterprise tenants; RedactWall intercepts at the
   edge instead of ingesting tenant logs.
-- **Shared multi-tenant SaaS.** PromptWall ships customer-silo; shared tenancy
+- **Shared multi-tenant SaaS.** RedactWall ships customer-silo; shared tenancy
   needs the Postgres migration already on the roadmap.
 
 Now shipped (previously gaps): vendor-labeled secrets, document-class

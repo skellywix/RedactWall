@@ -9,13 +9,13 @@ const path = require('node:path');
 const AdmZip = require('adm-zip');
 
 process.env.ADMIN_PASSWORD = 'unit-pass';
-process.env.SENTINEL_SECRET = 'unit-secret-stable';
-process.env.SENTINEL_DATA_KEY = 'unit-data-key-stable';
+process.env.REDACTWALL_SECRET = 'unit-secret-stable';
+process.env.REDACTWALL_DATA_KEY = 'unit-data-key-stable';
 process.env.INGEST_API_KEY = 'unit-ingest-key';
-process.env.SENTINEL_DB_PATH = path.join(os.tmpdir(), 'ps-dashboard-linkage-test-' + crypto.randomBytes(6).toString('hex') + '.db');
-process.env.SENTINEL_POLICY_PATH = path.join(os.tmpdir(), 'ps-dashboard-linkage-policy-' + crypto.randomBytes(6).toString('hex') + '.json');
+process.env.REDACTWALL_DB_PATH = path.join(os.tmpdir(), 'ps-dashboard-linkage-test-' + crypto.randomBytes(6).toString('hex') + '.db');
+process.env.REDACTWALL_POLICY_PATH = path.join(os.tmpdir(), 'ps-dashboard-linkage-policy-' + crypto.randomBytes(6).toString('hex') + '.json');
 
-fs.copyFileSync(path.join(__dirname, '..', 'config', 'policy.json'), process.env.SENTINEL_POLICY_PATH);
+fs.copyFileSync(path.join(__dirname, '..', 'config', 'policy.json'), process.env.REDACTWALL_POLICY_PATH);
 
 const app = require('../server/app');
 const db = require('../server/db');
@@ -56,7 +56,7 @@ async function login(port) {
   });
   assert.strictEqual(res.status, 200);
   const cookie = (res.headers.get('set-cookie') || '').split(';')[0];
-  assert.match(cookie, /^promptwall_session=/);
+  assert.match(cookie, /^redactwall_session=/);
 
   const csrfRes = await jsonFetch(port, '/api/csrf', {
     method: 'GET',
@@ -416,16 +416,16 @@ test('dashboard static controls, generated policy controls, and API routes stay 
   assert.ok(dashboard.includes('hardening-runbook'), 'dashboard.js no longer renders hardening remediation runbooks');
   assert.ok(dashboard.includes('hardening-mission'), 'dashboard.js no longer renders the guided hardening mission');
   assert.ok(dashboard.includes('renderOperatorFlow'), 'dashboard.js no longer renders the operator flow');
-  assert.ok(operatorFlowJs.includes('PromptWallOperatorFlow'), 'operator-flow.js no longer exports the operator flow renderer');
+  assert.ok(operatorFlowJs.includes('RedactWallOperatorFlow'), 'operator-flow.js no longer exports the operator flow renderer');
   assert.ok(operatorFlowJs.includes('operator-flow-card'), 'operator-flow.js no longer renders operator flow cards');
   assert.ok(operatorFlowJs.includes('data-flow-target'), 'operator-flow.js no longer exposes section jump targets');
   assert.ok(policyGuidesJs.includes('addApprovalRoute'), 'policy-guides.js no longer renders approval route builder behavior');
   assert.ok(policyGuidesJs.includes('addMcpToolRule'), 'policy-guides.js no longer renders MCP builder behavior');
   assert.ok(policyGuidesJs.includes('pol_approval_routing_rules'), 'policy-guides.js no longer writes approval routing rules');
   assert.ok(policyGuidesJs.includes('pol_mcp_approval_required_tools'), 'policy-guides.js no longer writes MCP approval tools');
-  assert.ok(policyImpactPreviewJs.includes('PromptWallPolicyImpact'), 'policy-impact-preview.js no longer exports the policy impact renderer');
+  assert.ok(policyImpactPreviewJs.includes('RedactWallPolicyImpact'), 'policy-impact-preview.js no longer exports the policy impact renderer');
   assert.ok(index.includes('<script src="/policy-impact-preview.js" defer></script>'), 'index.html no longer loads the policy impact renderer');
-  assert.ok(behaviorBaselinesJs.includes('PromptWallBehaviorBaselines'), 'behavior-baselines.js no longer exports the behavior baseline renderer');
+  assert.ok(behaviorBaselinesJs.includes('RedactWallBehaviorBaselines'), 'behavior-baselines.js no longer exports the behavior baseline renderer');
   assert.ok(behaviorBaselinesJs.includes('behavior-baseline-row'), 'behavior-baselines.js no longer renders behavior baseline rows');
   assert.ok(dashboard.includes('renderBehaviorBaselines'), 'dashboard.js no longer renders behavior baselines');
   assert.ok(operatorFlowJs.includes('Behavior baselines'), 'operator-flow.js no longer includes behavior baseline triage');
@@ -434,25 +434,25 @@ test('dashboard static controls, generated policy controls, and API routes stay 
   assert.ok(dashboard.includes('ai-inventory-risk'), 'dashboard.js no longer renders AI inventory risk tiers');
   assert.ok(dashboard.includes('renderAgenticMcp'), 'dashboard.js no longer renders Agentic MCP control posture');
   assert.ok(agenticMcpJs.includes('agentic-mcp-row'), 'agentic-mcp.js no longer renders MCP agent/tool rows');
-  assert.ok(agenticMcpJs.includes('PromptWallAgenticMcp'), 'agentic-mcp.js no longer exports the MCP renderer');
+  assert.ok(agenticMcpJs.includes('RedactWallAgenticMcp'), 'agentic-mcp.js no longer exports the MCP renderer');
   assert.ok(agenticMcpJs.includes('connectorRegistry'), 'agentic-mcp.js no longer renders connector registry posture');
   assert.ok(agenticMcpJs.includes('Connectors'), 'agentic-mcp.js no longer exposes connector profiles');
   assert.ok(dashboard.includes('renderThreatGuardrails'), 'dashboard.js no longer renders AI threat guardrails');
   assert.ok(threatGuardrailsJs.includes('threat-guardrail-row'), 'ai-threat-guardrails.js no longer renders threat guardrail rows');
-  assert.ok(threatGuardrailsJs.includes('PromptWallThreatGuardrails'), 'ai-threat-guardrails.js no longer exports the threat renderer');
+  assert.ok(threatGuardrailsJs.includes('RedactWallThreatGuardrails'), 'ai-threat-guardrails.js no longer exports the threat renderer');
   assert.ok(dashboard.includes('renderControlGraph'), 'dashboard.js no longer renders the AI control graph');
-  assert.ok(controlGraphJs.includes('PromptWallControlGraph'), 'control-graph.js no longer exports the AI control graph renderer');
+  assert.ok(controlGraphJs.includes('RedactWallControlGraph'), 'control-graph.js no longer exports the AI control graph renderer');
   assert.ok(controlGraphJs.includes('control-graph-node'), 'control-graph.js no longer renders control graph nodes');
   assert.ok(controlGraphJs.includes('control-graph-edge'), 'control-graph.js no longer renders control graph links');
   assert.ok(dashboard.includes('renderLeakPathMap'), 'dashboard.js no longer renders the AI leak path map');
-  assert.ok(leakPathMapJs.includes('PromptWallLeakPathMap'), 'leak-path-map.js no longer exports the leak path map renderer');
+  assert.ok(leakPathMapJs.includes('RedactWallLeakPathMap'), 'leak-path-map.js no longer exports the leak path map renderer');
   assert.ok(leakPathMapJs.includes('leakMap'), 'leak-path-map.js no longer reads the posture leakMap contract');
   assert.ok(leakPathMapJs.includes('leak-node'), 'leak-path-map.js no longer renders leak map nodes');
   assert.ok(leakPathMapJs.includes('data-leak-edge'), 'leak-path-map.js no longer renders clickable leak edges');
   assert.ok(leakPathMapJs.includes('data-leak-filter'), 'leak-path-map.js no longer exposes exposure filters');
   assert.ok(leakPathMapJs.includes('data-leak-category'), 'leak-path-map.js no longer exposes data-type filters');
   assert.ok(leakPathMapJs.includes('prefers-reduced-motion'), 'leak-path-map.js no longer respects reduced motion');
-  assert.ok(leakPathMapJs.includes('leak-wall'), 'leak-path-map.js no longer draws the PromptWall barrier');
+  assert.ok(leakPathMapJs.includes('leak-wall'), 'leak-path-map.js no longer draws the RedactWall barrier');
   assert.ok(dashboard.includes('MCP Tool Governance'), 'dashboard.js no longer exposes MCP tool governance policy');
   assert.ok(dashboard.includes('mission-proof-ledger'), 'dashboard.js no longer renders the mission proof ledger');
   assert.ok(dashboard.includes('hardening-proof-ledger'), 'dashboard.js no longer renders hardening proof rows');
@@ -466,7 +466,7 @@ test('dashboard static controls, generated policy controls, and API routes stay 
   assert.ok(siemPackageJs.includes('siem-profile-row'), 'siem-package.js no longer renders SIEM profile rows');
   assert.ok(dashboard.includes('renderSecurityPackage'), 'dashboard.js no longer renders security trust package previews');
   assert.ok(dashboard.includes('downloadSecurityPackage'), 'dashboard.js no longer downloads security trust packages');
-  assert.ok(securityPackageJs.includes('PromptWallSecurityPackage'), 'security-package.js no longer exports the trust package renderer');
+  assert.ok(securityPackageJs.includes('RedactWallSecurityPackage'), 'security-package.js no longer exports the trust package renderer');
   assert.ok(securityPackageJs.includes('trust-control-row'), 'security-package.js no longer renders trust control rows');
   assert.ok(index.includes('trust-package-board'), 'index.html no longer styles the security trust package board');
   assert.ok(index.includes('<script src="/security-package.js" defer></script>'), 'index.html no longer loads the security package renderer');
@@ -479,9 +479,9 @@ test('dashboard static controls, generated policy controls, and API routes stay 
   assert.ok(coverageFileFlowJs.includes('endpointFileFlowProfiles'), 'coverage-file-flow.js no longer reads endpoint file-flow profiles');
   assert.ok(coverageFileFlowJs.includes('Local path: not reported'), 'coverage-file-flow.js no longer labels path redaction');
   assert.ok(decisionQualityJs.includes('decisionQuality'), 'decision-quality.js no longer reads decision quality posture');
-  assert.ok(decisionQualityJs.includes('PromptWallDecisionQuality'), 'decision-quality.js no longer exports the decision quality renderer');
+  assert.ok(decisionQualityJs.includes('RedactWallDecisionQuality'), 'decision-quality.js no longer exports the decision quality renderer');
   assert.ok(detectorFeedbackJs.includes('/api/detector-feedback/report'), 'detector-feedback.js no longer fetches detector feedback');
-  assert.ok(detectorFeedbackJs.includes('PromptWallDetectorFeedback'), 'detector-feedback.js no longer exports the feedback renderer');
+  assert.ok(detectorFeedbackJs.includes('RedactWallDetectorFeedback'), 'detector-feedback.js no longer exports the feedback renderer');
   assert.ok(detectorFeedbackJs.includes('Held-out Eval'), 'detector-feedback.js no longer renders held-out eval quality proof');
   assert.ok(detectorFeedbackJs.includes('quality'), 'detector-feedback.js no longer reads detector quality proof');
   assert.ok(index.includes('ai-inventory-grid'), 'index.html no longer styles the AI app inventory grid');
@@ -493,7 +493,7 @@ test('dashboard static controls, generated policy controls, and API routes stay 
   assert.ok(index.includes('control-graph-lanes'), 'index.html no longer styles AI control graph lanes');
   assert.ok(index.includes('control-graph-edge'), 'index.html no longer styles AI control graph edges');
   assert.ok(index.includes('leak-map-stage'), 'index.html no longer styles the leak path map stage');
-  assert.ok(index.includes('leak-wall'), 'index.html no longer styles the PromptWall barrier');
+  assert.ok(index.includes('leak-wall'), 'index.html no longer styles the RedactWall barrier');
   assert.ok(index.includes('leak-edge'), 'index.html no longer styles leak map edges');
   assert.ok(index.includes('leak-inspector-grid'), 'index.html no longer styles the leak map inspector');
   assert.ok(index.includes('<script src="/leak-path-map.js" defer></script>'), 'index.html no longer loads the leak path map renderer');
@@ -746,14 +746,14 @@ test('dashboard-backed API actions accept the payloads built by forms and button
 
   const scimUser = db.saveScimUser({ userName: 'qa-9043@example.test', active: true });
   db.saveScimGroup({
-    displayName: 'PromptWall Lending',
+    displayName: 'RedactWall Lending',
     members: [{ value: scimUser.id, display: scimUser.userName }],
   });
-  const segmentedPosture = await jsonFetch(port, '/api/posture?limit=5000&segment=group:promptwall-lending', { method: 'GET', headers: { cookie } });
+  const segmentedPosture = await jsonFetch(port, '/api/posture?limit=5000&segment=group:redactwall-lending', { method: 'GET', headers: { cookie } });
   assert.strictEqual(segmentedPosture.status, 200);
   const segmentedPostureBody = await segmentedPosture.json();
-  assert.strictEqual(segmentedPostureBody.segments.active.label, 'PromptWall Lending');
-  assert.strictEqual(segmentedPostureBody.segments.summary.selectedId, 'group:promptwall-lending');
+  assert.strictEqual(segmentedPostureBody.segments.active.label, 'RedactWall Lending');
+  assert.strictEqual(segmentedPostureBody.segments.summary.selectedId, 'group:redactwall-lending');
   assert.strictEqual(segmentedPostureBody.summary.events, 1);
   assert.strictEqual(segmentedPostureBody.summary.pending, 1);
   assert.strictEqual(JSON.stringify(segmentedPostureBody).includes('524-71-9043'), false);
@@ -793,14 +793,14 @@ test('dashboard-backed API actions accept the payloads built by forms and button
   const siemPackageBody = await siemPackageRes.json();
   assert.strictEqual(siemPackageBody.profiles[0].id, 'splunk');
   assert.strictEqual(JSON.stringify(siemPackageBody).includes('524-71-9043'), false);
-  assert.ok(siemPackageBody.profiles[0].savedSearches.some((item) => item.spl.includes('promptwall:security')));
+  assert.ok(siemPackageBody.profiles[0].savedSearches.some((item) => item.spl.includes('redactwall:security')));
 
   const siemDownload = await jsonFetch(port, '/api/integrations/siem/package?profile=splunk&download=1', {
     method: 'GET',
     headers: { cookie },
   });
   assert.strictEqual(siemDownload.status, 200);
-  assert.match(siemDownload.headers.get('content-disposition') || '', /promptwall-siem-splunk-package\.json/);
+  assert.match(siemDownload.headers.get('content-disposition') || '', /redactwall-siem-splunk-package\.json/);
 
   const siemZip = await jsonFetch(port, '/api/integrations/siem/package?profile=splunk&format=zip', {
     method: 'GET',
@@ -808,7 +808,7 @@ test('dashboard-backed API actions accept the payloads built by forms and button
   });
   assert.strictEqual(siemZip.status, 200);
   assert.match(siemZip.headers.get('content-type') || '', /application\/zip/);
-  assert.match(siemZip.headers.get('content-disposition') || '', /promptwall-siem-splunk-package\.zip/);
+  assert.match(siemZip.headers.get('content-disposition') || '', /redactwall-siem-splunk-package\.zip/);
   const zip = new AdmZip(Buffer.from(await siemZip.arrayBuffer()));
   const entries = zip.getEntries().map((entry) => entry.entryName);
   assert.ok(entries.includes('manifest.json'));
@@ -830,7 +830,7 @@ test('dashboard-backed API actions accept the payloads built by forms and button
   });
   assert.strictEqual(securityPackageRes.status, 200);
   const securityPackageBody = await securityPackageRes.json();
-  assert.strictEqual(securityPackageBody.schemaVersion, 'promptwall.security-trust-package.v1');
+  assert.strictEqual(securityPackageBody.schemaVersion, 'redactwall.security-trust-package.v1');
   assert.ok(securityPackageBody.summary.controlCoverage.total >= 8);
   assert.ok(securityPackageBody.sbom.summary.components >= 1);
   assert.ok(securityPackageBody.controls.some((item) => item.id === 'audit_chain'));
@@ -841,7 +841,7 @@ test('dashboard-backed API actions accept the payloads built by forms and button
     headers: { cookie },
   });
   assert.strictEqual(securityPackageJsonDownload.status, 200);
-  assert.match(securityPackageJsonDownload.headers.get('content-disposition') || '', /promptwall-security-trust-package\.json/);
+  assert.match(securityPackageJsonDownload.headers.get('content-disposition') || '', /redactwall-security-trust-package\.json/);
 
   const securityPackageZip = await jsonFetch(port, '/api/security/package?format=zip', {
     method: 'GET',
@@ -849,7 +849,7 @@ test('dashboard-backed API actions accept the payloads built by forms and button
   });
   assert.strictEqual(securityPackageZip.status, 200);
   assert.match(securityPackageZip.headers.get('content-type') || '', /application\/zip/);
-  assert.match(securityPackageZip.headers.get('content-disposition') || '', /promptwall-security-trust-package\.zip/);
+  assert.match(securityPackageZip.headers.get('content-disposition') || '', /redactwall-security-trust-package\.zip/);
   const securityZip = new AdmZip(Buffer.from(await securityPackageZip.arrayBuffer()));
   const securityEntries = securityZip.getEntries().map((entry) => entry.entryName);
   assert.ok(securityEntries.includes('manifest.json'));
@@ -863,7 +863,7 @@ test('dashboard-backed API actions accept the payloads built by forms and button
 
 test.after(() => {
   for (const suffix of ['', '-wal', '-shm']) {
-    try { fs.unlinkSync(process.env.SENTINEL_DB_PATH + suffix); } catch {}
+    try { fs.unlinkSync(process.env.REDACTWALL_DB_PATH + suffix); } catch {}
   }
-  try { fs.unlinkSync(process.env.SENTINEL_POLICY_PATH); } catch {}
+  try { fs.unlinkSync(process.env.REDACTWALL_POLICY_PATH); } catch {}
 });

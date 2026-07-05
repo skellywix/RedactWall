@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "PromptWall - AI Data Guard",
+  "name": "RedactWall - AI Data Guard",
   "version": "0.3.0",
   "description": "Warns, redacts, or blocks sensitive data (PII, source code, credentials, confidential info) before it is sent to ChatGPT, Claude, Copilot, Gemini, and other AI tools.",
   "permissions": ["storage", "activeTab", "tabs", "alarms", "downloads", "nativeMessaging"],
@@ -139,7 +139,7 @@
   "storage": { "managed_schema": "schema.json" },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "PromptWall"
+    "default_title": "RedactWall"
   },
   "content_scripts": [
     {

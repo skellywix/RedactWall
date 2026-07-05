@@ -318,7 +318,7 @@ function ModePicker({ mode, disabled, onChange }: { mode: EnforcementMode; disab
     <section className="policy-section">
       <h3>Policy mode</h3>
       <p className="policy-hint">
-        What every PromptWall sensor does when it sees sensitive content. Hard-stop identifiers still block regardless of mode.
+        What every RedactWall sensor does when it sees sensitive content. Hard-stop identifiers still block regardless of mode.
       </p>
       <div className="policy-modes" role="radiogroup" aria-label="Enforcement mode">
         {MODES.map(([value, title, detail]) => (

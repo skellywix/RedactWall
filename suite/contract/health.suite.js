@@ -13,7 +13,7 @@ test('GET /healthz returns status/service/version and needs no credentials', asy
   assert.strictEqual(res.status, 200);
   const body = await res.json();
   assert.strictEqual(body.status, 'ok');
-  assert.strictEqual(body.service, 'promptwall');
+  assert.strictEqual(body.service, 'redactwall');
   assert.match(String(body.version), /^\d+\.\d+\.\d+/);
 }));
 

@@ -1,4 +1,4 @@
-# PromptWall Stack Review
+# RedactWall Stack Review
 
 Reviewed: 26 June 2026
 
@@ -12,7 +12,7 @@ Reviewed: 26 June 2026
 
 ## Decision Summary
 
-PromptWall should optimize for a regulated pilot that installs quickly, proves control effectiveness, and avoids unnecessary moving parts. The right stack is not the most fashionable one. It is the one that keeps browser, endpoint, MCP, and server behavior easy to verify.
+RedactWall should optimize for a regulated pilot that installs quickly, proves control effectiveness, and avoids unnecessary moving parts. The right stack is not the most fashionable one. It is the one that keeps browser, endpoint, MCP, and server behavior easy to verify.
 
 ## Changes Made
 
@@ -57,7 +57,7 @@ Revisit Vite plus React when at least two of these become true:
 
 ## Why Not Fastify Right Now
 
-Fastify is a strong framework, especially for schema-first APIs and high-throughput services. PromptWall's current backend bottlenecks are not router performance. They are detection quality, evidence integrity, extension behavior, deployment safety, and file processing. Migrating from Express to Fastify would touch every route and test for limited immediate gain.
+Fastify is a strong framework, especially for schema-first APIs and high-throughput services. RedactWall's current backend bottlenecks are not router performance. They are detection quality, evidence integrity, extension behavior, deployment safety, and file processing. Migrating from Express to Fastify would touch every route and test for limited immediate gain.
 
 The better backend improvement was Express 5 plus Helmet, with real HTTP integration tests already in place.
 

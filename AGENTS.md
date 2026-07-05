@@ -1,9 +1,9 @@
-# AGENTS.md — operating contract for agents working in PromptWall
+# AGENTS.md — operating contract for agents working in RedactWall
 
 Read this before changing anything. It is the agent-memory file: how we work, how to prove a change works, the invariants you may not break, and the mistakes not to repeat. Update it when you learn something (see "Mistake log"). `CLAUDE.md`, if present, may extend this.
 
 ## What this project is
-PromptWall is a compliance-grade DLP layer that inspects prompts/files headed to AI tools and **warns / requires justification / redacts / blocks** by policy, with a tamper-evident audit log. Three sensors (browser `sensors/browser-extension/`, `sensors/endpoint-agent/`, `sensors/mcp-guard/`) all run the SAME local engine and report to one server. Sold to regulated shops (credit unions; NCUA/GLBA/PCI/HIPAA) — an examiner will inspect this.
+RedactWall is a compliance-grade DLP layer that inspects prompts/files headed to AI tools and **warns / requires justification / redacts / blocks** by policy, with a tamper-evident audit log. Three sensors (browser `sensors/browser-extension/`, `sensors/endpoint-agent/`, `sensors/mcp-guard/`) all run the SAME local engine and report to one server. Sold to regulated shops (credit unions; NCUA/GLBA/PCI/HIPAA) — an examiner will inspect this.
 
 ## How we work (manager-of-agents)
 Plan → Implement → Validate. Spend most effort planning. See `.claude/skills/`:
@@ -21,7 +21,7 @@ Plan → Implement → Validate. Spend most effort planning. See `.claude/skills
 - `npm run review:ci` — full local gate (`git diff --check`, generated demo-doc drift check, AI-domain coverage check, `npm test`, Playwright browser tests, `npm run sync-check`, `npm run eval`).
 - `npm run eval` — precision/recall/F1 on the HELD-OUT labeled corpus (`test/fixtures/semantic-eval.json`, 500+ decontaminated cases). Floors: semantic precision >= 0.95, recall >= 0.80, structured recall >= 0.95; enforced by `test/eval.test.js`, composition by `test/eval-corpus.test.js`; **zero benign false positives** is the hard gate.
 - `npm run simulate` — end-to-end detection over the sample corpus.
-- `npm start` — run the server. `docker build -t promptwall .` — CI also builds the image.
+- `npm start` — run the server. `docker build -t redactwall .` — CI also builds the image.
 
 ## Change-control process
 - Run `npm run hooks:install` after cloning or reinstalling the repo.
@@ -37,7 +37,7 @@ Plan → Implement → Validate. Spend most effort planning. See `.claude/skills
 5. The audit log is append-only and hash-chained: after any `server/db.js` / `server/crypto.js` change, `node -e "require('./server/db').verifyAuditChain()"` must report `ok:true`.
 6. Detection changes must keep `npm run eval` floors green — held-out precision/recall AND **zero false positives on benign prompts**. Don't tune the model against `test/fixtures/semantic-eval.json`; it's the held-out test, not training data.
 
-## How to exercise PromptWall end-to-end (required evidence before handing back)
+## How to exercise RedactWall end-to-end (required evidence before handing back)
 Don't trust green unit tests alone. For the surface you changed, produce a **Testing** section with this evidence (synthetic PII only — never real member data):
 - **Detection:** `npm run simulate`; show before/after verdicts for the affected prompts; prove `alwaysBlock` types still block.
 - **Browser sensor:** load unpacked `sensors/browser-extension/` in a test Chrome profile, paste `123-45-6789` into a chat box → screenshot the block modal and confirm nothing was sent.

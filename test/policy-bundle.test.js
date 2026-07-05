@@ -8,8 +8,8 @@ const path = require('node:path');
 const fs = require('node:fs');
 const crypto = require('node:crypto');
 
-process.env.SENTINEL_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'pw-bundle-'));
-test.after(() => fs.rmSync(process.env.SENTINEL_DATA_DIR, { recursive: true, force: true }));
+process.env.REDACTWALL_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'pw-bundle-'));
+test.after(() => fs.rmSync(process.env.REDACTWALL_DATA_DIR, { recursive: true, force: true }));
 
 const pb = require('../server/policy-bundle');
 

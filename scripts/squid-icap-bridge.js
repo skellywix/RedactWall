@@ -5,7 +5,7 @@ require('../server/env').loadEnv();
  *
  * A minimal RFC 3507 REQMOD service: Squid hands each intercepted HTTP request
  * to this bridge, the bridge extracts the user's prompt from the embedded HTTP
- * body, calls the PromptWall control plane (`POST /api/v1/gate`), and enforces
+ * body, calls the RedactWall control plane (`POST /api/v1/gate`), and enforces
  * the verdict inline - allow (ICAP 204 / echo), block (synthesized HTTP 403),
  * or hold (poll `/api/v1/status/:id` until released, deny by default).
  *
@@ -16,12 +16,12 @@ require('../server/env').loadEnv();
  * Protocol subset: REQMOD + OPTIONS, no Preview negotiation, no RESPMOD.
  */
 const net = require('node:net');
-const SENTINEL = process.env.SENTINEL_URL || 'http://localhost:4000';
+const REDACTWALL = process.env.REDACTWALL_URL || 'http://localhost:4000';
 const KEY = process.env.INGEST_API_KEY || 'dev-ingest-key';
 const DEFAULT_REQUEST_TIMEOUT_MS = 10000;
 
 function requestTimeoutMs(opts = {}) {
-  const n = Number(opts.timeoutMs ?? process.env.SENTINEL_REQUEST_TIMEOUT_MS ?? DEFAULT_REQUEST_TIMEOUT_MS);
+  const n = Number(opts.timeoutMs ?? process.env.REDACTWALL_REQUEST_TIMEOUT_MS ?? DEFAULT_REQUEST_TIMEOUT_MS);
   if (!Number.isFinite(n)) return DEFAULT_REQUEST_TIMEOUT_MS;
   return Math.max(50, Math.min(120000, n));
 }
@@ -33,7 +33,7 @@ async function fetchWithTimeout(fetchImpl, url, options, opts = {}) {
   try {
     return await fetchImpl(url, { ...options, signal: controller.signal });
   } catch (e) {
-    if (e && e.name === 'AbortError') e.code = 'SENTINEL_TIMEOUT';
+    if (e && e.name === 'AbortError') e.code = 'REDACTWALL_TIMEOUT';
     throw e;
   } finally {
     clearTimeout(timer);
@@ -78,7 +78,7 @@ async function gate({
   sourceIp,
   contentType,
   body,
-  sentinel = SENTINEL,
+  redactwall = REDACTWALL,
   key = KEY,
   fetchImpl = globalThis.fetch,
   timeoutMs,
@@ -86,7 +86,7 @@ async function gate({
   if (!fetchImpl) return failClosed('fetch_unavailable');
   const prompt = extractPrompt(host, contentType, body);
   try {
-    const r = await fetchWithTimeout(fetchImpl, sentinel + '/api/v1/gate', {
+    const r = await fetchWithTimeout(fetchImpl, redactwall + '/api/v1/gate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': key },
       body: JSON.stringify({ prompt, user, destination: host, sourceIp, source: 'proxy', channel: 'submit' }),
@@ -96,7 +96,7 @@ async function gate({
     if (!verdict || typeof verdict.decision !== 'string') return failClosed('gate_invalid_json');
     return verdict; // { id, decision, status, ... }
   } catch (e) {
-    return failClosed(e && e.code === 'SENTINEL_TIMEOUT' ? 'gate_timeout' : 'gate_unreachable');
+    return failClosed(e && e.code === 'REDACTWALL_TIMEOUT' ? 'gate_timeout' : 'gate_unreachable');
   }
 }
 
@@ -105,7 +105,7 @@ async function awaitRelease(id, {
   releaseToken,
   timeoutMs = 5 * 60 * 1000,
   intervalMs = 2000,
-  sentinel = SENTINEL,
+  redactwall = REDACTWALL,
   key = KEY,
   fetchImpl = globalThis.fetch,
   requestTimeoutMs: perRequestTimeoutMs,
@@ -117,14 +117,14 @@ async function awaitRelease(id, {
   while (Date.now() - start < timeoutMs) {
     let r;
     try {
-      r = await fetchWithTimeout(fetchImpl, `${sentinel}/api/v1/status/${encodeURIComponent(id)}`, {
+      r = await fetchWithTimeout(fetchImpl, `${redactwall}/api/v1/status/${encodeURIComponent(id)}`, {
         headers: {
           'x-api-key': key,
           ...(releaseToken ? { 'x-release-token': releaseToken } : {}),
         },
       }, { timeoutMs: perRequestTimeoutMs });
     } catch (e) {
-      return { released: false, reason: e && e.code === 'SENTINEL_TIMEOUT' ? 'status_timeout' : 'status_unreachable' };
+      return { released: false, reason: e && e.code === 'REDACTWALL_TIMEOUT' ? 'status_timeout' : 'status_unreachable' };
     }
     if (!r || !r.ok) return { released: false, reason: `status_http_${r ? r.status : 'missing'}` };
     const s = await responseJson(r);
@@ -148,7 +148,7 @@ const DEFAULT_SOCKET_TIMEOUT_MS = 30000;
 const DEFAULT_RELEASE_WAIT_MS = 5 * 60 * 1000;
 const MAX_HEADER_COUNT = 128;
 const MAX_CHUNK_SIZE_LINE_BYTES = 64;
-const ISTAG = '"promptwall-icap-bridge-1"';
+const ISTAG = '"redactwall-icap-bridge-1"';
 const BODY_METHODS = new Set(['POST', 'PUT', 'PATCH']);
 const EMPTY = Buffer.alloc(0);
 
@@ -162,7 +162,7 @@ function icapConfig(opts = {}) {
   const maxBodyBytes = boundedInt(opts.maxBodyBytes ?? process.env.ICAP_BRIDGE_MAX_BODY_BYTES, DEFAULT_MAX_BODY_BYTES, 1024, 32 * 1024 * 1024);
   const maxHeaderBytes = boundedInt(opts.maxHeaderBytes ?? process.env.ICAP_BRIDGE_MAX_HEADER_BYTES, DEFAULT_MAX_HEADER_BYTES, 1024, 256 * 1024);
   return {
-    sentinel: opts.sentinel || SENTINEL,
+    redactwall: opts.redactwall || REDACTWALL,
     key: opts.key || KEY,
     fetchImpl: opts.fetchImpl || globalThis.fetch,
     io: opts.io || process,
@@ -294,7 +294,7 @@ function httpHost(head) {
 }
 
 function icapMessage(status, headers = {}, payload = null) {
-  const lines = [`ICAP/1.0 ${status}`, `ISTag: ${ISTAG}`, 'Service: PromptWall ICAP bridge'];
+  const lines = [`ICAP/1.0 ${status}`, `ISTag: ${ISTAG}`, 'Service: RedactWall ICAP bridge'];
   for (const [name, value] of Object.entries(headers)) lines.push(`${name}: ${value}`);
   lines.push('', '');
   const head = Buffer.from(lines.join('\r\n'), 'latin1');
@@ -338,7 +338,7 @@ function blockResponse(decision, queryId) {
     'HTTP/1.1 403 Forbidden',
     'Content-Type: application/json',
     `Content-Length: ${json.length}`,
-    'X-PromptWall: blocked',
+    'X-RedactWall: blocked',
     'Connection: close',
     '',
     '',
@@ -351,10 +351,10 @@ async function decideReqmod(embedded, message, config) {
   if (!BODY_METHODS.has(embedded.method) || !message.body.length) {
     return { action: 'allow', decision: 'allow', queryId: null, reason: 'no_body' };
   }
-  const shared = { sentinel: config.sentinel, key: config.key, fetchImpl: config.fetchImpl };
+  const shared = { redactwall: config.redactwall, key: config.key, fetchImpl: config.fetchImpl };
   const verdict = await gate({
     host: embedded.host,
-    user: embedded.headers['x-promptwall-user'] || message.head.headers['x-client-username'] || 'unknown',
+    user: embedded.headers['x-redactwall-user'] || message.head.headers['x-client-username'] || 'unknown',
     sourceIp: message.head.headers['x-client-ip'] || null,
     contentType: embedded.headers['content-type'] || '',
     body: message.body.toString('utf8'),
@@ -467,7 +467,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     const item = argv[i];
     if (item === '--port') out.port = Number(argv[++i]);
     else if (item === '--host') out.host = argv[++i];
-    else if (item === '--sentinel') out.sentinel = argv[++i];
+    else if (item === '--redactwall' || item === '--sentinel') out.redactwall = argv[++i];
     else if (item === '--key') out.key = argv[++i];
     else if (item === '--max-body-bytes') out.maxBodyBytes = Number(argv[++i]);
   }
@@ -481,7 +481,7 @@ async function main(argv = process.argv.slice(2), io = process) {
   const server = createIcapServer({ ...args, io });
   server.listen(port, host, () => {
     const address = server.address();
-    io.stdout.write(`PromptWall Squid ICAP bridge (REQMOD) listening on icap://${host}:${address && address.port ? address.port : port}/reqmod\n`);
+    io.stdout.write(`RedactWall Squid ICAP bridge (REQMOD) listening on icap://${host}:${address && address.port ? address.port : port}/reqmod\n`);
   });
   const shutdown = () => {
     server.close(() => process.exit(0));

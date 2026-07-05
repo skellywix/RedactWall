@@ -24,7 +24,7 @@ test('policy scopes tighten enforcement for matching SCIM groups and destination
     alwaysBlock: ['US_SSN'],
     policyScopes: [{
       id: 'engineering_ai',
-      groups: ['PromptWall Engineers'],
+      groups: ['RedactWall Engineers'],
       destinations: ['chatgpt.com'],
       categories: ['CONFIDENTIAL_BUSINESS'],
       enforcementMode: 'block',
@@ -35,7 +35,7 @@ test('policy scopes tighten enforcement for matching SCIM groups and destination
     }],
   }, {
     user: 'engineer@example.test',
-    groups: ['PromptWall Engineers'],
+    groups: ['RedactWall Engineers'],
     destination: 'https://chatgpt.com/c/unit',
     source: 'browser_extension',
     channel: 'submit',

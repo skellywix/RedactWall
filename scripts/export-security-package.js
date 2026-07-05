@@ -1,6 +1,6 @@
 'use strict';
 /**
- * Generate a sanitized PromptWall security trust package for vendor-risk review.
+ * Generate a sanitized RedactWall security trust package for vendor-risk review.
  */
 require('../server/env').loadEnv();
 const fs = require('fs');
@@ -41,7 +41,7 @@ function sha256File(file) {
 function resolveOutputFile({ outDir, file, generatedAt } = {}) {
   const dir = path.resolve(outDir || path.join(process.cwd(), 'security-packages'));
   const stamp = stampFor(generatedAt ? new Date(generatedAt) : new Date());
-  return path.resolve(file || path.join(dir, `promptwall-security-trust-package-${stamp}.json`));
+  return path.resolve(file || path.join(dir, `redactwall-security-trust-package-${stamp}.json`));
 }
 
 function currentPreflight({ appModule } = {}) {

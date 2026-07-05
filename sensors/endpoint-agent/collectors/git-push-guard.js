@@ -131,7 +131,7 @@ function destinationFromRemote(remoteUrl, remoteName) {
 function configuredAllowedHosts(opts = {}) {
   const raw = []
     .concat(opts.allowedHosts || [])
-    .concat(String(process.env.PROMPTWALL_GIT_ALLOWED_HOSTS || process.env.ENDPOINT_AGENT_GIT_ALLOWED_HOSTS || '').split(','));
+    .concat(String(process.env.REDACTWALL_GIT_ALLOWED_HOSTS || process.env.ENDPOINT_AGENT_GIT_ALLOWED_HOSTS || '').split(','));
   const out = [];
   const seen = new Set();
   for (const item of raw) {
@@ -380,14 +380,14 @@ async function collectGitPush(opts = {}) {
 
 function printHuman(result, io = console) {
   if (result.status === 'clean') {
-    io.log(`PromptWall git push guard clean: ${result.destination}`);
+    io.log(`RedactWall git push guard clean: ${result.destination}`);
     return;
   }
   if (result.status === 'failed') {
-    io.log(`PromptWall git push guard failed: ${result.error}`);
+    io.log(`RedactWall git push guard failed: ${result.error}`);
     return;
   }
-  const parts = [`PromptWall git push guard ${result.status}: ${result.destination}`];
+  const parts = [`RedactWall git push guard ${result.status}: ${result.destination}`];
   if (result.labels && result.labels.length) parts.push(result.labels.join(', '));
   if (result.reason) parts.push(result.reason);
   if (!result.recorded) parts.push('not recorded');

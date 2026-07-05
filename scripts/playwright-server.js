@@ -8,17 +8,17 @@ const os = require('os');
 const path = require('path');
 
 const root = path.join(__dirname, '..');
-const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'promptwall-e2e-'));
+const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-e2e-'));
 const policyPath = path.join(tempDir, 'policy.json');
 fs.copyFileSync(path.join(root, 'config', 'policy.json'), policyPath);
 
 process.env.PORT = process.env.PORT || '4210';
 process.env.ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'e2e-pass';
-process.env.SENTINEL_SECRET = process.env.SENTINEL_SECRET || 'e2e-session-secret';
-process.env.SENTINEL_DATA_KEY = process.env.SENTINEL_DATA_KEY || 'e2e-data-key';
+process.env.REDACTWALL_SECRET = process.env.REDACTWALL_SECRET || 'e2e-session-secret';
+process.env.REDACTWALL_DATA_KEY = process.env.REDACTWALL_DATA_KEY || 'e2e-data-key';
 process.env.INGEST_API_KEY = process.env.INGEST_API_KEY || 'e2e-ingest-key';
-process.env.SENTINEL_DB_PATH = process.env.SENTINEL_DB_PATH || path.join(tempDir, 'sentinel.db');
-process.env.SENTINEL_POLICY_PATH = process.env.SENTINEL_POLICY_PATH || policyPath;
+process.env.REDACTWALL_DB_PATH = process.env.REDACTWALL_DB_PATH || path.join(tempDir, 'redactwall.db');
+process.env.REDACTWALL_POLICY_PATH = process.env.REDACTWALL_POLICY_PATH || policyPath;
 
 const app = require('../server/app');
 const server = app.startServer(Number(process.env.PORT));

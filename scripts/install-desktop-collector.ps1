@@ -1,17 +1,17 @@
 param(
-  [string]$MenuName = "PromptWall Protected Upload",
-  [string]$KeyName = "PromptWallProtectedUpload",
+  [string]$MenuName = "RedactWall Protected Upload",
+  [string]$KeyName = "RedactWallProtectedUpload",
   [string]$Destination = "",
-  [string]$ConfigDir = "$env:LOCALAPPDATA\PromptWall",
+  [string]$ConfigDir = "$env:LOCALAPPDATA\RedactWall",
   [string]$RepoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path,
-  [string]$LogPath = "$env:LOCALAPPDATA\PromptWall\logs\desktop-collector.log",
+  [string]$LogPath = "$env:LOCALAPPDATA\RedactWall\logs\desktop-collector.log",
   [switch]$Force
 )
 
 $ErrorActionPreference = "Stop"
 
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
-  throw "Node.js is required on PATH before installing the PromptWall desktop collector."
+  throw "Node.js is required on PATH before installing the RedactWall desktop collector."
 }
 
 $repo = (Resolve-Path -LiteralPath $RepoRoot).Path
@@ -46,8 +46,8 @@ function Get-EndpointConfigValue {
   return ""
 }
 
-$handoffDirValue = Get-EndpointConfigValue -Text $configText -Names @("ENDPOINT_AGENT_HANDOFF_DIR", "PROMPTWALL_ENDPOINT_AGENT_HANDOFF_DIR")
-$handoffSecretValue = Get-EndpointConfigValue -Text $configText -Names @("ENDPOINT_AGENT_HANDOFF_SECRET", "PROMPTWALL_ENDPOINT_AGENT_HANDOFF_SECRET")
+$handoffDirValue = Get-EndpointConfigValue -Text $configText -Names @("ENDPOINT_AGENT_HANDOFF_DIR", "REDACTWALL_ENDPOINT_AGENT_HANDOFF_DIR")
+$handoffSecretValue = Get-EndpointConfigValue -Text $configText -Names @("ENDPOINT_AGENT_HANDOFF_SECRET", "REDACTWALL_ENDPOINT_AGENT_HANDOFF_SECRET")
 if (-not $handoffDirValue) {
   throw "Endpoint native handoff must be enabled before installing the desktop collector."
 }

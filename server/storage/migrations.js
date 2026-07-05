@@ -210,7 +210,7 @@ const MIGRATIONS = [
       BEGIN SELECT RAISE(ABORT, 'audit log is append-only'); END;
     `,
     postgres: `
-      CREATE OR REPLACE FUNCTION promptwall_audit_append_only() RETURNS trigger AS $$
+      CREATE OR REPLACE FUNCTION redactwall_audit_append_only() RETURNS trigger AS $$
       BEGIN
         RAISE EXCEPTION 'audit log is append-only';
       END;
@@ -219,7 +219,7 @@ const MIGRATIONS = [
       DROP TRIGGER IF EXISTS audit_append_only_guard ON audit;
       CREATE TRIGGER audit_append_only_guard
         BEFORE UPDATE OR DELETE ON audit
-        FOR EACH ROW EXECUTE FUNCTION promptwall_audit_append_only();
+        FOR EACH ROW EXECUTE FUNCTION redactwall_audit_append_only();
     `,
   },
   {
@@ -239,10 +239,10 @@ const MIGRATIONS = [
       ALTER TABLE queries FORCE ROW LEVEL SECURITY;
       DROP POLICY IF EXISTS queries_tenant_isolation ON queries;
       CREATE POLICY queries_tenant_isolation ON queries
-        USING (COALESCE(current_setting('promptwall.org_id', true), '') = ''
-          OR "orgId" = current_setting('promptwall.org_id', true))
-        WITH CHECK (COALESCE(current_setting('promptwall.org_id', true), '') = ''
-          OR "orgId" = current_setting('promptwall.org_id', true));
+        USING (COALESCE(current_setting('redactwall.org_id', true), '') = ''
+          OR "orgId" = current_setting('redactwall.org_id', true))
+        WITH CHECK (COALESCE(current_setting('redactwall.org_id', true), '') = ''
+          OR "orgId" = current_setting('redactwall.org_id', true));
     `,
   },
 ];

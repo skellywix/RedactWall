@@ -83,9 +83,9 @@ async function runSequentialSuite() {
   const files = walkTestFiles(TEST_DIR)
     .map((file) => path.relative(process.cwd(), file))
     .sort((a, b) => a.localeCompare(b));
-  const delayMs = positiveInteger(process.env.PROMPTWALL_NODE_TEST_DELAY_MS, DEFAULT_DELAY_MS);
-  const retries = positiveInteger(process.env.PROMPTWALL_NODE_TEST_RETRIES, DEFAULT_RETRIES);
-  const retryDelayMs = positiveInteger(process.env.PROMPTWALL_NODE_TEST_RETRY_DELAY_MS, DEFAULT_RETRY_DELAY_MS);
+  const delayMs = positiveInteger(process.env.REDACTWALL_NODE_TEST_DELAY_MS, DEFAULT_DELAY_MS);
+  const retries = positiveInteger(process.env.REDACTWALL_NODE_TEST_RETRIES, DEFAULT_RETRIES);
+  const retryDelayMs = positiveInteger(process.env.REDACTWALL_NODE_TEST_RETRY_DELAY_MS, DEFAULT_RETRY_DELAY_MS);
   const recovered = [];
 
   console.log(`[node-test] running ${files.length} test files sequentially`);

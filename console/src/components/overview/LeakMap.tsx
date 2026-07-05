@@ -305,9 +305,9 @@ export default function LeakMap({ map, surfaces }: { map: LeakMapReport | null; 
       </div>
       <div className={`leak-map-stage${still ? ' is-static' : ''}`} id="leakMapStage">
         {model && map ? (
-          <svg viewBox={`0 0 ${W} ${model.height}`} role="img" aria-label="Map of sensitive data paths from departments through PromptWall to AI destinations">
+          <svg viewBox={`0 0 ${W} ${model.height}`} role="img" aria-label="Map of sensitive data paths from departments through RedactWall to AI destinations">
             <text className="leak-col-label" x={10} y={24}>DEPARTMENTS &amp; TEAMS</text>
-            <text className="leak-col-label" x={(CH_L + CH_R) / 2} y={24} textAnchor="middle">PROMPTWALL</text>
+            <text className="leak-col-label" x={(CH_L + CH_R) / 2} y={24} textAnchor="middle">REDACTWALL</text>
             <text className="leak-col-label" x={W - 10} y={24} textAnchor="end">AI DESTINATIONS</text>
             <rect className="leak-wall" x={(CH_L + CH_R) / 2 - 23} y={PAD_TOP - 18} width={46} height={model.height - PAD_TOP - PAD_BOT + 30} rx={14} />
             {model.visible.map((edge) => {

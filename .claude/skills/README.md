@@ -1,4 +1,4 @@
-# PromptWall Agent Skills
+# RedactWall Agent Skills
 
 Project skills in the universal `SKILL.md` format. Claude Code (and Cursor / Codex / Gemini CLI) auto-discover them here. Each is either invoked as a slash command (`/skill-name`) or triggers automatically when its `description` matches the task.
 
@@ -27,7 +27,7 @@ Long-form history stays in the existing `ITERATIONS.md` / `CHANGELOG.md`.
 |-------|--------------|
 | `ci-failure-fix-loop` | Red CI → reproduce in a worktree → fix one root cause → full gate → PR. |
 | `test-coverage-loop` | Raise coverage on detection/policy/crypto/audit; one real test per pass; never weaken assertions. |
-| `pr-review-loop` | Adversarial pre-human review: quality + PromptWall invariants (no PII in logs, engine parity, `alwaysBlock` intact). |
+| `pr-review-loop` | Adversarial pre-human review: quality + RedactWall invariants (no PII in logs, engine parity, `alwaysBlock` intact). |
 | `dependency-upkeep-loop` | Scheduled `npm audit`/outdated; auto-merge low-risk green bumps; route majors & parser/native deps to a human. |
 | `bug-repro-fix-loop` | No fix without a failing test first; turn each bug into a permanent regression guard. |
 | `security-scan-loop` | Scheduled adversarial pass on local/staging: Shannon + product abuse cases (IDOR, detector bypass, PII leakage). Never prod. |
@@ -46,7 +46,7 @@ Long-form history stays in the existing `ITERATIONS.md` / `CHANGELOG.md`.
 | `shannon-pentest` | wrapper (Docker + key) | `npx skills add unicodeveloper/shannon` |
 | `excalidraw-diagram` | wrapper | `npx skills add https://github.com/coleam00/excalidraw-diagram-skill --skill excalidraw-diagram` |
 
-Installers were intentionally NOT run. The wrapper SKILL.md files document *when to use* each tool and a PromptWall-tuned playbook; run the install command yourself, and provide any API keys / OAuth consent directly (never share secrets in chat).
+Installers were intentionally NOT run. The wrapper SKILL.md files document *when to use* each tool and a RedactWall-tuned playbook; run the install command yourself, and provide any API keys / OAuth consent directly (never share secrets in chat).
 
 ## How they fit together (a real loop)
 `daily-triage-loop` (scheduled) writes findings → `ci-failure-fix-loop` / `bug-repro-fix-loop` pick one up in a worktree → `goal-contract-loop` frames the stop condition → `maker-checker-loop` / `pr-review-loop` gate it → PR. Weekly, `security-scan-loop` and `weekly-review-loop` run. `dependency-upkeep-loop` runs Mondays. State lives in `PLAN/STATUS/DECISIONS.md`.
@@ -66,6 +66,6 @@ Added from the "L8 Principal's Agentic Engineering Workflow" talk. The throughli
 | `agent-self-validation` | Validate | Force end-to-end evidence (not just unit tests); the repo's AGENTS.md says how to exercise the app. |
 | `no-mistakes-review` | Validate | Fresh-context review → self-correct → rebase → E2E evidence → docs/lint → structured PR → CI green; escalate product-changing decisions. |
 
-Companion file: **`AGENTS.md`** (repo root) — the agent operating contract: commands, hard invariants, how to exercise PromptWall E2E, review standards, and a mistake log. `agent-self-validation` and `delegate-like-a-manager` depend on it.
+Companion file: **`AGENTS.md`** (repo root) — the agent operating contract: commands, hard invariants, how to exercise RedactWall E2E, review standards, and a mistake log. `agent-self-validation` and `delegate-like-a-manager` depend on it.
 
 A normal day: voice/describe the work → `plan-first-spec` until the plan is confident → implement directly or hand a big job to `long-running-orchestrator`, each in its own `parallel-agents-worktrees` checkout → `no-mistakes-review` (which runs `agent-self-validation`) opens a clean PR while you start the next task. Findings/mistakes flow back into `AGENTS.md` and `STATUS.md`.

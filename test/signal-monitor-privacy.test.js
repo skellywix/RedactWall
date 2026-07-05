@@ -33,7 +33,7 @@ test('AI Command Center labels its feed as sanitized metadata', () => {
 });
 
 test('leak path map renders sanitized scenario evidence only', () => {
-  assert.match(leakPathMap, /PromptWallLeakPathMap/);
+  assert.match(leakPathMap, /RedactWallLeakPathMap/);
   assert.match(leakPathMap, /masked findings only/);
   assert.match(leakPathMap, /prompt bodies excluded/);
   assert.doesNotMatch(leakPathMap, /\brawPrompt\b|_rawPrompt|\/reveal/);

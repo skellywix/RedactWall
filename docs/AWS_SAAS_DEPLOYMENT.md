@@ -16,9 +16,9 @@ control plane (RDS role setup, migrations, backups, monitoring, sizing).
 
 - Application Load Balancer at the edge.
 - One Amazon Linux 2023 EC2 host running the existing Docker image.
-- Encrypted EBS root volume with `/var/lib/promptwall` mounted into the
+- Encrypted EBS root volume with `/var/lib/redactwall` mounted into the
   container at `/data`.
-- Docker runtime state under `/data`: `sentinel.db`, `policy.json`,
+- Docker runtime state under `/data`: `redactwall.db`, `policy.json`,
   `custom-detectors.json`, backups, and scheduled examiner evidence packs.
 - Hardened container flags: init process, read-only root filesystem, writable
   `/tmp` tmpfs, dropped Linux capabilities, and `no-new-privileges`.
@@ -28,23 +28,23 @@ control plane (RDS role setup, migrations, backups, monitoring, sizing).
 - Systems Manager Session Manager for operator access. No SSH ingress is
   required by the template.
 - App-level SaaS mode:
-  - `SENTINEL_SAAS_MODE=true`
-  - `SENTINEL_TENANT_ID=<customer-slug>`
-  - `SENTINEL_SEAT_LIMIT=<paid-seat-count>`
-  - `SENTINEL_REQUIRE_TENANT_CONTEXT=true`
-  - `SENTINEL_REQUIRE_USER_IDENTITY=true`
+  - `REDACTWALL_SAAS_MODE=true`
+  - `REDACTWALL_TENANT_ID=<customer-slug>`
+  - `REDACTWALL_SEAT_LIMIT=<paid-seat-count>`
+  - `REDACTWALL_REQUIRE_TENANT_CONTEXT=true`
+  - `REDACTWALL_REQUIRE_USER_IDENTITY=true`
 
-The current CloudFormation template still writes the existing `SENTINEL_*` and
+The current CloudFormation template still writes the existing `REDACTWALL_*` and
 `INGEST_API_KEY` names for upgrade safety. The runtime also accepts
-`PROMPTWALL_*` aliases for those values, including `PROMPTWALL_SECRET`,
-`PROMPTWALL_DATA_KEY`, `PROMPTWALL_INGEST_API_KEY`, and
-`PROMPTWALL_SCIM_BEARER_TOKEN`, when a future template or customer secret
+`REDACTWALL_*` aliases for those values, including `REDACTWALL_SECRET`,
+`REDACTWALL_DATA_KEY`, `REDACTWALL_INGEST_API_KEY`, and
+`REDACTWALL_SCIM_BEARER_TOKEN`, when a future template or customer secret
 standard moves to the new prefix.
 
 The AWS template pins mutable customer state to the mounted `/data` volume:
-`SENTINEL_DB_PATH=/data/sentinel.db`,
-`SENTINEL_POLICY_PATH=/data/policy.json`, and
-`SENTINEL_CUSTOM_DETECTORS_PATH=/data/custom-detectors.json`. Do not store
+`REDACTWALL_DB_PATH=/data/redactwall.db`,
+`REDACTWALL_POLICY_PATH=/data/policy.json`, and
+`REDACTWALL_CUSTOM_DETECTORS_PATH=/data/custom-detectors.json`. Do not store
 customer policy edits or detector packs only in the image layer.
 
 Do not run this app on Fargate with SQLite over EFS. The current preflight and
@@ -56,7 +56,7 @@ matters more than making the first AWS shape look serverless.
 Create an ECR repository once:
 
 ```bash
-aws ecr create-repository --repository-name promptwall
+aws ecr create-repository --repository-name redactwall
 ```
 
 Build and push:
@@ -64,7 +64,7 @@ Build and push:
 ```bash
 AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 AWS_REGION=us-east-1
-IMAGE="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/promptwall:0.3.0"
+IMAGE="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/redactwall:0.3.0"
 
 aws ecr get-login-password --region "$AWS_REGION" \
   | docker login --username AWS --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
@@ -82,8 +82,8 @@ folder:
 {
   "ADMIN_PASSWORD": "replace-with-16-plus-random-chars",
   "ADMIN_TOTP_SECRET": "JBSWY3DPEHPK3PXP",
-  "SENTINEL_SECRET": "replace-with-32-plus-random-chars",
-  "SENTINEL_DATA_KEY": "replace-with-32-plus-random-chars",
+  "REDACTWALL_SECRET": "replace-with-32-plus-random-chars",
+  "REDACTWALL_DATA_KEY": "replace-with-32-plus-random-chars",
   "INGEST_API_KEY": "ps_ingest_replace_with_32_plus_random_chars",
   "SCIM_BEARER_TOKEN": "",
   "APPROVER_USER": "approver",
@@ -99,7 +99,7 @@ Then create the secret:
 
 ```bash
 aws secretsmanager create-secret \
-  --name promptwall/cu-acme \
+  --name redactwall/cu-acme \
   --secret-string file://customer-secret.json
 ```
 
@@ -108,7 +108,7 @@ admins use the console. You can generate production-safe values with:
 
 ```bash
 npm run setup:prod -- --skip-install --env aws-customer.env
-npm run mfa:uri -- --env aws-customer.env --issuer "PromptWall cu-acme"
+npm run mfa:uri -- --env aws-customer.env --issuer "RedactWall cu-acme"
 ```
 
 ## 3. Deploy The Customer Stack
@@ -124,13 +124,13 @@ Deploy:
 
 ```bash
 SECRET_ARN=$(aws secretsmanager describe-secret \
-  --secret-id promptwall/cu-acme \
+  --secret-id redactwall/cu-acme \
   --query ARN \
   --output text)
 
 aws cloudformation deploy \
   --template-file infra/aws/customer-silo.yml \
-  --stack-name promptwall-cu-acme \
+  --stack-name redactwall-cu-acme \
   --capabilities CAPABILITY_NAMED_IAM \
   --parameter-overrides \
     VpcId=vpc-xxxxxxxx \
@@ -150,7 +150,7 @@ Get the URL:
 
 ```bash
 aws cloudformation describe-stacks \
-  --stack-name promptwall-cu-acme \
+  --stack-name redactwall-cu-acme \
   --query "Stacks[0].Outputs[?OutputKey=='Url'].OutputValue" \
   --output text
 ```
@@ -161,7 +161,7 @@ For the managed browser extension storage policy, set:
 
 ```json
 {
-  "serverUrl": "https://promptwall.customer.example",
+  "serverUrl": "https://redactwall.customer.example",
   "ingestKey": "same-value-as-INGEST_API_KEY",
   "orgId": "cu-acme",
   "email": "${user_email}"
@@ -170,7 +170,7 @@ For the managed browser extension storage policy, set:
 
 The server runs in SaaS mode and will reject sensor events that omit `orgId`, use
 the wrong tenant id, or send an unmanaged user identity. A new user beyond
-`SENTINEL_SEAT_LIMIT` is blocked and recorded as `SEAT_LIMIT_BLOCKED` without
+`REDACTWALL_SEAT_LIMIT` is blocked and recorded as `SEAT_LIMIT_BLOCKED` without
 storing the prompt body.
 
 ## 5. Validate
@@ -187,8 +187,8 @@ node -e "const v=require('./server/db').verifyAuditChain(); console.log(JSON.str
 After deployment:
 
 ```bash
-curl https://promptwall.customer.example/healthz
-curl https://promptwall.customer.example/readyz
+curl https://redactwall.customer.example/healthz
+curl https://redactwall.customer.example/readyz
 ```
 
 Log in to the dashboard and confirm:
@@ -206,32 +206,32 @@ sanitized evidence packs. It copies the Linux runner and schedule template out
 of the running container, then creates:
 
 ```bash
-/var/lib/promptwall/evidence-schedule.json
-/etc/promptwall/evidence-pack.env
-/etc/systemd/system/promptwall-evidence-pack.service
-/etc/systemd/system/promptwall-evidence-pack.timer
-/var/log/promptwall/evidence-pack.log
+/var/lib/redactwall/evidence-schedule.json
+/etc/redactwall/evidence-pack.env
+/etc/systemd/system/redactwall-evidence-pack.service
+/etc/systemd/system/redactwall-evidence-pack.timer
+/var/log/redactwall/evidence-pack.log
 ```
 
 The default schedule is `OnCalendar=quarterly` with `Persistent=true`, and the
 default config writes packs to `/data/evidence-packs` inside the container,
-which maps to the encrypted EBS-backed `/var/lib/promptwall/evidence-packs`
+which maps to the encrypted EBS-backed `/var/lib/redactwall/evidence-packs`
 folder on the EC2 host.
 
 After deployment, use Systems Manager Session Manager to inspect or adjust the
 schedule config:
 
 ```bash
-sudo editor /var/lib/promptwall/evidence-schedule.json
-sudo systemctl restart promptwall-evidence-pack.timer
-sudo systemctl start promptwall-evidence-pack.service
-systemctl list-timers promptwall-evidence-pack.timer
+sudo editor /var/lib/redactwall/evidence-schedule.json
+sudo systemctl restart redactwall-evidence-pack.timer
+sudo systemctl start redactwall-evidence-pack.service
+systemctl list-timers redactwall-evidence-pack.timer
 ```
 
 The timer calls the running container with `npm run evidence:pack:scheduled`,
-writes run status to `/var/log/promptwall/evidence-pack.log`, and stores only
+writes run status to `/var/log/redactwall/evidence-pack.log`, and stores only
 mode, container name, config path, and log path in
-`/etc/promptwall/evidence-pack.env`. Do not put admin passwords, ingest keys,
+`/etc/redactwall/evidence-pack.env`. Do not put admin passwords, ingest keys,
 data-encryption keys, raw prompt bodies, release tokens, or uploaded file bytes
 in the unit environment.
 
@@ -240,7 +240,7 @@ in the unit environment.
 Move to a shared SaaS control plane after the first paid customer stack is
 operational. That migration should include:
 
-- Postgres datastore: SHIPPED behind `SENTINEL_DB_DRIVER=postgres` with
+- Postgres datastore: SHIPPED behind `REDACTWALL_DB_DRIVER=postgres` with
   tenant-scoped queries (indexed `orgId` + forced row-level security) and a
   database-enforced append-only audit table.
 - Database migrations: SHIPPED (auto-applied ordered history on startup for

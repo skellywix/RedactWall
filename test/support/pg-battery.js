@@ -2,7 +2,7 @@
 /**
  * Exercises the full db.js contract against whatever driver the environment
  * selects, printing one JSON result blob. Run in a child process so the
- * db singleton binds to the Postgres driver via SENTINEL_DB_DRIVER.
+ * db singleton binds to the Postgres driver via REDACTWALL_DB_DRIVER.
  */
 const results = {};
 

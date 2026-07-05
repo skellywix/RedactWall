@@ -45,10 +45,10 @@ async function download(state,deps){
   try{
     const response=await deps.api(`${endpoint}${encodeURIComponent(state.siemPackageProfile)}&format=zip`);
     if(!response||!response.ok){window.alert(await deps.apiErrorSummary(response,'SIEM package download failed'));return;}
-    const url=URL.createObjectURL(await response.blob()),link=Object.assign(document.createElement('a'),{href:url,download:`promptwall-siem-${state.siemPackageProfile||'all'}-package.zip`});
+    const url=URL.createObjectURL(await response.blob()),link=Object.assign(document.createElement('a'),{href:url,download:`redactwall-siem-${state.siemPackageProfile||'all'}-package.zip`});
     document.body.appendChild(link);link.click();link.remove();URL.revokeObjectURL(url);deps.markUpdated('SIEM PACKAGE READY');
   }catch{window.alert('SIEM package download failed.');}
   finally{if(button){button.removeAttribute('aria-busy');button.innerHTML='Download ZIP';}deps.renderSiemPackage();}
 }
-window.PromptWallSiemPackage={render,load,download};
+window.RedactWallSiemPackage={render,load,download};
 }());

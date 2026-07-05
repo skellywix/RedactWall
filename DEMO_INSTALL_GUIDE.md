@@ -1,6 +1,6 @@
-# PromptWall Demo Guide Hub
+# RedactWall Demo Guide Hub
 
-This is the entry point for PromptWall demos. The detailed guide is now split by
+This is the entry point for RedactWall demos. The detailed guide is now split by
 audience so a presenter can stay focused on the buyer story while a technician
 keeps the demo machine clean, repeatable, and verified.
 
@@ -48,10 +48,10 @@ This section is generated from the app by `npm run docs:demo-guide`. Do not hand
 
 | Source | Current value |
 | --- | --- |
-| App package | `promptwall@0.3.0` |
-| Active repo folder | `promptwall` |
+| App package | `redactwall@0.3.0` |
+| Active repo folder | `redactwall` |
 | Server entrypoint | `server/app.js` |
-| Browser extension | `PromptWall - AI Data Guard` version `0.3.0` |
+| Browser extension | `RedactWall - AI Data Guard` version `0.3.0` |
 | Default enforcement mode | `block` |
 | Block thresholds | severity `2`, risk score `20` |
 | Raw approval retention | enabled for `30` day(s) |
@@ -145,9 +145,9 @@ This section is generated from the app by `npm run docs:demo-guide`. Do not hand
 
 ## Demo Contract
 
-Every complete PromptWall demo should prove these five points:
+Every complete RedactWall demo should prove these five points:
 
-1. PromptWall detects sensitive data before it leaves the browser or device.
+1. RedactWall detects sensitive data before it leaves the browser or device.
 2. The browser extension, endpoint agent, MCP guard, and server share one local
    detection engine.
 3. Policy can warn, require justification, redact, or block.
@@ -204,7 +204,7 @@ show:
 The active repo folder in this checkout is:
 
 ```powershell
-cd C:\Users\Eric\Desktop\Coding_Projects\promptsentinel-app\promptwall
+cd C:\Users\Eric\Desktop\Coding_Projects\redactwall-app\redactwall
 ```
 
 Do not run source edits, npm commands, commits, hook setup, review gates, or

@@ -1,15 +1,15 @@
 # Examiner Evidence Pack Schedules
 
-PromptWall can register recurring jobs that generate sanitized examiner evidence
+RedactWall can register recurring jobs that generate sanitized examiner evidence
 packs from a schedule config. Use Windows Task Scheduler on pilot workstations
 and systemd timers on Linux or AWS customer-silo hosts.
 
 ## Windows Task Scheduler
 
-- Task name: `\PromptWall\PromptWall Examiner Evidence Pack`
+- Task name: `\RedactWall\RedactWall Examiner Evidence Pack`
 - Default trigger: every 13 weeks on Sunday at 11:00 PM local machine time
 - Action: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/run-evidence-pack.ps1`
-- Log file: `%LOCALAPPDATA%\PromptWall\logs\evidence-pack.log`
+- Log file: `%LOCALAPPDATA%\RedactWall\logs\evidence-pack.log`
 
 Create the customer schedule file before installing the task:
 
@@ -54,8 +54,8 @@ For Docker customer-silo hosts, put the schedule config in the mounted data
 folder so the container sees it at `/data/evidence-schedule.json`:
 
 ```bash
-sudo cp config/evidence-schedule.example.json /var/lib/promptwall/evidence-schedule.json
-sudo editor /var/lib/promptwall/evidence-schedule.json
+sudo cp config/evidence-schedule.example.json /var/lib/redactwall/evidence-schedule.json
+sudo editor /var/lib/redactwall/evidence-schedule.json
 ```
 
 Set `outDir` inside that file to `/data/evidence-packs`, then install the
@@ -64,7 +64,7 @@ timer:
 ```bash
 sudo npm run evidence:pack:install-systemd -- \
   --mode docker \
-  --container promptwall \
+  --container redactwall \
   --config /data/evidence-schedule.json \
   --on-calendar quarterly
 ```
@@ -74,18 +74,18 @@ For a local Linux repo checkout without Docker:
 ```bash
 sudo npm run evidence:pack:install-systemd -- \
   --mode npm \
-  --project-dir /opt/promptwall \
+  --project-dir /opt/redactwall \
   --config config/evidence-schedule.json \
   --on-calendar weekly
 ```
 
 The installer writes:
 
-- `/usr/local/bin/promptwall-run-evidence-pack`
-- `/etc/promptwall/evidence-pack.env`
-- `/etc/systemd/system/promptwall-evidence-pack.service`
-- `/etc/systemd/system/promptwall-evidence-pack.timer`
-- `/var/log/promptwall/evidence-pack.log`
+- `/usr/local/bin/redactwall-run-evidence-pack`
+- `/etc/redactwall/evidence-pack.env`
+- `/etc/systemd/system/redactwall-evidence-pack.service`
+- `/etc/systemd/system/redactwall-evidence-pack.timer`
+- `/var/log/redactwall/evidence-pack.log`
 
 The timer uses `Persistent=true`, so a missed run executes after the host comes
 back online. The unit environment contains scheduler metadata only: mode, repo
@@ -96,7 +96,7 @@ uploaded file bytes.
 Run a one-off pack through the installed service:
 
 ```bash
-sudo systemctl start promptwall-evidence-pack.service
+sudo systemctl start redactwall-evidence-pack.service
 ```
 
 For a direct Linux run without registering systemd:
@@ -106,5 +106,5 @@ npm run evidence:pack:run-linux -- \
   --mode npm \
   --project-dir "$PWD" \
   --config config/evidence-schedule.json \
-  --log /tmp/promptwall-evidence-pack.log
+  --log /tmp/redactwall-evidence-pack.log
 ```

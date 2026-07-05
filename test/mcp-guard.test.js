@@ -51,12 +51,12 @@ test('reports sanitized client analysis for locally redacted MCP output', async 
       return { ok: true };
     },
     policy: { ignore: [], disabledDetectors: [] },
-    server: 'http://sentinel.test',
+    server: 'http://redactwall.test',
     key: 'unit-key',
   });
 
   assert.strictEqual(guarded.redacted, true);
-  assert.strictEqual(outbound.url, 'http://sentinel.test/api/v1/gate');
+  assert.strictEqual(outbound.url, 'http://redactwall.test/api/v1/gate');
   assert.strictEqual(outbound.headers['x-api-key'], 'unit-key');
   assert.strictEqual(outbound.body.source, 'mcp_guard');
   assert.strictEqual(outbound.body.channel, 'mcp_doc');
@@ -76,14 +76,14 @@ test('does not contact the control plane without an ingest key', async () => {
     return { ok: true, json: async () => ({ ignore: ['US_SSN'], disabledDetectors: [] }) };
   };
 
-  const policy = await fetchPolicy({ server: 'http://sentinel.test', key: '', fetchImpl });
+  const policy = await fetchPolicy({ server: 'http://redactwall.test', key: '', fetchImpl });
   assert.strictEqual(policy, null);
 
   const guarded = await guardToolResult('Member SSN 524-71-9043 must stay local.', {
     agent: 'mcp-unit',
     tool: 'drive.fetch',
   }, {
-    server: 'http://sentinel.test',
+    server: 'http://redactwall.test',
     key: '',
     fetchImpl,
     policy: { ignore: [], disabledDetectors: [] },
@@ -131,7 +131,7 @@ test('blocks disallowed MCP tools before the handler runs and logs sanitized evi
     agent: 'mcp-unit',
     tool: 'sharepoint.deleteRecord',
   }, {
-    server: 'http://sentinel.test',
+    server: 'http://redactwall.test',
     key: 'unit-key',
     policy: { ignore: [], disabledDetectors: [], mcpAllowedTools: ['sharepoint.fetch*'] },
     fetchImpl: async (url, opts) => {
@@ -143,7 +143,7 @@ test('blocks disallowed MCP tools before the handler runs and logs sanitized evi
   const result = await wrapped({ memberSsn: '524-71-9043' });
   assert.strictEqual(handlerCalled, false);
   assert.match(result, /\[BLOCKED: MCP tool is outside the allowed registry\]/);
-  assert.strictEqual(outbound.url, 'http://sentinel.test/api/v1/gate');
+  assert.strictEqual(outbound.url, 'http://redactwall.test/api/v1/gate');
   assert.strictEqual(outbound.body.source, 'mcp_guard');
   assert.strictEqual(outbound.body.channel, 'mcp_tool');
   assert.strictEqual(outbound.body.clientOutcome, 'action_blocked');
@@ -167,7 +167,7 @@ test('policy refresh failures log sanitized errors only when requested', async (
   console.error = (...args) => errors.push(args.join(' '));
   try {
     const policy = await fetchPolicy({
-      server: 'http://sentinel.test',
+      server: 'http://redactwall.test',
       key: 'policy-key',
       silent: false,
       fetchImpl: async () => {
@@ -204,11 +204,11 @@ test('returns redacted tool output when audit logging stalls', async () => {
   const started = Date.now();
   const guarded = await guardToolResult('Member SSN 524-71-9043 must be redacted.', { agent: 'test', tool: 'drive.fetch' }, {
     policy: { ignore: [], disabledDetectors: [] },
-    server: 'http://sentinel.test',
+    server: 'http://redactwall.test',
     key: 'unit-key',
     timeoutMs: 10,
     fetchImpl: async (url, opts) => new Promise((resolve, reject) => {
-      assert.strictEqual(url, 'http://sentinel.test/api/v1/gate');
+      assert.strictEqual(url, 'http://redactwall.test/api/v1/gate');
       assert.strictEqual(opts.headers['x-api-key'], 'unit-key');
       opts.signal.addEventListener('abort', () => {
         const e = new Error('aborted');
@@ -242,7 +242,7 @@ test('guardToolResult refreshes live policy before scanning when no explicit pol
     agent: 'mcp-unit',
     tool: 'sharepoint.fetchDoc',
   }, {
-    server: 'http://sentinel.test',
+    server: 'http://redactwall.test',
     key: 'policy-key',
     policyRefreshMs: 0,
     fetchImpl: async (url, opts = {}) => {
@@ -255,9 +255,9 @@ test('guardToolResult refreshes live policy before scanning when no explicit pol
     },
   });
 
-  assert.strictEqual(requests[0].url, 'http://sentinel.test/api/v1/policy');
+  assert.strictEqual(requests[0].url, 'http://redactwall.test/api/v1/policy');
   // The policy refresh also fires a fire-and-forget presence heartbeat.
-  assert.ok(requests.slice(1).every((r) => r.url === 'http://sentinel.test/api/v1/heartbeat'));
+  assert.ok(requests.slice(1).every((r) => r.url === 'http://redactwall.test/api/v1/heartbeat'));
   assert.strictEqual(requests[0].headers['x-api-key'], 'policy-key');
   assert.strictEqual(guarded.redacted, false);
   assert.deepStrictEqual(guarded.findings, []);
@@ -265,7 +265,7 @@ test('guardToolResult refreshes live policy before scanning when no explicit pol
 
 test('wrapTool returns only guarded text for string and structured tool results', async () => {
   await refreshPolicy({
-    server: 'http://sentinel.test',
+    server: 'http://redactwall.test',
     key: 'policy-key',
     fetchImpl: async () => ({
       ok: true,
@@ -317,7 +317,7 @@ test('demo path prints raw and guarded MCP examples for operator verification', 
 test('refreshes MCP detection policy from the control plane', async () => {
   let request;
   const policy = await refreshPolicy({
-    server: 'http://sentinel.test',
+    server: 'http://redactwall.test',
     key: 'policy-key',
     fetchImpl: async (url, opts) => {
       request = { url, headers: opts.headers };
@@ -328,7 +328,7 @@ test('refreshes MCP detection policy from the control plane', async () => {
     },
   });
 
-  assert.strictEqual(request.url, 'http://sentinel.test/api/v1/policy');
+  assert.strictEqual(request.url, 'http://redactwall.test/api/v1/policy');
   assert.strictEqual(request.headers['x-api-key'], 'policy-key');
   assert.deepStrictEqual(policy.ignore, ['US_SSN', 'CREDENTIALS']);
   assert.deepStrictEqual(policy.disabledDetectors, ['CREDIT_CARD']);

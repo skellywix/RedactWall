@@ -1,4 +1,4 @@
-/* PromptWall background service worker.
+/* RedactWall background service worker.
  * - Holds the server URL + ingest key, and the org policy (cached).
  * - Resolves the END-USER IDENTITY from MDM-injected managed storage (so the
  *   audit log can answer "did employee X paste member data?" — REVIEW #8).
@@ -338,7 +338,7 @@ async function handleDownloadCreated(item = {}) {
 // host so the real file gets scanned on the device. Strictly best-effort: a
 // missing host, missing permission, or slow reply never affects enforcement -
 // the upload is already blocked before this runs.
-const FILE_INTENT_HOST = 'com.promptwall.file_intent';
+const FILE_INTENT_HOST = 'com.redactwall.file_intent';
 
 function boundedFileIntent(payload = {}) {
   const fileName = String(payload.fileName || '').slice(0, 255);

@@ -59,27 +59,27 @@ function parseArgs(argv = []) {
 
 function linearEnv(env, args) {
   const out = { ...env };
-  if (args.apiUrl) out.PROMPTWALL_APPROVAL_LINEAR_API_URL = args.apiUrl;
-  if (args.teamId) out.PROMPTWALL_APPROVAL_LINEAR_TEAM_ID = args.teamId;
-  if (args.stateId) out.PROMPTWALL_APPROVAL_LINEAR_STATE_ID = args.stateId;
-  if (args.projectId) out.PROMPTWALL_APPROVAL_LINEAR_PROJECT_ID = args.projectId;
-  if (args.labelIds) out.PROMPTWALL_APPROVAL_LINEAR_LABEL_IDS = args.labelIds;
+  if (args.apiUrl) out.REDACTWALL_APPROVAL_LINEAR_API_URL = args.apiUrl;
+  if (args.teamId) out.REDACTWALL_APPROVAL_LINEAR_TEAM_ID = args.teamId;
+  if (args.stateId) out.REDACTWALL_APPROVAL_LINEAR_STATE_ID = args.stateId;
+  if (args.projectId) out.REDACTWALL_APPROVAL_LINEAR_PROJECT_ID = args.projectId;
+  if (args.labelIds) out.REDACTWALL_APPROVAL_LINEAR_LABEL_IDS = args.labelIds;
   return out;
 }
 
 function linearChannelForPayload(env) {
-  const teamId = envValue(env, 'PROMPTWALL_APPROVAL_LINEAR_TEAM_ID', 'APPROVAL_LINEAR_TEAM_ID');
-  if (!teamId) throw new Error('missing Linear team id: set PROMPTWALL_APPROVAL_LINEAR_TEAM_ID or pass --team-id');
-  const url = notifiers.linearApiUrl(envValue(env, 'PROMPTWALL_APPROVAL_LINEAR_API_URL', 'APPROVAL_LINEAR_API_URL'));
+  const teamId = envValue(env, 'REDACTWALL_APPROVAL_LINEAR_TEAM_ID', 'APPROVAL_LINEAR_TEAM_ID');
+  if (!teamId) throw new Error('missing Linear team id: set REDACTWALL_APPROVAL_LINEAR_TEAM_ID or pass --team-id');
+  const url = notifiers.linearApiUrl(envValue(env, 'REDACTWALL_APPROVAL_LINEAR_API_URL', 'APPROVAL_LINEAR_API_URL'));
   if (!url) throw new Error('invalid Linear API URL: use an https:// endpoint');
   return {
     type: 'linear',
     name: 'linear',
     url,
     teamId,
-    stateId: envValue(env, 'PROMPTWALL_APPROVAL_LINEAR_STATE_ID', 'APPROVAL_LINEAR_STATE_ID'),
-    projectId: envValue(env, 'PROMPTWALL_APPROVAL_LINEAR_PROJECT_ID', 'APPROVAL_LINEAR_PROJECT_ID'),
-    labelIds: csv(envValue(env, 'PROMPTWALL_APPROVAL_LINEAR_LABEL_IDS', 'APPROVAL_LINEAR_LABEL_IDS')),
+    stateId: envValue(env, 'REDACTWALL_APPROVAL_LINEAR_STATE_ID', 'APPROVAL_LINEAR_STATE_ID'),
+    projectId: envValue(env, 'REDACTWALL_APPROVAL_LINEAR_PROJECT_ID', 'APPROVAL_LINEAR_PROJECT_ID'),
+    labelIds: csv(envValue(env, 'REDACTWALL_APPROVAL_LINEAR_LABEL_IDS', 'APPROVAL_LINEAR_LABEL_IDS')),
   };
 }
 
@@ -91,7 +91,7 @@ function syntheticApprovalQuery({ now = new Date(), queryId } = {}) {
     createdAt,
     status: 'pending',
     user: 'linear-smoke@example.test',
-    orgId: 'promptwall-smoke',
+    orgId: 'redactwall-smoke',
     source: 'linear_smoke',
     channel: 'approval_ticket',
     sensor: {
@@ -152,8 +152,8 @@ async function runSmoke({ env = process.env, argv = process.argv.slice(2), fetch
     };
   }
 
-  if (!envValue(request.env, 'PROMPTWALL_APPROVAL_LINEAR_API_KEY', 'APPROVAL_LINEAR_API_KEY')) {
-    throw new Error('missing Linear API key: set PROMPTWALL_APPROVAL_LINEAR_API_KEY or APPROVAL_LINEAR_API_KEY before --send');
+  if (!envValue(request.env, 'REDACTWALL_APPROVAL_LINEAR_API_KEY', 'APPROVAL_LINEAR_API_KEY')) {
+    throw new Error('missing Linear API key: set REDACTWALL_APPROVAL_LINEAR_API_KEY or APPROVAL_LINEAR_API_KEY before --send');
   }
 
   const result = await notifiers.emitApprovalNotification(request.query, {
@@ -183,7 +183,7 @@ async function main(argv = process.argv.slice(2), deps = {}) {
     io.log(`LINEAR_APPROVAL_SMOKE_DRY_RUN query=${result.queryId} team=${result.teamId} endpoint=${result.url}`);
     io.log(`title=${result.title}`);
     io.log('wire=sanitized send=false');
-    io.log('Add --send after setting PROMPTWALL_APPROVAL_LINEAR_API_KEY to create a real Linear issue.');
+    io.log('Add --send after setting REDACTWALL_APPROVAL_LINEAR_API_KEY to create a real Linear issue.');
     return;
   }
   io.log(`LINEAR_APPROVAL_SMOKE_OK query=${result.queryId} issue=${result.externalId || 'created'} status=${result.status}`);

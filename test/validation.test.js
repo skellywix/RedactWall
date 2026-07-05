@@ -8,12 +8,12 @@ const fs = require('node:fs');
 const crypto = require('node:crypto');
 
 process.env.ADMIN_PASSWORD = 'unit-pass';
-process.env.SENTINEL_SECRET = 'unit-secret-stable';
-process.env.SENTINEL_DATA_KEY = 'unit-data-key-stable';
+process.env.REDACTWALL_SECRET = 'unit-secret-stable';
+process.env.REDACTWALL_DATA_KEY = 'unit-data-key-stable';
 process.env.INGEST_API_KEY = 'unit-ingest-key';
-process.env.SENTINEL_DB_PATH = path.join(os.tmpdir(), 'ps-validation-test-' + crypto.randomBytes(6).toString('hex') + '.db');
+process.env.REDACTWALL_DB_PATH = path.join(os.tmpdir(), 'ps-validation-test-' + crypto.randomBytes(6).toString('hex') + '.db');
 const policyPath = path.join(os.tmpdir(), 'ps-validation-policy-' + crypto.randomBytes(6).toString('hex') + '.json');
-process.env.SENTINEL_POLICY_PATH = policyPath;
+process.env.REDACTWALL_POLICY_PATH = policyPath;
 fs.copyFileSync(path.join(__dirname, '..', 'config', 'policy.json'), policyPath);
 
 const app = require('../server/app');
@@ -54,7 +54,7 @@ async function login(port) {
   });
   assert.strictEqual(res.status, 200);
   const cookie = (res.headers.get('set-cookie') || '').split(';')[0];
-  assert.ok(cookie.includes('promptwall_session='));
+  assert.ok(cookie.includes('redactwall_session='));
   const csrfRes = await fetch(`http://127.0.0.1:${port}/api/csrf`, {
     headers: { cookie },
   });
@@ -394,9 +394,9 @@ test('gate emits automatic sanitized posture feed when enabled', async () => wit
     });
     assert.strictEqual(res.status, 200);
 
-    await waitFor(() => sent.some((alert) => alert.body.eventType === 'promptwall.posture_snapshot'), 2000);
-    const postureAlert = sent.find((alert) => alert.body.eventType === 'promptwall.posture_snapshot');
-    const securityAlert = sent.find((alert) => alert.body.eventType === 'promptwall.security_event');
+    await waitFor(() => sent.some((alert) => alert.body.eventType === 'redactwall.posture_snapshot'), 2000);
+    const postureAlert = sent.find((alert) => alert.body.eventType === 'redactwall.posture_snapshot');
+    const securityAlert = sent.find((alert) => alert.body.eventType === 'redactwall.security_event');
     assert.ok(securityAlert);
     assert.strictEqual(postureAlert.url, 'https://siem.example.test/hook');
     assert.strictEqual(postureAlert.headers.Authorization, 'Bearer unit-token');
@@ -1455,9 +1455,16 @@ test('admin policy accepts its own full policy payload', async () => withServer(
   }
 }));
 
-test('admin auth accepts legacy session cookie during PromptWall migration', async () => withServer(async (port) => {
+test('admin auth accepts legacy session cookie during RedactWall migration', async () => withServer(async (port) => {
   const { cookie } = await login(port);
-  const legacyCookie = cookie.replace(/^promptwall_session=/, 'sentinel_session=');
+  const legacyCookie = cookie.replace(/^redactwall_session=/, 'sentinel_session=');
+
+  const promptwallCookie = cookie.replace(/^redactwall_session=/, 'promptwall_session=');
+  const mePromptwall = await jsonFetch(port, '/api/me', {
+    method: 'GET',
+    headers: { cookie: promptwallCookie },
+  });
+  assert.strictEqual(mePromptwall.status, 200);
 
   const me = await jsonFetch(port, '/api/me', {
     method: 'GET',
@@ -1483,6 +1490,7 @@ test('admin auth accepts legacy session cookie during PromptWall migration', asy
   });
   assert.strictEqual(logout.status, 200);
   const setCookie = logout.headers.get('set-cookie') || '';
+  assert.ok(setCookie.includes('redactwall_session='));
   assert.ok(setCookie.includes('promptwall_session='));
   assert.ok(setCookie.includes('sentinel_session='));
 }));
@@ -1779,7 +1787,7 @@ test('admin policy accepts customer approval routing rules', async () => withSer
         approvalRoutingRules: [{
           id: 'member_services_chatgpt',
           users: ['lending@example.test'],
-          groups: ['PromptWall Lending'],
+          groups: ['RedactWall Lending'],
           orgIds: ['cu-001'],
           detectors: ['MEMBER_ID'],
           destinations: ['chatgpt.com'],
@@ -1802,7 +1810,7 @@ test('admin policy accepts customer approval routing rules', async () => withSer
       slaMinutes: 120,
       reason: 'member_services',
       users: ['lending@example.test'],
-      groups: ['promptwall lending'],
+      groups: ['redactwall lending'],
       orgIds: ['cu-001'],
       detectors: ['MEMBER_ID'],
       destinations: ['chatgpt.com'],
@@ -1826,7 +1834,7 @@ test('admin policy accepts scoped policy and time-bound exceptions', async () =>
       body: {
         policyScopes: [{
           id: 'legal_contract_review',
-          groups: ['PromptWall Legal'],
+          groups: ['RedactWall Legal'],
           destinations: ['claude.ai'],
           categories: ['LEGAL_CONTRACT'],
           enforcementMode: 'block',
@@ -1854,7 +1862,7 @@ test('admin policy accepts scoped policy and time-bound exceptions', async () =>
     assert.deepStrictEqual(body.policyScopes, [{
       id: 'legal_contract_review',
       enabled: true,
-      groups: ['promptwall legal'],
+      groups: ['redactwall legal'],
       detectors: undefined,
       categories: ['LEGAL_CONTRACT'],
       sources: undefined,
@@ -2057,7 +2065,7 @@ test('admin destination review validates, persists, and audits decisions', async
 
 test.after(() => {
   for (const suffix of ['', '-wal', '-shm']) {
-    try { fs.unlinkSync(process.env.SENTINEL_DB_PATH + suffix); } catch {}
+    try { fs.unlinkSync(process.env.REDACTWALL_DB_PATH + suffix); } catch {}
   }
   try { fs.unlinkSync(policyPath); } catch {}
 });

@@ -1,6 +1,6 @@
 # Slack MCP Connector
 
-PromptWall ships a first-party Slack connector for MCP runtimes. It fetches
+RedactWall ships a first-party Slack connector for MCP runtimes. It fetches
 bounded Slack conversation history or text-readable private Slack file content,
 then calls `sanitizeConversationHistory()` or `sanitizeSlackFileContent()`
 before returning a tool result to the model.
@@ -45,7 +45,7 @@ const fetchSlackHistory = createSlackConversationHistoryTool({
   accessToken: process.env.SLACK_BOT_TOKEN,
   agent: 'claude-desktop',
   guardOptions: {
-    server: process.env.SENTINEL_URL,
+    server: process.env.REDACTWALL_URL,
     key: process.env.INGEST_API_KEY,
   },
 });
@@ -59,7 +59,7 @@ const fetchSlackFile = createSlackFileContentTool({
   accessToken: process.env.SLACK_BOT_TOKEN,
   agent: 'claude-desktop',
   guardOptions: {
-    server: process.env.SENTINEL_URL,
+    server: process.env.REDACTWALL_URL,
     key: process.env.INGEST_API_KEY,
   },
 });
@@ -74,7 +74,7 @@ const health = slackConnectorHealth({
 }, true, 'OAuth probe ok');
 ```
 
-`history` and `file` are safe to return to the MCP client. If PromptWall
+`history` and `file` are safe to return to the MCP client. If RedactWall
 detects sensitive content, the result contains a single redacted text block.
 The control plane receives sanitized evidence only: redacted text, masked
 findings, categories, risk metadata, destination label, and sensor version.

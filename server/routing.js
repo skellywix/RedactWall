@@ -1,6 +1,6 @@
 'use strict';
 /**
- * Approval ownership and SLA routing for held PromptWall decisions.
+ * Approval ownership and SLA routing for held RedactWall decisions.
  *
  * The routing contract is deliberately metadata-only. Rules can look at detector
  * ids, categories, source, channel, destination, severity, and risk, but never

@@ -247,10 +247,10 @@ async function collectClipboard(opts = {}) {
 
 function printHuman(result, io = console) {
   if (result.status === 'clean' || result.status === 'empty') {
-    io.log(`PromptWall clipboard guard ${result.status}`);
+    io.log(`RedactWall clipboard guard ${result.status}`);
     return;
   }
-  const parts = [`PromptWall clipboard guard ${result.status}`];
+  const parts = [`RedactWall clipboard guard ${result.status}`];
   if (result.labels && result.labels.length) parts.push(result.labels.join(', '));
   if (result.cleared) parts.push('clipboard cleared');
   if (!result.recorded) parts.push('not recorded');

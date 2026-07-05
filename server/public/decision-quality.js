@@ -69,7 +69,7 @@
     });
   }
 
-  window.PromptWallDecisionQuality={load,render};
+  window.RedactWallDecisionQuality={load,render};
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);
   else boot();
 })();

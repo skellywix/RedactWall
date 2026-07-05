@@ -3,7 +3,7 @@
  * SaaS/customer tenancy helpers.
  *
  * The current commercial-safe shape is a customer-silo deployment: one
- * PromptWall stack per paying customer. These checks make that stack behave
+ * RedactWall stack per paying customer. These checks make that stack behave
  * like a tenant-bound SaaS instance without weakening the existing audit store.
  */
 
@@ -50,13 +50,13 @@ function isBillableUser(value) {
 
 function config(env = process.env) {
   const resolved = withEnvAliases(env);
-  const tenantId = normalizeTenantId(resolved.SENTINEL_TENANT_ID);
-  const explicitSaasMode = bool(resolved.SENTINEL_SAAS_MODE);
-  const requireTenantContext = bool(resolved.SENTINEL_REQUIRE_TENANT_CONTEXT);
-  const requireUserIdentity = bool(resolved.SENTINEL_REQUIRE_USER_IDENTITY);
-  const seatLimitConfigured = hasSeatLimit(resolved.SENTINEL_SEAT_LIMIT);
-  const seatLimitValid = seatLimitConfigured && validSeatLimit(resolved.SENTINEL_SEAT_LIMIT);
-  const seatLimit = parseSeatLimit(resolved.SENTINEL_SEAT_LIMIT);
+  const tenantId = normalizeTenantId(resolved.REDACTWALL_TENANT_ID);
+  const explicitSaasMode = bool(resolved.REDACTWALL_SAAS_MODE);
+  const requireTenantContext = bool(resolved.REDACTWALL_REQUIRE_TENANT_CONTEXT);
+  const requireUserIdentity = bool(resolved.REDACTWALL_REQUIRE_USER_IDENTITY);
+  const seatLimitConfigured = hasSeatLimit(resolved.REDACTWALL_SEAT_LIMIT);
+  const seatLimitValid = seatLimitConfigured && validSeatLimit(resolved.REDACTWALL_SEAT_LIMIT);
+  const seatLimit = parseSeatLimit(resolved.REDACTWALL_SEAT_LIMIT);
   const saasMode = explicitSaasMode || !!tenantId || seatLimitConfigured || requireTenantContext || requireUserIdentity;
   return {
     saasMode,

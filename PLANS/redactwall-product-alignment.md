@@ -1,8 +1,8 @@
-# PromptWall Product Alignment Plan
+# RedactWall Product Alignment Plan
 
 ## Goal And Context
 
-Rename the product to PromptWall and keep moving the codebase toward the stated
+Rename the product to RedactWall and keep moving the codebase toward the stated
 end goal: a compliance-grade safety layer that lets regulated companies allow
 AI tools without leaking customer data. The target product is one policy, one
 approval queue, one tamper-evident audit log, and three sensors using the same
@@ -15,12 +15,12 @@ local detection engine.
 - `alwaysBlock` entities stay hard stops.
 - Raw prompt or file content may only be retained as encrypted approval data
   when policy allows it.
-- Existing `SENTINEL_*` env vars remain supported until a tested compatibility
+- Existing `REDACTWALL_*` env vars remain supported until a tested compatibility
   migration exists.
-- `PROMPTWALL_*` env aliases may be added only as compatibility aliases; they
-  must not break existing `SENTINEL_*` deployments or retained evidence.
+- `REDACTWALL_*` env aliases may be added only as compatibility aliases; they
+  must not break existing `REDACTWALL_*` deployments or retained evidence.
 - Existing encrypted approval records must remain decryptable after the
-  PromptWall rename.
+  RedactWall rename.
 - The repo remains one source of truth. Source edits, tests, and commits run
   from the active app repo folder.
 
@@ -48,7 +48,7 @@ existing customer-style runbooks.
 ### Recommendation
 
 Use Option A plus tested compatibility shims. Runtime-visible names can move to
-PromptWall only when fresh installs use the new name by default and existing
+RedactWall only when fresh installs use the new name by default and existing
 installs keep a tested fallback. Keep encrypted-data namespaces and retained
 evidence stable until a separate migration plan exists.
 
@@ -60,8 +60,8 @@ evidence stable until a separate migration plan exists.
    notes for env-var aliases.
 3. Product alignment: competitor-backed roadmap note, coverage parity checks,
    and active protection for governed destinations.
-4. Runtime compatibility cleanup: tested `PROMPTWALL_*` aliases, primary
-   PromptWall session cookie with legacy fallback, and stable encrypted-data
+4. Runtime compatibility cleanup: tested `REDACTWALL_*` aliases, primary
+   RedactWall session cookie with legacy fallback, and stable encrypted-data
    compatibility.
 5. Next product gap: native desktop collector or deeper app/action policy
    controls beyond destination, file-upload, response scanning, browser paste,
@@ -78,7 +78,7 @@ evidence stable until a separate migration plan exists.
 
 For this alignment track, completion requires evidence for every area below:
 
-- Rename search: no user-facing `PromptSentinel` references remain except
+- Rename search: no user-facing `RedactWall` references remain except
   explicit backward-compatibility notes or literals.
 - Package and sensor packaging tests pass.
 - `npm run sync-check` passes.
@@ -87,7 +87,7 @@ For this alignment track, completion requires evidence for every area below:
 - `verifyAuditChain()` returns `ok:true`.
 - Browser E2E passes after UI or extension behavior changes.
 - Documentation explains competitor positioning, deployment, operations, and
-  remaining gaps under the PromptWall name.
+  remaining gaps under the RedactWall name.
 
 ## Completed Product Slice
 
@@ -103,10 +103,10 @@ For this alignment track, completion requires evidence for every area below:
 - Browser uploads, endpoint file flows, and `scan-file` short-circuit as
   `file_upload_blocked` before uploaded bytes, extracted text, or sensitive
   filenames are retained.
-- Added tested `PROMPTWALL_*` aliases for server, SaaS, ingest, timeout, policy,
+- Added tested `REDACTWALL_*` aliases for server, SaaS, ingest, timeout, policy,
   endpoint watch, and endpoint handoff runtime settings while keeping existing
-  `SENTINEL_*`, `INGEST_API_KEY`, and endpoint-agent keys valid.
-- Changed fresh admin sessions to use `promptwall_session`, while accepting
+  `REDACTWALL_*`, `INGEST_API_KEY`, and endpoint-agent keys valid.
+- Changed fresh admin sessions to use `redactwall_session`, while accepting
   legacy `sentinel_session` cookies and clearing both names on logout.
 - Normalized scanner `maxFileBytes` to an integer in default policy, persisted
   config, policy load/save, and endpoint-agent scanner config so the admin
@@ -130,7 +130,7 @@ For this alignment track, completion requires evidence for every area below:
   before model delivery.
 - Added SCIM-backed OIDC console login with state, nonce, authorization-code
   token exchange, RS256 JWKS ID-token validation, active SCIM user role mapping,
-  PromptWall-prefixed env aliases, and production preflight checks.
+  RedactWall-prefixed env aliases, and production preflight checks.
 - Added a secret-free enterprise identity handoff for Microsoft Entra and Okta
   through `server/identity-setup.js`, `/api/identity/setup-guide`, the dashboard
   Identity tab, `npm run identity:setup`, generated setup env placeholders, and
@@ -158,12 +158,12 @@ For this alignment track, completion requires evidence for every area below:
   blocks, destination/file-upload blocks, file-drop blocks, and response-copy
   blocks only claim recorded evidence after the control plane returns the
   expected id and status.
-- Changed the endpoint installer's public server parameter to `-PromptWallUrl`
+- Changed the endpoint installer's public server parameter to `-RedactWallUrl`
   for fresh installs while keeping `-SentinelUrl` as a tested compatibility
-  alias, and made endpoint/MCP install-health messaging name `PROMPTWALL_URL`
+  alias, and made endpoint/MCP install-health messaging name `REDACTWALL_URL`
   first.
 - Changed fresh endpoint runner and protected-upload launcher paths to set
-  `PROMPTWALL_ENV_PATH` while still accepting legacy `SENTINEL_ENV_PATH` in the
+  `REDACTWALL_ENV_PATH` while still accepting legacy `REDACTWALL_ENV_PATH` in the
   shared env loader.
 - Added a sanitized approval ticket bridge that sends deduplicated, issue-shaped
   workflow payloads to ticketing middleware without prompt bodies, raw findings,
@@ -185,8 +185,8 @@ For this alignment track, completion requires evidence for every area below:
 
 ## Open Decisions
 
-- The local checkout folder has been renamed to `promptwall/`; the remaining
-  GitHub repository has also been renamed to `skellywix/promptwall`.
+- The local checkout folder has been renamed to `redactwall/`; the remaining
+  GitHub repository has also been renamed to `skellywix/redactwall`.
 - Whether the next product build should prioritize deeper desktop interception,
   signed-update operations, step-up reauthentication polish, or broader
   app/action policy controls beyond browser paste, file drops, and response

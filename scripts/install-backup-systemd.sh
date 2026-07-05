@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SERVICE_NAME="promptwall-backup"
+SERVICE_NAME="redactwall-backup"
 MODE="npm"
-PROJECT_DIR="/opt/promptwall"
+PROJECT_DIR="/opt/redactwall"
 BACKUP_DIR=""
-LOG_PATH="/var/log/promptwall/backup.log"
-CONTAINER_NAME="promptwall"
+LOG_PATH="/var/log/redactwall/backup.log"
+CONTAINER_NAME="redactwall"
 ON_CALENDAR="daily"
 RANDOMIZED_DELAY="15m"
 RETENTION_DAYS="30"
@@ -16,21 +16,21 @@ usage() {
   cat <<'USAGE'
 Usage: install-backup-systemd.sh [options]
 
-Installs a systemd timer that backs up the PromptWall SQLite evidence store
+Installs a systemd timer that backs up the RedactWall SQLite evidence store
 with `npm run backup` and prunes backups older than the retention window.
-Defaults target a repo checkout at /opt/promptwall; docker mode targets the
-customer-silo shape where /var/lib/promptwall is mounted into the container
+Defaults target a repo checkout at /opt/redactwall; docker mode targets the
+customer-silo shape where /var/lib/redactwall is mounted into the container
 at /data.
 
 Options:
-  --service-name <name>       systemd service/timer base name. Default: promptwall-backup.
+  --service-name <name>       systemd service/timer base name. Default: redactwall-backup.
   --mode npm|docker          Runner mode. Default: npm.
-  --project-dir <path>       Repo checkout for npm mode. Default: /opt/promptwall.
+  --project-dir <path>       Repo checkout for npm mode. Default: /opt/redactwall.
   --backup-dir <path>        Backup output dir. npm default: <project-dir>/backups.
                              docker default: /data/backups (inside the container).
   --retention-days <days>    Delete backups older than this many days. Default: 30.
-  --log <path>               Log path. Default: /var/log/promptwall/backup.log.
-  --container <name>         Docker container for docker mode. Default: promptwall.
+  --log <path>               Log path. Default: /var/log/redactwall/backup.log.
+  --container <name>         Docker container for docker mode. Default: redactwall.
   --on-calendar <expr>       systemd OnCalendar expression. Default: daily.
   --randomized-delay <span>  systemd RandomizedDelaySec. Default: 15m.
   --uninstall                Disable and remove the service and timer, then exit.
@@ -136,16 +136,16 @@ fi
 
 # The prune runs as a second ExecStart of the oneshot service, so it only
 # executes after a successful backup — a failing backup never deletes the
-# older good copies. systemd passes `sentinel-*` to find without shell
+# older good copies. systemd passes `redactwall-*` to find without shell
 # globbing, which is exactly what -name expects.
 if [[ "$MODE" == "docker" ]]; then
   working_dir_line=""
   backup_exec="/usr/bin/env docker exec \"$CONTAINER_NAME\" node scripts/backup-store.js create \"$BACKUP_DIR\""
-  prune_exec="/usr/bin/env docker exec \"$CONTAINER_NAME\" find \"$BACKUP_DIR\" -maxdepth 1 -type f -name sentinel-* -mtime +$RETENTION_DAYS -delete"
+  prune_exec="/usr/bin/env docker exec \"$CONTAINER_NAME\" find \"$BACKUP_DIR\" -maxdepth 1 -type f -name redactwall-* -mtime +$RETENTION_DAYS -delete"
 else
   working_dir_line="WorkingDirectory=$PROJECT_DIR"
   backup_exec="/usr/bin/env npm run backup -- --out \"$BACKUP_DIR\""
-  prune_exec="/usr/bin/env find \"$BACKUP_DIR\" -maxdepth 1 -type f -name sentinel-* -mtime +$RETENTION_DAYS -delete"
+  prune_exec="/usr/bin/env find \"$BACKUP_DIR\" -maxdepth 1 -type f -name redactwall-* -mtime +$RETENTION_DAYS -delete"
 fi
 
 tmp_service="$(mktemp)"
@@ -154,7 +154,7 @@ trap 'rm -f "$tmp_service" "$tmp_timer"' EXIT
 
 cat > "$tmp_service" <<EOF
 [Unit]
-Description=Back up the PromptWall SQLite evidence store
+Description=Back up the RedactWall SQLite evidence store
 After=$after_units
 Wants=network-online.target
 
@@ -172,7 +172,7 @@ EOF
 
 cat > "$tmp_timer" <<EOF
 [Unit]
-Description=Run PromptWall evidence store backup on schedule
+Description=Run RedactWall evidence store backup on schedule
 
 [Timer]
 OnCalendar=$ON_CALENDAR

@@ -27,8 +27,8 @@ approval-required tool prompts (`ask`) before it runs.
 
 ## Install
 
-The hook reads `INGEST_API_KEY` and `SENTINEL_URL` (or `PROMPTWALL_URL`) from the
-environment or `~/.promptwall/agent-hooks.env`. The **ingest key is never written
+The hook reads `INGEST_API_KEY` and `REDACTWALL_URL` (or `REDACTWALL_URL`) from the
+environment or `~/.redactwall/agent-hooks.env`. The **ingest key is never written
 into `settings.json`.**
 
 ```bash
@@ -41,7 +41,7 @@ npm run agent-hooks:install
 # or into the current repo's .claude/settings.json
 npm run agent-hooks:install -- --project
 
-# remove only PromptWall-owned entries
+# remove only RedactWall-owned entries
 npm run agent-hooks:install -- --uninstall
 
 # verify the install and register presence in the fleet/coverage matrix

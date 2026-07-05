@@ -10,7 +10,7 @@ A goal is only as good as the evidence that proves it. This skill forces every a
 ## Write the contract first
 Fill in all four fields. Refuse to start if any is vague.
 
-| Field | Weak | Verifiable (PromptWall example) |
+| Field | Weak | Verifiable (RedactWall example) |
 |-------|------|-------------------------------------|
 | End state | "Improve detection" | "`detect.js` flags `ROUTING_NUMBER` only with banking context AND valid ABA checksum" |
 | Evidence | "It works" | "`npm test` exits 0 and `test/detect.test.js` has a new passing case for the false-positive" |

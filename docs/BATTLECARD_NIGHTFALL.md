@@ -1,4 +1,4 @@
-# Battlecard: PromptWall vs. Nightfall AI
+# Battlecard: RedactWall vs. Nightfall AI
 
 **Internal sales use only.** Not for customer or examiner distribution. Every
 claim below is anchored to a file or command so it can be defended live. Do not

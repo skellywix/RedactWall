@@ -80,7 +80,7 @@
     if(event.target.closest('#monitorRefresh')||event.target.closest('[data-posture-segment]'))setTimeout(load,450);
   });
   document.addEventListener('change',(event)=>{if(event.target&&event.target.id==='postureSegmentSelect')setTimeout(load,450);});
-  window.PromptWallMarketHardening={load,render};
+  window.RedactWallMarketHardening={load,render};
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',load);
   else load();
 }());

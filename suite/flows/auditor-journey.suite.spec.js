@@ -64,7 +64,7 @@ test('auditor sees a read-only console, exports evidence, and is blocked from wr
   const downloadPromise = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Export Evidence' }).click();
   const download = await downloadPromise;
-  expect(download.suggestedFilename()).toMatch(/^promptwall-evidence-/);
+  expect(download.suggestedFilename()).toMatch(/^redactwall-evidence-/);
   const pack = JSON.parse(await fs.readFile(await download.path(), 'utf8'));
   expect(pack.auditIntegrity.ok).toBe(true);
   expect(JSON.stringify(pack)).not.toContain('524-71-6201');

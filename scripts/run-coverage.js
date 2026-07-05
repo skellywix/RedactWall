@@ -21,7 +21,7 @@ const INCLUDE = ['server/**/*.js', 'gateway/**/*.js', 'detection-engine/**/*.js'
 const EXCLUDE = ['server/public/**', 'sensors/browser-extension/lib/**', 'test/**', 'node_modules/**'];
 
 function main() {
-  const coverageDir = fs.mkdtempSync(path.join(os.tmpdir(), 'promptwall-v8cov-'));
+  const coverageDir = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-v8cov-'));
   try {
     const run = spawnSync(process.execPath, [path.join(__dirname, 'run-node-tests.js'), ...process.argv.slice(2)], {
       cwd: ROOT,

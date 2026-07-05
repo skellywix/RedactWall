@@ -1,6 +1,6 @@
-# PromptWall Demo Technician Setup Guide
+# RedactWall Demo Technician Setup Guide
 
-This guide is for the person preparing and operating a PromptWall demo machine.
+This guide is for the person preparing and operating a RedactWall demo machine.
 It covers local setup, browser extension configuration, synthetic fixtures,
 verification, reset, and troubleshooting.
 
@@ -16,10 +16,10 @@ This section is generated from the app by `npm run docs:demo-guide`. Do not hand
 
 | Source | Current value |
 | --- | --- |
-| App package | `promptwall@0.3.0` |
-| Active repo folder | `promptwall` |
+| App package | `redactwall@0.3.0` |
+| Active repo folder | `redactwall` |
 | Server entrypoint | `server/app.js` |
-| Browser extension | `PromptWall - AI Data Guard` version `0.3.0` |
+| Browser extension | `RedactWall - AI Data Guard` version `0.3.0` |
 | Default enforcement mode | `block` |
 | Block thresholds | severity `2`, risk score `20` |
 | Raw approval retention | enabled for `30` day(s) |
@@ -154,7 +154,7 @@ Why:
 Run commands from:
 
 ```powershell
-cd C:\Users\Eric\Desktop\Coding_Projects\promptsentinel-app\promptwall
+cd C:\Users\Eric\Desktop\Coding_Projects\redactwall-app\redactwall
 ```
 
 Do not run source edits, npm commands, commits, hooks, review gates, or pushes
@@ -239,15 +239,15 @@ shell-only values, use:
 $env:PORT = "4000"
 $env:ADMIN_USER = "admin"
 $env:ADMIN_PASSWORD = "DemoOnly!2026"
-$env:SENTINEL_SECRET = node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-$env:SENTINEL_DATA_KEY = node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+$env:REDACTWALL_SECRET = node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+$env:REDACTWALL_DATA_KEY = node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 $env:INGEST_API_KEY = "demo-ingest-key"
 ```
 
 Notes:
 
-- Keep `SENTINEL_SECRET` stable for the demo so admin sessions remain valid.
-- Keep `SENTINEL_DATA_KEY` stable so sealed approval records can be revealed.
+- Keep `REDACTWALL_SECRET` stable for the demo so admin sessions remain valid.
+- Keep `REDACTWALL_DATA_KEY` stable so sealed approval records can be revealed.
 - Do not screenshot `.env`.
 - Do not use production keys in a sales demo.
 - For a pilot, use managed storage or customer vault delivery instead of
@@ -264,7 +264,7 @@ npm start
 Expected output:
 
 ```text
-PromptWall running on http://localhost:4000
+RedactWall running on http://localhost:4000
 Raw-prompt retention: encrypted at rest (AES-256-GCM), held items only; finalized records purge after 30 day(s).
 Ingest key: configured
 ```
@@ -307,7 +307,7 @@ For a local demo:
 3. Turn on Developer mode.
 4. Click Load unpacked.
 5. Select `sensors/browser-extension/`.
-6. Pin the PromptWall extension.
+6. Pin the RedactWall extension.
 7. Open the popup and confirm protection is enabled.
 
 The extension defaults to localhost but has no real ingest key. Configure local
@@ -516,7 +516,7 @@ New-Item -ItemType Directory -Force .\demo-watch | Out-Null
 Start the agent in a second terminal:
 
 ```powershell
-$env:PROMPTWALL_URL = "http://localhost:4000"
+$env:REDACTWALL_URL = "http://localhost:4000"
 $env:INGEST_API_KEY = "demo-ingest-key"
 node sensors\endpoint-agent\agent.js .\demo-watch
 ```
@@ -530,7 +530,7 @@ Copy-Item .\demo-files\loan-summary.txt .\demo-watch\loan-summary.txt
 Expected:
 
 - The agent extracts and scans the file locally.
-- Structured-only findings in redact mode create `.promptwall-redacted` output.
+- Structured-only findings in redact mode create `.redactwall-redacted` output.
 - Semantic or mixed files are held for review.
 - Unsupported files fail closed and are recorded without uploading bytes.
 - Dashboard records sanitized endpoint evidence.
@@ -540,9 +540,9 @@ For a longer Windows pilot:
 ```powershell
 npm run package:endpoint-agent
 .\scripts\install-endpoint-agent.ps1 `
-  -PromptWallUrl "http://localhost:4000" `
+  -RedactWallUrl "http://localhost:4000" `
   -IngestKey "demo-ingest-key" `
-  -WatchDir "$env:USERPROFILE\PromptWallWatch"
+  -WatchDir "$env:USERPROFILE\RedactWallWatch"
 ```
 
 Uninstall:
@@ -584,20 +584,20 @@ not include prompt bodies or raw audit detail text.
 Build:
 
 ```powershell
-docker build -t promptwall-demo .
+docker build -t redactwall-demo .
 ```
 
 Run:
 
 ```powershell
-docker run --rm --name promptwall-demo -p 4000:4000 `
+docker run --rm --name redactwall-demo -p 4000:4000 `
   -e ADMIN_USER=admin `
   -e ADMIN_PASSWORD=DemoOnly!2026 `
-  -e SENTINEL_SECRET=demo-session-secret-change-me `
-  -e SENTINEL_DATA_KEY=demo-data-key-change-me `
+  -e REDACTWALL_SECRET=demo-session-secret-change-me `
+  -e REDACTWALL_DATA_KEY=demo-data-key-change-me `
   -e INGEST_API_KEY=demo-ingest-key `
-  -v promptwall-demo-data:/data `
-  promptwall-demo
+  -v redactwall-demo-data:/data `
+  redactwall-demo
 ```
 
 Open:
@@ -630,14 +630,14 @@ Remove-Item -LiteralPath .\backups -Recurse -Force -ErrorAction SilentlyContinue
 Reset Chrome:
 
 1. Go to `chrome://extensions`.
-2. Remove PromptWall.
+2. Remove RedactWall.
 3. Load unpacked again if needed.
 
 Remove Docker state:
 
 ```powershell
-docker rm -f promptwall-demo 2>$null
-docker volume rm promptwall-demo-data 2>$null
+docker rm -f redactwall-demo 2>$null
+docker volume rm redactwall-demo-data 2>$null
 ```
 
 ## Troubleshooting

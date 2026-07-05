@@ -5,10 +5,10 @@
  */
 
 const ROLE_GROUPS = [
-  { role: 'security_admin', groups: ['PromptWall Security Admins', 'Security Admins', 'Admins'] },
-  { role: 'approver', groups: ['PromptWall Approvers', 'PromptWall Reviewers', 'Approvers', 'Reviewers'] },
-  { role: 'auditor', groups: ['PromptWall Auditors', 'PromptWall Read-only', 'Auditors', 'Read-only'] },
-  { role: 'operator', groups: ['PromptWall Operators', 'PromptWall Ops', 'Operators', 'Ops'] },
+  { role: 'security_admin', groups: ['RedactWall Security Admins', 'Security Admins', 'Admins'] },
+  { role: 'approver', groups: ['RedactWall Approvers', 'RedactWall Reviewers', 'Approvers', 'Reviewers'] },
+  { role: 'auditor', groups: ['RedactWall Auditors', 'RedactWall Read-only', 'Auditors', 'Read-only'] },
+  { role: 'operator', groups: ['RedactWall Operators', 'RedactWall Ops', 'Operators', 'Ops'] },
 ];
 
 const PROVIDERS = {
@@ -24,16 +24,16 @@ const PROVIDERS = {
     scimSteps: [
       'Create a non-gallery enterprise application.',
       'Set Provisioning mode to Automatic.',
-      'Use the PromptWall SCIM tenant URL and the SCIM bearer token from the customer vault.',
-      'Provision assigned users and groups, including the PromptWall role groups.',
+      'Use the RedactWall SCIM tenant URL and the SCIM bearer token from the customer vault.',
+      'Provision assigned users and groups, including the RedactWall role groups.',
       'Run Test Connection, then start provisioning only after the test succeeds.',
     ],
     oidcSteps: [
-      'Register a web app for the PromptWall console.',
-      'Add the PromptWall callback URL as the web redirect URI.',
+      'Register a web app for the RedactWall console.',
+      'Add the RedactWall callback URL as the web redirect URI.',
       'Use a tenant-specific authority rather than common or consumers.',
       'Create a client secret and store it only in the customer secret manager.',
-      'Assign only PromptWall administrators, reviewers, operators, and auditors.',
+      'Assign only RedactWall administrators, reviewers, operators, and auditors.',
     ],
   },
   okta: {
@@ -46,18 +46,18 @@ const PROVIDERS = {
       'https://help.okta.com/en-us/content/topics/apps/apps_app_integration_wizard_oidc.htm',
     ],
     scimSteps: [
-      'Create or edit the PromptWall app integration.',
+      'Create or edit the RedactWall app integration.',
       'Enable API integration on the Provisioning tab.',
-      'Use the PromptWall SCIM base URL and the SCIM bearer token from the customer vault.',
+      'Use the RedactWall SCIM base URL and the SCIM bearer token from the customer vault.',
       'Select create, update, deactivate, and group-push actions that the pilot needs.',
       'Test API Credentials before assigning production groups.',
     ],
     oidcSteps: [
       'Create an OIDC web application integration.',
-      'Add the PromptWall callback URL as the sign-in redirect URI.',
+      'Add the RedactWall callback URL as the sign-in redirect URI.',
       'Use the Okta org authorization server or the customer custom authorization server as the issuer.',
       'Create a client secret and store it only in the customer secret manager.',
-      'Assign only PromptWall administrators, reviewers, operators, and auditors.',
+      'Assign only RedactWall administrators, reviewers, operators, and auditors.',
     ],
   },
 };
@@ -75,7 +75,7 @@ function normalizeProvider(value) {
 }
 
 function normalizeBaseUrl(value) {
-  const raw = cleanString(value || 'https://promptwall.customer.example', 1024).replace(/\/+$/, '');
+  const raw = cleanString(value || 'https://redactwall.customer.example', 1024).replace(/\/+$/, '');
   if (!/^https?:\/\//i.test(raw)) throw new Error('baseUrl must start with http:// or https://');
   return raw;
 }
@@ -103,12 +103,12 @@ function providerIssuer(provider, tenant) {
 
 function envRows(issuer, redirectUri) {
   return [
-    { key: 'SCIM_BEARER_TOKEN', alias: 'PROMPTWALL_SCIM_BEARER_TOKEN', value: '<32-plus-random-characters>' },
-    { key: 'OIDC_ISSUER', alias: 'PROMPTWALL_OIDC_ISSUER', value: issuer },
-    { key: 'OIDC_CLIENT_ID', alias: 'PROMPTWALL_OIDC_CLIENT_ID', value: '<registered-web-client-id>' },
-    { key: 'OIDC_CLIENT_SECRET', alias: 'PROMPTWALL_OIDC_CLIENT_SECRET', value: '<32-plus-random-characters>' },
-    { key: 'OIDC_REDIRECT_URI', alias: 'PROMPTWALL_OIDC_REDIRECT_URI', value: redirectUri },
-    { key: 'OIDC_SCOPE', alias: 'PROMPTWALL_OIDC_SCOPE', value: 'openid email profile' },
+    { key: 'SCIM_BEARER_TOKEN', alias: 'REDACTWALL_SCIM_BEARER_TOKEN', value: '<32-plus-random-characters>' },
+    { key: 'OIDC_ISSUER', alias: 'REDACTWALL_OIDC_ISSUER', value: issuer },
+    { key: 'OIDC_CLIENT_ID', alias: 'REDACTWALL_OIDC_CLIENT_ID', value: '<registered-web-client-id>' },
+    { key: 'OIDC_CLIENT_SECRET', alias: 'REDACTWALL_OIDC_CLIENT_SECRET', value: '<32-plus-random-characters>' },
+    { key: 'OIDC_REDIRECT_URI', alias: 'REDACTWALL_OIDC_REDIRECT_URI', value: redirectUri },
+    { key: 'OIDC_SCOPE', alias: 'REDACTWALL_OIDC_SCOPE', value: 'openid email profile' },
   ];
 }
 
@@ -118,7 +118,7 @@ function scimGuide(meta, scimUrl) {
     baseUrl: scimUrl,
     authMode: 'Bearer token',
     tokenEnv: 'SCIM_BEARER_TOKEN',
-    tokenAlias: 'PROMPTWALL_SCIM_BEARER_TOKEN',
+    tokenAlias: 'REDACTWALL_SCIM_BEARER_TOKEN',
     uniqueIdentifier: 'userName',
     contentType: 'application/scim+json',
     supportedActions: ['create users', 'update users', 'deactivate users', 'create groups', 'update groups', 'delete groups'],
@@ -185,7 +185,7 @@ function buildIdentitySetupGuide(opts = {}) {
 
 function renderTextGuide(guide) {
   const lines = [
-    `${guide.label} setup for PromptWall`,
+    `${guide.label} setup for RedactWall`,
     '',
     'SCIM',
     `  Tenant URL: ${guide.scim.tenantUrl}`,

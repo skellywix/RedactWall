@@ -110,7 +110,7 @@ test('customer approval routing rules can match provisioned identity metadata', 
   const rule = {
     id: 'legal_group_contracts',
     users: ['counsel@example.test'],
-    groups: ['PromptWall Legal'],
+    groups: ['RedactWall Legal'],
     orgIds: ['cu-001'],
     categories: ['LEGAL_CONTRACT'],
     assignedGroup: 'legal',
@@ -135,7 +135,7 @@ test('customer approval routing rules can match provisioned identity metadata', 
   }, {
     now: NOW,
     policy: { approvalRoutingRules: [rule] },
-    context: { groups: ['PromptWall Legal'] },
+    context: { groups: ['RedactWall Legal'] },
   });
 
   assert.strictEqual(routed.assignedRole, 'approver');
@@ -146,7 +146,7 @@ test('customer approval routing rules can match provisioned identity metadata', 
 
   assert.strictEqual(routing.ruleMatches(rule, {}, {
     users: ['counsel@example.test'],
-    groups: ['PromptWall Engineering'],
+    groups: ['RedactWall Engineering'],
     orgIds: ['cu-001'],
     detectorLabels: [],
     categoryLabels: ['LEGAL_CONTRACT'],

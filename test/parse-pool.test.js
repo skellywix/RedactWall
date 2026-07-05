@@ -3,9 +3,9 @@
 const test = require('node:test');
 const assert = require('node:assert');
 
-process.env.SENTINEL_PARSE_ISOLATION = 'on';
-process.env.SENTINEL_PARSE_POOL_SIZE = '1';
-process.env.SENTINEL_PARSE_KILL_GRACE_MS = '400';
+process.env.REDACTWALL_PARSE_ISOLATION = 'on';
+process.env.REDACTWALL_PARSE_POOL_SIZE = '1';
+process.env.REDACTWALL_PARSE_KILL_GRACE_MS = '400';
 
 const processors = require('../server/processors');
 const parsePool = require('../server/parse-pool');
@@ -98,7 +98,7 @@ test('a killed child fails the in-flight task and the next extraction succeeds',
 });
 
 test('queue overflow fails closed instead of queueing unbounded work', async () => {
-  process.env.SENTINEL_PARSE_QUEUE_MAX = '1';
+  process.env.REDACTWALL_PARSE_QUEUE_MAX = '1';
   try {
     const doc = officeDoc('short');
     const busy = parsePool.extractText('spin.docx', pathologicalDoc(48), { timeoutMs: 2000 });
@@ -111,12 +111,12 @@ test('queue overflow fails closed instead of queueing unbounded work', async () 
     const drained = await queued;
     assert.strictEqual(drained.extractionOk, true);
   } finally {
-    delete process.env.SENTINEL_PARSE_QUEUE_MAX;
+    delete process.env.REDACTWALL_PARSE_QUEUE_MAX;
   }
 });
 
 test('children are recycled after their task budget', async () => {
-  process.env.SENTINEL_PARSE_CHILD_MAX_TASKS = '2';
+  process.env.REDACTWALL_PARSE_CHILD_MAX_TASKS = '2';
   try {
     parsePool.shutdown();
     const doc = officeDoc('recycle me');
@@ -128,12 +128,12 @@ test('children are recycled after their task budget', async () => {
     const nextPid = [...parsePool._internal.workers][0]?.child.pid;
     assert.ok(nextPid && nextPid !== firstPid, 'fresh child after recycle');
   } finally {
-    delete process.env.SENTINEL_PARSE_CHILD_MAX_TASKS;
+    delete process.env.REDACTWALL_PARSE_CHILD_MAX_TASKS;
   }
 });
 
-test('SENTINEL_PARSE_ISOLATION=off falls back to in-process extraction', async () => {
-  process.env.SENTINEL_PARSE_ISOLATION = 'off';
+test('REDACTWALL_PARSE_ISOLATION=off falls back to in-process extraction', async () => {
+  process.env.REDACTWALL_PARSE_ISOLATION = 'off';
   try {
     parsePool.shutdown();
     const doc = officeDoc('inline path SSN 524-71-9043');
@@ -142,6 +142,6 @@ test('SENTINEL_PARSE_ISOLATION=off falls back to in-process extraction', async (
     assert.strictEqual(result.text, 'inline path SSN 524-71-9043');
     assert.strictEqual(parsePool._internal.workers.size, 0);
   } finally {
-    process.env.SENTINEL_PARSE_ISOLATION = 'on';
+    process.env.REDACTWALL_PARSE_ISOLATION = 'on';
   }
 });

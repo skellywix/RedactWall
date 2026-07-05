@@ -8,13 +8,13 @@ const fs = require('node:fs');
 const crypto = require('node:crypto');
 
 process.env.ADMIN_PASSWORD = 'unit-pass';
-process.env.SENTINEL_SECRET = 'unit-secret-stable';
-process.env.SENTINEL_DATA_KEY = 'unit-data-key-stable';
+process.env.REDACTWALL_SECRET = 'unit-secret-stable';
+process.env.REDACTWALL_DATA_KEY = 'unit-data-key-stable';
 process.env.INGEST_API_KEY = 'unit-ingest-key';
 process.env.INGEST_AUTH_MAX_FAILURES = '3';
 process.env.INGEST_AUTH_WINDOW_MS = '60000';
 process.env.INGEST_AUTH_LOCK_MS = '60000';
-process.env.SENTINEL_DB_PATH = path.join(os.tmpdir(), 'ps-ingest-auth-test-' + crypto.randomBytes(6).toString('hex') + '.db');
+process.env.REDACTWALL_DB_PATH = path.join(os.tmpdir(), 'ps-ingest-auth-test-' + crypto.randomBytes(6).toString('hex') + '.db');
 
 const app = require('../server/app');
 const { listen } = require('./support/listen');
@@ -64,6 +64,6 @@ test('invalid ingest keys are sanitized and throttled without blocking a valid k
 
 test.after(() => {
   for (const suffix of ['', '-wal', '-shm']) {
-    try { fs.unlinkSync(process.env.SENTINEL_DB_PATH + suffix); } catch {}
+    try { fs.unlinkSync(process.env.REDACTWALL_DB_PATH + suffix); } catch {}
   }
 });

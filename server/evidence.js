@@ -254,7 +254,7 @@ function safeReportSchedule(schedule) {
 function safeReport(input, generatedAt) {
   const report = input && typeof input === 'object' ? input : {};
   return {
-    id: safeBoundedText(report.id, 120) || `promptwall-evidence-${generatedAt.slice(0, 10)}`,
+    id: safeBoundedText(report.id, 120) || `redactwall-evidence-${generatedAt.slice(0, 10)}`,
     generatedAt,
     generatedBy: safeBoundedText(report.generatedBy, 80) || 'system',
     periodStart: safeBoundedText(report.periodStart, 80),
@@ -818,7 +818,7 @@ function buildEvidencePack(input) {
     generatedAt: now,
     report: safeReport(input.report, now),
     service: {
-      name: 'PromptWall',
+      name: 'RedactWall',
       version: input.version || 'unknown',
     },
     scope,

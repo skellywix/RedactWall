@@ -4,9 +4,9 @@
  * - Password is salted+hashed (scrypt). Default creds are dev-only and must be
  *   overridden via env (ADMIN_USER / ADMIN_PASSWORD) before any real use.
  * - Session = HMAC-signed cookie. The signing secret is STABLE: env
- *   SENTINEL_SECRET in production, else a generated secret persisted to disk so
+ *   REDACTWALL_SECRET in production, else a generated secret persisted to disk so
  *   sessions survive a restart on one host. (Multi-instance deployments must set
- *   SENTINEL_SECRET so every instance shares it — logged at startup.)
+ *   REDACTWALL_SECRET so every instance shares it — logged at startup.)
  * - Brute-force defense: per user+IP attempt throttling with temporary lockout.
  */
 require('./env').loadEnv();
@@ -22,7 +22,7 @@ function resolveSecret(opts = {}) {
   const fsImpl = opts.fs || fs;
   const dataDir = opts.dataDir || DATA_DIR;
   const randomBytes = opts.randomBytes || crypto.randomBytes;
-  if (env.SENTINEL_SECRET) return { secret: env.SENTINEL_SECRET, source: 'env' };
+  if (env.REDACTWALL_SECRET) return { secret: env.REDACTWALL_SECRET, source: 'env' };
   try {
     const f = path.join(dataDir, '.session-secret');
     if (fsImpl.existsSync(f)) { const v = fsImpl.readFileSync(f, 'utf8').trim(); if (v) return { secret: v, source: 'file' }; }
@@ -50,8 +50,8 @@ const APPROVER_DISTINCT = !!APPROVER_USER && APPROVER_USER !== ADMIN_USER;
 const AUDITOR_DISTINCT = !!AUDITOR_USER && AUDITOR_USER !== ADMIN_USER && AUDITOR_USER !== APPROVER_USER;
 const OPERATOR_DISTINCT = !!OPERATOR_USER && ![ADMIN_USER, APPROVER_USER, AUDITOR_USER].includes(OPERATOR_USER);
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000; // 8h
-const SESSION_COOKIE_NAME = 'promptwall_session';
-const LEGACY_SESSION_COOKIE_NAME = 'sentinel_session';
+const SESSION_COOKIE_NAME = 'redactwall_session';
+const LEGACY_SESSION_COOKIE_NAMES = Object.freeze(['promptwall_session', 'sentinel_session']);
 const TOTP_STEP_MS = 30 * 1000;
 const TOTP_WINDOW = Number(process.env.ADMIN_TOTP_WINDOW || 1);
 
@@ -303,7 +303,11 @@ function verifyCsrfToken(sessionToken, token) {
 
 function sessionTokenFromRequest(req) {
   const cookies = (req && req.cookies) || {};
-  return cookies[SESSION_COOKIE_NAME] || cookies[LEGACY_SESSION_COOKIE_NAME] || '';
+  if (cookies[SESSION_COOKIE_NAME]) return cookies[SESSION_COOKIE_NAME];
+  for (const name of LEGACY_SESSION_COOKIE_NAMES) {
+    if (cookies[name]) return cookies[name];
+  }
+  return '';
 }
 
 function requireAuth(req, res, next) {
@@ -328,7 +332,7 @@ function requireRole(...roles) {
 /**
  * Derive a purpose-scoped key from the stable session secret so other modules
  * can sign artifacts (e.g. safe-to-send receipts) without touching the raw
- * secret. Same namespace + same SENTINEL_SECRET => same key across restarts.
+ * secret. Same namespace + same REDACTWALL_SECRET => same key across restarts.
  */
 function deriveKey(namespace) {
   return crypto.createHash('sha256').update(String(namespace) + ':' + SECRET).digest();
@@ -355,6 +359,6 @@ module.exports = {
   AUDITOR_ENABLED: AUDITOR_DISTINCT && ACCOUNTS.some((account) => account.role === roles.AUDITOR),
   OPERATOR_ENABLED: OPERATOR_DISTINCT && ACCOUNTS.some((account) => account.role === roles.OPERATOR),
   SECRET_SOURCE, SECRET_IS_STABLE: SECRET_SOURCE === 'env' || SECRET_SOURCE === 'file',
-  SESSION_COOKIE_NAME, LEGACY_SESSION_COOKIE_NAME,
+  SESSION_COOKIE_NAME, LEGACY_SESSION_COOKIE_NAMES,
   _internal: { resolveSecret },
 };

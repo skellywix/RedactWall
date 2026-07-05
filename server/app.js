@@ -1,11 +1,11 @@
 'use strict';
 /**
- * PromptWall — inline DLP gateway for AI chat prompts.
+ * RedactWall — inline DLP gateway for AI chat prompts.
  *
  * Flow:
  *   1. The network proxy (Squid+ICAP) or an SDK calls POST /api/v1/gate with the
  *      user's prompt + context before it is allowed to reach the AI service.
- *   2. PromptWall analyzes for PII, applies policy, and either ALLOWS or
+ *   2. RedactWall analyzes for PII, applies policy, and either ALLOWS or
  *      BLOCKS (holds) the prompt. Blocked prompts enter the approval queue.
  *   3. A Security Admin reviews the queue in the dashboard and approves/denies.
  *   4. The waiting client polls GET /api/v1/status/:id (or long-poll /await/:id)
@@ -104,7 +104,7 @@ app.disable('x-powered-by');
 // blindly. Default OFF (direct-connect/demo); set TRUST_PROXY when deployed
 // behind a known proxy: a hop count ("1"), "true", or an IP/subnet list.
 (function configureTrustProxy() {
-  const raw = String(process.env.TRUST_PROXY || process.env.PROMPTWALL_TRUST_PROXY || '').trim();
+  const raw = String(process.env.TRUST_PROXY || process.env.REDACTWALL_TRUST_PROXY || '').trim();
   if (!raw) return;
   if (/^\d+$/.test(raw)) app.set('trust proxy', Number(raw));
   else if (/^(true|false)$/i.test(raw)) app.set('trust proxy', raw.toLowerCase() === 'true');
@@ -145,7 +145,7 @@ app.use(jsonErrorHandler);
 app.use(cookieParser());
 
 // ---- Health / readiness (public, no sensitive data) -------------------------
-app.get('/healthz', (req, res) => res.json({ status: 'ok', service: 'promptwall', version: require('../package.json').version }));
+app.get('/healthz', (req, res) => res.json({ status: 'ok', service: 'redactwall', version: require('../package.json').version }));
 app.get('/readyz', (req, res) => {
   try {
     db.stats();
@@ -254,7 +254,7 @@ function currentPreflight() {
     secretSource: auth.SECRET_SOURCE,
     dataCryptoEnabled: dataCrypto.ENABLED,
     cookieSecure: SESSION_COOKIE_OPTIONS.secure,
-    dbPath: process.env.SENTINEL_DB_PATH || '',
+    dbPath: process.env.REDACTWALL_DB_PATH || '',
   });
 }
 
@@ -1659,7 +1659,7 @@ app.post('/api/login', validation.validateBody(validation.loginSchema), (req, re
   auth.registerSuccess(key);
   const token = auth.createSession(account.user, account.role);
   res.cookie(auth.SESSION_COOKIE_NAME, token, SESSION_COOKIE_OPTIONS);
-  res.clearCookie(auth.LEGACY_SESSION_COOKIE_NAME, SESSION_COOKIE_CLEAR_OPTIONS);
+  for (const legacyCookie of auth.LEGACY_SESSION_COOKIE_NAMES) res.clearCookie(legacyCookie, SESSION_COOKIE_CLEAR_OPTIONS);
   db.appendAudit({
     action: roles.loginAuditAction(account.role),
     actor: account.user,
@@ -1695,7 +1695,7 @@ app.get('/auth/oidc/callback', async (req, res) => {
     });
     const token = auth.createSession(result.account.user, result.account.role, result.sessionExtras);
     res.cookie(auth.SESSION_COOKIE_NAME, token, SESSION_COOKIE_OPTIONS);
-    res.clearCookie(auth.LEGACY_SESSION_COOKIE_NAME, SESSION_COOKIE_CLEAR_OPTIONS);
+    for (const legacyCookie of auth.LEGACY_SESSION_COOKIE_NAMES) res.clearCookie(legacyCookie, SESSION_COOKIE_CLEAR_OPTIONS);
     res.clearCookie(oidc.STATE_COOKIE_NAME, OIDC_STATE_COOKIE_CLEAR_OPTIONS);
     db.appendAudit({
       action: roles.loginAuditAction(result.account.role),
@@ -1739,7 +1739,7 @@ app.get('/api/csrf', auth.requireAuth, (req, res) => {
 
 app.post('/api/logout', ...sessionWrite, (req, res) => {
   res.clearCookie(auth.SESSION_COOKIE_NAME, SESSION_COOKIE_CLEAR_OPTIONS);
-  res.clearCookie(auth.LEGACY_SESSION_COOKIE_NAME, SESSION_COOKIE_CLEAR_OPTIONS);
+  for (const legacyCookie of auth.LEGACY_SESSION_COOKIE_NAMES) res.clearCookie(legacyCookie, SESSION_COOKIE_CLEAR_OPTIONS);
   res.json({ ok: true });
 });
 
@@ -2275,11 +2275,11 @@ app.get('/api/integrations/siem/package', ...auditRead, (req, res) => {
     if (format === 'zip') {
       const archive = siemPackage.packageArchive(pkg);
       res.setHeader('Content-Type', 'application/zip');
-      res.setHeader('Content-Disposition', `attachment; filename="promptwall-siem-${suffix}-package.zip"`);
+      res.setHeader('Content-Disposition', `attachment; filename="redactwall-siem-${suffix}-package.zip"`);
       return res.send(archive);
     }
     if (format === '1' || format === 'true' || format === 'json') {
-      res.setHeader('Content-Disposition', `attachment; filename="promptwall-siem-${suffix}-package.json"`);
+      res.setHeader('Content-Disposition', `attachment; filename="redactwall-siem-${suffix}-package.json"`);
     }
     res.json(pkg);
   } catch (err) {
@@ -2299,11 +2299,11 @@ app.get('/api/security/package', ...auditRead, (req, res) => {
   if (format === 'zip') {
     const archive = securityPackage.packageArchive(pkg);
     res.setHeader('Content-Type', 'application/zip');
-    res.setHeader('Content-Disposition', 'attachment; filename="promptwall-security-trust-package.zip"');
+    res.setHeader('Content-Disposition', 'attachment; filename="redactwall-security-trust-package.zip"');
     return res.send(archive);
   }
   if (format === '1' || format === 'true' || format === 'json') {
-    res.setHeader('Content-Disposition', 'attachment; filename="promptwall-security-trust-package.json"');
+    res.setHeader('Content-Disposition', 'attachment; filename="redactwall-security-trust-package.json"');
   }
   res.json(pkg);
 });
@@ -2406,7 +2406,7 @@ app.post('/api/subscriptions/:id/test', ...operatorWrite, async (req, res) => {
   if (!dest) return res.status(404).json({ error: 'unknown subscription' });
   const testAlert = alerts.sanitizedAlert({
     id: 'test_' + Date.now(), createdAt: new Date().toISOString(), status: 'subscription_test',
-    user: req.user.user, orgId: null, source: 'console', channel: 'test', destination: 'promptwall:test',
+    user: req.user.user, orgId: null, source: 'console', channel: 'test', destination: 'redactwall:test',
     riskScore: 0, maxSeverity: 0, maxSeverityLabel: 'none', findings: [], categories: [], reasons: ['subscription connectivity test'],
   }, { action: 'SUBSCRIPTION_TEST', force: true });
   const result = await subscriptions.deliverTo(dest, testAlert, { force: true });
@@ -2446,7 +2446,7 @@ const DEPLOY_ARTIFACTS = Object.freeze({
 function buildDeployArtifact(id) {
   const spec = DEPLOY_ARTIFACTS[id];
   if (!spec) return null;
-  const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'promptwall-deploy-'));
+  const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-deploy-'));
   if (spec.kind === 'extension') {
     return require('../scripts/package-extension').packageExtension({ outDir, target: spec.target });
   }
@@ -2572,7 +2572,7 @@ async function sendDailyDigest(actor = 'scheduler') {
   const s = db.stats();
   const alert = {
     action: 'digest', status: 'digest', riskScore: 0, maxSeverity: 0,
-    title: 'PromptWall daily digest',
+    title: 'RedactWall daily digest',
     summary: { pending: s.pending, todayBlocked: s.todayBlocked, approved: s.approved, denied: s.denied, totalQueries: s.total },
     generatedAt: new Date().toISOString(),
   };
@@ -2613,8 +2613,8 @@ app.post('/api/notifications/test-email', ...adminWrite, async (req, res) => {
   if (!/^[^\s@]+@[^\s@]+$/.test(to)) return res.status(400).json({ error: 'provide a recipient address' });
   const result = await email.send({
     to,
-    subject: 'PromptWall test notification',
-    text: 'This is a test notification from your PromptWall console. Delivery works.',
+    subject: 'RedactWall test notification',
+    text: 'This is a test notification from your RedactWall console. Delivery works.',
   });
   const masked = to.replace(/^(.).*(@.*)$/, '$1***$2');
   db.appendAudit({ action: 'EMAIL_TEST_SENT', actor: req.user.user, detail: `${masked}: ${result.ok ? 'delivered' : result.error}` });
@@ -2804,10 +2804,10 @@ app.get('/api/stream', auth.requireAuth, (req, res) => {
 });
 
 // ---- Static dashboard --------------------------------------------------------
-// SENTINEL_CONSOLE_DEFAULT=app makes the new console the landing surface once
+// REDACTWALL_CONSOLE_DEFAULT=app makes the new console the landing surface once
 // enough views are ported for a deployment's operators; legacy stays default.
 app.get('/', (req, res) =>
-  res.redirect(String(process.env.SENTINEL_CONSOLE_DEFAULT || 'legacy') === 'app' ? '/app/' : '/index.html'));
+  res.redirect(String(process.env.REDACTWALL_CONSOLE_DEFAULT || 'legacy') === 'app' ? '/app/' : '/index.html'));
 app.get('/index.html', auth.requireAuth, (req, res) =>
   res.sendFile(path.join(__dirname, 'public', 'index.html')));
 // New console (Vite build output; hashed assets under /app/assets stay public
@@ -2822,15 +2822,15 @@ function logStartup(port, deps = {}) {
   const cryptoModule = deps.dataCrypto || dataCrypto;
   const policyModule = deps.policy || policy;
   const ingestKey = Object.prototype.hasOwnProperty.call(deps, 'ingestKey') ? deps.ingestKey : INGEST_KEY;
-  io.log(`PromptWall running on http://localhost:${port}`);
+  io.log(`RedactWall running on http://localhost:${port}`);
   if (authModule.ADMIN_PASSWORD_IS_DEFAULT) {
     io.log('  [!] Using DEFAULT admin password. Set ADMIN_PASSWORD before production.');
   }
   if (!authModule.SECRET_IS_STABLE) {
-    io.log('  [!] Session secret is ' + authModule.SECRET_SOURCE + ' — set SENTINEL_SECRET (stable) for multi-instance deployments.');
+    io.log('  [!] Session secret is ' + authModule.SECRET_SOURCE + ' — set REDACTWALL_SECRET (stable) for multi-instance deployments.');
   }
   if (!cryptoModule.ENABLED) {
-    io.log('  [!] No SENTINEL_DATA_KEY/SENTINEL_SECRET set — raw prompts are NOT stored (reveal shows redacted). Set a key to enable encrypted raw retention for approvals.');
+    io.log('  [!] No REDACTWALL_DATA_KEY/REDACTWALL_SECRET set — raw prompts are NOT stored (reveal shows redacted). Set a key to enable encrypted raw retention for approvals.');
   } else {
     const days = policyModule.rawRetentionDays(policyModule.loadPolicy());
     io.log(`  Raw-prompt retention: encrypted at rest (AES-256-GCM), held items only; finalized records purge after ${days} day(s).`);
@@ -2890,7 +2890,7 @@ function installShutdownHandlers(server, deps = {}) {
   const clearTimeoutFn = deps.clearTimeout || clearTimeout;
   const exit = deps.exit || ((code) => process.exit(code));
   const shutdown = (signal) => {
-    io.log(`PromptWall received ${signal}; shutting down`);
+    io.log(`RedactWall received ${signal}; shutting down`);
     const timeout = setTimeoutFn(() => exit(1), 10000);
     if (timeout.unref) timeout.unref();
     server.close(() => {

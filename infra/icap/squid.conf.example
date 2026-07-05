@@ -1,10 +1,10 @@
-# PromptWall network backstop - minimal Squid REQMOD example.
+# RedactWall network backstop - minimal Squid REQMOD example.
 #
-# Sends every client request through the PromptWall ICAP bridge
+# Sends every client request through the RedactWall ICAP bridge
 # (scripts/squid-icap-bridge.js) BEFORE it leaves the network. The bridge
 # gates prompts via POST /api/v1/gate and replaces blocked requests with a
 # synthesized HTTP 403, so policy and evidence stay unified with the other
-# PromptWall sensors.
+# RedactWall sensors.
 #
 # Copy this file to squid.conf and adjust the ICAP URI for your deployment:
 #   - host install:   icap://127.0.0.1:1344/reqmod   (npm run icap:bridge)
@@ -18,8 +18,8 @@ icap_enable on
 # bypass=off: if the ICAP service fails or times out, Squid returns an error
 # to the client instead of silently forwarding the request. This is the
 # fail-closed backstop guarantee - do NOT set bypass=on.
-icap_service promptwall_reqmod reqmod_precache icap://127.0.0.1:1344/reqmod bypass=off
-adaptation_access promptwall_reqmod allow all
+icap_service redactwall_reqmod reqmod_precache icap://127.0.0.1:1344/reqmod bypass=off
+adaptation_access redactwall_reqmod allow all
 
 # Never suspend the service after repeated failures; keep failing closed
 # rather than drifting into an unprotected open state.
@@ -28,11 +28,11 @@ icap_service_failure_limit -1
 # The bridge does not negotiate ICAP Preview; send complete messages.
 icap_preview_enable off
 
-# Forward client identity so PromptWall evidence records who sent the prompt.
+# Forward client identity so RedactWall evidence records who sent the prompt.
 icap_send_client_ip on
 icap_send_client_username on
 
-# Give held prompts time to be approved/denied in the PromptWall queue.
+# Give held prompts time to be approved/denied in the RedactWall queue.
 # Must exceed the bridge's ICAP_BRIDGE_RELEASE_WAIT_MS (default 5 minutes).
 icap_io_timeout 6 minutes
 

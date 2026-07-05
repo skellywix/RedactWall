@@ -98,7 +98,7 @@ test('competitive hardening readiness scores gateway, asset discovery, and MCP w
     auditIntegrity: { ok: true, count: 12 },
     env: {
       SIEM_WEBHOOK_URL: 'https://siem.example.test/events',
-      PROMPTWALL_APPROVAL_SLACK_WEBHOOK_URL: 'https://hooks.slack.example.test/services/abc',
+      REDACTWALL_APPROVAL_SLACK_WEBHOOK_URL: 'https://hooks.slack.example.test/services/abc',
     },
   });
 
@@ -240,7 +240,7 @@ test('posture SIEM alert is sanitized and can be emitted through HTTPS', async (
     rawPrompt: 'Member SSN 524-71-9043',
   };
   const payload = alerts.sanitizedPostureAlert(posture);
-  assert.strictEqual(payload.eventType, 'promptwall.posture_snapshot');
+  assert.strictEqual(payload.eventType, 'redactwall.posture_snapshot');
   assert.strictEqual(payload.hardening.areas[0].gapCount, 0);
   assert.strictEqual(payload.hardening.areas[0].playbookDone, 1);
   assert.strictEqual(payload.hardening.areas[0].playbookTodo, 1);

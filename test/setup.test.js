@@ -31,19 +31,19 @@ const SETUP_ENV_KEYS = [
   'NODE_ENV',
   'HTTPS',
   'COOKIE_SECURE',
-  'SENTINEL_DB_PATH',
-  'SENTINEL_SAAS_MODE',
-  'SENTINEL_TENANT_ID',
-  'SENTINEL_SEAT_LIMIT',
-  'SENTINEL_REQUIRE_TENANT_CONTEXT',
-  'SENTINEL_REQUIRE_USER_IDENTITY',
+  'REDACTWALL_DB_PATH',
+  'REDACTWALL_SAAS_MODE',
+  'REDACTWALL_TENANT_ID',
+  'REDACTWALL_SEAT_LIMIT',
+  'REDACTWALL_REQUIRE_TENANT_CONTEXT',
+  'REDACTWALL_REQUIRE_USER_IDENTITY',
   'ADMIN_USER',
   'ADMIN_PASSWORD',
   'ADMIN_TOTP_SECRET',
   'APPROVER_USER',
   'APPROVER_PASSWORD',
-  'SENTINEL_SECRET',
-  'SENTINEL_DATA_KEY',
+  'REDACTWALL_SECRET',
+  'REDACTWALL_DATA_KEY',
   'INGEST_API_KEY',
   'SCIM_BEARER_TOKEN',
   'OIDC_ISSUER',
@@ -54,7 +54,7 @@ const SETUP_ENV_KEYS = [
   'OIDC_AUTHORIZATION_ENDPOINT',
   'OIDC_TOKEN_ENDPOINT',
   'OIDC_JWKS_URI',
-  'SENTINEL_REQUEST_TIMEOUT_MS',
+  'REDACTWALL_REQUEST_TIMEOUT_MS',
   'SIEM_WEBHOOK_URL',
   'SIEM_WEBHOOK_TOKEN',
   'SIEM_ALERT_MIN_RISK',
@@ -63,27 +63,27 @@ const SETUP_ENV_KEYS = [
   'SIEM_POSTURE_MIN_INTERVAL_MS',
   'AUDITOR_USER',
   'AUDITOR_PASSWORD',
-  'SENTINEL_ENV_PATH',
-  'PROMPTWALL_DB_PATH',
-  'PROMPTWALL_SAAS_MODE',
-  'PROMPTWALL_TENANT_ID',
-  'PROMPTWALL_SEAT_LIMIT',
-  'PROMPTWALL_REQUIRE_TENANT_CONTEXT',
-  'PROMPTWALL_REQUIRE_USER_IDENTITY',
-  'PROMPTWALL_SECRET',
-  'PROMPTWALL_DATA_KEY',
-  'PROMPTWALL_INGEST_API_KEY',
-  'PROMPTWALL_SCIM_BEARER_TOKEN',
-  'PROMPTWALL_OIDC_ISSUER',
-  'PROMPTWALL_OIDC_CLIENT_ID',
-  'PROMPTWALL_OIDC_CLIENT_SECRET',
-  'PROMPTWALL_OIDC_REDIRECT_URI',
-  'PROMPTWALL_OIDC_SCOPE',
-  'PROMPTWALL_OIDC_AUTHORIZATION_ENDPOINT',
-  'PROMPTWALL_OIDC_TOKEN_ENDPOINT',
-  'PROMPTWALL_OIDC_JWKS_URI',
-  'PROMPTWALL_REQUEST_TIMEOUT_MS',
-  'PROMPTWALL_ENV_PATH',
+  'REDACTWALL_ENV_PATH',
+  'REDACTWALL_DB_PATH',
+  'REDACTWALL_SAAS_MODE',
+  'REDACTWALL_TENANT_ID',
+  'REDACTWALL_SEAT_LIMIT',
+  'REDACTWALL_REQUIRE_TENANT_CONTEXT',
+  'REDACTWALL_REQUIRE_USER_IDENTITY',
+  'REDACTWALL_SECRET',
+  'REDACTWALL_DATA_KEY',
+  'REDACTWALL_INGEST_API_KEY',
+  'REDACTWALL_SCIM_BEARER_TOKEN',
+  'REDACTWALL_OIDC_ISSUER',
+  'REDACTWALL_OIDC_CLIENT_ID',
+  'REDACTWALL_OIDC_CLIENT_SECRET',
+  'REDACTWALL_OIDC_REDIRECT_URI',
+  'REDACTWALL_OIDC_SCOPE',
+  'REDACTWALL_OIDC_AUTHORIZATION_ENDPOINT',
+  'REDACTWALL_OIDC_TOKEN_ENDPOINT',
+  'REDACTWALL_OIDC_JWKS_URI',
+  'REDACTWALL_REQUEST_TIMEOUT_MS',
+  'REDACTWALL_ENV_PATH',
 ];
 
 function childEnv() {
@@ -104,29 +104,29 @@ test('production setup env passes deployment preflight', () => {
   assert.notStrictEqual(env.INGEST_API_KEY, 'dev-ingest-key');
   assert.strictEqual(env.OIDC_ISSUER, '');
   assert.strictEqual(env.OIDC_SCOPE, 'openid email profile');
-  assert.ok(env.SENTINEL_SECRET.length >= 32);
-  assert.ok(env.SENTINEL_DATA_KEY.length >= 32);
-  assert.strictEqual(env.SENTINEL_SAAS_MODE, 'false');
+  assert.ok(env.REDACTWALL_SECRET.length >= 32);
+  assert.ok(env.REDACTWALL_DATA_KEY.length >= 32);
+  assert.strictEqual(env.REDACTWALL_SAAS_MODE, 'false');
   assert.strictEqual(status.ready, true);
   assert.strictEqual(status.level, 'ok');
 });
 
-test('setup preflight accepts PromptWall env aliases', () => {
+test('setup preflight accepts RedactWall env aliases', () => {
   const status = statusFromEnv({
     NODE_ENV: 'production',
     HTTPS: 'true',
     COOKIE_SECURE: 'true',
-    PROMPTWALL_DB_PATH: '/var/lib/promptwall/promptwall.db',
-    PROMPTWALL_SAAS_MODE: 'true',
-    PROMPTWALL_TENANT_ID: 'cu-acme',
-    PROMPTWALL_SEAT_LIMIT: '25',
+    REDACTWALL_DB_PATH: '/var/lib/redactwall/redactwall.db',
+    REDACTWALL_SAAS_MODE: 'true',
+    REDACTWALL_TENANT_ID: 'cu-acme',
+    REDACTWALL_SEAT_LIMIT: '25',
     ADMIN_USER: 'admin',
     ADMIN_PASSWORD: 'long-admin-password',
     ADMIN_TOTP_SECRET: 'JBSWY3DPEHPK3PXP',
-    PROMPTWALL_SECRET: 's'.repeat(32),
-    PROMPTWALL_DATA_KEY: 'd'.repeat(32),
-    PROMPTWALL_INGEST_API_KEY: 'ps_ingest_' + 'a'.repeat(32),
-    PROMPTWALL_REQUEST_TIMEOUT_MS: '10000',
+    REDACTWALL_SECRET: 's'.repeat(32),
+    REDACTWALL_DATA_KEY: 'd'.repeat(32),
+    REDACTWALL_INGEST_API_KEY: 'ps_ingest_' + 'a'.repeat(32),
+    REDACTWALL_REQUEST_TIMEOUT_MS: '10000',
   });
 
   assert.strictEqual(status.ready, true);
@@ -138,20 +138,20 @@ test('mergeEnv replaces placeholders but preserves custom values', () => {
     ADMIN_PASSWORD: 'ChangeMe!2026',
     ADMIN_TOTP_SECRET: '',
     INGEST_API_KEY: 'dev-ingest-key',
-    SENTINEL_SECRET: '',
+    REDACTWALL_SECRET: '',
     SIEM_WEBHOOK_URL: 'https://soc.example.test/hook',
   }, {
     ADMIN_PASSWORD: 'generated-pass',
     ADMIN_TOTP_SECRET: 'JBSWY3DPEHPK3PXP',
     INGEST_API_KEY: 'generated-key',
-    SENTINEL_SECRET: 'generated-secret',
+    REDACTWALL_SECRET: 'generated-secret',
     SIEM_WEBHOOK_URL: '',
   });
 
   assert.strictEqual(merged.ADMIN_PASSWORD, 'generated-pass');
   assert.strictEqual(merged.ADMIN_TOTP_SECRET, 'JBSWY3DPEHPK3PXP');
   assert.strictEqual(merged.INGEST_API_KEY, 'generated-key');
-  assert.strictEqual(merged.SENTINEL_SECRET, 'generated-secret');
+  assert.strictEqual(merged.REDACTWALL_SECRET, 'generated-secret');
   assert.strictEqual(merged.SIEM_WEBHOOK_URL, 'https://soc.example.test/hook');
 });
 
@@ -188,12 +188,12 @@ test('setup helpers cover placeholder, env-file, install, and console output bra
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-setup-helpers-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const envPath = path.join(dir, 'setup.env');
-  fs.writeFileSync(envPath, 'ADMIN_PASSWORD=existing-pass\nPROMPTWALL_INGEST_API_KEY=alias-key\n');
+  fs.writeFileSync(envPath, 'ADMIN_PASSWORD=existing-pass\nREDACTWALL_INGEST_API_KEY=alias-key\n');
   assert.deepStrictEqual(readEnvFile(path.join(dir, 'missing.env')), {});
   assert.strictEqual(readEnvFile(envPath).ADMIN_PASSWORD, 'existing-pass');
   assert.strictEqual(placeholderValue('ADMIN_PASSWORD', 'ChangeMe!2026'), true);
   assert.strictEqual(placeholderValue('INGEST_API_KEY', 'dev-ingest-key'), true);
-  assert.strictEqual(placeholderValue('SENTINEL_SEAT_LIMIT', ''), false);
+  assert.strictEqual(placeholderValue('REDACTWALL_SEAT_LIMIT', ''), false);
   assert.strictEqual(placeholderValue('CUSTOM', ''), false);
 
   const commands = [];
@@ -250,7 +250,7 @@ test('setup command runner reports child-process success, failure, and spawn err
     /exited with 7/,
   );
   assert.throws(
-    () => run('promptwall-definitely-missing-command', [], { stdio: 'ignore' }),
+    () => run('redactwall-definitely-missing-command', [], { stdio: 'ignore' }),
     /ENOENT|not found|no such file/i,
   );
 });
@@ -281,7 +281,7 @@ test('setup main supports injected help, check, write, and blocked status flows'
     console: io,
     env: {},
     assertNodeVersion: () => {},
-    buildEnv: () => ({ SENTINEL_DB_PATH: 'data/test.db', ADMIN_PASSWORD: 'generated' }),
+    buildEnv: () => ({ REDACTWALL_DB_PATH: 'data/test.db', ADMIN_PASSWORD: 'generated' }),
     readEnvFile: () => ({ ADMIN_PASSWORD: 'ChangeMe!2026' }),
     mergeEnv: (existing, generated) => ({ ...existing, ...generated }),
     renderEnv: (values) => `ADMIN_PASSWORD=${values.ADMIN_PASSWORD}\n`,
@@ -302,7 +302,7 @@ test('setup main supports injected help, check, write, and blocked status flows'
     console: io,
     env: {},
     assertNodeVersion: () => {},
-    buildEnv: () => ({ SENTINEL_DB_PATH: 'data/test.db' }),
+    buildEnv: () => ({ REDACTWALL_DB_PATH: 'data/test.db' }),
     readEnvFile: () => ({}),
     mergeEnv: (existing, generated) => ({ ...existing, ...generated }),
     renderEnv: () => '',
@@ -318,8 +318,8 @@ test('setup main supports injected help, check, write, and blocked status flows'
 test('production setup, mfa enrollment, and setup check work end to end without setup leaking secrets', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-setup-prod-'));
   const envPath = path.join(dir, 'pilot.env');
-  const dbPath = path.join(dir, 'sentinel.db').replace(/\\/g, '/');
-  fs.writeFileSync(envPath, `SENTINEL_DB_PATH=${dbPath}\n`);
+  const dbPath = path.join(dir, 'redactwall.db').replace(/\\/g, '/');
+  fs.writeFileSync(envPath, `REDACTWALL_DB_PATH=${dbPath}\n`);
   const env = childEnv();
 
   const setupOut = execFileSync(process.execPath, [
@@ -334,7 +334,7 @@ test('production setup, mfa enrollment, and setup check work end to end without 
   assert.match(parsed.ADMIN_TOTP_SECRET, /^[A-Z2-7]{16,}$/);
   assert.match(parsed.ADMIN_PASSWORD, /^Ps-/);
   assert.match(parsed.INGEST_API_KEY, /^ps_ingest_/);
-  assert.strictEqual(parsed.SENTINEL_DB_PATH, dbPath);
+  assert.strictEqual(parsed.REDACTWALL_DB_PATH, dbPath);
   assert.strictEqual(fs.existsSync(dbPath), true);
   assert.match(setupOut, /Preflight: ok \(ready\)/);
   assert.strictEqual(setupOut.includes(parsed.ADMIN_TOTP_SECRET), false);
@@ -346,13 +346,13 @@ test('production setup, mfa enrollment, and setup check work end to end without 
     '--env',
     envPath,
     '--issuer',
-    'PromptWall Smoke',
+    'RedactWall Smoke',
   ], { cwd: ROOT, encoding: 'utf8', env });
   const uriLine = mfaOut.split(/\r?\n/).find((line) => line.startsWith('otpauth://'));
   assert.ok(uriLine);
   const uri = new URL(uriLine);
   assert.strictEqual(uri.searchParams.get('secret'), parsed.ADMIN_TOTP_SECRET);
-  assert.strictEqual(uri.searchParams.get('issuer'), 'PromptWall Smoke');
+  assert.strictEqual(uri.searchParams.get('issuer'), 'RedactWall Smoke');
   assert.strictEqual(mfaOut.includes(parsed.ADMIN_PASSWORD), false);
   assert.strictEqual(mfaOut.includes(parsed.INGEST_API_KEY), false);
 

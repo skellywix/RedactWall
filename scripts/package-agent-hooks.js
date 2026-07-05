@@ -42,7 +42,7 @@ function validateRuntimeFiles(files) {
     { label: 'development ingest key', pattern: /dev-ingest-key/ },
     { label: 'synthetic SSN demo value', pattern: /524-71-9043/ },
     { label: 'synthetic card demo value', pattern: /4111 1111 1111 1111/ },
-    { label: 'environment assignment', pattern: /\b(?:INGEST_API_KEY|SENTINEL_SECRET|SENTINEL_DATA_KEY)\s*=/ },
+    { label: 'environment assignment', pattern: /\b(?:INGEST_API_KEY|REDACTWALL_SECRET|REDACTWALL_DATA_KEY)\s*=/ },
   ];
   for (const file of files) {
     const text = file.body.toString('utf8');
@@ -69,7 +69,7 @@ function packageAgentHooks(opts = {}) {
   validateRuntimeFiles(files);
 
   fs.mkdirSync(outDir, { recursive: true });
-  const baseName = `promptwall-agent-hooks-v${appVersion}`;
+  const baseName = `redactwall-agent-hooks-v${appVersion}`;
   const zipPath = path.join(outDir, `${baseName}.zip`);
   const manifestPath = path.join(outDir, `${baseName}.manifest.json`);
   const zip = new AdmZip();
@@ -80,7 +80,7 @@ function packageAgentHooks(opts = {}) {
   zip.writeZip(zipPath);
   const zipBody = fs.readFileSync(zipPath);
   const packageManifest = {
-    kind: 'promptwall-agent-hooks-package',
+    kind: 'redactwall-agent-hooks-package',
     packageName: path.basename(zipPath),
     appVersion,
     createdAt: now.toISOString(),

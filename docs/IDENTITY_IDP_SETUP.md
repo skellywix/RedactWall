@@ -1,12 +1,12 @@
-# PromptWall IdP Setup For Entra And Okta
+# RedactWall IdP Setup For Entra And Okta
 
-Use this guide after the customer has a public PromptWall console URL and a
+Use this guide after the customer has a public RedactWall console URL and a
 secret store for SCIM bearer tokens and OIDC client secrets. The dashboard
 Identity tab and the CLI both render the same secret-free setup values:
 
 ```powershell
-npm run identity:setup -- --provider entra --base-url https://promptwall.customer.example --tenant-id <tenant-id-or-domain>
-npm run identity:setup -- --provider okta --base-url https://promptwall.customer.example --tenant-id <customer.okta.com>
+npm run identity:setup -- --provider entra --base-url https://redactwall.customer.example --tenant-id <tenant-id-or-domain>
+npm run identity:setup -- --provider okta --base-url https://redactwall.customer.example --tenant-id <customer.okta.com>
 ```
 
 The output intentionally uses placeholders for `SCIM_BEARER_TOKEN` and
@@ -17,20 +17,20 @@ manager, not in tickets, screenshots, policy files, or evidence packs.
 
 SCIM provisioning:
 
-- Create a non-gallery enterprise application for PromptWall.
+- Create a non-gallery enterprise application for RedactWall.
 - Set Provisioning mode to Automatic.
-- Tenant URL: `https://promptwall.customer.example/scim/v2`.
+- Tenant URL: `https://redactwall.customer.example/scim/v2`.
 - Secret token: the value stored in `SCIM_BEARER_TOKEN` or
-  `PROMPTWALL_SCIM_BEARER_TOKEN`.
+  `REDACTWALL_SCIM_BEARER_TOKEN`.
 - Unique identifier: `userName`.
 - Provision assigned users and groups.
-- Include PromptWall role groups such as `PromptWall Security Admins`,
-  `PromptWall Approvers`, `PromptWall Auditors`, and `PromptWall Operators`.
+- Include RedactWall role groups such as `RedactWall Security Admins`,
+  `RedactWall Approvers`, `RedactWall Auditors`, and `RedactWall Operators`.
 
 OIDC console login:
 
-- Register a web app for the PromptWall console.
-- Redirect URI: `https://promptwall.customer.example/auth/oidc/callback`.
+- Register a web app for the RedactWall console.
+- Redirect URI: `https://redactwall.customer.example/auth/oidc/callback`.
 - Issuer: `https://login.microsoftonline.com/<tenant-id-or-domain>/v2.0`.
 - Scopes: `openid email profile`.
 - Store the client id in `OIDC_CLIENT_ID`.
@@ -38,29 +38,29 @@ OIDC console login:
 - Store the callback URL in `OIDC_REDIRECT_URI`.
 
 Use a tenant-specific issuer. Do not use broad `common` or consumer authorities
-for production customer stacks because PromptWall maps the signed identity back
+for production customer stacks because RedactWall maps the signed identity back
 to active SCIM users.
 
 ## Okta
 
 SCIM provisioning:
 
-- Create or edit the PromptWall app integration.
+- Create or edit the RedactWall app integration.
 - Enable API integration on the Provisioning tab.
-- Base URL: `https://promptwall.customer.example/scim/v2`.
+- Base URL: `https://redactwall.customer.example/scim/v2`.
 - Authentication mode: bearer token.
 - Token value: the value stored in `SCIM_BEARER_TOKEN` or
-  `PROMPTWALL_SCIM_BEARER_TOKEN`.
+  `REDACTWALL_SCIM_BEARER_TOKEN`.
 - Enable the create, update, deactivate, and group-push actions needed for the
   pilot.
-- Push the PromptWall role groups when role mapping or approval routing depends
+- Push the RedactWall role groups when role mapping or approval routing depends
   on IdP group membership.
 
 OIDC console login:
 
 - Create an OIDC web application integration.
 - Sign-in redirect URI:
-  `https://promptwall.customer.example/auth/oidc/callback`.
+  `https://redactwall.customer.example/auth/oidc/callback`.
 - Issuer: `https://<customer.okta.com>/oauth2/default`, unless the customer uses
   a dedicated authorization server.
 - Scopes: `openid email profile`.
@@ -68,14 +68,14 @@ OIDC console login:
 - Store the client secret in `OIDC_CLIENT_SECRET`.
 - Store the callback URL in `OIDC_REDIRECT_URI`.
 
-## PromptWall Role Groups
+## RedactWall Role Groups
 
-| PromptWall role | Accepted group display names |
+| RedactWall role | Accepted group display names |
 | --- | --- |
-| `security_admin` | `PromptWall Security Admins`, `Security Admins`, `Admins` |
-| `approver` | `PromptWall Approvers`, `PromptWall Reviewers`, `Approvers`, `Reviewers` |
-| `auditor` | `PromptWall Auditors`, `PromptWall Read-only`, `Auditors`, `Read-only` |
-| `operator` | `PromptWall Operators`, `PromptWall Ops`, `Operators`, `Ops` |
+| `security_admin` | `RedactWall Security Admins`, `Security Admins`, `Admins` |
+| `approver` | `RedactWall Approvers`, `RedactWall Reviewers`, `Approvers`, `Reviewers` |
+| `auditor` | `RedactWall Auditors`, `RedactWall Read-only`, `Auditors`, `Read-only` |
+| `operator` | `RedactWall Operators`, `RedactWall Ops`, `Operators`, `Ops` |
 
 If no direct role or group role matches, the SCIM user defaults to `auditor`.
 OIDC login succeeds only when the signed identity maps to an active SCIM
@@ -95,7 +95,7 @@ only in the customer shell:
 ```bash
 curl -sS \
   -H "Authorization: Bearer $SCIM_BEARER_TOKEN" \
-  https://promptwall.customer.example/scim/v2/ServiceProviderConfig
+  https://redactwall.customer.example/scim/v2/ServiceProviderConfig
 ```
 
 Then sign in through SSO as one active SCIM-provisioned test user and confirm

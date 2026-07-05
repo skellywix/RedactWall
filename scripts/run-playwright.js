@@ -8,7 +8,7 @@ const path = require('node:path');
 
 const DEFAULT_START_PORT = 4211;
 const MAX_PORT_PROBES = 50;
-const LOCK_DIR = path.join(os.tmpdir(), 'promptwall-playwright-ports');
+const LOCK_DIR = path.join(os.tmpdir(), 'redactwall-playwright-ports');
 
 function isProcessAlive(pid, deps = {}) {
   if (!Number.isInteger(pid) || pid <= 0) return false;

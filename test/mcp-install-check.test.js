@@ -37,9 +37,9 @@ test('MCP install check validates runtime wiring without exposing secrets', asyn
   const envPath = path.join(dir, 'mcp-guard.env');
   const ingestKey = 'mcp-ingest-key-000000000000000000000000000001';
   fs.writeFileSync(envPath, [
-    'PROMPTWALL_URL=https://promptwall.customer.example',
+    'REDACTWALL_URL=https://redactwall.customer.example',
     `INGEST_API_KEY=${ingestKey}`,
-    'SENTINEL_TENANT_ID=cu-acme',
+    'REDACTWALL_TENANT_ID=cu-acme',
   ].join('\n') + '\n');
 
   const report = buildInstallReport({
@@ -89,7 +89,7 @@ test('MCP install check validates runtime wiring without exposing secrets', asyn
     user: 'mcp-tech@example.test',
     fetchImpl: async (url, opts = {}) => {
       requests.push({ url, opts });
-      assert.strictEqual(url, 'https://promptwall.customer.example/api/v1/heartbeat');
+      assert.strictEqual(url, 'https://redactwall.customer.example/api/v1/heartbeat');
       assert.strictEqual(opts.headers['x-api-key'], ingestKey);
       assert.ok(!opts.body.includes(ingestKey));
       const body = JSON.parse(opts.body);
@@ -112,9 +112,9 @@ test('MCP install check adds optional Microsoft 365 connector health without exp
   const ingestKey = 'mcp-ingest-key-000000000000000000000000000002';
   const graphToken = 'microsoft-graph-token-000000000000000000000001';
   fs.writeFileSync(envPath, [
-    'PROMPTWALL_URL=https://promptwall.customer.example',
+    'REDACTWALL_URL=https://redactwall.customer.example',
     `INGEST_API_KEY=${ingestKey}`,
-    'SENTINEL_TENANT_ID=cu-acme',
+    'REDACTWALL_TENANT_ID=cu-acme',
     `M365_GRAPH_ACCESS_TOKEN=${graphToken}`,
     'M365_TENANT_ID=tenant-acme',
     'M365_GRAPH_SCOPES=Files.Read Sites.Selected',
@@ -138,9 +138,9 @@ test('MCP install check adds optional Google Drive connector health without expo
   const ingestKey = 'mcp-ingest-key-000000000000000000000000000003';
   const googleToken = 'google-drive-token-000000000000000000000001';
   fs.writeFileSync(envPath, [
-    'PROMPTWALL_URL=https://promptwall.customer.example',
+    'REDACTWALL_URL=https://redactwall.customer.example',
     `INGEST_API_KEY=${ingestKey}`,
-    'SENTINEL_TENANT_ID=cu-acme',
+    'REDACTWALL_TENANT_ID=cu-acme',
     `GOOGLE_DRIVE_ACCESS_TOKEN=${googleToken}`,
     'GOOGLE_WORKSPACE_DOMAIN=cu.example',
     'GOOGLE_DRIVE_SCOPES=https://www.googleapis.com/auth/drive.readonly',
@@ -165,9 +165,9 @@ test('MCP install check adds optional Slack connector health without exposing to
   const ingestKey = 'mcp-ingest-key-000000000000000000000000000004';
   const slackToken = 'fixture-slack-token-000000000000000000000001';
   fs.writeFileSync(envPath, [
-    'PROMPTWALL_URL=https://promptwall.customer.example',
+    'REDACTWALL_URL=https://redactwall.customer.example',
     `INGEST_API_KEY=${ingestKey}`,
-    'SENTINEL_TENANT_ID=cu-acme',
+    'REDACTWALL_TENANT_ID=cu-acme',
     `SLACK_BOT_TOKEN=${slackToken}`,
     'SLACK_TEAM_ID=T123',
     'SLACK_SCOPES=channels:history groups:history files:read',
@@ -192,9 +192,9 @@ test('MCP install check adds optional Microsoft Teams connector health without e
   const ingestKey = 'mcp-ingest-key-000000000000000000000000000005';
   const teamsToken = 'teams-graph-token-000000000000000000000001';
   fs.writeFileSync(envPath, [
-    'PROMPTWALL_URL=https://promptwall.customer.example',
+    'REDACTWALL_URL=https://redactwall.customer.example',
     `INGEST_API_KEY=${ingestKey}`,
-    'SENTINEL_TENANT_ID=cu-acme',
+    'REDACTWALL_TENANT_ID=cu-acme',
     `TEAMS_GRAPH_ACCESS_TOKEN=${teamsToken}`,
     'TEAMS_TENANT_ID=tenant-acme',
     'TEAMS_GRAPH_SCOPES=ChannelMessage.Read.Group ChatMessage.Read.Chat',
@@ -219,9 +219,9 @@ test('MCP install check adds optional Atlassian connector health without exposin
   const ingestKey = 'mcp-ingest-key-000000000000000000000000000006';
   const atlassianToken = 'atlassian-token-000000000000000000000001';
   fs.writeFileSync(envPath, [
-    'PROMPTWALL_URL=https://promptwall.customer.example',
+    'REDACTWALL_URL=https://redactwall.customer.example',
     `INGEST_API_KEY=${ingestKey}`,
-    'SENTINEL_TENANT_ID=cu-acme',
+    'REDACTWALL_TENANT_ID=cu-acme',
     `ATLASSIAN_ACCESS_TOKEN=${atlassianToken}`,
     'ATLASSIAN_SITE_URL=https://acme.atlassian.net',
     'ATLASSIAN_SCOPES=read:jira-work read:page:confluence',
@@ -246,9 +246,9 @@ test('MCP install check adds optional database read-only connector health withou
   const ingestKey = 'mcp-ingest-key-000000000000000000000000000007';
   const dsn = 'sqlite:///C:/private/member-data.db';
   fs.writeFileSync(envPath, [
-    'PROMPTWALL_URL=https://promptwall.customer.example',
+    'REDACTWALL_URL=https://redactwall.customer.example',
     `INGEST_API_KEY=${ingestKey}`,
-    'SENTINEL_TENANT_ID=cu-acme',
+    'REDACTWALL_TENANT_ID=cu-acme',
     `MCP_DATABASE_DSN=${dsn}`,
     'MCP_DATABASE_LABEL=core-reporting',
     'MCP_DATABASE_SCOPES=readonly',
@@ -271,7 +271,7 @@ test('MCP install check reports attention for bad config', (t) => {
   const dir = tempDir(t, 'ps-mcp-check-attention-');
   const envPath = path.join(dir, 'mcp-guard.env');
   fs.writeFileSync(envPath, [
-    'SENTINEL_URL=not a url',
+    'REDACTWALL_URL=not a url',
     'INGEST_API_KEY=short-key',
   ].join('\n') + '\n');
 
@@ -309,9 +309,9 @@ test('MCP install check accepts runtime environment without a default env file',
   const report = buildInstallReport({
     repoRoot: installRoot,
     env: {
-      SENTINEL_URL: 'https://promptwall.runtime.example',
+      REDACTWALL_URL: 'https://redactwall.runtime.example',
       INGEST_API_KEY: ingestKey,
-      SENTINEL_TENANT_ID: 'cu-runtime',
+      REDACTWALL_TENANT_ID: 'cu-runtime',
     },
   });
 
@@ -325,16 +325,16 @@ test('MCP install check accepts env aliases and default install-root env paths',
   const envPath = path.join(dir, 'mcp.env');
   const aliasKey = 'mcp-alias-key-000000000000000000000000000001';
   fs.writeFileSync(envPath, [
-    'PROMPTWALL_URL=https://promptwall.alias.example/path',
-    `PROMPTWALL_INGEST_API_KEY=${aliasKey}`,
-    'PROMPTWALL_TENANT_ID=cu-alias',
+    'REDACTWALL_URL=https://redactwall.alias.example/path',
+    `REDACTWALL_INGEST_API_KEY=${aliasKey}`,
+    'REDACTWALL_TENANT_ID=cu-alias',
     'MICROSOFT_GRAPH_SCOPES=Files.Read, Sites.Selected',
   ].join('\n') + '\n');
 
   assert.strictEqual(defaultMcpEnvPath({}, dir), path.join(dir, '.env'));
   const config = readMcpConfig(envPath, {}, dir).config;
   assert.strictEqual(config.INGEST_API_KEY, aliasKey);
-  assert.strictEqual(mcpSettings(config).serverUrl, 'https://promptwall.alias.example/path');
+  assert.strictEqual(mcpSettings(config).serverUrl, 'https://redactwall.alias.example/path');
   assert.deepStrictEqual(microsoft365Settings(config).scopes, ['Files.Read', 'Sites.Selected']);
   assert.deepStrictEqual(googleDriveSettings(config).scopes, ['https://www.googleapis.com/auth/drive.readonly']);
   assert.deepStrictEqual(slackSettings(config).scopes, ['channels:history', 'groups:history', 'files:read']);
@@ -350,14 +350,14 @@ test('MCP install check accepts env aliases and default install-root env paths',
 
 test('MCP heartbeat and human output cover failure branches without leaking secrets', async () => {
   const report = { status: 'ok', checks: [{ id: 'ingest_key', ok: true, detail: 'configured' }] };
-  await assert.rejects(() => emitHeartbeat(report, { config: { INGEST_API_KEY: 'key-0000000000000001' } }), /PROMPTWALL_URL/);
-  await assert.rejects(() => emitHeartbeat(report, { config: { PROMPTWALL_URL: 'https://promptwall.example' } }), /INGEST_API_KEY/);
+  await assert.rejects(() => emitHeartbeat(report, { config: { INGEST_API_KEY: 'key-0000000000000001' } }), /REDACTWALL_URL/);
+  await assert.rejects(() => emitHeartbeat(report, { config: { REDACTWALL_URL: 'https://redactwall.example' } }), /INGEST_API_KEY/);
   const originalFetch = globalThis.fetch;
   delete globalThis.fetch;
   try {
     await assert.rejects(() => emitHeartbeat(report, {
       config: {
-        PROMPTWALL_URL: 'https://promptwall.example',
+        REDACTWALL_URL: 'https://redactwall.example',
         INGEST_API_KEY: 'key-0000000000000001',
       },
     }), /fetch is not available/);
@@ -366,7 +366,7 @@ test('MCP heartbeat and human output cover failure branches without leaking secr
   }
   await assert.rejects(() => emitHeartbeat(report, {
     config: {
-      PROMPTWALL_URL: 'https://promptwall.example',
+      REDACTWALL_URL: 'https://redactwall.example',
       INGEST_API_KEY: 'key-0000000000000001',
     },
     fetchImpl: async () => ({
@@ -378,7 +378,7 @@ test('MCP heartbeat and human output cover failure branches without leaking secr
 
   const logs = [];
   printHuman({ ...report, heartbeat: { ok: true, detail: 'recorded' } }, { log: (line) => logs.push(line) });
-  assert.match(logs.join('\n'), /PromptWall MCP guard install: ok/);
+  assert.match(logs.join('\n'), /RedactWall MCP guard install: ok/);
   assert.match(logs.join('\n'), /\[ok\] heartbeat - recorded/);
 });
 

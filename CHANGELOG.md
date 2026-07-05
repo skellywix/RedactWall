@@ -1,9 +1,9 @@
 # Changelog
 
-All notable changes to PromptWall are documented in this file.
+All notable changes to RedactWall are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and PromptWall adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+and RedactWall adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Release process: `docs/RELEASE_PROCESS.md`. Entries before 0.3.0 are
 reconstructed from `ITERATIONS.md` and git history.
 
@@ -113,7 +113,7 @@ log, shared detection engine with held-out eval gates, browser/endpoint/MCP
 sensors running the same local engine, approval queue with redact/warn/
 justify/block modes, examiner evidence export, and SQLite storage.
 
-[Unreleased]: https://github.com/skellywix/promptwall/compare/v0.3.0...HEAD
-[0.3.0]: https://github.com/skellywix/promptwall/releases/tag/v0.3.0
-[0.2.0]: https://github.com/skellywix/promptwall/releases/tag/v0.2.0
-[0.1.0]: https://github.com/skellywix/promptwall/releases/tag/v0.1.0
+[Unreleased]: https://github.com/skellywix/redactwall/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/skellywix/redactwall/releases/tag/v0.3.0
+[0.2.0]: https://github.com/skellywix/redactwall/releases/tag/v0.2.0
+[0.1.0]: https://github.com/skellywix/redactwall/releases/tag/v0.1.0

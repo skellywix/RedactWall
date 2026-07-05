@@ -16,7 +16,7 @@ const app = support.requireApp();
 const Database = require(path.join(support.ROOT, 'node_modules', 'better-sqlite3'));
 
 function withRawDb(fn) {
-  const db = new Database(process.env.SENTINEL_DB_PATH);
+  const db = new Database(process.env.REDACTWALL_DB_PATH);
   try {
     return fn(db);
   } finally {

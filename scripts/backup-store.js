@@ -3,7 +3,7 @@
  * Backup, verify, and offline-restore the evidence store.
  *
  * SQLite (default driver): online `.backup()` copy plus a manifest.
- * Postgres (SENTINEL_DB_DRIVER=postgres): drives pg_dump/pg_restore (custom
+ * Postgres (REDACTWALL_DB_DRIVER=postgres): drives pg_dump/pg_restore (custom
  * format); credentials travel via libpq environment variables so the
  * connection string never appears in argv, output, or the manifest.
  *
@@ -58,7 +58,7 @@ function assertWritable(file, force) {
 
 function resolveCreateTargets({ outDir, file, manifestFile, extension = '.db' } = {}) {
   const backupDir = path.resolve(outDir || path.join(process.cwd(), 'backups'));
-  const backupFile = path.resolve(file || path.join(backupDir, `sentinel-${nowStamp()}${extension}`));
+  const backupFile = path.resolve(file || path.join(backupDir, `redactwall-${nowStamp()}${extension}`));
   const manifestPath = path.resolve(manifestFile || `${backupFile}.manifest.json`);
   return { backupFile, manifestPath };
 }
@@ -83,8 +83,8 @@ const PG_TOOL_INSTALL_HINT = 'install the PostgreSQL client tools (Debian/Ubuntu
   'RHEL/Amazon Linux: dnf install postgresql16; macOS: brew install libpq) with a major version >= the server\'s';
 
 function pgConnectionString(explicit) {
-  const connectionString = explicit || process.env.SENTINEL_DATABASE_URL || process.env.DATABASE_URL;
-  if (!connectionString) throw new Error('postgres backups require SENTINEL_DATABASE_URL');
+  const connectionString = explicit || process.env.REDACTWALL_DATABASE_URL || process.env.DATABASE_URL;
+  if (!connectionString) throw new Error('postgres backups require REDACTWALL_DATABASE_URL');
   return connectionString;
 }
 
@@ -161,7 +161,7 @@ function buildPgManifest({ db, connectionString, backupFile, backupSha256, sourc
     driver: 'postgres',
     format: 'pg_dump-custom',
     createdAt: new Date().toISOString(),
-    service: { name: 'PromptWall', version: require('../package.json').version },
+    service: { name: 'RedactWall', version: require('../package.json').version },
     sourceDatabase: pgDatabaseName(connectionString),
     backupFile: path.basename(backupFile),
     backupBytes: fs.statSync(backupFile).size,
@@ -190,7 +190,7 @@ async function createPgBackup({ outDir, file, manifestFile, dbModule, connection
 
   // --enable-row-security: queries has FORCE ROW LEVEL SECURITY, which pg_dump
   // otherwise refuses as a non-BYPASSRLS role. A fresh session has a blank
-  // promptwall.org_id (operator mode), so every tenant row is visible and the
+  // redactwall.org_id (operator mode), so every tenant row is visible and the
   // dump is complete; the drill's count checks would expose a partial dump.
   runPgTool('pg_dump', ['--format=custom', '--enable-row-security', `--dbname=${pgDatabaseName(connString)}`, `--file=${backupFile}`], connString);
   const backupSha256 = sha256File(backupFile);
@@ -308,8 +308,8 @@ async function createSqliteBackup({ outDir, file, manifestFile, dbModule: db, fo
   const manifest = {
     schemaVersion: 1,
     createdAt: new Date().toISOString(),
-    service: { name: 'PromptWall', version: require('../package.json').version },
-    sourceDbFile: path.basename(db._dbPath || 'sentinel.db'),
+    service: { name: 'RedactWall', version: require('../package.json').version },
+    sourceDbFile: path.basename(db._dbPath || 'redactwall.db'),
     sourceDbPathHash: crypto.createHash('sha256').update(String(db._dbPath || '')).digest('hex'),
     backupFile: path.basename(backupFile),
     backupBytes: verification.bytes,

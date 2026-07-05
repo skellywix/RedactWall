@@ -13,7 +13,7 @@ test.setTimeout(90000);
 
 async function login(page) {
   await page.goto('/login.html');
-  await expect(page.getByRole('heading', { name: 'PromptWall' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'RedactWall' })).toBeVisible();
   await page.locator('#password').fill('e2e-pass');
   await page.getByRole('button', { name: 'Continue' }).click();
   await expect(page).toHaveURL(/\/index\.html$/);
@@ -88,7 +88,7 @@ test('overview leak exposure map renders the sanitized department graph', async 
   await expect(page.locator('#leakMapSummary')).toContainText('prompt bodies excluded');
   await expect(page.locator('#leakMapStage svg')).toBeVisible();
   await expect(page.locator('#leakMapStage .leak-wall')).toBeVisible();
-  await expect(page.locator('#leakMapStage')).toContainText('PROMPTWALL');
+  await expect(page.locator('#leakMapStage')).toContainText('REDACTWALL');
   await expect(page.locator('#leakMapStage [data-leak-node="segment:org:e2e-org"]')).toBeVisible();
   await expect(page.locator('#leakMapStage [data-leak-node^="destination:"]').first()).toBeVisible();
 

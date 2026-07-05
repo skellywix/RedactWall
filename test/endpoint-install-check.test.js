@@ -41,13 +41,13 @@ test('endpoint install check validates runtime wiring without exposing secrets',
     { id: 'lending', dir: lendingFlowDir, destination: 'Copilot Desktop' },
   ]);
   fs.writeFileSync(envPath, [
-    'PROMPTWALL_URL=https://promptwall.customer.example',
+    'REDACTWALL_URL=https://redactwall.customer.example',
     `INGEST_API_KEY=${ingestKey}`,
     `ENDPOINT_AGENT_WATCH_DIR=${watchDir}`,
     `ENDPOINT_AGENT_HANDOFF_DIR=${handoffDir}`,
     `ENDPOINT_AGENT_HANDOFF_SECRET=${handoffSecret}`,
     `ENDPOINT_AGENT_FILE_FLOW_PROFILES=${profiles}`,
-    'SENTINEL_TENANT_ID=cu-acme',
+    'REDACTWALL_TENANT_ID=cu-acme',
   ].join('\n') + '\n');
 
   const report = buildInstallReport({
@@ -92,7 +92,7 @@ test('endpoint install check validates runtime wiring without exposing secrets',
     user: 'tech@example.test',
     fetchImpl: async (url, opts = {}) => {
       requests.push({ url, opts });
-      assert.strictEqual(url, 'https://promptwall.customer.example/api/v1/heartbeat');
+      assert.strictEqual(url, 'https://redactwall.customer.example/api/v1/heartbeat');
       assert.strictEqual(opts.headers['x-api-key'], ingestKey);
       assert.ok(!opts.body.includes(ingestKey));
       assert.ok(!opts.body.includes(handoffSecret));
@@ -117,7 +117,7 @@ test('endpoint install check reports unapproved endpoint AI tools without failin
   fs.mkdirSync(watchDir, { recursive: true });
   const envPath = path.join(dir, 'endpoint-agent.env');
   fs.writeFileSync(envPath, [
-    'PROMPTWALL_URL=https://promptwall.customer.example',
+    'REDACTWALL_URL=https://redactwall.customer.example',
     'INGEST_API_KEY=pilot-ingest-key-000000000000000000000000000004',
     `ENDPOINT_AGENT_WATCH_DIR=${watchDir}`,
     'ENDPOINT_AGENT_APPROVED_AI_TOOLS=cursor,claude_code',
@@ -144,7 +144,7 @@ test('endpoint install check reports attention for missing desktop collector pre
   const dir = tempDir(t, 'ps-endpoint-check-attention-');
   const envPath = path.join(dir, 'endpoint-agent.env');
   fs.writeFileSync(envPath, [
-    'PROMPTWALL_URL=https://promptwall.customer.example',
+    'REDACTWALL_URL=https://redactwall.customer.example',
     'INGEST_API_KEY=too-short',
     `ENDPOINT_AGENT_WATCH_DIR=${path.join(dir, 'missing-watch')}`,
   ].join('\n') + '\n');
@@ -168,7 +168,7 @@ test('endpoint install check reports attention for unusable explicit OCR command
   fs.mkdirSync(watchDir, { recursive: true });
   const envPath = path.join(dir, 'endpoint-agent.env');
   fs.writeFileSync(envPath, [
-    'PROMPTWALL_URL=https://promptwall.customer.example',
+    'REDACTWALL_URL=https://redactwall.customer.example',
     'INGEST_API_KEY=pilot-ingest-key-000000000000000000000000000003',
     `ENDPOINT_AGENT_WATCH_DIR=${watchDir}`,
     `ENDPOINT_AGENT_OCR_COMMAND=${path.join(dir, 'missing-ocr.exe')}`,
@@ -193,7 +193,7 @@ test('endpoint install check reports missing file-flow profile directories witho
   fs.mkdirSync(watchDir, { recursive: true });
   const envPath = path.join(dir, 'endpoint-agent.env');
   fs.writeFileSync(envPath, [
-    'PROMPTWALL_URL=https://promptwall.customer.example',
+    'REDACTWALL_URL=https://redactwall.customer.example',
     'INGEST_API_KEY=pilot-ingest-key-000000000000000000000000000005',
     `ENDPOINT_AGENT_WATCH_DIR=${watchDir}`,
     `ENDPOINT_AGENT_FILE_FLOW_PROFILES=${JSON.stringify([{ id: 'member-flow', dir: missingFlowDir, destination: 'Desktop AI' }])}`,
@@ -215,29 +215,29 @@ test('endpoint install check accepts env aliases, default paths, and shell OCR c
   const envPath = path.join(dir, 'endpoint-agent.env');
   const aliasKey = 'alias-ingest-key-0000000000000000000000000001';
   fs.writeFileSync(envPath, [
-    'PROMPTWALL_URL=https://promptwall.alias.example/path',
-    `PROMPTWALL_INGEST_API_KEY=${aliasKey}`,
-    `PROMPTWALL_ENDPOINT_AGENT_WATCH_DIR=${watchDir}`,
-    'PROMPTWALL_ENDPOINT_AGENT_OCR_COMMAND=tesseract',
-    'PROMPTWALL_TENANT_ID=cu-alias',
+    'REDACTWALL_URL=https://redactwall.alias.example/path',
+    `REDACTWALL_INGEST_API_KEY=${aliasKey}`,
+    `REDACTWALL_ENDPOINT_AGENT_WATCH_DIR=${watchDir}`,
+    'REDACTWALL_ENDPOINT_AGENT_OCR_COMMAND=tesseract',
+    'REDACTWALL_TENANT_ID=cu-alias',
   ].join('\n') + '\n');
 
   const config = readEndpointConfig(envPath, {}).config;
   assert.strictEqual(config.INGEST_API_KEY, aliasKey);
-  assert.strictEqual(defaultEndpointEnvPath({ LOCALAPPDATA: 'C:\\Temp' }, 'win32'), 'C:\\Temp\\PromptWall\\endpoint-agent.env');
-  assert.match(defaultEndpointEnvPath({ HOME: '/tmp/home' }, 'linux').replace(/\\/g, '/'), /\/tmp\/home\/.config\/promptwall\/endpoint-agent\.env$/);
+  assert.strictEqual(defaultEndpointEnvPath({ LOCALAPPDATA: 'C:\\Temp' }, 'win32'), 'C:\\Temp\\RedactWall\\endpoint-agent.env');
+  assert.match(defaultEndpointEnvPath({ HOME: '/tmp/home' }, 'linux').replace(/\\/g, '/'), /\/tmp\/home\/.config\/redactwall\/endpoint-agent\.env$/);
 
   const report = buildInstallReport({ envPath, repoRoot: root, env: {} });
   assert.strictEqual(report.status, 'ok');
-  assert.ok(report.checks.some((item) => item.id === 'server_url' && item.detail === 'https://promptwall.alias.example'));
+  assert.ok(report.checks.some((item) => item.id === 'server_url' && item.detail === 'https://redactwall.alias.example'));
   assert.ok(report.checks.some((item) => item.id === 'endpoint_ocr_config' && item.ok && item.detail === 'configured'));
   assert.ok(!JSON.stringify(report).includes(aliasKey));
 
   const invalidEnvPath = path.join(dir, 'invalid-endpoint-agent.env');
   fs.writeFileSync(invalidEnvPath, [
-    'PROMPTWALL_URL=https://bad host%%%/prompt',
-    `PROMPTWALL_INGEST_API_KEY=${aliasKey}`,
-    `PROMPTWALL_ENDPOINT_AGENT_WATCH_DIR=${watchDir}`,
+    'REDACTWALL_URL=https://bad host%%%/prompt',
+    `REDACTWALL_INGEST_API_KEY=${aliasKey}`,
+    `REDACTWALL_ENDPOINT_AGENT_WATCH_DIR=${watchDir}`,
   ].join('\n') + '\n');
   const invalidUrlReport = buildInstallReport({
     envPath: invalidEnvPath,
@@ -249,14 +249,14 @@ test('endpoint install check accepts env aliases, default paths, and shell OCR c
 
 test('endpoint heartbeat and human output cover failure branches without leaking secrets', async () => {
   const report = { status: 'ok', checks: [{ id: 'ingest_key', ok: true, detail: 'configured' }] };
-  await assert.rejects(() => emitHeartbeat(report, { config: { INGEST_API_KEY: 'key-0000000000000001' } }), /PROMPTWALL_URL/);
-  await assert.rejects(() => emitHeartbeat(report, { config: { PROMPTWALL_URL: 'https://promptwall.example' } }), /INGEST_API_KEY/);
+  await assert.rejects(() => emitHeartbeat(report, { config: { INGEST_API_KEY: 'key-0000000000000001' } }), /REDACTWALL_URL/);
+  await assert.rejects(() => emitHeartbeat(report, { config: { REDACTWALL_URL: 'https://redactwall.example' } }), /INGEST_API_KEY/);
   const originalFetch = globalThis.fetch;
   delete globalThis.fetch;
   try {
     await assert.rejects(() => emitHeartbeat(report, {
       config: {
-        PROMPTWALL_URL: 'https://promptwall.example',
+        REDACTWALL_URL: 'https://redactwall.example',
         INGEST_API_KEY: 'key-0000000000000001',
       },
     }), /fetch is not available/);
@@ -265,7 +265,7 @@ test('endpoint heartbeat and human output cover failure branches without leaking
   }
   await assert.rejects(() => emitHeartbeat(report, {
     config: {
-      PROMPTWALL_URL: 'https://promptwall.example',
+      REDACTWALL_URL: 'https://redactwall.example',
       INGEST_API_KEY: 'key-0000000000000001',
     },
     fetchImpl: async () => ({
@@ -277,7 +277,7 @@ test('endpoint heartbeat and human output cover failure branches without leaking
 
   const logs = [];
   printHuman({ ...report, heartbeat: { ok: false, detail: 'offline' } }, { log: (line) => logs.push(line) });
-  assert.match(logs.join('\n'), /PromptWall endpoint install: ok/);
+  assert.match(logs.join('\n'), /RedactWall endpoint install: ok/);
   assert.match(logs.join('\n'), /\[attention\] heartbeat - offline/);
 });
 
@@ -361,7 +361,7 @@ test('endpoint install check verifies OCR extraction against the bundled fixture
     extractImageFile: async (name, filePath) => {
       assert.strictEqual(name, 'ocr-sample.png');
       assert.ok(fs.existsSync(filePath), 'fixture image ships with the agent');
-      return { extractionOk: true, text: 'PROMPTWALL OCR 7391' };
+      return { extractionOk: true, text: 'REDACTWALL OCR 7391' };
     },
   });
   assert.deepStrictEqual(extracted, { id: 'endpoint_ocr_extract', ok: true, detail: 'extracted fixture text' });
@@ -399,7 +399,7 @@ test('endpoint install check verifies OCR extraction against the bundled fixture
     extractImageFile: async (name, filePath, engineOpts) => {
       assert.strictEqual(engineOpts.discover, false);
       assert.ok(fs.existsSync(filePath), 'fixture image ships with the agent');
-      return { extractionOk: true, text: 'PROMPTWALL OCR 73491', ocrEngine: 'wasm' };
+      return { extractionOk: true, text: 'REDACTWALL OCR 73491', ocrEngine: 'wasm' };
     },
   });
   assert.strictEqual(wasmExtract.ok, true);
@@ -413,7 +413,7 @@ test('endpoint install check auto-discovers OCR and surfaces guarded app folders
   const envPath = path.join(dir, 'endpoint-agent.env');
   const key = 'appflow-ingest-key-000000000000000000000001';
   fs.writeFileSync(envPath, [
-    'PROMPTWALL_URL=https://promptwall.appflow.example',
+    'REDACTWALL_URL=https://redactwall.appflow.example',
     `INGEST_API_KEY=${key}`,
     `ENDPOINT_AGENT_WATCH_DIR=${watchDir}`,
     'ENDPOINT_AGENT_APP_FLOW=1',
@@ -431,7 +431,7 @@ test('endpoint install check auto-discovers OCR and surfaces guarded app folders
     extraChecks: [await ocrExtractionCheck({
       envPath,
       env: {},
-      extractImageFile: async () => ({ extractionOk: true, text: 'PROMPTWALL OCR 7391' }),
+      extractImageFile: async () => ({ extractionOk: true, text: 'REDACTWALL OCR 7391' }),
       discoverOcrCommand: () => '/discovered/tesseract',
     })],
   });

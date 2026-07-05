@@ -3,12 +3,12 @@ param(
   [string]$ExtensionId,
   [ValidateSet("chrome", "edge", "both")]
   [string]$Browser = "both",
-  [string]$ConfigDir = "$env:LOCALAPPDATA\PromptWall",
+  [string]$ConfigDir = "$env:LOCALAPPDATA\RedactWall",
   [string]$RepoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path,
   [switch]$Force
 )
 
-# Registers the PromptWall browser file-intent native messaging host for the
+# Registers the RedactWall browser file-intent native messaging host for the
 # current user: a secret-free .cmd launcher, the host manifest JSON, and the
 # per-user NativeMessagingHosts registry key for Chrome and/or Edge. The
 # endpoint config (ingest key, handoff secret) stays in endpoint-agent.env;
@@ -16,10 +16,10 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$HostName = "com.promptwall.file_intent"
+$HostName = "com.redactwall.file_intent"
 
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
-  throw "Node.js is required on PATH before installing the PromptWall file-intent host."
+  throw "Node.js is required on PATH before installing the RedactWall file-intent host."
 }
 if ($ExtensionId -notmatch '^[a-p]{32}$') {
   throw "ExtensionId must be a 32-character Chrome extension id."
@@ -55,7 +55,7 @@ Set-Content -LiteralPath $launcherPath -Value $launcherBody -Encoding Ascii
 
 $manifestBody = [ordered]@{
   name = $HostName
-  description = "PromptWall browser file-upload intent handoff"
+  description = "RedactWall browser file-upload intent handoff"
   path = $launcherPath
   type = "stdio"
   allowed_origins = @("chrome-extension://$ExtensionId/")

@@ -14,8 +14,7 @@ const fs = require('fs');
 const path = require('path');
 const detector = require('../detection-engine/detect');
 
-const CONFIG_PATH = process.env.SENTINEL_EXACT_MATCH_PATH
-  || process.env.PROMPTWALL_EXACT_MATCH_PATH
+const CONFIG_PATH = process.env.REDACTWALL_EXACT_MATCH_PATH || process.env.PROMPTWALL_EXACT_MATCH_PATH || process.env.SENTINEL_EXACT_MATCH_PATH
   || path.join(__dirname, '..', 'config', 'exact-match.json');
 
 function loadRaw() {

@@ -7,7 +7,7 @@
  * database read-only, and proves the audit hash-chain plus row counts
  * survived the round trip.
  *
- * Postgres (SENTINEL_DB_DRIVER=postgres): dumps with pg_dump, restores into a
+ * Postgres (REDACTWALL_DB_DRIVER=postgres): dumps with pg_dump, restores into a
  * uniquely named scratch database on the same server, verifies the audit
  * chain and counts there, and always drops the scratch database afterwards
  * (--keep retains only the dump + manifest). The connected role needs
@@ -48,7 +48,7 @@ function resolveWorkDir(backupDir) {
     fs.mkdirSync(dir, { recursive: true });
     return { dir, owned: false };
   }
-  return { dir: fs.mkdtempSync(path.join(os.tmpdir(), 'promptwall-drill-')), owned: true };
+  return { dir: fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-drill-')), owned: true };
 }
 
 /** Open the restored copy read-only and measure it independently. */
@@ -182,10 +182,10 @@ function cleanupPgArtifacts(workDir, created) {
 
 /** Dump → restore into a scratch database → verify there → drop it (always). */
 async function runPgDrill(opts, db, create) {
-  const connectionString = process.env.SENTINEL_DATABASE_URL || process.env.DATABASE_URL;
-  if (!connectionString) throw new Error('postgres drill requires SENTINEL_DATABASE_URL');
+  const connectionString = process.env.REDACTWALL_DATABASE_URL || process.env.DATABASE_URL;
+  if (!connectionString) throw new Error('postgres drill requires REDACTWALL_DATABASE_URL');
   const workDir = resolveWorkDir(opts.backupDir);
-  const scratchDb = 'promptwall_drill_' + crypto.randomBytes(5).toString('hex');
+  const scratchDb = 'redactwall_drill_' + crypto.randomBytes(5).toString('hex');
   const created = await create({ outDir: workDir.dir, dbModule: db });
   const verified = backup.verifyBackup({ file: created.file, manifestFile: created.manifestFile });
   let restored = null;
@@ -207,7 +207,7 @@ async function runDrill(opts = {}) {
   const create = opts.createBackup || backup.createBackup;
   if ((db._driverKind || 'sqlite') === 'postgres') return runPgDrill(opts, db, create);
   const workDir = resolveWorkDir(opts.backupDir);
-  const restoredPath = path.join(workDir.dir, 'drill-restore', 'restored-sentinel.db');
+  const restoredPath = path.join(workDir.dir, 'drill-restore', 'restored-redactwall.db');
   const created = await create({ outDir: workDir.dir, dbModule: db });
   const verified = backup.verifyBackup({ file: created.file, manifestFile: created.manifestFile });
   const restored = verified.ok

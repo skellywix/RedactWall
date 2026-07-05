@@ -8,11 +8,11 @@ const fs = require('node:fs');
 const crypto = require('node:crypto');
 
 process.env.ADMIN_PASSWORD = 'unit-pass';
-process.env.SENTINEL_SECRET = 'unit-secret-stable';
-process.env.SENTINEL_DATA_KEY = 'unit-data-key-stable';
+process.env.REDACTWALL_SECRET = 'unit-secret-stable';
+process.env.REDACTWALL_DATA_KEY = 'unit-data-key-stable';
 process.env.INGEST_API_KEY = 'unit-ingest-key';
 process.env.SCIM_BEARER_TOKEN = 'unit-scim-token-with-32-plus-characters';
-process.env.SENTINEL_DB_PATH = path.join(os.tmpdir(), 'ps-scim-test-' + crypto.randomBytes(6).toString('hex') + '.db');
+process.env.REDACTWALL_DB_PATH = path.join(os.tmpdir(), 'ps-scim-test-' + crypto.randomBytes(6).toString('hex') + '.db');
 
 const app = require('../server/app');
 const { listen } = require('./support/listen');
@@ -67,29 +67,29 @@ test('scim endpoints require configured bearer token', async () => withServer(as
 }));
 
 test('scim role helpers map known groups and reject unknown display names', () => {
-  assert.strictEqual(scim.roleFromDisplayName('PromptWall Security Admins'), 'security_admin');
+  assert.strictEqual(scim.roleFromDisplayName('RedactWall Security Admins'), 'security_admin');
   assert.strictEqual(scim.roleFromDisplayName('read only'), 'auditor');
   assert.strictEqual(scim.roleFromDisplayName('Facilities Team'), '');
 });
 
-test('scim provisions users and groups, maps promptwall approver group to approver role, and deactivates users', async () => withServer(async (port) => {
+test('scim provisions users and groups, maps redactwall approver group to approver role, and deactivates users', async () => withServer(async (port) => {
   const groupRes = await scimFetch(port, '/Groups', {
     method: 'POST',
     body: {
       schemas: [scim.GROUP_SCHEMA],
       externalId: 'entra-group-approvers',
-      displayName: 'PromptWall Approvers',
+      displayName: 'RedactWall Approvers',
     },
   });
   assert.strictEqual(groupRes.status, 201);
   const group = await groupRes.json();
-  assert.strictEqual(group.displayName, 'PromptWall Approvers');
+  assert.strictEqual(group.displayName, 'RedactWall Approvers');
 
   const duplicateGroupRes = await scimFetch(port, '/Groups', {
     method: 'POST',
     body: {
       schemas: [scim.GROUP_SCHEMA],
-      displayName: 'PromptWall Approvers',
+      displayName: 'RedactWall Approvers',
     },
   });
   assert.strictEqual(duplicateGroupRes.status, 409);
@@ -139,7 +139,7 @@ test('scim provisions users and groups, maps promptwall approver group to approv
   assert.strictEqual(storedUser.status, 200);
   const mapped = await storedUser.json();
   assert.strictEqual(mapped.roles[0].value, 'approver');
-  assert.deepStrictEqual(mapped.groups.map((g) => g.display), ['PromptWall Approvers']);
+  assert.deepStrictEqual(mapped.groups.map((g) => g.display), ['RedactWall Approvers']);
 
   const removeMember = await scimFetch(port, `/Groups/${group.id}`, {
     method: 'PATCH',
@@ -235,7 +235,7 @@ test('scim supports user and group lifecycle routes without leaking identity sec
     body: {
       schemas: [scim.GROUP_SCHEMA],
       externalId: 'entra-group-lifecycle-updated',
-      displayName: 'PromptWall Operators',
+      displayName: 'RedactWall Operators',
       members: [{ value: user.id, display: updatedUser.userName }],
     },
   });
@@ -246,9 +246,9 @@ test('scim supports user and group lifecycle routes without leaking identity sec
 
   const groupLookup = await scimFetch(port, `/Groups/${group.id}`);
   assert.strictEqual(groupLookup.status, 200);
-  assert.strictEqual((await groupLookup.json()).displayName, 'PromptWall Operators');
+  assert.strictEqual((await groupLookup.json()).displayName, 'RedactWall Operators');
 
-  const filteredGroups = await scimFetch(port, '/Groups?filter=displayName%20eq%20%22PromptWall%20Operators%22');
+  const filteredGroups = await scimFetch(port, '/Groups?filter=displayName%20eq%20%22RedactWall%20Operators%22');
   assert.strictEqual(filteredGroups.status, 200);
   const filteredGroupsBody = await filteredGroups.json();
   assert.strictEqual(filteredGroupsBody.totalResults, 1);
@@ -456,6 +456,6 @@ test('scim list responses paginate from startIndex and clamp oversized counts', 
 
 test.after(() => {
   for (const suffix of ['', '-wal', '-shm']) {
-    try { fs.unlinkSync(process.env.SENTINEL_DB_PATH + suffix); } catch {}
+    try { fs.unlinkSync(process.env.REDACTWALL_DB_PATH + suffix); } catch {}
   }
 });

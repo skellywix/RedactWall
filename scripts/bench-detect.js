@@ -6,7 +6,7 @@
  *   node scripts/bench-detect.js --json     # machine-readable metrics
  *   node scripts/bench-detect.js --ci       # exit 1 if any BUDGET is exceeded
  *
- * Why this exists: PromptWall runs analyze() ON-DEVICE, in-process, with no
+ * Why this exists: RedactWall runs analyze() ON-DEVICE, in-process, with no
  * network hop — unlike a cloud DLP whose "p99" includes a round-trip and a
  * customer rate limit. This measures the real cost of a scan so we can publish
  * an honest number (docs/DETECTION_BENCHMARKS.md) and catch order-of-magnitude

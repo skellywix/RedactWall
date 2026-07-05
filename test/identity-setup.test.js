@@ -32,7 +32,7 @@ function captureOutput() {
 test('identity setup guide renders Microsoft Entra SCIM and OIDC values', () => {
   const guide = buildIdentitySetupGuide({
     provider: 'entra',
-    baseUrl: 'https://promptwall.cu.example/',
+    baseUrl: 'https://redactwall.cu.example/',
     tenantId: '11111111-2222-3333-4444-555555555555',
     token: 'should-not-appear',
     clientSecret: 'should-not-appear',
@@ -40,11 +40,11 @@ test('identity setup guide renders Microsoft Entra SCIM and OIDC values', () => 
 
   const wire = JSON.stringify(guide);
   assert.strictEqual(guide.label, 'Microsoft Entra ID');
-  assert.strictEqual(guide.scim.tenantUrl, 'https://promptwall.cu.example/scim/v2');
-  assert.strictEqual(guide.oidc.redirectUri, 'https://promptwall.cu.example/auth/oidc/callback');
+  assert.strictEqual(guide.scim.tenantUrl, 'https://redactwall.cu.example/scim/v2');
+  assert.strictEqual(guide.oidc.redirectUri, 'https://redactwall.cu.example/auth/oidc/callback');
   assert.strictEqual(guide.oidc.issuer, 'https://login.microsoftonline.com/11111111-2222-3333-4444-555555555555/v2.0');
   assert.ok(guide.env.some((row) => row.key === 'OIDC_CLIENT_SECRET' && row.value === '<32-plus-random-characters>'));
-  assert.ok(guide.roleGroups.some((row) => row.role === 'approver' && row.groups.includes('PromptWall Approvers')));
+  assert.ok(guide.roleGroups.some((row) => row.role === 'approver' && row.groups.includes('RedactWall Approvers')));
   assert.ok(guide.preflightChecks.includes('oidc_scim_users'));
   assert.doesNotMatch(wire, /should-not-appear/);
 });
@@ -52,12 +52,12 @@ test('identity setup guide renders Microsoft Entra SCIM and OIDC values', () => 
 test('identity setup guide renders Okta issuer and callback values', () => {
   const guide = buildIdentitySetupGuide({
     provider: 'okta',
-    baseUrl: 'https://promptwall.okta-pilot.example',
+    baseUrl: 'https://redactwall.okta-pilot.example',
     tenantId: 'customer.okta.com',
   });
 
   assert.strictEqual(guide.label, 'Okta');
-  assert.strictEqual(guide.scim.baseUrl, 'https://promptwall.okta-pilot.example/scim/v2');
+  assert.strictEqual(guide.scim.baseUrl, 'https://redactwall.okta-pilot.example/scim/v2');
   assert.strictEqual(guide.oidc.issuer, 'https://customer.okta.com/oauth2/default');
   assert.strictEqual(guide.oidc.discovery, 'https://customer.okta.com/oauth2/default/.well-known/openid-configuration');
 });
@@ -68,7 +68,7 @@ test('identity setup guide accepts provider aliases and rejects invalid base url
   assert.strictEqual(normalizeProvider('okta'), 'okta');
   assert.throws(() => normalizeProvider('github'), /unsupported identity provider/);
   assert.throws(() => _internal.providerIssuer('github', 'tenant'), /unsupported identity provider/);
-  assert.throws(() => buildIdentitySetupGuide({ provider: 'entra', baseUrl: 'promptwall.example.test' }), /baseUrl/);
+  assert.throws(() => buildIdentitySetupGuide({ provider: 'entra', baseUrl: 'redactwall.example.test' }), /baseUrl/);
 });
 
 test('identity setup CLI prints text and json without secrets', () => {
@@ -77,11 +77,11 @@ test('identity setup CLI prints text and json without secrets', () => {
     '--provider',
     'okta',
     '--base-url',
-    'https://promptwall.customer.example',
+    'https://redactwall.customer.example',
     '--tenant-id',
     'customer.okta.com',
   ], { cwd: root, encoding: 'utf8' });
-  assert.match(text, /Okta setup for PromptWall/);
+  assert.match(text, /Okta setup for RedactWall/);
   assert.match(text, /SCIM_BEARER_TOKEN=<32-plus-random-characters>/);
   assert.doesNotMatch(text, /client-secret-[a-z0-9]/i);
 
@@ -90,7 +90,7 @@ test('identity setup CLI prints text and json without secrets', () => {
     '--provider',
     'entra',
     '--base-url',
-    'https://promptwall.customer.example',
+    'https://redactwall.customer.example',
     '--tenant-id',
     'contoso.onmicrosoft.com',
     '--json',
@@ -103,12 +103,12 @@ test('identity setup CLI prints text and json without secrets', () => {
 test('identity setup CLI parser and injectable main cover help, text, json, and errors', () => {
   assert.deepStrictEqual(identityCli.parseArgs([
     '--provider', 'okta',
-    '--base-url', 'https://promptwall.customer.example',
+    '--base-url', 'https://redactwall.customer.example',
     '--okta-domain', 'customer.okta.com',
     '--format', 'json',
   ]), {
     provider: 'okta',
-    baseUrl: 'https://promptwall.customer.example',
+    baseUrl: 'https://redactwall.customer.example',
     tenantId: 'customer.okta.com',
     format: 'json',
   });
@@ -125,15 +125,15 @@ test('identity setup CLI parser and injectable main cover help, text, json, and 
   const text = captureOutput();
   assert.strictEqual(identityCli.main([
     '--provider', 'entra',
-    '--base-url', 'https://promptwall.customer.example',
+    '--base-url', 'https://redactwall.customer.example',
     '--tenant-id', 'contoso.onmicrosoft.com',
   ], { console: text.console, stdout: text.stdout }), 0);
-  assert.match(text.writes.join(''), /Microsoft Entra ID setup for PromptWall/);
+  assert.match(text.writes.join(''), /Microsoft Entra ID setup for RedactWall/);
 
   const json = captureOutput();
   assert.strictEqual(identityCli.main([
     '--provider', 'okta',
-    '--base-url', 'https://promptwall.customer.example',
+    '--base-url', 'https://redactwall.customer.example',
     '--tenant-id', 'customer.okta.com',
     '--json',
   ], { console: json.console, stdout: json.stdout }), 0);
@@ -173,11 +173,11 @@ test('dashboard and server expose authenticated identity setup UX', () => {
 test('text renderer summarizes without live token material', () => {
   const guide = buildIdentitySetupGuide({
     provider: 'entra',
-    baseUrl: 'https://promptwall.customer.example',
+    baseUrl: 'https://redactwall.customer.example',
     tenantId: 'contoso.onmicrosoft.com',
   });
   const text = renderTextGuide(guide);
-  assert.match(text, /Microsoft Entra ID setup for PromptWall/);
+  assert.match(text, /Microsoft Entra ID setup for RedactWall/);
   assert.match(text, /OIDC_CLIENT_SECRET=<32-plus-random-characters>/);
   assert.doesNotMatch(text, /SCIM bearer token value/i);
 });

@@ -9,10 +9,10 @@
  * tiny scale, and a corrupted audit log is the one thing this product cannot
  * ship. better-sqlite3 gives real ACID transactions and WAL concurrency.
  *
- * Storage location: defaults to data/sentinel.db. A live SQLite file must sit
+ * Storage location: defaults to data/redactwall.db. A live SQLite file must sit
  * on LOCAL disk — never a network/cloud-synced share (locking + mmap break).
  * If the configured path's filesystem rejects SQLite, we fall back to a local
- * OS dir and log loudly. Set SENTINEL_DB_PATH to a real local-disk path (or a
+ * OS dir and log loudly. Set REDACTWALL_DB_PATH to a real local-disk path (or a
  * managed Postgres in front of this interface) in production.
  *
  * Tamper-evidence: every audit entry's hash covers a CANONICAL
@@ -514,7 +514,7 @@ function verifyAuditChain() {
 // short interval so this O(N) scan runs at most once per window instead of once
 // per request; the "top data types" widget tolerates a few seconds of lag.
 const TOP_ENTITIES_TTL_MS = (() => {
-  const n = Number(process.env.PROMPTWALL_TOP_ENTITIES_TTL_MS);
+  const n = Number(process.env.REDACTWALL_TOP_ENTITIES_TTL_MS);
   return Number.isFinite(n) && n >= 0 ? n : 10000;
 })();
 let _topEntitiesCache = null;
@@ -560,7 +560,7 @@ function migrateFromJson(opts = {}) {
   const append = opts.appendAudit || appendAudit;
   const fsModule = opts.fs || fs;
   const dataDir = opts.dataDir || DATA_DIR;
-  if (env.SENTINEL_DB_PATH) return; // explicit path: caller owns its data, no legacy auto-import
+  if (env.REDACTWALL_DB_PATH) return; // explicit path: caller owns its data, no legacy auto-import
   if (db.prepare('SELECT COUNT(*) n FROM queries').get().n > 0) return;
   const qf = path.join(dataDir, 'queries.json');
   const af = path.join(dataDir, 'audit.json');

@@ -1,7 +1,7 @@
 'use strict';
 require('../server/env').loadEnv();
 /**
- * Reference shared limiter service for the PromptWall AI LLM Gateway.
+ * Reference shared limiter service for the RedactWall AI LLM Gateway.
  *
  * Run this as a small internal service when gateway replicas need one shared
  * abuse-control counter. It accepts only hashed limiter keys from the gateway
@@ -17,12 +17,12 @@ const { URL } = require('node:url');
 const Database = require('better-sqlite3');
 
 const DEFAULT_PORT = 4183;
-const DEFAULT_STORE = process.env.PROMPTWALL_RATE_LIMITER_STORE || 'sqlite';
-const DEFAULT_DB = process.env.PROMPTWALL_RATE_LIMITER_DB || path.join(process.cwd(), 'data', 'gateway-shared-rate-limiter.db');
-const DEFAULT_REDIS_URL = process.env.PROMPTWALL_RATE_LIMITER_REDIS_URL || '';
-const DEFAULT_REDIS_PREFIX = process.env.PROMPTWALL_RATE_LIMITER_REDIS_PREFIX || 'promptwall:gateway:rl:';
+const DEFAULT_STORE = process.env.REDACTWALL_RATE_LIMITER_STORE || 'sqlite';
+const DEFAULT_DB = process.env.REDACTWALL_RATE_LIMITER_DB || path.join(process.cwd(), 'data', 'gateway-shared-rate-limiter.db');
+const DEFAULT_REDIS_URL = process.env.REDACTWALL_RATE_LIMITER_REDIS_URL || '';
+const DEFAULT_REDIS_PREFIX = process.env.REDACTWALL_RATE_LIMITER_REDIS_PREFIX || 'redactwall:gateway:rl:';
 const DEFAULT_REDIS_TIMEOUT_MS = 2000;
-const DEFAULT_TOKEN = process.env.PROMPTWALL_RATE_LIMITER_TOKEN || process.env.PROMPTWALL_GATEWAY_RATE_LIMIT_TOKEN || '';
+const DEFAULT_TOKEN = process.env.REDACTWALL_RATE_LIMITER_TOKEN || process.env.REDACTWALL_GATEWAY_RATE_LIMIT_TOKEN || '';
 const DEFAULT_MAX_BODY_BYTES = 16 * 1024;
 const DEFAULT_MAX_LIMIT = 100000;
 const DEFAULT_MAX_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -381,7 +381,7 @@ async function limiterHealth(store, opts = {}) {
   } catch {}
   return {
     status: tokenConfigured && backendReady ? 'ready' : 'attention',
-    service: 'promptwall-ai-gateway-rate-limiter',
+    service: 'redactwall-ai-gateway-rate-limiter',
     tokenConfigured,
     dbReady: backendReady,
     backendReady,
@@ -394,10 +394,10 @@ async function limiterHealth(store, opts = {}) {
 async function handleLimiterRequest(req, res, opts = {}, state = {}) {
   const store = state.store || createLimiterStore(opts);
   state.store = store;
-  res.setHeader('x-promptwall-rate-limiter', 'ai-gateway');
+  res.setHeader('x-redactwall-rate-limiter', 'ai-gateway');
 
   if (req.method === 'GET' && req.url === '/healthz') {
-    return jsonResponse(res, 200, { status: 'ok', service: 'promptwall-ai-gateway-rate-limiter' });
+    return jsonResponse(res, 200, { status: 'ok', service: 'redactwall-ai-gateway-rate-limiter' });
   }
   if (req.method === 'GET' && req.url === '/readyz') {
     const health = await limiterHealth(store, opts);
@@ -458,13 +458,13 @@ function parseArgs(argv = process.argv.slice(2)) {
 async function main(argv = process.argv.slice(2), io = process) {
   const args = parseArgs(argv);
   if (!configuredToken(args) && args.allowInsecureDev !== true) {
-    throw new Error('Set PROMPTWALL_RATE_LIMITER_TOKEN or pass --token before starting the shared limiter.');
+    throw new Error('Set REDACTWALL_RATE_LIMITER_TOKEN or pass --token before starting the shared limiter.');
   }
   const port = Number.isFinite(args.port) ? args.port : DEFAULT_PORT;
   const host = args.host || '127.0.0.1';
   const server = createLimiterServer(args).listen(port, host, () => {
     const address = server.address();
-    io.stdout.write(`PromptWall AI gateway shared limiter listening on http://${host}:${address && address.port ? address.port : port}\n`);
+    io.stdout.write(`RedactWall AI gateway shared limiter listening on http://${host}:${address && address.port ? address.port : port}\n`);
   });
   return server;
 }

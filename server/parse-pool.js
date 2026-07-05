@@ -10,7 +10,7 @@
  *
  * Exposes the same extractText(name, buf, opts) contract and error codes as
  * server/processors.js so call sites and sensors need no other changes.
- * SENTINEL_PARSE_ISOLATION=off falls back to in-process extraction.
+ * REDACTWALL_PARSE_ISOLATION=off falls back to in-process extraction.
  */
 require('./env').loadEnv();
 const { fork } = require('child_process');
@@ -30,15 +30,15 @@ function bounded(value, fallback, min, max) {
 }
 
 function poolEnabled() {
-  const v = String(process.env.SENTINEL_PARSE_ISOLATION || 'on').toLowerCase();
+  const v = String(process.env.REDACTWALL_PARSE_ISOLATION || 'on').toLowerCase();
   return !['off', '0', 'false', 'disabled'].includes(v);
 }
 
-function poolSize() { return bounded(process.env.SENTINEL_PARSE_POOL_SIZE, 1, 1, 4); }
-function maxTasksPerChild() { return bounded(process.env.SENTINEL_PARSE_CHILD_MAX_TASKS, 50, 1, 1000); }
-function childHeapMb() { return bounded(process.env.SENTINEL_PARSE_CHILD_MAX_OLD_SPACE_MB, 256, 64, 4096); }
-function queueMax() { return bounded(process.env.SENTINEL_PARSE_QUEUE_MAX, 16, 1, 256); }
-function killGraceMs() { return bounded(process.env.SENTINEL_PARSE_KILL_GRACE_MS, 500, 50, 10000); }
+function poolSize() { return bounded(process.env.REDACTWALL_PARSE_POOL_SIZE, 1, 1, 4); }
+function maxTasksPerChild() { return bounded(process.env.REDACTWALL_PARSE_CHILD_MAX_TASKS, 50, 1, 1000); }
+function childHeapMb() { return bounded(process.env.REDACTWALL_PARSE_CHILD_MAX_OLD_SPACE_MB, 256, 64, 4096); }
+function queueMax() { return bounded(process.env.REDACTWALL_PARSE_QUEUE_MAX, 16, 1, 256); }
+function killGraceMs() { return bounded(process.env.REDACTWALL_PARSE_KILL_GRACE_MS, 500, 50, 10000); }
 
 function childTimeoutMs(opts) {
   return bounded(

@@ -301,5 +301,5 @@ test('gateway blocks the response when the scan itself errors (fail closed)', as
   const { app } = createGateway({ provider: 'mock', client, agentTokensPath: tp });
   const res = await listenAndRequest(app, { headers: { authorization: 'Bearer ' + token }, body: { model: 'x', messages: [{ role: 'user', content: 'hello there' }] } });
   assert.strictEqual(res.status, 403);
-  assert.strictEqual(res.json.error.type, 'response_blocked_by_promptwall');
+  assert.strictEqual(res.json.error.type, 'response_blocked_by_redactwall');
 });

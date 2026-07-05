@@ -161,20 +161,20 @@ test('evidence pack omits raw prompt, redacted prompt body, token vault, and aud
     },
     backup: {
       ok: true,
-      file: 'C:\\secret\\backups\\sentinel-2026-06-26.db',
+      file: 'C:\\secret\\backups\\redactwall-2026-06-26.db',
       bytes: 4096,
       backupSha256: '2'.repeat(64),
       manifestOk: true,
       auditIntegrity: { ok: true, count: 1 },
       sourceIntegrity: { ok: true, count: 1 },
       manifest: {
-        backupFile: 'sentinel-2026-06-26.db',
+        backupFile: 'redactwall-2026-06-26.db',
         secret: 'backup-secret-should-not-export',
       },
     },
     restoreDrill: {
       ok: true,
-      file: 'C:\\secret\\restore\\restored-sentinel.db',
+      file: 'C:\\secret\\restore\\restored-redactwall.db',
       backupSha256: '3'.repeat(64),
       manifestOk: true,
       auditIntegrity: { ok: true, count: 1 },
@@ -243,8 +243,8 @@ test('evidence pack omits raw prompt, redacted prompt body, token vault, and aud
   assert.strictEqual(pack.scope.backupEvidenceIncluded, true);
   assert.strictEqual(pack.scope.restoreDrillEvidenceIncluded, true);
   assert.strictEqual(pack.backup.ok, true);
-  assert.strictEqual(pack.backup.backupFile, 'sentinel-2026-06-26.db');
-  assert.strictEqual(pack.restoreDrill.restoredFile, 'restored-sentinel.db');
+  assert.strictEqual(pack.backup.backupFile, 'redactwall-2026-06-26.db');
+  assert.strictEqual(pack.restoreDrill.restoredFile, 'restored-redactwall.db');
   assert.ok(pack.controlMappings.some((item) => item.id === 'backup_recoverability' && item.state === 'covered'));
   assert.ok(pack.queries[0].promptHash);
   assert.ok(pack.audit[0].detailHash);

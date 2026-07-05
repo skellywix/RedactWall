@@ -6,16 +6,16 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 
-process.env.SENTINEL_DB_PATH = path.join(os.tmpdir(), 'ps-saas-test-' + crypto.randomBytes(6).toString('hex') + '.db');
-process.env.SENTINEL_POLICY_PATH = path.join(os.tmpdir(), 'ps-saas-policy-' + crypto.randomBytes(6).toString('hex') + '.json');
+process.env.REDACTWALL_DB_PATH = path.join(os.tmpdir(), 'ps-saas-test-' + crypto.randomBytes(6).toString('hex') + '.db');
+process.env.REDACTWALL_POLICY_PATH = path.join(os.tmpdir(), 'ps-saas-policy-' + crypto.randomBytes(6).toString('hex') + '.json');
 process.env.INGEST_API_KEY = 'unit-saas-ingest-key';
 process.env.ADMIN_PASSWORD = 'unit-pass';
-process.env.SENTINEL_SECRET = 'unit-saas-secret-stable-value-32';
-process.env.SENTINEL_DATA_KEY = 'unit-saas-data-key-stable-value-32';
-process.env.SENTINEL_SAAS_MODE = 'true';
-process.env.SENTINEL_TENANT_ID = 'cu-acme';
-process.env.SENTINEL_SEAT_LIMIT = '1';
-fs.writeFileSync(process.env.SENTINEL_POLICY_PATH, JSON.stringify({
+process.env.REDACTWALL_SECRET = 'unit-saas-secret-stable-value-32';
+process.env.REDACTWALL_DATA_KEY = 'unit-saas-data-key-stable-value-32';
+process.env.REDACTWALL_SAAS_MODE = 'true';
+process.env.REDACTWALL_TENANT_ID = 'cu-acme';
+process.env.REDACTWALL_SEAT_LIMIT = '1';
+fs.writeFileSync(process.env.REDACTWALL_POLICY_PATH, JSON.stringify({
   scanner: { maxFileBytes: 1024 },
 }));
 

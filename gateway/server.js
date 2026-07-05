@@ -1,7 +1,7 @@
 'use strict';
 /**
- * PromptWall AI Gateway — an OpenAI-compatible reverse proxy that gates every
- * prompt and scans every response through the PromptWall control plane before
+ * RedactWall AI Gateway — an OpenAI-compatible reverse proxy that gates every
+ * prompt and scans every response through the RedactWall control plane before
  * anything reaches the upstream model or returns to the caller.
  *
  * Fail-closed: if the control plane is unreachable, the request is blocked — it
@@ -92,7 +92,7 @@ const BLOCK_STATUSES = new Set([
 ]);
 
 function openAiError(message, type, reasons) {
-  return { error: { message, type: type || 'promptwall_block', code: type || 'promptwall_block', reasons: reasons || [] } };
+  return { error: { message, type: type || 'redactwall_block', code: type || 'redactwall_block', reasons: reasons || [] } };
 }
 
 function createGateway(overrides = {}) {
@@ -157,7 +157,7 @@ function createGateway(overrides = {}) {
       const blocked = verdict.decision === 'block' || BLOCK_STATUSES.has(verdict.status);
       if (blocked && verdict.decision !== 'redact') {
         metrics.blocked += 1;
-        return res.status(403).json(openAiError('Prompt blocked by PromptWall policy', 'blocked_by_promptwall', verdict.reasons));
+        return res.status(403).json(openAiError('Prompt blocked by RedactWall policy', 'blocked_by_redactwall', verdict.reasons));
       }
       if (verdict.decision === 'redact') {
         // Tokenize every role locally so no raw PII in any message reaches upstream.
@@ -173,7 +173,7 @@ function createGateway(overrides = {}) {
       // never forward ungated content upstream.
       metrics.blocked += 1;
       metrics.failClosed += 1;
-      return res.status(403).json(openAiError('Request carries content PromptWall could not scan; blocked', 'unscannable_content'));
+      return res.status(403).json(openAiError('Request carries content RedactWall could not scan; blocked', 'unscannable_content'));
     } else {
       metrics.allowed += 1;
     }
@@ -195,7 +195,7 @@ function createGateway(overrides = {}) {
       });
       if (scan.blocked || scan.decision === 'block') {
         metrics.responseBlocked += 1;
-        return res.status(403).json(openAiError('Model response blocked by PromptWall policy', 'response_blocked_by_promptwall', scan.reasons));
+        return res.status(403).json(openAiError('Model response blocked by RedactWall policy', 'response_blocked_by_redactwall', scan.reasons));
       }
       if (scan.decision === 'redact' && typeof scan.redacted === 'string') {
         outJson = adapter.applyResponseText(outJson, scan.redacted);
@@ -223,7 +223,7 @@ function createGateway(overrides = {}) {
     res.setHeader('connection', 'keep-alive');
     const choice = (json.choices && json.choices[0]) || {};
     const content = (choice.message && choice.message.content) || choice.text || '';
-    const model = json.model || 'promptwall-gateway';
+    const model = json.model || 'redactwall-gateway';
     const base = { id: json.id || 'gw', object: kind === 'completions' ? 'text_completion' : 'chat.completion.chunk', model };
     const delta = kind === 'completions' ? { text: content } : { choices: [{ index: 0, delta: { role: 'assistant', content }, finish_reason: null }] };
     res.write('data: ' + JSON.stringify({ ...base, ...(kind === 'completions' ? { choices: [{ index: 0, text: content, finish_reason: null }] } : delta) }) + '\n\n');
@@ -232,9 +232,9 @@ function createGateway(overrides = {}) {
     res.end();
   }
 
-  app.get('/healthz', (req, res) => res.json({ status: 'ok', service: 'promptwall-gateway', provider: cfg.provider }));
+  app.get('/healthz', (req, res) => res.json({ status: 'ok', service: 'redactwall-gateway', provider: cfg.provider }));
   app.get('/readyz', async (req, res) => {
-    const verdict = await client.gate({ prompt: 'promptwall gateway readiness probe', user: 'gateway@readyz', destination: destinationLabel(), source: 'ai_gateway', channel: 'readyz' });
+    const verdict = await client.gate({ prompt: 'redactwall gateway readiness probe', user: 'gateway@readyz', destination: destinationLabel(), source: 'ai_gateway', channel: 'readyz' });
     const ready = !verdict._failClosed;
     res.status(ready ? 200 : 503).json({ ready, controlPlane: ready });
   });
@@ -252,7 +252,7 @@ function startGateway(overrides = {}) {
   const { app, cfg } = createGateway(overrides);
   const server = app.listen(cfg.port, () => {
     // eslint-disable-next-line no-console
-    console.log(`PromptWall AI Gateway on :${cfg.port} → provider=${cfg.provider} control-plane=${cfg.controlPlaneUrl}`);
+    console.log(`RedactWall AI Gateway on :${cfg.port} → provider=${cfg.provider} control-plane=${cfg.controlPlaneUrl}`);
   });
   return server;
 }

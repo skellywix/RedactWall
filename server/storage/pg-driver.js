@@ -26,13 +26,13 @@ function boundedInt(value, fallback, min, max) {
  * keeps the connection alive — before the bridge gives up on the worker.
  */
 function resolveBridgeConfig(env = process.env) {
-  const statementTimeoutMs = boundedInt(env.SENTINEL_PG_STATEMENT_TIMEOUT_MS, DEFAULT_STATEMENT_TIMEOUT_MS, 1000, 600000);
+  const statementTimeoutMs = boundedInt(env.REDACTWALL_PG_STATEMENT_TIMEOUT_MS, DEFAULT_STATEMENT_TIMEOUT_MS, 1000, 600000);
   return {
     statementTimeoutMs,
     callTimeoutMs: statementTimeoutMs + BRIDGE_GRACE_MS,
-    connectAttempts: boundedInt(env.SENTINEL_PG_CONNECT_ATTEMPTS, 5, 1, 20),
-    connectBaseDelayMs: boundedInt(env.SENTINEL_PG_CONNECT_BASE_DELAY_MS, 200, 10, 10000),
-    connectTimeoutMs: boundedInt(env.SENTINEL_PG_CONNECT_TIMEOUT_MS, 5000, 500, 60000),
+    connectAttempts: boundedInt(env.REDACTWALL_PG_CONNECT_ATTEMPTS, 5, 1, 20),
+    connectBaseDelayMs: boundedInt(env.REDACTWALL_PG_CONNECT_BASE_DELAY_MS, 200, 10, 10000),
+    connectTimeoutMs: boundedInt(env.REDACTWALL_PG_CONNECT_TIMEOUT_MS, 5000, 500, 60000),
   };
 }
 
@@ -157,7 +157,7 @@ function createPgDriver(connectionString) {
     lockAuditAppend: () => { call('query', 'SELECT pg_advisory_xact_lock($1)', [4021990]); },
     pragma: () => undefined,
     setTenantContext: (orgId) => {
-      call('query', 'SELECT set_config($1, $2, false)', ['promptwall.org_id', String(orgId || '')]);
+      call('query', 'SELECT set_config($1, $2, false)', ['redactwall.org_id', String(orgId || '')]);
     },
     close: () => {
       try { call('close'); } catch { /* already gone */ }

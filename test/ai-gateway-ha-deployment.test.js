@@ -17,14 +17,14 @@ test('AI gateway HA compose publishes only the load-balanced gateway', () => {
   for (const service of ['ai-gateway-limiter', 'ai-gateway-a', 'ai-gateway-b', 'ai-gateway-lb']) {
     assert.match(compose, new RegExp(`^  ${service}:`, 'm'), service);
   }
-  assert.match(compose, /PROMPTWALL_GATEWAY_RATE_LIMIT_STORE:\s+http/);
-  assert.match(compose, /PROMPTWALL_GATEWAY_RATE_LIMIT_URL:\s+http:\/\/ai-gateway-limiter:4183\/check/);
-  assert.match(compose, /PROMPTWALL_GATEWAY_RATE_LIMIT_TOKEN:\s+\$\{PROMPTWALL_RATE_LIMITER_TOKEN:\?set PROMPTWALL_RATE_LIMITER_TOKEN\}/);
-  assert.match(compose, /PROMPTWALL_RATE_LIMITER_STORE:\s+\$\{PROMPTWALL_RATE_LIMITER_STORE:-sqlite\}/);
-  assert.match(compose, /PROMPTWALL_RATE_LIMITER_REDIS_URL:\s+\$\{PROMPTWALL_RATE_LIMITER_REDIS_URL:-\}/);
-  assert.match(compose, /PROMPTWALL_RATE_LIMITER_DB:\s+\/data\/gateway-shared-rate-limiter\.db/);
+  assert.match(compose, /REDACTWALL_GATEWAY_RATE_LIMIT_STORE:\s+http/);
+  assert.match(compose, /REDACTWALL_GATEWAY_RATE_LIMIT_URL:\s+http:\/\/ai-gateway-limiter:4183\/check/);
+  assert.match(compose, /REDACTWALL_GATEWAY_RATE_LIMIT_TOKEN:\s+\$\{REDACTWALL_RATE_LIMITER_TOKEN:\?set REDACTWALL_RATE_LIMITER_TOKEN\}/);
+  assert.match(compose, /REDACTWALL_RATE_LIMITER_STORE:\s+\$\{REDACTWALL_RATE_LIMITER_STORE:-sqlite\}/);
+  assert.match(compose, /REDACTWALL_RATE_LIMITER_REDIS_URL:\s+\$\{REDACTWALL_RATE_LIMITER_REDIS_URL:-\}/);
+  assert.match(compose, /REDACTWALL_RATE_LIMITER_DB:\s+\/data\/gateway-shared-rate-limiter\.db/);
   assert.match(compose, /-\s+gateway-limiter-data:\/data/);
-  assert.match(compose, /"\$\{PROMPTWALL_GATEWAY_PUBLIC_PORT:-4182\}:4182"/);
+  assert.match(compose, /"\$\{REDACTWALL_GATEWAY_PUBLIC_PORT:-4182\}:4182"/);
   assert.doesNotMatch(compose, /4183:4183/);
 });
 
@@ -40,17 +40,17 @@ test('AI gateway HA containers use the hardened runtime posture', () => {
 
 test('AI gateway HA balancer disables prompt-sensitive access logging', () => {
   assert.match(nginx, /access_log off;/);
-  assert.match(nginx, /upstream promptwall_ai_gateway/);
+  assert.match(nginx, /upstream redactwall_ai_gateway/);
   assert.match(nginx, /server ai-gateway-a:4182/);
   assert.match(nginx, /server ai-gateway-b:4182/);
   assert.match(nginx, /proxy_buffering off;/);
-  assert.match(nginx, /X-PromptWall-Request-Id/);
+  assert.match(nginx, /X-RedactWall-Request-Id/);
 });
 
 test('AI gateway HA docs and scripts expose an operator smoke path', () => {
   assert.strictEqual(packageJson.scripts['gateway:ha:smoke'], 'node scripts/smoke-ai-gateway-ha.js');
   assert.match(gatewayDocs, /docker compose -f docker-compose\.gateway-ha\.yml up -d --build/);
-  assert.match(gatewayDocs, /PROMPTWALL_RATE_LIMITER_STORE = "redis"/);
+  assert.match(gatewayDocs, /REDACTWALL_RATE_LIMITER_STORE = "redis"/);
   assert.match(gatewayDocs, /--scale ai-gateway-limiter=2/);
   assert.match(gatewayDocs, /npm run gateway:ha:smoke/);
   assert.match(deploymentDocs, /docker-compose\.gateway-ha\.yml` publishes only the gateway load balancer/);

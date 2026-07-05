@@ -106,7 +106,7 @@ function jsonFetchResponse(status, body, headers = {}) {
 }
 
 test('shared limiter validates config, health, auth, and bounded hashed input', async (t) => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'promptwall-shared-limiter-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-shared-limiter-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const dbPath = path.join(dir, 'limiter.db');
   const parsed = parseArgs(['--port', '4998', '--host', '127.0.0.1', '--store', 'redis', '--db', dbPath, '--redis-url', 'rediss://cache.example.test:6380/2', '--redis-prefix', 'pw:test:', '--redis-timeout-ms', '1500', '--token', 'limiter-token', '--default-limit', '10', '--default-window-ms', '2000']);
@@ -130,7 +130,7 @@ test('shared limiter validates config, health, auth, and bounded hashed input', 
   try {
     const health = await requestJson(port, { method: 'GET', path: '/healthz', token: '', body: '' });
     assert.strictEqual(health.status, 200);
-    assert.match(health.body, /promptwall-ai-gateway-rate-limiter/);
+    assert.match(health.body, /redactwall-ai-gateway-rate-limiter/);
 
     const ready = await requestJson(port, { method: 'GET', path: '/readyz', token: '', body: '' });
     assert.strictEqual(ready.status, 200);
@@ -235,7 +235,7 @@ test('shared limiter server can run against an async redis backend without leaki
 });
 
 test('AI gateway can use the shipped shared limiter service across gateway replicas', async (t) => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'promptwall-gateway-limiter-integration-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-gateway-limiter-integration-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const limiter = createLimiterServer({
     dbPath: path.join(dir, 'limiter.db'),

@@ -13,7 +13,7 @@ const crypto = require('crypto');
 const auth = require('./auth');
 
 const RECEIPT_VERSION = 1;
-const KEY = auth.deriveKey('promptwall:receipt-key:v1');
+const KEY = auth.deriveKey('redactwall:receipt-key:v1');
 const HEX64_RE = /^[0-9a-f]{64}$/;
 
 /** Statuses whose outbound text is cleared to leave the device. */

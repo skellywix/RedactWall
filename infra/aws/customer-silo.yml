@@ -1,16 +1,16 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: PromptWall customer-silo SaaS stack using ALB, EC2, Docker, Secrets Manager, and local EBS-backed SQLite storage.
+Description: RedactWall customer-silo SaaS stack using ALB, EC2, Docker, Secrets Manager, and local EBS-backed SQLite storage.
 
 Parameters:
   VpcId:
     Type: AWS::EC2::VPC::Id
-    Description: VPC for the public load balancer and PromptWall host.
+    Description: VPC for the public load balancer and RedactWall host.
   PublicSubnetIds:
     Type: List<AWS::EC2::Subnet::Id>
     Description: At least two public subnets for the internet-facing load balancer.
   InstanceSubnetId:
     Type: AWS::EC2::Subnet::Id
-    Description: Subnet for the PromptWall host. It must have outbound internet access to pull the image.
+    Description: Subnet for the RedactWall host. It must have outbound internet access to pull the image.
   ImageUri:
     Type: String
     MinLength: 1
@@ -18,7 +18,7 @@ Parameters:
   SecretArn:
     Type: String
     MinLength: 1
-    Description: Secrets Manager secret ARN with ADMIN_PASSWORD, ADMIN_TOTP_SECRET, SENTINEL_SECRET, SENTINEL_DATA_KEY, and INGEST_API_KEY.
+    Description: Secrets Manager secret ARN with ADMIN_PASSWORD, ADMIN_TOTP_SECRET, REDACTWALL_SECRET, REDACTWALL_DATA_KEY, and INGEST_API_KEY.
   TenantId:
     Type: String
     AllowedPattern: '^[a-z0-9][a-z0-9_-]{1,62}$'
@@ -45,7 +45,7 @@ Parameters:
     Default: 40
     MinValue: 20
     MaxValue: 500
-    Description: Encrypted root EBS volume size. SQLite state lives under /var/lib/promptwall.
+    Description: Encrypted root EBS volume size. SQLite state lives under /var/lib/redactwall.
   AmiId:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
     Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
@@ -59,7 +59,7 @@ Resources:
   AlbSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: PromptWall ALB ingress
+      GroupDescription: RedactWall ALB ingress
       VpcId: !Ref VpcId
       SecurityGroupIngress:
         - IpProtocol: tcp
@@ -80,7 +80,7 @@ Resources:
   AppSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: PromptWall app host ingress from ALB only
+      GroupDescription: RedactWall app host ingress from ALB only
       VpcId: !Ref VpcId
       SecurityGroupIngress:
         - IpProtocol: tcp
@@ -94,7 +94,7 @@ Resources:
   AppLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Sub /promptwall/${TenantId}
+      LogGroupName: !Sub /redactwall/${TenantId}
       RetentionInDays: 90
 
   InstanceRole:
@@ -111,7 +111,7 @@ Resources:
         - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
         - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
       Policies:
-        - PolicyName: PromptWallRuntimeAccess
+        - PolicyName: RedactWallRuntimeAccess
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
@@ -153,8 +153,8 @@ Resources:
             DeleteOnTermination: false
       Tags:
         - Key: Name
-          Value: !Sub promptwall-${TenantId}
-        - Key: PromptWallTenant
+          Value: !Sub redactwall-${TenantId}
+        - Key: RedactWallTenant
           Value: !Ref TenantId
       UserData:
         Fn::Base64: !Sub |
@@ -165,58 +165,58 @@ Resources:
           dnf install -y docker awscli jq aws-cfn-bootstrap
           systemctl enable --now docker
 
-          mkdir -p /var/lib/promptwall /etc/promptwall
-          chmod 700 /etc/promptwall
-          chown 1000:1000 /var/lib/promptwall
+          mkdir -p /var/lib/redactwall /etc/redactwall
+          chmod 700 /etc/redactwall
+          chown 1000:1000 /var/lib/redactwall
 
           SECRET_JSON=$(aws secretsmanager get-secret-value --secret-id '${SecretArn}' --region '${AWS::Region}' --query SecretString --output text)
           secret() { echo "$SECRET_JSON" | jq -r --arg key "$1" '.[$key] // empty'; }
 
           ADMIN_PASSWORD=$(secret ADMIN_PASSWORD)
           ADMIN_TOTP_SECRET=$(secret ADMIN_TOTP_SECRET)
-          SENTINEL_SECRET=$(secret SENTINEL_SECRET)
-          SENTINEL_DATA_KEY=$(secret SENTINEL_DATA_KEY)
+          REDACTWALL_SECRET=$(secret REDACTWALL_SECRET)
+          REDACTWALL_DATA_KEY=$(secret REDACTWALL_DATA_KEY)
           INGEST_API_KEY=$(secret INGEST_API_KEY)
           AUDITOR_USER=$(secret AUDITOR_USER)
           AUDITOR_PASSWORD=$(secret AUDITOR_PASSWORD)
           SIEM_WEBHOOK_URL=$(secret SIEM_WEBHOOK_URL)
           SIEM_WEBHOOK_TOKEN=$(secret SIEM_WEBHOOK_TOKEN)
 
-          cat > /etc/promptwall/env <<EOF
+          cat > /etc/redactwall/env <<EOF
           PORT=4000
           NODE_ENV=production
           HTTPS=true
           COOKIE_SECURE=true
-          SENTINEL_DB_PATH=/data/sentinel.db
-          SENTINEL_POLICY_PATH=/data/policy.json
-          SENTINEL_CUSTOM_DETECTORS_PATH=/data/custom-detectors.json
-          SENTINEL_SAAS_MODE=true
-          SENTINEL_TENANT_ID=${TenantId}
-          SENTINEL_SEAT_LIMIT=${SeatLimit}
-          SENTINEL_REQUIRE_TENANT_CONTEXT=true
-          SENTINEL_REQUIRE_USER_IDENTITY=true
+          REDACTWALL_DB_PATH=/data/redactwall.db
+          REDACTWALL_POLICY_PATH=/data/policy.json
+          REDACTWALL_CUSTOM_DETECTORS_PATH=/data/custom-detectors.json
+          REDACTWALL_SAAS_MODE=true
+          REDACTWALL_TENANT_ID=${TenantId}
+          REDACTWALL_SEAT_LIMIT=${SeatLimit}
+          REDACTWALL_REQUIRE_TENANT_CONTEXT=true
+          REDACTWALL_REQUIRE_USER_IDENTITY=true
           ADMIN_USER=admin
           ADMIN_PASSWORD=$ADMIN_PASSWORD
           ADMIN_TOTP_SECRET=$ADMIN_TOTP_SECRET
           AUDITOR_USER=$AUDITOR_USER
           AUDITOR_PASSWORD=$AUDITOR_PASSWORD
-          SENTINEL_SECRET=$SENTINEL_SECRET
-          SENTINEL_DATA_KEY=$SENTINEL_DATA_KEY
+          REDACTWALL_SECRET=$REDACTWALL_SECRET
+          REDACTWALL_DATA_KEY=$REDACTWALL_DATA_KEY
           INGEST_API_KEY=$INGEST_API_KEY
-          SENTINEL_REQUEST_TIMEOUT_MS=10000
+          REDACTWALL_REQUEST_TIMEOUT_MS=10000
           SIEM_WEBHOOK_URL=$SIEM_WEBHOOK_URL
           SIEM_WEBHOOK_TOKEN=$SIEM_WEBHOOK_TOKEN
           SIEM_ALERT_MIN_RISK=25
           SIEM_ALERT_MIN_SEVERITY=3
           EOF
-          chmod 600 /etc/promptwall/env
+          chmod 600 /etc/redactwall/env
 
           REGISTRY=$(echo '${ImageUri}' | cut -d/ -f1)
           aws ecr get-login-password --region '${AWS::Region}' | docker login --username AWS --password-stdin "$REGISTRY"
           docker pull '${ImageUri}'
-          docker rm -f promptwall || true
+          docker rm -f redactwall || true
           docker run -d \
-            --name promptwall \
+            --name redactwall \
             --restart unless-stopped \
             --init \
             --read-only \
@@ -224,68 +224,68 @@ Resources:
             --cap-drop ALL \
             --security-opt no-new-privileges \
             --stop-timeout 30 \
-            --env-file /etc/promptwall/env \
+            --env-file /etc/redactwall/env \
             -p 4000:4000 \
-            -v /var/lib/promptwall:/data \
+            -v /var/lib/redactwall:/data \
             --log-driver=awslogs \
             --log-opt awslogs-region='${AWS::Region}' \
             --log-opt awslogs-group='${AppLogGroup}' \
             --log-opt awslogs-stream='${TenantId}' \
             '${ImageUri}'
 
-          mkdir -p /var/log/promptwall
-          docker cp promptwall:/app/scripts/run-evidence-pack.sh /usr/local/bin/promptwall-run-evidence-pack
-          chmod 755 /usr/local/bin/promptwall-run-evidence-pack
+          mkdir -p /var/log/redactwall
+          docker cp redactwall:/app/scripts/run-evidence-pack.sh /usr/local/bin/redactwall-run-evidence-pack
+          chmod 755 /usr/local/bin/redactwall-run-evidence-pack
 
-          if [ ! -f /var/lib/promptwall/evidence-schedule.json ]; then
-            docker cp promptwall:/app/config/evidence-schedule.example.json /var/lib/promptwall/evidence-schedule.json
+          if [ ! -f /var/lib/redactwall/evidence-schedule.json ]; then
+            docker cp redactwall:/app/config/evidence-schedule.example.json /var/lib/redactwall/evidence-schedule.json
             jq '.outDir = "/data/evidence-packs" | .generatedBy = "aws-systemd-evidence-export"' \
-              /var/lib/promptwall/evidence-schedule.json > /tmp/promptwall-evidence-schedule.json
-            mv /tmp/promptwall-evidence-schedule.json /var/lib/promptwall/evidence-schedule.json
-            chown 1000:1000 /var/lib/promptwall/evidence-schedule.json
-            chmod 600 /var/lib/promptwall/evidence-schedule.json
+              /var/lib/redactwall/evidence-schedule.json > /tmp/redactwall-evidence-schedule.json
+            mv /tmp/redactwall-evidence-schedule.json /var/lib/redactwall/evidence-schedule.json
+            chown 1000:1000 /var/lib/redactwall/evidence-schedule.json
+            chmod 600 /var/lib/redactwall/evidence-schedule.json
           fi
 
-          cat > /etc/promptwall/evidence-pack.env <<'EOF'
-          PROMPTWALL_EVIDENCE_MODE='docker'
-          PROMPTWALL_EVIDENCE_PROJECT_DIR='/app'
-          PROMPTWALL_EVIDENCE_CONFIG='/data/evidence-schedule.json'
-          PROMPTWALL_EVIDENCE_LOG='/var/log/promptwall/evidence-pack.log'
-          PROMPTWALL_EVIDENCE_CONTAINER='promptwall'
+          cat > /etc/redactwall/evidence-pack.env <<'EOF'
+          REDACTWALL_EVIDENCE_MODE='docker'
+          REDACTWALL_EVIDENCE_PROJECT_DIR='/app'
+          REDACTWALL_EVIDENCE_CONFIG='/data/evidence-schedule.json'
+          REDACTWALL_EVIDENCE_LOG='/var/log/redactwall/evidence-pack.log'
+          REDACTWALL_EVIDENCE_CONTAINER='redactwall'
           EOF
-          chmod 600 /etc/promptwall/evidence-pack.env
+          chmod 600 /etc/redactwall/evidence-pack.env
 
-          cat > /etc/systemd/system/promptwall-evidence-pack.service <<'EOF'
+          cat > /etc/systemd/system/redactwall-evidence-pack.service <<'EOF'
           [Unit]
-          Description=Generate sanitized PromptWall examiner evidence pack
+          Description=Generate sanitized RedactWall examiner evidence pack
           After=network-online.target docker.service
           Wants=network-online.target
 
           [Service]
           Type=oneshot
-          EnvironmentFile=/etc/promptwall/evidence-pack.env
-          ExecStart=/usr/local/bin/promptwall-run-evidence-pack
+          EnvironmentFile=/etc/redactwall/evidence-pack.env
+          ExecStart=/usr/local/bin/redactwall-run-evidence-pack
           User=root
           Group=root
           Nice=5
           EOF
 
-          cat > /etc/systemd/system/promptwall-evidence-pack.timer <<'EOF'
+          cat > /etc/systemd/system/redactwall-evidence-pack.timer <<'EOF'
           [Unit]
-          Description=Run sanitized PromptWall examiner evidence pack on schedule
+          Description=Run sanitized RedactWall examiner evidence pack on schedule
 
           [Timer]
           OnCalendar=quarterly
           Persistent=true
           RandomizedDelaySec=1h
-          Unit=promptwall-evidence-pack.service
+          Unit=redactwall-evidence-pack.service
 
           [Install]
           WantedBy=timers.target
           EOF
 
           systemctl daemon-reload
-          systemctl enable --now promptwall-evidence-pack.timer
+          systemctl enable --now redactwall-evidence-pack.timer
 
           /opt/aws/bin/cfn-signal --stack '${AWS::StackName}' --resource AppInstance --region '${AWS::Region}' --exit-code 0
 
@@ -298,7 +298,7 @@ Resources:
         - !Ref AlbSecurityGroup
       Subnets: !Ref PublicSubnetIds
       Tags:
-        - Key: PromptWallTenant
+        - Key: RedactWallTenant
           Value: !Ref TenantId
 
   TargetGroup:

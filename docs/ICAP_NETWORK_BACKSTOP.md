@@ -60,19 +60,19 @@ Every failure path results in a block, never a silent forward:
 Bridge logs are metadata-only JSON lines: decision, verdict, destination host,
 reason code, body byte count, and latency. Raw prompt text, request bodies,
 PII, and secrets are never logged and never appear in block responses. Prompt
-text goes to exactly one place: the local PromptWall control plane's `/api/v1/gate`,
+text goes to exactly one place: the local RedactWall control plane's `/api/v1/gate`,
 same as every other sensor.
 
 ## Running
 
-Host process (control plane already running on `SENTINEL_URL`):
+Host process (control plane already running on `REDACTWALL_URL`):
 
 ```bash
 INGEST_API_KEY=dev-ingest-key npm run icap:bridge
-# PromptWall Squid ICAP bridge (REQMOD) listening on icap://127.0.0.1:1344/reqmod
+# RedactWall Squid ICAP bridge (REQMOD) listening on icap://127.0.0.1:1344/reqmod
 ```
 
-CLI flags: `--port`, `--host`, `--sentinel`, `--key`, `--max-body-bytes`.
+CLI flags: `--port`, `--host`, `--redactwall`, `--key`, `--max-body-bytes`.
 
 Environment:
 
@@ -80,13 +80,13 @@ Environment:
 | --- | --- | --- |
 | `ICAP_BRIDGE_PORT` | `1344` | ICAP listen port |
 | `ICAP_BRIDGE_HOST` | `127.0.0.1` | ICAP listen address |
-| `SENTINEL_URL` | `http://localhost:4000` | PromptWall control plane |
+| `REDACTWALL_URL` | `http://localhost:4000` | RedactWall control plane |
 | `INGEST_API_KEY` | `dev-ingest-key` | Gate API key |
 | `ICAP_BRIDGE_MAX_BODY_BYTES` | `2097152` | Max decoded request body |
 | `ICAP_BRIDGE_MAX_HEADER_BYTES` | `16384` | Max ICAP/HTTP header block |
 | `ICAP_BRIDGE_SOCKET_TIMEOUT_MS` | `30000` | Idle socket teardown |
 | `ICAP_BRIDGE_RELEASE_WAIT_MS` | `300000` | Max hold-for-approval wait |
-| `SENTINEL_REQUEST_TIMEOUT_MS` | `10000` | Per control-plane call timeout |
+| `REDACTWALL_REQUEST_TIMEOUT_MS` | `10000` | Per control-plane call timeout |
 
 Squid deployment:
 

@@ -1,4 +1,4 @@
-# PromptWall Status
+# RedactWall Status
 
 Live working state for the production loop. Durable goals live in `PLAN.md`,
 decision rationale in `DECISIONS.md`, the product roadmap in `ROADMAP.md`, and
@@ -20,7 +20,7 @@ Roadmap references (N*/X*) point at `ROADMAP.md`.
   `console/src/views/` (typed api module + view + co-located CSS; `Queue.tsx`
   is the richest example). Carry the recently-landed legacy queue assignee
   editor and Command Center decision pivots over to the `/app` Queue/Overview.
-- WS1 A4 (after A3): cutover — flip `SENTINEL_CONSOLE_DEFAULT=app` as deploy
+- WS1 A4 (after A3): cutover — flip `REDACTWALL_CONSOLE_DEFAULT=app` as deploy
   default, serve legacy at `/legacy/` for one release, port remaining
   Playwright specs, then delete `server/public/dashboard.js`, `index.html`,
   and the feature-module files plus their asset-budget entries.
@@ -98,7 +98,7 @@ drag/drop or file-open interception inside every desktop AI app.
   O(k²)→O(k log k)); detail in `docs/SECURITY_REVIEW_2026-07.md`.
 - 2026-07-04: Browser→endpoint file-intent handoff — when the extension blocks
   an upload it cannot inspect (too large / OCR-required / unsupported), it
-  sends name+size (never bytes) through a `com.promptwall.file_intent` native
+  sends name+size (never bytes) through a `com.redactwall.file_intent` native
   messaging host that resolves the file in local staging roots and writes the
   signed metadata-only handoff so the endpoint agent scans it locally.
 - 2026-07-04: Console-parity checklist closed — inline queue reassignment
@@ -113,7 +113,7 @@ drag/drop or file-open interception inside every desktop AI app.
   views ported.
 - 2026-07-02: Safe-to-send receipts shipped (signed, prompt-free,
   `POST /api/receipts/verify`); console simplified to one navigation and one
-  title per screen; PromptWall logo/favicon.
+  title per screen; RedactWall logo/favicon.
 - 2026-06-29: Destination-scoped browser download blocking; managed browser
   text-upload inspection moved into the extension; per-user Clipboard Guard
   install path.

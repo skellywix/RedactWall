@@ -148,11 +148,11 @@ test('writer helper defaults and env parse failures are explicit', (t) => {
   const badEnv = path.join(dir, 'bad.env');
   fs.writeFileSync(badEnv, 'BROKEN LINE\n');
   const previous = {
-    SENTINEL_ENV_PATH: process.env.SENTINEL_ENV_PATH,
-    PROMPTWALL_ENV_PATH: process.env.PROMPTWALL_ENV_PATH,
+    REDACTWALL_ENV_PATH: process.env.REDACTWALL_ENV_PATH,
   };
-  delete process.env.SENTINEL_ENV_PATH;
+  delete process.env.REDACTWALL_ENV_PATH;
   delete process.env.PROMPTWALL_ENV_PATH;
+  delete process.env.SENTINEL_ENV_PATH;
   t.after(() => {
     for (const [key, value] of Object.entries(previous)) {
       if (value === undefined) delete process.env[key];

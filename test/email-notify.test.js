@@ -11,12 +11,12 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 process.env.ADMIN_PASSWORD = 'unit-pass';
-process.env.SENTINEL_SECRET = 'unit-secret-stable';
-process.env.SENTINEL_DATA_KEY = 'unit-data-key-stable';
+process.env.REDACTWALL_SECRET = 'unit-secret-stable';
+process.env.REDACTWALL_DATA_KEY = 'unit-data-key-stable';
 process.env.INGEST_API_KEY = 'unit-ingest-key';
-process.env.SENTINEL_DB_PATH = path.join(os.tmpdir(), 'ps-email-' + crypto.randomBytes(6).toString('hex') + '.db');
+process.env.REDACTWALL_DB_PATH = path.join(os.tmpdir(), 'ps-email-' + crypto.randomBytes(6).toString('hex') + '.db');
 const SUBS_PATH = path.join(os.tmpdir(), 'ps-email-subs-' + crypto.randomBytes(4).toString('hex') + '.json');
-process.env.SENTINEL_SUBSCRIPTIONS_PATH = SUBS_PATH;
+process.env.REDACTWALL_SUBSCRIPTIONS_PATH = SUBS_PATH;
 
 const email = require('../server/email');
 const subscriptions = require('../server/subscriptions');
@@ -57,14 +57,14 @@ test('send() completes an authenticated SMTP dialogue without leaking content to
   const { server, port, seen } = await fakeSmtpServer();
   try {
     const result = await email.send(
-      { to: ['approver@example.test', 'not-an-address'], subject: 'PromptWall: prompt held', text: 'Risk 60. Entities: US_SSN.\n.leading dot line' },
-      { SMTP_HOST: '127.0.0.1', SMTP_PORT: String(port), SMTP_SECURE: 'none', SMTP_USER: 'mailer', SMTP_PASS: 'mailer-pass', SMTP_FROM: 'alerts@promptwall.test' },
+      { to: ['approver@example.test', 'not-an-address'], subject: 'RedactWall: prompt held', text: 'Risk 60. Entities: US_SSN.\n.leading dot line' },
+      { SMTP_HOST: '127.0.0.1', SMTP_PORT: String(port), SMTP_SECURE: 'none', SMTP_USER: 'mailer', SMTP_PASS: 'mailer-pass', SMTP_FROM: 'alerts@redactwall.test' },
     );
     assert.deepStrictEqual(result, { ok: true });
-    assert.ok(seen.commands.includes('MAIL FROM:<alerts@promptwall.test>'));
+    assert.ok(seen.commands.includes('MAIL FROM:<alerts@redactwall.test>'));
     assert.ok(seen.commands.includes('RCPT TO:<approver@example.test>'));
     assert.ok(!seen.commands.some((c) => c.includes('not-an-address')), 'invalid recipients filtered');
-    assert.ok(seen.data.includes('Subject: PromptWall: prompt held'));
+    assert.ok(seen.data.includes('Subject: RedactWall: prompt held'));
     assert.ok(seen.data.includes('..leading dot line'), 'dot-stuffed per RFC 5321');
   } finally {
     server.close();

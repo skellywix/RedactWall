@@ -138,7 +138,7 @@ function fetchDatabaseRows(args = {}, opts = {}) {
   const db = opts.db || openReadonlyDatabase(opts);
   const close = !opts.db;
   try {
-    const wrapped = `SELECT * FROM (${sql}) AS promptwall_readonly LIMIT ?`;
+    const wrapped = `SELECT * FROM (${sql}) AS redactwall_readonly LIMIT ?`;
     const rows = normalizeRows(db.prepare(wrapped).all(limit + 1));
     const truncated = rows.length > limit;
     const visibleRows = truncated ? rows.slice(0, limit) : rows;

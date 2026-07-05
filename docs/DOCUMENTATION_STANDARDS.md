@@ -1,6 +1,6 @@
 # Documentation Standards
 
-How PromptWall documentation is organized, written, and kept honest. Based on
+How RedactWall documentation is organized, written, and kept honest. Based on
 the Diátaxis framework (tutorials / how-to / reference / explanation), the
 Google developer documentation style guide, and GitLab's docs-as-code
 workflow.
@@ -22,7 +22,7 @@ workflow.
 Each page is exactly one of these. Do not mix "why" into a how-to or
 narrative into reference.
 
-| Type | Purpose | PromptWall examples |
+| Type | Purpose | RedactWall examples |
 |------|---------|---------------------|
 | Tutorial | Learning by doing, start to finish | `DEMO_INSTALL_GUIDE.md`, `docs/DEMO_TECHNICIAN_SETUP.md` |
 | How-to | One task, for a competent operator | `docs/DEPLOYMENT.md` sections, `docs/MANAGED_EXTENSION_DEPLOYMENT.md`, `docs/EVIDENCE_PACK_TASK.md` |

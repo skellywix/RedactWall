@@ -1,6 +1,6 @@
 # Microsoft Teams MCP Connector
 
-PromptWall ships a first-party Microsoft Teams connector for MCP runtimes. It
+RedactWall ships a first-party Microsoft Teams connector for MCP runtimes. It
 reads bounded Teams channel or chat messages through Microsoft Graph, converts
 message bodies to plain text, then calls `sanitizeTeamsChannelMessages()` or
 `sanitizeTeamsChatMessages()` before returning a tool result to the model.
@@ -47,7 +47,7 @@ const fetchChannelMessages = createTeamsChannelMessagesTool({
   accessToken: process.env.TEAMS_GRAPH_ACCESS_TOKEN,
   agent: 'claude-desktop',
   guardOptions: {
-    server: process.env.SENTINEL_URL,
+    server: process.env.REDACTWALL_URL,
     key: process.env.INGEST_API_KEY,
   },
 });
@@ -62,7 +62,7 @@ const fetchChatMessages = createTeamsChatMessagesTool({
   accessToken: process.env.TEAMS_GRAPH_ACCESS_TOKEN,
   agent: 'claude-desktop',
   guardOptions: {
-    server: process.env.SENTINEL_URL,
+    server: process.env.REDACTWALL_URL,
     key: process.env.INGEST_API_KEY,
   },
 });
@@ -79,7 +79,7 @@ const health = teamsConnectorHealth({
 ```
 
 `channelMessages` and `chatMessages` are safe to return to the MCP client. If
-PromptWall detects sensitive content, the result contains a single redacted text
+RedactWall detects sensitive content, the result contains a single redacted text
 block. The control plane receives sanitized evidence only: redacted text, masked
 findings, categories, risk metadata, destination label, and sensor version.
 

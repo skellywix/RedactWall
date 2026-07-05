@@ -10,7 +10,7 @@ Makes the code you receive the second draft, not the first. This is quality/simp
 ## Optional upstream skill
 Official Anthropic `simplify`: `npx skills add anthropics/claude-code --skill simplify`. (Install yourself.) This file is self-contained.
 
-## Review standards (PromptWall)
+## Review standards (RedactWall)
 After completing any implementation, review changed code for:
 - Functions longer than ~30 lines (likely doing too much) → extract.
 - Logic duplicated more than twice → pull into a shared helper. (E.g. detector boilerplate belongs in `detection-engine/detect.js`, not copied per sensor.)

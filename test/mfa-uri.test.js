@@ -26,14 +26,14 @@ test('builds a standard otpauth uri for authenticator enrollment', () => {
   const uri = new URL(otpauthUri({
     secret: 'jbsw y3dp-ehpk3pxp=',
     account: 'alice@example.test',
-    issuer: 'PromptWall Demo',
+    issuer: 'RedactWall Demo',
   }));
 
   assert.strictEqual(uri.protocol, 'otpauth:');
   assert.strictEqual(uri.hostname, 'totp');
-  assert.strictEqual(decodeURIComponent(uri.pathname), '/PromptWall Demo:alice@example.test');
+  assert.strictEqual(decodeURIComponent(uri.pathname), '/RedactWall Demo:alice@example.test');
   assert.strictEqual(uri.searchParams.get('secret'), 'JBSWY3DPEHPK3PXP');
-  assert.strictEqual(uri.searchParams.get('issuer'), 'PromptWall Demo');
+  assert.strictEqual(uri.searchParams.get('issuer'), 'RedactWall Demo');
   assert.strictEqual(uri.searchParams.get('algorithm'), 'SHA1');
   assert.strictEqual(uri.searchParams.get('digits'), '6');
   assert.strictEqual(uri.searchParams.get('period'), '30');
@@ -41,7 +41,7 @@ test('builds a standard otpauth uri for authenticator enrollment', () => {
 
 test('rejects invalid enrollment secrets and parses cli options', () => {
   assert.throws(() => otpauthUri({ secret: 'bad-*' }), /ADMIN_TOTP_SECRET/);
-  assert.match(otpauthUri({ secret: 'jbswy3dpehpk3pxp', issuer: '  ', account: '  ' }), /PromptWall%3Aadmin/);
+  assert.match(otpauthUri({ secret: 'jbswy3dpehpk3pxp', issuer: '  ', account: '  ' }), /RedactWall%3Aadmin/);
   const opts = parseArgs(['--env', 'pilot.env', '--issuer', 'Pilot CU', '--account', 'admin@pilot.test']);
   assert.match(opts.envPath, /pilot\.env$/);
   assert.strictEqual(opts.issuer, 'Pilot CU');
@@ -60,7 +60,7 @@ test('main and help can be exercised without child processes', () => {
   assert.match(logs.join('\n'), /Usage: npm run mfa:uri/);
   logs.length = 0;
 
-  const code = main(['--issuer', 'PromptWall Test'], {
+  const code = main(['--issuer', 'RedactWall Test'], {
     console: io,
     effectiveEnv: () => ({
       ADMIN_USER: 'admin@example.test',
@@ -69,7 +69,7 @@ test('main and help can be exercised without child processes', () => {
   });
   assert.strictEqual(code, 0);
   assert.match(logs.join('\n'), /Treat this MFA enrollment URI as a secret/);
-  assert.match(logs.join('\n'), /otpauth:\/\/totp\/PromptWall%20Test%3Aadmin%40example\.test/);
+  assert.match(logs.join('\n'), /otpauth:\/\/totp\/RedactWall%20Test%3Aadmin%40example\.test/);
   assert.match(logs.join('\n'), /secret=JBSWY3DPEHPK3PXP/);
   logs.length = 0;
 
@@ -98,7 +98,7 @@ test('cli reads an explicit env file and prints enrollment uri only on request',
     '--env',
     envPath,
     '--issuer',
-    'PromptWall Test',
+    'RedactWall Test',
   ], {
     cwd: path.join(__dirname, '..'),
     encoding: 'utf8',
@@ -106,9 +106,9 @@ test('cli reads an explicit env file and prints enrollment uri only on request',
   });
 
   assert.match(output, /Treat this MFA enrollment URI as a secret/);
-  assert.match(output, /otpauth:\/\/totp\/PromptWall%20Test%3Apilot-admin\?/);
+  assert.match(output, /otpauth:\/\/totp\/RedactWall%20Test%3Apilot-admin\?/);
   assert.match(output, /secret=JBSWY3DPEHPK3PXP/);
-  assert.match(output, /issuer=PromptWall\+Test/);
+  assert.match(output, /issuer=RedactWall\+Test/);
 });
 
 test('cli exits nonzero for invalid configured secret', () => {

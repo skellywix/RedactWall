@@ -1,7 +1,7 @@
 'use strict';
 require('../../server/env').loadEnv();
 /**
- * PromptWall endpoint agent (reference implementation).
+ * RedactWall endpoint agent (reference implementation).
  *
  * Catches sensitive FILES headed to desktop AI apps that a browser extension
  * cannot see. Watches a folder, extracts and detects locally using the same
@@ -9,11 +9,11 @@ require('../../server/env').loadEnv();
  * plane. Respects scanner ignore-lists.
  *
  * Usage: node agent.js [watchDir]
- *   SENTINEL_URL or PROMPTWALL_URL (default http://localhost:4000),
- *   INGEST_API_KEY or PROMPTWALL_INGEST_API_KEY (required for control-plane calls)
- *   ENDPOINT_AGENT_WATCH_DIR or PROMPTWALL_ENDPOINT_AGENT_WATCH_DIR
- *   ENDPOINT_AGENT_HANDOFF_SECRET or PROMPTWALL_ENDPOINT_AGENT_HANDOFF_SECRET enables signed native file-flow handoff events
- *   ENDPOINT_AGENT_FILE_FLOW_PROFILES or PROMPTWALL_ENDPOINT_AGENT_FILE_FLOW_PROFILES enables named extra watch roots
+ *   REDACTWALL_URL (or legacy PROMPTWALL_URL/SENTINEL_URL, default http://localhost:4000),
+ *   INGEST_API_KEY or REDACTWALL_INGEST_API_KEY (required for control-plane calls)
+ *   ENDPOINT_AGENT_WATCH_DIR or REDACTWALL_ENDPOINT_AGENT_WATCH_DIR
+ *   ENDPOINT_AGENT_HANDOFF_SECRET or REDACTWALL_ENDPOINT_AGENT_HANDOFF_SECRET enables signed native file-flow handoff events
+ *   ENDPOINT_AGENT_FILE_FLOW_PROFILES or REDACTWALL_ENDPOINT_AGENT_FILE_FLOW_PROFILES enables named extra watch roots
  */
 const fs = require('fs');
 const path = require('path');
@@ -28,10 +28,10 @@ const policyEngine = require('../../server/policy');
 const D = require('../../detection-engine/detect');
 const VERSION = require('../../package.json').version;
 
-const SERVER = process.env.SENTINEL_URL || 'http://localhost:4000';
+const SERVER = process.env.REDACTWALL_URL || 'http://localhost:4000';
 const KEY = process.env.INGEST_API_KEY || '';
 function defaultWatchDir(argv = process.argv, env = process.env) {
-  return argv[2] || env.ENDPOINT_AGENT_WATCH_DIR || env.PROMPTWALL_ENDPOINT_AGENT_WATCH_DIR || path.join(os.tmpdir(), 'promptwall-watch');
+  return argv[2] || env.ENDPOINT_AGENT_WATCH_DIR || env.REDACTWALL_ENDPOINT_AGENT_WATCH_DIR || path.join(os.tmpdir(), 'redactwall-watch');
 }
 const WATCH = defaultWatchDir();
 const HANDOFF_DIR = nativeHandoff.defaultHandoffDir();
@@ -43,10 +43,10 @@ const DEFAULT_SCANNER = {
   ignoreExtensions: ['.tmp', '.log', '.lock'],
   maxFileBytes: Math.round(6.3 * 1024 * 1024),
 };
-const REDACTION_HANDOFF_DIR = '.promptwall-redacted';
-const REDACTION_HANDOFF_SUFFIX = '.promptwall-redacted.txt';
-const LEGACY_REDACTION_HANDOFF_DIR = '.promptsentinel-redacted';
-const LEGACY_REDACTION_HANDOFF_SUFFIX = '.promptsentinel-redacted.txt';
+const REDACTION_HANDOFF_DIR = '.redactwall-redacted';
+const REDACTION_HANDOFF_SUFFIX = '.redactwall-redacted.txt';
+const LEGACY_REDACTION_HANDOFF_DIR = '.promptwall-redacted';
+const LEGACY_REDACTION_HANDOFF_SUFFIX = '.promptwall-redacted.txt';
 const POLICY_REFRESH_MS = 15 * 60 * 1000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 10000;
 const HANDOFF_RETRY_DELAY_MS = 200;
@@ -223,7 +223,7 @@ async function refreshPolicy(opts = {}) {
 }
 
 function requestTimeoutMs(opts = {}) {
-  const n = Number(opts.timeoutMs ?? process.env.SENTINEL_REQUEST_TIMEOUT_MS ?? DEFAULT_REQUEST_TIMEOUT_MS);
+  const n = Number(opts.timeoutMs ?? process.env.REDACTWALL_REQUEST_TIMEOUT_MS ?? DEFAULT_REQUEST_TIMEOUT_MS);
   if (!Number.isFinite(n)) return DEFAULT_REQUEST_TIMEOUT_MS;
   return Math.max(50, Math.min(120000, n));
 }
@@ -236,7 +236,7 @@ async function fetchWithTimeout(fetchImpl, url, options, opts = {}) {
   try {
     return await fetchImpl(url, { ...options, signal: controller.signal });
   } catch (e) {
-    if (e && e.name === 'AbortError') e.code = 'SENTINEL_TIMEOUT';
+    if (e && e.name === 'AbortError') e.code = 'REDACTWALL_TIMEOUT';
     throw e;
   } finally {
     clearTimeout(timer);
@@ -328,7 +328,7 @@ async function blockFileUpload(file, user, opts = {}) {
 
 async function blockScanUnavailable(file, user, opts = {}) {
   const label = safeFileLabel(file);
-  console.log(`[BLOCK] ${label} could not be recorded by PromptWall`);
+  console.log(`[BLOCK] ${label} could not be recorded by RedactWall`);
   await (opts.report || report)(unscannedFileEvent(
     file,
     user,
@@ -385,7 +385,7 @@ function writeRedactionHandoff(file, text, analysis, opts = {}) {
   const tokenized = D.tokenize(text || '', analysis.findings || []);
   const label = safeFileLabel(file);
   const body = [
-    'PromptWall redacted companion file',
+    'RedactWall redacted companion file',
     `Original file: ${label}`,
     `Generated: ${new Date().toISOString()}`,
     '',
@@ -641,7 +641,7 @@ function start(opts = {}) {
     ? fileFlowProfiles.normalizeFileFlowProfiles(opts.appFlowProfiles)
     : desktopAppFlow.desktopAppFlowProfiles({ watchDir });
 
-  io.log('PromptWall endpoint agent');
+  io.log('RedactWall endpoint agent');
   io.log('  watching:', watchDir);
   io.log('  file-flow profiles:', profiles.length ? profiles.map((profile) => profile.id).join(', ') : 'disabled');
   io.log('  app file-flow:', appFlowProfiles.length ? appFlowProfiles.map((profile) => profile.id).join(', ') : 'disabled');

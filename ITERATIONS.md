@@ -1,4 +1,4 @@
-# PromptWall — Iteration Log
+# RedactWall — Iteration Log
 
 A record of the self-improvement passes taken to move the project from "skeleton
 that proves the loop" toward production-ready, benchmarked against commercial AI
@@ -64,7 +64,7 @@ grew from 11 passing / 3 known-failing to **42 passing / 0 failing / 0 todo**.
 
 ## Iteration 5 — Security & ops hardening (REVIEW P2)
 - **Auth**: brute-force lockout (per user+IP), and a **stable signing secret** —
-  env `SENTINEL_SECRET`, else generated-and-persisted so sessions survive restarts;
+  env `REDACTWALL_SECRET`, else generated-and-persisted so sessions survive restarts;
   startup warns when ephemeral. Tests in `test/auth.test.js`.
 - **Output scanning**: `/api/v1/scan-response` flags PII/secret leakage in AI replies.
 - **Per-user risk**: `/api/risk` aggregates events/avg-risk/top-entities per user —
@@ -112,7 +112,7 @@ grew from 11 passing / 3 known-failing to **42 passing / 0 failing / 0 todo**.
 - Aligned the source layout around `detection-engine/`, `sensors/`, and `server/`.
 
 This iteration keeps local change quality and GitHub sync aligned to a single
-repository path: the active app repo folder (`promptwall/` in this checkout).
+repository path: the active app repo folder (`redactwall/` in this checkout).
 
 ### Test growth
 | Pass | Iteration |

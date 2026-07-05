@@ -2,12 +2,12 @@
 /**
  * Outbound event envelope adapters for SIEM/SOAR destinations.
  *
- * Each adapter turns a sanitized, prompt-free PromptWall security event into the
+ * Each adapter turns a sanitized, prompt-free RedactWall security event into the
  * exact request shape a target platform expects (endpoint suffix, auth header,
  * payload envelope). Pure functions — no I/O — so they are fully unit-testable.
  * The delivery engine (server/subscriptions.js) calls buildRequest and sends it.
  *
- * Event contract is `promptwall.security_event` schemaVersion 2: the schema-1
+ * Event contract is `redactwall.security_event` schemaVersion 2: the schema-1
  * sanitized alert plus a stable `id` (dedupe key) and `schemaVersion: 2`.
  */
 const EVENT_SCHEMA_VERSION = 2;
@@ -27,7 +27,7 @@ function epochSeconds(iso) {
 
 function summaryLine(e) {
   const detectors = (e.findings || []).map((f) => f.type).join(',') || (e.categories || []).join(',') || 'none';
-  return `PromptWall ${e.action || e.status} user=${e.user} dest=${e.destination} risk=${e.riskScore} sev=${e.maxSeverityLabel} detectors=${detectors}`;
+  return `RedactWall ${e.action || e.status} user=${e.user} dest=${e.destination} risk=${e.riskScore} sev=${e.maxSeverityLabel} detectors=${detectors}`;
 }
 
 // Splunk HTTP Event Collector — Authorization: Splunk <token>, {event, sourcetype, time}.
@@ -36,7 +36,7 @@ function splunkHec(event, dest) {
     url: joinUrl(dest.url, '/services/collector/event'),
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: 'Splunk ' + (dest.token || '') },
-    body: JSON.stringify({ event, sourcetype: 'promptwall:security_event', source: 'promptwall', time: epochSeconds(event.createdAt) }),
+    body: JSON.stringify({ event, sourcetype: 'redactwall:security_event', source: 'redactwall', time: epochSeconds(event.createdAt) }),
   };
 }
 
@@ -46,7 +46,7 @@ function datadog(event, dest) {
     url: dest.url || 'https://http-intake.logs.datadoghq.com/api/v2/logs',
     method: 'POST',
     headers: { 'content-type': 'application/json', 'dd-api-key': dest.token || '' },
-    body: JSON.stringify([{ message: JSON.stringify(event), ddsource: 'promptwall', service: 'promptwall', status: statusLevel(event), ddtags: `env:prod,action:${event.action || event.status}`, timestamp: Date.parse(event.createdAt) || Date.now() }]),
+    body: JSON.stringify([{ message: JSON.stringify(event), ddsource: 'redactwall', service: 'redactwall', status: statusLevel(event), ddtags: `env:prod,action:${event.action || event.status}`, timestamp: Date.parse(event.createdAt) || Date.now() }]),
   };
 }
 
@@ -67,7 +67,7 @@ function chronicle(event, dest) {
     url: dest.url || 'https://malachiteingestion-pa.googleapis.com/v2/unstructuredlogentries:batchCreate',
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: 'Bearer ' + (dest.token || '') },
-    body: JSON.stringify({ customer_id: dest.customerId || '', log_type: dest.logType || 'PROMPTWALL', entries: [{ log_text: JSON.stringify(event), ts_rfc3339: event.createdAt || new Date().toISOString() }] }),
+    body: JSON.stringify({ customer_id: dest.customerId || '', log_type: dest.logType || 'REDACTWALL', entries: [{ log_text: JSON.stringify(event), ts_rfc3339: event.createdAt || new Date().toISOString() }] }),
   };
 }
 
@@ -78,7 +78,7 @@ function qradarLeef(event, dest) {
     'dst=' + event.destination, 'src=' + (event.source || 'unknown'), 'risk=' + (event.riskScore || 0),
     'queryId=' + event.queryId, 'devTime=' + (event.createdAt || new Date().toISOString()),
   ].join('\t');
-  const leef = `LEEF:2.0|PromptWall|ControlPlane|1.0|${event.action || event.status}|\t|${attrs}`;
+  const leef = `LEEF:2.0|RedactWall|ControlPlane|1.0|${event.action || event.status}|\t|${attrs}`;
   return { url: dest.url, method: 'POST', headers: { 'content-type': 'text/plain' }, body: leef };
 }
 
@@ -90,7 +90,7 @@ function slack(event, dest) {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ text, blocks: [
-      { type: 'section', text: { type: 'mrkdwn', text: '*PromptWall security event*\n' + summaryLine(event) } },
+      { type: 'section', text: { type: 'mrkdwn', text: '*RedactWall security event*\n' + summaryLine(event) } },
       { type: 'section', fields: [
         { type: 'mrkdwn', text: `*Action:*\n${event.action || event.status}` },
         { type: 'mrkdwn', text: `*Risk:*\n${event.riskScore} (${event.maxSeverityLabel})` },
@@ -110,7 +110,7 @@ function teams(event, dest) {
     body: JSON.stringify({ type: 'message', attachments: [{ contentType: 'application/vnd.microsoft.card.adaptive', content: {
       $schema: 'http://adaptivecards.io/schemas/adaptive-card.json', type: 'AdaptiveCard', version: '1.4',
       body: [
-        { type: 'TextBlock', size: 'Medium', weight: 'Bolder', text: 'PromptWall security event' },
+        { type: 'TextBlock', size: 'Medium', weight: 'Bolder', text: 'RedactWall security event' },
         { type: 'TextBlock', wrap: true, text: summaryLine(event) },
         { type: 'FactSet', facts: [
           { title: 'Action', value: String(event.action || event.status) },
@@ -133,7 +133,7 @@ function webhook(event, dest) {
 // OpenTelemetry OTLP/HTTP (JSON) logs. Maps a sanitized event to a LogRecord.
 // int64 fields (timeUnixNano, intValue) MUST be JSON strings per the proto3
 // JSON mapping, or strict collectors reject the payload. Attributes use the
-// promptwall.* namespace (not the still-evolving gen_ai.*) and carry only
+// redactwall.* namespace (not the still-evolving gen_ai.*) and carry only
 // label-shaped metadata — never masked values or reasons.
 function otlpAttr(key, value) {
   if (typeof value === 'number') {
@@ -162,17 +162,17 @@ function otlp(event, dest) {
     severityText: sev.text,
     body: { stringValue: summaryLine(event) },
     attributes: [
-      otlpAttr('promptwall.event_type', 'security_event'),
-      otlpAttr('promptwall.action', event.action || event.status || ''),
-      otlpAttr('promptwall.query_id', event.queryId || ''),
-      otlpAttr('promptwall.schema_version', event.schemaVersion || 2),
+      otlpAttr('redactwall.event_type', 'security_event'),
+      otlpAttr('redactwall.action', event.action || event.status || ''),
+      otlpAttr('redactwall.query_id', event.queryId || ''),
+      otlpAttr('redactwall.schema_version', event.schemaVersion || 2),
       otlpAttr('enduser.id', event.user || ''),
-      otlpAttr('promptwall.destination', event.destination || ''),
-      otlpAttr('promptwall.source', event.source || ''),
-      otlpAttr('promptwall.channel', event.channel || ''),
-      otlpAttr('promptwall.risk_score', event.riskScore || 0),
-      otlpAttr('promptwall.max_severity', event.maxSeverity || 0),
-      otlpAttr('promptwall.finding_types', (event.findings || []).map((f) => f.type).join(',')),
+      otlpAttr('redactwall.destination', event.destination || ''),
+      otlpAttr('redactwall.source', event.source || ''),
+      otlpAttr('redactwall.channel', event.channel || ''),
+      otlpAttr('redactwall.risk_score', event.riskScore || 0),
+      otlpAttr('redactwall.max_severity', event.maxSeverity || 0),
+      otlpAttr('redactwall.finding_types', (event.findings || []).map((f) => f.type).join(',')),
     ],
   };
   const headers = { 'content-type': 'application/json' };
@@ -183,8 +183,8 @@ function otlp(event, dest) {
     headers,
     body: JSON.stringify({
       resourceLogs: [{
-        resource: { attributes: [otlpAttr('service.name', dest.serviceName || 'promptwall')] },
-        scopeLogs: [{ scope: { name: 'promptwall.subscriptions' }, logRecords: [record] }],
+        resource: { attributes: [otlpAttr('service.name', dest.serviceName || 'redactwall')] },
+        scopeLogs: [{ scope: { name: 'redactwall.subscriptions' }, logRecords: [record] }],
       }],
     }),
   };

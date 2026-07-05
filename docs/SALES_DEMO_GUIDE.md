@@ -1,6 +1,6 @@
-# PromptWall Sales Demo Guide
+# RedactWall Sales Demo Guide
 
-This guide is for the person presenting PromptWall to a buyer. It keeps the demo
+This guide is for the person presenting RedactWall to a buyer. It keeps the demo
 focused on the business problem: regulated teams want to say yes to AI tools
 without letting member, patient, cardholder, customer, source code, contract, or
 credential data leave the institution.
@@ -15,10 +15,10 @@ This section is generated from the app by `npm run docs:demo-guide`. Do not hand
 
 | Source | Current value |
 | --- | --- |
-| App package | `promptwall@0.3.0` |
-| Active repo folder | `promptwall` |
+| App package | `redactwall@0.3.0` |
+| Active repo folder | `redactwall` |
 | Server entrypoint | `server/app.js` |
-| Browser extension | `PromptWall - AI Data Guard` version `0.3.0` |
+| Browser extension | `RedactWall - AI Data Guard` version `0.3.0` |
 | Default enforcement mode | `block` |
 | Block thresholds | severity `2`, risk score `20` |
 | Raw approval retention | enabled for `30` day(s) |
@@ -112,7 +112,7 @@ This section is generated from the app by `npm run docs:demo-guide`. Do not hand
 
 ## Positioning
 
-PromptWall is the guardrail between employees and AI tools. It inspects typed
+RedactWall is the guardrail between employees and AI tools. It inspects typed
 prompts, pasted text, uploaded files, endpoint file flows, and MCP tool output
 before sensitive data reaches a model. The buyer should leave believing three
 things:
@@ -124,7 +124,7 @@ things:
 The short version:
 
 ```text
-PromptWall lets regulated companies allow AI tools without losing control of
+RedactWall lets regulated companies allow AI tools without losing control of
 customer data. It catches sensitive prompts and files locally, applies a simple
 policy, and gives Security Admins an examiner-ready audit trail.
 ```
@@ -175,7 +175,7 @@ tenant identity, and managed extension deployment.
 | --- | --- | --- |
 | 0:00-3:00 | Problem framing | Make the risk obvious and specific. |
 | 3:00-5:00 | Product model | Three sensors, one control plane, one policy. |
-| 5:00-8:00 | Benign prompt | Show PromptWall is not just blocking everything. |
+| 5:00-8:00 | Benign prompt | Show RedactWall is not just blocking everything. |
 | 8:00-13:00 | SSN block | Prove the core leak is stopped before send. |
 | 13:00-17:00 | Admin queue and audit | Show accountability and review controls. |
 | 17:00-21:00 | Justify and redact | Show productivity-friendly modes. |
@@ -203,7 +203,7 @@ Use this or adapt it:
 ```text
 Every employee now has a box where they can paste member data, loan files,
 contracts, credentials, and source code. Blocking all AI is bad for productivity,
-but allowing everything creates a compliance hole. PromptWall is the middle
+but allowing everything creates a compliance hole. RedactWall is the middle
 path: inspect the prompt or file before it leaves, apply a simple policy, and
 keep an audit trail that security and compliance can trust.
 ```
@@ -249,8 +249,8 @@ an auto loan.
 
 Expected:
 
-- PromptWall blocks before the prompt is sent.
-- The user sees the PromptWall banner.
+- RedactWall blocks before the prompt is sent.
+- The user sees the RedactWall banner.
 - The banner gives a safe substitute, such as a masked member ID or synthetic
   example, so the user learns how to continue without leaking data.
 - The dashboard shows a pending item.
@@ -261,7 +261,7 @@ Expected:
 Talk track:
 
 ```text
-This is the moment the leak normally happens. PromptWall stops it before the
+This is the moment the leak normally happens. RedactWall stops it before the
 employee sends it to the AI tool.
 ```
 
@@ -273,9 +273,9 @@ the control plane.
 These screenshots come from the real unpacked Chrome extension running against
 controlled ChatGPT and Poe fixtures:
 
-![PromptWall blocking a synthetic SSN in a ChatGPT fixture](assets/demo/chatgpt-blocked.png)
+![RedactWall blocking a synthetic SSN in a ChatGPT fixture](assets/demo/chatgpt-blocked.png)
 
-![PromptWall blocking the same synthetic SSN through a Poe-style send button](assets/demo/poe-blocked.png)
+![RedactWall blocking the same synthetic SSN through a Poe-style send button](assets/demo/poe-blocked.png)
 
 Refresh them with:
 
@@ -382,14 +382,14 @@ this internal and do not forward.
 
 Expected:
 
-- PromptWall blocks or holds the prompt.
+- RedactWall blocks or holds the prompt.
 - It does not send category-only confidential content raw because there is no
   structured value to tokenize.
 
 Talk track:
 
 ```text
-Keyword filters miss this kind of business context. PromptWall treats it as
+Keyword filters miss this kind of business context. RedactWall treats it as
 sensitive even without an SSN or card number.
 ```
 
@@ -404,7 +404,7 @@ the institution.
 
 Expected:
 
-- PromptWall detects `CANARY_TOKEN`.
+- RedactWall detects `CANARY_TOKEN`.
 - The event is treated as critical.
 - Alerts and evidence exports show masked metadata only.
 
@@ -435,7 +435,7 @@ Set-Content -LiteralPath .\demo-files\loan-summary.txt -Value "Loan file for mem
 In ChatGPT or Claude:
 
 1. Drag `demo-files\loan-summary.txt` into the chat composer.
-2. Show PromptWall intercepting the upload attempt.
+2. Show RedactWall intercepting the upload attempt.
 3. Show the dashboard event.
 
 Expected:
@@ -451,7 +451,7 @@ Expected:
 Talk track:
 
 ```text
-People leak data in files as often as prompts. PromptWall covers the upload path
+People leak data in files as often as prompts. RedactWall covers the upload path
 too, not just typed text.
 ```
 
@@ -465,7 +465,7 @@ Show:
 - The watched folder.
 - A synthetic sensitive file dropped into the folder.
 - A dashboard event from `endpoint_agent`.
-- A `.promptwall-redacted` companion file in redact mode for structured-only
+- A `.redactwall-redacted` companion file in redact mode for structured-only
   findings.
 
 Talk track:
@@ -535,8 +535,8 @@ Open it only after logging into the dashboard.
 
 | Objection | Response |
 | --- | --- |
-| We already block AI tools. | Blocking everything protects data but loses productivity. PromptWall lets approved use continue with controls. |
-| We already have DLP. | Traditional DLP is broader and heavier. PromptWall is focused on AI prompts, uploads, approvals, and examiner evidence. |
+| We already block AI tools. | Blocking everything protects data but loses productivity. RedactWall lets approved use continue with controls. |
+| We already have DLP. | Traditional DLP is broader and heavier. RedactWall is focused on AI prompts, uploads, approvals, and examiner evidence. |
 | Will this send all prompts to your server? | Detection runs locally in the sensor path. Server records are redacted and masked for normal events. Held approval records can retain encrypted raw text only if policy allows it. |
 | What about false positives? | Detection quality is measured with `npm run eval`; the current gate requires zero benign false positives in the held-out eval set. |
 | What about desktop AI apps? | The endpoint agent covers watched file flows and the native handoff contract. It is not a kernel driver, and that simplicity helps deployment. |
@@ -579,7 +579,7 @@ Before the call:
 
 During the call:
 
-- Say what PromptWall stops before showing UI.
+- Say what RedactWall stops before showing UI.
 - Show benign allow first.
 - Show block before dashboard.
 - Show dashboard evidence before policy depth.

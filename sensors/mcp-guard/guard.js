@@ -1,7 +1,7 @@
 'use strict';
 require('../../server/env').loadEnv();
 /**
- * PromptWall MCP guard (reference implementation).
+ * RedactWall MCP guard (reference implementation).
  *
  * Sits between an MCP server and the model. When an AI agent pulls a document or
  * record through a tool call (SharePoint, Drive, a database), the guard scans
@@ -14,7 +14,7 @@ require('../../server/env').loadEnv();
 const D = require('../../detection-engine/detect');
 const VERSION = require('../../package.json').version;
 
-const SERVER = process.env.SENTINEL_URL || 'http://localhost:4000';
+const SERVER = process.env.REDACTWALL_URL || 'http://localhost:4000';
 const KEY = process.env.INGEST_API_KEY || '';
 const POLICY_REFRESH_MS = 15 * 60 * 1000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 10000;
@@ -70,7 +70,7 @@ function detectionOptions(policy = detectionPolicy) {
 }
 
 function requestTimeoutMs(opts = {}) {
-  const n = Number(opts.timeoutMs ?? process.env.SENTINEL_REQUEST_TIMEOUT_MS ?? DEFAULT_REQUEST_TIMEOUT_MS);
+  const n = Number(opts.timeoutMs ?? process.env.REDACTWALL_REQUEST_TIMEOUT_MS ?? DEFAULT_REQUEST_TIMEOUT_MS);
   if (!Number.isFinite(n)) return DEFAULT_REQUEST_TIMEOUT_MS;
   return Math.max(50, Math.min(120000, n));
 }
@@ -83,7 +83,7 @@ async function fetchWithTimeout(fetchImpl, url, options, opts = {}) {
   try {
     return await fetchImpl(url, { ...(options || {}), signal: controller.signal });
   } catch (e) {
-    if (e && e.name === 'AbortError') e.code = 'SENTINEL_TIMEOUT';
+    if (e && e.name === 'AbortError') e.code = 'REDACTWALL_TIMEOUT';
     throw e;
   } finally {
     clearTimeout(timer);

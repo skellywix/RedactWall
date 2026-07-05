@@ -60,7 +60,7 @@ async function runFireDrill({ baseUrl, ingestKey, fetchImpl = fetch, token = mak
 async function main(argv = process.argv.slice(2), deps = {}) {
   const io = deps.console || console;
   const run = deps.runFireDrill || runFireDrill;
-  const baseUrl = argv[0] || process.env.SENTINEL_URL || 'http://localhost:4000';
+  const baseUrl = argv[0] || process.env.REDACTWALL_URL || 'http://localhost:4000';
   const result = await run({ baseUrl });
   io.log(`FIRE_DRILL_OK ${result.id || ''} decision=${result.decision} status=${result.status || 'unknown'} risk=${result.riskScore}`);
   return result;

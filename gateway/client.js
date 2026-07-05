@@ -2,7 +2,7 @@
 /**
  * Control-plane client for the AI Gateway.
  *
- * Wraps the PromptWall sensor API (/api/v1/gate, /api/v1/scan-response,
+ * Wraps the RedactWall sensor API (/api/v1/gate, /api/v1/scan-response,
  * /api/v1/rehydrate). Every call carries the ingest key. The gateway treats a
  * network/timeout failure as FAIL CLOSED: gate() returns a block decision so a
  * prompt cannot reach upstream when the control plane is unreachable.
