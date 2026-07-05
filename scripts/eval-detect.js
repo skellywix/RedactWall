@@ -18,13 +18,16 @@ const path = require('path');
 const D = require('../detection-engine/detect');
 
 const FIXTURE = path.join(__dirname, '..', 'test', 'fixtures', 'semantic-eval.json');
-const SEM_CATS = ['CONFIDENTIAL_BUSINESS', 'SOURCE_CODE', 'LEGAL_CONTRACT', 'CREDENTIALS', 'PROMPT_ATTACK'];
+const SEM_CATS = ['CONFIDENTIAL_BUSINESS', 'SOURCE_CODE', 'LEGAL_CONTRACT', 'CREDENTIALS', 'PROMPT_ATTACK', 'HEALTH_RECORD', 'FINANCIAL_STATEMENT', 'TAX_FILING', 'HR_RECORD'];
 
 // Minimum acceptable quality. A DLP control that cries wolf gets switched off, so
 // benign false positives are the hard gate; recall floors keep real leaks caught.
 const FLOORS = {
-  semanticPrecision: 0.90, // per category, over examples that fired it
-  semanticRecall: 0.70,    // per category, over examples labeled with it
+  // Raised from 0.90/0.70 after the corpus grew to 500+ decontaminated cases
+  // (measured P and R are 1.00 per category, so 0.95/0.80 keeps >=15pt margin
+  // while catching real regressions). Zero-FP floors are the hard gate.
+  semanticPrecision: 0.95, // per category, over examples that fired it
+  semanticRecall: 0.80,    // per category, over examples labeled with it
   semanticBenignFP: 0,     // benign prompts must trigger NOTHING
   structuredRecall: 0.95,  // tested PII types must be caught
   structuredBaitFP: 0,     // ordinary ids must not fire a tested PII type
@@ -127,7 +130,16 @@ function report(r) {
   return L.join('\n');
 }
 
-function summaryJson(r) {
+function corpusCounts(fixture) {
+  const data = fixture || JSON.parse(fs.readFileSync(FIXTURE, 'utf8'));
+  const semanticPositives = data.semantic.filter((e) => (e.labels || []).length).length;
+  const benign = data.semantic.length - semanticPositives;
+  const structuredPositives = data.structured.filter((e) => (e.types || []).length).length;
+  const bait = data.structured.length - structuredPositives;
+  return { semanticPositives, benign, structuredPositives, bait, total: data.semantic.length + data.structured.length };
+}
+
+function summaryJson(r, fixture) {
   return {
     semantic: r.semantic,
     structured: r.structured,
@@ -135,6 +147,7 @@ function summaryJson(r) {
     microStruct: r.microStruct,
     benignFPs: r.benignFPs.length,
     baitFPs: r.baitFPs.length,
+    counts: corpusCounts(fixture),
   };
 }
 
@@ -156,4 +169,4 @@ function main(argv = process.argv.slice(2), deps = {}) {
 
 if (require.main === module) main();
 
-module.exports = { evaluate, failures, main, report, summaryJson, FLOORS, SEM_CATS };
+module.exports = { evaluate, failures, main, report, summaryJson, corpusCounts, FLOORS, SEM_CATS };

@@ -22,6 +22,7 @@ Use this index when you know the job but not the file name.
 | Monitor-only AI chat proxy lab | `AI_CHAT_DLP_PROXY_LAB.md` |
 | Enforced AI LLM Gateway, shared limiter, and HA compose | `AI_LLM_GATEWAY.md` |
 | Endpoint agent, MCP guard, Docker, secrets, health checks | `DEPLOYMENT.md` |
+| Agent hooks for Claude Code (prompts, shell, MCP tool calls) | `AGENT_HOOKS.md` |
 | Evidence pack schedule automation | `EVIDENCE_PACK_TASK.md` |
 | Security trust package export | `SECURITY_TRUST_PACKAGE.md` |
 
@@ -34,6 +35,7 @@ Use this index when you know the job but not the file name.
 | Console access roles and titles | `ACCESS_ROLES.md` |
 | Scoped policy and time-bound exceptions | `POLICY_SCOPES.md` |
 | Approval ownership, notifications, and SLA escalation | `APPROVAL_ROUTING.md` |
+| Developer REST API (`/api/v1`) reference + OpenAPI spec | `API_REFERENCE.md` |
 
 ## MCP And Connectors
 
@@ -54,6 +56,8 @@ Use this index when you know the job but not the file name.
 | Product roadmap | `../ROADMAP.md` |
 | Competitive positioning and product direction | `COMPETITIVE_ALIGNMENT.md` |
 | Feature benchmark vs. market leaders | `COMPETITIVE_BENCHMARK_2026.md` |
+| Sales battlecard vs. Nightfall AI (internal) | `BATTLECARD_NIGHTFALL.md` |
+| Detection latency and accuracy benchmarks | `DETECTION_BENCHMARKS.md` |
 | Vendor-risk security trust package | `SECURITY_TRUST_PACKAGE.md` |
 | Architecture, crypto inventory, threat model | `SECURITY_WHITEPAPER.md` |
 | Security incident response runbook | `INCIDENT_RESPONSE.md` |

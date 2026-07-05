@@ -65,6 +65,10 @@
     "release:extension:check": "node scripts/check-extension-release.js",
     "package:endpoint-agent": "node scripts/package-endpoint-agent.js",
     "package:mcp-guard": "node scripts/package-mcp-guard.js",
+    "package:agent-hooks": "node scripts/package-agent-hooks.js",
+    "license:issue": "node scripts/license-issue.js",
+    "agent-hooks:install": "node scripts/install-agent-hooks.js",
+    "agent-hooks:check": "node scripts/check-agent-hooks-install.js",
     "docs:demo-guide": "node scripts/update-demo-guide.js",
     "docs:demo-guide:check": "node scripts/update-demo-guide.js --check",
     "endpoint:check": "node scripts/check-endpoint-install.js",
@@ -81,6 +85,7 @@
     "sync-check": "node scripts/sync-check.js",
     "ai-domains:check": "node scripts/check-ai-domain-coverage.js",
     "eval": "node scripts/eval-detect.js",
+    "bench": "node scripts/bench-detect.js",
     "rotate:data-key": "node scripts/rotate-data-key.js",
     "backup:drill": "node scripts/backup-drill.js",
     "backup:install-task": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/install-backup-task.ps1",
@@ -101,5 +106,8 @@
   "devDependencies": {
     "@playwright/test": "^1.61.1",
     "c8": "^11.0.0"
+  },
+  "optionalDependencies": {
+    "tesseract.js": "^6.0.1"
   }
 }

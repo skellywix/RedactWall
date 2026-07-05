@@ -122,6 +122,10 @@ const sensorMetadataSchema = z.object({
   platform: optionalString(80),
 }).strict();
 
+const licenseInstallSchema = z.object({
+  license: z.string().min(1).max(20000),
+}).strict();
+
 const heartbeatCheckSchema = z.object({
   id: z.string().min(1).max(80).regex(SENSOR_ID),
   ok: z.boolean(),
@@ -174,6 +178,16 @@ const gateSchema = z.object({
   clientMaxSeverity: severitySchema.optional(),
   clientMaxSeverityLabel: z.enum(['none', 'low', 'medium', 'high', 'critical']).optional(),
   clientPreRedacted: z.boolean().optional(),
+  // Personal-vs-corporate account signal (ROADMAP N4). ENUM ONLY — the strict
+  // schema makes it structurally impossible to send a raw account email to the
+  // control plane; the sensor classifies locally and reports the result.
+  clientAccount: z.object({
+    type: z.enum(['personal', 'corporate', 'unknown']),
+    signal: z.enum(['workspace_badge', 'org_email_domain', 'personal_email_domain', 'consumer_badge', 'unrecognized_email_domain', 'none']),
+  }).strict().optional(),
+  // Sanitized origin-app id for data-lineage (e.g. clipboard copied from a
+  // core-banking client). Process-name id only — never a title/path/content.
+  originApp: z.string().regex(/^[a-z][a-z0-9_]{0,39}$/).optional(),
 }).strict();
 
 const rehydrateSchema = z.object({
@@ -217,7 +231,9 @@ const heartbeatSchema = z.object({
   source: stringDefault('api'),
   orgId: nullableString(),
   sensor: sensorMetadataSchema.optional(),
-  checks: z.array(heartbeatCheckSchema).max(40).optional(),
+  // Raised 40 -> 80: installs already emit ~25-32 checks, and the endpoint MCP
+  // inventory adds an mcp_inventory summary plus up to 12 per-server checks.
+  checks: z.array(heartbeatCheckSchema).max(80).optional(),
 }).strict();
 
 const loginSchema = z.object({
@@ -487,10 +503,11 @@ const policyMatcherFields = {
   sources: z.array(sensorIdSchema).max(40).optional(),
   channels: z.array(sensorIdSchema).max(40).optional(),
   destinations: z.array(destinationLabelSchema).max(40).optional(),
+  accountTypes: z.array(z.enum(['personal', 'corporate', 'unknown'])).max(3).optional(),
 };
 
 function hasPolicyMatcher(rule) {
-  return ['users', 'groups', 'orgIds', 'detectors', 'categories', 'sources', 'channels', 'destinations']
+  return ['users', 'groups', 'orgIds', 'detectors', 'categories', 'sources', 'channels', 'destinations', 'accountTypes']
     .some((key) => Array.isArray(rule[key]) && rule[key].length);
 }
 
@@ -567,6 +584,10 @@ const policyUpdateSchema = z.object({
   mcpBlockedTools: z.array(mcpToolLabelSchema).max(LIMITS.policyListItems).optional(),
   mcpApprovalRequiredTools: z.array(mcpToolLabelSchema).max(LIMITS.policyListItems).optional(),
   blockUnapprovedAiDestinations: z.boolean().optional(),
+  corporateAiAccounts: z.object({
+    orgEmailDomains: z.array(z.string().min(1).max(253)).max(40).optional(),
+    personalAccountAction: z.enum(['allow', 'coach', 'block']).optional(),
+  }).strict().optional(),
   responseScanMode: z.enum(['flag', 'redact', 'block']).optional(),
   unmanagedInstalls: z.enum(['allow', 'flag', 'block']).optional(),
   desktopCollectorDestination: z.string().min(1).max(80).regex(DESKTOP_DESTINATION_LABEL).refine((value) => value.trim().length > 0, {
@@ -640,6 +661,7 @@ module.exports = {
   validateBody,
   validationFields,
   gateSchema,
+  licenseInstallSchema,
   rehydrateSchema,
   scanFileSchema,
   scanResponseSchema,

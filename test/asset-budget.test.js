@@ -78,7 +78,9 @@ test('admin public assets stay within transfer budgets', () => {
     { path: 'server/public/login.js', maxRawBytes: 6_000, maxGzipBytes: 2_500 },
   ]);
 
-  assertWithin('admin public assets raw total', totals.rawBytes, 525_000);
+  // Raised 525k -> 528k for the Endpoint MCP Servers panel (shadow-MCP
+  // discovery), mirroring the existing Endpoint AI Tools panel.
+  assertWithin('admin public assets raw total', totals.rawBytes, 528_000);
   assertWithin('admin public assets gzip total', totals.gzipBytes, 128_000);
 });
 
@@ -102,7 +104,10 @@ test('console app bundle stays within transfer budgets', (t) => {
 
 test('browser extension assets stay within install package budgets', () => {
   assertAssetBudgets([
-    { path: 'sensors/browser-extension/lib/detect.js', maxRawBytes: 105_000, maxGzipBytes: 37_000 },
+    // Raised 105k/37k -> 112k/40k for the vendor-labeled secrets catalog
+    // (secretVendor table + expanded SECRET_KEY branches). Still tight enough
+    // to catch an accidentally committed LR model (~10KB raw each).
+    { path: 'sensors/browser-extension/lib/detect.js', maxRawBytes: 112_000, maxGzipBytes: 40_000 },
     { path: 'sensors/browser-extension/content.js', maxRawBytes: 60_000, maxGzipBytes: 16_000 },
     { path: 'sensors/browser-extension/background.js', maxRawBytes: 30_000, maxGzipBytes: 9_000 },
     { path: 'sensors/browser-extension/manifest.json', maxRawBytes: 14_000, maxGzipBytes: 2_500 },

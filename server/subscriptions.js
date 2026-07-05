@@ -109,6 +109,7 @@ function normalizeDestination(raw, index) {
     token: raw.token ? String(raw.token) : null,
     customerId: raw.customerId ? String(raw.customerId) : undefined,
     logType: raw.logType ? String(raw.logType) : undefined,
+    serviceName: raw.serviceName ? String(raw.serviceName).slice(0, 120) : undefined,
     minRisk: Number.isFinite(Number(raw.minRisk)) ? Number(raw.minRisk) : 0,
     minSeverity: Number.isFinite(Number(raw.minSeverity)) ? Number(raw.minSeverity) : 0,
     eventTypes: Array.isArray(raw.eventTypes) ? raw.eventTypes.map(String) : null,

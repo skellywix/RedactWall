@@ -24,7 +24,76 @@
   Ext.sendMessage({ type: 'getConfig' }).then((res) => {
     if (res && res.policy) POLICY = res.policy;
     if (res && typeof res.enabled === 'boolean') ENABLED = res.enabled;
+    scheduleAccountProbe();
   });
+
+  // ---- personal vs corporate account detection (ROADMAP N4) -----------------
+  // LOCAL DOM heuristics only, computed on page load and cached per tab. Only
+  // the enum { type, signal } ever leaves the page — never the account email.
+  // Runs off the keystroke hot path (load + retries + focus), so interceptSend
+  // reads a cached object and allocates nothing extra.
+  let ACCOUNT = { type: 'unknown', signal: 'none' };
+  let accountCoached = false;
+  const ACCOUNT_EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+  function probeAccount() {
+    try {
+      const A = window.PSAdapters;
+      if (!A || !A.accountMarkersFor || !A.accountMarkersFor(SITE)) return;
+      const nodes = document.querySelectorAll(
+        '[aria-label*="account" i],[data-testid*="account" i],[data-testid*="profile" i],[class*="workspace" i],[class*="account" i],header,nav',
+      );
+      const emails = new Set();
+      let badgeText = '';
+      let count = 0;
+      for (const el of nodes) {
+        if (count++ > 20) break;
+        const t = ((el.getAttribute && el.getAttribute('aria-label')) || '') + ' ' + ((el.textContent || '').slice(0, 512));
+        badgeText += ' ' + t;
+        const found = t.match(ACCOUNT_EMAIL_RE);
+        if (found) for (const e of found) emails.add(e);
+      }
+      const orgDomains = (POLICY.corporateAiAccounts && POLICY.corporateAiAccounts.orgEmailDomains) || [];
+      ACCOUNT = A.classifyAccount({ host: SITE, emails: [...emails], badgeText }, orgDomains);
+      maybeCoachAccount();
+    } catch (_) { /* best effort; stays 'unknown' */ }
+  }
+  function scheduleAccountProbe() {
+    probeAccount();
+    setTimeout(probeAccount, 2000);
+    setTimeout(probeAccount, 6000);
+    setTimeout(probeAccount, 15000);
+  }
+  let lastFocusProbe = 0;
+  if (typeof window.addEventListener === 'function') {
+    window.addEventListener('focus', () => {
+      const now = Date.now();
+      if (now - lastFocusProbe < 300000) return; // throttle to once / 5 min
+      lastFocusProbe = now;
+      probeAccount();
+    });
+  }
+  function personalAccountAction() {
+    return (POLICY.corporateAiAccounts && POLICY.corporateAiAccounts.personalAccountAction) || 'allow';
+  }
+  function maybeCoachAccount() {
+    if (accountCoached || ACCOUNT.type !== 'personal') return;
+    if (personalAccountAction() !== 'coach') return;
+    accountCoached = true;
+    showAccountCoach();
+  }
+  function showAccountCoach() {
+    try {
+      const el = document.createElement('div');
+      el.className = 'ps-account-coach';
+      el.textContent = 'PromptWall: you appear to be signed into a personal account on this AI site. '
+        + 'Use your corporate workspace account for work data.';
+      el.style.cssText = 'position:fixed;bottom:16px;right:16px;max-width:320px;z-index:2147483647;'
+        + 'background:#3b2f00;color:#ffe9a8;border:1px solid #7a5c00;border-radius:8px;padding:12px 14px;'
+        + 'font:13px/1.4 system-ui,sans-serif;box-shadow:0 4px 16px rgba(0,0,0,.3)';
+      document.documentElement.appendChild(el);
+      setTimeout(() => { try { el.remove(); } catch (_) {} }, 12000);
+    } catch (_) { /* best effort */ }
+  }
   Ext.addRuntimeMessageListener((msg, sender, sendResponse) => {
     if (!msg || msg.type !== 'getPolicyState') return false;
     sendResponse({
@@ -185,6 +254,9 @@
     IPV6_ADDRESS: 'IPv6 address',
     US_LICENSE_PLATE: 'license plate',
     VIN: 'vehicle ID number',
+    FINANCIAL_STATEMENT: 'financial statement',
+    TAX_FILING: 'tax filing',
+    HR_RECORD: 'HR record',
   };
 
   const COACHING = {
@@ -212,6 +284,9 @@
     LEGAL_CONTRACT: 'Remove contract text unless approved for external AI review.',
     CONFIDENTIAL_BUSINESS: 'Remove unreleased plans, pricing, vendor changes, or strategy details.',
     CANARY_TOKEN: 'Stop and notify Security Admin before continuing.',
+    FINANCIAL_STATEMENT: 'Remove financial statement line items or use an approved reporting workflow.',
+    TAX_FILING: 'Remove tax form details before sending.',
+    HR_RECORD: 'Remove employee personnel details before sending.',
   };
 
   function labelFor(item) {
@@ -256,6 +331,7 @@
       severity: f.severity,
       score: f.score,
       masked: D.maskValue(f.type, f.value),
+      ...(f.vendor ? { vendor: f.vendor, vendorLabel: f.vendorLabel } : {}),
     }));
   }
   function publicCategories(analysis) {
@@ -280,6 +356,7 @@
             clientRiskScore: analysis.riskScore || 0,
             clientMaxSeverity: analysis.maxSeverity || 0,
             clientMaxSeverityLabel: analysis.maxSeverityLabel || 'none',
+            clientAccount: { type: ACCOUNT.type, signal: ACCOUNT.signal },
             outcome, note: note || '',
             ...(extra || {}),
           },

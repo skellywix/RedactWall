@@ -16,6 +16,9 @@ export interface QueryFinding {
   severity?: number;
   score?: number;
   confidence?: string;
+  /** Vendor attribution for SECRET_KEY findings, e.g. "stripe" / "Stripe secret key (live)". */
+  vendor?: string;
+  vendorLabel?: string;
 }
 
 export interface QueueQuery {

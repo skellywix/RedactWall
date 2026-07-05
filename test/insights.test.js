@@ -117,3 +117,16 @@ test('summarize output carries no prompt bodies or raw finding values', () => {
   assert.ok(!out.includes('412-22-7843'), 'raw finding value must not appear');
   assert.ok(!out.includes('Member SSN'), 'prompt text must not appear');
 });
+
+test('summarize aggregates account types and personal-account usage (N4)', () => {
+  const rows = [
+    row({ status: 'allowed', accountType: 'corporate', destination: 'chatgpt.com' }),
+    row({ status: 'allowed', accountType: 'personal', destination: 'chatgpt.com' }),
+    row({ status: 'pending', accountType: 'personal', destination: 'claude.ai', riskScore: 80, maxSeverity: 4 }),
+    row({ status: 'allowed' }), // no accountType -> unknown
+  ];
+  const s = insights.summarize(rows, { windowDays: 7, now: NOW });
+  assert.deepStrictEqual(s.accountTypes, { corporate: 1, personal: 2, unknown: 1 });
+  assert.strictEqual(s.personalAccountBlocked, 1, 'one personal-account event was blocked');
+  assert.ok(s.personalAccountTopDestinations.some((d) => d.key === 'chatgpt.com'));
+});

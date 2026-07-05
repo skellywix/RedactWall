@@ -20,7 +20,7 @@ An incident usually surfaces through one of these channels:
 
 | Source | Where | What it tells you |
 |--------|-------|-------------------|
-| SIEM subscriptions | `config/subscriptions.json` destinations, delivery history in the dashboard | Sanitized posture and security events routed to Splunk, Sentinel, Chronicle, or ServiceNow |
+| SIEM subscriptions | `config/subscriptions.json` destinations, delivery history in the dashboard | Sanitized posture and security events routed to Splunk, Sentinel, Chronicle, ServiceNow, or an OpenTelemetry collector (`otlp` type, OTLP/HTTP JSON logs) |
 | SIEM webhook | `SIEM_WEBHOOK_URL` alerts | Best-effort sanitized alert stream for blocked and held events |
 | Approval queue | Dashboard, approval routing notifications | A held prompt that a human flagged during review |
 | Audit chain verification | `node -e "console.log(require('./server/db').verifyAuditChain())"` | Evidence tampering: a broken chain means stored records were altered |

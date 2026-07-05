@@ -488,7 +488,7 @@ test('app internals cover ingest throttle, startup logging, server timers, and s
   assert.ok(calls.includes('workflow'));
   assert.ok(calls.includes('stale-sweep'));
   assert.ok(calls.includes('log:4521'));
-  assert.deepStrictEqual(cleared.sort((a, b) => a - b), [5 * 60 * 1000, 60 * 60 * 1000, 60 * 60 * 1000].sort((a, b) => a - b));
+  assert.deepStrictEqual(cleared.sort((a, b) => a - b), [5 * 60 * 1000, 60 * 60 * 1000, 60 * 60 * 1000, 24 * 60 * 60 * 1000].sort((a, b) => a - b));
 
   const signals = {};
   const exits = [];

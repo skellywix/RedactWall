@@ -168,7 +168,7 @@ Important settings:
 | `PROMPTWALL_GATEWAY_UPSTREAM` / `PROMPTWALL_GATEWAY_UPSTREAM_API_KEY` | Provider base URL and gateway-held provider key for OpenAI-compatible, Anthropic, Gemini, or private model upstreams. |
 | `PROMPTWALL_GATEWAY_UPSTREAM_AUTH_SCHEME` / `PROMPTWALL_GATEWAY_AWS_REGION` | Use `aws-sigv4` plus an AWS region for direct Amazon Bedrock Runtime gateway enforcement. |
 | `PROMPTWALL_RATE_LIMITER_TOKEN` / `PROMPTWALL_RATE_LIMITER_STORE` | Shared AI gateway limiter token and backend, `sqlite` for one limiter service or `redis`/`valkey` for active-active limiter replicas. |
-| `ENDPOINT_AGENT_OCR_COMMAND` or `PROMPTWALL_ENDPOINT_AGENT_OCR_COMMAND` | Optional local OCR command for endpoint image files. |
+| `ENDPOINT_AGENT_OCR_COMMAND` or `PROMPTWALL_ENDPOINT_AGENT_OCR_COMMAND` | Optional local OCR command for endpoint image files. Without one, the agent falls back to a bundled offline WASM OCR engine (`ENDPOINT_AGENT_OCR_WASM`, default on). |
 
 See `.env.example`, `docs/AI_LLM_GATEWAY.md`, and `docs/DEPLOYMENT.md` for the longer deployment reference.
 

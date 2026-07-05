@@ -44,6 +44,10 @@ function minimalFiles(agentBody) {
       body: Buffer.from('const { execFile } = require("child_process");\nconst env = "ENDPOINT_AGENT_OCR_COMMAND";\nfunction extractImageFile() {}\nmodule.exports = { extractImageFile };\n'),
     },
     {
+      path: 'sensors/endpoint-agent/ocr-wasm.js',
+      body: Buffer.from('const langPath = "./tessdata";\nasync function extractImageTextWasm() {}\nasync function terminate() {}\nmodule.exports = { extractImageTextWasm, terminate };\n'),
+    },
+    {
       path: 'sensors/endpoint-agent/native-handoff.js',
       body: Buffer.from("require('crypto').createHmac('sha256', 'secret'); const blocked = 'contentBase64';"),
     },
@@ -60,12 +64,20 @@ function minimalFiles(agentBody) {
       body: Buffer.from('function collectAiToolInventory() {}\nfunction parseApprovedTools() {}\nmodule.exports = { collectAiToolInventory, parseApprovedTools };\n'),
     },
     {
+      path: 'sensors/endpoint-agent/collectors/mcp-inventory.js',
+      body: Buffer.from('function collectMcpInventorySync() {}\nfunction serverMetadata() {}\nmodule.exports = { collectMcpInventorySync, serverMetadata };\n'),
+    },
+    {
       path: 'sensors/endpoint-agent/collectors/desktop-app-flow.js',
       body: Buffer.from('function desktopAppFlowProfiles() {}\nfunction publicAppFlowChecks() {}\nmodule.exports = { desktopAppFlowProfiles, publicAppFlowChecks };\n'),
     },
     {
       path: 'sensors/endpoint-agent/fixtures/ocr-sample.png',
       body: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    },
+    {
+      path: 'sensors/endpoint-agent/tessdata/eng.traineddata.gz',
+      body: Buffer.alloc(120000, 1),
     },
     {
       path: 'sensors/endpoint-agent/collectors/clipboard-guard.js',
@@ -161,6 +173,7 @@ test('package script writes a prompt-free endpoint agent zip and integrity manif
   assert.strictEqual(manifest.checks.endpointRedactionHandoffIncluded, true);
   assert.strictEqual(manifest.checks.endpointFileFlowProfilesIncluded, true);
   assert.strictEqual(manifest.checks.endpointOcrIncluded, true);
+  assert.strictEqual(manifest.checks.endpointWasmOcrIncluded, true);
   assert.strictEqual(manifest.checks.aiToolInventoryIncluded, true);
   assert.strictEqual(manifest.checks.nativeHandoffPrototypeIncluded, true);
   assert.strictEqual(manifest.checks.nativeHandoffWriterIncluded, true);
@@ -194,10 +207,13 @@ test('package script writes a prompt-free endpoint agent zip and integrity manif
     'sensors/endpoint-agent/agent.js',
     'sensors/endpoint-agent/file-flow-profiles.js',
     'sensors/endpoint-agent/ocr.js',
+    'sensors/endpoint-agent/ocr-wasm.js',
+    'sensors/endpoint-agent/tessdata/eng.traineddata.gz',
     'sensors/endpoint-agent/native-handoff.js',
     'sensors/endpoint-agent/native-messaging-host.js',
     'sensors/endpoint-agent/write-handoff.js',
     'sensors/endpoint-agent/collectors/ai-tool-inventory.js',
+    'sensors/endpoint-agent/collectors/mcp-inventory.js',
     'sensors/endpoint-agent/collectors/clipboard-guard.js',
     'sensors/endpoint-agent/collectors/git-push-guard.js',
     'sensors/endpoint-agent/collectors/protected-upload.js',

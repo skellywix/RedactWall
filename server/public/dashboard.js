@@ -2051,6 +2051,7 @@ async function loadStats() {
     const seatMeta = invalidSeatConfig ? 'set paid seat limit' : (hasSeatLimit ? `${seats.seatsRemaining} remaining` : 'billable users');
     const seatLabel = invalidSeatConfig ? 'Seat config' : (seats && seats.saasMode ? 'Seats used' : 'Users observed');
     const seatTone = invalidSeatConfig || (seats && seats.overLimit) ? 'warn' : 'secure';
+    const lic = seats && seats.license;
     const cards = [
       ['pending', s.pending, 'Pending approval', 'held for review', 'critical'],
       ['alert', s.todayBlocked, 'Blocked today', 'policy stops', 'warn'],
@@ -2059,6 +2060,15 @@ async function loadStats() {
       ['', approveRate, 'Approval rate', 'admin decisions', 'live'],
       [invalidSeatConfig || (seats && seats.overLimit) ? 'alert' : '', seatValue, seatLabel, seatMeta, seatTone],
     ];
+    if (lic) {
+      const licTone = lic.state === 'readonly' ? 'critical' : (lic.state === 'grace' ? 'warn' : (lic.state === 'unlicensed' ? 'live' : 'secure'));
+      const licValue = lic.state === 'unlicensed' ? 'Demo' : (lic.plan || lic.state);
+      const licMeta = lic.state === 'unlicensed' ? 'no license installed'
+        : (lic.state === 'readonly' ? 'past grace — config read-only'
+          : (lic.state === 'grace' ? `expired; grace ends ${(lic.graceEndsAt || '').slice(0, 10)}`
+            : `expires ${(lic.expires || '').slice(0, 10)}`));
+      cards.push([lic.state === 'readonly' || lic.state === 'grace' ? 'alert' : '', licValue, 'License', licMeta, licTone]);
+    }
     $('#stats').innerHTML = cards.map(([c, n, l, m, tone]) => `
       <div class="stat ${c}" data-tooltip="${escapeHtml(`${l}: ${m}`)}">
         <div class="l"><span class="status-light tone-${escapeHtml(tone)}" aria-hidden="true"></span>${escapeHtml(l)}</div>
@@ -2080,7 +2090,7 @@ async function loadStats() {
 }
 
 function findingChips(findings, categories) {
-  const fc = (findings || []).map((f) => `<span class="chip status-chip tone-warn" tabindex="0" role="button" data-status-detail="${escapeHtml(`Detected type: ${f.type}\nMasked value: ${f.masked || 'redacted'}`)}"><b>${escapeHtml(f.type)}</b> ${escapeHtml(f.masked || '')}</span>`).join('');
+  const fc = (findings || []).map((f) => `<span class="chip status-chip tone-warn" tabindex="0" role="button" data-status-detail="${escapeHtml(`Detected type: ${f.type}${f.vendorLabel ? ` (${f.vendorLabel})` : ''}\nMasked value: ${f.masked || 'redacted'}`)}"><b>${escapeHtml(f.type)}${f.vendorLabel ? ` · ${escapeHtml(f.vendorLabel)}` : ''}</b> ${escapeHtml(f.masked || '')}</span>`).join('');
   const cc = (categories || []).map((c) => `<span class="chip category status-chip tone-warn" tabindex="0" role="button" data-status-detail="${escapeHtml(`Policy category: ${c}`)}"><b>${escapeHtml(c)}</b></span>`).join('');
   return fc + cc;
 }
@@ -3642,6 +3652,21 @@ function renderCoverage(c) {
       </div>
     </div>`;
   }).join('') || '<div class="empty"><div class="big">No endpoint AI tools</div>No endpoint AI inventory reported.</div>';
+  $('#endpointMcpServerRows').innerHTML = (c.endpointMcpServers || []).map((server) => {
+    const meta = [
+      server.user || 'unknown',
+      server.orgId || '',
+      (server.platforms || []).join(', '),
+      server.lastSeen ? fmt(server.lastSeen) : '',
+    ].filter(Boolean).join(' | ');
+    return `<div class="tool-row">
+      <div><strong>${escapeHtml(server.id || 'unknown server')}</strong><span>${escapeHtml(meta || '-')}</span></div>
+      <div class="tool-state">
+        ${statusChip(endpointAiToolTone(server.state), server.state || 'unknown', `Endpoint MCP server: ${server.id || 'unknown'}\nApproval state: ${server.state || 'unknown'}\nLast seen: ${server.lastSeen ? fmt(server.lastSeen) : '-'}`)}
+        <span>${escapeHtml(server.detail || '-')}</span>
+      </div>
+    </div>`;
+  }).join('') || '<div class="empty"><div class="big">No endpoint MCP servers</div>No endpoint MCP inventory reported.</div>';
   $('#governedRows').innerHTML = (c.governedDestinations || []).map((d) => `<tr>
     <td class="mono">${escapeHtml(d.destination)}</td>
     <td class="mono">${escapeHtml(d.events)}</td>

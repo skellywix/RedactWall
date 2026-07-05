@@ -60,8 +60,6 @@ chase Island/Zscaler breadth.
 - **On-device semantic model upgrade** (ONNX/WASM SLM behind the existing
   `classifySemantic` seam; cloud-classifier seam already exists) — answers
   Harmonic/Nightfall ML-classification depth while staying local-first.
-- **Bundled default OCR engine** (today: auto-discovery of an installed
-  tesseract; ship a vetted default so image-paste coverage is turnkey).
 - **Route-to-sanctioned-model enforcement** (WitnessAI has it): redirect
   traffic from unsanctioned AI apps to the governed gateway.
 - **Shared multi-tenant SaaS** on the Postgres seam + managed-infra failover

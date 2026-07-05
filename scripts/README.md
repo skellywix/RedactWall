@@ -14,6 +14,7 @@ place.
 | Full local gate | `npm run review:ci` |
 | AI-domain coverage guard | `npm run ai-domains:check` |
 | Detection eval | `npm run eval` |
+| Detection latency benchmark | `npm run bench` |
 | Native Linear approval smoke | `npm run smoke:linear-approval -- -- --team-id=<linear-team-id>` |
 | Demo guide drift check | `npm run docs:demo-guide:check` |
 

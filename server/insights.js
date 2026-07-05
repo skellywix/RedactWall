@@ -74,6 +74,9 @@ function summarize(rows, options = {}) {
   const destinationCounts = {};
   const shadowByProvider = {};
   const userAgg = {};
+  const accountTypes = { corporate: 0, personal: 0, unknown: 0 };
+  const personalDestinationCounts = {};
+  let personalBlocked = 0;
   let scored = 0; let riskSum = 0; let considered = 0;
 
   for (const q of rows || []) {
@@ -108,6 +111,12 @@ function summarize(rows, options = {}) {
     if (decision === 'blocked') ua.blocked++;
     ua.riskSum += q.riskScore || 0;
     if ((q.maxSeverity || 0) > ua.maxSeverity) ua.maxSeverity = q.maxSeverity;
+    const acct = accountTypes[q.accountType] !== undefined ? q.accountType : 'unknown';
+    accountTypes[acct]++;
+    if (acct === 'personal') {
+      if (dest) personalDestinationCounts[dest] = (personalDestinationCounts[dest] || 0) + 1;
+      if (decision === 'blocked') personalBlocked++;
+    }
   }
 
   const topDestinations = topEntries(destinationCounts, 8).map((d) => {
@@ -137,6 +146,9 @@ function summarize(rows, options = {}) {
     confidence,
     topDetectors: topEntries(detectorCounts, 8),
     topCategories: topEntries(categoryCounts, 8),
+    accountTypes,
+    personalAccountBlocked: personalBlocked,
+    personalAccountTopDestinations: topEntries(personalDestinationCounts, 8),
     topDestinations,
     shadowByProvider: topEntries(shadowByProvider, 8),
     topUsers,

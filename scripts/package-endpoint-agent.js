@@ -22,15 +22,18 @@ const PACKAGE_FILES = [
   'sensors/endpoint-agent/agent.js',
   'sensors/endpoint-agent/file-flow-profiles.js',
   'sensors/endpoint-agent/ocr.js',
+  'sensors/endpoint-agent/ocr-wasm.js',
   'sensors/endpoint-agent/native-handoff.js',
   'sensors/endpoint-agent/native-messaging-host.js',
   'sensors/endpoint-agent/write-handoff.js',
   'sensors/endpoint-agent/collectors/ai-tool-inventory.js',
+  'sensors/endpoint-agent/collectors/mcp-inventory.js',
   'sensors/endpoint-agent/collectors/clipboard-guard.js',
   'sensors/endpoint-agent/collectors/desktop-app-flow.js',
   'sensors/endpoint-agent/collectors/git-push-guard.js',
   'sensors/endpoint-agent/collectors/protected-upload.js',
   'sensors/endpoint-agent/fixtures/ocr-sample.png',
+  'sensors/endpoint-agent/tessdata/eng.traineddata.gz',
   'scripts/check-endpoint-install.js',
   'scripts/install-clipboard-guard.ps1',
   'scripts/install-desktop-collector.ps1',
@@ -78,6 +81,7 @@ function validateRuntimeFiles(files) {
   ];
 
   for (const file of files) {
+    if (/\.(png|gz)$/.test(file.path)) continue; // binary assets: skip the utf8 token scan
     const text = file.body.toString('utf8');
     for (const rule of disallowed) {
       if (rule.pattern.test(text)) {
@@ -122,6 +126,18 @@ function validateRuntimeFiles(files) {
     throw new Error('Endpoint OCR bridge must stay local and must not upload, shell, or read unrelated file bodies');
   }
 
+  const ocrWasm = files.find((file) => file.path === 'sensors/endpoint-agent/ocr-wasm.js').body.toString('utf8');
+  if (!/langPath/.test(ocrWasm) || !/terminate/.test(ocrWasm)) {
+    throw new Error('Endpoint agent package must include the bundled WASM OCR fallback with pinned langPath');
+  }
+  if (/contentBase64|fetch\(|https?:\/\/|readFileSync/.test(ocrWasm)) {
+    throw new Error('Endpoint WASM OCR fallback must stay local: hard-pin model paths and never fetch or read file bodies');
+  }
+  const tessdata = files.find((file) => file.path === 'sensors/endpoint-agent/tessdata/eng.traineddata.gz');
+  if (!tessdata || tessdata.body.length < 100000) {
+    throw new Error('Endpoint agent package must vendor local tesseract language data for offline OCR');
+  }
+
   const appFlow = files.find((file) => file.path === 'sensors/endpoint-agent/collectors/desktop-app-flow.js').body.toString('utf8');
   if (!/publicAppFlowChecks/.test(appFlow) || !/desktopAppFlowProfiles/.test(appFlow)) {
     throw new Error('Endpoint agent package must include the per-app guarded folder collector');
@@ -136,6 +152,16 @@ function validateRuntimeFiles(files) {
   }
   if (/contentBase64|fetch\(|https?:\/\/|readFileSync|writeFileSync|console\.log\([^)]*process|console\.error\([^)]*process/.test(aiToolInventory)) {
     throw new Error('Endpoint AI tool inventory must not upload, persist, or log local process or path data');
+  }
+
+  const mcpInventory = files.find((file) => file.path === 'sensors/endpoint-agent/collectors/mcp-inventory.js').body.toString('utf8');
+  if (!/collectMcpInventorySync/.test(mcpInventory) || !/serverMetadata/.test(mcpInventory)) {
+    throw new Error('Endpoint agent package must include sanitized MCP server inventory');
+  }
+  // The MCP collector reads config files (readFileSync is expected) but must
+  // never upload, persist, or log their contents.
+  if (/contentBase64|fetch\(|https?:\/\/|writeFileSync|console\.log|console\.error/.test(mcpInventory)) {
+    throw new Error('Endpoint MCP inventory must not upload, persist, or log MCP config data');
   }
 
   const handoff = files.find((file) => file.path === 'sensors/endpoint-agent/native-handoff.js').body.toString('utf8');
@@ -310,6 +336,7 @@ function packageEndpointAgent(opts = {}) {
       endpointRedactionHandoffIncluded: true,
       endpointFileFlowProfilesIncluded: true,
       endpointOcrIncluded: true,
+      endpointWasmOcrIncluded: true,
       aiToolInventoryIncluded: true,
       nativeHandoffPrototypeIncluded: true,
       nativeHandoffWriterIncluded: true,

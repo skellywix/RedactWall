@@ -259,6 +259,72 @@ test('custom detectors support context windows and luhn checksum validators', ()
 });
 
 // ---------------------------------------------------------------------------
+// SECRETS — expanded provider catalog + vendor labeling. All values below are
+// synthetic (documented example keys or obviously fake fillers).
+const SECRET_CASES = [
+  ['sk_live_a1B2c3D4e5F6g7H8i9J0', 'stripe', 'live'],
+  ['sk_test_a1B2c3D4e5F6g7H8i9J0', 'stripe', 'test'],
+  ['xapp-1-A0EXAMPLE1-1234567890123-' + 'abcdef0123456789abcdef0123456789', 'slack', null],
+  ['dapi0123456789abcdef0123456789abcdef', 'databricks', null],
+  ['PMAK-0123456789abcdef01234567-0123456789abcdef0123456789abcdef01', 'postman', null],
+  ['ExampleTeam001.atlasv1.' + 'A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8S9t0', 'terraform', null],
+  ['ya29.a0ExampleOAuthTokenFiller_1234567890', 'google', null],
+  ['sk-ant-api03-exampleExampleExample', 'anthropic', null],
+  ['sk-proj-exampleExampleExample1234', 'openai', null],
+];
+
+test('secrets — expanded provider token catalog fires SECRET_KEY', () => {
+  for (const [value] of SECRET_CASES) {
+    assert.ok(hasType('the credential ' + value + ' was pasted', 'SECRET_KEY'), 'should fire: ' + value.slice(0, 12) + '…');
+  }
+  assert.ok(hasType('storage conn AccountKey=' + 'A1b2C3d4'.repeat(6) + '== end', 'SECRET_KEY'), 'Azure AccountKey');
+  assert.ok(hasType('the aws secret access key wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY was shared', 'SECRET_KEY'), 'AWS secret access key with context');
+  assert.ok(hasType('the file had "type": "service_account" and a private_key field', 'SECRET_KEY'), 'GCP service-account marker');
+});
+
+test('secrets — vendor labeling attributes the provider without the value', () => {
+  for (const [value, vendor, env] of SECRET_CASES) {
+    const f = find('the credential ' + value + ' was pasted').findings.find((x) => x.type === 'SECRET_KEY');
+    assert.ok(f, 'finding exists for ' + vendor);
+    assert.strictEqual(f.vendor, vendor, value.slice(0, 12) + '… should label ' + vendor);
+    assert.ok(f.vendorLabel && !f.vendorLabel.includes(value), 'label never contains the value');
+    if (env) assert.ok(f.vendorLabel.includes(env), 'Stripe label should carry ' + env);
+  }
+  const azure = find('storage conn AccountKey=' + 'A1b2C3d4'.repeat(6) + '== end').findings.find((x) => x.type === 'SECRET_KEY');
+  assert.strictEqual(azure && azure.vendor, 'azure');
+  const aws = find('aws secret access key: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY').findings.find((x) => x.type === 'SECRET_KEY');
+  assert.strictEqual(aws && aws.vendor, 'aws');
+  const gcp = find('config: "type": "service_account"').findings.find((x) => x.type === 'SECRET_KEY');
+  assert.strictEqual(gcp && gcp.vendor, 'gcp');
+});
+
+test('secrets — vendor precedence pins ambiguous prefixes', () => {
+  assert.strictEqual(D.secretVendor('sk-ant-api03-x').vendor, 'anthropic', 'sk-ant- wins over sk-');
+  assert.strictEqual(D.secretVendor('sk-proj-xyz').vendor, 'openai');
+  assert.strictEqual(D.secretVendor('sk_live_xyz').vendor, 'stripe');
+  assert.strictEqual(D.secretVendor('AKIAIOSFODNN7EXAMPLE').vendor, 'aws');
+  assert.strictEqual(D.secretVendor('xoxb-123-abc').vendor, 'slack');
+  assert.strictEqual(D.secretVendor('github_pat_abc').vendor, 'github');
+  assert.strictEqual(D.secretVendor('eyJhbGciOi.eyJzdWIi.sig').vendor, 'jwt');
+  assert.strictEqual(D.secretVendor('no-vendor-here'), null);
+});
+
+test('secrets — env-var branch and non-secret findings carry no vendor fields', () => {
+  const env = find('MY_APP_SECRET=supersecretvalue123').findings.find((f) => f.type === 'SECRET_KEY');
+  assert.ok(env, 'env-var secret still fires');
+  assert.strictEqual(env.vendor, undefined);
+  const ssn = find('member SSN 123-45-6789').findings.find((f) => f.type === 'US_SSN');
+  assert.strictEqual(ssn.vendor, undefined);
+});
+
+test('secrets — false-positive bait for context-gated formats', () => {
+  assert.ok(!hasType('build hash q9WvZx3JmT5rKpN8dHcYbLgF2sV6wA1eUoQi4XnR is cached', 'SECRET_KEY'), '40-char blob without aws context');
+  assert.ok(!hasType('tracking code dapi12345 printed on the label', 'SECRET_KEY'), 'short dapi lookalike');
+  assert.ok(!hasType('reference PMAK-2024-001 attached to the ticket', 'SECRET_KEY'), 'PMAK lookalike with wrong shape');
+  assert.ok(!hasType('the word dapidary is not a token', 'SECRET_KEY'), 'dapi as substring of a longer word');
+});
+
+// ---------------------------------------------------------------------------
 // SEMANTIC MODEL — the compact on-device classifier (detection-engine/detect.js, trained
 // by scripts/train-semantic.js) catches paraphrased meaning the keyword
 // heuristic misses, while keeping zero false positives on benign prompts.
@@ -279,6 +345,38 @@ test('semantic — generalizes to unseen confidential phrasings', () => {
 });
 test('semantic — generalizes to unseen code', () => {
   assert.ok(hasCat('total = 0\nfor row in rows:\n    total = total + row[2]\n', 'SOURCE_CODE'));
+});
+
+// ---------------------------------------------------------------------------
+// DOCUMENT-CLASS CATEGORIES — keyword-first, two cue families ANDed plus
+// negation cues (cf. Nightfall's file classifiers, but on-device).
+test('document classes — financial statement content is caught', () => {
+  assert.ok(hasCat('Q2 balance sheet attached: total assets $412M, retained earnings up 3%.', 'FINANCIAL_STATEMENT'));
+  assert.ok(hasCat('The call report shows charge-offs rising and net interest income down.', 'FINANCIAL_STATEMENT'));
+});
+test('document classes — tax filing content is caught', () => {
+  assert.ok(hasCat('Her W-2 shows wages of $61,200 and federal income tax withheld of $8,340.', 'TAX_FILING'));
+  assert.ok(hasCat('The 1099 lists box 1 interest for tax year 2025.', 'TAX_FILING'));
+});
+test('document classes — HR record content is caught', () => {
+  assert.ok(hasCat('The performance improvement plan for our head teller starts Monday.', 'HR_RECORD'));
+  assert.ok(hasCat('Attach the disciplinary write-up for the employee before the meeting.', 'HR_RECORD'));
+});
+test('document classes — about-the-topic asks do not fire', () => {
+  assert.ok(!hasCat('Explain what appears on a balance sheet for a financial-literacy class', 'FINANCIAL_STATEMENT'));
+  assert.ok(!hasCat('How do I read my W-2? Just the concepts please', 'TAX_FILING'));
+  assert.ok(!hasCat('Draft a job posting for a teller position', 'HR_RECORD'));
+  assert.ok(!hasCat('Write a performance review template our managers can use, best practices please', 'HR_RECORD'));
+});
+test('document classes — listed with severity, regulations, and disable support', () => {
+  const detectors = new Map(D.listDetectors().map((d) => [d.id, d]));
+  for (const id of ['FINANCIAL_STATEMENT', 'TAX_FILING', 'HR_RECORD']) {
+    assert.ok(detectors.has(id), id + ' should be listed');
+    assert.strictEqual(detectors.get(id).severity, 3, id + ' severity');
+    assert.ok(D.regulationsFor(id).length >= 2, id + ' has regulation citations');
+  }
+  const disabled = D.analyze('Q2 balance sheet: total assets $412M, retained earnings up 3%.', { disabledDetectors: ['FINANCIAL_STATEMENT'] });
+  assert.strictEqual(disabled.categories.some((c) => c.category === 'FINANCIAL_STATEMENT'), false);
 });
 
 // The bucket that protects admin trust: ordinary business prompts must NOT be

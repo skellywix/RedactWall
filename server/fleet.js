@@ -9,7 +9,7 @@
  *   2. summary(): the console's per-user fleet matrix with coverage gaps.
  */
 
-const TRACKED = ['browser_extension', 'endpoint_agent', 'mcp_guard'];
+const TRACKED = ['browser_extension', 'endpoint_agent', 'mcp_guard', 'agent_hooks'];
 const STALE_MS = 48 * 3600 * 1000;
 
 let db = null;

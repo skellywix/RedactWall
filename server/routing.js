@@ -41,14 +41,20 @@ const HEALTH_LABELS = new Set([
 const FINANCIAL_MEMBER_LABELS = new Set([
   'BANK_ACCOUNT',
   'CREDIT_CARD',
+  'FINANCIAL_STATEMENT',
   'IBAN',
   'LOAN_NUMBER',
   'MEMBER_ID',
   'ROUTING_NUMBER',
   'SWIFT_BIC',
+  'TAX_FILING',
   'US_ITIN',
   'US_SSN',
   'US_TIN_EIN',
+]);
+
+const HR_LABELS = new Set([
+  'HR_RECORD',
 ]);
 
 const LEGAL_LABELS = new Set([
@@ -234,6 +240,13 @@ function routeDecision(query = {}, opts = {}) {
         ...route,
         assignedGroup: 'privacy',
         workflowReason: `detector:${health}`,
+        slaMinutes: 240,
+      };
+    } else if (firstMatching(labels, HR_LABELS)) {
+      route = {
+        ...route,
+        assignedGroup: 'privacy',
+        workflowReason: 'category:HR_RECORD',
         slaMinutes: 240,
       };
     } else if (financial) {

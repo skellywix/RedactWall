@@ -11,8 +11,10 @@ const {
   failedInstallCheckIds,
 } = require('../server/install-checks');
 const aiToolInventory = require('../sensors/endpoint-agent/collectors/ai-tool-inventory');
+const mcpInventory = require('../sensors/endpoint-agent/collectors/mcp-inventory');
 const desktopAppFlow = require('../sensors/endpoint-agent/collectors/desktop-app-flow');
 const endpointOcr = require('../sensors/endpoint-agent/ocr');
+const endpointOcrWasm = require('../sensors/endpoint-agent/ocr-wasm');
 const fileFlowProfiles = require('../sensors/endpoint-agent/file-flow-profiles');
 
 const ROOT = path.join(__dirname, '..');
@@ -94,6 +96,7 @@ function endpointSettings(config = {}) {
     handoffSecret: config.ENDPOINT_AGENT_HANDOFF_SECRET || config.PROMPTWALL_ENDPOINT_AGENT_HANDOFF_SECRET || '',
     ocrCommand: config.ENDPOINT_AGENT_OCR_COMMAND || config.PROMPTWALL_ENDPOINT_AGENT_OCR_COMMAND || '',
     approvedAiTools: config.ENDPOINT_AGENT_APPROVED_AI_TOOLS || config.PROMPTWALL_ENDPOINT_AGENT_APPROVED_AI_TOOLS || '',
+    approvedMcpServers: config.ENDPOINT_AGENT_APPROVED_MCP_SERVERS || config.PROMPTWALL_ENDPOINT_AGENT_APPROVED_MCP_SERVERS || '',
     fileFlowProfiles: config.ENDPOINT_AGENT_FILE_FLOW_PROFILES || config.PROMPTWALL_ENDPOINT_AGENT_FILE_FLOW_PROFILES || '',
     orgId: config.SENTINEL_TENANT_ID || config.PROMPTWALL_TENANT_ID || '',
   };
@@ -137,6 +140,13 @@ function buildInstallReport(opts = {}) {
     processNames: opts.processNames || [],
     approvedTools: settings.approvedAiTools,
   }).checks);
+  checks.push(check('mcp_inventory_runtime', existsFile(repoRoot, 'sensors/endpoint-agent/collectors/mcp-inventory.js'), 'MCP server inventory present'));
+  checks.push(...mcpInventory.collectMcpInventorySync({
+    env: configInfo.config,
+    platform: opts.platform || process.platform,
+    home: opts.home,
+    approvedServers: settings.approvedMcpServers,
+  }).checks);
   checks.push(check('desktop_app_flow_runtime', existsFile(repoRoot, 'sensors/endpoint-agent/collectors/desktop-app-flow.js'), 'app file-flow collector present'));
   checks.push(...desktopAppFlow.publicAppFlowChecks(desktopAppFlow.desktopAppFlowProfiles({
     settings: desktopAppFlow.appFlowSettings(configInfo.config, settings.watchDir),
@@ -174,15 +184,19 @@ async function ocrExtractionCheck(opts = {}) {
   const settings = endpointSettings(configInfo.config);
   const discover = opts.discoverOcrCommand || endpointOcr.discoverOcrCommand;
   const command = settings.ocrCommand || discover({ fresh: true, env: opts.env, platform: opts.platform });
-  if (!configured(command)) {
+  const wasmAvailable = (opts.wasmOcrAvailable || endpointOcrWasm.wasmOcrAvailable)({ env: opts.env });
+  if (!configured(command) && !wasmAvailable) {
     return check('endpoint_ocr_extract', true, 'no OCR engine; images stay ocr_required');
   }
   const fixture = opts.ocrFixturePath || OCR_FIXTURE_PATH;
   const extract = opts.extractImageFile || endpointOcr.extractImageFile;
-  const result = await extract(path.basename(fixture), fixture, { command });
+  const engineOpts = configured(command) ? { command } : { discover: false, env: opts.env, platform: opts.platform };
+  const result = await extract(path.basename(fixture), fixture, engineOpts);
+  if (result.ocrEngine === 'wasm') await endpointOcrWasm.terminateWasmOcr().catch(() => {});
   const extracted = result.extractionOk === true && OCR_FIXTURE_TEXT.test(result.text || '');
+  const suffix = result.ocrEngine === 'wasm' ? ' (wasm)' : '';
   return check('endpoint_ocr_extract', extracted,
-    extracted ? 'extracted fixture text' : (result.error || 'no text extracted from fixture'));
+    extracted ? `extracted fixture text${suffix}` : (result.error || 'no text extracted from fixture'));
 }
 
 function buildHeartbeatBody(report, opts = {}) {

@@ -45,9 +45,11 @@ refactors and is the durable regression net as the app evolves. See
 
 ## Non-negotiable quality floors
 
-- Detector eval (`npm run eval`): semantic precision >= 0.90, recall >= 0.70,
+- Detector eval (`npm run eval`): semantic precision >= 0.95, recall >= 0.80,
   structured recall >= 0.95, and **zero false positives on benign prompts**.
-  Never tune against the held-out fixture; it is the test, not training data.
+  Measured over a 500+-case decontaminated held-out corpus
+  (`test/fixtures/semantic-eval.json`); `test/eval-corpus.test.js` guards its
+  composition. Never tune against the fixture; it is the test, not training data.
 - `alwaysBlock` types (US_SSN, CREDIT_CARD, BANK_ACCOUNT, ROUTING_NUMBER,
   IBAN, US_PASSPORT, SECRET_KEY, PRIVATE_KEY) must always block or tokenize —
   `suite/detector/` asserts this end-to-end through the API.

@@ -488,11 +488,25 @@ ENDPOINT_AGENT_OCR_MAX_CHARS=1000000
 '@
 ```
 
-The OCR command runs through `execFile` without a shell. If the command is not
-configured, image files stay blocked as `ocr_required`. If it is configured and
-returns text, the endpoint agent runs the same local detector/redactor path used
-for text, PDF, Office, and native handoff files. Image bytes and raw OCR text do
-not go to `/api/v1/scan-file` or `/api/v1/gate`.
+The OCR command runs through `execFile` without a shell. The engine precedence
+is: an explicit `ENDPOINT_AGENT_OCR_COMMAND`, then an auto-discovered native
+`tesseract`, then the **bundled WASM engine**, then `ocr_required`. The bundled
+engine runs the pure-WASM tesseract with language data vendored inside the agent
+package (`sensors/endpoint-agent/tessdata/`); model paths are hard-pinned to
+those local files, so it works fully offline and never fetches weights from a
+network. It uses `tesseract.js` (Apache-2.0) and the tesseract `eng`
+`traineddata` (Apache-2.0), both installed as an optional dependency of the
+endpoint agent. Set `ENDPOINT_AGENT_OCR_WASM=off` to disable it (images then stay
+`ocr_required` unless a native command is present). If OCR returns text, the
+endpoint agent runs the same local detector/redactor path used for text, PDF,
+Office, and native handoff files. Image bytes and raw OCR text do not go to
+`/api/v1/scan-file` or `/api/v1/gate`.
+
+Strict mode (`ENDPOINT_AGENT_OCR_STRICT=on`, default off) changes the posture for
+low-quality images: when OCR (native or WASM) yields little or no text, the image
+is routed to `ocr_required`/the approval queue instead of being allowed through
+on sparse extraction. Leave it off to keep today's behavior, where an image the
+OCR engine cannot read is allowed once no findings are detected.
 
 For desktop file flows, enable the native handoff directory with an explicit
 local secret. The endpoint agent keeps scanning locally; the handoff event is
@@ -789,8 +803,10 @@ Set these through `.env`, container environment, or a deployment secret manager:
 | `ENDPOINT_AGENT_HANDOFF_SECRET` | Optional 32-plus-character local HMAC secret required before the endpoint agent accepts native handoff events. |
 | `ENDPOINT_AGENT_OCR_COMMAND` / `PROMPTWALL_ENDPOINT_AGENT_OCR_COMMAND` | Optional endpoint-local OCR command for image files. Disabled by default. |
 | `ENDPOINT_AGENT_OCR_ARGS_JSON` / `PROMPTWALL_ENDPOINT_AGENT_OCR_ARGS_JSON` | Optional JSON string array of OCR command args. Include `{file}` where the image path belongs; otherwise the file path is appended. |
-| `ENDPOINT_AGENT_OCR_TIMEOUT_MS` / `PROMPTWALL_ENDPOINT_AGENT_OCR_TIMEOUT_MS` | Optional OCR command timeout, defaulting to 15000 ms. |
+| `ENDPOINT_AGENT_OCR_TIMEOUT_MS` / `PROMPTWALL_ENDPOINT_AGENT_OCR_TIMEOUT_MS` | Optional OCR command timeout, defaulting to 15000 ms (30000 ms for the WASM engine). |
 | `ENDPOINT_AGENT_OCR_MAX_CHARS` / `PROMPTWALL_ENDPOINT_AGENT_OCR_MAX_CHARS` | Optional OCR output cap before detection, defaulting to 1000000 chars. |
+| `ENDPOINT_AGENT_OCR_WASM` / `PROMPTWALL_ENDPOINT_AGENT_OCR_WASM` | Bundled offline WASM OCR fallback used when no native tesseract is present. Enabled by default; set to `off` to disable. Never fetches model weights from the network. |
+| `ENDPOINT_AGENT_OCR_STRICT` / `PROMPTWALL_ENDPOINT_AGENT_OCR_STRICT` | When `on` (default off), images whose OCR yields little or no text are routed to `ocr_required` instead of allowed on sparse extraction. |
 | `ENDPOINT_AGENT_APPROVED_AI_TOOLS` / `PROMPTWALL_ENDPOINT_AGENT_APPROVED_AI_TOOLS` | Optional comma-separated sanctioned endpoint AI tool ids. Detected local AI tools outside this list report endpoint AI-tool inventory attention using sanitized ids only. |
 | `ENDPOINT_AGENT_FILE_FLOW_PROFILES` / `PROMPTWALL_ENDPOINT_AGENT_FILE_FLOW_PROFILES` | Optional JSON array of named endpoint file-flow watcher profiles. Heartbeats report profile ids/status only. |
 
@@ -827,6 +843,8 @@ set.
 | `ENDPOINT_AGENT_WATCH_DIR` | `PROMPTWALL_ENDPOINT_AGENT_WATCH_DIR` |
 | `ENDPOINT_AGENT_HANDOFF_DIR` | `PROMPTWALL_ENDPOINT_AGENT_HANDOFF_DIR` |
 | `ENDPOINT_AGENT_HANDOFF_SECRET` | `PROMPTWALL_ENDPOINT_AGENT_HANDOFF_SECRET` |
+| `ENDPOINT_AGENT_OCR_WASM` | `PROMPTWALL_ENDPOINT_AGENT_OCR_WASM` |
+| `ENDPOINT_AGENT_OCR_STRICT` | `PROMPTWALL_ENDPOINT_AGENT_OCR_STRICT` |
 | `ENDPOINT_AGENT_OCR_COMMAND` | `PROMPTWALL_ENDPOINT_AGENT_OCR_COMMAND` |
 | `ENDPOINT_AGENT_OCR_ARGS_JSON` | `PROMPTWALL_ENDPOINT_AGENT_OCR_ARGS_JSON` |
 | `ENDPOINT_AGENT_OCR_TIMEOUT_MS` | `PROMPTWALL_ENDPOINT_AGENT_OCR_TIMEOUT_MS` |

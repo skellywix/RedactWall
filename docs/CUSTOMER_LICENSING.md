@@ -5,9 +5,15 @@ offline license-file patterns used by GitLab (self-managed license + renewal
 true-up) and Keygen (cryptographically signed offline licenses), adapted for
 regulated buyers who often run air-gapped or egress-restricted environments.
 
-Status: this document is the design of record. The license-file verifier is a
-roadmap item (`ROADMAP.md` N7); until it ships, pilots run on signed order
-forms without in-product enforcement.
+Status: SHIPPED. The offline Ed25519 verifier is `server/license.js`
+(verified at boot and re-checked daily); licenses are issued offline with
+`npm run license:issue` and installed via `POST /api/billing/license` or by
+dropping `promptwall.lic` next to `.env`. Absence = demo mode (zero gating);
+past the grace window only the admin console's config writes go read-only —
+detection, enforcement, approvals, audit, and evidence export always run. The
+embedded public key in `server/license.js` is a placeholder to be replaced with
+the vendor's real public key (from `--init-keypair`) before the first
+commercial release.
 
 ## Principles
 

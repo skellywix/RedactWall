@@ -39,6 +39,29 @@ test('every SIEM adapter emits a prompt-free, PII-free envelope', () => {
   }
 });
 
+test('otlp adapter emits a valid OTLP/HTTP JSON logs envelope', () => {
+  const a = alert({ maxSeverity: 4, createdAt: '2026-07-05T00:00:00.000Z' });
+  const req = formats.buildRequest(a, { id: 'o', type: 'otlp', url: 'https://collector.example.com', token: 't', serviceName: 'cu-prod' });
+  assert.strictEqual(req.url, 'https://collector.example.com/v1/logs');
+  assert.strictEqual(req.headers.authorization, 'Bearer t');
+  // A url already ending in /v1/logs must not be double-suffixed.
+  const req2 = formats.buildRequest(a, { id: 'o', type: 'otlp', url: 'https://collector.example.com/v1/logs' });
+  assert.strictEqual(req2.url, 'https://collector.example.com/v1/logs');
+  assert.strictEqual(req2.headers.authorization, undefined, 'no token -> no auth header');
+
+  const body = JSON.parse(req.body);
+  const rec = body.resourceLogs[0].scopeLogs[0].logRecords[0];
+  assert.strictEqual(typeof rec.timeUnixNano, 'string', 'int64 must be a JSON string');
+  assert.strictEqual(rec.severityNumber, 21, 'maxSeverity 4 -> FATAL(21)');
+  assert.strictEqual(rec.severityText, 'FATAL');
+  assert.strictEqual(rec.body.stringValue, formats.summaryLine({ ...a, schemaVersion: 2 }));
+  const svc = body.resourceLogs[0].resource.attributes.find((x) => x.key === 'service.name');
+  assert.strictEqual(svc.value.stringValue, 'cu-prod');
+  const risk = rec.attributes.find((x) => x.key === 'promptwall.risk_score');
+  assert.strictEqual(typeof risk.value.intValue, 'string', 'intValue must be a JSON string');
+  assert.ok(!req.body.includes('412-22-7843'), 'no raw PII in the OTLP envelope');
+});
+
 test('delivery succeeds and is recorded prompt-free', async () => {
   writeSubs([{ id: 'splunk1', name: 'Splunk', type: 'splunk_hec', url: 'https://splunk.example.com', token: 'hec' }]);
   const sent = [];

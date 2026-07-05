@@ -13,8 +13,13 @@ export function FindingChips({ findings, categories }: FindingChipsProps) {
   return (
     <div className="chips">
       {found.map((finding, index) => (
-        <span className="chip" key={`${finding.type}:${index}`} title={`Detected type: ${finding.type}`}>
-          <b>{finding.type}</b> {finding.masked || 'redacted'}
+        <span
+          className="chip"
+          key={`${finding.type}:${index}`}
+          title={`Detected type: ${finding.type}${finding.vendorLabel ? ` (${finding.vendorLabel})` : ''}`}
+        >
+          <b>{finding.type}</b>
+          {finding.vendorLabel ? ` · ${finding.vendorLabel}` : ''} {finding.masked || 'redacted'}
         </span>
       ))}
       {cats.map((category) => (

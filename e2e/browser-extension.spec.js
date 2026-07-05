@@ -54,6 +54,7 @@ function serverPolicyFromFixture(policy) {
     blockedFileUploadDestinations: policy.blockedFileUploadDestinations || [],
     blockedBrowserActions: policy.blockedBrowserActions || [],
     blockUnapprovedAiDestinations: policy.blockUnapprovedAiDestinations !== false,
+    ...(policy.corporateAiAccounts ? { corporateAiAccounts: policy.corporateAiAccounts } : {}),
     storeRawForApproval: true,
     rawRetentionDays: 30,
     ignore: [],
@@ -81,7 +82,7 @@ function comparableBrowserActions(rules) {
   }));
 }
 
-function chatFixture({ host, sendButton }) {
+function chatFixture({ host, sendButton, accountRegion = '' }) {
   return `<!doctype html>
 <html>
   <head>
@@ -101,6 +102,7 @@ function chatFixture({ host, sendButton }) {
   <body>
     <main>
       <h1>${host} controlled chat fixture</h1>
+      ${accountRegion}
       <textarea id="prompt-textarea" aria-label="Message"></textarea>
       ${sendButton}
       <section id="sent" aria-label="Sent messages"></section>
@@ -393,6 +395,39 @@ test.describe('browser extension live smoke', () => {
       await page.getByRole('button', { name: 'Request approval' }).click();
       await expect(page.locator('.ps-toast')).toContainText('Sent to your Security Admin for approval.');
       await expect(page.locator('[data-sent]')).toHaveCount(0);
+    } finally {
+      await context.close();
+      fs.rmSync(userDataDir, { recursive: true, force: true });
+    }
+  });
+
+  test('coaches on a personal AI account and records the account type (N4)', async ({ baseURL, request }, testInfo) => {
+    const coachPolicy = { ...fixturePolicy, corporateAiAccounts: { orgEmailDomains: ['examplecu.org'], personalAccountAction: 'coach' } };
+    const { context, userDataDir } = await launchExtensionContext(baseURL, testInfo, coachPolicy, request);
+    try {
+      const page = await openControlledAiPage(
+        context,
+        'https://chatgpt.com/',
+        chatFixture({
+          host: 'chatgpt.com',
+          sendButton: '<button data-testid="send-button" aria-label="Send prompt">Send</button>',
+          accountRegion: '<button data-testid="accounts-profile-button" aria-label="Google Account: Jane Roe (jane.roe@gmail.com)">Account</button>',
+        }),
+      );
+
+      // The probe runs on load + retries; the coach toast appears for a personal account.
+      await expect(page.locator('.ps-account-coach')).toContainText('personal account', { timeout: 20000 });
+
+      await applyFixturePolicyToPage(context, page, baseURL, 'chatgpt.com');
+      await page.locator('#prompt-textarea').fill('What are our branch hours this week?');
+      await page.locator('button[data-testid="send-button"]').click();
+      await page.waitForTimeout(400);
+
+      const rows = await (await request.get('/api/queries?limit=100')).json();
+      const personal = rows.filter((r) => r.accountType === 'personal');
+      expect(personal.length).toBeGreaterThan(0);
+      // No raw account email is ever stored.
+      expect(JSON.stringify(rows)).not.toContain('jane.roe@gmail.com');
     } finally {
       await context.close();
       fs.rmSync(userDataDir, { recursive: true, force: true });

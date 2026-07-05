@@ -73,7 +73,7 @@ function safeFinding(f) {
 }
 
 function safeInstallChecks(checks = []) {
-  return (Array.isArray(checks) ? checks : []).slice(0, 40).map((check) => {
+  return (Array.isArray(checks) ? checks : []).slice(0, 80).map((check) => {
     if (!check || typeof check !== 'object') return null;
     const id = typeof check.id === 'string' ? check.id.slice(0, 80) : null;
     if (!id) return null;
@@ -101,6 +101,8 @@ function safeQuery(q) {
     channel: q.channel || 'unknown',
     sensor: safeSensor(q.sensor),
     destination: q.destination || 'unknown',
+    accountType: ['personal', 'corporate', 'unknown'].includes(q.accountType) ? q.accountType : 'unknown',
+    originApp: typeof q.originApp === 'string' && /^[a-z][a-z0-9_]{0,39}$/.test(q.originApp) ? q.originApp : null,
     riskScore: q.riskScore || 0,
     maxSeverity: q.maxSeverity || 0,
     maxSeverityLabel: q.maxSeverityLabel || 'none',
@@ -784,6 +786,8 @@ function buildLineage(rows) {
     byChannel: aggregateLineage(rows, (q) => q.channel || 'unknown'),
     byCategory: aggregateLineage(rows, (q) => categoryLabels(q).length ? categoryLabels(q) : ['none']),
     byDecision: aggregateLineage(rows, (q) => decisionForStatus(q.status)),
+    byAccountType: aggregateLineage(rows, (q) => q.accountType || 'unknown'),
+    byOriginApp: aggregateLineage(rows, (q) => q.originApp || 'unknown'),
   };
 }
 

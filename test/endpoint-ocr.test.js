@@ -52,7 +52,12 @@ test('endpoint OCR settings accept PromptWall aliases', () => {
 
 test('endpoint OCR returns ocr_required for images when no local OCR is configured', async (t) => {
   const file = tempImage(t);
-  const extracted = await endpointOcr.extractImageFile(path.basename(file), file, { env: {}, discover: false });
+  // No native command and the bundled WASM fallback disabled: images must stay
+  // ocr_required rather than being inspected.
+  const extracted = await endpointOcr.extractImageFile(path.basename(file), file, {
+    env: { ENDPOINT_AGENT_OCR_WASM: 'off' },
+    discover: false,
+  });
 
   assert.strictEqual(extracted.extractionOk, false);
   assert.strictEqual(extracted.error, 'ocr_required');
