@@ -66,4 +66,6 @@ module.exports = {
   responseText: canonical.responseText,
   applyResponseText: canonical.applyResponseText,
   callUpstream,
+  toAnthropic,
+  fromAnthropic,
 };

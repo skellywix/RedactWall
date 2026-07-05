@@ -80,6 +80,80 @@ test('semantic — literal confidential markers are caught', () => {
   assert.ok(hasCat('function foo(){ const x = 1; return x; } class A {}', 'SOURCE_CODE'));
 });
 
+test('true positives - hard-stop identity documents and identifiers are caught', () => {
+  assert.ok(hasType('EIN tax id 12-3456789 for the business', 'US_TIN_EIN'), 'EIN with context');
+  assert.ok(hasType("driver's license # A1234567 on file", 'US_DRIVERS_LICENSE'), 'drivers license with label');
+  assert.ok(hasType('DL# D12345678 verified at the branch', 'US_DRIVERS_LICENSE'), 'DL shorthand');
+  assert.ok(hasType('license plate ABC1234 was seen leaving the lot', 'US_LICENSE_PLATE'), 'plate with context');
+  assert.ok(hasType('PAN ABCPD1234E for income tax filing', 'INDIA_PAN'), 'India PAN with context');
+  assert.ok(hasType('server at 192.168.10.44 responded', 'IP_ADDRESS'), 'IPv4');
+  assert.ok(hasType('patient date of birth 04/17/1985', 'DOB'), 'DOB with context');
+});
+
+test('false-positive bait - hard-stop identifier shapes need their context cues', () => {
+  assert.ok(!hasType('part number 12-3456789 restocked', 'US_TIN_EIN'), 'EIN shape without tax context');
+  assert.ok(!hasType('SKU ABC1234 restocked', 'US_LICENSE_PLATE'), 'plate shape without plate context');
+  assert.ok(!hasType('code ABCPD1234E in the batch export', 'INDIA_PAN'), 'PAN shape without tax context');
+  assert.ok(!hasType('invoice due 04/17/1985 net-30', 'DOB'), 'date without birth context');
+  assert.ok(!hasType('patient date of birth 02/30/1985', 'DOB'), 'implausible calendar date');
+});
+
+test('overlapping matches keep only the higher-severity finding', () => {
+  // The same 9 digits sit in both SSN context and routing-number context;
+  // US_SSN (severity 4) must win and ROUTING_NUMBER (severity 3) must be dropped.
+  const res = find('ssn / routing number 123456789');
+  assert.deepStrictEqual(res.findings.map((f) => f.type), ['US_SSN']);
+});
+
+test('redact replaces findings with typed brackets and leaves the rest intact', () => {
+  const text = 'Member SSN is 123-45-6789 and email jane.doe@example.com';
+  const res = find(text);
+  assert.strictEqual(D.redact(text, res.findings), 'Member SSN is [US_SSN] and email [EMAIL_ADDRESS]');
+  assert.strictEqual(D.redact(text, []), text, 'no findings is a no-op');
+  assert.strictEqual(D.redact(text, null), text, 'null findings is a no-op');
+  assert.ok(!D.redact(text, res.findings).includes('123-45-6789'), 'no raw PII survives redaction');
+});
+
+test('confidence tiers map score ranges to labels', () => {
+  const first = (text) => find(text).findings[0];
+  assert.strictEqual(first('ABA routing number 011000015').confidenceLabel, 'possible', 'score < 0.7');
+  assert.strictEqual(first('patient date of birth 04/17/1985').confidenceLabel, 'likely', '0.7 <= score < 0.9');
+  assert.strictEqual(first('International wire uses IBAN GB82 WEST 1234 5698 7654 32').confidenceLabel, 'very_likely', 'score >= 0.9');
+});
+
+test('checksum validators accept known-good values and reject corrupted ones', () => {
+  assert.ok(D.luhnValid('4111111111111111'), 'luhn ok');
+  assert.ok(!D.luhnValid('4111111111111112'), 'luhn off-by-one');
+  assert.ok(!D.luhnValid('411'), 'luhn too short');
+  assert.ok(D.ssnPlausible('123-45-6789'), 'ssn ok');
+  assert.ok(!D.ssnPlausible('000-45-6789'), 'ssn 000 area');
+  assert.ok(!D.ssnPlausible('666-45-6789'), 'ssn 666 area');
+  assert.ok(!D.ssnPlausible('923-45-6789'), 'ssn 9xx area');
+  assert.ok(!D.ssnPlausible('123-00-6789'), 'ssn 00 group');
+  assert.ok(!D.ssnPlausible('123-45-0000'), 'ssn 0000 serial');
+  assert.ok(D.abaValid('011000015'), 'aba ok');
+  assert.ok(!D.abaValid('011000016'), 'aba bad check digit');
+  assert.ok(D.ibanValid('GB82WEST12345698765432'), 'iban ok');
+  assert.ok(!D.ibanValid('GB82TEST12345698765432'), 'iban bad mod-97');
+  assert.ok(D.vinValid('1HGCM82633A004352'), 'vin ok');
+  assert.ok(!D.vinValid('1HGCM82633A004353'), 'vin bad check digit');
+  assert.ok(!D.vinValid('1HGCM82633A00435I'), 'vin illegal letter I');
+  assert.ok(D.datePlausible('02/29/2000'), 'leap day on a leap year');
+  assert.ok(!D.datePlausible('02/29/1900'), 'century non-leap year');
+  assert.ok(!D.datePlausible('02/30/1990'), 'impossible day');
+});
+
+test('cardNetwork classifies every supported network', () => {
+  assert.strictEqual(D.cardNetwork('4111111111111111'), 'visa');
+  assert.strictEqual(D.cardNetwork('5500005555555559'), 'mastercard');
+  assert.strictEqual(D.cardNetwork('2221000000000009'), 'mastercard', '2-series BIN range');
+  assert.strictEqual(D.cardNetwork('378282246310005'), 'amex');
+  assert.strictEqual(D.cardNetwork('6011111111111117'), 'discover');
+  assert.strictEqual(D.cardNetwork('36700102000000'), 'diners');
+  assert.strictEqual(D.cardNetwork('3528000700000000'), 'jcb');
+  assert.strictEqual(D.cardNetwork('1234567812345678'), null, 'unknown BIN');
+});
+
 // ---------------------------------------------------------------------------
 test('false-positive bait — ordinary 9-digit ids are NOT SSNs', () => {
   assert.ok(!hasType('Your order number is 122105155 ships Tuesday', 'US_SSN'), 'order number');
