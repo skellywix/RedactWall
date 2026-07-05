@@ -131,10 +131,11 @@ Nightfall's Claude Compliance API tenant ingestion.
 These are deliberately not yet built and are called out so the benchmark stays
 truthful:
 
-- **On-device OCR / image text extraction.** Nightfall extracts text from pasted
-  images; PromptWall's server-side OCR is optional and unbundled. A screenshot
-  paste is still a coverage hole where no endpoint OCR command is configured.
-  (WASM-bundled endpoint OCR is on the roadmap.)
+- **CV-model OCR depth.** The endpoint agent now bundles an offline WASM OCR
+  engine, so screenshots and document scans are read on-box with no configured
+  command and no egress. Nightfall's CV transformers still go deeper on hard
+  inputs — photos, handwriting, and heavily-degraded scans — and PromptWall's OCR
+  stays endpoint-only (server-side images remain `ocr_required` by design).
 - **Fine-tuned SLM detectors.** Harmonic's per-category small language models
   generalize further than PromptWall's logistic-regression classifier on novel
   phrasings. PromptWall trades some recall on unseen paraphrases for zero
@@ -155,7 +156,8 @@ truthful:
 Now shipped (previously gaps): vendor-labeled secrets, document-class
 categories, personal-vs-corporate account detection, coding-agent hooks,
 shadow-MCP discovery, OTLP export, published detection benchmarks
-(`docs/DETECTION_BENCHMARKS.md`), and the offline license verifier.
+(`docs/DETECTION_BENCHMARKS.md`), the offline license verifier, a machine-readable
+OpenAPI 3.1 spec (`docs/API_REFERENCE.md`), and bundled offline endpoint OCR.
 
 ## How to verify these claims locally
 
