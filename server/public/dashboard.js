@@ -419,6 +419,30 @@ function renderMonitorStatusFilters() {
   }).join('');
 }
 
+// Decision pivots: one chip per gate outcome, counting the loaded activity
+// window and drilling into All Activity with the matching status: field query.
+// Tokens match the search grammar's substring rule, so "blocked" covers
+// destination_blocked, file_upload_blocked, response_blocked, and friends.
+const DECISION_PIVOTS = [
+  { token: 'blocked', label: 'Blocked' },
+  { token: 'pending', label: 'Held' },
+  { token: 'redacted', label: 'Redacted' },
+  { token: 'warned', label: 'Warned' },
+  { token: 'allowed', label: 'Allowed' },
+  { token: 'denied', label: 'Denied' },
+  { token: 'approved', label: 'Approved' },
+];
+
+function renderDecisionPivots() {
+  const el = $('#monitorDecisionPivots');
+  if (!el) return;
+  const count = (token) => currentActivity.filter((q) => String(q.status || '').toLowerCase().includes(token)).length;
+  el.innerHTML = DECISION_PIVOTS.map((pivot) => `
+    <button class="signal-chip" type="button" data-search-pivot="status:${escapeHtml(pivot.token)}" data-then-tab="activity" title="Open All Activity filtered to status:${escapeHtml(pivot.token)}">
+      <span>${escapeHtml(pivot.label)}</span><b>${escapeHtml(count(pivot.token))}</b>
+    </button>`).join('');
+}
+
 // Every Command Center metric drills through to the tab where the operator
 // can act on it (Zscaler "Analyze more" pattern).
 function metricJumpTarget(metric) {
@@ -983,6 +1007,7 @@ function renderMonitor() {
   renderMonitorStatusFilters();
   renderPostureSegments();
   renderMonitorMetrics();
+  renderDecisionPivots();
   renderHardeningMission();
   renderOperatorFlow();
   renderHardeningActionQueue();
@@ -2379,6 +2404,47 @@ function renderQueueView() {
   renderIncident(rows.find((q) => q.id === selected) || rows[0]);
 }
 
+// Inline "Assigned to" editing on the queue row (Security Admin only), the
+// same convenience MDCA/Netskope give on incident rows.
+let queueAssignOpenId = null;
+
+function assigneeChip(q) {
+  if (!canAdminWrite()) return '';
+  return `<button class="chip" type="button" data-assign-toggle="${escapeHtml(q.id)}" title="Reassign this decision"><b>Assignee</b> ${escapeHtml(q.assignedUser || 'anyone in group')}</button>`;
+}
+
+function assignEditor(q) {
+  if (queueAssignOpenId !== q.id || !canAdminWrite()) return '';
+  const id = escapeHtml(q.id);
+  const field = (kind, value, max, label) => `<input type="text" id="assign_${kind}_${id}" value="${escapeHtml(value || '')}" maxlength="${max}" placeholder="${label}" aria-label="${label}"/>`;
+  const roleOption = (value, label) => `<option value="${value}" ${String(q.assignedRole || '') === value ? 'selected' : ''}>${label}</option>`;
+  return `<div class="assign-editor">
+    ${field('user', q.assignedUser, 128, 'Assignee username (blank = anyone)')}
+    ${field('group', q.assignedGroup, 64, 'Group, e.g. compliance')}
+    <select id="assign_role_${id}" aria-label="Assigned role">${roleOption('approver', 'Approver')}${roleOption('security_admin', 'Security Admin')}${roleOption('', 'No role (admins only)')}</select>
+    <button class="btn" type="button" data-assign-save="${id}">Save assignment</button>
+    <button class="btn" type="button" data-assign-toggle="${id}">Cancel</button>
+  </div>`;
+}
+
+async function saveAssignment(id) {
+  const body = {
+    assignedUser: ($(`#assign_user_${id}`).value || '').trim(),
+    assignedGroup: ($(`#assign_group_${id}`).value || '').trim(),
+    assignedRole: $(`#assign_role_${id}`).value || '',
+  };
+  const r = await api(`/api/queries/${encodeURIComponent(id)}/assign`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const updated = await responseJsonObject(r, null);
+  if (!updated) { toast('Assignment failed - check the group/role values.', 'bad'); return; }
+  queueAssignOpenId = null;
+  toast(`Assigned to ${updated.assignedUser || 'anyone'} in ${updated.assignedGroup || 'no group'}.`, 'good');
+  await loadQueue();
+}
+
 function renderQueueItem(q) {
   const isSelected = selected === q.id;
   const sev = sevClass(q.maxSeverityLabel);
@@ -2417,7 +2483,8 @@ function renderQueueItem(q) {
     </div>
     ${revealStatus}
     <div class="prompt ${revealDisplay ? escapeHtml(revealDisplay.promptClass) : ''}" id="p_${escapeHtml(q.id)}">${escapeHtml(promptText)}</div>
-    <div class="chips">${findingChips(q.findings, q.categories)}${workflowChips(q)}</div>
+    <div class="chips">${findingChips(q.findings, q.categories)}${workflowChips(q)}${assigneeChip(q)}</div>
+    ${assignEditor(q)}
     <div class="reasons">Detected: ${escapeHtml(detected)}${(q.reasons || []).length ? `; ${escapeHtml((q.reasons || []).join('; '))}` : ''}</div>
     ${controls}
   </article>`;
@@ -2548,6 +2615,17 @@ document.addEventListener('click', async (e) => {
     return;
   }
   closeStatusPopover();
+  const assignToggle = e.target.closest('[data-assign-toggle]');
+  if (assignToggle) {
+    queueAssignOpenId = queueAssignOpenId === assignToggle.dataset.assignToggle ? null : assignToggle.dataset.assignToggle;
+    renderQueueView();
+    return;
+  }
+  const assignSave = e.target.closest('[data-assign-save]');
+  if (assignSave) {
+    await saveAssignment(assignSave.dataset.assignSave);
+    return;
+  }
   const selectableQueueRow = e.target.closest('.q[data-id]');
   if (selectableQueueRow && !e.target.closest('textarea,input,button,select,a')) {
     selected = selectableQueueRow.dataset.id;
@@ -2972,6 +3050,7 @@ async function loadActivity() {
     if (!rows) return;
     currentActivity = rows;
     renderActivityRows(currentActivity);
+    renderDecisionPivots();
     markUpdated();
   } finally {
     setBusy('#tab-activity .panel', false);

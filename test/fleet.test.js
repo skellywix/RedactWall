@@ -12,9 +12,12 @@ process.env.SENTINEL_SECRET = 'unit-secret-stable';
 process.env.SENTINEL_DATA_KEY = 'unit-data-key-stable';
 process.env.INGEST_API_KEY = 'unit-ingest-key';
 process.env.SENTINEL_DB_PATH = path.join(os.tmpdir(), 'ps-fleet-' + crypto.randomBytes(6).toString('hex') + '.db');
+process.env.SENTINEL_SUBSCRIPTIONS_PATH = path.join(os.tmpdir(), 'ps-fleet-subs-' + crypto.randomBytes(6).toString('hex') + '.json');
 
+const fs = require('node:fs');
 const app = require('../server/app');
 const auth = require('../server/auth');
+const db = require('../server/db');
 const { listen } = require('./support/listen');
 
 const INGEST = { 'x-api-key': 'unit-ingest-key', 'Content-Type': 'application/json' };
@@ -75,6 +78,37 @@ test('gate traffic counts as presence, not just heartbeats', async () => withSer
   assert.strictEqual((await beat.json()).companions.endpoint_agent, 'active');
 }));
 
+test('sensors silent past the stale threshold fire one SENSOR_STALE alert per silence period', async () => withServer(async (port) => {
+  await heartbeat(port, { user: 'quiet@example.test', source: 'endpoint_agent', sensor: { name: 'endpoint_agent', version: '0.3.0', platform: 'win32' } });
+  fs.writeFileSync(process.env.SENTINEL_SUBSCRIPTIONS_PATH, JSON.stringify({
+    destinations: [{ id: 'stale_feed', name: 'Stale feed', type: 'webhook', url: 'https://siem.example.test/hook', eventTypes: ['SENSOR_STALE'] }],
+  }));
+  const sent = [];
+  const fakeFetch = async (url, req) => { sent.push({ url, body: JSON.parse(req.body) }); return { ok: true, status: 200 }; };
+  const later = Date.now() + 49 * 3600 * 1000;
+
+  const swept = await app.runSensorStaleSweep('unit-test', { now: later, dispatch: { fetch: fakeFetch, sleep: async () => {} } });
+  assert.ok(swept.stale >= 1, 'the silent sensor is reported');
+  assert.strictEqual(sent.length, 1, 'the subscribed destination is called once');
+  const payload = sent[0].body;
+  assert.strictEqual(payload.action, 'SENSOR_STALE');
+  assert.strictEqual(payload.staleAfterHours, 48);
+  assert.ok(payload.sensors.some((s) => s.user === 'quiet@example.test' && s.sensor === 'endpoint_agent' && s.lastSeen));
+  assert.ok(!JSON.stringify(payload).includes('prompt'), 'payload carries presence metadata only');
+
+  const entry = db.listAudit(20).find((a) => a.action === 'SENSOR_STALE_ALERTED');
+  assert.ok(entry, 'the sweep is audited');
+  assert.match(entry.detail, /delivered/);
+
+  const again = await app.runSensorStaleSweep('unit-test', { now: later, dispatch: { fetch: fakeFetch, sleep: async () => {} } });
+  assert.strictEqual(again.stale, 0, 'the same silence period does not re-alert');
+  assert.strictEqual(sent.length, 1);
+
+  await heartbeat(port, { user: 'quiet@example.test', source: 'endpoint_agent' });
+  const afterReport = await app.runSensorStaleSweep('unit-test', { now: later + 50 * 3600 * 1000, dispatch: { fetch: fakeFetch, sleep: async () => {} } });
+  assert.ok(afterReport.stale >= 1, 'a sensor that reported again and went silent again re-alerts');
+}));
+
 test('agent and guard heartbeat senders post the right shape', async () => {
   const agent = require('../sensors/endpoint-agent/agent');
   const guard = require('../sensors/mcp-guard/guard');
@@ -92,4 +126,8 @@ test('agent and guard heartbeat senders post the right shape', async () => {
   assert.strictEqual(calls[0].body.sensor.name, 'endpoint_agent');
   assert.strictEqual(calls[1].body.source, 'mcp_guard');
   assert.strictEqual(calls[1].body.user, 'copilot-agent');
+});
+
+test.after(() => {
+  try { fs.unlinkSync(process.env.SENTINEL_SUBSCRIPTIONS_PATH); } catch {}
 });

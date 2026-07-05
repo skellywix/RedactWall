@@ -23,6 +23,7 @@ const PACKAGE_FILES = [
   'sensors/endpoint-agent/file-flow-profiles.js',
   'sensors/endpoint-agent/ocr.js',
   'sensors/endpoint-agent/native-handoff.js',
+  'sensors/endpoint-agent/native-messaging-host.js',
   'sensors/endpoint-agent/write-handoff.js',
   'sensors/endpoint-agent/collectors/ai-tool-inventory.js',
   'sensors/endpoint-agent/collectors/clipboard-guard.js',
@@ -34,6 +35,7 @@ const PACKAGE_FILES = [
   'scripts/install-clipboard-guard.ps1',
   'scripts/install-desktop-collector.ps1',
   'scripts/install-endpoint-agent.ps1',
+  'scripts/install-file-intent-host.ps1',
   'scripts/install-git-push-guard.ps1',
   'scripts/run-clipboard-guard.ps1',
   'scripts/run-desktop-collector.ps1',
@@ -41,6 +43,7 @@ const PACKAGE_FILES = [
   'scripts/uninstall-clipboard-guard.ps1',
   'scripts/uninstall-desktop-collector.ps1',
   'scripts/uninstall-endpoint-agent.ps1',
+  'scripts/uninstall-file-intent-host.ps1',
   'scripts/uninstall-git-push-guard.ps1',
 ];
 
@@ -146,6 +149,27 @@ function validateRuntimeFiles(files) {
   }
   if (/--secret|contentBase64|readFileSync\(filePath/.test(handoffWriter)) {
     throw new Error('Endpoint agent handoff writer must not take secrets in argv or read file bodies');
+  }
+
+  const intentHost = files.find((file) => file.path === 'sensors/endpoint-agent/native-messaging-host.js').body.toString('utf8');
+  if (!/upload_intent/.test(intentHost) || !/resolveIntentFile/.test(intentHost) || !/writeHandoffFile/.test(intentHost)) {
+    throw new Error('Endpoint agent package must include the browser file-intent native messaging host');
+  }
+  if (/contentBase64|readFileSync\(|fetch\(|https?:\/\//.test(intentHost)) {
+    throw new Error('Endpoint file-intent host must stay local and never read file bodies or call out');
+  }
+
+  const intentInstall = files.find((file) => file.path === 'scripts/install-file-intent-host.ps1').body.toString('utf8');
+  if (!/NativeMessagingHosts/.test(intentInstall) || !/allowed_origins/.test(intentInstall) || !/\[a-p\]\{32\}/.test(intentInstall)) {
+    throw new Error('Endpoint file-intent host installer must register a per-user host manifest bound to one extension id');
+  }
+  if (/"-IngestKey"|"-HandoffSecret"|INGEST_API_KEY|ENDPOINT_AGENT_HANDOFF_SECRET/.test(intentInstall)) {
+    throw new Error('Endpoint file-intent host installer must not put secrets in launchers, manifests, or the registry');
+  }
+
+  const intentUninstall = files.find((file) => file.path === 'scripts/uninstall-file-intent-host.ps1').body.toString('utf8');
+  if (!/NativeMessagingHosts/.test(intentUninstall) || !/Remove-Item/.test(intentUninstall)) {
+    throw new Error('Endpoint file-intent host uninstaller must remove the per-user host registration');
   }
 
   const collector = files.find((file) => file.path === 'sensors/endpoint-agent/collectors/protected-upload.js').body.toString('utf8');
@@ -289,6 +313,8 @@ function packageEndpointAgent(opts = {}) {
       aiToolInventoryIncluded: true,
       nativeHandoffPrototypeIncluded: true,
       nativeHandoffWriterIncluded: true,
+      fileIntentHostIncluded: true,
+      fileIntentHostInstallerIncluded: true,
       protectedUploadCollectorIncluded: true,
       clipboardGuardIncluded: true,
       gitPushGuardIncluded: true,

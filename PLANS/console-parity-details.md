@@ -19,10 +19,12 @@ Legend: **HAVE** shipped · **PARTIAL** exists but thinner than competitors ·
 
 Implemented since this file was written: all ten quick wins, plus score
 explainability with regulation citations (GLBA/NCUA/PCI/HIPAA chips in the
-queue/activity rationale and in block reasons), the Detection Tester, and
+queue/activity rationale and in block reasons), the Detection Tester,
 cross-sensor fleet awareness (sensors heartbeat, learn about their
-companions, and the console shows per-user coverage gaps). Items still open
-are marked MISSING below with the reason when deliberate.
+companions, and the console shows per-user coverage gaps), inline queue
+reassignment, SENSOR_STALE staleness alerts, and the monitor decision
+chip row. Every remaining unchecked item below is a DELIBERATE SKIP with
+its reason inline - the buildable checklist is complete.
 
 ## Top 10 highest-value quick wins (all shipped)
 
@@ -71,9 +73,10 @@ are marked MISSING below with the reason when deliberate.
   decisions; per-item outcomes report what was skipped and why (50 max).
 - [x] HAVE: activity status chips show who decided, when, and the note on
   hover/click.
-- [ ] PARTIAL: assignment exists (approver routing) but no inline-editable
-  "Assigned to" on the row like MDCA/Netskope incident bulk-edit of severity
-  and assignee (Netskope DLP Incidents).
+- [x] HAVE: inline-editable "Assigned to" on the row (Security Admin only) -
+  assignee username, group, and role edit in place, audited as
+  APPROVAL_REASSIGNED, with empty values returning the item to "anyone in
+  the group" (POST /api/queries/:id/assign).
 - [x] HAVE: History section in the incident inspector - every audit-chain
   entry for the selected incident (created, reveals, escalations, decision).
 
@@ -83,9 +86,9 @@ are marked MISSING below with the reason when deliberate.
 - [x] HAVE: every Command Center metric card is a drill-through button into
   the tab where the operator can act (coverage / integrations / queue /
   activity by metric type).
-- [x] PARTIAL: decision pivots live in the search grammar (`status:blocked`,
-  `status:allowed`) applied from any metric drill-through; a dedicated
-  chip row on the monitor itself is future polish.
+- [x] HAVE: decision pivot chip row on the monitor - one chip per gate
+  outcome with live counts, each drilling into All Activity with the
+  matching `status:` field query (in addition to metric drill-throughs).
 - [ ] DELIBERATE SKIP: per-widget CSV on the Command Center - Insights owns
   data exports (series + executive summary CSV); monitor cards drill
   through to the acting tab instead of duplicating exports.
@@ -122,9 +125,10 @@ are marked MISSING below with the reason when deliberate.
   fleet matrix + companion reporting covers visibility.
 - [x] HAVE: per-user fleet matrix with ACTIVE / STALE / MISSING state chips
   (tooltips explain each state and last-seen).
-- [x] PARTIAL: sensors stale after 48h are flagged in the fleet matrix and in
-  the companion view returned to other sensors; no subscription alert event
-  fires yet for staleness.
+- [x] HAVE: sensors stale after 48h are flagged in the fleet matrix and in
+  the companion view returned to other sensors, and an hourly sweep fires a
+  SENSOR_STALE subscription event (metadata only, once per silence period,
+  audited as SENSOR_STALE_ALERTED).
 
 ## App Catalog (`#tab-catalog`)
 
