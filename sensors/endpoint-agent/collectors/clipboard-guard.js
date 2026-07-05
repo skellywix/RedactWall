@@ -88,6 +88,34 @@ async function readClipboard(opts = {}) {
   return result.stdout || '';
 }
 
+// Sanitized origin-app provenance: the FOREGROUND process' executable name only
+// (basename, lowercased, [a-z0-9_] id) — never a window title, path, argument,
+// or any clipboard content. This lets the examiner pack say "NPI copied from
+// the core-banking client into ChatGPT" without leaking anything.
+const ORIGIN_APP_ID_RE = /^[a-z][a-z0-9_]{0,39}$/;
+function normalizeOriginApp(value) {
+  // basename first so a stray path never leaks its structure into the id.
+  const leaf = String(value || '').trim().replace(/\\/g, '/').split('/').pop() || '';
+  const base = leaf.toLowerCase().replace(/\.exe$/, '').replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '');
+  return ORIGIN_APP_ID_RE.test(base) ? base : null;
+}
+
+async function foregroundApp(opts = {}) {
+  if (opts.foregroundApp) return normalizeOriginApp(await opts.foregroundApp());
+  if ((opts.platform || process.platform) !== 'win32') return null;
+  const run = opts.execFileAsync || execFileAsync;
+  // Returns ONLY the foreground process name (e.g. "chrome"). No title/path.
+  const script = 'Add-Type @"\nusing System;using System.Runtime.InteropServices;'
+    + 'public class W{[DllImport("user32.dll")]public static extern IntPtr GetForegroundWindow();'
+    + '[DllImport("user32.dll")]public static extern int GetWindowThreadProcessId(IntPtr h,out int p);}"@;'
+    + '$p=0;[void][W]::GetWindowThreadProcessId([W]::GetForegroundWindow(),[ref]$p);'
+    + '(Get-Process -Id $p -ErrorAction SilentlyContinue).ProcessName';
+  try {
+    const result = await run('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], { windowsHide: true, timeout: 4000, maxBuffer: 4096 });
+    return normalizeOriginApp((result.stdout || '').split(/\r?\n/)[0]);
+  } catch (_) { return null; }
+}
+
 async function clearClipboard(opts = {}) {
   if (opts.clearClipboard) return opts.clearClipboard();
   if ((opts.platform || process.platform) !== 'win32') throw new Error('clipboard guard is not supported on this platform');
@@ -117,6 +145,7 @@ function safePrompt(status, analysis) {
 function clipboardRecord(analysis, outcome, opts = {}) {
   const agent = loadAgent();
   const status = outcome === 'action_blocked' ? 'blocked' : 'flagged';
+  const originApp = normalizeOriginApp(opts.originApp);
   return {
     prompt: safePrompt(status, analysis),
     user: opts.user,
@@ -124,6 +153,7 @@ function clipboardRecord(analysis, outcome, opts = {}) {
     source: 'endpoint_agent',
     channel: 'clipboard',
     sensor: agent.sensorMetadata(),
+    ...(originApp ? { originApp } : {}),
     clientOutcome: outcome,
     note: outcome === 'action_blocked'
       ? 'endpoint clipboard cleared locally after sensitive content detection'
@@ -195,7 +225,9 @@ async function collectClipboard(opts = {}) {
   }
 
   const outcome = opts.clearOnBlock && !clearFailed ? 'action_blocked' : 'paste_flagged';
-  const record = clipboardRecord(analysis, outcome, opts);
+  // Best-effort origin-app provenance (sanitized process name only).
+  const originApp = opts.originApp !== undefined ? opts.originApp : await foregroundApp(opts).catch(() => null);
+  const record = clipboardRecord(analysis, outcome, { ...opts, originApp });
   const res = await reportClipboard(record, opts);
   const status = clearFailed ? 'clear_failed' : opts.clearOnBlock ? 'blocked' : 'flagged';
   if (!res) {
@@ -270,5 +302,8 @@ module.exports = {
   _internal: {
     clearClipboard,
     readClipboard,
+    clipboardRecord,
+    foregroundApp,
+    normalizeOriginApp,
   },
 };

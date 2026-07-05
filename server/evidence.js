@@ -102,6 +102,7 @@ function safeQuery(q) {
     sensor: safeSensor(q.sensor),
     destination: q.destination || 'unknown',
     accountType: ['personal', 'corporate', 'unknown'].includes(q.accountType) ? q.accountType : 'unknown',
+    originApp: typeof q.originApp === 'string' && /^[a-z][a-z0-9_]{0,39}$/.test(q.originApp) ? q.originApp : null,
     riskScore: q.riskScore || 0,
     maxSeverity: q.maxSeverity || 0,
     maxSeverityLabel: q.maxSeverityLabel || 'none',
@@ -786,6 +787,7 @@ function buildLineage(rows) {
     byCategory: aggregateLineage(rows, (q) => categoryLabels(q).length ? categoryLabels(q) : ['none']),
     byDecision: aggregateLineage(rows, (q) => decisionForStatus(q.status)),
     byAccountType: aggregateLineage(rows, (q) => q.accountType || 'unknown'),
+    byOriginApp: aggregateLineage(rows, (q) => q.originApp || 'unknown'),
   };
 }
 

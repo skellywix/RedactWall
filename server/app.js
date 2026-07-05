@@ -987,6 +987,7 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
   const clientAccount = (req.body && req.body.clientAccount) || {};
   const accountType = ['personal', 'corporate', 'unknown'].includes(clientAccount.type) ? clientAccount.type : 'unknown';
   const accountSignal = clientAccount.signal || 'none';
+  const originApp = (req.body && typeof req.body.originApp === 'string' && /^[a-z][a-z0-9_]{0,39}$/.test(req.body.originApp)) ? req.body.originApp : null;
   const pol = policy.loadPolicy();
   const declaredClientPreRedacted = req.body && req.body.clientPreRedacted === true;
   const clientAnalysis = declaredClientPreRedacted ? clientAnalysisFrom(req.body) : null;
@@ -1145,6 +1146,7 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
     maxSeverityLabel: analysis.maxSeverityLabel, reasons: verdict.reasons,
     scoreBreakdown: analysis.scoreBreakdown, regulations: analysis.regulations,
     accountType, accountSignal,
+    ...(originApp ? { originApp } : {}),
     ...policyDecisionMetadata(verdict),
   };
 

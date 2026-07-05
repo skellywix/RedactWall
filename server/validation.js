@@ -185,6 +185,9 @@ const gateSchema = z.object({
     type: z.enum(['personal', 'corporate', 'unknown']),
     signal: z.enum(['workspace_badge', 'org_email_domain', 'personal_email_domain', 'consumer_badge', 'unrecognized_email_domain', 'none']),
   }).strict().optional(),
+  // Sanitized origin-app id for data-lineage (e.g. clipboard copied from a
+  // core-banking client). Process-name id only — never a title/path/content.
+  originApp: z.string().regex(/^[a-z][a-z0-9_]{0,39}$/).optional(),
 }).strict();
 
 const rehydrateSchema = z.object({

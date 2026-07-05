@@ -310,3 +310,66 @@ test('clipboardRecord never includes raw content fields', () => {
   assert.match(record.clientFindings[0].masked, /9043$/);
   assert.ok(!JSON.stringify(record).includes(RAW_SSN));
 });
+
+test('normalizeOriginApp reduces any foreground signal to a bare sanitized process id', () => {
+  const { normalizeOriginApp } = _internal;
+  assert.strictEqual(normalizeOriginApp('chrome.exe'), 'chrome');
+  assert.strictEqual(normalizeOriginApp('Chrome'), 'chrome');
+  // Full path / window-title shaped input never leaks structure — basename only.
+  assert.strictEqual(normalizeOriginApp('C:\\Program Files\\Core Banking\\CoreBankingClient.exe'), 'corebankingclient');
+  assert.strictEqual(normalizeOriginApp('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'), 'google_chrome');
+  assert.strictEqual(normalizeOriginApp(''), null);
+  assert.strictEqual(normalizeOriginApp('   '), null);
+  assert.strictEqual(normalizeOriginApp(null), null);
+  assert.strictEqual(normalizeOriginApp(undefined), null);
+  // Leading non-letter and over-long names are rejected rather than truncated blindly.
+  assert.strictEqual(normalizeOriginApp('123app'), null);
+  assert.strictEqual(normalizeOriginApp('a'.repeat(60)), null);
+});
+
+test('foregroundApp is Windows-only and normalizes an injected signal', async () => {
+  const { foregroundApp } = _internal;
+  assert.strictEqual(await foregroundApp({ platform: 'linux' }), null);
+  assert.strictEqual(await foregroundApp({ platform: 'darwin' }), null);
+  assert.strictEqual(await foregroundApp({ foregroundApp: async () => 'Teams.exe' }), 'teams');
+  // A window-title-with-path style leak from the OS probe is still reduced to a bare id.
+  assert.strictEqual(
+    await foregroundApp({ foregroundApp: async () => 'C:\\Users\\teller\\AppData\\core-banking client.exe' }),
+    'core_banking_client'
+  );
+});
+
+test('collectClipboard attaches a sanitized origin app and never leaks its path', async () => {
+  let reportRequest;
+  const result = await collectClipboard({
+    readClipboard: async () => `Member SSN ${RAW_SSN}`,
+    foregroundApp: async () => 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    policy: { enforcementMode: 'warn', alwaysBlock: ['US_SSN'], ignore: [], disabledDetectors: [] },
+    report: async (req) => {
+      reportRequest = req;
+      return { id: 'q_clip_origin', status: 'paste_flagged' };
+    },
+    destination: 'ChatGPT',
+  });
+
+  assert.strictEqual(result.status, 'flagged');
+  assert.strictEqual(reportRequest.originApp, 'chrome');
+  // Provenance carries only the bare process id — no window title, path, or content.
+  const serialized = JSON.stringify(reportRequest);
+  assert.ok(!serialized.includes('Program Files'));
+  assert.ok(!serialized.includes('\\'));
+  assert.ok(!serialized.includes('.exe'));
+  assert.ok(!serialized.includes(RAW_SSN));
+});
+
+test('collectClipboard omits originApp when no foreground signal is available', async () => {
+  let reportRequest;
+  await collectClipboard({
+    readClipboard: async () => `Member SSN ${RAW_SSN}`,
+    originApp: null,
+    policy: { enforcementMode: 'warn', alwaysBlock: ['US_SSN'], ignore: [], disabledDetectors: [] },
+    report: async (req) => { reportRequest = req; return { id: 'q_clip_none', status: 'paste_flagged' }; },
+  });
+
+  assert.ok(!('originApp' in reportRequest));
+});
