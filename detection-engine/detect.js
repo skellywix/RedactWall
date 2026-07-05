@@ -177,7 +177,7 @@
     SECRET_KEY: 4, PRIVATE_KEY: 4, CANARY_TOKEN: 4, PASSWORD: 3, DOB: 3, EXACT_MATCH: 4,
     EMAIL_ADDRESS: 2, PHONE_NUMBER: 2, IP_ADDRESS: 1, IPV6_ADDRESS: 1, US_ADDRESS: 2, PERSON_NAME: 1,
     SOURCE_CODE: 3, LEGAL_CONTRACT: 3, CREDENTIALS: 4, CONFIDENTIAL_BUSINESS: 3, HEALTH_RECORD: 3,
-    PROMPT_ATTACK: 3,
+    PROMPT_ATTACK: 3, FINANCIAL_STATEMENT: 3, TAX_FILING: 3, HR_RECORD: 3,
   };
   const SEVERITY_LABEL = { 0: 'none', 1: 'low', 2: 'medium', 3: 'high', 4: 'critical' };
   // Which laws/frameworks make each detection sensitive. These drive the
@@ -225,6 +225,9 @@
     CONFIDENTIAL_BUSINESS: Object.freeze(['trade secret (DTSA)', 'company confidentiality']),
     VIN: Object.freeze(['DPPA 18 USC 2721']),
     PROMPT_ATTACK: Object.freeze(['AI security guardrail']),
+    FINANCIAL_STATEMENT: Object.freeze(['GLBA 501(b)', 'company confidentiality']),
+    TAX_FILING: Object.freeze(['IRS Pub 1075', 'GLBA 501(b)']),
+    HR_RECORD: Object.freeze(['company confidentiality', 'state employment-privacy laws']),
   });
   const NO_REGULATIONS = Object.freeze([]);
   function regulationsFor(type) { return REGULATIONS[type] || NO_REGULATIONS; }
@@ -337,7 +340,10 @@
     { id: 'US_ADDRESS', score: 0.6, re: /\b\d{1,6}\s+(?:[A-Za-z0-9.'-]+\s){0,4}(?:Street|St|Avenue|Ave|Boulevard|Blvd|Road|Rd|Lane|Ln|Drive|Dr|Court|Ct|Way|Place|Pl|Terrace|Ter)\b\.?/gi },
   ];
   const NAME_CONTEXT = /\b(?:member|customer|client|account holder|name is|patient|mr\.?|mrs\.?|ms\.?|dr\.?)\b[:,]?\s+([A-Z][a-z]+\s+[A-Z][a-z]+)/g;
-  const SEMANTIC_DETECTOR_IDS = ['PERSON_NAME', 'SOURCE_CODE', 'LEGAL_CONTRACT', 'CREDENTIALS', 'CONFIDENTIAL_BUSINESS', 'HEALTH_RECORD', 'PROMPT_ATTACK'];
+  // Stateless probe over the same pattern — .test() on a /g regex is lastIndex-
+  // dependent, so classifySemantic uses this copy instead.
+  const NAME_CONTEXT_PROBE = new RegExp(NAME_CONTEXT.source);
+  const SEMANTIC_DETECTOR_IDS = ['PERSON_NAME', 'SOURCE_CODE', 'LEGAL_CONTRACT', 'CREDENTIALS', 'CONFIDENTIAL_BUSINESS', 'HEALTH_RECORD', 'PROMPT_ATTACK', 'FINANCIAL_STATEMENT', 'TAX_FILING', 'HR_RECORD'];
   // Emitted dynamically (not from a regex in DETECTORS) but must still be a
   // known, policy-addressable detector id — e.g. usable in alwaysBlock.
   const VIRTUAL_DETECTOR_IDS = ['EXACT_MATCH'];
@@ -755,6 +761,35 @@
       const deidentifiedCue = /\b(?:without|no|not)\s+(?:any\s+)?patient\s+(?:details|context|data|identifiers?|info|information)\b/i.test(t);
       const generalAsk = /\b(explain|what are|best practices|high level|in general|no specifics)\b/i.test(t);
       if (identifierCue || (patientCue && healthTopic && !deidentifiedCue && !generalAsk)) cats.push({ category: 'HEALTH_RECORD', score: 0.72 });
+    }
+    // Document-class categories (cf. Nightfall's LLM file classifiers), on-device
+    // and keyword-first: two independent cue families ANDed plus negation cues
+    // (the HEALTH_RECORD pattern), max-combined with the LR model so a future
+    // trained model plugs in with zero engine change.
+    if (want('FINANCIAL_STATEMENT')) {
+      const docCue = /\b(balance sheet|income statement|statement of (?:income|operations|cash flows|financial condition)|profit (?:and|&) loss|p&l|trial balance|general ledger|10-[kq]\b|call report|form 5300)/i.test(t);
+      const lineItemCue = /\b(total (?:assets|liabilities|equity)|net (?:income|interest income|worth)|retained earnings|accounts (?:receivable|payable)|allowance for (?:loan|credit) losses|provision for loan losses|charge-?offs?|operating expenses?|delinquen)/i.test(t);
+      const generalAsk = /\b(explain|what (?:is|are)|how (?:to|do i) read|in general|template|example|for a class|financial literacy)\b/i.test(t);
+      const dollarCue = /\$[\d,]+/.test(t);
+      const p = _lrProb(t, 'FINANCIAL_STATEMENT');
+      const kwFires = docCue && lineItemCue && (!generalAsk || dollarCue);
+      if (kwFires || p >= _lrThresh('FINANCIAL_STATEMENT')) cats.push({ category: 'FINANCIAL_STATEMENT', score: Math.min(1, Math.max(kwFires ? 0.72 : 0, p)) });
+    }
+    if (want('TAX_FILING')) {
+      const formCue = /\b(?:form\s+)?(w-2|w-4|w-9|1099(?:-[a-z]+)?|1040|941\b|940\b|1120s?|1065|schedule\s+[a-e]\b|k-1\b|990\b)/i.test(t);
+      const fieldCue = /\b(wages|withholding|withheld|taxable income|adjusted gross income|agi\b|filing status|box \d|tax year 20\d{2}|employer identification|refund|amount owed|federal income tax)/i.test(t);
+      const generalAsk = /\b(explain|what (?:is|are)|how (?:to|do i) read|in general|template|example|just the concepts)\b/i.test(t);
+      const p = _lrProb(t, 'TAX_FILING');
+      const kwFires = formCue && fieldCue && !generalAsk;
+      if (kwFires || p >= _lrThresh('TAX_FILING')) cats.push({ category: 'TAX_FILING', score: Math.min(1, Math.max(kwFires ? 0.72 : 0, p)) });
+    }
+    if (want('HR_RECORD')) {
+      const hrDocCue = /\b(performance (?:review|improvement plan)|pip\b|disciplinary (?:action|write-?up)|written warning|termination (?:letter|notice)|offer letter|salary (?:history|increase|adjustment)|compensation (?:change|review)|hr (?:file|record|case|complaint)|employee (?:id|record|file)|personnel file|fmla\b|accommodation request|background check|exit interview)/i.test(t);
+      const employeeCue = /\b(employee|staff member|direct report|teller|loan officer|branch manager|underwriter|coworker|new hire)\b/i.test(t) || NAME_CONTEXT_PROBE.test(t);
+      const templateAsk = /\b(job (?:posting|description)|template|handbook|policy|in general|best practices|hypothetical|example|sample)\b/i.test(t);
+      const p = _lrProb(t, 'HR_RECORD');
+      const kwFires = hrDocCue && employeeCue && !templateAsk;
+      if (kwFires || p >= _lrThresh('HR_RECORD')) cats.push({ category: 'HR_RECORD', score: Math.min(1, Math.max(kwFires ? 0.72 : 0, p)) });
     }
     return cats;
   }

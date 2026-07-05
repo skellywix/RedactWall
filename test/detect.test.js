@@ -347,6 +347,38 @@ test('semantic — generalizes to unseen code', () => {
   assert.ok(hasCat('total = 0\nfor row in rows:\n    total = total + row[2]\n', 'SOURCE_CODE'));
 });
 
+// ---------------------------------------------------------------------------
+// DOCUMENT-CLASS CATEGORIES — keyword-first, two cue families ANDed plus
+// negation cues (cf. Nightfall's file classifiers, but on-device).
+test('document classes — financial statement content is caught', () => {
+  assert.ok(hasCat('Q2 balance sheet attached: total assets $412M, retained earnings up 3%.', 'FINANCIAL_STATEMENT'));
+  assert.ok(hasCat('The call report shows charge-offs rising and net interest income down.', 'FINANCIAL_STATEMENT'));
+});
+test('document classes — tax filing content is caught', () => {
+  assert.ok(hasCat('Her W-2 shows wages of $61,200 and federal income tax withheld of $8,340.', 'TAX_FILING'));
+  assert.ok(hasCat('The 1099 lists box 1 interest for tax year 2025.', 'TAX_FILING'));
+});
+test('document classes — HR record content is caught', () => {
+  assert.ok(hasCat('The performance improvement plan for our head teller starts Monday.', 'HR_RECORD'));
+  assert.ok(hasCat('Attach the disciplinary write-up for the employee before the meeting.', 'HR_RECORD'));
+});
+test('document classes — about-the-topic asks do not fire', () => {
+  assert.ok(!hasCat('Explain what appears on a balance sheet for a financial-literacy class', 'FINANCIAL_STATEMENT'));
+  assert.ok(!hasCat('How do I read my W-2? Just the concepts please', 'TAX_FILING'));
+  assert.ok(!hasCat('Draft a job posting for a teller position', 'HR_RECORD'));
+  assert.ok(!hasCat('Write a performance review template our managers can use, best practices please', 'HR_RECORD'));
+});
+test('document classes — listed with severity, regulations, and disable support', () => {
+  const detectors = new Map(D.listDetectors().map((d) => [d.id, d]));
+  for (const id of ['FINANCIAL_STATEMENT', 'TAX_FILING', 'HR_RECORD']) {
+    assert.ok(detectors.has(id), id + ' should be listed');
+    assert.strictEqual(detectors.get(id).severity, 3, id + ' severity');
+    assert.ok(D.regulationsFor(id).length >= 2, id + ' has regulation citations');
+  }
+  const disabled = D.analyze('Q2 balance sheet: total assets $412M, retained earnings up 3%.', { disabledDetectors: ['FINANCIAL_STATEMENT'] });
+  assert.strictEqual(disabled.categories.some((c) => c.category === 'FINANCIAL_STATEMENT'), false);
+});
+
 // The bucket that protects admin trust: ordinary business prompts must NOT be
 // flagged as confidential/code by the model.
 test('semantic — no false positives on benign business prompts', () => {

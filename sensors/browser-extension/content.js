@@ -185,6 +185,9 @@
     IPV6_ADDRESS: 'IPv6 address',
     US_LICENSE_PLATE: 'license plate',
     VIN: 'vehicle ID number',
+    FINANCIAL_STATEMENT: 'financial statement',
+    TAX_FILING: 'tax filing',
+    HR_RECORD: 'HR record',
   };
 
   const COACHING = {
@@ -212,6 +215,9 @@
     LEGAL_CONTRACT: 'Remove contract text unless approved for external AI review.',
     CONFIDENTIAL_BUSINESS: 'Remove unreleased plans, pricing, vendor changes, or strategy details.',
     CANARY_TOKEN: 'Stop and notify Security Admin before continuing.',
+    FINANCIAL_STATEMENT: 'Remove financial statement line items or use an approved reporting workflow.',
+    TAX_FILING: 'Remove tax form details before sending.',
+    HR_RECORD: 'Remove employee personnel details before sending.',
   };
 
   function labelFor(item) {
