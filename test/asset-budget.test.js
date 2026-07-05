@@ -81,6 +81,24 @@ test('admin public assets stay within transfer budgets', () => {
   assertWithin('admin public assets gzip total', totals.gzipBytes, 122_000);
 });
 
+test('console app bundle stays within transfer budgets', (t) => {
+  // The bundle is gitignored build output; CI builds it before tests. Local
+  // runs without `npm run console:build` skip rather than fail on a missing dir.
+  if (!fs.existsSync(path.join(root, 'server', 'public', 'app', 'index.html'))) {
+    t.skip('console bundle not built (npm run console:build)');
+    return;
+  }
+  const totals = walkFiles(path.join('server', 'public', 'app'))
+    .map(readAsset)
+    .reduce((acc, asset) => ({
+      rawBytes: acc.rawBytes + asset.rawBytes,
+      gzipBytes: acc.gzipBytes + asset.gzipBytes,
+    }), { rawBytes: 0, gzipBytes: 0 });
+
+  assertWithin('console app bundle raw total', totals.rawBytes, 700_000);
+  assertWithin('console app bundle gzip total', totals.gzipBytes, 200_000);
+});
+
 test('browser extension assets stay within install package budgets', () => {
   assertAssetBudgets([
     { path: 'sensors/browser-extension/lib/detect.js', maxRawBytes: 105_000, maxGzipBytes: 37_000 },

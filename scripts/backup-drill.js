@@ -1,11 +1,20 @@
 'use strict';
 /**
- * One-command disaster-recovery drill for the SQLite evidence store.
+ * One-command disaster-recovery drill for the evidence store.
  *
- * Creates a backup with scripts/backup-store.js, verifies the manifest,
- * restores to a scratch path, re-opens the restored database read-only, and
- * proves the audit hash-chain plus row counts survived the round trip. The
- * report contains only hashes, counts, and check results — never prompt text.
+ * SQLite (default driver): creates a backup with scripts/backup-store.js,
+ * verifies the manifest, restores to a scratch path, re-opens the restored
+ * database read-only, and proves the audit hash-chain plus row counts
+ * survived the round trip.
+ *
+ * Postgres (SENTINEL_DB_DRIVER=postgres): dumps with pg_dump, restores into a
+ * uniquely named scratch database on the same server, verifies the audit
+ * chain and counts there, and always drops the scratch database afterwards
+ * (--keep retains only the dump + manifest). The connected role needs
+ * CREATEDB for the scratch restore.
+ *
+ * Either way the report contains only hashes, counts, and check results —
+ * never prompt text or connection credentials.
  */
 require('../server/env').loadEnv();
 const fs = require('fs');
@@ -108,9 +117,95 @@ function cleanupArtifacts(workDir, created, restoredPath) {
   fs.rmSync(created.manifestFile, { force: true });
 }
 
+// ---- Postgres drill ----------------------------------------------------------
+
+async function withPgClient(connectionString, fn) {
+  const { Client } = require('pg');
+  const client = new Client({ connectionString });
+  await client.connect();
+  try {
+    return await fn(client);
+  } finally {
+    await client.end();
+  }
+}
+
+function pgDrillChecks({ created, verified, restored }) {
+  const manifest = created.manifest || {};
+  const stats = manifest.stats || {};
+  const source = manifest.sourceIntegrity || {};
+  return [
+    { id: 'source_audit_chain_ok', ok: !!source.ok },
+    { id: 'backup_verified', ok: !!verified.ok },
+    { id: 'manifest_hash_matches', ok: !!verified.manifestOk },
+    { id: 'restore_verified', ok: !!(restored && restored.ok) },
+    { id: 'restored_audit_chain_ok', ok: !!(restored && restored.auditIntegrity && restored.auditIntegrity.ok) },
+    { id: 'restored_query_count_matches_manifest', ok: !!(restored && restored.queryCount === stats.total) },
+    { id: 'restored_audit_count_matches_source', ok: !!(restored && restored.auditIntegrity && restored.auditIntegrity.count === source.count) },
+  ];
+}
+
+function buildPgReport({ created, verified, restored, scratchDb, workDir, keep }) {
+  const checks = pgDrillChecks({ created, verified, restored });
+  const pass = checks.every((c) => c.ok);
+  return {
+    drill: 'backup-restore',
+    driver: 'postgres',
+    result: pass ? 'PASS' : 'FAIL',
+    pass,
+    completedAt: new Date().toISOString(),
+    backup: {
+      file: path.basename(created.file),
+      bytes: created.bytes,
+      sha256: created.backupSha256,
+    },
+    restored: restored ? {
+      scratchDatabase: scratchDb,
+      queryCount: restored.queryCount,
+      auditCount: restored.auditCount,
+      auditChainOk: !!(restored.auditIntegrity && restored.auditIntegrity.ok),
+    } : null,
+    checks,
+    artifacts: keep ? { keptAt: workDir } : { cleanedUp: true },
+    rawPromptBodiesIncluded: false,
+  };
+}
+
+function cleanupPgArtifacts(workDir, created) {
+  if (workDir.owned) {
+    fs.rmSync(workDir.dir, { recursive: true, force: true });
+    return;
+  }
+  fs.rmSync(created.file, { force: true });
+  fs.rmSync(created.manifestFile, { force: true });
+}
+
+/** Dump → restore into a scratch database → verify there → drop it (always). */
+async function runPgDrill(opts, db, create) {
+  const connectionString = process.env.SENTINEL_DATABASE_URL || process.env.DATABASE_URL;
+  if (!connectionString) throw new Error('postgres drill requires SENTINEL_DATABASE_URL');
+  const workDir = resolveWorkDir(opts.backupDir);
+  const scratchDb = 'promptwall_drill_' + crypto.randomBytes(5).toString('hex');
+  const created = await create({ outDir: workDir.dir, dbModule: db });
+  const verified = backup.verifyBackup({ file: created.file, manifestFile: created.manifestFile });
+  let restored = null;
+  if (verified.ok) {
+    await withPgClient(connectionString, (client) => client.query(`CREATE DATABASE ${scratchDb}`));
+    try {
+      restored = backup.restoreBackup({ file: created.file, to: scratchDb });
+    } finally {
+      await withPgClient(connectionString, (client) => client.query(`DROP DATABASE IF EXISTS ${scratchDb} WITH (FORCE)`));
+    }
+  }
+  const report = buildPgReport({ created, verified, restored, scratchDb, workDir: workDir.dir, keep: !!opts.keep });
+  if (!opts.keep) cleanupPgArtifacts(workDir, created);
+  return report;
+}
+
 async function runDrill(opts = {}) {
   const db = opts.dbModule || require('../server/db');
   const create = opts.createBackup || backup.createBackup;
+  if ((db._driverKind || 'sqlite') === 'postgres') return runPgDrill(opts, db, create);
   const workDir = resolveWorkDir(opts.backupDir);
   const restoredPath = path.join(workDir.dir, 'drill-restore', 'restored-sentinel.db');
   const created = await create({ outDir: workDir.dir, dbModule: db });
