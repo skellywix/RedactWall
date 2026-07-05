@@ -57,7 +57,7 @@ test('fleet summary shows per-user sensors and companion gaps to the console', a
   const r = await fetch(`http://127.0.0.1:${port}/api/fleet`, { headers: { cookie } });
   assert.strictEqual(r.status, 200);
   const fleet = await r.json();
-  assert.deepStrictEqual(fleet.trackedSensors, ['browser_extension', 'endpoint_agent', 'mcp_guard']);
+  assert.deepStrictEqual(fleet.trackedSensors, ['browser_extension', 'endpoint_agent', 'mcp_guard', 'agent_hooks']);
   const solo = fleet.users.find((u) => u.user === 'solo@example.test');
   assert.strictEqual(solo.sensors.browser_extension.state, 'active');
   assert.strictEqual(solo.sensors.browser_extension.version, '0.3.0');

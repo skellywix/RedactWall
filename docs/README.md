@@ -22,6 +22,7 @@ Use this index when you know the job but not the file name.
 | Monitor-only AI chat proxy lab | `AI_CHAT_DLP_PROXY_LAB.md` |
 | Enforced AI LLM Gateway, shared limiter, and HA compose | `AI_LLM_GATEWAY.md` |
 | Endpoint agent, MCP guard, Docker, secrets, health checks | `DEPLOYMENT.md` |
+| Agent hooks for Claude Code (prompts, shell, MCP tool calls) | `AGENT_HOOKS.md` |
 | Evidence pack schedule automation | `EVIDENCE_PACK_TASK.md` |
 | Security trust package export | `SECURITY_TRUST_PACKAGE.md` |
 

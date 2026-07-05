@@ -11,6 +11,7 @@ const SENSOR_LABELS = {
   browser_extension: 'Browser extension',
   endpoint_agent: 'Endpoint agent',
   mcp_guard: 'MCP guard',
+  agent_hooks: 'Agent hooks (Claude Code)',
   api: 'API gateway',
   proxy: 'Network proxy',
 };
