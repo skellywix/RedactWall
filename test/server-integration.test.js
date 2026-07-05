@@ -2,8 +2,24 @@
 /** Real HTTP smoke tests for the importable Express app. */
 const test = require('node:test');
 const assert = require('node:assert');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+
+// Isolate the SQLite store BEFORE requiring the app so the smoke tests never
+// open (or mutate) a developer's live data/sentinel.db.
+const dbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pw-server-integration-'));
+process.env.SENTINEL_DB_PATH = path.join(dbDir, 'test.db');
+
 const app = require('../server/app');
+const db = require('../server/db');
 const { listen } = require('./support/listen');
+
+// Close the SQLite handle before deleting: Windows cannot unlink open files.
+test.after(() => {
+  try { db._db.close(); } catch {}
+  fs.rmSync(dbDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+});
 
 
 test('server module exports an app without requiring a fixed listening port', async (t) => {
@@ -49,6 +65,18 @@ test('unauthenticated navigation redirects pages but returns API auth errors', a
   const root = await fetch(`${base}/`, { redirect: 'manual' });
   assert.strictEqual(root.status, 302);
   assert.strictEqual(root.headers.get('location'), '/index.html');
+
+  process.env.SENTINEL_CONSOLE_DEFAULT = 'app';
+  try {
+    const newConsoleRoot = await fetch(`${base}/`, { redirect: 'manual' });
+    assert.strictEqual(newConsoleRoot.status, 302);
+    assert.strictEqual(newConsoleRoot.headers.get('location'), '/app/');
+    const gatedApp = await fetch(`${base}/app/`, { redirect: 'manual' });
+    assert.strictEqual(gatedApp.status, 302);
+    assert.strictEqual(gatedApp.headers.get('location'), '/login.html');
+  } finally {
+    delete process.env.SENTINEL_CONSOLE_DEFAULT;
+  }
 
   const dashboard = await fetch(`${base}/index.html`, { redirect: 'manual' });
   assert.strictEqual(dashboard.status, 302);

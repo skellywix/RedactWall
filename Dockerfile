@@ -7,7 +7,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3 make g+
     && rm -rf /var/lib/apt/lists/*
 COPY package*.json ./
 RUN --mount=type=cache,target=/root/.npm npm ci --omit=dev
+COPY console/package*.json ./console/
+RUN --mount=type=cache,target=/root/.npm npm ci --prefix console
 COPY . .
+RUN npm run build --prefix console
 
 FROM node:22-bookworm-slim AS runtime
 ENV NODE_ENV=production \
@@ -21,6 +24,8 @@ WORKDIR /app
 COPY --from=builder --chown=node:node /app/node_modules ./node_modules
 COPY --chown=node:node package*.json ./
 COPY --chown=node:node server ./server
+# Console bundle is built in the builder stage, not present in the context.
+COPY --from=builder --chown=node:node /app/server/public/app ./server/public/app
 COPY --chown=node:node detection-engine ./detection-engine
 COPY --chown=node:node config ./config
 COPY --chown=node:node scripts ./scripts

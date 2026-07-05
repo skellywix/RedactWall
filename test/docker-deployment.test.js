@@ -10,8 +10,6 @@ const compose = fs.readFileSync(path.join(root, 'docker-compose.yml'), 'utf8');
 const dockerfile = fs.readFileSync(path.join(root, 'Dockerfile'), 'utf8');
 const dockerignore = fs.readFileSync(path.join(root, '.dockerignore'), 'utf8');
 const gitignore = fs.readFileSync(path.join(root, '.gitignore'), 'utf8');
-const packageJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
-const mechaScript = fs.readFileSync(path.join(root, 'scripts', 'mecha-docker.ps1'), 'utf8');
 const deployment = fs.readFileSync(path.join(root, 'docs', 'DEPLOYMENT.md'), 'utf8');
 
 function composeEnvironment() {
@@ -112,20 +110,6 @@ test('deployment docs describe compose readiness and persistent state', () => {
   assert.match(deployment, /read-only root filesystem/);
 });
 
-test('MECHA standing Docker test stack is repeatable and preserves its volume', () => {
+test('local env files stay out of git', () => {
   assert.match(gitignore, /^\.env\*\.local$/m);
-  assert.match(mechaScript, /promptwall-mecha-20260628/);
-  assert.match(mechaScript, /\.env\.mecha\.local/);
-  assert.match(mechaScript, /HostPort = .*4027/);
-  assert.match(mechaScript, /New-HexSecret/);
-  assert.match(mechaScript, /New-Base32Secret/);
-  assert.match(mechaScript, /docker compose --env-file \$EnvFile -p \$ProjectName/);
-  assert.match(mechaScript, /Invoke-Compose @\('stop'\)/);
-  assert.doesNotMatch(mechaScript, /down\s+-v/);
-  assert.doesNotMatch(mechaScript, /MockAdminPassword2026/);
-  assert.doesNotMatch(mechaScript, /ps_ingest_mock_mecha_20260628_local_32chars/);
-  assert.match(deployment, /MECHA Standing Docker Test Environment/);
-  assert.match(deployment, /promptwall-mecha-20260628_promptwall-data/);
-  assert.strictEqual(packageJson.scripts['docker:mecha'], 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/mecha-docker.ps1 start');
-  assert.strictEqual(packageJson.scripts['docker:mecha:smoke'], 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/mecha-docker.ps1 smoke');
 });

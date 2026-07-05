@@ -8,7 +8,9 @@ That is intentional. The current product uses SQLite with a hash-chained audit
 store. Running one customer per stack preserves strong tenant isolation and
 local-disk SQLite semantics while you sell the first version. A shared
 multi-tenant SaaS plane should be a later migration to managed Postgres, tenant
-scoped queries, SSO, and centralized billing operations.
+scoped queries, SSO, and centralized billing operations. When that migration
+happens, `docs/MANAGED_POSTGRES.md` is the operator runbook for the Postgres
+control plane (RDS role setup, migrations, backups, monitoring, sizing).
 
 ## AWS Shape
 
@@ -238,8 +240,13 @@ in the unit environment.
 Move to a shared SaaS control plane after the first paid customer stack is
 operational. That migration should include:
 
-- Postgres datastore with tenant-scoped query and audit tables.
-- Database migrations and backup/restore runbooks.
+- Postgres datastore: SHIPPED behind `SENTINEL_DB_DRIVER=postgres` with
+  tenant-scoped queries (indexed `orgId` + forced row-level security) and a
+  database-enforced append-only audit table.
+- Database migrations: SHIPPED (auto-applied ordered history on startup for
+  SQLite and Postgres). Backup/restore runbooks: SHIPPED (`npm run backup`,
+  `npm run backup:drill`, scheduled-backup installers; `pg_dump`/snapshots on
+  Postgres).
 - Shared-SaaS identity lifecycle on top of the current customer-silo
   SCIM-backed OIDC login.
 - Billing provider integration for subscription and seat updates.

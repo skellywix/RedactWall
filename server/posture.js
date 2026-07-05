@@ -1639,6 +1639,7 @@ function objectives({ rows, policy, coverageReport, auditIntegrity, nowMs, harde
       'coverage',
     ),
     ...hardeningObjectives(hardening),
+    attributionObjective(totals),
     objective(
       'govern_ai_actions',
       'Govern AI actions',
@@ -1664,6 +1665,23 @@ function objectives({ rows, policy, coverageReport, auditIntegrity, nowMs, harde
       'queue',
     ),
   ];
+}
+
+function attributionObjective(totals = {}) {
+  const unattributed = n(totals.unattributedEvents);
+  const rate = Number(totals.unattributedRate) || 0;
+  const mode = totals.unmanagedInstallMode || 'allow';
+  const score = unattributed
+    ? Math.max(0, 100 - Math.round(rate * 100) - (mode === 'allow' ? 15 : 0))
+    : 100;
+  return objective(
+    'guarantee_user_attribution',
+    'Guarantee per-user attribution',
+    score,
+    `${unattributed} unattributed events / unmanaged installs ${mode}`,
+    unattributed || mode === 'allow' ? 'Set unmanagedInstalls to flag or block' : 'Keep managed identity enforced',
+    'coverage',
+  );
 }
 
 function sensorStatus(sensor = {}) {

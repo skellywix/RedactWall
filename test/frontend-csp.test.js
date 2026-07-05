@@ -26,6 +26,18 @@ test('login page sends optional authenticator code', () => {
   assert.match(loginJs, /mfaRequired/);
 });
 
+test('console app bundle loads module scripts instead of inline scripts', (t) => {
+  const appIndexPath = path.join(root, 'server', 'public', 'app', 'index.html');
+  if (!fs.existsSync(appIndexPath)) {
+    t.skip('console bundle not built (npm run console:build)');
+    return;
+  }
+  const appHtml = fs.readFileSync(appIndexPath, 'utf8');
+  assert.match(appHtml, /<script type="module"[^>]* src="\/app\/assets\//);
+  assert.doesNotMatch(appHtml, /<script>\s*\S/);
+  assert.doesNotMatch(appHtml, /<script type="module">\s*\S/);
+});
+
 test('public frontend files avoid known mojibake after asset extraction', () => {
   for (const [name, text] of Object.entries({ dashboardHtml, loginHtml, dashboardJs, loginJs })) {
     assert.doesNotMatch(text, /[âÂÃ�]/, name);

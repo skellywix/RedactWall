@@ -16,26 +16,40 @@ const express = require('express');
 const cookieParser = require('cookie-parser');
 const helmet = require('helmet');
 const crypto = require('crypto');
+const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
 const detector = require('./detector');
-const processors = require('./processors');
+const email = require('./email');
+const fleet = require('./fleet');
+const adapters = require('../detection-engine/adapters');
+const parsePool = require('./parse-pool');
 const policy = require('./policy');
 const policyImpact = require('./policy-impact');
 const db = require('./db');
+fleet.init(db);
 const auth = require('./auth');
+// SCIM deactivation invalidates already-issued sessions, not just new logins.
+auth.setSessionRevokedCheck((session) => db.identityRevokedSince(session.user, session.iat));
 const dataCrypto = require('./crypto');
 const templates = require('./templates');
 const alerts = require('./alerts');
+const subscriptions = require('./subscriptions');
+const policyBundle = require('./policy-bundle');
 const siemPackage = require('./siem-package');
 const evidence = require('./evidence');
 const securityPackage = require('./security-package');
 const preflight = require('./preflight');
 const validation = require('./validation');
 const coverage = require('./coverage');
+const insights = require('./insights');
+const appCatalog = require('./app-catalog');
 const posture = require('./posture');
 const detectorFeedback = require('./detector-feedback');
 const detectionQuality = require('./detection-quality');
+const ticketSync = require('./ticket-sync');
+const semanticRemote = require('./semantic-remote');
 const {
   endpointAiToolAttentionIds,
   failedInstallCheckIds,
@@ -80,6 +94,19 @@ const OIDC_STATE_COOKIE_CLEAR_OPTIONS = {
 };
 
 app.disable('x-powered-by');
+
+// Behind a load balancer/proxy, req.ip is otherwise the proxy's address, which
+// collapses per-client ingest throttling into one shared bucket (one bad client
+// could lock out the whole sensor fleet) and lets x-forwarded-* be trusted
+// blindly. Default OFF (direct-connect/demo); set TRUST_PROXY when deployed
+// behind a known proxy: a hop count ("1"), "true", or an IP/subnet list.
+(function configureTrustProxy() {
+  const raw = String(process.env.TRUST_PROXY || process.env.PROMPTWALL_TRUST_PROXY || '').trim();
+  if (!raw) return;
+  if (/^\d+$/.test(raw)) app.set('trust proxy', Number(raw));
+  else if (/^(true|false)$/i.test(raw)) app.set('trust proxy', raw.toLowerCase() === 'true');
+  else app.set('trust proxy', raw.split(',').map((s) => s.trim()).filter(Boolean));
+})();
 
 app.use(helmet({
   contentSecurityPolicy: {
@@ -155,6 +182,12 @@ function emitSecurityAlert(row, action, opts = {}) {
 function fireSecurityAlert(row, opts) {
   try {
     Promise.resolve(alerts.emitSecurityAlert(row, opts)).catch(() => {});
+    // Fan out to configured named SIEM/SOAR subscriptions (retry + delivery
+    // history). Same threshold gate as the single webhook; payloads are the
+    // prompt-free sanitized event.
+    if (alerts.shouldAlert(row, opts)) {
+      Promise.resolve(subscriptions.dispatch(alerts.sanitizedAlert(row, opts))).catch(() => {});
+    }
   } catch {}
 }
 
@@ -346,19 +379,22 @@ function routeOptionsFor(query = {}, opts = {}) {
 }
 
 function createQuery(query, opts = {}) {
-  return db.createQuery(routing.withWorkflow(query, routeOptionsFor(query, opts)));
+  const row = db.createQuery(routing.withWorkflow(query, routeOptionsFor(query, opts)));
+  fleet.recordPresence(row);
+  return row;
 }
 
 function createQueryWithReleaseToken(query) {
   const routed = routing.withWorkflow(query, routeOptionsFor(query));
+  let result;
   if (routed && (routed.status === 'pending' || routed._tokenVault)) {
     const release = releaseTokens.issueReleaseToken();
-    return {
-      row: db.createQuery({ ...routed, _releaseTokenHash: release.hash }),
-      releaseToken: release.token,
-    };
+    result = { row: db.createQuery({ ...routed, _releaseTokenHash: release.hash }), releaseToken: release.token };
+  } else {
+    result = { row: db.createQuery(routed), releaseToken: null };
   }
-  return { row: db.createQuery(routed), releaseToken: null };
+  fleet.recordPresence(result.row);
+  return result;
 }
 
 function releaseTokenPayload(releaseToken) {
@@ -509,6 +545,21 @@ function clientCategoriesFrom(body) {
     .map((c) => ({ category: c.category, score: safeNumber(c.score, 0.72, 0, 1) }));
 }
 
+// Rebuild the "why this score" rationale for sensor-computed verdicts, using
+// the same weights the engine applies, so client-scored rows explain
+// themselves in the console exactly like server-scored ones.
+function clientScoreBreakdown(findings, categories) {
+  const entry = (kind, type, severity, score) => ({
+    kind, type, severity,
+    severityLabel: detector.SEVERITY_LABEL[severity] || 'none',
+    confidence: score >= 0.9 ? 'very_likely' : score >= 0.7 ? 'likely' : 'possible',
+    points: Math.round(severity * score * (kind === 'finding' ? 8 : 7)),
+    regulations: detector.regulationsFor(type),
+  });
+  return findings.map((f) => entry('finding', f.type, f.severity, f.score))
+    .concat(categories.map((c) => entry('category', c.category, detector.SEVERITY[c.category] || 2, c.score)));
+}
+
 function clientAnalysisFrom(body) {
   if (!body || (!Array.isArray(body.clientFindings) && !Array.isArray(body.clientCategories))) return null;
   const findings = clientFindingsFrom(body);
@@ -529,6 +580,7 @@ function clientAnalysisFrom(body) {
   const computedRisk = Math.min(100, Math.round(findings.reduce((s, f) => s + f.severity * f.score * 8, 0)
     + categories.reduce((s, c) => s + (detector.SEVERITY[c.category] || 2) * c.score * 7, 0)));
   const riskScore = Math.max(safeNumber(body.clientRiskScore, computedRisk), computedRisk);
+  const scoreBreakdown = clientScoreBreakdown(findings, categories);
   return {
     findings,
     categories,
@@ -536,6 +588,8 @@ function clientAnalysisFrom(body) {
     riskScore,
     maxSeverity,
     maxSeverityLabel: detector.SEVERITY_LABEL[maxSeverity] || 'none',
+    scoreBreakdown,
+    regulations: [...new Set(scoreBreakdown.flatMap((e) => e.regulations))],
   };
 }
 
@@ -835,6 +889,16 @@ function blockBrowserActionByPolicy(res, context = {}, responseExtra = {}) {
   });
 }
 
+// Prompt-free AI-app discovery hook. Records a sighting only for real AI hosts
+// (governed or shadow), never for internal labels like 'gateway:...' or
+// 'sensor-health'. Best-effort — never blocks the gate path.
+function recordAiSighting(destination, source, outcome) {
+  try {
+    const host = adapters.normalizeHost(destination);
+    if (!host || host.includes(':') || !adapters.isAiHost(host)) return;
+    appCatalog.recordSighting({ destination: host, source: source === 'browser_extension' ? 'browser' : source, outcome });
+  } catch (e) { /* discovery is best-effort */ }
+}
 app.post('/api/v1/discovery', checkIngestKey, validation.validateBody(validation.aiDiscoverySchema), (req, res) => {
   if (!enforceTenantForSensor(req, res)) return;
   const {
@@ -906,7 +970,7 @@ app.post('/api/v1/discovery', checkIngestKey, validation.validateBody(validation
   });
 });
 
-app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gateSchema), (req, res) => {
+app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gateSchema), async (req, res) => {
   if (!enforceTenantForSensor(req, res)) return;
   const {
     prompt, user = 'unknown', destination = 'unknown', sourceIp = null,
@@ -1000,6 +1064,19 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
   if (clientOutcome === 'file_upload_blocked') {
     return blockFileUploadByPolicy(res, { user, orgId, destination, sourceIp, source, channel, sensor });
   }
+  if (policy.unmanagedInstallBlocked(user, pol)) {
+    return blockDestinationByPolicy(res, {
+      user,
+      orgId,
+      destination,
+      sourceIp,
+      source,
+      channel,
+      sensor,
+      redactedPrompt: '[unmanaged install blocked] ' + policy.normalizeDestination(destination),
+      reason: 'Unmanaged browser install blocked by policy; enroll the device for managed identity',
+    });
+  }
   if (declaredClientPreRedacted && !clientAnalysis) {
     return res.status(400).json({ error: 'client redaction analysis required' });
   }
@@ -1021,7 +1098,7 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
     });
   }
   const analyzeOpts = policy.analyzeOpts(pol);
-  const serverAnalysis = detector.analyze(prompt, analyzeOpts);
+  const serverAnalysis = await semanticRemote.augmentAnalysis(prompt, detector.analyze(prompt, analyzeOpts));
   const clientPreRedacted = declaredClientPreRedacted && clientAnalysis && !hasSensitivity(serverAnalysis);
   const clientRedactionResolved = (clientOutcome === 'redacted_sent' || clientOutcome === 'redacted_available') && clientPreRedacted;
   const analysis = clientPreRedacted ? clientAnalysis : serverAnalysis;
@@ -1032,7 +1109,8 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
   // Privacy-preserving record: redacted prompt + masked findings + categories.
   const redactedPrompt = clientRedactionResolved && !categoryNames(analysis).length ? prompt : safePreview(prompt, analysis);
   const findings = analysis.findings.map((f) => ({
-    type: f.type, severity: f.severity, score: f.score, masked: f.masked || detector.maskValue(f.type, f.value || ''),
+    type: f.type, severity: f.severity, score: f.score, confidence: f.confidenceLabel || null,
+    masked: f.masked || detector.maskValue(f.type, f.value || ''),
   }));
   const categories = (analysis.categories || []).map((c) => c.category);
 
@@ -1041,6 +1119,7 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
     redactedPrompt, findings, categories, entityCounts: analysis.entityCounts,
     riskScore: analysis.riskScore, maxSeverity: analysis.maxSeverity,
     maxSeverityLabel: analysis.maxSeverityLabel, reasons: verdict.reasons,
+    scoreBreakdown: analysis.scoreBreakdown, regulations: analysis.regulations,
     ...policyDecisionMetadata(verdict),
   };
 
@@ -1054,9 +1133,15 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
     return res.json({ id: row.id, decision: 'block', status: 'injection_blocked' });
   }
 
+  // One discovery sighting per gate request. Shadow-AI visits are recorded in
+  // their own branch below with the 'shadow' outcome, so skip the 'gated' record
+  // for them to avoid double-counting a single user action.
+  if (clientOutcome !== 'shadow_ai') recordAiSighting(destination, source, 'gated');
+
   // Shadow-AI discovery: a visit to an AI tool policy does not govern. Recorded
   // as an informational event so the examiner sees unmonitored paths, not a leak.
   if (clientOutcome === 'shadow_ai') {
+    recordAiSighting(destination, source, 'shadow');
     if (policy.unapprovedAiDestination(destination, pol)) {
       return blockDestinationByPolicy(res, {
         user,
@@ -1134,6 +1219,15 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
   else if (mode === 'warn') status = 'warned';
   else if (mode === 'justify') status = 'pending_justification';
   else status = 'pending';
+
+  // alwaysBlock invariant: when the prompt still contains a raw hard-stop value
+  // (serverAnalysis found it — so this is NOT a genuine client pre-redaction),
+  // a sensor-declared outcome can never clear it as sent/justified/warned. Hold
+  // it for Security Admin approval so no raw regulated value is recorded as
+  // cleared or issued a safe-to-send receipt. 'redacted' is exempt because the
+  // server re-tokenizes it below (real values never leave); 'blocked_by_user'
+  // already withholds.
+  if (hardStop && status !== 'redacted' && status !== 'blocked_by_user') status = 'pending';
 
   // Reversible tokenization: replace each detected value with a stable typed
   // placeholder and seal the token->value map (the "vault") at rest. The caller
@@ -1245,6 +1339,9 @@ app.post('/api/v1/heartbeat', checkIngestKey, validation.validateBody(validation
     decision: 'recorded',
     status: 'sensor_heartbeat',
     failedChecks,
+    // Tell this sensor about its peers on the same identity, so sensors can
+    // surface each other's absence (extension installed but agent missing, ...).
+    companions: fleet.companionsFor(user, { exclude: source }),
   });
 });
 
@@ -1267,9 +1364,9 @@ app.post('/api/v1/rehydrate', checkIngestKey, validation.validateBody(validation
 });
 
 // Public policy for sensors (ingest-key protected).
-app.get('/api/v1/policy', checkIngestKey, (req, res) => {
+function sensorSafePolicy() {
   const p = policy.loadPolicy();
-  res.json({
+  return {
     enforcementMode: p.enforcementMode, blockMinSeverity: p.blockMinSeverity,
     blockRiskScore: p.blockRiskScore, alwaysBlock: p.alwaysBlock,
     ignore: p.ignore || [],
@@ -1282,6 +1379,7 @@ app.get('/api/v1/policy', checkIngestKey, (req, res) => {
     blockedBrowserActions: p.blockedBrowserActions || [],
     blockUnapprovedAiDestinations: p.blockUnapprovedAiDestinations !== false,
     responseScanMode: p.responseScanMode || policy.DEFAULT_POLICY.responseScanMode,
+    unmanagedInstalls: p.unmanagedInstalls || policy.DEFAULT_POLICY.unmanagedInstalls,
     desktopCollectorDestination: p.desktopCollectorDestination || policy.DEFAULT_POLICY.desktopCollectorDestination,
     requiredSensors: p.requiredSensors || policy.DEFAULT_POLICY.requiredSensors,
     desiredSensorVersions: p.desiredSensorVersions || policy.DEFAULT_POLICY.desiredSensorVersions,
@@ -1289,7 +1387,22 @@ app.get('/api/v1/policy', checkIngestKey, (req, res) => {
     mcpBlockedTools: p.mcpBlockedTools || policy.DEFAULT_POLICY.mcpBlockedTools,
     mcpApprovalRequiredTools: p.mcpApprovalRequiredTools || policy.DEFAULT_POLICY.mcpApprovalRequiredTools,
     scanner: p.scanner || {},
-  });
+  };
+}
+
+app.get('/api/v1/policy', checkIngestKey, (req, res) => {
+  res.json(sensorSafePolicy());
+});
+
+// Signed, versioned, expiring policy bundle. Sensors verify with the public key
+// (GET /api/v1/policy/pubkey) and FAIL CLOSED when the bundle is unverifiable or
+// stale — moving policy trust to the sensor edge.
+app.get('/api/v1/policy/bundle', checkIngestKey, (req, res) => {
+  res.json(policyBundle.buildBundle(sensorSafePolicy()));
+});
+
+app.get('/api/v1/policy/pubkey', checkIngestKey, (req, res) => {
+  res.json({ publicKey: policyBundle.publicKeyPem(), algorithm: 'ed25519', bundleVersion: policyBundle.BUNDLE_VERSION });
 });
 
 // List available detectors (for the console enable/disable UI).
@@ -1319,7 +1432,7 @@ app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation
   if (buf.length > (pol.scanner && pol.scanner.maxFileBytes || 6.6e6)) return res.status(413).json({ error: 'file too large' });
 
   let extracted;
-  try { extracted = await processors.extractText(filename, buf); }
+  try { extracted = await parsePool.extractText(filename, buf); }
   catch (e) { extracted = { text: '', processor: null, supported: true, extractionOk: false, error: 'extract_failed' }; }
   if (!extracted.supported) {
     const row = createQuery({ status: 'flagged', user, orgId, destination, source, channel, sensor,
@@ -1370,6 +1483,7 @@ app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation
   const base = { user, orgId, destination, source, channel, sensor, filename: fileLabel, processor: extracted.processor,
     redactedPrompt: preview, findings, categories, entityCounts: analysis.entityCounts,
     riskScore: analysis.riskScore, maxSeverity: analysis.maxSeverity, maxSeverityLabel: analysis.maxSeverityLabel, reasons: verdict.reasons,
+    scoreBreakdown: analysis.scoreBreakdown, regulations: analysis.regulations,
     ...policyDecisionMetadata(verdict) };
 
   if (verdict.decision === 'allow') {
@@ -1422,7 +1536,7 @@ app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation
 
 // Scan an AI RESPONSE for sensitive data leaking back to the user (e.g. an MCP
 // tool pulled PII, or the model echoed it). Parity with output-scanning DLP.
-app.post('/api/v1/scan-response', checkIngestKey, validation.validateBody(validation.scanResponseSchema), (req, res) => {
+app.post('/api/v1/scan-response', checkIngestKey, validation.validateBody(validation.scanResponseSchema), async (req, res) => {
   if (!enforceTenantForSensor(req, res)) return;
   const { text, user = 'unknown', destination = 'unknown', source = 'api', orgId = null, sensor = null } = req.body || {};
   if (typeof text !== 'string' || !text.trim()) return res.status(400).json({ error: 'text (string) required' });
@@ -1434,7 +1548,7 @@ app.post('/api/v1/scan-response', checkIngestKey, validation.validateBody(valida
       reason: policy.destinationBlockReason(destination, pol),
     }, { leaked: false, findings: [], categories: [], redacted: '' });
   }
-  const analysis = detector.analyze(text, policy.analyzeOpts(pol));
+  const analysis = await semanticRemote.augmentAnalysis(text, detector.analyze(text, policy.analyzeOpts(pol)));
   const findings = analysis.findings.map((f) => ({ type: f.type, severity: f.severity, score: f.score, masked: detector.maskValue(f.type, f.value) }));
   const categories = (analysis.categories || []).map((c) => c.category);
   const redacted = safePreview(text, analysis);
@@ -1444,6 +1558,7 @@ app.post('/api/v1/scan-response', checkIngestKey, validation.validateBody(valida
     const row = createQuery({ status: outcome.status, mode: 'response_' + outcome.decision, user, orgId, destination, source, channel: 'ai_response', sensor,
       redactedPrompt: '[AI response] ' + redacted, findings, categories, entityCounts: analysis.entityCounts,
       riskScore: analysis.riskScore, maxSeverity: analysis.maxSeverity, maxSeverityLabel: analysis.maxSeverityLabel,
+      scoreBreakdown: analysis.scoreBreakdown, regulations: analysis.regulations,
       reasons: ['Sensitive data present in AI response', 'Response scan mode: ' + outcome.decision] });
     db.appendAudit({ action: outcome.action, queryId: row.id, actor: user, detail: `${source}: ${findings.map((f) => f.type).join(', ') || categories.join(', ')}` });
     emitSecurityAlert(row, outcome.action);
@@ -1490,9 +1605,13 @@ app.post('/api/login', validation.validateBody(validation.loginSchema), (req, re
     return res.status(401).json({ error: 'invalid credentials', remaining: r.remaining });
   }
   if (account.role === 'security_admin' && auth.ADMIN_MFA_REQUIRED && !auth.verifyTotpCode(otp)) {
-    const r = auth.registerFail(key);
-    db.appendAudit({ action: 'ADMIN_MFA_FAILED', actor: account.user, detail: r.locked ? 'locked out' : (r.remaining + ' attempts left') });
-    return res.status(401).json({ error: 'invalid mfa code', mfaRequired: true, remaining: r.remaining });
+    const recoveryIndex = auth.recoveryCodeIndex(otp);
+    if (recoveryIndex < 0 || !db.consumeMfaRecoveryCode(recoveryIndex)) {
+      const r = auth.registerFail(key);
+      db.appendAudit({ action: 'ADMIN_MFA_FAILED', actor: account.user, detail: r.locked ? 'locked out' : (r.remaining + ' attempts left') });
+      return res.status(401).json({ error: 'invalid mfa code', mfaRequired: true, remaining: r.remaining });
+    }
+    db.appendAudit({ action: 'ADMIN_MFA_RECOVERY_USED', actor: account.user, detail: `recovery code ${recoveryIndex + 1} of ${auth.MFA_RECOVERY_CODE_COUNT} consumed` });
   }
   auth.registerSuccess(key);
   const token = auth.createSession(account.user, account.role);
@@ -1552,6 +1671,11 @@ const sessionWrite = [auth.requireAuth, auth.requireCsrf];
 const adminRead = [auth.requireAuth, auth.requireRole(roles.SECURITY_ADMIN)];
 const adminWrite = [auth.requireAuth, auth.requireCsrf, auth.requireRole(roles.SECURITY_ADMIN)];
 const decisionWrite = [auth.requireAuth, auth.requireCsrf, auth.requireRole(roles.SECURITY_ADMIN, roles.APPROVER)];
+// Compliance evidence exports: the auditor's whole job, without admin power.
+const auditRead = [auth.requireAuth, auth.requireRole(roles.SECURITY_ADMIN, roles.AUDITOR)];
+// Fleet/runtime operations: updates, posture triage, delivery checks - no policy power.
+const operatorRead = [auth.requireAuth, auth.requireRole(roles.SECURITY_ADMIN, roles.OPERATOR)];
+const operatorWrite = [auth.requireAuth, auth.requireCsrf, auth.requireRole(roles.SECURITY_ADMIN, roles.OPERATOR)];
 const API_MAX_LIST_LIMIT = 5000;
 
 function boundedApiLimit(value, fallback = 200, max = API_MAX_LIST_LIMIT) {
@@ -1571,6 +1695,32 @@ app.post('/api/logout', ...sessionWrite, (req, res) => {
   res.json({ ok: true });
 });
 
+// Dedicated step-up flow: verify the password once, then re-issue the session
+// with a short-lived elevation window that reveal/approve actions accept.
+app.post('/api/auth/step-up', ...sessionWrite, (req, res) => {
+  const user = req.user && req.user.user;
+  const key = stepUpKey('STEP_UP', user, req);
+  const st = auth.loginStatus(key);
+  if (st.locked) {
+    db.appendAudit({ action: 'STEP_UP_LOCKED', actor: user || '?', detail: 'too many attempts' });
+    return res.status(429).json({ error: 'too many attempts - temporarily locked', retryMs: st.retryMs });
+  }
+  if (req.user.provider === 'oidc') {
+    if (auth.stepUpSatisfied(req.user)) return res.json({ ok: true, stepUpUntil: req.user.stepUpUntil });
+    return res.status(409).json({ error: 'reauthenticate with your identity provider to elevate', oidc: true });
+  }
+  if (!auth.verifyPassword(user, req.body && req.body.password)) {
+    const r = auth.registerFail(key);
+    db.appendAudit({ action: 'STEP_UP_FAILED', actor: user || '?', detail: r.locked ? 'locked out' : (r.remaining + ' attempts left') });
+    return res.status(401).json({ error: 'invalid credentials', remaining: r.remaining });
+  }
+  auth.registerSuccess(key);
+  const elevated = auth.elevateSession(req.user);
+  res.cookie(auth.SESSION_COOKIE_NAME, elevated, SESSION_COOKIE_OPTIONS);
+  db.appendAudit({ action: 'STEP_UP_GRANTED', actor: user, detail: `elevated for ${Math.round(auth.STEP_UP_TTL_MS / 60000)} min` });
+  res.json({ ok: true, stepUpUntil: Date.now() + auth.STEP_UP_TTL_MS });
+});
+
 function stepUpKey(scope, user, req) {
   return String(scope || 'admin').toLowerCase() + '|' + (user || '?') + '|' + (req.ip || (req.connection && req.connection.remoteAddress) || '');
 }
@@ -1586,7 +1736,7 @@ function requireStepUpPassword(scope) {
       emitAdminSecurityAlert(req, auditScope + '_LOCKED', user, auditScope);
       return res.status(429).json({ error: 'too many attempts - temporarily locked', retryMs: st.retryMs });
     }
-    if (auth.oidcStepUpSatisfied(req.user)) {
+    if (auth.stepUpSatisfied(req.user)) {
       auth.registerSuccess(key);
       return next();
     }
@@ -1648,6 +1798,15 @@ app.get('/api/queries', auth.requireAuth, (req, res) => {
   res.json(rows.map((q) => publicQuery(q)));
 });
 
+// Two-way ticket state: pull Jira/Linear issue status back onto queries.
+app.post('/api/tickets/sync', ...adminWrite, async (req, res) => {
+  const result = await ticketSync.syncTicketStatuses({
+    db,
+    onUpdate: (updated) => broadcast('query', { type: 'ticket_synced', query: publicQuery(updated) }),
+  });
+  res.json(result);
+});
+
 app.get('/api/queries/:id', auth.requireAuth, (req, res) => {
   const q = db.getQuery(req.params.id);
   if (!q) return res.status(404).json({ error: 'not found' });
@@ -1703,6 +1862,75 @@ app.post(
   },
 );
 
+// Bulk decision: approve or deny up to 50 held prompts in one audited pass.
+// Same gates as single decisions - role, per-item decision access, and
+// password step-up for approvals - with per-item outcomes so a partial bulk
+// is honest about what it skipped and why.
+function applyBulkDecision(req) {
+  const status = req.body.action === 'approve' ? 'approved' : 'denied';
+  const note = (req.body && req.body.note) || '';
+  const results = [];
+  for (const id of req.body.ids) {
+    const q = db.getQuery(id);
+    if (!q) { results.push({ id, outcome: 'skipped', reason: 'not found' }); continue; }
+    if (q.status !== 'pending') { results.push({ id, outcome: 'skipped', reason: `already ${q.status}` }); continue; }
+    if (!roles.canDecideQuery(req.user, q)) { results.push({ id, outcome: 'skipped', reason: 'not yours to decide' }); continue; }
+    db.updateQuery(id, { status, decidedBy: req.user.user, decidedAt: new Date().toISOString(), decisionNote: note });
+    db.appendAudit({ action: status.toUpperCase(), queryId: id, actor: req.user.user, detail: note ? `${note} (bulk)` : 'bulk decision' });
+    broadcast('decision', { id, status });
+    results.push({ id, outcome: status });
+  }
+  broadcast('stats', db.stats());
+  return results;
+}
+
+app.post(
+  '/api/queries/bulk-decision',
+  ...decisionWrite,
+  validation.validateBody(validation.bulkDecisionSchema),
+  (req, res, next) => (req.body.action === 'approve' ? requireApprovePassword(req, res, next) : next()),
+  (req, res) => {
+    const results = applyBulkDecision(req);
+    res.json({
+      results,
+      decided: results.filter((r) => r.outcome !== 'skipped').length,
+      skipped: results.filter((r) => r.outcome === 'skipped').length,
+    });
+  },
+);
+
+// Inline reassignment: Security Admins can change who owns a held decision
+// straight from the queue row. Metadata only - the audit line records the new
+// owner, never prompt content. Empty string clears a field; omitted fields
+// keep their routed value.
+function assignmentPatch(body = {}) {
+  const patch = {};
+  for (const key of ['assignedUser', 'assignedGroup', 'assignedRole']) {
+    if (body[key] === undefined) continue;
+    patch[key] = String(body[key]).trim() || null;
+  }
+  return patch;
+}
+
+app.post('/api/queries/:id/assign', ...adminWrite, validation.validateBody(validation.assignSchema), (req, res) => {
+  const q = db.getQuery(req.params.id);
+  if (!q) return res.status(404).json({ error: 'not found' });
+  if (!routing.routeableStatus(q.status)) return res.status(409).json({ error: `not reassignable: ${q.status}` });
+  const updated = db.updateQuery(q.id, assignmentPatch(req.body));
+  db.appendAudit({
+    action: 'APPROVAL_REASSIGNED',
+    queryId: q.id,
+    actor: req.user.user,
+    detail: [
+      `assignedUser=${updated.assignedUser || 'none'}`,
+      `assignedGroup=${updated.assignedGroup || 'none'}`,
+      `assignedRole=${updated.assignedRole || 'none'}`,
+    ].join('; '),
+  });
+  broadcast('query', { type: updated.status, query: publicQuery(updated) });
+  res.json(publicQuery(updated));
+});
+
 app.post('/api/queries/:id/deny', ...decisionWrite, validation.validateBody(validation.noteSchema), requireDecisionAccess, (req, res) => {
   const q = req.queryRecord;
   if (q.status !== 'pending') return res.status(409).json({ error: `already ${q.status}` });
@@ -1717,6 +1945,12 @@ app.post('/api/queries/:id/deny', ...decisionWrite, validation.validateBody(vali
 });
 
 app.get('/api/stats', auth.requireAuth, (req, res) => res.json(db.stats()));
+
+// AI-usage analytics for the Insights dashboard (metadata only; no prompt text).
+app.get('/api/insights', auth.requireAuth, (req, res) => {
+  const windowDays = boundedApiLimit(req.query.windowDays, 30, 90);
+  res.json(insights.summarize(db.listQueries({ limit: 5000 }), { windowDays }));
+});
 
 app.get('/api/billing/seats', ...adminRead, (req, res) => {
   res.json(tenant.seatReport(db));
@@ -1760,7 +1994,7 @@ function sendUpdateError(res, err) {
   res.status(err && err.statusCode ? err.statusCode : 500).json({ error: updater.publicError(err) });
 }
 
-app.get('/api/update/status', ...adminRead, async (req, res) => {
+app.get('/api/update/status', ...operatorRead, async (req, res) => {
   try {
     res.json(await updater.status());
   } catch (err) {
@@ -1779,7 +2013,7 @@ app.put('/api/update/config', ...adminWrite, validation.validateBody(validation.
   }
 });
 
-app.post('/api/update/check', ...adminWrite, async (req, res) => {
+app.post('/api/update/check', ...operatorWrite, async (req, res) => {
   try {
     const result = await updater.checkForUpdates();
     db.appendAudit({ action: 'APP_UPDATE_CHECKED', actor: req.user.user, detail: updateAuditDetail(result) });
@@ -1790,7 +2024,7 @@ app.post('/api/update/check', ...adminWrite, async (req, res) => {
   }
 });
 
-app.post('/api/update/apply', ...adminWrite, validation.validateBody(validation.updateApplySchema), async (req, res) => {
+app.post('/api/update/apply', ...operatorWrite, validation.validateBody(validation.updateApplySchema), async (req, res) => {
   db.appendAudit({ action: 'APP_UPDATE_STARTED', actor: req.user.user, detail: 'backup=true; fastForwardOnly=true' });
   try {
     const result = await updater.applyUpdate({ confirmBackup: req.body.confirmBackup === true });
@@ -1802,7 +2036,7 @@ app.post('/api/update/apply', ...adminWrite, validation.validateBody(validation.
   }
 });
 
-app.post('/api/update/restart', ...adminWrite, async (req, res) => {
+app.post('/api/update/restart', ...operatorWrite, async (req, res) => {
   try {
     const result = updater.scheduleRestart();
     db.appendAudit({ action: 'APP_UPDATE_RESTART_SCHEDULED', actor: req.user.user, detail: 'restart command scheduled' });
@@ -1911,7 +2145,7 @@ app.post('/api/queries/:id/detector-feedback', ...decisionWrite, validation.vali
   });
 });
 
-app.post('/api/posture/actions', ...adminWrite, validation.validateBody(validation.postureActionSchema), (req, res) => {
+app.post('/api/posture/actions', ...operatorWrite, validation.validateBody(validation.postureActionSchema), (req, res) => {
   const payload = {
     id: req.body.id,
     status: req.body.status,
@@ -1953,7 +2187,7 @@ app.post('/api/posture/notify', ...adminWrite, async (req, res) => {
   });
 });
 
-app.get('/api/integrations/siem/package', ...adminRead, (req, res) => {
+app.get('/api/integrations/siem/package', ...auditRead, (req, res) => {
   try {
     const profile = req.query.profile || 'all';
     const pkg = siemPackage.integrationPackage({ profile });
@@ -1980,7 +2214,7 @@ app.get('/api/integrations/siem/package', ...adminRead, (req, res) => {
   }
 });
 
-app.get('/api/security/package', ...adminRead, (req, res) => {
+app.get('/api/security/package', ...auditRead, (req, res) => {
   const pkg = currentSecurityTrustPackage();
   const format = String(req.query.format || req.query.download || '').toLowerCase();
   if (format === 'zip') {
@@ -2028,7 +2262,342 @@ app.post('/api/destinations/review', ...adminWrite, validation.validateBody(vali
   res.json({ destination: reviewed.destination, decision: reviewed.decision, policy: reviewed.policy, coverage: report });
 });
 
+// ---- AI app catalog ---------------------------------------------------------
+app.get('/api/catalog', auth.requireAuth, (req, res) => {
+  res.json({ apps: appCatalog.publicCatalog() });
+});
+
+app.post('/api/catalog', ...adminWrite, validation.validateBody(validation.catalogAddSchema), (req, res) => {
+  const record = appCatalog.addManual(req.body);
+  if (!record) return res.status(400).json({ error: 'invalid destination' });
+  db.appendAudit({ action: 'CATALOG_ADDED', actor: req.user.user, detail: `manual catalog entry: ${record.canonicalHost}` });
+  res.json({ app: appCatalog.publicCatalog().find((a) => a.destination === record.canonicalHost) || null });
+});
+
+app.post('/api/catalog/import', ...adminWrite, validation.validateBody(validation.catalogImportSchema), (req, res) => {
+  const result = appCatalog.importCsv(req.body.csv, { source: req.body.source || 'csv_import' });
+  db.appendAudit({ action: 'CATALOG_IMPORTED', actor: req.user.user, detail: `discovery import: ${result.imported} host(s), ${result.skipped} skipped` });
+  res.json({ ...result, apps: appCatalog.publicCatalog() });
+});
+
+// Review a catalogued app: apply a govern/allow/block decision to policy (reusing
+// the existing destination-review path) AND update catalog status/ownership.
+app.post('/api/catalog/:host/review', ...adminWrite, validation.validateBody(validation.catalogReviewSchema), (req, res) => {
+  const host = adapters.normalizeHost(req.params.host);
+  if (!host) return res.status(400).json({ error: 'invalid host' });
+  const before = policy.loadPolicy();
+  let reviewed;
+  try {
+    reviewed = policy.reviewDestination(before, host, req.body.decision);
+  } catch (e) {
+    return res.status(400).json({ error: 'invalid catalog review' });
+  }
+  policy.savePolicy(reviewed.policy);
+  const statusMap = { govern: 'tolerated', allow: 'sanctioned', block: 'blocked' };
+  appCatalog.annotate(host, {
+    owner: req.body.owner,
+    notes: req.body.notes,
+    sanctionedStatus: req.body.sanctionedStatus || statusMap[req.body.decision],
+  });
+  db.appendAudit({
+    action: 'CATALOG_REVIEWED',
+    actor: req.user.user,
+    detail: policy.policyChangeDetail(before, reviewed.policy, { reason: req.body.reason }),
+  });
+  broadcast('stats', db.stats());
+  res.json({
+    destination: host,
+    decision: reviewed.decision,
+    app: appCatalog.publicCatalog().find((a) => a.destination === host) || null,
+  });
+});
+
+// ---- Posture subscriptions (SIEM/SOAR delivery) -----------------------------
+app.get('/api/subscriptions', ...operatorRead, (req, res) => {
+  res.json({ destinations: subscriptions.publicDestinations(), supportedTypes: require('./siem-formats').supportedTypes() });
+});
+
+app.get('/api/subscriptions/deliveries', ...operatorRead, (req, res) => {
+  res.json({ deliveries: db.listDeliveries(boundedApiLimit(req.query.limit, 200)) });
+});
+
+// Send a synthetic test event to one destination (proves connectivity + auth).
+app.post('/api/subscriptions/:id/test', ...operatorWrite, async (req, res) => {
+  const dest = subscriptions.findDestination(req.params.id);
+  if (!dest) return res.status(404).json({ error: 'unknown subscription' });
+  const testAlert = alerts.sanitizedAlert({
+    id: 'test_' + Date.now(), createdAt: new Date().toISOString(), status: 'subscription_test',
+    user: req.user.user, orgId: null, source: 'console', channel: 'test', destination: 'promptwall:test',
+    riskScore: 0, maxSeverity: 0, maxSeverityLabel: 'none', findings: [], categories: [], reasons: ['subscription connectivity test'],
+  }, { action: 'SUBSCRIPTION_TEST', force: true });
+  const result = await subscriptions.deliverTo(dest, testAlert, { force: true });
+  db.appendAudit({ action: 'SUBSCRIPTION_TESTED', actor: req.user.user, detail: `subscription ${dest.id} (${dest.type}): ${result.status}` });
+  res.json({ result: { destId: result.destId, status: result.status, attempts: result.attempts, httpStatus: result.httpStatus || null } });
+});
+
+// ---- Sensor rollout downloads (Deploy tab) -----------------------------------
+const DEPLOY_ARTIFACTS = Object.freeze({
+  'extension-chrome': {
+    label: 'Browser extension (Chrome/Brave MV3)', kind: 'extension', target: 'chrome',
+    requires: 'Chrome or Brave 88+ (Manifest V3)',
+    install: 'Force-install via browser policy: docs/examples/chrome-extension-settings.example.json',
+  },
+  'extension-edge': {
+    label: 'Browser extension (Microsoft Edge)', kind: 'extension', target: 'edge',
+    requires: 'Microsoft Edge 88+ (Manifest V3)',
+    install: 'Force-install via browser policy: docs/examples/edge-extension-settings.example.json',
+  },
+  'extension-firefox': {
+    label: 'Browser extension (Firefox)', kind: 'extension', target: 'firefox',
+    requires: 'Firefox 109+',
+    install: 'Signed XPI + policy: docs/examples/firefox-extension-settings.example.json',
+  },
+  'endpoint-agent': {
+    label: 'Endpoint agent (desktop file/clipboard sensor)', kind: 'endpoint',
+    requires: 'Windows, macOS, or Linux with Node.js 22+',
+    install: 'Unzip on the endpoint, then follow the technician runbook service-install steps',
+  },
+  'mcp-guard': {
+    label: 'MCP guard (agent/connector sensor)', kind: 'mcp',
+    requires: 'Any MCP-capable client, Node.js 22+',
+    install: 'Wrap each MCP server command per the connector SDK guide',
+  },
+});
+
+function buildDeployArtifact(id) {
+  const spec = DEPLOY_ARTIFACTS[id];
+  if (!spec) return null;
+  const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'promptwall-deploy-'));
+  if (spec.kind === 'extension') {
+    return require('../scripts/package-extension').packageExtension({ outDir, target: spec.target });
+  }
+  if (spec.kind === 'endpoint') {
+    return require('../scripts/package-endpoint-agent').packageEndpointAgent({ outDir });
+  }
+  return require('../scripts/package-mcp-guard').packageMcpGuard({ outDir });
+}
+
+let deployMetadataCache = null;
+
+function deployArtifactMetadata() {
+  if (deployMetadataCache) return deployMetadataCache;
+  deployMetadataCache = Object.entries(DEPLOY_ARTIFACTS).map(([id, spec]) => {
+    try {
+      const built = buildDeployArtifact(id);
+      const manifest = built.packageManifest || {};
+      const meta = {
+        id,
+        label: spec.label,
+        kind: spec.kind,
+        fileName: path.basename(built.zipPath),
+        fileType: 'application/zip',
+        sizeBytes: manifest.sizeBytes || fs.statSync(built.zipPath).size,
+        sha256: manifest.sha256 || null,
+        fileCount: Array.isArray(manifest.files) ? manifest.files.length : null,
+        version: manifest.version || require('../package.json').version,
+        requires: spec.requires,
+        install: spec.install,
+        guide: spec.kind === 'extension' ? 'docs/MANAGED_EXTENSION_DEPLOYMENT.md'
+          : spec.kind === 'endpoint' ? 'docs/TECHNICIAN_DEPLOYMENT_GUIDE.md'
+            : 'docs/MCP_CONNECTOR_SDK.md',
+      };
+      fs.rmSync(path.dirname(built.zipPath), { recursive: true, force: true });
+      return meta;
+    } catch {
+      return { id, label: spec.label, kind: spec.kind, error: 'packaging failed' };
+    }
+  });
+  return deployMetadataCache;
+}
+
+function deployDownloadHistory(limit = 20) {
+  return db.listAudit(500)
+    .filter((entry) => entry.action === 'DEPLOY_ARTIFACT_DOWNLOADED')
+    .slice(0, limit)
+    .map((entry) => ({ ts: entry.ts, actor: entry.actor, detail: entry.detail }));
+}
+
+app.get('/api/deploy/artifacts', ...operatorRead, (req, res) => {
+  res.json({
+    artifacts: deployArtifactMetadata(),
+    history: deployDownloadHistory(),
+    version: require('../package.json').version,
+  });
+});
+
+app.get('/api/deploy/download/:artifact', ...operatorRead, (req, res) => {
+  const id = String(req.params.artifact || '');
+  if (!DEPLOY_ARTIFACTS[id]) return res.status(404).json({ error: 'unknown artifact' });
+  let built;
+  try {
+    built = buildDeployArtifact(id);
+  } catch (err) {
+    return res.status(500).json({ error: 'packaging failed' });
+  }
+  db.appendAudit({ action: 'DEPLOY_ARTIFACT_DOWNLOADED', actor: req.user.user, detail: `${id} v${built.packageManifest.version || 'unknown'} sha256:${(built.packageManifest.sha256 || '').slice(0, 16)}` });
+  res.download(built.zipPath, path.basename(built.zipPath), () => {
+    fs.rm(path.dirname(built.zipPath), { recursive: true, force: true }, () => {});
+  });
+});
+
 // Regulation policy templates (list + one-click apply).
+// Per-user sensor fleet: which sensors cover each identity, with the coverage
+// gaps the sensors reported about each other.
+app.get('/api/fleet', auth.requireAuth, (req, res) => {
+  res.json(fleet.summary());
+});
+
+// Analyst risk-score override with a required justification, visible to every
+// admin next to the computed score. Null score clears the override.
+app.post('/api/catalog/:host/override', ...adminWrite, (req, res) => {
+  const { score, note } = req.body || {};
+  if (score != null && (!Number.isFinite(Number(score)) || Number(score) < 0 || Number(score) > 100)) {
+    return res.status(400).json({ error: 'score must be 0-100 or null to clear' });
+  }
+  if (score != null && !String(note || '').trim()) {
+    return res.status(400).json({ error: 'a justification note is required for an override' });
+  }
+  const updated = appCatalog.overrideScore(req.params.host, { score, note, actor: req.user.user });
+  if (!updated) return res.status(404).json({ error: 'unknown app' });
+  db.appendAudit({
+    action: score == null ? 'CATALOG_OVERRIDE_CLEARED' : 'CATALOG_SCORE_OVERRIDDEN',
+    actor: req.user.user,
+    detail: score == null ? req.params.host : `${req.params.host} -> ${Math.round(Number(score))}: ${String(note).slice(0, 200)}`,
+  });
+  res.json({ ok: true });
+});
+
+// Identity configuration self-test: reports which sign-in paths are actually
+// wired (config completeness only - no outbound calls), and audits the check.
+app.post('/api/identity/test', ...adminRead, auth.requireCsrf, (req, res) => {
+  const oidcConfig = oidc.config();
+  const scimToken = String(process.env.SCIM_BEARER_TOKEN || '').trim();
+  const checks = [
+    { id: 'oidc', label: 'OIDC single sign-on', ok: !!oidcConfig.enabled,
+      detail: oidcConfig.enabled ? `issuer ${oidcConfig.issuer}` : 'set OIDC_ISSUER, OIDC_CLIENT_ID, and OIDC_CLIENT_SECRET' },
+    { id: 'oidc_redirect', label: 'OIDC redirect URI', ok: !oidcConfig.enabled || !!oidcConfig.redirectUri,
+      detail: oidcConfig.redirectUri || 'set OIDC_REDIRECT_URI to this console\'s /auth/oidc/callback' },
+    { id: 'scim', label: 'SCIM provisioning', ok: scimToken.length >= 32,
+      detail: scimToken ? (scimToken.length >= 32 ? 'bearer token configured' : 'token shorter than 32 chars') : 'set SCIM_BEARER_TOKEN (32+ chars)' },
+    { id: 'break_glass', label: 'Local break-glass account', ok: true, detail: 'ADMIN_USER/ADMIN_PASSWORD active' },
+  ];
+  db.appendAudit({ action: 'IDENTITY_CONFIG_TESTED', actor: req.user.user, detail: checks.filter((c) => !c.ok).map((c) => c.id).join(', ') || 'all ok' });
+  res.json({ checkedAt: new Date().toISOString(), ok: checks.every((c) => c.ok), checks });
+});
+
+// Daily digest: yesterday's decision counts to every destination subscribed to
+// the 'digest' event type. On a 24h timer and on demand for testing.
+let lastDigest = null;
+
+async function sendDailyDigest(actor = 'scheduler') {
+  const s = db.stats();
+  const alert = {
+    action: 'digest', status: 'digest', riskScore: 0, maxSeverity: 0,
+    title: 'PromptWall daily digest',
+    summary: { pending: s.pending, todayBlocked: s.todayBlocked, approved: s.approved, denied: s.denied, totalQueries: s.total },
+    generatedAt: new Date().toISOString(),
+  };
+  const results = await subscriptions.dispatch(alert);
+  lastDigest = { at: alert.generatedAt, delivered: results.filter((r) => r.status === 'delivered').length, total: results.length, actor };
+  if (results.length) db.appendAudit({ action: 'DIGEST_SENT', actor, detail: `${lastDigest.delivered}/${results.length} delivered` });
+  return results;
+}
+setInterval(() => { sendDailyDigest().catch(() => {}); }, 24 * 3600 * 1000).unref();
+
+app.post('/api/reports/digest/send', ...adminWrite, async (req, res) => {
+  res.json({ results: await sendDailyDigest(req.user.user) });
+});
+
+// Notification plumbing status for the console: SMTP relay wiring (secrets
+// redacted), email destinations, and the last digest run.
+app.get('/api/notifications/status', ...adminRead, (req, res) => {
+  const smtp = email.config();
+  const emailDests = subscriptions.publicDestinations().filter((d) => d.type === 'email');
+  res.json({
+    smtp: {
+      configured: smtp.enabled,
+      host: smtp.enabled ? smtp.host : null,
+      port: smtp.enabled ? smtp.port : null,
+      secure: smtp.secure,
+      from: smtp.enabled ? smtp.from : null,
+      authConfigured: !!smtp.user,
+    },
+    emailDestinations: emailDests.map((d) => ({ id: d.id, name: d.name, recipients: d.recipients, eventTypes: d.eventTypes })),
+    digest: { intervalHours: 24, last: lastDigest },
+  });
+});
+
+// Prove the relay end to end with a synthetic message. The recipient address
+// is audited masked; message content is fixed and prompt-free.
+app.post('/api/notifications/test-email', ...adminWrite, async (req, res) => {
+  const to = String((req.body || {}).to || '').trim();
+  if (!/^[^\s@]+@[^\s@]+$/.test(to)) return res.status(400).json({ error: 'provide a recipient address' });
+  const result = await email.send({
+    to,
+    subject: 'PromptWall test notification',
+    text: 'This is a test notification from your PromptWall console. Delivery works.',
+  });
+  const masked = to.replace(/^(.).*(@.*)$/, '$1***$2');
+  db.appendAudit({ action: 'EMAIL_TEST_SENT', actor: req.user.user, detail: `${masked}: ${result.ok ? 'delivered' : result.error}` });
+  res.json(result);
+});
+
+// Sensor staleness: when a tracked sensor goes silent past the fleet's 48h
+// threshold, tell destinations subscribed to the SENSOR_STALE event type.
+// Payload is metadata only - user, sensor name, last-seen timestamp - and each
+// silence period alerts once (a sensor re-qualifies only after reporting again).
+async function runSensorStaleSweep(actor = 'scheduler', opts = {}) {
+  const stale = fleet.staleTransitions({ now: opts.now || Date.now() });
+  if (!stale.length) return { stale: 0, results: [] };
+  const alert = {
+    action: 'SENSOR_STALE',
+    status: 'sensor_stale',
+    riskScore: 0,
+    maxSeverity: 0,
+    staleAfterHours: fleet.STALE_MS / 3600000,
+    staleCount: stale.length,
+    sensors: stale.slice(0, 50),
+    generatedAt: new Date().toISOString(),
+  };
+  const results = await subscriptions.dispatch(alert, opts.dispatch || {});
+  db.appendAudit({
+    action: 'SENSOR_STALE_ALERTED',
+    actor,
+    detail: `${stale.length} sensor(s) stale; ${results.filter((r) => r.status === 'delivered').length}/${results.length} delivered`,
+  });
+  return { stale: stale.length, results };
+}
+
+// Static detector metadata (severity scale + regulation map) so the console
+// can explain historical rows that predate persisted score breakdowns.
+app.get('/api/detectors/meta', auth.requireAuth, (req, res) => {
+  res.json({ severityLabels: detector.SEVERITY_LABEL, regulations: detector.REGULATIONS });
+});
+
+// Detection tester: run a sample through the live engine + policy and return
+// the full rationale. The sample is analyzed in memory only - never stored,
+// never logged, never written to the audit chain.
+app.post('/api/detectors/test', auth.requireAuth, (req, res) => {
+  const text = String((req.body || {}).text || '');
+  if (!text || text.length > 20000) return res.status(400).json({ error: 'provide sample text up to 20k chars' });
+  const pol = policy.loadPolicy();
+  const analysis = detector.analyze(text, policy.analyzeOpts(pol));
+  const verdict = policy.evaluate(analysis, pol, policyContext({ user: req.user.user, source: 'detector_test', channel: 'test' }));
+  res.json({
+    decision: verdict.decision,
+    reasons: verdict.reasons,
+    riskScore: analysis.riskScore,
+    maxSeverityLabel: analysis.maxSeverityLabel,
+    regulations: analysis.regulations,
+    scoreBreakdown: analysis.scoreBreakdown,
+    findings: analysis.findings.map((f) => ({
+      type: f.type, severity: f.severity, severityLabel: detector.SEVERITY_LABEL[f.severity],
+      confidence: f.confidenceLabel, masked: detector.maskValue(f.type, f.value), regulations: f.regulations,
+    })),
+    categories: (analysis.categories || []).map((c) => ({ category: c.category, confidence: c.confidenceLabel })),
+  });
+});
+
 app.get('/api/policy/templates', auth.requireAuth, (req, res) => res.json(templates.list()));
 app.put('/api/policy/apply-template', ...adminWrite, validation.validateBody(validation.applyTemplateSchema), (req, res) => {
   const t = templates.get((req.body || {}).id);
@@ -2041,7 +2610,15 @@ app.put('/api/policy/apply-template', ...adminWrite, validation.validateBody(val
 });
 
 app.get('/api/audit', auth.requireAuth, (req, res) => {
-  res.json({ entries: db.listAudit(boundedApiLimit(req.query.limit, 200)), integrity: db.verifyAuditChain() });
+  const queryId = String(req.query.queryId || '').trim();
+  const entries = queryId
+    ? db.listAudit(2000).filter((e) => e.queryId === queryId).slice(0, boundedApiLimit(req.query.limit, 50))
+    : db.listAudit(boundedApiLimit(req.query.limit, 200));
+  res.json({
+    entries,
+    integrity: db.verifyAuditChain(),
+    retention: 'Append-only and hash-chained: entries are never edited or purged for the life of this database. Export an evidence pack for long-term archives.',
+  });
 });
 
 // Safe-to-send receipt verification: any console session (including read-only
@@ -2051,7 +2628,7 @@ app.post('/api/receipts/verify', ...sessionWrite, validation.validateBody(valida
   res.json(receipts.verifyReceipt(req.body));
 });
 
-app.get('/api/export/evidence', auth.requireAuth, (req, res) => {
+app.get('/api/export/evidence', ...auditRead, (req, res) => {
   const queryLimit = boundedApiLimit(req.query.queryLimit, 500);
   const auditLimit = boundedApiLimit(req.query.auditLimit, 500);
   const activePolicy = policy.loadPolicy();
@@ -2090,6 +2667,22 @@ app.get('/api/export/evidence', auth.requireAuth, (req, res) => {
     lineageQueries: summaryQueries,
     audit: db.listAudit(auditLimit),
   }));
+});
+
+// Compliance framework coverage (lightweight; the full pack is /api/export/evidence).
+app.get('/api/compliance', auth.requireAuth, (req, res) => {
+  const controlMap = require('./control-map');
+  const activePolicy = policy.loadPolicy();
+  const summaryQueries = db.listQueries({ all: true });
+  const mappings = controlMap.buildControlMappings({
+    generatedAt: new Date().toISOString(),
+    scope: { rawPromptBodiesIncluded: false },
+    policy: activePolicy,
+    detectors: detector.listDetectors({ customDetectors: policy.customDetectorsForSensors() }),
+    auditIntegrity: db.verifyAuditChain(),
+    coverage: coverage.summarize(summaryQueries, activePolicy),
+  });
+  res.json({ controlMappings: mappings });
 });
 
 app.get('/api/policy', auth.requireAuth, (req, res) => res.json(policy.loadPolicy()));
@@ -2131,9 +2724,16 @@ app.get('/api/stream', auth.requireAuth, (req, res) => {
 });
 
 // ---- Static dashboard --------------------------------------------------------
-app.get('/', (req, res) => res.redirect('/index.html'));
+// SENTINEL_CONSOLE_DEFAULT=app makes the new console the landing surface once
+// enough views are ported for a deployment's operators; legacy stays default.
+app.get('/', (req, res) =>
+  res.redirect(String(process.env.SENTINEL_CONSOLE_DEFAULT || 'legacy') === 'app' ? '/app/' : '/index.html'));
 app.get('/index.html', auth.requireAuth, (req, res) =>
   res.sendFile(path.join(__dirname, 'public', 'index.html')));
+// New console (Vite build output; hashed assets under /app/assets stay public
+// like every other data-free static file — all data flows through /api/*).
+app.get(['/app', '/app/', '/app/index.html'], auth.requireAuth, (req, res) =>
+  res.sendFile(path.join(__dirname, 'public', 'app', 'index.html')));
 app.use(express.static(path.join(__dirname, 'public')));
 
 function logStartup(port, deps = {}) {
@@ -2163,6 +2763,7 @@ function startServer(port = PORT, opts = {}) {
   const preflightModule = opts.preflight || preflight;
   const retentionPurge = opts.runRetentionPurge || runRetentionPurge;
   const workflowEscalation = opts.runWorkflowEscalation || runWorkflowEscalation;
+  const staleSweep = opts.runSensorStaleSweep || ((...args) => runSensorStaleSweep(...args).catch(() => {}));
   const setIntervalFn = opts.setInterval || setInterval;
   const clearIntervalFn = opts.clearInterval || clearInterval;
   const appToListen = opts.app || app;
@@ -2181,11 +2782,14 @@ function startServer(port = PORT, opts = {}) {
   });
   const retentionTimer = setIntervalFn(() => retentionPurge(), 60 * 60 * 1000);
   const workflowTimer = setIntervalFn(() => workflowEscalation(), 5 * 60 * 1000);
+  const staleTimer = setIntervalFn(() => staleSweep(), 60 * 60 * 1000);
   retentionTimer.unref();
   workflowTimer.unref();
+  staleTimer.unref();
   server.on('close', () => {
     clearIntervalFn(retentionTimer);
     clearIntervalFn(workflowTimer);
+    clearIntervalFn(staleTimer);
   });
   return server;
 }
@@ -2215,6 +2819,7 @@ if (require.main === module) installShutdownHandlers(startServer());
 app.startServer = startServer;
 app.runRetentionPurge = runRetentionPurge;
 app.runWorkflowEscalation = runWorkflowEscalation;
+app.runSensorStaleSweep = runSensorStaleSweep;
 app.currentPreflight = currentPreflight;
 app.currentSecurityTrustPackage = currentSecurityTrustPackage;
 app._internal = {

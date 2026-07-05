@@ -5,6 +5,7 @@
  * This is endpoint-only on purpose: the control plane still treats images as
  * ocr_required unless a workstation has a local OCR command configured.
  */
+const fs = require('fs');
 const path = require('path');
 const { execFile } = require('child_process');
 const { promisify } = require('util');
@@ -14,6 +15,8 @@ const execFileAsync = promisify(execFile);
 const DEFAULT_TIMEOUT_MS = 15000;
 const DEFAULT_MAX_CHARS = 1000000;
 const MAX_BUFFER_BYTES = 4 * 1024 * 1024;
+
+let discoveredCommandCache;
 
 function configured(value) {
   return value != null && String(value).trim() !== '';
@@ -46,10 +49,49 @@ function parseArgsJson(value) {
   return parsed;
 }
 
+function tesseractCandidates(env, platform) {
+  const name = platform === 'win32' ? 'tesseract.exe' : 'tesseract';
+  const fromPath = String(env.PATH || env.Path || '')
+    .split(path.delimiter)
+    .filter(Boolean)
+    .map((dir) => path.join(dir, name));
+  const wellKnown = platform === 'win32'
+    ? [
+      path.join(env.ProgramFiles || 'C:\\Program Files', 'Tesseract-OCR', name),
+      env.LOCALAPPDATA ? path.join(env.LOCALAPPDATA, 'Programs', 'Tesseract-OCR', name) : '',
+    ]
+    : ['/usr/bin/tesseract', '/usr/local/bin/tesseract', '/opt/homebrew/bin/tesseract'];
+  return fromPath.concat(wellKnown.filter(Boolean));
+}
+
+function discoverOcrCommand(opts = {}) {
+  if (opts.fresh !== true && discoveredCommandCache !== undefined) return discoveredCommandCache;
+  const env = opts.env || process.env;
+  const platform = opts.platform || process.platform;
+  const stat = opts.statSync || fs.statSync;
+  discoveredCommandCache = tesseractCandidates(env, platform).find((candidate) => {
+    try {
+      return stat(candidate).isFile();
+    } catch {
+      return false;
+    }
+  }) || '';
+  return discoveredCommandCache;
+}
+
+function resetOcrDiscovery() {
+  discoveredCommandCache = undefined;
+}
+
 function ocrSettings(opts = {}) {
   const env = opts.env || process.env;
   const injected = typeof opts.extractImageText === 'function';
-  const command = String(opts.command || env.ENDPOINT_AGENT_OCR_COMMAND || env.PROMPTWALL_ENDPOINT_AGENT_OCR_COMMAND || '').trim();
+  let command = String(opts.command || env.ENDPOINT_AGENT_OCR_COMMAND || env.PROMPTWALL_ENDPOINT_AGENT_OCR_COMMAND || '').trim();
+  let autoDiscovered = false;
+  if (!command && !injected && opts.discover !== false) {
+    command = discoverOcrCommand(opts);
+    autoDiscovered = Boolean(command);
+  }
   if (!command && !injected) return { configured: false };
   const args = Array.isArray(opts.args)
     ? opts.args.map((item) => String(item))
@@ -57,6 +99,7 @@ function ocrSettings(opts = {}) {
   return {
     configured: true,
     command: command || '[injected]',
+    autoDiscovered,
     args,
     timeoutMs: boundedPositiveInt(
       opts.timeoutMs || env.ENDPOINT_AGENT_OCR_TIMEOUT_MS || env.PROMPTWALL_ENDPOINT_AGENT_OCR_TIMEOUT_MS,
@@ -145,10 +188,12 @@ async function extractImageFile(name, filePath, opts = {}) {
 module.exports = {
   DEFAULT_MAX_CHARS,
   DEFAULT_TIMEOUT_MS,
+  discoverOcrCommand,
   extractImageFile,
   isImageFile,
   materializeArgs,
   ocrSettings,
   parseArgsJson,
+  resetOcrDiscovery,
   runOcrCommand,
 };

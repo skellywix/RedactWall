@@ -4,6 +4,7 @@
  * Validation errors intentionally include field names only, never submitted
  * values, because those values may be prompts, files, passwords, or notes.
  */
+const fs = require('fs');
 const { z } = require('zod');
 const detector = require('./detector');
 const customDetectors = require('./custom-detectors');
@@ -40,10 +41,25 @@ const SAFE_OPERATOR_COMMAND = /^[A-Za-z0-9 ._:/\\@+=,-]+$/;
 const POSTURE_ACTION_ID = /^[A-Za-z0-9._:@/-]+$/;
 const DISCOVERY_DESTINATION_LABEL = /^[A-Za-z0-9.*:-]+$/;
 const SENSITIVE_ROUTING_CODE = /(?:\d{3}[-_:.]?\d{2}[-_:.]?\d{4}|\d{12,19})/;
+// Memoized: a single /api/v1/gate request validates up to ~500 detector ids
+// (clientFindings + clientCategories + clientEntityCounts keys), and Zod runs
+// this refine once per value. Rebuilding the id set — which reads and parses the
+// custom-detector config file each time — per value turned one hot-path request
+// into hundreds of synchronous disk reads. Cache on the config file's mtime+size.
+let _detectorIdsCache = null;
+let _detectorIdsStamp = '';
 function knownDetectorIds() {
-  return new Set(detector.listDetectors({
+  let stamp = 'none';
+  try {
+    const st = fs.statSync(customDetectors.CONFIG_PATH);
+    stamp = st.mtimeMs + ':' + st.size;
+  } catch { /* no config file — stamp stays 'none' */ }
+  if (_detectorIdsCache && _detectorIdsStamp === stamp) return _detectorIdsCache;
+  _detectorIdsCache = new Set(detector.listDetectors({
     customDetectors: customDetectors.loadCustomDetectors(),
   }).map((d) => d.id));
+  _detectorIdsStamp = stamp;
+  return _detectorIdsCache;
 }
 
 function nonBlankString(max) {
@@ -232,6 +248,37 @@ const noteSchema = z.object({
   ),
 }).strict();
 
+// Inline reassignment of a held decision. Empty string clears a field so the
+// console can return an item to "anyone in the group"; omitted fields are
+// left unchanged.
+function clearableAssignmentField(max, pattern) {
+  return z.preprocess(
+    (value) => (value === null ? '' : value),
+    z.union([z.literal(''), z.string().max(max).regex(pattern)]).optional(),
+  );
+}
+
+const assignSchema = z.object({
+  assignedUser: clearableAssignmentField(LIMITS.idChars, POLICY_MATCH_TEXT),
+  assignedGroup: clearableAssignmentField(64, ROUTING_GROUP),
+  assignedRole: clearableAssignmentField(16, ROUTING_ROLE),
+}).strict().refine(
+  (body) => ['assignedUser', 'assignedGroup', 'assignedRole'].some((key) => body[key] !== undefined),
+  { message: 'no assignment fields' },
+);
+
+const bulkDecisionSchema = z.object({
+  ids: z.array(z.string().min(1).max(80)).min(1).max(50),
+  action: z.enum(['approve', 'deny']),
+  note: z.preprocess(
+    (value) => (value == null ? '' : value),
+    z.string().max(LIMITS.noteChars).default(''),
+  ),
+  // Verified by the approve step-up middleware; optional here so an already
+  // elevated session can bulk-approve without retyping it.
+  password: z.string().max(512).optional(),
+}).strict();
+
 const applyTemplateSchema = z.object({
   id: z.string().min(1).max(80).regex(/^[a-z0-9_/-]+$/),
 }).strict();
@@ -261,6 +308,26 @@ const destinationReviewSchema = z.object({
   destination: destinationLabelSchema,
   decision: z.enum(['govern', 'allow', 'block']),
   reason: nonBlankString(LIMITS.destinationReviewReasonChars),
+}).strict();
+
+const CATALOG_STATUS = ['under_review', 'sanctioned', 'tolerated', 'unsanctioned', 'blocked'];
+const catalogAddSchema = z.object({
+  destination: destinationLabelSchema,
+  appName: optionalString(120),
+  sanctionedStatus: z.enum(CATALOG_STATUS).optional(),
+}).strict();
+
+const catalogReviewSchema = z.object({
+  decision: z.enum(['govern', 'allow', 'block']),
+  reason: nonBlankString(LIMITS.destinationReviewReasonChars),
+  sanctionedStatus: z.enum(CATALOG_STATUS).optional(),
+  owner: optionalString(200),
+  notes: optionalString(2000),
+}).strict();
+
+const catalogImportSchema = z.object({
+  csv: z.string().min(1).max(1024 * 1024),
+  source: z.enum(['browser', 'gateway', 'endpoint', 'mcp', 'csv_import', 'manual']).optional(),
 }).strict();
 
 function safeOperatorText(value) {
@@ -501,6 +568,7 @@ const policyUpdateSchema = z.object({
   mcpApprovalRequiredTools: z.array(mcpToolLabelSchema).max(LIMITS.policyListItems).optional(),
   blockUnapprovedAiDestinations: z.boolean().optional(),
   responseScanMode: z.enum(['flag', 'redact', 'block']).optional(),
+  unmanagedInstalls: z.enum(['allow', 'flag', 'block']).optional(),
   desktopCollectorDestination: z.string().min(1).max(80).regex(DESKTOP_DESTINATION_LABEL).refine((value) => value.trim().length > 0, {
     message: 'required',
   }).optional(),
@@ -580,10 +648,15 @@ module.exports = {
   revealSchema,
   approveSchema,
   noteSchema,
+  assignSchema,
+  bulkDecisionSchema,
   applyTemplateSchema,
   receiptVerifySchema,
   aiDiscoverySchema,
   destinationReviewSchema,
+  catalogAddSchema,
+  catalogReviewSchema,
+  catalogImportSchema,
   postureActionSchema,
   detectorFeedbackSchema,
   policyUpdateSchema,

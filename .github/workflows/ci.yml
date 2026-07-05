@@ -6,14 +6,43 @@ on:
   workflow_dispatch: {}
 jobs:
   test:
+    name: test (node ${{ matrix.node-version }}, postgres ${{ matrix.postgres }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ['22', '24']
+        postgres: ['16-alpine']
+        include:
+          - node-version: '24'
+            postgres: '17-alpine'
+    services:
+      postgres:
+        image: postgres:${{ matrix.postgres }}
+        env:
+          POSTGRES_USER: promptwall
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U promptwall"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
         with:
-          node-version: '22'
+          node-version: ${{ matrix.node-version }}
           cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            console/package-lock.json
       - run: npm ci
+      - name: Console dependencies
+        run: npm run console:install
+      - name: Console build
+        run: npm run console:build
       - name: Native binding smoke
         run: npm run native:check:repair
       - name: Dependency audit
@@ -26,6 +55,8 @@ jobs:
         run: npm run ai-domains:check
       - name: Unit and integration tests
         run: npm test
+        env:
+          SENTINEL_TEST_PG_URL: postgresql://promptwall@127.0.0.1:55432/postgres
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium
       - name: Browser E2E tests
@@ -34,7 +65,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: playwright-artifacts
+          name: playwright-artifacts-node${{ matrix.node-version }}-pg${{ matrix.postgres }}
           path: |
             test-results/
             playwright-report/

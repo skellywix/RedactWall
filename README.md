@@ -42,7 +42,7 @@ The dashboard and API run on `http://localhost:4000` by default. The generated a
 
 ## Admin Console
 
-The browser console is the operator-facing control plane. It uses a macOS-inspired design system with light and dark themes, a single sidebar navigation, and one focused screen per task: login, approval queue, AI Data Leak Exposure Map (the command-center overview), activity, coverage, identity, lineage, audit, configuration, and updates. The queue, command-center, and configuration views are optimized for an interactive AI leak exposure map that attributes sanitized flows to departments, guided operator flow, guided policy setup, anomaly-score triage, redacted evidence review, live posture objectives, AI threat guardrails, AI control graph mapping, Agentic MCP Control, control outcomes, sensor posture, and fast approval or denial decisions without exposing raw prompt content by default.
+The browser console is the operator-facing control plane. It uses a macOS-inspired design system with light and dark themes, a single sidebar navigation, and one focused screen per task: login, overview, approval queue, AI Security Command Center, activity, insights, coverage, lineage, app catalog, compliance, identity, configuration, deploy, integrations, audit, and updates. The overview opens on the AI Data Leak Exposure Map, an interactive graph that attributes sanitized flows to departments as they pass PromptWall controls on the way to AI destinations. The queue, command-center, and configuration views are optimized for guided operator flow, guided policy setup, anomaly-score triage, redacted evidence review, live posture objectives, AI threat guardrails, AI control graph mapping, Agentic MCP Control, control outcomes, sensor posture, and fast approval or denial decisions without exposing raw prompt content by default.
 
 Run the default test suite:
 
@@ -100,6 +100,9 @@ docker compose up -d --build
 | `npm run setup` | Installs dependencies, writes `.env`, initializes SQLite, and checks local readiness. |
 | `npm start` | Starts `server/app.js`. |
 | `npm test` | Runs all `test/**/*.test.js` files sequentially through `scripts/run-node-tests.js`. |
+| `npm run suite` | Runs the full standalone black-box regression suite in `suite/` (contract, security, detector tiers). |
+| `npm run suite:smoke` | Runs the fast smoke tier of the regression suite. |
+| `npm run suite:ui` | Runs the regression suite's Playwright UI journeys (auditor role, SSE, bulk actions, session expiry). |
 | `npm run review:ci` | Runs whitespace checks, generated demo-doc checks, AI-domain checks, Node tests, the Playwright browser suite, detector sync, and detection eval. |
 | `npm run ai-domains:check` | Verifies the reviewed AI-host catalog stays covered by destination policy and browser adapter tests. |
 | `npm run sync-engine` | Copies `detection-engine/detect.js` into the browser extension detector copy. |
@@ -119,7 +122,6 @@ docker compose up -d --build
 | `npm run endpoint:check` | Validates endpoint-agent runtime/config health. |
 | `npm run mcp:check` | Validates MCP guard runtime/config health. |
 | `npm run docs:demo-guide` | Refreshes generated current-state demo documentation sections. |
-| `npm run docs:sync:check` | Checks local documentation sync state. |
 
 ## Project Structure
 
@@ -284,9 +286,9 @@ These routes are mounted under `/scim/v2` by `server/scim.js`.
 
 The package is private and is not published as a library. These CommonJS exports are used by tests, scripts, sensors, and local integrations.
 
-### `require("./server/app")` and `require("./server")`
+### `require("./server/app")`
 
-Exports the Express app. `server/index.js` re-exports `server/app.js`.
+Exports the Express app.
 
 | Export | Purpose |
 | --- | --- |
@@ -406,6 +408,7 @@ The tests show the intended public behavior:
 - `test/auth.test.js`, `test/admin-mfa.test.js`, `test/approval-stepup.test.js`, and role tests cover dashboard access control.
 - `test/scim.test.js`, `test/oidc-login.test.js`, and `test/identity-setup.test.js` cover provisioning and login integration.
 - `e2e/admin-console.spec.js` and `e2e/browser-extension.spec.js` cover browser-facing flows.
+- `suite/` is the standalone black-box regression suite (API contracts, authz/IDOR, PII-leak sweeps, audit tamper-evidence, detector floors, role-scoped UI journeys). See `suite/README.md` and `docs/TESTING_STRATEGY.md`.
 
 Run focused Node tests by passing files to `npm test`:
 
@@ -439,6 +442,14 @@ Do not hand-edit `sensors/browser-extension/lib/detect.js`.
 ```bash
 node -e "console.log(require('./server/db').verifyAuditChain())"
 ```
+
+## Project Records
+
+- [CHANGELOG.md](CHANGELOG.md) — release history (Keep a Changelog format).
+- [ROADMAP.md](ROADMAP.md) — competitor-grounded product roadmap.
+- [SECURITY.md](SECURITY.md) — vulnerability disclosure policy.
+- `docs/README.md` — full documentation index, including release, testing,
+  licensing, and support process docs.
 
 ## Contribution Notes
 

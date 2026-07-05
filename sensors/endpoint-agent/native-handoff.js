@@ -137,11 +137,11 @@ function normalizeEvent(event, opts = {}) {
     throw new Error('native handoff operation is unsupported');
   }
   const filePath = boundedString(event.filePath, '', 1024);
-  if (!filePath || !path.isAbsolute(filePath)) {
-    throw new Error('native handoff filePath must be absolute');
-  }
   if (/^\\\\/.test(filePath)) {
     throw new Error('native handoff filePath must be a local path');
+  }
+  if (!filePath || !(path.isAbsolute(filePath) || path.win32.isAbsolute(filePath))) {
+    throw new Error('native handoff filePath must be absolute');
   }
   const createdAt = boundedString(event.createdAt, '', 64);
   const createdMs = Date.parse(createdAt);

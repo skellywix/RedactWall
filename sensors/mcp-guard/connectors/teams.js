@@ -6,7 +6,7 @@
  * routes the result through the MCP connector SDK before any model receives it.
  */
 const { fetchWithTimeout } = require('../guard');
-const { connectorHealthCheck, sanitizeToolResult } = require('../sdk');
+const { connectorHealthCheck, htmlToText, sanitizeToolResult } = require('../sdk');
 
 const DEFAULT_GRAPH_ROOT = 'https://graph.microsoft.com/v1.0';
 const DEFAULT_MAX_BYTES = 512 * 1024;
@@ -162,33 +162,6 @@ async function graphApiCall(url, method, opts = {}) {
     throw new Error(`Microsoft Teams ${method} failed: ${code}`);
   }
   return body || {};
-}
-
-function decodeHtmlEntities(text) {
-  return String(text || '')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&#(\d+);/g, (_, code) => {
-      const n = Number(code);
-      return Number.isFinite(n) && n >= 32 && n <= 0xffff ? String.fromCharCode(n) : '';
-    });
-}
-
-function htmlToText(html) {
-  return decodeHtmlEntities(String(html || '')
-    .replace(/<\s*br\s*\/?>/gi, '\n')
-    .replace(/<\s*\/p\s*>/gi, '\n')
-    .replace(/<\s*\/div\s*>/gi, '\n')
-    .replace(/<[^>]+>/g, ' '))
-    .replace(/\r\n/g, '\n')
-    .replace(/[ \t]+/g, ' ')
-    .replace(/\n\s+/g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
 }
 
 function messagesToText(messages = []) {

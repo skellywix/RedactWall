@@ -12,6 +12,7 @@ const {
   defaultEndpointEnvPath,
   emitHeartbeat,
   main,
+  ocrExtractionCheck,
   parseArgs,
   printHuman,
   readEndpointConfig,
@@ -347,4 +348,83 @@ test('endpoint install check CLI main reports json, help, heartbeat errors, and 
 
   assert.strictEqual(await main(['--bad'], { console: io, env: {}, setExitCode: (code) => exitCodes.push(code) }), null);
   assert.ok(errors.some((line) => /Unknown option: --bad/.test(line)));
+});
+
+test('endpoint install check verifies OCR extraction against the bundled fixture', async (t) => {
+  const dir = tempDir(t, 'ps-endpoint-ocr-check-');
+  const envPath = path.join(dir, 'endpoint-agent.env');
+  fs.writeFileSync(envPath, 'ENDPOINT_AGENT_OCR_COMMAND=/opt/ocr/tesseract\n');
+
+  const extracted = await ocrExtractionCheck({
+    envPath,
+    env: {},
+    extractImageFile: async (name, filePath) => {
+      assert.strictEqual(name, 'ocr-sample.png');
+      assert.ok(fs.existsSync(filePath), 'fixture image ships with the agent');
+      return { extractionOk: true, text: 'PROMPTWALL OCR 7391' };
+    },
+  });
+  assert.deepStrictEqual(extracted, { id: 'endpoint_ocr_extract', ok: true, detail: 'extracted fixture text' });
+
+  const broken = await ocrExtractionCheck({
+    envPath,
+    env: {},
+    extractImageFile: async () => ({ extractionOk: false, error: 'extract_failed' }),
+  });
+  assert.strictEqual(broken.ok, false);
+  assert.strictEqual(broken.detail, 'extract_failed');
+
+  const noText = await ocrExtractionCheck({
+    envPath,
+    env: {},
+    extractImageFile: async () => ({ extractionOk: true, text: '' }),
+  });
+  assert.strictEqual(noText.ok, false);
+  assert.strictEqual(noText.detail, 'no text extracted from fixture');
+
+  const noEngine = await ocrExtractionCheck({
+    envPath: path.join(dir, 'missing.env'),
+    env: {},
+    discoverOcrCommand: () => '',
+  });
+  assert.strictEqual(noEngine.ok, true);
+  assert.match(noEngine.detail, /no OCR engine/);
+});
+
+test('endpoint install check auto-discovers OCR and surfaces guarded app folders', async (t) => {
+  const dir = tempDir(t, 'ps-endpoint-appflow-check-');
+  const watchDir = path.join(dir, 'watch');
+  fs.mkdirSync(path.join(watchDir, 'AI Apps', 'Microsoft Copilot'), { recursive: true });
+  const envPath = path.join(dir, 'endpoint-agent.env');
+  const key = 'appflow-ingest-key-000000000000000000000001';
+  fs.writeFileSync(envPath, [
+    'PROMPTWALL_URL=https://promptwall.appflow.example',
+    `INGEST_API_KEY=${key}`,
+    `ENDPOINT_AGENT_WATCH_DIR=${watchDir}`,
+    'ENDPOINT_AGENT_APP_FLOW=1',
+  ].join('\n') + '\n');
+
+  const binDir = path.join(dir, 'bin');
+  fs.mkdirSync(binDir);
+  fs.writeFileSync(path.join(binDir, 'Copilot.exe'), 'stub');
+
+  const report = buildInstallReport({
+    envPath,
+    repoRoot: root,
+    env: { PATH: binDir },
+    platform: 'win32',
+    extraChecks: [await ocrExtractionCheck({
+      envPath,
+      env: {},
+      extractImageFile: async () => ({ extractionOk: true, text: 'PROMPTWALL OCR 7391' }),
+      discoverOcrCommand: () => '/discovered/tesseract',
+    })],
+  });
+
+  assert.ok(report.checks.some((item) => item.id === 'desktop_app_flow_runtime' && item.ok));
+  assert.ok(report.checks.some((item) => item.id === 'endpoint_app_flow' && item.detail === 'guarded apps:1'));
+  assert.ok(report.checks.some((item) => item.id === 'endpoint_app_flow_copilot' && item.ok && item.detail === 'guarded folder ready'));
+  assert.ok(report.checks.some((item) => item.id === 'endpoint_ocr_extract' && item.ok));
+  assert.ok(!JSON.stringify(report.checks).includes(watchDir), 'app flow checks never leak paths');
+  assert.ok(!JSON.stringify(report).includes(key));
 });

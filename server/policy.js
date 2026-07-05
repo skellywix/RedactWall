@@ -8,7 +8,9 @@ const fs = require('fs');
 const path = require('path');
 const pkg = require('../package.json');
 const adapters = require('../detection-engine/adapters');
+const detector = require('../detection-engine/detect');
 const customDetectors = require('./custom-detectors');
+const exactMatch = require('./exact-match');
 
 const CONFIG_PATH = process.env.SENTINEL_POLICY_PATH || path.join(__dirname, '..', 'config', 'policy.json');
 const SENSOR_ID_RE = /^[a-z][a-z0-9_:-]{0,79}$/;
@@ -22,6 +24,7 @@ const POLICY_MATCH_TEXT_RE = /^[A-Za-z0-9 ._@:+/-]{1,128}$/;
 const MCP_TOOL_RE = /^[A-Za-z0-9.*:_/-]{1,160}$/;
 const POLICY_MODE_RANK = { warn: 1, redact: 2, justify: 2, block: 3 };
 const RESPONSE_SCAN_MODES = new Set(['flag', 'redact', 'block']);
+const UNMANAGED_INSTALL_MODES = new Set(['allow', 'flag', 'block']);
 const BROWSER_ACTIONS = new Set(['paste', 'drop', 'copy', 'download']);
 const SENSITIVE_ROUTING_CODE_RE = /(?:\d{3}[-_:.]?\d{2}[-_:.]?\d{4}|\d{12,19})/;
 const DEFAULT_REQUIRED_SENSORS = ['browser_extension', 'endpoint_agent', 'mcp_guard'];
@@ -34,7 +37,7 @@ const DEFAULT_POLICY = {
   enforcementMode: 'block',
   blockMinSeverity: 2,
   blockRiskScore: 25,
-  alwaysBlock: ['US_SSN', 'CREDIT_CARD', 'BANK_ACCOUNT', 'ROUTING_NUMBER', 'IBAN', 'US_PASSPORT', 'US_ITIN', 'US_NPI', 'MEMBER_ID', 'LOAN_NUMBER', 'MEDICAL_RECORD_NUMBER', 'HEALTH_INSURANCE_ID', 'SECRET_KEY', 'PRIVATE_KEY', 'CANARY_TOKEN'],
+  alwaysBlock: ['US_SSN', 'CREDIT_CARD', 'BANK_ACCOUNT', 'ROUTING_NUMBER', 'IBAN', 'US_PASSPORT', 'US_ITIN', 'US_NPI', 'MEMBER_ID', 'LOAN_NUMBER', 'MEDICAL_RECORD_NUMBER', 'HEALTH_INSURANCE_ID', 'UK_NINO', 'UK_NHS_NUMBER', 'CANADA_SIN', 'AUSTRALIA_TFN', 'INDIA_AADHAAR', 'SECRET_KEY', 'PRIVATE_KEY', 'CANARY_TOKEN', 'EXACT_MATCH'],
   // When true, the raw prompt of an item held for approval is retained
   // (encrypted at rest) so an admin can review it. Set false for institutions
   // that forbid any server-side raw retention — reveal then shows redacted only.
@@ -58,6 +61,7 @@ const DEFAULT_POLICY = {
   mcpApprovalRequiredTools: [],
   blockUnapprovedAiDestinations: true,
   responseScanMode: 'flag',
+  unmanagedInstalls: 'allow',
   desktopCollectorDestination: 'Desktop AI',
   approvalRoutingRules: [],
   policyScopes: [],
@@ -105,6 +109,11 @@ function normalizeDesiredSensorVersions(value, fallback = DEFAULT_POLICY.desired
 function normalizeResponseScanMode(value) {
   const mode = String(value || '').trim().toLowerCase();
   return RESPONSE_SCAN_MODES.has(mode) ? mode : DEFAULT_POLICY.responseScanMode;
+}
+
+function normalizeUnmanagedInstalls(value) {
+  const mode = String(value || '').trim().toLowerCase();
+  return UNMANAGED_INSTALL_MODES.has(mode) ? mode : DEFAULT_POLICY.unmanagedInstalls;
 }
 
 function normalizeBrowserAction(value) {
@@ -393,6 +402,7 @@ function normalizePolicy(p = {}) {
     requiredSensors: normalizeRequiredSensors((p || {}).requiredSensors),
     desiredSensorVersions: normalizeDesiredSensorVersions((p || {}).desiredSensorVersions),
     responseScanMode: normalizeResponseScanMode((p || {}).responseScanMode),
+    unmanagedInstalls: normalizeUnmanagedInstalls((p || {}).unmanagedInstalls),
     scanner,
   };
 }
@@ -416,6 +426,7 @@ const AUDIT_FIELDS = [
   'mcpApprovalRequiredTools',
   'blockUnapprovedAiDestinations',
   'responseScanMode',
+  'unmanagedInstalls',
   'desktopCollectorDestination',
   'approvalRoutingRules',
   'policyScopes',
@@ -474,11 +485,14 @@ function savePolicy(p) {
 }
 
 function analyzeOpts(policy = loadPolicy()) {
-  return {
+  const opts = {
     ignore: policy.ignore || [],
     disabledDetectors: policy.disabledDetectors || [],
     customDetectors: customDetectors.loadCustomDetectors(),
   };
+  const edm = exactMatch.exactMatchConfig();
+  if (edm) opts.exactMatch = edm;
+  return opts;
 }
 
 function customDetectorsForSensors() {
@@ -536,6 +550,11 @@ function unapprovedAiDestination(destination, policy = loadPolicy()) {
   if (destinationAllowed(normalized, policy)) return false;
   if (!adapters.isAiHost(normalized)) return false;
   return !destinationReviewed(normalized, policy);
+}
+
+function unmanagedInstallBlocked(user, policy = loadPolicy()) {
+  if (((policy || {}).unmanagedInstalls || DEFAULT_POLICY.unmanagedInstalls) !== 'block') return false;
+  return String(user || '').trim().toLowerCase() === 'unattributed@unmanaged';
 }
 
 function destinationBlockReason(destination, policy = loadPolicy()) {
@@ -695,19 +714,34 @@ function activePolicyException(policy = loadPolicy(), analysis = {}, context = {
   return null;
 }
 
+// Append the regulations behind a finding type to a verdict reason, so block
+// banners and audit entries say WHICH obligation the data fell under.
+function citedReason(label, type) {
+  const regs = type ? detector.regulationsFor(type) : [];
+  return regs.length ? label + ' [' + regs.join('; ') + ']' : label;
+}
+
 function evaluate(analysis, policy = loadPolicy(), context = {}, options = {}) {
   const effective = effectivePolicyForContext(policy, analysis, context, options);
   const reasons = [];
-  const findings = (analysis.findings || []).filter((f) => !(effective.ignore || []).includes(f.type));
-  const categories = (analysis.categories || []).filter((c) => !(effective.ignore || []).includes(c && (c.category || c)));
+  const ignore = effective.ignore || [];
+  const alwaysBlock = effective.alwaysBlock || [];
+  // Hard-stop (alwaysBlock) types can never be suppressed by the ignore list:
+  // an ignored finding is dropped for scoring, but an ignored hard-stop entity
+  // must still force a block, or raw regulated PII could be cleared to send.
+  const findings = (analysis.findings || []).filter((f) => alwaysBlock.includes(f.type) || !ignore.includes(f.type));
+  const categories = (analysis.categories || []).filter((c) => !ignore.includes(c && (c.category || c)));
 
   if (findings.length === 0 && categories.length === 0) {
     return { decision: 'allow', reasons: ['Nothing sensitive detected'], policy: effective, policyScopeIds: effective.appliedPolicyScopes || [] };
   }
   if (categories.length) reasons.push('Sensitive content: ' + categories.map((c) => c && (c.category || c)).join(', '));
   const hardStop = findings.find((f) => (effective.alwaysBlock || []).includes(f.type));
-  if (hardStop) reasons.push('Hard-stop entity present: ' + hardStop.type);
-  if (analysis.maxSeverity >= effective.blockMinSeverity) reasons.push('Severity ' + analysis.maxSeverityLabel + ' >= policy minimum');
+  if (hardStop) reasons.push(citedReason('Hard-stop entity present: ' + hardStop.type, hardStop.type));
+  if (analysis.maxSeverity >= effective.blockMinSeverity) {
+    const driver = findings.find((f) => f.severity === analysis.maxSeverity && f.type !== (hardStop && hardStop.type));
+    reasons.push(citedReason('Severity ' + analysis.maxSeverityLabel + ' >= policy minimum', driver && driver.type));
+  }
   if (analysis.riskScore >= effective.blockRiskScore) reasons.push('Risk score ' + analysis.riskScore + ' >= ' + effective.blockRiskScore);
   if ((effective.appliedPolicyScopes || []).length) reasons.push('Policy scope matched: ' + effective.appliedPolicyScopes.join(', '));
 
@@ -753,7 +787,9 @@ module.exports = {
   browserActionBlocked,
   browserActionBlockReason,
   unapprovedAiDestination,
+  unmanagedInstallBlocked,
   normalizeResponseScanMode,
+  normalizeUnmanagedInstalls,
   normalizeBrowserAction,
   normalizeBlockedBrowserActions,
   normalizeMcpToolList,

@@ -51,7 +51,6 @@ place.
 | Export evidence pack | `npm run evidence:pack` |
 | Export zipped evidence pack | `npm run evidence:pack:zip` |
 | Refresh generated demo docs | `npm run docs:demo-guide` |
-| Check docs sync task | `npm run docs:sync:check` |
 
 Never print or commit real customer prompt text, ingest keys, handoff secrets,
 OCR output, clipboard text, or local file contents from these scripts.

@@ -16,6 +16,15 @@ const { outboundHttpsUrl } = require('./url-policy');
 const MAX_LABELS = 20;
 const MAX_REASONS = 8;
 const DEFAULT_LINEAR_API_URL = 'https://api.linear.app/graphql';
+// Bound outbound notifier requests so a hung webhook/ticket endpoint cannot
+// stall an approval action that awaits notification delivery.
+const OUTBOUND_TIMEOUT_MS = (() => {
+  const n = Number(process.env.PROMPTWALL_NOTIFIER_TIMEOUT_MS || process.env.APPROVAL_NOTIFIER_TIMEOUT_MS);
+  return Number.isFinite(n) && n > 0 ? n : 8000;
+})();
+function outboundSignal() {
+  return typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(OUTBOUND_TIMEOUT_MS) : undefined;
+}
 
 function envValue(env, ...names) {
   for (const name of names) {
@@ -445,6 +454,7 @@ async function postJson(channel, payload, opts = {}) {
     method: 'POST',
     headers: headersForChannel(channel),
     body: JSON.stringify(bodyForChannel(channel, payload)),
+    signal: outboundSignal(),
   });
   const linearResult = channel.type === 'linear' ? await linearResponseResult(res) : { reason: null, issue: null };
   if (linearResult.reason) return { channel: channel.name || channel.type, sent: false, reason: linearResult.reason };
@@ -456,6 +466,15 @@ async function postJson(channel, payload, opts = {}) {
       status: res.status,
       externalId: issue.identifier || issue.id || null,
       url: issue.url || null,
+    };
+  }
+  if (channel.type === 'jira' && res && res.ok) {
+    const issue = typeof res.json === 'function' ? await res.json().catch(() => ({})) : {};
+    return {
+      channel: channel.name || channel.type,
+      sent: true,
+      status: res.status,
+      externalId: (issue && (issue.key || issue.id)) || null,
     };
   }
   return res && res.ok
@@ -499,6 +518,7 @@ async function emitApprovalNotification(query, opts = {}) {
 module.exports = {
   configuredChannels,
   deliveryStatus,
+  headersForChannel,
   emitApprovalNotification,
   jiraIssuePayload,
   linearApiUrl,

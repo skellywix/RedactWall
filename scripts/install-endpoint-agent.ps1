@@ -18,6 +18,9 @@ param(
   [switch]$ClipboardGuardDesktopShortcut,
   [string]$ConfigDir = "$env:LOCALAPPDATA\PromptWall",
   [string]$RepoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path,
+  [string]$OcrCommand = "",
+  [switch]$SkipOcr,
+  [switch]$DisableAppFileFlow,
   [switch]$Force
 )
 
@@ -68,6 +71,26 @@ if ($HandoffSecret) {
 }
 if ($DesktopCollectorDestination) {
   $configLines += "ENDPOINT_AGENT_DESKTOP_DESTINATION=$DesktopCollectorDestination"
+}
+$resolvedOcrCommand = $OcrCommand
+if (-not $resolvedOcrCommand -and -not $SkipOcr) {
+  $tesseract = Get-Command tesseract -ErrorAction SilentlyContinue
+  if ($tesseract) {
+    $resolvedOcrCommand = $tesseract.Source
+  } else {
+    foreach ($candidate in @(
+      (Join-Path $env:ProgramFiles "Tesseract-OCR\tesseract.exe"),
+      (Join-Path $env:LOCALAPPDATA "Programs\Tesseract-OCR\tesseract.exe")
+    )) {
+      if ($candidate -and (Test-Path -LiteralPath $candidate)) { $resolvedOcrCommand = $candidate; break }
+    }
+  }
+}
+if ($resolvedOcrCommand) {
+  $configLines += "ENDPOINT_AGENT_OCR_COMMAND=$resolvedOcrCommand"
+}
+if (-not $DisableAppFileFlow) {
+  $configLines += "ENDPOINT_AGENT_APP_FLOW=1"
 }
 $configLines | Set-Content -LiteralPath $configPath -Encoding utf8
 
@@ -222,5 +245,8 @@ Write-Host "Watch directory: $watchRoot"
 if ($HandoffSecret) { Write-Host "Native handoff directory: $handoffRoot" }
 if ($InstallDesktopCollector) { Write-Host "Desktop collector: $DesktopCollectorMenuName" }
 if ($InstallClipboardGuard) { Write-Host "Clipboard guard shortcut: $ClipboardGuardShortcutName" }
+if ($resolvedOcrCommand) { Write-Host "OCR engine: $resolvedOcrCommand" }
+else { Write-Host "OCR engine: not found (images stay ocr_required; install tesseract and re-run, or pass -OcrCommand)" }
+if (-not $DisableAppFileFlow) { Write-Host "App file-flow: enabled (guarded folders under $watchRoot\AI Apps)" }
 Write-Host "Config file: $configPath"
 Write-Host "Log file: $logPath"

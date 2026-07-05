@@ -11,11 +11,15 @@ const {
   failedInstallCheckIds,
 } = require('../server/install-checks');
 const aiToolInventory = require('../sensors/endpoint-agent/collectors/ai-tool-inventory');
+const desktopAppFlow = require('../sensors/endpoint-agent/collectors/desktop-app-flow');
+const endpointOcr = require('../sensors/endpoint-agent/ocr');
 const fileFlowProfiles = require('../sensors/endpoint-agent/file-flow-profiles');
 
 const ROOT = path.join(__dirname, '..');
 const VERSION = require('../package.json').version;
 const DEVELOPMENT_INGEST_KEY = ['dev', 'ingest', 'key'].join('-');
+const OCR_FIXTURE_PATH = path.join(ROOT, 'sensors', 'endpoint-agent', 'fixtures', 'ocr-sample.png');
+const OCR_FIXTURE_TEXT = /PROMPTWALL/i;
 
 function configured(value) {
   return value != null && String(value).trim() !== '';
@@ -24,10 +28,11 @@ function configured(value) {
 function defaultEndpointEnvPath(env = process.env, platform = process.platform) {
   if (configured(env.SENTINEL_ENV_PATH)) return env.SENTINEL_ENV_PATH;
   if (configured(env.PROMPTWALL_ENV_PATH)) return env.PROMPTWALL_ENV_PATH;
+  const join = platform === 'win32' ? path.win32.join : path.posix.join;
   if (platform === 'win32' && configured(env.LOCALAPPDATA)) {
-    return path.join(env.LOCALAPPDATA, 'PromptWall', 'endpoint-agent.env');
+    return join(env.LOCALAPPDATA, 'PromptWall', 'endpoint-agent.env');
   }
-  return path.join(env.HOME || os.homedir() || '.', '.config', 'promptwall', 'endpoint-agent.env');
+  return join(env.HOME || os.homedir() || '.', '.config', 'promptwall', 'endpoint-agent.env');
 }
 
 function readEndpointConfig(envPath, env = process.env) {
@@ -132,6 +137,15 @@ function buildInstallReport(opts = {}) {
     processNames: opts.processNames || [],
     approvedTools: settings.approvedAiTools,
   }).checks);
+  checks.push(check('desktop_app_flow_runtime', existsFile(repoRoot, 'sensors/endpoint-agent/collectors/desktop-app-flow.js'), 'app file-flow collector present'));
+  checks.push(...desktopAppFlow.publicAppFlowChecks(desktopAppFlow.desktopAppFlowProfiles({
+    settings: desktopAppFlow.appFlowSettings(configInfo.config, settings.watchDir),
+    env: opts.env || process.env,
+    platform: opts.platform || process.platform,
+    processNames: opts.processNames || [],
+    ensureDirs: false,
+  }), isDirectory));
+  if (Array.isArray(opts.extraChecks)) checks.push(...opts.extraChecks);
   checks.push(check('handoff_secret', requireDesktopCollector ? handoffReady : (!handoffEnabled || handoffReady),
     handoffReady ? 'configured' : (requireDesktopCollector ? 'missing 32-plus character handoff secret' : 'desktop collector disabled')));
   checks.push(check('handoff_dir', desktopCollectorExpected ? configured(settings.handoffDir) && isDirectory(settings.handoffDir) : true,
@@ -153,6 +167,22 @@ function buildInstallReport(opts = {}) {
     endpointAiToolAttention,
     checks,
   };
+}
+
+async function ocrExtractionCheck(opts = {}) {
+  const configInfo = readEndpointConfig(opts.envPath, opts.env || process.env);
+  const settings = endpointSettings(configInfo.config);
+  const discover = opts.discoverOcrCommand || endpointOcr.discoverOcrCommand;
+  const command = settings.ocrCommand || discover({ fresh: true, env: opts.env, platform: opts.platform });
+  if (!configured(command)) {
+    return check('endpoint_ocr_extract', true, 'no OCR engine; images stay ocr_required');
+  }
+  const fixture = opts.ocrFixturePath || OCR_FIXTURE_PATH;
+  const extract = opts.extractImageFile || endpointOcr.extractImageFile;
+  const result = await extract(path.basename(fixture), fixture, { command });
+  const extracted = result.extractionOk === true && OCR_FIXTURE_TEXT.test(result.text || '');
+  return check('endpoint_ocr_extract', extracted,
+    extracted ? 'extracted fixture text' : (result.error || 'no text extracted from fixture'));
 }
 
 function buildHeartbeatBody(report, opts = {}) {
@@ -266,6 +296,7 @@ async function main(argv = process.argv.slice(2), deps = {}) {
       return null;
     }
     opts.processNames = await listProcessNames({ platform: deps.platform || process.platform });
+    opts.extraChecks = [await (deps.ocrExtractionCheck || ocrExtractionCheck)(opts)];
     const report = buildReport(opts);
     if (opts.emitHeartbeat) {
       try {
@@ -296,6 +327,7 @@ module.exports = {
   emitHeartbeat,
   endpointSettings,
   main,
+  ocrExtractionCheck,
   parseArgs,
   printHuman,
   readEndpointConfig,

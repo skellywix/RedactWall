@@ -52,7 +52,7 @@ test('endpoint OCR settings accept PromptWall aliases', () => {
 
 test('endpoint OCR returns ocr_required for images when no local OCR is configured', async (t) => {
   const file = tempImage(t);
-  const extracted = await endpointOcr.extractImageFile(path.basename(file), file, { env: {} });
+  const extracted = await endpointOcr.extractImageFile(path.basename(file), file, { env: {}, discover: false });
 
   assert.strictEqual(extracted.extractionOk, false);
   assert.strictEqual(extracted.error, 'ocr_required');
@@ -141,4 +141,60 @@ test('endpoint OCR fails closed on invalid config and local extraction errors', 
   assert.strictEqual(failedExtraction.error, 'extract_failed');
   assert.strictEqual(failedExtraction.ocrConfigured, true);
   assert.strictEqual(failedExtraction.ocrApplied, false);
+});
+
+test('endpoint OCR auto-discovers a local tesseract engine', (t) => {
+  t.after(() => endpointOcr.resetOcrDiscovery());
+  const binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-ocr-discover-'));
+  t.after(() => fs.rmSync(binDir, { recursive: true, force: true }));
+  const engine = path.join(binDir, 'tesseract');
+  fs.writeFileSync(engine, '#!/bin/sh');
+
+  endpointOcr.resetOcrDiscovery();
+  const found = endpointOcr.discoverOcrCommand({ fresh: true, env: { PATH: binDir }, platform: 'linux' });
+  assert.strictEqual(found, engine);
+
+  const settings = endpointOcr.ocrSettings({ env: { PATH: binDir }, platform: 'linux' });
+  assert.strictEqual(settings.configured, true);
+  assert.strictEqual(settings.command, engine);
+  assert.strictEqual(settings.autoDiscovered, true);
+
+  const cached = endpointOcr.discoverOcrCommand({ env: { PATH: '/nonexistent' }, platform: 'linux' });
+  assert.strictEqual(cached, engine, 'discovery result is cached for the process lifetime');
+});
+
+test('endpoint OCR discovery checks well-known windows install dirs', (t) => {
+  t.after(() => endpointOcr.resetOcrDiscovery());
+  const programDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-ocr-win-'));
+  t.after(() => fs.rmSync(programDir, { recursive: true, force: true }));
+  const engine = path.join(programDir, 'Tesseract-OCR', 'tesseract.exe');
+  fs.mkdirSync(path.dirname(engine), { recursive: true });
+  fs.writeFileSync(engine, 'stub');
+
+  const found = endpointOcr.discoverOcrCommand({
+    fresh: true,
+    env: { PATH: '', ProgramFiles: programDir },
+    platform: 'win32',
+  });
+  assert.strictEqual(found, engine);
+});
+
+test('endpoint OCR discovery yields nothing without an engine and stays ocr_required', async (t) => {
+  t.after(() => endpointOcr.resetOcrDiscovery());
+  const noEngine = () => { throw new Error('missing'); };
+  const found = endpointOcr.discoverOcrCommand({
+    fresh: true,
+    env: { PATH: '/nonexistent' },
+    platform: 'linux',
+    statSync: noEngine,
+  });
+  assert.strictEqual(found, '');
+  const file = tempImage(t);
+  endpointOcr.resetOcrDiscovery();
+  const extracted = await endpointOcr.extractImageFile(path.basename(file), file, {
+    env: { PATH: '/nonexistent' },
+    platform: 'linux',
+    statSync: noEngine,
+  });
+  assert.strictEqual(extracted.error, 'ocr_required');
 });

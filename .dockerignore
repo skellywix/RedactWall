@@ -8,11 +8,13 @@ test-results
 .githooks
 .agents
 .claude
-.codex
 test
+suite
 e2e
 docs
 PLANS
 *.log
 .env
 *.local
+console/node_modules
+server/public/app

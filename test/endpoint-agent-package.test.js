@@ -30,6 +30,7 @@ function minimalFiles(agentBody) {
     { path: 'detection-engine/adapters.js', body: Buffer.from('module.exports = {};') },
     { path: 'detection-engine/detect.js', body: Buffer.from('module.exports = {};') },
     { path: 'server/custom-detectors.js', body: Buffer.from('module.exports = {};') },
+    { path: 'server/exact-match.js', body: Buffer.from('module.exports = {};') },
     { path: 'server/env.js', body: Buffer.from('module.exports = {};') },
     { path: 'server/policy.js', body: Buffer.from('module.exports = {};') },
     { path: 'server/processors.js', body: Buffer.from('module.exports = {};') },
@@ -51,8 +52,20 @@ function minimalFiles(agentBody) {
       body: Buffer.from('function writeHandoffFile() { return signHandoffEvent(); }\nfunction signHandoffEvent() {}\n'),
     },
     {
+      path: 'sensors/endpoint-agent/native-messaging-host.js',
+      body: Buffer.from('const type = "upload_intent";\nfunction resolveIntentFile() {}\nfunction handleIntentMessage() { return writeHandoffFile(); }\nfunction writeHandoffFile() {}\n'),
+    },
+    {
       path: 'sensors/endpoint-agent/collectors/ai-tool-inventory.js',
       body: Buffer.from('function collectAiToolInventory() {}\nfunction parseApprovedTools() {}\nmodule.exports = { collectAiToolInventory, parseApprovedTools };\n'),
+    },
+    {
+      path: 'sensors/endpoint-agent/collectors/desktop-app-flow.js',
+      body: Buffer.from('function desktopAppFlowProfiles() {}\nfunction publicAppFlowChecks() {}\nmodule.exports = { desktopAppFlowProfiles, publicAppFlowChecks };\n'),
+    },
+    {
+      path: 'sensors/endpoint-agent/fixtures/ocr-sample.png',
+      body: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     },
     {
       path: 'sensors/endpoint-agent/collectors/clipboard-guard.js',
@@ -83,6 +96,10 @@ function minimalFiles(agentBody) {
       body: Buffer.from('$taskArgs = "-File runner.ps1"\n[Parameter(Mandatory = $true)]\n[string]$IngestKey\nInstallClipboardGuard\ninstall-clipboard-guard.ps1\n'),
     },
     {
+      path: 'scripts/install-file-intent-host.ps1',
+      body: Buffer.from("NativeMessagingHosts\nallowed_origins\nif ($ExtensionId -notmatch '^[a-p]{32}$') { throw }\n"),
+    },
+    {
       path: 'scripts/install-git-push-guard.ps1',
       body: Buffer.from('PromptWall Git Push Guard\ngit-push-guard.js\nPROMPTWALL_ENV_PATH\n'),
     },
@@ -101,6 +118,7 @@ function minimalFiles(agentBody) {
     { path: 'scripts/uninstall-desktop-collector.ps1', body: Buffer.from('Remove-Item\n') },
     { path: 'scripts/uninstall-clipboard-guard.ps1', body: Buffer.from('Remove-Item\n') },
     { path: 'scripts/uninstall-endpoint-agent.ps1', body: Buffer.from('Unregister-ScheduledTask\n') },
+    { path: 'scripts/uninstall-file-intent-host.ps1', body: Buffer.from('NativeMessagingHosts\nRemove-Item\n') },
     { path: 'scripts/uninstall-git-push-guard.ps1', body: Buffer.from('pre-push\nPromptWall Git Push Guard\nRemove-Item\n') },
   ];
 }
@@ -146,6 +164,8 @@ test('package script writes a prompt-free endpoint agent zip and integrity manif
   assert.strictEqual(manifest.checks.aiToolInventoryIncluded, true);
   assert.strictEqual(manifest.checks.nativeHandoffPrototypeIncluded, true);
   assert.strictEqual(manifest.checks.nativeHandoffWriterIncluded, true);
+  assert.strictEqual(manifest.checks.fileIntentHostIncluded, true);
+  assert.strictEqual(manifest.checks.fileIntentHostInstallerIncluded, true);
   assert.strictEqual(manifest.checks.protectedUploadCollectorIncluded, true);
   assert.strictEqual(manifest.checks.clipboardGuardIncluded, true);
   assert.strictEqual(manifest.checks.gitPushGuardIncluded, true);
@@ -175,6 +195,7 @@ test('package script writes a prompt-free endpoint agent zip and integrity manif
     'sensors/endpoint-agent/file-flow-profiles.js',
     'sensors/endpoint-agent/ocr.js',
     'sensors/endpoint-agent/native-handoff.js',
+    'sensors/endpoint-agent/native-messaging-host.js',
     'sensors/endpoint-agent/write-handoff.js',
     'sensors/endpoint-agent/collectors/ai-tool-inventory.js',
     'sensors/endpoint-agent/collectors/clipboard-guard.js',
@@ -184,6 +205,7 @@ test('package script writes a prompt-free endpoint agent zip and integrity manif
     'scripts/install-clipboard-guard.ps1',
     'scripts/install-desktop-collector.ps1',
     'scripts/install-endpoint-agent.ps1',
+    'scripts/install-file-intent-host.ps1',
     'scripts/install-git-push-guard.ps1',
     'scripts/run-clipboard-guard.ps1',
     'scripts/run-desktop-collector.ps1',
@@ -191,6 +213,7 @@ test('package script writes a prompt-free endpoint agent zip and integrity manif
     'scripts/uninstall-clipboard-guard.ps1',
     'scripts/uninstall-desktop-collector.ps1',
     'scripts/uninstall-endpoint-agent.ps1',
+    'scripts/uninstall-file-intent-host.ps1',
     'scripts/uninstall-git-push-guard.ps1',
   ]) {
     assert.ok(entries.includes(required), required);
@@ -209,7 +232,9 @@ test('package script writes a prompt-free endpoint agent zip and integrity manif
   assert.match(zip.readAsText('sensors/endpoint-agent/ocr.js'), /ENDPOINT_AGENT_OCR_COMMAND/);
   assert.match(zip.readAsText('sensors/endpoint-agent/ocr.js'), /extractImageFile/);
   assert.match(zip.readAsText('sensors/endpoint-agent/native-handoff.js'), /createHmac\('sha256'/);
+  assert.match(zip.readAsText('sensors/endpoint-agent/native-messaging-host.js'), /upload_intent/);
   assert.match(zip.readAsText('sensors/endpoint-agent/write-handoff.js'), /writeHandoffFile/);
+  assert.match(zip.readAsText('scripts/install-file-intent-host.ps1'), /NativeMessagingHosts/);
   assert.match(zip.readAsText('sensors/endpoint-agent/collectors/ai-tool-inventory.js'), /collectAiToolInventory/);
   assert.match(zip.readAsText('sensors/endpoint-agent/collectors/clipboard-guard.js'), /collectClipboard/);
   assert.match(zip.readAsText('sensors/endpoint-agent/collectors/git-push-guard.js'), /collectGitPush/);

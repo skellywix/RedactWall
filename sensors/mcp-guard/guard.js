@@ -121,6 +121,27 @@ async function maybeRefreshPolicy(opts = {}) {
   if (opts.policy || opts.skipPolicyRefresh) return;
   if (Date.now() - lastPolicyRefresh < (opts.policyRefreshMs || POLICY_REFRESH_MS)) return;
   await refreshPolicy({ ...opts, silent: opts.silentPolicyRefresh !== false });
+  sendHeartbeat(opts).catch(() => {});
+}
+
+// Presence heartbeat: registers this guard with the control plane and returns
+// the companion view (is the browser extension / endpoint agent also active
+// for this identity), so wrapped agents can surface coverage gaps.
+async function sendHeartbeat(opts = {}) {
+  const fetchImpl = opts.fetchImpl || globalThis.fetch;
+  const server = opts.server || SERVER;
+  const key = configuredKey(opts);
+  if (!fetchImpl || !key) return null;
+  try {
+    const r = await fetchWithTimeout(fetchImpl, server + '/api/v1/heartbeat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': key },
+      body: JSON.stringify({ user: opts.agent || 'mcp-agent', source: 'mcp_guard', sensor: sensorMetadata() }),
+    }, opts);
+    return await r.json().catch(() => null);
+  } catch (e) {
+    return null;
+  }
 }
 
 function publicFindings(analysis) {
@@ -264,7 +285,11 @@ async function guardToolResult(text, ctx = {}, opts = {}) {
   const safe = a.categories.length
     ? '[REDACTED: ' + findings.join(', ') + ']'
     : D.redact(text, a.findings); // structured PII replaced with [TYPE]
-  await logEvent(reportBody({ safeText: safe, analysis: a, ctx }), opts);
+  // Telemetry to the control plane is always a label-only summary — never the
+  // fetched document prose, even with structured PII masked. The model still
+  // receives the full redacted `safe` text below.
+  const telemetryText = '[REDACTED: ' + findings.join(', ') + ']';
+  await logEvent(reportBody({ safeText: telemetryText, analysis: a, ctx }), opts);
   return { text: safe, redacted: true, findings };
 }
 
@@ -313,6 +338,7 @@ module.exports = {
   requestTimeoutMs,
   fetchWithTimeout,
   sensorMetadata,
+  sendHeartbeat,
 };
 
 // ---- demo when run directly ------------------------------------------------

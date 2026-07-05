@@ -183,11 +183,17 @@ async function reportInstallHealth() {
   const missing = missingServerConfigReason(server);
   if (missing) return { ok: false, reason: missing, checks };
   if (!validServerOrigin(server.serverUrl)) return { ok: false, reason: 'invalid_server_url', checks };
-  return fetchJsonWithTimeout(String(server.serverUrl).replace(/\/+$/, '') + '/api/v1/heartbeat', {
+  const result = await fetchJsonWithTimeout(String(server.serverUrl).replace(/\/+$/, '') + '/api/v1/heartbeat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-api-key': server.ingestKey },
     body: JSON.stringify(buildHeartbeatBody(checks, who)),
   }, server.requestTimeoutMs);
+  // The control plane answers with the state of this user's OTHER sensors, so
+  // the extension can surface a missing/stale endpoint agent (and vice versa).
+  if (result.ok && result.body && result.body.companions) {
+    await chrome.storage.local.set({ fleetCompanions: { at: Date.now(), companions: result.body.companions } });
+  }
+  return result;
 }
 
 async function refreshPolicy() {
@@ -326,6 +332,47 @@ async function handleDownloadCreated(item = {}) {
   return reportBlockedDownload(destination, rule);
 }
 
+// ---- Local file-intent handoff -----------------------------------------------
+// When the content script blocks an upload it cannot inspect locally, hand the
+// file's NAME and SIZE (never bytes) to the endpoint agent's native messaging
+// host so the real file gets scanned on the device. Strictly best-effort: a
+// missing host, missing permission, or slow reply never affects enforcement -
+// the upload is already blocked before this runs.
+const FILE_INTENT_HOST = 'com.promptwall.file_intent';
+
+function boundedFileIntent(payload = {}) {
+  const fileName = String(payload.fileName || '').slice(0, 255);
+  const sizeBytes = Math.floor(Number(payload.sizeBytes));
+  if (!fileName || !Number.isFinite(sizeBytes) || sizeBytes <= 0) return null;
+  return { fileName, sizeBytes };
+}
+
+async function relayFileIntent(payload, senderUrl) {
+  if (!chrome.runtime || typeof chrome.runtime.sendNativeMessage !== 'function') {
+    return { ok: false, reason: 'unsupported' };
+  }
+  const c = await cfg();
+  if (!c.enabled) return { ok: false, reason: 'disabled' };
+  const bounded = boundedFileIntent(payload);
+  if (!bounded) return { ok: false, reason: 'invalid_intent' };
+  const who = await identity();
+  return new Promise((resolve) => {
+    try {
+      chrome.runtime.sendNativeMessage(FILE_INTENT_HOST, {
+        type: 'upload_intent',
+        ...bounded,
+        destination: normalizeDestinationHost(senderUrl) || 'unknown',
+        user: who.user,
+      }, (reply) => {
+        void (chrome.runtime && chrome.runtime.lastError); // host not installed -> silent
+        resolve({ ok: true, reply: reply || null });
+      });
+    } catch (e) {
+      resolve({ ok: false, reason: 'native_error' });
+    }
+  });
+}
+
 chrome.runtime.onInstalled.addListener(() => runAsync(refreshPolicyAndHealth));
 chrome.runtime.onStartup.addListener(() => runAsync(refreshPolicyAndHealth));
 chrome.downloads?.onCreated?.addListener((item) => runAsync(() => handleDownloadCreated(item)));
@@ -337,6 +384,11 @@ chrome.alarms?.onAlarm.addListener((a) => {
 });
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg.type === 'fileIntent') {
+    runAsync(() => relayFileIntent(msg.payload || {}, sender && sender.url));
+    sendResponse && sendResponse({ queued: true });
+    return false;
+  }
   if (msg.type === 'getConfig') {
     Promise.all([cfg(), identity()]).then(([c, who]) => sendResponse({ policy: c.policy, enabled: c.enabled, user: who.user, orgId: who.orgId }));
     return true;

@@ -18,7 +18,7 @@ const path = require('path');
 const D = require('../detection-engine/detect');
 
 const FIXTURE = path.join(__dirname, '..', 'test', 'fixtures', 'semantic-eval.json');
-const SEM_CATS = ['CONFIDENTIAL_BUSINESS', 'SOURCE_CODE', 'LEGAL_CONTRACT', 'CREDENTIALS'];
+const SEM_CATS = ['CONFIDENTIAL_BUSINESS', 'SOURCE_CODE', 'LEGAL_CONTRACT', 'CREDENTIALS', 'PROMPT_ATTACK'];
 
 // Minimum acceptable quality. A DLP control that cries wolf gets switched off, so
 // benign false positives are the hard gate; recall floors keep real leaks caught.

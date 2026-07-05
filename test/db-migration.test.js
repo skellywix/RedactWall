@@ -16,6 +16,7 @@ function copyDbRuntime(tempRoot) {
   for (const file of ['db.js', 'env.js', 'audit-integrity.js']) {
     fs.copyFileSync(path.join(serverRoot, file), path.join(tempServer, file));
   }
+  fs.cpSync(path.join(serverRoot, 'storage'), path.join(tempServer, 'storage'), { recursive: true });
   return path.join(tempServer, 'db.js');
 }
 

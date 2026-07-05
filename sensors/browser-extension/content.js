@@ -11,8 +11,8 @@
  */
 (function () {
   'use strict';
-  if (window.__promptSentinelLoaded) return;
-  window.__promptSentinelLoaded = true;
+  if (window.__promptwallLoaded) return;
+  window.__promptwallLoaded = true;
 
   const D = window.PSDetect;
   const Ext = window.PWBrowserApi;
@@ -295,6 +295,7 @@
     if (res.decision === 'allow') return true;
     if (outcome === 'sent_after_warning') return res.status === 'warned_sent';
     if (outcome === 'justified') return res.status === 'justified';
+    if (outcome === 'redacted_sent') return res.status === 'redacted';
     return false;
   }
   function recordedEvidenceResponse(res, expectedStatus) {
@@ -325,6 +326,19 @@
     resend(el);
   }
 
+  // Redact path: the composer is already tokenized (PII-free). Only resend once
+  // the control plane has recorded the redacted-send, so an outage cannot
+  // produce a send with no compliance evidence (fail closed).
+  async function proceedRedactedAfterRecorded(tokenText, analysis, el) {
+    const res = await report(tokenText, analysis, 'submit', 'redacted_sent', '', { clientPreRedacted: true });
+    if (!recordedProceedResponse(res, 'redacted_sent')) {
+      toast('PromptWall could not record this redacted send. Held until the control plane is reachable — press send again to retry.');
+      return;
+    }
+    bypassOnce = true;
+    resend(el);
+  }
+
   async function sendApprovalRequest(text, analysis) {
     const res = await report(text, analysis, 'submit', 'awaiting_approval');
     if (res && res.id && res.status === 'pending') {
@@ -347,7 +361,27 @@
     return report('[browser action blocked] ' + action + ' ' + SITE, emptyAnalysis(), action, 'action_blocked', reason);
   }
 
+  // Outcomes where the browser blocked an upload it could not inspect: hand
+  // the file's name+size to the endpoint agent (via the background worker and
+  // native messaging) so the real file is scanned on the device. Best-effort
+  // only - the upload is already blocked before this fires.
+  const ENDPOINT_INTENT_OUTCOMES = new Set(['file_too_large', 'ocr_required', 'file_unsupported', 'scan_unavailable']);
+
+  function sendEndpointFileIntent(file, outcome) {
+    if (!ENDPOINT_INTENT_OUTCOMES.has(outcome)) return;
+    try {
+      Promise.resolve(Ext.sendMessage({
+        type: 'fileIntent',
+        payload: {
+          fileName: String((file && file.name) || '').slice(0, 255),
+          sizeBytes: Number((file && file.size) || 0),
+        },
+      })).catch(() => {});
+    } catch (_) { /* endpoint intent is optional */ }
+  }
+
   function reportLocalFileEvent(file, outcome, note) {
+    sendEndpointFileIntent(file, outcome);
     return report('[browser file blocked] ' + fileLabel(file), emptyAnalysis(), 'file_upload', outcome, note);
   }
 
@@ -466,10 +500,8 @@
       const t = D.tokenize(text, verdict.analysis.findings);
       mergeRehydrate(t.map);
       setComposerText(el, t.text);
-      report(t.text, verdict.analysis, 'submit', 'redacted_sent', '', { clientPreRedacted: true });
       toast('PromptWall: ' + Object.keys(t.map).length + ' sensitive value(s) tokenized before sending — the reply is restored here automatically.');
-      bypassOnce = true;
-      resend(el);
+      proceedRedactedAfterRecorded(t.text, verdict.analysis, el);
       return false;
     }
 

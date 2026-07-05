@@ -22,7 +22,7 @@ function sourceBetween(text, startNeedle, endNeedle) {
 test('AI Command Center labels its feed as sanitized metadata', () => {
   assert.match(index, /id="monitorDataScope"[\s\S]*without prompt bodies/);
   assert.match(index, /AI Data Leak Exposure Map/);
-  assert.match(index, /See Every Path Sensitive Data Can Take to AI/);
+  assert.match(index, /aria-label="AI data leak exposure map"/);
 
   assert.doesNotMatch(dashboard, /const monitorItems = \[/, 'dashboard.js reintroduced canned monitor fixtures');
   assert.doesNotMatch(dashboard, /const monitorEvents = \[/, 'dashboard.js reintroduced canned monitor events');

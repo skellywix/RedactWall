@@ -5,7 +5,7 @@
  * Why SQLite, not the old JSON file: the JSON store did unlocked
  * read-modify-write — two near-simultaneous writes last-write-win the whole
  * file, silently dropping an entry and breaking the audit hash-chain linkage
- * (REVIEW.md #6). With three sensors + SSE + polling that race is real even at
+ * With three sensors + SSE + polling that race is real even at
  * tiny scale, and a corrupted audit log is the one thing this product cannot
  * ship. better-sqlite3 gives real ACID transactions and WAL concurrency.
  *
@@ -15,7 +15,7 @@
  * OS dir and log loudly. Set SENTINEL_DB_PATH to a real local-disk path (or a
  * managed Postgres in front of this interface) in production.
  *
- * Tamper-evidence (REVIEW.md #5): every audit entry's hash covers a CANONICAL
+ * Tamper-evidence: every audit entry's hash covers a CANONICAL
  * serialization of the FULL entry (action, queryId, actor, detail, ts,
  * prevHash, and — when the event names a query — a contentHash of that query's
  * current state). Editing a query's findings, decisionNote, or an audit detail
@@ -26,7 +26,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
-const Database = require('better-sqlite3');
+const storage = require('./storage');
 const integrity = require('./audit-integrity');
 
 const DATA_DIR = path.join(__dirname, '..', 'data');
@@ -35,97 +35,25 @@ const sha = integrity.sha;
 const canonical = integrity.canonical;
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
-// Open a DB at `p`, preferring WAL, and force a real write so a filesystem that
-// cannot host SQLite fails HERE (where we can fall back) rather than later.
-function openAt(p) {
-  fs.mkdirSync(path.dirname(p), { recursive: true });
-  const d = new Database(p);
-  try { d.pragma('journal_mode = WAL'); } catch { try { d.pragma('journal_mode = DELETE'); } catch {} }
-  try { d.pragma('synchronous = NORMAL'); } catch {}
-  try { d.pragma('foreign_keys = ON'); } catch {}
-  d.exec('CREATE TABLE IF NOT EXISTS _probe (x); DROP TABLE _probe;'); // throws on a bad FS
-  return d;
+const store = storage.openStore({ env: process.env, dataDir: DATA_DIR });
+const sdb = store.driver;
+const DB_PATH = store.dbPath;
+const DRIVER_KIND = store.kind;
+storage.runMigrations(sdb, DRIVER_KIND);
+
+/** Postgres row-level security context; no-op on single-node SQLite. */
+function setTenantContext(orgId) {
+  if (typeof sdb.setTenantContext === 'function') sdb.setTenantContext(orgId);
 }
 
-let DB_PATH = process.env.SENTINEL_DB_PATH || path.join(DATA_DIR, 'sentinel.db');
-let sdb;
-try {
-  sdb = openAt(DB_PATH);
-} catch (e) {
-  const fallback = path.join(os.tmpdir(), 'promptwall', 'sentinel.db');
-  console.error(`[db] store at ${DB_PATH} unusable (${e.code || e.message}); falling back to ${fallback}. ` +
-    'Set SENTINEL_DB_PATH to a local-disk path in production (never a cloud-synced folder).');
-  DB_PATH = fallback;
-  sdb = openAt(DB_PATH);
-}
-
-sdb.exec(`
-  CREATE TABLE IF NOT EXISTS queries (
-    seq        INTEGER PRIMARY KEY AUTOINCREMENT,
-    id         TEXT UNIQUE NOT NULL,
-    createdAt  TEXT NOT NULL,
-    status     TEXT NOT NULL,
-    user       TEXT,
-    data       TEXT NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_queries_status ON queries(status);
-  CREATE INDEX IF NOT EXISTS idx_queries_created ON queries(createdAt);
-
-  CREATE TABLE IF NOT EXISTS audit (
-    seq       INTEGER PRIMARY KEY AUTOINCREMENT,
-    id        TEXT UNIQUE NOT NULL,
-    ts        TEXT NOT NULL,
-    action    TEXT,
-    queryId   TEXT,
-    actor     TEXT,
-    prevHash  TEXT NOT NULL,
-    hash      TEXT NOT NULL,
-    entry     TEXT NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_audit_query ON audit(queryId);
-
-  CREATE TABLE IF NOT EXISTS scim_users (
-    seq       INTEGER PRIMARY KEY AUTOINCREMENT,
-    id        TEXT UNIQUE NOT NULL,
-    userName  TEXT UNIQUE NOT NULL,
-    active    INTEGER NOT NULL DEFAULT 1,
-    createdAt TEXT NOT NULL,
-    updatedAt TEXT NOT NULL,
-    data      TEXT NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_scim_users_username ON scim_users(userName);
-
-  CREATE TABLE IF NOT EXISTS scim_groups (
-    seq         INTEGER PRIMARY KEY AUTOINCREMENT,
-    id          TEXT UNIQUE NOT NULL,
-    displayName TEXT UNIQUE NOT NULL,
-    createdAt   TEXT NOT NULL,
-    updatedAt   TEXT NOT NULL,
-    data        TEXT NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_scim_groups_display ON scim_groups(displayName);
-
-  CREATE TABLE IF NOT EXISTS detector_feedback (
-    seq        INTEGER PRIMARY KEY AUTOINCREMENT,
-    id         TEXT UNIQUE NOT NULL,
-    createdAt  TEXT NOT NULL,
-    queryId    TEXT NOT NULL,
-    detectorId TEXT NOT NULL,
-    verdict    TEXT NOT NULL,
-    actor      TEXT,
-    data       TEXT NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_detector_feedback_query ON detector_feedback(queryId);
-  CREATE INDEX IF NOT EXISTS idx_detector_feedback_detector ON detector_feedback(detectorId);
-  CREATE INDEX IF NOT EXISTS idx_detector_feedback_verdict ON detector_feedback(verdict);
-`);
 
 const id = (p) => p + '_' + crypto.randomBytes(8).toString('hex');
+const orgColumn = (value) => String(value || '').trim().toLowerCase() || null;
 
 // ---- Queries -----------------------------------------------------------------
-const qInsert = sdb.prepare('INSERT INTO queries (id, createdAt, status, user, data) VALUES (@id, @createdAt, @status, @user, @data)');
+const qInsert = sdb.prepare('INSERT INTO queries (id, createdAt, status, user, orgId, data) VALUES (@id, @createdAt, @status, @user, @orgId, @data)');
 const qById = sdb.prepare('SELECT data FROM queries WHERE id = ?');
-const qUpdateById = sdb.prepare('UPDATE queries SET status = @status, user = @user, data = @data WHERE id = @id');
+const qUpdateById = sdb.prepare('UPDATE queries SET status = @status, user = @user, orgId = @orgId, data = @data WHERE id = @id');
 const detectorFeedbackInsert = sdb.prepare('INSERT INTO detector_feedback (id, createdAt, queryId, detectorId, verdict, actor, data) VALUES (@id, @createdAt, @queryId, @detectorId, @verdict, @actor, @data)');
 
 function boundedLimit(value, fallback = 200, max = 5000) {
@@ -137,7 +65,7 @@ function boundedLimit(value, fallback = 200, max = 5000) {
 
 function createQuery(q) {
   const row = { id: id('q'), createdAt: new Date().toISOString(), status: 'pending', ...q };
-  qInsert.run({ id: row.id, createdAt: row.createdAt, status: row.status, user: row.user || null, data: JSON.stringify(row) });
+  qInsert.run({ id: row.id, createdAt: row.createdAt, status: row.status, user: row.user || null, orgId: orgColumn(row.orgId), data: JSON.stringify(row) });
   return row;
 }
 function getQuery(qid) {
@@ -147,13 +75,14 @@ function getQuery(qid) {
 function listQueries(filter = {}) {
   const all = filter.all === true;
   const limit = boundedLimit(filter.limit, 200, filter.maxLimit || 5000);
-  const rows = all
-    ? (filter.status
-      ? sdb.prepare('SELECT data FROM queries WHERE status = ? ORDER BY createdAt DESC, seq DESC').all(filter.status)
-      : sdb.prepare('SELECT data FROM queries ORDER BY createdAt DESC, seq DESC').all())
-    : (filter.status
-      ? sdb.prepare('SELECT data FROM queries WHERE status = ? ORDER BY createdAt DESC, seq DESC LIMIT ?').all(filter.status, limit)
-      : sdb.prepare('SELECT data FROM queries ORDER BY createdAt DESC, seq DESC LIMIT ?').all(limit));
+  const where = [];
+  const params = [];
+  if (filter.status) { where.push('status = ?'); params.push(filter.status); }
+  if (filter.orgId) { where.push('orgId = ?'); params.push(String(filter.orgId).trim().toLowerCase()); }
+  const clause = where.length ? ` WHERE ${where.join(' AND ')}` : '';
+  const tail = all ? '' : ' LIMIT ?';
+  if (!all) params.push(limit);
+  const rows = sdb.prepare(`SELECT data FROM queries${clause} ORDER BY createdAt DESC, seq DESC${tail}`).all(...params);
   return rows.map((r) => JSON.parse(r.data));
 }
 // Read-modify-write wrapped in a transaction so concurrent updates can't race.
@@ -161,7 +90,7 @@ const updateQuery = sdb.transaction((qid, patch) => {
   const cur = qById.get(qid);
   if (!cur) return null;
   const merged = { ...JSON.parse(cur.data), ...patch };
-  qUpdateById.run({ id: qid, status: merged.status, user: merged.user || null, data: JSON.stringify(merged) });
+  qUpdateById.run({ id: qid, status: merged.status, user: merged.user || null, orgId: orgColumn(merged.orgId), data: JSON.stringify(merged) });
   return merged;
 });
 
@@ -215,6 +144,10 @@ const aLast = sdb.prepare('SELECT hash FROM audit ORDER BY seq DESC LIMIT 1');
 const aInsert = sdb.prepare('INSERT INTO audit (id, ts, action, queryId, actor, prevHash, hash, entry) VALUES (@id, @ts, @action, @queryId, @actor, @prevHash, @hash, @entry)');
 
 function appendAuditRecord(event) {
+  // Serialize concurrent appends on a shared database (Postgres multi-instance)
+  // so the read-head-then-insert below is atomic and the hash chain cannot fork.
+  // No-op on SQLite, whose single-writer transaction already serializes writes.
+  if (typeof sdb.lockAuditAppend === 'function') sdb.lockAuditAppend();
   const last = aLast.get();
   const prevHash = last ? last.hash : ZERO;
   const contentHash = event.queryId ? queryContentHash(event.queryId) : undefined;
@@ -326,7 +259,7 @@ const purgeRetainedSensitiveData = sdb.transaction((options = {}) => {
     q.retentionPurgedAt = now;
     q.retentionPurgedFields = fields;
     q.retentionPurgeReason = options.reason || 'retention window elapsed';
-    qUpdateById.run({ id: q.id, status: q.status, user: q.user || null, data: JSON.stringify(q) });
+    qUpdateById.run({ id: q.id, status: q.status, user: q.user || null, orgId: orgColumn(q.orgId), data: JSON.stringify(q) });
     appendAuditRecord({
       action: 'RETENTION_PURGED',
       queryId: q.id,
@@ -357,6 +290,7 @@ function seatStats(filter = {}) {
   const wantedOrg = normalizedSeatOrg(filter.orgId);
   const rows = sdb.prepare('SELECT data FROM queries ORDER BY createdAt ASC, seq ASC').all();
   const users = new Map();
+  const inactiveIdentities = inactiveScimIdentitySet();
   for (const r of rows) {
     const q = JSON.parse(r.data);
     if (SEAT_EXCLUDED_STATUSES.has(q.status)) continue;
@@ -364,6 +298,7 @@ function seatStats(filter = {}) {
     if (wantedOrg && orgId !== wantedOrg) continue;
     const user = normalizedSeatUser(q.user);
     if (!user) continue;
+    if (inactiveIdentities.has(user)) continue; // deactivation releases the seat
     const current = users.get(user) || {
       user,
       orgId: orgId || null,
@@ -438,6 +373,10 @@ function saveScimUser(user) {
   };
   if (existing) scimUserUpdate.run(row);
   else scimUserInsert.run({ ...row, createdAt: merged.createdAt });
+  inactiveIdentityCache = null;
+  if ((!existing || existing.active !== false) && merged.active === false) {
+    for (const identity of scimIdentities(merged)) revokeIdentity(identity);
+  }
   return merged;
 }
 
@@ -445,6 +384,76 @@ function deactivateScimUser(scimId) {
   const existing = getScimUser(scimId);
   if (!existing) return null;
   return saveScimUser({ ...existing, active: false });
+}
+
+// ---- Identity lifecycle -------------------------------------------------------
+const revocationUpsert = sdb.prepare(
+  'INSERT INTO identity_revocations (identity, revokedAt) VALUES (@identity, @revokedAt) '
+  + 'ON CONFLICT(identity) DO UPDATE SET revokedAt = @revokedAt',
+);
+const revocationByIdentity = sdb.prepare('SELECT revokedAt FROM identity_revocations WHERE identity = ?');
+
+function normalizedIdentity(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function scimIdentities(user = {}) {
+  const identities = new Set();
+  const userName = normalizedIdentity(user.userName);
+  if (userName) identities.add(userName);
+  for (const email of Array.isArray(user.emails) ? user.emails : []) {
+    const value = normalizedIdentity(email && email.value);
+    if (value) identities.add(value);
+  }
+  return [...identities];
+}
+
+function revokeIdentity(identity, revokedAt = Date.now()) {
+  const normalized = normalizedIdentity(identity);
+  if (!normalized) return false;
+  revocationUpsert.run({ identity: normalized, revokedAt: Math.floor(revokedAt) });
+  return true;
+}
+
+function identityRevokedSince(identity, issuedAtMs) {
+  const row = revocationByIdentity.get(normalizedIdentity(identity));
+  if (!row) return false;
+  return Number(issuedAtMs || 0) <= Number(row.revokedAt);
+}
+
+// Cached because the sensor gate consults it on every event; saveScimUser
+// invalidates so provisioning changes apply immediately.
+let inactiveIdentityCache = null;
+
+function inactiveScimIdentitySet() {
+  if (inactiveIdentityCache) return inactiveIdentityCache;
+  const inactive = new Set();
+  for (const user of listScimUsers()) {
+    if (user.active === false) for (const identity of scimIdentities(user)) inactive.add(identity);
+  }
+  inactiveIdentityCache = inactive;
+  return inactive;
+}
+
+function scimIdentityInactive(identity) {
+  const normalized = normalizedIdentity(identity);
+  if (!normalized) return false;
+  return inactiveScimIdentitySet().has(normalized);
+}
+
+// ---- MFA recovery codes --------------------------------------------------------
+const recoveryCodeInsert = sdb.prepare('INSERT INTO mfa_recovery_used (codeIndex, usedAt) VALUES (?, ?)');
+const recoveryCodeUsedRow = sdb.prepare('SELECT usedAt FROM mfa_recovery_used WHERE codeIndex = ?');
+
+function mfaRecoveryCodeUsed(codeIndex) {
+  return !!recoveryCodeUsedRow.get(Math.floor(Number(codeIndex)));
+}
+
+function consumeMfaRecoveryCode(codeIndex) {
+  const index = Math.floor(Number(codeIndex));
+  if (!Number.isFinite(index) || index < 0 || mfaRecoveryCodeUsed(index)) return false;
+  recoveryCodeInsert.run(index, new Date().toISOString());
+  return true;
 }
 
 function getScimGroup(scimId) {
@@ -500,6 +509,29 @@ function verifyAuditChain() {
 }
 
 // ---- Stats -------------------------------------------------------------------
+// topEntities requires scanning and JSON-parsing every query row, and stats()
+// is broadcast after essentially every ingest event. Cache the result for a
+// short interval so this O(N) scan runs at most once per window instead of once
+// per request; the "top data types" widget tolerates a few seconds of lag.
+const TOP_ENTITIES_TTL_MS = (() => {
+  const n = Number(process.env.PROMPTWALL_TOP_ENTITIES_TTL_MS);
+  return Number.isFinite(n) && n >= 0 ? n : 10000;
+})();
+let _topEntitiesCache = null;
+let _topEntitiesAt = 0;
+function topEntities() {
+  const now = Date.now();
+  if (_topEntitiesCache && now - _topEntitiesAt < TOP_ENTITIES_TTL_MS) return _topEntitiesCache;
+  const entity = {};
+  for (const r of sdb.prepare('SELECT data FROM queries').all()) {
+    const ec = JSON.parse(r.data).entityCounts || {};
+    for (const [k, v] of Object.entries(ec)) entity[k] = (entity[k] || 0) + v;
+  }
+  _topEntitiesCache = Object.entries(entity).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  _topEntitiesAt = now;
+  return _topEntitiesCache;
+}
+
 function stats() {
   const counts = {};
   for (const r of sdb.prepare('SELECT status, COUNT(*) n FROM queries GROUP BY status').all()) counts[r.status] = r.n;
@@ -509,11 +541,6 @@ function stats() {
   const todayBlocked = sdb.prepare(
     `SELECT COUNT(*) n FROM queries WHERE substr(createdAt,1,10) = ? AND status IN (${blockedPlaceholders})`,
   ).get(today, ...STATS_BLOCKED_STATUSES).n;
-  const entity = {};
-  for (const r of sdb.prepare('SELECT data FROM queries').all()) {
-    const ec = JSON.parse(r.data).entityCounts || {};
-    for (const [k, v] of Object.entries(ec)) entity[k] = (entity[k] || 0) + v;
-  }
   return {
     total,
     pending: counts.pending || 0,
@@ -521,7 +548,7 @@ function stats() {
     denied: counts.denied || 0,
     allowed: counts.allowed || 0,
     todayBlocked,
-    topEntities: Object.entries(entity).sort((a, b) => b[1] - a[1]).slice(0, 8),
+    topEntities: topEntities(),
   };
 }
 
@@ -544,7 +571,7 @@ function migrateFromJson(opts = {}) {
       try { rows = JSON.parse(fsModule.readFileSync(qf, 'utf8')); } catch {}
       for (const r of rows) {
         if (!r || !r.id) continue;
-        queryInsert.run({ id: r.id, createdAt: r.createdAt || new Date().toISOString(), status: r.status || 'pending', user: r.user || null, data: JSON.stringify(r) });
+        queryInsert.run({ id: r.id, createdAt: r.createdAt || new Date().toISOString(), status: r.status || 'pending', user: r.user || null, orgId: orgColumn(r.orgId), data: JSON.stringify(r) });
         importedQ++;
       }
     }
@@ -566,13 +593,69 @@ function migrateFromJson(opts = {}) {
 }
 try { migrateFromJson(); } catch (e) { console.error('[db] migration skipped:', e.message); }
 
+// ---- AI app catalog ----------------------------------------------------------
+const aiAppInsert = sdb.prepare('INSERT INTO ai_apps (id, canonicalHost, firstSeen, lastSeen, data) VALUES (@id, @canonicalHost, @firstSeen, @lastSeen, @data)');
+const aiAppByHost = sdb.prepare('SELECT data FROM ai_apps WHERE canonicalHost = ?');
+const aiAppUpdate = sdb.prepare('UPDATE ai_apps SET lastSeen = @lastSeen, data = @data WHERE canonicalHost = @canonicalHost');
+
+function getAiApp(canonicalHost) {
+  const row = aiAppByHost.get(canonicalHost);
+  return row ? JSON.parse(row.data) : null;
+}
+
+function listAiApps() {
+  return sdb.prepare('SELECT data FROM ai_apps ORDER BY lastSeen DESC, seq DESC').all().map((r) => JSON.parse(r.data));
+}
+
+// Insert-or-update a catalog entry keyed by canonical host. `patch` is merged
+// over the stored record; discovery counters are additive via the caller.
+const upsertAiApp = sdb.transaction((canonicalHost, patch, now) => {
+  const existing = getAiApp(canonicalHost);
+  if (existing) {
+    const merged = { ...existing, ...patch, canonicalHost, id: existing.id, firstSeen: existing.firstSeen, lastSeen: now };
+    aiAppUpdate.run({ canonicalHost, lastSeen: now, data: JSON.stringify(merged) });
+    return merged;
+  }
+  const record = { id: id('app'), canonicalHost, firstSeen: now, lastSeen: now, ...patch };
+  aiAppInsert.run({ id: record.id, canonicalHost, firstSeen: now, lastSeen: now, data: JSON.stringify(record) });
+  return record;
+});
+
+// ---- Delivery history (SIEM/SOAR subscriptions) ------------------------------
+const deliveryInsert = sdb.prepare('INSERT INTO deliveries (id, ts, destId, dedupeKey, status, data) VALUES (@id, @ts, @destId, @dedupeKey, @status, @data)');
+
+function recordDelivery(record) {
+  const row = { id: id('dlv'), ts: new Date().toISOString(), destId: record.destId, dedupeKey: record.dedupeKey || '', status: record.status || 'unknown', ...record };
+  deliveryInsert.run({ id: row.id, ts: row.ts, destId: row.destId, dedupeKey: row.dedupeKey, status: row.status, data: JSON.stringify(row) });
+  // Bounded history: keep the most recent 2000 rows.
+  sdb.prepare('DELETE FROM deliveries WHERE seq <= (SELECT MAX(seq) - 2000 FROM deliveries)').run();
+  return row;
+}
+
+function listDeliveries(limit = 200) {
+  const n = Math.max(1, Math.min(2000, Number(limit) || 200));
+  return sdb.prepare('SELECT data FROM deliveries ORDER BY seq DESC LIMIT ?').all(n).map((r) => JSON.parse(r.data));
+}
+
+function recentDeliverySuccess(destId, dedupeKey, sinceIso) {
+  const row = sdb.prepare('SELECT data FROM deliveries WHERE destId = ? AND dedupeKey = ? AND status = ? ORDER BY seq DESC LIMIT 1').get(destId, dedupeKey, 'delivered');
+  if (!row) return false;
+  const rec = JSON.parse(row.data);
+  return !sinceIso || rec.ts >= sinceIso;
+}
+
 module.exports = {
   createQuery, getQuery, listQueries, updateQuery,
   createDetectorFeedback, listDetectorFeedback,
   purgeRetainedSensitiveData,
   appendAudit, listAudit, verifyAuditChain, stats, seatStats, postureActionStates,
   getScimUser, getScimUserByUserName, listScimUsers, saveScimUser, deactivateScimUser,
+  revokeIdentity, identityRevokedSince, scimIdentityInactive,
+  mfaRecoveryCodeUsed, consumeMfaRecoveryCode,
   getScimGroup, getScimGroupByDisplayName, listScimGroups, saveScimGroup, deleteScimGroup,
-  _canonical: canonical, _db: sdb, _dbPath: DB_PATH,
+  getAiApp, listAiApps, upsertAiApp,
+  recordDelivery, listDeliveries, recentDeliverySuccess,
+  setTenantContext,
+  _canonical: canonical, _db: sdb, _dbPath: DB_PATH, _driverKind: DRIVER_KIND,
   _internal: { migrateFromJson, parsePostureActionDetail, POSTURE_ACTION_AUDIT },
 };

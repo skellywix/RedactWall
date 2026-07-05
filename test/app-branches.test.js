@@ -278,16 +278,16 @@ test('admin routes cover login failures, OIDC errors, update actions, identity e
     maxSeverityLabel: 'critical',
     reasons: ['unit pending approval'],
   });
-  const originalStepUpSatisfied = auth.oidcStepUpSatisfied;
+  const originalStepUpSatisfied = auth.stepUpSatisfied;
   try {
-    auth.oidcStepUpSatisfied = () => true;
+    auth.stepUpSatisfied = () => true;
     res = await jsonFetch(base, `/api/queries/${pending.id}/approve`, {
       headers: { cookie, 'x-csrf-token': csrfToken },
-      body: { password: 'wrong-but-oidc-fresh', note: 'fresh oidc step-up' },
+      body: { password: 'wrong-but-step-up-fresh', note: 'fresh step-up window' },
     });
     assert.strictEqual(res.status, 200);
   } finally {
-    auth.oidcStepUpSatisfied = originalStepUpSatisfied;
+    auth.stepUpSatisfied = originalStepUpSatisfied;
   }
 
   const originalUpdater = {
@@ -470,6 +470,7 @@ test('app internals cover ingest throttle, startup logging, server timers, and s
     preflight: { summarizeFailures: () => [] },
     runRetentionPurge: () => calls.push('retention'),
     runWorkflowEscalation: () => calls.push('workflow'),
+    runSensorStaleSweep: () => calls.push('stale-sweep'),
     app: fakeApp,
     logStartup: (port) => calls.push(`log:${port}`),
     setInterval: (fn, ms) => {
@@ -485,8 +486,9 @@ test('app internals cover ingest throttle, startup logging, server timers, and s
   closeHandler();
   assert.ok(calls.includes('retention'));
   assert.ok(calls.includes('workflow'));
+  assert.ok(calls.includes('stale-sweep'));
   assert.ok(calls.includes('log:4521'));
-  assert.deepStrictEqual(cleared.sort((a, b) => a - b), [5 * 60 * 1000, 60 * 60 * 1000].sort((a, b) => a - b));
+  assert.deepStrictEqual(cleared.sort((a, b) => a - b), [5 * 60 * 1000, 60 * 60 * 1000, 60 * 60 * 1000].sort((a, b) => a - b));
 
   const signals = {};
   const exits = [];

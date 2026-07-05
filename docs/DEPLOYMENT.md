@@ -107,39 +107,6 @@ SENTINEL_POLICY_PATH=/data/policy.json
 SENTINEL_CUSTOM_DETECTORS_PATH=/data/custom-detectors.json
 ```
 
-## MECHA Standing Docker Test Environment
-
-The permanent local Docker test environment on MECHA uses:
-
-```text
-Compose project: promptwall-mecha-20260628
-URL: http://localhost:4027
-Env file: .env.mecha.local
-Volume: promptwall-mecha-20260628_promptwall-data
-```
-
-`.env.mecha.local` is ignored by Git and holds generated synthetic local test
-secrets. The standing volume is the reusable test store for mock SaaS events,
-local policy edits, backup drills, and evidence packs.
-
-Use these commands from the repo root:
-
-```bash
-npm run docker:mecha:status
-npm run docker:mecha
-npm run docker:mecha:rebuild
-npm run docker:mecha:restart
-npm run docker:mecha:check
-npm run docker:mecha:smoke
-npm run docker:mecha:logs
-npm run docker:mecha:stop
-```
-
-`docker:mecha:stop` stops the container without deleting the container, network,
-or named volume. Do not use `docker compose down -v` for this standing test
-stack unless you intentionally want to erase the MECHA test database and
-evidence files.
-
 ## Health Checks
 
 ```bash
@@ -192,14 +159,9 @@ SENTINEL_CUSTOM_DETECTORS_PATH=/data/custom-detectors.json
 
 For Docker image deployments, rebuild and roll the image through your normal
 host or CloudFormation process instead of using the source-clone updater inside
-a read-only container. The MECHA standing test stack can use this restart
-command after an update is applied from the host checkout:
-
-```text
-npm run docker:mecha:restart
-```
-
-Backend execution of that command is disabled unless the host sets:
+a read-only container. A host checkout can schedule a restart command after an
+update is applied, but backend execution of that command is disabled unless
+the host sets:
 
 ```text
 PROMPTWALL_UPDATE_RESTART_ENABLED=true
@@ -643,6 +605,38 @@ The writer loads `ENDPOINT_AGENT_HANDOFF_SECRET` and
 `ENDPOINT_AGENT_HANDOFF_DIR`, or their `PROMPTWALL_*` aliases, from the endpoint
 config, verifies the referenced path is a local file, writes the event
 atomically, and never reads the file body.
+
+### Browser File-Intent Native Messaging Host
+
+The managed browser extension blocks uploads it cannot inspect locally (too
+large, OCR required, or not text-readable) and tells the user the file needs
+endpoint inspection. With the file-intent host installed, the extension also
+hands the endpoint agent that file's NAME and SIZE - never bytes - over Chrome
+native messaging. The host resolves the intent against the user's staging
+folders (`Downloads`, `Desktop`, `Documents` by default, or
+`ENDPOINT_AGENT_INTENT_SEARCH_DIRS` from endpoint config), and on exactly one
+name+size match writes the same signed metadata-only handoff event the desktop
+collectors use. The endpoint agent then scans the real file locally, including
+the OCR path, and reports only sanitized evidence.
+
+Install it per user after endpoint agent setup, bound to the deployed
+extension id:
+
+```powershell
+.\scripts\install-file-intent-host.ps1 `
+  -ExtensionId "<32-character-extension-id>" `
+  -ConfigDir "$env:LOCALAPPDATA\PromptWall" `
+  -Browser both
+```
+
+The installer writes a secret-free launcher (`file-intent-host.cmd`), the
+`com.promptwall.file_intent` host manifest bound to that one extension origin,
+and per-user `NativeMessagingHosts` registry keys for Chrome and/or Edge. The
+ingest key and handoff secret stay in `endpoint-agent.env`; the launcher only
+points `PROMPTWALL_ENV_PATH` at it. Host replies to the browser carry only
+sanitized statuses (`handoff_written`, `not_found`, `ambiguous`) - never local
+paths. Ambiguous matches (the same name+size in two roots) write nothing.
+Remove the registration with `.\scripts\uninstall-file-intent-host.ps1`.
 
 ### Clipboard Guard
 
@@ -1275,6 +1269,43 @@ Invoke-RestMethod `
 
 Purge events keep the redacted metadata and hash-chained audit trail intact, and evidence exports show purge timestamps and the non-sensitive field names removed.
 
+## Postgres Control Plane (Scale-Out)
+
+The default store is SQLite on local disk - right for a single-node
+customer-silo stack. For a shared or highly available control plane, the same
+synchronous storage interface runs on Postgres:
+
+```
+SENTINEL_DB_DRIVER=postgres
+SENTINEL_DATABASE_URL=postgresql://promptwall_app@db.internal:5432/promptwall
+```
+
+For the full operator runbook — application-role setup, migration workflow,
+statement-timeout/retry tuning, Postgres-mode `npm run backup` /
+`npm run backup:drill`, monitoring, and sizing — see `docs/MANAGED_POSTGRES.md`.
+
+What you get on the Postgres driver:
+
+- **Schema migrations apply automatically on startup** (both drivers share one
+  ordered migration history; `schema_migrations` records what ran).
+- **Append-only audit is enforced in the database** - `UPDATE`/`DELETE` on the
+  audit table raise, and the hash chain still verifies end to end.
+- **Row-level tenant isolation**: the `queries` table carries an indexed
+  `orgId` column with `FORCE ROW LEVEL SECURITY`; setting the
+  `promptwall.org_id` session context confines reads and writes to one tenant.
+  Run the application as a NON-superuser role (superusers bypass RLS).
+- **Multiple control-plane replicas** can share one Postgres; set the same
+  `SENTINEL_SECRET` on every instance so sessions and receipts stay valid
+  across replicas, and put the replicas behind your load balancer.
+
+Backups on Postgres work through the same tooling as SQLite: `npm run backup`
+drives `pg_dump` (custom format) when the store runs on the Postgres driver,
+and `npm run backup:drill` verifies a restore into a scratch database — see
+`docs/MANAGED_POSTGRES.md`. Managed-provider snapshots/PITR remain a good
+complement. After restoring any Postgres backup, `node -e
+"console.log(JSON.stringify(require('./server/db').verifyAuditChain()))"`
+must report `ok: true` before the restored plane serves traffic.
+
 ## Backup And Restore
 
 Back up the SQLite evidence store to local encrypted storage or a managed backup target:
@@ -1308,6 +1339,75 @@ npm run evidence:pack -- evidence-packs \
   backups/sentinel-YYYY-MM-DDTHH-MM-SS-sssZ.db \
   data/restored-sentinel.db
 ```
+
+### Scheduled Backups
+
+Install a recurring backup with retention pruning. On Windows, register a
+scheduled task (defaults: daily at 2:00 AM, `backups/` under the repo,
+30-day retention):
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install-backup-task.ps1 `
+  -Cadence Daily -At '2:00 AM' -BackupDir 'D:\promptwall-backups' -RetentionDays 30
+```
+
+Remove it with the same script and `-Uninstall`.
+
+On Linux, install a systemd service + timer pair (`promptwall-backup.timer`).
+`npm` mode runs `npm run backup` from a repo checkout; `docker` mode runs the
+backup inside the customer-silo container against the `/data` mount:
+
+```bash
+sudo bash scripts/install-backup-systemd.sh --mode npm \
+  --project-dir /opt/promptwall --backup-dir /var/backups/promptwall \
+  --retention-days 30 --on-calendar daily
+```
+
+Remove it with `sudo bash scripts/install-backup-systemd.sh --uninstall`. Both
+installers prune backups older than the retention window only after a
+successful backup, so a failing backup never deletes the last good copies.
+Point the backup directory at local disk that your existing encrypted backup
+tooling then ships off-host; the `.db` files are sensitive runtime state.
+
+### Disaster-Recovery Drill
+
+Run the one-command restore drill on a schedule (quarterly at minimum, and
+after any storage or host change):
+
+```bash
+npm run backup:drill
+```
+
+The drill creates a fresh backup, verifies the manifest hash, restores the
+backup to a scratch path, re-opens the restored database read-only, and
+checks that the restored audit hash-chain verifies and that the restored row
+counts match the manifest. It prints a prompt-free JSON report (hashes,
+counts, and PASS/FAIL checks only) and exits non-zero on any mismatch — wire
+it into monitoring so a failed drill pages someone. Use
+`-- --backup-dir <dir>` to run the drill against a specific backup location
+and `-- --keep` to retain the drill backup and restored copy for inspection;
+without `--keep` the drill removes everything it created.
+
+A passing drill proves the backup path works end to end: the live store's
+audit chain is intact, the backup is byte-identical to what the manifest
+recorded, and a restore of that backup yields a database whose evidence and
+tamper-evident chain still verify.
+
+### What Backups Do Not Cover
+
+The backup and drill cover only the SQLite evidence store. A full
+disaster-recovery kit must also capture, through your configuration
+management or secret manager:
+
+- `.env` secrets — above all `SENTINEL_DATA_KEY` / `SENTINEL_SECRET`
+  (without them, sealed raw prompts in a restored store cannot be revealed),
+  plus `ADMIN_PASSWORD`, `INGEST_API_KEY`, and any SCIM/OIDC credentials.
+- The policy file (`config/policy.json` or the `SENTINEL_POLICY_PATH`
+  target) and custom detectors (`SENTINEL_CUSTOM_DETECTORS_PATH`).
+- Other `config/` artifacts such as `evidence-schedule.json`.
+
+Store those artifacts alongside the `.db` backups and include them when you
+rehearse the restore.
 
 ## Validation Gate
 

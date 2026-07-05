@@ -80,11 +80,21 @@ function loadBackground(opts = {}) {
 }
 
 test('redacted browser sends report tokenized text, not original prompt', () => {
-  assert.match(content, /report\(t\.text,\s*verdict\.analysis,\s*'submit',\s*'redacted_sent'/);
+  // The redact path reports the tokenized text through the recorded-confirmation
+  // helper (fail closed: resend only after the control plane records the send).
+  assert.match(content, /proceedRedactedAfterRecorded\(t\.text,\s*verdict\.analysis,\s*el\)/);
+  assert.match(content, /report\(tokenText,\s*analysis,\s*'submit',\s*'redacted_sent',\s*'',\s*\{ clientPreRedacted: true \}\)/);
   assert.doesNotMatch(content, /report\(text,\s*verdict\.analysis,\s*'submit',\s*'redacted_sent'/);
   assert.match(content, /clientPreRedacted:\s*true/);
   assert.match(background, /clientFindings:\s*msg\.payload\.clientFindings/);
   assert.match(background, /clientCategories:\s*msg\.payload\.clientCategories \|\| msg\.payload\.categories/);
+});
+
+test('redact path resends only after the control plane records the redacted send (fail closed)', () => {
+  assert.match(content, /async function proceedRedactedAfterRecorded/);
+  assert.match(content, /recordedProceedResponse\(res,\s*'redacted_sent'\)/);
+  // On an unrecorded response the function returns before bypassOnce/resend.
+  assert.match(content, /Held until the control plane is reachable/);
 });
 
 test('redact mode blocks category-only hits that cannot be tokenized', () => {
@@ -191,6 +201,40 @@ test('browser blocks configured paste, drop, copy, and download actions without 
   assert.match(background, /channel:\s*'download'/);
   assert.match(background, /clientOutcome:\s*'action_blocked'/);
   assert.match(background, /\.\.\.\(\(c\.policy && c\.policy\.blockedBrowserActions\) \|\| \[\]\)\.flatMap/);
+});
+
+test('unscannable browser uploads hand name+size file intent to the endpoint native host', async () => {
+  assert.match(content, /ENDPOINT_INTENT_OUTCOMES = new Set\(\['file_too_large', 'ocr_required', 'file_unsupported', 'scan_unavailable'\]\)/);
+  assert.match(content, /sendEndpointFileIntent\(file, outcome\);/);
+  assert.match(content, /type: 'fileIntent'/);
+  assert.doesNotMatch(content, /fileIntent[\s\S]{0,300}readAsText/, 'intent payload never reads file bytes');
+  assert.ok(manifest.permissions.includes('nativeMessaging'));
+
+  const sent = [];
+  const bg = loadBackground({ managed: { email: 'analyst@example.test' } });
+  bg.context.chrome.runtime.sendNativeMessage = (hostName, message, cb) => {
+    sent.push({ hostName, message });
+    if (cb) cb({ ok: true, status: 'handoff_written' });
+  };
+  const ack = await bg.sendMessage({ type: 'fileIntent', payload: { fileName: 'member-report.pdf', sizeBytes: 42 } });
+  assert.strictEqual(ack && ack.queued, true);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.strictEqual(sent.length, 1);
+  assert.strictEqual(sent[0].hostName, 'com.promptwall.file_intent');
+  assert.strictEqual(sent[0].message.type, 'upload_intent');
+  assert.strictEqual(sent[0].message.fileName, 'member-report.pdf');
+  assert.strictEqual(sent[0].message.sizeBytes, 42);
+  assert.strictEqual(sent[0].message.user, 'analyst@example.test');
+  assert.deepStrictEqual(
+    Object.keys(sent[0].message).sort(),
+    ['destination', 'fileName', 'sizeBytes', 'type', 'user'],
+    'intent carries metadata only - no bytes, no prompt text',
+  );
+
+  await bg.sendMessage({ type: 'fileIntent', payload: { fileName: '', sizeBytes: 42 } });
+  await bg.sendMessage({ type: 'fileIntent', payload: { fileName: 'x.pdf', sizeBytes: 0 } });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.strictEqual(sent.length, 1, 'invalid intents are dropped before the native host');
 });
 
 test('browser download blocks use host-only evidence and never report URLs or filenames', async () => {

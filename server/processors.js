@@ -38,7 +38,7 @@ const TextProcessor = {
 const OfficeProcessor = {
   id: 'office',
   supports: (name) => OFFICE_EXT.has(ext(name)),
-  extract: async (buf) => {
+  extract: async (buf, opts = {}) => {
     const AdmZip = require('adm-zip');
     let zip;
     try { zip = new AdmZip(buf); } catch {
@@ -46,7 +46,13 @@ const OfficeProcessor = {
       err.code = 'EXTRACT_FAILED';
       throw err;
     }
+    // Decompression-bomb guard: a small OOXML file can inflate to gigabytes.
+    // Bound the cumulative uncompressed bytes we will inflate, using the sizes
+    // declared in each entry's zip header, and refuse the file if it exceeds the
+    // budget (fail closed — the file is blocked unscanned rather than OOMing).
+    const budget = maxOfficeBytes(opts);
     const parts = [];
+    let used = 0;
     for (const entry of zip.getEntries()) {
       const n = entry.entryName;
       // Document body XML parts that carry visible text.
@@ -55,7 +61,24 @@ const OfficeProcessor = {
           /^xl\/worksheets\/sheet\d+\.xml$/.test(n) ||
           /^ppt\/slides\/slide\d+\.xml$/.test(n) ||
           /^ppt\/notesSlides\/notesSlide\d+\.xml$/.test(n)) {
-        try { parts.push(stripXml(entry.getData().toString('utf8'))); } catch {}
+        const declared = entry.header && Number(entry.header.size);
+        if (Number.isFinite(declared) && used + declared > budget) {
+          const err = new Error('office extract exceeds size budget');
+          err.code = 'EXTRACT_FAILED';
+          throw err;
+        }
+        try {
+          const data = entry.getData();
+          used += data.length;
+          if (used > budget) {
+            const err = new Error('office extract exceeds size budget');
+            err.code = 'EXTRACT_FAILED';
+            throw err;
+          }
+          parts.push(stripXml(data.toString('utf8')));
+        } catch (e) {
+          if (e && e.code === 'EXTRACT_FAILED') throw e;
+        }
       }
     }
     return parts.join('\n');
@@ -123,6 +146,15 @@ function maxTextChars(opts) {
   );
 }
 
+function maxOfficeBytes(opts) {
+  return boundedPositiveInt(
+    opts.maxOfficeBytes ?? process.env.FILE_EXTRACT_MAX_OFFICE_BYTES,
+    64 * 1024 * 1024,
+    64 * 1024,
+    512 * 1024 * 1024,
+  );
+}
+
 function withTimeout(promise, ms) {
   let timer;
   const timeout = new Promise((resolve, reject) => {
@@ -150,7 +182,7 @@ async function extractText(name, buf, opts = {}) {
     };
   }
   try {
-    const raw = await withTimeout(Promise.resolve().then(() => p.extract(buf)), timeoutMs(opts));
+    const raw = await withTimeout(Promise.resolve().then(() => p.extract(buf, opts)), timeoutMs(opts));
     const text = String(raw || '');
     const max = maxTextChars(opts);
     return {

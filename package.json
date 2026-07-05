@@ -3,19 +3,40 @@
   "version": "0.3.0",
   "description": "Inline DLP gateway for AI chat prompts - detects PII, blocks risky prompts, reversibly redacts, and releases only after Security Admin approval. Built for compliance (NCUA/GLBA/PCI/HIPAA) at credit unions and similar.",
   "main": "server/app.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/skellywix/promptwall.git"
+  },
+  "homepage": "https://github.com/skellywix/promptwall#readme",
+  "bugs": {
+    "url": "https://github.com/skellywix/promptwall/issues"
+  },
   "engines": {
     "node": ">=22"
   },
   "scripts": {
     "hooks:install": "git config core.hooksPath .githooks",
-    "review:ci": "git diff --check && npm run docs:demo-guide:check && npm run ai-domains:check && npm run native:check && npm test && npm run test:browser && npm run sync-check && npm run eval",
+    "review:ci": "git diff --check && npm run docs:demo-guide:check && npm run ai-domains:check && npm run native:check && npm run console:build && npm test && npm run test:browser && npm run sync-check && npm run eval",
     "review:agent": "npm run review:ci",
     "setup": "node scripts/setup.js",
     "setup:prod": "node scripts/setup.js --production",
     "setup:check": "node scripts/setup.js --check --skip-install",
     "mfa:uri": "node scripts/mfa-uri.js",
     "start": "node server/app.js",
+    "console:install": "npm ci --prefix console",
+    "console:dev": "npm run dev --prefix console",
+    "console:build": "npm run build --prefix console",
+    "console:check": "npm run check --prefix console",
+    "gateway": "node gateway/server.js",
+    "gateway:token": "node gateway/mint-token.js",
     "test": "node scripts/run-node-tests.js",
+    "test:coverage": "node scripts/run-coverage.js",
+    "suite": "node suite/runner.js --full",
+    "suite:smoke": "node suite/runner.js --smoke",
+    "suite:contract": "node suite/runner.js --tier contract",
+    "suite:security": "node suite/runner.js --tier security",
+    "suite:detector": "node suite/runner.js --tier detector",
+    "suite:ui": "node scripts/run-playwright.js --config=suite/playwright.config.js",
     "native:check": "node scripts/ensure-native-bindings.js",
     "native:check:repair": "node scripts/ensure-native-bindings.js --repair",
     "test:browser": "node scripts/run-playwright.js",
@@ -23,6 +44,7 @@
     "test:browser-extension": "node scripts/run-playwright.js browser-extension.spec.js --project=chromium",
     "simulate": "node scripts/simulate.js",
     "proxy:lab": "node scripts/ai-chat-dlp-proxy-lab.js",
+    "icap:bridge": "node scripts/squid-icap-bridge.js",
     "gateway:rate-limiter": "node scripts/ai-gateway-rate-limiter.js",
     "gateway:ha:smoke": "node scripts/smoke-ai-gateway-ha.js",
     "discovery:import": "node scripts/import-ai-discovery.js",
@@ -43,9 +65,6 @@
     "release:extension:check": "node scripts/check-extension-release.js",
     "package:endpoint-agent": "node scripts/package-endpoint-agent.js",
     "package:mcp-guard": "node scripts/package-mcp-guard.js",
-    "docs:sync": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/sync-docs.ps1",
-    "docs:sync:check": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/sync-docs.ps1 -CheckOnly",
-    "docs:sync:install-task": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/install-docs-sync-task.ps1",
     "docs:demo-guide": "node scripts/update-demo-guide.js",
     "docs:demo-guide:check": "node scripts/update-demo-guide.js --check",
     "endpoint:check": "node scripts/check-endpoint-install.js",
@@ -57,18 +76,15 @@
     "mcp:check": "node scripts/check-mcp-guard-install.js",
     "identity:setup": "node scripts/identity-setup.js",
     "train-semantic": "node scripts/train-semantic.js",
+    "edm:fingerprint": "node scripts/edm-fingerprint.js",
     "sync-engine": "node scripts/sync-engine.js",
     "sync-check": "node scripts/sync-check.js",
     "ai-domains:check": "node scripts/check-ai-domain-coverage.js",
     "eval": "node scripts/eval-detect.js",
-    "docker:mecha": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/mecha-docker.ps1 start",
-    "docker:mecha:rebuild": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/mecha-docker.ps1 rebuild",
-    "docker:mecha:restart": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/mecha-docker.ps1 restart",
-    "docker:mecha:stop": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/mecha-docker.ps1 stop",
-    "docker:mecha:status": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/mecha-docker.ps1 status",
-    "docker:mecha:check": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/mecha-docker.ps1 check",
-    "docker:mecha:smoke": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/mecha-docker.ps1 smoke",
-    "docker:mecha:logs": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/mecha-docker.ps1 logs"
+    "rotate:data-key": "node scripts/rotate-data-key.js",
+    "backup:drill": "node scripts/backup-drill.js",
+    "backup:install-task": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/install-backup-task.ps1",
+    "backup:install-systemd": "bash scripts/install-backup-systemd.sh"
   },
   "license": "UNLICENSED",
   "private": true,
@@ -79,9 +95,11 @@
     "express": "^5.2.1",
     "helmet": "^8.2.0",
     "pdf-parse": "^2.4.5",
+    "pg": "^8.22.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@playwright/test": "^1.61.1"
+    "@playwright/test": "^1.61.1",
+    "c8": "^11.0.0"
   }
 }

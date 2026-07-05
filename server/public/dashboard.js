@@ -57,9 +57,11 @@ const icons = {
   shield: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 4l7 3v5c0 4.2-2.6 6.8-7 8-4.4-1.2-7-3.8-7-8V7l7-3Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
   download: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
 };
-const ACTIVITY_PAGE_SIZE = 10;
 const LINEAGE_PAGE_SIZE = 10;
-const AUDIT_PAGE_SIZE = 10;
+let activityPageSize = 10;
+let auditPageSize = 10;
+let activityRangeDays = 0; // 0 = all retained rows
+let auditActionFilter = 'all';
 
 const monitorStatusOptions = [
   { id: 'all', label: 'All' },
@@ -202,6 +204,40 @@ function renderMonitorStatusFilters() {
   }).join('');
 }
 
+// Decision pivots: one chip per gate outcome, counting the loaded activity
+// window and drilling into All Activity with the matching status: field query.
+// Tokens match the search grammar's substring rule, so "blocked" covers
+// destination_blocked, file_upload_blocked, response_blocked, and friends.
+const DECISION_PIVOTS = [
+  { token: 'blocked', label: 'Blocked' },
+  { token: 'pending', label: 'Held' },
+  { token: 'redacted', label: 'Redacted' },
+  { token: 'warned', label: 'Warned' },
+  { token: 'allowed', label: 'Allowed' },
+  { token: 'denied', label: 'Denied' },
+  { token: 'approved', label: 'Approved' },
+];
+
+function renderDecisionPivots() {
+  const el = $('#monitorDecisionPivots');
+  if (!el) return;
+  const count = (token) => currentActivity.filter((q) => String(q.status || '').toLowerCase().includes(token)).length;
+  el.innerHTML = DECISION_PIVOTS.map((pivot) => `
+    <button class="signal-chip" type="button" data-search-pivot="status:${escapeHtml(pivot.token)}" data-then-tab="activity" title="Open All Activity filtered to status:${escapeHtml(pivot.token)}">
+      <span>${escapeHtml(pivot.label)}</span><b>${escapeHtml(count(pivot.token))}</b>
+    </button>`).join('');
+}
+
+// Every Command Center metric drills through to the tab where the operator
+// can act on it (Zscaler "Analyze more" pattern).
+function metricJumpTarget(metric) {
+  const id = String(metric.id || '').toLowerCase();
+  if (id.includes('sensor') || id.includes('coverage')) return 'coverage';
+  if (id.includes('deliver') || id.includes('subscription')) return 'integrations';
+  if (id.includes('pending') || id.includes('approval') || id.includes('queue')) return 'queue';
+  return 'activity';
+}
+
 function renderMonitorMetrics() {
   const metricRows = monitorMetrics();
   if (!metricRows.length) {
@@ -218,11 +254,12 @@ function renderMonitorMetrics() {
       decreased: 'Decreased',
       neutral: 'Stable',
     })[metric.trend] || 'Stable';
-    return `<article class="metric-card${statusClass}${metric.updating ? ' is-updating' : ''}" aria-busy="${metric.status === 'loading' ? 'true' : 'false'}">
+    const jump = metricJumpTarget(metric);
+    return `<button class="metric-card${statusClass}${metric.updating ? ' is-updating' : ''}" type="button" data-tab-jump="${escapeHtml(jump)}" title="Open ${escapeHtml(jump)}" aria-busy="${metric.status === 'loading' ? 'true' : 'false'}">
       <div class="metric-card-head"><span>${escapeHtml(metric.label)}</span>${monitorStatusDot(metric.status === 'normal' ? 'online' : metric.status === 'critical' ? 'error' : metric.status, `${metric.label} ${metric.status}`, { pulse: metric.updating })}</div>
       <div class="metric-value">${value}</div>
       <div class="metric-meta"><span class="metric-trend ${escapeHtml(metric.trend)}">${escapeHtml(trendLabel)}</span><span>${escapeHtml(fmtTime(metric.lastUpdated))}</span></div>
-    </article>`;
+    </button>`;
   }).join('');
 }
 
@@ -762,6 +799,7 @@ function renderMonitor() {
   renderMonitorStatusFilters();
   renderPostureSegments();
   renderMonitorMetrics();
+  renderDecisionPivots();
   renderHardeningMission();
   renderOperatorFlow();
   renderHardeningActionQueue();
@@ -898,7 +936,7 @@ function workflowPatchFor(status) {
 
 async function updatePostureActionWorkflow(id, status, button) {
   if (!canAdminWrite()) {
-    alert('Request not allowed for this session.');
+    toast('Request not allowed for this session.');
     return;
   }
   if (!id) return;
@@ -915,7 +953,7 @@ async function updatePostureActionWorkflow(id, status, button) {
     return;
   }
   if (button) button.disabled = false;
-  if (response) alert(await apiErrorSummary(response, 'Action update failed'));
+  if (response) toast(await apiErrorSummary(response, 'Action update failed'));
 }
 
 async function sendPostureSnapshot() {
@@ -1038,7 +1076,7 @@ function parsePolicyJsonArray(value, label) {
     if (!Array.isArray(parsed)) throw new Error('expected array');
     return parsed;
   } catch {
-    alert(`${label} must be valid JSON array syntax.`);
+    toast(`${label} must be valid JSON array syntax.`);
     return null;
   }
 }
@@ -1105,7 +1143,7 @@ function suggestedPolicyId(prefix, matcherPrefix) {
 function appendGuidedScopeRule() {
   const matchers = collectPolicyMatchers('scope_builder');
   if (!Object.keys(matchers).length) {
-    alert('Scoped enforcement needs at least one matcher.');
+    toast('Scoped enforcement needs at least one matcher.');
     return;
   }
   const rule = {
@@ -1133,7 +1171,7 @@ function appendGuidedScopeRule() {
 function appendGuidedExceptionRule() {
   const matchers = collectPolicyMatchers('exception_builder');
   if (!Object.keys(matchers).length) {
-    alert('Time-bound exception needs at least one matcher.');
+    toast('Time-bound exception needs at least one matcher.');
     return;
   }
   const hours = Math.max(1, Math.min(24 * 30, Number($('#exception_builder_hours').value) || 24));
@@ -1283,14 +1321,14 @@ function saveQueueDensity(value) {
 }
 
 function normalizeColorTheme(value) {
-  return value === 'dark' ? 'dark' : 'light';
+  return value === 'light' ? 'light' : 'dark';
 }
 
 function savedColorTheme() {
   try {
     return normalizeColorTheme(localStorage.getItem('promptwall.theme'));
   } catch {
-    return 'light';
+    return 'dark';
   }
 }
 
@@ -1438,8 +1476,40 @@ function queryText(q) {
   ].join(' ').toLowerCase();
 }
 
+// Search grammar: bare words match anywhere; `field:value` tokens match one
+// property (user:, dest:, status:, sev:, source:, action:, actor:).
+const SEARCH_FIELDS = {
+  user: (row) => row.user || row.actor || '',
+  actor: (row) => row.actor || row.user || '',
+  dest: (row) => row.destination || '',
+  destination: (row) => row.destination || '',
+  status: (row) => row.status || '',
+  sev: (row) => row.maxSeverityLabel || '',
+  severity: (row) => row.maxSeverityLabel || '',
+  source: (row) => row.source || '',
+  action: (row) => row.action || '',
+};
+
+function parseSearch(term) {
+  const fields = [];
+  const words = [];
+  for (const token of String(term || '').split(/\s+/).filter(Boolean)) {
+    const m = token.match(/^([a-z]+):(.+)$/);
+    if (m && SEARCH_FIELDS[m[1]]) fields.push({ get: SEARCH_FIELDS[m[1]], value: m[2] });
+    else words.push(token);
+  }
+  return { fields, words };
+}
+
+function matchesParsedSearch(row, text) {
+  if (!searchTerm) return true;
+  const { fields, words } = parseSearch(searchTerm);
+  return fields.every((f) => String(f.get(row)).toLowerCase().includes(f.value))
+    && words.every((w) => text.includes(w));
+}
+
 function matchesSearch(q) {
-  return !searchTerm || queryText(q).includes(searchTerm);
+  return matchesParsedSearch(q, queryText(q));
 }
 
 function lineageText(bucket) {
@@ -1471,7 +1541,116 @@ function auditText(entry = {}) {
 }
 
 function matchesAudit(entry) {
-  return !searchTerm || auditText(entry || {}).includes(searchTerm);
+  return matchesParsedSearch(entry || {}, auditText(entry || {}));
+}
+
+function withinRangeDays(ts, days) {
+  if (!days) return true;
+  const t = Date.parse(ts);
+  return !Number.isFinite(t) || t >= Date.now() - days * 86400000;
+}
+
+function filteredActivityRows(rows) {
+  return (rows || []).filter((q) => withinRangeDays(q.createdAt, activityRangeDays) && matchesSearch(q));
+}
+
+function filteredAuditEntries(entries) {
+  return (entries || []).filter((a) => (auditActionFilter === 'all' || a.action === auditActionFilter) && matchesAudit(a));
+}
+
+function csvCell(value) {
+  const s = String(value ?? '');
+  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
+function downloadCsv(name, header, rows) {
+  const body = [header, ...rows].map((r) => r.map(csvCell).join(',')).join('\n');
+  const url = URL.createObjectURL(new Blob([body], { type: 'text/csv' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function csvStamp() {
+  return new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+}
+
+// ---- Saved views: name the current search + range + page size ---------------
+function savedViews() {
+  try { return JSON.parse(localStorage.getItem('promptwall.savedViews') || '[]'); } catch { return []; }
+}
+
+function refreshSavedViewOptions() {
+  const sel = $('#savedViews');
+  if (!sel) return;
+  sel.innerHTML = '<option value="" selected>Saved views&hellip;</option>'
+    + savedViews().map((v, i) => `<option value="${i}">${escapeHtml(v.name)}</option>`).join('');
+}
+
+function saveCurrentView() {
+  const search = ($('#globalSearch').value || '').trim();
+  const name = search || (activityRangeDays ? `last ${activityRangeDays}d` : 'all activity');
+  const views = savedViews().filter((v) => v.name !== name);
+  views.unshift({ name, search, range: activityRangeDays, pageSize: activityPageSize });
+  localStorage.setItem('promptwall.savedViews', JSON.stringify(views.slice(0, 12)));
+  refreshSavedViewOptions();
+  toast(`View "${name}" saved.`, 'good');
+}
+
+function applySavedView(index) {
+  const view = savedViews()[Number(index)];
+  if (!view) return;
+  $('#globalSearch').value = view.search || '';
+  activityRangeDays = view.range || 0;
+  activityPageSize = view.pageSize || 10;
+  const range = $('#activityRange');
+  if (range) range.value = String(activityRangeDays);
+  const size = $('#activityPageSize');
+  if (size) size.value = String(activityPageSize);
+  updateSearch(view.search || '');
+}
+
+async function exportPolicyJson() {
+  const r = await api('/api/policy');
+  const pol = await responseJsonObject(r, null);
+  if (!pol) { toast('Could not load the policy for export.', 'bad'); return; }
+  const url = URL.createObjectURL(new Blob([JSON.stringify(pol, null, 2)], { type: 'application/json' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `promptwall-policy-${csvStamp()}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function exportInsightsCsv() {
+  const series = (currentInsights && currentInsights.series) || [];
+  if (!series.length) { toast('No insights data loaded yet.', 'bad'); return; }
+  downloadCsv(`promptwall-insights-${insightsWindowDays}d-${csvStamp()}.csv`,
+    ['Day', 'Allowed', 'Redacted', 'Warned', 'Flagged', 'Blocked', 'Shadow', 'Total'],
+    series.map((d) => [d.date, d.allowed || 0, d.redacted || 0, d.warned || 0, d.flagged || 0, d.blocked || 0, d.shadow || 0, d.total || 0]));
+}
+
+function exportActivityCsv() {
+  const rows = filteredActivityRows(currentActivity).map((q) => [
+    fmt(q.createdAt), sourceLabel(q.source), q.user || '', q.destination || '', workflowOwner(q),
+    q.maxSeverityLabel || 'low', q.riskScore ?? 0, Object.keys(q.entityCounts || {}).join('; '), humanize(q.status),
+  ]);
+  downloadCsv(`promptwall-activity-${csvStamp()}.csv`,
+    ['Time', 'Source', 'User', 'Destination', 'Owner', 'Severity', 'Risk', 'Detected', 'Status'], rows);
+}
+
+function exportAuditCsv() {
+  const rows = filteredAuditEntries(currentAuditEntries).map((a) => [
+    fmt(a.ts), a.action || '', a.actor || '', a.queryId || '', a.detail || '',
+  ]);
+  downloadCsv(`promptwall-audit-${csvStamp()}.csv`,
+    ['Timestamp', 'Action', 'Actor', 'Query', 'Detail'], rows);
 }
 
 function resetTablePages() {
@@ -1536,7 +1715,7 @@ async function api(path, opts = {}) {
   next.headers = headers;
   const r = await fetch(path, next);
   if (r.status === 401 && !allowAuthError) { location.href = '/login.html'; return null; }
-  if (r.status === 403) alert('Request not allowed for this session. Refresh or use a Security Admin account.');
+  if (r.status === 403) toast('Request not allowed for this session. Refresh or use a Security Admin account.');
   return r;
 }
 
@@ -1844,6 +2023,7 @@ async function init() {
     b.textContent = 'Default admin password is active. Set ADMIN_PASSWORD before production.';
   }
   await refreshAll();
+  loadDetectorMeta().catch(() => {});
   activateTab(tabNameFromLocation(), { replaceHistory: true });
   connectStream();
 }
@@ -1985,14 +2165,54 @@ async function loadQueue() {
   }
 }
 
+const QUEUE_FILTER_LABEL = { all: 'All', mine: 'Mine', unassigned: 'Unassigned', escalated: 'Escalated' };
+let queueBulkSelected = new Set();
+
+function updateQueueBulkBar() {
+  const bar = $('#queueBulkBar');
+  if (!bar) return;
+  queueBulkSelected = new Set([...queueBulkSelected].filter((id) => currentQueue.some((q) => q.id === id && q.status === 'pending')));
+  bar.classList.toggle('hidden', queueBulkSelected.size === 0);
+  const count = $('#queueBulkCount');
+  if (count) count.textContent = `${queueBulkSelected.size} selected`;
+}
+
+async function runQueueBulk(action) {
+  const ids = [...queueBulkSelected];
+  if (!ids.length) return;
+  const body = { ids, action, note: ($('#queueBulkNote').value || '').trim() };
+  const password = ($('#queueBulkPassword').value || '').trim();
+  if (password) body.password = password;
+  const r = await api('/api/queries/bulk-decision', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (r && r.status === 401) { toast('Bulk approval needs your password - enter it in the bulk bar.', 'bad'); return; }
+  const result = await responseJsonObject(r, null);
+  if (!result) { toast('Bulk decision failed.', 'bad'); return; }
+  const skippedNote = result.skipped ? ` ${result.skipped} skipped (${[...new Set(result.results.filter((x) => x.reason).map((x) => x.reason))].join(', ')}).` : '';
+  toast(`${result.decided} prompt(s) ${action === 'approve' ? 'approved' : 'denied'}.${skippedNote}`, result.skipped ? 'info' : 'good');
+  queueBulkSelected.clear();
+  $('#queueBulkPassword').value = '';
+  await Promise.all([loadQueue(), loadStats()]);
+}
+
+function queueFilterCount(filter) {
+  const saved = queueFilter;
+  queueFilter = filter;
+  const count = currentQueue.filter(queueFilterMatches).length;
+  queueFilter = saved;
+  return count;
+}
+
 function renderQueueView() {
   const el = $('#queueList');
   $$('.queue-tools [data-queue-filter]').forEach((button) => {
     const active = button.dataset.queueFilter === queueFilter;
     button.classList.toggle('active', active);
     button.setAttribute('aria-pressed', String(active));
+    const name = button.dataset.queueFilter;
+    if (QUEUE_FILTER_LABEL[name]) button.textContent = `${QUEUE_FILTER_LABEL[name]} (${queueFilterCount(name)})`;
   });
   syncQueueFilterOptions();
+  updateQueueBulkBar();
   const rows = currentQueue.filter(queueMetadataMatches).filter(matchesSearch);
   if (!currentQueue.length) {
     el.innerHTML = '<div class="empty"><div class="big">Queue clear</div>No prompts are awaiting approval.</div>';
@@ -2007,6 +2227,47 @@ function renderQueueView() {
   if (!rows.some((q) => q.id === selected)) selected = rows[0].id;
   el.innerHTML = rows.map(renderQueueItem).join('');
   renderIncident(rows.find((q) => q.id === selected) || rows[0]);
+}
+
+// Inline "Assigned to" editing on the queue row (Security Admin only), the
+// same convenience MDCA/Netskope give on incident rows.
+let queueAssignOpenId = null;
+
+function assigneeChip(q) {
+  if (!canAdminWrite()) return '';
+  return `<button class="chip" type="button" data-assign-toggle="${escapeHtml(q.id)}" title="Reassign this decision"><b>Assignee</b> ${escapeHtml(q.assignedUser || 'anyone in group')}</button>`;
+}
+
+function assignEditor(q) {
+  if (queueAssignOpenId !== q.id || !canAdminWrite()) return '';
+  const id = escapeHtml(q.id);
+  const field = (kind, value, max, label) => `<input type="text" id="assign_${kind}_${id}" value="${escapeHtml(value || '')}" maxlength="${max}" placeholder="${label}" aria-label="${label}"/>`;
+  const roleOption = (value, label) => `<option value="${value}" ${String(q.assignedRole || '') === value ? 'selected' : ''}>${label}</option>`;
+  return `<div class="assign-editor">
+    ${field('user', q.assignedUser, 128, 'Assignee username (blank = anyone)')}
+    ${field('group', q.assignedGroup, 64, 'Group, e.g. compliance')}
+    <select id="assign_role_${id}" aria-label="Assigned role">${roleOption('approver', 'Approver')}${roleOption('security_admin', 'Security Admin')}${roleOption('', 'No role (admins only)')}</select>
+    <button class="btn" type="button" data-assign-save="${id}">Save assignment</button>
+    <button class="btn" type="button" data-assign-toggle="${id}">Cancel</button>
+  </div>`;
+}
+
+async function saveAssignment(id) {
+  const body = {
+    assignedUser: ($(`#assign_user_${id}`).value || '').trim(),
+    assignedGroup: ($(`#assign_group_${id}`).value || '').trim(),
+    assignedRole: $(`#assign_role_${id}`).value || '',
+  };
+  const r = await api(`/api/queries/${encodeURIComponent(id)}/assign`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const updated = await responseJsonObject(r, null);
+  if (!updated) { toast('Assignment failed - check the group/role values.', 'bad'); return; }
+  queueAssignOpenId = null;
+  toast(`Assigned to ${updated.assignedUser || 'anyone'} in ${updated.assignedGroup || 'no group'}.`, 'good');
+  await loadQueue();
 }
 
 function renderQueueItem(q) {
@@ -2030,8 +2291,12 @@ function renderQueueItem(q) {
       ${revealControl}
     </div>`
     : `<div class="readonly-note">${escapeHtml(queueDecisionLabel(q))}</div>`;
+  const bulkBox = canDecide(q) || canAdminWrite()
+    ? `<input type="checkbox" class="queue-bulk-box" data-queue-bulk-select="${escapeHtml(q.id)}" ${queueBulkSelected.has(q.id) ? 'checked' : ''} aria-label="Select for bulk decision"/>`
+    : '';
   return `<article class="q ${isSelected ? 'selected' : ''}" data-id="${escapeHtml(q.id)}" tabindex="0" role="listitem" ${isSelected ? 'aria-current="true"' : ''} aria-controls="incidentDetail" aria-label="${escapeHtml(rowLabel)}">
     <div class="top risk-meta-row">
+      ${bulkBox}
       <span class="select-dot" aria-hidden="true"></span>
       <span class="sev ${sev}">${escapeHtml(q.maxSeverityLabel || 'low')}</span>
       <span class="risk">Risk <b>${escapeHtml(q.riskScore ?? 0)}</b>/100</span>
@@ -2043,10 +2308,63 @@ function renderQueueItem(q) {
     </div>
     ${revealStatus}
     <div class="prompt ${revealDisplay ? escapeHtml(revealDisplay.promptClass) : ''}" id="p_${escapeHtml(q.id)}">${escapeHtml(promptText)}</div>
-    <div class="chips">${findingChips(q.findings, q.categories)}${workflowChips(q)}</div>
+    <div class="chips">${findingChips(q.findings, q.categories)}${workflowChips(q)}${assigneeChip(q)}</div>
+    ${assignEditor(q)}
     <div class="reasons">Detected: ${escapeHtml(detected)}${(q.reasons || []).length ? `; ${escapeHtml((q.reasons || []).join('; '))}` : ''}</div>
     ${controls}
   </article>`;
+}
+
+// ---- "Why this score": severity x confidence points + regulation citations ----
+let detectorMeta = null;
+
+async function loadDetectorMeta() {
+  detectorMeta = await dashboardJsonWithTimeout('/api/detectors/meta', 2500);
+}
+
+function rationaleEntries(q) {
+  if (Array.isArray(q.scoreBreakdown) && q.scoreBreakdown.length) return q.scoreBreakdown;
+  const sevLabel = (n) => (detectorMeta && detectorMeta.severityLabels && detectorMeta.severityLabels[n]) || 'medium';
+  const regsFor = (t) => (detectorMeta && detectorMeta.regulations && detectorMeta.regulations[t]) || [];
+  return (q.findings || []).map((f) => ({
+    kind: 'finding', type: f.type, severity: f.severity, severityLabel: sevLabel(f.severity),
+    confidence: f.confidence || ((f.score || 0) >= 0.9 ? 'very_likely' : (f.score || 0) >= 0.7 ? 'likely' : 'possible'),
+    points: Math.round((f.severity || 0) * (f.score || 0) * 8),
+    regulations: regsFor(f.type),
+  }));
+}
+
+function scoreRationale(q) {
+  const entries = rationaleEntries(q);
+  if (!entries.length) return '';
+  const rows = entries.map((e) => `
+    <div class="rationale-row">
+      <span class="sev ${sevClass(e.severityLabel)}">${escapeHtml(e.severityLabel)}</span>
+      <span class="rationale-what"><b>${escapeHtml(e.type)}</b>${e.kind === 'category' ? ' <i>content category</i>' : ''}</span>
+      <span class="rationale-conf" title="How sure the engine is: validated match = very likely, contextual = likely, pattern-only = possible">${escapeHtml(humanize(e.confidence || 'possible'))}</span>
+      <span class="rationale-pts" title="Points this detection added to the risk score (severity x confidence weight)">+${escapeHtml(e.points)}</span>
+      <span class="rationale-regs">${(e.regulations || []).map((r) => `<span class="reg-chip" title="Obligation this data falls under">${escapeHtml(r)}</span>`).join('')}</span>
+    </div>`).join('');
+  return `<div class="rationale">
+    <div class="rationale-head">Why this score: <b>${escapeHtml(q.riskScore ?? 0)}/100</b></div>
+    ${rows}
+    <div class="rationale-note">Each detection adds severity &times; confidence points. Chips cite the law or obligation that makes the data sensitive - these appear in the block reasons and audit trail too.</div>
+  </div>`;
+}
+
+async function runDetectorTest() {
+  const input = $('#detectorTestInput');
+  const out = $('#detectorTestResult');
+  const text = (input.value || '').trim();
+  if (!text) { out.innerHTML = '<div class="empty">Paste some sample text first.</div>'; return; }
+  const r = await api('/api/detectors/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
+  const d = await responseJsonObject(r, null);
+  if (!d) { out.innerHTML = '<div class="empty">Test failed - check your session.</div>'; return; }
+  const tone = d.decision === 'block' ? 'bad' : 'good';
+  out.innerHTML = `
+    <div class="reasons" style="margin-top:10px">${statusChip(tone, d.decision.toUpperCase(), `Decision under current policy\n${(d.reasons || []).join('\n')}`)}
+      ${escapeHtml((d.reasons || []).join('; '))}</div>
+    ${scoreRationale(d)}`;
 }
 
 function renderIncident(q) {
@@ -2076,7 +2394,24 @@ function renderIncident(q) {
       <div class="risk-track"><i></i></div>
     </div>
     <div class="prompt">${escapeHtml(q.redactedPrompt)}</div>
-    <div class="posture-list">${matches}</div>`;
+    ${scoreRationale(q)}
+    <div class="posture-list">${matches}</div>
+    <div class="incident-trail" id="incidentTrail" aria-live="polite"></div>`;
+  renderIncidentTrail(q.id).catch(() => {});
+}
+
+// Everything that has happened to this incident, straight from the
+// tamper-evident audit chain (created, escalations, reveals, decision).
+async function renderIncidentTrail(id) {
+  const d = await dashboardJsonWithTimeout(`/api/audit?queryId=${encodeURIComponent(id)}&limit=20`, 2200);
+  const el = $('#incidentTrail');
+  if (!el || !d || !Array.isArray(d.entries)) return;
+  el.innerHTML = '<h3>History</h3>' + (d.entries.slice().reverse().map((a) => `
+    <div class="incident-trail-row">
+      <span class="when">${escapeHtml(fmt(a.ts))}</span>
+      <span class="what"><b>${escapeHtml(humanize(a.action))}</b> by ${escapeHtml(a.actor || '-')}${a.detail ? ` - ${escapeHtml(a.detail)}` : ''}</span>
+    </div>`).join('')
+    || '<div class="incident-trail-row"><span class="what">No audit entries yet for this incident.</span></div>');
 }
 
 document.addEventListener('click', async (e) => {
@@ -2105,6 +2440,17 @@ document.addEventListener('click', async (e) => {
     return;
   }
   closeStatusPopover();
+  const assignToggle = e.target.closest('[data-assign-toggle]');
+  if (assignToggle) {
+    queueAssignOpenId = queueAssignOpenId === assignToggle.dataset.assignToggle ? null : assignToggle.dataset.assignToggle;
+    renderQueueView();
+    return;
+  }
+  const assignSave = e.target.closest('[data-assign-save]');
+  if (assignSave) {
+    await saveAssignment(assignSave.dataset.assignSave);
+    return;
+  }
   const selectableQueueRow = e.target.closest('.q[data-id]');
   if (selectableQueueRow && !e.target.closest('textarea,input,button,select,a')) {
     selected = selectableQueueRow.dataset.id;
@@ -2166,6 +2512,80 @@ document.addEventListener('click', async (e) => {
     renderQueueView();
     return;
   }
+  const searchPivot = e.target.closest('[data-search-pivot]');
+  if (searchPivot) {
+    const box = $('#globalSearch');
+    box.value = searchPivot.dataset.searchPivot;
+    updateSearch(box.value);
+    if (searchPivot.dataset.thenTab) activateTab(searchPivot.dataset.thenTab);
+    return;
+  }
+  const catalogExpand = e.target.closest('[data-catalog-expand]');
+  if (catalogExpand) {
+    catalogExpandedHost = catalogExpandedHost === catalogExpand.dataset.catalogExpand ? null : catalogExpand.dataset.catalogExpand;
+    renderCatalog(catalogApps);
+    return;
+  }
+  const overrideSet = e.target.closest('[data-catalog-override-set]');
+  if (overrideSet) {
+    const host = overrideSet.dataset.catalogOverrideSet;
+    const score = Number($('#catalogOverrideScore').value);
+    const note = ($('#catalogOverrideNote').value || '').trim();
+    if (!Number.isFinite(score) || !note) { toast('An override needs a 0-100 score and a justification note.', 'bad'); return; }
+    const r = await api(`/api/catalog/${encodeURIComponent(host)}/override`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ score, note }) });
+    if (r && r.ok) { toast(`Score override recorded for ${host}.`, 'good'); loadCatalog(); }
+    return;
+  }
+  const overrideClear = e.target.closest('[data-catalog-override-clear]');
+  if (overrideClear) {
+    const host = overrideClear.dataset.catalogOverrideClear;
+    const r = await api(`/api/catalog/${encodeURIComponent(host)}/override`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ score: null }) });
+    if (r && r.ok) { toast(`Override cleared for ${host}.`, 'good'); loadCatalog(); }
+    return;
+  }
+  const catalogReview = e.target.closest('[data-catalog-review]');
+  if (catalogReview) {
+    catalogPendingReview = { host: catalogReview.dataset.catalogReview, decision: catalogReview.dataset.decision };
+    renderCatalog(catalogApps);
+    return;
+  }
+  const catalogConfirm = e.target.closest('[data-catalog-confirm]');
+  if (catalogConfirm && catalogPendingReview) {
+    const { host, decision } = catalogPendingReview;
+    const reason = ($('#catalogReviewReason').value || '').trim() || `${decision} decision from console`;
+    catalogPendingReview = null;
+    if (await submitCatalogReview(host, decision, reason)) {
+      toast(`${host} is now "${decision}".`, 'good');
+      loadCatalog();
+    } else renderCatalog(catalogApps);
+    return;
+  }
+  if (e.target.closest('[data-catalog-cancel]')) {
+    catalogPendingReview = null;
+    renderCatalog(catalogApps);
+    return;
+  }
+  const catalogBulk = e.target.closest('[data-catalog-bulk]');
+  if (catalogBulk) {
+    runCatalogBulk(catalogBulk.dataset.catalogBulk).catch(() => {});
+    return;
+  }
+  const catalogSortTh = e.target.closest('#tab-catalog th[data-catalog-sort]');
+  if (catalogSortTh) {
+    const key = catalogSortTh.dataset.catalogSort;
+    catalogSort = { key, dir: catalogSort.key === key ? -catalogSort.dir : (key === 'appName' || key === 'provider' ? 1 : -1) };
+    renderCatalog(catalogApps);
+    return;
+  }
+  const copySha = e.target.closest('[data-copy-sha]');
+  if (copySha && navigator.clipboard) {
+    navigator.clipboard.writeText(copySha.dataset.copySha).then(() => {
+      const original = copySha.innerHTML;
+      copySha.innerHTML = '<b>SHA-256</b> copied to clipboard';
+      setTimeout(() => { copySha.innerHTML = original; }, 1400);
+    }).catch(() => {});
+    return;
+  }
   const pagerButton = e.target.closest('[data-pager-target][data-pager-page]');
   if (pagerButton) {
     const page = Number(pagerButton.dataset.pagerPage) || 1;
@@ -2197,7 +2617,7 @@ document.addEventListener('click', async (e) => {
   const destinationReview = e.target.closest('[data-destination-review]');
   if (destinationReview) {
     if (!canAdminWrite()) {
-      alert('Request not allowed for this session. Use a Security Admin account.');
+      toast('Request not allowed for this session. Use a Security Admin account.');
       return;
     }
     const destination = destinationReview.dataset.destination;
@@ -2212,7 +2632,7 @@ document.addEventListener('click', async (e) => {
     });
     if (!r || !r.ok) {
       destinationReview.disabled = false;
-      alert('Destination review could not be saved.');
+      toast('Destination review could not be saved.');
       return;
     }
     const body = await r.json();
@@ -2229,7 +2649,7 @@ document.addEventListener('click', async (e) => {
     const q = currentQueue.find((item) => item.id === id) || {};
     if (act === 'reveal') {
       if (!canReveal(q)) {
-        alert(q.rawRetained === false
+        toast(q.rawRetained === false
           ? 'Raw prompt was not retained for this item.'
           : 'Request not allowed for this session. Use a Security Admin account.');
         return;
@@ -2246,10 +2666,10 @@ document.addEventListener('click', async (e) => {
       if (r.status === 401) {
         const body = await r.json().catch(() => ({}));
         if (body.error === 'unauthenticated') { location.href = '/login.html'; return; }
-        alert('Password confirmation failed.');
+        toast('Password confirmation failed.');
         return;
       }
-      if (r.status === 429) { alert('Too many confirmation attempts. Try again later.'); return; }
+      if (r.status === 429) { toast('Too many confirmation attempts. Try again later.'); return; }
       if (!r.ok) return;
       const body = await r.json();
       const rawRetained = body.rawRetained === true;
@@ -2268,7 +2688,7 @@ document.addEventListener('click', async (e) => {
     }
     if (act === 'approve' || act === 'deny') {
       if (!canDecide(q)) {
-        alert('Request not allowed for this session.');
+        toast('Request not allowed for this session.');
         return;
       }
       const note = ($(`#note_${CSS.escape(id)}`) || {}).value || '';
@@ -2284,12 +2704,12 @@ document.addEventListener('click', async (e) => {
       if (r && r.status === 401 && act === 'approve') {
         const body = await r.json().catch(() => ({}));
         if (body.error === 'unauthenticated') { location.href = '/login.html'; return; }
-        alert('Password confirmation failed.');
+        toast('Password confirmation failed.');
         actionButton.disabled = false;
         return;
       }
       if (r && r.status === 429 && act === 'approve') {
-        alert('Too many confirmation attempts. Try again later.');
+        toast('Too many confirmation attempts. Try again later.');
         actionButton.disabled = false;
         return;
       }
@@ -2323,6 +2743,55 @@ document.addEventListener('click', async (e) => {
 });
 
 document.addEventListener('change', (e) => {
+  const colToggle = e.target.closest('[data-activity-col]');
+  if (colToggle) {
+    const hidden = hiddenActivityCols();
+    if (colToggle.checked) hidden.delete(colToggle.dataset.activityCol);
+    else hidden.add(colToggle.dataset.activityCol);
+    localStorage.setItem('promptwall.activityCols', JSON.stringify([...hidden]));
+    applyActivityColumns();
+    return;
+  }
+  const queueBulkSelect = e.target.closest('[data-queue-bulk-select]');
+  if (queueBulkSelect) {
+    const id = queueBulkSelect.dataset.queueBulkSelect;
+    if (queueBulkSelect.checked) queueBulkSelected.add(id);
+    else queueBulkSelected.delete(id);
+    updateQueueBulkBar();
+    return;
+  }
+  const catalogSelect = e.target.closest('[data-catalog-select]');
+  if (catalogSelect) {
+    const host = catalogSelect.dataset.catalogSelect;
+    if (catalogSelect.checked) catalogSelected.add(host);
+    else catalogSelected.delete(host);
+    updateCatalogBulkBar();
+    return;
+  }
+  if (e.target.matches('#activityRange')) {
+    activityRangeDays = Number(e.target.value) || 0;
+    activityPage = 1;
+    renderActivityRows(currentActivity);
+    return;
+  }
+  if (e.target.matches('#activityPageSize')) {
+    activityPageSize = Number(e.target.value) || 10;
+    activityPage = 1;
+    renderActivityRows(currentActivity);
+    return;
+  }
+  if (e.target.matches('#auditActionFilter')) {
+    auditActionFilter = e.target.value || 'all';
+    auditPage = 1;
+    renderAuditRows(currentAuditEntries);
+    return;
+  }
+  if (e.target.matches('#auditPageSize')) {
+    auditPageSize = Number(e.target.value) || 10;
+    auditPage = 1;
+    renderAuditRows(currentAuditEntries);
+    return;
+  }
   if (e.target.matches('#queueCategoryFilter')) {
     queueCategoryFilter = e.target.value || 'all';
     renderQueueView();
@@ -2406,6 +2875,7 @@ async function loadActivity() {
     if (!rows) return;
     currentActivity = rows;
     renderActivityRows(currentActivity);
+    renderDecisionPivots();
     markUpdated();
   } finally {
     setBusy('#tab-activity .panel', false);
@@ -2436,9 +2906,12 @@ function activityDetail(q) {
           <div class="datum"><label>Detected</label><b>${escapeHtml(detected)}</b></div>
           <div class="datum"><label>Risk</label><b>${escapeHtml(q.riskScore ?? 0)}/100</b></div>
         </div>
+        ${scoreRationale(q)}
         <div class="activity-detail-actions">
           ${q.status === 'pending' ? '<button class="ghost mini" data-tab-jump="queue" type="button">INSPECT</button>' : ''}
           <button class="ghost mini" data-tab-jump="audit" type="button">VIEW AUDIT</button>
+          ${q.user ? `<button class="ghost mini" data-search-pivot="user:${escapeHtml(q.user)}" type="button">SAME USER</button>` : ''}
+          ${q.destination ? `<button class="ghost mini" data-search-pivot="dest:${escapeHtml(q.destination)}" type="button">SAME DESTINATION</button>` : ''}
         </div>
       </div>
     </td>
@@ -2446,32 +2919,641 @@ function activityDetail(q) {
 }
 
 function renderActivityRows(rows) {
-  const filtered = (rows || []).filter(matchesSearch);
-  const page = paginatedRows(filtered, activityPage, ACTIVITY_PAGE_SIZE);
+  const filtered = filteredActivityRows(rows);
+  const page = paginatedRows(filtered, activityPage, activityPageSize);
   activityPage = page.page;
   $('#activityRows').innerHTML = page.rows.map((q) => {
     const tone = statusTone(q.status);
-    const detail = `Status: ${humanize(q.status)}\nSession ID: ${q.id || '-'}\nOwner: ${workflowOwner(q)}\nRisk: ${q.riskScore ?? 0}/100`;
+    const decided = q.decidedBy ? `\nDecided by: ${q.decidedBy} at ${fmt(q.decidedAt)}${q.decisionNote ? `\nNote: ${q.decisionNote}` : ''}` : '';
+    const detail = `Status: ${humanize(q.status)}\nSession ID: ${q.id || '-'}\nOwner: ${workflowOwner(q)}\nRisk: ${q.riskScore ?? 0}/100${decided}`;
     return `<tr class="activity-row ${activitySeverityClass(q)} ${expandedActivityId === q.id ? 'selected' : ''}" data-activity-id="${escapeHtml(q.id)}" tabindex="0">
-    <td class="mono">${escapeHtml(fmt(q.createdAt))}</td>
-    <td>${escapeHtml(sourceLabel(q.source))}</td>
-    <td>${escapeHtml(q.user || '-')}</td>
-    <td class="mono">${escapeHtml(q.destination || '-')}</td>
-    <td>${escapeHtml(workflowOwner(q))}</td>
-    <td><span class="sev ${sevClass(q.maxSeverityLabel)}">${escapeHtml(q.maxSeverityLabel || 'low')}</span></td>
-    <td class="mono">${escapeHtml(q.riskScore ?? 0)}</td>
-    <td>${escapeHtml(Object.keys(q.entityCounts || {}).join(', ') || '-')}</td>
-    <td>${statusChip(tone, humanize(q.status), detail)}<span class="row-affordance">VIEW</span></td>
+    <td class="mono" data-col="time">${escapeHtml(fmt(q.createdAt))}</td>
+    <td data-col="source">${escapeHtml(sourceLabel(q.source))}</td>
+    <td data-col="user">${escapeHtml(q.user || '-')}</td>
+    <td class="mono" data-col="destination">${escapeHtml(q.destination || '-')}</td>
+    <td data-col="owner">${escapeHtml(workflowOwner(q))}</td>
+    <td data-col="severity"><span class="sev ${sevClass(q.maxSeverityLabel)}">${escapeHtml(q.maxSeverityLabel || 'low')}</span></td>
+    <td class="mono" data-col="risk">${escapeHtml(q.riskScore ?? 0)}</td>
+    <td data-col="detected">${escapeHtml(Object.keys(q.entityCounts || {}).join(', ') || '-')}</td>
+    <td data-col="status">${statusChip(tone, humanize(q.status), detail)}<span class="row-affordance">VIEW</span></td>
   </tr>${activityDetail(q)}`;
   }).join('') || '<tr><td colspan="9" class="empty">No matching activity</td></tr>';
+  applyActivityColumns();
   renderTablePager('#activityPager', { target: 'activity', ...page });
+}
+
+// Column chooser (Netskope Customize Columns pattern), persisted locally.
+const ACTIVITY_COLS = ['time', 'source', 'user', 'destination', 'owner', 'severity', 'risk', 'detected', 'status'];
+
+function hiddenActivityCols() {
+  try { return new Set(JSON.parse(localStorage.getItem('promptwall.activityCols') || '[]')); } catch { return new Set(); }
+}
+
+function applyActivityColumns() {
+  const hidden = hiddenActivityCols();
+  $$('#tab-activity [data-col]').forEach((el) => {
+    el.style.display = hidden.has(el.dataset.col) ? 'none' : '';
+  });
+}
+
+function renderActivityColMenu() {
+  const menu = $('#activityColMenu');
+  if (!menu) return;
+  const hidden = hiddenActivityCols();
+  menu.innerHTML = ACTIVITY_COLS.map((col) => `<label><input type="checkbox" data-activity-col="${col}" ${hidden.has(col) ? '' : 'checked'}/> ${humanize(col)}</label>`).join('');
+}
+
+let currentInsights = null;
+let insightsWindowDays = 30;
+
+const INSIGHTS_DECISION_META = {
+  allowed: { label: 'Allowed', tone: '#3fb27f' },
+  redacted: { label: 'Redacted', tone: '#3f8cff' },
+  warned: { label: 'Warned', tone: '#e0a23b' },
+  flagged: { label: 'Flagged', tone: '#c98b2e' },
+  blocked: { label: 'Blocked', tone: '#e0555f' },
+  shadow: { label: 'Shadow AI', tone: '#a15de0' },
+};
+const INSIGHTS_RISK_TONE = { none: '#6b7686', low: '#3fb27f', medium: '#e0a23b', high: '#e07a3b', critical: '#e0555f' };
+
+async function loadInsights() {
+  const sel = $('#insightsWindow');
+  if (sel) insightsWindowDays = Number(sel.value) || 30;
+  setBusy('#tab-insights .panel', true, 'AGGREGATING');
+  try {
+    const r = await api(`/api/insights?windowDays=${encodeURIComponent(insightsWindowDays)}`);
+    const next = await responseJsonObject(r, null);
+    if (!next) return;
+    currentInsights = next;
+    renderInsights(next);
+    markUpdated();
+  } finally {
+    setBusy('#tab-insights .panel', false);
+  }
+}
+
+function insightsKpi(label, value, hint) {
+  return `<div class="insights-kpi"><span class="insights-kpi-value">${escapeHtml(String(value))}</span>`
+    + `<span class="insights-kpi-label">${escapeHtml(label)}</span>`
+    + (hint ? `<span class="insights-kpi-hint">${escapeHtml(hint)}</span>` : '') + '</div>';
+}
+
+// Dependency-free stacked-area time series as inline SVG (CSP-safe).
+function insightsSeriesSvg(series) {
+  const w = 720, h = 200, pad = 24;
+  const days = series.length || 1;
+  const max = Math.max(1, ...series.map((d) => d.total));
+  const order = ['allowed', 'redacted', 'warned', 'flagged', 'blocked', 'shadow'];
+  const x = (i) => pad + (i * (w - pad * 2)) / Math.max(1, days - 1);
+  const y = (v) => h - pad - (v / max) * (h - pad * 2);
+  let bars = '';
+  const bw = Math.max(3, (w - pad * 2) / days - 4);
+  series.forEach((d, i) => {
+    let acc = 0;
+    const cx = x(i) - bw / 2;
+    for (const k of order) {
+      const v = d[k] || 0;
+      if (!v) continue;
+      const yTop = y(acc + v);
+      const seg = ((v / max) * (h - pad * 2));
+      bars += `<rect x="${cx.toFixed(1)}" y="${yTop.toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(1, seg).toFixed(1)}" fill="${INSIGHTS_DECISION_META[k].tone}" rx="1"><title>${escapeHtml(d.date)} · ${INSIGHTS_DECISION_META[k].label}: ${v}</title></rect>`;
+      acc += v;
+    }
+  });
+  const ticks = [0, Math.round(max / 2), max].map((v) => `<text x="4" y="${(y(v) + 3).toFixed(1)}" class="insights-axis">${v}</text>`).join('');
+  const firstLabel = series.length ? `<text x="${pad}" y="${h - 6}" class="insights-axis">${escapeHtml(series[0].date.slice(5))}</text>` : '';
+  const lastLabel = series.length ? `<text x="${w - pad}" y="${h - 6}" text-anchor="end" class="insights-axis">${escapeHtml(series[series.length - 1].date.slice(5))}</text>` : '';
+  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="AI activity over time">${ticks}${bars}${firstLabel}${lastLabel}</svg>`;
+}
+
+// Donut of the decision mix.
+function insightsDonutSvg(decisions) {
+  const total = decisions.reduce((s, d) => s + d.count, 0);
+  const size = 180, r = 64, cx = size / 2, cy = size / 2, C = 2 * Math.PI * r;
+  if (!total) return '<div class="insights-empty">No activity in this window.</div>';
+  let offset = 0;
+  const arcs = decisions.filter((d) => d.count).map((d) => {
+    const frac = d.count / total;
+    const dash = `${(frac * C).toFixed(2)} ${(C - frac * C).toFixed(2)}`;
+    const seg = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${INSIGHTS_DECISION_META[d.id].tone}" stroke-width="20" stroke-dasharray="${dash}" stroke-dashoffset="${(-offset * C).toFixed(2)}" transform="rotate(-90 ${cx} ${cy})"><title>${INSIGHTS_DECISION_META[d.id].label}: ${d.count}</title></circle>`;
+    offset += frac;
+    return seg;
+  }).join('');
+  const legend = decisions.filter((d) => d.count).map((d) =>
+    `<span class="insights-swatch"><i style="background:${INSIGHTS_DECISION_META[d.id].tone}"></i>${INSIGHTS_DECISION_META[d.id].label} <b>${d.count}</b></span>`).join('');
+  return `<svg viewBox="0 0 ${size} ${size}" class="insights-donut" role="img" aria-label="Decision mix">${arcs}`
+    + `<text x="${cx}" y="${cy - 2}" text-anchor="middle" class="insights-donut-total">${total}</text>`
+    + `<text x="${cx}" y="${cy + 16}" text-anchor="middle" class="insights-donut-sub">events</text></svg>`
+    + `<div class="insights-legend">${legend}</div>`;
+}
+
+function insightsRiskSvg(bands) {
+  const max = Math.max(1, ...bands.map((b) => b.count));
+  return '<div class="insights-riskbars">' + bands.map((b) => {
+    const pct = Math.round((b.count / max) * 100);
+    return `<div class="insights-riskbar"><span class="insights-riskbar-label">${escapeHtml(b.label)}</span>`
+      + `<span class="insights-riskbar-track"><span class="insights-riskbar-fill" style="width:${pct}%;background:${INSIGHTS_RISK_TONE[b.id]}"></span></span>`
+      + `<span class="insights-riskbar-count">${b.count}</span></div>`;
+  }).join('') + '</div>';
+}
+
+function insightsHBars(items, keyName) {
+  if (!items || !items.length) return '<div class="insights-empty">None recorded.</div>';
+  const max = Math.max(1, ...items.map((i) => i.count));
+  return items.map((i) => {
+    const pct = Math.round((i.count / max) * 100);
+    return `<div class="insights-hbar"><span class="insights-hbar-label" title="${escapeHtml(i[keyName])}">${escapeHtml(i[keyName])}</span>`
+      + `<span class="insights-hbar-track"><span class="insights-hbar-fill" style="width:${pct}%"></span></span>`
+      + `<span class="insights-hbar-count">${i.count}</span></div>`;
+  }).join('');
+}
+
+function insightsRiskChip(risk) {
+  if (!risk) return '<span class="insights-chip tone-neutral">Unrated</span>';
+  const tone = risk.riskTier >= 4 ? 'tone-critical' : risk.riskTier === 3 ? 'tone-high' : risk.riskTier === 2 ? 'tone-medium' : 'tone-low';
+  return `<span class="insights-chip ${tone}">${escapeHtml(risk.riskTierLabel || 'unknown')}</span>`;
+}
+
+function insightsFlagLabels(flags) {
+  const map = { trains_on_data: 'Trains on data', personal_account_tier: 'Personal tier', data_residency_cn: 'Data in CN', data_residency_eu: 'Data in EU' };
+  return (flags || []).map((f) => `<span class="insights-attr">${escapeHtml(map[f] || f)}</span>`).join(' ');
+}
+
+function renderInsights(d) {
+  if (!d) return;
+  const t = d.totals || {};
+  $('#insightsKpis').innerHTML = [
+    insightsKpi('AI interactions', t.considered || 0, `last ${d.windowDays} days`),
+    insightsKpi('Avg exposure risk', t.avgRisk || 0, 'of 100'),
+    insightsKpi('Blocked', t.blocked || 0, 'held or denied'),
+    insightsKpi('Redacted', t.redacted || 0, 'tokenized & sent'),
+    insightsKpi('Shadow-AI hits', t.shadow || 0, 'ungoverned tools'),
+  ].join('');
+  $('#insightsSeries').innerHTML = insightsSeriesSvg(d.series || []);
+  $('#insightsSeriesLegend').innerHTML = (d.decisions || []).filter((x) => INSIGHTS_DECISION_META[x.id])
+    .map((x) => `<span class="insights-swatch"><i style="background:${INSIGHTS_DECISION_META[x.id].tone}"></i>${INSIGHTS_DECISION_META[x.id].label}</span>`).join('');
+  $('#insightsDecisions').innerHTML = insightsDonutSvg(d.decisions || []);
+  $('#insightsRisk').innerHTML = insightsRiskSvg(d.riskBands || []);
+  $('#insightsDetectors').innerHTML = insightsHBars(d.topDetectors || [], 'key');
+  $('#insightsCategories').innerHTML = insightsHBars(d.topCategories || [], 'key');
+  $('#insightsShadow').innerHTML = insightsHBars(d.shadowByProvider || [], 'key');
+  $('#insightsDestinations').innerHTML = (d.topDestinations || []).map((row) =>
+    `<tr><td>${escapeHtml(row.destination)}</td><td>${escapeHtml(row.risk ? row.risk.provider : '—')}</td>`
+    + `<td>${insightsRiskChip(row.risk)}</td><td>${row.risk ? insightsFlagLabels(row.risk.flags) : '<span class="insights-attr-muted">—</span>'}</td>`
+    + `<td>${row.count}</td></tr>`).join('') || '<tr><td colspan="5" class="insights-empty">No destinations recorded.</td></tr>';
+  $('#insightsUsers').innerHTML = (d.topUsers || []).map((u) =>
+    `<tr><td>${escapeHtml(u.user)}</td><td>${u.events}</td><td>${u.blocked}</td><td>${u.avgRisk}</td></tr>`).join('')
+    || '<tr><td colspan="4" class="insights-empty">No user activity recorded.</td></tr>';
+}
+
+// ---- App Catalog ------------------------------------------------------------
+const CATALOG_RISK_TONE = { critical: 'tone-critical', high: 'tone-high', moderate: 'tone-medium', low: 'tone-low', minimal: 'tone-low', unrated: 'tone-neutral' };
+const CATALOG_STATUS_TONE = { blocked: 'tone-critical', unsanctioned: 'tone-high', under_review: 'tone-neutral', tolerated: 'tone-medium', sanctioned: 'tone-low' };
+const CATALOG_ATTR_LABEL = { trains_on_data: 'Trains on data', personal_account_tier: 'Personal tier', data_residency_cn: 'Data in CN', data_residency_eu: 'Data in EU' };
+
+// ---- Toasts: non-blocking notices replacing toast() -------------------------
+function toast(message, tone = 'info') {
+  let stack = $('#toastStack');
+  if (!stack) {
+    stack = document.createElement('div');
+    stack.id = 'toastStack';
+    stack.setAttribute('aria-live', 'polite');
+    document.body.appendChild(stack);
+  }
+  const el = document.createElement('div');
+  el.className = `toast toast-${tone}`;
+  el.textContent = message;
+  stack.appendChild(el);
+  setTimeout(() => { el.classList.add('gone'); setTimeout(() => el.remove(), 300); }, 4200);
+}
+
+let catalogApps = [];
+let catalogSort = { key: 'eventCount', dir: -1 };
+let catalogSelected = new Set();
+let catalogPendingReview = null; // { host, decision }
+
+async function loadCatalog() {
+  setBusy('#tab-catalog .panel', true, 'DISCOVERING');
+  try {
+    const r = await api('/api/catalog');
+    const body = await responseJsonObject(r, null);
+    if (!body) return;
+    catalogApps = body.apps || [];
+    catalogSelected = new Set([...catalogSelected].filter((host) => catalogApps.some((a) => a.destination === host)));
+    renderCatalog(catalogApps);
+    markUpdated();
+  } finally {
+    setBusy('#tab-catalog .panel', false);
+  }
+}
+
+function catalogAttrs(app) {
+  const flags = (app.riskAttributes && app.riskAttributes.flags) || [];
+  return flags.map((f) => `<span class="insights-attr">${escapeHtml(CATALOG_ATTR_LABEL[f] || f)}</span>`).join(' ') || '<span class="insights-attr-muted">—</span>';
+}
+
+function sortedCatalogApps(apps) {
+  const { key, dir } = catalogSort;
+  return [...apps].sort((a, b) => {
+    const va = a[key] == null ? '' : a[key];
+    const vb = b[key] == null ? '' : b[key];
+    if (typeof va === 'number' || typeof vb === 'number') return ((Number(va) || 0) - (Number(vb) || 0)) * dir;
+    return String(va).localeCompare(String(vb)) * dir;
+  });
+}
+
+let catalogExpandedHost = null;
+
+// App detail drawer: full record, score-factor breakdown, analyst override.
+function catalogDetailRow(a) {
+  if (catalogExpandedHost !== a.destination) return '';
+  const flags = (a.riskAttributes && a.riskAttributes.flags) || [];
+  const overrideForm = canAdminWrite() ? `
+      <div class="catalog-override">
+        <b>Analyst score override</b>
+        <input id="catalogOverrideScore" type="number" min="0" max="100" placeholder="0-100" value="${escapeHtml(a.riskOverride ?? '')}" aria-label="Override score"/>
+        <input id="catalogOverrideNote" type="text" placeholder="Business justification (required, audited)" value="${escapeHtml(a.overrideNote || '')}" aria-label="Override justification"/>
+        <button class="ghost mini" data-catalog-override-set="${escapeHtml(a.destination)}" type="button">Set override</button>
+        ${a.riskOverride != null ? `<button class="ghost mini" data-catalog-override-clear="${escapeHtml(a.destination)}" type="button">Clear</button>` : ''}
+      </div>` : '';
+  return `<tr class="catalog-detail-row"><td colspan="9"><div class="activity-detail">
+      <div class="activity-detail-grid">
+        <div class="datum"><label>Host</label><b>${escapeHtml(a.destination)}</b></div>
+        <div class="datum"><label>Provider</label><b>${escapeHtml(a.provider || '-')}</b></div>
+        <div class="datum"><label>Region</label><b>${escapeHtml(a.region || '-')}</b></div>
+        <div class="datum"><label>Computed score</label><b>${a.baseRiskScore ?? '-'}${a.riskOverride != null ? ` (overridden to ${a.riskOverride})` : ''}</b></div>
+        <div class="datum"><label>First seen</label><b>${escapeHtml(a.firstSeen ? fmt(a.firstSeen) : '-')}</b></div>
+        <div class="datum"><label>Last seen</label><b>${escapeHtml(a.lastSeen ? fmt(a.lastSeen) : '-')}</b></div>
+        <div class="datum"><label>Owner</label><b>${escapeHtml(a.owner || '-')}</b></div>
+        <div class="datum"><label>Events</label><b>${a.eventCount || 0} via ${escapeHtml(Object.entries(a.sources || {}).map(([k, v]) => `${k} (${v})`).join(', ') || '-')}</b></div>
+      </div>
+      ${flags.length ? `<div class="chips">${flags.map((f) => `<span class="insights-attr">${escapeHtml(CATALOG_ATTR_LABEL[f] || f)}</span>`).join(' ')}</div>` : ''}
+      ${a.overriddenBy ? `<div class="reasons">Override by ${escapeHtml(a.overriddenBy)}: ${escapeHtml(a.overrideNote || '')}</div>` : ''}
+      ${a.notes ? `<div class="reasons">Notes: ${escapeHtml(a.notes)}</div>` : ''}
+      ${overrideForm}
+      <div class="activity-detail-actions">
+        <button class="ghost mini" data-search-pivot="dest:${escapeHtml(a.destination)}" data-then-tab="activity" type="button">VIEW ACTIVITY</button>
+      </div>
+    </div></td></tr>`;
+}
+
+function catalogGovernCell(a) {
+  if (catalogPendingReview && catalogPendingReview.host === a.destination) {
+    return `<input class="catalog-reason" id="catalogReviewReason" type="text" placeholder="Reason (audited)" value="${escapeHtml(catalogPendingReview.decision)} decision from console" aria-label="Review reason"/>
+      <button class="ghost mini" data-catalog-confirm="1" type="button">Confirm ${escapeHtml(catalogPendingReview.decision)}</button>
+      <button class="ghost mini" data-catalog-cancel="1" type="button">Cancel</button>`;
+  }
+  return `<button class="ghost mini" data-catalog-review="${escapeHtml(a.destination)}" data-decision="allow" type="button">Allow</button>
+    <button class="ghost mini" data-catalog-review="${escapeHtml(a.destination)}" data-decision="govern" type="button">Govern</button>
+    <button class="ghost mini danger" data-catalog-review="${escapeHtml(a.destination)}" data-decision="block" type="button">Block</button>`;
+}
+
+function renderCatalog(apps) {
+  const total = apps.length;
+  const shadow = apps.filter((a) => a.sanctionedStatus === 'under_review').length;
+  const high = apps.filter((a) => a.riskTier === 'critical' || a.riskTier === 'high').length;
+  const governed = apps.filter((a) => ['sanctioned', 'tolerated', 'blocked'].includes(a.sanctionedStatus)).length;
+  $('#catalogKpis').innerHTML = [
+    insightsKpi('AI apps discovered', total, 'across all sources'),
+    insightsKpi('Awaiting review', shadow, 'shadow AI'),
+    insightsKpi('Elevated / high risk', high, 'by risk tier'),
+    insightsKpi('Governed', governed, 'allow / govern / block'),
+  ].join('');
+  $$('#tab-catalog th[data-catalog-sort]').forEach((th) => {
+    th.classList.toggle('sorted', th.dataset.catalogSort === catalogSort.key);
+    th.dataset.sortDir = th.dataset.catalogSort === catalogSort.key ? (catalogSort.dir > 0 ? 'asc' : 'desc') : '';
+  });
+  $('#catalogRows').innerHTML = sortedCatalogApps(apps).map((a) => `
+    <tr>
+      <td class="catalog-check"><input type="checkbox" data-catalog-select="${escapeHtml(a.destination)}" ${catalogSelected.has(a.destination) ? 'checked' : ''} aria-label="Select ${escapeHtml(a.destination)}"/></td>
+      <td><button class="catalog-app-link" data-catalog-expand="${escapeHtml(a.destination)}" type="button" title="Open app details">${escapeHtml(a.appName || a.destination)}${a.riskOverride != null ? ' *' : ''}</button><div class="catalog-host">${escapeHtml(a.destination)}</div></td>
+      <td>${escapeHtml(a.provider || '—')}</td>
+      <td><span class="insights-chip ${CATALOG_RISK_TONE[a.riskTier] || 'tone-neutral'}">${escapeHtml(a.riskTier)}</span> <span class="catalog-score">${a.riskScore == null ? '' : a.riskScore}</span></td>
+      <td>${catalogAttrs(a)}</td>
+      <td><span class="insights-chip ${CATALOG_STATUS_TONE[a.sanctionedStatus] || 'tone-neutral'}">${escapeHtml(a.sanctionedStatus.replace(/_/g, ' '))}</span></td>
+      <td>${a.eventCount || 0}</td>
+      <td class="catalog-sources">${escapeHtml(Object.keys(a.sources || {}).join(', ') || '—')}</td>
+      <td class="catalog-actions">${catalogGovernCell(a)}</td>
+    </tr>${catalogDetailRow(a)}`).join('') || '<tr><td colspan="9" class="insights-empty">No AI apps discovered yet. Import a proxy/DNS log or wait for sensor sightings.</td></tr>';
+  updateCatalogBulkBar();
+  const reason = $('#catalogReviewReason');
+  if (reason) { reason.focus(); reason.select(); }
+}
+
+function updateCatalogBulkBar() {
+  const bar = $('#catalogBulkBar');
+  if (!bar) return;
+  bar.classList.toggle('hidden', catalogSelected.size === 0);
+  const count = $('#catalogBulkCount');
+  if (count) count.textContent = `${catalogSelected.size} selected`;
+  const all = $('#catalogSelectAll');
+  if (all) all.checked = catalogApps.length > 0 && catalogSelected.size === catalogApps.length;
+}
+
+async function submitCatalogReview(host, decision, reason) {
+  const r = await api(`/api/catalog/${encodeURIComponent(host)}/review`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ decision, reason }) });
+  if (r && r.ok) return true;
+  toast(`Could not save the ${decision} decision for ${host}.`, 'bad');
+  return false;
+}
+
+async function runCatalogBulk(decision) {
+  const reason = ($('#catalogBulkReason').value || '').trim() || `bulk ${decision} decision from console`;
+  const hosts = [...catalogSelected];
+  let done = 0;
+  for (const host of hosts) {
+    if (await submitCatalogReview(host, decision, reason)) done += 1;
+  }
+  toast(`${decision} applied to ${done} of ${hosts.length} app(s).`, done === hosts.length ? 'good' : 'bad');
+  catalogSelected.clear();
+  loadCatalog();
+}
+
+function exportCatalogCsv() {
+  downloadCsv(`promptwall-ai-apps-${csvStamp()}.csv`,
+    ['App', 'Host', 'Provider', 'Risk tier', 'Risk score', 'Status', 'Events', 'Sources'],
+    sortedCatalogApps(catalogApps).map((a) => [
+      a.appName || a.destination, a.destination, a.provider || '', a.riskTier, a.riskScore ?? '',
+      a.sanctionedStatus, a.eventCount || 0, Object.keys(a.sources || {}).join('; '),
+    ]));
+}
+
+async function importCatalogCsv() {
+  const csv = ($('#catalogImportCsv').value || '').trim();
+  if (!csv) { toast('Paste at least one hostname first.', 'bad'); return; }
+  const r = await api('/api/catalog/import', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ csv }) });
+  if (r && r.ok) {
+    const b = await r.json();
+    toast(`Imported ${b.imported} app(s), skipped ${b.skipped}.`, 'good');
+    $('#catalogImportForm').classList.add('hidden');
+    $('#catalogImportCsv').value = '';
+    loadCatalog();
+  } else {
+    toast('Import failed - check the format (host or host,count per line).', 'bad');
+  }
+}
+
+async function addCatalogApp() {
+  const destination = ($('#catalogAddHost').value || '').trim();
+  if (!destination) { toast('Enter the AI app host first.', 'bad'); return; }
+  const appName = ($('#catalogAddName').value || '').trim() || undefined;
+  const r = await api('/api/catalog', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ destination, appName }) });
+  if (r && r.ok) {
+    toast(`${destination} added to the catalog.`, 'good');
+    $('#catalogAddForm').classList.add('hidden');
+    $('#catalogAddHost').value = '';
+    $('#catalogAddName').value = '';
+    loadCatalog();
+  } else {
+    toast(`Could not add ${destination}.`, 'bad');
+  }
+}
+
+// ---- Compliance framework coverage ------------------------------------------
+const COMPLIANCE_STATE_TONE = { covered: 'tone-low', attention: 'tone-high', not_provided: 'tone-neutral' };
+
+async function loadCompliance() {
+  setBusy('#tab-compliance .panel', true, 'MAPPING');
+  try {
+    const r = await api('/api/compliance');
+    const body = await responseJsonObject(r, null);
+    if (!body) return;
+    renderCompliance(body.controlMappings || []);
+    markUpdated();
+  } finally {
+    setBusy('#tab-compliance .panel', false);
+  }
+}
+
+function renderCompliance(controls) {
+  const covered = controls.filter((c) => c.state === 'covered').length;
+  const attention = controls.filter((c) => c.state === 'attention').length;
+  const pct = controls.length ? Math.round((covered / controls.length) * 100) : 0;
+  $('#complianceKpis').innerHTML = [
+    insightsKpi('Controls covered', `${covered}/${controls.length}`, `${pct}% coverage`),
+    insightsKpi('Needs attention', attention, 'action required'),
+    insightsKpi('AI frameworks', '5', 'NIST/ISO 42001/EU AI Act/OWASP/ATLAS'),
+    insightsKpi('Evidence', 'prompt-free', 'hashes & metadata only'),
+  ].join('');
+  // Framework roll-up: a control "belongs" to a framework if any control family names it.
+  const FRAMEWORKS = [
+    { key: 'NIST AI RMF', match: /NIST AI RMF/i },
+    { key: 'ISO/IEC 42001', match: /ISO\/IEC 42001|ISO 42001/i },
+    { key: 'EU AI Act', match: /EU AI Act/i },
+    { key: 'OWASP LLM Top 10', match: /OWASP LLM/i },
+    { key: 'MITRE ATLAS', match: /MITRE ATLAS/i },
+    { key: 'GLBA / NCUA', match: /GLBA|NCUA/i },
+    { key: 'HIPAA', match: /HIPAA/i },
+    { key: 'PCI DSS', match: /PCI/i },
+  ];
+  $('#complianceFrameworks').innerHTML = FRAMEWORKS.map((fw) => {
+    const rel = controls.filter((c) => (c.controlFamilies || []).some((f) => fw.match.test(f)));
+    if (!rel.length) return '';
+    const cov = rel.filter((c) => c.state === 'covered').length;
+    const p = Math.round((cov / rel.length) * 100);
+    const tone = p >= 100 ? 'tone-low' : p >= 50 ? 'tone-medium' : 'tone-high';
+    return `<div class="compliance-fw"><div class="compliance-fw-head"><span>${escapeHtml(fw.key)}</span><span class="insights-chip ${tone}">${cov}/${rel.length}</span></div>`
+      + `<span class="insights-riskbar-track"><span class="insights-riskbar-fill" style="width:${p}%;background:var(--blue)"></span></span></div>`;
+  }).join('');
+  $('#complianceControls').innerHTML = controls.map((c) => `
+    <div class="panel">
+      <div class="panel-head"><div><h2>${escapeHtml(c.title)}</h2><span>${escapeHtml((c.evidence || []).slice(0, 3).join(', '))}</span></div>
+        <span class="insights-chip ${COMPLIANCE_STATE_TONE[c.state] || 'tone-neutral'}">${escapeHtml((c.state || '').replace('_', ' '))}</span></div>
+      <div class="compliance-body">
+        <p class="compliance-summary">${escapeHtml(c.summary || '')}</p>
+        <div class="compliance-families">${(c.controlFamilies || []).map((f) => `<span class="insights-attr">${escapeHtml(f)}</span>`).join(' ')}</div>
+      </div>
+    </div>`).join('');
+  renderComplianceRecommendations(controls);
+  currentComplianceControls = controls;
+}
+
+let currentComplianceControls = [];
+
+// Recommendation cards (Purview "Fortify your data security" pattern): each
+// attention control becomes a next step that jumps into Configuration.
+function renderComplianceRecommendations(controls) {
+  const el = $('#complianceRecommendations');
+  if (!el) return;
+  const open = controls.filter((c) => c.state !== 'covered').slice(0, 4);
+  el.innerHTML = open.length
+    ? open.map((c) => `<button class="stat alert" type="button" data-tab-jump="policy" data-tooltip="Open Configuration to close this gap">
+        <div class="l"><span class="status-light tone-warn" aria-hidden="true"></span>Recommended</div>
+        <div class="n" style="font-size:15px">${escapeHtml(c.title)}</div>
+        <div class="m">${escapeHtml((c.summary || '').slice(0, 90))}</div>
+        <div class="stat-rule"></div>
+      </button>`).join('')
+    : '<div class="empty">All mapped controls are covered - nothing to recommend right now.</div>';
+}
+
+function exportComplianceCsv() {
+  if (!currentComplianceControls.length) { toast('No compliance data loaded yet.', 'bad'); return; }
+  downloadCsv(`promptwall-controls-${csvStamp()}.csv`,
+    ['Control', 'State', 'Frameworks', 'Summary'],
+    currentComplianceControls.map((c) => [c.title, c.state, (c.controlFamilies || []).join('; '), c.summary || '']));
+}
+
+function exportExecSummaryCsv() {
+  const d = currentInsights;
+  if (!d) { toast('No insights data loaded yet.', 'bad'); return; }
+  const rows = [
+    ['Window (days)', insightsWindowDays],
+    ...Object.entries(d.kpis || {}).map(([k, v]) => [`Decisions: ${k}`, v]),
+    ...(d.topDestinations || []).slice(0, 10).map((t) => [`Top destination: ${t.label || t[0]}`, t.count ?? t[1]]),
+    ...(d.topUsers || []).slice(0, 10).map((t) => [`Top user: ${t.label || t[0]}`, t.count ?? t[1]]),
+    ...(d.riskBands || []).map((b) => [`Risk band: ${b.label}`, b.count]),
+  ];
+  downloadCsv(`promptwall-executive-summary-${csvStamp()}.csv`, ['Metric', 'Value'], rows);
+}
+
+async function runIdentityTest() {
+  const r = await api('/api/identity/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  const d = await responseJsonObject(r, null);
+  const el = $('#identityTestResult');
+  if (!el) return;
+  if (!d) { el.innerHTML = '<div class="empty">Test failed - Security Admin session required.</div>'; return; }
+  el.innerHTML = `<div class="reasons">Checked ${escapeHtml(fmt(d.checkedAt))} - recorded in the audit log</div>`
+    + d.checks.map((c) => `<div class="incident-trail-row">
+        ${statusChip(c.ok ? 'good' : 'warn', c.ok ? 'OK' : 'ACTION', c.detail)}
+        <span class="what"><b>${escapeHtml(c.label)}</b> - ${escapeHtml(c.detail)}</span>
+      </div>`).join('');
+}
+
+// ---- Integrations & delivery ------------------------------------------------
+const DELIVERY_TONE = { delivered: 'tone-low', failed: 'tone-critical', deduped: 'tone-neutral' };
+
+async function loadIntegrations() {
+  setBusy('#tab-integrations .panel', true, 'SYNCING');
+  try {
+    const [subsR, delR] = await Promise.all([api('/api/subscriptions'), api('/api/subscriptions/deliveries')]);
+    const subs = await responseJsonObject(subsR, { destinations: [], supportedTypes: [] });
+    const del = await responseJsonObject(delR, { deliveries: [] });
+    renderIntegrations(subs, del.deliveries || []);
+    markUpdated();
+  } finally {
+    setBusy('#tab-integrations .panel', false);
+  }
+}
+
+function renderIntegrations(subs, deliveries) {
+  const dests = subs.destinations || [];
+  const delivered = deliveries.filter((d) => d.status === 'delivered').length;
+  const failed = deliveries.filter((d) => d.status === 'failed').length;
+  $('#integrationsKpis').innerHTML = [
+    insightsKpi('Subscriptions', dests.length, 'named destinations'),
+    insightsKpi('Delivered', delivered, 'recent events'),
+    insightsKpi('Failed', failed, 'needs attention'),
+    insightsKpi('Supported', (subs.supportedTypes || []).length, 'SIEM/SOAR types'),
+  ].join('');
+  $('#subscriptionRows').innerHTML = dests.map((d) => `
+    <div class="sub-row">
+      <div class="sub-meta"><b>${escapeHtml(d.name)}</b><span class="insights-attr">${escapeHtml(d.type)}</span>
+        <span class="sub-host">${escapeHtml(d.type === 'email' ? `${d.recipients} recipient${d.recipients === 1 ? '' : 's'}` : (d.urlHost || '—'))}</span>
+        <span class="sub-filter">risk≥${d.minRisk} · sev≥${d.minSeverity}${d.eventTypes ? ' · ' + escapeHtml(d.eventTypes.join(',')) : ''}</span></div>
+      ${subTestBadge(d.id)}
+      <button class="ghost mini" data-sub-test="${escapeHtml(d.id)}" type="button">Send test</button>
+    </div>`).join('') || '<div class="insights-empty">No subscriptions configured. Add destinations in config/subscriptions.json.</div>';
+  $$('#subscriptionRows [data-sub-test]').forEach((btn) => { btn.onclick = () => testSubscription(btn.dataset.subTest, btn); });
+  $('#deliveryRows').innerHTML = deliveries.map((d) => `
+    <tr><td>${fmtTime(d.ts)}</td><td>${escapeHtml(d.destName || d.destId)}</td><td>${escapeHtml(d.type || '')}</td>
+      <td><span class="insights-chip ${DELIVERY_TONE[d.status] || 'tone-neutral'}">${escapeHtml(d.status)}</span></td>
+      <td>${d.attempts || 0}</td><td>${d.httpStatus || '—'}</td></tr>`).join('')
+    || '<tr><td colspan="6" class="insights-empty">No deliveries yet.</td></tr>';
+}
+
+// ---- Email & digest status (SMTP relay health, storm limits, last digest) ----
+async function loadNotificationsStatus() {
+  const d = await dashboardJsonWithTimeout('/api/notifications/status', 2500);
+  const el = $('#smtpStatus');
+  if (!el) return;
+  if (!d) { el.innerHTML = '<div class="empty">Notification status needs a Security Admin session.</div>'; return; }
+  const smtp = d.smtp || {};
+  const digest = (d.digest && d.digest.last) || null;
+  el.innerHTML = [
+    ['SMTP relay', smtp.configured ? `${smtp.host}:${smtp.port} (${smtp.secure}${smtp.authConfigured ? ', authenticated' : ''})` : 'not configured - set SMTP_HOST to enable email'],
+    ['From address', smtp.from || '-'],
+    ['Email destinations', d.emailDestinations.length
+      ? d.emailDestinations.map((x) => `${x.name} (${x.recipients} recipient${x.recipients === 1 ? '' : 's'})`).join(' · ')
+      : 'none - add { "type": "email", "to": [...] } to config/subscriptions.json'],
+    ['Daily digest', digest ? `last sent ${fmt(digest.at)} by ${digest.actor} - ${digest.delivered}/${digest.total} delivered` : `every ${d.digest.intervalHours}h - not sent yet this run`],
+  ].map(([label, value]) => `<div class="inspector-field"><span>${escapeHtml(label)}</span><b>${escapeHtml(value)}</b></div>`).join('');
+}
+
+async function sendTestEmail() {
+  const to = ($('#testEmailTo').value || '').trim();
+  const out = $('#testEmailResult');
+  if (!to) { out.textContent = 'Enter a recipient address first.'; return; }
+  out.textContent = 'Sending...';
+  const r = await api('/api/notifications/test-email', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to }) });
+  const d = await responseJsonObject(r, null);
+  out.textContent = d && d.ok ? `Delivered to ${to}.` : `Failed: ${(d && d.error) || 'check the SMTP settings'}.`;
+  toast(d && d.ok ? 'Test email delivered.' : 'Test email failed - see the panel for the reason.', d && d.ok ? 'good' : 'bad');
+}
+
+async function sendDigestNow() {
+  const r = await api('/api/reports/digest/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  const d = await responseJsonObject(r, null);
+  const delivered = d ? d.results.filter((x) => x.status === 'delivered').length : 0;
+  toast(d ? `Digest dispatched: ${delivered}/${d.results.length} destination(s) delivered.` : 'Digest send failed.', d ? 'good' : 'bad');
+  loadNotificationsStatus().catch(() => {});
+  loadIntegrations().catch(() => {});
+}
+
+const subTestResults = {};
+
+function subTestBadge(id) {
+  const t = subTestResults[id];
+  if (!t) return '';
+  const ok = t.status === 'delivered';
+  return `<span class="sub-test-result ${ok ? 'ok' : 'bad'}">Last test: ${escapeHtml(t.status)} · ${t.attempts} attempt(s) · ${escapeHtml(t.at)}</span>`;
+}
+
+async function testSubscription(id, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+  const r = await api(`/api/subscriptions/${encodeURIComponent(id)}/test`, { method: 'POST' });
+  const b = r && r.ok ? await r.json().catch(() => null) : null;
+  subTestResults[id] = b && b.result
+    ? { status: b.result.status, attempts: b.result.attempts || 0, at: new Date().toLocaleTimeString() }
+    : { status: 'failed', attempts: 0, at: new Date().toLocaleTimeString() };
+  loadIntegrations();
+}
+
+const FLEET_STATE_TONE = { active: 'secure', stale: 'warn', missing: 'bad' };
+const FLEET_SENSOR_LABEL = { browser_extension: 'Browser extension', endpoint_agent: 'Endpoint agent', mcp_guard: 'MCP guard' };
+
+function fleetStateChip(info) {
+  const detail = info.state === 'active'
+    ? `Reporting. Last seen ${fmt(info.lastSeen)}${info.version ? ` (v${info.version})` : ''}`
+    : info.state === 'stale'
+      ? `Went quiet. Last seen ${fmt(info.lastSeen)} - sensor may be uninstalled or broken`
+      : 'Never reported for this user';
+  return statusChip(FLEET_STATE_TONE[info.state] || 'neutral', info.state.toUpperCase(), detail);
+}
+
+function renderFleet(data) {
+  const body = $('#fleetMatrixRows');
+  if (!body || !data) return;
+  body.innerHTML = (data.users || []).map((u) => `<tr>
+      <td>${escapeHtml(u.user)}</td>
+      <td>${fleetStateChip(u.sensors.browser_extension)}</td>
+      <td>${fleetStateChip(u.sensors.endpoint_agent)}</td>
+      <td>${fleetStateChip(u.sensors.mcp_guard)}</td>
+      <td>${u.gaps.length
+        ? u.gaps.map((g) => `<span class="sev high">${escapeHtml(`${FLEET_SENSOR_LABEL[g.sensor] || g.sensor} ${g.state}`)}</span>`).join(' ')
+        : '<span class="sev low">covered</span>'}</td>
+    </tr>`).join('')
+    || '<tr><td colspan="5" class="empty">No sensors have reported yet. Fleet coverage appears as soon as a sensor sends its first event or heartbeat.</td></tr>';
 }
 
 async function loadCoverage() {
   setBusy('#tab-coverage .panel', true, 'RECONCILING');
   try {
-    const r = await api('/api/coverage');
+    const [r, fleetData] = await Promise.all([
+      api('/api/coverage'),
+      dashboardJsonWithTimeout('/api/fleet', 2500),
+    ]);
     const nextCoverage = await responseJsonObject(r, null);
+    if (fleetData) renderFleet(fleetData);
     if (!nextCoverage) return;
     currentCoverage = nextCoverage;
     renderCoverage(currentCoverage);
@@ -2752,15 +3834,31 @@ async function loadAudit() {
       : `${icons.shield}<span>Integrity check failed at ${escapeHtml(ig.brokenAt)}.</span>`;
     currentAuditEntries = d.entries;
     renderAuditRows(currentAuditEntries);
+    const retention = $('#auditRetention');
+    if (retention && d.retention) retention.textContent = d.retention;
     markUpdated();
   } finally {
     setBusy('#tab-audit .panel', false);
   }
 }
 
+function refreshAuditActionOptions(entries) {
+  const sel = $('#auditActionFilter');
+  if (!sel) return;
+  const actions = [...new Set((entries || []).map((a) => a.action).filter(Boolean))].sort();
+  const want = 'all,' + actions.join(',');
+  if (sel.dataset.options === want) return;
+  sel.dataset.options = want;
+  sel.innerHTML = '<option value="all">All actions</option>'
+    + actions.map((a) => `<option value="${escapeHtml(a)}">${escapeHtml(humanize(a))}</option>`).join('');
+  if (actions.includes(auditActionFilter)) sel.value = auditActionFilter;
+  else { sel.value = 'all'; auditActionFilter = 'all'; }
+}
+
 function renderAuditRows(entries) {
-  const filtered = (entries || []).filter(matchesAudit);
-  const page = paginatedRows(filtered, auditPage, AUDIT_PAGE_SIZE);
+  refreshAuditActionOptions(entries);
+  const filtered = filteredAuditEntries(entries);
+  const page = paginatedRows(filtered, auditPage, auditPageSize);
   auditPage = page.page;
   $('#auditRows').innerHTML = page.rows.map((a) => `<tr>
       <td class="mono">${escapeHtml(fmt(a.ts))}</td>
@@ -2768,7 +3866,7 @@ function renderAuditRows(entries) {
       <td>${escapeHtml(a.actor || '-')}</td>
       <td class="mono">${escapeHtml(a.queryId || '-')}</td>
       <td>${escapeHtml(a.detail || '')}</td>
-    </tr>`).join('') || `<tr><td colspan="5" class="empty">${searchTerm ? 'No matching audit entries' : 'No audit entries yet'}</td></tr>`;
+    </tr>`).join('') || `<tr><td colspan="5" class="empty">${searchTerm || auditActionFilter !== 'all' ? 'No matching audit entries' : 'No audit entries yet'}</td></tr>`;
   renderTablePager('#auditPager', { target: 'audit', ...page });
 }
 
@@ -3309,6 +4407,12 @@ function installModeLabel(mode) {
   })[mode] || humanize(mode);
 }
 
+// git@github.com:o/r.git or https://github.com/o/r.git -> https://github.com/o/r
+function githubWebUrl(remoteUrl) {
+  const m = String(remoteUrl || '').match(/github\.com[:/]([^/\s]+)\/([^/\s]+?)(?:\.git)?$/);
+  return m ? `https://github.com/${m[1]}/${m[2]}` : null;
+}
+
 function updateStatusState(status = {}) {
   if (status.inProgress) return ['warn', 'Running'];
   if (status.error) return ['bad', 'Needs setup'];
@@ -3410,6 +4514,7 @@ function renderUpdates(status = {}) {
         ${updateLogRow('Config path', config.configPath)}
       </div>
       <div class="update-action-row">
+        ${githubWebUrl(repo.remoteUrl) ? `<a class="ghost" href="${escapeHtml(githubWebUrl(repo.remoteUrl))}/releases" target="_blank" rel="noopener">Release notes &nearr;</a>` : ''}
         <button class="ghost" id="checkUpdate" type="button" ${blocked ? 'disabled' : ''}>${icons.refresh}Check GitHub</button>
         <button class="btn approve" id="runUpdate" type="button" ${updateDisabled ? 'disabled' : ''}>${icons.refresh}Update from GitHub</button>
         <button class="ghost" id="restartUpdate" type="button" ${(!restartExecutable || !restartRequired || status.inProgress) ? 'disabled' : ''}>Restart service</button>
@@ -3497,7 +4602,7 @@ async function checkUpdate() {
   const r = await api('/api/update/check', { method: 'POST' });
   if (!r || !r.ok) {
     $('#updateConsoleStatus').innerHTML = statePill('bad', 'Check failed');
-    alert(r ? await apiErrorSummary(r, 'Could not check GitHub') : 'Could not check GitHub');
+    toast(r ? await apiErrorSummary(r, 'Could not check GitHub') : 'Could not check GitHub');
     await loadUpdates();
     return;
   }
@@ -3517,7 +4622,7 @@ async function runUpdate() {
   });
   if (!r || !r.ok) {
     $('#updateConsoleStatus').innerHTML = statePill('bad', 'Update failed');
-    alert(r ? await apiErrorSummary(r, 'Update failed') : 'Update failed');
+    toast(r ? await apiErrorSummary(r, 'Update failed') : 'Update failed');
     await loadUpdates();
     return;
   }
@@ -3529,7 +4634,7 @@ async function restartUpdatedService() {
   if (!proceed) return;
   const r = await api('/api/update/restart', { method: 'POST' });
   if (!r || !r.ok) {
-    alert(r ? await apiErrorSummary(r, 'Restart failed') : 'Restart failed');
+    toast(r ? await apiErrorSummary(r, 'Restart failed') : 'Restart failed');
     return;
   }
   $('#updateConsoleStatus').innerHTML = statePill('warn', 'Restarting');
@@ -3546,6 +4651,116 @@ function wireUpdateButtons() {
   if (restart) restart.onclick = restartUpdatedService;
 }
 
+
+function deploySize(bytes) {
+  if (!Number.isFinite(bytes)) return 'size on build';
+  return bytes < 1024 * 1024 ? Math.round(bytes / 1024) + ' KB' : (bytes / 1024 / 1024).toFixed(1) + ' MB';
+}
+
+async function loadDeploy() {
+  const rows = $('#deployRows');
+  if (!rows) return;
+  try {
+    const res = await fetch('/api/deploy/artifacts');
+    if (!res.ok) throw new Error('http_' + res.status);
+    const data = await res.json();
+    rows.innerHTML = data.artifacts.map((item) => item.error ? `
+      <div class="q" style="cursor:default"><div class="queue-mainline">
+        <strong>${escapeHtml(item.label)}</strong><span>packaging unavailable</span><span></span>
+      </div></div>` : `
+      <div class="q" style="cursor:default">
+        <div class="queue-mainline">
+          <strong>${escapeHtml(item.label)}</strong>
+          <span>${escapeHtml(item.fileName)}</span>
+          <a class="btn" href="/api/deploy/download/${escapeHtml(item.id)}" download>Download .zip</a>
+        </div>
+        <div class="chips">
+          <span class="chip"><b>ZIP</b> ${escapeHtml(deploySize(item.sizeBytes))}</span>
+          <span class="chip"><b>v${escapeHtml(item.version)}</b></span>
+          ${item.fileCount ? `<span class="chip">${item.fileCount} files</span>` : ''}
+          ${item.requires ? `<span class="chip"><b>Runs on</b> ${escapeHtml(item.requires)}</span>` : ''}
+          ${item.sha256 ? `<button class="chip mono" type="button" data-copy-sha="${escapeHtml(item.sha256)}" title="Copy full SHA-256 for installer verification"><b>SHA-256</b> ${escapeHtml(item.sha256.slice(0, 16))}&hellip; &#x2398;</button>` : ''}
+          <span class="chip"><b>Guide</b> ${escapeHtml(item.guide)}</span>
+        </div>
+        ${item.install ? `<div class="deploy-install"><b>Rollout</b> ${escapeHtml(item.install)}</div>` : ''}
+      </div>`).join('');
+    const history = $('#deployHistory');
+    if (history) {
+      history.innerHTML = (data.history || []).length
+        ? data.history.map((h) => `
+          <div class="inspector-field"><span>${escapeHtml(new Date(h.ts).toLocaleString())}</span><b>${escapeHtml(h.actor)} - ${escapeHtml(h.detail)}</b></div>`).join('')
+        : '<div class="empty">No downloads recorded yet. Every download is written to the audit chain.</div>';
+    }
+  } catch {
+    rows.innerHTML = '<div class="empty">Deploy packages need the operator or security admin role.</div>';
+  }
+}
+
+// ---- Overview: the always-up control room; every element jumps to its tab ----
+function overviewTile(jump, cls, value, label, meta, tone) {
+  return `<button class="stat ${cls}" type="button" data-tab-jump="${escapeHtml(jump)}" data-tooltip="${escapeHtml(`${label}: ${meta}. Click to open.`)}">
+      <div class="l"><span class="status-light tone-${escapeHtml(tone)}" aria-hidden="true"></span>${escapeHtml(label)}</div>
+      <div class="n">${escapeHtml(String(value))}</div>
+      <div class="m">${escapeHtml(meta)}</div>
+      <div class="stat-rule"></div>
+    </button>`;
+}
+
+function renderOverviewTiles({ stats, coverage, deliveries, audit, fleet }) {
+  const failed = deliveries ? deliveries.filter((d) => d.status === 'failed').length : null;
+  const chainOk = !!(audit && audit.integrity && audit.integrity.ok);
+  const gaps = fleet ? fleet.gapCount : null;
+  const tiles = [
+    stats && overviewTile('queue', stats.pending > 0 ? 'pending' : '', stats.pending, 'Pending approval', 'waiting on a decision', stats.pending > 0 ? 'warn' : 'secure'),
+    stats && overviewTile('activity', stats.todayBlocked > 0 ? 'alert' : '', stats.todayBlocked, 'Blocked today', 'policy stops', stats.todayBlocked > 0 ? 'critical' : 'secure'),
+    coverage && Number.isFinite(coverage.score) && overviewTile('coverage', '', `${coverage.score}/100`, 'Sensor coverage', 'fleet reporting score', coverage.score >= 70 ? 'secure' : 'warn'),
+    gaps !== null && overviewTile('coverage', gaps ? 'alert' : '', gaps, 'Coverage gaps', 'users missing a companion sensor', gaps ? 'warn' : 'secure'),
+    failed !== null && overviewTile('integrations', failed ? 'alert' : '', failed, 'Failed deliveries', 'SIEM and webhook sends', failed ? 'warn' : 'secure'),
+    audit && overviewTile('audit', '', chainOk ? 'Verified' : 'Check', 'Audit log', chainOk ? `${audit.integrity.count} linked entries` : 'integrity needs review', chainOk ? 'secure' : 'warn'),
+  ].filter(Boolean);
+  $('#overviewTiles').innerHTML = tiles.join('') || '<div class="empty">Waiting for the first data from your sensors.</div>';
+}
+
+function overviewRow(q, jump) {
+  const sev = q.maxSeverityLabel || 'low';
+  const tone = statusTone(q.status);
+  return `<button class="overview-row" type="button" data-tab-jump="${escapeHtml(jump)}">
+      <span class="ovr-when">${escapeHtml(fmtTime(q.createdAt))}</span>
+      <span class="sev ${sevClass(sev)}">${escapeHtml(sev)}</span>
+      <span class="ovr-what"><b>${escapeHtml(q.user || 'unknown')}</b> &rarr; ${escapeHtml(q.destination || '-')}</span>
+      <span class="pill ${escapeHtml(tone)} status-chip tone-${escapeHtml(statusToneClass(tone))}">${escapeHtml(humanize(q.status))}</span>
+    </button>`;
+}
+
+function renderOverviewLists(rows) {
+  if (!Array.isArray(rows)) return;
+  const pending = rows.filter((q) => q.status === 'pending').slice(0, 6);
+  $('#overviewQueue').innerHTML = pending.map((q) => overviewRow(q, 'queue')).join('')
+    || '<div class="empty">Nothing is waiting. New held prompts appear here the moment a sensor blocks one.</div>';
+  $('#overviewFeed').innerHTML = rows.slice(0, 8).map((q) => overviewRow(q, 'activity')).join('')
+    || '<div class="empty">No gated prompts yet. Activity streams in live once sensors report.</div>';
+}
+
+async function loadOverview() {
+  const [stats, rows, audit, deliveries, coverage, fleetData] = await Promise.all([
+    dashboardJsonWithTimeout('/api/stats', 2200),
+    dashboardJsonWithTimeout('/api/queries?limit=50', 2200),
+    dashboardJsonWithTimeout('/api/audit?limit=10', 2200),
+    dashboardJsonWithTimeout('/api/subscriptions/deliveries?limit=50', 2200),
+    dashboardJsonWithTimeout('/api/coverage', 2600),
+    dashboardJsonWithTimeout('/api/fleet', 2200),
+  ]);
+  renderOverviewTiles({ stats, coverage, deliveries: deliveries && deliveries.deliveries, audit, fleet: fleetData });
+  renderOverviewLists(rows);
+  const updated = $('#overviewUpdated');
+  if (updated) updated.textContent = 'UPDATED ' + new Date().toLocaleTimeString();
+}
+
+function refreshOverviewIfVisible() {
+  if (!$('#tab-overview').classList.contains('hidden')) loadOverview().catch(() => {});
+}
+setInterval(refreshOverviewIfVisible, 30000);
+
 function knownTabNames() {
   return $$('.tab[data-tab]')
     .map((tab) => tab.dataset.tab)
@@ -3554,19 +4769,19 @@ function knownTabNames() {
 
 function normalizeTabName(name) {
   const candidate = String(name || '').trim().toLowerCase();
-  return knownTabNames().includes(candidate) ? candidate : 'queue';
+  return knownTabNames().includes(candidate) ? candidate : 'overview';
 }
 
 function tabNameFromLocation() {
   const url = new URL(window.location.href);
   const queryTab = url.searchParams.get('tab');
   const hashTab = (url.hash || '').replace(/^#\/?/, '');
-  return normalizeTabName(queryTab || hashTab || 'queue');
+  return normalizeTabName(queryTab || hashTab || 'overview');
 }
 
 function syncTabUrl(name, { replace = false } = {}) {
   const url = new URL(window.location.href);
-  if (name === 'queue') url.searchParams.delete('tab');
+  if (name === 'overview') url.searchParams.delete('tab');
   else url.searchParams.set('tab', name);
   url.hash = '';
   if (url.href === window.location.href) return;
@@ -3589,13 +4804,19 @@ function activateTab(name, options = {}) {
   panel.classList.remove('hidden');
   window.scrollTo(0, 0);
   if (!options.skipHistory) syncTabUrl(targetName, { replace: options.replaceHistory });
+  if (targetName === 'overview') loadOverview();
   if (targetName === 'monitor') { renderMonitor(); loadPosture().catch(() => {}); loadSiemPackage().catch(() => {}); }
   if (targetName === 'audit') loadAudit();
   if (targetName === 'policy') loadPolicy();
   if (targetName === 'activity') loadActivity();
+  if (targetName === 'insights') loadInsights();
   if (targetName === 'coverage') loadCoverage();
+  if (targetName === 'catalog') loadCatalog();
+  if (targetName === 'compliance') loadCompliance();
+  if (targetName === 'integrations') { loadIntegrations(); loadNotificationsStatus().catch(() => {}); }
   if (targetName === 'identity') loadIdentitySetup();
   if (targetName === 'lineage') loadLineage();
+  if (targetName === 'deploy') loadDeploy();
   if (targetName === 'updates') loadUpdates();
 }
 
@@ -3614,6 +4835,44 @@ applyColorTheme(colorTheme, { persist: false });
 
 $('#refreshQueue').onclick = loadQueue;
 $('#refreshCoverage').onclick = loadCoverage;
+if ($('#refreshInsights')) $('#refreshInsights').onclick = loadInsights;
+if ($('#insightsWindow')) $('#insightsWindow').addEventListener('change', loadInsights);
+if ($('#exportActivityCsv')) $('#exportActivityCsv').addEventListener('click', exportActivityCsv);
+if ($('#exportAuditCsv')) $('#exportAuditCsv').addEventListener('click', exportAuditCsv);
+if ($('#detectorTestRun')) $('#detectorTestRun').addEventListener('click', () => { runDetectorTest().catch(() => {}); });
+if ($('#saveView')) $('#saveView').addEventListener('click', saveCurrentView);
+if ($('#testEmailBtn')) $('#testEmailBtn').addEventListener('click', () => { sendTestEmail().catch(() => {}); });
+if ($('#digestSendBtn')) $('#digestSendBtn').addEventListener('click', () => { sendDigestNow().catch(() => {}); });
+renderActivityColMenu();
+if ($('#queueBulkApprove')) $('#queueBulkApprove').addEventListener('click', () => { runQueueBulk('approve').catch(() => {}); });
+if ($('#queueBulkDeny')) $('#queueBulkDeny').addEventListener('click', () => { runQueueBulk('deny').catch(() => {}); });
+if ($('#savedViews')) {
+  refreshSavedViewOptions();
+  $('#savedViews').addEventListener('change', (e) => { if (e.target.value !== '') { applySavedView(e.target.value); e.target.value = ''; } });
+}
+if ($('#policyExportBtn')) $('#policyExportBtn').addEventListener('click', () => { exportPolicyJson().catch(() => {}); });
+if ($('#insightsExportCsv')) $('#insightsExportCsv').addEventListener('click', exportInsightsCsv);
+if ($('#insightsExecCsv')) $('#insightsExecCsv').addEventListener('click', exportExecSummaryCsv);
+if ($('#complianceCsvBtn')) $('#complianceCsvBtn').addEventListener('click', exportComplianceCsv);
+if ($('#identityTestBtn')) $('#identityTestBtn').addEventListener('click', () => {
+  $('#identityTestPanel').classList.remove('hidden');
+  runIdentityTest().catch(() => {});
+});
+if ($('#refreshCatalog')) $('#refreshCatalog').onclick = loadCatalog;
+if ($('#catalogImportBtn')) $('#catalogImportBtn').onclick = () => { $('#catalogImportForm').classList.toggle('hidden'); $('#catalogAddForm').classList.add('hidden'); };
+if ($('#catalogAddBtn')) $('#catalogAddBtn').onclick = () => { $('#catalogAddForm').classList.toggle('hidden'); $('#catalogImportForm').classList.add('hidden'); };
+if ($('#catalogAddConfirm')) $('#catalogAddConfirm').onclick = () => { addCatalogApp().catch(() => {}); };
+if ($('#catalogAddCancel')) $('#catalogAddCancel').onclick = () => $('#catalogAddForm').classList.add('hidden');
+if ($('#catalogImportConfirm')) $('#catalogImportConfirm').onclick = () => { importCatalogCsv().catch(() => {}); };
+if ($('#catalogImportCancel')) $('#catalogImportCancel').onclick = () => $('#catalogImportForm').classList.add('hidden');
+if ($('#catalogExportCsv')) $('#catalogExportCsv').onclick = exportCatalogCsv;
+if ($('#catalogSelectAll')) $('#catalogSelectAll').addEventListener('change', (e) => {
+  catalogSelected = e.target.checked ? new Set(catalogApps.map((a) => a.destination)) : new Set();
+  renderCatalog(catalogApps);
+});
+if ($('#refreshCompliance')) $('#refreshCompliance').onclick = loadCompliance;
+if ($('#complianceExportBtn')) $('#complianceExportBtn').onclick = () => { window.open('/api/export/evidence', '_blank'); };
+if ($('#refreshIntegrations')) $('#refreshIntegrations').onclick = loadIntegrations;
 $('#refreshIdentity').onclick = loadIdentitySetup;
 $('#identityProvider').addEventListener('change', loadIdentitySetup);
 $('#identityTenant').addEventListener('change', loadIdentitySetup);
@@ -3640,9 +4899,9 @@ $('#monitorSearch').addEventListener('blur', () => {
 
 function connectStream() {
   const es = new EventSource('/api/stream');
-  es.addEventListener('query', () => { loadStats(); loadQueue(); loadPosture().catch(() => {}); if (!$('#tab-coverage').classList.contains('hidden')) loadCoverage(); if (!$('#tab-lineage').classList.contains('hidden')) loadLineage(); flash(); });
-  es.addEventListener('decision', () => { loadStats(); loadQueue(); loadActivity(); loadPosture().catch(() => {}); if (!$('#tab-lineage').classList.contains('hidden')) loadLineage(); });
-  es.addEventListener('stats', () => { loadStats(); if (!$('#tab-monitor').classList.contains('hidden')) loadPosture().catch(() => {}); });
+  es.addEventListener('query', () => { loadStats(); loadQueue(); loadPosture().catch(() => {}); refreshOverviewIfVisible(); if (!$('#tab-coverage').classList.contains('hidden')) loadCoverage(); if (!$('#tab-lineage').classList.contains('hidden')) loadLineage(); if (!$('#tab-insights').classList.contains('hidden')) loadInsights(); flash(); });
+  es.addEventListener('decision', () => { loadStats(); loadQueue(); loadActivity(); loadPosture().catch(() => {}); refreshOverviewIfVisible(); if (!$('#tab-lineage').classList.contains('hidden')) loadLineage(); });
+  es.addEventListener('stats', () => { loadStats(); refreshOverviewIfVisible(); if (!$('#tab-monitor').classList.contains('hidden')) loadPosture().catch(() => {}); });
   es.onerror = () => { setLiveState('reconnecting'); };
   es.onopen = () => { setLiveState('live'); };
 }
@@ -3659,3 +4918,120 @@ function flash() {
 }
 
 init();
+
+// ---- Command palette (Ctrl/Cmd+K): jump to any tab or run a console action ----
+const cmdk = { overlay: null, items: [], selected: 0, restoreFocus: null };
+
+function cmdkEntries() {
+  const seen = new Set();
+  const tabs = $$('.rail .tab[data-tab]').filter((tab) => {
+    if (seen.has(tab.dataset.tab)) return false;
+    seen.add(tab.dataset.tab);
+    return true;
+  }).map((tab) => {
+    const badge = tab.querySelector('.badge');
+    const label = tab.textContent.replace(badge ? badge.textContent : '', '').trim();
+    return {
+      group: 'Navigate',
+      label,
+      icon: (tab.querySelector('.tab-icon') || {}).innerHTML || '',
+      run: () => activateTab(tab.dataset.tab),
+    };
+  });
+  const actions = [
+    {
+      group: 'Actions',
+      label: 'Toggle color theme',
+      icon: '',
+      run: () => {
+        const dark = document.body.dataset.theme === 'dark';
+        const target = $(dark ? '#themeLight' : '#themeDark');
+        if (target) target.click();
+      },
+    },
+    { group: 'Actions', label: 'Focus search', icon: '', run: () => { const s = $('#globalSearch'); if (s) s.focus(); } },
+    { group: 'Actions', label: 'Sign out', icon: '', run: () => { const b = $('#logout'); if (b) b.click(); } },
+  ];
+  return tabs.concat(actions);
+}
+
+function cmdkRender(filterText) {
+  const list = cmdk.overlay.querySelector('.cmdk-list');
+  const needle = String(filterText || '').trim().toLowerCase();
+  cmdk.items = cmdkEntries().filter((item) => !needle || item.label.toLowerCase().includes(needle));
+  cmdk.selected = Math.min(cmdk.selected, Math.max(0, cmdk.items.length - 1));
+  if (!cmdk.items.length) {
+    list.innerHTML = '<div class="cmdk-empty">No matching destination or action</div>';
+    return;
+  }
+  let group = '';
+  list.innerHTML = cmdk.items.map((item, index) => {
+    const header = item.group !== group ? `<div class="cmdk-group">${escapeHtml(item.group)}</div>` : '';
+    group = item.group;
+    return `${header}<button type="button" class="cmdk-item${index === cmdk.selected ? ' is-selected' : ''}" data-cmdk-index="${index}">
+      <span class="tab-icon" aria-hidden="true">${item.icon}</span>${escapeHtml(item.label)}
+      ${index === cmdk.selected ? '<kbd>enter</kbd>' : ''}
+    </button>`;
+  }).join('');
+}
+
+function cmdkClose() {
+  if (!cmdk.overlay) return;
+  cmdk.overlay.remove();
+  cmdk.overlay = null;
+  if (cmdk.restoreFocus && document.contains(cmdk.restoreFocus)) cmdk.restoreFocus.focus();
+}
+
+function cmdkOpen() {
+  if (cmdk.overlay) return cmdkClose();
+  cmdk.restoreFocus = document.activeElement;
+  cmdk.selected = 0;
+  const overlay = document.createElement('div');
+  overlay.className = 'cmdk-overlay';
+  overlay.innerHTML = `<div class="cmdk" role="dialog" aria-modal="true" aria-label="Command palette">
+    <input type="text" placeholder="Jump to a tab or run an action" aria-label="Command palette filter" />
+    <div class="cmdk-list" role="listbox"></div>
+  </div>`;
+  document.body.appendChild(overlay);
+  cmdk.overlay = overlay;
+  const input = overlay.querySelector('input');
+  cmdkRender('');
+  input.focus();
+  input.addEventListener('input', () => { cmdk.selected = 0; cmdkRender(input.value); });
+  overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) cmdkClose(); });
+  overlay.addEventListener('click', (e) => {
+    const item = e.target.closest('[data-cmdk-index]');
+    if (!item) return;
+    const entry = cmdk.items[Number(item.dataset.cmdkIndex)];
+    cmdkClose();
+    if (entry) entry.run();
+  });
+  overlay.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); cmdkClose(); return; }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const step = e.key === 'ArrowDown' ? 1 : -1;
+      cmdk.selected = (cmdk.selected + step + cmdk.items.length) % Math.max(1, cmdk.items.length);
+      cmdkRender(input.value);
+      return;
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const entry = cmdk.items[cmdk.selected];
+      cmdkClose();
+      if (entry) entry.run();
+    }
+  });
+}
+
+document.addEventListener('keydown', (e) => {
+  if ((e.metaKey || e.ctrlKey) && String(e.key).toLowerCase() === 'k') {
+    e.preventDefault();
+    cmdkOpen();
+  }
+}, true);
+const cmdkHint = document.getElementById('cmdkHint');
+if (cmdkHint) {
+  cmdkHint.style.cursor = 'pointer';
+  cmdkHint.addEventListener('click', (e) => { e.preventDefault(); cmdkOpen(); });
+}

@@ -5,6 +5,8 @@ context, not operator runbooks.
 
 | File | Purpose |
 |------|---------|
+| `platform-roadmap.md` | Platform roadmap: AI Gateway, app catalog, posture subscriptions, connectors, OCR, identity, and scale-out, sequenced into deployable slices |
+| `stack-upgrade-plan.md` | Stack upgrade sequencing: console migration to Vite + React + TS, file-parsing isolation, Node 24 validation, Postgres hardening, node:sqlite decision |
 | `promptwall-product-alignment.md` | Product-readiness and PromptWall alignment work |
 | `customer-missing-features.md` | Commercial feature gap analysis and build order |
 | `aws-saas-deployment.md` | Planning notes for the AWS customer-silo path |
