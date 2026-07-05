@@ -60,6 +60,10 @@ function minimalFiles(agentBody) {
       body: Buffer.from('function collectAiToolInventory() {}\nfunction parseApprovedTools() {}\nmodule.exports = { collectAiToolInventory, parseApprovedTools };\n'),
     },
     {
+      path: 'sensors/endpoint-agent/collectors/mcp-inventory.js',
+      body: Buffer.from('function collectMcpInventorySync() {}\nfunction serverMetadata() {}\nmodule.exports = { collectMcpInventorySync, serverMetadata };\n'),
+    },
+    {
       path: 'sensors/endpoint-agent/collectors/desktop-app-flow.js',
       body: Buffer.from('function desktopAppFlowProfiles() {}\nfunction publicAppFlowChecks() {}\nmodule.exports = { desktopAppFlowProfiles, publicAppFlowChecks };\n'),
     },
@@ -198,6 +202,7 @@ test('package script writes a prompt-free endpoint agent zip and integrity manif
     'sensors/endpoint-agent/native-messaging-host.js',
     'sensors/endpoint-agent/write-handoff.js',
     'sensors/endpoint-agent/collectors/ai-tool-inventory.js',
+    'sensors/endpoint-agent/collectors/mcp-inventory.js',
     'sensors/endpoint-agent/collectors/clipboard-guard.js',
     'sensors/endpoint-agent/collectors/git-push-guard.js',
     'sensors/endpoint-agent/collectors/protected-upload.js',

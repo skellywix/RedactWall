@@ -26,6 +26,7 @@ const PACKAGE_FILES = [
   'sensors/endpoint-agent/native-messaging-host.js',
   'sensors/endpoint-agent/write-handoff.js',
   'sensors/endpoint-agent/collectors/ai-tool-inventory.js',
+  'sensors/endpoint-agent/collectors/mcp-inventory.js',
   'sensors/endpoint-agent/collectors/clipboard-guard.js',
   'sensors/endpoint-agent/collectors/desktop-app-flow.js',
   'sensors/endpoint-agent/collectors/git-push-guard.js',
@@ -136,6 +137,16 @@ function validateRuntimeFiles(files) {
   }
   if (/contentBase64|fetch\(|https?:\/\/|readFileSync|writeFileSync|console\.log\([^)]*process|console\.error\([^)]*process/.test(aiToolInventory)) {
     throw new Error('Endpoint AI tool inventory must not upload, persist, or log local process or path data');
+  }
+
+  const mcpInventory = files.find((file) => file.path === 'sensors/endpoint-agent/collectors/mcp-inventory.js').body.toString('utf8');
+  if (!/collectMcpInventorySync/.test(mcpInventory) || !/serverMetadata/.test(mcpInventory)) {
+    throw new Error('Endpoint agent package must include sanitized MCP server inventory');
+  }
+  // The MCP collector reads config files (readFileSync is expected) but must
+  // never upload, persist, or log their contents.
+  if (/contentBase64|fetch\(|https?:\/\/|writeFileSync|console\.log|console\.error/.test(mcpInventory)) {
+    throw new Error('Endpoint MCP inventory must not upload, persist, or log MCP config data');
   }
 
   const handoff = files.find((file) => file.path === 'sensors/endpoint-agent/native-handoff.js').body.toString('utf8');

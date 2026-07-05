@@ -3642,6 +3642,21 @@ function renderCoverage(c) {
       </div>
     </div>`;
   }).join('') || '<div class="empty"><div class="big">No endpoint AI tools</div>No endpoint AI inventory reported.</div>';
+  $('#endpointMcpServerRows').innerHTML = (c.endpointMcpServers || []).map((server) => {
+    const meta = [
+      server.user || 'unknown',
+      server.orgId || '',
+      (server.platforms || []).join(', '),
+      server.lastSeen ? fmt(server.lastSeen) : '',
+    ].filter(Boolean).join(' | ');
+    return `<div class="tool-row">
+      <div><strong>${escapeHtml(server.id || 'unknown server')}</strong><span>${escapeHtml(meta || '-')}</span></div>
+      <div class="tool-state">
+        ${statusChip(endpointAiToolTone(server.state), server.state || 'unknown', `Endpoint MCP server: ${server.id || 'unknown'}\nApproval state: ${server.state || 'unknown'}\nLast seen: ${server.lastSeen ? fmt(server.lastSeen) : '-'}`)}
+        <span>${escapeHtml(server.detail || '-')}</span>
+      </div>
+    </div>`;
+  }).join('') || '<div class="empty"><div class="big">No endpoint MCP servers</div>No endpoint MCP inventory reported.</div>';
   $('#governedRows').innerHTML = (c.governedDestinations || []).map((d) => `<tr>
     <td class="mono">${escapeHtml(d.destination)}</td>
     <td class="mono">${escapeHtml(d.events)}</td>

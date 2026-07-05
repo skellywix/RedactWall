@@ -52,6 +52,7 @@ const ticketSync = require('./ticket-sync');
 const semanticRemote = require('./semantic-remote');
 const {
   endpointAiToolAttentionIds,
+  endpointMcpServerAttentionIds,
   failedInstallCheckIds,
 } = require('./install-checks');
 const releaseTokens = require('./release-token');
@@ -1293,6 +1294,7 @@ app.post('/api/v1/heartbeat', checkIngestKey, validation.validateBody(validation
   const checks = safeInstallChecks(req.body && req.body.checks);
   const failedChecks = failedInstallCheckIds(checks);
   const aiToolAttention = endpointAiToolAttentionIds(checks);
+  const mcpServerAttention = endpointMcpServerAttentionIds(checks);
   const row = createQuery({
     status: 'sensor_heartbeat',
     mode: 'sensor_health',
@@ -1313,14 +1315,16 @@ app.post('/api/v1/heartbeat', checkIngestKey, validation.validateBody(validation
       ? ['Sensor health attention: ' + failedChecks.join(', ')]
       : aiToolAttention.length
         ? ['Endpoint AI tool inventory attention: ' + aiToolAttention.join(', ')]
-        : ['Sensor heartbeat OK'],
+        : mcpServerAttention.length
+          ? ['Endpoint MCP server inventory attention: ' + mcpServerAttention.join(', ')]
+          : ['Sensor heartbeat OK'],
     installChecks: checks,
   });
   db.appendAudit({
     action: failedChecks.length ? 'SENSOR_HEALTH_ATTENTION' : 'SENSOR_HEARTBEAT',
     queryId: row.id,
     actor: user,
-    detail: JSON.stringify({ source, failedChecks, aiToolAttention, checkCount: checks.length }),
+    detail: JSON.stringify({ source, failedChecks, aiToolAttention, mcpServerAttention, checkCount: checks.length }),
   });
   if (aiToolAttention.length) {
     db.appendAudit({
@@ -1328,6 +1332,14 @@ app.post('/api/v1/heartbeat', checkIngestKey, validation.validateBody(validation
       queryId: row.id,
       actor: user,
       detail: JSON.stringify({ source, unapprovedTools: aiToolAttention }),
+    });
+  }
+  if (mcpServerAttention.length) {
+    db.appendAudit({
+      action: 'ENDPOINT_MCP_SERVER_ATTENTION',
+      queryId: row.id,
+      actor: user,
+      detail: JSON.stringify({ source, unapprovedServers: mcpServerAttention }),
     });
   }
   if (failedChecks.length) emitSecurityAlert(row, 'SENSOR_HEALTH_ATTENTION');

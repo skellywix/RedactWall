@@ -78,7 +78,9 @@ test('admin public assets stay within transfer budgets', () => {
     { path: 'server/public/login.js', maxRawBytes: 6_000, maxGzipBytes: 2_500 },
   ]);
 
-  assertWithin('admin public assets raw total', totals.rawBytes, 525_000);
+  // Raised 525k -> 528k for the Endpoint MCP Servers panel (shadow-MCP
+  // discovery), mirroring the existing Endpoint AI Tools panel.
+  assertWithin('admin public assets raw total', totals.rawBytes, 528_000);
   assertWithin('admin public assets gzip total', totals.gzipBytes, 128_000);
 });
 

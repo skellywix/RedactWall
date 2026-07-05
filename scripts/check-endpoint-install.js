@@ -11,6 +11,7 @@ const {
   failedInstallCheckIds,
 } = require('../server/install-checks');
 const aiToolInventory = require('../sensors/endpoint-agent/collectors/ai-tool-inventory');
+const mcpInventory = require('../sensors/endpoint-agent/collectors/mcp-inventory');
 const desktopAppFlow = require('../sensors/endpoint-agent/collectors/desktop-app-flow');
 const endpointOcr = require('../sensors/endpoint-agent/ocr');
 const fileFlowProfiles = require('../sensors/endpoint-agent/file-flow-profiles');
@@ -94,6 +95,7 @@ function endpointSettings(config = {}) {
     handoffSecret: config.ENDPOINT_AGENT_HANDOFF_SECRET || config.PROMPTWALL_ENDPOINT_AGENT_HANDOFF_SECRET || '',
     ocrCommand: config.ENDPOINT_AGENT_OCR_COMMAND || config.PROMPTWALL_ENDPOINT_AGENT_OCR_COMMAND || '',
     approvedAiTools: config.ENDPOINT_AGENT_APPROVED_AI_TOOLS || config.PROMPTWALL_ENDPOINT_AGENT_APPROVED_AI_TOOLS || '',
+    approvedMcpServers: config.ENDPOINT_AGENT_APPROVED_MCP_SERVERS || config.PROMPTWALL_ENDPOINT_AGENT_APPROVED_MCP_SERVERS || '',
     fileFlowProfiles: config.ENDPOINT_AGENT_FILE_FLOW_PROFILES || config.PROMPTWALL_ENDPOINT_AGENT_FILE_FLOW_PROFILES || '',
     orgId: config.SENTINEL_TENANT_ID || config.PROMPTWALL_TENANT_ID || '',
   };
@@ -136,6 +138,13 @@ function buildInstallReport(opts = {}) {
     platform: opts.platform || process.platform,
     processNames: opts.processNames || [],
     approvedTools: settings.approvedAiTools,
+  }).checks);
+  checks.push(check('mcp_inventory_runtime', existsFile(repoRoot, 'sensors/endpoint-agent/collectors/mcp-inventory.js'), 'MCP server inventory present'));
+  checks.push(...mcpInventory.collectMcpInventorySync({
+    env: configInfo.config,
+    platform: opts.platform || process.platform,
+    home: opts.home,
+    approvedServers: settings.approvedMcpServers,
   }).checks);
   checks.push(check('desktop_app_flow_runtime', existsFile(repoRoot, 'sensors/endpoint-agent/collectors/desktop-app-flow.js'), 'app file-flow collector present'));
   checks.push(...desktopAppFlow.publicAppFlowChecks(desktopAppFlow.desktopAppFlowProfiles({

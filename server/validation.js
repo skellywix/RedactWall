@@ -217,7 +217,9 @@ const heartbeatSchema = z.object({
   source: stringDefault('api'),
   orgId: nullableString(),
   sensor: sensorMetadataSchema.optional(),
-  checks: z.array(heartbeatCheckSchema).max(40).optional(),
+  // Raised 40 -> 80: installs already emit ~25-32 checks, and the endpoint MCP
+  // inventory adds an mcp_inventory summary plus up to 12 per-server checks.
+  checks: z.array(heartbeatCheckSchema).max(80).optional(),
 }).strict();
 
 const loginSchema = z.object({

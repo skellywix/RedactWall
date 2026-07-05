@@ -5,6 +5,7 @@ const aiCatalog = require('./ai-app-catalog');
 const {
   failedInstallCheckIds,
   isEndpointAiToolPolicyCheckId,
+  isEndpointMcpServerPolicyCheckId,
 } = require('./install-checks');
 
 const SENSOR_LABELS = {
@@ -233,7 +234,7 @@ function safeFleetText(value, fallback = 'unknown') {
 }
 
 function cleanInstallChecks(checks) {
-  return (Array.isArray(checks) ? checks : []).slice(0, 40).map((check) => {
+  return (Array.isArray(checks) ? checks : []).slice(0, 80).map((check) => {
     if (!check || typeof check !== 'object') return null;
     const id = normalizeSensorId(check.id);
     if (!id) return null;
@@ -292,6 +293,37 @@ function aiToolInventoryForChecks(checks = []) {
   };
 }
 
+// Shadow-MCP inventory summary from the endpoint heartbeat checks. Mirrors the
+// AI-tool inventory: metadata-only rows (id, client, transport), an unapproved
+// count, and a covered/attention state. Never contains config contents.
+function mcpServerInventoryForChecks(checks = []) {
+  const inventoryCheck = checks.find((check) => check.id === 'mcp_inventory');
+  const servers = [];
+  for (const check of checks) {
+    if (!check || !isEndpointMcpServerPolicyCheckId(check.id)) continue;
+    const id = String(check.id).slice('mcp_server_'.length);
+    const approved = check.ok === true;
+    servers.push({
+      id,
+      approved,
+      state: approved ? 'approved' : 'unapproved',
+      detail: String(check.detail || (approved ? 'detected' : 'unapproved detected')).slice(0, 160),
+    });
+  }
+  if (!inventoryCheck && !servers.length) return null;
+  servers.sort((a, b) => Number(a.approved) - Number(b.approved) || a.id.localeCompare(b.id));
+  const detected = detectedToolCount(inventoryCheck);
+  const unapproved = servers.filter((s) => !s.approved).length;
+  return {
+    detected: detected == null ? servers.length : detected,
+    reported: servers.length,
+    unapproved,
+    truncated: detected != null && detected > servers.length,
+    state: unapproved ? 'attention' : 'covered',
+    servers,
+  };
+}
+
 function fileFlowProfilesForChecks(checks = []) {
   const summary = checks.find((check) => check.id === 'endpoint_file_flow_profiles');
   const profiles = checks
@@ -330,6 +362,8 @@ function installHealthFor(q) {
   };
   const aiToolInventory = aiToolInventoryForChecks(checks);
   if (aiToolInventory) health.aiToolInventory = aiToolInventory;
+  const mcpServerInventory = mcpServerInventoryForChecks(checks);
+  if (mcpServerInventory) health.mcpServerInventory = mcpServerInventory;
   const fileFlowProfiles = fileFlowProfilesForChecks(checks);
   if (fileFlowProfiles) health.fileFlowProfiles = fileFlowProfiles;
   return health;
@@ -516,6 +550,32 @@ function endpointAiToolRows(rows) {
     .slice(0, ENDPOINT_AI_TOOL_LIMIT);
 }
 
+function endpointMcpServerRows(rows) {
+  const out = [];
+  for (const row of rows || []) {
+    if (!row || row.source !== 'endpoint_agent') continue;
+    const inventory = row.installHealth && row.installHealth.mcpServerInventory;
+    if (!inventory || !Array.isArray(inventory.servers)) continue;
+    for (const server of inventory.servers) {
+      out.push({
+        id: server.id,
+        approved: server.approved === true,
+        state: server.state,
+        detail: server.detail,
+        user: row.user || 'unknown',
+        orgId: row.orgId || null,
+        lastSeen: (row.installHealth && row.installHealth.at) || row.lastSeen || null,
+        platforms: Array.isArray(row.platforms) ? row.platforms.slice(0, 5) : [],
+      });
+    }
+  }
+  return out
+    .sort((a, b) => Number(a.approved) - Number(b.approved)
+      || String(a.user || '').localeCompare(String(b.user || ''))
+      || String(a.id || '').localeCompare(String(b.id || '')))
+    .slice(0, ENDPOINT_AI_TOOL_LIMIT);
+}
+
 function endpointFileFlowProfileRows(rows) {
   const out = [];
   for (const row of rows || []) {
@@ -638,6 +698,7 @@ function summarize(rows, pol) {
       || String(a.source || '').localeCompare(String(b.source || '')))
     .slice(0, FLEET_LIMIT);
   const endpointAiTools = endpointAiToolRows(allFleet);
+  const endpointMcpServers = endpointMcpServerRows(allFleet);
   const endpointFileFlowProfilesRows = endpointFileFlowProfileRows(allFleet);
   const endpointInventories = allFleet
     .filter((row) => row.source === 'endpoint_agent' && row.installHealth && row.installHealth.aiToolInventory)
@@ -648,6 +709,12 @@ function summarize(rows, pol) {
   const endpointAiInventoryReports = endpointInventories.length;
   const endpointAiToolDetections = endpointInventories.reduce((sum, inventory) => sum + (Number(inventory.detected) || 0), 0);
   const endpointAiToolUnapproved = endpointInventories.reduce((sum, inventory) => sum + (Number(inventory.unapproved) || 0), 0);
+  const endpointMcpInventories = allFleet
+    .filter((row) => row.source === 'endpoint_agent' && row.installHealth && row.installHealth.mcpServerInventory)
+    .map((row) => row.installHealth.mcpServerInventory);
+  const endpointMcpInventoryReports = endpointMcpInventories.length;
+  const endpointMcpServerDetections = endpointMcpInventories.reduce((sum, inv) => sum + (Number(inv.detected) || 0), 0);
+  const endpointMcpServerUnapproved = endpointMcpInventories.reduce((sum, inv) => sum + (Number(inv.unapproved) || 0), 0);
   const endpointFileFlowReports = endpointFileFlowInventories.length;
   const endpointFileFlowProfiles = endpointFileFlowInventories.reduce((sum, inventory) => sum + (Number(inventory.configured) || 0), 0);
   const endpointFileFlowAttention = endpointFileFlowInventories.reduce((sum, inventory) => sum + (Number(inventory.attention) || 0), 0);
@@ -698,6 +765,9 @@ function summarize(rows, pol) {
       endpointAiInventoryReports,
       endpointAiToolDetections,
       endpointAiToolUnapproved,
+      endpointMcpInventoryReports,
+      endpointMcpServerDetections,
+      endpointMcpServerUnapproved,
       endpointFileFlowReports,
       endpointFileFlowProfiles,
       endpointFileFlowAttention,
@@ -716,6 +786,7 @@ function summarize(rows, pol) {
     fleet,
     discoveryFeeds,
     endpointAiTools,
+    endpointMcpServers,
     endpointFileFlowProfiles: endpointFileFlowProfilesRows,
     governedDestinations: [...governed.values()]
       .map((bucket) => publicAggregate(bucket, { governed: true }))
@@ -789,6 +860,14 @@ function summarize(rows, pol) {
         detail: endpointAiInventoryReports
           ? `${endpointAiToolDetections} detected tools / ${endpointAiToolUnapproved} unapproved`
           : 'no endpoint inventory heartbeat',
+      },
+      {
+        id: 'endpoint_mcp_servers',
+        label: 'Endpoint MCP servers',
+        state: endpointMcpServerUnapproved ? 'attention' : (endpointMcpInventoryReports ? 'covered' : 'attention'),
+        detail: endpointMcpInventoryReports
+          ? `${endpointMcpServerDetections} discovered servers / ${endpointMcpServerUnapproved} unapproved`
+          : 'no endpoint MCP inventory heartbeat',
       },
       {
         id: 'endpoint_file_flow_profiles',

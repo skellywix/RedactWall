@@ -73,7 +73,7 @@ function safeFinding(f) {
 }
 
 function safeInstallChecks(checks = []) {
-  return (Array.isArray(checks) ? checks : []).slice(0, 40).map((check) => {
+  return (Array.isArray(checks) ? checks : []).slice(0, 80).map((check) => {
     if (!check || typeof check !== 'object') return null;
     const id = typeof check.id === 'string' ? check.id.slice(0, 80) : null;
     if (!id) return null;
