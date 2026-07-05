@@ -54,6 +54,7 @@ Use this index when you know the job but not the file name.
 | Product roadmap | `../ROADMAP.md` |
 | Competitive positioning and product direction | `COMPETITIVE_ALIGNMENT.md` |
 | Feature benchmark vs. market leaders | `COMPETITIVE_BENCHMARK_2026.md` |
+| Detection latency and accuracy benchmarks | `DETECTION_BENCHMARKS.md` |
 | Vendor-risk security trust package | `SECURITY_TRUST_PACKAGE.md` |
 | Architecture, crypto inventory, threat model | `SECURITY_WHITEPAPER.md` |
 | Security incident response runbook | `INCIDENT_RESPONSE.md` |
