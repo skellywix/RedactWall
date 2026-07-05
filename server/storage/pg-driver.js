@@ -10,7 +10,31 @@
 const path = require('path');
 const { Worker, MessageChannel, receiveMessageOnPort } = require('worker_threads');
 
-const CALL_TIMEOUT_MS = 30000;
+const DEFAULT_STATEMENT_TIMEOUT_MS = 25000;
+const BRIDGE_GRACE_MS = 5000;
+
+function boundedInt(value, fallback, min, max) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, Math.trunc(parsed)));
+}
+
+/**
+ * Bridge and session tuning from the environment. The session
+ * statement_timeout stays below the Atomics.wait cap (callTimeoutMs =
+ * statement timeout + grace) so Postgres cancels a runaway statement — and
+ * keeps the connection alive — before the bridge gives up on the worker.
+ */
+function resolveBridgeConfig(env = process.env) {
+  const statementTimeoutMs = boundedInt(env.SENTINEL_PG_STATEMENT_TIMEOUT_MS, DEFAULT_STATEMENT_TIMEOUT_MS, 1000, 600000);
+  return {
+    statementTimeoutMs,
+    callTimeoutMs: statementTimeoutMs + BRIDGE_GRACE_MS,
+    connectAttempts: boundedInt(env.SENTINEL_PG_CONNECT_ATTEMPTS, 5, 1, 20),
+    connectBaseDelayMs: boundedInt(env.SENTINEL_PG_CONNECT_BASE_DELAY_MS, 200, 10, 10000),
+    connectTimeoutMs: boundedInt(env.SENTINEL_PG_CONNECT_TIMEOUT_MS, 5000, 500, 60000),
+  };
+}
 
 // Runtime SQL is written in db.js with camelCase identifiers (which Postgres
 // would fold to lowercase) and a `user` column (reserved in Postgres), so
@@ -49,11 +73,12 @@ function normalizeValue(value) {
 }
 
 function createPgDriver(connectionString) {
+  const config = resolveBridgeConfig(process.env);
   const shared = new SharedArrayBuffer(4);
   const flag = new Int32Array(shared);
   const { port1, port2 } = new MessageChannel();
   const worker = new Worker(path.join(__dirname, 'pg-worker.js'), {
-    workerData: { shared, port: port2, connectionString },
+    workerData: { shared, port: port2, connectionString, ...config },
     transferList: [port2],
   });
   worker.unref();
@@ -62,7 +87,7 @@ function createPgDriver(connectionString) {
   function call(op, sql, params) {
     Atomics.store(flag, 0, 0);
     worker.postMessage({ op, sql, params });
-    const deadline = Date.now() + CALL_TIMEOUT_MS;
+    const deadline = Date.now() + config.callTimeoutMs;
     while (Atomics.load(flag, 0) === 0) {
       if (Date.now() > deadline) throw new Error('postgres bridge timeout');
       Atomics.wait(flag, 0, 0, 100);
@@ -120,4 +145,4 @@ function createPgDriver(connectionString) {
   };
 }
 
-module.exports = { createPgDriver, translateSql, quoteCamelIdentifiers };
+module.exports = { createPgDriver, translateSql, quoteCamelIdentifiers, resolveBridgeConfig };

@@ -1,0 +1,409 @@
+/* Policy editor. Uses the shared console-theme.css tokens (--panel, --panel2,
+   --line, --txt, --soft, --mut, --blue, --red, --green, --amber, --input-bg,
+   --focus-ring) so the form matches the instrument styling in both themes.
+   Severity color is never used alone: selected states also carry the 2px
+   verdict-spine inset used across the console. */
+
+.policy-editor {
+  display: grid;
+  gap: 14px;
+}
+
+.policy-section {
+  display: grid;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.policy-section h3 {
+  margin: 0;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.policy-hint {
+  margin: 0;
+  color: var(--mut);
+  font-size: 12px;
+}
+
+/* ---- Inputs (base sheet is not loaded in the new console) ------------------ */
+.policy-editor input[type='text'],
+.policy-editor input[type='number'],
+.policy-editor select,
+.policy-editor textarea {
+  max-width: 100%;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm, 5px);
+  background: var(--input-bg, var(--panel));
+  color: var(--txt);
+  font: inherit;
+}
+
+.policy-editor input:focus-visible,
+.policy-editor select:focus-visible,
+.policy-editor textarea:focus-visible,
+.policy-btn:focus-visible,
+.policy-chip:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.policy-editor input:disabled,
+.policy-editor select:disabled,
+.policy-editor textarea:disabled {
+  background: var(--disabled-bg, var(--panel2));
+  color: var(--mut);
+}
+
+/* ---- Action row ------------------------------------------------------------ */
+.policy-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.policy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border: 1px solid var(--line2, var(--line));
+  border-radius: var(--radius-sm, 5px);
+  background: var(--panel2);
+  color: var(--txt);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.policy-btn:hover:not(:disabled) {
+  background: var(--surface-hover, var(--panel3));
+}
+
+.policy-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.policy-btn.primary {
+  background: var(--green-vivid, var(--green));
+  border-color: var(--green);
+  color: #fff;
+}
+
+.policy-btn.primary:hover:not(:disabled) {
+  background: var(--green);
+}
+
+body[data-theme='dark'] .policy-btn.primary {
+  color: #062712;
+  border-color: #2aa565;
+}
+
+@media (prefers-color-scheme: dark) {
+  body:not([data-theme]) .policy-btn.primary {
+    color: #062712;
+    border-color: #2aa565;
+  }
+}
+
+.policy-readonly-note {
+  margin-left: auto;
+  color: var(--mut);
+  font-size: 12px;
+}
+
+.policy-actions .policy-btn.primary {
+  margin-left: auto;
+}
+
+/* ---- Mode picker ------------------------------------------------------------ */
+.policy-modes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 8px;
+}
+
+.policy-mode {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm, 5px);
+  background: var(--panel2);
+  cursor: pointer;
+}
+
+.policy-mode.selected {
+  border-color: var(--line2, var(--line));
+  background: var(--surface-selected, var(--panel3));
+  box-shadow: inset 2px 0 0 var(--blue);
+}
+
+.policy-mode span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 650;
+}
+
+.policy-mode p {
+  margin: 0;
+  color: var(--mut);
+  font-size: 12px;
+}
+
+/* ---- Label/control grid ------------------------------------------------------ */
+.policy-field-grid {
+  display: grid;
+  grid-template-columns: minmax(180px, 300px) minmax(0, 1fr);
+  gap: 8px 12px;
+  align-items: center;
+}
+
+.policy-field-grid label {
+  color: var(--soft);
+  font-size: 12.5px;
+}
+
+.policy-field-grid input[type='checkbox'] {
+  justify-self: start;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--blue);
+}
+
+.policy-field-grid input[type='number'] {
+  max-width: 120px;
+}
+
+@media (max-width: 700px) {
+  .policy-field-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---- Destination list textareas ---------------------------------------------- */
+.policy-list-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.policy-list-field {
+  display: grid;
+  gap: 6px;
+  color: var(--soft);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.policy-list-field textarea {
+  min-height: 110px;
+  resize: vertical;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+/* ---- Chips (hard stops, templates) -------------------------------------------- */
+.policy-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.policy-chip {
+  padding: 4px 9px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel2);
+  color: var(--soft);
+  font: inherit;
+  font-size: 12px;
+}
+
+button.policy-chip {
+  cursor: pointer;
+}
+
+button.policy-chip:hover:not(:disabled) {
+  border-color: var(--line2, var(--line));
+  background: var(--surface-hover, var(--panel3));
+  color: var(--txt);
+}
+
+button.policy-chip:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.policy-chip.selected {
+  background: var(--surface-selected, var(--panel3));
+  box-shadow: inset 2px 0 0 var(--blue);
+  color: var(--txt);
+}
+
+.policy-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line2, var(--line));
+  border-left: 2px solid var(--amber);
+  border-radius: var(--radius-sm, 5px);
+  background: var(--amber-bg, var(--panel2));
+  color: var(--soft);
+  font-size: 12.5px;
+}
+
+/* ---- Impact preview ------------------------------------------------------------ */
+.policy-impact-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 8px;
+}
+
+.policy-impact-tile {
+  position: relative;
+  display: grid;
+  gap: 2px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm, 5px);
+  background: var(--panel2);
+}
+
+/* Verdict spine, same as the stat cards. */
+.policy-impact-tile::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  border-radius: 0 2px 2px 0;
+  background: var(--blue);
+}
+
+.policy-impact-tile b {
+  font-size: 20px;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.policy-impact-tile span {
+  color: var(--mut);
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.policy-impact-tile.tone-critical::before { background: var(--red); }
+.policy-impact-tile.tone-critical b { color: var(--red); }
+.policy-impact-tile.tone-secure::before { background: var(--green); }
+.policy-impact-tile.tone-secure b { color: var(--green); }
+.policy-impact-tile.tone-warn::before { background: var(--amber); }
+.policy-impact-tile.tone-warn b { color: var(--amber); }
+
+.policy-outcomes {
+  display: grid;
+  gap: 2px;
+}
+
+.policy-outcome-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 72px 72px 64px;
+  gap: 8px;
+  padding: 3px 0;
+  color: var(--soft);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.policy-outcome-row span:nth-child(n + 2) {
+  text-align: right;
+}
+
+.policy-outcome-head {
+  border-bottom: 1px solid var(--line);
+  color: var(--mut);
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+}
+
+.delta-up { color: var(--amber); font-weight: 650; }
+.delta-down { color: var(--blue); font-weight: 650; }
+.delta-flat { color: var(--mut); }
+
+.policy-impact-deltas {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.policy-delta-group {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+}
+
+.policy-delta-group strong {
+  color: var(--mut);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.policy-delta-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 2px 0;
+  border-bottom: 1px dashed var(--line);
+  color: var(--soft);
+  font-size: 12.5px;
+}
+
+.policy-delta-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- Advanced read-only JSON ----------------------------------------------------- */
+.policy-advanced {
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.policy-advanced summary {
+  color: var(--soft);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.policy-advanced .policy-hint {
+  margin-top: 8px;
+}
+
+.policy-advanced pre {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm, 5px);
+  background: var(--code-bg, var(--panel2));
+  color: var(--soft);
+  font-size: 12px;
+  max-height: 420px;
+  overflow: auto;
+}

@@ -50,6 +50,18 @@ test('unauthenticated navigation redirects pages but returns API auth errors', a
   assert.strictEqual(root.status, 302);
   assert.strictEqual(root.headers.get('location'), '/index.html');
 
+  process.env.SENTINEL_CONSOLE_DEFAULT = 'app';
+  try {
+    const newConsoleRoot = await fetch(`${base}/`, { redirect: 'manual' });
+    assert.strictEqual(newConsoleRoot.status, 302);
+    assert.strictEqual(newConsoleRoot.headers.get('location'), '/app/');
+    const gatedApp = await fetch(`${base}/app/`, { redirect: 'manual' });
+    assert.strictEqual(gatedApp.status, 302);
+    assert.strictEqual(gatedApp.headers.get('location'), '/login.html');
+  } finally {
+    delete process.env.SENTINEL_CONSOLE_DEFAULT;
+  }
+
   const dashboard = await fetch(`${base}/index.html`, { redirect: 'manual' });
   assert.strictEqual(dashboard.status, 302);
   assert.strictEqual(dashboard.headers.get('location'), '/login.html');

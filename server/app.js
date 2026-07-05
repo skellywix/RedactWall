@@ -24,7 +24,7 @@ const detector = require('./detector');
 const email = require('./email');
 const fleet = require('./fleet');
 const adapters = require('../detection-engine/adapters');
-const processors = require('./processors');
+const parsePool = require('./parse-pool');
 const policy = require('./policy');
 const policyImpact = require('./policy-impact');
 const db = require('./db');
@@ -1410,7 +1410,7 @@ app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation
   if (buf.length > (pol.scanner && pol.scanner.maxFileBytes || 6.6e6)) return res.status(413).json({ error: 'file too large' });
 
   let extracted;
-  try { extracted = await processors.extractText(filename, buf); }
+  try { extracted = await parsePool.extractText(filename, buf); }
   catch (e) { extracted = { text: '', processor: null, supported: true, extractionOk: false, error: 'extract_failed' }; }
   if (!extracted.supported) {
     const row = createQuery({ status: 'flagged', user, orgId, destination, source, channel, sensor,
@@ -2702,9 +2702,16 @@ app.get('/api/stream', auth.requireAuth, (req, res) => {
 });
 
 // ---- Static dashboard --------------------------------------------------------
-app.get('/', (req, res) => res.redirect('/index.html'));
+// SENTINEL_CONSOLE_DEFAULT=app makes the new console the landing surface once
+// enough views are ported for a deployment's operators; legacy stays default.
+app.get('/', (req, res) =>
+  res.redirect(String(process.env.SENTINEL_CONSOLE_DEFAULT || 'legacy') === 'app' ? '/app/' : '/index.html'));
 app.get('/index.html', auth.requireAuth, (req, res) =>
   res.sendFile(path.join(__dirname, 'public', 'index.html')));
+// New console (Vite build output; hashed assets under /app/assets stay public
+// like every other data-free static file — all data flows through /api/*).
+app.get(['/app', '/app/', '/app/index.html'], auth.requireAuth, (req, res) =>
+  res.sendFile(path.join(__dirname, 'public', 'app', 'index.html')));
 app.use(express.static(path.join(__dirname, 'public')));
 
 function logStartup(port, deps = {}) {

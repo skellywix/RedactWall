@@ -8,16 +8,21 @@
   },
   "scripts": {
     "hooks:install": "git config core.hooksPath .githooks",
-    "review:ci": "git diff --check && npm run docs:demo-guide:check && npm run ai-domains:check && npm run native:check && npm test && npm run test:browser && npm run sync-check && npm run eval",
+    "review:ci": "git diff --check && npm run docs:demo-guide:check && npm run ai-domains:check && npm run native:check && npm run console:build && npm test && npm run test:browser && npm run sync-check && npm run eval",
     "review:agent": "npm run review:ci",
     "setup": "node scripts/setup.js",
     "setup:prod": "node scripts/setup.js --production",
     "setup:check": "node scripts/setup.js --check --skip-install",
     "mfa:uri": "node scripts/mfa-uri.js",
     "start": "node server/app.js",
+    "console:install": "npm ci --prefix console",
+    "console:dev": "npm run dev --prefix console",
+    "console:build": "npm run build --prefix console",
+    "console:check": "npm run check --prefix console",
     "gateway": "node gateway/server.js",
     "gateway:token": "node gateway/mint-token.js",
     "test": "node scripts/run-node-tests.js",
+    "test:coverage": "node scripts/run-coverage.js",
     "native:check": "node scripts/ensure-native-bindings.js",
     "native:check:repair": "node scripts/ensure-native-bindings.js --repair",
     "test:browser": "node scripts/run-playwright.js",
@@ -91,6 +96,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@playwright/test": "^1.61.1"
+    "@playwright/test": "^1.61.1",
+    "c8": "^11.0.0"
   }
 }

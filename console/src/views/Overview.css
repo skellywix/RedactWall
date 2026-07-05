@@ -1,0 +1,133 @@
+/* Overview KPI stat band + top-detections bars. Mirrors the legacy queue-tab
+   .stat "verdict spine" and .barrow instrument styling using the shared
+   console-theme.css tokens (severity: critical=red, warn=amber, secure=green,
+   live=blue; never color alone — each card carries a status light). */
+
+.overview-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.overview-stat {
+  position: relative;
+  padding: 12px 15px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius, 8px);
+  background: var(--panel2);
+  box-shadow: var(--shadow);
+}
+
+/* Verdict spine: 2px left rule in severity color. */
+.overview-stat::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 12px;
+  bottom: 12px;
+  width: 2px;
+  border-radius: 0 2px 2px 0;
+  background: var(--blue);
+}
+
+.overview-stat-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--mut);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.overview-stat-light {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--blue);
+}
+
+.overview-stat-value {
+  margin-top: 10px;
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.overview-stat-detail {
+  margin-top: 4px;
+  color: var(--mut);
+  font-size: 12px;
+}
+
+.overview-stat.tone-critical::before,
+.overview-stat.tone-critical .overview-stat-light { background: var(--red); }
+.overview-stat.tone-warn::before,
+.overview-stat.tone-warn .overview-stat-light { background: var(--amber); }
+.overview-stat.tone-secure::before,
+.overview-stat.tone-secure .overview-stat-light { background: var(--green); }
+.overview-stat.tone-critical .overview-stat-value { color: var(--red); }
+.overview-stat.tone-warn .overview-stat-value { color: var(--amber); }
+.overview-stat.tone-secure .overview-stat-value { color: var(--green); }
+
+.overview-entities {
+  display: grid;
+  gap: 6px;
+}
+
+.overview-entities-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+  color: var(--soft);
+}
+
+.overview-entities-head span {
+  color: var(--mut);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.overview-barrow {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr) 34px;
+  gap: 10px;
+  align-items: center;
+  color: var(--soft);
+  font-size: 12.5px;
+}
+
+.overview-barrow-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overview-bar {
+  height: 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.overview-bar i {
+  display: block;
+  height: 100%;
+  width: var(--w, 0%);
+  background: var(--blue);
+}
+
+.overview-barrow-count {
+  text-align: right;
+  color: var(--mut);
+  font-variant-numeric: tabular-nums;
+}

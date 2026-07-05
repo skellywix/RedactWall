@@ -1318,6 +1318,10 @@ SENTINEL_DB_DRIVER=postgres
 SENTINEL_DATABASE_URL=postgresql://promptwall_app@db.internal:5432/promptwall
 ```
 
+For the full operator runbook — application-role setup, migration workflow,
+statement-timeout/retry tuning, Postgres-mode `npm run backup` /
+`npm run backup:drill`, monitoring, and sizing — see `docs/MANAGED_POSTGRES.md`.
+
 What you get on the Postgres driver:
 
 - **Schema migrations apply automatically on startup** (both drivers share one
@@ -1332,9 +1336,11 @@ What you get on the Postgres driver:
   `SENTINEL_SECRET` on every instance so sessions and receipts stay valid
   across replicas, and put the replicas behind your load balancer.
 
-Backups on Postgres are the database's job: use `pg_dump` or your managed
-provider's snapshots (`npm run backup` covers the SQLite store only and will
-say so). After restoring a Postgres backup, `node -e
+Backups on Postgres work through the same tooling as SQLite: `npm run backup`
+drives `pg_dump` (custom format) when the store runs on the Postgres driver,
+and `npm run backup:drill` verifies a restore into a scratch database — see
+`docs/MANAGED_POSTGRES.md`. Managed-provider snapshots/PITR remain a good
+complement. After restoring any Postgres backup, `node -e
 "console.log(JSON.stringify(require('./server/db').verifyAuditChain()))"`
 must report `ok: true` before the restored plane serves traffic.
 

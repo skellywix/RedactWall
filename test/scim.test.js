@@ -327,6 +327,133 @@ test('scim save conflict helper rethrows unexpected datastore failures', () => {
   assert.deepStrictEqual(calls, []);
 });
 
+test('scim rejects authorization headers without the Bearer scheme', async () => withServer(async (port) => {
+  const res = await fetch(`http://127.0.0.1:${port}/scim/v2/Users`, {
+    headers: { authorization: process.env.SCIM_BEARER_TOKEN },
+  });
+  assert.strictEqual(res.status, 401);
+  assert.match(res.headers.get('www-authenticate') || '', /Bearer/);
+}));
+
+test('scim returns 404 for lookups and updates of unknown resource ids', async () => withServer(async (port) => {
+  const missingUser = await scimFetch(port, '/Users/su_missing');
+  assert.strictEqual(missingUser.status, 404);
+
+  const putUser = await scimFetch(port, '/Users/su_missing', {
+    method: 'PUT',
+    body: { schemas: [scim.USER_SCHEMA], userName: 'ghost@example.test' },
+  });
+  assert.strictEqual(putUser.status, 404);
+
+  const patchUser = await scimFetch(port, '/Users/su_missing', {
+    method: 'PATCH',
+    body: { schemas: [scim.PATCH_SCHEMA], Operations: [{ op: 'replace', path: 'active', value: false }] },
+  });
+  assert.strictEqual(patchUser.status, 404);
+
+  const putGroup = await scimFetch(port, '/Groups/sg_missing', {
+    method: 'PUT',
+    body: { schemas: [scim.GROUP_SCHEMA], displayName: 'Ghost Group' },
+  });
+  assert.strictEqual(putGroup.status, 404);
+
+  const patchGroup = await scimFetch(port, '/Groups/sg_missing', {
+    method: 'PATCH',
+    body: { schemas: [scim.PATCH_SCHEMA], Operations: [{ op: 'remove', path: 'members' }] },
+  });
+  assert.strictEqual(patchGroup.status, 404);
+}));
+
+test('scim rejects creates that omit required naming attributes', async () => withServer(async (port) => {
+  const user = await scimFetch(port, '/Users', {
+    method: 'POST',
+    body: { schemas: [scim.USER_SCHEMA], displayName: 'No UserName' },
+  });
+  assert.strictEqual(user.status, 400);
+  assert.strictEqual((await user.json()).scimType, 'invalidValue');
+
+  const group = await scimFetch(port, '/Groups', {
+    method: 'POST',
+    body: { schemas: [scim.GROUP_SCHEMA], externalId: 'entra-group-unnamed' },
+  });
+  assert.strictEqual(group.status, 400);
+  assert.strictEqual((await group.json()).scimType, 'invalidValue');
+}));
+
+test('scim applies path-based user patch ops and treats attribute removes as no-ops', async () => withServer(async (port) => {
+  const created = await scimFetch(port, '/Users', {
+    method: 'POST',
+    body: {
+      schemas: [scim.USER_SCHEMA],
+      userName: 'pathpatch@example.test',
+      displayName: 'Path Patch',
+      active: true,
+    },
+  });
+  assert.strictEqual(created.status, 201);
+  const user = await created.json();
+
+  const renamed = await scimFetch(port, `/Users/${user.id}`, {
+    method: 'PATCH',
+    body: { schemas: [scim.PATCH_SCHEMA], Operations: [{ op: 'replace', path: 'displayName', value: 'Renamed Patch' }] },
+  });
+  assert.strictEqual(renamed.status, 200);
+  assert.strictEqual((await renamed.json()).displayName, 'Renamed Patch');
+
+  const deactivated = await scimFetch(port, `/Users/${user.id}`, {
+    method: 'PATCH',
+    body: { schemas: [scim.PATCH_SCHEMA], Operations: [{ op: 'replace', path: 'active', value: false }] },
+  });
+  assert.strictEqual(deactivated.status, 200);
+  assert.strictEqual((await deactivated.json()).active, false);
+  assert.strictEqual(db.getScimUser(user.id).active, false);
+
+  const removed = await scimFetch(port, `/Users/${user.id}`, {
+    method: 'PATCH',
+    body: { schemas: [scim.PATCH_SCHEMA], Operations: [{ op: 'remove', path: 'displayName' }] },
+  });
+  assert.strictEqual(removed.status, 200);
+  assert.strictEqual((await removed.json()).displayName, 'Renamed Patch', 'user attribute remove is ignored');
+}));
+
+test('scim filters on unsupported fields or malformed filters return no resources', async () => withServer(async (port) => {
+  const disallowed = await scimFetch(port, '/Users?filter=displayName%20eq%20%22Renamed%20Patch%22');
+  assert.strictEqual(disallowed.status, 200);
+  const disallowedBody = await disallowed.json();
+  assert.strictEqual(disallowedBody.totalResults, 0);
+  assert.deepStrictEqual(disallowedBody.Resources, []);
+
+  const malformed = await scimFetch(port, '/Users?filter=userName%20gibberish');
+  assert.strictEqual(malformed.status, 200);
+  const malformedBody = await malformed.json();
+  assert.strictEqual(malformedBody.totalResults, 0);
+  assert.deepStrictEqual(malformedBody.Resources, []);
+}));
+
+test('scim list responses paginate from startIndex and clamp oversized counts', async () => withServer(async (port) => {
+  for (let i = 0; i < 3; i += 1) {
+    db.saveScimUser({ userName: `page-${i}@example.test`, displayName: `Page User ${i}`, active: true });
+  }
+
+  const all = await (await scimFetch(port, '/Users?count=200')).json();
+  assert.ok(all.totalResults >= 3);
+
+  const slice = await (await scimFetch(port, '/Users?startIndex=2&count=1')).json();
+  assert.strictEqual(slice.startIndex, 2);
+  assert.strictEqual(slice.itemsPerPage, 1);
+  assert.strictEqual(slice.totalResults, all.totalResults);
+  assert.strictEqual(slice.Resources.length, 1);
+  assert.strictEqual(slice.Resources[0].id, all.Resources[1].id);
+
+  for (let i = 0; i < 210; i += 1) {
+    db.saveScimUser({ userName: `bulk-${i}@example.test`, active: true });
+  }
+  const clamped = await (await scimFetch(port, '/Users?count=500')).json();
+  assert.strictEqual(clamped.itemsPerPage, 200, 'count above 200 clamps to the filter maxResults');
+  assert.strictEqual(clamped.Resources.length, 200);
+  assert.ok(clamped.totalResults > 200);
+}));
+
 test.after(() => {
   for (const suffix of ['', '-wal', '-shm']) {
     try { fs.unlinkSync(process.env.SENTINEL_DB_PATH + suffix); } catch {}
