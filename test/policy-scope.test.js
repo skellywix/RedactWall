@@ -234,3 +234,26 @@ test('policy exception review summarizes ownership and expiry state without cont
   assert.ok(!JSON.stringify(review).includes('counsel@example.test'));
   assert.ok(!JSON.stringify(review).includes('vendor@example.test'));
 });
+
+test('accountTypes scope tightens for personal accounts and leaves corporate untouched (N4)', () => {
+  const base = {
+    enforcementMode: 'warn', blockMinSeverity: 4, blockRiskScore: 90, alwaysBlock: ['US_SSN'],
+    policyScopes: [{ id: 'personal_strict', accountTypes: ['personal'], enforcementMode: 'block', blockMinSeverity: 1, reason: 'personal_strict' }],
+  };
+  const personal = policy.evaluate(categoryAnalysis('CONFIDENTIAL_BUSINESS'), base, { accountType: 'personal' });
+  assert.strictEqual(personal.decision, 'block');
+  assert.deepStrictEqual(personal.policyScopeIds, ['personal_strict']);
+
+  const corporate = policy.evaluate(categoryAnalysis('CONFIDENTIAL_BUSINESS'), base, { accountType: 'corporate' });
+  assert.deepStrictEqual(corporate.policyScopeIds, []);
+});
+
+test('personalAccountBlocked only fires on personal + block action (N4)', () => {
+  const pol = policy.normalizePolicy({ corporateAiAccounts: { orgEmailDomains: ['examplecu.org'], personalAccountAction: 'block' } });
+  assert.strictEqual(pol.corporateAiAccounts.orgEmailDomains[0], 'examplecu.org');
+  assert.strictEqual(policy.personalAccountBlocked('personal', pol), true);
+  assert.strictEqual(policy.personalAccountBlocked('unknown', pol), false);
+  assert.strictEqual(policy.personalAccountBlocked('corporate', pol), false);
+  const coach = policy.normalizePolicy({ corporateAiAccounts: { personalAccountAction: 'coach' } });
+  assert.strictEqual(policy.personalAccountBlocked('personal', coach), false);
+});

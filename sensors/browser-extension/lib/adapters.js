@@ -96,7 +96,50 @@
     return { suspicious: reasons.length > 0, reasons, stripped };
   }
 
-  const api = { SEND_BUTTONS, GENERIC_SEND, sendButtonSelectors, AI_HOSTS, normalizeHost, isGoverned, isAiHost, hostMatches, scanInjection };
+  // ---- personal vs corporate account detection (ROADMAP N4) -----------------
+  // LayerX reports ~82% of AI paste leakage happens on personal accounts, so
+  // policy wants to treat a personal login as higher risk. Detection is LOCAL
+  // DOM heuristics only (see content.js): the classifier below takes candidate
+  // account emails and visible workspace/plan badge text scraped from the page
+  // and returns an enum — never the email itself. Precedence is precision-first:
+  // a corporate signal wins, then an org-domain email, then a freemail domain,
+  // then a consumer badge; an email on an UNMATCHED domain stays 'unknown'
+  // (never guessed personal), so contractors/multi-domain orgs are not blocked.
+  const PERSONAL_EMAIL_DOMAINS = [
+    'gmail.com', 'googlemail.com', 'outlook.com', 'hotmail.com', 'live.com', 'msn.com',
+    'yahoo.com', 'ymail.com', 'icloud.com', 'me.com', 'mac.com', 'aol.com',
+    'proton.me', 'protonmail.com', 'gmx.com', 'gmx.net', 'mail.com', 'zoho.com', 'yandex.com',
+  ];
+  const ACCOUNT_MARKERS = {
+    'chatgpt.com': { corporate: /\bchatgpt\s+(?:team|enterprise|edu|business)\b|\bworkspace\b/i, personal: /\b(?:upgrade to|chatgpt)\s*(?:plus|go|free)\b|\bfree plan\b/i },
+    'chat.openai.com': { corporate: /\bchatgpt\s+(?:team|enterprise|edu|business)\b|\bworkspace\b/i, personal: /\bfree plan\b|\bchatgpt plus\b/i },
+    'claude.ai': { corporate: /\bclaude\s+(?:for work|team|enterprise)\b|\bteam plan\b/i, personal: /\b(?:free|pro)\s+plan\b/i },
+    'gemini.google.com': { corporate: /\bworkspace\b|\bmanaged by\b/i, personal: /\bpersonal (?:account|google account)\b/i },
+    'copilot.microsoft.com': { corporate: /\bwork account\b|\bentra\b|\bmanaged by\b/i, personal: /\bpersonal account\b/i },
+  };
+
+  function accountMarkersFor(host) { return ACCOUNT_MARKERS[normalizeHost(host)] || null; }
+
+  function emailDomain(email) {
+    const at = String(email || '').lastIndexOf('@');
+    return at >= 0 ? String(email).slice(at + 1).toLowerCase().trim() : '';
+  }
+
+  // { emails:[], badgeText:'', host } + org domain list -> { type, signal }.
+  function classifyAccount(ctx = {}, orgEmailDomains = []) {
+    const markers = accountMarkersFor(ctx.host);
+    const badge = String(ctx.badgeText || '');
+    if (markers && markers.corporate.test(badge)) return { type: 'corporate', signal: 'workspace_badge' };
+    const orgSet = new Set((orgEmailDomains || []).map((d) => String(d || '').toLowerCase().trim()).filter(Boolean));
+    const domains = (ctx.emails || []).map(emailDomain).filter(Boolean);
+    if (domains.some((d) => orgSet.has(d))) return { type: 'corporate', signal: 'org_email_domain' };
+    if (domains.some((d) => PERSONAL_EMAIL_DOMAINS.includes(d))) return { type: 'personal', signal: 'personal_email_domain' };
+    if (markers && markers.personal.test(badge)) return { type: 'personal', signal: 'consumer_badge' };
+    if (domains.length) return { type: 'unknown', signal: 'unrecognized_email_domain' };
+    return { type: 'unknown', signal: 'none' };
+  }
+
+  const api = { SEND_BUTTONS, GENERIC_SEND, sendButtonSelectors, AI_HOSTS, normalizeHost, isGoverned, isAiHost, hostMatches, scanInjection, ACCOUNT_MARKERS, PERSONAL_EMAIL_DOMAINS, accountMarkersFor, classifyAccount };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (root) root.PSAdapters = api;
 })(typeof window !== 'undefined' ? window : (typeof self !== 'undefined' ? self : null));

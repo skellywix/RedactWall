@@ -50,6 +50,13 @@ Supported matchers:
 | `destinations` | Host or desktop label matched with the same destination matcher as block lists. |
 | `detectors` | Structured detector ids such as `MEMBER_ID` or `US_SSN`. |
 | `categories` | Semantic categories such as `LEGAL_CONTRACT` or `SOURCE_CODE`. |
+| `accountTypes` | AI-site account identity: `personal`, `corporate`, or `unknown` (ROADMAP N4). Classified locally by the browser sensor from workspace badges and the logged-in account's email domain against `corporateAiAccounts.orgEmailDomains`. |
+
+> **Trust boundary for `accountTypes`.** The account signal is asserted by the
+> sensor (like `clientFindings`), and only ever an enum — the raw account email
+> never reaches the control plane. Because scopes can only *tighten* policy
+> (stricter-wins), a spoofed `corporate` claim can at most forfeit extra
+> tightening; it can never weaken `alwaysBlock` or the base thresholds.
 
 Supported scoped overrides:
 

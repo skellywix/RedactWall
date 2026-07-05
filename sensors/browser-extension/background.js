@@ -423,6 +423,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             clientMaxSeverity: msg.payload.clientMaxSeverity,
             clientMaxSeverityLabel: msg.payload.clientMaxSeverityLabel,
             clientPreRedacted: msg.payload.clientPreRedacted,
+            clientAccount: msg.payload.clientAccount,
             clientOutcome: msg.payload.outcome,
             note: msg.payload.note,
           }),

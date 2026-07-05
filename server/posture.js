@@ -703,6 +703,15 @@ const THREAT_GUARDRAIL_DEFS = Object.freeze([
     targetTab: 'coverage',
     detail: 'Files that could not be scanned were held until OCR or manual review is available.',
   },
+  {
+    id: 'personal_account',
+    label: 'Personal AI account',
+    framework: 'AI governance',
+    atlas: 'GLBA Safeguards: identity controls',
+    control: 'Account identity detection',
+    targetTab: 'insights',
+    detail: 'AI activity on personal (non-corporate) accounts — the leading data-leakage vector.',
+  },
 ]);
 
 function threatText(q = {}) {
@@ -732,6 +741,7 @@ function threatGuardrailMatches(def, q = {}) {
   if (def.id === 'excessive_agency') return q.source === 'mcp_guard' && (q.channel === 'mcp_tool' || status === 'action_blocked' || /\btool blocked\b/.test(text));
   if (def.id === 'shadow_ai') return isShadowAi(q);
   if (def.id === 'unscanned_content') return status === 'file_blocked_unscanned' || status === 'ocr_required' || /\b(ocr required|unscanned)\b/.test(text);
+  if (def.id === 'personal_account') return q.accountType === 'personal';
   return false;
 }
 

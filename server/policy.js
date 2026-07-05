@@ -60,6 +60,10 @@ const DEFAULT_POLICY = {
   mcpBlockedTools: [],
   mcpApprovalRequiredTools: [],
   blockUnapprovedAiDestinations: true,
+  // Personal vs corporate AI account detection (ROADMAP N4). orgEmailDomains
+  // are the institution's own domains; a login on any of them classifies as
+  // corporate. personalAccountAction: allow (telemetry only) | coach | block.
+  corporateAiAccounts: { orgEmailDomains: [], personalAccountAction: 'allow' },
   responseScanMode: 'flag',
   unmanagedInstalls: 'allow',
   desktopCollectorDestination: 'Desktop AI',
@@ -212,6 +216,7 @@ function normalizePolicyMatchers(item = {}) {
   const sources = normalizeRoutingTextList(item.sources, SENSOR_ID_RE).map((v) => v.toLowerCase());
   const channels = normalizeRoutingTextList(item.channels, SENSOR_ID_RE).map((v) => v.toLowerCase());
   const destinations = normalizeSafeRoutingTextList(item.destinations, /^[A-Za-z0-9.*:_/-]{1,253}$/);
+  const accountTypes = normalizeRoutingTextList(item.accountTypes, /^(?:personal|corporate|unknown)$/i).map((v) => v.toLowerCase());
   const matchers = {};
   if (users.length) matchers.users = users;
   if (groups.length) matchers.groups = groups;
@@ -221,11 +226,12 @@ function normalizePolicyMatchers(item = {}) {
   if (sources.length) matchers.sources = sources;
   if (channels.length) matchers.channels = channels;
   if (destinations.length) matchers.destinations = destinations;
+  if (accountTypes.length) matchers.accountTypes = accountTypes;
   return matchers;
 }
 
 function hasPolicyMatcher(rule) {
-  return ['users', 'groups', 'orgIds', 'detectors', 'categories', 'sources', 'channels', 'destinations']
+  return ['users', 'groups', 'orgIds', 'detectors', 'categories', 'sources', 'channels', 'destinations', 'accountTypes']
     .some((key) => Array.isArray(rule[key]) && rule[key].length);
 }
 
@@ -403,8 +409,31 @@ function normalizePolicy(p = {}) {
     desiredSensorVersions: normalizeDesiredSensorVersions((p || {}).desiredSensorVersions),
     responseScanMode: normalizeResponseScanMode((p || {}).responseScanMode),
     unmanagedInstalls: normalizeUnmanagedInstalls((p || {}).unmanagedInstalls),
+    corporateAiAccounts: normalizeCorporateAiAccounts((p || {}).corporateAiAccounts),
     scanner,
   };
+}
+
+const PERSONAL_ACCOUNT_ACTIONS = ['allow', 'coach', 'block'];
+function normalizeCorporateAiAccounts(value) {
+  const cfg = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const domains = [];
+  const seen = new Set();
+  for (const d of Array.isArray(cfg.orgEmailDomains) ? cfg.orgEmailDomains : []) {
+    const host = normalizeDestination(d).toLowerCase();
+    if (host && host !== 'unknown' && /^[a-z0-9.-]{3,253}$/.test(host) && !seen.has(host) && domains.length < 40) {
+      seen.add(host); domains.push(host);
+    }
+  }
+  const action = PERSONAL_ACCOUNT_ACTIONS.includes(String(cfg.personalAccountAction || '').toLowerCase())
+    ? String(cfg.personalAccountAction).toLowerCase() : 'allow';
+  return { orgEmailDomains: domains, personalAccountAction: action };
+}
+
+// Server-side enforcement mirror of the extension's personal-account block.
+function personalAccountBlocked(accountType, pol = loadPolicy()) {
+  const cfg = (pol && pol.corporateAiAccounts) || {};
+  return cfg.personalAccountAction === 'block' && String(accountType || '').toLowerCase() === 'personal';
 }
 
 const AUDIT_FIELDS = [
@@ -425,6 +454,7 @@ const AUDIT_FIELDS = [
   'mcpBlockedTools',
   'mcpApprovalRequiredTools',
   'blockUnapprovedAiDestinations',
+  'corporateAiAccounts',
   'responseScanMode',
   'unmanagedInstalls',
   'desktopCollectorDestination',
@@ -672,6 +702,7 @@ function policyRuleMatches(rule, analysis = {}, context = {}) {
   if (rule.sources && !rule.sources.includes(source)) return false;
   if (rule.channels && !rule.channels.includes(channel)) return false;
   if (rule.destinations && !destinationMatches(context.destination || '', rule.destinations)) return false;
+  if (rule.accountTypes && !rule.accountTypes.includes(String(context.accountType || 'unknown').toLowerCase())) return false;
   return true;
 }
 
@@ -781,6 +812,8 @@ module.exports = {
   policyExceptionReview,
   effectivePolicyForContext,
   policyRuleMatches,
+  personalAccountBlocked,
+  normalizeCorporateAiAccounts,
   destinationMatches,
   reviewDestination,
   destinationAllowed,

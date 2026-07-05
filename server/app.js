@@ -348,6 +348,7 @@ function policyContext(input = {}) {
     destination: input.destination || 'unknown',
     source: input.source || 'api',
     channel: input.channel || 'submit',
+    accountType: input.accountType || 'unknown',
     groups: scimGroupsForUser(input.user),
   };
 }
@@ -981,6 +982,9 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
   } = req.body || {};
   if (typeof prompt !== 'string' || !prompt.trim()) return res.status(400).json({ error: 'prompt (string) required' });
 
+  const clientAccount = (req.body && req.body.clientAccount) || {};
+  const accountType = ['personal', 'corporate', 'unknown'].includes(clientAccount.type) ? clientAccount.type : 'unknown';
+  const accountSignal = clientAccount.signal || 'none';
   const pol = policy.loadPolicy();
   const declaredClientPreRedacted = req.body && req.body.clientPreRedacted === true;
   const clientAnalysis = declaredClientPreRedacted ? clientAnalysisFrom(req.body) : null;
@@ -1063,6 +1067,21 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
       reason: policy.destinationBlockReason(destination, pol),
     });
   }
+  // Server-side mirror of the extension's personal-account block (N4). Never
+  // blocks on 'unknown'; the label enum arrives sanitized (no email).
+  if (policy.personalAccountBlocked(accountType, pol)) {
+    return blockDestinationByPolicy(res, {
+      user,
+      orgId,
+      destination,
+      sourceIp,
+      source,
+      channel,
+      sensor,
+      redactedPrompt: '[personal AI account blocked] ' + policy.normalizeDestination(destination),
+      reason: 'Personal AI account blocked by policy; sign in with the corporate workspace account',
+    });
+  }
   if (clientOutcome === 'file_upload_blocked') {
     return blockFileUploadByPolicy(res, { user, orgId, destination, sourceIp, source, channel, sensor });
   }
@@ -1104,7 +1123,7 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
   const clientPreRedacted = declaredClientPreRedacted && clientAnalysis && !hasSensitivity(serverAnalysis);
   const clientRedactionResolved = (clientOutcome === 'redacted_sent' || clientOutcome === 'redacted_available') && clientPreRedacted;
   const analysis = clientPreRedacted ? clientAnalysis : serverAnalysis;
-  const ctx = policyContext({ user, orgId, destination, source, channel });
+  const ctx = policyContext({ user, orgId, destination, source, channel, accountType });
   const verdict = policy.evaluate(analysis, pol, ctx);
   const decisionPolicy = verdict.policy || pol;
 
@@ -1123,6 +1142,7 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
     riskScore: analysis.riskScore, maxSeverity: analysis.maxSeverity,
     maxSeverityLabel: analysis.maxSeverityLabel, reasons: verdict.reasons,
     scoreBreakdown: analysis.scoreBreakdown, regulations: analysis.regulations,
+    accountType, accountSignal,
     ...policyDecisionMetadata(verdict),
   };
 
@@ -1392,6 +1412,7 @@ function sensorSafePolicy() {
     blockedFileUploadDestinations: p.blockedFileUploadDestinations || [],
     blockedBrowserActions: p.blockedBrowserActions || [],
     blockUnapprovedAiDestinations: p.blockUnapprovedAiDestinations !== false,
+    corporateAiAccounts: p.corporateAiAccounts || policy.DEFAULT_POLICY.corporateAiAccounts,
     responseScanMode: p.responseScanMode || policy.DEFAULT_POLICY.responseScanMode,
     unmanagedInstalls: p.unmanagedInstalls || policy.DEFAULT_POLICY.unmanagedInstalls,
     desktopCollectorDestination: p.desktopCollectorDestination || policy.DEFAULT_POLICY.desktopCollectorDestination,

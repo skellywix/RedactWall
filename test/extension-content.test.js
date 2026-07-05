@@ -28,6 +28,8 @@ const HOOK = `
     readText, fileExtension, fileLabel, textReadableUpload, ocrRequiredUpload,
     textLooksReadable, rememberCleanUpload, filesHaveCleanBypass, consumeCleanUploadBypass,
     safeFileFindingPrompt,
+    probeAccount, showAccountCoach, report,
+    account: () => ACCOUNT,
     setPolicy: (p) => { POLICY = { ...POLICY, ...p }; },
     setEnabled: (v) => { ENABLED = v; },
   };
@@ -85,6 +87,7 @@ function loadContent(opts = {}) {
       return { nextNode() { i += 1; return nodes[i] || null; } };
     },
     querySelector: opts.querySelector || (() => null),
+    querySelectorAll: opts.querySelectorAll || (() => []),
     body,
   };
   const Ext = {
@@ -389,4 +392,39 @@ test('safeFileFindingPrompt names the types, not the contents', () => {
   const analysis = D.analyze(SSN_TEXT);
   const promptText = T.safeFileFindingPrompt({ name: 'members.csv' }, analysis);
   assert.strictEqual(promptText, '[browser file blocked locally] US_SSN in .csv file');
+});
+
+test('probeAccount classifies a personal account locally and caches the enum (N4)', async () => {
+  const accountEl = new FakeElement('div');
+  accountEl.setAttribute('aria-label', 'Google Account: Jane Roe (jane.roe@gmail.com)');
+  const ctx = loadContent({
+    hostname: 'chatgpt.com',
+    querySelectorAll: () => [accountEl],
+  });
+  ctx.T.setPolicy({ corporateAiAccounts: { orgEmailDomains: ['examplecu.org'], personalAccountAction: 'coach' } });
+  ctx.T.probeAccount();
+  assert.deepStrictEqual(ctx.T.account(), { type: 'personal', signal: 'personal_email_domain' });
+});
+
+test('probeAccount marks the org domain as corporate (N4)', async () => {
+  const accountEl = new FakeElement('div');
+  accountEl.setAttribute('aria-label', 'Account jane@examplecu.org');
+  const ctx = loadContent({ hostname: 'chatgpt.com', querySelectorAll: () => [accountEl] });
+  ctx.T.setPolicy({ corporateAiAccounts: { orgEmailDomains: ['examplecu.org'], personalAccountAction: 'allow' } });
+  ctx.T.probeAccount();
+  assert.strictEqual(ctx.T.account().type, 'corporate');
+});
+
+test('reports carry the account enum, never a raw email (N4)', async () => {
+  const accountEl = new FakeElement('div');
+  accountEl.setAttribute('aria-label', 'jane.roe@gmail.com');
+  const ctx = loadContent({ hostname: 'chatgpt.com', querySelectorAll: () => [accountEl] });
+  ctx.T.setPolicy({ corporateAiAccounts: { orgEmailDomains: [], personalAccountAction: 'allow' } });
+  ctx.T.probeAccount();
+  await ctx.T.report('some prompt', { findings: [], categories: [] }, 'submit', 'allowed');
+  const payloads = ctx.reports();
+  const last = payloads[payloads.length - 1];
+  assert.strictEqual(last.clientAccount.type, 'personal');
+  assert.strictEqual(last.clientAccount.signal, 'personal_email_domain');
+  assert.ok(!JSON.stringify(last).includes('jane.roe@gmail.com'), 'no raw email in the report payload');
 });

@@ -39,3 +39,20 @@ test('injection scanner flags + strips hidden characters', () => {
   const tag = A.scanInjection('hi 󠁁 there');         // unicode tag char
   assert.ok(tag.suspicious && tag.reasons.some((r) => /tag/i.test(r)));
 });
+
+test('classifyAccount precedence and privacy (N4)', () => {
+  const org = ['examplecu.org'];
+  const t = (ctx) => A.classifyAccount(ctx, org);
+  assert.deepStrictEqual(t({ host: 'chatgpt.com', emails: ['jane@gmail.com'] }), { type: 'personal', signal: 'personal_email_domain' });
+  assert.deepStrictEqual(t({ host: 'chatgpt.com', emails: ['jane@examplecu.org'] }), { type: 'corporate', signal: 'org_email_domain' });
+  assert.deepStrictEqual(t({ host: 'chatgpt.com', badgeText: 'ChatGPT Team workspace' }), { type: 'corporate', signal: 'workspace_badge' });
+  assert.deepStrictEqual(t({ host: 'claude.ai', badgeText: 'Free plan' }), { type: 'personal', signal: 'consumer_badge' });
+  // Unmatched domain must be UNKNOWN, never guessed personal.
+  assert.deepStrictEqual(t({ host: 'chatgpt.com', emails: ['jane@contractor.co'] }), { type: 'unknown', signal: 'unrecognized_email_domain' });
+  assert.deepStrictEqual(t({ host: 'chatgpt.com', emails: [] }), { type: 'unknown', signal: 'none' });
+  // Corporate badge wins over a personal email.
+  assert.strictEqual(t({ host: 'chatgpt.com', emails: ['jane@gmail.com'], badgeText: 'ChatGPT Enterprise' }).type, 'corporate');
+  // The result object never contains an email.
+  const r = t({ host: 'chatgpt.com', emails: ['jane@gmail.com'] });
+  assert.ok(!JSON.stringify(r).includes('@'), 'result must not contain an email');
+});
