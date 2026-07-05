@@ -1,0 +1,222 @@
+/* Audit trail view. Every color comes from the shared theme tokens in
+   server/public/console-theme.css; rules are scoped under .audit-view so
+   parallel views cannot collide. */
+
+.audit-view {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+}
+
+/* ---- Toolbar ---------------------------------------------------------------- */
+.audit-toolbar {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: end;
+}
+
+.audit-toolbar label {
+  display: grid;
+  gap: 5px;
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--mut);
+}
+
+.audit-view select {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--input-bg);
+  color: var(--txt);
+  padding: 7px 10px;
+  font-size: 12.5px;
+  font-family: inherit;
+}
+
+.audit-view select:focus {
+  border-color: var(--blue);
+  box-shadow: var(--focus-ring);
+  outline: none;
+}
+
+.audit-export {
+  margin-left: auto;
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid var(--line2);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--txt);
+  padding: 7px 13px;
+  font-weight: 600;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: background var(--fast), border-color var(--fast);
+}
+
+.audit-export:hover {
+  background: var(--surface-hover);
+}
+
+.audit-export:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* ---- Tamper-evidence status chip --------------------------------------------- */
+.audit-integrity {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel2);
+  color: var(--soft);
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.audit-integrity.tone-good {
+  border-color: var(--green);
+  background: var(--green-bg);
+  color: var(--green);
+}
+
+.audit-integrity.tone-bad {
+  border-color: var(--red);
+  background: var(--red-bg);
+  color: var(--red);
+}
+
+/* ---- Table -------------------------------------------------------------------- */
+.audit-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.audit-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.audit-table th {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel2);
+  color: var(--mut);
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  white-space: nowrap;
+}
+
+.audit-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  color: var(--soft);
+  vertical-align: top;
+}
+
+.audit-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.audit-table tbody tr:hover {
+  background: var(--surface-hover);
+}
+
+.audit-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  color: var(--txt);
+  white-space: nowrap;
+}
+
+.audit-detail {
+  min-width: 220px;
+  word-break: break-word;
+}
+
+/* ---- Action tone chips ---------------------------------------------------------- */
+.audit-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 21px;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel2);
+  color: var(--soft);
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+.audit-chip.tone-good { background: var(--green-bg); border-color: var(--green); color: var(--green); }
+.audit-chip.tone-bad { background: var(--red-bg); border-color: var(--red); color: var(--red); }
+.audit-chip.tone-warn { background: var(--amber-bg); border-color: var(--amber); color: var(--amber); }
+
+/* ---- Pager ----------------------------------------------------------------------- */
+.audit-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  color: var(--mut);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.audit-pager-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.audit-pager-controls button {
+  min-height: 26px;
+  border: 1px solid var(--line2);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--txt);
+  padding: 3px 10px;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--fast), border-color var(--fast);
+}
+
+.audit-pager-controls button:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.audit-pager-controls button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* ---- Retention note ---------------------------------------------------------------- */
+.audit-retention {
+  margin: 0;
+  color: var(--mut);
+  font-size: 12px;
+  line-height: 1.5;
+}

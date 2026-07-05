@@ -99,6 +99,32 @@ test('locks out after the configured number of failures, resets on success', () 
   assert.strictEqual(auth.loginStatus(k).locked, false, 'success clears the lock');
 });
 
+test('lockout expires after the configured window and a correct login succeeds again', () => {
+  const script = [
+    "const auth = require('./server/auth');",
+    "const k = 'admin|10.0.0.9';",
+    "auth.registerFail(k); auth.registerFail(k);",
+    "const locked = auth.registerFail(k).locked && auth.loginStatus(k).locked;",
+    "setTimeout(() => {",
+    "  console.log(JSON.stringify({ locked, after: auth.loginStatus(k), login: auth.authenticate('admin', 'unit-pass') }));",
+    "}, 150);",
+  ].join('');
+  const output = execFileSync(process.execPath, ['-e', script], {
+    cwd: path.join(__dirname, '..'),
+    env: {
+      ...process.env,
+      LOGIN_MAX_ATTEMPTS: '3',
+      LOGIN_WINDOW_MS: '50',
+      SENTINEL_SECRET: 'unit-secret-stable',
+    },
+    encoding: 'utf8',
+  });
+  const result = JSON.parse(output);
+  assert.strictEqual(result.locked, true, 'locked at threshold before the window elapses');
+  assert.deepStrictEqual(result.after, { locked: false }, 'lock releases once the window passes');
+  assert.deepStrictEqual(result.login, { user: 'admin', role: 'security_admin' });
+});
+
 test('session token signs and verifies; tampered/none rejected', () => {
   const t = auth.createSession('admin');
   assert.strictEqual(auth.verify(t).user, 'admin');
@@ -261,6 +287,39 @@ test('auth middleware protects API and page routes and enforces roles', () => {
   let allowed = false;
   auth.requireRole('security_admin')(req, responseCapture(), () => { allowed = true; });
   assert.strictEqual(allowed, true);
+});
+
+test('requireRole with multiple roles allows any listed role and rejects unlisted ones', () => {
+  const middleware = auth.requireRole('security_admin', 'approver');
+
+  let allowed = false;
+  middleware({ user: { user: 'approver', role: 'approver' } }, responseCapture(), () => { allowed = true; });
+  assert.strictEqual(allowed, true, 'second listed role passes');
+
+  const forbidden = responseCapture();
+  middleware({ user: { user: 'auditor', role: 'auditor' } }, forbidden, () => {
+    throw new Error('unlisted role should not continue');
+  });
+  assert.strictEqual(forbidden.statusCode, 403);
+  assert.deepStrictEqual(forbidden.body, { error: 'forbidden' });
+});
+
+test('session verification strips forged idp extras from non-oidc cookies', () => {
+  const forged = signedSession({
+    user: 'admin',
+    role: 'security_admin',
+    provider: 'password',
+    idpSubject: 'forged-subject',
+    idpIssuer: 'https://forged-issuer.example.test',
+    iat: Date.now(),
+    exp: Date.now() + 60000,
+  });
+  const verified = auth.verify(forged);
+  assert.strictEqual(verified.user, 'admin');
+  assert.strictEqual(verified.role, 'security_admin');
+  assert.ok(!('provider' in verified), 'non-oidc provider marker is dropped');
+  assert.ok(!('idpSubject' in verified), 'forged idpSubject is stripped');
+  assert.ok(!('idpIssuer' in verified), 'forged idpIssuer is stripped');
 });
 
 test('csrf middleware allows safe methods and rejects missing or wrong tokens', () => {

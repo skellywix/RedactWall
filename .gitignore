@@ -8,6 +8,8 @@ data/
 backups/
 dist/
 output/
+# built console bundle — generated from console/ by `npm run console:build`
+server/public/app/
 test-results/
 playwright-report/
 # cloud-sync (ProtonDrive/FUSE) leftovers — never source

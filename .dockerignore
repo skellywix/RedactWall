@@ -16,3 +16,5 @@ PLANS
 *.log
 .env
 *.local
+console/node_modules
+server/public/app

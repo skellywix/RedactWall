@@ -244,9 +244,20 @@ function installDependencies(opts = {}, deps = {}) {
   const args = exists(path.join(ROOT, 'package-lock.json')) ? ['ci'] : ['install'];
   if (opts.production) args.push('--omit=dev');
   execute(npm(), args);
+  buildConsole({ exists, execute, npm });
   if (opts.withBrowser && !opts.production) {
     execute(npm(), ['exec', '--', 'playwright', 'install', 'chromium']);
   }
+}
+
+// The admin console ships as a built bundle (server/public/app is gitignored),
+// so a source install must build it or /app serves nothing.
+function buildConsole({ exists, execute, npm }) {
+  const consoleDir = path.join(ROOT, 'console');
+  if (!exists(path.join(consoleDir, 'package.json'))) return;
+  const ciOrInstall = exists(path.join(consoleDir, 'package-lock.json')) ? 'ci' : 'install';
+  execute(npm(), [ciOrInstall, '--prefix', consoleDir]);
+  execute(npm(), ['run', 'build', '--prefix', consoleDir]);
 }
 
 function initializeRuntime(envPath) {
