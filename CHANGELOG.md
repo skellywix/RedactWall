@@ -11,6 +11,15 @@ reconstructed from `ITERATIONS.md` and git history.
 
 ### Added
 
+- Bundled offline WASM OCR fallback for the endpoint agent (`tesseract.js` as an
+  optional dependency, with `eng.traineddata` language data vendored under
+  `sensors/endpoint-agent/tessdata/`). When no native `tesseract` is present the
+  agent now reads images on-box instead of dead-ending at `ocr_required`; model
+  paths are hard-pinned to the vendored files so it never fetches weights from a
+  network. Toggle with `ENDPOINT_AGENT_OCR_WASM` (default on). A new
+  `ENDPOINT_AGENT_OCR_STRICT` mode (default off) routes images whose OCR yields
+  little or no text to `ocr_required` instead of allowing them through on sparse
+  extraction.
 - OpenAPI 3.1 spec for the `/api/v1` sensor & scan surface at
   `GET /api/v1/openapi.json` (request schemas generated from the Zod validators;
   zero new dependencies) plus `docs/API_REFERENCE.md`.

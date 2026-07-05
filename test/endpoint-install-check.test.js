@@ -386,9 +386,24 @@ test('endpoint install check verifies OCR extraction against the bundled fixture
     envPath: path.join(dir, 'missing.env'),
     env: {},
     discoverOcrCommand: () => '',
+    wasmOcrAvailable: () => false,
   });
   assert.strictEqual(noEngine.ok, true);
   assert.match(noEngine.detail, /no OCR engine/);
+
+  const wasmExtract = await ocrExtractionCheck({
+    envPath: path.join(dir, 'missing.env'),
+    env: {},
+    discoverOcrCommand: () => '',
+    wasmOcrAvailable: () => true,
+    extractImageFile: async (name, filePath, engineOpts) => {
+      assert.strictEqual(engineOpts.discover, false);
+      assert.ok(fs.existsSync(filePath), 'fixture image ships with the agent');
+      return { extractionOk: true, text: 'PROMPTWALL OCR 73491', ocrEngine: 'wasm' };
+    },
+  });
+  assert.strictEqual(wasmExtract.ok, true);
+  assert.strictEqual(wasmExtract.detail, 'extracted fixture text (wasm)');
 });
 
 test('endpoint install check auto-discovers OCR and surfaces guarded app folders', async (t) => {

@@ -22,6 +22,7 @@ const PACKAGE_FILES = [
   'sensors/endpoint-agent/agent.js',
   'sensors/endpoint-agent/file-flow-profiles.js',
   'sensors/endpoint-agent/ocr.js',
+  'sensors/endpoint-agent/ocr-wasm.js',
   'sensors/endpoint-agent/native-handoff.js',
   'sensors/endpoint-agent/native-messaging-host.js',
   'sensors/endpoint-agent/write-handoff.js',
@@ -32,6 +33,7 @@ const PACKAGE_FILES = [
   'sensors/endpoint-agent/collectors/git-push-guard.js',
   'sensors/endpoint-agent/collectors/protected-upload.js',
   'sensors/endpoint-agent/fixtures/ocr-sample.png',
+  'sensors/endpoint-agent/tessdata/eng.traineddata.gz',
   'scripts/check-endpoint-install.js',
   'scripts/install-clipboard-guard.ps1',
   'scripts/install-desktop-collector.ps1',
@@ -79,6 +81,7 @@ function validateRuntimeFiles(files) {
   ];
 
   for (const file of files) {
+    if (/\.(png|gz)$/.test(file.path)) continue; // binary assets: skip the utf8 token scan
     const text = file.body.toString('utf8');
     for (const rule of disallowed) {
       if (rule.pattern.test(text)) {
@@ -121,6 +124,18 @@ function validateRuntimeFiles(files) {
   }
   if (/contentBase64|fetch\(|https?:\/\/|shell:\s*true|readFileSync/.test(ocr)) {
     throw new Error('Endpoint OCR bridge must stay local and must not upload, shell, or read unrelated file bodies');
+  }
+
+  const ocrWasm = files.find((file) => file.path === 'sensors/endpoint-agent/ocr-wasm.js').body.toString('utf8');
+  if (!/langPath/.test(ocrWasm) || !/terminate/.test(ocrWasm)) {
+    throw new Error('Endpoint agent package must include the bundled WASM OCR fallback with pinned langPath');
+  }
+  if (/contentBase64|fetch\(|https?:\/\/|readFileSync/.test(ocrWasm)) {
+    throw new Error('Endpoint WASM OCR fallback must stay local: hard-pin model paths and never fetch or read file bodies');
+  }
+  const tessdata = files.find((file) => file.path === 'sensors/endpoint-agent/tessdata/eng.traineddata.gz');
+  if (!tessdata || tessdata.body.length < 100000) {
+    throw new Error('Endpoint agent package must vendor local tesseract language data for offline OCR');
   }
 
   const appFlow = files.find((file) => file.path === 'sensors/endpoint-agent/collectors/desktop-app-flow.js').body.toString('utf8');
@@ -321,6 +336,7 @@ function packageEndpointAgent(opts = {}) {
       endpointRedactionHandoffIncluded: true,
       endpointFileFlowProfilesIncluded: true,
       endpointOcrIncluded: true,
+      endpointWasmOcrIncluded: true,
       aiToolInventoryIncluded: true,
       nativeHandoffPrototypeIncluded: true,
       nativeHandoffWriterIncluded: true,

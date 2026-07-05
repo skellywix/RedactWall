@@ -6,7 +6,9 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
     && rm -rf /var/lib/apt/lists/*
 COPY package*.json ./
-RUN --mount=type=cache,target=/root/.npm npm ci --omit=dev
+# Omit optional deps: the server never runs OCR (images return ocr_required),
+# so the endpoint-only WASM OCR engine (tesseract.js) stays out of this image.
+RUN --mount=type=cache,target=/root/.npm npm ci --omit=dev --omit=optional
 COPY console/package*.json ./console/
 RUN --mount=type=cache,target=/root/.npm npm ci --prefix console
 COPY . .

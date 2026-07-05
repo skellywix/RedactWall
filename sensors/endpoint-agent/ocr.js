@@ -155,6 +155,62 @@ function fail(error, extra = {}) {
   };
 }
 
+// Strict mode routes sparse/blank OCR back to the approval queue instead of
+// letting a low-quality image slip through on near-empty extraction.
+const STRICT_MIN_CHARS = 8;
+
+function ocrStrictMode(opts = {}) {
+  const env = opts.env || process.env;
+  const raw = env.ENDPOINT_AGENT_OCR_STRICT || env.PROMPTWALL_ENDPOINT_AGENT_OCR_STRICT || '';
+  return /^(1|on|true|yes|strict)$/i.test(String(raw).trim());
+}
+
+function ocrMaxChars(opts = {}) {
+  const env = opts.env || process.env;
+  return boundedPositiveInt(
+    opts.maxChars || env.ENDPOINT_AGENT_OCR_MAX_CHARS || env.PROMPTWALL_ENDPOINT_AGENT_OCR_MAX_CHARS,
+    DEFAULT_MAX_CHARS, 1000, 5000000,
+  );
+}
+
+function finalizeOcr(raw, maxChars, strict, extra = {}) {
+  const text = String(raw || '');
+  if (strict && text.trim().length < STRICT_MIN_CHARS) {
+    return fail('ocr_required', { processor: 'ocr_required', ocrRequired: true, ocrStrict: true, ...extra });
+  }
+  return {
+    text: text.slice(0, maxChars),
+    processor: 'endpoint_ocr',
+    supported: true,
+    extractionOk: true,
+    ocrApplied: true,
+    truncated: text.length > maxChars,
+    ...extra,
+  };
+}
+
+// Precedence: explicit env command > native discovered tesseract > bundled WASM
+// > ocr_required. This branch runs only when no native/injected engine is set.
+async function extractWithWasm(filePath, opts, strict) {
+  let wasm;
+  try {
+    wasm = opts.ocrWasm || require('./ocr-wasm');
+  } catch {
+    return fail('ocr_required', { processor: 'ocr_required', ocrRequired: true, ocrConfigured: false });
+  }
+  if (!wasm.wasmOcrAvailable(opts)) {
+    return fail('ocr_required', { processor: 'ocr_required', ocrRequired: true, ocrConfigured: false });
+  }
+  try {
+    const raw = await wasm.extractImageTextWasm(filePath, opts);
+    return finalizeOcr(raw, ocrMaxChars(opts), strict, { ocrConfigured: true, ocrEngine: 'wasm' });
+  } catch {
+    // The bundled engine could not read the image (bad decode or timeout): it
+    // still needs OCR, so route it to the queue rather than call it a scan failure.
+    return fail('ocr_required', { processor: 'ocr_required', ocrRequired: true, ocrConfigured: false, ocrEngine: 'wasm' });
+  }
+}
+
 async function extractImageFile(name, filePath, opts = {}) {
   if (!isImageFile(name)) return { text: '', processor: null, supported: false, extractionOk: false, error: 'unsupported' };
   let settings;
@@ -163,23 +219,15 @@ async function extractImageFile(name, filePath, opts = {}) {
   } catch {
     return fail('ocr_config_invalid', { ocrConfigured: true });
   }
+  const strict = ocrStrictMode(opts);
   if (!settings.configured) {
-    return fail('ocr_required', { processor: 'ocr_required', ocrRequired: true, ocrConfigured: false });
+    return extractWithWasm(filePath, opts, strict);
   }
   try {
     const raw = typeof opts.extractImageText === 'function'
       ? await opts.extractImageText(filePath, { filename: name, settings })
       : await runOcrCommand(filePath, settings, opts);
-    const text = String(raw || '');
-    return {
-      text: text.slice(0, settings.maxChars),
-      processor: 'endpoint_ocr',
-      supported: true,
-      extractionOk: true,
-      ocrApplied: true,
-      ocrConfigured: true,
-      truncated: text.length > settings.maxChars,
-    };
+    return finalizeOcr(raw, settings.maxChars, strict, { ocrConfigured: true });
   } catch {
     return fail('extract_failed', { ocrConfigured: true, ocrApplied: false });
   }
@@ -192,7 +240,9 @@ module.exports = {
   extractImageFile,
   isImageFile,
   materializeArgs,
+  ocrMaxChars,
   ocrSettings,
+  ocrStrictMode,
   parseArgsJson,
   resetOcrDiscovery,
   runOcrCommand,

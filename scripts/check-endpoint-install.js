@@ -14,6 +14,7 @@ const aiToolInventory = require('../sensors/endpoint-agent/collectors/ai-tool-in
 const mcpInventory = require('../sensors/endpoint-agent/collectors/mcp-inventory');
 const desktopAppFlow = require('../sensors/endpoint-agent/collectors/desktop-app-flow');
 const endpointOcr = require('../sensors/endpoint-agent/ocr');
+const endpointOcrWasm = require('../sensors/endpoint-agent/ocr-wasm');
 const fileFlowProfiles = require('../sensors/endpoint-agent/file-flow-profiles');
 
 const ROOT = path.join(__dirname, '..');
@@ -183,15 +184,19 @@ async function ocrExtractionCheck(opts = {}) {
   const settings = endpointSettings(configInfo.config);
   const discover = opts.discoverOcrCommand || endpointOcr.discoverOcrCommand;
   const command = settings.ocrCommand || discover({ fresh: true, env: opts.env, platform: opts.platform });
-  if (!configured(command)) {
+  const wasmAvailable = (opts.wasmOcrAvailable || endpointOcrWasm.wasmOcrAvailable)({ env: opts.env });
+  if (!configured(command) && !wasmAvailable) {
     return check('endpoint_ocr_extract', true, 'no OCR engine; images stay ocr_required');
   }
   const fixture = opts.ocrFixturePath || OCR_FIXTURE_PATH;
   const extract = opts.extractImageFile || endpointOcr.extractImageFile;
-  const result = await extract(path.basename(fixture), fixture, { command });
+  const engineOpts = configured(command) ? { command } : { discover: false, env: opts.env, platform: opts.platform };
+  const result = await extract(path.basename(fixture), fixture, engineOpts);
+  if (result.ocrEngine === 'wasm') await endpointOcrWasm.terminateWasmOcr().catch(() => {});
   const extracted = result.extractionOk === true && OCR_FIXTURE_TEXT.test(result.text || '');
+  const suffix = result.ocrEngine === 'wasm' ? ' (wasm)' : '';
   return check('endpoint_ocr_extract', extracted,
-    extracted ? 'extracted fixture text' : (result.error || 'no text extracted from fixture'));
+    extracted ? `extracted fixture text${suffix}` : (result.error || 'no text extracted from fixture'));
 }
 
 function buildHeartbeatBody(report, opts = {}) {
