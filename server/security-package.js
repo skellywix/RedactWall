@@ -251,7 +251,7 @@ function buildControls({ policy = {}, auditIntegrity = {}, preflight = {}, postu
       'Encrypted retained approval data',
       boolState(dataKey.ok || env.REDACTWALL_DATA_KEY || env.PROMPTWALL_DATA_KEY || env.SENTINEL_DATA_KEY),
       'Held approval prompts use AES-256-GCM sealing when a stable data key is configured; no key means raw retention is refused.',
-      ['REDACTWALL_DATA_KEY/REDACTWALL_DATA_KEY preflight', 'server/crypto.js AES-256-GCM'],
+      ['REDACTWALL_DATA_KEY (PROMPTWALL_/SENTINEL_ aliases) preflight', 'server/crypto.js AES-256-GCM'],
       'privacy',
     ),
     control(

@@ -14,25 +14,25 @@ const path = require('node:path');
 const { URL } = require('node:url');
 const { extractPrompt, fetchWithTimeout, awaitRelease } = require('./squid-icap-bridge');
 
-const REDACTWALL = process.env.REDACTWALL_URL || 'http://localhost:4000';
+const REDACTWALL = process.env.REDACTWALL_URL || process.env.PROMPTWALL_URL || process.env.SENTINEL_URL || 'http://localhost:4000';
 const KEY = process.env.INGEST_API_KEY || 'dev-ingest-key';
 const DEFAULT_PORT = 4182;
-const DEFAULT_HOST = process.env.REDACTWALL_GATEWAY_HOST || '127.0.0.1';
-const DEFAULT_UPSTREAM = process.env.REDACTWALL_GATEWAY_UPSTREAM || 'https://api.openai.com';
+const DEFAULT_HOST = (process.env.REDACTWALL_GATEWAY_HOST || process.env.PROMPTWALL_GATEWAY_HOST) || '127.0.0.1';
+const DEFAULT_UPSTREAM = (process.env.REDACTWALL_GATEWAY_UPSTREAM || process.env.PROMPTWALL_GATEWAY_UPSTREAM) || 'https://api.openai.com';
 const DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
 const DEFAULT_MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 const DEFAULT_RATE_LIMIT = 60;
 const DEFAULT_RATE_WINDOW_MS = 60000;
-const DEFAULT_RATE_LIMIT_STORE = process.env.REDACTWALL_GATEWAY_RATE_LIMIT_STORE || 'memory';
-const DEFAULT_RATE_LIMIT_DB = process.env.REDACTWALL_GATEWAY_RATE_LIMIT_DB || path.join(process.cwd(), 'data', 'gateway-rate-limits.db');
-const DEFAULT_RATE_LIMIT_URL = process.env.REDACTWALL_GATEWAY_RATE_LIMIT_URL || '';
-const DEFAULT_RATE_LIMIT_TOKEN = process.env.REDACTWALL_GATEWAY_RATE_LIMIT_TOKEN || '';
+const DEFAULT_RATE_LIMIT_STORE = (process.env.REDACTWALL_GATEWAY_RATE_LIMIT_STORE || process.env.PROMPTWALL_GATEWAY_RATE_LIMIT_STORE) || 'memory';
+const DEFAULT_RATE_LIMIT_DB = (process.env.REDACTWALL_GATEWAY_RATE_LIMIT_DB || process.env.PROMPTWALL_GATEWAY_RATE_LIMIT_DB) || path.join(process.cwd(), 'data', 'gateway-rate-limits.db');
+const DEFAULT_RATE_LIMIT_URL = (process.env.REDACTWALL_GATEWAY_RATE_LIMIT_URL || process.env.PROMPTWALL_GATEWAY_RATE_LIMIT_URL) || '';
+const DEFAULT_RATE_LIMIT_TOKEN = (process.env.REDACTWALL_GATEWAY_RATE_LIMIT_TOKEN || process.env.PROMPTWALL_GATEWAY_RATE_LIMIT_TOKEN) || '';
 const DEFAULT_RATE_LIMIT_TIMEOUT_MS = 2000;
 const DEFAULT_APPROVAL_WAIT_MS = 0;
-const DEFAULT_ALLOWED_MODELS = process.env.REDACTWALL_GATEWAY_ALLOWED_MODELS || '';
-const DEFAULT_UPSTREAM_AUTH_HEADER = process.env.REDACTWALL_GATEWAY_UPSTREAM_AUTH_HEADER || 'authorization';
-const DEFAULT_UPSTREAM_AUTH_SCHEME = process.env.REDACTWALL_GATEWAY_UPSTREAM_AUTH_SCHEME || 'Bearer';
-const DEFAULT_AWS_SIGV4_SERVICE = process.env.REDACTWALL_GATEWAY_AWS_SERVICE || 'bedrock';
+const DEFAULT_ALLOWED_MODELS = (process.env.REDACTWALL_GATEWAY_ALLOWED_MODELS || process.env.PROMPTWALL_GATEWAY_ALLOWED_MODELS) || '';
+const DEFAULT_UPSTREAM_AUTH_HEADER = (process.env.REDACTWALL_GATEWAY_UPSTREAM_AUTH_HEADER || process.env.PROMPTWALL_GATEWAY_UPSTREAM_AUTH_HEADER) || 'authorization';
+const DEFAULT_UPSTREAM_AUTH_SCHEME = (process.env.REDACTWALL_GATEWAY_UPSTREAM_AUTH_SCHEME || process.env.PROMPTWALL_GATEWAY_UPSTREAM_AUTH_SCHEME) || 'Bearer';
+const DEFAULT_AWS_SIGV4_SERVICE = (process.env.REDACTWALL_GATEWAY_AWS_SERVICE || process.env.PROMPTWALL_GATEWAY_AWS_SERVICE) || 'bedrock';
 const SENSOR = { name: 'ai_llm_gateway', version: '0.1.0', platform: 'node_reverse_gateway' };
 const PROMPT_METHODS = new Set(['POST', 'PUT', 'PATCH']);
 const HOP_BY_HOP_HEADERS = new Set([
@@ -62,7 +62,7 @@ function boundedInt(value, fallback, min, max) {
 }
 
 function configuredClientTokens(opts = {}) {
-  const raw = opts.clientTokens || opts.clientToken || process.env.REDACTWALL_GATEWAY_TOKEN || '';
+  const raw = opts.clientTokens || opts.clientToken || (process.env.REDACTWALL_GATEWAY_TOKEN || process.env.PROMPTWALL_GATEWAY_TOKEN) || '';
   const values = Array.isArray(raw) ? raw : String(raw).split(',');
   return values.map((item) => String(item || '').trim()).filter(Boolean);
 }
@@ -238,7 +238,7 @@ function unavailableRateLimit(limit, store, error) {
 function createHttpRateLimiter({ limit, windowMs, url, token, fetchImpl, timeoutMs }) {
   const target = normalizeRateLimitServiceUrl(url);
   const authToken = String(token || '').trim();
-  const timeout = boundedInt(timeoutMs ?? process.env.REDACTWALL_GATEWAY_RATE_LIMIT_TIMEOUT_MS, DEFAULT_RATE_LIMIT_TIMEOUT_MS, 100, 30000);
+  const timeout = boundedInt(timeoutMs ?? (process.env.REDACTWALL_GATEWAY_RATE_LIMIT_TIMEOUT_MS || process.env.PROMPTWALL_GATEWAY_RATE_LIMIT_TIMEOUT_MS), DEFAULT_RATE_LIMIT_TIMEOUT_MS, 100, 30000);
   return {
     store: 'http',
     endpoint: target.origin,
@@ -280,8 +280,8 @@ function createHttpRateLimiter({ limit, windowMs, url, token, fetchImpl, timeout
 }
 
 function createRateLimiter(opts = {}) {
-  const limit = boundedInt(opts.rateLimit ?? process.env.REDACTWALL_GATEWAY_RATE_LIMIT, DEFAULT_RATE_LIMIT, 1, 100000);
-  const windowMs = boundedInt(opts.rateWindowMs ?? process.env.REDACTWALL_GATEWAY_RATE_WINDOW_MS, DEFAULT_RATE_WINDOW_MS, 1000, 3600000);
+  const limit = boundedInt(opts.rateLimit ?? (process.env.REDACTWALL_GATEWAY_RATE_LIMIT || process.env.PROMPTWALL_GATEWAY_RATE_LIMIT), DEFAULT_RATE_LIMIT, 1, 100000);
+  const windowMs = boundedInt(opts.rateWindowMs ?? (process.env.REDACTWALL_GATEWAY_RATE_WINDOW_MS || process.env.PROMPTWALL_GATEWAY_RATE_WINDOW_MS), DEFAULT_RATE_WINDOW_MS, 1000, 3600000);
   const store = rateLimitStoreMode(opts);
   if (store === 'sqlite') return createSqliteRateLimiter({ limit, windowMs, dbPath: rateLimitDbPath(opts) });
   if (store === 'http') {
@@ -631,7 +631,7 @@ function promptForwardPlan(verdict = {}, opts = {}) {
 }
 
 function configuredUpstreamExtraHeaders(opts = {}) {
-  const raw = opts.upstreamHeaders || opts.upstreamHeader || process.env.REDACTWALL_GATEWAY_UPSTREAM_HEADERS || '';
+  const raw = opts.upstreamHeaders || opts.upstreamHeader || (process.env.REDACTWALL_GATEWAY_UPSTREAM_HEADERS || process.env.PROMPTWALL_GATEWAY_UPSTREAM_HEADERS) || '';
   const values = Array.isArray(raw) ? raw : String(raw).split(',');
   const out = {};
   for (const item of values) {
@@ -648,7 +648,7 @@ function configuredUpstreamExtraHeaders(opts = {}) {
 }
 
 function upstreamAuthHeader(opts = {}) {
-  const apiKey = opts.upstreamApiKey || process.env.REDACTWALL_GATEWAY_UPSTREAM_API_KEY;
+  const apiKey = opts.upstreamApiKey || (process.env.REDACTWALL_GATEWAY_UPSTREAM_API_KEY || process.env.PROMPTWALL_GATEWAY_UPSTREAM_API_KEY);
   if (upstreamAuthMode(opts) === 'aws-sigv4') return {};
   if (!apiKey) return {};
   const name = safeHeaderName(opts.upstreamAuthHeader || DEFAULT_UPSTREAM_AUTH_HEADER, 'authorization');
@@ -667,10 +667,10 @@ function upstreamAuthMode(opts = {}) {
 
 function awsSigningConfig(opts = {}) {
   return {
-    accessKeyId: String(opts.awsAccessKeyId || process.env.REDACTWALL_GATEWAY_AWS_ACCESS_KEY_ID || process.env.AWS_ACCESS_KEY_ID || '').trim(),
-    secretAccessKey: String(opts.awsSecretAccessKey || process.env.REDACTWALL_GATEWAY_AWS_SECRET_ACCESS_KEY || process.env.AWS_SECRET_ACCESS_KEY || '').trim(),
-    sessionToken: String(opts.awsSessionToken || process.env.REDACTWALL_GATEWAY_AWS_SESSION_TOKEN || process.env.AWS_SESSION_TOKEN || '').trim(),
-    region: safeHeaderValue(opts.awsRegion || process.env.REDACTWALL_GATEWAY_AWS_REGION || process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || '', '', 80),
+    accessKeyId: String(opts.awsAccessKeyId || (process.env.REDACTWALL_GATEWAY_AWS_ACCESS_KEY_ID || process.env.PROMPTWALL_GATEWAY_AWS_ACCESS_KEY_ID) || process.env.AWS_ACCESS_KEY_ID || '').trim(),
+    secretAccessKey: String(opts.awsSecretAccessKey || (process.env.REDACTWALL_GATEWAY_AWS_SECRET_ACCESS_KEY || process.env.PROMPTWALL_GATEWAY_AWS_SECRET_ACCESS_KEY) || process.env.AWS_SECRET_ACCESS_KEY || '').trim(),
+    sessionToken: String(opts.awsSessionToken || (process.env.REDACTWALL_GATEWAY_AWS_SESSION_TOKEN || process.env.PROMPTWALL_GATEWAY_AWS_SESSION_TOKEN) || process.env.AWS_SESSION_TOKEN || '').trim(),
+    region: safeHeaderValue(opts.awsRegion || (process.env.REDACTWALL_GATEWAY_AWS_REGION || process.env.PROMPTWALL_GATEWAY_AWS_REGION) || process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || '', '', 80),
     service: safeHeaderValue(opts.awsService || DEFAULT_AWS_SIGV4_SERVICE, 'bedrock', 80),
   };
 }
@@ -964,8 +964,8 @@ function gatewayHealth(opts = {}) {
   const authConfigured = configuredClientTokens(opts).length > 0 || opts.allowInsecureDev === true;
   const rateLimitStore = rateLimitStoreMode(opts);
   const rateLimit = {
-    limit: boundedInt(opts.rateLimit ?? process.env.REDACTWALL_GATEWAY_RATE_LIMIT, DEFAULT_RATE_LIMIT, 1, 100000),
-    windowMs: boundedInt(opts.rateWindowMs ?? process.env.REDACTWALL_GATEWAY_RATE_WINDOW_MS, DEFAULT_RATE_WINDOW_MS, 1000, 3600000),
+    limit: boundedInt(opts.rateLimit ?? (process.env.REDACTWALL_GATEWAY_RATE_LIMIT || process.env.PROMPTWALL_GATEWAY_RATE_LIMIT), DEFAULT_RATE_LIMIT, 1, 100000),
+    windowMs: boundedInt(opts.rateWindowMs ?? (process.env.REDACTWALL_GATEWAY_RATE_WINDOW_MS || process.env.PROMPTWALL_GATEWAY_RATE_WINDOW_MS), DEFAULT_RATE_WINDOW_MS, 1000, 3600000),
     store: rateLimitStore,
     shared: rateLimitStore !== 'memory',
   };
@@ -994,7 +994,7 @@ function gatewayHealth(opts = {}) {
   const authMode = upstreamAuthMode(opts);
   const upstreamAuth = authMode === 'aws-sigv4'
     ? { mode: 'aws-sigv4', configured: awsSigningConfigured(opts), service: awsSigningConfig(opts).service, region: awsSigningConfig(opts).region || 'unset' }
-    : { mode: 'header', configured: !!(opts.upstreamApiKey || process.env.REDACTWALL_GATEWAY_UPSTREAM_API_KEY), header: safeHeaderName(opts.upstreamAuthHeader || DEFAULT_UPSTREAM_AUTH_HEADER, 'authorization') };
+    : { mode: 'header', configured: !!(opts.upstreamApiKey || (process.env.REDACTWALL_GATEWAY_UPSTREAM_API_KEY || process.env.PROMPTWALL_GATEWAY_UPSTREAM_API_KEY)), header: safeHeaderName(opts.upstreamAuthHeader || DEFAULT_UPSTREAM_AUTH_HEADER, 'authorization') };
   const upstreamAuthReady = authMode !== 'aws-sigv4' || upstreamAuth.configured === true;
   return {
     status: authConfigured && upstreamReady && rateLimitReady && upstreamAuthReady ? 'ready' : 'attention',
@@ -1126,7 +1126,7 @@ async function handleGatewayRequest(req, res, opts = {}, state = {}) {
     sourceIp: req.socket && req.socket.remoteAddress,
   }, opts);
   const verdict = gateResult.body;
-  const approvalWaitMs = boundedInt(opts.approvalWaitMs ?? process.env.REDACTWALL_GATEWAY_APPROVAL_WAIT_MS, DEFAULT_APPROVAL_WAIT_MS, 0, 10 * 60 * 1000);
+  const approvalWaitMs = boundedInt(opts.approvalWaitMs ?? (process.env.REDACTWALL_GATEWAY_APPROVAL_WAIT_MS || process.env.PROMPTWALL_GATEWAY_APPROVAL_WAIT_MS), DEFAULT_APPROVAL_WAIT_MS, 0, 10 * 60 * 1000);
   const plan = promptForwardPlan(verdict, { approvalWaitMs });
   if (plan.forward === 'await_release') {
     const release = await awaitRelease(verdict.id, {

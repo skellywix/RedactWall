@@ -15,10 +15,10 @@ local detection engine.
 - `alwaysBlock` entities stay hard stops.
 - Raw prompt or file content may only be retained as encrypted approval data
   when policy allows it.
-- Existing `REDACTWALL_*` env vars remain supported until a tested compatibility
-  migration exists.
+- Existing `PROMPTWALL_*`/`SENTINEL_*` env vars remain supported until a tested
+  compatibility migration exists.
 - `REDACTWALL_*` env aliases may be added only as compatibility aliases; they
-  must not break existing `REDACTWALL_*` deployments or retained evidence.
+  must not break existing `PROMPTWALL_*`/`SENTINEL_*` deployments or retained evidence.
 - Existing encrypted approval records must remain decryptable after the
   RedactWall rename.
 - The repo remains one source of truth. Source edits, tests, and commits run
@@ -163,7 +163,7 @@ For this alignment track, completion requires evidence for every area below:
   alias, and made endpoint/MCP install-health messaging name `REDACTWALL_URL`
   first.
 - Changed fresh endpoint runner and protected-upload launcher paths to set
-  `REDACTWALL_ENV_PATH` while still accepting legacy `REDACTWALL_ENV_PATH` in the
+  `REDACTWALL_ENV_PATH` while still accepting legacy `SENTINEL_ENV_PATH`/`PROMPTWALL_ENV_PATH` in the
   shared env loader.
 - Added a sanitized approval ticket bridge that sends deduplicated, issue-shaped
   workflow payloads to ticketing middleware without prompt bodies, raw findings,

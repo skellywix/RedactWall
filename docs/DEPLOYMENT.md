@@ -294,7 +294,7 @@ shell-action install/run/uninstall scripts, plus the endpoint install validation
 checker. It refuses synthetic
 prompt bodies and packaged development ingest keys. Set the real
 `REDACTWALL_URL`, `INGEST_API_KEY`, and watch directory during install; the
-legacy `REDACTWALL_URL` key remains accepted for existing configs. The agent
+legacy `SENTINEL_URL`/`PROMPTWALL_URL` keys remain accepted for existing configs. The agent
 inspects supported files locally and does not contact the control plane without
 an explicit ingest key.
 
@@ -314,7 +314,7 @@ detection engine, env loader, version metadata, and MCP guard install
 validation checker. It excludes
 the local direct-run demo and refuses synthetic prompt bodies or development
 ingest keys. Set `REDACTWALL_URL` and `INGEST_API_KEY` in the host MCP runtime
-environment; the legacy `REDACTWALL_URL` key remains accepted for existing
+environment; the legacy `SENTINEL_URL`/`PROMPTWALL_URL` keys remain accepted for existing
 configs. Do not bake secrets into the package. The guard does not contact the
 control plane without an explicit ingest key.
 
@@ -533,7 +533,7 @@ install kernel drivers or universal app hooks.
 ### Customer Detector Packs
 
 Put customer-specific sensitive types in `config/custom-detectors.json`, or set
-`REDACTWALL_CUSTOM_DETECTORS_PATH` / `REDACTWALL_CUSTOM_DETECTORS_PATH` to an
+`REDACTWALL_CUSTOM_DETECTORS_PATH` to an
 alternate JSON file for a customer silo. Detector packs are data-only. Each
 enabled detector supplies an uppercase `id`, bounded `pattern`, optional
 `context`, `severity`, `score`, `group`, and validator knobs such as
@@ -587,7 +587,7 @@ loads `%LOCALAPPDATA%\RedactWall\endpoint-agent.env` through
 `sensors\endpoint-agent\collectors\protected-upload.js`, and passes only the
 selected local file paths to the collector process. The Explorer verb is marked
 with `MultiSelectModel=Player` so it remains available for multi-file
-selections. The legacy `REDACTWALL_ENV_PATH` alias remains accepted for existing
+selections. The legacy `SENTINEL_ENV_PATH`/`PROMPTWALL_ENV_PATH` aliases remain accepted for existing
 scripts. The collector verifies each path is a local file, writes signed events
 through the packaged writer, and never reads file bytes.
 
@@ -798,7 +798,7 @@ Set these through `.env`, container environment, or a deployment secret manager:
 | `REDACTWALL_REQUIRE_TENANT_CONTEXT` | Requires sensors to send the matching `orgId`. Enabled automatically by SaaS mode. |
 | `REDACTWALL_REQUIRE_USER_IDENTITY` | Requires sensors to send managed user identity instead of `unknown` or `unattributed@unmanaged`. Enabled automatically by SaaS mode. |
 | `REDACTWALL_POLICY_PATH` | Optional policy file path for isolated tests, pilots, or customer-silo policy storage. Docker customer silos default to `/data/policy.json`. |
-| `REDACTWALL_CUSTOM_DETECTORS_PATH` / `REDACTWALL_CUSTOM_DETECTORS_PATH` | Optional customer detector-pack path. Docker customer silos default to `/data/custom-detectors.json`; native Node defaults to `config/custom-detectors.json`. |
+| `REDACTWALL_CUSTOM_DETECTORS_PATH` | Optional customer detector-pack path. Docker customer silos default to `/data/custom-detectors.json`; native Node defaults to `config/custom-detectors.json`. |
 | `ENDPOINT_AGENT_HANDOFF_DIR` | Optional local spool for signed native endpoint upload-intent events. |
 | `ENDPOINT_AGENT_HANDOFF_SECRET` | Optional 32-plus-character local HMAC secret required before the endpoint agent accepts native handoff events. |
 | `ENDPOINT_AGENT_OCR_COMMAND` / `REDACTWALL_ENDPOINT_AGENT_OCR_COMMAND` | Optional endpoint-local OCR command for image files. Disabled by default. |
@@ -810,47 +810,56 @@ Set these through `.env`, container environment, or a deployment secret manager:
 | `ENDPOINT_AGENT_APPROVED_AI_TOOLS` / `REDACTWALL_ENDPOINT_AGENT_APPROVED_AI_TOOLS` | Optional comma-separated sanctioned endpoint AI tool ids. Detected local AI tools outside this list report endpoint AI-tool inventory attention using sanitized ids only. |
 | `ENDPOINT_AGENT_FILE_FLOW_PROFILES` / `REDACTWALL_ENDPOINT_AGENT_FILE_FLOW_PROFILES` | Optional JSON array of named endpoint file-flow watcher profiles. Heartbeats report profile ids/status only. |
 
-RedactWall accepts product-prefixed aliases for new deployments while keeping
-the existing `REDACTWALL_*`, `INGEST_API_KEY`, and endpoint-agent names valid for
-upgrades. Use one family per setting; a non-empty legacy key wins when both are
-set.
+RedactWall reads the **canonical** key names below. Deployments from earlier
+releases keep working: the legacy `PROMPTWALL_*` and `SENTINEL_*` names are still
+accepted as **aliases** for upgrades. Use one name per setting; the canonical key
+wins when both a canonical and an alias are set.
 
-| Existing key | RedactWall alias |
+The core settings are canonically `REDACTWALL_*` and accept the older
+`PROMPTWALL_*` / `SENTINEL_*` prefixes:
+
+| Canonical key | Accepted legacy aliases |
 | --- | --- |
-| `REDACTWALL_ENV_PATH` | `REDACTWALL_ENV_PATH` |
-| `REDACTWALL_URL` | `REDACTWALL_URL` |
-| `REDACTWALL_DB_PATH` | `REDACTWALL_DB_PATH` |
-| `REDACTWALL_POLICY_PATH` | `REDACTWALL_POLICY_PATH` |
-| `REDACTWALL_CUSTOM_DETECTORS_PATH` | `REDACTWALL_CUSTOM_DETECTORS_PATH` |
-| `REDACTWALL_SAAS_MODE` | `REDACTWALL_SAAS_MODE` |
-| `REDACTWALL_TENANT_ID` | `REDACTWALL_TENANT_ID` |
-| `REDACTWALL_SEAT_LIMIT` | `REDACTWALL_SEAT_LIMIT` |
-| `REDACTWALL_REQUIRE_TENANT_CONTEXT` | `REDACTWALL_REQUIRE_TENANT_CONTEXT` |
-| `REDACTWALL_REQUIRE_USER_IDENTITY` | `REDACTWALL_REQUIRE_USER_IDENTITY` |
-| `REDACTWALL_SECRET` | `REDACTWALL_SECRET` |
-| `REDACTWALL_DATA_KEY` | `REDACTWALL_DATA_KEY` |
-| `REDACTWALL_REQUEST_TIMEOUT_MS` | `REDACTWALL_REQUEST_TIMEOUT_MS` |
-| `INGEST_API_KEY` | `REDACTWALL_INGEST_API_KEY` |
-| `SCIM_BEARER_TOKEN` | `REDACTWALL_SCIM_BEARER_TOKEN` |
-| `OIDC_ISSUER` | `REDACTWALL_OIDC_ISSUER` |
-| `OIDC_CLIENT_ID` | `REDACTWALL_OIDC_CLIENT_ID` |
-| `OIDC_CLIENT_SECRET` | `REDACTWALL_OIDC_CLIENT_SECRET` |
-| `OIDC_REDIRECT_URI` | `REDACTWALL_OIDC_REDIRECT_URI` |
-| `OIDC_AUTHORIZATION_ENDPOINT` | `REDACTWALL_OIDC_AUTHORIZATION_ENDPOINT` |
-| `OIDC_TOKEN_ENDPOINT` | `REDACTWALL_OIDC_TOKEN_ENDPOINT` |
-| `OIDC_JWKS_URI` | `REDACTWALL_OIDC_JWKS_URI` |
-| `OIDC_SCOPE` | `REDACTWALL_OIDC_SCOPE` |
-| `ENDPOINT_AGENT_WATCH_DIR` | `REDACTWALL_ENDPOINT_AGENT_WATCH_DIR` |
-| `ENDPOINT_AGENT_HANDOFF_DIR` | `REDACTWALL_ENDPOINT_AGENT_HANDOFF_DIR` |
-| `ENDPOINT_AGENT_HANDOFF_SECRET` | `REDACTWALL_ENDPOINT_AGENT_HANDOFF_SECRET` |
-| `ENDPOINT_AGENT_OCR_WASM` | `REDACTWALL_ENDPOINT_AGENT_OCR_WASM` |
-| `ENDPOINT_AGENT_OCR_STRICT` | `REDACTWALL_ENDPOINT_AGENT_OCR_STRICT` |
-| `ENDPOINT_AGENT_OCR_COMMAND` | `REDACTWALL_ENDPOINT_AGENT_OCR_COMMAND` |
-| `ENDPOINT_AGENT_OCR_ARGS_JSON` | `REDACTWALL_ENDPOINT_AGENT_OCR_ARGS_JSON` |
-| `ENDPOINT_AGENT_OCR_TIMEOUT_MS` | `REDACTWALL_ENDPOINT_AGENT_OCR_TIMEOUT_MS` |
-| `ENDPOINT_AGENT_OCR_MAX_CHARS` | `REDACTWALL_ENDPOINT_AGENT_OCR_MAX_CHARS` |
-| `ENDPOINT_AGENT_APPROVED_AI_TOOLS` | `REDACTWALL_ENDPOINT_AGENT_APPROVED_AI_TOOLS` |
-| `ENDPOINT_AGENT_FILE_FLOW_PROFILES` | `REDACTWALL_ENDPOINT_AGENT_FILE_FLOW_PROFILES` |
+| `REDACTWALL_ENV_PATH` | `PROMPTWALL_ENV_PATH`, `SENTINEL_ENV_PATH` |
+| `REDACTWALL_URL` | `PROMPTWALL_URL`, `SENTINEL_URL` |
+| `REDACTWALL_DB_PATH` | `PROMPTWALL_DB_PATH`, `SENTINEL_DB_PATH` |
+| `REDACTWALL_POLICY_PATH` | `PROMPTWALL_POLICY_PATH`, `SENTINEL_POLICY_PATH` |
+| `REDACTWALL_CUSTOM_DETECTORS_PATH` | `PROMPTWALL_CUSTOM_DETECTORS_PATH`, `SENTINEL_CUSTOM_DETECTORS_PATH` |
+| `REDACTWALL_SAAS_MODE` | `PROMPTWALL_SAAS_MODE`, `SENTINEL_SAAS_MODE` |
+| `REDACTWALL_TENANT_ID` | `PROMPTWALL_TENANT_ID`, `SENTINEL_TENANT_ID` |
+| `REDACTWALL_SEAT_LIMIT` | `PROMPTWALL_SEAT_LIMIT`, `SENTINEL_SEAT_LIMIT` |
+| `REDACTWALL_REQUIRE_TENANT_CONTEXT` | `PROMPTWALL_REQUIRE_TENANT_CONTEXT`, `SENTINEL_REQUIRE_TENANT_CONTEXT` |
+| `REDACTWALL_REQUIRE_USER_IDENTITY` | `PROMPTWALL_REQUIRE_USER_IDENTITY`, `SENTINEL_REQUIRE_USER_IDENTITY` |
+| `REDACTWALL_SECRET` | `PROMPTWALL_SECRET`, `SENTINEL_SECRET` |
+| `REDACTWALL_DATA_KEY` | `PROMPTWALL_DATA_KEY`, `SENTINEL_DATA_KEY` |
+| `REDACTWALL_REQUEST_TIMEOUT_MS` | `PROMPTWALL_REQUEST_TIMEOUT_MS`, `SENTINEL_REQUEST_TIMEOUT_MS` |
+
+The remaining settings are canonically unprefixed and additionally accept a
+`REDACTWALL_*` alias (with the older `PROMPTWALL_*` alias still honored):
+
+| Canonical key | Accepted aliases |
+| --- | --- |
+| `INGEST_API_KEY` | `REDACTWALL_INGEST_API_KEY`, `PROMPTWALL_INGEST_API_KEY` |
+| `SCIM_BEARER_TOKEN` | `REDACTWALL_SCIM_BEARER_TOKEN`, `PROMPTWALL_SCIM_BEARER_TOKEN` |
+| `OIDC_ISSUER` | `REDACTWALL_OIDC_ISSUER`, `PROMPTWALL_OIDC_ISSUER` |
+| `OIDC_CLIENT_ID` | `REDACTWALL_OIDC_CLIENT_ID`, `PROMPTWALL_OIDC_CLIENT_ID` |
+| `OIDC_CLIENT_SECRET` | `REDACTWALL_OIDC_CLIENT_SECRET`, `PROMPTWALL_OIDC_CLIENT_SECRET` |
+| `OIDC_REDIRECT_URI` | `REDACTWALL_OIDC_REDIRECT_URI`, `PROMPTWALL_OIDC_REDIRECT_URI` |
+| `OIDC_AUTHORIZATION_ENDPOINT` | `REDACTWALL_OIDC_AUTHORIZATION_ENDPOINT`, `PROMPTWALL_OIDC_AUTHORIZATION_ENDPOINT` |
+| `OIDC_TOKEN_ENDPOINT` | `REDACTWALL_OIDC_TOKEN_ENDPOINT`, `PROMPTWALL_OIDC_TOKEN_ENDPOINT` |
+| `OIDC_JWKS_URI` | `REDACTWALL_OIDC_JWKS_URI`, `PROMPTWALL_OIDC_JWKS_URI` |
+| `OIDC_SCOPE` | `REDACTWALL_OIDC_SCOPE`, `PROMPTWALL_OIDC_SCOPE` |
+| `ENDPOINT_AGENT_WATCH_DIR` | `REDACTWALL_ENDPOINT_AGENT_WATCH_DIR`, `PROMPTWALL_ENDPOINT_AGENT_WATCH_DIR` |
+| `ENDPOINT_AGENT_HANDOFF_DIR` | `REDACTWALL_ENDPOINT_AGENT_HANDOFF_DIR`, `PROMPTWALL_ENDPOINT_AGENT_HANDOFF_DIR` |
+| `ENDPOINT_AGENT_HANDOFF_SECRET` | `REDACTWALL_ENDPOINT_AGENT_HANDOFF_SECRET`, `PROMPTWALL_ENDPOINT_AGENT_HANDOFF_SECRET` |
+| `ENDPOINT_AGENT_OCR_WASM` | `REDACTWALL_ENDPOINT_AGENT_OCR_WASM`, `PROMPTWALL_ENDPOINT_AGENT_OCR_WASM` |
+| `ENDPOINT_AGENT_OCR_STRICT` | `REDACTWALL_ENDPOINT_AGENT_OCR_STRICT`, `PROMPTWALL_ENDPOINT_AGENT_OCR_STRICT` |
+| `ENDPOINT_AGENT_OCR_COMMAND` | `REDACTWALL_ENDPOINT_AGENT_OCR_COMMAND`, `PROMPTWALL_ENDPOINT_AGENT_OCR_COMMAND` |
+| `ENDPOINT_AGENT_OCR_ARGS_JSON` | `REDACTWALL_ENDPOINT_AGENT_OCR_ARGS_JSON`, `PROMPTWALL_ENDPOINT_AGENT_OCR_ARGS_JSON` |
+| `ENDPOINT_AGENT_OCR_TIMEOUT_MS` | `REDACTWALL_ENDPOINT_AGENT_OCR_TIMEOUT_MS`, `PROMPTWALL_ENDPOINT_AGENT_OCR_TIMEOUT_MS` |
+| `ENDPOINT_AGENT_OCR_MAX_CHARS` | `REDACTWALL_ENDPOINT_AGENT_OCR_MAX_CHARS`, `PROMPTWALL_ENDPOINT_AGENT_OCR_MAX_CHARS` |
+| `ENDPOINT_AGENT_APPROVED_AI_TOOLS` | `REDACTWALL_ENDPOINT_AGENT_APPROVED_AI_TOOLS`, `PROMPTWALL_ENDPOINT_AGENT_APPROVED_AI_TOOLS` |
+| `ENDPOINT_AGENT_FILE_FLOW_PROFILES` | `REDACTWALL_ENDPOINT_AGENT_FILE_FLOW_PROFILES`, `PROMPTWALL_ENDPOINT_AGENT_FILE_FLOW_PROFILES` |
 
 Never bind `REDACTWALL_DB_PATH` to a cloud-synced folder or network share. SQLite locking must be backed by local disk semantics, and production preflight blocks missing, cloud-synced, or UNC/network SQLite paths before startup readiness passes.
 

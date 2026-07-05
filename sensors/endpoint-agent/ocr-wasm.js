@@ -22,7 +22,7 @@ let sharedWorker = null;
 let idleTimer = null;
 
 function offSwitch(env) {
-  const raw = env.ENDPOINT_AGENT_OCR_WASM ?? env.REDACTWALL_ENDPOINT_AGENT_OCR_WASM ?? 'on';
+  const raw = env.ENDPOINT_AGENT_OCR_WASM ?? env.REDACTWALL_ENDPOINT_AGENT_OCR_WASM ?? env.PROMPTWALL_ENDPOINT_AGENT_OCR_WASM ?? 'on';
   return /^(0|off|false|no|disabled)$/i.test(String(raw).trim());
 }
 

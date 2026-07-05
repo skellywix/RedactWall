@@ -172,16 +172,20 @@ function Start-EndpointFallbackProcess {
   $agent = Join-Path $RepoRoot "sensors\endpoint-agent\agent.js"
   $errLog = Join-Path (Split-Path -Parent $LogPath) "endpoint-agent.err.log"
   $previousEnvPath = $env:REDACTWALL_ENV_PATH
-  $previousLegacyEnvPath = $env:REDACTWALL_ENV_PATH
+  $previousPromptWallEnvPath = $env:PROMPTWALL_ENV_PATH
+  $previousSentinelEnvPath = $env:SENTINEL_ENV_PATH
   $env:REDACTWALL_ENV_PATH = $ConfigPath
-  Remove-Item Env:\REDACTWALL_ENV_PATH -ErrorAction SilentlyContinue
+  Remove-Item Env:\PROMPTWALL_ENV_PATH -ErrorAction SilentlyContinue
+  Remove-Item Env:\SENTINEL_ENV_PATH -ErrorAction SilentlyContinue
   try {
     $proc = Start-Process -FilePath $node.Source -ArgumentList "`"$agent`"" -WorkingDirectory $RepoRoot -WindowStyle Hidden -RedirectStandardOutput $LogPath -RedirectStandardError $errLog -PassThru
   } finally {
     if ($null -eq $previousEnvPath) { Remove-Item Env:\REDACTWALL_ENV_PATH -ErrorAction SilentlyContinue }
     else { $env:REDACTWALL_ENV_PATH = $previousEnvPath }
-    if ($null -eq $previousLegacyEnvPath) { Remove-Item Env:\REDACTWALL_ENV_PATH -ErrorAction SilentlyContinue }
-    else { $env:REDACTWALL_ENV_PATH = $previousLegacyEnvPath }
+    if ($null -eq $previousPromptWallEnvPath) { Remove-Item Env:\PROMPTWALL_ENV_PATH -ErrorAction SilentlyContinue }
+    else { $env:PROMPTWALL_ENV_PATH = $previousPromptWallEnvPath }
+    if ($null -eq $previousSentinelEnvPath) { Remove-Item Env:\SENTINEL_ENV_PATH -ErrorAction SilentlyContinue }
+    else { $env:SENTINEL_ENV_PATH = $previousSentinelEnvPath }
   }
   Set-Content -LiteralPath $PidPath -Encoding ascii -Value ([string]$proc.Id)
   return $proc

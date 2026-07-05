@@ -232,7 +232,7 @@ Build next:
 
 ## Recent Completed Passes
 
-- Rebrand the visible project from RedactWall to RedactWall.
+- Rebrand the visible project from PromptWall/PromptSentinel to RedactWall.
 - Add provider-specific Microsoft Entra and Okta identity setup handoff through
   the dashboard Identity tab, an authenticated secret-free API, and
   `npm run identity:setup`, so SCIM/OIDC pilot setup has exact callback, issuer,
@@ -333,10 +333,10 @@ Build next:
 - Preserve legacy canary token compatibility while adding the RedactWall canary
   prefix.
 - Add tested `REDACTWALL_*` runtime aliases so new RedactWall deployments can
-  use the renamed prefix without breaking existing `REDACTWALL_*` installs.
+  use the renamed prefix without breaking existing `PROMPTWALL_*`/`SENTINEL_*` installs.
 - Issue fresh admin sessions as `redactwall_session` while accepting legacy
-  `sentinel_session` cookies during migration, and clear both cookie names on
-  logout.
+  `promptwall_session`/`sentinel_session` cookies during migration, and clear all
+  cookie names on logout.
 - Normalize scanner byte limits to integers across policy load/save, default
   config, and endpoint-agent scanner config so the admin policy API can
   round-trip its own payload.

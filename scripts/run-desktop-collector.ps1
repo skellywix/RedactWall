@@ -27,7 +27,8 @@ New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 
 $node = Get-Command node -ErrorAction Stop
 $env:REDACTWALL_ENV_PATH = $config
-Remove-Item Env:\REDACTWALL_ENV_PATH -ErrorAction SilentlyContinue
+Remove-Item Env:\PROMPTWALL_ENV_PATH -ErrorAction SilentlyContinue
+Remove-Item Env:\SENTINEL_ENV_PATH -ErrorAction SilentlyContinue
 Set-Location -LiteralPath $repo
 
 $collectorArgs = @($collector)

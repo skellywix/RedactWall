@@ -34,12 +34,12 @@ control plane (RDS role setup, migrations, backups, monitoring, sizing).
   - `REDACTWALL_REQUIRE_TENANT_CONTEXT=true`
   - `REDACTWALL_REQUIRE_USER_IDENTITY=true`
 
-The current CloudFormation template still writes the existing `REDACTWALL_*` and
-`INGEST_API_KEY` names for upgrade safety. The runtime also accepts
-`REDACTWALL_*` aliases for those values, including `REDACTWALL_SECRET`,
-`REDACTWALL_DATA_KEY`, `REDACTWALL_INGEST_API_KEY`, and
-`REDACTWALL_SCIM_BEARER_TOKEN`, when a future template or customer secret
-standard moves to the new prefix.
+The current CloudFormation template writes the canonical `REDACTWALL_*` and
+`INGEST_API_KEY` names. The runtime also accepts the legacy
+`PROMPTWALL_*`/`SENTINEL_*` aliases for those values, including `PROMPTWALL_SECRET`,
+`PROMPTWALL_DATA_KEY`, `PROMPTWALL_INGEST_API_KEY`, and
+`PROMPTWALL_SCIM_BEARER_TOKEN`, so customer secret stores that still emit the
+older names keep working across the rebrand.
 
 The AWS template pins mutable customer state to the mounted `/data` volume:
 `REDACTWALL_DB_PATH=/data/redactwall.db`,

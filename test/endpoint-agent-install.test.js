@@ -51,7 +51,8 @@ test('installer registers a restarting scheduled task without putting the ingest
 
 test('runner loads endpoint config through REDACTWALL_ENV_PATH and starts the agent', () => {
   assert.match(run, /\$env:REDACTWALL_ENV_PATH = \$config/);
-  assert.match(run, /Remove-Item Env:\\REDACTWALL_ENV_PATH/);
+  assert.match(run, /Remove-Item Env:\\PROMPTWALL_ENV_PATH/);
+  assert.match(run, /Remove-Item Env:\\SENTINEL_ENV_PATH/);
   assert.doesNotMatch(run, /\$env:(?:PROMPTWALL|SENTINEL)_ENV_PATH = \$config/);
   assert.match(run, /sensors\\endpoint-agent\\agent\.js/);
   assert.match(run, /\*>> \$LogPath/);
@@ -71,7 +72,8 @@ test('desktop collector shell action is per-user and secret-free', () => {
   assert.doesNotMatch(desktopInstall, /"-HandoffSecret"/);
   assert.doesNotMatch(desktopInstall, /INGEST_API_KEY=\$IngestKey/);
   assert.match(desktopRun, /\$env:REDACTWALL_ENV_PATH = \$config/);
-  assert.match(desktopRun, /Remove-Item Env:\\REDACTWALL_ENV_PATH/);
+  assert.match(desktopRun, /Remove-Item Env:\\PROMPTWALL_ENV_PATH/);
+  assert.match(desktopRun, /Remove-Item Env:\\SENTINEL_ENV_PATH/);
   assert.doesNotMatch(desktopRun, /\$env:(?:PROMPTWALL|SENTINEL)_ENV_PATH = \$config/);
   assert.match(desktopRun, /\[string\[\]\]\$FilePath/);
   assert.match(desktopRun, /foreach \(\$file in \$FilePath\)/);
@@ -98,7 +100,8 @@ test('clipboard guard shortcut is per-user and secret-free', () => {
   assert.match(clipboardInstall, /Assert-SafeShortcutArgument/);
   assert.doesNotMatch(clipboardInstall, /INGEST_API_KEY|ENDPOINT_AGENT_HANDOFF_SECRET|"-IngestKey"|"-HandoffSecret"/);
   assert.match(clipboardRun, /\$env:REDACTWALL_ENV_PATH = \$config/);
-  assert.match(clipboardRun, /Remove-Item Env:\\REDACTWALL_ENV_PATH/);
+  assert.match(clipboardRun, /Remove-Item Env:\\PROMPTWALL_ENV_PATH/);
+  assert.match(clipboardRun, /Remove-Item Env:\\SENTINEL_ENV_PATH/);
   assert.doesNotMatch(clipboardRun, /\$env:(?:PROMPTWALL|SENTINEL)_ENV_PATH = \$config/);
   assert.match(clipboardRun, /clipboard-guard\.js/);
   assert.match(clipboardRun, /--clear-on-block/);

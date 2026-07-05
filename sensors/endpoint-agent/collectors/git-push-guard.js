@@ -131,7 +131,7 @@ function destinationFromRemote(remoteUrl, remoteName) {
 function configuredAllowedHosts(opts = {}) {
   const raw = []
     .concat(opts.allowedHosts || [])
-    .concat(String(process.env.REDACTWALL_GIT_ALLOWED_HOSTS || process.env.ENDPOINT_AGENT_GIT_ALLOWED_HOSTS || '').split(','));
+    .concat(String(process.env.REDACTWALL_GIT_ALLOWED_HOSTS || process.env.PROMPTWALL_GIT_ALLOWED_HOSTS || process.env.ENDPOINT_AGENT_GIT_ALLOWED_HOSTS || '').split(','));
   const out = [];
   const seen = new Set();
   for (const item of raw) {

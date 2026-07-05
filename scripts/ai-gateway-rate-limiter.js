@@ -17,12 +17,12 @@ const { URL } = require('node:url');
 const Database = require('better-sqlite3');
 
 const DEFAULT_PORT = 4183;
-const DEFAULT_STORE = process.env.REDACTWALL_RATE_LIMITER_STORE || 'sqlite';
-const DEFAULT_DB = process.env.REDACTWALL_RATE_LIMITER_DB || path.join(process.cwd(), 'data', 'gateway-shared-rate-limiter.db');
-const DEFAULT_REDIS_URL = process.env.REDACTWALL_RATE_LIMITER_REDIS_URL || '';
-const DEFAULT_REDIS_PREFIX = process.env.REDACTWALL_RATE_LIMITER_REDIS_PREFIX || 'redactwall:gateway:rl:';
+const DEFAULT_STORE = process.env.REDACTWALL_RATE_LIMITER_STORE || process.env.PROMPTWALL_RATE_LIMITER_STORE || 'sqlite';
+const DEFAULT_DB = process.env.REDACTWALL_RATE_LIMITER_DB || process.env.PROMPTWALL_RATE_LIMITER_DB || path.join(process.cwd(), 'data', 'gateway-shared-rate-limiter.db');
+const DEFAULT_REDIS_URL = process.env.REDACTWALL_RATE_LIMITER_REDIS_URL || process.env.PROMPTWALL_RATE_LIMITER_REDIS_URL || '';
+const DEFAULT_REDIS_PREFIX = process.env.REDACTWALL_RATE_LIMITER_REDIS_PREFIX || process.env.PROMPTWALL_RATE_LIMITER_REDIS_PREFIX || 'redactwall:gateway:rl:';
 const DEFAULT_REDIS_TIMEOUT_MS = 2000;
-const DEFAULT_TOKEN = process.env.REDACTWALL_RATE_LIMITER_TOKEN || process.env.REDACTWALL_GATEWAY_RATE_LIMIT_TOKEN || '';
+const DEFAULT_TOKEN = process.env.REDACTWALL_RATE_LIMITER_TOKEN || process.env.PROMPTWALL_RATE_LIMITER_TOKEN || process.env.REDACTWALL_GATEWAY_RATE_LIMIT_TOKEN || process.env.PROMPTWALL_GATEWAY_RATE_LIMIT_TOKEN || '';
 const DEFAULT_MAX_BODY_BYTES = 16 * 1024;
 const DEFAULT_MAX_LIMIT = 100000;
 const DEFAULT_MAX_WINDOW_MS = 24 * 60 * 60 * 1000;

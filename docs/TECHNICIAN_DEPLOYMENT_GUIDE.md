@@ -54,10 +54,10 @@ The supported paid-customer deployment today is one AWS stack per customer:
   - `REDACTWALL_REQUIRE_TENANT_CONTEXT=true`
   - `REDACTWALL_REQUIRE_USER_IDENTITY=true`
 
-RedactWall also accepts `REDACTWALL_*` aliases for those `REDACTWALL_*` runtime
-keys, plus `REDACTWALL_INGEST_API_KEY`, `REDACTWALL_ENDPOINT_AGENT_WATCH_DIR`,
-`REDACTWALL_SCIM_BEARER_TOKEN`, `REDACTWALL_ENDPOINT_AGENT_HANDOFF_DIR`, and
-`REDACTWALL_ENDPOINT_AGENT_HANDOFF_SECRET`. Use one key family per setting in a
+RedactWall also accepts the legacy `PROMPTWALL_*`/`SENTINEL_*` aliases for those `REDACTWALL_*` runtime
+keys, plus `PROMPTWALL_INGEST_API_KEY`, `PROMPTWALL_ENDPOINT_AGENT_WATCH_DIR`,
+`PROMPTWALL_SCIM_BEARER_TOKEN`, `PROMPTWALL_ENDPOINT_AGENT_HANDOFF_DIR`, and
+`PROMPTWALL_ENDPOINT_AGENT_HANDOFF_SECRET`. Use one key family per setting in a
 customer env file.
 
 Do not deploy the current product as a shared multi-tenant stack for paid

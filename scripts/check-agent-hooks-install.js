@@ -50,7 +50,7 @@ function buildInstallReport(opts = {}) {
 
 function buildHeartbeatBody(report, opts = {}) {
   return {
-    user: opts.user || process.env.REDACTWALL_AGENT_USER || os.userInfo().username || 'agent-technician',
+    user: opts.user || process.env.REDACTWALL_AGENT_USER || process.env.PROMPTWALL_AGENT_USER || os.userInfo().username || 'agent-technician',
     source: 'agent_hooks',
     destination: 'agent-hooks-install',
     sensor: { name: 'agent_hooks', version: VERSION, platform: 'node' },

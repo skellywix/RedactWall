@@ -175,7 +175,8 @@ function buildInstallReport(opts = {}) {
   const registry = connectorRegistryStatus({ repoRoot, envConfig: configInfo.config });
   const envExplicit = configured(opts.envPath)
     || configured(env.REDACTWALL_ENV_PATH)
-    || configured(env.REDACTWALL_ENV_PATH);
+    || configured(env.PROMPTWALL_ENV_PATH)
+    || configured(env.SENTINEL_ENV_PATH);
   const serverUrlValid = configured(settings.serverUrl) && safeOrigin(settings.serverUrl) !== 'invalid URL';
   const keyLooksUsable = configured(settings.ingestKey)
     && settings.ingestKey.length >= 16

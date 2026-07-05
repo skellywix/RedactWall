@@ -149,7 +149,7 @@ function buildRecord(kind, extracted, analysis, action, opts) {
   return {
     prompt: `[agent ${extracted.channel.replace('agent_', '')} ${outcome === 'action_blocked' ? 'blocked' : 'flagged'} locally] `
       + [...new Set((analysis.findings || []).map((f) => f.type).concat((analysis.categories || []).map((c) => c.category)))].join(', '),
-    user: opts.user || process.env.REDACTWALL_AGENT_USER || os.userInfo().username,
+    user: opts.user || process.env.REDACTWALL_AGENT_USER || process.env.PROMPTWALL_AGENT_USER || os.userInfo().username,
     destination: extracted.tool ? `claude-code:${extracted.tool}` : 'claude-code',
     source: 'agent_hooks',
     channel: extracted.channel,
@@ -201,7 +201,7 @@ async function run(event, opts = {}, deps = {}) {
 function buildToolRecord(extracted, toolDecision, opts) {
   return {
     prompt: `[agent mcp blocked locally] ${extracted.tool}`,
-    user: opts.user || process.env.REDACTWALL_AGENT_USER || os.userInfo().username,
+    user: opts.user || process.env.REDACTWALL_AGENT_USER || process.env.PROMPTWALL_AGENT_USER || os.userInfo().username,
     destination: `claude-code:${extracted.tool}`,
     source: 'agent_hooks',
     channel: 'agent_mcp',

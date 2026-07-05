@@ -137,6 +137,7 @@ async function resolveDestination(opts = {}) {
   return (await fetchPolicyDestination(opts))
     || cleanDestination(process.env.ENDPOINT_AGENT_DESKTOP_DESTINATION)
     || cleanDestination(process.env.REDACTWALL_DESKTOP_DESTINATION)
+    || cleanDestination(process.env.PROMPTWALL_DESKTOP_DESTINATION)
     || DEFAULT_DESTINATION;
 }
 

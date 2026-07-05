@@ -161,7 +161,7 @@ const STRICT_MIN_CHARS = 8;
 
 function ocrStrictMode(opts = {}) {
   const env = opts.env || process.env;
-  const raw = env.ENDPOINT_AGENT_OCR_STRICT || env.REDACTWALL_ENDPOINT_AGENT_OCR_STRICT || '';
+  const raw = env.ENDPOINT_AGENT_OCR_STRICT || env.REDACTWALL_ENDPOINT_AGENT_OCR_STRICT || env.PROMPTWALL_ENDPOINT_AGENT_OCR_STRICT || '';
   return /^(1|on|true|yes|strict)$/i.test(String(raw).trim());
 }
 
