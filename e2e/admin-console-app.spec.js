@@ -36,6 +36,24 @@ function collectUiProblems(page) {
   return problems;
 }
 
+async function createHeldPrompt(request, suffix) {
+  const response = await request.post('/api/v1/gate', {
+    headers: { 'x-api-key': 'e2e-ingest-key' },
+    data: {
+      prompt: `Synthetic new-console wiring SSN 524-71-${suffix} before submission.`,
+      user: 'app-console@example.test',
+      destination: 'chat.openai.com',
+      source: 'browser_extension',
+      channel: 'submit',
+      orgId: 'e2e-org',
+    },
+  });
+  expect(response.ok()).toBeTruthy();
+  const body = await response.json();
+  expect(body.status).toBe('pending');
+  return body;
+}
+
 test('unauthenticated /app is redirected to the login page', async ({ page }) => {
   await page.goto('/app/');
   await expect(page).toHaveURL(/\/login\.html$/);
@@ -57,5 +75,45 @@ test('console shell renders the live session and pilot view after login', async 
   await expect(page.locator('.app-panel-meta')).not.toHaveText('Loading', { timeout: 10000 });
 
   await expect(page.getByRole('link', { name: 'Classic console' })).toHaveAttribute('href', '/index.html');
+  expect(problems).toEqual([]);
+});
+
+test('approval queue releases a held prompt after password step-up', async ({ page, request }) => {
+  const held = await createHeldPrompt(request, '9001');
+  await login(page);
+
+  await page.goto('/app/#/queue');
+  await expect(page.getByRole('heading', { name: 'Approval Queue' })).toBeVisible();
+  const heldRow = page.locator('article.q').filter({ hasText: 'app-console@example.test' }).first();
+  await heldRow.click();
+
+  await page.getByLabel('Decision note').fill('e2e release check');
+  await page.getByRole('button', { name: 'Approve release' }).click();
+
+  const dialog = page.locator('dialog.stepup-dialog');
+  await expect(dialog).toBeVisible();
+  await dialog.getByLabel('Account password').fill('e2e-pass');
+  await dialog.getByRole('button', { name: 'Approve release' }).click();
+
+  await expect(page.locator('#toastStack')).toContainText('Prompt approved and released.');
+  const status = await request.get(`/api/v1/status/${held.id}`, {
+    headers: { 'x-api-key': 'e2e-ingest-key', 'x-release-token': held.releaseToken },
+  });
+  expect(status.ok()).toBeTruthy();
+  expect((await status.json()).status).toBe('approved');
+});
+
+test('policy and audit views render live data without errors', async ({ page }) => {
+  const problems = collectUiProblems(page);
+  await login(page);
+
+  await page.goto('/app/#/policy');
+  await expect(page.getByRole('heading', { name: 'Policy', exact: true })).toBeVisible();
+  await expect(page.locator('.app-panel-meta').first()).not.toHaveText('Loading', { timeout: 10000 });
+
+  await page.goto('/app/#/audit');
+  await expect(page.getByRole('heading', { name: 'Tamper-evident Audit Log' })).toBeVisible();
+  await expect(page.locator('.app-panel-meta').first()).not.toHaveText('Loading', { timeout: 10000 });
+
   expect(problems).toEqual([]);
 });

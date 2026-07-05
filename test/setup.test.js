@@ -207,8 +207,11 @@ test('setup helpers cover placeholder, env-file, install, and console output bra
     npmCommand: () => 'npm-test',
     run: (command, args) => commands.push([command, args]),
   });
+  const consoleDir = path.resolve(__dirname, '..', 'console');
   assert.deepStrictEqual(commands, [
     ['npm-test', ['ci', '--omit=dev']],
+    ['npm-test', ['ci', '--prefix', consoleDir]],
+    ['npm-test', ['run', 'build', '--prefix', consoleDir]],
     ['npm-test', ['install']],
     ['npm-test', ['exec', '--', 'playwright', 'install', 'chromium']],
   ]);

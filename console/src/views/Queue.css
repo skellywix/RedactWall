@@ -1,0 +1,530 @@
+/* Approval queue view. Reuses the legacy console class names (.q, .sev, .chip,
+   .prompt, .stepup-dialog) so the shared console-theme.css decorations —
+   severity glyphs, chip radii, .btn.approve/.deny accents — apply unchanged.
+   Every color comes from the shared theme tokens; rules are scoped under
+   .queue-view so parallel views cannot collide. */
+
+.queue-view {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 1100px) {
+  .queue-view {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---- Toolbar --------------------------------------------------------------- */
+.queue-toolbar {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: end;
+}
+
+.queue-toolbar label {
+  display: grid;
+  gap: 5px;
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--mut);
+}
+
+.queue-toolbar .queue-search {
+  flex: 1;
+  min-width: 200px;
+}
+
+.queue-view input[type='search'],
+.queue-view input[type='text'],
+.queue-view select,
+.queue-view textarea {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--input-bg);
+  color: var(--txt);
+  padding: 7px 10px;
+  font-size: 12.5px;
+  font-family: inherit;
+}
+
+.queue-view input:focus,
+.queue-view select:focus,
+.queue-view textarea:focus {
+  border-color: var(--blue);
+  box-shadow: var(--focus-ring);
+  outline: none;
+}
+
+/* ---- Bulk decision bar ------------------------------------------------------ */
+.queue-bulk-bar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel2);
+  padding: 8px 10px;
+}
+
+.queue-bulk-bar > span {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--soft);
+}
+
+.queue-bulk-bar input {
+  flex: 1;
+  min-width: 160px;
+  max-width: 260px;
+}
+
+.queue-bulk-box {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--blue);
+  margin-right: 2px;
+  flex: 0 0 auto;
+}
+
+/* ---- Queue rows ------------------------------------------------------------- */
+.queue-rows {
+  display: grid;
+  gap: 10px;
+}
+
+.queue-view .q {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  padding: 13px 14px;
+  cursor: pointer;
+  transition: background var(--fast), box-shadow var(--fast);
+}
+
+.queue-view .q:hover,
+.queue-view .q:focus-visible {
+  background: var(--surface-hover);
+}
+
+.queue-view .q.selected {
+  background: var(--surface-selected);
+  box-shadow: inset 3px 0 0 var(--blue);
+}
+
+.queue-view .q .top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.queue-view .risk-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.queue-view .select-dot {
+  width: 17px;
+  height: 17px;
+  border: 1.5px solid var(--line2);
+  border-radius: 50%;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  transition: border-color var(--fast), background var(--fast);
+}
+
+.queue-view .q.selected .select-dot {
+  background: var(--blue);
+  border-color: var(--blue);
+}
+
+.queue-view .q.selected .select-dot::after {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #fff;
+}
+
+/* ---- Severity / risk / status chips (legacy classes) ------------------------ */
+.queue-view .sev {
+  display: inline-flex;
+  align-items: center;
+  min-height: 21px;
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.queue-view .sev.critical { background: var(--red-bg); border-color: var(--red); color: var(--red); }
+.queue-view .sev.high { background: var(--amber-bg); border-color: var(--amber); color: var(--amber); }
+.queue-view .sev.medium { background: var(--yellow-bg); border-color: var(--yellow); color: var(--yellow); }
+.queue-view .sev.low,
+.queue-view .sev.none { background: var(--gray-bg); border-color: var(--line); color: var(--mut); }
+
+.queue-view .risk {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  color: var(--mut);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.queue-view .risk b {
+  color: var(--txt);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.queue-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 21px;
+  padding: 2px 9px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  background: var(--panel2);
+  color: var(--soft);
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.queue-status.tone-good { background: var(--green-bg); border-color: var(--green); color: var(--green); }
+.queue-status.tone-bad { background: var(--red-bg); border-color: var(--red); color: var(--red); }
+.queue-status.tone-warn { background: var(--amber-bg); border-color: var(--amber); color: var(--amber); }
+
+/* ---- Mainline + prompt ------------------------------------------------------ */
+.queue-mainline {
+  display: grid;
+  grid-template-columns: minmax(130px, 0.6fr) minmax(160px, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 9px;
+}
+
+.queue-mainline strong {
+  font-weight: 600;
+  color: var(--txt);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.queue-mainline span {
+  color: var(--mut);
+  font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.queue-view .prompt {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--code-bg);
+  color: var(--soft);
+  padding: 10px 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Sensitive-content styling for revealed raw prompts. */
+.queue-view .prompt.revealed { border-color: var(--red); background: var(--red-bg); color: var(--txt); }
+.queue-view .prompt.retained { border-color: var(--amber); background: var(--amber-bg); color: var(--txt); }
+.queue-view .prompt.unavailable { border-color: var(--line); background: var(--gray-bg); }
+
+.queue-prompt-preview {
+  max-height: 76px;
+  overflow: hidden;
+}
+
+.queue-view .prompt-reveal-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 26px;
+  border: 1px solid var(--red);
+  border-radius: var(--radius-sm);
+  background: var(--red-bg);
+  color: var(--red);
+  padding: 4px 9px;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.queue-view .prompt-reveal-status span {
+  color: var(--mut);
+  font-weight: 600;
+}
+
+.queue-view .prompt-reveal-status.retained { border-color: var(--amber); background: var(--amber-bg); color: var(--amber); }
+.queue-view .prompt-reveal-status.unavailable { border-color: var(--line); background: var(--gray-bg); color: var(--mut); }
+
+/* ---- Finding chips + reasons ------------------------------------------------ */
+.queue-view .chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.queue-view .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 23px;
+  border: 1px solid var(--line);
+  background: var(--panel2);
+  color: var(--soft);
+  padding: 2px 9px;
+  font-size: 11.5px;
+}
+
+.queue-view .chip b {
+  color: var(--txt);
+  font-weight: 600;
+}
+
+.queue-view .chip.category {
+  border-color: var(--amber);
+  color: var(--amber);
+  background: var(--amber-bg);
+}
+
+.queue-view .chip.category b {
+  color: var(--amber);
+}
+
+.queue-view .reasons {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--mut);
+}
+
+/* ---- Detail panel ------------------------------------------------------------ */
+.queue-view .detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 20px;
+}
+
+.queue-view .datum {
+  border-bottom: 1px solid var(--line);
+  padding: 9px 0;
+}
+
+.queue-view .datum label {
+  display: block;
+  color: var(--mut);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  margin-bottom: 3px;
+}
+
+.queue-view .datum b {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--txt);
+  word-break: break-word;
+}
+
+.queue-view .risk-meter {
+  display: grid;
+  gap: 9px;
+  padding: 2px 0;
+}
+
+.queue-view .risk-meter .risk {
+  margin-left: auto;
+}
+
+.queue-view .risk-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--panel3);
+  overflow: hidden;
+}
+
+.queue-view .risk-track i {
+  display: block;
+  height: 100%;
+  width: var(--risk-width);
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--green-vivid), var(--amber-vivid), var(--red-vivid));
+}
+
+.queue-view .note {
+  width: 100%;
+  min-height: 38px;
+  resize: vertical;
+}
+
+.queue-view .readonly-note {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  border: 1px solid var(--glow);
+  border-radius: var(--radius-sm);
+  background: var(--blue-bg);
+  color: var(--blue);
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.queue-view .actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ---- Buttons (base; console-theme.css supplies approve/deny accents) --------- */
+.queue-view .btn {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid var(--line2);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--txt);
+  padding: 7px 13px;
+  font-weight: 600;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: background var(--fast), border-color var(--fast);
+}
+
+.queue-view .btn:hover {
+  background: var(--surface-hover);
+}
+
+.queue-view .btn.reveal {
+  background: var(--panel);
+  border-color: var(--line2);
+  color: var(--soft);
+}
+
+.queue-view .btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* ---- Step-up password dialog -------------------------------------------------- */
+.queue-view .stepup-dialog {
+  width: min(430px, calc(100vw - 32px));
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel);
+  color: var(--txt);
+  padding: 0;
+  box-shadow: var(--shadow-pop);
+}
+
+.queue-view .stepup-dialog::backdrop {
+  background: rgba(9, 14, 24, 0.45);
+}
+
+.queue-view .stepup-panel {
+  display: grid;
+  gap: 14px;
+  padding: 20px;
+}
+
+.queue-view .stepup-panel h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.queue-view .stepup-panel p {
+  margin: 4px 0 0;
+  color: var(--mut);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.queue-view .stepup-panel label {
+  display: grid;
+  gap: 7px;
+  color: var(--soft);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.queue-view .stepup-panel input {
+  width: 100%;
+  padding: 10px 11px;
+  font-size: 13.5px;
+}
+
+.queue-view .stepup-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ---- Toast stack (global: lib/toast.ts appends to document.body; markup and
+   rules mirror the legacy console, so duplicates from other views are inert) -- */
+#toastStack {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 340px;
+}
+
+.toast {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--blue);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-raised);
+  padding: 10px 14px;
+  font-size: 13px;
+  color: var(--txt);
+  opacity: 1;
+  transition: opacity 0.3s, transform 0.3s;
+}
+
+.toast-good { border-left-color: var(--green); }
+.toast-warn { border-left-color: var(--amber); }
+.toast-error { border-left-color: var(--red); }
+
+.toast.gone {
+  opacity: 0;
+  transform: translateY(6px);
+}

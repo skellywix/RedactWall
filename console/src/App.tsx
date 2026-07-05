@@ -4,6 +4,9 @@ import { routeHref, useHashRoute } from './lib/router';
 import { roleLabel, useSession } from './lib/session';
 
 const Overview = lazy(() => import('./views/Overview'));
+const Queue = lazy(() => import('./views/Queue'));
+const Policy = lazy(() => import('./views/Policy'));
+const Audit = lazy(() => import('./views/Audit'));
 const DecisionQuality = lazy(() => import('./views/DecisionQuality'));
 
 interface Route {
@@ -14,6 +17,9 @@ interface Route {
 
 const ROUTES: Route[] = [
   { path: '/', label: 'Overview', view: Overview },
+  { path: '/queue', label: 'Approval Queue', view: Queue },
+  { path: '/policy', label: 'Policy', view: Policy },
+  { path: '/audit', label: 'Audit', view: Audit },
   { path: '/decision-quality', label: 'Decision Quality', view: DecisionQuality },
 ];
 
