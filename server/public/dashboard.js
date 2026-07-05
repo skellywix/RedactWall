@@ -759,6 +759,7 @@ function renderOperatorFlow(){window.PromptWallOperatorFlow&&window.PromptWallOp
 function renderAgenticMcp(){window.PromptWallAgenticMcp&&window.PromptWallAgenticMcp.render(currentPosture,{$,escapeHtml,inventoryStateLabel});}
 function renderThreatGuardrails(){window.PromptWallThreatGuardrails&&window.PromptWallThreatGuardrails.render(currentPosture,{$,escapeHtml});}
 function renderControlGraph(){window.PromptWallControlGraph&&window.PromptWallControlGraph.render(currentPosture,{$,escapeHtml});}
+function renderLeakPathMap(){window.PromptWallLeakPathMap&&window.PromptWallLeakPathMap.render(currentPosture,{$,escapeHtml});}
 function renderBehaviorBaselines(){window.PromptWallBehaviorBaselines&&window.PromptWallBehaviorBaselines.render(currentPosture,{$,escapeHtml});}
 
 function renderHardeningWorkbench() {
@@ -967,6 +968,7 @@ function updateMonitorSearchUi() {
 function renderMonitor() {
   if (!$('#tab-monitor')) return;
   updateMonitorSearchUi();
+  renderLeakPathMap();
   renderMonitorStatusFilters();
   renderPostureSegments();
   renderMonitorMetrics();

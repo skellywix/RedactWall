@@ -1113,8 +1113,9 @@ test('signal operations monitoring console supports adaptive states', async ({ p
 
   await page.locator('.rail .tab[data-tab="monitor"]').click();
   await expect(page.locator('#tab-monitor')).toBeVisible();
-  await expect(page.locator('.signal-console')).toContainText('AI Security Command Center');
+  await expect(page.locator('.signal-console')).toContainText('AI Data Leak Exposure Map');
   await expect(page.locator('#monitorDataScope')).toContainText('without prompt bodies');
+  await expect(page.locator('#leakMapStage .leak-path-row')).toHaveCount(5);
   await expect(page.locator('#hardeningMission')).toContainText('Hardening mission');
   await expect(page.locator('#hardeningMission')).toContainText('AI Gateway Enforcement');
   await expect(page.locator('#hardeningMission')).toContainText('Proof ledger');
@@ -1205,6 +1206,69 @@ test('signal operations monitoring console supports adaptive states', async ({ p
 
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await expect(page.locator('.signal-dot.is-pulsing').first()).toHaveCSS('animation-name', 'none');
+  expect(problems).toEqual([]);
+});
+
+test('leak path map walks buyers through exposure scenarios', async ({ page, request }) => {
+  const problems = collectUiProblems(page);
+  await createHeldPrompt(request, {
+    suffix: '9412',
+    user: 'leak-map@example.test',
+    destination: 'chatgpt.com',
+  });
+  await login(page);
+
+  await page.locator('.rail .tab[data-tab="monitor"]').click();
+  await expect(page.locator('#tab-monitor')).toBeVisible();
+  await expect(page.locator('.signal-console')).toContainText('See Every Path Sensitive Data Can Take to AI');
+  await expect(page.locator('#leakMapSummary')).toContainText('prompt bodies excluded');
+  await expect(page.locator('#leakMapScenarios .leak-scenario-chip')).toHaveCount(5);
+  await expect(page.locator('#leakMapStage .leak-path-row')).toHaveCount(5);
+  await expect(page.locator('#leakMapStage')).not.toHaveClass(/is-static/);
+  await expect(page.locator('[data-leak-lens="with"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#leakMapStage .leak-path-row.is-selected')).toHaveAttribute('data-leak-scenario', 'member-data');
+  await expect(page.locator('#leakMapInspector')).toContainText('What happened');
+  await expect(page.locator('#leakMapInspector')).toContainText('What would have leaked');
+  await expect(page.locator('#leakMapInspector')).toContainText('What stopped it');
+  await expect(page.locator('#leakMapInspector')).toContainText('What proof exists');
+  await expect(page.locator('#leakMapInspector')).toContainText('Hard stop before egress');
+
+  // Scenario toggle updates the selected path and inspector.
+  await page.locator('#leakMapScenarios [data-leak-pick="mcp-pull"]').click();
+  await expect(page.locator('#leakMapStage .leak-path-row.is-selected')).toHaveAttribute('data-leak-scenario', 'mcp-pull');
+  await expect(page.locator('#leakMapInspector')).toContainText('MCP document pull path — with PromptWall');
+  await expect(page.locator('#leakMapStage .leak-path-row.is-selected .leak-verdict')).toContainText('Redacted');
+
+  // Before PromptWall lens removes the control point and the proof.
+  await page.locator('[data-leak-lens="before"]').click();
+  await expect(page.locator('[data-leak-lens="before"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#leakMapStage .leak-path-row.is-selected .leak-node.is-absent')).toContainText('No control point');
+  await expect(page.locator('#leakMapInspector')).toContainText('no control point exists on this path');
+  await expect(page.locator('#leakMapInspector')).toContainText('Without a gateway there is no record');
+
+  // Node click drills into the clicked hop.
+  await page.locator('#leakMapStage .leak-path-row.is-selected [data-leak-node="outcome"]').click();
+  await expect(page.locator('#leakMapInspector')).toContainText('Outcome with no control in the path');
+
+  await page.locator('[data-leak-lens="with"]').click();
+  await expect(page.locator('#leakMapInspector')).toContainText('Connector payload transformed before model access');
+
+  // Sanitized only: the held prompt's SSN must never surface in the map.
+  expect(await page.locator('#tab-monitor').textContent()).not.toContain('524-71-');
+
+  // CTA routes into the approval queue.
+  await page.locator('#leakMapScenarios [data-leak-pick="member-data"]').click();
+  await page.locator('#leakMapInspector [data-tab-jump="queue"]').click();
+  await expect(page.locator('#tab-queue')).toBeVisible();
+  await page.locator('.rail .tab[data-tab="monitor"]').click();
+  await expect(page.locator('#tab-monitor')).toBeVisible();
+
+  // Reduced motion disables the payload pulse on re-render.
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.locator('[data-leak-lens="before"]').click();
+  await expect(page.locator('#leakMapStage')).toHaveClass(/is-static/);
+  await expect(page.locator('.leak-pulse').first()).toHaveCSS('animation-name', 'none');
+
   expect(problems).toEqual([]);
 });
 

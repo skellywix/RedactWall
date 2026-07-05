@@ -69,6 +69,7 @@ test('admin public assets stay within transfer budgets', () => {
     { path: 'server/public/market-hardening.js', maxRawBytes: 8_000, maxGzipBytes: 3_000 },
     { path: 'server/public/competitive-readiness.js', maxRawBytes: 8_000, maxGzipBytes: 3_000 },
     { path: 'server/public/control-graph.js', maxRawBytes: 8_000, maxGzipBytes: 3_000 },
+    { path: 'server/public/leak-path-map.js', maxRawBytes: 16_000, maxGzipBytes: 5_500 },
     { path: 'server/public/coverage-file-flow.js', maxRawBytes: 8_000, maxGzipBytes: 3_000 },
     { path: 'server/public/decision-quality.js', maxRawBytes: 8_000, maxGzipBytes: 3_000 },
     { path: 'server/public/detector-feedback.js', maxRawBytes: 8_000, maxGzipBytes: 3_000 },
@@ -77,8 +78,8 @@ test('admin public assets stay within transfer budgets', () => {
     { path: 'server/public/login.js', maxRawBytes: 6_000, maxGzipBytes: 2_500 },
   ]);
 
-  assertWithin('admin public assets raw total', totals.rawBytes, 408_000);
-  assertWithin('admin public assets gzip total', totals.gzipBytes, 100_000);
+  assertWithin('admin public assets raw total', totals.rawBytes, 424_000);
+  assertWithin('admin public assets gzip total', totals.gzipBytes, 105_500);
 });
 
 test('browser extension assets stay within install package budgets', () => {
