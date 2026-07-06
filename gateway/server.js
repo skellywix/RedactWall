@@ -78,12 +78,38 @@ function redactBodyLocally(body) {
     }
     return next;
   }
+  const tokArray = (arr) => arr.map((p) => (typeof p === 'string' ? tok(p) : p));
   const out = { ...body };
   if (Array.isArray(body.messages)) {
     out.messages = body.messages.map(tokMessage);
   } else if (typeof body.prompt === 'string') { out.prompt = tok(body.prompt); }
+  else if (Array.isArray(body.prompt)) { out.prompt = tokArray(body.prompt); }
   else if (typeof body.input === 'string') { out.input = tok(body.input); }
+  else if (Array.isArray(body.input)) { out.input = tokArray(body.input); }
   return { body: out, map, tokenCount: Object.keys(map).length };
+}
+
+// A redact verdict must never forward raw PII the control plane flagged. The
+// gateway redacts locally with DEFAULT detector options, so custom-detector /
+// exact-match (EDM) hits — which fired under the control plane's policy options
+// but are invisible to a default analyze — would otherwise slip through. Fail
+// closed when local redaction can't reproduce what the plane reported, or when a
+// redact verdict extracted text yet tokenized nothing.
+function redactionCoversVerdict(promptText, redacted, verdict) {
+  const reported = Array.isArray(verdict.findings) ? verdict.findings.length : 0;
+  if (!reported) return true; // no detector-level findings to reproduce
+  if (redacted.tokenCount === 0) return false;
+  return detect.analyze(promptText).findings.length >= reported;
+}
+
+// The gateway redacts a leaked response locally (full length, per choice). That
+// is only safe when local default detection reproduces everything the control
+// plane flagged. A semantic category or custom/EDM detector the gateway can't
+// see means local redaction would leave raw values in the body — withhold it.
+function responseRedactionCovers(respText, scan) {
+  if (Array.isArray(scan.categories) && scan.categories.length) return false;
+  const reported = Array.isArray(scan.findings) ? scan.findings.length : 0;
+  return detect.analyze(respText).findings.length >= reported;
 }
 
 const BLOCK_STATUSES = new Set([
@@ -145,6 +171,15 @@ function createGateway(overrides = {}) {
     const wantsStream = body.stream === true && kind !== 'embeddings';
     const promptText = adapter.requestText(body);
 
+    // Fail closed on ANY content the gateway cannot scan (image/binary parts,
+    // token-id arrays) — even when other parts carry scannable text, so a PII
+    // image alongside a caption is never forwarded ungated.
+    if (canonical.carriesUnscannableContent(body)) {
+      metrics.blocked += 1;
+      metrics.failClosed += 1;
+      return res.status(403).json(openAiError('Request carries content RedactWall could not scan; blocked', 'unscannable_content'));
+    }
+
     // 1. Gate the prompt (fail-closed).
     let redactMap = null;
     let outboundBody = body;
@@ -162,18 +197,19 @@ function createGateway(overrides = {}) {
       if (verdict.decision === 'redact') {
         // Tokenize every role locally so no raw PII in any message reaches upstream.
         const redacted = redactBodyLocally(body);
+        if (!redactionCoversVerdict(promptText, redacted, verdict)) {
+          // Local redaction could not reproduce what the plane flagged (custom
+          // detectors / EDM, or an unhandled shape). Never forward raw PII.
+          metrics.blocked += 1;
+          metrics.failClosed += 1;
+          return res.status(403).json(openAiError('Prompt requires redaction the gateway could not fully apply; blocked', 'incomplete_redaction', verdict.reasons));
+        }
         outboundBody = redacted.body;
         redactMap = redacted.tokenCount ? redacted.map : null;
         metrics.redacted += 1;
       } else {
         metrics.allowed += 1;
       }
-    } else if (canonical.carriesUnscannableContent(body)) {
-      // Content present but no scannable text (e.g. image parts). Fail closed —
-      // never forward ungated content upstream.
-      metrics.blocked += 1;
-      metrics.failClosed += 1;
-      return res.status(403).json(openAiError('Request carries content RedactWall could not scan; blocked', 'unscannable_content'));
     } else {
       metrics.allowed += 1;
     }
@@ -187,7 +223,7 @@ function createGateway(overrides = {}) {
 
     // 3. Scan the model output BEFORE it reaches the caller (fail-closed).
     let outJson = up.json;
-    let respText = adapter.responseText(outJson);
+    const respText = adapter.responseText(outJson);
     if (respText && respText.trim()) {
       const scan = await client.scanResponse({
         text: respText, user: identity.user, orgId: identity.orgId,
@@ -197,18 +233,25 @@ function createGateway(overrides = {}) {
         metrics.responseBlocked += 1;
         return res.status(403).json(openAiError('Model response blocked by RedactWall policy', 'response_blocked_by_redactwall', scan.reasons));
       }
-      if (scan.decision === 'redact' && typeof scan.redacted === 'string') {
-        outJson = adapter.applyResponseText(outJson, scan.redacted);
-        respText = scan.redacted;
+      if (scan.decision === 'redact') {
+        // Redact the FULL output locally, per choice — NOT the control plane's
+        // `redacted` field, which is a 600-char audit preview (truncates long
+        // answers) applied only to choices[0] (leaves n>1 choices raw). Withhold
+        // the whole response if the plane flagged a semantic category or
+        // detectors the gateway cannot reproduce locally.
+        if (!responseRedactionCovers(respText, scan)) {
+          metrics.responseBlocked += 1;
+          return res.status(403).json(openAiError('Model response withheld by RedactWall policy', 'response_blocked_by_redactwall', scan.reasons));
+        }
+        outJson = canonical.mapResponseText(outJson, (t) => detect.redact(t, detect.analyze(t).findings));
         metrics.responseRedacted += 1;
       }
     }
 
-    // 4. If the request was tokenized, rehydrate the (scanned) response locally —
-    // the token map never left the gateway.
+    // 4. If the request was tokenized, rehydrate the (scanned) response locally,
+    // in every choice — the token map never left the gateway.
     if (redactMap) {
-      const rehydrated = detect.detokenize(respText, redactMap);
-      if (rehydrated !== respText) outJson = adapter.applyResponseText(outJson, rehydrated);
+      outJson = canonical.mapResponseText(outJson, (t) => detect.detokenize(t, redactMap));
     }
 
     if (wantsStream) return streamJson(res, outJson, kind);
@@ -226,16 +269,29 @@ function createGateway(overrides = {}) {
     const model = json.model || 'redactwall-gateway';
     const base = { id: json.id || 'gw', object: kind === 'completions' ? 'text_completion' : 'chat.completion.chunk', model };
     const delta = kind === 'completions' ? { text: content } : { choices: [{ index: 0, delta: { role: 'assistant', content }, finish_reason: null }] };
+    const stop = kind === 'completions' ? { index: 0, text: '', finish_reason: 'stop' } : { index: 0, delta: {}, finish_reason: 'stop' };
     res.write('data: ' + JSON.stringify({ ...base, ...(kind === 'completions' ? { choices: [{ index: 0, text: content, finish_reason: null }] } : delta) }) + '\n\n');
-    res.write('data: ' + JSON.stringify({ ...base, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] }) + '\n\n');
+    res.write('data: ' + JSON.stringify({ ...base, choices: [stop] }) + '\n\n');
     res.write('data: [DONE]\n\n');
     res.end();
   }
 
   app.get('/healthz', (req, res) => res.json({ status: 'ok', service: 'redactwall-gateway', provider: cfg.provider }));
-  app.get('/readyz', async (req, res) => {
+  // Readiness probe WITHOUT creating control-plane records. A real gate() call
+  // logs an 'allowed' query, audit entry, receipt and SSE broadcast on every
+  // k8s/LB probe (and, being unauthenticated, is a write-amplification vector).
+  // Prefer a non-persisting health check; fall back to gate() only for injected
+  // test clients that predate health().
+  async function probeReady() {
+    if (typeof client.health === 'function') {
+      const h = await client.health();
+      return !!(h && h.ok);
+    }
     const verdict = await client.gate({ prompt: 'redactwall gateway readiness probe', user: 'gateway@readyz', destination: destinationLabel(), source: 'ai_gateway', channel: 'readyz' });
-    const ready = !verdict._failClosed;
+    return !verdict._failClosed;
+  }
+  app.get('/readyz', async (req, res) => {
+    const ready = await probeReady();
     res.status(ready ? 200 : 503).json({ ready, controlPlane: ready });
   });
   app.get('/metrics', (req, res) => res.json({ uptimeSec: Math.round(process.uptime()), provider: cfg.provider, ...metrics }));

@@ -116,9 +116,21 @@ function normalizeDestination(raw, index) {
   };
 }
 
+// dispatch() runs on the request path of every alert-worthy gated prompt, so
+// re-reading and re-parsing config/subscriptions.json per call adds synchronous
+// disk I/O to the busiest fan-out moment. Cache the normalized list and
+// invalidate on the file's mtime+size, matching the other data-only packs.
+let _cache = null;
+
 function destinations() {
+  let stat = null;
+  try { stat = fs.statSync(CONFIG_PATH); } catch { /* no file: no destinations */ }
+  const sig = stat ? `${stat.mtimeMs}:${stat.size}` : 'none';
+  if (_cache && _cache.sig === sig) return _cache.dests;
   const list = loadRaw().destinations || [];
-  return list.map(normalizeDestination).filter(Boolean);
+  const dests = list.map(normalizeDestination).filter(Boolean);
+  _cache = { sig, dests };
+  return dests;
 }
 
 function matches(dest, alert) {

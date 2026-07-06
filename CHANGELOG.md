@@ -11,6 +11,23 @@ reconstructed from `ITERATIONS.md` and git history.
 
 ### Added
 
+- **React admin console reaches full parity.** All 16 operator views are ported
+  to the Vite/React/TypeScript console served at `/app`: Overview, Approval
+  Queue, AI Command Center, All Activity, Insights, Sensor Coverage, Data
+  Lineage, Decision Quality, App Catalog, Compliance, Identity, Configuration,
+  Deploy, Integrations, Audit Log, and Updates — each wired to the same backend
+  routes the legacy console uses. Shell chrome landed too: grouped
+  Operate/Analyze/Govern/System navigation with per-tab icons and a live
+  pending-count badge, a Ctrl/Cmd-K command palette, LIVE + last-updated
+  indicators, sign out, and the system-status footer. The legacy design system
+  (font tokens, base typography, leak-map animation, selector styling) was
+  extracted verbatim from the inline `index.html` styles into the shared
+  `server/public/console-base.css`, which both consoles now link, so light/dark
+  theming (dark default) and every component render identically. Queue
+  reassignment, the per-query audit trail, and the billing/seats surface that
+  were absent from earlier console increments are restored. Evidence:
+  `e2e/console-parity.spec.js` (all routes, zero console errors) and
+  `e2e/console-design.spec.js` (dark+light screenshots of every view).
 - Bundled offline WASM OCR fallback for the endpoint agent (`tesseract.js` as an
   optional dependency, with `eng.traineddata` language data vendored under
   `sensors/endpoint-agent/tessdata/`). When no native `tesseract` is present the
@@ -44,6 +61,54 @@ reconstructed from `ITERATIONS.md` and git history.
 - `STATUS.md` restructured into a lean live TODO list; historical pass logs
   preserved in git history.
 - `README.md` admin-console description updated to the current tab set.
+- Unsupported / unscannable file uploads now **fail closed**: `scan-file` records
+  a new terminal `file_blocked_unscanned` status (was `flagged`/`allow`) so a
+  renamed or unparseable file can no longer leave uninspected.
+
+### Security
+
+- A full-repo, line-by-line audit (18 scopes, adversarially verified) fixed 131
+  confirmed defects. Data-safety highlights:
+  - Policy: the admin ignore list was passed into detection, disabling those
+    detectors — so a hard-stop (`alwaysBlock`) type placed on the ignore list
+    was never detected and raw regulated PII could clear to send. Hard-stop
+    types are now excluded from the detection-time ignore list.
+  - AI Gateway: on a `redact` verdict, array-form `prompt`/`input` was forwarded
+    raw, local redaction ran without policy/EDM options, the model response was
+    replaced by a truncated audit preview, and with `n>1` only the first choice
+    was rewritten (others returned raw PII). All response choices and inputs are
+    now redacted/detokenized with full policy coverage.
+  - The endpoint agent parsed attacker-controlled files in-process, bypassing
+    the killable parse-pool isolation; extraction now routes through the pool so
+    a crafted archive/PDF is SIGKILL-preempted instead of wedging the agent.
+  - The browser extension now scans files pasted from the clipboard (e.g. a
+    screenshot), which previously bypassed upload inspection.
+  - Postgres row-level tenant isolation added in migration v3 was inert
+    (`setTenantContext` was never called); it is now wired via
+    `db.wireTenantContext` for the customer-silo tenant model.
+
+### Fixed
+
+- Postgres storage bridge: literal-aware identifier quoting (migration v3 no
+  longer NULLs `orgId`), and per-call sequence tags so a single bridge timeout
+  no longer desynchronizes every subsequent request/reply.
+- SMTP: a mid-transaction socket error no longer crashes the process (a
+  persistent error handler now survives the session).
+- Detection engine: `detectStructured` no longer spins forever on a zero-length
+  custom-detector match on the per-keystroke hot path, and `US_DRIVERS_LICENSE`
+  no longer fires on any word following "license" (eval floors unchanged at
+  100% precision/recall).
+- Long-running agents: an un-awaited `response.json()` inside `try/catch` in the
+  endpoint agent and MCP guard no longer becomes an unhandled rejection.
+- Docker: the runtime image now copies `gateway/`, so the compose gateway
+  profile no longer crash-loops; CI smoke-tests the gateway image.
+- Console: OIDC-authenticated admins keep approve/reveal/bulk past the 5-minute
+  step-up window (re-verify via `/api/auth/step-up`, bounce to the IdP when
+  required); pivot routes carrying a query string now resolve to the right view.
+- Roughly fifty further medium/low correctness, performance, and
+  prototype-pollution fixes; high-severity items carry node:test regression
+  tests. Verified green: `npm test`, detector eval floors, `sync-check`,
+  console build, and all four Playwright suites.
 
 ### Removed
 

@@ -43,8 +43,20 @@ function main() {
   const minLen = Math.max(4, Number(arg('min-len', 6)) || 6);
   const severity = Math.max(1, Math.min(4, Number(arg('severity', 4)) || 4));
 
+  const priorFingerprints = Array.isArray(existing.fingerprints) ? existing.fingerprints : [];
+  // Merging is only sound when the salt matches: fingerprints hashed under a
+  // different salt can never match at detection time, so silently carrying them
+  // forward under the new salt would leave dead, unmatchable entries.
+  if (existing.salt && existing.salt !== salt && priorFingerprints.length) {
+    throw new Error(
+      `--salt differs from the salt already in ${outPath}; its ${priorFingerprints.length} existing ` +
+      'fingerprints were hashed with the previous salt and would become unmatchable. Re-fingerprint the ' +
+      'full value list into a fresh --out, or omit --salt to reuse the existing one.'
+    );
+  }
+
   const values = readInput().split(/\r?\n/).map((v) => v.trim()).filter(Boolean);
-  const set = new Set(Array.isArray(existing.fingerprints) ? existing.fingerprints : []);
+  const set = new Set(priorFingerprints);
   let added = 0;
   for (const value of values) {
     if (value.replace(/\s+/g, '').length < minLen) continue;
@@ -60,4 +72,9 @@ function main() {
   process.stdout.write(`EDM watchlist written to ${outPath}\n  values read: ${values.length}\n  fingerprints added: ${added}\n  total fingerprints: ${set.size}\n  (plaintext discarded; only salted one-way hashes are stored)\n`);
 }
 
-main();
+try {
+  main();
+} catch (e) {
+  process.stderr.write(`${e && e.message ? e.message : e}\n`);
+  process.exit(1);
+}

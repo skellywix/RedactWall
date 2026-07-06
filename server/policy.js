@@ -381,7 +381,18 @@ function normalizeMcpToolList(value) {
   return normalizeSafeRoutingTextList(value, MCP_TOOL_RE, 200);
 }
 
+// Marks a policy object as already normalized so hot callers (evaluate,
+// effectivePolicyForContext) and batch callers (policy-impact) can skip a
+// redundant re-normalization. Non-enumerable so it never leaks into JSON,
+// audit diffs, or deep-equality comparisons.
+const NORMALIZED = Symbol('normalizedPolicy');
+
+function isNormalizedPolicy(policy) {
+  return !!(policy && policy[NORMALIZED]);
+}
+
 function normalizePolicy(p = {}) {
+  if (isNormalizedPolicy(p)) return p;
   const scanner = {
     ...DEFAULT_POLICY.scanner,
     ...((p && p.scanner) || {}),
@@ -395,7 +406,7 @@ function normalizePolicy(p = {}) {
   scanner.maxFileBytes = hasConfiguredMaxFileBytes && Number.isFinite(maxFileBytes)
     ? Math.max(1024, Math.min(50 * 1024 * 1024, Math.round(maxFileBytes)))
     : DEFAULT_POLICY.scanner.maxFileBytes;
-  return {
+  const normalized = {
     ...DEFAULT_POLICY,
     ...(p || {}),
     approvalRoutingRules: normalizeApprovalRoutingRules((p || {}).approvalRoutingRules),
@@ -412,6 +423,8 @@ function normalizePolicy(p = {}) {
     corporateAiAccounts: normalizeCorporateAiAccounts((p || {}).corporateAiAccounts),
     scanner,
   };
+  Object.defineProperty(normalized, NORMALIZED, { value: true });
+  return normalized;
 }
 
 const PERSONAL_ACCOUNT_ACTIONS = ['allow', 'coach', 'block'];
@@ -514,9 +527,25 @@ function savePolicy(p) {
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(normalizePolicy(p), null, 2));
 }
 
+// Every hard-stop (alwaysBlock) type, including per-scope additions. These must
+// never be disabled at detection time by the ignore list — a disabled detector
+// produces no finding, so the evaluate()-level hard-stop guard could never fire
+// and raw regulated PII would be cleared to send.
+function alwaysBlockTypes(policy = loadPolicy()) {
+  const types = new Set(policy.alwaysBlock || DEFAULT_POLICY.alwaysBlock || []);
+  for (const scope of policy.policyScopes || []) {
+    for (const type of scope.alwaysBlockAdd || []) types.add(type);
+  }
+  return types;
+}
+
 function analyzeOpts(policy = loadPolicy()) {
+  const alwaysBlock = alwaysBlockTypes(policy);
   const opts = {
-    ignore: policy.ignore || [],
+    // Strip hard-stop types from the detection-time ignore list: ignoring a
+    // hard-stop entity only removes it from scoring (handled in evaluate), it
+    // must never suppress the detector itself.
+    ignore: (policy.ignore || []).filter((type) => !alwaysBlock.has(type)),
     disabledDetectors: policy.disabledDetectors || [],
     customDetectors: customDetectors.loadCustomDetectors(),
   };
@@ -779,7 +808,12 @@ function evaluate(analysis, policy = loadPolicy(), context = {}, options = {}) {
     reasons.push(citedReason('Severity ' + analysis.maxSeverityLabel + ' >= policy minimum', driver && driver.type));
   }
   if (analysis.riskScore >= effective.blockRiskScore) reasons.push('Risk score ' + analysis.riskScore + ' >= ' + effective.blockRiskScore);
-  if ((effective.appliedPolicyScopes || []).length) reasons.push('Policy scope matched: ' + effective.appliedPolicyScopes.join(', '));
+  // A matched scope only annotates an already-blocking decision — it must not by
+  // itself convert a sub-threshold detection into a block. Scope telemetry for
+  // allowed decisions is still carried via policyScopeIds below.
+  if (reasons.length && (effective.appliedPolicyScopes || []).length) {
+    reasons.push('Policy scope matched: ' + effective.appliedPolicyScopes.join(', '));
+  }
 
   const exception = reasons.length && !hardStop ? activePolicyException(effective, analysis, context, options) : null;
   if (exception && exception.action === 'allow') {

@@ -438,7 +438,28 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 // ---- Shadow-AI discovery -----------------------------------------------------
 // Flag visits to AI tools that policy does NOT govern (so an examiner sees the
 // unmonitored paths, not just the guarded ones). Throttled to once/host/12h.
-const seenShadow = {};
+const SHADOW_TTL_MS = 12 * 3600 * 1000;
+const SHADOW_SEEN_KEY = 'shadowSeen';
+
+// The throttle map must survive MV3 service-worker suspension (~30s idle), or
+// every wake re-reports the same host. chrome.storage.session persists for the
+// browser session across worker restarts; fall back to local where it is absent.
+function shadowThrottleStore() {
+  return (chrome.storage && chrome.storage.session) || chrome.storage.local;
+}
+
+async function shadowSeenRecently(host, now) {
+  const store = shadowThrottleStore();
+  const seen = (await store.get(SHADOW_SEEN_KEY))[SHADOW_SEEN_KEY] || {};
+  if (seen[host] && now - seen[host] < SHADOW_TTL_MS) return true;
+  seen[host] = now;
+  for (const h of Object.keys(seen)) {
+    if (now - seen[h] >= SHADOW_TTL_MS) delete seen[h];
+  }
+  await store.set({ [SHADOW_SEEN_KEY]: seen });
+  return false;
+}
+
 chrome.tabs?.onUpdated.addListener(async (tabId, info, tab) => {
   if (info.status !== 'complete' || !tab || !tab.url || !self.PSAdapters) return;
   let host; try { host = new URL(tab.url).hostname; } catch (e) { return; }
@@ -452,8 +473,7 @@ chrome.tabs?.onUpdated.addListener(async (tabId, info, tab) => {
   ];
   if (!self.PSAdapters.isAiHost(host) || self.PSAdapters.isGoverned(host, governed)) return;
   const now = Date.now();
-  if (seenShadow[host] && now - seenShadow[host] < 12 * 3600 * 1000) return;
-  seenShadow[host] = now;
+  if (await shadowSeenRecently(host, now)) return;
   const [sc, who] = await Promise.all([serverCfg(), identity()]);
   if (!sc.enabled) return;
   if (missingServerConfigReason(sc)) return;

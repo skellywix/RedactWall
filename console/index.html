@@ -4,10 +4,15 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="stylesheet" href="/console-base.css" />
     <link rel="stylesheet" href="/console-theme.css" />
     <title>RedactWall Console</title>
   </head>
-  <body>
+  <!-- Dark is the default theme, hardcoded here so first paint is dark with no
+       flash and zero JS — matching the legacy console (<body data-theme="dark">).
+       The persisted choice is applied from the bundled main.tsx (script-src is
+       'self'; inline scripts are blocked by CSP, so no inline boot script). -->
+  <body data-theme="dark">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

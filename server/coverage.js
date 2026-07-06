@@ -821,12 +821,15 @@ function summarize(rows, pol) {
         state: desktopCollector.events ? 'covered' : 'attention',
         detail: desktopCollector.events ? `${desktopCollector.events} protected uploads` : 'no protected uploads',
       },
-      {
+      // When mcp_guard is a required sensor it already has a posture row from the
+      // required-sensor loop above; only add this activity row otherwise so ids
+      // stay unique.
+      ...(requiredSources.includes('mcp_guard') ? [] : [{
         id: 'mcp_guard',
         label: 'MCP guard',
         state: (sensorCounts.get('mcp_guard') || {}).events ? 'covered' : 'attention',
         detail: `${(sensorCounts.get('mcp_guard') || {}).events || 0} events`,
-      },
+      }]),
       {
         id: 'shadow_ai',
         label: 'Shadow AI',

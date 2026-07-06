@@ -1,0 +1,25 @@
+/* Deploy view. Every color comes from the shared theme tokens in
+   server/public/console-theme.css; rules are scoped under .deploy-view so
+   parallel views cannot collide. Package cards reuse the legacy
+   .q / .queue-mainline / .chips / .deploy-install classes; download history
+   reuses .inspector-grid / .inspector-field. */
+
+.deploy-view {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+}
+
+/* Legacy set cursor:default inline on each card — .q normally styles a
+   clickable queue row; these cards are read-only. */
+.deploy-view .q {
+  cursor: default;
+}
+
+/* Frame the flush card list inside the padded panel body (same treatment as
+   the audit table wrap). */
+.deploy-list {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}

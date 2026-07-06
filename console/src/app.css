@@ -1,65 +1,81 @@
 /* Console shell layout. Design tokens (--bg, --panel, --line, --txt, --soft,
-   --mut, --blue, severity colors) come from the shared console-theme.css so
-   the new console inherits the same instrument styling as the legacy one. */
+   --mut, --blue, severity colors) plus base typography and every component
+   class come from the shared console-base.css + console-theme.css, loaded
+   before this file so the new console inherits the legacy instrument styling.
+   The rail/topbar internals (.brand, .tabs, .tab, .badge, .rail-group-label,
+   .rail-status, .status-line, .status-chip, .search, .live, .last-updated,
+   .who, .ghost, .theme-toggle, .cmdk*) reuse those legacy classes verbatim;
+   this file only owns the shell skeleton around them.
+
+   `.app-shell` is also a legacy class (centered 1480px grid); this file loads
+   after both shared sheets, so the flex layout below wins `display`, but we
+   must also reset the leaked box-model (width/margin/padding/gap) explicitly. */
 
 .app-shell {
   display: flex;
   min-height: 100vh;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  gap: 0;
   background: var(--bg);
   color: var(--txt);
 }
 
+/* ---- Rail: legacy sidebar internals inside the app-shell skeleton --------- */
+
 .app-rail {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  width: 208px;
+  gap: 14px;
+  width: 232px;
   flex-shrink: 0;
-  padding: 14px 10px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  scrollbar-width: none;
+  padding: 16px 12px 12px;
   border-right: 1px solid var(--line);
-}
-
-.app-brand {
-  display: flex;
-  flex-direction: column;
-  padding: 4px 8px 14px;
-}
-
-.app-brand-name {
-  font-weight: 700;
-  letter-spacing: 0.04em;
-}
-
-.app-brand-sub {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  color: var(--mut);
-}
-
-.app-nav {
-  display: block;
-  padding: 7px 8px;
-  border-left: 2px solid transparent;
-  color: var(--soft);
-  text-decoration: none;
-}
-
-.app-nav:hover {
-  color: var(--txt);
-}
-
-.app-nav.active {
-  border-left-color: var(--blue);
-  color: var(--txt);
   background: var(--panel2);
 }
 
-.app-nav-legacy {
-  margin-top: auto;
-  font-size: 12px;
-  color: var(--mut);
+.app-rail::-webkit-scrollbar {
+  display: none;
 }
+
+/* console-theme hides .rail-group-label under 1180px and strips .rail-status
+   spacing for its own bar-shell layout; restore both for this sidebar. */
+.app-rail .rail-group-label {
+  display: block;
+}
+
+.app-rail .tabs {
+  gap: 12px;
+}
+
+.app-rail-group {
+  display: grid;
+  gap: 2px;
+}
+
+.app-rail .rail-status {
+  margin-top: auto;
+  border-top: 1px solid var(--line);
+  padding: 12px 4px 2px;
+  display: grid;
+  gap: 9px;
+}
+
+.app-rail .status-line {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0 4px;
+}
+
+/* ---- Workspace ------------------------------------------------------------ */
 
 .app-main {
   flex: 1;
@@ -69,15 +85,24 @@
 }
 
 .app-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 9;
   display: flex;
-  justify-content: flex-end;
-  padding: 10px 18px;
+  align-items: center;
+  gap: 12px;
+  min-height: 56px;
+  padding: 8px 18px;
   border-bottom: 1px solid var(--line);
+  background: var(--topbar-bg);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
 }
 
-.app-who {
-  font-size: 12px;
-  color: var(--mut);
+/* The search box is a palette launcher, not a text field. */
+.app-topbar .search,
+.app-topbar .search input {
+  cursor: pointer;
 }
 
 .app-content {
@@ -85,6 +110,15 @@
   display: grid;
   gap: 16px;
   align-content: start;
+}
+
+/* console-base.css:891 gives bare .wide-panel `grid-column:1 / span 2`,
+   assuming the legacy 2-column grids it lived in. View roots here are
+   single-column grids, where that span conjures an implicit skinny second
+   column and shoves siblings into it. Reset the span for direct children of a
+   view root only — .insights-grid descendants keep the legacy 2-col span. */
+.app-content > * > .wide-panel {
+  grid-column: auto;
 }
 
 .app-panel {
@@ -125,26 +159,51 @@
   font-size: 13px;
 }
 
-@media (max-width: 760px) {
+@media (max-width: 900px) {
   .app-shell {
     flex-direction: column;
   }
 
   .app-rail {
     width: auto;
-    flex-direction: row;
-    flex-wrap: wrap;
-    align-items: center;
+    position: static;
+    height: auto;
     border-right: 0;
     border-bottom: 1px solid var(--line);
+    gap: 10px;
   }
 
-  .app-brand {
-    padding: 4px 8px;
+  .app-rail .rail-group-label {
+    display: none;
   }
 
-  .app-nav-legacy {
+  .app-rail .tabs {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .app-rail-group {
+    display: contents;
+  }
+
+  .app-rail .tab {
+    width: auto;
+    white-space: nowrap;
+  }
+
+  .app-rail .rail-status {
     margin-top: 0;
-    margin-left: auto;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .app-topbar {
+    flex-wrap: wrap;
+  }
+
+  .app-topbar .search {
+    order: 3;
+    flex-basis: 100%;
+    max-width: none;
   }
 }

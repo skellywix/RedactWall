@@ -666,9 +666,10 @@ function assetDiscoveryReadiness({ policy, coverageReport }) {
     ...((coverageReport && coverageReport.shadowDestinations) || []),
     ...((coverageReport && coverageReport.ungovernedDestinations) || []),
   ];
-  const catalogLastSeen = latestTimestamp(catalogRows.map((row, index) => ({
-    createdAt: row.lastSeen || (coverageReport && coverageReport.generatedAt) || `1970-01-01T00:00:0${index}.000Z`,
-  })));
+  // Only real row timestamps count as evidence. Falling back to generatedAt
+  // (now) or a synthetic 1970 stamp fabricated proof dates that changed every
+  // request; latestTimestamp already returns null when nothing real is present.
+  const catalogLastSeen = latestTimestamp(catalogRows.map((row) => ({ createdAt: row.lastSeen || '' })));
   let score = add(20, governedTotal)
     + add(15, governedActive)
     + add(15, discoverySources >= 2 || shadowEvents)

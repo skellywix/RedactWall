@@ -18,6 +18,7 @@ export default defineConfig({
       '/api': { target: backend, changeOrigin: false },
       '/login.html': backend,
       '/login.js': backend,
+      '/console-base.css': backend,
       '/console-theme.css': backend,
       '/favicon.svg': backend,
     },

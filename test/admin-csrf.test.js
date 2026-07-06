@@ -8,6 +8,10 @@ const path = require('path');
 const root = path.join(__dirname, '..');
 const server = fs.readFileSync(path.join(root, 'server/app.js'), 'utf8');
 const index = fs.readFileSync(path.join(root, 'server', 'public', 'index.html'), 'utf8');
+// The console base stylesheet is linked by index.html; feature styling that
+// used to live in the inline <style> now lives here (shared with the new
+// console). CSS-class presence checks read this file.
+const baseCss = fs.readFileSync(path.join(root, 'server', 'public', 'console-base.css'), 'utf8');
 const dashboard = fs.readFileSync(path.join(root, 'server', 'public', 'dashboard.js'), 'utf8');
 const loginHtml = fs.readFileSync(path.join(root, 'server', 'public', 'login.html'), 'utf8');
 const loginJs = fs.readFileSync(path.join(root, 'server', 'public', 'login.js'), 'utf8');
@@ -115,7 +119,7 @@ test('dashboard exposes retention settings and manual purge control', () => {
 });
 
 test('dashboard exposes scoped policy and exception editors', () => {
-  assert.match(index, /policy-advanced-grid/);
+  assert.match(baseCss, /policy-advanced-grid/);
   assert.match(index, /policy-builder-grid/);
   assert.match(dashboard, /function shortPolicyValue/);
   assert.match(dashboard, /function policyMatcherSummary/);
@@ -201,7 +205,7 @@ test('dashboard recovers approval queue from a stalled pending fetch', () => {
 
 test('dashboard exposes compact queue viewing controls', () => {
   assert.match(index, /id="toggleQueueDensity"/);
-  assert.match(index, /queue-density-compact/);
+  assert.match(baseCss, /queue-density-compact/);
   assert.match(dashboard, /function applyQueueDensity/);
   assert.match(dashboard, /redactwall\.queueDensity/);
   assert.match(dashboard, /aria-pressed/);

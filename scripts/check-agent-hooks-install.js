@@ -83,12 +83,14 @@ function main(argv = process.argv.slice(2), deps = {}) {
   else {
     for (const c of report.checks) io.log(`${c.ok ? '✓' : '✗'} ${c.id} — ${c.detail}`);
   }
+  // Set the failure exit code first so a broken install still fails the gate
+  // even when --heartbeat returns early after a successful post.
+  if (failed.length) setExitCode(1);
   if (argv.includes('--heartbeat')) {
     return (deps.emitHeartbeat || emitHeartbeat)(report, {})
       .then((res) => { io.log('heartbeat sent'); return res; })
       .catch((e) => { io.error(e.message); setExitCode(1); });
   }
-  if (failed.length) setExitCode(1);
   return report;
 }
 

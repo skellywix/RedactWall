@@ -153,7 +153,7 @@ test('main dispatches create, verify, and restore commands with JSON output', as
   assert.deepStrictEqual(calls, [
     ['create', { outDir: 'out-dir', file: 'backup.db', manifestFile: 'manifest.json', force: true }],
     ['verify', { file: 'backup.db', manifestFile: 'manifest.json' }],
-    ['restore', { file: 'backup.db', to: 'restore.db', force: true }],
+    ['restore', { file: 'backup.db', to: 'restore.db', manifestFile: undefined, force: true }],
   ]);
   assert.strictEqual(JSON.parse(io.lines[0]).command, 'create');
   assert.strictEqual(JSON.parse(io.lines[1]).command, 'verify');

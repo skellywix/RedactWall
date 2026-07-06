@@ -13,7 +13,7 @@ const serverRoot = path.join(root, 'server');
 function copyDbRuntime(tempRoot) {
   const tempServer = path.join(tempRoot, 'server');
   fs.mkdirSync(tempServer, { recursive: true });
-  for (const file of ['db.js', 'env.js', 'audit-integrity.js']) {
+  for (const file of ['db.js', 'env.js', 'audit-integrity.js', 'tenant.js']) {
     fs.copyFileSync(path.join(serverRoot, file), path.join(tempServer, file));
   }
   fs.cpSync(path.join(serverRoot, 'storage'), path.join(tempServer, 'storage'), { recursive: true });

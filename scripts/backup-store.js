@@ -210,7 +210,11 @@ function verifyPgBackup({ file, manifestFile } = {}) {
   const manifest = manifestFile
     ? JSON.parse(fs.readFileSync(path.resolve(manifestFile), 'utf8'))
     : readManifest(dumpPath);
-  const manifestOk = !manifest || manifest.backupSha256 === backupSha256;
+  // A missing manifest is not a pass: without it the dump is unverifiable, so
+  // restorePgBackup must refuse (or require an explicit override) rather than
+  // load a possibly-tampered archive over the target database.
+  const unverifiable = !manifest;
+  const manifestOk = !unverifiable && manifest.backupSha256 === backupSha256;
   return {
     ok: manifestOk,
     driver: 'postgres',
@@ -218,7 +222,10 @@ function verifyPgBackup({ file, manifestFile } = {}) {
     bytes: fs.statSync(dumpPath).size,
     backupSha256,
     manifestOk,
-    note: 'pg_dump archive verified by manifest hash; run backup:drill (or a restore) to verify the audit chain end to end',
+    unverifiable,
+    note: unverifiable
+      ? 'no manifest found next to the dump; integrity cannot be verified — pass --manifest <file> or --force to override'
+      : 'pg_dump archive verified by manifest hash; run backup:drill (or a restore) to verify the audit chain end to end',
   };
 }
 
@@ -238,9 +245,18 @@ function verifyRestoredPgDatabase(targetUrl) {
 }
 
 /** Verifier-first: the manifest hash must match before pg_restore runs. */
-function restorePgBackup({ file, to, force = false } = {}) {
-  const verification = verifyPgBackup({ file });
-  if (!verification.ok) throw new Error('refusing to restore a backup that does not verify');
+function restorePgBackup({ file, to, manifestFile, force = false } = {}) {
+  const verification = verifyPgBackup({ file, manifestFile });
+  if (!verification.ok) {
+    // A present-but-mismatched manifest signals tampering and is never
+    // bypassable. A missing manifest is merely unverifiable and may be
+    // overridden with --force (or by supplying an explicit --manifest).
+    if (!(verification.unverifiable && force)) {
+      throw new Error(verification.unverifiable
+        ? 'refusing to restore a backup with no manifest to verify against; pass --manifest <file> or --force to override'
+        : 'refusing to restore a backup that does not verify');
+    }
+  }
   const targetUrl = deriveDatabaseUrl(pgConnectionString(), to);
   const flags = ['--no-owner', '--no-privileges', '--exit-on-error'];
   if (force) flags.push('--clean', '--if-exists');
@@ -324,9 +340,9 @@ async function createSqliteBackup({ outDir, file, manifestFile, dbModule: db, fo
   return { ...verification, manifestFile: manifestPath, manifest };
 }
 
-function restoreBackup({ file, to, force = false } = {}) {
+function restoreBackup({ file, to, manifestFile, force = false } = {}) {
   if (!to) throw new Error('--to is required');
-  if (file && isPgDumpFile(path.resolve(file))) return restorePgBackup({ file, to, force });
+  if (file && isPgDumpFile(path.resolve(file))) return restorePgBackup({ file, to, manifestFile, force });
   const verification = verifyBackup({ file });
   if (!verification.ok) throw new Error('refusing to restore a backup that does not verify');
   const target = path.resolve(to);
@@ -356,7 +372,7 @@ async function main(argv = process.argv.slice(2), deps = {}) {
   } else if (command === 'verify') {
     result = verify({ file: args.file || positional[0], manifestFile: args.manifest });
   } else if (command === 'restore') {
-    result = restore({ file: args.file || positional[0], to: args.to || positional[1], force: args.force });
+    result = restore({ file: args.file || positional[0], to: args.to || positional[1], manifestFile: args.manifest, force: args.force });
   }
   else throw new Error(`unknown command: ${command}`);
   io.log(JSON.stringify(result, null, 2));

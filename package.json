@@ -41,6 +41,8 @@
     "native:check:repair": "node scripts/ensure-native-bindings.js --repair",
     "test:browser": "node scripts/run-playwright.js",
     "test:admin-console": "node scripts/run-playwright.js admin-console.spec.js",
+    "test:console-app": "node scripts/run-playwright.js admin-console-app.spec.js",
+    "console:verify-design": "npm run console:build && node scripts/run-playwright.js console-design.spec.js",
     "test:browser-extension": "node scripts/run-playwright.js browser-extension.spec.js --project=chromium",
     "simulate": "node scripts/simulate.js",
     "proxy:lab": "node scripts/ai-chat-dlp-proxy-lab.js",

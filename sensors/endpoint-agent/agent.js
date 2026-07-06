@@ -24,6 +24,7 @@ const fileFlowProfiles = require('./file-flow-profiles');
 const desktopAppFlow = require('./collectors/desktop-app-flow');
 const endpointOcr = require('./ocr');
 const processors = require('../../server/processors');
+const parsePool = require('../../server/parse-pool');
 const policyEngine = require('../../server/policy');
 const D = require('../../detection-engine/detect');
 const VERSION = require('../../package.json').version;
@@ -50,6 +51,8 @@ const LEGACY_REDACTION_HANDOFF_SUFFIX = '.promptwall-redacted.txt';
 const POLICY_REFRESH_MS = 15 * 60 * 1000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 10000;
 const HANDOFF_RETRY_DELAY_MS = 200;
+const DEFAULT_FILE_SETTLE_MS = 150;
+const MAX_FILE_SETTLE_POLLS = 40;
 let scannerState = scannerConfig(DEFAULT_SCANNER);
 let policyState = sensorPolicy(policyEngine.DEFAULT_POLICY);
 
@@ -206,7 +209,7 @@ async function fetchPolicy(opts = {}) {
       headers: { 'x-api-key': key },
     }, opts);
     if (!r || !r.ok) return null;
-    return r.json();
+    return await r.json();
   } catch (e) {
     if (!opts.silent) console.error('  policy refresh failed:', e.message);
     return null;
@@ -478,10 +481,35 @@ function decisionSummary(res) {
 }
 
 async function extractEndpointFile(file, full, buf, opts = {}) {
-  const extracted = await processors.extractText(file, buf, opts.extract || {});
+  // Route parsing through the killable parse pool so a crafted file (zip/pdf
+  // bomb) is preempted with SIGKILL instead of wedging the agent's event loop.
+  // Same extractText contract as processors; OCR-required types delegate back.
+  const extracted = await parsePool.extractText(file, buf, opts.extract || {});
   const needsOcr = !extracted.extractionOk && (extracted.error === 'ocr_required' || extracted.ocrRequired === true);
   if (!needsOcr) return extracted;
   return endpointOcr.extractImageFile(file, full, opts.ocr || {});
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Wait until a file's size is stable across two polls before inspecting it, so a
+// file still being copied is scanned on its final bytes, not a partial prefix.
+// Off (single stat) unless a caller opts in with settleMs>0 — the file watchers
+// do, since a 'rename' can fire mid-copy; direct API scans keep prior behavior.
+async function statStableFile(full, opts = {}) {
+  const settleMs = boundedNumber(opts.settleMs, 0, 0, 5000);
+  const wait = opts.sleep || sleep;
+  let prev;
+  for (let i = 0; i < MAX_FILE_SETTLE_POLLS; i += 1) {
+    let stat; try { stat = fs.statSync(full); } catch { return null; }
+    if (!stat.isFile()) return stat;
+    if (settleMs <= 0 || (prev !== undefined && stat.size === prev)) return stat;
+    prev = stat.size;
+    await wait(settleMs);
+  }
+  try { return fs.statSync(full); } catch { return null; }
 }
 
 async function scanResolvedFile(file, full, root, opts = {}) {
@@ -489,7 +517,8 @@ async function scanResolvedFile(file, full, root, opts = {}) {
   const scanner = opts.scanner ? scannerConfig(opts.scanner) : pol.scanner || scannerState;
   const maxBytes = opts.maxBytes || scanner.maxFileBytes;
   const label = safeFileLabel(file);
-  let stat; try { stat = fs.statSync(full); } catch { return; }
+  const stat = await statStableFile(full, opts);
+  if (!stat) return;
   if (!stat.isFile()) return;
   if (ignoredByScanner(file, scanner)) return;
   const user = opts.user || os.userInfo().username;
@@ -605,17 +634,27 @@ function startWatchedRoot(profile, deps = {}) {
   const watch = deps.watch || fs.watch;
   const setTimeoutFn = deps.setTimeout || setTimeout;
   const scan = deps.scanFile || scanFile;
+  const io = deps.console || console;
   const scanOpts = {
+    settleMs: DEFAULT_FILE_SETTLE_MS,
     ...(profile.scanOptions || {}),
     watchDir: profile.dir,
     destination: profile.destination,
     ...(profile.user ? { user: profile.user } : {}),
   };
   const scanQueuedFile = (filename) => scan(filename, scanOpts);
-  for (const f of readDir(profile.dir)) scanQueuedFile(f);
-  return watch(profile.dir, (event, filename) => {
-    if (filename && event === 'rename') setTimeoutFn(() => scanQueuedFile(filename), HANDOFF_RETRY_DELAY_MS);
-  });
+  // A configured profile dir may not exist yet (fresh machine, unmounted share).
+  // Degrade that one profile instead of aborting start() and dropping every
+  // other watcher. Log the id only — never the directory path.
+  try {
+    for (const f of readDir(profile.dir)) scanQueuedFile(f);
+    return watch(profile.dir, (event, filename) => {
+      if (filename && event === 'rename') setTimeoutFn(() => scanQueuedFile(filename), HANDOFF_RETRY_DELAY_MS);
+    });
+  } catch (e) {
+    io.error(`  file-flow profile ${profile.id} unavailable (${e.code || 'error'})`);
+    return null;
+  }
 }
 
 function start(opts = {}) {
@@ -632,7 +671,8 @@ function start(opts = {}) {
   const readDir = opts.readdirSync || fs.readdirSync;
   const setIntervalFn = opts.setInterval || setInterval;
   const setTimeoutFn = opts.setTimeout || setTimeout;
-  const scanOpts = opts.scanOptions || (opts.watchDir ? { watchDir } : undefined);
+  const scanOpts = opts.scanOptions
+    || (opts.watchDir ? { watchDir, settleMs: DEFAULT_FILE_SETTLE_MS } : { settleMs: DEFAULT_FILE_SETTLE_MS });
   const scanQueuedFile = (filename) => (scanOpts ? scan(filename, scanOpts) : scan(filename));
   const profiles = opts.fileFlowProfiles
     ? fileFlowProfiles.normalizeFileFlowProfiles(opts.fileFlowProfiles)
@@ -653,10 +693,10 @@ function start(opts = {}) {
   const heartbeat = opts.sendHeartbeat || sendHeartbeat;
   const initialRefresh = Promise.resolve(refresh({ silent: true })).finally(() => {
     for (const f of readDir(watchDir)) scanQueuedFile(f);
-  });
+  }).catch(() => {});
   Promise.resolve(heartbeat({ server, key })).catch(() => {});
   const refreshTimer = setIntervalFn(() => {
-    refresh({ silent: true });
+    Promise.resolve(refresh({ silent: true })).catch(() => {});
     Promise.resolve(heartbeat({ server, key })).catch(() => {});
   }, POLICY_REFRESH_MS);
   if (refreshTimer.unref) refreshTimer.unref();

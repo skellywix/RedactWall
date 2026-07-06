@@ -67,7 +67,7 @@ test('console shell renders the live session and pilot view after login', async 
   await expect(page.locator('#who')).toContainText('admin / Security Admin');
   await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible();
 
-  await page.getByRole('link', { name: 'Decision Quality' }).click();
+  await page.getByRole('button', { name: 'Decision Quality' }).click();
   await expect(page).toHaveURL(/\/app\/#\/decision-quality$/);
   await expect(page.getByRole('heading', { name: 'Decision Quality' })).toBeVisible();
   // Renders either posture-driven rows or the explicit empty state — both are
@@ -153,7 +153,7 @@ test('policy and audit views render live data without errors', async ({ page }) 
   await login(page);
 
   await page.goto('/app/#/policy');
-  await expect(page.getByRole('heading', { name: 'Policy', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Configuration', exact: true })).toBeVisible();
   await expect(page.locator('.app-panel-meta').first()).not.toHaveText('Loading', { timeout: 10000 });
 
   await page.goto('/app/#/audit');

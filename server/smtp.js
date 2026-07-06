@@ -118,24 +118,39 @@ function openSocket(channel, deps = {}) {
 function transport(socket, timeoutMs = 10000) {
   let buffer = '';
   let waiter = null;
+  // Persist a socket-error listener for the whole SMTP session: after
+  // openSocket removes its connect-phase 'error' handler, an error mid-
+  // transaction (e.g. relay ECONNRESET during AUTH/DATA) would otherwise be
+  // an unhandled 'error' event and crash the process. Reject the pending
+  // reader instead so send() fails closed.
+  let socketError = null;
   const onData = (chunk) => {
     buffer += chunk.toString('utf8');
     if (!waiter) return;
     const notify = waiter;
     waiter = null;
-    notify();
+    notify.resolve();
+  };
+  const onError = (err) => {
+    socketError = err instanceof Error ? err : new Error('smtp_socket_error');
+    if (!waiter) return;
+    const notify = waiter;
+    waiter = null;
+    notify.reject(socketError);
   };
   socket.on('data', onData);
+  socket.on('error', onError);
 
   function waitForData() {
     return new Promise((resolve, reject) => {
+      if (socketError) { reject(socketError); return; }
       const timer = setTimeout(() => {
         waiter = null;
         reject(new Error('smtp_timeout'));
       }, timeoutMs);
-      waiter = () => {
-        clearTimeout(timer);
-        resolve();
+      waiter = {
+        resolve: () => { clearTimeout(timer); resolve(); },
+        reject: (err) => { clearTimeout(timer); reject(err); },
       };
     });
   }
@@ -164,7 +179,7 @@ function transport(socket, timeoutMs = 10000) {
     return { code, lines, text: lines.join('\n') };
   }
 
-  return { command, detach: () => socket.off('data', onData) };
+  return { command, detach: () => { socket.off('data', onData); socket.off('error', onError); } };
 }
 
 function expect(response, expected, context) {

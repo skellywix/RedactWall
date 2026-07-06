@@ -27,16 +27,33 @@ function loadRaw() {
   return { salt: '', fingerprints: [] };
 }
 
+// Parse + normalize once and reuse until the file changes on disk. Returning
+// the SAME object across calls is load-bearing: analyze()'s EDM cache is keyed
+// by object identity, so a fresh object every call would rebuild the whole
+// fingerprint Set on every scanned prompt (this runs on the hot path). The
+// mtime+size signature invalidates the cache when the watchlist is updated.
+let _cache = null;
+
+function loadCached() {
+  let stat = null;
+  try { stat = fs.statSync(CONFIG_PATH); } catch { /* no file: default watchlist */ }
+  const sig = stat ? `${stat.mtimeMs}:${stat.size}` : 'none';
+  if (_cache && _cache.sig === sig) return _cache;
+  const raw = loadRaw();
+  _cache = { sig, raw, normalized: detector.normalizeExactMatchConfig(raw) };
+  return _cache;
+}
+
 // Engine-ready config for analyze(text, { exactMatch }). Returns null when no
 // usable watchlist is configured so the hot path skips EDM entirely.
 function exactMatchConfig() {
-  const normalized = detector.normalizeExactMatchConfig(loadRaw());
-  return normalized.enabled ? loadRaw() : null;
+  const cached = loadCached();
+  return cached.normalized.enabled ? cached.raw : null;
 }
 
 // Bounded, plaintext-free summary for the console and evidence packs.
 function publicSummary() {
-  const normalized = detector.normalizeExactMatchConfig(loadRaw());
+  const normalized = loadCached().normalized;
   return {
     enabled: normalized.enabled,
     fingerprints: normalized.set.size,

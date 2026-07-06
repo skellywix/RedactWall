@@ -212,6 +212,21 @@ function diffArgsForRange(range) {
   return ['diff', '--no-ext-diff', '--no-color', '--unified=0', '--find-renames', range.base, range.head, '--'];
 }
 
+// A remote-side base SHA may not exist locally (teammate pushed it, we never
+// fetched it). Diffing against a missing object fails the whole push; fall back
+// to the empty tree so the full head content is still scanned rather than
+// blocking a clean push with a confusing error.
+async function ensureLocalBase(range, opts = {}) {
+  if (range.staged || !range.base || range.base === EMPTY_TREE) return range;
+  try {
+    await runGit(['cat-file', '-e', `${range.base}^{commit}`], opts);
+    return range;
+  } catch (err) {
+    if (/git is not available/.test(String((err && err.message) || ''))) throw err;
+    return { ...range, base: EMPTY_TREE, newBranch: true };
+  }
+}
+
 async function collectDiff(opts = {}) {
   if (opts.diffText !== undefined) {
     const text = String(opts.diffText || '');
@@ -228,7 +243,8 @@ async function collectDiff(opts = {}) {
   let bytes = 0;
   const maxBytes = boundedNumber(opts.maxDiffBytes, DEFAULT_MAX_DIFF_BYTES, 4096, 12 * 1024 * 1024);
   for (const range of ranges) {
-    const chunk = await runGit(diffArgsForRange(range), opts);
+    const resolved = await ensureLocalBase(range, opts);
+    const chunk = await runGit(diffArgsForRange(resolved), opts);
     bytes += Buffer.byteLength(chunk, 'utf8');
     if (bytes > maxBytes) return { status: 'too_large', text: '', bytes, ranges };
     chunks.push(chunk);
@@ -293,7 +309,7 @@ function gitPushRecord(analysis, outcome, opts = {}, extra = {}) {
     channel: 'git_push',
     sensor: agent.sensorMetadata(),
     clientOutcome: outcome,
-    note: extra.reason === 'diff_too_large'
+    note: extra.reason === 'diff_too_large' || extra.reason === 'diff_partially_inspected'
       ? 'endpoint git push blocked locally because the diff exceeded inspection bounds'
       : 'endpoint git push blocked locally after sensitive content detection',
     clientPreRedacted: true,
@@ -359,14 +375,20 @@ async function collectGitPush(opts = {}) {
   }
   const policy = await policyForGit(opts);
   const analysis = analyzeDiff(diff.text, policy, opts);
-  if (!shouldBlock(analysis, opts)) {
+  // analyzeDiff only inspects the first maxChars; content past that bound is
+  // never scanned, so a diff larger than the window is blocked as partially
+  // inspected (fail closed) rather than reported clean like the too_large path.
+  const maxChars = boundedNumber(opts.maxChars, DEFAULT_MAX_CHARS, 1024, 1000000);
+  const partiallyInspected = String(diff.text || '').length > maxChars;
+  if (!partiallyInspected && !shouldBlock(analysis, opts)) {
     return publicResult('clean', analysis, {
       destination,
       refCount: diff.ranges.length,
       bytesScanned: diff.bytes,
     });
   }
-  const record = gitPushRecord(analysis, 'action_blocked', opts);
+  const extra = partiallyInspected ? { reason: 'diff_partially_inspected' } : {};
+  const record = gitPushRecord(analysis, 'action_blocked', opts, extra);
   const res = await reportGitPush(record, opts);
   return publicResult('blocked', analysis, {
     destination,
@@ -374,6 +396,7 @@ async function collectGitPush(opts = {}) {
     id: res && res.id,
     refCount: diff.ranges.length,
     bytesScanned: diff.bytes,
+    ...extra,
     ...(res ? {} : { error: 'control plane recording unavailable' }),
   });
 }

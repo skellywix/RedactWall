@@ -114,8 +114,8 @@ export default function Overview() {
         </>
       ) : null}
       <p className="app-note">
-        The full activity feed and approval queue still live in the classic console at{' '}
-        <a href="/index.html">/index.html</a>. Views are ported here one at a time.
+        Every operator view is available in the rail. The classic console remains at{' '}
+        <a href="/index.html">/index.html</a> during the migration period.
       </p>
     </Panel>
   );

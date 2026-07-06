@@ -1,5 +1,6 @@
-import type { ReactNode } from 'react';
-import type { QueueQuery, RevealResult } from '../../api/queries';
+import { useEffect, useState, type ReactNode } from 'react';
+import { fetchAuditForQuery, type AuditEntry } from '../../api/audit';
+import type { AssignmentPatch, QueueQuery, RevealResult } from '../../api/queries';
 import type { Me } from '../../lib/session';
 import { EmptyState } from '../Panel';
 import { FindingChips } from './FindingChips';
@@ -15,6 +16,7 @@ interface QueueDetailProps {
   onApprove: () => void;
   onDeny: () => void;
   onReveal: () => void;
+  onAssign: (id: string, patch: AssignmentPatch) => void;
 }
 
 function Datum({ label, value }: { label: string; value: ReactNode }) {
@@ -126,9 +128,84 @@ function DecisionControls({ query, me, busy, note, onNote, onApprove, onDeny, on
   );
 }
 
+/**
+ * Inline reassignment (Security Admin only): route a held prompt to a different
+ * approver, group, or role so an out-of-office assignee can't strand it. Fields
+ * are prefilled from the current routing; an emptied field clears that routing.
+ */
+function ReassignControl({ query, me, busy, onAssign }: { query: QueueQuery; me: Me | null; busy: boolean; onAssign: (id: string, patch: AssignmentPatch) => void }) {
+  const [user, setUser] = useState('');
+  const [group, setGroup] = useState('');
+  const [role, setRole] = useState('');
+  useEffect(() => {
+    setUser(query.assignedUser ?? '');
+    setGroup(query.assignedGroup ?? '');
+    setRole(query.assignedRole ?? '');
+  }, [query.id, query.assignedUser, query.assignedGroup, query.assignedRole]);
+  if (me?.role !== 'security_admin' || query.status !== 'pending') return null;
+  const submit = (event: React.FormEvent) => {
+    event.preventDefault();
+    onAssign(query.id, { assignedUser: user.trim(), assignedGroup: group.trim(), assignedRole: role.trim() });
+  };
+  return (
+    <form className="reassign" onSubmit={submit} aria-label="Reassign held prompt">
+      <label>
+        Assignee
+        <input value={user} onChange={(event) => setUser(event.target.value)} placeholder="user id" aria-label="Assigned user" />
+      </label>
+      <label>
+        Group
+        <input value={group} onChange={(event) => setGroup(event.target.value)} placeholder="group code" aria-label="Assigned group" />
+      </label>
+      <label>
+        Role
+        <select value={role} onChange={(event) => setRole(event.target.value)} aria-label="Assigned role">
+          <option value="">Any</option>
+          <option value="approver">Approver</option>
+          <option value="security_admin">Security Admin</option>
+        </select>
+      </label>
+      <button className="btn" type="submit" disabled={busy}>
+        Update assignment
+      </button>
+    </form>
+  );
+}
+
+/** Item-level audit trail for the selected incident, oldest event first. */
+function QueryAuditTrail({ queryId }: { queryId: string }) {
+  const [entries, setEntries] = useState<AuditEntry[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setEntries(null);
+    void fetchAuditForQuery(queryId).then((rows) => {
+      if (!cancelled) setEntries(rows);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [queryId]);
+  if (!entries?.length) return null;
+  const chronological = [...entries].reverse();
+  return (
+    <div className="query-audit">
+      <label>Audit trail</label>
+      <ul className="query-audit-list">
+        {chronological.map((entry) => (
+          <li key={entry.id}>
+            <time>{fmt(entry.ts)}</time>
+            <b>{humanize(entry.action)}</b>
+            <span>{entry.actor}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 /** Selected-incident panel body: metadata grid, risk meter, prompt, findings, decision controls. */
 export function QueueDetail(props: QueueDetailProps) {
-  const { query, reveal, me, busy, onReveal } = props;
+  const { query, reveal, me, busy, onReveal, onAssign } = props;
   if (!query) {
     return <EmptyState title="No selected incident" detail="Select a held prompt to review its redacted context." />;
   }
@@ -145,6 +222,8 @@ export function QueueDetail(props: QueueDetailProps) {
           <RevealControl query={query} reveal={reveal} me={me} busy={busy} onReveal={onReveal} />
         </div>
       ) : null}
+      <ReassignControl query={query} me={me} busy={busy} onAssign={onAssign} />
+      <QueryAuditTrail queryId={query.id} />
     </>
   );
 }

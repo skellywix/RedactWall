@@ -268,7 +268,7 @@ function buildInstallReport(opts = {}) {
 }
 
 function buildHeartbeatBody(report, opts = {}) {
-  const envConfig = opts.config || readMcpConfig(opts.envPath, opts.env || process.env).config;
+  const envConfig = opts.config || readMcpConfig(opts.envPath, opts.env || process.env, opts.repoRoot).config;
   const settings = mcpSettings(envConfig);
   return {
     user: opts.user || os.userInfo().username || 'mcp-technician',
@@ -289,7 +289,7 @@ function buildHeartbeatBody(report, opts = {}) {
 }
 
 async function emitHeartbeat(report, opts = {}) {
-  const envConfig = opts.config || readMcpConfig(opts.envPath, opts.env || process.env).config;
+  const envConfig = opts.config || readMcpConfig(opts.envPath, opts.env || process.env, opts.repoRoot).config;
   const settings = mcpSettings(envConfig);
   const serverUrl = opts.serverUrl || settings.serverUrl;
   const ingestKey = opts.ingestKey || settings.ingestKey;

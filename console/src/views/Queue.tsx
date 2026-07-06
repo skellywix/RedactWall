@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { fetchQueue, type QueueQuery } from '../api/queries';
 import { EmptyState, Panel } from '../components/Panel';
 import { QueueDetail } from '../components/queue/QueueDetail';
@@ -42,8 +42,13 @@ function matchesSearch(query: QueueQuery, term: string): boolean {
 function useQueueRows(statusFilter: string) {
   const [rows, setRows] = useState<QueueQuery[] | null>(null);
   const [loaded, setLoaded] = useState(false);
+  // Monotonic request id: a slow response for a superseded status filter (or a
+  // stale SSE-triggered reload) must never overwrite the newest filter's rows.
+  const reqId = useRef(0);
   const load = useCallback(async () => {
+    const seq = ++reqId.current;
     const next = await fetchQueue(statusFilter);
+    if (seq !== reqId.current) return;
     setRows(next ? sortPendingFirst(next) : []);
     setLoaded(true);
   }, [statusFilter]);
@@ -123,8 +128,8 @@ export default function Queue() {
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const { rows, loaded, load } = useQueueRows(statusFilter);
-  const actions = useQueueActions(load);
-  const { pruneTo } = actions;
+  const actions = useQueueActions(load, me?.authProvider);
+  const { pruneTo, setNote } = actions;
 
   useEffect(() => {
     if (rows) pruneTo(rows);
@@ -132,6 +137,19 @@ export default function Queue() {
 
   const visible = useMemo(() => (rows ?? []).filter((q) => matchesSearch(q, search)), [rows, search]);
   const selected = visible.find((q) => q.id === selectedId) ?? visible[0] ?? null;
+  const effectiveId = selected?.id ?? null;
+
+  // Clear the in-progress decision note whenever the effective incident changes
+  // for ANY reason — including the silent fallback to visible[0] after the
+  // selected row is decided elsewhere — so a note typed for one incident can
+  // never be recorded against another.
+  const prevEffectiveId = useRef(effectiveId);
+  useEffect(() => {
+    if (prevEffectiveId.current !== effectiveId) {
+      prevEffectiveId.current = effectiveId;
+      setNote('');
+    }
+  }, [effectiveId, setNote]);
   const pendingCount = (rows ?? []).filter((q) => q.status === 'pending').length;
   const meta = !loaded ? 'Loading' : `${visible.length} shown / ${pendingCount} pending`;
 
@@ -192,9 +210,10 @@ export default function Queue() {
           busy={actions.busy}
           note={actions.note}
           onNote={actions.setNote}
-          onApprove={() => selected && actions.setStepUp({ kind: 'approve-one', id: selected.id })}
+          onApprove={() => selected && void actions.beginStepUp({ kind: 'approve-one', id: selected.id })}
           onDeny={() => selected && actions.deny(selected.id)}
-          onReveal={() => selected && actions.setStepUp({ kind: 'reveal', id: selected.id })}
+          onReveal={() => selected && void actions.beginStepUp({ kind: 'reveal', id: selected.id })}
+          onAssign={actions.assign}
         />
       </Panel>
       {actions.stepUp ? (

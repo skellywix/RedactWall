@@ -28,7 +28,15 @@ const REDACTED_STATUSES = new Set(['redacted', 'response_redacted']);
 const ALLOWED_STATUSES = new Set(['allowed', 'approved']);
 const COACHING_STATUSES = new Set(['warned', 'justified', 'pending_justification', 'blocked_by_user', 'paste_flagged']);
 const EVENTLESS_STATUSES = new Set(['sensor_heartbeat']);
-const SENSITIVE_METADATA_RE = /(?:\d{3}[-_:.]?\d{2}[-_:.]?\d{4}|\b\d{12,19}\b)/;
+// SSNs (contiguous, dashed, or space-grouped), PANs (contiguous or space/dash
+// grouped), and common secret-key prefixes. One shared predicate so every
+// metadata redaction path — baseline labels and segment labels — stays in sync.
+const METADATA_SSN_RE = /\b\d{3}[-_ .:]?\d{2}[-_ .:]?\d{4}\b/;
+const METADATA_PAN_RE = /\b(?:\d[ -]?){12,19}\b/;
+const METADATA_SECRET_RE = /\b(?:sk|pk|rk|ghp|gho|github_pat|xox[baprs])[-_a-z0-9]{8,}\b/i;
+function containsSensitiveMetadata(text) {
+  return METADATA_SSN_RE.test(text) || METADATA_PAN_RE.test(text) || METADATA_SECRET_RE.test(text);
+}
 
 const SOURCE_LABELS = {
   browser_extension: 'Browser',
@@ -108,7 +116,7 @@ function safeText(value, fallback = 'unknown', limit = 140) {
 
 function safeMetadataLabel(value, fallback = 'unknown', limit = 140) {
   const text = safeText(value, fallback, limit);
-  return SENSITIVE_METADATA_RE.test(text) ? 'redacted_label' : text;
+  return containsSensitiveMetadata(text) ? 'redacted_label' : text;
 }
 
 function dayKey(date) {
@@ -877,9 +885,12 @@ function threatGuardrails({ rows = [], policy = {} } = {}) {
 }
 
 function inventoryStateForDestination(bucket = {}, fallback = 'sanctioned') {
-  if (fallback === 'shadow') return 'shadow';
+  // A reviewed-and-governed destination is sanctioned even if it was first seen
+  // as shadow AI; check governed before the shadow fallback so the coverage
+  // review actually clears the shadow/critical state here too.
   if (bucket.governed === true) return 'sanctioned';
-  return fallback === 'shadow' ? 'shadow' : 'unsanctioned';
+  if (fallback === 'shadow') return 'shadow';
+  return 'unsanctioned';
 }
 
 function inventoryStatus(state) {
@@ -935,32 +946,42 @@ function mcpPolicyList(policy = {}, key) {
     .slice(0, 50);
 }
 
-function mcpToolPatternMatches(tool, pattern) {
-  const target = safeText(tool, 'mcp-tool', 160).toLowerCase();
+// Compile one policy pattern into a reusable matcher so the wildcard RegExp is
+// built once, not once per MCP row on every /api/posture request.
+function compileMcpPattern(pattern) {
   const rule = safeText(pattern, '', 160).toLowerCase();
-  if (!rule) return false;
-  if (rule === '*') return true;
+  if (!rule) return null;
+  if (rule === '*') return { all: true };
   if (rule.includes('*')) {
-    const escaped = rule
-      .replace(/[.+?^${}()|[\]\\]/g, '\\$&')
-      .replace(/\*/g, '.*');
-    return new RegExp(`^${escaped}$`).test(target);
+    const escaped = rule.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
+    return { re: new RegExp(`^${escaped}$`) };
   }
-  return target === rule;
+  return { exact: rule };
 }
 
-function mcpToolMatchesAny(tool, patterns = []) {
-  return patterns.some((pattern) => mcpToolPatternMatches(tool, pattern));
+function compileMcpList(policy, key) {
+  return mcpPolicyList(policy, key).map(compileMcpPattern).filter(Boolean);
 }
 
-function mcpToolPolicyState(tool, policy = {}) {
-  const allowed = mcpPolicyList(policy, 'mcpAllowedTools');
-  const blocked = mcpPolicyList(policy, 'mcpBlockedTools');
-  const approvalRequired = mcpPolicyList(policy, 'mcpApprovalRequiredTools');
-  if (mcpToolMatchesAny(tool, blocked)) return 'blocked';
-  if (mcpToolMatchesAny(tool, approvalRequired)) return 'approval_required';
-  if (allowed.length && mcpToolMatchesAny(tool, allowed)) return 'allowed_registry';
-  if (allowed.length) return 'outside_registry';
+// Prepare the three policy matcher lists once; reuse across every row.
+function prepareMcpPolicy(policy = {}) {
+  return {
+    allowed: compileMcpList(policy, 'mcpAllowedTools'),
+    blocked: compileMcpList(policy, 'mcpBlockedTools'),
+    approvalRequired: compileMcpList(policy, 'mcpApprovalRequiredTools'),
+  };
+}
+
+function matchesCompiled(target, matchers) {
+  return matchers.some((m) => m.all || (m.re ? m.re.test(target) : m.exact === target));
+}
+
+function mcpToolPolicyState(tool, prepared) {
+  const target = safeText(tool, 'mcp-tool', 160).toLowerCase();
+  if (matchesCompiled(target, prepared.blocked)) return 'blocked';
+  if (matchesCompiled(target, prepared.approvalRequired)) return 'approval_required';
+  if (prepared.allowed.length && matchesCompiled(target, prepared.allowed)) return 'allowed_registry';
+  if (prepared.allowed.length) return 'outside_registry';
   return 'observed';
 }
 
@@ -1156,6 +1177,7 @@ function agenticMcpPosture({ rows = [], policy = {} } = {}) {
   const agents = new Map();
   const tools = new Map();
   const policySummary = mcpPolicySummary(policy);
+  const preparedPolicy = prepareMcpPolicy(policy);
   const connectorRegistry = connectorRegistryPosture(rows);
   const requestCounts = {
     toolData: 0,
@@ -1170,7 +1192,7 @@ function agenticMcpPosture({ rows = [], policy = {} } = {}) {
     const events = eventWeight(q);
     const agent = mcpRowAgent(q);
     const tool = mcpRowTool(q);
-    const toolState = mcpToolPolicyState(tool, policy);
+    const toolState = mcpToolPolicyState(tool, preparedPolicy);
     const blocked = isBlocked(q) ? events : 0;
     const redacted = isRedacted(q) ? events : 0;
     const allowed = isAllowed(q) ? events : 0;
@@ -2202,9 +2224,7 @@ const SEGMENT_TYPES = {
 function segmentSafeLabel(value, fallback = '') {
   const text = safeText(value, fallback, 100);
   if (!text || text === fallback) return text;
-  if (/\b\d{3}-\d{2}-\d{4}\b/.test(text)) return '';
-  if (/\b(?:\d[ -]?){13,19}\b/.test(text)) return '';
-  if (/\b(?:sk|pk|rk|ghp|gho|github_pat|xox[baprs])[-_a-z0-9]{8,}\b/i.test(text)) return '';
+  if (containsSensitiveMetadata(text)) return '';
   return text;
 }
 
@@ -2460,9 +2480,19 @@ function postureSegments({ rows = [], selectedRows = [], segment = '', identityG
     .slice(0, 16);
   const selectedId = normalizedSegmentId(segment);
   const views = savedOwnerViews(baseMatrix, selectedId || 'all');
+  // Two owner templates can resolve to the same segment (or both fall back to
+  // 'all'), so dedupe the owner cards by resolved id before concatenating —
+  // otherwise the matrix carries duplicate ids and the console renders
+  // duplicate React keys / double-selected cards.
+  const seenCardIds = new Set();
+  const ownerCards = ownerViewCards(views).filter((card) => {
+    if (seenCardIds.has(card.id)) return false;
+    seenCardIds.add(card.id);
+    return true;
+  });
   const matrix = [
-    ...ownerViewCards(views),
-    ...baseMatrix.filter((item) => !views.some((view) => normalizedSegmentId(view.segmentId) === item.id)),
+    ...ownerCards,
+    ...baseMatrix.filter((item) => !seenCardIds.has(item.id)),
   ].slice(0, 16);
   const active = selectedId ? baseMatrix.find((item) => item.id === selectedId) || {
     id: selectedId,

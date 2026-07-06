@@ -46,7 +46,10 @@ curl -sX POST "$URL/api/v1/gate" -H "x-api-key: $KEY" -H 'content-type: applicat
 ### `POST /api/v1/scan-file` — scan an uploaded file
 
 `contentBase64` is inspected server-side and never persisted. Images without a
-configured OCR path return `ocrRequired: true`.
+configured OCR path return `ocrRequired: true`. File types that cannot be parsed
+for inspection **fail closed**: the request is held with status
+`file_blocked_unscanned` (decision `block`) rather than allowed, so a renamed or
+unsupported file cannot leave uninspected.
 
 ```bash
 curl -sX POST "$URL/api/v1/scan-file" -H "x-api-key: $KEY" -H 'content-type: application/json' \

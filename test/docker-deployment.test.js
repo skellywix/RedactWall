@@ -37,8 +37,21 @@ test('docker compose passes production setup secrets into the container', () => 
     'ADMIN_TOTP_SECRET',
     'AUDITOR_USER',
     'AUDITOR_PASSWORD',
+    'OPERATOR_USER',
+    'OPERATOR_PASSWORD',
     'REDACTWALL_SECRET',
     'REDACTWALL_DATA_KEY',
+    'REDACTWALL_DATA_KEY_PREVIOUS',
+    'REDACTWALL_DB_DRIVER',
+    'REDACTWALL_DATABASE_URL',
+    'OIDC_ISSUER',
+    'OIDC_CLIENT_ID',
+    'OIDC_CLIENT_SECRET',
+    'OIDC_REDIRECT_URI',
+    'OIDC_SCOPE',
+    'OIDC_AUTHORIZATION_ENDPOINT',
+    'OIDC_TOKEN_ENDPOINT',
+    'OIDC_JWKS_URI',
     'INGEST_API_KEY',
     'REDACTWALL_INGEST_API_KEY',
     'REDACTWALL_POLICY_PATH',
@@ -89,6 +102,15 @@ test('docker image copies runtime files instead of the whole builder tree', () =
   for (const pattern of [/^test$/m, /^e2e$/m, /^docs$/m, /^PLANS$/m, /^dist$/m, /^data$/m]) {
     assert.match(dockerignore, pattern);
   }
+});
+
+test('runtime image ships the gateway source the gateway profile runs', () => {
+  // The compose gateway profile runs `node gateway/server.js` from this image,
+  // so the runtime stage must COPY gateway/ or the profile crash-loops.
+  assert.match(compose, /command:\s*\["node",\s*"gateway\/server\.js"\]/);
+  assert.match(dockerfile, /COPY --chown=node:node gateway \.\/gateway/);
+  // gateway/ must not be excluded from the build context either.
+  assert.doesNotMatch(dockerignore, /^gateway$/m);
 });
 
 test('deployment docs describe compose readiness and persistent state', () => {

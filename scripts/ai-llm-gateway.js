@@ -330,6 +330,12 @@ function targetUrl(req, upstream = DEFAULT_UPSTREAM) {
   const out = new URL(normalizedPath || '.', joinedBase);
   out.protocol = base.protocol;
   out.host = base.host;
+  // '..' segments resolve above the pinned upstream path prefix, letting a
+  // client escape a path-scoped deployment allowlist while the host stays
+  // pinned. Keep the resolved target fenced inside the configured base path.
+  if (!out.pathname.startsWith(joinedBase.pathname)) {
+    throw new Error('proxy target escapes the configured upstream path');
+  }
   return out;
 }
 

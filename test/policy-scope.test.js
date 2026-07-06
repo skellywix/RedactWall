@@ -50,6 +50,43 @@ test('policy scopes tighten enforcement for matching SCIM groups and destination
   assert.ok(verdict.reasons.some((reason) => reason.includes('Policy scope matched: engineering_ai')));
 });
 
+test('a matched scope does not block a sub-threshold finding on its own', () => {
+  // Regression: a scope match used to push an unconditional block reason, so any
+  // low-severity finding from a scoped user was force-blocked even when neither
+  // the global nor the scope-tightened thresholds were crossed.
+  const analysis = {
+    findings: [{ type: 'IP_ADDRESS', severity: 1, score: 0.3 }],
+    categories: [],
+    entityCounts: { IP_ADDRESS: 1 },
+    riskScore: 7,
+    maxSeverity: 1,
+    maxSeverityLabel: 'low',
+  };
+  const verdict = policy.evaluate(analysis, {
+    enforcementMode: 'block',
+    blockMinSeverity: 2,
+    blockRiskScore: 25,
+    alwaysBlock: ['US_SSN'],
+    policyScopes: [{
+      id: 'contractor_scope',
+      groups: ['contractors'],
+      alwaysBlockAdd: ['SOURCE_CODE'],
+      reason: 'contractor_scope',
+    }],
+  }, {
+    user: 'contractor@example.test',
+    groups: ['contractors'],
+    destination: 'chatgpt.com',
+    source: 'browser_extension',
+    channel: 'submit',
+  });
+
+  assert.strictEqual(verdict.decision, 'allow', 'sub-threshold finding is not blocked by scope match alone');
+  assert.deepStrictEqual(verdict.policyScopeIds, ['contractor_scope'], 'scope telemetry is still carried for allowed decisions');
+  assert.ok(!verdict.reasons.some((reason) => reason.includes('Policy scope matched')),
+    'no scope block reason is appended without another blocking reason');
+});
+
 test('policy scopes cannot weaken global enforcement or hard stops', () => {
   const verdict = policy.evaluate(categoryAnalysis('LEGAL_CONTRACT'), {
     enforcementMode: 'block',

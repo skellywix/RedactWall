@@ -2,9 +2,12 @@ import { useCallback, useState } from 'react';
 import {
   BULK_DECISION_LIMIT,
   approveQuery,
+  assignQuery,
   bulkDecision,
   denyQuery,
+  probeStepUp,
   revealQuery,
+  type AssignmentPatch,
   type BulkDecisionResult,
   type DecisionResult,
   type QueueQuery,
@@ -66,7 +69,17 @@ function validateBulk(ids: string[]): boolean {
   return true;
 }
 
-export function useQueueActions(load: () => void) {
+/**
+ * OIDC step-up cannot be satisfied by a local password (there is no local
+ * account), so bounce the admin back through the identity provider to refresh
+ * auth_time, returning to the current console view afterward.
+ */
+function redirectToIdpStepUp(): void {
+  const returnTo = location.pathname + location.search + location.hash;
+  location.href = `/auth/oidc/start?returnTo=${encodeURIComponent(returnTo)}`;
+}
+
+export function useQueueActions(load: () => void, authProvider?: string) {
   const [note, setNote] = useState('');
   const [bulkNote, setBulkNote] = useState('');
   const [checked, setChecked] = useState<ReadonlySet<string>>(() => new Set());
@@ -111,9 +124,21 @@ export function useQueueActions(load: () => void) {
     setBusy(false);
   };
 
+  const assign = async (id: string, patch: AssignmentPatch) => {
+    setBusy(true);
+    const result = await assignQuery(id, patch);
+    setBusy(false);
+    if (result.error) {
+      toast(result.error, 'error');
+      return;
+    }
+    toast('Assignment updated.', 'good');
+    load();
+  };
+
   const requestBulkApprove = () => {
     const ids = [...checked];
-    if (validateBulk(ids)) setStepUp({ kind: 'approve-bulk', ids });
+    if (validateBulk(ids)) void beginStepUp({ kind: 'approve-bulk', ids });
   };
 
   const runApprove = async (id: string, password: string) => {
@@ -136,15 +161,42 @@ export function useQueueActions(load: () => void) {
     setReveals((prev) => new Map(prev).set(id, data));
   };
 
-  const confirmStepUp = async (password: string) => {
-    const request = stepUp;
-    setStepUp(null);
-    if (!request) return;
+  const runStepUpAction = async (request: StepUpRequest, password: string) => {
     setBusy(true);
     if (request.kind === 'reveal') await runReveal(request.id, password);
     else if (request.kind === 'approve-one') await runApprove(request.id, password);
     else finishBulk(await bulkDecision(request.ids, 'approve', bulkNote.trim(), password), 'approved', request.ids);
     setBusy(false);
+  };
+
+  /**
+   * Entry point for every step-up-guarded action. Local accounts open the
+   * password modal; OIDC sessions probe /api/auth/step-up first and either run
+   * the action within the existing elevation window or re-authenticate via the
+   * identity provider — never a useless password prompt.
+   */
+  const beginStepUp = async (request: StepUpRequest) => {
+    if (authProvider !== 'oidc') {
+      setStepUp(request);
+      return;
+    }
+    setBusy(true);
+    const probe = await probeStepUp();
+    setBusy(false);
+    if (probe === 'ok') {
+      await runStepUpAction(request, '');
+    } else if (probe === 'oidc') {
+      redirectToIdpStepUp();
+    } else {
+      toast('Could not verify your session. Try again.', 'error');
+    }
+  };
+
+  const confirmStepUp = async (password: string) => {
+    const request = stepUp;
+    setStepUp(null);
+    if (!request) return;
+    await runStepUpAction(request, password);
   };
 
   /** Drop checks and revealed text for items no longer in (or no longer pending in) the list. */
@@ -166,6 +218,6 @@ export function useQueueActions(load: () => void) {
 
   return {
     note, setNote, bulkNote, setBulkNote, checked, reveals, stepUp, setStepUp, busy,
-    deny, bulkDeny, requestBulkApprove, confirmStepUp, pruneTo, toggleChecked,
+    deny, bulkDeny, assign, requestBulkApprove, beginStepUp, confirmStepUp, pruneTo, toggleChecked,
   };
 }

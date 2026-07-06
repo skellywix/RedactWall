@@ -30,6 +30,7 @@ const FLOORS = {
   semanticRecall: 0.80,    // per category, over examples labeled with it
   semanticBenignFP: 0,     // benign prompts must trigger NOTHING
   structuredRecall: 0.95,  // tested PII types must be caught
+  structuredPrecision: 0.95, // per type, over rows that fired it (guards cross-type FPs)
   structuredBaitFP: 0,     // ordinary ids must not fire a tested PII type
 };
 
@@ -106,6 +107,7 @@ function failures(r) {
   for (const t of Object.keys(r.structured)) {
     const m = r.structured[t];
     if (m.tp + m.fn > 0 && m.recall < FLOORS.structuredRecall) out.push(`${t} recall ${m.recall.toFixed(2)} < ${FLOORS.structuredRecall}`);
+    if (m.tp + m.fp > 0 && m.precision < FLOORS.structuredPrecision) out.push(`${t} precision ${m.precision.toFixed(2)} < ${FLOORS.structuredPrecision}`);
   }
   if (r.baitFPs.length > FLOORS.structuredBaitFP) out.push(`structured bait false positives: ${r.baitFPs.length} > ${FLOORS.structuredBaitFP}`);
   return out;

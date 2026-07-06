@@ -63,13 +63,32 @@ function dialogue(socket, timeoutMs) {
   };
 }
 
+const CONNECT_TIMEOUT_MS = (() => {
+  const n = Number(process.env.SMTP_CONNECT_TIMEOUT_MS);
+  return Number.isFinite(n) && n > 0 ? n : 10000;
+})();
+
 function connect(cfg) {
   return new Promise((resolve, reject) => {
-    const onError = (e) => reject(new Error('smtp_connect: ' + e.message));
+    let settled = false;
+    const onConnect = () => {
+      if (settled) return;
+      settled = true;
+      socket.setTimeout(0); // clear the connect deadline; expects have their own timers
+      resolve(socket);
+    };
     const socket = cfg.secure === 'tls'
-      ? tls.connect({ host: cfg.host, port: cfg.port, servername: cfg.host }, () => resolve(socket))
-      : net.connect({ host: cfg.host, port: cfg.port }, () => resolve(socket));
-    socket.once('error', onError);
+      ? tls.connect({ host: cfg.host, port: cfg.port, servername: cfg.host }, onConnect)
+      : net.connect({ host: cfg.host, port: cfg.port }, onConnect);
+    socket.once('error', (e) => { if (settled) return; settled = true; reject(new Error('smtp_connect: ' + e.message)); });
+    // A black-holed host that never ACKs the SYN would otherwise hang for the
+    // OS TCP timeout (1-2 min); fail the attempt fast instead.
+    socket.setTimeout(CONNECT_TIMEOUT_MS, () => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      reject(new Error('smtp_connect_timeout'));
+    });
   });
 }
 

@@ -34,6 +34,8 @@ function minimalFiles(agentBody) {
     { path: 'server/env.js', body: Buffer.from('module.exports = {};') },
     { path: 'server/policy.js', body: Buffer.from('module.exports = {};') },
     { path: 'server/processors.js', body: Buffer.from('module.exports = {};') },
+    { path: 'server/parse-pool.js', body: Buffer.from('module.exports = { extractText: async () => ({}) };') },
+    { path: 'server/parse-child.js', body: Buffer.from('module.exports = {};') },
     { path: 'sensors/endpoint-agent/agent.js', body: Buffer.from(agentBody) },
     {
       path: 'sensors/endpoint-agent/file-flow-profiles.js',

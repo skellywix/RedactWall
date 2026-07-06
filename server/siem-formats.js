@@ -72,13 +72,21 @@ function chronicle(event, dest) {
 }
 
 // IBM QRadar — LEEF 2.0 line delivered over HTTP to a collector.
+// Strip the LEEF structural characters (tab attribute-separator, pipe header-
+// delimiter, CR/LF record-separator) from every sensor-controlled value so a
+// crafted user/destination string cannot inject forged attributes or events.
+function leefValue(value) {
+  return String(value == null ? '' : value).replace(/[\t\r\n|]+/g, ' ').slice(0, 256);
+}
+
 function qradarLeef(event, dest) {
+  const action = leefValue(event.action || event.status);
   const attrs = [
-    'usrName=' + event.user, 'cat=' + (event.action || event.status), 'sev=' + (event.maxSeverity || 0),
-    'dst=' + event.destination, 'src=' + (event.source || 'unknown'), 'risk=' + (event.riskScore || 0),
-    'queryId=' + event.queryId, 'devTime=' + (event.createdAt || new Date().toISOString()),
+    'usrName=' + leefValue(event.user), 'cat=' + action, 'sev=' + (Number(event.maxSeverity) || 0),
+    'dst=' + leefValue(event.destination), 'src=' + leefValue(event.source || 'unknown'), 'risk=' + (Number(event.riskScore) || 0),
+    'queryId=' + leefValue(event.queryId), 'devTime=' + leefValue(event.createdAt || new Date().toISOString()),
   ].join('\t');
-  const leef = `LEEF:2.0|RedactWall|ControlPlane|1.0|${event.action || event.status}|\t|${attrs}`;
+  const leef = `LEEF:2.0|RedactWall|ControlPlane|1.0|${action}|\t|${attrs}`;
   return { url: dest.url, method: 'POST', headers: { 'content-type': 'text/plain' }, body: leef };
 }
 

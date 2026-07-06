@@ -47,8 +47,33 @@ const CAMEL_IDENTIFIERS = [
 ];
 const CAMEL_RE = new RegExp(`(?<!["@])\\b(${CAMEL_IDENTIFIERS.join('|')})\\b`, 'g');
 
+// Quote the known camelCase columns, but ONLY outside string/identifier
+// literals: a camelCase word inside a '...' literal (e.g. the JSON key in
+// data::jsonb->>'orgId') must be left byte-for-byte intact, or migrations and
+// runtime SQL that reference such keys silently read/write the wrong column.
 function quoteCamelIdentifiers(sql) {
-  return sql.replace(CAMEL_RE, '"$1"');
+  let out = '';
+  let i = 0;
+  while (i < sql.length) {
+    const ch = sql[i];
+    if (ch === "'" || ch === '"') {
+      const start = i++;
+      while (i < sql.length) { // copy the literal verbatim; '' / "" escapes the quote
+        if (sql[i] === ch) {
+          if (sql[i + 1] === ch) { i += 2; continue; }
+          i++;
+          break;
+        }
+        i++;
+      }
+      out += sql.slice(start, i);
+    } else {
+      const start = i;
+      while (i < sql.length && sql[i] !== "'" && sql[i] !== '"') i++;
+      out += sql.slice(start, i).replace(CAMEL_RE, '"$1"');
+    }
+  }
+  return out;
 }
 
 /** Rewrite @name / ? placeholders to $1..$n; returns binder for call args. */
@@ -70,6 +95,31 @@ function translateSql(sql) {
 
 function normalizeValue(value) {
   return value === undefined ? null : value;
+}
+
+/**
+ * Pull the reply matching `seq` from a FIFO port, discarding stale replies left
+ * behind by an earlier call that timed out. Returns the matching reply message
+ * or null when it has not arrived yet. `receive` yields the next queued
+ * { message } envelope (or null/undefined when the port is empty).
+ */
+function takeReply(receive, seq) {
+  let envelope = receive();
+  while (envelope) {
+    if (envelope.message.seq === seq) return envelope.message;
+    envelope = receive(); // stale reply from a timed-out call — drop it
+  }
+  return null;
+}
+
+/** Stable 32-bit hash (FNV-1a) for deriving advisory-lock keys from a row id. */
+function hash32(str) {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h | 0;
 }
 
 function createPgDriver(connectionString) {
@@ -95,27 +145,29 @@ function createPgDriver(connectionString) {
     if (code !== 0) recordFault(new Error(`worker exited with code ${code}`));
   });
   let txDepth = 0;
+  let callSeq = 0;
 
   function call(op, sql, params) {
     if (workerFault) throw new Error(`postgres bridge worker failed: ${workerFault.message}`);
+    const seq = ++callSeq;
     Atomics.store(flag, 0, 0);
-    worker.postMessage({ op, sql, params });
+    worker.postMessage({ op, sql, params, seq });
     const deadline = Date.now() + config.callTimeoutMs;
-    while (Atomics.load(flag, 0) === 0) {
+    for (;;) {
+      // Drain queued replies and match on seq. A reply whose seq is not ours is
+      // the late result of a call that already timed out; discard it so the
+      // request/reply stream cannot desynchronize (every later call would
+      // otherwise return the previous call's rows). See takeReply().
+      const reply = takeReply(() => receiveMessageOnPort(port1), seq);
+      if (reply) {
+        if (reply.error) { const err = new Error(reply.error); err.code = reply.code; throw err; }
+        return reply.result;
+      }
+      if (workerFault) throw new Error(`postgres bridge worker failed: ${workerFault.message}`);
       if (Date.now() > deadline) throw new Error('postgres bridge timeout');
+      Atomics.store(flag, 0, 0); // re-arm; a missed notify self-heals on the 100ms slice
       Atomics.wait(flag, 0, 0, 100);
     }
-    const msg = receiveMessageOnPort(port1);
-    if (!msg) {
-      if (workerFault) throw new Error(`postgres bridge worker failed: ${workerFault.message}`);
-      throw new Error('postgres bridge: missing reply');
-    }
-    if (msg.message.error) {
-      const err = new Error(msg.message.error);
-      err.code = msg.message.code;
-      throw err;
-    }
-    return msg.message.result;
   }
 
   function prepare(sql) {
@@ -155,10 +207,16 @@ function createPgDriver(connectionString) {
     // atomic, so two instances cannot both link a new entry to the same
     // prevHash and permanently fork the chain. Released on COMMIT/ROLLBACK.
     lockAuditAppend: () => { call('query', 'SELECT pg_advisory_xact_lock($1)', [4021990]); },
+    // Serialize a read-modify-write on one query id across instances sharing the
+    // database: a transaction-scoped advisory lock keyed on the id makes
+    // updateQuery's SELECT-then-UPDATE atomic so two concurrent patches can't
+    // both read the pre-image and lose one write. Released on COMMIT/ROLLBACK.
+    lockRowForUpdate: (key) => { call('query', 'SELECT pg_advisory_xact_lock($1, $2)', [4021991, hash32(String(key))]); },
     pragma: () => undefined,
-    setTenantContext: (orgId) => {
-      call('query', 'SELECT set_config($1, $2, false)', ['redactwall.org_id', String(orgId || '')]);
-    },
+    // Dedicated op so the worker REMEMBERS the tenant GUC and re-applies it on
+    // every reconnect; a plain session-level set_config would be silently lost
+    // the first time the bridge reconnects, leaving RLS fail-open.
+    setTenantContext: (orgId) => { call('setTenant', null, [String(orgId || '')]); },
     close: () => {
       try { call('close'); } catch { /* already gone */ }
       worker.terminate();
@@ -166,4 +224,4 @@ function createPgDriver(connectionString) {
   };
 }
 
-module.exports = { createPgDriver, translateSql, quoteCamelIdentifiers, resolveBridgeConfig };
+module.exports = { createPgDriver, translateSql, quoteCamelIdentifiers, resolveBridgeConfig, takeReply, hash32 };

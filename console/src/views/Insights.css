@@ -1,0 +1,13 @@
+/* AI Usage Insights view. Every color comes from the shared theme tokens (or
+   the legacy hard-coded chart hexes ported verbatim in Insights.tsx); rules
+   are scoped under .insights-view so parallel views cannot collide. All chart,
+   KPI, bar, chip, and panel classes (insights-*, panel, console-frame-*) are
+   styled by server/public/console-base.css, which the new console loads —
+   this file only supplies the frame layout the legacy .console-frame section
+   provided (display:grid; gap:14px). */
+
+.insights-view {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}

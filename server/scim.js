@@ -58,6 +58,20 @@ function cleanString(value, max = 256) {
   return String(value == null ? '' : value).trim().slice(0, max);
 }
 
+// SCIM PATCH/PUT bodies from real IdPs (Azure AD) send `active` as the strings
+// "True"/"False"; a bare !! coercion turns "False" truthy and silently
+// re-activates a deprovisioned user. Map string booleans explicitly.
+function scimBool(value, fallback = false) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'false' || normalized === '0' || normalized === 'no') return false;
+    if (normalized === 'true' || normalized === '1' || normalized === 'yes') return true;
+  }
+  if (value == null) return fallback;
+  return !!value;
+}
+
 function resourceLocation(req, resourceType, id) {
   return `${req.protocol}://${req.get('host')}/scim/v2/${resourceType}/${encodeURIComponent(id)}`;
 }
@@ -79,25 +93,28 @@ function roleFromScimRoles(scimRoles = []) {
   return '';
 }
 
-function groupMembersForUser(userId) {
-  return db.listScimGroups()
+// `groups` may be a pre-loaded db.listScimGroups() result so list handlers can
+// resolve N users without re-scanning the group table per user (avoids 2N loads).
+function groupMembersForUser(userId, groups) {
+  return (groups || db.listScimGroups())
     .filter((group) => (group.members || []).some((member) => member.value === userId))
     .map((group) => ({ value: group.id, display: group.displayName }));
 }
 
-function effectiveUserRole(user) {
+function effectiveUserRole(user, groups) {
   const direct = roles.normalizeRole(user.role);
   if (direct) return direct;
-  for (const group of groupMembersForUser(user.id)) {
+  for (const group of groupMembersForUser(user.id, groups)) {
     const role = roleFromDisplayName(group.display);
     if (role) return role;
   }
   return roles.AUDITOR;
 }
 
-function userResource(req, user) {
-  const groupRefs = groupMembersForUser(user.id);
-  const role = effectiveUserRole(user);
+function userResource(req, user, groups) {
+  const groupList = groups || db.listScimGroups();
+  const groupRefs = groupMembersForUser(user.id, groupList);
+  const role = effectiveUserRole(user, groupList);
   return {
     schemas: [USER_SCHEMA],
     id: user.id,
@@ -180,7 +197,7 @@ function normalizeUserBody(body = {}, existing = {}) {
     externalId: cleanString(body.externalId || existing.externalId, 256) || undefined,
     userName,
     displayName: cleanString(body.displayName || existing.displayName || userName, 256),
-    active: body.active !== undefined ? !!body.active : existing.active !== false,
+    active: body.active !== undefined ? scimBool(body.active, existing.active !== false) : existing.active !== false,
     role: roleFromScimRoles(body.roles) || roles.normalizeRole(body.role) || existing.role || '',
   };
 }
@@ -202,12 +219,12 @@ function applyUserPatch(user, operations = []) {
     const path = cleanString(op.path || '', 80).toLowerCase();
     const kind = cleanString(op.op || 'replace', 20).toLowerCase();
     if ((kind === 'replace' || kind === 'add') && !path && op.value && typeof op.value === 'object' && !Array.isArray(op.value)) {
-      if (Object.prototype.hasOwnProperty.call(op.value, 'active')) next.active = !!op.value.active;
+      if (Object.prototype.hasOwnProperty.call(op.value, 'active')) next.active = scimBool(op.value.active, next.active !== false);
       if (op.value.displayName) next.displayName = cleanString(op.value.displayName, 256) || next.displayName;
       if (op.value.roles) next.role = roleFromScimRoles(op.value.roles) || next.role;
       continue;
     }
-    if ((kind === 'replace' || kind === 'add') && path === 'active') next.active = !!op.value;
+    if ((kind === 'replace' || kind === 'add') && path === 'active') next.active = scimBool(op.value, next.active !== false);
     if ((kind === 'replace' || kind === 'add') && path === 'displayname') next.displayName = cleanString(op.value, 256) || next.displayName;
     if ((kind === 'replace' || kind === 'add') && path === 'roles') next.role = roleFromScimRoles(op.value) || next.role;
   }
@@ -219,6 +236,22 @@ function memberValueFromPatch(path, value) {
   if (direct) return direct;
   const match = String(path || '').match(/^members\s*\[\s*value\s+eq\s+"([^"]{1,128})"\s*\]$/i);
   return match ? cleanString(match[1], 128) : '';
+}
+
+// RFC 7644 lets clients remove members either via a path selector or by sending
+// `value` as an array of member objects ({op:'remove',path:'members',value:[{value:id}]}).
+// Return every member id the op targets; empty means "remove all members".
+function memberValuesFromPatch(path, value) {
+  if (Array.isArray(value)) {
+    const out = [];
+    for (const item of value) {
+      const id = cleanString(item && (item.value || item.$ref || item.id || item), 128);
+      if (id && id !== '[object Object]') out.push(id);
+    }
+    return out;
+  }
+  const single = memberValueFromPatch(path, value);
+  return single ? [single] : [];
 }
 
 function applyGroupPatch(group, operations = []) {
@@ -245,8 +278,8 @@ function applyGroupPatch(group, operations = []) {
       members = Array.from(byValue.values());
     }
     if (kind === 'remove' && path.startsWith('members')) {
-      const value = memberValueFromPatch(rawPath, op.value);
-      if (value) members = members.filter((member) => member.value !== value);
+      const values = memberValuesFromPatch(rawPath, op.value);
+      if (values.length) members = members.filter((member) => !values.includes(member.value));
       else members = [];
     }
   }
@@ -270,7 +303,9 @@ function saveOrConflict(res, detail, fn) {
   try {
     return fn();
   } catch (err) {
-    if (err && (err.code === 'SQLITE_CONSTRAINT_UNIQUE' || /UNIQUE constraint failed/i.test(err.message || ''))) {
+    if (err && (err.code === 'SQLITE_CONSTRAINT_UNIQUE' || err.code === '23505'
+      || /UNIQUE constraint failed/i.test(err.message || '')
+      || /duplicate key value violates unique constraint/i.test(err.message || ''))) {
       res.status(409).json(conflict(detail));
       return null;
     }
@@ -302,7 +337,8 @@ function router() {
 
   r.get('/Users', (req, res) => {
     const rows = filterEq(req, db.listScimUsers(), ['userName', 'externalId']);
-    res.json(listResponse(req, rows, userResource));
+    const groups = db.listScimGroups();
+    res.json(listResponse(req, rows, (rq, user) => userResource(rq, user, groups)));
   });
 
   r.post('/Users', (req, res) => {

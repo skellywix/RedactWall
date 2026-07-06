@@ -1,0 +1,47 @@
+/* Data lineage view. Every color comes from the shared theme tokens in
+   server/public/console-theme.css. Grid columns, fixed table layout, column
+   widths, and the narrow-screen collapse all come from the legacy
+   .lineage-grid / .wide-panel / .lineage-summary / .mini-kpi / .table-pager
+   classes in server/public/console-base.css (already loaded); rules here are
+   scoped under .lineage-view so parallel views cannot collide. */
+
+/* Legacy .lineage-summary pads itself for the legacy .panel; the shared
+   Panel body already pads, so drop the doubled padding. */
+.lineage-view .lineage-summary {
+  padding: 0;
+}
+
+/* ---- Toolbar (search + refresh) --------------------------------------------- */
+.lineage-view .lineage-toolbar {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: end;
+}
+
+.lineage-view .lineage-toolbar label {
+  display: grid;
+  gap: 5px;
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--mut);
+}
+
+.lineage-view .lineage-search {
+  flex: 1;
+  min-width: 200px;
+  max-width: 340px;
+}
+
+.lineage-view .lineage-refresh {
+  margin-left: auto;
+}
+
+/* ---- Tables ------------------------------------------------------------------ */
+/* Legacy gives lineage tables min-width:520px on narrow screens; scroll them
+   inside the panel instead of overflowing the page. */
+.lineage-view .lineage-table-wrap {
+  overflow-x: auto;
+}

@@ -29,6 +29,9 @@ const { listen, loopbackHttpFetch } = require('./support/listen');
 
 const root = path.join(__dirname, '..');
 const dashboardHtml = fs.readFileSync(path.join(root, 'server', 'public', 'index.html'), 'utf8');
+// Base + theme stylesheets are linked by index.html; the dashboard's layout and
+// responsive CSS lives here (shared with the new console), not inline anymore.
+const dashboardCss = fs.readFileSync(path.join(root, 'server', 'public', 'console-base.css'), 'utf8');
 const dashboardJs = fs.readFileSync(path.join(root, 'server', 'public', 'dashboard.js'), 'utf8');
 const siemPackageJs = fs.readFileSync(path.join(root, 'server', 'public', 'siem-package.js'), 'utf8');
 const threatGuardrailsJs = fs.readFileSync(path.join(root, 'server', 'public', 'ai-threat-guardrails.js'), 'utf8');
@@ -511,7 +514,7 @@ const responsiveMarkers = [
   /grid-template-columns:repeat/, /flex-wrap:wrap/, /white-space:nowrap/, /text-overflow:ellipsis/,
 ];
 for (const pattern of responsiveMarkers) {
-  add('static-ui', `responsive marker ${pattern}`, () => expectMatch(dashboardHtml + loginHtml, pattern));
+  add('static-ui', `responsive marker ${pattern}`, () => expectMatch(dashboardHtml + dashboardCss + loginHtml, pattern));
 }
 
 async function jsonFetch(port, apiPath, { method = 'GET', body, headers = {} } = {}) {

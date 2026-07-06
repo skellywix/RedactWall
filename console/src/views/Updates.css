@@ -1,0 +1,15 @@
+/* Updates view. The card, grid, log-row, posture, pill, form-control, and dialog
+   classes all come from the shared legacy sheets (server/public/console-base.css /
+   console-theme.css). Rules here are scoped under .updates-view so parallel views
+   cannot collide. */
+
+.updates-view {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+}
+
+/* Legacy renderUpdateConfigForm() set this spacing inline on the field grid. */
+.updates-view .updates-field-grid {
+  margin-top: 14px;
+}

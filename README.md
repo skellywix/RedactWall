@@ -42,7 +42,26 @@ The dashboard and API run on `http://localhost:4000` by default. The generated a
 
 ## Admin Console
 
-The browser console is the operator-facing control plane. It uses a macOS-inspired design system with light and dark themes, a single sidebar navigation, and one focused screen per task: login, overview, approval queue, AI Security Command Center, activity, insights, coverage, lineage, app catalog, compliance, identity, configuration, deploy, integrations, audit, and updates. The overview opens on the AI Data Leak Exposure Map, an interactive graph that attributes sanitized flows to departments as they pass RedactWall controls on the way to AI destinations. The queue, command-center, and configuration views are optimized for guided operator flow, guided policy setup, anomaly-score triage, redacted evidence review, live posture objectives, AI threat guardrails, AI control graph mapping, Agentic MCP Control, control outcomes, sensor posture, and fast approval or denial decisions without exposing raw prompt content by default.
+The browser console is the operator-facing control plane. It ships as a
+Vite/React/TypeScript app served at `/app` (behind the same login and CSRF gate
+as the rest of the API), with a grouped sidebar — Operate, Analyze, Govern,
+System — a Ctrl/Cmd-K command palette, and light/dark themes (dark by default).
+It has one focused screen per task: overview, approval queue, AI Command Center,
+all activity, insights, sensor coverage, data lineage, decision quality, app
+catalog, compliance, identity, configuration, deploy, integrations, audit log,
+and updates. The overview opens on the AI Data Leak Exposure Map, an interactive
+graph that attributes sanitized flows to departments as they pass RedactWall
+controls on the way to AI destinations. The queue, command-center, and
+configuration views are optimized for guided operator flow, guided policy setup,
+anomaly-score triage, redacted evidence review, live posture objectives, AI
+threat guardrails, AI control graph mapping, Agentic MCP Control, control
+outcomes, sensor posture, and fast approval or denial decisions without exposing
+raw prompt content by default.
+
+The original static console remains served at `/index.html` as the fallback
+during the migration window; `REDACTWALL_CONSOLE_DEFAULT=app` makes `/app` the
+landing console. Build the React bundle with `npm run console:build` (CI builds
+it automatically); it emits to `server/public/app/`.
 
 Run the default test suite:
 
@@ -188,8 +207,9 @@ See `.env.example`, `docs/AI_LLM_GATEWAY.md`, and `docs/DEPLOYMENT.md` for the l
 | --- | --- | --- |
 | `GET` | `/healthz` | Returns service health, service name, and package version. |
 | `GET` | `/readyz` | Checks database access and deployment preflight readiness. |
-| `GET` | `/` | Redirects to `/index.html`. |
-| `GET` | `/index.html` | Serves the admin dashboard after login. |
+| `GET` | `/` | Redirects to the default console (`/index.html`, or `/app/` when `REDACTWALL_CONSOLE_DEFAULT=app`). |
+| `GET` | `/app/` | Serves the React admin console after login. |
+| `GET` | `/index.html` | Serves the legacy static console after login (migration-window fallback). |
 
 ### Sensor API
 

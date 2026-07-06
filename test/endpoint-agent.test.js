@@ -80,8 +80,8 @@ test('endpoint agent start wires refresh, file watch, scans, and native handoff 
 
   assert.ok(unrefCalled);
   assert.deepStrictEqual(scans, [
-    { filename: 'existing.txt', opts: { watchDir: 'C:\\RedactWall\\watch' } },
-    { filename: 'new.txt', opts: { watchDir: 'C:\\RedactWall\\watch' } },
+    { filename: 'existing.txt', opts: { watchDir: 'C:\\RedactWall\\watch', settleMs: 150 } },
+    { filename: 'new.txt', opts: { watchDir: 'C:\\RedactWall\\watch', settleMs: 150 } },
   ]);
   assert.deepStrictEqual(handoffs, [{
     dir: 'C:\\RedactWall\\handoff',
@@ -123,6 +123,7 @@ test('file-flow profiles scan named roots with destination context and public ch
 
   assert.deepStrictEqual(scans.map((scan) => scan.filename), ['queued.pdf', 'new.docx']);
   assert.deepStrictEqual(scans[0].opts, {
+    settleMs: 150,
     watchDir: profiles[0].dir,
     destination: 'Copilot Desktop',
     user: 'lending@example.test',

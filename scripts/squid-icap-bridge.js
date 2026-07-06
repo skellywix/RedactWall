@@ -420,6 +420,10 @@ function processBuffer(socket, state, config) {
   state.buffer = state.buffer.slice(result.end);
   state.busy = true;
   socket.pause();
+  // Hold verdicts can poll for up to releaseWaitMs (default 5 min); disarm the
+  // idle timeout while a message is in flight so it cannot destroy the socket
+  // before the synthesized block/allow response is written. Re-arm in finally.
+  socket.setTimeout(0);
   handleMessage(socket, result.message, config)
     .catch(() => {
       try {
@@ -429,6 +433,7 @@ function processBuffer(socket, state, config) {
     .finally(() => {
       state.busy = false;
       if (!socket.destroyed) {
+        socket.setTimeout(config.socketTimeoutMs);
         socket.resume();
         processBuffer(socket, state, config);
       }
@@ -450,7 +455,8 @@ function createIcapServer(opts = {}) {
   const server = net.createServer((socket) => {
     const state = { buffer: EMPTY, busy: false, dead: false };
     sockets.add(socket);
-    socket.setTimeout(config.socketTimeoutMs, () => socket.destroy());
+    socket.setTimeout(config.socketTimeoutMs);
+    socket.on('timeout', () => socket.destroy());
     socket.on('close', () => sockets.delete(socket));
     socket.on('error', () => socket.destroy());
     socket.on('data', (chunk) => onSocketData(socket, state, chunk, config));

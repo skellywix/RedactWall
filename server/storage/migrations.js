@@ -245,6 +245,25 @@ const MIGRATIONS = [
           OR "orgId" = current_setting('redactwall.org_id', true));
     `,
   },
+  {
+    version: 4,
+    name: 'orgid-normalize-and-posture-index',
+    // Re-backfill orgId with the SAME normalization runtime writes/filters use
+    // (orgColumn: trimmed + lowercased, empty -> NULL). This repairs two v3
+    // defects: pre-migration rows whose stored orgId had mixed case/whitespace
+    // never matched the lowercased filter, and (on Postgres) the earlier
+    // identifier-quoting bug that could NULL every row. It reads from the intact
+    // data JSON, so it is safe and idempotent. The audit(action) index keeps
+    // posture-state reconstruction from scanning the whole append-only log.
+    sqlite: `
+      UPDATE queries SET orgId = NULLIF(lower(trim(json_extract(data, '$.orgId'))), '');
+      CREATE INDEX IF NOT EXISTS idx_audit_action ON audit(action);
+    `,
+    postgres: `
+      UPDATE queries SET "orgId" = NULLIF(lower(btrim(data::jsonb->>'orgId')), '');
+      CREATE INDEX IF NOT EXISTS idx_audit_action ON audit(action);
+    `,
+  },
 ];
 
 module.exports = { MIGRATIONS };

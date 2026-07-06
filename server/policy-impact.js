@@ -215,6 +215,11 @@ function addAggregate({ row, current, proposed, destinations, categories, source
 
 function buildPolicyImpact({ rows = [], currentPolicy = {}, proposedPolicy = {}, limit = 1000, now = new Date() } = {}) {
   const sample = (Array.isArray(rows) ? rows : []).slice(0, Math.max(1, Math.min(Number(limit) || 1000, 5000)));
+  // Normalize both policies once instead of per sampled row: evaluateRow (and the
+  // evaluate() it calls) short-circuit on an already-normalized policy, so a
+  // large simulation no longer re-normalizes the policy thousands of times.
+  const normalizedCurrent = policyEngine.normalizePolicy(currentPolicy);
+  const normalizedProposed = policyEngine.normalizePolicy(proposedPolicy);
   const currentCounts = emptyOutcomeCounts();
   const proposedCounts = emptyOutcomeCounts();
   const summary = {
@@ -231,8 +236,8 @@ function buildPolicyImpact({ rows = [], currentPolicy = {}, proposedPolicy = {},
   const sources = new Map();
 
   for (const row of sample) {
-    const current = evaluateRow(row, currentPolicy);
-    const proposed = evaluateRow(row, proposedPolicy);
+    const current = evaluateRow(row, normalizedCurrent);
+    const proposed = evaluateRow(row, normalizedProposed);
     currentCounts[current.outcome] += 1;
     proposedCounts[proposed.outcome] += 1;
     const changed = current.outcome !== proposed.outcome;
