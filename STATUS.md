@@ -12,18 +12,35 @@ Roadmap references (N*/X*) point at `ROADMAP.md`.
 
 **Active engineering thread — stack upgrade** (`PLANS/stack-upgrade-plan.md`):
 
-- WS1 A3: port the long-tail legacy feature modules to `/app` routes, one PR
-  each (`siem-package.js`, `security-package.js`, `agentic-mcp.js`,
-  `operator-flow.js`, `behavior-baselines.js`, `control-graph.js`,
-  `coverage-file-flow.js`, `ai-threat-guardrails.js`, plus posture/catalog/
-  compliance/lineage/identity views). Follow the conventions in
-  `console/src/views/` (typed api module + view + co-located CSS; `Queue.tsx`
-  is the richest example). Carry the recently-landed legacy queue assignee
-  editor and Command Center decision pivots over to the `/app` Queue/Overview.
-- WS1 A4 (after A3): cutover — flip `REDACTWALL_CONSOLE_DEFAULT=app` as deploy
-  default, serve legacy at `/legacy/` for one release, port remaining
-  Playwright specs, then delete `server/public/dashboard.js`, `index.html`,
-  and the feature-module files plus their asset-budget entries.
+- WS1 A3: **DONE.** All 16 operator views are ported to the React `/app`
+  console — Overview, Approval Queue, AI Command Center, All Activity,
+  Insights, Sensor Coverage, Data Lineage, Decision Quality, App Catalog,
+  Compliance, Identity, Configuration, Deploy, Integrations, Audit Log,
+  Updates — plus the shell chrome (grouped Operate/Analyze/Govern/System rail
+  with icons and a live pending badge, Ctrl/Cmd-K command palette, LIVE + last-
+  updated indicators, sign out, system-status footer). The legacy design
+  system (fonts, tokens, leak-map animation, selectors) was extracted to the
+  shared `server/public/console-base.css` so both consoles render identically.
+  Queue assignee editor, per-query audit trail, billing/seats, and the Command
+  Center decision pivots all carried over. Evidence: `e2e/console-parity.spec.js`
+  (all 16 routes, zero console errors) and `e2e/console-design.spec.js` (32
+  dark+light screenshots).
+- WS1 A4 (cutover — deploy decision, still open): flip
+  `REDACTWALL_CONSOLE_DEFAULT=app` as the deploy default, serve legacy at
+  `/legacy/` for one release, then delete `server/public/dashboard.js`,
+  `index.html`, and the feature-module files plus their asset-budget entries.
+  Deliberately not yet done: the legacy console still ships and passes
+  `e2e/admin-console.spec.js` (20/20) as the fallback during the migration
+  window; the routes it depends on are therefore not dead code.
+- **Repo-wide hardening pass — DONE.** A line-by-line audit (verified) fixed
+  131 defects across server, storage, engine, gateway, sensors, console, and
+  tooling, including several backend loose ends from the stack upgrade:
+  Postgres RLS tenant context is now actually wired (`db.wireTenantContext`),
+  the pg-driver literal-quoting and reply-desync bugs are fixed, the endpoint
+  agent parses untrusted files through the killable parse pool, unsupported
+  files fail closed (`file_blocked_unscanned`), and the AI Gateway redacts
+  every response choice / array input with full policy+EDM coverage. See the
+  `## Recently completed` note below and `CHANGELOG.md`.
 - WS3.2: flip the Dockerfile base to `node:24-bookworm-slim` once the Node
   22/24 CI matrix has soaked green ~2–3 weeks with no detection-eval perf
   regression and clean better-sqlite3 builds; keep the 22 CI lane after.

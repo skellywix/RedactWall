@@ -66,6 +66,15 @@ cannot read, update, delete, or re-tag each other's rows, and a blank
 tenants. Set the tenant context per request through the storage layer only;
 do not hand out this role for ad-hoc human access.
 
+**Wiring status.** For the customer-silo model (one RedactWall stack per
+tenant), the session tenant context is now pinned at startup from the configured
+tenant (`db.wireTenantContext`), and the Postgres worker re-applies it across
+reconnects — so RLS enforces isolation rather than sitting inert. A blank tenant
+context (operator / self-host mode) is fail-open by design. Per-request
+multi-tenancy on a **shared** control plane is a separate model: it needs a
+transaction-local `SET LOCAL redactwall.org_id` bound on each request, and is
+gated behind the shared-SaaS work in `PLANS/platform-roadmap.md`.
+
 ## Schema Migrations
 
 Migrations are applied automatically when the process opens the store: on

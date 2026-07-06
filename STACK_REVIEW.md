@@ -9,6 +9,15 @@ Reviewed: 26 June 2026
 > deployments; the "move to Postgres when multi-tenant hosted operation
 > becomes real" recommendation below is now a configuration choice rather
 > than future work. See `PLANS/platform-roadmap.md` (M4).
+>
+> **Update (6 July 2026):** the console migration this review scoped (WS1) has
+> landed — the operator console is now a Vite/React/TypeScript app at `/app`
+> with all 16 views and shell chrome at parity with the legacy console, which
+> remains as the migration-window fallback. A repo-wide, line-by-line audit
+> then fixed 131 verified defects across server, storage, engine, gateway,
+> sensors, console, and tooling (see `CHANGELOG.md`). Remaining stack work is
+> the production cutover and the calendar-/SaaS-gated items in
+> `PLANS/stack-upgrade-plan.md`.
 
 ## Decision Summary
 
