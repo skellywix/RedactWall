@@ -50,7 +50,6 @@ export default function Topbar({ who, liveState, lastUpdated, onOpenPalette, onS
       <div className="spacer"></div>
       <LiveStatus state={liveState} lastUpdated={lastUpdated} />
       <ThemeToggle />
-      <a className="ghost" href="/index.html">Classic console</a>
       <span className="who" id="who">{who}</span>
       <button className="ghost" id="logout" type="button" onClick={onSignOut}>
         {LOGOUT_ICON}

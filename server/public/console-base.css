@@ -1,8 +1,7 @@
-/* RedactWall console BASE SHEET — extracted verbatim from the inline <style>
-   in server/public/index.html so BOTH the legacy console and the new Vite
-   console (console/index.html) load the same base layer. Loaded BEFORE
-   console-theme.css, exactly as the legacy console did. Do not edit here for
-   legacy-only tweaks; this file is now shared. */
+/* RedactWall console BASE SHEET — the base design layer (tokens, typography,
+   component classes) for the React console at console/index.html. Loaded before
+   console-theme.css. Originally extracted from the now-retired legacy console's
+   inline styles; keep it framework-agnostic so any console surface can link it. */
 /* RedactWall Security Console - macOS-inspired design system.
    Light and dark themes share one token set; body[data-theme] switches. */
 :root{

@@ -112,6 +112,18 @@ reconstructed from `ITERATIONS.md` and git history.
 
 ### Removed
 
+- **Legacy static admin console retired.** With the React `/app` console at full
+  parity, `server/public/index.html`, `dashboard.js`, and the 15 feature-renderer
+  scripts (agentic-mcp, ai-threat-guardrails, behavior-baselines,
+  competitive-readiness, control-graph, coverage-file-flow, decision-quality,
+  detector-feedback, leak-path-map, market-hardening, operator-flow,
+  policy-guides, policy-impact-preview, security-package, siem-package) were
+  deleted, along with the `/index.html` route and the `REDACTWALL_CONSOLE_DEFAULT`
+  switch — `/` now redirects to `/app/`. The shared design system
+  (`console-base.css`, `console-theme.css`), login page, and favicon are kept.
+  Legacy-only tests were removed; the raw-prompt-privacy and sanitized
+  evidence-export invariants they guarded were migrated to assert against the
+  React console source.
 - Stale one-time QA artifacts (`.codex/`), the superseded project review
   (`REVIEW.md`), and the dead `server/index.js` re-export shim.
 - Machine-specific personal helper scripts and their npm aliases and docs:

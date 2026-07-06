@@ -237,10 +237,10 @@ export default function LeakMap({ map, surfaces }: { map: LeakMapReport | null; 
         <div className="leak-inspector-ctas">
           {num(sel.item.pending) > 0 && <a className="leak-cta" href={routeHref('/queue')}>Open approval queue</a>}
           {(num(sel.item.shadow) > 0 || (sel.kind === 'edge' && map.destinations.find((d) => d.id === (sel.item as LeakMapEdge).to)?.state === 'shadow')) && (
-            <a className="leak-cta" href="/index.html?tab=coverage">Review shadow AI</a>
+            <a className="leak-cta" href={routeHref('/coverage')}>Review shadow AI</a>
           )}
           {(sel.kind === 'edge' ? (sel.item as LeakMapEdge).via : sel.item.id) === 'mcp_guard' && (
-            <a className="leak-cta" href="/index.html?tab=policy">Review MCP policy</a>
+            <a className="leak-cta" href={routeHref('/policy')}>Review MCP policy</a>
           )}
           <a className="leak-cta" href={routeHref('/audit')}>Export evidence pack</a>
         </div>

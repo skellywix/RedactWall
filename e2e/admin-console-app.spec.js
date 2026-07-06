@@ -16,7 +16,7 @@ async function login(page) {
   await expect(page.getByRole('heading', { name: 'RedactWall' })).toBeVisible();
   await page.locator('#password').fill('e2e-pass');
   await page.getByRole('button', { name: 'Continue' }).click();
-  await expect(page).toHaveURL(/\/index\.html$/);
+  await expect(page).toHaveURL(/\/app\/?$/);
 }
 
 function collectUiProblems(page) {
@@ -74,7 +74,6 @@ test('console shell renders the live session and pilot view after login', async 
   // healthy; a hung "Loading" meta line is not.
   await expect(page.locator('.app-panel-meta')).not.toHaveText('Loading', { timeout: 10000 });
 
-  await expect(page.getByRole('link', { name: 'Classic console' })).toHaveAttribute('href', '/index.html');
   expect(problems).toEqual([]);
 });
 

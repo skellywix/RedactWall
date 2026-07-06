@@ -776,7 +776,6 @@ const TAB_ROUTES: Record<string, string> = {
 function jumpToTab(tab: string): void {
   const route = TAB_ROUTES[tab];
   if (route) navigate(route);
-  else location.href = `/index.html?tab=${encodeURIComponent(tab)}`;
 }
 
 function scrollToAnchor(anchorId: string): void {

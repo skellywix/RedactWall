@@ -1736,7 +1736,7 @@ app.get('/auth/oidc/callback', async (req, res) => {
       actor: result.account.user,
       detail: result.account.role + '; oidc',
     });
-    res.redirect(result.returnTo || '/index.html');
+    res.redirect(result.returnTo || '/app/');
   } catch (err) {
     db.appendAudit({ action: 'OIDC_LOGIN_FAILED', actor: 'oidc', detail: oidc.publicError(err) });
     res.clearCookie(oidc.STATE_COOKIE_NAME, OIDC_STATE_COOKIE_CLEAR_OPTIONS);
@@ -2845,15 +2845,11 @@ app.get('/api/stream', auth.requireAuth, (req, res) => {
   req.on('close', () => sseClients.delete(res));
 });
 
-// ---- Static dashboard --------------------------------------------------------
-// REDACTWALL_CONSOLE_DEFAULT=app makes the new console the landing surface once
-// enough views are ported for a deployment's operators; legacy stays default.
-app.get('/', (req, res) =>
-  res.redirect(String(process.env.REDACTWALL_CONSOLE_DEFAULT || 'legacy') === 'app' ? '/app/' : '/index.html'));
-app.get('/index.html', auth.requireAuth, (req, res) =>
-  res.sendFile(path.join(__dirname, 'public', 'index.html')));
-// New console (Vite build output; hashed assets under /app/assets stay public
-// like every other data-free static file — all data flows through /api/*).
+// ---- Console (React SPA) -----------------------------------------------------
+// The React console at /app is the only operator console; `/` lands there.
+app.get('/', (req, res) => res.redirect('/app/'));
+// Vite build output; hashed assets under /app/assets stay public like every
+// other data-free static file — all data flows through /api/*.
 app.get(['/app', '/app/', '/app/index.html'], auth.requireAuth, (req, res) =>
   res.sendFile(path.join(__dirname, 'public', 'app', 'index.html')));
 // serve-static normalizes non-canonical paths (//index.html, /%2findex.html)
@@ -2861,7 +2857,7 @@ app.get(['/app', '/app/', '/app/index.html'], auth.requireAuth, (req, res) =>
 // serve the console shell to anonymous callers. Gate any request that
 // normalizes to a console HTML entry point through requireAuth first, and stop
 // express.static from serving index.html on its own (index:false).
-const CONSOLE_HTML_PATHS = new Set(['/index.html', '/app', '/app/', '/app/index.html']);
+const CONSOLE_HTML_PATHS = new Set(['/app', '/app/', '/app/index.html']);
 app.use((req, res, next) => {
   let decoded = req.path;
   try { decoded = decodeURIComponent(req.path); } catch {}

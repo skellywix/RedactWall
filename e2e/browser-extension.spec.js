@@ -724,7 +724,7 @@ test.describe('browser extension live smoke', () => {
 
       await expect(popup.locator('#state')).toHaveText('Protecting this browser');
       await expect(popup.locator('#mode')).toHaveText('redact');
-      await expect(popup.locator('#dash')).toHaveAttribute('href', `${baseURL}/index.html`);
+      await expect(popup.locator('#dash')).toHaveAttribute('href', `${baseURL}/app/`);
 
       await popup.locator('.switch .slider').click();
       await expect(popup.locator('#state')).toHaveText('Paused');

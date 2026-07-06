@@ -23,7 +23,7 @@ async function login(page) {
   await expect(page.getByRole('heading', { name: 'RedactWall' })).toBeVisible();
   await page.locator('#password').fill('e2e-pass');
   await page.getByRole('button', { name: 'Continue' }).click();
-  await expect(page).toHaveURL(/\/index\.html$/);
+  await expect(page).toHaveURL(/\/app\/?$/);
 }
 
 function collectUiProblems(page) {

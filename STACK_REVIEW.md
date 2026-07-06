@@ -12,8 +12,10 @@ Reviewed: 26 June 2026
 >
 > **Update (6 July 2026):** the console migration this review scoped (WS1) has
 > landed — the operator console is now a Vite/React/TypeScript app at `/app`
-> with all 16 views and shell chrome at parity with the legacy console, which
-> remains as the migration-window fallback. A repo-wide, line-by-line audit
+> with all 16 views and shell chrome at parity with the now-retired legacy
+> console (`server/public/index.html`, `dashboard.js`, and the feature-renderer
+> JS were deleted; the shared design system and login page are kept). A
+> repo-wide, line-by-line audit
 > then fixed 131 verified defects across server, storage, engine, gateway,
 > sensors, console, and tooling (see `CHANGELOG.md`). Remaining stack work is
 > the production cutover and the calendar-/SaaS-gated items in

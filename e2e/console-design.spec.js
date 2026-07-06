@@ -44,7 +44,7 @@ async function login(page) {
   await page.goto('/login.html');
   await page.locator('#password').fill('e2e-pass');
   await page.getByRole('button', { name: 'Continue' }).click();
-  await expect(page).toHaveURL(/\/index\.html$/);
+  await expect(page).toHaveURL(/\/app\/?$/);
 }
 
 async function createHeldPrompt(request) {

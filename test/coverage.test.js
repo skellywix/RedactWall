@@ -7,9 +7,6 @@ const path = require('node:path');
 const coverage = require('../server/coverage');
 
 const serverSource = fs.readFileSync(path.join(__dirname, '..', 'server/app.js'), 'utf8');
-const dashboardHtml = fs.readFileSync(path.join(__dirname, '..', 'server/public/index.html'), 'utf8');
-const dashboardJs = fs.readFileSync(path.join(__dirname, '..', 'server/public/dashboard.js'), 'utf8');
-const coverageFileFlowJs = fs.readFileSync(path.join(__dirname, '..', 'server/public/coverage-file-flow.js'), 'utf8');
 
 const policy = {
   governedDestinations: ['chatgpt.com', 'claude.ai', 'copilot.microsoft.com'],
@@ -406,37 +403,7 @@ test('coverage route stays session protected', () => {
   assert.match(serverSource, /app\.get\('\/api\/coverage', auth\.requireAuth/);
 });
 
-test('lineage route and dashboard render sanitized lineage view', () => {
+test('lineage route stays session protected and sanitized', () => {
   assert.match(serverSource, /app\.get\('\/api\/lineage', auth\.requireAuth/);
   assert.match(serverSource, /lineage: evidence\.buildLineage\(queries\)/);
-  assert.match(dashboardHtml, /data-tab="lineage"/);
-  assert.match(dashboardHtml, /id="lineageSummary"/);
-  assert.match(dashboardHtml, /id="lineageUsers"/);
-  assert.match(dashboardHtml, /id="lineageDestinations"/);
-  assert.match(dashboardHtml, /id="lineageSensors"/);
-  assert.match(dashboardHtml, /id="lineageChannels"/);
-  assert.match(dashboardHtml, /id="lineageCategories"/);
-  assert.match(dashboardHtml, /id="lineageDecisions"/);
-  assert.match(dashboardJs, /async function loadLineage\(\)/);
-  assert.match(dashboardJs, /api\('\/api\/lineage\?limit=1000'\)/);
-  assert.match(dashboardJs, /function renderLineageRows/);
-  assert.match(dashboardJs, /function lineageTotals/);
-});
-
-test('coverage dashboard renders fleet install health posture', () => {
-  assert.match(dashboardHtml, /Fleet Install Health/);
-  assert.match(dashboardHtml, /id="fleetRows"/);
-  assert.match(dashboardHtml, /Endpoint AI Tools/);
-  assert.match(dashboardHtml, /id="endpointAiToolRows"/);
-  assert.match(dashboardHtml, /Endpoint File Flow/);
-  assert.match(dashboardHtml, /id="endpointFileFlowRows"/);
-  assert.match(dashboardJs, /totals\.fleetAttention/);
-  assert.match(dashboardJs, /totals\.freshDiscoveryFeeds/);
-  assert.match(dashboardJs, /Feeds fresh/);
-  assert.match(dashboardJs, /endpointAiTools/);
-  assert.match(coverageFileFlowJs, /endpointFileFlowProfiles/);
-  assert.match(coverageFileFlowJs, /Local path: not reported/);
-  assert.match(dashboardJs, /function endpointAiToolTone/);
-  assert.match(dashboardJs, /function fleetTone/);
-  assert.match(dashboardJs, /no install-health heartbeat/);
 });
