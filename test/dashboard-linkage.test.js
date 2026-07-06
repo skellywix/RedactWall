@@ -153,6 +153,9 @@ function assertRenderedId(source, id) {
 
 test('dashboard static controls, generated policy controls, and API routes stay wired', () => {
   const index = readProjectFile('server', 'public', 'index.html');
+  // Feature styling that used to be inline in index.html now lives in the
+  // linked console base stylesheet (shared with the new console).
+  const baseCss = readProjectFile('server', 'public', 'console-base.css');
   const loginHtml = readProjectFile('server', 'public', 'login.html');
   const loginJs = readProjectFile('server', 'public', 'login.js');
   const dashboard = readProjectFile('server', 'public', 'dashboard.js');
@@ -176,8 +179,8 @@ test('dashboard static controls, generated policy controls, and API routes stay 
 
   assert.match(agenticMcpJs, /agentic-mcp-readiness/);
   assert.match(agenticMcpJs, /Connector Catalog/);
-  assert.match(index, /\.agentic-mcp-readiness/);
-  assert.match(index, /\.agentic-mcp-layout/);
+  assert.match(baseCss, /\.agentic-mcp-readiness/);
+  assert.match(baseCss, /\.agentic-mcp-layout/);
 
   [
     'qBadge',
@@ -485,24 +488,24 @@ test('dashboard static controls, generated policy controls, and API routes stay 
   assert.ok(detectorFeedbackJs.includes('Held-out Eval'), 'detector-feedback.js no longer renders held-out eval quality proof');
   assert.ok(detectorFeedbackJs.includes('quality'), 'detector-feedback.js no longer reads detector quality proof');
   assert.ok(index.includes('ai-inventory-grid'), 'index.html no longer styles the AI app inventory grid');
-  assert.ok(index.includes('ai-inventory-risk'), 'index.html no longer styles AI inventory risk tiers');
+  assert.ok(baseCss.includes('ai-inventory-risk'), 'console base sheet no longer styles AI inventory risk tiers');
   assert.ok(index.includes('agentic-mcp-board'), 'index.html no longer styles Agentic MCP control');
-  assert.ok(index.includes('agentic-mcp-policy-row'), 'index.html no longer styles MCP policy rows');
+  assert.ok(baseCss.includes('agentic-mcp-policy-row'), 'console base sheet no longer styles MCP policy rows');
   assert.ok(index.includes('AI Threat Guardrails'), 'index.html no longer exposes the AI threat guardrails section');
   assert.ok(index.includes('segment-lens'), 'index.html no longer styles the posture segment lens');
-  assert.ok(index.includes('control-graph-lanes'), 'index.html no longer styles AI control graph lanes');
-  assert.ok(index.includes('control-graph-edge'), 'index.html no longer styles AI control graph edges');
+  assert.ok(baseCss.includes('control-graph-lanes'), 'console base sheet no longer styles AI control graph lanes');
+  assert.ok(baseCss.includes('control-graph-edge'), 'console base sheet no longer styles AI control graph edges');
   assert.ok(index.includes('leak-map-stage'), 'index.html no longer styles the leak path map stage');
-  assert.ok(index.includes('leak-wall'), 'index.html no longer styles the RedactWall barrier');
-  assert.ok(index.includes('leak-edge'), 'index.html no longer styles leak map edges');
-  assert.ok(index.includes('leak-inspector-grid'), 'index.html no longer styles the leak map inspector');
+  assert.ok(baseCss.includes('leak-wall'), 'console base sheet no longer styles the RedactWall barrier');
+  assert.ok(baseCss.includes('leak-edge'), 'console base sheet no longer styles leak map edges');
+  assert.ok(baseCss.includes('leak-inspector-grid'), 'console base sheet no longer styles the leak map inspector');
   assert.ok(index.includes('<script src="/leak-path-map.js" defer></script>'), 'index.html no longer loads the leak path map renderer');
   assert.ok(index.includes('action-queue'), 'index.html no longer styles the hardening action queue');
-  assert.ok(index.includes('action-workflow-pill'), 'index.html no longer styles action workflow state');
-  assert.ok(index.includes('hardening-step'), 'index.html no longer styles hardening remediation steps');
-  assert.ok(index.includes('proof-row'), 'index.html no longer styles proof ledger rows');
-  assert.ok(index.includes('mission-lane'), 'index.html no longer styles hardening mission lanes');
-  assert.ok(index.includes('market-hardening-board'), 'index.html no longer styles market hardening lanes');
+  assert.ok(baseCss.includes('action-workflow-pill'), 'console base sheet no longer styles action workflow state');
+  assert.ok(baseCss.includes('hardening-step'), 'console base sheet no longer styles hardening remediation steps');
+  assert.ok(baseCss.includes('proof-row'), 'console base sheet no longer styles proof ledger rows');
+  assert.ok(baseCss.includes('mission-lane'), 'console base sheet no longer styles hardening mission lanes');
+  assert.ok(baseCss.includes('market-hardening-board'), 'console base sheet no longer styles market hardening lanes');
   assert.ok(index.includes('operator-flow-board'), 'index.html no longer styles the operator flow board');
   assert.ok(index.includes('siem-package-board'), 'index.html no longer styles SIEM package board');
   assert.ok(index.includes('<script src="/siem-package.js" defer></script>'), 'index.html no longer loads the SIEM package renderer');

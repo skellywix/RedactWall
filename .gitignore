@@ -12,6 +12,8 @@ output/
 server/public/app/
 test-results/
 playwright-report/
+# design-parity screenshots produced by e2e/console-design.spec.js
+e2e/design-evidence/
 # cloud-sync (ProtonDrive/FUSE) leftovers — never source
 .fuse_hidden*
 # editor/OS noise

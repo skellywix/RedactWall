@@ -1,4 +1,5 @@
 import { Suspense, lazy, useEffect, useState, type ComponentType, type LazyExoticComponent } from 'react';
+import ThemeToggle from './components/ThemeToggle';
 import { initCsrf } from './lib/api';
 import { routeHref, useHashRoute } from './lib/router';
 import { roleLabel, useSession } from './lib/session';
@@ -58,6 +59,7 @@ export default function App() {
           <span id="who" className="app-who">
             {loading ? 'Signing in…' : me ? `${me.user} / ${roleLabel(me.role)}` : 'Session unavailable'}
           </span>
+          <ThemeToggle />
         </header>
         <main className="app-content">
           {csrfReady ? (
