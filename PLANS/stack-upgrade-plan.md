@@ -1,15 +1,16 @@
 # Stack Upgrade Plan: Console, Parsing Isolation, Node 24, Postgres Hardening
 
-> **Status (July 2026):** WS1 A1–A3 are complete — the React `/app` console
-> reached full parity with the legacy console (all 16 views + shell chrome),
-> verified by `e2e/console-parity.spec.js` and `e2e/console-design.spec.js`.
-> A subsequent line-by-line audit fixed 131 verified defects, including the
-> remaining stack-upgrade backend loose ends (Postgres RLS tenant context now
-> wired, pg-driver quoting/desync bugs, parse-pool isolation for the endpoint
-> agent, gateway response-choice redaction). What remains here is WS1 A4
-> (production cutover: flip `REDACTWALL_CONSOLE_DEFAULT=app`, then retire the
-> legacy console) and the calendar-/SaaS-gated items (WS3.2 Node 24 base flip,
-> WS4.4 tenant lifecycle). See `../CHANGELOG.md` and `../STATUS.md`.
+> **Status (July 2026):** WS1 is complete — the React `/app` console reached
+> full parity with the legacy console (all 16 views + shell chrome, verified by
+> `e2e/console-parity.spec.js` and `e2e/console-design.spec.js`), and A4 cutover
+> is done: `/` redirects to `/app/` and the legacy static console
+> (`server/public/index.html`, `dashboard.js`, and the feature-renderer JS) was
+> deleted, keeping the shared design system and login page. A line-by-line audit
+> also fixed 131 verified defects, including the remaining stack-upgrade backend
+> loose ends (Postgres RLS tenant context now wired, pg-driver quoting/desync
+> bugs, parse-pool isolation for the endpoint agent, gateway response-choice
+> redaction). What remains are the calendar-/SaaS-gated items (WS3.2 Node 24
+> base flip, WS4.4 tenant lifecycle). See `../CHANGELOG.md` and `../STATUS.md`.
 
 Action plan for the five concerns raised in the June 2026 architecture review
 (`../STACK_REVIEW.md`), fact-checked against the codebase and against where

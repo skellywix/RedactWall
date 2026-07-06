@@ -209,7 +209,7 @@ test('oidc callback issues a RedactWall session for an active SCIM approver', as
 
       const { callback } = await followOidcLogin(port);
       assert.strictEqual(callback.status, 302);
-      assert.strictEqual(callback.headers.get('location'), '/index.html');
+      assert.strictEqual(callback.headers.get('location'), '/app/');
       const sessionCookie = cookiePair(callback.headers.get('set-cookie'));
       assert.match(sessionCookie, /^redactwall_session=/);
 
@@ -314,7 +314,7 @@ test('oidc discovery and state cookies fail closed on mismatches and tampering',
   );
 
   assert.strictEqual(oidc.safeReturnTo('/dashboard.html'), '/dashboard.html');
-  assert.strictEqual(oidc.safeReturnTo('https://evil.example/'), '/index.html');
+  assert.strictEqual(oidc.safeReturnTo('https://evil.example/'), '/app/');
 });
 
 test('oidc id token validation rejects malformed and out-of-window signed claims', async () => {

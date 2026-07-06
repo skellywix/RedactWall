@@ -151,20 +151,19 @@ test('identity setup CLI parser and injectable main cover help, text, json, and 
   assert.match(failure.logs[0], /Identity setup failed: --format must be text or json/);
 });
 
-test('dashboard and server expose authenticated identity setup UX', () => {
+test('console and server expose authenticated identity setup UX', () => {
   const server = fs.readFileSync(path.join(root, 'server', 'app.js'), 'utf8');
-  const index = fs.readFileSync(path.join(root, 'server', 'public', 'index.html'), 'utf8');
-  const dashboard = fs.readFileSync(path.join(root, 'server', 'public', 'dashboard.js'), 'utf8');
+  const identityView = fs.readFileSync(path.join(root, 'console', 'src', 'views', 'Identity.tsx'), 'utf8');
   const packageJson = fs.readFileSync(path.join(root, 'package.json'), 'utf8');
   const envExample = fs.readFileSync(path.join(root, '.env.example'), 'utf8');
 
   assert.match(server, /app\.get\('\/api\/identity\/setup-guide', auth\.requireAuth/);
   assert.match(server, /identitySetup\.buildIdentitySetupGuide/);
-  assert.match(index, /data-tab="identity"/);
-  assert.match(index, /id="identityProvider"/);
-  assert.match(dashboard, /async function loadIdentitySetup\(\)/);
-  assert.match(dashboard, /api\(`\/api\/identity\/setup-guide\?\$\{params\.toString\(\)\}`\)/);
-  assert.match(dashboard, /if \(targetName === 'identity'\) loadIdentitySetup\(\)/);
+  // The identity setup guide UI now lives in the React console; it renders the
+  // guide fetched from the authenticated setup-guide route.
+  assert.match(identityView, /export default function Identity/);
+  assert.match(identityView, /api\(`\/api\/identity\/setup-guide\?\$\{params\.toString\(\)\}`\)/);
+  assert.match(identityView, /<option value="entra">Microsoft Entra ID<\/option>/);
   assert.match(packageJson, /"identity:setup": "node scripts\/identity-setup\.js"/);
   assert.match(envExample, /OIDC_ISSUER=/);
   assert.match(envExample, /npm run identity:setup/);

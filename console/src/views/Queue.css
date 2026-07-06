@@ -405,38 +405,11 @@
   flex-wrap: wrap;
 }
 
-/* ---- Buttons (base; console-theme.css supplies approve/deny accents) --------- */
-.queue-view .btn {
-  min-height: 34px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  border: 1px solid var(--line2);
-  border-radius: var(--radius-sm);
-  background: var(--panel);
-  color: var(--txt);
-  padding: 7px 13px;
-  font-weight: 600;
-  font-size: 12.5px;
-  cursor: pointer;
-  transition: background var(--fast), border-color var(--fast);
-}
-
-.queue-view .btn:hover {
-  background: var(--surface-hover);
-}
-
-.queue-view .btn.reveal {
-  background: var(--panel);
-  border-color: var(--line2);
-  color: var(--soft);
-}
-
-.queue-view .btn:disabled {
-  opacity: 0.55;
-  cursor: default;
-}
+/* Buttons (.btn, .btn.approve/.deny/.reveal, :disabled) are styled entirely by
+   the shared console-base.css + console-theme.css. A previous `.queue-view .btn`
+   block re-declared the base here, but at equal specificity it loaded after the
+   theme and silently overrode the approve/deny fills — leaving near-black labels
+   on a dark panel. Do not reintroduce a scoped `.btn` base rule here. */
 
 /* ---- Step-up password dialog -------------------------------------------------- */
 .queue-view .stepup-dialog {

@@ -266,7 +266,7 @@ test('auth middleware protects API and page routes and enforces roles', () => {
   assert.deepStrictEqual(apiRes.body, { error: 'unauthenticated' });
 
   const pageRes = responseCapture();
-  auth.requireAuth({ path: '/index.html', cookies: {} }, pageRes, () => {
+  auth.requireAuth({ path: '/app', cookies: {} }, pageRes, () => {
     throw new Error('unauthenticated page should not continue');
   });
   assert.strictEqual(pageRes.redirectTo, '/login.html');

@@ -28,20 +28,10 @@ const validation = require('../server/validation');
 const { listen, loopbackHttpFetch } = require('./support/listen');
 
 const root = path.join(__dirname, '..');
-const dashboardHtml = fs.readFileSync(path.join(root, 'server', 'public', 'index.html'), 'utf8');
-// Base + theme stylesheets are linked by index.html; the dashboard's layout and
-// responsive CSS lives here (shared with the new console), not inline anymore.
+// The console's responsive/layout CSS lives in console-base.css (a shared
+// stylesheet loaded by the React console), not inline; the responsive-marker
+// cases below assert against it plus login.html.
 const dashboardCss = fs.readFileSync(path.join(root, 'server', 'public', 'console-base.css'), 'utf8');
-const dashboardJs = fs.readFileSync(path.join(root, 'server', 'public', 'dashboard.js'), 'utf8');
-const siemPackageJs = fs.readFileSync(path.join(root, 'server', 'public', 'siem-package.js'), 'utf8');
-const threatGuardrailsJs = fs.readFileSync(path.join(root, 'server', 'public', 'ai-threat-guardrails.js'), 'utf8');
-const operatorFlowJs = fs.readFileSync(path.join(root, 'server', 'public', 'operator-flow.js'), 'utf8');
-const policyGuidesJs = fs.readFileSync(path.join(root, 'server', 'public', 'policy-guides.js'), 'utf8');
-const behaviorBaselinesJs = fs.readFileSync(path.join(root, 'server', 'public', 'behavior-baselines.js'), 'utf8');
-const competitiveReadinessJs = fs.readFileSync(path.join(root, 'server', 'public', 'competitive-readiness.js'), 'utf8');
-const coverageFileFlowJs = fs.readFileSync(path.join(root, 'server', 'public', 'coverage-file-flow.js'), 'utf8');
-const decisionQualityJs = fs.readFileSync(path.join(root, 'server', 'public', 'decision-quality.js'), 'utf8');
-const detectorFeedbackJs = fs.readFileSync(path.join(root, 'server', 'public', 'detector-feedback.js'), 'utf8');
 const loginHtml = fs.readFileSync(path.join(root, 'server', 'public', 'login.html'), 'utf8');
 const loginJs = fs.readFileSync(path.join(root, 'server', 'public', 'login.js'), 'utf8');
 const manifest = JSON.parse(fs.readFileSync(path.join(root, 'sensors', 'browser-extension', 'manifest.json'), 'utf8'));
@@ -389,115 +379,14 @@ for (let i = 0; i < 30; i += 1) {
   });
 }
 
-const selectorMarkers = [
-  'id="f"', 'id="user"', 'id="password"', 'id="otp"', 'id="oidc"', 'id="err"', 'aria-live="polite"', 'autocomplete="username"',
-  'autocomplete="current-password"', 'autocomplete="one-time-code"', 'id="globalSearch"', 'id="refreshQueue"', 'id="queueList"', 'data-queue-filter="all"',
-  'id="queueCategoryFilter"', 'id="queueDestinationFilter"', 'id="incidentDetail"', 'id="topEntities"', 'id="monitorSearch"', 'id="monitorStatusFilters"',
-  'id="monitorMetrics"', 'id="monitorPanelGrid"', 'id="monitorActivityFeed"', 'id="monitorInspector"', 'id="activityRows"', 'id="activityPager"',
-  'id="refreshCoverage"', 'id="coverageScore"', 'id="coveragePosture"', 'id="fleetRows"', 'id="endpointAiToolRows"', 'id="governedRows"',
-  'id="shadowRows"', 'id="identityProvider"', 'id="identityTenant"', 'id="refreshIdentity"', 'id="identitySummary"', 'id="identityScimRows"',
-  'id="identityOidcRows"', 'id="identityEnvRows"', 'id="identityRoleRows"', 'id="identityValidation"', 'id="refreshLineage"', 'id="lineageSummary"',
-  'id="lineageUsers"', 'id="lineageDestinations"', 'id="lineageSensors"', 'id="lineageCategories"', 'id="lineageChannels"', 'id="lineageDecisions"',
-  'id="exportEvidence"', 'id="exportStatus"', 'id="integrity"', 'id="auditRows"', 'id="auditPager"', 'id="policyBox"', 'id="configurationStatus"',
-  'id="updateBox"', 'id="updateConsoleStatus"', 'id="logout"', 'data-tab="queue"', 'data-tab="monitor"', 'data-tab="activity"', 'data-tab="coverage"',
-  'data-tab="identity"', 'data-tab="lineage"', 'data-tab="audit"', 'data-tab="policy"', 'data-tab="updates"', 'aria-label="Pending approval prompts"',
-  'aria-label="AI Command Center"', 'aria-label="All Activity"', 'aria-label="Coverage"', 'aria-label="Identity"', 'aria-label="Lineage"', 'aria-label="Audit Log"',
-];
-for (const marker of selectorMarkers) {
-  add('static-ui', `ui marker ${marker}`, () => expectContains(dashboardHtml + loginHtml, marker));
-}
-
-const accessibilityMarkers = [
-  /role="alert"/, /aria-describedby="err"/, /aria-current="page"/, /aria-pressed="/, /aria-selected="/,
-  /role="list"/, /role="listbox"/, /role="option"/, /aria-busy="/, /aria-expanded="/,
-  /aria-hidden="true"/, /aria-label="Approval queue metadata filters"/, /aria-invalid/, /aria-live="polite"/,
-  /label for="user"/, /label for="password"/, /label for="otp"/, /data-queue-filter="all"/,
-  /label for="queueCategoryFilter"/, /label for="queueDestinationFilter"/, /label for="monitorSearch"/,
-  /inputmode="numeric"/, /type="search"/, /type="password"/, /type="button"/,
-  /type="submit"/, /maxlength="6"/, /placeholder="Filter signals"/, /placeholder="Password"/,
-  /role="region"/, /aria-label="Selected incident details"/, /aria-label="Status filters"/,
-  /aria-label="Monitored systems"/, /aria-label="Signal event timeline"/, /aria-label="Identity provider"/,
-  /aria-label="Tenant or domain"/, /aria-live="polite"/, /role="img"/, /aria-label="Live monitoring online"/,
-];
-for (const pattern of accessibilityMarkers) {
-  add('static-ui', `accessibility marker ${pattern}`, () => expectMatch(dashboardHtml + dashboardJs + loginHtml + loginJs, pattern));
-}
-
 const securityStaticCases = [
-  () => assert.strictEqual(/\son[a-z]+\s*=/.test(dashboardHtml), false),
   () => assert.strictEqual(/\son[a-z]+\s*=/.test(loginHtml), false),
-  () => assert.strictEqual(/<script>\s*\S/.test(dashboardHtml), false),
   () => assert.strictEqual(/<script>\s*\S/.test(loginHtml), false),
-  () => {
-    expectContains(dashboardHtml, '<script src="/siem-package.js" defer></script>');
-    expectContains(dashboardHtml, '<script src="/ai-threat-guardrails.js" defer></script>');
-    expectContains(dashboardHtml, '<script src="/operator-flow.js" defer></script>');
-    expectContains(dashboardHtml, '<script src="/policy-guides.js" defer></script>');
-    expectContains(dashboardHtml, '<script src="/behavior-baselines.js" defer></script>');
-    expectContains(dashboardHtml, '<script src="/competitive-readiness.js" defer></script>');
-    expectContains(dashboardHtml, '<script src="/coverage-file-flow.js" defer></script>');
-    expectContains(dashboardHtml, '<script src="/decision-quality.js" defer></script>');
-    expectContains(dashboardHtml, '<script src="/detector-feedback.js" defer></script>');
-    expectContains(dashboardHtml, '<script src="/dashboard.js" defer></script>');
-    expectContains(dashboardHtml, 'id="endpointFileFlowRows"');
-    expectContains(dashboardHtml, 'Endpoint File Flow');
-    expectContains(dashboardHtml, 'id="decisionQualityRows"');
-    expectContains(dashboardHtml, 'Decision Quality');
-    expectContains(dashboardHtml, 'id="behaviorBaselineRows"');
-    expectContains(dashboardHtml, 'Behavior Baselines');
-    expectContains(dashboardHtml, 'id="detectorFeedbackRows"');
-    expectContains(dashboardHtml, 'Detection Feedback');
-    expectContains(threatGuardrailsJs, 'RedactWallThreatGuardrails');
-    expectContains(operatorFlowJs, 'RedactWallOperatorFlow');
-    expectContains(operatorFlowJs, 'data-flow-target');
-    expectContains(operatorFlowJs, 'Behavior baselines');
-    expectContains(policyGuidesJs, 'addApprovalRoute');
-    expectContains(policyGuidesJs, 'addMcpToolRule');
-    expectContains(behaviorBaselinesJs, 'RedactWallBehaviorBaselines');
-    expectContains(behaviorBaselinesJs, 'behavior-baseline-row');
-    expectContains(competitiveReadinessJs, 'competitiveReadiness');
-    expectContains(competitiveReadinessJs, '/api/posture?limit=5000');
-    expectContains(coverageFileFlowJs, 'endpointFileFlowProfiles');
-    expectContains(coverageFileFlowJs, 'Local path: not reported');
-    expectContains(decisionQualityJs, 'decisionQuality');
-    expectContains(decisionQualityJs, 'RedactWallDecisionQuality');
-    expectContains(detectorFeedbackJs, '/api/detector-feedback/report');
-    expectContains(detectorFeedbackJs, 'RedactWallDetectorFeedback');
-  },
   () => expectContains(loginHtml, '<script src="/login.js" defer></script>'),
-  () => expectContains(dashboardJs, 'escapeHtml'),
-  () => expectContains(dashboardJs, 'csrfToken'),
-  () => expectContains(dashboardJs, "headers.set('x-csrf-token', csrfToken)"),
   () => expectContains(loginJs, "fetch('/api/login-options')"),
   () => assert.ok(!/client_secret|OIDC_CLIENT_SECRET/.test(loginJs)),
-  () => expectContains(dashboardJs, 'apiErrorSummary'),
-  () => expectContains(dashboardJs, 'responseJsonObjectBody'),
-  () => expectContains(dashboardJs, 'rawDiffersFromRedacted'),
-  () => expectContains(dashboardJs, 'prompt-reveal-status'),
-  () => expectContains(dashboardJs, 'Run retention purge'),
-  () => expectContains(dashboardJs, 'Update from GitHub'),
-  () => expectContains(dashboardJs, 'confirmBackup'),
-  () => expectContains(dashboardJs, 'Save configuration'),
-  () => expectContains(dashboardJs, 'Read-only auditor view'),
-  () => expectContains(dashboardHtml, 'Security Console'),
-  () => expectContains(dashboardHtml, 'Tamper-evident Audit Log'),
-  () => expectContains(dashboardHtml, 'posture, control outcomes, and audit proof without prompt bodies.'),
   () => expectContains(loginHtml, 'Hash-chained audit history'),
   () => expectContains(loginHtml, 'Local-first detection posture'),
-  () => expectContains(dashboardJs, 'prompt-reveal-status'),
-  () => expectContains(dashboardJs, 'rawPrompt'),
-  () => expectContains(dashboardJs, 'policyExceptions'),
-  () => expectContains(dashboardJs, 'blockedBrowserActions'),
-  () => expectContains(dashboardJs, 'blockUnapprovedAiDestinations'),
-  () => expectContains(dashboardJs, 'loadQueue'),
-  () => expectContains(dashboardJs, 'loadCoverage'),
-  () => expectContains(dashboardJs, 'loadIdentitySetup'),
-  () => expectContains(dashboardJs, 'loadLineage'),
-  () => {
-    expectContains(dashboardJs, 'loadUpdates');
-    expectContains(siemPackageJs, '/api/integrations/siem/package?profile=');
-    expectContains(siemPackageJs, 'siem-profile-row');
-  },
 ];
 for (let i = 0; i < securityStaticCases.length; i += 1) {
   add('static-ui', `static security marker ${i + 1}`, securityStaticCases[i]);
@@ -509,12 +398,12 @@ const responsiveMarkers = [
   /minmax\(0,1fr\)/, /word-break:break-word/, /overflow-wrap:anywhere/, /scrollbar-width:none/,
   /position:sticky/, /max-width:460px/, /width:min\(100%,920px\)/, /height:100vh/,
   /min-height:44px/, /min-height:40px/, /border-radius:8px/, /letter-spacing:0/,
-  /prefers-reduced-motion/, /queue-density-compact/, /body\[data-theme="dark"\]/, /data-theme-choice="light"/,
-  /data-theme-choice="dark"/, /aria-hidden="true"/, /viewport/, /device-width/,
+  /prefers-reduced-motion/, /queue-density-compact/, /body\[data-theme="dark"\]/, /aria-hidden="true"/,
+  /viewport/, /device-width/,
   /grid-template-columns:repeat/, /flex-wrap:wrap/, /white-space:nowrap/, /text-overflow:ellipsis/,
 ];
 for (const pattern of responsiveMarkers) {
-  add('static-ui', `responsive marker ${pattern}`, () => expectMatch(dashboardHtml + dashboardCss + loginHtml, pattern));
+  add('static-ui', `responsive marker ${pattern}`, () => expectMatch(dashboardCss + loginHtml, pattern));
 }
 
 async function jsonFetch(port, apiPath, { method = 'GET', body, headers = {} } = {}) {
@@ -541,12 +430,12 @@ async function login(port) {
 
 function addHttpCases(ctx) {
   const publicRoutes = [
-    ['/healthz', 200], ['/readyz', 200], ['/login.html', 200], ['/', 302], ['/index.html', 302],
+    ['/healthz', 200], ['/readyz', 200], ['/login.html', 200], ['/', 302], ['/app/', 302],
     ['/api/me', 401], ['/api/queries', 401], ['/api/stats', 401], ['/api/policy', 401], ['/api/audit', 401],
     ['/api/coverage', 401], ['/api/lineage', 401], ['/api/risk', 401], ['/api/preflight', 401], ['/api/export/evidence', 401],
     ['/api/billing/seats', 401], ['/api/metrics', 401], ['/api/update/status', 401], ['/api/identity/setup-guide', 401],
     ['/api/policy/templates', 401], ['/api/policy/impact', 401], ['/api/destinations/review', 401], ['/api/v1/policy', 401], ['/api/v1/detectors', 401],
-    ['/api/login-options', 200], ['/missing-page', 404], ['/dashboard.js', 200], ['/login.js', 200], ['/api/stream', 401],
+    ['/api/login-options', 200], ['/missing-page', 404], ['/console-base.css', 200], ['/login.js', 200], ['/api/stream', 401],
     ['/api/queries/not-real-id', 401], ['/api/v1/status/not-real-id', 401], ['/api/update/check', 401], ['/api/update/apply', 401],
     ['/api/update/restart', 401], ['/api/logout', 401], ['/api/retention/purge', 401],
   ];
@@ -595,7 +484,7 @@ function addHttpCases(ctx) {
     });
   }
 
-  const headerRoutes = ['/healthz', '/readyz', '/login.html', '/dashboard.js', '/siem-package.js', '/policy-guides.js', '/behavior-baselines.js', '/login.js'];
+  const headerRoutes = ['/healthz', '/readyz', '/login.html', '/console-base.css', '/console-theme.css', '/favicon.svg', '/login.js', '/api/login-options'];
   for (let i = 0; i < 20; i += 1) {
     const route = headerRoutes[i % headerRoutes.length];
     add('http-webapp', `security header ${i + 1} ${route}`, async () => {
@@ -650,11 +539,11 @@ test('1000-case webapp QA matrix passes', async () => {
       'detector-negative': 120,
       'policy-destination': 140,
       'validation-schema': 220,
-      'static-ui': 180,
+      'static-ui': 35,
       'browser-extension-static': 50,
       'http-webapp': 110,
     });
-    assert.strictEqual(cases.length, 1000);
+    assert.strictEqual(cases.length, 855);
 
     const failures = [];
     for (let i = 0; i < cases.length; i += 1) {

@@ -64,23 +64,11 @@ test('unauthenticated navigation redirects pages but returns API auth errors', a
 
   const root = await fetch(`${base}/`, { redirect: 'manual' });
   assert.strictEqual(root.status, 302);
-  assert.strictEqual(root.headers.get('location'), '/index.html');
+  assert.strictEqual(root.headers.get('location'), '/app/');
 
-  process.env.REDACTWALL_CONSOLE_DEFAULT = 'app';
-  try {
-    const newConsoleRoot = await fetch(`${base}/`, { redirect: 'manual' });
-    assert.strictEqual(newConsoleRoot.status, 302);
-    assert.strictEqual(newConsoleRoot.headers.get('location'), '/app/');
-    const gatedApp = await fetch(`${base}/app/`, { redirect: 'manual' });
-    assert.strictEqual(gatedApp.status, 302);
-    assert.strictEqual(gatedApp.headers.get('location'), '/login.html');
-  } finally {
-    delete process.env.REDACTWALL_CONSOLE_DEFAULT;
-  }
-
-  const dashboard = await fetch(`${base}/index.html`, { redirect: 'manual' });
-  assert.strictEqual(dashboard.status, 302);
-  assert.strictEqual(dashboard.headers.get('location'), '/login.html');
+  const gatedApp = await fetch(`${base}/app/`, { redirect: 'manual' });
+  assert.strictEqual(gatedApp.status, 302);
+  assert.strictEqual(gatedApp.headers.get('location'), '/login.html');
 
   const login = await fetch(`${base}/login.html`);
   assert.strictEqual(login.status, 200);

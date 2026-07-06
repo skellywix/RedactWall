@@ -130,7 +130,7 @@ function readStateCookie(value, now = Date.now()) {
 
 function safeReturnTo(value) {
   const text = cleanString(value, 512);
-  if (!text || !text.startsWith('/') || text.startsWith('//') || text.includes('\\')) return '/index.html';
+  if (!text || !text.startsWith('/') || text.startsWith('//') || text.includes('\\')) return '/app/';
   return text;
 }
 

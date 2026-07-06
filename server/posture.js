@@ -3019,7 +3019,6 @@ function competitiveById(readiness = {}) {
 function focusLane({
   id,
   label,
-  competitors,
   marketBar,
   score,
   evidence = [],
@@ -3031,12 +3030,8 @@ function focusLane({
   const state = competitiveState(score);
   return {
     id,
-    label: safeText(label, 'Competitive focus', 140),
-    competitors: (Array.isArray(competitors) ? competitors : [])
-      .map((item) => safeText(item, '', 80))
-      .filter(Boolean)
-      .slice(0, 4),
-    marketBar: safeText(marketBar, 'top-three market bar', 240),
+    label: safeText(label, 'Control focus', 140),
+    marketBar: safeText(marketBar, 'control focus area', 240),
     score: bound(score),
     state,
     status: competitiveStatus(state),
@@ -3104,7 +3099,6 @@ function competitiveFocus({
     focusLane({
       id: 'continuous_shadow_ai_discovery',
       label: 'Continuous Shadow-AI Discovery',
-      competitors: ['Prompt Security', 'Nightfall'],
       marketBar: 'Show every AI app, user, sensor, and unapproved destination before data leaves the environment.',
       score: bound((((matrix.get('ai_usage_visibility') && matrix.get('ai_usage_visibility').score) || 0)
         + ((matrix.get('shadow_ai_governance') && matrix.get('shadow_ai_governance').score) || 0)) / 2),
@@ -3132,7 +3126,6 @@ function competitiveFocus({
     focusLane({
       id: 'mcp_saas_connector_coverage',
       label: 'MCP And SaaS Connector Coverage',
-      competitors: ['Strac', 'Prompt Security'],
       marketBar: 'Wrap SaaS and MCP tool responses with allow/block policy, redaction, connector health, and registry drift proof.',
       score: bound(
         (((matrix.get('agent_mcp_governance') && matrix.get('agent_mcp_governance').score) || 0) * 0.72)
@@ -3170,7 +3163,6 @@ function competitiveFocus({
     focusLane({
       id: 'detection_quality_proof',
       label: 'Detection Quality Proof',
-      competitors: ['Nightfall', 'Check Point AI Guardrails'],
       marketBar: 'Prove sensitive-data, prompt-injection, response, and custom-detector accuracy with reviewed tuning signals.',
       score: detectionQualityScore,
       evidence: [
@@ -3211,7 +3203,7 @@ function competitiveFocus({
       total: lanes.length,
       nextAction: next ? next.action : 'Keep monitoring',
       nextLane: next ? next.label : 'All lanes ready',
-      objective: 'Beat top-three AI DLP platforms on discovery, connector coverage, and detection proof for regulated pilots',
+      objective: 'Close the highest-impact control gaps across discovery, connector coverage, and detection proof',
       privacy: 'metadata only; prompt bodies excluded',
     },
     lanes,

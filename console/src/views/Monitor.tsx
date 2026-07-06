@@ -166,7 +166,6 @@ interface CompetitiveReadinessReport {
 }
 
 interface FocusLane extends BenchmarkRow {
-  competitors?: string[];
   status?: string;
   anchor?: string;
 }
@@ -776,7 +775,6 @@ const TAB_ROUTES: Record<string, string> = {
 function jumpToTab(tab: string): void {
   const route = TAB_ROUTES[tab];
   if (route) navigate(route);
-  else location.href = `/index.html?tab=${encodeURIComponent(tab)}`;
 }
 
 function scrollToAnchor(anchorId: string): void {
@@ -1653,7 +1651,6 @@ function MarketLaneCard({ lane }: { lane: FocusLane }) {
     <article className={`market-hardening-card ${benchmarkTone(lane.state)}`}>
       <div className="market-hardening-head">
         <div>
-          <span>{lane.competitors?.join(' + ') || 'Market bar'}</span>
           <strong>{lane.label}</strong>
         </div>
         <b>
@@ -1697,7 +1694,7 @@ function MarketHardening({ focus }: { focus: CompetitiveFocus | null }) {
           <>
             <div className="market-hardening-brief">
               <div>
-                <strong>{summary.objective || 'Beat the top-three competitive bar'}</strong>
+                <strong>{summary.objective || 'Close the highest-impact control gaps'}</strong>
                 <span>
                   {summary.nextLane || 'Next lane'} / {summary.nextAction || 'Keep moving'}
                 </span>

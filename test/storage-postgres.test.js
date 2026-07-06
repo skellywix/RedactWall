@@ -54,7 +54,7 @@ test('db.js contract holds on Postgres (migrations, RLS, immutability, chain)', 
   assert.deepStrictEqual(failed, [], `battery steps failed: ${JSON.stringify(failed)}`);
 
   assert.strictEqual(results.driverKind.value, 'postgres');
-  assert.deepStrictEqual(results.migrations.value.map((m) => m.version), [1, 2, 3]);
+  assert.deepStrictEqual(results.migrations.value.map((m) => m.version), [1, 2, 3, 4]);
   assert.strictEqual(results.queryCrud.value.updatedStatus, 'approved');
   assert.strictEqual(results.queryCrud.value.risk, 42);
   assert.strictEqual(results.auditChain.value.ok, true);

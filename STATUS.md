@@ -18,20 +18,21 @@ Roadmap references (N*/X*) point at `ROADMAP.md`.
   Compliance, Identity, Configuration, Deploy, Integrations, Audit Log,
   Updates — plus the shell chrome (grouped Operate/Analyze/Govern/System rail
   with icons and a live pending badge, Ctrl/Cmd-K command palette, LIVE + last-
-  updated indicators, sign out, system-status footer). The legacy design
-  system (fonts, tokens, leak-map animation, selectors) was extracted to the
-  shared `server/public/console-base.css` so both consoles render identically.
+  updated indicators, sign out, system-status footer). The instrument design
+  system (fonts, tokens, leak-map animation, selectors) lives in
+  `server/public/console-base.css` so the console renders as designed in
+  light/dark (dark default).
   Queue assignee editor, per-query audit trail, billing/seats, and the Command
   Center decision pivots all carried over. Evidence: `e2e/console-parity.spec.js`
   (all 16 routes, zero console errors) and `e2e/console-design.spec.js` (32
   dark+light screenshots).
-- WS1 A4 (cutover — deploy decision, still open): flip
-  `REDACTWALL_CONSOLE_DEFAULT=app` as the deploy default, serve legacy at
-  `/legacy/` for one release, then delete `server/public/dashboard.js`,
-  `index.html`, and the feature-module files plus their asset-budget entries.
-  Deliberately not yet done: the legacy console still ships and passes
-  `e2e/admin-console.spec.js` (20/20) as the fallback during the migration
-  window; the routes it depends on are therefore not dead code.
+- WS1 A4 (cutover) — **DONE.** The legacy static console is retired: `/`
+  redirects to `/app/`, and `server/public/{index.html,dashboard.js}` plus the
+  15 feature-renderer JS files were deleted (the shared `console-base.css`,
+  `console-theme.css`, `login.html`, `login.js`, and `favicon.svg` are kept —
+  the React console uses them). Legacy-only tests were removed; the privacy and
+  evidence-export invariants they guarded were migrated to assert against the
+  React console source.
 - **Repo-wide hardening pass — DONE.** A line-by-line audit (verified) fixed
   131 defects across server, storage, engine, gateway, sensors, console, and
   tooling, including several backend loose ends from the stack upgrade:

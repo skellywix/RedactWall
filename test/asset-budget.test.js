@@ -54,34 +54,20 @@ function walkFiles(relDir) {
   return files;
 }
 
-test('admin public assets stay within transfer budgets', () => {
+test('shipped static frontend assets stay within transfer budgets', () => {
+  // The legacy static console (index.html, dashboard.js, and the feature JS
+  // bundles) was removed in favor of the built React console under
+  // server/public/app (budgeted separately below). What still ships as static
+  // top-level assets are the login page and the console stylesheets.
   const totals = assertAssetBudgets([
-    { path: 'server/public/index.html', maxRawBytes: 180_000, maxGzipBytes: 32_000 },
-    { path: 'server/public/dashboard.js', maxRawBytes: 260_000, maxGzipBytes: 62_000 },
-    { path: 'server/public/siem-package.js', maxRawBytes: 8_000, maxGzipBytes: 3_000 },
-    { path: 'server/public/security-package.js', maxRawBytes: 8_000, maxGzipBytes: 3_000 },
-    { path: 'server/public/agentic-mcp.js', maxRawBytes: 8_000, maxGzipBytes: 3_000 },
-    { path: 'server/public/ai-threat-guardrails.js', maxRawBytes: 8_000, maxGzipBytes: 3_000 },
-    { path: 'server/public/operator-flow.js', maxRawBytes: 8_000, maxGzipBytes: 3_000 },
-    { path: 'server/public/policy-guides.js', maxRawBytes: 8_000, maxGzipBytes: 3_000 },
-    { path: 'server/public/policy-impact-preview.js', maxRawBytes: 8_000, maxGzipBytes: 3_000 },
-    { path: 'server/public/behavior-baselines.js', maxRawBytes: 8_000, maxGzipBytes: 3_000 },
-    { path: 'server/public/market-hardening.js', maxRawBytes: 8_000, maxGzipBytes: 3_000 },
-    { path: 'server/public/competitive-readiness.js', maxRawBytes: 8_000, maxGzipBytes: 3_000 },
-    { path: 'server/public/control-graph.js', maxRawBytes: 8_000, maxGzipBytes: 3_000 },
-    { path: 'server/public/leak-path-map.js', maxRawBytes: 16_000, maxGzipBytes: 5_500 },
-    { path: 'server/public/coverage-file-flow.js', maxRawBytes: 8_000, maxGzipBytes: 3_000 },
-    { path: 'server/public/decision-quality.js', maxRawBytes: 8_000, maxGzipBytes: 3_000 },
-    { path: 'server/public/detector-feedback.js', maxRawBytes: 8_000, maxGzipBytes: 3_000 },
+    { path: 'server/public/console-base.css', maxRawBytes: 130_000, maxGzipBytes: 24_000 },
     { path: 'server/public/console-theme.css', maxRawBytes: 24_000, maxGzipBytes: 6_000 },
     { path: 'server/public/login.html', maxRawBytes: 12_000, maxGzipBytes: 5_000 },
     { path: 'server/public/login.js', maxRawBytes: 6_000, maxGzipBytes: 2_500 },
   ]);
 
-  // Raised 525k -> 528k for the Endpoint MCP Servers panel (shadow-MCP
-  // discovery), mirroring the existing Endpoint AI Tools panel.
-  assertWithin('admin public assets raw total', totals.rawBytes, 528_000);
-  assertWithin('admin public assets gzip total', totals.gzipBytes, 128_000);
+  assertWithin('shipped static frontend raw total', totals.rawBytes, 160_000);
+  assertWithin('shipped static frontend gzip total', totals.gzipBytes, 34_000);
 });
 
 test('console app bundle stays within transfer budgets', (t) => {

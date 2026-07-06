@@ -58,10 +58,9 @@ threat guardrails, AI control graph mapping, Agentic MCP Control, control
 outcomes, sensor posture, and fast approval or denial decisions without exposing
 raw prompt content by default.
 
-The original static console remains served at `/index.html` as the fallback
-during the migration window; `REDACTWALL_CONSOLE_DEFAULT=app` makes `/app` the
-landing console. Build the React bundle with `npm run console:build` (CI builds
-it automatically); it emits to `server/public/app/`.
+`/` redirects to `/app/`; it is the only operator console (the original static
+console was retired). Build the React bundle with `npm run console:build` (CI
+builds it automatically); it emits to `server/public/app/`.
 
 Run the default test suite:
 
@@ -207,9 +206,8 @@ See `.env.example`, `docs/AI_LLM_GATEWAY.md`, and `docs/DEPLOYMENT.md` for the l
 | --- | --- | --- |
 | `GET` | `/healthz` | Returns service health, service name, and package version. |
 | `GET` | `/readyz` | Checks database access and deployment preflight readiness. |
-| `GET` | `/` | Redirects to the default console (`/index.html`, or `/app/` when `REDACTWALL_CONSOLE_DEFAULT=app`). |
+| `GET` | `/` | Redirects to `/app/`. |
 | `GET` | `/app/` | Serves the React admin console after login. |
-| `GET` | `/index.html` | Serves the legacy static console after login (migration-window fallback). |
 
 ### Sensor API
 

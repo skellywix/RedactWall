@@ -49,7 +49,7 @@ This section is generated from the app by `npm run docs:demo-guide`. Do not hand
 | `npm run fire-drill` | `node scripts/fire-drill.js` |
 | `npm run test` | `node scripts/run-node-tests.js` |
 | `npm run test:browser` | `node scripts/run-playwright.js` |
-| `npm run test:admin-console` | `node scripts/run-playwright.js admin-console.spec.js` |
+| `npm run test:console-app` | `node scripts/run-playwright.js admin-console-app.spec.js` |
 | `npm run test:browser-extension` | `node scripts/run-playwright.js browser-extension.spec.js --project=chromium` |
 | `npm run sync-check` | `node scripts/sync-check.js` |
 | `npm run eval` | `node scripts/eval-detect.js` |
@@ -79,7 +79,7 @@ This section is generated from the app by `npm run docs:demo-guide`. Do not hand
 | `server/routing.js` | Customer-configurable approval owner and SLA routing rules | Present |
 | `server/notifiers.js` | Sanitized approval workflow notification adapters | Present |
 | `server/workflow.js` | Approval notification status and SLA escalation | Present |
-| `server/public/index.html` | Admin dashboard shell | Present |
+| `console/src/App.tsx` | React admin console shell | Present |
 | `detection-engine/detect.js` | Shared detection engine source of truth | Present |
 | `sensors/browser-extension/manifest.json` | Browser extension source manifest | Present |
 | `sensors/browser-extension/background.js` | Browser install-health heartbeat and control-plane relay | Present |

@@ -15,15 +15,14 @@ reconstructed from `ITERATIONS.md` and git history.
   to the Vite/React/TypeScript console served at `/app`: Overview, Approval
   Queue, AI Command Center, All Activity, Insights, Sensor Coverage, Data
   Lineage, Decision Quality, App Catalog, Compliance, Identity, Configuration,
-  Deploy, Integrations, Audit Log, and Updates — each wired to the same backend
-  routes the legacy console uses. Shell chrome landed too: grouped
+  Deploy, Integrations, Audit Log, and Updates — each wired to the backend
+  `/api` routes directly. Shell chrome landed too: grouped
   Operate/Analyze/Govern/System navigation with per-tab icons and a live
   pending-count badge, a Ctrl/Cmd-K command palette, LIVE + last-updated
-  indicators, sign out, and the system-status footer. The legacy design system
-  (font tokens, base typography, leak-map animation, selector styling) was
-  extracted verbatim from the inline `index.html` styles into the shared
-  `server/public/console-base.css`, which both consoles now link, so light/dark
-  theming (dark default) and every component render identically. Queue
+  indicators, sign out, and the system-status footer. The instrument design
+  system (font tokens, base typography, leak-map animation, selector styling)
+  lives in the shared `server/public/console-base.css` so light/dark theming
+  (dark default) and every component render as designed. Queue
   reassignment, the per-query audit trail, and the billing/seats surface that
   were absent from earlier console increments are restored. Evidence:
   `e2e/console-parity.spec.js` (all routes, zero console errors) and
@@ -64,6 +63,24 @@ reconstructed from `ITERATIONS.md` and git history.
 - Unsupported / unscannable file uploads now **fail closed**: `scan-file` records
   a new terminal `file_blocked_unscanned` status (was `flagged`/`allow`) so a
   renamed or unparseable file can no longer leave uninspected.
+- **AI Command Center de-branded.** The operator posture surface no longer
+  embeds go-to-market strategy: the competitor names (Prompt Security, Nightfall,
+  Strac, Check Point) and the "beat top-three AI DLP platforms" objective were
+  removed from `server/posture.js` and the Monitor view. The operational signals
+  (shadow-AI discovery, MCP/SaaS connector coverage, detection-quality proof) and
+  their remediation gaps remain; a `posture.test.js` guard now fails if competitor
+  or strategy language reappears in the console payload.
+
+### Removed
+
+- **Legacy static console retired.** `server/public/index.html`,
+  `dashboard.js`, and the 14 feature-renderer scripts (agentic-mcp, control-graph,
+  leak-path-map, siem-package, …) were deleted now that the React `/app` console
+  is at full parity. `/` redirects to `/app/`; the `/index.html` route and the
+  `REDACTWALL_CONSOLE_DEFAULT` selector are gone; login and OIDC now return to
+  `/app/`. The shared `login.html`/`login.js`, `console-base.css`,
+  `console-theme.css`, and `favicon.svg` are retained. Legacy-only specs were
+  removed and shared assertions migrated to the React console.
 
 ### Security
 
@@ -112,6 +129,18 @@ reconstructed from `ITERATIONS.md` and git history.
 
 ### Removed
 
+- **Legacy static admin console retired.** With the React `/app` console at full
+  parity, `server/public/index.html`, `dashboard.js`, and the 15 feature-renderer
+  scripts (agentic-mcp, ai-threat-guardrails, behavior-baselines,
+  competitive-readiness, control-graph, coverage-file-flow, decision-quality,
+  detector-feedback, leak-path-map, market-hardening, operator-flow,
+  policy-guides, policy-impact-preview, security-package, siem-package) were
+  deleted, along with the `/index.html` route and the `REDACTWALL_CONSOLE_DEFAULT`
+  switch — `/` now redirects to `/app/`. The shared design system
+  (`console-base.css`, `console-theme.css`), login page, and favicon are kept.
+  Legacy-only tests were removed; the raw-prompt-privacy and sanitized
+  evidence-export invariants they guarded were migrated to assert against the
+  React console source.
 - Stale one-time QA artifacts (`.codex/`), the superseded project review
   (`REVIEW.md`), and the dead `server/index.js` re-export shim.
 - Machine-specific personal helper scripts and their npm aliases and docs:

@@ -6,7 +6,7 @@ const SENSOR_NAMES = { endpoint_agent: 'Endpoint agent', mcp_guard: 'MCP guard',
   toggle.checked = cfg.enabled !== false;
   paint(cfg.enabled !== false);
   document.getElementById('mode').textContent = (cfg.policy && cfg.policy.enforcementMode) || 'block';
-  document.getElementById('dash').href = cfg.serverUrl + '/index.html';
+  document.getElementById('dash').href = cfg.serverUrl + '/app/';
   paintFleet(cfg.fleetCompanions);
   toggle.addEventListener('change', () => {
     window.PWBrowserApi.storageSet('local', { enabled: toggle.checked });

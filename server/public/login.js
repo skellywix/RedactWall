@@ -52,7 +52,7 @@ f.addEventListener('submit', async (e) => {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ user: userInput.value, password: passwordInput.value, otp: otpInput.value }),
   });
-  if (r.ok) location.href = '/index.html';
+  if (r.ok) location.href = '/app/';
   else {
     const body = await r.json().catch(() => ({}));
     if (body.mfaRequired) showError('Enter the current authenticator code.', ['otp']);

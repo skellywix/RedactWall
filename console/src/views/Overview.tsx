@@ -113,10 +113,6 @@ export default function Overview() {
           <TopEntities entities={stats.topEntities} />
         </>
       ) : null}
-      <p className="app-note">
-        Every operator view is available in the rail. The classic console remains at{' '}
-        <a href="/index.html">/index.html</a> during the migration period.
-      </p>
     </Panel>
   );
 }

@@ -1,5 +1,10 @@
 # Console parity details — the little things competitors have
 
+> **Status (2026-07-06):** Historical parity checklist. The React `/app` console
+> reached full parity and the legacy `server/public/index.html` / `dashboard.js`
+> referenced below were retired; this file is kept as the record of what was
+> ported and why.
+
 Method: four research passes over public knowledge bases — Netskope
 (docs.netskope.com: Skope IT, Client deployment, CCI, Advanced Analytics),
 Zscaler (help.zscaler.com: Insights Logs, Client Connector App Store, Gen AI
