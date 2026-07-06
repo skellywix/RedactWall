@@ -146,43 +146,6 @@ interface SegmentsReport {
   summary?: { selectedId?: string; visibleEvents?: number; attention?: number; privacy?: string };
 }
 
-interface BenchmarkRow {
-  id: string;
-  label?: string;
-  score?: number;
-  state?: string;
-  marketBar?: string;
-  detail?: string;
-  source?: string;
-  evidence?: string[];
-  gaps?: string[];
-  action?: string;
-  targetTab?: string;
-}
-
-interface CompetitiveReadinessReport {
-  summary?: { score?: number; ready?: number; total?: number; privacy?: string };
-  matrix?: BenchmarkRow[];
-}
-
-interface FocusLane extends BenchmarkRow {
-  status?: string;
-  anchor?: string;
-}
-
-interface CompetitiveFocus {
-  summary?: {
-    score?: number;
-    ready?: number;
-    total?: number;
-    privacy?: string;
-    objective?: string;
-    nextLane?: string;
-    nextAction?: string;
-  };
-  lanes?: FocusLane[];
-}
-
 interface BaselineDimension {
   id: string;
   label?: string;
@@ -480,8 +443,6 @@ interface Posture {
   objectives?: PostureObjective[];
   hardening?: HardeningReport;
   segments?: SegmentsReport;
-  competitiveReadiness?: CompetitiveReadinessReport;
-  competitiveFocus?: CompetitiveFocus;
   behaviorBaselines?: BehaviorBaselinesReport;
   agenticMcp?: AgenticMcpReport;
   threatGuardrails?: ThreatGuardrailsReport;
@@ -641,17 +602,6 @@ function segmentTone(state?: string): string {
 
 const baselineTone = (state?: string) => (state === 'critical' ? 'critical' : state === 'warning' ? 'attention' : 'ready');
 const baselineStateLabel = (state?: string) => (state === 'critical' ? 'Critical' : state === 'warning' ? 'Watch' : 'Normal');
-
-const BENCHMARK_LABELS: Record<string, string> = {
-  leader: 'Leader',
-  pilot_ready: 'Pilot ready',
-  close_gap: 'Close gap',
-  gap: 'Gap',
-};
-
-const benchmarkStateLabel = (state?: string) => BENCHMARK_LABELS[state || ''] || 'Review';
-const benchmarkTone = (state?: string) =>
-  state === 'leader' || state === 'pilot_ready' ? 'ready' : state === 'gap' ? 'blocked' : 'attention';
 
 const INVENTORY_STATE_LABELS: Record<string, string> = {
   sanctioned: 'Sanctioned',
@@ -1555,7 +1505,7 @@ function DecisionPivots({ rows }: { rows: QueueQuery[] }) {
 }
 
 // ---------------------------------------------------------------------------
-// Hardening mission + market focus + capability benchmark + operator flow
+// Hardening mission + operator flow
 // ---------------------------------------------------------------------------
 
 function MissionPrimary({ mission }: { mission: HardeningMission }) {
@@ -1633,89 +1583,6 @@ function MissionBanner({ mission }: { mission: HardeningMission | null }) {
   );
 }
 
-function MiniList({ title, items, fallback }: { title: string; items?: string[]; fallback: string }) {
-  const rows = items?.length ? items : [fallback];
-  return (
-    <div className="market-hardening-list">
-      <b>{title}</b>
-      {rows.map((item, index) => (
-        <span key={index}>{item}</span>
-      ))}
-    </div>
-  );
-}
-
-function MarketLaneCard({ lane }: { lane: FocusLane }) {
-  const anchor = lane.anchor;
-  return (
-    <article className={`market-hardening-card ${benchmarkTone(lane.state)}`}>
-      <div className="market-hardening-head">
-        <div>
-          <strong>{lane.label}</strong>
-        </div>
-        <b>
-          {num(lane.score)}
-          <small>/100</small>
-        </b>
-      </div>
-      <p>{lane.marketBar || ''}</p>
-      <div className="market-hardening-state">
-        <span>{benchmarkStateLabel(lane.state)}</span>
-        <span>{lane.status || 'review'}</span>
-      </div>
-      <div className="market-hardening-columns">
-        <MiniList title="Proof" items={lane.evidence} fallback="Awaiting proof" />
-        <MiniList title="Gap" items={lane.gaps} fallback="No open gap" />
-      </div>
-      <div className="market-hardening-actions">
-        <TabJump tab={lane.targetTab || 'monitor'} label={lane.action || 'Open'} />
-        {anchor ? (
-          <button className="ghost mini" type="button" onClick={() => scrollToAnchor(anchor)}>
-            Jump to proof
-          </button>
-        ) : null}
-      </div>
-    </article>
-  );
-}
-
-function MarketHardening({ focus }: { focus: CompetitiveFocus | null }) {
-  const summary = focus?.summary ?? null;
-  const lanes = focus?.lanes ?? [];
-  const summaryText = summary
-    ? `${num(summary.ready)}/${num(summary.total)} pilot-ready / ${num(summary.score)}/100 / ${summary.privacy || 'metadata only'}`
-    : 'Waiting for competitive focus';
-  return (
-    <Section title="Hardening Focus Areas" summary={summaryText}>
-      <div aria-live="polite">
-        {!summary ? (
-          <EmptyState title="No focus data" detail="Refresh posture to build the market hardening flow." />
-        ) : (
-          <>
-            <div className="market-hardening-brief">
-              <div>
-                <strong>{summary.objective || 'Close the highest-impact control gaps'}</strong>
-                <span>
-                  {summary.nextLane || 'Next lane'} / {summary.nextAction || 'Keep moving'}
-                </span>
-              </div>
-              <b>
-                {num(summary.score)}
-                <small>/100</small>
-              </b>
-            </div>
-            <div className="market-hardening-board">
-              {lanes.map((lane) => (
-                <MarketLaneCard key={lane.id} lane={lane} />
-              ))}
-            </div>
-          </>
-        )}
-      </div>
-    </Section>
-  );
-}
-
 function HardeningList({ label, items, fallback }: { label: string; items?: string[]; fallback: string }) {
   const rows = items?.length ? items : [fallback];
   return (
@@ -1727,56 +1594,6 @@ function HardeningList({ label, items, fallback }: { label: string; items?: stri
         ))}
       </ul>
     </div>
-  );
-}
-
-function BenchmarkCard({ row }: { row: BenchmarkRow }) {
-  return (
-    <article className={`hardening-card ${benchmarkTone(row.state)}`}>
-      <div className="hardening-head">
-        <div className="hardening-title">
-          <strong>{row.label}</strong>
-        </div>
-        <div className="hardening-score">
-          {num(row.score)}
-          <span>/100</span>
-        </div>
-      </div>
-      <p className="hardening-desc">{row.marketBar || row.detail || ''}</p>
-      <div className="hardening-meta">
-        <span>{benchmarkStateLabel(row.state)}</span>
-        <span>{row.source || 'posture'}</span>
-      </div>
-      <div className="hardening-lists">
-        <HardeningList label="Proof" items={row.evidence} fallback="Awaiting proof" />
-        <HardeningList label="Missing" items={row.gaps} fallback="No open gaps" />
-      </div>
-      <TabJump tab={row.targetTab || 'monitor'} label={row.action || 'Open'} />
-    </article>
-  );
-}
-
-function CompetitiveReadiness({ report }: { report: CompetitiveReadinessReport | null }) {
-  const summary = report?.summary ?? null;
-  const rows = report?.matrix ?? [];
-  const summaryText = summary
-    ? `${num(summary.ready)}/${num(summary.total)} ready / ${num(summary.score)}/100 / ${summary.privacy || 'metadata only'}`
-    : 'Waiting for data';
-  const body = !summary ? (
-    <EmptyState title="No readiness data" detail="Refresh posture." />
-  ) : rows.length ? (
-    <div className="hardening-board competitive-readiness-board">
-      {rows.map((row) => (
-        <BenchmarkCard key={row.id} row={row} />
-      ))}
-    </div>
-  ) : (
-    <EmptyState title="No matrix" detail="Posture did not publish competitive rows." />
-  );
-  return (
-    <Section title="Capability Benchmark" summary={summaryText}>
-      <div aria-live="polite">{body}</div>
-    </Section>
   );
 }
 
@@ -3293,8 +3110,6 @@ export default function Monitor() {
         <MetricGrid metrics={report?.metrics ?? []} refreshing={refreshing} fallbackUpdated={report?.generatedAt || posture.lastUpdated} />
         <DecisionPivots rows={activity.rows} />
         <MissionBanner mission={report?.hardening?.mission ?? null} />
-        <MarketHardening focus={report?.competitiveFocus ?? null} />
-        <CompetitiveReadiness report={report?.competitiveReadiness ?? null} />
         <OperatorFlow posture={report} />
         <ActionQueueSection rows={report?.actionQueue ?? []} isAdmin={isAdmin} workflow={workflow} />
         <ObjectivesSection objectives={report?.objectives ?? []} />
