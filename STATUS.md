@@ -18,9 +18,10 @@ Roadmap references (N*/X*) point at `ROADMAP.md`.
   Compliance, Identity, Configuration, Deploy, Integrations, Audit Log,
   Updates — plus the shell chrome (grouped Operate/Analyze/Govern/System rail
   with icons and a live pending badge, Ctrl/Cmd-K command palette, LIVE + last-
-  updated indicators, sign out, system-status footer). The legacy design
-  system (fonts, tokens, leak-map animation, selectors) was extracted to the
-  shared `server/public/console-base.css` so both consoles render identically.
+  updated indicators, sign out, system-status footer). The instrument design
+  system (fonts, tokens, leak-map animation, selectors) lives in
+  `server/public/console-base.css` so the console renders as designed in
+  light/dark (dark default).
   Queue assignee editor, per-query audit trail, billing/seats, and the Command
   Center decision pivots all carried over. Evidence: `e2e/console-parity.spec.js`
   (all 16 routes, zero console errors) and `e2e/console-design.spec.js` (32
