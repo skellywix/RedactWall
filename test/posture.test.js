@@ -238,8 +238,11 @@ test('posture summarizes live AI security objectives without prompt bodies', () 
   assert.ok(report.competitiveFocus && report.competitiveFocus.summary.score > 0);
   assert.strictEqual(report.competitiveFocus.summary.total, 3);
   assert.strictEqual(report.competitiveFocus.summary.privacy, 'metadata only; prompt bodies excluded');
-  assert.ok(report.competitiveFocus.lanes.some((item) => item.id === 'continuous_shadow_ai_discovery' && item.competitors.includes('Prompt Security')));
-  assert.ok(report.competitiveFocus.lanes.some((item) => item.id === 'mcp_saas_connector_coverage' && item.competitors.includes('Strac')));
+  assert.ok(report.competitiveFocus.lanes.some((item) => item.id === 'continuous_shadow_ai_discovery' && item.marketBar));
+  assert.ok(report.competitiveFocus.lanes.some((item) => item.id === 'mcp_saas_connector_coverage' && item.marketBar));
+  // Operator console must not surface competitor names or go-to-market strategy.
+  assert.ok(report.competitiveFocus.lanes.every((item) => !('competitors' in item)));
+  assert.ok(!/beat|top-three|nightfall|strac|prompt security|check point/i.test(report.competitiveFocus.summary.objective));
   assert.ok(report.competitiveFocus.lanes.some((item) => item.id === 'mcp_saas_connector_coverage' && item.evidence.some((proof) => /shipped connector profile/.test(proof))));
   assert.ok(report.competitiveFocus.lanes.some((item) => item.id === 'mcp_saas_connector_coverage' && item.evidence.some((proof) => /connector registry proof/.test(proof))));
   assert.ok(report.competitiveFocus.lanes.some((item) => item.id === 'detection_quality_proof' && item.evidence.some((proof) => /reviewed detector/.test(proof))));
