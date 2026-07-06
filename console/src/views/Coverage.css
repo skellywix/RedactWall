@@ -1,0 +1,39 @@
+/* Sensor Coverage view. Every color comes from the shared theme tokens in
+   server/public/console-theme.css; rules are scoped under .coverage-view so
+   parallel views cannot collide. Panel, grid, score-ring, chip, and row
+   styling all come from the legacy console-base.css classes reused in the
+   markup - only the view frame and small gap fixes live here. */
+
+.coverage-view {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+
+.coverage-header h2 {
+  margin: 0;
+  font-size: 23px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  color: var(--txt);
+}
+
+.coverage-header p {
+  margin: 6px 0 0;
+  color: var(--mut);
+  font-size: 13px;
+  line-height: 1.5;
+  max-width: 720px;
+}
+
+/* Legacy joined the gap chips with a text space; JSX drops it. */
+.coverage-view .sev + .sev {
+  margin-left: 4px;
+}
+
+@media (max-width: 900px) {
+  .coverage-header h2 {
+    font-size: 20px;
+  }
+}

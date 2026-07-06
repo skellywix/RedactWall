@@ -19,12 +19,25 @@ const SHOT_DIR = path.join(__dirname, 'design-evidence');
 const VIEWS = [
   { hash: '/', name: 'overview' },
   { hash: '/queue', name: 'queue' },
-  { hash: '/policy', name: 'policy' },
-  { hash: '/audit', name: 'audit' },
+  { hash: '/monitor', name: 'monitor' },
+  { hash: '/activity', name: 'activity' },
+  { hash: '/insights', name: 'insights' },
+  { hash: '/coverage', name: 'coverage' },
+  { hash: '/lineage', name: 'lineage' },
   { hash: '/decision-quality', name: 'decision-quality' },
+  { hash: '/catalog', name: 'catalog' },
+  { hash: '/compliance', name: 'compliance' },
+  { hash: '/identity', name: 'identity' },
+  { hash: '/policy', name: 'policy' },
+  { hash: '/deploy', name: 'deploy' },
+  { hash: '/integrations', name: 'integrations' },
+  { hash: '/audit', name: 'audit' },
+  { hash: '/updates', name: 'updates' },
 ];
 
-test.setTimeout(120000);
+// 16 views x 2 themes of full-page screenshots need headroom beyond the old
+// five-view budget.
+test.setTimeout(240000);
 test.use({ viewport: { width: 1440, height: 900 } });
 
 async function login(page) {

@@ -1,0 +1,9 @@
+/* Identity view (SSO/SCIM onboarding helper). Layout, panels, tables, chips,
+   KPI cards, and the VERIFYING busy overlay all come from the shared legacy
+   sheets (console-base.css / console-theme.css) via the class names reused in
+   Identity.tsx. Only the one rule legacy set inline lives here, scoped under
+   .identity-view so parallel views cannot collide. */
+
+.identity-view .identity-test-result {
+  padding: 6px 16px 14px;
+}

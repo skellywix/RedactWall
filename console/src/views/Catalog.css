@@ -1,0 +1,37 @@
+/* AI App Catalog view. Every color comes from the shared theme tokens in
+   server/public/console-theme.css; rules are scoped under .catalog-view so
+   parallel views cannot collide. All panel, KPI, chip, form, table, and
+   drawer classes (panel, insights-*, catalog-*, console-frame-*,
+   activity-detail*, th[data-catalog-sort]) are styled by
+   server/public/console-base.css, which the new console loads — this file
+   only supplies the frame layout the legacy .console-frame section provided,
+   plus two gaps the extracted markup relied on document-level rules for. */
+
+.catalog-view {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+
+/* Legacy joined attribute chips with a literal text space; JSX emits none. */
+.catalog-view .insights-attr + .insights-attr {
+  margin-left: 4px;
+}
+
+/* The import textarea only inherited font styling on the legacy page; give it
+   the same themed treatment console-base.css applies to text inputs. */
+.catalog-view .catalog-form-body textarea {
+  min-height: 84px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--input-bg);
+  color: var(--txt);
+  padding: 7px 10px;
+  resize: vertical;
+}
+
+.catalog-view .catalog-form-body textarea:focus {
+  border-color: var(--blue);
+  box-shadow: var(--focus-ring);
+  outline: none;
+}

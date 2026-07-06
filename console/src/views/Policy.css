@@ -1,8 +1,73 @@
-/* Policy editor. Uses the shared console-theme.css tokens (--panel, --panel2,
-   --line, --txt, --soft, --mut, --blue, --red, --green, --amber, --input-bg,
-   --focus-ring) so the form matches the instrument styling in both themes.
-   Severity color is never used alone: selected states also carry the 2px
-   verdict-spine inset used across the console. */
+/* Configuration view (policy editor + detection tester + readiness cards).
+   Uses the shared console-base.css / console-theme.css tokens and legacy class
+   families (.config-card, .setup-list, .health-score, .sensor-card,
+   .policy-builder, .policy-textarea, .rationale, .chips, .status-chip, ...)
+   so markup matches the legacy Configuration tab; new rules are scoped under
+   .policy-view so parallel views cannot collide. Severity color is never used
+   alone: selected states also carry the 2px verdict-spine inset used across
+   the console. */
+
+.policy-view {
+  display: grid;
+  gap: 14px;
+}
+
+/* Readiness pill + policy export, top of the editor. */
+.policy-view .policy-head-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.policy-view .policy-head-row .ghost {
+  margin-left: auto;
+}
+
+/* Setup checklist / configuration health / environment settings cards. */
+.policy-view .policy-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px;
+  align-items: stretch;
+}
+
+.policy-view .policy-impact-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.policy-view a.ghost {
+  text-decoration: none;
+}
+
+/* Detection tester input spans the panel; result renders below it. */
+.policy-view .policy-tester-input {
+  width: 100%;
+  resize: vertical;
+}
+
+/* The base sheet gives .rationale gutter margins meant for the legacy panel
+   body; inside the app panel the container already pads. */
+.policy-view .rationale {
+  margin: 12px 0 0;
+}
+
+/* Base sheet adds trailing margins meant for the legacy card flow. */
+.policy-view .policy-builder-grid,
+.policy-view .policy-advanced-grid {
+  margin-bottom: 0;
+}
+
+@media (max-width: 1100px) {
+  .policy-view .policy-cards,
+  .policy-view .policy-builder-grid,
+  .policy-view .policy-advanced-grid,
+  .policy-view .sensor-cards {
+    grid-template-columns: 1fr;
+  }
+}
 
 .policy-editor {
   display: grid;

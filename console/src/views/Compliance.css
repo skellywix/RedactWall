@@ -1,0 +1,12 @@
+/* Compliance Posture view. All panel, KPI, chip, riskbar, stat-card, and
+   compliance-* classes are styled by server/public/console-base.css, which
+   the new console loads before the bundle — this file only supplies the
+   frame layout the legacy .console-frame section provided (display:grid;
+   gap:14px). Rules are scoped under .compliance-view so parallel views
+   cannot collide. */
+
+.compliance-view {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
