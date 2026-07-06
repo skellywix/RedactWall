@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "git fetch origin main:main 2>/dev/null || true",
+            "statusMessage": "Syncing local main with origin/main",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}
