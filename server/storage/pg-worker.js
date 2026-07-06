@@ -34,6 +34,9 @@ const MAX_BACKOFF_MS = 15000;
 
 let client = null; // live connected client, or null when down
 let connecting = null; // in-flight connect cycle shared by concurrent callers
+let generation = 0; // bumped on every successful physical connection
+let txGeneration = null; // the generation an open transaction began on, or null
+let tenantOrgId = ''; // RLS tenant GUC, re-applied on every (re)connect
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -52,10 +55,35 @@ async function connectOnce() {
   // statementTimeoutMs is a bounded integer from resolveBridgeConfig, never
   // raw user text. Session-level, so it survives BEGIN/COMMIT and SAVEPOINTs.
   await candidate.query(`SET statement_timeout = ${config.statementTimeoutMs}`);
+  // Re-assert the tenant RLS context on the fresh session so it survives
+  // reconnects rather than silently reverting to fail-open.
+  if (tenantOrgId) {
+    await candidate.query({ text: "SELECT set_config('redactwall.org_id', $1, false)", values: [tenantOrgId] });
+  }
   // Backend loss emits 'error' on the idle client; drop it so the next call
   // reconnects instead of crashing the worker on an unhandled 'error' event.
   candidate.on('error', () => { if (client === candidate) client = null; });
+  generation += 1;
   return candidate;
+}
+
+/** Classify a statement's role in transaction control so a mid-transaction
+ *  connection loss surfaces as an error instead of silently autocommitting on
+ *  a fresh session. Savepoint statements stay inside the enclosing tx. */
+function txKind(sql) {
+  const s = String(sql || '').replace(/^[\s(]+/, '').toUpperCase();
+  if (s.startsWith('BEGIN')) return 'begin';
+  if (s.startsWith('COMMIT')) return 'commit';
+  if (/^ROLLBACK\s+TO\b/.test(s)) return 'other';
+  if (s.startsWith('ROLLBACK')) return 'rollback';
+  return 'other';
+}
+
+async function setTenant(orgId) {
+  tenantOrgId = String(orgId || '');
+  const connected = await ensureClient();
+  await connected.query({ text: "SELECT set_config('redactwall.org_id', $1, false)", values: [tenantOrgId] });
+  return true;
 }
 
 async function connectWithRetry() {
@@ -84,10 +112,25 @@ function ensureClient() {
 }
 
 async function runQuery(sql, params) {
+  const kind = txKind(sql);
+  const lostMidTx = txGeneration !== null && (!client || generation !== txGeneration);
+  // A transaction whose connection was lost must NOT continue on a fresh
+  // session (that would autocommit stray statements and turn COMMIT into a
+  // no-op). Fail such statements; only a COMMIT surfaces the loss to the
+  // caller, while ROLLBACK of already-discarded work is a safe no-op.
+  if (kind === 'commit') {
+    txGeneration = null;
+    if (lostMidTx) throw new Error('postgres transaction aborted: connection lost before COMMIT');
+  } else if (kind === 'rollback') {
+    txGeneration = null;
+  } else if (kind !== 'begin' && lostMidTx) {
+    throw new Error('postgres transaction aborted: connection lost mid-transaction');
+  }
   const connected = await ensureClient();
   const res = Array.isArray(params) && params.length
     ? await connected.query({ text: sql, values: params })
     : await connected.query(sql); // simple protocol: multi-statement exec works
+  if (kind === 'begin') txGeneration = generation;
   const last = Array.isArray(res) ? res[res.length - 1] : res;
   return { rows: last.rows || [], rowCount: last.rowCount || 0 };
 }
@@ -99,11 +142,18 @@ async function closeClient() {
   return true;
 }
 
-parentPort.on('message', async ({ op, sql, params }) => {
+async function dispatch(op, sql, params) {
+  if (op === 'close') return closeClient();
+  if (op === 'setTenant') return setTenant(params && params[0]);
+  return runQuery(sql, params);
+}
+
+parentPort.on('message', async ({ op, sql, params, seq }) => {
+  // Echo seq so the bridge can discard a stale reply left by a timed-out call.
   try {
-    reply({ result: op === 'close' ? await closeClient() : await runQuery(sql, params) });
+    reply({ seq, result: await dispatch(op, sql, params) });
   } catch (err) {
-    reply({ error: err.message || String(err), code: err.code });
+    reply({ seq, error: err.message || String(err), code: err.code });
   }
 });
 

@@ -805,7 +805,10 @@ interface SearchUi {
   message: string;
 }
 
-function searchUiState(term: string, focused: boolean, refreshing: boolean): SearchUi {
+function searchUiState(rawTerm: string, focused: boolean, refreshing: boolean): SearchUi {
+  // Trim only here so the raw input keeps spaces the user is typing (a controlled
+  // value trimmed on every keystroke can never contain a multi-word phrase).
+  const term = rawTerm.trim();
   if (refreshing) return { state: 'disabled', message: 'Refreshing.' };
   if (!term && focused) return { state: 'focus', message: 'Ready.' };
   if (!term) return { state: 'default', message: 'Type to filter.' };
@@ -832,8 +835,9 @@ function searchHaystack(record: SignalRecordInfo): string {
     .toLowerCase();
 }
 
-function matchesSearch(record: SignalRecordInfo, searchState: string, term: string): boolean {
+function matchesSearch(record: SignalRecordInfo, searchState: string, rawTerm: string): boolean {
   if (searchState === 'error') return false;
+  const term = rawTerm.trim();
   if (!term) return true;
   return searchHaystack(record).includes(term.toLowerCase());
 }
@@ -946,8 +950,13 @@ async function downloadSiemZip(profile: string): Promise<string | null> {
 function usePosture(segment: string) {
   const [report, setReport] = useState<Posture | null>(null);
   const [lastUpdated, setLastUpdated] = useState(() => new Date().toISOString());
+  // Monotonic request id: a slow posture build for a superseded segment must not
+  // overwrite the report the user is now looking at.
+  const reqId = useRef(0);
   const load = useCallback(async () => {
+    const seq = ++reqId.current;
     const body = await fetchMonitorPosture(segment);
+    if (seq !== reqId.current) return body;
     if (body) {
       setReport(body);
       setLastUpdated(body.generatedAt || new Date().toISOString());
@@ -1004,9 +1013,12 @@ function useSiemPackage(role: string | null): SiemState {
   const [profile, setProfile] = useState('all');
   const load = useCallback(async () => {
     if (role === null) return;
-    if (role !== 'security_admin') {
+    // GET /api/integrations/siem/package is auditRead (Security Admin OR
+    // Auditor); gate the download the same way the server does so the evidence
+    // role is not falsely denied its own export.
+    if (role !== 'security_admin' && role !== 'auditor') {
       setPkg(null);
-      setError('security_admin_required');
+      setError('siem_role_required');
       setLoading(false);
       return;
     }
@@ -1374,7 +1386,7 @@ function MonitorToolbar({ term, search, counts, filter, onTerm, onFocus, onFilte
             value={term}
             disabled={search.state === 'disabled'}
             aria-invalid={search.state === 'error'}
-            onChange={(event) => onTerm(event.target.value.trim())}
+            onChange={(event) => onTerm(event.target.value)}
             onFocus={() => onFocus(true)}
             onBlur={() => onFocus(false)}
           />
@@ -1534,7 +1546,7 @@ function DecisionPivots({ rows }: { rows: QueueQuery[] }) {
           className="signal-chip"
           type="button"
           title={`Open All Activity filtered to status:${pivot.token}`}
-          onClick={() => jumpToTab('activity')}
+          onClick={() => navigate(`/activity?q=${encodeURIComponent('status:' + pivot.token)}`)}
         >
           <span>{pivot.label}</span>
           <b>{count(pivot.token)}</b>
@@ -2578,8 +2590,8 @@ const SIEM_PROFILES: Array<{ value: string; label: string }> = [
   { value: 'servicenow', label: 'ServiceNow' },
 ];
 
-function siemSummary(siem: SiemState, isAdmin: boolean): string {
-  if (!isAdmin) return 'Security Admin required';
+function siemSummary(siem: SiemState, canUse: boolean): string {
+  if (!canUse) return 'Security Admin or Auditor required';
   if (siem.loading) return 'Preparing package';
   if (siem.error) return `Package error - ${humanize(siem.error)}`.slice(0, 80);
   const profiles = siem.pkg?.profiles ?? [];
@@ -2665,8 +2677,8 @@ function SiemProfileRow({ profile }: { profile: SiemProfile }) {
   );
 }
 
-function SiemBody({ siem, isAdmin }: { siem: SiemState; isAdmin: boolean }) {
-  if (!isAdmin) return <EmptyState title="Security Admin required" detail="SIEM and SOAR packages are available to Security Admins only." />;
+function SiemBody({ siem, canUse }: { siem: SiemState; canUse: boolean }) {
+  if (!canUse) return <EmptyState title="Access required" detail="SIEM and SOAR packages are available to Security Admins and Auditors." />;
   if (siem.loading) return <EmptyState title="Preparing package" detail="Generating sanitized mappings, searches, and setup checks." />;
   if (siem.error) return <EmptyState title={`Package error - ${humanize(siem.error)}`.slice(0, 80)} detail="Refresh or choose a supported profile." />;
   const profiles = siem.pkg?.profiles ?? [];
@@ -2683,13 +2695,13 @@ function SiemBody({ siem, isAdmin }: { siem: SiemState; isAdmin: boolean }) {
   );
 }
 
-function SiemSection({ siem, isAdmin }: { siem: SiemState; isAdmin: boolean }) {
+function SiemSection({ siem, canUse }: { siem: SiemState; canUse: boolean }) {
   const busy = siem.loading || siem.downloading;
   const actions = (
     <div className="signal-header-actions">
       <label className="siem-profile-select">
         Profile
-        <select value={siem.profile} disabled={busy || !isAdmin} aria-label="SIEM package profile" onChange={(event) => siem.setProfile(event.target.value)}>
+        <select value={siem.profile} disabled={busy || !canUse} aria-label="SIEM package profile" onChange={(event) => siem.setProfile(event.target.value)}>
           {SIEM_PROFILES.map((option) => (
             <option key={option.value} value={option.value}>
               {option.label}
@@ -2700,7 +2712,7 @@ function SiemSection({ siem, isAdmin }: { siem: SiemState; isAdmin: boolean }) {
       <button
         className="system-button secondary"
         type="button"
-        disabled={busy || !isAdmin || Boolean(siem.error)}
+        disabled={busy || !canUse || Boolean(siem.error)}
         aria-busy={busy}
         onClick={() => void siem.download()}
       >
@@ -2716,9 +2728,9 @@ function SiemSection({ siem, isAdmin }: { siem: SiemState; isAdmin: boolean }) {
     </div>
   );
   return (
-    <Section title="SOC Integration Pack" summary={siemSummary(siem, isAdmin)} actions={actions}>
+    <Section title="SOC Integration Pack" summary={siemSummary(siem, canUse)} actions={actions}>
       <div className="siem-package-board" id="siemPackagePreview" aria-live="polite">
-        <SiemBody siem={siem} isAdmin={isAdmin} />
+        <SiemBody siem={siem} canUse={canUse} />
       </div>
     </Section>
   );
@@ -3243,6 +3255,7 @@ export default function Monitor() {
   const { me } = useSession();
   const role = me ? me.role : null;
   const isAdmin = role === 'security_admin';
+  const canUseSiem = role === 'security_admin' || role === 'auditor';
   const [segment, setSegment] = useState('all');
   const posture = usePosture(segment);
   const siem = useSiemPackage(role);
@@ -3293,7 +3306,7 @@ export default function Monitor() {
         <ThreatGuardrailsSection data={report?.threatGuardrails ?? null} />
         <ControlGraphSection graph={report?.controlGraph ?? null} />
         <WorkbenchSection hardening={report?.hardening ?? null} isAdmin={isAdmin} snapshot={snapshot} />
-        <SiemSection siem={siem} isAdmin={isAdmin} />
+        <SiemSection siem={siem} canUse={canUseSiem} />
         <InsightGrid report={report} feedback={feedback.report} verdicts={verdicts} />
         <SignalLayout surfaces={surfaces} events={events} ui={ui} search={search} recentEventId={recentEventId} />
       </div>

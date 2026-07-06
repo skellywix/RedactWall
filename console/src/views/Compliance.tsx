@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { EmptyState } from '../components/Panel';
 import { apiJson } from '../lib/api';
+import { downloadCsv, csvStamp } from '../lib/csv';
 import { navigate } from '../lib/router';
 import { toast } from '../lib/toast';
 import './Compliance.css';
@@ -61,27 +62,6 @@ const FRAMEWORKS: Array<{ key: string; match: RegExp }> = [
 ];
 
 // ---- CSV export (from the last loaded controls; framework labels and summaries only) ----
-
-function csvCell(value: string | number): string {
-  const s = String(value);
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
-
-function downloadCsv(name: string, lines: Array<Array<string | number>>): void {
-  const body = lines.map((cells) => cells.map(csvCell).join(',')).join('\n');
-  const url = URL.createObjectURL(new Blob([body], { type: 'text/csv' }));
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = name;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
-}
-
-function csvStamp(): string {
-  return new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
-}
 
 function exportControlsCsv(controls: ControlMapping[] | null): void {
   if (!controls?.length) {

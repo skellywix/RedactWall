@@ -34,7 +34,11 @@ function fakeDb({ audit = [], queries = {} }) {
       if (/FROM audit/.test(sql)) {
         return { all: () => audit.map((entry) => ({ entry: JSON.stringify(entry) })) };
       }
-      return { get: (qid) => (queries[qid] ? { data: JSON.stringify(queries[qid]) } : undefined) };
+      // queries: single-id .get (queryContentHash) and batched IN .all (verify).
+      return {
+        get: (qid) => (queries[qid] ? { data: JSON.stringify(queries[qid]) } : undefined),
+        all: (...ids) => ids.filter((qid) => queries[qid]).map((qid) => ({ id: qid, data: JSON.stringify(queries[qid]) })),
+      };
     },
   };
 }

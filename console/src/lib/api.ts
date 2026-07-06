@@ -27,15 +27,30 @@ export async function api(path: string, opts: ApiOptions = {}): Promise<Response
   const method = String(fetchOpts.method || 'GET').toUpperCase();
   const headers = new Headers(fetchOpts.headers || {});
   if (csrfToken && MUTATING.has(method)) headers.set('x-csrf-token', csrfToken);
-  const res = await fetch(path, { ...fetchOpts, headers });
+  let res: Response;
+  try {
+    res = await fetch(path, { ...fetchOpts, headers });
+  } catch {
+    // Network failure / server restart: collapse to the null path callers already
+    // handle for a non-ok response, instead of an unhandled promise rejection.
+    return null;
+  }
   if (res.status === 401 && !allowAuthError) {
     location.href = '/login.html';
     return null;
   }
-  if (res.status === 403) {
-    toast('Request not allowed for this session. Refresh or use a Security Admin account.', 'warn');
-  }
+  if (res.status === 403) await warnForbidden(res);
   return res;
+}
+
+/** Distinguish an expired license (read-only past the grace window) from a role denial. */
+async function warnForbidden(res: Response): Promise<void> {
+  const body = (await res.clone().json().catch(() => ({}))) as { error?: string };
+  if (body.error === 'license_readonly') {
+    toast('License is read-only past the grace window. Install a renewal license to make changes.', 'warn');
+    return;
+  }
+  toast('Request not allowed for this session. Refresh or use a Security Admin account.', 'warn');
 }
 
 export async function apiJson<T>(path: string, opts: ApiOptions = {}): Promise<T | null> {

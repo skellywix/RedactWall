@@ -39,18 +39,28 @@ function messageText(m) {
   return parts.filter(Boolean).join('\n');
 }
 
-// True when a request carries user-authored content but requestText extracted no
-// scannable text from it (e.g. image parts) — the gateway must fail closed
-// rather than forward such content ungated.
+// True when a request carries content the gateway cannot scan — image/binary
+// content parts, or prompt/input arrays holding non-strings (e.g. token-id
+// arrays) — even when other parts DO carry scannable text. The gateway must fail
+// closed rather than forward any such content ungated.
 function carriesUnscannableContent(body) {
   if (!body || typeof body !== 'object') return false;
   if (Array.isArray(body.messages)) {
     return body.messages.some((m) => {
       if (!m || m.role === 'system' || m.role === 'assistant') return false;
       if (typeof m.content === 'string') return false;
-      if (Array.isArray(m.content)) return m.content.length > 0;
+      // A content array is unscannable when ANY part lacks a scannable text
+      // field (an image/file part alongside text still leaks the image).
+      if (Array.isArray(m.content)) return m.content.some((p) => !(p && typeof p.text === 'string'));
       return m.content != null;
     });
+  }
+  // Legacy prompt/input arrays: strings are scannable (requestText joins them),
+  // but token-id arrays or other non-strings decode to content the gateway never
+  // saw — treat those as unscannable.
+  for (const key of ['prompt', 'input']) {
+    const v = body[key];
+    if (Array.isArray(v) && v.length && v.some((p) => typeof p !== 'string')) return true;
   }
   return false;
 }
@@ -97,4 +107,20 @@ function applyResponseText(json, newText) {
   return out;
 }
 
-module.exports = { requestText, messageText, carriesUnscannableContent, applyRedactedRequest, responseText, applyResponseText };
+// Apply a per-choice text transform to EVERY choice's output. Redaction and
+// detokenization must touch every choice: with n>1 the control plane scans the
+// join of all choices, so rewriting only the first (applyResponseText) would
+// leave choices[1..] carrying raw PII returned to the caller.
+function mapResponseText(json, fn) {
+  if (!json || !Array.isArray(json.choices)) return json;
+  return {
+    ...json,
+    choices: json.choices.map((c) => {
+      if (c && c.message && typeof c.message.content === 'string') return { ...c, message: { ...c.message, content: fn(c.message.content) } };
+      if (c && typeof c.text === 'string') return { ...c, text: fn(c.text) };
+      return c;
+    }),
+  };
+}
+
+module.exports = { requestText, messageText, carriesUnscannableContent, applyRedactedRequest, responseText, applyResponseText, mapResponseText };

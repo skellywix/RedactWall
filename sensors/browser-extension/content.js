@@ -403,15 +403,22 @@
     resend(el);
   }
 
+  // The composer holds a tokenized prompt whose redacted-send the control plane
+  // has not yet recorded. A retry must go back through the recorded path, never
+  // fall through to the plain allow branch (which would send with no evidence).
+  let pendingRedacted = null;
+
   // Redact path: the composer is already tokenized (PII-free). Only resend once
   // the control plane has recorded the redacted-send, so an outage cannot
   // produce a send with no compliance evidence (fail closed).
   async function proceedRedactedAfterRecorded(tokenText, analysis, el) {
     const res = await report(tokenText, analysis, 'submit', 'redacted_sent', '', { clientPreRedacted: true });
     if (!recordedProceedResponse(res, 'redacted_sent')) {
+      pendingRedacted = { text: tokenText, analysis };
       toast('RedactWall could not record this redacted send. Held until the control plane is reachable — press send again to retry.');
       return;
     }
+    pendingRedacted = null;
     bypassOnce = true;
     resend(el);
   }
@@ -539,6 +546,15 @@
     const el = composer || findComposer(e.target);
     let text = readText(el);
     if (!text) return true;
+    // Redact retry under outage: the composer still holds the exact tokenized
+    // prompt whose redacted-send was never recorded. Re-route it through the
+    // recorded path instead of letting the (PII-free) text pass as a plain
+    // 'allow' with no compliance evidence — fail closed.
+    if (pendingRedacted && text === pendingRedacted.text.trim()) {
+      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+      proceedRedactedAfterRecorded(pendingRedacted.text, pendingRedacted.analysis, el);
+      return false;
+    }
     if (destinationBlocked()) {
       e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
       toast('RedactWall blocked sends to ' + SITE + ' by policy. Recording evidence...');
@@ -643,7 +659,7 @@
     return inComposerOrUI(selection.anchorNode) || inComposerOrUI(selection.focusNode);
   }
   let rehydrating = false, observer = null;
-  const TOKEN_RE = /\[\[[A-Z_]+_\d+\]\]/;
+  const TOKEN_RE = /\[\[[A-Z][A-Z0-9_]*_\d+\]\]/;
   function startRehydrator() {
     if (observer) return;
     observer = new MutationObserver((muts) => {
@@ -672,11 +688,21 @@
     }
   }
 
+  // Only the field the Enter actually fired in — never a globally-found
+  // composer. Grabbing the global composer for an Enter in an unrelated input
+  // (e.g. a site search box) would file a false 'allowed' report of prompt text
+  // the user never submitted.
+  function composerFromTarget(target) {
+    if (!target || !target.closest) return null;
+    return target.closest('textarea, div[contenteditable="true"]');
+  }
+
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      const el = findComposer(e.target);
-      if (el && readText(el)) interceptSend(e, el);
-    }
+    // Skip IME composition commits (isComposing / keyCode 229): that Enter
+    // commits a candidate, it does not send, so it must not trigger a scan.
+    if (e.key !== 'Enter' || e.shiftKey || e.isComposing || e.keyCode === 229) return;
+    const el = composerFromTarget(e.target);
+    if (el && readText(el)) interceptSend(e, el);
   }, true);
 
   function closestSendButton(target) {
@@ -693,11 +719,26 @@
     return null;
   }
 
-  document.addEventListener('click', (e) => {
-    if (closestSendButton(e.target)) {
-      const el = findComposer();
-      if (el && readText(el)) interceptSend(e, el);
+  // Resolve the composer for the clicked send button relative to the button
+  // (its form / nearest container) so a click does not scan an unrelated empty
+  // field on multi-textarea sites and let a sensitive prompt send unscanned.
+  function composerNearButton(btn) {
+    if (!btn || !btn.closest) return null;
+    const scope = btn.closest('form') || btn.parentElement;
+    if (scope && scope.querySelector) {
+      for (const sel of SELECTORS) {
+        const el = scope.querySelector(sel);
+        if (el && isVisible(el)) return el;
+      }
     }
+    return null;
+  }
+
+  document.addEventListener('click', (e) => {
+    const btn = closestSendButton(e.target);
+    if (!btn) return;
+    const el = composerNearButton(btn) || findComposer();
+    if (el && readText(el)) interceptSend(e, el);
   }, true);
 
   // ---- intercept PASTE (early warning) --------------------------------------
@@ -711,6 +752,11 @@
       return;
     }
     const t = (e.clipboardData || window.clipboardData);
+    // A pasted file (e.g. a screenshot of a spreadsheet of SSNs) carries no
+    // clipboard text, so it must run the SAME upload gate as drop/picker —
+    // otherwise it uploads completely unscanned.
+    const files = clipboardFiles(t);
+    if (files.length) { scanFiles(files, e); return; }
     const pasted = t ? t.getData('text') : '';
     if (!pasted || pasted.length < 6) return;
     const verdict = evaluate(pasted);
@@ -779,8 +825,40 @@
   }, true);
   document.addEventListener('change', (e) => {
     if (!ENABLED) return;
-    if (e.target && e.target.type === 'file' && e.target.files && e.target.files.length) scanFiles(e.target.files, e);
+    const input = e.target;
+    if (!input || input.type !== 'file' || !input.files || !input.files.length) return;
+    scanFiles(input.files, e);
+    // Anything we intercepted (blocked, or held for async scan) must not stay
+    // attached: a form submit / framework re-render reading input.files would
+    // upload the blocked file, and re-selecting the same file for the clean
+    // 2-minute retry fires no change event while input.value is unchanged.
+    if (e.defaultPrevented) clearFileInput(input);
   }, true);
+
+  function clearFileInput(input) {
+    try {
+      input.value = '';
+      if (input.files && input.files.length && typeof DataTransfer === 'function') {
+        input.files = new DataTransfer().files;
+      }
+    } catch (_) { /* best effort; the block already fired */ }
+  }
+
+  // Files a paste carries (kind:'file' clipboard items) — a screenshot pasted
+  // into the composer arrives here with no clipboard text.
+  function clipboardFiles(data) {
+    if (!data) return [];
+    if (data.files && data.files.length) return [...data.files];
+    const items = data.items ? [...data.items] : [];
+    const out = [];
+    for (const item of items) {
+      if (item && item.kind === 'file' && typeof item.getAsFile === 'function') {
+        const file = item.getAsFile();
+        if (file) out.push(file);
+      }
+    }
+    return out;
+  }
   const MAX_BROWSER_FILE_BYTES = 6_300_000;
   const TEXT_UPLOAD_EXTENSIONS = new Set([
     '.txt', '.text', '.csv', '.tsv', '.json', '.jsonl', '.ndjson', '.xml', '.html', '.htm',

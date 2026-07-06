@@ -127,3 +127,39 @@ export function bulkDecision(
 export function revealQuery(id: string, password: string): Promise<DecisionResult<RevealResult>> {
   return decisionPost(`/api/queries/${encodeURIComponent(id)}/reveal`, { password }, 'Reveal failed', true);
 }
+
+/** Inline reassignment fields. Empty string clears a field; omit a field to leave it unchanged. */
+export interface AssignmentPatch {
+  assignedUser?: string;
+  assignedGroup?: string;
+  assignedRole?: string;
+}
+
+/** POST /api/queries/:id/assign (Security Admin) -> updated publicQuery. Metadata only; never prompt content. */
+export function assignQuery(id: string, patch: AssignmentPatch): Promise<DecisionResult<QueueQuery>> {
+  return decisionPost(`/api/queries/${encodeURIComponent(id)}/assign`, patch, 'Reassign failed', false);
+}
+
+/**
+ * Step-up probe for OIDC sessions. POST /api/auth/step-up returns:
+ *   200 -> elevation already satisfied (auth_time within the window); proceed.
+ *   409 {oidc:true} -> re-authenticate with the identity provider to refresh auth_time.
+ * Local accounts never call this; they collect a password in the step-up modal.
+ */
+export type StepUpProbe = 'ok' | 'oidc' | 'error';
+
+export async function probeStepUp(): Promise<StepUpProbe> {
+  const res = await api('/api/auth/step-up', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{}',
+    allowAuthError: true,
+  });
+  if (!res) return 'error';
+  if (res.ok) return 'ok';
+  if (res.status === 409) {
+    const body = (await res.json().catch(() => ({}))) as { oidc?: boolean };
+    if (body.oidc) return 'oidc';
+  }
+  return 'error';
+}

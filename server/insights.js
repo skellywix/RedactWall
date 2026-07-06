@@ -73,7 +73,7 @@ function summarize(rows, options = {}) {
   const categoryCounts = {};
   const destinationCounts = {};
   const shadowByProvider = {};
-  const userAgg = {};
+  const userAgg = Object.create(null);
   const accountTypes = { corporate: 0, personal: 0, unknown: 0 };
   const personalDestinationCounts = {};
   let personalBlocked = 0;
@@ -111,7 +111,7 @@ function summarize(rows, options = {}) {
     if (decision === 'blocked') ua.blocked++;
     ua.riskSum += q.riskScore || 0;
     if ((q.maxSeverity || 0) > ua.maxSeverity) ua.maxSeverity = q.maxSeverity;
-    const acct = accountTypes[q.accountType] !== undefined ? q.accountType : 'unknown';
+    const acct = Object.prototype.hasOwnProperty.call(accountTypes, q.accountType) ? q.accountType : 'unknown';
     accountTypes[acct]++;
     if (acct === 'personal') {
       if (dest) personalDestinationCounts[dest] = (personalDestinationCounts[dest] || 0) + 1;

@@ -185,12 +185,27 @@ async function extractText(name, buf, opts = {}) {
     const raw = await withTimeout(Promise.resolve().then(() => p.extract(buf, opts)), timeoutMs(opts));
     const text = String(raw || '');
     const max = maxTextChars(opts);
+    if (text.length > max) {
+      // Fail closed: we can only scan the first `max` chars, so the unscanned
+      // tail could carry PII (benign padding then SSNs/cards). Returning a
+      // truncated window with extractionOk:true let that content through
+      // unscanned, so treat truncation as an extraction failure — the caller's
+      // fail-closed path then holds the file unscanned instead of allowing it.
+      return {
+        text: '',
+        processor: p.id,
+        supported: true,
+        extractionOk: false,
+        error: 'truncated',
+        truncated: true,
+      };
+    }
     return {
-      text: text.slice(0, max),
+      text,
       processor: p.id,
       supported: true,
       extractionOk: true,
-      truncated: text.length > max,
+      truncated: false,
     };
   } catch (e) {
     return {

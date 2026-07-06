@@ -11,13 +11,17 @@ const crypto = require('crypto');
 const db = require('./db');
 const roles = require('./roles');
 const scim = require('./scim');
+const auth = require('./auth');
 
 const STATE_COOKIE_NAME = 'redactwall_oidc';
 const STATE_TTL_MS = 10 * 60 * 1000;
 const STEP_UP_TTL_MS = 5 * 60 * 1000;
 const MAX_CLOCK_SKEW_SEC = 60;
+// Reuse the stable session secret (env, else the disk-persisted one) instead of
+// a per-process random fallback, so in-flight logins survive a restart and every
+// instance in a fleet validates the same state-cookie signature.
 const STATE_SECRET = process.env.REDACTWALL_SECRET || process.env.PROMPTWALL_SECRET || process.env.SENTINEL_SECRET
-  || crypto.randomBytes(32).toString('hex');
+  || auth.deriveKey('oidc-state');
 
 function cleanString(value, max = 512) {
   return String(value == null ? '' : value).trim().slice(0, max);
@@ -254,9 +258,17 @@ async function exchangeCodeForTokens(opts = {}) {
   return json;
 }
 
+function emailVerified(claims = {}) {
+  return claims.email_verified === true || String(claims.email_verified).trim().toLowerCase() === 'true';
+}
+
 function identityCandidates(claims = {}) {
+  // The email claim is user-influencable at many IdPs (self-service B2C/B2B), so
+  // trust it for SCIM matching only when the IdP asserts email_verified. The
+  // directory-canonical claims (preferred_username/upn/unique_name) are not
+  // self-settable and remain eligible.
   const values = [
-    claims.email,
+    emailVerified(claims) ? claims.email : '',
     claims.preferred_username,
     claims.upn,
     claims.unique_name,

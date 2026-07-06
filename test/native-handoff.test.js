@@ -37,6 +37,19 @@ test('native handoff events sign and validate without file content', () => {
   assert.strictEqual(handoff.publicDestination(validated.destination), 'Desktop AI');
 });
 
+test('signatureFor over a raw string-destination event validates after normalization', () => {
+  // A third-party collector signs the raw event (destination as a plain string).
+  // canonicalEvent must produce the same bytes before and after normalization or
+  // the legitimately signed event is rejected.
+  const raw = event({ destination: 'Claude Desktop' });
+  const signed = { ...raw, signature: handoff.signatureFor(raw, SECRET) };
+  const validated = handoff.validateHandoffEvent(signed, {
+    secret: SECRET,
+    now: new Date('2026-06-26T15:01:00.000Z'),
+  });
+  assert.strictEqual(validated.destination.app, 'Claude Desktop');
+});
+
 test('native handoff rejects bad signatures, stale events, and raw payload keys', () => {
   const signed = handoff.signHandoffEvent(event(), SECRET);
   assert.throws(
@@ -102,7 +115,9 @@ test('native handoff validates the event schema before trusting file metadata', 
   );
 
   const signed = handoff.signHandoffEvent(event({ destination: 'Desktop AI\r\nApp' }), SECRET);
-  assert.deepStrictEqual(signed.destination, { app: 'Desktop AI  App' });
+  // String destinations normalize to the same {app,process,url} shape as object
+  // destinations, so signatureFor() is stable across a re-normalization pass.
+  assert.deepStrictEqual(signed.destination, { app: 'Desktop AI  App', process: '', url: '' });
   assert.strictEqual(handoff.publicDestination('Claude Desktop'), 'Claude Desktop');
 });
 

@@ -576,6 +576,10 @@ function useUpdateActions(store: ReturnType<typeof useUpdateStore>) {
     setBusy(true);
     try {
       const result = await updateSend<UpdateCheckResult>('/api/update/check', 'POST', undefined, 'Could not check GitHub');
+      // Reload the base status FIRST (it resets pillOverride), then apply the
+      // check result so the "Update available"/"Current" pill survives instead of
+      // being wiped by the reload milliseconds later.
+      await store.load();
       if (!result.data) {
         store.setPillOverride({ state: 'bad', label: 'Check failed' });
         toast(result.error || 'Could not check GitHub', 'error');
@@ -584,7 +588,6 @@ function useUpdateActions(store: ReturnType<typeof useUpdateStore>) {
       } else {
         store.setPillOverride({ state: 'good', label: 'Current' });
       }
-      await store.load();
     } finally {
       setBusy(false);
     }

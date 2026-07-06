@@ -103,12 +103,18 @@ function addManual({ destination, appName, sanctionedStatus } = {}) {
 function importCsv(text, { source = 'csv_import', max = 5000 } = {}) {
   const lines = String(text || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   let imported = 0; let skipped = 0;
-  for (const line of lines.slice(0, max)) {
-    const host = normalizeHost(line.split(',')[0]);
-    if (!plausibleHost(host)) { skipped += 1; continue; }
-    recordSighting({ destination: host, source });
-    imported += 1;
-  }
+  // One transaction for the whole batch: a max-size import commits (and fsyncs)
+  // once instead of per line, and a crash mid-import rolls back atomically
+  // instead of leaving a partial catalog.
+  const runBatch = db._db.transaction((batch) => {
+    for (const line of batch) {
+      const host = normalizeHost(line.split(',')[0]);
+      if (!plausibleHost(host)) { skipped += 1; continue; }
+      recordSighting({ destination: host, source });
+      imported += 1;
+    }
+  });
+  runBatch(lines.slice(0, max));
   return { imported, skipped, total: lines.length };
 }
 

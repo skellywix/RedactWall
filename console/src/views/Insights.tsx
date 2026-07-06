@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { EmptyState } from '../components/Panel';
 import { apiJson } from '../lib/api';
+import { downloadCsv, csvStamp } from '../lib/csv';
 import { useEventStream } from '../lib/sse';
 import { toast } from '../lib/toast';
 import './Insights.css';
@@ -132,28 +133,7 @@ function decisionMeta(id: string): { label: string; tone: string } | null {
 
 // ---- CSV export (from the last loaded report; never includes prompt text) ----
 
-function csvCell(value: string | number): string {
-  const s = String(value);
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
-
-function downloadCsv(name: string, lines: Array<Array<string | number>>): void {
-  const body = lines.map((cells) => cells.map(csvCell).join(',')).join('\n');
-  const url = URL.createObjectURL(new Blob([body], { type: 'text/csv' }));
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = name;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
-}
-
-function csvStamp(): string {
-  return new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
-}
-
-function exportSeriesCsv(report: InsightsReport | null, windowDays: number): void {
+function exportSeriesCsv(report: InsightsReport | null): void {
   if (!report?.series.length) {
     toast('No insights data loaded yet.', 'error');
     return;
@@ -164,17 +144,19 @@ function exportSeriesCsv(report: InsightsReport | null, windowDays: number): voi
       d.date, d.allowed || 0, d.redacted || 0, d.warned || 0, d.flagged || 0, d.blocked || 0, d.shadow || 0, d.total || 0,
     ]),
   ];
-  downloadCsv(`redactwall-insights-${windowDays}d-${csvStamp()}.csv`, lines);
+  // Label the file with the server-clamped window (max 90), not the selected
+  // window (up to 365) — the CSV must not claim more coverage than it contains.
+  downloadCsv(`redactwall-insights-${report.windowDays}d-${csvStamp()}.csv`, lines);
 }
 
-function exportExecCsv(report: InsightsReport | null, windowDays: number): void {
+function exportExecCsv(report: InsightsReport | null): void {
   if (!report) {
     toast('No insights data loaded yet.', 'error');
     return;
   }
   const lines: Array<Array<string | number>> = [
     ['Metric', 'Value'],
-    ['Window (days)', windowDays],
+    ['Window (days)', report.windowDays],
     ...report.decisions.map((d): [string, number] => [`Decisions: ${d.id}`, d.count]),
     ...report.topDestinations.slice(0, 10).map((t): [string, number] => [`Top destination: ${t.destination}`, t.count]),
     ...report.topUsers.slice(0, 10).map((u): [string, number] => [`Top user: ${u.user}`, u.events]),
@@ -668,8 +650,8 @@ export default function Insights() {
         busy={busy}
         onWindow={setWindowDays}
         onRefresh={load}
-        onExportSeries={() => exportSeriesCsv(report, windowDays)}
-        onExportExec={() => exportExecCsv(report, windowDays)}
+        onExportSeries={() => exportSeriesCsv(report)}
+        onExportExec={() => exportExecCsv(report)}
       />
       {renderBody()}
     </div>

@@ -66,11 +66,24 @@ function scoreFor(result = {}, failureCount = 0) {
   return Math.max(0, Math.min(100, Math.round(base * 100) - (failureCount * 8) - (falsePositivePenalty * 12)));
 }
 
+// The held-out eval fixture and the detection engine are static for the life of
+// the process, so the default eval result never changes between calls. Memoize
+// it lazily so posture polling and evidence export don't re-run the whole corpus
+// (~150ms of blocking CPU) on every request. Injected evaluators (tests) always
+// run fresh and are never cached.
+let cachedDefaultResult = null;
+
 function report(opts = {}) {
   const generatedAt = opts.generatedAt || new Date().toISOString();
   try {
     const evaluate = opts.evaluate || evalDetect.evaluate;
-    const result = evaluate();
+    let result;
+    if (opts.evaluate) {
+      result = evaluate();
+    } else {
+      if (!cachedDefaultResult) cachedDefaultResult = evaluate();
+      result = cachedDefaultResult;
+    }
     const failures = evalDetect.failures(result);
     const semanticFloors = {
       precision: evalDetect.FLOORS.semanticPrecision,

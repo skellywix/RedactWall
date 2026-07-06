@@ -32,7 +32,7 @@ function knownDetectorIds() {
   }
 }
 
-function detectorIdsForQuery(q = {}) {
+function detectorIdsForQuery(q = {}, known = knownDetectorIds()) {
   const ids = [];
   for (const finding of q.findings || []) {
     if (finding && finding.type) ids.push(String(finding.type));
@@ -42,7 +42,6 @@ function detectorIdsForQuery(q = {}) {
     else if (category && category.category) ids.push(String(category.category));
   }
   for (const key of Object.keys(q.entityCounts || {})) ids.push(key);
-  const known = knownDetectorIds();
   return [...new Set(ids.map((id) => safeText(id, '', 80)).filter((id) => id && (!known.size || known.has(id))))].sort();
 }
 
@@ -86,8 +85,8 @@ function emptyDetectorRow(detectorId) {
   };
 }
 
-function candidateForQuery(q = {}, feedbackByQuery = new Map()) {
-  const detectorIds = detectorIdsForQuery(q);
+function candidateForQuery(q = {}, feedbackByQuery = new Map(), known = knownDetectorIds()) {
+  const detectorIds = detectorIdsForQuery(q, known);
   if (!detectorIds.length) return null;
   const feedback = feedbackByQuery.get(q.id) || [];
   const reviewed = new Set(feedback.map((item) => item.detectorId));
@@ -135,10 +134,11 @@ function report({ rows = [], feedback = [], generatedAt = new Date().toISOString
       || b.total - a.total
       || a.detectorId.localeCompare(b.detectorId))
     .slice(0, 12);
+  const known = knownDetectorIds();
   const reviewQueue = (Array.isArray(rows) ? rows : [])
     .slice()
     .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
-    .map((q) => candidateForQuery(q, byQuery))
+    .map((q) => candidateForQuery(q, byQuery, known))
     .filter(Boolean)
     .sort((a, b) => Number(a.reviewed) - Number(b.reviewed) || b.riskScore - a.riskScore || String(b.createdAt).localeCompare(String(a.createdAt)))
     .slice(0, 10);

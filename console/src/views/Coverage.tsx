@@ -340,10 +340,13 @@ function useCoverageData() {
   const [fleet, setFleet] = useState<FleetSummary | null>(null);
   const [loaded, setLoaded] = useState(false);
   const load = useCallback(async () => {
-    const [nextCoverage, nextFleet] = await Promise.all([fetchCoverage(), fetchFleet()]);
-    if (nextFleet) setFleet(nextFleet);
-    if (nextCoverage) setCoverage(nextCoverage);
-    setLoaded(true);
+    try {
+      const [nextCoverage, nextFleet] = await Promise.all([fetchCoverage(), fetchFleet()]);
+      if (nextFleet) setFleet(nextFleet);
+      if (nextCoverage) setCoverage(nextCoverage);
+    } finally {
+      setLoaded(true);
+    }
   }, []);
   useEffect(() => {
     load();

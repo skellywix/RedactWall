@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import type { QueueQuery } from '../api/queries';
 import { EmptyState, Panel } from '../components/Panel';
 import { apiJson } from '../lib/api';
+import { downloadCsv, csvStamp } from '../lib/csv';
 import { navigate } from '../lib/router';
 import { roleLabel } from '../lib/session';
 import { useEventStream } from '../lib/sse';
@@ -205,27 +206,6 @@ function paginate(rows: ActivityQuery[], page: number, pageSize: number): PageSl
 }
 
 // ---- CSV export (filtered rows, all pages; never includes prompt text) ----
-
-function csvCell(value: string | number): string {
-  const s = String(value);
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
-
-function downloadCsv(name: string, lines: Array<Array<string | number>>): void {
-  const body = lines.map((cells) => cells.map(csvCell).join(',')).join('\n');
-  const url = URL.createObjectURL(new Blob([body], { type: 'text/csv' }));
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = name;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
-}
-
-function csvStamp(): string {
-  return new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
-}
 
 function exportActivityCsv(rows: ActivityQuery[]): void {
   const lines: Array<Array<string | number>> = [

@@ -12,12 +12,23 @@ const canonical = require('../canonical');
 function toAnthropic(body) {
   const messages = Array.isArray(body.messages) ? body.messages : [];
   const system = messages.filter((m) => m && m.role === 'system').map(canonical.messageText).join('\n') || undefined;
-  const turns = messages.filter((m) => m && (m.role === 'user' || m.role === 'assistant'))
-    .map((m) => ({ role: m.role, content: canonical.messageText(m) }));
+  const turns = [];
+  for (const m of messages) {
+    if (!m || m.role === 'system') continue;
+    // Anthropic has no 'tool' role: surface tool/function results as a user turn
+    // so the follow-up answer still sees them (silently dropping loses the data).
+    const role = m.role === 'assistant' ? 'assistant' : 'user';
+    const content = canonical.messageText(m);
+    if (!content) continue; // Anthropic rejects empty-content turns (e.g. image-only).
+    const prev = turns[turns.length - 1];
+    if (prev && prev.role === role) prev.content += '\n' + content; // roles must alternate
+    else turns.push({ role, content });
+  }
+  while (turns.length && turns[0].role !== 'user') turns.shift(); // first turn must be a user turn
   return {
     model: body.model || 'claude-sonnet-4',
     system,
-    messages: turns.length ? turns : [{ role: 'user', content: canonical.requestText(body) }],
+    messages: turns.length ? turns : [{ role: 'user', content: canonical.requestText(body) || '(no content)' }],
     max_tokens: body.max_tokens || 1024,
   };
 }

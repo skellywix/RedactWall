@@ -118,7 +118,9 @@ export default function App() {
   }, []);
   usePaletteHotkey(setPaletteOpen);
 
-  const active = ROUTES.find((r) => r.path === route) ?? ROUTES[0];
+  // Routes may carry a pivot query string (e.g. /activity?q=dest:host); match on
+  // the path segment alone so a seeded deep link lands on the right view.
+  const active = ROUTES.find((r) => r.path === route.split('?')[0]) ?? ROUTES[0];
   const View = active.view;
   const who = loading ? 'Signing in…' : me ? `${me.user} / ${roleLabel(me.role)}` : 'Session unavailable';
   const openPalette = useCallback(() => setPaletteOpen(true), []);

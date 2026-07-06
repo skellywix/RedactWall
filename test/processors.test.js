@@ -188,15 +188,44 @@ test('slow processors time out with a typed extraction error', async (t) => {
   assert.strictEqual(result.error, 'timeout');
 });
 
-test('extracted text is bounded before detection', async () => {
-  const raw = 'x'.repeat(1200);
+test('oversized extracted text fails closed instead of scanning a truncated window', async () => {
+  const raw = 'x'.repeat(1000) + ' Member SSN 524-71-9043';
   const result = await processors.extractText('large.txt', Buffer.from(raw), { maxTextChars: 1000 });
 
-  assert.strictEqual(result.extractionOk, true);
+  // The tail (holding the SSN) is past the scan window, so a truncated scan
+  // would clear regulated PII to send. Truncation must fail closed instead.
+  assert.strictEqual(result.extractionOk, false);
+  assert.strictEqual(result.error, 'truncated');
   assert.strictEqual(result.truncated, true);
-  assert.strictEqual(result.text.length, 1000);
-  assert.strictEqual(result.text, raw.slice(0, 1000));
+  assert.strictEqual(result.text, '');
 });
+
+test('text within the scan window is not marked truncated', async () => {
+  const raw = 'Member SSN 524-71-9043';
+  const result = await processors.extractText('small.txt', Buffer.from(raw), { maxTextChars: 1000 });
+
+  assert.strictEqual(result.extractionOk, true);
+  assert.strictEqual(result.truncated, false);
+  assert.strictEqual(result.text, raw);
+});
+
+test('scan-file holds a file whose PII sits past the extraction window', async () => withServer(async (port) => {
+  setPolicy();
+  const secret = '524-71-9043';
+  // Pad past the default 1,000,000-char extraction window, then place the SSN in
+  // the unscanned tail. The upload is under maxFileBytes, so without fail-closed
+  // truncation handling it would extract a clean window and be allowed to send.
+  const fileText = 'a'.repeat(1000050) + ' Member SSN ' + secret;
+  const res = await scanFile(port, 'padded-loan.txt', fileText);
+
+  assert.strictEqual(res.status, 200);
+  const body = await res.json();
+  assert.strictEqual(body.decision, 'block');
+  assert.strictEqual(body.status, 'file_blocked_unscanned');
+  assert.strictEqual(body.supported, true);
+  assert.strictEqual(body.inspected, false);
+  assert.ok(!JSON.stringify(body).includes(secret));
+}));
 
 test('scan-file blocks corrupt supported files without echoing file bytes', async () => withServer(async (port) => {
   const secret = '524-71-9043';

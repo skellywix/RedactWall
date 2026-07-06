@@ -115,7 +115,18 @@ function preempt(worker) {
   pump();
 }
 
+// Drop a still-queued task that has waited past its budget without ever being
+// assigned to a worker. Without this, a backlog of pathological files could keep
+// a legitimate upload queued for queueMax*(timeout+grace) with no wait bound.
+function expireQueued(task) {
+  const idx = queue.indexOf(task);
+  if (idx === -1) return; // already assigned or drained
+  queue.splice(idx, 1);
+  task.resolve(failResult(task, 'timeout'));
+}
+
 function assign(worker, task) {
+  clearTimeout(task.queueTimer);
   worker.task = task;
   setIdle(worker, false);
   task.timer = setTimeout(() => preempt(worker), task.totalTimeoutMs);
@@ -143,13 +154,18 @@ async function extractText(name, buf, opts = {}) {
   if (!p || p.requiresOcr) return processors.extractText(name, buf, opts);
   if (queue.length >= queueMax()) return failResult({ processorId: p.id }, 'extract_failed');
   return new Promise((resolve) => {
-    queue.push({
+    const task = {
       id: nextTaskId++,
       name, buf, opts, resolve,
       processorId: p.id,
       totalTimeoutMs: childTimeoutMs(opts) + killGraceMs(),
       timer: null,
-    });
+      queueTimer: null,
+    };
+    // Bound queue-wait time so a task never lingers longer than its own
+    // execution budget before it is even assigned to a worker.
+    task.queueTimer = setTimeout(() => expireQueued(task), task.totalTimeoutMs);
+    queue.push(task);
     pump();
   });
 }
@@ -158,6 +174,7 @@ async function extractText(name, buf, opts = {}) {
 function shutdown() {
   while (queue.length) {
     const task = queue.shift();
+    clearTimeout(task.queueTimer);
     task.resolve(failResult(task, 'extract_failed'));
   }
   for (const worker of [...workers]) {

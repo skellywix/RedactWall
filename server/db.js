@@ -28,6 +28,7 @@ const path = require('path');
 const crypto = require('crypto');
 const storage = require('./storage');
 const integrity = require('./audit-integrity');
+const tenant = require('./tenant');
 
 const DATA_DIR = path.join(__dirname, '..', 'data');
 const ZERO = integrity.ZERO;
@@ -45,6 +46,25 @@ storage.runMigrations(sdb, DRIVER_KIND);
 function setTenantContext(orgId) {
   if (typeof sdb.setTenantContext === 'function') sdb.setTenantContext(orgId);
 }
+
+/**
+ * Wire Postgres row-level security for the customer-silo deployment tenant.js
+ * implements (one RedactWall stack per customer). With a tenant configured we
+ * pin the driver's session GUC to it at startup so the v3 RLS policy actually
+ * enforces isolation instead of sitting inert; the pg worker re-applies the GUC
+ * across reconnects. No-op on SQLite and when no tenant is configured (operator
+ * / self-host mode, RLS fail-open by design). Per-request multi-tenancy on a
+ * SHARED plane is out of scope and would need a transaction-local GUC bound on
+ * the request path — do not rely on this for that model.
+ */
+function wireTenantContext(driver = sdb, cfg = tenant.config(process.env)) {
+  if (cfg && cfg.tenantId && cfg.tenantIdValid && typeof driver.setTenantContext === 'function') {
+    driver.setTenantContext(cfg.tenantId);
+    return cfg.tenantId;
+  }
+  return null;
+}
+try { wireTenantContext(); } catch (e) { console.error('[db] tenant context not wired:', e.message); }
 
 
 const id = (p) => p + '_' + crypto.randomBytes(8).toString('hex');
@@ -86,7 +106,12 @@ function listQueries(filter = {}) {
   return rows.map((r) => JSON.parse(r.data));
 }
 // Read-modify-write wrapped in a transaction so concurrent updates can't race.
+// A single-writer SQLite transaction already serializes this; on a shared
+// Postgres plane two instances could both read the pre-image under READ
+// COMMITTED and lose one patch, so take a transaction-scoped per-row advisory
+// lock first (no-op on SQLite, which lacks the hook).
 const updateQuery = sdb.transaction((qid, patch) => {
+  if (typeof sdb.lockRowForUpdate === 'function') sdb.lockRowForUpdate(qid);
   const cur = qById.get(qid);
   if (!cur) return null;
   const merged = { ...JSON.parse(cur.data), ...patch };
@@ -196,11 +221,17 @@ function parsePostureActionDetail(detail) {
   }
 }
 
-function postureActionStates(limit = 1000) {
-  const rows = listAudit(limit).reverse();
+// Posture-action workflow state is persistent: it must reconstruct from EVERY
+// posture entry (oldest -> newest so the latest wins), not the last N entries
+// of the whole log — otherwise ordinary ingest traffic evicts the update entry
+// and a resolved/snoozed action silently reverts to open. Scoped by action via
+// idx_audit_action so it stays cheap on a busy append-only log.
+const aPostureEntries = sdb.prepare('SELECT entry FROM audit WHERE action = ? ORDER BY seq ASC');
+
+function postureActionStates() {
   const states = {};
-  for (const entry of rows) {
-    if (!entry || entry.action !== POSTURE_ACTION_AUDIT) continue;
+  for (const row of aPostureEntries.all(POSTURE_ACTION_AUDIT)) {
+    const entry = JSON.parse(row.entry);
     const parsed = parsePostureActionDetail(entry.detail);
     if (!parsed) continue;
     states[parsed.id] = {
@@ -286,33 +317,36 @@ function normalizedSeatOrg(value) {
   return String(value || '').trim().toLowerCase();
 }
 
+// Aggregate seats in SQL over the indexed user/org/createdAt columns instead of
+// scanning + JSON.parsing every queries row: seatStats runs on every billable
+// ingest when a seat limit is set, so the old full-table parse made ingest
+// latency grow with history. GROUP BY lower(user) mirrors normalizedSeatUser's
+// case-folding; unknown/unattributed and SCIM-inactive users are dropped after.
+const SEAT_EXCLUDED_LIST = [...SEAT_EXCLUDED_STATUSES].map((s) => `'${s}'`).join(', ');
+const SEAT_SELECT = `SELECT lower("user") AS user, COUNT(*) AS events, MIN("createdAt") AS firstSeen,
+    MAX("createdAt") AS lastSeen, MIN("orgId") AS orgId FROM queries
+  WHERE "user" IS NOT NULL AND status NOT IN (${SEAT_EXCLUDED_LIST})`;
+const seatStatsAll = sdb.prepare(`${SEAT_SELECT} GROUP BY lower("user")`);
+const seatStatsByOrg = sdb.prepare(`${SEAT_SELECT} AND lower("orgId") = ? GROUP BY lower("user")`);
+
 function seatStats(filter = {}) {
   const wantedOrg = normalizedSeatOrg(filter.orgId);
-  const rows = sdb.prepare('SELECT data FROM queries ORDER BY createdAt ASC, seq ASC').all();
-  const users = new Map();
+  const rows = wantedOrg ? seatStatsByOrg.all(wantedOrg) : seatStatsAll.all();
   const inactiveIdentities = inactiveScimIdentitySet();
+  const users = [];
   for (const r of rows) {
-    const q = JSON.parse(r.data);
-    if (SEAT_EXCLUDED_STATUSES.has(q.status)) continue;
-    const orgId = normalizedSeatOrg(q.orgId);
-    if (wantedOrg && orgId !== wantedOrg) continue;
-    const user = normalizedSeatUser(q.user);
-    if (!user) continue;
-    if (inactiveIdentities.has(user)) continue; // deactivation releases the seat
-    const current = users.get(user) || {
+    const user = normalizedSeatUser(r.user);
+    if (!user || inactiveIdentities.has(user)) continue; // deactivation releases the seat
+    users.push({
       user,
-      orgId: orgId || null,
-      events: 0,
-      firstSeen: q.createdAt || null,
-      lastSeen: q.createdAt || null,
-    };
-    current.events += 1;
-    if (q.createdAt && (!current.firstSeen || q.createdAt < current.firstSeen)) current.firstSeen = q.createdAt;
-    if (q.createdAt && (!current.lastSeen || q.createdAt > current.lastSeen)) current.lastSeen = q.createdAt;
-    users.set(user, current);
+      orgId: normalizedSeatOrg(r.orgId) || null,
+      events: r.events,
+      firstSeen: r.firstSeen || null,
+      lastSeen: r.lastSeen || null,
+    });
   }
-  const list = Array.from(users.values()).sort((a, b) => a.user.localeCompare(b.user));
-  return { orgId: wantedOrg || null, seatsUsed: list.length, users: list };
+  users.sort((a, b) => a.user.localeCompare(b.user));
+  return { orgId: wantedOrg || null, seatsUsed: users.length, users };
 }
 
 // ---- SCIM provisioning -------------------------------------------------------
@@ -422,16 +456,36 @@ function identityRevokedSince(identity, issuedAtMs) {
 }
 
 // Cached because the sensor gate consults it on every event; saveScimUser
-// invalidates so provisioning changes apply immediately.
+// invalidates locally so provisioning changes apply immediately on THIS
+// instance. On a shared Postgres plane a deactivation handled by another
+// instance never fires our local invalidation, so the cache is also bounded by
+// a short TTL and revalidated against a cheap version signature (row count +
+// newest updatedAt) — a deprovisioned user stops passing the gate everywhere
+// within the TTL instead of only after a restart.
+const scimVersionStmt = sdb.prepare('SELECT COUNT(*) AS n, MAX(updatedAt) AS v FROM scim_users');
+const INACTIVE_CACHE_TTL_MS = (() => {
+  const n = Number(process.env.REDACTWALL_SCIM_CACHE_TTL_MS);
+  return Number.isFinite(n) && n >= 0 ? n : 5000;
+})();
 let inactiveIdentityCache = null;
+let inactiveIdentityVersion = null;
+let inactiveIdentityCheckedAt = 0;
 
 function inactiveScimIdentitySet() {
-  if (inactiveIdentityCache) return inactiveIdentityCache;
+  const now = Date.now();
+  if (inactiveIdentityCache && (now - inactiveIdentityCheckedAt) < INACTIVE_CACHE_TTL_MS) {
+    return inactiveIdentityCache;
+  }
+  const ver = scimVersionStmt.get() || {};
+  const signature = `${ver.n || 0}:${ver.v || ''}`;
+  inactiveIdentityCheckedAt = now;
+  if (inactiveIdentityCache && signature === inactiveIdentityVersion) return inactiveIdentityCache;
   const inactive = new Set();
   for (const user of listScimUsers()) {
     if (user.active === false) for (const identity of scimIdentities(user)) inactive.add(identity);
   }
   inactiveIdentityCache = inactive;
+  inactiveIdentityVersion = signature;
   return inactive;
 }
 
@@ -657,5 +711,5 @@ module.exports = {
   recordDelivery, listDeliveries, recentDeliverySuccess,
   setTenantContext,
   _canonical: canonical, _db: sdb, _dbPath: DB_PATH, _driverKind: DRIVER_KIND,
-  _internal: { migrateFromJson, parsePostureActionDetail, POSTURE_ACTION_AUDIT },
+  _internal: { migrateFromJson, parsePostureActionDetail, POSTURE_ACTION_AUDIT, wireTenantContext },
 };

@@ -46,6 +46,25 @@ test('ignore list cannot suppress a hard-stop entity (policy.evaluate)', () => {
   assert.strictEqual(verdict.decision, 'block', 'ignored SSN still blocks');
 });
 
+test('ignore list cannot disable a hard-stop detector at analysis time (analyzeOpts)', () => {
+  // Regression for the detection-time bypass: analyzeOpts used to pass the raw
+  // ignore list into detect.analyze, which fully disables those detectors — so
+  // an ignored hard-stop entity was never detected and evaluate() saw nothing.
+  const pol = policy.normalizePolicy({ ...policy.loadPolicy(), ignore: ['US_SSN'] });
+  const analysis = detect.analyze(SSN_PROMPT, policy.analyzeOpts(pol));
+  assert.ok(analysis.findings.some((f) => f.type === 'US_SSN'),
+    'hard-stop US_SSN is still detected even though it is on the ignore list');
+  const verdict = policy.evaluate(analysis, pol, { destination: 'chatgpt.com' });
+  assert.strictEqual(verdict.decision, 'block', 'ignored hard-stop still blocks end-to-end');
+});
+
+test('analyzeOpts strips only hard-stop types from the detection ignore list', () => {
+  const pol = policy.normalizePolicy({ ...policy.loadPolicy(), ignore: ['US_SSN', 'EMAIL'] });
+  const opts = policy.analyzeOpts(pol);
+  assert.ok(!opts.ignore.includes('US_SSN'), 'hard-stop type removed from detection ignore');
+  assert.ok(opts.ignore.includes('EMAIL'), 'non-hard-stop type still suppressed at detection time');
+});
+
 test('ignore list still suppresses a non-hard-stop finding', () => {
   const base = policy.loadPolicy();
   // A hard-stop type dropped from alwaysBlock AND ignored should be suppressed;

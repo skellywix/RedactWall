@@ -8,8 +8,8 @@
  *   2. RedactWall analyzes for PII, applies policy, and either ALLOWS or
  *      BLOCKS (holds) the prompt. Blocked prompts enter the approval queue.
  *   3. A Security Admin reviews the queue in the dashboard and approves/denies.
- *   4. The waiting client polls GET /api/v1/status/:id (or long-poll /await/:id)
- *      and proceeds only if released.
+ *   4. The waiting client polls GET /api/v1/status/:id and proceeds only if
+ *      released.
  */
 require('./env').loadEnv();
 const express = require('express');
@@ -43,6 +43,7 @@ const securityPackage = require('./security-package');
 const preflight = require('./preflight');
 const validation = require('./validation');
 const coverage = require('./coverage');
+const { safeSensor } = require('./sensor-metadata');
 const insights = require('./insights');
 const appCatalog = require('./app-catalog');
 const posture = require('./posture');
@@ -196,9 +197,24 @@ function fireSecurityAlert(row, opts) {
 
 const SENSOR_VERSION_ALERT_SOURCES = new Set(['browser_extension', 'endpoint_agent', 'mcp_guard']);
 
+// Cheap per-event precheck so the expensive fleet scan below only runs on an
+// actual version mismatch. Every ingest event hits this on the gate hot path;
+// scanning 5000 rows + coverage.summarize on each would block the fail-closed
+// gateway under load. If the row's own sensor version already matches the
+// desired version (or none is configured), there is no gap to report.
+function sensorVersionMismatch(row, pol) {
+  const desired = (pol.desiredSensorVersions || {})[row.source];
+  if (!desired) return false;
+  const meta = safeSensor(row.sensor) || {};
+  const version = meta.version || meta.packageVersion;
+  return !!version && version !== desired;
+}
+
 function sensorVersionGapFor(row) {
   if (!row || !SENSOR_VERSION_ALERT_SOURCES.has(row.source)) return null;
-  const report = coverage.summarize(db.listQueries({ limit: 5000 }), policy.loadPolicy());
+  const pol = policy.loadPolicy();
+  if (!sensorVersionMismatch(row, pol)) return null;
+  const report = coverage.summarize(db.listQueries({ limit: 5000 }), pol);
   const sensor = (report.sensors || []).find((item) => item.source === row.source);
   if (!sensor || !sensor.events || sensor.versionHealth === 'current') return null;
   return {
@@ -672,6 +688,13 @@ function currentSecurityTrustPackage() {
 
 function emitAutomaticPostureFeed(trigger = 'evidence') {
   if (!alerts.postureFeedEnabled(process.env)) return;
+  // Apply the time-based throttle BEFORE building the report. currentPostureReport
+  // runs listQueries(5000) + verifyAuditChain (O(N)+N+1) — wasted work if the feed
+  // would be discarded as rate_limited. The fingerprint ('unchanged') check still
+  // needs the report, but it now runs at most once per interval.
+  const cfg = alerts.postureFeedConfig(process.env);
+  const elapsed = Date.now() - (postureFeedState.lastAttemptAt || 0);
+  if (postureFeedState.lastAttemptAt && elapsed < cfg.minIntervalMs) return;
   const report = currentPostureReport(5000);
   Promise.resolve(alerts.emitPostureFeed(report, {
     state: postureFeedState,
@@ -1293,7 +1316,10 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
     policy: decisionPolicy, destination, user,
   });
   return res.json({
-    id: row.id, decision: status === 'redacted' ? 'redact' : 'block', mode, status,
+    // 'warned' is a coaching outcome, not a hold: report decision 'warn' so a
+    // non-interactive gateway forwards the prompt (with the logged warning)
+    // instead of hard-blocking it while the record claims the user was only warned.
+    id: row.id, decision: status === 'redacted' ? 'redact' : status === 'warned' ? 'warn' : 'block', mode, status,
     ...releaseTokenPayload(releaseToken),
     riskScore: analysis.riskScore, findings, categories, reasons: verdict.reasons,
     tokenizedPrompt,
@@ -1474,14 +1500,22 @@ app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation
   try { extracted = await parsePool.extractText(filename, buf); }
   catch (e) { extracted = { text: '', processor: null, supported: true, extractionOk: false, error: 'extract_failed' }; }
   if (!extracted.supported) {
-    const row = createQuery({ status: 'flagged', user, orgId, destination, source, channel, sensor,
+    // Fail closed: an unscannable format can carry the full PII payload (a
+    // renamed .csv -> .dat), so it must not leave with decision 'allow' the way
+    // it did before. Hold it unscanned, matching the supported-but-unreadable
+    // path below and the sensors' local fail-closed behavior.
+    const reason = 'Unsupported file type held: cannot be inspected before send';
+    const row = createQuery({ status: 'file_blocked_unscanned', user, orgId, destination, source, channel, sensor,
       redactedPrompt: '[unsupported file] ' + fileLabel, findings: [], categories: [], entityCounts: {},
-      riskScore: 0, maxSeverity: 0, maxSeverityLabel: 'none', reasons: ['Unsupported file type recorded'] });
-    db.appendAudit({ action: 'FILE_RECORDED', queryId: row.id, actor: user, detail: fileLabel });
-    emitSecurityAlert(row, 'FILE_RECORDED');
-    broadcast('query', { type: 'flagged', query: publicQuery(row) });
+      riskScore: 0, maxSeverity: 0, maxSeverityLabel: 'none', reasons: [reason] });
+    db.appendAudit({ action: 'FILE_BLOCKED_UNSUPPORTED', queryId: row.id, actor: user, detail: fileLabel });
+    emitSecurityAlert(row, 'FILE_BLOCKED_UNSUPPORTED');
+    broadcast('query', { type: 'file_blocked_unscanned', query: publicQuery(row) });
     broadcast('stats', db.stats());
-    return res.json({ id: row.id, decision: 'allow', supported: false, filename: fileLabel });
+    return res.json({
+      id: row.id, decision: 'block', mode: 'block', status: 'file_blocked_unscanned',
+      supported: false, inspected: false, filename: fileLabel, reasons: [reason],
+    });
   }
   if (!extracted.extractionOk) {
     const ocrRequired = extracted.error === 'ocr_required' || extracted.ocrRequired === true;
@@ -1890,6 +1924,11 @@ app.post(
   },
 );
 
+// Held statuses an approver may resolve. 'pending_justification' (justify mode)
+// is routed, SLA-escalated, and holds a sealed raw prompt just like 'pending',
+// so it must be decidable too — otherwise it can never leave the queue.
+const DECIDABLE_HELD_STATUSES = new Set(['pending', 'pending_justification']);
+
 app.post(
   '/api/queries/:id/approve',
   ...decisionWrite,
@@ -1898,7 +1937,7 @@ app.post(
   requireApprovePassword,
   (req, res) => {
     const q = req.queryRecord;
-    if (q.status !== 'pending') return res.status(409).json({ error: `already ${q.status}` });
+    if (!DECIDABLE_HELD_STATUSES.has(q.status)) return res.status(409).json({ error: `already ${q.status}` });
     const note = (req.body && req.body.note) || '';
     const updated = db.updateQuery(q.id, {
       status: 'approved', decidedBy: req.user.user, decidedAt: new Date().toISOString(), decisionNote: note,
@@ -1921,7 +1960,7 @@ function applyBulkDecision(req) {
   for (const id of req.body.ids) {
     const q = db.getQuery(id);
     if (!q) { results.push({ id, outcome: 'skipped', reason: 'not found' }); continue; }
-    if (q.status !== 'pending') { results.push({ id, outcome: 'skipped', reason: `already ${q.status}` }); continue; }
+    if (!DECIDABLE_HELD_STATUSES.has(q.status)) { results.push({ id, outcome: 'skipped', reason: `already ${q.status}` }); continue; }
     if (!roles.canDecideQuery(req.user, q)) { results.push({ id, outcome: 'skipped', reason: 'not yours to decide' }); continue; }
     db.updateQuery(id, { status, decidedBy: req.user.user, decidedAt: new Date().toISOString(), decisionNote: note });
     db.appendAudit({ action: status.toUpperCase(), queryId: id, actor: req.user.user, detail: note ? `${note} (bulk)` : 'bulk decision' });
@@ -1981,7 +2020,7 @@ app.post('/api/queries/:id/assign', ...adminWrite, validation.validateBody(valid
 
 app.post('/api/queries/:id/deny', ...decisionWrite, validation.validateBody(validation.noteSchema), requireDecisionAccess, (req, res) => {
   const q = req.queryRecord;
-  if (q.status !== 'pending') return res.status(409).json({ error: `already ${q.status}` });
+  if (!DECIDABLE_HELD_STATUSES.has(q.status)) return res.status(409).json({ error: `already ${q.status}` });
   const note = (req.body && req.body.note) || '';
   const updated = db.updateQuery(q.id, {
     status: 'denied', decidedBy: req.user.user, decidedAt: new Date().toISOString(), decisionNote: note,
@@ -2460,7 +2499,7 @@ let deployMetadataCache = null;
 
 function deployArtifactMetadata() {
   if (deployMetadataCache) return deployMetadataCache;
-  deployMetadataCache = Object.entries(DEPLOY_ARTIFACTS).map(([id, spec]) => {
+  const metadata = Object.entries(DEPLOY_ARTIFACTS).map(([id, spec]) => {
     try {
       const built = buildDeployArtifact(id);
       const manifest = built.packageManifest || {};
@@ -2486,7 +2525,10 @@ function deployArtifactMetadata() {
       return { id, label: spec.label, kind: spec.kind, error: 'packaging failed' };
     }
   });
-  return deployMetadataCache;
+  // Only memoize a fully-successful build; a transient packaging failure must be
+  // retried on the next request rather than pinned until process restart.
+  if (!metadata.some((meta) => meta.error)) deployMetadataCache = metadata;
+  return metadata;
 }
 
 function deployDownloadHistory(limit = 20) {
@@ -2814,7 +2856,22 @@ app.get('/index.html', auth.requireAuth, (req, res) =>
 // like every other data-free static file — all data flows through /api/*).
 app.get(['/app', '/app/', '/app/index.html'], auth.requireAuth, (req, res) =>
   res.sendFile(path.join(__dirname, 'public', 'app', 'index.html')));
-app.use(express.static(path.join(__dirname, 'public')));
+// serve-static normalizes non-canonical paths (//index.html, /%2findex.html)
+// that the exact-match authed routes above never match, which would let it
+// serve the console shell to anonymous callers. Gate any request that
+// normalizes to a console HTML entry point through requireAuth first, and stop
+// express.static from serving index.html on its own (index:false).
+const CONSOLE_HTML_PATHS = new Set(['/index.html', '/app', '/app/', '/app/index.html']);
+app.use((req, res, next) => {
+  let decoded = req.path;
+  try { decoded = decodeURIComponent(req.path); } catch {}
+  const normalized = decoded.replace(/\/{2,}/g, '/');
+  if (CONSOLE_HTML_PATHS.has(normalized) && normalized !== req.path) {
+    return auth.requireAuth(req, res, next);
+  }
+  next();
+});
+app.use(express.static(path.join(__dirname, 'public'), { index: false }));
 
 function logStartup(port, deps = {}) {
   const io = deps.console || console;
@@ -2889,12 +2946,19 @@ function installShutdownHandlers(server, deps = {}) {
   const setTimeoutFn = deps.setTimeout || setTimeout;
   const clearTimeoutFn = deps.clearTimeout || clearTimeout;
   const exit = deps.exit || ((code) => process.exit(code));
+  const parsePoolModule = deps.parsePool || parsePool;
   const shutdown = (signal) => {
     io.log(`RedactWall received ${signal}; shutting down`);
-    const timeout = setTimeoutFn(() => exit(1), 10000);
+    const timeout = setTimeoutFn(() => {
+      // Forced exit still SIGKILLs any extraction children so a bomb parse
+      // mid-flight cannot outlive the server as an orphan pegging a CPU.
+      try { parsePoolModule.shutdown(); } catch {}
+      exit(1);
+    }, 10000);
     if (timeout.unref) timeout.unref();
     server.close(() => {
       clearTimeoutFn(timeout);
+      try { parsePoolModule.shutdown(); } catch {}
       exit(0);
     });
   };

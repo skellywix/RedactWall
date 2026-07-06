@@ -17,6 +17,7 @@ import {
 } from '../api/policy';
 import { EmptyState, Panel } from '../components/Panel';
 import { api, apiErrorSummary, apiJson } from '../lib/api';
+import { csvStamp } from '../lib/csv';
 import { routeHref } from '../lib/router';
 import { roleLabel, useSession } from '../lib/session';
 import { toast } from '../lib/toast';
@@ -187,10 +188,6 @@ function parseJsonArray(value: string, label: string): unknown[] | null {
 function cleanId(value: string, fallback: string): string {
   const id = value.toLowerCase().replace(/[^a-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 64);
   return id || fallback;
-}
-
-function csvStamp(): string {
-  return new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
 }
 
 // ---- Narrowing helpers for advanced policy fields (index signature = unknown) --

@@ -130,10 +130,13 @@ function useIntegrationsData() {
   const [deliveries, setDeliveries] = useState<DeliveryRecord[]>([]);
   const [loaded, setLoaded] = useState(false);
   const load = useCallback(async () => {
-    const [subsBody, deliveryBody] = await Promise.all([fetchSubscriptions(), fetchDeliveries()]);
-    setSubs(subsBody ?? EMPTY_SUBSCRIPTIONS);
-    setDeliveries(deliveryBody?.deliveries ?? []);
-    setLoaded(true);
+    try {
+      const [subsBody, deliveryBody] = await Promise.all([fetchSubscriptions(), fetchDeliveries()]);
+      setSubs(subsBody ?? EMPTY_SUBSCRIPTIONS);
+      setDeliveries(deliveryBody?.deliveries ?? []);
+    } finally {
+      setLoaded(true);
+    }
   }, []);
   useEffect(() => {
     load();
@@ -145,8 +148,11 @@ function useNotificationsStatus() {
   const [status, setStatus] = useState<NotificationsStatus | null>(null);
   const [statusLoaded, setStatusLoaded] = useState(false);
   const loadStatus = useCallback(async () => {
-    setStatus(await fetchNotificationsStatus());
-    setStatusLoaded(true);
+    try {
+      setStatus(await fetchNotificationsStatus());
+    } finally {
+      setStatusLoaded(true);
+    }
   }, []);
   useEffect(() => {
     loadStatus();
@@ -160,17 +166,20 @@ function useSubscriptionTests(reload: () => Promise<void>) {
   const [testing, setTesting] = useState<ReadonlySet<string>>(new Set());
   const runTest = async (id: string) => {
     setTesting((prev) => new Set(prev).add(id));
-    const body = await postSubscriptionTest(id);
-    const outcome: TestOutcome = body?.result
-      ? { status: body.result.status, attempts: body.result.attempts || 0, at: new Date().toLocaleTimeString() }
-      : { status: 'failed', attempts: 0, at: new Date().toLocaleTimeString() };
-    setResults((prev) => new Map(prev).set(id, outcome));
-    setTesting((prev) => {
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
-    });
-    await reload();
+    try {
+      const body = await postSubscriptionTest(id);
+      const outcome: TestOutcome = body?.result
+        ? { status: body.result.status, attempts: body.result.attempts || 0, at: new Date().toLocaleTimeString() }
+        : { status: 'failed', attempts: 0, at: new Date().toLocaleTimeString() };
+      setResults((prev) => new Map(prev).set(id, outcome));
+      await reload();
+    } finally {
+      setTesting((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
   };
   return { results, testing, runTest };
 }

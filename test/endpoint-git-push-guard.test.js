@@ -194,14 +194,20 @@ test('collectDiff uses bounded git commands for pre-push ranges', async () => {
 
   assert.strictEqual(result.status, 'ok');
   assert.strictEqual(result.text, '+public change');
-  assert.strictEqual(calls[0].file, 'git');
-  assert.deepStrictEqual(calls[0].args.slice(0, 3), ['-C', 'C:/repo', 'diff']);
-  assert.ok(calls[0].args.includes('--no-ext-diff'));
-  assert.ok(calls[0].args.includes('--no-color'));
-  assert.ok(calls[0].args.includes(REMOTE_SHA));
-  assert.ok(calls[0].args.includes(LOCAL_SHA));
-  assert.strictEqual(calls[0].opts.windowsHide, true);
-  assert.ok(calls[0].opts.maxBuffer <= guard.DEFAULT_MAX_DIFF_BYTES + 4096);
+  // The remote-side base is probed for local existence before diffing so a
+  // stale ref falls back to the empty tree instead of failing the push.
+  const catFile = calls.find((c) => c.args.includes('cat-file'));
+  assert.ok(catFile, 'base existence is probed before diffing');
+  assert.deepStrictEqual(catFile.args.slice(0, 4), ['-C', 'C:/repo', 'cat-file', '-e']);
+  const diffCall = calls.find((c) => c.args.includes('diff'));
+  assert.strictEqual(diffCall.file, 'git');
+  assert.deepStrictEqual(diffCall.args.slice(0, 3), ['-C', 'C:/repo', 'diff']);
+  assert.ok(diffCall.args.includes('--no-ext-diff'));
+  assert.ok(diffCall.args.includes('--no-color'));
+  assert.ok(diffCall.args.includes(REMOTE_SHA));
+  assert.ok(diffCall.args.includes(LOCAL_SHA));
+  assert.strictEqual(diffCall.opts.windowsHide, true);
+  assert.ok(diffCall.opts.maxBuffer <= guard.DEFAULT_MAX_DIFF_BYTES + 4096);
 });
 
 test('public errors and human output are bounded', () => {

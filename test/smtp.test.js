@@ -249,6 +249,20 @@ test('SMTP internals expose deterministic timeout and TLS-upgrade seams', async 
   assert.strictEqual(tlsOptions.servername, 'smtp.test');
 });
 
+test('transport keeps a socket-error listener so a mid-session error fails closed instead of crashing', async () => {
+  const socket = new EventEmitter();
+  socket.write = () => {};
+  const io = smtp._internal.transport(socket, 50);
+  const pending = io.command('EHLO redactwall.test'); // registers a reader waiting on data
+  // A relay resetting the connection mid-transaction. Before the fix transport
+  // attached no 'error' listener, so this emit was an unhandled 'error' event
+  // that threw synchronously and took down the whole process.
+  socket.emit('error', new Error('ECONNRESET'));
+  await assert.rejects(pending, /ECONNRESET|smtp_socket_error/);
+  // A late error after the reader already rejected must still not throw.
+  assert.doesNotThrow(() => socket.emit('error', new Error('ECONNRESET again')));
+});
+
 test('SMTP delivery surfaces sanitized relay failures and connection errors', async (t) => {
   const relay = await scriptedServer(t, ({ line, socket }) => {
     if (/^EHLO\b/i.test(line)) socket.write('250 smtp.test\r\n');

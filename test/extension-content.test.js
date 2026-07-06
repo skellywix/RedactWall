@@ -428,3 +428,99 @@ test('reports carry the account enum, never a raw email (N4)', async () => {
   assert.strictEqual(last.clientAccount.signal, 'personal_email_domain');
   assert.ok(!JSON.stringify(last).includes('jane.roe@gmail.com'), 'no raw email in the report payload');
 });
+
+// ---------------------------------------------------------------------------
+// sensor-ext audit fixes
+// ---------------------------------------------------------------------------
+test('pasting a file runs the upload gate instead of uploading unscanned (HIGH)', async () => {
+  const h = loadContent({
+    hostname: 'chat.openai.com',
+    respond: (msg) => (msg.type === 'report' ? { id: 'q1', status: 'ocr_required' } : {}),
+  });
+  h.T.setPolicy({ allowedDestinations: ['chat.openai.com'] }); // isolate from the destination gate
+  // A screenshot of a spreadsheet of SSNs: no clipboard TEXT, only a file.
+  const e = fakeEvent({
+    clipboardData: {
+      getData: () => '',
+      files: [{ name: 'ssn-screenshot.png', type: 'image/png', size: 5000 }],
+    },
+  });
+  h.domListeners.paste[0](e);
+  await h.flush();
+
+  assert.strictEqual(e.defaultPrevented, true, 'the pasted file must be intercepted, not left to upload');
+  const fileReports = h.reports().filter((p) => p.channel === 'file_upload');
+  assert.strictEqual(fileReports.length, 1, 'the pasted file went through the upload scanner');
+  assert.strictEqual(fileReports[0].outcome, 'ocr_required', 'image paste requires OCR before inspection');
+});
+
+test('a blocked file-input change clears the input so the file is not left attached', async () => {
+  const h = loadContent({ hostname: 'chat.openai.com' }); // default: destination is unapproved -> blocked
+  const input = new FakeElement('input');
+  input.type = 'file';
+  input.value = 'C:\\fakepath\\members.csv';
+  input.files = [{ name: 'members.csv', size: 10, type: 'text/csv' }];
+  const e = fakeEvent({ target: input });
+  h.domListeners.change[0](e);
+  await h.flush();
+
+  assert.strictEqual(e.defaultPrevented, true, 'the upload is intercepted');
+  assert.strictEqual(input.value, '', 'the blocked FileList is cleared so a form submit cannot upload it');
+});
+
+test('Enter in an unrelated field never files a false allowed report of the composer (MEDIUM)', async () => {
+  const composer = fakeComposer('hello world draft prompt');
+  const h = loadContent({
+    hostname: 'chat.openai.com',
+    querySelector: () => composer, // a global find WOULD return the composer
+  });
+  h.T.setPolicy({ allowedDestinations: ['chat.openai.com'] });
+  const searchBox = new FakeElement('input');
+  searchBox.closest = () => null; // a plain search input, not the composer
+  const e = fakeEvent({ key: 'Enter', shiftKey: false, target: searchBox });
+  h.domListeners.keydown[0](e);
+  await h.flush();
+
+  assert.strictEqual(e.defaultPrevented, false, 'Enter outside the composer is left alone');
+  assert.strictEqual(h.reports().length, 0, 'no phantom submit report of text the user never sent');
+});
+
+test('IME composition Enter is not treated as a send (MEDIUM)', async () => {
+  const h = loadContent({ hostname: 'chat.openai.com' });
+  h.T.setPolicy({ allowedDestinations: ['chat.openai.com'] });
+  const composer = fakeComposer(SSN_TEXT);
+  const e = fakeEvent({ key: 'Enter', shiftKey: false, isComposing: true, target: composer });
+  h.domListeners.keydown[0](e);
+  await h.flush();
+
+  assert.strictEqual(e.defaultPrevented, false, 'an IME candidate commit must not trigger interception');
+  assert.strictEqual(h.reports().length, 0);
+});
+
+test('rehydration restores digit-bearing tokens like IPV6_ADDRESS (MEDIUM)', () => {
+  const { T } = loadContent();
+  T.mergeRehydrate({ '[[IPV6_ADDRESS_1]]': 'fe80::1ff:fe23:4567:890a' });
+  const reply = { nodeType: 3, nodeValue: 'Server at [[IPV6_ADDRESS_1]] responded', parentElement: { closest: () => null } };
+  T.rehydrateNode(reply);
+  assert.strictEqual(reply.nodeValue, 'Server at fe80::1ff:fe23:4567:890a responded');
+});
+
+test('redact retry under outage stays on the recorded path, never a plain allow (MEDIUM)', async () => {
+  const h = loadContent({ respond: () => ({}) }); // control plane never confirms -> outage
+  h.T.setPolicy({ enforcementMode: 'redact', allowedDestinations: ['chat.openai.com'] });
+  const composer = fakeComposer(SSN_TEXT);
+
+  const first = h.T.interceptSend(fakeEvent({ target: composer }), composer);
+  await h.flush();
+  assert.strictEqual(first, false, 'first send held while unrecorded');
+  assert.match(composer.value, /\[\[US_SSN_1\]\]/, 'composer tokenized');
+
+  // Retry: composer holds only the (PII-free) token text; the old code let this
+  // pass as a plain "allow" with zero compliance evidence.
+  const retry = h.T.interceptSend(fakeEvent({ target: composer }), composer);
+  await h.flush();
+  assert.strictEqual(retry, false, 'retry is held, not allowed through');
+  const outcomes = h.reports().map((p) => p.outcome);
+  assert.ok(outcomes.every((o) => o === 'redacted_sent'), 'every attempt routes through the redacted-send record');
+  assert.ok(!outcomes.includes('allowed'), 'no plain allow send with no evidence');
+});

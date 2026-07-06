@@ -77,9 +77,17 @@ function findAccount(user) {
   return ACCOUNTS.find((account) => account.user === user) || null;
 }
 
+// A throwaway salt/hash so unknown usernames still pay the scrypt cost; without
+// it, the early return leaks which usernames exist via response timing.
+const TIMING_DECOY_SALT = crypto.randomBytes(16);
+const TIMING_DECOY_HASH = crypto.scryptSync('timing-decoy', TIMING_DECOY_SALT, 32);
+
 function authenticate(user, password) {
   const account = findAccount(user);
-  if (!account) return null;
+  if (!account) {
+    try { crypto.timingSafeEqual(crypto.scryptSync(password || '', TIMING_DECOY_SALT, 32), TIMING_DECOY_HASH); } catch {}
+    return null;
+  }
   let h;
   try { h = crypto.scryptSync(password || '', account.salt, 32); } catch { return null; }
   if (!crypto.timingSafeEqual(h, account.hash)) return null;
@@ -190,7 +198,17 @@ function recoveryCodeIndex(code, secret = ADMIN_TOTP_SECRET) {
 // ---- brute-force throttling --------------------------------------------------
 const MAX_ATTEMPTS = Number(process.env.LOGIN_MAX_ATTEMPTS || 7);
 const WINDOW_MS = Number(process.env.LOGIN_WINDOW_MS || 15 * 60 * 1000);
+const MAX_ATTEMPT_KEYS = Number(process.env.LOGIN_MAX_TRACKED_KEYS || 10000);
 const attempts = new Map(); // key -> { count, first, lockedUntil }
+
+// Drop keys whose window has elapsed and are no longer locked. Called only when
+// the map hits its cap so credential-stuffing with unique keys can't grow it
+// without bound, while staying O(1) amortized on the common path.
+function pruneAttempts(now) {
+  for (const [key, a] of attempts) {
+    if (now - a.first > WINDOW_MS && (!a.lockedUntil || a.lockedUntil <= now)) attempts.delete(key);
+  }
+}
 
 function loginStatus(key) {
   const a = attempts.get(key);
@@ -199,6 +217,7 @@ function loginStatus(key) {
 }
 function registerFail(key) {
   const now = Date.now();
+  if (attempts.size >= MAX_ATTEMPT_KEYS) pruneAttempts(now);
   let a = attempts.get(key);
   if (!a || now - a.first > WINDOW_MS) a = { count: 0, first: now, lockedUntil: 0 };
   a.count += 1;
@@ -288,9 +307,23 @@ function elevateSession(session = {}, now = Date.now()) {
   });
 }
 
+// Bind the CSRF token to a STABLE part of the session (user + issued-at) rather
+// than the full signed cookie. elevateSession re-signs the cookie (step-up) but
+// preserves user+iat, so a step-up no longer silently invalidates the CSRF token
+// the client already holds; distinct logins still get distinct tokens.
+function csrfSubject(sessionToken) {
+  try {
+    const body = String(sessionToken).split('.')[0];
+    const payload = JSON.parse(Buffer.from(body, 'base64url').toString());
+    if (!payload || !payload.user) return '';
+    return `${payload.user}:${payload.iat || 0}`;
+  } catch { return ''; }
+}
+
 function createCsrfToken(sessionToken) {
-  if (!sessionToken) return null;
-  return crypto.createHmac('sha256', SECRET).update('csrf:' + sessionToken).digest('base64url');
+  const subject = csrfSubject(sessionToken);
+  if (!subject) return null;
+  return crypto.createHmac('sha256', SECRET).update('csrf:' + subject).digest('base64url');
 }
 
 function verifyCsrfToken(sessionToken, token) {

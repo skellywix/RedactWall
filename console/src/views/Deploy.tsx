@@ -65,8 +65,11 @@ function useDeployReport() {
   const [report, setReport] = useState<DeployReport | null>(null);
   const [loaded, setLoaded] = useState(false);
   const load = useCallback(async () => {
-    setReport(await fetchDeployReport());
-    setLoaded(true);
+    try {
+      setReport(await fetchDeployReport());
+    } finally {
+      setLoaded(true);
+    }
   }, []);
   useEffect(() => {
     load();
@@ -178,7 +181,7 @@ export default function Deploy() {
     if (!loaded) {
       return <div className="app-loading">Building sensor packages… the first build after a restart takes a few seconds.</div>;
     }
-    if (!report) return <div className="empty">Deploy packages need the operator or security admin role.</div>;
+    if (!report) return <div className="empty">Deploy packages are unavailable — retry, or confirm you have the operator or security admin role.</div>;
     return (
       <div className="queue-list deploy-list">
         {report.artifacts.map((artifact) => (

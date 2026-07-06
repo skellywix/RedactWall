@@ -18,7 +18,9 @@ const HOOK_PATH = path.join(__dirname, '..', 'sensors', 'agent-hooks', 'hook.js'
 const MARKER = 'agent-hooks/hook.js';
 
 function hookCommand(hookPath = HOOK_PATH) {
-  return `node ${hookPath} --quiet`;
+  // Quote the path so install roots containing spaces (e.g. "/Users/Jane Doe/…")
+  // don't break the shell command written into settings.json.
+  return `node "${hookPath}" --quiet`;
 }
 
 function ownsEntry(entry) {

@@ -94,9 +94,38 @@ function defaultEnvPath() {
   return process.env.REDACTWALL_ENV_PATH || process.env.PROMPTWALL_ENV_PATH || process.env.SENTINEL_ENV_PATH || path.join(__dirname, '..', '.env');
 }
 
+const UNESCAPE_MAP = { '\\n': '\n', '\\r': '\r', '\\t': '\t', '\\"': '"', '\\\\': '\\' };
+
 function unescapeQuoted(value, quote) {
   if (quote === "'") return value;
-  return value.replace(/\\n/g, '\n').replace(/\\r/g, '\r').replace(/\\t/g, '\t').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+  // Single left-to-right pass so an escaped backslash (\\) is consumed before
+  // the following character can be mistaken for its own escape sequence.
+  return value.replace(/\\[nrt"\\]/g, (m) => UNESCAPE_MAP[m]);
+}
+
+// Index of the value's closing quote, or -1 if it never closes. Double quotes
+// honor backslash escaping; single quotes are literal.
+function findClosingQuote(value, quote) {
+  let escaped = false;
+  for (let i = 1; i < value.length; i++) {
+    const ch = value[i];
+    if (quote === '"' && ch === '\\' && !escaped) { escaped = true; continue; }
+    if (ch === quote && !escaped) return i;
+    escaped = false;
+  }
+  return -1;
+}
+
+function parseValue(raw) {
+  const value = raw.trim();
+  const quote = value[0];
+  if (quote === '"' || quote === "'") {
+    const end = findClosingQuote(value, quote);
+    // A closed quote wins even when trailing text (an inline comment) follows,
+    // so `KEY="v" # note` yields v, not the literal `"v"`.
+    if (end !== -1) return unescapeQuoted(value.slice(1, end), quote);
+  }
+  return stripInlineComment(value);
 }
 
 function stripInlineComment(value) {
@@ -133,14 +162,7 @@ function parseEnv(content) {
       errors.push({ line: index + 1, error: 'invalid key' });
       return;
     }
-    let value = line.slice(eq + 1).trim();
-    const quote = value[0];
-    if ((quote === '"' || quote === "'") && value.endsWith(quote) && value.length >= 2) {
-      value = unescapeQuoted(value.slice(1, -1), quote);
-    } else {
-      value = stripInlineComment(value);
-    }
-    parsed[key] = value;
+    parsed[key] = parseValue(line.slice(eq + 1));
   });
   return { parsed, errors };
 }

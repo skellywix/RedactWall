@@ -2,10 +2,11 @@
 /**
  * Control-plane client for the AI Gateway.
  *
- * Wraps the RedactWall sensor API (/api/v1/gate, /api/v1/scan-response,
- * /api/v1/rehydrate). Every call carries the ingest key. The gateway treats a
- * network/timeout failure as FAIL CLOSED: gate() returns a block decision so a
- * prompt cannot reach upstream when the control plane is unreachable.
+ * Wraps the RedactWall sensor API (/api/v1/gate, /api/v1/scan-response). Every
+ * call carries the ingest key. The gateway treats a network/timeout failure as
+ * FAIL CLOSED: gate() returns a block decision so a prompt cannot reach upstream
+ * when the control plane is unreachable. health() is a non-persisting readiness
+ * probe (GET /healthz) that writes no records.
  */
 
 function timeoutSignal(ms) {
@@ -66,12 +67,18 @@ function makeClient({ controlPlaneUrl, ingestKey, requestTimeoutMs }) {
     }
   }
 
-  async function rehydrate(id, text) {
+  // Non-persisting readiness probe: GET /healthz creates no query/audit records,
+  // unlike gate(). Any 2xx/3xx/4xx answer means the control plane is up; only a
+  // 5xx or a transport failure counts as not-ready.
+  async function health() {
+    const t = timeoutSignal(requestTimeoutMs);
     try {
-      const r = await postJson(base + '/api/v1/rehydrate', ingestKey, { id, text }, requestTimeoutMs);
-      return r.json || { text, rehydrated: false };
+      const res = await fetch(base + '/healthz', { method: 'GET', headers: { 'x-api-key': ingestKey || '' }, signal: t.signal });
+      return { ok: res.status < 500 };
     } catch (e) {
-      return { text, rehydrated: false };
+      return { ok: false };
+    } finally {
+      t.clear();
     }
   }
 
@@ -79,7 +86,7 @@ function makeClient({ controlPlaneUrl, ingestKey, requestTimeoutMs }) {
     return { decision: 'block', status: 'control_plane_unavailable', reasons: [reason], _failClosed: true };
   }
 
-  return { gate, scanResponse, rehydrate };
+  return { gate, scanResponse, health };
 }
 
 module.exports = { makeClient };

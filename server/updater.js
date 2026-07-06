@@ -43,7 +43,11 @@ function dataRoot(opts = {}) {
   if (process.env.REDACTWALL_UPDATE_DATA_ROOT) return path.resolve(process.env.REDACTWALL_UPDATE_DATA_ROOT);
   if (process.env.REDACTWALL_UPDATE_CONFIG_PATH) return path.dirname(path.resolve(process.env.REDACTWALL_UPDATE_CONFIG_PATH));
   const db = activeDb(opts);
-  return path.dirname(db._dbPath || path.join(ROOT, 'data', 'redactwall.db'));
+  // On Postgres db._dbPath is the literal 'postgres' (not a filesystem path), so
+  // dirname would land in the process CWD. Fall back to the data directory
+  // whenever the driver path isn't an absolute filesystem path.
+  if (!db._dbPath || !path.isAbsolute(db._dbPath)) return path.join(ROOT, 'data');
+  return path.dirname(db._dbPath);
 }
 
 function configPath(opts = {}) {
@@ -475,6 +479,20 @@ function scheduleRestart(config = loadConfig(), opts = {}) {
   return { ok: true, scheduled: true, state };
 }
 
+// Full audit-chain verification re-hashes every audit row (plus a per-queryId
+// content-hash SELECT), so status() — polled by the console Updates view — must
+// not run it inline on every request. Cache the result for a short TTL, keyed by
+// the db handle so tests with a mock db aren't served a stale snapshot.
+let _auditCache = { db: null, at: 0, result: null };
+const AUDIT_CACHE_TTL_MS = 30 * 1000;
+function auditIntegritySnapshot(db) {
+  const now = Date.now();
+  if (_auditCache.db === db && now - _auditCache.at < AUDIT_CACHE_TTL_MS) return _auditCache.result;
+  const result = db.verifyAuditChain();
+  _auditCache = { db, at: now, result };
+  return result;
+}
+
 async function status(opts = {}) {
   const config = loadConfig(opts);
   const db = activeDb(opts);
@@ -496,7 +514,7 @@ async function status(opts = {}) {
       dataRoot: dataRoot(opts),
       databasePath: db._dbPath || '',
       backupDir: updateBackupDir(opts),
-      auditIntegrity: db.verifyAuditChain(),
+      auditIntegrity: auditIntegritySnapshot(db),
       sourceTreeClean: info ? info.dirtyFiles.length === 0 : false,
       configuredBranch: info ? info.branch === config.branch : false,
       githubRemote: info ? info.remoteIsGithub : false,

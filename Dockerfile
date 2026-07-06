@@ -32,6 +32,9 @@ COPY --chown=node:node detection-engine ./detection-engine
 COPY --chown=node:node config ./config
 COPY --chown=node:node scripts ./scripts
 COPY --chown=node:node sensors ./sensors
+# The gateway profile (docker-compose.yml) runs `node gateway/server.js` from
+# this same image, so the runtime stage must include the gateway source.
+COPY --chown=node:node gateway ./gateway
 # Persistent, local-disk runtime state. Keep /data mounted outside the image.
 RUN mkdir -p /data /app/data /tmp/redactwall \
     && chown -R node:node /data /app /tmp/redactwall \

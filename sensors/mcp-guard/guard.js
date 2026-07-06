@@ -101,7 +101,7 @@ async function fetchPolicy(opts = {}) {
       headers: { 'x-api-key': key },
     }, opts);
     if (!r || !r.ok) return null;
-    return r.json();
+    return await r.json();
   } catch (e) {
     if (!opts.silent) console.error('  policy refresh failed:', e.message);
     return null;

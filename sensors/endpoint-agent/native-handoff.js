@@ -108,7 +108,10 @@ function assertAllowedEventShape(event) {
 
 function normalizeDestination(destination) {
   if (typeof destination === 'string') {
-    return { app: boundedString(destination, 'desktop-ai-app', 80) };
+    // Emit the same {app,process,url} shape as the object path so canonicalEvent
+    // is stable whether it runs on a raw or already-normalized event; otherwise a
+    // signature computed over a string destination never re-validates.
+    return { app: boundedString(destination, 'desktop-ai-app', 80), process: '', url: '' };
   }
   const src = destination && typeof destination === 'object' ? destination : {};
   return {

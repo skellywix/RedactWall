@@ -256,18 +256,31 @@ function createProxyServer(opts = {}) {
       return;
     }
 
-    const { body, truncated } = await collectBody(req, opts.maxBodyBytes || DEFAULT_MAX_BODY_BYTES);
-    if (!truncated) {
-      await observeAiChatRequest({
-        method: req.method,
-        url: targetUrl.href,
-        host: targetUrl.hostname,
-        headers: req.headers,
-        sourceIp: req.socket && req.socket.remoteAddress,
-        body: body.toString('utf8'),
-      }, opts);
+    // collectBody rejects when a client aborts mid-upload; without this guard
+    // that rejection is unhandled and takes down the whole lab proxy process.
+    try {
+      const { body, truncated } = await collectBody(req, opts.maxBodyBytes || DEFAULT_MAX_BODY_BYTES);
+      if (!truncated) {
+        await observeAiChatRequest({
+          method: req.method,
+          url: targetUrl.href,
+          host: targetUrl.hostname,
+          headers: req.headers,
+          sourceIp: req.socket && req.socket.remoteAddress,
+          body: body.toString('utf8'),
+        }, opts);
+      }
+      await forwardRequest(req, res, targetUrl, body, opts);
+    } catch {
+      try {
+        if (!res.headersSent) {
+          res.writeHead(502, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ error: 'proxy request failed' }));
+        } else {
+          res.end();
+        }
+      } catch { /* client already gone */ }
     }
-    await forwardRequest(req, res, targetUrl, body, opts);
   });
   server.on('connect', (req, socket) => rejectConnect(socket));
   return server;

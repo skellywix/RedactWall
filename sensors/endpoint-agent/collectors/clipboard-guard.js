@@ -142,12 +142,20 @@ function safePrompt(status, analysis) {
   return `[clipboard ${status} locally] ${labelText}`.slice(0, 1000);
 }
 
+function clipboardNote(outcome, tooLarge) {
+  if (tooLarge) return 'endpoint clipboard blocked locally: content too large to inspect';
+  return outcome === 'action_blocked'
+    ? 'endpoint clipboard cleared locally after sensitive content detection'
+    : 'endpoint clipboard inspected locally; sensitive content detected';
+}
+
 function clipboardRecord(analysis, outcome, opts = {}) {
   const agent = loadAgent();
   const status = outcome === 'action_blocked' ? 'blocked' : 'flagged';
   const originApp = normalizeOriginApp(opts.originApp);
-  return {
-    prompt: safePrompt(status, analysis),
+  const tooLarge = opts.reason === 'too_large';
+  const base = {
+    prompt: tooLarge ? `[clipboard ${status} locally] too large to inspect` : safePrompt(status, analysis),
     user: opts.user,
     destination: String(opts.destination || DEFAULT_DESTINATION).trim() || DEFAULT_DESTINATION,
     source: 'endpoint_agent',
@@ -155,9 +163,11 @@ function clipboardRecord(analysis, outcome, opts = {}) {
     sensor: agent.sensorMetadata(),
     ...(originApp ? { originApp } : {}),
     clientOutcome: outcome,
-    note: outcome === 'action_blocked'
-      ? 'endpoint clipboard cleared locally after sensitive content detection'
-      : 'endpoint clipboard inspected locally; sensitive content detected',
+    note: clipboardNote(outcome, tooLarge),
+  };
+  if (tooLarge) return base;
+  return {
+    ...base,
     clientPreRedacted: true,
     clientFindings: agent.publicFindings(analysis),
     clientCategories: agent.publicCategories(analysis),
@@ -211,7 +221,13 @@ async function collectClipboard(opts = {}) {
 
   const policy = await policyForClipboard(opts);
   const analysis = analyzeClipboard(raw, policy, opts);
-  if (!sensitivityLabels(analysis).length) {
+  // readClipboard captures up to 2MB but analyzeClipboard only inspects the
+  // first maxChars; anything past that bound is uninspected, so an over-limit
+  // clipboard is treated as uninspectable (fail closed) rather than reported
+  // clean while sensitive content sits in the untested tail.
+  const limit = boundedNumber(opts.maxChars, DEFAULT_MAX_CHARS, 1024, 1000000);
+  const tooLarge = String(raw).length > limit;
+  if (!tooLarge && !sensitivityLabels(analysis).length) {
     return publicResult('clean', analysis);
   }
 
@@ -227,7 +243,7 @@ async function collectClipboard(opts = {}) {
   const outcome = opts.clearOnBlock && !clearFailed ? 'action_blocked' : 'paste_flagged';
   // Best-effort origin-app provenance (sanitized process name only).
   const originApp = opts.originApp !== undefined ? opts.originApp : await foregroundApp(opts).catch(() => null);
-  const record = clipboardRecord(analysis, outcome, { ...opts, originApp });
+  const record = clipboardRecord(analysis, outcome, { ...opts, originApp, ...(tooLarge ? { reason: 'too_large' } : {}) });
   const res = await reportClipboard(record, opts);
   const status = clearFailed ? 'clear_failed' : opts.clearOnBlock ? 'blocked' : 'flagged';
   if (!res) {
