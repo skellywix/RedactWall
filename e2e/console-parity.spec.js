@@ -18,6 +18,29 @@ test.skip(!fs.existsSync(appIndexPath), 'console bundle not built (npm run conso
 
 test.setTimeout(90000);
 
+// The committed default policy the playwright server boots with. Earlier specs
+// in the shared test:browser run (browser-extension) mutate the server policy —
+// e.g. blockUnapprovedAiDestinations with a narrow governed list — and do not
+// restore it, which makes the seeded chat.openai.com prompt come back
+// 'destination_blocked' instead of 'pending'. Reset to the default before each
+// test so this spec is independent of run order.
+const DEFAULT_POLICY = require(path.join(__dirname, '..', 'config', 'policy.json'));
+
+async function resetServerPolicy(request) {
+  const loginRes = await request.post('/api/login', { data: { user: 'admin', password: 'e2e-pass' } });
+  expect(loginRes.ok()).toBeTruthy();
+  const { csrfToken } = await (await request.get('/api/csrf')).json();
+  const putRes = await request.put('/api/policy', {
+    headers: { 'x-csrf-token': csrfToken },
+    data: DEFAULT_POLICY,
+  });
+  expect(putRes.ok()).toBeTruthy();
+}
+
+test.beforeEach(async ({ request }) => {
+  await resetServerPolicy(request);
+});
+
 async function login(page) {
   await page.goto('/login.html');
   await expect(page.getByRole('heading', { name: 'RedactWall' })).toBeVisible();

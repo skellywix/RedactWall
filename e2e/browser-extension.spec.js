@@ -132,6 +132,19 @@ function chatFixture({ host, sendButton, accountRegion = '' }) {
 </html>`;
 }
 
+// The serviceworker reference can resolve before the extension's chrome.*
+// runtime APIs finish initializing, so a first `chrome.storage.local.set`
+// occasionally throws "Cannot read properties of undefined (reading 'local')".
+// Poll until chrome.storage.local exists before handing the worker back.
+async function readyExtensionServiceWorker(context) {
+  const serviceWorker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
+  await expect.poll(
+    () => serviceWorker.evaluate(() => Boolean(globalThis.chrome && chrome.storage && chrome.storage.local)),
+    { timeout: 10000 },
+  ).toBe(true);
+  return serviceWorker;
+}
+
 async function launchExtensionContext(baseURL, testInfo, policy = fixturePolicy, request = null) {
   if (request) await syncServerPolicy(request, policy);
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-extension-e2e-'));
@@ -159,7 +172,7 @@ async function launchExtensionContext(baseURL, testInfo, policy = fixturePolicy,
     contentType: 'application/json',
   });
 
-  const serviceWorker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
+  const serviceWorker = await readyExtensionServiceWorker(context);
   await serviceWorker.evaluate(async ({ serverUrl, policy }) => {
     await chrome.storage.local.set({
       serverUrl,
@@ -176,7 +189,7 @@ async function launchExtensionContext(baseURL, testInfo, policy = fixturePolicy,
 }
 
 async function applyFixturePolicyToPage(context, page, baseURL, governedHost, policy = fixturePolicy) {
-  const serviceWorker = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
+  const serviceWorker = await readyExtensionServiceWorker(context);
   const expectedRules = (policy.blockedBrowserActions || []).map((rule) => ({
     id: rule.id,
     action: rule.action,
