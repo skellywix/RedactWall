@@ -6,6 +6,7 @@ Use this index when you know the job but not the file name.
 
 | Job | Document |
 |-----|----------|
+| Move the SaaS to production end to end | `PRODUCTION_LAUNCH_GUIDE.md` |
 | Install or operate RedactWall | `DEPLOYMENT.md` |
 | Run a production pilot handoff | `TECHNICIAN_DEPLOYMENT_GUIDE.md` |
 | Deploy the customer-silo AWS shape | `AWS_SAAS_DEPLOYMENT.md` |
