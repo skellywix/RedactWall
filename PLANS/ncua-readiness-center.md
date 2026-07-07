@@ -12,9 +12,12 @@ Govern-area console view plus examiner-facing exports that turn existing
 evidence, policy, catalog, EDM, audit, and posture data into NCUA/GLBA/
 Part 748-facing workflows. First slice is **Examiner Proof**.
 
-This is ROADMAP item **N2** ("Examiner report pack — the wedge; nobody owns
-the credit-union vertical"), with seeds of **X5** (core-banking EDM) and
-**X6** (incident triage) phased behind it. It is composition over existing
+This is ROADMAP item **N2** ("Examiner report pack") — the row the roadmap
+marks as the wedge, in a market where, per `ROADMAP.md`, nobody owns the
+credit-union/community-bank vertical. Seeds of **X5** (core-banking EDM)
+ride along, and the 72-hour workflow is a manual precursor to **X6**: it
+ships the incident timelines that X6's AI-assisted triage would later
+auto-summarize. It is composition over existing
 seams, not a parallel product: the only net-new persistence is the AI
 use-case inventory and incident records.
 
@@ -24,6 +27,15 @@ use-case inventory and incident records.
   `auditDetailsIncluded: false` stay hardcoded constants in
   `server/evidence.js`; every new export section carries only hashes, labels,
   masked findings, counts, and bounded metadata.
+- New export surfaces sanitize at the **export boundary**, not only at
+  input: every free-text field (use-case owner/approved-use, incident
+  title/notes, any catalog-derived text) passes a `safeThreatText`-style
+  filter (bounded length + SSN/card/secret pattern redaction — the
+  `server/evidence.js` house pattern) when it enters the readiness report
+  or any pack. The derived incident timeline consumes only `safeQuery`-/
+  `safeAuditEntry`-shaped fields (action, actor, `detailHash` — never raw
+  `audit.detail`, because approval/deny notes are free text that can carry
+  member PII).
 - `verifyAuditChain()` stays `ok: true`; all new mutations append sanitized
   audit entries (no raw prompt text, PII, or secrets in `detail`).
 - No detector changes are required. If any become necessary they go in
@@ -103,12 +115,17 @@ The draft assumed more greenfield than exists. Build on these instead:
     `license.publicStatus()` gives plan/expiry, `server/subscriptions.js`
     gives prompt-free scheduled delivery for later automation.
 11. **Storage migrations are dual-dialect.** New tables append
-    `{ version: 5, name, sqlite, postgres }` to
-    `server/storage/migrations.js` `MIGRATIONS`, with accessors in
-    `server/db.js`. Migration v3 added `orgId` tenant scoping + Postgres RLS;
-    new tables must ship tenant-ready the same way. The Postgres contract
-    battery (`suite/contract`) asserts the current migration version and
-    must be updated.
+    `{ version, name, sqlite, postgres }` entries to
+    `server/storage/migrations.js` `MIGRATIONS` (currently at v4), with
+    accessors in `server/db.js`. Tenant scoping is narrower than it looks:
+    migration v3 scoped **only** the `queries` table, and v4 had to repair
+    its orgId normalization — new tables use the v4-corrected `orgColumn`
+    semantics (trim + lowercase, empty → NULL). The Postgres battery lives
+    in `test/storage-postgres.test.js` (asserts the applied version list
+    `[1, 2, 3, 4]`, via `test/support/pg-battery.js`) and
+    `test/storage-postgres-rls.test.js` (pins
+    `TENANT_SCOPED_TABLES = ['queries']`); both get extended —
+    `suite/contract` holds route contracts only.
 12. **OpenAPI is sensor-surface only** (`server/openapi.js` covers
     `/api/v1`); new console routes need `docs/API_REFERENCE.md` updates, not
     OpenAPI changes.
@@ -123,8 +140,13 @@ One new domain module, additive extensions elsewhere:
   everywhere). Builds the readiness report from: `buildControlMappings`
   input, `control-readiness` summaries, `coverage.summarize`, posture
   aggregates, `policyExceptionReview`, `db.verifyAuditChain()`, backup/
-  restore-drill evidence, `exactMatch.publicSummary()`, catalog rollups, and
-  the new use-case/incident tables. Functions stay under ~30 lines; no N+1
+  restore-drill evidence, `exactMatch.publicSummary()`, evidence-export
+  schedule health (schedule-config presence + last-export recency from the
+  scheduled task), catalog rollups, and the new use-case/incident tables.
+  Catalog-derived content is limited to counts, canonical hosts,
+  `sanctionedStatus`/vendor enums, and numeric risk scores — including a
+  shadow-AI rollup (unsanctioned/tolerated sighting counts) — never catalog
+  `notes`/`owner` free text. Functions stay under ~30 lines; no N+1
   over `better-sqlite3` (reuse the existing single-query summarizers; batch
   incident timeline reads by id set).
 - **Profile-parameterized builders.** Internals take
@@ -138,12 +160,21 @@ One new domain module, additive extensions elsewhere:
   current), `vendor_service_provider_oversight` (catalog review coverage +
   vendor status), `incident_readiness` (drill/openness of the 72-hour
   workflow), `board_reporting` (packet generated within cadence). Existing
-  nine control ids untouched.
+  nine control ids untouched. The draft's sixth family — exception review
+  and employee coaching evidence — lands as follows: exception review is
+  live data already (the `policyExceptionReview` evidence section and
+  console panel; the existing `approval_workflow` control claims NCUA
+  exception-review evidence), while employee coaching evidence is
+  **deferred to ROADMAP N3** (coaching acknowledgment audit trail) and
+  becomes a control state here once N3 ships.
 - **Evidence pack profile.** `buildEvidencePack` accepts
   `examinerProfile`; when set, `scope.examinerProfile` is stamped and the
   pack adds `ncuaReadiness`, `useCases` (sanitized records), `incidents`
   (summary + prompt-free timelines), and `edm` (count/enabled/severity — no
-  salt, no fingerprints) sections. `schemaVersion` bumps 2 → 3 additively;
+  salt, no fingerprints) sections. Version semantics are explicit: default
+  packs stay `schemaVersion` 2 byte-compatible (`test/evidence.test.js`
+  pins it); only packs built with `examinerProfile` stamp `schemaVersion`
+  3, and the privacy regression asserts both shapes.
   `rawPromptBodiesIncluded`/`auditDetailsIncluded` remain hardcoded `false`.
   CLI gains `--examiner-profile federal_credit_union` so the existing
   scheduled-export task produces it.
@@ -178,9 +209,11 @@ prompt-shaped free text (length caps + newline limits), `allowedDataClasses`
 validated against engine detector ids + semantic categories, `queryIds`
 validated as existing query ids, dates as ISO strings.
 
-## Data Model (Migration v5, Dual-Dialect, Tenant-Ready)
+## Data Model (Migrations v5 + v6, Dual-Dialect, Tenant-Ready)
 
-Only two new tables; everything else composes existing facts.
+Only two new tables — `ai_use_cases` is migration v5 (slice 2),
+`ai_incidents` is migration v6 (slice 3); everything else composes
+existing facts.
 
 - **`ai_use_cases`**: `seq`, `id`, `orgId`, `canonicalHost` (catalog key),
   `department` (SCIM group display name; soft-validated against
@@ -199,13 +232,23 @@ Only two new tables; everything else composes existing facts.
   (bounded, prompt-free validated), `createdAt`, `updatedAt`.
   The incident **timeline is derived on read** from the referenced queries
   and audit entries (who, destination, data types, control outcome, blocked
-  vs exposed, review actions) — no duplicated event storage.
+  vs exposed, review actions) — no duplicated event storage, reading only
+  `safeQuery`-/`safeAuditEntry`-shaped fields (action, actor, `detailHash`),
+  never raw `audit.detail`.
 
-Both tables: `orgId` column + Postgres RLS policy in the v3 pattern, so the
-future shared-plane migration (`STATUS.md` WS4) needs no retrofit. Writes
-stamp `orgId` from `tenant.config()`. Every mutation appends a sanitized
-audit entry (`USE_CASE_UPDATED`, `INCIDENT_OPENED`, `INCIDENT_STATUS_CHANGED`,
-counts and enum values only).
+Both tables ship tenant-ready: an `orgId` column with a Postgres RLS
+policy, using the **v4-corrected** normalization (`db.js` `orgColumn`
+semantics: trim + lowercase, empty → NULL — not the raw v3 pattern, whose
+backfill shipped defective), stamped from `tenant.config()` on write and
+filtered on read in both dialects; both tables join `TENANT_SCOPED_TABLES`
+in `test/storage-postgres-rls.test.js`. Readiness inputs `ai_apps` and
+`audit` remain unscoped today, so the shared-plane migration
+(`PLANS/stack-upgrade-plan.md` WS4; `PLANS/aws-saas-deployment.md`) still
+has its own tenancy work — the new tables just don't add to it. Every
+mutation appends a sanitized audit entry (`USE_CASE_UPDATED`,
+`USE_CASE_REVIEWED` — actor, `reviewStatus` enum, next review date —
+`INCIDENT_OPENED`, `INCIDENT_STATUS_CHANGED`; counts, enums, and dates
+only, no free text).
 
 ## Console
 
@@ -222,6 +265,8 @@ follows the established page shape (route-contract doc comment, typed
   actions (Security Admin only, role-gated via `useSession`).
 - Member-data outcomes and exception-review panels (reads of readiness
   report sections).
+- Shadow-AI and evidence-export health rollups (unsanctioned/tolerated
+  sighting counts deep-linking to `/catalog`; scheduled-export recency).
 - Core-banking EDM panel: status when configured; when absent, setup
   guidance quoting the `edm:fingerprint` flow and "plaintext is discarded".
 - Incident readiness panel with 72-hour deadline countdowns.
@@ -239,23 +284,41 @@ follows the established page shape (route-contract doc comment, typed
   zero-egress licensing guarantee — works air-gapped).
 - **Packaging/entitlement.** First consumer of the license payload
   `features[]` (currently surfaced by `license.publicStatus()` but consumed
-  nowhere): add `license.hasFeature('ncua_readiness')`. Recommended
-  packaging: included in `enterprise`, orderable add-on for `standard`.
-  Honor the license philosophy ("the license never disables the security
-  function"): unlicensed demo mode shows the module fully (it is the sales
-  demo), evidence/examiner exports work in **every** license state, and the
+  nowhere). A naive `features.includes(...)` would hide the module exactly
+  in demo mode (unlicensed → `features: []`), so define the predicate
+  explicitly: `license.entitled('ncua_readiness')` =
+  `state === 'unlicensed' || features.includes('ncua_readiness') ||
+  plan === 'enterprise'` — the payload persists through `grace` and
+  `readonly`, so entitlement correctly survives expiry. Recommended
+  packaging: included in `enterprise`, orderable add-on for `standard`
+  (grant to an existing customer by re-issuing `redactwall.lic` with
+  `scripts/license-issue.js --features` and installing via the existing
+  `POST /api/billing/license`; update `docs/CUSTOMER_LICENSING.md` to
+  define add-on flags alongside plan tiers). Per-surface behavior: the nav
+  item stays visible with an upsell empty state when not entitled, and
+  `GET /api/ncua/readiness` returns an explicit `entitled: false` body —
+  the billing routes are Security-Admin read, so non-admin console sessions
+  take the entitlement signal from the readiness response. Honor the
+  license philosophy ("the license never disables the security function"):
+  evidence/examiner exports work in **every** license state, and the
   read-only state already blocks NCUA mutations via `requireWritable`.
-  Ungated fallback if the flag is absent from older licenses: treat
-  `enterprise` plan as entitled.
 - **Tenancy and seats.** New tables are `orgId`-scoped with RLS from day
-  one. The board packet embeds `tenant.seatReport()` (adoption, seats used/
-  remaining) and `license.publicStatus()` (plan, expiry), so it doubles as
-  a seat true-up artifact for billing conversations.
+  one (v4-corrected normalization; see Data Model). The board packet embeds
+  only the scalar `tenant.seatReport()` aggregates (tenantId, saasMode,
+  seatLimit, seatsUsed, seatsRemaining, overLimit) — the per-user `users[]`
+  roster is explicitly dropped, because an employee-level usage list must
+  not enter a document built to leave the security team — plus a `trueUp`
+  block comparing licensed seats (`license.publicStatus().seats`) against
+  the configured `REDACTWALL_SEAT_LIMIT` and `seatsUsed`. Nothing wires the
+  license seat count to the env limit today, so the packet is where a
+  mismatch becomes visible, which is what makes it a true-up artifact.
 - **Scheduled delivery.** The examiner pack rides the existing scheduled
   evidence-pack task (`scripts/run-evidence-pack.sh|ps1`, systemd/Task
-  Scheduler installers) via the new CLI flag. Board-packet delivery through
-  the `subscriptions.js` pipeline (prompt-free, HTTPS-only) is a later
-  automation step, not v1.
+  Scheduler installers) via the new CLI flag. Board-packet delivery is a
+  later automation step, not v1 — and not free: `subscriptions.js` is an
+  event pipeline (`siem-formats.toEvent`, dedupe, min-risk filters), so a
+  periodic report needs a new digest-style payload type plus a scheduler
+  hook.
 - **Identity.** Department names validate against SCIM groups when
   provisioned (Entra/Okta per `docs/SCIM_PROVISIONING.md`), matching how
   `policyScopes.groups` already match.
@@ -272,7 +335,8 @@ follows the established page shape (route-contract doc comment, typed
    task docs.
 5. Console view (score, control rows, EDM panel, examiner-pack export) +
    parity/design/e2e test entries.
-6. `license.hasFeature()` + entitlement wiring.
+6. `license.entitled()` predicate + entitlement wiring (nav upsell state,
+   readiness `entitled` flag, `docs/CUSTOMER_LICENSING.md` add-on note).
 7. Docs: `docs/NCUA_READINESS.md` (operator setup + "what to hand an NCUA
    examiner" + EDM import guide with "plaintext is discarded" language);
    update `docs/API_REFERENCE.md`, `PLANS/README.md`, `ROADMAP.md` N2 note.
@@ -284,8 +348,10 @@ follows the established page shape (route-contract doc comment, typed
 3. Console inventory table + review flow.
 4. Credit-union scoped-policy pack: documented `policyScopes` preset
    (tighten-only, per-department SCIM groups) + default-deny unapproved AI
-   destinations + required-sensors guidance; ships as documented config, not
-   as competing templates.
+   destinations + required-sensors guidance + a member-data routing recipe
+   (route member-data detector events to the compliance group via the
+   existing `approvalRoutingRules` and notifier/subscription seams); ships
+   as documented config, not as competing templates.
 5. `ai_use_inventory` + `vendor_service_provider_oversight` control states
    flip from `not_provided` to live.
 
@@ -294,7 +360,7 @@ follows the established page shape (route-contract doc comment, typed
 2. Derived prompt-free incident timeline + deadline tracking; console panel.
 3. `/api/ncua/board-packet` (AI adoption, member-data attempts prevented,
    unapproved AI usage, open exceptions, overdue reviews, readiness score,
-   seat report, license status) + console export button.
+   seat aggregates + true-up, license status) + console export button.
 4. `incident_readiness` + `board_reporting` control states go live; both
    summaries join the examiner pack.
 5. Later (not v1): PDF packaging, subscriptions-based scheduled board
@@ -309,14 +375,19 @@ follows the established page shape (route-contract doc comment, typed
   existing evidence privacy regression tests); use-case validation rejects
   prompt text, URLs with paths, secrets, invalid data classes; incident
   timeline exports blocked-vs-exposed without raw content; EDM summary
-  surfacing.
-- **API/security (`suite/security`, `test/`)**: role matrix (Security Admin
-  mutates; auditor reads/exports but cannot mutate; operator reads; CSRF
-  required on all mutations; license read-only blocks mutations but not
-  exports); tenant `orgId` stamping in SaaS mode.
-- **Storage (`suite/contract`)**: migration v5/v6 in both dialects; update
-  the Postgres contract battery's expected migration version; RLS policies
-  on new tables.
+  surfacing; board packet carries seat aggregates only (no `users[]`
+  roster); default packs stay `schemaVersion` 2 while examiner-profile
+  packs assert 3.
+- **API/security (`suite/security`, `test/`)**: role matrix over all four
+  roles (Security Admin mutates; auditor reads/exports but cannot mutate;
+  operator and approver read but cannot mutate; CSRF required on all
+  mutations; license read-only blocks mutations but not exports); tenant
+  `orgId` stamping in SaaS mode.
+- **Storage**: migrations v5/v6 in both dialects; extend the expected
+  version list in `test/storage-postgres.test.js` (`[1, 2, 3, 4]` → append
+  5, then 6) and add both tables to `TENANT_SCOPED_TABLES` in
+  `test/storage-postgres-rls.test.js`; mixed-case tenant ids must
+  round-trip through the new tables' RLS filters.
 - **Console (`e2e/`)**: `console-parity.spec.js` `ROUTES` entry
   `{ hash: '/ncua', heading: 'NCUA Readiness' }` under `govern`;
   `console-design.spec.js` `VIEWS` entry; export buttons hit the right
