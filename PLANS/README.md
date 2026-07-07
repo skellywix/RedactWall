@@ -10,6 +10,7 @@ context, not operator runbooks.
 | `redactwall-product-alignment.md` | Product-readiness and RedactWall alignment work |
 | `customer-missing-features.md` | Commercial feature gap analysis and build order |
 | `aws-saas-deployment.md` | Planning notes for the AWS customer-silo path |
+| `ncua-readiness-center.md` | NCUA Readiness Center: examiner proof, use-case inventory, EDM surfacing, 72-hour incident readiness, board packet (ROADMAP N2) |
 
 Current operational truth lives in:
 
