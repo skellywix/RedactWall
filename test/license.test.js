@@ -88,7 +88,7 @@ test('requireWritable gates config writes but exempts /api/queries/ and license 
 });
 
 test('entitled: demo mode grants all, licensed installs need the flag or enterprise plan', () => {
-  const check = (payload, state) => {
+  const check = (payload) => {
     license.refresh({
       publicKeyPem: PUB,
       now: NOW,
@@ -96,7 +96,6 @@ test('entitled: demo mode grants all, licensed installs need the flag or enterpr
         if (!payload) throw new Error('missing');
         return sign(payload);
       },
-      ...(state ? {} : {}),
     });
     return license.entitled('ncua_readiness');
   };

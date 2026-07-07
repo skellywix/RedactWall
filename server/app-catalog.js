@@ -146,6 +146,16 @@ function overrideScore(host, { score, note, actor } = {}) {
   }, db.getAiApp(h).lastSeen);
 }
 
+// Prompt-free rollup rows for readiness/evidence inputs: review status and
+// sighting counter only — never the free-text owner/notes fields, so catalog
+// annotations can't ride into an examiner-facing surface.
+function reviewRollup() {
+  return db.listAiApps().map((a) => ({
+    sanctionedStatus: a.sanctionedStatus || 'under_review',
+    eventCount: a.eventCount || 0,
+  }));
+}
+
 // Sensor-safe public view of the whole catalog.
 function publicCatalog() {
   return db.listAiApps().map((a) => ({
@@ -172,4 +182,4 @@ function publicCatalog() {
   }));
 }
 
-module.exports = { recordSighting, addManual, importCsv, annotate, overrideScore, publicCatalog, scoreFor, STATUS, SOURCES };
+module.exports = { recordSighting, addManual, importCsv, annotate, overrideScore, publicCatalog, reviewRollup, scoreFor, STATUS, SOURCES };

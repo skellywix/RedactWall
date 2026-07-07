@@ -91,7 +91,10 @@ node scripts/edm-fingerprint.js --in members.txt
 The existing evidence-pack schedule (`docs/EVIDENCE_PACK_TASK.md`) carries
 the profile: add `"examinerProfile": "federal_credit_union"` to
 `config/evidence-schedule.json`, or pass `--examiner-profile` on the CLI.
-Everything else (retention, zip, backup evidence inputs) is unchanged.
+Everything else (retention, zip, backup evidence inputs) is unchanged. The
+console's Evidence health panel and the pack's `exportHealth` section read
+`config/evidence-schedule.json` — a schedule kept at a custom path shows as
+"not scheduled" there even though the CLI honors it.
 
 ## Licensing
 

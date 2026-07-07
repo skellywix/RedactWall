@@ -841,12 +841,13 @@ function buildEvidencePack(input) {
     restoreDrill,
     edm,
   });
+  const report = safeReport(input.report, now);
   return {
     // Default packs stay schemaVersion 2 (consumers pin it); only
     // examiner-profile packs stamp 3.
     schemaVersion: examinerProfile ? 3 : 2,
     generatedAt: now,
-    report: safeReport(input.report, now),
+    report,
     service: {
       name: 'RedactWall',
       version: input.version || 'unknown',
@@ -873,7 +874,9 @@ function buildEvidencePack(input) {
         edm,
         catalog: input.catalog,
         queries: lineageQueries,
-        reportSchedule: input.report && input.report.schedule,
+        // The whitelisted schedule from safeReport, not the raw input, so the
+        // readiness section can't carry unvetted schedule-config fields.
+        reportSchedule: report.schedule,
       }),
     } : {}),
     lineage: buildLineage(lineageQueries),

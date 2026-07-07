@@ -324,3 +324,47 @@ test.after(() => {
   try { db._db.close(); } catch {}
   fs.rmSync(tempRoot, { recursive: true, force: true });
 });
+
+test('runtime build with --examiner-profile produces a schemaVersion-3 pack end to end', () => {
+  const fakeDb = {
+    listQueries(filter) {
+      return filter && filter.all
+        ? [{ id: 'q_m', createdAt: '2026-07-01T00:00:00.000Z', status: 'pending', findings: [{ type: 'MEMBER_ID', masked: '**** 1234', value: '99881234' }], categories: [] }]
+        : [];
+    },
+    listAudit() { return []; },
+    stats() { return { total: 1 }; },
+    verifyAuditChain() { return { ok: true, count: 1 }; },
+  };
+  const options = packer.cliOptionsFromArgs(
+    packer.parseArgs(['--examiner-profile', 'federal_credit_union']),
+    {},
+  );
+  assert.strictEqual(options.examinerProfile, 'federal_credit_union');
+
+  const pack = packer.buildEvidencePackFromRuntime({
+    ...options,
+    dbModule: fakeDb,
+    policyModule: {
+      loadPolicy() { return { alwaysBlock: ['US_SSN', 'MEMBER_ID', 'LOAN_NUMBER', 'BANK_ACCOUNT', 'ROUTING_NUMBER'] }; },
+      policyExceptionReview() { return { total: 1, active: 1, expiringSoon: 0, reviewDue: 0, expired: 0, disabled: 0, reviewWindowDays: 14, items: [] }; },
+    },
+    coverageModule: { summarize() { return { score: 100, totals: {}, sensors: [], fleet: [], governedDestinations: [], ungovernedDestinations: [], shadowDestinations: [], posture: [] }; } },
+    detectorModule: { listDetectors() { return [{ id: 'MEMBER_ID' }]; } },
+    customDetectorsModule: { loadCustomDetectors() { return []; } },
+    exactMatchModule: { publicSummary() { return { enabled: true, fingerprints: 7, minLength: 6, maxWords: 5, severity: 4, salt: 'cli-salt-decoy' }; } },
+    appCatalogModule: { reviewRollup() { return [{ sanctionedStatus: 'unsanctioned', eventCount: 3 }]; } },
+    packageInfo: { version: '0.3.0' },
+    backupModule: {},
+  });
+
+  assert.strictEqual(pack.schemaVersion, 3);
+  assert.strictEqual(pack.scope.examinerProfile, 'federal_credit_union');
+  assert.strictEqual(pack.ncuaReadiness.profile, 'federal_credit_union');
+  assert.strictEqual(pack.ncuaReadiness.panels.exceptions.total, 1);
+  assert.strictEqual(pack.ncuaReadiness.panels.memberData.events, 1);
+  assert.deepStrictEqual(pack.edm, { enabled: true, fingerprints: 7, minLength: 6, maxWords: 5, severity: 4 });
+  const wire = JSON.stringify(pack);
+  assert.ok(!wire.includes('cli-salt-decoy'));
+  assert.ok(!wire.includes('99881234'));
+});

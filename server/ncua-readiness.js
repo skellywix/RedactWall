@@ -10,22 +10,10 @@
  * enums, and bounded labels only.
  */
 const controlMap = require('./control-map');
+const { BLOCKED_STATUSES, REDACTED_STATUSES } = require('./control-readiness');
 
 const PROFILES = new Set(['federal_credit_union']);
 const { MEMBER_IDENTIFIERS } = controlMap;
-const PREVENTED_STATUSES = new Set([
-  'pending',
-  'pending_justification',
-  'denied',
-  'blocked_by_user',
-  'destination_blocked',
-  'file_upload_blocked',
-  'action_blocked',
-  'injection_blocked',
-  'file_blocked_unscanned',
-  'response_blocked',
-]);
-const REDACTED_STATUSES = new Set(['redacted', 'response_redacted']);
 const CONTROL_TARGET_TABS = {
   member_information_safeguards: 'ncua',
   ai_usage_governance: 'catalog',
@@ -58,7 +46,7 @@ function normalizeProfile(value) {
 
 function findingTypes(query) {
   const findings = Array.isArray(query && query.findings) ? query.findings : [];
-  return findings.map((f) => (typeof f === 'string' ? f : (f && f.type) || '')).filter(Boolean);
+  return findings.map((f) => (f && f.type) || '').filter(Boolean);
 }
 
 function memberDataPanel(queries = []) {
@@ -68,7 +56,7 @@ function memberDataPanel(queries = []) {
   return {
     identifiers: MEMBER_IDENTIFIERS,
     events: rows.length,
-    prevented: byStatus(PREVENTED_STATUSES),
+    prevented: byStatus(BLOCKED_STATUSES),
     redacted: byStatus(REDACTED_STATUSES),
     released: rows.filter((q) => String(q.status || '') === 'approved').length,
   };
@@ -90,10 +78,15 @@ function shadowAiPanel(catalog = []) {
 }
 
 function edmPanel(edm) {
-  if (!edm || typeof edm !== 'object') return { configured: false, enabled: false, fingerprints: 0 };
+  if (!edm || typeof edm !== 'object') return { configured: false, enabled: false, active: false, fingerprints: 0 };
+  const configured = n(edm.fingerprints) > 0;
+  const enabled = edm.enabled === true;
   return {
-    configured: n(edm.fingerprints) > 0,
-    enabled: edm.enabled === true,
+    configured,
+    enabled,
+    // A loaded-but-disabled watchlist is NOT protecting members; surfaces must
+    // never report it as running (matches edmActive in control-map.js).
+    active: configured && enabled,
     fingerprints: n(edm.fingerprints),
     minLength: n(edm.minLength),
     severity: n(edm.severity),

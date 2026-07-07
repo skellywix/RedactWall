@@ -138,8 +138,11 @@ function buildEvidencePackFromRuntime(options = {}) {
     backup: verified.backup,
     restoreDrill: verified.restoreDrill,
     edm: exactMatch.publicSummary(),
-    catalog: appCatalog.publicCatalog(),
+    catalog: appCatalog.reviewRollup(),
     examinerProfile: options.examinerProfile,
+    policyExceptionReview: typeof policy.policyExceptionReview === 'function'
+      ? policy.policyExceptionReview(activePolicy)
+      : undefined,
   });
 }
 

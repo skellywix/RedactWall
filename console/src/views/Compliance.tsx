@@ -9,9 +9,10 @@ import './Compliance.css';
 /**
  * Compliance Posture: AI-governance framework coverage mapped to live
  * RedactWall evidence. Read-only. Route contract from server/app.js:
- *   GET /api/compliance -> { controlMappings: ControlMapping[] } — 8 static
- *     control mappings (server/control-map.js) evaluated against the active
- *     policy, detector inventory, audit-chain verification, and coverage.
+ *   GET /api/compliance -> { controlMappings: ControlMapping[] } — the static
+ *     control mappings (server/control-map.js CONTROL_MAPPINGS, incl. the
+ *     credit-union families) evaluated against the active policy, detector
+ *     inventory, audit-chain verification, coverage, and EDM status.
  *     Any console role can read it; no query params, no CSRF (GET).
  *   GET /api/export/evidence — opened in a new tab only (Security Admin or
  *     Auditor; other roles get a JSON 403 in that tab, as legacy did). The

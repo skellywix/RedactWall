@@ -1172,4 +1172,6 @@ module.exports = {
   mcpAgentReadiness,
   desktopReadiness,
   socReadiness,
+  BLOCKED_STATUSES,
+  REDACTED_STATUSES,
 };

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { EmptyState } from '../components/Panel';
 import { apiJson } from '../lib/api';
 import { navigate } from '../lib/router';
+import './NcuaReadiness.css';
 
 /**
  * NCUA Readiness: examiner-readiness report for federal credit unions
@@ -11,8 +12,10 @@ import { navigate } from '../lib/router';
  *     composition of control mappings, member-data outcomes, shadow-AI
  *     rollups, EDM status, exception review, and audit-chain verification
  *     (server/ncua-readiness.js). Any console role can read it; no query
- *     params, no CSRF (GET). `entitled` reflects license.entitled(); the
- *     report always loads so demo mode stays fully visible.
+ *     params, no CSRF (GET). `entitled` reflects license.entitled(); when a
+ *     licensed install lacks the ncua_readiness add-on the server withholds
+ *     the report (report: null) and this view renders only the upsell state.
+ *     Demo mode (unlicensed) is always entitled, so demos stay fully visible.
  *   GET /api/export/evidence?examinerProfile=federal_credit_union — opened in
  *     a new tab only (Security Admin or Auditor; other roles get a JSON 403
  *     in that tab). Never parsed here.
@@ -47,7 +50,7 @@ interface NcuaReport {
   panels: {
     memberData: { identifiers: string[]; events: number; prevented: number; redacted: number; released: number };
     shadowAi: { totalApps: number; sanctioned: number; underReview: number; tolerated: number; unsanctioned: number; blocked: number; unreviewedEvents: number };
-    edm: { configured: boolean; enabled: boolean; fingerprints: number; minLength?: number; severity?: number };
+    edm: { configured: boolean; enabled: boolean; active: boolean; fingerprints: number; minLength?: number; severity?: number };
     exceptions: { total: number; active: number; expiringSoon: number; reviewDue: number; expired: number; disabled: number } | null;
     exportHealth: { scheduled: boolean; cadence?: string | null; nextRunAt?: string | null; retentionDays?: number | null };
     audit: { verified: boolean; count: number };
@@ -130,7 +133,11 @@ function KpiRow({ report }: { report: NcuaReport }) {
       <Kpi label="Readiness score" value={`${report.score}/100`} hint={report.state.replace('_', ' ')} />
       <Kpi label="Member-data events prevented" value={`${memberData.prevented}/${memberData.events}`} hint={`${memberData.redacted} redacted, ${memberData.released} released after review`} />
       <Kpi label="Unreviewed AI apps" value={String(shadowAi.unsanctioned + shadowAi.underReview)} hint={`${shadowAi.unreviewedEvents} sightings pending review`} />
-      <Kpi label="EDM fingerprints" value={edm.configured ? String(edm.fingerprints) : 'not set up'} hint={edm.configured ? 'core-banking watchlist active' : 'member records unfingerprinted'} />
+      <Kpi
+        label="EDM fingerprints"
+        value={edm.configured ? String(edm.fingerprints) : 'not set up'}
+        hint={edm.active ? 'core-banking watchlist active' : edm.configured ? 'watchlist loaded but DISABLED' : 'member records unfingerprinted'}
+      />
     </div>
   );
 }
@@ -162,15 +169,20 @@ function EdmPanel({ edm }: { edm: NcuaReport['panels']['edm'] }) {
           <h2>Core-banking EDM</h2>
           <span>Salted fingerprints of member records — plaintext is discarded</span>
         </div>
-        <span className={`insights-chip ${edm.configured ? 'tone-low' : 'tone-high'}`}>
-          {edm.configured ? 'active' : 'setup needed'}
+        <span className={`insights-chip ${edm.active ? 'tone-low' : 'tone-high'}`}>
+          {edm.active ? 'active' : edm.configured ? 'disabled' : 'setup needed'}
         </span>
       </div>
       <div style={{ padding: '0 16px 14px' }}>
-        {edm.configured ? (
+        {edm.active ? (
           <p style={{ margin: 0 }}>
             {edm.fingerprints} salted fingerprint(s) loaded; exact matches of member identifiers hard-stop on every
             sensor. The salt and fingerprints never appear in exports.
+          </p>
+        ) : edm.configured ? (
+          <p style={{ margin: 0 }}>
+            {edm.fingerprints} fingerprint(s) are loaded but the watchlist is <b>disabled</b> — exact-match detection
+            is not running. Re-enable it in <code>config/exact-match.json</code> (<code>"enabled": true</code>).
           </p>
         ) : (
           <p style={{ margin: 0 }}>
@@ -274,6 +286,7 @@ export default function NcuaReadiness() {
 
   const renderBody = () => {
     if (!loaded) return <div className="app-loading">Scoring NCUA readiness…</div>;
+    if (data && !data.entitled) return <UpsellNotice />;
     if (!data?.report) {
       return <EmptyState title="Readiness report unavailable" detail="Could not load the NCUA readiness report. Refresh to retry." />;
     }
@@ -281,7 +294,6 @@ export default function NcuaReadiness() {
     const { shadowAi, exceptions, exportHealth, audit } = report.panels;
     return (
       <>
-        {!data.entitled && <UpsellNotice />}
         <KpiRow report={report} />
         <NextActionsPanel actions={report.nextActions} />
         <div className="insights-grid">

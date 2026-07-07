@@ -78,10 +78,48 @@ test('ncua readiness reports blocked when the audit chain fails verification', (
 test('ncua readiness surfaces EDM setup state when unconfigured', () => {
   const report = ncuaReadiness.summarize(baseInput({ edm: { enabled: false, fingerprints: 0 } }));
 
-  assert.deepStrictEqual(report.panels.edm, { configured: false, enabled: false, fingerprints: 0, minLength: 0, severity: 0 });
+  assert.deepStrictEqual(report.panels.edm, { configured: false, enabled: false, active: false, fingerprints: 0, minLength: 0, severity: 0 });
   const control = report.controls.find((c) => c.id === 'member_information_safeguards');
   assert.strictEqual(control.state, 'attention');
   assert.match(control.summary, /EDM fingerprints are not configured/);
+});
+
+test('a loaded-but-disabled EDM watchlist is never reported active', () => {
+  const report = ncuaReadiness.summarize(baseInput({ edm: { enabled: false, fingerprints: 120 } }));
+
+  assert.strictEqual(report.panels.edm.configured, true);
+  assert.strictEqual(report.panels.edm.active, false);
+  const control = report.controls.find((c) => c.id === 'member_information_safeguards');
+  assert.strictEqual(control.state, 'attention');
+});
+
+test('ncua readiness drops decoy free text and secrets at the input boundary', () => {
+  const report = ncuaReadiness.summarize(baseInput({
+    edm: { enabled: true, fingerprints: 9, salt: 'edm-salt-decoy-should-not-appear', fingerprintList: ['deadbeefdecoy'] },
+    catalog: [
+      { sanctionedStatus: 'unsanctioned', eventCount: 2, notes: 'catalog-notes-decoy', owner: 'owner-decoy@example.test' },
+    ],
+    queries: [
+      { status: 'pending', findings: [{ type: 'MEMBER_ID', value: '99887766-decoy', masked: '**** 7766' }] },
+    ],
+  }));
+
+  const wire = JSON.stringify(report);
+  assert.ok(!wire.includes('edm-salt-decoy-should-not-appear'));
+  assert.ok(!wire.includes('deadbeefdecoy'));
+  assert.ok(!wire.includes('catalog-notes-decoy'));
+  assert.ok(!wire.includes('owner-decoy'));
+  assert.ok(!wire.includes('99887766-decoy'));
+});
+
+test('scoring internals: empty control set scores 0 and the ready boundary sits at 90', () => {
+  const { scoreControls, stateFor } = ncuaReadiness._internal;
+  assert.strictEqual(scoreControls([]), 0);
+  assert.strictEqual(scoreControls([{ state: 'not_provided' }]), 0);
+  assert.strictEqual(scoreControls([{ state: 'covered' }, { state: 'covered' }, { state: 'not_provided' }]), 100);
+  assert.strictEqual(stateFor(90, true), 'ready');
+  assert.strictEqual(stateFor(89, true), 'attention');
+  assert.strictEqual(stateFor(100, false), 'blocked');
 });
 
 test('ncua readiness shadow-AI rollup counts catalog statuses and unreviewed events', () => {
