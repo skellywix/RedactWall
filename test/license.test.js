@@ -86,3 +86,29 @@ test('requireWritable gates config writes but exempts /api/queries/ and license 
   license.refresh({ readFile: () => { throw new Error('none'); }, now: NOW });
   assert.strictEqual(license.status().state, 'unlicensed');
 });
+
+test('entitled: demo mode grants all, licensed installs need the flag or enterprise plan', () => {
+  const check = (payload, state) => {
+    license.refresh({
+      publicKeyPem: PUB,
+      now: NOW,
+      readFile: () => {
+        if (!payload) throw new Error('missing');
+        return sign(payload);
+      },
+      ...(state ? {} : {}),
+    });
+    return license.entitled('ncua_readiness');
+  };
+
+  assert.strictEqual(check(null), true); // unlicensed = demo mode: fully visible
+  assert.strictEqual(check(base), false); // standard plan, no flag
+  assert.strictEqual(check({ ...base, features: ['ncua_readiness'] }), true);
+  assert.strictEqual(check({ ...base, plan: 'enterprise' }), true);
+  // Entitlement survives expiry: payload persists through grace and readonly.
+  const expired = { ...base, features: ['ncua_readiness'], expires: '2026-06-01T00:00:00Z', graceDays: 3 };
+  license.refresh({ publicKeyPem: PUB, now: NOW, readFile: () => sign(expired) });
+  assert.strictEqual(license.status().state, 'readonly');
+  assert.strictEqual(license.entitled('ncua_readiness'), true);
+  license.refresh({ publicKeyPem: PUB, now: NOW, readFile: () => { throw new Error('missing'); } });
+});

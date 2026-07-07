@@ -18,6 +18,7 @@ const Lineage = lazy(() => import('./views/Lineage'));
 const DecisionQuality = lazy(() => import('./views/DecisionQuality'));
 const Catalog = lazy(() => import('./views/Catalog'));
 const Compliance = lazy(() => import('./views/Compliance'));
+const NcuaReadiness = lazy(() => import('./views/NcuaReadiness'));
 const Identity = lazy(() => import('./views/Identity'));
 const Policy = lazy(() => import('./views/Policy'));
 const Deploy = lazy(() => import('./views/Deploy'));
@@ -58,6 +59,7 @@ const GROUPS: RouteGroup[] = [
     items: [
       { path: '/catalog', label: 'App Catalog', icon: NAV_ICONS.catalog, view: Catalog },
       { path: '/compliance', label: 'Compliance', icon: NAV_ICONS.compliance, view: Compliance },
+      { path: '/ncua', label: 'NCUA Readiness', icon: NAV_ICONS.ncua, view: NcuaReadiness },
       { path: '/identity', label: 'Identity', icon: NAV_ICONS.identity, view: Identity },
       { path: '/policy', label: 'Configuration', icon: NAV_ICONS.policy, view: Policy },
     ],

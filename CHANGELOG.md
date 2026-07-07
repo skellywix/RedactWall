@@ -11,6 +11,27 @@ reconstructed from `ITERATIONS.md` and git history.
 
 ### Added
 
+- **NCUA Readiness Center (slice 1, Examiner Proof)** — a new Govern console
+  view (`/app/#/ncua`) and examiner-profile evidence pack for federal credit
+  unions (`PLANS/ncua-readiness-center.md`, ROADMAP N2). A new
+  `server/ncua-readiness.js` module composes existing evidence — control
+  mappings, coverage, exception review, audit-chain verification, EDM status,
+  and prompt-free catalog rollups — into a readiness score with next actions
+  (`GET /api/ncua/readiness`). Five credit-union control families join
+  `server/control-map.js` (member-information safeguards live; use-case
+  inventory, vendor oversight, incident readiness, and board reporting render
+  `not_provided` until their slices ship). Evidence packs gain an `edm`
+  status section (first consumer of `exactMatch.publicSummary()` — salt and
+  fingerprints never export) and an `examinerProfile` option
+  (`--examiner-profile federal_credit_union` on the CLI, `examinerProfile` in
+  the schedule config, `?examinerProfile=` on `/api/export/evidence`):
+  profile packs stamp `schemaVersion` 3 and embed the `ncuaReadiness` report;
+  default packs stay schemaVersion 2. The module is the first consumer of
+  license `features[]` entitlement (`license.entitled('ncua_readiness')`:
+  demo mode fully visible, included with Enterprise, add-on flag for
+  Standard; evidence export works in every license state). Operator and
+  examiner guide: `docs/NCUA_READINESS.md`.
+
 - **React admin console reaches full parity.** All 16 operator views are ported
   to the Vite/React/TypeScript console served at `/app`: Overview, Approval
   Queue, AI Command Center, All Activity, Insights, Sensor Coverage, Data

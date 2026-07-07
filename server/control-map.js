@@ -103,7 +103,69 @@ const CONTROL_MAPPINGS = [
     ],
     evidence: ['auditIntegrity', 'receipts', 'queries.workflow'],
   },
+  {
+    id: 'member_information_safeguards',
+    title: 'Member information safeguards (EDM + hard stops)',
+    controlFamilies: [
+      'NCUA Part 748 Appendix A member-information safeguards evidence',
+      'GLBA Safeguards Rule 501(b) evidence',
+      'NCUA information-security program evidence',
+    ],
+    evidence: ['edm', 'policy.alwaysBlock', 'detectors.MEMBER_ID', 'detectors.EXACT_MATCH'],
+  },
+  {
+    id: 'ai_use_inventory',
+    title: 'AI use-case inventory and review',
+    controlFamilies: [
+      'NCUA 2026 AI supervisory-priority inventory evidence',
+      'NIST AI RMF MAP evidence',
+      'GLBA risk-assessment evidence',
+    ],
+    evidence: ['useCases'],
+  },
+  {
+    id: 'vendor_service_provider_oversight',
+    title: 'AI vendor and service-provider oversight',
+    controlFamilies: [
+      'NCUA Part 748 service-provider oversight evidence',
+      'GLBA third-party oversight evidence',
+    ],
+    evidence: ['useCases.vendorStatus', 'catalog.review'],
+  },
+  {
+    id: 'incident_readiness',
+    title: '72-hour AI incident readiness',
+    controlFamilies: [
+      'NCUA 12 CFR 748.1(c) cyber-incident reporting evidence',
+      'GLBA incident-response evidence',
+    ],
+    evidence: ['incidents'],
+  },
+  {
+    id: 'board_reporting',
+    title: 'Board and executive AI reporting',
+    controlFamilies: [
+      'NCUA board-oversight evidence',
+      'GLBA Safeguards Rule board-reporting evidence',
+    ],
+    evidence: ['boardPacket'],
+  },
 ];
+
+// Member NPI hard-stop set an examiner expects on a federal credit union
+// deployment; the core of the ncua_glba template's alwaysBlock list. Shared
+// with server/ncua-readiness.js.
+const MEMBER_IDENTIFIERS = ['US_SSN', 'MEMBER_ID', 'LOAN_NUMBER', 'BANK_ACCOUNT', 'ROUTING_NUMBER'];
+
+// Slice-2/3 controls (PLANS/ncua-readiness-center.md) whose evidence inputs do
+// not exist yet; they render not_provided with an honest summary until the
+// use-case inventory, incident records, and board packet ship.
+const PENDING_CONTROL_SUMMARIES = {
+  ai_use_inventory: 'AI use-case inventory records are not yet attached; they ship with the NCUA Readiness inventory.',
+  vendor_service_provider_oversight: 'Vendor-review status is not yet attached; it ships with the AI use-case inventory.',
+  incident_readiness: '72-hour incident records are not yet attached; they ship with the incident-readiness workflow.',
+  board_reporting: 'Board packet evidence is not yet attached; it ships with Board Packet exports.',
+};
 
 function hasObject(value) {
   return !!value && typeof value === 'object';
@@ -150,6 +212,26 @@ function stateFromPromptThreat(input) {
   return detectorIds(input).has('PROMPT_ATTACK') ? 'covered' : 'attention';
 }
 
+function edmActive(edm) {
+  return hasObject(edm) && edm.enabled === true && Number(edm.fingerprints) > 0;
+}
+
+function stateFromMemberSafeguards(input) {
+  if (!input.policy) return hasObject(input.edm) ? 'attention' : 'not_provided';
+  const always = new Set(Array.isArray(input.policy.alwaysBlock) ? input.policy.alwaysBlock : []);
+  const identifiersCovered = MEMBER_IDENTIFIERS.every((id) => always.has(id));
+  return identifiersCovered && edmActive(input.edm) ? 'covered' : 'attention';
+}
+
+function memberSafeguardsSummary(input, state) {
+  if (state === 'not_provided') return 'No policy or EDM evidence attached to this pack.';
+  if (state === 'covered') return 'Core-banking EDM fingerprints are active and member-identifier hard stops are enforced.';
+  const always = new Set(Array.isArray(input.policy && input.policy.alwaysBlock) ? input.policy.alwaysBlock : []);
+  const missing = MEMBER_IDENTIFIERS.filter((id) => !always.has(id));
+  if (missing.length) return `Hard-stop coverage for member identifiers is incomplete: ${missing.join(', ')}.`;
+  return 'Member-identifier hard stops are enforced; core-banking EDM fingerprints are not configured yet (npm run edm:fingerprint).';
+}
+
 function stateFor(control, input) {
   if (control.id === 'tamper_evident_audit') return stateFromIntegrity(input.auditIntegrity);
   if (control.id === 'fleet_sensor_coverage') return stateFromCoverage(input.coverage);
@@ -160,10 +242,13 @@ function stateFor(control, input) {
   if (control.id === 'ai_usage_governance') return stateFromUsageGovernance(input);
   if (control.id === 'prompt_threat_defense') return stateFromPromptThreat(input);
   if (control.id === 'ai_activity_recordkeeping') return stateFromIntegrity(input.auditIntegrity);
+  if (control.id === 'member_information_safeguards') return stateFromMemberSafeguards(input);
   return 'not_provided';
 }
 
 function summaryFor(control, input, state) {
+  if (PENDING_CONTROL_SUMMARIES[control.id]) return PENDING_CONTROL_SUMMARIES[control.id];
+  if (control.id === 'member_information_safeguards') return memberSafeguardsSummary(input, state);
   if (control.id === 'tamper_evident_audit') {
     const count = Number(input.auditIntegrity && input.auditIntegrity.count) || 0;
     return state === 'covered'
@@ -226,4 +311,4 @@ function buildControlMappings(input = {}) {
   });
 }
 
-module.exports = { CONTROL_MAPPINGS, buildControlMappings, _internal: { stateFor } };
+module.exports = { CONTROL_MAPPINGS, buildControlMappings, MEMBER_IDENTIFIERS, _internal: { stateFor } };

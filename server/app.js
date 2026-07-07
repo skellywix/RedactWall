@@ -60,6 +60,8 @@ const releaseTokens = require('./release-token');
 const receipts = require('./receipts');
 const tenant = require('./tenant');
 const license = require('./license');
+const exactMatch = require('./exact-match');
+const ncuaReadiness = require('./ncua-readiness');
 const openapi = require('./openapi');
 const routing = require('./routing');
 const workflow = require('./workflow');
@@ -2788,6 +2790,9 @@ app.get('/api/export/evidence', ...auditRead, (req, res) => {
     queries,
     lineageQueries: summaryQueries,
     audit: db.listAudit(auditLimit),
+    edm: exactMatch.publicSummary(),
+    catalog: appCatalog.publicCatalog(),
+    examinerProfile: req.query.examinerProfile,
   }));
 });
 
@@ -2803,8 +2808,31 @@ app.get('/api/compliance', auth.requireAuth, (req, res) => {
     detectors: detector.listDetectors({ customDetectors: policy.customDetectorsForSensors() }),
     auditIntegrity: db.verifyAuditChain(),
     coverage: coverage.summarize(summaryQueries, activePolicy),
+    edm: evidence.safeEdmSummary(exactMatch.publicSummary()),
   });
   res.json({ controlMappings: mappings });
+});
+
+// NCUA Readiness (PLANS/ncua-readiness-center.md slice 1): prompt-free
+// examiner-readiness report for federal credit unions. Any console role can
+// read it, like /api/compliance; entitlement gates the console module, never
+// evidence export.
+app.get('/api/ncua/readiness', auth.requireAuth, (req, res) => {
+  const activePolicy = policy.loadPolicy();
+  const summaryQueries = db.listQueries({ all: true });
+  const report = ncuaReadiness.summarize({
+    generatedAt: new Date().toISOString(),
+    scope: { rawPromptBodiesIncluded: false },
+    policy: activePolicy,
+    detectors: detector.listDetectors({ customDetectors: policy.customDetectorsForSensors() }),
+    auditIntegrity: db.verifyAuditChain(),
+    coverage: coverage.summarize(summaryQueries, activePolicy),
+    policyExceptionReview: policy.policyExceptionReview(activePolicy),
+    edm: evidence.safeEdmSummary(exactMatch.publicSummary()),
+    catalog: appCatalog.publicCatalog(),
+    queries: summaryQueries,
+  });
+  res.json({ entitled: license.entitled('ncua_readiness'), report });
 });
 
 app.get('/api/policy', auth.requireAuth, (req, res) => res.json(policy.loadPolicy()));

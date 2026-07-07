@@ -80,6 +80,14 @@ product.
 - Plans: **Standard** (control plane + browser sensor) and **Enterprise**
   (adds endpoint agent, MCP guard, AI gateway, priority support). Feature
   flags in the license file gate plan differences.
+- **Add-on feature flags** ride the same `features[]` array. First add-on:
+  `ncua_readiness` (the NCUA Readiness Center console module) — included with
+  Enterprise, orderable on Standard. Entitlement is
+  `license.entitled(flag)`: demo mode (no license) shows everything, and
+  evidence export works in every license state — flags gate console modules,
+  never the security function. Grant an add-on mid-term by re-issuing the
+  license with `node scripts/license-issue.js --features ...`; the customer
+  installs it from the console or by replacing `redactwall.lic`.
 - Pilots: 90-day, full-featured, seat-capped license file.
 
 ## Legal shape

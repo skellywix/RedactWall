@@ -27,6 +27,7 @@ const VIEWS = [
   { hash: '/decision-quality', name: 'decision-quality' },
   { hash: '/catalog', name: 'catalog' },
   { hash: '/compliance', name: 'compliance' },
+  { hash: '/ncua', name: 'ncua-readiness' },
   { hash: '/identity', name: 'identity' },
   { hash: '/policy', name: 'policy' },
   { hash: '/deploy', name: 'deploy' },
@@ -35,7 +36,7 @@ const VIEWS = [
   { hash: '/updates', name: 'updates' },
 ];
 
-// 16 views x 2 themes of full-page screenshots need headroom beyond the old
+// 17 views x 2 themes of full-page screenshots need headroom beyond the old
 // five-view budget.
 test.setTimeout(240000);
 test.use({ viewport: { width: 1440, height: 900 } });

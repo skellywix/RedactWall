@@ -7,6 +7,7 @@
  */
 const crypto = require('crypto');
 const controlMap = require('./control-map');
+const ncuaReadiness = require('./ncua-readiness');
 const { safeSensor } = require('./sensor-metadata');
 const routing = require('./routing');
 
@@ -224,6 +225,19 @@ function safeBackupEvidence(input) {
     auditIntegrity: safeIntegrity(auditIntegrity),
     sourceIntegrity: safeIntegrity(sourceIntegrity),
     rawPromptBodiesIncluded: false,
+  };
+}
+
+// EDM watchlist status for examiner review: counts and thresholds only. The
+// salt and fingerprint list never leave server/exact-match.js.
+function safeEdmSummary(edm) {
+  if (!edm || typeof edm !== 'object') return null;
+  return {
+    enabled: edm.enabled === true,
+    fingerprints: safeCoverageNumber(edm.fingerprints),
+    minLength: safeCoverageNumber(edm.minLength),
+    maxWords: safeCoverageNumber(edm.maxWords),
+    severity: safeCoverageNumber(edm.severity),
   };
 }
 
@@ -803,6 +817,8 @@ function buildEvidencePack(input) {
   const policyExceptionReview = safePolicyExceptionReview(input.policyExceptionReview);
   const backup = safeBackupEvidence(input.backup);
   const restoreDrill = safeRestoreDrillEvidence(input.restoreDrill);
+  const examinerProfile = ncuaReadiness.isProfile(input.examinerProfile) ? input.examinerProfile : null;
+  const edm = safeEdmSummary(input.edm);
   const scope = {
     queryLimit: input.queryLimit,
     auditLimit: input.auditLimit,
@@ -812,9 +828,23 @@ function buildEvidencePack(input) {
     auditDetailsIncluded: false,
     backupEvidenceIncluded: !!backup,
     restoreDrillEvidenceIncluded: !!restoreDrill,
+    ...(examinerProfile ? { examinerProfile } : {}),
   };
+  const controlMappings = controlMap.buildControlMappings({
+    generatedAt: now,
+    scope,
+    policy: input.policy,
+    detectors: input.detectors || [],
+    auditIntegrity: input.auditIntegrity,
+    coverage: coverageReport,
+    backup,
+    restoreDrill,
+    edm,
+  });
   return {
-    schemaVersion: 2,
+    // Default packs stay schemaVersion 2 (consumers pin it); only
+    // examiner-profile packs stamp 3.
+    schemaVersion: examinerProfile ? 3 : 2,
     generatedAt: now,
     report: safeReport(input.report, now),
     service: {
@@ -831,16 +861,21 @@ function buildEvidencePack(input) {
     policyExceptionReview,
     backup,
     restoreDrill,
-    controlMappings: controlMap.buildControlMappings({
-      generatedAt: now,
-      scope,
-      policy: input.policy,
-      detectors: input.detectors || [],
-      auditIntegrity: input.auditIntegrity,
-      coverage: coverageReport,
-      backup,
-      restoreDrill,
-    }),
+    edm,
+    controlMappings,
+    ...(examinerProfile ? {
+      ncuaReadiness: ncuaReadiness.summarize({
+        generatedAt: now,
+        examinerProfile,
+        controls: controlMappings,
+        auditIntegrity: input.auditIntegrity,
+        policyExceptionReview,
+        edm,
+        catalog: input.catalog,
+        queries: lineageQueries,
+        reportSchedule: input.report && input.report.schedule,
+      }),
+    } : {}),
     lineage: buildLineage(lineageQueries),
     detectors: input.detectors || [],
     queries: queries.map(safeQuery),
@@ -857,6 +892,7 @@ module.exports = {
   safeInstallChecks,
   safeBackupEvidence,
   safeRestoreDrillEvidence,
+  safeEdmSummary,
   safeReport,
   safePosture,
   safeDetectorFeedbackReport,
