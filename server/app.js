@@ -2792,6 +2792,7 @@ app.get('/api/export/evidence', ...auditRead, (req, res) => {
     audit: db.listAudit(auditLimit),
     edm: exactMatch.publicSummary(),
     catalog: appCatalog.reviewRollup(),
+    useCases: db.listAiUseCases(),
     examinerProfile: req.query.examinerProfile,
     report: { schedule: evidenceScheduleSummary() },
   }));
@@ -2800,16 +2801,18 @@ app.get('/api/export/evidence', ...auditRead, (req, res) => {
 // Shared live inputs for the control-mapping surfaces (/api/compliance and
 // /api/ncua/readiness). The full pack is /api/export/evidence.
 function controlMappingInputs() {
+  const generatedAt = new Date().toISOString();
   const activePolicy = policy.loadPolicy();
   const summaryQueries = db.listQueries({ all: true });
   return {
-    generatedAt: new Date().toISOString(),
+    generatedAt,
     scope: { rawPromptBodiesIncluded: false },
     policy: activePolicy,
     detectors: detector.listDetectors({ customDetectors: policy.customDetectorsForSensors() }),
     auditIntegrity: db.verifyAuditChain(),
     coverage: coverage.summarize(summaryQueries, activePolicy),
     edm: evidence.safeEdmSummary(exactMatch.publicSummary()),
+    useCases: ncuaReadiness.useCasesSummary(db.listAiUseCases(), generatedAt),
     summaryQueries,
     activePolicy,
   };
@@ -2851,6 +2854,51 @@ app.get('/api/ncua/readiness', auth.requireAuth, (req, res) => {
     reportSchedule: evidenceScheduleSummary(),
   });
   res.json({ entitled, report });
+});
+
+// AI use-case inventory (slice 2): distinct approval records per
+// (destination, department). Reads are any-console-role like the readiness
+// report; mutations are Security Admin + CSRF and audit enum/count detail
+// only — never the operator's free text.
+app.get('/api/ncua/use-cases', auth.requireAuth, (req, res) => {
+  const entitled = license.entitled('ncua_readiness');
+  res.json({ entitled, useCases: entitled ? db.listAiUseCases() : [] });
+});
+
+app.post('/api/ncua/use-cases', ...adminWrite, validation.validateBody(validation.useCaseSchema), (req, res) => {
+  if (!license.entitled('ncua_readiness')) return res.status(403).json({ error: 'not_entitled' });
+  const host = adapters.normalizeHost(req.body.destination);
+  if (!host) return res.status(400).json({ error: 'invalid destination' });
+  const record = db.upsertAiUseCase({
+    canonicalHost: host,
+    department: req.body.department,
+    owner: req.body.owner,
+    approvedUse: req.body.approvedUse,
+    allowedDataClasses: req.body.allowedDataClasses || [],
+    reviewStatus: req.body.reviewStatus,
+    vendorStatus: req.body.vendorStatus || 'not_reviewed',
+    nextReviewAt: req.body.nextReviewAt,
+    policyScopeId: req.body.policyScopeId,
+    orgId: tenant.config().tenantId,
+  }, new Date().toISOString());
+  db.appendAudit({
+    action: 'USE_CASE_UPDATED',
+    actor: req.user.user,
+    detail: `${record.canonicalHost} uc=${record.id}: reviewStatus=${record.reviewStatus}; vendorStatus=${record.vendorStatus}; dataClasses=${(record.allowedDataClasses || []).length}`,
+  });
+  res.json({ useCase: record });
+});
+
+app.post('/api/ncua/use-cases/:id/review', ...adminWrite, validation.validateBody(validation.useCaseReviewSchema), (req, res) => {
+  if (!license.entitled('ncua_readiness')) return res.status(403).json({ error: 'not_entitled' });
+  const record = db.reviewAiUseCase(String(req.params.id).slice(0, 80), req.body, new Date().toISOString());
+  if (!record) return res.status(404).json({ error: 'not found' });
+  db.appendAudit({
+    action: 'USE_CASE_REVIEWED',
+    actor: req.user.user,
+    detail: `uc=${record.id}: reviewStatus=${record.reviewStatus}; vendorStatus=${record.vendorStatus || 'not_reviewed'}; nextReviewAt=${record.nextReviewAt || 'none'}`,
+  });
+  res.json({ useCase: record });
 });
 
 app.get('/api/policy', auth.requireAuth, (req, res) => res.json(policy.loadPolicy()));

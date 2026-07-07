@@ -9,3 +9,16 @@
   gap: 14px;
   align-content: start;
 }
+
+.ncua-usecase-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+  padding: 0 16px 12px;
+}
+
+.ncua-usecase-review {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}

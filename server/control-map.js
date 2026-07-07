@@ -157,12 +157,10 @@ const CONTROL_MAPPINGS = [
 // with server/ncua-readiness.js.
 const MEMBER_IDENTIFIERS = ['US_SSN', 'MEMBER_ID', 'LOAN_NUMBER', 'BANK_ACCOUNT', 'ROUTING_NUMBER'];
 
-// Slice-2/3 controls (PLANS/ncua-readiness-center.md) whose evidence inputs do
+// Slice-3 controls (PLANS/ncua-readiness-center.md) whose evidence inputs do
 // not exist yet; they render not_provided with an honest summary until the
-// use-case inventory, incident records, and board packet ship.
+// incident records and board packet ship.
 const PENDING_CONTROL_SUMMARIES = {
-  ai_use_inventory: 'AI use-case inventory records are not yet attached; they ship with the NCUA Readiness inventory.',
-  vendor_service_provider_oversight: 'Vendor-review status is not yet attached; it ships with the AI use-case inventory.',
   incident_readiness: '72-hour incident records are not yet attached; they ship with the incident-readiness workflow.',
   board_reporting: 'Board packet evidence is not yet attached; it ships with Board Packet exports.',
 };
@@ -223,6 +221,31 @@ function stateFromMemberSafeguards(input) {
   return identifiersCovered && edmActive(input.edm) ? 'covered' : 'attention';
 }
 
+function stateFromUseCaseInventory(summary) {
+  if (!hasObject(summary)) return 'not_provided';
+  return Number(summary.total) > 0 && Number(summary.overdue) === 0 ? 'covered' : 'attention';
+}
+
+function useCaseInventorySummary(summary, state) {
+  if (state === 'not_provided') return 'AI use-case inventory records are not yet attached; record each department’s approved tools in NCUA Readiness.';
+  if (state === 'covered') return `${summary.total} AI use case(s) inventoried by department; reviews are current.`;
+  if (!Number(summary.total)) return 'No AI use cases recorded yet; inventory each department’s approved tools and data classes.';
+  return `${summary.overdue} use-case review(s) overdue; complete the reviews or retire the use cases.`;
+}
+
+function stateFromVendorOversight(summary) {
+  if (!hasObject(summary)) return 'not_provided';
+  const active = Number(summary.activeTotal) || 0;
+  return active > 0 && Number(summary.vendorReviewed) === active ? 'covered' : 'attention';
+}
+
+function vendorOversightSummary(summary, state) {
+  if (state === 'not_provided') return 'Vendor-review status is not yet attached; it is tracked on each AI use-case record.';
+  if (state === 'covered') return `Vendor due diligence is recorded for all ${summary.activeTotal} active AI use case(s).`;
+  if (!Number(summary.activeTotal)) return 'No active AI use cases carry vendor-review status yet.';
+  return `${Number(summary.vendorPending) + Number(summary.vendorNotReviewed)} active use case(s) lack completed vendor review.`;
+}
+
 function memberSafeguardsSummary(input, state) {
   if (state === 'not_provided') return 'No policy or EDM evidence attached to this pack.';
   if (state === 'covered') return 'Core-banking EDM fingerprints are active and member-identifier hard stops are enforced.';
@@ -243,12 +266,16 @@ function stateFor(control, input) {
   if (control.id === 'prompt_threat_defense') return stateFromPromptThreat(input);
   if (control.id === 'ai_activity_recordkeeping') return stateFromIntegrity(input.auditIntegrity);
   if (control.id === 'member_information_safeguards') return stateFromMemberSafeguards(input);
+  if (control.id === 'ai_use_inventory') return stateFromUseCaseInventory(input.useCases);
+  if (control.id === 'vendor_service_provider_oversight') return stateFromVendorOversight(input.useCases);
   return 'not_provided';
 }
 
 function summaryFor(control, input, state) {
   if (PENDING_CONTROL_SUMMARIES[control.id]) return PENDING_CONTROL_SUMMARIES[control.id];
   if (control.id === 'member_information_safeguards') return memberSafeguardsSummary(input, state);
+  if (control.id === 'ai_use_inventory') return useCaseInventorySummary(input.useCases, state);
+  if (control.id === 'vendor_service_provider_oversight') return vendorOversightSummary(input.useCases, state);
   if (control.id === 'tamper_evident_audit') {
     const count = Number(input.auditIntegrity && input.auditIntegrity.count) || 0;
     return state === 'covered'

@@ -346,6 +346,37 @@ const catalogImportSchema = z.object({
   source: z.enum(['browser', 'gateway', 'endpoint', 'mcp', 'csv_import', 'manual']).optional(),
 }).strict();
 
+// AI use-case inventory (PLANS/ncua-readiness-center.md slice 2). destination
+// must be a bare hostname — a URL or anything with a path is rejected so a
+// pasted deep link (which can carry query text) never becomes an inventory
+// key. Free-text fields are single-line, bounded, and reject sensitive codes
+// (safeOperatorText), so prompt-shaped text can't be smuggled into records.
+const USE_CASE_HOST = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/i;
+const USE_CASE_REVIEW_STATUS = ['approved', 'under_review', 'restricted', 'retired'];
+const USE_CASE_VENDOR_STATUS = ['reviewed', 'pending', 'not_reviewed'];
+const useCaseTextSchema = (max) => z.string().max(max).refine(safeOperatorText, { message: 'unsafe text' })
+  .refine((value) => !/:\/\//.test(value), { message: 'urls not allowed' });
+const useCaseDateSchema = z.string().min(1).max(40).refine((value) => Number.isFinite(Date.parse(value)), {
+  message: 'invalid datetime',
+});
+const useCaseSchema = z.object({
+  destination: z.string().min(1).max(253).regex(USE_CASE_HOST, { message: 'hostname only' }),
+  department: useCaseTextSchema(80).refine((value) => value.trim().length > 0, { message: 'required' }),
+  owner: useCaseTextSchema(160).optional(),
+  approvedUse: useCaseTextSchema(240).optional(),
+  allowedDataClasses: z.array(detectorIdSchema).max(24).optional(),
+  reviewStatus: z.enum(USE_CASE_REVIEW_STATUS).optional(),
+  vendorStatus: z.enum(USE_CASE_VENDOR_STATUS).optional(),
+  nextReviewAt: useCaseDateSchema.optional(),
+  policyScopeId: z.string().max(64).regex(/^[a-z0-9][a-z0-9_-]{0,63}$/).optional(),
+}).strict();
+
+const useCaseReviewSchema = z.object({
+  reviewStatus: z.enum(USE_CASE_REVIEW_STATUS),
+  vendorStatus: z.enum(USE_CASE_VENDOR_STATUS).optional(),
+  nextReviewAt: useCaseDateSchema.optional(),
+}).strict();
+
 function safeOperatorText(value) {
   const text = String(value || '');
   return !/[\u0000-\u001F]/.test(text) && !SENSITIVE_ROUTING_CODE.test(text);
@@ -679,6 +710,8 @@ module.exports = {
   catalogAddSchema,
   catalogReviewSchema,
   catalogImportSchema,
+  useCaseSchema,
+  useCaseReviewSchema,
   postureActionSchema,
   detectorFeedbackSchema,
   policyUpdateSchema,

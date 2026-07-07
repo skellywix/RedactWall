@@ -11,6 +11,21 @@ reconstructed from `ITERATIONS.md` and git history.
 
 ### Added
 
+- **NCUA Readiness Center (slice 2, Member-Data Inventory)** — the AI
+  use-case inventory (`PLANS/ncua-readiness-center.md`): migration v5 adds a
+  tenant-ready `ai_use_cases` table (orgId + Postgres RLS, one record per
+  tool-host + department), `GET/POST /api/ncua/use-cases` and a review
+  endpoint (Security Admin + CSRF; `USE_CASE_UPDATED`/`USE_CASE_REVIEWED`
+  audit entries carry enums, counts, and dates only), and an inventory table
+  with add/review flows in the NCUA Readiness view. Validation keeps records
+  inventory-shaped: hostname-only destinations, single-line bounded text
+  with sensitive-code rejection, data classes checked against real detector
+  ids. The `ai_use_inventory` and `vendor_service_provider_oversight`
+  controls now score live from the inventory, examiner packs embed the
+  summary plus pattern-redacted records, and the operator guide documents
+  the department scoped-policy pack (tighten-only `policyScopes` +
+  member-data routing to compliance).
+
 - **NCUA Readiness Center (slice 1, Examiner Proof)** — a new Govern console
   view (`/app/#/ncua`) and examiner-profile evidence pack for federal credit
   unions (`PLANS/ncua-readiness-center.md`, ROADMAP N2). A new

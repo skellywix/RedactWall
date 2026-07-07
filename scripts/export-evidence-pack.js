@@ -139,6 +139,7 @@ function buildEvidencePackFromRuntime(options = {}) {
     restoreDrill: verified.restoreDrill,
     edm: exactMatch.publicSummary(),
     catalog: appCatalog.reviewRollup(),
+    useCases: typeof db.listAiUseCases === 'function' ? db.listAiUseCases() : undefined,
     examinerProfile: options.examinerProfile,
     policyExceptionReview: typeof policy.policyExceptionReview === 'function'
       ? policy.policyExceptionReview(activePolicy)
