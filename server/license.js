@@ -133,6 +133,20 @@ function publicStatus() {
   };
 }
 
+// Feature entitlement for licensed console modules (first consumer: the NCUA
+// Readiness Center). Unlicensed = demo mode, which shows every module — the
+// license philosophy above gates nothing until a customer is licensed. For
+// licensed installs the feature flag or the enterprise plan grants access;
+// the payload persists through 'grace' and 'readonly', so entitlement
+// correctly survives expiry (readonly already blocks writes elsewhere).
+function entitled(feature) {
+  const s = status();
+  if (s.state === 'unlicensed') return true;
+  const p = s.payload || {};
+  const features = Array.isArray(p.features) ? p.features : [];
+  return features.includes(feature) || p.plan === 'enterprise';
+}
+
 // Express middleware: in 'readonly' state, block admin configuration writes
 // EXCEPT under /api/queries/ (reveal/assign support the approval workflow, which
 // must never be impaired) and the license-install route itself.
@@ -150,6 +164,7 @@ module.exports = {
   refresh,
   status,
   publicStatus,
+  entitled,
   requireWritable,
   licensePath,
   EMBEDDED_PUBLIC_KEY_PEM,

@@ -49,6 +49,7 @@ function loadScheduleConfig(file) {
     queryLimit: config.queryLimit,
     auditLimit: config.auditLimit,
     generatedBy: config.generatedBy,
+    examinerProfile: config.examinerProfile,
     scheduled: config.enabled !== false,
     schedule: {
       id: config.id || path.basename(configPath, path.extname(configPath)),
@@ -94,6 +95,8 @@ function buildEvidencePackFromRuntime(options = {}) {
   const coverage = options.coverageModule || require('../server/coverage');
   const detector = options.detectorModule || require('../server/detector');
   const customDetectors = options.customDetectorsModule || require('../server/custom-detectors');
+  const exactMatch = options.exactMatchModule || require('../server/exact-match');
+  const appCatalog = options.appCatalogModule || require('../server/app-catalog');
   const pkg = options.packageInfo || require('../package.json');
   const queryLimit = boundedNumber(options.queryLimit, DEFAULT_QUERY_LIMIT);
   const auditLimit = boundedNumber(options.auditLimit, DEFAULT_AUDIT_LIMIT);
@@ -134,6 +137,12 @@ function buildEvidencePackFromRuntime(options = {}) {
     audit: db.listAudit(auditLimit),
     backup: verified.backup,
     restoreDrill: verified.restoreDrill,
+    edm: exactMatch.publicSummary(),
+    catalog: appCatalog.reviewRollup(),
+    examinerProfile: options.examinerProfile,
+    policyExceptionReview: typeof policy.policyExceptionReview === 'function'
+      ? policy.policyExceptionReview(activePolicy)
+      : undefined,
   });
 }
 
@@ -182,6 +191,7 @@ function cliOptionsFromArgs(args, schedule = {}) {
     auditLimit: args['audit-limit'] || schedule.auditLimit,
     reportId: args['report-id'] || schedule.id,
     generatedBy: args['generated-by'] || schedule.generatedBy,
+    examinerProfile: args['examiner-profile'] || schedule.examinerProfile,
     periodStart: args['period-start'],
     periodEnd: args['period-end'],
     scheduled: args.scheduled === true || schedule.scheduled === true,
@@ -204,6 +214,7 @@ async function main(argv = process.argv.slice(2), deps = {}) {
     zipBytes: result.zipBytes,
     zipSha256: result.zipSha256,
     schemaVersion: result.pack.schemaVersion,
+    examinerProfile: result.pack.scope.examinerProfile || null,
     rawPromptBodiesIncluded: result.pack.scope.rawPromptBodiesIncluded,
     auditDetailsIncluded: result.pack.scope.auditDetailsIncluded,
   }, null, 2));

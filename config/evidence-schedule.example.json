@@ -2,6 +2,7 @@
   "id": "quarterly-examiner-pack",
   "enabled": true,
   "cadence": "quarterly",
+  "examinerProfile": "federal_credit_union",
   "outDir": "evidence-packs",
   "queryLimit": 5000,
   "auditLimit": 5000,

@@ -25,6 +25,7 @@ Use this index when you know the job but not the file name.
 | Endpoint agent, MCP guard, Docker, secrets, health checks | `DEPLOYMENT.md` |
 | Agent hooks for Claude Code (prompts, shell, MCP tool calls) | `AGENT_HOOKS.md` |
 | Evidence pack schedule automation | `EVIDENCE_PACK_TASK.md` |
+| NCUA Readiness Center and examiner pack | `NCUA_READINESS.md` |
 | Security trust package export | `SECURITY_TRUST_PACKAGE.md` |
 
 ## Identity, Policy, And Workflow

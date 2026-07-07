@@ -60,6 +60,8 @@ const releaseTokens = require('./release-token');
 const receipts = require('./receipts');
 const tenant = require('./tenant');
 const license = require('./license');
+const exactMatch = require('./exact-match');
+const ncuaReadiness = require('./ncua-readiness');
 const openapi = require('./openapi');
 const routing = require('./routing');
 const workflow = require('./workflow');
@@ -2788,23 +2790,67 @@ app.get('/api/export/evidence', ...auditRead, (req, res) => {
     queries,
     lineageQueries: summaryQueries,
     audit: db.listAudit(auditLimit),
+    edm: exactMatch.publicSummary(),
+    catalog: appCatalog.reviewRollup(),
+    examinerProfile: req.query.examinerProfile,
+    report: { schedule: evidenceScheduleSummary() },
   }));
 });
 
-// Compliance framework coverage (lightweight; the full pack is /api/export/evidence).
-app.get('/api/compliance', auth.requireAuth, (req, res) => {
-  const controlMap = require('./control-map');
+// Shared live inputs for the control-mapping surfaces (/api/compliance and
+// /api/ncua/readiness). The full pack is /api/export/evidence.
+function controlMappingInputs() {
   const activePolicy = policy.loadPolicy();
   const summaryQueries = db.listQueries({ all: true });
-  const mappings = controlMap.buildControlMappings({
+  return {
     generatedAt: new Date().toISOString(),
     scope: { rawPromptBodiesIncluded: false },
     policy: activePolicy,
     detectors: detector.listDetectors({ customDetectors: policy.customDetectorsForSensors() }),
     auditIntegrity: db.verifyAuditChain(),
     coverage: coverage.summarize(summaryQueries, activePolicy),
+    edm: evidence.safeEdmSummary(exactMatch.publicSummary()),
+    summaryQueries,
+    activePolicy,
+  };
+}
+
+// The operator's evidence-pack schedule (docs/EVIDENCE_PACK_TASK.md keeps it
+// at config/evidence-schedule.json) so readiness export-health reflects the
+// real schedule. Absent or unparseable file = no schedule; never throws.
+function evidenceScheduleSummary() {
+  const file = path.join(__dirname, '..', 'config', 'evidence-schedule.json');
+  if (!fs.existsSync(file)) return null;
+  try {
+    return require('../scripts/export-evidence-pack').loadScheduleConfig(file).schedule || null;
+  } catch (e) {
+    return null;
+  }
+}
+
+// Compliance framework coverage (lightweight; the full pack is /api/export/evidence).
+app.get('/api/compliance', auth.requireAuth, (req, res) => {
+  const controlMap = require('./control-map');
+  res.json({ controlMappings: controlMap.buildControlMappings(controlMappingInputs()) });
+});
+
+// NCUA Readiness (PLANS/ncua-readiness-center.md slice 1): prompt-free
+// examiner-readiness report for federal credit unions. Any console role can
+// read it, like /api/compliance. Entitlement gates the console module (the
+// report is withheld for licensed installs without the add-on) but never
+// evidence export; demo mode (unlicensed) is always entitled.
+app.get('/api/ncua/readiness', auth.requireAuth, (req, res) => {
+  const entitled = license.entitled('ncua_readiness');
+  if (!entitled) return res.json({ entitled, report: null });
+  const inputs = controlMappingInputs();
+  const report = ncuaReadiness.summarize({
+    ...inputs,
+    policyExceptionReview: policy.policyExceptionReview(inputs.activePolicy),
+    catalog: appCatalog.reviewRollup(),
+    queries: inputs.summaryQueries,
+    reportSchedule: evidenceScheduleSummary(),
   });
-  res.json({ controlMappings: mappings });
+  res.json({ entitled, report });
 });
 
 app.get('/api/policy', auth.requireAuth, (req, res) => res.json(policy.loadPolicy()));

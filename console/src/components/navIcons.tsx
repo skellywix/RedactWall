@@ -37,6 +37,9 @@ export const NAV_ICONS = {
   compliance: (
     <svg viewBox="0 0 24 24" fill="none"><path d="M9 12l2 2 4-4M12 3l7 3v5c0 4.2-2.6 6.8-7 8-4.4-1.2-7-3.8-7-8V6l7-3Z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" /></svg>
   ),
+  ncua: (
+    <svg viewBox="0 0 24 24" fill="none"><path d="M4 20h16M6 20v-9m4 9v-9m4 9v-9m4 9v-9M3 11l9-6 9 6" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg>
+  ),
   identity: (
     <svg viewBox="0 0 24 24" fill="none"><path d="M12 4a4 4 0 1 1 0 8 4 4 0 0 1 0-8ZM4.5 20c.7-3.4 3.3-5.5 7.5-5.5s6.8 2.1 7.5 5.5M17 8h3m-1.5-1.5v3" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg>
   ),

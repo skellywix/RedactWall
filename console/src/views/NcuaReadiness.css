@@ -1,0 +1,11 @@
+/* NCUA Readiness view. All panel, KPI, chip, and stat-card classes are styled
+   by server/public/console-base.css, which the console loads before the
+   bundle — this file only supplies the frame layout the legacy
+   .console-frame section provided (display:grid; gap:14px). Rules are scoped
+   under .ncua-view so parallel views cannot collide. */
+
+.ncua-view {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}

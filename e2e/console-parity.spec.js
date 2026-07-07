@@ -102,6 +102,7 @@ const ROUTES = {
   govern: [
     { hash: '/catalog', heading: 'AI App Catalog' },
     { hash: '/compliance', heading: 'Compliance Posture' },
+    { hash: '/ncua', heading: 'NCUA Readiness' },
     { hash: '/identity', heading: 'Identity' },
     { hash: '/policy', heading: 'Configuration' },
   ],
