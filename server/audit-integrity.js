@@ -50,7 +50,14 @@ function verifyAuditChainForDatabase(database) {
   const liveHashes = batchQueryContentHashes(database, [...latest.keys()]);
   for (const [qid, e] of latest) {
     const live = liveHashes.get(qid);
-    if (live && live !== e.contentHash) {
+    if (!live) {
+      // The audit entry binds this query's evidence, but the query row is gone.
+      // Deletion of bound evidence is tampering — nothing legitimately removes a
+      // query row (retention purge keeps the row and re-anchors), so a missing
+      // live hash is a verification failure, not a silent pass.
+      return { ok: false, count: rows.length, brokenAt: e.id, reason: 'evidence-missing', queryId: qid };
+    }
+    if (live !== e.contentHash) {
       return { ok: false, count: rows.length, brokenAt: e.id, reason: 'evidence', queryId: qid };
     }
   }

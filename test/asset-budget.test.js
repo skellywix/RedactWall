@@ -93,7 +93,8 @@ test('browser extension assets stay within install package budgets', () => {
     // Raised 105k/37k -> 112k/40k for the vendor-labeled secrets catalog
     // (secretVendor table + expanded SECRET_KEY branches). Still tight enough
     // to catch an accidentally committed LR model (~10KB raw each).
-    { path: 'sensors/browser-extension/lib/detect.js', maxRawBytes: 112_000, maxGzipBytes: 40_000 },
+    // +~1KB raw / +0.2KB gzip for the Unicode digit-fold table (review fix D1).
+    { path: 'sensors/browser-extension/lib/detect.js', maxRawBytes: 112_000, maxGzipBytes: 41_000 },
     { path: 'sensors/browser-extension/content.js', maxRawBytes: 60_000, maxGzipBytes: 16_000 },
     { path: 'sensors/browser-extension/background.js', maxRawBytes: 30_000, maxGzipBytes: 9_000 },
     { path: 'sensors/browser-extension/manifest.json', maxRawBytes: 14_000, maxGzipBytes: 2_500 },
@@ -107,7 +108,8 @@ test('browser extension assets stay within install package budgets', () => {
     }), { rawBytes: 0, gzipBytes: 0 });
 
   assertWithin('browser extension assets raw total', totals.rawBytes, 220_000);
-  assertWithin('browser extension assets gzip total', totals.gzipBytes, 70_000);
+  // +0.2KB gzip from the Unicode digit-fold table in detect.js (review fix D1).
+  assertWithin('browser extension assets gzip total', totals.gzipBytes, 71_000);
 });
 
 test('browser extension store packages stay within size budget', (t) => {

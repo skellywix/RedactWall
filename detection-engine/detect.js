@@ -293,7 +293,7 @@
     { id: 'CREDIT_CARD', score: 0.95, re: /\b(?:\d[ -]?){13,19}\b/g, validate: (m, text) => luhnValid(m) && !!cardNetwork(m) && (/[ -]/.test(m.trim()) || CARD_CTX.test(text || '')) },
     // Match a contiguous IBAN body OR canonical space-grouped chunks, but never
     // absorb a following plain word (which greedily fails mod-97 and hid the IBAN).
-    { id: 'IBAN', score: 0.9, re: /\b[A-Z]{2}\d{2}(?:[A-Z0-9]{10,30}|(?: [A-Z0-9]{2,4}){3,9})\b/g, validate: (m) => ibanValid(m) },
+    { id: 'IBAN', score: 0.9, re: /\b[A-Za-z]{2}\d{2}(?:[A-Za-z0-9]{10,30}|(?: [A-Z0-9]{2,4}){3,9})\b/g, validate: (m) => ibanValid(m) },
     // Routing/ABA — valid checksum AND banking context (a bare 9-digit number is
     // far more often an id than a routing number).
     { id: 'ROUTING_NUMBER', score: 0.6, re: /\b\d{9}\b/g, ctx: /\b(routing|aba|rtn|transit|ach|wire|direct\s*deposit|bank)\b/i, validate: (m) => abaValid(m) },
@@ -330,7 +330,7 @@
     // filtering. Bounded {0,4}/{2,7} so there is no catastrophic backtracking.
     { id: 'IPV6_ADDRESS', score: 0.75, re: /(?<![0-9A-Fa-f:])(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}(?![0-9A-Fa-f:])/g, validate: (m) => ipv6Valid(m) },
     { id: 'DOB', score: 0.72, re: /\b(?:0?[1-9]|1[0-2])[/\-](?:0?[1-9]|[12]\d|3[01])[/\-](?:19|20)\d{2}\b/g, ctx: /\b(dob|date of birth|birthdate|born|birthday|patient|member|customer)\b/i, validate: (m) => datePlausible(m) },
-    { id: 'PRIVATE_KEY', score: 0.99, re: /-----BEGIN (?:RSA |EC |OPENSSH |PGP )?PRIVATE KEY-----/g },
+    { id: 'PRIVATE_KEY', score: 0.99, re: /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----/g },
     { id: 'SECRET_KEY', score: 0.95, re: /\b(?:sk-(?:live|test|proj)?-?[A-Za-z0-9_-]{16,}|sk_(?:live|test)_[A-Za-z0-9]{16,}|rk_(?:live|test)_[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{22,}|glpat-[A-Za-z0-9_-]{20,}|xapp-\d-[A-Z0-9]+-\d+-[a-f0-9]{32,}|xox[baprs]-[A-Za-z0-9-]{10,}|SG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}|AIza[0-9A-Za-z\-_]{20,}|ya29\.[A-Za-z0-9_-]{30,}|npm_[A-Za-z0-9]{36}|hf_[A-Za-z0-9]{30,}|dop_v1_[a-f0-9]{64}|shp(?:at|ss)_[a-fA-F0-9]{32}|pypi-AgEIcHlwaS5vcmc[A-Za-z0-9_-]{20,}|PMAK-[0-9a-f]{24}-[0-9a-f]{34}|dapi[0-9a-f]{32}(?:-\d)?|[A-Za-z0-9]{14}\.atlasv1\.[A-Za-z0-9_=-]{40,}|SK[0-9a-fA-F]{32}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})\b/g },
     { id: 'SECRET_KEY', score: 0.9, re: /\b[A-Z][A-Z0-9_]*(?:SECRET|TOKEN|API_KEY|ACCESS_KEY|PASSWORD|PRIVATE_KEY)\s*[:=]\s*["']?([A-Za-z0-9_./+=@%:-]{8,})["']?/g, group: 1 },
     // Cloud secrets that need context or key=value shape rather than a prefix.
@@ -391,7 +391,7 @@
     if (/\([^)]*(?:\+|\*|\{\d+(?:,\d*)?\})[^)]*\)(?:\+|\*|\{\d+(?:,\d*)?\})/.test(p)) return false;
     // Unbounded quantifier over an alternation group whose branches can overlap
     // (e.g. '([0-9]|\d)+') backtracks exponentially — reject it too.
-    if (/\([^)]*\|[^)]*\)[+*]/.test(p)) return false;
+    if (/\([^)]*\|[^)]*\)(?:[+*]|\{\d+(?:,\d*)?\})/.test(p)) return false;
     const reps = p.match(/\{(\d+)(?:,(\d*))?\}/g) || [];
     for (const rep of reps) {
       const m = rep.match(/\{(\d+)(?:,(\d*))?\}/);
@@ -847,12 +847,31 @@
     };
   }
 
+  // Unicode digit fold: map non-ASCII decimal digits (fullwidth, Arabic-Indic,
+  // Devanagari, Thai, ...) to ASCII so a structured detector cannot be bypassed
+  // by writing an SSN/card/IBAN in another digit script. Strictly one BMP code
+  // point -> one ASCII char, so finding offsets stay valid against the ORIGINAL
+  // text that tokenize()/redact() slice. Pure-ASCII input (the common case)
+  // short-circuits with no allocation.
+  const NON_ASCII_DIGIT = /[\u0660-\u0669\u06F0-\u06F9\u07C0-\u07C9\u0966-\u096F\u09E6-\u09EF\u0A66-\u0A6F\u0AE6-\u0AEF\u0B66-\u0B6F\u0BE6-\u0BEF\u0C66-\u0C6F\u0CE6-\u0CEF\u0D66-\u0D6F\u0E50-\u0E59\u0ED0-\u0ED9\u0F20-\u0F29\u1040-\u1049\u17E0-\u17E9\u1810-\u1819\uFF10-\uFF19]/;
+  const NON_ASCII_DIGIT_G = new RegExp(NON_ASCII_DIGIT.source, 'g');
+  const DIGIT_BLOCK_STARTS = [0x0660, 0x06F0, 0x07C0, 0x0966, 0x09E6, 0x0A66, 0x0AE6, 0x0B66, 0x0BE6, 0x0C66, 0x0CE6, 0x0D66, 0x0E50, 0x0ED0, 0x0F20, 0x1040, 0x17E0, 0x1810, 0xFF10];
+  function foldDigits(text) {
+    if (!NON_ASCII_DIGIT.test(text)) return text;
+    return text.replace(NON_ASCII_DIGIT_G, (ch) => {
+      const cp = ch.charCodeAt(0);
+      for (const b of DIGIT_BLOCK_STARTS) { if (cp >= b && cp <= b + 9) return String(cp - b); }
+      return ch;
+    });
+  }
+
   function analyze(text, opts) {
     opts = opts || {};
     const disabled = new Set([].concat(opts.ignore || [], opts.disabledDetectors || []));
     if (!text || typeof text !== 'string') {
       return { findings: [], categories: [], maxSeverity: 0, maxSeverityLabel: 'none', riskScore: 0, entityCounts: {}, scoreBreakdown: [], regulations: [] };
     }
+    text = foldDigits(text);
     let findings = detectStructured(text, disabled, opts.customDetectors);
     if (opts.exactMatch && !disabled.has('EXACT_MATCH')) findings = findings.concat(detectExactMatch(text, opts.exactMatch));
     findings.sort((a, b) => (b.severity - a.severity) || (b.score - a.score));

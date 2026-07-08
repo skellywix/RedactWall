@@ -10,6 +10,46 @@ logs were pruned on 2026-07-04; they are preserved in git history
 
 Roadmap references (N*/X*) point at `ROADMAP.md`.
 
+### Adversarial review 2026-07-08 — fix ledger (`claude/adversarial-codebase-review-xpfuyj`)
+
+Full report + repro: the review artifact. Each fix below ships with a
+failing-first regression guard (`test/adversarial-review-fixes.test.js`,
+`test/adversarial-review-a1.test.js`) and the full node suite stays green.
+
+**Fixed (14):** D1 unicode-digit detector bypass · D3 ENCRYPTED/DSA private
+keys · D4 lowercase IBAN · N1 custom-detector ReDoS guard · N9 empty-extraction
+OCR hold · N10 Word comments/footnotes scanned · N4 shadow-AI/self-block SIEM
+alerts · C3 deleted-evidence detection · G1 gateway tool-definition scan/redact
+· G4 response tool-call scan/redact · N6 backup manifest required · A1 SCIM
+demote revokes sessions · R1 SSRF alt-encoding block · E1 re-validate sensor
+`masked`.
+
+**Remaining code-fixable (no decision needed):**
+- N11 — Office per-entry parse errors should fail closed (deferred: needs a
+  deterministic corrupt-OOXML fixture; no fix without a red test).
+- C5 — `/status/:id` should scope by owner instead of the fail-open no-token pass.
+- A2 — OIDC login for a SCIM user with no assigned role (low; partly by design).
+- A3 — logout doesn't invalidate the stateless token (needs a jti denylist or
+  per-user valid-after epoch).
+
+**FP-risk — deliberately not auto-fixed (review-standards caution):**
+- D2 (bare card fires only with separator/context) and D5 (bare 9-digit SSN):
+  broadening recall risks benign false positives; needs careful counter-tests.
+
+**Decision-blocked — need a human call (safest mitigation noted):**
+- C1 — audit chain is unkeyed with no external anchor. A real fix HMAC-keys the
+  chain, which requires a one-time rekey MIGRATION of existing logs (their
+  stored hashes change) + a key held outside the DB. Not shippable unilaterally.
+- N2 — EDM fingerprints are fast/reversible. A slow keyed KDF changes the
+  fingerprint format (existing `config/exact-match.json` must be regenerated)
+  and can't fully protect an on-device salt; genuine architecture tradeoff.
+- G2/G3/G5 — kill-switch: reject env key-override + placeholder in connected
+  mode (G2), monotonic high-water-mark vs clock rollback (G3), refuse a wiped
+  install anchor (G5). Code-doable and fail-closed, but the real vendor private
+  key issuance is a release task, so these want a coordinated call.
+- N8 — HA gateway ships plaintext HTTP. Config + docs are code; real TLS certs
+  are supplied at deploy.
+
 **Active engineering thread — stack upgrade** (`PLANS/stack-upgrade-plan.md`):
 
 - WS1 A3: **DONE.** All 16 operator views are ported to the React `/app`
