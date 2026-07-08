@@ -430,7 +430,14 @@ function saveScimUser(user) {
   if (existing) scimUserUpdate.run(row);
   else scimUserInsert.run({ ...row, createdAt: merged.createdAt });
   inactiveIdentityCache = null;
-  if ((!existing || existing.active !== false) && merged.active === false) {
+  // Revoke live sessions when the user is deactivated OR their direct role
+  // changes while still active. Sessions embed the role in the signed cookie,
+  // so without this a demoted security_admin would keep releasing PII for the
+  // full session TTL (review finding A1). (Group-membership-driven role changes
+  // flow through group updates, not saveScimUser — tracked separately.)
+  const wasActive = !existing || existing.active !== false;
+  const roleChanged = !!existing && normalizedIdentity(existing.role) !== normalizedIdentity(merged.role);
+  if (wasActive && (merged.active === false || roleChanged)) {
     for (const identity of scimIdentities(merged)) revokeIdentity(identity);
   }
   return merged;
