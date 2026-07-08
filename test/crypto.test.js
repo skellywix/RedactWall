@@ -21,12 +21,19 @@ function childEnv(overrides = {}) {
   return {
     ...process.env,
     REDACTWALL_ENV_PATH: path.join(os.tmpdir(), 'ps-crypto-test-missing.env'),
+    // Blank the key vars AND their legacy aliases. env.js promotes
+    // PROMPTWALL_*/SENTINEL_* to REDACTWALL_*, so clearing only the canonical
+    // names lets an ambient .env (which ships SENTINEL_DATA_KEY) silently
+    // re-enable encryption and break the "no key configured" scenario.
     REDACTWALL_SECRET: '',
     REDACTWALL_DATA_KEY: '',
     REDACTWALL_DATA_KEY_PREVIOUS: '',
-    REDACTWALL_SECRET: '',
-    REDACTWALL_DATA_KEY: '',
-    REDACTWALL_DATA_KEY_PREVIOUS: '',
+    PROMPTWALL_SECRET: '',
+    PROMPTWALL_DATA_KEY: '',
+    PROMPTWALL_DATA_KEY_PREVIOUS: '',
+    SENTINEL_SECRET: '',
+    SENTINEL_DATA_KEY: '',
+    SENTINEL_DATA_KEY_PREVIOUS: '',
     ...overrides,
   };
 }

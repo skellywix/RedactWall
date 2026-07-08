@@ -29,6 +29,19 @@ test('merge preserves foreign hook entries', () => {
   assert.ok(merged.hooks.PreToolUse.some(ownsEntry), 'our entry added');
 });
 
+test('ownership survives Windows-style backslash paths (cross-platform)', () => {
+  // A hookPath built by path.join on Windows uses backslashes, so the command
+  // written into settings.json is 'node "…\\agent-hooks\\hook.js" --quiet'.
+  // ownsEntry must still recognize it, or merge duplicates and uninstall no-ops.
+  // Passing the path explicitly makes this fail on any OS if the bug returns.
+  const winPath = 'C:\\Users\\Jane\\redactwall\\sensors\\agent-hooks\\hook.js';
+  const once = mergeHooks({}, winPath);
+  assert.ok(once.hooks.PreToolUse.some(ownsEntry), 'own entry recognized with backslash path');
+  const twice = mergeHooks(once, winPath);
+  assert.strictEqual(twice.hooks.PreToolUse.length, 1, 'idempotent with backslash path');
+  assert.strictEqual(twice.hooks.UserPromptSubmit.length, 1);
+});
+
 test('uninstall removes only RedactWall-owned entries', () => {
   const foreign = { hooks: { PreToolUse: [{ matcher: 'Write', hooks: [{ type: 'command', command: 'other-tool' }] }] } };
   const merged = mergeHooks(foreign);
