@@ -44,6 +44,7 @@ const CAMEL_IDENTIFIERS = [
   'createdAt', 'updatedAt', 'queryId', 'detectorId', 'dedupeKey', 'destId',
   'canonicalHost', 'firstSeen', 'lastSeen', 'userName', 'displayName',
   'revokedAt', 'usedAt', 'codeIndex', 'prevHash', 'orgId', 'user',
+  'reviewStatus', 'nextReviewAt',
 ];
 const CAMEL_RE = new RegExp(`(?<!["@])\\b(${CAMEL_IDENTIFIERS.join('|')})\\b`, 'g');
 

@@ -16,7 +16,7 @@ import { toast } from '../../lib/toast';
  * operator-entered inventory text; nothing here ever shows prompt content.
  */
 
-export interface UseCaseRecord {
+interface UseCaseRecord {
   id: string;
   canonicalHost: string;
   department: string;
@@ -167,7 +167,9 @@ export default function UseCasesPanel() {
       <div style={{ padding: '0 16px 14px', overflowX: 'auto' }}>
         {!loaded ? (
           <div className="empty">Loading inventory…</div>
-        ) : !rows?.length ? (
+        ) : rows === null ? (
+          <div className="empty">Could not load the inventory — refresh the page to retry.</div>
+        ) : !rows.length ? (
           <div className="empty">
             No AI use cases recorded yet. Inventory each department's approved tools, owners, and allowed data
             classes — distinct records per department keep "ChatGPT in Lending" separate from Marketing.
@@ -191,7 +193,12 @@ export default function UseCasesPanel() {
                   <td><span className={`insights-chip ${REVIEW_TONE[row.reviewStatus] || 'tone-neutral'}`}>{row.reviewStatus.replace('_', ' ')}</span></td>
                   <td>{(row.vendorStatus || 'not_reviewed').replace('_', ' ')}</td>
                   <td>{row.nextReviewAt ? row.nextReviewAt.slice(0, 10) : '—'}</td>
-                  {isAdmin && <td><ReviewCell row={row} onSaved={() => void load()} /></td>}
+                  {isAdmin && (
+                    <td>
+                      {/* keyed on updatedAt so a reload remounts the cell with fresh state */}
+                      <ReviewCell key={`${row.id}:${row.updatedAt || ''}`} row={row} onSaved={() => void load()} />
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

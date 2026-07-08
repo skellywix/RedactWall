@@ -156,7 +156,7 @@ test('control map flags incomplete member-identifier hard stops', () => {
   assert.match(control.summary, /MEMBER_ID/);
 });
 
-test('control map keeps slice-2/3 controls not_provided with honest summaries', () => {
+test('controls without evidence inputs stay not_provided with honest summaries', () => {
   const mappings = controlMap.buildControlMappings({ generatedAt: '2026-07-07T12:00:00.000Z', policy: FCU_POLICY });
   for (const id of ['ai_use_inventory', 'vendor_service_provider_oversight', 'incident_readiness', 'board_reporting']) {
     const control = mappings.find((c) => c.id === id);

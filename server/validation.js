@@ -356,11 +356,15 @@ const USE_CASE_REVIEW_STATUS = ['approved', 'under_review', 'restricted', 'retir
 const USE_CASE_VENDOR_STATUS = ['reviewed', 'pending', 'not_reviewed'];
 const useCaseTextSchema = (max) => z.string().max(max).refine(safeOperatorText, { message: 'unsafe text' })
   .refine((value) => !/:\/\//.test(value), { message: 'urls not allowed' });
-const useCaseDateSchema = z.string().min(1).max(40).refine((value) => Number.isFinite(Date.parse(value)), {
-  message: 'invalid datetime',
-});
+// Strict ISO shape, not bare Date.parse: V8's lenient parser accepts
+// parenthesized "date comments", which would let free text (or an SSN-shaped
+// string) ride a date field into the immutable audit log and examiner packs.
+const useCaseDateSchema = z.string().max(40)
+  .regex(/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?Z?)?$/, { message: 'invalid datetime' })
+  .refine((value) => Number.isFinite(Date.parse(value)), { message: 'invalid datetime' });
 const useCaseSchema = z.object({
-  destination: z.string().min(1).max(253).regex(USE_CASE_HOST, { message: 'hostname only' }),
+  destination: z.string().min(1).max(253).regex(USE_CASE_HOST, { message: 'hostname only' })
+    .refine((value) => !SENSITIVE_ROUTING_CODE.test(value), { message: 'sensitive identifier not allowed' }),
   department: useCaseTextSchema(80).refine((value) => value.trim().length > 0, { message: 'required' }),
   owner: useCaseTextSchema(160).optional(),
   approvedUse: useCaseTextSchema(240).optional(),

@@ -140,13 +140,7 @@ test('examiner-profile export stamps schemaVersion 3; default export stays 2', a
 });
 
 async function adminSession(port) {
-  const res = await fetch(`http://127.0.0.1:${port}/api/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ user: 'admin', password: 'unit-pass' }),
-  });
-  assert.strictEqual(res.status, 200);
-  const cookie = (res.headers.get('set-cookie') || '').split(';')[0];
+  const cookie = await login(port, 'admin', 'unit-pass');
   const csrfRes = await fetch(`http://127.0.0.1:${port}/api/csrf`, { headers: { cookie } });
   const { csrfToken } = await csrfRes.json();
   return { cookie, csrfToken };
@@ -263,5 +257,66 @@ test('auditor cannot mutate use cases', async () => {
       body: JSON.stringify({ destination: 'claude.ai', department: 'IT' }),
     });
     assert.strictEqual(attempt.status, 403);
+  });
+});
+
+test('use-case upsert preserves review evidence and dedupes department variants', async () => {
+  await withServer(async (port) => {
+    const session = await adminSession(port);
+    const created = await postJson(port, '/api/ncua/use-cases', session, {
+      destination: 'gemini.google.com',
+      department: 'Collections',
+      owner: 'c.jones@cu.test',
+      approvedUse: 'Summarize hardship letters with synthetic data',
+      allowedDataClasses: ['MEMBER_ID'],
+      nextReviewAt: '2027-03-01',
+    });
+    const { useCase } = await created.json();
+    await postJson(port, `/api/ncua/use-cases/${useCase.id}/review`, session, {
+      reviewStatus: 'approved',
+      vendorStatus: 'reviewed',
+    });
+
+    // Partial re-POST (different owner, whitespace/case department variant):
+    // must update the SAME record and keep every unsent field intact.
+    const repost = await postJson(port, '/api/ncua/use-cases', session, {
+      destination: 'gemini.google.com',
+      department: '  collections ',
+      owner: 'new.owner@cu.test',
+    });
+    assert.strictEqual(repost.status, 200);
+    const merged = (await repost.json()).useCase;
+    assert.strictEqual(merged.id, useCase.id);
+    assert.strictEqual(merged.owner, 'new.owner@cu.test');
+    assert.strictEqual(merged.reviewStatus, 'approved');
+    assert.strictEqual(merged.vendorStatus, 'reviewed');
+    assert.strictEqual(merged.approvedUse, 'Summarize hardship letters with synthetic data');
+    assert.deepStrictEqual(merged.allowedDataClasses, ['MEMBER_ID']);
+    assert.strictEqual(merged.nextReviewAt, '2027-03-01');
+
+    const rows = (await (await fetch(`http://127.0.0.1:${port}/api/ncua/use-cases`, { headers: { cookie: session.cookie } })).json()).useCases;
+    assert.strictEqual(rows.filter((r) => r.canonicalHost === 'gemini.google.com').length, 1);
+  });
+});
+
+test('review of an unknown use-case id returns 404; date fields reject V8 date comments', async () => {
+  await withServer(async (port) => {
+    const session = await adminSession(port);
+    const missing = await postJson(port, '/api/ncua/use-cases/uc_missing/review', session, { reviewStatus: 'retired' });
+    assert.strictEqual(missing.status, 404);
+
+    // V8's lenient Date.parse accepts parenthesized "comments" — an SSN-shaped
+    // string must not ride a date field into the audit log.
+    const smuggled = await postJson(port, '/api/ncua/use-cases', session, {
+      destination: 'claude.ai',
+      department: 'IT',
+      nextReviewAt: '2027-01-01 (078-05-1120)',
+    });
+    assert.strictEqual(smuggled.status, 400);
+    const ssnHost = await postJson(port, '/api/ncua/use-cases', session, {
+      destination: '078051120123.example.com',
+      department: 'IT',
+    });
+    assert.strictEqual(ssnHost.status, 400);
   });
 });

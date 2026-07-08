@@ -228,26 +228,27 @@ function safeBackupEvidence(input) {
   };
 }
 
-// Use-case inventory records for the examiner pack. Free-text fields
-// (department/owner/approvedUse) pass safeThreatText — bounded plus
-// SSN/card/secret pattern redaction — at this export boundary, on top of the
-// create-time validation, so a record can never carry member PII out.
+// Use-case inventory records for the examiner pack. EVERY string field —
+// not only the free-text ones — passes safeThreatText (bounded plus
+// SSN/card/secret pattern redaction) at this export boundary, on top of the
+// create-time validation, so a record written by any path can never carry
+// member PII out.
 function safeUseCaseRecord(record) {
   if (!record || typeof record !== 'object') return null;
   return {
-    id: safeBoundedText(record.id, 80),
-    destination: safeBoundedText(record.canonicalHost, 253),
+    id: safeThreatText(record.id, 80),
+    destination: safeThreatText(record.canonicalHost, 253),
     department: safeThreatText(record.department, 80),
     owner: safeThreatText(record.owner, 160),
     approvedUse: safeThreatText(record.approvedUse, 240),
     allowedDataClasses: (Array.isArray(record.allowedDataClasses) ? record.allowedDataClasses : [])
-      .slice(0, 24).map((idText) => safeBoundedText(idText, 80)),
-    reviewStatus: safeBoundedText(record.reviewStatus, 40),
-    vendorStatus: safeBoundedText(record.vendorStatus, 40) || 'not_reviewed',
-    nextReviewAt: safeBoundedText(record.nextReviewAt, 80),
-    policyScopeId: safeBoundedText(record.policyScopeId, 64),
-    createdAt: safeBoundedText(record.createdAt, 80),
-    updatedAt: safeBoundedText(record.updatedAt, 80),
+      .slice(0, 24).map((idText) => safeThreatText(idText, 80)),
+    reviewStatus: safeThreatText(record.reviewStatus, 40),
+    vendorStatus: safeThreatText(record.vendorStatus, 40) || 'not_reviewed',
+    nextReviewAt: safeThreatText(record.nextReviewAt, 80),
+    policyScopeId: safeThreatText(record.policyScopeId, 64),
+    createdAt: safeThreatText(record.createdAt, 80),
+    updatedAt: safeThreatText(record.updatedAt, 80),
   };
 }
 

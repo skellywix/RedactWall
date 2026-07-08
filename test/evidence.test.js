@@ -934,3 +934,21 @@ test('default packs carry no use-case records section', () => {
   assert.strictEqual(pack.useCases, undefined);
   assert.ok(pack.controlMappings.some((c) => c.id === 'ai_use_inventory' && c.state === 'covered'));
 });
+
+test('empty inventory grades attention when provided; absent inventory stays not_provided', () => {
+  const build = (useCases) => evidence.buildEvidencePack({
+    generatedAt: '2026-07-07T12:00:00.000Z',
+    policy: {},
+    auditIntegrity: { ok: true, count: 0 },
+    queries: [],
+    audit: [],
+    ...(useCases !== undefined ? { useCases } : {}),
+  });
+
+  const provided = build([]);
+  assert.strictEqual(provided.controlMappings.find((c) => c.id === 'ai_use_inventory').state, 'attention');
+  // Unentitled installs never pass rows, so their packs keep the honest state.
+  const absent = build(undefined);
+  assert.strictEqual(absent.controlMappings.find((c) => c.id === 'ai_use_inventory').state, 'not_provided');
+  assert.strictEqual(absent.controlMappings.find((c) => c.id === 'vendor_service_provider_oversight').state, 'not_provided');
+});

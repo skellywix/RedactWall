@@ -2792,7 +2792,7 @@ app.get('/api/export/evidence', ...auditRead, (req, res) => {
     audit: db.listAudit(auditLimit),
     edm: exactMatch.publicSummary(),
     catalog: appCatalog.reviewRollup(),
-    useCases: db.listAiUseCases(),
+    useCases: license.entitled('ncua_readiness') ? db.listAiUseCases() : undefined,
     examinerProfile: req.query.examinerProfile,
     report: { schedule: evidenceScheduleSummary() },
   }));
@@ -2812,10 +2812,23 @@ function controlMappingInputs() {
     auditIntegrity: db.verifyAuditChain(),
     coverage: coverage.summarize(summaryQueries, activePolicy),
     edm: evidence.safeEdmSummary(exactMatch.publicSummary()),
-    useCases: ncuaReadiness.useCasesSummary(db.listAiUseCases(), generatedAt),
+    // Only entitled installs get the inventory graded: an unentitled licensed
+    // install cannot populate the inventory (the mutation routes 403), so its
+    // compliance surfaces must keep the honest not_provided state instead of
+    // an unresolvable attention.
+    useCases: license.entitled('ncua_readiness')
+      ? ncuaReadiness.useCasesSummary(db.listAiUseCases(), generatedAt)
+      : null,
     summaryQueries,
     activePolicy,
   };
+}
+
+// The NCUA module's mutation gate: reads stay open (they carry the entitled
+// flag instead) so the console can render the upsell state.
+function requireNcuaEntitled(req, res, next) {
+  if (license.entitled('ncua_readiness')) return next();
+  return res.status(403).json({ error: 'not_entitled' });
 }
 
 // The operator's evidence-pack schedule (docs/EVIDENCE_PACK_TASK.md keeps it
@@ -2865,18 +2878,20 @@ app.get('/api/ncua/use-cases', auth.requireAuth, (req, res) => {
   res.json({ entitled, useCases: entitled ? db.listAiUseCases() : [] });
 });
 
-app.post('/api/ncua/use-cases', ...adminWrite, validation.validateBody(validation.useCaseSchema), (req, res) => {
-  if (!license.entitled('ncua_readiness')) return res.status(403).json({ error: 'not_entitled' });
+app.post('/api/ncua/use-cases', ...adminWrite, requireNcuaEntitled, validation.validateBody(validation.useCaseSchema), (req, res) => {
   const host = adapters.normalizeHost(req.body.destination);
   if (!host) return res.status(400).json({ error: 'invalid destination' });
+  // Omitted fields stay undefined: the db merge preserves existing values, so
+  // a partial re-POST can never erase review evidence (insert-time defaults
+  // live in the db layer).
   const record = db.upsertAiUseCase({
     canonicalHost: host,
     department: req.body.department,
     owner: req.body.owner,
     approvedUse: req.body.approvedUse,
-    allowedDataClasses: req.body.allowedDataClasses || [],
+    allowedDataClasses: req.body.allowedDataClasses,
     reviewStatus: req.body.reviewStatus,
-    vendorStatus: req.body.vendorStatus || 'not_reviewed',
+    vendorStatus: req.body.vendorStatus,
     nextReviewAt: req.body.nextReviewAt,
     policyScopeId: req.body.policyScopeId,
     orgId: tenant.config().tenantId,
@@ -2889,8 +2904,7 @@ app.post('/api/ncua/use-cases', ...adminWrite, validation.validateBody(validatio
   res.json({ useCase: record });
 });
 
-app.post('/api/ncua/use-cases/:id/review', ...adminWrite, validation.validateBody(validation.useCaseReviewSchema), (req, res) => {
-  if (!license.entitled('ncua_readiness')) return res.status(403).json({ error: 'not_entitled' });
+app.post('/api/ncua/use-cases/:id/review', ...adminWrite, requireNcuaEntitled, validation.validateBody(validation.useCaseReviewSchema), (req, res) => {
   const record = db.reviewAiUseCase(String(req.params.id).slice(0, 80), req.body, new Date().toISOString());
   if (!record) return res.status(404).json({ error: 'not found' });
   db.appendAudit({

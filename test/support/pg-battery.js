@@ -102,6 +102,23 @@ attempt('deliveriesAndApps', () => {
   };
 });
 
+attempt('useCases', () => {
+  // Exercises the quoted camelCase columns (reviewStatus/nextReviewAt) and
+  // the (canonicalHost, department) upsert key on the Postgres dialect.
+  const now = new Date().toISOString();
+  const a = db.upsertAiUseCase({ canonicalHost: 'chatgpt.com', department: 'Lending', owner: 'pg-owner', nextReviewAt: '2027-01-01T00:00:00Z' }, now);
+  db.upsertAiUseCase({ canonicalHost: 'chatgpt.com', department: 'Marketing' }, now);
+  db.upsertAiUseCase({ canonicalHost: 'chatgpt.com', department: 'lending ' }, now); // same key as a
+  const reviewed = db.reviewAiUseCase(a.id, { reviewStatus: 'approved', vendorStatus: 'reviewed' }, now);
+  const rows = db.listAiUseCases();
+  return {
+    rows: rows.length,
+    reviewed: reviewed.reviewStatus === 'approved',
+    ownerKept: rows.some((r) => r.owner === 'pg-owner'),
+    unknownIsNull: db.reviewAiUseCase('uc_missing', { reviewStatus: 'retired' }, now) === null,
+  };
+});
+
 attempt('statsAndSeats', () => {
   const s = db.stats();
   const seats = db.seatStats({});
