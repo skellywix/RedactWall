@@ -9,7 +9,7 @@ team.
 
 | Layer | Where | Runner | When it runs |
 |-------|-------|--------|--------------|
-| Unit + integration (small/medium) | `test/*.test.js` (~140 files) | `npm test` (`scripts/run-node-tests.js`, sequential per-file `node --test`) | Every commit (pre-commit hook) and CI |
+| Unit + integration (small/medium) | `test/*.test.js` (~170 files) | `npm test` (`scripts/run-node-tests.js`, sequential per-file `node --test`) | Every commit (pre-commit hook) and CI |
 | Browser E2E (large) | `e2e/*.spec.js` | `npm run test:browser` (Playwright, chromium) | Every commit via `review:ci` and CI |
 | Detector quality gate | `test/fixtures/semantic-eval.json` | `npm run eval` (`scripts/eval-detect.js --ci` in CI) | Every detector change; CI |
 | Engine parity | `detection-engine/detect.js` vs browser copy | `npm run sync-check` | Every commit; CI |

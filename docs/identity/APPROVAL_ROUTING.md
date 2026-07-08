@@ -84,8 +84,9 @@ Example:
 Rule ids, group ids, and reason codes are bounded identifiers so workflow
 metadata stays clean in the dashboard, SIEM alerts, audit history, and examiner
 exports. Critical-risk items still keep the built-in safety floor:
-`security_admin` ownership and no more than a 60-minute SLA unless the item is
-already routed to legal.
+`security_admin` ownership and an SLA capped at 60 minutes. A legal-routed item
+keeps its `legal` group, but ownership is still forced to `security_admin` and
+the 60-minute cap still applies.
 
 The sensor policy endpoint, `/api/v1/policy`, does not expose
 `approvalRoutingRules`; sensors only need enforcement and scanner controls.
@@ -94,8 +95,8 @@ The sensor policy endpoint, `/api/v1/policy`, does not expose
 
 | Signal | Assigned group | Assigned role | SLA |
 | --- | --- | --- | --- |
-| `SECRET_KEY`, `PRIVATE_KEY`, `CREDENTIALS`, `PASSWORD`, `CANARY_TOKEN` | `security` | `security_admin` | 30 minutes |
-| `SOURCE_CODE` | `security` | `security_admin` | 60 minutes |
+| `SECRET_KEY`, `PRIVATE_KEY`, `CREDENTIALS`, `CANARY_TOKEN` | `security` | `security_admin` | 30 minutes |
+| `SOURCE_CODE`, `PASSWORD` | `security` | `security_admin` | 60 minutes |
 | `MEMBER_ID`, `LOAN_NUMBER`, `US_SSN`, payment or banking entities | `compliance` | `approver` | 4 hours |
 | `HEALTH_RECORD`, `MEDICAL_RECORD_NUMBER`, `HEALTH_INSURANCE_ID`, `US_NPI` | `privacy` | `approver` | 4 hours |
 | `CONFIDENTIAL_BUSINESS` | `legal` | `approver` | 4 hours |

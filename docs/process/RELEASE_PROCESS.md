@@ -45,7 +45,7 @@ integrity, and config schema before and after upgrade.
 
 1. Verify the gates on the release commit:
    ```bash
-   npm run review:ci      # whitespace, generated docs, AI domains, tests, browser E2E, engine sync, eval
+   npm run review:ci      # whitespace, generated docs, AI domains, native bindings, console build, tests, browser E2E, engine sync, eval
    npm run suite          # standalone black-box regression suite (see docs/process/TESTING_STRATEGY.md)
    node -e "const v=require('./server/db').verifyAuditChain(); if(!v.ok) process.exit(1)"
    ```

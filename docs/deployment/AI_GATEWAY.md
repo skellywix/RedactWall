@@ -17,15 +17,16 @@ control plane, sharing the same detection engine and policy.
   block on any network/timeout error; the readiness probe reports `503`.)
 - **Prompt gated before egress.** The prompt is sent to `/api/v1/gate`; a
   `block`/hold decision returns a structured refusal and the upstream is never
-  called. A `redact` decision forwards the tokenized prompt (no real PII) and
-  keeps the vault id.
+  called. A `redact` decision forwards a locally tokenized body (no real PII);
+  the token map is held in the gateway process only.
 - **Response scanned before release.** The model output is sent to
   `/api/v1/scan-response`; a leak blocks or redacts the output before the caller
   receives it. Streaming responses are **buffered and scanned, then re-emitted**
   as SSE — so model output cannot reach the caller until it passes.
-- **Local rehydration.** For redacted requests, the (scanned) response is
-  rehydrated from the sealed vault via `/api/v1/rehydrate` so the caller gets
-  real values back — the model never saw them.
+- **Local rehydration.** For redacted requests, the gateway tokenizes every
+  message locally before egress and rehydrates the scanned response from that
+  in-process token map after scanning (`detect.detokenize`) — the map never
+  leaves the gateway and the model never saw the real values.
 - **Authenticated callers.** Each caller presents an agent token
   (`Authorization: Bearer pw_gw_...`) mapped to a managed identity + orgId. Only
   salted hashes are stored. Per-token rate limits apply.

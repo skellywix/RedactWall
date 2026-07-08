@@ -345,8 +345,11 @@ Exports the Express app.
 | `listDetectors(opts)` | Lists available built-in and custom detectors. |
 | `normalizeCustomDetectors(value)` | Validates and normalizes custom detector config. |
 | `publicCustomDetectorConfig(value)` | Returns custom detector config safe for sensors. |
-| Validator helpers | `luhnValid`, `ssnPlausible`, `abaValid`, `ibanValid`, `vinValid`, `bankAccountPlausible`, `itinPlausible`, `npiValid`, `datePlausible`, `ipv6Valid`, and `cardNetwork`. |
-| Constants | `SEVERITY` and `SEVERITY_LABEL`. |
+| `normalizeExactMatchConfig(value)` | Validates and normalizes Exact Data Match (EDM) config. |
+| `edmFingerprint(value)` | Builds a privacy-preserving EDM fingerprint for exact-match detection. |
+| `regulationsFor(type)` / `secretVendor(value)` | Maps a finding type to the regulations it implicates; identifies the vendor of a detected secret. |
+| Validator helpers | `luhnValid`, `ssnPlausible`, `abaValid`, `ibanValid`, `vinValid`, `bankAccountPlausible`, `itinPlausible`, `npiValid`, `datePlausible`, `ipv6Valid`, `cardNetwork`, and the international validators `aadhaarValid`, `nhsValid`, `ninoValid`, `sinValid`, and `tfnValid`. |
+| Constants | `SEVERITY`, `SEVERITY_LABEL`, `CONFIDENCE_LABEL`, and `REGULATIONS`. |
 
 ### `require("./server/receipts")`
 

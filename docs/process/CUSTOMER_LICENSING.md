@@ -35,7 +35,7 @@ RedactWall ships **air-gapped** (default, this document) and **connected**
 (opt-in). Air-gapped verifies the license offline with zero egress. Connected
 adds a signed vendor heartbeat that reports seat counts and can **revoke** a
 customer (blocking all AI use, fail-closed, while data protection and evidence
-export keep running). See `docs/CONNECTED_DEPLOYMENT.md`. Everything below
+export keep running). See `CONNECTED_DEPLOYMENT.md`. Everything below
 describes the offline license file, which both modes use.
 
 ## License file format

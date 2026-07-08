@@ -12,7 +12,7 @@ All values in the examples below are synthetic.
 
 | Header | Used by | Purpose |
 |--------|---------|---------|
-| `x-api-key: <INGEST_API_KEY>` | every `/api/v1` route | the sensor ingest key (env `INGEST_API_KEY`). Missing/invalid → `401 {"error":"invalid ingest key"}`; repeated failures lock the client out with `429`. |
+| `x-api-key: <INGEST_API_KEY>` | every `/api/v1` route **except the public `GET /api/v1/openapi.json` spec** | the sensor ingest key (env `INGEST_API_KEY`). Missing/invalid → `401 {"error":"invalid ingest key"}`; repeated failures lock the client out with `429`. |
 | `x-release-token: <token>` | `GET /api/v1/status/{id}`, `POST /api/v1/rehydrate` | the release token handed back when an item is held, so only the originating sensor can poll or rehydrate it. |
 
 ## Privacy contract

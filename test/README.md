@@ -13,8 +13,9 @@ npm run review:ci
 ```
 
 That gate runs whitespace checks, generated demo-doc drift checks, AI-domain
-coverage checks, the full Node test suite, the Playwright browser suite,
-detector sync checks, and the held-out detection eval.
+coverage checks, a native-bindings check, the admin console build, the full Node
+test suite, the Playwright browser suite, detector sync checks, and the held-out
+detection eval.
 
 ## Useful Focused Checks
 
@@ -24,7 +25,7 @@ detector sync checks, and the held-out detection eval.
 | Endpoint install and AI tool inventory | `node --test --test-concurrency=1 test/endpoint-install-check.test.js test/endpoint-ai-tool-inventory.test.js` |
 | Coverage and evidence export | `node --test --test-concurrency=1 test/coverage.test.js test/evidence.test.js` |
 | Browser-level flows | `npm run test:browser` |
-| Admin console browser flows | `npm run test:admin-console` |
+| Admin console browser flows | `npm run test:console-app` |
 | Detection quality | `npm run eval` |
 | Shared engine copy parity | `npm run sync-check` |
 

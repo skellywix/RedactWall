@@ -32,7 +32,7 @@ Plan → Implement → Validate. Spend most effort planning. See `.claude/skills
 ## Hard invariants (do not break)
 1. Detector logic lives in `detection-engine/detect.js` ONLY. After editing, run `npm run sync-engine`; never hand-edit `sensors/browser-extension/lib/detect.js`.
 2. Never hand-edit the semantic model block — regenerate via `npm run train-semantic` (deterministic).
-3. `alwaysBlock` types (US_SSN, CREDIT_CARD, BANK_ACCOUNT, ROUTING_NUMBER, IBAN, US_PASSPORT, SECRET_KEY, PRIVATE_KEY) always block/tokenize regardless of mode. Do not weaken.
+3. `alwaysBlock` types always block/tokenize regardless of mode. Do not weaken. `server/policy.js` (`DEFAULT_POLICY.alwaysBlock`) is the source of truth for the full list — currently 21 types: US_SSN, CREDIT_CARD, BANK_ACCOUNT, ROUTING_NUMBER, IBAN, US_PASSPORT, US_ITIN, US_NPI, MEMBER_ID, LOAN_NUMBER, MEDICAL_RECORD_NUMBER, HEALTH_INSURANCE_ID, UK_NINO, UK_NHS_NUMBER, CANADA_SIN, AUSTRALIA_TFN, INDIA_AADHAAR, SECRET_KEY, PRIVATE_KEY, CANARY_TOKEN, and EXACT_MATCH.
 4. No raw PII / prompt text in logs, errors, or the audit `entry` — redacted detections + hashes only.
 5. The audit log is append-only and hash-chained: after any `server/db.js` / `server/crypto.js` change, `node -e "require('./server/db').verifyAuditChain()"` must report `ok:true`.
 6. Detection changes must keep `npm run eval` floors green — held-out precision/recall AND **zero false positives on benign prompts**. Don't tune the model against `test/fixtures/semantic-eval.json`; it's the held-out test, not training data.
