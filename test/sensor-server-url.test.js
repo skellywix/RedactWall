@@ -24,3 +24,16 @@ test('loopback host detection', () => {
   for (const h of ['localhost', 'dev.localhost', '127.0.0.1', '127.5.5.5', '::1']) assert.ok(isLoopbackHost(h), h);
   for (const h of ['plane.example', '10.0.0.1', '169.254.169.254']) assert.strictEqual(isLoopbackHost(h), false, h);
 });
+
+test('loopback detection resists prefix/suffix spoofing', () => {
+  // A public host crafted to slip past a naive 127. prefix or .localhost suffix
+  // must NOT be treated as loopback, else cleartext HTTP (and the ingest key)
+  // would be allowed to an attacker-controlled plane.
+  for (const h of [
+    '127.0.0.1.evil.com', '127.foo.evil.com', '1270.0.0.1', '127.0.0.256',
+    'dev.localhost.evil.com', 'localhost.evil.com', 'notlocalhost',
+  ]) {
+    assert.strictEqual(isLoopbackHost(h), false, h);
+    assert.strictEqual(secureServerUrl(`http://${h}:4000`), null, h);
+  }
+});

@@ -12,6 +12,10 @@
  */
 const D = require('../detection-engine/detect');
 const { withEnvAliases } = require('./env');
+// Single strict loopback definition, shared with the sensor transport guard so
+// the two cannot drift. A prefix match like startsWith('127.') would accept an
+// attacker host such as '127.0.0.1.evil.com' and leak prompt bodies over http.
+const { isLoopbackHost } = require('../sensors/shared/server-url');
 
 const DEFAULT_TIMEOUT_MS = 1500;
 const MAX_TEXT_CHARS = 20000;
@@ -19,11 +23,6 @@ const MAX_REMOTE_CATEGORIES = 12;
 
 function bool(value) {
   return ['1', 'true', 'yes', 'on'].includes(String(value || '').toLowerCase());
-}
-
-function isLoopbackHost(host) {
-  const h = String(host || '').toLowerCase().replace(/^\[|\]$/g, '');
-  return h === 'localhost' || h.endsWith('.localhost') || h === '127.0.0.1' || h.startsWith('127.') || h === '::1' || h === '0:0:0:0:0:0:0:1';
 }
 
 // This path ships prompt text off the box, so it must be encrypted in transit.
