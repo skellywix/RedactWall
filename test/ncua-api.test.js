@@ -320,3 +320,153 @@ test('review of an unknown use-case id returns 404; date fields reject V8 date c
     assert.strictEqual(ssnHost.status, 400);
   });
 });
+
+test('incident workflow: derived prompt-free timeline, 72h deadline, status flow', async () => {
+  await withServer(async (port) => {
+    const session = await adminSession(port);
+    // Seed a real held member-data event through the gate.
+    const gate = await fetch(`http://127.0.0.1:${port}/api/v1/gate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': 'unit-ingest-key' },
+      body: JSON.stringify({
+        prompt: 'Synthetic member John Carter SSN 524-71-9043 exported to chat',
+        user: 'teller@cu.test',
+        destination: 'chat.openai.com',
+        source: 'browser_extension',
+        channel: 'submit',
+      }),
+    });
+    assert.strictEqual(gate.status, 200);
+    const held = await gate.json();
+    assert.ok(held.id);
+
+    const opened = await postJson(port, '/api/ncua/incidents', session, {
+      title: 'Possible member-data exposure via browser paste',
+      queryIds: [held.id, 'q_unknown_ignored'],
+      detectedAt: '2026-07-08T00:00:00Z',
+    });
+    assert.strictEqual(opened.status, 200);
+    const { incident } = await opened.json();
+    assert.strictEqual(incident.status, 'open');
+    assert.strictEqual(incident.deadlineAt, '2026-07-11T00:00:00.000Z');
+    assert.strictEqual(incident.timeline.length, 1);
+    assert.strictEqual(incident.timeline[0].prevented, true);
+    assert.ok(incident.timeline[0].dataClasses.includes('US_SSN'));
+
+    // The wire never carries the raw prompt or the raw SSN.
+    const list = await fetch(`http://127.0.0.1:${port}/api/ncua/incidents`, { headers: { cookie: session.cookie } });
+    const wire = JSON.stringify(await list.json());
+    assert.ok(!wire.includes('524-71-9043'));
+    assert.ok(!wire.includes('John Carter'));
+
+    const reported = await postJson(port, `/api/ncua/incidents/${incident.id}/status`, session, { status: 'reported' });
+    assert.strictEqual((await reported.json()).incident.status, 'reported');
+    assert.ok((await (await fetch(`http://127.0.0.1:${port}/api/ncua/incidents`, { headers: { cookie: session.cookie } })).json())
+      .incidents.every((i) => i.detectedAt === '2026-07-08T00:00:00.000Z'));
+
+    const missing = await postJson(port, '/api/ncua/incidents/inc_missing/status', session, { status: 'closed' });
+    assert.strictEqual(missing.status, 404);
+
+    // Audit details stay enum/date/count-shaped.
+    const audit = require('../server/db').listAudit(50).filter((e) => e.action && e.action.startsWith('INCIDENT_'));
+    assert.ok(audit.length >= 2);
+    for (const entry of audit) {
+      assert.ok(!String(entry.detail || '').includes('member-data exposure'));
+    }
+  });
+});
+
+test('board packet: auditor POST with CSRF, seat aggregates only, cadence control flips covered', async () => {
+  await withServer(async (port) => {
+    const auditorCookie = await login(port, 'auditor', 'auditor-pass');
+    const csrfRes = await fetch(`http://127.0.0.1:${port}/api/csrf`, { headers: { cookie: auditorCookie } });
+    const { csrfToken } = await csrfRes.json();
+
+    // Generation is state-changing (it feeds the cadence control): a plain
+    // GET or a CSRF-less POST must never mint board-reporting evidence.
+    assert.strictEqual((await fetch(`http://127.0.0.1:${port}/api/ncua/board-packet`, { headers: { cookie: auditorCookie } })).status, 404);
+    assert.strictEqual((await fetch(`http://127.0.0.1:${port}/api/ncua/board-packet`, { method: 'POST', headers: { cookie: auditorCookie } })).status, 403);
+
+    const res = await fetch(`http://127.0.0.1:${port}/api/ncua/board-packet`, {
+      method: 'POST',
+      headers: { cookie: auditorCookie, 'x-csrf-token': csrfToken },
+    });
+    assert.strictEqual(res.status, 200);
+    const packet = await res.json();
+    assert.ok(Number.isFinite(packet.readiness.score));
+    assert.ok(packet.seats.trueUp);
+    assert.strictEqual(packet.seats.users, undefined); // never the roster
+    const wire = JSON.stringify(packet);
+    assert.ok(!wire.includes('"users"'));
+
+    // The audit record stays enum/count-shaped.
+    const auditEntry = require('../server/db').listAudit(20).find((e) => e.action === 'BOARD_PACKET_EXPORTED');
+    assert.match(String(auditEntry.detail), /^score=\d+; state=[a-z]+$/);
+
+    // Generation is recorded, so board_reporting grades covered on next read.
+    const adminCookie = await login(port, 'admin', 'unit-pass');
+    const readiness = await (await fetch(`http://127.0.0.1:${port}/api/ncua/readiness`, { headers: { cookie: adminCookie } })).json();
+    const control = readiness.report.controls.find((c) => c.id === 'board_reporting');
+    assert.strictEqual(control.state, 'covered');
+  });
+});
+
+test('72h deadline is timezone-deterministic, future-clamped, and reportedAt is immutable', async () => {
+  await withServer(async (port) => {
+    const session = await adminSession(port);
+    // A zoneless datetime must be treated as UTC, not server-local time.
+    const zoneless = await postJson(port, '/api/ncua/incidents', session, {
+      title: 'Zoneless detection time',
+      detectedAt: '2026-07-01T00:00',
+    });
+    const inc1 = (await zoneless.json()).incident;
+    assert.strictEqual(inc1.detectedAt, '2026-07-01T00:00:00.000Z');
+    assert.strictEqual(inc1.deadlineAt, '2026-07-04T00:00:00.000Z');
+
+    // A future-dated detection cannot push the deadline out of overdue reach.
+    const future = await postJson(port, '/api/ncua/incidents', session, {
+      title: 'Future-dated detection',
+      detectedAt: '2999-01-01T00:00:00Z',
+    });
+    const inc2 = (await future.json()).incident;
+    assert.ok(Date.parse(inc2.detectedAt) <= Date.now());
+
+    // reportedAt only lands via the 'reported' transition and the first
+    // stamp is permanent — a late report cannot be rewritten as on-time.
+    const sneak = await postJson(port, `/api/ncua/incidents/${inc1.id}/status`, session, {
+      status: 'under_review',
+      reportedAt: '2026-07-02T00:00:00Z',
+    });
+    assert.strictEqual((await sneak.json()).incident.reportedAt ?? null, null);
+    await postJson(port, `/api/ncua/incidents/${inc1.id}/status`, session, { status: 'reported' });
+    const first = (await (await fetch(`http://127.0.0.1:${port}/api/ncua/incidents`, { headers: { cookie: session.cookie } })).json())
+      .incidents.find((i) => i.id === inc1.id);
+    const rewrite = await postJson(port, `/api/ncua/incidents/${inc1.id}/status`, session, {
+      status: 'closed',
+      reportedAt: '2026-07-01T01:00:00Z',
+    });
+    const closed = (await rewrite.json()).incident;
+    assert.strictEqual(closed.reportedAt, first.reportedAt);
+    // Status patches preserve every other field.
+    assert.strictEqual(closed.title, 'Zoneless detection time');
+    assert.strictEqual(closed.detectedAt, inc1.detectedAt);
+    assert.strictEqual(closed.deadlineAt, inc1.deadlineAt);
+  });
+});
+
+test('incident and board-packet routes respect the entitlement gate', async () => {
+  await withServer(async (port) => {
+    const session = await adminSession(port);
+    setLicense(STANDARD_NO_ADDON);
+    const blocked = await postJson(port, '/api/ncua/incidents', session, { title: 'Should not open' });
+    assert.strictEqual(blocked.status, 403);
+    const packet = await fetch(`http://127.0.0.1:${port}/api/ncua/board-packet`, {
+      method: 'POST',
+      headers: { cookie: session.cookie, 'x-csrf-token': session.csrfToken },
+    });
+    assert.strictEqual(packet.status, 403);
+    const list = await fetch(`http://127.0.0.1:${port}/api/ncua/incidents`, { headers: { cookie: session.cookie } });
+    assert.deepStrictEqual(await list.json(), { entitled: false, incidents: [] });
+    setLicense(null);
+  });
+});

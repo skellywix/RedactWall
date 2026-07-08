@@ -11,6 +11,7 @@ context, not operator runbooks.
 | `customer-missing-features.md` | Commercial feature gap analysis and build order |
 | `aws-saas-deployment.md` | Planning notes for the AWS customer-silo path |
 | `ncua-readiness-center.md` | NCUA Readiness Center: examiner proof, use-case inventory, EDM surfacing, 72-hour incident readiness, board packet (ROADMAP N2) |
+| `vendor-connected-deployment.md` | Vendor-connected SKU audit: online licensing, kill-switch, seat telemetry, vendor-side second-layer scanning |
 
 Current operational truth lives in:
 

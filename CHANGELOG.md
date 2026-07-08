@@ -11,6 +11,25 @@ reconstructed from `ITERATIONS.md` and git history.
 
 ### Added
 
+- **NCUA Readiness Center (slice 3, 72-hour incidents + Board Packet)** —
+  completes `PLANS/ncua-readiness-center.md`. Migration v6 adds a
+  tenant-ready `ai_incidents` table (orgId + Postgres RLS); incidents carry
+  status/deadline metadata and referenced event ids while the examiner
+  timeline is derived on read from sanitized queries (never prompt bodies or
+  audit note text). `GET/POST /api/ncua/incidents` + a status route track
+  the 12 CFR 748.1(c) 72-hour reporting clock (`deadlineAt` stamped
+  server-side; `INCIDENT_OPENED`/`INCIDENT_STATUS_CHANGED` audit entries are
+  enum/date/count-shaped). `GET /api/ncua/board-packet` exports a prompt-free
+  executive JSON summary with seat aggregates and a license true-up (per-user
+  roster excluded); each export is audit-recorded so the `board_reporting`
+  control grades quarterly cadence from the append-only log, and
+  `incident_readiness` grades deadline health. The NCUA Readiness view gains
+  the incident panel (open/advance/countdowns) and a Board packet download;
+  examiner packs embed pattern-redacted incident records with timelines.
+  Also assessed and deliberately rejected: automatic regulation-driven policy
+  changes (see the plan's "Regulation Watch" section — human-approved mapping
+  packs are the supported path).
+
 - **NCUA Readiness Center (slice 2, Member-Data Inventory)** — the AI
   use-case inventory (`PLANS/ncua-readiness-center.md`): migration v5 adds a
   tenant-ready `ai_use_cases` table (orgId + Postgres RLS, one record per

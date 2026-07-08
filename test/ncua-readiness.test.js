@@ -213,3 +213,57 @@ test('use-case controls go live from the summary and never leak free text', () =
   assert.strictEqual(stale.controls.find((c) => c.id === 'ai_use_inventory').state, 'attention');
   assert.strictEqual(stale.controls.find((c) => c.id === 'vendor_service_provider_oversight').state, 'attention');
 });
+
+test('incident summary tracks the 72-hour clock: overdue and reported-late', () => {
+  const now = '2026-07-08T12:00:00.000Z';
+  const summary = ncuaReadiness.incidentsSummary([
+    { status: 'open', deadlineAt: '2026-07-08T00:00:00Z' },                                    // overdue
+    { status: 'under_review', deadlineAt: '2026-07-09T00:00:00Z' },                            // on the clock
+    { status: 'reported', deadlineAt: '2026-07-01T00:00:00Z', reportedAt: '2026-07-02T00:00:00Z' }, // late but reported
+    { status: 'closed', deadlineAt: '2026-07-01T00:00:00Z' },
+  ], now);
+
+  assert.deepStrictEqual(summary, { total: 4, open: 1, underReview: 1, reported: 1, closed: 1, overdue: 1, reportedLate: 1 });
+  assert.strictEqual(ncuaReadiness.incidentsSummary(undefined, now), null);
+});
+
+test('incident timeline consumes only sanitized query shapes and sorts by time', () => {
+  const timeline = ncuaReadiness.incidentTimeline({ id: 'inc_1' }, [
+    { id: 'q_2', createdAt: '2026-07-08T02:00:00Z', user: 'b@cu.test', destination: 'claude.ai', status: 'approved', findings: [{ type: 'LOAN_NUMBER', value: 'raw-decoy-9042' }] },
+    { id: 'q_1', createdAt: '2026-07-08T01:00:00Z', user: 'a@cu.test', destination: 'chat.openai.com', status: 'pending', findings: [{ type: 'US_SSN' }] },
+  ]);
+
+  assert.deepStrictEqual(timeline.map((e) => e.queryId), ['q_1', 'q_2']);
+  assert.strictEqual(timeline[0].prevented, true);
+  assert.strictEqual(timeline[1].prevented, false);
+  assert.ok(!JSON.stringify(timeline).includes('raw-decoy-9042'));
+});
+
+test('incident and board controls grade from summaries', () => {
+  const now = '2026-07-08T12:00:00.000Z';
+  const clean = ncuaReadiness.summarize(baseInput({
+    incidents: ncuaReadiness.incidentsSummary([], now),
+    boardPacket: { lastGeneratedAt: '2026-06-30T00:00:00Z' },
+  }));
+  assert.strictEqual(clean.controls.find((c) => c.id === 'incident_readiness').state, 'covered');
+  assert.strictEqual(clean.controls.find((c) => c.id === 'board_reporting').state, 'covered');
+
+  const stale = ncuaReadiness.summarize(baseInput({
+    incidents: ncuaReadiness.incidentsSummary([{ status: 'open', deadlineAt: '2026-07-01T00:00:00Z' }], now),
+    boardPacket: { lastGeneratedAt: '2025-01-01T00:00:00Z' },
+  }));
+  assert.strictEqual(stale.controls.find((c) => c.id === 'incident_readiness').state, 'attention');
+  assert.strictEqual(stale.controls.find((c) => c.id === 'board_reporting').state, 'attention');
+});
+
+test('board packet carries seat aggregates and true-up, never the roster', () => {
+  const packet = ncuaReadiness.boardPacket({
+    report: ncuaReadiness.summarize(baseInput()),
+    seatReport: { tenantId: 'cu-one', saasMode: true, seatLimit: 50, seatsUsed: 62, seatsRemaining: 0, overLimit: true, users: [{ user: 'roster-decoy@cu.test', events: 12 }] },
+    licenseStatus: { state: 'active', plan: 'enterprise', seats: 60, expires: '2027-01-01' },
+  });
+
+  assert.deepStrictEqual(packet.seats.trueUp, { licensedSeats: 60, configuredLimit: 50, seatsUsed: 62, mismatch: true });
+  assert.strictEqual(packet.license.plan, 'enterprise');
+  assert.ok(!JSON.stringify(packet).includes('roster-decoy'));
+});

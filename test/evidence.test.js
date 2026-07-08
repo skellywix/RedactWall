@@ -949,6 +949,46 @@ test('empty inventory grades attention when provided; absent inventory stays not
   assert.strictEqual(provided.controlMappings.find((c) => c.id === 'ai_use_inventory').state, 'attention');
   // Unentitled installs never pass rows, so their packs keep the honest state.
   const absent = build(undefined);
-  assert.strictEqual(absent.controlMappings.find((c) => c.id === 'ai_use_inventory').state, 'not_provided');
-  assert.strictEqual(absent.controlMappings.find((c) => c.id === 'vendor_service_provider_oversight').state, 'not_provided');
+  for (const id of ['ai_use_inventory', 'vendor_service_provider_oversight', 'incident_readiness', 'board_reporting']) {
+    assert.strictEqual(absent.controlMappings.find((c) => c.id === id).state, 'not_provided', id);
+  }
+});
+
+test('examiner pack sanitizes incident records and derives prompt-free timelines', () => {
+  const pack = evidence.buildEvidencePack({
+    generatedAt: '2026-07-08T12:00:00.000Z',
+    examinerProfile: 'federal_credit_union',
+    policy: {},
+    auditIntegrity: { ok: true, count: 0 },
+    queries: [],
+    audit: [],
+    lineageQueries: [{
+      id: 'q_inc', createdAt: '2026-07-08T01:00:00Z', status: 'pending', user: 'teller@cu.test',
+      destination: 'chat.openai.com', redactedPrompt: 'Member [US_SSN]',
+      findings: [{ type: 'US_SSN', masked: '***-**-9043', value: '524-71-9043' }],
+    }],
+    incidents: [{
+      id: 'inc_1',
+      title: 'Exposure of member 524-71-9043 data',
+      notes: 'card 4111 1111 1111 1111 seen',
+      status: 'open',
+      detectedAt: '2026-07-08T00:00:00Z',
+      deadlineAt: '2026-07-11T00:00:00Z',
+      queryIds: ['q_inc', 'q_unknown'],
+    }],
+    boardPacket: { lastGeneratedAt: '2026-07-01T00:00:00Z' },
+  });
+
+  assert.strictEqual(pack.incidents.summary.total, 1);
+  const record = pack.incidents.records[0];
+  assert.strictEqual(record.title, '[redacted]');
+  assert.strictEqual(record.notes, '[redacted]');
+  assert.strictEqual(record.queryCount, 2);
+  assert.strictEqual(record.timeline.length, 1);
+  assert.strictEqual(record.timeline[0].prevented, true);
+  assert.ok(pack.controlMappings.some((c) => c.id === 'incident_readiness' && c.state === 'covered'));
+  assert.ok(pack.controlMappings.some((c) => c.id === 'board_reporting' && c.state === 'covered'));
+  const wire = JSON.stringify(pack);
+  assert.ok(!wire.includes('524-71-9043'));
+  assert.ok(!wire.includes('4111 1111'));
 });

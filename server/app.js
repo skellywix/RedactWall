@@ -2792,7 +2792,11 @@ app.get('/api/export/evidence', ...auditRead, (req, res) => {
     audit: db.listAudit(auditLimit),
     edm: exactMatch.publicSummary(),
     catalog: appCatalog.reviewRollup(),
-    useCases: license.entitled('ncua_readiness') ? db.listAiUseCases() : undefined,
+    ...(license.entitled('ncua_readiness') ? {
+      useCases: db.listAiUseCases(),
+      incidents: db.listAiIncidents(),
+      boardPacket: { lastGeneratedAt: db.lastAuditActionAt('BOARD_PACKET_EXPORTED') },
+    } : {}),
     examinerProfile: req.query.examinerProfile,
     report: { schedule: evidenceScheduleSummary() },
   }));
@@ -2812,16 +2816,62 @@ function controlMappingInputs() {
     auditIntegrity: db.verifyAuditChain(),
     coverage: coverage.summarize(summaryQueries, activePolicy),
     edm: evidence.safeEdmSummary(exactMatch.publicSummary()),
-    // Only entitled installs get the inventory graded: an unentitled licensed
-    // install cannot populate the inventory (the mutation routes 403), so its
+    // Only entitled installs get the NCUA module inputs graded: an unentitled
+    // licensed install cannot populate them (the mutation routes 403), so its
     // compliance surfaces must keep the honest not_provided state instead of
     // an unresolvable attention.
-    useCases: license.entitled('ncua_readiness')
-      ? ncuaReadiness.useCasesSummary(db.listAiUseCases(), generatedAt)
-      : null,
+    ...ncuaModuleInputs(generatedAt),
     summaryQueries,
     activePolicy,
   };
+}
+
+function ncuaModuleInputs(generatedAt) {
+  if (!license.entitled('ncua_readiness')) return { useCases: null, incidents: null, boardPacket: null };
+  return {
+    useCases: ncuaReadiness.useCasesSummary(db.listAiUseCases(), generatedAt),
+    incidents: ncuaReadiness.incidentsSummary(db.listAiIncidents(), generatedAt),
+    boardPacket: { lastGeneratedAt: db.lastAuditActionAt('BOARD_PACKET_EXPORTED') },
+  };
+}
+
+// The full NCUA readiness report from live inputs; shared by the readiness
+// route and board-packet generation.
+function buildNcuaReport() {
+  const inputs = controlMappingInputs();
+  return ncuaReadiness.summarize({
+    ...inputs,
+    policyExceptionReview: policy.policyExceptionReview(inputs.activePolicy),
+    catalog: appCatalog.reviewRollup(),
+    queries: inputs.summaryQueries,
+    reportSchedule: evidenceScheduleSummary(),
+  });
+}
+
+// Regulatory timestamps must be timezone-deterministic: ECMAScript parses a
+// no-zone datetime ('2026-07-08T00:00') as LOCAL time, which would shift the
+// 72-hour deadline with the server's TZ. Treat zoneless T-forms as UTC, and
+// clamp to now so a future-dated detection can't evade the overdue check.
+function utcIncidentInstant(value, nowIso) {
+  const text = String(value || '');
+  const zoneless = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?$/.test(text);
+  const parsed = Date.parse(zoneless ? `${text}Z` : text);
+  if (!Number.isFinite(parsed)) return nowIso;
+  return new Date(Math.min(parsed, Date.parse(nowIso))).toISOString();
+}
+
+// Prompt-free incident timelines: resolves referenced query ids through the
+// same sanitizer the evidence pack uses (safeQuery), never audit.detail. One
+// query pass for the whole list — no per-incident point lookups.
+function incidentsWithTimelines(incidents) {
+  const queryMap = new Map(db.listQueries({ all: true }).map((q) => [q.id, q]));
+  return incidents.slice(0, 200).map((incident) => {
+    const safeQueries = (Array.isArray(incident.queryIds) ? incident.queryIds : [])
+      .map((queryId) => queryMap.get(queryId))
+      .filter(Boolean)
+      .map(evidence.safeQuery);
+    return { ...incident, timeline: ncuaReadiness.incidentTimeline(incident, safeQueries) };
+  });
 }
 
 // The NCUA module's mutation gate: reads stay open (they carry the entitled
@@ -2858,15 +2908,7 @@ app.get('/api/compliance', auth.requireAuth, (req, res) => {
 app.get('/api/ncua/readiness', auth.requireAuth, (req, res) => {
   const entitled = license.entitled('ncua_readiness');
   if (!entitled) return res.json({ entitled, report: null });
-  const inputs = controlMappingInputs();
-  const report = ncuaReadiness.summarize({
-    ...inputs,
-    policyExceptionReview: policy.policyExceptionReview(inputs.activePolicy),
-    catalog: appCatalog.reviewRollup(),
-    queries: inputs.summaryQueries,
-    reportSchedule: evidenceScheduleSummary(),
-  });
-  res.json({ entitled, report });
+  res.json({ entitled, report: buildNcuaReport() });
 });
 
 // AI use-case inventory (slice 2): distinct approval records per
@@ -2913,6 +2955,74 @@ app.post('/api/ncua/use-cases/:id/review', ...adminWrite, requireNcuaEntitled, v
     detail: `uc=${record.id}: reviewStatus=${record.reviewStatus}; vendorStatus=${record.vendorStatus || 'not_reviewed'}; nextReviewAt=${record.nextReviewAt || 'none'}`,
   });
   res.json({ useCase: record });
+});
+
+// 72-hour AI incident readiness (slice 3, 12 CFR 748.1(c)): incidents carry
+// status and deadline metadata plus referenced query ids; timelines are
+// derived from sanitized queries on read.
+app.get('/api/ncua/incidents', auth.requireAuth, (req, res) => {
+  const entitled = license.entitled('ncua_readiness');
+  res.json({ entitled, incidents: entitled ? incidentsWithTimelines(db.listAiIncidents()) : [] });
+});
+
+app.post('/api/ncua/incidents', ...adminWrite, requireNcuaEntitled, validation.validateBody(validation.incidentSchema), (req, res) => {
+  const now = new Date().toISOString();
+  const detectedAt = req.body.detectedAt ? utcIncidentInstant(req.body.detectedAt, now) : now;
+  const queryIds = (req.body.queryIds || []).filter((queryId) => !!db.getQuery(queryId));
+  const incident = db.createAiIncident({
+    title: req.body.title,
+    notes: req.body.notes,
+    queryIds,
+    detectedAt,
+    // The NCUA reporting clock: 72 hours from reasonable belief (detection).
+    deadlineAt: new Date(Date.parse(detectedAt) + 72 * 3600 * 1000).toISOString(),
+    orgId: tenant.config().tenantId,
+  }, now);
+  db.appendAudit({
+    action: 'INCIDENT_OPENED',
+    actor: req.user.user,
+    detail: `inc=${incident.id}: queries=${queryIds.length}; detectedAt=${incident.detectedAt}; deadlineAt=${incident.deadlineAt}`,
+  });
+  res.json({ incident: incidentsWithTimelines([incident])[0] });
+});
+
+app.post('/api/ncua/incidents/:id/status', ...adminWrite, requireNcuaEntitled, validation.validateBody(validation.incidentStatusSchema), (req, res) => {
+  const now = new Date().toISOString();
+  // reportedAt is stamped only by the transition to 'reported' and is
+  // normalized to UTC; the db layer refuses to overwrite an existing stamp,
+  // so a late report can never be rewritten into an on-time one.
+  const patch = { status: req.body.status, notes: req.body.notes };
+  if (req.body.status === 'reported') {
+    patch.reportedAt = req.body.reportedAt ? utcIncidentInstant(req.body.reportedAt, now) : now;
+  }
+  const incident = db.setAiIncidentStatus(String(req.params.id).slice(0, 80), patch, now);
+  if (!incident) return res.status(404).json({ error: 'not found' });
+  db.appendAudit({
+    action: 'INCIDENT_STATUS_CHANGED',
+    actor: req.user.user,
+    detail: `inc=${incident.id}: status=${incident.status}; reportedAt=${incident.reportedAt || 'none'}`,
+  });
+  res.json({ incident: incidentsWithTimelines([incident])[0] });
+});
+
+// Board packet (slice 3): prompt-free executive summary for Security Admin or
+// Auditor. POST + CSRF because generation is state-changing — it appends the
+// BOARD_PACKET_EXPORTED row the board_reporting cadence control grades from,
+// so a prefetch or monitoring probe must never attest board reporting. Not
+// license-writability-gated: evidence generation stays available in readonly,
+// like the approval workflow's audit appends.
+app.post('/api/ncua/board-packet', auth.requireAuth, auth.requireCsrf, auth.requireRole(roles.SECURITY_ADMIN, roles.AUDITOR), requireNcuaEntitled, (req, res) => {
+  const packet = ncuaReadiness.boardPacket({
+    report: buildNcuaReport(),
+    seatReport: tenant.seatReport(db),
+    licenseStatus: license.publicStatus(),
+  });
+  db.appendAudit({
+    action: 'BOARD_PACKET_EXPORTED',
+    actor: req.user.user,
+    detail: `score=${packet.readiness.score}; state=${packet.readiness.state}`,
+  });
+  res.json(packet);
 });
 
 app.get('/api/policy', auth.requireAuth, (req, res) => res.json(policy.loadPolicy()));

@@ -124,6 +124,35 @@ member-identifier events to the compliance group via `approvalRoutingRules`
 "LOAN_NUMBER", "EXACT_MATCH"]` to `group: "compliance"`, so a member-data
 hold always lands with the team that answers to the examiner.
 
+## 72-hour incident readiness
+
+NCUA's cyber-incident reporting rule (12 CFR §748.1(c)) requires reporting a
+reportable cyber incident within **72 hours** of reasonably believing one
+occurred. The NCUA Readiness view tracks that clock:
+
+- A Security Admin opens an incident from the held/blocked event ids involved
+  (single-line title only — validation rejects member-data shapes). The
+  server stamps `detectedAt` and `deadlineAt = detectedAt + 72h`.
+- The incident **timeline is derived** from the referenced events through the
+  same sanitizer the evidence pack uses: who, destination, decision, data
+  classes, blocked vs exposed — never prompt text, never audit note text.
+- Status flow: `open → under_review → reported/closed`; marking `reported`
+  stamps `reportedAt`. The `incident_readiness` control shows `attention`
+  whenever any open incident is past its deadline.
+- Examiner packs embed the summary and pattern-redacted incident records with
+  their timelines. RedactWall tracks readiness and evidence — the actual
+  report to the NCUA is filed by your team through official channels.
+
+## Board packet
+
+**Board packet** (NCUA Readiness header) downloads a prompt-free executive
+JSON summary: readiness score, member-data outcomes, shadow-AI review state,
+use-case and incident rollups, exception review, audit-chain status, and
+**seat aggregates with a license true-up** (licensed seats vs configured
+limit vs seats used — the per-user roster is never included). Each export is
+recorded in the audit log, and the `board_reporting` control grades
+`covered` while the latest packet is within the quarterly cadence.
+
 ## Core-banking EDM import
 
 `config/exact-match.json` holds **only** a salt and one-way fingerprints.

@@ -397,6 +397,35 @@ follows the established page shape (route-contract doc comment, typed
   `eval` — both trivially unaffected: no detector changes), plus
   `node -e "console.log(JSON.stringify(require('./server/db').verifyAuditChain()))"`.
 
+## Regulation Watch (Assessed — Not Built)
+
+Request considered: automatically change the product's regulation mappings /
+enforcement policy when NCUA law changes. **Verdict: the fully automatic form
+is a bad idea and is deliberately not built**, for reasons that go to the
+product's spine:
+
+1. **It inverts the trust model.** The product's examiner story is
+   hash-chained audit + named human approval for every policy change. "A
+   scraper rewrote the policy" is the answer no examiner accepts, and
+   `control-map.js` explicitly disclaims inventing legal conclusions —
+   auto-mapping legal text to enforcement *is* a legal conclusion.
+2. **It adds an egress + remote-influence channel.** Zero egress is a sold
+   guarantee (offline licensing, no phone-home; active-key verification was
+   rejected for the same reason). A regulatory feed is remote content that
+   steers enforcement — the exact class of influence the product exists to
+   block — and it cannot work in air-gapped silos at all.
+3. **The liability is the vendor's.** A misparsed rule that loosens
+   enforcement is a compliance breach at a federally regulated institution.
+4. **The cadence doesn't justify it.** NCUA rulemaking moves through
+   months-long comment periods; material changes land ~1–2×/year.
+
+**The defensible version, if demand appears:** vendor-curated *regulatory
+mapping packs* — reviewed updates to `CONTROL_MAPPINGS` families/citations —
+shipped through the existing signed release train, plus an optional console
+"regulation watch" notice (data-only: "NCUA published X, review your
+mapping", HTTPS-only, default off, nothing automated into policy). Every
+actual change stays a human `POLICY_UPDATED` with an audit trail.
+
 ## Decisions For The Human
 
 1. **Packaging**: `ncua_readiness` feature flag sold as add-on for

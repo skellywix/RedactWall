@@ -772,6 +772,73 @@ const reviewAiUseCase = sdb.transaction((useCaseId, patch, now) => {
   return merged;
 });
 
+// ---- AI incidents (PLANS/ncua-readiness-center.md slice 3) --------------------
+const incidentInsert = sdb.prepare('INSERT INTO ai_incidents (id, orgId, status, detectedAt, deadlineAt, reportedAt, createdAt, updatedAt, data) VALUES (@id, @orgId, @status, @detectedAt, @deadlineAt, @reportedAt, @createdAt, @updatedAt, @data)');
+const incidentById = sdb.prepare('SELECT data FROM ai_incidents WHERE id = ?');
+const incidentUpdate = sdb.prepare('UPDATE ai_incidents SET status = @status, reportedAt = @reportedAt, updatedAt = @updatedAt, data = @data WHERE id = @id');
+
+function listAiIncidents() {
+  return sdb.prepare('SELECT data FROM ai_incidents ORDER BY detectedAt DESC, seq DESC').all().map((r) => JSON.parse(r.data));
+}
+
+// Incident rows hold status/deadline metadata and referenced query ids only;
+// the examiner timeline is derived on read from those queries.
+function createAiIncident(record, now) {
+  const incident = {
+    ...definedEntries(record),
+    id: id('inc'),
+    orgId: orgColumn(record.orgId),
+    status: 'open',
+    reportedAt: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+  incidentInsert.run({
+    id: incident.id,
+    orgId: incident.orgId,
+    status: incident.status,
+    detectedAt: incident.detectedAt,
+    deadlineAt: incident.deadlineAt,
+    reportedAt: null,
+    createdAt: now,
+    updatedAt: now,
+    data: JSON.stringify(incident),
+  });
+  return incident;
+}
+
+// Status transition on an existing incident; returns null for an unknown id.
+// detectedAt/deadlineAt are immutable and the FIRST reportedAt stamp is
+// permanent — the 72-hour clock cannot be rewound and a late report cannot
+// be rewritten into an on-time one. (The route's strict schema means only
+// status/notes/reportedAt can reach `patch`.)
+const setAiIncidentStatus = sdb.transaction((incidentId, patch, now) => {
+  const row = incidentById.get(incidentId);
+  if (!row) return null;
+  const existing = JSON.parse(row.data);
+  const merged = {
+    ...existing,
+    ...definedEntries(patch),
+    id: existing.id,
+    orgId: orgColumn(existing.orgId),
+    detectedAt: existing.detectedAt,
+    deadlineAt: existing.deadlineAt,
+    ...(existing.reportedAt ? { reportedAt: existing.reportedAt } : {}),
+    createdAt: existing.createdAt,
+    updatedAt: now,
+  };
+  incidentUpdate.run({ id: merged.id, status: merged.status, reportedAt: merged.reportedAt || null, updatedAt: now, data: JSON.stringify(merged) });
+  return merged;
+});
+
+// Most recent timestamp of an audit action (idx_audit_action); lets cadence
+// controls (board reporting) derive state from the append-only log instead of
+// new persistence.
+function lastAuditActionAt(action) {
+  const row = sdb.prepare('SELECT ts FROM audit WHERE action = ? ORDER BY seq DESC LIMIT 1').get(action);
+  return row ? row.ts : null;
+}
+
 // ---- Delivery history (SIEM/SOAR subscriptions) ------------------------------
 const deliveryInsert = sdb.prepare('INSERT INTO deliveries (id, ts, destId, dedupeKey, status, data) VALUES (@id, @ts, @destId, @dedupeKey, @status, @data)');
 
@@ -806,6 +873,7 @@ module.exports = {
   getScimGroup, getScimGroupByDisplayName, listScimGroups, saveScimGroup, deleteScimGroup,
   getAiApp, listAiApps, upsertAiApp,
   listAiUseCases, upsertAiUseCase, reviewAiUseCase,
+  listAiIncidents, createAiIncident, setAiIncidentStatus, lastAuditActionAt,
   recordDelivery, listDeliveries, recentDeliverySuccess,
   setTenantContext,
   _canonical: canonical, _db: sdb, _dbPath: DB_PATH, _driverKind: DRIVER_KIND,

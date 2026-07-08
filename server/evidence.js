@@ -252,6 +252,23 @@ function safeUseCaseRecord(record) {
   };
 }
 
+// Incident records for the examiner pack: pattern-redacted metadata plus the
+// derived prompt-free timeline (built from safeQuery-shaped rows only).
+function safeIncidentRecord(record, timeline) {
+  if (!record || typeof record !== 'object') return null;
+  return {
+    id: safeThreatText(record.id, 80),
+    title: safeThreatText(record.title, 120),
+    notes: safeThreatText(record.notes, 240),
+    status: safeThreatText(record.status, 40),
+    detectedAt: safeThreatText(record.detectedAt, 80),
+    deadlineAt: safeThreatText(record.deadlineAt, 80),
+    reportedAt: safeThreatText(record.reportedAt, 80),
+    queryCount: (Array.isArray(record.queryIds) ? record.queryIds : []).length,
+    timeline: Array.isArray(timeline) ? timeline.slice(0, 50) : [],
+  };
+}
+
 // EDM watchlist status for examiner review: counts and thresholds only. The
 // salt and fingerprint list never leave server/exact-match.js.
 function safeEdmSummary(edm) {
@@ -829,6 +846,18 @@ function buildLineage(rows) {
   };
 }
 
+function buildIncidentSection(summary, incidentRows, lineageQueries) {
+  const queryMap = new Map(lineageQueries.map((q) => [q.id, q]));
+  return {
+    summary,
+    records: (incidentRows || []).slice(0, 100).map((record) => {
+      const resolved = (Array.isArray(record.queryIds) ? record.queryIds : [])
+        .map((queryId) => queryMap.get(queryId)).filter(Boolean).map(safeQuery);
+      return safeIncidentRecord(record, ncuaReadiness.incidentTimeline(record, resolved));
+    }).filter(Boolean),
+  };
+}
+
 function buildEvidencePack(input) {
   const now = input.generatedAt || new Date().toISOString();
   const queries = Array.isArray(input.queries) ? input.queries : [];
@@ -845,6 +874,8 @@ function buildEvidencePack(input) {
   const edm = safeEdmSummary(input.edm);
   const useCaseRows = Array.isArray(input.useCases) ? input.useCases : null;
   const useCases = ncuaReadiness.useCasesSummary(useCaseRows, now);
+  const incidentRows = Array.isArray(input.incidents) ? input.incidents : null;
+  const incidents = ncuaReadiness.incidentsSummary(incidentRows, now);
   const scope = {
     queryLimit: input.queryLimit,
     auditLimit: input.auditLimit,
@@ -867,6 +898,8 @@ function buildEvidencePack(input) {
     restoreDrill,
     edm,
     useCases,
+    incidents,
+    boardPacket: input.boardPacket,
   });
   const report = safeReport(input.report, now);
   return {
@@ -902,6 +935,7 @@ function buildEvidencePack(input) {
         catalog: input.catalog,
         queries: lineageQueries,
         useCases,
+        incidents,
         // The whitelisted schedule from safeReport, not the raw input, so the
         // readiness section can't carry unvetted schedule-config fields.
         reportSchedule: report.schedule,
@@ -910,6 +944,7 @@ function buildEvidencePack(input) {
         summary: useCases,
         records: (useCaseRows || []).slice(0, 200).map(safeUseCaseRecord).filter(Boolean),
       },
+      incidents: buildIncidentSection(incidents, incidentRows, lineageQueries),
     } : {}),
     lineage: buildLineage(lineageQueries),
     detectors: input.detectors || [],

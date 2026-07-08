@@ -18,6 +18,8 @@ const CONTROL_TARGET_TABS = {
   member_information_safeguards: 'ncua',
   ai_use_inventory: 'ncua',
   vendor_service_provider_oversight: 'ncua',
+  incident_readiness: 'ncua',
+  board_reporting: 'ncua',
   ai_usage_governance: 'catalog',
   fleet_sensor_coverage: 'coverage',
   backup_recoverability: 'deploy',
@@ -101,6 +103,97 @@ function useCasesSummary(rows, nowIso) {
     vendorReviewed: active.filter((row) => vendor(row) === 'reviewed').length,
     vendorPending: active.filter((row) => vendor(row) === 'pending').length,
     vendorNotReviewed: active.filter((row) => vendor(row) === 'not_reviewed').length,
+  };
+}
+
+const INCIDENT_OPEN = new Set(['open', 'under_review']);
+
+// Prompt-free rollup of incident rows for readiness scoring, control states,
+// and evidence: statuses, counts, and deadline math only.
+function incidentsSummary(rows, nowIso) {
+  if (!Array.isArray(rows)) return null;
+  const nowMs = Date.parse(nowIso || '') || Date.now();
+  const status = (row) => String((row && row.status) || '');
+  const overdue = (row) => INCIDENT_OPEN.has(status(row)) && row.deadlineAt && Date.parse(row.deadlineAt) < nowMs;
+  const reportedLate = (row) => row.reportedAt && row.deadlineAt && Date.parse(row.reportedAt) > Date.parse(row.deadlineAt);
+  return {
+    total: rows.length,
+    open: rows.filter((row) => status(row) === 'open').length,
+    underReview: rows.filter((row) => status(row) === 'under_review').length,
+    reported: rows.filter((row) => status(row) === 'reported').length,
+    closed: rows.filter((row) => status(row) === 'closed').length,
+    overdue: rows.filter(overdue).length,
+    reportedLate: rows.filter(reportedLate).length,
+  };
+}
+
+// Derived, prompt-free incident timeline: consumes only sanitized
+// (safeQuery-shaped) rows — who, destination, decision, data types, blocked
+// vs exposed. Never raw prompt text and never audit.detail.
+function incidentTimeline(incident, safeQueries = []) {
+  return safeQueries
+    .filter(Boolean)
+    .map((q) => ({
+      queryId: safeText(q.id, '', 80),
+      at: safeText(q.createdAt, '', 80),
+      user: safeText(q.user, 'unknown', 160),
+      destination: safeText(q.destination, 'unknown', 253),
+      decision: safeText(q.status, 'unknown', 40),
+      prevented: BLOCKED_STATUSES.has(String(q.status || '')),
+      dataClasses: findingTypes(q).slice(0, 24),
+    }))
+    .sort((a, b) => a.at.localeCompare(b.at));
+}
+
+// Board-packet seat block: scalar aggregates plus the license true-up — the
+// per-user `users[]` roster is deliberately dropped (this document leaves the
+// security team).
+function seatAggregates(seatReport, licenseStatus) {
+  const s = seatReport || {};
+  const licensedSeats = licenseStatus && Number.isFinite(Number(licenseStatus.seats)) ? Number(licenseStatus.seats) : null;
+  const configuredLimit = n(s.seatLimit) || null;
+  const seatsUsed = n(s.seatsUsed);
+  return {
+    tenantId: safeText(s.tenantId, '', 80) || null,
+    saasMode: s.saasMode === true,
+    seatLimit: configuredLimit,
+    seatsUsed,
+    seatsRemaining: s.seatsRemaining == null ? null : n(s.seatsRemaining),
+    overLimit: s.overLimit === true,
+    trueUp: {
+      licensedSeats,
+      configuredLimit,
+      seatsUsed,
+      // Nothing wires the license seat count to the configured env limit; the
+      // packet is where a mismatch becomes visible.
+      mismatch: !!((licensedSeats && configuredLimit && licensedSeats !== configuredLimit)
+        || (licensedSeats && seatsUsed > licensedSeats)),
+    },
+  };
+}
+
+// Monthly/quarterly executive summary: the readiness report's prompt-free
+// panels plus seat aggregates and license state. JSON v1 (per the plan).
+function boardPacket(input = {}) {
+  const report = input.report || summarize(input);
+  const lic = input.licenseStatus || null;
+  return {
+    generatedAt: report.generatedAt,
+    profile: report.profile,
+    readiness: { score: report.score, state: report.state },
+    memberData: report.panels.memberData,
+    shadowAi: report.panels.shadowAi,
+    useCases: report.panels.useCases,
+    incidents: report.panels.incidents,
+    exceptions: report.panels.exceptions,
+    exportHealth: report.panels.exportHealth,
+    audit: report.panels.audit,
+    seats: seatAggregates(input.seatReport, lic),
+    license: lic ? {
+      state: safeText(lic.state, 'unlicensed', 40),
+      plan: safeText(lic.plan, '', 40) || null,
+      expires: safeText(lic.expires, '', 80) || null,
+    } : null,
   };
 }
 
@@ -190,6 +283,7 @@ function summarize(input = {}) {
       shadowAi: shadowAiPanel(input.catalog),
       edm: edmPanel(input.edm),
       useCases: (input.useCases && typeof input.useCases === 'object') ? input.useCases : null,
+      incidents: (input.incidents && typeof input.incidents === 'object') ? input.incidents : null,
       exceptions: exceptionsPanel(input.policyExceptionReview),
       exportHealth: exportHealthPanel(input.reportSchedule),
       audit,
@@ -198,4 +292,12 @@ function summarize(input = {}) {
   };
 }
 
-module.exports = { summarize, isProfile, useCasesSummary, _internal: { memberDataPanel, shadowAiPanel, edmPanel, scoreControls, stateFor } };
+module.exports = {
+  summarize,
+  isProfile,
+  useCasesSummary,
+  incidentsSummary,
+  incidentTimeline,
+  boardPacket,
+  _internal: { memberDataPanel, shadowAiPanel, edmPanel, scoreControls, stateFor },
+};
