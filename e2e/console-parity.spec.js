@@ -145,7 +145,7 @@ test('GOVERN views render live content without errors', async ({ page, request }
   await assertGroupRenders(page, request, '8103', ROUTES.govern);
 });
 
-test('NCUA use-case inventory panel mounts with its empty state', async ({ page, request }) => {
+test('NCUA use-case inventory and incident panels mount with their empty states', async ({ page, request }) => {
   const problems = collectUiProblems(page);
   await createHeldPrompt(request, '8106');
   await login(page);
@@ -153,6 +153,9 @@ test('NCUA use-case inventory panel mounts with its empty state', async ({ page,
   await expect(page.getByRole('heading', { name: 'AI use-case inventory', exact: true })).toBeVisible();
   await expect(page.locator('.panel', { hasText: 'AI use-case inventory' }).locator('.empty'))
     .toContainText('No AI use cases recorded yet');
+  await expect(page.getByRole('heading', { name: '72-hour incident readiness', exact: true })).toBeVisible();
+  await expect(page.locator('.panel', { hasText: '72-hour incident readiness' }).locator('.empty'))
+    .toContainText('No AI incidents on record');
   expect(problems).toEqual([]);
 });
 

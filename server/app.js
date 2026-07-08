@@ -2793,6 +2793,10 @@ app.get('/api/export/evidence', ...auditRead, (req, res) => {
     edm: exactMatch.publicSummary(),
     catalog: appCatalog.reviewRollup(),
     useCases: license.entitled('ncua_readiness') ? db.listAiUseCases() : undefined,
+    incidents: license.entitled('ncua_readiness') ? db.listAiIncidents() : undefined,
+    boardPacket: license.entitled('ncua_readiness')
+      ? { lastGeneratedAt: db.lastAuditAction('BOARD_PACKET_EXPORTED') }
+      : undefined,
     examinerProfile: req.query.examinerProfile,
     report: { schedule: evidenceScheduleSummary() },
   }));
@@ -2819,9 +2823,25 @@ function controlMappingInputs() {
     useCases: license.entitled('ncua_readiness')
       ? ncuaReadiness.useCasesSummary(db.listAiUseCases(), generatedAt)
       : null,
+    incidents: license.entitled('ncua_readiness')
+      ? ncuaReadiness.incidentsSummary(db.listAiIncidents(), generatedAt)
+      : null,
+    boardPacket: license.entitled('ncua_readiness')
+      ? { lastGeneratedAt: db.lastAuditAction('BOARD_PACKET_EXPORTED') }
+      : null,
     summaryQueries,
     activePolicy,
   };
+}
+
+// Prompt-free incident timeline: resolves the referenced query ids through
+// the same sanitizer the evidence pack uses (safeQuery), never audit.detail.
+function incidentWithTimeline(incident) {
+  const safeQueries = (Array.isArray(incident.queryIds) ? incident.queryIds : [])
+    .map((queryId) => db.getQuery(queryId))
+    .filter(Boolean)
+    .map(evidence.safeQuery);
+  return { ...incident, timeline: ncuaReadiness.incidentTimeline(incident, safeQueries) };
 }
 
 // The NCUA module's mutation gate: reads stay open (they carry the entitled
@@ -2913,6 +2933,74 @@ app.post('/api/ncua/use-cases/:id/review', ...adminWrite, requireNcuaEntitled, v
     detail: `uc=${record.id}: reviewStatus=${record.reviewStatus}; vendorStatus=${record.vendorStatus || 'not_reviewed'}; nextReviewAt=${record.nextReviewAt || 'none'}`,
   });
   res.json({ useCase: record });
+});
+
+// 72-hour AI incident readiness (slice 3, 12 CFR 748.1(c)): incidents carry
+// status and deadline metadata plus referenced query ids; timelines are
+// derived from sanitized queries on read.
+app.get('/api/ncua/incidents', auth.requireAuth, (req, res) => {
+  const entitled = license.entitled('ncua_readiness');
+  res.json({ entitled, incidents: entitled ? db.listAiIncidents().map(incidentWithTimeline) : [] });
+});
+
+app.post('/api/ncua/incidents', ...adminWrite, requireNcuaEntitled, validation.validateBody(validation.incidentSchema), (req, res) => {
+  const now = new Date().toISOString();
+  const detectedAt = req.body.detectedAt ? new Date(Date.parse(req.body.detectedAt)).toISOString() : now;
+  const queryIds = (req.body.queryIds || []).filter((queryId) => !!db.getQuery(queryId));
+  const incident = db.createAiIncident({
+    title: req.body.title,
+    notes: req.body.notes,
+    queryIds,
+    detectedAt,
+    // The NCUA reporting clock: 72 hours from reasonable belief (detection).
+    deadlineAt: new Date(Date.parse(detectedAt) + 72 * 3600 * 1000).toISOString(),
+    orgId: tenant.config().tenantId,
+  }, now);
+  db.appendAudit({
+    action: 'INCIDENT_OPENED',
+    actor: req.user.user,
+    detail: `inc=${incident.id}: queries=${queryIds.length}; detectedAt=${incident.detectedAt}; deadlineAt=${incident.deadlineAt}`,
+  });
+  res.json({ incident: incidentWithTimeline(incident) });
+});
+
+app.post('/api/ncua/incidents/:id/status', ...adminWrite, requireNcuaEntitled, validation.validateBody(validation.incidentStatusSchema), (req, res) => {
+  const now = new Date().toISOString();
+  const patch = { ...req.body };
+  if (patch.status === 'reported' && !patch.reportedAt) patch.reportedAt = now;
+  const incident = db.setAiIncidentStatus(String(req.params.id).slice(0, 80), patch, now);
+  if (!incident) return res.status(404).json({ error: 'not found' });
+  db.appendAudit({
+    action: 'INCIDENT_STATUS_CHANGED',
+    actor: req.user.user,
+    detail: `inc=${incident.id}: status=${incident.status}; reportedAt=${incident.reportedAt || 'none'}`,
+  });
+  res.json({ incident: incidentWithTimeline(incident) });
+});
+
+// Board packet (slice 3): prompt-free executive summary. Auditor-readable
+// like the evidence export; generation is recorded so the board_reporting
+// control can grade cadence from the append-only log.
+app.get('/api/ncua/board-packet', ...auditRead, requireNcuaEntitled, (req, res) => {
+  const inputs = controlMappingInputs();
+  const report = ncuaReadiness.summarize({
+    ...inputs,
+    policyExceptionReview: policy.policyExceptionReview(inputs.activePolicy),
+    catalog: appCatalog.reviewRollup(),
+    queries: inputs.summaryQueries,
+    reportSchedule: evidenceScheduleSummary(),
+  });
+  const packet = ncuaReadiness.boardPacket({
+    report,
+    seatReport: tenant.seatReport(db),
+    licenseStatus: license.publicStatus(),
+  });
+  db.appendAudit({
+    action: 'BOARD_PACKET_EXPORTED',
+    actor: req.user.user,
+    detail: `score=${packet.readiness.score}; state=${packet.readiness.state}`,
+  });
+  res.json(packet);
 });
 
 app.get('/api/policy', auth.requireAuth, (req, res) => res.json(policy.loadPolicy()));

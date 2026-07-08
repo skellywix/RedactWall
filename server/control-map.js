@@ -157,13 +157,8 @@ const CONTROL_MAPPINGS = [
 // with server/ncua-readiness.js.
 const MEMBER_IDENTIFIERS = ['US_SSN', 'MEMBER_ID', 'LOAN_NUMBER', 'BANK_ACCOUNT', 'ROUTING_NUMBER'];
 
-// Slice-3 controls (PLANS/ncua-readiness-center.md) whose evidence inputs do
-// not exist yet; they render not_provided with an honest summary until the
-// incident records and board packet ship.
-const PENDING_CONTROL_SUMMARIES = {
-  incident_readiness: '72-hour incident records are not yet attached; they ship with the incident-readiness workflow.',
-  board_reporting: 'Board packet evidence is not yet attached; it ships with Board Packet exports.',
-};
+// Quarterly board-reporting cadence with slack for scheduling (13 weeks + 1).
+const BOARD_CADENCE_MS = 92 * 24 * 60 * 60 * 1000;
 
 function hasObject(value) {
   return !!value && typeof value === 'object';
@@ -239,6 +234,37 @@ function stateFromVendorOversight(summary) {
   return active > 0 && Number(summary.vendorReviewed) === active ? 'covered' : 'attention';
 }
 
+function stateFromIncidentReadiness(summary) {
+  if (!hasObject(summary)) return 'not_provided';
+  return Number(summary.overdue) === 0 ? 'covered' : 'attention';
+}
+
+function incidentReadinessSummary(summary, state) {
+  if (state === 'not_provided') return '72-hour incident records are not yet attached; the workflow ships with NCUA Readiness.';
+  if (state === 'covered') {
+    return Number(summary.total)
+      ? `${summary.total} AI incident(s) tracked against the 72-hour reporting clock; none overdue.`
+      : 'The 72-hour incident workflow is live; no incidents are open.';
+  }
+  return `${summary.overdue} incident(s) past the 72-hour reporting deadline without being reported.`;
+}
+
+function stateFromBoardReporting(meta, input) {
+  if (!hasObject(meta)) return 'not_provided';
+  if (!meta.lastGeneratedAt) return 'attention';
+  const generatedAt = Date.parse(meta.lastGeneratedAt);
+  const now = Date.parse(input.generatedAt || '') || Date.now();
+  return Number.isFinite(generatedAt) && now - generatedAt <= BOARD_CADENCE_MS ? 'covered' : 'attention';
+}
+
+function boardReportingSummary(meta, state) {
+  if (state === 'not_provided') return 'Board packet evidence is not yet attached; export one from NCUA Readiness.';
+  if (state === 'covered') return `A board packet was generated within the quarterly cadence (last: ${meta.lastGeneratedAt}).`;
+  return meta.lastGeneratedAt
+    ? `The last board packet (${meta.lastGeneratedAt}) is older than the quarterly cadence.`
+    : 'No board packet has been generated yet; export one from NCUA Readiness.';
+}
+
 function vendorOversightSummary(summary, state) {
   if (state === 'not_provided') return 'Vendor-review status is not yet attached; it is tracked on each AI use-case record.';
   if (state === 'covered') return `Vendor due diligence is recorded for all ${summary.activeTotal} active AI use case(s).`;
@@ -268,14 +294,17 @@ function stateFor(control, input) {
   if (control.id === 'member_information_safeguards') return stateFromMemberSafeguards(input);
   if (control.id === 'ai_use_inventory') return stateFromUseCaseInventory(input.useCases);
   if (control.id === 'vendor_service_provider_oversight') return stateFromVendorOversight(input.useCases);
+  if (control.id === 'incident_readiness') return stateFromIncidentReadiness(input.incidents);
+  if (control.id === 'board_reporting') return stateFromBoardReporting(input.boardPacket, input);
   return 'not_provided';
 }
 
 function summaryFor(control, input, state) {
-  if (PENDING_CONTROL_SUMMARIES[control.id]) return PENDING_CONTROL_SUMMARIES[control.id];
   if (control.id === 'member_information_safeguards') return memberSafeguardsSummary(input, state);
   if (control.id === 'ai_use_inventory') return useCaseInventorySummary(input.useCases, state);
   if (control.id === 'vendor_service_provider_oversight') return vendorOversightSummary(input.useCases, state);
+  if (control.id === 'incident_readiness') return incidentReadinessSummary(input.incidents, state);
+  if (control.id === 'board_reporting') return boardReportingSummary(input.boardPacket, state);
   if (control.id === 'tamper_evident_audit') {
     const count = Number(input.auditIntegrity && input.auditIntegrity.count) || 0;
     return state === 'covered'

@@ -381,6 +381,23 @@ const useCaseReviewSchema = z.object({
   nextReviewAt: useCaseDateSchema.optional(),
 }).strict();
 
+// 72-hour AI incident readiness (slice 3, 12 CFR 748.1(c)). Incidents carry a
+// bounded single-line title and referenced query ids only — the timeline is
+// derived from those queries, so no event content is accepted here.
+const INCIDENT_STATUS = ['open', 'under_review', 'reported', 'closed'];
+const incidentSchema = z.object({
+  title: useCaseTextSchema(120).refine((value) => value.trim().length > 0, { message: 'required' }),
+  queryIds: z.array(z.string().min(1).max(80).regex(/^[A-Za-z0-9_-]+$/)).max(50).optional(),
+  detectedAt: useCaseDateSchema.optional(),
+  notes: useCaseTextSchema(240).optional(),
+}).strict();
+
+const incidentStatusSchema = z.object({
+  status: z.enum(INCIDENT_STATUS),
+  reportedAt: useCaseDateSchema.optional(),
+  notes: useCaseTextSchema(240).optional(),
+}).strict();
+
 function safeOperatorText(value) {
   const text = String(value || '');
   return !/[\u0000-\u001F]/.test(text) && !SENSITIVE_ROUTING_CODE.test(text);
@@ -716,6 +733,8 @@ module.exports = {
   catalogImportSchema,
   useCaseSchema,
   useCaseReviewSchema,
+  incidentSchema,
+  incidentStatusSchema,
   postureActionSchema,
   detectorFeedbackSchema,
   policyUpdateSchema,

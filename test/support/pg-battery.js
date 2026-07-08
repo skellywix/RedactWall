@@ -119,6 +119,20 @@ attempt('useCases', () => {
   };
 });
 
+attempt('incidents', () => {
+  // Exercises the quoted detectedAt/deadlineAt/reportedAt columns on Postgres.
+  const now = new Date().toISOString();
+  const inc = db.createAiIncident({ title: 'pg incident', queryIds: [], detectedAt: now, deadlineAt: now, orgId: 'PG-Org ' }, now);
+  const moved = db.setAiIncidentStatus(inc.id, { status: 'reported', reportedAt: now }, now);
+  return {
+    created: !!inc.id,
+    orgNormalized: inc.orgId === 'pg-org',
+    reported: moved.status === 'reported',
+    listed: db.listAiIncidents().length === 1,
+    unknownIsNull: db.setAiIncidentStatus('inc_missing', { status: 'closed' }, now) === null,
+  };
+});
+
 attempt('statsAndSeats', () => {
   const s = db.stats();
   const seats = db.seatStats({});

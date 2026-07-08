@@ -145,6 +145,10 @@ function buildEvidencePackFromRuntime(options = {}) {
     edm: exactMatch.publicSummary(),
     catalog: appCatalog.reviewRollup(),
     useCases: useCasesEntitled && typeof db.listAiUseCases === 'function' ? db.listAiUseCases() : undefined,
+    incidents: useCasesEntitled && typeof db.listAiIncidents === 'function' ? db.listAiIncidents() : undefined,
+    boardPacket: useCasesEntitled && typeof db.lastAuditAction === 'function'
+      ? { lastGeneratedAt: db.lastAuditAction('BOARD_PACKET_EXPORTED') }
+      : undefined,
     examinerProfile: options.examinerProfile,
     policyExceptionReview: typeof policy.policyExceptionReview === 'function'
       ? policy.policyExceptionReview(activePolicy)

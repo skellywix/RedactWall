@@ -54,7 +54,7 @@ test('db.js contract holds on Postgres (migrations, RLS, immutability, chain)', 
   assert.deepStrictEqual(failed, [], `battery steps failed: ${JSON.stringify(failed)}`);
 
   assert.strictEqual(results.driverKind.value, 'postgres');
-  assert.deepStrictEqual(results.migrations.value.map((m) => m.version), [1, 2, 3, 4, 5]);
+  assert.deepStrictEqual(results.migrations.value.map((m) => m.version), [1, 2, 3, 4, 5, 6]);
   assert.strictEqual(results.queryCrud.value.updatedStatus, 'approved');
   assert.strictEqual(results.queryCrud.value.risk, 42);
   assert.strictEqual(results.auditChain.value.ok, true);
@@ -70,6 +70,7 @@ test('db.js contract holds on Postgres (migrations, RLS, immutability, chain)', 
   assert.deepStrictEqual(results.scimAndLifecycle.value, { inactive: true, revoked: true });
   assert.deepStrictEqual(results.deliveriesAndApps.value, { delivered: true, app: true });
   assert.deepStrictEqual(results.useCases.value, { rows: 2, reviewed: true, ownerKept: true, unknownIsNull: true });
+  assert.deepStrictEqual(results.incidents.value, { created: true, orgNormalized: true, reported: true, listed: true, unknownIsNull: true });
   assert.deepStrictEqual(results.statsAndSeats.value, { total: true, seatUsers: true });
   assert.deepStrictEqual(results.mfaRecovery.value, { first: true, second: false, used: true });
 });

@@ -20,7 +20,7 @@ const ADMIN_URL = process.env.REDACTWALL_TEST_PG_URL || '';
 // Every table carrying an "orgId" column must be listed here; the test
 // cross-checks this list against information_schema AND pg_policies in both
 // directions, so tenant-scoping a table without adding its policy fails.
-const TENANT_SCOPED_TABLES = ['ai_use_cases', 'queries'];
+const TENANT_SCOPED_TABLES = ['ai_incidents', 'ai_use_cases', 'queries'];
 const TENANT_GUC = 'redactwall.org_id';
 const SEED_ROWS = [
   ['rls-a-1', 'org-a'],

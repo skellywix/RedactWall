@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
+import IncidentsPanel from '../components/ncua/IncidentsPanel';
 import UseCasesPanel from '../components/ncua/UseCasesPanel';
 import { EmptyState } from '../components/Panel';
 import { apiJson } from '../lib/api';
 import { navigate } from '../lib/router';
+import { toast } from '../lib/toast';
 import './NcuaReadiness.css';
 
 /**
@@ -53,6 +55,7 @@ interface NcuaReport {
     shadowAi: { totalApps: number; sanctioned: number; underReview: number; tolerated: number; unsanctioned: number; blocked: number; unreviewedEvents: number };
     edm: { configured: boolean; enabled: boolean; active: boolean; fingerprints: number; minLength?: number; severity?: number };
     useCases: { total: number; approved: number; underReview: number; restricted: number; retired: number; overdue: number; activeTotal: number; vendorReviewed: number; vendorPending: number; vendorNotReviewed: number } | null;
+    incidents: { total: number; open: number; underReview: number; reported: number; closed: number; overdue: number; reportedLate: number } | null;
     exceptions: { total: number; active: number; expiringSoon: number; reviewDue: number; expired: number; disabled: number } | null;
     exportHealth: { scheduled: boolean; cadence?: string | null; nextRunAt?: string | null; retentionDays?: number | null };
     audit: { verified: boolean; count: number };
@@ -66,6 +69,23 @@ interface NcuaResponse {
 }
 
 const EXAMINER_PACK_HREF = '/api/export/evidence?examinerProfile=federal_credit_union';
+
+// Board packet: fetched as JSON and saved client-side (Audit.tsx pattern).
+// Server records BOARD_PACKET_EXPORTED so the cadence control can grade.
+async function downloadBoardPacket(): Promise<void> {
+  const packet = await apiJson<Record<string, unknown>>('/api/ncua/board-packet');
+  if (!packet) {
+    toast('Board packet export failed (Security Admin or Auditor role required).', 'error');
+    return;
+  }
+  const blob = new Blob([JSON.stringify(packet, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `redactwall-board-packet-${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 const STATE_TONE: Record<string, string> = {
   covered: 'tone-low',
@@ -110,6 +130,9 @@ function Header({ busy, onRefresh }: { busy: boolean; onRefresh: () => void }) {
         <a className="system-button secondary" href={EXAMINER_PACK_HREF} target="_blank" rel="noopener">
           Export examiner pack
         </a>
+        <button className="system-button secondary" type="button" onClick={() => void downloadBoardPacket()}>
+          Board packet
+        </button>
         <button className="system-button secondary" type="button" disabled={busy} onClick={onRefresh}>
           {busy ? 'Scoring…' : 'Refresh'}
         </button>
@@ -299,6 +322,7 @@ export default function NcuaReadiness() {
         <KpiRow report={report} />
         <NextActionsPanel actions={report.nextActions} />
         <UseCasesPanel />
+        <IncidentsPanel />
         <div className="insights-grid">
           <EdmPanel edm={report.panels.edm} />
           <CountsPanel

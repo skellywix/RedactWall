@@ -318,6 +318,57 @@ const MIGRATIONS = [
           OR "orgId" = current_setting('redactwall.org_id', true));
     `,
   },
+  {
+    version: 6,
+    name: 'ai-incidents',
+    // 72-hour AI incident readiness (PLANS/ncua-readiness-center.md slice 3,
+    // NCUA cyber-incident reporting rule, 12 CFR 748.1(c)). Rows hold status
+    // and deadline metadata plus referenced query ids; the examiner timeline
+    // is DERIVED on read from those queries — no event content is duplicated
+    // here. Tenant-ready like ai_use_cases: v4-corrected orgId + the same RLS
+    // policy shape.
+    sqlite: `
+      CREATE TABLE IF NOT EXISTS ai_incidents (
+        seq        INTEGER PRIMARY KEY AUTOINCREMENT,
+        id         TEXT UNIQUE NOT NULL,
+        orgId      TEXT,
+        status     TEXT NOT NULL,
+        detectedAt TEXT NOT NULL,
+        deadlineAt TEXT NOT NULL,
+        reportedAt TEXT,
+        createdAt  TEXT NOT NULL,
+        updatedAt  TEXT NOT NULL,
+        data       TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_ai_incidents_org ON ai_incidents(orgId);
+      CREATE INDEX IF NOT EXISTS idx_ai_incidents_status ON ai_incidents(status, deadlineAt);
+    `,
+    postgres: `
+      CREATE TABLE IF NOT EXISTS ai_incidents (
+        seq          BIGSERIAL PRIMARY KEY,
+        id           TEXT UNIQUE NOT NULL,
+        "orgId"      TEXT,
+        status       TEXT NOT NULL,
+        "detectedAt" TEXT NOT NULL,
+        "deadlineAt" TEXT NOT NULL,
+        "reportedAt" TEXT,
+        "createdAt"  TEXT NOT NULL,
+        "updatedAt"  TEXT NOT NULL,
+        data         TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_ai_incidents_org ON ai_incidents("orgId");
+      CREATE INDEX IF NOT EXISTS idx_ai_incidents_status ON ai_incidents(status, "deadlineAt");
+
+      ALTER TABLE ai_incidents ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE ai_incidents FORCE ROW LEVEL SECURITY;
+      DROP POLICY IF EXISTS ai_incidents_tenant_isolation ON ai_incidents;
+      CREATE POLICY ai_incidents_tenant_isolation ON ai_incidents
+        USING (COALESCE(current_setting('redactwall.org_id', true), '') = ''
+          OR "orgId" = current_setting('redactwall.org_id', true))
+        WITH CHECK (COALESCE(current_setting('redactwall.org_id', true), '') = ''
+          OR "orgId" = current_setting('redactwall.org_id', true));
+    `,
+  },
 ];
 
 module.exports = { MIGRATIONS };
