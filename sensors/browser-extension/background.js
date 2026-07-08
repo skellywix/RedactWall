@@ -61,15 +61,41 @@ function failClosed(reason) {
 function missingServerConfigReason(c) {
   if (!c.serverUrl) return 'missing_server_url';
   if (!c.ingestKey) return 'missing_ingest_key';
+  // Every data-sending path (gate, shadow-AI, blocked-download, policy refresh)
+  // funnels through this guard, so reject an unparseable or insecure origin
+  // here: a cleartext-http remote plane would leak the ingest key on the wire.
+  // HTTP is still allowed to loopback (the local-plane default). Fail closed.
+  if (!validServerOrigin(c.serverUrl)) return 'invalid_server_url';
   return null;
 }
 
+function isLoopbackHost(host) {
+  const h = String(host || '').toLowerCase().replace(/^\[|\]$/g, '');
+  if (h === 'localhost' || h === '::1' || h === '0:0:0:0:0:0:0:1') return true;
+  // '<name>.localhost' (single label) is loopback per RFC 6761; reject
+  // multi-label FQDNs so 'x.localhost.evil.com' is not treated as loopback.
+  if (/^[a-z0-9-]+\.localhost$/.test(h)) return true;
+  // IPv4 127.0.0.0/8 as a strict dotted-quad; a startsWith('127.') prefix would
+  // wrongly accept an attacker host like '127.0.0.1.evil.com'.
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
+  if (m) {
+    const o = m.slice(1).map(Number);
+    if (o.every((n) => n <= 255) && o[0] === 127) return true;
+  }
+  return false;
+}
+
+// The extension posts the ingest key and prompt metadata to the control plane;
+// a REMOTE plane must be HTTPS or the key travels in cleartext. HTTP is allowed
+// only to loopback (dev/local). A managed policy pointing at a remote plane
+// must use HTTPS.
 function validServerOrigin(value) {
   try {
     const url = new URL(String(value || ''));
-    if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
     if (url.username || url.password) return null;
-    return `${url.protocol}//${url.host}`;
+    if (url.protocol === 'https:') return `${url.protocol}//${url.host}`;
+    if (url.protocol === 'http:' && isLoopbackHost(url.hostname)) return `${url.protocol}//${url.host}`;
+    return null;
   } catch (e) {
     return null;
   }
@@ -180,9 +206,10 @@ async function reportInstallHealth() {
   };
   const checks = buildInstallChecks({ config, server, identity: who, managed });
   if (!server.enabled) return { ok: false, reason: 'disabled', checks };
+  // missingServerConfigReason already rejects an unparseable/insecure origin
+  // (returns 'invalid_server_url'), so no separate validServerOrigin check here.
   const missing = missingServerConfigReason(server);
   if (missing) return { ok: false, reason: missing, checks };
-  if (!validServerOrigin(server.serverUrl)) return { ok: false, reason: 'invalid_server_url', checks };
   const result = await fetchJsonWithTimeout(String(server.serverUrl).replace(/\/+$/, '') + '/api/v1/heartbeat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-api-key': server.ingestKey },

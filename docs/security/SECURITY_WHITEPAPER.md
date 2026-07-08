@@ -79,6 +79,15 @@ shape) — there is no RedactWall-hosted multi-tenant backend.
 
 ### What leaves the device, and what never does
 
+This section describes the **air-gapped** deployment mode — the default and the
+product's competitive wedge. The opt-in **connected** mode (a vendor-managed
+SKU, off unless explicitly configured) deliberately relaxes two of these lines:
+a prompt-free license heartbeat reports seat counts to the vendor, and an
+optional vendor-side second-layer scanner receives prompt text over HTTPS.
+Neither is on unless an operator sets the connected-mode env vars; see
+`docs/process/CONNECTED_DEPLOYMENT.md`. The rest of the contract below holds in
+both modes.
+
 The prompt-free contract, enforced in code and regression-tested:
 
 | Never leaves the device / deployment | Allowed to flow |
@@ -90,8 +99,10 @@ The prompt-free contract, enforced in code and regression-tested:
 | Secrets, credentials, key material | Signed prompt-free receipts |
 | Local file paths and raw URLs (in exports) | Sanitized SIEM/SOAR events |
 
-No telemetry is sent to RedactWall the vendor. SIEM delivery history is
-recorded without payload bodies.
+In air-gapped mode no telemetry is sent to RedactWall the vendor. (In opt-in
+connected mode the only vendor-bound call is the prompt-free license
+heartbeat — seat counts and license ids, never prompts or findings.) SIEM
+delivery history is recorded without payload bodies.
 
 ## 3. Cryptographic Inventory
 
@@ -163,11 +174,14 @@ In every model the customer operates the environment and owns the data.
 
 ## 6. Sub-Processor Stance
 
-RedactWall introduces no sub-processors by default. The product makes no
-vendor-bound calls: no telemetry, no cloud detection service, no external
-model calls of its own. Self-hosted deployments add only the vendors the
-operator chooses (hosting provider, SIEM destination), and outbound SIEM
-delivery is HTTPS-only and prompt-free by construction.
+RedactWall introduces no sub-processors by default. In air-gapped mode the
+product makes no vendor-bound calls: no telemetry, no cloud detection service,
+no external model calls of its own. Self-hosted deployments add only the
+vendors the operator chooses (hosting provider, SIEM destination), and outbound
+SIEM delivery is HTTPS-only and prompt-free by construction. Opt-in connected
+mode adds the vendor as a processor for the license heartbeat (prompt-free) and,
+if the vendor scanner is enabled, for prompt text sent to it over HTTPS — a
+deliberate, contracted choice, not a default.
 
 ## 7. Verifying These Claims
 

@@ -28,8 +28,18 @@ const parsePool = require('../../server/parse-pool');
 const policyEngine = require('../../server/policy');
 const D = require('../../detection-engine/detect');
 const VERSION = require('../../package.json').version;
+const { secureServerUrl } = require('../shared/server-url');
 
-const SERVER = process.env.REDACTWALL_URL || 'http://localhost:4000';
+const bool = (v) => ['1', 'true', 'yes', 'on'].includes(String(v || '').toLowerCase());
+// Refuse a cleartext connection to a REMOTE control plane — the ingest key
+// would travel in the clear. Loopback (the local default) stays fine; an
+// explicit REDACTWALL_ALLOW_INSECURE_SERVER=1 is the escape hatch.
+const RAW_SERVER = process.env.REDACTWALL_URL || 'http://localhost:4000';
+const SERVER = secureServerUrl(RAW_SERVER, bool(process.env.REDACTWALL_ALLOW_INSECURE_SERVER));
+if (!SERVER) {
+  console.error(`[endpoint-agent] refusing insecure control-plane URL "${RAW_SERVER}": use https:// for a remote plane (or set REDACTWALL_ALLOW_INSECURE_SERVER=1).`);
+  process.exit(1);
+}
 const KEY = process.env.INGEST_API_KEY || '';
 function defaultWatchDir(argv = process.argv, env = process.env) {
   return argv[2] || env.ENDPOINT_AGENT_WATCH_DIR || env.REDACTWALL_ENDPOINT_AGENT_WATCH_DIR || path.join(os.tmpdir(), 'redactwall-watch');

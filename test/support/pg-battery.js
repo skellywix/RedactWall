@@ -139,6 +139,23 @@ attempt('statsAndSeats', () => {
   return { total: s.total >= 3, seatUsers: seats.seatsUsed >= 2 };
 });
 
+attempt('seatWindow', () => {
+  // The trailing-30-day seat window must filter on the Postgres dialect too:
+  // an old-dated row falls outside the window, a recent one counts, and the
+  // org-filtered two-parameter path (cutoff + org) binds correctly.
+  const old = new Date(Date.now() - 60 * 86400000).toISOString();
+  const recent = new Date(Date.now() - 1 * 86400000).toISOString();
+  db._db.prepare('INSERT INTO queries (id, "createdAt", status, "user", "orgId", data) VALUES (?,?,?,?,?,?)')
+    .run('pg_seatwin_old', old, 'allowed', 'lapsed@pg.test', 'cu-seatwin', '{}');
+  db._db.prepare('INSERT INTO queries (id, "createdAt", status, "user", "orgId", data) VALUES (?,?,?,?,?,?)')
+    .run('pg_seatwin_new', recent, 'allowed', 'active@pg.test', 'cu-seatwin', '{}');
+  const windowed = db.seatStats({ orgId: 'cu-seatwin' }).seatsUsed;
+  process.env.REDACTWALL_SEAT_WINDOW_DAYS = 'all';
+  let lifetime;
+  try { lifetime = db.seatStats({ orgId: 'cu-seatwin' }).seatsUsed; } finally { delete process.env.REDACTWALL_SEAT_WINDOW_DAYS; }
+  return { windowed, lifetime };
+});
+
 attempt('mfaRecovery', () => {
   const first = db.consumeMfaRecoveryCode(3);
   const second = db.consumeMfaRecoveryCode(3);

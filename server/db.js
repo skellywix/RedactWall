@@ -244,7 +244,7 @@ function postureActionStates() {
 }
 
 const RETENTION_FINAL_STATUSES = ['approved', 'denied', 'redacted'];
-const SEAT_EXCLUDED_STATUSES = new Set(['seat_limit_blocked']);
+const SEAT_EXCLUDED_STATUSES = new Set(['seat_limit_blocked', 'license_revoked']);
 const SAFE_STATUS = /^[a-z_]+$/;
 const STATS_BLOCKED_STATUSES = [
   'pending',
@@ -323,15 +323,37 @@ function normalizedSeatOrg(value) {
 // latency grow with history. GROUP BY lower(user) mirrors normalizedSeatUser's
 // case-folding; unknown/unattributed and SCIM-inactive users are dropped after.
 const SEAT_EXCLUDED_LIST = [...SEAT_EXCLUDED_STATUSES].map((s) => `'${s}'`).join(', ');
+// A seat is a distinct billable user seen in the trailing window (default 30
+// days, matching docs/process/CUSTOMER_LICENSING.md), so inactive identities roll off
+// and billing reflects current usage. ISO-8601 createdAt compares
+// chronologically, so a string cutoff uses idx_queries_created directly.
+// REDACTWALL_SEAT_WINDOW_DAYS=0 (or 'all') restores lifetime counting.
 const SEAT_SELECT = `SELECT lower("user") AS user, COUNT(*) AS events, MIN("createdAt") AS firstSeen,
     MAX("createdAt") AS lastSeen, MIN("orgId") AS orgId FROM queries
-  WHERE "user" IS NOT NULL AND status NOT IN (${SEAT_EXCLUDED_LIST})`;
+  WHERE "user" IS NOT NULL AND status NOT IN (${SEAT_EXCLUDED_LIST}) AND "createdAt" >= ?`;
 const seatStatsAll = sdb.prepare(`${SEAT_SELECT} GROUP BY lower("user")`);
 const seatStatsByOrg = sdb.prepare(`${SEAT_SELECT} AND lower("orgId") = ? GROUP BY lower("user")`);
 
+const DEFAULT_SEAT_WINDOW_DAYS = 30;
+function seatWindowDays() {
+  const raw = process.env.REDACTWALL_SEAT_WINDOW_DAYS;
+  if (raw == null || raw === '') return DEFAULT_SEAT_WINDOW_DAYS;
+  if (String(raw).toLowerCase() === 'all') return 0;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : DEFAULT_SEAT_WINDOW_DAYS;
+}
+
+// Cutoff ISO for the seat window; '' (matches every createdAt) when windowless.
+function seatCutoff(nowMs) {
+  const days = seatWindowDays();
+  if (!days) return '';
+  return new Date((Number.isFinite(nowMs) ? nowMs : Date.now()) - days * 24 * 60 * 60 * 1000).toISOString();
+}
+
 function seatStats(filter = {}) {
   const wantedOrg = normalizedSeatOrg(filter.orgId);
-  const rows = wantedOrg ? seatStatsByOrg.all(wantedOrg) : seatStatsAll.all();
+  const cutoff = seatCutoff(filter.nowMs);
+  const rows = wantedOrg ? seatStatsByOrg.all(cutoff, wantedOrg) : seatStatsAll.all(cutoff);
   const inactiveIdentities = inactiveScimIdentitySet();
   const users = [];
   for (const r of rows) {
@@ -839,6 +861,27 @@ function lastAuditActionAt(action) {
   return row ? row.ts : null;
 }
 
+// Durable, tamper-evident anchors for the connected-mode kill-switch. The
+// vendor state file (server/vendor-link.js) is a fast cache but is
+// operator-writable/deletable; the hash-chained audit is not (editing it breaks
+// verifyAuditChain), so last vendor contact and install age are read from here.
+function lastVendorHeartbeat() {
+  const row = sdb.prepare("SELECT entry FROM audit WHERE action = 'VENDOR_HEARTBEAT_OK' ORDER BY seq DESC LIMIT 1").get();
+  if (!row) return null;
+  try {
+    const detail = JSON.parse(JSON.parse(row.entry).detail);
+    const issuedAt = Number(detail.issuedAt);
+    const contactAt = Number(detail.contactAt);
+    if (!Number.isFinite(issuedAt) || !Number.isFinite(contactAt)) return null;
+    return { issuedAt, contactAt, status: String(detail.status || '') };
+  } catch (_) { return null; }
+}
+
+function firstAuditAt() {
+  const row = sdb.prepare('SELECT ts FROM audit ORDER BY seq ASC LIMIT 1').get();
+  return row && row.ts ? (Date.parse(row.ts) || null) : null;
+}
+
 // ---- Delivery history (SIEM/SOAR subscriptions) ------------------------------
 const deliveryInsert = sdb.prepare('INSERT INTO deliveries (id, ts, destId, dedupeKey, status, data) VALUES (@id, @ts, @destId, @dedupeKey, @status, @data)');
 
@@ -874,6 +917,7 @@ module.exports = {
   getAiApp, listAiApps, upsertAiApp,
   listAiUseCases, upsertAiUseCase, reviewAiUseCase,
   listAiIncidents, createAiIncident, setAiIncidentStatus, lastAuditActionAt,
+  lastVendorHeartbeat, firstAuditAt,
   recordDelivery, listDeliveries, recentDeliverySuccess,
   setTenantContext,
   _canonical: canonical, _db: sdb, _dbPath: DB_PATH, _driverKind: DRIVER_KIND,

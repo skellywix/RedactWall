@@ -50,6 +50,10 @@ async function warnForbidden(res: Response): Promise<void> {
     toast('License is read-only past the grace window. Install a renewal license to make changes.', 'warn');
     return;
   }
+  if (body.error === 'license_revoked') {
+    toast('License revoked by the vendor. AI use is blocked; contact your vendor to restore access.', 'warn');
+    return;
+  }
   toast('Request not allowed for this session. Refresh or use a Security Admin account.', 'warn');
 }
 

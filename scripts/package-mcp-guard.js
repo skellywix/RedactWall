@@ -13,6 +13,7 @@ const PACKAGE_FILES = [
   'package.json',
   'server/env.js',
   'detection-engine/detect.js',
+  'sensors/shared/server-url.js',
   'sensors/mcp-guard/guard.js',
   'sensors/mcp-guard/sdk.js',
   'sensors/mcp-guard/connector-registry.js',

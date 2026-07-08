@@ -112,16 +112,12 @@ separate SKU. Every claim below carries verified references.
 
 ## Implementation Sequence
 
-- **Phase A — connected licensing** (`server/vendor-link.js` + license
+- **Phase A — connected licensing** — **SHIPPED** (`server/vendor-link.js`, `revoked` state + fail-closed ingest gate, gateway covered transitively, 30-day seat window, `docs/CONNECTED_DEPLOYMENT.md`, tests). Remaining original bullet detail: (`server/vendor-link.js` + license
   `revoked` state + ingest gate + gateway check + heartbeat with seat
   counts + tests updating `test/license*.test.js` pins + 30-day seat
   window fix).
-- **Phase B — second-layer hardening** (HTTPS enforcement + fail-mode
-  config + sensor transport hardening + operator doc
-  `docs/CONNECTED_DEPLOYMENT.md`).
-- **Phase C — positioning split** (two-SKU rewrite across the claim
-  inventory + CUSTOMER_LICENSING/SECURITY_WHITEPAPER updates + order-form
-  language).
+- **Phase B — second-layer hardening** — **SHIPPED** (HTTPS enforcement + degrade/hold fail-mode in `server/semantic-remote.js`; sensor transport hardening via `sensors/shared/server-url.js`; `docs/process/CONNECTED_DEPLOYMENT.md`; tests).
+- **Phase C — positioning split** — **SHIPPED** (two-SKU qualifiers across SECURITY_WHITEPAPER, BATTLECARD_NIGHTFALL, DETECTION_BENCHMARKS, COMPETITIVE_ALIGNMENT, ROADMAP, CUSTOMER_LICENSING). Order-form language remains a sales/legal task.
 
 ## Decisions For The Vendor
 

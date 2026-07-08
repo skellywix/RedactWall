@@ -36,6 +36,7 @@ function minimalFiles(agentBody) {
     { path: 'server/processors.js', body: Buffer.from('module.exports = {};') },
     { path: 'server/parse-pool.js', body: Buffer.from('module.exports = { extractText: async () => ({}) };') },
     { path: 'server/parse-child.js', body: Buffer.from('module.exports = {};') },
+    { path: 'sensors/shared/server-url.js', body: Buffer.from('function secureServerUrl() {}\nmodule.exports = { secureServerUrl };') },
     { path: 'sensors/endpoint-agent/agent.js', body: Buffer.from(agentBody) },
     {
       path: 'sensors/endpoint-agent/file-flow-profiles.js',
@@ -536,7 +537,7 @@ test('packaged endpoint agent runs a package-to-install pilot smoke', async (t) 
   const packageHandoffDir = path.join(installRoot, 'configured-native-handoff');
   fs.mkdirSync(configDir, { recursive: true });
   fs.writeFileSync(configPath, [
-    'REDACTWALL_URL=http://redactwall.package.test',
+    'REDACTWALL_URL=https://redactwall.package.test',
     'INGEST_API_KEY=pilot-ingest-key-000000000000000000000000000001',
     `ENDPOINT_AGENT_WATCH_DIR=${watchDir}`,
     `ENDPOINT_AGENT_HANDOFF_SECRET=native-handoff-secret-000000000000000001`,
@@ -636,7 +637,7 @@ test('packaged endpoint agent runs a package-to-install pilot smoke', async (t) 
   const fetchImpl = async (url, opts = {}) => {
     requests.push({ url, method: opts.method || 'GET', body: opts.body || '' });
     assert.strictEqual(opts.headers['x-api-key'], 'pilot-ingest-key-000000000000000000000000000001');
-    if (url === 'http://redactwall.package.test/api/v1/policy') {
+    if (url === 'https://redactwall.package.test/api/v1/policy') {
       return {
         ok: true,
         json: async () => ({
@@ -656,7 +657,7 @@ test('packaged endpoint agent runs a package-to-install pilot smoke', async (t) 
         }),
       };
     }
-    if (url === 'http://redactwall.package.test/api/v1/gate') {
+    if (url === 'https://redactwall.package.test/api/v1/gate') {
       const body = JSON.parse(opts.body);
       if (body.channel === 'clipboard') {
         assert.strictEqual(body.source, 'endpoint_agent');

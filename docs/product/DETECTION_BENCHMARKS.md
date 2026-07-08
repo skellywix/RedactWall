@@ -10,8 +10,10 @@ These are **in-process, on-device** measurements: the cost of a single
 `analyze()` call on the machine doing the scanning, with **no network hop**.
 That is the real cost RedactWall pays per keystroke, paste, or file scan,
 because detection runs locally in the browser extension, the endpoint agent,
-the MCP guard, and the gateway — prompt text never leaves the institution to
-be classified.
+the MCP guard, and the gateway — and in the default air-gapped mode prompt
+text never leaves the institution to be classified. (An opt-in connected
+deployment can add a vendor-side second layer; the on-device numbers below are
+the primary detector either way.)
 
 A cloud DLP publishes a different kind of number. Nightfall's prompt-sanitization
 sample repo advertises **≤100 ms p99** and **≥1000 rps** — but those figures

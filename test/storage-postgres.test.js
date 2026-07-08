@@ -72,5 +72,6 @@ test('db.js contract holds on Postgres (migrations, RLS, immutability, chain)', 
   assert.deepStrictEqual(results.useCases.value, { rows: 2, reviewed: true, ownerKept: true, unknownIsNull: true });
   assert.deepStrictEqual(results.incidents.value, { created: true, orgNormalized: true, reported: true, listed: true, unknownIsNull: true });
   assert.deepStrictEqual(results.statsAndSeats.value, { total: true, seatUsers: true });
+  assert.deepStrictEqual(results.seatWindow.value, { windowed: 1, lifetime: 2 });
   assert.deepStrictEqual(results.mfaRecovery.value, { first: true, second: false, used: true });
 });

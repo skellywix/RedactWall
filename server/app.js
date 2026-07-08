@@ -60,6 +60,7 @@ const releaseTokens = require('./release-token');
 const receipts = require('./receipts');
 const tenant = require('./tenant');
 const license = require('./license');
+const vendorLink = require('./vendor-link');
 const exactMatch = require('./exact-match');
 const ncuaReadiness = require('./ncua-readiness');
 const openapi = require('./openapi');
@@ -423,7 +424,54 @@ function releaseTokenPayload(releaseToken) {
   return releaseToken ? { releaseToken } : {};
 }
 
+// Record a prompt-free billing/licensing block (seat limit or license
+// revocation): a sanitized query row plus an audit entry. Shared so ingest
+// gating stays one place and one shape.
+function writeBillingBlock(body, { status, action, reasons, detail, seatLimit = null, seatsUsed = null }) {
+  const row = createQuery({
+    status,
+    mode: 'billing',
+    user: body.user || 'unknown',
+    orgId: body.orgId || tenant.config().tenantId || null,
+    destination: body.destination || 'unknown',
+    source: body.source || 'api',
+    channel: body.channel || 'submit',
+    sensor: body.sensor || null,
+    redactedPrompt: '[' + status + ']',
+    findings: [],
+    categories: [],
+    entityCounts: {},
+    riskScore: 0,
+    maxSeverity: 0,
+    maxSeverityLabel: 'none',
+    reasons,
+    seatLimit,
+    seatsUsed,
+  });
+  db.appendAudit({ action, queryId: row.id, actor: body.user || 'unknown', detail });
+  return row;
+}
+
+// Vendor kill-switch (connected mode): an active revocation or a stale vendor
+// link blocks ALL sensor ingest, fail-closed, with a distinct status so this
+// reads as a licensing action, not an outage. Nothing fails open.
+function blockIfRevoked(req, res) {
+  if (!license.isRevoked()) return false;
+  const body = req.body || {};
+  const row = writeBillingBlock(body, {
+    status: 'license_revoked',
+    action: 'LICENSE_REVOKED_BLOCK',
+    reasons: ['license_revoked'],
+    detail: 'tenant=' + (body.orgId || tenant.config().tenantId || 'unknown'),
+  });
+  broadcast('query', { type: 'license_revoked', query: publicQuery(row) });
+  res.status(403).json({ error: 'license revoked', decision: 'block', status: 'license_revoked' });
+  return true;
+}
+
 function enforceTenantForSensor(req, res) {
+  if (blockIfRevoked(req, res)) return false;
+
   const check = tenant.validateSensorAccess({ body: req.body || {}, db });
   if (check.ok) {
     req.body.orgId = check.orgId || null;
@@ -432,31 +480,13 @@ function enforceTenantForSensor(req, res) {
 
   if (check.audit) {
     const body = req.body || {};
-    const row = createQuery({
+    const row = writeBillingBlock({ ...body, orgId: check.orgId || body.orgId }, {
       status: check.status,
-      mode: 'billing',
-      user: check.user || body.user || 'unknown',
-      orgId: check.orgId || tenant.config().tenantId || null,
-      destination: body.destination || 'unknown',
-      source: body.source || 'api',
-      channel: body.channel || 'submit',
-      sensor: body.sensor || null,
-      redactedPrompt: '[' + check.message + ']',
-      findings: [],
-      categories: [],
-      entityCounts: {},
-      riskScore: 0,
-      maxSeverity: 0,
-      maxSeverityLabel: 'none',
+      action: check.action,
       reasons: [check.message],
+      detail: 'tenant=' + (check.orgId || tenant.config().tenantId || 'unknown') + '; seats=' + (check.seatsUsed || 0) + '/' + (check.seatLimit || 0),
       seatLimit: check.seatLimit || null,
       seatsUsed: check.seatsUsed || null,
-    });
-    db.appendAudit({
-      action: check.action,
-      queryId: row.id,
-      actor: check.user || body.user || 'unknown',
-      detail: 'tenant=' + (row.orgId || 'unknown') + '; seats=' + (check.seatsUsed || 0) + '/' + (check.seatLimit || 0),
     });
     emitSecurityAlert(row, check.action);
     broadcast('query', { type: check.status, query: publicQuery(row) });
@@ -471,6 +501,34 @@ function enforceTenantForSensor(req, res) {
     seatsUsed: check.seatsUsed || undefined,
   });
   return false;
+}
+
+// Connected-mode license heartbeat (opt-in via REDACTWALL_LICENSE_SERVER_URL).
+// Fire-and-forget: a failed or unreachable heartbeat never throws; a stale link
+// fails CLOSED, never open (server/vendor-link.js). Dormant otherwise.
+function runVendorHeartbeat() {
+  if (!vendorLink.enabled()) return Promise.resolve();
+  return vendorLink.heartbeat({
+    seatReport: tenant.seatReport(db),
+    version: require('../package.json').version,
+    appendAudit: (rec) => db.appendAudit(rec),
+  }).catch(() => {});
+}
+
+// Restore a persisted vendor revocation and evaluate staleness at boot, BEFORE
+// the server accepts ingest, so a kill-switch survives restart and a stale link
+// is already blocking on the first request. Synchronous by design.
+function runVendorRestore() {
+  if (!vendorLink.enabled()) return;
+  try {
+    vendorLink.restore({
+      appendAudit: (rec) => db.appendAudit(rec),
+      // Tamper-evident kill-switch anchors from the hash-chained audit, so the
+      // deletable state file cannot lift a revocation or reset staleness.
+      lastVendorHeartbeat: () => db.lastVendorHeartbeat(),
+      firstAuditAt: () => db.firstAuditAt(),
+    });
+  } catch (_) { /* staleness backstops */ }
 }
 
 function runRetentionPurge({ actor = 'system', now = new Date() } = {}) {
@@ -1004,10 +1062,16 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
   if (!enforceTenantForSensor(req, res)) return;
   const {
     prompt, user = 'unknown', destination = 'unknown', sourceIp = null,
-    source = 'api', channel = 'submit', clientOutcome = null, note = '', orgId = null,
+    source = 'api', channel = 'submit', clientOutcome = null, note: rawNote = '', orgId = null,
     sensor = null,
   } = req.body || {};
   if (typeof prompt !== 'string' || !prompt.trim()) return res.status(400).json({ error: 'prompt (string) required' });
+
+  // The sensor-supplied note lands in the tamper-evident audit chain and the
+  // decisionNote, so scrub it before use: mask detector-known PII, then any
+  // remaining routing-code-shaped identifier, so a raw SSN/card/prompt fragment
+  // can never be smuggled into immutable history via this free-text field.
+  const note = validation.sanitizeStoredNote(detector.redact(rawNote, detector.analyze(rawNote).findings || []));
 
   const clientAccount = (req.body && req.body.clientAccount) || {};
   const accountType = ['personal', 'corporate', 'unknown'].includes(clientAccount.type) ? clientAccount.type : 'unknown';
@@ -1154,6 +1218,12 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
   const ctx = policyContext({ user, orgId, destination, source, channel, accountType });
   const verdict = policy.evaluate(analysis, pol, ctx);
   const decisionPolicy = verdict.policy || pol;
+  // Connected-mode 'hold' fail mode: the required second-layer scanner could
+  // not vet this prompt, so it must not pass on local-only analysis — withhold
+  // it for Security Admin approval (routed through the normal pending path
+  // below, with raw retention). Never relaxes a stricter local decision.
+  const remoteHold = serverAnalysis.remoteScanFailed === true;
+  if (remoteHold) verdict.reasons = [...(verdict.reasons || []), 'second-layer scanner unavailable (hold mode)'];
 
   // Privacy-preserving record: redacted prompt + masked findings + categories.
   const redactedPrompt = clientRedactionResolved && !categoryNames(analysis).length ? prompt : safePreview(prompt, analysis);
@@ -1226,7 +1296,7 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
     return res.json({ id: row.id, decision: 'block', status });
   }
 
-  if (verdict.decision === 'allow') {
+  if (verdict.decision === 'allow' && !remoteHold) {
     const row = createQuery({ status: 'allowed', ...base });
     db.appendAudit({ action: 'ALLOWED', queryId: row.id, actor: user, detail: `${source} risk ${analysis.riskScore}` });
     emitSecurityAlert(row, 'ALLOWED');
@@ -1280,6 +1350,9 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
   // server re-tokenizes it below (real values never leave); 'blocked_by_user'
   // already withholds.
   if (hardStop && status !== 'redacted' && status !== 'blocked_by_user') status = 'pending';
+  // Hold-mode: a prompt the second layer could not vet is withheld for approval
+  // (same held-item machinery as a policy block), never issued as sent/allowed.
+  if (remoteHold && status !== 'redacted' && status !== 'blocked_by_user') status = 'pending';
 
   // Reversible tokenization: replace each detected value with a stable typed
   // placeholder and seal the token->value map (the "vault") at rest. The caller
@@ -1415,6 +1488,9 @@ app.post('/api/v1/heartbeat', checkIngestKey, validation.validateBody(validation
 // sealed vault for this query. Lets a proxy/SDK restore the model's answer
 // after a 'redact'-mode send. Audit-logged; never returns the vault itself.
 app.post('/api/v1/rehydrate', checkIngestKey, validation.validateBody(validation.rehydrateSchema), (req, res) => {
+  // A revoked license closes the token-rehydration surface too (it recovers
+  // original PII behind redaction tokens), consistent with the ingest gate.
+  if (license.isRevoked()) return res.status(403).json({ error: 'license revoked', status: 'license_revoked' });
   const { id, text } = req.body || {};
   const q = id && db.getQuery(id);
   if (!q) return res.status(404).json({ error: 'not found' });
@@ -1627,6 +1703,24 @@ app.post('/api/v1/scan-response', checkIngestKey, validation.validateBody(valida
   const findings = analysis.findings.map((f) => ({ type: f.type, severity: f.severity, score: f.score, masked: detector.maskValue(f.type, f.value), ...(f.vendor ? { vendor: f.vendor, vendorLabel: f.vendorLabel } : {}) }));
   const categories = (analysis.categories || []).map((c) => c.category);
   const redacted = safePreview(text, analysis);
+
+  // Second-layer scanner outage under fail mode 'hold': the operator requires
+  // the vendor-side scan, so an un-vetted response must NOT return 'allow'. Fail
+  // closed by blocking, mirroring the gate path's remoteHold handling — a local
+  // "nothing found" is not sufficient when the required second layer never ran.
+  if (analysis.remoteScanFailed === true) {
+    const reasons = ['Second-layer response scan unavailable', 'Fail mode: hold'];
+    const row = createQuery({ status: 'response_blocked', mode: 'response_block', user, orgId, destination, source, channel: 'ai_response', sensor,
+      redactedPrompt: '[AI response withheld] second-layer scan unavailable', findings, categories, entityCounts: analysis.entityCounts,
+      riskScore: analysis.riskScore, maxSeverity: analysis.maxSeverity, maxSeverityLabel: analysis.maxSeverityLabel,
+      scoreBreakdown: analysis.scoreBreakdown, regulations: analysis.regulations, reasons });
+    db.appendAudit({ action: 'RESPONSE_BLOCKED', queryId: row.id, actor: user, detail: `${source}: second-layer scan unavailable` });
+    emitSecurityAlert(row, 'RESPONSE_BLOCKED');
+    broadcast('query', { type: 'response_blocked', query: publicQuery(row) });
+    broadcast('stats', db.stats());
+    return res.json({ leaked: true, decision: 'block', status: 'response_blocked', blocked: true, findings, categories, redacted, reasons });
+  }
+
   const leaked = findings.length > 0 || categories.length > 0;
   const outcome = responseScanOutcome(pol.responseScanMode);
   if (leaked) {
@@ -3132,7 +3226,18 @@ function startServer(port = PORT, opts = {}) {
   }
   retentionPurge();
   workflowEscalation();
-  (opts.runLicenseRefresh || (() => license.refresh({ appendAudit: (rec) => db.appendAudit(rec) })))();
+  const licenseCycle = opts.runLicenseRefresh || (() => {
+    license.refresh({ appendAudit: (rec) => db.appendAudit(rec) });
+    runVendorHeartbeat();
+  });
+  // Load the license BEFORE restoring vendor state: restore() checks the
+  // persisted verdict's customer binding against the installed license, so the
+  // license file must already be loaded or a persisted revocation is dropped.
+  license.refresh({ appendAudit: (rec) => db.appendAudit(rec) });
+  // Kill-switch state must be in effect before the first request; restore is
+  // synchronous, the heartbeat that follows only refreshes it.
+  runVendorRestore();
+  licenseCycle();
   const server = appToListen.listen(port, () => {
     const address = server.address();
     log(address && address.port ? address.port : port);
@@ -3140,7 +3245,7 @@ function startServer(port = PORT, opts = {}) {
   const retentionTimer = setIntervalFn(() => retentionPurge(), 60 * 60 * 1000);
   const workflowTimer = setIntervalFn(() => workflowEscalation(), 5 * 60 * 1000);
   const staleTimer = setIntervalFn(() => staleSweep(), 60 * 60 * 1000);
-  const licenseTimer = setIntervalFn(() => license.refresh({ appendAudit: (rec) => db.appendAudit(rec) }), 24 * 60 * 60 * 1000);
+  const licenseTimer = setIntervalFn(licenseCycle, 24 * 60 * 60 * 1000);
   retentionTimer.unref();
   workflowTimer.unref();
   staleTimer.unref();

@@ -285,6 +285,40 @@ test('browser download blocks use host-only evidence and never report URLs or fi
   );
 });
 
+test('data-sending paths fail closed on a cleartext-http remote plane', async () => {
+  const fetchCalls = [];
+  const bg = loadBackground({
+    local: {
+      ingestKey: 'unit-ingest-key-000',
+      policy: {
+        blockedBrowserActions: [{
+          id: 'block_download_chatgpt',
+          action: 'download',
+          destinations: ['chatgpt.com'],
+          reason: 'download_blocked',
+        }],
+      },
+    },
+    // A managed policy pointing the plane at cleartext http on a REMOTE host
+    // would leak the ingest key on the wire; the guard must refuse to send.
+    managed: { email: 'analyst@example.test', serverUrl: 'http://plane.vendor.example' },
+    fetch: async (url, options) => {
+      fetchCalls.push({ url, body: JSON.parse(options.body) });
+      return { ok: true, json: async () => ({ id: 'q', status: 'action_blocked' }) };
+    },
+  });
+
+  const result = await bg.context.self.__test.handleDownloadCreated({
+    id: 7,
+    referrer: 'https://chatgpt.com/c/x',
+    url: 'https://files.example.test/x.pdf',
+  });
+
+  assert.strictEqual(result.ok, false);
+  assert.strictEqual(result.reason, 'invalid_server_url');
+  assert.strictEqual(fetchCalls.length, 0);
+});
+
 test('browser fallback hard-stops match regulated endpoint defaults before policy sync', () => {
   assert.match(background, /MEDICAL_RECORD_NUMBER/);
   assert.match(background, /HEALTH_INSURANCE_ID/);

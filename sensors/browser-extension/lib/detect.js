@@ -587,7 +587,12 @@
     const tokenRe = /[A-Za-z0-9][A-Za-z0-9._%+@'-]*/g;
     const toks = []; let t;
     tokenRe.lastIndex = 0;
-    while ((t = tokenRe.exec(text)) !== null) { toks.push({ v: t[0], start: t.index, end: t.index + t[0].length }); if (toks.length > 8000) break; }
+    // Scan the full text: every structured detector runs over the whole input,
+    // so EDM must too. A silent token cap here would let a watchlisted value
+    // hide past the cutoff in a large paste — a fail-open for exactly the
+    // must-never-leak data EDM protects. The inner loop is O(tokens * maxWords)
+    // with maxWords <= 8, i.e. linear and bounded.
+    while ((t = tokenRe.exec(text)) !== null) { toks.push({ v: t[0], start: t.index, end: t.index + t[0].length }); }
     for (let i = 0; i < toks.length; i++) {
       for (let n = 1; n <= c.maxWords && i + n <= toks.length; n++) {
         const span = text.slice(toks[i].start, toks[i + n - 1].end);
@@ -663,7 +668,7 @@
       /[-+*/%]=|=[^=]/.test(t) ? 1 : 0,                                 // assignment-ish operator
       /:\s*(\n|$)/.test(t) ? 1 : 0,                                     // colon at end of line (py/blocks)
       lines.filter((l) => /^\s{2,}\S/.test(l)).length / nl,            // indented lines ratio
-      /[A-Za-z_]\w*\s*\(/.test(t) ? 1 : 0,                              // function-call parens
+      /[A-Za-z_]\w{0,63}[ \t]{0,4}\(/.test(t) ? 1 : 0,                  // function-call parens (bounded: no catastrophic backtracking on long single-token pastes)
       (t.match(/\d/g) || []).length / len,                             // digit density
       /=>/.test(t) ? 1 : 0,                                             // arrow function
       Math.min(1, (len / nl) / 80),                                    // avg line length (norm)

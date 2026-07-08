@@ -3422,6 +3422,7 @@ function summarize({
 }
 
 module.exports = {
+  containsSensitiveMetadata,
   summarize,
   riskTrend,
   controlOutcomes,

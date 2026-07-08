@@ -111,3 +111,24 @@ test('entitled: demo mode grants all, licensed installs need the flag or enterpr
   assert.strictEqual(license.entitled('ncua_readiness'), true);
   license.refresh({ publicKeyPem: PUB, now: NOW, readFile: () => { throw new Error('missing'); } });
 });
+
+test('vendor revocation overlays the file state, survives refresh, and only a signed active verdict clears it', () => {
+  license.refresh({ publicKeyPem: PUB, now: NOW, readFile: () => sign(base) });
+  assert.strictEqual(license.status().state, 'active');
+
+  const entitledBefore = license.entitled('ncua_readiness');
+  license.applyVendorVerdict(true);
+  assert.strictEqual(license.status().state, 'revoked');
+  assert.strictEqual(license.isRevoked(), true);
+  assert.strictEqual(license.publicStatus().reason, 'vendor_revoked');
+  // Entitlement is preserved (payload persists) — revocation does not zero it.
+  assert.strictEqual(license.entitled('ncua_readiness'), entitledBefore);
+
+  // A file refresh (e.g. reinstall) does NOT clear a vendor revocation.
+  license.refresh({ publicKeyPem: PUB, now: NOW, readFile: () => sign(base) });
+  assert.strictEqual(license.status().state, 'revoked');
+
+  license.applyVendorVerdict(false);
+  assert.strictEqual(license.status().state, 'active');
+  license.refresh({ publicKeyPem: PUB, now: NOW, readFile: () => { throw new Error('none'); } });
+});

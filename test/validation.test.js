@@ -21,7 +21,7 @@ const { listen, loopbackHttpFetch } = require('./support/listen');
 const db = require('../server/db');
 const coverage = require('../server/coverage');
 const posture = require('../server/posture');
-const { validationFields } = require('../server/validation');
+const { validationFields, sanitizeStoredNote } = require('../server/validation');
 
 
 function close(server) {
@@ -81,6 +81,15 @@ function assertJsonOmits(value, ...needles) {
 
 test('validationFields labels root-level schema errors as body', () => {
   assert.deepStrictEqual(validationFields({ issues: [{ message: 'invalid root' }] }), ['body']);
+});
+
+test('sanitizeStoredNote masks routing-code identifiers and strips control chars', () => {
+  assert.strictEqual(sanitizeStoredNote('member 524-71-9043 flagged'), 'member [redacted] flagged');
+  assert.strictEqual(sanitizeStoredNote('card 4111111111111111 seen'), 'card [redacted] seen');
+  assert.strictEqual(sanitizeStoredNote('space grouped 123 45 6789 too'), 'space grouped [redacted] too');
+  assert.strictEqual(sanitizeStoredNote('a' + String.fromCharCode(9) + String.fromCharCode(0) + 'b'), 'a b');
+  assert.strictEqual(sanitizeStoredNote('download_blocked'), 'download_blocked');
+  assert.strictEqual(sanitizeStoredNote(null), '');
 });
 
 test('gate rejects invalid client analysis without echoing prompt values', async () => withServer(async (port) => {
