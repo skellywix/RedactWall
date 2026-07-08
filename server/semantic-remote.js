@@ -17,15 +17,44 @@ const DEFAULT_TIMEOUT_MS = 1500;
 const MAX_TEXT_CHARS = 20000;
 const MAX_REMOTE_CATEGORIES = 12;
 
+function bool(value) {
+  return ['1', 'true', 'yes', 'on'].includes(String(value || '').toLowerCase());
+}
+
+function isLoopbackHost(host) {
+  const h = String(host || '').toLowerCase().replace(/^\[|\]$/g, '');
+  return h === 'localhost' || h.endsWith('.localhost') || h === '127.0.0.1' || h.startsWith('127.') || h === '::1' || h === '0:0:0:0:0:0:0:1';
+}
+
+// This path ships prompt text off the box, so it must be encrypted in transit.
+// Allow HTTPS to any host; allow HTTP only to loopback (a local dev/test
+// scanner) or when the operator sets an explicit insecure override. Cleartext
+// to a remote host — prompt bodies over the wire — is rejected.
+function resolveRemoteUrl(raw, allowInsecure = false) {
+  try {
+    const url = new URL(String(raw || '').trim());
+    if (url.username || url.password) return '';
+    if (url.protocol === 'https:') return url.toString();
+    if (url.protocol === 'http:' && (isLoopbackHost(url.hostname) || allowInsecure)) return url.toString();
+    return '';
+  } catch (_) { return ''; }
+}
+
 function remoteSettings(env = process.env) {
   const resolved = withEnvAliases(env);
-  const url = String(resolved.REDACTWALL_SEMANTIC_REMOTE_URL || '').trim();
-  if (!url || !/^https?:\/\//.test(url)) return { enabled: false };
+  const allowInsecure = bool(resolved.REDACTWALL_SEMANTIC_REMOTE_ALLOW_INSECURE);
+  const url = resolveRemoteUrl(resolved.REDACTWALL_SEMANTIC_REMOTE_URL || '', allowInsecure);
+  if (!url) return { enabled: false };
+  // Fail mode when the scanner is unreachable: 'degrade' (default) falls back to
+  // on-device detection; 'hold' withholds the prompt for approval so nothing
+  // proceeds un-vetted by the required second layer.
+  const failMode = String(resolved.REDACTWALL_SEMANTIC_REMOTE_FAIL_MODE || 'degrade').toLowerCase() === 'hold' ? 'hold' : 'degrade';
   return {
     enabled: true,
     url,
     key: String(resolved.REDACTWALL_SEMANTIC_REMOTE_KEY || '').trim(),
     timeoutMs: Math.max(200, Math.min(10000, Number(resolved.REDACTWALL_SEMANTIC_REMOTE_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS)),
+    failMode,
   };
 }
 
@@ -76,7 +105,10 @@ function combineCategories(analysis, remoteCategories) {
   return combined;
 }
 
-async function fetchRemoteCategories(text, settings, fetchImpl) {
+// Returns { ok, categories }. ok=false means the scanner was unreachable,
+// errored, or returned an unparseable body — distinct from a clean {ok:true,
+// categories:[]} — so the fail mode can decide degrade vs hold.
+async function fetchRemote(text, settings, fetchImpl) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), settings.timeoutMs);
   try {
@@ -89,26 +121,28 @@ async function fetchRemoteCategories(text, settings, fetchImpl) {
       },
       body: JSON.stringify({ text: String(text || '').slice(0, MAX_TEXT_CHARS) }),
     });
-    if (!res || !res.ok) return [];
-    return normalizeRemoteCategories(await res.json());
+    if (!res || !res.ok) return { ok: false, categories: [] };
+    return { ok: true, categories: normalizeRemoteCategories(await res.json()) };
+  } catch (_) {
+    return { ok: false, categories: [] };
   } finally {
     clearTimeout(timer);
   }
 }
 
 /**
- * Augment a local analysis with the configured cloud classifier. Fail-closed
- * to local: whatever goes wrong, the caller gets the local analysis back.
+ * Augment a local analysis with the configured cloud classifier. Never weakens
+ * on-device detection. On a scanner failure the fail mode decides: 'degrade'
+ * (default) returns the untouched local analysis; 'hold' stamps
+ * `remoteScanFailed` so the caller withholds the prompt for approval.
  */
 async function augmentAnalysis(text, analysis, opts = {}) {
   const settings = opts.settings || remoteSettings(opts.env);
   if (!settings.enabled || !text) return analysis;
-  try {
-    const remote = await fetchRemoteCategories(text, settings, opts.fetchImpl || fetch);
-    return combineCategories(analysis, remote);
-  } catch {
-    return analysis; // remote outage never weakens on-device detection
-  }
+  const { ok, categories } = await fetchRemote(text, settings, opts.fetchImpl || fetch);
+  if (ok) return combineCategories(analysis, categories);
+  if (settings.failMode === 'hold') return { ...analysis, remoteScanFailed: true };
+  return analysis; // degrade: remote outage never weakens on-device detection
 }
 
 module.exports = {
@@ -116,4 +150,5 @@ module.exports = {
   combineCategories,
   normalizeRemoteCategories,
   remoteSettings,
+  resolveRemoteUrl,
 };

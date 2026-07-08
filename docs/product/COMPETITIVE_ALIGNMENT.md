@@ -35,7 +35,8 @@ dashboards, agent and MCP controls, and compliance reporting.
   retention of uploaded developer-platform files; endpoint rollout is MDM-heavy
   (Full-Disk-Access mobileconfig). Commercially it ships four masked-price
   bundles metered on users/apps/TB-scanned/API-calls with an enterprise-led,
-  MSSP/VAR go-to-market. RedactWall's counters: on-device zero-egress detection,
+  MSSP/VAR go-to-market. RedactWall's counters: on-device zero-egress detection
+  (air-gapped default; connected mode is opt-in),
   a gateway that **blocks** responses, transparent per-seat pricing, and a
   lighter force-install browser rollout.
 - Zscaler sets the SSE/browser-isolation bar: interactive dashboards, AI app

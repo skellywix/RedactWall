@@ -64,12 +64,22 @@ function missingServerConfigReason(c) {
   return null;
 }
 
+function isLoopbackHost(host) {
+  const h = String(host || '').toLowerCase().replace(/^\[|\]$/g, '');
+  return h === 'localhost' || h.endsWith('.localhost') || h === '127.0.0.1' || h.startsWith('127.') || h === '::1' || h === '0:0:0:0:0:0:0:1';
+}
+
+// The extension posts the ingest key and prompt metadata to the control plane;
+// a REMOTE plane must be HTTPS or the key travels in cleartext. HTTP is allowed
+// only to loopback (dev/local). A managed policy pointing at a remote plane
+// must use HTTPS.
 function validServerOrigin(value) {
   try {
     const url = new URL(String(value || ''));
-    if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
     if (url.username || url.password) return null;
-    return `${url.protocol}//${url.host}`;
+    if (url.protocol === 'https:') return `${url.protocol}//${url.host}`;
+    if (url.protocol === 'http:' && isLoopbackHost(url.hostname)) return `${url.protocol}//${url.host}`;
+    return null;
   } catch (e) {
     return null;
   }

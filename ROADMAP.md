@@ -25,7 +25,9 @@ shipped); this file is the forward-looking product roadmap and the source the
 ## Positioning (unchanged, sharpened)
 
 RedactWall competes as: (a) the only **self-hostable** option in a category now
-owned by cloud platforms — prompt data never leaves the institution; (b) the
+owned by cloud platforms — in the default air-gapped SKU prompt data never
+leaves the institution (an opt-in connected SKU adds vendor-managed licensing
+and an optional second-layer scan for shops that want it); (b) the
 only product with **examiner-ready evidence** as its spine (hash-chained audit,
 signed safe-to-send receipts, regulation-mapped evidence packs); (c) mid-market
 pricing below Nightfall's ~$25–60K band and far below an E5 uplift. We do not

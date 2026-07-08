@@ -11,6 +11,18 @@ reconstructed from `ITERATIONS.md` and git history.
 
 ### Added
 
+- **Connected deployment (Phase B/C).** The optional vendor-side second-layer
+  scanner (`REDACTWALL_SEMANTIC_REMOTE_URL`) now requires HTTPS for any remote
+  host — cleartext prompt egress to a remote scanner is rejected (loopback and
+  an explicit `REDACTWALL_SEMANTIC_REMOTE_ALLOW_INSECURE` override aside) — and
+  gains a fail mode (`REDACTWALL_SEMANTIC_REMOTE_FAIL_MODE=degrade|hold`): `hold`
+  withholds an un-vetted prompt for approval instead of degrading to local-only.
+  All three sensors (browser extension, endpoint agent, MCP guard) refuse a
+  non-HTTPS control-plane URL for a remote host so the ingest key never travels
+  in cleartext (`REDACTWALL_ALLOW_INSECURE_SERVER` escape hatch for the Node
+  sensors). Positioning docs now distinguish the air-gapped default SKU from the
+  opt-in connected SKU rather than claiming unconditional zero egress.
+
 - **Connected deployment mode (vendor-managed SKU, opt-in).** A new
   `server/vendor-link.js` adds a daily license heartbeat to a vendor license
   server (`REDACTWALL_LICENSE_SERVER_URL`, HTTPS-only) that reports prompt-free

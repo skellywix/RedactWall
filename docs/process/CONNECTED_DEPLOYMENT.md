@@ -96,13 +96,33 @@ max-combined into the local verdict (it can only *raise* risk):
 REDACTWALL_SEMANTIC_REMOTE_URL=https://scan.yourvendor.example/classify
 REDACTWALL_SEMANTIC_REMOTE_KEY=<bearer token>       # optional
 REDACTWALL_SEMANTIC_REMOTE_TIMEOUT_MS=1500           # optional
+REDACTWALL_SEMANTIC_REMOTE_FAIL_MODE=degrade         # optional: degrade | hold
 ```
 
 This path ships prompt text to your scanner — the one place the connected SKU
-sends content off the customer box. Routing member NPI to your infrastructure
-makes you a GLBA service provider (SOC 2 posture, due-diligence packet, breach
-obligations); price and contract accordingly. A scanner outage degrades to
-local-only detection rather than blocking.
+sends content off the customer box. It must be **HTTPS** for any remote host
+(cleartext to a remote host is rejected — prompt text may not cross the network
+in the clear); `http://` is accepted only to loopback for local testing, or
+with an explicit `REDACTWALL_SEMANTIC_REMOTE_ALLOW_INSECURE=1`. Routing member
+NPI to your infrastructure makes you a GLBA service provider (SOC 2 posture,
+due-diligence packet, breach obligations); price and contract accordingly.
+
+**Fail mode** when the scanner is unreachable:
+- `degrade` (default): fall back to on-device detection — availability over the
+  second layer.
+- `hold`: withhold the prompt for Security Admin approval (a normal held item)
+  rather than let it proceed un-vetted — the second layer over availability.
+
+## Sensor transport
+
+Sensors send the ingest key and prompt metadata to the control plane, so a
+**remote** plane must be HTTPS or the key travels in cleartext. The browser
+extension, endpoint agent, and MCP guard reject a non-HTTPS control-plane URL
+for any non-loopback host; `http://localhost` stays fine for local installs.
+The Node sensors accept `REDACTWALL_ALLOW_INSECURE_SERVER=1` as an explicit
+escape hatch; the browser extension has none (a managed policy pointing at a
+remote plane must use HTTPS). Terminate TLS at the plane's load balancer
+(`infra/aws/customer-silo.yml`).
 
 ## Compliance note
 

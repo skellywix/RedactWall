@@ -1204,6 +1204,12 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
   const ctx = policyContext({ user, orgId, destination, source, channel, accountType });
   const verdict = policy.evaluate(analysis, pol, ctx);
   const decisionPolicy = verdict.policy || pol;
+  // Connected-mode 'hold' fail mode: the required second-layer scanner could
+  // not vet this prompt, so it must not pass on local-only analysis — withhold
+  // it for Security Admin approval (routed through the normal pending path
+  // below, with raw retention). Never relaxes a stricter local decision.
+  const remoteHold = serverAnalysis.remoteScanFailed === true;
+  if (remoteHold) verdict.reasons = [...(verdict.reasons || []), 'second-layer scanner unavailable (hold mode)'];
 
   // Privacy-preserving record: redacted prompt + masked findings + categories.
   const redactedPrompt = clientRedactionResolved && !categoryNames(analysis).length ? prompt : safePreview(prompt, analysis);
@@ -1276,7 +1282,7 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
     return res.json({ id: row.id, decision: 'block', status });
   }
 
-  if (verdict.decision === 'allow') {
+  if (verdict.decision === 'allow' && !remoteHold) {
     const row = createQuery({ status: 'allowed', ...base });
     db.appendAudit({ action: 'ALLOWED', queryId: row.id, actor: user, detail: `${source} risk ${analysis.riskScore}` });
     emitSecurityAlert(row, 'ALLOWED');
@@ -1330,6 +1336,9 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
   // server re-tokenizes it below (real values never leave); 'blocked_by_user'
   // already withholds.
   if (hardStop && status !== 'redacted' && status !== 'blocked_by_user') status = 'pending';
+  // Hold-mode: a prompt the second layer could not vet is withheld for approval
+  // (same held-item machinery as a policy block), never issued as sent/allowed.
+  if (remoteHold && status !== 'redacted' && status !== 'blocked_by_user') status = 'pending';
 
   // Reversible tokenization: replace each detected value with a stable typed
   // placeholder and seal the token->value map (the "vault") at rest. The caller

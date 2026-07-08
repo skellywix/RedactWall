@@ -124,3 +124,52 @@ test('gate path consults the cloud classifier only when configured', async () =>
     await new Promise((resolve) => gateServer.close(resolve));
   }
 });
+
+test('remote URL must be encrypted for a remote host: https anywhere, http only to loopback', () => {
+  const on = (url, extra = {}) => semanticRemote.remoteSettings({ REDACTWALL_SEMANTIC_REMOTE_URL: url, ...extra }).enabled;
+  assert.strictEqual(on('https://scan.vendor.example/classify'), true);
+  assert.strictEqual(on('http://127.0.0.1:9000/scan'), true);          // loopback dev
+  assert.strictEqual(on('http://localhost:9000/scan'), true);
+  assert.strictEqual(on('http://scan.vendor.example/classify'), false); // cleartext to remote — rejected
+  assert.strictEqual(on('ftp://scan.vendor.example'), false);
+  // Explicit operator override re-enables cleartext to a remote host.
+  assert.strictEqual(on('http://scan.vendor.example/classify', { REDACTWALL_SEMANTIC_REMOTE_ALLOW_INSECURE: '1' }), true);
+});
+
+test('fail mode: degrade returns local analysis, hold stamps remoteScanFailed', async () => {
+  const local = detector.analyze(BENIGN, {});
+  const downSettings = (failMode) => ({ enabled: true, url: 'http://127.0.0.1:9/scan', timeoutMs: 200, failMode });
+  const fetchDown = async () => { throw new Error('ECONNREFUSED'); };
+
+  const degraded = await semanticRemote.augmentAnalysis(BENIGN, local, { settings: downSettings('degrade'), fetchImpl: fetchDown });
+  assert.strictEqual(degraded.remoteScanFailed, undefined);
+  assert.strictEqual(degraded.riskScore, local.riskScore);
+
+  const held = await semanticRemote.augmentAnalysis(BENIGN, local, { settings: downSettings('hold'), fetchImpl: fetchDown });
+  assert.strictEqual(held.remoteScanFailed, true);
+});
+
+test('hold mode withholds an otherwise-allowed prompt for approval when the scanner is down', async () => {
+  const down = await stubClassifier((req, body, res) => { res.destroy(); }); // connection drop = failure
+  const gateServer = await listen(app);
+  const port = gateServer.address().port;
+  const gate = () => fetch(`http://127.0.0.1:${port}/api/v1/gate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-api-key': 'unit-ingest-key' },
+    body: JSON.stringify({ prompt: BENIGN, user: 'analyst@example.test', destination: 'chatgpt.com', source: 'browser_extension' }),
+  });
+  try {
+    process.env.REDACTWALL_SEMANTIC_REMOTE_URL = `http://127.0.0.1:${down.address().port}/scan`;
+    process.env.REDACTWALL_SEMANTIC_REMOTE_FAIL_MODE = 'hold';
+    process.env.REDACTWALL_SEMANTIC_REMOTE_TIMEOUT_MS = '300';
+    const body = await (await gate()).json();
+    assert.strictEqual(body.decision, 'block');
+    assert.strictEqual(body.status, 'pending'); // held for approval, not allowed through
+  } finally {
+    delete process.env.REDACTWALL_SEMANTIC_REMOTE_URL;
+    delete process.env.REDACTWALL_SEMANTIC_REMOTE_FAIL_MODE;
+    delete process.env.REDACTWALL_SEMANTIC_REMOTE_TIMEOUT_MS;
+    down.close();
+    await new Promise((resolve) => gateServer.close(resolve));
+  }
+});
