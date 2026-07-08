@@ -37,6 +37,9 @@ const TextProcessor = {
 
 const OfficeProcessor = {
   id: 'office',
+  // No extractable text from a rich/binary format means we could not read it
+  // (e.g. an image-only doc) — hold it for OCR instead of treating '' as clean.
+  holdIfEmpty: true,
   supports: (name) => OFFICE_EXT.has(ext(name)),
   extract: async (buf, opts = {}) => {
     const AdmZip = require('adm-zip');
@@ -59,6 +62,7 @@ const OfficeProcessor = {
       if (/^word\/(document|header\d*|footer\d*)\.xml$/.test(n) ||
           /^xl\/sharedStrings\.xml$/.test(n) ||
           /^xl\/worksheets\/sheet\d+\.xml$/.test(n) ||
+          /^word\/(comments|footnotes|endnotes)\.xml$/.test(n) ||
           /^ppt\/slides\/slide\d+\.xml$/.test(n) ||
           /^ppt\/notesSlides\/notesSlide\d+\.xml$/.test(n)) {
         const declared = entry.header && Number(entry.header.size);
@@ -87,6 +91,9 @@ const OfficeProcessor = {
 
 const PdfProcessor = {
   id: 'pdf',
+  // A PDF with no text layer (scanned/image-only) extracts '' — hold for OCR
+  // rather than passing the un-inspected imagery through as clean.
+  holdIfEmpty: true,
   supports: (name) => PDF_EXT.has(ext(name)),
   extract: async (buf) => {
     try {
@@ -199,6 +206,12 @@ async function extractText(name, buf, opts = {}) {
         error: 'truncated',
         truncated: true,
       };
+    }
+    if (p.holdIfEmpty && text.trim() === '') {
+      // Fail closed: a binary/rich format that yielded no text was not truly
+      // "scanned clean" — route it to the OCR hold so PII in imagery can't slip
+      // through as an allowed empty extraction.
+      return { text: '', processor: p.id, supported: true, extractionOk: false, error: 'ocr_required', ocrRequired: true };
     }
     return {
       text,

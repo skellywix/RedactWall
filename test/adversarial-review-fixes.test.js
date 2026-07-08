@@ -1,0 +1,149 @@
+'use strict';
+/**
+ * Regression guards for the adversarial code review (2026-07).
+ *
+ * Every test below FAILS on the pre-fix tree and PASSES after the matching fix.
+ * They exist so a confirmed leak/bypass can never silently come back. Finding
+ * IDs match the review report. Synthetic PII only.
+ */
+const test = require('node:test');
+const assert = require('node:assert');
+const path = require('node:path');
+const AdmZip = require('adm-zip');
+const Database = require('better-sqlite3');
+
+const D = require('../detection-engine/detect');
+const processors = require('../server/processors');
+const alerts = require('../server/alerts');
+const integrity = require('../server/audit-integrity');
+
+const types = (text) => D.analyze(text).findings.map((f) => f.type);
+const hasType = (text, t) => types(text).includes(t);
+
+// ---------------------------------------------------------------------------
+// D1 — Unicode digit normalization. Fullwidth / Arabic-Indic digits used to
+// bypass EVERY structured detector (incl. alwaysBlock) → allow in all modes.
+// The fold is length-preserving so tokenize/redact offsets stay valid.
+// ---------------------------------------------------------------------------
+test('D1: fullwidth digits no longer bypass structured detection', () => {
+  assert.ok(hasType('１２３-４５-６７８９', 'US_SSN'), 'fullwidth SSN caught');
+  assert.ok(hasType('card 4111 1111 1111 1111'.replace(/[0-9]/g, (d) => String.fromCharCode(0xff10 + Number(d))), 'CREDIT_CARD'), 'fullwidth Visa caught');
+});
+test('D1: Arabic-Indic digits no longer bypass structured detection', () => {
+  assert.ok(hasType('١٢٣-٤٥-٦٧٨٩', 'US_SSN'), 'arabic-indic SSN caught');
+});
+test('D1: the fold is length-preserving so tokenization still lines up', () => {
+  const s = '１２３-４５-６７８９';
+  const a = D.analyze(s);
+  const f = a.findings.find((x) => x.type === 'US_SSN');
+  assert.ok(f, 'ssn found');
+  // start/end index into the ORIGINAL string; a length-preserving fold keeps
+  // them valid, so the sliced span is exactly the 11-char SSN.
+  assert.strictEqual(s.slice(f.start, f.end).length, '123-45-6789'.length);
+});
+test('D1: benign ASCII prompt is unaffected (no new false positives)', () => {
+  assert.deepStrictEqual(types('please summarize the quarterly plan for the team'), []);
+});
+
+// ---------------------------------------------------------------------------
+// D4 — a lowercase IBAN (an alwaysBlock type) was never detected: allow in all
+// modes. The validator already accepts lowercase; only the regex casing gated.
+// ---------------------------------------------------------------------------
+test('D4: a lowercase IBAN is detected', () => {
+  assert.ok(hasType('please wire to gb82west12345698765432 today', 'IBAN'), 'lowercase IBAN caught');
+  assert.ok(hasType('International wire uses IBAN GB82 WEST 1234 5698 7654 32', 'IBAN'), 'uppercase still works');
+});
+test('D4: an invalid lowercase IBAN-shaped token does NOT fire (no false positive)', () => {
+  assert.ok(!hasType('the seat is ab12 in row c', 'IBAN'), 'validator still gates');
+});
+
+// ---------------------------------------------------------------------------
+// D3 — PRIVATE_KEY (alwaysBlock) missed ENCRYPTED / DSA PEM labels → warn-mode
+// leak. Any standard PEM private-key label must hard-stop.
+// ---------------------------------------------------------------------------
+test('D3: ENCRYPTED / DSA private key headers hard-stop like RSA', () => {
+  assert.ok(hasType('-----BEGIN ENCRYPTED PRIVATE KEY-----', 'PRIVATE_KEY'), 'ENCRYPTED');
+  assert.ok(hasType('-----BEGIN DSA PRIVATE KEY-----', 'PRIVATE_KEY'), 'DSA');
+  assert.ok(hasType('-----BEGIN RSA PRIVATE KEY-----', 'PRIVATE_KEY'), 'RSA (control)');
+});
+
+// ---------------------------------------------------------------------------
+// N1 — the custom-detector ReDoS guard missed brace-quantified overlapping
+// alternation, so `(a|aa){2,80}c` could wedge the per-keystroke hot path.
+// ---------------------------------------------------------------------------
+test('N1: brace-quantified overlapping alternation is rejected', () => {
+  assert.strictEqual(D.normalizeCustomDetectors([{ id: 'EVILX', pattern: '(a|aa){2,80}c' }]).length, 0, 'evil pattern dropped');
+});
+test('N1: a well-formed bounded custom detector is still accepted', () => {
+  assert.strictEqual(D.normalizeCustomDetectors([{ id: 'OKX', pattern: 'X-[0-9]{2,8}' }]).length, 1, 'legit pattern kept');
+});
+test('N1: analyze does not hang on the pathological input', () => {
+  const started = Date.now();
+  D.analyze('a'.repeat(46), { customDetectors: [{ id: 'EVILX', pattern: '(a|aa){2,80}c' }] });
+  assert.ok(Date.now() - started < 2000, 'analyze returned promptly');
+});
+
+// ---------------------------------------------------------------------------
+// N9 — an image-only / empty-text Office (or PDF) file extracted '' and was
+// marked extractionOk:true → the file was ALLOWED instead of held for OCR.
+// ---------------------------------------------------------------------------
+function docx(parts) {
+  const zip = new AdmZip();
+  for (const [name, content] of Object.entries(parts)) zip.addFile(name, Buffer.from(content, 'utf8'));
+  return zip.toBuffer();
+}
+test('N9: an Office file with no extractable text is held for OCR, not allowed', async () => {
+  const buf = docx({ 'word/document.xml': '<w:document><w:body></w:body></w:document>' });
+  const r = await processors.extractText('image-only.docx', buf);
+  assert.strictEqual(r.extractionOk, false, 'empty extraction fails closed');
+  assert.strictEqual(r.error, 'ocr_required', 'routed to OCR hold');
+});
+
+// ---------------------------------------------------------------------------
+// N10 — PII in a Word comment / footnote / endnote was never scanned because
+// those parts were outside the extraction whitelist.
+// ---------------------------------------------------------------------------
+test('N10: PII inside a Word comment is extracted and detected', async () => {
+  const buf = docx({
+    'word/document.xml': '<w:document><w:body><w:p><w:r><w:t>cover letter</w:t></w:r></w:p></w:body></w:document>',
+    'word/comments.xml': '<w:comments><w:comment><w:p><w:r><w:t>reviewer note SSN 123-45-6789</w:t></w:r></w:p></w:comment></w:comments>',
+  });
+  const r = await processors.extractText('with-comment.docx', buf);
+  assert.strictEqual(r.extractionOk, true, 'extraction succeeded');
+  assert.ok(hasType(r.text, 'US_SSN'), 'SSN in the comment is caught');
+});
+
+// ---------------------------------------------------------------------------
+// N4 — shadow-AI / self-block / paste-flag security events were dropped from
+// SIEM whenever the prompt itself was clean (risk 0), because shouldAlert's
+// status whitelist omitted them.
+// ---------------------------------------------------------------------------
+test('N4: clean shadow-AI / self-block / paste events still alert', () => {
+  for (const status of ['shadow_ai', 'blocked_by_user', 'paste_flagged', 'proxy_observed']) {
+    assert.ok(alerts.shouldAlert({ status, riskScore: 0, maxSeverity: 0 }), `${status} alerts`);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// C3 — verifyAuditChain treated a DELETED evidence row as "unchanged", so
+// bound decision evidence could vanish while the chain still verified ok.
+// ---------------------------------------------------------------------------
+function seededAuditDb() {
+  const db = new Database(':memory:');
+  db.exec('CREATE TABLE audit(seq INTEGER PRIMARY KEY AUTOINCREMENT, entry TEXT NOT NULL)');
+  db.exec('CREATE TABLE queries(id TEXT PRIMARY KEY, data TEXT NOT NULL)');
+  const qData = { id: 'q1', status: 'pending', findings: [{ type: 'US_SSN' }], _rawPrompt: 'sealed:abc' };
+  db.prepare('INSERT INTO queries(id, data) VALUES (?, ?)').run('q1', JSON.stringify(qData));
+  const contentHash = integrity.sha(integrity.canonical(qData));
+  const body = { id: 'a1', ts: '2026-07-01T00:00:00.000Z', prevHash: integrity.ZERO, action: 'BLOCKED', queryId: 'q1', actor: 'system', detail: 'held', contentHash };
+  const entry = { ...body, hash: integrity.sha(integrity.canonical(body)) };
+  db.prepare('INSERT INTO audit(entry) VALUES (?)').run(JSON.stringify(entry));
+  return db;
+}
+test('C3: deleting a bound evidence row is detected as tampering', () => {
+  const db = seededAuditDb();
+  assert.strictEqual(integrity.verifyAuditChainForDatabase(db).ok, true, 'intact chain verifies');
+  db.prepare('DELETE FROM queries WHERE id = ?').run('q1');
+  const after = integrity.verifyAuditChainForDatabase(db);
+  assert.strictEqual(after.ok, false, 'vanished evidence is a verification failure');
+});
