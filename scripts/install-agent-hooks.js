@@ -24,8 +24,12 @@ function hookCommand(hookPath = HOOK_PATH) {
 }
 
 function ownsEntry(entry) {
+  // Normalize separators before matching: HOOK_PATH is built with path.join, so
+  // the command written on Windows contains 'agent-hooks\hook.js' while MARKER
+  // is POSIX-style. Without this, ownsEntry never recognizes our own entry on
+  // Windows — merge stops being idempotent and uninstall removes nothing.
   return entry && Array.isArray(entry.hooks)
-    && entry.hooks.some((h) => typeof h.command === 'string' && h.command.includes(MARKER));
+    && entry.hooks.some((h) => typeof h.command === 'string' && h.command.replace(/\\/g, '/').includes(MARKER));
 }
 
 function desiredConfig(hookPath = HOOK_PATH) {
