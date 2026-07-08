@@ -1062,10 +1062,16 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
   if (!enforceTenantForSensor(req, res)) return;
   const {
     prompt, user = 'unknown', destination = 'unknown', sourceIp = null,
-    source = 'api', channel = 'submit', clientOutcome = null, note = '', orgId = null,
+    source = 'api', channel = 'submit', clientOutcome = null, note: rawNote = '', orgId = null,
     sensor = null,
   } = req.body || {};
   if (typeof prompt !== 'string' || !prompt.trim()) return res.status(400).json({ error: 'prompt (string) required' });
+
+  // The sensor-supplied note lands in the tamper-evident audit chain and the
+  // decisionNote, so scrub it before use: mask detector-known PII, then any
+  // remaining routing-code-shaped identifier, so a raw SSN/card/prompt fragment
+  // can never be smuggled into immutable history via this free-text field.
+  const note = validation.sanitizeStoredNote(detector.redact(rawNote, detector.analyze(rawNote).findings || []));
 
   const clientAccount = (req.body && req.body.clientAccount) || {};
   const accountType = ['personal', 'corporate', 'unknown'].includes(clientAccount.type) ? clientAccount.type : 'unknown';
@@ -1697,6 +1703,24 @@ app.post('/api/v1/scan-response', checkIngestKey, validation.validateBody(valida
   const findings = analysis.findings.map((f) => ({ type: f.type, severity: f.severity, score: f.score, masked: detector.maskValue(f.type, f.value), ...(f.vendor ? { vendor: f.vendor, vendorLabel: f.vendorLabel } : {}) }));
   const categories = (analysis.categories || []).map((c) => c.category);
   const redacted = safePreview(text, analysis);
+
+  // Second-layer scanner outage under fail mode 'hold': the operator requires
+  // the vendor-side scan, so an un-vetted response must NOT return 'allow'. Fail
+  // closed by blocking, mirroring the gate path's remoteHold handling — a local
+  // "nothing found" is not sufficient when the required second layer never ran.
+  if (analysis.remoteScanFailed === true) {
+    const reasons = ['Second-layer response scan unavailable', 'Fail mode: hold'];
+    const row = createQuery({ status: 'response_blocked', mode: 'response_block', user, orgId, destination, source, channel: 'ai_response', sensor,
+      redactedPrompt: '[AI response withheld] second-layer scan unavailable', findings, categories, entityCounts: analysis.entityCounts,
+      riskScore: analysis.riskScore, maxSeverity: analysis.maxSeverity, maxSeverityLabel: analysis.maxSeverityLabel,
+      scoreBreakdown: analysis.scoreBreakdown, regulations: analysis.regulations, reasons });
+    db.appendAudit({ action: 'RESPONSE_BLOCKED', queryId: row.id, actor: user, detail: `${source}: second-layer scan unavailable` });
+    emitSecurityAlert(row, 'RESPONSE_BLOCKED');
+    broadcast('query', { type: 'response_blocked', query: publicQuery(row) });
+    broadcast('stats', db.stats());
+    return res.json({ leaked: true, decision: 'block', status: 'response_blocked', blocked: true, findings, categories, redacted, reasons });
+  }
+
   const leaked = findings.length > 0 || categories.length > 0;
   const outcome = responseScanOutcome(pol.responseScanMode);
   if (leaked) {

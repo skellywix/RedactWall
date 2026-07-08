@@ -463,6 +463,24 @@ test('lineage classifies browser action blocks without clipboard text', () => {
   assert.ok(!JSON.stringify(lineage).includes('524-71-9043'));
 });
 
+test('posture action-queue free-text is PII-scrubbed at the export boundary', () => {
+  const posture = evidence.safePosture({
+    generatedAt: '2026-06-28T12:00:00.000Z',
+    windowDays: 30,
+    actionQueue: [{
+      id: 'act_1',
+      label: 'Follow up',
+      // A space-grouped SSN (missed by a hyphen-only regex) and a card number
+      // in operator free text must not reach the examiner pack.
+      workflowNote: 'member 123 45 6789 and card 4111 1111 1111 1111 pending',
+      workflowOwner: 'analyst SSN 123-45-6789',
+    }],
+  });
+  const row = posture.actionQueue[0];
+  assert.strictEqual(row.workflowNote, '[redacted]');
+  assert.strictEqual(row.workflowOwner, '[redacted]');
+});
+
 test('posture evidence sanitizer bounds undefined, array, and object values', () => {
   const posture = evidence.safePosture({
     generatedAt: '2026-06-28T12:00:00.000Z',

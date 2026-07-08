@@ -10,6 +10,7 @@ const controlMap = require('./control-map');
 const ncuaReadiness = require('./ncua-readiness');
 const { safeSensor } = require('./sensor-metadata');
 const routing = require('./routing');
+const { containsSensitiveMetadata } = require('./posture');
 
 const POLICY_AUDIT_ACTIONS = new Set(['POLICY_UPDATED', 'POLICY_TEMPLATE_APPLIED', 'DESTINATION_REVIEWED']);
 const POLICY_AUDIT_FIELDS = new Set([
@@ -531,7 +532,11 @@ function safePolicyExceptionReview(report) {
 }
 
 function safePostureText(value, limit = 160) {
-  return safeBoundedText(value, limit);
+  // Operator-authored posture fields (workflowNote, owner, detail, ...) reach the
+  // examiner pack, so scrub PII patterns at the export boundary, not just bound
+  // length: a space-grouped SSN in a note must never ship. Uses the same
+  // redaction as threat text.
+  return safeThreatText(value, limit);
 }
 
 function safePostureItems(items = [], fields = []) {
@@ -541,7 +546,7 @@ function safePostureItems(items = [], fields = []) {
       const value = item && item[field];
       if (typeof value === 'number' || typeof value === 'boolean') row[field] = value;
       else if (typeof value === 'string') row[field] = safePostureText(value, field === 'description' || field === 'detail' ? 240 : 120);
-      else if (Array.isArray(value)) row[field] = value.slice(0, 20).map((entry) => safePolicyValue(entry));
+      else if (Array.isArray(value)) row[field] = value.slice(0, 20).map((entry) => (typeof entry === 'string' ? safeThreatText(entry, 120) : safePolicyValue(entry)));
       else if (value && typeof value === 'object') row[field] = safePolicyValue(value);
       else row[field] = null;
     }
@@ -582,11 +587,12 @@ function safePostureHardening(hardening) {
 }
 
 function safeThreatText(value, limit = 160) {
-  const text = safePostureText(value, limit);
+  const text = safeBoundedText(value, limit);
   if (!text) return text;
-  if (/\b\d{3}-\d{2}-\d{4}\b/.test(text)) return '[redacted]';
-  if (/\b(?:\d[ -]?){13,19}\b/.test(text)) return '[redacted]';
-  if (/\b(?:sk|pk|rk|ghp|gho|github_pat|xox[baprs])[-_a-z0-9]{8,}\b/i.test(text)) return '[redacted]';
+  // Canonical SSN/PAN/secret predicate shared with posture.js, so the export
+  // boundary's redaction can never be narrower than the create boundary's (a
+  // space-grouped SSN like '123 45 6789' was missed by the old hyphen-only regex).
+  if (containsSensitiveMetadata(text)) return '[redacted]';
   return text;
 }
 

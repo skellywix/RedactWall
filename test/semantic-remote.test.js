@@ -173,3 +173,31 @@ test('hold mode withholds an otherwise-allowed prompt for approval when the scan
     await new Promise((resolve) => gateServer.close(resolve));
   }
 });
+
+test('hold mode blocks an AI response scan when the second-layer scanner is down', async () => {
+  const down = await stubClassifier((req, body, res) => { res.destroy(); });
+  const server = await listen(app);
+  const port = server.address().port;
+  const scan = () => fetch(`http://127.0.0.1:${port}/api/v1/scan-response`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-api-key': 'unit-ingest-key' },
+    body: JSON.stringify({ text: BENIGN, user: 'analyst@example.test', destination: 'chatgpt.com', source: 'browser_extension' }),
+  });
+  try {
+    process.env.REDACTWALL_SEMANTIC_REMOTE_URL = `http://127.0.0.1:${down.address().port}/scan`;
+    process.env.REDACTWALL_SEMANTIC_REMOTE_FAIL_MODE = 'hold';
+    process.env.REDACTWALL_SEMANTIC_REMOTE_TIMEOUT_MS = '300';
+    const body = await (await scan()).json();
+    // A benign response would locally scan clean; with the required second layer
+    // down it must NOT return allow — fail closed by blocking.
+    assert.strictEqual(body.decision, 'block');
+    assert.strictEqual(body.blocked, true);
+    assert.strictEqual(body.status, 'response_blocked');
+  } finally {
+    delete process.env.REDACTWALL_SEMANTIC_REMOTE_URL;
+    delete process.env.REDACTWALL_SEMANTIC_REMOTE_FAIL_MODE;
+    delete process.env.REDACTWALL_SEMANTIC_REMOTE_TIMEOUT_MS;
+    down.close();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

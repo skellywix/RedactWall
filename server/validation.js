@@ -403,6 +403,24 @@ function safeOperatorText(value) {
   return !/[\u0000-\u001F]/.test(text) && !SENSITIVE_ROUTING_CODE.test(text);
 }
 
+// Scrub a free-text note before it is persisted into the tamper-evident audit
+// chain or a decisionNote. Sensor/client-supplied notes are only length-bounded
+// by the schema, so a routing-code-shaped identifier (SSN/account/card) or a
+// control char could otherwise be smuggled into immutable history. Masks every
+// occurrence (global) rather than rejecting, so a benign note still records.
+// Longest alternative first so a full account/card run is consumed in one match
+// (reusing SENSITIVE_ROUTING_CODE would try the 9-digit SSN shape first and
+// leave a digit tail on a 16-digit card); space is an allowed separator so a
+// space-grouped SSN is caught too.
+const NOTE_SENSITIVE_GLOBAL = /\d{12,19}|\d{3}[-_ .:]?\d{2}[-_ .:]?\d{4}/g;
+const CONTROL_CHARS_GLOBAL = new RegExp('[\\u0000-\\u001F]+', 'g');
+function sanitizeStoredNote(value, max = LIMITS.noteChars) {
+  return String(value == null ? '' : value)
+    .replace(CONTROL_CHARS_GLOBAL, ' ')
+    .replace(NOTE_SENSITIVE_GLOBAL, '[redacted]')
+    .slice(0, max);
+}
+
 const postureActionSchema = z.object({
   id: z.string().min(1).max(160).regex(POSTURE_ACTION_ID),
   status: z.enum(['open', 'assigned', 'snoozed', 'resolved']),
@@ -712,6 +730,8 @@ module.exports = {
   LIMITS,
   validateBody,
   validationFields,
+  safeOperatorText,
+  sanitizeStoredNote,
   gateSchema,
   licenseInstallSchema,
   rehydrateSchema,
