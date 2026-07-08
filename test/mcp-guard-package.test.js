@@ -28,6 +28,7 @@ function minimalMcpFiles(guardBody = "const KEY = process.env.INGEST_API_KEY || 
     { path: 'package.json', body: Buffer.from('{}') },
     { path: 'server/env.js', body: Buffer.from('module.exports = {};') },
     { path: 'detection-engine/detect.js', body: Buffer.from('module.exports = {};') },
+    { path: 'sensors/shared/server-url.js', body: Buffer.from('function secureServerUrl() {}\nmodule.exports = { secureServerUrl };') },
     { path: 'sensors/mcp-guard/guard.js', body: Buffer.from(guardBody) },
     { path: 'sensors/mcp-guard/sdk.js', body: Buffer.from('function sanitizeToolResult() {}\nfunction wrapConnectorTool() {}\nfunction connectorHealthCheck() {}\nmodule.exports = { sanitizeToolResult, wrapConnectorTool, connectorHealthCheck };') },
     { path: 'sensors/mcp-guard/connector-registry.js', body: Buffer.from('const CONNECTOR_PROFILES = [];\nfunction connectorRegistryStatus() {}\nfunction connectorRegistryChecks() {}\nmodule.exports = { CONNECTOR_PROFILES, connectorRegistryStatus, connectorRegistryChecks };') },
@@ -110,40 +111,12 @@ test('package script writes a prompt-free MCP guard zip and integrity manifest',
 
 test('package validation refuses prompt bodies or development keys', () => {
   assert.throws(
-    () => validateRuntimeFiles([
-      { path: 'package.json', body: Buffer.from('{}') },
-      { path: 'server/env.js', body: Buffer.from('module.exports = {};') },
-      { path: 'detection-engine/detect.js', body: Buffer.from('module.exports = {};') },
-      { path: 'sensors/mcp-guard/guard.js', body: Buffer.from("const KEY = process.env.INGEST_API_KEY || '';\nconst sample = '524-71-9043';") },
-      { path: 'sensors/mcp-guard/sdk.js', body: Buffer.from('function sanitizeToolResult() {}\nfunction wrapConnectorTool() {}\nfunction connectorHealthCheck() {}\nmodule.exports = { sanitizeToolResult, wrapConnectorTool, connectorHealthCheck };') },
-      { path: 'sensors/mcp-guard/connector-registry.js', body: Buffer.from('const CONNECTOR_PROFILES = [];\nfunction connectorRegistryStatus() {}\nfunction connectorRegistryChecks() {}\nmodule.exports = { CONNECTOR_PROFILES, connectorRegistryStatus, connectorRegistryChecks };') },
-      { path: 'sensors/mcp-guard/connectors/microsoft365.js', body: Buffer.from('function sanitizeDriveItemContent() {}\nfunction createDriveItemContentTool() {}\nfunction microsoft365ConnectorHealth() {}\nmodule.exports = { sanitizeDriveItemContent, createDriveItemContentTool, microsoft365ConnectorHealth };') },
-      { path: 'sensors/mcp-guard/connectors/google-drive.js', body: Buffer.from('function sanitizeDriveFileContent() {}\nfunction createDriveFileContentTool() {}\nfunction googleDriveConnectorHealth() {}\nmodule.exports = { sanitizeDriveFileContent, createDriveFileContentTool, googleDriveConnectorHealth };') },
-      { path: 'sensors/mcp-guard/connectors/slack.js', body: Buffer.from('function sanitizeConversationHistory() {}\nfunction createSlackConversationHistoryTool() {}\nfunction sanitizeSlackFileContent() {}\nfunction slackConnectorHealth() {}\nmodule.exports = { sanitizeConversationHistory, createSlackConversationHistoryTool, sanitizeSlackFileContent, slackConnectorHealth };') },
-      { path: 'sensors/mcp-guard/connectors/teams.js', body: Buffer.from('function sanitizeTeamsChannelMessages() {}\nfunction createTeamsChannelMessagesTool() {}\nfunction sanitizeTeamsChatMessages() {}\nfunction teamsConnectorHealth() {}\nmodule.exports = { sanitizeTeamsChannelMessages, createTeamsChannelMessagesTool, sanitizeTeamsChatMessages, teamsConnectorHealth };') },
-      { path: 'sensors/mcp-guard/connectors/atlassian.js', body: Buffer.from('function sanitizeJiraIssue() {}\nfunction createJiraIssueTool() {}\nfunction sanitizeConfluencePage() {}\nfunction atlassianConnectorHealth() {}\nmodule.exports = { sanitizeJiraIssue, createJiraIssueTool, sanitizeConfluencePage, atlassianConnectorHealth };') },
-      { path: 'sensors/mcp-guard/connectors/database-readonly.js', body: Buffer.from('function sanitizeDatabaseRows() {}\nfunction createDatabaseReadonlyQueryTool() {}\nfunction sanitizeDatabaseSchema() {}\nfunction databaseReadonlyConnectorHealth() {}\nmodule.exports = { sanitizeDatabaseRows, createDatabaseReadonlyQueryTool, sanitizeDatabaseSchema, databaseReadonlyConnectorHealth };') },
-      { path: 'scripts/check-mcp-guard-install.js', body: Buffer.from("const api = '/api/v1/heartbeat';\nfunction buildInstallReport() {}\nfunction connectorRegistryStatus() {}\nconst key = 'INGEST_API_KEY';") },
-    ]),
+    () => validateRuntimeFiles(minimalMcpFiles("const KEY = process.env.INGEST_API_KEY || '';\nconst sample = '524-71-9043';")),
     /synthetic SSN demo value/
   );
 
   assert.throws(
-    () => validateRuntimeFiles([
-      { path: 'package.json', body: Buffer.from('{}') },
-      { path: 'server/env.js', body: Buffer.from('module.exports = {};') },
-      { path: 'detection-engine/detect.js', body: Buffer.from('module.exports = {};') },
-      { path: 'sensors/mcp-guard/guard.js', body: Buffer.from("const KEY = process.env.INGEST_API_KEY || 'dev-ingest-key';") },
-      { path: 'sensors/mcp-guard/sdk.js', body: Buffer.from('function sanitizeToolResult() {}\nfunction wrapConnectorTool() {}\nfunction connectorHealthCheck() {}\nmodule.exports = { sanitizeToolResult, wrapConnectorTool, connectorHealthCheck };') },
-      { path: 'sensors/mcp-guard/connector-registry.js', body: Buffer.from('const CONNECTOR_PROFILES = [];\nfunction connectorRegistryStatus() {}\nfunction connectorRegistryChecks() {}\nmodule.exports = { CONNECTOR_PROFILES, connectorRegistryStatus, connectorRegistryChecks };') },
-      { path: 'sensors/mcp-guard/connectors/microsoft365.js', body: Buffer.from('function sanitizeDriveItemContent() {}\nfunction createDriveItemContentTool() {}\nfunction microsoft365ConnectorHealth() {}\nmodule.exports = { sanitizeDriveItemContent, createDriveItemContentTool, microsoft365ConnectorHealth };') },
-      { path: 'sensors/mcp-guard/connectors/google-drive.js', body: Buffer.from('function sanitizeDriveFileContent() {}\nfunction createDriveFileContentTool() {}\nfunction googleDriveConnectorHealth() {}\nmodule.exports = { sanitizeDriveFileContent, createDriveFileContentTool, googleDriveConnectorHealth };') },
-      { path: 'sensors/mcp-guard/connectors/slack.js', body: Buffer.from('function sanitizeConversationHistory() {}\nfunction createSlackConversationHistoryTool() {}\nfunction sanitizeSlackFileContent() {}\nfunction slackConnectorHealth() {}\nmodule.exports = { sanitizeConversationHistory, createSlackConversationHistoryTool, sanitizeSlackFileContent, slackConnectorHealth };') },
-      { path: 'sensors/mcp-guard/connectors/teams.js', body: Buffer.from('function sanitizeTeamsChannelMessages() {}\nfunction createTeamsChannelMessagesTool() {}\nfunction sanitizeTeamsChatMessages() {}\nfunction teamsConnectorHealth() {}\nmodule.exports = { sanitizeTeamsChannelMessages, createTeamsChannelMessagesTool, sanitizeTeamsChatMessages, teamsConnectorHealth };') },
-      { path: 'sensors/mcp-guard/connectors/atlassian.js', body: Buffer.from('function sanitizeJiraIssue() {}\nfunction createJiraIssueTool() {}\nfunction sanitizeConfluencePage() {}\nfunction atlassianConnectorHealth() {}\nmodule.exports = { sanitizeJiraIssue, createJiraIssueTool, sanitizeConfluencePage, atlassianConnectorHealth };') },
-      { path: 'sensors/mcp-guard/connectors/database-readonly.js', body: Buffer.from('function sanitizeDatabaseRows() {}\nfunction createDatabaseReadonlyQueryTool() {}\nfunction sanitizeDatabaseSchema() {}\nfunction databaseReadonlyConnectorHealth() {}\nmodule.exports = { sanitizeDatabaseRows, createDatabaseReadonlyQueryTool, sanitizeDatabaseSchema, databaseReadonlyConnectorHealth };') },
-      { path: 'scripts/check-mcp-guard-install.js', body: Buffer.from("const api = '/api/v1/heartbeat';\nfunction buildInstallReport() {}\nfunction connectorRegistryStatus() {}\nconst key = 'INGEST_API_KEY';") },
-    ]),
+    () => validateRuntimeFiles(minimalMcpFiles("const KEY = process.env.INGEST_API_KEY || 'dev-ingest-key';")),
     /development ingest key/
   );
 });

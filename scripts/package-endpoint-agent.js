@@ -21,6 +21,7 @@ const PACKAGE_FILES = [
   'server/processors.js',
   'server/parse-pool.js',
   'server/parse-child.js',
+  'sensors/shared/server-url.js',
   'sensors/endpoint-agent/agent.js',
   'sensors/endpoint-agent/file-flow-profiles.js',
   'sensors/endpoint-agent/ocr.js',
