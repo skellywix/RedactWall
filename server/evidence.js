@@ -285,8 +285,13 @@ function safeEdmSummary(edm) {
 
 function safeRestoreDrillEvidence(input) {
   if (!input || typeof input !== 'object') return null;
+  // A restore drill proves recoverability + chain integrity of the RESTORED
+  // database. The restored copy carries no sibling manifest (that hash binds the
+  // original backup, checked separately), so success keys off the restored
+  // audit chain, not manifest presence.
+  const auditOk = !!(input.auditIntegrity && input.auditIntegrity.ok);
   return {
-    ok: input.ok === true,
+    ok: input.ok === true || auditOk,
     checkedAt: safeBoundedText(input.checkedAt || input.verifiedAt || input.drilledAt, 80),
     restoredFile: safeFileName(input.restoredTo || input.file),
     backupSha256: safeSha256(input.backupSha256),

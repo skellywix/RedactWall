@@ -53,7 +53,28 @@ test('backup workflow verifies and restores audit evidence without leaking manif
   const restored = backup.restoreBackup({ file: result.file, to: restoredPath });
   assert.strictEqual(restored.ok, true);
   assert.strictEqual(restored.restoredTo, restoredPath);
-  assert.strictEqual(backup.verifyBackup({ file: restoredPath }).ok, true);
+  // The restored copy has no sibling manifest, so it is unverifiable by hash,
+  // but its audit chain must still verify end to end.
+  const restoredVerify = backup.verifyBackup({ file: restoredPath });
+  assert.strictEqual(restoredVerify.auditIntegrity.ok, true);
+  assert.strictEqual(restoredVerify.unverifiable, true);
+});
+
+test('N6: a backup with no manifest is unverifiable and restore refuses it without --force', async () => {
+  const result = await backup.createBackup({ outDir: path.join(tempRoot, 'no-manifest'), dbModule: db });
+  fs.rmSync(result.manifestFile); // an operator/attacker drops the manifest
+  const verified = backup.verifyBackup({ file: result.file });
+  assert.strictEqual(verified.auditIntegrity.ok, true, 'DB itself is intact');
+  assert.strictEqual(verified.unverifiable, true, 'no manifest => unverifiable');
+  assert.strictEqual(verified.ok, false, 'a manifest-less backup is not a pass');
+  assert.throws(
+    () => backup.restoreBackup({ file: result.file, to: path.join(tempRoot, 'no-manifest-restore', 'redactwall.db') }),
+    /no manifest/,
+    'restore refuses a manifest-less backup',
+  );
+  // --force may override the missing-manifest case (but never a hash mismatch).
+  const forced = backup.restoreBackup({ file: result.file, to: path.join(tempRoot, 'no-manifest-forced', 'redactwall.db'), force: true });
+  assert.strictEqual(forced.ok, true, 'forced restore of an intact-but-unverifiable backup succeeds');
 });
 
 test('manifest hash mismatch makes verification fail and blocks restore', async () => {

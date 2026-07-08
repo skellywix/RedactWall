@@ -288,7 +288,11 @@ function verifyBackup({ file, manifestFile } = {}) {
     const manifest = manifestFile
       ? JSON.parse(fs.readFileSync(path.resolve(manifestFile), 'utf8'))
       : readManifest(dbPath);
-    const manifestOk = !manifest || manifest.backupSha256 === backupSha256;
+    // A missing manifest is NOT a pass: without it the artifact hash is
+    // unverifiable, so a hand-crafted or swapped .db must not restore as
+    // "verified". Mirrors the Postgres path (unverifiable + --force override).
+    const unverifiable = !manifest;
+    const manifestOk = !unverifiable && manifest.backupSha256 === backupSha256;
     return {
       ok: auditIntegrityResult.ok && manifestOk,
       file: dbPath,
@@ -296,6 +300,7 @@ function verifyBackup({ file, manifestFile } = {}) {
       backupSha256,
       auditIntegrity: auditIntegrityResult,
       manifestOk,
+      unverifiable,
     };
   } finally {
     dbFile.close();
@@ -337,20 +342,36 @@ async function createSqliteBackup({ outDir, file, manifestFile, dbModule: db, fo
     note: 'The backup .db is sensitive runtime state. This manifest contains no prompt bodies.',
   };
   fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
-  return { ...verification, manifestFile: manifestPath, manifest };
+  // Re-verify WITH the manifest just written so the create result reflects the
+  // hash-bound state (the first pass ran before the manifest existed, which is
+  // now correctly reported as unverifiable).
+  const verified = verifyBackup({ file: backupFile, manifestFile: manifestPath });
+  return { ...verified, manifestFile: manifestPath, manifest };
 }
 
 function restoreBackup({ file, to, manifestFile, force = false } = {}) {
   if (!to) throw new Error('--to is required');
   if (file && isPgDumpFile(path.resolve(file))) return restorePgBackup({ file, to, manifestFile, force });
-  const verification = verifyBackup({ file });
-  if (!verification.ok) throw new Error('refusing to restore a backup that does not verify');
+  const verification = verifyBackup({ file, manifestFile });
+  if (!verification.ok) {
+    // A present-but-mismatched manifest signals tampering and is never
+    // bypassable. A missing manifest is merely unverifiable and may be
+    // overridden with --force (or by supplying an explicit --manifest).
+    if (!(verification.unverifiable && force)) {
+      throw new Error(verification.unverifiable
+        ? 'refusing to restore a backup with no manifest to verify against; pass --manifest <file> or --force to override'
+        : 'refusing to restore a backup that does not verify');
+    }
+  }
   const target = path.resolve(to);
   if (fs.existsSync(target) && !force) throw new Error(`${target} already exists; pass --force to overwrite`);
   ensureParent(target);
   fs.copyFileSync(path.resolve(file), target);
-  const restored = verifyBackup({ file: target });
-  return { ...restored, restoredTo: target };
+  // The restored .db has no sibling manifest; verify the audit chain end to end.
+  const restoredDb = new Database(target, { readonly: true, fileMustExist: true });
+  let auditIntegrityResult;
+  try { auditIntegrityResult = auditIntegrity.verifyAuditChainForDatabase(restoredDb); } finally { restoredDb.close(); }
+  return { ok: auditIntegrityResult.ok, restoredTo: target, file: target, backupSha256: sha256File(target), auditIntegrity: auditIntegrityResult, unverifiable: true };
 }
 
 async function main(argv = process.argv.slice(2), deps = {}) {
