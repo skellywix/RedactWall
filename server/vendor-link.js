@@ -125,26 +125,57 @@ function persist(deps, verdictText, status) {
   } catch (_) { /* best-effort; staleness still fails closed on restart */ }
 }
 
-// Restore persisted connected-mode state at boot, BEFORE the server accepts
-// ingest, so a revocation survives restart. With no persisted file a fresh
-// install gets the full tolerance window from boot to make first contact.
+// Restore connected-mode state at boot, BEFORE the server accepts ingest, so a
+// revocation survives restart and heartbeat-or-die cannot be reset.
+//
+// The kill-switch is anchored in the tamper-evident, hash-chained AUDIT (via the
+// injected durable/installAt readers), NOT the state file: the file is
+// operator-writable and deletable, so trusting its self-reported contact time or
+// treating its absence as a fresh install would let an adversary lift a
+// revocation or reset the staleness clock simply by deleting/editing it. The
+// audit cannot be edited without breaking verifyAuditChain.
+//
+// This also requires the license to be loaded already (the caller refreshes it
+// first): the verdict's customer binding is checked against the installed
+// customerId, which would otherwise be null and drop a persisted revocation.
 function restore(deps = {}) {
   const cfg = deps.settings || settings();
   const nowMs = deps.nowMs || Date.now();
   if (!cfg.enabled) { _lastContactMs = nowMs; _appliedIssuedAt = 0; return { ok: true, restored: false }; }
+
+  // Durable, tamper-evident facts from the audit chain.
+  const durable = (deps.lastVendorHeartbeat && deps.lastVendorHeartbeat()) || null; // { issuedAt, contactAt, status }
+  const installMs = (deps.firstAuditAt && deps.firstAuditAt()) || nowMs;             // install age anchor
+
+  // State file: a fast cache only. Its signed verdict can RAISE the monotonic
+  // issuedAt floor (never lower it) and can carry a revocation forward, but it
+  // can never relax an audit-anchored fact.
   const read = deps.readFile || ((p) => fs.readFileSync(p, 'utf8'));
   let saved;
   try { saved = JSON.parse(read(deps.statePath || statePath())); } catch (_) { saved = null; }
-  if (!saved) { _lastContactMs = nowMs; _appliedIssuedAt = 0; return evaluateStaleness(deps, nowMs); }
-
-  const payload = verifyVerdict(saved.verdict, publicKey(deps));
-  const installed = license.publicStatus().customerId;
-  const bound = payload && installed && payload.customerId && String(payload.customerId) === String(installed);
-  _appliedIssuedAt = bound ? (verdictIssuedAtMs(payload) || 0) : 0;
-  _lastContactMs = Date.parse(saved.lastContactAt) || 0;
-  if (bound && String(payload.status) === 'revoked') {
-    license.applyVendorVerdict(true, { appendAudit: deps.appendAudit });
+  let fileRevoked = false;
+  let fileVerdictIssuedAt = 0;
+  if (saved) {
+    const payload = verifyVerdict(saved.verdict, publicKey(deps));
+    const installed = license.publicStatus().customerId;
+    const bound = payload && installed && payload.customerId && String(payload.customerId) === String(installed);
+    if (bound) { fileVerdictIssuedAt = verdictIssuedAtMs(payload) || 0; fileRevoked = String(payload.status) === 'revoked'; }
   }
+
+  // Monotonic issuedAt floor = the max of every durable/cached source, so a
+  // rolled-back file cannot re-open a replay-downgrade window.
+  const durableIssuedAt = durable && Number.isFinite(durable.issuedAt) ? durable.issuedAt : 0;
+  _appliedIssuedAt = Math.max(durableIssuedAt, fileVerdictIssuedAt, 0);
+
+  // Last contact comes from the audit, not the file. With no durable contact
+  // record the staleness window is measured from install age (also durable), so
+  // an install that never reached the vendor cannot buy a fresh window by
+  // deleting the file — it stays within, and eventually past, its window.
+  _lastContactMs = durable && Number.isFinite(durable.contactAt) ? durable.contactAt : installMs;
+
+  const revoked = (durable && String(durable.status) === 'revoked') || fileRevoked;
+  if (revoked) license.applyVendorVerdict(true, { appendAudit: deps.appendAudit });
+
   return evaluateStaleness(deps, nowMs);
 }
 
@@ -207,6 +238,17 @@ async function heartbeat(deps = {}) {
   const revoked = String(payload.status) === 'revoked';
   license.applyVendorVerdict(revoked, { appendAudit: deps.appendAudit });
   license.setVendorStale(false, { appendAudit: deps.appendAudit });
+  // Durable, tamper-evident record of this contact (see restore()): the audit
+  // chain is the authoritative anchor, the state file only a cache. Written on
+  // every genuinely fresh verdict (monotonic issuedAt already gates duplicates),
+  // so its growth tracks the vendor's issuance cadence, not reboot frequency.
+  if (deps.appendAudit) {
+    deps.appendAudit({
+      action: 'VENDOR_HEARTBEAT_OK',
+      actor: 'vendor',
+      detail: JSON.stringify({ issuedAt: check.issuedAt, contactAt: nowMs, status: revoked ? 'revoked' : 'active' }),
+    });
+  }
   persist(deps, text, revoked ? 'revoked' : 'active');
   return { ok: true, verdict: { status: revoked ? 'revoked' : 'active' } };
 }

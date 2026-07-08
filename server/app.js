@@ -520,7 +520,15 @@ function runVendorHeartbeat() {
 // is already blocking on the first request. Synchronous by design.
 function runVendorRestore() {
   if (!vendorLink.enabled()) return;
-  try { vendorLink.restore({ appendAudit: (rec) => db.appendAudit(rec) }); } catch (_) { /* staleness backstops */ }
+  try {
+    vendorLink.restore({
+      appendAudit: (rec) => db.appendAudit(rec),
+      // Tamper-evident kill-switch anchors from the hash-chained audit, so the
+      // deletable state file cannot lift a revocation or reset staleness.
+      lastVendorHeartbeat: () => db.lastVendorHeartbeat(),
+      firstAuditAt: () => db.firstAuditAt(),
+    });
+  } catch (_) { /* staleness backstops */ }
 }
 
 function runRetentionPurge({ actor = 'system', now = new Date() } = {}) {
@@ -3198,6 +3206,10 @@ function startServer(port = PORT, opts = {}) {
     license.refresh({ appendAudit: (rec) => db.appendAudit(rec) });
     runVendorHeartbeat();
   });
+  // Load the license BEFORE restoring vendor state: restore() checks the
+  // persisted verdict's customer binding against the installed license, so the
+  // license file must already be loaded or a persisted revocation is dropped.
+  license.refresh({ appendAudit: (rec) => db.appendAudit(rec) });
   // Kill-switch state must be in effect before the first request; restore is
   // synchronous, the heartbeat that follows only refreshes it.
   runVendorRestore();

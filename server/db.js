@@ -861,6 +861,27 @@ function lastAuditActionAt(action) {
   return row ? row.ts : null;
 }
 
+// Durable, tamper-evident anchors for the connected-mode kill-switch. The
+// vendor state file (server/vendor-link.js) is a fast cache but is
+// operator-writable/deletable; the hash-chained audit is not (editing it breaks
+// verifyAuditChain), so last vendor contact and install age are read from here.
+function lastVendorHeartbeat() {
+  const row = sdb.prepare("SELECT entry FROM audit WHERE action = 'VENDOR_HEARTBEAT_OK' ORDER BY seq DESC LIMIT 1").get();
+  if (!row) return null;
+  try {
+    const detail = JSON.parse(JSON.parse(row.entry).detail);
+    const issuedAt = Number(detail.issuedAt);
+    const contactAt = Number(detail.contactAt);
+    if (!Number.isFinite(issuedAt) || !Number.isFinite(contactAt)) return null;
+    return { issuedAt, contactAt, status: String(detail.status || '') };
+  } catch (_) { return null; }
+}
+
+function firstAuditAt() {
+  const row = sdb.prepare('SELECT ts FROM audit ORDER BY seq ASC LIMIT 1').get();
+  return row && row.ts ? (Date.parse(row.ts) || null) : null;
+}
+
 // ---- Delivery history (SIEM/SOAR subscriptions) ------------------------------
 const deliveryInsert = sdb.prepare('INSERT INTO deliveries (id, ts, destId, dedupeKey, status, data) VALUES (@id, @ts, @destId, @dedupeKey, @status, @data)');
 
@@ -896,6 +917,7 @@ module.exports = {
   getAiApp, listAiApps, upsertAiApp,
   listAiUseCases, upsertAiUseCase, reviewAiUseCase,
   listAiIncidents, createAiIncident, setAiIncidentStatus, lastAuditActionAt,
+  lastVendorHeartbeat, firstAuditAt,
   recordDelivery, listDeliveries, recentDeliverySuccess,
   setTenantContext,
   _canonical: canonical, _db: sdb, _dbPath: DB_PATH, _driverKind: DRIVER_KIND,

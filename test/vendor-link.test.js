@@ -105,6 +105,62 @@ test('revocation survives a process restart via persisted, re-verified state', a
   assert.strictEqual(license.isRevoked(), true);
 });
 
+// A durable, tamper-evident audit anchor: heartbeat appends VENDOR_HEARTBEAT_OK,
+// restore reads it back. Simulates db.appendAudit / db.lastVendorHeartbeat.
+function auditAnchor() {
+  const rows = [];
+  return {
+    appendAudit: (rec) => { rows.push(rec); },
+    lastVendorHeartbeat: () => {
+      for (let i = rows.length - 1; i >= 0; i -= 1) {
+        if (rows[i].action === 'VENDOR_HEARTBEAT_OK') {
+          const d = JSON.parse(rows[i].detail);
+          return { issuedAt: Number(d.issuedAt), contactAt: Number(d.contactAt), status: String(d.status) };
+        }
+      }
+      return null;
+    },
+    firstAuditAt: () => T0,
+  };
+}
+
+test('deleting the state file cannot lift a revocation or reset the staleness clock', async () => {
+  const anchor = auditAnchor();
+  await vendorLink.heartbeat(deps({ nowMs: T0, appendAudit: anchor.appendAudit, fetchImpl: fetchReturning(verdict({ status: 'revoked', customerId: 'cu-42', issuedAt: T0 })) }));
+  assert.strictEqual(license.isRevoked(), true);
+
+  // Attacker restarts and deletes the operator-writable cache file.
+  fs.rmSync(STATE, { force: true });
+  vendorLink._internal.reset();
+  license.applyVendorVerdict(false);
+  assert.strictEqual(license.isRevoked(), false);
+
+  // Restore reads the tamper-evident audit anchor, not the (now-missing) file.
+  vendorLink.restore(deps({ nowMs: T0 + 2000, appendAudit: anchor.appendAudit, lastVendorHeartbeat: anchor.lastVendorHeartbeat, firstAuditAt: anchor.firstAuditAt }));
+  assert.strictEqual(license.isRevoked(), true, 'revocation must survive file deletion');
+});
+
+test('a deleted file cannot buy a fresh staleness window when the audit shows stale contact', () => {
+  const anchor = auditAnchor();
+  // Durable record: last active contact was 8 days ago.
+  anchor.appendAudit({ action: 'VENDOR_HEARTBEAT_OK', actor: 'vendor', detail: JSON.stringify({ issuedAt: T0 - 8 * DAY, contactAt: T0 - 8 * DAY, status: 'active' }) });
+  fs.rmSync(STATE, { force: true });
+  vendorLink._internal.reset();
+  license.applyVendorVerdict(false); license.setVendorStale(false);
+
+  vendorLink.restore(deps({ nowMs: T0, appendAudit: anchor.appendAudit, lastVendorHeartbeat: anchor.lastVendorHeartbeat, firstAuditAt: anchor.firstAuditAt }));
+  assert.strictEqual(license.isRevoked(), true, 'stale contact from the audit must fail closed despite the missing file');
+});
+
+test('an install that never reached the vendor fails closed once past its window from install age', () => {
+  const anchor = auditAnchor(); // firstAuditAt = T0, no heartbeat rows
+  vendorLink._internal.reset();
+  license.applyVendorVerdict(false); license.setVendorStale(false);
+  // 8 days after install, still no successful contact -> stale -> closed.
+  vendorLink.restore(deps({ nowMs: T0 + 8 * DAY, appendAudit: anchor.appendAudit, lastVendorHeartbeat: anchor.lastVendorHeartbeat, firstAuditAt: anchor.firstAuditAt }));
+  assert.strictEqual(license.isRevoked(), true);
+});
+
 test('a stale link (no fresh contact within tolerance) fails CLOSED; contact clears it', async () => {
   // Fresh active contact at T0.
   await vendorLink.heartbeat(deps({ nowMs: T0, fetchImpl: fetchReturning(verdict({ status: 'active', customerId: 'cu-42', issuedAt: T0 })) }));
