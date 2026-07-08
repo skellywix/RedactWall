@@ -112,7 +112,7 @@ separate SKU. Every claim below carries verified references.
 
 ## Implementation Sequence
 
-- **Phase A — connected licensing** (`server/vendor-link.js` + license
+- **Phase A — connected licensing** — **SHIPPED** (`server/vendor-link.js`, `revoked` state + fail-closed ingest gate, gateway covered transitively, 30-day seat window, `docs/CONNECTED_DEPLOYMENT.md`, tests). Remaining original bullet detail: (`server/vendor-link.js` + license
   `revoked` state + ingest gate + gateway check + heartbeat with seat
   counts + tests updating `test/license*.test.js` pins + 30-day seat
   window fix).

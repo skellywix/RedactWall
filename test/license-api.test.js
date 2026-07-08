@@ -91,6 +91,44 @@ test('past-grace license makes config read-only but never disables the security 
   assert.ok(!JSON.stringify(audit).includes('.'.repeat(0) + signLicense().slice(0, 30)), 'no raw license material in audit');
 });
 
+test('vendor revocation fail-closed-blocks ingest but never disables evidence export', async (t) => {
+  license.refresh({ readFile: () => signLicense(), now: Date.now() });
+  license.applyVendorVerdict(true, { appendAudit: (r) => db.appendAudit(r) });
+  t.after(() => license.applyVendorVerdict(false));
+  assert.strictEqual(license.status().state, 'revoked');
+  assert.strictEqual(license.publicStatus().reason, 'vendor_revoked');
+
+  const server = await listen(app);
+  t.after(() => new Promise((r) => server.close(r)));
+  const { port } = server.address();
+  const { cookie, csrfToken } = await login(port);
+
+  // 1) Ingest is fail-closed-blocked with a DISTINCT status (not an outage).
+  const gate = await jsonFetch(port, '/api/v1/gate', { headers: { 'x-api-key': 'unit-ingest-key' }, body: { prompt: 'anything at all', user: 'u@cu.org', destination: 'chatgpt.com' } });
+  assert.strictEqual(gate.status, 403);
+  const gateBody = await gate.json();
+  assert.strictEqual(gateBody.decision, 'block');
+  assert.strictEqual(gateBody.status, 'license_revoked');
+
+  // 2) Config writes are blocked with license_revoked.
+  const put = await jsonFetch(port, '/api/policy', { method: 'PUT', headers: { cookie, 'x-csrf-token': csrfToken }, body: { enforcementMode: 'warn' } });
+  assert.strictEqual(put.status, 403);
+  assert.strictEqual((await put.json()).error, 'license_revoked');
+
+  // 3) Evidence export STILL works — data protection is never disabled.
+  assert.strictEqual((await fetch(`http://127.0.0.1:${port}/api/export/evidence`, { headers: { cookie } })).status, 200);
+
+  // 4) A signed 'active' verdict clears the kill-switch and ingest resumes.
+  license.applyVendorVerdict(false, { appendAudit: (r) => db.appendAudit(r) });
+  const gate2 = await jsonFetch(port, '/api/v1/gate', { headers: { 'x-api-key': 'unit-ingest-key' }, body: { prompt: 'benign text', user: 'u@cu.org', destination: 'chatgpt.com' } });
+  assert.strictEqual(gate2.status, 200);
+
+  // 5) The revocation is recorded prompt-free in the audit chain.
+  const audit = await (await fetch(`http://127.0.0.1:${port}/api/audit`, { headers: { cookie } })).json();
+  assert.ok(JSON.stringify(audit).includes('LICENSE_REVOKED_BLOCK'));
+  assert.strictEqual(db.verifyAuditChain().ok, true);
+});
+
 test('invalid license install is rejected with a reason and audited', async (t) => {
   const server = await listen(app);
   t.after(() => new Promise((r) => server.close(r)));

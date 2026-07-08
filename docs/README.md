@@ -101,6 +101,7 @@ organized by topic: `deployment/`, `demo/`, `identity/`, `connectors/`,
 | Test tiers, gates, flaky policy, coverage | `process/TESTING_STRATEGY.md` |
 | Documentation types, style, lifecycle | `process/DOCUMENTATION_STANDARDS.md` |
 | License files, seats, expiry, pricing shape | `process/CUSTOMER_LICENSING.md` |
+| Connected (vendor-managed) mode: heartbeat, kill-switch, seats | `process/CONNECTED_DEPLOYMENT.md` |
 | Support severities, response targets, versions | `process/SUPPORT_POLICY.md` |
 | Release history | `../CHANGELOG.md` |
 

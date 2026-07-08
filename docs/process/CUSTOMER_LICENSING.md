@@ -29,6 +29,15 @@ is `docs/deployment/LICENSE_KEY_SETUP.md`.
    to the customer continuously; overage is a renewal conversation (GitLab-
    style true-up), not a hard block.
 
+## Deployment modes
+
+RedactWall ships **air-gapped** (default, this document) and **connected**
+(opt-in). Air-gapped verifies the license offline with zero egress. Connected
+adds a signed vendor heartbeat that reports seat counts and can **revoke** a
+customer (blocking all AI use, fail-closed, while data protection and evidence
+export keep running). See `docs/CONNECTED_DEPLOYMENT.md`. Everything below
+describes the offline license file, which both modes use.
+
 ## License file format
 
 A `redactwall.lic` file: base64-encoded JSON payload plus an Ed25519
@@ -58,8 +67,9 @@ product.
 ## Seat model
 
 - A **seat** is a distinct user identity observed by any sensor or the
-  gateway in the trailing 30 days (the data already exists —
-  `/api/billing/seats`).
+  gateway in the trailing 30 days (`/api/billing/seats`). The window is
+  enforced in `db.seatStats`; override with `REDACTWALL_SEAT_WINDOW_DAYS`
+  (`all` = lifetime).
 - The console shows seats used vs. licensed; warnings begin at 100%.
   Enforcement above the limit follows the existing `seat_limit_blocked`
   policy for *new* identities only where the customer has opted into hard

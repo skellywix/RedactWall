@@ -120,6 +120,26 @@ test('seat stats count unique billable users by tenant', () => {
   assert.ok(seats.users.every((u) => u.orgId === 'cu-acme'));
 });
 
+test('seat stats count only the trailing 30-day window; REDACTWALL_SEAT_WINDOW_DAYS=all restores lifetime', () => {
+  const old = new Date(Date.now() - 60 * 86400000).toISOString();
+  const recent = new Date(Date.now() - 1 * 86400000).toISOString();
+  db._db.prepare('INSERT INTO queries (id, createdAt, status, user, orgId, data) VALUES (?,?,?,?,?,?)')
+    .run('seatwin_old', old, 'allowed', 'lapsed@window.test', 'cu-window', '{}');
+  db._db.prepare('INSERT INTO queries (id, createdAt, status, user, orgId, data) VALUES (?,?,?,?,?,?)')
+    .run('seatwin_new', recent, 'allowed', 'active@window.test', 'cu-window', '{}');
+
+  const windowed = db.seatStats({ orgId: 'cu-window' });
+  assert.strictEqual(windowed.seatsUsed, 1);
+  assert.deepStrictEqual(windowed.users.map((u) => u.user), ['active@window.test']);
+
+  process.env.REDACTWALL_SEAT_WINDOW_DAYS = 'all';
+  try {
+    assert.strictEqual(db.seatStats({ orgId: 'cu-window' }).seatsUsed, 2);
+  } finally {
+    delete process.env.REDACTWALL_SEAT_WINDOW_DAYS;
+  }
+});
+
 test('SCIM users persist, update, list, and deactivate in the SQLite store', () => {
   const created = db.saveScimUser({
     externalId: 'entra-db-user',

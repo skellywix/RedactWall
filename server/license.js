@@ -5,13 +5,24 @@
  * A `redactwall.lic` file is `base64(payloadJSON).base64(ed25519Signature)`,
  * where the signature is over the UTF-8 bytes of the base64-payload string
  * (signing the encoded form avoids any JSON canonicalization question). It is
- * verified at boot and re-checked daily against an EMBEDDED public key — no
- * license server, no phone-home, so air-gapped credit-union deployments work.
+ * verified at boot and re-checked daily against an EMBEDDED public key. This is
+ * the AIR-GAPPED default — no license server, no phone-home — so offline
+ * credit-union deployments work with zero egress.
  *
- * The license NEVER disables the security function. Absence or invalidity =
- * demo mode (zero gating). Past the grace window it only degrades the ADMIN
- * CONSOLE to read-only for configuration routes; detection, enforcement, the
- * approval workflow, audit, and evidence export always keep running.
+ * The license never fails OPEN. In the offline model: absence or invalidity =
+ * demo mode (zero gating); past the grace window it degrades the ADMIN CONSOLE
+ * to read-only for configuration routes while detection, enforcement, the
+ * approval workflow, audit, and evidence export keep running.
+ *
+ * CONNECTED mode (opt-in, server/vendor-link.js) adds a vendor kill-switch: a
+ * signed heartbeat verdict from the vendor can move the effective state to
+ * 'revoked', which locks the console like readonly AND fail-closed-blocks
+ * sensor ingest (`license_revoked`). A revoked customer loses USE of AI through
+ * the product — the strongest data protection, not its absence; nothing ever
+ * fails open. Revocation is only ever set by a signature-verified vendor
+ * verdict (applyVendorVerdict), never by the local file, so it cannot be
+ * cleared by a customer reinstalling a license. It is an overlay on top of the
+ * file-derived state and survives refresh().
  *
  * The vendor's PRIVATE signing key lives offline (see scripts/license-issue.js
  * --init-keypair) and is never in the repo. Tests inject a throwaway public key
@@ -80,6 +91,10 @@ function evaluate(payload, now = Date.now()) {
 }
 
 let _status = { state: 'unlicensed', payload: null, reason: 'missing' };
+// Vendor kill-switch overlay (connected mode). Set only by a signature-verified
+// heartbeat verdict; survives refresh() so a customer cannot clear it by
+// reinstalling a license.
+let _vendorRevoked = false;
 
 function loadStatus(now = Date.now(), deps = {}) {
   const read = deps.readFile || ((p) => fs.readFileSync(p, 'utf8'));
@@ -90,22 +105,49 @@ function loadStatus(now = Date.now(), deps = {}) {
   return { state: evaluate(v.payload, now), payload: v.payload, reason: null };
 }
 
+// Effective state = file-derived state, overridden to 'revoked' when the vendor
+// has revoked. Payload/reason are preserved so publicStatus and entitlement
+// still describe the licensed customer.
+function effectiveStatus() {
+  if (_vendorRevoked) return { ..._status, state: 'revoked' };
+  return _status;
+}
+
 function refresh(deps = {}) {
   const now = deps.now || Date.now();
   const next = loadStatus(now, deps);
-  const prev = _status;
+  const prevEffective = effectiveStatus().state;
   _status = next;
-  if (deps.appendAudit && (prev.state !== next.state)) {
+  const nextEffective = effectiveStatus().state;
+  if (deps.appendAudit && (prevEffective !== nextEffective)) {
     deps.appendAudit({
       action: 'LICENSE_STATE_CHANGED',
       actor: 'system',
-      detail: `from=${prev.state}; to=${next.state}; plan=${next.payload ? next.payload.plan : 'none'}; expires=${next.payload ? next.payload.expires : 'none'}`,
+      detail: `from=${prevEffective}; to=${nextEffective}; plan=${next.payload ? next.payload.plan : 'none'}; expires=${next.payload ? next.payload.expires : 'none'}`,
     });
   }
-  return next;
+  return effectiveStatus();
 }
 
-function status() { return _status; }
+// Apply a signature-verified vendor heartbeat verdict (connected mode only).
+// `revoked` flips the kill-switch; audits an effective-state transition.
+function applyVendorVerdict(revoked, deps = {}) {
+  const prevEffective = effectiveStatus().state;
+  _vendorRevoked = revoked === true;
+  const nextEffective = effectiveStatus().state;
+  if (deps.appendAudit && (prevEffective !== nextEffective)) {
+    deps.appendAudit({
+      action: 'LICENSE_STATE_CHANGED',
+      actor: 'vendor',
+      detail: `from=${prevEffective}; to=${nextEffective}; source=vendor_link`,
+    });
+  }
+  return effectiveStatus();
+}
+
+function isRevoked() { return effectiveStatus().state === 'revoked'; }
+
+function status() { return effectiveStatus(); }
 
 function graceEndsAt(payload) {
   if (!payload) return null;
@@ -116,7 +158,7 @@ function graceEndsAt(payload) {
 }
 
 function publicStatus() {
-  const s = _status;
+  const s = effectiveStatus();
   const p = s.payload;
   const days = p ? Math.ceil((Date.parse(p.expires) - Date.now()) / (24 * 3600 * 1000)) : null;
   return {
@@ -129,7 +171,7 @@ function publicStatus() {
     expires: p ? p.expires : null,
     graceEndsAt: graceEndsAt(p),
     daysRemaining: days,
-    reason: s.reason || null,
+    reason: s.state === 'revoked' ? 'vendor_revoked' : (s.reason || null),
   };
 }
 
@@ -147,14 +189,18 @@ function entitled(feature) {
   return features.includes(feature) || p.plan === 'enterprise';
 }
 
-// Express middleware: in 'readonly' state, block admin configuration writes
-// EXCEPT under /api/queries/ (reveal/assign support the approval workflow, which
-// must never be impaired) and the license-install route itself.
+// Express middleware: in 'readonly' or vendor-'revoked' state, block admin
+// configuration writes EXCEPT under /api/queries/ (reveal/assign support the
+// approval workflow, which must never be impaired) and the license-install
+// route itself (renewal must always be installable). A revoked install can
+// still install a fresh license, but only a signed vendor 'active' verdict
+// clears the revocation.
 function requireWritable(req, res, next) {
-  if (status().state !== 'readonly') return next();
+  const state = status().state;
+  if (state !== 'readonly' && state !== 'revoked') return next();
   if (req.path.startsWith('/api/queries/')) return next();
   if (req.path === '/api/billing/license' && req.method === 'POST') return next();
-  return res.status(403).json({ error: 'license_readonly' });
+  return res.status(403).json({ error: state === 'revoked' ? 'license_revoked' : 'license_readonly' });
 }
 
 module.exports = {
@@ -162,6 +208,8 @@ module.exports = {
   evaluate,
   loadStatus,
   refresh,
+  applyVendorVerdict,
+  isRevoked,
   status,
   publicStatus,
   entitled,

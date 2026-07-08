@@ -323,15 +323,37 @@ function normalizedSeatOrg(value) {
 // latency grow with history. GROUP BY lower(user) mirrors normalizedSeatUser's
 // case-folding; unknown/unattributed and SCIM-inactive users are dropped after.
 const SEAT_EXCLUDED_LIST = [...SEAT_EXCLUDED_STATUSES].map((s) => `'${s}'`).join(', ');
+// A seat is a distinct billable user seen in the trailing window (default 30
+// days, matching docs/process/CUSTOMER_LICENSING.md), so inactive identities roll off
+// and billing reflects current usage. ISO-8601 createdAt compares
+// chronologically, so a string cutoff uses idx_queries_created directly.
+// REDACTWALL_SEAT_WINDOW_DAYS=0 (or 'all') restores lifetime counting.
 const SEAT_SELECT = `SELECT lower("user") AS user, COUNT(*) AS events, MIN("createdAt") AS firstSeen,
     MAX("createdAt") AS lastSeen, MIN("orgId") AS orgId FROM queries
-  WHERE "user" IS NOT NULL AND status NOT IN (${SEAT_EXCLUDED_LIST})`;
+  WHERE "user" IS NOT NULL AND status NOT IN (${SEAT_EXCLUDED_LIST}) AND "createdAt" >= ?`;
 const seatStatsAll = sdb.prepare(`${SEAT_SELECT} GROUP BY lower("user")`);
 const seatStatsByOrg = sdb.prepare(`${SEAT_SELECT} AND lower("orgId") = ? GROUP BY lower("user")`);
 
+const DEFAULT_SEAT_WINDOW_DAYS = 30;
+function seatWindowDays() {
+  const raw = process.env.REDACTWALL_SEAT_WINDOW_DAYS;
+  if (raw == null || raw === '') return DEFAULT_SEAT_WINDOW_DAYS;
+  if (String(raw).toLowerCase() === 'all') return 0;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : DEFAULT_SEAT_WINDOW_DAYS;
+}
+
+// Cutoff ISO for the seat window; '' (matches every createdAt) when windowless.
+function seatCutoff(nowMs) {
+  const days = seatWindowDays();
+  if (!days) return '';
+  return new Date((Number.isFinite(nowMs) ? nowMs : Date.now()) - days * 24 * 60 * 60 * 1000).toISOString();
+}
+
 function seatStats(filter = {}) {
   const wantedOrg = normalizedSeatOrg(filter.orgId);
-  const rows = wantedOrg ? seatStatsByOrg.all(wantedOrg) : seatStatsAll.all();
+  const cutoff = seatCutoff(filter.nowMs);
+  const rows = wantedOrg ? seatStatsByOrg.all(cutoff, wantedOrg) : seatStatsAll.all(cutoff);
   const inactiveIdentities = inactiveScimIdentitySet();
   const users = [];
   for (const r of rows) {

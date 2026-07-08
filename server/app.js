@@ -60,6 +60,7 @@ const releaseTokens = require('./release-token');
 const receipts = require('./receipts');
 const tenant = require('./tenant');
 const license = require('./license');
+const vendorLink = require('./vendor-link');
 const exactMatch = require('./exact-match');
 const ncuaReadiness = require('./ncua-readiness');
 const openapi = require('./openapi');
@@ -424,6 +425,36 @@ function releaseTokenPayload(releaseToken) {
 }
 
 function enforceTenantForSensor(req, res) {
+  // Vendor kill-switch (connected mode): a signed 'revoked' verdict blocks ALL
+  // sensor ingest, fail-closed, with a distinct status so this reads as a
+  // licensing action rather than an outage. Data protection is maximal (every
+  // prompt is blocked); nothing fails open.
+  if (license.isRevoked()) {
+    const body = req.body || {};
+    const row = createQuery({
+      status: 'license_revoked',
+      mode: 'billing',
+      user: body.user || 'unknown',
+      orgId: tenant.config().tenantId || null,
+      destination: body.destination || 'unknown',
+      source: body.source || 'api',
+      channel: body.channel || 'submit',
+      sensor: body.sensor || null,
+      redactedPrompt: '[license_revoked]',
+      findings: [],
+      categories: [],
+      entityCounts: {},
+      riskScore: 0,
+      maxSeverity: 0,
+      maxSeverityLabel: 'none',
+      reasons: ['license_revoked'],
+    });
+    db.appendAudit({ action: 'LICENSE_REVOKED_BLOCK', queryId: row.id, actor: body.user || 'unknown', detail: 'tenant=' + (row.orgId || 'unknown') });
+    broadcast('query', { type: 'license_revoked', query: publicQuery(row) });
+    res.status(403).json({ error: 'license revoked', decision: 'block', status: 'license_revoked' });
+    return false;
+  }
+
   const check = tenant.validateSensorAccess({ body: req.body || {}, db });
   if (check.ok) {
     req.body.orgId = check.orgId || null;
@@ -471,6 +502,18 @@ function enforceTenantForSensor(req, res) {
     seatsUsed: check.seatsUsed || undefined,
   });
   return false;
+}
+
+// Connected-mode license heartbeat (opt-in via REDACTWALL_LICENSE_SERVER_URL).
+// Fire-and-forget: a failed or unreachable heartbeat never throws and never
+// changes license state on its own (server/vendor-link.js). Dormant otherwise.
+function runVendorHeartbeat() {
+  if (!vendorLink.enabled()) return Promise.resolve();
+  return vendorLink.heartbeat({
+    seatReport: tenant.seatReport(db),
+    version: require('../package.json').version,
+    appendAudit: (rec) => db.appendAudit(rec),
+  }).catch(() => {});
 }
 
 function runRetentionPurge({ actor = 'system', now = new Date() } = {}) {
@@ -3132,7 +3175,11 @@ function startServer(port = PORT, opts = {}) {
   }
   retentionPurge();
   workflowEscalation();
-  (opts.runLicenseRefresh || (() => license.refresh({ appendAudit: (rec) => db.appendAudit(rec) })))();
+  const licenseCycle = opts.runLicenseRefresh || (() => {
+    license.refresh({ appendAudit: (rec) => db.appendAudit(rec) });
+    runVendorHeartbeat();
+  });
+  licenseCycle();
   const server = appToListen.listen(port, () => {
     const address = server.address();
     log(address && address.port ? address.port : port);
@@ -3140,7 +3187,7 @@ function startServer(port = PORT, opts = {}) {
   const retentionTimer = setIntervalFn(() => retentionPurge(), 60 * 60 * 1000);
   const workflowTimer = setIntervalFn(() => workflowEscalation(), 5 * 60 * 1000);
   const staleTimer = setIntervalFn(() => staleSweep(), 60 * 60 * 1000);
-  const licenseTimer = setIntervalFn(() => license.refresh({ appendAudit: (rec) => db.appendAudit(rec) }), 24 * 60 * 60 * 1000);
+  const licenseTimer = setIntervalFn(licenseCycle, 24 * 60 * 60 * 1000);
   retentionTimer.unref();
   workflowTimer.unref();
   staleTimer.unref();
