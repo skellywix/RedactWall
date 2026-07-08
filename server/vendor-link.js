@@ -1,45 +1,75 @@
 'use strict';
 /**
- * Vendor link — connected-mode license heartbeat (PLANS/vendor-connected-
- * deployment.md, Phase A).
+ * Vendor link — connected-mode license heartbeat and kill-switch
+ * (PLANS/vendor-connected-deployment.md, Phase A).
  *
  * OPT-IN and dormant unless REDACTWALL_LICENSE_SERVER_URL is set: this is the
  * ONLY vendor-bound egress in the product, and the air-gapped default never
- * enables it. On the daily license cadence it POSTs a prompt-free heartbeat
- * { customerId, licenseId, plan, seatsUsed, seatLimit, version, sentAt } to the
- * vendor's license server and applies the SIGNED verdict it returns.
+ * enables it. When enabled, the control plane must maintain vendor contact to
+ * keep serving — "heartbeat or die":
  *
- * Trust boundary: the verdict is base64(json).base64(ed25519sig), verified with
- * the SAME embedded public key the license file uses. A network attacker can
- * therefore neither spoof a 'revoked' verdict nor forge an 'active' one to lift
- * a real revocation, and the verdict's customerId must match the installed
- * license (no cross-tenant replay). An unreachable or unverifiable server NEVER
- * changes state on its own — the last verified verdict holds; the link only
- * logs. Nothing here fails open.
+ *  - On the daily license cadence it POSTs a prompt-free heartbeat
+ *    { customerId, plan, seatsUsed, seatLimit, version, sentAt } and expects a
+ *    FRESH signed verdict base64(json).base64(ed25519sig) over
+ *    { status:'active'|'revoked', customerId, issuedAt }.
+ *  - The verdict is verified with the SAME embedded public key the license file
+ *    uses, must be bound to the installed customerId, and its issuedAt must be
+ *    strictly greater than the last applied (monotonic). Only such a FRESH
+ *    verdict counts as vendor contact and can change the revoked state — so a
+ *    captured old 'active' verdict cannot be replayed to keep an install alive
+ *    or to lift a revocation (downgrade attack), and a customer who blocks
+ *    egress simply stops getting fresh verdicts.
+ *  - The last verdict + last-contact time are PERSISTED and restored at boot
+ *    BEFORE the server accepts ingest, so a revocation survives restart. If no
+ *    fresh contact occurs within the tolerance window
+ *    (REDACTWALL_LICENSE_MAX_STALENESS_DAYS, default 7) the install fails
+ *    CLOSED (blocked), it never drifts back to active.
  *
- * The heartbeat carries seat COUNTS and license identifiers only — never
- * prompts, findings, member data, or the per-user roster.
+ * A revoked/stale install blocks all AI use (maximal data protection) while
+ * detection, approvals, audit, and evidence export keep running. Nothing here
+ * fails open. The heartbeat carries seat COUNTS and license identifiers only —
+ * never prompts, findings, member data, or the per-user roster.
  */
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const env = require('./env');
 const license = require('./license');
 const { outboundHttpsUrl } = require('./url-policy');
 
 const DEFAULT_TIMEOUT_MS = 8000;
+const DEFAULT_MAX_STALENESS_DAYS = 7;
+
+// In-memory connected-mode state (mirrored to disk). appliedIssuedAt gates
+// monotonic freshness; lastContactMs drives staleness.
+let _appliedIssuedAt = 0;
+let _lastContactMs = 0;
 
 function settings(rawEnv = process.env) {
   const resolved = env.withEnvAliases(rawEnv);
   const url = outboundHttpsUrl(resolved.REDACTWALL_LICENSE_SERVER_URL || '');
   const timeout = Number(resolved.REDACTWALL_LICENSE_SERVER_TIMEOUT_MS);
+  const staleness = Number(resolved.REDACTWALL_LICENSE_MAX_STALENESS_DAYS);
   return {
     enabled: !!url,
     url,
     timeoutMs: Number.isFinite(timeout) && timeout > 0 ? Math.min(timeout, 30000) : DEFAULT_TIMEOUT_MS,
+    maxStalenessMs: (Number.isFinite(staleness) && staleness >= 0 ? staleness : DEFAULT_MAX_STALENESS_DAYS) * 24 * 60 * 60 * 1000,
   };
 }
 
 function enabled(rawEnv = process.env) {
   return settings(rawEnv).enabled;
+}
+
+function statePath() {
+  const explicit = process.env.REDACTWALL_VENDOR_STATE_PATH;
+  if (explicit) return explicit;
+  return path.join(path.dirname(license.licensePath()), 'redactwall.vendor');
+}
+
+function publicKey(deps) {
+  return deps.publicKeyPem || process.env.REDACTWALL_LICENSE_PUBLIC_KEY || license.EMBEDDED_PUBLIC_KEY_PEM;
 }
 
 // Verify a vendor verdict: base64(payload).base64(ed25519sig) over the
@@ -62,6 +92,72 @@ function verifyVerdict(text, publicKeyPem) {
   } catch (_) { return null; }
 }
 
+function verdictIssuedAtMs(payload) {
+  const raw = payload && payload.issuedAt;
+  if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
+  const parsed = Date.parse(String(raw || ''));
+  return Number.isFinite(parsed) ? parsed : NaN;
+}
+
+// A verdict is applicable to THIS install only if it is bound to the installed
+// customer (both ids present and equal) and strictly newer than the last
+// applied. Returns { ok, reason?, issuedAt? }.
+function applicable(payload) {
+  const installed = license.publicStatus().customerId;
+  if (!installed || !payload.customerId || String(payload.customerId) !== String(installed)) {
+    return { ok: false, reason: 'customer_mismatch' };
+  }
+  const issuedAt = verdictIssuedAtMs(payload);
+  if (!Number.isFinite(issuedAt)) return { ok: false, reason: 'no_issued_at' };
+  if (issuedAt <= _appliedIssuedAt) return { ok: false, reason: 'stale_verdict' };
+  return { ok: true, issuedAt };
+}
+
+function persist(deps, verdictText, status) {
+  const write = deps.writeFile || ((p, d) => fs.writeFileSync(p, d, { mode: 0o600 }));
+  try {
+    write(deps.statePath || statePath(), JSON.stringify({
+      verdict: verdictText,
+      status,
+      appliedIssuedAt: _appliedIssuedAt,
+      lastContactAt: new Date(_lastContactMs).toISOString(),
+    }));
+  } catch (_) { /* best-effort; staleness still fails closed on restart */ }
+}
+
+// Restore persisted connected-mode state at boot, BEFORE the server accepts
+// ingest, so a revocation survives restart. With no persisted file a fresh
+// install gets the full tolerance window from boot to make first contact.
+function restore(deps = {}) {
+  const cfg = deps.settings || settings();
+  const nowMs = deps.nowMs || Date.now();
+  if (!cfg.enabled) { _lastContactMs = nowMs; _appliedIssuedAt = 0; return { ok: true, restored: false }; }
+  const read = deps.readFile || ((p) => fs.readFileSync(p, 'utf8'));
+  let saved;
+  try { saved = JSON.parse(read(deps.statePath || statePath())); } catch (_) { saved = null; }
+  if (!saved) { _lastContactMs = nowMs; _appliedIssuedAt = 0; return evaluateStaleness(deps, nowMs); }
+
+  const payload = verifyVerdict(saved.verdict, publicKey(deps));
+  const installed = license.publicStatus().customerId;
+  const bound = payload && installed && payload.customerId && String(payload.customerId) === String(installed);
+  _appliedIssuedAt = bound ? (verdictIssuedAtMs(payload) || 0) : 0;
+  _lastContactMs = Date.parse(saved.lastContactAt) || 0;
+  if (bound && String(payload.status) === 'revoked') {
+    license.applyVendorVerdict(true, { appendAudit: deps.appendAudit });
+  }
+  return evaluateStaleness(deps, nowMs);
+}
+
+// Heartbeat-or-die staleness: block when the last FRESH vendor contact is older
+// than the tolerance window. Connected mode only.
+function evaluateStaleness(deps = {}, nowMs = Date.now()) {
+  const cfg = deps.settings || settings();
+  if (!cfg.enabled) { license.setVendorStale(false, { appendAudit: deps.appendAudit }); return { ok: true, stale: false }; }
+  const stale = (nowMs - _lastContactMs) > cfg.maxStalenessMs;
+  license.setVendorStale(stale, { appendAudit: deps.appendAudit });
+  return { ok: true, stale };
+}
+
 function heartbeatBody(deps) {
   const pub = license.publicStatus();
   const seats = deps.seatReport || {};
@@ -75,15 +171,13 @@ function heartbeatBody(deps) {
   };
 }
 
-// Run one heartbeat. Returns { ok, verdict?, reason? }. Applies a verified
-// verdict to the license kill-switch; an unverifiable/unreachable response
-// leaves state unchanged.
+// Run one heartbeat. Only a FRESH, customer-bound, signature-valid verdict
+// counts as contact and can change state; anything else leaves state unchanged
+// (and, being non-contact, lets staleness eventually fail closed).
 async function heartbeat(deps = {}) {
   const cfg = deps.settings || settings();
   if (!cfg.enabled) return { ok: false, reason: 'disabled' };
-  const publicKeyPem = deps.publicKeyPem
-    || process.env.REDACTWALL_LICENSE_PUBLIC_KEY
-    || license.EMBEDDED_PUBLIC_KEY_PEM;
+  const nowMs = deps.nowMs || Date.now();
   const fetchImpl = deps.fetchImpl || fetch;
   const body = heartbeatBody(deps);
 
@@ -95,23 +189,35 @@ async function heartbeat(deps = {}) {
       body: JSON.stringify(body),
       signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(cfg.timeoutMs) : undefined,
     });
-    if (!res || !res.ok) return { ok: false, reason: 'http_' + (res ? res.status : 'error') };
+    if (!res || !res.ok) { evaluateStaleness(deps, nowMs); return { ok: false, reason: 'http_' + (res ? res.status : 'error') }; }
     text = await res.text();
   } catch (_) {
+    evaluateStaleness(deps, nowMs);
     return { ok: false, reason: 'unreachable' };
   }
 
-  const verdict = verifyVerdict(text, publicKeyPem);
-  if (!verdict) return { ok: false, reason: 'bad_verdict' };
-  // Bind the verdict to the installed customer so a valid verdict for another
-  // tenant cannot be replayed here.
-  const installedCustomer = license.publicStatus().customerId;
-  if (installedCustomer && verdict.customerId && String(verdict.customerId) !== String(installedCustomer)) {
-    return { ok: false, reason: 'customer_mismatch' };
-  }
-  const revoked = String(verdict.status) === 'revoked';
+  const payload = verifyVerdict(text, publicKey(deps));
+  if (!payload) { evaluateStaleness(deps, nowMs); return { ok: false, reason: 'bad_verdict' }; }
+  const check = applicable(payload);
+  if (!check.ok) { evaluateStaleness(deps, nowMs); return { ok: false, reason: check.reason }; }
+
+  // Fresh, bound verdict = proof of live vendor contact.
+  _appliedIssuedAt = check.issuedAt;
+  _lastContactMs = nowMs;
+  const revoked = String(payload.status) === 'revoked';
   license.applyVendorVerdict(revoked, { appendAudit: deps.appendAudit });
+  license.setVendorStale(false, { appendAudit: deps.appendAudit });
+  persist(deps, text, revoked ? 'revoked' : 'active');
   return { ok: true, verdict: { status: revoked ? 'revoked' : 'active' } };
 }
 
-module.exports = { settings, enabled, verifyVerdict, heartbeat, _internal: { heartbeatBody } };
+module.exports = {
+  settings,
+  enabled,
+  verifyVerdict,
+  restore,
+  evaluateStaleness,
+  heartbeat,
+  statePath,
+  _internal: { heartbeatBody, applicable, verdictIssuedAtMs, reset: () => { _appliedIssuedAt = 0; _lastContactMs = 0; } },
+};

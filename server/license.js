@@ -91,10 +91,19 @@ function evaluate(payload, now = Date.now()) {
 }
 
 let _status = { state: 'unlicensed', payload: null, reason: 'missing' };
-// Vendor kill-switch overlay (connected mode). Set only by a signature-verified
-// heartbeat verdict; survives refresh() so a customer cannot clear it by
-// reinstalling a license.
+// Vendor kill-switch overlay (connected mode). TWO independent inputs, both
+// driven by server/vendor-link.js:
+//  - _vendorRevoked: an explicit signature-verified 'revoked' verdict.
+//  - _vendorStale:   heartbeat-or-die — no successful vendor contact within the
+//                    tolerance window. This is what defeats a hostile
+//                    self-hosted customer who blocks egress: without a fresh
+//                    signed 'active' verdict the install fails CLOSED, it does
+//                    not drift back to active.
+// Either flag blocks; both survive refresh() (file reload never clears them).
 let _vendorRevoked = false;
+let _vendorStale = false;
+
+function killed() { return _vendorRevoked || _vendorStale; }
 
 function loadStatus(now = Date.now(), deps = {}) {
   const read = deps.readFile || ((p) => fs.readFileSync(p, 'utf8'));
@@ -106,10 +115,10 @@ function loadStatus(now = Date.now(), deps = {}) {
 }
 
 // Effective state = file-derived state, overridden to 'revoked' when the vendor
-// has revoked. Payload/reason are preserved so publicStatus and entitlement
-// still describe the licensed customer.
+// kill-switch is active (explicit revoke OR stale). Payload/reason are
+// preserved so publicStatus and entitlement still describe the customer.
 function effectiveStatus() {
-  if (_vendorRevoked) return { ..._status, state: 'revoked' };
+  if (killed()) return { ..._status, state: 'revoked' };
   return _status;
 }
 
@@ -129,23 +138,35 @@ function refresh(deps = {}) {
   return effectiveStatus();
 }
 
-// Apply a signature-verified vendor heartbeat verdict (connected mode only).
-// `revoked` flips the kill-switch; audits an effective-state transition.
-function applyVendorVerdict(revoked, deps = {}) {
-  const prevEffective = effectiveStatus().state;
-  _vendorRevoked = revoked === true;
+function auditKillSwitch(prevEffective, source, deps) {
   const nextEffective = effectiveStatus().state;
   if (deps.appendAudit && (prevEffective !== nextEffective)) {
     deps.appendAudit({
       action: 'LICENSE_STATE_CHANGED',
-      actor: 'vendor',
-      detail: `from=${prevEffective}; to=${nextEffective}; source=vendor_link`,
+      actor: source,
+      detail: `from=${prevEffective}; to=${nextEffective}; source=${source}`,
     });
   }
   return effectiveStatus();
 }
 
-function isRevoked() { return effectiveStatus().state === 'revoked'; }
+// Apply a signature-verified vendor 'revoked'/'active' verdict (connected mode
+// only, driven by vendor-link after freshness + customer-binding checks).
+function applyVendorVerdict(revoked, deps = {}) {
+  const prevEffective = effectiveStatus().state;
+  _vendorRevoked = revoked === true;
+  return auditKillSwitch(prevEffective, 'vendor', deps);
+}
+
+// Heartbeat-or-die: vendor-link sets this true when contact is stale beyond
+// the tolerance window and false on a successful heartbeat.
+function setVendorStale(stale, deps = {}) {
+  const prevEffective = effectiveStatus().state;
+  _vendorStale = stale === true;
+  return auditKillSwitch(prevEffective, 'vendor_staleness', deps);
+}
+
+function isRevoked() { return killed(); }
 
 function status() { return effectiveStatus(); }
 
@@ -171,7 +192,7 @@ function publicStatus() {
     expires: p ? p.expires : null,
     graceEndsAt: graceEndsAt(p),
     daysRemaining: days,
-    reason: s.state === 'revoked' ? 'vendor_revoked' : (s.reason || null),
+    reason: _vendorRevoked ? 'vendor_revoked' : (_vendorStale ? 'vendor_unreachable' : (s.reason || null)),
   };
 }
 
@@ -209,6 +230,7 @@ module.exports = {
   loadStatus,
   refresh,
   applyVendorVerdict,
+  setVendorStale,
   isRevoked,
   status,
   publicStatus,

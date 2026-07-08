@@ -424,36 +424,53 @@ function releaseTokenPayload(releaseToken) {
   return releaseToken ? { releaseToken } : {};
 }
 
+// Record a prompt-free billing/licensing block (seat limit or license
+// revocation): a sanitized query row plus an audit entry. Shared so ingest
+// gating stays one place and one shape.
+function writeBillingBlock(body, { status, action, reasons, detail, seatLimit = null, seatsUsed = null }) {
+  const row = createQuery({
+    status,
+    mode: 'billing',
+    user: body.user || 'unknown',
+    orgId: body.orgId || tenant.config().tenantId || null,
+    destination: body.destination || 'unknown',
+    source: body.source || 'api',
+    channel: body.channel || 'submit',
+    sensor: body.sensor || null,
+    redactedPrompt: '[' + status + ']',
+    findings: [],
+    categories: [],
+    entityCounts: {},
+    riskScore: 0,
+    maxSeverity: 0,
+    maxSeverityLabel: 'none',
+    reasons,
+    seatLimit,
+    seatsUsed,
+  });
+  db.appendAudit({ action, queryId: row.id, actor: body.user || 'unknown', detail });
+  return row;
+}
+
+// Vendor kill-switch (connected mode): an active revocation or a stale vendor
+// link blocks ALL sensor ingest, fail-closed, with a distinct status so this
+// reads as a licensing action, not an outage. Nothing fails open.
+function blockIfRevoked(req, res) {
+  if (!license.isRevoked()) return false;
+  const body = req.body || {};
+  const row = writeBillingBlock(body, {
+    status: 'license_revoked',
+    action: 'LICENSE_REVOKED_BLOCK',
+    reasons: ['license_revoked'],
+    detail: 'tenant=' + (body.orgId || tenant.config().tenantId || 'unknown'),
+  });
+  broadcast('query', { type: 'license_revoked', query: publicQuery(row) });
+  res.status(403).json({ error: 'license revoked', decision: 'block', status: 'license_revoked' });
+  return true;
+}
+
 function enforceTenantForSensor(req, res) {
-  // Vendor kill-switch (connected mode): a signed 'revoked' verdict blocks ALL
-  // sensor ingest, fail-closed, with a distinct status so this reads as a
-  // licensing action rather than an outage. Data protection is maximal (every
-  // prompt is blocked); nothing fails open.
-  if (license.isRevoked()) {
-    const body = req.body || {};
-    const row = createQuery({
-      status: 'license_revoked',
-      mode: 'billing',
-      user: body.user || 'unknown',
-      orgId: tenant.config().tenantId || null,
-      destination: body.destination || 'unknown',
-      source: body.source || 'api',
-      channel: body.channel || 'submit',
-      sensor: body.sensor || null,
-      redactedPrompt: '[license_revoked]',
-      findings: [],
-      categories: [],
-      entityCounts: {},
-      riskScore: 0,
-      maxSeverity: 0,
-      maxSeverityLabel: 'none',
-      reasons: ['license_revoked'],
-    });
-    db.appendAudit({ action: 'LICENSE_REVOKED_BLOCK', queryId: row.id, actor: body.user || 'unknown', detail: 'tenant=' + (row.orgId || 'unknown') });
-    broadcast('query', { type: 'license_revoked', query: publicQuery(row) });
-    res.status(403).json({ error: 'license revoked', decision: 'block', status: 'license_revoked' });
-    return false;
-  }
+  if (blockIfRevoked(req, res)) return false;
 
   const check = tenant.validateSensorAccess({ body: req.body || {}, db });
   if (check.ok) {
@@ -463,31 +480,13 @@ function enforceTenantForSensor(req, res) {
 
   if (check.audit) {
     const body = req.body || {};
-    const row = createQuery({
+    const row = writeBillingBlock({ ...body, orgId: check.orgId || body.orgId }, {
       status: check.status,
-      mode: 'billing',
-      user: check.user || body.user || 'unknown',
-      orgId: check.orgId || tenant.config().tenantId || null,
-      destination: body.destination || 'unknown',
-      source: body.source || 'api',
-      channel: body.channel || 'submit',
-      sensor: body.sensor || null,
-      redactedPrompt: '[' + check.message + ']',
-      findings: [],
-      categories: [],
-      entityCounts: {},
-      riskScore: 0,
-      maxSeverity: 0,
-      maxSeverityLabel: 'none',
+      action: check.action,
       reasons: [check.message],
+      detail: 'tenant=' + (check.orgId || tenant.config().tenantId || 'unknown') + '; seats=' + (check.seatsUsed || 0) + '/' + (check.seatLimit || 0),
       seatLimit: check.seatLimit || null,
       seatsUsed: check.seatsUsed || null,
-    });
-    db.appendAudit({
-      action: check.action,
-      queryId: row.id,
-      actor: check.user || body.user || 'unknown',
-      detail: 'tenant=' + (row.orgId || 'unknown') + '; seats=' + (check.seatsUsed || 0) + '/' + (check.seatLimit || 0),
     });
     emitSecurityAlert(row, check.action);
     broadcast('query', { type: check.status, query: publicQuery(row) });
@@ -505,8 +504,8 @@ function enforceTenantForSensor(req, res) {
 }
 
 // Connected-mode license heartbeat (opt-in via REDACTWALL_LICENSE_SERVER_URL).
-// Fire-and-forget: a failed or unreachable heartbeat never throws and never
-// changes license state on its own (server/vendor-link.js). Dormant otherwise.
+// Fire-and-forget: a failed or unreachable heartbeat never throws; a stale link
+// fails CLOSED, never open (server/vendor-link.js). Dormant otherwise.
 function runVendorHeartbeat() {
   if (!vendorLink.enabled()) return Promise.resolve();
   return vendorLink.heartbeat({
@@ -514,6 +513,14 @@ function runVendorHeartbeat() {
     version: require('../package.json').version,
     appendAudit: (rec) => db.appendAudit(rec),
   }).catch(() => {});
+}
+
+// Restore a persisted vendor revocation and evaluate staleness at boot, BEFORE
+// the server accepts ingest, so a kill-switch survives restart and a stale link
+// is already blocking on the first request. Synchronous by design.
+function runVendorRestore() {
+  if (!vendorLink.enabled()) return;
+  try { vendorLink.restore({ appendAudit: (rec) => db.appendAudit(rec) }); } catch (_) { /* staleness backstops */ }
 }
 
 function runRetentionPurge({ actor = 'system', now = new Date() } = {}) {
@@ -1458,6 +1465,9 @@ app.post('/api/v1/heartbeat', checkIngestKey, validation.validateBody(validation
 // sealed vault for this query. Lets a proxy/SDK restore the model's answer
 // after a 'redact'-mode send. Audit-logged; never returns the vault itself.
 app.post('/api/v1/rehydrate', checkIngestKey, validation.validateBody(validation.rehydrateSchema), (req, res) => {
+  // A revoked license closes the token-rehydration surface too (it recovers
+  // original PII behind redaction tokens), consistent with the ingest gate.
+  if (license.isRevoked()) return res.status(403).json({ error: 'license revoked', status: 'license_revoked' });
   const { id, text } = req.body || {};
   const q = id && db.getQuery(id);
   if (!q) return res.status(404).json({ error: 'not found' });
@@ -3179,6 +3189,9 @@ function startServer(port = PORT, opts = {}) {
     license.refresh({ appendAudit: (rec) => db.appendAudit(rec) });
     runVendorHeartbeat();
   });
+  // Kill-switch state must be in effect before the first request; restore is
+  // synchronous, the heartbeat that follows only refreshes it.
+  runVendorRestore();
   licenseCycle();
   const server = appToListen.listen(port, () => {
     const address = server.address();

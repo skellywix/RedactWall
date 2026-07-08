@@ -103,12 +103,32 @@ test('vendor revocation fail-closed-blocks ingest but never disables evidence ex
   const { port } = server.address();
   const { cookie, csrfToken } = await login(port);
 
-  // 1) Ingest is fail-closed-blocked with a DISTINCT status (not an outage).
-  const gate = await jsonFetch(port, '/api/v1/gate', { headers: { 'x-api-key': 'unit-ingest-key' }, body: { prompt: 'anything at all', user: 'u@cu.org', destination: 'chatgpt.com' } });
+  // 1) EVERY sensor ingest path is fail-closed-blocked with a DISTINCT status
+  //    (not an outage) — gate, scan-file, scan-response, heartbeat, discovery,
+  //    and token rehydration.
+  const key = { 'x-api-key': 'unit-ingest-key' };
+  const gate = await jsonFetch(port, '/api/v1/gate', { headers: key, body: { prompt: 'anything at all', user: 'u@cu.org', destination: 'chatgpt.com' } });
   assert.strictEqual(gate.status, 403);
   const gateBody = await gate.json();
   assert.strictEqual(gateBody.decision, 'block');
   assert.strictEqual(gateBody.status, 'license_revoked');
+
+  const scanFile = await jsonFetch(port, '/api/v1/scan-file', { headers: key, body: { filename: 'x.txt', contentBase64: Buffer.from('hi').toString('base64'), user: 'u@cu.org' } });
+  assert.strictEqual(scanFile.status, 403);
+  assert.strictEqual((await scanFile.json()).status, 'license_revoked');
+
+  const scanResp = await jsonFetch(port, '/api/v1/scan-response', { headers: key, body: { text: 'model reply', user: 'u@cu.org' } });
+  assert.strictEqual(scanResp.status, 403);
+
+  const hb = await jsonFetch(port, '/api/v1/heartbeat', { headers: key, body: { user: 'u@cu.org', checks: [] } });
+  assert.strictEqual(hb.status, 403);
+
+  const disc = await jsonFetch(port, '/api/v1/discovery', { headers: key, body: { sightings: [{ destination: 'chatgpt.com' }] } });
+  assert.strictEqual(disc.status, 403);
+
+  const rehydrate = await jsonFetch(port, '/api/v1/rehydrate', { headers: { ...key, 'x-release-token': 'x' }, body: { id: 'nonexistent', text: 't' } });
+  assert.strictEqual(rehydrate.status, 403);
+  assert.strictEqual((await rehydrate.json()).status, 'license_revoked');
 
   // 2) Config writes are blocked with license_revoked.
   const put = await jsonFetch(port, '/api/policy', { method: 'PUT', headers: { cookie, 'x-csrf-token': csrfToken }, body: { enforcementMode: 'warn' } });

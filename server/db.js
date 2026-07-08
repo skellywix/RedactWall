@@ -244,7 +244,7 @@ function postureActionStates() {
 }
 
 const RETENTION_FINAL_STATUSES = ['approved', 'denied', 'redacted'];
-const SEAT_EXCLUDED_STATUSES = new Set(['seat_limit_blocked']);
+const SEAT_EXCLUDED_STATUSES = new Set(['seat_limit_blocked', 'license_revoked']);
 const SAFE_STATUS = /^[a-z_]+$/;
 const STATS_BLOCKED_STATUSES = [
   'pending',

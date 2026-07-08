@@ -33,10 +33,14 @@ REDACTWALL_LICENSE_SERVER_TIMEOUT_MS=8000   # optional, default 8000, max 30000
   and license identifiers only, never prompts, findings, member data, or the
   per-user roster.
 - The server replies with a signed verdict `base64(json).base64(ed25519sig)`
-  over `{ status: "active" | "revoked", customerId }`, signed with the **same
-  private key** that signs license files. The control plane verifies the
-  signature against the embedded public key and checks `customerId` matches the
-  installed license, so a verdict cannot be spoofed or replayed across tenants.
+  over `{ status: "active" | "revoked", customerId, issuedAt }`, signed with
+  the **same private key** that signs license files. The control plane verifies
+  the signature against the embedded public key, checks `customerId` matches the
+  installed license, and requires `issuedAt` to be **strictly newer** than the
+  last applied verdict. Your server must therefore stamp a fresh `issuedAt`
+  (e.g. current time) on **every** heartbeat response — only a fresh verdict
+  counts as live contact. This makes verdicts non-replayable: a captured older
+  `active` verdict can neither keep an install alive nor lift a revocation.
 
 **Revoking a customer.** Have your license server return a signed
 `{ status: "revoked" }` verdict for that `customerId`. On the next heartbeat
@@ -52,17 +56,28 @@ moves to the `revoked` state:
 - Evidence export, audit, and the approval workflow keep working — you are
   cutting off *use of AI through the product*, not the customer's data
   protection or their examiner evidence.
-- Reinstalling a license does **not** self-clear a revocation; only a signed
-  `active` verdict from your server lifts it.
+- Reinstalling a license does **not** self-clear a revocation; only a fresh
+  signed `active` verdict from your server lifts it. The revocation is
+  persisted (`redactwall.vendor`, next to the license) and restored at boot
+  **before** the control plane accepts any ingest, so it survives a restart.
 
-Failure handling: an unreachable or unverifiable license server **never**
-changes state on its own — the last verified verdict holds. Plan your server
-for availability; a vendor outage should not silently revoke a customer.
+**Heartbeat-or-die.** Connected mode requires periodic fresh contact to keep
+serving. If no fresh, verified verdict arrives within
+`REDACTWALL_LICENSE_MAX_STALENESS_DAYS` (default 7), the install fails
+**closed** (`vendor_unreachable`) — so a customer who firewalls the license
+server or deletes local state cannot escape a revocation by simply going
+offline; without your renewed `active` verdicts they stop passing AI traffic.
+Set the tolerance to balance kill-switch responsiveness against surviving a
+vendor-side outage. A short transient outage inside the window changes nothing.
 
 > Sensor-side display: a revoked control plane returns a distinct
 > `license_revoked` status in the response body and records it in the audit
 > chain. Sensors currently render their generic fail-closed message on any
 > block; surfacing the licensing reason in the sensor UI is a follow-up.
+>
+> The heartbeat POSTs to the operator-configured URL over HTTPS (loopback/
+> metadata IP literals are rejected). Point it only at a license host you
+> control; the body is non-sensitive (seat counts + license ids).
 
 ## Seat window
 
