@@ -421,6 +421,16 @@ function sanitizeStoredNote(value, max = LIMITS.noteChars) {
     .slice(0, max);
 }
 
+// A sensor sends an already-masked finding value (e.g. '•••• 6789'). The server
+// must NOT trust it blindly: a buggy/compromised sensor could smuggle a raw
+// value into SIEM/evidence through this field. Drop any masked string that
+// still contains detectable PII (containsPii is injected so this stays a pure,
+// detector-free helper). Review finding E1.
+function sanitizeClientMask(masked, containsPii) {
+  if (typeof masked !== 'string' || !masked) return undefined;
+  return (typeof containsPii === 'function' && containsPii(masked)) ? undefined : masked;
+}
+
 const postureActionSchema = z.object({
   id: z.string().min(1).max(160).regex(POSTURE_ACTION_ID),
   status: z.enum(['open', 'assigned', 'snoozed', 'resolved']),
@@ -732,6 +742,7 @@ module.exports = {
   validationFields,
   safeOperatorText,
   sanitizeStoredNote,
+  sanitizeClientMask,
   gateSchema,
   licenseInstallSchema,
   rehydrateSchema,

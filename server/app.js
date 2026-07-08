@@ -614,7 +614,8 @@ function clientFindingsFrom(body) {
       type: f.type,
       severity: safeNumber(f.severity, detector.SEVERITY[f.type] || 1, 0, 4),
       score: safeNumber(f.score, 0.5, 0, 1),
-      masked: typeof f.masked === 'string' ? f.masked : undefined,
+      // Never trust a sensor-supplied mask that still contains raw PII (E1).
+      masked: validation.sanitizeClientMask(f.masked, (s) => detector.analyze(s).findings.length > 0),
     }));
 }
 

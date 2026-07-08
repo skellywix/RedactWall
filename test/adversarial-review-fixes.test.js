@@ -215,3 +215,20 @@ test('R1: legitimate public and RFC1918 hosts are still allowed', () => {
   }
   assert.ok(urlPolicy.outboundHttpsUrl('https://siem.internal.example.com/ingest'), 'internal SIEM host allowed');
 });
+
+// ---------------------------------------------------------------------------
+// E1 — the server trusted a sensor-supplied `masked` string verbatim on the
+// pre-redacted / proxy ingest paths, so a non-conforming sensor could smuggle a
+// raw value into SIEM/evidence through the `masked` field.
+// ---------------------------------------------------------------------------
+const validation = require('../server/validation');
+const hasPii = (s) => D.analyze(s).findings.length > 0;
+test('E1: a client masked value that still contains PII is dropped', () => {
+  assert.strictEqual(validation.sanitizeClientMask('123-45-6789', hasPii), undefined, 'raw SSN dropped');
+  assert.strictEqual(validation.sanitizeClientMask('4111 1111 1111 1111', hasPii), undefined, 'raw card dropped');
+});
+test('E1: a conforming masked value passes through unchanged', () => {
+  assert.strictEqual(validation.sanitizeClientMask('•••• 6789', hasPii), '•••• 6789');
+  assert.strictEqual(validation.sanitizeClientMask('j***@example.com', hasPii), 'j***@example.com');
+  assert.strictEqual(validation.sanitizeClientMask(undefined, hasPii), undefined);
+});
