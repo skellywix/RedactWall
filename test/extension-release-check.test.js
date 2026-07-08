@@ -39,6 +39,7 @@ function releaseRootFixture(t) {
   const root = tempDir(t, 'ps-extension-release-root-');
   fs.mkdirSync(path.join(root, 'sensors'), { recursive: true });
   fs.mkdirSync(path.join(root, 'docs', 'examples'), { recursive: true });
+  fs.mkdirSync(path.join(root, 'docs', 'deployment'), { recursive: true });
   fs.copyFileSync(path.join(sourceRoot, 'package.json'), path.join(root, 'package.json'));
   fs.cpSync(path.join(sourceRoot, 'detection-engine'), path.join(root, 'detection-engine'), { recursive: true });
   fs.cpSync(
@@ -47,9 +48,9 @@ function releaseRootFixture(t) {
     { recursive: true },
   );
   for (const relPath of [
-    'docs/MANAGED_EXTENSION_DEPLOYMENT.md',
-    'docs/EXTENSION_RELEASE_CHECKLIST.md',
-    'docs/TECHNICIAN_DEPLOYMENT_GUIDE.md',
+    'docs/deployment/MANAGED_EXTENSION_DEPLOYMENT.md',
+    'docs/deployment/EXTENSION_RELEASE_CHECKLIST.md',
+    'docs/deployment/TECHNICIAN_DEPLOYMENT_GUIDE.md',
     'docs/examples/browser-managed-storage.policy.json',
     'docs/examples/firefox-managed-storage.policy.json',
     'docs/examples/chrome-extension-settings.example.json',

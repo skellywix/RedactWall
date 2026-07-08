@@ -142,7 +142,7 @@ Implemented:
 - Adds provider-specific Entra and Okta setup handoff from
   `server/identity-setup.js`, `/api/identity/setup-guide`, the dashboard
   Identity tab, `npm run identity:setup`, `.env.example`, and
-  `docs/IDENTITY_IDP_SETUP.md` without exposing SCIM tokens or OIDC client
+  `docs/identity/IDENTITY_IDP_SETUP.md` without exposing SCIM tokens or OIDC client
   secrets.
 
 Remaining:

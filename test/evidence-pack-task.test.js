@@ -8,9 +8,9 @@ const path = require('path');
 const root = path.join(__dirname, '..');
 const install = fs.readFileSync(path.join(root, 'scripts', 'install-evidence-pack-task.ps1'), 'utf8');
 const run = fs.readFileSync(path.join(root, 'scripts', 'run-evidence-pack.ps1'), 'utf8');
-const deployment = fs.readFileSync(path.join(root, 'docs', 'DEPLOYMENT.md'), 'utf8');
-const technician = fs.readFileSync(path.join(root, 'docs', 'TECHNICIAN_DEPLOYMENT_GUIDE.md'), 'utf8');
-const taskDoc = fs.readFileSync(path.join(root, 'docs', 'EVIDENCE_PACK_TASK.md'), 'utf8');
+const deployment = fs.readFileSync(path.join(root, 'docs', 'deployment', 'DEPLOYMENT.md'), 'utf8');
+const technician = fs.readFileSync(path.join(root, 'docs', 'deployment', 'TECHNICIAN_DEPLOYMENT_GUIDE.md'), 'utf8');
+const taskDoc = fs.readFileSync(path.join(root, 'docs', 'deployment', 'EVIDENCE_PACK_TASK.md'), 'utf8');
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 
 test('package exposes a Windows scheduled-task installer for examiner packs', () => {

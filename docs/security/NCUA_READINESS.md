@@ -89,7 +89,7 @@ status, vendor-review status, and next-review dates.
 ## Department scoped-policy pack
 
 Department differentiation ships as **tighten-only `policyScopes`** on top of
-the `ncua_glba` base template (`docs/POLICY_SCOPES.md`) — never as competing
+the `ncua_glba` base template (`docs/identity/POLICY_SCOPES.md`) — never as competing
 templates that would overwrite each other. A starting preset for a federal
 credit union with SCIM groups provisioned:
 
@@ -120,7 +120,7 @@ Pair the pack with the safe defaults the readiness score already checks:
 `blockUnapprovedAiDestinations: true` (default-deny unapproved AI tools),
 required browser/endpoint/MCP sensors, and **member-data routing** — send
 member-identifier events to the compliance group via `approvalRoutingRules`
-(`docs/APPROVAL_ROUTING.md`), e.g. route `detectors: ["MEMBER_ID",
+(`docs/identity/APPROVAL_ROUTING.md`), e.g. route `detectors: ["MEMBER_ID",
 "LOAN_NUMBER", "EXACT_MATCH"]` to `group: "compliance"`, so a member-data
 hold always lands with the team that answers to the examiner.
 
@@ -175,7 +175,7 @@ node scripts/edm-fingerprint.js --in members.txt
 
 ## Scheduled examiner packs
 
-The existing evidence-pack schedule (`docs/EVIDENCE_PACK_TASK.md`) carries
+The existing evidence-pack schedule (`docs/deployment/EVIDENCE_PACK_TASK.md`) carries
 the profile: add `"examinerProfile": "federal_credit_union"` to
 `config/evidence-schedule.json`, or pass `--examiner-profile` on the CLI.
 Everything else (retention, zip, backup evidence inputs) is unchanged. The
@@ -190,7 +190,7 @@ The console module is entitlement-gated (`license.entitled('ncua_readiness')`):
 - **Demo mode (no license): fully visible** — the license never disables the
   security function, and this is the sales demo.
 - **Licensed:** included with the `enterprise` plan; `standard` plans add the
-  `ncua_readiness` feature flag (see `docs/CUSTOMER_LICENSING.md`).
+  `ncua_readiness` feature flag (see `docs/process/CUSTOMER_LICENSING.md`).
 - **Every license state exports evidence.** Read-only license state blocks
   configuration writes as usual; readiness reads and examiner packs always
   work.

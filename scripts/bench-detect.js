@@ -9,7 +9,7 @@
  * Why this exists: RedactWall runs analyze() ON-DEVICE, in-process, with no
  * network hop — unlike a cloud DLP whose "p99" includes a round-trip and a
  * customer rate limit. This measures the real cost of a scan so we can publish
- * an honest number (docs/DETECTION_BENCHMARKS.md) and catch order-of-magnitude
+ * an honest number (docs/product/DETECTION_BENCHMARKS.md) and catch order-of-magnitude
  * regressions (e.g. catastrophic regex backtracking) in CI. require()-able so
  * test/bench-latency.test.js can hold the same budgets.
  *

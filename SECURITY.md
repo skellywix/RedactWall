@@ -32,7 +32,7 @@ without a demonstrated impact.
 | Sev3 | Other defects | Scheduled into the release train |
 
 Security fixes are backported to the current and previous minor release
-(see `docs/RELEASE_PROCESS.md`). Each security fix gets a `Security` entry in
+(see `docs/process/RELEASE_PROCESS.md`). Each security fix gets a `Security` entry in
 `CHANGELOG.md` and a GitHub Security Advisory once customers have had a
 reasonable upgrade window.
 

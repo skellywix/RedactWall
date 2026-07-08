@@ -285,7 +285,7 @@ function buildControls({ policy = {}, auditIntegrity = {}, preflight = {}, postu
       'Provider runtime AI gateway',
       boolState(gatewayProof),
       'Gateway path supports prompt gating, response scanning, model allowlisting, shared rate limits, and provider-native OpenAI, Anthropic, Gemini, and Bedrock Runtime routes.',
-      ['node --test test/ai-llm-gateway.test.js', 'docs/AI_LLM_GATEWAY.md'],
+      ['node --test test/ai-llm-gateway.test.js', 'docs/deployment/AI_LLM_GATEWAY.md'],
       'ai platform',
     ),
     control(
@@ -451,13 +451,13 @@ function questionnaire(controls) {
 
 function docs() {
   return [
-    { label: 'Deployment runbook', path: 'docs/DEPLOYMENT.md' },
-    { label: 'AI LLM gateway', path: 'docs/AI_LLM_GATEWAY.md' },
-    { label: 'Competitive alignment', path: 'docs/COMPETITIVE_ALIGNMENT.md' },
-    { label: 'Managed extension deployment', path: 'docs/MANAGED_EXTENSION_DEPLOYMENT.md' },
-    { label: 'Scheduled evidence packs', path: 'docs/EVIDENCE_PACK_TASK.md' },
-    { label: 'Security whitepaper', path: 'docs/SECURITY_WHITEPAPER.md' },
-    { label: 'Incident response runbook', path: 'docs/INCIDENT_RESPONSE.md' },
+    { label: 'Deployment runbook', path: 'docs/deployment/DEPLOYMENT.md' },
+    { label: 'AI LLM gateway', path: 'docs/deployment/AI_LLM_GATEWAY.md' },
+    { label: 'Competitive alignment', path: 'docs/product/COMPETITIVE_ALIGNMENT.md' },
+    { label: 'Managed extension deployment', path: 'docs/deployment/MANAGED_EXTENSION_DEPLOYMENT.md' },
+    { label: 'Scheduled evidence packs', path: 'docs/deployment/EVIDENCE_PACK_TASK.md' },
+    { label: 'Security whitepaper', path: 'docs/security/SECURITY_WHITEPAPER.md' },
+    { label: 'Incident response runbook', path: 'docs/security/INCIDENT_RESPONSE.md' },
   ];
 }
 

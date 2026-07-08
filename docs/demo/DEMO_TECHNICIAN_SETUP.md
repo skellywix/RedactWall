@@ -7,7 +7,7 @@ verification, reset, and troubleshooting.
 Use synthetic data only. Do not use real member, patient, cardholder, customer,
 employee, source code, contract, credential, or private business data.
 
-The presenter-facing guide is `docs/SALES_DEMO_GUIDE.md`.
+The presenter-facing guide is `docs/demo/SALES_DEMO_GUIDE.md`.
 
 <!-- DEMO_GUIDE_CURRENT_STATE_START -->
 ## Current App Snapshot
@@ -86,7 +86,7 @@ This section is generated from the app by `npm run docs:demo-guide`. Do not hand
 | `sensors/browser-extension/background.js` | Browser install-health heartbeat and control-plane relay | Present |
 | `sensors/browser-extension/content.js` | Browser send, paste, upload enforcement | Present |
 | `scripts/check-extension-release.js` | Browser extension release-readiness gate | Present |
-| `docs/EXTENSION_RELEASE_CHECKLIST.md` | Chrome, Edge, and Firefox release checklist | Present |
+| `docs/deployment/EXTENSION_RELEASE_CHECKLIST.md` | Chrome, Edge, and Firefox release checklist | Present |
 | `sensors/endpoint-agent/agent.js` | Local folder and file sensor | Present |
 | `sensors/endpoint-agent/write-handoff.js` | Signed native upload-intent handoff writer | Present |
 | `scripts/check-endpoint-install.js` | Endpoint install validation and heartbeat evidence | Present |
@@ -101,14 +101,14 @@ This section is generated from the app by `npm run docs:demo-guide`. Do not hand
 | `scripts/check-mcp-guard-install.js` | MCP guard install validation and heartbeat evidence | Present |
 | `config/policy.json` | Demo policy defaults | Present |
 | `DEMO_INSTALL_GUIDE.md` | Demo guide hub | Present |
-| `docs/SALES_DEMO_GUIDE.md` | Sales and client-facing demo script | Present |
-| `docs/DEMO_TECHNICIAN_SETUP.md` | Demo machine setup and reset runbook | Present |
-| `docs/DEPLOYMENT.md` | Native Node and Docker deployment reference | Present |
-| `docs/MANAGED_EXTENSION_DEPLOYMENT.md` | Managed browser extension pilot reference | Present |
-| `docs/EVIDENCE_PACK_TASK.md` | Examiner evidence pack scheduled task reference | Present |
-| `docs/APPROVAL_ROUTING.md` | Approval owner and SLA routing reference | Present |
-| `docs/TECHNICIAN_DEPLOYMENT_GUIDE.md` | Install-day production readiness runbook | Present |
-| `docs/AWS_SAAS_DEPLOYMENT.md` | Customer-silo AWS deployment path | Present |
+| `docs/demo/SALES_DEMO_GUIDE.md` | Sales and client-facing demo script | Present |
+| `docs/demo/DEMO_TECHNICIAN_SETUP.md` | Demo machine setup and reset runbook | Present |
+| `docs/deployment/DEPLOYMENT.md` | Native Node and Docker deployment reference | Present |
+| `docs/deployment/MANAGED_EXTENSION_DEPLOYMENT.md` | Managed browser extension pilot reference | Present |
+| `docs/deployment/EVIDENCE_PACK_TASK.md` | Examiner evidence pack scheduled task reference | Present |
+| `docs/identity/APPROVAL_ROUTING.md` | Approval owner and SLA routing reference | Present |
+| `docs/deployment/TECHNICIAN_DEPLOYMENT_GUIDE.md` | Install-day production readiness runbook | Present |
+| `docs/deployment/AWS_SAAS_DEPLOYMENT.md` | Customer-silo AWS deployment path | Present |
 <!-- DEMO_GUIDE_CURRENT_STATE_END -->
 
 ## Technician Success Criteria
@@ -322,7 +322,7 @@ extension storage.
 
 For a managed pilot, use:
 
-- `docs/MANAGED_EXTENSION_DEPLOYMENT.md`
+- `docs/deployment/MANAGED_EXTENSION_DEPLOYMENT.md`
 - `docs/examples/browser-managed-storage.policy.json`
 - `docs/examples/firefox-managed-storage.policy.json`
 - `docs/examples/chrome-extension-settings.example.json`

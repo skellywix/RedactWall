@@ -127,7 +127,7 @@ The draft assumed more greenfield than exists. Build on these instead:
     `TENANT_SCOPED_TABLES = ['queries']`); both get extended —
     `suite/contract` holds route contracts only.
 12. **OpenAPI is sensor-surface only** (`server/openapi.js` covers
-    `/api/v1`); new console routes need `docs/API_REFERENCE.md` updates, not
+    `/api/v1`); new console routes need `docs/reference/API_REFERENCE.md` updates, not
     OpenAPI changes.
 
 ## Architecture
@@ -293,7 +293,7 @@ follows the established page shape (route-contract doc comment, typed
   packaging: included in `enterprise`, orderable add-on for `standard`
   (grant to an existing customer by re-issuing `redactwall.lic` with
   `scripts/license-issue.js --features` and installing via the existing
-  `POST /api/billing/license`; update `docs/CUSTOMER_LICENSING.md` to
+  `POST /api/billing/license`; update `docs/process/CUSTOMER_LICENSING.md` to
   define add-on flags alongside plan tiers). Per-surface behavior: the nav
   item stays visible with an upsell empty state when not entitled, and
   `GET /api/ncua/readiness` returns an explicit `entitled: false` body —
@@ -320,7 +320,7 @@ follows the established page shape (route-contract doc comment, typed
   periodic report needs a new digest-style payload type plus a scheduler
   hook.
 - **Identity.** Department names validate against SCIM groups when
-  provisioned (Entra/Okta per `docs/SCIM_PROVISIONING.md`), matching how
+  provisioned (Entra/Okta per `docs/identity/SCIM_PROVISIONING.md`), matching how
   `policyScopes.groups` already match.
 
 ## Implementation Slices
@@ -336,10 +336,10 @@ follows the established page shape (route-contract doc comment, typed
 5. Console view (score, control rows, EDM panel, examiner-pack export) +
    parity/design/e2e test entries.
 6. `license.entitled()` predicate + entitlement wiring (nav upsell state,
-   readiness `entitled` flag, `docs/CUSTOMER_LICENSING.md` add-on note).
-7. Docs: `docs/NCUA_READINESS.md` (operator setup + "what to hand an NCUA
+   readiness `entitled` flag, `docs/process/CUSTOMER_LICENSING.md` add-on note).
+7. Docs: `docs/security/NCUA_READINESS.md` (operator setup + "what to hand an NCUA
    examiner" + EDM import guide with "plaintext is discarded" language);
-   update `docs/API_REFERENCE.md`, `PLANS/README.md`, `ROADMAP.md` N2 note.
+   update `docs/reference/API_REFERENCE.md`, `PLANS/README.md`, `ROADMAP.md` N2 note.
 
 **Slice 2 — Member-Data Inventory And Department Pack**:
 1. Migration v5 (`ai_use_cases`) + `db.js` accessors + contract-battery

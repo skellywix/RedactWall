@@ -4,7 +4,7 @@ Grounded in a July 2026 competitive sweep of the AI-DLP / GenAI-security market.
 Detailed engineering plans live in `PLANS/platform-roadmap.md` (M1–M4 are
 shipped); this file is the forward-looking product roadmap and the source the
 `STATUS.md` TODO list is cut from. Competitive detail and citations live in
-`docs/COMPETITIVE_BENCHMARK_2026.md` and `docs/COMPETITIVE_ALIGNMENT.md`.
+`docs/product/COMPETITIVE_BENCHMARK_2026.md` and `docs/product/COMPETITIVE_ALIGNMENT.md`.
 
 ## Where the market moved (2025–2026)
 
@@ -41,7 +41,7 @@ chase Island/Zscaler breadth.
 | N4 | **Personal vs. corporate account detection** on AI sites; policy to allow corporate tenants and flag/block personal logins. | LayerX, Harmonic, Island | Most leakage happens through personal ChatGPT/Gemini accounts (LayerX telemetry: ~82% of paste activity). Direct GLBA-safeguarding resonance. | M |
 | N5 | **AI browser-extension governance**: inventory installed GenAI browser extensions via the sensors, flag them in Coverage/posture. | LayerX | ~20% of users run GenAI extensions that bypass controls; cheap, differentiating telemetry for shops with no CASB. | S |
 | N6 | **Published detection benchmarks + self-service red-team harness**: publish precision/recall/latency from the held-out eval; ship a runnable detector test kit. | Lakera publishes 98%/<50ms/<0.5% FP | Regulated buyers must document vendor due diligence; a benchmark is sales collateral and the buyer's due-diligence artifact. Builds on `npm run eval` and the new `suite/` regression suite. | S–M |
-| N7 | **Commercial readiness**: offline Ed25519-signed license files with seat true-up and grace periods, monthly release train with signed artifacts + SBOM, SOC 2 readiness posture. | Standard practice (GitLab, HashiCorp, Keygen patterns) | Procurement at financial institutions stalls without licensing, support SLAs, and supply-chain answers. See `docs/CUSTOMER_LICENSING.md`, `docs/RELEASE_PROCESS.md`, `docs/SUPPORT_POLICY.md`. | M |
+| N7 | **Commercial readiness**: offline Ed25519-signed license files with seat true-up and grace periods, monthly release train with signed artifacts + SBOM, SOC 2 readiness posture. | Standard practice (GitLab, HashiCorp, Keygen patterns) | Procurement at financial institutions stalls without licensing, support SLAs, and supply-chain answers. See `docs/process/CUSTOMER_LICENSING.md`, `docs/process/RELEASE_PROCESS.md`, `docs/process/SUPPORT_POLICY.md`. | M |
 
 ## Next (two quarters out)
 
@@ -65,7 +65,7 @@ chase Island/Zscaler breadth.
 - **Shared multi-tenant SaaS** on the Postgres seam + managed-infra failover
   drills (multi-AZ, load-balancer cutover) — needs the AWS environment.
 - **Commercial extension-store publishing** (Chrome/Edge/Firefox listings;
-  checklists shipped in `docs/EXTENSION_RELEASE_CHECKLIST.md`).
+  checklists shipped in `docs/deployment/EXTENSION_RELEASE_CHECKLIST.md`).
 - **EU AI Act deployer-reporting module** (cheap once N2's report generator
   exists; transparency obligations land 2 Aug 2026).
 

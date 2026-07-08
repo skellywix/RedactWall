@@ -18,7 +18,7 @@ Move RedactWall from working proof of loop to a credible production baseline for
 RedactWall should not try to out-platform Strac, Nightfall, Cyberhaven, or Lakera immediately. The wedge is a simpler install for smaller regulated shops, with examiner-grade proof and local-first prompt protection.
 
 The sourced comparison and near-term product implications live in
-`docs/COMPETITIVE_ALIGNMENT.md`.
+`docs/product/COMPETITIVE_ALIGNMENT.md`.
 
 Observed market bar:
 

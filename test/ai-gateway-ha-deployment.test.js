@@ -10,8 +10,8 @@ const root = path.join(__dirname, '..');
 const compose = fs.readFileSync(path.join(root, 'docker-compose.gateway-ha.yml'), 'utf8');
 const nginx = fs.readFileSync(path.join(root, 'infra', 'ai-gateway-ha', 'nginx.conf'), 'utf8');
 const packageJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
-const gatewayDocs = fs.readFileSync(path.join(root, 'docs', 'AI_LLM_GATEWAY.md'), 'utf8');
-const deploymentDocs = fs.readFileSync(path.join(root, 'docs', 'DEPLOYMENT.md'), 'utf8');
+const gatewayDocs = fs.readFileSync(path.join(root, 'docs', 'deployment', 'AI_LLM_GATEWAY.md'), 'utf8');
+const deploymentDocs = fs.readFileSync(path.join(root, 'docs', 'deployment', 'DEPLOYMENT.md'), 'utf8');
 
 test('AI gateway HA compose publishes only the load-balanced gateway', () => {
   for (const service of ['ai-gateway-limiter', 'ai-gateway-a', 'ai-gateway-b', 'ai-gateway-lb']) {

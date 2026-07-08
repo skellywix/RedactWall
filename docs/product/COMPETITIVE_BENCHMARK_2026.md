@@ -156,8 +156,8 @@ truthful:
 Now shipped (previously gaps): vendor-labeled secrets, document-class
 categories, personal-vs-corporate account detection, coding-agent hooks,
 shadow-MCP discovery, OTLP export, published detection benchmarks
-(`docs/DETECTION_BENCHMARKS.md`), the offline license verifier, a machine-readable
-OpenAPI 3.1 spec (`docs/API_REFERENCE.md`), and bundled offline endpoint OCR.
+(`docs/product/DETECTION_BENCHMARKS.md`), the offline license verifier, a machine-readable
+OpenAPI 3.1 spec (`docs/reference/API_REFERENCE.md`), and bundled offline endpoint OCR.
 
 ## How to verify these claims locally
 

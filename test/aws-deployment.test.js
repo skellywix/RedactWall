@@ -6,7 +6,7 @@ const path = require('node:path');
 
 const root = path.join(__dirname, '..');
 const template = fs.readFileSync(path.join(root, 'infra', 'aws', 'customer-silo.yml'), 'utf8');
-const docs = fs.readFileSync(path.join(root, 'docs', 'AWS_SAAS_DEPLOYMENT.md'), 'utf8');
+const docs = fs.readFileSync(path.join(root, 'docs', 'deployment', 'AWS_SAAS_DEPLOYMENT.md'), 'utf8');
 
 test('AWS customer-silo template enforces tenant and seat parameters', () => {
   assert.match(template, /TenantId:/);

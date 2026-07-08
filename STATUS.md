@@ -81,9 +81,9 @@ drag/drop or file-open interception inside every desktop AI app.
    `npm run license:issue`, installed via `POST /api/billing/license`; 30-day
    grace, admin console goes read-only past grace but detection/enforcement/
    approvals/audit never stop. Replace the placeholder public key before the
-   first commercial release. Docs in `docs/CUSTOMER_LICENSING.md`.
+   first commercial release. Docs in `docs/process/CUSTOMER_LICENSING.md`.
 8. **First tagged release on the new process** (N7) — cut `v0.4.0` per
-   `docs/RELEASE_PROCESS.md`: CHANGELOG cut, signed artifacts, SBOM.
+   `docs/process/RELEASE_PROCESS.md`: CHANGELOG cut, signed artifacts, SBOM.
 9. **Desktop app file-open/drag-drop interception** (X7) — see the browser→
    endpoint file-intent next pass above; the endpoint package is not yet
    universal file-open interception for every desktop AI app.
@@ -113,7 +113,7 @@ drag/drop or file-open interception inside every desktop AI app.
   (contract, security, detector, UI-flow tiers). A line-by-line review then
   fixed three `alwaysBlock` hard-stop bypasses, an Atlassian connector
   credential leak, outbound SSRF, and hot-path perf (overlap resolution
-  O(k²)→O(k log k)); detail in `docs/SECURITY_REVIEW_2026-07.md`.
+  O(k²)→O(k log k)); detail in `docs/security/SECURITY_REVIEW_2026-07.md`.
 - 2026-07-04: Browser→endpoint file-intent handoff — when the extension blocks
   an upload it cannot inspect (too large / OCR-required / unsupported), it
   sends name+size (never bytes) through a `com.redactwall.file_intent` native

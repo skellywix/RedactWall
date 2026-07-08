@@ -107,25 +107,25 @@ RedactWall now includes six first-party connector runtimes:
 - Microsoft 365 Graph driveItem content for text-readable OneDrive and
   SharePoint files. It fetches the file body, applies
   `sanitizeDriveItemContent()`, and returns only the sanitized MCP result. See
-  `docs/MCP_MICROSOFT365_CONNECTOR.md`.
+  `docs/connectors/MCP_MICROSOFT365_CONNECTOR.md`.
 - Google Drive file content for Drive blob files and Google Workspace document
   exports. It applies `sanitizeDriveFileContent()` and returns only the
-  sanitized MCP result. See `docs/MCP_GOOGLE_DRIVE_CONNECTOR.md`.
+  sanitized MCP result. See `docs/connectors/MCP_GOOGLE_DRIVE_CONNECTOR.md`.
 - Slack conversation history and text-readable private file content. It applies
   `sanitizeConversationHistory()` or `sanitizeSlackFileContent()` and returns
-  only the sanitized MCP result. See `docs/MCP_SLACK_CONNECTOR.md`.
+  only the sanitized MCP result. See `docs/connectors/MCP_SLACK_CONNECTOR.md`.
 - Microsoft Teams channel and chat messages through Microsoft Graph. It applies
   `sanitizeTeamsChannelMessages()` or `sanitizeTeamsChatMessages()` and returns
-  only the sanitized MCP result. See `docs/MCP_TEAMS_CONNECTOR.md`.
+  only the sanitized MCP result. See `docs/connectors/MCP_TEAMS_CONNECTOR.md`.
 - Atlassian Jira issues and Confluence pages through the Jira Cloud and
   Confluence Cloud REST APIs. It applies `sanitizeJiraIssue()` or
   `sanitizeConfluencePage()` and returns only the sanitized MCP result. See
-  `docs/MCP_ATLASSIAN_CONNECTOR.md`.
+  `docs/connectors/MCP_ATLASSIAN_CONNECTOR.md`.
 - Read-only SQLite query and schema inspection for bounded pilot databases. It
   allows only single-statement `SELECT` or `WITH` queries, opens the database in
   read-only mode, applies `sanitizeDatabaseRows()` or `sanitizeDatabaseSchema()`,
   and returns only the sanitized MCP result. See
-  `docs/MCP_DATABASE_READONLY_CONNECTOR.md`.
+  `docs/connectors/MCP_DATABASE_READONLY_CONNECTOR.md`.
 
 ## Works Cited
 

@@ -24,6 +24,8 @@ to activate the local hooks.
 - `git diff --check`
 - `npm run docs:demo-guide:check`
 - `npm run ai-domains:check`
+- `npm run native:check`
+- `npm run console:build`
 - `npm test`
 - `npm run test:browser`
 - `npm run sync-check`
@@ -46,11 +48,11 @@ For any change you can reference:
 
 ## Process references
 
-- Documentation rules: `docs/DOCUMENTATION_STANDARDS.md` — docs change in the
+- Documentation rules: `docs/process/DOCUMENTATION_STANDARDS.md` — docs change in the
   same commit as the code they describe.
-- Testing rules and where a new test belongs: `docs/TESTING_STRATEGY.md`.
+- Testing rules and where a new test belongs: `docs/process/TESTING_STRATEGY.md`.
   The standalone regression suite in `suite/` runs with `npm run suite:smoke`
   (every change) and `npm run suite` (before release).
-- Releases: `docs/RELEASE_PROCESS.md`. Security reports: `SECURITY.md`.
+- Releases: `docs/process/RELEASE_PROCESS.md`. Security reports: `SECURITY.md`.
 
 Keep all outputs synthetic and avoid real member/personal data.

@@ -6,7 +6,7 @@ without letting member, patient, cardholder, customer, source code, contract, or
 credential data leave the institution.
 
 Use synthetic data only. Never paste real customer or employee data into a demo.
-The technician setup guide is `docs/DEMO_TECHNICIAN_SETUP.md`.
+The technician setup guide is `docs/demo/DEMO_TECHNICIAN_SETUP.md`.
 
 <!-- DEMO_GUIDE_CURRENT_STATE_START -->
 ## Current App Snapshot
@@ -85,7 +85,7 @@ This section is generated from the app by `npm run docs:demo-guide`. Do not hand
 | `sensors/browser-extension/background.js` | Browser install-health heartbeat and control-plane relay | Present |
 | `sensors/browser-extension/content.js` | Browser send, paste, upload enforcement | Present |
 | `scripts/check-extension-release.js` | Browser extension release-readiness gate | Present |
-| `docs/EXTENSION_RELEASE_CHECKLIST.md` | Chrome, Edge, and Firefox release checklist | Present |
+| `docs/deployment/EXTENSION_RELEASE_CHECKLIST.md` | Chrome, Edge, and Firefox release checklist | Present |
 | `sensors/endpoint-agent/agent.js` | Local folder and file sensor | Present |
 | `sensors/endpoint-agent/write-handoff.js` | Signed native upload-intent handoff writer | Present |
 | `scripts/check-endpoint-install.js` | Endpoint install validation and heartbeat evidence | Present |
@@ -100,14 +100,14 @@ This section is generated from the app by `npm run docs:demo-guide`. Do not hand
 | `scripts/check-mcp-guard-install.js` | MCP guard install validation and heartbeat evidence | Present |
 | `config/policy.json` | Demo policy defaults | Present |
 | `DEMO_INSTALL_GUIDE.md` | Demo guide hub | Present |
-| `docs/SALES_DEMO_GUIDE.md` | Sales and client-facing demo script | Present |
-| `docs/DEMO_TECHNICIAN_SETUP.md` | Demo machine setup and reset runbook | Present |
-| `docs/DEPLOYMENT.md` | Native Node and Docker deployment reference | Present |
-| `docs/MANAGED_EXTENSION_DEPLOYMENT.md` | Managed browser extension pilot reference | Present |
-| `docs/EVIDENCE_PACK_TASK.md` | Examiner evidence pack scheduled task reference | Present |
-| `docs/APPROVAL_ROUTING.md` | Approval owner and SLA routing reference | Present |
-| `docs/TECHNICIAN_DEPLOYMENT_GUIDE.md` | Install-day production readiness runbook | Present |
-| `docs/AWS_SAAS_DEPLOYMENT.md` | Customer-silo AWS deployment path | Present |
+| `docs/demo/SALES_DEMO_GUIDE.md` | Sales and client-facing demo script | Present |
+| `docs/demo/DEMO_TECHNICIAN_SETUP.md` | Demo machine setup and reset runbook | Present |
+| `docs/deployment/DEPLOYMENT.md` | Native Node and Docker deployment reference | Present |
+| `docs/deployment/MANAGED_EXTENSION_DEPLOYMENT.md` | Managed browser extension pilot reference | Present |
+| `docs/deployment/EVIDENCE_PACK_TASK.md` | Examiner evidence pack scheduled task reference | Present |
+| `docs/identity/APPROVAL_ROUTING.md` | Approval owner and SLA routing reference | Present |
+| `docs/deployment/TECHNICIAN_DEPLOYMENT_GUIDE.md` | Install-day production readiness runbook | Present |
+| `docs/deployment/AWS_SAAS_DEPLOYMENT.md` | Customer-silo AWS deployment path | Present |
 <!-- DEMO_GUIDE_CURRENT_STATE_END -->
 
 ## Positioning
@@ -553,7 +553,7 @@ Use this closing sequence:
 4. Confirm the pilot user group and seat count.
 5. Confirm who owns Security Admin approval.
 6. Confirm whether they need endpoint or MCP coverage in phase one.
-7. Ask for a technical setup session using `docs/TECHNICIAN_DEPLOYMENT_GUIDE.md`.
+7. Ask for a technical setup session using `docs/deployment/TECHNICIAN_DEPLOYMENT_GUIDE.md`.
 
 Closing script:
 

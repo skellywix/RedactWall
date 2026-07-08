@@ -89,17 +89,17 @@ separate SKU. Every claim below carries verified references.
 5. **No proxy support.** Nothing respects `HTTPS_PROXY` (global fetch/
    undici default). Optional: `EnvHttpProxyAgent` wiring for customers
    whose egress must transit a proxy.
-6. **Seat-count semantics discrepancy.** `docs/CUSTOMER_LICENSING.md`
+6. **Seat-count semantics discrepancy.** `docs/process/CUSTOMER_LICENSING.md`
    says a seat is a "distinct user identity observed … in the trailing 30
    days," but `db.seatStats` counts **all-time** distinct users with no
    window (`server/db.js:326-350`). Fix one or the other before billing
    against it — recommend implementing the documented 30-day window.
 7. **Positioning split.** Twenty-plus zero-egress/no-phone-home claims
    need rewording into a two-SKU story (inventory with file:line in the
-   audit: `docs/SECURITY_WHITEPAPER.md:80-94` "no telemetry to the
-   vendor" is the most load-bearing; also `docs/BATTLECARD_NIGHTFALL.md:24`,
-   `docs/CUSTOMER_LICENSING.md:20-22`, `ROADMAP.md:28,79`,
-   `docs/COMPETITIVE_*`, `docs/DETECTION_BENCHMARKS.md:9,13`,
+   audit: `docs/security/SECURITY_WHITEPAPER.md:80-94` "no telemetry to the
+   vendor" is the most load-bearing; also `docs/product/BATTLECARD_NIGHTFALL.md:24`,
+   `docs/process/CUSTOMER_LICENSING.md:20-22`, `ROADMAP.md:28,79`,
+   `docs/product/COMPETITIVE_*`, `docs/product/DETECTION_BENCHMARKS.md:9,13`,
    `PLANS/nightfall-competitive-improvement-plan.md`,
    `PLANS/ncua-readiness-center.md:283,413-416`). **Two SKUs:**
    *Air-gapped* (current behavior, offline license, no egress — keeps the

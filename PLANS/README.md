@@ -17,7 +17,7 @@ Current operational truth lives in:
 
 | Need | Source |
 |------|--------|
-| Install and deploy | `../docs/DEPLOYMENT.md` |
-| Production pilot handoff | `../docs/TECHNICIAN_DEPLOYMENT_GUIDE.md` |
+| Install and deploy | `../docs/deployment/DEPLOYMENT.md` |
+| Production pilot handoff | `../docs/deployment/TECHNICIAN_DEPLOYMENT_GUIDE.md` |
 | Demo flow | `../DEMO_INSTALL_GUIDE.md` |
 | Repo commands and gates | `../README.md` |

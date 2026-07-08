@@ -8,8 +8,8 @@ const START = '<!-- DEMO_GUIDE_CURRENT_STATE_START -->';
 const END = '<!-- DEMO_GUIDE_CURRENT_STATE_END -->';
 const GENERATED_DOCS = [
   'DEMO_INSTALL_GUIDE.md',
-  'docs/SALES_DEMO_GUIDE.md',
-  'docs/DEMO_TECHNICIAN_SETUP.md',
+  'docs/demo/SALES_DEMO_GUIDE.md',
+  'docs/demo/DEMO_TECHNICIAN_SETUP.md',
 ];
 const SEMANTIC_CATEGORIES = ['SOURCE_CODE', 'LEGAL_CONTRACT', 'CREDENTIALS', 'CONFIDENTIAL_BUSINESS', 'FINANCIAL_STATEMENT', 'TAX_FILING', 'HR_RECORD'];
 const DEMO_COMMANDS = [
@@ -54,7 +54,7 @@ const SENSOR_AND_DOC_PATHS = [
   ['sensors/browser-extension/background.js', 'Browser install-health heartbeat and control-plane relay'],
   ['sensors/browser-extension/content.js', 'Browser send, paste, upload enforcement'],
   ['scripts/check-extension-release.js', 'Browser extension release-readiness gate'],
-  ['docs/EXTENSION_RELEASE_CHECKLIST.md', 'Chrome, Edge, and Firefox release checklist'],
+  ['docs/deployment/EXTENSION_RELEASE_CHECKLIST.md', 'Chrome, Edge, and Firefox release checklist'],
   ['sensors/endpoint-agent/agent.js', 'Local folder and file sensor'],
   ['sensors/endpoint-agent/write-handoff.js', 'Signed native upload-intent handoff writer'],
   ['scripts/check-endpoint-install.js', 'Endpoint install validation and heartbeat evidence'],
@@ -69,14 +69,14 @@ const SENSOR_AND_DOC_PATHS = [
   ['scripts/check-mcp-guard-install.js', 'MCP guard install validation and heartbeat evidence'],
   ['config/policy.json', 'Demo policy defaults'],
   ['DEMO_INSTALL_GUIDE.md', 'Demo guide hub'],
-  ['docs/SALES_DEMO_GUIDE.md', 'Sales and client-facing demo script'],
-  ['docs/DEMO_TECHNICIAN_SETUP.md', 'Demo machine setup and reset runbook'],
-  ['docs/DEPLOYMENT.md', 'Native Node and Docker deployment reference'],
-  ['docs/MANAGED_EXTENSION_DEPLOYMENT.md', 'Managed browser extension pilot reference'],
-  ['docs/EVIDENCE_PACK_TASK.md', 'Examiner evidence pack scheduled task reference'],
-  ['docs/APPROVAL_ROUTING.md', 'Approval owner and SLA routing reference'],
-  ['docs/TECHNICIAN_DEPLOYMENT_GUIDE.md', 'Install-day production readiness runbook'],
-  ['docs/AWS_SAAS_DEPLOYMENT.md', 'Customer-silo AWS deployment path'],
+  ['docs/demo/SALES_DEMO_GUIDE.md', 'Sales and client-facing demo script'],
+  ['docs/demo/DEMO_TECHNICIAN_SETUP.md', 'Demo machine setup and reset runbook'],
+  ['docs/deployment/DEPLOYMENT.md', 'Native Node and Docker deployment reference'],
+  ['docs/deployment/MANAGED_EXTENSION_DEPLOYMENT.md', 'Managed browser extension pilot reference'],
+  ['docs/deployment/EVIDENCE_PACK_TASK.md', 'Examiner evidence pack scheduled task reference'],
+  ['docs/identity/APPROVAL_ROUTING.md', 'Approval owner and SLA routing reference'],
+  ['docs/deployment/TECHNICIAN_DEPLOYMENT_GUIDE.md', 'Install-day production readiness runbook'],
+  ['docs/deployment/AWS_SAAS_DEPLOYMENT.md', 'Customer-silo AWS deployment path'],
 ];
 
 function readJson(relativePath) {

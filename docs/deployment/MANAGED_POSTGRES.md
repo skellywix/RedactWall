@@ -12,7 +12,7 @@ Stay on SQLite unless you are building the shared multi-tenant SaaS plane.
 The default local-disk SQLite store is the supported shape for demos, pilots,
 and paid customer-silo stacks (one isolated stack per customer, per the
 2026-06-26 customer-silo decision in `DECISIONS.md` and
-`docs/AWS_SAAS_DEPLOYMENT.md`). Move to Postgres when you need:
+`docs/deployment/AWS_SAAS_DEPLOYMENT.md`). Move to Postgres when you need:
 
 - One control plane serving multiple tenants, with row-level tenant isolation.
 - Multiple control-plane replicas behind a load balancer.
@@ -186,7 +186,7 @@ As with SQLite, backups do not cover `.env` secrets (`REDACTWALL_DATA_KEY`
 above all — sealed prompts in a restored store cannot be revealed without
 it), the policy file, or custom detector packs. Capture those through your
 secret/configuration management (see "What Backups Do Not Cover" in
-`docs/DEPLOYMENT.md`).
+`docs/deployment/DEPLOYMENT.md`).
 
 ## Monitoring
 

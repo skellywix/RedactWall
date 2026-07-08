@@ -144,7 +144,7 @@ tokens, MFA seeds, or IdP secrets.
 
 ## IdP Notes
 
-For Microsoft Entra or Okta provisioning, use `docs/IDENTITY_IDP_SETUP.md`, the
+For Microsoft Entra or Okta provisioning, use `docs/identity/IDENTITY_IDP_SETUP.md`, the
 dashboard Identity tab, or the secret-free CLI handoff:
 
 ```bash

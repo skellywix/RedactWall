@@ -168,7 +168,7 @@ On a managed test device:
 - Use HTTPS for `serverUrl`.
 - Do not include URL username or password credentials in `serverUrl`.
 - Use a stable, rotated `INGEST_API_KEY`.
-- Use `docs/EXTENSION_RELEASE_CHECKLIST.md` before uploading or distributing a
+- Use `docs/deployment/EXTENSION_RELEASE_CHECKLIST.md` before uploading or distributing a
   managed browser package.
 - Pair extension force-install with browser policy that blocks unapproved AI
   destinations or routes them through governance.

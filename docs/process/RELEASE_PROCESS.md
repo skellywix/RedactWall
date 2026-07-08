@@ -23,7 +23,7 @@ all sensors depend on it.
   feature that misses the train waits for the next one; the train does not
   wait for features.
 - **Patch releases ship as needed**, typically within days for Sev1/Sev2
-  fixes (see `SECURITY.md` and `docs/SUPPORT_POLICY.md`).
+  fixes (see `SECURITY.md` and `docs/process/SUPPORT_POLICY.md`).
 - **Security backports** go to the current and previous minor release. State
   this to customers so they can plan upgrade windows — regulated buyers cite
   this policy in vendor reviews.
@@ -46,7 +46,7 @@ integrity, and config schema before and after upgrade.
 1. Verify the gates on the release commit:
    ```bash
    npm run review:ci      # whitespace, generated docs, AI domains, tests, browser E2E, engine sync, eval
-   npm run suite          # standalone black-box regression suite (see docs/TESTING_STRATEGY.md)
+   npm run suite          # standalone black-box regression suite (see docs/process/TESTING_STRATEGY.md)
    node -e "const v=require('./server/db').verifyAuditChain(); if(!v.ok) process.exit(1)"
    ```
 2. Move the `[Unreleased]` section of `CHANGELOG.md` under the new version

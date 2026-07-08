@@ -157,7 +157,7 @@ What RedactWall defends against, and where the honest limits are.
 - **HA gateway**: `docker-compose.gateway-ha.yml` runs multiple gateway
   instances with a shared rate limiter in front of one control plane.
 - **Customer-silo AWS**: per-customer isolated deployment described in
-  `docs/AWS_SAAS_DEPLOYMENT.md`; no shared multi-tenant data plane.
+  `docs/deployment/AWS_SAAS_DEPLOYMENT.md`; no shared multi-tenant data plane.
 
 In every model the customer operates the environment and owns the data.
 
@@ -180,5 +180,5 @@ npm run evidence:pack      # examiner evidence from a live deployment
 node -e "console.log(require('./server/db').verifyAuditChain())"
 ```
 
-Related reading: `docs/SECURITY_TRUST_PACKAGE.md`,
-`docs/INCIDENT_RESPONSE.md`, `docs/AI_LLM_GATEWAY.md`, `docs/DEPLOYMENT.md`.
+Related reading: `docs/security/SECURITY_TRUST_PACKAGE.md`,
+`docs/security/INCIDENT_RESPONSE.md`, `docs/deployment/AI_LLM_GATEWAY.md`, `docs/deployment/DEPLOYMENT.md`.
