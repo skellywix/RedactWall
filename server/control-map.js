@@ -259,9 +259,14 @@ function stateFromBoardReporting(meta, input) {
 
 function boardReportingSummary(meta, state) {
   if (state === 'not_provided') return 'Board packet evidence is not yet attached; export one from NCUA Readiness.';
-  if (state === 'covered') return `A board packet was generated within the quarterly cadence (last: ${meta.lastGeneratedAt}).`;
-  return meta.lastGeneratedAt
-    ? `The last board packet (${meta.lastGeneratedAt}) is older than the quarterly cadence.`
+  // Bound + charset-check the stored timestamp before it enters an
+  // examiner-facing string (the audit ts is trusted, but summaries stay
+  // defensive like every other export surface).
+  const raw = String((meta && meta.lastGeneratedAt) || '');
+  const at = /^[0-9T:.+Z-]{10,40}$/.test(raw) ? raw : raw ? 'unknown' : '';
+  if (state === 'covered') return `A board packet was generated within the quarterly cadence (last: ${at}).`;
+  return at
+    ? `The last board packet (${at}) is older than the quarterly cadence.`
     : 'No board packet has been generated yet; export one from NCUA Readiness.';
 }
 

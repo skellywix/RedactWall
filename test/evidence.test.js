@@ -949,8 +949,9 @@ test('empty inventory grades attention when provided; absent inventory stays not
   assert.strictEqual(provided.controlMappings.find((c) => c.id === 'ai_use_inventory').state, 'attention');
   // Unentitled installs never pass rows, so their packs keep the honest state.
   const absent = build(undefined);
-  assert.strictEqual(absent.controlMappings.find((c) => c.id === 'ai_use_inventory').state, 'not_provided');
-  assert.strictEqual(absent.controlMappings.find((c) => c.id === 'vendor_service_provider_oversight').state, 'not_provided');
+  for (const id of ['ai_use_inventory', 'vendor_service_provider_oversight', 'incident_readiness', 'board_reporting']) {
+    assert.strictEqual(absent.controlMappings.find((c) => c.id === id).state, 'not_provided', id);
+  }
 });
 
 test('examiner pack sanitizes incident records and derives prompt-free timelines', () => {

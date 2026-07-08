@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import IncidentsPanel from '../components/ncua/IncidentsPanel';
 import UseCasesPanel from '../components/ncua/UseCasesPanel';
 import { EmptyState } from '../components/Panel';
-import { apiJson } from '../lib/api';
+import { apiJson, apiSend } from '../lib/api';
 import { navigate } from '../lib/router';
 import { toast } from '../lib/toast';
 import './NcuaReadiness.css';
@@ -70,10 +70,12 @@ interface NcuaResponse {
 
 const EXAMINER_PACK_HREF = '/api/export/evidence?examinerProfile=federal_credit_union';
 
-// Board packet: fetched as JSON and saved client-side (Audit.tsx pattern).
-// Server records BOARD_PACKET_EXPORTED so the cadence control can grade.
+// Board packet: an explicit CSRF-protected POST (generation is
+// state-changing — it appends the BOARD_PACKET_EXPORTED row the cadence
+// control grades from, so it must never fire from a prefetch), saved
+// client-side (Audit.tsx pattern).
 async function downloadBoardPacket(): Promise<void> {
-  const packet = await apiJson<Record<string, unknown>>('/api/ncua/board-packet');
+  const packet = await apiSend<Record<string, unknown>>('/api/ncua/board-packet', 'POST');
   if (!packet) {
     toast('Board packet export failed (Security Admin or Auditor role required).', 'error');
     return;

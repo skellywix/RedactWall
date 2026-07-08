@@ -44,14 +44,26 @@ const STATUS_TONE: Record<string, string> = {
   closed: 'tone-neutral',
 };
 
-function deadlineLabel(incident: IncidentRecord): string {
+function deadlineLabel(incident: IncidentRecord, nowMs: number): string {
   if (incident.status === 'reported' || incident.status === 'closed') {
     return incident.reportedAt ? `reported ${incident.reportedAt.slice(0, 16).replace('T', ' ')}` : 'resolved';
   }
-  const remainingMs = Date.parse(incident.deadlineAt) - Date.now();
+  const remainingMs = Date.parse(incident.deadlineAt) - nowMs;
   if (!Number.isFinite(remainingMs)) return '—';
   if (remainingMs <= 0) return 'OVERDUE';
+  if (remainingMs < 3600000) return `${Math.max(1, Math.floor(remainingMs / 60000))}m left on the 72h clock`;
   return `${Math.floor(remainingMs / 3600000)}h left on the 72h clock`;
+}
+
+// Re-render every minute so an open tab's countdown stays live and flips to
+// OVERDUE when the regulatory deadline passes.
+function useMinuteTick(): number {
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowMs(Date.now()), 60000);
+    return () => window.clearInterval(timer);
+  }, []);
+  return nowMs;
 }
 
 function useIncidents() {
@@ -145,6 +157,7 @@ export default function IncidentsPanel() {
   const { me } = useSession();
   const isAdmin = me?.role === 'security_admin';
   const [adding, setAdding] = useState(false);
+  const nowMs = useMinuteTick();
 
   return (
     <div className="panel wide-panel">
@@ -183,7 +196,7 @@ export default function IncidentsPanel() {
                   <td>{incident.title}</td>
                   <td><span className={`insights-chip ${STATUS_TONE[incident.status] || 'tone-neutral'}`}>{incident.status.replace('_', ' ')}</span></td>
                   <td>{incident.detectedAt.slice(0, 16).replace('T', ' ')}</td>
-                  <td>{deadlineLabel(incident)}</td>
+                  <td>{deadlineLabel(incident, nowMs)}</td>
                   <td>{incident.timeline.length ? `${incident.timeline.length} (${incident.timeline.filter((e) => e.prevented).length} prevented)` : '—'}</td>
                   {isAdmin && (
                     <td>

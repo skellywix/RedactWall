@@ -299,5 +299,5 @@ module.exports = {
   incidentsSummary,
   incidentTimeline,
   boardPacket,
-  _internal: { memberDataPanel, shadowAiPanel, edmPanel, scoreControls, stateFor, seatAggregates },
+  _internal: { memberDataPanel, shadowAiPanel, edmPanel, scoreControls, stateFor },
 };

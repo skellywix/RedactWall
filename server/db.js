@@ -808,7 +808,10 @@ function createAiIncident(record, now) {
 }
 
 // Status transition on an existing incident; returns null for an unknown id.
-// detectedAt/deadlineAt are immutable — the 72-hour clock cannot be rewound.
+// detectedAt/deadlineAt are immutable and the FIRST reportedAt stamp is
+// permanent — the 72-hour clock cannot be rewound and a late report cannot
+// be rewritten into an on-time one. (The route's strict schema means only
+// status/notes/reportedAt can reach `patch`.)
 const setAiIncidentStatus = sdb.transaction((incidentId, patch, now) => {
   const row = incidentById.get(incidentId);
   if (!row) return null;
@@ -820,6 +823,7 @@ const setAiIncidentStatus = sdb.transaction((incidentId, patch, now) => {
     orgId: orgColumn(existing.orgId),
     detectedAt: existing.detectedAt,
     deadlineAt: existing.deadlineAt,
+    ...(existing.reportedAt ? { reportedAt: existing.reportedAt } : {}),
     createdAt: existing.createdAt,
     updatedAt: now,
   };
@@ -830,7 +834,7 @@ const setAiIncidentStatus = sdb.transaction((incidentId, patch, now) => {
 // Most recent timestamp of an audit action (idx_audit_action); lets cadence
 // controls (board reporting) derive state from the append-only log instead of
 // new persistence.
-function lastAuditAction(action) {
+function lastAuditActionAt(action) {
   const row = sdb.prepare('SELECT ts FROM audit WHERE action = ? ORDER BY seq DESC LIMIT 1').get(action);
   return row ? row.ts : null;
 }
@@ -869,7 +873,7 @@ module.exports = {
   getScimGroup, getScimGroupByDisplayName, listScimGroups, saveScimGroup, deleteScimGroup,
   getAiApp, listAiApps, upsertAiApp,
   listAiUseCases, upsertAiUseCase, reviewAiUseCase,
-  listAiIncidents, createAiIncident, setAiIncidentStatus, lastAuditAction,
+  listAiIncidents, createAiIncident, setAiIncidentStatus, lastAuditActionAt,
   recordDelivery, listDeliveries, recentDeliverySuccess,
   setTenantContext,
   _canonical: canonical, _db: sdb, _dbPath: DB_PATH, _driverKind: DRIVER_KIND,

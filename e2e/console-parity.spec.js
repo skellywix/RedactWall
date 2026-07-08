@@ -156,6 +156,7 @@ test('NCUA use-case inventory and incident panels mount with their empty states'
   await expect(page.getByRole('heading', { name: '72-hour incident readiness', exact: true })).toBeVisible();
   await expect(page.locator('.panel', { hasText: '72-hour incident readiness' }).locator('.empty'))
     .toContainText('No AI incidents on record');
+  await expect(page.getByRole('button', { name: 'Board packet', exact: true })).toBeVisible();
   expect(problems).toEqual([]);
 });
 
