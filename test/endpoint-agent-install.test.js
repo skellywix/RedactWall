@@ -15,7 +15,7 @@ const clipboardUninstall = fs.readFileSync(path.join(root, 'scripts', 'uninstall
 const desktopInstall = fs.readFileSync(path.join(root, 'scripts', 'install-desktop-collector.ps1'), 'utf8');
 const desktopRun = fs.readFileSync(path.join(root, 'scripts', 'run-desktop-collector.ps1'), 'utf8');
 const desktopUninstall = fs.readFileSync(path.join(root, 'scripts', 'uninstall-desktop-collector.ps1'), 'utf8');
-const deployment = fs.readFileSync(path.join(root, 'docs', 'DEPLOYMENT.md'), 'utf8');
+const deployment = fs.readFileSync(path.join(root, 'docs', 'deployment', 'DEPLOYMENT.md'), 'utf8');
 
 test('installer registers a restarting scheduled task without putting the ingest key in task args', () => {
   assert.match(install, /Register-ScheduledTask/);

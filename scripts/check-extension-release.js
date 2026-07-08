@@ -159,9 +159,9 @@ function validatePolicyExamples(root, checks, problems) {
 }
 
 function validateDocs(root, checks, problems) {
-  const managedGuide = readText(root, 'docs/MANAGED_EXTENSION_DEPLOYMENT.md');
-  const checklist = readText(root, 'docs/EXTENSION_RELEASE_CHECKLIST.md');
-  const technicianGuide = readText(root, 'docs/TECHNICIAN_DEPLOYMENT_GUIDE.md');
+  const managedGuide = readText(root, 'docs/deployment/MANAGED_EXTENSION_DEPLOYMENT.md');
+  const checklist = readText(root, 'docs/deployment/EXTENSION_RELEASE_CHECKLIST.md');
+  const technicianGuide = readText(root, 'docs/deployment/TECHNICIAN_DEPLOYMENT_GUIDE.md');
 
   requireCheck(
     checks,

@@ -13,7 +13,8 @@ past the grace window only the admin console's config writes go read-only —
 detection, enforcement, approvals, audit, and evidence export always run. The
 embedded public key in `server/license.js` is a placeholder to be replaced with
 the vendor's real public key (from `--init-keypair`) before the first
-commercial release.
+commercial release — the step-by-step key setup, issuance, and rotation guide
+is `docs/deployment/LICENSE_KEY_SETUP.md`.
 
 ## Principles
 

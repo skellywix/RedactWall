@@ -32,5 +32,5 @@ Do not hand-edit `browser-extension/lib/detect.js`; it is a synced copy.
 | MCP guard | `npm run mcp:check` |
 | Agent hooks | `npm run agent-hooks:check` |
 
-Use `../docs/DEPLOYMENT.md` for operator details and
-`../docs/TECHNICIAN_DEPLOYMENT_GUIDE.md` for customer handoff.
+Use `../docs/deployment/DEPLOYMENT.md` for operator details and
+`../docs/deployment/TECHNICIAN_DEPLOYMENT_GUIDE.md` for customer handoff.

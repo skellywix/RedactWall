@@ -9,7 +9,7 @@ store. Running one customer per stack preserves strong tenant isolation and
 local-disk SQLite semantics while you sell the first version. A shared
 multi-tenant SaaS plane should be a later migration to managed Postgres, tenant
 scoped queries, SSO, and centralized billing operations. When that migration
-happens, `docs/MANAGED_POSTGRES.md` is the operator runbook for the Postgres
+happens, `docs/deployment/MANAGED_POSTGRES.md` is the operator runbook for the Postgres
 control plane (RDS role setup, migrations, backups, monitoring, sizing).
 
 ## AWS Shape

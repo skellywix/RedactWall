@@ -5,7 +5,7 @@ service (RFC 3507 subset). Paired with a Squid proxy, it is the network-layer
 backstop for traffic the endpoint sensors cannot see: unmanaged browsers,
 curl/scripts calling AI APIs directly, and third-party desktop apps.
 
-Unlike the monitor-only proxy lab (`docs/AI_CHAT_DLP_PROXY_LAB.md`), this
+Unlike the monitor-only proxy lab (`docs/deployment/AI_CHAT_DLP_PROXY_LAB.md`), this
 bridge enforces: it can allow, block, or hold every intercepted request before
 it leaves the network.
 

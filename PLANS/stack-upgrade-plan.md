@@ -289,11 +289,11 @@ Priority order:
 4. **Tenant lifecycle (M).** Org create, suspend, offboard-with-export
    (dovetails with evidence-pack tooling), deletion with audit-chain
    preservation rules.
-5. **Deployment docs (S).** New `docs/MANAGED_POSTGRES.md`:
+5. **Deployment docs (S).** New `docs/deployment/MANAGED_POSTGRES.md`:
    `REDACTWALL_DB_DRIVER=postgres` + `REDACTWALL_DATABASE_URL` with
    `sslmode=require`, non-owner app role setup, migration runbook, monitoring,
-   sizing. Cross-link from `docs/AWS_SAAS_DEPLOYMENT.md` and
-   `docs/DEPLOYMENT.md`.
+   sizing. Cross-link from `docs/deployment/AWS_SAAS_DEPLOYMENT.md` and
+   `docs/deployment/DEPLOYMENT.md`.
 6. **CI (S, optional).** Add `postgres:17` alongside 16.
 
 Everything except item 1 is triggered by a signed shared-SaaS customer, not by

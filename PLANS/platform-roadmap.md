@@ -110,7 +110,7 @@ provable, and so no slice weakens the audit/privacy guarantees the product sells
   posture, incident-response runbook, security whitepaper, retention/legal-hold
   state); fail-closed ICAP REQMOD network backstop (`npm run icap:bridge`).
   Commercial extension-store publishing remains an external process
-  (checklists shipped in `docs/EXTENSION_RELEASE_CHECKLIST.md`).
+  (checklists shipped in `docs/deployment/EXTENSION_RELEASE_CHECKLIST.md`).
 - **M4 — Scale-Out [SHIPPED except managed-infra drills]:** Postgres control
   plane behind the unchanged synchronous db seam (`server/storage/`: driver
   selection, worker-thread sync bridge, shared migration history, verified
@@ -130,7 +130,7 @@ provable, and so no slice weakens the audit/privacy guarantees the product sells
 
 | Slice | Where | Verified by |
 | --- | --- | --- |
-| AI Gateway (OpenAI-compatible, fail-closed gate + response scan, streaming, agent tokens, rate limits, provider adapters) | `gateway/`, `docs/AI_GATEWAY.md` | `test/gateway.test.js`, live control-plane+gateway smoke |
+| AI Gateway (OpenAI-compatible, fail-closed gate + response scan, streaming, agent tokens, rate limits, provider adapters) | `gateway/`, `docs/deployment/AI_GATEWAY.md` | `test/gateway.test.js`, live control-plane+gateway smoke |
 | Persistent App Catalog + prompt-free discovery + risk scoring + review | `server/app-catalog.js`, `server/db.js`, `/api/catalog*` | `test/app-catalog.test.js`, `test/catalog-api.test.js` |
 | Posture subscriptions (Splunk/Sentinel/Chronicle/QRadar/Datadog/Slack/Teams/webhook) with retry, dedupe, delivery history | `server/siem-formats.js`, `server/subscriptions.js` | `test/subscriptions.test.js` |
 | Console: App Catalog, Compliance (AI-framework matrix), Integrations tabs; **left-sidebar nav** | `server/public/` | `e2e/admin-console.spec.js`, screenshots |
@@ -178,7 +178,7 @@ deployable reverse-proxy service, `gateway/` (own process, shares
   structured request logs (prompt-free: decision, risk, findings-count,
   latency, upstream, token id), Prometheus-style `/metrics`, config via env +
   `gateway/config.example.json`, Docker service in compose, operator runbook
-  `docs/AI_GATEWAY.md`.
+  `docs/deployment/AI_GATEWAY.md`.
 - **Network backstop (unmanaged paths).** In parallel, promote
   `scripts/squid-icap-bridge.js` from its current reference-sketch state into a
   first-class, documented ICAP/proxy deployment (the REQMOD handler is only an

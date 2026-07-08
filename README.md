@@ -16,7 +16,9 @@ The repository does not have a `src/` directory. The source code lives under `se
 
 - Node.js `>=22`
 - Express 5 for the HTTP API and dashboard server
-- `better-sqlite3` for local SQLite storage
+- `better-sqlite3` for local SQLite storage, with an optional managed Postgres
+  driver (`pg`) behind `REDACTWALL_DB_DRIVER=postgres` for the shared control
+  plane (see `docs/deployment/MANAGED_POSTGRES.md`)
 - `helmet` and `cookie-parser` for HTTP hardening and session cookies
 - `zod` for request validation
 - `adm-zip` and `pdf-parse` for Office/PDF text extraction
@@ -84,7 +86,7 @@ Run focused browser checks:
 
 ```bash
 npm run test:browser
-npm run test:admin-console
+npm run test:console-app
 npm run test:browser-extension
 ```
 
@@ -121,7 +123,7 @@ docker compose up -d --build
 | `npm run suite` | Runs the full standalone black-box regression suite in `suite/` (contract, security, detector tiers). |
 | `npm run suite:smoke` | Runs the fast smoke tier of the regression suite. |
 | `npm run suite:ui` | Runs the regression suite's Playwright UI journeys (auditor role, SSE, bulk actions, session expiry). |
-| `npm run review:ci` | Runs whitespace checks, generated demo-doc checks, AI-domain checks, Node tests, the Playwright browser suite, detector sync, and detection eval. |
+| `npm run review:ci` | Runs whitespace checks, generated demo-doc checks, AI-domain checks, native-module checks, the console build, Node tests, the Playwright browser suite, detector sync, and detection eval. |
 | `npm run ai-domains:check` | Verifies the reviewed AI-host catalog stays covered by destination policy and browser adapter tests. |
 | `npm run sync-engine` | Copies `detection-engine/detect.js` into the browser extension detector copy. |
 | `npm run sync-check` | Verifies the shared detector and browser detector copy match. |
@@ -146,18 +148,30 @@ docker compose up -d --build
 ```text
 redactwall/
 |-- config/                 Runtime policy and detector configuration
-|-- data/                   Local SQLite data path for development
+|-- console/                React/Vite/TypeScript admin console (built to server/public/app)
+|-- data/                   Local SQLite data path for development (generated)
 |-- detection-engine/       Shared detector and AI-site adapter helpers
-|-- docs/                   Deployment, rollout, identity, evidence, and demo docs
+|-- docs/                   Documentation, organized by topic
+|   |-- deployment/         Production launch, AWS silo, Docker, gateways, licensing keys
+|   |-- demo/               Sales demo script and demo machine setup
+|   |-- identity/           SSO, SCIM, roles, policy scopes, approval routing
+|   |-- connectors/         MCP connector SDK and shipped connectors
+|   |-- reference/          Developer REST API reference
+|   |-- security/           Whitepaper, incident response, trust package, NCUA readiness
+|   |-- product/            Competitive positioning and detection benchmarks
+|   `-- process/            Release, testing, docs standards, licensing model, support
 |-- e2e/                    Playwright browser tests
+|-- gateway/                Enforced AI LLM gateway (OpenAI-compatible reverse proxy)
 |-- infra/                  Customer-silo deployment templates
 |-- PLANS/                  Planning notes
 |-- scripts/                Setup, packaging, validation, docs, and smoke scripts
 |-- sensors/
+|   |-- agent-hooks/        Claude Code prompt, shell, and MCP hook sensor
 |   |-- browser-extension/  MV3 browser sensor
 |   |-- endpoint-agent/     Local file, clipboard, OCR, and handoff sensor
 |   `-- mcp-guard/          MCP tool-result guard, connector SDK, and shipped connectors
 |-- server/                 Express app, policy, auth, database, evidence, and dashboard
+|-- suite/                  Standalone black-box regression suite
 |-- test/                   Node test suite and fixtures
 |-- package.json            Scripts, package metadata, and dependencies
 `-- README.md
@@ -172,11 +186,11 @@ Important settings:
 | Variable | Purpose |
 | --- | --- |
 | `PORT` | Server port. Defaults to `4000`. |
-| `REDACTWALL_DB_PATH` or `REDACTWALL_DB_PATH` | SQLite database path. Keep production data on local disk. |
+| `REDACTWALL_DB_PATH` (legacy `PROMPTWALL_DB_PATH`/`SENTINEL_DB_PATH`) | SQLite database path. Keep production data on local disk. |
 | `ADMIN_USER` / `ADMIN_PASSWORD` | Local admin login. |
 | `ADMIN_TOTP_SECRET` | Security Admin MFA secret. Required by production preflight. |
-| `REDACTWALL_SECRET` or `REDACTWALL_SECRET` | Session signing secret. |
-| `REDACTWALL_DATA_KEY` or `REDACTWALL_DATA_KEY` | Encryption key for retained approval prompt data. |
+| `REDACTWALL_SECRET` (legacy `PROMPTWALL_SECRET`/`SENTINEL_SECRET`) | Session signing secret. |
+| `REDACTWALL_DATA_KEY` (legacy `PROMPTWALL_DATA_KEY`/`SENTINEL_DATA_KEY`) | Encryption key for retained approval prompt data. |
 | `INGEST_API_KEY` or `REDACTWALL_INGEST_API_KEY` | API key used by sensors for `/api/v1/*` ingest routes. |
 | `SCIM_BEARER_TOKEN` or `REDACTWALL_SCIM_BEARER_TOKEN` | Enables `/scim/v2/*` provisioning routes when set. |
 | `OIDC_*` or `REDACTWALL_OIDC_*` | Optional console SSO settings. |
@@ -188,7 +202,7 @@ Important settings:
 | `REDACTWALL_RATE_LIMITER_TOKEN` / `REDACTWALL_RATE_LIMITER_STORE` | Shared AI gateway limiter token and backend, `sqlite` for one limiter service or `redis`/`valkey` for active-active limiter replicas. |
 | `ENDPOINT_AGENT_OCR_COMMAND` or `REDACTWALL_ENDPOINT_AGENT_OCR_COMMAND` | Optional local OCR command for endpoint image files. Without one, the agent falls back to a bundled offline WASM OCR engine (`ENDPOINT_AGENT_OCR_WASM`, default on). |
 
-See `.env.example`, `docs/AI_LLM_GATEWAY.md`, and `docs/DEPLOYMENT.md` for the longer deployment reference.
+See `.env.example`, `docs/deployment/AI_LLM_GATEWAY.md`, and `docs/deployment/DEPLOYMENT.md` for the longer deployment reference.
 
 ## HTTP API Reference
 
@@ -257,6 +271,8 @@ npm run discovery:import -- --input ./proxy-ai-export.csv --vendor zscaler --dry
 | `POST` | `/api/queries/:id/deny` | Denies a pending held item; requires decision role and CSRF. |
 | `GET` | `/api/stats` | Returns dashboard counts. |
 | `GET` | `/api/billing/seats` | Returns SaaS tenant seat usage. |
+| `GET` | `/api/billing/license` | Returns license state, plan, seats, and expiry. |
+| `POST` | `/api/billing/license` | Installs a signed license file; works even in license read-only state. |
 | `GET` | `/api/metrics` | Returns uptime, stats, and audit-chain status. |
 | `GET` | `/api/preflight` | Returns current deployment preflight state. |
 | `GET` | `/api/identity/setup-guide` | Builds a secret-free Entra or Okta setup guide from query parameters. |
@@ -387,7 +403,7 @@ Exports the Express app.
 
 Shipped connector runtimes live under `sensors/mcp-guard/connectors/` for
 Microsoft 365, Google Drive, Slack, Microsoft Teams, Atlassian Jira/Confluence,
-and read-only SQLite database access. Start with `docs/MCP_CONNECTOR_SDK.md`
+and read-only SQLite database access. Start with `docs/connectors/MCP_CONNECTOR_SDK.md`
 and the connector-specific docs in `docs/` before wiring a pilot MCP server.
 
 ### `require("./sensors/endpoint-agent/agent")`
@@ -425,8 +441,8 @@ The tests show the intended public behavior:
 - `test/validation.test.js`, `test/processors.test.js`, and `test/release-token.test.js` cover sensor request contracts and fail-closed behavior.
 - `test/auth.test.js`, `test/admin-mfa.test.js`, `test/approval-stepup.test.js`, and role tests cover dashboard access control.
 - `test/scim.test.js`, `test/oidc-login.test.js`, and `test/identity-setup.test.js` cover provisioning and login integration.
-- `e2e/admin-console.spec.js` and `e2e/browser-extension.spec.js` cover browser-facing flows.
-- `suite/` is the standalone black-box regression suite (API contracts, authz/IDOR, PII-leak sweeps, audit tamper-evidence, detector floors, role-scoped UI journeys). See `suite/README.md` and `docs/TESTING_STRATEGY.md`.
+- `e2e/admin-console-app.spec.js` and `e2e/browser-extension.spec.js` cover browser-facing flows.
+- `suite/` is the standalone black-box regression suite (API contracts, authz/IDOR, PII-leak sweeps, audit tamper-evidence, detector floors, role-scoped UI journeys). See `suite/README.md` and `docs/process/TESTING_STRATEGY.md`.
 
 Run focused Node tests by passing files to `npm test`:
 

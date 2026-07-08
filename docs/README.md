@@ -1,87 +1,114 @@
 # RedactWall Documentation
 
-Use this index when you know the job but not the file name.
+Use this index when you know the job but not the file name. Files are
+organized by topic: `deployment/`, `demo/`, `identity/`, `connectors/`,
+`reference/`, `security/`, `product/`, and `process/`.
 
 ## Start Here
 
 | Job | Document |
 |-----|----------|
-| Move the SaaS to production end to end | `PRODUCTION_LAUNCH_GUIDE.md` |
-| Install or operate RedactWall | `DEPLOYMENT.md` |
-| Run a production pilot handoff | `TECHNICIAN_DEPLOYMENT_GUIDE.md` |
-| Deploy the customer-silo AWS shape | `AWS_SAAS_DEPLOYMENT.md` |
+| Move the SaaS to production end to end | `deployment/PRODUCTION_LAUNCH_GUIDE.md` |
+| Install or operate RedactWall | `deployment/DEPLOYMENT.md` |
+| Run a production pilot handoff | `deployment/TECHNICIAN_DEPLOYMENT_GUIDE.md` |
+| Deploy the customer-silo AWS shape | `deployment/AWS_SAAS_DEPLOYMENT.md` |
 | Run a sales or customer demo | `../DEMO_INSTALL_GUIDE.md` |
-| Present the client-facing story | `SALES_DEMO_GUIDE.md` |
-| Prepare a demo machine | `DEMO_TECHNICIAN_SETUP.md` |
+| Present the client-facing story | `demo/SALES_DEMO_GUIDE.md` |
+| Prepare a demo machine | `demo/DEMO_TECHNICIAN_SETUP.md` |
 
-## Deployment And Sensors
-
-| Topic | Document |
-|-------|----------|
-| Managed browser extension rollout | `MANAGED_EXTENSION_DEPLOYMENT.md` |
-| Browser extension release checklist | `EXTENSION_RELEASE_CHECKLIST.md` |
-| Monitor-only AI chat proxy lab | `AI_CHAT_DLP_PROXY_LAB.md` |
-| Enforced AI LLM Gateway, shared limiter, and HA compose | `AI_LLM_GATEWAY.md` |
-| Endpoint agent, MCP guard, Docker, secrets, health checks | `DEPLOYMENT.md` |
-| Agent hooks for Claude Code (prompts, shell, MCP tool calls) | `AGENT_HOOKS.md` |
-| Evidence pack schedule automation | `EVIDENCE_PACK_TASK.md` |
-| NCUA Readiness Center and examiner pack | `NCUA_READINESS.md` |
-| Security trust package export | `SECURITY_TRUST_PACKAGE.md` |
-
-## Identity, Policy, And Workflow
+## Deployment (`deployment/`)
 
 | Topic | Document |
 |-------|----------|
-| SCIM provisioning and OIDC login | `SCIM_PROVISIONING.md` |
-| Entra and Okta setup | `IDENTITY_IDP_SETUP.md` |
-| Console access roles and titles | `ACCESS_ROLES.md` |
-| Scoped policy and time-bound exceptions | `POLICY_SCOPES.md` |
-| Approval ownership, notifications, and SLA escalation | `APPROVAL_ROUTING.md` |
-| Developer REST API (`/api/v1`) reference + OpenAPI spec | `API_REFERENCE.md` |
+| Production launch sequence (AWS, domain, TLS, all portals) | `deployment/PRODUCTION_LAUNCH_GUIDE.md` |
+| Endpoint agent, MCP guard, Docker, secrets, health checks | `deployment/DEPLOYMENT.md` |
+| Customer-silo AWS stack (CloudFormation) | `deployment/AWS_SAAS_DEPLOYMENT.md` |
+| Install-day production readiness runbook | `deployment/TECHNICIAN_DEPLOYMENT_GUIDE.md` |
+| License signing keypair, issuing, rotation | `deployment/LICENSE_KEY_SETUP.md` |
+| Managed Postgres control plane (shared-plane migration) | `deployment/MANAGED_POSTGRES.md` |
+| Managed browser extension rollout | `deployment/MANAGED_EXTENSION_DEPLOYMENT.md` |
+| Browser extension release checklist | `deployment/EXTENSION_RELEASE_CHECKLIST.md` |
+| Enforced AI LLM Gateway, shared limiter, and HA compose | `deployment/AI_LLM_GATEWAY.md` |
+| AI Gateway overview (OpenAI-compatible reverse proxy) | `deployment/AI_GATEWAY.md` |
+| Squid ICAP network backstop | `deployment/ICAP_NETWORK_BACKSTOP.md` |
+| Monitor-only AI chat proxy lab | `deployment/AI_CHAT_DLP_PROXY_LAB.md` |
+| Agent hooks for Claude Code (prompts, shell, MCP tool calls) | `deployment/AGENT_HOOKS.md` |
+| Evidence pack schedule automation | `deployment/EVIDENCE_PACK_TASK.md` |
 
-## MCP And Connectors
+## Demo (`demo/`)
 
 | Topic | Document |
 |-------|----------|
-| MCP connector SDK rules | `MCP_CONNECTOR_SDK.md` |
-| Microsoft 365 connector | `MCP_MICROSOFT365_CONNECTOR.md` |
-| Google Drive connector | `MCP_GOOGLE_DRIVE_CONNECTOR.md` |
-| Slack connector | `MCP_SLACK_CONNECTOR.md` |
-| Microsoft Teams connector | `MCP_TEAMS_CONNECTOR.md` |
-| Atlassian Jira and Confluence connector | `MCP_ATLASSIAN_CONNECTOR.md` |
-| Database read-only connector | `MCP_DATABASE_READONLY_CONNECTOR.md` |
+| Sales and client-facing demo script | `demo/SALES_DEMO_GUIDE.md` |
+| Demo machine setup and reset | `demo/DEMO_TECHNICIAN_SETUP.md` |
+| Demo install hub (generated, repo root) | `../DEMO_INSTALL_GUIDE.md` |
 
-## Product And Evidence
+## Identity, Policy, And Workflow (`identity/`)
+
+| Topic | Document |
+|-------|----------|
+| SCIM provisioning and OIDC login | `identity/SCIM_PROVISIONING.md` |
+| Entra and Okta setup | `identity/IDENTITY_IDP_SETUP.md` |
+| Console access roles and titles | `identity/ACCESS_ROLES.md` |
+| Scoped policy and time-bound exceptions | `identity/POLICY_SCOPES.md` |
+| Approval ownership, notifications, and SLA escalation | `identity/APPROVAL_ROUTING.md` |
+| Email and digest notifications | `identity/NOTIFICATIONS.md` |
+
+## API Reference (`reference/`)
+
+| Topic | Document |
+|-------|----------|
+| Developer REST API (`/api/v1`) reference + OpenAPI spec | `reference/API_REFERENCE.md` |
+
+## MCP And Connectors (`connectors/`)
+
+| Topic | Document |
+|-------|----------|
+| MCP connector SDK rules | `connectors/MCP_CONNECTOR_SDK.md` |
+| Microsoft 365 connector | `connectors/MCP_MICROSOFT365_CONNECTOR.md` |
+| Google Drive connector | `connectors/MCP_GOOGLE_DRIVE_CONNECTOR.md` |
+| Slack connector | `connectors/MCP_SLACK_CONNECTOR.md` |
+| Microsoft Teams connector | `connectors/MCP_TEAMS_CONNECTOR.md` |
+| Atlassian Jira and Confluence connector | `connectors/MCP_ATLASSIAN_CONNECTOR.md` |
+| Database read-only connector | `connectors/MCP_DATABASE_READONLY_CONNECTOR.md` |
+
+## Security And Compliance (`security/`)
+
+| Topic | Document |
+|-------|----------|
+| Architecture, crypto inventory, threat model | `security/SECURITY_WHITEPAPER.md` |
+| Security incident response runbook | `security/INCIDENT_RESPONSE.md` |
+| Vendor-risk security trust package | `security/SECURITY_TRUST_PACKAGE.md` |
+| NCUA Readiness Center and examiner pack | `security/NCUA_READINESS.md` |
+| Codebase hardening review (July 2026) | `security/SECURITY_REVIEW_2026-07.md` |
+| Vulnerability disclosure policy | `../SECURITY.md` |
+
+## Product And Evidence (`product/`)
 
 | Topic | Document |
 |-------|----------|
 | Product roadmap | `../ROADMAP.md` |
-| Competitive positioning and product direction | `COMPETITIVE_ALIGNMENT.md` |
-| Feature benchmark vs. market leaders | `COMPETITIVE_BENCHMARK_2026.md` |
-| Sales battlecard vs. Nightfall AI (internal) | `BATTLECARD_NIGHTFALL.md` |
-| Detection latency and accuracy benchmarks | `DETECTION_BENCHMARKS.md` |
-| Vendor-risk security trust package | `SECURITY_TRUST_PACKAGE.md` |
-| Architecture, crypto inventory, threat model | `SECURITY_WHITEPAPER.md` |
-| Security incident response runbook | `INCIDENT_RESPONSE.md` |
-| Examiner evidence, backup, restore, retention | `DEPLOYMENT.md` |
+| Competitive positioning and product direction | `product/COMPETITIVE_ALIGNMENT.md` |
+| Feature benchmark vs. market leaders | `product/COMPETITIVE_BENCHMARK_2026.md` |
+| Sales battlecard vs. Nightfall AI (internal) | `product/BATTLECARD_NIGHTFALL.md` |
+| Detection latency and accuracy benchmarks | `product/DETECTION_BENCHMARKS.md` |
 
-## Engineering And Commercial Processes
+## Engineering And Commercial Processes (`process/`)
 
 | Topic | Document |
 |-------|----------|
-| Versioning, release train, artifacts, SBOM | `RELEASE_PROCESS.md` |
-| Test tiers, gates, flaky policy, coverage | `TESTING_STRATEGY.md` |
-| Documentation types, style, lifecycle | `DOCUMENTATION_STANDARDS.md` |
-| License files, seats, expiry, pricing shape | `CUSTOMER_LICENSING.md` |
-| Support severities, response targets, versions | `SUPPORT_POLICY.md` |
-| Vulnerability disclosure policy | `../SECURITY.md` |
+| Versioning, release train, artifacts, SBOM | `process/RELEASE_PROCESS.md` |
+| Test tiers, gates, flaky policy, coverage | `process/TESTING_STRATEGY.md` |
+| Documentation types, style, lifecycle | `process/DOCUMENTATION_STANDARDS.md` |
+| License files, seats, expiry, pricing shape | `process/CUSTOMER_LICENSING.md` |
+| Support severities, response targets, versions | `process/SUPPORT_POLICY.md` |
 | Release history | `../CHANGELOG.md` |
 
 ## Generated Docs
 
-`../DEMO_INSTALL_GUIDE.md`, `SALES_DEMO_GUIDE.md`, and
-`DEMO_TECHNICIAN_SETUP.md` include generated current-state sections. Refresh
-them with:
+`../DEMO_INSTALL_GUIDE.md`, `demo/SALES_DEMO_GUIDE.md`, and
+`demo/DEMO_TECHNICIAN_SETUP.md` include generated current-state sections.
+Refresh them with:
 
 ```bash
 npm run docs:demo-guide

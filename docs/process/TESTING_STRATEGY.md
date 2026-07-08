@@ -41,7 +41,7 @@ refactors and is the durable regression net as the app evolves. See
   Postgres, Playwright E2E, audit-chain verification, detector eval with
   floors, semantic-model determinism, config-mutation guard, Docker build.
 - **Release gate**: everything above plus `npm run suite` (full standalone
-  regression suite) on the release commit — see `docs/RELEASE_PROCESS.md`.
+  regression suite) on the release commit — see `docs/process/RELEASE_PROCESS.md`.
 
 ## Non-negotiable quality floors
 

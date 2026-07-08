@@ -36,7 +36,7 @@ at `/app` inside the server image is the only console.
    store with a hash-chained audit log is built for local disk, and one stack
    per customer gives hard tenant isolation with zero shared-plane code to
    operate. The shared multi-tenant Postgres plane is a documented later
-   migration (`docs/AWS_SAAS_DEPLOYMENT.md`, "Next Migration"), not a launch
+   migration (`docs/deployment/AWS_SAAS_DEPLOYMENT.md`, "Next Migration"), not a launch
    requirement.
 2. **AWS account.** Use a dedicated production AWS account (or an AWS
    Organization with a production OU if you already have one). Enable MFA on
@@ -97,11 +97,12 @@ Do these once before the first production deploy.
    ```
 
    Paste the printed public PEM into `server/license.js` (the marked
-   placeholder), commit that change, and store the private key somewhere
-   durable and offline (password manager plus an offline backup). The private
-   key never enters the repo, the image, or AWS. Losing it means you cannot
-   issue or renew any customer license; leaking it means anyone can mint
-   licenses.
+   placeholder), commit that change, and store the private key
+   (`license-signing-key.pem`) somewhere durable and offline (password
+   manager plus an offline backup). The private key never enters the repo,
+   the image, or AWS. Losing it means you cannot issue or renew any customer
+   license; leaking it means anyone can mint licenses. Full walkthrough,
+   including rotation: `docs/deployment/LICENSE_KEY_SETUP.md`.
 2. **Run the full review gate** on the commit you are about to ship:
 
    ```bash
@@ -111,7 +112,7 @@ Do these once before the first production deploy.
    This runs the docs checks, console build, Node tests, Playwright suite,
    detector sync check, and the detection eval — the same gate CI enforces.
 3. **Build and push the image to ECR** (full commands in
-   `docs/AWS_SAAS_DEPLOYMENT.md` §1):
+   `docs/deployment/AWS_SAAS_DEPLOYMENT.md` §1):
 
    ```bash
    aws ecr create-repository --repository-name redactwall   # once
@@ -133,18 +134,18 @@ own encrypted EBS volume, and the app manages its own schema.
   auto-applied at startup, and an append-only, hash-chained `audit` table.
 - **Do not** move the database to EFS or run this on Fargate. SQLite over
   network storage is a documented anti-pattern here; audit-chain integrity is
-  built around local disk (`docs/AWS_SAAS_DEPLOYMENT.md`).
+  built around local disk (`docs/deployment/AWS_SAAS_DEPLOYMENT.md`).
 - **Backups, two layers:**
   1. App-level: `npm run backup` / `npm run backup:verify` /
      `npm run backup:restore`, with `npm run backup:drill` as the periodic
-     restore rehearsal. `docs/DEPLOYMENT.md` covers the scheduled-backup
+     restore rehearsal. `docs/deployment/DEPLOYMENT.md` covers the scheduled-backup
      installers.
   2. Volume-level: an EBS snapshot schedule via Data Lifecycle Manager (for
      example daily snapshots, 14-day retention) per customer volume.
 - **Later, not now:** the Postgres driver is already shipped
   (`REDACTWALL_DB_DRIVER=postgres`, tenant row-level security, same migration
   history). When you outgrow silos and build the shared plane,
-  `docs/MANAGED_POSTGRES.md` is the operator runbook. Nothing about launch
+  `docs/deployment/MANAGED_POSTGRES.md` is the operator runbook. Nothing about launch
   depends on it.
 
 ## Phase 4 — The Vendor Admin Stack (The Portal You Use)
@@ -153,7 +154,7 @@ Deploy yourself a silo first. It proves the whole path before a customer is
 watching, and it is the environment you will use daily.
 
 1. Create the secret `redactwall/vendor-ops` in Secrets Manager using the
-   customer-secret template from `docs/AWS_SAAS_DEPLOYMENT.md` §2. Generate
+   customer-secret template from `docs/deployment/AWS_SAAS_DEPLOYMENT.md` §2. Generate
    strong values with:
 
    ```bash
@@ -213,14 +214,14 @@ itself accordingly. That is a feature: sales never handles license files.
    npm run docs:demo-guide:check
    ```
 
-5. Hand sales the runbooks: `docs/SALES_DEMO_GUIDE.md` (the story to present),
-   `docs/DEMO_TECHNICIAN_SETUP.md` (machine prep), and `DEMO_INSTALL_GUIDE.md`
+5. Hand sales the runbooks: `docs/demo/SALES_DEMO_GUIDE.md` (the story to present),
+   `docs/demo/DEMO_TECHNICIAN_SETUP.md` (machine prep), and `DEMO_INSTALL_GUIDE.md`
    at the repo root.
 
 ## Phase 6 — Client Tenant Silos (Repeat Per Customer)
 
 This is the onboarding runbook you will run for every sale. With practice it
-is under an hour of operator time. Full detail: `docs/AWS_SAAS_DEPLOYMENT.md`.
+is under an hour of operator time. Full detail: `docs/deployment/AWS_SAAS_DEPLOYMENT.md`.
 
 1. **Secret.** Create `redactwall/<customer-slug>` in Secrets Manager from the
    §2 template; generate values with `npm run setup:prod` and the MFA URI with
@@ -237,7 +238,7 @@ is under an hour of operator time. Full detail: `docs/AWS_SAAS_DEPLOYMENT.md`.
 
    ```bash
    npm run license:issue -- \
-     --key ~/redactwall-license-keys/private.pem \
+     --key ~/redactwall-license-keys/license-signing-key.pem \
      --customer "Acme Credit Union" --customer-id cu-acme \
      --plan standard --seats 120 \
      --expires 2027-08-01 --grace-days 30 \
@@ -247,13 +248,13 @@ is under an hour of operator time. Full detail: `docs/AWS_SAAS_DEPLOYMENT.md`.
    Install via the console's Configuration tab (paste the file contents) or
    `POST /api/billing/license`. The install is recorded in the audit log,
    metadata only. Plans and feature flags are described in
-   `docs/CUSTOMER_LICENSING.md`; pilots get a 90-day, seat-capped,
+   `docs/process/CUSTOMER_LICENSING.md`; pilots get a 90-day, seat-capped,
    full-featured license.
 5. **Handover.** Deliver the admin credentials and TOTP enrollment to the
    customer's security admin over a secure channel. If they want SSO and
-   automatic user lifecycle, wire their IdP: `docs/IDENTITY_IDP_SETUP.md`
-   (Entra/Okta OIDC) and `docs/SCIM_PROVISIONING.md`.
-6. **Validate** (checklist from `docs/AWS_SAAS_DEPLOYMENT.md` §5):
+   automatic user lifecycle, wire their IdP: `docs/identity/IDENTITY_IDP_SETUP.md`
+   (Entra/Okta OIDC) and `docs/identity/SCIM_PROVISIONING.md`.
+6. **Validate** (checklist from `docs/deployment/AWS_SAAS_DEPLOYMENT.md` §5):
    - `https://<customer-slug>.<domain>/healthz` and `/readyz` return ok
    - Console login works; the stats row shows `Seats used`
    - A test event with `orgId=<customer-slug>` is accepted
@@ -281,15 +282,15 @@ first.
    - **Managed browser extension** first — broadest coverage, centrally
      pushed via Intune/Group Policy with managed storage
      (`serverUrl=https://<customer-slug>.<domain>`, the ingest key, and
-     `orgId=<customer-slug>`). Runbook: `docs/MANAGED_EXTENSION_DEPLOYMENT.md`.
+     `orgId=<customer-slug>`). Runbook: `docs/deployment/MANAGED_EXTENSION_DEPLOYMENT.md`.
    - **Endpoint agent** next (file, clipboard, OCR flows), packaged with
      `npm run package:endpoint-agent` and validated with
      `npm run endpoint:check`.
    - **MCP guard / AI gateway** where the plan includes them
-     (`docs/AI_LLM_GATEWAY.md`).
+     (`docs/deployment/AI_LLM_GATEWAY.md`).
 5. **Pilot cohort → tune → enforce.** Start 10–20 users in monitor/warn mode,
    tune policy on real (sanitized) evidence for a week or two, then flip to
-   block mode and expand org-wide. `docs/TECHNICIAN_DEPLOYMENT_GUIDE.md` is
+   block mode and expand org-wide. `docs/deployment/TECHNICIAN_DEPLOYMENT_GUIDE.md` is
    the field guide for this handoff.
 
 ## Phase 8 — Tracking Clients And Licenses
@@ -324,7 +325,7 @@ registry — a private git repo with one file per customer (or one
 
 Add each expiry date minus 60 days to a renewal calendar.
 
-**The renewal loop** (behavior defined in `docs/CUSTOMER_LICENSING.md`):
+**The renewal loop** (behavior defined in `docs/process/CUSTOMER_LICENSING.md`):
 
 1. ~60 days out: seat true-up conversation using the customer's own
    `/api/billing/seats` report — that report is the audit mechanism, no
@@ -350,16 +351,16 @@ registry above is sufficient at silo scale.
   restore rehearsal on the vendor stack.
 - **Evidence packs.** Each stack installs a systemd timer for quarterly
   sanitized examiner evidence packs; inspect or adjust via Session Manager
-  (`docs/AWS_SAAS_DEPLOYMENT.md` §6, `docs/EVIDENCE_PACK_TASK.md`).
+  (`docs/deployment/AWS_SAAS_DEPLOYMENT.md` §6, `docs/deployment/EVIDENCE_PACK_TASK.md`).
 - **Key hygiene.** Rotate the data-encryption key on schedule with
   `npm run rotate:data-key`; rotate ingest keys via the customer secret and a
   stack update.
 - **Upgrades.** Build and push the new image tag, run `npm run review:ci` at
   that tag, then update each stack's `ImageUri` (CloudFormation stack update)
   starting with vendor-ops, then demo, then clients. Release discipline:
-  `docs/RELEASE_PROCESS.md`.
-- **Incidents and support.** `docs/INCIDENT_RESPONSE.md` is the runbook;
-  `docs/SUPPORT_POLICY.md` defines the severities and response targets you
+  `docs/process/RELEASE_PROCESS.md`.
+- **Incidents and support.** `docs/security/INCIDENT_RESPONSE.md` is the runbook;
+  `docs/process/SUPPORT_POLICY.md` defines the severities and response targets you
   are committing to customers.
 
 ## Cost Sketch Per Silo
@@ -368,17 +369,18 @@ Rough monthly figures per customer stack in `us-east-1` (verify against
 current AWS pricing): ALB ~$20, `t3.small`–`t3.medium` EC2 ~$15–30, encrypted
 EBS + snapshots ~$5, Secrets Manager + CloudWatch ~$3. Roughly **$45–60 per
 customer per month**, which comfortably fits a per-seat annual price with a
-50-seat minimum (`docs/CUSTOMER_LICENSING.md`). The vendor and demo stacks are
+50-seat minimum (`docs/process/CUSTOMER_LICENSING.md`). The vendor and demo stacks are
 the same cost — budget for two internal silos from day one.
 
 ## Related Documents
 
-- `docs/AWS_SAAS_DEPLOYMENT.md` — the detailed silo deploy commands
-- `docs/DEPLOYMENT.md` — Docker, secrets, health checks, backups
-- `docs/CUSTOMER_LICENSING.md` — license format, seat model, pricing shape
-- `docs/MANAGED_POSTGRES.md` — the later shared-plane database runbook
-- `docs/TECHNICIAN_DEPLOYMENT_GUIDE.md` — customer pilot field guide
-- `docs/MANAGED_EXTENSION_DEPLOYMENT.md` — browser sensor rollout
-- `docs/IDENTITY_IDP_SETUP.md`, `docs/SCIM_PROVISIONING.md` — customer SSO
-- `docs/SALES_DEMO_GUIDE.md`, `docs/DEMO_TECHNICIAN_SETUP.md` — demo runbooks
-- `docs/INCIDENT_RESPONSE.md`, `docs/SUPPORT_POLICY.md` — operations
+- `docs/deployment/AWS_SAAS_DEPLOYMENT.md` — the detailed silo deploy commands
+- `docs/deployment/DEPLOYMENT.md` — Docker, secrets, health checks, backups
+- `docs/deployment/LICENSE_KEY_SETUP.md` — signing keypair, issuing, rotation
+- `docs/process/CUSTOMER_LICENSING.md` — license format, seat model, pricing shape
+- `docs/deployment/MANAGED_POSTGRES.md` — the later shared-plane database runbook
+- `docs/deployment/TECHNICIAN_DEPLOYMENT_GUIDE.md` — customer pilot field guide
+- `docs/deployment/MANAGED_EXTENSION_DEPLOYMENT.md` — browser sensor rollout
+- `docs/identity/IDENTITY_IDP_SETUP.md`, `docs/identity/SCIM_PROVISIONING.md` — customer SSO
+- `docs/demo/SALES_DEMO_GUIDE.md`, `docs/demo/DEMO_TECHNICIAN_SETUP.md` — demo runbooks
+- `docs/security/INCIDENT_RESPONSE.md`, `docs/process/SUPPORT_POLICY.md` — operations

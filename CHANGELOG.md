@@ -4,7 +4,7 @@ All notable changes to RedactWall are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and RedactWall adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-Release process: `docs/RELEASE_PROCESS.md`. Entries before 0.3.0 are
+Release process: `docs/process/RELEASE_PROCESS.md`. Entries before 0.3.0 are
 reconstructed from `ITERATIONS.md` and git history.
 
 ## [Unreleased]
@@ -64,7 +64,7 @@ reconstructed from `ITERATIONS.md` and git history.
   license `features[]` entitlement (`license.entitled('ncua_readiness')`:
   demo mode fully visible, included with Enterprise, add-on flag for
   Standard; evidence export works in every license state). Operator and
-  examiner guide: `docs/NCUA_READINESS.md`.
+  examiner guide: `docs/security/NCUA_READINESS.md`.
 
 - **React admin console reaches full parity.** All 16 operator views are ported
   to the Vite/React/TypeScript console served at `/app`: Overview, Approval
@@ -93,7 +93,7 @@ reconstructed from `ITERATIONS.md` and git history.
   extraction.
 - OpenAPI 3.1 spec for the `/api/v1` sensor & scan surface at
   `GET /api/v1/openapi.json` (request schemas generated from the Zod validators;
-  zero new dependencies) plus `docs/API_REFERENCE.md`.
+  zero new dependencies) plus `docs/reference/API_REFERENCE.md`.
 - OTLP/HTTP (JSON) subscription destination type (`otlp`): stream sanitized AI
   activity events to a self-hosted OpenTelemetry collector at `<url>/v1/logs`,
   with an optional `serviceName` resource attribute. Label-only, prompt-free.
@@ -104,9 +104,9 @@ reconstructed from `ITERATIONS.md` and git history.
   `npm run suite:smoke` / `npm run suite`.
 - Focused unit tests for previously untested modules: `server/audit-integrity.js`,
   `server/url-policy.js`, `server/sensor-metadata.js`, `server/ai-app-catalog.js`.
-- Engineering process documentation: `docs/RELEASE_PROCESS.md`,
-  `docs/TESTING_STRATEGY.md`, `docs/CUSTOMER_LICENSING.md`,
-  `docs/SUPPORT_POLICY.md`, `docs/DOCUMENTATION_STANDARDS.md`.
+- Engineering process documentation: `docs/process/RELEASE_PROCESS.md`,
+  `docs/process/TESTING_STRATEGY.md`, `docs/process/CUSTOMER_LICENSING.md`,
+  `docs/process/SUPPORT_POLICY.md`, `docs/process/DOCUMENTATION_STANDARDS.md`.
 - `SECURITY.md`: vulnerability disclosure policy.
 - `package.json` now declares `repository`, `homepage`, and `bugs`.
 

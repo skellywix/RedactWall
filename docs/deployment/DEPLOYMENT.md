@@ -8,12 +8,12 @@ RedactWall has three supported deployment paths:
 
 Use synthetic data for setup checks. Do not seed real member, patient, cardholder, employee, or customer data into a demo.
 
-For AWS paid-customer deployment, see `docs/AWS_SAAS_DEPLOYMENT.md`. The first
+For AWS paid-customer deployment, see `docs/deployment/AWS_SAAS_DEPLOYMENT.md`. The first
 commercial AWS path is one isolated stack per customer with app-level tenant and
 seat enforcement.
 
 For install technicians taking a customer to production readiness, use
-`docs/TECHNICIAN_DEPLOYMENT_GUIDE.md` as the step-by-step runbook and handoff
+`docs/deployment/TECHNICIAN_DEPLOYMENT_GUIDE.md` as the step-by-step runbook and handoff
 checklist.
 
 ## Native Setup
@@ -185,8 +185,8 @@ Set `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, and
 authorization-code callback, state, nonce, RS256 ID-token signature, issuer,
 audience, expiry, and active SCIM user before issuing the normal RedactWall
 session cookie. Keep local Security Admin credentials as the break-glass console
-path. See `docs/SCIM_PROVISIONING.md` for endpoint details and
-`docs/IDENTITY_IDP_SETUP.md` for Microsoft Entra and Okta setup recipes. Logged
+path. See `docs/identity/SCIM_PROVISIONING.md` for endpoint details and
+`docs/identity/IDENTITY_IDP_SETUP.md` for Microsoft Entra and Okta setup recipes. Logged
 in operators can also open the dashboard Identity tab, or print the same
 secret-free handoff from the CLI:
 
@@ -197,7 +197,7 @@ npm run identity:setup -- --provider okta --base-url https://redactwall.customer
 
 ## Scoped Policy And Exceptions
 
-Use `docs/POLICY_SCOPES.md` when a customer needs stricter controls for a user,
+Use `docs/identity/POLICY_SCOPES.md` when a customer needs stricter controls for a user,
 SCIM group, source, channel, destination, detector, or semantic category. The
 control plane applies these scopes on gate and file-scan events and records
 matched scope ids in evidence. Time-bound exceptions can allow matching
@@ -339,12 +339,12 @@ prompt text, tool output, DSNs, SQL text, document IDs, or document content.
 
 Future MCP content connectors must wrap every tool handler with
 `sanitizeToolResult()` or `wrapConnectorTool()` from `sensors/mcp-guard/sdk.js`
-before returning data to the model. See `docs/MCP_CONNECTOR_SDK.md`.
+before returning data to the model. See `docs/connectors/MCP_CONNECTOR_SDK.md`.
 
 For the shipped Microsoft 365 connector, provide a Graph access token through
 the host MCP runtime environment and use least-privileged file scopes for the
 pilot. The connector supports text-readable driveItem content and rejects
-unsupported binary content by default. See `docs/MCP_MICROSOFT365_CONNECTOR.md`.
+unsupported binary content by default. See `docs/connectors/MCP_MICROSOFT365_CONNECTOR.md`.
 When Microsoft 365 environment values are present, `npm run mcp:check` also
 adds sanitized connector health checks for token presence, tenant ID, and scope
 count without printing or posting the token.
@@ -354,7 +354,7 @@ through the host MCP runtime environment and prefer
 `https://www.googleapis.com/auth/drive.readonly` for delegated pilots. The
 connector uses Drive media downloads for blob files and text-oriented exports
 for Google Workspace documents, then redacts before returning MCP output. See
-`docs/MCP_GOOGLE_DRIVE_CONNECTOR.md`. When Google Drive environment values are
+`docs/connectors/MCP_GOOGLE_DRIVE_CONNECTOR.md`. When Google Drive environment values are
 present, `npm run mcp:check` adds sanitized token, optional tenant, and scope
 count health checks without printing or posting the token.
 
@@ -364,7 +364,7 @@ narrowest approved scopes for the pilot: `channels:history` for public channel
 history, `groups:history` for private channels, and `files:read` for private
 file reads. The connector defaults conversation fetches to 15 messages, rejects
 non-Slack private file URLs, rejects unsupported binary file content, and redacts
-before returning MCP output. See `docs/MCP_SLACK_CONNECTOR.md`. When Slack
+before returning MCP output. See `docs/connectors/MCP_SLACK_CONNECTOR.md`. When Slack
 environment values are present, `npm run mcp:check` adds sanitized token,
 optional team or enterprise ID, and scope count health checks without printing
 or posting the token.
@@ -377,7 +377,7 @@ resource-specific read scopes for the pilot, such as
 read scopes only after customer approval. The connector reads channel or chat
 messages, converts HTML message bodies to plain text, caps Graph page size at
 50, and redacts before returning MCP output. See
-`docs/MCP_TEAMS_CONNECTOR.md`. When Teams environment values are present,
+`docs/connectors/MCP_TEAMS_CONNECTOR.md`. When Teams environment values are present,
 `npm run mcp:check` adds sanitized token, optional tenant, and scope count
 health checks without printing or posting the token.
 
@@ -388,7 +388,7 @@ plus `ATLASSIAN_ACCESS_TOKEN` or `ATLASSIAN_API_TOKEN`. Set
 `read:jira-work` and `read:page:confluence` for pilots. The connector reads
 bounded Jira issue fields and Confluence page bodies, converts them to plain
 text, and redacts before returning MCP output. See
-`docs/MCP_ATLASSIAN_CONNECTOR.md`. When Atlassian environment values are
+`docs/connectors/MCP_ATLASSIAN_CONNECTOR.md`. When Atlassian environment values are
 present, `npm run mcp:check` adds sanitized token, tenant, and scope count
 health checks without printing or posting the token, issue key, or page id.
 
@@ -398,7 +398,7 @@ Set `MCP_DATABASE_LABEL` for bounded health evidence and
 `MCP_DATABASE_SCOPES` when a pilot wants a custom scope label. The connector
 opens SQLite with read-only options, accepts only single-statement `SELECT` or
 `WITH` queries, wraps results in an outer `LIMIT`, and redacts rows before
-returning MCP output. See `docs/MCP_DATABASE_READONLY_CONNECTOR.md`. When
+returning MCP output. See `docs/connectors/MCP_DATABASE_READONLY_CONNECTOR.md`. When
 database environment values are present, `npm run mcp:check` adds sanitized DSN
 presence, label, and scope count checks without printing or posting the DSN,
 absolute file path, SQL text, row values, or schema output.
@@ -1237,7 +1237,7 @@ in the Redis key prefix.
 The shared limiter receives only SHA-256 gateway-client limiter keys, requested
 limits, windows, and timestamps. It does not receive raw client tokens, prompts,
 users, destinations, or model output. Check `/healthz` and `/readyz` on both the
-gateway and limiter before routing traffic. See `docs/AI_LLM_GATEWAY.md` for
+gateway and limiter before routing traffic. See `docs/deployment/AI_LLM_GATEWAY.md` for
 provider-specific headers, model allowlists, and streaming behavior.
 
 Security Admins can also edit `blockedFileUploadDestinations` when a customer
@@ -1309,7 +1309,7 @@ REDACTWALL_DATABASE_URL=postgresql://redactwall_app@db.internal:5432/redactwall
 
 For the full operator runbook — application-role setup, migration workflow,
 statement-timeout/retry tuning, Postgres-mode `npm run backup` /
-`npm run backup:drill`, monitoring, and sizing — see `docs/MANAGED_POSTGRES.md`.
+`npm run backup:drill`, monitoring, and sizing — see `docs/deployment/MANAGED_POSTGRES.md`.
 
 What you get on the Postgres driver:
 
@@ -1328,7 +1328,7 @@ What you get on the Postgres driver:
 Backups on Postgres work through the same tooling as SQLite: `npm run backup`
 drives `pg_dump` (custom format) when the store runs on the Postgres driver,
 and `npm run backup:drill` verifies a restore into a scratch database — see
-`docs/MANAGED_POSTGRES.md`. Managed-provider snapshots/PITR remain a good
+`docs/deployment/MANAGED_POSTGRES.md`. Managed-provider snapshots/PITR remain a good
 complement. After restoring any Postgres backup, `node -e
 "console.log(JSON.stringify(require('./server/db').verifyAuditChain()))"`
 must report `ok: true` before the restored plane serves traffic.

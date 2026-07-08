@@ -2517,9 +2517,9 @@ function deployArtifactMetadata() {
         version: manifest.version || require('../package.json').version,
         requires: spec.requires,
         install: spec.install,
-        guide: spec.kind === 'extension' ? 'docs/MANAGED_EXTENSION_DEPLOYMENT.md'
-          : spec.kind === 'endpoint' ? 'docs/TECHNICIAN_DEPLOYMENT_GUIDE.md'
-            : 'docs/MCP_CONNECTOR_SDK.md',
+        guide: spec.kind === 'extension' ? 'docs/deployment/MANAGED_EXTENSION_DEPLOYMENT.md'
+          : spec.kind === 'endpoint' ? 'docs/deployment/TECHNICIAN_DEPLOYMENT_GUIDE.md'
+            : 'docs/connectors/MCP_CONNECTOR_SDK.md',
       };
       fs.rmSync(path.dirname(built.zipPath), { recursive: true, force: true });
       return meta;
@@ -2881,7 +2881,7 @@ function requireNcuaEntitled(req, res, next) {
   return res.status(403).json({ error: 'not_entitled' });
 }
 
-// The operator's evidence-pack schedule (docs/EVIDENCE_PACK_TASK.md keeps it
+// The operator's evidence-pack schedule (docs/deployment/EVIDENCE_PACK_TASK.md keeps it
 // at config/evidence-schedule.json) so readiness export-health reflects the
 // real schedule. Absent or unparseable file = no schedule; never throws.
 function evidenceScheduleSummary() {

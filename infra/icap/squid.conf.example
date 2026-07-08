@@ -51,5 +51,5 @@ http_access deny all
 #   ssl_bump splice all
 #
 # Certificate generation, CA distribution (MDM/GPO), and pinning exceptions
-# are organization-specific; see docs/ICAP_NETWORK_BACKSTOP.md. Without
+# are organization-specific; see docs/deployment/ICAP_NETWORK_BACKSTOP.md. Without
 # ssl-bump, only plain-HTTP traffic is gated by this backstop.

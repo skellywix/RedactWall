@@ -12,18 +12,18 @@ into any demo.
 
 | Need | Use |
 | --- | --- |
-| Client meeting narrative, talk track, objection handling, and timed demo flow | `docs/SALES_DEMO_GUIDE.md` |
-| Laptop or demo workstation setup, extension config, verification, reset, and troubleshooting | `docs/DEMO_TECHNICIAN_SETUP.md` |
-| Production customer install and handoff | `docs/TECHNICIAN_DEPLOYMENT_GUIDE.md` |
-| Native Node, Docker, and deployment reference details | `docs/DEPLOYMENT.md` |
-| Customer-silo AWS paid deployment | `docs/AWS_SAAS_DEPLOYMENT.md` |
-| Managed Chrome extension rollout | `docs/MANAGED_EXTENSION_DEPLOYMENT.md` |
+| Client meeting narrative, talk track, objection handling, and timed demo flow | `docs/demo/SALES_DEMO_GUIDE.md` |
+| Laptop or demo workstation setup, extension config, verification, reset, and troubleshooting | `docs/demo/DEMO_TECHNICIAN_SETUP.md` |
+| Production customer install and handoff | `docs/deployment/TECHNICIAN_DEPLOYMENT_GUIDE.md` |
+| Native Node, Docker, and deployment reference details | `docs/deployment/DEPLOYMENT.md` |
+| Customer-silo AWS paid deployment | `docs/deployment/AWS_SAAS_DEPLOYMENT.md` |
+| Managed Chrome extension rollout | `docs/deployment/MANAGED_EXTENSION_DEPLOYMENT.md` |
 
 For a live client demo, the normal flow is:
 
 1. Technician prepares and verifies the demo machine with
-   `docs/DEMO_TECHNICIAN_SETUP.md`.
-2. Presenter runs the client story from `docs/SALES_DEMO_GUIDE.md`.
+   `docs/demo/DEMO_TECHNICIAN_SETUP.md`.
+2. Presenter runs the client story from `docs/demo/SALES_DEMO_GUIDE.md`.
 3. Presenter closes on examiner evidence, pilot scope, and production readiness.
 4. Technician resets the machine or preserves the approved synthetic evidence
    packet after the meeting.
@@ -118,7 +118,7 @@ This section is generated from the app by `npm run docs:demo-guide`. Do not hand
 | `sensors/browser-extension/background.js` | Browser install-health heartbeat and control-plane relay | Present |
 | `sensors/browser-extension/content.js` | Browser send, paste, upload enforcement | Present |
 | `scripts/check-extension-release.js` | Browser extension release-readiness gate | Present |
-| `docs/EXTENSION_RELEASE_CHECKLIST.md` | Chrome, Edge, and Firefox release checklist | Present |
+| `docs/deployment/EXTENSION_RELEASE_CHECKLIST.md` | Chrome, Edge, and Firefox release checklist | Present |
 | `sensors/endpoint-agent/agent.js` | Local folder and file sensor | Present |
 | `sensors/endpoint-agent/write-handoff.js` | Signed native upload-intent handoff writer | Present |
 | `scripts/check-endpoint-install.js` | Endpoint install validation and heartbeat evidence | Present |
@@ -133,14 +133,14 @@ This section is generated from the app by `npm run docs:demo-guide`. Do not hand
 | `scripts/check-mcp-guard-install.js` | MCP guard install validation and heartbeat evidence | Present |
 | `config/policy.json` | Demo policy defaults | Present |
 | `DEMO_INSTALL_GUIDE.md` | Demo guide hub | Present |
-| `docs/SALES_DEMO_GUIDE.md` | Sales and client-facing demo script | Present |
-| `docs/DEMO_TECHNICIAN_SETUP.md` | Demo machine setup and reset runbook | Present |
-| `docs/DEPLOYMENT.md` | Native Node and Docker deployment reference | Present |
-| `docs/MANAGED_EXTENSION_DEPLOYMENT.md` | Managed browser extension pilot reference | Present |
-| `docs/EVIDENCE_PACK_TASK.md` | Examiner evidence pack scheduled task reference | Present |
-| `docs/APPROVAL_ROUTING.md` | Approval owner and SLA routing reference | Present |
-| `docs/TECHNICIAN_DEPLOYMENT_GUIDE.md` | Install-day production readiness runbook | Present |
-| `docs/AWS_SAAS_DEPLOYMENT.md` | Customer-silo AWS deployment path | Present |
+| `docs/demo/SALES_DEMO_GUIDE.md` | Sales and client-facing demo script | Present |
+| `docs/demo/DEMO_TECHNICIAN_SETUP.md` | Demo machine setup and reset runbook | Present |
+| `docs/deployment/DEPLOYMENT.md` | Native Node and Docker deployment reference | Present |
+| `docs/deployment/MANAGED_EXTENSION_DEPLOYMENT.md` | Managed browser extension pilot reference | Present |
+| `docs/deployment/EVIDENCE_PACK_TASK.md` | Examiner evidence pack scheduled task reference | Present |
+| `docs/identity/APPROVAL_ROUTING.md` | Approval owner and SLA routing reference | Present |
+| `docs/deployment/TECHNICIAN_DEPLOYMENT_GUIDE.md` | Install-day production readiness runbook | Present |
+| `docs/deployment/AWS_SAAS_DEPLOYMENT.md` | Customer-silo AWS deployment path | Present |
 <!-- DEMO_GUIDE_CURRENT_STATE_END -->
 
 ## Demo Contract

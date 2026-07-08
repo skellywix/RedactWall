@@ -182,8 +182,8 @@ test('security trust package lists whitepaper and incident-response docs that ex
   const pack = buildFixturePackage();
   const docPaths = pack.documents.map((item) => item.path);
 
-  assert.ok(docPaths.includes('docs/SECURITY_WHITEPAPER.md'));
-  assert.ok(docPaths.includes('docs/INCIDENT_RESPONSE.md'));
+  assert.ok(docPaths.includes('docs/security/SECURITY_WHITEPAPER.md'));
+  assert.ok(docPaths.includes('docs/security/INCIDENT_RESPONSE.md'));
   for (const docPath of docPaths) {
     assert.ok(fs.existsSync(path.join(__dirname, '..', docPath)), `${docPath} should exist`);
   }

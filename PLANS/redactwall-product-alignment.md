@@ -134,7 +134,7 @@ For this alignment track, completion requires evidence for every area below:
 - Added a secret-free enterprise identity handoff for Microsoft Entra and Okta
   through `server/identity-setup.js`, `/api/identity/setup-guide`, the dashboard
   Identity tab, `npm run identity:setup`, generated setup env placeholders, and
-  `docs/IDENTITY_IDP_SETUP.md`.
+  `docs/identity/IDENTITY_IDP_SETUP.md`.
 - Extended approval routing rules to match SCIM user names, SCIM groups, and
   org ids so provisioned identity can route legal, lending, engineering, or
   other customer review queues without storing raw prompts or file text.

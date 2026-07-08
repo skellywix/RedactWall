@@ -29,7 +29,7 @@ coverage we cannot staff; Sev1 vulnerability notifications follow the
 ## Maintenance and version support
 
 - Monthly minor release train; patch releases as needed
-  (`docs/RELEASE_PROCESS.md`).
+  (`docs/process/RELEASE_PROCESS.md`).
 - **Supported versions: the current and previous minor release.** Security
   fixes are backported to both. Older versions receive best-effort guidance
   to upgrade.
@@ -54,4 +54,4 @@ For vendor-side incidents (bad release, shipped vulnerability):
 - Advisories are published to GitHub Releases/Security Advisories after the
   customer upgrade window.
 - The security incident-response runbook for operators is
-  `docs/INCIDENT_RESPONSE.md`.
+  `docs/security/INCIDENT_RESPONSE.md`.

@@ -10,12 +10,20 @@ workflow.
 - Documentation lives in this repo and changes **in the same commit/PR as the
   code change it describes**. A feature is not done until its doc is updated.
 - Generated sections stay generated: `DEMO_INSTALL_GUIDE.md`,
-  `docs/SALES_DEMO_GUIDE.md`, and `docs/DEMO_TECHNICIAN_SETUP.md` are
+  `docs/demo/SALES_DEMO_GUIDE.md`, and `docs/demo/DEMO_TECHNICIAN_SETUP.md` are
   refreshed by `npm run docs:demo-guide`; CI fails on drift
   (`npm run docs:demo-guide:check`). Never hand-edit generated sections.
 - Every doc must be reachable from the index in `docs/README.md`. An
   unindexed doc is a lost doc.
+- Docs live in topical folders under `docs/` — `deployment/`, `demo/`,
+  `identity/`, `connectors/`, `reference/`, `security/`, `product/`,
+  `process/` — plus `assets/` and `examples/`. New docs go into the folder
+  that matches their job, and into the matching `docs/README.md` section.
 - Relative links must resolve; check them when moving or deleting files.
+  Some doc paths are also pinned in code (`scripts/update-demo-guide.js`,
+  `scripts/check-extension-release.js`, `server/security-package.js`,
+  `server/app.js`, and their tests) — moving those files means updating the
+  code in the same commit.
 
 ## The four document types (Diátaxis)
 
@@ -24,10 +32,10 @@ narrative into reference.
 
 | Type | Purpose | RedactWall examples |
 |------|---------|---------------------|
-| Tutorial | Learning by doing, start to finish | `DEMO_INSTALL_GUIDE.md`, `docs/DEMO_TECHNICIAN_SETUP.md` |
-| How-to | One task, for a competent operator | `docs/DEPLOYMENT.md` sections, `docs/MANAGED_EXTENSION_DEPLOYMENT.md`, `docs/EVIDENCE_PACK_TASK.md` |
-| Reference | Complete, neutral facts | `README.md` API tables, `docs/ACCESS_ROLES.md`, connector docs |
-| Explanation | Why it works this way | `docs/SECURITY_WHITEPAPER.md`, `docs/COMPETITIVE_ALIGNMENT.md`, `DECISIONS.md` |
+| Tutorial | Learning by doing, start to finish | `DEMO_INSTALL_GUIDE.md`, `docs/demo/DEMO_TECHNICIAN_SETUP.md` |
+| How-to | One task, for a competent operator | `docs/deployment/DEPLOYMENT.md` sections, `docs/deployment/MANAGED_EXTENSION_DEPLOYMENT.md`, `docs/deployment/EVIDENCE_PACK_TASK.md` |
+| Reference | Complete, neutral facts | `README.md` API tables, `docs/identity/ACCESS_ROLES.md`, connector docs |
+| Explanation | Why it works this way | `docs/security/SECURITY_WHITEPAPER.md`, `docs/product/COMPETITIVE_ALIGNMENT.md`, `DECISIONS.md` |
 
 ## Style
 

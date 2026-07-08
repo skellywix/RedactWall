@@ -3,8 +3,8 @@
 This guide is for the technicians who install RedactWall for a paying
 customer and hand the environment over as production ready.
 
-Use it as the install-day runbook. `docs/DEPLOYMENT.md` and
-`docs/AWS_SAAS_DEPLOYMENT.md` are the deeper reference docs.
+Use it as the install-day runbook. `docs/deployment/DEPLOYMENT.md` and
+`docs/deployment/AWS_SAAS_DEPLOYMENT.md` are the deeper reference docs.
 
 ## Production-Ready Definition
 
@@ -425,8 +425,8 @@ the approved secret process.
 
 ## Phase 8: Browser Extension Rollout
 
-Use `docs/MANAGED_EXTENSION_DEPLOYMENT.md` for the full managed browser policy reference.
-Use `docs/EXTENSION_RELEASE_CHECKLIST.md` before uploading or handing over a
+Use `docs/deployment/MANAGED_EXTENSION_DEPLOYMENT.md` for the full managed browser policy reference.
+Use `docs/deployment/EXTENSION_RELEASE_CHECKLIST.md` before uploading or handing over a
 Chrome, Edge, or Firefox managed extension package.
 For install day, the technician must confirm these values in managed storage:
 

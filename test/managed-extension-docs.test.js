@@ -12,8 +12,8 @@ const firefoxManaged = JSON.parse(fs.readFileSync(path.join(root, 'docs', 'examp
 const chromeExtensionSettings = JSON.parse(fs.readFileSync(path.join(root, 'docs', 'examples', 'chrome-extension-settings.example.json'), 'utf8'));
 const edgeExtensionSettings = JSON.parse(fs.readFileSync(path.join(root, 'docs', 'examples', 'edge-extension-settings.example.json'), 'utf8'));
 const firefoxExtensionSettings = JSON.parse(fs.readFileSync(path.join(root, 'docs', 'examples', 'firefox-extension-settings.example.json'), 'utf8'));
-const guide = fs.readFileSync(path.join(root, 'docs', 'MANAGED_EXTENSION_DEPLOYMENT.md'), 'utf8');
-const releaseChecklist = fs.readFileSync(path.join(root, 'docs', 'EXTENSION_RELEASE_CHECKLIST.md'), 'utf8');
+const guide = fs.readFileSync(path.join(root, 'docs', 'deployment', 'MANAGED_EXTENSION_DEPLOYMENT.md'), 'utf8');
+const releaseChecklist = fs.readFileSync(path.join(root, 'docs', 'deployment', 'EXTENSION_RELEASE_CHECKLIST.md'), 'utf8');
 
 test('managed storage example uses only schema-backed keys', () => {
   const allowed = new Set(Object.keys(schema.properties));
