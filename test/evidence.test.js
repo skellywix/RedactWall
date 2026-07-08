@@ -887,3 +887,68 @@ test('default pack stays schemaVersion 2 and rejects unknown examiner profiles',
   assert.strictEqual(pack.scope.examinerProfile, undefined);
   assert.strictEqual(pack.ncuaReadiness, undefined);
 });
+
+test('examiner pack sanitizes use-case records at the export boundary', () => {
+  const pack = evidence.buildEvidencePack({
+    generatedAt: '2026-07-07T12:00:00.000Z',
+    examinerProfile: 'federal_credit_union',
+    policy: {},
+    auditIntegrity: { ok: true, count: 0 },
+    queries: [],
+    audit: [],
+    useCases: [{
+      id: 'uc_1',
+      canonicalHost: 'chat.openai.com',
+      department: 'Lending',
+      owner: 'owner with SSN 524-71-9043 embedded',
+      approvedUse: 'card 4111 1111 1111 1111 pasted here',
+      allowedDataClasses: ['MEMBER_ID'],
+      reviewStatus: 'approved',
+      vendorStatus: 'reviewed',
+      nextReviewAt: '2027-01-01T00:00:00Z',
+      createdAt: '2026-07-01T00:00:00Z',
+      updatedAt: '2026-07-01T00:00:00Z',
+    }],
+  });
+
+  assert.strictEqual(pack.useCases.summary.total, 1);
+  assert.strictEqual(pack.useCases.records.length, 1);
+  assert.strictEqual(pack.useCases.records[0].owner, '[redacted]');
+  assert.strictEqual(pack.useCases.records[0].approvedUse, '[redacted]');
+  assert.ok(pack.controlMappings.some((c) => c.id === 'ai_use_inventory' && c.state === 'covered'));
+  const wire = JSON.stringify(pack);
+  assert.ok(!wire.includes('524-71-9043'));
+  assert.ok(!wire.includes('4111 1111'));
+});
+
+test('default packs carry no use-case records section', () => {
+  const pack = evidence.buildEvidencePack({
+    generatedAt: '2026-07-07T12:00:00.000Z',
+    policy: {},
+    auditIntegrity: { ok: true, count: 0 },
+    queries: [],
+    audit: [],
+    useCases: [{ id: 'uc_1', canonicalHost: 'claude.ai', department: 'IT', reviewStatus: 'approved' }],
+  });
+  assert.strictEqual(pack.schemaVersion, 2);
+  assert.strictEqual(pack.useCases, undefined);
+  assert.ok(pack.controlMappings.some((c) => c.id === 'ai_use_inventory' && c.state === 'covered'));
+});
+
+test('empty inventory grades attention when provided; absent inventory stays not_provided', () => {
+  const build = (useCases) => evidence.buildEvidencePack({
+    generatedAt: '2026-07-07T12:00:00.000Z',
+    policy: {},
+    auditIntegrity: { ok: true, count: 0 },
+    queries: [],
+    audit: [],
+    ...(useCases !== undefined ? { useCases } : {}),
+  });
+
+  const provided = build([]);
+  assert.strictEqual(provided.controlMappings.find((c) => c.id === 'ai_use_inventory').state, 'attention');
+  // Unentitled installs never pass rows, so their packs keep the honest state.
+  const absent = build(undefined);
+  assert.strictEqual(absent.controlMappings.find((c) => c.id === 'ai_use_inventory').state, 'not_provided');
+  assert.strictEqual(absent.controlMappings.find((c) => c.id === 'vendor_service_provider_oversight').state, 'not_provided');
+});

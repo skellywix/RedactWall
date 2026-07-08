@@ -675,6 +675,103 @@ const upsertAiApp = sdb.transaction((canonicalHost, patch, now) => {
   return record;
 });
 
+// ---- AI use-case inventory (PLANS/ncua-readiness-center.md slice 2) -----------
+const useCaseInsert = sdb.prepare('INSERT INTO ai_use_cases (id, orgId, canonicalHost, department, reviewStatus, nextReviewAt, createdAt, updatedAt, data) VALUES (@id, @orgId, @canonicalHost, @department, @reviewStatus, @nextReviewAt, @createdAt, @updatedAt, @data)');
+const useCaseById = sdb.prepare('SELECT data FROM ai_use_cases WHERE id = ?');
+const useCaseByKey = sdb.prepare('SELECT data FROM ai_use_cases WHERE canonicalHost = ? AND department = ?');
+const useCaseUpdate = sdb.prepare('UPDATE ai_use_cases SET orgId = @orgId, reviewStatus = @reviewStatus, nextReviewAt = @nextReviewAt, updatedAt = @updatedAt, data = @data WHERE id = @id');
+
+// Departments are stored normalized: the unique-key column is trimmed,
+// single-spaced, AND lowercased so 'Lending' and 'lending ' cannot become two
+// rows under the default case-sensitive collation; the record keeps the
+// operator's display casing.
+const departmentDisplay = (value) => String(value || '').trim().replace(/\s+/g, ' ');
+const departmentKey = (value) => departmentDisplay(value).toLowerCase();
+
+// Drop undefined-valued keys before merging a patch over a stored record: a
+// route that omits a field must not erase it (spread copies undefined keys and
+// JSON.stringify then deletes them).
+function definedEntries(record) {
+  return Object.fromEntries(Object.entries(record || {}).filter(([, value]) => value !== undefined));
+}
+
+function getAiUseCase(useCaseId) {
+  const row = useCaseById.get(useCaseId);
+  return row ? JSON.parse(row.data) : null;
+}
+
+function listAiUseCases() {
+  return sdb.prepare('SELECT data FROM ai_use_cases ORDER BY department, canonicalHost, seq').all().map((r) => JSON.parse(r.data));
+}
+
+function useCaseRow(merged, now) {
+  return {
+    id: merged.id,
+    orgId: merged.orgId,
+    canonicalHost: merged.canonicalHost,
+    department: departmentKey(merged.department),
+    reviewStatus: merged.reviewStatus,
+    nextReviewAt: merged.nextReviewAt || null,
+    createdAt: merged.createdAt,
+    updatedAt: now,
+    data: JSON.stringify(merged),
+  };
+}
+
+function buildUseCaseMerge(existing, record, now) {
+  // A stamped tenant id is never erased by a later write from an unconfigured
+  // process (orgColumn('') is null); insert-time defaults must not clobber a
+  // reviewed record on re-POST — only reviews change review evidence.
+  const stampedOrg = orgColumn(record.orgId);
+  return {
+    ...(existing || { vendorStatus: 'not_reviewed', allowedDataClasses: [] }),
+    ...definedEntries(record),
+    id: existing ? existing.id : id('uc'),
+    canonicalHost: record.canonicalHost,
+    department: departmentDisplay(record.department),
+    orgId: stampedOrg != null ? stampedOrg : orgColumn(existing && existing.orgId),
+    reviewStatus: record.reviewStatus || (existing && existing.reviewStatus) || 'under_review',
+    createdAt: existing ? existing.createdAt : now,
+    updatedAt: now,
+  };
+}
+
+// Insert-or-update keyed by (canonicalHost, department) so each department's
+// approval of the same tool stays a distinct record ("ChatGPT in Lending" is
+// not "ChatGPT in Marketing"). The concurrent-insert race loses to the unique
+// index; one retry re-reads the winner and applies this write as an update.
+const upsertAiUseCase = sdb.transaction((record, now, retried = false) => {
+  const row = useCaseByKey.get(record.canonicalHost, departmentKey(record.department));
+  const existing = row ? JSON.parse(row.data) : null;
+  const merged = buildUseCaseMerge(existing, record, now);
+  try {
+    if (existing) useCaseUpdate.run(useCaseRow(merged, now));
+    else useCaseInsert.run(useCaseRow(merged, now));
+  } catch (e) {
+    if (retried || !/unique/i.test(String(e && e.message))) throw e;
+    return upsertAiUseCase(record, now, true);
+  }
+  return merged;
+});
+
+// Review decision on an existing record; returns null for an unknown id.
+const reviewAiUseCase = sdb.transaction((useCaseId, patch, now) => {
+  const existing = getAiUseCase(useCaseId);
+  if (!existing) return null;
+  const merged = {
+    ...existing,
+    ...definedEntries(patch),
+    id: existing.id,
+    canonicalHost: existing.canonicalHost,
+    department: existing.department,
+    orgId: orgColumn(existing.orgId),
+    createdAt: existing.createdAt,
+    updatedAt: now,
+  };
+  useCaseUpdate.run(useCaseRow(merged, now));
+  return merged;
+});
+
 // ---- Delivery history (SIEM/SOAR subscriptions) ------------------------------
 const deliveryInsert = sdb.prepare('INSERT INTO deliveries (id, ts, destId, dedupeKey, status, data) VALUES (@id, @ts, @destId, @dedupeKey, @status, @data)');
 
@@ -708,6 +805,7 @@ module.exports = {
   mfaRecoveryCodeUsed, consumeMfaRecoveryCode,
   getScimGroup, getScimGroupByDisplayName, listScimGroups, saveScimGroup, deleteScimGroup,
   getAiApp, listAiApps, upsertAiApp,
+  listAiUseCases, upsertAiUseCase, reviewAiUseCase,
   recordDelivery, listDeliveries, recentDeliverySuccess,
   setTenantContext,
   _canonical: canonical, _db: sdb, _dbPath: DB_PATH, _driverKind: DRIVER_KIND,

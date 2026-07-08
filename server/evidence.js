@@ -228,6 +228,30 @@ function safeBackupEvidence(input) {
   };
 }
 
+// Use-case inventory records for the examiner pack. EVERY string field —
+// not only the free-text ones — passes safeThreatText (bounded plus
+// SSN/card/secret pattern redaction) at this export boundary, on top of the
+// create-time validation, so a record written by any path can never carry
+// member PII out.
+function safeUseCaseRecord(record) {
+  if (!record || typeof record !== 'object') return null;
+  return {
+    id: safeThreatText(record.id, 80),
+    destination: safeThreatText(record.canonicalHost, 253),
+    department: safeThreatText(record.department, 80),
+    owner: safeThreatText(record.owner, 160),
+    approvedUse: safeThreatText(record.approvedUse, 240),
+    allowedDataClasses: (Array.isArray(record.allowedDataClasses) ? record.allowedDataClasses : [])
+      .slice(0, 24).map((idText) => safeThreatText(idText, 80)),
+    reviewStatus: safeThreatText(record.reviewStatus, 40),
+    vendorStatus: safeThreatText(record.vendorStatus, 40) || 'not_reviewed',
+    nextReviewAt: safeThreatText(record.nextReviewAt, 80),
+    policyScopeId: safeThreatText(record.policyScopeId, 64),
+    createdAt: safeThreatText(record.createdAt, 80),
+    updatedAt: safeThreatText(record.updatedAt, 80),
+  };
+}
+
 // EDM watchlist status for examiner review: counts and thresholds only. The
 // salt and fingerprint list never leave server/exact-match.js.
 function safeEdmSummary(edm) {
@@ -819,6 +843,8 @@ function buildEvidencePack(input) {
   const restoreDrill = safeRestoreDrillEvidence(input.restoreDrill);
   const examinerProfile = ncuaReadiness.isProfile(input.examinerProfile) ? input.examinerProfile : null;
   const edm = safeEdmSummary(input.edm);
+  const useCaseRows = Array.isArray(input.useCases) ? input.useCases : null;
+  const useCases = ncuaReadiness.useCasesSummary(useCaseRows, now);
   const scope = {
     queryLimit: input.queryLimit,
     auditLimit: input.auditLimit,
@@ -840,6 +866,7 @@ function buildEvidencePack(input) {
     backup,
     restoreDrill,
     edm,
+    useCases,
   });
   const report = safeReport(input.report, now);
   return {
@@ -874,10 +901,15 @@ function buildEvidencePack(input) {
         edm,
         catalog: input.catalog,
         queries: lineageQueries,
+        useCases,
         // The whitelisted schedule from safeReport, not the raw input, so the
         // readiness section can't carry unvetted schedule-config fields.
         reportSchedule: report.schedule,
       }),
+      useCases: {
+        summary: useCases,
+        records: (useCaseRows || []).slice(0, 200).map(safeUseCaseRecord).filter(Boolean),
+      },
     } : {}),
     lineage: buildLineage(lineageQueries),
     detectors: input.detectors || [],

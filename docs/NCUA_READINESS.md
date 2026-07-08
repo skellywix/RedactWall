@@ -66,6 +66,64 @@ Talking points that map to NCUA 2026 exam priorities:
 | "Show me your monitoring evidence." | Hash-chained audit (`auditIntegrity.ok`), coverage totals, safe-to-send receipts |
 | "What happens when something gets through?" | Approval workflow, exception review lifecycle (`policyExceptionReview`), incident workflow (slice 3) |
 
+## AI use-case inventory
+
+NCUA's 2026 exam priorities put "what AI is in use, for what, approved by
+whom" first. The inventory lives in the NCUA Readiness view: one record per
+**(tool host, department)**, so "ChatGPT in Lending" and "ChatGPT in
+Marketing" carry separate approvals, owners, allowed data classes, review
+status, vendor-review status, and next-review dates.
+
+- Records are Security-Admin mutations (CSRF-protected); every change appends
+  a `USE_CASE_UPDATED` / `USE_CASE_REVIEWED` audit entry carrying enums,
+  counts, and dates only — never the operator's free text.
+- Input validation keeps records inventory-shaped: hostname-only
+  destinations (no URLs or paths), single-line bounded text with sensitive
+  codes rejected, `allowedDataClasses` validated against real detector ids.
+- The `ai_use_inventory` control goes **covered** when records exist and no
+  review is overdue; `vendor_service_provider_oversight` goes covered when
+  every active use case has vendor review completed.
+- Examiner packs embed the summary plus records with free-text fields passed
+  through pattern redaction at the export boundary.
+
+## Department scoped-policy pack
+
+Department differentiation ships as **tighten-only `policyScopes`** on top of
+the `ncua_glba` base template (`docs/POLICY_SCOPES.md`) — never as competing
+templates that would overwrite each other. A starting preset for a federal
+credit union with SCIM groups provisioned:
+
+```json
+{
+  "policyScopes": [
+    { "id": "cu_lending", "groups": ["Lending"], "enforcementMode": "block",
+      "blockMinSeverity": 2, "blockRiskScore": 15,
+      "alwaysBlockAdd": ["DOB", "US_DRIVERS_LICENSE"], "reason": "member_loan_files" },
+    { "id": "cu_member_services", "groups": ["Member Services", "Contact Center"],
+      "enforcementMode": "block", "blockMinSeverity": 2, "blockRiskScore": 15,
+      "reason": "member_contact_data" },
+    { "id": "cu_collections", "groups": ["Collections"], "enforcementMode": "block",
+      "blockMinSeverity": 2, "blockRiskScore": 10, "reason": "delinquency_data" },
+    { "id": "cu_marketing", "groups": ["Marketing"], "enforcementMode": "block",
+      "blockMinSeverity": 3, "blockRiskScore": 25, "reason": "member_lists" },
+    { "id": "cu_it_developers", "groups": ["IT", "Developers"],
+      "alwaysBlockAdd": ["SECRET_KEY", "PRIVATE_KEY"], "reason": "credentials_and_source" },
+    { "id": "cu_compliance", "groups": ["Compliance"], "enforcementMode": "block",
+      "blockMinSeverity": 2, "blockRiskScore": 10, "reason": "exam_and_bsa_material" },
+    { "id": "cu_executives", "groups": ["Executives", "Board"], "enforcementMode": "block",
+      "blockMinSeverity": 2, "blockRiskScore": 15, "reason": "board_material" }
+  ]
+}
+```
+
+Pair the pack with the safe defaults the readiness score already checks:
+`blockUnapprovedAiDestinations: true` (default-deny unapproved AI tools),
+required browser/endpoint/MCP sensors, and **member-data routing** — send
+member-identifier events to the compliance group via `approvalRoutingRules`
+(`docs/APPROVAL_ROUTING.md`), e.g. route `detectors: ["MEMBER_ID",
+"LOAN_NUMBER", "EXACT_MATCH"]` to `group: "compliance"`, so a member-data
+hold always lands with the team that answers to the examiner.
+
 ## Core-banking EDM import
 
 `config/exact-match.json` holds **only** a salt and one-way fingerprints.

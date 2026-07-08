@@ -145,6 +145,17 @@ test('GOVERN views render live content without errors', async ({ page, request }
   await assertGroupRenders(page, request, '8103', ROUTES.govern);
 });
 
+test('NCUA use-case inventory panel mounts with its empty state', async ({ page, request }) => {
+  const problems = collectUiProblems(page);
+  await createHeldPrompt(request, '8106');
+  await login(page);
+  await page.goto('/app/#/ncua');
+  await expect(page.getByRole('heading', { name: 'AI use-case inventory', exact: true })).toBeVisible();
+  await expect(page.locator('.panel', { hasText: 'AI use-case inventory' }).locator('.empty'))
+    .toContainText('No AI use cases recorded yet');
+  expect(problems).toEqual([]);
+});
+
 test('SYSTEM views render live content without errors', async ({ page, request }) => {
   await assertGroupRenders(page, request, '8104', ROUTES.system);
 });

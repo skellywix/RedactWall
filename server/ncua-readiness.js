@@ -16,6 +16,8 @@ const PROFILES = new Set(['federal_credit_union']);
 const { MEMBER_IDENTIFIERS } = controlMap;
 const CONTROL_TARGET_TABS = {
   member_information_safeguards: 'ncua',
+  ai_use_inventory: 'ncua',
+  vendor_service_provider_oversight: 'ncua',
   ai_usage_governance: 'catalog',
   fleet_sensor_coverage: 'coverage',
   backup_recoverability: 'deploy',
@@ -74,6 +76,31 @@ function shadowAiPanel(catalog = []) {
     unsanctioned: count('unsanctioned'),
     blocked: count('blocked'),
     unreviewedEvents: unsanctioned.reduce((sum, app) => sum + n(app.eventCount), 0),
+  };
+}
+
+const USE_CASE_ACTIVE = new Set(['approved', 'under_review', 'restricted']);
+
+// Prompt-free rollup of inventory rows for readiness scoring, control states,
+// and evidence. Counts and dates only — the rows' free-text fields
+// (owner/approvedUse/department) never enter the summary.
+function useCasesSummary(rows, nowIso) {
+  if (!Array.isArray(rows)) return null;
+  const nowMs = Date.parse(nowIso || '') || Date.now();
+  const status = (row) => String((row && row.reviewStatus) || '');
+  const vendor = (row) => String((row && row.vendorStatus) || 'not_reviewed');
+  const active = rows.filter((row) => USE_CASE_ACTIVE.has(status(row)));
+  return {
+    total: rows.length,
+    approved: rows.filter((row) => status(row) === 'approved').length,
+    underReview: rows.filter((row) => status(row) === 'under_review').length,
+    restricted: rows.filter((row) => status(row) === 'restricted').length,
+    retired: rows.filter((row) => status(row) === 'retired').length,
+    overdue: active.filter((row) => row.nextReviewAt && Date.parse(row.nextReviewAt) < nowMs).length,
+    activeTotal: active.length,
+    vendorReviewed: active.filter((row) => vendor(row) === 'reviewed').length,
+    vendorPending: active.filter((row) => vendor(row) === 'pending').length,
+    vendorNotReviewed: active.filter((row) => vendor(row) === 'not_reviewed').length,
   };
 }
 
@@ -162,6 +189,7 @@ function summarize(input = {}) {
       memberData: memberDataPanel(input.queries),
       shadowAi: shadowAiPanel(input.catalog),
       edm: edmPanel(input.edm),
+      useCases: (input.useCases && typeof input.useCases === 'object') ? input.useCases : null,
       exceptions: exceptionsPanel(input.policyExceptionReview),
       exportHealth: exportHealthPanel(input.reportSchedule),
       audit,
@@ -170,4 +198,4 @@ function summarize(input = {}) {
   };
 }
 
-module.exports = { summarize, isProfile, _internal: { memberDataPanel, shadowAiPanel, edmPanel, scoreControls, stateFor } };
+module.exports = { summarize, isProfile, useCasesSummary, _internal: { memberDataPanel, shadowAiPanel, edmPanel, scoreControls, stateFor } };

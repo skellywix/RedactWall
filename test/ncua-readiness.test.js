@@ -156,11 +156,60 @@ test('control map flags incomplete member-identifier hard stops', () => {
   assert.match(control.summary, /MEMBER_ID/);
 });
 
-test('control map keeps slice-2/3 controls not_provided with honest summaries', () => {
+test('controls without evidence inputs stay not_provided with honest summaries', () => {
   const mappings = controlMap.buildControlMappings({ generatedAt: '2026-07-07T12:00:00.000Z', policy: FCU_POLICY });
   for (const id of ['ai_use_inventory', 'vendor_service_provider_oversight', 'incident_readiness', 'board_reporting']) {
     const control = mappings.find((c) => c.id === id);
     assert.strictEqual(control.state, 'not_provided');
     assert.match(control.summary, /not yet attached/);
   }
+});
+
+test('use-case summary rolls up counts, overdue reviews, and vendor status', () => {
+  const rows = [
+    { reviewStatus: 'approved', vendorStatus: 'reviewed', nextReviewAt: '2027-01-01T00:00:00Z' },
+    { reviewStatus: 'under_review', vendorStatus: 'pending', nextReviewAt: '2026-01-01T00:00:00Z' },
+    { reviewStatus: 'restricted' },
+    { reviewStatus: 'retired', vendorStatus: 'not_reviewed' },
+  ];
+  const summary = ncuaReadiness.useCasesSummary(rows, '2026-07-07T12:00:00.000Z');
+
+  assert.deepStrictEqual(summary, {
+    total: 4,
+    approved: 1,
+    underReview: 1,
+    restricted: 1,
+    retired: 1,
+    overdue: 1,
+    activeTotal: 3,
+    vendorReviewed: 1,
+    vendorPending: 1,
+    vendorNotReviewed: 1,
+  });
+  assert.strictEqual(ncuaReadiness.useCasesSummary(undefined, '2026-07-07T12:00:00.000Z'), null);
+});
+
+test('use-case controls go live from the summary and never leak free text', () => {
+  const currentSummary = ncuaReadiness.useCasesSummary(
+    [{ reviewStatus: 'approved', vendorStatus: 'reviewed', owner: 'owner-decoy', approvedUse: 'use-decoy' }],
+    '2026-07-07T12:00:00.000Z',
+  );
+  const report = ncuaReadiness.summarize(baseInput({ useCases: currentSummary }));
+
+  const inventory = report.controls.find((c) => c.id === 'ai_use_inventory');
+  const vendor = report.controls.find((c) => c.id === 'vendor_service_provider_oversight');
+  assert.strictEqual(inventory.state, 'covered');
+  assert.strictEqual(vendor.state, 'covered');
+  assert.strictEqual(report.panels.useCases.total, 1);
+  const wire = JSON.stringify(report);
+  assert.ok(!wire.includes('owner-decoy'));
+  assert.ok(!wire.includes('use-decoy'));
+
+  const overdueSummary = ncuaReadiness.useCasesSummary(
+    [{ reviewStatus: 'approved', vendorStatus: 'not_reviewed', nextReviewAt: '2026-01-01T00:00:00Z' }],
+    '2026-07-07T12:00:00.000Z',
+  );
+  const stale = ncuaReadiness.summarize(baseInput({ useCases: overdueSummary }));
+  assert.strictEqual(stale.controls.find((c) => c.id === 'ai_use_inventory').state, 'attention');
+  assert.strictEqual(stale.controls.find((c) => c.id === 'vendor_service_provider_oversight').state, 'attention');
 });

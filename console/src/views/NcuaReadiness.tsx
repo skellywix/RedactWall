@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import UseCasesPanel from '../components/ncua/UseCasesPanel';
 import { EmptyState } from '../components/Panel';
 import { apiJson } from '../lib/api';
 import { navigate } from '../lib/router';
@@ -51,6 +52,7 @@ interface NcuaReport {
     memberData: { identifiers: string[]; events: number; prevented: number; redacted: number; released: number };
     shadowAi: { totalApps: number; sanctioned: number; underReview: number; tolerated: number; unsanctioned: number; blocked: number; unreviewedEvents: number };
     edm: { configured: boolean; enabled: boolean; active: boolean; fingerprints: number; minLength?: number; severity?: number };
+    useCases: { total: number; approved: number; underReview: number; restricted: number; retired: number; overdue: number; activeTotal: number; vendorReviewed: number; vendorPending: number; vendorNotReviewed: number } | null;
     exceptions: { total: number; active: number; expiringSoon: number; reviewDue: number; expired: number; disabled: number } | null;
     exportHealth: { scheduled: boolean; cadence?: string | null; nextRunAt?: string | null; retentionDays?: number | null };
     audit: { verified: boolean; count: number };
@@ -296,6 +298,7 @@ export default function NcuaReadiness() {
       <>
         <KpiRow report={report} />
         <NextActionsPanel actions={report.nextActions} />
+        <UseCasesPanel />
         <div className="insights-grid">
           <EdmPanel edm={report.panels.edm} />
           <CountsPanel

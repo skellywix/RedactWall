@@ -264,6 +264,60 @@ const MIGRATIONS = [
       CREATE INDEX IF NOT EXISTS idx_audit_action ON audit(action);
     `,
   },
+  {
+    version: 5,
+    name: 'ai-use-cases',
+    // AI use-case inventory (PLANS/ncua-readiness-center.md slice 2): one row
+    // per (canonicalHost, department) so "ChatGPT in Lending" and "ChatGPT in
+    // Marketing" carry separate approvals. Tenant-ready from day one: orgId is
+    // written with the v4-corrected normalization (trim + lowercase, empty ->
+    // NULL) and Postgres rows are isolated with the same RLS policy shape as
+    // queries. department is stored normalized (trimmed, single-spaced) so the
+    // unique index needs no dialect-specific expression support.
+    sqlite: `
+      CREATE TABLE IF NOT EXISTS ai_use_cases (
+        seq           INTEGER PRIMARY KEY AUTOINCREMENT,
+        id            TEXT UNIQUE NOT NULL,
+        orgId         TEXT,
+        canonicalHost TEXT NOT NULL,
+        department    TEXT NOT NULL,
+        reviewStatus  TEXT NOT NULL,
+        nextReviewAt  TEXT,
+        createdAt     TEXT NOT NULL,
+        updatedAt     TEXT NOT NULL,
+        data          TEXT NOT NULL
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_use_cases_host_dept ON ai_use_cases(canonicalHost, department);
+      CREATE INDEX IF NOT EXISTS idx_ai_use_cases_org ON ai_use_cases(orgId);
+      CREATE INDEX IF NOT EXISTS idx_ai_use_cases_review ON ai_use_cases(reviewStatus, nextReviewAt);
+    `,
+    postgres: `
+      CREATE TABLE IF NOT EXISTS ai_use_cases (
+        seq             BIGSERIAL PRIMARY KEY,
+        id              TEXT UNIQUE NOT NULL,
+        "orgId"         TEXT,
+        "canonicalHost" TEXT NOT NULL,
+        department      TEXT NOT NULL,
+        "reviewStatus"  TEXT NOT NULL,
+        "nextReviewAt"  TEXT,
+        "createdAt"     TEXT NOT NULL,
+        "updatedAt"     TEXT NOT NULL,
+        data            TEXT NOT NULL
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_use_cases_host_dept ON ai_use_cases("canonicalHost", department);
+      CREATE INDEX IF NOT EXISTS idx_ai_use_cases_org ON ai_use_cases("orgId");
+      CREATE INDEX IF NOT EXISTS idx_ai_use_cases_review ON ai_use_cases("reviewStatus", "nextReviewAt");
+
+      ALTER TABLE ai_use_cases ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE ai_use_cases FORCE ROW LEVEL SECURITY;
+      DROP POLICY IF EXISTS ai_use_cases_tenant_isolation ON ai_use_cases;
+      CREATE POLICY ai_use_cases_tenant_isolation ON ai_use_cases
+        USING (COALESCE(current_setting('redactwall.org_id', true), '') = ''
+          OR "orgId" = current_setting('redactwall.org_id', true))
+        WITH CHECK (COALESCE(current_setting('redactwall.org_id', true), '') = ''
+          OR "orgId" = current_setting('redactwall.org_id', true));
+    `,
+  },
 ];
 
 module.exports = { MIGRATIONS };

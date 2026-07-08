@@ -97,6 +97,11 @@ function buildEvidencePackFromRuntime(options = {}) {
   const customDetectors = options.customDetectorsModule || require('../server/custom-detectors');
   const exactMatch = options.exactMatchModule || require('../server/exact-match');
   const appCatalog = options.appCatalogModule || require('../server/app-catalog');
+  const license = options.licenseModule || require('../server/license');
+  // The CLI process starts unlicensed until it reads redactwall.lic; refresh
+  // so the entitlement matches what the running control plane enforces.
+  if (!options.licenseModule) license.refresh();
+  const useCasesEntitled = license.entitled('ncua_readiness');
   const pkg = options.packageInfo || require('../package.json');
   const queryLimit = boundedNumber(options.queryLimit, DEFAULT_QUERY_LIMIT);
   const auditLimit = boundedNumber(options.auditLimit, DEFAULT_AUDIT_LIMIT);
@@ -139,6 +144,7 @@ function buildEvidencePackFromRuntime(options = {}) {
     restoreDrill: verified.restoreDrill,
     edm: exactMatch.publicSummary(),
     catalog: appCatalog.reviewRollup(),
+    useCases: useCasesEntitled && typeof db.listAiUseCases === 'function' ? db.listAiUseCases() : undefined,
     examinerProfile: options.examinerProfile,
     policyExceptionReview: typeof policy.policyExceptionReview === 'function'
       ? policy.policyExceptionReview(activePolicy)
