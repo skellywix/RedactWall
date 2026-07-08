@@ -193,3 +193,25 @@ test('G4: redacting the response also rewrites tool-call arguments', () => {
   const out = canonical.mapResponseText(resp, (t) => t.replace(/123-45-6789/g, '[REDACTED]'));
   assert.ok(!/123-45-6789/.test(JSON.stringify(out)), 'tool-call args are redacted, not passed through');
 });
+
+// ---------------------------------------------------------------------------
+// R1 — the SSRF denylist only matched dotted-quad literals, so decimal / octal
+// / hex / short IPv4 encodings of loopback and the cloud-metadata address
+// slipped past. (DNS-rebinding + redirect re-validation remain follow-ups.)
+// ---------------------------------------------------------------------------
+const urlPolicy = require('../server/url-policy');
+test('R1: alternate IPv4 encodings of loopback/metadata are blocked', () => {
+  for (const host of ['2130706433', '0177.0.0.1', '127.1', '0x7f.0.0.1', '0x7f000001']) {
+    assert.strictEqual(urlPolicy.isBlockedHost(host), true, `${host} (loopback) blocked`);
+    assert.strictEqual(urlPolicy.outboundHttpsUrl(`https://${host}/hook`), '', `${host} URL rejected`);
+  }
+  for (const host of ['2852039166', '0xA9FE0001', '169.254.169.254']) {
+    assert.strictEqual(urlPolicy.isBlockedHost(host), true, `${host} (metadata/link-local) blocked`);
+  }
+});
+test('R1: legitimate public and RFC1918 hosts are still allowed', () => {
+  for (const host of ['example.com', '8.8.8.8', '10.0.0.5', '192.168.1.10', '172.16.4.4']) {
+    assert.strictEqual(urlPolicy.isBlockedHost(host), false, `${host} allowed`);
+  }
+  assert.ok(urlPolicy.outboundHttpsUrl('https://siem.internal.example.com/ingest'), 'internal SIEM host allowed');
+});

@@ -5,14 +5,41 @@
 // endpoint 169.254.169.254), and the unspecified address. RFC1918 private ranges
 // (10/8, 172.16/12, 192.168/16) are intentionally allowed because this is a
 // self-hosted product whose SIEM/webhook often lives on an internal network.
+// Parse an IPv4 literal in ANY inet_aton form the resolver accepts — dotted
+// quad, but also decimal (2130706433), octal (0177.0.0.1), hex (0x7f000001),
+// and short forms (127.1) — to a 32-bit value, or null if it isn't an IPv4
+// literal. A plain denylist over dotted-quad text let all the other encodings
+// of 127.0.0.1 / 169.254.169.254 through (SSRF bypass, review finding R1).
+function parseIpv4Loose(host) {
+  const parts = String(host).split('.');
+  if (!parts.length || parts.length > 4) return null;
+  const nums = [];
+  for (const p of parts) {
+    if (p === '') return null;
+    let n;
+    if (/^0x[0-9a-f]+$/i.test(p)) n = parseInt(p, 16);
+    else if (/^0[0-7]*$/.test(p)) n = parseInt(p, 8);
+    else if (/^[1-9][0-9]*$/.test(p)) n = parseInt(p, 10);
+    else return null;
+    if (!Number.isInteger(n) || n < 0) return null;
+    nums.push(n);
+  }
+  const last = nums.length - 1;
+  for (let i = 0; i < last; i++) if (nums[i] > 255) return null; // leading bytes are octets
+  if (nums[last] >= Math.pow(256, 4 - last)) return null;        // trailing value fits remaining bytes
+  let value = nums[last];
+  for (let i = 0; i < last; i++) value += nums[i] * Math.pow(256, 3 - i);
+  return value >>> 0;
+}
+
 function isBlockedIpv4(host) {
-  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
-  if (!m) return false;
-  const o = m.slice(1).map(Number);
-  if (o.some((n) => n > 255)) return true; // malformed octet — reject
-  if (o[0] === 127) return true;           // 127.0.0.0/8 loopback
-  if (o[0] === 0) return true;             // 0.0.0.0/8 unspecified/this-host
-  if (o[0] === 169 && o[1] === 254) return true; // 169.254.0.0/16 link-local (metadata)
+  const v = parseIpv4Loose(host);
+  if (v === null) return false;
+  const b0 = (v >>> 24) & 0xff;
+  const b1 = (v >>> 16) & 0xff;
+  if (b0 === 127) return true;              // 127.0.0.0/8 loopback
+  if (b0 === 0) return true;                // 0.0.0.0/8 unspecified/this-host
+  if (b0 === 169 && b1 === 254) return true; // 169.254.0.0/16 link-local (metadata)
   return false;
 }
 
