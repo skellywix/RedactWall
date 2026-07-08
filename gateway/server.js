@@ -79,6 +79,24 @@ function redactBodyLocally(body) {
     return next;
   }
   const tokArray = (arr) => arr.map((p) => (typeof p === 'string' ? tok(p) : p));
+  // Tokenize PII in tool/function DEFINITIONS (description + parameters schema)
+  // so a redact verdict doesn't forward raw PII embedded in a tool spec. The
+  // function NAME is left intact — tokens contain `[` `]` which are invalid in
+  // OpenAI function names — and the residual check in handle() fails closed if
+  // any untokenized field still carries PII.
+  function tokDeep(v) {
+    if (typeof v === 'string') return tok(v);
+    if (Array.isArray(v)) return v.map(tokDeep);
+    if (v && typeof v === 'object') { const o = {}; for (const k of Object.keys(v)) o[k] = tokDeep(v[k]); return o; }
+    return v;
+  }
+  function tokFnDef(fn) {
+    if (!fn || typeof fn !== 'object') return fn;
+    const nextFn = { ...fn };
+    if (typeof fn.description === 'string') nextFn.description = tok(fn.description);
+    if (fn.parameters != null) nextFn.parameters = tokDeep(fn.parameters);
+    return nextFn;
+  }
   const out = { ...body };
   if (Array.isArray(body.messages)) {
     out.messages = body.messages.map(tokMessage);
@@ -86,6 +104,8 @@ function redactBodyLocally(body) {
   else if (Array.isArray(body.prompt)) { out.prompt = tokArray(body.prompt); }
   else if (typeof body.input === 'string') { out.input = tok(body.input); }
   else if (Array.isArray(body.input)) { out.input = tokArray(body.input); }
+  if (Array.isArray(body.tools)) out.tools = body.tools.map((t) => (t && t.function ? { ...t, function: tokFnDef(t.function) } : t));
+  if (Array.isArray(body.functions)) out.functions = body.functions.map(tokFnDef);
   return { body: out, map, tokenCount: Object.keys(map).length };
 }
 
@@ -229,6 +249,14 @@ function createGateway(overrides = {}) {
           metrics.failClosed += 1;
           return res.status(403).json(openAiError('Prompt requires redaction the gateway could not fully apply; blocked', 'incomplete_redaction', verdict.reasons));
         }
+        // Residual safety net: verify the OUTBOUND body carries no raw PII in
+        // ANY field (e.g. a tool name we deliberately don't tokenize). If local
+        // default analysis still finds something, fail closed rather than leak.
+        if (detect.analyze(adapter.requestText(redacted.body)).findings.length) {
+          metrics.blocked += 1;
+          metrics.failClosed += 1;
+          return res.status(403).json(openAiError('Prompt requires redaction the gateway could not fully apply; blocked', 'incomplete_redaction', verdict.reasons));
+        }
         outboundBody = redacted.body;
         redactMap = redacted.tokenCount ? redacted.map : null;
         metrics.redacted += 1;
@@ -340,4 +368,4 @@ function startGateway(overrides = {}) {
 
 if (require.main === module) startGateway();
 
-module.exports = { createGateway, startGateway };
+module.exports = { createGateway, startGateway, redactBodyLocally };

@@ -147,3 +147,49 @@ test('C3: deleting a bound evidence row is detected as tampering', () => {
   const after = integrity.verifyAuditChainForDatabase(db);
   assert.strictEqual(after.ok, false, 'vanished evidence is a verification failure');
 });
+
+// ---------------------------------------------------------------------------
+// G1 — the gateway scanned message content + message tool-call args, but NOT
+// top-level tools[]/functions[] DEFINITIONS, so PII in a function description
+// reached the provider. Non-string tool-call args also skipped the gate.
+// ---------------------------------------------------------------------------
+const canonical = require('../gateway/canonical');
+const gwServer = require('../gateway/server');
+
+test('G1: tool/function definition text is included in the scanned request text', () => {
+  const body = { messages: [{ role: 'user', content: 'hi' }],
+    tools: [{ type: 'function', function: { name: 'lookup', description: 'member SSN is 123-45-6789', parameters: { properties: { note: { default: 'card 4111 1111 1111 1111' } } } } }] };
+  const text = canonical.requestText(body);
+  assert.ok(/123-45-6789/.test(text), 'function description is scanned');
+  assert.ok(/4111 1111 1111 1111/.test(text), 'parameter string is scanned');
+});
+test('G1: non-string tool-call arguments are treated as unscannable (fail closed)', () => {
+  const body = { messages: [{ role: 'assistant', content: null, tool_calls: [{ function: { name: 'x', arguments: { ssn: '123-45-6789' } } }] }] };
+  assert.strictEqual(canonical.carriesUnscannableContent(body), true, 'object tool args are unscannable');
+});
+test('G1: a normal string tool-call is still scannable (not over-blocked)', () => {
+  const body = { messages: [{ role: 'assistant', content: null, tool_calls: [{ function: { name: 'x', arguments: '{"q":"weather"}' } }] }] };
+  assert.strictEqual(canonical.carriesUnscannableContent(body), false, 'string tool args remain scannable');
+});
+test('G1: local redaction tokenizes PII inside a tool definition (no raw leak upstream)', () => {
+  const body = { messages: [{ role: 'user', content: 'run the tool' }],
+    tools: [{ type: 'function', function: { name: 'lookup', description: 'member SSN is 123-45-6789', parameters: { properties: { note: { default: 'wire GB82WEST12345698765432' } } } } }] };
+  const { body: out } = gwServer.redactBodyLocally(body);
+  const serialized = JSON.stringify(out);
+  assert.ok(!/123-45-6789/.test(serialized), 'SSN in the tool description is tokenized');
+  assert.ok(!/GB82WEST12345698765432/.test(serialized), 'IBAN in the tool parameters is tokenized');
+});
+
+// ---------------------------------------------------------------------------
+// G4 — the model's response tool_calls / function_call.arguments were never
+// scanned or redacted: PII the model emitted there reached the caller raw.
+// ---------------------------------------------------------------------------
+test('G4: response tool-call arguments are included in the scanned response text', () => {
+  const resp = { choices: [{ message: { content: null, tool_calls: [{ function: { name: 'save', arguments: '{"ssn":"123-45-6789"}' } }] } }] };
+  assert.ok(/123-45-6789/.test(canonical.responseText(resp)), 'tool-call args are scanned');
+});
+test('G4: redacting the response also rewrites tool-call arguments', () => {
+  const resp = { choices: [{ message: { content: null, tool_calls: [{ function: { name: 'save', arguments: '{"ssn":"123-45-6789"}' } }] } }] };
+  const out = canonical.mapResponseText(resp, (t) => t.replace(/123-45-6789/g, '[REDACTED]'));
+  assert.ok(!/123-45-6789/.test(JSON.stringify(out)), 'tool-call args are redacted, not passed through');
+});
