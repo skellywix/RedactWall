@@ -43,7 +43,8 @@ Under the hood:
   another.
 - **Smoke selection** is by marker: a file is in the smoke set when its **first
   line contains `// @tier smoke`**. Current smoke files: `contract/health`,
-  `contract/sensor-routes`, `security/pii-leak`, `detector/always-block`.
+  `contract/openapi`, `contract/sensor-routes`, `security/pii-leak`,
+  `detector/always-block`.
 - The **UI tier** runs through `scripts/run-playwright.js` (the same port-locking
   wrapper the product uses) with `--config=suite/playwright.config.js`, which
   boots `suite/support/playwright-server.js` — a variant of

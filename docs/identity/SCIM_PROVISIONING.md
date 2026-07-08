@@ -108,8 +108,8 @@ OIDC_JWKS_URI=https://login.customer.example/discovery/v2.0/keys
 The login bridge uses authorization-code flow with `openid email profile`,
 stores state and nonce in a short-lived HttpOnly state cookie, validates RS256
 ID-token signatures through JWKS, checks issuer, audience, expiry, nonce, and
-subject claims, and maps `email`, `preferred_username`, `upn`, or `unique_name`
-to an active SCIM `userName`. Token values and client secrets are never written
+subject claims, and maps `preferred_username`, `upn`, `unique_name`, and (only
+when the IdP asserts `email_verified`) `email` to an active SCIM `userName`. Token values and client secrets are never written
 to audit entries.
 
 Fresh OIDC sessions include a short step-up window when the ID token contains a
