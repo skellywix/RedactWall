@@ -89,17 +89,43 @@ function redactBodyLocally(body) {
   return { body: out, map, tokenCount: Object.keys(map).length };
 }
 
+// Count findings by detector TYPE. A raw total is not enough: the control plane
+// analyzes under policy options (disabled/custom detectors, exact-match/EDM) the
+// gateway's default analyze cannot see, so a custom/EDM hit and an extra
+// default-detectable hit both count as "1" and a count-only check would let the
+// unreproduced type through. Comparing per type catches exactly the finding the
+// gateway can't redact locally.
+function findingTypeCounts(findings) {
+  const counts = new Map();
+  for (const f of (Array.isArray(findings) ? findings : [])) {
+    if (!f || typeof f.type !== 'string') continue;
+    counts.set(f.type, (counts.get(f.type) || 0) + 1);
+  }
+  return counts;
+}
+
+// True only when local default analysis reproduces every reported finding type
+// at least as many times as the plane reported it.
+function localReproducesTypes(localText, reported) {
+  if (!reported.size) return true;
+  const local = findingTypeCounts(detect.analyze(localText).findings);
+  for (const [type, n] of reported) {
+    if ((local.get(type) || 0) < n) return false;
+  }
+  return true;
+}
+
 // A redact verdict must never forward raw PII the control plane flagged. The
 // gateway redacts locally with DEFAULT detector options, so custom-detector /
 // exact-match (EDM) hits — which fired under the control plane's policy options
 // but are invisible to a default analyze — would otherwise slip through. Fail
-// closed when local redaction can't reproduce what the plane reported, or when a
-// redact verdict extracted text yet tokenized nothing.
+// closed when local redaction can't reproduce every reported finding type, or
+// when a redact verdict extracted text yet tokenized nothing.
 function redactionCoversVerdict(promptText, redacted, verdict) {
-  const reported = Array.isArray(verdict.findings) ? verdict.findings.length : 0;
-  if (!reported) return true; // no detector-level findings to reproduce
+  const reported = findingTypeCounts(verdict.findings);
+  if (!reported.size) return true; // no detector-level findings to reproduce
   if (redacted.tokenCount === 0) return false;
-  return detect.analyze(promptText).findings.length >= reported;
+  return localReproducesTypes(promptText, reported);
 }
 
 // The gateway redacts a leaked response locally (full length, per choice). That
@@ -108,8 +134,7 @@ function redactionCoversVerdict(promptText, redacted, verdict) {
 // see means local redaction would leave raw values in the body — withhold it.
 function responseRedactionCovers(respText, scan) {
   if (Array.isArray(scan.categories) && scan.categories.length) return false;
-  const reported = Array.isArray(scan.findings) ? scan.findings.length : 0;
-  return detect.analyze(respText).findings.length >= reported;
+  return localReproducesTypes(respText, findingTypeCounts(scan.findings));
 }
 
 const BLOCK_STATUSES = new Set([

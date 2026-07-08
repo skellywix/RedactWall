@@ -200,6 +200,56 @@ test('mixed text+image content fails closed — image never forwarded', async (t
   assert.strictEqual(upstreamCalls, 0);
 });
 
+// Coverage must match by TYPE, not raw count: a plane finding the gateway
+// cannot reproduce (EDM/custom) hidden behind an equal count of a different,
+// locally-detectable type must still fail closed.
+test('redact fails closed when finding COUNT matches but a reported type is unreproduced', async (t) => {
+  const tp = tmpTokens(t);
+  const { token } = tokens.mintToken({ user: 'a@x' }, tp);
+  let upstreamCalls = 0;
+  const adapter = {
+    requestText: canonical.requestText,
+    responseText: () => '', applyResponseText: (j) => j,
+    callUpstream: async (kind, b) => { upstreamCalls++; return { ok: true, status: 200, json: {}, forwarded: b }; },
+  };
+  // Prompt locally analyzes to exactly ONE finding (the email). The plane
+  // reports TWO findings — the email PLUS a custom ORG_CODENAME the gateway
+  // cannot see. Old count check: local 1 >= reported 2 is false anyway, so make
+  // the collision exact: prompt carries an email AND a phone (local = 2), while
+  // the plane reports email + ORG_CODENAME (also 2) — count matches, type does not.
+  const { app } = createGateway({
+    client: stubClient({ verdict: { decision: 'redact', findings: [{ type: 'EMAIL', masked: 'a***@x' }, { type: 'ORG_CODENAME', masked: 'OR***' }] } }),
+    adapter, agentTokensPath: tp,
+  });
+  const res = await listenAndRequest(app, {
+    headers: { authorization: 'Bearer ' + token },
+    body: { model: 'x', messages: [{ role: 'user', content: 'mail bob@corp.com or call 415-555-0100 re ORION-7' }] },
+  });
+  assert.strictEqual(res.status, 403);
+  assert.strictEqual(res.json.error.type, 'incomplete_redaction');
+  assert.strictEqual(upstreamCalls, 0, 'a count-collision must not slip an unreproduced type upstream');
+});
+
+// An image/binary part in a SYSTEM or ASSISTANT message is forwarded upstream
+// just like one in a user message, so it must fail closed too.
+test('image content in a system/assistant message fails closed', async (t) => {
+  const tp = tmpTokens(t);
+  const { token } = tokens.mintToken({ user: 'a@x' }, tp);
+  let upstreamCalls = 0;
+  const adapter = { requestText: canonical.requestText, responseText: () => '', applyResponseText: (j) => j, callUpstream: async () => { upstreamCalls++; return { ok: true, json: {} }; } };
+  const { app } = createGateway({ client: stubClient({ verdict: { decision: 'allow' } }), adapter, agentTokensPath: tp });
+  const res = await listenAndRequest(app, {
+    headers: { authorization: 'Bearer ' + token },
+    body: { model: 'x', messages: [
+      { role: 'system', content: [{ type: 'image_url', image_url: { url: 'data:image/png;base64,AAAA' } }] },
+      { role: 'user', content: 'hello' },
+    ] },
+  });
+  assert.strictEqual(res.status, 403);
+  assert.strictEqual(res.json.error.type, 'unscannable_content');
+  assert.strictEqual(upstreamCalls, 0);
+});
+
 // MEDIUM #6 — token-id array input (non-strings) must fail closed.
 test('token-id array input fails closed (unscannable)', async (t) => {
   const tp = tmpTokens(t);

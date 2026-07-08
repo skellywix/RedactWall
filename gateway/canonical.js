@@ -42,12 +42,14 @@ function messageText(m) {
 // True when a request carries content the gateway cannot scan — image/binary
 // content parts, or prompt/input arrays holding non-strings (e.g. token-id
 // arrays) — even when other parts DO carry scannable text. The gateway must fail
-// closed rather than forward any such content ungated.
+// closed rather than forward any such content ungated. The check is symmetric
+// across roles: an image/binary part in a system or assistant message is
+// forwarded upstream just like one in a user message, so it must gate too.
 function carriesUnscannableContent(body) {
   if (!body || typeof body !== 'object') return false;
   if (Array.isArray(body.messages)) {
     return body.messages.some((m) => {
-      if (!m || m.role === 'system' || m.role === 'assistant') return false;
+      if (!m) return false;
       if (typeof m.content === 'string') return false;
       // A content array is unscannable when ANY part lacks a scannable text
       // field (an image/file part alongside text still leaks the image).
