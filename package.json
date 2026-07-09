@@ -1,6 +1,6 @@
 {
   "name": "redactwall",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Inline DLP gateway for AI chat prompts - detects PII, blocks risky prompts, reversibly redacts, and releases only after Security Admin approval. Built for compliance (NCUA/GLBA/PCI/HIPAA) at credit unions and similar.",
   "main": "server/app.js",
   "repository": {
