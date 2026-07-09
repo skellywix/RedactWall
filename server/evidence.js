@@ -7,6 +7,7 @@
  */
 const crypto = require('crypto');
 const controlMap = require('./control-map');
+const aupCrosswalk = require('./aup-crosswalk');
 const ncuaReadiness = require('./ncua-readiness');
 const { safeSensor } = require('./sensor-metadata');
 const routing = require('./routing');
@@ -972,6 +973,7 @@ function buildEvidencePack(input) {
     restoreDrillEvidenceIncluded: !!restoreDrill,
     ...(examinerProfile ? { examinerProfile } : {}),
   };
+  const aupAttestation = aupCrosswalk.normalizeAupAttestation(input.aupAttestation);
   const controlMappings = controlMap.buildControlMappings({
     generatedAt: now,
     scope,
@@ -985,6 +987,7 @@ function buildEvidencePack(input) {
     useCases,
     incidents,
     boardPacket: input.boardPacket,
+    aupAttestation,
   });
   const report = safeReport(input.report, now);
   return {
@@ -1018,6 +1021,8 @@ function buildEvidencePack(input) {
         restoreDrill,
         detectionQuality: postureReport && postureReport.detectionQuality,
       }),
+      aupCrosswalk: aupCrosswalk.AUP_CROSSWALK,
+      aupAttestation,
       ncuaReadiness: ncuaReadiness.summarize({
         generatedAt: now,
         examinerProfile,

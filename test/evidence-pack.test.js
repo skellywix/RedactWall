@@ -378,6 +378,9 @@ test('runtime build with --examiner-profile produces a schemaVersion-3 pack end 
   assert.strictEqual(restoreTest.result, 'not_provided');
   assert.strictEqual(restoreTest.lastTestedAt, null);
   assert.ok(/not evidence of a scheduled/i.test(pack.controlTests.disclaimer));
+  // AUP clause->control crosswalk rides the examiner pack; no board-adoptable prose.
+  assert.ok(Array.isArray(pack.aupCrosswalk) && pack.aupCrosswalk.length >= 5);
+  assert.ok(pack.controlMappings.some((c) => c.id === 'ai_acceptable_use'));
   const wire = JSON.stringify(pack);
   assert.ok(!wire.includes('cli-salt-decoy'));
   assert.ok(!wire.includes('99881234'));
@@ -409,6 +412,7 @@ test('the compliance disclaimer is a non-empty constant absent from v2 default p
   assert.strictEqual(pack.schemaVersion, 2);
   assert.strictEqual(pack.complianceDisclaimer, undefined);
   assert.strictEqual(pack.controlTests, undefined);
+  assert.strictEqual(pack.aupCrosswalk, undefined);
 });
 
 test('renderMarkdown produces a bounded report and never leaks record free text', () => {

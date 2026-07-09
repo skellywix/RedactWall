@@ -160,6 +160,16 @@ const CONTROL_MAPPINGS = [
     ],
     evidence: ['boardPacket'],
   },
+  {
+    id: 'ai_acceptable_use',
+    title: 'AI Acceptable-Use Policy enforcement and attestation',
+    controlFamilies: [
+      'NIST AI RMF GOVERN acceptable-use evidence',
+      'EU AI Act Article 4 acceptable-use evidence',
+      'GLBA staff-oversight evidence',
+    ],
+    evidence: ['aupCrosswalk', 'aupAttestation', 'policy.governedDestinations'],
+  },
 ];
 
 // Member NPI hard-stop set an examiner expects on a federal credit union
@@ -296,6 +306,22 @@ function memberSafeguardsSummary(input, state) {
   return 'Member-identifier hard stops are enforced; core-banking EDM fingerprints are not configured yet (npm run edm:fingerprint).';
 }
 
+function stateFromAcceptableUse(input) {
+  if (!input.policy) return 'not_provided';
+  const enforced = stateFromUsageGovernance(input) === 'covered';
+  const attested = !!(input.aupAttestation && input.aupAttestation.adoptedAt);
+  return attested && enforced ? 'covered' : 'attention';
+}
+
+function acceptableUseSummary(input, state) {
+  if (state === 'not_provided') return 'No policy attached; the AUP clause-to-control crosswalk ships with the evidence pack.';
+  if (state === 'covered') return 'AUP clauses are enforced by active controls and board adoption is attested (date + reference).';
+  const attested = !!(input.aupAttestation && input.aupAttestation.adoptedAt);
+  return attested
+    ? 'AUP adoption is attested, but an enforcing control needs configuration (governed destinations / default-deny for unreviewed AI).'
+    : 'AUP clauses are enforced by policy, but board adoption is not yet attested; record the adoption date and a minutes reference.';
+}
+
 function stateFor(control, input) {
   if (control.id === 'tamper_evident_audit') return stateFromIntegrity(input.auditIntegrity);
   if (control.id === 'fleet_sensor_coverage') return stateFromCoverage(input.coverage);
@@ -311,6 +337,7 @@ function stateFor(control, input) {
   if (control.id === 'vendor_service_provider_oversight') return stateFromVendorOversight(input.useCases);
   if (control.id === 'incident_readiness') return stateFromIncidentReadiness(input.incidents);
   if (control.id === 'board_reporting') return stateFromBoardReporting(input.boardPacket, input);
+  if (control.id === 'ai_acceptable_use') return stateFromAcceptableUse(input);
   return 'not_provided';
 }
 
@@ -320,6 +347,7 @@ function summaryFor(control, input, state) {
   if (control.id === 'vendor_service_provider_oversight') return vendorOversightSummary(input.useCases, state);
   if (control.id === 'incident_readiness') return incidentReadinessSummary(input.incidents, state);
   if (control.id === 'board_reporting') return boardReportingSummary(input.boardPacket, state);
+  if (control.id === 'ai_acceptable_use') return acceptableUseSummary(input, state);
   if (control.id === 'tamper_evident_audit') {
     const count = Number(input.auditIntegrity && input.auditIntegrity.count) || 0;
     return state === 'covered'
