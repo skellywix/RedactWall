@@ -108,3 +108,16 @@ test('shared decide() matches the extension evaluate() semantics', () => {
   assert.strictEqual(decide({ findings: [], categories: [] }, pol).action, 'allow');
   assert.strictEqual(decide({ findings: [{ type: 'SECRET_KEY', severity: 4 }], maxSeverity: 4 }, { ...pol, enforcementMode: 'warn' }).action, 'block', 'hard-stop overrides warn');
 });
+
+test('shared decide() tokenizes hard-stop in redact mode, blocks categories (extension parity)', () => {
+  const pol = { alwaysBlock: ['US_SSN'], blockMinSeverity: 2, blockRiskScore: 25, enforcementMode: 'redact' };
+  // Redact tokenizes a hard-stop structured finding so the prompt proceeds (raw
+  // value never leaves) — parity with server API/file, browser, endpoint paths.
+  assert.strictEqual(decide({ findings: [{ type: 'US_SSN', severity: 4 }], categories: [], maxSeverity: 4 }, pol).action, 'redact', 'hard-stop tokenized in redact');
+  // A semantic category has no span to tokenize -> block.
+  assert.strictEqual(decide({ findings: [], categories: [{ category: 'CONFIDENTIAL' }] }, pol).action, 'block', 'category blocks in redact');
+  // Mixed structured + category -> block (cannot tokenize the category).
+  assert.strictEqual(decide({ findings: [{ type: 'US_SSN', severity: 4 }], categories: [{ category: 'CONFIDENTIAL' }], maxSeverity: 4 }, pol).action, 'block', 'mixed blocks in redact');
+  // Hard-stop still hard-blocks in every non-redact mode.
+  assert.strictEqual(decide({ findings: [{ type: 'US_SSN', severity: 4 }], categories: [], maxSeverity: 4 }, { ...pol, enforcementMode: 'warn' }).action, 'block', 'hard-stop blocks in warn');
+});

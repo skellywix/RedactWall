@@ -337,8 +337,12 @@ const catalogReviewSchema = z.object({
   decision: z.enum(['govern', 'allow', 'block']),
   reason: nonBlankString(LIMITS.destinationReviewReasonChars),
   sanctionedStatus: z.enum(CATALOG_STATUS).optional(),
-  owner: optionalString(200),
-  notes: optionalString(2000),
+  // owner/notes persist into publicCatalog() (sensor-visible) and audit detail,
+  // so reject sensitive shapes (SSN/card/routing, control chars) — the same
+  // guard posture-action operator notes use — never smuggle raw regulated data
+  // into broadly-visible catalog surfaces via a free-text field.
+  owner: optionalString(200).refine(safeOperatorText, { message: 'sensitive identifier not allowed' }),
+  notes: optionalString(2000).refine(safeOperatorText, { message: 'sensitive identifier not allowed' }),
 }).strict();
 
 const catalogImportSchema = z.object({
