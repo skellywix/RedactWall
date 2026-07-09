@@ -199,8 +199,8 @@ function IntegrationsHeader({ onRefresh }: { onRefresh: () => void }) {
     <div className="console-frame-header">
       <div className="console-frame-title">
         <div>
-          <h2>Integrations &amp; Delivery</h2>
-          <p>SIEM / SOAR subscriptions and the AI Gateway. Every delivered event is prompt-free. Test connectivity and watch delivery health.</p>
+          <h2>Evidence Delivery</h2>
+          <p>SIEM, SOAR, email, digest, and AI Gateway delivery for Texas FCU security teams. Every delivered event is prompt-free.</p>
         </div>
       </div>
       <div className="console-frame-actions">
@@ -228,7 +228,7 @@ function KpiStrip({ subs, deliveries }: { subs: SubscriptionsResponse; deliverie
   const failed = deliveries.filter((d) => d.status === 'failed').length;
   return (
     <div className="insights-kpis">
-      <Kpi value={subs.destinations.length} label="Subscriptions" hint="named destinations" />
+      <Kpi value={subs.destinations.length} label="Evidence routes" hint="named destinations" />
       <Kpi value={delivered} label="Delivered" hint="recent events" />
       <Kpi value={failed} label="Failed" hint="needs attention" />
       <Kpi value={subs.supportedTypes.length} label="Supported" hint="SIEM/SOAR types" />
@@ -324,8 +324,8 @@ function EmailDigestPanel({ status, statusLoaded, digestBusy, onDigest }: EmailD
     <div className="panel wide-panel">
       <div className="panel-head">
         <div>
-          <h2>Email &amp; Digest</h2>
-          <span>Human notifications: SMTP relay health, storm-limited email destinations, and the daily digest</span>
+          <h2>Email &amp; Board Digest</h2>
+          <span>Human notifications: SMTP relay health, storm-limited reviewer destinations, and the daily digest</span>
         </div>
         <button
           className="ghost mini"
@@ -415,8 +415,8 @@ function SubscriptionsPanel({ destinations, loaded, tests }: SubscriptionsPanelP
     <div className="panel wide-panel">
       <div className="panel-head">
         <div>
-          <h2>SIEM / SOAR subscriptions</h2>
-          <span>Named destinations from config/subscriptions.json</span>
+          <h2>SIEM / SOAR evidence routes</h2>
+          <span>Named prompt-free destinations from config/subscriptions.json</span>
         </div>
       </div>
       <div>{renderRows()}</div>
@@ -463,8 +463,8 @@ function DeliveryHistoryPanel({ deliveries, loaded }: { deliveries: DeliveryReco
     <div className="panel wide-panel">
       <div className="panel-head">
         <div>
-          <h2>Delivery history</h2>
-          <span>Recent outbound deliveries — status only, never payload bodies</span>
+          <h2>Evidence delivery history</h2>
+          <span>Recent outbound deliveries - status only, never payload bodies</span>
         </div>
       </div>
       <table>

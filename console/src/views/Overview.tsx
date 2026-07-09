@@ -24,13 +24,13 @@ function approvalRate(stats: Stats): string {
 /** Mirrors the legacy queue-tab KPI band (dashboard.js loadStats cards). */
 function statCards(stats: Stats): StatCard[] {
   return [
-    { key: 'pending', value: stats.pending, label: 'Pending approval', detail: 'held for review', tone: 'critical' },
-    { key: 'blocked', value: stats.todayBlocked, label: 'Blocked today', detail: 'policy stops', tone: 'warn' },
-    { key: 'approved', value: stats.approved, label: 'Approved', detail: 'released by admin', tone: 'secure' },
-    { key: 'denied', value: stats.denied, label: 'Denied', detail: 'never released', tone: 'critical' },
-    { key: 'allowed', value: stats.allowed, label: 'Allowed', detail: 'passed policy', tone: 'secure' },
-    { key: 'rate', value: approvalRate(stats), label: 'Approval rate', detail: 'admin decisions', tone: 'live' },
-    { key: 'total', value: stats.total, label: 'Total events', detail: 'all recorded queries', tone: 'live' },
+    { key: 'pending', value: stats.pending, label: 'Member-data queue', detail: 'held for FCU review', tone: 'critical' },
+    { key: 'blocked', value: stats.todayBlocked, label: 'Blocked today', detail: 'member-data stops', tone: 'warn' },
+    { key: 'approved', value: stats.approved, label: 'Approved releases', detail: 'admin reviewed', tone: 'secure' },
+    { key: 'denied', value: stats.denied, label: 'Denied releases', detail: 'never sent', tone: 'critical' },
+    { key: 'allowed', value: stats.allowed, label: 'Clean traffic', detail: 'passed policy', tone: 'secure' },
+    { key: 'rate', value: approvalRate(stats), label: 'Reviewer approval rate', detail: 'admin decisions', tone: 'live' },
+    { key: 'total', value: stats.total, label: 'Exam evidence events', detail: 'sanitized records', tone: 'live' },
   ];
 }
 
@@ -57,13 +57,13 @@ function StatBand({ stats }: { stats: Stats }) {
 
 function TopEntities({ entities }: { entities: [string, number][] }) {
   if (!entities.length) {
-    return <EmptyState title="No detections" detail="Current data set has no classified prompt findings." />;
+    return <EmptyState title="No member-data detections" detail="Current data set has no classified AI prompt findings." />;
   }
   const max = entities[0][1] || 1;
   return (
     <div className="overview-entities">
       <div className="overview-entities-head">
-        <strong>Top detections</strong>
+        <strong>Top member-data detections</strong>
         <span>metadata only</span>
       </div>
       {entities.map(([name, n]) => (
@@ -103,10 +103,10 @@ export default function Overview() {
   });
 
   return (
-    <Panel title="Overview" meta={!loaded ? 'Loading' : stats ? summaryLine(stats) : 'Waiting for data'}>
+    <Panel title="Texas FCU Overview" meta={!loaded ? 'Loading' : stats ? summaryLine(stats) : 'Waiting for data'}>
       <LeakMap map={posture?.leakMap ?? null} surfaces={posture?.surfaces} />
       {!stats && loaded ? (
-        <EmptyState title="No stats yet" detail="Live counters appear once sensors report activity." />
+        <EmptyState title="No FCU evidence yet" detail="Live counters appear once branch, browser, endpoint, or MCP sensors report activity." />
       ) : stats ? (
         <>
           <StatBand stats={stats} />

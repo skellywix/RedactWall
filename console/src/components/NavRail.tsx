@@ -112,7 +112,7 @@ export default function NavRail({ groups, activePath, pending, surfaces, version
         <div className="logo" aria-hidden="true">{LOGO}</div>
         <div>
           <h1>RedactWall</h1>
-          <p>AI Prompt DLP Gateway</p>
+          <p>Texas FCU AI DLP</p>
         </div>
       </div>
       <nav className="tabs" aria-label="Primary">

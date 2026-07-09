@@ -849,8 +849,8 @@ function ReasonDialog({ request, onConfirm, onCancel }: ReasonDialogProps) {
 function CoverageHeader() {
   return (
     <header className="coverage-header">
-      <h2>Sensor Coverage</h2>
-      <p>Track governed destinations, sensor posture, endpoint inventory, and shadow-AI gaps.</p>
+      <h2>Texas FCU Coverage</h2>
+      <p>Track branch browser coverage, endpoint posture, MCP guardrails, governed AI vendors, and shadow-AI gaps.</p>
     </header>
   );
 }
@@ -881,7 +881,7 @@ export default function Coverage() {
         <PosturePanel report={report} onRefresh={() => void data.load()} />
         <SensorMixPanel sensors={report.sensors ?? []} />
         <FleetHealthPanel rows={report.fleet ?? []} />
-        <CoveragePanel title="Endpoint AI Tools" subtitle="Sanitized local app and agent CLI inventory">
+        <CoveragePanel title="Endpoint AI Tools" subtitle="Sanitized local app and agent CLI inventory across FCU workstations">
           <InventoryList
             rows={report.endpointAiTools ?? []}
             name={(row) => row.label || row.id || 'Unknown AI tool'}
@@ -890,7 +890,7 @@ export default function Coverage() {
             emptyDetail="No endpoint AI inventory reported."
           />
         </CoveragePanel>
-        <CoveragePanel title="Endpoint MCP Servers" subtitle="Shadow-MCP discovery: server id, client, and transport only">
+        <CoveragePanel title="Endpoint MCP Servers" subtitle="Shadow-MCP discovery for Texas FCU teams: server id, client, and transport only">
           <InventoryList
             rows={report.endpointMcpServers ?? []}
             name={(row) => row.id || 'unknown server'}
@@ -899,7 +899,7 @@ export default function Coverage() {
             emptyDetail="No endpoint MCP inventory reported."
           />
         </CoveragePanel>
-        <CoveragePanel title="Endpoint File Flow" subtitle="Named watcher profiles without local paths">
+        <CoveragePanel title="Endpoint File Flow" subtitle="Loan-file and member-document watcher profiles without local paths">
           <FileFlowList rows={report.endpointFileFlowProfiles ?? []} />
         </CoveragePanel>
         <GovernedPanel rows={report.governedDestinations ?? []} />

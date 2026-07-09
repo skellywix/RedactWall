@@ -240,8 +240,8 @@ function InsightsHeader(props: HeaderProps) {
     <div className="console-frame-header">
       <div className="console-frame-title">
         <div>
-          <h2>AI Usage Insights</h2>
-          <p>Real-time analytics on AI activity, data exposure risk, detections, and shadow-AI — metadata only, no prompt content.</p>
+          <h2>Member Data Insights</h2>
+          <p>Real-time analytics on Texas FCU AI use, member-data exposure risk, detections, and shadow AI - metadata only, no prompt content.</p>
         </div>
       </div>
       <HeaderActions {...props} />
@@ -265,11 +265,11 @@ function KpiRow({ report }: { report: InsightsReport }) {
   const t = report.totals;
   return (
     <div className="insights-kpis">
-      <Kpi label="AI interactions" value={t.considered || 0} hint={`last ${report.windowDays} days`} />
-      <Kpi label="Avg exposure risk" value={t.avgRisk || 0} hint="of 100" />
-      <Kpi label="Blocked" value={t.blocked || 0} hint="held or denied" />
+      <Kpi label="AI member interactions" value={t.considered || 0} hint={`last ${report.windowDays} days`} />
+      <Kpi label="Avg member-data risk" value={t.avgRisk || 0} hint="of 100" />
+      <Kpi label="Blocked or held" value={t.blocked || 0} hint="not released" />
       <Kpi label="Redacted" value={t.redacted || 0} hint="tokenized & sent" />
-      <Kpi label="Shadow-AI hits" value={t.shadow || 0} hint="ungoverned tools" />
+      <Kpi label="Shadow-AI sightings" value={t.shadow || 0} hint="ungoverned tools" />
     </div>
   );
 }
@@ -578,7 +578,7 @@ function InsightPanel({ title, subtitle, wide, children }: InsightPanelProps) {
 function ChartsRow({ report }: { report: InsightsReport }) {
   return (
     <>
-      <InsightPanel wide title="AI Activity Over Time" subtitle="Decisions per day across the window">
+      <InsightPanel wide title="Texas FCU AI Activity" subtitle="Decisions per day across the window">
         <div className="insights-chart">
           <SeriesChart series={report.series} />
         </div>
@@ -589,7 +589,7 @@ function ChartsRow({ report }: { report: InsightsReport }) {
           <DecisionDonut decisions={report.decisions} />
         </div>
       </InsightPanel>
-      <InsightPanel title="Data Exposure Risk" subtitle="Risk-score distribution">
+      <InsightPanel title="Member-Data Exposure Risk" subtitle="Risk-score distribution">
         <div className="insights-chart">
           <RiskBands bands={report.riskBands} />
         </div>
@@ -601,17 +601,17 @@ function ChartsRow({ report }: { report: InsightsReport }) {
 function BreakdownRow({ report }: { report: InsightsReport }) {
   return (
     <>
-      <InsightPanel title="Top Detected Data Types" subtitle="Structured findings by type">
+      <InsightPanel title="Top Member Data Types" subtitle="Structured findings by type">
         <div className="insights-bars">
           <TopBars items={report.topDetectors} />
         </div>
       </InsightPanel>
-      <InsightPanel title="Sensitive Categories" subtitle="Semantic and intent classes">
+      <InsightPanel title="Sensitive FCU Categories" subtitle="Semantic and intent classes">
         <div className="insights-bars">
           <TopBars items={report.topCategories} />
         </div>
       </InsightPanel>
-      <InsightPanel wide title="Top Destinations" subtitle="Where AI traffic goes, with app-risk attributes">
+      <InsightPanel wide title="Top AI Destinations" subtitle="Where Texas FCU traffic goes, with app-risk attributes">
         <DestinationsTable rows={report.topDestinations} />
       </InsightPanel>
       <InsightPanel title="Shadow AI by Provider" subtitle="Ungoverned AI usage discovered">

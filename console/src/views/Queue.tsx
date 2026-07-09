@@ -83,7 +83,7 @@ function QueueToolbar({ status, onStatus, search, onSearch }: QueueToolbarProps)
         Search
         <input
           type="search"
-          placeholder="Filter by user, destination, or redacted text"
+          placeholder="Filter by employee, AI destination, or masked text"
           value={search}
           onChange={(event) => onSearch(event.target.value)}
         />
@@ -107,7 +107,7 @@ function BulkBar({ count, note, busy, onNote, onApprove, onDeny }: BulkBarProps)
       <span>{count} selected</span>
       <input
         type="text"
-        placeholder="Decision note (audited)"
+        placeholder="Exam-ready decision note"
         aria-label="Bulk decision note"
         value={note}
         onChange={(event) => onNote(event.target.value)}
@@ -163,12 +163,12 @@ export default function Queue() {
     if (!loaded) return <div className="app-loading">Loading queue…</div>;
     if (!rows?.length) {
       return statusFilter === 'pending' ? (
-        <EmptyState title="Queue clear" detail="No prompts are awaiting approval." />
+        <EmptyState title="Member-data queue clear" detail="No Texas FCU prompts are awaiting approval." />
       ) : (
-        <EmptyState title="No matches" detail="No prompts have this status yet." />
+        <EmptyState title="No matches" detail="No member-data events have this status yet." />
       );
     }
-    if (!visible.length) return <EmptyState title="No matches" detail="No prompts match the current search." />;
+    if (!visible.length) return <EmptyState title="No matches" detail="No member-data events match the current search." />;
     return (
       <div className="queue-rows" role="list" aria-label="Held prompts">
         {visible.map((q) => (
@@ -188,7 +188,7 @@ export default function Queue() {
 
   return (
     <div className="queue-view">
-      <Panel title="Approval Queue" meta={meta}>
+      <Panel title="Member Data Queue" meta={meta}>
         <QueueToolbar status={statusFilter} onStatus={setStatusFilter} search={search} onSearch={setSearch} />
         {actions.checked.size > 0 ? (
           <BulkBar
@@ -202,7 +202,7 @@ export default function Queue() {
         ) : null}
         {renderRows()}
       </Panel>
-      <Panel title="Selected Incident" meta="Redacted review context">
+      <Panel title="Selected Member-Data Incident" meta="Redacted review context">
         <QueueDetail
           query={selected}
           reveal={selected ? actions.reveals.get(selected.id) ?? null : null}

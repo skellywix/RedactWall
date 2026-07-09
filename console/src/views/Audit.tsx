@@ -224,7 +224,7 @@ export default function Audit() {
   const renderBody = () => {
     if (!loaded) return <div className="app-loading">Loading audit log…</div>;
     if (!log) return <EmptyState title="Audit log unavailable" detail="Could not load the audit trail. Refresh to retry." />;
-    if (!entries.length) return <EmptyState title="No audit entries yet" detail="Admin, policy, and decision activity appears here as it is recorded." />;
+    if (!entries.length) return <EmptyState title="No examiner audit entries yet" detail="Admin, policy, and member-data decision activity appears here as it is recorded." />;
     if (!table.filtered.length) return <EmptyState title="No matching audit entries" detail="No entries match the current action and actor filters." />;
     return (
       <>
@@ -237,7 +237,7 @@ export default function Audit() {
   const meta = !loaded ? 'Loading' : `${table.filtered.length} shown / ${entries.length} entries`;
   return (
     <div className="audit-view">
-      <Panel title="Tamper-evident Audit Log" meta={meta}>
+      <Panel title="Examiner Audit Chain" meta={meta}>
         <AuditToolbar table={table} exporting={exporting} onExport={runExport} />
         {log ? <IntegrityChip integrity={log.integrity} /> : null}
         {renderBody()}

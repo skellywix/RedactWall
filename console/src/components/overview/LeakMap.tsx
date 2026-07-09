@@ -27,7 +27,7 @@ type Filter = 'all' | 'risk' | 'shadow';
 type Selection = { kind: 'edge'; id: string } | { kind: 'node'; id: string };
 
 const FILTERS: { id: Filter; label: string }[] = [
-  { id: 'all', label: 'All flows' },
+  { id: 'all', label: 'All FCU flows' },
   { id: 'risk', label: 'At-risk' },
   { id: 'shadow', label: 'Shadow AI' },
 ];
@@ -104,8 +104,8 @@ const flowPath = (x1: number, y1: number, x2: number, y2: number): string => {
 function summaryText(map: LeakMapReport | null): string {
   if (!map) return 'Waiting for posture data';
   const s = map.summary;
-  if (!num(s.events)) return `No sanitized activity yet — the map draws as sensors report flows / ${s.privacy || 'prompt bodies excluded'}`;
-  return `${plural(num(s.segments), 'department')} / ${plural(num(s.destinations), 'AI destination')} / ${num(s.uncontrolled)} uncontrolled / ${num(s.shadow)} shadow / ${num(s.controlRate)}% controlled / ${s.privacy || 'prompt bodies excluded'}`;
+  if (!num(s.events)) return `No sanitized member-data activity yet - the map draws as Texas FCU sensors report flows / ${s.privacy || 'prompt bodies excluded'}`;
+  return `${plural(num(s.segments), 'team')} / ${plural(num(s.destinations), 'AI destination')} / ${num(s.uncontrolled)} uncontrolled / ${num(s.shadow)} shadow / ${num(s.controlRate)}% controlled / ${s.privacy || 'prompt bodies excluded'}`;
 }
 
 function findSelected(map: LeakMapReport, selected: Selection | null):
@@ -148,7 +148,7 @@ function outcomeLine(item: LeakMapNode | LeakMapEdge): string {
 }
 
 function exposureLine(item: LeakMapNode | LeakMapEdge): string {
-  if (num(item.uncontrolled)) return `${num(item.uncontrolled)} sensitive events left with no control applied.`;
+  if (num(item.uncontrolled)) return `${num(item.uncontrolled)} member-data events left with no control applied.`;
   if (num(item.shadow)) return `${num(item.shadow)} sightings of ungoverned AI on this path.`;
   return 'No uncontrolled egress recorded on this path.';
 }
@@ -267,7 +267,7 @@ export default function LeakMap({ map, surfaces }: { map: LeakMapReport | null; 
     <section className="leak-map-section" aria-label="AI data leak exposure map">
       <div className="leak-map-head">
         <div>
-          <h3>AI Data Leak Exposure Map</h3>
+          <h3>Texas FCU AI Exposure Map</h3>
           <span id="leakMapSummary">{summaryText(map)}</span>
         </div>
         <div className="leak-map-lens" id="leakMapLens" role="group" aria-label="Exposure filter">
@@ -305,8 +305,8 @@ export default function LeakMap({ map, surfaces }: { map: LeakMapReport | null; 
       </div>
       <div className={`leak-map-stage${still ? ' is-static' : ''}`} id="leakMapStage">
         {model && map ? (
-          <svg viewBox={`0 0 ${W} ${model.height}`} role="img" aria-label="Map of sensitive data paths from departments through RedactWall to AI destinations">
-            <text className="leak-col-label" x={10} y={24}>DEPARTMENTS &amp; TEAMS</text>
+          <svg viewBox={`0 0 ${W} ${model.height}`} role="img" aria-label="Map of member-data paths from Texas FCU teams through RedactWall to AI destinations">
+            <text className="leak-col-label" x={10} y={24}>TEXAS FCU TEAMS</text>
             <text className="leak-col-label" x={(CH_L + CH_R) / 2} y={24} textAnchor="middle">REDACTWALL</text>
             <text className="leak-col-label" x={W - 10} y={24} textAnchor="end">AI DESTINATIONS</text>
             <rect className="leak-wall" x={(CH_L + CH_R) / 2 - 23} y={PAD_TOP - 18} width={46} height={model.height - PAD_TOP - PAD_BOT + 30} rx={14} />
@@ -389,7 +389,7 @@ export default function LeakMap({ map, surfaces }: { map: LeakMapReport | null; 
         ) : (
           <div className="leak-map-empty">
             <b>No paths mapped yet</b>
-            <p>Connect sensors and the exposure map draws every department-to-AI flow from sanitized events.</p>
+            <p>Connect sensors and the exposure map draws every Texas FCU team-to-AI flow from sanitized events.</p>
           </div>
         )}
       </div>

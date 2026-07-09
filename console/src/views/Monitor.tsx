@@ -1249,8 +1249,8 @@ function ConsoleHeader({ critical, lastUpdated, refreshing, onRefresh }: Console
     <div className="signal-console-header">
       <div className="signal-console-title">
         <div>
-          <h2>AI Security Command Center</h2>
-          <p>Sanitized posture, control outcomes, and audit proof without prompt bodies.</p>
+          <h2>Texas FCU Command Center</h2>
+          <p>Sanitized member-data posture, control outcomes, and examiner proof without prompt bodies.</p>
         </div>
       </div>
       <div className="signal-header-actions">
@@ -1487,13 +1487,13 @@ const DECISION_PIVOTS: Array<{ token: string; label: string }> = [
 function DecisionPivots({ rows }: { rows: QueueQuery[] }) {
   const count = (token: string) => rows.filter((q) => String(q.status || '').toLowerCase().includes(token)).length;
   return (
-    <div className="signal-filters decision-pivots" aria-label="Decision pivots into All Activity" aria-live="polite">
+    <div className="signal-filters decision-pivots" aria-label="Decision pivots into Exam Activity" aria-live="polite">
       {DECISION_PIVOTS.map((pivot) => (
         <button
           key={pivot.token}
           className="signal-chip"
           type="button"
-          title={`Open All Activity filtered to status:${pivot.token}`}
+          title={`Open Exam Activity filtered to status:${pivot.token}`}
           onClick={() => navigate(`/activity?q=${encodeURIComponent('status:' + pivot.token)}`)}
         >
           <span>{pivot.label}</span>
@@ -1629,9 +1629,9 @@ function operatorSteps(posture: Posture): OperatorStep[] {
     step('threats', 'Threat triage', `${num(threat.events)} events`, `${num(threat.activeRules)} rules / ${threatOpen} urgent`, 'Review threats', threatOpen ? 'critical' : num(threat.events) ? 'attention' : 'ready', 'threatGuardrailsRows'),
     step('baselines', 'Behavior baselines', `${num(behavior.anomalies)} anomalies`, `${num(behavior.critical)} critical / ${num(behavior.warning)} watch`, 'Review baselines', num(behavior.critical) ? 'critical' : num(behavior.warning) ? 'attention' : 'ready', 'behaviorBaselineRows'),
     step('actions', 'Hardening actions', `${actions.length} actions`, `${critical} critical / ${warning} warning / ${routed} routed`, 'Route actions', critical ? 'critical' : warning ? 'attention' : 'ready', 'hardeningActionQueue'),
-    step('assets', 'AI surface review', `${highAssets} high risk`, `${num(inventory.activeDestinations)} destinations / ${num(mcp.activeAgents)} agents`, 'Review assets', highAssets > 0 ? 'critical' : 'ready', 'aiInventoryRows'),
+    step('assets', 'AI vendor review', `${highAssets} high risk`, `${num(inventory.activeDestinations)} destinations / ${num(mcp.activeAgents)} agents`, 'Review vendors', highAssets > 0 ? 'critical' : 'ready', 'aiInventoryRows'),
     step('graph', 'Control graph', `${num(graph.highRiskAssets)} watched`, `${num(graph.nodes)} nodes / ${num(graph.controlledLinks)} controlled links`, 'Map control', num(graph.highRiskAssets) + num(graph.shadowAssets) > 0 ? 'critical' : 'ready', 'controlGraphMap'),
-    step('soc', 'SOC handoff', `${num(ledger.verified)} proof`, `${proofOpen} open / ${graph.privacy || 'metadata only'}`, 'Prepare SOC', proofOpen ? 'attention' : 'ready', 'siemPackagePreview'),
+    step('soc', 'Examiner handoff', `${num(ledger.verified)} proof`, `${proofOpen} open / ${graph.privacy || 'metadata only'}`, 'Prepare evidence', proofOpen ? 'attention' : 'ready', 'siemPackagePreview'),
   ];
 }
 
@@ -1641,7 +1641,7 @@ function OperatorFlow({ posture }: { posture: Posture | null }) {
   const attention = rows.filter((row) => row.tone === 'attention').length;
   const ready = rows.filter((row) => row.tone === 'ready').length;
   return (
-    <Section title="Operator Flow" summary={posture ? `${urgent} urgent / ${attention} attention / ${ready} ready` : 'Waiting for data'}>
+    <Section title="FCU Operator Flow" summary={posture ? `${urgent} urgent / ${attention} attention / ${ready} ready` : 'Waiting for data'}>
       <div className="operator-flow-board" aria-live="polite">
         {posture ? (
           rows.map((row) => (
@@ -1728,7 +1728,7 @@ function ActionQueueSection({ rows, isAdmin, workflow }: { rows: PostureAction[]
   const routed = rows.filter((item) => item.workflowStatus === 'assigned' || item.workflowStatus === 'snoozed').length;
   const summary = rows.length ? `${rows.length} actions / ${critical} critical / ${warning} warning / ${routed} routed` : 'All clear';
   return (
-    <Section title="Action Queue" summary={summary}>
+    <Section title="Exam Action Queue" summary={summary}>
       <div className="action-queue" id="hardeningActionQueue" aria-live="polite">
         {rows.length ? (
           rows.map((item, index) => <ActionRow key={item.id} item={item} rank={index + 1} isAdmin={isAdmin} workflow={workflow} />)
@@ -1743,7 +1743,7 @@ function ActionQueueSection({ rows, isAdmin, workflow }: { rows: PostureAction[]
 function ObjectivesSection({ objectives }: { objectives: PostureObjective[] }) {
   const covered = objectives.filter((item) => item.state === 'covered').length;
   return (
-    <Section title="Posture Objectives" summary={objectives.length ? `${covered}/${objectives.length} covered` : 'Waiting for data'}>
+    <Section title="Exam Posture Objectives" summary={objectives.length ? `${covered}/${objectives.length} covered` : 'Waiting for data'}>
       <div className="posture-objectives">
         {objectives.length ? (
           objectives.map((item) => (
@@ -1801,7 +1801,7 @@ function InventorySection({ inventory }: { inventory: AiInventoryReport | null }
     ? `${num(summary.sanctioned)} sanctioned / ${num(summary.shadow)} shadow / ${num(summary.highRiskAssets)} high risk`
     : 'Waiting for data';
   return (
-    <Section title="AI App Inventory" summary={summaryText}>
+    <Section title="AI Vendor Inventory" summary={summaryText}>
       <div className="ai-inventory-grid" id="aiInventoryRows" aria-live="polite">
         {rows.length ? (
           rows.map((item) => <InventoryRow key={item.id} item={item} />)
@@ -2653,10 +2653,10 @@ function DecisionQualitySection({ quality }: { quality: DecisionQualityInfo | nu
     ? `${num(summary.controlRate)}% controlled / ${num(summary.pendingReviews)} pending / ${num(summary.overrideWatch)} overrides`
     : 'Waiting for data';
   return (
-    <Section title="Decision Quality" summary={summaryText}>
+    <Section title="Reviewer Decision Quality" summary={summaryText}>
       <div className="control-breakdown" id="decisionQualityRows" aria-live="polite">
         {!summary ? (
-          <EmptyState title="No decision quality data" detail="Recent approval, coaching, and override outcomes appear here." />
+          <EmptyState title="No reviewer decision data" detail="Recent approval, coaching, and override outcomes appear here." />
         ) : (
           <>
             {cards.map((card) => (
@@ -2673,7 +2673,7 @@ function DecisionQualitySection({ quality }: { quality: DecisionQualityInfo | nu
             {hotspots.length ? (
               <div className="control-row">
                 <div>
-                  <strong>Decision Hotspots</strong>
+                  <strong>Member-Data Decision Hotspots</strong>
                   <span>metadata only</span>
                 </div>
               </div>
@@ -3095,7 +3095,7 @@ export default function Monitor() {
 
   return (
     <div className="monitor-view">
-      <div className="signal-console" aria-label="AI Command Center">
+      <div className="signal-console" aria-label="Texas FCU Command Center">
         <ConsoleHeader critical={critical} lastUpdated={posture.lastUpdated} refreshing={refreshing} onRefresh={() => void refresh()} />
         <MonitorToolbar
           term={ui.term}

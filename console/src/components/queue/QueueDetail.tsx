@@ -110,7 +110,7 @@ function DecisionControls({ query, me, busy, note, onNote, onApprove, onDeny, on
     <>
       <textarea
         className="note"
-        placeholder="Decision note, recorded in audit log"
+        placeholder="Exam-ready decision note, recorded in audit log"
         aria-label="Decision note"
         value={note}
         onChange={(event) => onNote(event.target.value)}
@@ -207,7 +207,7 @@ function QueryAuditTrail({ queryId }: { queryId: string }) {
 export function QueueDetail(props: QueueDetailProps) {
   const { query, reveal, me, busy, onReveal, onAssign } = props;
   if (!query) {
-    return <EmptyState title="No selected incident" detail="Select a held prompt to review its redacted context." />;
+    return <EmptyState title="No selected member-data incident" detail="Select a held prompt to review its redacted context." />;
   }
   return (
     <>

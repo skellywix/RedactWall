@@ -28,9 +28,9 @@ export default function DecisionQuality() {
   const hotspots = (quality?.hotspots ?? []).slice(0, 4);
 
   return (
-    <Panel title="Decision Quality" meta={!loaded ? 'Loading' : quality ? summaryLine(quality) : 'Waiting for data'}>
+    <Panel title="Reviewer Decision Quality" meta={!loaded ? 'Loading' : quality ? summaryLine(quality) : 'Waiting for data'}>
       {!quality && loaded ? (
-        <EmptyState title="No decision quality data" detail="Recent approval, coaching, and override outcomes appear here." />
+        <EmptyState title="No reviewer decision data" detail="Recent approval, coaching, and override outcomes appear here." />
       ) : (
         <>
           {cards.map((card) => (
@@ -47,7 +47,7 @@ export default function DecisionQuality() {
             <>
               <div className="control-row">
                 <div>
-                  <strong>Decision Hotspots</strong>
+                  <strong>Member-Data Decision Hotspots</strong>
                   <span>metadata only</span>
                 </div>
               </div>

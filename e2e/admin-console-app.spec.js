@@ -65,11 +65,11 @@ test('console shell renders the live session and pilot view after login', async 
 
   await page.goto('/app/');
   await expect(page.locator('#who')).toContainText('admin / Security Admin');
-  await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Texas FCU Overview' })).toBeVisible();
 
-  await page.getByRole('button', { name: 'Decision Quality' }).click();
+  await page.getByRole('button', { name: 'Reviewer Decisions' }).click();
   await expect(page).toHaveURL(/\/app\/#\/decision-quality$/);
-  await expect(page.getByRole('heading', { name: 'Decision Quality' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Reviewer Decision Quality' })).toBeVisible();
   // Renders either posture-driven rows or the explicit empty state — both are
   // healthy; a hung "Loading" meta line is not.
   await expect(page.locator('.app-panel-meta')).not.toHaveText('Loading', { timeout: 10000 });
@@ -83,7 +83,7 @@ test('overview leak exposure map renders the sanitized department graph', async 
   await login(page);
 
   await page.goto('/app/');
-  await expect(page.locator('.leak-map-section')).toContainText('AI Data Leak Exposure Map');
+  await expect(page.locator('.leak-map-section')).toContainText('Texas FCU AI Exposure Map');
   await expect(page.locator('#leakMapSummary')).toContainText('prompt bodies excluded');
   await expect(page.locator('#leakMapStage svg')).toBeVisible();
   await expect(page.locator('#leakMapStage .leak-wall')).toBeVisible();
@@ -127,7 +127,7 @@ test('approval queue releases a held prompt after password step-up', async ({ pa
   await login(page);
 
   await page.goto('/app/#/queue');
-  await expect(page.getByRole('heading', { name: 'Approval Queue' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Member Data Queue' })).toBeVisible();
   const heldRow = page.locator('article.q').filter({ hasText: 'app-console@example.test' }).first();
   await heldRow.click();
 
@@ -152,11 +152,11 @@ test('policy and audit views render live data without errors', async ({ page }) 
   await login(page);
 
   await page.goto('/app/#/policy');
-  await expect(page.getByRole('heading', { name: 'Configuration', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Policy Configuration', exact: true })).toBeVisible();
   await expect(page.locator('.app-panel-meta').first()).not.toHaveText('Loading', { timeout: 10000 });
 
   await page.goto('/app/#/audit');
-  await expect(page.getByRole('heading', { name: 'Tamper-evident Audit Log' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Examiner Audit Chain' })).toBeVisible();
   await expect(page.locator('.app-panel-meta').first()).not.toHaveText('Loading', { timeout: 10000 });
 
   expect(problems).toEqual([]);

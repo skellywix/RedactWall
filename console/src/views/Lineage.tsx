@@ -106,10 +106,10 @@ function lineageTotals(report: LineageReport): LineageTotals {
 
 function summaryCards(totals: LineageTotals): Array<{ value: number; label: string; meta: string }> {
   return [
-    { value: totals.events, label: 'Events', meta: 'recent sanitized records' },
-    { value: totals.users, label: 'Users', meta: 'unique lineage buckets' },
-    { value: totals.destinations, label: 'Destinations', meta: 'AI tools and apps' },
-    { value: totals.blocked, label: 'Blocked', meta: 'policy stops' },
+    { value: totals.events, label: 'Exam events', meta: 'recent sanitized records' },
+    { value: totals.users, label: 'Employees', meta: 'unique lineage buckets' },
+    { value: totals.destinations, label: 'AI destinations', meta: 'tools and apps' },
+    { value: totals.blocked, label: 'Blocked', meta: 'member-data stops' },
     { value: totals.redacted, label: 'Redacted', meta: 'tokenized or masked' },
     { value: totals.allowed, label: 'Allowed', meta: 'below thresholds' },
   ];
@@ -124,10 +124,10 @@ interface LineageGroup {
 }
 
 const GROUPS: LineageGroup[] = [
-  { key: 'byUser', title: 'Users', caption: 'Observed activity without prompt bodies', columnLabel: 'User', emptyLabel: 'No user lineage yet.' },
-  { key: 'byDestination', title: 'Destinations', caption: 'AI tools and apps involved', columnLabel: 'Destination', emptyLabel: 'No destination lineage yet.' },
+  { key: 'byUser', title: 'Employees', caption: 'Observed activity without prompt bodies', columnLabel: 'Employee', emptyLabel: 'No employee lineage yet.' },
+  { key: 'byDestination', title: 'AI Destinations', caption: 'AI tools and apps involved', columnLabel: 'Destination', emptyLabel: 'No destination lineage yet.' },
   { key: 'bySensor', title: 'Sensors', caption: 'Control points that saw traffic', columnLabel: 'Sensor', emptyLabel: 'No sensor lineage yet.' },
-  { key: 'byCategory', title: 'Categories', caption: 'Detected sensitive-data themes', columnLabel: 'Category', emptyLabel: 'No category lineage yet.' },
+  { key: 'byCategory', title: 'Member-Data Categories', caption: 'Detected sensitive-data themes', columnLabel: 'Category', emptyLabel: 'No category lineage yet.' },
   { key: 'byChannel', title: 'Channels', caption: 'Prompt, file, response, and agent paths', columnLabel: 'Channel', emptyLabel: 'No channel lineage yet.' },
   { key: 'byDecision', title: 'Decisions', caption: 'How policy resolved the traffic', columnLabel: 'Decision', emptyLabel: 'No decision lineage yet.' },
 ];
@@ -185,7 +185,7 @@ function LineageToolbar({ search, busy, onSearch, onRefresh }: LineageToolbarPro
         Search
         <input
           type="search"
-          placeholder="Search users or destinations"
+          placeholder="Search employees or destinations"
           value={search}
           onChange={(event) => onSearch(event.target.value)}
         />
@@ -314,8 +314,8 @@ export default function Lineage() {
   return (
     <div className="lineage-view lineage-grid">
       <div className="wide-panel">
-        <Panel title="Prompt And File Lineage" meta={meta}>
-          <p className="app-note">Sanitized aggregates across users, sensors, destinations, categories, and decisions.</p>
+        <Panel title="Member Data Lineage" meta={meta}>
+          <p className="app-note">Sanitized aggregates across employees, sensors, AI destinations, member-data categories, and decisions.</p>
           <LineageToolbar search={search} busy={busy} onSearch={setSearch} onRefresh={load} />
           {renderSummary(loaded, totals)}
         </Panel>

@@ -78,7 +78,7 @@ test('new console ports the legacy design system (fonts, dark default, toggle, a
   await createHeldPrompt(request);
   await login(page);
   await page.goto('/app/');
-  await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Texas FCU Overview' })).toBeVisible();
 
   // 1) Dark is the default theme (no stored preference yet).
   await expect(page.locator('body')).toHaveAttribute('data-theme', 'dark');

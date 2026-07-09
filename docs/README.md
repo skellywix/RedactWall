@@ -88,6 +88,7 @@ organized by topic: `deployment/`, `demo/`, `identity/`, `connectors/`,
 | Topic | Document |
 |-------|----------|
 | Product roadmap | `../ROADMAP.md` |
+| Texas FCU product map and tab positioning | `product/TEXAS_FCU_PRODUCT_MAP.md` |
 | Competitive positioning and product direction | `product/COMPETITIVE_ALIGNMENT.md` |
 | Feature benchmark vs. market leaders | `product/COMPETITIVE_BENCHMARK_2026.md` |
 | Sales battlecard vs. Nightfall AI (internal) | `product/BATTLECARD_NIGHTFALL.md` |

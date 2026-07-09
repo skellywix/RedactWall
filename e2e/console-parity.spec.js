@@ -88,29 +88,29 @@ async function createHeldPrompt(request, suffix) {
 // console/src/views/*.tsx), never a nav label, so a blank view cannot pass.
 const ROUTES = {
   operate: [
-    { hash: '/', heading: 'Overview' },
-    { hash: '/queue', heading: 'Approval Queue' },
-    { hash: '/monitor', heading: 'AI Security Command Center' },
-    { hash: '/activity', heading: 'All Gated Prompts' },
+    { hash: '/', heading: 'Texas FCU Overview' },
+    { hash: '/queue', heading: 'Member Data Queue' },
+    { hash: '/monitor', heading: 'Texas FCU Command Center' },
+    { hash: '/activity', heading: 'Gated Member-Data Events' },
   ],
   analyze: [
-    { hash: '/insights', heading: 'AI Usage Insights' },
-    { hash: '/coverage', heading: 'Sensor Coverage' },
-    { hash: '/lineage', heading: 'Prompt And File Lineage' },
-    { hash: '/decision-quality', heading: 'Decision Quality' },
+    { hash: '/insights', heading: 'Member Data Insights' },
+    { hash: '/coverage', heading: 'Texas FCU Coverage' },
+    { hash: '/lineage', heading: 'Member Data Lineage' },
+    { hash: '/decision-quality', heading: 'Reviewer Decision Quality' },
   ],
   govern: [
-    { hash: '/catalog', heading: 'AI App Catalog' },
-    { hash: '/compliance', heading: 'Compliance Posture' },
-    { hash: '/ncua', heading: 'NCUA Readiness' },
-    { hash: '/identity', heading: 'Identity' },
-    { hash: '/policy', heading: 'Configuration' },
+    { hash: '/catalog', heading: 'AI Vendor Catalog' },
+    { hash: '/compliance', heading: 'NCUA / GLBA Controls' },
+    { hash: '/ncua', heading: 'Texas FCU Readiness' },
+    { hash: '/identity', heading: 'Identity & Roles' },
+    { hash: '/policy', heading: 'Policy Configuration' },
   ],
   system: [
-    { hash: '/deploy', heading: 'Sensor packages' },
-    { hash: '/integrations', heading: 'Integrations & Delivery' },
-    { hash: '/audit', heading: 'Tamper-evident Audit Log' },
-    { hash: '/updates', heading: 'Updates' },
+    { hash: '/deploy', heading: 'Texas FCU sensor rollout' },
+    { hash: '/integrations', heading: 'Evidence Delivery' },
+    { hash: '/audit', heading: 'Examiner Audit Chain' },
+    { hash: '/updates', heading: 'Controlled Updates' },
   ],
 };
 
@@ -150,8 +150,8 @@ test('NCUA use-case inventory and incident panels mount with their empty states'
   await createHeldPrompt(request, '8106');
   await login(page);
   await page.goto('/app/#/ncua');
-  await expect(page.getByRole('heading', { name: 'AI use-case inventory', exact: true })).toBeVisible();
-  await expect(page.locator('.panel', { hasText: 'AI use-case inventory' }).locator('.empty'))
+  await expect(page.getByRole('heading', { name: 'Texas FCU AI use-case inventory', exact: true })).toBeVisible();
+  await expect(page.locator('.panel', { hasText: 'Texas FCU AI use-case inventory' }).locator('.empty'))
     .toContainText('No AI use cases recorded yet');
   await expect(page.getByRole('heading', { name: '72-hour incident readiness', exact: true })).toBeVisible();
   await expect(page.locator('.panel', { hasText: '72-hour incident readiness' }).locator('.empty'))
@@ -170,15 +170,15 @@ test('shell chrome: nav groups, queue badge, LIVE indicator, sign-out, command p
   await login(page);
 
   await page.goto('/app/');
-  await expect(page.getByRole('heading', { name: 'Overview', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Texas FCU Overview', exact: true })).toBeVisible();
 
-  // All four legacy capability groups exist in the rail.
-  for (const label of ['Operate', 'Analyze', 'Govern', 'System']) {
+  // All four capability groups exist in the rail.
+  for (const label of ['Member Defense', 'Risk & Proof', 'Governance', 'Platform']) {
     await expect(page.locator('.app-rail-group .rail-group-label', { hasText: new RegExp(`^${label}$`) })).toBeVisible();
   }
 
   // The queue badge reflects the seeded held prompt.
-  const queueBadge = page.locator('.app-rail .tab', { hasText: 'Approval Queue' }).locator('.badge');
+  const queueBadge = page.locator('.app-rail .tab', { hasText: 'Member Data Queue' }).locator('.badge');
   await expect(queueBadge).toBeVisible();
   await expect(queueBadge).toHaveText(/^[1-9]\d*$/);
 
@@ -194,10 +194,10 @@ test('shell chrome: nav groups, queue badge, LIVE indicator, sign-out, command p
   await expect(palette).toBeVisible();
   await palette.getByLabel('Command palette filter').fill('lineage');
   await expect(palette.locator('.cmdk-item')).toHaveCount(1);
-  await expect(palette.locator('.cmdk-item.is-selected')).toContainText('Data Lineage');
+  await expect(palette.locator('.cmdk-item.is-selected')).toContainText('Member Data Lineage');
   await page.keyboard.press('Enter');
   await expect(page).toHaveURL(/\/app\/#\/lineage$/);
-  await expect(page.getByRole('heading', { name: 'Prompt And File Lineage', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Member Data Lineage', exact: true })).toBeVisible();
   await expect(palette).toHaveCount(0);
 
   expect(problems).toEqual([]);

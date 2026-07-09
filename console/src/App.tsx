@@ -37,40 +37,40 @@ interface RouteGroup {
 
 const GROUPS: RouteGroup[] = [
   {
-    label: 'Operate',
+    label: 'Member Defense',
     items: [
-      { path: '/', label: 'Overview', icon: NAV_ICONS.overview, view: Overview },
-      { path: '/queue', label: 'Approval Queue', icon: NAV_ICONS.queue, view: Queue },
-      { path: '/monitor', label: 'AI Command Center', icon: NAV_ICONS.monitor, view: Monitor },
-      { path: '/activity', label: 'All Activity', icon: NAV_ICONS.activity, view: Activity },
+      { path: '/', label: 'Texas FCU Overview', icon: NAV_ICONS.overview, view: Overview },
+      { path: '/queue', label: 'Member Data Queue', icon: NAV_ICONS.queue, view: Queue },
+      { path: '/monitor', label: 'FCU Command Center', icon: NAV_ICONS.monitor, view: Monitor },
+      { path: '/activity', label: 'Exam Activity', icon: NAV_ICONS.activity, view: Activity },
     ],
   },
   {
-    label: 'Analyze',
+    label: 'Risk & Proof',
     items: [
-      { path: '/insights', label: 'Insights', icon: NAV_ICONS.insights, view: Insights },
-      { path: '/coverage', label: 'Sensor Coverage', icon: NAV_ICONS.coverage, view: Coverage },
-      { path: '/lineage', label: 'Data Lineage', icon: NAV_ICONS.lineage, view: Lineage },
-      { path: '/decision-quality', label: 'Decision Quality', icon: NAV_ICONS.decisionQuality, view: DecisionQuality },
+      { path: '/insights', label: 'Member Risk Insights', icon: NAV_ICONS.insights, view: Insights },
+      { path: '/coverage', label: 'Texas FCU Coverage', icon: NAV_ICONS.coverage, view: Coverage },
+      { path: '/lineage', label: 'Member Data Lineage', icon: NAV_ICONS.lineage, view: Lineage },
+      { path: '/decision-quality', label: 'Reviewer Decisions', icon: NAV_ICONS.decisionQuality, view: DecisionQuality },
     ],
   },
   {
-    label: 'Govern',
+    label: 'Governance',
     items: [
-      { path: '/catalog', label: 'App Catalog', icon: NAV_ICONS.catalog, view: Catalog },
-      { path: '/compliance', label: 'Compliance', icon: NAV_ICONS.compliance, view: Compliance },
-      { path: '/ncua', label: 'NCUA Readiness', icon: NAV_ICONS.ncua, view: NcuaReadiness },
-      { path: '/identity', label: 'Identity', icon: NAV_ICONS.identity, view: Identity },
-      { path: '/policy', label: 'Configuration', icon: NAV_ICONS.policy, view: Policy },
+      { path: '/catalog', label: 'AI Vendor Catalog', icon: NAV_ICONS.catalog, view: Catalog },
+      { path: '/compliance', label: 'NCUA / GLBA Controls', icon: NAV_ICONS.compliance, view: Compliance },
+      { path: '/ncua', label: 'Texas FCU Readiness', icon: NAV_ICONS.ncua, view: NcuaReadiness },
+      { path: '/identity', label: 'Identity & Roles', icon: NAV_ICONS.identity, view: Identity },
+      { path: '/policy', label: 'Policy Configuration', icon: NAV_ICONS.policy, view: Policy },
     ],
   },
   {
-    label: 'System',
+    label: 'Platform',
     items: [
-      { path: '/deploy', label: 'Deploy', icon: NAV_ICONS.deploy, view: Deploy },
-      { path: '/integrations', label: 'Integrations', icon: NAV_ICONS.integrations, view: Integrations },
-      { path: '/audit', label: 'Audit Log', icon: NAV_ICONS.audit, view: Audit },
-      { path: '/updates', label: 'Updates', icon: NAV_ICONS.updates, view: Updates },
+      { path: '/deploy', label: 'Sensor Rollout', icon: NAV_ICONS.deploy, view: Deploy },
+      { path: '/integrations', label: 'Evidence Delivery', icon: NAV_ICONS.integrations, view: Integrations },
+      { path: '/audit', label: 'Examiner Audit Chain', icon: NAV_ICONS.audit, view: Audit },
+      { path: '/updates', label: 'Controlled Updates', icon: NAV_ICONS.updates, view: Updates },
     ],
   },
 ];

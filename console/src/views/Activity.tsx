@@ -424,7 +424,7 @@ function ToolbarActions({ table, views, onSaveView, onExport }: ToolbarProps) {
       <input
         type="search"
         aria-label="Search activity"
-        placeholder="Search: user: dest: status: sev: source: or text"
+        placeholder="Search: employee: dest: status: sev: source: or masked text"
         value={table.search}
         onChange={(event) => table.applySearch(event.target.value)}
       />
@@ -446,8 +446,8 @@ function Toolbar(props: ToolbarProps) {
     <div className="console-frame-header">
       <div className="console-frame-title">
         <div>
-          <h2>All Activity</h2>
-          <p>Scan recent gated prompts, decisions, owners, and sanitized detection context.</p>
+          <h2>Exam Activity</h2>
+          <p>Review recent Texas FCU AI events, decisions, owners, and sanitized member-data context.</p>
         </div>
       </div>
       <ToolbarActions {...props} />
@@ -842,7 +842,7 @@ function ActivityBody(props: ActivityBodyProps) {
   const { loaded, rows, table } = props;
   if (!loaded) return <div className="app-loading">Loading activity…</div>;
   if (!rows) return <EmptyState title="Activity unavailable" detail="Could not load activity. Refresh to retry." />;
-  if (!rows.length) return <EmptyState title="No gated prompts yet" detail="Prompt events appear here as the sensors report them." />;
+  if (!rows.length) return <EmptyState title="No gated member-data events yet" detail="AI events appear here as the sensors report them." />;
   return (
     <>
       <ColumnChooser hidden={props.hidden} onToggle={props.onToggleCol} />
@@ -880,7 +880,7 @@ export default function Activity() {
   return (
     <div className="activity-view">
       <Toolbar table={table} views={savedViews.views} onSaveView={() => savedViews.save(currentView(table))} onExport={() => exportActivityCsv(table.filtered)} />
-      <Panel title="All Gated Prompts" meta={metaLine}>
+      <Panel title="Gated Member-Data Events" meta={metaLine}>
         <ActivityBody
           loaded={loaded}
           rows={rows}

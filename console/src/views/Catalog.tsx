@@ -266,10 +266,10 @@ function CatalogHeader({ busy, onImport, onAdd, onRefresh }: CatalogHeaderProps)
     <div className="console-frame-header">
       <div className="console-frame-title">
         <div>
-          <h2>AI App Catalog</h2>
+          <h2>AI Vendor Catalog</h2>
           <p>
-            Discovered AI applications with app-risk attributes, sanctioned status, and one-click govern / allow /
-            block — the shadow-AI control surface. Discovery is metadata only.
+            Discovered AI vendors and internal assistants with app-risk attributes, sanctioned status, and one-click
+            govern / allow / block for Texas FCU teams. Discovery is metadata only.
           </p>
         </div>
       </div>
@@ -303,7 +303,7 @@ function KpiRow({ apps }: { apps: CatalogApp[] }) {
   const governed = apps.filter((a) => ['sanctioned', 'tolerated', 'blocked'].includes(a.sanctionedStatus)).length;
   return (
     <div className="insights-kpis">
-      <Kpi label="AI apps discovered" value={apps.length} hint="across all sources" />
+      <Kpi label="AI vendors discovered" value={apps.length} hint="across all sources" />
       <Kpi label="Awaiting review" value={shadow} hint="shadow AI" />
       <Kpi label="Elevated / high risk" value={high} hint="by risk tier" />
       <Kpi label="Governed" value={governed} hint="allow / govern / block" />
@@ -335,9 +335,9 @@ function AddForm({ onSaved, onClose }: FormPanelProps) {
   };
   return (
     <div className="panel catalog-form">
-      <div className="panel-head"><div><h2>Add AI app</h2><span>Register an app the sensors have not discovered yet</span></div></div>
+      <div className="panel-head"><div><h2>Add AI vendor</h2><span>Register an AI host the sensors have not discovered yet</span></div></div>
       <div className="catalog-form-body">
-        <input type="text" placeholder="internal-llm.corp" aria-label="AI app host" value={host} onChange={(event) => setHost(event.target.value)} />
+        <input type="text" placeholder="cu-assistant.internal" aria-label="AI app host" value={host} onChange={(event) => setHost(event.target.value)} />
         <input type="text" placeholder="Display name (optional)" aria-label="Display name" value={name} onChange={(event) => setName(event.target.value)} />
         <button className="system-button primary" type="button" onClick={submit}>Add app</button>
         <button className="ghost" type="button" onClick={onClose}>Cancel</button>
@@ -359,9 +359,9 @@ function ImportForm({ onSaved, onClose }: FormPanelProps) {
   };
   return (
     <div className="panel catalog-form">
-      <div className="panel-head"><div><h2>Import from proxy/DNS log</h2><span>One hostname per line, or host,count pairs - metadata only</span></div></div>
+      <div className="panel-head"><div><h2>Import from Texas FCU proxy/DNS log</h2><span>One hostname per line, or host,count pairs - metadata only</span></div></div>
       <div className="catalog-form-body catalog-form-column">
-        <textarea rows={4} placeholder={'internal-llm.corp\nchat.example.ai,42'} aria-label="Hostnames to import" value={csv} onChange={(event) => setCsv(event.target.value)} />
+        <textarea rows={4} placeholder={'cu-assistant.internal\nchat.example.ai,42'} aria-label="Hostnames to import" value={csv} onChange={(event) => setCsv(event.target.value)} />
         <div className="catalog-form-actions">
           <button className="system-button primary" type="button" onClick={submit}>Import</button>
           <button className="ghost" type="button" onClick={onClose}>Cancel</button>
@@ -613,7 +613,7 @@ function CatalogRows({ apps, actions, isAdmin }: { apps: CatalogApp[]; actions: 
   if (!apps.length) {
     return (
       <tr>
-        <td colSpan={9} className="insights-empty">No AI apps discovered yet. Import a proxy/DNS log or wait for sensor sightings.</td>
+        <td colSpan={9} className="insights-empty">No AI vendors discovered yet. Import a proxy/DNS log or wait for sensor sightings.</td>
       </tr>
     );
   }
@@ -672,8 +672,8 @@ function TablePanel({ apps, sort, onSort, actions, isAdmin, loaded, busy, failed
     <div className={`panel wide-panel${busy ? ' is-loading' : ''}`} data-loading-label="DISCOVERING">
       <div className="panel-head">
         <div>
-          <h2>Discovered AI apps</h2>
-          <span>Risk score, attributes, discovery source, and governance decision - click a column to sort</span>
+          <h2>Discovered AI vendors</h2>
+          <span>Risk score, attributes, discovery source, and FCU governance decision - click a column to sort</span>
         </div>
         {actions.selected.size > 0 ? (
           <BulkBar count={actions.selected.size} reason={actions.bulkReason} acting={actions.acting} onReason={actions.setBulkReason} onDecision={actions.runBulk} />

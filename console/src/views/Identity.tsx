@@ -209,8 +209,8 @@ function IdentityHeader({ onTest }: { onTest: () => void }) {
     <div className="console-frame-header">
       <div className="console-frame-title">
         <div>
-          <h2>Identity</h2>
-          <p>Prepare SCIM, OIDC, role mapping, and readiness values without exposing secrets.</p>
+          <h2>Identity &amp; Roles</h2>
+          <p>Prepare SCIM, OIDC, Texas FCU team mapping, and reviewer roles without exposing secrets.</p>
         </div>
       </div>
       <div className="console-frame-actions">
@@ -248,7 +248,7 @@ function TestPanel({ result }: { result: IdentityTestResult | 'failed' | null })
     <div className="panel">
       <div className="panel-head">
         <div>
-          <h2>Configuration check</h2>
+          <h2>Identity readiness check</h2>
           <span>Config completeness only - no calls leave this server</span>
         </div>
       </div>
@@ -267,7 +267,7 @@ function TenantInput({ onCommit }: { onCommit: (value: string) => void }) {
     <input
       type="text"
       aria-label="Tenant or domain"
-      placeholder="tenant id or domain"
+      placeholder="tenant id or texasfcu.org"
       value={draft}
       onChange={(event) => setDraft(event.target.value)}
       onBlur={() => onCommit(draft.trim())}
@@ -425,7 +425,7 @@ function GuidePanels({ guide }: { guide: IdentitySetupGuide | null }) {
       <IdentityPanel title="Environment" hint="Server-side settings" wide>
         <EnvTable rows={guide?.env ?? []} />
       </IdentityPanel>
-      <IdentityPanel title="Role Groups" hint="Provisioned group names">
+      <IdentityPanel title="Reviewer Groups" hint="Provisioned Texas FCU team names">
         <RoleGroupsTable rows={guide?.roleGroups ?? []} />
       </IdentityPanel>
       <IdentityPanel title="Validation" hint="Readiness checks">
@@ -481,7 +481,7 @@ export default function Identity() {
       <div className="identity-grid">
         <IdentityPanel
           title="Identity Setup"
-          hint="SCIM and OIDC handoff values"
+          hint="SCIM, OIDC, and Texas FCU reviewer-routing values"
           wide
           loading={loading}
           tools={<SetupTools provider={provider} onProvider={setProvider} onTenant={setTenant} onRefresh={load} />}

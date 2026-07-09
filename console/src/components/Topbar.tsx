@@ -40,7 +40,7 @@ export default function Topbar({ who, liveState, lastUpdated, onOpenPalette, onS
           type="search"
           autoComplete="off"
           readOnly
-          placeholder="Search destinations or actions"
+          placeholder="Search FCU evidence or actions"
           aria-label="Open the command palette"
           onMouseDown={openFromMouse}
           onFocus={openFromFocus}

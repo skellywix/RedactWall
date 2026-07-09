@@ -875,9 +875,9 @@ function SelectField(props: {
 function ModePicker({ mode, disabled, onChange }: { mode: EnforcementMode; disabled: boolean; onChange: (mode: EnforcementMode) => void }) {
   return (
     <section className="policy-section">
-      <h3>Policy mode</h3>
+      <h3>Texas FCU policy mode</h3>
       <p className="policy-hint">
-        What every RedactWall sensor does when it sees sensitive content. Hard-stop identifiers still block regardless of mode.
+        What every RedactWall sensor does when it sees member information. Hard-stop identifiers still block regardless of mode.
       </p>
       <div className="policy-modes" role="radiogroup" aria-label="Enforcement mode">
         {MODES.map(([value, title, detail]) => (
@@ -904,7 +904,7 @@ function ModePicker({ mode, disabled, onChange }: { mode: EnforcementMode; disab
 function ThresholdFields({ draft, disabled, patch }: FieldProps) {
   return (
     <section className="policy-section">
-      <h3>Blocking thresholds</h3>
+      <h3>Member-data blocking thresholds</h3>
       <div className="policy-field-grid">
         <SelectField
           id="pol-sev"
@@ -931,7 +931,7 @@ function ThresholdFields({ draft, disabled, patch }: FieldProps) {
 function HandlingFields({ draft, disabled, patch }: FieldProps) {
   return (
     <section className="policy-section">
-      <h3>Retention and handling</h3>
+      <h3>Approval retention and handling</h3>
       <div className="policy-field-grid">
         <CheckboxField
           id="pol-store-raw"
@@ -980,8 +980,8 @@ function HandlingFields({ draft, disabled, patch }: FieldProps) {
 function DestinationLists({ draft, disabled, patch }: FieldProps) {
   return (
     <section className="policy-section">
-      <h3>Destination governance</h3>
-      <p className="policy-hint">One destination per line; * wildcards allowed. Allowed entries override blocks.</p>
+      <h3>AI vendor governance</h3>
+      <p className="policy-hint">One destination per line; * wildcards allowed. Allowed entries override blocks for approved Texas FCU use cases.</p>
       <div className="policy-list-grid">
         {DESTINATION_FIELDS.map(([key, label, placeholder]) => (
           <label key={key} className="policy-list-field">
@@ -1003,9 +1003,9 @@ function DestinationLists({ draft, disabled, patch }: FieldProps) {
 function HardStops({ items }: { items: string[] }) {
   return (
     <section className="policy-section">
-      <h3>Hard-stop entities</h3>
+      <h3>Member-information hard stops</h3>
       <p className="policy-hint">
-        These identifiers block or tokenize even when the global mode is softer. Change them by applying a template or via the API.
+        These identifiers block or tokenize even when the global mode is softer. Change them by applying the NCUA / GLBA template or via the API.
       </p>
       <div className="policy-chips">
         {items.length ? (
@@ -1028,7 +1028,7 @@ function TemplatePicker({ templates, disabled, onApply }: { templates: PolicyTem
   return (
     <section className="policy-section">
       <h3>Policy templates</h3>
-      <p className="policy-hint">Start from a compliance preset, then tune thresholds and destinations. Applying saves immediately.</p>
+      <p className="policy-hint">Start from the NCUA / GLBA credit-union preset, then tune thresholds and destinations. Applying saves immediately.</p>
       <div className="policy-chips">
         {templates.map((template) => (
           <button
@@ -1120,8 +1120,8 @@ function SetupChecklistCard({ policy, preflight, coverage }: CardProps) {
     <div className="config-card pad">
       <div className="sensor-head">
         <div>
-          <h3>Setup Checklist</h3>
-          <p>Fast path from install to governed pilot.</p>
+          <h3>Texas FCU Setup Checklist</h3>
+          <p>Fast path from install to governed Texas FCU pilot.</p>
         </div>
         <StatusChip tone={done === items.length ? 'good' : 'warn'} label={`${done}/${items.length} ready`} />
       </div>
@@ -1150,8 +1150,8 @@ function HealthCard({ policy, preflight, coverage }: CardProps) {
     <div className="config-card pad">
       <div className="sensor-head">
         <div>
-          <h3>Configuration Health</h3>
-          <p>Readiness across auth, sensors, data, and governance.</p>
+          <h3>Policy Health</h3>
+          <p>Readiness across auth, sensors, member data, and AI governance.</p>
         </div>
         <StatePill state={health.state} label={health.state === 'good' ? 'Good' : health.label} />
       </div>
@@ -1183,7 +1183,7 @@ const ENV_GROUPS: [string, string[]][] = [
 function EnvironmentCard({ preflight }: { preflight: Preflight | null }) {
   return (
     <div className="config-card pad">
-      <h3>Environment Settings</h3>
+      <h3>Control Plane Settings</h3>
       <p>Security-critical setup status without exposing secret values.</p>
       <div className="settings-list">
         <div className="settings-row">
@@ -1263,8 +1263,8 @@ function SensorSetupCard({ policy, coverage }: { policy: PolicyDoc; coverage: Co
     <div className="config-card pad">
       <div className="sensor-head">
         <div>
-          <h3>Sensor Setup</h3>
-          <p>Deploy and manage the control points that feed one shared policy.</p>
+          <h3>Texas FCU Sensor Setup</h3>
+          <p>Deploy and manage the branch browser, endpoint, and MCP control points that feed one shared policy.</p>
         </div>
         <a className="ghost mini" href={routeHref('/coverage')}>
           View coverage
@@ -2003,7 +2003,7 @@ function DetectionTester() {
     </button>
   );
   return (
-    <Panel title="Detection Tester" meta={runButton}>
+    <Panel title="Member Data Test Bench" meta={runButton}>
       <p className="policy-hint">
         Paste sample text to see exactly how the live policy would score and decide it - the sample is analyzed in memory and never
         stored or logged
@@ -2013,7 +2013,7 @@ function DetectionTester() {
         rows={3}
         value={text}
         spellCheck={false}
-        placeholder="e.g. Please summarize: member SSN 123-45-6789, card 4111 1111 1111 1111"
+        placeholder="e.g. Draft a payoff letter for member SSN 123-45-6789 and loan LN-120045"
         aria-label="Sample text to test"
         onChange={(event) => setText(event.target.value)}
       />
@@ -2268,7 +2268,7 @@ export default function Policy() {
   return (
     <div className="policy-view">
       <DetectionTester />
-      <Panel title="Configuration" meta={!loaded ? 'Loading' : policy ? metaLine(policy) : 'Waiting for data'}>
+      <Panel title="Policy Configuration" meta={!loaded ? 'Loading' : policy ? metaLine(policy) : 'Waiting for data'}>
         {loaded && !policy ? (
           <EmptyState title="Policy unavailable" detail="The enforcement policy could not be loaded. Refresh or check the server." />
         ) : policy && draft ? (

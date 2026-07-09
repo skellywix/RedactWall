@@ -409,7 +409,7 @@ function ConfigCard({ config, disabled, saveStatus, onSave }: ConfigCardProps) {
   const patch = (next: Partial<ConfigFormState>) => setForm((prev) => ({ ...prev, ...next }));
   return (
     <div className="config-card pad">
-      <h3>Update Configuration</h3>
+      <h3>Controlled Update Configuration</h3>
       <p>Fill these once for the production host. Settings are stored beside the active evidence database, not in source.</p>
       <ConfigFields form={form} disabled={disabled} onChange={patch} />
       <p className="config-subtitle">Backend restart execution requires REDACTWALL_UPDATE_RESTART_ENABLED=true on the host.</p>
@@ -689,8 +689,8 @@ export default function Updates() {
 
   return (
     <div className="updates-view">
-      <Panel title="Updates" meta={headerMeta(sessionLoading, isAdmin, store)}>
-        <p className="app-note">Pull approved RedactWall releases from GitHub while preserving evidence data, logs, and backups.</p>
+      <Panel title="Controlled Updates" meta={headerMeta(sessionLoading, isAdmin, store)}>
+        <p className="app-note">Pull approved RedactWall releases from GitHub while preserving Texas FCU evidence data, logs, and backups.</p>
         <UpdatesBody sessionLoading={sessionLoading} isAdmin={isAdmin} store={store} actions={actions} />
       </Panel>
       {actions.confirming ? (

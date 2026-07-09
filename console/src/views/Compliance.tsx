@@ -126,10 +126,10 @@ function ComplianceHeader({ busy, onRefresh }: { busy: boolean; onRefresh: () =>
     <div className="console-frame-header">
       <div className="console-frame-title">
         <div>
-          <h2>Compliance Posture</h2>
+          <h2>NCUA / GLBA Controls</h2>
           <p>
-            AI-governance framework coverage — NIST AI RMF, ISO/IEC 42001, EU AI Act, OWASP LLM Top 10, MITRE ATLAS —
-            plus the financial/health control families, mapped to live RedactWall evidence. Prompt-free.
+            Texas Federal Credit Union control coverage for NCUA Part 748, GLBA safeguards, board oversight, incident
+            readiness, and AI-governance frameworks. Prompt-free evidence mapped from live RedactWall telemetry.
           </p>
         </div>
       </div>
@@ -164,8 +164,8 @@ function KpiRow({ controls }: { controls: ControlMapping[] }) {
   const pct = controls.length ? Math.round((covered / controls.length) * 100) : 0;
   return (
     <div className="insights-kpis">
-      <Kpi label="Controls covered" value={`${covered}/${controls.length}`} hint={`${pct}% coverage`} />
-      <Kpi label="Needs attention" value={String(attention)} hint="action required" />
+      <Kpi label="FCU controls covered" value={`${covered}/${controls.length}`} hint={`${pct}% coverage`} />
+      <Kpi label="Needs examiner prep" value={String(attention)} hint="action required" />
       <Kpi label="AI frameworks" value="5" hint="NIST/ISO 42001/EU AI Act/OWASP/ATLAS" />
       <Kpi label="Evidence" value="prompt-free" hint="hashes & metadata only" />
     </div>
@@ -179,7 +179,7 @@ function RecommendationCard({ control }: { control: ControlMapping }) {
     <button
       className="stat alert"
       type="button"
-      title="Open Configuration to close this gap"
+      title="Open Policy Configuration to close this gap"
       onClick={() => navigate('/policy')}
     >
       <div className="l">
@@ -200,7 +200,7 @@ function RecommendationsPanel({ controls, onExportCsv }: { controls: ControlMapp
       <div className="panel-head">
         <div>
           <h2>Recommended next steps</h2>
-          <span>Controls needing attention - each card opens Configuration</span>
+          <span>Controls needing attention before an exam - each card opens Policy Configuration</span>
         </div>
         <button className="ghost mini" type="button" onClick={onExportCsv}>
           Export controls CSV
@@ -261,8 +261,8 @@ function FrameworksPanel({ controls }: { controls: ControlMapping[] }) {
     <div className="panel wide-panel">
       <div className="panel-head">
         <div>
-          <h2>AI-governance frameworks</h2>
-          <span>Coverage across the frameworks incumbents do not map in-console</span>
+          <h2>AI governance frameworks</h2>
+          <span>Secondary framework coverage for Texas FCU AI oversight</span>
         </div>
       </div>
       <div className="compliance-frameworks">
@@ -308,7 +308,7 @@ export default function Compliance() {
   const renderBody = () => {
     if (!loaded) return <div className="app-loading">Mapping compliance controls…</div>;
     if (!controls) {
-      return <EmptyState title="Compliance mapping unavailable" detail="Could not load control mappings. Refresh to retry." />;
+      return <EmptyState title="FCU control mapping unavailable" detail="Could not load control mappings. Refresh to retry." />;
     }
     return (
       <>

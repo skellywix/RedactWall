@@ -60,7 +60,7 @@ function AddForm({ onSaved }: { onSaved: () => void }) {
 
   const submit = async () => {
     if (!destination.trim() || !department.trim()) {
-      toast('Destination host and department are required.', 'error');
+      toast('Destination host and Texas FCU team are required.', 'error');
       return;
     }
     setBusy(true);
@@ -76,7 +76,7 @@ function AddForm({ onSaved }: { onSaved: () => void }) {
       };
       const saved = await apiSend<{ useCase: UseCaseRecord }>('/api/ncua/use-cases', 'POST', body);
       if (saved?.useCase) {
-        toast(`Recorded ${saved.useCase.canonicalHost} for ${saved.useCase.department}.`, 'good');
+        toast(`Recorded ${saved.useCase.canonicalHost} for the ${saved.useCase.department} team.`, 'good');
         setDestination(''); setDepartment(''); setOwner(''); setApprovedUse(''); setDataClasses('');
         onSaved();
       } else {
@@ -90,7 +90,7 @@ function AddForm({ onSaved }: { onSaved: () => void }) {
   return (
     <div className="ncua-usecase-form">
       <input placeholder="AI tool host (chat.openai.com)" value={destination} onChange={(e) => setDestination(e.target.value)} />
-      <input placeholder="Department (Lending)" value={department} onChange={(e) => setDepartment(e.target.value)} />
+      <input placeholder="Texas FCU team (Lending)" value={department} onChange={(e) => setDepartment(e.target.value)} />
       <input placeholder="Owner (name or email)" value={owner} onChange={(e) => setOwner(e.target.value)} />
       <input placeholder="Approved use (one line)" value={approvedUse} onChange={(e) => setApprovedUse(e.target.value)} />
       <input placeholder="Allowed data classes (MEMBER_ID, LOAN_NUMBER)" value={dataClasses} onChange={(e) => setDataClasses(e.target.value)} />
@@ -114,7 +114,7 @@ function ReviewCell({ row, onSaved }: { row: UseCaseRecord; onSaved: () => void 
         vendorStatus,
       });
       if (saved?.useCase) {
-        toast(`Review recorded for ${row.canonicalHost} / ${row.department}.`, 'good');
+        toast(`Review recorded for the ${row.department} team on ${row.canonicalHost}.`, 'good');
         onSaved();
       } else {
         toast('Review failed.', 'error');
@@ -154,8 +154,8 @@ export default function UseCasesPanel() {
     <div className="panel wide-panel">
       <div className="panel-head">
         <div>
-          <h2>AI use-case inventory</h2>
-          <span>Who may use which tool for what, by department — the inventory an examiner asks for first</span>
+          <h2>Texas FCU AI use-case inventory</h2>
+          <span>Who may use which AI tool for what, by team - the inventory an examiner asks for first</span>
         </div>
         {isAdmin && (
           <button className="ghost mini" type="button" onClick={() => setAdding((v) => !v)}>
@@ -171,14 +171,14 @@ export default function UseCasesPanel() {
           <div className="empty">Could not load the inventory — refresh the page to retry.</div>
         ) : !rows.length ? (
           <div className="empty">
-            No AI use cases recorded yet. Inventory each department's approved tools, owners, and allowed data
-            classes — distinct records per department keep "ChatGPT in Lending" separate from Marketing.
+            No AI use cases recorded yet. Inventory each Texas FCU team's approved tools, owners, and allowed data
+            classes - distinct records per team keep "ChatGPT in Lending" separate from Marketing.
           </div>
         ) : (
           <table>
             <thead>
               <tr>
-                <th>Department</th><th>Tool</th><th>Owner</th><th>Approved use</th><th>Data classes</th>
+                <th>Team</th><th>Tool</th><th>Owner</th><th>Approved use</th><th>Data classes</th>
                 <th>Review</th><th>Vendor</th><th>Next review</th>{isAdmin && <th>Actions</th>}
               </tr>
             </thead>
