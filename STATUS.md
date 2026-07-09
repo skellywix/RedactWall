@@ -104,9 +104,12 @@ drag/drop or file-open interception inside every desktop AI app.
 1. **Inline redaction + coaching UX in the browser sensor** (N1) — replace
    sensitive spans in the composer with typed tokens, explain why, allow
    proceed-with-redacted. Detector spans and tokenization already exist.
-2. **Examiner report pack** (N2) — quarterly generated report mapping usage,
-   enforcement, and evidence to NCUA 2026 exam priorities / FFIEC / GLBA /
-   NIST AI RMF. Extends `server/evidence.js`.
+2. **Examiner report pack** (N2) — DONE (core slices). The schemaVersion-3
+   examiner-profile pack maps usage, enforcement, and evidence to NCUA Part 748
+   Appendix A / GLBA 501(b) / NIST AI RMF (`server/evidence.js`,
+   `server/control-map.js`, `scripts/export-evidence-pack.js
+   --examiner-profile federal_credit_union`). Open tails: FFIEC handbook labels
+   (not yet coded) and a rendered human-readable report (JSON today).
 3. **Coaching acknowledgment audit trail** (N3) — record warn/acknowledge/
    proceed/cancel into the hash-chained audit.
 4. **Personal vs. corporate AI account detection** (N4) — detect the logged-in

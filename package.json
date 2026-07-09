@@ -48,6 +48,7 @@
     "icap:bridge": "node scripts/squid-icap-bridge.js",
     "gateway:rate-limiter": "node scripts/ai-gateway-rate-limiter.js",
     "gateway:ha:smoke": "node scripts/smoke-ai-gateway-ha.js",
+    "silo:smoke": "node scripts/aws-silo-smoke.js",
     "discovery:import": "node scripts/import-ai-discovery.js",
     "fire-drill": "node scripts/fire-drill.js",
     "smoke:linear-approval": "node scripts/smoke-linear-approval.js",

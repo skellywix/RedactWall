@@ -208,6 +208,7 @@ test('argument parser supports npm-run paths and optional evidence inputs', () =
       periodEnd: undefined,
       scheduled: false,
       schedule: undefined,
+      format: undefined,
     },
   );
   assert.deepStrictEqual(
@@ -233,6 +234,7 @@ test('argument parser supports npm-run paths and optional evidence inputs', () =
       periodEnd: undefined,
       scheduled: true,
       schedule: { id: 'quarterly' },
+      format: undefined,
     },
   );
 });
@@ -364,7 +366,143 @@ test('runtime build with --examiner-profile produces a schemaVersion-3 pack end 
   assert.strictEqual(pack.ncuaReadiness.panels.exceptions.total, 1);
   assert.strictEqual(pack.ncuaReadiness.panels.memberData.events, 1);
   assert.deepStrictEqual(pack.edm, { enabled: true, fingerprints: 7, minLength: 6, maxWords: 5, severity: 4 });
+  const controlMap = require('../server/control-map');
+  assert.strictEqual(pack.complianceDisclaimer, controlMap.CONTROL_MAP_DISCLAIMER);
+  assert.ok(/not compliance certification/i.test(pack.complianceDisclaimer));
+  // controlTests (748 App A "regularly test key controls") rollup.
+  assert.strictEqual(pack.controlTests.summary.total, 4);
+  const auditTest = pack.controlTests.tests.find((t) => t.id === 'audit_chain_integrity');
+  assert.strictEqual(auditTest.result, 'pass');
+  assert.ok(auditTest.lastTestedAt, 'audit test carries an honest lastTestedAt');
+  const restoreTest = pack.controlTests.tests.find((t) => t.id === 'restore_drill');
+  assert.strictEqual(restoreTest.result, 'not_provided');
+  assert.strictEqual(restoreTest.lastTestedAt, null);
+  assert.ok(/not evidence of a scheduled/i.test(pack.controlTests.disclaimer));
+  // AUP clause->control crosswalk rides the examiner pack; no board-adoptable prose.
+  assert.ok(Array.isArray(pack.aupCrosswalk) && pack.aupCrosswalk.length >= 5);
+  assert.ok(pack.controlMappings.some((c) => c.id === 'ai_acceptable_use'));
   const wire = JSON.stringify(pack);
   assert.ok(!wire.includes('cli-salt-decoy'));
   assert.ok(!wire.includes('99881234'));
+});
+
+test('the compliance disclaimer is a non-empty constant absent from v2 default packs', () => {
+  const controlMap = require('../server/control-map');
+  assert.strictEqual(typeof controlMap.CONTROL_MAP_DISCLAIMER, 'string');
+  assert.ok(controlMap.CONTROL_MAP_DISCLAIMER.length > 40);
+  assert.ok(/evidence pointers/i.test(controlMap.CONTROL_MAP_DISCLAIMER));
+  assert.ok(/not compliance certification/i.test(controlMap.CONTROL_MAP_DISCLAIMER));
+
+  // The disclaimer rides only the examiner-profile (schemaVersion-3) pack; the
+  // default schemaVersion-2 pack that consumers pin stays byte-unchanged.
+  const pack = packer.buildEvidencePackFromRuntime({
+    dbModule: {
+      listQueries() { return []; },
+      listAudit() { return []; },
+      stats() { return { total: 0 }; },
+      verifyAuditChain() { return { ok: true, count: 0 }; },
+    },
+    policyModule: { loadPolicy() { return {}; } },
+    coverageModule: { summarize() { return { score: 100, totals: {}, sensors: [], fleet: [], governedDestinations: [], ungovernedDestinations: [], shadowDestinations: [], posture: [] }; } },
+    detectorModule: { listDetectors() { return []; } },
+    customDetectorsModule: { loadCustomDetectors() { return []; } },
+    packageInfo: { version: '0.3.0' },
+    backupModule: {},
+  });
+  assert.strictEqual(pack.schemaVersion, 2);
+  assert.strictEqual(pack.complianceDisclaimer, undefined);
+  assert.strictEqual(pack.controlTests, undefined);
+  assert.strictEqual(pack.aupCrosswalk, undefined);
+});
+
+test('renderMarkdown produces a bounded report and never leaks record free text', () => {
+  const report = require('../server/evidence-report');
+  const pack = {
+    schemaVersion: 3,
+    generatedAt: '2026-07-09T00:00:00.000Z',
+    service: { name: 'RedactWall', version: '0.4.0' },
+    scope: { examinerProfile: 'federal_credit_union', rawPromptBodiesIncluded: false },
+    complianceDisclaimer: 'These control mappings are product evidence pointers, not compliance certification.',
+    controlMappings: [
+      { id: 'member_information_safeguards', title: 'Member information safeguards', state: 'covered', controlFamilies: ['NCUA Part 748 Appendix A member-information safeguards evidence'], summary: 'ok' },
+    ],
+    controlTests: {
+      disclaimer: 'point-in-time verification record, not evidence of a scheduled periodic testing program.',
+      summary: { total: 4, applicable: 1, passed: 1 },
+      tests: [{ id: 'audit_chain_integrity', control: 'tamper_evident_audit', method: 'verifyAuditChain', result: 'pass', lastTestedAt: '2026-07-09T00:00:00.000Z', detail: 'ok' }],
+    },
+    ncuaReadiness: {
+      score: 100,
+      state: 'ready',
+      panels: { note: 'CONFIDENTIAL-OWNER-jane.doe internal minutes SECRET-NOTE-XYZ' },
+    },
+    // Records carry potential free text; the renderer must not read them.
+    useCases: { records: [{ owner: 'CONFIDENTIAL-OWNER-jane.doe', notes: 'SECRET-NOTE-XYZ' }] },
+  };
+  const md = report.renderMarkdown(pack);
+  assert.ok(md.includes('# RedactWall examiner evidence report'));
+  assert.ok(md.includes('Member information safeguards'));
+  assert.ok(md.includes('NCUA Part 748 Appendix A'));
+  assert.ok(/Control testing/.test(md));
+  assert.ok(md.includes('Prompt bodies included:** no'));
+  assert.ok(md.includes('not compliance certification'));
+  // The renderer reads only bounded fields, so planted record free text is absent.
+  assert.ok(!md.includes('CONFIDENTIAL-OWNER-jane.doe'));
+  assert.ok(!md.includes('SECRET-NOTE-XYZ'));
+});
+
+test('writeEvidencePack --format md writes a rendered sibling report', () => {
+  const os = require('os');
+  const fs = require('fs');
+  const path = require('path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rw-md-'));
+  try {
+    const file = path.join(dir, 'pack.json');
+    const pack = {
+      schemaVersion: 3,
+      generatedAt: '2026-07-09T00:00:00.000Z',
+      service: { name: 'RedactWall', version: '0.4.0' },
+      scope: { examinerProfile: 'federal_credit_union', rawPromptBodiesIncluded: false },
+      complianceDisclaimer: 'x',
+      controlMappings: [],
+      controlTests: { tests: [], summary: {}, disclaimer: 'y' },
+    };
+    const result = packer.writeEvidencePack({ pack, file, force: true, format: 'md' });
+    assert.ok(result.mdFile.endsWith('.md'));
+    assert.ok(fs.existsSync(result.mdFile));
+    assert.ok(fs.readFileSync(result.mdFile, 'utf8').includes('# RedactWall examiner evidence report'));
+    // JSON is still written unchanged alongside the md.
+    assert.ok(fs.existsSync(file));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('writeEvidencePack --format md never overwrites a non-.json pack file', () => {
+  const os = require('os');
+  const fs = require('fs');
+  const path = require('path');
+  const crypto = require('crypto');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rw-md2-'));
+  try {
+    const file = path.join(dir, 'examiner-pack'); // deliberately no .json suffix
+    const pack = {
+      schemaVersion: 3,
+      generatedAt: '2026-07-09T00:00:00.000Z',
+      service: { name: 'RedactWall', version: '0.4.0' },
+      scope: { examinerProfile: 'federal_credit_union', rawPromptBodiesIncluded: false },
+      complianceDisclaimer: 'x',
+      controlMappings: [],
+      controlTests: { tests: [], summary: {}, disclaimer: 'y' },
+    };
+    const result = packer.writeEvidencePack({ pack, file, force: true, format: 'md' });
+    assert.notStrictEqual(result.mdFile, file, 'md file must not equal the json pack file');
+    assert.ok(result.mdFile.endsWith('.md'));
+    // The JSON pack is intact, still parses, and its recorded sha256 matches disk.
+    assert.strictEqual(JSON.parse(fs.readFileSync(file, 'utf8')).schemaVersion, 3);
+    const sha = crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+    assert.strictEqual(sha, result.sha256, 'recorded sha256 matches the JSON file on disk');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

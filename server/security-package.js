@@ -177,11 +177,23 @@ function preflightControl(status, id) {
   return check ? { ok: check.ok === true, severity: check.severity || 'warning' } : { ok: false, severity: 'warning' };
 }
 
+// Assurance level per control: HOW the control is verified, not whether it is
+// currently passing. Nothing is 'third-party-verified' until a real external
+// audit or penetration test exists — the honest ceiling of this self-attested
+// package (see docs/security/SECURITY_TRUST_PACKAGE.md).
+const ASSURANCE = { SELF: 'self-attested', CI: 'ci-verified', THIRD_PARTY: 'third-party-verified' };
+const CI_VERIFIED_CONTROLS = new Set(['local_detection', 'privacy_minimization', 'audit_chain', 'response_scanning', 'llm_gateway']);
+
+function assuranceFor(id) {
+  return CI_VERIFIED_CONTROLS.has(id) ? ASSURANCE.CI : ASSURANCE.SELF;
+}
+
 function control(id, label, status, detail, evidence = [], owner = 'security') {
   return {
     id,
     label,
     status: state(status),
+    assurance: assuranceFor(id),
     owner,
     detail: safeText(detail, '', 260),
     evidence: (Array.isArray(evidence) ? evidence : [evidence]).filter(Boolean).map((item) => safeText(item, '', 180)).slice(0, 8),
@@ -449,6 +461,40 @@ function questionnaire(controls) {
   ];
 }
 
+// Credit-union third-party due-diligence responses, mapped to the NCUA
+// due-diligence letters (07-CU-13 Evaluating Third Party Relationships,
+// 01-CU-20 Due Diligence Over Third Party Service Providers). Each response
+// cites a control id or a runnable command — evidence pointers, not certification.
+function dueDiligence(controls) {
+  const byId = new Map(controls.map((item) => [item.id, item]));
+  const cite = (id) => (byId.get(id) ? `controls.${id}` : id);
+  return [
+    { dimension: 'Data security & confidentiality of member NPI', ncuaReference: 'NCUA 07-CU-13; GLBA 12 CFR 748 App A', response: 'Detection runs on-device; operational packages exclude prompt bodies, secrets, token vaults, and raw findings. Held approval data is AES-256-GCM sealed.', evidence: [cite('privacy_minimization'), cite('encrypted_retention'), cite('local_detection')] },
+    { dimension: 'Where member data flows (residency / egress)', ncuaReference: 'NCUA 07-CU-13; GLBA 501(b)', response: 'Prompts are scanned locally; only masked evidence and hashes leave the device. Remote semantic classification is off by default and HTTPS-enforced when explicitly enabled.', evidence: [cite('local_detection'), 'docs/security/SECURITY_WHITEPAPER.md'] },
+    { dimension: 'Audit trail & monitoring', ncuaReference: 'NCUA 12 CFR 748; GLBA monitoring', response: 'Every decision is written to a tamper-evident SHA-256 hash-chained audit log; verifyAuditChain() proves integrity.', evidence: [cite('audit_chain'), 'node -e "console.log(require(\'./server/db\').verifyAuditChain())"'] },
+    { dimension: 'Incident response & 72-hour reporting', ncuaReference: 'NCUA 12 CFR 748.1(c)', response: 'The examiner pack includes a 72-hour incident workflow keyed to detectedAt + 72h; the actual NCUA filing is performed by the credit union.', evidence: ['docs/security/INCIDENT_RESPONSE.md', 'controlMappings.incident_readiness'] },
+    { dimension: 'Access control & administrator MFA', ncuaReference: 'NCUA 07-CU-13; GLBA access controls', response: 'Security Admin TOTP MFA and secure-cookie/session-secret posture are enforced by production preflight; raw reveal and approval release require password step-up.', evidence: [cite('admin_mfa'), cite('secure_sessions')] },
+    { dimension: 'Sub-processors & subcontractors', ncuaReference: 'NCUA 07-CU-13 service-provider oversight', response: 'Local-first architecture ships with no default sub-processors; any per-customer sub-processor is disclosed and governed by an executed DPA/BAA.', evidence: ['dpaBaaPosture', 'legalTemplates'] },
+    { dimension: 'Vulnerability & patch management', ncuaReference: 'NCUA 07-CU-13; FFIEC', response: 'Documented patch SLAs (critical 72h, high 7d, medium 30d, low 90d); npm audit runs in CI on every push.', evidence: ['vulnerabilityPolicy', 'npm audit'] },
+    { dimension: 'Business continuity & recoverability', ncuaReference: 'NCUA resilience; GLBA availability', response: 'Backup verification and restore-drill tooling ship with the product; run them to attach current evidence to the examiner pack.', evidence: ['npm run backup:verify', 'npm run backup:drill'] },
+    { dimension: 'Independent assurance (SOC 2 / penetration test)', ncuaReference: 'NCUA 07-CU-13', response: 'SOC 2 mappings are self-attested, not an audit opinion; no third-party penetration-test report exists yet. Per-control assurance levels are labeled; nothing is third-party-verified.', evidence: ['soc2Readiness', 'exclusions'] },
+  ];
+}
+
+// SAMPLE contract templates. RedactWall ships text for procurement convenience
+// only; it is non-binding and must be reviewed/executed by the customer's
+// counsel (Decision 5 in PLANS/credit-union-tuning.md). Not legal advice.
+function legalTemplates() {
+  return {
+    note: 'SAMPLE templates for procurement convenience only. Non-binding; review and execute with your legal counsel. RedactWall does not provide legal advice.',
+    templates: [
+      { label: 'Data Processing Addendum (DPA) — sample', path: 'docs/legal/DPA_TEMPLATE_SAMPLE.md' },
+      { label: 'Business Associate Agreement (BAA) — sample', path: 'docs/legal/BAA_TEMPLATE_SAMPLE.md' },
+      { label: 'GLBA service-provider flow-down clauses — sample', path: 'docs/legal/GLBA_FLOWDOWN_SAMPLE.md' },
+    ],
+  };
+}
+
 function docs() {
   return [
     { label: 'Deployment runbook', path: 'docs/deployment/DEPLOYMENT.md' },
@@ -507,6 +553,8 @@ function trustPackage(input = {}) {
       recommendedCommands: validationCommands(),
     },
     questionnaire: questionnaire(controls),
+    dueDiligence: dueDiligence(controls),
+    legalTemplates: legalTemplates(),
     sbom,
     documents: docs(),
     exclusions: limitations(),
