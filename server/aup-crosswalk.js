@@ -60,7 +60,10 @@ const AUP_CROSSWALK = [
 function normalizeAupAttestation(input) {
   if (!input || typeof input !== 'object') return null;
   const raw = String(input.adoptedAt || '');
-  const adoptedAt = /^[0-9T:.+Z-]{10,40}$/.test(raw) ? raw : null;
+  // Require a real ISO-8601 date (not just the allowed charset), so a malformed
+  // string like "0000000000" can't flip the AUP control toward covered.
+  const looksIso = /^\d{4}-\d{2}-\d{2}([T ][0-9:.+Z-]{1,30})?$/.test(raw) && Number.isFinite(Date.parse(raw));
+  const adoptedAt = looksIso ? raw : null;
   if (!adoptedAt) return null;
   const reference = typeof input.reference === 'string' ? input.reference.slice(0, 120) : '';
   return { adoptedAt, reference };

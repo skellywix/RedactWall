@@ -179,7 +179,9 @@ function writeEvidencePack(options = {}) {
   };
   if (String(options.format || '').toLowerCase() === 'md') {
     const report = options.reportModule || require('../server/evidence-report');
-    const mdFile = file.replace(/\.json$/i, '.md');
+    // Never derive a path equal to the JSON file (which would overwrite the pack
+    // and break its recorded sha256): only strip a real .json suffix, else append.
+    const mdFile = /\.json$/i.test(file) ? file.replace(/\.json$/i, '.md') : `${file}.md`;
     fs.writeFileSync(mdFile, report.renderMarkdown(pack));
     result.mdFile = mdFile;
     result.mdBytes = fs.statSync(mdFile).size;

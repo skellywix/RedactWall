@@ -27,6 +27,9 @@ test('AUP attestation normalizer keeps only a bounded date + reference', () => {
   assert.strictEqual(ok.adoptedAt, ATTESTATION.adoptedAt);
   assert.strictEqual(ok.reference, ATTESTATION.reference);
   assert.strictEqual(aup.normalizeAupAttestation({ adoptedAt: 'not-a-date' }), null);
+  // A charset-valid but non-date string must not pass (would otherwise flip the control toward covered).
+  assert.strictEqual(aup.normalizeAupAttestation({ adoptedAt: '0000000000' }), null);
+  assert.strictEqual(aup.normalizeAupAttestation({ adoptedAt: '2026-13-40' }), null);
   assert.strictEqual(aup.normalizeAupAttestation(null), null);
   // Reference is bounded to 120 chars.
   const long = aup.normalizeAupAttestation({ adoptedAt: ATTESTATION.adoptedAt, reference: 'x'.repeat(500) });

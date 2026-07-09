@@ -477,3 +477,32 @@ test('writeEvidencePack --format md writes a rendered sibling report', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('writeEvidencePack --format md never overwrites a non-.json pack file', () => {
+  const os = require('os');
+  const fs = require('fs');
+  const path = require('path');
+  const crypto = require('crypto');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rw-md2-'));
+  try {
+    const file = path.join(dir, 'examiner-pack'); // deliberately no .json suffix
+    const pack = {
+      schemaVersion: 3,
+      generatedAt: '2026-07-09T00:00:00.000Z',
+      service: { name: 'RedactWall', version: '0.4.0' },
+      scope: { examinerProfile: 'federal_credit_union', rawPromptBodiesIncluded: false },
+      complianceDisclaimer: 'x',
+      controlMappings: [],
+      controlTests: { tests: [], summary: {}, disclaimer: 'y' },
+    };
+    const result = packer.writeEvidencePack({ pack, file, force: true, format: 'md' });
+    assert.notStrictEqual(result.mdFile, file, 'md file must not equal the json pack file');
+    assert.ok(result.mdFile.endsWith('.md'));
+    // The JSON pack is intact, still parses, and its recorded sha256 matches disk.
+    assert.strictEqual(JSON.parse(fs.readFileSync(file, 'utf8')).schemaVersion, 3);
+    const sha = crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+    assert.strictEqual(sha, result.sha256, 'recorded sha256 matches the JSON file on disk');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

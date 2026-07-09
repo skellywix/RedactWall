@@ -768,7 +768,7 @@ function buildControlTests({ now, auditIntegrity, backup, restoreDrill, detectio
       id: 'detection_floors',
       control: 'ai_prompt_dlp',
       method: 'detector-eval-floors',
-      result: gates.length ? (gatesMet === gates.length ? 'pass' : 'attention') : 'not_provided',
+      result: gates.length ? (gatesMet === gates.length ? 'pass' : 'fail') : 'not_provided',
       lastTestedAt: (detectionQuality && detectionQuality.generatedAt) || null,
       detail: gates.length
         ? `${gatesMet}/${gates.length} detector accuracy floor(s) met at the last eval.`
