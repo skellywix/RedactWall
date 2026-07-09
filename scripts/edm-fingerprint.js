@@ -9,9 +9,13 @@
  *
  *   node scripts/edm-fingerprint.js --in secret-values.txt
  *   printf 'ACME-MEMBER-77413\nJane Q Public\n' | node scripts/edm-fingerprint.js
+ *   node scripts/edm-fingerprint.js --in members.csv --column "Member Number"
  *
  * Flags:
  *   --in <file>     Read values from a file instead of stdin.
+ *   --column <c>    Treat the input as CSV and fingerprint one column: a header
+ *                   name (skips the header row) or a 1-based index (all rows).
+ *                   Runs locally; only salted one-way hashes are ever written.
  *   --out <file>    Output path (default config/exact-match.json).
  *   --salt <value>  Reuse an existing salt (default: generate a fresh one and
  *                   reuse the salt already in --out if present, so appends work).
@@ -32,6 +36,52 @@ function readInput() {
   const inFile = arg('in', null);
   if (inFile) return fs.readFileSync(inFile, 'utf8');
   try { return fs.readFileSync(0, 'utf8'); } catch (e) { return ''; }
+}
+
+// Minimal CSV field parser: handles quoted fields, escaped ("") quotes, and
+// commas inside quotes. Assumes rows are newline-separated (no embedded
+// newlines in fields) — the shape of a core-banking roster export.
+function parseCsvLine(line) {
+  const out = [];
+  let field = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (line[i + 1] === '"') { field += '"'; i++; } else inQuotes = false;
+      } else field += ch;
+    } else if (ch === '"') inQuotes = true;
+    else if (ch === ',') { out.push(field); field = ''; } else field += ch;
+  }
+  out.push(field);
+  return out;
+}
+
+// Extract one column of values from CSV text. `column` is a header name
+// (case-insensitive; the header row is skipped) or a 1-based index (all rows).
+function valuesFromCsv(text, column) {
+  const lines = String(text || '').split(/\r?\n/).filter((l) => l.length);
+  if (!lines.length) return [];
+  let idx;
+  let dataStart;
+  if (/^\d+$/.test(String(column))) {
+    idx = Number(column) - 1;
+    dataStart = 0;
+  } else {
+    const header = parseCsvLine(lines[0]).map((h) => h.trim().toLowerCase());
+    idx = header.indexOf(String(column).trim().toLowerCase());
+    if (idx === -1) {
+      throw new Error(`--column "${column}" not found in CSV header: ${parseCsvLine(lines[0]).join(', ')}`);
+    }
+    dataStart = 1;
+  }
+  const out = [];
+  for (let r = dataStart; r < lines.length; r++) {
+    const v = (parseCsvLine(lines[r])[idx] || '').trim();
+    if (v) out.push(v);
+  }
+  return out;
 }
 
 function main() {
@@ -55,7 +105,11 @@ function main() {
     );
   }
 
-  const values = readInput().split(/\r?\n/).map((v) => v.trim()).filter(Boolean);
+  const column = arg('column', null);
+  const raw = readInput();
+  const values = column
+    ? valuesFromCsv(raw, column)
+    : raw.split(/\r?\n/).map((v) => v.trim()).filter(Boolean);
   const set = new Set(priorFingerprints);
   let added = 0;
   for (const value of values) {
@@ -72,9 +126,13 @@ function main() {
   process.stdout.write(`EDM watchlist written to ${outPath}\n  values read: ${values.length}\n  fingerprints added: ${added}\n  total fingerprints: ${set.size}\n  (plaintext discarded; only salted one-way hashes are stored)\n`);
 }
 
-try {
-  main();
-} catch (e) {
-  process.stderr.write(`${e && e.message ? e.message : e}\n`);
-  process.exit(1);
+if (require.main === module) {
+  try {
+    main();
+  } catch (e) {
+    process.stderr.write(`${e && e.message ? e.message : e}\n`);
+    process.exit(1);
+  }
 }
+
+module.exports = { parseCsvLine, valuesFromCsv };

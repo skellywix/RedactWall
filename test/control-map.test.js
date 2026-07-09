@@ -20,3 +20,14 @@ test('control map marks partial backup evidence as attention', () => {
 test('control map defaults unknown controls to not provided', () => {
   assert.strictEqual(controlMap._internal.stateFor({ id: 'future_control' }, {}), 'not_provided');
 });
+
+test('control map appends FFIEC handbook labels to mapped controls only', () => {
+  const mappings = controlMap.buildControlMappings({ generatedAt: '2026-07-09T00:00:00.000Z' });
+  const audit = mappings.find((m) => m.id === 'tamper_evident_audit');
+  assert.ok(audit.controlFamilies.some((f) => /FFIEC Audit booklet/.test(f)));
+  const dlp = mappings.find((m) => m.id === 'ai_prompt_dlp');
+  assert.ok(dlp.controlFamilies.some((f) => /FFIEC Information Security/.test(f)));
+  // A control with no FFIEC mapping is left unchanged (no dangling FFIEC label).
+  const threat = mappings.find((m) => m.id === 'prompt_threat_defense');
+  assert.ok(!threat.controlFamilies.some((f) => /FFIEC/.test(f)));
+});

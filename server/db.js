@@ -868,6 +868,25 @@ function lastAuditActionAt(action) {
   return row ? row.ts : null;
 }
 
+// The most recent board cybersecurity-training / oversight attestation, read
+// back from the tamper-evident audit chain (a BOARD_TRAINING_ATTESTED entry
+// whose detail is JSON: { trainingCompletedAt, reference }). Bounded date +
+// reference only, no PII. Same structured-read pattern as lastVendorHeartbeat.
+function lastBoardTrainingAttestation() {
+  const row = sdb.prepare("SELECT ts, entry FROM audit WHERE action = 'BOARD_TRAINING_ATTESTED' ORDER BY seq DESC LIMIT 1").get();
+  if (!row) return null;
+  try {
+    const detail = JSON.parse(JSON.parse(row.entry).detail);
+    const trainingCompletedAt = typeof detail.trainingCompletedAt === 'string' ? detail.trainingCompletedAt : null;
+    if (!trainingCompletedAt) return null;
+    return {
+      trainingCompletedAt,
+      reference: typeof detail.reference === 'string' ? detail.reference.slice(0, 120) : '',
+      attestedAt: row.ts || null,
+    };
+  } catch (_) { return null; }
+}
+
 // Durable, tamper-evident anchors for the connected-mode kill-switch. The
 // vendor state file (server/vendor-link.js) is a fast cache but is
 // operator-writable/deletable; the hash-chained audit is not (editing it breaks
@@ -924,6 +943,7 @@ module.exports = {
   getAiApp, listAiApps, upsertAiApp,
   listAiUseCases, upsertAiUseCase, reviewAiUseCase,
   listAiIncidents, createAiIncident, setAiIncidentStatus, lastAuditActionAt,
+  lastBoardTrainingAttestation,
   lastVendorHeartbeat, firstAuditAt,
   recordDelivery, listDeliveries, recentDeliverySuccess,
   setTenantContext,
