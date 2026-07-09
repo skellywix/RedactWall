@@ -9,7 +9,8 @@ import './Compliance.css';
 /**
  * Compliance Posture: AI-governance framework coverage mapped to live
  * RedactWall evidence. Read-only. Route contract from server/app.js:
- *   GET /api/compliance -> { controlMappings: ControlMapping[] } — the static
+ *   GET /api/compliance -> { disclaimer, controlMappings: ControlMapping[] } — the
+ *     "evidence pointers, not certification" disclaimer plus the static
  *     control mappings (server/control-map.js CONTROL_MAPPINGS, incl. the
  *     credit-union families) evaluated against the active policy, detector
  *     inventory, audit-chain verification, coverage, and EDM status.
@@ -35,12 +36,22 @@ interface ControlMapping {
 }
 
 interface ComplianceResponse {
+  disclaimer?: string;
   controlMappings: ControlMapping[];
 }
 
-async function fetchCompliance(): Promise<ControlMapping[] | null> {
+interface ComplianceData {
+  controls: ControlMapping[];
+  disclaimer: string;
+}
+
+async function fetchCompliance(): Promise<ComplianceData | null> {
   const body = await apiJson<ComplianceResponse>('/api/compliance');
-  return body && Array.isArray(body.controlMappings) ? body.controlMappings : null;
+  if (!body || !Array.isArray(body.controlMappings)) return null;
+  return {
+    controls: body.controlMappings,
+    disclaimer: typeof body.disclaimer === 'string' ? body.disclaimer : '',
+  };
 }
 
 // ---- Constants (ported verbatim from dashboard.js renderCompliance) ----
@@ -80,12 +91,15 @@ function exportControlsCsv(controls: ControlMapping[] | null): void {
 
 function useComplianceControls() {
   const [controls, setControls] = useState<ControlMapping[] | null>(null);
+  const [disclaimer, setDisclaimer] = useState('');
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const load = useCallback(async () => {
     setBusy(true);
     try {
-      setControls(await fetchCompliance());
+      const data = await fetchCompliance();
+      setControls(data ? data.controls : null);
+      setDisclaimer(data ? data.disclaimer : '');
     } finally {
       setBusy(false);
       setLoaded(true);
@@ -94,7 +108,7 @@ function useComplianceControls() {
   useEffect(() => {
     load();
   }, [load]);
-  return { controls, loaded, busy, load };
+  return { controls, disclaimer, loaded, busy, load };
 }
 
 // ---- Header ----
@@ -289,7 +303,7 @@ function ControlCard({ control }: { control: ControlMapping }) {
 }
 
 export default function Compliance() {
-  const { controls, loaded, busy, load } = useComplianceControls();
+  const { controls, disclaimer, loaded, busy, load } = useComplianceControls();
 
   const renderBody = () => {
     if (!loaded) return <div className="app-loading">Mapping compliance controls…</div>;
@@ -298,6 +312,24 @@ export default function Compliance() {
     }
     return (
       <>
+        {disclaimer ? (
+          <p
+            className="compliance-disclaimer"
+            role="note"
+            style={{
+              margin: '0 0 12px',
+              padding: '10px 14px',
+              fontSize: '13px',
+              lineHeight: 1.5,
+              color: 'var(--muted, #5b6472)',
+              border: '1px solid var(--border, #d9dee6)',
+              borderRadius: '8px',
+              background: 'var(--surface-2, #f6f8fb)',
+            }}
+          >
+            {disclaimer}
+          </p>
+        ) : null}
         <KpiRow controls={controls} />
         <RecommendationsPanel controls={controls} onExportCsv={() => exportControlsCsv(controls)} />
         <FrameworksPanel controls={controls} />

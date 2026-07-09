@@ -2992,7 +2992,7 @@ function evidenceScheduleSummary() {
 // Compliance framework coverage (lightweight; the full pack is /api/export/evidence).
 app.get('/api/compliance', auth.requireAuth, (req, res) => {
   const controlMap = require('./control-map');
-  res.json({ controlMappings: controlMap.buildControlMappings(controlMappingInputs()) });
+  res.json({ disclaimer: controlMap.CONTROL_MAP_DISCLAIMER, controlMappings: controlMap.buildControlMappings(controlMappingInputs()) });
 });
 
 // NCUA Readiness (PLANS/ncua-readiness-center.md slice 1): prompt-free

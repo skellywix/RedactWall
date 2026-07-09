@@ -177,6 +177,14 @@ function writeEvidencePack(options = {}) {
     sha256: sha256File(file),
     pack,
   };
+  if (String(options.format || '').toLowerCase() === 'md') {
+    const report = options.reportModule || require('../server/evidence-report');
+    const mdFile = file.replace(/\.json$/i, '.md');
+    fs.writeFileSync(mdFile, report.renderMarkdown(pack));
+    result.mdFile = mdFile;
+    result.mdBytes = fs.statSync(mdFile).size;
+    result.mdSha256 = sha256File(mdFile);
+  }
   if (options.zip) {
     result.zipFile = writeZip({ jsonFile: file, zipFile: options.zipFile, force: options.force });
     result.zipBytes = fs.statSync(result.zipFile).size;
@@ -206,6 +214,7 @@ function cliOptionsFromArgs(args, schedule = {}) {
     periodEnd: args['period-end'],
     scheduled: args.scheduled === true || schedule.scheduled === true,
     schedule: schedule.schedule,
+    format: args.format,
   };
 }
 
@@ -220,6 +229,7 @@ async function main(argv = process.argv.slice(2), deps = {}) {
     file: result.file,
     bytes: result.bytes,
     sha256: result.sha256,
+    mdFile: result.mdFile,
     zipFile: result.zipFile,
     zipBytes: result.zipBytes,
     zipSha256: result.zipSha256,

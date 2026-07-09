@@ -2,10 +2,20 @@
 /**
  * Stable examiner-facing control map.
  *
- * These mappings are product evidence pointers, not compliance certification.
- * They keep export packs readable for regulated buyers without inventing
- * customer-specific legal conclusions.
+ * Single source of truth for the "evidence pointers, not certification"
+ * disclaimer (CONTROL_MAP_DISCLAIMER) so the examiner pack and the compliance
+ * console render identical text and cannot drift.
  */
+
+// Emitted verbatim in the schemaVersion-3 examiner pack and the compliance
+// console so a regulated buyer never mistakes an evidence pointer for an
+// attestation of compliance.
+const CONTROL_MAP_DISCLAIMER =
+  'These control mappings are product evidence pointers, not compliance '
+  + 'certification. They document how RedactWall enforcement and audit signals '
+  + 'correspond to control families for examiner review; they do not certify '
+  + 'compliance with any regulation or constitute a legal conclusion about any '
+  + 'specific institution.';
 
 const CONTROL_MAPPINGS = [
   {
@@ -372,4 +382,4 @@ function buildControlMappings(input = {}) {
   });
 }
 
-module.exports = { CONTROL_MAPPINGS, buildControlMappings, MEMBER_IDENTIFIERS, _internal: { stateFor } };
+module.exports = { CONTROL_MAPPINGS, CONTROL_MAP_DISCLAIMER, buildControlMappings, MEMBER_IDENTIFIERS, _internal: { stateFor } };

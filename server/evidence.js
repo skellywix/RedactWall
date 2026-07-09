@@ -717,6 +717,80 @@ function safePostureDetectionQuality(quality) {
   };
 }
 
+// GLBA / NCUA Part 748 Appendix A require a credit union to "regularly test the
+// key controls" of its information-security program. This assembles the control
+// signals that are genuinely verifiable in this pack into one tested-controls
+// rollup. Each entry's lastTestedAt is when THAT signal was actually verified —
+// the audit chain at export, backup/restore when the drill ran, detector floors
+// at the last eval — never a claimed periodic program. Counts/enums/timestamps
+// only; no prompt bodies.
+function controlTestResult(present, ok) {
+  if (!present) return 'not_provided';
+  return ok ? 'pass' : 'fail';
+}
+
+function buildControlTests({ now, auditIntegrity, backup, restoreDrill, detectionQuality }) {
+  const gates = detectionQuality && Array.isArray(detectionQuality.gates) ? detectionQuality.gates : [];
+  const gatesMet = gates.filter((g) => g && g.state === 'pass').length;
+  const tests = [
+    {
+      id: 'audit_chain_integrity',
+      control: 'tamper_evident_audit',
+      method: 'verifyAuditChain',
+      result: controlTestResult(!!auditIntegrity, auditIntegrity && auditIntegrity.ok === true),
+      lastTestedAt: auditIntegrity ? now : null,
+      detail: auditIntegrity
+        ? `Hash chain verified across ${safeCoverageNumber(auditIntegrity.count) || 0} event(s) at export.`
+        : 'No audit-integrity signal attached to this pack.',
+    },
+    {
+      id: 'backup_verification',
+      control: 'backup_recoverability',
+      method: 'backup-verify',
+      result: controlTestResult(!!backup, backup && backup.ok === true),
+      lastTestedAt: (backup && backup.checkedAt) || null,
+      detail: backup
+        ? (backup.ok ? 'Backup manifest and integrity verified.' : 'Backup verification is failing or incomplete.')
+        : 'No backup evidence attached (npm run backup:verify).',
+    },
+    {
+      id: 'restore_drill',
+      control: 'backup_recoverability',
+      method: 'restore-drill',
+      result: controlTestResult(!!restoreDrill, restoreDrill && restoreDrill.ok === true),
+      lastTestedAt: (restoreDrill && restoreDrill.checkedAt) || null,
+      detail: restoreDrill
+        ? (restoreDrill.ok ? 'Restored database recovered with an intact audit chain.' : 'Restore drill is failing or incomplete.')
+        : 'No restore-drill evidence attached (npm run backup:drill).',
+    },
+    {
+      id: 'detection_floors',
+      control: 'ai_prompt_dlp',
+      method: 'detector-eval-floors',
+      result: gates.length ? (gatesMet === gates.length ? 'pass' : 'attention') : 'not_provided',
+      lastTestedAt: (detectionQuality && detectionQuality.generatedAt) || null,
+      detail: gates.length
+        ? `${gatesMet}/${gates.length} detector accuracy floor(s) met at the last eval.`
+        : 'No detector-eval evidence attached (npm run eval).',
+    },
+  ];
+  const applicable = tests.filter((t) => t.result !== 'not_provided');
+  return {
+    generatedAt: now,
+    disclaimer:
+      'Each lastTestedAt is when that control signal was last verified — the audit '
+      + 'chain at pack export, backup/restore when the drill ran, detector floors at '
+      + 'the last eval. This is a point-in-time verification record, not evidence of a '
+      + 'scheduled periodic testing program.',
+    summary: {
+      total: tests.length,
+      applicable: applicable.length,
+      passed: tests.filter((t) => t.result === 'pass').length,
+    },
+    tests,
+  };
+}
+
 function safeDetectorFeedbackReport(report) {
   if (!report || typeof report !== 'object') return null;
   return {
@@ -936,6 +1010,14 @@ function buildEvidencePack(input) {
     edm,
     controlMappings,
     ...(examinerProfile ? {
+      complianceDisclaimer: controlMap.CONTROL_MAP_DISCLAIMER,
+      controlTests: buildControlTests({
+        now,
+        auditIntegrity: input.auditIntegrity,
+        backup,
+        restoreDrill,
+        detectionQuality: postureReport && postureReport.detectionQuality,
+      }),
       ncuaReadiness: ncuaReadiness.summarize({
         generatedAt: now,
         examinerProfile,

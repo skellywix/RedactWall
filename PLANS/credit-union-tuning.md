@@ -225,11 +225,13 @@ capture AUP as an attestation date + reference only (see Decision 4).
 
 ## Decisions for the human (flagged)
 
-These are product-changing. **Status as of 2026-07-09: Decisions 1–4 are RESOLVED**
+These are product-changing. **Status as of 2026-07-09: Decisions 1–4 RESOLVED**
 (strategy = Option A; core-banking pack = name vendors + disabled-by-default; AUP = crosswalk +
 attestation only; detection aggressiveness & roster handling = the defaults recorded below).
-**Decisions 5–9 remain OPEN** and still gate their P1/P2 items — the agent must **not** silently
-choose them.
+**Decisions 5, 7, 8, 9 are set to PROPOSED defaults** (building to them where they touch code;
+veto anytime — nothing ships without branch review). **Decision 6 (the published price *number*)
+remains genuinely OPEN — no engineer can set it.** None of 5–9 block the P0 build except the
+DPA/BAA drafting in #5, which proceeds as clearly-labeled non-binding samples pending counsel.
 
 1. **RESOLVED → name the vendors, ship disabled-by-default.** Pack labels/ids name the actual
    core processors (Symitar/Episys, Corelation KeyStone, Fiserv DNA/Portico/Premier, Jack Henry,
@@ -252,27 +254,27 @@ choose them.
    board-adoptable AUP prose — that stays CU-owned, keeping RedactWall firmly in the
    data-protection lane.
 
-5. **[OPEN — needs your input]** **Ship counsel-reviewed DPA/BAA/GLBA flow-down templates, or bespoke per-customer?**
+5. **[PROPOSED → draft non-binding sample templates now, pending counsel]** **Ship counsel-reviewed DPA/BAA/GLBA flow-down templates, or bespoke per-customer?**
    Options: (a) counsel-reviewed baseline templates (redlines allowed); (b) bespoke, no
    template; (c) "sample, non-binding" without counsel.
    **Recommendation:** (a). Drafting is doc work now; the gate is legal sign-off.
    **Reject (c)** — contract text that reads as binding without counsel is a
    regulated-finance liability.
 
-6. **[OPEN — needs your input]** **Published per-seat annual price for the CU air-gapped SKU (+ connected delta)?**
+6. **[OPEN → needs your price number; pricing *model* built, dollar figure TBD]** **Published per-seat annual price for the CU air-gapped SKU (+ connected delta)?**
    **Recommendation:** publish a transparent per-seat number clearly below the ~$25–60K
    competitor band and "far below an E5 uplift", with **default warn-and-true-up renewal
    reconciliation (hard cap opt-in only)** to match `server/license.js` +
    `CUSTOMER_LICENSING.md`. A dollar figure is a business commitment no engineer sets.
 
-7. **[OPEN — needs your input]** **Default `personalAccountAction` in the shipped `credit_union` preset, and
+7. **[PROPOSED → default `coach`; direct-first GTM (P2, not built this pass)]** **Default `personalAccountAction` in the shipped `credit_union` preset, and
    direct-vs-channel GTM timing?** Options for action: allow (current default) / coach /
    block. **Recommendation:** default **coach** (GLBA resonance, low friction), block as a
    per-department opt-in; the examiner-facing control must render the **actual configured
    action**. **GTM:** direct-first (AWS customer-silo) to own the first testimonial, open
    one CUSO/league channel only after the reference is quantified (keeps the channel kit P2).
 
-8. **[OPEN — needs your input]** **First-tag version/timing + is the placeholder Ed25519 license key replaced first?**
+8. **[PROPOSED → replace key, soak, tag v0.4.0 after the WS6 P0 fixes (P1)]** **First-tag version/timing + is the placeholder Ed25519 license key replaced first?**
    Options: (a) tag v0.4.0 now as pre-commercial/internal, placeholder key kept, labeled
    non-commercial; (b) replace the key, run the ≥1-week staging soak, then tag v0.4.0 as
    first commercial-ready; (c) hold for N1/N3 coaching UX.
@@ -280,7 +282,7 @@ choose them.
    sequence the tag **after** WS6 P0s so it doesn't immortalize the doc drift or the
    missing disclaimer.
 
-9. **[OPEN — needs your input]** **Competitor-name ban scope: shipped product only, or the whole `docs/product/` tree
+9. **[PROPOSED → ban = shipped/rendered surfaces only; keep named docs in PLANS/ (P2)]** **Competitor-name ban scope: shipped product only, or the whole `docs/product/` tree
    (does the Nightfall line in `DETECTION_BENCHMARKS.md` stay)?**
    **Recommendation:** scope the ban to the **shipped/rendered product** (console / API /
    evidence). Genericize the served OpenAPI example and the one customer-facing benchmark
