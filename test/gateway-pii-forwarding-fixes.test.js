@@ -125,6 +125,33 @@ test('redact fails closed when local detection cannot reproduce the verdict find
   assert.strictEqual(upstreamCalls, 0, 'raw PII must not be forwarded when local redaction is incomplete');
 });
 
+// HIGH #2 (count-smuggling) — a reported type local detection cannot reproduce
+// must fail closed even when an UNRELATED default finding pads the local count
+// to match the reported total. A bare count check (1 >= 1) would forward the
+// custom value raw; per-type coverage must catch the unreproduced type.
+test('redact fails closed on count-smuggling (custom type padded by an unrelated default finding)', async (t) => {
+  const tp = tmpTokens(t);
+  const { token } = tokens.mintToken({ user: 'a@x' }, tp);
+  let upstreamCalls = 0;
+  const adapter = {
+    requestText: canonical.requestText, responseText: () => '', applyResponseText: (j) => j,
+    callUpstream: async () => { upstreamCalls++; return { ok: true, status: 200, json: {} }; },
+  };
+  // Plane reports ONE custom EMPLOYEE_ID; the prompt also carries an ordinary
+  // email a default analyze DOES detect, padding the local count to 1.
+  const { app } = createGateway({
+    client: stubClient({ verdict: { decision: 'redact', findings: [{ type: 'EMPLOYEE_ID', masked: 'EMP-***' }] } }),
+    adapter, agentTokensPath: tp,
+  });
+  const res = await listenAndRequest(app, {
+    headers: { authorization: 'Bearer ' + token },
+    body: { model: 'x', messages: [{ role: 'user', content: 'look up EMP-000123 for bob@example.com' }] },
+  });
+  assert.strictEqual(res.status, 403);
+  assert.strictEqual(res.json.error.type, 'incomplete_redaction');
+  assert.strictEqual(upstreamCalls, 0, 'custom secret must not forward when a default finding merely pads the count');
+});
+
 // HIGH #3 — a long leaked response must be redacted at full length, not
 // truncated to the control plane's 600-char preview.
 test('leaked response is redacted at full length (not truncated to the 600-char preview)', async (t) => {

@@ -23,10 +23,14 @@ function decide(analysis, policy = {}) {
   const hardStop = findings.some((f) => alwaysBlock.includes(f.type));
   const mode = policy.enforcementMode || 'block';
 
-  // REDACT mode neutralizes structured values locally; a semantic category has
-  // no span-level token to swap, so any category hit must block rather than
-  // leak confidential context with only the PII tokenized.
-  if (mode === 'redact' && !hardStop) {
+  // REDACT mode neutralizes structured values locally by tokenizing them —
+  // including hard-stop entities, which then leave only as tokens (never raw) so
+  // the prompt can proceed. This matches the server API/file, browser, and
+  // endpoint paths ("reversibly redacts"). A semantic category has no span-level
+  // token to swap, so any category hit must block rather than leak confidential
+  // context with only the PII tokenized. Hard-stop still hard-blocks in every
+  // OTHER mode (handled below).
+  if (mode === 'redact') {
     return { action: (findings.length && !categories.length) ? 'redact' : 'block', hardStop };
   }
 

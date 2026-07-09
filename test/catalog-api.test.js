@@ -72,6 +72,33 @@ test('gate visits populate the catalog and review writes policy + status', async
   });
 });
 
+test('catalog override + review reject sensitive identifiers in operator notes', async () => {
+  await withServer(async (port) => {
+    await ingest(port, { prompt: 'hi', user: 'a@cu.org', destination: 'claude.ai' });
+    const { cookie, csrf } = await adminSession(port);
+    const post = (url, body) => fetch(`http://127.0.0.1:${port}${url}`, {
+      method: 'POST', headers: { cookie, 'content-type': 'application/json', 'x-csrf-token': csrf }, body: JSON.stringify(body),
+    });
+
+    // An override note carrying a synthetic SSN is rejected (never stored/audited).
+    const bad = await post('/api/catalog/claude.ai/override', { score: 90, note: 'raise per member 524-71-3312 dispute' });
+    assert.strictEqual(bad.status, 400);
+
+    // A clean justification is accepted and surfaced in the sensor-visible catalog.
+    const ok = await post('/api/catalog/claude.ai/override', { score: 90, note: 'raised per risk committee review' });
+    assert.strictEqual(ok.status, 200);
+    const cat = await (await fetch(`http://127.0.0.1:${port}/api/catalog`, { headers: { cookie } })).json();
+    const claude = cat.apps.find((a) => a.destination === 'claude.ai');
+    assert.strictEqual(claude.overrideNote, 'raised per risk committee review');
+    assert.strictEqual(claude.riskOverride, 90);
+    assert.ok(!JSON.stringify(cat).includes('524-71-3312'), 'no rejected SSN anywhere in the catalog');
+
+    // A review owner carrying a card-shaped value is rejected by the schema.
+    const badReview = await post('/api/catalog/claude.ai/review', { decision: 'govern', reason: 'ok', owner: 'acct 4012888888881881' });
+    assert.strictEqual(badReview.status, 400);
+  });
+});
+
 test('catalog routes require admin auth', async () => {
   await withServer(async (port) => {
     assert.strictEqual((await fetch(`http://127.0.0.1:${port}/api/catalog`)).status, 401);

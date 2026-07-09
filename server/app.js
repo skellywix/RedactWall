@@ -2675,6 +2675,13 @@ app.post('/api/catalog/:host/override', ...adminWrite, (req, res) => {
   if (score != null && !String(note || '').trim()) {
     return res.status(400).json({ error: 'a justification note is required for an override' });
   }
+  // The note persists into publicCatalog() (sensor-visible) and audit detail, so
+  // reject sensitive shapes (SSN/card/routing, control chars) the same way
+  // posture-action operator notes are guarded — never let raw regulated data be
+  // smuggled into broadly-visible catalog/audit surfaces via a free-text field.
+  if (note != null && !validation.safeOperatorText(note)) {
+    return res.status(400).json({ error: 'note must not contain sensitive identifiers' });
+  }
   const updated = appCatalog.overrideScore(req.params.host, { score, note, actor: req.user.user });
   if (!updated) return res.status(404).json({ error: 'unknown app' });
   db.appendAudit({
