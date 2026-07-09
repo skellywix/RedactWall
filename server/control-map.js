@@ -277,6 +277,17 @@ function stateFromBoardReporting(meta, input) {
   return Number.isFinite(generatedAt) && now - generatedAt <= BOARD_CADENCE_MS ? 'covered' : 'attention';
 }
 
+// Board cybersecurity training is a named 2026 NCUA priority; surface its
+// attestation alongside the board-packet cadence. Bounded date + reference only.
+function boardTrainingClause(meta) {
+  const t = meta && meta.training;
+  if (t && typeof t.trainingCompletedAt === 'string' && /^[0-9T:.+Z-]{8,40}$/.test(t.trainingCompletedAt)) {
+    const ref = typeof t.reference === 'string' && t.reference ? `, ref ${t.reference.slice(0, 120)}` : '';
+    return ` Board cybersecurity training attested (completed ${t.trainingCompletedAt}${ref}).`;
+  }
+  return ' Board cybersecurity-training attestation not yet recorded (a named 2026 NCUA priority).';
+}
+
 function boardReportingSummary(meta, state) {
   if (state === 'not_provided') return 'Board packet evidence is not yet attached; export one from NCUA Readiness.';
   // Bound + charset-check the stored timestamp before it enters an
@@ -284,10 +295,11 @@ function boardReportingSummary(meta, state) {
   // defensive like every other export surface).
   const raw = String((meta && meta.lastGeneratedAt) || '');
   const at = /^[0-9T:.+Z-]{10,40}$/.test(raw) ? raw : raw ? 'unknown' : '';
-  if (state === 'covered') return `A board packet was generated within the quarterly cadence (last: ${at}).`;
-  return at
+  const training = boardTrainingClause(meta);
+  if (state === 'covered') return `A board packet was generated within the quarterly cadence (last: ${at}).${training}`;
+  return (at
     ? `The last board packet (${at}) is older than the quarterly cadence.`
-    : 'No board packet has been generated yet; export one from NCUA Readiness.';
+    : 'No board packet has been generated yet; export one from NCUA Readiness.') + training;
 }
 
 function vendorOversightSummary(summary, state) {
@@ -395,14 +407,31 @@ function summaryFor(control, input, state) {
   return 'Policy, detector inventory, event summaries, and lineage evidence are present for examiner review.';
 }
 
+// FFIEC IT Examination Handbook booklet labels, appended per control at build
+// time. Label-only evidence pointers governed by CONTROL_MAP_DISCLAIMER — the
+// booklets are the frameworks NCUA/FFIEC examiners actually work from.
+const FFIEC_FAMILIES = {
+  ai_prompt_dlp: 'FFIEC Information Security booklet evidence',
+  local_detection_minimization: 'FFIEC Information Security data-handling evidence',
+  approval_workflow: 'FFIEC Information Security access-control evidence',
+  tamper_evident_audit: 'FFIEC Audit booklet evidence',
+  fleet_sensor_coverage: 'FFIEC Architecture, Infrastructure, and Operations booklet evidence',
+  backup_recoverability: 'FFIEC Business Continuity Management booklet evidence',
+  member_information_safeguards: 'FFIEC Information Security member-data safeguards evidence',
+  vendor_service_provider_oversight: 'FFIEC Outsourcing Technology Services booklet evidence',
+  incident_readiness: 'FFIEC Information Security incident-response evidence',
+  board_reporting: 'FFIEC Management booklet board-oversight evidence',
+};
+
 function buildControlMappings(input = {}) {
   return CONTROL_MAPPINGS.map((control) => {
     const state = stateFor(control, input);
+    const ffiec = FFIEC_FAMILIES[control.id];
     return {
       id: control.id,
       title: control.title,
       state,
-      controlFamilies: control.controlFamilies,
+      controlFamilies: ffiec ? [...control.controlFamilies, ffiec] : control.controlFamilies,
       evidence: control.evidence,
       summary: summaryFor(control, input, state),
       lastVerifiedAt: input.generatedAt || null,

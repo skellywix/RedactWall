@@ -147,7 +147,10 @@ function buildEvidencePackFromRuntime(options = {}) {
     useCases: useCasesEntitled && typeof db.listAiUseCases === 'function' ? db.listAiUseCases() : undefined,
     incidents: useCasesEntitled && typeof db.listAiIncidents === 'function' ? db.listAiIncidents() : undefined,
     boardPacket: useCasesEntitled && typeof db.lastAuditActionAt === 'function'
-      ? { lastGeneratedAt: db.lastAuditActionAt('BOARD_PACKET_EXPORTED') }
+      ? {
+        lastGeneratedAt: db.lastAuditActionAt('BOARD_PACKET_EXPORTED'),
+        training: typeof db.lastBoardTrainingAttestation === 'function' ? db.lastBoardTrainingAttestation() : null,
+      }
       : undefined,
     examinerProfile: options.examinerProfile,
     policyExceptionReview: typeof policy.policyExceptionReview === 'function'

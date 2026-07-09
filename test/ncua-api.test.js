@@ -470,3 +470,45 @@ test('incident and board-packet routes respect the entitlement gate', async () =
     setLicense(null);
   });
 });
+
+test('board training attestation: CSRF-gated, audit is JSON date+reference, control reflects it', async () => {
+  await withServer(async (port) => {
+    const auditorCookie = await login(port, 'auditor', 'auditor-pass');
+    const csrfRes = await fetch(`http://127.0.0.1:${port}/api/csrf`, { headers: { cookie: auditorCookie } });
+    const { csrfToken } = await csrfRes.json();
+
+    // CSRF-less POST is rejected.
+    assert.strictEqual((await fetch(`http://127.0.0.1:${port}/api/ncua/board-training`, { method: 'POST', headers: { cookie: auditorCookie } })).status, 403);
+
+    // A malformed date is rejected by the schema.
+    const bad = await fetch(`http://127.0.0.1:${port}/api/ncua/board-training`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', cookie: auditorCookie, 'x-csrf-token': csrfToken },
+      body: JSON.stringify({ trainingCompletedAt: 'not-a-date' }),
+    });
+    assert.strictEqual(bad.status, 400);
+
+    // A valid attestation records date + reference.
+    const res = await fetch(`http://127.0.0.1:${port}/api/ncua/board-training`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', cookie: auditorCookie, 'x-csrf-token': csrfToken },
+      body: JSON.stringify({ trainingCompletedAt: '2026-07-01', reference: 'Board minutes 2026-Q2' }),
+    });
+    assert.strictEqual(res.status, 200);
+    const stored = await res.json();
+    assert.strictEqual(stored.trainingCompletedAt, '2026-07-01');
+    assert.strictEqual(stored.reference, 'Board minutes 2026-Q2');
+    assert.ok(stored.attestedAt);
+
+    // The audit entry is JSON date+reference shaped; no prompt/PII.
+    const entry = require('../server/db').listAudit(20).find((e) => e.action === 'BOARD_TRAINING_ATTESTED');
+    assert.ok(entry);
+    assert.deepStrictEqual(JSON.parse(entry.detail), { trainingCompletedAt: '2026-07-01', reference: 'Board minutes 2026-Q2' });
+
+    // The board_reporting control surfaces the attestation on next read.
+    const adminCookie = await login(port, 'admin', 'unit-pass');
+    const readiness = await (await fetch(`http://127.0.0.1:${port}/api/ncua/readiness`, { headers: { cookie: adminCookie } })).json();
+    const control = readiness.report.controls.find((c) => c.id === 'board_reporting');
+    assert.match(control.summary, /Board cybersecurity training attested \(completed 2026-07-01/);
+  });
+});
