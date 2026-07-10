@@ -6,6 +6,11 @@ require('../server/env').loadEnv();
  */
 const BASE = process.argv[2] || 'http://localhost:4000';
 const KEY = process.env.INGEST_API_KEY || 'dev-ingest-key';
+const { readBoundedJson } = require('../sensors/shared/bounded-response');
+const { secureServerBase } = require('../sensors/shared/server-url');
+
+const MAX_GATE_RESPONSE_BYTES = 512 * 1024;
+const GATE_RESPONSE_TIMEOUT_MS = 10000;
 
 const SAMPLES = [
   { user: 'jdoe',   dest: 'chatgpt.com', prompt: 'Summarize this email thread about our Q3 roadmap into 3 bullet points.' },
@@ -18,23 +23,43 @@ const SAMPLES = [
   { user: 'agarcia',dest: 'chatgpt.com', prompt: 'Reset login for user, temp password: Pass=Summer2026! and email agarcia@cu.org for confirmation.' },
 ];
 
-async function post(path, body) {
-  const r = await fetch(BASE + path, {
+async function post(path, body, opts = {}) {
+  const base = secureServerBase(opts.base || BASE);
+  if (!base) throw new Error('simulation base URL must use HTTPS or loopback HTTP without query parameters or fragments');
+  const fetchImpl = opts.fetchImpl || globalThis.fetch;
+  if (typeof fetchImpl !== 'function') throw new Error('fetch is not available');
+  const r = await fetchImpl(base + path, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-api-key': KEY },
+    redirect: 'error',
+    headers: { 'Content-Type': 'application/json', 'x-api-key': opts.key || KEY },
     body: JSON.stringify(body),
   });
-  return { status: r.status, json: await r.json().catch(() => ({})) };
+  const { json } = await readBoundedJson(r, {
+    maxBytes: opts.maxResponseBytes || MAX_GATE_RESPONSE_BYTES,
+    timeoutMs: opts.responseTimeoutMs || GATE_RESPONSE_TIMEOUT_MS,
+    label: 'simulation gate response',
+  });
+  return { status: r.status, json };
 }
 
-(async () => {
-  console.log(`Simulating prompts against ${BASE}\n`);
+async function main(opts = {}) {
+  const base = opts.base || BASE;
+  const io = opts.console || console;
+  const wait = opts.wait || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+  io.log(`Simulating prompts against ${base}\n`);
   for (const s of SAMPLES) {
-    const { json } = await post('/api/v1/gate', { prompt: s.prompt, user: s.user, destination: s.dest, sourceIp: '10.0.4.' + (10 + Math.floor(Math.random() * 40)) });
+    const { json } = await post('/api/v1/gate', { prompt: s.prompt, user: s.user, destination: s.dest, sourceIp: '10.0.4.' + (10 + Math.floor(Math.random() * 40)) }, opts);
     const tag = json.decision === 'allow' ? 'ALLOW ' : 'BLOCK ';
-    console.log(`${tag} [risk ${String(json.riskScore).padStart(3)}] ${s.user} → ${s.dest}`);
-    if (json.decision === 'block') console.log(`        held: ${json.id}  (${(json.findings || []).map(f => f.type).join(', ')})`);
-    await new Promise((r) => setTimeout(r, 250));
+    io.log(`${tag} [risk ${String(json.riskScore).padStart(3)}] ${s.user} → ${s.dest}`);
+    if (json.decision === 'block') io.log(`        held: ${json.id}  (${(json.findings || []).map(f => f.type).join(', ')})`);
+    await wait(250);
   }
-  console.log('\nDone. Open the dashboard to review the approval queue.');
-})();
+  io.log('\nDone. Open the dashboard to review the approval queue.');
+}
+
+if (require.main === module) main().catch((err) => {
+  console.error(err && err.message ? err.message : err);
+  process.exitCode = 1;
+});
+
+module.exports = { SAMPLES, main, post };

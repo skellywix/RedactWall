@@ -5,9 +5,86 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { spawn, spawnSync } = require('node:child_process');
 const handoff = require('../sensors/endpoint-agent/native-handoff');
 
 const SECRET = 'native-handoff-secret-000000000000000001';
+const HANDOFF_MODULE = path.join(__dirname, '..', 'sensors', 'endpoint-agent', 'native-handoff.js');
+
+function waitForFiles(directory, count, timeoutMs = 30_000) {
+  const deadline = Date.now() + timeoutMs;
+  return new Promise((resolve, reject) => {
+    const poll = () => {
+      const found = fs.existsSync(directory) ? fs.readdirSync(directory).filter((name) => name.endsWith('.ready')).length : 0;
+      if (found === count) return resolve();
+      if (Date.now() >= deadline) return reject(new Error(`only ${found}/${count} native handoff workers became ready`));
+      setTimeout(poll, 20);
+    };
+    poll();
+  });
+}
+
+function claimWorker(handoffDir, coordinationDir, index) {
+  const source = `
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const handoff = require(process.env.HANDOFF_MODULE);
+    fs.writeFileSync(path.join(process.env.COORDINATION_DIR, process.env.WORKER_ID + '.ready'), 'ready');
+    while (!fs.existsSync(path.join(process.env.COORDINATION_DIR, 'go'))) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    }
+    const now = new Date().toISOString();
+    const signed = handoff.signHandoffEvent({
+      version: handoff.EVENT_VERSION,
+      id: 'concurrent-' + process.env.WORKER_ID,
+      createdAt: now,
+      operation: 'upload',
+      filePath: path.join(process.env.HANDOFF_DIR, 'source-' + process.env.WORKER_ID + '.txt'),
+      destination: { app: 'Desktop AI' },
+      user: '',
+      nonce: 'nonce-' + process.env.WORKER_ID,
+    }, process.env.HANDOFF_SECRET);
+    handoff.ensurePrivateDirectory(process.env.HANDOFF_DIR);
+    const result = handoff.claimHandoffEvent(signed, path.join(process.env.HANDOFF_DIR, 'event-' + process.env.WORKER_ID + '.json'), {
+      secret: process.env.HANDOFF_SECRET,
+    });
+    process.stdout.write(JSON.stringify(result));
+  `;
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ['-e', source], {
+      env: {
+        ...process.env,
+        HANDOFF_MODULE,
+        HANDOFF_DIR: handoffDir,
+        HANDOFF_SECRET: SECRET,
+        COORDINATION_DIR: coordinationDir,
+        WORKER_ID: String(index),
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.once('error', reject);
+    child.once('exit', (code) => {
+      if (code !== 0) return reject(new Error(`native handoff worker ${index} failed (${code}): ${stderr}`));
+      try { resolve(JSON.parse(stdout)); } catch (error) { reject(error); }
+    });
+  });
+}
+
+function assertWindowsPrivateDirectory(target) {
+  const principal = String(spawnSync('whoami.exe', [], { encoding: 'utf8', windowsHide: true }).stdout || '').trim();
+  const acl = spawnSync('icacls.exe', [target], { encoding: 'utf8', windowsHide: true });
+  assert.strictEqual(acl.status, 0, acl.stderr);
+  assert.strictEqual(
+    require('../server/private-path').privateAclListing(acl.stdout, principal),
+    true,
+    acl.stdout,
+  );
+}
 
 function event(overrides = {}) {
   return {
@@ -68,19 +145,19 @@ test('native handoff rejects bad signatures, stale events, and raw payload keys'
   );
   assert.throws(
     () => handoff.signHandoffEvent(event({ meta: { content_base64: 'abc' } }), SECRET),
-    /not allowed/,
+    /prohibited payload field/,
   );
   assert.throws(
     () => handoff.signHandoffEvent(event({ RawText: 'secret' }), SECRET),
-    /not allowed/,
+    /prohibited payload field/,
   );
   assert.throws(
     () => handoff.signHandoffEvent(event({ payloadRef: 'anything-extra' }), SECRET),
-    /event\.payloadRef is not allowed/,
+    /event contains an unsupported field/,
   );
   assert.throws(
     () => handoff.signHandoffEvent(event({ destination: { app: 'Desktop AI', extra: 'anything-extra' } }), SECRET),
-    /event\.destination\.extra is not allowed/,
+    /event\.destination contains an unsupported field/,
   );
 });
 
@@ -139,6 +216,171 @@ test('native handoff files are size-bounded and require a configured secret', (t
   const largePath = path.join(dir, 'large.json');
   fs.writeFileSync(largePath, 'x'.repeat(handoff.MAX_EVENT_BYTES + 1));
   assert.throws(() => handoff.readHandoffFile(largePath, { secret: SECRET }), /too large/);
+
+  const malformedPath = path.join(dir, 'malformed.json');
+  fs.writeFileSync(malformedPath, '{"raw-secret-524-71-9043"');
+  assert.throws(
+    () => handoff.readHandoffFile(malformedPath, { secret: SECRET }),
+    (error) => error.message === 'native handoff event JSON is invalid' && !error.message.includes('524-71-9043'),
+  );
+});
+
+test('native handoff event files cannot be supplied through a symbolic link', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-native-handoff-link-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const target = path.join(dir, 'target.json');
+  const linked = path.join(dir, 'linked.json');
+  fs.writeFileSync(target, JSON.stringify(handoff.signHandoffEvent(event(), SECRET)));
+  try {
+    fs.symlinkSync(target, linked, 'file');
+  } catch (error) {
+    if (error.code === 'EPERM') return t.skip('file symlinks require Windows developer mode');
+    throw error;
+  }
+  assert.throws(
+    () => handoff.readHandoffFile(linked, { secret: SECRET, now: new Date('2026-06-26T15:01:00.000Z') }),
+    /symbolic link|safe regular file|ELOOP/i,
+  );
+});
+
+test('native handoff consumed claims are durable, opaque, exclusive, and private', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-native-handoff-claim-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const handoffFile = path.join(dir, 'event.json');
+  const signed = handoff.signHandoffEvent(event({ id: 'member-sensitive-id', nonce: 'member-sensitive-nonce' }), SECRET);
+  handoff.ensurePrivateDirectory(dir);
+  fs.writeFileSync(handoffFile, JSON.stringify(signed));
+
+  const first = handoff.claimHandoffEvent(signed, handoffFile, { secret: SECRET });
+  const second = handoff.claimHandoffEvent(signed, handoffFile, { secret: SECRET });
+  assert.strictEqual(first.claimed, true);
+  assert.strictEqual(second.claimed, false);
+  assert.strictEqual(first.claimFile, second.claimFile);
+  assert.ok(!first.claimFile.includes('member-sensitive'));
+  assert.match(path.basename(first.claimFile), /^[0-9a-f]{64}\.claim$/);
+  if (process.platform !== 'win32') {
+    assert.strictEqual(fs.statSync(path.dirname(first.claimFile)).mode & 0o777, 0o700);
+    assert.strictEqual(fs.statSync(first.claimFile).mode & 0o777, 0o600);
+  }
+
+  delete require.cache[require.resolve('../sensors/endpoint-agent/native-handoff')];
+  const reloaded = require('../sensors/endpoint-agent/native-handoff');
+  assert.strictEqual(reloaded.claimHandoffEvent(signed, handoffFile, { secret: SECRET }).claimed, false);
+
+  const old = new Date(Date.now() - Math.floor(1.5 * reloaded.DEFAULT_CLAIM_RETENTION_MS));
+  fs.utimesSync(first.claimFile, old, old);
+  assert.strictEqual(reloaded.pruneConsumedClaims(path.dirname(first.claimFile), {
+    forceClaimPrune: true,
+    ttlMs: reloaded.DEFAULT_CLAIM_RETENTION_MS,
+    claimRetentionMs: reloaded.DEFAULT_TTL_MS * 2,
+  }), 0, 'claims live at least twice a configured extended event TTL');
+  assert.strictEqual(reloaded.pruneConsumedClaims(path.dirname(first.claimFile), {
+    forceClaimPrune: true,
+    claimRetentionMs: reloaded.DEFAULT_TTL_MS * 2,
+  }), 1);
+  assert.strictEqual(fs.existsSync(first.claimFile), false);
+});
+
+test('native handoff rejects a claim planted before the Windows consumed directory was trusted', {
+  skip: process.platform !== 'win32' && 'Windows ACL bootstrap is Windows-specific',
+}, (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-native-planted-'));
+  const handoffDir = path.join(root, 'handoff');
+  const consumedDir = path.join(handoffDir, handoff.CONSUMED_DIR_NAME);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  handoff.ensurePrivateDirectory(handoffDir);
+  fs.mkdirSync(consumedDir);
+  const broadGrant = spawnSync('icacls.exe', [consumedDir, '/grant', '*S-1-5-32-545:(OI)(CI)(M)', '/q'], {
+    encoding: 'utf8',
+    windowsHide: true,
+  });
+  assert.strictEqual(broadGrant.status, 0, broadGrant.stderr);
+
+  const signed = handoff.signHandoffEvent(event({ id: 'planted-event', nonce: 'planted-nonce' }), SECRET);
+  const claimFile = path.join(consumedDir, `${handoff._internal.claimFingerprint(signed, SECRET)}.claim`);
+  const planted = Buffer.from(`${JSON.stringify({ version: 1, claimedAt: '2026-06-26T15:00:00.000Z' })}\n`);
+  fs.writeFileSync(claimFile, planted);
+
+  assert.throws(
+    () => handoff.claimHandoffEvent(signed, path.join(handoffDir, 'event.json'), { secret: SECRET }),
+    /before its permissions were trusted/,
+  );
+  assert.deepStrictEqual(fs.readFileSync(claimFile), planted);
+});
+
+test('initialized Windows handoff directories are asserted and never repaired after ACL drift', {
+  skip: process.platform !== 'win32' && 'Windows ACL bootstrap is Windows-specific',
+}, (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-native-assert-only-'));
+  const handoffDir = path.join(root, 'handoff');
+  const consumedDir = path.join(handoffDir, handoff.CONSUMED_DIR_NAME);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  handoff.ensurePrivateDirectory(handoffDir);
+  handoff.ensurePrivateDirectory(consumedDir);
+
+  const broadGrant = spawnSync('icacls.exe', [consumedDir, '/grant', '*S-1-5-32-545:(OI)(CI)(M)', '/q'], {
+    encoding: 'utf8',
+    windowsHide: true,
+  });
+  assert.strictEqual(broadGrant.status, 0, broadGrant.stderr);
+  assert.throws(() => handoff.ensurePrivateDirectory(consumedDir), /ACL verification failed/);
+  const acl = spawnSync('icacls.exe', [consumedDir], { encoding: 'utf8', windowsHide: true });
+  assert.strictEqual(acl.status, 0, acl.stderr);
+  assert.match(acl.stdout.toLowerCase(), /builtin\\users/);
+});
+
+test('eight native handoff processes serialize fresh Windows handoff and consumed-directory trust', {
+  timeout: 120_000,
+  skip: process.platform !== 'win32' && 'Windows ACL bootstrap is Windows-specific',
+}, async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-native-bootstrap-race-'));
+  const handoffDir = path.join(root, 'handoff');
+  const coordinationDir = path.join(root, 'coordination');
+  fs.mkdirSync(coordinationDir);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  const workers = Array.from({ length: 8 }, (_, index) => claimWorker(handoffDir, coordinationDir, index));
+  await waitForFiles(coordinationDir, 8);
+  fs.writeFileSync(path.join(coordinationDir, 'go'), 'go');
+  const results = await Promise.all(workers);
+
+  assert.ok(results.every((result) => result.claimed === true));
+  assert.strictEqual(fs.readdirSync(path.join(handoffDir, handoff.CONSUMED_DIR_NAME)).filter((name) => name.endsWith('.claim')).length, 8);
+  assertWindowsPrivateDirectory(handoffDir);
+  assertWindowsPrivateDirectory(path.join(handoffDir, handoff.CONSUMED_DIR_NAME));
+});
+
+test('native handoff claim rejects directory-fsync EIO without consuming the event', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-native-handoff-durable-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const handoffFile = path.join(dir, 'event.json');
+  const signed = handoff.signHandoffEvent(event({
+    id: 'evt_durable_claim',
+    nonce: 'nonce-durable-claim',
+    filePath: path.join(dir, 'source.txt'),
+  }), SECRET);
+  handoff.ensurePrivateDirectory(dir);
+  handoff.ensurePrivateDirectory(path.join(dir, handoff.CONSUMED_DIR_NAME));
+  const originalFsync = fs.fsyncSync;
+  fs.fsyncSync = (fd) => {
+    if (fs.fstatSync(fd).isDirectory()) {
+      const error = new Error('synthetic claim directory fsync EIO');
+      error.code = 'EIO';
+      throw error;
+    }
+    return originalFsync(fd);
+  };
+  try {
+    assert.throws(
+      () => handoff.claimHandoffEvent(signed, handoffFile, { secret: SECRET }),
+      /synthetic claim directory fsync EIO/,
+    );
+  } finally {
+    fs.fsyncSync = originalFsync;
+  }
+  const consumed = path.join(dir, handoff.CONSUMED_DIR_NAME);
+  assert.deepStrictEqual(fs.readdirSync(consumed), []);
 });
 
 test('native handoff accepts RedactWall endpoint env aliases', () => {

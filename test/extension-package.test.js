@@ -49,6 +49,14 @@ function writeFixture(rootDir, opts = {}) {
     ? "const api = '/api/v1/heartbeat';\nfunction buildInstallChecks() {}\nconst check = 'managed_identity';\nconst ingestKey = 'dev-ingest-key';\n"
     : "const api = '/api/v1/heartbeat';\nfunction buildInstallChecks() {}\nconst check = 'managed_identity';\n");
   writeFile(path.join(rootDir, 'sensors', 'browser-extension', 'lib', 'browser-api.js'), 'globalThis.PWBrowserApi = {};\n');
+  writeFile(path.join(rootDir, 'sensors', 'browser-extension', 'lib', 'policy-bundle.js'), 'globalThis.RedactWallPolicyTrust = {};\n');
+  writeFile(path.join(rootDir, 'sensors', 'browser-extension', 'lib', 'destination-coverage.js'), 'globalThis.RedactWallDestinationCoverage = {};\n');
+  writeFile(path.join(rootDir, 'sensors', 'browser-extension', 'coverage-required.html'), '<html>coverage required</html>\n');
+  writeFile(path.join(rootDir, 'sensors', 'browser-extension', 'rehydrate.html'), '<html><script src="rehydrate.js"></script></html>\n');
+  writeFile(path.join(rootDir, 'sensors', 'browser-extension', 'rehydrate.js'), 'console.log("isolated");\n');
+  writeFile(path.join(rootDir, 'sensors', 'browser-extension', 'rehydrate.css'), 'body { color: black; }\n');
+  writeFile(path.join(rootDir, 'sensors', 'browser-extension', '_metadata', 'runtime-cache'), 'browser generated\n');
+  writeJson(path.join(rootDir, 'sensors', 'browser-extension', 'rules', 'coverage-base.json'), []);
   writeFile(path.join(rootDir, 'sensors', 'browser-extension', 'content.js'), 'console.log("content");\n');
   writeFile(path.join(rootDir, 'sensors', 'browser-extension', 'content.css'), 'body { color: black; }\n');
   writeFile(path.join(rootDir, 'sensors', 'browser-extension', 'popup.html'), '<html></html>\n');
@@ -57,7 +65,9 @@ function writeFixture(rootDir, opts = {}) {
     properties: {
       serverUrl: { type: 'string' },
       ingestKey: { type: 'string' },
+      policyPublicKey: { type: 'string' },
       orgId: { type: 'string' },
+      enabled: { type: 'boolean' },
     },
   });
   writeJson(path.join(rootDir, 'sensors', 'browser-extension', 'manifest.json'), {
@@ -65,8 +75,12 @@ function writeFixture(rootDir, opts = {}) {
     name: 'RedactWall',
     version,
     description: 'Fixture package',
-    permissions: ['storage'],
+    permissions: ['storage', 'clipboardWrite', 'scripting', 'declarativeNetRequest'],
     host_permissions: ['https://chatgpt.com/*'],
+    optional_host_permissions: ['https://*/*'],
+    declarative_net_request: {
+      rule_resources: [{ id: 'coverage_base', enabled: true, path: 'rules/coverage-base.json' }],
+    },
     background: { service_worker: 'background.js' },
     storage: { managed_schema: 'schema.json' },
     action: { default_popup: 'popup.html' },
@@ -98,11 +112,12 @@ test('package script writes browser target zips and prompt-free integrity manife
   assert.strictEqual(manifest.checks.syncedEngine, true);
   assert.strictEqual(manifest.checks.browserApiBridgeIncluded, true);
   assert.strictEqual(manifest.checks.installValidationIncluded, true);
+  assert.strictEqual(manifest.checks.isolatedRehydrationIncluded, true);
   assert.strictEqual(manifest.checks.developmentIngestKeyAbsent, true);
 
   const zip = new AdmZip(result.zipPath);
   const entries = zip.getEntries().map((entry) => entry.entryName).sort();
-  for (const required of ['manifest.json', 'background.js', 'content.js', 'content.css', 'popup.html', 'popup.js', 'schema.json', 'lib/browser-api.js', 'lib/detect.js', 'lib/adapters.js']) {
+  for (const required of ['manifest.json', 'background.js', 'content.js', 'content.css', 'coverage-required.html', 'rehydrate.html', 'rehydrate.js', 'rehydrate.css', 'popup.html', 'popup.js', 'schema.json', 'rules/coverage-base.json', 'lib/browser-api.js', 'lib/policy-bundle.js', 'lib/destination-coverage.js', 'lib/detect.js', 'lib/adapters.js']) {
     assert.ok(entries.includes(required), required);
     assert.ok(manifest.files.some((file) => file.path === required), required);
   }
@@ -118,7 +133,13 @@ test('package script writes browser target zips and prompt-free integrity manife
 test('Firefox target manifest uses gecko id and background scripts', () => {
   const source = JSON.parse(fs.readFileSync(path.join(root, 'sensors', 'browser-extension', 'manifest.json'), 'utf8'));
   const manifest = manifestForTarget(source, 'firefox');
-  assert.deepStrictEqual(manifest.background, { scripts: ['background.js'] });
+  assert.deepStrictEqual(manifest.background, { scripts: [
+    'lib/browser-api.js',
+    'lib/adapters.js',
+    'lib/policy-bundle.js',
+    'lib/destination-coverage.js',
+    'background.js',
+  ] });
   assert.strictEqual(manifest.browser_specific_settings.gecko.id, 'redactwall@example.com');
   assert.ok(manifest.content_scripts[0].js.includes('lib/browser-api.js'));
   assert.strictEqual(backgroundModel(manifest), 'background_scripts');
@@ -143,14 +164,31 @@ test('package script refuses packaged development ingest keys', (t) => {
   );
 });
 
+test('package script excludes Chromium runtime metadata from store artifacts', (t) => {
+  const fixture = tempDir(t, 'ps-extension-runtime-metadata-');
+  writeFixture(fixture);
+  const extensionDir = path.join(fixture, 'sensors', 'browser-extension');
+  const files = collectExtensionFiles(extensionDir);
+  assert.ok(!files.some((file) => file.relPath.startsWith('_metadata/')));
+
+  const result = packageExtension({ root: fixture, extensionDir, outDir: path.join(fixture, 'out') });
+  const entries = new AdmZip(result.zipPath).getEntries().map((entry) => entry.entryName);
+  assert.ok(!entries.some((entry) => entry.startsWith('_metadata/')));
+  assert.ok(!result.packageManifest.files.some((file) => file.path.startsWith('_metadata/')));
+});
+
 function validManifest() {
   return {
     manifest_version: 3,
     name: 'RedactWall',
     version: '9.9.9',
     description: 'Fixture package',
-    permissions: ['storage'],
+    permissions: ['storage', 'clipboardWrite', 'scripting', 'declarativeNetRequest'],
     host_permissions: ['https://chatgpt.com/*'],
+    optional_host_permissions: ['https://*/*'],
+    declarative_net_request: {
+      rule_resources: [{ id: 'coverage_base', enabled: true, path: 'rules/coverage-base.json' }],
+    },
     background: { service_worker: 'background.js' },
     storage: { managed_schema: 'schema.json' },
     action: { default_popup: 'popup.html' },
@@ -168,9 +206,16 @@ function validPackageFiles() {
     'background.js',
     'schema.json',
     'popup.html',
+    'coverage-required.html',
+    'rehydrate.html',
+    'rehydrate.js',
+    'rehydrate.css',
     'lib/browser-api.js',
+    'lib/policy-bundle.js',
+    'lib/destination-coverage.js',
     'lib/detect.js',
     'lib/adapters.js',
+    'rules/coverage-base.json',
     'content.js',
     'content.css',
   ].map((relPath) => ({ relPath }));
@@ -179,7 +224,7 @@ function validPackageFiles() {
 test('manifest validation covers browser target and managed-install guardrails', () => {
   const manifest = validManifest();
   const files = validPackageFiles();
-  const schema = { properties: { serverUrl: {}, ingestKey: {}, orgId: {} } };
+  const schema = { properties: { serverUrl: {}, ingestKey: {}, policyPublicKey: {}, orgId: {}, enabled: {} } };
   assert.doesNotThrow(() => validateManifest({ manifest, schema, appVersion: '9.9.9', files }));
   assert.doesNotThrow(() => validateManifest({
     manifest: manifestForTarget(manifest, 'firefox'),
@@ -212,6 +257,26 @@ test('manifest validation covers browser target and managed-install guardrails',
       message: /must not request <all_urls>/,
     },
     {
+      name: 'missing dynamic coverage permissions',
+      manifest: { ...manifest, permissions: ['storage'] },
+      message: /dynamic scripting and fail-closed destination blocking/,
+    },
+    {
+      name: 'custom hosts requested as required access',
+      manifest: { ...manifest, optional_host_permissions: [] },
+      message: /only as an optional host permission/,
+    },
+    {
+      name: 'missing isolated copy permission',
+      manifest: { ...manifest, permissions: manifest.permissions.filter((value) => value !== 'clipboardWrite') },
+      message: /clipboardWrite for explicit isolated-surface copy/,
+    },
+    {
+      name: 'missing static DNR compatibility ruleset',
+      manifest: { ...manifest, declarative_net_request: undefined },
+      message: /enabled static DNR ruleset/,
+    },
+    {
       name: 'missing background declaration',
       manifest: { ...manifest, background: {} },
       message: /must include a background worker or script/,
@@ -225,6 +290,19 @@ test('manifest validation covers browser target and managed-install guardrails',
       name: 'missing popup file',
       files: files.filter((file) => file.relPath !== 'popup.html'),
       message: /missing popup\.html/,
+    },
+    {
+      name: 'missing isolated reveal page',
+      files: files.filter((file) => file.relPath !== 'rehydrate.html'),
+      message: /missing rehydrate\.html/,
+    },
+    {
+      name: 'provider-accessible reveal page',
+      manifest: {
+        ...manifest,
+        web_accessible_resources: [{ resources: ['rehydrate.html'], matches: ['https://chatgpt.com/*'] }],
+      },
+      message: /keep the rehydration surface extension-only/,
     },
     {
       name: 'missing schema file',

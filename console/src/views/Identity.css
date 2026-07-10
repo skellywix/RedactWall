@@ -7,3 +7,106 @@
 .identity-view .identity-test-result {
   padding: 6px 16px 14px;
 }
+
+.identity-tabs {
+  display: inline-flex;
+  gap: 4px;
+  margin: 0 0 14px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.identity-tabs button {
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--mut);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  padding: 8px 12px;
+}
+
+.identity-tabs button.active {
+  background: var(--blue);
+  color: #fff;
+}
+
+.role-matrix,
+.invite-form {
+  display: grid;
+  gap: 10px;
+  padding: 0 16px 16px;
+}
+
+.role-card {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel2);
+}
+
+.role-card span,
+.role-card em {
+  color: var(--mut);
+  font-style: normal;
+  font-size: 12px;
+}
+
+.invite-form input,
+.invite-form select,
+.admin-table select {
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--input-bg);
+  color: var(--text);
+  padding: 0 10px;
+}
+
+.invite-url {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel2);
+}
+
+.invite-url span {
+  overflow-wrap: anywhere;
+}
+
+.admin-table td {
+  vertical-align: top;
+}
+
+.admin-table td > b,
+.admin-table td > span {
+  display: block;
+}
+
+.admin-table.compact td,
+.admin-table.compact th {
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+.source-stack {
+  display: grid;
+  gap: 3px;
+}
+
+.source-stack span,
+.admin-table td > span {
+  color: var(--mut);
+  font-size: 12px;
+}
+
+.admin-table .readonly-note {
+  display: inline-flex;
+}

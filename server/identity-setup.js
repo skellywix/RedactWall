@@ -76,12 +76,22 @@ function normalizeProvider(value) {
 
 function normalizeBaseUrl(value) {
   const raw = cleanString(value || 'https://redactwall.customer.example', 1024).replace(/\/+$/, '');
-  if (!/^https?:\/\//i.test(raw)) throw new Error('baseUrl must start with http:// or https://');
-  return raw;
+  let url;
+  try { url = new URL(raw); } catch { throw new Error('baseUrl must be an absolute http:// or https:// origin'); }
+  if (!['http:', 'https:'].includes(url.protocol)
+      || url.username
+      || url.password
+      || url.search
+      || url.hash
+      || (url.pathname && url.pathname !== '/')) {
+    throw new Error('baseUrl must be an absolute http:// or https:// origin');
+  }
+  return url.origin;
 }
 
-function normalizeTenant(value, fallback) {
-  return cleanString(value, 256).replace(/^https?:\/\//i, '').replace(/\/+$/, '') || fallback;
+function normalizeTenant(value, fallback, preserveScheme = false) {
+  const tenant = cleanString(value, 256).replace(/\/+$/, '');
+  return (preserveScheme ? tenant : tenant.replace(/^https?:\/\//i, '')) || fallback;
 }
 
 function entraIssuer(tenant) {
@@ -109,6 +119,7 @@ function envRows(issuer, redirectUri) {
     { key: 'OIDC_CLIENT_SECRET', alias: 'REDACTWALL_OIDC_CLIENT_SECRET', value: '<32-plus-random-characters>' },
     { key: 'OIDC_REDIRECT_URI', alias: 'REDACTWALL_OIDC_REDIRECT_URI', value: redirectUri },
     { key: 'OIDC_SCOPE', alias: 'REDACTWALL_OIDC_SCOPE', value: 'openid email profile' },
+    { key: 'OIDC_STEP_UP_ACR_VALUES', alias: 'REDACTWALL_OIDC_STEP_UP_ACR_VALUES', value: '<approved-mfa-acr-values-or-empty>' },
   ];
 }
 
@@ -161,7 +172,11 @@ function buildIdentitySetupGuide(opts = {}) {
   const provider = normalizeProvider(opts.provider);
   const meta = PROVIDERS[provider];
   const baseUrl = normalizeBaseUrl(opts.baseUrl);
-  const tenant = normalizeTenant(opts.tenantId || opts.tenant || opts.oktaDomain, meta.tenantPlaceholder);
+  const tenant = normalizeTenant(
+    opts.tenantId || opts.tenant || opts.oktaDomain,
+    meta.tenantPlaceholder,
+    provider === 'okta',
+  );
   const redirectUri = `${baseUrl}/auth/oidc/callback`;
   const issuer = providerIssuer(provider, tenant);
   const scimUrl = `${baseUrl}/scim/v2`;
@@ -177,7 +192,7 @@ function buildIdentitySetupGuide(opts = {}) {
     env: envRows(issuer, redirectUri),
     roleGroups: ROLE_GROUPS,
     validation: validationSteps(scimUrl),
-    preflightChecks: ['scim_bearer_token_strength', 'oidc_config', 'oidc_client_secret_strength', 'oidc_scim_users', 'oidc_endpoints'],
+    preflightChecks: ['scim_bearer_token_strength', 'oidc_config', 'oidc_client_secret_strength', 'oidc_scim_users', 'oidc_endpoints', 'oidc_https'],
     safety: safetyNotes(),
     docs: meta.docs,
   };

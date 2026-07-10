@@ -149,6 +149,14 @@ test('gate issues verifiable receipts on allow, warn-sent, and redact paths only
   assert.strictEqual(held.status, 'pending');
   assert.strictEqual(held.receipt, undefined, 'held prompts must not get a safe-to-send receipt');
 
+  const { cookie, csrfToken } = await login(port);
+  const setWarn = await jsonFetch(port, '/api/policy', {
+    method: 'PUT',
+    headers: { cookie, 'x-csrf-token': csrfToken },
+    body: { enforcementMode: 'warn' },
+  });
+  assert.strictEqual(setWarn.status, 200);
+
   // warn-sent is a legitimate outcome only for sensitive content that is NOT a
   // hard-stop entity (a raw alwaysBlock value can never be cleared to send — see
   // test/alwaysblock-invariant.test.js). Use non-hard-stop PII so the warn-sent
@@ -167,7 +175,6 @@ test('gate issues verifiable receipts on allow, warn-sent, and redact paths only
   assert.strictEqual(warned.receipt.promptSha256, sha256Hex(warnedPrompt));
   assert.deepStrictEqual(receipts.verifyReceipt(warned.receipt), { ok: true });
 
-  const { cookie, csrfToken } = await login(port);
   const setRedact = await jsonFetch(port, '/api/policy', {
     method: 'PUT',
     headers: { cookie, 'x-csrf-token': csrfToken },

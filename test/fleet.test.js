@@ -8,6 +8,8 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 process.env.ADMIN_PASSWORD = 'unit-pass';
+process.env.AUDITOR_USER = 'auditor@x';
+process.env.AUDITOR_PASSWORD = 'auditor-pass';
 process.env.REDACTWALL_SECRET = 'unit-secret-stable';
 process.env.REDACTWALL_DATA_KEY = 'unit-data-key-stable';
 process.env.INGEST_API_KEY = 'unit-ingest-key';
@@ -117,8 +119,8 @@ test('agent and guard heartbeat senders post the right shape', async () => {
     calls.push({ url, body: JSON.parse(opts.body) });
     return { ok: true, status: 200, json: async () => ({ companions: { browser_extension: 'missing' } }) };
   };
-  await agent.sendHeartbeat({ server: 'http://x', key: 'k', fetchImpl, user: 'tech@example.test' });
-  await guard.sendHeartbeat({ server: 'http://x', key: 'k', fetchImpl, agent: 'copilot-agent' });
+  await agent.sendHeartbeat({ server: 'https://control.example.test', key: 'k', fetchImpl, user: 'tech@example.test' });
+  await guard.sendHeartbeat({ server: 'https://control.example.test', key: 'k', fetchImpl, agent: 'copilot-agent' });
   assert.strictEqual(calls.length, 2);
   assert.ok(calls[0].url.endsWith('/api/v1/heartbeat'));
   assert.deepStrictEqual(calls[0].body.source, 'endpoint_agent');

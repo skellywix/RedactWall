@@ -47,6 +47,7 @@ const RESPONSES = {
   ScanResponseResult: openObject({ leaked: { type: 'boolean' }, decision: { type: 'string' }, status: { type: 'string' }, blocked: { type: 'boolean' }, findings: { type: 'array', items: FINDING }, categories: { type: 'array', items: { type: 'string' } }, redacted: { type: 'string' }, reasons: { type: 'array', items: { type: 'string' } } }),
   RehydrateResponse: openObject({ id: { type: 'string' }, text: { type: 'string' }, rehydrated: { type: 'boolean' }, reason: { type: 'string' } }),
   StatusResponse: openObject({ id: { type: 'string' }, status: { type: 'string' }, released: { type: 'boolean' } }),
+  JustificationResolutionResponse: openObject({ id: { type: 'string' }, decision: { type: 'string', enum: ['allow', 'block'] }, status: { type: 'string', enum: ['justified', 'blocked_by_user'] } }),
   HeartbeatResponse: openObject({ id: { type: 'string' }, decision: { type: 'string' }, status: { type: 'string' }, failedChecks: { type: 'array', items: { type: 'string' } }, companions: { type: 'object', additionalProperties: { type: 'string', enum: ['active', 'stale', 'missing'] } } }),
   DiscoveryResponse: openObject({ status: { type: 'string' }, imported: { type: 'integer' }, observations: { type: 'integer' }, destinations: { type: 'array', items: openObject({ id: { type: 'string' }, destination: { type: 'string' }, observations: { type: 'integer' }, status: { type: 'string' } }) } }),
   DetectorList: { type: 'array', items: openObject({ id: { type: 'string' }, severity: { type: 'integer' }, severityLabel: { type: 'string' } }) },
@@ -71,10 +72,12 @@ const PATHS = [
   { method: 'get', path: '/api/v1/policy/pubkey', op: 'getPolicyPubkey', ok: ['PubkeyResponse', 'Policy-bundle public key'] },
   { method: 'get', path: '/api/v1/detectors', op: 'listDetectors', ok: ['DetectorList', 'Detector inventory'] },
   { method: 'get', path: '/api/v1/status/{id}', op: 'getStatus', ok: ['StatusResponse', 'Held-item status'], releaseToken: true, pathParam: 'id' },
+  { method: 'post', path: '/api/v1/justify/{id}', op: 'resolveJustification', reqRef: 'ResolveJustificationRequest', ok: ['JustificationResolutionResponse', 'Justification hold resolved'], releaseToken: true, pathParam: 'id', example: { outcome: 'justified', note: 'Approved member-service workflow' } },
 ];
 
 const REQUEST_SCHEMAS = {
   GateRequest: () => requestSchema(validation.gateSchema),
+  ResolveJustificationRequest: () => requestSchema(validation.resolveJustificationSchema),
   ScanFileRequest: () => requestSchema(validation.scanFileSchema),
   ScanResponseRequest: () => requestSchema(validation.scanResponseSchema),
   RehydrateRequest: () => requestSchema(validation.rehydrateSchema),
@@ -85,8 +88,9 @@ const REQUEST_SCHEMAS = {
 function buildPaths() {
   const paths = {};
   for (const r of PATHS) {
-    const security = [{ IngestKey: [] }];
-    if (r.releaseToken) security.push({ ReleaseToken: [] });
+    const security = r.releaseToken
+      ? [{ IngestKey: [], ReleaseToken: [] }]
+      : [{ IngestKey: [] }];
     const op = {
       operationId: r.op,
       tags: ['sensor-api'],
@@ -97,6 +101,7 @@ function buildPaths() {
         401: ERR('Missing or invalid ingest key'),
         403: ERR('Tenant/seat or release-token check failed'),
         404: ERR('Not found'),
+        408: ERR('Request body deadline exceeded'),
         409: ERR('Conflict'),
         413: ERR('Payload too large'),
         429: ERR('Rate limited or key locked out'),

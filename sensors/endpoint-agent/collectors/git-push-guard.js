@@ -208,8 +208,8 @@ async function runGit(args, opts = {}) {
 }
 
 function diffArgsForRange(range) {
-  if (range.staged) return ['diff', '--cached', '--no-ext-diff', '--no-color', '--unified=0', '--find-renames'];
-  return ['diff', '--no-ext-diff', '--no-color', '--unified=0', '--find-renames', range.base, range.head, '--'];
+  if (range.staged) return ['diff', '--cached', '--no-ext-diff', '--no-textconv', '--no-color', '--unified=0', '--find-renames'];
+  return ['diff', '--no-ext-diff', '--no-textconv', '--no-color', '--unified=0', '--find-renames', range.base, range.head, '--'];
 }
 
 // A remote-side base SHA may not exist locally (teammate pushed it, we never
@@ -254,9 +254,10 @@ async function collectDiff(opts = {}) {
 
 async function policyForGit(opts = {}) {
   const agent = loadAgent();
-  if (opts.policy) return agent.sensorPolicy(opts.policy);
+  const override = agent._testPolicyOverride(opts);
+  if (override) return override;
   const fetched = await agent.fetchPolicy({ ...opts, silent: true });
-  return agent.sensorPolicy(fetched || {});
+  return fetched ? agent.sensorPolicy(fetched) : null;
 }
 
 function analyzeDiff(text, policy, opts = {}) {
@@ -265,15 +266,21 @@ function analyzeDiff(text, policy, opts = {}) {
     ignore: policy.ignore,
     disabledDetectors: policy.disabledDetectors,
     customDetectors: policy.customDetectors,
+    opaqueEncodedContent: true,
   });
 }
 
+function hasUninspectableBinaryDiff(text) {
+  return /^(?:Binary files .+ differ|GIT binary patch)\r?$/m.test(String(text || ''));
+}
+
 function sensitivityLabels(analysis = {}) {
-  return [...new Set(
+  const labels =
     (analysis.findings || []).map((f) => f.type)
       .concat((analysis.categories || []).map((c) => c.category))
-      .filter(Boolean)
-  )];
+      .filter(Boolean);
+  if (analysis.opaqueEncoded === true) labels.push('OPAQUE_ENCODED_CONTENT');
+  return [...new Set(labels)];
 }
 
 function findingLabels(analysis = {}) {
@@ -285,6 +292,7 @@ function categoryLabels(analysis = {}) {
 }
 
 function shouldBlock(analysis, opts = {}) {
+  if (analysis && analysis.opaqueEncoded === true) return true;
   const findings = findingLabels(analysis);
   const categories = categoryLabels(analysis);
   if (!findings.length && !categories.length) return false;
@@ -301,7 +309,7 @@ function safePrompt(status, analysis, extra = {}) {
 
 function gitPushRecord(analysis, outcome, opts = {}, extra = {}) {
   const agent = loadAgent();
-  return {
+  const base = {
     prompt: safePrompt(outcome === 'action_blocked' ? 'blocked' : 'flagged', analysis, extra),
     user: opts.user,
     destination: destinationFromRemote(opts.remoteUrl, opts.remoteName),
@@ -309,9 +317,17 @@ function gitPushRecord(analysis, outcome, opts = {}, extra = {}) {
     channel: 'git_push',
     sensor: agent.sensorMetadata(),
     clientOutcome: outcome,
-    note: extra.reason === 'diff_too_large' || extra.reason === 'diff_partially_inspected'
+    note: extra.reason === 'policy_unavailable'
+      ? 'endpoint git push blocked locally because no trusted signed policy is available'
+      : extra.reason === 'binary_diff_uninspectable'
+      ? 'endpoint git push blocked locally because a binary diff could not be inspected'
+      : extra.reason === 'diff_too_large' || extra.reason === 'diff_partially_inspected'
       ? 'endpoint git push blocked locally because the diff exceeded inspection bounds'
       : 'endpoint git push blocked locally after sensitive content detection',
+  };
+  if (analysis.opaqueEncoded === true) return base;
+  return {
+    ...base,
     clientPreRedacted: true,
     clientFindings: agent.publicFindings(analysis),
     clientCategories: agent.publicCategories(analysis),
@@ -347,6 +363,19 @@ function publicResult(status, analysis = {}, extra = {}) {
 async function collectGitPush(opts = {}) {
   writer.loadEndpointEnv(opts.envPath);
   const destination = destinationFromRemote(opts.remoteUrl, opts.remoteName);
+  const policy = await policyForGit(opts);
+  if (!policy) {
+    const record = gitPushRecord({}, 'action_blocked', opts, { reason: 'policy_unavailable' });
+    const res = await reportGitPush(record, opts);
+    return publicResult('blocked', {}, {
+      destination,
+      recorded: !!res,
+      id: res && res.id,
+      reason: 'policy_unavailable',
+      bytesScanned: 0,
+      ...(res ? {} : { error: 'control plane recording unavailable' }),
+    });
+  }
   let diff;
   try {
     diff = await collectDiff(opts);
@@ -373,21 +402,23 @@ async function collectGitPush(opts = {}) {
       bytesScanned: diff.bytes,
     });
   }
-  const policy = await policyForGit(opts);
   const analysis = analyzeDiff(diff.text, policy, opts);
+  const binaryDiff = hasUninspectableBinaryDiff(diff.text);
   // analyzeDiff only inspects the first maxChars; content past that bound is
   // never scanned, so a diff larger than the window is blocked as partially
   // inspected (fail closed) rather than reported clean like the too_large path.
   const maxChars = boundedNumber(opts.maxChars, DEFAULT_MAX_CHARS, 1024, 1000000);
   const partiallyInspected = String(diff.text || '').length > maxChars;
-  if (!partiallyInspected && !shouldBlock(analysis, opts)) {
+  if (!binaryDiff && !partiallyInspected && !shouldBlock(analysis, opts)) {
     return publicResult('clean', analysis, {
       destination,
       refCount: diff.ranges.length,
       bytesScanned: diff.bytes,
     });
   }
-  const extra = partiallyInspected ? { reason: 'diff_partially_inspected' } : {};
+  const extra = binaryDiff
+    ? { reason: 'binary_diff_uninspectable' }
+    : (partiallyInspected ? { reason: 'diff_partially_inspected' } : {});
   const record = gitPushRecord(analysis, 'action_blocked', opts, extra);
   const res = await reportGitPush(record, opts);
   return publicResult('blocked', analysis, {

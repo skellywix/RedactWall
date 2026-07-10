@@ -3,6 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const policy = require('../server/policy');
+const detector = require('../detection-engine/detect');
 
 function categoryAnalysis(category, overrides = {}) {
   return {
@@ -15,6 +16,17 @@ function categoryAnalysis(category, overrides = {}) {
     ...overrides,
   };
 }
+
+test('disabledDetectors cannot suppress an alwaysBlock detector', () => {
+  const configured = policy.normalizePolicy({
+    ...policy.DEFAULT_POLICY,
+    disabledDetectors: ['US_SSN'],
+  });
+  const analysis = detector.analyze('Member SSN is 123-45-6789', policy.analyzeOpts(configured));
+
+  assert.ok(analysis.findings.some((finding) => finding.type === 'US_SSN'));
+  assert.strictEqual(policy.evaluate(analysis, configured).decision, 'block');
+});
 
 test('policy scopes tighten enforcement for matching SCIM groups and destinations', () => {
   const verdict = policy.evaluate(categoryAnalysis('CONFIDENTIAL_BUSINESS'), {

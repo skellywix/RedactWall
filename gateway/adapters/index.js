@@ -3,11 +3,12 @@
 const openai = require('./openai');
 const anthropic = require('./anthropic');
 const mock = require('./mock');
+const { normalizeProvider } = require('../providers');
 
-const ADAPTERS = { openai, anthropic, mock, 'azure-openai': openai, 'internal-http': openai };
+const ADAPTERS = { openai, anthropic, mock, 'internal-http': openai };
 
 function getAdapter(provider) {
-  return ADAPTERS[String(provider || 'openai').toLowerCase()] || openai;
+  return ADAPTERS[normalizeProvider(provider)];
 }
 
 module.exports = { getAdapter, ADAPTERS };

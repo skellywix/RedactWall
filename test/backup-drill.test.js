@@ -68,7 +68,14 @@ test('drill passes end-to-end and prints a prompt-free PASS report', async () =>
   assert.ok(!output.includes(SECRET));
   assert.ok(!output.includes('Member SSN'));
   assert.ok(fs.readdirSync(drillDir).some((name) => name.endsWith('.db')));
-  assert.ok(fs.existsSync(path.join(drillDir, 'drill-restore', 'restored-redactwall.db')));
+  assert.ok(fs.readdirSync(drillDir).some((name) => name.endsWith('.db.audit-state.json')));
+  assert.ok(fs.readdirSync(drillDir).some((name) => name.endsWith('.db.audit-checkpoint.json')));
+  const restoredPath = path.join(drillDir, 'drill-restore', 'restored-redactwall.db');
+  assert.ok(fs.existsSync(restoredPath));
+  assert.deepStrictEqual(fs.readdirSync(`${restoredPath}.audit-integrity`).sort(), [
+    '.audit-integrity-checkpoint.json',
+    '.audit-integrity-state.json',
+  ]);
 });
 
 test('drill without --keep cleans up every artifact it created', async () => {

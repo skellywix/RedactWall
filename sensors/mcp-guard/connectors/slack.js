@@ -7,7 +7,12 @@
  * model receives it.
  */
 const { fetchWithTimeout } = require('../guard');
-const { connectorHealthCheck, sanitizeToolResult } = require('../sdk');
+const { connectorHealthCheck, executeConnectorTool } = require('../sdk');
+const {
+  cancelResponseBody,
+  readBoundedJson,
+  readBoundedText: readSharedBoundedText,
+} = require('../../shared/bounded-response');
 
 const DEFAULT_SLACK_ROOT = 'https://slack.com/api';
 const DEFAULT_MAX_BYTES = 512 * 1024;
@@ -135,12 +140,6 @@ function responseContentType(response) {
   return compactLabel(headerValue(response.headers, 'content-type').split(';')[0], 'unknown', 80);
 }
 
-function responseContentLength(response) {
-  const raw = headerValue(response.headers, 'content-length');
-  const n = Number(raw);
-  return Number.isFinite(n) && n >= 0 ? n : null;
-}
-
 function maxBytes(opts = {}) {
   const n = Number(opts.maxBytes ?? DEFAULT_MAX_BYTES);
   if (!Number.isFinite(n)) return DEFAULT_MAX_BYTES;
@@ -156,38 +155,11 @@ function isTextContentType(contentType, opts = {}) {
 }
 
 async function readBoundedText(response, opts = {}) {
-  const limit = maxBytes(opts);
-  const declared = responseContentLength(response);
-  if (declared != null && declared > limit) {
-    throw new Error(`Slack content exceeds ${limit} byte limit`);
-  }
-
-  if (response.body && typeof response.body.getReader === 'function') {
-    const decoder = new TextDecoder();
-    const reader = response.body.getReader();
-    let total = 0;
-    let text = '';
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      total += value.byteLength;
-      if (total > limit) throw new Error(`Slack content exceeds ${limit} byte limit`);
-      text += decoder.decode(value, { stream: true });
-    }
-    text += decoder.decode();
-    return { text, sizeBytes: total };
-  }
-
-  if (typeof response.arrayBuffer === 'function') {
-    const buffer = Buffer.from(await response.arrayBuffer());
-    if (buffer.length > limit) throw new Error(`Slack content exceeds ${limit} byte limit`);
-    return { text: buffer.toString('utf8'), sizeBytes: buffer.length };
-  }
-
-  const text = typeof response.text === 'function' ? await response.text() : '';
-  const size = Buffer.byteLength(text, 'utf8');
-  if (size > limit) throw new Error(`Slack content exceeds ${limit} byte limit`);
-  return { text, sizeBytes: size };
+  return readSharedBoundedText(response, {
+    maxBytes: maxBytes(opts),
+    timeoutMs: opts.responseTimeoutMs || opts.timeoutMs,
+    label: 'Slack content',
+  });
 }
 
 function slackScopes(opts = {}) {
@@ -231,11 +203,14 @@ async function slackApiCall(method, args = {}, opts = {}) {
   }, opts);
   if (!response || !response.ok) {
     const status = response && response.status ? response.status : 'unknown';
+    if (response) await cancelResponseBody(response);
     throw new Error(`Slack ${method} failed with HTTP ${status}`);
   }
-  const body = typeof response.json === 'function'
-    ? await response.json()
-    : JSON.parse((await readBoundedText(response, { ...opts, maxBytes: Math.min(maxBytes(opts), 64 * 1024) })).text || '{}');
+  const { json: body } = await readBoundedJson(response, {
+    maxBytes: opts.maxJsonBytes ?? Math.max(64 * 1024, maxBytes(opts)),
+    timeoutMs: opts.responseTimeoutMs || opts.timeoutMs,
+    label: `Slack ${method} response`,
+  });
   if (!body || body.ok !== true) {
     const error = compactLabel(body && body.error, 'unknown_error', 80);
     throw new Error(`Slack ${method} failed: ${error}`);
@@ -329,11 +304,13 @@ async function fetchSlackFileContent(args = {}, opts = {}) {
   }, opts);
   if (!response || !response.ok) {
     const status = response && response.status ? response.status : 'unknown';
+    if (response) await cancelResponseBody(response);
     throw new Error(`Slack file content fetch failed with HTTP ${status}`);
   }
 
   const contentType = responseContentType(response);
   if (!isTextContentType(contentType, opts)) {
+    await cancelResponseBody(response);
     throw new Error(`Slack file content type is not text-readable: ${contentType}`);
   }
 
@@ -352,8 +329,7 @@ async function fetchSlackFileContent(args = {}, opts = {}) {
 }
 
 async function sanitizeConversationHistory(args = {}, opts = {}) {
-  const raw = await fetchConversationHistory(args, opts);
-  return sanitizeToolResult(raw, {
+  return executeConnectorTool((toolArgs) => fetchConversationHistory(toolArgs, opts), args, {
     agent: opts.agent,
     connector: 'slack',
     tool: 'conversations.history',
@@ -361,8 +337,7 @@ async function sanitizeConversationHistory(args = {}, opts = {}) {
 }
 
 async function sanitizeSlackFileContent(args = {}, opts = {}) {
-  const raw = await fetchSlackFileContent(args, opts);
-  return sanitizeToolResult(raw, {
+  return executeConnectorTool((toolArgs) => fetchSlackFileContent(toolArgs, opts), args, {
     agent: opts.agent,
     connector: 'slack',
     tool: 'files.info',

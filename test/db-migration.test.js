@@ -13,10 +13,14 @@ const serverRoot = path.join(root, 'server');
 function copyDbRuntime(tempRoot) {
   const tempServer = path.join(tempRoot, 'server');
   fs.mkdirSync(tempServer, { recursive: true });
-  for (const file of ['db.js', 'env.js', 'audit-integrity.js', 'tenant.js']) {
+  for (const file of [
+    'db.js', 'env.js', 'audit-integrity.js', 'audit-anchor.js', 'file-mutation-lock.js',
+    'tenant.js', 'postgres-url.js', 'private-path.js', 'crypto.js', 'detector.js',
+  ]) {
     fs.copyFileSync(path.join(serverRoot, file), path.join(tempServer, file));
   }
   fs.cpSync(path.join(serverRoot, 'storage'), path.join(tempServer, 'storage'), { recursive: true });
+  fs.cpSync(path.join(root, 'detection-engine'), path.join(tempRoot, 'detection-engine'), { recursive: true });
   return path.join(tempServer, 'db.js');
 }
 
@@ -31,6 +35,8 @@ function writeLegacyStore(tempRoot) {
       user: 'analyst@example.test',
       redactedPrompt: 'Member [US_SSN]',
       findings: [{ type: 'US_SSN', masked: '***-**-9043' }],
+      _rawPrompt: 'Member synthetic SSN 123-45-6789',
+      _tokenVault: { '[[US_SSN_1]]': '123-45-6789' },
     },
     {
       id: 'legacy-q-2',
@@ -46,7 +52,7 @@ function writeLegacyStore(tempRoot) {
       action: 'BLOCKED',
       queryId: 'legacy-q-1',
       actor: 'sensor',
-      detail: 'structured pii detected',
+      detail: 'structured pii detected for synthetic SSN 123-45-6789',
     },
     {
       ts: '2026-01-02T00:00:01.000Z',
@@ -89,6 +95,8 @@ function runCopiedDb(tempRoot, envOverrides = {}) {
       NODE_PATH: path.join(root, 'node_modules'),
       REDACTWALL_ENV_PATH: path.join(tempRoot, 'missing.env'),
       REDACTWALL_DB_PATH: '',
+      REDACTWALL_DATA_KEY: '',
+      REDACTWALL_SECRET: '',
       ...envOverrides,
     },
   });
@@ -105,17 +113,41 @@ test('default SQLite store imports legacy JSON once and preserves audit integrit
 
   assert.deepStrictEqual(snapshot.queries.map((q) => q.id).sort(), ['legacy-q-1', 'legacy-q-2']);
   assert.strictEqual(snapshot.queries.find((q) => q.id === 'legacy-q-1').findings[0].type, 'US_SSN');
+  assert.strictEqual(snapshot.queries.find((q) => q.id === 'legacy-q-1')._rawPrompt, undefined);
+  assert.strictEqual(snapshot.queries.find((q) => q.id === 'legacy-q-1')._tokenVault, undefined);
+  assert.deepStrictEqual(snapshot.queries.find((q) => q.id === 'legacy-q-1').legacySensitiveFieldsDiscarded, ['_rawPrompt', '_tokenVault']);
   assert.strictEqual(snapshot.integrity.ok, true);
   assert.ok(snapshot.audit.some((entry) => entry.action === 'BLOCKED' && entry.queryId === 'legacy-q-1'));
   assert.ok(snapshot.audit.some((entry) => entry.action === 'APPROVED' && entry.queryId === 'legacy-q-2'));
   assert.ok(snapshot.audit.some((entry) => entry.action === 'STORE_MIGRATED'));
+  assert.ok(snapshot.audit.every((entry) => !String(entry.detail || '').includes('123-45-6789')));
   assert.ok(snapshot.audit.find((entry) => entry.queryId === 'legacy-q-1').contentHash);
   assert.deepStrictEqual(snapshot.files, {
     sqlite: true,
     queriesJson: false,
     auditJson: false,
-    queriesMigrated: true,
-    auditMigrated: true,
+    queriesMigrated: false,
+    auditMigrated: false,
+  });
+});
+
+test('legacy sensitive fields are sealed when a stable data key is available', (t) => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-db-migration-sealed-'));
+  t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
+  writeLegacyStore(tempRoot);
+  const snapshot = runCopiedDb(tempRoot, { REDACTWALL_DATA_KEY: 'migration-test-key-with-at-least-thirty-two-characters' });
+  const query = snapshot.queries.find((item) => item.id === 'legacy-q-1');
+  assert.match(query._rawPrompt, /^enc:v1:/);
+  assert.match(query._tokenVault, /^enc:v1:/);
+  assert.ok(!JSON.stringify(query).includes('123-45-6789'));
+  assert.ok(snapshot.audit.every((entry) => !String(entry.detail || '').includes('123-45-6789')));
+  assert.strictEqual(snapshot.integrity.ok, true);
+  assert.deepStrictEqual(snapshot.files, {
+    sqlite: true,
+    queriesJson: false,
+    auditJson: false,
+    queriesMigrated: false,
+    auditMigrated: false,
   });
 });
 
@@ -173,7 +205,7 @@ test('injectable JSON migration skips non-empty stores and re-anchors imported a
 
     const inserted = [];
     const audit = [];
-    const renames = [];
+    const removals = [];
     db._internal.migrateFromJson({
       env: {},
       dataDir,
@@ -185,21 +217,17 @@ test('injectable JSON migration skips non-empty stores and re-anchors imported a
       appendAudit: (entry) => audit.push(entry),
       fs: {
         ...fs,
-        renameSync: (from, to) => {
-          renames.push([path.basename(from), path.basename(to)]);
-          if (from.endsWith('audit.json')) throw new Error('audit file locked');
+        rmSync: (file) => {
+          removals.push(path.basename(file));
         },
       },
     });
 
     assert.deepStrictEqual(inserted.map((row) => row.id), ['legacy-q-1']);
     assert.strictEqual(inserted[0].status, 'approved');
-    assert.deepStrictEqual(audit.map((entry) => entry.action), ['BLOCKED', 'APPROVED', 'STORE_MIGRATED']);
-    assert.match(audit[2].detail, /imported 1 queries, 2 audit events/);
-    assert.deepStrictEqual(renames, [
-      ['queries.json', 'queries.json.migrated'],
-      ['audit.json', 'audit.json.migrated'],
-    ]);
+    assert.deepStrictEqual(audit.map((entry) => entry.action), ['BLOCKED', 'APPROVED', 'LEGACY_QUERY_IMPORTED', 'STORE_MIGRATED']);
+    assert.match(audit[3].detail, /imported 1 queries, 2 audit events/);
+    assert.deepStrictEqual(removals, ['queries.json', 'audit.json']);
   } finally {
     db._db.close();
     delete require.cache[dbModulePath];

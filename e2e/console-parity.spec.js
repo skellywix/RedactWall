@@ -98,18 +98,19 @@ const ROUTES = {
     { hash: '/coverage', heading: 'Texas FCU Coverage' },
     { hash: '/lineage', heading: 'Member Data Lineage' },
     { hash: '/decision-quality', heading: 'Reviewer Decision Quality' },
+    { hash: '/audit', heading: 'Examiner Audit Chain' },
   ],
   govern: [
     { hash: '/catalog', heading: 'AI Vendor Catalog' },
     { hash: '/compliance', heading: 'NCUA / GLBA Controls' },
     { hash: '/ncua', heading: 'Texas FCU Readiness' },
-    { hash: '/identity', heading: 'Identity & Roles' },
     { hash: '/policy', heading: 'Policy Configuration' },
   ],
   system: [
+    { hash: '/identity', heading: 'Users & Roles' },
+    { hash: '/licensing', heading: 'Licensing' },
     { hash: '/deploy', heading: 'Texas FCU sensor rollout' },
     { hash: '/integrations', heading: 'Evidence Delivery' },
-    { hash: '/audit', heading: 'Examiner Audit Chain' },
     { hash: '/updates', heading: 'Controlled Updates' },
   ],
 };
@@ -173,7 +174,7 @@ test('shell chrome: nav groups, queue badge, LIVE indicator, sign-out, command p
   await expect(page.getByRole('heading', { name: 'Texas FCU Overview', exact: true })).toBeVisible();
 
   // All four capability groups exist in the rail.
-  for (const label of ['Member Defense', 'Risk & Proof', 'Governance', 'Platform']) {
+  for (const label of ['Member Defense', 'Risk & Proof', 'Governance', 'Administration']) {
     await expect(page.locator('.app-rail-group .rail-group-label', { hasText: new RegExp(`^${label}$`) })).toBeVisible();
   }
 
@@ -185,7 +186,7 @@ test('shell chrome: nav groups, queue badge, LIVE indicator, sign-out, command p
   // Topbar telemetry + session controls, same ids the legacy console exposed.
   await expect(page.locator('#liveTxt')).toHaveText('LIVE');
   await expect(page.locator('#lastUpdated')).toContainText('LAST UPDATED');
-  await expect(page.locator('#who')).toContainText('admin / Security Admin');
+  await expect(page.locator('#who')).toContainText('admin / Global Administrator');
   await expect(page.locator('#logout')).toHaveText(/Sign out/);
 
   // Command palette: Ctrl+K opens, substring filter narrows, Enter navigates.

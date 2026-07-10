@@ -5,8 +5,22 @@ const otpInput = document.getElementById('otp');
 const errorBox = document.getElementById('err');
 const oidcButton = document.getElementById('oidc');
 const demoHint = document.getElementById('demoHint');
+const params = new URLSearchParams(location.search);
+const fragmentParams = new URLSearchParams(String(location.hash || '').replace(/^#/, ''));
 
-if (new URLSearchParams(location.search).get('oidc') === 'failed') {
+const invitedUser = fragmentParams.get('user');
+if (invitedUser) userInput.value = invitedUser;
+
+// Invite identity is a convenience hint, not request metadata. Capture it from
+// the fragment, then remove it before credentials are entered or links can
+// propagate it. Legacy ?user= links are ignored and stripped because their
+// request target may already have appeared in access logs.
+if (location.hash || params.has('user')) {
+  const safeSearch = params.get('oidc') === 'failed' ? '?oidc=failed' : '';
+  try { history.replaceState(null, document.title, location.pathname + safeSearch); } catch {}
+}
+
+if (params.get('oidc') === 'failed') {
   showError('SSO sign-in failed. Try again or use a local account.');
 }
 

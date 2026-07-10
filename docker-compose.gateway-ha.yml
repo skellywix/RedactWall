@@ -1,37 +1,4 @@
 services:
-  ai-gateway-limiter:
-    build: .
-    image: redactwall:gateway-ha
-    init: true
-    read_only: true
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,size=64m
-    command: ["node", "scripts/ai-gateway-rate-limiter.js", "--host", "0.0.0.0", "--port", "4183"]
-    environment:
-      NODE_ENV: production
-      REDACTWALL_RATE_LIMITER_TOKEN: ${REDACTWALL_RATE_LIMITER_TOKEN:?set REDACTWALL_RATE_LIMITER_TOKEN}
-      REDACTWALL_RATE_LIMITER_STORE: ${REDACTWALL_RATE_LIMITER_STORE:-sqlite}
-      REDACTWALL_RATE_LIMITER_DB: /data/gateway-shared-rate-limiter.db
-      REDACTWALL_RATE_LIMITER_REDIS_URL: ${REDACTWALL_RATE_LIMITER_REDIS_URL:-}
-      REDACTWALL_RATE_LIMITER_REDIS_PREFIX: ${REDACTWALL_RATE_LIMITER_REDIS_PREFIX:-redactwall:gateway:rl:}
-      REDACTWALL_RATE_LIMITER_REDIS_TIMEOUT_MS: ${REDACTWALL_RATE_LIMITER_REDIS_TIMEOUT_MS:-2000}
-    expose:
-      - "4183"
-    volumes:
-      - gateway-limiter-data:/data
-    healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4183/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
-      interval: 15s
-      timeout: 4s
-      start_period: 5s
-      retries: 4
-    stop_grace_period: 30s
-    restart: unless-stopped
-
   ai-gateway-a:
     build: .
     image: redactwall:gateway-ha
@@ -46,7 +13,7 @@ services:
     command: ["node", "scripts/ai-llm-gateway.js", "--host", "0.0.0.0", "--port", "4182"]
     environment: &gateway-env
       NODE_ENV: production
-      REDACTWALL_URL: ${REDACTWALL_URL:-http://host.docker.internal:4000}
+      REDACTWALL_URL: ${REDACTWALL_URL:?set an HTTPS REDACTWALL_URL}
       INGEST_API_KEY: ${INGEST_API_KEY:?set INGEST_API_KEY}
       REDACTWALL_GATEWAY_TOKEN: ${REDACTWALL_GATEWAY_TOKEN:?set REDACTWALL_GATEWAY_TOKEN}
       REDACTWALL_GATEWAY_UPSTREAM: ${REDACTWALL_GATEWAY_UPSTREAM:-https://api.openai.com}
@@ -54,17 +21,14 @@ services:
       REDACTWALL_GATEWAY_ALLOWED_MODELS: ${REDACTWALL_GATEWAY_ALLOWED_MODELS:-}
       REDACTWALL_GATEWAY_RATE_LIMIT: ${REDACTWALL_GATEWAY_RATE_LIMIT:-60}
       REDACTWALL_GATEWAY_RATE_WINDOW_MS: ${REDACTWALL_GATEWAY_RATE_WINDOW_MS:-60000}
-      REDACTWALL_GATEWAY_RATE_LIMIT_STORE: http
-      REDACTWALL_GATEWAY_RATE_LIMIT_URL: http://ai-gateway-limiter:4183/check
-      REDACTWALL_GATEWAY_RATE_LIMIT_TOKEN: ${REDACTWALL_RATE_LIMITER_TOKEN:?set REDACTWALL_RATE_LIMITER_TOKEN}
-      REDACTWALL_GATEWAY_RATE_LIMIT_TIMEOUT_MS: ${REDACTWALL_GATEWAY_RATE_LIMIT_TIMEOUT_MS:-2000}
+      REDACTWALL_GATEWAY_RATE_LIMIT_STORE: sqlite
+      REDACTWALL_GATEWAY_RATE_LIMIT_DB: /data/gateway-rate-limits.db
     expose:
       - "4182"
+    volumes:
+      - gateway-limiter-data:/data
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    depends_on:
-      ai-gateway-limiter:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4182/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 15s
@@ -90,11 +54,10 @@ services:
       <<: *gateway-env
     expose:
       - "4182"
+    volumes:
+      - gateway-limiter-data:/data
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    depends_on:
-      ai-gateway-limiter:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4182/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 15s
@@ -107,17 +70,18 @@ services:
   ai-gateway-lb:
     image: nginx:1.27-alpine
     init: true
+    user: "101:101"
     read_only: true
     security_opt:
       - no-new-privileges:true
     cap_drop:
       - ALL
     tmpfs:
-      - /var/cache/nginx:rw,noexec,nosuid,size=32m
-      - /var/run:rw,noexec,nosuid,size=8m
-      - /tmp:rw,noexec,nosuid,size=16m
+      - /var/cache/nginx:rw,noexec,nosuid,uid=101,gid=101,mode=0700,size=32m
+      - /var/run:rw,noexec,nosuid,uid=101,gid=101,mode=0700,size=8m
+      - /tmp:rw,noexec,nosuid,uid=101,gid=101,mode=0700,size=16m
     ports:
-      - "${REDACTWALL_GATEWAY_PUBLIC_PORT:-4182}:4182"
+      - "${REDACTWALL_GATEWAY_BIND_ADDRESS:-127.0.0.1}:${REDACTWALL_GATEWAY_PUBLIC_PORT:-4182}:4182"
     volumes:
       - ./infra/ai-gateway-ha/nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
@@ -126,7 +90,7 @@ services:
       ai-gateway-b:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:4182/healthz >/dev/null || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:4182/readyz >/dev/null || exit 1"]
       interval: 15s
       timeout: 4s
       start_period: 5s

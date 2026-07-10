@@ -22,10 +22,13 @@ RedactWall cannot inspect the prompt or response.
 - Model-output scanning through `POST /api/v1/scan-response`.
 - Response redaction or response blocking before the caller sees the model
   output.
-- Buffered scanning for `stream: true`, Gemini `streamGenerateContent`, and
-  Bedrock `converse-stream` / `invoke-with-response-stream` traffic. The
-  gateway waits for the upstream stream, scans the complete output, then
-  releases only allowed content.
+- Buffered scanning for JSON/SSE `stream: true` and Gemini
+  `streamGenerateContent` traffic. The gateway waits for the upstream stream,
+  scans the complete output, then releases only allowed content.
+- Explicit `501` rejection for Bedrock `converse-stream` and
+  `invoke-with-response-stream`. AWS returns binary EventStream frames, which
+  this dependency-free proxy does not decode or CRC-validate, so those routes
+  never reach the control plane or Bedrock upstream.
 - Optional AWS SigV4 signing for direct Bedrock Runtime upstreams. AWS
   credentials stay on the gateway host and are never accepted from callers.
 - Default blocking for non-text image/file/tool payload blocks unless
@@ -100,38 +103,52 @@ $env:REDACTWALL_GATEWAY_RATE_LIMIT_TOKEN = "<shared-limiter-token>"
 node scripts/ai-llm-gateway.js --redactwall http://127.0.0.1:4000 --upstream https://api.openai.com --port 4182
 ```
 
-For a pilot-ready HA container shape, use the dedicated compose file. It runs
-two gateway replicas behind a private Nginx balancer and keeps the shared
-limiter private on the Docker network:
+For single-host process redundancy, use the dedicated compose file. It runs
+two gateway replicas behind Nginx and stores hashed rate-limit counters in one
+SQLite file on a local named volume:
 
 ```powershell
 $env:REDACTWALL_GATEWAY_TOKEN = "<client-token>"
-$env:REDACTWALL_RATE_LIMITER_TOKEN = "<shared-limiter-token>"
 $env:INGEST_API_KEY = "<sensor-ingest-key>"
+$env:REDACTWALL_URL = "https://redactwall.internal.example"
 $env:REDACTWALL_GATEWAY_UPSTREAM_API_KEY = "<provider-key>"
 docker compose -f docker-compose.gateway-ha.yml up -d --build
 Invoke-RestMethod http://127.0.0.1:4182/readyz
 ```
 
-The load balancer publishes only `REDACTWALL_GATEWAY_PUBLIC_PORT` (default
-`4182`). The limiter has no host port mapping, persists hashed counters in the
-`gateway-limiter-data` volume, and should stay on private networking. Use
-`npm run gateway:ha:smoke` to prove the same client is rate-limited across two
-gateway replicas without calling an external LLM provider.
+The load balancer binds `REDACTWALL_GATEWAY_BIND_ADDRESS` (default `127.0.0.1`)
+and publishes only `REDACTWALL_GATEWAY_PUBLIC_PORT` (default `4182`). The two
+replicas independently listen on the private Compose network and share only the
+local `gateway-limiter-data` volume. No limiter bearer token or prompt crosses a
+cleartext inter-container limiter hop. Use `npm run gateway:ha:smoke` to prove a
+surviving and restarted replica retain the same rate-limit counter without
+calling an external LLM provider.
 
-For active-active limiter replicas, switch the limiter backend to Redis or
-Valkey and scale only after `/readyz` reports `backend: "redis"`:
+This stack is not multi-host high availability. Nginx, the Docker host, and the
+named volume remain one failure domain. Keep the default loopback bind for a
+local client, or place an authenticated TLS reverse proxy in front before
+exposing it to another host.
+
+For multi-host gateways, deploy the limiter behind an HTTPS internal load
+balancer and set `REDACTWALL_GATEWAY_RATE_LIMIT_URL` to that HTTPS endpoint.
+Never send `REDACTWALL_GATEWAY_RATE_LIMIT_TOKEN` to non-loopback cleartext HTTP.
+Redis or Valkey can back multiple HTTPS limiter instances:
 
 ```powershell
 $env:REDACTWALL_RATE_LIMITER_STORE = "redis"
 $env:REDACTWALL_RATE_LIMITER_REDIS_URL = "rediss://:<password>@redis.internal.example:6380/0"
-docker compose -f docker-compose.gateway-ha.yml up -d --build --scale ai-gateway-limiter=2
+$env:REDACTWALL_GATEWAY_RATE_LIMIT_URL = "https://gateway-limiter.internal.example/check"
 ```
 
 The Redis backend uses a single atomic `EVAL` operation per check, sets a TTL
 per hashed key, and stores only `REDACTWALL_RATE_LIMITER_REDIS_PREFIX` plus the
 SHA-256 limiter key. It does not store raw gateway client tokens, users,
-prompts, destinations, or model output.
+prompts, destinations, or model output. Remote Redis and Valkey connections
+must use `rediss://`; the limiter refuses cleartext `redis://` before opening a
+socket. For local development only, a numeric loopback address can be enabled
+explicitly with `--allow-insecure-redis-loopback` or
+`REDACTWALL_RATE_LIMITER_ALLOW_INSECURE_REDIS_LOOPBACK=true`. That exception is
+rejected when `NODE_ENV=production`.
 
 The limiter service receives:
 
@@ -169,12 +186,15 @@ Point an app or agent at `http://127.0.0.1:4182/v1/chat/completions` and send:
 
 ```http
 Authorization: Bearer replace-with-client-token
-X-RedactWall-User: analyst@example.test
 Content-Type: application/json
 ```
 
 The gateway strips caller auth before the upstream request and injects
-`REDACTWALL_GATEWAY_UPSTREAM_API_KEY` as the provider credential.
+`REDACTWALL_GATEWAY_UPSTREAM_API_KEY` as the provider credential. Audit and
+policy attribution uses a one-way fingerprint of the authenticated client
+token. Caller-supplied `X-RedactWall-User` and `X-RedactWall-Org` headers are
+ignored so a client cannot impersonate another user or tenant. Issue distinct
+client tokens to applications that need distinct attribution.
 
 Check liveness and readiness without exposing secrets:
 
@@ -182,6 +202,16 @@ Check liveness and readiness without exposing secrets:
 Invoke-RestMethod http://127.0.0.1:4182/healthz
 Invoke-RestMethod http://127.0.0.1:4182/readyz
 ```
+
+`/healthz` proves only that the gateway process is alive. `/readyz` first proves
+the configured ingest key against the control plane's authenticated, read-only
+`/api/v1/detectors` inventory, then checks the public control-plane readiness,
+the configured upstream network path, and the external shared limiter when
+enabled. Every response read is bounded, redirects are rejected, and the ingest
+key is sent only to the configured HTTPS or loopback control-plane origin and is
+never included in the gateway readiness response. `/readyz` returns `503` if any
+required dependency is unavailable; the limiter probe uses its own read-only
+readiness endpoint and does not consume a rate-limit check.
 
 ## Useful Options
 
@@ -206,6 +236,9 @@ Invoke-RestMethod http://127.0.0.1:4182/readyz
 | `--rate-timeout-ms` | `REDACTWALL_GATEWAY_RATE_LIMIT_TIMEOUT_MS` | `2000` | Timeout for shared limiter checks. |
 | `--allowed-models` | `REDACTWALL_GATEWAY_ALLOWED_MODELS` | all models | Comma-separated model names or wildcard patterns, such as `gpt-4o-mini,company-*`. |
 | `--allow-multimodal` | none | off | Allows non-text provider payload blocks. Leave off unless another local collector inspects those bytes. |
+| none | `REDACTWALL_GATEWAY_MAX_UPSTREAM_RESPONSE_BYTES` | `4194304` | Maximum upstream response bytes buffered for complete scanning. |
+| none | `REDACTWALL_GATEWAY_MAX_CONTROL_PLANE_RESPONSE_BYTES` | `524288` | Maximum gate or response-scan JSON bytes. |
+| `--allow-insecure-dev` | `REDACTWALL_GATEWAY_ALLOW_INSECURE_HTTP` | off | Development-only remote HTTP override. It is ignored in production; never use it with real bearer credentials. |
 
 ## Shared Limiter Options
 
@@ -219,6 +252,8 @@ Run with `npm run gateway:rate-limiter -- <options>`.
 | `--redis-url` | `REDACTWALL_RATE_LIMITER_REDIS_URL` | none | Redis or Valkey URL for active-active limiter replicas, such as `rediss://:<password>@redis.internal:6380/0`. |
 | `--redis-prefix` | `REDACTWALL_RATE_LIMITER_REDIS_PREFIX` | `redactwall:gateway:rl:` | Prefix prepended to hashed limiter keys. Unsafe characters are stripped. |
 | `--redis-timeout-ms` | `REDACTWALL_RATE_LIMITER_REDIS_TIMEOUT_MS` | `2000` | Timeout for Redis limiter commands. |
+| `--allow-insecure-redis-loopback` | `REDACTWALL_RATE_LIMITER_ALLOW_INSECURE_REDIS_LOOPBACK` | off | Development-only exception for `redis://` on a numeric loopback address. Rejected in production. |
+| `--body-timeout-ms` | `REDACTWALL_RATE_LIMITER_BODY_TIMEOUT_MS` | `5000` | Absolute deadline for reading an inbound `/check` request body. |
 | `--host` | none | `127.0.0.1` | Bind address. Keep private; terminate TLS in front when exposed beyond localhost. |
 | `--port` | none | `4183` | Listener port. |
 | `--default-limit` | none | `60` | Fallback request limit if a gateway does not provide one. |
@@ -231,14 +266,16 @@ Run with `npm run gateway:rate-limiter -- <options>`.
 - Supports JSON POST/PUT/PATCH traffic for paths ending in `chat/completions`,
   `responses`, or `messages`, plus Gemini-style
   `/models/{model}:generateContent` and `/models/{model}:streamGenerateContent`
-  paths, plus Bedrock Runtime-style `/model/{modelId}/converse`,
-  `/model/{modelId}/converse-stream`, `/model/{modelId}/invoke`, and
-  `/model/{modelId}/invoke-with-response-stream` paths.
+  paths, plus non-streaming Bedrock Runtime-style
+  `/model/{modelId}/converse` and `/model/{modelId}/invoke` paths. Bedrock
+  `converse-stream` and `invoke-with-response-stream` are recognized but return
+  `501` before any policy or upstream network call because AWS EventStream
+  decoding and CRC validation are not implemented.
 - Model allowlist blocks are logged as sanitized `action_blocked` evidence with
   a placeholder prompt like `[LLM model blocked] model-name`; the blocked user
   prompt is not sent to the control plane or upstream provider.
-- Streaming requests are buffered for complete-output scanning. If response
-  scanning is unavailable, the stream is not released to the caller.
+- JSON/SSE streaming requests are buffered for complete-output scanning. If
+  response scanning is unavailable, the stream is not released to the caller.
 - Non-text content blocks are blocked by default because the gateway cannot
   inspect image bytes, file references, or arbitrary tool payloads locally.
 - Does not perform TLS interception. Put TLS in front of the gateway and point
@@ -248,10 +285,11 @@ Run with `npm run gateway:rate-limiter -- <options>`.
   limiter keys only. Use the HTTP limiter mode for multi-worker or multi-host
   horizontal scale; the shipped limiter service centralizes counters and still
   stores only hashed limiter keys.
-- The shipped shared limiter defaults to SQLite for simple pilots. For active-
-  active limiter service replicas, use the built-in Redis/Valkey backend. For
-  global distribution beyond one Redis control plane, run the same HTTP
-  contract behind customer-managed KV, Postgres, or API-gateway rate limiting.
+- The shipped shared limiter defaults to SQLite for simple pilots. Multi-host
+  limiter instances may use the built-in Redis/Valkey backend, but their HTTP
+  contract must be terminated behind customer-managed HTTPS. Redis/Valkey also
+  requires TLS in production; the cleartext loopback exception is only for
+  explicitly enabled local development.
 - Bedrock Converse text blocks are inspected and redacted. Bedrock image,
   document, video, tool-use, and tool-result blocks are blocked by default
   unless another local collector inspects those bytes first.
@@ -266,8 +304,9 @@ npm run gateway:ha:smoke
 
 The focused test covers auth, memory and shared SQLite rate limiting,
 fail-closed RedactWall outages, prompt redaction before upstream, response
-scanning and redaction, approval release polling, blocked paths,
-provider-native Gemini/Anthropic/Bedrock shapes, buffered streaming, AWS SigV4
-header signing, and non-text fail-closed behavior. The HA smoke starts the
-shipped limiter and two local gateway replicas, then verifies the second replica
-sees the first replica's shared limiter counter.
+scanning and redaction, approval release polling, bounded request bodies, blocked paths,
+provider-native Gemini/Anthropic/Bedrock shapes, buffered JSON/SSE streaming,
+explicit Bedrock EventStream rejection, AWS SigV4 header signing, and non-text
+fail-closed behavior. The redundancy smoke starts
+two local gateway replicas on one SQLite limiter file, removes the first, then
+verifies both the survivor and a restarted replica see its counter.

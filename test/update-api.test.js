@@ -28,6 +28,8 @@ fs.writeFileSync(process.env.REDACTWALL_UPDATE_CONFIG_PATH, JSON.stringify({
 }));
 
 const app = require('../server/app');
+const db = require('../server/db');
+const updater = require('../server/updater');
 const { listen } = require('./support/listen');
 
 test.after(() => {
@@ -93,4 +95,106 @@ test('admin update config endpoint saves settings and records audit metadata', a
   assert.ok(audit.entries.some((entry) => entry.action === 'APP_UPDATE_CONFIGURED'
     && /remote=origin/.test(entry.detail)
     && /install=skip/.test(entry.detail)));
+});
+
+test('update config audit failure leaves the exact prior file and no temporary artifact', async (t) => {
+  const baseline = Buffer.from(JSON.stringify({
+    remoteName: 'origin',
+    branch: currentBranch,
+    installMode: 'npm-ci-omit-dev',
+    restartCommand: '',
+    restartAfterUpdate: false,
+  }, null, 2));
+  fs.writeFileSync(process.env.REDACTWALL_UPDATE_CONFIG_PATH, baseline);
+  const server = await listen(app);
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const { cookie, csrfToken } = await login(base);
+  const originalAppendAudit = db.appendAudit;
+  db.appendAudit = () => { throw new Error('synthetic update audit outage'); };
+  try {
+    const response = await fetch(`${base}/api/update/config`, {
+      method: 'PUT',
+      headers: {
+        cookie,
+        'content-type': 'application/json',
+        'x-csrf-token': csrfToken,
+      },
+      body: JSON.stringify({
+        remoteName: 'origin',
+        branch: currentBranch,
+        installMode: 'skip',
+        restartCommand: '',
+        restartAfterUpdate: false,
+      }),
+    });
+    assert.strictEqual(response.status, 500);
+    assert.deepStrictEqual(fs.readFileSync(process.env.REDACTWALL_UPDATE_CONFIG_PATH), baseline);
+    assert.deepStrictEqual(
+      fs.readdirSync(tempRoot).filter((name) => name.startsWith('update-settings.json.')),
+      [],
+    );
+  } finally {
+    db.appendAudit = originalAppendAudit;
+  }
+});
+
+test('apply and restart audit failures preserve truthful ordering around irreversible effects', async (t) => {
+  const server = await listen(app);
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const { cookie, csrfToken } = await login(base);
+  const originalAppendAudit = db.appendAudit;
+  const originalApplyUpdate = updater.applyUpdate;
+  const originalScheduleRestart = updater.scheduleRestart;
+  let applyCalls = 0;
+  let restartCalls = 0;
+  try {
+    updater.applyUpdate = async () => {
+      applyCalls += 1;
+      return { ok: true, updated: true, restartScheduled: false, check: {} };
+    };
+    db.appendAudit = (event) => {
+      if (event.action === 'APP_UPDATE_APPLIED') throw new Error('synthetic terminal audit outage');
+      return originalAppendAudit(event);
+    };
+    const apply = await fetch(`${base}/api/update/apply`, {
+      method: 'POST',
+      headers: { cookie, 'content-type': 'application/json', 'x-csrf-token': csrfToken },
+      body: JSON.stringify({ confirmBackup: true }),
+    });
+    assert.strictEqual(apply.status, 500);
+    assert.deepStrictEqual(await apply.json(), {
+      error: 'update completed but audit confirmation failed; inspect update status before retry',
+    });
+    assert.strictEqual(applyCalls, 1);
+    const updateActions = db.listAudit(100).map((entry) => entry.action);
+    assert.ok(updateActions.includes('APP_UPDATE_STARTED'));
+    assert.ok(updateActions.includes('APP_UPDATE_AUDIT_FAILED'));
+    assert.ok(!updateActions.includes('APP_UPDATE_FAILED'), 'a completed update is never mislabeled as an update failure');
+
+    updater.scheduleRestart = () => {
+      restartCalls += 1;
+      return { ok: true, scheduled: true };
+    };
+    db.appendAudit = (event) => {
+      if (event.action === 'APP_UPDATE_RESTART_SCHEDULED') throw new Error('synthetic restart audit outage');
+      return originalAppendAudit(event);
+    };
+    const restart = await fetch(`${base}/api/update/restart`, {
+      method: 'POST',
+      headers: { cookie, 'content-type': 'application/json', 'x-csrf-token': csrfToken },
+      body: '{}',
+    });
+    assert.strictEqual(restart.status, 500);
+    assert.deepStrictEqual(await restart.json(), {
+      error: 'restart could not be audited and was not scheduled',
+    });
+    assert.strictEqual(restartCalls, 0, 'restart side effect stays behind the durable audit boundary');
+    assert.ok(db.listAudit(100).some((entry) => entry.action === 'APP_UPDATE_RESTART_FAILED'));
+  } finally {
+    db.appendAudit = originalAppendAudit;
+    updater.applyUpdate = originalApplyUpdate;
+    updater.scheduleRestart = originalScheduleRestart;
+  }
 });

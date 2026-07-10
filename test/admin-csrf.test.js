@@ -13,7 +13,7 @@ const loginJs = fs.readFileSync(path.join(root, 'server', 'public', 'login.js'),
 test('admin write routes include csrf middleware', () => {
   assert.match(server, /const sessionWrite = \[auth\.requireAuth,\s*auth\.requireCsrf\]/);
   assert.match(server, /const adminRead = \[auth\.requireAuth,\s*auth\.requireRole\(roles\.SECURITY_ADMIN\)\]/);
-  assert.match(server, /const adminWrite = \[auth\.requireAuth,\s*auth\.requireCsrf,\s*auth\.requireRole\(roles\.SECURITY_ADMIN\),\s*license\.requireWritable\]/);
+  assert.match(server, /const adminWrite = \[auth\.requireAuth,\s*auth\.requireCsrf,\s*auth\.requireRole\(roles\.SECURITY_ADMIN\),\s*requireWritableSharedLicense\]/);
   assert.match(server, /const decisionWrite = \[auth\.requireAuth,\s*auth\.requireCsrf,\s*auth\.requireRole\(roles\.SECURITY_ADMIN,\s*roles\.APPROVER\)\]/);
   assert.match(server, /app\.post\(\s*'\/api\/queries\/:id\/reveal',\s*\.\.\.adminWrite,\s*validation\.validateBody\(validation\.revealSchema\),\s*requireRevealPassword,/);
   assert.match(server, /app\.post\(\s*'\/api\/queries\/:id\/approve',\s*\.\.\.decisionWrite,\s*validation\.validateBody\(validation\.approveSchema\),\s*requireDecisionAccess,\s*requireApprovePassword,/);

@@ -3,11 +3,17 @@
   "GATEWAY_PORT": "4100",
   "GATEWAY_CONTROL_PLANE_URL": "http://127.0.0.1:4000",
   "INGEST_API_KEY": "<same ingest key the control plane uses for /api/v1/*>",
-  "GATEWAY_PROVIDER": "openai | anthropic | azure-openai | internal-http | mock",
+  "GATEWAY_PROVIDER": "openai | anthropic | internal-http | mock",
+  "_mock_comment": "The mock provider is for local and CI verification only and is rejected when NODE_ENV=production.",
+  "_upstream_comment": "GATEWAY_UPSTREAM_URL is required for internal-http, which never falls back to api.openai.com. Azure OpenAI is not advertised because its deployment path, api-version query, and api-key contract are not implemented by this adapter.",
   "GATEWAY_UPSTREAM_URL": "https://api.openai.com",
+  "_upstream_key_comment": "GATEWAY_UPSTREAM_API_KEY is required for openai and anthropic; internal-http is the explicit no-auth provider.",
   "GATEWAY_UPSTREAM_API_KEY": "<upstream provider key>",
   "GATEWAY_REQUIRE_AGENT_TOKEN": "true",
   "GATEWAY_RATE_LIMIT_PER_MIN": "120",
   "GATEWAY_MAX_BODY_BYTES": "2097152",
+  "GATEWAY_REQUEST_BODY_TIMEOUT_MS": "15000",
+  "GATEWAY_MAX_UPSTREAM_RESPONSE_BYTES": "4194304",
+  "GATEWAY_MAX_CONTROL_PLANE_RESPONSE_BYTES": "524288",
   "GATEWAY_TIMEOUT_MS": "60000"
 }

@@ -10,6 +10,9 @@ const fs = require('fs');
 const path = require('path');
 const writer = require('../write-handoff');
 const nativeHandoff = require('../native-handoff');
+const { secureServerUrl } = require('../../shared/server-url');
+const { cancelResponseBody, readBoundedJson } = require('../../shared/bounded-response');
+const signedPolicy = require('../../shared/signed-policy');
 
 const DEFAULT_DESTINATION = 'Desktop AI';
 const DEFAULT_TIMEOUT_MS = 30000;
@@ -28,7 +31,7 @@ function usage() {
     '  --destination-url <url>       Optional destination URL',
     '  --user <id>                   Optional managed user identity',
     '  --env <path>                  Endpoint agent env file to load',
-    '  --wait                        Wait until the endpoint agent consumes each handoff event',
+    '  --wait                        Wait for each endpoint inspection to reach a durable terminal result',
     '  --timeout-ms <ms>             Wait timeout, default 30000',
     '  --poll-ms <ms>                Wait poll interval, default 250',
     '  --json                        Print JSON result',
@@ -91,7 +94,11 @@ function cleanDestination(value) {
 }
 
 function configuredServer(opts = {}) {
-  return cleanDestination(opts.server || process.env.REDACTWALL_URL || process.env.PROMPTWALL_URL || process.env.SENTINEL_URL);
+  const raw = cleanDestination(opts.server || process.env.REDACTWALL_URL || process.env.PROMPTWALL_URL || process.env.SENTINEL_URL);
+  const production = String(opts.nodeEnv ?? process.env.NODE_ENV ?? '').trim().toLowerCase() === 'production';
+  const allowInsecure = !production && (opts.allowInsecureServer === true
+    || ['1', 'true', 'yes', 'on'].includes(String(process.env.REDACTWALL_ALLOW_INSECURE_SERVER || '').toLowerCase()));
+  return secureServerUrl(raw, allowInsecure) || '';
 }
 
 function configuredKey(opts = {}) {
@@ -103,11 +110,12 @@ function policyRequestTimeoutMs(opts = {}) {
 }
 
 async function fetchWithTimeout(fetchImpl, url, options, opts = {}) {
-  if (!globalThis.AbortController) return fetchImpl(url, options);
+  const requestOptions = { ...(options || {}), redirect: 'error' };
+  if (!globalThis.AbortController) return fetchImpl(url, requestOptions);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), policyRequestTimeoutMs(opts));
   try {
-    return await fetchImpl(url, { ...(options || {}), signal: controller.signal });
+    return await fetchImpl(url, { ...requestOptions, signal: controller.signal });
   } finally {
     clearTimeout(timer);
   }
@@ -117,16 +125,31 @@ async function fetchPolicyDestination(opts = {}) {
   const fetchImpl = opts.fetchImpl || globalThis.fetch;
   const server = configuredServer(opts);
   const key = configuredKey(opts);
-  if (!fetchImpl || !server || !key) return '';
+  const trustOptions = { ...opts, sensorId: 'endpoint-agent' };
+  const cachedDestination = () => {
+    const cached = signedPolicy.readCachedSignedPolicy(trustOptions);
+    return cached.ok ? cleanDestination(cached.policy && cached.policy.desktopCollectorDestination) : '';
+  };
+  if (!fetchImpl || !server || !key) return cachedDestination();
   try {
-    const res = await fetchWithTimeout(fetchImpl, server.replace(/\/+$/, '') + '/api/v1/policy', {
+    const res = await fetchWithTimeout(fetchImpl, server.replace(/\/+$/, '') + '/api/v1/policy/bundle', {
       headers: { 'x-api-key': key },
     }, opts);
-    if (!res || !res.ok) return '';
-    const body = await res.json();
-    return cleanDestination(body && body.desktopCollectorDestination);
+    if (!res || !res.ok) {
+      if (res) await cancelResponseBody(res);
+      return cachedDestination();
+    }
+    const body = (await readBoundedJson(res, {
+      maxBytes: 512 * 1024,
+      timeoutMs: policyRequestTimeoutMs(opts),
+      label: 'protected upload policy response',
+    })).json;
+    const accepted = signedPolicy.acceptSignedPolicyBundle(body, trustOptions);
+    return accepted.ok
+      ? cleanDestination(accepted.policy && accepted.policy.desktopCollectorDestination)
+      : cachedDestination();
   } catch {
-    return '';
+    return cachedDestination();
   }
 }
 
@@ -173,7 +196,15 @@ async function waitForHandoffConsumption(handoffPath, opts = {}) {
   const pollMs = boundedNumber(opts.pollMs, DEFAULT_POLL_MS, 50, 5000);
   const deadline = Date.now() + timeoutMs;
   while (Date.now() <= deadline) {
-    if (!fs.existsSync(handoffPath)) return { consumed: true };
+    if (opts.event) {
+      const claim = nativeHandoff.readHandoffClaim(opts.event, handoffPath, opts);
+      if (claim && claim.state === 'terminal') {
+        return { consumed: true, decision: claim.decision, status: claim.status, recorded: claim.recorded === true };
+      }
+    }
+    if (!fs.existsSync(handoffPath)) {
+      return { consumed: false, reason: 'handoff_missing_without_terminal_result' };
+    }
     await sleep(pollMs);
   }
   return { consumed: false, reason: 'handoff_not_consumed_before_timeout' };
@@ -200,6 +231,8 @@ function publicResult(record) {
     id: record.id,
     destination: record.destination,
     consumed: !!record.consumed,
+    ...(record.decision ? { decision: record.decision } : {}),
+    ...(record.terminalStatus ? { terminalStatus: record.terminalStatus } : {}),
     ...(record.reason ? { reason: record.reason } : {}),
   };
 }
@@ -225,10 +258,26 @@ async function collectProtectedUploads(opts = {}) {
       const written = writer.writeHandoffFile(handoffOptions(file, { ...opts, destination }));
       let consumed = false;
       let reason;
+      let terminalDecision;
+      let terminalStatus;
       if (opts.wait) {
-        const wait = await waitForHandoffConsumption(written.path, opts);
+        const wait = await waitForHandoffConsumption(written.path, { ...opts, event: written.event });
         consumed = wait.consumed;
         reason = wait.reason;
+        terminalDecision = wait.decision;
+        terminalStatus = wait.status;
+        if (wait.consumed && wait.decision === 'block') {
+          results.push({
+            status: 'failed',
+            error: 'upload was blocked by endpoint inspection',
+            id: written.event.id,
+            destination: nativeHandoff.publicDestination(written.event.destination),
+            consumed: true,
+            decision: wait.decision,
+            terminalStatus: wait.status,
+          });
+          continue;
+        }
       }
       results.push(publicResult({
         status: reason ? 'queued' : 'written',
@@ -236,6 +285,8 @@ async function collectProtectedUploads(opts = {}) {
         destination: nativeHandoff.publicDestination(written.event.destination),
         consumed,
         reason,
+        decision: terminalDecision,
+        terminalStatus,
       }));
     } catch (err) {
       results.push({ status: 'failed', error: publicError(err) });
@@ -257,7 +308,7 @@ function printHuman(result, io = console) {
   io.log(parts.join(', '));
   for (const item of result.results) {
     if (item.status === 'failed') io.log(`  - failed: ${item.error}`);
-    else io.log(`  - ${item.status}: ${item.id} -> ${item.destination}${item.consumed ? ' (consumed)' : ''}`);
+    else io.log(`  - ${item.status}: ${item.id} -> ${item.destination}${item.consumed ? ' (inspection complete)' : ''}`);
   }
 }
 

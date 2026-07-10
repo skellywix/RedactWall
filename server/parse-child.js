@@ -5,6 +5,7 @@
  * without taking down auth, approvals, or live streams. Spawned only by
  * server/parse-pool.js over an IPC channel with advanced serialization.
  */
+process.env.REDACTWALL_PARSE_CHILD = '1';
 const processors = require('./processors');
 
 const FAILED = { text: '', processor: null, supported: true, extractionOk: false, error: 'extract_failed' };

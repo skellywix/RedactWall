@@ -155,14 +155,18 @@ function fail(error, extra = {}) {
   };
 }
 
-// Strict mode routes sparse/blank OCR back to the approval queue instead of
-// letting a low-quality image slip through on near-empty extraction.
+// Sparse or blank OCR is not evidence that an image is clean. Strict handling
+// is the default and cannot be disabled in production; a non-production
+// workstation may opt into lenient behavior only for synthetic OCR testing.
 const STRICT_MIN_CHARS = 8;
 
 function ocrStrictMode(opts = {}) {
   const env = opts.env || process.env;
   const raw = env.ENDPOINT_AGENT_OCR_STRICT || env.REDACTWALL_ENDPOINT_AGENT_OCR_STRICT || env.PROMPTWALL_ENDPOINT_AGENT_OCR_STRICT || '';
-  return /^(1|on|true|yes|strict)$/i.test(String(raw).trim());
+  const runtime = String(env.NODE_ENV || '').trim().toLowerCase();
+  const explicitDevelopment = runtime === 'development' || runtime === 'test';
+  const lenientRequested = /^(0|off|false|no|lenient)$/i.test(String(raw).trim());
+  return !(explicitDevelopment && lenientRequested);
 }
 
 function ocrMaxChars(opts = {}) {
@@ -175,16 +179,25 @@ function ocrMaxChars(opts = {}) {
 
 function finalizeOcr(raw, maxChars, strict, extra = {}) {
   const text = String(raw || '');
+  if (text.length > maxChars) {
+    return fail('ocr_output_truncated', {
+      processor: 'ocr_required',
+      ocrRequired: true,
+      ocrApplied: true,
+      truncated: true,
+      ...extra,
+    });
+  }
   if (strict && text.trim().length < STRICT_MIN_CHARS) {
     return fail('ocr_required', { processor: 'ocr_required', ocrRequired: true, ocrStrict: true, ...extra });
   }
   return {
-    text: text.slice(0, maxChars),
+    text,
     processor: 'endpoint_ocr',
     supported: true,
     extractionOk: true,
     ocrApplied: true,
-    truncated: text.length > maxChars,
+    truncated: false,
     ...extra,
   };
 }

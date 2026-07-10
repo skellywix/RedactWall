@@ -5,15 +5,40 @@ const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
+const crypto = require('node:crypto');
 
 const root = path.join(__dirname, '..');
 const extensionDir = path.join(root, 'sensors', 'browser-extension');
 const content = fs.readFileSync(path.join(extensionDir, 'content.js'), 'utf8');
 const contentCss = fs.readFileSync(path.join(extensionDir, 'content.css'), 'utf8');
 const popupHtml = fs.readFileSync(path.join(extensionDir, 'popup.html'), 'utf8');
+const popup = fs.readFileSync(path.join(extensionDir, 'popup.js'), 'utf8');
 const background = fs.readFileSync(path.join(extensionDir, 'background.js'), 'utf8');
+const policyVerifier = fs.readFileSync(path.join(extensionDir, 'lib', 'policy-bundle.js'), 'utf8');
+const destinationCoverageSource = fs.readFileSync(path.join(extensionDir, 'lib', 'destination-coverage.js'), 'utf8');
+const rehydrateHtml = fs.readFileSync(path.join(extensionDir, 'rehydrate.html'), 'utf8');
+const rehydrateScript = fs.readFileSync(path.join(extensionDir, 'rehydrate.js'), 'utf8');
 const manifest = JSON.parse(fs.readFileSync(path.join(extensionDir, 'manifest.json'), 'utf8'));
 const adapters = require('../detection-engine/adapters');
+const { DEFAULT_POLICY } = require('../server/policy');
+const { MANDATORY_ALWAYS_BLOCK } = require('../sensors/shared/decision');
+const POLICY_KEYS = crypto.generateKeyPairSync('ed25519');
+const POLICY_PUBLIC_KEY = POLICY_KEYS.publicKey.export({ type: 'spki', format: 'pem' }).toString();
+
+function signedPolicyBundle(policy, options = {}) {
+  const issuedAt = options.issuedAt || new Date().toISOString();
+  const expiresAt = options.expiresAt || new Date(Date.parse(issuedAt) + 15 * 60 * 1000).toISOString();
+  const policyHash = crypto.createHash('sha256').update(JSON.stringify(policy)).digest('hex');
+  const input = JSON.stringify({ version: 1, issuedAt, expiresAt, policyHash });
+  return { version: 1, issuedAt, expiresAt, policy, signature: crypto.sign(null, Buffer.from(input), POLICY_KEYS.privateKey).toString('base64') };
+}
+
+function jsonResponse(status, body, headers = {}) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json', ...headers },
+  });
+}
 
 function loadBackground(opts = {}) {
   let onMessage;
@@ -21,9 +46,19 @@ function loadBackground(opts = {}) {
   let onStartup;
   let onAlarm;
   let onDownloadCreated;
+  let onTabRemoved;
   const storage = { ...(opts.local || {}) };
+  const managedStorage = { ...(opts.managed || {}) };
+  if (storage.policy && !storage.policyBundle) {
+    storage.policyBundle = signedPolicyBundle(storage.policy);
+    managedStorage.policyPublicKey = managedStorage.policyPublicKey || POLICY_PUBLIC_KEY;
+  }
   const createdAlarms = [];
   const canceledDownloads = [];
+  const registeredScripts = (opts.registeredScripts || []).map((item) => ({ ...item }));
+  let dynamicRules = (opts.dynamicRules || []).map((item) => ({ ...item }));
+  const updatedTabs = [];
+  const createdTabs = [];
   const chrome = {
     storage: {
       local: {
@@ -34,16 +69,56 @@ function loadBackground(opts = {}) {
             return out;
           }, {});
         },
-        set: async (value) => Object.assign(storage, value),
+        set: async (value) => {
+          if (typeof opts.storageSet === 'function') {
+            await opts.storageSet(value, {
+              storage,
+              registeredScripts,
+              dynamicRules: () => dynamicRules.map((item) => ({ ...item })),
+            });
+          }
+          Object.assign(storage, value);
+        },
       },
-      managed: { get: async () => ({ ...(opts.managed || {}) }) },
+      managed: { get: async () => ({ ...managedStorage }) },
     },
     runtime: {
+      id: 'unit',
       onInstalled: { addListener(fn) { onInstalled = fn; } },
       onStartup: { addListener(fn) { onStartup = fn; } },
       onMessage: { addListener(fn) { onMessage = fn; } },
       getManifest: () => manifest,
+      getURL: (value) => `chrome-extension://unit/${value}`,
       lastError: null,
+    },
+    permissions: {
+      contains: async (request) => (typeof opts.permissionsContains === 'function'
+        ? opts.permissionsContains(request)
+        : opts.permissionsContains !== false),
+      onAdded: { addListener() {} },
+      onRemoved: { addListener() {} },
+    },
+    scripting: {
+      getRegisteredContentScripts: async () => registeredScripts.map((item) => ({ ...item })),
+      registerContentScripts: async (items) => { registeredScripts.push(...items.map((item) => ({ ...item }))); },
+      updateContentScripts: async (items) => {
+        for (const item of items) {
+          const index = registeredScripts.findIndex((current) => current.id === item.id);
+          if (index >= 0) registeredScripts[index] = { ...item };
+        }
+      },
+      unregisterContentScripts: async ({ ids }) => {
+        for (let i = registeredScripts.length - 1; i >= 0; i -= 1) {
+          if (ids.includes(registeredScripts[i].id)) registeredScripts.splice(i, 1);
+        }
+      },
+    },
+    declarativeNetRequest: {
+      getDynamicRules: async () => dynamicRules.map((item) => ({ ...item })),
+      updateDynamicRules: async ({ removeRuleIds = [], addRules = [] }) => {
+        dynamicRules = dynamicRules.filter((item) => !removeRuleIds.includes(item.id));
+        dynamicRules.push(...addRules.map((item) => ({ ...item })));
+      },
     },
     alarms: { create(name, spec) { createdAlarms.push({ name, spec }); }, onAlarm: { addListener(fn) { onAlarm = fn; } } },
     downloads: {
@@ -53,41 +128,231 @@ function loadBackground(opts = {}) {
         if (cb) cb();
       },
     },
-    tabs: { onUpdated: { addListener() {} } },
+    tabs: {
+      onUpdated: { addListener() {} },
+      onRemoved: { addListener(fn) { onTabRemoved = fn; } },
+      query: async () => opts.tabs || [],
+      update: async (id, value) => { updatedTabs.push({ id, value }); },
+      create: async (value) => {
+        const fallback = { id: 100 + createdTabs.length, ...value };
+        const tab = typeof opts.tabsCreate === 'function' ? await opts.tabsCreate(value, fallback) : fallback;
+        createdTabs.push(tab);
+        return tab;
+      },
+      remove: async () => {},
+    },
   };
+  chrome.storage.onChanged = { addListener() {} };
   const context = {
     AbortController,
+    TextEncoder,
+    TextDecoder,
     URL,
     chrome,
     clearTimeout,
     console,
-    fetch: opts.fetch || (async () => ({ ok: true, json: async () => ({}) })),
+    crypto: crypto.webcrypto,
+    atob: (value) => Buffer.from(value, 'base64').toString('binary'),
+    fetch: opts.fetch || (async () => jsonResponse(200, {})),
     self: { PSAdapters: opts.adapters || adapters },
     setTimeout,
   };
-  vm.runInNewContext(background + '\nself.__test = { requestTimeoutMs, fetchJsonWithTimeout, failClosed, browserPlatform, buildHeartbeatBody, buildInstallChecks, reportInstallHealth, refreshPolicy, normalizeDestinationHost, downloadHostCandidates, downloadDestinationForPolicy, browserActionBlockRule, handleDownloadCreated };', context);
+  vm.runInNewContext(policyVerifier, context);
+  vm.runInNewContext(destinationCoverageSource, context);
+  vm.runInNewContext(background + '\nself.__test = { requestTimeoutMs, readBoundedJsonResponse, fetchJsonWithTimeout, failClosed, serverPermissionPattern, hasServerPermission, browserPlatform, buildHeartbeatBody, buildInstallChecks, reportInstallHealth, refreshPolicy, syncDestinationCoverage, syncCurrentDestinationCoverage, normalizeDestinationHost, downloadHostCandidates, downloadDestinationForPolicy, browserActionBlockRule, handleDownloadCreated, cleanupExpiredRehydrations };', context);
   return {
     context,
     createdAlarms,
     canceledDownloads,
+    createdTabs,
+    dynamicRules: () => dynamicRules.map((item) => ({ ...item })),
+    registeredScripts,
+    updatedTabs,
     runAlarm: (name) => onAlarm && onAlarm({ name }),
     runDownloadCreated: (item) => onDownloadCreated && onDownloadCreated(item),
+    runTabRemoved: (tabId) => onTabRemoved && onTabRemoved(tabId),
     runInstalled: () => onInstalled && onInstalled(),
     runStartup: () => onStartup && onStartup(),
     storage,
-    sendMessage: (msg) => new Promise((resolve) => onMessage(msg, {}, resolve)),
+    sendMessage: (msg, sender = {}) => new Promise((resolve) => onMessage(msg, sender, resolve)),
   };
 }
 
 test('redacted browser sends report tokenized text, not original prompt', () => {
   // The redact path reports the tokenized text through the recorded-confirmation
   // helper (fail closed: resend only after the control plane records the send).
-  assert.match(content, /proceedRedactedAfterRecorded\(t\.text,\s*verdict\.analysis,\s*el\)/);
+  assert.match(content, /beginRedactedSend\(t,\s*verdict\.analysis,\s*el,\s*reservation\)/);
+  assert.match(content, /type:\s*'rehydrationStore'/);
   assert.match(content, /report\(tokenText,\s*analysis,\s*'submit',\s*'redacted_sent',\s*'',\s*\{ clientPreRedacted: true \}\)/);
   assert.doesNotMatch(content, /report\(text,\s*verdict\.analysis,\s*'submit',\s*'redacted_sent'/);
   assert.match(content, /clientPreRedacted:\s*true/);
   assert.match(background, /clientFindings:\s*msg\.payload\.clientFindings/);
   assert.match(background, /clientCategories:\s*msg\.payload\.clientCategories \|\| msg\.payload\.categories/);
+});
+
+test('raw browser mappings are revealed once only to the exact extension tab', async () => {
+  const h = loadBackground();
+  const contentSender = {
+    id: 'unit',
+    frameId: 0,
+    url: 'https://chat.openai.com/c/example',
+    tab: { id: 7, url: 'https://chat.openai.com/c/example' },
+  };
+  const stored = await h.sendMessage({
+    type: 'rehydrationStore',
+    site: 'chat.openai.com',
+    entries: [{ token: '[[US_SSN_1]]', value: '412-22-7843' }],
+  }, contentSender);
+  assert.strictEqual(stored.ok, true);
+  assert.match(stored.channel, /^[a-f0-9]{32}$/);
+
+  const otherProviderTab = await h.sendMessage({
+    type: 'rehydrationOpen', channel: stored.channel, site: 'chat.openai.com',
+  }, { ...contentSender, tab: { id: 8, url: contentSender.url } });
+  assert.strictEqual(otherProviderTab.ok, false, 'another provider tab cannot claim the channel');
+
+  const opened = await h.sendMessage({
+    type: 'rehydrationOpen', channel: stored.channel, site: 'chat.openai.com',
+  }, contentSender);
+  assert.strictEqual(opened.ok, true);
+  assert.strictEqual(h.createdTabs.length, 1);
+  assert.match(h.createdTabs[0].url, /^chrome-extension:\/\/unit\/rehydrate\.html#channel=[a-f0-9]{32}$/);
+
+  const wrongTab = await h.sendMessage({ type: 'rehydrationReveal', channel: stored.channel }, {
+    id: 'unit', url: 'chrome-extension://unit/rehydrate.html', tab: { id: 999 },
+  });
+  assert.strictEqual(wrongTab.ok, false, 'another extension tab cannot consume the channel');
+  const wrongHash = await h.sendMessage({ type: 'rehydrationReveal', channel: stored.channel }, {
+    id: 'unit', url: 'chrome-extension://unit/rehydrate.html#channel=' + '0'.repeat(32), tab: { id: h.createdTabs[0].id },
+  });
+  assert.strictEqual(wrongHash.ok, false, 'the page URL channel must match the runtime channel');
+
+  const revealed = await h.sendMessage({ type: 'rehydrationReveal', channel: stored.channel }, {
+    id: 'unit', url: 'chrome-extension://unit/rehydrate.html', tab: { id: h.createdTabs[0].id },
+  });
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(revealed)), {
+    ok: true,
+    entries: [{ token: '[[US_SSN_1]]', value: '412-22-7843' }],
+  });
+
+  const replay = await h.sendMessage({ type: 'rehydrationReveal', channel: stored.channel }, {
+    id: 'unit', url: 'chrome-extension://unit/rehydrate.html', tab: { id: h.createdTabs[0].id },
+  });
+  assert.strictEqual(replay.ok, false, 'revealing consumes and clears the in-memory mapping');
+});
+
+test('rehydration broker rejects spoofed origins, frames, sites, and malformed mappings', async () => {
+  const h = loadBackground();
+  const message = {
+    type: 'rehydrationStore',
+    site: 'chat.openai.com',
+    entries: [{ token: '[[US_SSN_1]]', value: '412-22-7843' }],
+  };
+  const valid = { id: 'unit', frameId: 0, url: 'https://chat.openai.com/c/example', tab: { id: 7 } };
+  const attempts = [
+    [{ ...valid, id: 'another-extension' }, message],
+    [{ ...valid, frameId: 2 }, message],
+    [{ ...valid, url: 'https://evil.example/c/example' }, message],
+    [valid, { ...message, entries: [{ token: '__proto__', value: '412-22-7843' }] }],
+    [valid, { ...message, entries: [{ token: '[[US_SSN_1]]', value: '' }] }],
+    [valid, { ...message, entries: [1, 2, 3].map((index) => ({ token: `[[SECRET_KEY_${index}]]`, value: '界'.repeat(8192) })) }],
+  ];
+  for (const [sender, payload] of attempts) {
+    const response = await h.sendMessage(payload, sender);
+    assert.strictEqual(response.ok, false);
+  }
+  assert.strictEqual(h.createdTabs.length, 0);
+  const unauthorizedDiscard = await h.sendMessage({
+    type: 'rehydrationDiscard', channel: '0'.repeat(32), site: 'chat.openai.com',
+  }, { ...valid, id: 'another-extension' });
+  assert.strictEqual(unauthorizedDiscard.ok, false);
+});
+
+test('one rehydration channel cannot concurrently open multiple reveal tabs', async () => {
+  let finishOpen;
+  const h = loadBackground({
+    tabsCreate: (_value, fallback) => new Promise((resolve) => { finishOpen = () => resolve(fallback); }),
+  });
+  const sender = { id: 'unit', frameId: 0, url: 'https://chat.openai.com/', tab: { id: 7 } };
+  const stored = await h.sendMessage({
+    type: 'rehydrationStore', site: 'chat.openai.com',
+    entries: [{ token: '[[US_SSN_1]]', value: '412-22-7843' }],
+  }, sender);
+  const first = h.sendMessage({ type: 'rehydrationOpen', channel: stored.channel, site: 'chat.openai.com' }, sender);
+  const duplicate = await h.sendMessage({ type: 'rehydrationOpen', channel: stored.channel, site: 'chat.openai.com' }, sender);
+  assert.strictEqual(duplicate.ok, false);
+  assert.strictEqual(duplicate.reason, 'already_open');
+  finishOpen();
+  assert.strictEqual((await first).ok, true);
+  assert.strictEqual(h.createdTabs.length, 1);
+});
+
+test('closing the isolated reveal tab destroys its unrevealed mapping', async () => {
+  const h = loadBackground();
+  const sender = { id: 'unit', frameId: 0, url: 'https://chat.openai.com/', tab: { id: 7 } };
+  const stored = await h.sendMessage({
+    type: 'rehydrationStore', site: 'chat.openai.com',
+    entries: [{ token: '[[US_SSN_1]]', value: '412-22-7843' }],
+  }, sender);
+  await h.sendMessage({ type: 'rehydrationOpen', channel: stored.channel, site: 'chat.openai.com' }, sender);
+  h.runTabRemoved(h.createdTabs[0].id);
+  const response = await h.sendMessage({ type: 'rehydrationReveal', channel: stored.channel }, {
+    id: 'unit', url: 'chrome-extension://unit/rehydrate.html', tab: { id: h.createdTabs[0].id },
+  });
+  assert.strictEqual(response.ok, false);
+});
+
+test('expired rehydration mappings are destroyed before they can open', async () => {
+  const h = loadBackground();
+  const sender = { id: 'unit', frameId: 0, url: 'https://chat.openai.com/', tab: { id: 7 } };
+  const stored = await h.sendMessage({
+    type: 'rehydrationStore', site: 'chat.openai.com',
+    entries: [{ token: '[[US_SSN_1]]', value: '412-22-7843' }],
+  }, sender);
+  h.context.self.__test.cleanupExpiredRehydrations(Number.MAX_SAFE_INTEGER);
+  const response = await h.sendMessage({
+    type: 'rehydrationOpen', channel: stored.channel, site: 'chat.openai.com',
+  }, sender);
+  assert.strictEqual(response.ok, false);
+  assert.strictEqual(h.createdTabs.length, 0);
+});
+
+test('rehydration broker bounds memory and keeps only the newest mapping per source tab', async () => {
+  const h = loadBackground();
+  const message = {
+    type: 'rehydrationStore',
+    site: 'chat.openai.com',
+    entries: [{ token: '[[US_SSN_1]]', value: '412-22-7843' }],
+  };
+  const sender = { id: 'unit', frameId: 0, url: 'https://chat.openai.com/', tab: { id: 7 } };
+  const first = await h.sendMessage(message, sender);
+  const replacement = await h.sendMessage(message, sender);
+  assert.strictEqual(first.ok, true);
+  assert.strictEqual(replacement.ok, true);
+  assert.strictEqual((await h.sendMessage({
+    type: 'rehydrationOpen', channel: first.channel, site: 'chat.openai.com',
+  }, sender)).ok, false, 'a newer mapping destroys stale raw values from the same source tab');
+
+  for (let id = 100; id < 199; id += 1) {
+    const stored = await h.sendMessage(message, { ...sender, tab: { id } });
+    assert.strictEqual(stored.ok, true);
+  }
+  const overflow = await h.sendMessage(message, { ...sender, tab: { id: 999 } });
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(overflow)), { ok: false, reason: 'capacity' });
+});
+
+test('the reveal UI has no provider-page bridge and requires explicit reveal and copy actions', () => {
+  assert.match(rehydrateHtml, /<script src="lib\/browser-api\.js"><\/script>/);
+  assert.match(rehydrateHtml, /id="reveal"/);
+  assert.match(rehydrateHtml, /id="copy"[^>]*disabled/);
+  assert.match(rehydrateScript, /history\.replaceState\(null, '', location\.pathname\)/);
+  assert.match(rehydrateScript, /if \(!event\.isTrusted/);
+  assert.match(rehydrateScript, /rehydrationReveal/);
+  assert.match(rehydrateScript, /navigator\.clipboard\.writeText/);
+  assert.match(rehydrateScript, /document\.hidden/);
+  assert.doesNotMatch(rehydrateScript, /postMessage|innerHTML|localStorage|sessionStorage/);
+  assert.ok(!manifest.web_accessible_resources, 'the provider cannot embed or request the reveal page');
+  assert.ok(manifest.permissions.includes('clipboardWrite'), 'explicit Copy works in managed Chromium and Firefox installs');
 });
 
 test('redact path resends only after the control plane records the redacted send (fail closed)', () => {
@@ -99,11 +364,10 @@ test('redact path resends only after the control plane records the redacted send
 
 test('redact mode blocks category-only hits that cannot be tokenized', () => {
   assert.match(content, /action:\s*\(a\.findings\.length && !a\.categories\.length\) \? 'redact' : 'block'/);
-  assert.match(content, /Semantic categories/);
 });
 
 test('active content scripts receive policy updates from storage', () => {
-  assert.match(content, /if \(c\.policy\) POLICY = \{ \.\.\.POLICY, \.\.\.c\.policy\.newValue \};/);
+  assert.match(content, /if \(c\.policy \|\| c\.policyBundle \|\| c\.policyExpiresAt\) refreshRuntimeConfig/);
   assert.match(content, /msg\.type !== 'getPolicyState'/);
   assert.match(content, /blockUnapprovedAiDestinations:\s*POLICY\.blockUnapprovedAiDestinations !== false/);
   assert.match(content, /const Ext = window\.PWBrowserApi/);
@@ -113,28 +377,31 @@ test('active content scripts receive policy updates from storage', () => {
 
 test('browser local analysis honors centralized detector policy', () => {
   assert.match(content, /function detectionPolicy\(\)/);
-  assert.match(content, /ignore:\s*POLICY\.ignore \|\| \[\]/);
-  assert.match(content, /disabledDetectors:\s*POLICY\.disabledDetectors \|\| \[\]/);
+  assert.match(content, /ignore:\s*\(POLICY\.ignore \|\| \[\]\)\.filter/);
+  assert.match(content, /disabledDetectors:\s*\(POLICY\.disabledDetectors \|\| \[\]\)\.filter/);
+  assert.match(content, /exactMatch:\s*POLICY\.exactMatch/);
   assert.match(content, /D\.analyze\(text,\s*detectionPolicy\(\)\)/);
   assert.match(content, /const verdict = evaluate\(pasted\)/);
   assert.doesNotMatch(content, /const a = D\.analyze\(pasted\)/);
 });
 
 test('browser file uploads inspect locally and never send file bytes to the control plane', () => {
-  assert.match(content, /function inspectTextUpload\(file, text\)/);
+  assert.match(content, /function inspectTextUpload\(file, text, done = \(\) => \{\}\)/);
   assert.match(content, /D\.analyze\(text,\s*detectionPolicy\(\)\)/);
   assert.match(content, /reader\.readAsText\(f\)/);
   assert.match(content, /TEXT_UPLOAD_EXTENSIONS/);
   assert.match(content, /OCR_UPLOAD_EXTENSIONS/);
-  assert.match(content, /CLEAN_UPLOAD_BYPASS_MS/);
+  assert.match(content, /const cleanUploadBypass = new WeakSet\(\)/);
   assert.match(content, /function textLooksReadable\(text\)/);
   assert.match(content, /if \(!textLooksReadable\(text\)\)/);
   assert.match(content, /function filesHaveCleanBypass\(files\)/);
   assert.match(content, /function consumeCleanUploadBypass\(files\)/);
-  assert.match(content, /if \(destinationBlocked\(\)\)[\s\S]+if \(fileUploadBlocked\(\)\)[\s\S]+if \(filesHaveCleanBypass\(files\)\)/);
-  assert.match(content, /if \(filesHaveCleanBypass\(files\)\) \{\s*consumeCleanUploadBypass\(files\);\s*return;/);
-  assert.match(content, /String\(file\.name \|\| ''\)/);
-  assert.match(content, /recordedEvidenceResponse\(res,\s*'allowed'\)\) rememberCleanUpload\(file\)/);
+  assert.match(content, /if \(destinationBlocked\(\)\)[\s\S]+if \(fileUploadBlocked\(\)\)[\s\S]+if \(filesHaveCleanBypass\(list\)\)/);
+  assert.match(content, /if \(filesHaveCleanBypass\(list\)\) \{\s*consumeCleanUploadBypass\(list\);\s*return;/);
+  assert.match(content, /stopFileEvent\(e\);\s*clearBlockedFileInput\(e\);\s*let remaining/);
+  assert.match(content, /allClean && replayCleanFileEvent\(list, e\)/);
+  assert.match(content, /const ext = fileExtension\(file && file\.name\)/);
+  assert.match(content, /reportPromise\.then\(\(res\) => done\(recordedEvidenceResponse\(res, 'allowed'\)\)\)/);
   assert.match(content, /function fileLabel\(file\)/);
   assert.match(content, /safeFileFindingPrompt\(file, analysis\)/);
   assert.match(content, /\[browser file blocked locally\]/);
@@ -168,9 +435,11 @@ test('browser blocks configured destinations before local prompt or file inspect
   assert.match(content, /RedactWall blocked file uploads to/);
   assert.match(content, /Recording evidence/);
   assert.match(content, /Control-plane evidence was not recorded yet/);
-  assert.match(content, /updateEvidenceToast\(\s*reportBlockedDestination\('submit'\),\s*'destination_blocked'/);
-  assert.match(content, /updateBatchEvidenceToast\(\s*reports,\s*'destination_blocked'/);
-  assert.match(content, /updateBatchEvidenceToast\(\s*reports,\s*'file_upload_blocked'/);
+  assert.match(content, /function trackPolicyBlock\(report, status, message, batch = false\)/);
+  assert.match(content, /const update = batch \? updateBatchEvidenceToast : updateEvidenceToast/);
+  assert.match(content, /const reportPromise = reportBlockedDestination\('submit'\);[\s\S]+trackPolicyBlock\(reportPromise, 'destination_blocked'/);
+  assert.match(content, /trackPolicyBlock\(reports, 'destination_blocked',[\s\S]+true\)/);
+  assert.match(content, /trackPolicyBlock\(reports, 'file_upload_blocked',[\s\S]+true\)/);
   assert.match(background, /blockedDestinations:\s*\[\]/);
   assert.match(background, /blockedFileUploadDestinations:\s*\[\]/);
   assert.match(background, /blockedBrowserActions:\s*\[\]/);
@@ -187,8 +456,8 @@ test('browser blocks configured paste, drop, copy, and download actions without 
   assert.match(content, /selection\.anchorNode/);
   assert.match(content, /e\.preventDefault\(\);\s*e\.stopPropagation\(\);\s*e\.stopImmediatePropagation\(\);/);
   assert.match(content, /function reportBlockedBrowserAction\(action, rule\)/);
-  assert.match(content, /updateEvidenceToast\(\s*reportBlockedBrowserAction\('copy', actionRule\),\s*'action_blocked'/);
-  assert.match(content, /updateEvidenceToast\(\s*reportBlockedBrowserAction\('drop', actionRule\),\s*'action_blocked'/);
+  assert.match(content, /trackPolicyBlock\(reportBlockedBrowserAction\('copy', actionRule\), 'action_blocked'/);
+  assert.match(content, /trackPolicyBlock\(reportBlockedBrowserAction\('drop', actionRule\), 'action_blocked'/);
   assert.match(content, /'\[browser action blocked\] ' \+ action \+ ' ' \+ SITE/);
   assert.match(content, /'action_blocked'/);
   assert.match(content, /RedactWall blocked paste into/);
@@ -201,6 +470,7 @@ test('browser blocks configured paste, drop, copy, and download actions without 
   assert.match(background, /channel:\s*'download'/);
   assert.match(background, /clientOutcome:\s*'action_blocked'/);
   assert.match(background, /\.\.\.\(\(c\.policy && c\.policy\.blockedBrowserActions\) \|\| \[\]\)\.flatMap/);
+  assert.match(background, /rule && rule\.enabled !== false && String\(rule\.action \|\| ''\)\.trim\(\)/);
 });
 
 test('unscannable browser uploads hand name+size file intent to the endpoint native host', async () => {
@@ -254,7 +524,7 @@ test('browser download blocks use host-only evidence and never report URLs or fi
     managed: { email: 'analyst@example.test', orgId: 'credit-union-1' },
     fetch: async (url, options) => {
       fetchCalls.push({ url, body: JSON.parse(options.body) });
-      return { ok: true, json: async () => ({ id: 'q-download', status: 'action_blocked' }) };
+      return jsonResponse(200, { id: 'q-download', status: 'action_blocked' });
     },
   });
 
@@ -304,7 +574,7 @@ test('data-sending paths fail closed on a cleartext-http remote plane', async ()
     managed: { email: 'analyst@example.test', serverUrl: 'http://plane.vendor.example' },
     fetch: async (url, options) => {
       fetchCalls.push({ url, body: JSON.parse(options.body) });
-      return { ok: true, json: async () => ({ id: 'q', status: 'action_blocked' }) };
+      return jsonResponse(200, { id: 'q', status: 'action_blocked' });
     },
   });
 
@@ -319,9 +589,153 @@ test('data-sending paths fail closed on a cleartext-http remote plane', async ()
   assert.strictEqual(fetchCalls.length, 0);
 });
 
-test('browser fallback hard-stops match regulated endpoint defaults before policy sync', () => {
-  assert.match(background, /MEDICAL_RECORD_NUMBER/);
-  assert.match(background, /HEALTH_INSURANCE_ID/);
+test('browser fallback hard-stops exactly match committed server defaults before policy sync', async () => {
+  const bg = loadBackground();
+  const config = await bg.sendMessage({ type: 'getConfig' });
+  assert.deepStrictEqual(Array.from(config.policy.alwaysBlock), DEFAULT_POLICY.alwaysBlock);
+  assert.deepStrictEqual(Array.from(MANDATORY_ALWAYS_BLOCK), DEFAULT_POLICY.alwaysBlock);
+});
+
+test('an explicit local policy pin is trusted only for a loopback control plane', async () => {
+  const policy = { enforcementMode: 'warn', alwaysBlock: ['US_SSN'] };
+  const policyBundle = signedPolicyBundle(policy);
+  const local = {
+    serverUrl: 'http://127.0.0.1:4210',
+    policyPublicKey: POLICY_PUBLIC_KEY,
+    policyBundle,
+    policy,
+  };
+  const loopback = await loadBackground({ local }).sendMessage({ type: 'getConfig' });
+  assert.strictEqual(loopback.policyTrusted, true);
+  assert.strictEqual(loopback.policy.enforcementMode, 'warn');
+
+  const remote = await loadBackground({
+    local: { ...local, serverUrl: 'https://control.example.test' },
+  }).sendMessage({ type: 'getConfig' });
+  assert.strictEqual(remote.policyTrusted, false);
+  assert.strictEqual(remote.policy.enforcementMode, 'block');
+});
+
+test('managed browser configuration cannot be disabled by a stale local pause', async () => {
+  let gateCalls = 0;
+  const managed = {
+    serverUrl: 'https://redactwall.customer.example',
+    ingestKey: 'managed-browser-ingest-key',
+    orgId: 'cu-acme',
+    email: 'analyst@example.test',
+  };
+  const bg = loadBackground({
+    local: { enabled: false },
+    managed,
+    fetch: async () => {
+      gateCalls += 1;
+      return jsonResponse(200, { decision: 'allow', status: 'allowed' });
+    },
+  });
+
+  const config = await bg.sendMessage({ type: 'getConfig' });
+  assert.strictEqual(config.enabled, true);
+  assert.strictEqual(config.enabledLocked, true);
+  const verdict = await bg.sendMessage({
+    type: 'report',
+    payload: {
+      prompt: 'Public branch-hours draft.',
+      destination: 'chatgpt.com',
+      channel: 'submit',
+      source: 'browser_extension',
+      outcome: 'allowed',
+    },
+  });
+  assert.strictEqual(verdict.decision, 'allow');
+  assert.strictEqual(gateCalls, 1, 'managed protection still reports despite local enabled=false');
+
+  const adminPaused = loadBackground({ local: { enabled: true }, managed: { ...managed, enabled: false } });
+  const adminConfig = await adminPaused.sendMessage({ type: 'getConfig' });
+  assert.strictEqual(adminConfig.enabled, false, 'an administrator can explicitly pause managed protection');
+  assert.strictEqual(adminConfig.enabledLocked, true);
+
+  const unmanaged = loadBackground({ local: { enabled: false } });
+  const unmanagedConfig = await unmanaged.sendMessage({ type: 'getConfig' });
+  assert.strictEqual(unmanagedConfig.enabled, false, 'unmanaged demo installs retain the local pause control');
+  assert.strictEqual(unmanagedConfig.enabledLocked, false);
+});
+
+test('background approval polling authenticates with the release token', async () => {
+  const calls = [];
+  const bg = loadBackground({
+    local: { serverUrl: 'https://control.example.test', ingestKey: 'unit-ingest-key-000' },
+    fetch: async (url, options) => {
+      calls.push({ url, options });
+      return jsonResponse(200, { id: 'q/held', status: 'approved', released: true });
+    },
+  });
+
+  const response = await Promise.race([
+    bg.sendMessage({ type: 'approvalStatus', id: 'q/held', releaseToken: 'release-token-unit' }),
+    new Promise((resolve) => setTimeout(() => resolve(null), 50)),
+  ]);
+  assert.strictEqual(response.id, 'q/held');
+  assert.strictEqual(response.status, 'approved');
+  assert.strictEqual(response.released, true);
+  assert.strictEqual(calls[0].url, 'https://control.example.test/api/v1/status/q%2Fheld');
+  assert.strictEqual(calls[0].options.headers['x-api-key'], 'unit-ingest-key-000');
+  assert.strictEqual(calls[0].options.headers['x-release-token'], 'release-token-unit');
+});
+
+test('background resolves a held justification in place with its release token', async () => {
+  const calls = [];
+  const bg = loadBackground({
+    local: { serverUrl: 'https://control.example.test', ingestKey: 'unit-ingest-key-000' },
+    fetch: async (url, options) => {
+      calls.push({ url, options });
+      const body = JSON.parse(options.body);
+      return jsonResponse(200, {
+        id: 'q/held',
+        decision: body.outcome === 'justified' ? 'allow' : 'block',
+        status: body.outcome,
+      });
+    },
+  });
+
+  const response = await bg.sendMessage({
+    type: 'resolveJustification',
+    id: 'q/held',
+    releaseToken: 'release-token-unit',
+    outcome: 'justified',
+    note: 'Approved member-service workflow',
+  });
+
+  assert.strictEqual(response.id, 'q/held');
+  assert.strictEqual(response.decision, 'allow');
+  assert.strictEqual(response.status, 'justified');
+  assert.strictEqual(calls.length, 1);
+  assert.strictEqual(calls[0].url, 'https://control.example.test/api/v1/justify/q%2Fheld');
+  assert.strictEqual(calls[0].options.method, 'POST');
+  assert.strictEqual(calls[0].options.headers['x-api-key'], 'unit-ingest-key-000');
+  assert.strictEqual(calls[0].options.headers['x-release-token'], 'release-token-unit');
+  assert.deepStrictEqual(JSON.parse(calls[0].options.body), {
+    outcome: 'justified', note: 'Approved member-service workflow',
+  });
+
+  const cancelled = await bg.sendMessage({
+    type: 'resolveJustification',
+    id: 'q/held',
+    releaseToken: 'release-token-unit',
+    outcome: 'blocked_by_user',
+    note: '',
+  });
+  assert.strictEqual(cancelled.id, 'q/held');
+  assert.strictEqual(cancelled.decision, 'block');
+  assert.strictEqual(cancelled.status, 'blocked_by_user');
+  assert.strictEqual(calls.length, 2);
+  assert.deepStrictEqual(JSON.parse(calls[1].options.body), { outcome: 'blocked_by_user', note: '' });
+
+  const invalid = await bg.sendMessage({
+    type: 'resolveJustification', id: 'q/held', releaseToken: 'release-token-unit',
+    outcome: 'justified', note: '   ',
+  });
+  assert.strictEqual(invalid.reason, 'invalid_justification_request');
+  assert.strictEqual(calls.length, 2, 'invalid business reasons never reach the control plane');
 });
 
 test('browser policy refresh preserves cached state on disabled or failed refresh', async () => {
@@ -349,30 +763,201 @@ test('browser policy refresh preserves cached state on disabled or failed refres
       ingestKey: 'unit-ingest-key-000',
       policy: cachedPolicy,
     },
-    fetch: async () => ({ ok: false, json: async () => ({ error: 'offline' }) }),
+    fetch: async () => jsonResponse(503, { error: 'offline' }),
   });
   await failed.context.self.__test.refreshPolicy();
   assert.deepStrictEqual(failed.storage.policy, cachedPolicy);
 
+  const sequenceNow = Date.now();
+  const cachedBundle = signedPolicyBundle(cachedPolicy, {
+    issuedAt: new Date(sequenceNow - 60_000).toISOString(),
+  });
+  const refreshedBundle = signedPolicyBundle({
+    enforcementMode: 'redact',
+    governedDestinations: ['claude.ai'],
+    alwaysBlock: ['SOURCE_CODE'],
+  }, { issuedAt: new Date(sequenceNow).toISOString() });
   const refreshed = loadBackground({
     local: {
       serverUrl: 'https://control.example.test',
       ingestKey: 'unit-ingest-key-000',
       policy: cachedPolicy,
+      policyBundle: cachedBundle,
     },
-    fetch: async () => ({
-      ok: true,
-      json: async () => ({
-        enforcementMode: 'redact',
-        governedDestinations: ['claude.ai'],
-      }),
-    }),
+    managed: { policyPublicKey: POLICY_PUBLIC_KEY },
+    fetch: async () => jsonResponse(200, refreshedBundle),
   });
   await refreshed.context.self.__test.refreshPolicy();
   assert.strictEqual(refreshed.storage.policy.enforcementMode, 'redact');
   assert.deepStrictEqual(Array.from(refreshed.storage.policy.governedDestinations), ['claude.ai']);
   assert.deepStrictEqual(Array.from(refreshed.storage.policy.blockedBrowserActions), []);
   assert.ok(Array.from(refreshed.storage.policy.alwaysBlock).includes('US_SSN'));
+  assert.ok(Array.from(refreshed.storage.policy.alwaysBlock).includes('SOURCE_CODE'));
+});
+
+test('browser policy publication failure retains fail-closed coverage for the durable policy', async () => {
+  const now = Date.now();
+  const host = 'custom-ai.customer.example';
+  const incomingHost = 'replacement-ai.customer.example';
+  const origin = `https://*.${host}/*`;
+  const previous = signedPolicyBundle({
+    enforcementMode: 'block',
+    governedDestinations: [host],
+  }, { issuedAt: new Date(now - 60_000).toISOString() });
+  const incoming = signedPolicyBundle({
+    enforcementMode: 'warn',
+    governedDestinations: [incomingHost],
+  }, { issuedAt: new Date(now).toISOString() });
+  const publicationSnapshots = [];
+  const bg = loadBackground({
+    local: {
+      serverUrl: 'https://control.example.test',
+      ingestKey: 'unit-ingest-key-000',
+      policyBundle: previous,
+      policy: previous.policy,
+      policyExpiresAt: previous.expiresAt,
+    },
+    managed: { policyPublicKey: POLICY_PUBLIC_KEY },
+    registeredScripts: [{
+      id: 'redactwall-policy-destinations',
+      matches: [origin],
+      js: ['lib/detect.js', 'content.js'],
+    }],
+    storageSet: async (value, state) => {
+      if (!value.policyBundle) return;
+      publicationSnapshots.push({
+        scripts: state.registeredScripts.map((item) => ({ ...item })),
+        rules: state.dynamicRules(),
+      });
+      throw new Error('simulated policy cache publication failure');
+    },
+    fetch: async () => jsonResponse(200, incoming),
+  });
+
+  await bg.context.self.__test.refreshPolicy();
+
+  assert.strictEqual(bg.storage.policyBundle.signature, previous.signature, 'failed publication retains the durable bundle');
+  assert.strictEqual(bg.storage.policy.enforcementMode, 'block');
+  assert.deepStrictEqual(Array.from(bg.storage.policy.governedDestinations), [host]);
+  assert.strictEqual(publicationSnapshots.length, 1);
+  const atPublication = publicationSnapshots[0];
+  assert.ok(atPublication.scripts.some((script) => Array.from(script.matches || []).includes(origin)),
+    'the durable runtime script is not relaxed before bundle publication',
+  );
+  assert.deepStrictEqual(
+    new Set(atPublication.rules.flatMap((rule) => Array.from(rule.condition.requestDomains || []))),
+    new Set([host, incomingHost]),
+    'old and incoming destinations are both blocked at the publication boundary',
+  );
+  assert.ok(bg.registeredScripts.some((script) => Array.from(script.matches || []).includes(origin)),
+    'failed publication retains the durable runtime script',
+  );
+  assert.deepStrictEqual(
+    new Set(bg.dynamicRules().flatMap((rule) => Array.from(rule.condition.requestDomains || []))),
+    new Set([host, incomingHost]),
+    'failed publication retains the conservative union blocks',
+  );
+});
+
+test('successful browser policy publication converges from old dynamic coverage', async () => {
+  const now = Date.now();
+  const host = 'custom-ai.customer.example';
+  const origin = `https://*.${host}/*`;
+  const previous = signedPolicyBundle({
+    enforcementMode: 'block',
+    governedDestinations: [host],
+  }, { issuedAt: new Date(now - 60_000).toISOString() });
+  const incoming = signedPolicyBundle({
+    enforcementMode: 'warn',
+    governedDestinations: [],
+  }, { issuedAt: new Date(now).toISOString() });
+  const bg = loadBackground({
+    local: {
+      serverUrl: 'https://control.example.test',
+      ingestKey: 'unit-ingest-key-000',
+      policyBundle: previous,
+      policy: previous.policy,
+      policyExpiresAt: previous.expiresAt,
+    },
+    managed: { policyPublicKey: POLICY_PUBLIC_KEY },
+    registeredScripts: [{
+      id: 'redactwall-policy-destinations',
+      matches: [origin],
+      js: ['lib/detect.js', 'content.js'],
+    }],
+    fetch: async () => jsonResponse(200, incoming),
+  });
+
+  await bg.context.self.__test.refreshPolicy();
+
+  assert.strictEqual(bg.storage.policyBundle.signature, incoming.signature);
+  assert.strictEqual(bg.storage.policy.enforcementMode, 'warn');
+  assert.deepStrictEqual(Array.from(bg.storage.policy.governedDestinations), []);
+  assert.strictEqual(bg.registeredScripts.length, 0, 'obsolete dynamic script coverage is removed after publication');
+  assert.strictEqual(bg.dynamicRules().length, 0, 'temporary conservative blocks are removed after coverage converges');
+});
+
+test('browser policy refresh rejects an older signed replay across worker restart', async () => {
+  const now = Date.now();
+  const older = signedPolicyBundle({ enforcementMode: 'warn', alwaysBlock: ['US_SSN'] }, {
+    issuedAt: new Date(now - (2 * 60 * 1000)).toISOString(),
+  });
+  const newer = signedPolicyBundle({ enforcementMode: 'block', alwaysBlock: ['US_SSN'] }, {
+    issuedAt: new Date(now - (60 * 1000)).toISOString(),
+  });
+  const local = {
+    serverUrl: 'https://control.example.test',
+    ingestKey: 'unit-ingest-key-000',
+    policyBundle: newer,
+    policy: newer.policy,
+    policyExpiresAt: newer.expiresAt,
+  };
+  const first = loadBackground({
+    local,
+    managed: { policyPublicKey: POLICY_PUBLIC_KEY },
+    fetch: async () => jsonResponse(200, older),
+  });
+  await first.context.self.__test.refreshPolicy();
+  assert.strictEqual(first.storage.policyBundle.signature, newer.signature);
+  assert.strictEqual(first.storage.policy.enforcementMode, 'block');
+
+  const restarted = loadBackground({
+    local: { ...first.storage },
+    managed: { policyPublicKey: POLICY_PUBLIC_KEY },
+    fetch: async () => jsonResponse(200, older),
+  });
+  await restarted.context.self.__test.refreshPolicy();
+  assert.strictEqual(restarted.storage.policyBundle.signature, newer.signature);
+  assert.strictEqual(restarted.storage.policy.enforcementMode, 'block');
+});
+
+test('browser policy refresh refuses to reset high-water from an invalid existing cache', async () => {
+  const now = Date.now();
+  const original = signedPolicyBundle({ enforcementMode: 'block', alwaysBlock: ['US_SSN'] }, {
+    issuedAt: new Date(now - (2 * 60 * 1000)).toISOString(),
+  });
+  const tampered = { ...original, policy: { enforcementMode: 'warn', alwaysBlock: [] } };
+  const incoming = signedPolicyBundle({ enforcementMode: 'warn', alwaysBlock: ['US_SSN'] }, {
+    issuedAt: new Date(now - (60 * 1000)).toISOString(),
+  });
+  const bg = loadBackground({
+    local: {
+      serverUrl: 'https://control.example.test',
+      ingestKey: 'unit-ingest-key-000',
+      policyBundle: tampered,
+      policy: { enforcementMode: 'block', alwaysBlock: ['US_SSN'] },
+      policyExpiresAt: original.expiresAt,
+    },
+    managed: { policyPublicKey: POLICY_PUBLIC_KEY },
+    fetch: async () => jsonResponse(200, incoming),
+  });
+
+  await bg.context.self.__test.refreshPolicy();
+  assert.strictEqual(bg.storage.policyBundle.signature, tampered.signature);
+  assert.strictEqual(bg.storage.policy.enforcementMode, 'block');
+  const config = await bg.sendMessage({ type: 'getConfig' });
+  assert.strictEqual(config.policyTrusted, false);
+  assert.strictEqual(config.policy.enforcementMode, 'block');
 });
 
 test('destination allowlist overrides wildcard destination blocks', () => {
@@ -405,8 +990,8 @@ test('browser block banner includes employee coaching guidance', () => {
   assert.match(content, /reasonInput\.setAttribute\('aria-invalid', 'true'\)/);
   assert.match(content, /reasonInput\.addEventListener\('input'/);
   assert.match(content, /reasonInput\.setAttribute\('aria-invalid', 'false'\)/);
-  assert.match(content, /initialFocus\.focus\(\{ preventScroll: true \}\)/);
-  assert.match(content, /'<div class="ps-coach">' \+ escapeHtml\(coach\) \+ '<\/div>'/);
+  assert.match(content, /\(reasonInput \|\| banner\)\.focus\(\{ preventScroll: true \}\)/);
+  assert.match(content, /'<div class="ps-coach">' \+ escapeHtml\(coachingFor\(items\)\) \+ '<\/div>'/);
   assert.match(content, /RedactWall found sensitive data: ' \+ listForScreen/);
   assert.doesNotMatch(content, /this prompt contains <b>' \+ items\.join/);
 });
@@ -434,6 +1019,134 @@ test('browser click interception uses shared send-button adapters', () => {
 test('manifest permits local control-plane URLs used by browser smoke tests', () => {
   assert.ok(manifest.host_permissions.includes('http://localhost/*'));
   assert.ok(manifest.host_permissions.includes('http://127.0.0.1/*'));
+  assert.deepStrictEqual(manifest.optional_host_permissions, ['https://*/*']);
+  assert.ok(!manifest.host_permissions.includes('https://*/*'), 'arbitrary HTTPS origins require an exact runtime grant');
+});
+
+test('custom governed destinations stay blocked until exact access is granted, then gain active interception', async () => {
+  let granted = false;
+  const customOrigin = 'https://*.custom-ai.customer.example/*';
+  const bg = loadBackground({
+    permissionsContains: ({ origins }) => origins[0] === customOrigin && granted,
+    tabs: [{ id: 41, url: 'https://custom-ai.customer.example/chat' }],
+  });
+  const policy = { ...DEFAULT_POLICY, governedDestinations: ['custom-ai.customer.example'] };
+
+  const missing = await bg.context.self.__test.syncDestinationCoverage(policy);
+  assert.strictEqual(missing.ready, false);
+  assert.deepStrictEqual(Array.from(missing.missingOrigins), [customOrigin]);
+  assert.strictEqual(bg.registeredScripts.length, 0);
+  assert.strictEqual(bg.dynamicRules().length, 1);
+  assert.deepStrictEqual(Array.from(bg.dynamicRules()[0].condition.requestDomains), ['custom-ai.customer.example']);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(bg.updatedTabs)), [
+    { id: 41, value: { url: 'chrome-extension://unit/coverage-required.html' } },
+  ]);
+
+  bg.updatedTabs.length = 0;
+  granted = true;
+  const ready = await bg.context.self.__test.syncDestinationCoverage(policy);
+  assert.strictEqual(ready.ready, true);
+  assert.deepStrictEqual(Array.from(ready.missingOrigins), []);
+  assert.strictEqual(bg.dynamicRules().length, 0);
+  assert.strictEqual(bg.registeredScripts.length, 1);
+  assert.deepStrictEqual(Array.from(bg.registeredScripts[0].matches), [customOrigin]);
+  assert.ok(Array.from(bg.registeredScripts[0].js).includes('content.js'));
+  assert.ok(Array.from(bg.registeredScripts[0].js).includes('lib/detect.js'));
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(bg.updatedTabs)), [
+    { id: 41, value: { url: 'chrome-extension://unit/coverage-required.html' } },
+  ], 'a tab that was already open is ejected before its first dynamic registration');
+});
+
+test('invalid, credentialed, cleartext, and all-HTTPS destination policies fail closed', async () => {
+  const bg = loadBackground({ permissionsContains: true });
+  const state = await bg.context.self.__test.syncDestinationCoverage({
+    governedDestinations: ['http://cleartext.example', 'https://user:pass@credentialed.example', 'not a host', '*'],
+  });
+
+  assert.strictEqual(state.ready, false);
+  assert.deepStrictEqual(
+    new Set(Array.from(state.unsupported)),
+    new Set(['non_https_destination', 'credentialed_destination', 'invalid_destination', 'all_https']),
+  );
+  assert.strictEqual(bg.registeredScripts.length, 0);
+  assert.strictEqual(bg.dynamicRules().length, 1);
+  assert.ok(bg.dynamicRules().some((rule) => rule.condition.urlFilter === '|https://'));
+});
+
+test('remote control-plane access is exact-origin, user-granted, and fail-closed', async () => {
+  const bg = loadBackground({
+    managed: {
+      serverUrl: 'https://redactwall.customer.example/path',
+      ingestKey: 'remote-ingest-key-000000000000',
+      email: 'analyst@example.test',
+      orgId: 'cu-acme',
+    },
+    permissionsContains: false,
+    fetch: async () => { throw new Error('fetch must not run without host access'); },
+  });
+  assert.strictEqual(bg.context.self.__test.serverPermissionPattern('https://redactwall.customer.example/path'), 'https://redactwall.customer.example/*');
+  assert.strictEqual(bg.context.self.__test.serverPermissionPattern('http://remote.example'), null);
+  assert.strictEqual(bg.context.self.__test.serverPermissionPattern('https://user:pass@remote.example'), null);
+
+  const health = await bg.context.self.__test.reportInstallHealth();
+  assert.strictEqual(health.ok, false);
+  assert.strictEqual(health.reason, 'missing_host_permission');
+  assert.ok(health.checks.some((item) => item.id === 'server_host_permission' && !item.ok));
+
+  const gate = await bg.sendMessage({
+    type: 'report',
+    payload: { prompt: 'public text', destination: 'chatgpt.com', channel: 'submit', source: 'browser_extension', outcome: 'allowed' },
+  });
+  assert.strictEqual(gate.decision, 'block');
+  assert.strictEqual(gate.reason, 'gate_missing_host_permission');
+  assert.match(popup, /storageGet\('managed', \['serverUrl', 'orgId', 'email', 'user', 'enabled'\]\)/);
+  assert.match(popup, /permissions\.request\(\{ origins: \[pattern\] \}\)/);
+  assert.match(popupHtml, /id="grantServerAccess"/);
+});
+
+test('popup requests only the exact managed HTTPS control-plane origin', async () => {
+  const elements = new Map();
+  const element = (id) => {
+    if (!elements.has(id)) elements.set(id, {
+      checked: false, className: '', disabled: false, hidden: id === 'serverAccess', href: '', textContent: '',
+      addEventListener(type, fn) { this['on' + type] = fn; },
+    });
+    return elements.get(id);
+  };
+  let requested;
+  const storageWrites = [];
+  const context = {
+    URL,
+    document: { getElementById: element },
+    window: {
+      PWBrowserApi: {
+        api: {
+          permissions: {
+            contains: async () => false,
+            request: (value) => { requested = value; return Promise.resolve(true); },
+          },
+        },
+        storageGet: async (area) => (area === 'managed'
+          ? { serverUrl: 'https://managed-control.example/path' }
+          : { serverUrl: 'https://local-control.example', enabled: false, policy: { enforcementMode: 'block' } }),
+        storageSet: async (area, value) => { storageWrites.push({ area, value }); },
+      },
+    },
+  };
+  vm.runInNewContext(popup, context);
+  await new Promise((resolve) => setImmediate(() => setImmediate(resolve)));
+  assert.strictEqual(element('serverAccess').hidden, false);
+  assert.strictEqual(element('dash').href, 'https://managed-control.example/path/app/');
+  assert.strictEqual(element('toggle').checked, true, 'managed configuration overrides a stale local pause');
+  assert.strictEqual(element('toggle').disabled, true);
+  element('toggle').checked = false;
+  element('toggle').onchange();
+  assert.deepStrictEqual(storageWrites, [], 'managed toggle cannot persist a local override');
+
+  element('grantServerAccess').onclick();
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(requested)), { origins: ['https://managed-control.example/*'] });
+  await new Promise((resolve) => setImmediate(() => setImmediate(resolve)));
+  assert.strictEqual(element('serverAccess').hidden, true);
 });
 
 test('manifest declares download permission for policy-controlled browser egress blocks', () => {
@@ -474,6 +1187,36 @@ test('background report fails closed when gate request times out', async () => {
   assert.strictEqual(res.reason, 'gate_timeout');
 });
 
+test('background control-plane JSON reads time out and reject unknown-length overflow', async () => {
+  let cancelled = 0;
+  const stalled = loadBackground({
+    local: { serverUrl: 'http://localhost:4000', ingestKey: 'unit-ingest-key' },
+    fetch: async () => new Response(new ReadableStream({
+      cancel() { cancelled += 1; },
+    }), { status: 200, headers: { 'content-type': 'application/json' } }),
+  });
+  const timedOut = await stalled.context.self.__test.fetchJsonWithTimeout(
+    'http://localhost:4000/api/v1/policy',
+    { headers: { 'x-api-key': 'unit-ingest-key' } },
+    50,
+  );
+  assert.strictEqual(timedOut.ok, false);
+  assert.strictEqual(timedOut.reason, 'timeout');
+  assert.strictEqual(cancelled, 1);
+
+  const oversized = loadBackground({
+    local: { serverUrl: 'http://localhost:4000', ingestKey: 'unit-ingest-key' },
+    fetch: async () => jsonResponse(200, { padding: 'x'.repeat(600 * 1024) }),
+  });
+  const tooLarge = await oversized.context.self.__test.fetchJsonWithTimeout(
+    'http://localhost:4000/api/v1/policy',
+    { headers: { 'x-api-key': 'unit-ingest-key' } },
+    1000,
+  );
+  assert.strictEqual(tooLarge.ok, false);
+  assert.strictEqual(tooLarge.reason, 'response_too_large');
+});
+
 test('background report fails closed when no ingest key is configured', async () => {
   const bg = loadBackground({
     fetch: async () => {
@@ -502,7 +1245,7 @@ test('background report includes browser extension version metadata', async () =
     local: { ingestKey: 'unit-key' },
     fetch: async (url, options) => {
       outbound = { url, body: JSON.parse(options.body), headers: options.headers };
-      return { ok: true, json: async () => ({ decision: 'allow' }) };
+      return jsonResponse(200, { decision: 'allow' });
     },
   });
   const res = await bg.sendMessage({
@@ -542,19 +1285,19 @@ test('background install health posts secret-free browser heartbeat', async () =
   const ingestKey = 'browser-ingest-key-0000000000000000000001';
   let outbound;
   const bg = loadBackground({
+    local: {
+      policy: DEFAULT_POLICY,
+    },
     managed: {
       serverUrl: 'https://redactwall.customer.example',
       ingestKey,
       email: 'analyst@example.test',
       orgId: 'cu-acme',
+      policyPublicKey: POLICY_PUBLIC_KEY,
     },
     fetch: async (url, options) => {
       outbound = { url, headers: options.headers, body: JSON.parse(options.body), rawBody: options.body };
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({ id: 'q_browser_heartbeat', decision: 'recorded', status: 'sensor_heartbeat', failedChecks: [] }),
-      };
+      return jsonResponse(200, { id: 'q_browser_heartbeat', decision: 'recorded', status: 'sensor_heartbeat', failedChecks: [] });
     },
   });
 
@@ -601,7 +1344,7 @@ test('background install health flags unmanaged local config without leaking key
     },
     fetch: async (url, options) => {
       outbound = { url, body: JSON.parse(options.body), rawBody: options.body };
-      return { ok: true, status: 200, json: async () => ({ id: 'q_local_browser_heartbeat' }) };
+      return jsonResponse(200, { id: 'q_local_browser_heartbeat' });
     },
   });
 
@@ -672,8 +1415,6 @@ test('background schedules browser install-health heartbeats', () => {
 
 test('governed Poe destination receives active content-script protection', () => {
   const matches = manifest.content_scripts.flatMap((entry) => entry.matches || []);
-  assert.ok(manifest.host_permissions.includes('https://poe.com/*'));
-  assert.ok(manifest.host_permissions.includes('https://www.poe.com/*'));
   assert.ok(matches.includes('https://poe.com/*'));
   assert.ok(matches.includes('https://www.poe.com/*'));
   assert.match(background, /shadow-AI/);
@@ -693,7 +1434,6 @@ test('major Chinese AI destinations receive active content-script protection', (
     'https://xinghuo.xfyun.cn/*',
     'https://ai.360.com/*',
   ]) {
-    assert.ok(manifest.host_permissions.includes(pattern), pattern);
     assert.ok(matches.includes(pattern), pattern);
   }
   for (const host of ['chat.deepseek.com', 'chat.qwen.ai', 'kimi.com', 'doubao.com', 'yuanbao.tencent.com']) {

@@ -1,6 +1,6 @@
 {
   "_description": "Customer-owned detector packs. Add bounded regex detectors here for local member, account, loan, or internal record identifiers. The engine rejects built-in ID overrides and unsafe regex shapes.",
-  "_creditUnionPack": "Starter core-banking identifier detectors for U.S. credit unions. Every detector ships DISABLED (\"enabled\": false) and context-gated. Enable ONLY the core your institution runs and tune the pattern to your real account-number format before relying on it. These are warn-tier (severity 2) evidence pointers, not certified detection: most core IDs carry no checksum, so pair them with roster-seeded Exact Data Match (npm run edm:fingerprint) for high-confidence hard blocks.",
+  "_creditUnionPack": "Starter core-banking identifier detectors for U.S. credit unions. Every detector ships DISABLED (\"enabled\": false) and context-gated. Enable ONLY the core your institution runs and tune the pattern to your real account-number format before relying on it. These are warn-tier (severity 2) evidence pointers, not certified detection: most core IDs carry no checksum, so validate them against representative hard negatives and retain the mandatory MEMBER_ID, LOAN_NUMBER, and BANK_ACCOUNT hard stops. Offline EDM intentionally rejects enumerable member and account numbers.",
   "detectors": [
     {
       "id": "JACK_HENRY_MEMBER_ACCOUNT",

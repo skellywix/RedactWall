@@ -19,15 +19,13 @@ const detect = require('../detection-engine/detect');
 const { config } = require('./config');
 const { makeClient } = require('./client');
 const { getAdapter } = require('./adapters');
+const { validateProviderConfig, validateProviderCredentials } = require('./providers');
+const { requestBodyDeadline, requestBodyDeadlineExpired } = require('../server/request-body-deadline');
 const tokens = require('./tokens');
 const canonical = require('./canonical');
+const { classifyRequestVerdict, classifyResponseVerdict } = require('./verdict');
 
-// Role-faithful local redaction: tokenize EVERY message/content (system,
-// assistant, user) with a shared value->token map so no raw PII in any role
-// reaches the upstream model, and the response can be rehydrated locally. This
-// replaces relying on the control plane's single joined tokenized string, which
-// dropped non-user roles.
-function redactBodyLocally(body) {
+function tokenizingMapper() {
   const byValue = new Map();
   const map = {};
   const counters = {};
@@ -38,7 +36,7 @@ function redactBodyLocally(body) {
     byValue.set(value, t); map[t] = value;
     return t;
   }
-  function tok(text) {
+  function tokenizeText(text) {
     if (typeof text !== 'string' || !text) return text;
     const findings = detect.analyze(text).findings;
     if (!findings.length) return text;
@@ -48,65 +46,16 @@ function redactBodyLocally(body) {
     }
     return out;
   }
-  // Tokenize every scannable surface so no raw PII in any message reaches
-  // upstream — string content, array text parts, and tool/function-call
-  // arguments (all of which requestText/messageText also scan).
-  function tokMessage(m) {
-    if (!m || typeof m !== 'object') return m;
-    let next = m;
-    const patch = (obj, key, val) => { if (next === obj) next = { ...obj }; next[key] = val; };
-    if (typeof m.content === 'string') patch(m, 'content', tok(m.content));
-    else if (Array.isArray(m.content)) {
-      let touched = false;
-      const parts = m.content.map((part) => {
-        if (part && typeof part.text === 'string') { touched = true; return { ...part, text: tok(part.text) }; }
-        return part;
-      });
-      if (touched) patch(m, 'content', parts);
-    }
-    if (Array.isArray(m.tool_calls)) {
-      let touched = false;
-      const calls = m.tool_calls.map((tc) => {
-        const args = tc && tc.function && tc.function.arguments;
-        if (typeof args === 'string' && args) { touched = true; return { ...tc, function: { ...tc.function, arguments: tok(args) } }; }
-        return tc;
-      });
-      if (touched) patch(m, 'tool_calls', calls);
-    }
-    if (m.function_call && typeof m.function_call.arguments === 'string') {
-      patch(m, 'function_call', { ...m.function_call, arguments: tok(m.function_call.arguments) });
-    }
-    return next;
-  }
-  const tokArray = (arr) => arr.map((p) => (typeof p === 'string' ? tok(p) : p));
-  // Tokenize PII in tool/function DEFINITIONS (description + parameters schema)
-  // so a redact verdict doesn't forward raw PII embedded in a tool spec. The
-  // function NAME is left intact — tokens contain `[` `]` which are invalid in
-  // OpenAI function names — and the residual check in handle() fails closed if
-  // any untokenized field still carries PII.
-  function tokDeep(v) {
-    if (typeof v === 'string') return tok(v);
-    if (Array.isArray(v)) return v.map(tokDeep);
-    if (v && typeof v === 'object') { const o = {}; for (const k of Object.keys(v)) o[k] = tokDeep(v[k]); return o; }
-    return v;
-  }
-  function tokFnDef(fn) {
-    if (!fn || typeof fn !== 'object') return fn;
-    const nextFn = { ...fn };
-    if (typeof fn.description === 'string') nextFn.description = tok(fn.description);
-    if (fn.parameters != null) nextFn.parameters = tokDeep(fn.parameters);
-    return nextFn;
-  }
-  const out = { ...body };
-  if (Array.isArray(body.messages)) {
-    out.messages = body.messages.map(tokMessage);
-  } else if (typeof body.prompt === 'string') { out.prompt = tok(body.prompt); }
-  else if (Array.isArray(body.prompt)) { out.prompt = tokArray(body.prompt); }
-  else if (typeof body.input === 'string') { out.input = tok(body.input); }
-  else if (Array.isArray(body.input)) { out.input = tokArray(body.input); }
-  if (Array.isArray(body.tools)) out.tools = body.tools.map((t) => (t && t.function ? { ...t, function: tokFnDef(t.function) } : t));
-  if (Array.isArray(body.functions)) out.functions = body.functions.map(tokFnDef);
-  return { body: out, map, tokenCount: Object.keys(map).length };
+  return { tokenizeText, map };
+}
+
+// Tokenize every string that will cross the gateway boundary, including
+// provider-specific and future metadata fields. A field the gateway does not
+// know about therefore cannot bypass the same scan/redact rule as messages.
+function redactBodyLocally(body) {
+  const mapper = tokenizingMapper();
+  const redacted = canonical.mapStrings(body, mapper.tokenizeText);
+  return { body: redacted, map: mapper.map, tokenCount: Object.keys(mapper.map).length };
 }
 
 // Count findings by detector TYPE. A raw total is not enough: the control plane
@@ -143,8 +92,17 @@ function localReproducesTypes(localText, reported) {
 // when a redact verdict extracted text yet tokenized nothing.
 function redactionCoversVerdict(promptText, redacted, verdict) {
   const reported = findingTypeCounts(verdict.findings);
-  if (!reported.size) return true; // no detector-level findings to reproduce
+  const localAnalysis = detect.analyze(promptText);
+  // Semantic categories describe whole-chunk sensitivity. The local mapper can
+  // replace only structured finding spans, so forwarding a category-only (or
+  // mixed) redact verdict would leave the confidential prose unchanged.
+  if ((Array.isArray(verdict.categories) && verdict.categories.length)
+      || (localAnalysis.categories || []).length) return false;
   if (redacted.tokenCount === 0) return false;
+  // Older/injected control planes may omit finding metadata. Local structured
+  // findings still make the transformation provably useful, but a no-op never
+  // satisfies a redact verdict.
+  if (!reported.size) return localAnalysis.findings.length > 0;
   return localReproducesTypes(promptText, reported);
 }
 
@@ -154,13 +112,19 @@ function redactionCoversVerdict(promptText, redacted, verdict) {
 // see means local redaction would leave raw values in the body — withhold it.
 function responseRedactionCovers(respText, scan) {
   if (Array.isArray(scan.categories) && scan.categories.length) return false;
+  if ((detect.analyze(respText).categories || []).length) return false;
   return localReproducesTypes(respText, findingTypeCounts(scan.findings));
 }
 
-const BLOCK_STATUSES = new Set([
-  'control_plane_unavailable', 'destination_blocked', 'injection_blocked',
-  'file_blocked_unscanned', 'file_upload_blocked', 'pending', 'pending_justification',
-]);
+function hasLocalSensitivity(text) {
+  const analysis = detect.analyze(text);
+  return analysis.findings.length > 0 || (analysis.categories || []).length > 0;
+}
+
+function carriesOpaqueSensitiveContent(value) {
+  return canonical.carriesNumericContent(value, { rootIsContent: true })
+    || canonical.carriesEncodedSensitiveText(value, (text, options) => detect.analyze(text, options));
+}
 
 function openAiError(message, type, reasons) {
   return { error: { message, type: type || 'redactwall_block', code: type || 'redactwall_block', reasons: reasons || [] } };
@@ -168,12 +132,40 @@ function openAiError(message, type, reasons) {
 
 function createGateway(overrides = {}) {
   const cfg = { ...config(), ...overrides };
+  cfg.provider = validateProviderConfig(cfg.provider, cfg.upstreamBaseUrl, {
+    production: String(process.env.NODE_ENV || '').toLowerCase() === 'production',
+  });
+  if (!overrides.adapter) validateProviderCredentials(cfg.provider, cfg.upstreamApiKey);
   // Client/adapter are injectable for deterministic tests (no network).
   const client = overrides.client || makeClient(cfg);
   const adapter = overrides.adapter || getAdapter(cfg.provider);
   const app = express();
   app.disable('x-powered-by');
-  app.use(express.json({ limit: cfg.maxBodyBytes }));
+  app.use(requestBodyDeadline({
+    timeoutMs: () => cfg.requestBodyTimeoutMs,
+    fallbackMs: 15000,
+    onTimeout: (_req, res) => res.status(408)
+      .json(openAiError('Request body deadline exceeded', 'request_timeout')),
+  }));
+  app.use((req, _res, next) => {
+    req.redactwallJsonBytes = 0;
+    next();
+  });
+  app.use(express.json({
+    limit: cfg.maxBodyBytes,
+    verify(req, _res, buffer) {
+      req.redactwallJsonBytes = buffer.length;
+    },
+  }));
+  app.use((error, req, res, next) => {
+    if (requestBodyDeadlineExpired(req)) return undefined;
+    if (!error) return next();
+    if (error.type === 'entity.parse.failed' || error.type === 'entity.too.large') {
+      return res.status(error.type === 'entity.too.large' ? 413 : 400)
+        .json(openAiError('Request body must be a bounded JSON object', 'invalid_request'));
+    }
+    return next(error);
+  });
 
   const metrics = { requests: 0, allowed: 0, redacted: 0, blocked: 0, responseBlocked: 0, responseRedacted: 0, upstreamErrors: 0, failClosed: 0 };
   const buckets = new Map(); // token id -> { count, resetAt }
@@ -212,14 +204,29 @@ function createGateway(overrides = {}) {
   async function handle(kind, req, res) {
     metrics.requests += 1;
     const identity = req.agentIdentity;
-    const body = req.body || {};
+    const body = req.body;
+    if (!req.redactwallJsonBytes || !body || typeof body !== 'object' || Array.isArray(body)
+        || (Object.getPrototypeOf(body) !== Object.prototype && Object.getPrototypeOf(body) !== null)) {
+      metrics.blocked += 1;
+      metrics.failClosed += 1;
+      return res.status(400).json(openAiError('Request body must be a JSON object', 'invalid_request'));
+    }
+    try {
+      if (typeof adapter.validateRequest === 'function') adapter.validateRequest(kind, body);
+    } catch {
+      metrics.blocked += 1;
+      metrics.failClosed += 1;
+      return res.status(400).json(openAiError('Request shape is not supported by the configured provider', 'invalid_request'));
+    }
     const wantsStream = body.stream === true && kind !== 'embeddings';
-    const promptText = adapter.requestText(body);
+    const promptText = canonical.forwardedRequestText(body);
 
     // Fail closed on ANY content the gateway cannot scan (image/binary parts,
     // token-id arrays) — even when other parts carry scannable text, so a PII
     // image alongside a caption is never forwarded ungated.
-    if (canonical.carriesUnscannableContent(body)) {
+    if (canonical.carriesExplicitBinary(body)
+        || canonical.carriesUnscannableContent(body)
+        || carriesOpaqueSensitiveContent(body)) {
       metrics.blocked += 1;
       metrics.failClosed += 1;
       return res.status(403).json(openAiError('Request carries content RedactWall could not scan; blocked', 'unscannable_content'));
@@ -233,13 +240,18 @@ function createGateway(overrides = {}) {
         prompt: promptText, user: identity.user, orgId: identity.orgId,
         destination: destinationLabel(), source: 'ai_gateway', channel: 'gateway',
       });
+      const requestAction = classifyRequestVerdict(verdict);
+      if (requestAction === 'invalid') {
+        metrics.blocked += 1;
+        metrics.failClosed += 1;
+        return res.status(403).json(openAiError('Prompt blocked because RedactWall returned an invalid verdict', 'blocked_by_redactwall'));
+      }
       if (verdict._failClosed) metrics.failClosed += 1;
-      const blocked = verdict.decision === 'block' || BLOCK_STATUSES.has(verdict.status);
-      if (blocked && verdict.decision !== 'redact') {
+      if (requestAction === 'block') {
         metrics.blocked += 1;
         return res.status(403).json(openAiError('Prompt blocked by RedactWall policy', 'blocked_by_redactwall', verdict.reasons));
       }
-      if (verdict.decision === 'redact') {
+      if (requestAction === 'redact') {
         // Tokenize every role locally so no raw PII in any message reaches upstream.
         const redacted = redactBodyLocally(body);
         if (!redactionCoversVerdict(promptText, redacted, verdict)) {
@@ -252,7 +264,7 @@ function createGateway(overrides = {}) {
         // Residual safety net: verify the OUTBOUND body carries no raw PII in
         // ANY field (e.g. a tool name we deliberately don't tokenize). If local
         // default analysis still finds something, fail closed rather than leak.
-        if (detect.analyze(adapter.requestText(redacted.body)).findings.length) {
+        if (hasLocalSensitivity(canonical.deepText(redacted.body))) {
           metrics.blocked += 1;
           metrics.failClosed += 1;
           return res.status(403).json(openAiError('Prompt requires redaction the gateway could not fully apply; blocked', 'incomplete_redaction', verdict.reasons));
@@ -276,17 +288,28 @@ function createGateway(overrides = {}) {
 
     // 3. Scan the model output BEFORE it reaches the caller (fail-closed).
     let outJson = up.json;
-    const respText = adapter.responseText(outJson);
+    if (canonical.carriesExplicitBinary(outJson) || carriesOpaqueSensitiveContent(outJson)) {
+      metrics.responseBlocked += 1;
+      metrics.failClosed += 1;
+      return res.status(403).json(openAiError('Model response blocked by RedactWall policy', 'response_blocked_by_redactwall'));
+    }
+    const respText = canonical.deepText(outJson);
     if (respText && respText.trim()) {
       const scan = await client.scanResponse({
         text: respText, user: identity.user, orgId: identity.orgId,
         destination: destinationLabel(), source: 'ai_gateway',
       });
-      if (scan.blocked || scan.decision === 'block') {
+      const responseAction = classifyResponseVerdict(scan);
+      if (responseAction === 'invalid') {
+        metrics.responseBlocked += 1;
+        metrics.failClosed += 1;
+        return res.status(403).json(openAiError('Model response withheld because RedactWall returned an invalid verdict', 'response_blocked_by_redactwall'));
+      }
+      if (responseAction === 'block') {
         metrics.responseBlocked += 1;
         return res.status(403).json(openAiError('Model response blocked by RedactWall policy', 'response_blocked_by_redactwall', scan.reasons));
       }
-      if (scan.decision === 'redact') {
+      if (responseAction === 'redact') {
         // Redact the FULL output locally, per choice — NOT the control plane's
         // `redacted` field, which is a 600-char audit preview (truncates long
         // answers) applied only to choices[0] (leaves n>1 choices raw). Withhold
@@ -296,15 +319,54 @@ function createGateway(overrides = {}) {
           metrics.responseBlocked += 1;
           return res.status(403).json(openAiError('Model response withheld by RedactWall policy', 'response_blocked_by_redactwall', scan.reasons));
         }
-        outJson = canonical.mapResponseText(outJson, (t) => detect.redact(t, detect.analyze(t).findings));
+        outJson = canonical.mapStrings(outJson, (t) => detect.redact(t, detect.analyze(t).findings));
+        if (hasLocalSensitivity(canonical.deepText(outJson))) {
+          metrics.responseBlocked += 1;
+          return res.status(403).json(openAiError('Model response withheld by RedactWall policy', 'response_blocked_by_redactwall', scan.reasons));
+        }
         metrics.responseRedacted += 1;
       }
     }
 
     // 4. If the request was tokenized, rehydrate the (scanned) response locally,
-    // in every choice — the token map never left the gateway.
+    // in content-bearing response fields only. Provider ids and metadata are
+    // never rehydration targets because they may contain attacker-controlled
+    // token strings. Scan the complete rehydrated envelope once more before it
+    // reaches the caller because the first scan saw opaque tokens, not values.
     if (redactMap) {
       outJson = canonical.mapResponseText(outJson, (t) => detect.detokenize(t, redactMap));
+      if (canonical.carriesExplicitBinary(outJson) || carriesOpaqueSensitiveContent(outJson)) {
+        metrics.responseBlocked += 1;
+        metrics.failClosed += 1;
+        return res.status(403).json(openAiError('Model response blocked by RedactWall policy', 'response_blocked_by_redactwall'));
+      }
+      const finalText = canonical.deepText(outJson);
+      const finalScan = await client.scanResponse({
+        text: finalText, user: identity.user, orgId: identity.orgId,
+        destination: destinationLabel(), source: 'ai_gateway',
+      });
+      const finalAction = classifyResponseVerdict(finalScan);
+      if (finalAction === 'invalid') {
+        metrics.responseBlocked += 1;
+        metrics.failClosed += 1;
+        return res.status(403).json(openAiError('Model response withheld because RedactWall returned an invalid verdict', 'response_blocked_by_redactwall'));
+      }
+      if (finalAction === 'block') {
+        metrics.responseBlocked += 1;
+        return res.status(403).json(openAiError('Model response blocked by RedactWall policy', 'response_blocked_by_redactwall', finalScan.reasons));
+      }
+      if (finalAction === 'redact') {
+        if (!responseRedactionCovers(finalText, finalScan)) {
+          metrics.responseBlocked += 1;
+          return res.status(403).json(openAiError('Model response withheld by RedactWall policy', 'response_blocked_by_redactwall', finalScan.reasons));
+        }
+        outJson = canonical.mapResponseText(outJson, (t) => detect.redact(t, detect.analyze(t).findings));
+        if (hasLocalSensitivity(canonical.deepText(outJson))) {
+          metrics.responseBlocked += 1;
+          return res.status(403).json(openAiError('Model response withheld by RedactWall policy', 'response_blocked_by_redactwall', finalScan.reasons));
+        }
+        metrics.responseRedacted += 1;
+      }
     }
 
     if (wantsStream) return streamJson(res, outJson, kind);
@@ -317,14 +379,46 @@ function createGateway(overrides = {}) {
     res.setHeader('content-type', 'text/event-stream');
     res.setHeader('cache-control', 'no-cache');
     res.setHeader('connection', 'keep-alive');
-    const choice = (json.choices && json.choices[0]) || {};
-    const content = (choice.message && choice.message.content) || choice.text || '';
+    const choices = Array.isArray(json.choices) && json.choices.length ? json.choices : [{}];
     const model = json.model || 'redactwall-gateway';
-    const base = { id: json.id || 'gw', object: kind === 'completions' ? 'text_completion' : 'chat.completion.chunk', model };
-    const delta = kind === 'completions' ? { text: content } : { choices: [{ index: 0, delta: { role: 'assistant', content }, finish_reason: null }] };
-    const stop = kind === 'completions' ? { index: 0, text: '', finish_reason: 'stop' } : { index: 0, delta: {}, finish_reason: 'stop' };
-    res.write('data: ' + JSON.stringify({ ...base, ...(kind === 'completions' ? { choices: [{ index: 0, text: content, finish_reason: null }] } : delta) }) + '\n\n');
-    res.write('data: ' + JSON.stringify({ ...base, choices: [stop] }) + '\n\n');
+    const base = {
+      id: json.id || 'gw',
+      object: kind === 'completions' ? 'text_completion' : 'chat.completion.chunk',
+      model,
+      ...(json.created != null ? { created: json.created } : {}),
+      ...(json.system_fingerprint != null ? { system_fingerprint: json.system_fingerprint } : {}),
+    };
+    const contentChoices = choices.map((choice, choiceIndex) => {
+      const index = choice.index ?? choiceIndex;
+      if (kind === 'completions') {
+        return {
+          index,
+          text: typeof choice.text === 'string' ? choice.text : '',
+          finish_reason: null,
+          ...(choice.logprobs != null ? { logprobs: choice.logprobs } : {}),
+        };
+      }
+      const message = choice.message && typeof choice.message === 'object' ? choice.message : {};
+      const delta = { role: message.role || 'assistant' };
+      if (typeof message.content === 'string') delta.content = message.content;
+      if (Array.isArray(message.tool_calls)) {
+        delta.tool_calls = message.tool_calls.map((tool, toolIndex) => ({ index: tool.index ?? toolIndex, ...tool }));
+      }
+      if (message.function_call) delta.function_call = message.function_call;
+      return {
+        index,
+        delta,
+        finish_reason: null,
+        ...(choice.logprobs != null ? { logprobs: choice.logprobs } : {}),
+      };
+    });
+    const terminalChoices = choices.map((choice, choiceIndex) => ({
+      index: choice.index ?? choiceIndex,
+      ...(kind === 'completions' ? { text: '' } : { delta: {} }),
+      finish_reason: choice.finish_reason || 'stop',
+    }));
+    res.write('data: ' + JSON.stringify({ ...base, choices: contentChoices }) + '\n\n');
+    res.write('data: ' + JSON.stringify({ ...base, choices: terminalChoices, ...(json.usage ? { usage: json.usage } : {}) }) + '\n\n');
     res.write('data: [DONE]\n\n');
     res.end();
   }
@@ -359,6 +453,7 @@ function createGateway(overrides = {}) {
 
 function startGateway(overrides = {}) {
   const { app, cfg } = createGateway(overrides);
+  validateProviderCredentials(cfg.provider, cfg.upstreamApiKey);
   const server = app.listen(cfg.port, () => {
     // eslint-disable-next-line no-console
     console.log(`RedactWall AI Gateway on :${cfg.port} → provider=${cfg.provider} control-plane=${cfg.controlPlaneUrl}`);

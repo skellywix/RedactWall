@@ -5,10 +5,21 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const collector = require('../sensors/endpoint-agent/collectors/protected-upload');
 const handoff = require('../sensors/endpoint-agent/native-handoff');
 
 const SECRET = 'native-handoff-secret-000000000000000001';
+const POLICY_KEYS = crypto.generateKeyPairSync('ed25519');
+const POLICY_PUBLIC_KEY = POLICY_KEYS.publicKey.export({ type: 'spki', format: 'pem' }).toString();
+
+function signedPolicyBundle(policy) {
+  const issuedAt = new Date().toISOString();
+  const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+  const policyHash = crypto.createHash('sha256').update(JSON.stringify(policy)).digest('hex');
+  const input = JSON.stringify({ version: 1, issuedAt, expiresAt, policyHash });
+  return { version: 1, issuedAt, expiresAt, policy, signature: crypto.sign(null, Buffer.from(input), POLICY_KEYS.privateKey).toString('base64') };
+}
 
 function tempDir(t, prefix = 'ps-desktop-collector-') {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -23,6 +34,13 @@ function captureConsole() {
     log(message) { lines.push(['log', message]); },
     error(message) { lines.push(['error', message]); },
   };
+}
+
+function jsonResponse(status, body, headers = {}) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json', ...headers },
+  });
 }
 
 function withCleanHandoffEnv(t) {
@@ -40,6 +58,7 @@ function withCleanHandoffEnv(t) {
     'INGEST_API_KEY',
     'REDACTWALL_INGEST_API_KEY',
     'REDACTWALL_REQUEST_TIMEOUT_MS',
+    'REDACTWALL_ALLOW_INSECURE_SERVER',
   ];
   const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
   for (const key of keys) delete process.env[key];
@@ -92,22 +111,25 @@ test('collector resolves desktop destination from control-plane policy', async (
   fs.writeFileSync(envPath, [
     `ENDPOINT_AGENT_HANDOFF_SECRET=${SECRET}`,
     `ENDPOINT_AGENT_HANDOFF_DIR=${path.join(dir, 'handoff')}`,
-    'REDACTWALL_URL=http://redactwall.unit.test',
+    'REDACTWALL_URL=https://redactwall.unit.test',
     'INGEST_API_KEY=policy-key',
   ].join('\n') + '\n');
 
   let request;
   const destination = await collector.resolveDestination({
     envPath,
+    policyPublicKey: POLICY_PUBLIC_KEY,
+    policyCachePath: path.join(dir, 'policy-cache', 'bundle.json'),
     fetchImpl: async (url, opts) => {
-      request = { url, headers: opts.headers };
-      return { ok: true, json: async () => ({ desktopCollectorDestination: 'Copilot Desktop' }) };
+      request = { url, headers: opts.headers, redirect: opts.redirect };
+      return jsonResponse(200, signedPolicyBundle({ desktopCollectorDestination: 'Copilot Desktop' }));
     },
   });
 
   assert.strictEqual(destination, 'Copilot Desktop');
-  assert.strictEqual(request.url, 'http://redactwall.unit.test/api/v1/policy');
+  assert.strictEqual(request.url, 'https://redactwall.unit.test/api/v1/policy/bundle');
   assert.strictEqual(request.headers['x-api-key'], 'policy-key');
+  assert.strictEqual(request.redirect, 'error');
 });
 
 test('explicit collector destination overrides policy and local fallback', async (t) => {
@@ -117,7 +139,7 @@ test('explicit collector destination overrides policy and local fallback', async
   fs.writeFileSync(envPath, [
     `ENDPOINT_AGENT_HANDOFF_SECRET=${SECRET}`,
     `ENDPOINT_AGENT_HANDOFF_DIR=${path.join(dir, 'handoff')}`,
-    'REDACTWALL_URL=http://redactwall.unit.test',
+    'REDACTWALL_URL=https://redactwall.unit.test',
     'INGEST_API_KEY=policy-key',
     'ENDPOINT_AGENT_DESKTOP_DESTINATION=Local Fallback',
   ].join('\n') + '\n');
@@ -136,23 +158,52 @@ test('explicit collector destination overrides policy and local fallback', async
 test('collector destination falls back through env and handles policy fetch misses', async (t) => {
   withCleanHandoffEnv(t);
   process.env.ENDPOINT_AGENT_DESKTOP_DESTINATION = 'Env Desktop';
-  process.env.REDACTWALL_URL = 'http://redactwall.unit.test/';
+  process.env.REDACTWALL_URL = 'https://redactwall.unit.test/';
   process.env.INGEST_API_KEY = 'policy-key';
 
-  assert.strictEqual(collector.configuredServer(), 'http://redactwall.unit.test/');
+  assert.strictEqual(collector.configuredServer(), 'https://redactwall.unit.test/');
   assert.strictEqual(collector.configuredKey(), 'policy-key');
   assert.strictEqual(await collector.fetchPolicyDestination({
-    fetchImpl: async () => ({ ok: false, json: async () => ({ desktopCollectorDestination: 'Ignored' }) }),
+    fetchImpl: async () => jsonResponse(503, { desktopCollectorDestination: 'Ignored' }),
   }), '');
   assert.strictEqual(await collector.fetchPolicyDestination({
     fetchImpl: async () => { throw new Error('network down'); },
   }), '');
   assert.strictEqual(await collector.resolveDestination({
-    fetchImpl: async () => ({ ok: true, json: async () => ({ desktopCollectorDestination: '' }) }),
+    fetchImpl: async () => jsonResponse(200, { desktopCollectorDestination: '' }),
   }), 'Env Desktop');
 
   delete process.env.ENDPOINT_AGENT_DESKTOP_DESTINATION;
   assert.strictEqual(await collector.fetchPolicyDestination({ fetchImpl: null }), '');
+});
+
+test('collector rejects cleartext remote policy URLs and bounds policy bodies', async (t) => {
+  withCleanHandoffEnv(t);
+  let calls = 0;
+  assert.strictEqual(await collector.fetchPolicyDestination({
+    server: 'http://redactwall.unit.test',
+    key: 'policy-key',
+    fetchImpl: async () => { calls += 1; },
+  }), '');
+  assert.strictEqual(calls, 0);
+
+  let cancelled = 0;
+  const stalled = new Response(new ReadableStream({
+    cancel() { cancelled += 1; },
+  }), { status: 200, headers: { 'content-type': 'application/json' } });
+  assert.strictEqual(await collector.fetchPolicyDestination({
+    server: 'https://redactwall.unit.test',
+    key: 'policy-key',
+    policyTimeoutMs: 10,
+    fetchImpl: async () => stalled,
+  }), '');
+  assert.strictEqual(cancelled, 1);
+
+  assert.strictEqual(await collector.fetchPolicyDestination({
+    server: 'https://redactwall.unit.test',
+    key: 'policy-key',
+    fetchImpl: async () => jsonResponse(200, { padding: 'x'.repeat(600 * 1024) }),
+  }), '');
 });
 
 test('protected upload writes signed handoff events without file content or file path in public result', async (t) => {
@@ -231,7 +282,7 @@ test('protected upload handles repeated files as one bounded batch', async (t) =
   assert.strictEqual(fs.readdirSync(handoffDir).filter((file) => file.endsWith('.json')).length, 2);
 });
 
-test('wait mode reports consumed when the endpoint agent removes the handoff file', async (t) => {
+test('wait mode does not treat queue-file disappearance as terminal success', async (t) => {
   const dir = tempDir(t);
   const handoffPath = path.join(dir, 'evt.json');
   fs.writeFileSync(handoffPath, '{}');
@@ -240,7 +291,7 @@ test('wait mode reports consumed when the endpoint agent removes the handoff fil
     timeoutMs: 1000,
     pollMs: 10,
   });
-  assert.deepStrictEqual(result, { consumed: true });
+  assert.deepStrictEqual(result, { consumed: false, reason: 'handoff_missing_without_terminal_result' });
 });
 
 test('protected upload wait mode reports consumed public results', async (t) => {
@@ -256,7 +307,16 @@ test('protected upload wait mode reports consumed public results', async (t) => 
   ].join('\n') + '\n');
 
   const expectedHandoff = path.join(handoffDir, 'evt_wait_consumed.json');
-  setTimeout(() => fs.rmSync(expectedHandoff, { force: true }), 30);
+  setTimeout(async () => {
+    const event = handoff.readHandoffFile(expectedHandoff, {
+      secret: SECRET,
+      now: new Date('2026-06-27T20:15:00.000Z'),
+    });
+    await handoff.withHandoffClaim(event, expectedHandoff, async () => ({
+      id: 'q_wait_consumed', decision: 'allow', status: 'allowed',
+    }), { secret: SECRET });
+    fs.rmSync(expectedHandoff, { force: true });
+  }, 30);
   const result = await collector.collectProtectedUploads({
     files: [sourceFile],
     envPath,
@@ -265,7 +325,7 @@ test('protected upload wait mode reports consumed public results', async (t) => 
     nonce: 'collector-nonce',
     now: new Date('2026-06-27T20:15:00.000Z'),
     wait: true,
-    timeoutMs: 1000,
+    timeoutMs: 15000,
     pollMs: 50,
   });
 
@@ -275,7 +335,51 @@ test('protected upload wait mode reports consumed public results', async (t) => 
     id: 'evt_wait_consumed',
     destination: 'Desktop AI',
     consumed: true,
+    decision: 'allow',
+    terminalStatus: 'allowed',
   }]);
+});
+
+test('protected upload wait mode fails when terminal inspection is unavailable', async (t) => {
+  withCleanHandoffEnv(t);
+  const dir = tempDir(t);
+  const handoffDir = path.join(dir, 'handoff');
+  const envPath = path.join(dir, 'endpoint-agent.env');
+  const sourceFile = path.join(dir, 'member-upload.txt');
+  fs.writeFileSync(sourceFile, 'Local file body.');
+  fs.writeFileSync(envPath, [
+    `ENDPOINT_AGENT_HANDOFF_SECRET=${SECRET}`,
+    `ENDPOINT_AGENT_HANDOFF_DIR=${handoffDir}`,
+  ].join('\n') + '\n');
+  const expectedHandoff = path.join(handoffDir, 'evt_wait_blocked.json');
+  setTimeout(async () => {
+    const event = handoff.readHandoffFile(expectedHandoff, {
+      secret: SECRET,
+      now: new Date('2026-06-27T20:16:00.000Z'),
+    });
+    await handoff.withHandoffClaim(event, expectedHandoff, async () => ({
+      decision: 'block', status: 'file_missing_or_unreadable',
+    }), { secret: SECRET });
+    fs.rmSync(expectedHandoff, { force: true });
+  }, 30);
+
+  const result = await collector.collectProtectedUploads({
+    files: [sourceFile],
+    envPath,
+    destination: 'Desktop AI',
+    id: 'evt_wait_blocked',
+    nonce: 'collector-blocked-nonce',
+    now: new Date('2026-06-27T20:16:00.000Z'),
+    wait: true,
+    timeoutMs: 15000,
+    pollMs: 50,
+  });
+
+  assert.strictEqual(result.status, 'failed');
+  assert.strictEqual(result.failed, 1);
+  assert.strictEqual(result.results[0].decision, 'block');
+  assert.strictEqual(result.results[0].terminalStatus, 'file_missing_or_unreadable');
+  assert.strictEqual(collector.exitCodeForResult(result), 1);
 });
 
 test('wait mode reports queued when the handoff is not consumed before timeout', async (t) => {
@@ -355,7 +459,7 @@ test('collector public errors and human output are bounded', () => {
   assert.deepStrictEqual(io.lines.map(([, message]) => message), [
     'RedactWall protected upload failed: 2 file(s), 1 failed',
     '  - failed: file is not available',
-    '  - written: evt_1 -> Desktop AI (consumed)',
+    '  - written: evt_1 -> Desktop AI (inspection complete)',
   ]);
 });
 

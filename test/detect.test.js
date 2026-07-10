@@ -13,6 +13,7 @@
  */
 const test = require('node:test');
 const assert = require('node:assert');
+const zlib = require('node:zlib');
 const D = require('../detection-engine/detect');
 
 const find = (text) => D.analyze(text);
@@ -37,6 +38,154 @@ test('true positives — structured PII is caught', () => {
   assert.ok(hasType('legacy marker PROMPTWALL-CANARY-DEMO2026ABCDEF still blocks after rename', 'CANARY_TOKEN'), 'legacy PromptWall canary token');
   assert.ok(hasType('older marker PROMPTSENTINEL-CANARY-DEMO2026ABCDEF still blocks after rename', 'CANARY_TOKEN'), 'legacy PromptSentinel canary token');
   assert.ok(hasType('email me at jane.doe@example.com', 'EMAIL_ADDRESS'), 'email');
+});
+
+test('reversible encodings map sensitive findings to the exact encoded span', () => {
+  const raw = 'SSN 123-45-6789';
+  const base64 = Buffer.from(raw).toString('base64');
+  const variants = [
+    base64,
+    Buffer.from(base64).toString('base64'),
+    Buffer.from(JSON.stringify({ text: base64 })).toString('base64'),
+    Buffer.from(base64).toString('hex'),
+    Buffer.from('姓名 ' + raw).toString('base64'),
+    Buffer.from('🙂 ' + raw).toString('base64'),
+  ];
+
+  for (const encoded of variants) {
+    const analysis = D.analyze(`prefix ${encoded} suffix`);
+    const finding = analysis.findings.find((item) => item.type === 'US_SSN');
+    assert.ok(finding, encoded);
+    assert.strictEqual(finding.start, 7);
+    assert.strictEqual(finding.end, 7 + encoded.length);
+    assert.strictEqual(finding.value, encoded);
+    assert.ok(['base64', 'hex'].includes(finding.encoded));
+    assert.strictEqual(D.redact(`prefix ${encoded} suffix`, analysis.findings).includes(encoded), false);
+  }
+});
+
+test('repeated encoded values are each mapped and benign encodings stay clean', () => {
+  const sensitive = Buffer.from('SSN 123-45-6789').toString('base64');
+  const repeated = D.analyze(`${sensitive} then ${sensitive}`);
+  assert.strictEqual(repeated.findings.filter((item) => item.type === 'US_SSN').length, 2);
+
+  for (const benign of [
+    'CustomerAccountStatus',
+    Buffer.from('quarterly branch hours').toString('base64'),
+    Buffer.from(Buffer.from('quarterly branch hours').toString('base64')).toString('base64'),
+    Buffer.from('quarterly branch hours').toString('hex'),
+    '550e8400e29b41d4a716446655440000',
+    'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1bml0LXVzZXIifQ.signature',
+    'src/components/Account2026/View',
+    'https://api.example/v1/items/2026',
+    'C++Programming2026',
+  ]) {
+    const analysis = D.analyze(benign, { opaqueEncodedContent: true });
+    assert.deepStrictEqual(analysis.findings, [], benign);
+    assert.strictEqual(!!analysis.opaqueEncoded, false, benign);
+  }
+});
+
+test('known binary containers are marked opaque without exposing decoded bytes', () => {
+  const gzip = zlib.gzipSync(Buffer.from('SSN 123-45-6789')).toString('base64');
+  const analysis = D.analyze(gzip);
+  assert.strictEqual(analysis.findings.length, 0);
+  assert.strictEqual(analysis.opaqueEncoded, true);
+  assert.deepStrictEqual(analysis.opaqueEncodedSpans, [{ start: 0, end: gzip.length, kind: 'gzip' }]);
+});
+
+test('content-bound strict Base64 binary is opaque without classifying IDs or hashes', () => {
+  const binary = Buffer.from([0, 255, 1, 254, 2, 253, 3, 252, 4, 251, 5, 250]).toString('base64');
+  assert.strictEqual(!!D.analyze(binary).opaqueEncoded, false, 'generic binary requires content context');
+
+  const analysis = D.analyze(binary, { opaqueEncodedContent: true });
+  assert.strictEqual(analysis.findings.length, 0);
+  assert.strictEqual(analysis.opaqueEncoded, true);
+  assert.deepStrictEqual(analysis.opaqueEncodedSpans, [{ start: 0, end: binary.length, kind: 'binary' }]);
+
+  const benign = Buffer.from('ordinary encoded prose').toString('base64');
+  assert.strictEqual(!!D.analyze(benign, { opaqueEncodedContent: true }).opaqueEncoded, false);
+});
+
+test('recognized secret tokens keep their specific hard stop while separate opaque bytes still fail closed', () => {
+  const awsKey = 'AKIA1234567890ABCDEF';
+  const classified = D.analyze(`Synthetic AWS key ${awsKey} found in config.`, { opaqueEncodedContent: true });
+  assert.ok(classified.findings.some((finding) => finding.type === 'SECRET_KEY'));
+  assert.strictEqual(!!classified.opaqueEncoded, false);
+
+  const binary = 'AAECAwQFBgcICQoL';
+  const mixed = D.analyze(`${awsKey} ${binary}`, { opaqueEncodedContent: true });
+  assert.ok(mixed.findings.some((finding) => finding.type === 'SECRET_KEY'));
+  assert.strictEqual(mixed.opaqueEncoded, true);
+});
+
+test('UTF-16 Base64 is decoded recursively and unpadded binary stays opaque', () => {
+  const raw = 'SSN 123-45-6789';
+  const littleEndian = Buffer.from(raw, 'utf16le');
+  const bigEndian = Buffer.from(littleEndian);
+  for (let index = 0; index < bigEndian.length; index += 2) {
+    [bigEndian[index], bigEndian[index + 1]] = [bigEndian[index + 1], bigEndian[index]];
+  }
+
+  for (const encoded of [littleEndian.toString('base64'), bigEndian.toString('base64')]) {
+    const analysis = D.analyze(encoded, { opaqueEncodedContent: true });
+    assert.ok(analysis.findings.some((finding) => finding.type === 'US_SSN'), encoded);
+    assert.strictEqual(analysis.findings[0].start, 0);
+    assert.strictEqual(analysis.findings[0].end, encoded.length);
+    assert.strictEqual(analysis.opaqueEncoded, undefined);
+  }
+
+  const unpaddedBinary = 'AAECAwQFBgcICQoL';
+  const opaque = D.analyze(unpaddedBinary, { opaqueEncodedContent: true });
+  assert.deepStrictEqual(opaque.findings, []);
+  assert.strictEqual(opaque.opaqueEncoded, true);
+
+  for (const identifier of [
+    'CustomerAccountStatus20260710',
+    '550e8400-e29b-41d4-a716-446655440000',
+    'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1bml0LXVzZXIifQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c',
+  ]) {
+    const analysis = D.analyze(identifier, { opaqueEncodedContent: true });
+    assert.strictEqual(!!analysis.opaqueEncoded, false, identifier);
+  }
+});
+
+test('ordinary labels plus grouped card digits are not misclassified as wrapped Base64', () => {
+  const text = 'Loan file. SSN 524-71-9043. Card 4111 1111 1111 1111.';
+  const analysis = D.analyze(text, { opaqueEncodedContent: true });
+
+  assert.strictEqual(analysis.opaqueEncoded, undefined);
+  assert.ok(analysis.findings.some((finding) => finding.type === 'US_SSN'));
+  assert.ok(analysis.findings.some((finding) => finding.type === 'CREDIT_CARD'));
+});
+
+test('unified diff addition markers do not hide encoded content', () => {
+  const encodedSsn = Buffer.from('SSN 524-71-9043').toString('base64');
+  const hexSsn = Buffer.from('SSN 524-71-9043').toString('hex');
+  const binary = Buffer.from([0, 255, 1, 254, 2, 253, 3, 252, 4, 251, 5, 250]).toString('base64');
+
+  for (const encoded of [encodedSsn, hexSsn]) {
+    const analysis = D.analyze(`diff\n+${encoded}`, { opaqueEncodedContent: true });
+    const finding = analysis.findings.find((item) => item.type === 'US_SSN');
+    assert.ok(finding, encoded);
+    assert.strictEqual(finding.start, 6);
+    assert.strictEqual(finding.value, encoded);
+  }
+  assert.strictEqual(D.analyze(`diff\n+${binary}`, { opaqueEncodedContent: true }).opaqueEncoded, true);
+});
+
+test('encoding preflight stays bounded on 200 KB of long benign alphanumeric prose', () => {
+  const unit = 'compliance2026 governance2025 operationally2024 documented2023 ';
+  const text = unit.repeat(Math.ceil((200 * 1024) / unit.length)).slice(0, 200 * 1024);
+  const started = Date.now();
+  const analysis = D.analyze(text, { opaqueEncodedContent: true });
+  const elapsed = Date.now() - started;
+
+  assert.deepStrictEqual(analysis.findings, []);
+  assert.strictEqual(!!analysis.opaqueEncoded, false);
+  assert.ok(elapsed < 2000, `encoding preflight took ${elapsed}ms`);
 });
 
 test('true positives - regulated customer identifiers are caught', () => {
@@ -140,6 +289,9 @@ test('checksum validators accept known-good values and reject corrupted ones', (
   assert.ok(!D.vinValid('1HGCM82633A004353'), 'vin bad check digit');
   assert.ok(!D.vinValid('1HGCM82633A00435I'), 'vin illegal letter I');
   assert.ok(D.datePlausible('02/29/2000'), 'leap day on a leap year');
+  assert.ok(D.itinPlausible('912-70-1234'), 'valid ITIN allocation range');
+  assert.strictEqual(D.itinPlausible('912-93-1234'), false, 'unallocated ITIN middle range');
+  assert.strictEqual(D.itinPlausible('812-70-1234'), false, 'ITIN must start with 9');
   assert.ok(!D.datePlausible('02/29/1900'), 'century non-leap year');
   assert.ok(!D.datePlausible('02/30/1990'), 'impossible day');
 });

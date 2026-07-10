@@ -18,6 +18,7 @@ const path = require('path');
 const db = require('./db');
 const formats = require('./siem-formats');
 const { outboundHttpsUrl } = require('./url-policy');
+const { cancelResponseBody } = require('../sensors/shared/bounded-response');
 
 const CONFIG_PATH = process.env.REDACTWALL_SUBSCRIPTIONS_PATH || process.env.PROMPTWALL_SUBSCRIPTIONS_PATH || process.env.SENTINEL_SUBSCRIPTIONS_PATH
   || path.join(__dirname, '..', 'config', 'subscriptions.json');
@@ -171,8 +172,15 @@ async function deliverTo(dest, alert, opts = {}) {
       // Email relays get the same prompt-free event the SIEM adapters send.
       const res = dest.type === 'email'
         ? await sendMail({ to: dest.to, subject: formats.summaryLine(alert), text: emailBody(alert) })
-        : await fetchImpl(req.url, { method: req.method, headers: req.headers, body: req.body, signal: outboundSignal() });
+        : await fetchImpl(req.url, {
+          method: req.method,
+          redirect: 'error',
+          headers: req.headers,
+          body: req.body,
+          signal: outboundSignal(),
+        });
       httpStatus = res && res.status;
+      if (dest.type !== 'email') await cancelResponseBody(res);
       if (res && (res.ok || res.status === 200)) {
         return db.recordDelivery({ destId: dest.id, destName: dest.name, type: dest.type, dedupeKey, status: 'delivered', attempts, httpStatus });
       }

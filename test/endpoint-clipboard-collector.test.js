@@ -86,6 +86,55 @@ test('clear-on-block clears locally and records a blocked clipboard action', asy
   assert.ok(!JSON.stringify(result).includes(RAW_SSN));
 });
 
+test('encoded clipboard evasion is cleared even in report-only mode', async () => {
+  const encodedSsn = Buffer.from(`Member SSN ${RAW_SSN}`).toString('base64');
+  const opaqueBinary = Buffer.from([0, 255, 1, 254, 2, 253, 3, 252, 4, 251, 5, 250]).toString('base64');
+
+  for (const raw of [encodedSsn, Buffer.from(`Member SSN ${RAW_SSN}`).toString('hex'), opaqueBinary]) {
+    let cleared = 0;
+    let reportRequest;
+    const result = await collectClipboard({
+      readClipboard: async () => raw,
+      clearClipboard: async () => { cleared += 1; },
+      policy: { enforcementMode: 'warn', alwaysBlock: [], ignore: [], disabledDetectors: [] },
+      report: async (record) => {
+        reportRequest = record;
+        return { id: 'q_encoded_clipboard', status: 'action_blocked' };
+      },
+    });
+
+    assert.strictEqual(cleared, 1);
+    assert.strictEqual(result.status, 'blocked');
+    assert.strictEqual(result.cleared, true);
+    assert.strictEqual(reportRequest.clientOutcome, 'action_blocked');
+    assert.ok(!JSON.stringify(reportRequest).includes(raw));
+  }
+});
+
+test('clipboard content beyond the inspection limit is cleared and fails closed', async () => {
+  let cleared = 0;
+  let reportRequest;
+  const result = await collectClipboard({
+    readClipboard: async () => 'A'.repeat(1025),
+    clearClipboard: async () => { cleared += 1; },
+    maxChars: 1024,
+    policy: { enforcementMode: 'warn', alwaysBlock: [], ignore: [], disabledDetectors: [] },
+    report: async (record) => {
+      reportRequest = record;
+      return { id: 'q_oversize_clipboard', status: 'action_blocked' };
+    },
+  });
+
+  assert.strictEqual(cleared, 1);
+  assert.strictEqual(result.status, 'blocked');
+  assert.strictEqual(result.cleared, true);
+  assert.strictEqual(result.reason, 'too_large');
+  assert.strictEqual(reportRequest.clientOutcome, 'action_blocked');
+  assert.match(reportRequest.note, /too large to inspect/);
+  assert.ok(!JSON.stringify(reportRequest).includes('A'.repeat(100)));
+  assert.strictEqual(exitCodeForResult(result), 1);
+});
+
 test('clean and empty clipboard values do not report to the control plane', async () => {
   let calls = 0;
   const clean = await collectClipboard({
@@ -101,6 +150,24 @@ test('clean and empty clipboard values do not report to the control plane', asyn
   assert.strictEqual(clean.status, 'clean');
   assert.strictEqual(empty.status, 'empty');
   assert.strictEqual(calls, 0);
+});
+
+test('benign hashes, JWT-like IDs, and encoded prose stay clean on clipboard', async () => {
+  let reports = 0;
+  const values = [
+    'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+    'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1bml0LXVzZXIifQ.signature',
+    Buffer.from('ordinary encoded prose').toString('base64'),
+  ];
+  for (const value of values) {
+    const result = await collectClipboard({
+      readClipboard: async () => value,
+      policy: { enforcementMode: 'block', alwaysBlock: [], ignore: [], disabledDetectors: [] },
+      report: async () => { reports += 1; },
+    });
+    assert.strictEqual(result.status, 'clean', value);
+  }
+  assert.strictEqual(reports, 0);
 });
 
 test('default clipboard PowerShell commands are hidden and bounded', async () => {
@@ -133,6 +200,33 @@ test('default clipboard PowerShell commands are hidden and bounded', async () =>
   );
 });
 
+test('PowerShell maxBuffer overflow clears the clipboard before recording a label-only block', async () => {
+  const order = [];
+  const overflow = new Error(`stdout maxBuffer exceeded ${RAW_SSN}`);
+  overflow.code = 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER';
+  let reportRequest;
+  const result = await collectClipboard({
+    platform: 'win32',
+    execFileAsync: async () => { throw overflow; },
+    clearClipboard: async () => { order.push('clear'); },
+    originApp: null,
+    report: async (request) => {
+      order.push('report');
+      reportRequest = request;
+      return { id: 'q_clipboard_maxbuffer' };
+    },
+  });
+
+  assert.deepStrictEqual(order, ['clear', 'report']);
+  assert.strictEqual(result.status, 'blocked');
+  assert.strictEqual(result.reason, 'too_large');
+  assert.strictEqual(result.cleared, true);
+  assert.strictEqual(result.recorded, true);
+  assert.strictEqual(reportRequest.clientOutcome, 'action_blocked');
+  assert.match(reportRequest.prompt, /too large to inspect/);
+  assert.doesNotMatch(JSON.stringify({ result, reportRequest }), /524-71-9043|maxBuffer/);
+});
+
 test('clipboard guard keeps blocked result local even when recording fails', async () => {
   let cleared = 0;
   const result = await collectClipboard({
@@ -152,13 +246,18 @@ test('clipboard guard keeps blocked result local even when recording fails', asy
 });
 
 test('default policy/report path fails closed without an ingest key', async () => {
+  let cleared = 0;
   const result = await collectClipboard({
     readClipboard: async () => `Member SSN ${RAW_SSN}`,
+    clearClipboard: async () => { cleared += 1; },
     key: '',
   });
 
-  assert.strictEqual(result.status, 'flagged');
-  assert.strictEqual(result.sensitive, true);
+  assert.strictEqual(result.status, 'blocked');
+  assert.strictEqual(result.reason, 'policy_unavailable');
+  assert.strictEqual(result.cleared, true);
+  assert.strictEqual(cleared, 1);
+  assert.strictEqual(result.sensitive, false);
   assert.strictEqual(result.recorded, false);
   assert.match(result.error, /control plane recording unavailable/);
   assert.ok(!JSON.stringify(result).includes(RAW_SSN));

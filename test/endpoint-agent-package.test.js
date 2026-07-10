@@ -5,6 +5,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const AdmZip = require('adm-zip');
 
 const {
@@ -14,8 +15,19 @@ const {
   sha256,
   validateRuntimeFiles,
 } = require('../scripts/package-endpoint-agent');
+const { securePrivatePath } = require('../server/private-path');
 
 const root = path.join(__dirname, '..');
+const POLICY_KEYS = crypto.generateKeyPairSync('ed25519');
+const POLICY_PUBLIC_KEY = POLICY_KEYS.publicKey.export({ type: 'spki', format: 'pem' }).toString();
+
+function signedPolicyBundle(policy) {
+  const issuedAt = new Date().toISOString();
+  const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+  const policyHash = crypto.createHash('sha256').update(JSON.stringify(policy)).digest('hex');
+  const input = JSON.stringify({ version: 1, issuedAt, expiresAt, policyHash });
+  return { version: 1, issuedAt, expiresAt, policy, signature: crypto.sign(null, Buffer.from(input), POLICY_KEYS.privateKey).toString('base64') };
+}
 
 function tempDir(t, prefix = 'ps-endpoint-agent-package-') {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -23,7 +35,21 @@ function tempDir(t, prefix = 'ps-endpoint-agent-package-') {
   return dir;
 }
 
+function jsonResponse(status, body) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
 function minimalFiles(agentBody) {
+  const privateOcrContract = [
+    'const securePrivatePath = true;',
+    'secure(dir, { directory: true });',
+    "const fd = fsImpl.openSync(snapshot, 'wx', 0o600);",
+    'secure(snapshot, { directory: false });',
+    'fsImpl.writeFileSync(fd, buf);',
+  ].join('\n');
   return [
     { path: 'package.json', body: Buffer.from('{"version":"0.0.0"}') },
     { path: 'package-lock.json', body: Buffer.from('{}') },
@@ -32,12 +58,16 @@ function minimalFiles(agentBody) {
     { path: 'server/custom-detectors.js', body: Buffer.from('module.exports = {};') },
     { path: 'server/exact-match.js', body: Buffer.from('module.exports = {};') },
     { path: 'server/env.js', body: Buffer.from('module.exports = {};') },
+    { path: 'server/file-mutation-lock.js', body: Buffer.from('module.exports = {};') },
+    { path: 'server/private-path.js', body: Buffer.from('module.exports = {};') },
     { path: 'server/policy.js', body: Buffer.from('module.exports = {};') },
     { path: 'server/processors.js', body: Buffer.from('module.exports = {};') },
     { path: 'server/parse-pool.js', body: Buffer.from('module.exports = { extractText: async () => ({}) };') },
     { path: 'server/parse-child.js', body: Buffer.from('module.exports = {};') },
+    { path: 'sensors/shared/bounded-response.js', body: Buffer.from('module.exports = { readBoundedJson: async () => ({}) };') },
+    { path: 'sensors/shared/signed-policy.js', body: Buffer.from('module.exports = {};') },
     { path: 'sensors/shared/server-url.js', body: Buffer.from('function secureServerUrl() {}\nmodule.exports = { secureServerUrl };') },
-    { path: 'sensors/endpoint-agent/agent.js', body: Buffer.from(agentBody) },
+    { path: 'sensors/endpoint-agent/agent.js', body: Buffer.from(`${agentBody}\n${privateOcrContract}`) },
     {
       path: 'sensors/endpoint-agent/file-flow-profiles.js',
       body: Buffer.from('const MAX_FILE_FLOW_PROFILES = 8;\nfunction publicProfileChecks() {}\nmodule.exports = { publicProfileChecks, MAX_FILE_FLOW_PROFILES };\n'),
@@ -108,7 +138,7 @@ function minimalFiles(agentBody) {
     },
     {
       path: 'scripts/install-endpoint-agent.ps1',
-      body: Buffer.from('$taskArgs = "-File runner.ps1"\n[Parameter(Mandatory = $true)]\n[string]$IngestKey\nInstallClipboardGuard\ninstall-clipboard-guard.ps1\n'),
+      body: Buffer.from('$taskArgs = "-File runner.ps1"\n[Parameter(Mandatory = $true)]\n[string]$IngestKey\n[Parameter(Mandatory = $true)]\n[string]$PolicyPublicKeyPath\nREDACTWALL_POLICY_PUBLIC_KEY_PATH\nREDACTWALL_POLICY_CACHE_PATH\nInstallClipboardGuard\ninstall-clipboard-guard.ps1\n'),
     },
     {
       path: 'scripts/install-file-intent-host.ps1',
@@ -176,6 +206,7 @@ test('package script writes a prompt-free endpoint agent zip and integrity manif
   assert.strictEqual(manifest.checks.endpointRedactionHandoffIncluded, true);
   assert.strictEqual(manifest.checks.endpointFileFlowProfilesIncluded, true);
   assert.strictEqual(manifest.checks.endpointOcrIncluded, true);
+  assert.strictEqual(manifest.checks.endpointOcrPrivateSnapshots, true);
   assert.strictEqual(manifest.checks.endpointWasmOcrIncluded, true);
   assert.strictEqual(manifest.checks.aiToolInventoryIncluded, true);
   assert.strictEqual(manifest.checks.nativeHandoffPrototypeIncluded, true);
@@ -205,8 +236,11 @@ test('package script writes a prompt-free endpoint agent zip and integrity manif
     'detection-engine/detect.js',
     'server/custom-detectors.js',
     'server/env.js',
+    'server/file-mutation-lock.js',
+    'server/private-path.js',
     'server/policy.js',
     'server/processors.js',
+    'sensors/shared/bounded-response.js',
     'sensors/endpoint-agent/agent.js',
     'sensors/endpoint-agent/file-flow-profiles.js',
     'sensors/endpoint-agent/ocr.js',
@@ -247,6 +281,10 @@ test('package script writes a prompt-free endpoint agent zip and integrity manif
   assert.match(agent, /file-flow-profiles/);
   assert.match(agent, /startWatchedRoot/);
   assert.match(agent, /extractEndpointFile/);
+  assert.match(agent, /securePrivatePath/);
+  assert.match(agent, /secure\(dir, \{ \.\.\.security, directory: true \}\)/);
+  assert.match(agent, /openSync\(snapshot, 'wx', 0o600\)/);
+  assert.match(agent, /writeFileSync\(fd, buf\)/);
   assert.match(zip.readAsText('sensors/endpoint-agent/file-flow-profiles.js'), /publicProfileChecks/);
   assert.match(zip.readAsText('sensors/endpoint-agent/ocr.js'), /ENDPOINT_AGENT_OCR_COMMAND/);
   assert.match(zip.readAsText('sensors/endpoint-agent/ocr.js'), /extractImageFile/);
@@ -330,6 +368,23 @@ test('package validation covers endpoint runtime and installer guardrails', () =
       name: 'agent missing OCR bridge',
       files: minimalFiles("const KEY = process.env.INGEST_API_KEY || '';\nredacted_available\n.redactwall-redacted\nnative-handoff\nENDPOINT_AGENT_HANDOFF_SECRET\nfile-flow-profiles\nstartWatchedRoot"),
       message: /endpoint-local OCR/,
+    },
+    {
+      name: 'agent writes OCR bytes without a private empty snapshot',
+      files: replaceBody(validFiles, 'sensors/endpoint-agent/agent.js', validAgentBody),
+      message: /secure an empty private snapshot before writing image bytes/,
+    },
+    {
+      name: 'agent writes OCR bytes before securing the snapshot',
+      files: replaceBody(validFiles, 'sensors/endpoint-agent/agent.js', [
+        validAgentBody,
+        'const securePrivatePath = true;',
+        'secure(dir, { directory: true });',
+        "const fd = fsImpl.openSync(snapshot, 'wx', 0o600);",
+        'fsImpl.writeFileSync(fd, buf);',
+        'secure(snapshot, { directory: false });',
+      ].join('\n')),
+      message: /secure an empty private snapshot before writing image bytes/,
     },
     {
       name: 'OCR bridge missing runtime pieces',
@@ -442,6 +497,11 @@ test('package validation covers endpoint runtime and installer guardrails', () =
       message: /must be able to install the clipboard guard/,
     },
     {
+      name: 'endpoint installer omits the signed-policy pin',
+      files: replaceBody(validFiles, 'scripts/install-endpoint-agent.ps1', '$taskArgs = "-File runner.ps1"\n[Parameter(Mandatory = $true)]\n[string]$IngestKey\nInstallClipboardGuard\ninstall-clipboard-guard.ps1'),
+      message: /must provision a pinned policy key/,
+    },
+    {
       name: 'desktop collector installer missing shell action',
       files: replaceBody(validFiles, 'scripts/install-desktop-collector.ps1', 'REDACTWALL_ENDPOINT_AGENT_HANDOFF_DIR\nREDACTWALL_ENDPOINT_AGENT_HANDOFF_SECRET'),
       message: /register a per-user file shell action/,
@@ -535,14 +595,20 @@ test('packaged endpoint agent runs a package-to-install pilot smoke', async (t) 
   const configDir = path.join(installRoot, 'config');
   const configPath = path.join(configDir, 'endpoint-agent.env');
   const packageHandoffDir = path.join(installRoot, 'configured-native-handoff');
+  const policyPublicKeyPath = path.join(configDir, 'policy-public-key.pem');
   fs.mkdirSync(configDir, { recursive: true });
+  securePrivatePath(configDir, { directory: true, label: 'package pilot config' });
+  fs.writeFileSync(policyPublicKeyPath, POLICY_PUBLIC_KEY);
   fs.writeFileSync(configPath, [
     'REDACTWALL_URL=https://redactwall.package.test',
     'INGEST_API_KEY=pilot-ingest-key-000000000000000000000000000001',
+    'PROMPTWALL_TENANT_ID=cu-package-pilot',
     `ENDPOINT_AGENT_WATCH_DIR=${watchDir}`,
     `ENDPOINT_AGENT_HANDOFF_SECRET=native-handoff-secret-000000000000000001`,
     `ENDPOINT_AGENT_HANDOFF_DIR=${packageHandoffDir}`,
     'REDACTWALL_REQUEST_TIMEOUT_MS=250',
+    `REDACTWALL_POLICY_PUBLIC_KEY_PATH=${policyPublicKeyPath}`,
+    `REDACTWALL_POLICY_CACHE_PATH=${path.join(configDir, 'policy-cache.json')}`,
   ].join('\n') + '\n');
 
   const packaged = packageEndpointAgent({ outDir, now: new Date('2026-06-26T13:00:00.000Z') });
@@ -562,6 +628,12 @@ test('packaged endpoint agent runs a package-to-install pilot smoke', async (t) 
   assert.match(installScript, /\[Alias\("SentinelUrl"\)\]/);
   assert.match(installScript, /REDACTWALL_URL=\$RedactWallUrl/);
   assert.match(installScript, /INGEST_API_KEY=\$IngestKey/);
+  assert.ok(
+    installScript.indexOf('Set-Acl -LiteralPath $configRoot')
+      < installScript.indexOf('$configLines | Set-Content'),
+    'installer must harden the config directory before writing trust state',
+  );
+  assert.match(installScript, /Remove-Item -LiteralPath \$staleTrustPath -Force/);
   assert.match(installScript, /InstallDesktopCollector/);
   assert.match(installScript, /InstallClipboardGuard/);
   assert.match(installScript, /install-clipboard-guard\.ps1/);
@@ -597,7 +669,7 @@ test('packaged endpoint agent runs a package-to-install pilot smoke', async (t) 
   assert.match(uninstallScript, /endpoint-agent\.env/);
 
   const previousEnv = {};
-  for (const key of ['REDACTWALL_ENV_PATH', 'PROMPTWALL_ENV_PATH', 'SENTINEL_ENV_PATH', 'REDACTWALL_URL', 'PROMPTWALL_URL', 'SENTINEL_URL', 'INGEST_API_KEY', 'ENDPOINT_AGENT_WATCH_DIR', 'REDACTWALL_REQUEST_TIMEOUT_MS']) {
+  for (const key of ['REDACTWALL_ENV_PATH', 'PROMPTWALL_ENV_PATH', 'SENTINEL_ENV_PATH', 'REDACTWALL_URL', 'PROMPTWALL_URL', 'SENTINEL_URL', 'INGEST_API_KEY', 'REDACTWALL_TENANT_ID', 'PROMPTWALL_TENANT_ID', 'ENDPOINT_AGENT_WATCH_DIR', 'REDACTWALL_REQUEST_TIMEOUT_MS', 'REDACTWALL_POLICY_PUBLIC_KEY_PATH', 'REDACTWALL_POLICY_CACHE_PATH']) {
     previousEnv[key] = process.env[key];
     delete process.env[key];
   }
@@ -636,11 +708,10 @@ test('packaged endpoint agent runs a package-to-install pilot smoke', async (t) 
   const requests = [];
   const fetchImpl = async (url, opts = {}) => {
     requests.push({ url, method: opts.method || 'GET', body: opts.body || '' });
+    assert.strictEqual(opts.redirect, 'error');
     assert.strictEqual(opts.headers['x-api-key'], 'pilot-ingest-key-000000000000000000000000000001');
-    if (url === 'https://redactwall.package.test/api/v1/policy') {
-      return {
-        ok: true,
-        json: async () => ({
+    if (url === 'https://redactwall.package.test/api/v1/policy/bundle') {
+      return jsonResponse(200, signedPolicyBundle({
           enforcementMode: 'redact',
           blockMinSeverity: 2,
           blockRiskScore: 20,
@@ -654,11 +725,11 @@ test('packaged endpoint agent runs a package-to-install pilot smoke', async (t) 
             ignoreExtensions: ['.tmp'],
             maxFileBytes: 4096,
           },
-        }),
-      };
+      }));
     }
     if (url === 'https://redactwall.package.test/api/v1/gate') {
       const body = JSON.parse(opts.body);
+      assert.strictEqual(body.orgId, 'cu-package-pilot');
       if (body.channel === 'clipboard') {
         assert.strictEqual(body.source, 'endpoint_agent');
         assert.strictEqual(body.clientOutcome, 'action_blocked');
@@ -668,15 +739,12 @@ test('packaged endpoint agent runs a package-to-install pilot smoke', async (t) 
         assert.ok(body.clientFindings.some((finding) => finding.type === 'CREDIT_CARD'));
         assert.ok(!JSON.stringify(body).includes('524-71-9043'));
         assert.ok(!JSON.stringify(body).includes('4111 1111 1111 1111'));
-        return {
-          ok: true,
-          json: async () => ({
+        return jsonResponse(200, {
             id: 'q_packaged_clipboard',
             decision: 'block',
             mode: 'browser_action_block',
             status: 'action_blocked',
-          }),
-        };
+        });
       }
       assert.strictEqual(body.clientOutcome, 'redacted_available');
       assert.strictEqual(body.clientPreRedacted, true);
@@ -697,9 +765,7 @@ test('packaged endpoint agent runs a package-to-install pilot smoke', async (t) 
       assert.ok(!JSON.stringify(body).includes('524-71-9043'));
       assert.ok(!JSON.stringify(body).includes('4111 1111 1111 1111'));
       assert.strictEqual(body.contentBase64, undefined);
-      return {
-        ok: true,
-        json: async () => ({
+      return jsonResponse(200, {
           id: 'q_packaged_pilot',
           decision: 'redact',
           mode: 'redact',
@@ -708,15 +774,16 @@ test('packaged endpoint agent runs a package-to-install pilot smoke', async (t) 
           findings: body.clientFindings,
           categories: [],
           riskScore: body.clientRiskScore,
-        }),
-      };
+      });
     }
     throw new Error('unexpected packaged endpoint request: ' + url);
   };
 
   const scanner = await agent.refreshPolicy({ fetchImpl });
   assert.strictEqual(scanner.maxFileBytes, 4096);
-  assert.ok(scanner.ignoreExtensions.has('.tmp'));
+  assert.strictEqual(scanner.ignoreExtensions.has('.lock'), false);
+  assert.strictEqual(scanner.ignoreExtensions.has('.log'), false);
+  assert.strictEqual(scanner.ignoreExtensions.has('.tmp'), true);
 
   const result = await agent.scanFile(filename, { user: 'pilot-user', fetchImpl });
   assert.strictEqual(result.decision, 'redact');
@@ -731,7 +798,7 @@ test('packaged endpoint agent runs a package-to-install pilot smoke', async (t) 
   assert.match(companion, /Original file: \[sensitive filename\]/);
   assert.ok(!companion.includes('524-71-9043'));
   assert.ok(!companion.includes('4111 1111 1111 1111'));
-  assert.ok(requests.some((request) => request.url.endsWith('/api/v1/policy')));
+  assert.ok(requests.some((request) => request.url.endsWith('/api/v1/policy/bundle')));
   assert.ok(requests.some((request) => request.url.endsWith('/api/v1/gate')));
 
   const sourceDir = path.join(installRoot, 'native-source');

@@ -77,12 +77,12 @@ HTTPS with the same certificate; DNS decides which stack a hostname reaches.
    console when the zone is in Route 53), wait for status `ISSUED`, and record
    the certificate ARN. This ARN is the `CertificateArn` parameter you will
    pass to **every** stack deploy.
-3. **Rule:** never run a production stack without `CertificateArn`. Without
-   it, `infra/aws/customer-silo.yml` exposes plain HTTP on the ALB — that mode
-   exists only for short sandbox smoke tests.
+3. **Rule:** `CertificateArn` and the certificate-covered `PublicHostname` are
+   required by `infra/aws/customer-silo.yml`. The ALB always redirects HTTP to
+   HTTPS and has no HTTP-only application listener.
 4. **Per-stack DNS** happens at deploy time: after each CloudFormation stack
    comes up, create an alias A record (`admin`, `demo`, or the customer slug)
-   pointing at that stack's ALB DNS name (the stack's `Url` output).
+   pointing at that stack's `LoadBalancerDnsName` output.
 
 ## Phase 2 — Release Engineering (One-Time Hardening)
 
@@ -116,13 +116,14 @@ Do these once before the first production deploy.
 
    ```bash
    aws ecr create-repository --repository-name redactwall   # once
-   # then build and push, tagged with the app version:
-   # <account>.dkr.ecr.<region>.amazonaws.com/redactwall:0.3.0
+   # then build and push with the app-version tag, resolve its ECR digest,
+   # and deploy <account>.dkr.ecr.<region>.amazonaws.com/redactwall@sha256:<digest>
    ```
 
-   Tag images with the package version (`redactwall:0.3.0`), never `latest`.
-   The image URI is the `ImageUri` parameter for every stack, and upgrades
-   (Phase 9) are "push a new tag, update the stack".
+   Tag images with the package version (`redactwall:0.3.0`), never `latest`,
+   then resolve the pushed tag to its immutable ECR digest. The digest URI is
+   the `ImageUri` parameter for every stack, and upgrades (Phase 9) are
+   "push a new tag, resolve its digest, update the stack".
 
 ## Phase 3 — Database
 
@@ -158,7 +159,7 @@ watching, and it is the environment you will use daily.
    strong values with:
 
    ```bash
-   npm run setup:prod -- --skip-install --env vendor-ops.env
+   npm run setup:prod -- --customer-id vendor-ops --skip-install --env vendor-ops.env
    npm run mfa:uri -- --env vendor-ops.env --issuer "RedactWall vendor-ops"
    ```
 
@@ -173,7 +174,7 @@ watching, and it is the environment you will use daily.
        VpcId=<vpc> PublicSubnetIds=<a,b> InstanceSubnetId=<a> \
        ImageUri=<ecr-image> SecretArn=<vendor-ops-secret-arn> \
        TenantId=vendor-ops SeatLimit=10 \
-       CertificateArn=<acm-arn>
+       CertificateArn=<acm-arn> PublicHostname=admin.<domain>
    ```
 
 3. Point `admin.<domain>` at the stack's ALB, enroll the admin TOTP secret in
@@ -227,8 +228,9 @@ is under an hour of operator time. Full detail: `docs/deployment/AWS_SAAS_DEPLOY
    §2 template; generate values with `npm run setup:prod` and the MFA URI with
    `npm run mfa:uri -- --issuer "RedactWall <customer-slug>"`.
 2. **Stack.** Deploy `redactwall-<customer-slug>` with `TenantId`, the
-   purchased `SeatLimit`, the shared `CertificateArn`, and the current
-   `ImageUri`. The stack enables SaaS mode (`REDACTWALL_SAAS_MODE=true`,
+   purchased `SeatLimit`, the shared `CertificateArn`, the certificate-covered
+   `PublicHostname`, and the current `ImageUri`. The stack enables SaaS mode
+   (`REDACTWALL_SAAS_MODE=true`,
    tenant context and managed identity required), so events with the wrong or
    missing `orgId` are rejected and over-seat identities are blocked as
    `SEAT_LIMIT_BLOCKED` without storing prompt bodies.
@@ -343,8 +345,9 @@ registry above is sufficient at silo scale.
 
 ## Phase 9 — Production Operations
 
-- **Monitoring.** Container logs are already in CloudWatch Logs
-  (`/redactwall/<tenant>`). Add, per stack: a Route 53 health check on
+- **Monitoring.** Container logs are already in the CloudWatch Logs group
+  returned by the `LogGroupName` stack output. Resolve that output instead of
+  assuming a tenant-derived name. Add, per stack: a Route 53 health check on
   `https://<host>/healthz` with an alarm to your email/SMS, and CloudWatch
   alarms on ALB 5xx and unhealthy-host count.
 - **Backups.** Phase 3's two layers, plus a quarterly `npm run backup:drill`
@@ -356,7 +359,8 @@ registry above is sufficient at silo scale.
   `npm run rotate:data-key`; rotate ingest keys via the customer secret and a
   stack update.
 - **Upgrades.** Build and push the new image tag, run `npm run review:ci` at
-  that tag, then update each stack's `ImageUri` (CloudFormation stack update)
+  that tag, resolve the ECR digest, then update each stack's digest-pinned
+  `ImageUri` (CloudFormation stack update)
   starting with vendor-ops, then demo, then clients. Release discipline:
   `docs/process/RELEASE_PROCESS.md`.
 - **Incidents and support.** `docs/security/INCIDENT_RESPONSE.md` is the runbook;

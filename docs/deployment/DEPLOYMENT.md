@@ -41,7 +41,7 @@ npm start
 For production-safe defaults:
 
 ```bash
-npm run setup:prod
+npm run setup:prod -- --customer-id cu-local
 npm run mfa:uri
 npm start
 ```
@@ -62,7 +62,7 @@ npm run setup:check
 Generate config first:
 
 ```bash
-npm run setup:prod -- --skip-install
+npm run setup:prod -- --customer-id cu-local --skip-install
 npm run mfa:uri
 ```
 
@@ -81,6 +81,60 @@ database or production preflight readiness is blocked. The container runs with a
 read-only root filesystem, a writable `/tmp` tmpfs, no extra Linux
 capabilities, and `no-new-privileges`; keep all mutable customer state under
 `/data`.
+
+On first boot, the image entrypoint atomically seeds `/data/policy.json` and
+`/data/custom-detectors.json` from the shipped `config/policy.json` and
+`config/custom-detectors.json`, with mode `0600`. A later boot never overwrites
+an existing customer policy or detector pack. This keeps Compose and AWS
+customer-silo defaults aligned with the tested repository configuration while
+preserving every customer edit on the writable volume.
+
+Production also creates `/data/.policy-bundle-key.pem` once, with private
+permissions and exclusive interprocess publication. A corrupt, partial, or
+unwritable key blocks readiness; RedactWall never rotates it implicitly or
+falls back to an ephemeral identity. After the first healthy boot, export only
+the public half from the trusted host and provision it to sensors:
+
+```bash
+docker compose exec -T redactwall node -e "process.stdout.write(require('./server/policy-bundle').publicKeyPem())" > customer-policy-public-key.pem
+```
+
+Keep this pin with the deployment handoff record. Recreating the container on
+the same `/data` volume must print the same public key. Treat any unexpected
+change as a control-plane identity incident rather than automatically updating
+sensors.
+
+Compose pins the control-plane container hostname to `redactwall`. Keep that
+hostname stable when recreating a container against the same `/data` volume so
+file-mutation locks can combine that identity with the Linux boot and PID
+namespace generation to distinguish a restarted process instance from its
+crashed predecessor, even when the old PID is occupied again. Locks from a
+different hostname, or locks without conclusive generation and liveness
+evidence, fail closed instead of being deleted. A crash-orphaned empty lock
+directory is removed only after its directory identity and continued emptiness
+are revalidated, so a concurrently published owner is preserved. This is a
+single-control-plane container layout; do not scale multiple control-plane containers against the
+same `/data` volume.
+
+Compose host ports bind to `127.0.0.1` by default. Put an authenticated TLS
+reverse proxy in front before changing `REDACTWALL_BIND_ADDRESS` or
+`REDACTWALL_GATEWAY_BIND_ADDRESS` to a non-loopback address. The optional
+gateway profile shares the control-plane network namespace and calls
+`http://127.0.0.1:4000`, so the ingest credential never crosses the cleartext
+Compose service network. The loopback gateway port is reserved even when the
+profile is stopped; enable it with:
+
+```bash
+docker compose --profile gateway up -d --build
+```
+
+Docker does not permit a container `hostname` option together with
+`network_mode: service:redactwall`. Compose therefore pins the gateway's lock
+identity with `REDACTWALL_LOCK_HOSTNAME=redactwall-gateway`. Preserve that value
+when recreating the singleton gateway against the same token store. The new
+Linux PID-namespace generation then proves that a crashed gateway's lock is
+stale without relying on an old PID becoming unused. Never run two live PID
+namespaces with the same lock hostname against one token store.
 
 For a local HTTP-only container smoke test, set these in `.env` before starting Compose:
 
@@ -252,8 +306,25 @@ and a shared release-readiness JSON under `dist/browser-extension/`. It verifies
 Manifest V3 wiring, managed-storage schema coverage, synced engine copies, the
 WebExtension API bridge, browser install-health heartbeat support,
 force-install policy examples, the browser release checklist, and absence of a
-packaged development ingest key. Configure `serverUrl`, `ingestKey`, and
-identity through managed browser storage or local demo storage.
+packaged development ingest key. Configure `serverUrl`, `ingestKey`,
+`policyPublicKey`, and identity through managed browser storage. The policy key
+is an out-of-band Ed25519 pin, not a value the extension may fetch beside the
+policy bundle.
+
+In browser redact mode, the AI page and its composer stay tokenized. Raw token
+mappings are handed to a short-lived, in-memory background channel and are
+never written into provider-owned DOM. After the control plane records the
+tokenized send, RedactWall opens an extension-only tab. The channel is bound to
+the originating HTTPS site and the exact extension tab, can be revealed only
+once, and is destroyed on reveal, expiry, or tab close. Originals appear only
+after an explicit Reveal action, Copy is a separate explicit action, and the
+extension hides visible values after 30 seconds or when the tab leaves the
+foreground.
+
+For isolated loopback development only, an unpacked extension may store the
+same independently generated `policyPublicKey` in extension-local storage. The
+runtime ignores a local pin as soon as `serverUrl` is not loopback; remote and
+production control planes still require the managed-storage pin above.
 
 After browser store items or signed Firefox install URLs exist, rerun the same
 gate with the final values:
@@ -265,16 +336,30 @@ npm run release:extension:check -- dist/browser-extension --chrome-extension-id 
 That adds prompt-free `redactwall-<browser>-extension-v<version>.extension-settings.json`
 artifacts for browser force-install policy. They contain extension IDs, install
 or update URLs, and `force_installed` mode only; managed storage with
-`serverUrl`, `orgId`, user identity, and the ingest key stays in the customer's
-policy system or vault.
+`serverUrl`, `orgId`, user identity, the policy public-key pin, and the ingest
+key stay in the customer's policy system or vault.
 
 The extension posts sanitized install-health heartbeats on install, browser
 startup, and a periodic `installHeartbeat` alarm when server config is present.
 The heartbeat verifies Manifest V3 metadata, background worker wiring, content
-script coverage, protection status, server URL, ingest-key presence, managed
-configuration, managed identity, tenant id, and policy cache availability. It
+script coverage, custom-destination coverage, protection status, server URL, ingest-key presence, managed
+configuration, managed identity, tenant id, policy-key pin, and fresh verified
+signed-policy cache availability. It
 posts only check IDs, boolean status, and short details; it does not post ingest
 keys, prompts, file content, or browser page content.
+
+Static content scripts cover the built-in AI catalog. For an administrator-added
+HTTPS destination, the extension requests only that host pattern from its
+optional HTTPS permission, registers the same detector/content scripts at
+runtime, and records `custom_destination_coverage=true` only after registration
+succeeds. Open the popup and select **Allow exact sites** for every pending
+destination. Until a grant and registration both succeed, a persistent dynamic
+browser rule blocks top-level navigation and any already-open matching tab is
+moved to the local coverage-required page. Invalid, cleartext, credentialed, or
+global-wildcard destination entries fail readiness and stay browser-blocked;
+use an enforced gateway or network proxy when a precise browser host grant is
+not possible. Chrome administrators must also ensure `ExtensionSettings`
+`runtime_allowed_hosts` does not prohibit the governed hosts.
 
 ## Endpoint Agent Package
 
@@ -293,10 +378,12 @@ and scheduled-task plus
 shell-action install/run/uninstall scripts, plus the endpoint install validation
 checker. It refuses synthetic
 prompt bodies and packaged development ingest keys. Set the real
-`REDACTWALL_URL`, `INGEST_API_KEY`, and watch directory during install; the
+`REDACTWALL_URL`, `INGEST_API_KEY`, `REDACTWALL_POLICY_PUBLIC_KEY_PATH`, and
+watch directory during install; the
 legacy `SENTINEL_URL`/`PROMPTWALL_URL` keys remain accepted for existing configs. The agent
 inspects supported files locally and does not contact the control plane without
-an explicit ingest key.
+an explicit ingest key. It blocks file release when neither a current verified
+bundle nor a still-fresh signed LKG exists.
 
 ## MCP Guard Package
 
@@ -313,10 +400,12 @@ Atlassian Jira/Confluence connector, database read-only connector, shared
 detection engine, env loader, version metadata, and MCP guard install
 validation checker. It excludes
 the local direct-run demo and refuses synthetic prompt bodies or development
-ingest keys. Set `REDACTWALL_URL` and `INGEST_API_KEY` in the host MCP runtime
+ingest keys. Set `REDACTWALL_URL`, `INGEST_API_KEY`, and
+`REDACTWALL_POLICY_PUBLIC_KEY_PATH` in the host MCP runtime
 environment; the legacy `SENTINEL_URL`/`PROMPTWALL_URL` keys remain accepted for existing
 configs. Do not bake secrets into the package. The guard does not contact the
-control plane without an explicit ingest key.
+control plane without an explicit ingest key, and no wrapped handler runs until
+a signed current or fresh cached policy verifies under the pinned key.
 
 Validate the unpacked MCP guard runtime and optionally emit sanitized health
 evidence:
@@ -413,6 +502,7 @@ Run PowerShell from the project folder:
 .\scripts\install-endpoint-agent.ps1 `
   -RedactWallUrl "https://redactwall.example.com" `
   -IngestKey "<pilot-ingest-key>" `
+  -PolicyPublicKeyPath ".\customer-policy-public-key.pem" `
   -WatchDir "$env:USERPROFILE\RedactWallWatch"
 ```
 
@@ -424,7 +514,15 @@ Config: %LOCALAPPDATA%\RedactWall\endpoint-agent.env
 Log:    %LOCALAPPDATA%\RedactWall\logs\endpoint-agent.log
 ```
 
-The config file carries `REDACTWALL_URL`, `INGEST_API_KEY`, and `ENDPOINT_AGENT_WATCH_DIR`. Keep it restricted to the installing user, Administrators, and SYSTEM. The installer still accepts the legacy `-SentinelUrl` parameter and existing `REDACTWALL_URL` config files remain valid. For an all-user managed install, pass an explicit `-ConfigDir "$env:ProgramData\RedactWall"` from an elevated PowerShell session.
+The config file carries `REDACTWALL_URL`, `INGEST_API_KEY`,
+`REDACTWALL_POLICY_PUBLIC_KEY_PATH`, `REDACTWALL_POLICY_CACHE_PATH`, and
+`ENDPOINT_AGENT_WATCH_DIR`. The installer copies the operator-provisioned pin
+into the protected config directory. Keep it restricted to the installing
+user and LocalSystem. The installer still accepts the legacy
+`-SentinelUrl` parameter and existing `REDACTWALL_URL` config files remain
+valid only after the signed-policy pin is added. For an all-user managed
+install, pass an explicit `-ConfigDir "$env:ProgramData\RedactWall"` from an
+elevated PowerShell session.
 
 Validate the local install and optionally emit sanitized health evidence:
 
@@ -475,7 +573,7 @@ they do not print or post watched paths, file names, file bytes, extracted text,
 or prompts. The Coverage tab summarizes the profile count as `Endpoint
 file-flow profiles` so operators can see which workstation flows are ready.
 
-The agent inspects supported watched files locally. Under redact policy, structured-only findings write a safe companion text file under `.redactwall-redacted` and report `redacted_available` evidence to the control plane; semantic or mixed findings remain held for Security Admin review. The managed browser extension also inspects text-readable file selections and drops locally before upload. It sends only synthetic file labels, masked detector evidence, categories, risk metadata, and client outcomes to `/api/v1/gate`; it does not send file bytes, raw filenames, `contentBase64`, or extracted text to the control plane. Unsupported, oversized, unreadable, or OCR-needed browser uploads fail closed as `file_blocked_unscanned` or `ocr_required`. Direct API uploads through `/api/v1/scan-file` still return `ocr_required` for images until an endpoint-local OCR path is in scope. Endpoint agents can optionally run a workstation-local OCR command and then send only sanitized detector evidence to the control plane.
+The agent inspects supported watched files locally. Under redact policy, structured-only findings write a safe companion text file under `.redactwall-redacted` and report `redacted_available` evidence to the control plane; semantic or mixed findings remain held for Security Admin review. The managed browser extension also inspects text-readable file selections and drops locally before upload. It sends only synthetic file labels, masked detector evidence, categories, risk metadata, and client outcomes to `/api/v1/gate`; it does not send file bytes, raw filenames, `contentBase64`, or extracted text to the control plane. Unsupported, oversized, unreadable, OCR-needed, or opaque encoded browser uploads fail closed and are never replayed into the page as clean. Base64/hex text is recursively inspected with bounded work; encoded sensitive text maps to the exact outer span, while strict Base64 that decodes to non-text bytes cannot be approved or released. Direct API uploads through `/api/v1/scan-file` apply the same rule and still return `ocr_required` for images until an endpoint-local OCR path is in scope. Endpoint agents can optionally run a workstation-local OCR command and then send only sanitized detector evidence to the control plane.
 
 Optional endpoint-local OCR:
 
@@ -500,13 +598,16 @@ endpoint agent. Set `ENDPOINT_AGENT_OCR_WASM=off` to disable it (images then sta
 `ocr_required` unless a native command is present). If OCR returns text, the
 endpoint agent runs the same local detector/redactor path used for text, PDF,
 Office, and native handoff files. Image bytes and raw OCR text do not go to
-`/api/v1/scan-file` or `/api/v1/gate`.
+`/api/v1/scan-file` or `/api/v1/gate`. When an OCR engine needs a file path,
+the agent first secures an owner-only temporary directory and an empty snapshot
+(owner plus LocalSystem on Windows), then writes the image through the open
+private handle and removes the directory after OCR completes or fails.
 
-Strict mode (`ENDPOINT_AGENT_OCR_STRICT=on`, default off) changes the posture for
-low-quality images: when OCR (native or WASM) yields little or no text, the image
-is routed to `ocr_required`/the approval queue instead of being allowed through
-on sparse extraction. Leave it off to keep today's behavior, where an image the
-OCR engine cannot read is allowed once no findings are detected.
+Strict OCR handling is on by default. When OCR (native or WASM) yields little or
+no text, the image is routed to `ocr_required`/the approval queue instead of
+being treated as clean. Production always enforces this behavior. An explicit
+`ENDPOINT_AGENT_OCR_STRICT=off` is honored only when `NODE_ENV` is explicitly
+`test` or `development`, for synthetic OCR development.
 
 For desktop file flows, enable the native handoff directory with an explicit
 local secret. The endpoint agent keeps scanning locally; the handoff event is
@@ -602,6 +703,10 @@ node .\sensors\endpoint-agent\collectors\protected-upload.js `
   --wait `
   --json
 ```
+
+`--wait` succeeds only after the endpoint agent durably records a terminal
+inspection result. Queue-file disappearance alone is treated as a failure, and
+a terminal block returns a nonzero exit code.
 
 An app integration or pilot script can still use the lower-level writer to
 produce one signed upload-intent event without putting the handoff secret on the
@@ -790,10 +895,12 @@ Set these through `.env`, container environment, or a deployment secret manager:
 | `OIDC_CLIENT_SECRET` | OIDC web application client secret. Production preflight requires at least 32 characters when OIDC is configured. |
 | `OIDC_REDIRECT_URI` | OIDC callback URL, usually `https://redactwall.customer.example/auth/oidc/callback`. |
 | `OIDC_SCOPE` | OIDC scopes requested by console SSO, defaulting to `openid email profile`. |
+| `OIDC_STEP_UP_ACR_VALUES` | Optional space-separated IdP assurance class values that RedactWall may accept for privileged step-up. A recent token must assert `amr=mfa` or one of these exact `acr` values. |
 | `OIDC_AUTHORIZATION_ENDPOINT` / `OIDC_TOKEN_ENDPOINT` / `OIDC_JWKS_URI` | Optional explicit endpoints. Leave all three empty for issuer discovery, or set all three together. |
 | `REDACTWALL_DB_PATH` | SQLite path on local persistent disk. |
 | `REDACTWALL_SAAS_MODE` | Set to `true` for a paid customer stack. Production preflight then requires tenant id and seat limit. |
 | `REDACTWALL_TENANT_ID` | Lowercase customer tenant slug accepted from sensors, for example `cu-acme`. |
+| `REDACTWALL_LICENSE_CUSTOMER_ID` | Stable customer slug used to bind an offline license on non-SaaS installs. Customer silos use `REDACTWALL_TENANT_ID`; if both are set they must match. |
 | `REDACTWALL_SEAT_LIMIT` | Purchased seat count. New managed users beyond this count are blocked and recorded as `SEAT_LIMIT_BLOCKED`. |
 | `REDACTWALL_REQUIRE_TENANT_CONTEXT` | Requires sensors to send the matching `orgId`. Enabled automatically by SaaS mode. |
 | `REDACTWALL_REQUIRE_USER_IDENTITY` | Requires sensors to send managed user identity instead of `unknown` or `unattributed@unmanaged`. Enabled automatically by SaaS mode. |
@@ -806,7 +913,7 @@ Set these through `.env`, container environment, or a deployment secret manager:
 | `ENDPOINT_AGENT_OCR_TIMEOUT_MS` / `REDACTWALL_ENDPOINT_AGENT_OCR_TIMEOUT_MS` | Optional OCR command timeout, defaulting to 15000 ms (30000 ms for the WASM engine). |
 | `ENDPOINT_AGENT_OCR_MAX_CHARS` / `REDACTWALL_ENDPOINT_AGENT_OCR_MAX_CHARS` | Optional OCR output cap before detection, defaulting to 1000000 chars. |
 | `ENDPOINT_AGENT_OCR_WASM` / `REDACTWALL_ENDPOINT_AGENT_OCR_WASM` | Bundled offline WASM OCR fallback used when no native tesseract is present. Enabled by default; set to `off` to disable. Never fetches model weights from the network. |
-| `ENDPOINT_AGENT_OCR_STRICT` / `REDACTWALL_ENDPOINT_AGENT_OCR_STRICT` | When `on` (default off), images whose OCR yields little or no text are routed to `ocr_required` instead of allowed on sparse extraction. |
+| `ENDPOINT_AGENT_OCR_STRICT` / `REDACTWALL_ENDPOINT_AGENT_OCR_STRICT` | On by default. Images whose OCR yields little or no text are routed to `ocr_required`; production ignores attempts to disable this fail-closed behavior. |
 | `ENDPOINT_AGENT_APPROVED_AI_TOOLS` / `REDACTWALL_ENDPOINT_AGENT_APPROVED_AI_TOOLS` | Optional comma-separated sanctioned endpoint AI tool ids. Detected local AI tools outside this list report endpoint AI-tool inventory attention using sanitized ids only. |
 | `ENDPOINT_AGENT_FILE_FLOW_PROFILES` / `REDACTWALL_ENDPOINT_AGENT_FILE_FLOW_PROFILES` | Optional JSON array of named endpoint file-flow watcher profiles. Heartbeats report profile ids/status only. |
 
@@ -827,6 +934,7 @@ The core settings are canonically `REDACTWALL_*` and accept the older
 | `REDACTWALL_CUSTOM_DETECTORS_PATH` | `PROMPTWALL_CUSTOM_DETECTORS_PATH`, `SENTINEL_CUSTOM_DETECTORS_PATH` |
 | `REDACTWALL_SAAS_MODE` | `PROMPTWALL_SAAS_MODE`, `SENTINEL_SAAS_MODE` |
 | `REDACTWALL_TENANT_ID` | `PROMPTWALL_TENANT_ID`, `SENTINEL_TENANT_ID` |
+| `REDACTWALL_LICENSE_CUSTOMER_ID` | `PROMPTWALL_LICENSE_CUSTOMER_ID`, `SENTINEL_LICENSE_CUSTOMER_ID` |
 | `REDACTWALL_SEAT_LIMIT` | `PROMPTWALL_SEAT_LIMIT`, `SENTINEL_SEAT_LIMIT` |
 | `REDACTWALL_REQUIRE_TENANT_CONTEXT` | `PROMPTWALL_REQUIRE_TENANT_CONTEXT`, `SENTINEL_REQUIRE_TENANT_CONTEXT` |
 | `REDACTWALL_REQUIRE_USER_IDENTITY` | `PROMPTWALL_REQUIRE_USER_IDENTITY`, `SENTINEL_REQUIRE_USER_IDENTITY` |
@@ -849,6 +957,7 @@ The remaining settings are canonically unprefixed and additionally accept a
 | `OIDC_TOKEN_ENDPOINT` | `REDACTWALL_OIDC_TOKEN_ENDPOINT`, `PROMPTWALL_OIDC_TOKEN_ENDPOINT` |
 | `OIDC_JWKS_URI` | `REDACTWALL_OIDC_JWKS_URI`, `PROMPTWALL_OIDC_JWKS_URI` |
 | `OIDC_SCOPE` | `REDACTWALL_OIDC_SCOPE`, `PROMPTWALL_OIDC_SCOPE` |
+| `OIDC_STEP_UP_ACR_VALUES` | `REDACTWALL_OIDC_STEP_UP_ACR_VALUES` |
 | `ENDPOINT_AGENT_WATCH_DIR` | `REDACTWALL_ENDPOINT_AGENT_WATCH_DIR`, `PROMPTWALL_ENDPOINT_AGENT_WATCH_DIR` |
 | `ENDPOINT_AGENT_HANDOFF_DIR` | `REDACTWALL_ENDPOINT_AGENT_HANDOFF_DIR`, `PROMPTWALL_ENDPOINT_AGENT_HANDOFF_DIR` |
 | `ENDPOINT_AGENT_HANDOFF_SECRET` | `REDACTWALL_ENDPOINT_AGENT_HANDOFF_SECRET`, `PROMPTWALL_ENDPOINT_AGENT_HANDOFF_SECRET` |
@@ -1179,11 +1288,13 @@ $env:AWS_SESSION_TOKEN = '<optional-session-token>'
 node scripts/ai-llm-gateway.js --redactwall http://127.0.0.1:4000 --upstream https://bedrock-runtime.us-east-1.amazonaws.com --upstream-auth-scheme aws-sigv4 --aws-region us-east-1 --allowed-models 'anthropic.claude-*,amazon.nova-*'
 ```
 
-Supported Bedrock paths are `/model/{modelId}/converse`,
-`/model/{modelId}/converse-stream`, `/model/{modelId}/invoke`, and
-`/model/{modelId}/invoke-with-response-stream`. RedactWall inspects text
-content blocks and blocks Bedrock image/document/video/tool blocks by default
-because those bytes are not locally inspected by this gateway.
+Supported Bedrock paths are the non-streaming `/model/{modelId}/converse` and
+`/model/{modelId}/invoke` operations. The `converse-stream` and
+`invoke-with-response-stream` routes return `501` before any control-plane or
+upstream call because AWS EventStream decoding and CRC validation are not
+implemented. RedactWall inspects text content blocks and blocks Bedrock
+image/document/video/tool blocks by default because those bytes are not locally
+inspected by this gateway.
 
 For multiple gateway workers or hosts, start the shared limiter service first:
 
@@ -1202,32 +1313,37 @@ $env:REDACTWALL_GATEWAY_RATE_LIMIT_TOKEN = '<shared-limiter-token>'
 node scripts/ai-llm-gateway.js --redactwall http://127.0.0.1:4000 --upstream https://api.openai.com --port 4182
 ```
 
-For a pilot HA gateway layer, run the dedicated compose stack:
+For a single-host redundant gateway layer, run the dedicated compose stack:
 
 ```powershell
 $env:REDACTWALL_GATEWAY_TOKEN = '<client-token>'
-$env:REDACTWALL_RATE_LIMITER_TOKEN = '<shared-limiter-token>'
 $env:INGEST_API_KEY = '<sensor-ingest-key>'
+$env:REDACTWALL_URL = 'https://redactwall.internal.example'
 $env:REDACTWALL_GATEWAY_UPSTREAM_API_KEY = '<provider-key>'
 docker compose -f docker-compose.gateway-ha.yml up -d --build
 Invoke-RestMethod http://127.0.0.1:4182/readyz
 npm run gateway:ha:smoke
 ```
 
-`docker-compose.gateway-ha.yml` publishes only the gateway load balancer,
-keeps the limiter private, persists hashed limiter counters in
+`docker-compose.gateway-ha.yml` publishes only the gateway load balancer on
+`127.0.0.1` by default, persists hashed limiter counters in
 `gateway-limiter-data`, disables load-balancer access logs, and uses the same
 read-only/no-new-privileges container posture as the main RedactWall compose
-path.
+path. The two gateway processes share a local SQLite counter file, so no
+bearer-authenticated limiter request crosses the Docker bridge.
 
-When a pilot needs active-active limiter replicas, use a managed Redis or Valkey
-backend and scale the private limiter service:
+This stack provides process redundancy on one Docker host, not multi-host high
+availability. The host, Nginx, and named volume remain one failure domain. Add
+authenticated TLS termination before changing the bind address for remote
+clients.
+
+For multi-host scale, place an HTTPS external limiter in front of managed Redis
+or Valkey. Do not expose the limiter port directly:
 
 ```powershell
 $env:REDACTWALL_RATE_LIMITER_STORE = 'redis'
 $env:REDACTWALL_RATE_LIMITER_REDIS_URL = 'rediss://:<password>@redis.internal.example:6380/0'
-docker compose -f docker-compose.gateway-ha.yml up -d --build --scale ai-gateway-limiter=2
-Invoke-RestMethod http://127.0.0.1:4182/readyz
+$env:REDACTWALL_GATEWAY_RATE_LIMIT_URL = 'https://gateway-limiter.internal.example/check'
 ```
 
 The Redis backend stores only prefixed SHA-256 limiter keys with TTLs. Do not
@@ -1341,7 +1457,24 @@ Back up the SQLite evidence store to local encrypted storage or a managed backup
 npm run backup -- backups
 ```
 
-The command writes a `.db` backup plus a `.manifest.json` file with the backup hash, size, counts, and audit-chain verification result. The manifest intentionally omits prompt bodies; treat the `.db` file itself as sensitive runtime state.
+The command writes a `.db` backup, authenticated audit state/checkpoint sidecars,
+and an HMAC-authenticated `.manifest.json` file. The MAC binds the complete
+manifest, including every artifact hash and size, counts, and the audit-chain
+verification result. The manifest intentionally omits prompt bodies; treat the
+database and sidecars as sensitive runtime state.
+
+Portable backup authentication requires an externally configured
+`REDACTWALL_AUDIT_KEY` or `REDACTWALL_SECRET`. RedactWall refuses to create or
+trust a portable backup when its only MAC key is embedded in the packaged audit
+state, because anyone holding that artifact could recover the key and forge a
+replacement manifest.
+
+Backup and restore stage sensitive artifacts in an owner-only directory, then
+publish files at mode `0600` on POSIX or with an explicit current-user plus
+LocalSystem ACL on Windows. ACL setup fails closed. SQLite verification uses a
+private working copy, so the published artifact set stays limited to the
+database, authenticated audit sidecars, and manifest, without SQLite
+`-wal`, `-shm`, or `-journal` files.
 
 Verify a backup before you rely on it:
 
@@ -1349,14 +1482,24 @@ Verify a backup before you rely on it:
 npm run backup:verify -- backups/redactwall-YYYY-MM-DDTHH-MM-SS-sssZ.db
 ```
 
+The verifier exits nonzero whenever the printed result has `ok: false`, so it
+is safe to use as a monitoring or deployment gate. Missing and unsigned
+manifests are rejected; replace older unsigned backup sets with a fresh backup.
+
 For an offline restore, stop the RedactWall process, restore to a new local-disk path, verify it, and then point `REDACTWALL_DB_PATH` at the restored file:
 
 ```bash
 npm run backup:restore -- backups/redactwall-YYYY-MM-DDTHH-MM-SS-sssZ.db data/restored-redactwall.db
-npm run backup:verify -- data/restored-redactwall.db
+npm run backup:verify -- data/restored-redactwall.db \
+  --manifest backups/redactwall-YYYY-MM-DDTHH-MM-SS-sssZ.db.manifest.json
 ```
 
-Use `--force` only when intentionally replacing an existing restore target.
+The restored database is byte-identical to the verified backup, so its original
+manifest remains the hash-bound verification record. A restored copy without
+that explicit manifest is intentionally reported as unverifiable.
+
+Use `--force` only when intentionally replacing an existing restore target. It
+never bypasses a missing, unsigned, or invalid authenticated manifest.
 
 After backup verification and any restore drill, generate an examiner pack that
 records both statuses without embedding the `.db` content:

@@ -7,11 +7,14 @@
 const fs = require('fs');
 const path = require('path');
 const adapters = require('../detection-engine/adapters');
+const { readBoundedJson } = require('../sensors/shared/bounded-response');
 
 const ROOT = path.join(__dirname, '..');
 const DEFAULT_WATCHLIST = path.join(ROOT, 'config', 'ai-domain-watchlist.json');
 const DEFAULT_MANIFEST = path.join(ROOT, 'sensors', 'browser-extension', 'manifest.json');
 const RADAR_TOP_URL = 'https://api.cloudflare.com/client/v4/radar/ranking/internet_services/top';
+const MAX_RADAR_RESPONSE_BYTES = 1024 * 1024;
+const RADAR_RESPONSE_TIMEOUT_MS = 10000;
 
 function readJson(file) {
   return JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -105,6 +108,8 @@ async function fetchRadarServices({
   serviceCategory = process.env.AI_DOMAIN_RADAR_SERVICE_CATEGORY || 'Generative AI',
   limit = Number(process.env.AI_DOMAIN_RADAR_LIMIT || 100),
   fetchImpl = globalThis.fetch,
+  maxResponseBytes = MAX_RADAR_RESPONSE_BYTES,
+  responseTimeoutMs = RADAR_RESPONSE_TIMEOUT_MS,
 } = {}) {
   if (!token) return { skipped: true, services: [] };
   if (typeof fetchImpl !== 'function') throw new Error('fetch unavailable for Cloudflare Radar check');
@@ -113,14 +118,16 @@ async function fetchRadarServices({
   url.searchParams.set('limit', String(Math.max(1, Math.min(200, Math.floor(limit) || 100))));
   if (serviceCategory) url.searchParams.set('serviceCategory', serviceCategory);
   const res = await fetchImpl(url, {
+    redirect: 'error',
     headers: { Authorization: `Bearer ${token}` },
   });
-  const body = await res.json().catch(() => null);
+  const { json: body } = await readBoundedJson(res, {
+    maxBytes: maxResponseBytes,
+    timeoutMs: responseTimeoutMs,
+    label: 'Cloudflare Radar response',
+  });
   if (!res.ok || !body || body.success === false) {
-    const message = body && Array.isArray(body.errors) && body.errors[0] && body.errors[0].message
-      ? body.errors[0].message
-      : `HTTP ${res.status}`;
-    throw new Error(`Cloudflare Radar check failed: ${message}`);
+    throw new Error(`Cloudflare Radar check failed: HTTP ${res.status}`);
   }
   const top = body.result && Array.isArray(body.result.top_0) ? body.result.top_0 : [];
   return { skipped: false, services: top.map((row) => row.service).filter(Boolean) };

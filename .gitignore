@@ -12,6 +12,9 @@ output/
 server/public/app/
 test-results/
 playwright-report/
+.playwright-cli/
+# Chromium runtime cache created beside an unpacked extension; never source.
+sensors/browser-extension/_metadata/
 # design-parity screenshots produced by e2e/console-design.spec.js
 e2e/design-evidence/
 # cloud-sync (ProtonDrive/FUSE) leftovers — never source

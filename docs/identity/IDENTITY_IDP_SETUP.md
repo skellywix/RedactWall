@@ -77,9 +77,9 @@ OIDC console login:
 | `auditor` | `RedactWall Auditors`, `RedactWall Read-only`, `Auditors`, `Read-only` |
 | `operator` | `RedactWall Operators`, `RedactWall Ops`, `Operators`, `Ops` |
 
-If no direct role or group role matches, the SCIM user defaults to `auditor`.
-OIDC login succeeds only when the signed identity maps to an active SCIM
-`userName`.
+If no direct role or group role matches, the SCIM user has no RedactWall role
+and cannot sign in. OIDC login succeeds only when the signed identity maps to
+an active SCIM `userName` with an assigned role.
 
 ## Validation
 

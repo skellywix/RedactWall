@@ -17,6 +17,17 @@ process.env.REDACTWALL_SECRET = 'unit-secret-alwaysblock';
 process.env.REDACTWALL_DATA_KEY = 'unit-data-key-alwaysblock';
 process.env.INGEST_API_KEY = 'unit-ingest-alwaysblock';
 process.env.REDACTWALL_DB_PATH = path.join(os.tmpdir(), 'ps-alwaysblock-' + crypto.randomBytes(6).toString('hex') + '.db');
+const policyPath = path.join(os.tmpdir(), 'ps-alwaysblock-policy-' + crypto.randomBytes(6).toString('hex') + '.json');
+const configuredPolicy = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'config', 'policy.json'), 'utf8'));
+fs.writeFileSync(policyPath, JSON.stringify({
+  ...configuredPolicy,
+  enforcementMode: 'warn',
+  blockMinSeverity: 4,
+  blockRiskScore: 100,
+  alwaysBlock: [],
+}));
+process.env.REDACTWALL_POLICY_PATH = policyPath;
+test.after(() => fs.rmSync(policyPath, { force: true }));
 
 const app = require('../server/app');
 const policy = require('../server/policy');
@@ -67,12 +78,30 @@ test('analyzeOpts strips only hard-stop types from the detection ignore list', (
 
 test('ignore list still suppresses a non-hard-stop finding', () => {
   const base = policy.loadPolicy();
-  // A hard-stop type dropped from alwaysBlock AND ignored should be suppressed;
-  // proves the exemption is scoped to alwaysBlock membership, not blanket.
-  const custom = policy.normalizePolicy({ ...base, alwaysBlock: [], ignore: ['US_SSN'] });
-  const analysis = detect.analyze(SSN_PROMPT);
+  const custom = policy.normalizePolicy({ ...base, alwaysBlock: [], ignore: ['EMAIL_ADDRESS'] });
+  const analysis = detect.analyze('Contact jane.doe@example.com for branch hours.');
   const verdict = policy.evaluate(analysis, custom, { destination: 'chatgpt.com' });
   assert.strictEqual(verdict.decision, 'allow', 'non-hard-stop ignored type is suppressed');
+  assert.ok(policy.DEFAULT_POLICY.alwaysBlock.every((type) => custom.alwaysBlock.includes(type)),
+    'an empty configured list cannot remove mandatory hard stops');
+});
+
+test('configured empty alwaysBlock cannot make a raw SSN sendable end to end', async (t) => {
+  const loaded = policy.loadPolicy();
+  assert.ok(policy.DEFAULT_POLICY.alwaysBlock.every((type) => loaded.alwaysBlock.includes(type)));
+  const server = await listen(app);
+  t.after(() => close(server));
+  const res = await gate(server.address().port, {
+    prompt: SSN_PROMPT,
+    user: 'demo@example.com',
+    destination: 'chatgpt.com',
+    clientOutcome: 'sent_after_warning',
+  });
+  const body = await res.json();
+  assert.strictEqual(loaded.enforcementMode, 'warn');
+  assert.strictEqual(body.mode, 'block');
+  assert.strictEqual(body.status, 'pending');
+  assert.ok(!body.receipt);
 });
 
 test('clientOutcome=sent_after_warning cannot clear a raw hard-stop value', async (t) => {

@@ -34,10 +34,15 @@ test('parseEnv reports invalid keys without loading their values', () => {
 });
 
 test('withEnvAliases returns an aliased copy without mutating the source', () => {
-  const source = { PROMPTWALL_URL: 'https://promptwall.example.test' };
+  const source = {
+    PROMPTWALL_URL: 'https://promptwall.example.test',
+    SENTINEL_LICENSE_CUSTOMER_ID: 'cu-legacy',
+  };
   const copy = env.withEnvAliases(source);
   assert.strictEqual(copy.REDACTWALL_URL, 'https://promptwall.example.test');
+  assert.strictEqual(copy.REDACTWALL_LICENSE_CUSTOMER_ID, 'cu-legacy');
   assert.strictEqual(source.REDACTWALL_URL, undefined);
+  assert.strictEqual(source.REDACTWALL_LICENSE_CUSTOMER_ID, undefined);
 });
 
 test('loadEnv keeps existing process values unless override is requested', () => {

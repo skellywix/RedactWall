@@ -18,9 +18,440 @@ process.env.OIDC_CLIENT_SECRET = 'oidc-client-secret-00000000000000000001';
 process.env.REDACTWALL_DB_PATH = path.join(os.tmpdir(), 'ps-oidc-login-test-' + crypto.randomBytes(6).toString('hex') + '.db');
 
 const app = require('../server/app');
+const auth = require('../server/auth');
 const db = require('../server/db');
 const oidc = require('../server/oidc');
 const { listen } = require('./support/listen');
+
+test.beforeEach(() => oidc._resetLoginAttemptsForTest());
+
+function jsonResponse(value, init = {}) {
+  return new Response(JSON.stringify(value), {
+    status: init.status || 200,
+    headers: { 'content-type': 'application/json', ...(init.headers || {}) },
+  });
+}
+
+test('OIDC requires an explicit callback URI and never derives it from request headers', () => {
+  const incomplete = oidc.config({
+    OIDC_ISSUER: 'https://login.example.test',
+    OIDC_CLIENT_ID: 'redactwall-console',
+    OIDC_CLIENT_SECRET: 'unit-secret',
+  });
+
+  assert.strictEqual(incomplete.enabled, false);
+  assert.throws(
+    () => oidc.redirectUriFor({ ...incomplete, enabled: true }, 'https://attacker.example'),
+    /redirect uri/i,
+  );
+});
+
+test('production OIDC rejects every cleartext URL before provider traffic or redirect', async () => {
+  const secure = {
+    issuer: 'https://login.example.test',
+    clientId: 'redactwall-console',
+    clientSecret: 'unit-secret',
+    redirectUri: 'https://redactwall.example.test/auth/oidc/callback',
+    authorizationEndpoint: 'https://login.example.test/authorize',
+    tokenEndpoint: 'https://login.example.test/token',
+    jwksUri: 'https://login.example.test/jwks',
+    scope: 'openid email profile',
+    production: true,
+    enabled: true,
+  };
+
+  for (const key of ['issuer', 'redirectUri', 'authorizationEndpoint', 'tokenEndpoint', 'jwksUri']) {
+    await assert.rejects(
+      () => oidc.resolvedConfig({
+        config: { ...secure, [key]: secure[key].replace('https://', 'http://') },
+      }),
+      /https/i,
+      key,
+    );
+  }
+
+  let requests = 0;
+  await assert.rejects(
+    () => oidc.resolvedConfig({
+      env: {
+        NODE_ENV: 'production',
+        OIDC_ISSUER: 'http://login.example.test',
+        OIDC_CLIENT_ID: 'redactwall-console',
+        OIDC_CLIENT_SECRET: 'unit-secret',
+        OIDC_REDIRECT_URI: 'https://redactwall.example.test/auth/oidc/callback',
+      },
+      fetchImpl: async () => {
+        requests += 1;
+        throw new Error('must not fetch');
+      },
+    }),
+    /https/i,
+  );
+  assert.strictEqual(requests, 0, 'cleartext issuer is rejected before discovery');
+});
+
+test('OIDC rejects credentials, queries, and fragments in every configured URL without echoing secrets', async () => {
+  const secure = {
+    issuer: 'https://login.example.test',
+    clientId: 'redactwall-console',
+    clientSecret: 'unit-secret',
+    redirectUri: 'https://redactwall.example.test/auth/oidc/callback',
+    authorizationEndpoint: 'https://login.example.test/authorize',
+    tokenEndpoint: 'https://login.example.test/token',
+    jwksUri: 'https://login.example.test/jwks',
+    scope: 'openid email profile',
+    production: true,
+    enabled: true,
+  };
+  const secret = 'embedded-provider-password';
+  for (const field of ['issuer', 'redirectUri', 'authorizationEndpoint', 'tokenEndpoint', 'jwksUri']) {
+    const credential = new URL(secure[field]);
+    credential.username = 'provider-user';
+    credential.password = secret;
+    for (const unsafe of [credential.toString(), `${secure[field]}?tenant=hidden`, `${secure[field]}#override`]) {
+      await assert.rejects(
+        () => oidc.resolvedConfig({ config: { ...secure, [field]: unsafe } }),
+        (error) => /credentials, query parameters, or fragments/i.test(error.message)
+          && !error.message.includes(secret),
+        `${field}: ${unsafe.replace(secret, '[secret]')}`,
+      );
+    }
+  }
+});
+
+test('OIDC provider JSON rejects declared and streamed oversized bodies, timeouts, and secret-bearing fetch errors', async () => {
+  const env = {
+    OIDC_ISSUER: 'https://login.example.test',
+    OIDC_CLIENT_ID: 'redactwall-console',
+    OIDC_CLIENT_SECRET: 'unit-secret',
+    OIDC_REDIRECT_URI: 'https://redactwall.example.test/auth/oidc/callback',
+  };
+  let bodyReads = 0;
+  await assert.rejects(
+    () => oidc.resolvedConfig({
+      env,
+      fetchImpl: async () => ({
+        ok: true,
+        headers: { get: (name) => name.toLowerCase() === 'content-length' ? String(50 * 1024 * 1024) : '' },
+        body: {
+          async *[Symbol.asyncIterator]() {
+            bodyReads += 1;
+            yield Buffer.from('{}');
+          },
+        },
+      }),
+    }),
+    /safe size limit/,
+  );
+  assert.strictEqual(bodyReads, 0, 'Content-Length is rejected before reading the body');
+
+  await assert.rejects(
+    () => oidc.resolvedConfig({
+      env,
+      fetchImpl: async () => ({
+        ok: true,
+        headers: { get: () => '' },
+        body: {
+          async *[Symbol.asyncIterator]() {
+            yield Buffer.alloc(150 * 1024, 0x7b);
+            yield Buffer.alloc(150 * 1024, 0x7d);
+          },
+        },
+      }),
+    }),
+    /safe size limit/,
+  );
+
+  let cancelled = false;
+  await assert.rejects(
+    () => oidc.resolvedConfig({
+      env,
+      responseTimeoutMs: 20,
+      fetchImpl: async () => ({
+        ok: true,
+        headers: new Headers(),
+        body: { getReader: () => ({
+          read: async () => new Promise(() => {}),
+          cancel: async () => { cancelled = true; },
+        }) },
+      }),
+    }),
+    /provider response timed out/,
+  );
+  assert.strictEqual(cancelled, true);
+
+  let textCalled = false;
+  await assert.rejects(
+    () => oidc.resolvedConfig({
+      env,
+      fetchImpl: async () => ({
+        ok: true,
+        text: async () => { textCalled = true; return '{}'; },
+      }),
+    }),
+    /response body was unavailable/,
+  );
+  assert.strictEqual(textCalled, false);
+
+  let nonSuccessCancelled = false;
+  await assert.rejects(
+    () => oidc.resolvedConfig({
+      env,
+      fetchImpl: async () => ({
+        ok: false,
+        status: 503,
+        body: { cancel: async () => { nonSuccessCancelled = true; } },
+      }),
+    }),
+    /provider request failed/,
+  );
+  assert.strictEqual(nonSuccessCancelled, true);
+
+  const providerSecret = 'provider-internal-secret-value';
+  await assert.rejects(
+    () => oidc.resolvedConfig({
+      env,
+      requestTimeoutMs: 10,
+      fetchImpl: async (_url, options) => new Promise((resolve, reject) => {
+        options.signal.addEventListener('abort', () => reject(new Error(providerSecret)), { once: true });
+      }),
+    }),
+    (error) => /timed out/.test(error.message) && !error.message.includes(providerSecret),
+  );
+  await assert.rejects(
+    () => oidc.resolvedConfig({
+      env,
+      fetchImpl: async () => { throw new Error(providerSecret); },
+    }),
+    (error) => /provider request failed/.test(error.message) && !error.message.includes(providerSecret),
+  );
+});
+
+test('production OIDC rejects cleartext endpoints returned by HTTPS discovery', async () => {
+  const base = {
+    NODE_ENV: 'production',
+    OIDC_ISSUER: 'https://login.example.test',
+    OIDC_CLIENT_ID: 'redactwall-console',
+    OIDC_CLIENT_SECRET: 'unit-secret',
+    OIDC_REDIRECT_URI: 'https://redactwall.example.test/auth/oidc/callback',
+  };
+
+  for (const key of ['authorization_endpoint', 'token_endpoint', 'jwks_uri']) {
+    await assert.rejects(
+      () => oidc.resolvedConfig({
+        env: base,
+        fetchImpl: async () => jsonResponse({
+            issuer: base.OIDC_ISSUER,
+            authorization_endpoint: 'https://login.example.test/authorize',
+            token_endpoint: 'https://login.example.test/token',
+            jwks_uri: 'https://login.example.test/jwks',
+            [key]: `http://login.example.test/${key}`,
+        }),
+      }),
+      /https/i,
+      key,
+    );
+  }
+});
+
+test('OIDC provider requests reject redirects without dropping request options', async () => {
+  let discoveryOptions;
+  await oidc.resolvedConfig({
+    env: {
+      NODE_ENV: 'production',
+      OIDC_ISSUER: 'https://login.example.test',
+      OIDC_CLIENT_ID: 'redactwall-console',
+      OIDC_CLIENT_SECRET: 'unit-secret',
+      OIDC_REDIRECT_URI: 'https://redactwall.example.test/auth/oidc/callback',
+    },
+    fetchImpl: async (_url, options) => {
+      discoveryOptions = options;
+      return jsonResponse({
+          issuer: 'https://login.example.test',
+          authorization_endpoint: 'https://login.example.test/authorize',
+          token_endpoint: 'https://login.example.test/token',
+          jwks_uri: 'https://login.example.test/jwks',
+      });
+    },
+  });
+  assert.strictEqual(discoveryOptions.redirect, 'error');
+
+  const fixture = idTokenFixture();
+  let jwksOptions;
+  await oidc.validateIdToken(fixture.token, {
+    config: fixture.config,
+    nonce: 'nonce-1',
+    now: fixture.now,
+    fetchImpl: async (url, options) => {
+      jwksOptions = options;
+      return fixture.fetchImpl(url);
+    },
+  });
+  assert.strictEqual(jwksOptions.redirect, 'error');
+
+  const now = Date.parse('2026-06-28T13:00:00.000Z');
+  const state = 'redirect-test-state';
+  let tokenOptions;
+  const redirectError = new Error('synthetic provider redirect rejected');
+  await assert.rejects(
+    () => oidc.handleCallback({
+      query: { code: 'code-1', state },
+      stateCookie: oidc.signState({ state, nonce: 'nonce-1', returnTo: '/app/', exp: now + 60_000 }),
+      now,
+      config: {
+        issuer: 'https://login.example.test',
+        clientId: 'redactwall-console',
+        clientSecret: 'unit-secret',
+        redirectUri: 'https://redactwall.example.test/auth/oidc/callback',
+        authorizationEndpoint: 'https://login.example.test/authorize',
+        tokenEndpoint: 'https://login.example.test/token',
+        jwksUri: 'https://login.example.test/jwks',
+        scope: 'openid email profile',
+        production: true,
+        enabled: true,
+      },
+      fetchImpl: async (_url, options) => {
+        tokenOptions = options;
+        throw redirectError;
+      },
+    }),
+    /OIDC provider request failed/,
+  );
+  assert.strictEqual(tokenOptions.redirect, 'error');
+  assert.strictEqual(tokenOptions.method, 'POST');
+  assert.match(tokenOptions.headers.authorization, /^Basic /);
+  assert.match(tokenOptions.body, /grant_type=authorization_code/);
+  assert.strictEqual(oidc.publicError(redirectError), 'oidc login failed');
+});
+
+test('OIDC discovery is shared in flight and cached only for its bounded TTL', async () => {
+  const env = {
+    OIDC_ISSUER: 'https://cached-login.example.test',
+    OIDC_CLIENT_ID: 'redactwall-console',
+    OIDC_CLIENT_SECRET: 'unit-secret',
+    OIDC_REDIRECT_URI: 'https://redactwall.example.test/auth/oidc/callback',
+  };
+  let calls = 0;
+  const fetchImpl = async () => {
+    calls += 1;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    return jsonResponse({
+      issuer: env.OIDC_ISSUER,
+      authorization_endpoint: `${env.OIDC_ISSUER}/authorize`,
+      token_endpoint: `${env.OIDC_ISSUER}/token`,
+      jwks_uri: `${env.OIDC_ISSUER}/jwks`,
+    });
+  };
+  const options = { env, fetchImpl, discoveryCacheTtlMs: 10, now: 1000 };
+  await Promise.all([oidc.resolvedConfig(options), oidc.resolvedConfig(options)]);
+  assert.strictEqual(calls, 1, 'concurrent starts share one discovery request');
+  await oidc.resolvedConfig({ ...options, now: 1009 });
+  assert.strictEqual(calls, 1, 'fresh discovery result is reused');
+  await oidc.resolvedConfig({ ...options, now: 1011 });
+  assert.strictEqual(calls, 2, 'expired discovery is refreshed');
+});
+
+test('OIDC token responses are bounded before the authenticated body is read', async () => {
+  const now = Date.parse('2026-06-28T13:00:00.000Z');
+  const state = 'large-token-state';
+  let bodyReads = 0;
+  await assert.rejects(
+    () => oidc.handleCallback({
+      query: { code: 'code-1', state },
+      stateCookie: oidc.signState({ state, nonce: 'nonce-1', returnTo: '/app/', exp: now + 60_000 }),
+      now,
+      config: {
+        issuer: 'https://login.example.test',
+        clientId: 'redactwall-console',
+        clientSecret: 'token-client-secret',
+        redirectUri: 'https://redactwall.example.test/auth/oidc/callback',
+        authorizationEndpoint: 'https://login.example.test/authorize',
+        tokenEndpoint: 'https://login.example.test/token',
+        jwksUri: 'https://login.example.test/jwks',
+        enabled: true,
+      },
+      fetchImpl: async () => ({
+        ok: true,
+        headers: { get: (name) => name.toLowerCase() === 'content-length' ? String(50 * 1024 * 1024) : '' },
+        body: {
+          async *[Symbol.asyncIterator]() {
+            bodyReads += 1;
+            yield Buffer.from('{}');
+          },
+        },
+      }),
+    }),
+    (error) => /safe size limit/.test(error.message) && !error.message.includes('token-client-secret'),
+  );
+  assert.strictEqual(bodyReads, 0);
+});
+
+test('OIDC caps JWKS key count and caches only successful bounded key sets', async () => {
+  const tooMany = idTokenFixture();
+  await assert.rejects(
+    () => oidc.validateIdToken(tooMany.token, {
+      config: tooMany.config,
+      nonce: 'nonce-1',
+      now: tooMany.now,
+      fetchImpl: async () => jsonResponse({
+        keys: Array.from({ length: 65 }, (_, index) => ({ kty: 'RSA', kid: `key-${index}` })),
+      }),
+    }),
+    /key-count limit/,
+  );
+
+  const cached = idTokenFixture();
+  let requests = 0;
+  const fetchImpl = async (url) => {
+    requests += 1;
+    return cached.fetchImpl(url);
+  };
+  for (let i = 0; i < 2; i += 1) {
+    await oidc.validateIdToken(cached.token, {
+      config: cached.config,
+      nonce: 'nonce-1',
+      now: cached.now,
+      fetchImpl,
+    });
+  }
+  assert.strictEqual(requests, 1, 'successful JWKS response is reused only within its bounded TTL');
+});
+
+test('identity self-test reports unsafe OIDC URLs without reflecting embedded credentials', async () => {
+  const previousIssuer = process.env.OIDC_ISSUER;
+  const previousRedirect = process.env.OIDC_REDIRECT_URI;
+  const embeddedSecret = 'identity-check-provider-secret';
+  process.env.OIDC_ISSUER = `https://provider:${embeddedSecret}@login.example.test`;
+  process.env.OIDC_REDIRECT_URI = 'https://redactwall.example.test/auth/oidc/callback';
+  try {
+    await withServer(async (port) => {
+      const cookie = `${auth.SESSION_COOKIE_NAME}=${auth.createSession('admin', 'security_admin')}`;
+      const csrfResponse = await fetch(`http://127.0.0.1:${port}/api/csrf`, { headers: { cookie } });
+      const csrf = await csrfResponse.json();
+      const response = await fetch(`http://127.0.0.1:${port}/api/identity/test`, {
+        method: 'POST',
+        headers: { cookie, 'content-type': 'application/json', 'x-csrf-token': csrf.csrfToken },
+        body: '{}',
+      });
+      assert.strictEqual(response.status, 200);
+      const body = await response.json();
+      const oidcCheck = body.checks.find((check) => check.id === 'oidc');
+      assert.deepStrictEqual(oidcCheck, {
+        id: 'oidc',
+        label: 'OIDC single sign-on',
+        ok: false,
+        detail: 'configured issuer URL is unsafe',
+      });
+      assert.ok(!JSON.stringify(body).includes(embeddedSecret));
+      assert.ok(!JSON.stringify(db.listAudit(20)).includes(embeddedSecret));
+    });
+  } finally {
+    if (previousIssuer === undefined) delete process.env.OIDC_ISSUER;
+    else process.env.OIDC_ISSUER = previousIssuer;
+    if (previousRedirect === undefined) delete process.env.OIDC_REDIRECT_URI;
+    else process.env.OIDC_REDIRECT_URI = previousRedirect;
+  }
+});
 
 function close(server) {
   return new Promise((resolve) => server.close(resolve));
@@ -76,7 +507,7 @@ function idTokenFixture(claimOverrides = {}) {
     token: signJwt(privateKey, kid, claims),
     config,
     now: nowSec * 1000,
-    fetchImpl: async () => ({ ok: true, json: async () => ({ keys: [jwk] }) }),
+    fetchImpl: async () => jsonResponse({ keys: [jwk] }),
   };
 }
 
@@ -193,6 +624,7 @@ test('oidc callback issues a RedactWall session for an active SCIM approver', as
       process.env.OIDC_REDIRECT_URI = `http://127.0.0.1:${port}/auth/oidc/callback`;
       const user = db.saveScimUser({
         userName: 'reviewer@example.test',
+        externalId: 'sub-reviewer@example.test',
         displayName: 'OIDC Reviewer',
         active: true,
       });
@@ -242,6 +674,7 @@ test('oidc callback refuses inactive SCIM users without issuing a session', asyn
       issuer.nextEmail = 'disabled@example.test';
       db.saveScimUser({
         userName: 'disabled@example.test',
+        externalId: 'sub-disabled@example.test',
         displayName: 'Disabled OIDC User',
         active: false,
         role: 'security_admin',
@@ -261,19 +694,101 @@ test('oidc callback refuses inactive SCIM users without issuing a session', asyn
   }
 });
 
-test('oidc fresh step-up window is bounded by the IdP auth_time claim', () => {
+test('oidc callback refuses active SCIM users without an assigned role', async () => {
+  const issuer = await startIssuer();
+  try {
+    process.env.OIDC_ISSUER = issuer.url;
+    await withServer(async (port) => {
+      process.env.OIDC_REDIRECT_URI = `http://127.0.0.1:${port}/auth/oidc/callback`;
+      issuer.nextEmail = 'unassigned@example.test';
+      db.saveScimUser({
+        userName: 'unassigned@example.test',
+        externalId: 'sub-unassigned@example.test',
+        displayName: 'Unassigned OIDC User',
+        active: true,
+        role: '',
+      });
+
+      const { callback } = await followOidcLogin(port);
+      assert.strictEqual(callback.status, 302);
+      assert.strictEqual(callback.headers.get('location'), '/login.html?oidc=failed');
+      assert.doesNotMatch(callback.headers.get('set-cookie') || '', /redactwall_session=/);
+
+      const audit = db.listAudit(10);
+      assert.ok(audit.some((entry) => entry.action === 'OIDC_LOGIN_FAILED' && /not provisioned/.test(entry.detail || '')));
+      assert.strictEqual(db.verifyAuditChain().ok, true);
+    });
+  } finally {
+    await issuer.close();
+  }
+});
+
+test('oidc step-up requires fresh strong IdP assurance, not auth_time alone', () => {
   const now = Date.parse('2026-06-28T12:00:00.000Z');
   const authTime = Math.floor((now - 4 * 60 * 1000) / 1000);
-  const extras = oidc.sessionExtrasForClaims({
+  const passwordOnly = oidc.sessionExtrasForClaims({
     sub: 'subject-1',
     auth_time: authTime,
+    amr: ['pwd'],
   }, {
     issuer: 'https://login.example.test',
   }, now);
 
-  assert.strictEqual(extras.provider, 'oidc');
-  assert.strictEqual(extras.stepUpUntil, authTime * 1000 + oidc.STEP_UP_TTL_MS);
-  assert.ok(extras.stepUpUntil < now + oidc.STEP_UP_TTL_MS);
+  assert.strictEqual(passwordOnly.provider, 'oidc');
+  assert.strictEqual(passwordOnly.stepUpUntil, undefined, 'recent password-only auth is not step-up');
+
+  const mfa = oidc.sessionExtrasForClaims({
+    sub: 'subject-1',
+    auth_time: authTime,
+    amr: ['pwd', 'mfa'],
+  }, {
+    issuer: 'https://login.example.test',
+  }, now);
+  assert.strictEqual(mfa.stepUpUntil, authTime * 1000 + oidc.STEP_UP_TTL_MS);
+  assert.ok(mfa.stepUpUntil < now + oidc.STEP_UP_TTL_MS);
+
+  const staleMfa = oidc.sessionExtrasForClaims({
+    sub: 'subject-1',
+    auth_time: Math.floor((now - oidc.STEP_UP_TTL_MS - 1000) / 1000),
+    amr: ['mfa'],
+  }, {
+    issuer: 'https://login.example.test',
+  }, now);
+  assert.strictEqual(staleMfa.stepUpUntil, undefined, 'stale MFA is not step-up');
+
+  const configuredAcr = oidc.sessionExtrasForClaims({
+    sub: 'subject-1',
+    auth_time: authTime,
+    acr: 'urn:customer:assurance:mfa',
+  }, {
+    issuer: 'https://login.example.test',
+    stepUpAcrValues: ['urn:customer:assurance:mfa'],
+  }, now);
+  assert.ok(configuredAcr.stepUpUntil > now, 'an explicitly allowed strong ACR can satisfy step-up');
+});
+
+test('oidc step-up authorization requests fresh configured assurance', async () => {
+  const redirect = await oidc.buildAuthorizationRedirect({
+    stepUp: true,
+    returnTo: '/app/#queue',
+    config: {
+      issuer: 'https://login.example.test',
+      clientId: 'redactwall-console',
+      clientSecret: 'unit-secret',
+      redirectUri: 'https://redactwall.example.test/auth/oidc/callback',
+      authorizationEndpoint: 'https://login.example.test/authorize',
+      tokenEndpoint: 'https://login.example.test/token',
+      jwksUri: 'https://login.example.test/jwks',
+      scope: 'openid email profile',
+      stepUpAcrValues: ['urn:customer:assurance:mfa'],
+      enabled: true,
+    },
+  });
+  const url = new URL(redirect.url);
+  assert.strictEqual(url.searchParams.get('prompt'), 'login');
+  assert.strictEqual(url.searchParams.get('max_age'), '0');
+  assert.strictEqual(url.searchParams.get('acr_values'), 'urn:customer:assurance:mfa');
+  assert.strictEqual(redirect.state.requireStepUp, true);
 });
 
 test('oidc discovery and state cookies fail closed on mismatches and tampering', async () => {
@@ -283,15 +798,13 @@ test('oidc discovery and state cookies fail closed on mismatches and tampering',
         OIDC_ISSUER: 'https://issuer.example.test',
         OIDC_CLIENT_ID: 'redactwall-console',
         OIDC_CLIENT_SECRET: 'secret',
+        OIDC_REDIRECT_URI: 'https://redactwall.example.test/auth/oidc/callback',
       },
-      fetchImpl: async () => ({
-        ok: true,
-        json: async () => ({
+      fetchImpl: async () => jsonResponse({
           issuer: 'https://other-issuer.example.test',
           authorization_endpoint: 'https://issuer.example.test/auth',
           token_endpoint: 'https://issuer.example.test/token',
           jwks_uri: 'https://issuer.example.test/jwks',
-        }),
       }),
     }),
     /issuer mismatch/,
@@ -423,6 +936,22 @@ test('oidc id token validation rejects wrong keys, issuers, audiences, and missi
     /audience mismatch/,
   );
 
+  for (const aud of [process.env.OIDC_CLIENT_ID, [process.env.OIDC_CLIENT_ID]]) {
+    const wrongAuthorizedParty = idTokenFixture({
+      aud,
+      azp: 'other-client',
+    });
+    await assert.rejects(
+      () => oidc.validateIdToken(wrongAuthorizedParty.token, {
+        config: wrongAuthorizedParty.config,
+        fetchImpl: wrongAuthorizedParty.fetchImpl,
+        nonce: 'nonce-1',
+        now: wrongAuthorizedParty.now,
+      }),
+      /audience mismatch/,
+    );
+  }
+
   const missingSub = idTokenFixture({ sub: '' });
   await assert.rejects(
     () => oidc.validateIdToken(missingSub.token, {
@@ -462,6 +991,30 @@ test('oidc callback rejects state mismatches and provider errors without issuing
     const audit = db.listAudit(10);
     assert.ok(audit.some((entry) => entry.action === 'OIDC_LOGIN_FAILED' && entry.detail === 'oidc login failed'));
     assert.strictEqual(db.verifyAuditChain().ok, true);
+  });
+});
+
+test('OIDC routes cap per-IP amplification and emit one audit event for the lock window', async () => {
+  await withServer(async (port) => {
+    const before = db.listAudit(5000);
+    const failedBefore = before.filter((entry) => entry.action === 'OIDC_LOGIN_FAILED').length;
+    const limitedBefore = before.filter((entry) => entry.action === 'OIDC_RATE_LIMITED').length;
+    const limit = oidc._loginAttemptLimits.maxAttempts;
+    for (let index = 0; index < limit; index += 1) {
+      const response = await fetch(`http://127.0.0.1:${port}/auth/oidc/callback?error=access_denied&n=${index}`, {
+        redirect: 'manual',
+      });
+      assert.strictEqual(response.status, 302);
+    }
+    for (let index = 0; index < 5; index += 1) {
+      const response = await fetch(`http://127.0.0.1:${port}/auth/oidc/callback?error=access_denied&locked=${index}`, {
+        redirect: 'manual',
+      });
+      assert.strictEqual(response.status, 429);
+    }
+    const after = db.listAudit(5000);
+    assert.strictEqual(after.filter((entry) => entry.action === 'OIDC_LOGIN_FAILED').length - failedBefore, limit);
+    assert.strictEqual(after.filter((entry) => entry.action === 'OIDC_RATE_LIMITED').length - limitedBefore, 1);
   });
 });
 

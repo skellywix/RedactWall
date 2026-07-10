@@ -4,6 +4,7 @@
  * selects, printing one JSON result blob. Run in a child process so the
  * db singleton binds to the Postgres driver via REDACTWALL_DB_DRIVER.
  */
+const crypto = require('node:crypto');
 const results = {};
 
 function attempt(name, fn) {
@@ -20,19 +21,81 @@ attempt('driverKind', () => db._driverKind);
 attempt('migrations', () => db._db.prepare('SELECT version, name FROM schema_migrations ORDER BY version').all());
 
 attempt('queryCrud', () => {
-  const created = db.createQuery({
+  const created = db.createQueryWithAudit({
     status: 'pending', user: 'pg@example.test', orgId: 'cu-alpha',
     destination: 'chatgpt.com', redactedPrompt: 'Member [US_SSN]', riskScore: 42,
-  });
+  }, { action: 'PG_QUERY_CREATED', actor: 'battery', detail: 'query fixture created' }).row;
   const fetched = db.getQuery(created.id);
-  const updated = db.updateQuery(created.id, { status: 'approved', decisionNote: 'ok' });
+  const updated = db.mutateQueryWithAudit(
+    created.id,
+    () => ({ status: 'approved', decisionNote: 'ok' }),
+    { action: 'PG_QUERY_UPDATED', actor: 'battery', detail: 'query fixture updated' },
+  ).row;
   return { id: created.id, fetchedStatus: fetched.status, updatedStatus: updated.status, risk: fetched.riskScore };
+});
+
+attempt('decisionCas', () => {
+  const held = db.createQueryWithAudit({
+    status: 'pending', user: 'decision@pg.test', orgId: 'cu-alpha', destination: 'chatgpt.com',
+  }, { action: 'PG_DECISION_CREATED', actor: 'battery', detail: 'decision fixture created' }).row;
+  const expected = {
+    status: held.status,
+    assignedUser: held.assignedUser,
+    assignedGroup: held.assignedGroup,
+    assignedRole: held.assignedRole,
+    _releaseTokenHash: held._releaseTokenHash,
+  };
+  const winner = db.transitionQueryWithAudit(
+    held.id,
+    expected,
+    { status: 'approved', decidedBy: 'instance-a', decidedAt: new Date().toISOString() },
+    { action: 'APPROVED', actor: 'instance-a', detail: 'winner' },
+  );
+  const loser = db.transitionQueryWithAudit(
+    held.id,
+    expected,
+    { status: 'denied', decidedBy: 'instance-b', decidedAt: new Date().toISOString() },
+    { action: 'DENIED', actor: 'instance-b', detail: 'loser' },
+  );
+  const audits = db.listAudit(500).filter((entry) => entry.queryId === held.id && ['APPROVED', 'DENIED'].includes(entry.action));
+  return {
+    winner: winner.outcome,
+    loser: loser.outcome,
+    finalStatus: db.getQuery(held.id).status,
+    auditActions: audits.map((entry) => entry.action),
+    chainOk: db.verifyAuditChain().ok,
+  };
 });
 
 attempt('auditChain', () => {
   db.appendAudit({ action: 'PG_TEST', actor: 'battery', detail: 'first' });
   db.appendAudit({ action: 'PG_TEST', actor: 'battery', detail: 'second' });
   return db.verifyAuditChain();
+});
+
+attempt('vendorHeartbeatCas', () => {
+  const customerId = 'cu-pg-vendor';
+  const customerRef = 'license_' + crypto.createHash('sha256').update(customerId).digest('base64url').slice(0, 24);
+  const record = (issuedAt, status) => {
+    const state = { customerId, issuedAt, contactAt: issuedAt, status };
+    return {
+      ...state,
+      customerRef,
+      audits: [{
+        action: 'VENDOR_HEARTBEAT_OK', actor: 'vendor',
+        detail: JSON.stringify({ customerRef, issuedAt, contactAt: issuedAt, status }),
+      }],
+    };
+  };
+  const newer = db.applyVendorHeartbeat(record(3000, 'revoked'));
+  const older = db.applyVendorHeartbeat(record(2000, 'active'));
+  return {
+    newerApplied: newer.applied,
+    olderApplied: older.applied,
+    status: db.lastVendorHeartbeat(customerId, customerRef).status,
+    issuedAt: db.lastVendorHeartbeat(customerId, customerRef).issuedAt,
+    chainOk: db.verifyAuditChain().ok,
+  };
 });
 
 attempt('auditImmutable', () => {
@@ -46,8 +109,14 @@ attempt('auditImmutable', () => {
 });
 
 attempt('tenantScoping', () => {
-  db.createQuery({ status: 'allowed', user: 'a@alpha.test', orgId: 'cu-alpha', destination: 'chatgpt.com' });
-  db.createQuery({ status: 'allowed', user: 'b@beta.test', orgId: 'cu-beta', destination: 'claude.ai' });
+  db.createQueryWithAudit(
+    { status: 'allowed', user: 'a@alpha.test', orgId: 'cu-alpha', destination: 'chatgpt.com' },
+    { action: 'PG_TENANT_CREATED', actor: 'battery', detail: 'alpha fixture created' },
+  );
+  db.createQueryWithAudit(
+    { status: 'allowed', user: 'b@beta.test', orgId: 'cu-beta', destination: 'claude.ai' },
+    { action: 'PG_TENANT_CREATED', actor: 'battery', detail: 'beta fixture created' },
+  );
   const alpha = db.listQueries({ orgId: 'cu-alpha', limit: 100 });
   const beta = db.listQueries({ orgId: 'CU-BETA', limit: 100 });
   return {
@@ -147,8 +216,10 @@ attempt('seatWindow', () => {
   const recent = new Date(Date.now() - 1 * 86400000).toISOString();
   db._db.prepare('INSERT INTO queries (id, "createdAt", status, "user", "orgId", data) VALUES (?,?,?,?,?,?)')
     .run('pg_seatwin_old', old, 'allowed', 'lapsed@pg.test', 'cu-seatwin', '{}');
+  db.appendAudit({ action: 'PG_SEAT_WINDOW_CREATED', queryId: 'pg_seatwin_old', actor: 'battery', detail: 'old seat fixture created' });
   db._db.prepare('INSERT INTO queries (id, "createdAt", status, "user", "orgId", data) VALUES (?,?,?,?,?,?)')
     .run('pg_seatwin_new', recent, 'allowed', 'active@pg.test', 'cu-seatwin', '{}');
+  db.appendAudit({ action: 'PG_SEAT_WINDOW_CREATED', queryId: 'pg_seatwin_new', actor: 'battery', detail: 'recent seat fixture created' });
   const windowed = db.seatStats({ orgId: 'cu-seatwin' }).seatsUsed;
   process.env.REDACTWALL_SEAT_WINDOW_DAYS = 'all';
   let lifetime;
@@ -160,6 +231,39 @@ attempt('mfaRecovery', () => {
   const first = db.consumeMfaRecoveryCode(3);
   const second = db.consumeMfaRecoveryCode(3);
   return { first, second, used: db.mfaRecoveryCodeUsed(3) };
+});
+
+attempt('administration', () => {
+  const user = db.saveAdminUser({ orgId: 'pg-admin', userName: 'admin-pg@example.test', displayName: 'PG Admin', role: 'security_admin', active: true });
+  const invite = db.saveAdminInvitation({
+    orgId: 'pg-admin',
+    userName: 'invite-pg@example.test',
+    displayName: 'Invite PG',
+    role: 'auditor',
+    tokenHash: 'pg-token-hash',
+    status: 'pending',
+    expiresAt: '2027-01-01T00:00:00.000Z',
+  });
+  const seat = db.saveLicenseSeatAssignment({
+    orgId: 'pg-admin',
+    userKey: 'admin-pg@example.test',
+    userName: 'admin-pg@example.test',
+    status: 'released',
+    reason: 'pg battery',
+    actor: 'battery',
+  });
+  const renewal = db.createLicenseRenewalRequest({
+    orgId: 'pg-admin',
+    requestedSeats: 25,
+    contactEmail: 'admin-pg@example.test',
+    note: 'pg battery',
+  });
+  return {
+    user: !!db.getAdminUser(user.id),
+    invite: !!db.getAdminInvitation(invite.id),
+    seat: db.getLicenseSeatAssignment(seat.userKey).status === 'released',
+    renewal: db.listLicenseRenewalRequests().some((row) => row.id === renewal.id),
+  };
 });
 
 process.stdout.write(JSON.stringify(results));

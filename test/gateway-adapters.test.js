@@ -43,9 +43,15 @@ function listenAndRequest(app, { method = 'POST', pathName = '/v1/chat/completio
 }
 
 function stubClient({ verdict, scan } = {}) {
+  const requestVerdict = verdict || { decision: 'allow' };
+  const responseVerdict = scan || { leaked: false, decision: 'allow', blocked: false };
   return {
-    gate: async () => verdict || { decision: 'allow' },
-    scanResponse: async () => scan || { leaked: false, decision: 'allow', blocked: false },
+    gate: async () => requestVerdict.status !== undefined || requestVerdict.decision === 'allow'
+      ? requestVerdict
+      : { ...requestVerdict, status: ({ block: 'pending', redact: 'redacted', warn: 'warned', log: 'proxy_observed' })[requestVerdict.decision] },
+    scanResponse: async () => responseVerdict.status !== undefined
+      ? responseVerdict
+      : { ...responseVerdict, status: ({ allow: 'allowed', block: 'response_blocked', redact: 'response_redacted', flag: 'response_flagged' })[responseVerdict.decision] },
     rehydrate: async (id, text) => ({ text, rehydrated: false }),
   };
 }
@@ -56,7 +62,7 @@ function stubFetch(t, { status = 200, bodyText = '{}' } = {}) {
   const original = globalThis.fetch;
   globalThis.fetch = async (url, opts) => {
     calls.push({ url, opts });
-    return { ok: status >= 200 && status < 300, status, text: async () => bodyText };
+    return new Response(bodyText, { status, headers: { 'content-type': 'application/json' } });
   };
   t.after(() => { globalThis.fetch = original; });
   return calls;
@@ -106,47 +112,143 @@ test('canonical.applyResponseText replaces the first textual choice only', () =>
 });
 
 // ---------------------------------------------------------------------------
-test('getAdapter resolves aliases, is case-insensitive, and falls back to openai', () => {
-  assert.strictEqual(getAdapter('azure-openai'), ADAPTERS.openai);
+test('getAdapter resolves supported aliases and rejects unknown providers', () => {
   assert.strictEqual(getAdapter('internal-http'), ADAPTERS.openai);
   assert.strictEqual(getAdapter('Anthropic'), ADAPTERS.anthropic);
-  assert.strictEqual(getAdapter('no-such-provider'), ADAPTERS.openai);
+  assert.throws(() => getAdapter('azure-openai'), /gateway provider must be one of/i);
+  assert.throws(() => getAdapter('no-such-provider'), /gateway provider must be one of/i);
   assert.strictEqual(getAdapter(undefined), ADAPTERS.openai);
+});
+
+test('gateway construction rejects invalid or incomplete provider configuration', () => {
+  assert.throws(() => createGateway({ provider: 'opneai' }), /gateway provider must be one of/i);
+  assert.throws(() => createGateway({ provider: 'azure-openai' }), /gateway provider must be one of/i);
+  assert.throws(
+    () => createGateway({ provider: 'internal-http', upstreamBaseUrl: undefined }),
+    /internal-http.*requires GATEWAY_UPSTREAM_URL/i
+  );
+});
+
+test('gateway construction cannot override production onto the mock adapter', () => {
+  const previous = process.env.NODE_ENV;
+  process.env.NODE_ENV = 'production';
+  try {
+    assert.throws(
+      () => createGateway({ provider: 'mock' }),
+      /mock gateway provider is not allowed in production/i
+    );
+  } finally {
+    if (previous === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previous;
+  }
+});
+
+test('gateway construction requires credentials for public providers only', () => {
+  const cases = [
+    ['openai', undefined],
+    ['anthropic', undefined],
+  ];
+  for (const [provider, upstreamBaseUrl] of cases) {
+    assert.throws(
+      () => createGateway({ provider, upstreamBaseUrl, upstreamApiKey: '   ' }),
+      new RegExp(`${provider}.*requires GATEWAY_UPSTREAM_API_KEY`, 'i')
+    );
+  }
+  assert.doesNotThrow(() => createGateway({
+    provider: 'internal-http',
+    upstreamBaseUrl: 'https://internal.example.test',
+    upstreamApiKey: undefined,
+  }));
 });
 
 // ---------------------------------------------------------------------------
 test('anthropic.toAnthropic splits system turns and applies defaults', () => {
-  const out = anthropic.toAnthropic({ messages: [
+  const out = anthropic.toAnthropic({ model: 'claude-sonnet-4', messages: [
     { role: 'system', content: 'be brief' },
     { role: 'user', content: 'hi' },
     { role: 'assistant', content: 'hello' },
   ] });
   assert.strictEqual(out.system, 'be brief');
   assert.deepStrictEqual(out.messages, [{ role: 'user', content: 'hi' }, { role: 'assistant', content: 'hello' }]);
-  assert.strictEqual(out.model, 'claude-sonnet-4', 'default model');
+  assert.strictEqual(out.model, 'claude-sonnet-4');
   assert.strictEqual(out.max_tokens, 1024, 'default max_tokens');
 });
 
-test('anthropic.toAnthropic falls back to requestText when no user/assistant turns exist', () => {
-  const out = anthropic.toAnthropic({ prompt: 'bare prompt', model: 'claude-x', max_tokens: 9 });
-  assert.deepStrictEqual(out.messages, [{ role: 'user', content: 'bare prompt' }]);
-  assert.strictEqual(out.model, 'claude-x');
-  assert.strictEqual(out.max_tokens, 9);
+test('anthropic.toAnthropic rejects non-chat and empty message shapes instead of inventing content', () => {
+  assert.throws(
+    () => anthropic.toAnthropic({ prompt: 'bare prompt', model: 'claude-x', max_tokens: 9 }),
+    /does not support prompt/
+  );
+  assert.throws(
+    () => anthropic.toAnthropic({ model: 'claude-x', messages: [] }),
+    /require at least one message/
+  );
 });
 
 test('anthropic.fromAnthropic maps content parts and stop_reason to OpenAI shape', () => {
-  const out = anthropic.fromAnthropic({ id: 'msg_1', model: 'claude-x', stop_reason: 'end_turn', content: [{ type: 'text', text: 'a' }, { type: 'tool_use' }, { type: 'text', text: 'b' }] });
+  const out = anthropic.fromAnthropic({ id: 'msg_1', model: 'claude-x', stop_reason: 'end_turn', content: [{ type: 'text', text: 'a' }, { type: 'text', text: 'b' }] });
   assert.strictEqual(out.object, 'chat.completion');
   assert.strictEqual(out.choices[0].message.content, 'ab');
-  assert.strictEqual(out.choices[0].finish_reason, 'end_turn');
-  const empty = anthropic.fromAnthropic(null);
-  assert.strictEqual(empty.choices[0].message.content, '');
-  assert.strictEqual(empty.choices[0].finish_reason, 'stop');
+  assert.strictEqual(out.choices[0].finish_reason, 'stop');
+  assert.strictEqual(typeof out.created, 'number');
+  assert.throws(() => anthropic.fromAnthropic(null), /response is malformed/);
+});
+
+test('anthropic translates OpenAI function tools, results, choices, usage, and stop reasons', () => {
+  const request = anthropic.toAnthropic({
+    model: 'claude-x', max_completion_tokens: 77, parallel_tool_calls: false,
+    tool_choice: { type: 'function', function: { name: 'lookup' } },
+    tools: [{ type: 'function', function: {
+      name: 'lookup', description: 'Lookup public data', strict: true,
+      parameters: { type: 'object', properties: { id: { type: 'string' } } },
+    } }],
+    messages: [
+      { role: 'user', content: 'Find it' },
+      { role: 'assistant', content: null, tool_calls: [{
+        id: 'call_1', type: 'function', function: { name: 'lookup', arguments: '{"id":"public"}' },
+      }] },
+      { role: 'tool', tool_call_id: 'call_1', content: 'found' },
+    ],
+  });
+  assert.strictEqual(request.max_tokens, 77);
+  assert.deepStrictEqual(request.tool_choice, {
+    type: 'tool', name: 'lookup', disable_parallel_tool_use: true,
+  });
+  assert.strictEqual(request.tools[0].strict, true);
+  assert.deepStrictEqual(request.messages[1].content, [{
+    type: 'tool_use', id: 'call_1', name: 'lookup', input: { id: 'public' },
+  }]);
+  assert.deepStrictEqual(request.messages[2].content, [{
+    type: 'tool_result', tool_use_id: 'call_1', content: 'found',
+  }]);
+
+  const response = anthropic.fromAnthropic({
+    id: 'msg_tool', model: 'claude-x', stop_reason: 'tool_use',
+    content: [{ type: 'tool_use', id: 'toolu_1', name: 'lookup', input: { id: 'public' } }],
+    usage: { input_tokens: 3, output_tokens: 4 },
+  });
+  assert.strictEqual(response.choices[0].finish_reason, 'tool_calls');
+  assert.strictEqual(response.choices[0].message.content, null);
+  assert.deepStrictEqual(response.choices[0].message.tool_calls, [{
+    id: 'toolu_1', type: 'function',
+    function: { name: 'lookup', arguments: '{"id":"public"}' },
+  }]);
+  assert.deepStrictEqual(response.usage, {
+    prompt_tokens: 3, completion_tokens: 4, total_tokens: 7,
+  });
+});
+
+test('anthropic rejects unsupported semantics before translation', () => {
+  const base = { model: 'claude-x', messages: [{ role: 'user', content: 'hello' }] };
+  assert.throws(() => anthropic.validateRequest('embeddings', base), /chat\/completions/);
+  assert.throws(() => anthropic.validateRequest('chat', { ...base, response_format: { type: 'json_object' } }), /response_format/);
+  assert.throws(() => anthropic.validateRequest('chat', { ...base, temperature: 1.5 }), /between 0 and 1/);
+  assert.throws(() => anthropic.toAnthropic({ ...base, messages: [{ role: 'assistant', content: 'leading' }, ...base.messages] }), /begin with a user/);
 });
 
 test('anthropic.callUpstream posts a translated body to /v1/messages with anthropic headers', async (t) => {
-  const calls = stubFetch(t, { bodyText: JSON.stringify({ id: 'msg_2', content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn' }) });
-  const up = await anthropic.callUpstream('chat', { messages: [{ role: 'user', content: 'hi' }] }, { upstreamBaseUrl: 'https://up.example//', upstreamApiKey: 'k1', requestTimeoutMs: 1000 });
+  const calls = stubFetch(t, { bodyText: JSON.stringify({ id: 'msg_2', model: 'claude-x', content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn' }) });
+  const up = await anthropic.callUpstream('chat', { model: 'claude-x', messages: [{ role: 'user', content: 'hi' }] }, { upstreamBaseUrl: 'https://up.example//', upstreamApiKey: 'k1', requestTimeoutMs: 1000 });
   assert.strictEqual(calls[0].url, 'https://up.example/v1/messages', 'trailing slashes stripped');
   assert.strictEqual(calls[0].opts.headers['x-api-key'], 'k1');
   assert.strictEqual(calls[0].opts.headers['anthropic-version'], '2023-06-01');
@@ -158,7 +260,7 @@ test('anthropic.callUpstream posts a translated body to /v1/messages with anthro
 
 test('anthropic.callUpstream returns json null on an unparseable upstream body', async (t) => {
   stubFetch(t, { status: 500, bodyText: 'not json' });
-  const up = await anthropic.callUpstream('chat', { messages: [] }, { requestTimeoutMs: 1000 });
+  const up = await anthropic.callUpstream('chat', { model: 'claude-x', messages: [{ role: 'user', content: 'hi' }] }, { upstreamApiKey: 'unit-key', requestTimeoutMs: 1000 });
   assert.strictEqual(up.ok, false);
   assert.strictEqual(up.status, 500);
   assert.strictEqual(up.json, null);
@@ -181,9 +283,48 @@ test('openai.callUpstream routes each kind to its endpoint with a bearer key', a
 
 test('openai.callUpstream survives an unparseable upstream body', async (t) => {
   stubFetch(t, { status: 200, bodyText: '<html>gateway timeout</html>' });
-  const up = await openai.callUpstream('chat', { messages: [] }, { requestTimeoutMs: 1000 });
+  const up = await openai.callUpstream('chat', { messages: [] }, { upstreamApiKey: 'unit-key', requestTimeoutMs: 1000 });
   assert.strictEqual(up.ok, true);
   assert.strictEqual(up.json, null, 'callers must treat unparseable success bodies as errors');
+});
+
+test('internal OpenAI-compatible adapter requires a URL and omits empty authorization', async (t) => {
+  await assert.rejects(
+    () => openai.callUpstream('chat', { messages: [] }, {
+      provider: 'internal-http', requestTimeoutMs: 1000, maxUpstreamResponseBytes: 1024,
+    }),
+    /internal-http.*requires GATEWAY_UPSTREAM_URL/i
+  );
+  const calls = stubFetch(t);
+  await openai.callUpstream('chat', { messages: [] }, {
+    provider: 'internal-http', upstreamBaseUrl: 'https://internal.example.test',
+    requestTimeoutMs: 1000, maxUpstreamResponseBytes: 1024,
+  });
+  assert.strictEqual(calls[0].opts.headers.authorization, undefined);
+});
+
+test('gateway rejects an unsupported Anthropic request before gate or upstream side effects', async (t) => {
+  const tp = tmpTokens(t);
+  const { token } = tokens.mintToken({ user: 'a@x' }, tp);
+  let gateCalls = 0;
+  let fetchCalls = 0;
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => { fetchCalls += 1; throw new Error('must not fetch'); };
+  t.after(() => { globalThis.fetch = original; });
+  const client = { ...stubClient(), gate: async () => { gateCalls += 1; return { decision: 'allow' }; } };
+  const { app } = createGateway({
+    provider: 'anthropic', upstreamApiKey: 'unit-key', client, agentTokensPath: tp,
+  });
+  const res = await listenAndRequest(app, {
+    headers: { authorization: 'Bearer ' + token },
+    body: {
+      model: 'claude-x', response_format: { type: 'json_object' },
+      messages: [{ role: 'user', content: 'safe request' }],
+    },
+  });
+  assert.strictEqual(res.status, 400);
+  assert.strictEqual(gateCalls, 0);
+  assert.strictEqual(fetchCalls, 0);
 });
 
 // ---------------------------------------------------------------------------
@@ -246,15 +387,17 @@ test('gateway returns 502 when the upstream errors or replies unparseably', asyn
   assert.deepStrictEqual(res.json.error.reasons, ['upstream status 503']);
 });
 
-test('gateway skips the gate for empty prompts but still calls upstream', async (t) => {
+test('gateway gates structural outbound strings even when message content is empty', async (t) => {
   const tp = tmpTokens(t);
   const { token } = tokens.mintToken({ user: 'a@x' }, tp);
   let gateCalls = 0;
-  const client = { ...stubClient(), gate: async () => { gateCalls++; return { decision: 'allow' }; } };
+  let gatedPrompt = '';
+  const client = { ...stubClient(), gate: async (payload) => { gateCalls++; gatedPrompt = payload.prompt; return { decision: 'allow' }; } };
   const { app, metrics } = createGateway({ provider: 'mock', client, agentTokensPath: tp });
   const res = await listenAndRequest(app, { headers: { authorization: 'Bearer ' + token }, body: { model: 'x', messages: [] } });
   assert.strictEqual(res.status, 200);
-  assert.strictEqual(gateCalls, 0, 'no text to gate');
+  assert.strictEqual(gateCalls, 1, 'every forwarded string crosses the DLP gate');
+  assert.match(gatedPrompt, /model\nx/);
   assert.strictEqual(metrics.allowed, 1);
 });
 

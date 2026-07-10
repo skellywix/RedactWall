@@ -12,7 +12,7 @@ test('policy impact compares current and proposed outcomes from metadata only', 
     source: 'browser_extension_524-71-9043',
     channel: 'submit',
     redactedPrompt: 'Member SSN 524-71-9043 should never return in preview',
-    findings: [{ type: 'US_SSN', severity: 4, score: 1, masked: '***-**-9043' }],
+    findings: [{ type: 'EMAIL_ADDRESS', severity: 2, score: 1, masked: 'm***@example.test' }],
     categories: [],
     riskScore: 10,
     maxSeverity: 1,
@@ -56,5 +56,5 @@ test('policy impact compares current and proposed outcomes from metadata only', 
   assert.strictEqual(JSON.stringify(report).includes('524-71-9043'), false);
   assert.strictEqual(JSON.stringify(report).includes('SharePoint export preview'), false);
   assert.ok(report.topDeltas.destinations.some((item) => item.label === 'chatgpt.com'));
-  assert.ok(report.topDeltas.categories.some((item) => item.label === 'US_SSN'));
+  assert.ok(report.topDeltas.categories.some((item) => item.label === 'EMAIL_ADDRESS'));
 });

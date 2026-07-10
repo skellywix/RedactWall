@@ -228,22 +228,36 @@ test('webhook emit is disabled without url and swallows network failures', async
     fetch: async () => { throw new Error('offline'); },
   });
   assert.deepStrictEqual(failed, { sent: false, reason: 'error' });
+
+  let cancelled = false;
+  const rejected = await alerts.emitSecurityAlert(sampleQuery(), {
+    url: 'https://siem.example.test/hook',
+    fetch: async (_url, options) => {
+      assert.strictEqual(options.redirect, 'error');
+      return { ok: false, status: 503, body: { cancel: async () => { cancelled = true; } } };
+    },
+  });
+  assert.deepStrictEqual(rejected, { sent: false, reason: 'http_503' });
+  assert.strictEqual(cancelled, true);
 });
 
 test('webhook emit sends authorization and sanitized json', async () => {
   let request;
+  let cancelled = false;
   const sent = await alerts.emitSecurityAlert(sampleQuery(), {
     url: 'https://siem.example.test/hook#secret-fragment',
     token: 'unit-token',
     fetch: async (url, opts) => {
       request = { url, opts };
-      return { ok: true, status: 202 };
+      return { ok: true, status: 202, body: { cancel: async () => { cancelled = true; } } };
     },
   });
 
   assert.deepStrictEqual(sent, { sent: true, status: 202 });
   assert.strictEqual(request.url, 'https://siem.example.test/hook');
+  assert.strictEqual(request.opts.redirect, 'error');
   assert.strictEqual(request.opts.headers.Authorization, 'Bearer unit-token');
+  assert.strictEqual(cancelled, true);
   assert.ok(!request.opts.body.includes('524-71-9043'));
   assert.match(request.opts.body, /US_SSN/);
 });
@@ -298,6 +312,7 @@ test('automatic posture feed dedupes, rate limits, and sends sanitized snapshots
   assert.strictEqual(sent.sent, true);
   assert.strictEqual(sent.attempted, true);
   assert.strictEqual(request.url, 'https://siem.example.test/hook');
+  assert.strictEqual(request.opts.redirect, 'error');
   assert.strictEqual(request.opts.headers.Authorization, 'Bearer unit-token');
   const body = JSON.parse(request.opts.body);
   assert.strictEqual(body.action, 'POSTURE_FEED');

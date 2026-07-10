@@ -82,7 +82,7 @@
   function itinPlausible(raw) {
     const d = compactDigits(raw);
     if (!/^9\d{2}(5\d|6[0-5]|7\d|8[0-8]|9[0-2]|9[4-9])\d{4}$/.test(d)) return false;
-    return ssnPlausible(d) === false;
+    return true;
   }
   function npiValid(raw) {
     const d = compactDigits(raw);
@@ -548,33 +548,103 @@
   // numbers, employee names) WITHOUT the plaintext ever leaving the org: the
   // admin fingerprints each known value to a salted one-way hash, and detection
   // hashes candidate spans and checks set membership. This is the on-device,
-  // privacy-preserving version of Nightfall/Strac EDM — the vault of real values
-  // never ships to the sensor, only irreversible fingerprints do.
+  // Offline exact match for non-enumerable random identifiers. Managed sensors
+  // receive the salt and fingerprints, so this profile rejects low-entropy
+  // member, account, identity, and contact values that could be guessed offline.
   const EDM_CACHE = typeof WeakMap !== 'undefined' ? new WeakMap() : null;
-  function _fnv1a(str) { let h = 0x811c9dc5; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0; } return h; }
-  function _djb2(str) { let h = 5381; for (let i = 0; i < str.length; i++) h = ((h * 33) ^ str.charCodeAt(i)) >>> 0; return h; }
-  // 64-bit-ish fingerprint as two independent 32-bit hashes → negligible
-  // collision rate for realistic watchlist sizes, still zero-dependency.
+  const EDM_PROFILE = Object.freeze({
+    formatVersion: 2,
+    algorithm: 'sha256',
+    valuePolicy: 'offline-random-id-v1',
+    minLen: 20,
+    maxWords: 1,
+    saltMinLength: 32,
+    fingerprintHexLength: 64,
+  });
+  const SHA256_K = [
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+  ];
+  function _utf8Bytes(value) {
+    const out = [];
+    for (const char of String(value)) {
+      const cp = char.codePointAt(0);
+      if (cp < 0x80) out.push(cp);
+      else if (cp < 0x800) out.push(0xc0 | (cp >>> 6), 0x80 | (cp & 63));
+      else if (cp < 0x10000) out.push(0xe0 | (cp >>> 12), 0x80 | ((cp >>> 6) & 63), 0x80 | (cp & 63));
+      else out.push(0xf0 | (cp >>> 18), 0x80 | ((cp >>> 12) & 63), 0x80 | ((cp >>> 6) & 63), 0x80 | (cp & 63));
+    }
+    return out;
+  }
+  function _sha256(value) {
+    const bytes = _utf8Bytes(value), bitLength = bytes.length * 8;
+    bytes.push(0x80);
+    while (bytes.length % 64 !== 56) bytes.push(0);
+    const high = Math.floor(bitLength / 0x100000000), low = bitLength >>> 0;
+    for (const n of [high, low]) bytes.push((n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255);
+    const state = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+    const w = new Uint32Array(64), rotr = (n, bits) => (n >>> bits) | (n << (32 - bits));
+    for (let offset = 0; offset < bytes.length; offset += 64) {
+      for (let i = 0; i < 16; i++) { const j = offset + i * 4; w[i] = ((bytes[j] << 24) | (bytes[j + 1] << 16) | (bytes[j + 2] << 8) | bytes[j + 3]) >>> 0; }
+      for (let i = 16; i < 64; i++) { const a = w[i - 15], b = w[i - 2]; const s0 = rotr(a, 7) ^ rotr(a, 18) ^ (a >>> 3), s1 = rotr(b, 17) ^ rotr(b, 19) ^ (b >>> 10); w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0; }
+      let [a, b, c, d, e, f, g, h] = state;
+      for (let i = 0; i < 64; i++) { const s1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25), ch = (e & f) ^ (~e & g); const t1 = (h + s1 + ch + SHA256_K[i] + w[i]) >>> 0; const s0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22), maj = (a & b) ^ (a & c) ^ (b & c); const t2 = (s0 + maj) >>> 0; h = g; g = f; f = e; e = (d + t1) >>> 0; d = c; c = b; b = a; a = (t1 + t2) >>> 0; }
+      for (const [i, n] of [a, b, c, d, e, f, g, h].entries()) state[i] = (state[i] + n) >>> 0;
+    }
+    return state.map((n) => n.toString(16).padStart(8, '0')).join('');
+  }
+  // Fingerprints use SHA-256. The salt prevents cross-organization rainbow
+  // tables, while the v2 pack profile restricts inputs to non-enumerable random
+  // identifiers because a public salt cannot protect low-entropy values.
   function edmFingerprint(value, salt) {
     const norm = String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
     if (!norm) return '';
     const seeded = String(salt || '') + ' ' + norm;
-    return _fnv1a(seeded).toString(16).padStart(8, '0') + _djb2(seeded).toString(16).padStart(8, '0');
+    return _sha256(seeded);
+  }
+  function edmValueEligibility(value) {
+    const input = String(value || '').trim();
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input)) {
+      return { ok: true, kind: 'uuid-v4' };
+    }
+    if (/^[0-9]{30,}$/.test(input)) return { ok: true, kind: 'numeric-100-bit' };
+    if (/^[0-9a-f]{24,}$/i.test(input)) return { ok: true, kind: 'hex-96-bit' };
+    if (/^[A-Z2-7]{20,}$/.test(input) && /[A-Z]/.test(input) && /[2-7]/.test(input)) {
+      return { ok: true, kind: 'base32-100-bit' };
+    }
+    if (/^[A-Za-z0-9_-]{24,}$/.test(input)
+        && /[a-z]/.test(input) && /[A-Z]/.test(input) && /[0-9]/.test(input)) {
+      return { ok: true, kind: 'mixed-token-120-bit' };
+    }
+    return {
+      ok: false,
+      reason: 'value is not a supported random identifier with at least 96 bits of source entropy',
+    };
   }
   function normalizeExactMatchConfig(value) {
     const cfg = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
     const list = Array.isArray(cfg.fingerprints) ? cfg.fingerprints : [];
     if (EDM_CACHE && typeof cfg === 'object') { const c = EDM_CACHE.get(cfg); if (c) return c; }
     const set = new Set();
-    for (const fp of list) { const s = String(fp || '').trim().toLowerCase(); if (/^[0-9a-f]{16}$/.test(s)) set.add(s); }
+    for (const fp of list) { const s = String(fp || '').trim().toLowerCase(); if (/^[0-9a-f]{64}$/.test(s)) set.add(s); }
+    const profileOk = cfg.formatVersion === EDM_PROFILE.formatVersion
+      && cfg.algorithm === EDM_PROFILE.algorithm && cfg.valuePolicy === EDM_PROFILE.valuePolicy;
+    const salt = String(cfg.salt || '');
     const out = {
-      salt: String(cfg.salt || ''),
+      salt,
       set,
-      minLen: Math.max(4, Math.min(64, Number(cfg.minLen) || 6)),
-      maxWords: Math.max(1, Math.min(8, Number(cfg.maxWords) || 5)),
+      minLen: Math.max(EDM_PROFILE.minLen, Math.min(128, Number(cfg.minLen) || EDM_PROFILE.minLen)),
+      maxWords: EDM_PROFILE.maxWords,
       score: Math.max(0.1, Math.min(1, Number(cfg.score) || 0.99)),
       severity: Math.round(Math.max(1, Math.min(4, Number(cfg.severity) || 4))),
-      enabled: set.size > 0 && cfg.enabled !== false,
+      enabled: profileOk && new RegExp(`^[A-Za-z0-9_-]{${EDM_PROFILE.saltMinLength},128}$`).test(salt)
+        && set.size > 0 && cfg.enabled !== false,
     };
     if (EDM_CACHE && typeof cfg === 'object') EDM_CACHE.set(cfg, out);
     return out;
@@ -865,15 +935,433 @@
     });
   }
 
-  function analyze(text, opts) {
+  // Structured values may arrive behind nested reversible text escapes or
+  // invisible separators. Each pass is non-expanding and uses at most 12 code
+  // units of look-ahead; a four-pass ceiling bounds nested canonicalization.
+  const CANONICAL_FORMAT = /[\u00AD\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u206F\uFEFF]/;
+  const CANONICAL_SPACE = /[\u00A0\u1680\u2000-\u200A\u202F\u205F\u3000]/;
+  const CANONICAL_DASH = /[\u2010-\u2015\u2212\u2E3A\u2E3B\uFE58\uFE63\uFF0D]/;
+  const CANONICAL_TRIGGER = /\\u[0-9A-Fa-f]{4}|&(?:#(?:[0-9]{1,7}|[xX][0-9A-Fa-f]{1,6})|nbsp|ensp|emsp|thinsp|hyphen|ndash|minus);|%[0-9A-Fa-f]{2}|[\u00A0\u00AD\u1680\u180E\u2000-\u200F\u2010-\u2015\u202A-\u202F\u205F\u2060-\u2064\u2066-\u206F\u2212\u2E3A\u2E3B\u3000\uFE58\uFE63\uFEFF\uFF0D]/;
+  const MAX_CANONICAL_ESCAPE_CHARS = 12;
+  const MAX_CANONICAL_DEPTH = 4;
+  const HTML_CANONICAL_ENTITIES = Object.freeze({
+    '&nbsp;': '\u00A0', '&ensp;': ' ', '&emsp;': ' ', '&thinsp;': ' ',
+    '&hyphen;': '-', '&ndash;': '-', '&minus;': '-',
+  });
+
+  function normalizedCanonicalValue(value) {
+    if (CANONICAL_FORMAT.test(value)) return '';
+    if (CANONICAL_SPACE.test(value)) return ' ';
+    if (CANONICAL_DASH.test(value)) return '-';
+    return value;
+  }
+
+  function jsonEscapeAt(text, start) {
+    const first = text.slice(start, start + 6);
+    if (!/^\\u[0-9A-Fa-f]{4}$/.test(first)) return null;
+    const unit = parseInt(first.slice(2), 16);
+    if (unit >= 0xdc00 && unit <= 0xdfff) return null;
+    if (unit < 0xd800 || unit > 0xdbff) return { value: String.fromCharCode(unit), end: start + 6 };
+    const second = text.slice(start + 6, start + MAX_CANONICAL_ESCAPE_CHARS);
+    if (!/^\\u[dD][c-fC-F][0-9A-Fa-f]{2}$/.test(second)) return null;
+    const low = parseInt(second.slice(2), 16);
+    const point = 0x10000 + ((unit - 0xd800) << 10) + (low - 0xdc00);
+    return { value: String.fromCodePoint(point), end: start + MAX_CANONICAL_ESCAPE_CHARS };
+  }
+
+  function htmlEntityAt(text, start) {
+    const sample = text.slice(start, start + MAX_CANONICAL_ESCAPE_CHARS);
+    const named = /^&(?:nbsp|ensp|emsp|thinsp|hyphen|ndash|minus);/.exec(sample);
+    if (named) return { value: HTML_CANONICAL_ENTITIES[named[0]], end: start + named[0].length };
+    const match = /^&#(?:([0-9]{1,7})|[xX]([0-9A-Fa-f]{1,6}));/.exec(sample);
+    if (!match) return null;
+    const point = parseInt(match[1] || match[2], match[1] ? 10 : 16);
+    if (point > 0x10ffff || (point >= 0xd800 && point <= 0xdfff)) return null;
+    return { value: String.fromCodePoint(point), end: start + match[0].length };
+  }
+
+  function percentEscapeAt(text, start) {
+    const first = /^%([0-9A-Fa-f]{2})/.exec(text.slice(start, start + 3));
+    if (!first) return null;
+    const byte = parseInt(first[1], 16);
+    const count = byte <= 0x7f ? 1 : byte >= 0xc2 && byte <= 0xdf ? 2
+      : byte >= 0xe0 && byte <= 0xef ? 3 : byte >= 0xf0 && byte <= 0xf4 ? 4 : 0;
+    if (!count) return null;
+    const raw = text.slice(start, start + count * 3);
+    if (!(new RegExp('^(?:%[0-9A-Fa-f]{2}){' + count + '}$')).test(raw)) return null;
+    try { return { value: decodeURIComponent(raw), end: start + raw.length }; } catch (_) { return null; }
+  }
+
+  function canonicalTokenAt(text, start) {
+    const ch = text[start];
+    if (ch === '\\') return jsonEscapeAt(text, start);
+    if (ch === '&') return htmlEntityAt(text, start);
+    if (ch === '%') return percentEscapeAt(text, start);
+    if (CANONICAL_FORMAT.test(ch) || CANONICAL_SPACE.test(ch) || CANONICAL_DASH.test(ch)) {
+      return { value: ch, end: start + 1 };
+    }
+    return null;
+  }
+
+  function appendCanonical(chars, starts, ends, value, start, end) {
+    const normalized = normalizedCanonicalValue(value);
+    for (let i = 0; i < normalized.length; i++) {
+      chars.push(normalized[i]); starts.push(start); ends.push(end);
+    }
+  }
+
+  function canonicalizeOnce(text) {
+    if (!CANONICAL_TRIGGER.test(text)) return null;
+    const chars = [], starts = [], ends = [];
+    for (let index = 0; index < text.length;) {
+      const token = canonicalTokenAt(text, index);
+      if (token) {
+        appendCanonical(chars, starts, ends, token.value, index, token.end);
+        index = token.end;
+      } else {
+        appendCanonical(chars, starts, ends, text[index], index, index + 1);
+        index += 1;
+      }
+    }
+    return { text: chars.join(''), starts, ends };
+  }
+
+  function composeCanonicalMaps(parent, child) {
+    const starts = new Array(child.starts.length), ends = new Array(child.ends.length);
+    for (let i = 0; i < child.starts.length; i++) {
+      starts[i] = parent.starts[child.starts[i]];
+      ends[i] = parent.ends[child.ends[i] - 1];
+    }
+    return { text: child.text, starts, ends };
+  }
+
+  function canonicalizeStructuredText(text) {
+    let current = text, mapped = null, depth = 0;
+    for (; depth < MAX_CANONICAL_DEPTH; depth++) {
+      const next = canonicalizeOnce(current);
+      if (!next || next.text === current) break;
+      mapped = mapped ? composeCanonicalMaps(mapped, next) : next;
+      current = next.text;
+    }
+    if (!mapped) return null;
+    const remaining = depth === MAX_CANONICAL_DEPTH ? canonicalizeOnce(current) : null;
+    mapped.text = foldDigits(current);
+    mapped.incomplete = !!(remaining && remaining.text !== current);
+    return mapped;
+  }
+
+  function remapCanonicalFindings(findings, originalText, canonical) {
+    const out = [];
+    for (const finding of findings) {
+      if (finding.start < 0 || finding.end <= finding.start || finding.end > canonical.ends.length) continue;
+      let canonicalStart = finding.start, canonicalEnd = finding.end;
+      while (canonicalStart < canonicalEnd && /\s/.test(canonical.text[canonicalStart])) canonicalStart += 1;
+      while (canonicalEnd > canonicalStart && /\s/.test(canonical.text[canonicalEnd - 1])) canonicalEnd -= 1;
+      if (canonicalEnd <= canonicalStart) continue;
+      const start = canonical.starts[canonicalStart], end = canonical.ends[canonicalEnd - 1];
+      out.push(Object.assign({}, finding, { value: originalText.slice(start, end), start, end }));
+    }
+    return out;
+  }
+
+  function remapCanonicalSpans(spans, canonical) {
+    const out = [];
+    for (const span of spans) {
+      if (span.start < 0 || span.end <= span.start || span.end > canonical.ends.length) continue;
+      out.push(Object.assign({}, span, {
+        start: canonical.starts[span.start], end: canonical.ends[span.end - 1],
+      }));
+    }
+    return out;
+  }
+
+  // ---------- bounded reversible-encoding inspection ------------------------
+  // Prompt text can carry structured PII behind Base64 or hex. Decode only
+  // strict, bounded candidates, require valid printable UTF-8, then run the
+  // same detector recursively. Findings map back to the exact encoded span so
+  // tokenization/redaction removes what actually crossed the trust boundary.
+  const ENCODED_TOKEN_SOURCE = '[A-Za-z0-9+/_-]{12,}={0,2}|[0-9A-Fa-f]{16,}';
+  const WRAPPED_BASE64_SOURCE = '(?:[A-Za-z0-9+/_-]{4}[ \\t\\r\\n]+){2,}[A-Za-z0-9+/_-]{2,4}={0,2}';
+  const BASE64_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  const MAX_ENCODED_TOKEN_CHARS = 64 * 1024;
+  const MAX_ENCODED_CANDIDATES = 256;
+  const MAX_DECODED_CHARS = 512 * 1024;
+  const MAX_ENCODING_DEPTH = 4;
+
+  function encodeBase64Bytes(bytes) {
+    let out = '';
+    for (let i = 0; i < bytes.length; i += 3) {
+      const a = bytes[i], b = i + 1 < bytes.length ? bytes[i + 1] : 0, c = i + 2 < bytes.length ? bytes[i + 2] : 0;
+      const n = (a << 16) | (b << 8) | c;
+      out += BASE64_ALPHABET[(n >>> 18) & 63] + BASE64_ALPHABET[(n >>> 12) & 63];
+      out += i + 1 < bytes.length ? BASE64_ALPHABET[(n >>> 6) & 63] : '=';
+      out += i + 2 < bytes.length ? BASE64_ALPHABET[n & 63] : '=';
+    }
+    return out;
+  }
+
+  function decodeBase64Bytes(raw) {
+    const token = raw.replace(/[\s]/g, '').replace(/-/g, '+').replace(/_/g, '/');
+    if (token.length < 12 || token.length > MAX_ENCODED_TOKEN_CHARS || !/^[A-Za-z0-9+/]+={0,2}$/.test(token)) return null;
+    const unpadded = token.replace(/=+$/, '');
+    if (unpadded.length % 4 === 1) return null;
+    const padded = unpadded + '='.repeat((4 - (unpadded.length % 4)) % 4);
+    const bytes = [];
+    for (let i = 0; i < padded.length; i += 4) {
+      const a = BASE64_ALPHABET.indexOf(padded[i]), b = BASE64_ALPHABET.indexOf(padded[i + 1]);
+      const c = padded[i + 2] === '=' ? 0 : BASE64_ALPHABET.indexOf(padded[i + 2]);
+      const d = padded[i + 3] === '=' ? 0 : BASE64_ALPHABET.indexOf(padded[i + 3]);
+      if (a < 0 || b < 0 || c < 0 || d < 0) return null;
+      const n = (a << 18) | (b << 12) | (c << 6) | d;
+      bytes.push((n >>> 16) & 255);
+      if (padded[i + 2] !== '=') bytes.push((n >>> 8) & 255);
+      if (padded[i + 3] !== '=') bytes.push(n & 255);
+    }
+    const out = new Uint8Array(bytes);
+    return encodeBase64Bytes(out).replace(/=+$/, '') === unpadded ? out : null;
+  }
+
+  function decodeHexBytes(raw) {
+    const token = raw.replace(/\s/g, '');
+    if (token.length < 16 || token.length > MAX_ENCODED_TOKEN_CHARS || token.length % 2 || !/^[0-9A-Fa-f]+$/.test(token)) return null;
+    const out = new Uint8Array(token.length / 2);
+    for (let i = 0; i < out.length; i++) out[i] = parseInt(token.slice(i * 2, i * 2 + 2), 16);
+    return out;
+  }
+
+  function strictPrintableUtf8(bytes) {
+    if (!bytes || bytes.length < 6) return null;
+    let escaped = '';
+    for (const byte of bytes) escaped += '%' + byte.toString(16).padStart(2, '0');
+    let decoded;
+    try { decoded = decodeURIComponent(escaped); } catch (_) { return null; }
+    if (!decoded || /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\uFFFD]/.test(decoded)) return null;
+    let printable = 0, total = 0;
+    for (const ch of decoded) {
+      total += 1;
+      const cp = ch.codePointAt(0);
+      if (ch === '\t' || ch === '\n' || ch === '\r' || cp >= 0x20) printable += 1;
+    }
+    return total && printable / total >= 0.85 ? decoded : null;
+  }
+
+  function strictPrintableUtf16(bytes, littleEndian) {
+    if (!bytes || bytes.length < 8 || bytes.length % 2) return null;
+    let zeroHigh = 0, zeroLow = 0;
+    for (let i = 0; i < bytes.length; i += 2) {
+      if (bytes[littleEndian ? i + 1 : i] === 0) zeroHigh += 1;
+      if (bytes[littleEndian ? i : i + 1] === 0) zeroLow += 1;
+    }
+    const units = bytes.length / 2;
+    const hasBom = littleEndian
+      ? bytes[0] === 0xff && bytes[1] === 0xfe
+      : bytes[0] === 0xfe && bytes[1] === 0xff;
+    // Without a BOM, require the zero-byte pattern produced by ordinary
+    // ASCII-bearing UTF-16. This keeps random identifiers from being treated
+    // as plausible UTF-16 text while still covering encoded regulated data.
+    if (!hasBom && (zeroHigh < Math.max(2, Math.ceil(units / 5)) || zeroLow > Math.ceil(units / 10))) return null;
+    let decoded = '';
+    for (let i = hasBom ? 2 : 0; i < bytes.length; i += 2) {
+      const unit = littleEndian ? bytes[i] | (bytes[i + 1] << 8) : (bytes[i] << 8) | bytes[i + 1];
+      if (unit >= 0xd800 && unit <= 0xdbff) {
+        if (i + 3 >= bytes.length) return null;
+        const next = littleEndian ? bytes[i + 2] | (bytes[i + 3] << 8) : (bytes[i + 2] << 8) | bytes[i + 3];
+        if (next < 0xdc00 || next > 0xdfff) return null;
+        decoded += String.fromCharCode(unit, next); i += 2;
+      } else {
+        if (unit >= 0xdc00 && unit <= 0xdfff) return null;
+        decoded += String.fromCharCode(unit);
+      }
+    }
+    if (!decoded || /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\uFFFD]/.test(decoded)) return null;
+    return decoded;
+  }
+
+  function printableByteDecodings(bytes) {
+    const values = [
+      strictPrintableUtf8(bytes),
+      strictPrintableUtf16(bytes, true),
+      strictPrintableUtf16(bytes, false),
+    ].filter(Boolean);
+    return [...new Set(values)];
+  }
+
+  function clearlyBinaryBytes(bytes) {
+    if (!bytes || bytes.length < 8) return false;
+    let controls = 0, nul = 0;
+    for (const byte of bytes) {
+      if (byte === 0) nul += 1;
+      if ((byte < 0x20 && byte !== 0x09 && byte !== 0x0a && byte !== 0x0d) || byte === 0x7f) controls += 1;
+    }
+    return controls / bytes.length >= 0.3 || (nul > 0 && controls / bytes.length >= 0.15);
+  }
+
+  function candidateDecodings(token) {
+    const out = [];
+    const plausibleHex = token.length % 2 === 0 && /[A-Fa-f]/.test(token) && /[0-9]/.test(token) && /^[0-9A-Fa-f]+$/.test(token);
+    const base64Shape = token.length % 4 !== 1 && /[A-Za-z]/.test(token)
+      && /^[A-Za-z0-9+/_-]+={0,2}$/.test(token);
+    if (plausibleHex) {
+      const bytes = decodeHexBytes(token);
+      const decodedValues = printableByteDecodings(bytes);
+      const kind = opaqueEncodingKind(bytes);
+      for (const decoded of decodedValues) out.push({ encoding: 'hex', bytes, decoded, kind });
+      if (!decodedValues.length && kind) out.push({ encoding: 'hex', bytes, decoded: null, kind });
+    }
+    if (base64Shape) {
+      const bytes = decodeBase64Bytes(token);
+      const decodedValues = printableByteDecodings(bytes);
+      const kind = opaqueEncodingKind(bytes);
+      // Whitespace alone is not proof of Base64. Ordinary prose followed by
+      // grouped card digits ("Card 4111 1111 ...") can satisfy the wrapped
+      // token grammar. Printable decoded text is still inspected, but generic
+      // non-text opacity requires a canonical Base64 marker.
+      const standardMarkers = (token.match(/[+/]/g) || []).length;
+      const explicitBinaryEncoding = token.includes('=')
+        || (standardMarkers >= 3 && standardMarkers / token.length >= 0.15);
+      const opaqueBinary = bytes && (explicitBinaryEncoding || clearlyBinaryBytes(bytes));
+      for (const decoded of decodedValues) out.push({ encoding: 'base64', bytes, decoded, kind, opaqueBinary });
+      if (!decodedValues.length && (kind || opaqueBinary)) out.push({ encoding: 'base64', bytes, decoded: null, kind, opaqueBinary });
+    }
+    return out;
+  }
+
+  function encodedCandidates(text) {
+    const out = [], seen = new Set();
+    const collect = (source, compactWhitespace) => {
+      const re = new RegExp(source, 'g');
+      let match;
+      while ((match = re.exec(text))) {
+        let raw = match[0], start = match.index;
+        let token = compactWhitespace ? raw.replace(/\s/g, '') : raw;
+        let decodings = candidateDecodings(token);
+        // Unified diff addition markers are transport syntax, not Base64. The
+        // token grammar includes '+', so retry without a leading line marker
+        // only when the full candidate is not itself a valid encoding.
+        if (!decodings.length && !compactWhitespace && raw[0] === '+'
+            && (start === 0 || text[start - 1] === '\n' || text[start - 1] === '\r')) {
+          raw = raw.slice(1); token = raw; start += 1;
+          decodings = candidateDecodings(token);
+        }
+        const key = match.index + ':' + re.lastIndex + ':' + token;
+        if (seen.has(key)) continue;
+        if (!decodings.length) continue;
+        seen.add(key); out.push({ raw, token, start, end: re.lastIndex, decodings });
+        if (out.length > MAX_ENCODED_CANDIDATES) { out.overflow = true; return; }
+      }
+    };
+    collect(ENCODED_TOKEN_SOURCE, false);
+    if (!out.overflow) collect(WRAPPED_BASE64_SOURCE, true);
+    return out.sort((a, b) => a.start - b.start || b.end - a.end);
+  }
+
+  function opaqueEncodingKind(bytes) {
+    if (!bytes || bytes.length < 2) return '';
+    if (bytes[0] === 0x1f && bytes[1] === 0x8b) return 'gzip';
+    if (bytes.length >= 4 && bytes[0] === 0x50 && bytes[1] === 0x4b && [0x03, 0x05, 0x07].includes(bytes[2])) return 'zip';
+    if (bytes.length >= 4 && bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46) return 'pdf';
+    return '';
+  }
+
+  function encodedFinding(source, candidate, encoding) {
+    return {
+      type: source.type || source.category,
+      value: candidate.raw,
+      start: candidate.start,
+      end: candidate.end,
+      severity: source.severity || SEVERITY[source.type || source.category] || 3,
+      score: source.score || 0.9,
+      encoded: encoding,
+    };
+  }
+
+  function directlyClassifiedSpan(candidate, findings) {
+    return findings.some((finding) => finding.start <= candidate.start && finding.end >= candidate.end);
+  }
+
+  function detectEncodedContent(text, opts, state, directFindings = []) {
+    const result = { findings: [], opaqueSpans: [] };
+    const candidates = encodedCandidates(text);
+    if (!candidates.length) return result;
+    if (candidates.overflow) result.opaqueSpans.push({ start: 0, end: text.length, kind: 'decode_limit' });
+    for (const candidate of candidates) {
+      for (const item of candidate.decodings) {
+        if (item.kind) result.opaqueSpans.push({ start: candidate.start, end: candidate.end, kind: item.kind });
+        const decoded = item.decoded;
+        // A recognized outer token such as an AWS access-key id is itself the
+        // content to enforce, not evidence that its coincidental Base64 decode
+        // is an opaque attachment. Keep true containers and any separate
+        // opaque span fail-closed, but let the structured hard stop retain its
+        // specific verdict instead of being shadowed by a generic binary hold.
+        if (!decoded && opts.opaqueEncodedContent === true && item.opaqueBinary
+            && !directlyClassifiedSpan(candidate, directFindings)) {
+          result.opaqueSpans.push({ start: candidate.start, end: candidate.end, kind: 'binary' });
+        }
+        if (!decoded) continue;
+        state.budget.candidates += 1; state.budget.decodedChars += decoded.length;
+        if (state.budget.candidates > MAX_ENCODED_CANDIDATES || state.budget.decodedChars > MAX_DECODED_CHARS) {
+          result.opaqueSpans.push({ start: candidate.start, end: candidate.end, kind: 'decode_limit' });
+          continue;
+        }
+        const cacheKey = item.encoding + ':' + decoded;
+        let nested = state.cache.get(cacheKey);
+        if (!nested) {
+          if (state.depth >= MAX_ENCODING_DEPTH && encodedCandidates(decoded).length) {
+            nested = { findings: [], categories: [], opaqueEncoded: true };
+          } else {
+            nested = analyze(decoded, opts, { depth: state.depth + 1, budget: state.budget, cache: state.cache });
+          }
+          state.cache.set(cacheKey, nested);
+        }
+        for (const finding of nested.findings || []) result.findings.push(encodedFinding(finding, candidate, item.encoding));
+        for (const category of nested.categories || []) result.findings.push(encodedFinding(category, candidate, item.encoding));
+        if (nested.opaqueEncoded) result.opaqueSpans.push({ start: candidate.start, end: candidate.end, kind: 'nested_opaque' });
+      }
+    }
+    return result;
+  }
+
+  function mergeCategories(primary, secondary) {
+    const out = primary.slice(), byCategory = new Map(out.map((item) => [item.category, item]));
+    for (const item of secondary) {
+      const current = byCategory.get(item.category);
+      if (current) current.score = Math.max(current.score, item.score);
+      else { out.push(item); byCategory.set(item.category, item); }
+    }
+    return out;
+  }
+
+  function analyze(text, opts, encodedState) {
     opts = opts || {};
     const disabled = new Set([].concat(opts.ignore || [], opts.disabledDetectors || []));
     if (!text || typeof text !== 'string') {
       return { findings: [], categories: [], maxSeverity: 0, maxSeverityLabel: 'none', riskScore: 0, entityCounts: {}, scoreBreakdown: [], regulations: [] };
     }
+    const originalText = text;
     text = foldDigits(text);
     let findings = detectStructured(text, disabled, opts.customDetectors);
     if (opts.exactMatch && !disabled.has('EXACT_MATCH')) findings = findings.concat(detectExactMatch(text, opts.exactMatch));
+    const canonical = canonicalizeStructuredText(text);
+    let canonicalFindings = [];
+    if (canonical) {
+      canonicalFindings = detectStructured(canonical.text, disabled, opts.customDetectors);
+      if (opts.exactMatch && !disabled.has('EXACT_MATCH')) {
+        canonicalFindings = canonicalFindings.concat(detectExactMatch(canonical.text, opts.exactMatch));
+      }
+      findings = findings.concat(remapCanonicalFindings(canonicalFindings, originalText, canonical));
+    }
+    const state = encodedState || { depth: 0, budget: { candidates: 0, decodedChars: 0 }, cache: new Map() };
+    const encoded = detectEncodedContent(
+      canonical ? canonical.text : text, opts, state, canonical ? canonicalFindings : findings,
+    );
+    if (canonical) {
+      encoded.findings = remapCanonicalFindings(encoded.findings, originalText, canonical);
+      encoded.opaqueSpans = remapCanonicalSpans(encoded.opaqueSpans, canonical);
+      if (canonical.incomplete) {
+        encoded.opaqueSpans.push({ start: 0, end: originalText.length, kind: 'canonicalize_limit' });
+      }
+    }
+    findings = findings.concat(encoded.findings);
     findings.sort((a, b) => (b.severity - a.severity) || (b.score - a.score));
     // Greedy overlap resolution: accept findings in priority order, skipping any
     // that overlap an already-accepted span. Accepted spans are kept sorted by
@@ -892,7 +1380,9 @@
       if (!overlaps) { accepted.push(f); byStart.splice(lo, 0, f); }
     }
     accepted.sort((a, b) => a.start - b.start);
-    const categories = classifySemantic(text, disabled);
+    const categories = mergeCategories(
+      classifySemantic(text, disabled), canonical ? classifySemantic(canonical.text, disabled) : [],
+    );
     const entityCounts = {};
     const scoreBreakdown = [];
     let maxSeverity = 0;
@@ -913,7 +1403,15 @@
     for (const c of categories) raw += (SEVERITY[c.category] || 2) * c.score * 7;
     const riskScore = Math.min(100, Math.round(raw));
     const regulations = [...new Set(scoreBreakdown.flatMap((e) => e.regulations))];
-    return { findings: accepted, categories, maxSeverity, maxSeverityLabel: SEVERITY_LABEL[maxSeverity] || 'none', riskScore, entityCounts, scoreBreakdown, regulations };
+    const result = {
+      findings: accepted, categories, maxSeverity, maxSeverityLabel: SEVERITY_LABEL[maxSeverity] || 'none',
+      riskScore, entityCounts, scoreBreakdown, regulations,
+    };
+    if (encoded.opaqueSpans.length) {
+      result.opaqueEncoded = true;
+      result.opaqueEncodedSpans = encoded.opaqueSpans;
+    }
+    return result;
   }
 
   function redact(text, findings) {
@@ -982,7 +1480,7 @@
     return normalizeCustomDetectors(value).map(publicCustomDetector);
   }
 
-  const api = { analyze, redact, maskValue, tokenize, detokenize, tokenizePrompt, classifySemantic, _featurize, _lrProb, listDetectors, normalizeCustomDetectors, publicCustomDetectorConfig, edmFingerprint, normalizeExactMatchConfig, secretVendor, luhnValid, ssnPlausible, abaValid, ibanValid, vinValid, bankAccountPlausible, itinPlausible, npiValid, datePlausible, ipv6Valid, cardNetwork, ninoValid, nhsValid, sinValid, tfnValid, aadhaarValid, regulationsFor, SEVERITY, SEVERITY_LABEL, CONFIDENCE_LABEL, REGULATIONS };
+  const api = { analyze, redact, maskValue, tokenize, detokenize, tokenizePrompt, classifySemantic, _featurize, _lrProb, listDetectors, normalizeCustomDetectors, publicCustomDetectorConfig, edmFingerprint, edmValueEligibility, normalizeExactMatchConfig, EDM_PROFILE, secretVendor, luhnValid, ssnPlausible, abaValid, ibanValid, vinValid, bankAccountPlausible, itinPlausible, npiValid, datePlausible, ipv6Valid, cardNetwork, ninoValid, nhsValid, sinValid, tfnValid, aadhaarValid, regulationsFor, SEVERITY, SEVERITY_LABEL, CONFIDENCE_LABEL, REGULATIONS };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (root) root.PSDetect = api;
 })(typeof window !== 'undefined' ? window : (typeof self !== 'undefined' ? self : null));

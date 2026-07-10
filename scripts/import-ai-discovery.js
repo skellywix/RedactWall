@@ -7,11 +7,15 @@ require('../server/env').loadEnv();
  */
 const fs = require('node:fs');
 const path = require('node:path');
+const { readBoundedJson } = require('../sensors/shared/bounded-response');
+const { secureServerBase } = require('../sensors/shared/server-url');
 
 const DEFAULT_REDACTWALL_URL = process.env.REDACTWALL_URL || process.env.PROMPTWALL_URL || process.env.SENTINEL_URL || 'http://localhost:4000';
 const DEFAULT_SOURCE = 'proxy';
 const DEFAULT_VENDOR = 'generic';
 const API_BATCH_SIZE = 100;
+const MAX_IMPORT_RESPONSE_BYTES = 512 * 1024;
+const IMPORT_RESPONSE_TIMEOUT_MS = 10000;
 const DESTINATION_RE = /^[A-Za-z0-9.*:-]+$/;
 const SAFE_POLICY_TEXT_RE = /^[A-Za-z0-9 ._@:+/-]+$/;
 const SENSOR_ID_RE = /^[a-z][a-z0-9_:-]{0,79}$/;
@@ -336,23 +340,28 @@ function buildBatches(records = [], opts = {}) {
 }
 
 async function postBatch(batch, opts = {}) {
-  const base = String(opts.redactwallUrl || DEFAULT_REDACTWALL_URL).replace(/\/+$/, '');
+  const base = secureServerBase(opts.redactwallUrl || DEFAULT_REDACTWALL_URL);
+  if (!base) throw new Error('RedactWall URL must use HTTPS or loopback HTTP without query parameters or fragments');
   const fetchImpl = opts.fetchImpl || globalThis.fetch;
   if (typeof fetchImpl !== 'function') throw new Error('fetch unavailable');
   if (!opts.apiKey) throw new Error('INGEST_API_KEY is required unless --dry-run is used');
   const res = await fetchImpl(`${base}/api/v1/discovery`, {
     method: 'POST',
+    redirect: 'error',
     headers: {
       'content-type': 'application/json',
       'x-api-key': opts.apiKey,
     },
     body: JSON.stringify(batch),
   });
-  const body = await res.json().catch(() => ({}));
+  const { json: body } = await readBoundedJson(res, {
+    maxBytes: opts.maxResponseBytes || MAX_IMPORT_RESPONSE_BYTES,
+    timeoutMs: opts.responseTimeoutMs || IMPORT_RESPONSE_TIMEOUT_MS,
+    label: 'discovery import response',
+  });
   if (!res.ok) {
     const err = new Error(`discovery import failed: HTTP ${res.status}`);
     err.status = res.status;
-    err.body = body;
     throw err;
   }
   return body;

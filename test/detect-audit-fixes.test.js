@@ -81,10 +81,18 @@ test('overlapping-alternation custom regex is rejected (ReDoS guard)', () => {
   assert.strictEqual(D.normalizeCustomDetectors([{ id: 'RD_ONE', pattern: '([0-9]|\\d)+X' }]).length, 0);
 });
 
-test('EDM matches a watchlisted number written with spaces', () => {
-  const salt = 'unit-salt';
-  const cfg = { salt, minLen: 6, fingerprints: [D.edmFingerprint('12345678', salt)] };
-  assert.ok(hasType(D.analyze('order 1234 5678 shipped', { exactMatch: cfg }), 'EXACT_MATCH'));
+test('EDM matches a high-entropy number written with separators', () => {
+  const salt = 'unit-salt-0123456789abcdef0123456789';
+  const cfg = {
+    formatVersion: 2,
+    algorithm: 'sha256',
+    valuePolicy: 'offline-random-id-v1',
+    salt,
+    minLen: 20,
+    maxWords: 1,
+    fingerprints: [D.edmFingerprint('123456789012345678901234567890', salt)],
+  };
+  assert.ok(hasType(D.analyze('order 1234567890-1234567890-1234567890 shipped', { exactMatch: cfg }), 'EXACT_MATCH'));
 });
 
 test('compressed IPv6 addresses are detected', () => {

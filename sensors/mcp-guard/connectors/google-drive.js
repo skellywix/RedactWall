@@ -6,7 +6,12 @@
  * the result through the MCP connector SDK before any model receives it.
  */
 const { fetchWithTimeout } = require('../guard');
-const { connectorHealthCheck, sanitizeToolResult } = require('../sdk');
+const { connectorHealthCheck, executeConnectorTool } = require('../sdk');
+const {
+  cancelResponseBody,
+  readBoundedJson,
+  readBoundedText: readSharedBoundedText,
+} = require('../../shared/bounded-response');
 
 const DEFAULT_DRIVE_ROOT = 'https://www.googleapis.com/drive/v3';
 const DEFAULT_MAX_BYTES = 512 * 1024;
@@ -97,12 +102,6 @@ function responseContentType(response) {
   return compactLabel(headerValue(response.headers, 'content-type').split(';')[0], 'unknown', 80);
 }
 
-function responseContentLength(response) {
-  const raw = headerValue(response.headers, 'content-length');
-  const n = Number(raw);
-  return Number.isFinite(n) && n >= 0 ? n : null;
-}
-
 function maxBytes(opts = {}) {
   const n = Number(opts.maxBytes ?? DEFAULT_MAX_BYTES);
   if (!Number.isFinite(n)) return DEFAULT_MAX_BYTES;
@@ -127,38 +126,11 @@ function isTextContentType(contentType, opts = {}) {
 }
 
 async function readBoundedText(response, opts = {}) {
-  const limit = maxBytes(opts);
-  const declared = responseContentLength(response);
-  if (declared != null && declared > limit) {
-    throw new Error(`Google Drive content exceeds ${limit} byte limit`);
-  }
-
-  if (response.body && typeof response.body.getReader === 'function') {
-    const decoder = new TextDecoder();
-    const reader = response.body.getReader();
-    let total = 0;
-    let text = '';
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      total += value.byteLength;
-      if (total > limit) throw new Error(`Google Drive content exceeds ${limit} byte limit`);
-      text += decoder.decode(value, { stream: true });
-    }
-    text += decoder.decode();
-    return { text, sizeBytes: total };
-  }
-
-  if (typeof response.arrayBuffer === 'function') {
-    const buffer = Buffer.from(await response.arrayBuffer());
-    if (buffer.length > limit) throw new Error(`Google Drive content exceeds ${limit} byte limit`);
-    return { text: buffer.toString('utf8'), sizeBytes: buffer.length };
-  }
-
-  const text = typeof response.text === 'function' ? await response.text() : '';
-  const size = Buffer.byteLength(text, 'utf8');
-  if (size > limit) throw new Error(`Google Drive content exceeds ${limit} byte limit`);
-  return { text, sizeBytes: size };
+  return readSharedBoundedText(response, {
+    maxBytes: maxBytes(opts),
+    timeoutMs: opts.responseTimeoutMs || opts.timeoutMs,
+    label: 'Google Drive content',
+  });
 }
 
 function driveScopes(opts = {}) {
@@ -192,11 +164,15 @@ async function fetchJson(url, opts = {}) {
   }, opts);
   if (!response || !response.ok) {
     const status = response && response.status ? response.status : 'unknown';
+    if (response) await cancelResponseBody(response);
     throw new Error(`Google Drive metadata fetch failed with HTTP ${status}`);
   }
-  if (typeof response.json === 'function') return response.json();
-  const body = await readBoundedText(response, { ...opts, maxBytes: Math.min(maxBytes(opts), 64 * 1024) });
-  return JSON.parse(body.text || '{}');
+  const body = await readBoundedJson(response, {
+    maxBytes: opts.maxJsonBytes ?? 64 * 1024,
+    timeoutMs: opts.responseTimeoutMs || opts.timeoutMs,
+    label: 'Google Drive metadata response',
+  });
+  return body.json || {};
 }
 
 async function driveFileMetadata(args = {}, opts = {}) {
@@ -234,11 +210,13 @@ async function fetchDriveFileContent(args = {}, opts = {}) {
 
   if (!response || !response.ok) {
     const status = response && response.status ? response.status : 'unknown';
+    if (response) await cancelResponseBody(response);
     throw new Error(`Google Drive content fetch failed with HTTP ${status}`);
   }
 
   const contentType = responseContentType(response);
   if (!isTextContentType(contentType, opts)) {
+    await cancelResponseBody(response);
     throw new Error(`Google Drive content type is not text-readable: ${contentType}`);
   }
 
@@ -256,13 +234,25 @@ async function fetchDriveFileContent(args = {}, opts = {}) {
   };
 }
 
+function drivePolicyContexts(args = {}, opts = {}) {
+  const base = { agent: opts.agent, connector: 'google_drive' };
+  const mimeType = compactLabel(args.mimeType || opts.mimeType, '', 120);
+  const explicitExport = args.exportMimeType || opts.exportMimeType || isWorkspaceMimeType(mimeType);
+  if (explicitExport) return [{ ...base, tool: 'files.export' }];
+  if (mimeType || opts.fetchMetadata === false) return [{ ...base, tool: 'files.get' }];
+  return [
+    { ...base, tool: 'files.get' },
+    { ...base, tool: 'files.export' },
+  ];
+}
+
 async function sanitizeDriveFileContent(args = {}, opts = {}) {
-  const raw = await fetchDriveFileContent(args, opts);
-  return sanitizeToolResult(raw, {
-    agent: opts.agent,
-    connector: 'google_drive',
-    tool: raw.structuredContent.operation,
-  }, opts.guardOptions || {});
+  return executeConnectorTool(
+    (toolArgs) => fetchDriveFileContent(toolArgs, opts),
+    args,
+    drivePolicyContexts(args, opts),
+    opts.guardOptions || {}
+  );
 }
 
 function createDriveFileContentTool(opts = {}) {

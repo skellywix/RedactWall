@@ -7,6 +7,13 @@ const notifiers = require('../server/notifiers');
 const linearSmoke = require('../scripts/smoke-linear-approval');
 const { listenNet } = require('./support/listen');
 
+function jsonResponse(value, status = 200) {
+  return new Response(JSON.stringify(value), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
 function sampleQuery(overrides = {}) {
   return {
     id: 'q_notify',
@@ -68,6 +75,7 @@ test('approval notification is disabled without configured channels', async () =
 
 test('generic, Slack, Teams, and ticket adapters send sanitized payloads', async () => {
   const requests = [];
+  let cancelled = 0;
   const env = {
     APPROVAL_NOTIFY_WEBHOOK_URL: 'https://notify.example.test/hook',
     APPROVAL_NOTIFY_WEBHOOK_TOKEN: 'unit-token',
@@ -84,7 +92,7 @@ test('generic, Slack, Teams, and ticket adapters send sanitized payloads', async
     env,
     fetch: async (url, opts) => {
       requests.push({ url, opts });
-      return { ok: true, status: 202 };
+      return { ok: true, status: 202, body: { cancel: async () => { cancelled += 1; } } };
     },
   });
 
@@ -92,6 +100,8 @@ test('generic, Slack, Teams, and ticket adapters send sanitized payloads', async
   assert.strictEqual(result.status, 'sent');
   assert.deepStrictEqual(result.channels, ['webhook', 'slack', 'teams', 'ticket']);
   assert.strictEqual(requests.length, 4);
+  assert.strictEqual(cancelled, 4);
+  assert.ok(requests.every((request) => request.opts.redirect === 'error'));
   assert.strictEqual(requests[0].opts.headers.Authorization, 'Bearer unit-token');
   assert.strictEqual(requests[3].opts.headers.Authorization, 'Bearer ticket-token');
   assert.ok(requests[1].opts.body.includes('RedactWall approval routed'));
@@ -163,13 +173,9 @@ test('native Jira and Linear adapters create sanitized issue requests', async ()
     fetch: async (url, opts) => {
       requests.push({ url, opts });
       if (url.includes('linear.app')) {
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({ data: { issueCreate: { success: true, issue: { identifier: 'SEC-1' } } } }),
-        };
+        return jsonResponse({ data: { issueCreate: { success: true, issue: { identifier: 'SEC-1' } } } });
       }
-      return { ok: true, status: 201 };
+      return jsonResponse({ key: 'SEC-1' }, 201);
     },
   });
 
@@ -177,6 +183,7 @@ test('native Jira and Linear adapters create sanitized issue requests', async ()
   assert.strictEqual(result.status, 'sent');
   assert.deepStrictEqual(result.channels, ['jira', 'linear']);
   assert.strictEqual(requests.length, 2);
+  assert.ok(requests.every((request) => request.opts.redirect === 'error'));
 
   assert.strictEqual(requests[0].url, 'https://acme.atlassian.net/rest/api/3/issue');
   assert.strictEqual(
@@ -247,11 +254,7 @@ test('Linear adapter treats GraphQL errors as failed notification delivery', asy
       REDACTWALL_APPROVAL_LINEAR_API_KEY: 'linear-secret-key',
       REDACTWALL_APPROVAL_LINEAR_TEAM_ID: 'team-security',
     },
-    fetch: async () => ({
-      ok: true,
-      status: 200,
-      json: async () => ({ errors: [{ message: 'invalid input' }] }),
-    }),
+    fetch: async () => jsonResponse({ errors: [{ message: 'invalid input' }] }),
   });
 
   assert.strictEqual(result.sent, false);
@@ -260,15 +263,77 @@ test('Linear adapter treats GraphQL errors as failed notification delivery', asy
   assert.strictEqual(result.results[0].reason, 'graphql_error');
 });
 
-test('Linear adapter treats malformed JSON as failed notification delivery', async () => {
-  const result = await notifiers.linearResponseResult({
-    ok: true,
-    json: async () => {
-      throw new Error('not json');
+test('native ticket adapters reject 2xx responses without a trackable issue id', async () => {
+  const cases = [
+    {
+      channel: {
+        type: 'jira', name: 'jira', url: 'https://acme.atlassian.net/rest/api/3/issue',
+        email: 'secops@example.test', token: 'jira-token', projectKey: 'SEC', issueType: 'Task',
+      },
+      body: {},
+      reason: 'invalid_jira_response',
     },
-  });
+    {
+      channel: {
+        type: 'jira', name: 'jira', url: 'https://acme.atlassian.net/rest/api/3/issue',
+        email: 'secops@example.test', token: 'jira-token', projectKey: 'SEC', issueType: 'Task',
+      },
+      body: { key: {} },
+      reason: 'invalid_jira_response',
+    },
+    {
+      channel: {
+        type: 'linear', name: 'linear', url: 'https://api.linear.app/graphql',
+        token: 'linear-token', teamId: 'team-security',
+      },
+      body: { data: { issueCreate: { success: true, issue: null } } },
+      reason: 'invalid_graphql_response',
+    },
+    {
+      channel: {
+        type: 'linear', name: 'linear', url: 'https://api.linear.app/graphql',
+        token: 'linear-token', teamId: 'team-security',
+      },
+      body: { data: { issueCreate: { success: true, issue: { identifier: [] } } } },
+      reason: 'invalid_graphql_response',
+    },
+  ];
+
+  for (const item of cases) {
+    const result = await notifiers.emitApprovalNotification(sampleQuery(), {
+      channels: [item.channel],
+      fetch: async () => jsonResponse(item.body, 201),
+    });
+    assert.strictEqual(result.sent, false, item.channel.type);
+    assert.strictEqual(result.status, 'failed', item.channel.type);
+    assert.deepStrictEqual(result.results, [{ channel: item.channel.type, sent: false, reason: item.reason }]);
+  }
+});
+
+test('Linear adapter treats malformed JSON as failed notification delivery', async () => {
+  const result = await notifiers.linearResponseResult(new Response('not json'));
 
   assert.deepStrictEqual(result, { reason: 'invalid_graphql_response', issue: null });
+});
+
+test('Linear response parsing rejects oversized, stalled, and unstreamable bodies', async () => {
+  const oversized = await notifiers.linearResponseResult(new Response(Buffer.alloc(300 * 1024)));
+  assert.deepStrictEqual(oversized, { reason: 'invalid_graphql_response', issue: null });
+
+  let cancelled = false;
+  const stalled = await notifiers.linearResponseResult({
+    ok: true,
+    headers: new Headers(),
+    body: { getReader: () => ({
+      read: async () => new Promise(() => {}),
+      cancel: async () => { cancelled = true; },
+    }) },
+  }, { responseTimeoutMs: 20 });
+  assert.deepStrictEqual(stalled, { reason: 'invalid_graphql_response', issue: null });
+  assert.strictEqual(cancelled, true);
+
+  const unstreamable = await notifiers.linearResponseResult({ ok: true, json: async () => ({ data: {} }) });
+  assert.deepStrictEqual(unstreamable, { reason: 'invalid_graphql_response', issue: null });
 });
 
 test('notification delivery records sanitized adapter exceptions', async () => {
@@ -285,16 +350,26 @@ test('notification delivery records sanitized adapter exceptions', async () => {
   assert.ok(!JSON.stringify(result).includes('524-71-9043'));
 });
 
+test('notification HTTP failures cancel unused response bodies', async () => {
+  let cancelled = false;
+  const result = await notifiers.emitApprovalNotification(sampleQuery(), {
+    channels: [{ type: 'webhook', name: 'webhook', url: 'https://notify.example.test/hook' }],
+    fetch: async (_url, options) => {
+      assert.strictEqual(options.redirect, 'error');
+      return { ok: false, status: 503, body: { cancel: async () => { cancelled = true; } } };
+    },
+  });
+  assert.strictEqual(cancelled, true);
+  assert.deepStrictEqual(result.results, [{ channel: 'webhook', sent: false, reason: 'http_503' }]);
+});
+
 test('native Linear adapter returns created issue metadata', async () => {
   const result = await notifiers.emitApprovalNotification(sampleQuery(), {
     env: {
       REDACTWALL_APPROVAL_LINEAR_API_KEY: 'linear-secret-key',
       REDACTWALL_APPROVAL_LINEAR_TEAM_ID: 'team-security',
     },
-    fetch: async () => ({
-      ok: true,
-      status: 200,
-      json: async () => ({
+    fetch: async () => jsonResponse({
         data: {
           issueCreate: {
             success: true,
@@ -307,7 +382,6 @@ test('native Linear adapter returns created issue metadata', async () => {
           },
         },
       }),
-    }),
   });
 
   assert.strictEqual(result.sent, true);
@@ -434,17 +508,13 @@ test('Linear smoke command reports adapter send failures', async () => {
       env: { REDACTWALL_APPROVAL_LINEAR_API_KEY: 'linear-secret-key' },
       argv: ['--send', '--team-id', 'team-security'],
       now: new Date('2026-06-29T12:00:00.000Z'),
-      fetchImpl: async () => ({
-        ok: true,
-        status: 200,
-        json: async () => ({
+      fetchImpl: async () => jsonResponse({
           data: {
             issueCreate: {
               success: false,
             },
           },
         }),
-      }),
     }),
     /Linear approval smoke failed/,
   );
@@ -458,10 +528,7 @@ test('Linear smoke command sends through the native adapter', async () => {
     now: new Date('2026-06-29T12:00:00.000Z'),
     fetchImpl: async (url, opts) => {
       requests.push({ url, opts });
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({
+      return jsonResponse({
           data: {
             issueCreate: {
               success: true,
@@ -473,8 +540,7 @@ test('Linear smoke command sends through the native adapter', async () => {
               },
             },
           },
-        }),
-      };
+        });
     },
   });
 

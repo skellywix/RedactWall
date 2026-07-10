@@ -41,20 +41,36 @@ OpenAI-compatible, so existing SDKs work by changing the base URL:
 | `POST` | `/v1/completions` |
 | `POST` | `/v1/embeddings` |
 | `GET`  | `/healthz` — service liveness |
-| `GET`  | `/readyz` — control-plane reachability (503 when the plane is down) |
+| `GET`  | `/readyz` — authenticated, bounded control-plane readiness (503 on bad credentials, wrong service, or outage) |
 | `GET`  | `/metrics` — request/decision counters |
 
 ## Providers
 
 `GATEWAY_PROVIDER` selects the upstream adapter (`gateway/adapters/`):
 
-- `openai` — any OpenAI-compatible endpoint (OpenAI, Azure OpenAI, internal gateways)
-- `anthropic` — Anthropic Messages API (request/response translated to/from OpenAI shape)
-- `azure-openai`, `internal-http` — OpenAI-compatible aliases
-- `mock` — no network; echoes the prompt back (for local/CI verification)
+- `openai` — OpenAI or a bearer-authenticated endpoint with the same `/v1/*` paths
+- `anthropic` — Anthropic Messages API for `/v1/chat/completions`, including
+  text conversations and function-tool calls translated to and from OpenAI shape
+- `internal-http` — an explicit no-auth OpenAI-compatible endpoint that requires
+  `GATEWAY_UPSTREAM_URL`
+- `mock` — no network; echoes the prompt back for local/CI verification and is rejected when `NODE_ENV=production`
+
+Provider names are validated at startup. Unknown values fail closed instead of
+silently selecting OpenAI, and `internal-http` never falls back to
+`api.openai.com` when its upstream URL is missing. OpenAI and Anthropic require
+a nonempty `GATEWAY_UPSTREAM_API_KEY`.
+
+The Anthropic adapter accepts the text-chat subset it can translate without
+semantic loss: `model`, messages, completion-token limits, `temperature`,
+`top_p`, stop sequences, streaming, and OpenAI function tools/tool choices.
+Completions, embeddings, multimodal content, and unsupported OpenAI options
+return `400` before policy or upstream side effects. Azure OpenAI is not listed
+as an alias because its deployment path, `api-version` query, and `api-key`
+authentication contract are not implemented by the standard OpenAI adapter.
 
 New providers are a small adapter implementing `requestText`,
-`applyRedactedRequest`, `responseText`, `applyResponseText`, and `callUpstream`.
+`applyRedactedRequest`, `responseText`, `applyResponseText`, `callUpstream`, and
+optionally a fail-fast `validateRequest`.
 
 ## Quick start (local)
 
@@ -89,8 +105,13 @@ The gateway ships as an opt-in compose profile:
 docker compose --profile gateway up -d --build
 ```
 
-It talks to the `redactwall` service over the compose network and shares the
-data volume for its agent-token store.
+It shares the `redactwall` service's network namespace so authenticated
+control-plane traffic stays on loopback, and it shares the data volume for its
+agent-token store. Compose pins `REDACTWALL_LOCK_HOSTNAME` to
+`redactwall-gateway` because Docker forbids a container hostname together with
+that shared-network mode. Keep this lock hostname stable and unique when a
+singleton gateway is recreated against the same token store so its new Linux
+PID-namespace generation can reclaim a crashed predecessor's lock.
 
 ## Configuration
 
@@ -100,12 +121,14 @@ data volume for its agent-token store.
 | `GATEWAY_CONTROL_PLANE_URL` | Control plane base URL | `http://127.0.0.1:4000` |
 | `INGEST_API_KEY` | Sensor ingest key (same as the control plane) | — |
 | `GATEWAY_PROVIDER` | Upstream adapter | `openai` |
-| `GATEWAY_UPSTREAM_URL` | Upstream provider base URL | provider default |
-| `GATEWAY_UPSTREAM_API_KEY` | Upstream provider key | — |
+| `GATEWAY_UPSTREAM_URL` | Upstream provider base URL | OpenAI/Anthropic provider default; required for `internal-http` |
+| `GATEWAY_UPSTREAM_API_KEY` | Upstream provider key | Required for `openai` and `anthropic`; omitted for `internal-http` |
 | `GATEWAY_REQUIRE_AGENT_TOKEN` | Reject unauthenticated callers | `true` |
 | `GATEWAY_RATE_LIMIT_PER_MIN` | Per-token request cap | `120` |
 | `GATEWAY_AGENT_TOKENS_PATH` | Agent-token store (hashes only) | `data/gateway-agent-tokens.json` |
+| `REDACTWALL_LOCK_HOSTNAME` | Stable singleton identity for file-lock recovery | OS hostname |
 | `GATEWAY_MAX_BODY_BYTES` | Max request body | `2097152` |
+| `GATEWAY_REQUEST_BODY_TIMEOUT_MS` | Absolute inbound JSON body-read deadline | `15000` |
 | `GATEWAY_TIMEOUT_MS` | Control-plane + upstream timeout | `60000` |
 
 All settings honor the `REDACTWALL_` env names (with legacy `PROMPTWALL_`/`SENTINEL_` aliases) used elsewhere.

@@ -6,6 +6,12 @@ const OPERATOR = 'operator';
 const AUDITOR = 'auditor';
 
 const ALL_ROLES = [SECURITY_ADMIN, APPROVER, OPERATOR, AUDITOR];
+const ROLE_LABELS = {
+  [SECURITY_ADMIN]: 'Global Administrator',
+  [OPERATOR]: 'Operations Administrator',
+  [APPROVER]: 'Member Data Reviewer',
+  [AUDITOR]: 'Read-only Examiner/Auditor',
+};
 
 function normalizeRole(role) {
   const value = String(role || '').trim().toLowerCase();
@@ -33,14 +39,20 @@ function loginAuditAction(role) {
   })[normalizeRole(role)] || 'LOGIN';
 }
 
+function label(role) {
+  return ROLE_LABELS[normalizeRole(role)] || 'Unknown Role';
+}
+
 module.exports = {
   SECURITY_ADMIN,
   APPROVER,
   OPERATOR,
   AUDITOR,
   ALL_ROLES,
+  ROLE_LABELS,
   normalizeRole,
   normalizePrincipal,
   canDecideQuery,
   loginAuditAction,
+  label,
 };

@@ -15,8 +15,10 @@ Board Packet ship in later slices.
    **NCUA / GLBA (credit unions, banks)** (`ncua_glba`). This hard-stops
    member nonpublic personal information: SSN, member ID, loan number,
    account and routing numbers, cards, DOB, TIN.
-2. **Fingerprint core-banking records** (see the EDM guide below) so *your*
-   members' identifiers hard-stop even when their format is ambiguous.
+2. **Tune core-banking detectors.** Enable only the relevant disabled starter
+   detector in `config/custom-detectors.json`, adapt it to the institution's
+   identifier format, and validate representative hard negatives. Do not put
+   enumerable member, account, or loan numbers in an offline EDM pack.
 3. **Require the sensors you deploy.** Coverage → required sensors: browser
    extension, endpoint agent, and MCP guard for any AI-agent usage. The
    readiness score counts required-sensor health.
@@ -62,7 +64,7 @@ Talking points that map to NCUA 2026 exam priorities:
 | Examiner question | Where it is answered |
 |---|---|
 | "What AI tools are in use, and who approved them?" | `ncuaReadiness.panels.shadowAi` + App Catalog review trail (audit actions `DESTINATION_REVIEWED`) |
-| "How do you keep member data out of AI tools?" | `member_information_safeguards` control: hard-stop identifiers + core-banking EDM, with per-event outcomes in `queries[]` (masked) |
+| "How do you keep member data out of AI tools?" | `member_information_safeguards` control: mandatory structured-identifier hard stops plus institution-tuned custom detectors, with per-event outcomes in `queries[]` (masked) |
 | "Show me your monitoring evidence." | Hash-chained audit (`auditIntegrity.ok`), coverage totals, safe-to-send receipts |
 | "What happens when something gets through?" | Approval workflow, exception review lifecycle (`policyExceptionReview`), incident workflow (slice 3) |
 
@@ -153,25 +155,32 @@ limit vs seats used — the per-user roster is never included). Each export is
 recorded in the audit log, and the `board_reporting` control grades
 `covered` while the latest packet is within the quarterly cadence.
 
-## Core-banking EDM import
+## High-entropy exact-match import
 
-`config/exact-match.json` holds **only** a salt and one-way fingerprints.
-The plaintext export is discarded — it never reaches disk in the config, the
-database, the sensors, or any export.
+`config/exact-match.json` is an offline sensor pack for random identifiers
+with at least 96 bits of source entropy. Version 2 stores a public salt and
+SHA-256 fingerprints and rejects enumerable identifiers such as SSNs, member
+numbers, account numbers, loan numbers, names, and email addresses. The salt
+and fingerprints ship to managed sensors, so hashing alone cannot protect a
+low-entropy source value from offline guessing.
 
 ```bash
-# One value per line: member IDs, account numbers, loan numbers, core-system
-# identifiers. Generate the file from the core system, run, then delete it.
-node scripts/edm-fingerprint.js --in members.txt
+# One random identifier per line, for example UUIDv4 or a >=96-bit opaque token.
+# Generate the source file locally, build the pack, then securely remove the source.
+node scripts/edm-fingerprint.js --in random-identifiers.txt
 ```
 
-- Digits-only forms are fingerprinted too, so `900-123-456` matches
-  `900123456`.
+- Legacy packs and ineligible values fail closed. Rebuild a legacy pack from
+  the complete eligible source list before re-enabling it.
 - Re-runs must use the same salt (the script refuses to merge mismatched
-  salts); re-fingerprint the full list to rotate the salt.
+  salts); rebuild the full eligible list to rotate the salt.
 - Status (enabled + fingerprint count) appears in the NCUA Readiness EDM
   panel and the `edm` section of evidence packs. Counts only — never the
   salt, never the fingerprints.
+- Use mandatory built-in detectors and carefully tuned custom detectors for
+  low-entropy member, account, and loan identifiers. A future protected
+  server-side lookup is the appropriate design if exact roster matching is
+  required for those enumerable values.
 
 ## Scheduled examiner packs
 
@@ -198,6 +207,8 @@ The console module is entitlement-gated (`license.entitled('ncua_readiness')`):
 ## API
 
 `GET /api/ncua/readiness` (any authenticated console role, prompt-free)
-returns `{ entitled, report }`. The examiner pack is
+returns `{ entitled, report }`. `POST /api/ncua/board-packet` (Security Admin
+or Auditor, CSRF-protected) returns the board packet JSON and records
+`BOARD_PACKET_EXPORTED` evidence for the cadence control. The examiner pack is
 `GET /api/export/evidence?examinerProfile=federal_credit_union`
 (Security Admin or Auditor, like every evidence export).

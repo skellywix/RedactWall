@@ -117,10 +117,10 @@ test('a native engine takes precedence and never invokes the WASM fallback', asy
   assert.strictEqual(wasmTouched, 0);
 });
 
-test('strict mode routes sparse OCR back to the approval queue', async () => {
+test('strict-by-default OCR routes sparse output back to the approval queue', async () => {
   const strict = await endpointOcr.extractImageFile('scan.png', '/tmp/scan.png', {
     discover: false,
-    env: { ENDPOINT_AGENT_OCR_STRICT: 'on' },
+    env: {},
     ocrWasm: { wasmOcrAvailable: () => true, extractImageTextWasm: async () => '  x ' },
   });
   assert.strictEqual(strict.extractionOk, false);
@@ -130,21 +130,52 @@ test('strict mode routes sparse OCR back to the approval queue', async () => {
 
   const lenient = await endpointOcr.extractImageFile('scan.png', '/tmp/scan.png', {
     discover: false,
-    env: {},
+    env: { NODE_ENV: 'test', ENDPOINT_AGENT_OCR_STRICT: 'off' },
     ocrWasm: { wasmOcrAvailable: () => true, extractImageTextWasm: async () => '  x ' },
   });
   assert.strictEqual(lenient.extractionOk, true);
   assert.strictEqual(lenient.text, '  x ');
+
+  const production = await endpointOcr.extractImageFile('scan.png', '/tmp/scan.png', {
+    discover: false,
+    env: { NODE_ENV: 'production', ENDPOINT_AGENT_OCR_STRICT: 'off' },
+    ocrWasm: { wasmOcrAvailable: () => true, extractImageTextWasm: async () => '' },
+  });
+  assert.strictEqual(production.extractionOk, false, 'production ignores the lenient escape hatch');
+  assert.strictEqual(production.error, 'ocr_required');
+
+  const unspecifiedRuntime = await endpointOcr.extractImageFile('scan.png', '/tmp/scan.png', {
+    discover: false,
+    env: { ENDPOINT_AGENT_OCR_STRICT: 'off' },
+    ocrWasm: { wasmOcrAvailable: () => true, extractImageTextWasm: async () => '' },
+  });
+  assert.strictEqual(unspecifiedRuntime.extractionOk, false, 'an unset runtime is not a development opt-out');
+  assert.strictEqual(unspecifiedRuntime.error, 'ocr_required');
 });
 
 test('strict mode applies to the native path when extraction is near-empty', async () => {
   const result = await endpointOcr.extractImageFile('scan.png', '/tmp/scan.png', {
-    env: { ENDPOINT_AGENT_OCR_STRICT: 'on' },
+    env: {},
     extractImageText: async () => '',
   });
   assert.strictEqual(result.extractionOk, false);
   assert.strictEqual(result.error, 'ocr_required');
   assert.strictEqual(result.ocrStrict, true);
+});
+
+test('truncated OCR output fails closed instead of treating the scanned prefix as complete', async () => {
+  const hiddenSsn = '123-45-6789';
+  const result = await endpointOcr.extractImageFile('scan.png', '/tmp/scan.png', {
+    env: { NODE_ENV: 'production' },
+    maxChars: 1000,
+    extractImageText: async () => 'A'.repeat(1000) + ` Member SSN ${hiddenSsn}`,
+  });
+  assert.strictEqual(result.extractionOk, false);
+  assert.strictEqual(result.error, 'ocr_output_truncated');
+  assert.strictEqual(result.ocrRequired, true);
+  assert.strictEqual(result.truncated, true);
+  assert.strictEqual(result.text, '');
+  assert.doesNotMatch(JSON.stringify(result), new RegExp(hiddenSsn));
 });
 
 test('the kill switch yields a byte-for-byte ocr_required result through the real module', async () => {

@@ -3,7 +3,13 @@
  * Deployment preflight checks. Local demos can run with warnings; production
  * must not start with defaults that would undermine admin or sensor security.
  */
+const crypto = require('crypto');
 const { withEnvAliases } = require('./env');
+const { configuredCustomerBinding, EMBEDDED_PUBLIC_KEY_PEM } = require('./license');
+const { publicOrigin } = require('./public-url');
+const { validPostgresTlsUrl } = require('./postgres-url');
+const { validOidcUrl } = require('./oidc-url');
+const { outboundHttpsUrlWithoutParameters } = require('./url-policy');
 
 function bool(value) {
   return ['1', 'true', 'yes', 'on'].includes(String(value || '').toLowerCase());
@@ -16,6 +22,7 @@ function check(id, ok, severity, message, remediation) {
 const MIN_SECRET_LENGTHS = {
   adminPassword: 16,
   adminTotpSecret: 16,
+  operatorPassword: 16,
   approverPassword: 16,
   auditorPassword: 16,
   ingestKey: 32,
@@ -25,6 +32,9 @@ const MIN_SECRET_LENGTHS = {
   dataKey: 32,
 };
 const TENANT_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{1,62}$/;
+const SQLITE_DRIVERS = new Set(['sqlite', 'sqlite3']);
+const POSTGRES_DRIVERS = new Set(['postgres', 'postgresql', 'pg']);
+const LICENSE_HEARTBEAT_TOKEN_PATTERN = /^[A-Za-z0-9._~+/=-]{32,256}$/;
 
 function hasMinLength(value, min) {
   return String(value || '').trim().length >= min;
@@ -42,6 +52,25 @@ function hasValidTenantId(value) {
 function positiveInteger(value) {
   const n = Number(value);
   return Number.isInteger(n) && n > 0;
+}
+
+function validEd25519PublicKey(value) {
+  try { return crypto.createPublicKey(value).asymmetricKeyType === 'ed25519'; } catch { return false; }
+}
+
+function distinctEd25519PublicKeys(left, right) {
+  try {
+    const first = crypto.createPublicKey(left).export({ type: 'spki', format: 'der' });
+    const second = crypto.createPublicKey(right).export({ type: 'spki', format: 'der' });
+    return first.length !== second.length || !crypto.timingSafeEqual(first, second);
+  } catch { return false; }
+}
+
+function normalizeDbDriver(value) {
+  const driver = String(value || '').trim().toLowerCase() || 'sqlite';
+  if (SQLITE_DRIVERS.has(driver)) return 'sqlite';
+  if (POSTGRES_DRIVERS.has(driver)) return 'postgres';
+  return null;
 }
 
 function pathSegments(value) {
@@ -71,11 +100,24 @@ function configStatus(input = {}) {
   const env = withEnvAliases(input.env || process.env);
   const production = env.NODE_ENV === 'production';
   const severity = production ? 'error' : 'warning';
+  const dbDriver = normalizeDbDriver(input.dbDriver ?? env.REDACTWALL_DB_DRIVER);
   const dbPath = input.dbPath || env.REDACTWALL_DB_PATH || '';
   const dbPathReason = cloudSyncedPathReason(dbPath);
+  const databaseUrl = input.databaseUrl ?? env.REDACTWALL_DATABASE_URL ?? env.DATABASE_URL ?? '';
+  const configuredPublicUrl = String(input.publicUrl ?? env.REDACTWALL_PUBLIC_URL ?? '').trim();
+  const publicUrlValid = !configuredPublicUrl || !!publicOrigin(configuredPublicUrl, { production });
+  const licenseServerUrl = String(env.REDACTWALL_LICENSE_SERVER_URL || '').trim();
+  const connectedLicense = !!licenseServerUrl;
+  const licenseServerToken = String(env.REDACTWALL_LICENSE_SERVER_TOKEN || '');
+  const verdictPublicKey = String(env.REDACTWALL_LICENSE_VERDICT_PUBLIC_KEY || '');
+  const licenseRootPublicKey = String(env.REDACTWALL_LICENSE_PUBLIC_KEY || EMBEDDED_PUBLIC_KEY_PEM);
   const adminUser = String(input.adminUser ?? env.ADMIN_USER ?? 'admin').trim();
   const adminPassword = input.adminPassword ?? env.ADMIN_PASSWORD ?? '';
   const adminTotpSecret = input.adminTotpSecret ?? env.ADMIN_TOTP_SECRET ?? '';
+  const operatorUser = String(input.operatorUser ?? env.OPERATOR_USER ?? '').trim();
+  const operatorPassword = input.operatorPassword ?? env.OPERATOR_PASSWORD ?? '';
+  const operatorPasswordSet = !!String(operatorPassword).trim();
+  const operatorConfigured = !!operatorUser || operatorPasswordSet;
   const approverUser = String(input.approverUser ?? env.APPROVER_USER ?? '').trim();
   const approverPassword = input.approverPassword ?? env.APPROVER_PASSWORD ?? '';
   const approverPasswordSet = !!String(approverPassword).trim();
@@ -84,8 +126,18 @@ function configStatus(input = {}) {
   const auditorPassword = input.auditorPassword ?? env.AUDITOR_PASSWORD ?? '';
   const auditorPasswordSet = !!String(auditorPassword).trim();
   const auditorConfigured = !!auditorUser || auditorPasswordSet;
+  const adminPrincipal = adminUser.toLowerCase();
+  const operatorPrincipal = operatorUser.toLowerCase();
+  const approverPrincipal = approverUser.toLowerCase();
+  const auditorPrincipal = auditorUser.toLowerCase();
   const saasMode = bool(input.saasMode ?? env.REDACTWALL_SAAS_MODE);
   const tenantId = input.tenantId ?? env.REDACTWALL_TENANT_ID ?? '';
+  const licenseCustomerId = input.licenseCustomerId ?? env.REDACTWALL_LICENSE_CUSTOMER_ID ?? '';
+  const licenseBinding = configuredCustomerBinding({
+    ...env,
+    REDACTWALL_LICENSE_CUSTOMER_ID: licenseCustomerId,
+    REDACTWALL_TENANT_ID: tenantId,
+  });
   const seatLimit = input.seatLimit ?? env.REDACTWALL_SEAT_LIMIT ?? '';
   const requireTenantContext = input.requireTenantContext ?? env.REDACTWALL_REQUIRE_TENANT_CONTEXT;
   const requireUserIdentity = input.requireUserIdentity ?? env.REDACTWALL_REQUIRE_USER_IDENTITY;
@@ -128,8 +180,20 @@ function configStatus(input = {}) {
     && !!String(oidcTokenEndpoint || '').trim()
     && !!String(oidcJwksUri || '').trim()
   );
+  const oidcUrls = [
+    oidcIssuer,
+    oidcRedirectUri,
+    oidcAuthorizationEndpoint,
+    oidcTokenEndpoint,
+    oidcJwksUri,
+  ].filter((value) => !!String(value || '').trim());
+  const oidcHttps = !oidcConfigured || oidcUrls.every((value) => validOidcUrl(value, { production }));
   const sessionSecret = input.sessionSecret ?? env.REDACTWALL_SECRET ?? '';
   const dataKeySource = input.dataKeySource ?? env.REDACTWALL_DATA_KEY ?? env.REDACTWALL_SECRET ?? '';
+  const customDetectorsStatus = input.customDetectorsStatus || { ok: true };
+  const policyStatus = input.policyStatus || { ok: true };
+  const exactMatchStatus = input.exactMatchStatus || { ok: true };
+  const policySigningKeyStatus = input.policySigningKeyStatus || { ok: true, persistent: true };
   const checks = [
     check(
       'admin_password',
@@ -160,6 +224,27 @@ function configStatus(input = {}) {
       `Set ADMIN_TOTP_SECRET to a base32 value at least ${MIN_SECRET_LENGTHS.adminTotpSecret} characters long.`,
     ),
     check(
+      'operator_credentials',
+      !operatorConfigured || (!!operatorUser && operatorPasswordSet),
+      severity,
+      'Operator login has both OPERATOR_USER and OPERATOR_PASSWORD when configured.',
+      'Set both OPERATOR_USER and OPERATOR_PASSWORD, or remove both to disable operator login.',
+    ),
+    check(
+      'operator_user_distinct',
+      !operatorConfigured || !operatorUser || ![adminPrincipal, approverPrincipal, auditorPrincipal].includes(operatorPrincipal),
+      severity,
+      'Operator username is distinct from ADMIN_USER, APPROVER_USER, and AUDITOR_USER.',
+      'Set OPERATOR_USER to a separate platform operations account name.',
+    ),
+    check(
+      'operator_password_strength',
+      !operatorConfigured || hasMinLength(operatorPassword, MIN_SECRET_LENGTHS.operatorPassword),
+      severity,
+      `Operator password is at least ${MIN_SECRET_LENGTHS.operatorPassword} characters when operator login is configured.`,
+      `Set OPERATOR_PASSWORD to at least ${MIN_SECRET_LENGTHS.operatorPassword} characters, or remove OPERATOR_USER to disable operator login.`,
+    ),
+    check(
       'approver_credentials',
       !approverConfigured || (!!approverUser && approverPasswordSet),
       severity,
@@ -168,9 +253,9 @@ function configStatus(input = {}) {
     ),
     check(
       'approver_user_distinct',
-      !approverConfigured || !approverUser || (approverUser !== adminUser && approverUser !== auditorUser),
+      !approverConfigured || !approverUser || ![adminPrincipal, operatorPrincipal, auditorPrincipal].includes(approverPrincipal),
       severity,
-      'Approver username is distinct from ADMIN_USER and AUDITOR_USER.',
+      'Approver username is distinct from ADMIN_USER, OPERATOR_USER, and AUDITOR_USER.',
       'Set APPROVER_USER to a separate review account name.',
     ),
     check(
@@ -189,9 +274,9 @@ function configStatus(input = {}) {
     ),
     check(
       'auditor_user_distinct',
-      !auditorConfigured || !auditorUser || (auditorUser !== adminUser && auditorUser !== approverUser),
+      !auditorConfigured || !auditorUser || ![adminPrincipal, operatorPrincipal, approverPrincipal].includes(auditorPrincipal),
       severity,
-      'Auditor username is distinct from ADMIN_USER and APPROVER_USER.',
+      'Auditor username is distinct from ADMIN_USER, OPERATOR_USER, and APPROVER_USER.',
       'Set AUDITOR_USER to a separate read-only account name.',
     ),
     check(
@@ -251,6 +336,13 @@ function configStatus(input = {}) {
       'Set all of OIDC_AUTHORIZATION_ENDPOINT, OIDC_TOKEN_ENDPOINT, and OIDC_JWKS_URI, or omit all three to use discovery.',
     ),
     check(
+      'oidc_https',
+      oidcHttps,
+      'error',
+      'OIDC URLs use an approved transport and contain no credentials, query parameters, or fragments.',
+      'Use plain https:// URLs without embedded credentials, query parameters, or fragments; local development may use http://.',
+    ),
+    check(
       'session_secret',
       input.secretSource === 'env',
       severity,
@@ -286,13 +378,102 @@ function configStatus(input = {}) {
       'Set HTTPS=true or COOKIE_SECURE=true when serving the console over TLS.',
     ),
     check(
+      'db_driver',
+      dbDriver !== null,
+      severity,
+      'Database driver is an explicitly supported SQLite or Postgres value.',
+      'Set REDACTWALL_DB_DRIVER to sqlite, sqlite3, postgres, postgresql, or pg.',
+    ),
+    check(
       'sqlite_local_disk',
-      !!dbPath && !dbPathReason,
+      dbDriver !== 'sqlite' || (!!dbPath && !dbPathReason),
       severity,
       'SQLite evidence store is configured on a local disk path.',
       dbPathReason
         ? `Set REDACTWALL_DB_PATH to a local disk path; current path looks like ${dbPathReason}.`
         : 'Set REDACTWALL_DB_PATH to a local disk path outside cloud-synced or network folders.',
+    ),
+    check(
+      'postgres_tls',
+      dbDriver !== 'postgres' || validPostgresTlsUrl(databaseUrl, { allowLoopbackPlaintext: !production }),
+      'error',
+      'Postgres uses one unambiguous connection URL with supported parameters and required TLS.',
+      'Set REDACTWALL_DATABASE_URL with explicit host, user, and database plus sslmode=require, verify-ca, or verify-full. Only non-production loopback may omit TLS.',
+    ),
+    check(
+      'postgres_tenant_context',
+      dbDriver !== 'postgres' || !production || hasValidTenantId(tenantId),
+      'error',
+      'Production Postgres is pinned to a valid tenant context.',
+      'Set REDACTWALL_TENANT_ID to a valid lowercase customer slug before starting production Postgres.',
+    ),
+    check(
+      'public_url',
+      publicUrlValid,
+      severity,
+      'The configured public console origin is safe for invitation links.',
+      production
+        ? 'Set REDACTWALL_PUBLIC_URL to an HTTPS origin without credentials, query parameters, or fragments.'
+        : 'Set REDACTWALL_PUBLIC_URL to a valid HTTP(S) origin without credentials, query parameters, or fragments.',
+    ),
+    check(
+      'connected_license_url',
+      !connectedLicense || !!outboundHttpsUrlWithoutParameters(licenseServerUrl),
+      'error',
+      'Connected licensing uses an approved HTTPS vendor endpoint.',
+      'Set REDACTWALL_LICENSE_SERVER_URL to a public or private HTTPS endpoint without credentials, query parameters, or fragments.',
+    ),
+    check(
+      'connected_license_auth',
+      !connectedLicense || LICENSE_HEARTBEAT_TOKEN_PATTERN.test(licenseServerToken),
+      'error',
+      'Connected licensing has a customer-specific bearer credential.',
+      'Set REDACTWALL_LICENSE_SERVER_TOKEN to the 32-to-256-character customer token issued by the vendor.',
+    ),
+    check(
+      'connected_license_verdict_key',
+      !connectedLicense || (
+        validEd25519PublicKey(verdictPublicKey)
+        && distinctEd25519PublicKeys(verdictPublicKey, licenseRootPublicKey)
+      ),
+      'error',
+      'Connected licensing has a dedicated Ed25519 verdict public key.',
+      'Set REDACTWALL_LICENSE_VERDICT_PUBLIC_KEY to the vendor online-verdict public key, not the offline license-root key.',
+    ),
+    check(
+      'custom_detectors',
+      customDetectorsStatus.ok !== false,
+      'error',
+      'Configured custom detector pack is readable and valid JSON.',
+      'Repair REDACTWALL_CUSTOM_DETECTORS_PATH; RedactWall retains the last-known-good pack but stays unready until the configured file is valid.',
+    ),
+    check(
+      'policy_file',
+      policyStatus.ok !== false,
+      'error',
+      'Configured policy file is present, readable, and valid JSON.',
+      'Repair REDACTWALL_POLICY_PATH; RedactWall enforces conservative defaults or the last-known-good policy but stays unready until the configured file is valid.',
+    ),
+    check(
+      'policy_signing_key',
+      policySigningKeyStatus.ok === true && policySigningKeyStatus.persistent === true,
+      'error',
+      'The Ed25519 sensor-policy signing identity is valid and durably persisted.',
+      'Mount a private writable REDACTWALL_DATA_DIR (the production container uses /data), then repair or explicitly restore the policy signing key. Corrupt keys are never regenerated automatically.',
+    ),
+    check(
+      'exact_match',
+      exactMatchStatus.ok !== false,
+      'error',
+      'Configured exact-match pack is present and valid.',
+      'Repair REDACTWALL_EXACT_MATCH_PATH; RedactWall disables a never-loaded optional pack or retains the last-known-good pack but stays unready until the configured file is valid.',
+    ),
+    check(
+      'license_customer_binding',
+      input.requireLicenseBinding !== true || licenseBinding.ok,
+      severity,
+      'A stable deployment customer id is configured for offline license binding.',
+      'Set REDACTWALL_LICENSE_CUSTOMER_ID to the licensed customer slug, or use REDACTWALL_TENANT_ID for a customer silo; if both are set they must match.',
     ),
     check(
       'saas_tenant_id',

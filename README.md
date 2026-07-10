@@ -7,8 +7,14 @@ RedactWall is a Node.js control plane and set of local sensors that scan prompts
 RedactWall has three main parts:
 
 - A server in `server/` that owns policy, the admin dashboard, approvals, evidence export, and the hash-chained audit log.
-- A shared detector in `detection-engine/` that finds structured sensitive data and semantic risk categories.
+- A shared detector in `detection-engine/` that finds structured sensitive data and semantic risk categories, including bounded recursive inspection of Base64/hex text so reversible encoding cannot bypass the same policy.
 - Sensors in `sensors/` that run the detector locally for browser AI chat, endpoint file flows, clipboard checks, and MCP tool responses.
+
+Strict encoded content that resolves to sensitive text maps back to its exact
+outer span for redaction or blocking. Content-bearing Base64 that resolves to
+non-text bytes fails closed as unscannable; ordinary hashes, UUIDs, JWT-like
+identifiers, numeric records, embeddings, and benign encoded prose remain
+allowed by regression tests.
 
 The repository does not have a `src/` directory. The source code lives under `server/`, `detection-engine/`, `sensors/`, and supporting scripts.
 
@@ -100,7 +106,7 @@ npm run sync-check
 Production-style setup:
 
 ```bash
-npm run setup:prod
+npm run setup:prod -- --customer-id cu-local
 npm run mfa:uri
 npm start
 ```
@@ -108,7 +114,7 @@ npm start
 Docker setup:
 
 ```bash
-npm run setup:prod -- --skip-install
+npm run setup:prod -- --customer-id cu-local --skip-install
 npm run mfa:uri
 docker compose up -d --build
 ```
@@ -346,7 +352,7 @@ Exports the Express app.
 | `normalizeCustomDetectors(value)` | Validates and normalizes custom detector config. |
 | `publicCustomDetectorConfig(value)` | Returns custom detector config safe for sensors. |
 | `normalizeExactMatchConfig(value)` | Validates and normalizes Exact Data Match (EDM) config. |
-| `edmFingerprint(value)` | Builds a privacy-preserving EDM fingerprint for exact-match detection. |
+| `edmFingerprint(value, salt)` | Builds the version-2 SHA-256 fingerprint used for eligible high-entropy random identifiers. Public sensor packs do not make low-entropy values confidential. |
 | `regulationsFor(type)` / `secretVendor(value)` | Maps a finding type to the regulations it implicates; identifies the vendor of a detected secret. |
 | Validator helpers | `luhnValid`, `ssnPlausible`, `abaValid`, `ibanValid`, `vinValid`, `bankAccountPlausible`, `itinPlausible`, `npiValid`, `datePlausible`, `ipv6Valid`, `cardNetwork`, and the international validators `aadhaarValid`, `nhsValid`, `ninoValid`, `sinValid`, and `tfnValid`. |
 | Constants | `SEVERITY`, `SEVERITY_LABEL`, `CONFIDENCE_LABEL`, and `REGULATIONS`. |

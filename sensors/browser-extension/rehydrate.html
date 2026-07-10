@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RedactWall Sensitive Values</title>
+  <link rel="stylesheet" href="rehydrate.css">
+</head>
+<body>
+  <main class="card" aria-labelledby="title">
+    <div class="brand"><span aria-hidden="true">RW</span> RedactWall</div>
+    <p class="eyebrow">Isolated reveal surface</p>
+    <h1 id="title">Sensitive values stay outside the AI page</h1>
+    <p class="intro">The AI provider received tokens only. Originals are held briefly in extension memory and are revealed once, only after you choose.</p>
+
+    <section class="privacy" aria-label="Privacy details">
+      <strong>Before you reveal</strong>
+      <span>Values disappear when this tab closes, becomes hidden, or reaches its 30-second display limit.</span>
+    </section>
+
+    <div id="values" class="values" hidden aria-live="polite"></div>
+    <p id="status" class="status" role="status">Values are hidden.</p>
+
+    <div class="actions">
+      <button id="reveal" class="primary" type="button">Reveal once</button>
+      <button id="copy" type="button" disabled>Copy and hide</button>
+      <button id="close" class="quiet" type="button">Close</button>
+    </div>
+  </main>
+  <script src="lib/browser-api.js"></script>
+  <script src="rehydrate.js"></script>
+</body>
+</html>

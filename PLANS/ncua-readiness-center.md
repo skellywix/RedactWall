@@ -193,7 +193,7 @@ existing middleware arrays:
 | `/api/ncua/incidents` | GET | `auth.requireAuth` | Incident list + deadline state |
 | `/api/ncua/incidents` | POST | `...adminWrite` + zod | Open incident from query ids |
 | `/api/ncua/incidents/:id/status` | POST | `...adminWrite` + zod | Advance status / mark reported |
-| `/api/ncua/board-packet` | GET | `auditRead` | Board packet JSON |
+| `/api/ncua/board-packet` | POST | `auth.requireAuth` + CSRF + Security Admin/Auditor + entitlement | Board packet JSON; appends prompt-free export evidence |
 | `/api/export/evidence?examinerProfile=federal_credit_union` | GET | `auditRead` (existing) | Examiner pack |
 
 Refinement vs the draft: **no separate `/api/ncua/examiner-pack`** — the

@@ -38,14 +38,14 @@ function notificationPatch(query, result, now = new Date()) {
   };
 }
 
-function auditNotification(db, query, result, action, status) {
+function notificationAudit(query, result, action, status) {
   if (status === 'not_configured') return null;
   const auditAction = status === 'sent'
     ? 'APPROVAL_NOTIFICATION_SENT'
     : status === 'partial'
       ? 'APPROVAL_NOTIFICATION_PARTIAL'
       : 'APPROVAL_NOTIFICATION_FAILED';
-  return db.appendAudit({
+  return {
     action: auditAction,
     queryId: query.id,
     actor: 'system',
@@ -54,7 +54,7 @@ function auditNotification(db, query, result, action, status) {
       `status=${status}`,
       `channels=${(result.channels || []).join(',') || 'none'}`,
     ].join('; '),
-  });
+  };
 }
 
 async function emitAndPersistApprovalNotification(query, { db, action = 'APPROVAL_ROUTED', now = new Date(), onUpdate, ...notifyOpts } = {}) {
@@ -62,13 +62,15 @@ async function emitAndPersistApprovalNotification(query, { db, action = 'APPROVA
   const current = db.getQuery(query.id) || query;
   const result = await notifiers.emitApprovalNotification(current, { action, ...notifyOpts });
   if (result.reason === 'not_routeable' || result.reason === 'disabled') return result;
-  const patch = notificationPatch(current, result, now);
-  const status = patch.notificationStatus;
+  const status = resultStatus(result);
   if (status === 'not_configured') return result;
-  const updated = db.updateQuery(current.id, patch);
-  if (updated) {
-    auditNotification(db, updated, result, action, status);
-    if (typeof onUpdate === 'function') onUpdate(updated);
+  const transition = db.mutateQueryWithAudit(
+    current.id,
+    (fresh) => notificationPatch(fresh, result, now),
+    (updated) => notificationAudit(updated, result, action, status),
+  );
+  if (transition.outcome === 'updated') {
+    if (typeof onUpdate === 'function') onUpdate(transition.row);
   }
   return result;
 }
@@ -101,19 +103,24 @@ function escalateDueApprovals({ db, now = new Date(), actor = 'system', notify =
   const escalated = [];
   for (const query of rows) {
     if (!routing.routeableStatus(query.status) || !dueForEscalation(query, now)) continue;
-    const updated = db.updateQuery(query.id, escalationPatch(query, now));
-    if (!updated) continue;
-    db.appendAudit({
-      action: 'APPROVAL_ESCALATED',
-      queryId: updated.id,
-      actor,
-      detail: [
-        `reason=${updated.escalationReason}`,
-        `assignedGroup=${updated.assignedGroup || 'unassigned'}`,
-        `assignedRole=${updated.assignedRole || 'unassigned'}`,
-        `slaDueAt=${updated.slaDueAt || 'none'}`,
-      ].join('; '),
-    });
+    const transition = db.mutateQueryWithAudit(
+      query.id,
+      (fresh) => routing.routeableStatus(fresh.status) && dueForEscalation(fresh, now)
+        ? escalationPatch(fresh, now)
+        : null,
+      (updated) => ({
+        action: 'APPROVAL_ESCALATED',
+        actor,
+        detail: [
+          `reason=${updated.escalationReason}`,
+          `assignedGroup=${updated.assignedGroup || 'unassigned'}`,
+          `assignedRole=${updated.assignedRole || 'unassigned'}`,
+          `slaDueAt=${updated.slaDueAt || 'none'}`,
+        ].join('; '),
+      }),
+    );
+    if (transition.outcome !== 'updated') continue;
+    const updated = transition.row;
     escalated.push(updated);
     if (typeof onUpdate === 'function') onUpdate(updated);
     if (notify) fireAndPersistApprovalNotification(updated, { db, action: 'APPROVAL_ESCALATED', onUpdate, ...notifyOpts });

@@ -4,6 +4,13 @@ const test = require('node:test');
 const assert = require('node:assert');
 const importer = require('../scripts/import-ai-discovery');
 
+function jsonResponse(status, body) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
 test('discovery importer parses CSV, strips URL paths, and aggregates observations', () => {
   const csv = [
     'User,Request URL,Requests,Last Seen,Category,Confidence',
@@ -85,18 +92,13 @@ test('discovery importer batches sanitized sightings and posts with ingest auth 
     apiKey: 'unit-ingest-key',
     fetchImpl: async (url, options) => {
       calls.push({ url, options });
-      return {
-        ok: true,
-        status: 202,
-        async json() {
-          return { status: 'imported', imported: 100, observations: 100 };
-        },
-      };
+      return jsonResponse(202, { status: 'imported', imported: 100, observations: 100 });
     },
   });
 
   assert.strictEqual(body.status, 'imported');
   assert.strictEqual(calls[0].url, 'http://127.0.0.1:4000/api/v1/discovery');
+  assert.strictEqual(calls[0].options.redirect, 'error');
   assert.strictEqual(calls[0].options.headers['x-api-key'], 'unit-ingest-key');
   assert.strictEqual(JSON.parse(calls[0].options.body).vendor, 'netskope');
   assert.strictEqual(JSON.stringify(calls[0]).includes('unit-ingest-key'), true);
@@ -171,4 +173,12 @@ test('discovery importer surfaces missing input and posting failures without lea
     apiKey: '',
     fetchImpl: async () => { throw err; },
   }), /INGEST_API_KEY/);
+
+  let called = false;
+  await assert.rejects(() => importer.postBatch({ sightings: [] }, {
+    redactwallUrl: 'http://redactwall.example',
+    apiKey: 'unit-ingest-key',
+    fetchImpl: async () => { called = true; },
+  }), /must use HTTPS or loopback HTTP/);
+  assert.strictEqual(called, false);
 });

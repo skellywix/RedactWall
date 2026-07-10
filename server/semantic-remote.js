@@ -12,6 +12,7 @@
  */
 const D = require('../detection-engine/detect');
 const { withEnvAliases } = require('./env');
+const { cancelResponseBody, readBoundedJson } = require('../sensors/shared/bounded-response');
 // Single strict loopback definition, shared with the sensor transport guard so
 // the two cannot drift. A prefix match like startsWith('127.') would accept an
 // attacker host such as '127.0.0.1.evil.com' and leak prompt bodies over http.
@@ -20,6 +21,7 @@ const { isLoopbackHost } = require('../sensors/shared/server-url');
 const DEFAULT_TIMEOUT_MS = 1500;
 const MAX_TEXT_CHARS = 20000;
 const MAX_REMOTE_CATEGORIES = 12;
+const MAX_REMOTE_RESPONSE_BYTES = 128 * 1024;
 
 function bool(value) {
   return ['1', 'true', 'yes', 'on'].includes(String(value || '').toLowerCase());
@@ -27,21 +29,22 @@ function bool(value) {
 
 // This path ships prompt text off the box, so it must be encrypted in transit.
 // Allow HTTPS to any host; allow HTTP only to loopback (a local dev/test
-// scanner) or when the operator sets an explicit insecure override. Cleartext
-// to a remote host — prompt bodies over the wire — is rejected.
+// scanner) or, outside production, when the operator sets an explicit insecure
+// override. Production never sends prompt bodies to a remote cleartext host.
 function resolveRemoteUrl(raw, allowInsecure = false) {
   try {
     const url = new URL(String(raw || '').trim());
     if (url.username || url.password) return '';
-    if (url.protocol === 'https:') return url.toString();
-    if (url.protocol === 'http:' && (isLoopbackHost(url.hostname) || allowInsecure)) return url.toString();
-    return '';
+    if (url.protocol !== 'https:' && !(url.protocol === 'http:' && (isLoopbackHost(url.hostname) || allowInsecure))) return '';
+    url.hash = '';
+    return url.toString();
   } catch (_) { return ''; }
 }
 
 function remoteSettings(env = process.env) {
   const resolved = withEnvAliases(env);
-  const allowInsecure = bool(resolved.REDACTWALL_SEMANTIC_REMOTE_ALLOW_INSECURE);
+  const allowInsecure = resolved.NODE_ENV !== 'production'
+    && bool(resolved.REDACTWALL_SEMANTIC_REMOTE_ALLOW_INSECURE);
   const url = resolveRemoteUrl(resolved.REDACTWALL_SEMANTIC_REMOTE_URL || '', allowInsecure);
   if (!url) return { enabled: false };
   // Fail mode when the scanner is unreachable: 'degrade' (default) falls back to
@@ -110,9 +113,11 @@ function combineCategories(analysis, remoteCategories) {
 async function fetchRemote(text, settings, fetchImpl) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), settings.timeoutMs);
+  let res;
   try {
-    const res = await fetchImpl(settings.url, {
+    res = await fetchImpl(settings.url, {
       method: 'POST',
+      redirect: 'error',
       signal: controller.signal,
       headers: {
         'Content-Type': 'application/json',
@@ -120,12 +125,24 @@ async function fetchRemote(text, settings, fetchImpl) {
       },
       body: JSON.stringify({ text: String(text || '').slice(0, MAX_TEXT_CHARS) }),
     });
-    if (!res || !res.ok) return { ok: false, categories: [] };
-    return { ok: true, categories: normalizeRemoteCategories(await res.json()) };
   } catch (_) {
     return { ok: false, categories: [] };
   } finally {
     clearTimeout(timer);
+  }
+  if (!res || !res.ok) {
+    await cancelResponseBody(res);
+    return { ok: false, categories: [] };
+  }
+  try {
+    const { json } = await readBoundedJson(res, {
+      maxBytes: MAX_REMOTE_RESPONSE_BYTES,
+      timeoutMs: settings.timeoutMs,
+      label: 'semantic classifier response',
+    });
+    return { ok: true, categories: normalizeRemoteCategories(json) };
+  } catch (_) {
+    return { ok: false, categories: [] };
   }
 }
 

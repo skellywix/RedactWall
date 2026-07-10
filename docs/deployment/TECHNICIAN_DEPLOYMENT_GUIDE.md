@@ -154,7 +154,7 @@ outside the repo:
 ```powershell
 $TenantId = "cu-acme"
 $EnvPath = Join-Path $env:TEMP "redactwall-$TenantId.env"
-npm run setup:prod -- --skip-install --env $EnvPath
+npm run setup:prod -- --customer-id $TenantId --skip-install --env $EnvPath
 npm run mfa:uri -- --env $EnvPath --issuer "RedactWall $TenantId"
 npm run setup:check -- --env $EnvPath
 ```
@@ -206,7 +206,7 @@ $AwsRegion = "us-east-1"
 $ImageTag = "0.3.0"
 $AccountId = aws sts get-caller-identity --query Account --output text
 $Registry = "$AccountId.dkr.ecr.$AwsRegion.amazonaws.com"
-$Image = "$Registry/redactwall:$ImageTag"
+$TaggedImage = "$Registry/redactwall:$ImageTag"
 ```
 
 Create the ECR repository once if it does not already exist:
@@ -224,11 +224,19 @@ Build, authenticate, and push:
 aws ecr get-login-password --region $AwsRegion |
   docker login --username AWS --password-stdin $Registry
 
-docker build -t $Image .
-docker push $Image
+docker build -t $TaggedImage .
+docker push $TaggedImage
+$ImageDigest = aws ecr describe-images `
+  --repository-name redactwall `
+  --image-ids imageTag=$ImageTag `
+  --query "imageDetails[0].imageDigest" `
+  --output text `
+  --region $AwsRegion
+$Image = "$Registry/redactwall@$ImageDigest"
 ```
 
-Record `$Image` in the handoff packet.
+Record the digest-pinned `$Image` in the handoff packet. Do not substitute the
+human-readable tag when supplying CloudFormation `ImageUri`.
 
 ## Phase 4: Create The Customer Secret
 
@@ -289,6 +297,7 @@ $VpcId = "vpc-xxxxxxxx"
 $PublicSubnetIds = "subnet-aaaaaaa,subnet-bbbbbbb"
 $InstanceSubnetId = "subnet-aaaaaaa"
 $CertificateArn = "arn:aws:acm:us-east-1:123456789012:certificate/example"
+$PublicHostname = "$TenantId.redactwall.customer.example"
 $SeatLimit = 25
 $SecretArn = aws secretsmanager describe-secret `
   --secret-id "redactwall/$TenantId" `
@@ -321,22 +330,31 @@ aws cloudformation deploy `
     SecretArn=$SecretArn `
     TenantId=$TenantId `
     SeatLimit=$SeatLimit `
-    CertificateArn=$CertificateArn
+    CertificateArn=$CertificateArn `
+    PublicHostname=$PublicHostname
 ```
 
-Get the deployed URL:
+Get the ALB DNS target for the customer alias and the canonical URL:
 
 ```powershell
+$AlbDnsName = aws cloudformation describe-stacks `
+  --stack-name $StackName `
+  --query "Stacks[0].Outputs[?OutputKey=='LoadBalancerDnsName'].OutputValue" `
+  --output text `
+  --region $AwsRegion
 $Url = aws cloudformation describe-stacks `
   --stack-name $StackName `
   --query "Stacks[0].Outputs[?OutputKey=='Url'].OutputValue" `
   --output text `
   --region $AwsRegion
+$AlbDnsName
 $Url
 ```
 
-Point the customer DNS name to the ALB according to the customer's DNS process.
-Production is not ready until HTTPS is working at the final customer DNS name.
+Point `$PublicHostname` to `$AlbDnsName` according to the customer's DNS
+process. Production is not ready until the alias resolves and HTTPS works at
+the final customer DNS name. Do not health-check the raw ALB hostname because
+it is not covered by the customer certificate.
 
 ## Phase 6: Server Health And Audit Checks
 
@@ -388,7 +406,17 @@ sudo docker exec redactwall npm run backup -- /data/backups
 Also check CloudWatch logs:
 
 ```powershell
-aws logs tail "/redactwall/$TenantId" --since 30m --region $AwsRegion
+$LogGroupName = aws cloudformation describe-stacks `
+  --stack-name $StackName `
+  --query "Stacks[0].Outputs[?OutputKey=='LogGroupName'].OutputValue | [0]" `
+  --output text `
+  --region $AwsRegion
+
+if ([string]::IsNullOrWhiteSpace($LogGroupName) -or $LogGroupName -eq "None") {
+  throw "Stack output LogGroupName was not found."
+}
+
+aws logs tail $LogGroupName --since 30m --region $AwsRegion
 ```
 
 Save health, readiness, audit-chain, backup, and log evidence in the handoff
@@ -434,8 +462,10 @@ For install day, the technician must confirm these values in managed storage:
 {
   "serverUrl": "https://redactwall.customer.example",
   "ingestKey": "customer-ingest-key-from-approved-vault",
+  "policyPublicKey": "-----BEGIN PUBLIC KEY-----\\ncustomer-policy-pin\\n-----END PUBLIC KEY-----",
   "orgId": "cu-acme",
-  "email": "${user_email}"
+  "email": "${user_email}",
+  "enabled": true
 }
 ```
 
@@ -445,23 +475,29 @@ Validation on one managed test device:
    `edge://policy`, or `about:policies`.
 2. Confirm the extension is force-installed.
 3. Confirm the extension receives managed storage.
-4. Open the extension popup and confirm protection is enabled.
-5. Open an approved AI destination.
-6. Confirm the Coverage tab shows a `browser_extension` install-health heartbeat
+4. Open the extension popup, grant the exact remote HTTPS control-plane origin,
+   and confirm protection is enabled. If the grant is denied, the extension
+   remains fail closed and install health reports `server_host_permission=false`.
+5. In the popup, select **Allow exact sites** for every pending custom governed
+   destination. Built-in AI hosts are already covered. A custom host remains
+   browser-blocked and reports `custom_destination_coverage=false` until its
+   exact optional host grant and dynamic content-script registration succeed.
+6. Open an approved AI destination.
+7. Confirm the Coverage tab shows a `browser_extension` install-health heartbeat
    with passing checks for managed config, managed identity, org id, server URL,
    ingest-key presence, content-script coverage, and policy cache availability.
    The Fleet Install Health table should show the test user, org, browser
    sensor version, platform, `covered` state, and `checks ok`.
-7. Send a benign prompt and confirm it is attributed to the test user.
-8. Paste `123-45-6789` as synthetic SSN test data.
-9. Confirm the configured policy action appears in the browser.
-10. Confirm the dashboard shows the event under the right user and tenant.
-11. Add a disposable host to `blockedDestinations`, refresh policy, and confirm
+8. Send a benign prompt and confirm it is attributed to the test user.
+9. Paste `123-45-6789` as synthetic SSN test data.
+10. Confirm the configured policy action appears in the browser.
+11. Confirm the dashboard shows the event under the right user and tenant.
+12. Add a disposable host to `blockedDestinations`, refresh policy, and confirm
     a send attempt records `destination_blocked` without prompt text.
-12. Add the same host to `blockedFileUploadDestinations`, remove it from
+13. Add the same host to `blockedFileUploadDestinations`, remove it from
     `blockedDestinations`, and confirm an upload attempt records
     `file_upload_blocked` without file content.
-13. Visit an ungoverned AI host and confirm shadow-AI discovery appears.
+14. Visit an ungoverned AI host and confirm shadow-AI discovery appears.
 
 Do not proceed to broad rollout until this managed test device passes.
 

@@ -46,6 +46,7 @@ function walkFiles(relDir) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const relPath = path.join(relDir, entry.name);
     if (entry.isDirectory()) {
+      if (relPath === path.join('sensors', 'browser-extension', '_metadata')) continue;
       files.push(...walkFiles(relPath));
     } else if (entry.isFile()) {
       files.push(relPath);
@@ -90,13 +91,17 @@ test('console app bundle stays within transfer budgets', (t) => {
 
 test('browser extension assets stay within install package budgets', () => {
   assertAssetBudgets([
-    // Raised 105k/37k -> 112k/40k for the vendor-labeled secrets catalog
-    // (secretVendor table + expanded SECRET_KEY branches). Still tight enough
-    // to catch an accidentally committed LR model (~10KB raw each).
-    // +~1KB raw / +0.2KB gzip for the Unicode digit-fold table (review fix D1).
-    { path: 'sensors/browser-extension/lib/detect.js', maxRawBytes: 112_000, maxGzipBytes: 41_000 },
-    { path: 'sensors/browser-extension/content.js', maxRawBytes: 60_000, maxGzipBytes: 16_000 },
-    { path: 'sensors/browser-extension/background.js', maxRawBytes: 30_000, maxGzipBytes: 9_000 },
+    // Bounded nested encoding/canonicalization plus the synchronous SHA-256 EDM
+    // profile are required at the disconnected sensor edge. Keep less than 3KB
+    // raw and 1.5KB gzip headroom so generated-model or debug-data drift fails.
+    { path: 'sensors/browser-extension/lib/detect.js', maxRawBytes: 138_000, maxGzipBytes: 49_000 },
+    // Managed-policy locking and immutable-send checks moved this just over the
+    // prior 60KB line; retain less than 1KB of raw headroom.
+    { path: 'sensors/browser-extension/content.js', maxRawBytes: 61_000, maxGzipBytes: 16_000 },
+    // Exact optional-host grants, persistent runtime injection, bounded
+    // control-plane reads, and fail-closed rehydration live in the worker.
+    // These ceilings retain about 1.2KB raw and 0.4KB gzip headroom.
+    { path: 'sensors/browser-extension/background.js', maxRawBytes: 48_000, maxGzipBytes: 12_000 },
     { path: 'sensors/browser-extension/manifest.json', maxRawBytes: 14_000, maxGzipBytes: 2_500 },
   ]);
 
@@ -107,9 +112,10 @@ test('browser extension assets stay within install package budgets', () => {
       gzipBytes: acc.gzipBytes + asset.gzipBytes,
     }), { rawBytes: 0, gzipBytes: 0 });
 
-  assertWithin('browser extension assets raw total', totals.rawBytes, 220_000);
-  // +0.2KB gzip from the Unicode digit-fold table in detect.js (review fix D1).
-  assertWithin('browser extension assets gzip total', totals.gzipBytes, 71_000);
+  // Signed-policy, destination-coverage, and isolated-reveal assets are now
+  // first-class shipped controls. Keep aggregate headroom below three percent.
+  assertWithin('browser extension assets raw total', totals.rawBytes, 300_000);
+  assertWithin('browser extension assets gzip total', totals.gzipBytes, 95_000);
 });
 
 test('browser extension store packages stay within size budget', (t) => {
@@ -118,6 +124,8 @@ test('browser extension store packages stay within size budget', (t) => {
 
   for (const target of BROWSER_TARGETS) {
     const result = packageExtension({ outDir, target, now: new Date('2026-07-01T00:00:00.000Z') });
-    assertWithin(`${target} extension zip size`, result.packageManifest.sizeBytes, 80_000);
+    // A 97KB cap leaves less than three percent package headroom after the
+    // non-shipped Chromium runtime metadata directory is excluded.
+    assertWithin(`${target} extension zip size`, result.packageManifest.sizeBytes, 97_000);
   }
 });

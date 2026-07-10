@@ -19,6 +19,7 @@ control plane (RDS role setup, migrations, backups, monitoring, sizing).
 - Encrypted EBS root volume with `/var/lib/redactwall` mounted into the
   container at `/data`.
 - Docker runtime state under `/data`: `redactwall.db`, `policy.json`,
+  `.policy-bundle-key.pem`,
   `custom-detectors.json`, backups, and scheduled examiner evidence packs.
 - Hardened container flags: init process, read-only root filesystem, writable
   `/tmp` tmpfs, dropped Linux capabilities, and `no-new-privileges`.
@@ -47,6 +48,21 @@ The AWS template pins mutable customer state to the mounted `/data` volume:
 `REDACTWALL_CUSTOM_DETECTORS_PATH=/data/custom-detectors.json`. Do not store
 customer policy edits or detector packs only in the image layer.
 
+The container image entrypoint atomically seeds `/data/policy.json` from the
+shipped policy on first boot. If a customer policy already exists on the EBS
+volume, the entrypoint leaves it untouched. The CloudFormation `docker run`
+uses that default entrypoint, so a new customer silo starts with the same policy
+that passed repository validation without risking later policy overwrite.
+The same durable volume owns the Ed25519 sensor-policy signing key. Production
+readiness fails if that key cannot be created or read, and a corrupt or partial
+existing key is never silently replaced. Export the public half from the
+trusted instance after deployment and distribute it through browser MDM and
+Node-sensor configuration; do not bootstrap pins from the public-key API.
+The template also pins the container hostname to `redactwall`. Preserve that
+hostname on replacement containers that reuse `/var/lib/redactwall`; it lets
+the file-mutation lock distinguish a new PID 1 process instance from a crashed
+PID 1 predecessor without deleting ambiguous locks from another host.
+
 Do not run this app on Fargate with SQLite over EFS. The current preflight and
 database comments are built around local disk because audit evidence integrity
 matters more than making the first AWS shape look serverless.
@@ -64,14 +80,27 @@ Build and push:
 ```bash
 AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 AWS_REGION=us-east-1
-IMAGE="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/redactwall:0.3.0"
+REPOSITORY="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/redactwall"
+IMAGE_TAG=0.3.0
+TAGGED_IMAGE="$REPOSITORY:$IMAGE_TAG"
 
 aws ecr get-login-password --region "$AWS_REGION" \
   | docker login --username AWS --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
 
-docker build -t "$IMAGE" .
-docker push "$IMAGE"
+docker build -t "$TAGGED_IMAGE" .
+docker push "$TAGGED_IMAGE"
+
+IMAGE_DIGEST=$(aws ecr describe-images \
+  --repository-name redactwall \
+  --image-ids imageTag="$IMAGE_TAG" \
+  --query 'imageDetails[0].imageDigest' \
+  --output text \
+  --region "$AWS_REGION")
+IMAGE="$REPOSITORY@$IMAGE_DIGEST"
 ```
+
+CloudFormation accepts only the digest-pinned `IMAGE` value. Keep the tag for
+human release naming, but never deploy a mutable tag into `ImageUri`.
 
 ## 2. Create The Customer Secret
 
@@ -107,7 +136,7 @@ The `ADMIN_TOTP_SECRET` must be enrolled in an authenticator app before customer
 admins use the console. You can generate production-safe values with:
 
 ```bash
-npm run setup:prod -- --skip-install --env aws-customer.env
+npm run setup:prod -- --customer-id cu-acme --skip-install --env aws-customer.env
 npm run mfa:uri -- --env aws-customer.env --issuer "RedactWall cu-acme"
 ```
 
@@ -140,13 +169,27 @@ aws cloudformation deploy \
     SecretArn="$SECRET_ARN" \
     TenantId=cu-acme \
     SeatLimit=25 \
-    CertificateArn=arn:aws:acm:us-east-1:123456789012:certificate/example
+    CertificateArn=arn:aws:acm:us-east-1:123456789012:certificate/example \
+    PublicHostname=redactwall.customer.example
 ```
 
-If you do not pass `CertificateArn`, the template exposes HTTP on the ALB. Use
-that only for a short sandbox smoke test. Production should use ACM and DNS.
+`CertificateArn` and `PublicHostname` are required. The ALB always redirects
+port 80 to its HTTPS listener, which prevents the console from advertising
+secure session cookies over an HTTP-only endpoint. Use an ACM certificate issued
+in the deployment region that covers `PublicHostname`.
 
-Get the URL:
+Get the ALB DNS target, create the customer DNS alias to that value, and wait for
+DNS propagation:
+
+```bash
+aws cloudformation describe-stacks \
+  --stack-name redactwall-cu-acme \
+  --query "Stacks[0].Outputs[?OutputKey=='LoadBalancerDnsName'].OutputValue" \
+  --output text
+```
+
+The canonical URL output uses `PublicHostname`, so it matches the ACM
+certificate after the alias is live:
 
 ```bash
 aws cloudformation describe-stacks \
@@ -154,6 +197,17 @@ aws cloudformation describe-stacks \
   --query "Stacks[0].Outputs[?OutputKey=='Url'].OutputValue" \
   --output text
 ```
+
+### Apply image and configuration updates
+
+Rerun the same `aws cloudformation deploy` command with a new digest-pinned
+`ImageUri` whenever a release is promoted. The instance runs `cfn-hup`, which
+detects the `AWS::CloudFormation::Init` metadata change and invokes `cfn-init`;
+the update does not depend on EC2 user data running a second time. The deploy
+script refreshes Secrets Manager values, pulls the image, starts it, and waits
+for both Docker health and `/readyz`. The previous container is restored if the
+candidate does not become ready. After every update, verify `/readyz`, the ALB
+healthy-host count, and `systemctl is-active cfn-hup` through Session Manager.
 
 ## 4. Configure The Customer Sensors
 
@@ -172,6 +226,11 @@ The server runs in SaaS mode and will reject sensor events that omit `orgId`, us
 the wrong tenant id, or send an unmanaged user identity. A new user beyond
 `REDACTWALL_SEAT_LIMIT` is blocked and recorded as `SEAT_LIMIT_BLOCKED` without
 storing the prompt body.
+
+On each managed Chrome or Edge test device, open the extension popup and grant
+the exact remote HTTPS control-plane origin. This runtime permission must come
+from a user gesture; until it is granted, control-plane requests fail closed and
+install health reports `server_host_permission=false`.
 
 ## 5. Validate
 

@@ -57,6 +57,14 @@ product.
 }
 ```
 
+`customerId` is mandatory, uses the same bounded tenant-slug format as
+`REDACTWALL_TENANT_ID`, and makes the signed file deployment-specific.
+Customer-silo deployments compare it with `REDACTWALL_TENANT_ID`; licensed
+standalone deployments set `REDACTWALL_LICENSE_CUSTOMER_ID`. If both settings
+exist they must match. Missing or mismatched customer binding is rejected both
+when a license is installed and whenever the file is loaded at boot or during
+the daily refresh.
+
 - Generated with `node:crypto` Ed25519 keys; the private signing key lives
   offline with the vendor, never in the repo.
 - Installed by pasting into the admin console (Configuration tab) or dropping

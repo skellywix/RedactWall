@@ -11,6 +11,11 @@ const { spawnSync } = require('child_process');
 
 const { parseEnv, withEnvAliases } = require('../server/env');
 const preflight = require('../server/preflight');
+const {
+  assertPrivatePath,
+  publishFileDurably,
+  securePrivatePath,
+} = require('../server/private-path');
 
 const ROOT = path.resolve(__dirname, '..');
 const DEFAULT_ENV_PATH = path.join(ROOT, '.env');
@@ -24,6 +29,7 @@ const ENV_ORDER = [
   'REDACTWALL_DB_PATH',
   'REDACTWALL_SAAS_MODE',
   'REDACTWALL_TENANT_ID',
+  'REDACTWALL_LICENSE_CUSTOMER_ID',
   'REDACTWALL_SEAT_LIMIT',
   'REDACTWALL_REQUIRE_TENANT_CONTEXT',
   'REDACTWALL_REQUIRE_USER_IDENTITY',
@@ -83,6 +89,7 @@ function buildEnv(opts = {}) {
     REDACTWALL_DB_PATH: nativeDataPath(),
     REDACTWALL_SAAS_MODE: 'false',
     REDACTWALL_TENANT_ID: '',
+    REDACTWALL_LICENSE_CUSTOMER_ID: String(opts.customerId || '').trim().toLowerCase(),
     REDACTWALL_SEAT_LIMIT: '',
     REDACTWALL_REQUIRE_TENANT_CONTEXT: 'false',
     REDACTWALL_REQUIRE_USER_IDENTITY: 'false',
@@ -121,7 +128,7 @@ function placeholderValue(key, value) {
   if (key === 'REDACTWALL_SECRET' || key === 'REDACTWALL_DATA_KEY') return !v;
   if (key === 'REDACTWALL_DB_PATH') return !v;
   if (key === 'REDACTWALL_SEAT_LIMIT') return false;
-  if (key === 'REDACTWALL_TENANT_ID') return false;
+  if (key === 'REDACTWALL_TENANT_ID' || key === 'REDACTWALL_LICENSE_CUSTOMER_ID') return false;
   return false;
 }
 
@@ -162,6 +169,8 @@ function renderEnv(values, opts = {}) {
   ['PORT', 'NODE_ENV', 'HTTPS', 'COOKIE_SECURE', 'REDACTWALL_DB_PATH'].forEach(add);
   lines.push('', '# SaaS/customer tenancy. Enable these for a paid customer stack.');
   ['REDACTWALL_SAAS_MODE', 'REDACTWALL_TENANT_ID', 'REDACTWALL_SEAT_LIMIT', 'REDACTWALL_REQUIRE_TENANT_CONTEXT', 'REDACTWALL_REQUIRE_USER_IDENTITY'].forEach(add);
+  lines.push('', '# Stable customer slug for licensed standalone deployments.');
+  ['REDACTWALL_LICENSE_CUSTOMER_ID'].forEach(add);
   lines.push('', '# Security Admin console');
   ['ADMIN_USER', 'ADMIN_PASSWORD', 'ADMIN_TOTP_SECRET'].forEach(add);
   lines.push('', '# Stable secrets. Keep these values across restarts.');
@@ -194,6 +203,7 @@ function statusFromEnv(env) {
     secretSource: resolved.REDACTWALL_SECRET ? 'env' : 'generated',
     dataCryptoEnabled: !!(resolved.REDACTWALL_DATA_KEY || resolved.REDACTWALL_SECRET),
     cookieSecure: preflight.bool(resolved.COOKIE_SECURE || resolved.HTTPS),
+    requireLicenseBinding: true,
   });
 }
 
@@ -213,6 +223,10 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (arg === '--with-browser') opts.withBrowser = true;
     else if (arg === '--force') opts.force = true;
     else if (arg === '--check') opts.check = true;
+    else if (arg === '--customer-id') {
+      opts.customerId = String(argv[++i] || '').trim();
+      if (!opts.customerId) throw new Error('--customer-id requires a customer slug');
+    }
     else if (arg === '--env') opts.envPath = path.resolve(argv[++i] || DEFAULT_ENV_PATH);
     else if (arg === '--help' || arg === '-h') opts.help = true;
     else throw new Error(`Unknown option: ${arg}`);
@@ -285,9 +299,44 @@ function printHelp(io = console) {
     '  --skip-install     Write/check config without running npm ci',
     '  --with-browser     Also install Chromium for Playwright E2E tests',
     '  --force            Replace existing generated/default .env values',
+    '  --customer-id <id> Stable licensed-customer slug for a standalone deployment',
     '  --check            Check current config and exit without writing',
     '  --env <path>       Use a non-default env file path',
   ].join('\n'));
+}
+
+function writeEnvAtomic(filePath, body, deps = {}) {
+  const fsImpl = deps.fs || fs;
+  const dir = path.dirname(filePath);
+  const nonce = `${process.pid}.${crypto.randomBytes(8).toString('hex')}`;
+  const tempPath = path.join(dir, `.${path.basename(filePath)}.${nonce}.tmp`);
+  let fd;
+  fsImpl.mkdirSync(dir, { recursive: true });
+  try {
+    fd = fsImpl.openSync(tempPath, 'wx', 0o600);
+    securePrivatePath(tempPath, {
+      fs: fsImpl,
+      directory: false,
+      fresh: true,
+      label: 'setup environment staging file',
+      ownerLabel: 'setup environment staging file',
+    });
+    fsImpl.writeFileSync(fd, body, { encoding: 'utf8' });
+    fsImpl.fsyncSync(fd);
+    fsImpl.closeSync(fd);
+    fd = undefined;
+    publishFileDurably(tempPath, filePath, { fs: fsImpl });
+    assertPrivatePath(filePath, {
+      fs: fsImpl,
+      directory: false,
+      label: 'setup environment file',
+      ownerLabel: 'setup environment file',
+    });
+  } catch (error) {
+    if (fd !== undefined) try { fsImpl.closeSync(fd); } catch {}
+    try { fsImpl.unlinkSync(tempPath); } catch {}
+    throw error;
+  }
 }
 
 function main(argv = process.argv.slice(2), deps = {}) {
@@ -301,8 +350,7 @@ function main(argv = process.argv.slice(2), deps = {}) {
   const merge = deps.mergeEnv || mergeEnv;
   const render = deps.renderEnv || renderEnv;
   const statusForEnv = deps.statusFromEnv || statusFromEnv;
-  const mkdir = deps.mkdirSync || fs.mkdirSync;
-  const writeFile = deps.writeFileSync || fs.writeFileSync;
+  const writeEnvFile = deps.writeEnvFile || writeEnvAtomic;
   const env = deps.env || process.env;
   const opts = parseArgs(argv);
   if (opts.help) {
@@ -321,8 +369,7 @@ function main(argv = process.argv.slice(2), deps = {}) {
 
   const generated = build(opts);
   const merged = merge(readEnv(opts.envPath), generated, opts);
-  mkdir(path.dirname(opts.envPath), { recursive: true });
-  writeFile(opts.envPath, render(merged, opts), { mode: 0o600 });
+  writeEnvFile(opts.envPath, render(merged, opts));
 
   const audit = initRuntime(opts.envPath);
   const status = statusForEnv({ ...merged, ...env });
@@ -355,4 +402,5 @@ module.exports = {
   renderEnv,
   run,
   statusFromEnv,
+  writeEnvAtomic,
 };

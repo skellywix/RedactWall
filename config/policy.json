@@ -94,8 +94,6 @@
       "package-lock.json"
     ],
     "ignoreExtensions": [
-      ".tmp",
-      ".log",
       ".lock"
     ],
     "maxFileBytes": 6606029

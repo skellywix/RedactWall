@@ -165,8 +165,9 @@ What RedactWall defends against, and where the honest limits are.
   the default for pilots and demos.
 - **Docker / Compose**: containerized control plane (`Dockerfile`,
   `docker-compose.yml`).
-- **HA gateway**: `docker-compose.gateway-ha.yml` runs multiple gateway
-  instances with a shared rate limiter in front of one control plane.
+- **Single-host redundant gateway**: `docker-compose.gateway-ha.yml` runs two
+  gateway processes with one local SQLite limiter file. The Docker host,
+  balancer, and named volume remain a single failure domain.
 - **Customer-silo AWS**: per-customer isolated deployment described in
   `docs/deployment/AWS_SAAS_DEPLOYMENT.md`; no shared multi-tenant data plane.
 

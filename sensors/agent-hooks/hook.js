@@ -8,34 +8,29 @@ require('../../server/env').loadEnv();
  * the shared detection engine and applies org policy — blocking secrets, PII,
  * and prompt-injection before they reach the model or the shell. Nothing is
  * sent anywhere to decide; the control plane only receives a label-only,
- * post-decision telemetry record (best effort). Fails OPEN on any internal
- * error so it never breaks the agent; exits 2 only to deliberately block.
+ * post-decision telemetry record (best effort). Every supported hook event
+ * fails closed until a pinned, signed policy is available.
  *
  *   echo '<claude-code-event-json>' | node sensors/agent-hooks/hook.js
  *
  * Install into ~/.claude/settings.json with scripts/install-agent-hooks.js.
  */
-const fs = require('fs');
 const os = require('os');
-const path = require('path');
 const D = require('../../detection-engine/detect');
 const guard = require('../mcp-guard/guard');
 const { decide } = require('../shared/decision');
 const VERSION = require('../../package.json').version;
 
 const MAX_CHARS = 200000;
-const POLICY_REFRESH_MS = 15 * 60 * 1000;
-const CACHE_DIR = path.join(os.homedir(), '.redactwall');
-const CACHE_FILE = path.join(CACHE_DIR, 'agent-hooks-policy.json');
 
-// Conservative built-in policy when no cache and the control plane is
-// unreachable — mirrors sensors/browser-extension/background.js DEFAULTS so a
-// fresh install still hard-blocks the obvious secrets/PII.
+// Conservative policy template used by installers/tests. Runtime enforcement
+// never treats this unsigned object as organization authority.
 const DEFAULT_POLICY = {
   enforcementMode: 'block', blockMinSeverity: 2, blockRiskScore: 25,
-  alwaysBlock: ['US_SSN', 'CREDIT_CARD', 'BANK_ACCOUNT', 'ROUTING_NUMBER', 'US_ITIN', 'US_NPI',
-    'MEMBER_ID', 'LOAN_NUMBER', 'MEDICAL_RECORD_NUMBER', 'HEALTH_INSURANCE_ID',
-    'SECRET_KEY', 'PRIVATE_KEY', 'CANARY_TOKEN'],
+  alwaysBlock: ['US_SSN', 'CREDIT_CARD', 'BANK_ACCOUNT', 'ROUTING_NUMBER', 'IBAN', 'US_PASSPORT',
+    'US_ITIN', 'US_NPI', 'MEMBER_ID', 'LOAN_NUMBER', 'MEDICAL_RECORD_NUMBER', 'HEALTH_INSURANCE_ID',
+    'UK_NINO', 'UK_NHS_NUMBER', 'CANADA_SIN', 'AUSTRALIA_TFN', 'INDIA_AADHAAR',
+    'SECRET_KEY', 'PRIVATE_KEY', 'CANARY_TOKEN', 'EXACT_MATCH'],
   ignore: [], disabledDetectors: [], customDetectors: [],
   mcpAllowedTools: [], mcpBlockedTools: [], mcpApprovalRequiredTools: [],
 };
@@ -60,30 +55,15 @@ async function readStdin(stream = process.stdin) {
   return data;
 }
 
-// ---- policy: cached to disk, refreshed lazily; enforcement is fully local ----
-function readCachedPolicy(now = Date.now(), deps = {}) {
-  const read = deps.readFile || ((p) => fs.readFileSync(p, 'utf8'));
-  try {
-    const cached = JSON.parse(read(deps.cacheFile || CACHE_FILE));
-    return { policy: cached.policy, fresh: now - (cached.fetchedAt || 0) < POLICY_REFRESH_MS };
-  } catch (_) { return { policy: null, fresh: false }; }
-}
-
-function writeCachedPolicy(policy, now = Date.now(), deps = {}) {
-  const write = deps.writeFile || ((p, d) => {
-    fs.mkdirSync(path.dirname(p), { recursive: true });
-    fs.writeFileSync(p, d, { mode: 0o600 });
-  });
-  try { write(deps.cacheFile || CACHE_FILE, JSON.stringify({ policy, fetchedAt: now })); } catch (_) { /* best effort */ }
-}
-
 async function loadPolicy(opts = {}, deps = {}) {
-  const now = deps.now || Date.now();
-  const cached = readCachedPolicy(now, deps);
-  if (cached.policy && cached.fresh) return cached.policy;
-  const fetched = await guard.fetchPolicy({ ...opts, silent: true }).catch(() => null);
-  if (fetched) { writeCachedPolicy(fetched, now, deps); return fetched; }
-  return cached.policy || DEFAULT_POLICY;
+  if (Object.prototype.hasOwnProperty.call(deps, 'trustedPolicy')) return deps.trustedPolicy;
+  return guard.fetchPolicy({
+    ...opts,
+    silent: true,
+    sensorId: 'agent-hooks',
+    ...(deps.cacheFile ? { policyCachePath: deps.cacheFile } : {}),
+    ...(deps.policyPublicKey ? { policyPublicKey: deps.policyPublicKey } : {}),
+  }).catch(() => null);
 }
 
 // ---- event dispatch --------------------------------------------------------
@@ -146,15 +126,21 @@ function emitDecision(kind, action, reason, io) {
 // ---- telemetry (best effort, label-only, after the decision) ---------------
 function buildRecord(kind, extracted, analysis, action, opts) {
   const outcome = action === 'block' || action === 'redact' ? 'action_blocked' : 'paste_flagged';
-  return {
+  const base = {
     prompt: `[agent ${extracted.channel.replace('agent_', '')} ${outcome === 'action_blocked' ? 'blocked' : 'flagged'} locally] `
-      + [...new Set((analysis.findings || []).map((f) => f.type).concat((analysis.categories || []).map((c) => c.category)))].join(', '),
+      + (analysis.opaqueEncoded === true ? 'OPAQUE_ENCODED_CONTENT'
+        : [...new Set((analysis.findings || []).map((f) => f.type).concat((analysis.categories || []).map((c) => c.category)))].join(', ')),
     user: opts.user || process.env.REDACTWALL_AGENT_USER || process.env.PROMPTWALL_AGENT_USER || os.userInfo().username,
     destination: extracted.tool ? `claude-code:${extracted.tool}` : 'claude-code',
     source: 'agent_hooks',
     channel: extracted.channel,
     sensor: { name: 'agent_hooks', version: VERSION, platform: 'node' },
     clientOutcome: outcome,
+    note: 'agent hook enforced locally before model/tool execution',
+  };
+  if (analysis.opaqueEncoded === true) return base;
+  return {
+    ...base,
     clientPreRedacted: true,
     clientFindings: guard.publicFindings(analysis),
     clientCategories: guard.publicCategories(analysis),
@@ -162,7 +148,6 @@ function buildRecord(kind, extracted, analysis, action, opts) {
     clientRiskScore: analysis.riskScore || 0,
     clientMaxSeverity: analysis.maxSeverity || 0,
     clientMaxSeverityLabel: analysis.maxSeverityLabel || 'none',
-    note: 'agent hook enforced locally before model/tool execution',
   };
 }
 
@@ -171,7 +156,13 @@ async function run(event, opts = {}, deps = {}) {
   const extracted = extractEvent(event);
   if (!extracted) return { code: 0, action: 'allow' };
 
-  const policy = await loadPolicy(opts, deps);
+  const trustedPolicy = await loadPolicy(opts, deps);
+  if (!trustedPolicy) {
+    const reason = 'RedactWall blocked: no trusted signed policy is available';
+    const code = emitDecision(event.hook_event_name, 'block', reason, io);
+    return { code, action: 'block', reason };
+  }
+  const policy = trustedPolicy;
 
   // MCP tool-call policy (reuse the guard's wildcard matcher — do not reimplement).
   if (extracted.tool) {
@@ -185,10 +176,15 @@ async function run(event, opts = {}, deps = {}) {
     }
   }
 
-  const text = String(extracted.text || '').slice(0, MAX_CHARS);
-  const analysis = D.analyze(text, {
-    ignore: policy.ignore, disabledDetectors: policy.disabledDetectors, customDetectors: policy.customDetectors,
-  });
+  const text = String(extracted.text || '');
+  if (text.length > MAX_CHARS) {
+    const analysis = { findings: [], categories: [], entityCounts: {}, riskScore: 0, maxSeverity: 0, maxSeverityLabel: 'none' };
+    const reason = `RedactWall blocked: input exceeds the ${MAX_CHARS}-character local scan limit`;
+    const code = emitDecision(event.hook_event_name, 'block', reason, io);
+    await report(buildRecord(event.hook_event_name, extracted, analysis, 'block', opts), opts, deps);
+    return { code, action: 'block', reason };
+  }
+  const analysis = D.analyze(text, guard.detectionOptions(policy));
   const { action } = decide(analysis, policy);
   if (action === 'allow') return { code: 0, action };
 
@@ -223,12 +219,17 @@ async function main(argv = process.argv.slice(2), deps = {}) {
   try {
     const raw = deps.stdin !== undefined ? deps.stdin : await readStdin(deps.stdinStream);
     let event;
-    try { event = JSON.parse(raw); } catch (_) { return exit(0); } // malformed → fail open
+    try {
+      event = JSON.parse(raw);
+    } catch (_) {
+      io.err('RedactWall blocked: malformed hook input');
+      return exit(2);
+    }
     const result = await run(event, opts, { ...deps, io });
     return exit(result.code);
   } catch (_) {
-    // Never break the agent on an internal error.
-    return exit(0);
+    io.err('RedactWall blocked: hook inspection failed');
+    return exit(2);
   }
 }
 

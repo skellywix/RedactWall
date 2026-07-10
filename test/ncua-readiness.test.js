@@ -20,7 +20,7 @@ function baseInput(overrides = {}) {
     auditIntegrity: { ok: true, count: 12 },
     coverage: { totals: { requiredSensors: 2, activeRequiredSensors: 2 } },
     policyExceptionReview: { total: 2, active: 1, expiringSoon: 1, reviewDue: 0, expired: 1, disabled: 0, reviewWindowDays: 14 },
-    edm: { enabled: true, fingerprints: 120, minLength: 6, severity: 4 },
+    edm: { enabled: true, fingerprints: 120, minLength: 20, severity: 4 },
     catalog: [
       { sanctionedStatus: 'sanctioned', eventCount: 40 },
       { sanctionedStatus: 'unsanctioned', eventCount: 7 },
@@ -75,13 +75,13 @@ test('ncua readiness reports blocked when the audit chain fails verification', (
   assert.strictEqual(report.panels.audit.verified, false);
 });
 
-test('ncua readiness surfaces EDM setup state when unconfigured', () => {
+test('ncua readiness treats optional high-entropy EDM separately from member hard-stop coverage', () => {
   const report = ncuaReadiness.summarize(baseInput({ edm: { enabled: false, fingerprints: 0 } }));
 
   assert.deepStrictEqual(report.panels.edm, { configured: false, enabled: false, active: false, fingerprints: 0, minLength: 0, severity: 0 });
   const control = report.controls.find((c) => c.id === 'member_information_safeguards');
-  assert.strictEqual(control.state, 'attention');
-  assert.match(control.summary, /EDM fingerprints are not configured/);
+  assert.strictEqual(control.state, 'covered');
+  assert.match(control.summary, /identifier hard stops are enforced/);
 });
 
 test('a loaded-but-disabled EDM watchlist is never reported active', () => {
@@ -90,7 +90,7 @@ test('a loaded-but-disabled EDM watchlist is never reported active', () => {
   assert.strictEqual(report.panels.edm.configured, true);
   assert.strictEqual(report.panels.edm.active, false);
   const control = report.controls.find((c) => c.id === 'member_information_safeguards');
-  assert.strictEqual(control.state, 'attention');
+  assert.strictEqual(control.state, 'covered');
 });
 
 test('ncua readiness drops decoy free text and secrets at the input boundary', () => {

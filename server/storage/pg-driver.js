@@ -9,6 +9,7 @@
  */
 const path = require('path');
 const { Worker, MessageChannel, receiveMessageOnPort } = require('worker_threads');
+const { parsePostgresConnectionUrl, withoutPostgresConnectionEnv } = require('../postgres-url');
 
 const DEFAULT_STATEMENT_TIMEOUT_MS = 25000;
 const BRIDGE_GRACE_MS = 5000;
@@ -45,6 +46,8 @@ const CAMEL_IDENTIFIERS = [
   'canonicalHost', 'firstSeen', 'lastSeen', 'userName', 'displayName',
   'revokedAt', 'usedAt', 'codeIndex', 'prevHash', 'orgId', 'user',
   'reviewStatus', 'nextReviewAt', 'detectedAt', 'deadlineAt', 'reportedAt',
+  'tokenHash', 'expiresAt', 'acceptedAt', 'userKey', 'requestedSeats',
+  'contactEmail', 'keyHash', 'auditId', 'replaySnapshot', 'ingestIdentityHash',
 ];
 const CAMEL_RE = new RegExp(`(?<!["@])\\b(${CAMEL_IDENTIFIERS.join('|')})\\b`, 'g');
 
@@ -124,6 +127,10 @@ function hash32(str) {
 }
 
 function createPgDriver(connectionString) {
+  // Reject ambiguous URL semantics before a worker, socket, or migration can
+  // start. The worker receives no inherited PG* authority that could override
+  // fields omitted from the validated URL.
+  parsePostgresConnectionUrl(connectionString);
   const config = resolveBridgeConfig(process.env);
   const shared = new SharedArrayBuffer(4);
   const flag = new Int32Array(shared);
@@ -131,6 +138,7 @@ function createPgDriver(connectionString) {
   const worker = new Worker(path.join(__dirname, 'pg-worker.js'), {
     workerData: { shared, port: port2, connectionString, ...config },
     transferList: [port2],
+    env: withoutPostgresConnectionEnv(process.env),
   });
   worker.unref();
   // A worker that dies (e.g. a require failure) can never signal the flag;

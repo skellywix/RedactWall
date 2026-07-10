@@ -5,6 +5,7 @@
  * values, because those values may be prompts, files, passwords, or notes.
  */
 const fs = require('fs');
+const net = require('net');
 const { z } = require('zod');
 const detector = require('./detector');
 const customDetectors = require('./custom-detectors');
@@ -23,13 +24,18 @@ const LIMITS = {
   detectorFeedbackReasonChars: 240,
   updateCommandChars: 256,
   discoverySightings: 100,
+  adminReasonChars: 240,
+  adminDisplayNameChars: 256,
+  adminNoteChars: 1000,
 };
 
 const DETECTOR_ID = /^[A-Z0-9_]+$/;
 const HOST_OR_LABEL = /^[A-Za-z0-9.*:_/-]+$/;
 const DESKTOP_DESTINATION_LABEL = /^[A-Za-z0-9 .:_/-]+$/;
+const SENSOR_USER_LABEL = /^[A-Za-z0-9][A-Za-z0-9._@+\\:-]{0,511}$/;
 const SENSOR_ID = /^[a-z][a-z0-9_:-]{0,79}$/;
 const SENSOR_VERSION = /^[A-Za-z0-9._+:-]+$/;
+const TENANT_CONTEXT_ID = /^[a-z0-9][a-z0-9_-]{1,62}$/;
 const ROUTING_RULE_ID = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const ROUTING_GROUP = /^[a-z][a-z0-9_-]{0,63}$/;
 const ROUTING_ROLE = /^(security_admin|approver)$/;
@@ -41,6 +47,11 @@ const SAFE_OPERATOR_COMMAND = /^[A-Za-z0-9 ._:/\\@+=,-]+$/;
 const POSTURE_ACTION_ID = /^[A-Za-z0-9._:@/-]+$/;
 const DISCOVERY_DESTINATION_LABEL = /^[A-Za-z0-9.*:-]+$/;
 const SENSITIVE_ROUTING_CODE = /(?:\d{3}[-_:.]?\d{2}[-_:.]?\d{4}|\d{12,19})/;
+// Local and SCIM directory ids are generated as a fixed prefix plus 128 bits
+// of hexadecimal entropy. Treat that exact shape as an opaque identifier: a
+// random id may legitimately contain nine adjacent digits, but arbitrary text
+// must still pass the sensitive-number guard below.
+const OPAQUE_SEAT_USER_KEY = /^(?:local:au|scim:su)_[0-9a-f]{16}$/i;
 // Memoized: a single /api/v1/gate request validates up to ~500 detector ids
 // (clientFindings + clientCategories + clientEntityCounts keys), and Zod runs
 // this refine once per value. Rebuilding the id set — which reads and parses the
@@ -82,12 +93,81 @@ function stringDefault(defaultValue, max = LIMITS.metadataChars) {
   );
 }
 
+const PERMITTED_SENSOR_METADATA_FINDINGS = new Set(['EMAIL_ADDRESS', 'IP_ADDRESS', 'IPV6_ADDRESS']);
+
+function sensorMetadataCandidates(text) {
+  const candidates = [text];
+  const seen = new Set(candidates);
+  for (let i = 0; i < text.length && candidates.length < 24; i += 1) {
+    if (!/[ ._:/\\+@-]/.test(text[i])) continue;
+    const suffix = text.slice(i + 1);
+    if (suffix.length < 4 || seen.has(suffix)) continue;
+    seen.add(suffix);
+    candidates.push(suffix);
+  }
+  return candidates;
+}
+
+function excludesRegulatedMetadata(value) {
+  try {
+    const text = String(value || '');
+    if (SENSITIVE_ROUTING_CODE.test(text)) return false;
+    return !sensorMetadataCandidates(text).some((candidate) => detector.analyze(candidate).findings
+      .some((finding) => !PERMITTED_SENSOR_METADATA_FINDINGS.has(finding.type)));
+  } catch {
+    return false;
+  }
+}
+
+function sensorContextString(defaultValue, pattern, max = LIMITS.metadataChars) {
+  return z.preprocess(
+    (value) => (value == null ? undefined : value),
+    z.string()
+      .min(1)
+      .max(max)
+      .regex(pattern)
+      .refine(excludesRegulatedMetadata, { message: 'regulated identifier not allowed' })
+      .default(defaultValue),
+  );
+}
+
+function optionalSensorContextString(pattern, max = 80) {
+  return z.preprocess(
+    (value) => (value == null || value === '' ? undefined : value),
+    z.string()
+      .min(1)
+      .max(max)
+      .regex(pattern)
+      .refine(excludesRegulatedMetadata, { message: 'regulated identifier not allowed' })
+      .optional(),
+  );
+}
+
 function nullableString(max = LIMITS.metadataChars) {
   return z.preprocess(
     (value) => (value === undefined ? null : value),
     z.string().max(max).nullable(),
   );
 }
+
+const orgIdSchema = z.preprocess(
+  (value) => (value == null || value === '' ? null : value),
+  z.string()
+    .min(2)
+    .max(63)
+    .regex(TENANT_CONTEXT_ID)
+    .refine(excludesRegulatedMetadata, { message: 'regulated identifier not allowed' })
+    .nullable(),
+);
+
+const sourceIpSchema = z.preprocess(
+  (value) => (value == null || value === '' ? null : value),
+  z.string()
+    .max(45)
+    .refine((value) => net.isIP(value) !== 0, { message: 'invalid IP address' })
+    .refine(excludesRegulatedMetadata, { message: 'regulated identifier not allowed' })
+    .nullable(),
+);
 
 const detectorIdSchema = z.string().max(80).regex(DETECTOR_ID).refine((id) => knownDetectorIds().has(id), {
   message: 'unknown detector',
@@ -116,18 +196,69 @@ const entityCountsSchema = z.record(
 );
 
 const sensorMetadataSchema = z.object({
-  name: optionalString(80),
-  version: optionalString(80),
-  packageVersion: optionalString(80),
-  platform: optionalString(80),
+  name: optionalSensorContextString(SENSOR_ID),
+  version: optionalSensorContextString(SENSOR_VERSION),
+  packageVersion: optionalSensorContextString(SENSOR_VERSION),
+  platform: optionalSensorContextString(SENSOR_VERSION),
 }).strict();
 
 const licenseInstallSchema = z.object({
   license: z.string().min(1).max(20000),
+  reason: optionalString(LIMITS.adminReasonChars),
+}).strict();
+
+const adminRoleSchema = z.enum(['security_admin', 'operator', 'approver', 'auditor']);
+const localInvitationRoleSchema = z.enum(['operator', 'approver', 'auditor']);
+const adminEmailSchema = z.string().min(3).max(256).email();
+const adminReasonSchema = z.object({
+  reason: nonBlankString(LIMITS.adminReasonChars),
+}).strict();
+
+const adminInvitationSchema = z.object({
+  userName: adminEmailSchema,
+  displayName: optionalString(LIMITS.adminDisplayNameChars),
+  role: localInvitationRoleSchema,
+  expiresInDays: z.number().int().min(1).max(30).default(7),
+  reason: nonBlankString(LIMITS.adminReasonChars),
+}).strict();
+
+const adminUserPatchSchema = z.object({
+  displayName: optionalString(LIMITS.adminDisplayNameChars),
+  role: adminRoleSchema.optional(),
+  active: z.boolean().optional(),
+  reason: nonBlankString(LIMITS.adminReasonChars),
+}).strict().refine((body) => (
+  body.displayName !== undefined || body.role !== undefined || body.active !== undefined
+), {
+  message: 'at least one user field required',
+  path: ['reason'],
+});
+
+const adminInvitationAcceptSchema = z.object({
+  token: nonBlankString(512),
+  password: z.string().min(12).max(512),
+  displayName: optionalString(LIMITS.adminDisplayNameChars),
+}).strict();
+
+const adminSeatAssignmentSchema = z.object({
+  userKey: z.string().min(1).max(320).refine(safeSeatUserKey, { message: 'sensitive identifier not allowed' }),
+  reason: nonBlankString(LIMITS.adminReasonChars),
+}).strict();
+
+const licenseRenewalRequestSchema = z.object({
+  requestedSeats: z.number().int().min(1).max(100000).optional(),
+  contactName: optionalString(160),
+  contactEmail: z.preprocess(
+    (value) => (value == null || value === '' ? undefined : value),
+    z.string().max(256).email().optional(),
+  ),
+  note: optionalString(LIMITS.adminNoteChars),
 }).strict();
 
 const heartbeatCheckSchema = z.object({
-  id: z.string().min(1).max(80).regex(SENSOR_ID),
+  id: z.string().min(1).max(80).regex(SENSOR_ID).refine(excludesRegulatedMetadata, {
+    message: 'sensitive identifier not allowed',
+  }),
   ok: z.boolean(),
   detail: optionalString(160),
 }).strict();
@@ -154,14 +285,39 @@ const clientOutcomeSchema = z.enum([
 ]).nullable().optional();
 
 const commonSensorContext = {
-  user: stringDefault('unknown'),
-  destination: stringDefault('unknown'),
-  sourceIp: nullableString(),
-  source: stringDefault('api'),
-  channel: stringDefault('submit'),
-  orgId: nullableString(),
+  user: sensorContextString('unknown', SENSOR_USER_LABEL),
+  destination: sensorContextString('unknown', DESKTOP_DESTINATION_LABEL),
+  sourceIp: sourceIpSchema,
+  source: sensorContextString('api', SENSOR_ID, 80),
+  channel: sensorContextString('submit', SENSOR_ID, 80),
+  orgId: orgIdSchema,
   sensor: sensorMetadataSchema.optional(),
 };
+
+function requireBusinessReason(body, ctx) {
+  if (body.clientOutcome !== 'justified' && body.outcome !== 'justified') return;
+  if (String(body.note || '').trim().length >= 4) return;
+  ctx.addIssue({ code: 'custom', path: ['note'], message: 'business reason must be at least 4 characters' });
+}
+
+const nativeHandoffIdempotencySchema = z.object({
+  scope: z.literal('native_handoff_v1'),
+  key: z.string().regex(/^[0-9a-f]{64}$/),
+}).strict();
+
+function validateGateContext(body, ctx) {
+  requireBusinessReason(body, ctx);
+  if (!body.idempotency) return;
+  if (body.source !== 'endpoint_agent') {
+    ctx.addIssue({ code: 'custom', path: ['idempotency'], message: 'native handoff source required' });
+  }
+  if (body.channel !== 'file_upload') {
+    ctx.addIssue({ code: 'custom', path: ['idempotency'], message: 'native handoff channel required' });
+  }
+  if (!body.sensor || body.sensor.name !== 'endpoint_agent') {
+    ctx.addIssue({ code: 'custom', path: ['idempotency'], message: 'native handoff sensor required' });
+  }
+}
 
 const gateSchema = z.object({
   prompt: nonBlankString(LIMITS.promptChars),
@@ -178,6 +334,9 @@ const gateSchema = z.object({
   clientMaxSeverity: severitySchema.optional(),
   clientMaxSeverityLabel: z.enum(['none', 'low', 'medium', 'high', 'critical']).optional(),
   clientPreRedacted: z.boolean().optional(),
+  // Opaque HMAC derived locally from the complete signature-validated native
+  // event. It contains no event id, nonce, path, user, or prompt content.
+  idempotency: nativeHandoffIdempotencySchema.optional(),
   // Personal-vs-corporate account signal (ROADMAP N4). ENUM ONLY — the strict
   // schema makes it structurally impossible to send a raw account email to the
   // control plane; the sensor classifies locally and reports the result.
@@ -188,7 +347,15 @@ const gateSchema = z.object({
   // Sanitized origin-app id for data-lineage (e.g. clipboard copied from a
   // core-banking client). Process-name id only — never a title/path/content.
   originApp: z.string().regex(/^[a-z][a-z0-9_]{0,39}$/).optional(),
-}).strict();
+}).strict().superRefine(validateGateContext);
+
+const resolveJustificationSchema = z.object({
+  outcome: z.enum(['justified', 'blocked_by_user']),
+  note: z.preprocess(
+    (value) => (value == null ? '' : value),
+    z.string().max(LIMITS.noteChars).default(''),
+  ),
+}).strict().superRefine(requireBusinessReason);
 
 const rehydrateSchema = z.object({
   id: nonBlankString(LIMITS.idChars),
@@ -208,28 +375,28 @@ const scanFileSchema = z.object({
   contentBase64: z.string().min(1).max(LIMITS.base64Chars).refine(isBase64, {
     message: 'invalid base64',
   }),
-  user: stringDefault('unknown'),
-  destination: stringDefault('unknown'),
-  source: stringDefault('api'),
-  channel: stringDefault('file_upload'),
-  orgId: nullableString(),
+  user: sensorContextString('unknown', SENSOR_USER_LABEL),
+  destination: sensorContextString('unknown', DESKTOP_DESTINATION_LABEL),
+  source: sensorContextString('api', SENSOR_ID, 80),
+  channel: sensorContextString('file_upload', SENSOR_ID, 80),
+  orgId: orgIdSchema,
   sensor: sensorMetadataSchema.optional(),
 }).strict();
 
 const scanResponseSchema = z.object({
   text: nonBlankString(LIMITS.responseChars),
-  user: stringDefault('unknown'),
-  destination: stringDefault('unknown'),
-  source: stringDefault('api'),
-  orgId: nullableString(),
+  user: sensorContextString('unknown', SENSOR_USER_LABEL),
+  destination: sensorContextString('unknown', DESKTOP_DESTINATION_LABEL),
+  source: sensorContextString('api', SENSOR_ID, 80),
+  orgId: orgIdSchema,
   sensor: sensorMetadataSchema.optional(),
 }).strict();
 
 const heartbeatSchema = z.object({
-  user: stringDefault('unknown'),
-  destination: stringDefault('sensor-health'),
-  source: stringDefault('api'),
-  orgId: nullableString(),
+  user: sensorContextString('unknown', SENSOR_USER_LABEL),
+  destination: sensorContextString('sensor-health', DESKTOP_DESTINATION_LABEL),
+  source: sensorContextString('api', SENSOR_ID, 80),
+  orgId: orgIdSchema,
   sensor: sensorMetadataSchema.optional(),
   // Raised 40 -> 80: installs already emit ~25-32 checks, and the endpoint MCP
   // inventory adds an mcp_inventory summary plus up to 12 per-server checks.
@@ -407,6 +574,11 @@ function safeOperatorText(value) {
   return !/[\u0000-\u001F]/.test(text) && !SENSITIVE_ROUTING_CODE.test(text);
 }
 
+function safeSeatUserKey(value) {
+  const text = String(value || '');
+  return OPAQUE_SEAT_USER_KEY.test(text) || safeOperatorText(text);
+}
+
 // Scrub a free-text note before it is persisted into the tamper-evident audit
 // chain or a decisionNote. Sensor/client-supplied notes are only length-bounded
 // by the schema, so a routing-code-shaped identifier (SSN/account/card) or a
@@ -519,7 +691,7 @@ const discoveryDestinationSchema = z.string().min(1).max(253).regex(DISCOVERY_DE
 const aiDiscoverySightingSchema = z.object({
   destination: discoveryDestinationSchema,
   user: optionalSafePolicyText(),
-  orgId: optionalSafePolicyText(),
+  orgId: orgIdSchema.optional(),
   events: z.preprocess(
     (value) => (value == null || value === '' ? 1 : Number(value)),
     z.number().int().min(1).max(100000).default(1),
@@ -536,10 +708,7 @@ const aiDiscoverySchema = z.object({
     sensorIdSchema,
   ),
   user: safePolicyTextDefault('discovery-import'),
-  orgId: z.preprocess(
-    (value) => (value == null || value === '' ? null : value),
-    safePolicyMatchTextSchema.nullable().default(null),
-  ),
+  orgId: orgIdSchema,
   vendor: z.preprocess(
     (value) => (value == null || value === '' ? '' : value),
     z.string().max(80).refine((value) => value === '' || POLICY_MATCH_TEXT.test(value), {
@@ -748,7 +917,14 @@ module.exports = {
   sanitizeStoredNote,
   sanitizeClientMask,
   gateSchema,
+  resolveJustificationSchema,
   licenseInstallSchema,
+  adminInvitationSchema,
+  adminUserPatchSchema,
+  adminReasonSchema,
+  adminInvitationAcceptSchema,
+  adminSeatAssignmentSchema,
+  licenseRenewalRequestSchema,
   rehydrateSchema,
   scanFileSchema,
   scanResponseSchema,

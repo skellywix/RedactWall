@@ -23,6 +23,22 @@ test('a fresh bundle verifies with the published public key', () => {
   assert.ok(bundle.expiresAt > bundle.issuedAt);
 });
 
+test('published policy ordering survives Chrome-style storage normalization', () => {
+  const policy = {
+    zeta: { second: true, first: false },
+    alpha: [{ zebra: 1, aardvark: 2 }],
+    versionMap: { 10: 'ten', 2: 'two' },
+    enforcementMode: 'block',
+  };
+  const bundle = pb.buildBundle(policy);
+  const chromeStored = JSON.parse(JSON.stringify(bundle, (_key, value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, value[key]]));
+  }));
+  assert.strictEqual(JSON.stringify(bundle.policy), pb.canonicalPolicyJson(policy));
+  assert.deepStrictEqual(pb.verifyBundle(chromeStored, pb.publicKeyPem()), { ok: true });
+});
+
 test('a tampered policy fails verification (fail closed)', () => {
   const bundle = pb.buildBundle(POLICY);
   const tampered = { ...bundle, policy: { ...POLICY, alwaysBlock: [] } };

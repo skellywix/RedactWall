@@ -11,6 +11,16 @@ const { validateRuntimeFiles, packageAgentHooks } = require('../scripts/package-
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { spawnSync } = require('node:child_process');
+const AdmZip = require('adm-zip');
+const installCheck = require('../scripts/check-agent-hooks-install');
+
+function jsonResponse(status, body) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
+}
 
 test('merge is idempotent and adds both hook events', () => {
   const once = mergeHooks({});
@@ -59,8 +69,14 @@ test('package rejects an installer that writes the ingest key', () => {
   const bad = [
     { path: 'package.json', body: Buffer.from('{}') },
     { path: 'server/env.js', body: Buffer.from('') },
+    { path: 'server/file-mutation-lock.js', body: Buffer.from('') },
+    { path: 'server/private-path.js', body: Buffer.from('') },
     { path: 'detection-engine/detect.js', body: Buffer.from('') },
     { path: 'sensors/shared/decision.js', body: Buffer.from('') },
+    { path: 'sensors/shared/bounded-response.js', body: Buffer.from('') },
+    { path: 'sensors/shared/opaque-content.js', body: Buffer.from('') },
+    { path: 'sensors/shared/signed-policy.js', body: Buffer.from('') },
+    { path: 'sensors/shared/server-url.js', body: Buffer.from('') },
     { path: 'sensors/mcp-guard/guard.js', body: Buffer.from('') },
     { path: 'sensors/agent-hooks/hook.js', body: Buffer.from('hook_event_name decide(') },
     { path: 'scripts/install-agent-hooks.js', body: Buffer.from('settings.hooks["x-api-key"] = key;') },
@@ -75,8 +91,66 @@ test('package builds a prompt-free zip with a manifest', () => {
     const result = packageAgentHooks({ outDir, now: new Date('2026-07-05T00:00:00Z') });
     assert.ok(fs.existsSync(result.zipPath));
     assert.strictEqual(result.packageManifest.checks.installerNeverWritesKey, true);
+    assert.strictEqual(result.packageManifest.checks.boundedResponseReaderIncluded, true);
     assert.ok(result.packageManifest.files.some((f) => f.path === 'sensors/agent-hooks/hook.js'));
+    assert.ok(result.packageManifest.files.some((f) => f.path === 'sensors/shared/bounded-response.js'));
+    assert.ok(result.packageManifest.files.some((f) => f.path === 'sensors/shared/server-url.js'));
+    assert.ok(result.packageManifest.files.some((f) => f.path === 'server/private-path.js'));
   } finally {
     fs.rmSync(outDir, { recursive: true, force: true });
   }
+});
+
+test('packaged agent-hooks install check starts from a clean unpack', () => {
+  const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ph-agent-hooks-out-'));
+  const unpackDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ph-agent-hooks-unpack-'));
+  try {
+    const result = packageAgentHooks({ outDir, now: new Date('2026-07-05T00:00:00Z') });
+    new AdmZip(result.zipPath).extractAllTo(unpackDir, true);
+    const smoke = spawnSync(process.execPath, ['-e', "require('./scripts/check-agent-hooks-install')"], {
+      cwd: unpackDir,
+      encoding: 'utf8',
+    });
+    assert.strictEqual(smoke.status, 0, `${smoke.stdout}\n${smoke.stderr}`);
+  } finally {
+    fs.rmSync(outDir, { recursive: true, force: true });
+    fs.rmSync(unpackDir, { recursive: true, force: true });
+  }
+});
+
+test('agent-hooks heartbeat refuses remote cleartext and disables redirects', async () => {
+  const report = { checks: [{ id: 'agent_hooks_runtime', ok: true, detail: 'present' }] };
+  await assert.rejects(() => installCheck.emitHeartbeat(report, {
+    serverUrl: 'https://redactwall.example',
+    ingestKey: 'unit-ingest-key',
+    fetchImpl: 42,
+  }), /fetch is not available/);
+  let called = false;
+  await assert.rejects(() => installCheck.emitHeartbeat(report, {
+    serverUrl: 'http://redactwall.example',
+    ingestKey: 'unit-ingest-key',
+    fetchImpl: async () => { called = true; },
+  }), /must use HTTPS or loopback HTTP/);
+  assert.strictEqual(called, false);
+
+  let request;
+  await installCheck.emitHeartbeat(report, {
+    serverUrl: 'https://redactwall.example/control/',
+    ingestKey: 'unit-ingest-key',
+    fetchImpl: async (url, options) => {
+      request = { url, options };
+      return jsonResponse(200, { id: 'hb_hooks' });
+    },
+  });
+  assert.strictEqual(request.url, 'https://redactwall.example/control/api/v1/heartbeat');
+  assert.strictEqual(request.options.redirect, 'error');
+});
+
+test('agent-hooks heartbeat rejects an oversized streamed response', async () => {
+  await assert.rejects(() => installCheck.emitHeartbeat({ checks: [] }, {
+    serverUrl: 'https://redactwall.example',
+    ingestKey: 'unit-ingest-key',
+    maxResponseBytes: 8,
+    fetchImpl: async () => jsonResponse(200, { id: 'response-is-too-large' }),
+  }), /exceeds 8 byte limit/);
 });

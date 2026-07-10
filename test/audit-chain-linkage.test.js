@@ -10,6 +10,7 @@
  */
 const test = require('node:test');
 const assert = require('node:assert');
+const fs = require('node:fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
@@ -25,9 +26,9 @@ function readEntry(id) {
 // Rewrite an entry with a SELF-CONSISTENT hash (body hash matches) so only the
 // prevHash linkage is wrong — this must still fail verification.
 function rewriteEntry(id, mutate) {
-  const { hash, ...body } = readEntry(id);
+  const { hash: _hash, mac, ...body } = readEntry(id);
   mutate(body);
-  const forged = { ...body, hash: integrity.sha(integrity.canonical(body)) };
+  const forged = { ...body, hash: integrity.sha(integrity.canonical(body)), ...(mac ? { mac } : {}) };
   db._db.exec('DROP TRIGGER IF EXISTS audit_append_only_update');
   db._db.prepare('UPDATE audit SET entry = ? WHERE id = ?').run(JSON.stringify(forged), id);
   db._db.exec("CREATE TRIGGER audit_append_only_update BEFORE UPDATE ON audit BEGIN SELECT RAISE(ABORT, 'audit log is append-only'); END");
@@ -63,10 +64,14 @@ test('removing a middle entry breaks the chain at its successor', () => {
 
   const v = db.verifyAuditChain();
   assert.strictEqual(v.ok, false, 'a removed entry must fail verification');
-  assert.strictEqual(v.reason, 'chain');
-  assert.strictEqual(v.brokenAt, entries[2].id, 'the successor exposes the missing link');
+  assert.strictEqual(v.reason, 'checkpoint-truncated', 'the external high-water detects tail loss before chain traversal');
 
-  const cols = Object.keys(removedRow);
+  // SQLite returns generated columns from SELECT *, but rejects explicitly
+  // inserting them. Restore only writable columns so this tamper fixture keeps
+  // working when the audit table gains derived integrity indexes.
+  const cols = db._db.prepare('PRAGMA table_xinfo(audit)').all()
+    .filter(({ hidden }) => hidden === 0)
+    .map(({ name }) => name);
   db._db.prepare(`INSERT INTO audit (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`)
     .run(...cols.map((c) => removedRow[c]));
   assert.strictEqual(db.verifyAuditChain().ok, true, 'clean after restore');
@@ -88,6 +93,60 @@ test('a forged genesis prevHash fails verification against the zero link', () =>
   db._db.prepare('UPDATE audit SET entry = ? WHERE id = ?').run(original, firstId);
   db._db.exec("CREATE TRIGGER audit_append_only_update BEFORE UPDATE ON audit BEGIN SELECT RAISE(ABORT, 'audit log is append-only'); END");
   assert.strictEqual(db.verifyAuditChain().ok, true, 'clean after restore');
+});
+
+test('a database writer cannot forge a new history by recomputing every SHA link', () => {
+  db.appendAudit({ action: 'PING', actor: 'forge-test', detail: 'original' });
+  db.appendAudit({ action: 'PING', actor: 'forge-test', detail: 'successor' });
+  assert.strictEqual(db.verifyAuditChain().ok, true, 'baseline verifies');
+  const originals = db._db.prepare('SELECT seq, id, prevHash, hash, entry FROM audit ORDER BY seq ASC').all();
+
+  db._db.exec('DROP TRIGGER IF EXISTS audit_append_only_update');
+  let prev = integrity.ZERO;
+  for (const row of originals) {
+    const parsed = JSON.parse(row.entry);
+    const { hash: _oldHash, mac, ...body } = parsed;
+    body.prevHash = prev;
+    if (body.actor === 'forge-test' && body.detail === 'original') body.detail = 'forged allow decision';
+    const hash = integrity.sha(integrity.canonical(body));
+    const forged = { ...body, hash, ...(mac ? { mac } : {}) };
+    db._db.prepare('UPDATE audit SET prevHash = ?, hash = ?, entry = ? WHERE id = ?')
+      .run(body.prevHash, hash, JSON.stringify(forged), row.id);
+    prev = hash;
+  }
+  db._db.exec("CREATE TRIGGER audit_append_only_update BEFORE UPDATE ON audit BEGIN SELECT RAISE(ABORT, 'audit log is append-only'); END");
+
+  const forged = db.verifyAuditChain();
+  assert.strictEqual(forged.ok, false);
+  assert.match(forged.reason, /entry-authentication|checkpoint-diverged/);
+
+  db._db.exec('DROP TRIGGER IF EXISTS audit_append_only_update');
+  for (const row of originals) {
+    db._db.prepare('UPDATE audit SET prevHash = ?, hash = ?, entry = ? WHERE id = ?')
+      .run(row.prevHash, row.hash, row.entry, row.id);
+  }
+  db._db.exec("CREATE TRIGGER audit_append_only_update BEFORE UPDATE ON audit BEGIN SELECT RAISE(ABORT, 'audit log is append-only'); END");
+  assert.strictEqual(db.verifyAuditChain().ok, true, 'original authenticated history restores cleanly');
+});
+
+test('the external checkpoint cannot be deleted or edited without detection', () => {
+  db.appendAudit({ action: 'PING', actor: 'checkpoint-test', detail: 'anchor' });
+  assert.strictEqual(db.verifyAuditChain().ok, true);
+  const checkpointPath = db._auditAnchorPaths.checkpointPath;
+  const original = fs.readFileSync(checkpointPath);
+  const heldPath = `${checkpointPath}.held`;
+
+  fs.renameSync(checkpointPath, heldPath);
+  assert.strictEqual(db.verifyAuditChain().reason, 'checkpoint-missing');
+  fs.renameSync(heldPath, checkpointPath);
+  assert.strictEqual(db.verifyAuditChain().ok, true);
+
+  const edited = JSON.parse(original.toString('utf8'));
+  edited.count = Math.max(0, edited.count - 1);
+  fs.writeFileSync(checkpointPath, JSON.stringify(edited), { mode: 0o600 });
+  assert.strictEqual(db.verifyAuditChain().reason, 'checkpoint-authentication');
+  fs.writeFileSync(checkpointPath, original, { mode: 0o600 });
+  assert.strictEqual(db.verifyAuditChain().ok, true);
 });
 
 test('canonical JSON is deterministic regardless of key order and handles all value shapes', () => {

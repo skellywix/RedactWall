@@ -43,6 +43,8 @@ async function heartbeat(port, body, key = 'unit-ingest-key') {
 
 test('sensor heartbeat stores bounded install checks and feeds coverage evidence', async () => withServer(async (port) => {
   const secret = 'native-handoff-secret-should-not-appear';
+  const syntheticSsn = '524-71-9043';
+  const syntheticEmail = 'private-member@example.test';
   const res = await heartbeat(port, {
     user: 'tech@example.test',
     orgId: 'cu-acme',
@@ -50,7 +52,7 @@ test('sensor heartbeat stores bounded install checks and feeds coverage evidence
     destination: 'endpoint-install',
     sensor: { name: 'endpoint_agent', version: '0.3.0', platform: 'win32' },
     checks: [
-      { id: 'endpoint_env_file', ok: true, detail: 'found' },
+      { id: 'endpoint_env_file', ok: true, detail: `found member ${syntheticSsn} ${syntheticEmail}` },
       { id: 'handoff_secret', ok: false, detail: 'missing 32-plus character handoff secret' },
     ],
     secret,
@@ -66,7 +68,7 @@ test('sensor heartbeat stores bounded install checks and feeds coverage evidence
     destination: 'endpoint-install',
     sensor: { name: 'endpoint_agent', version: '0.3.0', platform: 'win32' },
     checks: [
-      { id: 'endpoint_env_file', ok: true, detail: 'found' },
+      { id: 'endpoint_env_file', ok: true, detail: `found member ${syntheticSsn} ${syntheticEmail}` },
       { id: 'handoff_secret', ok: false, detail: 'missing 32-plus character handoff secret' },
     ],
   });
@@ -85,6 +87,10 @@ test('sensor heartbeat stores bounded install checks and feeds coverage evidence
     ['endpoint_env_file', true],
     ['handoff_secret', false],
   ]);
+  assert.ok(!JSON.stringify(row.installChecks).includes(syntheticSsn));
+  assert.ok(!JSON.stringify(row.installChecks).includes(syntheticEmail));
+  assert.match(row.installChecks[0].detail, /\[US_SSN\]/);
+  assert.match(row.installChecks[0].detail, /\[EMAIL_ADDRESS\]/);
   assert.ok(!JSON.stringify(row).includes(secret));
 
   const audit = db.listAudit(10);
@@ -116,6 +122,8 @@ test('sensor heartbeat stores bounded install checks and feeds coverage evidence
   assert.strictEqual(pack.queries[0].installChecks[1].id, 'handoff_secret');
   assert.strictEqual(pack.coverage.sensors[0].installHealth.state, 'attention');
   assert.ok(!JSON.stringify(pack).includes(secret));
+  assert.ok(!JSON.stringify(pack).includes(syntheticSsn));
+  assert.ok(!JSON.stringify(pack).includes(syntheticEmail));
 }));
 
 test('endpoint AI tool inventory attention does not emit sensor-health failure', async () => withServer(async (port) => {
@@ -194,6 +202,25 @@ test('heartbeat endpoint rejects unknown prompt-like fields without echoing valu
     fields: ['rawPrompt'],
   });
   assert.ok(!JSON.stringify(body).includes(rawPrompt));
+}));
+
+test('heartbeat check identifiers reject SSNs and secret-shaped values without persisting them', async () => withServer(async (port) => {
+  const sensitiveIds = ['member_524-71-9043', 'connector_ghp_abcdefghijklmnopqrstuvwxyz1234567890'];
+  for (const id of sensitiveIds) {
+    const response = await heartbeat(port, {
+      source: 'endpoint_agent',
+      checks: [{ id, ok: false }],
+    });
+    assert.strictEqual(response.status, 400, id);
+    const body = await response.json();
+    assert.ok(!JSON.stringify(body).includes(id));
+  }
+  const serializedStore = JSON.stringify(db.listQueries({ limit: 100 })) + JSON.stringify(db.listAudit(100));
+  for (const id of sensitiveIds) assert.ok(!serializedStore.includes(id));
+
+  const legacy = evidence.safeInstallChecks(sensitiveIds.map((id) => ({ id, ok: false })));
+  assert.deepStrictEqual(legacy.map((check) => check.id), ['redacted_check_id', 'redacted_check_id']);
+  for (const id of sensitiveIds) assert.ok(!JSON.stringify(legacy).includes(id));
 }));
 
 test.after(() => {

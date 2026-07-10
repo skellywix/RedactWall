@@ -18,8 +18,18 @@ A license is an offline, signed file — never a phone-home check:
 - The server verifies it at boot and re-checks daily against a public key
   **embedded in the product** (`EMBEDDED_PUBLIC_KEY_PEM` in
   `server/license.js`).
+- Every license must carry a tenant-style `customerId`: 2 to 63 lowercase
+  letters, digits, underscores, or hyphens, starting with a letter or digit.
+  At install and boot the
+  server binds it to `REDACTWALL_LICENSE_CUSTOMER_ID`, or to
+  `REDACTWALL_TENANT_ID` for a customer-silo deployment. If both settings are
+  present they must identify the same customer.
 - The private signing key exists only at the vendor, offline. Whoever holds it
   can mint licenses for any customer, any seat count, any expiry.
+- Connected-mode heartbeat verdicts use a different Ed25519 keypair and
+  signature domain. Never install this offline private key on the connected
+  license server. That service requires the offline **public** key only so it
+  can reject accidental key reuse.
 - Tests are unaffected by the embedded key: the suite generates throwaway
   keypairs and injects them via `REDACTWALL_LICENSE_PUBLIC_KEY`, so replacing
   the placeholder breaks nothing.
@@ -91,7 +101,7 @@ Flag reference (`scripts/license-issue.js`):
 |------|---------|---------|
 | `--key <pem>` | Private signing key path | required |
 | `--customer "<name>"` | Display name shown in the console | `Unknown` |
-| `--customer-id <id>` | Stable customer id (use the tenant slug) | empty |
+| `--customer-id <id>` | Required stable tenant-style customer slug, 2 to 63 characters | required |
 | `--plan standard\|enterprise` | Plan; feature gates follow `docs/process/CUSTOMER_LICENSING.md` | required |
 | `--seats <n>` | Licensed seat count | required |
 | `--expires YYYY-MM-DD` | Expiry date | required |
@@ -115,6 +125,15 @@ Two equivalent installs:
 
 Alternatively, drop the file as `redactwall.lic` next to `.env` (or point
 `REDACTWALL_LICENSE_PATH` at it) and restart.
+
+Before installing, bind the deployment to the same customer id used when the
+license was issued:
+
+- Customer-silo/SaaS: set `REDACTWALL_TENANT_ID=cu-acme`.
+- Licensed non-SaaS or air-gapped standalone: set
+  `REDACTWALL_LICENSE_CUSTOMER_ID=cu-acme`.
+- If both are set, they must match. A missing license `customerId`, a mismatch,
+  or conflicting deployment settings is rejected during API install and boot.
 
 Verify with `GET /api/billing/license` (state should be `active`, with the
 expected plan/seats/expiry) and `GET /api/billing/seats` for usage. Installs

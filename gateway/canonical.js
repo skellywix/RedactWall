@@ -1,4 +1,8 @@
 'use strict';
+const {
+  carriesEncodedSensitiveText,
+  carriesNumericContent,
+} = require('../sensors/shared/opaque-content');
 /**
  * Canonical request/response text helpers shared by gateway adapters.
  *
@@ -7,12 +11,120 @@
  * text, independent of which upstream provider ultimately serves the call.
  */
 
-// Collect every string value in an arbitrarily nested value (tool JSON schemas
-// carry PII in descriptions, enum/default values, etc.).
-function collectStrings(v, out) {
+// Collect every string value and object property name in an arbitrarily nested
+// value. Provider-specific metadata keys can be user-controlled just like their
+// values, and both cross the same upstream trust boundary.
+const MAX_TEXT_DEPTH = 64;
+const UNSCANNABLE_PART_TYPE = /^(?:(?:input|output)_)?(?:image|audio|video|file|binary|blob|base64)(?:_(?:url|data))?$/i;
+const UNSCANNABLE_PART_KEY = /^(?:image_?url|image|audio|video|file|file_?data|binary|blob|base64|b64_?json|content_?base64|bytes)$/i;
+const EXPLICIT_BINARY_KEY = /^(?:base64|b64_?json|content_?base64|file_?data|bytes|blob|binary)$/i;
+const MIME_PAYLOAD_KEY = /^(?:data|content|source|payload|body|value|bytes|blob|binary|base64|b64_?json|content_?base64|file_?data)$/i;
+const BINARY_DATA_URL = /^data:[^,]*;base64,/i;
+const NON_TEXT_MIME = /^(?:image|audio|video)\/|^application\/(?:octet-stream|pdf|zip|gzip)$/i;
+
+function collectStrings(v, out, depth = 0) {
+  if (depth > MAX_TEXT_DEPTH) throw new Error('text nesting exceeds gateway limit');
   if (typeof v === 'string') { if (v) out.push(v); return; }
-  if (Array.isArray(v)) { for (const x of v) collectStrings(x, out); return; }
-  if (v && typeof v === 'object') { for (const k of Object.keys(v)) collectStrings(v[k], out); }
+  if (Array.isArray(v)) { for (const x of v) collectStrings(x, out, depth + 1); return; }
+  if (v && typeof v === 'object') {
+    for (const k of Object.keys(v)) {
+      if (k) out.push(k);
+      collectStrings(v[k], out, depth + 1);
+    }
+  }
+}
+
+// Every string value in the JSON that will cross the gateway trust boundary.
+// Provider APIs grow new optional fields frequently, so an allowlist extractor
+// can silently miss user metadata or future content-bearing fields. Structural
+// strings (model, role, ids) are harmless under normal input and scanning them
+// gives unknown fields a fail-closed default.
+function deepText(value) {
+  const out = [];
+  collectStrings(value, out);
+  return out.join('\n');
+}
+
+function forwardedRequestText(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return '';
+  // Even structural string fields such as model are forwarded verbatim and can
+  // be attacker-controlled. Scan the complete JSON object. Boolean transport
+  // fields such as stream naturally contribute no text.
+  return deepText(body);
+}
+
+function mapStrings(value, fn, depth = 0) {
+  if (depth > MAX_TEXT_DEPTH) throw new Error('text nesting exceeds gateway limit');
+  if (typeof value === 'string') return fn(value);
+  if (Array.isArray(value)) return value.map((item) => mapStrings(item, fn, depth + 1));
+  if (!value || typeof value !== 'object') return value;
+  const out = {};
+  for (const key of Object.keys(value)) {
+    // Define data properties explicitly so a JSON key named "__proto__" stays
+    // ordinary provider data instead of invoking Object.prototype's setter.
+    Object.defineProperty(out, key, {
+      value: mapStrings(value[key], fn, depth + 1),
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
+  }
+  return out;
+}
+
+function explicitBinaryValue(value) {
+  if (value == null || value === false || value === '') return false;
+  return true;
+}
+
+// Find opaque bytes in any provider-specific request or response field. Text
+// scanning cannot validate base64 or other binary encodings, so unknown JSON
+// fields get the same fail-closed treatment as known multimodal content parts.
+// Exact type matching deliberately excludes harmless tool types such as
+// `file_search`; their ordinary definition metadata remains scannable text.
+function carriesExplicitBinary(value, depth = 0) {
+  if (depth > MAX_TEXT_DEPTH) return true;
+  if (typeof value === 'string') return BINARY_DATA_URL.test(value.trim());
+  if (!value || typeof value !== 'object') return false;
+  if (typeof Buffer !== 'undefined' && Buffer.isBuffer(value)) return true;
+  if (typeof ArrayBuffer !== 'undefined'
+    && (value instanceof ArrayBuffer || ArrayBuffer.isView(value))) return true;
+  if (Array.isArray(value)) return value.some((item) => carriesExplicitBinary(item, depth + 1));
+
+  if (typeof value.type === 'string' && UNSCANNABLE_PART_TYPE.test(value.type.trim())) return true;
+  const mime = value.mimeType || value.mime_type || value.mime;
+  if (typeof mime === 'string' && NON_TEXT_MIME.test(mime.trim())) {
+    for (const key of Object.keys(value)) {
+      if (MIME_PAYLOAD_KEY.test(key) && explicitBinaryValue(value[key])) return true;
+    }
+  }
+  for (const key of Object.keys(value)) {
+    if (EXPLICIT_BINARY_KEY.test(key) && explicitBinaryValue(value[key])) return true;
+    if (carriesExplicitBinary(value[key], depth + 1)) return true;
+  }
+  return false;
+}
+
+function carriesPartOnlyData(value, depth = 0) {
+  if (depth > MAX_TEXT_DEPTH) return true;
+  if (!value || typeof value !== 'object') return false;
+  if (Array.isArray(value)) return value.some((item) => carriesPartOnlyData(item, depth + 1));
+  const mime = value.mimeType || value.mime_type || value.mime;
+  if (typeof mime === 'string' && NON_TEXT_MIME.test(mime.trim())) return true;
+  for (const key of Object.keys(value)) {
+    if (UNSCANNABLE_PART_KEY.test(key) && value[key] != null) return true;
+    if (carriesPartOnlyData(value[key], depth + 1)) return true;
+  }
+  return false;
+}
+
+function carriesUnscannablePartData(value, depth = 0) {
+  return carriesExplicitBinary(value, depth) || carriesPartOnlyData(value, depth);
+}
+
+function scannableTextPart(part) {
+  return !!(part && typeof part === 'object' && !Array.isArray(part)
+    && typeof part.text === 'string' && !carriesUnscannablePartData(part));
 }
 
 // Text carried by tool/function DEFINITIONS (name, description, parameters
@@ -84,7 +196,7 @@ function carriesUnscannableContent(body) {
       if (typeof m.content === 'string') return false;
       // A content array is unscannable when ANY part lacks a scannable text
       // field (an image/file part alongside text still leaks the image).
-      if (Array.isArray(m.content)) return m.content.some((p) => !(p && typeof p.text === 'string'));
+      if (Array.isArray(m.content)) return m.content.some((p) => !scannableTextPart(p));
       return m.content != null;
     });
   }
@@ -179,4 +291,18 @@ function mapResponseText(json, fn) {
   };
 }
 
-module.exports = { requestText, messageText, carriesUnscannableContent, applyRedactedRequest, responseText, applyResponseText, mapResponseText };
+module.exports = {
+  requestText,
+  messageText,
+  deepText,
+  forwardedRequestText,
+  mapStrings,
+  carriesExplicitBinary,
+  carriesEncodedSensitiveText,
+  carriesNumericContent,
+  carriesUnscannableContent,
+  applyRedactedRequest,
+  responseText,
+  applyResponseText,
+  mapResponseText,
+};

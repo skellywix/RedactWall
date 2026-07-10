@@ -25,14 +25,46 @@ function pathologicalDoc(megabytes) {
 
 test.after(() => parsePool.shutdown());
 
-test('pooled extraction matches direct extraction for text, office, and unsupported files', async () => {
+test('pooled extraction matches direct extraction for safe text and unsupported files', async () => {
   const textBuf = Buffer.from('Member SSN 524-71-9043 pending review.');
-  const docBuf = officeDoc('Member &amp; loan SSN 524-71-9043');
 
-  for (const [name, buf] of [['loan.txt', textBuf], ['loan.docx', docBuf], ['archive.bin', textBuf]]) {
+  for (const [name, buf] of [['loan.txt', textBuf], ['archive.bin', textBuf]]) {
     const direct = await processors.extractText(name, buf);
     const pooled = await parsePool.extractText(name, buf);
     assert.deepStrictEqual(pooled, direct, name);
+  }
+});
+
+test('the public processor API transparently routes rich extraction through the pool', async () => {
+  parsePool.shutdown();
+  const doc = officeDoc('Member &amp; loan SSN 524-71-9043');
+  const direct = await processors.extractText('loan.docx', doc);
+  assert.strictEqual(direct.extractionOk, true);
+  assert.strictEqual(direct.text, 'Member & loan SSN 524-71-9043');
+  assert.strictEqual(parsePool._internal.workers.size, 1, 'public API created an isolated worker');
+
+  const pooled = await parsePool.extractText('loan.docx', doc);
+  assert.deepStrictEqual(pooled, direct);
+});
+
+test('every synchronous rich parser stays behind the capped child-process boundary', async () => {
+  const cases = [
+    ['member.docx', officeDoc('visible text')],
+    ['member.json', Buffer.from('{"text":"visible"}')],
+    ['member.xml', Buffer.from('<text>visible</text>')],
+    ['member.rtf', Buffer.from(String.raw`{\rtf1\ansi visible}`)],
+    ['member.eml', Buffer.from('Subject: visible\r\n\r\nbody')],
+  ];
+  process.env.REDACTWALL_PARSE_ISOLATION = 'off';
+  try {
+    for (const [name, buf] of cases) {
+      parsePool.shutdown();
+      const direct = await processors.extractText(name, buf);
+      assert.strictEqual(direct.extractionOk, true, name);
+      assert.strictEqual(parsePool._internal.workers.size, 1, name + ' used a child');
+    }
+  } finally {
+    process.env.REDACTWALL_PARSE_ISOLATION = 'on';
   }
 });
 
@@ -132,15 +164,19 @@ test('children are recycled after their task budget', async () => {
   }
 });
 
-test('REDACTWALL_PARSE_ISOLATION=off falls back to in-process extraction', async () => {
+test('REDACTWALL_PARSE_ISOLATION=off only bypasses the child for safe plain text', async () => {
   process.env.REDACTWALL_PARSE_ISOLATION = 'off';
   try {
     parsePool.shutdown();
+    const plain = await parsePool.extractText('inline.txt', Buffer.from('plain SSN 524-71-9043'));
+    assert.strictEqual(plain.extractionOk, true);
+    assert.strictEqual(parsePool._internal.workers.size, 0);
+
     const doc = officeDoc('inline path SSN 524-71-9043');
     const result = await parsePool.extractText('inline.docx', doc);
     assert.strictEqual(result.extractionOk, true);
     assert.strictEqual(result.text, 'inline path SSN 524-71-9043');
-    assert.strictEqual(parsePool._internal.workers.size, 0);
+    assert.strictEqual(parsePool._internal.workers.size, 1, 'rich parser stayed isolated');
   } finally {
     process.env.REDACTWALL_PARSE_ISOLATION = 'on';
   }

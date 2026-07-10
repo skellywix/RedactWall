@@ -5,6 +5,8 @@
     "email":     { "type": "string", "title": "End-user email (preferred identity for the audit log)" },
     "orgId":     { "type": "string", "title": "Institution / tenant id" },
     "serverUrl": { "type": "string", "title": "RedactWall control-plane URL" },
-    "ingestKey": { "type": "string", "title": "Ingest API key the sensor presents to the gate" }
+    "ingestKey": { "type": "string", "title": "Ingest API key the sensor presents to the gate" },
+    "policyPublicKey": { "type": "string", "title": "Pinned Ed25519 public key for signed sensor policy bundles" },
+    "enabled":   { "type": "boolean", "title": "Administrator-controlled protection state" }
   }
 }

@@ -1,23 +1,22 @@
 'use strict';
 /**
- * Local HA smoke for the AI gateway shared limiter path.
+ * Local single-host redundancy smoke for the AI gateway shared SQLite limiter.
  *
- * This does not call an external LLM provider. It starts the shipped limiter
- * and two gateway replicas, then proves both replicas consume the same
- * privacy-safe limiter counter.
+ * This does not call an external LLM provider. It starts two gateway replicas
+ * against one local SQLite counter store, removes one replica, and proves the
+ * survivor plus a restarted replica retain the same privacy-safe counter.
  */
 const http = require('node:http');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const { createGatewayServer } = require('./ai-llm-gateway');
-const { createLimiterServer } = require('./ai-gateway-rate-limiter');
 
 function jsonFetchResponse(status, body, headers = {}) {
-  return {
-    ok: status >= 200 && status < 300,
+  return new Response(JSON.stringify(body), {
     status,
-    headers: new Headers({ 'content-type': 'application/json', ...headers }),
-    arrayBuffer: async () => Buffer.from(JSON.stringify(body)),
-    json: async () => body,
-  };
+    headers: { 'content-type': 'application/json', ...headers },
+  });
 }
 
 function listen(server, host = '127.0.0.1') {
@@ -72,12 +71,12 @@ function gatewayRequest(port, token) {
 async function runSmoke(opts = {}) {
   if (!globalThis.fetch) throw new Error('global fetch is required for the shared limiter smoke');
   const clientToken = opts.clientToken || 'gateway-ha-client-token';
-  const limiterToken = opts.limiterToken || 'gateway-ha-limiter-token';
-  const limiter = createLimiterServer({ token: limiterToken, dbPath: ':memory:' });
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-gateway-redundancy-'));
+  const limiterDb = path.join(tempRoot, 'gateway-rate-limits.db');
   let gatewayA;
   let gatewayB;
+  let gatewayRestarted;
   try {
-    const limiterPort = await listen(limiter);
     const fetchImpl = async (url) => {
       const target = String(url || '');
       if (target.includes('/api/v1/gate')) {
@@ -91,14 +90,12 @@ async function runSmoke(opts = {}) {
     const gatewayOpts = {
       clientToken,
       key: 'gateway-ha-smoke-ingest-key',
-      redactwall: 'http://redactwall-control.local',
-      upstream: 'http://upstream.local',
-      rateLimitStore: 'http',
+      redactwall: 'https://redactwall-control.local',
+      upstream: 'https://upstream.local',
+      rateLimitStore: 'sqlite',
       rateLimit: 1,
       rateWindowMs: 60000,
-      rateLimitUrl: `http://127.0.0.1:${limiterPort}/check`,
-      rateLimitToken: limiterToken,
-      rateLimitFetchImpl: globalThis.fetch,
+      rateLimitDbPath: limiterDb,
       fetchImpl,
     };
     gatewayA = createGatewayServer(gatewayOpts);
@@ -107,19 +104,30 @@ async function runSmoke(opts = {}) {
     const gatewayBPort = await listen(gatewayB);
 
     const first = await gatewayRequest(gatewayAPort, clientToken);
+    await close(gatewayA);
+    gatewayA = null;
     const second = await gatewayRequest(gatewayBPort, clientToken);
     if (first.status !== 200) throw new Error(`first gateway replica returned ${first.status}: ${first.body}`);
     if (second.status !== 429) throw new Error(`second gateway replica did not share limiter state: ${second.status}`);
+    await close(gatewayB);
+    gatewayB = null;
+    gatewayRestarted = createGatewayServer(gatewayOpts);
+    const restartedPort = await listen(gatewayRestarted);
+    const restarted = await gatewayRequest(restartedPort, clientToken);
+    if (restarted.status !== 429) throw new Error(`restarted gateway lost limiter state: ${restarted.status}`);
     return {
       ok: true,
       sharedLimiter: true,
       gatewayReplicaStatuses: [first.status, second.status],
-      limiterStore: 'http',
+      restartedReplicaStatus: restarted.status,
+      limiterStore: 'sqlite',
+      scope: 'single_host',
     };
   } finally {
     await close(gatewayA);
     await close(gatewayB);
-    await close(limiter);
+    await close(gatewayRestarted);
+    fs.rmSync(tempRoot, { recursive: true, force: true });
   }
 }
 

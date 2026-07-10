@@ -10,6 +10,7 @@ const path = require('path');
 const crypto = require('crypto');
 const nativeHandoff = require('./native-handoff');
 const { loadEnv } = require('../../server/env');
+const privatePaths = require('../../server/private-path');
 
 function usage() {
   return [
@@ -96,12 +97,24 @@ function safeEventFileName(id) {
 function writeAtomicJson(file, body) {
   const dir = path.dirname(file);
   const tmp = path.join(dir, `${path.basename(file)}.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`);
-  fs.writeFileSync(tmp, body, { flag: 'wx', mode: 0o600 });
+  let fd;
   try {
-    fs.renameSync(tmp, file);
-  } catch (err) {
-    fs.rmSync(tmp, { force: true });
-    throw err;
+    fd = fs.openSync(tmp, 'wx', 0o600);
+    privatePaths.securePrivatePath(tmp, {
+      fs,
+      directory: false,
+      fresh: true,
+      label: 'native handoff event staging file',
+      ownerLabel: 'native handoff event staging file',
+    });
+    fs.writeFileSync(fd, body, { encoding: 'utf8' });
+    fs.fsyncSync(fd);
+    fs.closeSync(fd);
+    fd = undefined;
+    privatePaths.publishFileExclusiveDurably(tmp, file, { fs });
+  } finally {
+    if (fd !== undefined) try { fs.closeSync(fd); } catch {}
+    try { fs.unlinkSync(tmp); } catch {}
   }
 }
 
@@ -112,7 +125,7 @@ function writeHandoffFile(opts = {}) {
 
   const filePath = absoluteLocalFilePath(opts.filePath);
   const handoffDir = path.resolve(opts.dir || nativeHandoff.defaultHandoffDir());
-  fs.mkdirSync(handoffDir, { recursive: true });
+  nativeHandoff.ensurePrivateDirectory(handoffDir);
 
   const now = opts.now instanceof Date ? opts.now : new Date();
   const event = nativeHandoff.signHandoffEvent({
@@ -132,10 +145,12 @@ function writeHandoffFile(opts = {}) {
   }
 
   const handoffPath = path.join(handoffDir, `${safeEventFileName(event.id)}.json`);
-  if (fs.existsSync(handoffPath)) {
-    throw new Error('native handoff event already exists');
+  try {
+    writeAtomicJson(handoffPath, body);
+  } catch (error) {
+    if (error.code === 'EEXIST') throw new Error('native handoff event already exists');
+    throw error;
   }
-  writeAtomicJson(handoffPath, body);
   return { path: handoffPath, event };
 }
 

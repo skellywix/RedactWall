@@ -6,7 +6,8 @@
  * routes the result through the MCP connector SDK before any model receives it.
  */
 const { fetchWithTimeout } = require('../guard');
-const { connectorHealthCheck, htmlToText, sanitizeToolResult } = require('../sdk');
+const { connectorHealthCheck, executeConnectorTool, htmlToText } = require('../sdk');
+const { cancelResponseBody, readBoundedJson } = require('../../shared/bounded-response');
 
 const DEFAULT_GRAPH_ROOT = 'https://graph.microsoft.com/v1.0';
 const DEFAULT_MAX_BYTES = 512 * 1024;
@@ -154,9 +155,14 @@ async function graphApiCall(url, method, opts = {}) {
   }, opts);
   if (!response || !response.ok) {
     const status = response && response.status ? response.status : 'unknown';
+    if (response) await cancelResponseBody(response);
     throw new Error(`Microsoft Teams ${method} failed with HTTP ${status}`);
   }
-  const body = typeof response.json === 'function' ? await response.json() : JSON.parse(await response.text() || '{}');
+  const { json: body } = await readBoundedJson(response, {
+    maxBytes: opts.maxJsonBytes ?? Math.max(64 * 1024, maxBytes(opts)),
+    timeoutMs: opts.responseTimeoutMs || opts.timeoutMs,
+    label: `Microsoft Teams ${method} response`,
+  });
   if (body && body.error) {
     const code = compactLabel(body.error.code || 'graph_error', 'graph_error', 80);
     throw new Error(`Microsoft Teams ${method} failed: ${code}`);
@@ -206,8 +212,7 @@ async function fetchTeamsChatMessages(args = {}, opts = {}) {
 }
 
 async function sanitizeTeamsChannelMessages(args = {}, opts = {}) {
-  const raw = await fetchTeamsChannelMessages(args, opts);
-  return sanitizeToolResult(raw, {
+  return executeConnectorTool((toolArgs) => fetchTeamsChannelMessages(toolArgs, opts), args, {
     agent: opts.agent,
     connector: 'teams',
     tool: 'channels.messages',
@@ -215,8 +220,7 @@ async function sanitizeTeamsChannelMessages(args = {}, opts = {}) {
 }
 
 async function sanitizeTeamsChatMessages(args = {}, opts = {}) {
-  const raw = await fetchTeamsChatMessages(args, opts);
-  return sanitizeToolResult(raw, {
+  return executeConnectorTool((toolArgs) => fetchTeamsChatMessages(toolArgs, opts), args, {
     agent: opts.agent,
     connector: 'teams',
     tool: 'chats.messages',

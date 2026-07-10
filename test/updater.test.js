@@ -5,9 +5,12 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { execFileSync } = require('node:child_process');
+const { execFileSync, spawn } = require('node:child_process');
 
 const updater = require('../server/updater');
+const fileMutationLock = require('../server/file-mutation-lock');
+
+const mutationWorker = path.join(__dirname, 'support', 'file-mutation-worker.js');
 
 function git(cwd, args) {
   return execFileSync('git', args, {
@@ -86,6 +89,27 @@ async function waitFor(predicate, timeoutMs = 2000) {
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   return predicate();
+}
+
+function launchMutationWorker(mode, env) {
+  const child = spawn(process.execPath, [mutationWorker, mode], {
+    env: { ...process.env, ...env },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  child.output = '';
+  child.stdout.on('data', (chunk) => { child.output += chunk.toString(); });
+  child.stderr.on('data', (chunk) => { child.output += chunk.toString(); });
+  return child;
+}
+
+async function waitForMarker(child, file, timeoutMs = 5000) {
+  const found = await waitFor(() => fs.existsSync(file) || child.exitCode !== null, timeoutMs);
+  if (!found || !fs.existsSync(file)) throw new Error(`mutation worker exited before marker: ${child.output}`);
+}
+
+async function waitForChild(child) {
+  if (child.exitCode === null) await new Promise((resolve) => child.once('exit', resolve));
+  assert.strictEqual(child.exitCode, 0, child.output);
 }
 
 test('updater fast-forwards a clean checkout after backup', async (t) => {
@@ -287,6 +311,124 @@ test('updater rejects unsafe config values before writing settings', () => {
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('updater atomic config write preserves the old file and removes staging data on rename failure', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-updater-atomic-config-'));
+  const file = path.join(root, 'update-settings.json');
+  const baseline = Buffer.from('{"baseline":true}\n');
+  fs.writeFileSync(file, baseline);
+  const failingFs = new Proxy(fs, {
+    get(target, property) {
+      if (property === 'renameSync') return () => { throw new Error('synthetic rename failure'); };
+      return Reflect.get(target, property);
+    },
+  });
+  try {
+    assert.throws(
+      () => updater.saveConfig(testConfig(), { dataRoot: root, fs: failingFs }),
+      /synthetic rename failure/,
+    );
+    assert.deepStrictEqual(fs.readFileSync(file), baseline);
+    assert.deepStrictEqual(
+      fs.readdirSync(root).filter((name) => name.startsWith('update-settings.json.')),
+      [],
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('updater config write rejects directory-fsync EIO and restores exact prior bytes', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-updater-durable-config-'));
+  const file = path.join(root, 'update-settings.json');
+  const baseline = Buffer.from('{"baseline":true}\r\n');
+  fs.writeFileSync(file, baseline, { mode: 0o600 });
+  const failingFs = {
+    ...fs,
+    fsyncSync(fd) {
+      if (fs.fstatSync(fd).isDirectory()) {
+        const error = new Error('synthetic directory fsync EIO');
+        error.code = 'EIO';
+        throw error;
+      }
+      return fs.fsyncSync(fd);
+    },
+  };
+  try {
+    assert.throws(
+      () => updater.saveConfig(testConfig(), { dataRoot: root, fs: failingFs }),
+      /synthetic directory fsync EIO/,
+    );
+    assert.deepStrictEqual(fs.readFileSync(file), baseline);
+    assert.deepStrictEqual(fs.readdirSync(root), ['update-settings.json']);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('first-time audited config save removes the new file when audit persistence fails', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-updater-first-audit-'));
+  const file = path.join(root, 'update-settings.json');
+  try {
+    await assert.rejects(
+      updater.saveConfigWithAudit(testConfig(), () => { throw new Error('synthetic audit failure'); }, { dataRoot: root }),
+      /could not be audited/,
+    );
+    assert.strictEqual(fs.existsSync(file), false);
+    assert.deepStrictEqual(
+      fs.readdirSync(root).filter((name) => name.startsWith('update-settings.json.')),
+      [],
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('two updater processes serialize failed rollback before a successful writer', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-updater-two-process-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const file = path.join(root, 'update-settings.json');
+  const ready = path.join(root, 'failed-ready');
+  const release = path.join(root, 'release-failed');
+  const successStarted = path.join(root, 'success-started');
+  const successWaiting = path.join(root, 'success-waiting');
+  const failedDone = path.join(root, 'failed-done');
+  const successDone = path.join(root, 'success-done');
+  const winningBytes = path.join(root, 'winning-bytes');
+  const baseline = Buffer.from(`${JSON.stringify({ ...testConfig(), installMode: 'npm-ci-omit-dev' }, null, 2)}\n\n`);
+  fs.writeFileSync(file, baseline);
+  const common = {
+    MUTATION_TARGET: file,
+    MUTATION_READY: ready,
+    MUTATION_RELEASE: release,
+    REDACTWALL_UPDATE_CONFIG_PATH: file,
+    REDACTWALL_UPDATE_DATA_ROOT: root,
+  };
+  const failing = launchMutationWorker('updater-fail', { ...common, MUTATION_DONE: failedDone });
+  t.after(() => { if (failing.exitCode === null) failing.kill(); });
+  await waitForMarker(failing, ready);
+  assert.strictEqual(JSON.parse(fs.readFileSync(file, 'utf8')).installMode, 'npm-ci');
+
+  const succeeding = launchMutationWorker('updater-success', {
+    ...common,
+    MUTATION_STARTED: successStarted,
+    MUTATION_WAITING: successWaiting,
+    MUTATION_DONE: successDone,
+    MUTATION_WINNER_BYTES: winningBytes,
+  });
+  t.after(() => { if (succeeding.exitCode === null) succeeding.kill(); });
+  await waitForMarker(succeeding, successStarted);
+  await waitForMarker(succeeding, successWaiting);
+  assert.strictEqual(fs.existsSync(successDone), false, 'successful writer remains excluded while rollback is pending');
+
+  fs.writeFileSync(release, 'release\n');
+  await Promise.all([waitForChild(failing), waitForChild(succeeding)]);
+  assert.strictEqual(fs.existsSync(failedDone), true);
+  assert.strictEqual(fs.existsSync(successDone), true);
+  assert.deepStrictEqual(fs.readFileSync(file), fs.readFileSync(winningBytes));
+  assert.strictEqual(JSON.parse(fs.readFileSync(file, 'utf8')).installMode, 'skip');
+  assert.strictEqual(fs.existsSync(fileMutationLock.lockPathFor(file)), false);
 });
 
 test('updater falls back safely when saved settings JSON is corrupt', () => {

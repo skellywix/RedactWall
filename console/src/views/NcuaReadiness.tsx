@@ -124,7 +124,7 @@ function Header({ busy, onRefresh }: { busy: boolean; onRefresh: () => void }) {
           <h2>Texas FCU Readiness</h2>
           <p>
             Examiner readiness for Texas-based Federal Credit Unions: NCUA Part 748 / GLBA control coverage,
-            member-data outcomes, core-banking EDM, shadow-AI review, board packets, and live prompt-free evidence.
+            member-data outcomes, structured hard stops, high-entropy EDM, shadow-AI review, board packets, and live prompt-free evidence.
           </p>
         </div>
       </div>
@@ -163,7 +163,7 @@ function KpiRow({ report }: { report: NcuaReport }) {
       <Kpi
         label="EDM fingerprints"
         value={edm.configured ? String(edm.fingerprints) : 'not set up'}
-        hint={edm.active ? 'core-banking watchlist active' : edm.configured ? 'watchlist loaded but DISABLED' : 'member records unfingerprinted'}
+        hint={edm.active ? 'random-ID watchlist active' : edm.configured ? 'watchlist loaded but DISABLED' : 'optional random-ID watchlist not configured'}
       />
     </div>
   );
@@ -193,8 +193,8 @@ function EdmPanel({ edm }: { edm: NcuaReport['panels']['edm'] }) {
     <div className="panel">
       <div className="panel-head">
         <div>
-          <h2>Core-banking EDM</h2>
-          <span>Salted fingerprints of member records — plaintext is discarded</span>
+          <h2>High-entropy exact match</h2>
+          <span>Versioned SHA-256 fingerprints for non-enumerable random identifiers</span>
         </div>
         <span className={`insights-chip ${edm.active ? 'tone-low' : 'tone-high'}`}>
           {edm.active ? 'active' : edm.configured ? 'disabled' : 'setup needed'}
@@ -203,8 +203,8 @@ function EdmPanel({ edm }: { edm: NcuaReport['panels']['edm'] }) {
       <div style={{ padding: '0 16px 14px' }}>
         {edm.active ? (
           <p style={{ margin: 0 }}>
-            {edm.fingerprints} salted fingerprint(s) loaded; exact matches of member identifiers hard-stop on every
-            sensor. The salt and fingerprints never appear in exports.
+            {edm.fingerprints} fingerprint(s) loaded; exact matches of eligible random identifiers hard-stop on every
+            sensor. The salt and fingerprints never appear in evidence exports.
           </p>
         ) : edm.configured ? (
           <p style={{ margin: 0 }}>
@@ -213,9 +213,9 @@ function EdmPanel({ edm }: { edm: NcuaReport['panels']['edm'] }) {
           </p>
         ) : (
           <p style={{ margin: 0 }}>
-            Export member IDs, account numbers, and loan numbers from the core system, then run{' '}
-            <code>npm run edm:fingerprint -- --in members.txt</code> on the control plane. Only salted one-way
-            fingerprints are stored; the plaintext list is discarded.
+            If the institution uses random identifiers with at least 96 bits of source entropy, run{' '}
+            <code>npm run edm:fingerprint -- --in random-identifiers.txt</code> locally. Use built-in and tuned custom
+            detectors for enumerable member, account, and loan numbers; the EDM CLI rejects them.
           </p>
         )}
       </div>
@@ -297,11 +297,11 @@ function UpsellNotice() {
           <span>
             The Texas FCU Readiness Center is licensed as an add-on (included with Enterprise). Evidence export and every
             security function keep working; ask your account contact for the `ncua_readiness` feature, then install
-            the updated license under Integrations.
+            the updated license under Licensing.
           </span>
         </div>
-        <button className="ghost mini" type="button" onClick={() => navigate('/integrations')}>
-          Open Integrations
+        <button className="ghost mini" type="button" onClick={() => navigate('/licensing')}>
+          Open Licensing
         </button>
       </div>
     </div>

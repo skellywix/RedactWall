@@ -1,0 +1,17 @@
+# Connected-mode compose overlay for the CUSTOMER control plane.
+# Copy to the repo root as docker-compose.override.yml on the deployment
+# machine; `docker compose` merges it with docker-compose.yml automatically.
+#
+# Why it exists: the stock compose file does not pass the license-file path or
+# the connected-mode settings, and the container root filesystem is read-only —
+# so the installed license must live on the writable /data volume or a console
+# license install cannot persist.
+services:
+  redactwall:
+    environment:
+      REDACTWALL_LICENSE_PATH: /data/redactwall.lic
+      REDACTWALL_LICENSE_SERVER_URL: ${REDACTWALL_LICENSE_SERVER_URL:-}
+      REDACTWALL_LICENSE_SERVER_TOKEN: ${REDACTWALL_LICENSE_SERVER_TOKEN:-}
+      REDACTWALL_LICENSE_VERDICT_PUBLIC_KEY: ${REDACTWALL_LICENSE_VERDICT_PUBLIC_KEY:-}
+      REDACTWALL_LICENSE_SERVER_TIMEOUT_MS: ${REDACTWALL_LICENSE_SERVER_TIMEOUT_MS:-}
+      REDACTWALL_LICENSE_MAX_STALENESS_DAYS: ${REDACTWALL_LICENSE_MAX_STALENESS_DAYS:-}

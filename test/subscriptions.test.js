@@ -65,12 +65,18 @@ test('otlp adapter emits a valid OTLP/HTTP JSON logs envelope', () => {
 test('delivery succeeds and is recorded prompt-free', async () => {
   writeSubs([{ id: 'splunk1', name: 'Splunk', type: 'splunk_hec', url: 'https://splunk.example.com', token: 'hec' }]);
   const sent = [];
-  const fakeFetch = async (url, req) => { sent.push({ url, req }); return { ok: true, status: 200 }; };
+  let cancelled = false;
+  const fakeFetch = async (url, req) => {
+    sent.push({ url, req });
+    return { ok: true, status: 200, body: { cancel: async () => { cancelled = true; } } };
+  };
   const dest = subscriptions.findDestination('splunk1');
   const rec = await subscriptions.deliverTo(dest, alert(), { fetch: fakeFetch, sleep: async () => {} });
   assert.strictEqual(rec.status, 'delivered');
   assert.strictEqual(rec.attempts, 1);
   assert.strictEqual(sent[0].url, 'https://splunk.example.com/services/collector/event');
+  assert.strictEqual(sent[0].req.redirect, 'error');
+  assert.strictEqual(cancelled, true);
   // History carries no payload body.
   const hist = db.listDeliveries(10);
   assert.ok(hist.some((d) => d.status === 'delivered'));
@@ -80,13 +86,19 @@ test('delivery succeeds and is recorded prompt-free', async () => {
 test('delivery retries with backoff then records failure', async () => {
   writeSubs([{ id: 'flaky', name: 'Flaky', type: 'webhook', url: 'https://flaky.example.com', maxAttempts: 3 }]);
   let calls = 0;
-  const fakeFetch = async () => { calls++; return { ok: false, status: 503 }; };
+  let cancelled = 0;
+  const fakeFetch = async (_url, options) => {
+    calls++;
+    assert.strictEqual(options.redirect, 'error');
+    return { ok: false, status: 503, body: { cancel: async () => { cancelled += 1; } } };
+  };
   const sleeps = [];
   const dest = subscriptions.findDestination('flaky');
   const rec = await subscriptions.deliverTo(dest, alert(), { fetch: fakeFetch, sleep: async (ms) => { sleeps.push(ms); } });
   assert.strictEqual(rec.status, 'failed');
   assert.strictEqual(rec.attempts, 3);
   assert.strictEqual(calls, 3);
+  assert.strictEqual(cancelled, 3);
   assert.deepStrictEqual(sleeps, [500, 1000], 'exponential backoff between attempts');
 });
 

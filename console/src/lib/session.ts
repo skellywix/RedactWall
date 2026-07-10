@@ -9,10 +9,10 @@ export interface Me {
 }
 
 const ROLE_LABELS: Record<string, string> = {
-  security_admin: 'Security Admin',
-  approver: 'Approver',
-  operator: 'Operator',
-  auditor: 'Auditor',
+  security_admin: 'Global Administrator',
+  approver: 'Member Data Reviewer',
+  operator: 'Operations Administrator',
+  auditor: 'Read-only Examiner/Auditor',
 };
 
 export function roleLabel(role: string): string {

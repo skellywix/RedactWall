@@ -358,7 +358,8 @@ Expected:
 
 - The extension replaces the card number with a token before send.
 - The AI tool receives tokenized text.
-- The page can rehydrate tokenized responses locally.
+- The AI page stays tokenized. Originals appear only in RedactWall's separate,
+  extension-only reveal tab after the employee clicks Reveal.
 - The server receives metadata and tokenized text, not raw card data.
 
 Talk track:

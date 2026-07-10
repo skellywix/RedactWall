@@ -88,6 +88,20 @@ async function readClipboard(opts = {}) {
   return result.stdout || '';
 }
 
+function isClipboardTooLargeError(error) {
+  return !!error && (error.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER'
+    || /maxBuffer|stdout.*too large|stdout.*exceeded/i.test(String(error.message || '')));
+}
+
+async function readClipboardResult(opts = {}) {
+  try {
+    return { status: 'ok', text: await readClipboard(opts) };
+  } catch (error) {
+    if (isClipboardTooLargeError(error)) return { status: 'too_large', text: '' };
+    throw error;
+  }
+}
+
 // Sanitized origin-app provenance: the FOREGROUND process' executable name only
 // (basename, lowercased, [a-z0-9_] id) — never a window title, path, argument,
 // or any clipboard content. This lets the examiner pack say "NPI copied from
@@ -129,11 +143,12 @@ async function clearClipboard(opts = {}) {
 }
 
 function sensitivityLabels(analysis = {}) {
-  return [...new Set(
+  const labels =
     (analysis.findings || []).map((f) => f.type)
       .concat((analysis.categories || []).map((c) => c.category))
-      .filter(Boolean)
-  )];
+      .filter(Boolean);
+  if (analysis.opaqueEncoded === true) labels.push('OPAQUE_ENCODED_CONTENT');
+  return [...new Set(labels)];
 }
 
 function safePrompt(status, analysis) {
@@ -154,8 +169,10 @@ function clipboardRecord(analysis, outcome, opts = {}) {
   const status = outcome === 'action_blocked' ? 'blocked' : 'flagged';
   const originApp = normalizeOriginApp(opts.originApp);
   const tooLarge = opts.reason === 'too_large';
+  const policyUnavailable = opts.reason === 'policy_unavailable';
   const base = {
-    prompt: tooLarge ? `[clipboard ${status} locally] too large to inspect` : safePrompt(status, analysis),
+    prompt: policyUnavailable ? '[clipboard blocked locally] policy unavailable'
+      : (tooLarge ? `[clipboard ${status} locally] too large to inspect` : safePrompt(status, analysis)),
     user: opts.user,
     destination: String(opts.destination || DEFAULT_DESTINATION).trim() || DEFAULT_DESTINATION,
     source: 'endpoint_agent',
@@ -163,9 +180,22 @@ function clipboardRecord(analysis, outcome, opts = {}) {
     sensor: agent.sensorMetadata(),
     ...(originApp ? { originApp } : {}),
     clientOutcome: outcome,
-    note: clipboardNote(outcome, tooLarge),
+    note: policyUnavailable ? 'endpoint clipboard blocked locally because no trusted signed policy is available'
+      : clipboardNote(outcome, tooLarge),
   };
-  if (tooLarge) return base;
+  if (tooLarge || policyUnavailable) return base;
+  if (analysis && analysis.opaqueEncoded === true) {
+    return {
+      ...base,
+      clientPreRedacted: true,
+      clientFindings: [],
+      clientCategories: [{ category: 'OPAQUE_ENCODED_CONTENT', score: 1 }],
+      clientEntityCounts: { OPAQUE_ENCODED_CONTENT: 1 },
+      clientRiskScore: 14,
+      clientMaxSeverity: 2,
+      clientMaxSeverityLabel: 'medium',
+    };
+  }
   return {
     ...base,
     clientPreRedacted: true,
@@ -180,9 +210,10 @@ function clipboardRecord(analysis, outcome, opts = {}) {
 
 async function policyForClipboard(opts = {}) {
   const agent = loadAgent();
-  if (opts.policy) return agent.sensorPolicy(opts.policy);
+  const override = agent._testPolicyOverride(opts);
+  if (override) return override;
   const fetched = await agent.fetchPolicy({ ...opts, silent: true });
-  return agent.sensorPolicy(fetched || {});
+  return fetched ? agent.sensorPolicy(fetched) : null;
 }
 
 function analyzeClipboard(text, policy, opts = {}) {
@@ -191,19 +222,22 @@ function analyzeClipboard(text, policy, opts = {}) {
     ignore: policy.ignore,
     disabledDetectors: policy.disabledDetectors,
     customDetectors: policy.customDetectors,
+    opaqueEncodedContent: true,
   });
 }
 
 function publicResult(status, analysis, extra = {}) {
+  const opaqueEncoded = analysis && analysis.opaqueEncoded === true;
   return {
     status,
-    sensitive: !!sensitivityLabels(analysis).length,
+    sensitive: opaqueEncoded || !!sensitivityLabels(analysis).length,
     labels: sensitivityLabels(analysis),
     riskScore: (analysis && analysis.riskScore) || 0,
     cleared: !!extra.cleared,
     recorded: !!extra.recorded,
     ...(extra.id ? { id: extra.id } : {}),
     ...(extra.error ? { error: extra.error } : {}),
+    ...(extra.reason ? { reason: extra.reason } : {}),
   };
 }
 
@@ -212,14 +246,57 @@ async function reportClipboard(record, opts = {}) {
   return loadAgent().postJson('/api/v1/gate', record, opts);
 }
 
+async function blockTooLargeClipboard(opts = {}) {
+  const analysis = { findings: [], categories: [], entityCounts: {}, riskScore: 0, maxSeverity: 0, maxSeverityLabel: 'none' };
+  let cleared = false;
+  try {
+    await clearClipboard(opts);
+    cleared = true;
+  } catch {}
+  const outcome = cleared ? 'action_blocked' : 'paste_flagged';
+  const originApp = opts.originApp !== undefined ? opts.originApp : await foregroundApp(opts).catch(() => null);
+  const record = clipboardRecord(analysis, outcome, { ...opts, originApp, reason: 'too_large' });
+  const response = await reportClipboard(record, opts).catch(() => null);
+  return publicResult(cleared ? 'blocked' : 'clear_failed', analysis, {
+    cleared,
+    recorded: !!response,
+    id: response && response.id,
+    reason: 'too_large',
+    ...(!cleared || !response ? {
+      error: !cleared
+        ? 'clipboard cannot be cleared; control plane recording unavailable'
+        : 'control plane recording unavailable',
+    } : {}),
+  });
+}
+
 async function collectClipboard(opts = {}) {
   writer.loadEndpointEnv(opts.envPath);
-  const raw = await readClipboard(opts);
+  const read = await readClipboardResult(opts);
+  if (read.status === 'too_large') return blockTooLargeClipboard(opts);
+  const raw = read.text;
   if (!String(raw || '').trim()) {
     return { status: 'empty', sensitive: false, cleared: false, recorded: false };
   }
 
   const policy = await policyForClipboard(opts);
+  if (!policy) {
+    let cleared = false;
+    try { await clearClipboard(opts); cleared = true; } catch {}
+    const analysis = { findings: [], categories: [], entityCounts: {}, riskScore: 0, maxSeverity: 0, maxSeverityLabel: 'none' };
+    const res = await reportClipboard(clipboardRecord(analysis, 'action_blocked', { ...opts, reason: 'policy_unavailable' }), opts);
+    return publicResult('blocked', analysis, {
+      cleared,
+      recorded: !!res,
+      id: res && res.id,
+      reason: 'policy_unavailable',
+      ...(!res || !cleared ? {
+        error: !cleared
+          ? 'clipboard cannot be cleared; control plane recording unavailable'
+          : 'control plane recording unavailable',
+      } : {}),
+    });
+  }
   const analysis = analyzeClipboard(raw, policy, opts);
   // readClipboard captures up to 2MB but analyzeClipboard only inspects the
   // first maxChars; anything past that bound is uninspected, so an over-limit
@@ -227,12 +304,18 @@ async function collectClipboard(opts = {}) {
   // clean while sensitive content sits in the untested tail.
   const limit = boundedNumber(opts.maxChars, DEFAULT_MAX_CHARS, 1024, 1000000);
   const tooLarge = String(raw).length > limit;
-  if (!tooLarge && !sensitivityLabels(analysis).length) {
+  if (!tooLarge && analysis.opaqueEncoded !== true && !sensitivityLabels(analysis).length) {
     return publicResult('clean', analysis);
   }
 
+  // Encoded findings are an explicit evasion attempt, and opaque encoded bytes
+  // cannot be inspected at all. Clear those even in report-only mode so the
+  // clipboard guard cannot label the event while leaving the bypass pasteable.
+  const encodedEvasion = analysis.opaqueEncoded === true
+    || (analysis.findings || []).some((finding) => !!finding.encoded);
+  const mustClear = tooLarge || opts.clearOnBlock || encodedEvasion;
   let clearFailed = false;
-  if (opts.clearOnBlock) {
+  if (mustClear) {
     try {
       await clearClipboard(opts);
     } catch {
@@ -240,23 +323,25 @@ async function collectClipboard(opts = {}) {
     }
   }
 
-  const outcome = opts.clearOnBlock && !clearFailed ? 'action_blocked' : 'paste_flagged';
+  const outcome = mustClear && !clearFailed ? 'action_blocked' : 'paste_flagged';
   // Best-effort origin-app provenance (sanitized process name only).
   const originApp = opts.originApp !== undefined ? opts.originApp : await foregroundApp(opts).catch(() => null);
   const record = clipboardRecord(analysis, outcome, { ...opts, originApp, ...(tooLarge ? { reason: 'too_large' } : {}) });
   const res = await reportClipboard(record, opts);
-  const status = clearFailed ? 'clear_failed' : opts.clearOnBlock ? 'blocked' : 'flagged';
+  const status = clearFailed ? 'clear_failed' : mustClear ? 'blocked' : 'flagged';
   if (!res) {
     return publicResult(status, analysis, {
-      cleared: opts.clearOnBlock && !clearFailed,
+      cleared: mustClear && !clearFailed,
       recorded: false,
+      ...(tooLarge ? { reason: 'too_large' } : {}),
       error: clearFailed ? 'clipboard cannot be cleared; control plane recording unavailable' : 'control plane recording unavailable',
     });
   }
   return publicResult(status, analysis, {
-    cleared: opts.clearOnBlock && !clearFailed,
+    cleared: mustClear && !clearFailed,
     recorded: true,
     id: res.id,
+    ...(tooLarge ? { reason: 'too_large' } : {}),
     ...(clearFailed ? { error: 'clipboard cannot be cleared' } : {}),
   });
 }
@@ -318,6 +403,8 @@ module.exports = {
   _internal: {
     clearClipboard,
     readClipboard,
+    readClipboardResult,
+    isClipboardTooLargeError,
     clipboardRecord,
     foregroundApp,
     normalizeOriginApp,

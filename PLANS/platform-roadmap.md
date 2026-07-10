@@ -155,8 +155,9 @@ deployable reverse-proxy service, `gateway/` (own process, shares
 - **Service shape.** `gateway/server.js` exposes an OpenAI-compatible surface
   (`POST /v1/chat/completions`, `/v1/completions`, `/v1/embeddings`, streaming
   via SSE). A `gateway/adapters/` seam normalizes request/response for
-  `openai`, `anthropic`, `azure-openai`, `bedrock`, and `internal-http` so one
-  policy governs all. Adapter interface: `toCanonical(req)`,
+  `openai`, `anthropic`, and `internal-http` so one policy governs all. Azure
+  OpenAI and Bedrock need dedicated native-contract adapters before they can be
+  advertised here. Adapter interface: `toCanonical(req)`,
   `fromCanonical(upstreamResp)`, `streamTransform(chunk)`.
 - **Request path (fail-closed).** Extract prompt/messages → call control plane
   `/api/v1/gate` → on `block`/`pending` return a structured refusal (or hold +

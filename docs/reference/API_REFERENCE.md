@@ -30,7 +30,7 @@ approval, only when a data key is configured, and only encrypted at rest.
 | decision | meaning |
 |----------|---------|
 | `allow` | nothing sensitive; a signed "safe-to-send" receipt is included. |
-| `block` | held for approval (`status: pending`); no receipt. A `releaseToken` gates status polling. |
+| `block` | withheld; ordinary policy blocks use `status: pending` plus a `releaseToken`, while uninspectable encoded content uses `status: blocked_unscannable` with no release token. |
 | `redact` | structured findings tokenized locally; the tokenized prompt is safe to send. |
 | `log` | monitor-only (proxy path); recorded, not enforced. |
 
@@ -43,6 +43,11 @@ curl -sX POST "$URL/api/v1/gate" -H "x-api-key: $KEY" -H 'content-type: applicat
   -d '{"prompt":"Member SSN is 123-45-6789","destination":"chatgpt.com","user":"teller@cu.example"}'
 ```
 
+Base64 and hex that decode to sensitive text are evaluated as that sensitive
+type. Strict Base64 that decodes to non-text bytes is blocked as
+`blocked_unscannable`; it cannot be changed to allow, warn, justify, redact, or
+later approval because the text detector could not inspect its contents.
+
 ### `POST /api/v1/scan-file` — scan an uploaded file
 
 `contentBase64` is inspected server-side and never persisted. Images without a
@@ -50,6 +55,9 @@ configured OCR path return `ocrRequired: true`. File types that cannot be parsed
 for inspection **fail closed**: the request is held with status
 `file_blocked_unscanned` (decision `block`) rather than allowed, so a renamed or
 unsupported file cannot leave uninspected.
+The `contentBase64` field is the API transport encoding. If extracted text
+itself contains another reversible encoding, RedactWall recursively inspects
+that text and applies the same fail-closed rule.
 
 ```bash
 curl -sX POST "$URL/api/v1/scan-file" -H "x-api-key: $KEY" -H 'content-type: application/json' \
@@ -84,8 +92,11 @@ curl -sX POST "$URL/api/v1/discovery" -H "x-api-key: $KEY" -H 'content-type: app
 
 The subset of policy sensors need (enforcement mode, thresholds, `alwaysBlock`,
 governed destinations…), excluding admin-only fields like retention settings.
-`GET /api/v1/policy/bundle` returns the same policy Ed25519-signed;
-`GET /api/v1/policy/pubkey` returns the verification key.
+`GET /api/v1/policy/bundle` returns the sensor-safe policy in a versioned,
+expiring Ed25519-signed envelope. `GET /api/v1/policy/pubkey` exposes the public
+key for authenticated operator retrieval and inventory only. A sensor must use
+an out-of-band pinned copy of that key. Fetching the key and the bundle from the
+same untrusted connection does not establish policy authenticity.
 
 ### `GET /api/v1/detectors` — detector inventory
 

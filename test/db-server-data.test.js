@@ -9,10 +9,17 @@ const assert = require('node:assert');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
+const { spawnSync } = require('node:child_process');
 
 process.env.REDACTWALL_DB_PATH = path.join(os.tmpdir(), 'ps-sd-test-' + crypto.randomBytes(6).toString('hex') + '.db');
 const db = require('../server/db');
 const { wireTenantContext } = db._internal;
+
+function createQuery(query) {
+  return db.createQueryWithAudit(query, {
+    action: 'TEST_QUERY_CREATED', actor: 'db-server-test', detail: 'transactional fixture',
+  }).row;
+}
 
 test('wireTenantContext pins the RLS tenant GUC only when a valid silo tenant is configured', () => {
   const calls = [];
@@ -28,6 +35,59 @@ test('wireTenantContext pins the RLS tenant GUC only when a valid silo tenant is
 
 test('wireTenantContext is a no-op on a driver without setTenantContext (SQLite)', () => {
   assert.strictEqual(wireTenantContext({}, { tenantId: 'cu-acme', tenantIdValid: true }), null);
+});
+
+test('wireTenantContext aborts unscoped SaaS and production Postgres startup', () => {
+  const driver = { setTenantContext() {} };
+  assert.throws(
+    () => wireTenantContext(driver, { saasMode: true, tenantId: '', tenantIdValid: true }, {
+      driverKind: 'postgres', env: { NODE_ENV: 'test' },
+    }),
+    (error) => error.code === 'REDACTWALL_TENANT_CONTEXT_REQUIRED',
+  );
+  assert.throws(
+    () => wireTenantContext(driver, { saasMode: false, tenantId: '', tenantIdValid: true }, {
+      driverKind: 'postgres', env: { NODE_ENV: 'production' },
+    }),
+    (error) => error.code === 'REDACTWALL_TENANT_CONTEXT_REQUIRED',
+  );
+  assert.throws(
+    () => wireTenantContext({}, { saasMode: true, tenantId: 'cu-acme', tenantIdValid: true }, {
+      driverKind: 'postgres', env: { NODE_ENV: 'production' },
+    }),
+    (error) => error.code === 'REDACTWALL_TENANT_CONTEXT_UNAVAILABLE',
+  );
+  assert.strictEqual(wireTenantContext({}, { saasMode: false, tenantId: '', tenantIdValid: true }, {
+    driverKind: 'sqlite', env: { NODE_ENV: 'production' },
+  }), null);
+});
+
+test('configured Postgres tenant-context failure aborts datastore initialization', () => {
+  const child = spawnSync(process.execPath, ['-e', `
+    const storage = require('./server/storage');
+    storage.openStore = () => ({
+      driver: { setTenantContext() { throw new Error('synthetic tenant context failure'); } },
+      kind: 'postgres',
+      dbPath: 'postgres',
+    });
+    storage.migrationApplied = () => false;
+    storage.runMigrations = () => {};
+    try {
+      require('./server/db');
+      process.exit(2);
+    } catch (error) {
+      if (!/synthetic tenant context failure/.test(error.message || '')) process.exit(3);
+    }
+  `], {
+    cwd: path.resolve(__dirname, '..'),
+    env: {
+      ...process.env,
+      REDACTWALL_TENANT_ID: 'cu-acme',
+      REDACTWALL_AUDIT_DIR: path.join(os.tmpdir(), 'ps-sd-tenant-failure-' + crypto.randomBytes(6).toString('hex')),
+    },
+    encoding: 'utf8',
+  });
+  assert.strictEqual(child.status, 0, child.stderr || child.stdout);
 });
 
 test('posture action state persists across heavy unrelated audit traffic', () => {
@@ -47,11 +107,11 @@ test('posture action state persists across heavy unrelated audit traffic', () =>
 
 test('seatStats counts unique billable users via SQL aggregation, excluding blocked + unknown', () => {
   const org = 'cu-seat-' + crypto.randomBytes(3).toString('hex');
-  db.createQuery({ status: 'allowed', orgId: org, user: 'Casey@Example.Test', redactedPrompt: 'ok' });
-  db.createQuery({ status: 'pending', orgId: org, user: 'casey@example.test', redactedPrompt: 'held' });
-  db.createQuery({ status: 'allowed', orgId: org, user: 'dana@example.test', redactedPrompt: 'ok' });
-  db.createQuery({ status: 'seat_limit_blocked', orgId: org, user: 'blocked@example.test', redactedPrompt: 'x' });
-  db.createQuery({ status: 'allowed', orgId: org, user: 'unknown', redactedPrompt: 'ok' });
+  createQuery({ status: 'allowed', orgId: org, user: 'Casey@Example.Test', redactedPrompt: 'ok' });
+  createQuery({ status: 'pending', orgId: org, user: 'casey@example.test', redactedPrompt: 'held' });
+  createQuery({ status: 'allowed', orgId: org, user: 'dana@example.test', redactedPrompt: 'ok' });
+  createQuery({ status: 'seat_limit_blocked', orgId: org, user: 'blocked@example.test', redactedPrompt: 'x' });
+  createQuery({ status: 'allowed', orgId: org, user: 'unknown', redactedPrompt: 'ok' });
 
   const seats = db.seatStats({ orgId: org });
   assert.strictEqual(seats.seatsUsed, 2);
@@ -62,7 +122,7 @@ test('seatStats counts unique billable users via SQL aggregation, excluding bloc
 });
 
 test('verifyAuditChain still holds after the batched evidence check', () => {
-  const q = db.createQuery({ status: 'pending', user: 'evidence@example.test', findings: [{ type: 'US_SSN' }] });
+  const q = createQuery({ status: 'pending', user: 'evidence@example.test', findings: [{ type: 'US_SSN' }] });
   db.appendAudit({ action: 'BLOCKED', queryId: q.id, actor: 'sensor', detail: 'ssn' });
   db.updateQuery(q.id, { status: 'approved', decisionNote: 'ok' });
   db.appendAudit({ action: 'APPROVED', queryId: q.id, actor: 'admin', detail: 'ok' });

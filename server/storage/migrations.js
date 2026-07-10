@@ -369,6 +369,273 @@ const MIGRATIONS = [
           OR "orgId" = current_setting('redactwall.org_id', true));
     `,
   },
+  {
+    version: 7,
+    name: 'administration-users-and-licensing',
+    // Customer-admin directory and licensing operations. These tables are
+    // metadata-only: invite tokens are hashed, passwords are salted hashes, and
+    // seat release/reassign state never rewrites historical sensor activity.
+    sqlite: `
+      CREATE TABLE IF NOT EXISTS admin_users (
+        seq          INTEGER PRIMARY KEY AUTOINCREMENT,
+        id           TEXT UNIQUE NOT NULL,
+        orgId        TEXT,
+        userName     TEXT UNIQUE NOT NULL,
+        displayName  TEXT,
+        role         TEXT NOT NULL,
+        active       INTEGER NOT NULL DEFAULT 1,
+        createdAt    TEXT NOT NULL,
+        updatedAt    TEXT NOT NULL,
+        data         TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_admin_users_org ON admin_users(orgId);
+      CREATE INDEX IF NOT EXISTS idx_admin_users_username ON admin_users(userName);
+      CREATE INDEX IF NOT EXISTS idx_admin_users_role ON admin_users(role, active);
+
+      CREATE TABLE IF NOT EXISTS admin_invitations (
+        seq          INTEGER PRIMARY KEY AUTOINCREMENT,
+        id           TEXT UNIQUE NOT NULL,
+        orgId        TEXT,
+        userName     TEXT NOT NULL,
+        tokenHash    TEXT UNIQUE NOT NULL,
+        status       TEXT NOT NULL,
+        expiresAt    TEXT NOT NULL,
+        acceptedAt   TEXT,
+        createdAt    TEXT NOT NULL,
+        updatedAt    TEXT NOT NULL,
+        data         TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_admin_invitations_org ON admin_invitations(orgId);
+      CREATE INDEX IF NOT EXISTS idx_admin_invitations_username ON admin_invitations(userName);
+      CREATE INDEX IF NOT EXISTS idx_admin_invitations_status ON admin_invitations(status, expiresAt);
+
+      CREATE TABLE IF NOT EXISTS license_seat_assignments (
+        seq          INTEGER PRIMARY KEY AUTOINCREMENT,
+        id           TEXT UNIQUE NOT NULL,
+        orgId        TEXT,
+        userKey      TEXT UNIQUE NOT NULL,
+        userName     TEXT NOT NULL,
+        status       TEXT NOT NULL,
+        reason       TEXT NOT NULL,
+        actor        TEXT NOT NULL,
+        createdAt    TEXT NOT NULL,
+        updatedAt    TEXT NOT NULL,
+        data         TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_license_seat_assignments_org ON license_seat_assignments(orgId);
+      CREATE INDEX IF NOT EXISTS idx_license_seat_assignments_status ON license_seat_assignments(status);
+
+      CREATE TABLE IF NOT EXISTS license_renewal_requests (
+        seq             INTEGER PRIMARY KEY AUTOINCREMENT,
+        id              TEXT UNIQUE NOT NULL,
+        orgId           TEXT,
+        status          TEXT NOT NULL,
+        requestedSeats  INTEGER,
+        contactEmail    TEXT,
+        createdAt       TEXT NOT NULL,
+        updatedAt       TEXT NOT NULL,
+        data            TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_license_renewal_requests_org ON license_renewal_requests(orgId);
+      CREATE INDEX IF NOT EXISTS idx_license_renewal_requests_status ON license_renewal_requests(status, createdAt);
+    `,
+    postgres: `
+      CREATE TABLE IF NOT EXISTS admin_users (
+        seq           BIGSERIAL PRIMARY KEY,
+        id            TEXT UNIQUE NOT NULL,
+        "orgId"       TEXT,
+        "userName"    TEXT UNIQUE NOT NULL,
+        "displayName" TEXT,
+        role          TEXT NOT NULL,
+        active        INTEGER NOT NULL DEFAULT 1,
+        "createdAt"   TEXT NOT NULL,
+        "updatedAt"   TEXT NOT NULL,
+        data          TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_admin_users_org ON admin_users("orgId");
+      CREATE INDEX IF NOT EXISTS idx_admin_users_username ON admin_users("userName");
+      CREATE INDEX IF NOT EXISTS idx_admin_users_role ON admin_users(role, active);
+
+      ALTER TABLE admin_users ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE admin_users FORCE ROW LEVEL SECURITY;
+      DROP POLICY IF EXISTS admin_users_tenant_isolation ON admin_users;
+      CREATE POLICY admin_users_tenant_isolation ON admin_users
+        USING (COALESCE(current_setting('redactwall.org_id', true), '') = ''
+          OR "orgId" = current_setting('redactwall.org_id', true))
+        WITH CHECK (COALESCE(current_setting('redactwall.org_id', true), '') = ''
+          OR "orgId" = current_setting('redactwall.org_id', true));
+
+      CREATE TABLE IF NOT EXISTS admin_invitations (
+        seq          BIGSERIAL PRIMARY KEY,
+        id           TEXT UNIQUE NOT NULL,
+        "orgId"      TEXT,
+        "userName"   TEXT NOT NULL,
+        "tokenHash"  TEXT UNIQUE NOT NULL,
+        status       TEXT NOT NULL,
+        "expiresAt"  TEXT NOT NULL,
+        "acceptedAt" TEXT,
+        "createdAt"  TEXT NOT NULL,
+        "updatedAt"  TEXT NOT NULL,
+        data         TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_admin_invitations_org ON admin_invitations("orgId");
+      CREATE INDEX IF NOT EXISTS idx_admin_invitations_username ON admin_invitations("userName");
+      CREATE INDEX IF NOT EXISTS idx_admin_invitations_status ON admin_invitations(status, "expiresAt");
+
+      ALTER TABLE admin_invitations ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE admin_invitations FORCE ROW LEVEL SECURITY;
+      DROP POLICY IF EXISTS admin_invitations_tenant_isolation ON admin_invitations;
+      CREATE POLICY admin_invitations_tenant_isolation ON admin_invitations
+        USING (COALESCE(current_setting('redactwall.org_id', true), '') = ''
+          OR "orgId" = current_setting('redactwall.org_id', true))
+        WITH CHECK (COALESCE(current_setting('redactwall.org_id', true), '') = ''
+          OR "orgId" = current_setting('redactwall.org_id', true));
+
+      CREATE TABLE IF NOT EXISTS license_seat_assignments (
+        seq         BIGSERIAL PRIMARY KEY,
+        id          TEXT UNIQUE NOT NULL,
+        "orgId"     TEXT,
+        "userKey"   TEXT UNIQUE NOT NULL,
+        "userName"  TEXT NOT NULL,
+        status      TEXT NOT NULL,
+        reason      TEXT NOT NULL,
+        actor       TEXT NOT NULL,
+        "createdAt" TEXT NOT NULL,
+        "updatedAt" TEXT NOT NULL,
+        data        TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_license_seat_assignments_org ON license_seat_assignments("orgId");
+      CREATE INDEX IF NOT EXISTS idx_license_seat_assignments_status ON license_seat_assignments(status);
+
+      ALTER TABLE license_seat_assignments ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE license_seat_assignments FORCE ROW LEVEL SECURITY;
+      DROP POLICY IF EXISTS license_seat_assignments_tenant_isolation ON license_seat_assignments;
+      CREATE POLICY license_seat_assignments_tenant_isolation ON license_seat_assignments
+        USING (COALESCE(current_setting('redactwall.org_id', true), '') = ''
+          OR "orgId" = current_setting('redactwall.org_id', true))
+        WITH CHECK (COALESCE(current_setting('redactwall.org_id', true), '') = ''
+          OR "orgId" = current_setting('redactwall.org_id', true));
+
+      CREATE TABLE IF NOT EXISTS license_renewal_requests (
+        seq              BIGSERIAL PRIMARY KEY,
+        id               TEXT UNIQUE NOT NULL,
+        "orgId"          TEXT,
+        status           TEXT NOT NULL,
+        "requestedSeats" INTEGER,
+        "contactEmail"   TEXT,
+        "createdAt"      TEXT NOT NULL,
+        "updatedAt"      TEXT NOT NULL,
+        data             TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_license_renewal_requests_org ON license_renewal_requests("orgId");
+      CREATE INDEX IF NOT EXISTS idx_license_renewal_requests_status ON license_renewal_requests(status, "createdAt");
+
+      ALTER TABLE license_renewal_requests ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE license_renewal_requests FORCE ROW LEVEL SECURITY;
+      DROP POLICY IF EXISTS license_renewal_requests_tenant_isolation ON license_renewal_requests;
+      CREATE POLICY license_renewal_requests_tenant_isolation ON license_renewal_requests
+        USING (COALESCE(current_setting('redactwall.org_id', true), '') = ''
+          OR "orgId" = current_setting('redactwall.org_id', true))
+        WITH CHECK (COALESCE(current_setting('redactwall.org_id', true), '') = ''
+          OR "orgId" = current_setting('redactwall.org_id', true));
+    `,
+  },
+  {
+    version: 8,
+    name: 'authenticated-audit-checkpoint',
+    // The authenticated chain uses private sidecar state rather than another
+    // database column. Recording a schema version still gives db.js a one-time,
+    // crash-recoverable bootstrap signal for existing unkeyed chains. On later
+    // starts a missing sidecar is treated as tampering, never silently recreated.
+    sqlite: 'SELECT 1;',
+    postgres: 'SELECT 1;',
+  },
+  {
+    version: 9,
+    name: 'shared-vendor-license-state',
+    // Connected-license verdict freshness and status must be shared by every
+    // replica. The audit remains the tamper-evident evidence anchor; this row
+    // is the transactionally serialized high-water used by the live CAS.
+    // Connected deployments must drain all pre-v9 replicas before applying
+    // this migration; old processes do not reconcile shared state on requests.
+    sqlite: `
+      CREATE TABLE IF NOT EXISTS vendor_license_state (
+        customerId TEXT PRIMARY KEY,
+        issuedAt   INTEGER NOT NULL,
+        contactAt  INTEGER NOT NULL,
+        status     TEXT NOT NULL CHECK (status IN ('active', 'revoked'))
+      );
+    `,
+    postgres: `
+      CREATE TABLE IF NOT EXISTS vendor_license_state (
+        "customerId" TEXT PRIMARY KEY,
+        "issuedAt"   BIGINT NOT NULL,
+        "contactAt"  BIGINT NOT NULL,
+        status       TEXT NOT NULL CHECK (status IN ('active', 'revoked'))
+      );
+
+      ALTER TABLE vendor_license_state ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE vendor_license_state FORCE ROW LEVEL SECURITY;
+      DROP POLICY IF EXISTS vendor_license_state_tenant_isolation ON vendor_license_state;
+      CREATE POLICY vendor_license_state_tenant_isolation ON vendor_license_state
+        USING (COALESCE(current_setting('redactwall.org_id', true), '') = ''
+          OR "customerId" = current_setting('redactwall.org_id', true))
+        WITH CHECK (COALESCE(current_setting('redactwall.org_id', true), '') = ''
+          OR "customerId" = current_setting('redactwall.org_id', true));
+    `,
+  },
+  {
+    version: 10,
+    name: 'native-handoff-ingest-idempotency',
+    // One opaque HMAC maps to one committed query inside a normalized,
+    // non-null tenant scope. Query creation, its audit append, and this mapping
+    // are one transaction; retries never need raw event or prompt content.
+    sqlite: `
+      ALTER TABLE audit ADD COLUMN ingestIdentityHash TEXT
+        GENERATED ALWAYS AS (json_extract(entry, '$.ingestIdempotency.identityHash')) VIRTUAL;
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_ingest_identity
+        ON audit(ingestIdentityHash) WHERE ingestIdentityHash IS NOT NULL;
+
+      CREATE TABLE IF NOT EXISTS ingest_idempotency (
+        scope       TEXT NOT NULL,
+        orgId       TEXT NOT NULL,
+        keyHash     TEXT NOT NULL,
+        queryId     TEXT UNIQUE NOT NULL REFERENCES queries(id) ON DELETE CASCADE,
+        auditId     TEXT UNIQUE NOT NULL REFERENCES audit(id),
+        replaySnapshot TEXT NOT NULL,
+        createdAt   TEXT NOT NULL,
+        PRIMARY KEY (scope, orgId, keyHash)
+      );
+      CREATE INDEX IF NOT EXISTS idx_ingest_idempotency_query ON ingest_idempotency(queryId);
+    `,
+    postgres: `
+      ALTER TABLE audit ADD COLUMN IF NOT EXISTS "ingestIdentityHash" TEXT
+        GENERATED ALWAYS AS ((entry::jsonb #>> '{ingestIdempotency,identityHash}')) STORED;
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_ingest_identity
+        ON audit("ingestIdentityHash") WHERE "ingestIdentityHash" IS NOT NULL;
+
+      CREATE TABLE IF NOT EXISTS ingest_idempotency (
+        scope       TEXT NOT NULL,
+        "orgId"     TEXT NOT NULL,
+        "keyHash"   TEXT NOT NULL,
+        "queryId"   TEXT UNIQUE NOT NULL REFERENCES queries(id) ON DELETE CASCADE,
+        "auditId"   TEXT UNIQUE NOT NULL REFERENCES audit(id),
+        "replaySnapshot" TEXT NOT NULL,
+        "createdAt" TEXT NOT NULL,
+        PRIMARY KEY (scope, "orgId", "keyHash")
+      );
+      CREATE INDEX IF NOT EXISTS idx_ingest_idempotency_query ON ingest_idempotency("queryId");
+
+      ALTER TABLE ingest_idempotency ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE ingest_idempotency FORCE ROW LEVEL SECURITY;
+      DROP POLICY IF EXISTS ingest_idempotency_tenant_isolation ON ingest_idempotency;
+      CREATE POLICY ingest_idempotency_tenant_isolation ON ingest_idempotency
+        USING (COALESCE(current_setting('redactwall.org_id', true), '') = ''
+          OR "orgId" = current_setting('redactwall.org_id', true))
+        WITH CHECK (COALESCE(current_setting('redactwall.org_id', true), '') = ''
+          OR "orgId" = current_setting('redactwall.org_id', true));
+    `,
+  },
 ];
 
 module.exports = { MIGRATIONS };

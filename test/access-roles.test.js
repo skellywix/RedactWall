@@ -20,6 +20,7 @@ process.env.REDACTWALL_DB_PATH = path.join(os.tmpdir(), 'ps-roles-test-' + crypt
 
 const app = require('../server/app');
 const auth = require('../server/auth');
+const db = require('../server/db');
 const { listen } = require('./support/listen');
 
 function cookieFor(user, role) {
@@ -82,9 +83,14 @@ test('auditor exports evidence but changes nothing', async () => withServer(asyn
 test('operator maintains the fleet but cannot export evidence or touch policy', async () => withServer(async (port) => {
   assert.strictEqual((await get(port, '/api/update/status', 'operator')).status, 200);
   assert.strictEqual((await get(port, '/api/subscriptions/deliveries', 'operator')).status, 200);
-  const posture = await post(port, '/api/posture/actions', 'operator', { id: 'unit_action', status: 'resolved' });
-  assert.ok([200, 400].includes(posture.status), 'operator reaches the posture action route');
-  assert.notStrictEqual(posture.status, 403);
+  const posture = await post(port, '/api/posture/actions', 'operator', {
+    id: 'unit_action', status: 'resolved', note: 'Reviewed with posture-owner@example.test',
+  });
+  assert.strictEqual(posture.status, 200, 'operator reaches the posture action route');
+  const postureAudit = db.listAudit(100).find((entry) => entry.action === db._internal.POSTURE_ACTION_AUDIT);
+  assert.ok(postureAudit);
+  assert.ok(!postureAudit.detail.includes('posture-owner@example.test'));
+  assert.match(postureAudit.detail, /\[EMAIL_ADDRESS\]/);
   assert.strictEqual((await get(port, '/api/export/evidence', 'operator')).status, 403);
   assert.strictEqual((await get(port, '/api/security/package', 'operator')).status, 403);
 }));

@@ -20,6 +20,13 @@ const {
 
 const root = path.join(__dirname, '..');
 
+function jsonResponse(status, body) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
 function tempDir(t, prefix = 'ps-endpoint-check-') {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -100,11 +107,7 @@ test('endpoint install check validates runtime wiring without exposing secrets',
       assert.strictEqual(body.source, 'endpoint_agent');
       assert.ok(body.checks.every((item) => item.ok));
       assert.ok(!opts.body.includes(lendingFlowDir));
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({ id: 'q_heartbeat', decision: 'recorded', status: 'sensor_heartbeat', failedChecks: [] }),
-      };
+      return jsonResponse(200, { id: 'q_heartbeat', decision: 'recorded', status: 'sensor_heartbeat', failedChecks: [] });
     },
   });
   assert.strictEqual(requests.length, 1);
@@ -268,12 +271,32 @@ test('endpoint heartbeat and human output cover failure branches without leaking
       REDACTWALL_URL: 'https://redactwall.example',
       INGEST_API_KEY: 'key-0000000000000001',
     },
-    fetchImpl: async () => ({
-      ok: false,
-      status: 503,
-      json: async () => ({ error: 'maintenance' }),
-    }),
-  }), /HTTP 503: maintenance/);
+    fetchImpl: async () => jsonResponse(503, { error: 'maintenance' }),
+  }), /HTTP 503$/);
+
+  let request;
+  await emitHeartbeat(report, {
+    config: {
+      REDACTWALL_URL: 'https://redactwall.example/control/',
+      INGEST_API_KEY: 'key-0000000000000001',
+    },
+    fetchImpl: async (url, options) => {
+      request = { url, options };
+      return jsonResponse(200, { id: 'hb_endpoint' });
+    },
+  });
+  assert.strictEqual(request.url, 'https://redactwall.example/control/api/v1/heartbeat');
+  assert.strictEqual(request.options.redirect, 'error');
+
+  let cleartextCalled = false;
+  await assert.rejects(() => emitHeartbeat(report, {
+    config: {
+      REDACTWALL_URL: 'http://redactwall.example',
+      INGEST_API_KEY: 'key-0000000000000001',
+    },
+    fetchImpl: async () => { cleartextCalled = true; },
+  }), /must use HTTPS or loopback HTTP/);
+  assert.strictEqual(cleartextCalled, false);
 
   const logs = [];
   printHuman({ ...report, heartbeat: { ok: false, detail: 'offline' } }, { log: (line) => logs.push(line) });

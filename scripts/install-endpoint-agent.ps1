@@ -4,6 +4,8 @@ param(
   [string]$RedactWallUrl = "http://localhost:4000",
   [Parameter(Mandatory = $true)]
   [string]$IngestKey,
+  [Parameter(Mandatory = $true)]
+  [string]$PolicyPublicKeyPath,
   [string]$WatchDir = "$env:USERPROFILE\RedactWallWatch",
   [string]$HandoffDir = "$env:LOCALAPPDATA\RedactWall\native-handoff",
   [string]$HandoffSecret = "",
@@ -43,8 +45,28 @@ $logDir = Join-Path $configRoot "logs"
 $configPath = Join-Path $configRoot "endpoint-agent.env"
 $logPath = Join-Path $logDir "endpoint-agent.log"
 $pidPath = Join-Path $configRoot "endpoint-agent.pid"
+$policyKeyTarget = Join-Path $configRoot "policy-public-key.pem"
+$policyCachePath = Join-Path $configRoot "endpoint-policy-bundle.json"
 
-New-Item -ItemType Directory -Force -Path $configRoot, $watchRoot, $logDir | Out-Null
+New-Item -ItemType Directory -Force -Path $configRoot, $watchRoot | Out-Null
+$currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+$configRootAcl = Get-Acl -LiteralPath $configRoot
+$configRootAcl.SetAccessRuleProtection($true, $false)
+foreach ($rule in @($configRootAcl.Access)) { $configRootAcl.RemoveAccessRule($rule) | Out-Null }
+$configRootAcl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($currentUser, "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")))
+$configRootAcl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule("SYSTEM", "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")))
+Set-Acl -LiteralPath $configRoot -AclObject $configRootAcl
+
+# Never inherit a cache or follow a planted config/key reparse point across an
+# install. The first trusted policy response recreates the cache atomically.
+foreach ($staleTrustPath in @($configPath, $policyKeyTarget, $policyCachePath)) {
+  if (Test-Path -LiteralPath $staleTrustPath) {
+    Remove-Item -LiteralPath $staleTrustPath -Force
+  }
+}
+New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+$policyKeySource = (Resolve-Path -LiteralPath $PolicyPublicKeyPath).Path
+Copy-Item -LiteralPath $policyKeySource -Destination $policyKeyTarget -Force
 if ($HandoffSecret) {
   if ($HandoffSecret.Trim().Length -lt 32) {
     throw "HandoffSecret must be at least 32 characters when native handoff is enabled."
@@ -62,6 +84,8 @@ $configLines = @(
   "# RedactWall endpoint agent local config",
   "REDACTWALL_URL=$RedactWallUrl",
   "INGEST_API_KEY=$IngestKey",
+  "REDACTWALL_POLICY_PUBLIC_KEY_PATH=$policyKeyTarget",
+  "REDACTWALL_POLICY_CACHE_PATH=$policyCachePath",
   "ENDPOINT_AGENT_WATCH_DIR=$watchRoot",
   "REDACTWALL_REQUEST_TIMEOUT_MS=10000"
 )
@@ -96,12 +120,11 @@ $configLines | Set-Content -LiteralPath $configPath -Encoding utf8
 
 $acl = Get-Acl -LiteralPath $configPath
 $acl.SetAccessRuleProtection($true, $false)
-$currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
 foreach ($rule in @($acl.Access)) { $acl.RemoveAccessRule($rule) | Out-Null }
 $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($currentUser, "FullControl", "Allow")))
 $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule("SYSTEM", "FullControl", "Allow")))
-$acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule("BUILTIN\Administrators", "FullControl", "Allow")))
 Set-Acl -LiteralPath $configPath -AclObject $acl
+Set-Acl -LiteralPath $policyKeyTarget -AclObject $acl
 if ($HandoffSecret) {
   $handoffAcl = Get-Acl -LiteralPath $handoffRoot
   $handoffAcl.SetAccessRuleProtection($true, $false)

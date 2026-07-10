@@ -22,7 +22,7 @@ function fakeExportOptions() {
     coverageModule: { summarize() { return { score: 100, totals: {}, sensors: [], fleet: [], governedDestinations: [], ungovernedDestinations: [], shadowDestinations: [], posture: [] }; } },
     detectorModule: { listDetectors() { return [{ id: 'MEMBER_ID' }]; } },
     customDetectorsModule: { loadCustomDetectors() { return []; } },
-    exactMatchModule: { publicSummary() { return { enabled: true, fingerprints: 7, minLength: 6, maxWords: 5, severity: 4 }; } },
+    exactMatchModule: { publicSummary() { return { enabled: true, fingerprints: 7, minLength: 20, maxWords: 1, severity: 4 }; } },
     appCatalogModule: { reviewRollup() { return []; } },
     licenseModule: { entitled() { return true; }, refresh() {} },
     packageInfo: { version: '0.4.0' },

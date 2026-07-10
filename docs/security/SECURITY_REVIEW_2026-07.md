@@ -69,6 +69,14 @@ changed under automation because they carry data-migration or FP/FN risk.
 - Frontend: `riskOverride` escaped in its quoted HTML attribute.
 - Dead ternary removed in `server/workflow.js`.
 
+## Closed after the original review
+
+- Postgres customer-silo RLS now wires the validated tenant context during
+  storage initialization and reapplies it after bridge reconnects. SQLite and
+  live two-tenant Postgres tests cover the resulting behavior.
+- `itinPlausible` now returns the explicit result of its allocation-range check
+  instead of routing that result through the tautological SSN rejection.
+
 ## Deferred (tracked) — remediation planned, not changed under automation
 
 These are real hardening items, but each risks breaking the audit chain, a
@@ -85,22 +93,14 @@ a dedicated, separately-reviewed change rather than an inline edit.
    the chain once on upgrade — done deliberately, not inline, because a botched
    change would break the product's core tamper-evidence guarantee. Mitigated
    today by the DB-level append-only triggers on the `audit` table.
-2. **Postgres row-level tenant isolation wiring (Medium).** Migration v3
-   installs RLS keyed on `current_setting('redactwall.org_id')`, but
-   `setTenantContext` is not called per request, and the shared single worker
-   connection means session-level `set_config` would bleed context across
-   tenants. Remediation: call `setTenantContext` inside a per-request
-   transaction with `set_config(..., true)` (transaction-local). Only affects
-   the shared-multi-tenant Postgres path, which is not the shipped deployment
-   shape (customer-silo single-node SQLite is).
-3. **EDM fingerprint preimage resistance (Medium).** Exact-Data-Match uses fast
-   non-cryptographic hashes (FNV-1a/djb2) with a salt that must ship to sensors,
-   so low-entropy watchlist values (SSNs, account numbers) are brute-forceable
-   on any endpoint holding the extension. Remediation: use a slow keyed KDF with
-   a server-held pepper and do membership checks server-side, or document the
-   on-device EDM confidentiality limit honestly. Needs a design decision on the
-   on-device vs server-side detection tradeoff.
-4. **Bare-PAN / compact-SSN detection (High, detection tuning).** A compact
+2. **EDM fingerprint preimage resistance (Medium, remediated).** Version 2
+   replaced FNV-1a/djb2 with SHA-256, versions the pack, and accepts only
+   syntactically random identifiers with at least 96 bits of source entropy.
+   Legacy packs and enumerable values such as SSNs, member numbers, and account
+   numbers fail closed. Those low-entropy values remain covered by structured
+   and custom detectors; exact roster matching for them would require a future
+   protected server-side lookup because every offline sensor receives the salt.
+3. **Bare-PAN / compact-SSN detection (High, detection tuning).** A compact
    16-digit Luhn-valid card or 9-digit SSN with no separator or context word is
    not flagged (a deliberate false-positive-avoidance tradeoff). Flagging bare
    Luhn+known-BIN PANs would improve recall but risks the zero-false-positive
@@ -108,8 +108,3 @@ a dedicated, separately-reviewed change rather than an inline edit.
    Remediation: add a "possible"-tier signal and validate it against the eval
    corpus in a dedicated detector change with the corpus extended for hard
    negatives.
-5. **`itinPlausible` tautological branch (trivial).** Ends with
-   `return ssnPlausible(d) === false`, which is always true given the `9xx`
-   precondition. Harmless; fold into the next detector change so the generated
-   engine copy is re-synced with other detector work rather than for a cosmetic
-   edit alone.

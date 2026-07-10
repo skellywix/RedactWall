@@ -43,6 +43,34 @@ function resealToken(token, counts) {
   return dataCrypto.seal(plaintext);
 }
 
+function resealPatch(record, counts) {
+  const patch = {};
+  for (const field of SEALED_FIELDS) {
+    const resealed = resealToken(record[field], counts);
+    if (resealed !== undefined) patch[field] = resealed;
+  }
+  return patch;
+}
+
+function rotateRecord(store, record, counts, dryRun) {
+  if (dryRun) return resealPatch(record, counts);
+  if (typeof store.mutateQueryWithAudit !== 'function') {
+    throw new Error('query mutation with audit is unavailable');
+  }
+  let resealedFields = 0;
+  const result = store.mutateQueryWithAudit(record.id, (current) => {
+    const patch = resealPatch(current, counts);
+    resealedFields = Object.keys(patch).length;
+    return resealedFields ? patch : null;
+  }, () => ({
+    action: 'DATA_KEY_RESEALED',
+    actor: 'operator',
+    detail: JSON.stringify({ resealedFields }),
+  }));
+  if (result.outcome === 'not_found') throw new Error('query disappeared during data-key rotation');
+  return result;
+}
+
 /**
  * Walk every query record and reseal previous-key tokens under the current
  * key. Counts: scanned = records inspected, resealed/unreadable = tokens.
@@ -52,12 +80,7 @@ function rotateDataKey({ db, dryRun = false } = {}) {
   const counts = { scanned: 0, resealed: 0, unreadable: 0 };
   for (const record of store.listQueries({ all: true })) {
     counts.scanned++;
-    const patch = {};
-    for (const field of SEALED_FIELDS) {
-      const resealed = resealToken(record[field], counts);
-      if (resealed !== undefined) patch[field] = resealed;
-    }
-    if (!dryRun && Object.keys(patch).length > 0) store.updateQuery(record.id, patch);
+    rotateRecord(store, record, counts, dryRun);
   }
   return counts;
 }

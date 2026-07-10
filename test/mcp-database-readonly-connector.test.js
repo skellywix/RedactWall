@@ -5,6 +5,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { EventEmitter } = require('node:events');
 const Database = require('better-sqlite3');
 const {
   createDatabaseReadonlyQueryTool,
@@ -13,6 +14,7 @@ const {
   databaseReadonlyConnectorHealth,
   databaseScopes,
   fetchDatabaseRows,
+  fetchDatabaseRowsWithBudget,
   fetchDatabaseSchema,
   rejectUnsafeSql,
   sanitizeDatabaseRows,
@@ -87,7 +89,7 @@ test('sanitizeDatabaseRows redacts row content before returning MCP output', asy
     databasePath: dbPath,
     label: 'pilot-member-db',
     guardOptions: {
-      server: 'http://redactwall.test',
+      server: 'https://redactwall.test',
       key: 'unit-ingest-key',
       policy: { ignore: [], disabledDetectors: [] },
       fetchImpl: async (url, opts = {}) => {
@@ -102,7 +104,7 @@ test('sanitizeDatabaseRows redacts row content before returning MCP output', asy
   assert.ok(sanitized.findings.includes('CREDIT_CARD'));
   assert.ok(!JSON.stringify(sanitized.result).includes('524-71-9043'));
   assert.ok(!JSON.stringify(sanitized.result).includes('4111 1111 1111 1111'));
-  assert.strictEqual(outbound.url, 'http://redactwall.test/api/v1/gate');
+  assert.strictEqual(outbound.url, 'https://redactwall.test/api/v1/gate');
   assert.strictEqual(outbound.body.destination, 'database_readonly.query.readonly');
   assert.strictEqual(outbound.body.source, 'mcp_guard');
   assert.ok(!JSON.stringify(outbound.body).includes(dbPath));
@@ -147,4 +149,82 @@ test('database connector errors and health evidence are secret-free', (t) => {
   assert.ok(check.detail.includes('scopes:1'));
   assert.ok(!JSON.stringify(check).includes('sqlite:///secret'));
   assert.deepStrictEqual(databaseScopes({ env: {} }), ['readonly']);
+});
+
+test('database query worker terminates recursive work at the execution budget', async (t) => {
+  const dbPath = tempDb(t);
+  const startedAt = Date.now();
+  await assert.rejects(
+    () => fetchDatabaseRowsWithBudget({
+      sql: 'WITH RECURSIVE forever(x) AS (VALUES(1) UNION ALL SELECT x + 1 FROM forever) SELECT sum(x) FROM forever',
+    }, { databasePath: dbPath, queryTimeoutMs: 50 }),
+    (err) => err && err.code === 'REDACTWALL_DATABASE_QUERY_TIMEOUT'
+  );
+  assert.ok(Date.now() - startedAt < 2000, 'recursive query worker must be killable without wedging the test event loop');
+
+  const normal = await fetchDatabaseRowsWithBudget({ sql: 'SELECT count(*) AS total FROM members' }, {
+    databasePath: dbPath,
+    queryTimeoutMs: 1000,
+  });
+  assert.match(normal.content[0].text, /"total": 2/);
+});
+
+test('database query worker contains native and V8 memory amplification', async (t) => {
+  const dbPath = tempDb(t);
+  const beforeRss = process.memoryUsage().rss;
+  await assert.rejects(
+    () => fetchDatabaseRowsWithBudget({ sql: 'SELECT hex(zeroblob(16777216)) AS amplified' }, {
+      databasePath: dbPath,
+      queryTimeoutMs: 3000,
+      queryMemoryBytes: 8 * 1024 * 1024,
+      maxBytes: 64,
+    }),
+    /Database read-only query failed/
+  );
+  assert.ok(process.memoryUsage().rss - beforeRss < 32 * 1024 * 1024, 'large SQLite result must stay isolated from the parent process');
+
+  const normal = await fetchDatabaseRowsWithBudget({ sql: 'SELECT 1 AS alive' }, {
+    databasePath: dbPath,
+    queryTimeoutMs: 1000,
+  });
+  assert.match(normal.content[0].text, /"alive": 1/);
+});
+
+test('database query capacity remains reserved until each worker actually exits', async (t) => {
+  const dbPath = tempDb(t);
+  const workers = [];
+  const forkImpl = () => {
+    const worker = new EventEmitter();
+    worker.kill = () => true;
+    worker.send = (_payload, callback) => {
+      callback(null);
+      setImmediate(() => worker.emit('message', {
+        ok: true,
+        result: { content: [], structuredContent: {} },
+      }));
+    };
+    workers.push(worker);
+    return worker;
+  };
+
+  const pending = Array.from({ length: 4 }, () => fetchDatabaseRowsWithBudget(
+    { sql: 'SELECT 1 AS alive' },
+    { databasePath: dbPath, queryTimeoutMs: 1000, forkImpl },
+  ));
+  await new Promise((resolve) => setImmediate(() => setImmediate(resolve)));
+  await assert.rejects(
+    () => fetchDatabaseRowsWithBudget(
+      { sql: 'SELECT 1 AS alive' },
+      { databasePath: dbPath, queryTimeoutMs: 1000, forkImpl },
+    ),
+    (error) => error && error.code === 'REDACTWALL_DATABASE_QUERY_BUSY',
+  );
+
+  for (const worker of workers) worker.emit('exit', 0, null);
+  await Promise.all(pending);
+  const recovered = await fetchDatabaseRowsWithBudget({ sql: 'SELECT 1 AS alive' }, {
+    databasePath: dbPath,
+    queryTimeoutMs: 1000,
+  });
+  assert.match(recovered.content[0].text, /"alive": 1/);
 });

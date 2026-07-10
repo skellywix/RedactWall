@@ -20,6 +20,7 @@
   input:checked + .slider{background:var(--green)}
   input:checked + .slider:before{transform:translateX(18px)}
   .stat{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:12px;color:#3a3a3c;margin-top:10px;box-shadow:var(--shadow)}
+  .permit{margin-top:8px;border:0;border-radius:6px;padding:7px 10px;background:var(--blue);color:#fff;font-weight:700;cursor:pointer}
   a{color:var(--blue);text-decoration:none;font-size:12px;font-weight:700}
   .foot{padding:10px 16px;border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;background:rgba(255,255,255,.82)}
   @media(prefers-reduced-motion:reduce){
@@ -41,6 +42,16 @@
     <div class="stat" id="fleet" hidden>
       <b>Other sensors for your account</b>
       <div class="muted" id="fleetLines"></div>
+    </div>
+    <div class="stat" id="serverAccess" hidden>
+      <b>Secure control plane access</b>
+      <div class="muted" id="serverAccessText"></div>
+      <button class="permit" id="grantServerAccess">Allow configured server</button>
+    </div>
+    <div class="stat" id="destinationAccess" hidden>
+      <b>Governed destination access</b>
+      <div class="muted" id="destinationAccessText"></div>
+      <button class="permit" id="grantDestinationAccess">Allow exact sites</button>
     </div>
   </div>
   <div class="foot">

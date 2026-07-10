@@ -25,16 +25,13 @@ function headers(values = {}) {
 function response(body, opts = {}) {
   const text = typeof body === 'string' ? body : JSON.stringify(body);
   const status = opts.status || 200;
-  return {
-    ok: status >= 200 && status < 300,
+  return new Response(text, {
     status,
-    headers: headers({
+    headers: {
       'content-type': opts.contentType || 'application/json',
       'content-length': opts.contentLength || String(Buffer.byteLength(text, 'utf8')),
-    }),
-    text: async () => text,
-    json: async () => (typeof body === 'string' ? JSON.parse(body) : body),
-  };
+    },
+  });
 }
 
 test('Teams URL builders target Graph channel and chat messages safely', () => {
@@ -126,7 +123,7 @@ test('sanitizeTeamsChannelMessages redacts Teams channel text before returning M
       ],
     }),
     guardOptions: {
-      server: 'http://redactwall.test',
+      server: 'https://redactwall.test',
       key: 'unit-ingest-key',
       policy: { ignore: [], disabledDetectors: [] },
       fetchImpl: async (url, opts = {}) => {
@@ -141,7 +138,7 @@ test('sanitizeTeamsChannelMessages redacts Teams channel text before returning M
   assert.ok(sanitized.findings.includes('CREDIT_CARD'));
   assert.ok(!JSON.stringify(sanitized.result).includes('524-71-9043'));
   assert.ok(!JSON.stringify(sanitized.result).includes('4111 1111 1111 1111'));
-  assert.strictEqual(outbound.url, 'http://redactwall.test/api/v1/gate');
+  assert.strictEqual(outbound.url, 'https://redactwall.test/api/v1/gate');
   assert.strictEqual(outbound.body.destination, 'teams.channels.messages');
   assert.strictEqual(outbound.body.source, 'mcp_guard');
   assert.ok(!JSON.stringify(outbound.body).includes('unit-teams-token'));
@@ -215,4 +212,19 @@ test('Teams connector errors and health evidence are secret-free', async () => {
   assert.ok(!JSON.stringify(check).includes('should-not-appear'));
   assert.deepStrictEqual(graphScopes({ env: {} }), ['ChannelMessage.Read.Group', 'ChatMessage.Read.Chat']);
   assert.deepStrictEqual(graphScopes({ env: { TEAMS_GRAPH_SCOPES: 'Chat.Read ChannelMessage.Read.All' } }), ['Chat.Read', 'ChannelMessage.Read.All']);
+});
+
+test('Teams Graph JSON enforces declared response bounds before parsing', async () => {
+  let jsonCalled = false;
+  await assert.rejects(() => fetchTeamsChannelMessages({ teamId: 'team1', channelId: 'channel1' }, {
+    accessToken: 'unit-teams-token',
+    maxJsonBytes: 16,
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      headers: headers({ 'content-length': '50000000' }),
+      json: async () => { jsonCalled = true; return { value: [] }; },
+    }),
+  }), /exceeds 16 byte limit/);
+  assert.strictEqual(jsonCalled, false);
 });

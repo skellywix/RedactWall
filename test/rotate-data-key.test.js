@@ -30,9 +30,6 @@ function childEnv(dbPath, keys = {}) {
     REDACTWALL_SECRET: '',
     REDACTWALL_DATA_KEY: '',
     REDACTWALL_DATA_KEY_PREVIOUS: '',
-    REDACTWALL_SECRET: '',
-    REDACTWALL_DATA_KEY: '',
-    REDACTWALL_DATA_KEY_PREVIOUS: '',
     ...keys,
   };
 }
@@ -47,7 +44,7 @@ const SEED_SCRIPT = `
     if (spec.raw) record._rawPrompt = c.seal(spec.raw);
     if (spec.vault) record._tokenVault = c.seal(JSON.stringify(spec.vault));
     if (spec.presealedRaw) record._rawPrompt = spec.presealedRaw;
-    const q = db.createQuery(record);
+    const q = db.createQueryWithAudit(record, { action: 'ROTATION_FIXTURE_CREATED', actor: 'rotation-test' }).row;
     out.push({ id: q.id, rawToken: q._rawPrompt || null, vaultToken: q._tokenVault || null });
   }
   db._db.close();
@@ -100,6 +97,15 @@ function readStore(dbPath) {
   }
 }
 
+function verifyStore(dbPath, keys) {
+  const output = execFileSync(process.execPath, ['-e', "process.stdout.write(JSON.stringify(require('./server/db').verifyAuditChain()));"], {
+    cwd: root,
+    encoding: 'utf8',
+    env: childEnv(dbPath, keys),
+  });
+  return JSON.parse(output);
+}
+
 test('rotation reseals old-key tokens so they open with the new key only', (t) => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-rotate-test-'));
   t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
@@ -117,9 +123,10 @@ test('rotation reseals old-key tokens so they open with the new key only', (t) =
   assert.strictEqual(dry.status, 0, dry.stderr || dry.stdout);
   assert.deepStrictEqual(JSON.parse(dry.stdout), { ok: true, dryRun: true, scanned: 3, resealed: 3, unreadable: 0 });
   const afterDry = readStore(dbPath);
+  const baselineAuditCount = afterDry.audit.length;
   assert.strictEqual(afterDry.queries[0]._rawPrompt, seeded[0].rawToken, 'dry run leaves tokens untouched');
   assert.strictEqual(afterDry.queries[0]._tokenVault, seeded[0].vaultToken);
-  assert.strictEqual(afterDry.audit.length, 0, 'dry run appends no audit entry');
+  assert.strictEqual(baselineAuditCount, 3, 'fixture rows begin with query-bound evidence');
 
   // Real run reseals every old-key token.
   const run = runRotation(dbPath, rotationKeys);
@@ -136,18 +143,23 @@ test('rotation reseals old-key tokens so they open with the new key only', (t) =
   assert.strictEqual(openUnderKeys(dbPath, newKeyOnly, after.queries[1]._rawPrompt), 'card 4111 1111 1111 1111');
   assert.strictEqual(openUnderKeys(dbPath, { REDACTWALL_DATA_KEY: OLD_KEY }, after.queries[0]._rawPrompt), null, 'old key can no longer open the data');
 
-  // One audit entry, counts only, no plaintext.
-  assert.strictEqual(after.audit.length, 1);
-  assert.strictEqual(after.audit[0].action, 'DATA_KEY_ROTATED');
-  assert.strictEqual(after.audit[0].actor, 'operator');
-  assert.deepStrictEqual(JSON.parse(after.audit[0].detail), { scanned: 3, resealed: 3, unreadable: 0 });
+  // Each changed row gets a new content-hash anchor, followed by one counts-only summary.
+  const resealedEntries = after.audit.filter((entry) => entry.action === 'DATA_KEY_RESEALED');
+  const summaries = after.audit.filter((entry) => entry.action === 'DATA_KEY_ROTATED');
+  assert.strictEqual(after.audit.length, baselineAuditCount + 3);
+  assert.deepStrictEqual(resealedEntries.map((entry) => entry.queryId).sort(), [seeded[0].id, seeded[1].id].sort());
+  assert.deepStrictEqual(resealedEntries.map((entry) => JSON.parse(entry.detail).resealedFields).sort(), [1, 2]);
+  assert.strictEqual(summaries.length, 1);
+  assert.strictEqual(summaries[0].actor, 'operator');
+  assert.deepStrictEqual(JSON.parse(summaries[0].detail), { scanned: 3, resealed: 3, unreadable: 0 });
   assert.ok(!JSON.stringify(after.audit).includes(SECRET_SSN));
+  assert.deepStrictEqual(verifyStore(dbPath, newKeyOnly), { ok: true, count: baselineAuditCount + 3 });
 
   // A second run is a no-op and appends no further audit entries.
   const again = runRotation(dbPath, rotationKeys);
   assert.strictEqual(again.status, 0, again.stderr || again.stdout);
   assert.deepStrictEqual(JSON.parse(again.stdout), { ok: true, dryRun: false, scanned: 3, resealed: 0, unreadable: 0 });
-  assert.strictEqual(readStore(dbPath).audit.length, 1, 'no-op run appends no audit entry');
+  assert.strictEqual(readStore(dbPath).audit.length, baselineAuditCount + 3, 'no-op run appends no audit entry');
 });
 
 test('a sealed value unreadable with both keys exits 1 and is reported in counts', (t) => {

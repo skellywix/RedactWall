@@ -16,9 +16,12 @@ require('../server/env').loadEnv();
  * Protocol subset: REQMOD + OPTIONS, no Preview negotiation, no RESPMOD.
  */
 const net = require('node:net');
+const { cancelResponseBody, readBoundedJson } = require('../sensors/shared/bounded-response');
+const { secureServerUrl } = require('../sensors/shared/server-url');
 const REDACTWALL = process.env.REDACTWALL_URL || 'http://localhost:4000';
 const KEY = process.env.INGEST_API_KEY || 'dev-ingest-key';
 const DEFAULT_REQUEST_TIMEOUT_MS = 10000;
+const bool = (value) => ['1', 'true', 'yes', 'on'].includes(String(value || '').toLowerCase());
 
 function requestTimeoutMs(opts = {}) {
   const n = Number(opts.timeoutMs ?? process.env.REDACTWALL_REQUEST_TIMEOUT_MS ?? DEFAULT_REQUEST_TIMEOUT_MS);
@@ -27,11 +30,13 @@ function requestTimeoutMs(opts = {}) {
 }
 
 async function fetchWithTimeout(fetchImpl, url, options, opts = {}) {
-  if (!fetchImpl || !globalThis.AbortController) return fetchImpl(url, options);
+  if (!fetchImpl) return undefined;
+  const requestOptions = { ...(options || {}), redirect: 'error' };
+  if (!globalThis.AbortController) return fetchImpl(url, requestOptions);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), requestTimeoutMs(opts));
   try {
-    return await fetchImpl(url, { ...options, signal: controller.signal });
+    return await fetchImpl(url, { ...requestOptions, signal: controller.signal });
   } catch (e) {
     if (e && e.name === 'AbortError') e.code = 'REDACTWALL_TIMEOUT';
     throw e;
@@ -44,9 +49,20 @@ function failClosed(reason) {
   return { decision: 'block', status: 'control_plane_unavailable', reason };
 }
 
-async function responseJson(res) {
+function controlPlaneBase(value, allowInsecure = false) {
+  const production = String(process.env.NODE_ENV || '').trim().toLowerCase() === 'production';
+  const safe = secureServerUrl(value, !production && allowInsecure);
+  return safe ? safe.replace(/\/+$/, '') : '';
+}
+
+async function responseJson(res, opts = {}) {
   try {
-    return await res.json();
+    const parsed = await readBoundedJson(res, {
+      maxBytes: opts.maxResponseBytes || 512 * 1024,
+      timeoutMs: opts.timeoutMs || requestTimeoutMs(),
+      label: 'proxy control-plane response',
+    });
+    return parsed.json;
   } catch {
     return null;
   }
@@ -85,14 +101,19 @@ async function gate({
 }) {
   if (!fetchImpl) return failClosed('fetch_unavailable');
   const prompt = extractPrompt(host, contentType, body);
+  const plane = controlPlaneBase(redactwall, bool(process.env.REDACTWALL_ALLOW_INSECURE_SERVER));
+  if (!plane) return failClosed('insecure_control_plane_url');
   try {
-    const r = await fetchWithTimeout(fetchImpl, redactwall + '/api/v1/gate', {
+    const r = await fetchWithTimeout(fetchImpl, plane + '/api/v1/gate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': key },
       body: JSON.stringify({ prompt, user, destination: host, sourceIp, source: 'proxy', channel: 'submit' }),
     }, { timeoutMs });
-    if (!r || !r.ok) return failClosed(`gate_http_${r ? r.status : 'missing'}`);
-    const verdict = await responseJson(r);
+    if (!r || !r.ok) {
+      if (r) await cancelResponseBody(r);
+      return failClosed(`gate_http_${r ? r.status : 'missing'}`);
+    }
+    const verdict = await responseJson(r, { timeoutMs, maxResponseBytes: 512 * 1024 });
     if (!verdict || typeof verdict.decision !== 'string') return failClosed('gate_invalid_json');
     return verdict; // { id, decision, status, ... }
   } catch (e) {
@@ -109,15 +130,18 @@ async function awaitRelease(id, {
   key = KEY,
   fetchImpl = globalThis.fetch,
   requestTimeoutMs: perRequestTimeoutMs,
+  maxResponseBytes = 512 * 1024,
   sleepImpl = (ms) => new Promise((res) => setTimeout(res, ms)),
 } = {}) {
   if (!id) return { released: false, reason: 'missing_id' };
   if (!fetchImpl) return { released: false, reason: 'fetch_unavailable' };
+  const plane = controlPlaneBase(redactwall, bool(process.env.REDACTWALL_ALLOW_INSECURE_SERVER));
+  if (!plane) return { released: false, reason: 'insecure_control_plane_url' };
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     let r;
     try {
-      r = await fetchWithTimeout(fetchImpl, `${redactwall}/api/v1/status/${encodeURIComponent(id)}`, {
+      r = await fetchWithTimeout(fetchImpl, `${plane}/api/v1/status/${encodeURIComponent(id)}`, {
         headers: {
           'x-api-key': key,
           ...(releaseToken ? { 'x-release-token': releaseToken } : {}),
@@ -126,8 +150,11 @@ async function awaitRelease(id, {
     } catch (e) {
       return { released: false, reason: e && e.code === 'REDACTWALL_TIMEOUT' ? 'status_timeout' : 'status_unreachable' };
     }
-    if (!r || !r.ok) return { released: false, reason: `status_http_${r ? r.status : 'missing'}` };
-    const s = await responseJson(r);
+    if (!r || !r.ok) {
+      if (r) await cancelResponseBody(r);
+      return { released: false, reason: `status_http_${r ? r.status : 'missing'}` };
+    }
+    const s = await responseJson(r, { timeoutMs: perRequestTimeoutMs, maxResponseBytes });
     if (!s || typeof s.status !== 'string') return { released: false, reason: 'status_invalid_json' };
     if (s.status === 'approved' || s.status === 'allowed') return { released: true };
     if (s.status === 'denied') return { released: false, reason: 'denied' };

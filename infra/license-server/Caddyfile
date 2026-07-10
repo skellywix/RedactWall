@@ -1,0 +1,15 @@
+# TLS front for the license heartbeat server. Replace the hostname with your
+# domain (a free DuckDNS subdomain works). Caddy obtains and renews the
+# Let's Encrypt certificate automatically — ports 80 and 443 must be reachable
+# from the internet for the ACME challenge.
+yourname-redactwall.duckdns.org {
+	@heartbeat path /heartbeat
+	handle @heartbeat {
+		reverse_proxy 127.0.0.1:8080 {
+			header_up X-Forwarded-For {remote_host}
+		}
+	}
+	handle {
+		respond 404
+	}
+}

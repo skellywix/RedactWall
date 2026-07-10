@@ -71,12 +71,12 @@ function validateBulk(ids: string[]): boolean {
 
 /**
  * OIDC step-up cannot be satisfied by a local password (there is no local
- * account), so bounce the admin back through the identity provider to refresh
- * auth_time, returning to the current console view afterward.
+ * account), so bounce the admin back through the identity provider to request
+ * fresh strong assurance, returning to the current console view afterward.
  */
 function redirectToIdpStepUp(): void {
   const returnTo = location.pathname + location.search + location.hash;
-  location.href = `/auth/oidc/start?returnTo=${encodeURIComponent(returnTo)}`;
+  location.href = `/auth/oidc/start?stepUp=1&returnTo=${encodeURIComponent(returnTo)}`;
 }
 
 export function useQueueActions(load: () => void, authProvider?: string) {

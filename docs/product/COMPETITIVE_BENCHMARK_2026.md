@@ -51,7 +51,7 @@ Each closed a specific gap versus a named leader.
 | --- | --- | --- | --- |
 | Prompt-injection / **jailbreak intent** detection (direct + indirect) | Prompt Security, WitnessAI, Lakera | `PROMPT_ATTACK` category — instruction-override, persona-jailbreak, guardrail-bypass, and "AI reading this" indirect-injection signals, on prompts **and** AI responses **and** MCP tool output | `detection-engine/detect.js`, `test/prompt-attack.test.js` |
 | **International PII** with real checksums | Nightfall (100+ detectors) | UK NINO, UK NHS (mod-11), Canada SIN (Luhn), Australia TFN (weighted mod-11), India Aadhaar (Verhoeff) + India PAN, all context-anchored | `detection-engine/detect.js`, `test/international-pii.test.js` |
-| **Exact Data Match (EDM)** | Nightfall | On-device salted one-way fingerprints — the org's watchlist plaintext never reaches a sensor; a `edm:fingerprint` CLI builds the list and discards the plaintext | `server/exact-match.js`, `scripts/edm-fingerprint.js`, `test/exact-match.test.js` |
+| **Exact Data Match (EDM)** | Nightfall | On-device versioned SHA-256 packs for non-enumerable random identifiers only; the CLI rejects low-entropy watchlists because a sensor-visible salt cannot prevent offline guessing | `server/exact-match.js`, `scripts/edm-fingerprint.js`, `test/exact-match.test.js` |
 | Expanded **secrets** coverage | Nightfall, Prompt Security | npm, Hugging Face, DigitalOcean, Shopify, Twilio, PyPI tokens added to the secret detector | `detection-engine/detect.js` |
 | **Tiered confidence** (Possible / Likely / Very Likely) | Nightfall | Every finding carries `confidence` / `confidenceLabel`; surfaced in the gate API and console | `detection-engine/detect.js`, `server/app.js` |
 | **AI-governance compliance mappings** | Harmonic | NIST AI RMF, ISO/IEC 42001, EU AI Act (Art. 12), OWASP LLM Top 10, MITRE ATLAS mapped in the examiner evidence pack | `server/control-map.js` |
@@ -164,7 +164,7 @@ OpenAPI 3.1 spec (`docs/reference/API_REFERENCE.md`), and bundled offline endpoi
 ```bash
 npm run review:ci      # full gate: tests, engine sync, detector eval, browser E2E
 npm run eval           # detector precision/recall/false-positive floors
-npm run edm:fingerprint --  --in watchlist.txt   # build an EDM list (plaintext discarded)
+npm run edm:fingerprint -- --in random-identifiers.txt # eligible >=96-bit random IDs only
 ```
 
 The Insights dashboard is at `/index.html?tab=insights` after login. The

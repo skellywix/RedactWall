@@ -110,11 +110,27 @@ test('SaaS mode enforces tenant identity and paid seat limit', async (t) => {
   assert.strictEqual(otherTenantFile.res.status, 403);
   assert.strictEqual(otherTenantFile.body.status, 'tenant_mismatch');
 
-  const secondUser = await postGate(port, { orgId: 'cu-acme', user: 'second@example.test' });
+  const seatIdempotency = { scope: 'native_handoff_v1', key: 'f'.repeat(64) };
+  const secondUserBody = {
+    orgId: 'cu-acme',
+    user: 'second@example.test',
+    source: 'endpoint_agent',
+    channel: 'file_upload',
+    sensor: { name: 'endpoint_agent', version: '1.0.0', platform: 'test' },
+    idempotency: seatIdempotency,
+  };
+  const secondUser = await postGate(port, secondUserBody);
   assert.strictEqual(secondUser.res.status, 402);
   assert.strictEqual(secondUser.body.status, 'seat_limit_blocked');
   assert.strictEqual(secondUser.body.seatLimit, 1);
   assert.strictEqual(secondUser.body.seatsUsed, 1);
+  assert.match(secondUser.body.id, /^q_/);
+  const secondUserRetry = await postGate(port, secondUserBody);
+  assert.strictEqual(secondUserRetry.res.status, 200);
+  assert.strictEqual(secondUserRetry.body.id, secondUser.body.id);
+  assert.strictEqual(secondUserRetry.body.status, 'seat_limit_blocked');
+  assert.strictEqual(secondUserRetry.body.idempotentReplay, true);
+  assert.strictEqual(db.listAudit(500).filter((entry) => entry.queryId === secondUser.body.id).length, 1);
 
   const secondFileUser = await postFile(port, { orgId: 'cu-acme', user: 'file-user@example.test' });
   assert.strictEqual(secondFileUser.res.status, 402);

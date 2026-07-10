@@ -5,9 +5,11 @@
         "redactwall@example.com": {
           "serverUrl": "https://redactwall.example.org",
           "ingestKey": "REPLACE_WITH_LONG_RANDOM_INGEST_KEY",
+          "policyPublicKey": "-----BEGIN PUBLIC KEY-----\\nREPLACE_WITH_REDACTWALL_POLICY_PUBLIC_KEY\\n-----END PUBLIC KEY-----",
           "orgId": "credit-union-demo",
           "email": "employee@example.org",
-          "user": "employee"
+          "user": "employee",
+          "enabled": true
         }
       }
     }

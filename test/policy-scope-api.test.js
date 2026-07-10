@@ -75,12 +75,16 @@ async function gate(port, body) {
 }
 
 function provisionLegalUser() {
+  const existingUser = db.getScimUserByUserName('counsel@example.test');
   const user = db.saveScimUser({
+    ...(existingUser || {}),
     userName: 'counsel@example.test',
     displayName: 'Counsel User',
     active: true,
   });
+  const existingGroup = db.getScimGroupByDisplayName('RedactWall Legal');
   db.saveScimGroup({
+    ...(existingGroup || {}),
     displayName: 'RedactWall Legal',
     members: [{ value: user.id, display: user.userName }],
   });
@@ -101,6 +105,21 @@ test('gate applies scoped policy from SCIM group membership', async () => withSe
   assert.ok(!JSON.stringify(stored).includes('524-71-9043'));
 }));
 
+test('sensor warning and justification outcomes cannot override an effective block scope', async () => withServer(async (port) => {
+  provisionLegalUser();
+  for (const clientOutcome of ['sent_after_warning', 'justified']) {
+    const res = await gate(port, {
+      clientOutcome,
+      ...(clientOutcome === 'justified' ? { note: 'documented business need' } : {}),
+    });
+    assert.strictEqual(res.status, 200);
+    const body = await res.json();
+    assert.strictEqual(body.mode, 'block');
+    assert.strictEqual(body.decision, 'block');
+    assert.strictEqual(body.status, 'pending', `${clientOutcome} must not weaken the scoped block`);
+  }
+}));
+
 test('gate records a time-bound exception id for matched non-hard-stop content', async () => withServer(async (port) => {
   provisionLegalUser();
   const current = JSON.parse(fs.readFileSync(process.env.REDACTWALL_POLICY_PATH, 'utf8'));
@@ -115,7 +134,7 @@ test('gate records a time-bound exception id for matched non-hard-stop content',
     }],
   }, null, 2));
 
-  const res = await gate(port);
+  const res = await gate(port, { clientOutcome: 'awaiting_approval' });
   assert.strictEqual(res.status, 200);
   const body = await res.json();
   assert.strictEqual(body.decision, 'allow');

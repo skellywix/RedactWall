@@ -224,7 +224,7 @@ npm run setup -- --with-browser
 For a production-style local smoke:
 
 ```powershell
-npm run setup:prod
+npm run setup:prod -- --customer-id demo-local
 npm run mfa:uri
 ```
 
@@ -590,7 +590,7 @@ docker build -t redactwall-demo .
 Run:
 
 ```powershell
-docker run --rm --name redactwall-demo -p 4000:4000 `
+docker run --rm --name redactwall-demo --hostname redactwall-demo -p 4000:4000 `
   -e ADMIN_USER=admin `
   -e ADMIN_PASSWORD=DemoOnly!2026 `
   -e REDACTWALL_SECRET=demo-session-secret-change-me `

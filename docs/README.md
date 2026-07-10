@@ -28,7 +28,7 @@ organized by topic: `deployment/`, `demo/`, `identity/`, `connectors/`,
 | Managed Postgres control plane (shared-plane migration) | `deployment/MANAGED_POSTGRES.md` |
 | Managed browser extension rollout | `deployment/MANAGED_EXTENSION_DEPLOYMENT.md` |
 | Browser extension release checklist | `deployment/EXTENSION_RELEASE_CHECKLIST.md` |
-| Enforced AI LLM Gateway, shared limiter, and HA compose | `deployment/AI_LLM_GATEWAY.md` |
+| Enforced AI LLM Gateway, shared limiter, and single-host redundant compose | `deployment/AI_LLM_GATEWAY.md` |
 | AI Gateway overview (OpenAI-compatible reverse proxy) | `deployment/AI_GATEWAY.md` |
 | Squid ICAP network backstop | `deployment/ICAP_NETWORK_BACKSTOP.md` |
 | Monitor-only AI chat proxy lab | `deployment/AI_CHAT_DLP_PROXY_LAB.md` |

@@ -25,8 +25,10 @@ from the same source extension.
 4. Set managed storage values for:
    - `serverUrl`
    - `ingestKey`
+   - `policyPublicKey` (the out-of-band Ed25519 public-key pin)
    - `orgId`
    - `email` or `user`
+   - `enabled: true` (administrator-owned; managed installs default on even when omitted)
 5. Confirm the dashboard Coverage tab receives the browser install-health
    heartbeat for the correct user, org, version, platform, and failed-check
    state.
@@ -136,9 +138,35 @@ Recommended values:
 
 - `serverUrl`: HTTPS URL of the RedactWall control plane.
 - `ingestKey`: pilot-specific ingest key, stored in MDM or browser policy.
+- `policyPublicKey`: exact PEM public key exported from the deployed control
+  plane through a trusted operator channel. Do not let the extension learn this
+  pin from `/api/v1/policy/pubkey`; a key fetched beside a bundle cannot
+  authenticate that bundle.
 - `orgId`: institution or tenant identifier.
 - `email`: end-user email from directory attributes, preferred for the audit log.
 - `user`: fallback username when email is unavailable.
+- `enabled`: administrator-controlled protection state. The popup cannot override
+  this value. A managed install without this key also defaults to enabled so an
+  older managed policy cannot be bypassed by a stale local pause setting.
+
+### Rotate the policy signing key
+
+Treat a policy-key rotation as scheduled maintenance, not as recovery from an
+unexplained signature failure. A cached bundle signed by the old key is a
+durable anti-rollback high-water mark, so the extension will reject a new-key
+bundle until a trusted administrator deliberately resets that cache.
+
+1. Remove the browser force-install assignment and confirm the extension has
+   been uninstalled, which clears its `chrome.storage.local` `policyBundle`.
+2. Replace `policyPublicKey` in the managed storage policy through the trusted
+   MDM channel.
+3. Reapply the force-install assignment.
+4. Confirm install health reports both `policy_public_key_pin` and
+   `policy_cache` healthy before users resume AI access.
+
+Do not clear extension storage merely to bypass `bad_signature`,
+`rollback_detected`, or `policy_sequence_conflict`. Investigate those events
+unless the signing-key change is an approved rotation.
 
 ## Validation Checklist
 
@@ -150,16 +178,26 @@ On a managed test device:
    - Firefox: `about:policies`
 2. Confirm the extension is force-installed.
 3. Confirm managed storage is present.
-4. Open the RedactWall popup and confirm protection is enabled.
-5. Open ChatGPT or Claude and send a benign prompt.
-6. Confirm the dashboard Coverage tab shows `browser_extension` install health.
+4. Open the RedactWall popup. For a remote HTTPS `serverUrl`, grant the exact
+   control-plane origin when prompted, then confirm protection is enabled. The
+   extension stays fail closed and reports `server_host_permission=false` until
+   this user-gesture permission succeeds.
+5. If the signed policy contains administrator-added browser destinations,
+   select **Allow exact sites** until the popup reports no pending origins.
+   The extension requests only those HTTPS host patterns and keeps uncovered
+   hosts blocked with a dynamic browser rule. Ensure Chrome/Edge
+   `ExtensionSettings.runtime_allowed_hosts` does not prohibit them.
+6. Open ChatGPT, Claude, and one administrator-added destination, then send a
+   benign prompt on each.
+7. Confirm the dashboard Coverage tab shows `browser_extension` install health.
    A healthy managed install should show passing checks for managed config,
-   managed identity, tenant id, server URL, ingest-key presence, content-script
-   coverage, and policy cache availability.
-7. Confirm the dashboard shows the correct user, org, version, and platform
+   managed identity, tenant id, server URL, exact server-host permission,
+   ingest-key presence, pinned policy-key presence, content-script coverage,
+   and a fresh verified signed-policy cache.
+8. Confirm the dashboard shows the correct user, org, version, and platform
    (`chrome_mv3`, `edge_mv3`, or `firefox_mv3`).
-8. Paste synthetic PII and confirm a block or redaction.
-9. Visit an unreviewed AI host and confirm RedactWall blocks it by default, then
+9. Paste synthetic PII and confirm a block or redaction.
+10. Visit an unreviewed AI host and confirm RedactWall blocks it by default, then
    records the reviewed allow/govern/block decision after a Security Admin
    enters a reason.
 
@@ -168,10 +206,18 @@ On a managed test device:
 - Use HTTPS for `serverUrl`.
 - Do not include URL username or password credentials in `serverUrl`.
 - Use a stable, rotated `INGEST_API_KEY`.
+- Provision `policyPublicKey` before enabling the extension. A missing pin,
+  bad signature, key swap, malformed bundle, or expired cache blocks browser
+  sends and uploads until a fresh bundle verifies under the existing pin.
 - Use `docs/deployment/EXTENSION_RELEASE_CHECKLIST.md` before uploading or distributing a
   managed browser package.
 - Pair extension force-install with browser policy that blocks unapproved AI
   destinations or routes them through governance.
+- Built-in AI hosts use packaged content scripts. Administrator-added HTTPS
+  hosts require their exact optional-host grant and runtime script registration;
+  install health reports `custom_destination_coverage=false` and top-level
+  navigation remains blocked until both are active. A broad `*`, cleartext URL,
+  credentialed URL, or invalid host requires correction or proxy enforcement.
 - Keep each browser extension ID stable across updates.
 - Treat managed policy as secret-bearing configuration because it contains the
   ingest key.

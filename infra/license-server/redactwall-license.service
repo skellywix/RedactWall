@@ -1,0 +1,35 @@
+# systemd unit for the RedactWall license heartbeat server.
+# Install: sudo cp redactwall-license.service /etc/systemd/system/
+#          sudo systemctl daemon-reload && sudo systemctl enable --now redactwall-license
+[Unit]
+Description=RedactWall license heartbeat server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=rwlicense
+Group=rwlicense
+ExecStart=/usr/bin/node /opt/redactwall-license/server.js
+Environment=LICENSE_SERVER_PORT=8080
+Environment=LICENSE_VERDICT_SIGNING_KEY_PATH=/etc/redactwall-license/verdict-signing-key.pem
+Environment=LICENSE_ROOT_PUBLIC_KEY_PATH=/etc/redactwall-license/license-signing-pub.pem
+Environment=LICENSE_REVOKED_PATH=/etc/redactwall-license/revoked.json
+Environment=LICENSE_CUSTOMERS_PATH=/etc/redactwall-license/customers.json
+Environment=LICENSE_HEARTBEAT_LOG=/var/lib/redactwall-license/heartbeats.jsonl
+Environment=LICENSE_BODY_TIMEOUT_MS=5000
+Environment=LICENSE_RATE_LIMIT_PER_MINUTE=60
+Environment=LICENSE_HEARTBEAT_LOG_MAX_BYTES=10485760
+Environment=LICENSE_TRUST_PROXY=1
+Restart=on-failure
+RestartSec=5
+UMask=0077
+StateDirectory=redactwall-license
+StateDirectoryMode=0700
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/redactwall-license
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

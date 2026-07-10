@@ -6,13 +6,17 @@
 require('./env').loadEnv();
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const pkg = require('../package.json');
 const adapters = require('../detection-engine/adapters');
 const detector = require('../detection-engine/detect');
 const customDetectors = require('./custom-detectors');
 const exactMatch = require('./exact-match');
+const fileMutationLock = require('./file-mutation-lock');
+const privatePaths = require('./private-path');
 
-const CONFIG_PATH = process.env.REDACTWALL_POLICY_PATH || path.join(__dirname, '..', 'config', 'policy.json');
+const CONFIG_ENV_PATH = process.env.REDACTWALL_POLICY_PATH;
+const CONFIG_PATH = CONFIG_ENV_PATH || path.join(__dirname, '..', 'config', 'policy.json');
 const SENSOR_ID_RE = /^[a-z][a-z0-9_:-]{0,79}$/;
 const SENSOR_VERSION_RE = /^[A-Za-z0-9._+:-]{1,80}$/;
 const ROUTING_RULE_ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
@@ -75,7 +79,7 @@ const DEFAULT_POLICY = {
   scanner: {
     ignoreDirectories: ['node_modules', '.git', 'Library', 'Applications', 'AppData'],
     ignoreFilenames: ['thumbs.db', '.ds_store', 'package.json', 'package-lock.json'],
-    ignoreExtensions: ['.tmp', '.log', '.lock'],
+    ignoreExtensions: ['.lock'],
     maxFileBytes: Math.round(6.3 * 1024 * 1024),
   },
 };
@@ -391,6 +395,19 @@ function isNormalizedPolicy(policy) {
   return !!(policy && policy[NORMALIZED]);
 }
 
+function mandatoryAlwaysBlock(value) {
+  const configured = Array.isArray(value) ? value : [];
+  return [...new Set([...DEFAULT_POLICY.alwaysBlock, ...configured]
+    .filter((type) => typeof type === 'string' && type.trim())
+    .map((type) => type.trim().toUpperCase()))];
+}
+
+function validatePolicyData(value) {
+  // Lazy so standalone endpoint packages can import DEFAULT_POLICY without
+  // pulling the server-only request-validation dependency graph.
+  return require('./validation').policyUpdateSchema.safeParse(value);
+}
+
 function normalizePolicy(p = {}) {
   if (isNormalizedPolicy(p)) return p;
   const scanner = {
@@ -409,6 +426,7 @@ function normalizePolicy(p = {}) {
   const normalized = {
     ...DEFAULT_POLICY,
     ...(p || {}),
+    alwaysBlock: mandatoryAlwaysBlock((p || {}).alwaysBlock),
     approvalRoutingRules: normalizeApprovalRoutingRules((p || {}).approvalRoutingRules),
     policyScopes: normalizePolicyScopes((p || {}).policyScopes),
     policyExceptions: normalizePolicyExceptions((p || {}).policyExceptions),
@@ -512,19 +530,298 @@ function policyChangeDetail(before, after, meta = {}) {
   return JSON.stringify(policyChangeSummary(before, after, meta));
 }
 
-function loadPolicy() {
-  try {
-    if (fs.existsSync(CONFIG_PATH)) {
-      return normalizePolicy(JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')));
+function createPolicyLoader(configPath, configuredByEnv = false, fsImpl = fs) {
+  const fallback = normalizePolicy();
+  let cached = null;
+  let lastGood = null;
+
+  function failed(error, signature, cacheResult = true) {
+    const policy = lastGood || fallback;
+    const result = {
+      signature,
+      policy,
+      ok: false,
+      configured: true,
+      error,
+      usingLastKnownGood: !!lastGood,
+    };
+    if (cacheResult) cached = result;
+    return result;
+  }
+
+  function missing() {
+    const signature = 'missing';
+    if (cached && cached.signature === signature) return cached;
+    if (lastGood) return failed('policy file disappeared after a successful load', signature);
+    if (configuredByEnv) return failed('configured policy file is missing', signature);
+    cached = {
+      signature,
+      policy: fallback,
+      ok: true,
+      configured: false,
+      error: null,
+      usingLastKnownGood: false,
+    };
+    return cached;
+  }
+
+  function state() {
+    let stat;
+    try {
+      stat = fsImpl.statSync(configPath);
+    } catch (error) {
+      if (error && error.code === 'ENOENT') return missing();
+      return failed('policy file could not be inspected', 'stat-error');
     }
-  } catch (e) { /* default */ }
-  return normalizePolicy();
+
+    const signature = `${stat.mtimeMs}:${stat.ctimeMs}:${stat.size}`;
+    if (cached && cached.signature === signature) return cached;
+
+    let contents;
+    try {
+      contents = fsImpl.readFileSync(configPath, 'utf8');
+    } catch (error) {
+      return failed('policy file could not be read', signature, false);
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(contents);
+    } catch (error) {
+      return failed('policy file is not valid JSON', signature);
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return failed('policy file must be a JSON object', signature);
+    }
+    const parsedPolicy = validatePolicyData(parsed);
+    if (!parsedPolicy.success) {
+      return failed('policy file failed semantic validation', signature);
+    }
+
+    const loaded = normalizePolicy(parsedPolicy.data);
+    cached = {
+      signature,
+      policy: loaded,
+      ok: true,
+      configured: true,
+      error: null,
+      usingLastKnownGood: false,
+    };
+    lastGood = loaded;
+    return cached;
+  }
+
+  return {
+    loadPolicy: () => state().policy,
+    status: () => {
+      const current = state();
+      return {
+        ok: current.ok,
+        configured: current.configured,
+        error: current.error,
+        usingLastKnownGood: current.usingLastKnownGood,
+      };
+    },
+    invalidate: () => { cached = null; },
+  };
 }
 
-function savePolicy(p) {
-  const dir = path.dirname(CONFIG_PATH);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(normalizePolicy(p), null, 2));
+const defaultPolicyLoader = createPolicyLoader(CONFIG_PATH, !!CONFIG_ENV_PATH);
+
+function loadPolicy() {
+  return defaultPolicyLoader.loadPolicy();
+}
+
+function policyStatus() {
+  return defaultPolicyLoader.status();
+}
+
+function cleanupPolicyTemp(fsImpl, fileDescriptor, tempPath, tempCreated) {
+  if (fileDescriptor !== null) {
+    try { fsImpl.closeSync(fileDescriptor); } catch (error) { /* preserve original error */ }
+  }
+  if (tempCreated) {
+    try { fsImpl.unlinkSync(tempPath); } catch (error) { /* best-effort cleanup */ }
+  }
+}
+
+function writePolicyBytesAtomically(configPath, data, options = {}) {
+  const fsImpl = options.fs || fs;
+  const dir = path.dirname(configPath);
+  const mode = options.mode == null ? 0o600 : options.mode;
+  const baseNonce = options.nonce || crypto.randomBytes(12).toString('hex');
+  const safeNonce = String(baseNonce).replace(/[^A-Za-z0-9_-]/g, '')
+    || crypto.randomBytes(12).toString('hex');
+  const tempPath = path.join(dir, `.${path.basename(configPath)}.${process.pid}.${safeNonce}.tmp`);
+  let fileDescriptor = null;
+  let tempCreated = false;
+
+  try {
+    fsImpl.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    fileDescriptor = fsImpl.openSync(tempPath, 'wx', mode);
+    tempCreated = true;
+    fsImpl.writeFileSync(fileDescriptor, data, 'utf8');
+    fsImpl.fsyncSync(fileDescriptor);
+    fsImpl.closeSync(fileDescriptor);
+    fileDescriptor = null;
+    privatePaths.publishFileDurably(tempPath, configPath, { ...options, fs: fsImpl });
+    tempCreated = false;
+  } catch (error) {
+    cleanupPolicyTemp(fsImpl, fileDescriptor, tempPath, tempCreated);
+    throw error;
+  }
+}
+
+function normalizedPolicyForWrite(p) {
+  const inputPolicy = validatePolicyData(p == null ? {} : p);
+  if (!inputPolicy.success) throw new TypeError('policy failed semantic validation');
+  const normalized = normalizePolicy(inputPolicy.data);
+  const parsedPolicy = validatePolicyData(normalized);
+  if (!parsedPolicy.success) throw new TypeError('policy failed semantic validation');
+  return parsedPolicy.data;
+}
+
+function writePolicyAtomically(configPath, p, options = {}) {
+  const normalized = normalizedPolicyForWrite(p);
+  writePolicyBytesAtomically(configPath, `${JSON.stringify(normalized, null, 2)}\n`, options);
+  return normalized;
+}
+
+function policyFileSnapshot(configPath = CONFIG_PATH, options = {}) {
+  const fsImpl = options.fs || fs;
+  let stat;
+  try {
+    stat = fsImpl.lstatSync(configPath);
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return { exists: false };
+    throw error;
+  }
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1) {
+    const error = new Error('policy path is not a private regular file');
+    error.code = 'POLICY_FILE_INVALID';
+    throw error;
+  }
+  return {
+    exists: true,
+    contents: fsImpl.readFileSync(configPath),
+    mode: stat.mode & 0o777,
+  };
+}
+
+function policyFromSnapshot(snapshot) {
+  if (!snapshot.exists) return normalizePolicy();
+  let parsed;
+  try {
+    parsed = JSON.parse(snapshot.contents.toString('utf8'));
+  } catch (error) {
+    const invalid = new Error('policy file is not valid JSON');
+    invalid.code = 'POLICY_FILE_INVALID';
+    throw invalid;
+  }
+  const result = validatePolicyData(parsed);
+  if (!result.success) {
+    const invalid = new Error('policy file failed semantic validation');
+    invalid.code = 'POLICY_FILE_INVALID';
+    throw invalid;
+  }
+  return normalizePolicy(result.data);
+}
+
+function policiesEqual(left, right) {
+  return JSON.stringify(normalizedPolicyForWrite(left)) === JSON.stringify(normalizedPolicyForWrite(right));
+}
+
+function stalePolicyError() {
+  const error = new Error('policy changed before mutation lock acquisition');
+  error.code = 'POLICY_WRITE_CONFLICT';
+  error.statusCode = 409;
+  error.publicMessage = 'policy changed; refresh and retry';
+  return error;
+}
+
+function restorePolicySnapshot(configPath, snapshot, options = {}) {
+  const fsImpl = options.fs || fs;
+  if (snapshot.exists) {
+    writePolicyBytesAtomically(configPath, snapshot.contents, { ...options, mode: snapshot.mode });
+    return;
+  }
+  try {
+    fsImpl.unlinkSync(configPath);
+    privatePaths.fsyncDirectory(path.dirname(configPath), { ...options, fs: fsImpl });
+  } catch (error) {
+    if (!error || error.code !== 'ENOENT') throw error;
+  }
+}
+
+function invalidatePolicyCache(configPath) {
+  if (configPath === path.resolve(CONFIG_PATH)) defaultPolicyLoader.invalidate();
+}
+
+function createPolicyMutationWriter(configPath, state, options) {
+  return (nextPolicy) => {
+    const saved = writePolicyAtomically(configPath, nextPolicy, options);
+    state.written = true;
+    invalidatePolicyCache(configPath);
+    return normalizePolicy(saved);
+  };
+}
+
+function rollbackPolicyMutation(configPath, before, originalError, options) {
+  try {
+    restorePolicySnapshot(configPath, before, options);
+    invalidatePolicyCache(configPath);
+  } catch (rollbackError) {
+    const failure = new Error('policy rollback failed after control-plane commit error');
+    failure.code = 'POLICY_ROLLBACK_FAILED';
+    failure.cause = originalError;
+    failure.rollbackCause = rollbackError;
+    throw failure;
+  }
+}
+
+function runPolicyFileMutation(configPath, expectedPolicy, callback, options) {
+  const before = policyFileSnapshot(configPath, options);
+  const current = policyFromSnapshot(before);
+  if (!policiesEqual(current, expectedPolicy)) throw stalePolicyError();
+  const state = { written: false };
+  const write = createPolicyMutationWriter(configPath, state, options);
+  try {
+    const result = callback({ current, write });
+    if (result && typeof result.then === 'function') {
+      throw new TypeError('policy mutation callback must be synchronous');
+    }
+    return result;
+  } catch (error) {
+    if (state.written) rollbackPolicyMutation(configPath, before, error, options);
+    throw error;
+  }
+}
+
+function withPolicyFileMutation(expectedPolicy, callback, options = {}) {
+  const configPath = path.resolve(options.configPath || CONFIG_PATH);
+  return fileMutationLock.withFileMutationLockSync(
+    configPath,
+    () => runPolicyFileMutation(configPath, expectedPolicy, callback, options),
+    options,
+  );
+}
+
+async function withPolicyFileMutationAsync(expectedPolicy, callback, options = {}) {
+  const configPath = path.resolve(options.configPath || CONFIG_PATH);
+  return fileMutationLock.withFileMutationLock(
+    configPath,
+    () => runPolicyFileMutation(configPath, expectedPolicy, callback, options),
+    options,
+  );
+}
+
+function savePolicy(p, options = {}) {
+  const configPath = path.resolve(options.configPath || CONFIG_PATH);
+  return fileMutationLock.withFileMutationLockSync(configPath, () => {
+    const saved = writePolicyAtomically(configPath, p, options);
+    invalidatePolicyCache(configPath);
+    return normalizePolicy(saved);
+  }, options);
 }
 
 // Every hard-stop (alwaysBlock) type, including per-scope additions. These must
@@ -532,7 +829,7 @@ function savePolicy(p) {
 // produces no finding, so the evaluate()-level hard-stop guard could never fire
 // and raw regulated PII would be cleared to send.
 function alwaysBlockTypes(policy = loadPolicy()) {
-  const types = new Set(policy.alwaysBlock || DEFAULT_POLICY.alwaysBlock || []);
+  const types = new Set(mandatoryAlwaysBlock(policy && policy.alwaysBlock));
   for (const scope of policy.policyScopes || []) {
     for (const type of scope.alwaysBlockAdd || []) types.add(type);
   }
@@ -546,8 +843,15 @@ function analyzeOpts(policy = loadPolicy()) {
     // hard-stop entity only removes it from scoring (handled in evaluate), it
     // must never suppress the detector itself.
     ignore: (policy.ignore || []).filter((type) => !alwaysBlock.has(type)),
-    disabledDetectors: policy.disabledDetectors || [],
+    // A disabled detector may tune optional coverage, but it can never remove
+    // evidence for a global or scoped hard stop. Keep those detectors active so
+    // evaluate() can enforce the alwaysBlock invariant.
+    disabledDetectors: (policy.disabledDetectors || []).filter((type) => !alwaysBlock.has(type)),
     customDetectors: customDetectors.loadCustomDetectors(),
+    // These options are used only at prompt, file-text, and response-text
+    // boundaries. A strict reversible encoding that decodes to non-text cannot
+    // be cleared as ordinary prose because the text detector could not inspect it.
+    opaqueEncodedContent: true,
   };
   const edm = exactMatch.exactMatchConfig();
   if (edm) opts.exactMatch = edm;
@@ -556,6 +860,10 @@ function analyzeOpts(policy = loadPolicy()) {
 
 function customDetectorsForSensors() {
   return customDetectors.loadCustomDetectors();
+}
+
+function customDetectorsStatus() {
+  return customDetectors.status();
 }
 
 function rawRetentionDays(policy = loadPolicy()) {
@@ -791,10 +1099,12 @@ function evaluate(analysis, policy = loadPolicy(), context = {}, options = {}) {
   // must still force a block, or raw regulated PII could be cleared to send.
   const findings = (analysis.findings || []).filter((f) => alwaysBlock.includes(f.type) || !ignore.includes(f.type));
   const categories = (analysis.categories || []).filter((c) => !ignore.includes(c && (c.category || c)));
+  const opaqueEncoded = analysis && analysis.opaqueEncoded === true;
 
-  if (findings.length === 0 && categories.length === 0) {
+  if (findings.length === 0 && categories.length === 0 && !opaqueEncoded) {
     return { decision: 'allow', reasons: ['Nothing sensitive detected'], policy: effective, policyScopeIds: effective.appliedPolicyScopes || [] };
   }
+  if (opaqueEncoded) reasons.push('Opaque reversible encoding could not be inspected');
   if (categories.length) reasons.push('Sensitive content: ' + categories.map((c) => c && (c.category || c)).join(', '));
   const hardStop = findings.find((f) => (effective.alwaysBlock || []).includes(f.type));
   if (hardStop) {
@@ -815,7 +1125,7 @@ function evaluate(analysis, policy = loadPolicy(), context = {}, options = {}) {
     reasons.push('Policy scope matched: ' + effective.appliedPolicyScopes.join(', '));
   }
 
-  const exception = reasons.length && !hardStop ? activePolicyException(effective, analysis, context, options) : null;
+  const exception = reasons.length && !hardStop && !opaqueEncoded ? activePolicyException(effective, analysis, context, options) : null;
   if (exception && exception.action === 'allow') {
     return {
       decision: 'allow',
@@ -832,13 +1142,20 @@ function evaluate(analysis, policy = loadPolicy(), context = {}, options = {}) {
 }
 
 module.exports = {
+  createPolicyLoader,
   loadPolicy,
+  policyStatus,
   savePolicy,
+  writePolicyAtomically,
+  withPolicyFileMutation,
+  withPolicyFileMutationAsync,
   evaluate,
   analyzeOpts,
   customDetectorsForSensors,
+  customDetectorsStatus,
   rawRetentionDays,
   normalizePolicy,
+  mandatoryAlwaysBlock,
   normalizeDestination,
   normalizeApprovalRoutingRules,
   normalizePolicyScopes,

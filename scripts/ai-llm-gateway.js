@@ -13,6 +13,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { URL } = require('node:url');
 const { extractPrompt, fetchWithTimeout, awaitRelease } = require('./squid-icap-bridge');
+const detect = require('../detection-engine/detect');
+const canonical = require('../gateway/canonical');
+const { classifyResponseVerdict } = require('../gateway/verdict');
+const { readBoundedBuffer, readBoundedJson } = require('../sensors/shared/bounded-response');
 
 const REDACTWALL = process.env.REDACTWALL_URL || process.env.PROMPTWALL_URL || process.env.SENTINEL_URL || 'http://localhost:4000';
 const KEY = process.env.INGEST_API_KEY || 'dev-ingest-key';
@@ -21,6 +25,11 @@ const DEFAULT_HOST = (process.env.REDACTWALL_GATEWAY_HOST || process.env.PROMPTW
 const DEFAULT_UPSTREAM = (process.env.REDACTWALL_GATEWAY_UPSTREAM || process.env.PROMPTWALL_GATEWAY_UPSTREAM) || 'https://api.openai.com';
 const DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
 const DEFAULT_MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
+const DEFAULT_MAX_CONTROL_PLANE_BYTES = 512 * 1024;
+const DEFAULT_UPSTREAM_TIMEOUT_MS = 60000;
+const DEFAULT_REQUEST_BODY_TIMEOUT_MS = 15000;
+const DEFAULT_HEADERS_TIMEOUT_MS = 10000;
+const DEFAULT_KEEP_ALIVE_TIMEOUT_MS = 5000;
 const DEFAULT_RATE_LIMIT = 60;
 const DEFAULT_RATE_WINDOW_MS = 60000;
 const DEFAULT_RATE_LIMIT_STORE = (process.env.REDACTWALL_GATEWAY_RATE_LIMIT_STORE || process.env.PROMPTWALL_GATEWAY_RATE_LIMIT_STORE) || 'memory';
@@ -28,12 +37,15 @@ const DEFAULT_RATE_LIMIT_DB = (process.env.REDACTWALL_GATEWAY_RATE_LIMIT_DB || p
 const DEFAULT_RATE_LIMIT_URL = (process.env.REDACTWALL_GATEWAY_RATE_LIMIT_URL || process.env.PROMPTWALL_GATEWAY_RATE_LIMIT_URL) || '';
 const DEFAULT_RATE_LIMIT_TOKEN = (process.env.REDACTWALL_GATEWAY_RATE_LIMIT_TOKEN || process.env.PROMPTWALL_GATEWAY_RATE_LIMIT_TOKEN) || '';
 const DEFAULT_RATE_LIMIT_TIMEOUT_MS = 2000;
+const DEFAULT_READINESS_TIMEOUT_MS = 2000;
+const DEFAULT_READINESS_CACHE_MS = 1000;
 const DEFAULT_APPROVAL_WAIT_MS = 0;
 const DEFAULT_ALLOWED_MODELS = (process.env.REDACTWALL_GATEWAY_ALLOWED_MODELS || process.env.PROMPTWALL_GATEWAY_ALLOWED_MODELS) || '';
 const DEFAULT_UPSTREAM_AUTH_HEADER = (process.env.REDACTWALL_GATEWAY_UPSTREAM_AUTH_HEADER || process.env.PROMPTWALL_GATEWAY_UPSTREAM_AUTH_HEADER) || 'authorization';
 const DEFAULT_UPSTREAM_AUTH_SCHEME = (process.env.REDACTWALL_GATEWAY_UPSTREAM_AUTH_SCHEME || process.env.PROMPTWALL_GATEWAY_UPSTREAM_AUTH_SCHEME) || 'Bearer';
 const DEFAULT_AWS_SIGV4_SERVICE = (process.env.REDACTWALL_GATEWAY_AWS_SERVICE || process.env.PROMPTWALL_GATEWAY_AWS_SERVICE) || 'bedrock';
 const SENSOR = { name: 'ai_llm_gateway', version: '0.1.0', platform: 'node_reverse_gateway' };
+const READINESS_DETECTOR_IDS = Object.freeze(['US_SSN', 'CREDIT_CARD', 'SECRET_KEY']);
 const PROMPT_METHODS = new Set(['POST', 'PUT', 'PATCH']);
 const HOP_BY_HOP_HEADERS = new Set([
   'connection',
@@ -59,6 +71,38 @@ function boundedInt(value, fallback, min, max) {
   const n = Number(value);
   if (!Number.isFinite(n)) return fallback;
   return Math.max(min, Math.min(max, Math.floor(n)));
+}
+
+function loopbackHost(hostname) {
+  const host = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
+  return host === 'localhost' || host === '::1' || /^127(?:\.\d{1,3}){3}$/.test(host);
+}
+
+function allowInsecureTransport(opts = {}) {
+  const requested = opts.allowInsecureDev === true
+    || String(process.env.REDACTWALL_GATEWAY_ALLOW_INSECURE_HTTP || '').toLowerCase() === 'true';
+  return requested && String(process.env.NODE_ENV || '').toLowerCase() !== 'production';
+}
+
+function normalizeGatewayServiceUrl(value, label, opts = {}) {
+  let url;
+  try { url = new URL(String(value || '')); } catch { throw new Error(`${label} is invalid`); }
+  if (!['http:', 'https:'].includes(url.protocol)) throw new Error(`${label} must use http or https`);
+  if (url.username || url.password) throw new Error(`${label} must not contain credentials`);
+  if (url.hash) throw new Error(`${label} must not contain a fragment`);
+  if (opts.allowQuery !== true && url.search) throw new Error(`${label} must not contain a query`);
+  if (url.protocol === 'http:' && !loopbackHost(url.hostname) && !allowInsecureTransport(opts)) {
+    throw new Error(`${label} must use https for a remote host`);
+  }
+  return url;
+}
+
+function normalizeCredentialProbeUrl(value, label, opts = {}) {
+  const url = normalizeGatewayServiceUrl(value, label, opts);
+  if (url.protocol === 'http:' && !loopbackHost(url.hostname)) {
+    throw new Error(`${label} must use https or loopback http for authenticated readiness`);
+  }
+  return url;
 }
 
 function configuredClientTokens(opts = {}) {
@@ -161,13 +205,10 @@ function rateLimitKey(key) {
   return crypto.createHash('sha256').update(String(key || 'unknown')).digest('hex');
 }
 
-function normalizeRateLimitServiceUrl(value) {
+function normalizeRateLimitServiceUrl(value, opts = {}) {
   const raw = String(value || '').trim();
   if (!raw) throw new Error('gateway http rate limit url is required');
-  const url = new URL(raw);
-  if (!['http:', 'https:'].includes(url.protocol)) throw new Error('gateway http rate limit url must be http or https');
-  if (url.username || url.password) throw new Error('gateway http rate limit url must not contain credentials');
-  return url;
+  return normalizeGatewayServiceUrl(raw, 'gateway http rate limit URL', opts);
 }
 
 function openRateLimitDatabase(dbPath) {
@@ -235,8 +276,8 @@ function unavailableRateLimit(limit, store, error) {
   };
 }
 
-function createHttpRateLimiter({ limit, windowMs, url, token, fetchImpl, timeoutMs }) {
-  const target = normalizeRateLimitServiceUrl(url);
+function createHttpRateLimiter({ limit, windowMs, url, token, fetchImpl, timeoutMs, allowInsecureDev }) {
+  const target = normalizeRateLimitServiceUrl(url, { allowInsecureDev });
   const authToken = String(token || '').trim();
   const timeout = boundedInt(timeoutMs ?? (process.env.REDACTWALL_GATEWAY_RATE_LIMIT_TIMEOUT_MS || process.env.PROMPTWALL_GATEWAY_RATE_LIMIT_TIMEOUT_MS), DEFAULT_RATE_LIMIT_TIMEOUT_MS, 100, 30000);
   return {
@@ -259,7 +300,12 @@ function createHttpRateLimiter({ limit, windowMs, url, token, fetchImpl, timeout
             now,
           }),
         }, { timeoutMs: timeout });
-        const body = res && typeof res.json === 'function' ? await res.json().catch(() => null) : null;
+        const parsed = res ? await readBoundedJson(res, {
+          maxBytes: 64 * 1024,
+          timeoutMs: timeout,
+          label: 'gateway rate limiter response',
+        }).catch(() => null) : null;
+        const body = parsed && parsed.json;
         if (!res || !res.ok || !body || typeof body !== 'object') {
           return unavailableRateLimit(limit, 'http', `gateway shared rate limiter http_${res ? res.status : 'missing'}`);
         }
@@ -292,6 +338,7 @@ function createRateLimiter(opts = {}) {
       token: rateLimitServiceToken(opts),
       fetchImpl: opts.rateLimitFetchImpl || opts.fetchImpl,
       timeoutMs: opts.rateLimitTimeoutMs,
+      allowInsecureDev: opts.allowInsecureDev,
     });
   }
   const buckets = new Map();
@@ -312,18 +359,16 @@ function createRateLimiter(opts = {}) {
   };
 }
 
-function normalizeUpstreamBase(value = DEFAULT_UPSTREAM) {
-  const url = new URL(String(value || DEFAULT_UPSTREAM));
-  if (!['http:', 'https:'].includes(url.protocol)) throw new Error('upstream must be http or https');
-  return url;
+function normalizeUpstreamBase(value = DEFAULT_UPSTREAM, opts = {}) {
+  return normalizeGatewayServiceUrl(value || DEFAULT_UPSTREAM, 'gateway upstream URL', opts);
 }
 
-function targetUrl(req, upstream = DEFAULT_UPSTREAM) {
+function targetUrl(req, upstream = DEFAULT_UPSTREAM, opts = {}) {
   const rawPath = String(req.url || '/');
   if (/^https?:\/\//i.test(rawPath) || rawPath.startsWith('//')) {
     throw new Error('absolute proxy targets are not allowed');
   }
-  const base = normalizeUpstreamBase(upstream);
+  const base = normalizeUpstreamBase(upstream, opts);
   const joinedBase = new URL(base.href);
   if (!joinedBase.pathname.endsWith('/')) joinedBase.pathname += '/';
   const normalizedPath = rawPath.replace(/^\/+/, '');
@@ -347,18 +392,62 @@ function pathAllowed(pathname, opts = {}) {
     || /\/model\/[^/]+\/(?:converse|converse-stream|invoke|invoke-with-response-stream)$/i.test(path);
 }
 
-function collectBody(req, maxBytes = DEFAULT_MAX_BODY_BYTES) {
+function isUnsupportedBedrockStreamingPath(pathname) {
+  return /\/model\/[^/]+\/(?:converse-stream|invoke-with-response-stream)$/i
+    .test(String(pathname || ''));
+}
+
+function declaredRequestLength(req) {
+  const raw = String(req && req.headers && req.headers['content-length'] || '').trim();
+  if (!/^\d+$/.test(raw)) return null;
+  const length = Number(raw);
+  return Number.isSafeInteger(length) ? length : null;
+}
+
+function collectBody(req, maxBytes = DEFAULT_MAX_BODY_BYTES, timeoutMs = DEFAULT_REQUEST_BODY_TIMEOUT_MS) {
+  const declared = declaredRequestLength(req);
+  if (declared != null && declared > maxBytes) {
+    req.pause();
+    return Promise.resolve({ body: Buffer.alloc(0), size: declared, truncated: true });
+  }
   return new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;
-    let truncated = false;
-    req.on('data', (chunk) => {
+    let settled = false;
+    let timer;
+    const cleanup = () => {
+      clearTimeout(timer);
+      req.removeListener('data', onData);
+      req.removeListener('end', onEnd);
+      req.removeListener('error', onError);
+      req.removeListener('aborted', onAborted);
+    };
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (result.truncated || result.timedOut) req.pause();
+      resolve(result);
+    };
+    const onData = (chunk) => {
       size += chunk.length;
-      if (size <= maxBytes) chunks.push(chunk);
-      else truncated = true;
-    });
-    req.on('end', () => resolve({ body: Buffer.concat(chunks), size, truncated }));
-    req.on('error', reject);
+      if (size > maxBytes) return finish({ body: Buffer.alloc(0), size, truncated: true });
+      chunks.push(chunk);
+    };
+    const onEnd = () => finish({ body: Buffer.concat(chunks, size), size, truncated: false });
+    const onError = (error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+    const onAborted = () => finish({ body: Buffer.alloc(0), size, aborted: true });
+    req.on('data', onData);
+    req.on('end', onEnd);
+    req.on('error', onError);
+    req.on('aborted', onAborted);
+    timer = setTimeout(() => finish({ body: Buffer.alloc(0), size, timedOut: true }), timeoutMs);
+    if (typeof timer.unref === 'function') timer.unref();
   });
 }
 
@@ -448,12 +537,16 @@ function inspectContentBlocks(content, reasons) {
 function inspectRequestContent(bodyJson) {
   const payload = bodyJson && typeof bodyJson === 'object' ? bodyJson : {};
   const reasons = new Set();
+  if (canonical.carriesExplicitBinary(payload)) reasons.add('opaque_binary_content');
+  if (canonical.carriesNumericContent(payload, { rootIsContent: true })) reasons.add('opaque_numeric_content');
+  if (canonical.carriesEncodedSensitiveText(payload, (text, options) => detect.analyze(text, options))) reasons.add('encoded_sensitive_content');
+  if (canonical.carriesUnscannableContent(payload)) reasons.add('unscannable_content');
   const messages = [];
   if (Array.isArray(payload.messages)) messages.push(...payload.messages);
   if (Array.isArray(payload.input)) messages.push(...payload.input);
   for (const message of messages) {
     if (!message || typeof message !== 'object') continue;
-    if (message.role && !['user', 'assistant', 'system', 'developer'].includes(String(message.role).toLowerCase())) {
+    if (message.role && !['user', 'assistant', 'system', 'developer', 'tool', 'function'].includes(String(message.role).toLowerCase())) {
       reasons.add('unknown_message_role');
     }
     inspectContentBlocks(message.content, reasons);
@@ -494,9 +587,41 @@ function modelAllowed(model, opts = {}) {
 }
 
 function extractPromptText(destination, bodyJson, bodyText, contentType = 'application/json') {
-  const structured = promptTextFromJson(bodyJson);
+  const structured = bodyJson && typeof bodyJson === 'object' ? canonical.deepText(bodyJson) : '';
   if (String(structured || '').trim()) return String(structured).trim();
   return String(extractPrompt(destination, contentType, bodyText) || '').trim();
+}
+
+function findingCounts(findings = []) {
+  const counts = new Map();
+  for (const finding of findings) {
+    const type = finding && typeof finding === 'object' ? finding.type : finding;
+    if (typeof type === 'string' && type) counts.set(type, (counts.get(type) || 0) + 1);
+  }
+  return counts;
+}
+
+function localCoversVerdict(text, verdict = {}) {
+  const analysis = detect.analyze(String(text || ''));
+  const local = findingCounts(analysis.findings);
+  for (const [type, count] of findingCounts(verdict.findings)) {
+    if ((local.get(type) || 0) < count) return false;
+  }
+  const localCategories = new Set((analysis.categories || []).map((category) => category.type || category));
+  return (verdict.categories || []).every((category) => localCategories.has(category && category.type ? category.type : category));
+}
+
+function analysisHasSensitive(text) {
+  const analysis = detect.analyze(String(text || ''));
+  return analysis.findings.length > 0 || (analysis.categories || []).length > 0;
+}
+
+function redactPromptEnvelope(bodyJson, verdict = {}) {
+  const originalText = canonical.deepText(bodyJson);
+  if (!localCoversVerdict(originalText, verdict)) return null;
+  const body = canonical.mapStrings(bodyJson, (text) => detect.redact(text, detect.analyze(text).findings));
+  if (analysisHasSensitive(canonical.deepText(body))) return null;
+  return body;
 }
 
 function replaceTextContent(content, replacement, state) {
@@ -564,8 +689,17 @@ function replacePromptPayload(bodyJson, replacement) {
   return { body: clone, replaced: state.replaced };
 }
 
-function readControlPlaneJson(res) {
-  return res.json().catch(() => null);
+async function readControlPlaneJson(res, opts = {}) {
+  try {
+    const parsed = await readBoundedJson(res, {
+      maxBytes: boundedInt(opts.maxControlPlaneBytes ?? process.env.REDACTWALL_GATEWAY_MAX_CONTROL_PLANE_RESPONSE_BYTES, DEFAULT_MAX_CONTROL_PLANE_BYTES, 1024, 4 * 1024 * 1024),
+      timeoutMs: boundedInt(opts.controlPlaneTimeoutMs, 10000, 100, 10 * 60 * 1000),
+      label: 'gateway control-plane response',
+    });
+    return parsed.json;
+  } catch {
+    return null;
+  }
 }
 
 function sanitizeGateBody(body = {}) {
@@ -588,7 +722,8 @@ async function postGate({ prompt, user, orgId, destination, sourceIp, clientOutc
   const fetchImpl = opts.fetchImpl || globalThis.fetch;
   if (!fetchImpl) return { ok: false, status: 0, body: { decision: 'block', status: 'control_plane_unavailable', reasons: ['fetch unavailable'] } };
   try {
-    const res = await fetchWithTimeout(fetchImpl, `${opts.redactwall || REDACTWALL}/api/v1/gate`, {
+    const plane = normalizeGatewayServiceUrl(opts.redactwall || REDACTWALL, 'gateway control-plane URL', opts);
+    const res = await fetchWithTimeout(fetchImpl, `${plane.toString().replace(/\/+$/, '')}/api/v1/gate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': opts.key || KEY },
       body: JSON.stringify({
@@ -604,7 +739,7 @@ async function postGate({ prompt, user, orgId, destination, sourceIp, clientOutc
         note,
       }),
     }, { timeoutMs: opts.controlPlaneTimeoutMs });
-    const body = await readControlPlaneJson(res);
+    const body = await readControlPlaneJson(res, opts);
     if (!res || !res.ok || !body || typeof body.decision !== 'string') {
       return { ok: false, status: res ? res.status : 0, body: { decision: 'block', status: 'control_plane_unavailable', reasons: [`gate_http_${res ? res.status : 'missing'}`] } };
     }
@@ -623,14 +758,22 @@ async function postGate({ prompt, user, orgId, destination, sourceIp, clientOutc
 }
 
 function promptForwardPlan(verdict = {}, opts = {}) {
-  const status = verdict.status || '';
-  if (verdict.decision === 'allow' || verdict.decision === 'log' || ['allowed', 'warned', 'warned_sent', 'justified'].includes(status)) {
+  const decision = String(verdict.decision || '').toLowerCase();
+  const status = String(verdict.status || '').toLowerCase();
+  if (decision === 'allow' && ['', 'allowed', 'justified'].includes(status)) {
     return { forward: true, bodyMode: 'original' };
   }
-  if (verdict.decision === 'redact' && status === 'redacted' && typeof verdict.tokenizedPrompt === 'string') {
+  if (decision === 'warn' && ['warned', 'warned_sent'].includes(status)) {
+    return { forward: true, bodyMode: 'original' };
+  }
+  if (decision === 'log' && ['paste_flagged', 'proxy_observed', 'shadow_ai'].includes(status)) {
+    return { forward: true, bodyMode: 'original' };
+  }
+  if (decision === 'redact' && status === 'redacted' && typeof verdict.tokenizedPrompt === 'string') {
     return { forward: true, bodyMode: 'redacted', prompt: verdict.tokenizedPrompt };
   }
-  if (['pending', 'pending_justification'].includes(status) && opts.approvalWaitMs > 0 && verdict.id && verdict.releaseToken) {
+  if (decision === 'block' && ['pending', 'pending_justification'].includes(status)
+      && opts.approvalWaitMs > 0 && verdict.id && verdict.releaseToken) {
     return { forward: 'await_release' };
   }
   return { forward: false, statusCode: status === 'control_plane_unavailable' ? 503 : 403 };
@@ -776,61 +919,31 @@ async function forwardToUpstream({ req, target, bodyJson, opts = {} }) {
     }
   }
   try {
-    const res = await fetchImpl(target.href, {
+    const timeoutMs = boundedInt(opts.upstreamTimeoutMs ?? process.env.REDACTWALL_GATEWAY_TIMEOUT_MS, DEFAULT_UPSTREAM_TIMEOUT_MS, 100, 10 * 60 * 1000);
+    const res = await fetchWithTimeout(fetchImpl, target.href, {
       method: req.method,
       headers,
       body: bodyText,
       redirect: 'manual',
-    });
+    }, { timeoutMs });
     const contentType = res.headers && typeof res.headers.get === 'function'
       ? res.headers.get('content-type') || ''
       : '';
-    const buffer = Buffer.from(await res.arrayBuffer());
-    if (buffer.length > boundedInt(opts.maxResponseBytes, DEFAULT_MAX_RESPONSE_BYTES, 1024, 20 * 1024 * 1024)) {
-      return { ok: false, status: 502, error: 'upstream response too large to scan' };
-    }
+    const buffer = await readBoundedBuffer(res, {
+      maxBytes: boundedInt(opts.maxResponseBytes ?? process.env.REDACTWALL_GATEWAY_MAX_UPSTREAM_RESPONSE_BYTES, DEFAULT_MAX_RESPONSE_BYTES, 1024, 20 * 1024 * 1024),
+      timeoutMs,
+      label: 'gateway upstream response',
+    });
     return { ok: !!(res && res.ok), status: res ? res.status : 0, contentType, body: buffer };
-  } catch {
-    return { ok: false, status: 502, error: 'upstream unavailable' };
+  } catch (err) {
+    const boundedFailure = err && (err.code === 'REDACTWALL_RESPONSE_TOO_LARGE' || err.code === 'REDACTWALL_RESPONSE_TIMEOUT');
+    return { ok: false, status: 502, error: boundedFailure ? 'upstream response unavailable for bounded scan' : 'upstream unavailable' };
   }
-}
-
-function collectText(value, texts) {
-  if (typeof value === 'string' && value.trim()) texts.push(value);
 }
 
 function extractResponseText(bodyJson) {
-  const texts = [];
   if (!bodyJson || typeof bodyJson !== 'object') return '';
-  collectText(bodyJson.output_text, texts);
-  collectText(bodyJson.text, texts);
-  collectText(bodyJson.completion, texts);
-  if (Array.isArray(bodyJson.choices)) {
-    for (const choice of bodyJson.choices) {
-      collectText(choice && choice.text, texts);
-      collectText(choice && choice.message && textFromContent(choice.message.content), texts);
-      collectText(choice && choice.delta && textFromContent(choice.delta.content), texts);
-    }
-  }
-  if (Array.isArray(bodyJson.content)) {
-    for (const item of bodyJson.content) collectText(item && item.text, texts);
-  }
-  if (bodyJson.output && bodyJson.output.message) {
-    collectText(textFromContent(bodyJson.output.message.content), texts);
-  }
-  if (Array.isArray(bodyJson.output)) {
-    for (const output of bodyJson.output) {
-      if (Array.isArray(output && output.content)) {
-        for (const item of output.content) collectText(item && item.text, texts);
-      }
-    }
-  }
-  if (Array.isArray(bodyJson.candidates)) {
-    for (const candidate of bodyJson.candidates) {
-      if (candidate && candidate.content) collectText(textFromParts(candidate.content.parts), texts);
-    }
-  }
-  return texts.join('\n').trim();
+  return canonical.deepText(bodyJson).trim();
 }
 
 function rewriteResponseJson(bodyJson, replacement) {
@@ -908,17 +1021,25 @@ function rewriteResponseJson(bodyJson, replacement) {
   };
 }
 
+function redactResponseEnvelope(bodyJson, verdict = {}) {
+  const text = canonical.deepText(bodyJson);
+  if (!localCoversVerdict(text, verdict)) return null;
+  const body = canonical.mapStrings(bodyJson, (value) => detect.redact(value, detect.analyze(value).findings));
+  return analysisHasSensitive(canonical.deepText(body)) ? null : body;
+}
+
 function sanitizeResponseScan(body = {}) {
-  return {
+  const out = {
     leaked: body.leaked === true,
-    decision: body.decision || 'allow',
-    status: body.status || 'allowed',
-    blocked: body.blocked === true,
+    decision: typeof body.decision === 'string' ? body.decision : null,
+    status: typeof body.status === 'string' ? body.status : null,
     findings: Array.isArray(body.findings) ? body.findings : [],
     categories: Array.isArray(body.categories) ? body.categories : [],
     redacted: typeof body.redacted === 'string' ? body.redacted : '',
     reasons: Array.isArray(body.reasons) ? body.reasons : [],
   };
+  if (typeof body.blocked === 'boolean') out.blocked = body.blocked;
+  return out;
 }
 
 async function scanResponseText({ text, user, orgId, destination }, opts = {}) {
@@ -926,7 +1047,8 @@ async function scanResponseText({ text, user, orgId, destination }, opts = {}) {
   const fetchImpl = opts.fetchImpl || globalThis.fetch;
   if (!fetchImpl) return { ok: false, body: { decision: 'block', status: 'response_scan_unavailable', blocked: true } };
   try {
-    const res = await fetchWithTimeout(fetchImpl, `${opts.redactwall || REDACTWALL}/api/v1/scan-response`, {
+    const plane = normalizeGatewayServiceUrl(opts.redactwall || REDACTWALL, 'gateway control-plane URL', opts);
+    const res = await fetchWithTimeout(fetchImpl, `${plane.toString().replace(/\/+$/, '')}/api/v1/scan-response`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': opts.key || KEY },
       body: JSON.stringify({
@@ -938,7 +1060,7 @@ async function scanResponseText({ text, user, orgId, destination }, opts = {}) {
         sensor: opts.sensor || SENSOR,
       }),
     }, { timeoutMs: opts.controlPlaneTimeoutMs });
-    const body = await readControlPlaneJson(res);
+    const body = await readControlPlaneJson(res, opts);
     if (!res || !res.ok || !body || typeof body.decision !== 'string') {
       return { ok: false, body: { decision: 'block', status: 'response_scan_unavailable', blocked: true } };
     }
@@ -957,6 +1079,14 @@ function jsonResponse(res, status, body, headers = {}) {
     ...headers,
   });
   res.end(payload);
+}
+
+function rejectRequestBody(req, res, status, body) {
+  res.setHeader('connection', 'close');
+  res.once('finish', () => {
+    try { req.destroy(); } catch { /* best effort */ }
+  });
+  return jsonResponse(res, status, body);
 }
 
 function setRateLimitHeaders(res, rate = {}) {
@@ -980,7 +1110,7 @@ function gatewayHealth(opts = {}) {
   }
   if (rateLimitStore === 'http') {
     try {
-      const url = normalizeRateLimitServiceUrl(rateLimitServiceUrl(opts));
+      const url = normalizeRateLimitServiceUrl(rateLimitServiceUrl(opts), opts);
       rateLimit.endpoint = url.origin;
       rateLimit.externalConfigured = true;
     } catch {
@@ -990,10 +1120,18 @@ function gatewayHealth(opts = {}) {
   let upstream = '';
   let upstreamReady = false;
   try {
-    upstream = normalizeUpstreamBase(opts.upstream || DEFAULT_UPSTREAM).origin;
+    upstream = normalizeUpstreamBase(opts.upstream || DEFAULT_UPSTREAM, opts).origin;
     upstreamReady = true;
   } catch {
     upstream = 'invalid';
+  }
+  let controlPlane = '';
+  let controlPlaneReady = false;
+  try {
+    controlPlane = normalizeCredentialProbeUrl(opts.redactwall || REDACTWALL, 'gateway control-plane URL', opts).origin;
+    controlPlaneReady = true;
+  } catch {
+    controlPlane = 'invalid';
   }
   const allowedModels = configuredAllowedModels(opts);
   const rateLimitReady = rateLimitStore !== 'http' || rateLimit.externalConfigured === true;
@@ -1003,18 +1141,166 @@ function gatewayHealth(opts = {}) {
     : { mode: 'header', configured: !!(opts.upstreamApiKey || (process.env.REDACTWALL_GATEWAY_UPSTREAM_API_KEY || process.env.PROMPTWALL_GATEWAY_UPSTREAM_API_KEY)), header: safeHeaderName(opts.upstreamAuthHeader || DEFAULT_UPSTREAM_AUTH_HEADER, 'authorization') };
   const upstreamAuthReady = authMode !== 'aws-sigv4' || upstreamAuth.configured === true;
   return {
-    status: authConfigured && upstreamReady && rateLimitReady && upstreamAuthReady ? 'ready' : 'attention',
+    status: authConfigured && upstreamReady && controlPlaneReady && rateLimitReady && upstreamAuthReady ? 'ready' : 'attention',
     service: 'redactwall-ai-llm-gateway',
     authConfigured,
     upstream,
     upstreamReady,
+    controlPlane,
+    controlPlaneReady,
     upstreamAuth,
     allowedModels: allowedModels.length ? allowedModels : ['*'],
     rateLimit,
     responseScanning: 'required',
-    streaming: 'buffered_scan',
+    streaming: 'buffered_scan_sse',
+    bedrockEventStream: 'unsupported',
     sensor: opts.sensor || SENSOR,
   };
+}
+
+async function cancelProbeBody(response) {
+  try {
+    if (response && response.body && typeof response.body.cancel === 'function') await response.body.cancel();
+  } catch {}
+}
+
+function isRedactWallDetectorInventory(value) {
+  if (!Array.isArray(value)) return false;
+  const detectorIds = new Set(value
+    .filter((item) => item && typeof item === 'object' && typeof item.id === 'string')
+    .map((item) => item.id));
+  return READINESS_DETECTOR_IDS.every((id) => detectorIds.has(id));
+}
+
+async function probeJsonReadiness(url, fetchImpl, timeoutMs, label, accepts, headers = {}) {
+  try {
+    const response = await fetchWithTimeout(fetchImpl, url, {
+      method: 'GET',
+      headers: { accept: 'application/json', ...headers },
+      redirect: 'error',
+    }, { timeoutMs });
+    const parsed = await readBoundedJson(response, {
+      maxBytes: 64 * 1024,
+      timeoutMs,
+      label,
+    });
+    const body = parsed && parsed.json;
+    const defaultAcceptance = (value) => value.ready === true || value.status === 'ready' || value.status === 'ok';
+    const ready = !!(response && response.ok && body && typeof body === 'object'
+      && (typeof accepts === 'function' ? accepts(body) : defaultAcceptance(body)));
+    return { reachable: true, ready };
+  } catch {
+    return { reachable: false, ready: false };
+  }
+}
+
+async function probeControlPlaneReadiness(plane, ingestKey, fetchImpl, timeoutMs) {
+  const base = plane.toString().replace(/\/+$/, '');
+  const [identity, readiness] = await Promise.all([
+    probeJsonReadiness(
+      `${base}/api/v1/detectors`,
+      fetchImpl,
+      timeoutMs,
+      'gateway authenticated control-plane identity',
+      isRedactWallDetectorInventory,
+      { 'x-api-key': ingestKey },
+    ),
+    probeJsonReadiness(
+      `${base}/readyz`,
+      fetchImpl,
+      timeoutMs,
+      'gateway control-plane readiness',
+      (body) => body.ready === true && body.database === true,
+    ),
+  ]);
+  return {
+    reachable: identity.reachable || readiness.reachable,
+    ready: identity.ready && readiness.ready,
+  };
+}
+
+async function probeUpstreamReachability(url, fetchImpl, timeoutMs) {
+  try {
+    const response = await fetchWithTimeout(fetchImpl, url, {
+      method: 'HEAD',
+      redirect: 'error',
+    }, { timeoutMs });
+    await cancelProbeBody(response);
+    const status = Number(response && response.status);
+    return Number.isInteger(status) && status >= 100 && status < 500;
+  } catch {
+    return false;
+  }
+}
+
+async function computeGatewayReadiness(opts = {}) {
+  const health = gatewayHealth(opts);
+  if (health.status !== 'ready') return health;
+  const fetchImpl = opts.readinessFetchImpl || opts.fetchImpl || globalThis.fetch;
+  if (!fetchImpl) {
+    return { ...health, status: 'attention', controlPlaneReady: false, upstreamReady: false };
+  }
+  const timeoutMs = boundedInt(
+    opts.readinessTimeoutMs ?? process.env.REDACTWALL_GATEWAY_READINESS_TIMEOUT_MS,
+    DEFAULT_READINESS_TIMEOUT_MS,
+    100,
+    30000,
+  );
+  const plane = normalizeCredentialProbeUrl(opts.redactwall || REDACTWALL, 'gateway control-plane URL', opts);
+  const upstream = normalizeUpstreamBase(opts.upstream || DEFAULT_UPSTREAM, opts);
+  const probes = [
+    probeControlPlaneReadiness(plane, opts.key || KEY, fetchImpl, timeoutMs),
+    probeUpstreamReachability(upstream.href, fetchImpl, timeoutMs),
+  ];
+  let limiterIndex = -1;
+  if (health.rateLimit.store === 'http') {
+    const limiter = normalizeRateLimitServiceUrl(rateLimitServiceUrl(opts), opts);
+    limiterIndex = probes.length;
+    probes.push(probeJsonReadiness(
+      `${limiter.origin}/readyz`,
+      fetchImpl,
+      timeoutMs,
+      'gateway rate-limiter readiness',
+      (body) => body.status === 'ready' && body.service === 'redactwall-ai-gateway-rate-limiter',
+    ));
+  }
+  const results = await Promise.all(probes);
+  const controlPlaneProbe = results[0];
+  const upstreamReachable = results[1] === true;
+  const limiterProbe = limiterIndex >= 0 ? results[limiterIndex] : { reachable: true, ready: true };
+  const dependenciesReady = controlPlaneProbe.ready && upstreamReachable && limiterProbe.ready;
+  return {
+    ...health,
+    status: dependenciesReady ? 'ready' : 'attention',
+    controlPlaneReady: controlPlaneProbe.ready,
+    controlPlaneReachable: controlPlaneProbe.reachable,
+    upstreamReady: upstreamReachable,
+    upstreamReachable,
+    rateLimit: {
+      ...health.rateLimit,
+      ready: limiterProbe.ready,
+      reachable: limiterProbe.reachable,
+    },
+  };
+}
+
+function gatewayReadiness(opts = {}, state = {}) {
+  const now = Date.now();
+  if (state.readiness && state.readinessExpiresAt > now) return Promise.resolve(state.readiness);
+  if (state.readinessPromise) return state.readinessPromise;
+  state.readinessPromise = computeGatewayReadiness(opts).then((readiness) => {
+    state.readiness = readiness;
+    state.readinessExpiresAt = Date.now() + boundedInt(
+      opts.readinessCacheMs,
+      DEFAULT_READINESS_CACHE_MS,
+      250,
+      30000,
+    );
+    return readiness;
+  }).finally(() => {
+    state.readinessPromise = null;
+  });
+  return state.readinessPromise;
 }
 
 function upstreamHeaders(contentType) {
@@ -1029,8 +1315,84 @@ function upstreamHeaders(contentType) {
 
 function isBufferedStreamingRequest(target, bodyJson) {
   return !!(bodyJson && bodyJson.stream === true)
-    || /:streamGenerateContent$/i.test(String(target && target.pathname || ''))
-    || /\/model\/[^/]+\/(?:converse-stream|invoke-with-response-stream)$/i.test(String(target && target.pathname || ''));
+    || /:streamGenerateContent$/i.test(String(target && target.pathname || ''));
+}
+
+function sseJsonFrames(upstreamText) {
+  const frames = [];
+  let invalid = false;
+  // The SSE grammar permits one UTF-8 BOM at the beginning of the stream.
+  // Remove exactly that marker so the first data frame cannot evade parsing.
+  const source = String(upstreamText || '').replace(/^\uFEFF/, '');
+  for (const block of source.split(/\r?\n\r?\n/)) {
+    const data = block.split(/\r?\n/)
+      .filter((line) => line.startsWith('data:'))
+      .map((line) => line.slice(5).trimStart())
+      .join('\n').trim();
+    if (!data || data === '[DONE]') continue;
+    try { frames.push(JSON.parse(data)); } catch { invalid = true; }
+  }
+  return { frames, invalid };
+}
+
+function openAiFrameDeltas(frame) {
+  const deltas = [];
+  for (const [choiceIndex, choice] of (Array.isArray(frame.choices) ? frame.choices : []).entries()) {
+    if (!choice || typeof choice !== 'object') continue;
+    const key = `openai:${choice.index ?? choiceIndex}`;
+    const delta = choice.delta && typeof choice.delta === 'object' ? choice.delta : {};
+    if (typeof delta.content === 'string') deltas.push([`${key}:content`, delta.content]);
+    if (Array.isArray(delta.content)) for (const [partIndex, part] of delta.content.entries()) {
+      if (part && typeof part.text === 'string') deltas.push([`${key}:content:${partIndex}`, part.text]);
+    }
+    if (delta.function_call && typeof delta.function_call.arguments === 'string') deltas.push([`${key}:function`, delta.function_call.arguments]);
+    for (const [toolIndex, tool] of (Array.isArray(delta.tool_calls) ? delta.tool_calls : []).entries()) {
+      const args = tool && tool.function && tool.function.arguments;
+      if (typeof args === 'string') deltas.push([`${key}:tool:${tool.index ?? toolIndex}`, args]);
+    }
+    if (typeof choice.text === 'string') deltas.push([`${key}:text`, choice.text]);
+  }
+  return deltas;
+}
+
+function providerFrameDeltas(frame) {
+  const deltas = openAiFrameDeltas(frame);
+  const type = String(frame && frame.type || '');
+  if (frame && frame.delta && typeof frame.delta.text === 'string') deltas.push([`anthropic:${frame.index ?? 0}:text`, frame.delta.text]);
+  if (frame && frame.delta && typeof frame.delta.partial_json === 'string') deltas.push([`anthropic:${frame.index ?? 0}:json`, frame.delta.partial_json]);
+  if (frame && typeof frame.completion === 'string') deltas.push(['anthropic:completion', frame.completion]);
+  if (/^response\.(?:output_text|function_call_arguments|reasoning_text)\.delta$/.test(type) && typeof frame.delta === 'string') {
+    deltas.push([`responses:${frame.output_index ?? 0}:${frame.content_index ?? 0}:${type}`, frame.delta]);
+  }
+  for (const [candidateIndex, candidate] of (Array.isArray(frame && frame.candidates) ? frame.candidates : []).entries()) {
+    const parts = candidate && candidate.content && candidate.content.parts;
+    for (const [partIndex, part] of (Array.isArray(parts) ? parts : []).entries()) {
+      if (part && typeof part.text === 'string') deltas.push([`gemini:${candidate.index ?? candidateIndex}:${partIndex}`, part.text]);
+    }
+  }
+  return deltas;
+}
+
+function sseResponseInspection(upstreamText) {
+  const parsed = sseJsonFrames(upstreamText);
+  const frames = parsed.frames;
+  const streams = new Map();
+  for (const frame of frames) for (const [key, value] of providerFrameDeltas(frame)) {
+    streams.set(key, (streams.get(key) || '') + value);
+  }
+  return { frames, reconstructed: [...streams.values()].filter(Boolean), invalid: parsed.invalid };
+}
+
+function looksLikeSse(upstreamText) {
+  return /(?:^|\r?\n)data:/.test(String(upstreamText || '').replace(/^\uFEFF/, ''));
+}
+
+function responseInspectionEnvelopes(upstreamJson, upstreamText, contentType, sseInspection) {
+  if (upstreamJson) return [upstreamJson];
+  if (!String(contentType || '').toLowerCase().startsWith('text/event-stream')) return [upstreamText];
+  const parsed = sseInspection || sseResponseInspection(upstreamText);
+  if (!parsed.frames.length) return [upstreamText];
+  return parsed.frames.concat(parsed.reconstructed.map((text) => ({ output_text: text })));
 }
 
 async function handleGatewayRequest(req, res, opts = {}, state = {}) {
@@ -1041,7 +1403,7 @@ async function handleGatewayRequest(req, res, opts = {}, state = {}) {
     return jsonResponse(res, 200, { status: 'ok', service: 'redactwall-ai-llm-gateway', requestId });
   }
   if (req.method === 'GET' && req.url === '/readyz') {
-    const health = gatewayHealth(opts);
+    const health = await gatewayReadiness(opts, state);
     return jsonResponse(res, health.status === 'ready' ? 200 : 503, { ...health, requestId });
   }
   if (!PROMPT_METHODS.has(String(req.method || '').toUpperCase())) {
@@ -1063,7 +1425,7 @@ async function handleGatewayRequest(req, res, opts = {}, state = {}) {
 
   let target;
   try {
-    target = targetUrl(req, opts.upstream || DEFAULT_UPSTREAM);
+    target = targetUrl(req, opts.upstream || DEFAULT_UPSTREAM, opts);
   } catch (e) {
     return jsonResponse(res, 400, { error: e.message || 'invalid gateway target' });
   }
@@ -1072,18 +1434,39 @@ async function handleGatewayRequest(req, res, opts = {}, state = {}) {
   }
 
   const maxBodyBytes = boundedInt(opts.maxBodyBytes, DEFAULT_MAX_BODY_BYTES, 1024, 20 * 1024 * 1024);
-  const collected = await collectBody(req, maxBodyBytes);
-  if (collected.truncated) return jsonResponse(res, 413, { error: 'request too large to inspect' });
+  const bodyTimeoutMs = boundedInt(
+    opts.requestBodyTimeoutMs ?? process.env.REDACTWALL_GATEWAY_REQUEST_BODY_TIMEOUT_MS,
+    DEFAULT_REQUEST_BODY_TIMEOUT_MS,
+    100,
+    120000,
+  );
+  const collected = await collectBody(req, maxBodyBytes, bodyTimeoutMs);
+  if (collected.truncated) return rejectRequestBody(req, res, 413, { error: 'request too large to inspect' });
+  if (collected.timedOut) return rejectRequestBody(req, res, 408, { error: 'request body timed out' });
+  if (collected.aborted) return rejectRequestBody(req, res, 400, { error: 'request body aborted' });
   const parsed = parseJsonBody(collected.body.toString('utf8'));
   if (!parsed.ok) return jsonResponse(res, 400, { error: parsed.error });
   const requestJson = parsed.value;
-  if (isBufferedStreamingRequest(target, requestJson)) res.setHeader('x-redactwall-stream-buffered', 'true');
+  if (isUnsupportedBedrockStreamingPath(target.pathname)) {
+    return jsonResponse(res, 501, {
+      error: 'Bedrock streaming is disabled because AWS event-stream decoding is not implemented',
+      status: 'bedrock_event_stream_unsupported',
+      requestId,
+    });
+  }
+  const bufferedStreaming = isBufferedStreamingRequest(target, requestJson);
+  if (bufferedStreaming) res.setHeader('x-redactwall-stream-buffered', 'true');
 
   const destination = safeHeaderValue(target.hostname, 'unknown', 253);
-  const user = safeHeaderValue(req.headers['x-redactwall-user'], auth.principal, 320);
-  const orgId = req.headers['x-redactwall-org'] ? safeHeaderValue(req.headers['x-redactwall-org'], '', 160) : null;
+  // Attribution is bound to the authenticated token. Caller-provided identity
+  // headers are untrusted and cannot override policy or audit identity.
+  const user = auth.principal;
+  const orgId = null;
   const requestInspection = inspectRequestContent(requestJson);
-  if (!requestInspection.inspectable && opts.allowMultimodal !== true) {
+  const hardOpaqueContent = requestInspection.reasons.some((reason) => (
+    reason === 'opaque_numeric_content' || reason === 'encoded_sensitive_content'
+  ));
+  if (!requestInspection.inspectable && (hardOpaqueContent || opts.allowMultimodal !== true)) {
     await postGate({
       prompt: `[LLM non-text content blocked] ${requestInspection.reasons.join(', ')}`,
       user,
@@ -1135,11 +1518,17 @@ async function handleGatewayRequest(req, res, opts = {}, state = {}) {
   const approvalWaitMs = boundedInt(opts.approvalWaitMs ?? (process.env.REDACTWALL_GATEWAY_APPROVAL_WAIT_MS || process.env.PROMPTWALL_GATEWAY_APPROVAL_WAIT_MS), DEFAULT_APPROVAL_WAIT_MS, 0, 10 * 60 * 1000);
   const plan = promptForwardPlan(verdict, { approvalWaitMs });
   if (plan.forward === 'await_release') {
+    let releasePlane;
+    try {
+      releasePlane = normalizeGatewayServiceUrl(opts.redactwall || REDACTWALL, 'gateway control-plane URL', opts).toString().replace(/\/+$/, '');
+    } catch {
+      return jsonResponse(res, 503, { error: 'RedactWall control plane unavailable', decision: 'block', requestId });
+    }
     const release = await awaitRelease(verdict.id, {
       releaseToken: verdict.releaseToken,
       timeoutMs: approvalWaitMs,
       intervalMs: boundedInt(opts.approvalPollMs, 2000, 100, 60000),
-      redactwall: opts.redactwall || REDACTWALL,
+      redactwall: releasePlane,
       key: opts.key || KEY,
       fetchImpl: opts.fetchImpl || globalThis.fetch,
       requestTimeoutMs: opts.controlPlaneTimeoutMs,
@@ -1172,9 +1561,13 @@ async function handleGatewayRequest(req, res, opts = {}, state = {}) {
 
   let outboundJson = requestJson;
   if (plan.bodyMode === 'redacted') {
-    const replaced = replacePromptPayload(requestJson, plan.prompt);
-    if (!replaced.replaced) return jsonResponse(res, 409, { error: 'unable to apply RedactWall redaction to request payload', requestId });
-    outboundJson = replaced.body;
+    const redacted = redactPromptEnvelope(requestJson, verdict);
+    if (!redacted) return jsonResponse(res, 409, { error: 'unable to apply RedactWall redaction to complete request payload', requestId });
+    outboundJson = redacted;
+  }
+
+  if (plan.bodyMode === 'redacted' && analysisHasSensitive(canonical.deepText(outboundJson))) {
+    return jsonResponse(res, 409, { error: 'unable to prove complete RedactWall redaction for request payload', requestId });
   }
 
   const upstream = await forwardToUpstream({ req, target, bodyJson: outboundJson, opts });
@@ -1187,13 +1580,61 @@ async function handleGatewayRequest(req, res, opts = {}, state = {}) {
   if ((upstream.contentType || '').includes('json')) {
     try { upstreamJson = JSON.parse(upstreamText); } catch {}
   }
-  const responseText = upstreamJson ? extractResponseText(upstreamJson) : upstreamText;
+  const responseContentType = String(upstream.contentType || '').toLowerCase();
+  const sseLike = responseContentType.startsWith('text/event-stream')
+    || (bufferedStreaming && looksLikeSse(upstreamText));
+  const effectiveResponseContentType = sseLike
+    ? 'text/event-stream; charset=utf-8'
+    : upstream.contentType;
+  const responseTypeScannable = !responseContentType
+    || responseContentType.includes('json')
+    || responseContentType.startsWith('text/plain')
+    || responseContentType.startsWith('text/event-stream');
+  const sseInspection = sseLike
+    ? sseResponseInspection(upstreamText)
+    : null;
+  if (sseInspection && sseInspection.invalid) {
+    return jsonResponse(res, 403, {
+      error: 'AI response contains malformed streaming data RedactWall cannot inspect',
+      decision: 'block',
+      status: 'response_non_text_content_blocked',
+      requestId,
+    });
+  }
+  const responseEnvelopes = responseInspectionEnvelopes(upstreamJson, upstreamText, effectiveResponseContentType, sseInspection);
+  const opaqueResponse = responseEnvelopes.some((envelope) => (
+    (envelope && typeof envelope === 'object' && canonical.carriesExplicitBinary(envelope))
+    || canonical.carriesNumericContent(envelope, { rootIsContent: true })
+    || canonical.carriesEncodedSensitiveText(envelope, (text, options) => detect.analyze(text, options))
+  ));
+  if (!responseTypeScannable || opaqueResponse) {
+    return jsonResponse(res, 403, {
+      error: 'AI response contains content RedactWall cannot inspect',
+      decision: 'block',
+      status: 'response_non_text_content_blocked',
+      requestId,
+    });
+  }
+  const responseText = upstreamJson
+    ? extractResponseText(upstreamJson)
+    : (sseInspection && sseInspection.reconstructed.length
+      ? sseInspection.reconstructed.concat(upstreamText).join('\n')
+      : upstreamText);
   const responseScan = await scanResponseText({ text: responseText, user, orgId, destination }, opts);
   const scanBody = responseScan.body;
   if (!responseScan.ok) {
     return jsonResponse(res, 502, { error: 'RedactWall response scan unavailable', decision: 'block', status: scanBody.status, requestId });
   }
-  if (scanBody.blocked || scanBody.decision === 'block') {
+  const responseAction = classifyResponseVerdict(scanBody);
+  if (responseAction === 'invalid') {
+    return jsonResponse(res, 403, {
+      error: 'AI response withheld because RedactWall returned an invalid verdict',
+      decision: 'block',
+      status: 'response_scan_invalid',
+      requestId,
+    });
+  }
+  if (responseAction === 'block') {
     return jsonResponse(res, 403, {
       error: 'AI response blocked by RedactWall',
       decision: 'block',
@@ -1204,17 +1645,42 @@ async function handleGatewayRequest(req, res, opts = {}, state = {}) {
       requestId,
     });
   }
-  if (scanBody.decision === 'redact') {
+  if (responseAction === 'redact') {
     if (upstreamJson) {
-      const rewritten = rewriteResponseJson(upstreamJson, scanBody.redacted || '[REDACTED]');
-      return jsonResponse(res, upstream.status, rewritten, upstreamHeaders(upstream.contentType));
+      const rewritten = redactResponseEnvelope(upstreamJson, scanBody);
+      if (!rewritten) {
+        return jsonResponse(res, 403, {
+          error: 'AI response could not be completely redacted',
+          decision: 'block',
+          status: 'response_redaction_incomplete',
+          requestId,
+        });
+      }
+      return jsonResponse(res, upstream.status, rewritten, upstreamHeaders(effectiveResponseContentType));
     }
-    res.writeHead(upstream.status, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
-    res.end(scanBody.redacted || '[REDACTED]');
+    if (!localCoversVerdict(upstreamText, scanBody)) {
+      return jsonResponse(res, 403, {
+        error: 'AI response could not be completely redacted',
+        decision: 'block',
+        status: 'response_redaction_incomplete',
+        requestId,
+      });
+    }
+    const redactedText = detect.redact(upstreamText, detect.analyze(upstreamText).findings);
+    if (analysisHasSensitive(redactedText)) {
+      return jsonResponse(res, 403, {
+        error: 'AI response could not be completely redacted',
+        decision: 'block',
+        status: 'response_redaction_incomplete',
+        requestId,
+      });
+    }
+    res.writeHead(upstream.status, upstreamHeaders(effectiveResponseContentType));
+    res.end(redactedText);
     return undefined;
   }
 
-  res.writeHead(upstream.status, upstreamHeaders(upstream.contentType));
+  res.writeHead(upstream.status, upstreamHeaders(effectiveResponseContentType));
   res.end(upstream.body);
   return undefined;
 }
@@ -1230,6 +1696,25 @@ function createGatewayServer(opts = {}) {
   server.on('close', () => {
     if (state.rateLimiter && typeof state.rateLimiter.close === 'function') state.rateLimiter.close();
   });
+  const requestTimeoutMs = boundedInt(
+    opts.requestBodyTimeoutMs ?? process.env.REDACTWALL_GATEWAY_REQUEST_BODY_TIMEOUT_MS,
+    DEFAULT_REQUEST_BODY_TIMEOUT_MS,
+    100,
+    120000,
+  );
+  server.requestTimeout = Math.min(120000, requestTimeoutMs + 1000);
+  server.headersTimeout = Math.min(server.requestTimeout, boundedInt(
+    opts.headersTimeoutMs ?? process.env.REDACTWALL_GATEWAY_HEADERS_TIMEOUT_MS,
+    DEFAULT_HEADERS_TIMEOUT_MS,
+    100,
+    60000,
+  ));
+  server.keepAliveTimeout = boundedInt(
+    opts.keepAliveTimeoutMs ?? process.env.REDACTWALL_GATEWAY_KEEP_ALIVE_TIMEOUT_MS,
+    DEFAULT_KEEP_ALIVE_TIMEOUT_MS,
+    100,
+    60000,
+  );
   return server;
 }
 
@@ -1260,6 +1745,9 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (item === '--rate-url') out.rateLimitUrl = argv[++i];
     else if (item === '--rate-token') out.rateLimitToken = argv[++i];
     else if (item === '--rate-timeout-ms') out.rateLimitTimeoutMs = Number(argv[++i]);
+    else if (item === '--request-body-timeout-ms') out.requestBodyTimeoutMs = Number(argv[++i]);
+    else if (item === '--headers-timeout-ms') out.headersTimeoutMs = Number(argv[++i]);
+    else if (item === '--keep-alive-timeout-ms') out.keepAliveTimeoutMs = Number(argv[++i]);
     else if (item === '--allowed-models') out.allowedModels = argv[++i];
     else if (item === '--allow-multimodal') out.allowMultimodal = true;
     else if (item === '--allow-insecure-dev') out.allowInsecureDev = true;
@@ -1290,15 +1778,18 @@ if (require.main === module) {
 
 module.exports = {
   authenticateGatewayClient,
+  collectBody,
   createGatewayServer,
   createHttpRateLimiter,
   createRateLimiter,
   createSqliteRateLimiter,
   extractResponseText,
   gatewayHealth,
+  gatewayReadiness,
   handleGatewayRequest,
   inspectRequestContent,
   isBufferedStreamingRequest,
+  isUnsupportedBedrockStreamingPath,
   modelAllowed,
   modelFromJson,
   modelFromRequest,

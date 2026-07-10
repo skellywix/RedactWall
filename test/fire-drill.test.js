@@ -2,7 +2,26 @@
 /** Canary fire drill should prove detection without leaking the planted token. */
 const test = require('node:test');
 const assert = require('node:assert');
+const http = require('node:http');
 const drill = require('../scripts/fire-drill');
+
+function jsonResponse(status, body) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
+function listen(server) {
+  return new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => resolve(server.address().port));
+  });
+}
+
+function close(server) {
+  return new Promise((resolve) => server.close(resolve));
+}
 
 test('canary fire drill token and prompt use detector-compatible shape', () => {
   const token = drill.makeCanaryToken('demo');
@@ -53,27 +72,23 @@ test('runFireDrill posts a canary gate request and returns sanitized summary', a
   const requests = [];
   const token = drill.makeCanaryToken('request');
   const result = await drill.runFireDrill({
-    baseUrl: 'http://control.example/',
+    baseUrl: 'https://control.example/',
     ingestKey: 'test-key',
     token,
     async fetchImpl(url, options) {
       requests.push({ url, options, body: JSON.parse(options.body) });
-      return {
-        ok: true,
-        async json() {
-          return {
-            id: 'q_fire',
-            decision: 'redact',
-            status: 'redacted',
-            riskScore: 99,
-            findings: [{ type: 'CANARY_TOKEN', masked: '[CANARY_TOKEN]' }],
-          };
-        },
-      };
+      return jsonResponse(200, {
+        id: 'q_fire',
+        decision: 'redact',
+        status: 'redacted',
+        riskScore: 99,
+        findings: [{ type: 'CANARY_TOKEN', masked: '[CANARY_TOKEN]' }],
+      });
     },
   });
 
-  assert.strictEqual(requests[0].url, 'http://control.example/api/v1/gate');
+  assert.strictEqual(requests[0].url, 'https://control.example/api/v1/gate');
+  assert.strictEqual(requests[0].options.redirect, 'error');
   assert.strictEqual(requests[0].options.headers['x-api-key'], 'test-key');
   assert.strictEqual(requests[0].body.destination, 'chatgpt.com');
   assert.strictEqual(requests[0].body.source, 'fire_drill');
@@ -84,12 +99,70 @@ test('runFireDrill posts a canary gate request and returns sanitized summary', a
 
 test('runFireDrill reports non-OK gate responses', async () => {
   await assert.rejects(() => drill.runFireDrill({
-    baseUrl: 'http://control.example',
+    baseUrl: 'https://control.example',
     token: drill.makeCanaryToken('fail'),
     async fetchImpl() {
       return { ok: false, status: 503 };
     },
   }), /HTTP 503/);
+});
+
+test('runFireDrill cancels a stalled unknown-length response body', async () => {
+  let cancelled = false;
+  await assert.rejects(() => drill.runFireDrill({
+    baseUrl: 'https://control.example',
+    token: drill.makeCanaryToken('stall'),
+    responseTimeoutMs: 20,
+    async fetchImpl() {
+      return {
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        body: new ReadableStream({
+          cancel() { cancelled = true; },
+        }),
+      };
+    },
+  }), (err) => err && err.code === 'REDACTWALL_RESPONSE_TIMEOUT');
+  assert.strictEqual(cancelled, true);
+});
+
+test('runFireDrill rejects a remote cleartext control plane before sending the key or canary', async () => {
+  let called = false;
+  await assert.rejects(() => drill.runFireDrill({
+    baseUrl: 'http://control.example',
+    ingestKey: 'unit-key',
+    token: drill.makeCanaryToken('cleartext'),
+    fetchImpl: async () => { called = true; },
+  }), /must use HTTPS or loopback HTTP/);
+  assert.strictEqual(called, false);
+});
+
+test('runFireDrill does not forward the ingest key or body through a real 307 redirect', async (t) => {
+  let redirectedRequests = 0;
+  const receiver = http.createServer((req, res) => {
+    redirectedRequests += 1;
+    req.resume();
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end('{}');
+  });
+  const receiverPort = await listen(receiver);
+  t.after(() => close(receiver));
+
+  const redirector = http.createServer((req, res) => {
+    req.resume();
+    res.writeHead(307, { location: `http://127.0.0.1:${receiverPort}/capture` });
+    res.end();
+  });
+  const redirectorPort = await listen(redirector);
+  t.after(() => close(redirector));
+
+  await assert.rejects(() => drill.runFireDrill({
+    baseUrl: `http://127.0.0.1:${redirectorPort}`,
+    ingestKey: 'must-not-reach-redirect-target',
+    token: drill.makeCanaryToken('redirect'),
+  }), /fetch failed|redirect/i);
+  assert.strictEqual(redirectedRequests, 0);
 });
 
 test('fire drill main emits an operator summary with the selected base URL', async () => {

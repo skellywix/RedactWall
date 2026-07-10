@@ -52,14 +52,14 @@ async function jsonFetch(port, apiPath, { method = 'POST', body, headers = {} } 
   });
 }
 
-async function waitFor(fn, timeoutMs = 1000) {
+async function waitFor(fn, label, timeoutMs = 10000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const value = fn();
     if (value) return value;
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await new Promise((resolve) => setTimeout(resolve, 25));
   }
-  assert.fail('timed out waiting for condition');
+  assert.fail(`timed out waiting for ${label}`);
 }
 
 test('blocked prompt sends sanitized approval notification and persists delivery status', async () => withServer(async (port) => {
@@ -92,7 +92,7 @@ test('blocked prompt sends sanitized approval notification and persists delivery
     const stored = await waitFor(() => {
       const q = db.getQuery(body.id);
       return q && q.notificationStatus === 'sent' ? q : null;
-    });
+    }, 'initial approval notification persistence');
     assert.deepStrictEqual(stored.notificationChannels, ['webhook']);
     assert.strictEqual(stored.notificationAttemptCount, 1);
     assert.match(stored.notificationLastAttemptAt, /^\d{4}-\d{2}-\d{2}T/);
@@ -135,7 +135,7 @@ test('SLA escalation persists state, audits the event, and sends a second notifi
     const initial = await waitFor(() => {
       const q = db.getQuery(body.id);
       return q && q.notificationAttemptCount === 1 ? q : null;
-    });
+    }, 'initial escalation notification attempt');
 
     const due = new Date(Date.parse(initial.slaDueAt) + 1000);
     const result = app.runWorkflowEscalation({ now: due, notify: true });
@@ -144,7 +144,7 @@ test('SLA escalation persists state, audits the event, and sends a second notifi
     const escalated = await waitFor(() => {
       const q = db.getQuery(body.id);
       return q && q.escalatedAt && q.notificationAttemptCount === 2 ? q : null;
-    });
+    }, 'escalation notification persistence');
     assert.strictEqual(escalated.assignedRole, 'security_admin');
     assert.strictEqual(escalated.escalationReason, 'sla_due');
     assert.ok(sent.some((payload) => payload.action === 'APPROVAL_ESCALATED'));

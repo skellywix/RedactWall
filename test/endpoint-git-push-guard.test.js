@@ -115,6 +115,66 @@ test('sensitive outbound diff is blocked locally and reports masked evidence onl
   assert.ok(!JSON.stringify(result).includes(RAW_SECRET));
 });
 
+test('encoded SSNs and opaque Base64 block git push before the hook exits', async () => {
+  const encodedSsn = Buffer.from(`SSN ${RAW_SSN}`).toString('base64');
+  const opaqueBinary = Buffer.from([0, 255, 1, 254, 2, 253, 3, 252, 4, 251, 5, 250]).toString('base64');
+
+  for (const encoded of [encodedSsn, Buffer.from(`SSN ${RAW_SSN}`).toString('hex'), opaqueBinary]) {
+    let reportRequest;
+    const result = await guard.collectGitPush({
+      diffText: `diff --git a/data.txt b/data.txt\n+${encoded}`,
+      remoteUrl: 'https://github.com/customer/repo.git',
+      allowedHosts: ['github.com'],
+      policy: { enforcementMode: 'warn', alwaysBlock: [], ignore: [], disabledDetectors: [] },
+      report: async (record) => {
+        reportRequest = record;
+        return { id: 'q_encoded_git', status: 'action_blocked' };
+      },
+    });
+
+    assert.strictEqual(result.status, 'blocked');
+    assert.strictEqual(result.blocked, true);
+    assert.strictEqual(reportRequest.clientOutcome, 'action_blocked');
+    assert.ok(!JSON.stringify(reportRequest).includes(encoded));
+  }
+});
+
+test('Git binary-diff summaries fail closed because file bytes were not inspected', async () => {
+  let reportRequest;
+  const diff = [
+    'diff --git a/member.pdf b/member.pdf',
+    'new file mode 100644',
+    'index 0000000..1234567',
+    'Binary files /dev/null and b/member.pdf differ',
+  ].join('\n');
+  const result = await guard.collectGitPush({
+    diffText: diff,
+    remoteUrl: 'https://github.com/customer/repo.git',
+    allowedHosts: ['github.com'],
+    policy: { enforcementMode: 'warn', alwaysBlock: [], ignore: [], disabledDetectors: [] },
+    report: async (record) => {
+      reportRequest = record;
+      return { id: 'q_binary_git', status: 'action_blocked' };
+    },
+  });
+
+  assert.strictEqual(result.status, 'blocked');
+  assert.strictEqual(result.reason, 'binary_diff_uninspectable');
+  assert.strictEqual(guard.exitCodeForResult(result), 1);
+  assert.strictEqual(reportRequest.clientOutcome, 'action_blocked');
+  assert.match(reportRequest.note, /binary diff/i);
+  assert.ok(!JSON.stringify(reportRequest).includes('member.pdf'));
+
+  const quotedSummary = await guard.collectGitPush({
+    diffText: 'diff --git a/readme.md b/readme.md\n+Binary files are documented as unsupported.',
+    remoteUrl: 'https://github.com/customer/repo.git',
+    allowedHosts: ['github.com'],
+    policy: {},
+    report: async () => { throw new Error('ordinary added prose must not report'); },
+  });
+  assert.strictEqual(quotedSummary.status, 'clean');
+});
+
 test('allowed corporate git host permits source-code-only pushes but still blocks secrets', async () => {
   let reports = 0;
   const codeOnly = await guard.collectGitPush({
@@ -146,11 +206,13 @@ test('empty and clean diffs do not report to the control plane', async () => {
   const empty = await guard.collectGitPush({
     diffText: '',
     remoteUrl: 'https://github.com/customer/repo.git',
+    policy: {},
     report: async () => { reports += 1; },
   });
   const clean = await guard.collectGitPush({
     diffText: 'diff --git a/readme.md b/readme.md\n+Public release note.',
     remoteUrl: 'https://github.com/customer/repo.git',
+    policy: {},
     report: async () => { reports += 1; },
   });
 
@@ -159,12 +221,31 @@ test('empty and clean diffs do not report to the control plane', async () => {
   assert.strictEqual(reports, 0);
 });
 
+test('git push permits benign hashes, JWT-like IDs, and encoded prose on an allowed host', async () => {
+  const values = [
+    'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+    'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1bml0LXVzZXIifQ.signature',
+    Buffer.from('ordinary encoded prose').toString('base64'),
+  ];
+  for (const value of values) {
+    const result = await guard.collectGitPush({
+      diffText: `diff --git a/ids.txt b/ids.txt\n+${value}`,
+      remoteUrl: 'https://github.com/customer/repo.git',
+      allowedHosts: ['github.com'],
+      policy: { enforcementMode: 'block', alwaysBlock: [], ignore: [], disabledDetectors: [] },
+      report: async () => { throw new Error('clean diff must not report'); },
+    });
+    assert.strictEqual(result.status, 'clean', value);
+  }
+});
+
 test('unbounded diffs fail closed with sanitized blocked evidence', async () => {
   let reportRequest;
   const result = await guard.collectGitPush({
     diffText: 'x'.repeat(5000),
     maxDiffBytes: 4096,
     remoteUrl: 'https://gitlab.example/customer/repo.git',
+    policy: {},
     report: async (req) => {
       reportRequest = req;
       return { id: 'q_git_large', status: 'action_blocked' };
@@ -177,6 +258,18 @@ test('unbounded diffs fail closed with sanitized blocked evidence', async () => 
   assert.strictEqual(reportRequest.clientOutcome, 'action_blocked');
   assert.match(reportRequest.note, /exceeded inspection bounds/);
   assert.ok(!JSON.stringify(result).includes('x'.repeat(100)));
+});
+
+test('git push blocks before diff collection when no trusted policy exists', async () => {
+  let diffCalls = 0;
+  const result = await guard.collectGitPush({
+    key: '',
+    runGit: async () => { diffCalls += 1; return ''; },
+    report: async () => null,
+  });
+  assert.strictEqual(result.status, 'blocked');
+  assert.strictEqual(result.reason, 'policy_unavailable');
+  assert.strictEqual(diffCalls, 0);
 });
 
 test('collectDiff uses bounded git commands for pre-push ranges', async () => {
@@ -203,6 +296,7 @@ test('collectDiff uses bounded git commands for pre-push ranges', async () => {
   assert.strictEqual(diffCall.file, 'git');
   assert.deepStrictEqual(diffCall.args.slice(0, 3), ['-C', 'C:/repo', 'diff']);
   assert.ok(diffCall.args.includes('--no-ext-diff'));
+  assert.ok(diffCall.args.includes('--no-textconv'));
   assert.ok(diffCall.args.includes('--no-color'));
   assert.ok(diffCall.args.includes(REMOTE_SHA));
   assert.ok(diffCall.args.includes(LOCAL_SHA));

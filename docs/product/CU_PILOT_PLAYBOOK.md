@@ -23,8 +23,9 @@ or fair-lending (those stay credit-union-owned).
 - Stand up the silo; run `npm run setup:check -- --production`.
 - Apply the `ncua_glba` policy template (member-NPI hard stops).
 - Optionally enable the relevant core-banking detector (Symitar/Episys,
-  Corelation, Fiserv, Finastra) in `config/custom-detectors.json` and fingerprint
-  a member-number sample with `npm run edm:fingerprint` (local only).
+  Corelation, Fiserv, Finastra) in `config/custom-detectors.json`, tune it to
+  the institution's format, and test representative hard negatives. Offline
+  EDM rejects enumerable member numbers and is only for high-entropy random IDs.
 - Install the browser, endpoint, and MCP sensors on the pilot cohort.
 - Record AUP adoption as an attestation (date + minutes reference).
 

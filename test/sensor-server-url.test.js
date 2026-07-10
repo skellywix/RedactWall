@@ -2,7 +2,7 @@
 /** Sensor transport guard: cleartext to a remote plane leaks the ingest key. */
 const test = require('node:test');
 const assert = require('node:assert');
-const { secureServerUrl, isLoopbackHost } = require('../sensors/shared/server-url');
+const { secureServerBase, secureServerUrl, isLoopbackHost } = require('../sensors/shared/server-url');
 
 test('https is accepted to any host; http only to loopback', () => {
   assert.ok(secureServerUrl('https://plane.vendor.example'));
@@ -18,6 +18,14 @@ test('https is accepted to any host; http only to loopback', () => {
 test('explicit override allows cleartext to a remote host', () => {
   assert.strictEqual(secureServerUrl('http://plane.vendor.example', false), null);
   assert.ok(secureServerUrl('http://plane.vendor.example', true));
+});
+
+test('secure server bases are normalized and reject target-changing suffixes', () => {
+  assert.strictEqual(secureServerBase(' https://plane.vendor.example/control/ '), 'https://plane.vendor.example/control');
+  assert.strictEqual(secureServerBase('http://127.0.0.1:4000/'), 'http://127.0.0.1:4000');
+  assert.strictEqual(secureServerBase('https://plane.vendor.example?next=https://attacker.example'), null);
+  assert.strictEqual(secureServerBase('https://plane.vendor.example#attacker'), null);
+  assert.strictEqual(secureServerBase('http://plane.vendor.example'), null);
 });
 
 test('loopback host detection', () => {

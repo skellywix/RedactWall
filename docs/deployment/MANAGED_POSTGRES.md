@@ -87,12 +87,24 @@ re-running it. There is no separate migrate command.
 
 Upgrade runbook:
 
+> **Connected-mode schema 9 exception:** do not use a rolling mixed-version
+> deployment for the shared vendor-license-state migration. Drain every pre-v9
+> replica, start one upgraded replica to apply the migration, then start only
+> upgraded replicas before restoring traffic. Follow
+> [`CONNECTED_DEPLOYMENT.md`](../process/CONNECTED_DEPLOYMENT.md#migrating-an-existing-connected-deployment).
+>
+> **Native-handoff schema 10 exception:** also drain every pre-v10 control-plane
+> replica before applying `native-handoff-ingest-idempotency`, then run only
+> upgraded replicas. Upgrade endpoint agents immediately afterward. Pre-v10
+> agents do not carry the opaque signed-event identity and therefore cannot
+> receive exactly-once ingest behavior retroactively.
+
 1. Take a snapshot (or confirm PITR coverage) before deploying a version that
    adds a migration.
-2. Roll one replica first and let it finish startup. Concurrent first-boots
-   can race on the `schema_migrations` primary key; the loser fails startup
-   and is fixed by restarting it after the winner completes, but rolling one
-   instance first avoids the noise.
+2. For migrations other than the schema-9 and schema-10 exceptions above,
+   start the upgraded replicas. A Postgres advisory lock serializes migration
+   planning and application, so the first process applies pending versions and
+   concurrent followers wait, then observe the completed history.
 3. Confirm the history, then roll the rest:
 
 ```sql
@@ -142,23 +154,33 @@ npm run backup:drill               # dump, restore to a scratch DB, verify, drop
 
 Behavior on Postgres:
 
+- Portable backup authentication requires an externally configured
+  `REDACTWALL_AUDIT_KEY` or `REDACTWALL_SECRET`; an audit key embedded in a
+  packaged sidecar is intentionally rejected because it is not an independent
+  trust boundary.
 - `backup` drives `pg_dump --format=custom --enable-row-security` and writes
-  the same verifier-first manifest as SQLite: hashes, sizes, row counts, and
-  the source audit-chain verification result — never prompt bodies and never
+  the dump, authenticated audit state/checkpoint sidecars, and an HMAC-bound
+  verifier-first manifest. The authentication covers every artifact hash,
+  the exact checkpoint, sizes, row counts, and source audit-chain result —
+  never prompt bodies and never
   connection credentials (credentials pass to `pg_dump`/`pg_restore` via
   libpq environment variables, not argv). A blank tenant context sees every
   tenant row, so the dump is complete; the drill's count checks would expose
   a partial dump.
 - `backup` refuses to run if the live audit chain does not verify, exactly
   like SQLite mode.
-- `backup:verify` checks the dump's SHA-256 against the manifest. A dump
-  cannot be opened in place, so full audit-chain verification happens on
-  restore — which is why the drill exists.
-- `backup:restore` verifies the manifest hash first, then runs
+- `backup:verify` authenticates the complete manifest and exact checkpoint,
+  then checks every artifact hash. A dump cannot be opened in place, so full
+  audit-chain verification still happens on restore — which is why the drill
+  exists. PostgreSQL manifests created before this authenticated artifact-set
+  contract are intentionally rejected; replace them with a fresh backup.
+- `backup:restore` authenticates the complete manifest and verifies every
+  artifact hash first, then runs
   `pg_restore --no-owner --no-privileges --exit-on-error` into the named
   target database (bare name = same server; a full `postgresql://` URL is
   also accepted), then verifies the restored audit chain through the
-  production driver. `--force` adds `--clean --if-exists`.
+  production driver. `--force` adds `--clean --if-exists`, but cannot bypass a
+  missing, unsigned, or invalid authenticated manifest.
 - `backup:drill` restores into a uniquely named scratch database
   (`redactwall_drill_<hex>`), verifies the audit hash-chain and row counts
   there, and always drops the scratch database — `--keep` retains only the

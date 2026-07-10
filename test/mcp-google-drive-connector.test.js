@@ -22,16 +22,13 @@ function headers(values = {}) {
 
 function response(text, opts = {}) {
   const status = opts.status || 200;
-  return {
-    ok: status >= 200 && status < 300,
+  return new Response(text, {
     status,
-    headers: headers({
+    headers: {
       'content-type': opts.contentType || 'text/plain; charset=utf-8',
       'content-length': opts.contentLength || String(Buffer.byteLength(text, 'utf8')),
-    }),
-    text: async () => text,
-    json: async () => JSON.parse(text),
-  };
+    },
+  });
 }
 
 function streamResponse(chunks, opts = {}) {
@@ -152,7 +149,7 @@ test('sanitizeDriveFileContent redacts Drive content before returning MCP output
       return response('Google Drive record: SSN 524-71-9043 and card 4111 1111 1111 1111.');
     },
     guardOptions: {
-      server: 'http://redactwall.test',
+      server: 'https://redactwall.test',
       key: 'unit-ingest-key',
       policy: { ignore: [], disabledDetectors: [] },
       fetchImpl: async (url, opts = {}) => {
@@ -167,7 +164,7 @@ test('sanitizeDriveFileContent redacts Drive content before returning MCP output
   assert.ok(sanitized.findings.includes('CREDIT_CARD'));
   assert.ok(!JSON.stringify(sanitized.result).includes('524-71-9043'));
   assert.ok(!JSON.stringify(sanitized.result).includes('4111 1111 1111 1111'));
-  assert.strictEqual(outbound.url, 'http://redactwall.test/api/v1/gate');
+  assert.strictEqual(outbound.url, 'https://redactwall.test/api/v1/gate');
   assert.strictEqual(outbound.body.destination, 'google_drive.files.export');
   assert.strictEqual(outbound.body.source, 'mcp_guard');
   assert.ok(!JSON.stringify(outbound.body).includes('524-71-9043'));
@@ -253,4 +250,19 @@ test('driveScopes defaults to least-privileged read-only Drive scope', () => {
   assert.deepStrictEqual(driveScopes({ env: {} }), ['https://www.googleapis.com/auth/drive.readonly']);
   assert.deepStrictEqual(driveScopes({ env: { GOOGLE_DRIVE_SCOPES: 'drive.readonly drive.metadata.readonly' } }), ['drive.readonly', 'drive.metadata.readonly']);
   assert.strictEqual(exportMimeTypeFor('application/vnd.google-apps.spreadsheet'), 'text/csv');
+});
+
+test('Drive metadata JSON enforces declared response bounds before parsing', async () => {
+  let jsonCalled = false;
+  await assert.rejects(() => driveFileMetadata({ fileId: 'file1' }, {
+    accessToken: 'unit-google-token',
+    maxJsonBytes: 16,
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      headers: headers({ 'content-length': '50000000' }),
+      json: async () => { jsonCalled = true; return { id: 'file1' }; },
+    }),
+  }), /exceeds 16 byte limit/);
+  assert.strictEqual(jsonCalled, false);
 });

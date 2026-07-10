@@ -22,6 +22,7 @@ fs.writeFileSync(policyPath, JSON.stringify(basePolicy, null, 2));
 const app = require('../server/app');
 const auth = require('../server/auth');
 const db = require('../server/db');
+const policyEngine = require('../server/policy');
 const updater = require('../server/updater');
 const { listen, loopbackHttpFetch } = require('./support/listen');
 
@@ -106,10 +107,12 @@ function readStreamHello(base, cookie) {
 test('sensor routes cover fail-closed and monitor-only app branches', async () => withServer(async (base) => {
   const originalStats = db.stats;
   try {
-    db.stats = () => { throw new Error('db offline'); };
+    db.stats = () => { throw new Error('postgresql://svc:SUPERSECRET@db.internal/redactwall'); };
     const ready = await loopbackHttpFetch(`${base}/readyz`);
     assert.strictEqual(ready.status, 503);
-    assert.deepStrictEqual(await ready.json(), { ready: false, database: false, error: 'db offline' });
+    const body = await ready.json();
+    assert.deepStrictEqual(body, { ready: false, database: false, error: 'database_unavailable' });
+    assert.ok(!JSON.stringify(body).includes('SUPERSECRET'));
   } finally {
     db.stats = originalStats;
   }
@@ -185,6 +188,62 @@ test('sensor routes cover fail-closed and monitor-only app branches', async () =
   writePolicy();
 }));
 
+test('direct text APIs detect encoded SSNs and fail closed on opaque Base64', async () => withServer(async (base) => {
+  writePolicy();
+  const encodedSsn = Buffer.from('SSN 524-71-9043').toString('base64');
+  const opaqueBinary = Buffer.from([0, 255, 1, 254, 2, 253, 3, 252, 4, 251, 5, 250]).toString('base64');
+
+  let response = await ingest(base, '/api/v1/gate', {
+    prompt: encodedSsn,
+    destination: 'chatgpt.com',
+  });
+  assert.strictEqual(response.status, 200);
+  let body = await response.json();
+  assert.strictEqual(body.decision, 'block');
+  assert.ok(body.findings.some((finding) => finding.type === 'US_SSN'));
+
+  response = await ingest(base, '/api/v1/gate', {
+    prompt: opaqueBinary,
+    destination: 'chatgpt.com',
+  });
+  assert.strictEqual(response.status, 200);
+  body = await response.json();
+  assert.strictEqual(body.decision, 'block');
+  assert.strictEqual(body.status, 'blocked_unscannable');
+  assert.strictEqual(body.releaseToken, undefined);
+  assert.ok(!JSON.stringify(body).includes(opaqueBinary));
+
+  response = await ingest(base, '/api/v1/scan-file', {
+    filename: 'opaque.txt',
+    contentBase64: Buffer.from(opaqueBinary).toString('base64'),
+    destination: 'chatgpt.com',
+  });
+  assert.strictEqual(response.status, 200);
+  body = await response.json();
+  assert.strictEqual(body.decision, 'block');
+  assert.strictEqual(body.status, 'file_blocked_unscanned');
+  assert.strictEqual(body.releaseToken, undefined);
+
+  response = await ingest(base, '/api/v1/scan-response', {
+    text: opaqueBinary,
+    destination: 'chatgpt.com',
+  });
+  assert.strictEqual(response.status, 200);
+  body = await response.json();
+  assert.strictEqual(body.decision, 'block');
+  assert.strictEqual(body.blocked, true);
+  assert.strictEqual(body.status, 'response_blocked');
+  assert.ok(!JSON.stringify(body).includes(opaqueBinary));
+
+  response = await ingest(base, '/api/v1/gate', {
+    prompt: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+    destination: 'chatgpt.com',
+  });
+  assert.strictEqual(response.status, 200);
+  body = await response.json();
+  assert.strictEqual(body.decision, 'allow');
+}));
+
 test('gate records warn and justify status branches from policy mode', async () => withServer(async (base) => {
   writePolicy({
     ...basePolicy,
@@ -216,21 +275,22 @@ test('gate records warn and justify status branches from policy mode', async () 
   body = await res.json();
   assert.strictEqual(body.status, 'pending_justification');
 
-  writePolicy({
-    ...basePolicy,
-    enforcementMode: 'monitor',
-    alwaysBlock: [],
-    blockMinSeverity: 2,
-    blockRiskScore: 10,
+  writePolicy();
+}));
+
+test('template application returns the persisted mandatory hard-stop union', async () => withServer(async (base) => {
+  const session = await login(base);
+  const response = await jsonFetch(base, '/api/policy/apply-template', {
+    method: 'PUT',
+    headers: { cookie: session.cookie, 'x-csrf-token': session.csrfToken },
+    body: { id: 'pci_dss' },
   });
-  res = await ingest(base, '/api/v1/gate', {
-    prompt: 'This confidential merger contract should be reviewed.',
-    destination: 'chatgpt.com',
-  });
-  assert.strictEqual(res.status, 200);
-  body = await res.json();
-  assert.strictEqual(body.mode, 'monitor');
-  assert.strictEqual(body.status, 'pending');
+  assert.strictEqual(response.status, 200);
+  const body = await response.json();
+  for (const type of policyEngine.DEFAULT_POLICY.alwaysBlock) {
+    assert.ok(body.alwaysBlock.includes(type), type);
+    assert.ok(policyEngine.loadPolicy().alwaysBlock.includes(type), `persisted ${type}`);
+  }
   writePolicy();
 }));
 
@@ -244,6 +304,7 @@ test('admin routes cover login failures, OIDC errors, update actions, identity e
     assert.ok([401, 429].includes(failed.status));
   }
   assert.strictEqual(sawLoginLock, true);
+  auth._internal.resetAttempts();
 
   const oidcStart = await loopbackHttpFetch(`${base}/auth/oidc/start`);
   assert.strictEqual(oidcStart.status, 404);
@@ -252,6 +313,25 @@ test('admin routes cover login failures, OIDC errors, update actions, identity e
 
   let res = await loopbackHttpFetch(`${base}/api/identity/setup-guide?baseUrl=not-a-url`, { headers: { cookie } });
   assert.strictEqual(res.status, 400);
+
+  const previousPublicUrl = process.env.REDACTWALL_PUBLIC_URL;
+  delete process.env.REDACTWALL_PUBLIC_URL;
+  try {
+    res = await loopbackHttpFetch(`${base}/api/identity/setup-guide`, {
+      headers: {
+        cookie,
+        'x-forwarded-host': 'attacker.example.test',
+        'x-forwarded-proto': 'https',
+      },
+    });
+    assert.strictEqual(res.status, 200);
+    const guide = await res.json();
+    assert.strictEqual(guide.baseUrl, 'https://redactwall.customer.example');
+    assert.ok(!JSON.stringify(guide).includes('attacker.example.test'));
+  } finally {
+    if (previousPublicUrl === undefined) delete process.env.REDACTWALL_PUBLIC_URL;
+    else process.env.REDACTWALL_PUBLIC_URL = previousPublicUrl;
+  }
 
   res = await jsonFetch(base, '/api/destinations/review', {
     headers: { cookie, 'x-csrf-token': csrfToken },
@@ -293,6 +373,7 @@ test('admin routes cover login failures, OIDC errors, update actions, identity e
   const originalUpdater = {
     status: updater.status,
     saveConfig: updater.saveConfig,
+    saveConfigWithAudit: updater.saveConfigWithAudit,
     checkForUpdates: updater.checkForUpdates,
     applyUpdate: updater.applyUpdate,
     scheduleRestart: updater.scheduleRestart,
@@ -307,7 +388,7 @@ test('admin routes cover login failures, OIDC errors, update actions, identity e
     assert.strictEqual(res.status, 503);
 
     updater.status = async () => ({ ok: true, config: {}, safety: {} });
-    updater.saveConfig = () => {
+    updater.saveConfigWithAudit = async () => {
       const err = new Error('config failed');
       err.statusCode = 400;
       throw err;

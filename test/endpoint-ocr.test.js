@@ -65,7 +65,7 @@ test('endpoint OCR returns ocr_required for images when no local OCR is configur
   assert.strictEqual(extracted.ocrConfigured, false);
 });
 
-test('endpoint OCR accepts injected local extraction and bounds returned text', async (t) => {
+test('endpoint OCR fails closed when injected output exceeds the configured bound', async (t) => {
   const file = tempImage(t);
   const longText = 'OCR text SSN 524-71-9043 '.repeat(80);
   const extracted = await endpointOcr.extractImageFile(path.basename(file), file, {
@@ -77,11 +77,12 @@ test('endpoint OCR accepts injected local extraction and bounds returned text', 
     },
   });
 
-  assert.strictEqual(extracted.extractionOk, true);
-  assert.strictEqual(extracted.processor, 'endpoint_ocr');
+  assert.strictEqual(extracted.extractionOk, false);
+  assert.strictEqual(extracted.processor, 'ocr_required');
   assert.strictEqual(extracted.ocrApplied, true);
-  assert.strictEqual(extracted.text, longText.slice(0, 1000));
-  assert.strictEqual(extracted.text.length, 1000);
+  assert.strictEqual(extracted.error, 'ocr_output_truncated');
+  assert.strictEqual(extracted.ocrRequired, true);
+  assert.strictEqual(extracted.text, '');
   assert.strictEqual(extracted.truncated, true);
 });
 

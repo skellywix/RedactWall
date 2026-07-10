@@ -37,6 +37,7 @@ const loginJs = fs.readFileSync(path.join(root, 'server', 'public', 'login.js'),
 const manifest = JSON.parse(fs.readFileSync(path.join(root, 'sensors', 'browser-extension', 'manifest.json'), 'utf8'));
 const contentJs = fs.readFileSync(path.join(root, 'sensors', 'browser-extension', 'content.js'), 'utf8');
 const backgroundJs = fs.readFileSync(path.join(root, 'sensors', 'browser-extension', 'background.js'), 'utf8');
+const rehydrateJs = fs.readFileSync(path.join(root, 'sensors', 'browser-extension', 'rehydrate.js'), 'utf8');
 const browserAdaptersJs = fs.readFileSync(path.join(root, 'sensors', 'browser-extension', 'lib', 'adapters.js'), 'utf8');
 
 const cases = [];
@@ -318,6 +319,7 @@ for (let i = 0; i < 40; i += 1) {
       clientMaxSeverity: i % 5,
       clientMaxSeverityLabel: ['none', 'low', 'medium', 'high', 'critical'][i % 5],
     };
+    if (payload.clientOutcome === 'justified') payload.note = 'documented business need';
     expectSchemaPass(validation.gateSchema, payload);
   });
 }
@@ -513,11 +515,19 @@ const extensionContentMarkers = [
   'document.addEventListener(\'copy\'', 'document.addEventListener(\'drop\'', 'type: \'report\'',
   'clientPreRedacted', 'safeClientPrompt', 'reportBlockedBrowserAction', 'reportLocalFileEvent',
   'TEXT_UPLOAD_EXTENSIONS', 'OCR_UPLOAD_EXTENSIONS', 'cleanUploadBypass', 'showBanner',
-  'role\', \'alertdialog\'', 'aria-labelledby', 'aria-describedby', 'D.tokenize', 'D.detokenize', 'window.PSAdapters',
+  'role\', \'alertdialog\'', 'aria-labelledby', 'aria-describedby', 'D.tokenize', 'window.PSAdapters',
 ];
 for (const marker of extensionContentMarkers) {
   add('browser-extension-static', `content marker ${marker}`, () => expectContains(contentJs, marker));
 }
+add('browser-extension-static', 'isolated rehydration surface replaces provider-page detokenization', () => {
+  expectContains(contentJs, 'rehydrationStore');
+  expectContains(backgroundJs, 'storeRehydrationSession');
+  expectContains(rehydrateJs, "type: 'rehydrationReveal'");
+  assert.doesNotMatch(contentJs, /D\.detokenize/);
+  const exposed = (manifest.web_accessible_resources || []).flatMap((entry) => entry.resources || []);
+  assert.ok(!exposed.some((file) => /^rehydrate\./.test(file)), 'isolated reveal assets must not be web-accessible');
+});
 
 const extensionBackgroundMarkers = [
   'failClosed', 'missingServerConfigReason', 'validServerOrigin', 'sensorMetadata', 'buildInstallChecks',

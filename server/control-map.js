@@ -115,13 +115,13 @@ const CONTROL_MAPPINGS = [
   },
   {
     id: 'member_information_safeguards',
-    title: 'Member information safeguards (EDM + hard stops)',
+    title: 'Member information safeguards (structured hard stops)',
     controlFamilies: [
       'NCUA Part 748 Appendix A member-information safeguards evidence',
       'GLBA Safeguards Rule 501(b) evidence',
       'NCUA information-security program evidence',
     ],
-    evidence: ['edm', 'policy.alwaysBlock', 'detectors.MEMBER_ID', 'detectors.EXACT_MATCH'],
+    evidence: ['policy.alwaysBlock', 'detectors.MEMBER_ID', 'customDetectors'],
   },
   {
     id: 'ai_use_inventory',
@@ -225,15 +225,11 @@ function stateFromPromptThreat(input) {
   return detectorIds(input).has('PROMPT_ATTACK') ? 'covered' : 'attention';
 }
 
-function edmActive(edm) {
-  return hasObject(edm) && edm.enabled === true && Number(edm.fingerprints) > 0;
-}
-
 function stateFromMemberSafeguards(input) {
-  if (!input.policy) return hasObject(input.edm) ? 'attention' : 'not_provided';
+  if (!input.policy) return 'not_provided';
   const always = new Set(Array.isArray(input.policy.alwaysBlock) ? input.policy.alwaysBlock : []);
   const identifiersCovered = MEMBER_IDENTIFIERS.every((id) => always.has(id));
-  return identifiersCovered && edmActive(input.edm) ? 'covered' : 'attention';
+  return identifiersCovered ? 'covered' : 'attention';
 }
 
 function stateFromUseCaseInventory(summary) {
@@ -298,12 +294,12 @@ function vendorOversightSummary(summary, state) {
 }
 
 function memberSafeguardsSummary(input, state) {
-  if (state === 'not_provided') return 'No policy or EDM evidence attached to this pack.';
-  if (state === 'covered') return 'Core-banking EDM fingerprints are active and member-identifier hard stops are enforced.';
+  if (state === 'not_provided') return 'No member-identifier policy evidence is attached to this pack.';
+  if (state === 'covered') return 'Mandatory member, account, loan, and routing identifier hard stops are enforced.';
   const always = new Set(Array.isArray(input.policy && input.policy.alwaysBlock) ? input.policy.alwaysBlock : []);
   const missing = MEMBER_IDENTIFIERS.filter((id) => !always.has(id));
   if (missing.length) return `Hard-stop coverage for member identifiers is incomplete: ${missing.join(', ')}.`;
-  return 'Member-identifier hard stops are enforced; core-banking EDM fingerprints are not configured yet (npm run edm:fingerprint).';
+  return 'Mandatory member-identifier hard-stop coverage is incomplete.';
 }
 
 function stateFromAcceptableUse(input) {

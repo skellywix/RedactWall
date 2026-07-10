@@ -18,6 +18,7 @@ FROM node:22-bookworm-slim AS runtime
 ENV NODE_ENV=production \
     PORT=4000 \
     REDACTWALL_DB_PATH=/data/redactwall.db \
+    REDACTWALL_DATA_DIR=/data \
     REDACTWALL_POLICY_PATH=/data/policy.json \
     REDACTWALL_CUSTOM_DETECTORS_PATH=/data/custom-detectors.json \
     NPM_CONFIG_CACHE=/tmp/.npm \
@@ -36,12 +37,13 @@ COPY --chown=node:node sensors ./sensors
 # this same image, so the runtime stage must include the gateway source.
 COPY --chown=node:node gateway ./gateway
 # Persistent, local-disk runtime state. Keep /data mounted outside the image.
-RUN mkdir -p /data /app/data /tmp/redactwall \
-    && chown -R node:node /data /app /tmp/redactwall \
-    && chmod 700 /data /tmp/redactwall
+RUN mkdir -p /data /gateway-data /app/data /tmp/redactwall \
+    && chown -R node:node /data /gateway-data /app /tmp/redactwall \
+    && chmod 700 /data /gateway-data /tmp/redactwall
 USER node
 EXPOSE 4000
-VOLUME ["/data"]
+VOLUME ["/data", "/gateway-data"]
 HEALTHCHECK --interval=30s --timeout=4s --start-period=5s --retries=3 \
   CMD node -e "fetch('http://localhost:'+(process.env.PORT||4000)+'/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+ENTRYPOINT ["sh", "scripts/docker-entrypoint.sh"]
 CMD ["node", "server/app.js"]

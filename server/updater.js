@@ -12,9 +12,12 @@
 require('./env').loadEnv();
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { execFile } = require('child_process');
 
 const backupStore = require('../scripts/backup-store');
+const fileMutationLock = require('./file-mutation-lock');
+const { fsyncDirectory, publishFileDurably, securePrivatePath } = require('./private-path');
 
 const ROOT = path.resolve(__dirname, '..');
 const COMMAND_TIMEOUT_MS = 2 * 60 * 1000;
@@ -62,8 +65,8 @@ function updateBackupDir(opts = {}) {
   return path.join(dataRoot(opts), 'backups', 'updates');
 }
 
-function ensureParent(file) {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
+function ensureParent(file, fsImpl = fs) {
+  fsImpl.mkdirSync(path.dirname(file), { recursive: true });
 }
 
 function readJson(file, fallback = null) {
@@ -75,11 +78,65 @@ function readJson(file, fallback = null) {
   }
 }
 
-function writeJson(file, value) {
-  ensureParent(file);
-  const tmp = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(value, null, 2));
-  fs.renameSync(tmp, file);
+function writeFileAtomic(file, contents, opts = {}) {
+  const fsImpl = opts.fs || fs;
+  ensureParent(file, fsImpl);
+  const mode = opts.mode == null ? 0o600 : opts.mode;
+  const suffix = (opts.randomBytes || crypto.randomBytes)(8).toString('hex');
+  const tmp = `${file}.${process.pid}.${suffix}.tmp`;
+  let fd;
+  try {
+    fd = fsImpl.openSync(tmp, 'wx', mode);
+    securePrivatePath(tmp, {
+      fs: fsImpl,
+      directory: false,
+      fresh: true,
+      label: 'updater staging file',
+      ownerLabel: 'updater staging file',
+    });
+    fsImpl.writeFileSync(fd, contents);
+    if (typeof fsImpl.fsyncSync === 'function') fsImpl.fsyncSync(fd);
+    fsImpl.closeSync(fd);
+    fd = undefined;
+    publishFileDurably(tmp, file, { fs: fsImpl });
+  } catch (error) {
+    if (fd !== undefined) {
+      try { fsImpl.closeSync(fd); } catch {}
+    }
+    try { fsImpl.unlinkSync(tmp); } catch {}
+    throw error;
+  }
+}
+
+function writeJson(file, value, opts = {}) {
+  writeFileAtomic(file, JSON.stringify(value, null, 2), opts);
+}
+
+function fileSnapshot(file, opts = {}) {
+  const fsImpl = opts.fs || fs;
+  let stat;
+  try {
+    stat = fsImpl.lstatSync(file);
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return { exists: false };
+    throw error;
+  }
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1) {
+    throw publicFailure('update configuration path is not a private regular file');
+  }
+  return { exists: true, contents: fsImpl.readFileSync(file), mode: stat.mode & 0o777 };
+}
+
+function restoreFileSnapshot(file, snapshot, opts = {}) {
+  const fsImpl = opts.fs || fs;
+  if (snapshot.exists) {
+    writeFileAtomic(file, snapshot.contents, { ...opts, mode: snapshot.mode });
+    return;
+  }
+  try { fsImpl.unlinkSync(file); } catch (error) {
+    if (error && error.code !== 'ENOENT') throw error;
+  }
+  fsyncDirectory(path.dirname(file), { fs: fsImpl });
 }
 
 function normalizeConfig(input = {}) {
@@ -113,11 +170,42 @@ function publicConfig(config = loadConfig(), opts = {}) {
   };
 }
 
-function saveConfig(input = {}, opts = {}) {
+function normalizedConfigForWrite(input = {}) {
   const config = normalizeConfig(input);
   validateConfig(config);
-  writeJson(configPath(opts), config);
   return config;
+}
+
+function saveConfigUnlocked(input = {}, opts = {}) {
+  const config = normalizedConfigForWrite(input);
+  writeJson(configPath(opts), config, opts);
+  return config;
+}
+
+function saveConfig(input = {}, opts = {}) {
+  const file = configPath(opts);
+  return fileMutationLock.withFileMutationLockSync(file, () => saveConfigUnlocked(input, opts), opts);
+}
+
+async function saveConfigWithAudit(input = {}, appendAudit, opts = {}) {
+  if (typeof appendAudit !== 'function') throw publicFailure('update configuration audit callback is required', 500);
+  const file = configPath(opts);
+  const config = normalizedConfigForWrite(input);
+  return fileMutationLock.withFileMutationLock(file, async () => {
+    const before = fileSnapshot(file, opts);
+    writeJson(file, config, opts);
+    try {
+      await appendAudit(config);
+      return config;
+    } catch {
+      try {
+        restoreFileSnapshot(file, before, opts);
+      } catch {
+        throw publicFailure('update configuration audit failed and the prior file could not be restored', 500);
+      }
+      throw publicFailure('update configuration could not be audited', 500);
+    }
+  }, opts);
 }
 
 function validateConfig(config) {
@@ -353,7 +441,7 @@ function writeState(patch, opts = {}) {
     ...patch,
     updatedAt: new Date().toISOString(),
   };
-  writeJson(statePath(opts), next);
+  writeJson(statePath(opts), next, opts);
   return next;
 }
 
@@ -536,6 +624,7 @@ module.exports = {
   loadConfig,
   publicConfig,
   saveConfig,
+  saveConfigWithAudit,
   status,
   checkForUpdates,
   applyUpdate,
@@ -552,5 +641,6 @@ module.exports = {
     runInstall,
     createBackup,
     runCommand,
+    writeJson,
   },
 };

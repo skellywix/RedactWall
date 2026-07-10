@@ -20,7 +20,20 @@ const ADMIN_URL = process.env.REDACTWALL_TEST_PG_URL || '';
 // Every table carrying an "orgId" column must be listed here; the test
 // cross-checks this list against information_schema AND pg_policies in both
 // directions, so tenant-scoping a table without adding its policy fails.
-const TENANT_SCOPED_TABLES = ['ai_incidents', 'ai_use_cases', 'queries'];
+const ADMINISTRATION_TABLES = [
+  'admin_invitations',
+  'admin_users',
+  'license_renewal_requests',
+  'license_seat_assignments',
+];
+const TENANT_SCOPED_TABLES = [
+  ...ADMINISTRATION_TABLES,
+  'ai_incidents',
+  'ai_use_cases',
+  'ingest_idempotency',
+  'queries',
+].sort();
+const POLICY_SCOPED_TABLES = [...TENANT_SCOPED_TABLES, 'vendor_license_state'].sort();
 const TENANT_GUC = 'redactwall.org_id';
 const SEED_ROWS = [
   ['rls-a-1', 'org-a'],
@@ -75,9 +88,9 @@ function assertPolicyCoverage(catalog) {
   assert.deepStrictEqual(catalog.orgIdTables, TENANT_SCOPED_TABLES,
     'tables carrying an orgId column must exactly match the declared tenant-scoped set');
   const policyTables = [...new Set(catalog.policies.map((p) => p.tablename))].sort();
-  assert.deepStrictEqual(policyTables, TENANT_SCOPED_TABLES,
+  assert.deepStrictEqual(policyTables, POLICY_SCOPED_TABLES,
     'every tenant-scoped table needs an RLS policy, and only scoped tables may have one');
-  for (const table of TENANT_SCOPED_TABLES) {
+  for (const table of POLICY_SCOPED_TABLES) {
     const sec = catalog.security.get(table);
     assert.strictEqual(sec.enabled, true, `${table}: row-level security must be ENABLED`);
     assert.strictEqual(sec.forced, true, `${table}: row-level security must be FORCED so the table owner is covered`);
@@ -101,7 +114,7 @@ async function assertRoleCannotBypassRls(client, catalog, role) {
   const { rows } = await client.query('SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = $1', [role]);
   assert.strictEqual(rows[0].rolsuper, false, 'worker role must not be a superuser');
   assert.strictEqual(rows[0].rolbypassrls, false, 'worker role must not have BYPASSRLS');
-  for (const table of TENANT_SCOPED_TABLES) {
+  for (const table of POLICY_SCOPED_TABLES) {
     assert.notStrictEqual(catalog.security.get(table).owner, role,
       `${table}: worker role must not own the table (only FORCE covers owners)`);
   }
@@ -113,6 +126,73 @@ async function seedTenantRows(client) {
       'INSERT INTO queries (id, "createdAt", status, "user", data, "orgId") VALUES ($1, $2, $3, $4, $5, $6)',
       [id, new Date().toISOString(), 'pending', 'rls-worker@example.test', '{}', orgId]);
   }
+}
+
+function administrationInsert(table, id, orgId) {
+  const now = '2026-07-09T00:00:00.000Z';
+  if (table === 'admin_users') {
+    return {
+      text: 'INSERT INTO admin_users (id, "orgId", "userName", "displayName", role, active, "createdAt", "updatedAt", data) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)',
+      values: [id, orgId, `${id}@example.test`, id, 'auditor', 1, now, now, '{}'],
+    };
+  }
+  if (table === 'admin_invitations') {
+    return {
+      text: 'INSERT INTO admin_invitations (id, "orgId", "userName", "tokenHash", status, "expiresAt", "acceptedAt", "createdAt", "updatedAt", data) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',
+      values: [id, orgId, `${id}@example.test`, `token-${id}`, 'pending', '2027-01-01T00:00:00.000Z', null, now, now, '{}'],
+    };
+  }
+  if (table === 'license_seat_assignments') {
+    return {
+      text: 'INSERT INTO license_seat_assignments (id, "orgId", "userKey", "userName", status, reason, actor, "createdAt", "updatedAt", data) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',
+      values: [id, orgId, `${id}@example.test`, `${id}@example.test`, 'assigned', 'RLS fixture', 'rls-test', now, now, '{}'],
+    };
+  }
+  if (table === 'license_renewal_requests') {
+    return {
+      text: 'INSERT INTO license_renewal_requests (id, "orgId", status, "requestedSeats", "contactEmail", "createdAt", "updatedAt", data) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)',
+      values: [id, orgId, 'requested', 25, `${id}@example.test`, now, now, '{}'],
+    };
+  }
+  throw new Error(`unsupported administration table: ${table}`);
+}
+
+function insertAdministrationRow(client, table, id, orgId) {
+  const query = administrationInsert(table, id, orgId);
+  return client.query(query.text, query.values);
+}
+
+async function seedAdministrationTenantRows(client) {
+  for (const table of ADMINISTRATION_TABLES) {
+    for (const org of ['org-a', 'org-b']) {
+      await insertAdministrationRow(client, table, `seed-${table}-${org}`, org);
+    }
+  }
+}
+
+async function seedVendorTenantRows(client) {
+  for (const [index, org] of ['org-a', 'org-b'].entries()) {
+    await client.query(
+      'INSERT INTO vendor_license_state ("customerId", "issuedAt", "contactAt", status) VALUES ($1,$2,$3,$4)',
+      [org, 1000 + index, 1000 + index, index ? 'revoked' : 'active'],
+    );
+  }
+}
+
+async function seedIdempotencyTenantRows(client) {
+  const sharedKey = 'a'.repeat(64);
+  const now = new Date().toISOString();
+  await client.query(
+    'INSERT INTO audit (id, ts, action, "queryId", actor, "prevHash", hash, entry) VALUES ($1,$2,$3,$4,$5,$6,$7,$8),($9,$2,$3,$10,$5,$6,$11,$8)',
+    ['idem-audit-a', now, 'RLS_FIXTURE', 'rls-a-1', 'rls-test', '0'.repeat(64), '1'.repeat(64), '{}',
+      'idem-audit-b', 'rls-b-1', '2'.repeat(64)],
+  );
+  await client.query(
+    'INSERT INTO ingest_idempotency (scope, "orgId", "keyHash", "queryId", "auditId", "replaySnapshot", "createdAt") '
+      + 'VALUES ($1,$2,$3,$4,$5,$6,$7),($1,$8,$3,$9,$10,$6,$7)',
+    ['native_handoff_v1', 'org-a', sharedKey, 'rls-a-1', 'idem-audit-a', '{}', now,
+      'org-b', 'rls-b-1', 'idem-audit-b'],
+  );
 }
 
 /** Mirrors pg-driver.js setTenantContext: session-scoped custom GUC. */
@@ -137,6 +217,136 @@ async function assertTenantIsolation(client, { org, ownIds, foreignOrg, foreignI
   await assert.rejects(
     client.query('UPDATE queries SET "orgId" = $1 WHERE id = $2', [foreignOrg, ownIds[0]]),
     /row-level security/, `${org}: re-tagging an own row to ${foreignOrg} must fail WITH CHECK`);
+}
+
+async function assertAdministrationTenantIsolation(client, org) {
+  const foreignOrg = org === 'org-a' ? 'org-b' : 'org-a';
+  await setTenant(client, org);
+  for (const table of ADMINISTRATION_TABLES) {
+    const ownId = `seed-${table}-${org}`;
+    const foreignId = `seed-${table}-${foreignOrg}`;
+    const visible = await client.query(`SELECT id, "orgId" FROM ${table} ORDER BY id`);
+    assert.deepStrictEqual(visible.rows.map((row) => row.id), [ownId],
+      `${table}/${org}: SELECT must expose only the current tenant row`);
+
+    const foreignUpdate = await client.query(`UPDATE ${table} SET data = $1 WHERE id = $2`, ['{"blocked":true}', foreignId]);
+    assert.strictEqual(foreignUpdate.rowCount, 0, `${table}/${org}: UPDATE must not reach a foreign row`);
+    const foreignDelete = await client.query(`DELETE FROM ${table} WHERE id = $1`, [foreignId]);
+    assert.strictEqual(foreignDelete.rowCount, 0, `${table}/${org}: DELETE must not reach a foreign row`);
+
+    await assert.rejects(
+      insertAdministrationRow(client, table, `cross-${table}-${org}`, foreignOrg),
+      /row-level security/,
+      `${table}/${org}: INSERT tagged for ${foreignOrg} must fail WITH CHECK`,
+    );
+
+    const crudId = `crud-${table}-${org}`;
+    const inserted = await insertAdministrationRow(client, table, crudId, org);
+    assert.strictEqual(inserted.rowCount, 1, `${table}/${org}: own-tenant INSERT must succeed`);
+    const updated = await client.query(`UPDATE ${table} SET data = $1 WHERE id = $2`, ['{"updated":true}', crudId]);
+    assert.strictEqual(updated.rowCount, 1, `${table}/${org}: own-tenant UPDATE must succeed`);
+    const deleted = await client.query(`DELETE FROM ${table} WHERE id = $1`, [crudId]);
+    assert.strictEqual(deleted.rowCount, 1, `${table}/${org}: own-tenant DELETE must succeed`);
+  }
+}
+
+async function assertVendorTenantIsolation(client, org) {
+  const foreignOrg = org === 'org-a' ? 'org-b' : 'org-a';
+  await setTenant(client, org);
+  const visible = await client.query('SELECT "customerId", status FROM vendor_license_state');
+  assert.deepStrictEqual(visible.rows.map((row) => row.customerId), [org],
+    `vendor_license_state/${org}: SELECT must expose only the current customer`);
+  const foreignUpdate = await client.query(
+    'UPDATE vendor_license_state SET status = $1 WHERE "customerId" = $2', ['active', foreignOrg],
+  );
+  assert.strictEqual(foreignUpdate.rowCount, 0, `${org}: foreign vendor status cannot be changed`);
+  const foreignDelete = await client.query(
+    'DELETE FROM vendor_license_state WHERE "customerId" = $1', [foreignOrg],
+  );
+  assert.strictEqual(foreignDelete.rowCount, 0, `${org}: foreign vendor state cannot be deleted`);
+  await assert.rejects(
+    client.query(
+      'INSERT INTO vendor_license_state ("customerId", "issuedAt", "contactAt", status) VALUES ($1,$2,$3,$4)',
+      [`${foreignOrg}-cross`, 2000, 2000, 'active'],
+    ),
+    /row-level security/,
+    `${org}: a foreign customer row must fail WITH CHECK`,
+  );
+  const ownUpdate = await client.query(
+    'UPDATE vendor_license_state SET "contactAt" = "contactAt" + 1 WHERE "customerId" = $1', [org],
+  );
+  assert.strictEqual(ownUpdate.rowCount, 1, `${org}: own vendor row UPDATE must succeed`);
+  const ownDelete = await client.query(
+    'DELETE FROM vendor_license_state WHERE "customerId" = $1', [org],
+  );
+  assert.strictEqual(ownDelete.rowCount, 1, `${org}: own vendor row DELETE must succeed`);
+  const ownInsert = await client.query(
+    'INSERT INTO vendor_license_state ("customerId", "issuedAt", "contactAt", status) VALUES ($1,$2,$3,$4)',
+    [org, 3000, 3000, 'revoked'],
+  );
+  assert.strictEqual(ownInsert.rowCount, 1, `${org}: own vendor row INSERT must succeed`);
+}
+
+async function assertIdempotencyTenantIsolation(client, org) {
+  const foreignOrg = org === 'org-a' ? 'org-b' : 'org-a';
+  const ownQuery = org === 'org-a' ? 'rls-a-1' : 'rls-b-1';
+  const foreignQuery = org === 'org-a' ? 'rls-b-1' : 'rls-a-1';
+  await setTenant(client, org);
+  const visible = await client.query(
+    'SELECT "orgId", "queryId", "keyHash" FROM ingest_idempotency ORDER BY "queryId"',
+  );
+  assert.deepStrictEqual(visible.rows.map((row) => [row.orgId, row.queryId]), [[org, ownQuery]],
+    `ingest_idempotency/${org}: SELECT must expose only the current tenant mapping`);
+  assert.strictEqual(visible.rows[0].keyHash, 'a'.repeat(64),
+    'the same opaque key may exist independently in each tenant scope');
+  const foreignUpdate = await client.query(
+    'UPDATE ingest_idempotency SET "createdAt" = $1 WHERE "queryId" = $2',
+    [new Date().toISOString(), foreignQuery],
+  );
+  assert.strictEqual(foreignUpdate.rowCount, 0, `${org}: foreign idempotency mapping cannot be updated`);
+  const foreignDelete = await client.query(
+    'DELETE FROM ingest_idempotency WHERE "queryId" = $1', [foreignQuery],
+  );
+  assert.strictEqual(foreignDelete.rowCount, 0, `${org}: foreign idempotency mapping cannot be deleted`);
+  const crossAuditId = `idem-audit-cross-${org}`;
+  await client.query(
+    'INSERT INTO audit (id, ts, action, "queryId", actor, "prevHash", hash, entry) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)',
+    [crossAuditId, new Date().toISOString(), 'RLS_FIXTURE', foreignQuery, 'rls-test', '0'.repeat(64),
+      (org === 'org-a' ? '5' : '6').repeat(64), '{}'],
+  );
+  await assert.rejects(
+    client.query(
+      'INSERT INTO ingest_idempotency (scope, "orgId", "keyHash", "queryId", "auditId", "replaySnapshot", "createdAt") VALUES ($1,$2,$3,$4,$5,$6,$7)',
+      ['native_handoff_v1', foreignOrg, 'b'.repeat(64), foreignQuery, crossAuditId, '{}', new Date().toISOString()],
+    ),
+    /row-level security/,
+    `${org}: a foreign idempotency mapping must fail WITH CHECK`,
+  );
+
+  const queryId = `idem-crud-${org}`;
+  await client.query(
+    'INSERT INTO queries (id, "createdAt", status, data, "orgId") VALUES ($1,$2,$3,$4,$5)',
+    [queryId, new Date().toISOString(), 'allowed', '{}', org],
+  );
+  const auditId = `idem-audit-crud-${org}`;
+  await client.query(
+    'INSERT INTO audit (id, ts, action, "queryId", actor, "prevHash", hash, entry) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)',
+    [auditId, new Date().toISOString(), 'RLS_FIXTURE', queryId, 'rls-test', '0'.repeat(64),
+      (org === 'org-a' ? '3' : '4').repeat(64), '{}'],
+  );
+  const inserted = await client.query(
+    'INSERT INTO ingest_idempotency (scope, "orgId", "keyHash", "queryId", "auditId", "replaySnapshot", "createdAt") VALUES ($1,$2,$3,$4,$5,$6,$7)',
+    ['native_handoff_v1', org, 'c'.repeat(64), queryId, auditId, '{}', new Date().toISOString()],
+  );
+  assert.strictEqual(inserted.rowCount, 1, `${org}: own idempotency mapping INSERT must succeed`);
+  const updated = await client.query(
+    'UPDATE ingest_idempotency SET "createdAt" = $1 WHERE "queryId" = $2',
+    [new Date(Date.now() + 1000).toISOString(), queryId],
+  );
+  assert.strictEqual(updated.rowCount, 1, `${org}: own idempotency mapping UPDATE must succeed`);
+  const deleted = await client.query('DELETE FROM ingest_idempotency WHERE "queryId" = $1', [queryId]);
+  assert.strictEqual(deleted.rowCount, 1, `${org}: own idempotency mapping DELETE must succeed`);
+  await client.query('DELETE FROM queries WHERE id = $1', [queryId]);
 }
 
 async function assertContextEdgeCases(client) {
@@ -182,9 +392,18 @@ test('migration 3 row-level security isolates tenants for a non-owner role', { s
       await createWorkerRole(client, workerRole);
       await assertRoleCannotBypassRls(client, catalog, workerRole);
       await seedTenantRows(client);
+      await seedAdministrationTenantRows(client);
+      await seedVendorTenantRows(client);
+      await seedIdempotencyTenantRows(client);
       await client.query(`SET ROLE ${workerRole}`);
       await assertTenantIsolation(client, { org: 'org-a', ownIds: ['rls-a-1', 'rls-a-2'], foreignOrg: 'org-b', foreignId: 'rls-b-1' });
+      await assertAdministrationTenantIsolation(client, 'org-a');
+      await assertVendorTenantIsolation(client, 'org-a');
+      await assertIdempotencyTenantIsolation(client, 'org-a');
       await assertTenantIsolation(client, { org: 'org-b', ownIds: ['rls-b-1'], foreignOrg: 'org-a', foreignId: 'rls-a-1' });
+      await assertAdministrationTenantIsolation(client, 'org-b');
+      await assertVendorTenantIsolation(client, 'org-b');
+      await assertIdempotencyTenantIsolation(client, 'org-b');
       await assertContextEdgeCases(client);
       await client.query('RESET ROLE');
     } finally {

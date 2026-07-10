@@ -16,21 +16,16 @@ Full report + repro: the review artifact. Each fix below ships with a
 failing-first regression guard (`test/adversarial-review-fixes.test.js`,
 `test/adversarial-review-a1.test.js`) and the full node suite stays green.
 
-**Fixed (14):** D1 unicode-digit detector bypass · D3 ENCRYPTED/DSA private
+**Fixed (18):** D1 unicode-digit detector bypass · D3 ENCRYPTED/DSA private
 keys · D4 lowercase IBAN · N1 custom-detector ReDoS guard · N9 empty-extraction
 OCR hold · N10 Word comments/footnotes scanned · N4 shadow-AI/self-block SIEM
 alerts · C3 deleted-evidence detection · G1 gateway tool-definition scan/redact
 · G4 response tool-call scan/redact · N6 backup manifest required · A1 SCIM
 demote revokes sessions · R1 SSRF alt-encoding block · E1 re-validate sensor
-`masked`.
-
-**Remaining code-fixable (no decision needed):**
-- N11 — Office per-entry parse errors should fail closed (deferred: needs a
-  deterministic corrupt-OOXML fixture; no fix without a red test).
-- C5 — `/status/:id` should scope by owner instead of the fail-open no-token pass.
-- A2 — OIDC login for a SCIM user with no assigned role (low; partly by design).
-- A3 — logout doesn't invalidate the stateless token (needs a jti denylist or
-  per-user valid-after epoch).
+`masked` · N11 corrupt Office entries fail the complete extraction closed · C5
+held-status polling requires the per-item release token · A2 unassigned SCIM
+identities cannot sign in · A3 logout persistently revokes the specific session
+`jti`.
 
 **FP-risk — deliberately not auto-fixed (review-standards caution):**
 - D2 (bare card fires only with separator/context) and D5 (bare 9-digit SSN):

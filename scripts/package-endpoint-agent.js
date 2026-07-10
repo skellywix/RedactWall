@@ -17,10 +17,14 @@ const PACKAGE_FILES = [
   'server/custom-detectors.js',
   'server/exact-match.js',
   'server/env.js',
+  'server/file-mutation-lock.js',
+  'server/private-path.js',
   'server/policy.js',
   'server/processors.js',
   'server/parse-pool.js',
   'server/parse-child.js',
+  'sensors/shared/bounded-response.js',
+  'sensors/shared/signed-policy.js',
   'sensors/shared/server-url.js',
   'sensors/endpoint-agent/agent.js',
   'sensors/endpoint-agent/file-flow-profiles.js',
@@ -111,6 +115,17 @@ function validateRuntimeFiles(files) {
   }
   if (!/\.\/ocr/.test(agent) || !/extractEndpointFile/.test(agent)) {
     throw new Error('Endpoint agent package must route image files through endpoint-local OCR');
+  }
+  const ocrPrivacySteps = [
+    /secure\(dir,\s*\{[^}]*directory:\s*true/,
+    /openSync\(snapshot,\s*'wx',\s*0o600\)/,
+    /secure\(snapshot,\s*\{[^}]*directory:\s*false/,
+    /writeFileSync\(fd,\s*buf\)/,
+  ].map((pattern) => agent.search(pattern));
+  if (!/securePrivatePath/.test(agent)
+      || ocrPrivacySteps.some((index) => index < 0)
+      || ocrPrivacySteps.some((index, position) => position > 0 && index <= ocrPrivacySteps[position - 1])) {
+    throw new Error('Endpoint OCR must secure an empty private snapshot before writing image bytes');
   }
 
   const fileFlowProfiles = files.find((file) => file.path === 'sensors/endpoint-agent/file-flow-profiles.js').body.toString('utf8');
@@ -246,6 +261,11 @@ function validateRuntimeFiles(files) {
   if (!/InstallClipboardGuard/.test(install) || !/install-clipboard-guard\.ps1/.test(install)) {
     throw new Error('Endpoint agent installer must be able to install the clipboard guard shortcut');
   }
+  if (!/\[Parameter\(Mandatory = \$true\)\]\s*\r?\n\s*\[string\]\$PolicyPublicKeyPath/.test(install)
+      || !/REDACTWALL_POLICY_PUBLIC_KEY_PATH/.test(install)
+      || !/REDACTWALL_POLICY_CACHE_PATH/.test(install)) {
+    throw new Error('Endpoint agent installer must provision a pinned policy key and private signed-policy cache');
+  }
 
   const collectorInstall = files.find((file) => file.path === 'scripts/install-desktop-collector.ps1').body.toString('utf8');
   if (!collectorInstall.includes(String.raw`HKEY_CURRENT_USER\Software\Classes\*\shell`) || !collectorInstall.includes('%1') || !/MultiSelectModel/.test(collectorInstall)) {
@@ -336,9 +356,11 @@ function packageEndpointAgent(opts = {}) {
     checks: {
       explicitIngestKeyRequired: true,
       localDetectionEngineIncluded: true,
+      signedPolicyVerifierIncluded: true,
       endpointRedactionHandoffIncluded: true,
       endpointFileFlowProfilesIncluded: true,
       endpointOcrIncluded: true,
+      endpointOcrPrivateSnapshots: true,
       endpointWasmOcrIncluded: true,
       aiToolInventoryIncluded: true,
       nativeHandoffPrototypeIncluded: true,

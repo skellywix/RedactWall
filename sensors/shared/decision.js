@@ -14,12 +14,29 @@
  * object with { alwaysBlock, blockMinSeverity, blockRiskScore, enforcementMode }
  * and returns { action: 'allow' | 'warn' | 'redact' | 'block', hardStop }.
  */
+const MANDATORY_ALWAYS_BLOCK = Object.freeze([
+  'US_SSN', 'CREDIT_CARD', 'BANK_ACCOUNT', 'ROUTING_NUMBER', 'IBAN', 'US_PASSPORT',
+  'US_ITIN', 'US_NPI', 'MEMBER_ID', 'LOAN_NUMBER', 'MEDICAL_RECORD_NUMBER', 'HEALTH_INSURANCE_ID',
+  'UK_NINO', 'UK_NHS_NUMBER', 'CANADA_SIN', 'AUSTRALIA_TFN', 'INDIA_AADHAAR',
+  'SECRET_KEY', 'PRIVATE_KEY', 'CANARY_TOKEN', 'EXACT_MATCH',
+]);
+
+function mandatoryAlwaysBlock(value) {
+  const configured = Array.isArray(value) ? value : [];
+  return [...new Set([...MANDATORY_ALWAYS_BLOCK, ...configured]
+    .filter((type) => typeof type === 'string' && type.trim())
+    .map((type) => type.trim().toUpperCase()))];
+}
+
 function decide(analysis, policy = {}) {
   const findings = (analysis && analysis.findings) || [];
   const categories = (analysis && analysis.categories) || [];
+  if (analysis && analysis.opaqueEncoded === true) {
+    return { action: 'block', hardStop: true, opaqueEncoded: true };
+  }
   if (!findings.length && !categories.length) return { action: 'allow', hardStop: false };
 
-  const alwaysBlock = policy.alwaysBlock || [];
+  const alwaysBlock = mandatoryAlwaysBlock(policy.alwaysBlock);
   const hardStop = findings.some((f) => alwaysBlock.includes(f.type));
   const mode = policy.enforcementMode || 'block';
 
@@ -43,4 +60,4 @@ function decide(analysis, policy = {}) {
   return { action: hardStop ? 'block' : mode, hardStop };
 }
 
-module.exports = { decide };
+module.exports = { decide, mandatoryAlwaysBlock, MANDATORY_ALWAYS_BLOCK };

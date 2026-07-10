@@ -10,6 +10,7 @@ const crypto = require('node:crypto');
 const { safeSensor, safeSensorVersionGap } = require('./sensor-metadata');
 const routing = require('./routing');
 const { outboundHttpsUrl } = require('./url-policy');
+const { cancelResponseBody } = require('../sensors/shared/bounded-response');
 
 function num(v, fallback) {
   const n = Number(v);
@@ -301,10 +302,12 @@ async function emitSecurityAlert(query, opts = {}) {
     const fetchImpl = opts.fetch || fetch;
     const res = await fetchImpl(url, {
       method: 'POST',
+      redirect: 'error',
       headers,
       body: JSON.stringify(sanitizedAlert(query, opts)),
       signal: outboundSignal(),
     });
+    await cancelResponseBody(res);
     return res && res.ok ? { sent: true, status: res.status } : { sent: false, reason: 'http_' + (res && res.status) };
   } catch (e) {
     return { sent: false, reason: 'error' };
@@ -325,10 +328,12 @@ async function emitPostureAlert(report, opts = {}) {
     const fetchImpl = opts.fetch || fetch;
     const res = await fetchImpl(url, {
       method: 'POST',
+      redirect: 'error',
       headers,
       body: JSON.stringify(sanitizedPostureAlert(report, opts)),
       signal: outboundSignal(),
     });
+    await cancelResponseBody(res);
     return res && res.ok ? { sent: true, status: res.status } : { sent: false, reason: 'http_' + (res && res.status) };
   } catch (e) {
     return { sent: false, reason: 'error' };

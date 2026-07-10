@@ -14,11 +14,10 @@ const {
 } = require('../scripts/squid-icap-bridge');
 
 function jsonResponse(status, body) {
-  return {
-    ok: status >= 200 && status < 300,
+  return new Response(JSON.stringify(body), {
     status,
-    json: async () => body,
-  };
+    headers: { 'content-type': 'application/json' },
+  });
 }
 
 test('extracts user prompt text from chat-style JSON bodies', () => {
@@ -49,7 +48,7 @@ test('gate sends proxy context and returns a usable control-plane verdict', asyn
     sourceIp: '10.0.0.9',
     contentType: 'application/json',
     body: JSON.stringify({ prompt: 'Synthetic SSN 524-71-9043' }),
-    redactwall: 'http://redactwall.test',
+    redactwall: 'https://redactwall.test',
     key: 'proxy-key',
     fetchImpl: async (url, opts) => {
       outbound = { url, headers: opts.headers, body: JSON.parse(opts.body) };
@@ -58,7 +57,8 @@ test('gate sends proxy context and returns a usable control-plane verdict', asyn
   });
 
   assert.deepStrictEqual(verdict, { id: 'q_proxy', decision: 'block', status: 'pending' });
-  assert.strictEqual(outbound.url, 'http://redactwall.test/api/v1/gate');
+  assert.strictEqual(outbound.url, 'https://redactwall.test/api/v1/gate');
+  assert.strictEqual(outbound.headers['x-api-key'], 'proxy-key');
   assert.strictEqual(outbound.headers['x-api-key'], 'proxy-key');
   assert.strictEqual(outbound.body.destination, 'chatgpt.com');
   assert.strictEqual(outbound.body.source, 'proxy');
@@ -124,6 +124,39 @@ test('gate fails closed on timeout, non-ok response, or invalid JSON', async () 
   });
 });
 
+test('gate bounds stalled and oversized control-plane response bodies', async () => {
+  let cancelled = 0;
+  const stalled = new Response(new ReadableStream({
+    cancel() { cancelled += 1; },
+  }), { status: 200, headers: { 'content-type': 'application/json' } });
+  const timedOutBody = await gate({
+    host: 'chatgpt.com',
+    body: 'synthetic prompt',
+    timeoutMs: 10,
+    fetchImpl: async (_url, opts) => {
+      assert.strictEqual(opts.redirect, 'error');
+      return stalled;
+    },
+  });
+  assert.deepStrictEqual(timedOutBody, {
+    decision: 'block',
+    status: 'control_plane_unavailable',
+    reason: 'gate_invalid_json',
+  });
+  assert.strictEqual(cancelled, 1);
+
+  const oversized = await gate({
+    host: 'chatgpt.com',
+    body: 'synthetic prompt',
+    fetchImpl: async () => jsonResponse(200, { padding: 'x'.repeat(600 * 1024) }),
+  });
+  assert.deepStrictEqual(oversized, {
+    decision: 'block',
+    status: 'control_plane_unavailable',
+    reason: 'gate_invalid_json',
+  });
+});
+
 test('awaitRelease releases only approved or allowed statuses', async () => {
   const seen = [];
   const sequence = [
@@ -132,7 +165,7 @@ test('awaitRelease releases only approved or allowed statuses', async () => {
   ];
   const result = await awaitRelease('q_1/needs encoding', {
     releaseToken: 'release-token-unit',
-    redactwall: 'http://redactwall.test',
+    redactwall: 'https://redactwall.test',
     key: 'proxy-key',
     intervalMs: 1,
     timeoutMs: 1000,
@@ -144,7 +177,7 @@ test('awaitRelease releases only approved or allowed statuses', async () => {
   });
 
   assert.deepStrictEqual(result, { released: true });
-  assert.strictEqual(seen[0].url, 'http://redactwall.test/api/v1/status/q_1%2Fneeds%20encoding');
+  assert.strictEqual(seen[0].url, 'https://redactwall.test/api/v1/status/q_1%2Fneeds%20encoding');
   assert.strictEqual(seen[0].key, 'proxy-key');
   assert.strictEqual(seen[0].releaseToken, 'release-token-unit');
 });

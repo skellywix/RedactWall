@@ -3,7 +3,8 @@
  * Shared sensor transport guard. Sensors send the ingest key and prompt
  * metadata to the control plane; over a REMOTE connection that must be HTTPS,
  * or the ingest key travels in cleartext. HTTP is allowed only to loopback (the
- * local-plane default and dev/test), or with an explicit insecure override.
+ * local-plane default and dev/test), or when a caller explicitly permits a
+ * development-only insecure override. Production callers must never do so.
  */
 
 function isLoopbackHost(host) {
@@ -37,4 +38,16 @@ function secureServerUrl(value, allowInsecure = false) {
   }
 }
 
-module.exports = { secureServerUrl, isLoopbackHost };
+function secureServerBase(value, allowInsecure = false) {
+  const safe = secureServerUrl(value, allowInsecure);
+  if (!safe) return null;
+  try {
+    const url = new URL(String(safe));
+    if (url.search || url.hash) return null;
+    return url.toString().replace(/\/+$/, '');
+  } catch (_) {
+    return null;
+  }
+}
+
+module.exports = { secureServerUrl, secureServerBase, isLoopbackHost };

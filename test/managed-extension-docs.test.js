@@ -18,8 +18,9 @@ const releaseChecklist = fs.readFileSync(path.join(root, 'docs', 'deployment', '
 test('managed storage example uses only schema-backed keys', () => {
   const allowed = new Set(Object.keys(schema.properties));
   for (const key of Object.keys(managed)) assert.ok(allowed.has(key), key);
-  for (const key of ['serverUrl', 'ingestKey', 'orgId']) assert.ok(key in managed, key);
+  for (const key of ['serverUrl', 'ingestKey', 'orgId', 'enabled']) assert.ok(key in managed, key);
   assert.strictEqual(managed.ingestKey, 'REPLACE_WITH_LONG_RANDOM_INGEST_KEY');
+  assert.strictEqual(managed.enabled, true);
 });
 
 test('Firefox managed storage example uses schema-backed keys', () => {
@@ -27,6 +28,7 @@ test('Firefox managed storage example uses schema-backed keys', () => {
   const allowed = new Set(Object.keys(schema.properties));
   for (const key of Object.keys(values)) assert.ok(allowed.has(key), key);
   assert.strictEqual(values.ingestKey, 'REPLACE_WITH_LONG_RANDOM_INGEST_KEY');
+  assert.strictEqual(values.enabled, true);
 });
 
 test('extension force-install examples have placeholder ids and update/install urls', () => {
@@ -47,6 +49,7 @@ test('managed deployment guide warns about secret-bearing policy', () => {
   assert.match(guide, /Coverage tab shows `browser_extension` install health/);
   assert.match(guide, /release:extension:check/);
   assert.match(guide, /Chrome, Edge, and Firefox/);
+  assert.match(guide, /popup cannot override/);
 });
 
 test('release checklist covers private rollout, update channel, and rollback', () => {

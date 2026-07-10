@@ -20,13 +20,13 @@ test('A1: a SCIM role downgrade on an active user revokes live sessions', () => 
   const issuedAt = Date.now();
   const u = db.saveScimUser({ userName: 'admin@cu.example', role: 'security_admin', active: true, emails: [{ value: 'admin@cu.example' }] });
   assert.strictEqual(db.identityRevokedSince('admin@cu.example', issuedAt - 1000), false, 'not revoked before demotion');
-  db.saveScimUser({ id: u.id, userName: 'admin@cu.example', role: 'auditor', active: true, emails: [{ value: 'admin@cu.example' }] });
+  db.saveScimUser({ ...u, role: 'auditor' });
   assert.strictEqual(db.identityRevokedSince('admin@cu.example', issuedAt - 1000), true, 'demotion revokes the pre-demotion session');
 });
 
 test('A1: an unchanged-role save does NOT revoke (no needless logout)', () => {
   const issuedAt = Date.now();
-  db.saveScimUser({ userName: 'stable@cu.example', role: 'auditor', active: true, emails: [{ value: 'stable@cu.example' }] });
-  db.saveScimUser({ userName: 'stable@cu.example', role: 'auditor', active: true, emails: [{ value: 'stable@cu.example' }] });
+  const stable = db.saveScimUser({ userName: 'stable@cu.example', role: 'auditor', active: true, emails: [{ value: 'stable@cu.example' }] });
+  db.saveScimUser({ ...stable });
   assert.strictEqual(db.identityRevokedSince('stable@cu.example', issuedAt - 1000), false, 'unchanged role leaves sessions intact');
 });

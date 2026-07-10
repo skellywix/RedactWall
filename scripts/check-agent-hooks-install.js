@@ -13,9 +13,13 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { settingsPath, ownsEntry } = require('./install-agent-hooks');
+const { readBoundedJson } = require('../sensors/shared/bounded-response');
+const { secureServerBase } = require('../sensors/shared/server-url');
 
 const ROOT = path.join(__dirname, '..');
 const VERSION = require(path.join(ROOT, 'package.json')).version;
+const MAX_HEARTBEAT_RESPONSE_BYTES = 512 * 1024;
+const HEARTBEAT_RESPONSE_TIMEOUT_MS = 10000;
 
 function existsFile(relPath) {
   try { return fs.statSync(path.join(ROOT, relPath)).isFile(); } catch (_) { return false; }
@@ -36,6 +40,7 @@ function settingsInstalled(opts = {}) {
 function buildInstallReport(opts = {}) {
   const key = opts.ingestKey || process.env.INGEST_API_KEY || '';
   const server = opts.serverUrl || process.env.REDACTWALL_URL || process.env.PROMPTWALL_URL || process.env.SENTINEL_URL || '';
+  const secureServer = secureServerBase(server);
   return {
     checks: [
       check('agent_hooks_runtime', existsFile('sensors/agent-hooks/hook.js'), 'hook runtime present'),
@@ -43,7 +48,7 @@ function buildInstallReport(opts = {}) {
       check('shared_detection_engine', existsFile('detection-engine/detect.js'), 'shared engine present'),
       check('agent_hooks_settings', settingsInstalled(opts), 'Claude Code settings contain the hooks'),
       check('ingest_key_configured', !!key, 'INGEST_API_KEY is set'),
-      check('server_url_configured', !!server, 'control-plane URL is set'),
+      check('server_url_configured', !!secureServer, secureServer ? 'control-plane URL uses a secure transport' : 'control-plane URL must use HTTPS or loopback HTTP'),
     ],
   };
 }
@@ -63,14 +68,22 @@ async function emitHeartbeat(report, opts = {}) {
   const key = opts.ingestKey || process.env.INGEST_API_KEY;
   if (!server) throw new Error('REDACTWALL_URL is required to emit a heartbeat');
   if (!key) throw new Error('INGEST_API_KEY is required to emit a heartbeat');
+  const base = secureServerBase(server);
+  if (!base) throw new Error('REDACTWALL_URL must use HTTPS or loopback HTTP without query parameters or fragments');
   const fetchImpl = opts.fetchImpl || globalThis.fetch;
-  const r = await fetchImpl(String(server).replace(/\/+$/, '') + '/api/v1/heartbeat', {
+  if (typeof fetchImpl !== 'function') throw new Error('fetch is not available');
+  const r = await fetchImpl(base + '/api/v1/heartbeat', {
     method: 'POST',
+    redirect: 'error',
     headers: { 'Content-Type': 'application/json', 'x-api-key': key },
     body: JSON.stringify(buildHeartbeatBody(report, opts)),
   });
-  const body = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(`heartbeat post failed HTTP ${r.status}${body.error ? ': ' + body.error : ''}`);
+  const { json: body } = await readBoundedJson(r, {
+    maxBytes: opts.maxResponseBytes || MAX_HEARTBEAT_RESPONSE_BYTES,
+    timeoutMs: opts.responseTimeoutMs || HEARTBEAT_RESPONSE_TIMEOUT_MS,
+    label: 'heartbeat response',
+  });
+  if (!r.ok) throw new Error(`heartbeat post failed HTTP ${r.status}`);
   return body;
 }
 

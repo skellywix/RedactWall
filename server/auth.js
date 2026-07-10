@@ -14,25 +14,102 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const roles = require('./roles');
+const fileMutationLock = require('./file-mutation-lock');
+const privatePaths = require('./private-path');
 
 const DATA_DIR = path.join(__dirname, '..', 'data');
+const SESSION_SECRET_FILE = '.session-secret';
+const SESSION_SECRET_PATTERN = /^[a-f0-9]{64}$/;
+const PRIVATE_INIT_LOCK_TIMEOUT_MS = 30_000;
+
+function secretDataDir(env, explicit) {
+  return explicit
+    || env.REDACTWALL_DATA_DIR
+    || env.PROMPTWALL_DATA_DIR
+    || env.SENTINEL_DATA_DIR
+    || DATA_DIR;
+}
+
+function privatePathOptions(opts, fsImpl, label, directory) {
+  return {
+    ...(opts.privatePathSecurity || {}),
+    fs: fsImpl,
+    label,
+    directory,
+  };
+}
+
+function validateStoredSecret(bytes) {
+  const secret = bytes.toString('utf8');
+  if (!SESSION_SECRET_PATTERN.test(secret)) throw new Error('persisted session secret is corrupt');
+  return secret;
+}
+
+function readStoredSecret(file, opts, fsImpl) {
+  const security = privatePathOptions(opts, fsImpl, 'session secret', false);
+  privatePaths.securePrivatePath(file, security);
+  const bytes = privatePaths.readBoundedRegularFile(file, {
+    ...security,
+    maxBytes: 64,
+  });
+  privatePaths.assertPrivatePath(file, security);
+  return validateStoredSecret(bytes);
+}
+
+function publishStoredSecret(file, secret, opts, fsImpl) {
+  const temp = `${file}.${process.pid}.${crypto.randomBytes(8).toString('hex')}.tmp`;
+  let fd;
+  try {
+    fd = fsImpl.openSync(temp, 'wx', 0o600);
+    fsImpl.writeFileSync(fd, secret, 'utf8');
+    fsImpl.fsyncSync(fd);
+    fsImpl.closeSync(fd);
+    fd = undefined;
+    privatePaths.securePrivatePath(temp, {
+      ...privatePathOptions(opts, fsImpl, 'temporary session secret', false),
+      fresh: true,
+    });
+    privatePaths.publishFileExclusiveDurably(temp, file, { ...opts, fs: fsImpl });
+    fsImpl.unlinkSync(temp);
+    if (readStoredSecret(file, opts, fsImpl) !== secret) throw new Error('persisted session secret verification failed');
+    return secret;
+  } finally {
+    if (fd !== undefined) try { fsImpl.closeSync(fd); } catch { /* best effort */ }
+    try { fsImpl.unlinkSync(temp); } catch { /* already published or best effort */ }
+  }
+}
 
 function resolveSecret(opts = {}) {
   const env = opts.env || process.env;
   const fsImpl = opts.fs || fs;
-  const dataDir = opts.dataDir || DATA_DIR;
+  const dataDir = secretDataDir(env, opts.dataDir);
   const randomBytes = opts.randomBytes || crypto.randomBytes;
-  if (env.REDACTWALL_SECRET) return { secret: env.REDACTWALL_SECRET, source: 'env' };
-  try {
-    const f = path.join(dataDir, '.session-secret');
-    if (fsImpl.existsSync(f)) { const v = fsImpl.readFileSync(f, 'utf8').trim(); if (v) return { secret: v, source: 'file' }; }
-    if (!fsImpl.existsSync(dataDir)) fsImpl.mkdirSync(dataDir, { recursive: true });
-    const sec = randomBytes(32).toString('hex');
-    fsImpl.writeFileSync(f, sec, { mode: 0o600 });
-    return { secret: sec, source: 'generated' };
-  } catch (e) {
-    return { secret: randomBytes(32).toString('hex'), source: 'ephemeral' };
-  }
+  const configured = env.REDACTWALL_SECRET || env.PROMPTWALL_SECRET || env.SENTINEL_SECRET;
+  if (configured) return { secret: configured, source: 'env' };
+  const file = path.join(dataDir, SESSION_SECRET_FILE);
+  return privatePaths.withPrivateDirectoryMutationLockSync(dataDir, () => {
+    const lock = fileMutationLock.acquireFileMutationLockSync(file, {
+      lockTimeoutMs: PRIVATE_INIT_LOCK_TIMEOUT_MS,
+      ...(opts.lockOptions || {}),
+      fs: fsImpl,
+    });
+    try {
+      try {
+        return { secret: readStoredSecret(file, opts, fsImpl), source: 'file' };
+      } catch (error) {
+        if (!error || error.code !== 'ENOENT') throw error;
+      }
+      const secret = randomBytes(32).toString('hex');
+      if (!SESSION_SECRET_PATTERN.test(secret)) throw new Error('generated session secret is invalid');
+      return { secret: publishStoredSecret(file, secret, opts, fsImpl), source: 'generated' };
+    } finally {
+      fileMutationLock.releaseFileMutationLock(lock);
+    }
+  }, {
+    ...privatePathOptions(opts, fsImpl, 'session secret directory', true),
+    lockOptions: opts.lockOptions,
+    lockTimeoutMs: opts.lockOptions?.lockTimeoutMs ?? PRIVATE_INIT_LOCK_TIMEOUT_MS,
+  });
 }
 const { secret: SECRET, source: SECRET_SOURCE } = resolveSecret();
 
@@ -73,8 +150,34 @@ const ACCOUNTS = [
   OPERATOR_DISTINCT ? buildAccount(OPERATOR_USER, OPERATOR_PASSWORD, roles.OPERATOR) : null,
 ].filter(Boolean);
 
+let dynamicAccountLookup = null;
+
+function setAccountLookup(fn) {
+  dynamicAccountLookup = typeof fn === 'function' ? fn : null;
+}
+
+function bufferFromStored(value) {
+  if (Buffer.isBuffer(value)) return value;
+  const text = String(value || '');
+  if (!text) return Buffer.alloc(0);
+  return Buffer.from(text, 'base64');
+}
+
+function normalizeDynamicAccount(record) {
+  if (!record || record.active === false) return null;
+  const role = roles.normalizeRole(record.role);
+  if (!record.user || !role || !record.salt || !record.hash) return null;
+  const salt = bufferFromStored(record.salt);
+  const hash = bufferFromStored(record.hash);
+  if (salt.length < 8 || hash.length !== 32) return null;
+  return { user: record.user, role, salt, hash };
+}
+
 function findAccount(user) {
-  return ACCOUNTS.find((account) => account.user === user) || null;
+  const staticAccount = ACCOUNTS.find((account) => account.user === user);
+  if (staticAccount) return staticAccount;
+  if (!dynamicAccountLookup) return null;
+  return normalizeDynamicAccount(dynamicAccountLookup(user));
 }
 
 // A throwaway salt/hash so unknown usernames still pay the scrypt cost; without
@@ -92,6 +195,20 @@ function authenticate(user, password) {
   try { h = crypto.scryptSync(password || '', account.salt, 32); } catch { return null; }
   if (!crypto.timingSafeEqual(h, account.hash)) return null;
   return { user: account.user, role: account.role };
+}
+
+function hashPassword(password) {
+  const text = String(password || '');
+  const salt = crypto.randomBytes(16);
+  return {
+    algorithm: 'scrypt',
+    salt: salt.toString('base64'),
+    hash: crypto.scryptSync(text, salt, 32).toString('base64'),
+  };
+}
+
+function listStaticAccounts() {
+  return ACCOUNTS.map((account) => ({ user: account.user, role: account.role }));
 }
 
 function verifyPassword(user, password) {
@@ -196,9 +313,20 @@ function recoveryCodeIndex(code, secret = ADMIN_TOTP_SECRET) {
 }
 
 // ---- brute-force throttling --------------------------------------------------
-const MAX_ATTEMPTS = Number(process.env.LOGIN_MAX_ATTEMPTS || 7);
-const WINDOW_MS = Number(process.env.LOGIN_WINDOW_MS || 15 * 60 * 1000);
-const MAX_ATTEMPT_KEYS = Number(process.env.LOGIN_MAX_TRACKED_KEYS || 10000);
+function boundedPositiveInteger(value, fallback, { min = 1, max = Number.MAX_SAFE_INTEGER } = {}) {
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < min || parsed > max) return fallback;
+  return parsed;
+}
+
+const MAX_ATTEMPTS = boundedPositiveInteger(process.env.LOGIN_MAX_ATTEMPTS, 7, { max: 1000 });
+const WINDOW_MS = boundedPositiveInteger(process.env.LOGIN_WINDOW_MS, 15 * 60 * 1000, {
+  max: 7 * 24 * 60 * 60 * 1000,
+});
+const MAX_ATTEMPT_KEYS = boundedPositiveInteger(process.env.LOGIN_MAX_TRACKED_KEYS, 10000, {
+  min: 2,
+  max: 1000000,
+});
 const attempts = new Map(); // key -> { count, first, lockedUntil }
 
 // Drop keys whose window has elapsed and are no longer locked. Called only when
@@ -220,10 +348,22 @@ function registerFail(key) {
   if (attempts.size >= MAX_ATTEMPT_KEYS) pruneAttempts(now);
   let a = attempts.get(key);
   if (!a || now - a.first > WINDOW_MS) a = { count: 0, first: now, lockedUntil: 0 };
+  const wasLocked = !!a.lockedUntil && now < a.lockedUntil;
   a.count += 1;
   if (a.count >= MAX_ATTEMPTS) a.lockedUntil = now + WINDOW_MS;
+  // Refresh insertion order so frequently-hit IP/global buckets survive
+  // deterministic eviction while one-shot username spray keys fall out first.
+  attempts.delete(key);
+  while (attempts.size >= MAX_ATTEMPT_KEYS) {
+    const oldest = attempts.keys().next().value;
+    attempts.delete(oldest);
+  }
   attempts.set(key, a);
-  return { locked: !!a.lockedUntil, remaining: Math.max(0, MAX_ATTEMPTS - a.count) };
+  return {
+    locked: !!a.lockedUntil,
+    newlyLocked: !wasLocked && !!a.lockedUntil,
+    remaining: Math.max(0, MAX_ATTEMPTS - a.count),
+  };
 }
 function registerSuccess(key) { attempts.delete(key); }
 
@@ -253,14 +393,20 @@ function verify(token) {
     const role = roles.normalizeRole(payload.role);
     if (!role) return null;
     payload.role = role;
+    if (payload.jti !== undefined) {
+      payload.jti = String(payload.jti || '');
+      if (!/^[A-Za-z0-9_-]{16,64}$/.test(payload.jti)) return null;
+    }
     payload.stepUpUntil = Number(payload.stepUpUntil) || 0;
     if (payload.provider !== 'oidc') {
       delete payload.provider;
       delete payload.idpSubject;
       delete payload.idpIssuer;
+      delete payload.scimUserId;
     } else {
       payload.idpSubject = String(payload.idpSubject || '').slice(0, 256);
       payload.idpIssuer = String(payload.idpIssuer || '').slice(0, 512);
+      payload.scimUserId = String(payload.scimUserId || '').slice(0, 128);
     }
     if (sessionRevokedCheck && sessionRevokedCheck(payload)) return null;
     return payload;
@@ -274,12 +420,14 @@ function sessionExtras(extras = {}) {
     provider: 'oidc',
     idpSubject: String(extras.idpSubject || '').slice(0, 256),
     idpIssuer: String(extras.idpIssuer || '').slice(0, 512),
+    scimUserId: String(extras.scimUserId || '').slice(0, 128),
   };
 }
 function createSession(user, role = roles.SECURITY_ADMIN, extras = {}) {
   return sign({
     user,
     role,
+    jti: crypto.randomBytes(16).toString('base64url'),
     ...sessionExtras(extras),
     iat: Date.now(),
     exp: Date.now() + SESSION_TTL_MS,
@@ -383,7 +531,8 @@ function requireCsrf(req, res, next) {
 module.exports = {
   authenticate, verifyPassword, verifyTotpCode, totpCode, createSession, verify, oidcStepUpSatisfied, createCsrfToken, verifyCsrfToken, sessionTokenFromRequest, requireAuth, requireRole, requireCsrf, deriveKey,
   loginStatus, registerFail, registerSuccess,
-  setSessionRevokedCheck, stepUpSatisfied, elevateSession, STEP_UP_TTL_MS,
+  setAccountLookup, setSessionRevokedCheck, stepUpSatisfied, elevateSession, STEP_UP_TTL_MS,
+  hashPassword, listStaticAccounts,
   recoveryCodes, recoveryCodeIndex, MFA_RECOVERY_CODE_COUNT,
   ADMIN_USER, ADMIN_PASSWORD_IS_DEFAULT: ADMIN_PASSWORD === DEFAULT_ADMIN_PASSWORD,
   ADMIN_MFA_REQUIRED: !!ADMIN_TOTP_SECRET,
@@ -391,7 +540,13 @@ module.exports = {
   APPROVER_ENABLED: APPROVER_DISTINCT && ACCOUNTS.some((account) => account.role === roles.APPROVER),
   AUDITOR_ENABLED: AUDITOR_DISTINCT && ACCOUNTS.some((account) => account.role === roles.AUDITOR),
   OPERATOR_ENABLED: OPERATOR_DISTINCT && ACCOUNTS.some((account) => account.role === roles.OPERATOR),
-  SECRET_SOURCE, SECRET_IS_STABLE: SECRET_SOURCE === 'env' || SECRET_SOURCE === 'file',
+  SECRET_SOURCE, SECRET_IS_STABLE: ['env', 'file', 'generated'].includes(SECRET_SOURCE),
   SESSION_COOKIE_NAME, LEGACY_SESSION_COOKIE_NAMES,
-  _internal: { resolveSecret },
+  _internal: {
+    resolveSecret,
+    ACCOUNTS,
+    attemptCount: () => attempts.size,
+    loginLimits: { maxAttempts: MAX_ATTEMPTS, windowMs: WINDOW_MS, maxAttemptKeys: MAX_ATTEMPT_KEYS },
+    resetAttempts: () => attempts.clear(),
+  },
 };

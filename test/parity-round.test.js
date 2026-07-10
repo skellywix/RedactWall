@@ -8,6 +8,8 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 process.env.ADMIN_PASSWORD = 'unit-pass';
+process.env.AUDITOR_USER = 'aud@x';
+process.env.AUDITOR_PASSWORD = 'auditor-pass';
 process.env.REDACTWALL_SECRET = 'unit-secret-stable';
 process.env.REDACTWALL_DATA_KEY = 'unit-data-key-stable';
 process.env.INGEST_API_KEY = 'unit-ingest-key';

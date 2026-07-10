@@ -38,6 +38,7 @@ function signLicense(payload) {
 function setLicense(payload) {
   license.refresh({
     publicKeyPem: PUB,
+    expectedCustomerId: 'cu-1',
     readFile: () => {
       if (!payload) throw new Error('missing');
       return signLicense(payload);

@@ -28,24 +28,39 @@ const guardedFetchFile = wrapConnectorTool(fetchFile, {
 });
 ```
 
-`wrapConnectorTool()` calls `sanitizeToolResult()` before returning the tool
-result to the model. If the shared engine finds sensitive content, the returned
-MCP result is replaced with a single safe text content block. Raw connector
-output is not sent to the control plane. The control plane receives only the
-redacted text, masked findings, categories, risk metadata, destination label,
-and sensor version.
+`wrapConnectorTool()` checks request policy before calling `fetchFile()`, then
+calls `sanitizeToolResult()` before returning the tool result to the model.
+Blocked, approval-required, and non-allowlisted tools therefore cannot perform
+the upstream read or side effect. If the shared engine finds sensitive content,
+the returned MCP result is replaced with a single safe text content block. Raw
+connector output is not sent to the control plane. The control plane receives
+only label-safe policy evidence or redacted findings, categories, risk metadata,
+destination label, and sensor version.
 
-For custom control flow, call `sanitizeToolResult()` directly:
+The SDK scans the complete serialized MCP envelope, including mixed text,
+`resource_link`, `structuredContent`, and vendor-specific fields. Opaque binary
+content and results that throw during inspection fail closed with a generic
+text block; exception text and raw result fields are never forwarded or logged.
+
+For custom control flow, use `executeConnectorTool()` so request policy is
+enforced before the handler runs:
 
 ```js
-const safe = await sanitizeToolResult(rawToolResult, {
+const { executeConnectorTool } = require('./sensors/mcp-guard/sdk');
+
+const safe = await executeConnectorTool(fetchFile, args, {
   agent: 'cursor-agent',
   connector: 'google-drive',
   tool: 'files.export',
-});
+}, guardOptions);
 
 return safe.result;
 ```
+
+`sanitizeToolResult()` is an output-only boundary. Call it directly only when
+the host has already enforced `guardToolRequest()` before executing the tool.
+Fetching or mutating first and then calling `sanitizeToolResult()` is unsafe
+because a policy-blocked action has already happened.
 
 ## Connector Health
 
@@ -90,7 +105,10 @@ checks.
 
 ## Connector Rules
 
-- Call `sanitizeToolResult()` on every tool response before the model sees it.
+- Use `wrapConnectorTool()` or `executeConnectorTool()` so policy is checked
+  before execution and every response is sanitized before the model sees it.
+- Never fetch, query, or mutate first and rely on output sanitization as tool
+  policy enforcement.
 - Keep OAuth tokens, refresh tokens, tenant secrets, and connector credentials
   outside source code and package artifacts.
 - Include connector name, operation name, tenant ID, and scope count in health
@@ -105,7 +123,7 @@ checks.
 RedactWall now includes six first-party connector runtimes:
 
 - Microsoft 365 Graph driveItem content for text-readable OneDrive and
-  SharePoint files. It fetches the file body, applies
+  SharePoint files. It preflights request policy, fetches the file body, applies
   `sanitizeDriveItemContent()`, and returns only the sanitized MCP result. See
   `docs/connectors/MCP_MICROSOFT365_CONNECTOR.md`.
 - Google Drive file content for Drive blob files and Google Workspace document

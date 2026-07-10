@@ -14,11 +14,16 @@ const adapters = require('../detection-engine/adapters');
 const detector = require('../server/detector');
 const policy = require('../server/policy');
 const { extractPrompt, fetchWithTimeout } = require('./squid-icap-bridge');
+const { readBoundedBuffer, readBoundedJson } = require('../sensors/shared/bounded-response');
+const { secureServerBase } = require('../sensors/shared/server-url');
 
 const REDACTWALL = process.env.REDACTWALL_URL || 'http://localhost:4000';
 const KEY = process.env.INGEST_API_KEY || 'dev-ingest-key';
 const DEFAULT_PORT = 4181;
 const DEFAULT_MAX_BODY_BYTES = 256 * 1024;
+const DEFAULT_MAX_CONTROL_RESPONSE_BYTES = 512 * 1024;
+const DEFAULT_MAX_UPSTREAM_RESPONSE_BYTES = 8 * 1024 * 1024;
+const DEFAULT_RESPONSE_TIMEOUT_MS = 10000;
 const BODY_METHODS = new Set(['POST', 'PUT', 'PATCH']);
 const HOP_BY_HOP_HEADERS = new Set([
   'connection',
@@ -40,12 +45,18 @@ function safeEvidencePrompt(destination, analysis = {}) {
   const labels = unique([
     ...(analysis.findings || []).map((f) => f.type),
     ...(analysis.categories || []).map((c) => c.category),
+    ...(analysis.opaqueEncoded === true ? ['OPAQUE_ENCODED_CONTENT'] : []),
   ]);
   if (!labels.length) return `[proxy observed] ${destination}`;
   return `[REDACTED: ${labels.join(', ')}]`;
 }
 
 function clientEvidenceFromAnalysis(analysis = {}) {
+  const categories = (analysis.categories || []).map((c) => ({
+    category: c.category,
+    score: c.score,
+  }));
+  if (analysis.opaqueEncoded === true) categories.push({ category: 'OPAQUE_ENCODED_CONTENT', score: 1 });
   return {
     clientFindings: (analysis.findings || []).map((f) => ({
       type: f.type,
@@ -53,10 +64,7 @@ function clientEvidenceFromAnalysis(analysis = {}) {
       score: f.score,
       masked: f.masked || detector.maskValue(f.type, f.value || ''),
     })),
-    clientCategories: (analysis.categories || []).map((c) => ({
-      category: c.category,
-      score: c.score,
-    })),
+    clientCategories: categories,
     clientEntityCounts: analysis.entityCounts || {},
     clientRiskScore: analysis.riskScore || 0,
     clientMaxSeverity: analysis.maxSeverity || 0,
@@ -108,22 +116,31 @@ function buildMonitorPayload({
       riskScore: analysis.riskScore || 0,
       maxSeverity: analysis.maxSeverity || 0,
       findings: (analysis.findings || []).map((f) => ({ type: f.type, masked: f.masked || detector.maskValue(f.type, f.value || '') })),
-      categories: (analysis.categories || []).map((c) => c.category),
+      categories: (analysis.categories || []).map((c) => c.category)
+        .concat(analysis.opaqueEncoded === true ? ['OPAQUE_ENCODED_CONTENT'] : []),
     },
   };
 }
 
 function sanitizeControlPlaneBody(body = {}) {
+  body = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
+  const safeCode = (value) => /^[A-Za-z0-9_.:-]{1,128}$/.test(String(value || '')) ? String(value) : null;
+  const findings = Array.isArray(body.findings) ? body.findings : [];
+  const categories = Array.isArray(body.categories) ? body.categories : [];
   return {
-    id: body.id || null,
-    decision: body.decision || null,
-    status: body.status || null,
-    mode: body.mode || null,
-    riskScore: body.riskScore || 0,
-    findings: (body.findings || []).map((f) => ({ type: f.type, severity: f.severity, score: f.score, masked: f.masked })),
-    categories: body.categories || [],
-    reasons: body.reasons || [],
-    error: body.error || null,
+    id: safeCode(body.id),
+    decision: safeCode(body.decision),
+    status: safeCode(body.status),
+    mode: safeCode(body.mode),
+    riskScore: Number.isFinite(body.riskScore) ? body.riskScore : 0,
+    findings: findings.map((f) => ({
+      type: safeCode(f && f.type),
+      severity: Number.isFinite(f && f.severity) ? f.severity : 0,
+      score: Number.isFinite(f && f.score) ? f.score : 0,
+    })).filter((f) => f.type),
+    categories: categories.map((item) => safeCode(item && item.category ? item.category : item)).filter(Boolean),
+    reasons: [],
+    error: body.error ? 'control_plane_error' : null,
   };
 }
 
@@ -132,21 +149,31 @@ async function postMonitorEvidence(payload, {
   key = KEY,
   fetchImpl = globalThis.fetch,
   timeoutMs,
+  maxResponseBytes = DEFAULT_MAX_CONTROL_RESPONSE_BYTES,
+  responseTimeoutMs = DEFAULT_RESPONSE_TIMEOUT_MS,
 } = {}) {
   if (!fetchImpl) return { ok: false, status: 0, reason: 'fetch_unavailable' };
+  const plane = secureServerBase(redactwall);
+  if (!plane) return { ok: false, status: 0, reason: 'insecure_control_plane_url' };
   try {
-    const res = await fetchWithTimeout(fetchImpl, `${redactwall}/api/v1/gate`, {
+    const res = await fetchWithTimeout(fetchImpl, `${plane}/api/v1/gate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': key },
       body: JSON.stringify(payload),
     }, { timeoutMs });
-    const body = await res.json().catch(() => ({}));
+    const { json: body } = await readBoundedJson(res, {
+      maxBytes: maxResponseBytes,
+      timeoutMs: responseTimeoutMs,
+      label: 'proxy control-plane response',
+    });
     return { ok: !!(res && res.ok), status: res ? res.status : 0, body: sanitizeControlPlaneBody(body) };
   } catch (e) {
     return {
       ok: false,
       status: 0,
-      reason: e && e.code === 'REDACTWALL_TIMEOUT' ? 'gate_timeout' : 'gate_unreachable',
+      reason: e && ['REDACTWALL_TIMEOUT', 'REDACTWALL_RESPONSE_TIMEOUT'].includes(e.code)
+        ? 'gate_timeout'
+        : 'gate_unreachable',
     };
   }
 }
@@ -233,12 +260,17 @@ async function forwardRequest(req, res, targetUrl, body, opts = {}) {
       body: body && body.length ? body : undefined,
       redirect: 'manual',
     });
+    const responseBody = await readBoundedBuffer(upstream, {
+      maxBytes: opts.maxUpstreamResponseBytes || DEFAULT_MAX_UPSTREAM_RESPONSE_BYTES,
+      timeoutMs: opts.upstreamResponseTimeoutMs || DEFAULT_RESPONSE_TIMEOUT_MS,
+      label: 'proxy upstream response',
+    });
     const responseHeaders = {};
     upstream.headers.forEach((value, key) => {
       if (!HOP_BY_HOP_HEADERS.has(key.toLowerCase())) responseHeaders[key] = value;
     });
     res.writeHead(upstream.status, responseHeaders);
-    res.end(Buffer.from(await upstream.arrayBuffer()));
+    res.end(responseBody);
   } catch {
     res.writeHead(502, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ error: 'upstream unavailable' }));
@@ -246,6 +278,9 @@ async function forwardRequest(req, res, targetUrl, body, opts = {}) {
 }
 
 function createProxyServer(opts = {}) {
+  if (!secureServerBase(opts.redactwall || REDACTWALL)) {
+    throw new Error('RedactWall URL must use HTTPS or loopback HTTP without query parameters or fragments');
+  }
   const server = http.createServer(async (req, res) => {
     let targetUrl;
     try {

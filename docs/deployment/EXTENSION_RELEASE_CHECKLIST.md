@@ -86,9 +86,10 @@ Before upload:
   governed AI tools and blocks, redacts, warns, or requires justification by
   policy.
 - Document the permission purpose for `storage`, `activeTab`, `tabs`, `alarms`,
-  `downloads`, and the governed AI host list.
-- Document that managed storage provides `serverUrl`, `ingestKey`, `orgId`, and
-  user identity.
+  `downloads`, `scripting`, `declarativeNetRequest`, the packaged AI host list,
+  and the optional HTTPS host permission used only for exact custom-site grants.
+- Document that managed storage provides `serverUrl`, `ingestKey`,
+  `policyPublicKey`, `orgId`, `enabled`, and user identity.
 - State that prompt text is inspected locally by the extension before send, and
   that install-health heartbeats contain only bounded check IDs, version, user,
   org, platform, and failed-check state.
@@ -121,8 +122,11 @@ On a managed test device:
   `about:policies`) and reload policies.
 - Confirm the extension is force-installed.
 - Confirm the extension receives managed storage.
-- Open the RedactWall popup and confirm protection is enabled.
-- Send a benign prompt to a governed AI destination.
+- Open the RedactWall popup, grant the exact control-plane origin and every
+  pending custom governed destination, then confirm protection is enabled and
+  custom destination coverage is healthy.
+- Send a benign prompt to a packaged host and an administrator-added governed
+  destination.
 - Confirm Coverage shows the managed test user and org in Fleet Install Health
   with `browser_extension`, the released version, expected platform, `covered`,
   and `checks ok`.

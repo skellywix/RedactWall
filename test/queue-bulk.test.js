@@ -10,6 +10,8 @@ const crypto = require('node:crypto');
 process.env.ADMIN_PASSWORD = 'unit-pass';
 process.env.APPROVER_USER = 'approver@example.test';
 process.env.APPROVER_PASSWORD = 'approver-pass';
+process.env.AUDITOR_USER = 'aud@example.test';
+process.env.AUDITOR_PASSWORD = 'auditor-pass';
 process.env.REDACTWALL_SECRET = 'unit-secret-stable';
 process.env.REDACTWALL_DATA_KEY = 'unit-data-key-stable';
 process.env.INGEST_API_KEY = 'unit-ingest-key';
@@ -17,6 +19,7 @@ process.env.REDACTWALL_DB_PATH = path.join(os.tmpdir(), 'ps-bulk-' + crypto.rand
 
 const app = require('../server/app');
 const auth = require('../server/auth');
+const db = require('../server/db');
 const { listen } = require('./support/listen');
 
 async function withServer(fn) {
@@ -52,11 +55,35 @@ async function holdPrompt(port, suffix, user = 'bulk-user@example.test') {
   return body.id;
 }
 
+async function withInjectedCompetingDecision(status, fn) {
+  const original = db.transitionQueryWithAudit;
+  let injected = false;
+  db.transitionQueryWithAudit = (id, expected, patch, audit) => {
+    if (!injected) {
+      injected = true;
+      const winner = original(
+        id,
+        expected,
+        { status, decidedBy: 'other-instance', decidedAt: new Date().toISOString(), decisionNote: 'concurrent winner' },
+        { action: status.toUpperCase(), actor: 'other-instance', detail: 'concurrent winner' },
+      );
+      assert.strictEqual(winner.outcome, 'updated');
+    }
+    return original(id, expected, patch, audit);
+  };
+  try {
+    return await fn(() => injected);
+  } finally {
+    db.transitionQueryWithAudit = original;
+  }
+}
+
 test('admin bulk-denies pending prompts with per-item audit entries', async () => withServer(async (port) => {
   const admin = cookieFor('admin', 'security_admin');
   const a = await holdPrompt(port, '9001');
   const b = await holdPrompt(port, '9002');
-  const r = await post(port, '/api/queries/bulk-decision', admin, { ids: [a, b, 'q_missing'], action: 'deny', note: 'policy sweep' });
+  const rawNote = 'Policy sweep for member SSN 524-71-9009 at reviewer@example.test';
+  const r = await post(port, '/api/queries/bulk-decision', admin, { ids: [a, b, 'q_missing'], action: 'deny', note: rawNote });
   assert.strictEqual(r.status, 200);
   const body = await r.json();
   assert.strictEqual(body.decided, 2);
@@ -68,7 +95,13 @@ test('admin bulk-denies pending prompts with per-item audit entries', async () =
   const audit = await (await fetch(`http://127.0.0.1:${port}/api/audit`, { headers: { cookie: admin } })).json();
   const denials = audit.entries.filter((e) => e.action === 'DENIED' && [a, b].includes(e.queryId));
   assert.strictEqual(denials.length, 2);
-  assert.ok(denials.every((e) => e.detail === 'policy sweep (bulk)'));
+  assert.ok(denials.every((e) => !e.detail.includes('524-71-9009')));
+  assert.ok(denials.every((e) => !e.detail.includes('reviewer@example.test')));
+  assert.ok(denials.every((e) => /\[US_SSN\]/.test(e.detail) && /\[EMAIL_ADDRESS\]/.test(e.detail)));
+  assert.ok([a, b].every((id) => {
+    const note = rows.find((query) => query.id === id).decisionNote;
+    return !note.includes('524-71-9009') && !note.includes('reviewer@example.test');
+  }));
 
   const again = await post(port, '/api/queries/bulk-decision', admin, { ids: [a], action: 'deny' });
   assert.deepStrictEqual((await again.json()).results[0], { id: a, outcome: 'skipped', reason: 'already denied' });
@@ -85,6 +118,34 @@ test('bulk approval requires password step-up like single approvals', async () =
   assert.strictEqual((await withPassword.json()).decided, 1);
   const rows = await (await fetch(`http://127.0.0.1:${port}/api/queries`, { headers: { cookie: admin } })).json();
   assert.strictEqual(rows.find((q) => q.id === id).status, 'approved');
+}));
+
+test('single and bulk decisions lose atomically when another instance wins the held row', async () => withServer(async (port) => {
+  const admin = cookieFor('admin', 'security_admin');
+  const singleId = await holdPrompt(port, '9010');
+  const single = await withInjectedCompetingDecision('approved', () => (
+    post(port, `/api/queries/${singleId}/deny`, admin, { note: 'stale single denial' })
+  ));
+  assert.strictEqual(single.status, 409);
+  assert.deepStrictEqual(await single.json(), { error: 'already approved' });
+
+  const bulkId = await holdPrompt(port, '9011');
+  const bulk = await withInjectedCompetingDecision('approved', () => (
+    post(port, '/api/queries/bulk-decision', admin, { ids: [bulkId], action: 'deny', note: 'stale bulk denial' })
+  ));
+  assert.strictEqual(bulk.status, 200);
+  assert.deepStrictEqual(await bulk.json(), {
+    results: [{ id: bulkId, outcome: 'skipped', reason: 'already approved' }],
+    decided: 0,
+    skipped: 1,
+  });
+
+  for (const id of [singleId, bulkId]) {
+    assert.strictEqual(db.getQuery(id).status, 'approved');
+    const decisions = db.listAudit(1000).filter((entry) => entry.queryId === id && ['APPROVED', 'DENIED'].includes(entry.action));
+    assert.deepStrictEqual(decisions.map((entry) => entry.action), ['APPROVED']);
+  }
+  assert.strictEqual(db.verifyAuditChain().ok, true);
 }));
 
 test('approver bulk skips items that are not theirs to decide', async () => withServer(async (port) => {

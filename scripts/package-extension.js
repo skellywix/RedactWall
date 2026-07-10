@@ -10,7 +10,7 @@ const AdmZip = require('adm-zip');
 const ROOT = path.join(__dirname, '..');
 const DEFAULT_OUT_DIR = path.join(ROOT, 'dist', 'browser-extension');
 const BROWSER_TARGETS = ['chrome', 'edge', 'firefox'];
-const REQUIRED_MANAGED_KEYS = ['serverUrl', 'ingestKey', 'orgId'];
+const REQUIRED_MANAGED_KEYS = ['serverUrl', 'ingestKey', 'policyPublicKey', 'orgId', 'enabled'];
 const ENGINE_COPIES = [
   ['detection-engine/detect.js', 'sensors/browser-extension/lib/detect.js'],
   ['detection-engine/adapters.js', 'sensors/browser-extension/lib/adapters.js'],
@@ -44,11 +44,19 @@ function manifestForTarget(manifest, target = 'chrome') {
   const normalized = normalizeTarget(target);
   const next = cloneJson(manifest);
   if (normalized === 'firefox') {
-    next.background = { scripts: ['background.js'] };
+    next.background = {
+      scripts: [
+        'lib/browser-api.js',
+        'lib/adapters.js',
+        'lib/policy-bundle.js',
+        'lib/destination-coverage.js',
+        'background.js',
+      ],
+    };
     next.browser_specific_settings = {
       gecko: {
         id: 'redactwall@example.com',
-        strict_min_version: '109.0',
+        strict_min_version: '128.0',
       },
     };
   }
@@ -70,6 +78,9 @@ function collectExtensionFiles(extensionDir = path.join(ROOT, 'sensors', 'browse
       if (entry.name === '.DS_Store') continue;
       const absPath = path.join(dir, entry.name);
       if (entry.isDirectory()) {
+        // Chromium writes this runtime cache beside an unpacked extension.
+        // It is browser-owned state, not a distributable source asset.
+        if (absPath === path.join(extensionDir, '_metadata')) continue;
         walk(absPath);
         continue;
       }
@@ -114,6 +125,35 @@ function validateManifest({ manifest, schema, appVersion, files, target = 'chrom
   }
 
   requirePackageFile(fileSet, 'manifest.json');
+  requirePackageFile(fileSet, 'lib/policy-bundle.js');
+  requirePackageFile(fileSet, 'lib/destination-coverage.js');
+  requirePackageFile(fileSet, 'coverage-required.html');
+  for (const file of ['rehydrate.html', 'rehydrate.js', 'rehydrate.css']) requirePackageFile(fileSet, file);
+  const webResources = (manifest.web_accessible_resources || []).flatMap((entry) => entry.resources || []);
+  if (webResources.some((file) => /^rehydrate\.(?:html|js|css)$/.test(file))) {
+    throw new Error(`${normalized} extension must keep the rehydration surface extension-only`);
+  }
+  if (!Array.isArray(manifest.permissions)
+      || !manifest.permissions.includes('scripting')
+      || !manifest.permissions.includes('declarativeNetRequest')) {
+    throw new Error(`${normalized} extension must declare dynamic scripting and fail-closed destination blocking`);
+  }
+  if (!manifest.permissions.includes('clipboardWrite')) {
+    throw new Error(`${normalized} extension must declare clipboardWrite for explicit isolated-surface copy`);
+  }
+  if (!Array.isArray(manifest.optional_host_permissions)
+      || manifest.optional_host_permissions.length !== 1
+      || manifest.optional_host_permissions[0] !== 'https://*/*') {
+    throw new Error(`${normalized} extension must request custom HTTPS destinations only as an optional host permission`);
+  }
+  const ruleResources = manifest.declarative_net_request && manifest.declarative_net_request.rule_resources;
+  if (!Array.isArray(ruleResources) || !ruleResources.length) {
+    throw new Error(`${normalized} extension must declare an enabled static DNR ruleset`);
+  }
+  for (const resource of ruleResources) {
+    if (!resource.enabled) throw new Error(`${normalized} extension DNR rulesets must be enabled`);
+    requirePackageFile(fileSet, resource.path);
+  }
   if (manifest.background && manifest.background.service_worker) {
     requirePackageFile(fileSet, manifest.background.service_worker);
   } else if (manifest.background && Array.isArray(manifest.background.scripts)) {
@@ -218,6 +258,8 @@ function packageExtension(opts = {}) {
       syncedEngine: true,
       browserApiBridgeIncluded: true,
       installValidationIncluded: true,
+      signedPolicyVerifierIncluded: true,
+      isolatedRehydrationIncluded: true,
       developmentIngestKeyAbsent: true,
       broadHostPermissionsAbsent: true,
     },

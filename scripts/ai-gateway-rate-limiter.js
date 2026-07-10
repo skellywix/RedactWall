@@ -22,10 +22,33 @@ const DEFAULT_DB = process.env.REDACTWALL_RATE_LIMITER_DB || process.env.PROMPTW
 const DEFAULT_REDIS_URL = process.env.REDACTWALL_RATE_LIMITER_REDIS_URL || process.env.PROMPTWALL_RATE_LIMITER_REDIS_URL || '';
 const DEFAULT_REDIS_PREFIX = process.env.REDACTWALL_RATE_LIMITER_REDIS_PREFIX || process.env.PROMPTWALL_RATE_LIMITER_REDIS_PREFIX || 'redactwall:gateway:rl:';
 const DEFAULT_REDIS_TIMEOUT_MS = 2000;
+const DEFAULT_BODY_TIMEOUT_MS = boundedInt(
+  process.env.REDACTWALL_RATE_LIMITER_BODY_TIMEOUT_MS || process.env.PROMPTWALL_RATE_LIMITER_BODY_TIMEOUT_MS,
+  5000,
+  100,
+  120000,
+);
+const DEFAULT_ALLOW_INSECURE_REDIS_LOOPBACK = process.env.REDACTWALL_RATE_LIMITER_ALLOW_INSECURE_REDIS_LOOPBACK || process.env.PROMPTWALL_RATE_LIMITER_ALLOW_INSECURE_REDIS_LOOPBACK || '';
 const DEFAULT_TOKEN = process.env.REDACTWALL_RATE_LIMITER_TOKEN || process.env.PROMPTWALL_RATE_LIMITER_TOKEN || process.env.REDACTWALL_GATEWAY_RATE_LIMIT_TOKEN || process.env.PROMPTWALL_GATEWAY_RATE_LIMIT_TOKEN || '';
 const DEFAULT_MAX_BODY_BYTES = 16 * 1024;
 const DEFAULT_MAX_LIMIT = 100000;
 const DEFAULT_MAX_WINDOW_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_RESP_LIMITS = Object.freeze({
+  maxResponseBytes: 64 * 1024,
+  maxLineBytes: 1024,
+  maxBulkBytes: 32 * 1024,
+  maxArrayLength: 64,
+  maxDepth: 8,
+  maxElements: 256,
+});
+const HARD_RESP_LIMITS = Object.freeze({
+  maxResponseBytes: 256 * 1024,
+  maxLineBytes: 8 * 1024,
+  maxBulkBytes: 128 * 1024,
+  maxArrayLength: 1024,
+  maxDepth: 16,
+  maxElements: 4096,
+});
 const REDIS_LIMITER_SCRIPT = [
   'local window = tonumber(ARGV[1])',
   "local count = redis.call('INCR', KEYS[1])",
@@ -44,6 +67,10 @@ function boundedInt(value, fallback, min, max) {
 function safeText(value, fallback = '', max = 160) {
   const text = String(value || '').replace(/[\r\n\t]/g, ' ').trim();
   return (text || fallback).slice(0, max);
+}
+
+function enabled(value) {
+  return /^(?:1|true|yes|on)$/i.test(String(value || '').trim());
 }
 
 function limiterStoreMode(opts = {}) {
@@ -167,14 +194,49 @@ function redisUrl(opts = {}) {
   if (!raw) throw new Error('rate limiter redis url is required');
   const url = new URL(raw);
   if (!['redis:', 'rediss:'].includes(url.protocol)) throw new Error('rate limiter redis url must use redis or rediss');
+  if (url.search || url.hash) throw new Error('rate limiter redis url must not include query parameters or fragments');
+  const host = String(url.hostname || '').replace(/^\[|\]$/g, '').toLowerCase();
+  if (!host) throw new Error('rate limiter redis url host is required');
+  const port = Number(url.port || 6379);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('rate limiter redis url port is invalid');
+  let username;
+  let password;
+  let db;
+  try {
+    username = decodeURIComponent(url.username || '');
+    password = decodeURIComponent(url.password || '');
+    db = decodeURIComponent(String(url.pathname || '').replace(/^\/+/, ''));
+  } catch {
+    throw new Error('rate limiter redis url contains invalid encoding');
+  }
+  if (username.length > 1024 || password.length > 1024) throw new Error('rate limiter redis credentials are too long');
+  if (db && (!/^\d+$/.test(db) || Number(db) > 65535)) throw new Error('rate limiter redis database is invalid');
+  if (url.protocol === 'redis:') validateCleartextRedis(host, opts);
   return {
     tls: url.protocol === 'rediss:',
-    host: url.hostname || '127.0.0.1',
-    port: Number(url.port || 6379),
-    username: decodeURIComponent(url.username || ''),
-    password: decodeURIComponent(url.password || ''),
-    db: String(url.pathname || '').replace(/^\/+/, ''),
+    host,
+    port,
+    username,
+    password,
+    db,
   };
+}
+
+function isLoopbackAddress(host) {
+  const normalized = String(host || '').replace(/^\[|\]$/g, '').toLowerCase();
+  if (normalized === '::1') return true;
+  if (net.isIP(normalized) !== 4) return false;
+  return normalized.split('.')[0] === '127';
+}
+
+function validateCleartextRedis(host, opts = {}) {
+  if (!isLoopbackAddress(host)) throw new Error('TLS is required for remote Redis or Valkey');
+  const nodeEnv = safeText(opts.nodeEnv || process.env.NODE_ENV || 'development', 'development', 32).toLowerCase();
+  if (nodeEnv === 'production') throw new Error('cleartext Redis loopback is disabled in production');
+  const explicit = Object.prototype.hasOwnProperty.call(opts, 'allowInsecureRedisLoopback')
+    ? opts.allowInsecureRedisLoopback === true
+    : enabled(DEFAULT_ALLOW_INSECURE_REDIS_LOOPBACK);
+  if (!explicit) throw new Error('cleartext Redis requires an explicit non-production loopback exception');
 }
 
 function encodeRedisCommand(args = []) {
@@ -192,11 +254,35 @@ function incompleteResp() {
   return err;
 }
 
-function parseRespReplies(buffer, expectedReplies) {
+function respError(message, code = 'RESP_MALFORMED') {
+  const err = new Error(message);
+  err.code = code;
+  return err;
+}
+
+function respLimits(opts = {}) {
+  const limits = {};
+  for (const name of Object.keys(DEFAULT_RESP_LIMITS)) {
+    limits[name] = boundedInt(opts[name], DEFAULT_RESP_LIMITS[name], 1, HARD_RESP_LIMITS[name]);
+  }
+  limits.maxBulkBytes = Math.min(limits.maxBulkBytes, limits.maxResponseBytes);
+  return limits;
+}
+
+function parseRespReplies(input, expectedReplies, opts = {}) {
+  const buffer = Buffer.isBuffer(input) ? input : Buffer.from(input || '');
+  const limits = respLimits(opts);
+  if (buffer.length > limits.maxResponseBytes) throw respError('redis response exceeds byte limit', 'RESP_LIMIT');
+  const expected = boundedInt(expectedReplies, 1, 1, limits.maxElements);
   let offset = 0;
+  let elements = 0;
   const readLine = () => {
     const end = buffer.indexOf('\r\n', offset, 'utf8');
-    if (end === -1) throw incompleteResp();
+    if (end === -1) {
+      if (buffer.length - offset > limits.maxLineBytes) throw respError('redis response line exceeds byte limit', 'RESP_LIMIT');
+      throw incompleteResp();
+    }
+    if (end - offset > limits.maxLineBytes) throw respError('redis response line exceeds byte limit', 'RESP_LIMIT');
     const value = buffer.slice(offset, end).toString('utf8');
     offset = end + 2;
     return value;
@@ -204,43 +290,60 @@ function parseRespReplies(buffer, expectedReplies) {
   const ensure = (n) => {
     if (offset + n > buffer.length) throw incompleteResp();
   };
-  const parseOne = () => {
+  const readInteger = (label) => {
+    const raw = readLine();
+    if (!/^-?\d+$/.test(raw)) throw respError(`redis ${label} is malformed`);
+    const value = Number(raw);
+    if (!Number.isSafeInteger(value)) throw respError(`redis ${label} is malformed`);
+    return value;
+  };
+  const parseOne = (depth = 0) => {
+    if (depth > limits.maxDepth) throw respError('redis response nesting exceeds depth limit', 'RESP_LIMIT');
+    elements += 1;
+    if (elements > limits.maxElements) throw respError('redis response exceeds element limit', 'RESP_LIMIT');
     ensure(1);
     const type = String.fromCharCode(buffer[offset]);
     offset += 1;
     if (type === '+') return readLine();
-    if (type === ':') return Number(readLine());
+    if (type === ':') return readInteger('integer');
     if (type === '-') {
       const err = new Error(`redis error: ${safeText(readLine(), 'command failed', 80)}`);
       err.code = 'REDIS_ERROR';
       throw err;
     }
     if (type === '$') {
-      const length = Number(readLine());
+      const length = readInteger('bulk string length');
       if (length === -1) return null;
+      if (length < 0) throw respError('redis bulk string length is malformed');
+      if (length > limits.maxBulkBytes) throw respError('redis bulk string exceeds byte limit', 'RESP_LIMIT');
       ensure(length + 2);
       const value = buffer.slice(offset, offset + length).toString('utf8');
+      if (buffer[offset + length] !== 13 || buffer[offset + length + 1] !== 10) {
+        throw respError('redis bulk string terminator is malformed');
+      }
       offset += length + 2;
       return value;
     }
     if (type === '*') {
-      const length = Number(readLine());
+      const length = readInteger('array length');
       if (length === -1) return null;
+      if (length < 0) throw respError('redis array length is malformed');
+      if (length > limits.maxArrayLength) throw respError('redis array exceeds element limit', 'RESP_LIMIT');
       const values = [];
-      for (let i = 0; i < length; i += 1) values.push(parseOne());
+      for (let i = 0; i < length; i += 1) values.push(parseOne(depth + 1));
       return values;
     }
-    const err = new Error('unsupported redis response');
-    err.code = 'REDIS_ERROR';
-    throw err;
+    throw respError('unsupported redis response');
   };
   const replies = [];
-  while (offset < buffer.length && replies.length < expectedReplies) replies.push(parseOne());
-  return { replies, complete: replies.length >= expectedReplies };
+  while (offset < buffer.length && replies.length < expected) replies.push(parseOne());
+  if (replies.length >= expected && offset < buffer.length) throw respError('redis response contains unexpected trailing data');
+  return { replies, complete: replies.length >= expected };
 }
 
 function redisCommand(config, args, opts = {}) {
   const timeoutMs = boundedInt(opts.timeoutMs, DEFAULT_REDIS_TIMEOUT_MS, 100, 30000);
+  const limits = respLimits(opts);
   const commands = [];
   if (config.password && config.username) commands.push(['AUTH', config.username, config.password]);
   else if (config.password) commands.push(['AUTH', config.password]);
@@ -251,9 +354,10 @@ function redisCommand(config, args, opts = {}) {
     const socket = (config.tls ? tls : net).connect({
       host: config.host,
       port: config.port,
-      servername: config.tls ? config.host : undefined,
+      servername: config.tls && net.isIP(config.host) === 0 ? config.host : undefined,
     });
-    const chunks = [];
+    const response = Buffer.allocUnsafe(limits.maxResponseBytes);
+    let responseBytes = 0;
     const finish = (err, value) => {
       if (settled) return;
       settled = true;
@@ -263,13 +367,19 @@ function redisCommand(config, args, opts = {}) {
       else resolve(value);
     };
     const timer = setTimeout(() => finish(new Error('redis limiter timeout')), timeoutMs);
-    socket.on('connect', () => {
+    socket.on(config.tls ? 'secureConnect' : 'connect', () => {
       socket.write(commands.map(encodeRedisCommand).join(''));
     });
     socket.on('data', (chunk) => {
-      chunks.push(chunk);
+      if (chunk.length > limits.maxResponseBytes - responseBytes) {
+        finish(respError('redis response exceeds byte limit', 'RESP_LIMIT'));
+        return;
+      }
+      chunk.copy(response, responseBytes);
+      responseBytes += chunk.length;
+      if (responseBytes < 2 || response[responseBytes - 2] !== 13 || response[responseBytes - 1] !== 10) return;
       try {
-        const parsed = parseRespReplies(Buffer.concat(chunks), commands.length);
+        const parsed = parseRespReplies(response.subarray(0, responseBytes), commands.length, limits);
         if (parsed.complete) finish(null, parsed.replies[parsed.replies.length - 1]);
       } catch (err) {
         if (err && err.code === 'RESP_INCOMPLETE') return;
@@ -345,19 +455,77 @@ function jsonResponse(res, status, body, headers = {}) {
   res.end(payload);
 }
 
-function collectBody(req, maxBodyBytes = DEFAULT_MAX_BODY_BYTES) {
+function collectBody(req, maxBodyBytes = DEFAULT_MAX_BODY_BYTES, bodyTimeoutMs = DEFAULT_BODY_TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;
-    let truncated = false;
-    req.on('data', (chunk) => {
+    let settled = false;
+    let timer;
+    const cleanup = () => {
+      clearTimeout(timer);
+      req.removeListener('data', onData);
+      req.removeListener('end', onEnd);
+      req.removeListener('error', onError);
+      req.removeListener('aborted', onAborted);
+    };
+    const finish = (err, value) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (err) reject(err);
+      else resolve(value);
+    };
+    const onData = (chunk) => {
       size += chunk.length;
-      if (size <= maxBodyBytes) chunks.push(chunk);
-      else truncated = true;
-    });
-    req.on('end', () => resolve({ body: Buffer.concat(chunks), truncated }));
-    req.on('error', reject);
+      if (size > maxBodyBytes) {
+        req.pause();
+        finish(httpBodyError(413, 'request too large'));
+        return;
+      }
+      chunks.push(chunk);
+    };
+    const onEnd = () => finish(null, { body: Buffer.concat(chunks) });
+    const onError = () => finish(httpBodyError(400, 'request body read failed'));
+    const onAborted = () => finish(httpBodyError(400, 'request body aborted'));
+    req.on('data', onData);
+    req.on('end', onEnd);
+    req.on('error', onError);
+    req.on('aborted', onAborted);
+    const timeoutMs = boundedInt(bodyTimeoutMs, DEFAULT_BODY_TIMEOUT_MS, 100, 120000);
+    timer = setTimeout(() => {
+      req.pause();
+      finish(httpBodyError(408, 'request body deadline exceeded'));
+    }, timeoutMs);
   });
+}
+
+function httpBodyError(status, message) {
+  const err = new Error(message);
+  err.status = status;
+  return err;
+}
+
+function contentLength(req) {
+  const raw = req.headers['content-length'];
+  if (raw === undefined) return null;
+  if (!/^\d+$/.test(String(raw))) throw httpBodyError(400, 'invalid content length');
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value)) throw httpBodyError(413, 'request too large');
+  return value;
+}
+
+function bodyErrorResponse(req, res, err) {
+  const status = Number(err && err.status) || 400;
+  const ignoreLateError = () => {};
+  req.on('error', ignoreLateError);
+  req.once('close', () => req.removeListener('error', ignoreLateError));
+  res.shouldKeepAlive = false;
+  return jsonResponse(
+    res,
+    status,
+    { error: safeText(err && err.message, 'invalid request body') },
+    { connection: 'close' },
+  );
 }
 
 function parseJson(buffer) {
@@ -409,8 +577,23 @@ async function handleLimiterRequest(req, res, opts = {}, state = {}) {
   const auth = authenticate(req, opts);
   if (!auth.ok) return jsonResponse(res, auth.status, { error: auth.error });
 
-  const collected = await collectBody(req, boundedInt(opts.maxBodyBytes, DEFAULT_MAX_BODY_BYTES, 1024, 128 * 1024));
-  if (collected.truncated) return jsonResponse(res, 413, { error: 'request too large' });
+  const maxBodyBytes = boundedInt(opts.maxBodyBytes, DEFAULT_MAX_BODY_BYTES, 1024, 128 * 1024);
+  try {
+    if (contentLength(req) > maxBodyBytes) throw httpBodyError(413, 'request too large');
+  } catch (err) {
+    req.pause();
+    return bodyErrorResponse(req, res, err);
+  }
+  let collected;
+  try {
+    collected = await collectBody(
+      req,
+      maxBodyBytes,
+      boundedInt(opts.bodyTimeoutMs, DEFAULT_BODY_TIMEOUT_MS, 100, 120000),
+    );
+  } catch (err) {
+    return bodyErrorResponse(req, res, err);
+  }
   const parsed = parseJson(collected.body);
   if (!parsed.ok) return jsonResponse(res, 400, { error: parsed.error });
   try {
@@ -445,8 +628,10 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (item === '--redis-url') out.redisUrl = argv[++i];
     else if (item === '--redis-prefix') out.redisPrefix = argv[++i];
     else if (item === '--redis-timeout-ms') out.redisTimeoutMs = Number(argv[++i]);
+    else if (item === '--allow-insecure-redis-loopback') out.allowInsecureRedisLoopback = true;
     else if (item === '--token') out.token = argv[++i];
     else if (item === '--allow-insecure-dev') out.allowInsecureDev = true;
+    else if (item === '--body-timeout-ms') out.bodyTimeoutMs = Number(argv[++i]);
     else if (item === '--default-limit') out.defaultLimit = Number(argv[++i]);
     else if (item === '--default-window-ms') out.defaultWindowMs = Number(argv[++i]);
     else if (item === '--max-limit') out.maxLimit = Number(argv[++i]);

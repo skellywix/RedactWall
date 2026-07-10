@@ -121,10 +121,12 @@ dashboard that proves control without storing prompt bodies by default.
   and `/readyz` endpoints, centralizes AI gateway counters for multi-worker and
   multi-host deployments, persists only hashed limiter keys, and is covered by
   direct and gateway-integration tests.
-- Added a pilot-ready AI gateway HA compose stack with two gateway replicas, a
-  private shared limiter, a no-access-log Nginx balancer, read-only hardened
-  containers, and `npm run gateway:ha:smoke` proving cross-replica limiter
-  sharing without calling an external LLM provider.
+- Added a single-host redundant AI gateway compose stack with two gateway
+  replicas, a shared local SQLite limiter file, a loopback-bound no-access-log
+  Nginx balancer, read-only hardened containers, and
+  `npm run gateway:ha:smoke` proving survivor and restart counter continuity
+  without calling an external LLM provider. It is not presented as multi-host
+  high availability.
 - Added a built-in Redis/Valkey backend for the shared limiter service so
   pilots can run active-active private limiter replicas behind the same HTTP
   contract. The backend uses atomic Redis `EVAL`, TTL-bound prefixed hashed

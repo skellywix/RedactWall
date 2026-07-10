@@ -3,6 +3,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const crypto = require('crypto');
 const { test, expect, chromium } = require('@playwright/test');
 const pkg = require('../package.json');
 
@@ -41,6 +42,47 @@ const fixturePolicy = {
   blockUnapprovedAiDestinations: true,
   alwaysBlock: ['US_SSN', 'CREDIT_CARD', 'BANK_ACCOUNT', 'ROUTING_NUMBER', 'IBAN', 'US_PASSPORT', 'SECRET_KEY', 'PRIVATE_KEY', 'CANARY_TOKEN'],
 };
+const E2E_POLICY_KEYS = crypto.generateKeyPairSync('ed25519');
+const E2E_POLICY_PUBLIC_KEY = E2E_POLICY_KEYS.publicKey.export({ type: 'spki', format: 'pem' }).toString();
+let e2ePolicySequence = Date.now();
+
+function arrayIndexKey(value) {
+  if (!/^(0|[1-9]\d*)$/.test(value)) return false;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 0 && parsed < 4294967295 && String(parsed) === value;
+}
+
+function orderedPolicyKeys(value) {
+  const keys = Object.keys(value);
+  return [
+    ...keys.filter(arrayIndexKey).sort((left, right) => Number(left) - Number(right)),
+    ...keys.filter((key) => !arrayIndexKey(key)).sort(),
+  ];
+}
+
+function canonicalPolicyJson(value) {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalPolicyJson).join(',')}]`;
+  return `{${orderedPolicyKeys(value).map((key) => (
+    `${JSON.stringify(key)}:${canonicalPolicyJson(value[key])}`
+  )).join(',')}}`;
+}
+
+function signedFixturePolicy(policy) {
+  e2ePolicySequence = Math.max(Date.now(), e2ePolicySequence + 1);
+  const issuedAt = new Date(e2ePolicySequence).toISOString();
+  const expiresAt = new Date(e2ePolicySequence + (30 * 60 * 1000)).toISOString();
+  const canonicalPolicy = JSON.parse(canonicalPolicyJson(policy));
+  const policyHash = crypto.createHash('sha256').update(canonicalPolicyJson(canonicalPolicy)).digest('hex');
+  const input = JSON.stringify({ version: 1, issuedAt, expiresAt, policyHash });
+  return {
+    version: 1,
+    issuedAt,
+    expiresAt,
+    policy: canonicalPolicy,
+    signature: crypto.sign(null, Buffer.from(input), E2E_POLICY_KEYS.privateKey).toString('base64'),
+  };
+}
 
 function serverPolicyFromFixture(policy) {
   return {
@@ -73,6 +115,24 @@ function serverPolicyFromFixture(policy) {
   };
 }
 
+function serverScopedJustificationPolicies() {
+  const serverPolicy = {
+    ...fixturePolicy,
+    enforcementMode: 'justify',
+    blockMinSeverity: 1,
+    blockRiskScore: 1,
+  };
+  return {
+    serverPolicy,
+    locallyPermissivePolicy: {
+      ...serverPolicy,
+      enforcementMode: 'block',
+      blockMinSeverity: 99,
+      blockRiskScore: 999,
+    },
+  };
+}
+
 function comparableBrowserActions(rules) {
   return (rules || []).map((rule) => ({
     id: rule.id,
@@ -82,7 +142,10 @@ function comparableBrowserActions(rules) {
   }));
 }
 
-function chatFixture({ host, sendButton, accountRegion = '' }) {
+function chatFixture({ host, sendButton, accountRegion = '', contenteditable = false }) {
+  const composerMarkup = contenteditable
+    ? '<div id="prompt-textarea" role="textbox" aria-label="Message" contenteditable="true"></div>'
+    : '<textarea id="prompt-textarea" aria-label="Message"></textarea>';
   return `<!doctype html>
 <html>
   <head>
@@ -103,22 +166,27 @@ function chatFixture({ host, sendButton, accountRegion = '' }) {
     <main>
       <h1>${host} controlled chat fixture</h1>
       ${accountRegion}
-      <textarea id="prompt-textarea" aria-label="Message"></textarea>
+      ${composerMarkup}
       ${sendButton}
+      <input id="file-upload" type="file" aria-label="Attach file">
+      <section id="uploads" aria-label="Uploaded files"></section>
       <section id="sent" aria-label="Sent messages"></section>
     </main>
     <script>
       window.__sent = [];
+      window.__uploaded = [];
       const composer = document.querySelector('#prompt-textarea');
       const sent = document.querySelector('#sent');
       const button = document.querySelector('button');
+      const upload = document.querySelector('#file-upload');
       function send() {
-        const value = composer.value.trim();
+        const value = (('value' in composer ? composer.value : composer.textContent) || '').trim();
         if (!value) return;
         window.__sent.push(value);
         sent.insertAdjacentHTML('beforeend', '<p data-sent></p>');
         sent.lastElementChild.textContent = value;
-        composer.value = '';
+        if ('value' in composer) composer.value = '';
+        else composer.textContent = '';
       }
       button.addEventListener('click', send);
       composer.addEventListener('keydown', (event) => {
@@ -127,8 +195,54 @@ function chatFixture({ host, sendButton, accountRegion = '' }) {
           send();
         }
       });
+      upload.addEventListener('change', async () => {
+        const files = [...upload.files];
+        for (const file of files) {
+          const body = await file.text();
+          window.__uploaded.push({ name: file.name, body });
+          const row = document.createElement('p');
+          row.setAttribute('data-uploaded', '');
+          row.textContent = file.name + ': ' + body;
+          document.querySelector('#uploads').appendChild(row);
+        }
+      });
     </script>
   </body>
+</html>`;
+}
+
+function twoComposerFixture() {
+  return `<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>two composer fixture</title></head>
+<body>
+  <main>
+    <h1>controlled chat fixture: two composers</h1>
+    <form id="form-a"><textarea id="composer-a" aria-label="Composer A"></textarea></form>
+    <button id="send-b" type="button" form="form-b" data-testid="send-button" aria-label="Send B">Send B</button>
+    <button id="send-a" type="button" form="form-a" data-testid="send-button" aria-label="Send A">Send A</button>
+    <form id="form-b"><textarea id="composer-b" aria-label="Composer B"></textarea></form>
+    <section id="sent-a"></section>
+    <section id="sent-b"></section>
+  </main>
+  <script>
+    window.__sentA = [];
+    window.__sentB = [];
+    function send(composerId, sentId, bucket, marker) {
+      const composer = document.querySelector(composerId);
+      const value = composer.value.trim();
+      if (!value) return;
+      bucket.push(value);
+      const row = document.createElement('p');
+      row.setAttribute(marker, '');
+      row.textContent = value;
+      document.querySelector(sentId).appendChild(row);
+      composer.value = '';
+    }
+    document.querySelector('#send-a').addEventListener('click', () => send('#composer-a', '#sent-a', window.__sentA, 'data-sent-a'));
+    document.querySelector('#send-b').addEventListener('click', () => send('#composer-b', '#sent-b', window.__sentB, 'data-sent-b'));
+  </script>
+</body>
 </html>`;
 }
 
@@ -145,27 +259,30 @@ async function readyExtensionServiceWorker(context) {
   return serviceWorker;
 }
 
-async function launchExtensionContext(baseURL, testInfo, policy = fixturePolicy, request = null) {
+async function launchExtensionContext(baseURL, testInfo, policy = fixturePolicy, request = null, extensionPath = extensionDir) {
   if (request) await syncServerPolicy(request, policy);
+  const policyBundle = signedFixturePolicy(policy);
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-extension-e2e-'));
   await testInfo.attach('user-data-dir', { body: userDataDir, contentType: 'text/plain' });
   const context = await chromium.launchPersistentContext(userDataDir, {
     headless: false,
     ...(chromiumExecutablePath ? { executablePath: chromiumExecutablePath } : {}),
     args: [
-      `--disable-extensions-except=${extensionDir}`,
-      `--load-extension=${extensionDir}`,
+      `--disable-extensions-except=${extensionPath}`,
+      `--load-extension=${extensionPath}`,
     ],
   });
   await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: 'https://chatgpt.com' });
   await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: 'https://poe.com' });
-  await testInfo.attach('extension-dir', { body: extensionDir, contentType: 'text/plain' });
+  await testInfo.attach('extension-dir', { body: extensionPath, contentType: 'text/plain' });
   await testInfo.attach('test-policy', {
     body: JSON.stringify({
       serverUrl: baseURL,
       ingestKey: 'e2e-ingest-key',
       enabled: true,
       policy,
+      policyBundle,
+      policyPublicKey: E2E_POLICY_PUBLIC_KEY,
       user: 'browser-smoke@example.test',
       orgId: 'e2e-org',
     }, null, 2),
@@ -173,38 +290,78 @@ async function launchExtensionContext(baseURL, testInfo, policy = fixturePolicy,
   });
 
   const serviceWorker = await readyExtensionServiceWorker(context);
-  await serviceWorker.evaluate(async ({ serverUrl, policy }) => {
+  await serviceWorker.evaluate(async ({ serverUrl, policy, policyBundle, policyPublicKey }) => {
     await chrome.storage.local.set({
       serverUrl,
       ingestKey: 'e2e-ingest-key',
       enabled: true,
-      requestTimeoutMs: 3000,
+      requestTimeoutMs: 10000,
       user: 'browser-smoke@example.test',
       orgId: 'e2e-org',
       policy,
+      policyBundle,
+      policyPublicKey,
     });
-  }, { serverUrl: baseURL, policy });
+  }, { serverUrl: baseURL, policy, policyBundle, policyPublicKey: E2E_POLICY_PUBLIC_KEY });
+
+  const expectedPolicyJson = JSON.stringify(policy);
+  const expectedPolicyHash = crypto.createHash('sha256').update(expectedPolicyJson).digest('hex');
+  const policyTrust = await serviceWorker.evaluate(async ({ expectedPolicyJson, expectedPolicyHash }) => {
+    const local = await chrome.storage.local.get(['serverUrl', 'policyBundle', 'policyPublicKey']);
+    const config = await cfg();
+    const storedPolicyJson = JSON.stringify(local.policyBundle.policy);
+    const storedDigest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(storedPolicyJson));
+    const storedPolicyHash = [...new Uint8Array(storedDigest)]
+      .map((value) => value.toString(16).padStart(2, '0')).join('');
+    const verification = await self.RedactWallPolicyTrust.verifyBundle(
+      local.policyBundle,
+      local.policyPublicKey,
+    );
+    return {
+      verification,
+      policyTrusted: config.policyTrusted,
+      policyExpiresAt: config.policyExpiresAt,
+      serverUrl: config.serverUrl,
+      localPinPresent: !!local.policyPublicKey,
+      policyJsonPreserved: storedPolicyJson === expectedPolicyJson,
+      expectedPolicyHash,
+      storedPolicyHash,
+    };
+  }, { expectedPolicyJson, expectedPolicyHash });
+  await testInfo.attach('policy-trust', {
+    body: JSON.stringify(policyTrust, null, 2),
+    contentType: 'application/json',
+  });
+  expect(policyTrust, `policy trust bootstrap failed: ${JSON.stringify(policyTrust)}`).toMatchObject({
+    verification: { ok: true },
+    policyTrusted: true,
+    serverUrl: baseURL,
+    localPinPresent: true,
+  });
 
   return { context, userDataDir };
 }
 
 async function applyFixturePolicyToPage(context, page, baseURL, governedHost, policy = fixturePolicy) {
   const serviceWorker = await readyExtensionServiceWorker(context);
+  const policyBundle = signedFixturePolicy(policy);
   const expectedRules = (policy.blockedBrowserActions || []).map((rule) => ({
     id: rule.id,
     action: rule.action,
   }));
-  await serviceWorker.evaluate(async ({ serverUrl, policy }) => {
+  await serviceWorker.evaluate(async ({ serverUrl, policy, policyBundle, policyPublicKey }) => {
     await chrome.storage.local.set({
       serverUrl,
       ingestKey: 'e2e-ingest-key',
       enabled: true,
-      requestTimeoutMs: 3000,
+      requestTimeoutMs: 10000,
       user: 'browser-smoke@example.test',
       orgId: 'e2e-org',
       policy,
+      policyBundle,
+      policyPublicKey,
     });
-  }, { serverUrl: baseURL, policy });
+  }, { serverUrl: baseURL, policy, policyBundle, policyPublicKey: E2E_POLICY_PUBLIC_KEY });
 
   await page.reload({ waitUntil: 'domcontentloaded' });
   await expect(page.locator('h1')).toContainText('controlled chat fixture');
@@ -220,6 +377,7 @@ async function applyFixturePolicyToPage(context, page, baseURL, governedHost, po
       return !!(
         state
         && state.enabled
+        && state.policyTrusted
         && state.policy
         && state.policy.blockUnapprovedAiDestinations === true
         && (state.policy.governedDestinations || []).includes(host)
@@ -351,6 +509,13 @@ async function queryStatusesFor(request, status) {
   return rows.filter((row) => row.user === 'browser-smoke@example.test' && row.status === status).length;
 }
 
+async function browserRowsFor(request) {
+  const response = await request.get('/api/queries?limit=100');
+  expect(response.ok()).toBeTruthy();
+  const rows = await response.json();
+  return rows.filter((row) => row.user === 'browser-smoke@example.test');
+}
+
 async function expectNoHorizontalOverflow(page, allowance = 1) {
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(allowance);
@@ -368,7 +533,7 @@ async function expectElementInsideViewport(page, locator) {
 test.describe('browser extension live smoke', () => {
   test.setTimeout(90000);
 
-  test('blocks a synthetic SSN before ChatGPT fixture send and records approval request', async ({ baseURL, request }, testInfo) => {
+  test('blocks a synthetic SSN, polls its approval, and resumes only after release', async ({ baseURL, request }, testInfo) => {
     const { context, userDataDir } = await launchExtensionContext(baseURL, testInfo, fixturePolicy, request);
     try {
       const page = await openControlledAiPage(
@@ -408,6 +573,20 @@ test.describe('browser extension live smoke', () => {
       await page.getByRole('button', { name: 'Request approval' }).click();
       await expect(page.locator('.ps-toast')).toContainText('Sent to your Security Admin for approval.');
       await expect(page.locator('[data-sent]')).toHaveCount(0);
+
+      const csrfToken = await loginAdminApi(request);
+      const rows = await (await request.get('/api/queries?limit=100')).json();
+      const held = rows.find((row) => row.user === 'browser-smoke@example.test'
+        && row.source === 'browser_extension' && row.status === 'pending');
+      expect(held).toBeTruthy();
+      const approved = await request.post(`/api/queries/${encodeURIComponent(held.id)}/approve`, {
+        headers: { 'x-csrf-token': csrfToken },
+        data: { note: 'Synthetic browser release', password: 'e2e-pass' },
+      });
+      expect(approved.ok()).toBeTruthy();
+
+      await expect(page.locator('[data-sent]')).toHaveCount(1, { timeout: 10000 });
+      await expect(page.locator('[data-sent]')).toContainText('123-45-6789 needs a payoff letter');
     } finally {
       await context.close();
       fs.rmSync(userDataDir, { recursive: true, force: true });
@@ -606,6 +785,166 @@ test.describe('browser extension live smoke', () => {
     }
   });
 
+  test('verified clean file input is replayed to the page after recorded evidence', async ({ baseURL, request }, testInfo) => {
+    const { context, userDataDir } = await launchExtensionContext(baseURL, testInfo, fixturePolicy, request);
+    try {
+      const page = await openControlledAiPage(
+        context,
+        'https://chatgpt.com/',
+        chatFixture({
+          host: 'chatgpt.com',
+          sendButton: '<button data-testid="send-button" aria-label="Send prompt">Send</button>',
+        }),
+      );
+
+      await applyFixturePolicyToPage(context, page, baseURL, 'chatgpt.com');
+      await page.locator('#file-upload').setInputFiles({
+        name: 'branch-hours.txt',
+        mimeType: 'text/plain',
+        buffer: Buffer.from('Lobby opens at nine.'),
+      });
+
+      await expect(page.locator('[data-uploaded]')).toHaveCount(1, { timeout: 15000 });
+      await expect(page.locator('[data-uploaded]')).toContainText('branch-hours.txt: Lobby opens at nine.');
+      expect(await page.evaluate(() => window.__uploaded)).toEqual([
+        { name: 'branch-hours.txt', body: 'Lobby opens at nine.' },
+      ]);
+    } finally {
+      await context.close();
+      fs.rmSync(userDataDir, { recursive: true, force: true });
+    }
+  });
+
+  test('async allow resumes only the exact composer and never the first global send button', async ({ baseURL, request }, testInfo) => {
+    const { context, userDataDir } = await launchExtensionContext(baseURL, testInfo, fixturePolicy, request);
+    try {
+      const page = await openControlledAiPage(context, 'https://chatgpt.com/', twoComposerFixture());
+      await applyFixturePolicyToPage(context, page, baseURL, 'chatgpt.com');
+      await page.locator('#composer-a').fill('Summarize the public quarterly update.');
+      await page.locator('#composer-b').fill('Composer B must remain unsent.');
+
+      await page.locator('#send-a').click();
+
+      await expect(page.locator('[data-sent-a]')).toHaveCount(1, { timeout: 10000 });
+      await expect(page.locator('[data-sent-a]')).toContainText('Summarize the public quarterly update.');
+      await expect(page.locator('[data-sent-b]')).toHaveCount(0);
+      expect(await page.evaluate(() => ({ sentA: window.__sentA, sentB: window.__sentB }))).toEqual({
+        sentA: ['Summarize the public quarterly update.'],
+        sentB: [],
+      });
+    } finally {
+      await context.close();
+      fs.rmSync(userDataDir, { recursive: true, force: true });
+    }
+  });
+
+  test('rapid redact clicks send once and reveal originals only in the extension tab', async ({ baseURL, request }, testInfo) => {
+    const policy = {
+      ...fixturePolicy,
+      enforcementMode: 'redact',
+      blockMinSeverity: 1,
+      blockRiskScore: 1,
+    };
+    const { context, userDataDir } = await launchExtensionContext(baseURL, testInfo, policy, request);
+    try {
+      const page = await openControlledAiPage(
+        context,
+        'https://chatgpt.com/',
+        chatFixture({
+          host: 'chatgpt.com',
+          sendButton: '<button data-testid="send-button" aria-label="Send prompt">Send</button>',
+        }),
+      );
+      await applyFixturePolicyToPage(context, page, baseURL, 'chatgpt.com', policy);
+      const rawValue = 'alex.member@example.com';
+      await page.locator('#prompt-textarea').fill('Contact ' + rawValue + ' about public branch hours.');
+      const revealPagePromise = context.waitForEvent('page', {
+        predicate: (candidate) => candidate.url().includes('/rehydrate.html'),
+      });
+
+      await page.evaluate(() => {
+        const send = document.querySelector('button[data-testid="send-button"]');
+        send.click();
+        send.click();
+      });
+
+      await expect(page.locator('[data-sent]')).toHaveCount(1, { timeout: 10000 });
+      await expect(page.locator('[data-sent]')).toContainText('[[EMAIL_ADDRESS_1]]');
+      await expect(page.locator('[data-sent]')).not.toContainText(rawValue);
+
+      const revealPage = await revealPagePromise;
+      await revealPage.waitForLoadState('domcontentloaded');
+      await expect(revealPage.getByRole('heading', { name: /Sensitive values stay outside/ })).toBeVisible();
+      await expect(revealPage.locator('body')).not.toContainText(rawValue);
+      await revealPage.getByRole('button', { name: 'Reveal once' }).click();
+      await expect(revealPage.locator('output')).toHaveText(rawValue);
+      await expect(page.locator('[data-sent]')).not.toContainText(rawValue);
+
+      fs.mkdirSync(artifactDir, { recursive: true });
+      await revealPage.screenshot({ path: path.join(artifactDir, 'redactwall-isolated-reveal.png'), fullPage: true });
+      await revealPage.getByRole('button', { name: 'Copy and hide' }).click();
+      await expect(revealPage.locator('#status')).toContainText('Copied by your explicit request');
+      await expect(revealPage.locator('output')).toHaveCount(0);
+    } finally {
+      await context.close();
+      fs.rmSync(userDataDir, { recursive: true, force: true });
+    }
+  });
+
+  test('identical approval holds poll and release only their exact composers', async ({ baseURL, request }, testInfo) => {
+    const { context, userDataDir } = await launchExtensionContext(baseURL, testInfo, fixturePolicy, request);
+    try {
+      const page = await openControlledAiPage(context, 'https://chatgpt.com/', twoComposerFixture());
+      await applyFixturePolicyToPage(context, page, baseURL, 'chatgpt.com');
+      const existingIds = new Set((await browserRowsFor(request)).map((row) => row.id));
+      const prompt = 'Member test SSN 123-45-6789 needs a payoff letter.';
+      await page.locator('#composer-a').fill(prompt);
+      await page.locator('#composer-b').fill(prompt);
+
+      await page.getByRole('button', { name: 'Send A' }).click();
+      await page.getByRole('button', { name: 'Request approval' }).click();
+      let holdA;
+      await expect.poll(async () => {
+        const created = (await browserRowsFor(request)).filter((row) => !existingIds.has(row.id));
+        holdA = created.find((row) => row.status === 'pending');
+        return created.length === 1 && Boolean(holdA);
+      }).toBe(true);
+
+      await page.getByRole('button', { name: 'Send B' }).click();
+      await expect(page.getByRole('alertdialog', { name: 'Sensitive data blocked' })).toBeVisible();
+      await page.getByRole('button', { name: 'Request approval' }).click();
+      let holdB;
+      await expect.poll(async () => {
+        const created = (await browserRowsFor(request)).filter((row) => !existingIds.has(row.id));
+        holdB = created.find((row) => row.id !== holdA.id);
+        return created.length === 2 && Boolean(holdB && holdB.status === 'pending');
+      }).toBe(true);
+
+      const csrfToken = await loginAdminApi(request);
+      const approveA = await request.post(`/api/queries/${encodeURIComponent(holdA.id)}/approve`, {
+        headers: { 'x-csrf-token': csrfToken },
+        data: { note: 'Release exact composer A', password: 'e2e-pass' },
+      });
+      expect(approveA.ok()).toBeTruthy();
+      await expect(page.locator('[data-sent-a]')).toHaveCount(1, { timeout: 10000 });
+      await expect(page.locator('[data-sent-b]')).toHaveCount(0);
+
+      const approveB = await request.post(`/api/queries/${encodeURIComponent(holdB.id)}/approve`, {
+        headers: { 'x-csrf-token': csrfToken },
+        data: { note: 'Release exact composer B', password: 'e2e-pass' },
+      });
+      expect(approveB.ok()).toBeTruthy();
+      await expect(page.locator('[data-sent-b]')).toHaveCount(1, { timeout: 10000 });
+      expect(await page.evaluate(() => ({ sentA: window.__sentA, sentB: window.__sentB }))).toEqual({
+        sentA: [prompt],
+        sentB: [prompt],
+      });
+    } finally {
+      await context.close();
+      fs.rmSync(userDataDir, { recursive: true, force: true });
+    }
+  });
+
   test('blocks configured response copies without reading selected text', async ({ baseURL, request }, testInfo) => {
     const policy = {
       ...fixturePolicy,
@@ -684,6 +1023,46 @@ test.describe('browser extension live smoke', () => {
     }
   });
 
+  test('normalizes zero-width text in a live contenteditable before authorized resend', async ({ baseURL, request }, testInfo) => {
+    const policy = { ...fixturePolicy, enforcementMode: 'warn' };
+    const { context, userDataDir } = await launchExtensionContext(baseURL, testInfo, policy, request);
+    try {
+      const page = await openControlledAiPage(
+        context,
+        'https://chatgpt.com/',
+        chatFixture({
+          host: 'chatgpt.com',
+          sendButton: '<button data-testid="send-button" aria-label="Send prompt">Send</button>',
+          contenteditable: true,
+        }),
+      );
+
+      await applyFixturePolicyToPage(context, page, baseURL, 'chatgpt.com', policy);
+      await loginAdminApi(request);
+      const obfuscated = 'Email qa-warning@example.test about zero\u200bwidth cleanup.';
+      const normalized = 'Email qa-warning@example.test about zerowidth cleanup.';
+      await page.locator('#prompt-textarea').evaluate((composer, text) => {
+        composer.textContent = text;
+        composer.dispatchEvent(new InputEvent('input', {
+          bubbles: true,
+          data: text,
+          inputType: 'insertText',
+        }));
+      }, obfuscated);
+
+      await page.locator('button[data-testid="send-button"]').click();
+      await expect(page.getByRole('alertdialog', { name: 'Review before sending' })).toBeVisible();
+      await expect(page.locator('#prompt-textarea')).toHaveText(normalized);
+      await page.getByRole('button', { name: 'Send anyway' }).click();
+      await expect(page.locator('[data-sent]')).toHaveText(normalized);
+      await expect.poll(() => page.evaluate(() => window.__sent)).toEqual([normalized]);
+      await expect.poll(() => queryStatusesFor(request, 'warned_sent')).toBeGreaterThan(0);
+    } finally {
+      await context.close();
+      fs.rmSync(userDataDir, { recursive: true, force: true });
+    }
+  });
+
   test('justify banner buttons validate, cancel, and submit reasons to the backend', async ({ baseURL, request }, testInfo) => {
     const policy = { ...fixturePolicy, enforcementMode: 'justify' };
     const { context, userDataDir } = await launchExtensionContext(baseURL, testInfo, policy, request);
@@ -723,6 +1102,313 @@ test.describe('browser extension live smoke', () => {
     } finally {
       await context.close();
       fs.rmSync(userDataDir, { recursive: true, force: true });
+    }
+  });
+
+  test('server-scoped justification submit and dismiss resolve their original holds in place', async ({ baseURL, request }, testInfo) => {
+    const { serverPolicy, locallyPermissivePolicy } = serverScopedJustificationPolicies();
+    const { context, userDataDir } = await launchExtensionContext(baseURL, testInfo, serverPolicy, request);
+    try {
+      const page = await openControlledAiPage(
+        context,
+        'https://chatgpt.com/',
+        chatFixture({
+          host: 'chatgpt.com',
+          sendButton: '<button data-testid="send-button" aria-label="Send prompt">Send</button>',
+        }),
+      );
+
+      await applyFixturePolicyToPage(context, page, baseURL, 'chatgpt.com', locallyPermissivePolicy);
+      await loginAdminApi(request);
+      const existingIds = new Set((await browserRowsFor(request)).map((row) => row.id));
+      await page.locator('#prompt-textarea').fill('Email qa-server-justify@example.test about the account update.');
+      await page.locator('button[data-testid="send-button"]').click();
+      await expect(page.getByRole('alertdialog', { name: 'Business reason required' })).toBeVisible();
+
+      let held;
+      await expect.poll(async () => {
+        const created = (await browserRowsFor(request)).filter((row) => !existingIds.has(row.id));
+        held = created.find((row) => row.status === 'pending_justification');
+        return created.length === 1 && Boolean(held && held.rawRetained === true);
+      }).toBe(true);
+
+      await page.getByRole('textbox', { name: 'Business reason' }).fill('Member support follow-up');
+      await page.getByRole('button', { name: 'Submit reason' }).click();
+      await expect(page.locator('[data-sent]')).toContainText('qa-server-justify@example.test');
+
+      await expect.poll(async () => {
+        const created = (await browserRowsFor(request)).filter((row) => !existingIds.has(row.id));
+        return created.length === 1
+          && created[0].id === held.id
+          && created[0].status === 'justified'
+          && created[0].rawRetained === false;
+      }).toBe(true);
+      const created = (await browserRowsFor(request)).filter((row) => !existingIds.has(row.id));
+      expect(created).toHaveLength(1);
+      expect(created[0]).toMatchObject({ id: held.id, status: 'justified', rawRetained: false });
+      expect(created.some((row) => row.status === 'pending_justification')).toBe(false);
+
+      const afterSubmitIds = new Set((await browserRowsFor(request)).map((row) => row.id));
+      await page.locator('#prompt-textarea').fill('Email qa-server-dismiss@example.test about the account update.');
+      await page.locator('button[data-testid="send-button"]').click();
+      await expect(page.getByRole('alertdialog', { name: 'Business reason required' })).toBeVisible();
+      let cancelledHold;
+      await expect.poll(async () => {
+        const next = (await browserRowsFor(request)).filter((row) => !afterSubmitIds.has(row.id));
+        cancelledHold = next.find((row) => row.status === 'pending_justification');
+        return next.length === 1 && Boolean(cancelledHold && cancelledHold.rawRetained === true);
+      }).toBe(true);
+
+      await page.getByRole('button', { name: 'Dismiss' }).click();
+      await expect(page.locator('[data-sent]')).toHaveCount(1);
+      await expect(page.locator('[data-sent]')).not.toContainText('qa-server-dismiss@example.test');
+      await expect.poll(async () => {
+        const next = (await browserRowsFor(request)).filter((row) => !afterSubmitIds.has(row.id));
+        return next.length === 1
+          && next[0].id === cancelledHold.id
+          && next[0].status === 'blocked_by_user'
+          && next[0].rawRetained === false;
+      }).toBe(true);
+      const cancelledRows = (await browserRowsFor(request)).filter((row) => !afterSubmitIds.has(row.id));
+      expect(cancelledRows).toHaveLength(1);
+      expect(cancelledRows[0]).toMatchObject({ id: cancelledHold.id, status: 'blocked_by_user', rawRetained: false });
+    } finally {
+      await context.close();
+      fs.rmSync(userDataDir, { recursive: true, force: true });
+    }
+  });
+
+  test('a second composer challenge terminalizes the first hold before it becomes active', async ({ baseURL, request }, testInfo) => {
+    const { serverPolicy, locallyPermissivePolicy } = serverScopedJustificationPolicies();
+    const { context, userDataDir } = await launchExtensionContext(baseURL, testInfo, serverPolicy, request);
+    try {
+      const page = await openControlledAiPage(
+        context,
+        'https://chatgpt.com/',
+        twoComposerFixture(),
+      );
+
+      await applyFixturePolicyToPage(context, page, baseURL, 'chatgpt.com', locallyPermissivePolicy);
+      await loginAdminApi(request);
+      const existingIds = new Set((await browserRowsFor(request)).map((row) => row.id));
+
+      await page.locator('#composer-a').fill('Email qa-hold-a@example.test about the account update.');
+      await page.locator('#composer-b').fill('Email qa-hold-b@example.test about the account update.');
+      await page.getByRole('button', { name: 'Send A' }).click();
+      await expect(page.getByRole('alertdialog', { name: 'Business reason required' })).toBeVisible();
+
+      let holdA;
+      await expect.poll(async () => {
+        const created = (await browserRowsFor(request)).filter((row) => !existingIds.has(row.id));
+        holdA = created.find((row) => row.status === 'pending_justification');
+        return created.length === 1 && Boolean(holdA && holdA.rawRetained === true);
+      }).toBe(true);
+
+      await page.getByRole('button', { name: 'Send B' }).click();
+      let holdB;
+      await expect.poll(async () => {
+        const created = (await browserRowsFor(request)).filter((row) => !existingIds.has(row.id));
+        const first = created.find((row) => row.id === holdA.id);
+        holdB = created.find((row) => row.id !== holdA.id);
+        return created.length === 2
+          && first && first.status === 'blocked_by_user' && first.rawRetained === false
+          && holdB && holdB.status === 'pending_justification' && holdB.rawRetained === true;
+      }).toBe(true);
+
+      await expect(page.locator('.ps-banner')).toHaveCount(1);
+      await page.getByRole('textbox', { name: 'Business reason' }).fill('Composer B support workflow');
+      await page.getByRole('button', { name: 'Submit reason' }).click();
+      await expect(page.locator('[data-sent-a]')).toHaveCount(0);
+      await expect(page.locator('[data-sent-b]')).toHaveCount(1);
+      await expect(page.locator('[data-sent-b]')).toContainText('qa-hold-b@example.test');
+
+      await expect.poll(async () => {
+        const created = (await browserRowsFor(request)).filter((row) => !existingIds.has(row.id));
+        const first = created.find((row) => row.id === holdA.id);
+        const second = created.find((row) => row.id === holdB.id);
+        return created.length === 2
+          && first && first.status === 'blocked_by_user' && first.rawRetained === false
+          && second && second.status === 'justified' && second.rawRetained === false;
+      }).toBe(true);
+    } finally {
+      await context.close();
+      fs.rmSync(userDataDir, { recursive: true, force: true });
+    }
+  });
+
+  test('a failed justification resolution keeps the same banner and retries safely', async ({ baseURL, request }, testInfo) => {
+    const { serverPolicy, locallyPermissivePolicy } = serverScopedJustificationPolicies();
+    const { context, userDataDir } = await launchExtensionContext(baseURL, testInfo, serverPolicy, request);
+    try {
+      const page = await openControlledAiPage(
+        context,
+        'https://chatgpt.com/',
+        chatFixture({
+          host: 'chatgpt.com',
+          sendButton: '<button data-testid="send-button" aria-label="Send prompt">Send</button>',
+        }),
+      );
+
+      await applyFixturePolicyToPage(context, page, baseURL, 'chatgpt.com', locallyPermissivePolicy);
+      await loginAdminApi(request);
+      const existingIds = new Set((await browserRowsFor(request)).map((row) => row.id));
+      const prompt = 'Email qa-retry-justify@example.test about the account update.';
+      await page.locator('#prompt-textarea').fill(prompt);
+      await page.locator('button[data-testid="send-button"]').click();
+      const banner = page.getByRole('alertdialog', { name: 'Business reason required' });
+      const reason = page.getByRole('textbox', { name: 'Business reason' });
+      await expect(banner).toBeVisible();
+      await reason.fill('Retry after control-plane outage');
+
+      let held;
+      await expect.poll(async () => {
+        const created = (await browserRowsFor(request)).filter((row) => !existingIds.has(row.id));
+        held = created.find((row) => row.status === 'pending_justification');
+        return created.length === 1 && Boolean(held && held.rawRetained === true);
+      }).toBe(true);
+
+      const serviceWorker = await readyExtensionServiceWorker(context);
+      await serviceWorker.evaluate(async () => {
+        await chrome.storage.local.set({ serverUrl: 'http://127.0.0.1:1', requestTimeoutMs: 100 });
+      });
+      await page.getByRole('button', { name: 'Submit reason' }).click();
+      await expect(page.locator('.ps-toast').last()).toContainText('could not record this justification decision');
+      await expect(banner).toBeVisible();
+      await expect(reason).toHaveValue('Retry after control-plane outage');
+      await expect(page.locator('[data-sent]')).toHaveCount(0);
+      const stillHeld = (await browserRowsFor(request)).filter((row) => !existingIds.has(row.id));
+      expect(stillHeld).toHaveLength(1);
+      expect(stillHeld[0]).toMatchObject({ id: held.id, status: 'pending_justification', rawRetained: true });
+
+      fs.mkdirSync(artifactDir, { recursive: true });
+      await page.screenshot({ path: path.join(artifactDir, 'server-justify-retry.png'), fullPage: true });
+      await serviceWorker.evaluate(async (serverUrl) => {
+        await chrome.storage.local.set({ serverUrl, requestTimeoutMs: 3000 });
+      }, baseURL);
+      await page.getByRole('button', { name: 'Submit reason' }).click();
+      await expect(page.locator('[data-sent]')).toHaveCount(1);
+      await expect(page.locator('[data-sent]')).toContainText('qa-retry-justify@example.test');
+      await expect(page.locator('.ps-banner')).toHaveCount(0);
+
+      await expect.poll(async () => {
+        const created = (await browserRowsFor(request)).filter((row) => !existingIds.has(row.id));
+        return created.length === 1
+          && created[0].id === held.id
+          && created[0].status === 'justified'
+          && created[0].rawRetained === false;
+      }).toBe(true);
+    } finally {
+      await context.close();
+      fs.rmSync(userDataDir, { recursive: true, force: true });
+    }
+  });
+
+  test('remote HTTPS control-plane access is exact-origin and fail-closed without a grant', async ({ baseURL, request }, testInfo) => {
+    const policy = { ...fixturePolicy, allowedDestinations: ['chatgpt.com'] };
+    const { context, userDataDir } = await launchExtensionContext(baseURL, testInfo, policy, request);
+    const remoteOrigin = 'https://control.example.test';
+    const remotePattern = remoteOrigin + '/*';
+    let remoteGateCalls = 0;
+    try {
+      await context.route(remoteOrigin + '/**', async (route) => {
+        if (new URL(route.request().url()).pathname === '/api/v1/gate') remoteGateCalls += 1;
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ id: 'q_remote_permission', decision: 'allow', status: 'allowed' }),
+        });
+      });
+      const worker = await readyExtensionServiceWorker(context);
+      expect(await worker.evaluate((pattern) => chrome.permissions.contains({ origins: [pattern] }), remotePattern)).toBe(false);
+      expect(await worker.evaluate((pattern) => chrome.permissions.contains({ origins: [pattern] }), baseURL + '/*')).toBe(true);
+      const page = await openControlledAiPage(
+        context,
+        'https://chatgpt.com/',
+        chatFixture({
+          host: 'chatgpt.com',
+          sendButton: '<button data-testid="send-button" aria-label="Send prompt">Send</button>',
+        }),
+      );
+      await applyFixturePolicyToPage(context, page, baseURL, 'chatgpt.com', policy);
+      await worker.evaluate(async ({ serverUrl, policy }) => {
+        await chrome.storage.local.set({
+          serverUrl,
+          ingestKey: 'remote-e2e-ingest-key',
+          requestTimeoutMs: 1000,
+          policy,
+        });
+      }, { serverUrl: remoteOrigin, policy });
+      await page.locator('#prompt-textarea').fill('Summarize the public quarterly update.');
+      await page.locator('button[data-testid="send-button"]').click();
+      await expect(page.locator('[data-sent]')).toHaveCount(0);
+      await expect(page.locator('.ps-toast')).toContainText('Send not confirmed; blocked.');
+      expect(remoteGateCalls).toBe(0);
+
+      const extensionId = new URL(worker.url()).host;
+      const popup = await context.newPage();
+      await popup.goto(`chrome-extension://${extensionId}/popup.html`);
+      await expect(popup.locator('#serverAccess')).toBeVisible();
+      await expect(popup.locator('#serverAccessText')).toContainText('control.example.test');
+      const permissions = await worker.evaluate(() => chrome.permissions.getAll());
+      expect(permissions.origins).not.toContain(remotePattern);
+      expect(permissions.origins).not.toContain('https://*/*');
+    } finally {
+      await context.close();
+      fs.rmSync(userDataDir, { recursive: true, force: true });
+    }
+  });
+
+  test('an exact remote HTTPS host grant enables real control-plane fetch', async ({ baseURL, request }, testInfo) => {
+    const remoteOrigin = 'https://control.example.test';
+    const remotePattern = remoteOrigin + '/*';
+    const grantedExtension = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-extension-granted-'));
+    fs.cpSync(extensionDir, grantedExtension, { recursive: true });
+    const grantedManifestPath = path.join(grantedExtension, 'manifest.json');
+    const grantedManifest = JSON.parse(fs.readFileSync(grantedManifestPath, 'utf8'));
+    grantedManifest.host_permissions.push(remotePattern);
+    fs.writeFileSync(grantedManifestPath, JSON.stringify(grantedManifest, null, 2));
+    const policy = { ...fixturePolicy, allowedDestinations: ['chatgpt.com'] };
+    let context;
+    let userDataDir;
+    let remoteGateCalls = 0;
+    try {
+      ({ context, userDataDir } = await launchExtensionContext(baseURL, testInfo, policy, request, grantedExtension));
+      await context.route(remoteOrigin + '/**', async (route) => {
+        remoteGateCalls += 1;
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ id: 'q_remote_granted', decision: 'allow', status: 'allowed' }),
+        });
+      });
+      const worker = await readyExtensionServiceWorker(context);
+      expect(await worker.evaluate((pattern) => chrome.permissions.contains({ origins: [pattern] }), remotePattern)).toBe(true);
+      const page = await openControlledAiPage(
+        context,
+        'https://chatgpt.com/',
+        chatFixture({
+          host: 'chatgpt.com',
+          sendButton: '<button data-testid="send-button" aria-label="Send prompt">Send</button>',
+        }),
+      );
+      await applyFixturePolicyToPage(context, page, baseURL, 'chatgpt.com', policy);
+      await worker.evaluate(async ({ serverUrl, policy }) => {
+        await chrome.storage.local.set({
+          serverUrl,
+          ingestKey: 'remote-e2e-ingest-key',
+          requestTimeoutMs: 1000,
+          policy,
+        });
+      }, { serverUrl: remoteOrigin, policy });
+      await page.locator('#prompt-textarea').fill('Summarize the public quarterly update.');
+      await page.locator('button[data-testid="send-button"]').click();
+      await expect(page.locator('[data-sent]')).toHaveCount(1, { timeout: 10000 });
+      await expect(page.locator('[data-sent]')).toContainText('public quarterly update');
+      expect(remoteGateCalls).toBe(1);
+    } finally {
+      if (context) await context.close();
+      if (userDataDir) fs.rmSync(userDataDir, { recursive: true, force: true });
+      fs.rmSync(grantedExtension, { recursive: true, force: true });
     }
   });
 

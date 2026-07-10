@@ -354,7 +354,7 @@ test('runtime build with --examiner-profile produces a schemaVersion-3 pack end 
     coverageModule: { summarize() { return { score: 100, totals: {}, sensors: [], fleet: [], governedDestinations: [], ungovernedDestinations: [], shadowDestinations: [], posture: [] }; } },
     detectorModule: { listDetectors() { return [{ id: 'MEMBER_ID' }]; } },
     customDetectorsModule: { loadCustomDetectors() { return []; } },
-    exactMatchModule: { publicSummary() { return { enabled: true, fingerprints: 7, minLength: 6, maxWords: 5, severity: 4, salt: 'cli-salt-decoy' }; } },
+    exactMatchModule: { publicSummary() { return { enabled: true, fingerprints: 7, minLength: 20, maxWords: 1, severity: 4, salt: 'cli-salt-decoy' }; } },
     appCatalogModule: { reviewRollup() { return [{ sanctionedStatus: 'unsanctioned', eventCount: 3 }]; } },
     packageInfo: { version: '0.3.0' },
     backupModule: {},
@@ -365,7 +365,7 @@ test('runtime build with --examiner-profile produces a schemaVersion-3 pack end 
   assert.strictEqual(pack.ncuaReadiness.profile, 'federal_credit_union');
   assert.strictEqual(pack.ncuaReadiness.panels.exceptions.total, 1);
   assert.strictEqual(pack.ncuaReadiness.panels.memberData.events, 1);
-  assert.deepStrictEqual(pack.edm, { enabled: true, fingerprints: 7, minLength: 6, maxWords: 5, severity: 4 });
+  assert.deepStrictEqual(pack.edm, { enabled: true, fingerprints: 7, minLength: 20, maxWords: 1, severity: 4 });
   const controlMap = require('../server/control-map');
   assert.strictEqual(pack.complianceDisclaimer, controlMap.CONTROL_MAP_DISCLAIMER);
   assert.ok(/not compliance certification/i.test(pack.complianceDisclaimer));

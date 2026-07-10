@@ -2,6 +2,7 @@ services:
   redactwall:
     build: .
     image: redactwall:local
+    hostname: redactwall
     init: true
     read_only: true
     security_opt:
@@ -17,6 +18,7 @@ services:
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
       REDACTWALL_SAAS_MODE: ${REDACTWALL_SAAS_MODE:-}
       REDACTWALL_TENANT_ID: ${REDACTWALL_TENANT_ID:-}
+      REDACTWALL_LICENSE_CUSTOMER_ID: ${REDACTWALL_LICENSE_CUSTOMER_ID:-}
       REDACTWALL_SEAT_LIMIT: ${REDACTWALL_SEAT_LIMIT:-}
       REDACTWALL_REQUIRE_TENANT_CONTEXT: ${REDACTWALL_REQUIRE_TENANT_CONTEXT:-}
       REDACTWALL_REQUIRE_USER_IDENTITY: ${REDACTWALL_REQUIRE_USER_IDENTITY:-}
@@ -52,8 +54,11 @@ services:
       SIEM_ALERT_MIN_RISK: ${SIEM_ALERT_MIN_RISK:-25}
       SIEM_ALERT_MIN_SEVERITY: ${SIEM_ALERT_MIN_SEVERITY:-3}
       REDACTWALL_DB_PATH: /data/redactwall.db
+      REDACTWALL_DATA_DIR: /data
+      REDACTWALL_LOCK_HOSTNAME: redactwall
     ports:
-      - "${PORT:-4000}:4000"
+      - "${REDACTWALL_BIND_ADDRESS:-127.0.0.1}:${PORT:-4000}:4000"
+      - "${REDACTWALL_GATEWAY_BIND_ADDRESS:-127.0.0.1}:${GATEWAY_PORT:-4100}:4100"
     volumes:
       - redactwall-data:/data
     healthcheck:
@@ -84,9 +89,10 @@ services:
     profiles: ["gateway"]
     depends_on:
       - redactwall
+    network_mode: "service:redactwall"
     environment:
       GATEWAY_PORT: 4100
-      GATEWAY_CONTROL_PLANE_URL: ${GATEWAY_CONTROL_PLANE_URL:-http://redactwall:4000}
+      GATEWAY_CONTROL_PLANE_URL: ${GATEWAY_CONTROL_PLANE_URL:-http://127.0.0.1:4000}
       INGEST_API_KEY: ${INGEST_API_KEY:-}
       REDACTWALL_INGEST_API_KEY: ${REDACTWALL_INGEST_API_KEY:-}
       GATEWAY_PROVIDER: ${GATEWAY_PROVIDER:-openai}
@@ -94,14 +100,16 @@ services:
       GATEWAY_UPSTREAM_API_KEY: ${GATEWAY_UPSTREAM_API_KEY:-}
       GATEWAY_REQUIRE_AGENT_TOKEN: ${GATEWAY_REQUIRE_AGENT_TOKEN:-true}
       GATEWAY_RATE_LIMIT_PER_MIN: ${GATEWAY_RATE_LIMIT_PER_MIN:-120}
-      GATEWAY_AGENT_TOKENS_PATH: /data/gateway-agent-tokens.json
-      REDACTWALL_DATA_DIR: /data
-    ports:
-      - "${GATEWAY_PORT:-4100}:4100"
+      GATEWAY_AGENT_TOKENS_PATH: /gateway-data/gateway-agent-tokens.json
+      REDACTWALL_DATA_DIR: /gateway-data
+      REDACTWALL_SKIP_POLICY_SEED: "1"
+      # Docker forbids `hostname` with `network_mode: service:...`; pin the
+      # filesystem-lock identity independently so recreation is reclaimable.
+      REDACTWALL_LOCK_HOSTNAME: redactwall-gateway
     volumes:
-      - redactwall-data:/data
+      - redactwall-gateway-data:/gateway-data
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://localhost:4100/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://localhost:4100/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 4s
       start_period: 5s
@@ -111,3 +119,4 @@ services:
 
 volumes:
   redactwall-data:
+  redactwall-gateway-data:

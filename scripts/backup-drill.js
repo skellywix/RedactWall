@@ -3,9 +3,9 @@
  * One-command disaster-recovery drill for the evidence store.
  *
  * SQLite (default driver): creates a backup with scripts/backup-store.js,
- * verifies the manifest, restores to a scratch path, re-opens the restored
- * database read-only, and proves the audit hash-chain plus row counts
- * survived the round trip.
+ * verifies the complete manifest, restores to a scratch path, authenticates
+ * the restored database through its runtime state/checkpoint sidecars, and
+ * proves the audit chain plus row counts survived the round trip.
  *
  * Postgres (REDACTWALL_DB_DRIVER=postgres): dumps with pg_dump, restores into a
  * uniquely named scratch database on the same server, verifies the audit
@@ -22,7 +22,6 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const Database = require('better-sqlite3');
-const auditIntegrity = require('../server/audit-integrity');
 const backup = require('./backup-store');
 
 function parseArgs(argv) {
@@ -36,12 +35,6 @@ function parseArgs(argv) {
   return out;
 }
 
-function sha256File(file) {
-  const h = crypto.createHash('sha256');
-  h.update(fs.readFileSync(file));
-  return h.digest('hex');
-}
-
 function resolveWorkDir(backupDir) {
   if (backupDir) {
     const dir = path.resolve(backupDir);
@@ -53,13 +46,14 @@ function resolveWorkDir(backupDir) {
 
 /** Open the restored copy read-only and measure it independently. */
 function inspectRestoredDb(file) {
+  const authenticated = backup.verifyBackup({ file });
   const restoredDb = new Database(file, { readonly: true, fileMustExist: true });
   try {
     return {
-      auditIntegrity: auditIntegrity.verifyAuditChainForDatabase(restoredDb),
+      auditIntegrity: authenticated.auditIntegrity,
       queryCount: restoredDb.prepare('SELECT COUNT(*) n FROM queries').get().n,
       auditCount: restoredDb.prepare('SELECT COUNT(*) n FROM audit').get().n,
-      sha256: sha256File(file),
+      sha256: authenticated.backupSha256,
     };
   } finally {
     restoredDb.close();
@@ -112,14 +106,16 @@ function cleanupArtifacts(workDir, created, restoredPath) {
     fs.rmSync(workDir.dir, { recursive: true, force: true });
     return;
   }
-  // Verifying a WAL-mode backup creates -wal/-shm sidecars next to it.
-  for (const suffix of ['', '-wal', '-shm']) fs.rmSync(created.file + suffix, { force: true });
+  for (const suffix of ['', '-wal', '-shm', '-journal']) fs.rmSync(created.file + suffix, { force: true });
+  if (created.auditStateFile) fs.rmSync(created.auditStateFile, { force: true });
+  if (created.auditCheckpointFile) fs.rmSync(created.auditCheckpointFile, { force: true });
   fs.rmSync(created.manifestFile, { force: true });
 }
 
 // ---- Postgres drill ----------------------------------------------------------
 
 async function withPgClient(connectionString, fn) {
+  backup.assertPostgresConnectionUrl(connectionString);
   const { Client } = require('pg');
   const client = new Client({ connectionString });
   await client.connect();
@@ -184,6 +180,7 @@ function cleanupPgArtifacts(workDir, created) {
 async function runPgDrill(opts, db, create) {
   const connectionString = process.env.REDACTWALL_DATABASE_URL || process.env.DATABASE_URL;
   if (!connectionString) throw new Error('postgres drill requires REDACTWALL_DATABASE_URL');
+  backup.assertPostgresConnectionUrl(connectionString);
   const workDir = resolveWorkDir(opts.backupDir);
   const scratchDb = 'redactwall_drill_' + crypto.randomBytes(5).toString('hex');
   const created = await create({ outDir: workDir.dir, dbModule: db });
@@ -203,6 +200,13 @@ async function runPgDrill(opts, db, create) {
 }
 
 async function runDrill(opts = {}) {
+  const driver = String(process.env.REDACTWALL_DB_DRIVER || '').trim().toLowerCase();
+  const postgresConfigured = ['postgres', 'postgresql', 'pg'].includes(driver);
+  if (!opts.dbModule && postgresConfigured) {
+    const connectionString = process.env.REDACTWALL_DATABASE_URL || process.env.DATABASE_URL;
+    if (!connectionString) throw new Error('postgres drill requires REDACTWALL_DATABASE_URL');
+    backup.assertPostgresConnectionUrl(connectionString);
+  }
   const db = opts.dbModule || require('../server/db');
   const create = opts.createBackup || backup.createBackup;
   if ((db._driverKind || 'sqlite') === 'postgres') return runPgDrill(opts, db, create);

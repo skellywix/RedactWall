@@ -1,6 +1,10 @@
 {
+  "formatVersion": 2,
+  "algorithm": "sha256",
+  "valuePolicy": "offline-random-id-v1",
   "salt": "",
-  "minLen": 6,
+  "minLen": 20,
+  "maxWords": 1,
   "severity": 4,
   "enabled": false,
   "fingerprints": []

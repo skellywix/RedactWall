@@ -1,0 +1,81 @@
+.licensing-view {
+  display: grid;
+  gap: 14px;
+}
+
+.licensing-cards {
+  margin-bottom: 0;
+}
+
+.licensing-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.licensing-form {
+  display: grid;
+  gap: 10px;
+  padding: 0 16px 16px;
+}
+
+.licensing-form input,
+.licensing-form textarea {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--input-bg);
+  color: var(--txt);
+  padding: 8px 10px;
+}
+
+.licensing-form textarea {
+  min-height: 92px;
+  resize: vertical;
+}
+
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.admin-table th,
+.admin-table td {
+  border-bottom: 1px solid var(--line);
+  padding: 10px 12px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.admin-table th {
+  color: var(--mut);
+  font-size: 12px;
+}
+
+.admin-table td > b,
+.admin-table td > span {
+  display: block;
+}
+
+.admin-table td > span,
+.seat-note {
+  color: var(--mut);
+  font-size: 12px;
+}
+
+.admin-table.compact td,
+.admin-table.compact th {
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+.license-table .pill {
+  margin-bottom: 4px;
+}
+
+@media (max-width: 1100px) {
+  .licensing-grid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -36,6 +36,10 @@ test('openapi: heartbeat companions is an object map and discovery destinations 
   const destItems = doc.components.schemas.DiscoveryResponse.properties.destinations.items;
   assert.strictEqual(destItems.type, 'object');
   assert.ok(destItems.properties.id && destItems.properties.destination);
+  const justify = doc.paths['/api/v1/justify/{id}'].post;
+  assert.strictEqual(justify.operationId, 'resolveJustification');
+  assert.deepStrictEqual(justify.security, [{ IngestKey: [], ReleaseToken: [] }]);
+  assert.ok(doc.components.schemas.ResolveJustificationRequest.properties.outcome);
 });
 
 test('insights: a user named __proto__ does not pollute Object.prototype', () => {

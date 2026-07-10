@@ -21,6 +21,7 @@ const detector = require('../detection-engine/detect');
 const semanticRemote = require('../server/semantic-remote');
 const app = require('../server/app');
 const { listen } = require('./support/listen');
+const nativeFetch = globalThis.fetch;
 
 const BENIGN = 'Please summarize the cafeteria menu rotation for next month.';
 
@@ -65,6 +66,106 @@ test('remote categories are validated, capped, and max-combined into local analy
     assert.strictEqual(local.categories.length, 0, 'local analysis object is not mutated');
   } finally {
     server.close();
+  }
+});
+
+test('remote classifier requests reject redirects and bound every response body', async () => {
+  const local = detector.analyze(BENIGN);
+  let options;
+  const valid = await semanticRemote.augmentAnalysis(BENIGN, local, {
+    settings: { enabled: true, url: 'https://scanner.example.test/scan', timeoutMs: 1000 },
+    fetchImpl: async (_url, requestOptions) => {
+      options = requestOptions;
+      return new Response(JSON.stringify({ categories: [] }));
+    },
+  });
+  assert.strictEqual(valid.riskScore, local.riskScore);
+  assert.strictEqual(options.redirect, 'error');
+
+  const oversized = await semanticRemote.augmentAnalysis(BENIGN, local, {
+    settings: { enabled: true, url: 'https://scanner.example.test/scan', timeoutMs: 1000 },
+    fetchImpl: async () => new Response(Buffer.alloc(129 * 1024)),
+  });
+  assert.strictEqual(oversized, local);
+
+  let cancelled = false;
+  const stalled = await semanticRemote.augmentAnalysis(BENIGN, local, {
+    settings: { enabled: true, url: 'https://scanner.example.test/scan', timeoutMs: 20 },
+    fetchImpl: async () => ({
+      ok: true,
+      headers: new Headers(),
+      body: { getReader: () => ({
+        read: async () => new Promise(() => {}),
+        cancel: async () => { cancelled = true; },
+      }) },
+    }),
+  });
+  assert.strictEqual(stalled, local);
+  assert.strictEqual(cancelled, true);
+
+  let failedBodyCancelled = false;
+  const rejected = await semanticRemote.augmentAnalysis(BENIGN, local, {
+    settings: { enabled: true, url: 'https://scanner.example.test/scan', timeoutMs: 1000 },
+    fetchImpl: async () => ({
+      ok: false,
+      status: 503,
+      body: { cancel: async () => { failedBodyCancelled = true; } },
+    }),
+  });
+  assert.strictEqual(rejected, local);
+  assert.strictEqual(failedBodyCancelled, true);
+
+  let jsonCalled = false;
+  const unstreamable = await semanticRemote.augmentAnalysis(BENIGN, local, {
+    settings: { enabled: true, url: 'https://scanner.example.test/scan', timeoutMs: 1000 },
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => { jsonCalled = true; return { categories: [] }; },
+    }),
+  });
+  assert.strictEqual(unstreamable, local);
+  assert.strictEqual(jsonCalled, false);
+});
+
+test('a real 307 cannot forward the classifier bearer token or prompt body', async () => {
+  const seen = { redirectAuth: null, redirectBody: '', receiverRequests: 0, receiverAuth: null, receiverBody: '' };
+  const server = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', (chunk) => { body += chunk; });
+    req.on('end', () => {
+      if (req.url === '/redirect') {
+        seen.redirectAuth = req.headers.authorization || null;
+        seen.redirectBody = body;
+        res.writeHead(307, { location: '/receiver' });
+        res.end();
+        return;
+      }
+      seen.receiverRequests += 1;
+      seen.receiverAuth = req.headers.authorization || null;
+      seen.receiverBody = body;
+      res.end(JSON.stringify({ categories: [] }));
+    });
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const local = detector.analyze(BENIGN);
+    const result = await semanticRemote.augmentAnalysis(BENIGN, local, {
+      settings: {
+        enabled: true,
+        url: `http://127.0.0.1:${server.address().port}/redirect`,
+        key: 'redirect-unit-secret',
+        timeoutMs: 1000,
+      },
+      fetchImpl: nativeFetch,
+    });
+    assert.strictEqual(result, local);
+    assert.strictEqual(seen.redirectAuth, 'Bearer redirect-unit-secret');
+    assert.ok(seen.redirectBody.includes(BENIGN));
+    assert.strictEqual(seen.receiverRequests, 0);
+    assert.strictEqual(seen.receiverAuth, null);
+    assert.strictEqual(seen.receiverBody, '');
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
   }
 });
 
@@ -132,8 +233,12 @@ test('remote URL must be encrypted for a remote host: https anywhere, http only 
   assert.strictEqual(on('http://localhost:9000/scan'), true);
   assert.strictEqual(on('http://scan.vendor.example/classify'), false); // cleartext to remote — rejected
   assert.strictEqual(on('ftp://scan.vendor.example'), false);
-  // Explicit operator override re-enables cleartext to a remote host.
+  // Explicit operator override is limited to non-production development.
   assert.strictEqual(on('http://scan.vendor.example/classify', { REDACTWALL_SEMANTIC_REMOTE_ALLOW_INSECURE: '1' }), true);
+  assert.strictEqual(on('http://scan.vendor.example/classify', {
+    NODE_ENV: 'production',
+    REDACTWALL_SEMANTIC_REMOTE_ALLOW_INSECURE: '1',
+  }), false);
 });
 
 test('fail mode: degrade returns local analysis, hold stamps remoteScanFailed', async () => {

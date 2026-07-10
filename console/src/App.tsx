@@ -20,6 +20,7 @@ const Catalog = lazy(() => import('./views/Catalog'));
 const Compliance = lazy(() => import('./views/Compliance'));
 const NcuaReadiness = lazy(() => import('./views/NcuaReadiness'));
 const Identity = lazy(() => import('./views/Identity'));
+const Licensing = lazy(() => import('./views/Licensing'));
 const Policy = lazy(() => import('./views/Policy'));
 const Deploy = lazy(() => import('./views/Deploy'));
 const Integrations = lazy(() => import('./views/Integrations'));
@@ -28,6 +29,7 @@ const Updates = lazy(() => import('./views/Updates'));
 
 interface Route extends NavItem {
   view: LazyExoticComponent<ComponentType>;
+  allowedRoles?: string[];
 }
 
 interface RouteGroup {
@@ -52,6 +54,7 @@ const GROUPS: RouteGroup[] = [
       { path: '/coverage', label: 'Texas FCU Coverage', icon: NAV_ICONS.coverage, view: Coverage },
       { path: '/lineage', label: 'Member Data Lineage', icon: NAV_ICONS.lineage, view: Lineage },
       { path: '/decision-quality', label: 'Reviewer Decisions', icon: NAV_ICONS.decisionQuality, view: DecisionQuality },
+      { path: '/audit', label: 'Examiner Audit Chain', icon: NAV_ICONS.audit, view: Audit },
     ],
   },
   {
@@ -60,22 +63,31 @@ const GROUPS: RouteGroup[] = [
       { path: '/catalog', label: 'AI Vendor Catalog', icon: NAV_ICONS.catalog, view: Catalog },
       { path: '/compliance', label: 'NCUA / GLBA Controls', icon: NAV_ICONS.compliance, view: Compliance },
       { path: '/ncua', label: 'Texas FCU Readiness', icon: NAV_ICONS.ncua, view: NcuaReadiness },
-      { path: '/identity', label: 'Identity & Roles', icon: NAV_ICONS.identity, view: Identity },
       { path: '/policy', label: 'Policy Configuration', icon: NAV_ICONS.policy, view: Policy },
     ],
   },
   {
-    label: 'Platform',
+    label: 'Administration',
     items: [
-      { path: '/deploy', label: 'Sensor Rollout', icon: NAV_ICONS.deploy, view: Deploy },
-      { path: '/integrations', label: 'Evidence Delivery', icon: NAV_ICONS.integrations, view: Integrations },
-      { path: '/audit', label: 'Examiner Audit Chain', icon: NAV_ICONS.audit, view: Audit },
-      { path: '/updates', label: 'Controlled Updates', icon: NAV_ICONS.updates, view: Updates },
+      { path: '/identity', label: 'Users & Roles', icon: NAV_ICONS.identity, view: Identity, allowedRoles: ['security_admin', 'operator', 'auditor'] },
+      { path: '/licensing', label: 'Licensing', icon: NAV_ICONS.licensing, view: Licensing, allowedRoles: ['security_admin', 'operator', 'auditor'] },
+      { path: '/deploy', label: 'Sensor Rollout', icon: NAV_ICONS.deploy, view: Deploy, allowedRoles: ['security_admin', 'operator'] },
+      { path: '/integrations', label: 'Evidence Delivery', icon: NAV_ICONS.integrations, view: Integrations, allowedRoles: ['security_admin', 'operator'] },
+      { path: '/updates', label: 'Controlled Updates', icon: NAV_ICONS.updates, view: Updates, allowedRoles: ['security_admin', 'operator'] },
     ],
   },
 ];
 
 const ROUTES: Route[] = GROUPS.flatMap((group) => group.items);
+
+function visibleGroupsForRole(role?: string | null): RouteGroup[] {
+  return GROUPS
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((route) => !route.allowedRoles || route.allowedRoles.includes(role || '')),
+    }))
+    .filter((group) => group.items.length > 0);
+}
 
 async function signOut(): Promise<void> {
   await apiJson('/api/logout', { method: 'POST' });
@@ -89,8 +101,7 @@ function toggleColorTheme(): void {
   document.querySelector<HTMLButtonElement>(`.theme-toggle [data-theme-choice="${next}"]`)?.click();
 }
 
-const PALETTE_ENTRIES: PaletteEntry[] = [
-  ...ROUTES.map((route) => ({ group: 'Navigate', label: route.label, icon: route.icon, run: () => navigate(route.path) })),
+const PALETTE_ACTIONS: PaletteEntry[] = [
   { group: 'Actions', label: 'Toggle color theme', icon: null, run: toggleColorTheme },
   { group: 'Actions', label: 'Sign out', icon: null, run: () => void signOut() },
 ];
@@ -119,18 +130,29 @@ export default function App() {
     initCsrf().finally(() => setCsrfReady(true));
   }, []);
   usePaletteHotkey(setPaletteOpen);
+  const visibleGroups = visibleGroupsForRole(me?.role);
+  const visibleRoutes = visibleGroups.flatMap((group) => group.items);
 
   // Routes may carry a pivot query string (e.g. /activity?q=dest:host); match on
   // the path segment alone so a seeded deep link lands on the right view.
-  const active = ROUTES.find((r) => r.path === route.split('?')[0]) ?? ROUTES[0];
+  const active = visibleRoutes.find((r) => r.path === route.split('?')[0]) ?? visibleRoutes[0] ?? ROUTES[0];
   const View = active.view;
   const who = loading ? 'Signing in…' : me ? `${me.user} / ${roleLabel(me.role)}` : 'Session unavailable';
   const openPalette = useCallback(() => setPaletteOpen(true), []);
   const closePalette = useCallback(() => setPaletteOpen(false), []);
+  const paletteEntries: PaletteEntry[] = [
+    ...visibleRoutes.map((visibleRoute) => ({
+      group: 'Navigate',
+      label: visibleRoute.label,
+      icon: visibleRoute.icon,
+      run: () => navigate(visibleRoute.path),
+    })),
+    ...PALETTE_ACTIONS,
+  ];
 
   return (
     <div className="app-shell">
-      <NavRail groups={GROUPS} activePath={active.path} pending={shell.pending} surfaces={shell.surfaces} version={shell.version} />
+      <NavRail groups={visibleGroups} activePath={active.path} pending={shell.pending} surfaces={shell.surfaces} version={shell.version} />
       <div className="app-main">
         <Topbar who={who} liveState={shell.liveState} lastUpdated={shell.lastUpdated} onOpenPalette={openPalette} onSignOut={() => void signOut()} />
         <main className="app-content">
@@ -143,7 +165,7 @@ export default function App() {
           )}
         </main>
       </div>
-      {paletteOpen ? <CommandPalette entries={PALETTE_ENTRIES} onClose={closePalette} /> : null}
+      {paletteOpen ? <CommandPalette entries={paletteEntries} onClose={closePalette} /> : null}
     </div>
   );
 }

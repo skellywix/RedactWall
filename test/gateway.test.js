@@ -39,9 +39,19 @@ function listenAndRequest(app, { method = 'POST', pathName = '/v1/chat/completio
 
 // A scripted control-plane client. verdictFor/scanFor decide behavior per text.
 function stubClient({ verdict, scan, rehydrated } = {}) {
+  const requestFixture = async (payload) => {
+    const result = typeof verdict === 'function' ? await verdict(payload) : (verdict || { decision: 'allow' });
+    if (result.status !== undefined || result.decision === 'allow') return result;
+    return { ...result, status: ({ block: 'pending', redact: 'redacted', warn: 'warned', log: 'proxy_observed' })[result.decision] };
+  };
+  const responseFixture = async (payload) => {
+    const result = typeof scan === 'function' ? await scan(payload) : (scan || { leaked: false, decision: 'allow', blocked: false });
+    if (result.status !== undefined) return result;
+    return { ...result, status: ({ allow: 'allowed', block: 'response_blocked', redact: 'response_redacted', flag: 'response_flagged' })[result.decision] };
+  };
   return {
-    gate: async (payload) => (typeof verdict === 'function' ? verdict(payload) : (verdict || { decision: 'allow' })),
-    scanResponse: async (payload) => (typeof scan === 'function' ? scan(payload) : (scan || { leaked: false, decision: 'allow', blocked: false })),
+    gate: requestFixture,
+    scanResponse: responseFixture,
     rehydrate: async (id, text) => ({ text: rehydrated || text, rehydrated: !!rehydrated }),
   };
 }
@@ -240,4 +250,41 @@ test('agent tokens are stored hashed and revocation takes effect', async (t) => 
   assert.ok(tokens.resolveToken(token, tp), 'token resolves before revocation');
   tokens.revokeToken(id, tp);
   assert.strictEqual(tokens.resolveToken(token, tp), null, 'revoked token no longer resolves');
+});
+
+test('response rehydration touches content only and rescans the final envelope', async (t) => {
+  const tp = tmpTokens(t);
+  const { token } = tokens.mintToken({ user: 'a@x' }, tp);
+  const scans = [];
+  let upstreamToken = '';
+  const client = {
+    gate: async () => ({ decision: 'redact', status: 'redacted', findings: [] }),
+    scanResponse: async (payload) => { scans.push(payload.text); return { decision: 'allow', status: 'allowed', blocked: false }; },
+  };
+  const adapter = {
+    callUpstream: async (kind, body) => {
+      upstreamToken = body.messages[0].content.match(/\[\[US_SSN_\d+\]\]/)[0];
+      return {
+        ok: true,
+        status: 200,
+        json: {
+          id: upstreamToken,
+          vendor_metadata: { trace: upstreamToken },
+          choices: [{ message: { role: 'assistant', content: upstreamToken } }],
+        },
+      };
+    },
+  };
+  const { app } = createGateway({ client, adapter, agentTokensPath: tp });
+  const res = await listenAndRequest(app, {
+    headers: { authorization: `Bearer ${token}` },
+    body: chatBody('Member SSN 524-71-9043'),
+  });
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.json.id, upstreamToken);
+  assert.strictEqual(res.json.vendor_metadata.trace, upstreamToken);
+  assert.strictEqual(res.json.choices[0].message.content, '524-71-9043');
+  assert.strictEqual(scans.length, 2);
+  assert.match(scans[1], /524-71-9043/);
+  assert.ok(!scans[1].includes(`id\n524-71-9043`), 'metadata token must not be detokenized');
 });

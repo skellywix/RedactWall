@@ -12,11 +12,27 @@ const db = require('./db');
 const roles = require('./roles');
 const scim = require('./scim');
 const auth = require('./auth');
+const { assertOidcUrls } = require('./oidc-url');
+const { cancelResponseBody, readBoundedJson } = require('../sensors/shared/bounded-response');
 
 const STATE_COOKIE_NAME = 'redactwall_oidc';
 const STATE_TTL_MS = 10 * 60 * 1000;
 const STEP_UP_TTL_MS = 5 * 60 * 1000;
 const MAX_CLOCK_SKEW_SEC = 60;
+const PROVIDER_REQUEST_TIMEOUT_MS = 10 * 1000;
+const MAX_DISCOVERY_BYTES = 256 * 1024;
+const MAX_TOKEN_RESPONSE_BYTES = 128 * 1024;
+const MAX_JWKS_BYTES = 512 * 1024;
+const MAX_JWKS_KEYS = 64;
+const JWKS_CACHE_TTL_MS = 5 * 60 * 1000;
+const DISCOVERY_CACHE_TTL_MS = 5 * 60 * 1000;
+const LOGIN_ATTEMPT_LIMIT = Math.max(3, Math.min(100, Number(process.env.OIDC_ATTEMPT_LIMIT) || 12));
+const LOGIN_ATTEMPT_WINDOW_MS = Math.max(1000, Math.min(60 * 60 * 1000, Number(process.env.OIDC_ATTEMPT_WINDOW_MS) || 60 * 1000));
+const MAX_LOGIN_ATTEMPT_KEYS = 10000;
+const STRONG_AMR_VALUES = new Set(['mfa']);
+const jwksCacheByFetch = new WeakMap();
+const discoveryCacheByFetch = new WeakMap();
+const loginAttempts = new Map();
 // Reuse the stable session secret (env, else the disk-persisted one) instead of
 // a per-process random fallback, so in-flight logins survive a restart and every
 // instance in a fleet validates the same state-cookie signature.
@@ -25,6 +41,22 @@ const STATE_SECRET = process.env.REDACTWALL_SECRET || process.env.PROMPTWALL_SEC
 
 function cleanString(value, max = 512) {
   return String(value == null ? '' : value).trim().slice(0, max);
+}
+
+function configList(value, maxItems = 16) {
+  const source = Array.isArray(value) ? value : String(value || '').split(/[\s,]+/);
+  return Array.from(new Set(source
+    .map((item) => cleanString(item, 256))
+    .filter(Boolean)))
+    .slice(0, maxItems);
+}
+
+function runtimeConfig(cfg, opts = {}) {
+  const env = opts.env || process.env;
+  return {
+    ...(cfg || {}),
+    production: (cfg && cfg.production === true) || env.NODE_ENV === 'production',
+  };
 }
 
 function config(env = process.env) {
@@ -36,6 +68,7 @@ function config(env = process.env) {
   const tokenEndpoint = cleanString(env.OIDC_TOKEN_ENDPOINT || env.REDACTWALL_OIDC_TOKEN_ENDPOINT, 1024);
   const jwksUri = cleanString(env.OIDC_JWKS_URI || env.REDACTWALL_OIDC_JWKS_URI, 1024);
   const scope = cleanString(env.OIDC_SCOPE || env.REDACTWALL_OIDC_SCOPE, 256) || 'openid email profile';
+  const stepUpAcrValues = configList(env.OIDC_STEP_UP_ACR_VALUES || env.REDACTWALL_OIDC_STEP_UP_ACR_VALUES);
   return {
     issuer,
     clientId,
@@ -45,7 +78,9 @@ function config(env = process.env) {
     tokenEndpoint,
     jwksUri,
     scope,
-    enabled: !!issuer && !!clientId && !!clientSecret,
+    stepUpAcrValues,
+    production: env.NODE_ENV === 'production',
+    enabled: !!issuer && !!clientId && !!clientSecret && !!redirectUri,
   };
 }
 
@@ -57,39 +92,199 @@ function publicOptions(env = process.env) {
   };
 }
 
-function originFromRequest(req) {
-  const forwardedProto = cleanString(req && req.get && req.get('x-forwarded-proto'), 80).split(',')[0].trim();
-  const forwardedHost = cleanString(req && req.get && req.get('x-forwarded-host'), 256).split(',')[0].trim();
-  const proto = forwardedProto || (req && req.protocol) || 'http';
-  const host = forwardedHost || (req && req.get && req.get('host')) || 'localhost';
-  return `${proto}://${host}`;
+function redirectUriFor(cfg) {
+  if (!cfg || !cfg.redirectUri) throw new Error('OIDC redirect URI is required');
+  assertOidcUrls(cfg, [['redirectUri', 'redirect URI']]);
+  return cfg.redirectUri;
 }
 
-function redirectUriFor(cfg, origin) {
-  return cfg.redirectUri || `${origin.replace(/\/+$/, '')}/auth/oidc/callback`;
+function safeProviderError(message) {
+  const error = new Error(message);
+  error.oidcSafe = true;
+  return error;
 }
 
-async function fetchJson(fetchImpl, url, options) {
-  const res = await fetchImpl(url, options);
-  if (!res || !res.ok) throw new Error('OIDC provider request failed');
-  return res.json();
+function requestTimeout(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return PROVIDER_REQUEST_TIMEOUT_MS;
+  return Math.max(10, Math.min(60 * 1000, Math.floor(parsed)));
+}
+
+async function withProviderTimeout(task, options = {}) {
+  const controller = new AbortController();
+  const externalSignal = options.signal;
+  const abort = () => controller.abort();
+  if (externalSignal) {
+    if (externalSignal.aborted) throw safeProviderError('OIDC provider request failed');
+    externalSignal.addEventListener('abort', abort, { once: true });
+  }
+  let timer;
+  const timeout = new Promise((resolve, reject) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(safeProviderError('OIDC provider request timed out'));
+    }, requestTimeout(options.requestTimeoutMs));
+  });
+  const work = Promise.resolve().then(() => task(controller.signal));
+  try {
+    return await Promise.race([work, timeout]);
+  } catch (error) {
+    if (error && error.oidcSafe) throw error;
+    throw safeProviderError('OIDC provider request failed');
+  } finally {
+    clearTimeout(timer);
+    if (externalSignal) externalSignal.removeEventListener('abort', abort);
+  }
+}
+
+function providerBodyError(error) {
+  if (error && error.code === 'REDACTWALL_RESPONSE_TOO_LARGE') {
+    return safeProviderError('OIDC provider response exceeded the safe size limit');
+  }
+  if (error && error.code === 'REDACTWALL_RESPONSE_TIMEOUT') {
+    return safeProviderError('OIDC provider response timed out');
+  }
+  if (error && error.code === 'REDACTWALL_RESPONSE_INVALID_JSON') {
+    return safeProviderError('OIDC provider returned invalid JSON');
+  }
+  if (error && error.code === 'REDACTWALL_RESPONSE_UNSTREAMABLE') {
+    return safeProviderError('OIDC provider response body was unavailable');
+  }
+  return safeProviderError('OIDC provider request failed');
+}
+
+async function fetchJson(fetchImpl, url, options = {}) {
+  const response = await withProviderTimeout(async (signal) => {
+    try {
+      return await fetchImpl(url, {
+        ...(options.fetchOptions || {}),
+        redirect: 'error',
+        signal,
+      });
+    } catch {
+      throw safeProviderError('OIDC provider request failed');
+    }
+  }, options);
+  if (!response || !response.ok) {
+    await cancelResponseBody(response);
+    throw safeProviderError('OIDC provider request failed');
+  }
+  try {
+    const { json } = await readBoundedJson(response, {
+      maxBytes: options.maxBytes,
+      timeoutMs: requestTimeout(options.responseTimeoutMs ?? options.requestTimeoutMs),
+      label: 'OIDC provider response',
+    });
+    return json;
+  } catch (error) {
+    throw providerBodyError(error);
+  }
+}
+
+function boundedDiscoveryTtl(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) return DISCOVERY_CACHE_TTL_MS;
+  return Math.min(60 * 60 * 1000, Math.floor(parsed));
+}
+
+function discoveryCache(fetchImpl) {
+  let cache = discoveryCacheByFetch.get(fetchImpl);
+  if (!cache) {
+    cache = new Map();
+    discoveryCacheByFetch.set(fetchImpl, cache);
+  }
+  return cache;
+}
+
+async function discoveryDocument(cfg, fetchImpl, opts = {}) {
+  const cache = discoveryCache(fetchImpl);
+  const now = Number.isFinite(Number(opts.now)) ? Number(opts.now) : Date.now();
+  const cached = cache.get(cfg.issuer);
+  if (cached && cached.value && cached.expiresAt > now) return cached.value;
+  if (cached && cached.promise) return cached.promise;
+  const promise = fetchJson(fetchImpl, `${cfg.issuer}/.well-known/openid-configuration`, {
+    maxBytes: MAX_DISCOVERY_BYTES,
+    requestTimeoutMs: opts.requestTimeoutMs,
+    responseTimeoutMs: opts.responseTimeoutMs,
+    signal: opts.signal,
+  });
+  cache.set(cfg.issuer, { promise, expiresAt: 0 });
+  try {
+    const value = await promise;
+    cache.set(cfg.issuer, { value, expiresAt: now + boundedDiscoveryTtl(opts.discoveryCacheTtlMs) });
+    return value;
+  } catch (error) {
+    cache.delete(cfg.issuer);
+    throw error;
+  }
 }
 
 async function resolvedConfig(opts = {}) {
-  const cfg = opts.config || config(opts.env);
+  const cfg = runtimeConfig(opts.config || config(opts.env), opts);
   if (!cfg.enabled) throw new Error('OIDC login is not enabled');
-  if (cfg.authorizationEndpoint && cfg.tokenEndpoint && cfg.jwksUri) return cfg;
+  assertOidcUrls(cfg, [
+    ['issuer', 'issuer'],
+    ['redirectUri', 'redirect URI'],
+  ]);
+  if (cfg.authorizationEndpoint && cfg.tokenEndpoint && cfg.jwksUri) {
+    assertOidcUrls(cfg, [
+      ['authorizationEndpoint', 'authorization endpoint'],
+      ['tokenEndpoint', 'token endpoint'],
+      ['jwksUri', 'JWKS URI'],
+    ]);
+    return cfg;
+  }
   const fetchImpl = opts.fetchImpl || globalThis.fetch;
-  if (!fetchImpl) throw new Error('OIDC discovery requires fetch');
-  const discovery = await fetchJson(fetchImpl, `${cfg.issuer}/.well-known/openid-configuration`);
+  if (typeof fetchImpl !== 'function') throw new Error('OIDC discovery requires fetch');
+  const discovery = await discoveryDocument(cfg, fetchImpl, opts);
   if (cleanString(discovery.issuer).replace(/\/+$/, '') !== cfg.issuer) {
     throw new Error('OIDC discovery issuer mismatch');
   }
-  return {
+  const resolved = {
     ...cfg,
     authorizationEndpoint: cfg.authorizationEndpoint || cleanString(discovery.authorization_endpoint, 1024),
     tokenEndpoint: cfg.tokenEndpoint || cleanString(discovery.token_endpoint, 1024),
     jwksUri: cfg.jwksUri || cleanString(discovery.jwks_uri, 1024),
+  };
+  assertOidcUrls(resolved, [
+    ['authorizationEndpoint', 'authorization endpoint'],
+    ['tokenEndpoint', 'token endpoint'],
+    ['jwksUri', 'JWKS URI'],
+  ]);
+  return resolved;
+}
+
+function pruneLoginAttempts(now) {
+  for (const [key, attempt] of loginAttempts) {
+    if (attempt.lockedUntil <= now && now - attempt.startedAt >= LOGIN_ATTEMPT_WINDOW_MS) loginAttempts.delete(key);
+  }
+  while (loginAttempts.size >= MAX_LOGIN_ATTEMPT_KEYS) loginAttempts.delete(loginAttempts.keys().next().value);
+}
+
+function consumeLoginAttempt(client, now = Date.now()) {
+  const key = crypto.createHash('sha256').update(cleanString(client, 512) || 'unknown').digest('hex');
+  const time = Number.isFinite(Number(now)) ? Number(now) : Date.now();
+  pruneLoginAttempts(time);
+  let attempt = loginAttempts.get(key);
+  if (attempt && attempt.lockedUntil > time) {
+    return { allowed: false, newlyLocked: false, retryMs: attempt.lockedUntil - time };
+  }
+  if (!attempt || time - attempt.startedAt >= LOGIN_ATTEMPT_WINDOW_MS) {
+    attempt = { count: 0, startedAt: time, lockedUntil: 0 };
+  }
+  attempt.count += 1;
+  let newlyLocked = false;
+  if (attempt.count > LOGIN_ATTEMPT_LIMIT) {
+    attempt.lockedUntil = time + LOGIN_ATTEMPT_WINDOW_MS;
+    newlyLocked = true;
+  }
+  loginAttempts.delete(key);
+  loginAttempts.set(key, attempt);
+  return {
+    allowed: !newlyLocked,
+    newlyLocked,
+    retryMs: newlyLocked ? LOGIN_ATTEMPT_WINDOW_MS : 0,
+    remaining: Math.max(0, LOGIN_ATTEMPT_LIMIT - attempt.count),
   };
 }
 
@@ -136,14 +331,16 @@ function safeReturnTo(value) {
 
 async function buildAuthorizationRedirect(opts = {}) {
   const cfg = await resolvedConfig(opts);
-  const origin = opts.origin || originFromRequest(opts.req);
-  const redirectUri = redirectUriFor(cfg, origin);
+  const redirectUri = redirectUriFor(cfg);
+  const requireStepUp = opts.stepUp === true;
+  const stepUpAcrValues = configList(cfg.stepUpAcrValues);
   const state = randomBase64Url(24);
   const nonce = randomBase64Url(24);
   const statePayload = {
     state,
     nonce,
     returnTo: safeReturnTo(opts.returnTo),
+    requireStepUp,
     exp: Date.now() + STATE_TTL_MS,
   };
   const url = new URL(cfg.authorizationEndpoint);
@@ -153,7 +350,19 @@ async function buildAuthorizationRedirect(opts = {}) {
   url.searchParams.set('scope', cfg.scope);
   url.searchParams.set('state', state);
   url.searchParams.set('nonce', nonce);
-  url.searchParams.set('max_age', String(Math.floor(STEP_UP_TTL_MS / 1000)));
+  if (requireStepUp) {
+    // max_age=0 + prompt=login asks the provider for fresh authentication.
+    // acr_values is operator-configured because assurance identifiers are IdP-
+    // specific. The callback still verifies the resulting amr/acr claims before
+    // granting RedactWall's privileged step-up window.
+    url.searchParams.set('prompt', 'login');
+    url.searchParams.set('max_age', '0');
+    if (stepUpAcrValues.length) {
+      url.searchParams.set('acr_values', stepUpAcrValues.join(' '));
+    }
+  } else {
+    url.searchParams.set('max_age', String(Math.floor(STEP_UP_TTL_MS / 1000)));
+  }
   return {
     url: url.toString(),
     cookieValue: signState(statePayload),
@@ -182,31 +391,72 @@ function parseJwt(token) {
 }
 
 function audienceMatches(aud, clientId, azp) {
+  if (azp != null && azp !== clientId) return false;
   if (typeof aud === 'string') return aud === clientId;
   if (!Array.isArray(aud) || !aud.includes(clientId)) return false;
   return aud.length === 1 || azp === clientId;
 }
 
-async function jwkForHeader(header, cfg, fetchImpl) {
-  if (header.alg !== 'RS256') throw new Error('OIDC ID token must use RS256');
-  const jwks = await fetchJson(fetchImpl, cfg.jwksUri);
-  const keys = Array.isArray(jwks.keys) ? jwks.keys : [];
-  const key = keys.find((candidate) => {
+function jwksCache(fetchImpl) {
+  let cache = jwksCacheByFetch.get(fetchImpl);
+  if (!cache) {
+    cache = new Map();
+    jwksCacheByFetch.set(fetchImpl, cache);
+  }
+  return cache;
+}
+
+async function loadJwks(cfg, fetchImpl, opts = {}, forceRefresh = false) {
+  const cache = jwksCache(fetchImpl);
+  const cached = cache.get(cfg.jwksUri);
+  if (!forceRefresh && cached && cached.expiresAt > Date.now()) {
+    return { keys: cached.keys, cached: true };
+  }
+  const jwks = await fetchJson(fetchImpl, cfg.jwksUri, {
+    maxBytes: MAX_JWKS_BYTES,
+    requestTimeoutMs: opts.requestTimeoutMs,
+    responseTimeoutMs: opts.responseTimeoutMs,
+    signal: opts.signal,
+  });
+  const keys = Array.isArray(jwks && jwks.keys) ? jwks.keys : [];
+  if (keys.length > MAX_JWKS_KEYS) throw safeProviderError('OIDC JWKS exceeded the safe key-count limit');
+  cache.set(cfg.jwksUri, { keys, expiresAt: Date.now() + JWKS_CACHE_TTL_MS });
+  return { keys, cached: false };
+}
+
+function signingKey(keys, header) {
+  return keys.find((candidate) => {
     if (!candidate || candidate.kty !== 'RSA') return false;
     if (candidate.use && candidate.use !== 'sig') return false;
     if (candidate.alg && candidate.alg !== 'RS256') return false;
     return !header.kid || candidate.kid === header.kid;
   });
+}
+
+async function jwkForHeader(header, cfg, fetchImpl, opts = {}) {
+  if (header.alg !== 'RS256') throw new Error('OIDC ID token must use RS256');
+  let result = await loadJwks(cfg, fetchImpl, opts);
+  let key = signingKey(result.keys, header);
+  // A cached key set may legitimately rotate. Refresh once on a miss, but never
+  // cache failures or accept an unbounded provider response.
+  if (!key && result.cached) {
+    result = await loadJwks(cfg, fetchImpl, opts, true);
+    key = signingKey(result.keys, header);
+  }
   if (!key) throw new Error('OIDC signing key was not found');
   return key;
 }
 
 async function validateIdToken(idToken, opts = {}) {
-  const cfg = opts.config || await resolvedConfig(opts);
+  const cfg = opts.config ? runtimeConfig(opts.config, opts) : await resolvedConfig(opts);
+  assertOidcUrls(cfg, [
+    ['issuer', 'issuer'],
+    ['jwksUri', 'JWKS URI'],
+  ]);
   const fetchImpl = opts.fetchImpl || globalThis.fetch;
-  if (!fetchImpl) throw new Error('OIDC ID token validation requires fetch');
+  if (typeof fetchImpl !== 'function') throw new Error('OIDC ID token validation requires fetch');
   const jwt = parseJwt(idToken);
-  const jwk = await jwkForHeader(jwt.header, cfg, fetchImpl);
+  const jwk = await jwkForHeader(jwt.header, cfg, fetchImpl, opts);
   const publicKey = crypto.createPublicKey({ key: jwk, format: 'jwk' });
   const ok = crypto.verify('RSA-SHA256', Buffer.from(jwt.signingInput), publicKey, jwt.signature);
   if (!ok) throw new Error('OIDC ID token signature is invalid');
@@ -231,9 +481,11 @@ async function validateIdToken(idToken, opts = {}) {
 }
 
 async function exchangeCodeForTokens(opts = {}) {
-  const cfg = opts.config || await resolvedConfig(opts);
+  const cfg = opts.config ? runtimeConfig(opts.config, opts) : await resolvedConfig(opts);
+  assertOidcUrls(cfg, [['tokenEndpoint', 'token endpoint']]);
+  assertOidcUrls({ ...cfg, redirectUri: opts.redirectUri }, [['redirectUri', 'redirect URI']]);
   const fetchImpl = opts.fetchImpl || globalThis.fetch;
-  if (!fetchImpl) throw new Error('OIDC token exchange requires fetch');
+  if (typeof fetchImpl !== 'function') throw new Error('OIDC token exchange requires fetch');
   const code = cleanString(opts.code, 4096);
   if (!code) throw new Error('OIDC authorization code is missing');
   const body = new URLSearchParams({
@@ -243,53 +495,36 @@ async function exchangeCodeForTokens(opts = {}) {
     client_id: cfg.clientId,
   });
   const basic = Buffer.from(`${cfg.clientId}:${cfg.clientSecret}`).toString('base64');
-  const res = await fetchImpl(cfg.tokenEndpoint, {
-    method: 'POST',
-    headers: {
-      authorization: `Basic ${basic}`,
-      'content-type': 'application/x-www-form-urlencoded',
-      accept: 'application/json',
+  const json = await fetchJson(fetchImpl, cfg.tokenEndpoint, {
+    maxBytes: MAX_TOKEN_RESPONSE_BYTES,
+    requestTimeoutMs: opts.requestTimeoutMs,
+    responseTimeoutMs: opts.responseTimeoutMs,
+    signal: opts.signal,
+    fetchOptions: {
+      method: 'POST',
+      headers: {
+        authorization: `Basic ${basic}`,
+        'content-type': 'application/x-www-form-urlencoded',
+        accept: 'application/json',
+      },
+      body: body.toString(),
     },
-    body: body.toString(),
   });
-  if (!res || !res.ok) throw new Error('OIDC token exchange failed');
-  const json = await res.json();
   if (!json || !json.id_token) throw new Error('OIDC token response did not include an ID token');
   return json;
 }
 
-function emailVerified(claims = {}) {
-  return claims.email_verified === true || String(claims.email_verified).trim().toLowerCase() === 'true';
-}
-
-function identityCandidates(claims = {}) {
-  // The email claim is user-influencable at many IdPs (self-service B2C/B2B), so
-  // trust it for SCIM matching only when the IdP asserts email_verified. The
-  // directory-canonical claims (preferred_username/upn/unique_name) are not
-  // self-settable and remain eligible.
-  const values = [
-    emailVerified(claims) ? claims.email : '',
-    claims.preferred_username,
-    claims.upn,
-    claims.unique_name,
-  ].map((value) => cleanString(value, 256).toLowerCase()).filter(Boolean);
-  return Array.from(new Set(values));
-}
-
 function scimAccountForClaims(claims = {}) {
-  for (const candidate of identityCandidates(claims)) {
-    const user = db.getScimUserByUserName(candidate);
-    if (!user || user.active === false) continue;
-    const role = roles.normalizeRole(scim.effectiveUserRole(user));
-    if (!role) continue;
-    return {
-      user: user.userName,
-      role,
-      scimUserId: user.id,
-      subject: cleanString(claims.sub, 256),
-    };
-  }
-  throw new Error('OIDC user is not active in SCIM');
+  const subject = cleanString(claims.sub, 256);
+  if (!subject) throw new Error('OIDC user is not active in SCIM');
+  const matches = db.listScimUsers().filter((user) => (
+    user.active !== false && cleanString(user.externalId, 256) === subject
+  ));
+  if (matches.length !== 1) throw new Error('OIDC user is not active in SCIM');
+  const user = matches[0];
+  const role = roles.normalizeRole(scim.effectiveUserRole(user));
+  if (!role) throw new Error('OIDC user is not active in SCIM');
+  return { user: user.userName, role, scimUserId: user.id, subject };
 }
 
 function sessionExtrasForClaims(claims = {}, cfg = {}, now = Date.now()) {
@@ -298,8 +533,15 @@ function sessionExtrasForClaims(claims = {}, cfg = {}, now = Date.now()) {
     idpSubject: cleanString(claims.sub, 256),
     idpIssuer: cleanString(cfg.issuer, 512),
   };
+  const amr = configList(claims.amr).map((value) => value.toLowerCase());
+  const configuredAcr = configList(cfg.stepUpAcrValues);
+  const hasStrongAssurance = amr.some((value) => STRONG_AMR_VALUES.has(value))
+    || (!!cleanString(claims.acr, 256) && configuredAcr.includes(cleanString(claims.acr, 256)));
   const authTimeMs = Number(claims.auth_time) * 1000;
-  if (Number.isFinite(authTimeMs) && authTimeMs <= now + MAX_CLOCK_SKEW_SEC * 1000 && now - authTimeMs <= STEP_UP_TTL_MS) {
+  if (hasStrongAssurance
+      && Number.isFinite(authTimeMs)
+      && authTimeMs <= now + MAX_CLOCK_SKEW_SEC * 1000
+      && now - authTimeMs <= STEP_UP_TTL_MS) {
     extras.stepUpUntil = authTimeMs + STEP_UP_TTL_MS;
   }
   return extras;
@@ -311,8 +553,7 @@ async function handleCallback(opts = {}) {
   const state = readStateCookie(opts.stateCookie, opts.now || Date.now());
   if (!constantTimeEqual(query.state, state.state)) throw new Error('OIDC state mismatch');
   const cfg = await resolvedConfig(opts);
-  const origin = opts.origin || originFromRequest(opts.req);
-  const redirectUri = redirectUriFor(cfg, origin);
+  const redirectUri = redirectUriFor(cfg);
   const tokens = await exchangeCodeForTokens({
     ...opts,
     config: cfg,
@@ -324,11 +565,19 @@ async function handleCallback(opts = {}) {
     config: cfg,
     nonce: state.nonce,
   });
+  const account = scimAccountForClaims(claims);
+  const sessionExtras = {
+    ...sessionExtrasForClaims(claims, cfg, opts.now || Date.now()),
+    scimUserId: account.scimUserId,
+  };
+  if (state.requireStepUp && !sessionExtras.stepUpUntil) {
+    throw new Error('OIDC step-up assurance was not satisfied');
+  }
   return {
-    account: scimAccountForClaims(claims),
+    account,
     claims,
     returnTo: safeReturnTo(state.returnTo),
-    sessionExtras: sessionExtrasForClaims(claims, cfg, opts.now || Date.now()),
+    sessionExtras,
   };
 }
 
@@ -356,4 +605,7 @@ module.exports = {
   sessionExtrasForClaims,
   signState,
   validateIdToken,
+  consumeLoginAttempt,
+  _resetLoginAttemptsForTest: () => loginAttempts.clear(),
+  _loginAttemptLimits: { maxAttempts: LOGIN_ATTEMPT_LIMIT, windowMs: LOGIN_ATTEMPT_WINDOW_MS },
 };

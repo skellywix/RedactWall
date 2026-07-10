@@ -6,6 +6,13 @@ const path = require('node:path');
 const adapters = require('../detection-engine/adapters');
 const checker = require('../scripts/check-ai-domain-coverage');
 
+function jsonResponse(status, body) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
 test('reviewed AI destination watchlist is covered by canonical adapters', () => {
   const watchlist = checker.readJson(path.join(__dirname, '..', 'config', 'ai-domain-watchlist.json'));
   const manifest = checker.readJson(path.join(__dirname, '..', 'sensors', 'browser-extension', 'manifest.json'));
@@ -58,21 +65,15 @@ test('Cloudflare Radar response maps top services into service names', async () 
     serviceCategory: 'Generative AI',
     fetchImpl: async (url, options) => {
       calls.push({ url: String(url), options });
-      return {
-        ok: true,
-        status: 200,
-        async json() {
-          return {
-            success: true,
-            result: {
-              top_0: [
-                { rank: 1, service: 'ChatGPT' },
-                { rank: 2, service: 'Claude' },
-              ],
-            },
-          };
+      return jsonResponse(200, {
+        success: true,
+        result: {
+          top_0: [
+            { rank: 1, service: 'ChatGPT' },
+            { rank: 2, service: 'Claude' },
+          ],
         },
-      };
+      });
     },
   });
 
@@ -80,6 +81,7 @@ test('Cloudflare Radar response maps top services into service names', async () 
   assert.match(calls[0].url, /\/radar\/ranking\/internet_services\/top/);
   assert.match(calls[0].url, /serviceCategory=Generative\+AI/);
   assert.strictEqual(calls[0].options.headers.Authorization, 'Bearer unit-token');
+  assert.strictEqual(calls[0].options.redirect, 'error');
 });
 
 test('AI domain helpers normalize manifests, mapped services, and Radar failures', async () => {
@@ -109,15 +111,9 @@ test('AI domain helpers normalize manifests, mapped services, and Radar failures
     limit: 999,
     fetchImpl: async (url) => {
       assert.match(String(url), /limit=200/);
-      return {
-        ok: false,
-        status: 403,
-        async json() {
-          return { success: false, errors: [{ message: 'bad token' }] };
-        },
-      };
+      return jsonResponse(403, { success: false, errors: [{ message: 'bad token' }] });
     },
-  }), /bad token/);
+  }), /HTTP 403/);
   await assert.rejects(() => checker.fetchRadarServices({
     token: 'unit-token',
     serviceCategory: '',
@@ -125,13 +121,7 @@ test('AI domain helpers normalize manifests, mapped services, and Radar failures
     fetchImpl: async (url) => {
       assert.match(String(url), /limit=100/);
       assert.doesNotMatch(String(url), /serviceCategory=/);
-      return {
-        ok: false,
-        status: 500,
-        async json() {
-          return null;
-        },
-      };
+      return jsonResponse(500, null);
     },
   }), /HTTP 500/);
 });

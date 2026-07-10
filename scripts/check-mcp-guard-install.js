@@ -10,9 +10,13 @@ const {
   connectorRegistryChecks,
   connectorRegistryStatus,
 } = require('../sensors/mcp-guard/connector-registry');
+const { readBoundedJson } = require('../sensors/shared/bounded-response');
+const { secureServerBase } = require('../sensors/shared/server-url');
 
 const ROOT = path.join(__dirname, '..');
 const VERSION = require('../package.json').version;
+const MAX_HEARTBEAT_RESPONSE_BYTES = 512 * 1024;
+const HEARTBEAT_RESPONSE_TIMEOUT_MS = 10000;
 const DEVELOPMENT_INGEST_KEY = ['dev', 'ingest', 'key'].join('-');
 
 function configured(value) {
@@ -177,7 +181,7 @@ function buildInstallReport(opts = {}) {
     || configured(env.REDACTWALL_ENV_PATH)
     || configured(env.PROMPTWALL_ENV_PATH)
     || configured(env.SENTINEL_ENV_PATH);
-  const serverUrlValid = configured(settings.serverUrl) && safeOrigin(settings.serverUrl) !== 'invalid URL';
+  const serverUrlValid = configured(settings.serverUrl) && !!secureServerBase(settings.serverUrl);
   const keyLooksUsable = configured(settings.ingestKey)
     && settings.ingestKey.length >= 16
     && settings.ingestKey !== DEVELOPMENT_INGEST_KEY;
@@ -295,16 +299,23 @@ async function emitHeartbeat(report, opts = {}) {
   const ingestKey = opts.ingestKey || settings.ingestKey;
   if (!configured(serverUrl)) throw new Error('REDACTWALL_URL is required to emit a heartbeat');
   if (!configured(ingestKey)) throw new Error('INGEST_API_KEY is required to emit a heartbeat');
+  const base = secureServerBase(serverUrl);
+  if (!base) throw new Error('REDACTWALL_URL must use HTTPS or loopback HTTP without query parameters or fragments');
   const fetchImpl = opts.fetchImpl || globalThis.fetch;
-  if (!fetchImpl) throw new Error('fetch is not available');
-  const response = await fetchImpl(String(serverUrl).replace(/\/+$/, '') + '/api/v1/heartbeat', {
+  if (typeof fetchImpl !== 'function') throw new Error('fetch is not available');
+  const response = await fetchImpl(base + '/api/v1/heartbeat', {
     method: 'POST',
+    redirect: 'error',
     headers: { 'Content-Type': 'application/json', 'x-api-key': ingestKey },
     body: JSON.stringify(buildHeartbeatBody(report, { ...opts, config: envConfig })),
   });
-  const body = await response.json().catch(() => ({}));
+  const { json: body } = await readBoundedJson(response, {
+    maxBytes: opts.maxResponseBytes || MAX_HEARTBEAT_RESPONSE_BYTES,
+    timeoutMs: opts.responseTimeoutMs || HEARTBEAT_RESPONSE_TIMEOUT_MS,
+    label: 'heartbeat response',
+  });
   if (!response.ok) {
-    throw new Error(`heartbeat post failed with HTTP ${response.status}${body.error ? ': ' + body.error : ''}`);
+    throw new Error(`heartbeat post failed with HTTP ${response.status}`);
   }
   return body;
 }

@@ -43,6 +43,9 @@ export const NAV_ICONS = {
   identity: (
     <svg viewBox="0 0 24 24" fill="none"><path d="M12 4a4 4 0 1 1 0 8 4 4 0 0 1 0-8ZM4.5 20c.7-3.4 3.3-5.5 7.5-5.5s6.8 2.1 7.5 5.5M17 8h3m-1.5-1.5v3" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg>
   ),
+  licensing: (
+    <svg viewBox="0 0 24 24" fill="none"><path d="M5 7h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Zm0 4h14M7 15h4m5-1.5 1.5 1.5L20 12" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg>
+  ),
   policy: (
     <svg viewBox="0 0 24 24" fill="none"><path d="M12 4l7 3v5c0 4.2-2.6 6.8-7 8-4.4-1.2-7-3.8-7-8V7l7-3Z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" /></svg>
   ),

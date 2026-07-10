@@ -44,8 +44,10 @@ test('identity setup guide renders Microsoft Entra SCIM and OIDC values', () => 
   assert.strictEqual(guide.oidc.redirectUri, 'https://redactwall.cu.example/auth/oidc/callback');
   assert.strictEqual(guide.oidc.issuer, 'https://login.microsoftonline.com/11111111-2222-3333-4444-555555555555/v2.0');
   assert.ok(guide.env.some((row) => row.key === 'OIDC_CLIENT_SECRET' && row.value === '<32-plus-random-characters>'));
+  assert.ok(guide.env.some((row) => row.key === 'OIDC_STEP_UP_ACR_VALUES' && row.value === '<approved-mfa-acr-values-or-empty>'));
   assert.ok(guide.roleGroups.some((row) => row.role === 'approver' && row.groups.includes('RedactWall Approvers')));
   assert.ok(guide.preflightChecks.includes('oidc_scim_users'));
+  assert.ok(guide.preflightChecks.includes('oidc_https'));
   assert.doesNotMatch(wire, /should-not-appear/);
 });
 
@@ -60,6 +62,17 @@ test('identity setup guide renders Okta issuer and callback values', () => {
   assert.strictEqual(guide.scim.baseUrl, 'https://redactwall.okta-pilot.example/scim/v2');
   assert.strictEqual(guide.oidc.issuer, 'https://customer.okta.com/oauth2/default');
   assert.strictEqual(guide.oidc.discovery, 'https://customer.okta.com/oauth2/default/.well-known/openid-configuration');
+
+  const customIssuer = buildIdentitySetupGuide({
+    provider: 'okta',
+    tenant: 'https://customer.okta.com/oauth2/aus123',
+    baseUrl: 'https://redactwall.customer.example',
+  });
+  assert.strictEqual(customIssuer.oidc.issuer, 'https://customer.okta.com/oauth2/aus123');
+  assert.strictEqual(
+    customIssuer.oidc.discovery,
+    'https://customer.okta.com/oauth2/aus123/.well-known/openid-configuration',
+  );
 });
 
 test('identity setup guide accepts provider aliases and rejects invalid base urls', () => {
@@ -69,6 +82,14 @@ test('identity setup guide accepts provider aliases and rejects invalid base url
   assert.throws(() => normalizeProvider('github'), /unsupported identity provider/);
   assert.throws(() => _internal.providerIssuer('github', 'tenant'), /unsupported identity provider/);
   assert.throws(() => buildIdentitySetupGuide({ provider: 'entra', baseUrl: 'redactwall.example.test' }), /baseUrl/);
+  for (const baseUrl of [
+    'javascript://redactwall.example.test',
+    'https://user:password@redactwall.example.test',
+    'https://redactwall.example.test/path',
+    'https://redactwall.example.test?redirect=attacker',
+  ]) {
+    assert.throws(() => buildIdentitySetupGuide({ provider: 'entra', baseUrl }), /baseUrl/);
+  }
 });
 
 test('identity setup CLI prints text and json without secrets', () => {

@@ -47,6 +47,10 @@ test('writes signed native handoff files without reading file content into the e
   const body = fs.readFileSync(result.path, 'utf8');
   assert.ok(!body.includes('Private upload body'));
   assert.ok(!body.includes('524-71-9043'));
+  if (process.platform !== 'win32') {
+    assert.strictEqual(fs.statSync(handoffDir).mode & 0o777, 0o700);
+    assert.strictEqual(fs.statSync(result.path).mode & 0o777, 0o600);
+  }
 
   const validated = handoff.readHandoffFile(result.path, {
     secret: SECRET,
@@ -242,18 +246,41 @@ test('writer rejects oversized events and cleans up failed atomic writes', (t) =
   const atomicDir = path.join(dir, 'atomic');
   fs.mkdirSync(atomicDir);
   const target = path.join(atomicDir, 'atomic.json');
-  const originalRename = fs.renameSync;
-  fs.renameSync = () => {
-    throw new Error('rename denied');
+  const originalLink = fs.linkSync;
+  fs.linkSync = () => {
+    throw new Error('publish denied');
   };
   try {
     assert.throws(
       () => writer._internal.writeAtomicJson(target, '{"ok":true}\n'),
-      /rename denied/,
+      /publish denied/,
     );
   } finally {
-    fs.renameSync = originalRename;
+    fs.linkSync = originalLink;
   }
   assert.deepStrictEqual(fs.readdirSync(atomicDir), []);
   assert.deepStrictEqual(fs.readdirSync(path.join(dir, 'handoff')), []);
+});
+
+test('writer rejects directory-fsync EIO and removes the unpublished event', (t) => {
+  const dir = tempDir(t);
+  const target = path.join(dir, 'durability.json');
+  const originalFsync = fs.fsyncSync;
+  fs.fsyncSync = (fd) => {
+    if (fs.fstatSync(fd).isDirectory()) {
+      const error = new Error('synthetic handoff directory fsync EIO');
+      error.code = 'EIO';
+      throw error;
+    }
+    return originalFsync(fd);
+  };
+  try {
+    assert.throws(
+      () => writer._internal.writeAtomicJson(target, '{"ok":true}\n'),
+      /synthetic handoff directory fsync EIO/,
+    );
+  } finally {
+    fs.fsyncSync = originalFsync;
+  }
+  assert.deepStrictEqual(fs.readdirSync(dir), []);
 });

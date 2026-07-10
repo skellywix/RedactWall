@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>RedactWall - Accept invite</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+<style>
+  :root{
+    color-scheme:light;
+    --bg:#f5f7fb;
+    --panel:#ffffff;
+    --panel2:#f7f9fd;
+    --line:rgba(63,88,128,.18);
+    --line2:rgba(63,88,128,.32);
+    --txt:#1d1d1f;
+    --mut:#6e7380;
+    --soft:#3a3a3c;
+    --blue:#0a84ff;
+    --green:#30a15a;
+    --red:#b4232a;
+    --shadow:0 24px 70px rgba(56,76,110,.16);
+    --glow:rgba(10,132,255,.14);
+  }
+  @media(prefers-color-scheme:dark){
+    :root{
+      color-scheme:dark;
+      --bg:#101114;
+      --panel:#191b20;
+      --panel2:#202631;
+      --line:rgba(141,154,180,.2);
+      --line2:rgba(141,154,180,.36);
+      --txt:#f5f5f7;
+      --mut:#a6adbb;
+      --soft:#d7dbe4;
+      --blue:#63b3ff;
+      --green:#70d389;
+      --red:#ff686f;
+      --shadow:0 24px 70px rgba(0,0,0,.44);
+      --glow:rgba(99,179,255,.14);
+    }
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0;
+    min-height:100vh;
+    display:grid;
+    place-items:center;
+    padding:24px;
+    background:linear-gradient(180deg,#fbfcff 0,#f3f6fb 54%,#e9eef6 100%);
+    color:var(--txt);
+    font-family:Inter,Aptos,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    letter-spacing:0;
+    line-height:1.45;
+  }
+  @media(prefers-color-scheme:dark){
+    body{background:linear-gradient(180deg,#181a20 0,#101114 58%,#0b0c0f 100%)}
+  }
+  .invite-shell{
+    position:relative;
+    width:min(100%,760px);
+    min-height:520px;
+    display:grid;
+    grid-template-columns:minmax(0,1fr) 360px;
+    border:1px solid var(--line);
+    border-radius:8px;
+    overflow:hidden;
+    background:var(--panel);
+    box-shadow:var(--shadow);
+  }
+  .brand-panel{
+    display:flex;
+    flex-direction:column;
+    justify-content:space-between;
+    padding:34px;
+    border-right:1px solid var(--line);
+    background:
+      linear-gradient(135deg,rgba(10,132,255,.12),rgba(48,159,88,.08) 48%,transparent),
+      rgba(255,255,255,.78);
+  }
+  @media(prefers-color-scheme:dark){
+    .brand-panel{
+      background:
+        linear-gradient(135deg,rgba(99,179,255,.14),rgba(112,211,137,.08) 52%,transparent),
+        rgba(24,26,32,.88);
+    }
+  }
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{
+    width:38px;
+    height:38px;
+    border:1px solid rgba(10,132,255,.35);
+    border-radius:10px;
+    display:grid;
+    place-items:center;
+    background:linear-gradient(180deg,#3f9fff,#0a72e8);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.25),0 1px 3px rgba(9,30,66,.2);
+  }
+  .logo svg{width:22px;height:22px;display:block}
+  h1{margin:0;font-size:22px;line-height:1.08}
+  .brand p{margin:4px 0 0;color:var(--mut);font-size:12px}
+  .statement h2{margin:0;font-size:30px;line-height:1.05;font-weight:800}
+  .statement p{margin:14px 0 0;color:var(--mut);line-height:1.55}
+  .checks{display:grid;gap:10px;color:var(--soft);font-size:13px}
+  .check{display:flex;align-items:center;gap:9px}
+  .check i{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 0 4px rgba(67,227,138,.12)}
+  form,.success{
+    display:flex;
+    flex-direction:column;
+    justify-content:center;
+    padding:42px 36px;
+    background:var(--panel);
+  }
+  form h2,.success h2{margin:0;font-size:24px}
+  .sub{margin:7px 0 22px;color:var(--mut);font-size:13px}
+  label{display:block;font-size:11px;color:var(--mut);margin:14px 0 7px;text-transform:uppercase;letter-spacing:.08em;font-weight:720}
+  input{
+    width:100%;
+    min-height:44px;
+    padding:11px 12px;
+    border-radius:8px;
+    border:1px solid var(--line);
+    background:var(--panel2);
+    color:var(--txt);
+    font-size:14px;
+  }
+  input:focus{outline:2px solid var(--glow);outline-offset:1px;border-color:var(--blue);background:var(--panel)}
+  button,a.button{
+    width:100%;
+    min-height:44px;
+    margin-top:22px;
+    border:1px solid transparent;
+    border-radius:8px;
+    background:linear-gradient(180deg,#2b91ff,#0a72e8);
+    color:#fff;
+    font-weight:700;
+    font-size:14px;
+    cursor:pointer;
+    text-decoration:none;
+    display:grid;
+    place-items:center;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 1px 3px rgba(9,30,66,.24);
+  }
+  button:hover,a.button:hover{filter:brightness(1.06)}
+  button:disabled{cursor:wait;opacity:.72}
+  .err{color:var(--red);font-size:13px;margin-top:14px;min-height:18px}
+  .note{margin-top:14px;font-size:12px;color:var(--mut);line-height:1.5}
+  .success[hidden],form[hidden]{display:none}
+  @media(max-width:760px){
+    body{display:block;padding:14px}
+    .invite-shell{grid-template-columns:1fr;min-height:0}
+    .brand-panel{gap:34px;border-right:0;border-bottom:1px solid var(--line)}
+    .statement h2{font-size:27px}
+    form,.success{padding:30px 24px}
+  }
+</style>
+<link rel="stylesheet" href="/console-theme.css" />
+</head>
+<body class="login-page" data-theme="dark">
+  <main class="invite-shell">
+    <section class="brand-panel" aria-label="RedactWall">
+      <div class="brand">
+        <div class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><g fill="#fff"><rect x="4.5" y="5.5" width="10" height="3" rx="1.5"/><rect x="16" y="5.5" width="3.5" height="3" rx="1.5" opacity=".5"/><rect x="4.5" y="10.5" width="5" height="3" rx="1.5" opacity=".5"/><rect x="11" y="10.5" width="8.5" height="3" rx="1.5"/><rect x="4.5" y="15.5" width="11" height="3" rx="1.5"/><rect x="17" y="15.5" width="2.5" height="3" rx="1.25" opacity=".5"/></g></svg></div>
+        <div>
+          <h1>RedactWall</h1>
+          <p>Texas FCU Administration</p>
+        </div>
+      </div>
+      <div class="statement">
+        <h2>Accept your staff invite</h2>
+        <p>Create your local RedactWall account for member data review, examiner evidence, and administration workflows.</p>
+      </div>
+      <div class="checks">
+        <div class="check"><i aria-hidden="true"></i><span>Invite tokens expire and are stored as hashes</span></div>
+        <div class="check"><i aria-hidden="true"></i><span>Role assignments are audit logged</span></div>
+        <div class="check"><i aria-hidden="true"></i><span>SCIM and SSO remain preferred for production FCUs</span></div>
+      </div>
+    </section>
+    <form id="inviteForm">
+      <h2>Set password</h2>
+      <div class="sub">Use the same staff email your administrator invited.</div>
+      <label for="displayName">Display name</label>
+      <input id="displayName" autocomplete="name" placeholder="Branch Auditor" aria-describedby="err" />
+      <label for="password">Password</label>
+      <input id="password" type="password" autocomplete="new-password" minlength="12" placeholder="At least 12 characters" aria-describedby="err" />
+      <label for="confirm">Confirm password</label>
+      <input id="confirm" type="password" autocomplete="new-password" minlength="12" aria-describedby="err" />
+      <button id="submit" type="submit">Accept invite</button>
+      <div class="err" id="err" role="alert" aria-live="polite"></div>
+      <div class="note">For Texas FCU production rollout, Microsoft Entra ID or Okta provisioning should remain the primary access path.</div>
+    </form>
+    <section class="success" id="success" hidden aria-live="polite">
+      <h2>Invite accepted</h2>
+      <div class="sub" id="acceptedUser">Your RedactWall account is ready.</div>
+      <a class="button" id="loginLink" href="/login.html">Sign in</a>
+      <div class="note">Your administrator can adjust role and license assignment from Administration.</div>
+    </section>
+  </main>
+<script src="/accept-invite.js" defer></script>
+</body>
+</html>

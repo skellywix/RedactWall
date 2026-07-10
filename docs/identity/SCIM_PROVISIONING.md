@@ -67,9 +67,9 @@ Group display names map onto the existing RedactWall route roles:
 | `operator` | `RedactWall Operators`, `RedactWall Ops`, `Operators`, `Ops` |
 
 Direct SCIM `roles` values can also set one of the same normalized role names.
-If no direct or group role matches, the user resource returns `auditor` as the
-safe default. OIDC login uses this effective role after the ID token is validated
-and the user is confirmed active in SCIM.
+If no direct or group role matches, the user resource returns an empty `roles`
+array and OIDC login is denied. OIDC uses the effective assigned role only after
+the ID token is validated and the user is confirmed active in SCIM.
 
 The same provisioned group membership can also drive `approvalRoutingRules`.
 For example, a rule with `groups: ["RedactWall Legal"]` and
@@ -92,6 +92,8 @@ OIDC_ISSUER=https://login.customer.example/<tenant-or-org>
 OIDC_CLIENT_ID=<registered-web-client-id>
 OIDC_CLIENT_SECRET=<32-plus-random-characters>
 OIDC_REDIRECT_URI=https://redactwall.customer.example/auth/oidc/callback
+# IdP-specific assurance classes that prove MFA, separated by spaces.
+OIDC_STEP_UP_ACR_VALUES=<optional-approved-mfa-acr-values>
 ```
 
 `REDACTWALL_OIDC_*` aliases are accepted for each value. RedactWall discovers
@@ -105,17 +107,28 @@ OIDC_TOKEN_ENDPOINT=https://login.customer.example/oauth2/v2.0/token
 OIDC_JWKS_URI=https://login.customer.example/discovery/v2.0/keys
 ```
 
+Configure every OIDC URL as a plain origin/path without embedded credentials,
+query parameters, or fragments. RedactWall rejects fixed query strings on all
+OIDC URLs, including the issuer and callback, so provider parameters are added
+only by the audited authorization-code flow. Production OIDC URLs require
+HTTPS; local development may use HTTP for an explicit loopback issuer.
+
 The login bridge uses authorization-code flow with `openid email profile`,
 stores state and nonce in a short-lived HttpOnly state cookie, validates RS256
-ID-token signatures through JWKS, checks issuer, audience, expiry, nonce, and
-subject claims, and maps `preferred_username`, `upn`, `unique_name`, and (only
-when the IdP asserts `email_verified`) `email` to an active SCIM `userName`. Token values and client secrets are never written
-to audit entries.
+ID-token signatures through JWKS, and checks issuer, audience, expiry, nonce,
+and subject claims. Login authorization requires the signed OIDC `sub` to
+exactly match one active SCIM user's `externalId`. Configure the identity
+provider's SCIM mapping so `externalId` carries the same immutable subject used
+in that RedactWall OIDC client. Mutable username and email claims are display
+metadata only and never grant a role. Token values and client secrets are never
+written to audit entries.
 
-Fresh OIDC sessions include a short step-up window when the ID token contains a
-recent `auth_time` claim. That lets routed approvers and Security Admins use the
-existing approve/reveal gates immediately after IdP authentication while local
-break-glass accounts still use password confirmation.
+Fresh OIDC sessions include a short step-up window only when the ID token has a
+recent `auth_time` and proves strong assurance with `amr=mfa` or an exact `acr`
+listed in `OIDC_STEP_UP_ACR_VALUES`. The console's privileged-action flow asks
+the IdP for fresh authentication and the configured assurance class. A recent
+password-only login never unlocks approve or reveal. Local break-glass accounts
+continue to use password confirmation.
 
 ## Example Smoke Test
 

@@ -8,7 +8,9 @@
 const crypto = require('crypto');
 const express = require('express');
 const db = require('./db');
+const auth = require('./auth');
 const roles = require('./roles');
+const { opaqueReference } = require('./audit-reference');
 
 const USER_SCHEMA = 'urn:ietf:params:scim:schemas:core:2.0:User';
 const GROUP_SCHEMA = 'urn:ietf:params:scim:schemas:core:2.0:Group';
@@ -93,6 +95,19 @@ function roleFromScimRoles(scimRoles = []) {
   return '';
 }
 
+function hasOwn(object, key) {
+  return Object.prototype.hasOwnProperty.call(object, key);
+}
+
+function directRoleFromUserBody(body = {}, existing = {}, replace = false) {
+  if (hasOwn(body, 'roles')) {
+    const role = roleFromScimRoles(body.roles);
+    if (role || !hasOwn(body, 'role')) return role;
+  }
+  if (hasOwn(body, 'role')) return roles.normalizeRole(body.role);
+  return replace ? '' : (existing.role || '');
+}
+
 // `groups` may be a pre-loaded db.listScimGroups() result so list handlers can
 // resolve N users without re-scanning the group table per user (avoids 2N loads).
 function groupMembersForUser(userId, groups) {
@@ -108,7 +123,7 @@ function effectiveUserRole(user, groups) {
     const role = roleFromDisplayName(group.display);
     if (role) return role;
   }
-  return roles.AUDITOR;
+  return '';
 }
 
 function userResource(req, user, groups) {
@@ -123,7 +138,7 @@ function userResource(req, user, groups) {
     displayName: user.displayName || user.userName,
     active: user.active !== false,
     groups: groupRefs,
-    roles: [{ value: role, display: role, primary: true }],
+    roles: role ? [{ value: role, display: role, primary: true }] : [],
     meta: {
       resourceType: 'User',
       created: user.createdAt,
@@ -189,27 +204,40 @@ function normalizeMembers(input) {
   return members;
 }
 
-function normalizeUserBody(body = {}, existing = {}) {
-  const userName = cleanString(body.userName || existing.userName, 256);
+function normalizeUserBody(body = {}, existing = {}, { replace = false } = {}) {
+  const userName = cleanString(replace ? body.userName : (body.userName || existing.userName), 256);
   if (!userName) return null;
+  const externalId = hasOwn(body, 'externalId')
+    ? cleanString(body.externalId, 256)
+    : (replace ? '' : cleanString(existing.externalId, 256));
+  const displayName = hasOwn(body, 'displayName')
+    ? cleanString(body.displayName, 256)
+    : (replace ? '' : cleanString(existing.displayName, 256));
   return {
     id: existing.id,
-    externalId: cleanString(body.externalId || existing.externalId, 256) || undefined,
+    ...(existing.id ? { expectedVersion: existing.version } : {}),
+    externalId: externalId || undefined,
     userName,
-    displayName: cleanString(body.displayName || existing.displayName || userName, 256),
+    displayName: displayName || userName,
     active: body.active !== undefined ? scimBool(body.active, existing.active !== false) : existing.active !== false,
-    role: roleFromScimRoles(body.roles) || roles.normalizeRole(body.role) || existing.role || '',
+    role: directRoleFromUserBody(body, existing, replace),
   };
 }
 
-function normalizeGroupBody(body = {}, existing = {}) {
-  const displayName = cleanString(body.displayName || existing.displayName, 256);
+function normalizeGroupBody(body = {}, existing = {}, { replace = false } = {}) {
+  const displayName = cleanString(replace ? body.displayName : (body.displayName || existing.displayName), 256);
   if (!displayName) return null;
+  const externalId = hasOwn(body, 'externalId')
+    ? cleanString(body.externalId, 256)
+    : (replace ? '' : cleanString(existing.externalId, 256));
   return {
     id: existing.id,
-    externalId: cleanString(body.externalId || existing.externalId, 256) || undefined,
+    ...(existing.id ? { expectedVersion: existing.version } : {}),
+    externalId: externalId || undefined,
     displayName,
-    members: body.members ? normalizeMembers(body.members) : (existing.members || []),
+    members: hasOwn(body, 'members')
+      ? normalizeMembers(body.members)
+      : (replace ? [] : (existing.members || [])),
   };
 }
 
@@ -219,14 +247,23 @@ function applyUserPatch(user, operations = []) {
     const path = cleanString(op.path || '', 80).toLowerCase();
     const kind = cleanString(op.op || 'replace', 20).toLowerCase();
     if ((kind === 'replace' || kind === 'add') && !path && op.value && typeof op.value === 'object' && !Array.isArray(op.value)) {
-      if (Object.prototype.hasOwnProperty.call(op.value, 'active')) next.active = scimBool(op.value.active, next.active !== false);
+      if (hasOwn(op.value, 'active')) next.active = scimBool(op.value.active, next.active !== false);
+      if (op.value.userName) next.userName = cleanString(op.value.userName, 256) || next.userName;
       if (op.value.displayName) next.displayName = cleanString(op.value.displayName, 256) || next.displayName;
-      if (op.value.roles) next.role = roleFromScimRoles(op.value.roles) || next.role;
+      if (hasOwn(op.value, 'roles')) {
+        const role = roleFromScimRoles(op.value.roles);
+        next.role = kind === 'replace' ? role : (role || next.role);
+      }
       continue;
     }
     if ((kind === 'replace' || kind === 'add') && path === 'active') next.active = scimBool(op.value, next.active !== false);
+    if ((kind === 'replace' || kind === 'add') && path === 'username') next.userName = cleanString(op.value, 256) || next.userName;
     if ((kind === 'replace' || kind === 'add') && path === 'displayname') next.displayName = cleanString(op.value, 256) || next.displayName;
-    if ((kind === 'replace' || kind === 'add') && path === 'roles') next.role = roleFromScimRoles(op.value) || next.role;
+    if ((kind === 'replace' || kind === 'add') && path === 'roles') {
+      const role = roleFromScimRoles(op.value);
+      next.role = kind === 'replace' ? role : (role || next.role);
+    }
+    if (kind === 'remove' && path === 'roles') next.role = '';
   }
   return next;
 }
@@ -254,6 +291,14 @@ function memberValuesFromPatch(path, value) {
   return single ? [single] : [];
 }
 
+function applyMemberWrite(current, value, kind) {
+  const incoming = normalizeMembers(value);
+  if (kind === 'replace') return incoming;
+  const byValue = new Map(current.map((member) => [member.value, member]));
+  for (const member of incoming) byValue.set(member.value, member);
+  return Array.from(byValue.values());
+}
+
 function applyGroupPatch(group, operations = []) {
   let members = normalizeMembers(group.members || []);
   const next = { ...group };
@@ -263,20 +308,11 @@ function applyGroupPatch(group, operations = []) {
     const kind = cleanString(op.op || 'replace', 20).toLowerCase();
     if ((kind === 'replace' || kind === 'add') && !path && op.value && typeof op.value === 'object' && !Array.isArray(op.value)) {
       if (op.value.displayName) next.displayName = cleanString(op.value.displayName, 256) || next.displayName;
-      if (op.value.members) {
-        const byValue = new Map(members.map((member) => [member.value, member]));
-        for (const member of normalizeMembers(op.value.members)) byValue.set(member.value, member);
-        members = Array.from(byValue.values());
-      }
+      if (hasOwn(op.value, 'members')) members = applyMemberWrite(members, op.value.members, kind);
       continue;
     }
     if ((kind === 'replace' || kind === 'add') && path === 'displayname') next.displayName = cleanString(op.value, 256) || next.displayName;
-    if ((kind === 'replace' || kind === 'add') && (!path || path === 'members')) {
-      const incoming = normalizeMembers(op.value);
-      const byValue = new Map(members.map((member) => [member.value, member]));
-      for (const member of incoming) byValue.set(member.value, member);
-      members = Array.from(byValue.values());
-    }
+    if ((kind === 'replace' || kind === 'add') && path === 'members') members = applyMemberWrite(members, op.value, kind);
     if (kind === 'remove' && path.startsWith('members')) {
       const values = memberValuesFromPatch(rawPath, op.value);
       if (values.length) members = members.filter((member) => !values.includes(member.value));
@@ -291,8 +327,13 @@ function patchOperations(body = {}) {
   return Array.isArray(body.Operations) ? body.Operations : [];
 }
 
-function audit(action, actor, detail) {
-  db.appendAudit({ action, actor: actor || 'scim', detail: cleanString(detail, 512) });
+function userAuditDetail(user) {
+  return `userRef=${opaqueReference('scim_user', user && (user.id || user.userName))}; active=${user && user.active !== false}`;
+}
+
+function groupAuditDetail(group) {
+  const memberCount = Array.isArray(group && group.members) ? group.members.length : 0;
+  return `groupRef=${opaqueReference('scim_group', group && (group.id || group.displayName))}; members=${memberCount}`;
 }
 
 function conflict(detail) {
@@ -304,6 +345,7 @@ function saveOrConflict(res, detail, fn) {
     return fn();
   } catch (err) {
     if (err && (err.code === 'SQLITE_CONSTRAINT_UNIQUE' || err.code === '23505'
+      || err.code === 'IDENTITY_ALREADY_EXISTS' || err.code === 'IDENTITY_WRITE_CONFLICT'
       || /UNIQUE constraint failed/i.test(err.message || '')
       || /duplicate key value violates unique constraint/i.test(err.message || ''))) {
       res.status(409).json(conflict(detail));
@@ -311,6 +353,37 @@ function saveOrConflict(res, detail, fn) {
     }
     throw err;
   }
+}
+
+function normalizedUserName(value) {
+  return cleanString(value, 256).toLowerCase();
+}
+
+function userNameCollisions(userName, currentScimUser = null) {
+  const normalized = normalizedUserName(userName);
+  const scimUser = db.getScimUserByUserName(normalized);
+  return {
+    staticAccount: auth.listStaticAccounts().some((account) => normalizedUserName(account.user) === normalized),
+    localAccount: !!db.getAdminUserByUserName(normalized),
+    otherScimUser: !!(scimUser && (!currentScimUser || scimUser.id !== currentScimUser.id)),
+  };
+}
+
+function rejectUserNameCollision(res, nextUser, currentScimUser = null) {
+  const collisions = userNameCollisions(nextUser.userName, currentScimUser);
+  if (!collisions.staticAccount && !collisions.localAccount && !collisions.otherScimUser) return false;
+
+  // Legacy deployments may already contain a duplicate. Permit only an update
+  // that keeps that exact SCIM username inactive, so an IdP can deprovision it;
+  // active updates and moves onto another credential source remain rejected.
+  const deactivatingPreexistingDuplicate = !!currentScimUser
+    && normalizedUserName(currentScimUser.userName) === normalizedUserName(nextUser.userName)
+    && nextUser.active === false
+    && !collisions.otherScimUser;
+  if (deactivatingPreexistingDuplicate) return false;
+
+  res.status(409).json(conflict('userName already exists in another authentication source'));
+  return true;
 }
 
 function router() {
@@ -344,10 +417,13 @@ function router() {
   r.post('/Users', (req, res) => {
     const user = normalizeUserBody(req.body || {});
     if (!user) return res.status(400).json(scimError(400, 'userName is required', 'invalidValue'));
-    if (db.getScimUserByUserName(user.userName)) return res.status(409).json(conflict('userName already exists'));
-    const saved = saveOrConflict(res, 'userName already exists', () => db.saveScimUser(user));
-    if (!saved) return;
-    audit('SCIM_USER_UPSERTED', 'scim', `user=${saved.userName}; active=${saved.active}`);
+    if (rejectUserNameCollision(res, user)) return;
+    const outcome = saveOrConflict(res, 'userName already exists', () => db.mutateWithAudit(
+      () => db.saveScimUser(user),
+      (saved) => ({ action: 'SCIM_USER_UPSERTED', actor: 'scim', detail: userAuditDetail(saved) }),
+    ));
+    if (!outcome) return;
+    const saved = outcome.result;
     res.status(201).json(userResource(req, saved));
   });
 
@@ -360,27 +436,38 @@ function router() {
   r.put('/Users/:id', (req, res) => {
     const existing = db.getScimUser(req.params.id);
     if (!existing) return res.status(404).json(scimError(404, 'user not found'));
-    const user = normalizeUserBody(req.body || {}, existing);
+    const user = normalizeUserBody(req.body || {}, existing, { replace: true });
     if (!user) return res.status(400).json(scimError(400, 'userName is required', 'invalidValue'));
-    const saved = saveOrConflict(res, 'userName already exists', () => db.saveScimUser(user));
-    if (!saved) return;
-    audit('SCIM_USER_UPSERTED', 'scim', `user=${saved.userName}; active=${saved.active}`);
+    if (rejectUserNameCollision(res, user, existing)) return;
+    const outcome = saveOrConflict(res, 'userName already exists', () => db.mutateWithAudit(
+      () => db.saveScimUser(user),
+      (saved) => ({ action: 'SCIM_USER_UPSERTED', actor: 'scim', detail: userAuditDetail(saved) }),
+    ));
+    if (!outcome) return;
+    const saved = outcome.result;
     res.json(userResource(req, saved));
   });
 
   r.patch('/Users/:id', (req, res) => {
     const existing = db.getScimUser(req.params.id);
     if (!existing) return res.status(404).json(scimError(404, 'user not found'));
-    const saved = saveOrConflict(res, 'userName already exists', () => db.saveScimUser(applyUserPatch(existing, patchOperations(req.body))));
-    if (!saved) return;
-    audit('SCIM_USER_PATCHED', 'scim', `user=${saved.userName}; active=${saved.active}`);
+    const user = applyUserPatch(existing, patchOperations(req.body));
+    if (rejectUserNameCollision(res, user, existing)) return;
+    const outcome = saveOrConflict(res, 'userName already exists', () => db.mutateWithAudit(
+      () => db.saveScimUser(user),
+      (saved) => ({ action: 'SCIM_USER_PATCHED', actor: 'scim', detail: userAuditDetail(saved) }),
+    ));
+    if (!outcome) return;
+    const saved = outcome.result;
     res.json(userResource(req, saved));
   });
 
   r.delete('/Users/:id', (req, res) => {
-    const saved = db.deactivateScimUser(req.params.id);
+    const { result: saved } = db.mutateWithAudit(
+      () => db.deactivateScimUser(req.params.id),
+      (deactivated) => ({ action: 'SCIM_USER_DEACTIVATED', actor: 'scim', detail: userAuditDetail(deactivated) }),
+    );
     if (!saved) return res.status(404).json(scimError(404, 'user not found'));
-    audit('SCIM_USER_DEACTIVATED', 'scim', `user=${saved.userName}`);
     res.status(204).end();
   });
 
@@ -393,9 +480,12 @@ function router() {
     const group = normalizeGroupBody(req.body || {});
     if (!group) return res.status(400).json(scimError(400, 'displayName is required', 'invalidValue'));
     if (db.getScimGroupByDisplayName(group.displayName)) return res.status(409).json(conflict('displayName already exists'));
-    const saved = saveOrConflict(res, 'displayName already exists', () => db.saveScimGroup(group));
-    if (!saved) return;
-    audit('SCIM_GROUP_UPSERTED', 'scim', `group=${saved.displayName}; members=${saved.members.length}`);
+    const outcome = saveOrConflict(res, 'displayName already exists', () => db.mutateWithAudit(
+      () => db.saveScimGroup(group),
+      (saved) => ({ action: 'SCIM_GROUP_UPSERTED', actor: 'scim', detail: groupAuditDetail(saved) }),
+    ));
+    if (!outcome) return;
+    const saved = outcome.result;
     res.status(201).json(groupResource(req, saved));
   });
 
@@ -408,27 +498,35 @@ function router() {
   r.put('/Groups/:id', (req, res) => {
     const existing = db.getScimGroup(req.params.id);
     if (!existing) return res.status(404).json(scimError(404, 'group not found'));
-    const group = normalizeGroupBody(req.body || {}, existing);
+    const group = normalizeGroupBody(req.body || {}, existing, { replace: true });
     if (!group) return res.status(400).json(scimError(400, 'displayName is required', 'invalidValue'));
-    const saved = saveOrConflict(res, 'displayName already exists', () => db.saveScimGroup(group));
-    if (!saved) return;
-    audit('SCIM_GROUP_UPSERTED', 'scim', `group=${saved.displayName}; members=${saved.members.length}`);
+    const outcome = saveOrConflict(res, 'displayName already exists', () => db.mutateWithAudit(
+      () => db.saveScimGroup(group),
+      (saved) => ({ action: 'SCIM_GROUP_UPSERTED', actor: 'scim', detail: groupAuditDetail(saved) }),
+    ));
+    if (!outcome) return;
+    const saved = outcome.result;
     res.json(groupResource(req, saved));
   });
 
   r.patch('/Groups/:id', (req, res) => {
     const existing = db.getScimGroup(req.params.id);
     if (!existing) return res.status(404).json(scimError(404, 'group not found'));
-    const saved = saveOrConflict(res, 'displayName already exists', () => db.saveScimGroup(applyGroupPatch(existing, patchOperations(req.body))));
-    if (!saved) return;
-    audit('SCIM_GROUP_PATCHED', 'scim', `group=${saved.displayName}; members=${saved.members.length}`);
+    const outcome = saveOrConflict(res, 'displayName already exists', () => db.mutateWithAudit(
+      () => db.saveScimGroup(applyGroupPatch(existing, patchOperations(req.body))),
+      (saved) => ({ action: 'SCIM_GROUP_PATCHED', actor: 'scim', detail: groupAuditDetail(saved) }),
+    ));
+    if (!outcome) return;
+    const saved = outcome.result;
     res.json(groupResource(req, saved));
   });
 
   r.delete('/Groups/:id', (req, res) => {
-    const deleted = db.deleteScimGroup(req.params.id);
+    const { result: deleted } = db.mutateWithAudit(
+      () => db.deleteScimGroup(req.params.id),
+      (removed) => ({ action: 'SCIM_GROUP_DELETED', actor: 'scim', detail: groupAuditDetail(removed) }),
+    );
     if (!deleted) return res.status(404).json(scimError(404, 'group not found'));
-    audit('SCIM_GROUP_DELETED', 'scim', `group=${deleted.displayName}`);
     res.status(204).end();
   });
 
@@ -446,6 +544,7 @@ module.exports = {
   LIST_SCHEMA,
   PATCH_SCHEMA,
   _internal: {
+    rejectUserNameCollision,
     saveOrConflict,
   },
 };

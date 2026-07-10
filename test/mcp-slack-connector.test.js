@@ -24,16 +24,13 @@ function headers(values = {}) {
 
 function response(text, opts = {}) {
   const status = opts.status || 200;
-  return {
-    ok: status >= 200 && status < 300,
+  return new Response(text, {
     status,
-    headers: headers({
+    headers: {
       'content-type': opts.contentType || 'text/plain; charset=utf-8',
       'content-length': opts.contentLength || String(Buffer.byteLength(text, 'utf8')),
-    }),
-    text: async () => text,
-    json: async () => JSON.parse(text),
-  };
+    },
+  });
 }
 
 function jsonResponse(body, opts = {}) {
@@ -127,7 +124,7 @@ test('sanitizeConversationHistory redacts Slack message text before returning MC
       ],
     }),
     guardOptions: {
-      server: 'http://redactwall.test',
+      server: 'https://redactwall.test',
       key: 'unit-ingest-key',
       policy: { ignore: [], disabledDetectors: [] },
       fetchImpl: async (url, opts = {}) => {
@@ -142,7 +139,7 @@ test('sanitizeConversationHistory redacts Slack message text before returning MC
   assert.ok(sanitized.findings.includes('CREDIT_CARD'));
   assert.ok(!JSON.stringify(sanitized.result).includes('524-71-9043'));
   assert.ok(!JSON.stringify(sanitized.result).includes('4111 1111 1111 1111'));
-  assert.strictEqual(outbound.url, 'http://redactwall.test/api/v1/gate');
+  assert.strictEqual(outbound.url, 'https://redactwall.test/api/v1/gate');
   assert.strictEqual(outbound.body.destination, 'slack.conversations.history');
   assert.strictEqual(outbound.body.source, 'mcp_guard');
   assert.ok(!JSON.stringify(outbound.body).includes('fixture-unit-slack-token'));
@@ -272,7 +269,7 @@ test('sanitizeSlackFileContent and file tool return sanitized MCP results only',
       return response('Slack file includes SSN 524-71-9043.');
     },
     guardOptions: {
-      server: 'http://redactwall.test',
+      server: 'https://redactwall.test',
       key: 'unit-ingest-key',
       policy: { ignore: [], disabledDetectors: [] },
       fetchImpl: async (url, request = {}) => {
@@ -350,4 +347,19 @@ test('Slack connector errors, text extraction, URL allowlist, and health evidenc
   assert.ok(!JSON.stringify(check).includes('should-not-appear'));
   assert.deepStrictEqual(slackScopes({ env: {} }), ['channels:history', 'groups:history', 'files:read']);
   assert.deepStrictEqual(slackScopes({ env: { SLACK_SCOPES: 'channels:history,files:read' } }), ['channels:history', 'files:read']);
+});
+
+test('Slack API JSON enforces declared response bounds before parsing', async () => {
+  let jsonCalled = false;
+  await assert.rejects(() => fetchConversationHistory({ channel: 'C123' }, {
+    accessToken: 'fixture-unit-slack-token',
+    maxJsonBytes: 16,
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      headers: headers({ 'content-length': '50000000' }),
+      json: async () => { jsonCalled = true; return { ok: true, messages: [] }; },
+    }),
+  }), /exceeds 16 byte limit/);
+  assert.strictEqual(jsonCalled, false);
 });

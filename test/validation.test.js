@@ -21,7 +21,8 @@ const { listen, loopbackHttpFetch } = require('./support/listen');
 const db = require('../server/db');
 const coverage = require('../server/coverage');
 const posture = require('../server/posture');
-const { validationFields, sanitizeStoredNote } = require('../server/validation');
+const validation = require('../server/validation');
+const { validationFields, sanitizeStoredNote } = validation;
 
 
 function close(server) {
@@ -90,6 +91,30 @@ test('sanitizeStoredNote masks routing-code identifiers and strips control chars
   assert.strictEqual(sanitizeStoredNote('a' + String.fromCharCode(9) + String.fromCharCode(0) + 'b'), 'a b');
   assert.strictEqual(sanitizeStoredNote('download_blocked'), 'download_blocked');
   assert.strictEqual(sanitizeStoredNote(null), '');
+});
+
+test('seat assignment accepts generated opaque directory ids without allowing sensitive prose', () => {
+  const base = { reason: 'atomic seat proof' };
+  assert.strictEqual(validation.adminSeatAssignmentSchema.safeParse({
+    ...base,
+    userKey: 'local:au_123456789abcdef0',
+  }).success, true, 'a valid random local id may contain a nine-digit run');
+  assert.strictEqual(validation.adminSeatAssignmentSchema.safeParse({
+    ...base,
+    userKey: 'scim:su_0123456789abcdef',
+  }).success, true, 'generated SCIM ids use the same opaque grammar');
+  assert.strictEqual(validation.adminSeatAssignmentSchema.safeParse({
+    ...base,
+    userKey: 'member@example.test',
+  }).success, true, 'ordinary non-sensitive identities remain valid');
+  assert.strictEqual(validation.adminSeatAssignmentSchema.safeParse({
+    ...base,
+    userKey: 'local:au_123456789',
+  }).success, false, 'a malformed prefix cannot launder a routing-code-shaped value');
+  assert.strictEqual(validation.adminSeatAssignmentSchema.safeParse({
+    ...base,
+    userKey: 'member-123-45-6789',
+  }).success, false, 'ordinary sensitive identifiers remain rejected');
 });
 
 test('gate rejects invalid client analysis without echoing prompt values', async () => withServer(async (port) => {
@@ -296,6 +321,128 @@ test('sensor metadata validation rejects oversized values without echoing them',
   const body = await res.json();
   assert.ok(body.fields.includes('sensor.version'));
   assert.ok(!JSON.stringify(body).includes(tooLong));
+}));
+
+test('sensor routing metadata rejects regulated identifiers without persisting them', async () => withServer(async (port) => {
+  const secret = '524-71-9043';
+  const beforeQueries = db.listQueries({ all: true }).length;
+  const beforeAudit = db.listAudit(5000).length;
+  const cases = [
+    ['user', `analyst-${secret}@example.test`],
+    ['destination', `chatgpt-${secret}.example`],
+    ['source', `browser_${secret}`],
+    ['channel', `submit_${secret}`],
+    ['orgId', secret],
+    ['sourceIp', secret],
+    ['source', 'browser_sk-proj-abcdefghijklmnopqrstuvwxyz1234567890'],
+  ];
+
+  for (const [field, value] of cases) {
+    const res = await jsonFetch(port, '/api/v1/gate', {
+      headers: { 'x-api-key': 'unit-ingest-key' },
+      body: {
+        prompt: 'Draft a generic branch announcement.',
+        user: 'analyst@example.test',
+        destination: 'chatgpt.com',
+        source: 'browser_extension',
+        channel: 'submit',
+        [field]: value,
+      },
+    });
+    assert.strictEqual(res.status, 400, `${field} should reject regulated identifiers`);
+    const body = await res.json();
+    assert.ok(body.fields.includes(field));
+    assert.ok(!JSON.stringify(body).includes(secret));
+  }
+
+  assert.strictEqual(db.listQueries({ all: true }).length, beforeQueries);
+  assert.strictEqual(db.listAudit(5000).length, beforeAudit);
+}));
+
+test('sensor tenant and IP metadata use strict shapes across every ingest schema', async () => {
+  const secret = '524-71-9043';
+  const invalidCases = [
+    [validation.gateSchema, { prompt: 'Public branch hours.', orgId: secret }],
+    [validation.gateSchema, { prompt: 'Public branch hours.', sourceIp: secret }],
+    [validation.scanFileSchema, { filename: 'public.txt', contentBase64: Buffer.from('public').toString('base64'), orgId: secret }],
+    [validation.scanResponseSchema, { text: 'Public response.', orgId: secret }],
+    [validation.heartbeatSchema, { orgId: secret }],
+    [validation.aiDiscoverySchema, { orgId: secret, sightings: [{ destination: 'chatgpt.com' }] }],
+    [validation.aiDiscoverySchema, { sightings: [{ destination: 'chatgpt.com', orgId: secret }] }],
+  ];
+  for (const [schema, input] of invalidCases) {
+    assert.strictEqual(schema.safeParse(input).success, false, JSON.stringify(input));
+  }
+
+  for (const sourceIp of ['192.0.2.44', '2001:db8::44', '::ffff:192.0.2.44']) {
+    const parsed = validation.gateSchema.safeParse({
+      prompt: 'Public branch hours.',
+      orgId: 'cu-acme',
+      sourceIp,
+    });
+    assert.strictEqual(parsed.success, true, sourceIp);
+    assert.strictEqual(parsed.data.orgId, 'cu-acme');
+    assert.strictEqual(parsed.data.sourceIp, sourceIp);
+  }
+  for (const input of [
+    { prompt: 'Public branch hours.', orgId: 'CU ACME' },
+    { prompt: 'Public branch hours.', orgId: 'a' },
+    { prompt: 'Public branch hours.', sourceIp: 'client.internal' },
+    { prompt: 'Public branch hours.', sourceIp: '192.0.2.44:443' },
+  ]) {
+    assert.strictEqual(validation.gateSchema.safeParse(input).success, false, JSON.stringify(input));
+  }
+});
+
+test('validated tenant and IP metadata persist without mutation', async () => withServer(async (port) => {
+  const res = await jsonFetch(port, '/api/v1/gate', {
+    headers: { 'x-api-key': 'unit-ingest-key' },
+    body: {
+      prompt: 'Draft a public branch-hours announcement.',
+      user: 'analyst@example.test',
+      destination: 'chatgpt.com',
+      source: 'browser_extension',
+      channel: 'submit',
+      orgId: 'cu-validation',
+      sourceIp: '192.0.2.44',
+    },
+  });
+  assert.strictEqual(res.status, 200);
+  const body = await res.json();
+  const stored = db.getQuery(body.id);
+  assert.strictEqual(stored.orgId, 'cu-validation');
+  assert.strictEqual(stored.sourceIp, '192.0.2.44');
+}));
+
+test('nested sensor metadata rejects regulated identifiers without persisting them', async () => withServer(async (port) => {
+  const secret = '524-71-9043';
+  const beforeQueries = db.listQueries({ all: true }).length;
+  const beforeAudit = db.listAudit(5000).length;
+  for (const field of ['name', 'version', 'packageVersion', 'platform']) {
+    const res = await jsonFetch(port, '/api/v1/gate', {
+      headers: { 'x-api-key': 'unit-ingest-key' },
+      body: {
+        prompt: 'Draft a generic branch announcement.',
+        user: 'analyst@example.test',
+        destination: 'chatgpt.com',
+        source: 'browser_extension',
+        channel: 'submit',
+        sensor: {
+          name: 'browser_extension',
+          version: '0.3.0',
+          platform: 'chrome_mv3',
+          [field]: `sensor-${secret}`,
+        },
+      },
+    });
+    assert.strictEqual(res.status, 400, `sensor.${field} should reject regulated identifiers`);
+    const body = await res.json();
+    assert.ok(body.fields.includes(`sensor.${field}`));
+    assert.ok(!JSON.stringify(body).includes(secret));
+  }
+
+  assert.strictEqual(db.listQueries({ all: true }).length, beforeQueries);
+  assert.strictEqual(db.listAudit(5000).length, beforeAudit);
 }));
 
 test('sensor metadata validation rejects unknown fields without echoing them', async () => withServer(async (port) => {
@@ -792,8 +939,10 @@ test('gate accepts blocked browser downloads without retaining URLs or filenames
   assert.ok(db.listAudit(20).some((entry) => entry.action === 'BROWSER_ACTION_BLOCKED' && entry.detail === 'browser_extension/download: chatgpt.com'));
 }));
 
-test('gate sanitizes malformed browser action labels without retaining channel text', async () => withServer(async (port) => {
+test('gate rejects malformed browser action labels without retaining channel text', async () => withServer(async (port) => {
   const secret = '524-71-9043';
+  const beforeQueries = db.listQueries({ all: true }).length;
+  const beforeAudit = db.listAudit(5000).length;
   const res = await jsonFetch(port, '/api/v1/gate', {
     headers: { 'x-api-key': 'unit-ingest-key' },
     body: {
@@ -806,15 +955,12 @@ test('gate sanitizes malformed browser action labels without retaining channel t
     },
   });
 
-  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.status, 400);
   const body = await res.json();
-  assert.strictEqual(body.status, 'action_blocked');
+  assert.ok(body.fields.includes('channel'));
   assert.ok(!JSON.stringify(body).includes(secret));
-
-  const stored = db.getQuery(body.id);
-  assert.strictEqual(stored.channel, 'browser_action');
-  assert.ok(!JSON.stringify(stored).includes(secret));
-  assert.ok(!db.listAudit(20).some((entry) => String(entry.detail || '').includes(secret)));
+  assert.strictEqual(db.listQueries({ all: true }).length, beforeQueries);
+  assert.strictEqual(db.listAudit(5000).length, beforeAudit);
 }));
 
 test('gate records endpoint clipboard action blocks with masked client evidence', async () => withServer(async (port) => {
@@ -1502,6 +1648,12 @@ test('admin auth accepts legacy session cookie during RedactWall migration', asy
   assert.ok(setCookie.includes('redactwall_session='));
   assert.ok(setCookie.includes('promptwall_session='));
   assert.ok(setCookie.includes('sentinel_session='));
+
+  const replay = await jsonFetch(port, '/api/me', {
+    method: 'GET',
+    headers: { cookie: legacyCookie },
+  });
+  assert.strictEqual(replay.status, 401, 'logout invalidates replay of the signed session token');
 }));
 
 test('malformed json returns sanitized json error', async () => withServer(async (port) => {
@@ -2053,7 +2205,7 @@ test('admin destination review validates, persists, and audits decisions', async
       body: {
         destination: 'https://www.Poe.com/chat',
         decision: 'allow',
-        reason: 'Approved for vendor evaluation pilot',
+        reason: 'Approved member SSN 524-71-9043 with reviewer@example.test for vendor evaluation',
       },
     });
     assert.strictEqual(res.status, 200);
@@ -2066,7 +2218,24 @@ test('admin destination review validates, persists, and audits decisions', async
     assert.ok(body.coverage);
     const reviewAudit = db.listAudit(20).find((entry) => entry.action === 'DESTINATION_REVIEWED');
     assert.ok(reviewAudit);
-    assert.strictEqual(JSON.parse(reviewAudit.detail).reason, 'Approved for vendor evaluation pilot');
+    const auditReason = JSON.parse(reviewAudit.detail).reason;
+    assert.strictEqual(auditReason, 'Approved member SSN [US_SSN] with [EMAIL_ADDRESS] for vendor evaluation');
+    assert.ok(!reviewAudit.detail.includes('524-71-9043'));
+    assert.ok(!reviewAudit.detail.includes('reviewer@example.test'));
+
+    const confidentialReason = 'Do not forward: we are switching our card processor and terminating the current vendor.';
+    const categoryOnly = await jsonFetch(port, '/api/destinations/review', {
+      headers: { cookie, 'x-csrf-token': csrfToken },
+      body: { destination: 'perplexity.ai', decision: 'govern', reason: confidentialReason },
+    });
+    assert.strictEqual(categoryOnly.status, 200);
+    const categoryAudit = db.listAudit(20).find((entry) => (
+      entry.action === 'DESTINATION_REVIEWED'
+      && JSON.parse(entry.detail).reason === '[REDACTED: CONFIDENTIAL_BUSINESS]'
+    ));
+    assert.ok(categoryAudit);
+    assert.ok(!categoryAudit.detail.includes('card processor'));
+    assert.ok(!categoryAudit.detail.includes('terminating the current vendor'));
   } finally {
     fs.writeFileSync(policyPath, originalPolicy);
   }

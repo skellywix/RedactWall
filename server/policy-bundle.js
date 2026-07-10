@@ -1,93 +1,249 @@
 'use strict';
-/**
- * Signed, versioned sensor policy bundles.
- *
- * Sensors currently fetch plain policy from /api/v1/policy. A bundle wraps the
- * sensor-safe policy with a version, issue time, and expiry, and signs it with
- * an Ed25519 key. Sensors verify with the PUBLIC key (no shared secret needed),
- * and FAIL CLOSED — treat policy as unavailable → block — when a bundle is
- * unverifiable, tampered, or stale. This moves policy trust to the sensor edge
- * and closes the "sensor trusts whatever the network returns" gap.
- *
- * The private key is persisted under the data dir (0600), like the session
- * secret; the public key is published via /api/v1/policy/pubkey and distributed
- * to sensors.
- */
+/** Durable Ed25519 signing for versioned sensor policy bundles. */
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { withFileMutationLockSync } = require('./file-mutation-lock');
+const {
+  assertPrivatePath,
+  securePrivatePath,
+  readBoundedRegularFile,
+  publishFileExclusiveDurably,
+  withPrivateDirectoryMutationLockSync,
+} = require('./private-path');
 
-const DATA_DIR = process.env.REDACTWALL_DATA_DIR || process.env.PROMPTWALL_DATA_DIR || process.env.SENTINEL_DATA_DIR || path.join(__dirname, '..', 'data');
-const KEY_FILE = path.join(DATA_DIR, '.policy-bundle-key.pem');
 const BUNDLE_VERSION = 1;
-const DEFAULT_TTL_MS = 15 * 60 * 1000; // sensors refresh well inside this window
+const DEFAULT_TTL_MS = 15 * 60 * 1000;
+const MAX_KEY_BYTES = 16 * 1024;
+const PRIVATE_INIT_LOCK_TIMEOUT_MS = 30_000;
+let cachedKeys = null;
+let cachedKeyFile = '';
 
-function loadOrCreateKeypair() {
+function dataDir(env = process.env) {
+  const configured = env.REDACTWALL_DATA_DIR || env.PROMPTWALL_DATA_DIR || env.SENTINEL_DATA_DIR;
+  if (configured) return path.resolve(configured);
+  return String(env.NODE_ENV || '').trim().toLowerCase() === 'production'
+    ? path.resolve('/data')
+    : path.join(__dirname, '..', 'data');
+}
+
+function keyFile(options = {}) {
+  return path.resolve(options.keyFile || path.join(dataDir(options.env), '.policy-bundle-key.pem'));
+}
+
+function privateSecurity(options, fsImpl, directory) {
+  return {
+    ...(options.privatePathSecurity || {}),
+    fs: fsImpl,
+    directory,
+    label: 'policy signing key',
+    ownerLabel: 'policy signing key',
+  };
+}
+
+function readPrivateKey(file, fsImpl = fs, options = {}) {
   try {
-    if (fs.existsSync(KEY_FILE)) {
-      const pem = fs.readFileSync(KEY_FILE, 'utf8');
-      const privateKey = crypto.createPrivateKey(pem);
-      return { privateKey, publicKey: crypto.createPublicKey(privateKey) };
-    }
-  } catch (e) { /* regenerate below */ }
-  const { privateKey, publicKey } = crypto.generateKeyPairSync('ed25519');
+    const security = privateSecurity(options, fsImpl, false);
+    if (options.harden === true) securePrivatePath(file, security);
+    else assertPrivatePath(file, security);
+    const pem = readBoundedRegularFile(file, {
+      ...security,
+      maxBytes: MAX_KEY_BYTES,
+    }).toString('utf8');
+    const privateKey = crypto.createPrivateKey(pem);
+    if (privateKey.asymmetricKeyType !== 'ed25519') throw new Error('policy signing key is not Ed25519');
+    return { privateKey, publicKey: crypto.createPublicKey(privateKey) };
+  } catch (error) {
+    const wrapped = new Error('policy signing key is unreadable or corrupt');
+    wrapped.code = 'POLICY_SIGNING_KEY_INVALID';
+    wrapped.cause = error;
+    throw wrapped;
+  }
+}
+
+function createPrivateKeyExclusive(file, fsImpl = fs, options = {}) {
+  const dir = path.dirname(file);
+
+  const generated = crypto.generateKeyPairSync('ed25519');
+  const pem = generated.privateKey.export({ type: 'pkcs8', format: 'pem' });
+  const temp = path.join(dir, `.${path.basename(file)}.${crypto.randomBytes(16).toString('hex')}.tmp`);
+  let fd;
   try {
-    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-    fs.writeFileSync(KEY_FILE, privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
-  } catch (e) { /* ephemeral keypair if the dir is read-only */ }
-  return { privateKey, publicKey };
+    fd = fsImpl.openSync(temp, 'wx', 0o600);
+    fsImpl.writeFileSync(fd, pem);
+    fsImpl.fsyncSync(fd);
+    fsImpl.fchmodSync(fd, 0o600);
+    fsImpl.closeSync(fd);
+    fd = undefined;
+    securePrivatePath(temp, privateSecurity(options, fsImpl, false));
+    // Hard-link publication is atomic and refuses to replace a concurrently
+    // published identity. The surrounding interprocess lock serializes normal
+    // initializers; this exclusive publication is the final collision guard.
+    publishFileExclusiveDurably(temp, file, { ...options, fs: fsImpl });
+  } finally {
+    if (fd !== undefined) { try { fsImpl.closeSync(fd); } catch {} }
+    try { fsImpl.unlinkSync(temp); } catch {}
+  }
+  securePrivatePath(file, privateSecurity(options, fsImpl, false));
+  return readPrivateKey(file, fsImpl, options);
 }
 
-let _keys = null;
-function keys() {
-  if (!_keys) _keys = loadOrCreateKeypair();
-  return _keys;
+function loadOrCreateKeypair(options = {}) {
+  const file = keyFile(options);
+  const fsImpl = options.fs || fs;
+  return withPrivateDirectoryMutationLockSync(path.dirname(file), () => {
+    return withFileMutationLockSync(file, () => {
+      try {
+        fsImpl.lstatSync(file);
+        return readPrivateKey(file, fsImpl, { ...options, harden: true });
+      } catch (error) {
+        if (!error || error.code !== 'ENOENT') throw error;
+      }
+      try {
+        return createPrivateKeyExclusive(file, fsImpl, options);
+      } catch (error) {
+        if (error && error.code === 'EEXIST') return readPrivateKey(file, fsImpl, { ...options, harden: true });
+        const wrapped = new Error('policy signing key could not be persisted');
+        wrapped.code = 'POLICY_SIGNING_KEY_UNAVAILABLE';
+        wrapped.cause = error;
+        throw wrapped;
+      }
+    }, {
+      ...options,
+      lockTimeoutMs: options.lockTimeoutMs ?? PRIVATE_INIT_LOCK_TIMEOUT_MS,
+      fs: fsImpl,
+    });
+  }, {
+    ...options,
+    ...privateSecurity(options, fsImpl, true),
+    lockTimeoutMs: options.lockTimeoutMs ?? PRIVATE_INIT_LOCK_TIMEOUT_MS,
+  });
 }
 
-function publicKeyPem() {
-  return keys().publicKey.export({ type: 'spki', format: 'pem' }).toString();
+function keys(options = {}) {
+  const file = keyFile(options);
+  if (options.reload || !cachedKeys || cachedKeyFile !== file) {
+    cachedKeys = loadOrCreateKeypair(options);
+    cachedKeyFile = file;
+  }
+  return cachedKeys;
 }
 
-// Canonical signing input: the exact bytes both sides hash. Sorted-key JSON of
-// the signed header + a sha256 of the policy so the policy body can't be swapped.
-function signingInput({ version, issuedAt, expiresAt, policy }) {
+function publicKeyPem(options = {}) {
+  return keys(options).publicKey.export({ type: 'spki', format: 'pem' }).toString();
+}
+
+function arrayIndexKey(value) {
+  if (!/^(0|[1-9]\d*)$/.test(value)) return false;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 0 && parsed < 4294967295 && String(parsed) === value;
+}
+
+function orderedPolicyKeys(value, legacyLexical = false) {
+  const keys = Object.keys(value);
+  if (legacyLexical) return keys.sort();
+  return [
+    ...keys.filter(arrayIndexKey).sort((left, right) => Number(left) - Number(right)),
+    ...keys.filter((key) => !arrayIndexKey(key)).sort(),
+  ];
+}
+
+function canonicalPolicyJson(value, legacyLexical = false) {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map((item) => canonicalPolicyJson(item, legacyLexical)).join(',')}]`;
+  return `{${orderedPolicyKeys(value, legacyLexical).map((key) => (
+    `${JSON.stringify(key)}:${canonicalPolicyJson(value[key], legacyLexical)}`
+  )).join(',')}}`;
+}
+
+function signingInput({ version, issuedAt, expiresAt, policy }, legacyLexical = false) {
+  if (!policy || typeof policy !== 'object' || Array.isArray(policy)) throw new TypeError('policy must be an object');
+  const policyHash = crypto.createHash('sha256').update(canonicalPolicyJson(policy, legacyLexical)).digest('hex');
+  return JSON.stringify({ version, issuedAt, expiresAt, policyHash });
+}
+
+function legacySigningInput({ version, issuedAt, expiresAt, policy }) {
   const policyHash = crypto.createHash('sha256').update(JSON.stringify(policy)).digest('hex');
   return JSON.stringify({ version, issuedAt, expiresAt, policyHash });
 }
 
-// Build a signed bundle around a sensor-safe policy object. `now`/`ttlMs` are
-// injectable for tests.
-function buildBundle(policy, { now = new Date().toISOString(), ttlMs = DEFAULT_TTL_MS } = {}) {
+function buildBundle(policy, { now = new Date().toISOString(), ttlMs = DEFAULT_TTL_MS, ...options } = {}) {
   const issuedAt = now;
   const expiresAt = new Date(Date.parse(now) + ttlMs).toISOString();
-  const header = { version: BUNDLE_VERSION, issuedAt, expiresAt, policy };
-  const signature = crypto.sign(null, Buffer.from(signingInput(header)), keys().privateKey).toString('base64');
+  // Chrome storage recursively orders object properties. Publish that same
+  // canonical order so existing v1 clients verify both before and after
+  // persistence while upgraded clients treat key order as semantic noise.
+  const canonicalPolicy = JSON.parse(canonicalPolicyJson(policy));
+  const header = { version: BUNDLE_VERSION, issuedAt, expiresAt, policy: canonicalPolicy };
+  const signature = crypto.sign(null, Buffer.from(signingInput(header)), keys(options).privateKey).toString('base64');
   return { ...header, signature };
 }
 
-// Verify a bundle against a public key (PEM). Returns { ok } or { ok:false, reason }.
-// Sensors call this and block when ok is false.
 function verifyBundle(bundle, publicKeyPemStr, { now = new Date().toISOString() } = {}) {
-  if (!bundle || typeof bundle !== 'object') return { ok: false, reason: 'no_bundle' };
+  if (!bundle || typeof bundle !== 'object' || Array.isArray(bundle)) return { ok: false, reason: 'no_bundle' };
   if (bundle.version !== BUNDLE_VERSION) return { ok: false, reason: 'version_mismatch' };
-  if (!bundle.signature) return { ok: false, reason: 'no_signature' };
+  if (!bundle.policy || typeof bundle.policy !== 'object' || Array.isArray(bundle.policy)) return { ok: false, reason: 'malformed_bundle' };
+  if (typeof bundle.signature !== 'string' || !/^[A-Za-z0-9+/]{86}==$/.test(bundle.signature)) return { ok: false, reason: 'no_signature' };
   let pub;
-  try { pub = crypto.createPublicKey(publicKeyPemStr); } catch (e) { return { ok: false, reason: 'bad_public_key' }; }
-  let input;
-  try { input = Buffer.from(signingInput(bundle)); } catch (e) { return { ok: false, reason: 'malformed_bundle' }; }
+  try {
+    pub = crypto.createPublicKey(publicKeyPemStr);
+    if (pub.asymmetricKeyType !== 'ed25519') return { ok: false, reason: 'bad_public_key' };
+  } catch { return { ok: false, reason: 'bad_public_key' }; }
+  let inputs;
+  try { inputs = [...new Set([signingInput(bundle), signingInput(bundle, true), legacySigningInput(bundle)])]; } catch { return { ok: false, reason: 'malformed_bundle' }; }
   let valid = false;
-  try { valid = crypto.verify(null, input, pub, Buffer.from(bundle.signature, 'base64')); } catch (e) { valid = false; }
+  try {
+    const signature = Buffer.from(bundle.signature, 'base64');
+    valid = inputs.some((input) => crypto.verify(null, Buffer.from(input), pub, signature));
+  } catch { valid = false; }
   if (!valid) return { ok: false, reason: 'bad_signature' };
-  // Fail closed on a missing/unparseable expiry: NaN comparisons are always
-  // false, which would otherwise treat an unbounded-lifetime bundle as fresh.
+  const issued = Date.parse(bundle.issuedAt);
   const exp = Date.parse(bundle.expiresAt);
   const ref = Date.parse(now);
-  if (!Number.isFinite(exp) || !Number.isFinite(ref) || exp <= ref) return { ok: false, reason: 'expired' };
+  if (![issued, exp, ref].every(Number.isFinite) || issued > ref + 5 * 60 * 1000 || exp <= issued || exp <= ref) {
+    return { ok: false, reason: 'expired' };
+  }
   return { ok: true };
 }
 
 function isFresh(bundle, now = new Date().toISOString()) {
-  return !!bundle && Date.parse(bundle.expiresAt || 0) > Date.parse(now);
+  return !!bundle && Number.isFinite(Date.parse(bundle.expiresAt)) && Date.parse(bundle.expiresAt) > Date.parse(now);
 }
 
-module.exports = { buildBundle, verifyBundle, isFresh, publicKeyPem, signingInput, BUNDLE_VERSION, DEFAULT_TTL_MS, KEY_FILE };
+function signingKeyStatus(options = {}) {
+  try {
+    const fsImpl = options.fs || fs;
+    const pair = options.initialize === false
+      ? readPrivateKey(keyFile(options), fsImpl, options)
+      : keys({ ...options, reload: options.reload === true });
+    const persisted = readPrivateKey(keyFile(options), fsImpl, options);
+    const active = pair.publicKey.export({ type: 'spki', format: 'der' });
+    const stored = persisted.publicKey.export({ type: 'spki', format: 'der' });
+    if (!active.equals(stored)) throw new Error('policy signing key changed after initialization');
+    return { ok: !!pair.privateKey, persistent: true };
+  } catch (error) {
+    return { ok: false, persistent: false, reason: error && error.code || 'POLICY_SIGNING_KEY_INVALID' };
+  }
+}
+
+function resetForTest() {
+  cachedKeys = null;
+  cachedKeyFile = '';
+}
+
+module.exports = {
+  buildBundle,
+  verifyBundle,
+  isFresh,
+  publicKeyPem,
+  signingInput,
+  canonicalPolicyJson,
+  signingKeyStatus,
+  loadOrCreateKeypair,
+  keyFile,
+  dataDir,
+  BUNDLE_VERSION,
+  DEFAULT_TTL_MS,
+  get KEY_FILE() { return keyFile(); },
+  _resetForTest: resetForTest,
+};

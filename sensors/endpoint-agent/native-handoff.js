@@ -11,11 +11,19 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 const { withEnvAliases } = require('../../server/env');
+const privatePaths = require('../../server/private-path');
+const fileMutationLock = require('../../server/file-mutation-lock');
 
 const EVENT_VERSION = 1;
 const MAX_EVENT_BYTES = 16 * 1024;
 const DEFAULT_TTL_MS = 5 * 60 * 1000;
+const DEFAULT_CLAIM_RETENTION_MS = 24 * 60 * 60 * 1000;
+const CLAIM_PRUNE_INTERVAL_MS = 60 * 1000;
 const DEFAULT_HANDOFF_DIR = path.join(os.tmpdir(), 'redactwall-native-handoff');
+const CONSUMED_DIR_NAME = '.consumed';
+const CLAIM_DOMAIN = 'redactwall-native-handoff-consumed-v1\0';
+const INGEST_IDEMPOTENCY_SCOPE = 'native_handoff_v1';
+const INGEST_IDEMPOTENCY_DOMAIN = 'redactwall-native-handoff-ingest-v1\0';
 const DISALLOWED_EVENT_KEYS = new Set([
   'body',
   'bytes',
@@ -50,6 +58,8 @@ const ALLOWED_DESTINATION_KEYS = new Set([
   'process',
   'url',
 ]);
+let lastClaimPruneMs = 0;
+const trustedDirectories = new Set();
 
 function defaultHandoffDir(env = process.env) {
   const resolved = withEnvAliases(env);
@@ -62,6 +72,43 @@ function configuredHandoffSecret(opts = {}) {
     ? opts.secret
     : env.ENDPOINT_AGENT_HANDOFF_SECRET;
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function assertOwnedDirectory(dir, security) {
+  privatePaths.assertPrivatePath(dir, security);
+  const stat = fs.lstatSync(dir);
+  if (!stat.isDirectory() || stat.isSymbolicLink()) {
+    throw new Error('native handoff directory must be a real directory');
+  }
+  if (typeof process.getuid === 'function' && stat.uid !== process.getuid()) {
+    throw new Error('native handoff directory must be owned by the current user');
+  }
+}
+
+function directoryTrustKey(dir, security) {
+  const platform = security.platform || process.platform;
+  return `${platform}:${platform === 'win32' ? dir.toLowerCase() : dir}`;
+}
+
+function ensurePrivateDirectory(dir, privatePathSecurity = {}) {
+  const resolved = path.resolve(dir);
+  const security = {
+    ...privatePathSecurity,
+    fs,
+    directory: true,
+    label: 'native handoff directory',
+    ownerLabel: 'native handoff directory',
+  };
+  const trustKey = directoryTrustKey(resolved, security);
+  if (trustedDirectories.has(trustKey)) {
+    assertOwnedDirectory(resolved, security);
+    return resolved;
+  }
+  privatePaths.withPrivateDirectoryMutationLockSync(resolved, () => {
+    assertOwnedDirectory(resolved, security);
+  }, security);
+  trustedDirectories.add(trustKey);
+  return resolved;
 }
 
 function boundedString(value, fallback, max) {
@@ -78,7 +125,7 @@ function assertNoPayloadKeys(value, prefix = 'event') {
   if (!value || typeof value !== 'object') return;
   for (const [key, child] of Object.entries(value)) {
     if (DISALLOWED_EVENT_KEYS.has(key) || DISALLOWED_EVENT_KEYS.has(normalizedEventKey(key))) {
-      throw new Error(`native handoff ${prefix}.${key} is not allowed`);
+      throw new Error('native handoff event contains a prohibited payload field');
     }
     if (child && typeof child === 'object') {
       assertNoPayloadKeys(child, `${prefix}.${key}`);
@@ -90,7 +137,7 @@ function assertAllowedKeys(value, allowed, prefix) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return;
   for (const key of Object.keys(value)) {
     if (!allowed.has(key)) {
-      throw new Error(`native handoff ${prefix}.${key} is not allowed`);
+      throw new Error(`native handoff ${prefix} contains an unsupported field`);
     }
   }
 }
@@ -218,23 +265,273 @@ function validateHandoffEvent(event, opts = {}) {
   return normalized;
 }
 
+function sameFile(left, right) {
+  if (!left || !right || left.dev !== right.dev) return false;
+  return !left.ino || !right.ino || left.ino === right.ino;
+}
+
+function sameSnapshot(left, right) {
+  return sameFile(left, right)
+    && left.size === right.size
+    && left.mtimeMs === right.mtimeMs
+    && left.ctimeMs === right.ctimeMs;
+}
+
+function readBoundedEventFile(file) {
+  const noFollow = fs.constants.O_NOFOLLOW || 0;
+  const fd = fs.openSync(file, fs.constants.O_RDONLY | noFollow);
+  try {
+    const link = fs.lstatSync(file);
+    const before = fs.fstatSync(fd);
+    if (link.isSymbolicLink() || !before.isFile() || !sameFile(link, before)) {
+      throw new Error('native handoff path is not a safe regular file');
+    }
+    if (before.size > MAX_EVENT_BYTES) throw new Error('native handoff event is too large');
+    const body = Buffer.allocUnsafe(MAX_EVENT_BYTES + 1);
+    let length = 0;
+    while (length <= MAX_EVENT_BYTES) {
+      const bytes = fs.readSync(fd, body, length, body.length - length, null);
+      if (!bytes) break;
+      length += bytes;
+    }
+    const after = fs.fstatSync(fd);
+    if (length > MAX_EVENT_BYTES || after.size > MAX_EVENT_BYTES) throw new Error('native handoff event is too large');
+    if (!sameSnapshot(before, after) || length !== after.size || !sameFile(after, fs.statSync(file))) {
+      throw new Error('native handoff event changed during inspection');
+    }
+    return body.subarray(0, length).toString('utf8');
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 function readHandoffFile(file, opts = {}) {
-  const stat = fs.statSync(file);
-  if (!stat.isFile()) throw new Error('native handoff path is not a file');
-  if (stat.size > MAX_EVENT_BYTES) throw new Error('native handoff event is too large');
-  const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+  let body;
+  try {
+    body = readBoundedEventFile(file);
+  } catch (error) {
+    if (String(error.message || '').startsWith('native handoff ')) throw error;
+    throw new Error('native handoff event is unavailable');
+  }
+  let parsed;
+  try { parsed = JSON.parse(body); } catch { throw new Error('native handoff event JSON is invalid'); }
   return validateHandoffEvent(parsed, opts);
+}
+
+function writeExclusiveDurable(file, body) {
+  const temp = `${file}.${process.pid}.${crypto.randomBytes(8).toString('hex')}.tmp`;
+  let fd;
+  try {
+    fd = fs.openSync(temp, 'wx', 0o600);
+    privatePaths.securePrivatePath(temp, {
+      fs,
+      directory: false,
+      fresh: true,
+      label: 'native handoff claim staging file',
+      ownerLabel: 'native handoff claim staging file',
+    });
+    fs.writeFileSync(fd, body, { encoding: 'utf8' });
+    fs.fsyncSync(fd);
+    fs.closeSync(fd);
+    fd = undefined;
+    privatePaths.publishFileExclusiveDurably(temp, file, { fs });
+  } finally {
+    if (fd !== undefined) try { fs.closeSync(fd); } catch {}
+    try { fs.unlinkSync(temp); } catch {}
+  }
+}
+
+function claimFingerprint(event, secret) {
+  return crypto.createHmac('sha256', secret)
+    .update(CLAIM_DOMAIN)
+    .update(String(event.id || ''))
+    .update('\0')
+    .update(String(event.nonce || ''))
+    .digest('hex');
+}
+
+/**
+ * Opaque, restart-stable identity for one signature-validated native event.
+ * The control plane never receives the path, nonce, event id, or local secret.
+ */
+function ingestIdempotency(event, opts = {}) {
+  const secret = configuredHandoffSecret(opts);
+  if (!secret) throw new Error('native handoff secret is not configured');
+  return {
+    scope: INGEST_IDEMPOTENCY_SCOPE,
+    key: crypto.createHmac('sha256', secret)
+      .update(INGEST_IDEMPOTENCY_DOMAIN)
+      .update(canonicalEvent(event))
+      .digest('hex'),
+  };
+}
+
+function claimFileFor(event, handoffFile, opts = {}) {
+  const secret = configuredHandoffSecret(opts);
+  if (!secret) throw new Error('native handoff secret is not configured');
+  const privatePathSecurity = opts.privatePathSecurity || {};
+  const handoffDir = ensurePrivateDirectory(path.dirname(path.resolve(handoffFile)), privatePathSecurity);
+  const consumedDir = ensurePrivateDirectory(path.resolve(
+    opts.consumedDir || path.join(handoffDir, CONSUMED_DIR_NAME),
+  ), privatePathSecurity);
+  return path.join(consumedDir, `${claimFingerprint(event, secret)}.claim`);
+}
+
+function readHandoffClaim(event, handoffFile, opts = {}) {
+  const claimFile = claimFileFor(event, handoffFile, opts);
+  let body;
+  try { body = readBoundedEventFile(claimFile); }
+  catch (error) {
+    if (error && error.code === 'ENOENT') return null;
+    if (!fs.existsSync(claimFile)) return null;
+    throw new Error('native handoff claim is unavailable');
+  }
+  try {
+    const parsed = JSON.parse(body);
+    if (!parsed || parsed.version !== EVENT_VERSION) throw new Error('invalid');
+    if (!['claimed', 'terminal'].includes(parsed.state)) {
+      // Claims written by the pre-terminal-state implementation are permanent
+      // consumed markers and must not become replayable after upgrade.
+      if (parsed.claimedAt) return { version: EVENT_VERSION, state: 'terminal', decision: 'unknown', status: 'legacy_consumed' };
+      throw new Error('invalid');
+    }
+    return parsed;
+  } catch {
+    throw new Error('native handoff claim is invalid');
+  }
+}
+
+function publishClaimState(file, state) {
+  const temp = `${file}.${process.pid}.${crypto.randomBytes(8).toString('hex')}.tmp`;
+  let fd;
+  try {
+    fd = fs.openSync(temp, 'wx', 0o600);
+    privatePaths.securePrivatePath(temp, {
+      fs,
+      directory: false,
+      fresh: true,
+      label: 'native handoff claim staging file',
+      ownerLabel: 'native handoff claim staging file',
+    });
+    fs.writeFileSync(fd, `${JSON.stringify(state)}\n`, { encoding: 'utf8' });
+    fs.fsyncSync(fd);
+    fs.closeSync(fd);
+    fd = undefined;
+    privatePaths.publishFileDurably(temp, file, { fs });
+  } finally {
+    if (fd !== undefined) try { fs.closeSync(fd); } catch {}
+    try { fs.unlinkSync(temp); } catch {}
+  }
+}
+
+function terminalClaim(result) {
+  if (!result || typeof result !== 'object' || typeof result.decision !== 'string') {
+    throw new Error('native handoff scan did not reach a terminal decision');
+  }
+  const decision = boundedString(result.decision, 'block', 32).toLowerCase();
+  const status = boundedString(result.status, decision, 80).toLowerCase();
+  const recordId = boundedString(result.id, '', 120);
+  return {
+    version: EVENT_VERSION,
+    state: 'terminal',
+    decision,
+    status,
+    recorded: typeof result.id === 'string' && !!result.id,
+    ...(recordId ? { recordId } : {}),
+    completedAt: new Date().toISOString(),
+  };
+}
+
+async function withHandoffClaim(event, handoffFile, callback, opts = {}) {
+  if (typeof callback !== 'function') throw new TypeError('native handoff claim callback is required');
+  const claimFile = claimFileFor(event, handoffFile, opts);
+  pruneConsumedClaims(path.dirname(claimFile), opts);
+  return fileMutationLock.withFileMutationLock(claimFile, async () => {
+    const prior = readHandoffClaim(event, handoffFile, opts);
+    if (prior && prior.state === 'terminal') {
+      return { claimed: false, claimFile, terminal: prior };
+    }
+    const claimedAt = prior && prior.claimedAt ? prior.claimedAt : new Date().toISOString();
+    publishClaimState(claimFile, {
+      version: EVENT_VERSION,
+      state: 'claimed',
+      claimedAt,
+      attemptAt: new Date().toISOString(),
+    });
+    const result = await callback();
+    const terminal = terminalClaim(result);
+    publishClaimState(claimFile, terminal);
+    return { claimed: true, claimFile, result, terminal, resumed: !!prior };
+  }, {
+    lockTimeoutMs: opts.claimLockTimeoutMs || 30000,
+    lockRetryMs: opts.claimLockRetryMs || 25,
+  });
+}
+
+function pruneConsumedClaims(dir, opts = {}) {
+  const nowMs = Number.isFinite(Number(opts.claimNowMs)) ? Number(opts.claimNowMs) : Date.now();
+  if (!opts.forceClaimPrune && nowMs - lastClaimPruneMs < CLAIM_PRUNE_INTERVAL_MS) return 0;
+  lastClaimPruneMs = nowMs;
+  const requestedTtl = Number(opts.ttlMs);
+  const ttlMs = Number.isFinite(requestedTtl) && requestedTtl > 0 ? requestedTtl : DEFAULT_TTL_MS;
+  const minimumRetentionMs = Math.max(DEFAULT_TTL_MS * 2, ttlMs * 2);
+  const configured = Number(opts.claimRetentionMs);
+  const retentionMs = Number.isFinite(configured) && configured >= minimumRetentionMs
+    ? configured : Math.max(DEFAULT_CLAIM_RETENTION_MS, minimumRetentionMs);
+  let removed = 0;
+  for (const entry of fs.readdirSync(dir)) {
+    if (!entry.endsWith('.claim')) continue;
+    const file = path.join(dir, entry);
+    try {
+      if (nowMs - fs.lstatSync(file).mtimeMs <= retentionMs) continue;
+      fs.rmSync(file, { force: true });
+      removed += 1;
+    } catch { /* a concurrent claimant or pruner won */ }
+  }
+  return removed;
+}
+
+function claimHandoffEvent(event, handoffFile, opts = {}) {
+  const claimFile = claimFileFor(event, handoffFile, opts);
+  const consumedDir = path.dirname(claimFile);
+  pruneConsumedClaims(consumedDir, opts);
+  try {
+    writeExclusiveDurable(claimFile, JSON.stringify({ version: EVENT_VERSION, claimedAt: new Date().toISOString() }) + '\n');
+    return { claimed: true, claimFile };
+  } catch (error) {
+    if (error.code === 'EEXIST') return { claimed: false, claimFile };
+    throw error;
+  }
 }
 
 module.exports = {
   EVENT_VERSION,
   MAX_EVENT_BYTES,
   DEFAULT_TTL_MS,
+  DEFAULT_CLAIM_RETENTION_MS,
+  CONSUMED_DIR_NAME,
+  INGEST_IDEMPOTENCY_SCOPE,
   defaultHandoffDir,
   configuredHandoffSecret,
+  ensurePrivateDirectory,
   publicDestination,
   signatureFor,
   signHandoffEvent,
   validateHandoffEvent,
   readHandoffFile,
+  claimHandoffEvent,
+  claimFileFor,
+  readHandoffClaim,
+  ingestIdempotency,
+  withHandoffClaim,
+  pruneConsumedClaims,
+  _internal: {
+    claimFingerprint,
+    readBoundedEventFile,
+    sameFile,
+    sameSnapshot,
+    publishClaimState,
+    terminalClaim,
+    writeExclusiveDurable,
+  },
 };

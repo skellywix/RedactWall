@@ -17,6 +17,8 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const license = require('../server/license');
+const fileMutationLock = require('../server/file-mutation-lock');
+const privatePaths = require('../server/private-path');
 
 function parseArgs(argv) {
   const opts = { features: [] };
@@ -32,46 +34,178 @@ function parseArgs(argv) {
     else if (a === '--grace-days') opts.graceDays = Number(argv[++i]);
     else if (a === '--features') opts.features = String(argv[++i] || '').split(',').map((s) => s.trim()).filter(Boolean);
     else if (a === '--out') opts.out = argv[++i];
+    else if (a === '--force') opts.force = true;
   }
   return opts;
 }
 
+function comparablePath(filePath) {
+  const absolute = path.resolve(filePath);
+  let resolved = absolute;
+  try {
+    resolved = fs.realpathSync.native(absolute);
+  } catch {
+    try { resolved = path.join(fs.realpathSync.native(path.dirname(absolute)), path.basename(absolute)); } catch {}
+  }
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
+function sameFile(left, right) {
+  if (comparablePath(left) === comparablePath(right)) return true;
+  if (!fs.existsSync(left) || !fs.existsSync(right)) return false;
+  const a = fs.statSync(left);
+  const b = fs.statSync(right);
+  return a.dev === b.dev && a.ino === b.ino;
+}
+
+function keypairPaths(dir) {
+  return {
+    priv: path.join(dir, 'license-signing-key.pem'),
+    pub: path.join(dir, 'license-signing-pub.pem'),
+  };
+}
+
+function assertKeypairAbsent(paths) {
+  if (fs.existsSync(paths.priv) || fs.existsSync(paths.pub)) {
+    throw new Error('refusing to overwrite an existing license signing keypair');
+  }
+}
+
+function stagePrivateFile(target, contents, label) {
+  const temp = `${target}.${process.pid}.${crypto.randomBytes(8).toString('hex')}.tmp`;
+  let fd;
+  try {
+    fd = fs.openSync(temp, 'wx', 0o600);
+    privatePaths.securePrivatePath(temp, {
+      fs,
+      directory: false,
+      fresh: true,
+      label,
+      ownerLabel: label,
+    });
+    fs.writeFileSync(fd, contents);
+    fs.fsyncSync(fd);
+    fs.closeSync(fd);
+    fd = undefined;
+    return temp;
+  } catch (error) {
+    if (fd !== undefined) try { fs.closeSync(fd); } catch {}
+    try { fs.unlinkSync(temp); } catch {}
+    throw error;
+  }
+}
+
+function rollbackKeypair(paths, published, originalError) {
+  try {
+    if (published.pub) fs.unlinkSync(paths.pub);
+    if (published.priv) fs.unlinkSync(paths.priv);
+    privatePaths.fsyncDirectory(path.dirname(paths.priv), { fs });
+  } catch (rollbackError) {
+    originalError.rollbackError = rollbackError;
+  }
+}
+
+function publishKeypair(paths, privatePem, publicPem) {
+  const tempPriv = stagePrivateFile(paths.priv, privatePem, 'offline license private-key staging file');
+  let tempPub;
+  let privPublished = false;
+  let pubPublished = false;
+  try {
+    tempPub = stagePrivateFile(paths.pub, publicPem, 'offline license public-key staging file');
+    privatePaths.publishFileExclusiveDurably(tempPriv, paths.priv, { fs });
+    privPublished = true;
+    privatePaths.publishFileExclusiveDurably(tempPub, paths.pub, { fs });
+    pubPublished = true;
+  } catch (error) {
+    rollbackKeypair(paths, { priv: privPublished, pub: pubPublished }, error);
+    throw error;
+  } finally {
+    for (const temp of [tempPriv, tempPub]) if (temp) try { fs.unlinkSync(temp); } catch {}
+  }
+}
+
 function initKeypair(dir, io) {
-  const { privateKey, publicKey } = crypto.generateKeyPairSync('ed25519');
-  fs.mkdirSync(dir, { recursive: true });
-  const priv = path.join(dir, 'license-signing-key.pem');
-  const pub = path.join(dir, 'license-signing-pub.pem');
-  fs.writeFileSync(priv, privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
-  const pubPem = publicKey.export({ type: 'spki', format: 'pem' }).toString();
-  fs.writeFileSync(pub, pubPem);
-  io.log(`Wrote ${priv} (keep OFFLINE, never commit)`);
-  io.log(`Wrote ${pub}`);
-  io.log('\nEmbed this PUBLIC key in server/license.js EMBEDDED_PUBLIC_KEY_PEM:\n');
-  io.log(pubPem);
+  const resolved = path.resolve(dir);
+  return privatePaths.withPrivateDirectoryMutationLockSync(resolved, () => {
+    const paths = keypairPaths(resolved);
+    assertKeypairAbsent(paths);
+    const { privateKey, publicKey } = crypto.generateKeyPairSync('ed25519');
+    const privatePem = privateKey.export({ type: 'pkcs8', format: 'pem' });
+    const pubPem = publicKey.export({ type: 'spki', format: 'pem' }).toString();
+    publishKeypair(paths, privatePem, pubPem);
+    io.log(`Wrote ${paths.priv} (keep OFFLINE, never commit)`);
+    io.log(`Wrote ${paths.pub}`);
+    io.log('\nEmbed this PUBLIC key in server/license.js EMBEDDED_PUBLIC_KEY_PEM:\n');
+    io.log(pubPem);
+  }, {
+    fs,
+    label: 'offline license key directory',
+    ownerLabel: 'offline license key directory',
+  });
+}
+
+function readSigningKey(file) {
+  const resolved = path.resolve(file);
+  privatePaths.assertPrivatePath(resolved, {
+    fs,
+    directory: false,
+    label: 'offline license signing key',
+    ownerLabel: 'offline license signing key',
+  });
+  return privatePaths.readBoundedRegularFile(resolved, {
+    fs,
+    maxBytes: 64 * 1024,
+    label: 'offline license signing key',
+  }).toString('utf8');
+}
+
+function publishLicense(out, body, force) {
+  const target = path.resolve(out);
+  const temp = stagePrivateFile(target, body, 'license output staging file');
+  try {
+    if (force) privatePaths.publishFileDurably(temp, target, { fs });
+    else privatePaths.publishFileExclusiveDurably(temp, target, { fs });
+    try { fs.unlinkSync(temp); } catch (error) {
+      if (!error || error.code !== 'ENOENT') throw error;
+    }
+    privatePaths.assertPrivatePath(target, {
+      fs,
+      directory: false,
+      label: 'license output file',
+      ownerLabel: 'license output file',
+    });
+  } finally {
+    try { fs.unlinkSync(temp); } catch {}
+  }
 }
 
 function issue(opts, io, setExitCode) {
-  const priv = crypto.createPrivateKey(fs.readFileSync(opts.key, 'utf8'));
-  const payload = {
-    customer: opts.customer || 'Unknown',
-    customerId: opts.customerId || '',
-    plan: opts.plan || 'standard',
-    seats: opts.seats || 0,
-    features: opts.features || [],
-    issued: new Date().toISOString(),
-    expires: opts.expires,
-    graceDays: Number.isFinite(opts.graceDays) ? opts.graceDays : 30,
-  };
-  const payloadB64 = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64');
-  const sig = crypto.sign(null, Buffer.from(payloadB64, 'utf8'), priv).toString('base64');
-  const licText = `${payloadB64}.${sig}`;
-  // Self-verify with the matching public key before writing.
-  const pubPem = crypto.createPublicKey(priv).export({ type: 'spki', format: 'pem' }).toString();
-  const check = license.verifyLicenseText(licText, { publicKeyPem: pubPem });
-  if (!check.ok) { io.error(`self-verify failed: ${check.reason}`); return setExitCode(1); }
-  const out = opts.out || 'redactwall.lic';
-  fs.writeFileSync(out, licText + '\n');
-  io.log(`Wrote ${out} for ${payload.customer} (${payload.plan}, ${payload.seats} seats, expires ${payload.expires})`);
+  const out = path.resolve(opts.out || 'redactwall.lic');
+  return fileMutationLock.withFileMutationLockSync(out, () => {
+    if (sameFile(opts.key, out)) {
+      throw new Error('license output path must not be the signing key path');
+    }
+    const priv = crypto.createPrivateKey(readSigningKey(opts.key));
+    const customerId = license.normalizeCustomerId(opts.customerId);
+    const payload = {
+      customer: opts.customer || 'Unknown',
+      customerId,
+      plan: opts.plan || 'standard',
+      seats: opts.seats || 0,
+      features: opts.features || [],
+      issued: new Date().toISOString(),
+      expires: opts.expires,
+      graceDays: Number.isFinite(opts.graceDays) ? opts.graceDays : 30,
+    };
+    const payloadB64 = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64');
+    const sig = crypto.sign(null, Buffer.from(payloadB64, 'utf8'), priv).toString('base64');
+    const licText = `${payloadB64}.${sig}`;
+    const pubPem = crypto.createPublicKey(priv).export({ type: 'spki', format: 'pem' }).toString();
+    const check = license.verifyLicenseText(licText, { publicKeyPem: pubPem, expectedCustomerId: customerId });
+    if (!check.ok) { io.error(`self-verify failed: ${check.reason}`); return setExitCode(1); }
+    publishLicense(out, `${licText}\n`, opts.force === true);
+    io.log(`Wrote ${out} for ${payload.customer} (${payload.plan}, ${payload.seats} seats, expires ${payload.expires})`);
+  }, { fs });
 }
 
 function main(argv = process.argv.slice(2), deps = {}) {
@@ -80,8 +214,8 @@ function main(argv = process.argv.slice(2), deps = {}) {
   const opts = parseArgs(argv);
   try {
     if (opts.initKeypair) return initKeypair(opts.initKeypair, io);
-    if (!opts.key || !opts.expires || !opts.plan || !opts.seats) {
-      io.error('Usage: --init-keypair <dir>  OR  --key <pem> --customer <name> --customer-id <id> --plan <standard|enterprise> --seats <n> --expires <YYYY-MM-DD> [--grace-days 30] [--features a,b] [--out redactwall.lic]');
+    if (!opts.key || !license.validCustomerId(opts.customerId) || !opts.expires || !opts.plan || !opts.seats) {
+      io.error('Usage: --init-keypair <dir>  OR  --key <pem> --customer <name> --customer-id <id> --plan <standard|enterprise> --seats <n> --expires <YYYY-MM-DD> [--grace-days 30] [--features a,b] [--out redactwall.lic] [--force]');
       return setExitCode(1);
     }
     return issue(opts, io, setExitCode);

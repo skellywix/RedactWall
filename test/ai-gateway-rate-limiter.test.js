@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const http = require('node:http');
+const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
 const {
@@ -13,6 +14,7 @@ const {
   normalizeLimiterInput,
   parseArgs,
   parseRespReplies,
+  redisCommand,
   redisUrl,
 } = require('../scripts/ai-gateway-rate-limiter');
 const { createGatewayServer } = require('../scripts/ai-llm-gateway');
@@ -64,6 +66,51 @@ function requestJson(port, {
   });
 }
 
+function requestSlowBody(port, timeoutMs = 2000) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const req = http.request({
+      host: '127.0.0.1',
+      port,
+      method: 'POST',
+      path: '/check',
+      headers: {
+        authorization: 'Bearer limiter-token',
+        'content-type': 'application/json',
+        'content-length': '128',
+      },
+    }, (res) => {
+      const chunks = [];
+      res.on('data', (chunk) => chunks.push(chunk));
+      res.on('end', () => {
+        settled = true;
+        clearTimeout(timer);
+        resolve({
+          status: res.statusCode,
+          headers: res.headers,
+          body: Buffer.concat(chunks).toString('utf8'),
+        });
+      });
+    });
+    req.on('error', (err) => {
+      if (!settled) reject(err);
+    });
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      req.destroy();
+      reject(new Error('slow request did not receive an absolute-deadline response'));
+    }, timeoutMs);
+    req.write('{');
+  });
+}
+
+function listenNet(server) {
+  return new Promise((resolve) => {
+    server.listen(0, '127.0.0.1', () => resolve(server.address().port));
+  });
+}
+
 function gatewayRequest(port, {
   token = 'client-token',
   body = { messages: [{ role: 'user', content: 'Summarize public FAQ copy.' }] },
@@ -96,27 +143,26 @@ function gatewayRequest(port, {
 }
 
 function jsonFetchResponse(status, body, headers = {}) {
-  return {
-    ok: status >= 200 && status < 300,
+  return new Response(JSON.stringify(body), {
     status,
-    headers: new Headers({ 'content-type': 'application/json', ...headers }),
-    arrayBuffer: async () => Buffer.from(JSON.stringify(body)),
-    json: async () => body,
-  };
+    headers: { 'content-type': 'application/json', ...headers },
+  });
 }
 
 test('shared limiter validates config, health, auth, and bounded hashed input', async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-shared-limiter-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const dbPath = path.join(dir, 'limiter.db');
-  const parsed = parseArgs(['--port', '4998', '--host', '127.0.0.1', '--store', 'redis', '--db', dbPath, '--redis-url', 'rediss://cache.example.test:6380/2', '--redis-prefix', 'pw:test:', '--redis-timeout-ms', '1500', '--token', 'limiter-token', '--default-limit', '10', '--default-window-ms', '2000']);
+  const parsed = parseArgs(['--port', '4998', '--host', '127.0.0.1', '--store', 'redis', '--db', dbPath, '--redis-url', 'rediss://cache.example.test:6380/2', '--redis-prefix', 'pw:test:', '--redis-timeout-ms', '1500', '--allow-insecure-redis-loopback', '--token', 'limiter-token', '--body-timeout-ms', '3000', '--default-limit', '10', '--default-window-ms', '2000']);
   assert.strictEqual(parsed.port, 4998);
   assert.strictEqual(parsed.storeBackend, 'redis');
   assert.strictEqual(parsed.dbPath, dbPath);
   assert.strictEqual(parsed.redisUrl, 'rediss://cache.example.test:6380/2');
   assert.strictEqual(parsed.redisPrefix, 'pw:test:');
   assert.strictEqual(parsed.redisTimeoutMs, 1500);
+  assert.strictEqual(parsed.allowInsecureRedisLoopback, true);
   assert.strictEqual(parsed.token, 'limiter-token');
+  assert.strictEqual(parsed.bodyTimeoutMs, 3000);
   assert.strictEqual(parsed.defaultLimit, 10);
   assert.throws(() => normalizeLimiterInput({ key: 'client-token', limit: 1, windowMs: 1000 }), /sha256 hex digest/);
 
@@ -177,7 +223,7 @@ test('redis limiter backend uses prefixed hashed keys and supports async health 
   assert.deepStrictEqual(parsedResp, { replies: ['OK', [3, '1234']], complete: true });
 
   const store = createRedisLimiterStore({
-    redisUrl: 'redis://cache.example.test:6379/0',
+    redisUrl: 'rediss://cache.example.test:6379/0',
     redisPrefix: 'pw:test prefix:',
     redisCommand: async (args) => {
       calls.push(args);
@@ -206,7 +252,7 @@ test('shared limiter server can run against an async redis backend without leaki
   const key = 'c'.repeat(64);
   let count = 0;
   const store = createRedisLimiterStore({
-    redisUrl: 'redis://cache.example.test:6379/0',
+    redisUrl: 'rediss://cache.example.test:6379/0',
     redisPrefix: 'pw:server:',
     redisCommand: async (args) => {
       if (args[0] === 'PING') return 'PONG';
@@ -234,6 +280,131 @@ test('shared limiter server can run against an async redis backend without leaki
   }
 });
 
+test('redis transport rejects remote cleartext and requires an explicit non-production loopback exception', () => {
+  assert.throws(
+    () => redisUrl({ redisUrl: 'redis://user:secret@203.0.113.10:6379/0' }),
+    /TLS is required for remote Redis/,
+  );
+  assert.throws(
+    () => redisUrl({ redisUrl: 'redis://127.0.0.1:6379/0', nodeEnv: 'development' }),
+    /explicit non-production loopback exception/,
+  );
+  assert.throws(
+    () => redisUrl({
+      redisUrl: 'redis://127.0.0.1:6379/0',
+      nodeEnv: 'production',
+      allowInsecureRedisLoopback: true,
+    }),
+    /disabled in production/,
+  );
+  const local = redisUrl({
+    redisUrl: 'redis://127.0.0.1:6379/0',
+    nodeEnv: 'development',
+    allowInsecureRedisLoopback: true,
+  });
+  assert.strictEqual(local.tls, false);
+  assert.strictEqual(local.host, '127.0.0.1');
+  assert.strictEqual(redisUrl({ redisUrl: 'rediss://user:secret@cache.example.test:6380/0' }).tls, true);
+});
+
+test('RESP parser enforces byte, line, bulk, array, nesting, and element limits', () => {
+  const valid = parseRespReplies(Buffer.from('*2\r\n:3\r\n$4\r\n1234\r\n'), 1);
+  assert.deepStrictEqual(valid, { replies: [[3, '1234']], complete: true });
+
+  assert.throws(
+    () => parseRespReplies(Buffer.from('+123456789\r\n'), 1, { maxResponseBytes: 8 }),
+    /response exceeds byte limit/,
+  );
+  assert.throws(
+    () => parseRespReplies(Buffer.from('+123456789\r\n'), 1, { maxLineBytes: 8 }),
+    /line exceeds byte limit/,
+  );
+  assert.throws(
+    () => parseRespReplies(Buffer.from('$9\r\n123456789\r\n'), 1, { maxBulkBytes: 8 }),
+    /bulk string exceeds byte limit/,
+  );
+  assert.throws(
+    () => parseRespReplies(Buffer.from('*3\r\n:1\r\n:2\r\n:3\r\n'), 1, { maxArrayLength: 2 }),
+    /array exceeds element limit/,
+  );
+  assert.throws(
+    () => parseRespReplies(Buffer.from('*1\r\n*1\r\n*1\r\n:1\r\n'), 1, { maxDepth: 2 }),
+    /nesting exceeds depth limit/,
+  );
+  assert.throws(
+    () => parseRespReplies(Buffer.from('*3\r\n:1\r\n:2\r\n:3\r\n'), 1, { maxElements: 3 }),
+    /response exceeds element limit/,
+  );
+  assert.throws(
+    () => parseRespReplies(Buffer.from('$4\r\n1234xx'), 1),
+    /bulk string terminator is malformed/,
+  );
+  assert.throws(
+    () => parseRespReplies(Buffer.from(':not-a-number\r\n'), 1),
+    /integer is malformed/,
+  );
+});
+
+test('redis command aborts an oversized streamed response', async (t) => {
+  const fakeRedis = net.createServer((socket) => {
+    socket.once('data', () => socket.write(`+${'x'.repeat(128)}\r\n`));
+  });
+  const port = await listenNet(fakeRedis);
+  t.after(() => close(fakeRedis));
+  await assert.rejects(
+    redisCommand(
+      { tls: false, host: '127.0.0.1', port, username: '', password: '', db: '' },
+      ['PING'],
+      { timeoutMs: 1000, maxResponseBytes: 64 },
+    ),
+    /response exceeds byte limit/,
+  );
+});
+
+test('redis command accepts a bounded valid response split across network chunks', async (t) => {
+  const fakeRedis = net.createServer((socket) => {
+    socket.once('data', () => {
+      socket.write('+PO');
+      setImmediate(() => socket.write('NG\r\n'));
+    });
+  });
+  const port = await listenNet(fakeRedis);
+  t.after(() => close(fakeRedis));
+  const reply = await redisCommand(
+    { tls: false, host: '127.0.0.1', port, username: '', password: '', db: '' },
+    ['PING'],
+    { timeoutMs: 1000, maxResponseBytes: 64 },
+  );
+  assert.strictEqual(reply, 'PONG');
+});
+
+test('shared limiter enforces an absolute request-body deadline against trickle clients', async () => {
+  let checks = 0;
+  const store = {
+    check() {
+      checks += 1;
+      return { ok: true, limit: 1, remaining: 0, resetMs: 1000 };
+    },
+    stats() {
+      return { ready: true, entries: 0, checks, store: 'test' };
+    },
+    close() {},
+  };
+  const server = createLimiterServer({ store, token: 'limiter-token', bodyTimeoutMs: 100 });
+  const port = await listen(server);
+  try {
+    const startedAt = Date.now();
+    const response = await requestSlowBody(port);
+    assert.strictEqual(response.status, 408);
+    assert.strictEqual(response.headers.connection, 'close');
+    assert.match(response.body, /request body deadline exceeded/);
+    assert.ok(Date.now() - startedAt < 1500);
+    assert.strictEqual(checks, 0);
+  } finally {
+    await close(server);
+  }
+});
+
 test('AI gateway can use the shipped shared limiter service across gateway replicas', async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-gateway-limiter-integration-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -252,7 +423,7 @@ test('AI gateway can use the shipped shared limiter service across gateway repli
   };
   const gatewayOpts = {
     clientToken: 'client-token',
-    upstream: 'http://upstream.test',
+    upstream: 'https://upstream.test',
     rateLimit: 1,
     rateWindowMs: 60000,
     rateLimitStore: 'http',
@@ -274,7 +445,7 @@ test('AI gateway can use the shipped shared limiter service across gateway repli
     const second = await gatewayRequest(secondPort);
     assert.strictEqual(second.status, 429);
     assert.match(second.body, /gateway rate limit exceeded/);
-    assert.strictEqual(calls.filter((call) => call.url === 'http://upstream.test/v1/chat/completions').length, 1);
+    assert.strictEqual(calls.filter((call) => call.url === 'https://upstream.test/v1/chat/completions').length, 1);
   } finally {
     await close(firstGateway);
     await close(secondGateway);

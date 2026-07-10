@@ -20,6 +20,7 @@ delete process.env.ADMIN_TOTP_SECRET;
 const app = require('../server/app');
 const { listen } = require('./support/listen');
 const policy = require('../server/policy');
+const db = require('../server/db');
 
 test.after(() => {
   for (const p of [process.env.REDACTWALL_DB_PATH, process.env.REDACTWALL_POLICY_PATH]) { try { fs.rmSync(p, { force: true }); } catch (e) { /* ignore */ } }
@@ -64,11 +65,19 @@ test('gate visits populate the catalog and review writes policy + status', async
     assert.ok(imp.skipped >= 1);
 
     // Review deepseek -> block: policy now blocks it AND catalog status updates.
-    const rev = await (await fetch(`http://127.0.0.1:${port}/api/catalog/chat.deepseek.com/review`, { method: 'POST', headers: { cookie, 'content-type': 'application/json', 'x-csrf-token': csrf }, body: JSON.stringify({ decision: 'block', reason: 'CN trains on data', owner: 'sec@cu.org' }) })).json();
+    const reviewResponse = await fetch(`http://127.0.0.1:${port}/api/catalog/chat.deepseek.com/review`, { method: 'POST', headers: { cookie, 'content-type': 'application/json', 'x-csrf-token': csrf }, body: JSON.stringify({ decision: 'block', reason: 'Review synthetic SSN 524-71-9043 with catalog-reviewer@example.test', owner: 'sec@cu.org' }) });
+    assert.strictEqual(reviewResponse.status, 200);
+    const rev = await reviewResponse.json();
     assert.strictEqual(rev.decision, 'block');
     assert.strictEqual(rev.app.sanctionedStatus, 'blocked');
     assert.strictEqual(rev.app.owner, 'sec@cu.org');
     assert.ok(policy.destinationBlocked('chat.deepseek.com', policy.loadPolicy()), 'policy now blocks the reviewed app');
+    const reviewAudit = db.listAudit(100).find((entry) => entry.action === 'CATALOG_REVIEWED');
+    assert.ok(reviewAudit);
+    assert.ok(!reviewAudit.detail.includes('524-71-9043'));
+    assert.ok(!reviewAudit.detail.includes('catalog-reviewer@example.test'));
+    assert.match(reviewAudit.detail, /\[US_SSN\]/);
+    assert.match(reviewAudit.detail, /\[EMAIL_ADDRESS\]/);
   });
 });
 
@@ -84,14 +93,20 @@ test('catalog override + review reject sensitive identifiers in operator notes',
     const bad = await post('/api/catalog/claude.ai/override', { score: 90, note: 'raise per member 524-71-3312 dispute' });
     assert.strictEqual(bad.status, 400);
 
-    // A clean justification is accepted and surfaced in the sensor-visible catalog.
-    const ok = await post('/api/catalog/claude.ai/override', { score: 90, note: 'raised per risk committee review' });
+    // Detector-known PII that passes structural validation is scrubbed before
+    // the note reaches the sensor-visible catalog or immutable audit history.
+    const ok = await post('/api/catalog/claude.ai/override', { score: 90, note: 'raised after review by risk-analyst@example.test' });
     assert.strictEqual(ok.status, 200);
     const cat = await (await fetch(`http://127.0.0.1:${port}/api/catalog`, { headers: { cookie } })).json();
     const claude = cat.apps.find((a) => a.destination === 'claude.ai');
-    assert.strictEqual(claude.overrideNote, 'raised per risk committee review');
+    assert.strictEqual(claude.overrideNote, 'raised after review by [EMAIL_ADDRESS]');
     assert.strictEqual(claude.riskOverride, 90);
     assert.ok(!JSON.stringify(cat).includes('524-71-3312'), 'no rejected SSN anywhere in the catalog');
+    assert.ok(!JSON.stringify(cat).includes('risk-analyst@example.test'));
+    const overrideAudit = db.listAudit(100).find((entry) => entry.action === 'CATALOG_SCORE_OVERRIDDEN');
+    assert.ok(overrideAudit);
+    assert.ok(!overrideAudit.detail.includes('risk-analyst@example.test'));
+    assert.match(overrideAudit.detail, /\[EMAIL_ADDRESS\]/);
 
     // A review owner carrying a card-shaped value is rejected by the schema.
     const badReview = await post('/api/catalog/claude.ai/review', { decision: 'govern', reason: 'ok', owner: 'acct 4012888888881881' });

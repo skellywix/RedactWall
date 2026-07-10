@@ -57,6 +57,12 @@ function loopbackHttpFetchOnce(url, opts = {}) {
           ok: res.statusCode >= 200 && res.statusCode < 300,
           status: res.statusCode,
           headers: responseHeaders(res.headers),
+          body: new ReadableStream({
+            start(controller) {
+              if (body.length) controller.enqueue(body);
+              controller.close();
+            },
+          }),
           text: async () => body.toString('utf8'),
           json: async () => JSON.parse(body.toString('utf8')),
           arrayBuffer: async () => body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength),

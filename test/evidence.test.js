@@ -871,7 +871,7 @@ test('examiner-profile pack stamps schemaVersion 3 and stays prompt-free', () =>
     examinerProfile: 'federal_credit_union',
     policy: { alwaysBlock: ['US_SSN', 'MEMBER_ID', 'LOAN_NUMBER', 'BANK_ACCOUNT', 'ROUTING_NUMBER'] },
     auditIntegrity: { ok: true, count: 3 },
-    edm: { enabled: true, fingerprints: 42, minLength: 6, severity: 4, salt: 'edm-salt-should-not-export', fingerprintList: ['deadbeef'] },
+    edm: { enabled: true, fingerprints: 42, minLength: 20, maxWords: 1, severity: 4, salt: 'edm-salt-should-not-export', fingerprintList: ['deadbeef'] },
     catalog: [{ sanctionedStatus: 'unsanctioned', eventCount: 5, notes: 'catalog-note-should-not-export' }],
     queries: [{ id: 'q_1', status: 'pending', findings: [{ type: 'MEMBER_ID', masked: '**** 1234', value: '99881234' }] }],
     audit: [],
@@ -883,7 +883,7 @@ test('examiner-profile pack stamps schemaVersion 3 and stays prompt-free', () =>
   assert.strictEqual(pack.scope.rawPromptBodiesIncluded, false);
   assert.strictEqual(pack.ncuaReadiness.profile, 'federal_credit_union');
   assert.strictEqual(pack.ncuaReadiness.panels.memberData.events, 1);
-  assert.deepStrictEqual(pack.edm, { enabled: true, fingerprints: 42, minLength: 6, maxWords: 0, severity: 4 });
+  assert.deepStrictEqual(pack.edm, { enabled: true, fingerprints: 42, minLength: 20, maxWords: 1, severity: 4 });
   assert.ok(pack.controlMappings.some((item) => item.id === 'member_information_safeguards'));
   assert.ok(!wire.includes('edm-salt-should-not-export'));
   assert.ok(!wire.includes('deadbeef'));

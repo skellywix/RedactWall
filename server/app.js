@@ -30,8 +30,7 @@ const policyImpact = require('./policy-impact');
 const db = require('./db');
 fleet.init(db);
 const auth = require('./auth');
-// SCIM deactivation invalidates already-issued sessions, not just new logins.
-auth.setSessionRevokedCheck((session) => db.identityRevokedSince(session.user, session.iat));
+const { opaqueReference } = require('./audit-reference');
 const dataCrypto = require('./crypto');
 const templates = require('./templates');
 const alerts = require('./alerts');
@@ -42,6 +41,7 @@ const evidence = require('./evidence');
 const securityPackage = require('./security-package');
 const preflight = require('./preflight');
 const validation = require('./validation');
+const { sanitizeSensitiveText } = require('./sensitive-text');
 const coverage = require('./coverage');
 const { safeSensor } = require('./sensor-metadata');
 const insights = require('./insights');
@@ -68,9 +68,25 @@ const routing = require('./routing');
 const workflow = require('./workflow');
 const roles = require('./roles');
 const scim = require('./scim');
+const adminDomain = require('./admin');
 const oidc = require('./oidc');
+const { validOidcUrl } = require('./oidc-url');
+const { createSessionAuthorizationCheck } = require('./session-authorization');
 const identitySetup = require('./identity-setup');
 const updater = require('./updater');
+const { boundedTimeoutMs, requestBodyDeadline, requestBodyDeadlineExpired } = require('./request-body-deadline');
+
+auth.setAccountLookup((userName) => adminDomain.accountLookup(db, userName));
+// A session's signed role is only a claim about login time. Re-read mutable
+// local and SCIM authority on every request so a stale instance cannot mint a
+// usable cookie after another instance demotes or deprovisions the identity.
+auth.setSessionRevokedCheck(createSessionAuthorizationCheck({
+  auth,
+  db,
+  oidcConfig: () => oidc.config(),
+  roles,
+  scim,
+}));
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -101,6 +117,11 @@ const OIDC_STATE_COOKIE_CLEAR_OPTIONS = {
 };
 
 app.disable('x-powered-by');
+app.locals.requestBodyTimeoutMs = boundedTimeoutMs(process.env.REDACTWALL_REQUEST_BODY_TIMEOUT_MS, 30000);
+app.use(requestBodyDeadline({
+  timeoutMs: () => app.locals.requestBodyTimeoutMs,
+  onTimeout: (_req, res) => res.status(408).json({ error: 'request body deadline exceeded' }),
+}));
 
 // Behind a load balancer/proxy, req.ip is otherwise the proxy's address, which
 // collapses per-client ingest throttling into one shared bucket (one bad client
@@ -141,6 +162,7 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '12mb', type: ['application/json', 'application/*+json'] }));
 app.use('/scim/v2', scim.router());
 function jsonErrorHandler(err, req, res, next) {
+  if (requestBodyDeadlineExpired(req)) return undefined;
   if (err && err.type === 'entity.too.large') return res.status(413).json({ error: 'request body too large' });
   if (err instanceof SyntaxError && err.status === 400 && 'body' in err) return res.status(400).json({ error: 'invalid json' });
   return next(err);
@@ -154,14 +176,26 @@ app.get('/readyz', (req, res) => {
   try {
     db.stats();
     const cfg = currentPreflight();
+    const audit = db.auditHealth();
+    if (!audit.ok) {
+      return res.status(503).json({
+        ready: false,
+        database: true,
+        audit: false,
+        configuration: cfg.level,
+        error: 'audit_checkpoint_unavailable',
+      });
+    }
     res.status(cfg.ready ? 200 : 503).json({ ready: cfg.ready, database: true, configuration: cfg.level });
-  } catch (e) {
-    res.status(503).json({ ready: false, database: false, error: String((e && e.message) || e) });
+  } catch {
+    res.status(503).json({ ready: false, database: false, error: 'database_unavailable' });
   }
 });
 
 // ---- Live updates (Server-Sent Events) --------------------------------------
 const sseClients = new Set();
+const IDEMPOTENT_REPLAY = Symbol('redactwall.idempotentReplay');
+const IDEMPOTENT_REPLAY_SNAPSHOT = Symbol('redactwall.idempotentReplaySnapshot');
 function broadcast(event, data) {
   const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
   for (const res of sseClients) { try { res.write(payload); } catch {} }
@@ -170,6 +204,7 @@ function broadcast(event, data) {
 const postureFeedState = { lastAttemptAt: 0, lastSentAt: 0, fingerprint: '' };
 
 function emitSecurityAlert(row, action, opts = {}) {
+  if (row && row[IDEMPOTENT_REPLAY] === true) return;
   fireSecurityAlert(row, { action, ...opts });
   if (!opts.adminEvent) {
     workflow.fireAndPersistApprovalNotification(row, {
@@ -273,16 +308,13 @@ function currentPreflight() {
     secretSource: auth.SECRET_SOURCE,
     dataCryptoEnabled: dataCrypto.ENABLED,
     cookieSecure: SESSION_COOKIE_OPTIONS.secure,
+    requireLicenseBinding: true,
     dbPath: process.env.REDACTWALL_DB_PATH || '',
+    customDetectorsStatus: policy.customDetectorsStatus(),
+    policyStatus: policy.policyStatus(),
+    exactMatchStatus: exactMatch.status(),
+    policySigningKeyStatus: policyBundle.signingKeyStatus({ initialize: true }),
   });
-}
-
-function publicBaseUrl(req) {
-  const forwardedProto = String(req.get('x-forwarded-proto') || '').split(',')[0].trim();
-  const forwardedHost = String(req.get('x-forwarded-host') || '').split(',')[0].trim();
-  const proto = forwardedProto || req.protocol || 'http';
-  const host = forwardedHost || req.get('host') || `localhost:${PORT}`;
-  return `${proto}://${host}`;
 }
 
 function checkIngestKey(req, res, next) {
@@ -341,16 +373,22 @@ function pruneIngestFailures() {
 
 setInterval(pruneIngestFailures, Math.min(INGEST_AUTH_WINDOW_MS, 60000)).unref();
 
+const HELD_RELEASE_STATUSES = new Set(['pending', 'pending_justification']);
+
 // Privacy: only the raw prompt of an item HELD for admin approval is retained,
 // and only sealed (AES-256-GCM). Returns undefined when nothing should be
 // persisted — so allowed/warned/justified items keep ONLY redacted + masked
 // data, and no cleartext member data ever lands on disk.
 function rawToStore(text, status, pol) {
-  const held = status === 'pending' || status === 'pending_justification';
+  const held = HELD_RELEASE_STATUSES.has(status);
   if (!held) return undefined;
   if (pol && pol.storeRawForApproval === false) return undefined;
   const sealed = dataCrypto.seal(text);
   return sealed == null ? undefined : sealed;
+}
+
+function sanitizeDecisionNote(value) {
+  return sanitizeSensitiveText(value);
 }
 
 function scimGroupsForUser(userName) {
@@ -401,22 +439,65 @@ function routeOptionsFor(query = {}, opts = {}) {
   };
 }
 
-function createQuery(query, opts = {}) {
-  const row = db.createQuery(routing.withWorkflow(query, routeOptionsFor(query, opts)));
-  fleet.recordPresence(row);
+function queryWriteParts(query = {}) {
+  const persisted = { ...query };
+  const idempotency = persisted._ingestIdempotency || null;
+  delete persisted._ingestIdempotency;
+  return { persisted, idempotency };
+}
+
+function rowFromQueryWrite(result) {
+  if (result && result.replayed && result.row) {
+    if (!result.replaySnapshot) {
+      const error = new Error('native handoff replay snapshot is unavailable');
+      error.code = 'REDACTWALL_IDEMPOTENCY_INTEGRITY';
+      throw error;
+    }
+    Object.defineProperty(result.row, IDEMPOTENT_REPLAY, { value: true });
+    Object.defineProperty(result.row, IDEMPOTENT_REPLAY_SNAPSHOT, { value: result.replaySnapshot });
+  }
+  return result && result.row;
+}
+
+function isIdempotentReplay(row) {
+  return Boolean(row && row[IDEMPOTENT_REPLAY] === true);
+}
+
+function createQueryWithAudit(query, audit, opts = {}) {
+  const { persisted, idempotency } = queryWriteParts(query);
+  const routed = routing.withWorkflow(persisted, routeOptionsFor(persisted, opts));
+  const result = db.createQueryWithAudit(routed, audit, { idempotency });
+  const row = rowFromQueryWrite(result);
+  if (!result.replayed) fleet.recordPresence(row);
   return row;
 }
 
-function createQueryWithReleaseToken(query) {
-  const routed = routing.withWorkflow(query, routeOptionsFor(query));
+function createQueryWithAudits(query, audits, opts = {}) {
+  const { persisted, idempotency } = queryWriteParts(query);
+  const routed = routing.withWorkflow(persisted, routeOptionsFor(persisted, opts));
+  const result = db.createQueryWithAudits(routed, audits, { idempotency });
+  const row = rowFromQueryWrite(result);
+  if (!result.replayed) fleet.recordPresence(row);
+  return row;
+}
+
+function createQueryWithReleaseToken(query, audit) {
+  const { persisted, idempotency } = queryWriteParts(query);
+  const routed = routing.withWorkflow(persisted, routeOptionsFor(persisted));
   let result;
-  if (routed && (routed.status === 'pending' || routed._tokenVault)) {
+  if (routed && (HELD_RELEASE_STATUSES.has(routed.status) || routed._tokenVault)) {
     const release = releaseTokens.issueReleaseToken();
-    result = { row: db.createQuery({ ...routed, _releaseTokenHash: release.hash }), releaseToken: release.token };
+    const write = db.createQueryWithAudit(
+      { ...routed, _releaseTokenHash: release.hash },
+      audit,
+      { idempotency },
+    );
+    result = { row: rowFromQueryWrite(write), releaseToken: write.replayed ? null : release.token, replayed: write.replayed };
   } else {
-    result = { row: db.createQuery(routed), releaseToken: null };
+    const write = db.createQueryWithAudit(routed, audit, { idempotency });
+    result = { row: rowFromQueryWrite(write), releaseToken: null, replayed: write.replayed };
   }
-  fleet.recordPresence(result.row);
+  if (!result.replayed) fleet.recordPresence(result.row);
   return result;
 }
 
@@ -428,7 +509,7 @@ function releaseTokenPayload(releaseToken) {
 // revocation): a sanitized query row plus an audit entry. Shared so ingest
 // gating stays one place and one shape.
 function writeBillingBlock(body, { status, action, reasons, detail, seatLimit = null, seatsUsed = null }) {
-  const row = createQuery({
+  const row = createQueryWithAudit({
     status,
     mode: 'billing',
     user: body.user || 'unknown',
@@ -447,25 +528,51 @@ function writeBillingBlock(body, { status, action, reasons, detail, seatLimit = 
     reasons,
     seatLimit,
     seatsUsed,
-  });
-  db.appendAudit({ action, queryId: row.id, actor: body.user || 'unknown', detail });
+    _ingestIdempotency: body.idempotency || null,
+  }, { action, actor: body.user || 'unknown', detail });
   return row;
 }
 
 // Vendor kill-switch (connected mode): an active revocation or a stale vendor
 // link blocks ALL sensor ingest, fail-closed, with a distinct status so this
 // reads as a licensing action, not an outage. Nothing fails open.
+function reconcileVendorLicenseState() {
+  if (!vendorLink.enabled()) return { ok: true, synced: false };
+  return vendorLink.reconcileSharedState({
+    lastVendorHeartbeat: (customerId, customerRef) => db.lastVendorHeartbeat(customerId, customerRef),
+  });
+}
+
+function sharedLicenseRevoked() {
+  reconcileVendorLicenseState();
+  return license.isRevoked();
+}
+
+function sharedLicenseStatus() {
+  reconcileVendorLicenseState();
+  return license.publicStatus();
+}
+
+function requireWritableSharedLicense(req, res, next) {
+  reconcileVendorLicenseState();
+  return license.requireWritable(req, res, next);
+}
+
 function blockIfRevoked(req, res) {
-  if (!license.isRevoked()) return false;
+  if (!sharedLicenseRevoked()) return false;
   const body = req.body || {};
   const row = writeBillingBlock(body, {
     status: 'license_revoked',
     action: 'LICENSE_REVOKED_BLOCK',
     reasons: ['license_revoked'],
-    detail: 'tenant=' + (body.orgId || tenant.config().tenantId || 'unknown'),
+    detail: 'tenantRef=' + adminAuditReference('tenant', body.orgId || tenant.config().tenantId || 'unknown'),
   });
+  if (isIdempotentReplay(row)) {
+    res.json(nativeIdempotentReplayResponse(row));
+    return true;
+  }
   broadcast('query', { type: 'license_revoked', query: publicQuery(row) });
-  res.status(403).json({ error: 'license revoked', decision: 'block', status: 'license_revoked' });
+  res.status(403).json({ id: row.id, error: 'license revoked', decision: 'block', status: 'license_revoked' });
   return true;
 }
 
@@ -484,13 +591,27 @@ function enforceTenantForSensor(req, res) {
       status: check.status,
       action: check.action,
       reasons: [check.message],
-      detail: 'tenant=' + (check.orgId || tenant.config().tenantId || 'unknown') + '; seats=' + (check.seatsUsed || 0) + '/' + (check.seatLimit || 0),
+      detail: 'tenantRef=' + adminAuditReference('tenant', check.orgId || tenant.config().tenantId || 'unknown')
+        + '; seats=' + (check.seatsUsed || 0) + '/' + (check.seatLimit || 0),
       seatLimit: check.seatLimit || null,
       seatsUsed: check.seatsUsed || null,
     });
+    if (isIdempotentReplay(row)) {
+      res.json(nativeIdempotentReplayResponse(row));
+      return false;
+    }
     emitSecurityAlert(row, check.action);
     broadcast('query', { type: check.status, query: publicQuery(row) });
     broadcast('stats', db.stats());
+    res.status(check.statusCode || 403).json({
+      id: row.id,
+      error: check.message,
+      decision: 'block',
+      status: check.status,
+      seatLimit: check.seatLimit || undefined,
+      seatsUsed: check.seatsUsed || undefined,
+    });
+    return false;
   }
 
   res.status(check.statusCode || 403).json({
@@ -512,6 +633,9 @@ function runVendorHeartbeat() {
     seatReport: tenant.seatReport(db),
     version: require('../package.json').version,
     appendAudit: (rec) => db.appendAudit(rec),
+    appendAudits: (records) => db.appendAudits(records),
+    applyVendorHeartbeat: (record) => db.applyVendorHeartbeat(record),
+    lastVendorHeartbeat: (customerId, customerRef) => db.lastVendorHeartbeat(customerId, customerRef),
   }).catch(() => {});
 }
 
@@ -525,10 +649,12 @@ function runVendorRestore() {
       appendAudit: (rec) => db.appendAudit(rec),
       // Tamper-evident kill-switch anchors from the hash-chained audit, so the
       // deletable state file cannot lift a revocation or reset staleness.
-      lastVendorHeartbeat: () => db.lastVendorHeartbeat(),
+      lastVendorHeartbeat: (customerId, customerRef) => db.lastVendorHeartbeat(customerId, customerRef),
       firstAuditAt: () => db.firstAuditAt(),
     });
-  } catch (_) { /* staleness backstops */ }
+  } catch (_) {
+    license.setVendorStale(true);
+  }
 }
 
 function runRetentionPurge({ actor = 'system', now = new Date() } = {}) {
@@ -565,19 +691,25 @@ function safeNumber(value, fallback, min = 0, max = 100) {
 }
 
 function safeInstallChecks(checks = []) {
-  return (Array.isArray(checks) ? checks : []).map((check) => ({
-    id: String(check.id || '').slice(0, 80),
-    ok: check.ok === true,
-    ...(check.detail ? { detail: String(check.detail).slice(0, 160) } : {}),
-  }));
+  return (Array.isArray(checks) ? checks : []).map((check) => {
+    const rawId = String(check.id || '').slice(0, 80);
+    const sanitizedId = sanitizeSensitiveText(rawId, 80);
+    return {
+      id: sanitizedId === rawId ? rawId : 'redacted_check_id',
+      ok: check.ok === true,
+      ...(check.detail ? { detail: sanitizeSensitiveText(check.detail, 160) } : {}),
+    };
+  });
 }
 
 function hasSensitivity(analysis) {
-  return !!(analysis && ((analysis.findings || []).length || (analysis.categories || []).length));
+  return !!(analysis && (analysis.opaqueEncoded === true
+    || (analysis.findings || []).length || (analysis.categories || []).length));
 }
 
 function canTokenizeAllSensitivity(analysis) {
-  return !!(analysis && (analysis.findings || []).length && !(analysis.categories || []).length);
+  return !!(analysis && analysis.opaqueEncoded !== true
+    && (analysis.findings || []).length && !(analysis.categories || []).length);
 }
 
 function categoryNames(analysis) {
@@ -585,6 +717,7 @@ function categoryNames(analysis) {
 }
 
 function safePreview(text, analysis, prefix = '', limit = 600) {
+  if (analysis && analysis.opaqueEncoded === true) return prefix + '[REDACTED: OPAQUE_ENCODED_CONTENT]';
   const categories = categoryNames(analysis);
   if (categories.length) return prefix + '[REDACTED: ' + categories.join(', ') + ']';
   return prefix + detector.redact(text, analysis.findings || []).slice(0, limit);
@@ -799,11 +932,12 @@ function blockDestinationByPolicy(res, context = {}, responseExtra = {}) {
     source = 'api',
     channel = 'submit',
     sensor = null,
+    idempotency = null,
     redactedPrompt = null,
     reason = 'Destination blocked by policy',
   } = context;
   const normalized = policy.normalizeDestination(destination);
-  const row = createQuery({
+  const row = createQueryWithAudit({
     status: 'destination_blocked',
     mode: 'destination_block',
     user,
@@ -821,8 +955,9 @@ function blockDestinationByPolicy(res, context = {}, responseExtra = {}) {
     maxSeverity: 0,
     maxSeverityLabel: 'none',
     reasons: [reason],
-  });
-  db.appendAudit({ action: 'DESTINATION_BLOCKED', queryId: row.id, actor: user, detail: `${source}/${channel}: ${normalized}` });
+    _ingestIdempotency: idempotency,
+  }, { action: 'DESTINATION_BLOCKED', actor: user, detail: `${source}/${channel}: ${normalized}` });
+  if (isIdempotentReplay(row)) return res.json(nativeIdempotentReplayResponse(row));
   emitSecurityAlert(row, 'DESTINATION_BLOCKED');
   broadcast('query', { type: 'destination_blocked', query: publicQuery(row) });
   broadcast('stats', db.stats());
@@ -848,10 +983,11 @@ function blockFileUploadByPolicy(res, context = {}, responseExtra = {}) {
     source = 'api',
     channel = 'file_upload',
     sensor = null,
+    idempotency = null,
   } = context;
   const normalized = policy.normalizeDestination(destination);
   const reason = 'File upload blocked by policy';
-  const row = createQuery({
+  const row = createQueryWithAudit({
     status: 'file_upload_blocked',
     mode: 'file_upload_block',
     user,
@@ -869,8 +1005,9 @@ function blockFileUploadByPolicy(res, context = {}, responseExtra = {}) {
     maxSeverity: 0,
     maxSeverityLabel: 'none',
     reasons: [reason],
-  });
-  db.appendAudit({ action: 'FILE_UPLOAD_BLOCKED', queryId: row.id, actor: user, detail: `${source}/${channel}: ${normalized}` });
+    _ingestIdempotency: idempotency,
+  }, { action: 'FILE_UPLOAD_BLOCKED', actor: user, detail: `${source}/${channel}: ${normalized}` });
+  if (isIdempotentReplay(row)) return res.json(nativeIdempotentReplayResponse(row));
   emitSecurityAlert(row, 'FILE_UPLOAD_BLOCKED');
   broadcast('query', { type: 'file_upload_blocked', query: publicQuery(row) });
   broadcast('stats', db.stats());
@@ -936,13 +1073,14 @@ function blockBrowserActionByPolicy(res, context = {}, responseExtra = {}) {
     action = channel || 'paste',
     reason = 'Browser action blocked by policy',
     analysis = null,
+    idempotency = null,
   } = context;
   const normalized = policy.normalizeDestination(destination);
   const normalizedAction = blockedActionLabel(action, source);
   const evidence = blockedActionEvidence(analysis);
   const auditAction = source === 'browser_extension' ? 'BROWSER_ACTION_BLOCKED' : 'CLIENT_ACTION_BLOCKED';
   const promptLabel = source === 'browser_extension' ? 'browser action' : 'client action';
-  const row = createQuery({
+  const row = createQueryWithAudit({
     status: 'action_blocked',
     mode: 'browser_action_block',
     user,
@@ -960,8 +1098,9 @@ function blockBrowserActionByPolicy(res, context = {}, responseExtra = {}) {
     maxSeverity: evidence.maxSeverity,
     maxSeverityLabel: evidence.maxSeverityLabel,
     reasons: [reason],
-  });
-  db.appendAudit({ action: auditAction, queryId: row.id, actor: user, detail: `${source}/${normalizedAction}: ${normalized}` });
+    _ingestIdempotency: idempotency,
+  }, { action: auditAction, actor: user, detail: `${source}/${normalizedAction}: ${normalized}` });
+  if (isIdempotentReplay(row)) return res.json(nativeIdempotentReplayResponse(row));
   emitSecurityAlert(row, auditAction);
   broadcast('query', { type: 'action_blocked', query: publicQuery(row) });
   broadcast('stats', db.stats());
@@ -1006,7 +1145,7 @@ app.post('/api/v1/discovery', checkIngestKey, validation.validateBody(validation
     const events = Math.max(1, Math.min(100000, Number(sighting.events) || 1));
     const createdAt = isoOrNow(sighting.lastSeen);
     observations += events;
-    const row = createQuery({
+    const row = createQueryWithAudit({
       createdAt,
       status: 'shadow_ai',
       mode: 'discovery',
@@ -1030,17 +1169,14 @@ app.post('/api/v1/discovery', checkIngestKey, validation.validateBody(validation
       discoveryConfidence: Number.isFinite(Number(sighting.confidence)) ? Number(sighting.confidence) : null,
       firstSeen: isoOrNull(sighting.firstSeen),
       lastSeen: createdAt,
+    }, {
+      action: 'AI_DISCOVERY_IMPORTED',
+      actor: user,
+      detail: `${source}: destination=${destination}; observations=${events}`,
     });
     rows.push(row);
   }
 
-  const first = rows[0] || null;
-  db.appendAudit({
-    action: 'AI_DISCOVERY_IMPORTED',
-    queryId: first ? first.id : null,
-    actor: user,
-    detail: `${source}: ${rows.length} destinations / ${observations} observations`,
-  });
   for (const row of rows) {
     broadcast('query', { type: 'shadow_ai', query: publicQuery(row) });
   }
@@ -1059,12 +1195,38 @@ app.post('/api/v1/discovery', checkIngestKey, validation.validateBody(validation
   });
 });
 
+function nativeIdempotentReplayResponse(row) {
+  const snapshot = row && row[IDEMPOTENT_REPLAY_SNAPSHOT];
+  if (!snapshot) {
+    const error = new Error('native handoff replay snapshot is unavailable');
+    error.code = 'REDACTWALL_IDEMPOTENCY_INTEGRITY';
+    throw error;
+  }
+  return nativeReplaySnapshotResponse(snapshot);
+}
+
+function nativeReplaySnapshotResponse(snapshot) {
+  const { mode, ...response } = snapshot;
+  return {
+    ...response,
+    ...(mode ? { mode } : {}),
+    idempotentReplay: true,
+  };
+}
+
+function committedNativeIngest(body = {}) {
+  if (!body.idempotency) return null;
+  return db.getIdempotentIngestReplay({ ...body.idempotency, orgId: body.orgId || null });
+}
+
 app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gateSchema), async (req, res) => {
   if (!enforceTenantForSensor(req, res)) return;
+  const committed = committedNativeIngest(req.body || {});
+  if (committed) return res.json(nativeReplaySnapshotResponse(committed));
   const {
     prompt, user = 'unknown', destination = 'unknown', sourceIp = null,
     source = 'api', channel = 'submit', clientOutcome = null, note: rawNote = '', orgId = null,
-    sensor = null,
+    sensor = null, idempotency = null,
   } = req.body || {};
   if (typeof prompt !== 'string' || !prompt.trim()) return res.status(400).json({ error: 'prompt (string) required' });
 
@@ -1072,7 +1234,10 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
   // decisionNote, so scrub it before use: mask detector-known PII, then any
   // remaining routing-code-shaped identifier, so a raw SSN/card/prompt fragment
   // can never be smuggled into immutable history via this free-text field.
-  const note = validation.sanitizeStoredNote(detector.redact(rawNote, detector.analyze(rawNote).findings || []));
+  const note = sanitizeDecisionNote(rawNote);
+  if (clientOutcome === 'justified' && note.trim().length < 4) {
+    return res.status(400).json({ error: 'a business reason of at least 4 characters is required' });
+  }
 
   const clientAccount = (req.body && req.body.clientAccount) || {};
   const accountType = ['personal', 'corporate', 'unknown'].includes(clientAccount.type) ? clientAccount.type : 'unknown';
@@ -1114,7 +1279,7 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
     const reasons = hasSensitivity(analysis)
       ? ['AI-domain request observed by monitor proxy', 'Sensitive content observed locally by proxy monitor']
       : ['AI-domain request observed by monitor proxy'];
-    const row = createQuery({
+    const row = createQueryWithAudit({
       status: 'proxy_observed',
       mode: 'monitor',
       user,
@@ -1132,8 +1297,7 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
       maxSeverity: analysis.maxSeverity || 0,
       maxSeverityLabel: analysis.maxSeverityLabel || 'none',
       reasons,
-    });
-    db.appendAudit({ action: 'PROXY_OBSERVED', queryId: row.id, actor: user, detail: `${source}/${channel}: ${normalized}` });
+    }, { action: 'PROXY_OBSERVED', actor: user, detail: `${source}/${channel}: ${normalized}` });
     emitSecurityAlert(row, 'PROXY_OBSERVED');
     broadcast('query', { type: 'proxy_observed', query: publicQuery(row) });
     broadcast('stats', db.stats());
@@ -1157,6 +1321,7 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
       source,
       channel,
       sensor,
+      idempotency,
       reason: policy.destinationBlockReason(destination, pol),
     });
   }
@@ -1171,12 +1336,13 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
       source,
       channel,
       sensor,
+      idempotency,
       redactedPrompt: '[personal AI account blocked] ' + policy.normalizeDestination(destination),
       reason: 'Personal AI account blocked by policy; sign in with the corporate workspace account',
     });
   }
   if (clientOutcome === 'file_upload_blocked') {
-    return blockFileUploadByPolicy(res, { user, orgId, destination, sourceIp, source, channel, sensor });
+    return blockFileUploadByPolicy(res, { user, orgId, destination, sourceIp, source, channel, sensor, idempotency });
   }
   if (policy.unmanagedInstallBlocked(user, pol)) {
     return blockDestinationByPolicy(res, {
@@ -1187,6 +1353,7 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
       source,
       channel,
       sensor,
+      idempotency,
       redactedPrompt: '[unmanaged install blocked] ' + policy.normalizeDestination(destination),
       reason: 'Unmanaged browser install blocked by policy; enroll the device for managed identity',
     });
@@ -1204,6 +1371,7 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
       source,
       channel,
       sensor,
+      idempotency,
       action: channel,
       reason: browserActionRule
         ? policy.browserActionBlockReason(channel, destination, pol)
@@ -1237,6 +1405,7 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
 
   const base = {
     user, orgId, destination, sourceIp, source, channel, sensor,
+    _ingestIdempotency: idempotency,
     redactedPrompt, findings, categories, entityCounts: analysis.entityCounts,
     riskScore: analysis.riskScore, maxSeverity: analysis.maxSeverity,
     maxSeverityLabel: analysis.maxSeverityLabel, reasons: verdict.reasons,
@@ -1246,10 +1415,36 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
     ...policyDecisionMetadata(verdict),
   };
 
+  // Reversible content that decodes to non-text is not an approval candidate:
+  // no policy mode or later release may turn uninspected bytes into AI egress.
+  // Store only the fixed redacted label and do not mint a release token.
+  if (analysis.opaqueEncoded === true) {
+    const row = createQueryWithAudit({ status: 'blocked_unscannable', mode: 'block', ...base }, {
+      action: 'OPAQUE_ENCODED_BLOCKED', actor: user, detail: `${source}/${channel}: uninspectable reversible encoding`,
+    });
+    if (isIdempotentReplay(row)) return res.json(nativeIdempotentReplayResponse(row));
+    emitSecurityAlert(row, 'OPAQUE_ENCODED_BLOCKED');
+    broadcast('query', { type: 'blocked_unscannable', query: publicQuery(row) });
+    broadcast('stats', db.stats());
+    return res.json({
+      id: row.id,
+      decision: 'block',
+      mode: 'block',
+      status: 'blocked_unscannable',
+      riskScore: analysis.riskScore,
+      findings,
+      categories,
+      reasons: verdict.reasons,
+      message: 'Encoded content could not be inspected and was blocked.',
+    });
+  }
+
   // Man-in-the-Prompt: the sensor stopped a prompt carrying hidden instructions.
   if (clientOutcome === 'injection_blocked') {
-    const row = createQuery({ status: 'injection_blocked', ...base });
-    db.appendAudit({ action: 'INJECTION_BLOCKED', queryId: row.id, actor: user, detail: note || 'hidden instructions detected' });
+    const row = createQueryWithAudit({ status: 'injection_blocked', ...base }, {
+      action: 'INJECTION_BLOCKED', actor: user, detail: note || 'hidden instructions detected',
+    });
+    if (isIdempotentReplay(row)) return res.json(nativeIdempotentReplayResponse(row));
     emitSecurityAlert(row, 'INJECTION_BLOCKED');
     broadcast('query', { type: 'injection_blocked', query: publicQuery(row) });
     broadcast('stats', db.stats());
@@ -1274,12 +1469,15 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
         source,
         channel,
         sensor,
+        idempotency,
         redactedPrompt: '[unapproved AI blocked] ' + policy.normalizeDestination(destination),
         reason: policy.destinationBlockReason(destination, pol),
       });
     }
-    const row = createQuery({ status: 'shadow_ai', ...base });
-    db.appendAudit({ action: 'SHADOW_AI', queryId: row.id, actor: user, detail: `ungoverned AI tool: ${destination}` });
+    const row = createQueryWithAudit({ status: 'shadow_ai', ...base }, {
+      action: 'SHADOW_AI', actor: user, detail: `ungoverned AI tool: ${destination}`,
+    });
+    if (isIdempotentReplay(row)) return res.json(nativeIdempotentReplayResponse(row));
     emitSecurityAlert(row, 'SHADOW_AI');
     broadcast('query', { type: 'shadow_ai', query: publicQuery(row) });
     broadcast('stats', db.stats());
@@ -1289,8 +1487,8 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
   if (clientOutcome === 'file_too_large' || clientOutcome === 'file_unsupported' || clientOutcome === 'ocr_required' || clientOutcome === 'scan_unavailable') {
     const status = clientOutcome === 'ocr_required' ? 'ocr_required' : 'file_blocked_unscanned';
     const action = status === 'ocr_required' ? 'FILE_OCR_REQUIRED' : 'FILE_BLOCKED_UNSCANNED';
-    const row = createQuery({ status, ...base });
-    db.appendAudit({ action, queryId: row.id, actor: user, detail: note || 'file blocked unscanned' });
+    const row = createQueryWithAudit({ status, ...base }, { action, actor: user, detail: note || 'file blocked unscanned' });
+    if (isIdempotentReplay(row)) return res.json(nativeIdempotentReplayResponse(row));
     emitSecurityAlert(row, action);
     broadcast('query', { type: status, query: publicQuery(row) });
     broadcast('stats', db.stats());
@@ -1298,8 +1496,10 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
   }
 
   if (verdict.decision === 'allow' && !remoteHold) {
-    const row = createQuery({ status: 'allowed', ...base });
-    db.appendAudit({ action: 'ALLOWED', queryId: row.id, actor: user, detail: `${source} risk ${analysis.riskScore}` });
+    const row = createQueryWithAudit({ status: 'allowed', ...base }, {
+      action: 'ALLOWED', actor: user, detail: `${source} risk ${analysis.riskScore}`,
+    });
+    if (isIdempotentReplay(row)) return res.json(nativeIdempotentReplayResponse(row));
     emitSecurityAlert(row, 'ALLOWED');
     broadcast('query', { type: 'allowed', query: publicQuery(row) });
     broadcast('stats', db.stats());
@@ -1310,8 +1510,10 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
   }
 
   if (clientOutcome === 'paste_flagged') {
-    const row = createQuery({ status: 'paste_flagged', mode: decisionPolicy.enforcementMode || 'block', ...base });
-    db.appendAudit({ action: 'PASTE_FLAGGED', queryId: row.id, actor: user, detail: note || `${source}/paste: ${verdict.reasons.join('; ')}` });
+    const row = createQueryWithAudit({ status: 'paste_flagged', mode: decisionPolicy.enforcementMode || 'block', ...base }, {
+      action: 'PASTE_FLAGGED', actor: user, detail: note || `${source}/paste: ${verdict.reasons.join('; ')}`,
+    });
+    if (isIdempotentReplay(row)) return res.json(nativeIdempotentReplayResponse(row));
     emitSecurityAlert(row, 'PASTE_FLAGGED');
     broadcast('query', { type: 'paste_flagged', query: publicQuery(row) });
     broadcast('stats', db.stats());
@@ -1331,10 +1533,10 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
   // API/proxy path, defaults to the mode's behaviour.
   let status;
   const wholeChunkClientRedacted = declaredClientPreRedacted && /^\s*\[REDACTED:[^\]]+\]\s*$/i.test(prompt);
-  if (clientOutcome === 'sent_after_warning') status = 'warned_sent';
+  if (clientOutcome === 'sent_after_warning' && mode === 'warn') status = 'warned_sent';
   else if (clientOutcome === 'redacted_sent') status = canTokenizeAllSensitivity(analysis) || wholeChunkClientRedacted ? 'redacted' : 'pending';
   else if (clientOutcome === 'redacted_available') status = canTokenizeAllSensitivity(analysis) || wholeChunkClientRedacted ? 'redacted' : 'pending';
-  else if (clientOutcome === 'justified') status = 'justified';
+  else if (clientOutcome === 'justified' && mode === 'justify') status = 'justified';
   else if (clientOutcome === 'blocked_by_user') status = 'blocked_by_user';
   else if (clientOutcome === 'awaiting_approval') status = 'pending';
   else if (mode === 'redact') status = canTokenizeAllSensitivity(analysis) ? 'redacted' : 'pending';
@@ -1369,18 +1571,18 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
     tokenizedPrompt = prompt;
   }
 
-  const { row, releaseToken } = createQueryWithReleaseToken({
-    status, mode, ...base, decisionNote: note,
-    _rawPrompt: rawToStore(prompt, status, decisionPolicy),
-    _tokenVault: tokenVault,
-    tokenizedPrompt,
-  });
   const action = status === 'pending' ? 'BLOCKED'
     : status === 'redacted' ? 'REDACTED'
     : status === 'justified' ? 'JUSTIFIED'
     : status === 'warned_sent' ? 'WARNED_SENT'
     : status === 'blocked_by_user' ? 'SELF_BLOCKED' : 'FLAGGED';
-  db.appendAudit({ action, queryId: row.id, actor: user, detail: `${source}/${channel}: ${verdict.reasons.join('; ')}` });
+  const { row, releaseToken } = createQueryWithReleaseToken({
+    status, mode, ...base, decisionNote: note,
+    _rawPrompt: rawToStore(prompt, status, decisionPolicy),
+    _tokenVault: tokenVault,
+    tokenizedPrompt,
+  }, { action, actor: user, detail: `${source}/${channel}: ${verdict.reasons.join('; ')}` });
+  if (isIdempotentReplay(row)) return res.json(nativeIdempotentReplayResponse(row));
   emitSecurityAlert(row, action);
   broadcast('query', { type: status, query: publicQuery(row) });
   broadcast('stats', db.stats());
@@ -1421,7 +1623,22 @@ app.post('/api/v1/heartbeat', checkIngestKey, validation.validateBody(validation
   const failedChecks = failedInstallCheckIds(checks);
   const aiToolAttention = endpointAiToolAttentionIds(checks);
   const mcpServerAttention = endpointMcpServerAttentionIds(checks);
-  const row = createQuery({
+  const heartbeatAudits = [{
+    action: failedChecks.length ? 'SENSOR_HEALTH_ATTENTION' : 'SENSOR_HEARTBEAT',
+    actor: user,
+    detail: JSON.stringify({ source, failedChecks, aiToolAttention, mcpServerAttention, checkCount: checks.length }),
+  }];
+  if (aiToolAttention.length) heartbeatAudits.push({
+    action: 'ENDPOINT_AI_TOOL_ATTENTION',
+    actor: user,
+    detail: JSON.stringify({ source, unapprovedTools: aiToolAttention }),
+  });
+  if (mcpServerAttention.length) heartbeatAudits.push({
+    action: 'ENDPOINT_MCP_SERVER_ATTENTION',
+    actor: user,
+    detail: JSON.stringify({ source, unapprovedServers: mcpServerAttention }),
+  });
+  const row = createQueryWithAudits({
     status: 'sensor_heartbeat',
     mode: 'sensor_health',
     user,
@@ -1445,29 +1662,7 @@ app.post('/api/v1/heartbeat', checkIngestKey, validation.validateBody(validation
           ? ['Endpoint MCP server inventory attention: ' + mcpServerAttention.join(', ')]
           : ['Sensor heartbeat OK'],
     installChecks: checks,
-  });
-  db.appendAudit({
-    action: failedChecks.length ? 'SENSOR_HEALTH_ATTENTION' : 'SENSOR_HEARTBEAT',
-    queryId: row.id,
-    actor: user,
-    detail: JSON.stringify({ source, failedChecks, aiToolAttention, mcpServerAttention, checkCount: checks.length }),
-  });
-  if (aiToolAttention.length) {
-    db.appendAudit({
-      action: 'ENDPOINT_AI_TOOL_ATTENTION',
-      queryId: row.id,
-      actor: user,
-      detail: JSON.stringify({ source, unapprovedTools: aiToolAttention }),
-    });
-  }
-  if (mcpServerAttention.length) {
-    db.appendAudit({
-      action: 'ENDPOINT_MCP_SERVER_ATTENTION',
-      queryId: row.id,
-      actor: user,
-      detail: JSON.stringify({ source, unapprovedServers: mcpServerAttention }),
-    });
-  }
+  }, heartbeatAudits);
   if (failedChecks.length) emitSecurityAlert(row, 'SENSOR_HEALTH_ATTENTION');
   else {
     try { emitSensorVersionGapAlert(row); } catch {}
@@ -1491,7 +1686,7 @@ app.post('/api/v1/heartbeat', checkIngestKey, validation.validateBody(validation
 app.post('/api/v1/rehydrate', checkIngestKey, validation.validateBody(validation.rehydrateSchema), (req, res) => {
   // A revoked license closes the token-rehydration surface too (it recovers
   // original PII behind redaction tokens), consistent with the ingest gate.
-  if (license.isRevoked()) return res.status(403).json({ error: 'license revoked', status: 'license_revoked' });
+  if (sharedLicenseRevoked()) return res.status(403).json({ error: 'license revoked', status: 'license_revoked' });
   const { id, text } = req.body || {};
   const q = id && db.getQuery(id);
   if (!q) return res.status(404).json({ error: 'not found' });
@@ -1515,6 +1710,7 @@ function sensorSafePolicy() {
     ignore: p.ignore || [],
     disabledDetectors: p.disabledDetectors || [],
     customDetectors: policy.customDetectorsForSensors(),
+    exactMatch: exactMatch.exactMatchConfig(),
     governedDestinations: p.governedDestinations,
     allowedDestinations: p.allowedDestinations || [],
     blockedDestinations: p.blockedDestinations || [],
@@ -1535,12 +1731,13 @@ function sensorSafePolicy() {
 }
 
 app.get('/api/v1/policy', checkIngestKey, (req, res) => {
+  // Legacy diagnostics only. Sensors never authorize from this unsigned view.
   res.json(sensorSafePolicy());
 });
 
-// Signed, versioned, expiring policy bundle. Sensors verify with the public key
-// (GET /api/v1/policy/pubkey) and FAIL CLOSED when the bundle is unverifiable or
-// stale — moving policy trust to the sensor edge.
+// Signed, versioned, expiring policy bundle. Sensors verify with an independently
+// provisioned public-key pin and fail closed when the bundle is unverifiable or
+// stale. The pubkey endpoint below is inventory only, never a trust bootstrap.
 app.get('/api/v1/policy/bundle', checkIngestKey, (req, res) => {
   res.json(policyBundle.buildBundle(sensorSafePolicy()));
 });
@@ -1584,10 +1781,10 @@ app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation
     // it did before. Hold it unscanned, matching the supported-but-unreadable
     // path below and the sensors' local fail-closed behavior.
     const reason = 'Unsupported file type held: cannot be inspected before send';
-    const row = createQuery({ status: 'file_blocked_unscanned', user, orgId, destination, source, channel, sensor,
+    const row = createQueryWithAudit({ status: 'file_blocked_unscanned', user, orgId, destination, source, channel, sensor,
       redactedPrompt: '[unsupported file] ' + fileLabel, findings: [], categories: [], entityCounts: {},
-      riskScore: 0, maxSeverity: 0, maxSeverityLabel: 'none', reasons: [reason] });
-    db.appendAudit({ action: 'FILE_BLOCKED_UNSUPPORTED', queryId: row.id, actor: user, detail: fileLabel });
+      riskScore: 0, maxSeverity: 0, maxSeverityLabel: 'none', reasons: [reason] },
+    { action: 'FILE_BLOCKED_UNSUPPORTED', actor: user, detail: fileLabel });
     emitSecurityAlert(row, 'FILE_BLOCKED_UNSUPPORTED');
     broadcast('query', { type: 'file_blocked_unscanned', query: publicQuery(row) });
     broadcast('stats', db.stats());
@@ -1602,12 +1799,11 @@ app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation
     const reason = ocrRequired ? 'OCR is required before this file can be inspected'
       : extracted.error === 'timeout' ? 'File extraction timed out before inspection completed'
       : 'File could not be inspected';
-    const row = createQuery({ status, user, orgId, destination, source, channel, sensor,
+    const action = ocrRequired ? 'FILE_OCR_REQUIRED' : 'FILE_BLOCKED_UNREADABLE';
+    const row = createQueryWithAudit({ status, user, orgId, destination, source, channel, sensor,
       filename: fileLabel, processor: extracted.processor, redactedPrompt: (ocrRequired ? '[ocr required file] ' : '[unreadable file] ') + fileLabel,
       findings: [], categories: [], entityCounts: {}, riskScore: 0, maxSeverity: 0, maxSeverityLabel: 'none',
-      reasons: [reason] });
-    const action = ocrRequired ? 'FILE_OCR_REQUIRED' : 'FILE_BLOCKED_UNREADABLE';
-    db.appendAudit({ action, queryId: row.id, actor: user, detail: `${fileLabel}: ${extracted.error || 'extract_failed'}` });
+      reasons: [reason] }, { action, actor: user, detail: `${fileLabel}: ${extracted.error || 'extract_failed'}` });
     emitSecurityAlert(row, action);
     broadcast('query', { type: status, query: publicQuery(row) });
     broadcast('stats', db.stats());
@@ -1638,9 +1834,33 @@ app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation
     scoreBreakdown: analysis.scoreBreakdown, regulations: analysis.regulations,
     ...policyDecisionMetadata(verdict) };
 
+  if (analysis.opaqueEncoded === true) {
+    const reasons = verdict.reasons && verdict.reasons.length
+      ? verdict.reasons : ['Opaque reversible encoding could not be inspected'];
+    const row = createQueryWithAudit({ status: 'file_blocked_unscanned', mode: 'block', ...base, reasons }, {
+      action: 'FILE_BLOCKED_UNSCANNABLE', actor: user, detail: `${fileLabel}: uninspectable reversible encoding`,
+    });
+    emitSecurityAlert(row, 'FILE_BLOCKED_UNSCANNABLE');
+    broadcast('query', { type: 'file_blocked_unscanned', query: publicQuery(row) });
+    broadcast('stats', db.stats());
+    return res.json({
+      id: row.id,
+      decision: 'block',
+      mode: 'block',
+      status: 'file_blocked_unscanned',
+      supported: true,
+      inspected: false,
+      filename: fileLabel,
+      findings,
+      categories,
+      reasons,
+    });
+  }
+
   if (verdict.decision === 'allow') {
-    const row = createQuery({ status: 'allowed', ...base });
-    db.appendAudit({ action: 'FILE_ALLOWED', queryId: row.id, actor: user, detail: fileLabel + ' risk ' + analysis.riskScore });
+    const row = createQueryWithAudit({ status: 'allowed', ...base }, {
+      action: 'FILE_ALLOWED', actor: user, detail: fileLabel + ' risk ' + analysis.riskScore,
+    });
     emitSecurityAlert(row, 'FILE_ALLOWED');
     broadcast('query', { type: 'allowed', query: publicQuery(row) }); broadcast('stats', db.stats());
     return res.json({ id: row.id, decision: 'allow', supported: true, filename: fileLabel, riskScore: analysis.riskScore, findings, categories });
@@ -1658,13 +1878,12 @@ app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation
     tokenizedPrompt = '[file:' + fileLabel + ']\n' + t.text;
     tokenVault = dataCrypto.seal(JSON.stringify(t.map));
   }
-  const { row, releaseToken } = createQueryWithReleaseToken({
-    status, mode, ...base, _rawPrompt: rawToStore(rawFile, status, decisionPolicy), _tokenVault: tokenVault, tokenizedPrompt,
-  });
   const action = status === 'pending' ? 'FILE_BLOCKED'
     : status === 'redacted' ? 'FILE_REDACTED'
     : 'FILE_FLAGGED';
-  db.appendAudit({ action, queryId: row.id, actor: user, detail: fileLabel + ': ' + verdict.reasons.join('; ') });
+  const { row, releaseToken } = createQueryWithReleaseToken({
+    status, mode, ...base, _rawPrompt: rawToStore(rawFile, status, decisionPolicy), _tokenVault: tokenVault, tokenizedPrompt,
+  }, { action, actor: user, detail: fileLabel + ': ' + verdict.reasons.join('; ') });
   emitSecurityAlert(row, action);
   broadcast('query', { type: status, query: publicQuery(row) }); broadcast('stats', db.stats());
   res.json({
@@ -1705,17 +1924,30 @@ app.post('/api/v1/scan-response', checkIngestKey, validation.validateBody(valida
   const categories = (analysis.categories || []).map((c) => c.category);
   const redacted = safePreview(text, analysis);
 
+  if (analysis.opaqueEncoded === true) {
+    const reasons = ['Opaque reversible encoding could not be inspected'];
+    const row = createQueryWithAudit({ status: 'response_blocked', mode: 'response_block', user, orgId, destination, source, channel: 'ai_response', sensor,
+      redactedPrompt: '[AI response withheld] opaque encoded content', findings, categories, entityCounts: analysis.entityCounts,
+      riskScore: analysis.riskScore, maxSeverity: analysis.maxSeverity, maxSeverityLabel: analysis.maxSeverityLabel,
+      scoreBreakdown: analysis.scoreBreakdown, regulations: analysis.regulations, reasons },
+    { action: 'RESPONSE_BLOCKED', actor: user, detail: `${source}: uninspectable reversible encoding` });
+    emitSecurityAlert(row, 'RESPONSE_BLOCKED');
+    broadcast('query', { type: 'response_blocked', query: publicQuery(row) });
+    broadcast('stats', db.stats());
+    return res.json({ leaked: true, decision: 'block', status: 'response_blocked', blocked: true, findings, categories, redacted, reasons });
+  }
+
   // Second-layer scanner outage under fail mode 'hold': the operator requires
   // the vendor-side scan, so an un-vetted response must NOT return 'allow'. Fail
   // closed by blocking, mirroring the gate path's remoteHold handling — a local
   // "nothing found" is not sufficient when the required second layer never ran.
   if (analysis.remoteScanFailed === true) {
     const reasons = ['Second-layer response scan unavailable', 'Fail mode: hold'];
-    const row = createQuery({ status: 'response_blocked', mode: 'response_block', user, orgId, destination, source, channel: 'ai_response', sensor,
+    const row = createQueryWithAudit({ status: 'response_blocked', mode: 'response_block', user, orgId, destination, source, channel: 'ai_response', sensor,
       redactedPrompt: '[AI response withheld] second-layer scan unavailable', findings, categories, entityCounts: analysis.entityCounts,
       riskScore: analysis.riskScore, maxSeverity: analysis.maxSeverity, maxSeverityLabel: analysis.maxSeverityLabel,
-      scoreBreakdown: analysis.scoreBreakdown, regulations: analysis.regulations, reasons });
-    db.appendAudit({ action: 'RESPONSE_BLOCKED', queryId: row.id, actor: user, detail: `${source}: second-layer scan unavailable` });
+      scoreBreakdown: analysis.scoreBreakdown, regulations: analysis.regulations, reasons },
+    { action: 'RESPONSE_BLOCKED', actor: user, detail: `${source}: second-layer scan unavailable` });
     emitSecurityAlert(row, 'RESPONSE_BLOCKED');
     broadcast('query', { type: 'response_blocked', query: publicQuery(row) });
     broadcast('stats', db.stats());
@@ -1725,12 +1957,12 @@ app.post('/api/v1/scan-response', checkIngestKey, validation.validateBody(valida
   const leaked = findings.length > 0 || categories.length > 0;
   const outcome = responseScanOutcome(pol.responseScanMode);
   if (leaked) {
-    const row = createQuery({ status: outcome.status, mode: 'response_' + outcome.decision, user, orgId, destination, source, channel: 'ai_response', sensor,
+    const row = createQueryWithAudit({ status: outcome.status, mode: 'response_' + outcome.decision, user, orgId, destination, source, channel: 'ai_response', sensor,
       redactedPrompt: '[AI response] ' + redacted, findings, categories, entityCounts: analysis.entityCounts,
       riskScore: analysis.riskScore, maxSeverity: analysis.maxSeverity, maxSeverityLabel: analysis.maxSeverityLabel,
       scoreBreakdown: analysis.scoreBreakdown, regulations: analysis.regulations,
-      reasons: ['Sensitive data present in AI response', 'Response scan mode: ' + outcome.decision] });
-    db.appendAudit({ action: outcome.action, queryId: row.id, actor: user, detail: `${source}: ${findings.map((f) => f.type).join(', ') || categories.join(', ')}` });
+      reasons: ['Sensitive data present in AI response', 'Response scan mode: ' + outcome.decision] },
+    { action: outcome.action, actor: user, detail: `${source}: ${findings.map((f) => f.type).join(', ') || categories.join(', ')}` });
     emitSecurityAlert(row, outcome.action);
     broadcast('query', { type: outcome.status, query: publicQuery(row) });
     broadcast('stats', db.stats());
@@ -1747,13 +1979,72 @@ app.post('/api/v1/scan-response', checkIngestKey, validation.validateBody(valida
   });
 });
 
+function revokedReleaseResponse(res) {
+  return res.status(403).json({ error: 'license_revoked', status: 'license_revoked', released: false });
+}
+
+function justificationResolution(outcome) {
+  return outcome === 'justified'
+    ? { decision: 'allow', action: 'JUSTIFIED' }
+    : { decision: 'block', action: 'SELF_BLOCKED' };
+}
+
+function transitionJustification(q, outcome, note) {
+  const resolution = justificationResolution(outcome);
+  const transition = db.transitionQueryWithAudit(q.id, {
+    status: 'pending_justification', mode: 'justify', _releaseTokenHash: q._releaseTokenHash,
+  }, {
+    status: outcome,
+    decidedBy: q.user || 'sensor',
+    decidedAt: new Date().toISOString(),
+    decisionNote: note,
+    _rawPrompt: undefined,
+    _releaseTokenHash: undefined,
+  }, {
+    action: resolution.action,
+    actor: q.user || 'sensor',
+    detail: note || 'User cancelled the justification request',
+  });
+  return { resolution, transition };
+}
+
+function resolveJustificationRequest(req, res) {
+  if (sharedLicenseRevoked()) return revokedReleaseResponse(res);
+  const q = db.getQuery(req.params.id);
+  if (!q) return res.status(404).json({ error: 'not found' });
+  if (q.status !== 'pending_justification' || q.mode !== 'justify') {
+    return res.status(409).json({ error: `already ${q.status}` });
+  }
+  const releaseToken = req.get('x-release-token') || '';
+  if (!q._releaseTokenHash || !releaseTokens.verifyReleaseToken(q, releaseToken)) {
+    return res.status(401).json({ error: 'invalid release token' });
+  }
+  const note = sanitizeDecisionNote(req.body.note);
+  if (req.body.outcome === 'justified' && note.trim().length < 4) {
+    return res.status(400).json({ error: 'a business reason of at least 4 characters is required' });
+  }
+  const { resolution, transition } = transitionJustification(q, req.body.outcome, note);
+  if (transition.outcome !== 'updated') return res.status(409).json({ error: 'already decided' });
+  emitSecurityAlert(transition.row, resolution.action);
+  broadcast('decision', { id: q.id, status: req.body.outcome });
+  broadcast('stats', db.stats());
+  return res.json({ id: q.id, decision: resolution.decision, status: req.body.outcome });
+}
+
+app.post('/api/v1/justify/:id', checkIngestKey,
+  validation.validateBody(validation.resolveJustificationSchema), resolveJustificationRequest);
+
 // Client polls for release decision.
 app.get('/api/v1/status/:id', checkIngestKey, (req, res) => {
+  if (sharedLicenseRevoked()) return revokedReleaseResponse(res);
   const q = db.getQuery(req.params.id);
   if (!q) return res.status(404).json({ error: 'not found' });
   const releaseToken = req.get('x-release-token') || '';
-  if (!releaseTokens.verifyReleaseToken(q, releaseToken)) return res.status(401).json({ error: 'invalid release token' });
-  const released = q.status === 'approved' || q.status === 'allowed';
+  if ((HELD_RELEASE_STATUSES.has(q.status) && !q._releaseTokenHash)
+      || !releaseTokens.verifyReleaseToken(q, releaseToken)) {
+    return res.status(401).json({ error: 'invalid release token' });
+  }
+  const released = q.status === 'approved' || q.status === 'allowed' || q.status === 'justified';
   res.json({ id: q.id, status: q.status, released });
 });
 
@@ -1764,38 +2055,79 @@ app.get('/api/v1/openapi.json', (req, res) => res.json(openapi.document()));
 // =============================================================================
 // AUTH
 // =============================================================================
+function canonicalLoginIdentity(value) {
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\u0000-\u001F\u007F]/g, '')
+    .slice(0, 128);
+  return normalized || '?';
+}
+
+function rejectAdminMfa(res, key, ipKey, account) {
+  const result = auth.registerFail(key);
+  const ipResult = auth.registerFail(ipKey);
+  const remaining = Math.min(result.remaining, ipResult.remaining);
+  db.appendAudit({
+    action: 'ADMIN_MFA_FAILED',
+    actor: account.user,
+    detail: result.locked || ipResult.locked ? 'locked out' : (remaining + ' attempts left'),
+  });
+  return res.status(401).json({ error: 'invalid mfa code', mfaRequired: true, remaining });
+}
+
+function successfulLoginAudit(account) {
+  return { action: roles.loginAuditAction(account.role), actor: account.user, detail: account.role };
+}
+
 app.post('/api/login', validation.validateBody(validation.loginSchema), (req, res) => {
   const { user, password, otp } = req.body || {};
-  const key = (user || '?') + '|' + (req.ip || (req.connection && req.connection.remoteAddress) || '');
-  const st = auth.loginStatus(key);
-  if (st.locked) {
-    db.appendAudit({ action: 'LOGIN_LOCKED', actor: user || '?', detail: 'too many attempts' });
-    return res.status(429).json({ error: 'too many attempts — temporarily locked', retryMs: st.retryMs });
+  const loginIdentity = canonicalLoginIdentity(user);
+  const client = req.ip || (req.connection && req.connection.remoteAddress) || 'unknown';
+  const key = loginIdentity + '|' + client;
+  const ipKey = 'login-ip|' + client;
+  const statuses = [auth.loginStatus(key), auth.loginStatus(ipKey)];
+  const locked = statuses.find((status) => status.locked);
+  if (locked) {
+    return res.status(429).json({ error: 'too many attempts — temporarily locked', retryMs: locked.retryMs });
   }
   const account = auth.authenticate(user, password);
   if (!account) {
     const r = auth.registerFail(key);
-    db.appendAudit({ action: 'LOGIN_FAILED', actor: user || '?', detail: r.locked ? 'locked out' : (r.remaining + ' attempts left') });
-    return res.status(401).json({ error: 'invalid credentials', remaining: r.remaining });
+    const ipResult = auth.registerFail(ipKey);
+    const remaining = Math.min(r.remaining, ipResult.remaining);
+    const newlyLocked = r.newlyLocked || ipResult.newlyLocked;
+    db.appendAudit({
+      action: newlyLocked ? 'LOGIN_LOCKED' : 'LOGIN_FAILED',
+      actor: opaqueReference('login', loginIdentity),
+      detail: newlyLocked ? 'locked out' : (remaining + ' attempts left'),
+    });
+    return res.status(401).json({ error: 'invalid credentials', remaining });
   }
+  let recoveryIndex = -1;
   if (account.role === 'security_admin' && auth.ADMIN_MFA_REQUIRED && !auth.verifyTotpCode(otp)) {
-    const recoveryIndex = auth.recoveryCodeIndex(otp);
-    if (recoveryIndex < 0 || !db.consumeMfaRecoveryCode(recoveryIndex)) {
-      const r = auth.registerFail(key);
-      db.appendAudit({ action: 'ADMIN_MFA_FAILED', actor: account.user, detail: r.locked ? 'locked out' : (r.remaining + ' attempts left') });
-      return res.status(401).json({ error: 'invalid mfa code', mfaRequired: true, remaining: r.remaining });
-    }
-    db.appendAudit({ action: 'ADMIN_MFA_RECOVERY_USED', actor: account.user, detail: `recovery code ${recoveryIndex + 1} of ${auth.MFA_RECOVERY_CODE_COUNT} consumed` });
+    recoveryIndex = auth.recoveryCodeIndex(otp);
+    if (recoveryIndex < 0) return rejectAdminMfa(res, key, ipKey, account);
+  }
+  const loginAudit = successfulLoginAudit(account);
+  if (recoveryIndex >= 0) {
+    const consumed = db.consumeMfaRecoveryCodeWithAudits(recoveryIndex, [
+      {
+        action: 'ADMIN_MFA_RECOVERY_USED',
+        actor: account.user,
+        detail: `recovery code ${recoveryIndex + 1} of ${auth.MFA_RECOVERY_CODE_COUNT} consumed`,
+      },
+      loginAudit,
+    ]);
+    if (!consumed) return rejectAdminMfa(res, key, ipKey, account);
+  } else {
+    db.appendAudit(loginAudit);
   }
   auth.registerSuccess(key);
+  auth.registerSuccess(ipKey);
   const token = auth.createSession(account.user, account.role);
   res.cookie(auth.SESSION_COOKIE_NAME, token, SESSION_COOKIE_OPTIONS);
   for (const legacyCookie of auth.LEGACY_SESSION_COOKIE_NAMES) res.clearCookie(legacyCookie, SESSION_COOKIE_CLEAR_OPTIONS);
-  db.appendAudit({
-    action: roles.loginAuditAction(account.role),
-    actor: account.user,
-    detail: account.role,
-  });
   res.json({ ok: true, user: account.user, role: account.role });
 });
 
@@ -1803,11 +2135,24 @@ app.get('/api/login-options', (req, res) => {
   res.json({ oidc: oidc.publicOptions(), defaultAdminCredential: auth.ADMIN_PASSWORD_IS_DEFAULT });
 });
 
+function allowOidcAttempt(req, res) {
+  const client = req.ip || (req.connection && req.connection.remoteAddress) || 'unknown';
+  const attempt = oidc.consumeLoginAttempt(client);
+  if (attempt.allowed) return true;
+  if (attempt.newlyLocked) {
+    db.appendAudit({ action: 'OIDC_RATE_LIMITED', actor: 'oidc', detail: 'client attempt limit reached' });
+  }
+  res.status(429).json({ error: 'too many oidc attempts', retryMs: attempt.retryMs });
+  return false;
+}
+
 app.get('/auth/oidc/start', async (req, res) => {
+  if (!allowOidcAttempt(req, res)) return;
   try {
     const redirect = await oidc.buildAuthorizationRedirect({
       req,
       returnTo: req.query.returnTo,
+      stepUp: req.query.stepUp === '1',
     });
     res.cookie(oidc.STATE_COOKIE_NAME, redirect.cookieValue, OIDC_STATE_COOKIE_OPTIONS);
     res.redirect(redirect.url);
@@ -1818,6 +2163,7 @@ app.get('/auth/oidc/start', async (req, res) => {
 });
 
 app.get('/auth/oidc/callback', async (req, res) => {
+  if (!allowOidcAttempt(req, res)) return;
   try {
     const result = await oidc.handleCallback({
       req,
@@ -1825,14 +2171,14 @@ app.get('/auth/oidc/callback', async (req, res) => {
       stateCookie: req.cookies && req.cookies[oidc.STATE_COOKIE_NAME],
     });
     const token = auth.createSession(result.account.user, result.account.role, result.sessionExtras);
-    res.cookie(auth.SESSION_COOKIE_NAME, token, SESSION_COOKIE_OPTIONS);
-    for (const legacyCookie of auth.LEGACY_SESSION_COOKIE_NAMES) res.clearCookie(legacyCookie, SESSION_COOKIE_CLEAR_OPTIONS);
-    res.clearCookie(oidc.STATE_COOKIE_NAME, OIDC_STATE_COOKIE_CLEAR_OPTIONS);
     db.appendAudit({
       action: roles.loginAuditAction(result.account.role),
       actor: result.account.user,
       detail: result.account.role + '; oidc',
     });
+    res.cookie(auth.SESSION_COOKIE_NAME, token, SESSION_COOKIE_OPTIONS);
+    for (const legacyCookie of auth.LEGACY_SESSION_COOKIE_NAMES) res.clearCookie(legacyCookie, SESSION_COOKIE_CLEAR_OPTIONS);
+    res.clearCookie(oidc.STATE_COOKIE_NAME, OIDC_STATE_COOKIE_CLEAR_OPTIONS);
     res.redirect(result.returnTo || '/app/');
   } catch (err) {
     db.appendAudit({ action: 'OIDC_LOGIN_FAILED', actor: 'oidc', detail: oidc.publicError(err) });
@@ -1843,18 +2189,19 @@ app.get('/auth/oidc/callback', async (req, res) => {
 
 const sessionWrite = [auth.requireAuth, auth.requireCsrf];
 const adminRead = [auth.requireAuth, auth.requireRole(roles.SECURITY_ADMIN)];
-// license.requireWritable is appended LAST: past the license grace window it
-// returns 403 license_readonly for config writes, but exempts /api/queries/
-// (reveal/assign keep the approval workflow alive) and the license-install
-// route. It never gates ingest, SCIM, or decision routes — the security
-// function must never be disabled for billing.
-const adminWrite = [auth.requireAuth, auth.requireCsrf, auth.requireRole(roles.SECURITY_ADMIN), license.requireWritable];
+// The shared-state wrapper around license.requireWritable is appended LAST:
+// it reconciles another replica's verdict, then returns 403 for read-only or
+// revoked config writes while preserving the approval and recovery exemptions.
+const adminWrite = [auth.requireAuth, auth.requireCsrf, auth.requireRole(roles.SECURITY_ADMIN), requireWritableSharedLicense];
 const decisionWrite = [auth.requireAuth, auth.requireCsrf, auth.requireRole(roles.SECURITY_ADMIN, roles.APPROVER)];
 // Compliance evidence exports: the auditor's whole job, without admin power.
 const auditRead = [auth.requireAuth, auth.requireRole(roles.SECURITY_ADMIN, roles.AUDITOR)];
 // Fleet/runtime operations: updates, posture triage, delivery checks - no policy power.
 const operatorRead = [auth.requireAuth, auth.requireRole(roles.SECURITY_ADMIN, roles.OPERATOR)];
-const operatorWrite = [auth.requireAuth, auth.requireCsrf, auth.requireRole(roles.SECURITY_ADMIN, roles.OPERATOR), license.requireWritable];
+const operatorWrite = [auth.requireAuth, auth.requireCsrf, auth.requireRole(roles.SECURITY_ADMIN, roles.OPERATOR), requireWritableSharedLicense];
+const administrationRead = [auth.requireAuth, auth.requireRole(roles.SECURITY_ADMIN, roles.OPERATOR, roles.AUDITOR)];
+const administrationWrite = [auth.requireAuth, auth.requireCsrf, auth.requireRole(roles.SECURITY_ADMIN), requireWritableSharedLicense];
+const administrationLicenseInstall = [auth.requireAuth, auth.requireCsrf, auth.requireRole(roles.SECURITY_ADMIN)];
 const API_MAX_LIST_LIMIT = 5000;
 
 function boundedApiLimit(value, fallback = 200, max = API_MAX_LIST_LIMIT) {
@@ -1869,6 +2216,11 @@ app.get('/api/csrf', auth.requireAuth, (req, res) => {
 });
 
 app.post('/api/logout', ...sessionWrite, (req, res) => {
+  const revocationKey = req.user.jti ? `session:${req.user.jti}` : req.user.user;
+  db.mutateWithAudit(
+    () => ({ revoked: db.revokeIdentity(revocationKey) }),
+    { action: 'LOGOUT', actor: req.user.user, detail: 'session invalidated' },
+  );
   res.clearCookie(auth.SESSION_COOKIE_NAME, SESSION_COOKIE_CLEAR_OPTIONS);
   for (const legacyCookie of auth.LEGACY_SESSION_COOKIE_NAMES) res.clearCookie(legacyCookie, SESSION_COOKIE_CLEAR_OPTIONS);
   res.json({ ok: true });
@@ -1895,8 +2247,8 @@ app.post('/api/auth/step-up', ...sessionWrite, (req, res) => {
   }
   auth.registerSuccess(key);
   const elevated = auth.elevateSession(req.user);
-  res.cookie(auth.SESSION_COOKIE_NAME, elevated, SESSION_COOKIE_OPTIONS);
   db.appendAudit({ action: 'STEP_UP_GRANTED', actor: user, detail: `elevated for ${Math.round(auth.STEP_UP_TTL_MS / 60000)} min` });
+  res.cookie(auth.SESSION_COOKIE_NAME, elevated, SESSION_COOKIE_OPTIONS);
   res.json({ ok: true, stepUpUntil: Date.now() + auth.STEP_UP_TTL_MS });
 });
 
@@ -1962,6 +2314,78 @@ app.get('/api/me', auth.requireAuth, (req, res) => {
   });
 });
 
+function adminReason(body = {}) {
+  return sanitizeDecisionNote(body.reason);
+}
+
+function adminAuditReference(kind, value) {
+  return opaqueReference(kind, value);
+}
+
+function adminReasonAuditReference(body = {}) {
+  return adminAuditReference('reason', adminReason(body));
+}
+
+async function commitPolicyWithAudit(before, nextPolicy, mutate, auditForResult) {
+  return policy.withPolicyFileMutationAsync(before, ({ write }) => (
+    db.mutateWithAudit(() => {
+      const savedPolicy = write(nextPolicy);
+      const value = typeof mutate === 'function' ? mutate(savedPolicy) : null;
+      return { policy: savedPolicy, value };
+    }, auditForResult).result
+  ));
+}
+
+function invitationAttemptKey(req) {
+  const client = req.ip || (req.connection && req.connection.remoteAddress) || 'unknown';
+  return `invitation|${client}`;
+}
+
+function rejectInvitationAcceptance(res, attemptKey) {
+  auth.registerFail(attemptKey);
+  return res.status(400).json({ error: 'invalid_or_expired_invitation' });
+}
+
+async function installLicenseFromRequest(req, res, { requireReason = false } = {}) {
+  const reason = adminReason(req.body);
+  if (requireReason && !reason) return res.status(400).json({ error: 'invalid request body', fields: ['reason'] });
+  const text = String(req.body.license || '');
+  const v = license.verifyLicenseText(text);
+  if (!v.ok) {
+    db.appendAudit({ action: 'LICENSE_INSTALL_REJECTED', actor: req.user.user, detail: `reason=${v.reason}` });
+    return res.status(400).json({ error: 'invalid_license', reason: v.reason });
+  }
+  const target = license.licensePath();
+  let written = false;
+  try {
+    await license.withLicenseFileMutationAsync(({ write }) => (
+      db.mutateWithAudit(() => {
+        write(text);
+        written = true;
+        license.refresh();
+        return v.payload;
+      }, () => ({
+        action: 'LICENSE_INSTALLED',
+        actor: req.user.user,
+        detail: [
+          `customerId=${v.payload.customerId}`,
+          `plan=${v.payload.plan}`,
+          `seats=${v.payload.seats}`,
+          `expires=${v.payload.expires}`,
+          ...(reason ? [`reasonRef=${adminAuditReference('reason', reason)}`] : []),
+        ].join('; '),
+      }))
+    ), { path: target });
+  } catch (error) {
+    if (error && error.code === 'LICENSE_FILE_READ_FAILED') {
+      return res.status(500).json({ error: 'license_read_failed' });
+    }
+    if (!written) return res.status(500).json({ error: 'license_write_failed' });
+    throw error;
+  }
+  return res.json(sharedLicenseStatus());
+}
+
 // =============================================================================
 // ADMIN API (session-protected)
 // =============================================================================
@@ -1970,6 +2394,199 @@ function publicQuery(q, { includeRaw = false } = {}) {
   const sanitized = { ...rest, rawRetained: Boolean(_rawPrompt) };
   return includeRaw ? { ...sanitized, rawPrompt: _rawPrompt } : sanitized;
 }
+
+app.get('/api/admin/roles', ...administrationRead, (req, res) => {
+  res.json({
+    roles: roles.ALL_ROLES.map((role) => ({
+      id: role,
+      label: roles.label(role),
+      permissions: {
+        administration: role === roles.SECURITY_ADMIN ? 'manage' : (role === roles.OPERATOR || role === roles.AUDITOR ? 'read' : 'none'),
+        approvals: role === roles.SECURITY_ADMIN || role === roles.APPROVER ? 'decide assigned member-data events' : 'none',
+        evidence: role === roles.SECURITY_ADMIN || role === roles.AUDITOR ? 'export examiner evidence' : 'none',
+        platform: role === roles.SECURITY_ADMIN || role === roles.OPERATOR ? 'operate sensors and updates' : 'none',
+      },
+    })),
+  });
+});
+
+app.get('/api/admin/users', ...administrationRead, (req, res) => {
+  res.json(adminDomain.directory(db, auth));
+});
+
+app.post('/api/admin/users/invitations', ...administrationWrite, validation.validateBody(validation.adminInvitationSchema), (req, res, next) => {
+  try {
+    const { result: invite } = db.mutateWithAudit(
+      () => adminDomain.createInvitation(
+        db,
+        { ...req.body, reason: adminReason(req.body) },
+        req.user.user,
+        adminDomain.publicInviteBaseUrl(process.env),
+        process.env,
+        auth,
+      ),
+      (created) => ({
+        action: 'ADMIN_USER_INVITED',
+        actor: req.user.user,
+        detail: `invitation=${created.id}; role=${created.role}; reasonRef=${adminReasonAuditReference(req.body)}`,
+      }),
+    );
+    res.status(201).json(invite);
+  } catch (error) {
+    if (error && error.code === 'IDENTITY_ALREADY_EXISTS') {
+      return res.status(409).json({ error: 'identity_already_exists' });
+    }
+    if (error && error.code === 'LOCAL_SECURITY_ADMIN_MFA_REQUIRED') {
+      return res.status(409).json({ error: 'per_user_mfa_required' });
+    }
+    return next(error);
+  }
+});
+
+app.post('/api/admin/users/invitations/:id/resend', ...administrationWrite, validation.validateBody(validation.adminReasonSchema), (req, res) => {
+  const { result: invite } = db.mutateWithAudit(
+    () => adminDomain.resendInvitation(db, req.params.id, req.user.user, adminDomain.publicInviteBaseUrl(process.env)),
+    (resent) => ({ action: 'ADMIN_USER_INVITE_RESENT', actor: req.user.user, detail: `invitation=${resent.id}; reasonRef=${adminReasonAuditReference(req.body)}` }),
+  );
+  if (!invite) return res.status(404).json({ error: 'invitation_not_found' });
+  res.json(invite);
+});
+
+app.post('/api/admin/users/invitations/:id/revoke', ...administrationWrite, validation.validateBody(validation.adminReasonSchema), (req, res) => {
+  const { result: invite } = db.mutateWithAudit(
+    () => adminDomain.revokeInvitation(db, req.params.id, req.user.user, adminReason(req.body)),
+    (revoked) => ({ action: 'ADMIN_USER_INVITE_REVOKED', actor: req.user.user, detail: `invitation=${revoked.id}; reasonRef=${adminReasonAuditReference(req.body)}` }),
+  );
+  if (!invite) return res.status(404).json({ error: 'invitation_not_found' });
+  res.json(adminDomain.publicInvitation(invite));
+});
+
+app.post('/api/invitations/accept', validation.validateBody(validation.adminInvitationAcceptSchema), (req, res) => {
+  const tokenHash = adminDomain.hashToken(req.body.token);
+  const attemptKey = invitationAttemptKey(req);
+  const status = auth.loginStatus(attemptKey);
+  if (status.locked) {
+    return res.status(429).json({ error: 'too_many_invitation_attempts', retryMs: status.retryMs });
+  }
+
+  const inspected = db.inspectAdminInvitation(tokenHash);
+  if (!inspected.ok) {
+    if (inspected.reason === 'expired' && inspected.invitation) {
+      db.mutateWithAudit(
+        () => db.expireAdminInvitation(tokenHash),
+        (expired) => ({ action: 'ADMIN_USER_INVITE_EXPIRED', actor: 'system', detail: `invitation=${expired.id}` }),
+      );
+    }
+    return rejectInvitationAcceptance(res, attemptKey);
+  }
+  if (adminDomain.identityExists(db, auth, inspected.invitation.userName)) {
+    return rejectInvitationAcceptance(res, attemptKey);
+  }
+
+  const passwordRecord = auth.hashPassword(req.body.password);
+  const { result } = db.mutateWithAudit(
+    () => db.acceptAdminInvitation(tokenHash, passwordRecord, req.body.displayName),
+    (accepted) => ({
+      action: 'ADMIN_USER_INVITE_ACCEPTED',
+      actor: `local:${accepted.user.id}`,
+      detail: `invitation=${accepted.invitation.id}; user=${accepted.user.id}; role=${accepted.user.role}`,
+    }),
+  );
+  if (!result) return rejectInvitationAcceptance(res, attemptKey);
+  auth.registerSuccess(attemptKey);
+  res.json({ ok: true, user: result.user.userName, role: result.user.role, roleLabel: roles.label(result.user.role) });
+});
+
+app.patch('/api/admin/users/:id', ...administrationWrite, validation.validateBody(validation.adminUserPatchSchema), (req, res) => {
+  if (req.params.id.startsWith('local:') && req.body.role === roles.SECURITY_ADMIN) {
+    return res.status(409).json({ error: 'per_user_mfa_required' });
+  }
+  if (adminDomain.wouldRemoveLastGlobalAdmin(db, auth, req.params.id, req.body)) {
+    return res.status(409).json({ error: 'last_global_administrator' });
+  }
+  const { result } = db.mutateWithAudit(
+    () => adminDomain.patchUser(db, req.params.id, req.body),
+    (updated) => ({
+      action: 'ADMIN_USER_UPDATED',
+      actor: req.user.user,
+      detail: `target=${updated.kind}:${updated.user.id}; role=${updated.user.role}; active=${updated.user.active !== false}; reasonRef=${adminReasonAuditReference(req.body)}`,
+    }),
+  );
+  if (!result) return res.status(404).json({ error: 'user_not_found_or_readonly' });
+  res.json(adminDomain.directory(db, auth));
+});
+
+app.post('/api/admin/users/:id/disable', ...administrationWrite, validation.validateBody(validation.adminReasonSchema), (req, res) => {
+  if (adminDomain.wouldRemoveLastGlobalAdmin(db, auth, req.params.id, { active: false })) {
+    return res.status(409).json({ error: 'last_global_administrator' });
+  }
+  const { result } = db.mutateWithAudit(
+    () => adminDomain.disableUser(db, req.params.id),
+    (disabled) => ({ action: 'ADMIN_USER_DISABLED', actor: req.user.user, detail: `target=${disabled.kind}:${disabled.user.id}; reasonRef=${adminReasonAuditReference(req.body)}` }),
+  );
+  if (!result) return res.status(404).json({ error: 'user_not_found_or_readonly' });
+  res.json(adminDomain.directory(db, auth));
+});
+
+app.post('/api/admin/users/:id/reactivate', ...administrationWrite, validation.validateBody(validation.adminReasonSchema), (req, res) => {
+  const { result } = db.mutateWithAudit(
+    () => adminDomain.reactivateUser(db, req.params.id),
+    (reactivated) => ({ action: 'ADMIN_USER_REACTIVATED', actor: req.user.user, detail: `target=${reactivated.kind}:${reactivated.user.id}; reasonRef=${adminReasonAuditReference(req.body)}` }),
+  );
+  if (!result) return res.status(404).json({ error: 'user_not_found_or_readonly' });
+  res.json(adminDomain.directory(db, auth));
+});
+
+app.get('/api/admin/license', ...administrationRead, (req, res) => {
+  res.json({
+    ...sharedLicenseStatus(),
+    renewalRequests: db.listLicenseRenewalRequests().slice(0, 10),
+  });
+});
+
+app.get('/api/admin/license/seats', ...administrationRead, (req, res) => {
+  res.json(adminDomain.seats(db, auth, sharedLicenseStatus()));
+});
+
+app.post('/api/admin/license/seats/assign', ...administrationWrite, validation.validateBody(validation.adminSeatAssignmentSchema), (req, res) => {
+  const { result: assignment } = db.mutateWithAudit(
+    () => adminDomain.saveSeatState(db, req.body.userKey, 'assigned', adminReason(req.body), req.user.user),
+    (saved) => ({ action: 'LICENSE_SEAT_ASSIGNED', actor: req.user.user, detail: `assignment=${saved.id}; status=assigned; reasonRef=${adminAuditReference('reason', saved.reason)}` }),
+  );
+  res.json({ assignment, seats: adminDomain.seats(db, auth, sharedLicenseStatus()) });
+});
+
+app.post('/api/admin/license/seats/release', ...administrationWrite, validation.validateBody(validation.adminSeatAssignmentSchema), (req, res) => {
+  const { result: assignment } = db.mutateWithAudit(
+    () => adminDomain.saveSeatState(db, req.body.userKey, 'released', adminReason(req.body), req.user.user),
+    (saved) => ({ action: 'LICENSE_SEAT_RELEASED', actor: req.user.user, detail: `assignment=${saved.id}; status=released; reasonRef=${adminAuditReference('reason', saved.reason)}` }),
+  );
+  res.json({ assignment, seats: adminDomain.seats(db, auth, sharedLicenseStatus()) });
+});
+
+app.post('/api/admin/license/renewal-request', ...administrationWrite, validation.validateBody(validation.licenseRenewalRequestSchema), (req, res) => {
+  const currentLicense = sharedLicenseStatus();
+  const seatReport = tenant.seatReport(db);
+  const { result: request } = db.mutateWithAudit(
+    () => db.createLicenseRenewalRequest({
+      orgId: seatReport.tenantId,
+      requestedSeats: req.body.requestedSeats || currentLicense.seats || seatReport.seatLimit || seatReport.seatsUsed || 1,
+      contactName: req.body.contactName || req.user.user,
+      contactEmail: req.body.contactEmail || '',
+      note: sanitizeDecisionNote(req.body.note),
+      actor: req.user.user,
+      licenseState: currentLicense.state,
+    }),
+    (created) => ({ action: 'LICENSE_RENEWAL_REQUESTED', actor: req.user.user, detail: `request=${created.id}; requestedSeats=${created.requestedSeats}` }),
+  );
+  const renewal = adminDomain.renewalPackage(request, currentLicense, seatReport);
+  res.status(201).json({ request, renewal });
+});
+
+app.post('/api/admin/license/install',
+  ...administrationLicenseInstall,
+  validation.validateBody(validation.licenseInstallSchema),
+  (req, res) => installLicenseFromRequest(req, res, { requireReason: true }));
 
 app.get('/api/queries', auth.requireAuth, (req, res) => {
   const status = req.query.status;
@@ -2024,7 +2641,36 @@ app.post(
 // Held statuses an approver may resolve. 'pending_justification' (justify mode)
 // is routed, SLA-escalated, and holds a sealed raw prompt just like 'pending',
 // so it must be decidable too — otherwise it can never leave the queue.
-const DECIDABLE_HELD_STATUSES = new Set(['pending', 'pending_justification']);
+const DECIDABLE_HELD_STATUSES = HELD_RELEASE_STATUSES;
+
+function decisionExpectedState(query) {
+  return {
+    status: query.status,
+    assignedUser: query.assignedUser,
+    assignedGroup: query.assignedGroup,
+    assignedRole: query.assignedRole,
+    _releaseTokenHash: query._releaseTokenHash,
+  };
+}
+
+function transitionHeldDecision(query, status, actor, note, bulk = false) {
+  return db.transitionQueryWithAudit(
+    query.id,
+    decisionExpectedState(query),
+    { status, decidedBy: actor, decidedAt: new Date().toISOString(), decisionNote: note },
+    {
+      action: status.toUpperCase(),
+      actor,
+      detail: bulk ? (note ? `${note} (bulk)` : 'bulk decision') : note,
+    },
+  );
+}
+
+function decisionConflictReason(transition) {
+  const current = transition && transition.row;
+  if (current && !DECIDABLE_HELD_STATUSES.has(current.status)) return `already ${current.status}`;
+  return 'query changed; reload and retry';
+}
 
 app.post(
   '/api/queries/:id/approve',
@@ -2035,14 +2681,13 @@ app.post(
   (req, res) => {
     const q = req.queryRecord;
     if (!DECIDABLE_HELD_STATUSES.has(q.status)) return res.status(409).json({ error: `already ${q.status}` });
-    const note = (req.body && req.body.note) || '';
-    const updated = db.updateQuery(q.id, {
-      status: 'approved', decidedBy: req.user.user, decidedAt: new Date().toISOString(), decisionNote: note,
-    });
-    db.appendAudit({ action: 'APPROVED', queryId: q.id, actor: req.user.user, detail: note });
+    const note = sanitizeDecisionNote(req.body && req.body.note);
+    const transition = transitionHeldDecision(q, 'approved', req.user.user, note);
+    if (transition.outcome === 'not_found') return res.status(404).json({ error: 'not found' });
+    if (transition.outcome !== 'updated') return res.status(409).json({ error: decisionConflictReason(transition) });
     broadcast('decision', { id: q.id, status: 'approved' });
     broadcast('stats', db.stats());
-    res.json(publicQuery(updated));
+    res.json(publicQuery(transition.row));
   },
 );
 
@@ -2052,15 +2697,18 @@ app.post(
 // is honest about what it skipped and why.
 function applyBulkDecision(req) {
   const status = req.body.action === 'approve' ? 'approved' : 'denied';
-  const note = (req.body && req.body.note) || '';
+  const note = sanitizeDecisionNote(req.body && req.body.note);
   const results = [];
   for (const id of req.body.ids) {
     const q = db.getQuery(id);
     if (!q) { results.push({ id, outcome: 'skipped', reason: 'not found' }); continue; }
     if (!DECIDABLE_HELD_STATUSES.has(q.status)) { results.push({ id, outcome: 'skipped', reason: `already ${q.status}` }); continue; }
     if (!roles.canDecideQuery(req.user, q)) { results.push({ id, outcome: 'skipped', reason: 'not yours to decide' }); continue; }
-    db.updateQuery(id, { status, decidedBy: req.user.user, decidedAt: new Date().toISOString(), decisionNote: note });
-    db.appendAudit({ action: status.toUpperCase(), queryId: id, actor: req.user.user, detail: note ? `${note} (bulk)` : 'bulk decision' });
+    const transition = transitionHeldDecision(q, status, req.user.user, note, true);
+    if (transition.outcome !== 'updated') {
+      results.push({ id, outcome: 'skipped', reason: transition.outcome === 'not_found' ? 'not found' : decisionConflictReason(transition) });
+      continue;
+    }
     broadcast('decision', { id, status });
     results.push({ id, outcome: status });
   }
@@ -2100,17 +2748,26 @@ app.post('/api/queries/:id/assign', ...adminWrite, validation.validateBody(valid
   const q = db.getQuery(req.params.id);
   if (!q) return res.status(404).json({ error: 'not found' });
   if (!routing.routeableStatus(q.status)) return res.status(409).json({ error: `not reassignable: ${q.status}` });
-  const updated = db.updateQuery(q.id, assignmentPatch(req.body));
-  db.appendAudit({
+  const patch = assignmentPatch(req.body);
+  const target = { ...q, ...patch };
+  const transition = db.transitionQueryWithAudit(q.id, decisionExpectedState(q), patch, {
     action: 'APPROVAL_REASSIGNED',
-    queryId: q.id,
     actor: req.user.user,
     detail: [
-      `assignedUser=${updated.assignedUser || 'none'}`,
-      `assignedGroup=${updated.assignedGroup || 'none'}`,
-      `assignedRole=${updated.assignedRole || 'none'}`,
+      `assignedUserRef=${target.assignedUser ? adminAuditReference('assignment_user', target.assignedUser) : 'none'}`,
+      `assignedGroupRef=${target.assignedGroup ? adminAuditReference('assignment_group', target.assignedGroup) : 'none'}`,
+      `assignedRole=${target.assignedRole || 'none'}`,
     ].join('; '),
   });
+  if (transition.outcome === 'not_found') return res.status(404).json({ error: 'not found' });
+  if (transition.outcome !== 'updated') {
+    const current = transition.row;
+    const reason = current && !routing.routeableStatus(current.status)
+      ? `not reassignable: ${current.status}`
+      : 'query changed; reload and retry';
+    return res.status(409).json({ error: reason });
+  }
+  const updated = transition.row;
   broadcast('query', { type: updated.status, query: publicQuery(updated) });
   res.json(publicQuery(updated));
 });
@@ -2118,14 +2775,13 @@ app.post('/api/queries/:id/assign', ...adminWrite, validation.validateBody(valid
 app.post('/api/queries/:id/deny', ...decisionWrite, validation.validateBody(validation.noteSchema), requireDecisionAccess, (req, res) => {
   const q = req.queryRecord;
   if (!DECIDABLE_HELD_STATUSES.has(q.status)) return res.status(409).json({ error: `already ${q.status}` });
-  const note = (req.body && req.body.note) || '';
-  const updated = db.updateQuery(q.id, {
-    status: 'denied', decidedBy: req.user.user, decidedAt: new Date().toISOString(), decisionNote: note,
-  });
-  db.appendAudit({ action: 'DENIED', queryId: q.id, actor: req.user.user, detail: note });
+  const note = sanitizeDecisionNote(req.body && req.body.note);
+  const transition = transitionHeldDecision(q, 'denied', req.user.user, note);
+  if (transition.outcome === 'not_found') return res.status(404).json({ error: 'not found' });
+  if (transition.outcome !== 'updated') return res.status(409).json({ error: decisionConflictReason(transition) });
   broadcast('decision', { id: q.id, status: 'denied' });
   broadcast('stats', db.stats());
-  res.json(publicQuery(updated));
+  res.json(publicQuery(transition.row));
 });
 
 app.get('/api/stats', auth.requireAuth, (req, res) => res.json(db.stats()));
@@ -2137,11 +2793,11 @@ app.get('/api/insights', auth.requireAuth, (req, res) => {
 });
 
 app.get('/api/billing/seats', ...adminRead, (req, res) => {
-  res.json({ ...tenant.seatReport(db), license: license.publicStatus() });
+  res.json({ ...tenant.seatReport(db), license: sharedLicenseStatus() });
 });
 
 app.get('/api/billing/license', ...adminRead, (req, res) => {
-  res.json(license.publicStatus());
+  res.json(sharedLicenseStatus());
 });
 
 // Installing a renewal must always work, even in readonly state — so this is
@@ -2150,26 +2806,7 @@ app.get('/api/billing/license', ...adminRead, (req, res) => {
 app.post('/api/billing/license',
   auth.requireAuth, auth.requireCsrf, auth.requireRole(roles.SECURITY_ADMIN),
   validation.validateBody(validation.licenseInstallSchema),
-  (req, res) => {
-    const text = String(req.body.license || '');
-    const v = license.verifyLicenseText(text);
-    if (!v.ok) {
-      db.appendAudit({ action: 'LICENSE_INSTALL_REJECTED', actor: req.user.user, detail: `reason=${v.reason}` });
-      return res.status(400).json({ error: 'invalid_license', reason: v.reason });
-    }
-    try {
-      fs.writeFileSync(license.licensePath(), text.trim() + '\n', { mode: 0o600 });
-    } catch (e) {
-      return res.status(500).json({ error: 'license_write_failed' });
-    }
-    license.refresh({ appendAudit: (rec) => db.appendAudit(rec) });
-    db.appendAudit({
-      action: 'LICENSE_INSTALLED',
-      actor: req.user.user,
-      detail: `customerId=${v.payload.customerId}; plan=${v.payload.plan}; seats=${v.payload.seats}; expires=${v.payload.expires}`,
-    });
-    res.json(license.publicStatus());
-  });
+  (req, res) => installLicenseFromRequest(req, res));
 
 // Ops metrics (admin) - counts + live audit-integrity, for dashboards/monitoring.
 app.get('/api/metrics', ...adminRead, (req, res) => {
@@ -2209,6 +2846,13 @@ function sendUpdateError(res, err) {
   res.status(err && err.statusCode ? err.statusCode : 500).json({ error: updater.publicError(err) });
 }
 
+function updateControlFailure(message) {
+  const error = new Error(message);
+  error.publicMessage = message;
+  error.statusCode = 500;
+  return error;
+}
+
 app.get('/api/update/status', ...operatorRead, async (req, res) => {
   try {
     res.json(await updater.status());
@@ -2218,13 +2862,23 @@ app.get('/api/update/status', ...operatorRead, async (req, res) => {
 });
 
 app.put('/api/update/config', ...adminWrite, validation.validateBody(validation.updateConfigSchema), async (req, res) => {
+  let config;
   try {
-    const config = updater.saveConfig(req.body);
-    db.appendAudit({ action: 'APP_UPDATE_CONFIGURED', actor: req.user.user, detail: updateConfigAuditDetail(config) });
-    res.json(await updater.status());
+    config = await updater.saveConfigWithAudit(req.body, (saved) => db.appendAudit({
+      action: 'APP_UPDATE_CONFIGURED',
+      actor: req.user.user,
+      detail: updateConfigAuditDetail(saved),
+    }));
   } catch (err) {
-    db.appendAudit({ action: 'APP_UPDATE_CONFIG_FAILED', actor: req.user.user, detail: updater.publicError(err) });
-    sendUpdateError(res, err);
+    try {
+      db.appendAudit({ action: 'APP_UPDATE_CONFIG_FAILED', actor: req.user.user, detail: updater.publicError(err) });
+    } catch {}
+    return sendUpdateError(res, err);
+  }
+  try {
+    return res.json(await updater.status());
+  } catch (err) {
+    return sendUpdateError(res, err);
   }
 });
 
@@ -2240,25 +2894,48 @@ app.post('/api/update/check', ...operatorWrite, async (req, res) => {
 });
 
 app.post('/api/update/apply', ...operatorWrite, validation.validateBody(validation.updateApplySchema), async (req, res) => {
-  db.appendAudit({ action: 'APP_UPDATE_STARTED', actor: req.user.user, detail: 'backup=true; fastForwardOnly=true' });
   try {
-    const result = await updater.applyUpdate({ confirmBackup: req.body.confirmBackup === true });
-    db.appendAudit({ action: 'APP_UPDATE_APPLIED', actor: req.user.user, detail: updateAuditDetail(result) });
-    res.json(result);
-  } catch (err) {
-    db.appendAudit({ action: 'APP_UPDATE_FAILED', actor: req.user.user, detail: updater.publicError(err) });
-    sendUpdateError(res, err);
+    db.appendAudit({ action: 'APP_UPDATE_STARTED', actor: req.user.user, detail: 'backup=true; fastForwardOnly=true' });
+  } catch {
+    try { db.appendAudit({ action: 'APP_UPDATE_FAILED', actor: req.user.user, detail: 'update start could not be audited' }); } catch {}
+    return sendUpdateError(res, updateControlFailure('update could not be audited and was not started'));
   }
+  let result;
+  try {
+    result = await updater.applyUpdate({ confirmBackup: req.body.confirmBackup === true });
+  } catch (err) {
+    try { db.appendAudit({ action: 'APP_UPDATE_FAILED', actor: req.user.user, detail: updater.publicError(err) }); } catch {}
+    return sendUpdateError(res, err);
+  }
+  try {
+    db.appendAudit({ action: 'APP_UPDATE_APPLIED', actor: req.user.user, detail: updateAuditDetail(result) });
+  } catch {
+    try {
+      db.appendAudit({
+        action: 'APP_UPDATE_AUDIT_FAILED',
+        actor: req.user.user,
+        detail: 'update completed; terminal audit confirmation failed; inspect update status before retry',
+      });
+    } catch {}
+    return sendUpdateError(res, updateControlFailure('update completed but audit confirmation failed; inspect update status before retry'));
+  }
+  return res.json(result);
 });
 
 app.post('/api/update/restart', ...operatorWrite, async (req, res) => {
   try {
-    const result = updater.scheduleRestart();
-    db.appendAudit({ action: 'APP_UPDATE_RESTART_SCHEDULED', actor: req.user.user, detail: 'restart command scheduled' });
-    res.json(result);
+    // Record the authorized restart before scheduling its irreversible process
+    // side effect. A later scheduling error gets a paired FAILED entry.
+    db.appendAudit({ action: 'APP_UPDATE_RESTART_SCHEDULED', actor: req.user.user, detail: 'restart command authorized for scheduling' });
+  } catch {
+    try { db.appendAudit({ action: 'APP_UPDATE_RESTART_FAILED', actor: req.user.user, detail: 'restart authorization could not be audited' }); } catch {}
+    return sendUpdateError(res, updateControlFailure('restart could not be audited and was not scheduled'));
+  }
+  try {
+    return res.json(updater.scheduleRestart());
   } catch (err) {
-    db.appendAudit({ action: 'APP_UPDATE_RESTART_FAILED', actor: req.user.user, detail: updater.publicError(err) });
-    sendUpdateError(res, err);
+    try { db.appendAudit({ action: 'APP_UPDATE_RESTART_FAILED', actor: req.user.user, detail: updater.publicError(err) }); } catch {}
+    return sendUpdateError(res, err);
   }
 });
 
@@ -2266,7 +2943,10 @@ app.get('/api/identity/setup-guide', auth.requireAuth, (req, res) => {
   try {
     res.json(identitySetup.buildIdentitySetupGuide({
       provider: req.query.provider,
-      baseUrl: req.query.baseUrl || publicBaseUrl(req),
+      // Never turn attacker-controlled Host/X-Forwarded-* headers into IdP
+      // callback instructions. Operators may supply an explicit validated
+      // baseUrl, otherwise use the trusted deployment origin or safe placeholder.
+      baseUrl: req.query.baseUrl || adminDomain.publicInviteBaseUrl(process.env) || undefined,
       tenantId: req.query.tenantId || req.query.tenant || req.query.oktaDomain,
     }));
   } catch (e) {
@@ -2332,28 +3012,30 @@ app.post('/api/queries/:id/detector-feedback', ...decisionWrite, validation.vali
   if (req.body.verdict !== 'missed' && !observed.includes(req.body.detectorId)) {
     return res.status(400).json({ error: 'detector_not_on_query' });
   }
-  const record = db.createDetectorFeedback({
-    queryId: q.id,
-    detectorId: req.body.detectorId,
-    verdict: req.body.verdict,
-    reason: req.body.reason || '',
-    actor: req.user.user,
-    role: req.user.role,
-    queryUser: q.user || '',
-    orgId: q.orgId || '',
-    source: q.source || '',
-    channel: q.channel || '',
-    destination: coverage.normalizeDestination(q.destination || 'unknown'),
-    queryStatus: q.status || '',
-    riskScore: q.riskScore || 0,
-    maxSeverity: q.maxSeverity || 0,
-  });
-  const audit = db.appendAudit({
-    action: 'DETECTOR_FEEDBACK_RECORDED',
-    queryId: q.id,
-    actor: req.user.user,
-    detail: `${record.detectorId}:${record.verdict}`,
-  });
+  const { result: record, audit } = db.mutateWithAudit(
+    () => db.createDetectorFeedback({
+      queryId: q.id,
+      detectorId: req.body.detectorId,
+      verdict: req.body.verdict,
+      reason: req.body.reason || '',
+      actor: req.user.user,
+      role: req.user.role,
+      queryUser: q.user || '',
+      orgId: q.orgId || '',
+      source: q.source || '',
+      channel: q.channel || '',
+      destination: coverage.normalizeDestination(q.destination || 'unknown'),
+      queryStatus: q.status || '',
+      riskScore: q.riskScore || 0,
+      maxSeverity: q.maxSeverity || 0,
+    }),
+    (created) => ({
+      action: 'DETECTOR_FEEDBACK_RECORDED',
+      queryId: q.id,
+      actor: req.user.user,
+      detail: `${created.detectorId}:${created.verdict}`,
+    }),
+  );
   res.json({
     feedback: detectorFeedback.publicFeedback(record),
     audit: { id: audit.id, ts: audit.ts, hash: audit.hash },
@@ -2365,7 +3047,7 @@ app.post('/api/posture/actions', ...operatorWrite, validation.validateBody(valid
     id: req.body.id,
     status: req.body.status,
     owner: req.body.owner || (req.body.status === 'assigned' ? req.user.user : ''),
-    note: req.body.note || '',
+    note: sanitizeDecisionNote(req.body.note),
     snoozeUntil: req.body.status === 'snoozed' ? req.body.snoozeUntil : null,
   };
   const audit = db.appendAudit({
@@ -2458,7 +3140,7 @@ app.get('/api/destinations/review', auth.requireAuth, (req, res) => {
   res.json({ destinations: report.shadowDestinations || [], coverage: report });
 });
 
-app.post('/api/destinations/review', ...adminWrite, validation.validateBody(validation.destinationReviewSchema), (req, res) => {
+app.post('/api/destinations/review', ...adminWrite, validation.validateBody(validation.destinationReviewSchema), async (req, res) => {
   const before = policy.loadPolicy();
   let reviewed;
   try {
@@ -2466,15 +3148,14 @@ app.post('/api/destinations/review', ...adminWrite, validation.validateBody(vali
   } catch (e) {
     return res.status(400).json({ error: 'invalid destination review' });
   }
-  policy.savePolicy(reviewed.policy);
-  db.appendAudit({
+  const committed = await commitPolicyWithAudit(before, reviewed.policy, null, (result) => ({
     action: 'DESTINATION_REVIEWED',
     actor: req.user.user,
-    detail: policy.policyChangeDetail(before, reviewed.policy, { reason: req.body.reason }),
-  });
-  const report = coverage.summarize(db.listQueries({ limit: 5000 }), reviewed.policy);
+    detail: policy.policyChangeDetail(before, result.policy, { reason: sanitizeDecisionNote(req.body.reason) }),
+  }));
+  const report = coverage.summarize(db.listQueries({ limit: 5000 }), committed.policy);
   broadcast('stats', db.stats());
-  res.json({ destination: reviewed.destination, decision: reviewed.decision, policy: reviewed.policy, coverage: report });
+  res.json({ destination: reviewed.destination, decision: reviewed.decision, policy: committed.policy, coverage: report });
 });
 
 // ---- AI app catalog ---------------------------------------------------------
@@ -2483,21 +3164,25 @@ app.get('/api/catalog', auth.requireAuth, (req, res) => {
 });
 
 app.post('/api/catalog', ...adminWrite, validation.validateBody(validation.catalogAddSchema), (req, res) => {
-  const record = appCatalog.addManual(req.body);
+  const { result: record } = db.mutateWithAudit(
+    () => appCatalog.addManual(req.body),
+    (created) => created && ({ action: 'CATALOG_ADDED', actor: req.user.user, detail: `manual catalog entry: ${created.canonicalHost}` }),
+  );
   if (!record) return res.status(400).json({ error: 'invalid destination' });
-  db.appendAudit({ action: 'CATALOG_ADDED', actor: req.user.user, detail: `manual catalog entry: ${record.canonicalHost}` });
   res.json({ app: appCatalog.publicCatalog().find((a) => a.destination === record.canonicalHost) || null });
 });
 
 app.post('/api/catalog/import', ...adminWrite, validation.validateBody(validation.catalogImportSchema), (req, res) => {
-  const result = appCatalog.importCsv(req.body.csv, { source: req.body.source || 'csv_import' });
-  db.appendAudit({ action: 'CATALOG_IMPORTED', actor: req.user.user, detail: `discovery import: ${result.imported} host(s), ${result.skipped} skipped` });
+  const { result } = db.mutateWithAudit(
+    () => appCatalog.importCsv(req.body.csv, { source: req.body.source || 'csv_import' }),
+    (imported) => ({ action: 'CATALOG_IMPORTED', actor: req.user.user, detail: `discovery import: ${imported.imported} host(s), ${imported.skipped} skipped` }),
+  );
   res.json({ ...result, apps: appCatalog.publicCatalog() });
 });
 
 // Review a catalogued app: apply a govern/allow/block decision to policy (reusing
 // the existing destination-review path) AND update catalog status/ownership.
-app.post('/api/catalog/:host/review', ...adminWrite, validation.validateBody(validation.catalogReviewSchema), (req, res) => {
+app.post('/api/catalog/:host/review', ...adminWrite, validation.validateBody(validation.catalogReviewSchema), async (req, res) => {
   const host = adapters.normalizeHost(req.params.host);
   if (!host) return res.status(400).json({ error: 'invalid host' });
   const before = policy.loadPolicy();
@@ -2507,23 +3192,26 @@ app.post('/api/catalog/:host/review', ...adminWrite, validation.validateBody(val
   } catch (e) {
     return res.status(400).json({ error: 'invalid catalog review' });
   }
-  policy.savePolicy(reviewed.policy);
   const statusMap = { govern: 'tolerated', allow: 'sanctioned', block: 'blocked' };
-  appCatalog.annotate(host, {
-    owner: req.body.owner,
-    notes: req.body.notes,
-    sanctionedStatus: req.body.sanctionedStatus || statusMap[req.body.decision],
-  });
-  db.appendAudit({
-    action: 'CATALOG_REVIEWED',
-    actor: req.user.user,
-    detail: policy.policyChangeDetail(before, reviewed.policy, { reason: req.body.reason }),
-  });
+  const committed = await commitPolicyWithAudit(
+    before,
+    reviewed.policy,
+    () => appCatalog.annotate(host, {
+      owner: req.body.owner,
+      notes: req.body.notes,
+      sanctionedStatus: req.body.sanctionedStatus || statusMap[req.body.decision],
+    }),
+    (result) => ({
+      action: 'CATALOG_REVIEWED',
+      actor: req.user.user,
+      detail: policy.policyChangeDetail(before, result.policy, { reason: sanitizeDecisionNote(req.body.reason) }),
+    }),
+  );
   broadcast('stats', db.stats());
   res.json({
     destination: host,
     decision: reviewed.decision,
-    app: appCatalog.publicCatalog().find((a) => a.destination === host) || null,
+    app: committed.value && (appCatalog.publicCatalog().find((a) => a.destination === host) || null),
   });
 });
 
@@ -2682,13 +3370,16 @@ app.post('/api/catalog/:host/override', ...adminWrite, (req, res) => {
   if (note != null && !validation.safeOperatorText(note)) {
     return res.status(400).json({ error: 'note must not contain sensitive identifiers' });
   }
-  const updated = appCatalog.overrideScore(req.params.host, { score, note, actor: req.user.user });
+  const safeNote = note == null ? note : sanitizeDecisionNote(note);
+  const { result: updated } = db.mutateWithAudit(
+    () => appCatalog.overrideScore(req.params.host, { score, note: safeNote, actor: req.user.user }),
+    (changed) => changed && ({
+      action: score == null ? 'CATALOG_OVERRIDE_CLEARED' : 'CATALOG_SCORE_OVERRIDDEN',
+      actor: req.user.user,
+      detail: score == null ? req.params.host : `${req.params.host} -> ${Math.round(Number(score))}: ${String(safeNote).slice(0, 200)}`,
+    }),
+  );
   if (!updated) return res.status(404).json({ error: 'unknown app' });
-  db.appendAudit({
-    action: score == null ? 'CATALOG_OVERRIDE_CLEARED' : 'CATALOG_SCORE_OVERRIDDEN',
-    actor: req.user.user,
-    detail: score == null ? req.params.host : `${req.params.host} -> ${Math.round(Number(score))}: ${String(note).slice(0, 200)}`,
-  });
   res.json({ ok: true });
 });
 
@@ -2696,12 +3387,18 @@ app.post('/api/catalog/:host/override', ...adminWrite, (req, res) => {
 // wired (config completeness only - no outbound calls), and audits the check.
 app.post('/api/identity/test', ...adminRead, auth.requireCsrf, (req, res) => {
   const oidcConfig = oidc.config();
+  const issuerSafe = validOidcUrl(oidcConfig.issuer, { production: oidcConfig.production });
+  const redirectSafe = validOidcUrl(oidcConfig.redirectUri, { production: oidcConfig.production });
   const scimToken = String(process.env.SCIM_BEARER_TOKEN || '').trim();
   const checks = [
-    { id: 'oidc', label: 'OIDC single sign-on', ok: !!oidcConfig.enabled,
-      detail: oidcConfig.enabled ? `issuer ${oidcConfig.issuer}` : 'set OIDC_ISSUER, OIDC_CLIENT_ID, and OIDC_CLIENT_SECRET' },
-    { id: 'oidc_redirect', label: 'OIDC redirect URI', ok: !oidcConfig.enabled || !!oidcConfig.redirectUri,
-      detail: oidcConfig.redirectUri || 'set OIDC_REDIRECT_URI to this console\'s /auth/oidc/callback' },
+    { id: 'oidc', label: 'OIDC single sign-on', ok: !!oidcConfig.enabled && issuerSafe,
+      detail: oidcConfig.enabled
+        ? (issuerSafe ? `issuer ${oidcConfig.issuer}` : 'configured issuer URL is unsafe')
+        : 'set OIDC_ISSUER, OIDC_CLIENT_ID, and OIDC_CLIENT_SECRET' },
+    { id: 'oidc_redirect', label: 'OIDC redirect URI', ok: !oidcConfig.enabled || redirectSafe,
+      detail: oidcConfig.redirectUri
+        ? (redirectSafe ? oidcConfig.redirectUri : 'configured redirect URL is unsafe')
+        : 'set OIDC_REDIRECT_URI to this console\'s /auth/oidc/callback' },
     { id: 'scim', label: 'SCIM provisioning', ok: scimToken.length >= 32,
       detail: scimToken ? (scimToken.length >= 32 ? 'bearer token configured' : 'token shorter than 32 chars') : 'set SCIM_BEARER_TOKEN (32+ chars)' },
     { id: 'break_glass', label: 'Local break-glass account', ok: true, detail: 'ADMIN_USER/ADMIN_PASSWORD active' },
@@ -2825,14 +3522,17 @@ app.post('/api/detectors/test', auth.requireAuth, (req, res) => {
 });
 
 app.get('/api/policy/templates', auth.requireAuth, (req, res) => res.json(templates.list()));
-app.put('/api/policy/apply-template', ...adminWrite, validation.validateBody(validation.applyTemplateSchema), (req, res) => {
+app.put('/api/policy/apply-template', ...adminWrite, validation.validateBody(validation.applyTemplateSchema), async (req, res) => {
   const t = templates.get((req.body || {}).id);
   if (!t) return res.status(404).json({ error: 'unknown template' });
   const before = policy.loadPolicy();
   const merged = { ...before, ...t.policy };
-  policy.savePolicy(merged);
-  db.appendAudit({ action: 'POLICY_TEMPLATE_APPLIED', actor: req.user.user, detail: policy.policyChangeDetail(before, merged, { templateId: req.body.id }) });
-  res.json(merged);
+  const committed = await commitPolicyWithAudit(before, merged, null, (result) => ({
+    action: 'POLICY_TEMPLATE_APPLIED',
+    actor: req.user.user,
+    detail: policy.policyChangeDetail(before, result.policy, { templateId: req.body.id }),
+  }));
+  res.json(committed.policy);
 });
 
 app.get('/api/audit', auth.requireAuth, (req, res) => {
@@ -3028,34 +3728,38 @@ app.post('/api/ncua/use-cases', ...adminWrite, requireNcuaEntitled, validation.v
   // Omitted fields stay undefined: the db merge preserves existing values, so
   // a partial re-POST can never erase review evidence (insert-time defaults
   // live in the db layer).
-  const record = db.upsertAiUseCase({
-    canonicalHost: host,
-    department: req.body.department,
-    owner: req.body.owner,
-    approvedUse: req.body.approvedUse,
-    allowedDataClasses: req.body.allowedDataClasses,
-    reviewStatus: req.body.reviewStatus,
-    vendorStatus: req.body.vendorStatus,
-    nextReviewAt: req.body.nextReviewAt,
-    policyScopeId: req.body.policyScopeId,
-    orgId: tenant.config().tenantId,
-  }, new Date().toISOString());
-  db.appendAudit({
-    action: 'USE_CASE_UPDATED',
-    actor: req.user.user,
-    detail: `${record.canonicalHost} uc=${record.id}: reviewStatus=${record.reviewStatus}; vendorStatus=${record.vendorStatus}; dataClasses=${(record.allowedDataClasses || []).length}`,
-  });
+  const { result: record } = db.mutateWithAudit(
+    () => db.upsertAiUseCase({
+      canonicalHost: host,
+      department: req.body.department,
+      owner: req.body.owner,
+      approvedUse: req.body.approvedUse,
+      allowedDataClasses: req.body.allowedDataClasses,
+      reviewStatus: req.body.reviewStatus,
+      vendorStatus: req.body.vendorStatus,
+      nextReviewAt: req.body.nextReviewAt,
+      policyScopeId: req.body.policyScopeId,
+      orgId: tenant.config().tenantId,
+    }, new Date().toISOString()),
+    (saved) => ({
+      action: 'USE_CASE_UPDATED',
+      actor: req.user.user,
+      detail: `${saved.canonicalHost} uc=${saved.id}: reviewStatus=${saved.reviewStatus}; vendorStatus=${saved.vendorStatus}; dataClasses=${(saved.allowedDataClasses || []).length}`,
+    }),
+  );
   res.json({ useCase: record });
 });
 
 app.post('/api/ncua/use-cases/:id/review', ...adminWrite, requireNcuaEntitled, validation.validateBody(validation.useCaseReviewSchema), (req, res) => {
-  const record = db.reviewAiUseCase(String(req.params.id).slice(0, 80), req.body, new Date().toISOString());
+  const { result: record } = db.mutateWithAudit(
+    () => db.reviewAiUseCase(String(req.params.id).slice(0, 80), req.body, new Date().toISOString()),
+    (reviewed) => ({
+      action: 'USE_CASE_REVIEWED',
+      actor: req.user.user,
+      detail: `uc=${reviewed.id}: reviewStatus=${reviewed.reviewStatus}; vendorStatus=${reviewed.vendorStatus || 'not_reviewed'}; nextReviewAt=${reviewed.nextReviewAt || 'none'}`,
+    }),
+  );
   if (!record) return res.status(404).json({ error: 'not found' });
-  db.appendAudit({
-    action: 'USE_CASE_REVIEWED',
-    actor: req.user.user,
-    detail: `uc=${record.id}: reviewStatus=${record.reviewStatus}; vendorStatus=${record.vendorStatus || 'not_reviewed'}; nextReviewAt=${record.nextReviewAt || 'none'}`,
-  });
   res.json({ useCase: record });
 });
 
@@ -3071,20 +3775,22 @@ app.post('/api/ncua/incidents', ...adminWrite, requireNcuaEntitled, validation.v
   const now = new Date().toISOString();
   const detectedAt = req.body.detectedAt ? utcIncidentInstant(req.body.detectedAt, now) : now;
   const queryIds = (req.body.queryIds || []).filter((queryId) => !!db.getQuery(queryId));
-  const incident = db.createAiIncident({
-    title: req.body.title,
-    notes: req.body.notes,
-    queryIds,
-    detectedAt,
-    // The NCUA reporting clock: 72 hours from reasonable belief (detection).
-    deadlineAt: new Date(Date.parse(detectedAt) + 72 * 3600 * 1000).toISOString(),
-    orgId: tenant.config().tenantId,
-  }, now);
-  db.appendAudit({
-    action: 'INCIDENT_OPENED',
-    actor: req.user.user,
-    detail: `inc=${incident.id}: queries=${queryIds.length}; detectedAt=${incident.detectedAt}; deadlineAt=${incident.deadlineAt}`,
-  });
+  const { result: incident } = db.mutateWithAudit(
+    () => db.createAiIncident({
+      title: req.body.title,
+      notes: req.body.notes,
+      queryIds,
+      detectedAt,
+      // The NCUA reporting clock: 72 hours from reasonable belief (detection).
+      deadlineAt: new Date(Date.parse(detectedAt) + 72 * 3600 * 1000).toISOString(),
+      orgId: tenant.config().tenantId,
+    }, now),
+    (opened) => ({
+      action: 'INCIDENT_OPENED',
+      actor: req.user.user,
+      detail: `inc=${opened.id}: queries=${queryIds.length}; detectedAt=${opened.detectedAt}; deadlineAt=${opened.deadlineAt}`,
+    }),
+  );
   res.json({ incident: incidentsWithTimelines([incident])[0] });
 });
 
@@ -3097,13 +3803,15 @@ app.post('/api/ncua/incidents/:id/status', ...adminWrite, requireNcuaEntitled, v
   if (req.body.status === 'reported') {
     patch.reportedAt = req.body.reportedAt ? utcIncidentInstant(req.body.reportedAt, now) : now;
   }
-  const incident = db.setAiIncidentStatus(String(req.params.id).slice(0, 80), patch, now);
+  const { result: incident } = db.mutateWithAudit(
+    () => db.setAiIncidentStatus(String(req.params.id).slice(0, 80), patch, now),
+    (changed) => ({
+      action: 'INCIDENT_STATUS_CHANGED',
+      actor: req.user.user,
+      detail: `inc=${changed.id}: status=${changed.status}; reportedAt=${changed.reportedAt || 'none'}`,
+    }),
+  );
   if (!incident) return res.status(404).json({ error: 'not found' });
-  db.appendAudit({
-    action: 'INCIDENT_STATUS_CHANGED',
-    actor: req.user.user,
-    detail: `inc=${incident.id}: status=${incident.status}; reportedAt=${incident.reportedAt || 'none'}`,
-  });
   res.json({ incident: incidentsWithTimelines([incident])[0] });
 });
 
@@ -3117,7 +3825,7 @@ app.post('/api/ncua/board-packet', auth.requireAuth, auth.requireCsrf, auth.requ
   const packet = ncuaReadiness.boardPacket({
     report: buildNcuaReport(),
     seatReport: tenant.seatReport(db),
-    licenseStatus: license.publicStatus(),
+    licenseStatus: sharedLicenseStatus(),
   });
   db.appendAudit({
     action: 'BOARD_PACKET_EXPORTED',
@@ -3143,17 +3851,19 @@ app.post('/api/policy/impact', ...adminWrite, validation.validateBody(validation
     limit,
   }));
 });
-app.put('/api/policy', ...adminWrite, validation.validateBody(validation.policyUpdateSchema), (req, res) => {
+app.put('/api/policy', ...adminWrite, validation.validateBody(validation.policyUpdateSchema), async (req, res) => {
   const before = policy.loadPolicy();
   const merged = {
     ...before,
     ...(req.body || {}),
     ...(req.body && req.body.scanner ? { scanner: { ...(before.scanner || {}), ...req.body.scanner } } : {}),
   };
-  policy.savePolicy(merged);
-  const saved = policy.loadPolicy();
-  db.appendAudit({ action: 'POLICY_UPDATED', actor: req.user.user, detail: policy.policyChangeDetail(before, saved) });
-  res.json(saved);
+  const committed = await commitPolicyWithAudit(before, merged, null, (result) => ({
+    action: 'POLICY_UPDATED',
+    actor: req.user.user,
+    detail: policy.policyChangeDetail(before, result.policy),
+  }));
+  res.json(committed.policy);
 });
 
 // SSE stream for the dashboard.
@@ -3163,6 +3873,30 @@ app.get('/api/stream', auth.requireAuth, (req, res) => {
   res.write(`event: hello\ndata: ${JSON.stringify({ ok: true })}\n\n`);
   sseClients.add(res);
   req.on('close', () => sseClients.delete(res));
+});
+
+// Route failures reach this only after every API/SCIM handler has had a chance
+// to run. Keep internal database paths, connection strings, secrets, and
+// attacker-controlled request values out of both the response and stderr.
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  if (req.path.startsWith('/api/') || req.path.startsWith('/scim/')) {
+    if (err && err.code === 'POLICY_WRITE_CONFLICT') {
+      return res.status(409).json({ error: 'policy_write_conflict' });
+    }
+    if (err && err.code === 'FILE_MUTATION_LOCK_TIMEOUT') {
+      return res.status(503).json({ error: 'configuration_busy' });
+    }
+    if (err && err.code === 'IDENTITY_WRITE_CONFLICT') {
+      return res.status(409).json({ error: 'identity_write_conflict' });
+    }
+    if (err && err.code === 'IDENTITY_ALREADY_EXISTS') {
+      return res.status(409).json({ error: 'identity_already_exists' });
+    }
+    console.error('[server] API request failed');
+    return res.status(500).json({ error: 'internal_error' });
+  }
+  return next(err);
 });
 
 // ---- Console (React SPA) -----------------------------------------------------
@@ -3312,6 +4046,10 @@ app._internal = {
   currentPreflight,
   currentSecurityTrustPackage,
   installShutdownHandlers,
+  allowOidcAttempt,
+  reconcileVendorLicenseState,
+  sharedLicenseRevoked,
+  runVendorRestore,
 };
 
 module.exports = app;

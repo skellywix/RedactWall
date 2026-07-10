@@ -7,8 +7,9 @@
  */
 const test = require('node:test');
 const assert = require('node:assert');
-const { run, extractEvent, mapMcpTool, DEFAULT_POLICY } = require('../sensors/agent-hooks/hook');
+const { main, run, extractEvent, mapMcpTool, DEFAULT_POLICY } = require('../sensors/agent-hooks/hook');
 const { decide } = require('../sensors/shared/decision');
+const D = require('../detection-engine/detect');
 
 // Isolate the disk policy cache so tests use DEFAULT_POLICY deterministically.
 const NO_CACHE = { readFile: () => { throw new Error('no cache'); }, writeFile: () => {}, cacheFile: '/dev/null/none' };
@@ -21,15 +22,23 @@ function collectIo() {
 async function runHook(event, extra = {}) {
   const io = collectIo();
   const reports = [];
-  const result = await run(event, {}, {
+  let trustedPolicy;
+  if (typeof extra.readFile === 'function') {
+    try { trustedPolicy = JSON.parse(extra.readFile(extra.cacheFile || 'test-cache')).policy; } catch (_) {}
+  }
+  const dependencies = {
     ...NO_CACHE, io: io.io,
     report: (rec) => { reports.push(rec); },
     ...extra,
-  });
+    ...(trustedPolicy ? { trustedPolicy } : {}),
+  };
+  if (!Object.prototype.hasOwnProperty.call(extra, 'trustedPolicy')
+      && typeof extra.readFile !== 'function') dependencies.trustedPolicy = DEFAULT_POLICY;
+  const result = await run(event, {}, dependencies);
   return { result, reports, out: io.out, err: io.err };
 }
 
-test('blocks a prompt carrying an SSN (default policy, offline)', async () => {
+test('blocks a prompt carrying an SSN under a trusted policy', async () => {
   const { result, reports, out, err } = await runHook({ hook_event_name: 'UserPromptSubmit', prompt: 'my ssn is 524-71-9043' });
   assert.strictEqual(result.code, 2);
   assert.match(out.join(''), /"decision":"block"/);
@@ -40,6 +49,59 @@ test('blocks a prompt carrying an SSN (default policy, offline)', async () => {
   assert.strictEqual(reports[0].clientOutcome, 'action_blocked');
   assert.strictEqual(reports[0].clientPreRedacted, true);
   assert.strictEqual(reports[0].source, 'agent_hooks');
+});
+
+test('agent hook blocks reversible encoded SSNs and opaque Base64 before execution', async () => {
+  const encodedSsn = Buffer.from('SSN 524-71-9043').toString('base64');
+  const binary = Buffer.from([0, 255, 1, 254, 2, 253, 3, 252, 4, 251, 5, 250]).toString('base64');
+
+  for (const prompt of [encodedSsn, Buffer.from('SSN 524-71-9043').toString('hex'), binary]) {
+    const { result, reports, out, err } = await runHook({ hook_event_name: 'UserPromptSubmit', prompt });
+    assert.strictEqual(result.code, 2);
+    assert.strictEqual(result.action, 'block');
+    assert.strictEqual(reports[0].clientOutcome, 'action_blocked');
+    assert.ok(!JSON.stringify(reports).includes(prompt), 'encoded payload stays out of telemetry');
+    assert.ok(!out.join('').includes(prompt));
+    assert.ok(!err.join('').includes(prompt));
+  }
+});
+
+test('fails closed when sensitive prompt content falls beyond the scan limit', async () => {
+  const prompt = 'a'.repeat(200001) + ' SSN 123-45-6789';
+  const { result, reports, out, err } = await runHook({ hook_event_name: 'UserPromptSubmit', prompt });
+
+  assert.strictEqual(result.code, 2);
+  assert.strictEqual(result.action, 'block');
+  assert.match(out.join('') + err.join(''), /scan limit|too large/i);
+  assert.ok(!JSON.stringify(reports).includes('123-45-6789'), 'oversized block telemetry stays label-only');
+});
+
+test('agent hook carries EDM and cannot disable active hard stops', async () => {
+  const value = '550e8400-e29b-41d4-a716-446655440000';
+  const salt = 'hook-unit-salt-0123456789abcdef0123';
+  const exactMatch = {
+    formatVersion: 2,
+    algorithm: 'sha256',
+    valuePolicy: 'offline-random-id-v1',
+    salt,
+    minLen: 20,
+    maxWords: 1,
+    fingerprints: [D.edmFingerprint(value, salt)],
+  };
+  const policy = {
+    ...DEFAULT_POLICY,
+    alwaysBlock: ['US_SSN', 'EXACT_MATCH'],
+    disabledDetectors: ['US_SSN', 'EXACT_MATCH'],
+    exactMatch,
+  };
+  const cache = { readFile: () => JSON.stringify({ policy, fetchedAt: Date.now() }), cacheFile: 'x' };
+
+  const ssn = await runHook({ hook_event_name: 'UserPromptSubmit', prompt: 'ssn 524-71-9043' }, cache);
+  assert.strictEqual(ssn.result.code, 2, 'disabledDetectors cannot turn off a hard stop');
+
+  const edm = await runHook({ hook_event_name: 'UserPromptSubmit', prompt: `opaque record ${value}` }, cache);
+  assert.strictEqual(edm.result.code, 2);
+  assert.match(edm.err.join(''), /EXACT_MATCH/);
 });
 
 test('blocks a Bash command containing a secret, channel agent_shell', async () => {
@@ -98,6 +160,37 @@ test('non-hook events are ignored', async () => {
   assert.strictEqual(extractEvent({ hook_event_name: 'PostToolUse' }), null);
 });
 
+test('supported prompt and shell events fail closed without a trusted signed policy', async () => {
+  for (const event of [
+    { hook_event_name: 'UserPromptSubmit', prompt: 'public branch hours' },
+    { hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'echo public' } },
+  ]) {
+    const { result, out, err } = await runHook(event, { trustedPolicy: null });
+    assert.strictEqual(result.code, 2);
+    assert.strictEqual(result.action, 'block');
+    assert.match(out.join('') + err.join(''), /no trusted signed policy/i);
+  }
+});
+
+test('malformed input and internal hook failures exit denied with bounded generic output', async () => {
+  for (const dependencies of [
+    { stdin: '{not-json' },
+    { stdinStream: { async *[Symbol.asyncIterator]() { throw new Error('raw secret 524-71-9043'); } } },
+  ]) {
+    const io = collectIo();
+    let exitCode = null;
+    await main([], {
+      ...dependencies,
+      io: io.io,
+      exit: (code) => { exitCode = code; },
+    });
+    assert.strictEqual(exitCode, 2);
+    const output = io.out.join('') + io.err.join('');
+    assert.match(output, /RedactWall blocked/);
+    assert.doesNotMatch(output, /524-71-9043|raw secret/);
+  }
+});
+
 test('mapMcpTool maps mcp__server__tool to server.tool', () => {
   assert.strictEqual(mapMcpTool('mcp__jira__create_issue'), 'jira.create_issue');
   assert.strictEqual(mapMcpTool('mcp__github__merge_pr'), 'github.merge_pr');
@@ -107,6 +200,7 @@ test('shared decide() matches the extension evaluate() semantics', () => {
   const pol = { alwaysBlock: ['SECRET_KEY'], blockMinSeverity: 2, blockRiskScore: 25, enforcementMode: 'block' };
   assert.strictEqual(decide({ findings: [], categories: [] }, pol).action, 'allow');
   assert.strictEqual(decide({ findings: [{ type: 'SECRET_KEY', severity: 4 }], maxSeverity: 4 }, { ...pol, enforcementMode: 'warn' }).action, 'block', 'hard-stop overrides warn');
+  assert.strictEqual(decide({ findings: [], categories: [], opaqueEncoded: true }, { ...pol, enforcementMode: 'redact' }).action, 'block');
 });
 
 test('shared decide() tokenizes hard-stop in redact mode, blocks categories (extension parity)', () => {

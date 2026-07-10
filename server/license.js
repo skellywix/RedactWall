@@ -32,6 +32,9 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const env = require('./env');
+const tenant = require('./tenant');
+const privatePaths = require('./private-path');
+const fileMutationLock = require('./file-mutation-lock');
 
 // Placeholder public key. Regenerate offline with
 // `node scripts/license-issue.js --init-keypair <dir>` before the first
@@ -41,6 +44,7 @@ MCowBQYDK2VwAyEA0lard41yplR7X9CCdwvvvbjWIPUGOisoi4jfQV1GY6c=
 -----END PUBLIC KEY-----`;
 
 const DEFAULT_GRACE_DAYS = 30;
+const MAX_LICENSE_FILE_BYTES = 64 * 1024;
 const PLANS = ['standard', 'enterprise'];
 
 function embeddedPublicKey() {
@@ -54,8 +58,209 @@ function licensePath() {
   return path.join(path.dirname(base), 'redactwall.lic');
 }
 
+function writeLicenseBytesAtomically(contents, options = {}) {
+  const fsImpl = options.fs || fs;
+  const target = options.path || licensePath();
+  const directory = path.dirname(target);
+  const temp = path.join(directory, `.${path.basename(target)}.${process.pid}.${crypto.randomBytes(12).toString('hex')}.tmp`);
+  const mode = options.mode == null ? 0o600 : options.mode;
+  let descriptor = null;
+  let created = false;
+  try {
+    fsImpl.mkdirSync(directory, { recursive: true, mode: 0o700 });
+    descriptor = fsImpl.openSync(temp, 'wx', mode);
+    created = true;
+    fsImpl.writeFileSync(descriptor, contents);
+    fsImpl.fsyncSync(descriptor);
+    fsImpl.fchmodSync(descriptor, mode);
+    fsImpl.closeSync(descriptor);
+    descriptor = null;
+    privatePaths.publishFileDurably(temp, target, { ...options, fs: fsImpl });
+    created = false;
+    try { fsImpl.chmodSync(target, mode); } catch {}
+  } catch (error) {
+    if (descriptor !== null) {
+      try { fsImpl.closeSync(descriptor); } catch {}
+    }
+    if (created) {
+      try { fsImpl.unlinkSync(temp); } catch {}
+    }
+    throw error;
+  }
+  return target;
+}
+
+function writeLicenseAtomically(text, options = {}) {
+  return writeLicenseBytesAtomically(
+    Buffer.from(`${String(text || '').trim()}\n`, 'utf8'),
+    options,
+  );
+}
+
+function removeLicenseFile(options = {}) {
+  const fsImpl = options.fs || fs;
+  const target = options.path || licensePath();
+  try {
+    fsImpl.unlinkSync(target);
+  } catch (error) {
+    if (!error || error.code !== 'ENOENT') throw error;
+  }
+  privatePaths.fsyncDirectory(path.dirname(target), { ...options, fs: fsImpl });
+}
+
+function licenseFileSnapshot(target, options = {}) {
+  const fsImpl = options.fs || fs;
+  let before;
+  try {
+    before = fsImpl.lstatSync(target);
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return { exists: false };
+    const wrapped = new Error('license file could not be inspected');
+    wrapped.code = 'LICENSE_FILE_READ_FAILED';
+    wrapped.cause = error;
+    throw wrapped;
+  }
+  if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1
+      || before.size > MAX_LICENSE_FILE_BYTES) {
+    const error = new Error('license path is not a bounded regular file');
+    error.code = 'LICENSE_FILE_READ_FAILED';
+    throw error;
+  }
+  let contents;
+  let after;
+  try {
+    contents = fsImpl.readFileSync(target);
+    after = fsImpl.lstatSync(target);
+  } catch (error) {
+    const wrapped = new Error('license file could not be read');
+    wrapped.code = 'LICENSE_FILE_READ_FAILED';
+    wrapped.cause = error;
+    throw wrapped;
+  }
+  if (!after.isFile() || after.isSymbolicLink() || after.nlink !== 1
+      || contents.length !== before.size || after.size !== before.size
+      || (before.dev && after.dev && before.dev !== after.dev)
+      || (before.ino && after.ino && before.ino !== after.ino)
+      || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs) {
+    const error = new Error('license file changed while reading');
+    error.code = 'LICENSE_FILE_READ_FAILED';
+    throw error;
+  }
+  return { exists: true, contents, mode: before.mode & 0o777 };
+}
+
+function restoreLicenseSnapshot(target, snapshot, options = {}) {
+  if (snapshot.exists) {
+    writeLicenseBytesAtomically(snapshot.contents, {
+      ...options,
+      path: target,
+      mode: snapshot.mode,
+    });
+  } else {
+    removeLicenseFile({ ...options, path: target });
+  }
+}
+
+function runLicenseFileMutation(target, callback, options) {
+  const before = licenseFileSnapshot(target, options);
+  let written = false;
+  const write = (text) => {
+    const result = writeLicenseAtomically(text, { ...options, path: target });
+    written = true;
+    return result;
+  };
+  try {
+    const result = callback({ write });
+    if (result && typeof result.then === 'function') {
+      throw new TypeError('license mutation callback must be synchronous');
+    }
+    return result;
+  } catch (error) {
+    if (!written) throw error;
+    try {
+      restoreLicenseSnapshot(target, before, options);
+      refresh();
+    } catch (rollbackError) {
+      const failure = new Error('license rollback failed after control-plane commit error');
+      failure.code = 'LICENSE_ROLLBACK_FAILED';
+      failure.cause = error;
+      failure.rollbackCause = rollbackError;
+      throw failure;
+    }
+    throw error;
+  }
+}
+
+function mutationOptions(options, fsImpl) {
+  return { ...options, fs: fsImpl };
+}
+
+function withLicenseFileMutation(callback, options = {}) {
+  const fsImpl = options.fs || fs;
+  const target = path.resolve(options.path || licensePath());
+  fsImpl.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+  return fileMutationLock.withFileMutationLockSync(
+    target,
+    () => runLicenseFileMutation(target, callback, mutationOptions(options, fsImpl)),
+    mutationOptions(options, fsImpl),
+  );
+}
+
+async function withLicenseFileMutationAsync(callback, options = {}) {
+  const fsImpl = options.fs || fs;
+  const target = path.resolve(options.path || licensePath());
+  fsImpl.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+  return fileMutationLock.withFileMutationLock(
+    target,
+    () => runLicenseFileMutation(target, callback, mutationOptions(options, fsImpl)),
+    mutationOptions(options, fsImpl),
+  );
+}
+
+function normalizeCustomerId(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function validCustomerId(value) {
+  return tenant.validTenantId(value);
+}
+
+function configuredCustomerBinding(source = process.env) {
+  const resolved = typeof env.withEnvAliases === 'function' ? env.withEnvAliases(source) : source;
+  const explicitValue = String(resolved.REDACTWALL_LICENSE_CUSTOMER_ID || '').trim();
+  const tenantValue = String(resolved.REDACTWALL_TENANT_ID || '').trim();
+  if ((explicitValue && !validCustomerId(explicitValue)) || (tenantValue && !validCustomerId(tenantValue))) {
+    return { ok: false, reason: 'customer_binding_invalid', expectedCustomerId: null };
+  }
+  const explicit = normalizeCustomerId(explicitValue);
+  const tenantId = normalizeCustomerId(tenantValue);
+  if (explicit && tenantId && explicit !== tenantId) {
+    return { ok: false, reason: 'customer_binding_conflict', expectedCustomerId: null };
+  }
+  const expectedCustomerId = explicit || tenantId;
+  if (!expectedCustomerId) {
+    return { ok: false, reason: 'customer_binding_missing', expectedCustomerId: null };
+  }
+  return { ok: true, reason: null, expectedCustomerId };
+}
+
+function customerBinding(options) {
+  if (Object.prototype.hasOwnProperty.call(options, 'expectedCustomerId')) {
+    const value = String(options.expectedCustomerId || '').trim();
+    if (!value) {
+      return { ok: false, reason: 'customer_binding_missing', expectedCustomerId: null };
+    }
+    if (!validCustomerId(value)) {
+      return { ok: false, reason: 'customer_binding_invalid', expectedCustomerId: null };
+    }
+    return { ok: true, reason: null, expectedCustomerId: normalizeCustomerId(value) };
+  }
+  return configuredCustomerBinding(options.env || process.env);
+}
+
 // Never throws, never echoes file content. Returns { ok, payload } | { ok:false, reason }.
-function verifyLicenseText(text, { publicKeyPem = embeddedPublicKey(), now = Date.now() } = {}) {
+function verifyLicenseText(text, options = {}) {
+  const { publicKeyPem = embeddedPublicKey() } = options;
   const raw = String(text || '').trim();
   if (!raw) return { ok: false, reason: 'missing' };
   const dot = raw.indexOf('.');
@@ -72,10 +277,19 @@ function verifyLicenseText(text, { publicKeyPem = embeddedPublicKey(), now = Dat
   if (!payload || typeof payload !== 'object') return { ok: false, reason: 'bad_payload' };
   if (!PLANS.includes(String(payload.plan))) return { ok: false, reason: 'bad_payload' };
   if (!Number.isFinite(Number(payload.seats)) || Number(payload.seats) <= 0) return { ok: false, reason: 'bad_payload' };
-  // Fail closed on an unparseable expiry (NaN comparisons would otherwise read
-  // as never-expiring).
+  const rawCustomerId = typeof payload.customerId === 'string' ? payload.customerId.trim() : '';
+  const customerId = normalizeCustomerId(rawCustomerId);
+  if (!customerId) return { ok: false, reason: 'customer_id_missing' };
+  if (!validCustomerId(rawCustomerId)) return { ok: false, reason: 'customer_id_invalid' };
+  // Validate the signed payload completely before comparing it with local
+  // deployment configuration so malformed licenses retain a stable reason.
   if (!Number.isFinite(Date.parse(payload.expires))) return { ok: false, reason: 'bad_payload' };
-  return { ok: true, payload };
+  const binding = customerBinding(options);
+  if (!binding.ok) return { ok: false, reason: binding.reason };
+  if (binding.expectedCustomerId && customerId !== binding.expectedCustomerId) {
+    return { ok: false, reason: 'customer_mismatch' };
+  }
+  return { ok: true, payload: { ...payload, customerId } };
 }
 
 // missing/invalid -> 'unlicensed'; before expiry -> 'active'; within grace ->
@@ -109,7 +323,11 @@ function loadStatus(now = Date.now(), deps = {}) {
   const read = deps.readFile || ((p) => fs.readFileSync(p, 'utf8'));
   let text = '';
   try { text = read(deps.licensePath || licensePath()); } catch (_) { return { state: 'unlicensed', payload: null, reason: 'missing' }; }
-  const v = verifyLicenseText(text, { now, ...(deps.publicKeyPem ? { publicKeyPem: deps.publicKeyPem } : {}) });
+  const verifyOptions = { now };
+  for (const key of ['publicKeyPem', 'expectedCustomerId', 'env']) {
+    if (Object.prototype.hasOwnProperty.call(deps, key)) verifyOptions[key] = deps[key];
+  }
+  const v = verifyLicenseText(text, verifyOptions);
   if (!v.ok) return { state: 'unlicensed', payload: null, reason: v.reason };
   return { state: evaluate(v.payload, now), payload: v.payload, reason: null };
 }
@@ -125,15 +343,21 @@ function effectiveStatus() {
 function refresh(deps = {}) {
   const now = deps.now || Date.now();
   const next = loadStatus(now, deps);
+  const previous = _status;
   const prevEffective = effectiveStatus().state;
   _status = next;
   const nextEffective = effectiveStatus().state;
-  if (deps.appendAudit && (prevEffective !== nextEffective)) {
-    deps.appendAudit({
-      action: 'LICENSE_STATE_CHANGED',
-      actor: 'system',
-      detail: `from=${prevEffective}; to=${nextEffective}; plan=${next.payload ? next.payload.plan : 'none'}; expires=${next.payload ? next.payload.expires : 'none'}`,
-    });
+  try {
+    if (deps.appendAudit && (prevEffective !== nextEffective)) {
+      deps.appendAudit({
+        action: 'LICENSE_STATE_CHANGED',
+        actor: 'system',
+        detail: `from=${prevEffective}; to=${nextEffective}; plan=${next.payload ? next.payload.plan : 'none'}; expires=${next.payload ? next.payload.expires : 'none'}`,
+      });
+    }
+  } catch (error) {
+    _status = previous;
+    throw error;
   }
   return effectiveStatus();
 }
@@ -150,20 +374,39 @@ function auditKillSwitch(prevEffective, source, deps) {
   return effectiveStatus();
 }
 
+function vendorStateSnapshot() {
+  return { revoked: _vendorRevoked, stale: _vendorStale };
+}
+
+function restoreVendorState(snapshot) {
+  _vendorRevoked = snapshot.revoked === true;
+  _vendorStale = snapshot.stale === true;
+  return effectiveStatus();
+}
+
+function applyVendorState(next = {}, deps = {}) {
+  const previous = vendorStateSnapshot();
+  const prevEffective = effectiveStatus().state;
+  if (Object.prototype.hasOwnProperty.call(next, 'revoked')) _vendorRevoked = next.revoked === true;
+  if (Object.prototype.hasOwnProperty.call(next, 'stale')) _vendorStale = next.stale === true;
+  try {
+    return auditKillSwitch(prevEffective, deps.source || 'vendor', deps);
+  } catch (error) {
+    restoreVendorState(previous);
+    throw error;
+  }
+}
+
 // Apply a signature-verified vendor 'revoked'/'active' verdict (connected mode
 // only, driven by vendor-link after freshness + customer-binding checks).
 function applyVendorVerdict(revoked, deps = {}) {
-  const prevEffective = effectiveStatus().state;
-  _vendorRevoked = revoked === true;
-  return auditKillSwitch(prevEffective, 'vendor', deps);
+  return applyVendorState({ revoked }, { ...deps, source: 'vendor' });
 }
 
 // Heartbeat-or-die: vendor-link sets this true when contact is stale beyond
 // the tolerance window and false on a successful heartbeat.
 function setVendorStale(stale, deps = {}) {
-  const prevEffective = effectiveStatus().state;
-  _vendorStale = stale === true;
-  return auditKillSwitch(prevEffective, 'vendor_staleness', deps);
+  return applyVendorState({ stale }, { ...deps, source: 'vendor_staleness' });
 }
 
 function isRevoked() { return killed(); }
@@ -221,6 +464,7 @@ function requireWritable(req, res, next) {
   if (state !== 'readonly' && state !== 'revoked') return next();
   if (req.path.startsWith('/api/queries/')) return next();
   if (req.path === '/api/billing/license' && req.method === 'POST') return next();
+  if (req.path === '/api/admin/license/install' && req.method === 'POST') return next();
   return res.status(403).json({ error: state === 'revoked' ? 'license_revoked' : 'license_readonly' });
 }
 
@@ -237,6 +481,20 @@ module.exports = {
   entitled,
   requireWritable,
   licensePath,
+  writeLicenseAtomically,
+  removeLicenseFile,
+  withLicenseFileMutation,
+  withLicenseFileMutationAsync,
+  configuredCustomerBinding,
+  normalizeCustomerId,
+  validCustomerId,
   EMBEDDED_PUBLIC_KEY_PEM,
   DEFAULT_GRACE_DAYS,
+  _internal: {
+    applyVendorState,
+    vendorStateSnapshot,
+    restoreVendorState,
+    licenseFileSnapshot,
+    restoreLicenseSnapshot,
+  },
 };

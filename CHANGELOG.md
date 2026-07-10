@@ -9,12 +9,24 @@ reconstructed from `ITERATIONS.md` and git history.
 
 ## [Unreleased]
 
+### Changed
+
+- **EDM version 2 migration.** Offline exact-match packs now use SHA-256 and a
+  versioned `offline-random-id-v1` profile that accepts only syntactically
+  random identifiers with at least 96 bits of source entropy. Legacy 16-hex
+  packs and enumerable values such as SSNs, member numbers, account numbers,
+  loan numbers, names, and email addresses fail closed. Rebuild enabled legacy
+  packs from the complete eligible source list. Low-entropy identifiers remain
+  covered by mandatory built-in and tuned custom detectors; they must not be
+  moved into an offline sensor-visible fingerprint pack.
+
 ### Added
 
 - **Connected deployment (Phase B/C).** The optional vendor-side second-layer
   scanner (`REDACTWALL_SEMANTIC_REMOTE_URL`) now requires HTTPS for any remote
   host — cleartext prompt egress to a remote scanner is rejected (loopback and
-  an explicit `REDACTWALL_SEMANTIC_REMOTE_ALLOW_INSECURE` override aside) — and
+  a non-production-only `REDACTWALL_SEMANTIC_REMOTE_ALLOW_INSECURE` override
+  aside) — and
   gains a fail mode (`REDACTWALL_SEMANTIC_REMOTE_FAIL_MODE=degrade|hold`): `hold`
   withholds an un-vetted prompt for approval instead of degrading to local-only.
   All three sensors (browser extension, endpoint agent, MCP guard) refuse a
@@ -116,9 +128,10 @@ reconstructed from `ITERATIONS.md` and git history.
   agent now reads images on-box instead of dead-ending at `ocr_required`; model
   paths are hard-pinned to the vendored files so it never fetches weights from a
   network. Toggle with `ENDPOINT_AGENT_OCR_WASM` (default on). A new
-  `ENDPOINT_AGENT_OCR_STRICT` mode (default off) routes images whose OCR yields
-  little or no text to `ocr_required` instead of allowing them through on sparse
-  extraction.
+  `ENDPOINT_AGENT_OCR_STRICT` is fail-closed by default and routes images whose
+  OCR yields little or no text to `ocr_required` instead of allowing them through
+  on sparse extraction. Only explicit development and test environments may opt
+  into lenient behavior; production ignores attempts to disable this control.
 - OpenAPI 3.1 spec for the `/api/v1` sensor & scan surface at
   `GET /api/v1/openapi.json` (request schemas generated from the Zod validators;
   zero new dependencies) plus `docs/reference/API_REFERENCE.md`.
@@ -186,6 +199,21 @@ reconstructed from `ITERATIONS.md` and git history.
   - Postgres row-level tenant isolation added in migration v3 was inert
     (`setTenantContext` was never called); it is now wired via
     `db.wireTenantContext` for the customer-silo tenant model.
+- Encoded-content enforcement now reconstructs bounded adjacent request and
+  streaming-response fragments, including OpenAI and Anthropic SSE deltas,
+  before inspection. UTF-16 and unpadded binary Base64 cannot bypass the shared
+  browser, endpoint, MCP, or gateway controls; oversized clipboard content and
+  uninspectable binary Git diffs are held instead of released.
+- Signed sensor policy activation now occurs only after the verified bundle is
+  durably published as a private last-known-good file. Failed publication keeps
+  both the previous bytes and replay high-water mark intact, while a corrupt
+  browser cache remains fail-closed until the documented key-rotation reset.
+- Jira and Linear creation/status responses now reject redirects and are parsed
+  only through bounded, timed streams. Oversized, malformed, or unstreamable
+  provider bodies cannot consume unbounded memory or fabricate a state change.
+- File-backed control-plane locks now recognize Windows `EBUSY` contention and
+  retry exact token-owned cleanup paths, preventing transient filesystem races
+  from leaving an orphaned lock directory.
 
 ### Fixed
 
@@ -239,8 +267,9 @@ The "platform" cycle (PLANS/platform-roadmap.md M1–M4).
 ### Added
 
 - Deployable AI LLM gateway (`gateway/`): OpenAI-compatible, Anthropic,
-  Gemini, and Bedrock upstreams; fail-closed prompt gating and buffered
-  streamed-response scanning; agent tokens; rate limiting with SQLite or
+  Gemini, and non-streaming Bedrock upstreams; fail-closed prompt gating and
+  buffered JSON/SSE response scanning; explicit rejection of unsupported
+  binary Bedrock EventStream routes; agent tokens; rate limiting with SQLite or
   Redis/Valkey shared limiter; HA compose stack.
 - Signed safe-to-send receipts for cleared gate outcomes and
   `POST /api/receipts/verify`.

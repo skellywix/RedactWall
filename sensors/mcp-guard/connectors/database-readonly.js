@@ -7,13 +7,19 @@
  */
 const crypto = require('crypto');
 const path = require('path');
+const { fork } = require('child_process');
 const Database = require('better-sqlite3');
-const { connectorHealthCheck, sanitizeToolResult } = require('../sdk');
+const { connectorHealthCheck, executeConnectorTool } = require('../sdk');
 
 const DEFAULT_MAX_ROWS = 50;
 const MAX_ROWS = 500;
 const DEFAULT_MAX_BYTES = 512 * 1024;
 const DEFAULT_SCOPES = ['readonly'];
+const DEFAULT_QUERY_TIMEOUT_MS = 1000;
+const DEFAULT_QUERY_MEMORY_BYTES = 32 * 1024 * 1024;
+const CHILD_V8_HEAP_MB = 64;
+const MAX_CONCURRENT_QUERIES = 4;
+let activeQueryWorkers = 0;
 
 function compactLabel(value, fallback = '', max = 120) {
   return String(value == null ? fallback : value)
@@ -100,10 +106,12 @@ function rejectUnsafeSql(sql) {
 }
 
 function openReadonlyDatabase(opts = {}) {
-  return new Database(configuredDatabasePath(opts), {
+  const db = new Database(configuredDatabasePath(opts), {
     readonly: true,
     fileMustExist: true,
   });
+  if (opts.hardHeapLimitBytes) db.pragma(`hard_heap_limit = ${Math.floor(opts.hardHeapLimitBytes)}`);
+  return db;
 }
 
 function normalizeCell(value) {
@@ -122,6 +130,100 @@ function normalizeRows(rows = []) {
 
 function queryHash(sql) {
   return crypto.createHash('sha256').update(String(sql || '')).digest('hex').slice(0, 16);
+}
+
+function queryTimeoutMs(opts = {}) {
+  const value = Number(opts.queryTimeoutMs ?? opts.timeoutMs ?? DEFAULT_QUERY_TIMEOUT_MS);
+  if (!Number.isFinite(value)) return DEFAULT_QUERY_TIMEOUT_MS;
+  return Math.max(10, Math.min(30000, Math.floor(value)));
+}
+
+function queryMemoryBytes(opts = {}) {
+  const value = Number(opts.queryMemoryBytes ?? DEFAULT_QUERY_MEMORY_BYTES);
+  if (!Number.isFinite(value)) return DEFAULT_QUERY_MEMORY_BYTES;
+  return Math.max(8 * 1024 * 1024, Math.min(128 * 1024 * 1024, Math.floor(value)));
+}
+
+function workerQueryOptions(opts = {}) {
+  if (opts.db) throw new Error('Database query budget requires a file-backed database');
+  return {
+    databasePath: configuredDatabasePath(opts),
+    label: databaseLabel(opts),
+    maxBytes: maxBytes(opts),
+    maxRows: maxRows(opts.maxRows),
+    hardHeapLimitBytes: queryMemoryBytes(opts),
+  };
+}
+
+function workerQueryArgs(args = {}, opts = {}) {
+  return {
+    sql: rejectUnsafeSql(args.sql || args.query || opts.sql || opts.query),
+    limit: maxRows(args.limit ?? args.maxRows ?? opts.limit ?? opts.maxRows),
+  };
+}
+
+function workerQueryPromise(worker, payload, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let outcome = null;
+    let processClosed = false;
+    let capacityReleased = false;
+    let timer;
+    const settleAfterExit = () => {
+      processClosed = true;
+      if (!capacityReleased) {
+        capacityReleased = true;
+        activeQueryWorkers = Math.max(0, activeQueryWorkers - 1);
+      }
+      if (settled) return;
+      if (!outcome) outcome = { fn: reject, value: new Error('Database read-only query failed') };
+      settled = true;
+      outcome.fn(outcome.value);
+    };
+    const finish = (fn, value, terminate = false) => {
+      if (outcome) return;
+      outcome = { fn, value };
+      clearTimeout(timer);
+      if (terminate) worker.kill();
+      if (processClosed) settleAfterExit();
+    };
+    timer = setTimeout(() => {
+      const err = new Error(`Database read-only query exceeded ${timeoutMs} ms execution budget`);
+      err.code = 'REDACTWALL_DATABASE_QUERY_TIMEOUT';
+      finish(reject, err, true);
+    }, timeoutMs);
+    worker.once('message', (message) => message && message.ok
+      ? finish(resolve, message.result, true)
+      : finish(reject, new Error('Database read-only query failed'), true));
+    worker.once('error', () => finish(reject, new Error('Database read-only query failed'), true));
+    worker.once('exit', settleAfterExit);
+    // A failed spawn may emit `error` and `close` without `exit`. `close`
+    // proves the child has no remaining stdio/IPC resources and is the only
+    // safe fallback for releasing that reserved capacity slot.
+    worker.once('close', settleAfterExit);
+    worker.send(payload, (err) => {
+      if (err) finish(reject, new Error('Database read-only query failed'), true);
+    });
+  });
+}
+
+function fetchDatabaseRowsWithBudget(args = {}, opts = {}) {
+  if (activeQueryWorkers >= MAX_CONCURRENT_QUERIES) {
+    const err = new Error('Database read-only query capacity is busy');
+    err.code = 'REDACTWALL_DATABASE_QUERY_BUSY';
+    return Promise.reject(err);
+  }
+  const timeoutMs = queryTimeoutMs(opts);
+  const safeOpts = workerQueryOptions(opts);
+  const safeArgs = workerQueryArgs(args, opts);
+  const forkImpl = opts.forkImpl || fork;
+  const worker = forkImpl(path.join(__dirname, 'database-readonly-worker.js'), [], {
+    stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+    windowsHide: true,
+    execArgv: [`--max-old-space-size=${CHILD_V8_HEAP_MB}`],
+  });
+  activeQueryWorkers += 1;
+  return workerQueryPromise(worker, { args: safeArgs, opts: safeOpts }, timeoutMs);
 }
 
 function boundedJsonText(value, label, opts = {}) {
@@ -216,8 +318,7 @@ function fetchDatabaseSchema(args = {}, opts = {}) {
 }
 
 async function sanitizeDatabaseRows(args = {}, opts = {}) {
-  const raw = fetchDatabaseRows(args, opts);
-  return sanitizeToolResult(raw, {
+  return executeConnectorTool((toolArgs) => fetchDatabaseRowsWithBudget(toolArgs, opts), args, {
     agent: opts.agent,
     connector: 'database_readonly',
     tool: 'query.readonly',
@@ -225,8 +326,7 @@ async function sanitizeDatabaseRows(args = {}, opts = {}) {
 }
 
 async function sanitizeDatabaseSchema(args = {}, opts = {}) {
-  const raw = fetchDatabaseSchema(args, opts);
-  return sanitizeToolResult(raw, {
+  return executeConnectorTool((toolArgs) => fetchDatabaseSchema(toolArgs, opts), args, {
     agent: opts.agent,
     connector: 'database_readonly',
     tool: 'schema.readonly',
@@ -254,6 +354,7 @@ module.exports = {
   databaseReadonlyConnectorHealth,
   databaseScopes,
   fetchDatabaseRows,
+  fetchDatabaseRowsWithBudget,
   fetchDatabaseSchema,
   rejectUnsafeSql,
   sanitizeDatabaseRows,

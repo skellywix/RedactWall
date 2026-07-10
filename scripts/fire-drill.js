@@ -5,6 +5,11 @@ require('../server/env').loadEnv();
  * fail if the system does not detect it or if the raw token leaks in response.
  */
 const crypto = require('crypto');
+const { cancelResponseBody, readBoundedJson } = require('../sensors/shared/bounded-response');
+const { secureServerBase } = require('../sensors/shared/server-url');
+
+const MAX_GATE_RESPONSE_BYTES = 512 * 1024;
+const GATE_RESPONSE_TIMEOUT_MS = 10000;
 
 function makeCanaryToken(seed = crypto.randomBytes(10).toString('hex').toUpperCase()) {
   return `PS-CANARY-${String(seed).replace(/[^A-Z0-9_-]/gi, '').toUpperCase().padEnd(12, 'X').slice(0, 40)}`;
@@ -37,11 +42,20 @@ function assertFireDrillResponse(body, token) {
   };
 }
 
-async function runFireDrill({ baseUrl, ingestKey, fetchImpl = fetch, token = makeCanaryToken() }) {
-  const url = String(baseUrl || 'http://localhost:4000').replace(/\/+$/, '');
+async function runFireDrill({
+  baseUrl,
+  ingestKey,
+  fetchImpl = fetch,
+  token = makeCanaryToken(),
+  maxResponseBytes = MAX_GATE_RESPONSE_BYTES,
+  responseTimeoutMs = GATE_RESPONSE_TIMEOUT_MS,
+}) {
+  const url = secureServerBase(baseUrl || 'http://localhost:4000');
+  if (!url) throw new Error('fire drill base URL must use HTTPS or loopback HTTP without query parameters or fragments');
   const key = ingestKey || process.env.INGEST_API_KEY || 'dev-ingest-key';
   const res = await fetchImpl(`${url}/api/v1/gate`, {
     method: 'POST',
+    redirect: 'error',
     headers: { 'Content-Type': 'application/json', 'x-api-key': key },
     body: JSON.stringify({
       prompt: makePrompt(token),
@@ -52,8 +66,15 @@ async function runFireDrill({ baseUrl, ingestKey, fetchImpl = fetch, token = mak
       orgId: 'synthetic',
     }),
   });
-  if (!res.ok) throw new Error(`fire drill request failed: HTTP ${res.status}`);
-  const body = await res.json();
+  if (!res.ok) {
+    await cancelResponseBody(res);
+    throw new Error(`fire drill request failed: HTTP ${res.status}`);
+  }
+  const { json: body } = await readBoundedJson(res, {
+    maxBytes: maxResponseBytes,
+    timeoutMs: responseTimeoutMs,
+    label: 'fire drill response',
+  });
   return assertFireDrillResponse(body, token);
 }
 

@@ -17,23 +17,17 @@ const {
 } = require('../scripts/ai-chat-dlp-proxy-lab');
 
 function jsonResponse(status, body) {
-  return {
-    ok: status >= 200 && status < 300,
+  return new Response(JSON.stringify(body), {
     status,
-    headers: new Headers({ 'content-type': 'application/json', connection: 'close' }),
-    arrayBuffer: async () => Buffer.from(JSON.stringify(body)),
-    json: async () => body,
-  };
+    headers: { 'content-type': 'application/json', connection: 'close' },
+  });
 }
 
 function textResponse(status, body, headers = {}) {
-  return {
-    ok: status >= 200 && status < 300,
+  return new Response(body, {
     status,
-    headers: new Headers(headers),
-    arrayBuffer: async () => Buffer.from(body),
-    json: async () => JSON.parse(body),
-  };
+    headers,
+  });
 }
 
 function listen(server) {
@@ -103,6 +97,30 @@ test('monitor payload scans locally and contains no raw prompt text', () => {
   assert.match(built.payload.prompt, /^\[REDACTED:/);
   assert.ok(built.payload.clientFindings.some((f) => f.type === 'US_SSN'));
   assert.ok(!JSON.stringify(built).includes(secret));
+});
+
+test('monitor payload surfaces encoded sensitive and opaque content without claiming it is clean', () => {
+  const encodedSsn = Buffer.from('SSN 524-71-9043').toString('base64');
+  const opaqueBinary = Buffer.from([0, 255, 1, 254, 2, 253, 3, 252, 4, 251, 5, 250]).toString('base64');
+
+  const sensitive = buildMonitorPayload({
+    host: 'chatgpt.com',
+    contentType: 'application/json',
+    body: JSON.stringify({ prompt: encodedSsn }),
+  });
+  assert.match(sensitive.payload.prompt, /^\[REDACTED:/);
+  assert.ok(sensitive.payload.clientFindings.some((finding) => finding.type === 'US_SSN'));
+  assert.ok(!JSON.stringify(sensitive).includes(encodedSsn));
+
+  const opaque = buildMonitorPayload({
+    host: 'chatgpt.com',
+    contentType: 'application/json',
+    body: JSON.stringify({ prompt: opaqueBinary }),
+  });
+  assert.strictEqual(opaque.payload.prompt, '[REDACTED: OPAQUE_ENCODED_CONTENT]');
+  assert.deepStrictEqual(opaque.payload.clientCategories, [{ category: 'OPAQUE_ENCODED_CONTENT', score: 1 }]);
+  assert.deepStrictEqual(opaque.evidence.categories, ['OPAQUE_ENCODED_CONTENT']);
+  assert.ok(!JSON.stringify(opaque).includes(opaqueBinary));
 });
 
 test('monitor payload handles safe prompts, category-only evidence, and CLI args', () => {
@@ -195,10 +213,10 @@ test('proxy observer posts only redacted evidence and still forwards on control-
     user: 'analyst@example.test',
     sourceIp: '10.0.0.9',
   }, {
-    redactwall: 'http://redactwall.test',
+    redactwall: 'https://redactwall.test',
     key: 'proxy-key',
     fetchImpl: async (url, opts) => {
-      outbound = { url, headers: opts.headers, body: JSON.parse(opts.body) };
+      outbound = { url, headers: opts.headers, redirect: opts.redirect, body: JSON.parse(opts.body) };
       return jsonResponse(200, { id: 'q_proxy_monitor', decision: 'log', status: 'proxy_observed', riskScore: 30 });
     },
   });
@@ -206,8 +224,9 @@ test('proxy observer posts only redacted evidence and still forwards on control-
   assert.strictEqual(observed.forward, true);
   assert.strictEqual(observed.monitored, true);
   assert.strictEqual(observed.controlPlane.ok, true);
-  assert.strictEqual(outbound.url, 'http://redactwall.test/api/v1/gate');
+  assert.strictEqual(outbound.url, 'https://redactwall.test/api/v1/gate');
   assert.strictEqual(outbound.headers['x-api-key'], 'proxy-key');
+  assert.strictEqual(outbound.redirect, 'error');
   assert.strictEqual(outbound.body.destination, 'claude.ai');
   assert.strictEqual(outbound.body.clientOutcome, 'proxy_observed');
   assert.ok(!JSON.stringify(outbound).includes(secret));
@@ -242,13 +261,38 @@ test('proxy observer posts only redacted evidence and still forwards on control-
     status: 0,
     reason: 'fetch_unavailable',
   });
+
+  let cleartextCalled = false;
+  assert.deepStrictEqual(await postMonitorEvidence({}, {
+    redactwall: 'http://control-plane.test',
+    key: 'proxy-key',
+    fetchImpl: async () => { cleartextCalled = true; },
+  }), { ok: false, status: 0, reason: 'insecure_control_plane_url' });
+  assert.strictEqual(cleartextCalled, false);
+
+  const oversized = await postMonitorEvidence({ prompt: '[proxy observed] chatgpt.com' }, {
+    maxResponseBytes: 8,
+    fetchImpl: async () => jsonResponse(200, { id: 'response-is-too-large' }),
+  });
+  assert.deepStrictEqual(oversized, { ok: false, status: 0, reason: 'gate_unreachable' });
+
+  const remoteSecret = 'remote-secret-must-not-leak';
+  const sanitizedError = await postMonitorEvidence({ prompt: '[proxy observed] chatgpt.com' }, {
+    fetchImpl: async () => jsonResponse(500, {
+      error: remoteSecret,
+      reasons: [remoteSecret],
+      findings: [{ type: 'SECRET_KEY', masked: remoteSecret }],
+    }),
+  });
+  assert.strictEqual(JSON.stringify(sanitizedError).includes(remoteSecret), false);
+  assert.strictEqual(sanitizedError.body.error, 'control_plane_error');
 });
 
 test('cleartext lab proxy forwards original traffic while posting only sanitized monitor evidence', async () => {
   const secret = '524-71-9043';
   const calls = [];
   const server = createProxyServer({
-    redactwall: 'http://control-plane.test',
+    redactwall: 'https://control-plane.test',
     key: 'proxy-key',
     fetchImpl: async (url, opts = {}) => {
       calls.push({ url, opts });
@@ -271,7 +315,7 @@ test('cleartext lab proxy forwards original traffic while posting only sanitized
 
     assert.strictEqual(res.status, 201);
     assert.strictEqual(res.body, 'upstream ok');
-    const monitorCall = calls.find((call) => call.url === 'http://control-plane.test/api/v1/gate');
+    const monitorCall = calls.find((call) => call.url === 'https://control-plane.test/api/v1/gate');
     const upstreamCall = calls.find((call) => call.url === 'http://chatgpt.com/v1/chat/completions');
     assert.ok(monitorCall);
     assert.ok(upstreamCall);
@@ -290,7 +334,7 @@ test('cleartext lab proxy skips truncated monitoring and returns upstream failur
   const calls = [];
   const truncatedServer = createProxyServer({
     maxBodyBytes: 8,
-    redactwall: 'http://control-plane.test',
+    redactwall: 'https://control-plane.test',
     fetchImpl: async (url, opts = {}) => {
       calls.push({ url, opts });
       return textResponse(200, 'forwarded');
@@ -324,6 +368,22 @@ test('cleartext lab proxy skips truncated monitoring and returns upstream failur
     assert.match(res.body, /upstream unavailable/);
   } finally {
     await close(failingServer);
+  }
+
+  const oversizedServer = createProxyServer({
+    maxUpstreamResponseBytes: 8,
+    fetchImpl: async () => textResponse(200, 'response-is-too-large'),
+  });
+  const oversizedPort = await listen(oversizedServer);
+  try {
+    const res = await proxyRequest(oversizedPort, {
+      method: 'GET',
+      path: 'http://example.com/safe',
+    });
+    assert.strictEqual(res.status, 502);
+    assert.match(res.body, /upstream unavailable/);
+  } finally {
+    await close(oversizedServer);
   }
 });
 
@@ -367,7 +427,7 @@ test('cli main supports sample mode and returns a closeable lab server', async (
   assert.strictEqual(sample.destination, 'example.com');
 
   output = '';
-  const server = await main(['--port', '0', '--redactwall', 'http://control-plane.test', '--key', 'proxy-key'], io);
+  const server = await main(['--port', '0', '--redactwall', 'https://control-plane.test', '--key', 'proxy-key'], io);
   try {
     await new Promise((resolve) => server.listening ? resolve() : server.once('listening', resolve));
     assert.match(output, /RedactWall AI chat proxy lab listening/);

@@ -87,4 +87,13 @@ function outboundHttpsUrl(value) {
   }
 }
 
-module.exports = { outboundHttpsUrl, isBlockedHost };
+function outboundHttpsUrlWithoutParameters(value) {
+  const raw = String(value || '').trim();
+  try {
+    const url = new URL(raw);
+    if (url.search || url.hash) return '';
+  } catch { return ''; }
+  return outboundHttpsUrl(raw);
+}
+
+module.exports = { outboundHttpsUrl, outboundHttpsUrlWithoutParameters, isBlockedHost };

@@ -111,10 +111,17 @@ test('admin reassigns a held item inline; approver is refused; audit records met
   // Reassignment makes the item decidable by the named approver.
   const approved = await jsonFetch(port, `/api/queries/${held.id}/approve`, {
     headers: { cookie: approver.cookie, 'x-csrf-token': approver.csrfToken },
-    body: { note: 'assigned to me inline', password: 'approver-pass' },
+    body: { note: 'Assigned member SSN 524-71-9043 to reviewer@example.test', password: 'approver-pass' },
   });
   assert.strictEqual(approved.status, 200);
-  assert.strictEqual(db.getQuery(held.id).status, 'approved');
+  const approvedRow = db.getQuery(held.id);
+  assert.strictEqual(approvedRow.status, 'approved');
+  assert.ok(!approvedRow.decisionNote.includes('524-71-9043'));
+  assert.ok(!approvedRow.decisionNote.includes('reviewer@example.test'));
+  assert.match(approvedRow.decisionNote, /\[US_SSN\]/);
+  const approvalAudit = db.listAudit(50).find((item) => item.action === 'APPROVED' && item.queryId === held.id);
+  assert.ok(!approvalAudit.detail.includes('524-71-9043'));
+  assert.ok(!approvalAudit.detail.includes('reviewer@example.test'));
   assert.strictEqual(db.verifyAuditChain().ok, true);
 }));
 
@@ -137,6 +144,9 @@ test('assignment validates fields, clears with empty strings, and refuses decide
   const afterPartial = db.getQuery(held.id);
   assert.strictEqual(afterPartial.assignedUser, 'reviewer@example.test');
   assert.ok(afterPartial.assignedGroup, 'omitted fields keep their routed value');
+  const reassigned = db.listAudit(50).find((item) => item.action === 'APPROVAL_REASSIGNED' && item.queryId === held.id);
+  assert.ok(!reassigned.detail.includes('reviewer@example.test'));
+  assert.match(reassigned.detail, /assignedUserRef=assignment_user_[A-Za-z0-9_-]{24}/);
 
   const cleared = await assign(port, admin, held.id, { assignedUser: '', assignedGroup: '', assignedRole: '' });
   assert.strictEqual(cleared.status, 200);
@@ -147,11 +157,49 @@ test('assignment validates fields, clears with empty strings, and refuses decide
 
   const deny = await jsonFetch(port, `/api/queries/${held.id}/deny`, {
     headers: { cookie: admin.cookie, 'x-csrf-token': admin.csrfToken },
-    body: { note: 'deny before reassign attempt' },
+    body: { note: 'Deny member SSN 524-71-9043 for reviewer@example.test' },
   });
   assert.strictEqual(deny.status, 200);
+  const deniedRow = db.getQuery(held.id);
+  assert.ok(!deniedRow.decisionNote.includes('524-71-9043'));
+  assert.ok(!deniedRow.decisionNote.includes('reviewer@example.test'));
+  const denialAudit = db.listAudit(50).find((item) => item.action === 'DENIED' && item.queryId === held.id);
+  assert.ok(!denialAudit.detail.includes('524-71-9043'));
+  assert.ok(!denialAudit.detail.includes('reviewer@example.test'));
   const decided = await assign(port, admin, held.id, { assignedUser: 'late@example.test' });
   assert.strictEqual(decided.status, 409);
+  assert.strictEqual(db.verifyAuditChain().ok, true);
+}));
+
+test('assignment loses atomically when another instance decides the held row', async () => withServer(async (port) => {
+  const held = await createHeldPrompt(port);
+  const admin = await login(port, 'admin', 'unit-pass');
+  const original = db.transitionQueryWithAudit;
+  let injected = false;
+  db.transitionQueryWithAudit = (id, expected, patch, audit) => {
+    if (!injected) {
+      injected = true;
+      const winner = original(
+        id,
+        expected,
+        { status: 'approved', decidedBy: 'other-instance', decidedAt: new Date().toISOString() },
+        { action: 'APPROVED', actor: 'other-instance', detail: 'concurrent winner' },
+      );
+      assert.strictEqual(winner.outcome, 'updated');
+    }
+    return original(id, expected, patch, audit);
+  };
+  try {
+    const response = await assign(port, admin, held.id, { assignedUser: 'late-reviewer@example.test' });
+    assert.strictEqual(response.status, 409);
+    assert.deepStrictEqual(await response.json(), { error: 'not reassignable: approved' });
+  } finally {
+    db.transitionQueryWithAudit = original;
+  }
+
+  assert.strictEqual(db.getQuery(held.id).status, 'approved');
+  const relevant = db.listAudit(1000).filter((entry) => entry.queryId === held.id && ['APPROVED', 'APPROVAL_REASSIGNED'].includes(entry.action));
+  assert.deepStrictEqual(relevant.map((entry) => entry.action), ['APPROVED']);
   assert.strictEqual(db.verifyAuditChain().ok, true);
 }));
 

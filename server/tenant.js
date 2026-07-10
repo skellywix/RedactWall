@@ -103,11 +103,34 @@ function deactivatedIdentityResult(user, cfg) {
   };
 }
 
+function releasedSeatResult(user, cfg, seatsUsed) {
+  return {
+    ok: false,
+    statusCode: 403,
+    status: 'seat_released',
+    action: 'SEAT_RELEASED_BLOCK',
+    message: 'license seat is released',
+    audit: true,
+    orgId: cfg.tenantId || null,
+    user,
+    seatLimit: cfg.seatLimit || 0,
+    seatsUsed: Number(seatsUsed || 0),
+  };
+}
+
 function validateSensorAccess({ body = {}, db, env = process.env } = {}) {
   const cfg = config(env);
   const sensorUser = normalizeUser(body.user);
   if (sensorUser && db && typeof db.scimIdentityInactive === 'function' && db.scimIdentityInactive(sensorUser)) {
     return deactivatedIdentityResult(sensorUser, cfg);
+  }
+  // A seat release is an explicit administrator access decision, not merely a
+  // SaaS billing annotation. Enforce it before the standalone fast path too.
+  if (sensorUser && db && typeof db.getLicenseSeatAssignment === 'function') {
+    const assignment = db.getLicenseSeatAssignment(sensorUser);
+    if (assignment && assignment.status === 'released') {
+      return releasedSeatResult(sensorUser, cfg, seatReport(db, env).seatsUsed);
+    }
   }
   if (!cfg.saasMode) {
     return { ok: true, orgId: body.orgId || null };

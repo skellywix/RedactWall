@@ -6,7 +6,8 @@
  * result through the MCP connector SDK before any model receives it.
  */
 const { fetchWithTimeout } = require('../guard');
-const { connectorHealthCheck, htmlToText, sanitizeToolResult } = require('../sdk');
+const { connectorHealthCheck, executeConnectorTool, htmlToText } = require('../sdk');
+const { cancelResponseBody, readBoundedJson } = require('../../shared/bounded-response');
 
 const DEFAULT_MAX_BYTES = 512 * 1024;
 const DEFAULT_SCOPES = ['read:jira-work', 'read:page:confluence'];
@@ -113,30 +114,6 @@ function maxBytes(opts = {}) {
   return Math.max(1, Math.min(5 * 1024 * 1024, Math.floor(n)));
 }
 
-function headerValue(headers, name) {
-  if (!headers) return '';
-  if (typeof headers.get === 'function') return headers.get(name) || '';
-  return headers[name] || headers[name.toLowerCase()] || '';
-}
-
-function responseContentLength(response) {
-  const raw = headerValue(response.headers, 'content-length');
-  const n = Number(raw);
-  return Number.isFinite(n) && n >= 0 ? n : null;
-}
-
-async function readBoundedText(response, opts = {}) {
-  const limit = maxBytes(opts);
-  const declared = responseContentLength(response);
-  if (declared != null && declared > limit) {
-    throw new Error(`Atlassian response exceeds ${limit} byte limit`);
-  }
-  const text = typeof response.text === 'function' ? await response.text() : '';
-  const size = Buffer.byteLength(text, 'utf8');
-  if (size > limit) throw new Error(`Atlassian response exceeds ${limit} byte limit`);
-  return { text, sizeBytes: size };
-}
-
 function authHeaders(opts = {}) {
   const token = accessToken(opts);
   if (!token) throw new Error('Atlassian access token is required');
@@ -161,10 +138,15 @@ async function fetchJson(url, method, opts = {}) {
   }, opts);
   if (!response || !response.ok) {
     const status = response && response.status ? response.status : 'unknown';
+    if (response) await cancelResponseBody(response);
     throw new Error(`Atlassian ${method} failed with HTTP ${status}`);
   }
-  const body = await readBoundedText(response, opts);
-  return JSON.parse(body.text || '{}');
+  const body = await readBoundedJson(response, {
+    maxBytes: maxBytes(opts),
+    timeoutMs: opts.responseTimeoutMs || opts.timeoutMs,
+    label: `Atlassian ${method} response`,
+  });
+  return body.json || {};
 }
 
 function adfToText(value) {
@@ -308,8 +290,7 @@ function atlassianConnectorHealth(opts = {}, ok = true, detail = 'configured') {
 }
 
 async function sanitizeJiraIssue(args = {}, opts = {}) {
-  const raw = await fetchJiraIssue(args, opts);
-  return sanitizeToolResult(raw, {
+  return executeConnectorTool((toolArgs) => fetchJiraIssue(toolArgs, opts), args, {
     agent: opts.agent,
     connector: 'atlassian',
     tool: 'jira.issue.get',
@@ -317,8 +298,7 @@ async function sanitizeJiraIssue(args = {}, opts = {}) {
 }
 
 async function sanitizeConfluencePage(args = {}, opts = {}) {
-  const raw = await fetchConfluencePage(args, opts);
-  return sanitizeToolResult(raw, {
+  return executeConnectorTool((toolArgs) => fetchConfluencePage(toolArgs, opts), args, {
     agent: opts.agent,
     connector: 'atlassian',
     tool: 'confluence.page.get',

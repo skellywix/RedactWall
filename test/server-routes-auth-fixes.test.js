@@ -157,20 +157,29 @@ test('SCIM group remove in the value-array form actually removes the member', as
   assert.deepStrictEqual((await patched.json()).members, [], 'array-form remove clears the member');
 }));
 
-// oidc.js:259 — email claim only trusted when email_verified is asserted
-test('OIDC identity mapping ignores an unverified spoofable email claim', () => {
-  db.saveScimUser({ userName: 'oidc-admin@example.test', active: true, role: 'security_admin' });
+test('OIDC identity mapping requires the immutable subject bound as SCIM externalId', () => {
+  db.saveScimUser({
+    userName: 'oidc-admin@example.test',
+    externalId: 'victim-object-id',
+    active: true,
+    role: 'security_admin',
+  });
   assert.throws(
-    () => oidc.scimAccountForClaims({ sub: 'attacker-sub', email: 'oidc-admin@example.test' }),
+    () => oidc.scimAccountForClaims({
+      sub: 'attacker-subject',
+      preferred_username: 'oidc-admin@example.test',
+      email: 'oidc-admin@example.test',
+      email_verified: true,
+    }),
     /not active in SCIM/,
-    'unverified email must not match a privileged SCIM user',
+    'mutable username/email claims cannot impersonate a bound privileged subject',
   );
-  const account = oidc.scimAccountForClaims({ sub: 'attacker-sub', email: 'oidc-admin@example.test', email_verified: true });
-  assert.strictEqual(account.role, 'security_admin', 'verified email still resolves the account');
-
-  // The directory-canonical preferred_username remains eligible without email_verified.
-  const viaUsername = oidc.scimAccountForClaims({ sub: 's', preferred_username: 'oidc-admin@example.test' });
-  assert.strictEqual(viaUsername.role, 'security_admin');
+  const account = oidc.scimAccountForClaims({
+    sub: 'victim-object-id',
+    preferred_username: 'renamed-admin@example.test',
+  });
+  assert.strictEqual(account.role, 'security_admin');
+  assert.strictEqual(account.user, 'oidc-admin@example.test');
 });
 
 // auth.js:281 — CSRF token survives a step-up cookie re-issue

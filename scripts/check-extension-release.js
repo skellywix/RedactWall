@@ -110,8 +110,10 @@ function validatePolicyExamples(root, checks, problems) {
   requireCheck(
     checks,
     'managed_storage_schema_aligned',
-    managedKeys.every((key) => schemaKeys.has(key)) && ['serverUrl', 'ingestKey', 'orgId'].every((key) => managedKeys.includes(key)),
-    'managed storage example uses only schema-backed keys and includes serverUrl, ingestKey, and orgId',
+    managedKeys.every((key) => schemaKeys.has(key))
+      && ['serverUrl', 'ingestKey', 'orgId', 'enabled'].every((key) => managedKeys.includes(key))
+      && managed.enabled === true,
+    'managed storage example uses only schema-backed keys and explicitly enables protection',
     problems,
   );
   requireCheck(
@@ -152,8 +154,11 @@ function validatePolicyExamples(root, checks, problems) {
   requireCheck(
     checks,
     'firefox_managed_storage_example',
-    !!firefoxManagedValues && Object.keys(firefoxManagedValues).every((key) => schemaKeys.has(key)) && firefoxManagedValues.ingestKey === 'REPLACE_WITH_LONG_RANDOM_INGEST_KEY',
-    'Firefox managed-storage policy uses schema-backed keys and a placeholder ingest key',
+    !!firefoxManagedValues
+      && Object.keys(firefoxManagedValues).every((key) => schemaKeys.has(key))
+      && firefoxManagedValues.ingestKey === 'REPLACE_WITH_LONG_RANDOM_INGEST_KEY'
+      && firefoxManagedValues.enabled === true,
+    'Firefox managed-storage policy uses schema-backed keys, enables protection, and keeps a placeholder ingest key',
     problems,
   );
 }

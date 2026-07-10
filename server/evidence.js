@@ -12,6 +12,7 @@ const ncuaReadiness = require('./ncua-readiness');
 const { safeSensor } = require('./sensor-metadata');
 const routing = require('./routing');
 const { containsSensitiveMetadata } = require('./posture');
+const { sanitizeSensitiveText } = require('./sensitive-text');
 
 const POLICY_AUDIT_ACTIONS = new Set(['POLICY_UPDATED', 'POLICY_TEMPLATE_APPLIED', 'DESTINATION_REVIEWED']);
 const POLICY_AUDIT_FIELDS = new Set([
@@ -78,10 +79,12 @@ function safeFinding(f) {
 function safeInstallChecks(checks = []) {
   return (Array.isArray(checks) ? checks : []).slice(0, 80).map((check) => {
     if (!check || typeof check !== 'object') return null;
-    const id = typeof check.id === 'string' ? check.id.slice(0, 80) : null;
-    if (!id) return null;
+    const rawId = typeof check.id === 'string' ? check.id.slice(0, 80) : null;
+    if (!rawId) return null;
+    const sanitizedId = sanitizeSensitiveText(rawId, 80);
+    const id = sanitizedId === rawId ? rawId : 'redacted_check_id';
     const detail = typeof check.detail === 'string' && check.detail.trim()
-      ? check.detail.trim().slice(0, 160)
+      ? sanitizeSensitiveText(check.detail, 160)
       : null;
     return {
       id,

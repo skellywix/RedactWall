@@ -14,10 +14,14 @@ Parameters:
   ImageUri:
     Type: String
     MinLength: 1
-    Description: Full ECR image URI, including tag.
+    AllowedPattern: '^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com(?:\.cn)?/[a-z0-9]+(?:[._/-][a-z0-9]+)*@sha256:[a-f0-9]{64}$'
+    ConstraintDescription: Must be a complete private ECR image URI pinned to a sha256 digest.
+    Description: Immutable ECR image URI, including the sha256 digest.
   SecretArn:
     Type: String
     MinLength: 1
+    AllowedPattern: '^arn:(?:aws|aws-us-gov|aws-cn):secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:[A-Za-z0-9/_+=.@-]{1,512}$'
+    ConstraintDescription: Must be a complete Secrets Manager secret ARN with no whitespace or shell metacharacters.
     Description: Secrets Manager secret ARN with ADMIN_PASSWORD, ADMIN_TOTP_SECRET, REDACTWALL_SECRET, REDACTWALL_DATA_KEY, and INGEST_API_KEY.
   TenantId:
     Type: String
@@ -29,8 +33,14 @@ Parameters:
     Description: Purchased seats for this customer.
   CertificateArn:
     Type: String
-    Default: ''
-    Description: Optional ACM certificate ARN. When present, HTTP redirects to HTTPS.
+    MinLength: 1
+    Description: Required ACM certificate ARN. HTTP always redirects to the HTTPS listener.
+  PublicHostname:
+    Type: String
+    MinLength: 1
+    AllowedPattern: '^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$'
+    ConstraintDescription: Must be a DNS hostname without a scheme, port, path, query, or fragment.
+    Description: Customer DNS hostname covered by CertificateArn, without a scheme.
   InstanceType:
     Type: String
     Default: t3.small
@@ -51,10 +61,6 @@ Parameters:
     Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
     Description: Amazon Linux 2023 AMI SSM parameter.
 
-Conditions:
-  HasCertificate: !Not [!Equals [!Ref CertificateArn, '']]
-  NoCertificate: !Equals [!Ref CertificateArn, '']
-
 Resources:
   AlbSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -66,13 +72,10 @@ Resources:
           FromPort: 80
           ToPort: 80
           CidrIp: 0.0.0.0/0
-        - !If
-          - HasCertificate
-          - IpProtocol: tcp
-            FromPort: 443
-            ToPort: 443
-            CidrIp: 0.0.0.0/0
-          - !Ref AWS::NoValue
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
       SecurityGroupEgress:
         - IpProtocol: -1
           CidrIp: 0.0.0.0/0
@@ -93,8 +96,9 @@ Resources:
 
   AppLogGroup:
     Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
-      LogGroupName: !Sub /redactwall/${TenantId}
       RetentionInDays: 90
 
   InstanceRole:
@@ -134,6 +138,206 @@ Resources:
 
   AppInstance:
     Type: AWS::EC2::Instance
+    Metadata:
+      AWS::CloudFormation::Init:
+        config:
+          files:
+            /usr/local/sbin/redactwall-deploy:
+              content: !Sub |
+                #!/bin/bash
+                set -euo pipefail
+
+                exec 9>/run/redactwall-deploy.lock
+                flock 9
+                install -d -m 700 -o 1000 -g 1000 /var/lib/redactwall
+                install -d -m 700 /etc/redactwall
+
+                SECRET_JSON=$(aws secretsmanager get-secret-value --secret-id '${SecretArn}' --region '${AWS::Region}' --query SecretString --output text)
+                secret() {
+                  printf '%s' "$SECRET_JSON" | jq -er --arg key "$1" '
+                    (.[$key] // "") as $value |
+                    if ($value | type) != "string"
+                       or ($value | test("[\u0000\r\n]"))
+                       or ($value != ($value | sub("^[[:space:]]+"; "") | sub("[[:space:]]+$"; "")))
+                    then error("invalid secret value") else $value end
+                  '
+                }
+
+                ADMIN_PASSWORD=$(secret ADMIN_PASSWORD)
+                ADMIN_TOTP_SECRET=$(secret ADMIN_TOTP_SECRET)
+                REDACTWALL_SECRET=$(secret REDACTWALL_SECRET)
+                REDACTWALL_DATA_KEY=$(secret REDACTWALL_DATA_KEY)
+                INGEST_API_KEY=$(secret INGEST_API_KEY)
+                AUDITOR_USER=$(secret AUDITOR_USER)
+                AUDITOR_PASSWORD=$(secret AUDITOR_PASSWORD)
+                SIEM_WEBHOOK_URL=$(secret SIEM_WEBHOOK_URL)
+                SIEM_WEBHOOK_TOKEN=$(secret SIEM_WEBHOOK_TOKEN)
+
+                umask 077
+                ENV_TMP=$(mktemp /etc/redactwall/env.XXXXXX)
+                {
+                  printf '%s\n' \
+                    'PORT=4000' \
+                    'NODE_ENV=production' \
+                    'HTTPS=true' \
+                    'COOKIE_SECURE=true' \
+                    'TRUST_PROXY=1' \
+                    'REDACTWALL_DATA_DIR=/data' \
+                    'REDACTWALL_DB_PATH=/data/redactwall.db' \
+                    'REDACTWALL_POLICY_PATH=/data/policy.json' \
+                    'REDACTWALL_CUSTOM_DETECTORS_PATH=/data/custom-detectors.json' \
+                    'REDACTWALL_SAAS_MODE=true' \
+                    'REDACTWALL_TENANT_ID=${TenantId}' \
+                    'REDACTWALL_SEAT_LIMIT=${SeatLimit}' \
+                    'REDACTWALL_REQUIRE_TENANT_CONTEXT=true' \
+                    'REDACTWALL_REQUIRE_USER_IDENTITY=true' \
+                    'ADMIN_USER=admin' \
+                    'REDACTWALL_REQUEST_TIMEOUT_MS=10000' \
+                    'SIEM_ALERT_MIN_RISK=25' \
+                    'SIEM_ALERT_MIN_SEVERITY=3'
+                  printf 'ADMIN_PASSWORD=%s\n' "$ADMIN_PASSWORD"
+                  printf 'ADMIN_TOTP_SECRET=%s\n' "$ADMIN_TOTP_SECRET"
+                  printf 'AUDITOR_USER=%s\n' "$AUDITOR_USER"
+                  printf 'AUDITOR_PASSWORD=%s\n' "$AUDITOR_PASSWORD"
+                  printf 'REDACTWALL_SECRET=%s\n' "$REDACTWALL_SECRET"
+                  printf 'REDACTWALL_DATA_KEY=%s\n' "$REDACTWALL_DATA_KEY"
+                  printf 'INGEST_API_KEY=%s\n' "$INGEST_API_KEY"
+                  printf 'SIEM_WEBHOOK_URL=%s\n' "$SIEM_WEBHOOK_URL"
+                  printf 'SIEM_WEBHOOK_TOKEN=%s\n' "$SIEM_WEBHOOK_TOKEN"
+                } > "$ENV_TMP"
+                chmod 600 "$ENV_TMP"
+                sync -f "$ENV_TMP"
+                mv -f "$ENV_TMP" /etc/redactwall/env
+                sync -f /etc/redactwall
+
+                REGISTRY=$(echo '${ImageUri}' | cut -d/ -f1)
+                aws ecr get-login-password --region '${AWS::Region}' | docker login --username AWS --password-stdin "$REGISTRY"
+                docker pull '${ImageUri}'
+
+                rollback_deploy() {
+                  exit_code=$?
+                  trap - EXIT
+                  if docker inspect redactwall-previous >/dev/null 2>&1; then
+                    docker rm -f redactwall >/dev/null 2>&1 || true
+                    docker rename redactwall-previous redactwall
+                    docker start redactwall >/dev/null || true
+                  fi
+                  exit "$exit_code"
+                }
+                trap rollback_deploy EXIT
+
+                docker rm -f redactwall-previous >/dev/null 2>&1 || true
+                if docker inspect redactwall >/dev/null 2>&1; then
+                  docker stop -t 30 redactwall >/dev/null
+                  docker rename redactwall redactwall-previous
+                fi
+
+                docker run -d \
+                  --name redactwall \
+                  --hostname redactwall \
+                  --restart unless-stopped \
+                  --init \
+                  --read-only \
+                  --tmpfs /tmp:rw,noexec,nosuid,size=64m \
+                  --cap-drop ALL \
+                  --security-opt no-new-privileges \
+                  --stop-timeout 30 \
+                  --env-file /etc/redactwall/env \
+                  -p 4000:4000 \
+                  -v /var/lib/redactwall:/data \
+                  --log-driver=awslogs \
+                  --log-opt awslogs-region='${AWS::Region}' \
+                  --log-opt awslogs-group='${AppLogGroup}' \
+                  --log-opt awslogs-stream='${TenantId}' \
+                  '${ImageUri}'
+
+                READY=0
+                for attempt in $(seq 1 60); do
+                  CONTAINER_STATE=$(docker inspect -f '{{.State.Status}}' redactwall 2>/dev/null || echo missing)
+                  case "$CONTAINER_STATE" in
+                    exited|dead|restarting|missing)
+                      echo "RedactWall container entered terminal deployment state: $CONTAINER_STATE" >&2
+                      exit 1
+                      ;;
+                  esac
+                  HEALTH_STATUS=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' redactwall 2>/dev/null || echo missing)
+                  if [ "$HEALTH_STATUS" = "unhealthy" ]; then
+                    echo "RedactWall container health check failed" >&2
+                    exit 1
+                  fi
+                  if [ "$CONTAINER_STATE" = "running" ] && [ "$HEALTH_STATUS" = "healthy" ] \
+                    && curl --fail --silent --show-error --max-time 3 http://127.0.0.1:4000/readyz >/dev/null; then
+                    READY=1
+                    break
+                  fi
+                  sleep 5
+                done
+                if [ "$READY" -ne 1 ]; then
+                  echo "RedactWall did not become ready before the deployment deadline" >&2
+                  exit 1
+                fi
+
+                mkdir -p /var/log/redactwall
+                docker cp redactwall:/app/scripts/run-evidence-pack.sh /usr/local/bin/redactwall-run-evidence-pack
+                chmod 755 /usr/local/bin/redactwall-run-evidence-pack
+
+                if [ ! -f /var/lib/redactwall/evidence-schedule.json ]; then
+                  docker cp redactwall:/app/config/evidence-schedule.example.json /var/lib/redactwall/evidence-schedule.json
+                  jq '.outDir = "/data/evidence-packs" | .generatedBy = "aws-systemd-evidence-export"' \
+                    /var/lib/redactwall/evidence-schedule.json > /tmp/redactwall-evidence-schedule.json
+                  mv /tmp/redactwall-evidence-schedule.json /var/lib/redactwall/evidence-schedule.json
+                  chown 1000:1000 /var/lib/redactwall/evidence-schedule.json
+                  chmod 600 /var/lib/redactwall/evidence-schedule.json
+                fi
+
+                cat > /etc/redactwall/evidence-pack.env <<'EOF'
+                REDACTWALL_EVIDENCE_MODE='docker'
+                REDACTWALL_EVIDENCE_PROJECT_DIR='/app'
+                REDACTWALL_EVIDENCE_CONFIG='/data/evidence-schedule.json'
+                REDACTWALL_EVIDENCE_LOG='/var/log/redactwall/evidence-pack.log'
+                REDACTWALL_EVIDENCE_CONTAINER='redactwall'
+                EOF
+                chmod 600 /etc/redactwall/evidence-pack.env
+
+                cat > /etc/systemd/system/redactwall-evidence-pack.service <<'EOF'
+                [Unit]
+                Description=Generate sanitized RedactWall examiner evidence pack
+                After=network-online.target docker.service
+                Wants=network-online.target
+
+                [Service]
+                Type=oneshot
+                EnvironmentFile=/etc/redactwall/evidence-pack.env
+                ExecStart=/usr/local/bin/redactwall-run-evidence-pack
+                User=root
+                Group=root
+                Nice=5
+                EOF
+
+                cat > /etc/systemd/system/redactwall-evidence-pack.timer <<'EOF'
+                [Unit]
+                Description=Run sanitized RedactWall examiner evidence pack on schedule
+
+                [Timer]
+                OnCalendar=quarterly
+                Persistent=true
+                RandomizedDelaySec=1h
+                Unit=redactwall-evidence-pack.service
+
+                [Install]
+                WantedBy=timers.target
+                EOF
+
+                systemctl daemon-reload
+                systemctl enable --now redactwall-evidence-pack.timer
+                docker rm -f redactwall-previous >/dev/null 2>&1 || true
+                trap - EXIT
+              mode: '000700'
+              owner: root
+              group: root
+          commands:
+            01_deploy_redactwall:
+              command: /usr/local/sbin/redactwall-deploy
     CreationPolicy:
       ResourceSignal:
         Timeout: PT20M
@@ -161,133 +365,64 @@ Resources:
           #!/bin/bash
           set -euo pipefail
 
+          bootstrap_failed() {
+            exit_code=$?
+            trap - EXIT
+            if [ "$exit_code" -eq 0 ]; then exit_code=1; fi
+            /opt/aws/bin/cfn-signal --stack '${AWS::StackName}' --resource AppInstance --region '${AWS::Region}' --exit-code "$exit_code" || true
+            exit "$exit_code"
+          }
+          trap bootstrap_failed EXIT
+
           dnf update -y
-          dnf install -y docker awscli jq aws-cfn-bootstrap
+          dnf install -y docker awscli curl jq aws-cfn-bootstrap
           systemctl enable --now docker
 
-          mkdir -p /var/lib/redactwall /etc/redactwall
-          chmod 700 /etc/redactwall
-          chown 1000:1000 /var/lib/redactwall
+          install -d -m 700 -o 1000 -g 1000 /var/lib/redactwall
+          install -d -m 700 /etc/redactwall
 
-          SECRET_JSON=$(aws secretsmanager get-secret-value --secret-id '${SecretArn}' --region '${AWS::Region}' --query SecretString --output text)
-          secret() { echo "$SECRET_JSON" | jq -r --arg key "$1" '.[$key] // empty'; }
+          install -d -m 700 /etc/cfn/hooks.d
 
-          ADMIN_PASSWORD=$(secret ADMIN_PASSWORD)
-          ADMIN_TOTP_SECRET=$(secret ADMIN_TOTP_SECRET)
-          REDACTWALL_SECRET=$(secret REDACTWALL_SECRET)
-          REDACTWALL_DATA_KEY=$(secret REDACTWALL_DATA_KEY)
-          INGEST_API_KEY=$(secret INGEST_API_KEY)
-          AUDITOR_USER=$(secret AUDITOR_USER)
-          AUDITOR_PASSWORD=$(secret AUDITOR_PASSWORD)
-          SIEM_WEBHOOK_URL=$(secret SIEM_WEBHOOK_URL)
-          SIEM_WEBHOOK_TOKEN=$(secret SIEM_WEBHOOK_TOKEN)
-
-          cat > /etc/redactwall/env <<EOF
-          PORT=4000
-          NODE_ENV=production
-          HTTPS=true
-          COOKIE_SECURE=true
-          REDACTWALL_DB_PATH=/data/redactwall.db
-          REDACTWALL_POLICY_PATH=/data/policy.json
-          REDACTWALL_CUSTOM_DETECTORS_PATH=/data/custom-detectors.json
-          REDACTWALL_SAAS_MODE=true
-          REDACTWALL_TENANT_ID=${TenantId}
-          REDACTWALL_SEAT_LIMIT=${SeatLimit}
-          REDACTWALL_REQUIRE_TENANT_CONTEXT=true
-          REDACTWALL_REQUIRE_USER_IDENTITY=true
-          ADMIN_USER=admin
-          ADMIN_PASSWORD=$ADMIN_PASSWORD
-          ADMIN_TOTP_SECRET=$ADMIN_TOTP_SECRET
-          AUDITOR_USER=$AUDITOR_USER
-          AUDITOR_PASSWORD=$AUDITOR_PASSWORD
-          REDACTWALL_SECRET=$REDACTWALL_SECRET
-          REDACTWALL_DATA_KEY=$REDACTWALL_DATA_KEY
-          INGEST_API_KEY=$INGEST_API_KEY
-          REDACTWALL_REQUEST_TIMEOUT_MS=10000
-          SIEM_WEBHOOK_URL=$SIEM_WEBHOOK_URL
-          SIEM_WEBHOOK_TOKEN=$SIEM_WEBHOOK_TOKEN
-          SIEM_ALERT_MIN_RISK=25
-          SIEM_ALERT_MIN_SEVERITY=3
+          cat > /etc/cfn/cfn-hup.conf <<EOF
+          [main]
+          stack=${AWS::StackName}
+          region=${AWS::Region}
+          interval=1
+          umask=077
           EOF
-          chmod 600 /etc/redactwall/env
+          chmod 600 /etc/cfn/cfn-hup.conf
 
-          REGISTRY=$(echo '${ImageUri}' | cut -d/ -f1)
-          aws ecr get-login-password --region '${AWS::Region}' | docker login --username AWS --password-stdin "$REGISTRY"
-          docker pull '${ImageUri}'
-          docker rm -f redactwall || true
-          docker run -d \
-            --name redactwall \
-            --restart unless-stopped \
-            --init \
-            --read-only \
-            --tmpfs /tmp:rw,noexec,nosuid,size=64m \
-            --cap-drop ALL \
-            --security-opt no-new-privileges \
-            --stop-timeout 30 \
-            --env-file /etc/redactwall/env \
-            -p 4000:4000 \
-            -v /var/lib/redactwall:/data \
-            --log-driver=awslogs \
-            --log-opt awslogs-region='${AWS::Region}' \
-            --log-opt awslogs-group='${AppLogGroup}' \
-            --log-opt awslogs-stream='${TenantId}' \
-            '${ImageUri}'
-
-          mkdir -p /var/log/redactwall
-          docker cp redactwall:/app/scripts/run-evidence-pack.sh /usr/local/bin/redactwall-run-evidence-pack
-          chmod 755 /usr/local/bin/redactwall-run-evidence-pack
-
-          if [ ! -f /var/lib/redactwall/evidence-schedule.json ]; then
-            docker cp redactwall:/app/config/evidence-schedule.example.json /var/lib/redactwall/evidence-schedule.json
-            jq '.outDir = "/data/evidence-packs" | .generatedBy = "aws-systemd-evidence-export"' \
-              /var/lib/redactwall/evidence-schedule.json > /tmp/redactwall-evidence-schedule.json
-            mv /tmp/redactwall-evidence-schedule.json /var/lib/redactwall/evidence-schedule.json
-            chown 1000:1000 /var/lib/redactwall/evidence-schedule.json
-            chmod 600 /var/lib/redactwall/evidence-schedule.json
-          fi
-
-          cat > /etc/redactwall/evidence-pack.env <<'EOF'
-          REDACTWALL_EVIDENCE_MODE='docker'
-          REDACTWALL_EVIDENCE_PROJECT_DIR='/app'
-          REDACTWALL_EVIDENCE_CONFIG='/data/evidence-schedule.json'
-          REDACTWALL_EVIDENCE_LOG='/var/log/redactwall/evidence-pack.log'
-          REDACTWALL_EVIDENCE_CONTAINER='redactwall'
+          cat > /etc/cfn/hooks.d/redactwall-reloader.conf <<EOF
+          [redactwall-metadata-update]
+          triggers=post.update
+          path=Resources.AppInstance.Metadata.AWS::CloudFormation::Init
+          action=/opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource AppInstance --region ${AWS::Region}
+          runas=root
           EOF
-          chmod 600 /etc/redactwall/evidence-pack.env
+          chmod 600 /etc/cfn/hooks.d/redactwall-reloader.conf
 
-          cat > /etc/systemd/system/redactwall-evidence-pack.service <<'EOF'
+          cat > /etc/systemd/system/cfn-hup.service <<'EOF'
           [Unit]
-          Description=Generate sanitized RedactWall examiner evidence pack
-          After=network-online.target docker.service
+          Description=Apply RedactWall CloudFormation metadata updates
+          After=network-online.target
           Wants=network-online.target
 
           [Service]
-          Type=oneshot
-          EnvironmentFile=/etc/redactwall/evidence-pack.env
-          ExecStart=/usr/local/bin/redactwall-run-evidence-pack
-          User=root
-          Group=root
-          Nice=5
-          EOF
-
-          cat > /etc/systemd/system/redactwall-evidence-pack.timer <<'EOF'
-          [Unit]
-          Description=Run sanitized RedactWall examiner evidence pack on schedule
-
-          [Timer]
-          OnCalendar=quarterly
-          Persistent=true
-          RandomizedDelaySec=1h
-          Unit=redactwall-evidence-pack.service
+          Type=simple
+          ExecStart=/opt/aws/bin/cfn-hup
+          Restart=always
+          RestartSec=15
 
           [Install]
-          WantedBy=timers.target
+          WantedBy=multi-user.target
           EOF
 
+          /opt/aws/bin/cfn-init -v --stack '${AWS::StackName}' --resource AppInstance --region '${AWS::Region}'
           systemctl daemon-reload
-          systemctl enable --now redactwall-evidence-pack.timer
+          systemctl enable --now cfn-hup.service
 
           /opt/aws/bin/cfn-signal --stack '${AWS::StackName}' --resource AppInstance --region '${AWS::Region}' --exit-code 0
+          trap - EXIT
 
   LoadBalancer:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
@@ -317,20 +452,8 @@ Resources:
         - Id: !Ref AppInstance
           Port: 4000
 
-  HttpForwardListener:
-    Type: AWS::ElasticLoadBalancingV2::Listener
-    Condition: NoCertificate
-    Properties:
-      LoadBalancerArn: !Ref LoadBalancer
-      Port: 80
-      Protocol: HTTP
-      DefaultActions:
-        - Type: forward
-          TargetGroupArn: !Ref TargetGroup
-
   HttpRedirectListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
-    Condition: HasCertificate
     Properties:
       LoadBalancerArn: !Ref LoadBalancer
       Port: 80
@@ -344,11 +467,11 @@ Resources:
 
   HttpsListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
-    Condition: HasCertificate
     Properties:
       LoadBalancerArn: !Ref LoadBalancer
       Port: 443
       Protocol: HTTPS
+      SslPolicy: ELBSecurityPolicy-TLS13-1-2-Res-2021-06
       Certificates:
         - CertificateArn: !Ref CertificateArn
       DefaultActions:
@@ -357,11 +480,14 @@ Resources:
 
 Outputs:
   Url:
-    Description: Customer console URL. Attach a Route 53 alias and ACM certificate for production.
-    Value: !Sub
-      - '${Scheme}://${DnsName}'
-      - Scheme: !If [HasCertificate, https, http]
-        DnsName: !GetAtt LoadBalancer.DNSName
+    Description: HTTPS customer console URL. Create a DNS alias to LoadBalancerDnsName before using it.
+    Value: !Sub 'https://${PublicHostname}'
+  LoadBalancerDnsName:
+    Description: ALB DNS target for the customer PublicHostname alias record.
+    Value: !GetAtt LoadBalancer.DNSName
+  LogGroupName:
+    Description: CloudWatch Logs group used by the RedactWall container.
+    Value: !Ref AppLogGroup
   TenantId:
     Description: Tenant id enforced by the stack.
     Value: !Ref TenantId

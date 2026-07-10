@@ -12,7 +12,13 @@ const DEFAULT_OUT_DIR = path.join(ROOT, 'dist', 'mcp-guard');
 const PACKAGE_FILES = [
   'package.json',
   'server/env.js',
+  'server/file-mutation-lock.js',
+  'server/private-path.js',
   'detection-engine/detect.js',
+  'sensors/shared/decision.js',
+  'sensors/shared/bounded-response.js',
+  'sensors/shared/opaque-content.js',
+  'sensors/shared/signed-policy.js',
   'sensors/shared/server-url.js',
   'sensors/mcp-guard/guard.js',
   'sensors/mcp-guard/sdk.js',
@@ -23,6 +29,7 @@ const PACKAGE_FILES = [
   'sensors/mcp-guard/connectors/teams.js',
   'sensors/mcp-guard/connectors/atlassian.js',
   'sensors/mcp-guard/connectors/database-readonly.js',
+  'sensors/mcp-guard/connectors/database-readonly-worker.js',
   'scripts/check-mcp-guard-install.js',
 ];
 
@@ -82,6 +89,15 @@ function validateRuntimeFiles(files) {
   if (!/sanitizeToolResult/.test(sdk) || !/wrapConnectorTool/.test(sdk) || !/connectorHealthCheck/.test(sdk)) {
     throw new Error('MCP guard package must include connector SDK sanitization and health helpers');
   }
+  if (!/carriesUnscannableToolResult/.test(sdk) || !/blockUnscannableToolResult/.test(sdk)) {
+    throw new Error('MCP guard package must include the connector binary fail-closed guard');
+  }
+  if (!/blockUninspectableToolResult/.test(sdk)) {
+    throw new Error('MCP guard package must include the connector inspection fail-closed guard');
+  }
+  if (!/guardToolRequest/.test(sdk) || !/executeConnectorTool/.test(sdk)) {
+    throw new Error('MCP guard package must include connector request-policy preflight');
+  }
 
   const registry = files.find((file) => file.path === 'sensors/mcp-guard/connector-registry.js').body.toString('utf8');
   if (!/CONNECTOR_PROFILES/.test(registry) || !/connectorRegistryStatus/.test(registry) || !/connectorRegistryChecks/.test(registry)) {
@@ -92,30 +108,48 @@ function validateRuntimeFiles(files) {
   if (!/sanitizeDriveItemContent/.test(microsoft365) || !/createDriveItemContentTool/.test(microsoft365) || !/microsoft365ConnectorHealth/.test(microsoft365)) {
     throw new Error('MCP guard package must include Microsoft 365 connector sanitization and health helpers');
   }
+  if (!/executeConnectorTool/.test(microsoft365)) {
+    throw new Error('MCP guard package must include Microsoft 365 connector request-policy preflight');
+  }
 
   const googleDrive = files.find((file) => file.path === 'sensors/mcp-guard/connectors/google-drive.js').body.toString('utf8');
   if (!/sanitizeDriveFileContent/.test(googleDrive) || !/createDriveFileContentTool/.test(googleDrive) || !/googleDriveConnectorHealth/.test(googleDrive)) {
     throw new Error('MCP guard package must include Google Drive connector sanitization and health helpers');
+  }
+  if (!/executeConnectorTool/.test(googleDrive)) {
+    throw new Error('MCP guard package must include Google Drive connector request-policy preflight');
   }
 
   const slack = files.find((file) => file.path === 'sensors/mcp-guard/connectors/slack.js').body.toString('utf8');
   if (!/sanitizeConversationHistory/.test(slack) || !/createSlackConversationHistoryTool/.test(slack) || !/sanitizeSlackFileContent/.test(slack) || !/slackConnectorHealth/.test(slack)) {
     throw new Error('MCP guard package must include Slack connector sanitization and health helpers');
   }
+  if (!/executeConnectorTool/.test(slack)) {
+    throw new Error('MCP guard package must include Slack connector request-policy preflight');
+  }
 
   const teams = files.find((file) => file.path === 'sensors/mcp-guard/connectors/teams.js').body.toString('utf8');
   if (!/sanitizeTeamsChannelMessages/.test(teams) || !/createTeamsChannelMessagesTool/.test(teams) || !/sanitizeTeamsChatMessages/.test(teams) || !/teamsConnectorHealth/.test(teams)) {
     throw new Error('MCP guard package must include Microsoft Teams connector sanitization and health helpers');
+  }
+  if (!/executeConnectorTool/.test(teams)) {
+    throw new Error('MCP guard package must include Microsoft Teams connector request-policy preflight');
   }
 
   const atlassian = files.find((file) => file.path === 'sensors/mcp-guard/connectors/atlassian.js').body.toString('utf8');
   if (!/sanitizeJiraIssue/.test(atlassian) || !/createJiraIssueTool/.test(atlassian) || !/sanitizeConfluencePage/.test(atlassian) || !/atlassianConnectorHealth/.test(atlassian)) {
     throw new Error('MCP guard package must include Atlassian connector sanitization and health helpers');
   }
+  if (!/executeConnectorTool/.test(atlassian)) {
+    throw new Error('MCP guard package must include Atlassian connector request-policy preflight');
+  }
 
   const databaseReadonly = files.find((file) => file.path === 'sensors/mcp-guard/connectors/database-readonly.js').body.toString('utf8');
   if (!/sanitizeDatabaseRows/.test(databaseReadonly) || !/createDatabaseReadonlyQueryTool/.test(databaseReadonly) || !/sanitizeDatabaseSchema/.test(databaseReadonly) || !/databaseReadonlyConnectorHealth/.test(databaseReadonly)) {
     throw new Error('MCP guard package must include database read-only connector sanitization and health helpers');
+  }
+  if (!/executeConnectorTool/.test(databaseReadonly)) {
+    throw new Error('MCP guard package must include database read-only connector request-policy preflight');
   }
 
   const installCheck = files.find((file) => file.path === 'scripts/check-mcp-guard-install.js').body.toString('utf8');
@@ -162,6 +196,8 @@ function packageMcpGuard(opts = {}) {
     checks: {
       explicitIngestKeyRequired: true,
       sharedEngineIncluded: true,
+      boundedResponseReaderIncluded: true,
+      signedPolicyVerifierIncluded: true,
       connectorSdkIncluded: true,
       connectorRegistryIncluded: true,
       microsoft365ConnectorIncluded: true,
@@ -170,6 +206,7 @@ function packageMcpGuard(opts = {}) {
       teamsConnectorIncluded: true,
       atlassianConnectorIncluded: true,
       databaseReadonlyConnectorIncluded: true,
+      databaseQueryWorkerIncluded: true,
       demoCodeExcluded: true,
       installValidationIncluded: true,
       developmentIngestKeyAbsent: true,

@@ -9,14 +9,14 @@ function fakeDb(query) {
   return {
     calls,
     getQuery: () => query,
-    updateQuery: (id, patch) => {
+    mutateQueryWithAudit: (id, mutate, auditForResult) => {
+      const patch = mutate(query);
+      if (!patch) return { outcome: 'no_change', row: query, audit: null };
       calls.updates.push({ id, patch });
       query = { ...query, ...patch };
-      return query;
-    },
-    appendAudit: (event) => {
+      const event = auditForResult(query);
       calls.audits.push(event);
-      return event;
+      return { outcome: 'updated', row: query, audit: event };
     },
   };
 }

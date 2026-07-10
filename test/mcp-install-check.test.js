@@ -24,6 +24,13 @@ const {
   teamsSettings,
 } = require('../scripts/check-mcp-guard-install');
 
+function jsonResponse(status, body) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
 const root = path.join(__dirname, '..');
 
 function tempDir(t, prefix = 'ps-mcp-check-') {
@@ -95,11 +102,7 @@ test('MCP install check validates runtime wiring without exposing secrets', asyn
       const body = JSON.parse(opts.body);
       assert.strictEqual(body.source, 'mcp_guard');
       assert.ok(body.checks.every((item) => item.ok));
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({ id: 'q_mcp_heartbeat', decision: 'recorded', status: 'sensor_heartbeat', failedChecks: [] }),
-      };
+      return jsonResponse(200, { id: 'q_mcp_heartbeat', decision: 'recorded', status: 'sensor_heartbeat', failedChecks: [] });
     },
   });
   assert.strictEqual(requests.length, 1);
@@ -369,12 +372,32 @@ test('MCP heartbeat and human output cover failure branches without leaking secr
       REDACTWALL_URL: 'https://redactwall.example',
       INGEST_API_KEY: 'key-0000000000000001',
     },
-    fetchImpl: async () => ({
-      ok: false,
-      status: 429,
-      json: async () => ({ error: 'rate limited' }),
-    }),
-  }), /HTTP 429: rate limited/);
+    fetchImpl: async () => jsonResponse(429, { error: 'rate limited' }),
+  }), /HTTP 429$/);
+
+  let request;
+  await emitHeartbeat(report, {
+    config: {
+      REDACTWALL_URL: 'https://redactwall.example/control/',
+      INGEST_API_KEY: 'key-0000000000000001',
+    },
+    fetchImpl: async (url, options) => {
+      request = { url, options };
+      return jsonResponse(200, { id: 'hb_mcp' });
+    },
+  });
+  assert.strictEqual(request.url, 'https://redactwall.example/control/api/v1/heartbeat');
+  assert.strictEqual(request.options.redirect, 'error');
+
+  let cleartextCalled = false;
+  await assert.rejects(() => emitHeartbeat(report, {
+    config: {
+      REDACTWALL_URL: 'http://redactwall.example',
+      INGEST_API_KEY: 'key-0000000000000001',
+    },
+    fetchImpl: async () => { cleartextCalled = true; },
+  }), /must use HTTPS or loopback HTTP/);
+  assert.strictEqual(cleartextCalled, false);
 
   const logs = [];
   printHuman({ ...report, heartbeat: { ok: true, detail: 'recorded' } }, { log: (line) => logs.push(line) });

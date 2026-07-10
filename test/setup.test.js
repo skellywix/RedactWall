@@ -21,6 +21,7 @@ const {
   quoteEnvValue,
   readEnvFile,
   renderEnv,
+  writeEnvAtomic,
   run,
   statusFromEnv,
 } = require('../scripts/setup');
@@ -34,6 +35,7 @@ const SETUP_ENV_KEYS = [
   'REDACTWALL_DB_PATH',
   'REDACTWALL_SAAS_MODE',
   'REDACTWALL_TENANT_ID',
+  'REDACTWALL_LICENSE_CUSTOMER_ID',
   'REDACTWALL_SEAT_LIMIT',
   'REDACTWALL_REQUIRE_TENANT_CONTEXT',
   'REDACTWALL_REQUIRE_USER_IDENTITY',
@@ -67,6 +69,7 @@ const SETUP_ENV_KEYS = [
   'REDACTWALL_DB_PATH',
   'REDACTWALL_SAAS_MODE',
   'REDACTWALL_TENANT_ID',
+  'REDACTWALL_LICENSE_CUSTOMER_ID',
   'REDACTWALL_SEAT_LIMIT',
   'REDACTWALL_REQUIRE_TENANT_CONTEXT',
   'REDACTWALL_REQUIRE_USER_IDENTITY',
@@ -94,7 +97,7 @@ function childEnv() {
 
 test('production setup env passes deployment preflight', () => {
   const env = buildEnv({ production: true });
-  const status = statusFromEnv(env);
+  const unboundStatus = statusFromEnv(env);
 
   assert.strictEqual(env.NODE_ENV, 'production');
   assert.strictEqual(env.HTTPS, 'true');
@@ -107,6 +110,13 @@ test('production setup env passes deployment preflight', () => {
   assert.ok(env.REDACTWALL_SECRET.length >= 32);
   assert.ok(env.REDACTWALL_DATA_KEY.length >= 32);
   assert.strictEqual(env.REDACTWALL_SAAS_MODE, 'false');
+  assert.strictEqual(env.REDACTWALL_LICENSE_CUSTOMER_ID, '');
+  assert.strictEqual(unboundStatus.ready, false);
+  assert.strictEqual(unboundStatus.checks.find((item) => item.id === 'license_customer_binding').ok, false);
+
+  const boundEnv = buildEnv({ production: true, customerId: 'CU-Setup' });
+  assert.strictEqual(boundEnv.REDACTWALL_LICENSE_CUSTOMER_ID, 'cu-setup');
+  const status = statusFromEnv(boundEnv);
   assert.strictEqual(status.ready, true);
   assert.strictEqual(status.level, 'ok');
 });
@@ -172,16 +182,65 @@ test('renderEnv quotes only values that need quoting', () => {
   assert.strictEqual(quoteEnvValue('has # mark'), '"has # mark"');
 });
 
+test('atomic env writer replaces an existing file privately and preserves it on publish failure', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-setup-env-write-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const envPath = path.join(dir, '.env');
+  fs.writeFileSync(envPath, 'OLD=1\n', { mode: 0o644 });
+  fs.chmodSync(envPath, 0o644);
+
+  writeEnvAtomic(envPath, 'NEW=2\n');
+  assert.strictEqual(fs.readFileSync(envPath, 'utf8'), 'NEW=2\n');
+  if (process.platform !== 'win32') assert.strictEqual(fs.statSync(envPath).mode & 0o777, 0o600);
+  assert.deepStrictEqual(fs.readdirSync(dir), ['.env']);
+
+  const failingFs = {
+    ...fs,
+    renameSync() { throw new Error('injected publish failure'); },
+  };
+  assert.throws(() => writeEnvAtomic(envPath, 'BROKEN=1\n', { fs: failingFs }), /injected publish failure/);
+  assert.strictEqual(fs.readFileSync(envPath, 'utf8'), 'NEW=2\n');
+  assert.deepStrictEqual(fs.readdirSync(dir), ['.env']);
+});
+
+test('atomic env writer rejects a real directory-fsync failure and restores exact prior bytes', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-setup-env-durable-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const envPath = path.join(dir, '.env');
+  const baseline = Buffer.from('OLD_EXACT=1\r\n');
+  fs.writeFileSync(envPath, baseline, { mode: 0o600 });
+  const failingFs = {
+    ...fs,
+    fsyncSync(fd) {
+      if (fs.fstatSync(fd).isDirectory()) {
+        const error = new Error('injected directory durability failure');
+        error.code = 'EIO';
+        throw error;
+      }
+      return fs.fsyncSync(fd);
+    },
+  };
+
+  assert.throws(
+    () => writeEnvAtomic(envPath, 'NEW=2\n', { fs: failingFs }),
+    /injected directory durability failure/,
+  );
+  assert.deepStrictEqual(fs.readFileSync(envPath), baseline);
+  assert.deepStrictEqual(fs.readdirSync(dir), ['.env']);
+});
+
 test('parseArgs supports check and alternate env file', () => {
-  const opts = parseArgs(['--check', '--skip-install', '--with-browser', '--force', '--prod', '--env', 'demo.env']);
+  const opts = parseArgs(['--check', '--skip-install', '--with-browser', '--force', '--customer-id', 'cu-setup', '--prod', '--env', 'demo.env']);
   assert.strictEqual(opts.check, true);
   assert.strictEqual(opts.skipInstall, true);
   assert.strictEqual(opts.withBrowser, true);
   assert.strictEqual(opts.force, true);
+  assert.strictEqual(opts.customerId, 'cu-setup');
   assert.strictEqual(opts.production, true);
   assert.match(opts.envPath, /demo\.env$/);
   assert.strictEqual(parseArgs(['--help']).help, true);
   assert.throws(() => parseArgs(['--bad']), /Unknown option: --bad/);
+  assert.throws(() => parseArgs(['--customer-id']), /requires a customer slug/);
 });
 
 test('setup helpers cover placeholder, env-file, install, and console output branches', (t) => {
@@ -285,8 +344,7 @@ test('setup main supports injected help, check, write, and blocked status flows'
     readEnvFile: () => ({ ADMIN_PASSWORD: 'ChangeMe!2026' }),
     mergeEnv: (existing, generated) => ({ ...existing, ...generated }),
     renderEnv: (values) => `ADMIN_PASSWORD=${values.ADMIN_PASSWORD}\n`,
-    mkdirSync: (dirPath) => writes.push(['mkdir', dirPath]),
-    writeFileSync: (file, body, opts) => writes.push(['write', file, body, opts.mode]),
+    writeEnvFile: (file, body) => writes.push(['write', file, body]),
     initializeRuntime: (envPath) => {
       assert.match(envPath, /pilot\.env$/);
       return { ok: true };
@@ -294,7 +352,7 @@ test('setup main supports injected help, check, write, and blocked status flows'
     statusFromEnv: () => readyStatus,
   });
   assert.strictEqual(code, 0);
-  assert.ok(writes.some((item) => item[0] === 'write' && /pilot\.env$/.test(item[1]) && item[3] === 0o600));
+  assert.ok(writes.some((item) => item[0] === 'write' && /pilot\.env$/.test(item[1])));
   assert.match(logs.join('\n'), /Setup complete/);
   logs.length = 0;
 
@@ -306,8 +364,7 @@ test('setup main supports injected help, check, write, and blocked status flows'
     readEnvFile: () => ({}),
     mergeEnv: (existing, generated) => ({ ...existing, ...generated }),
     renderEnv: () => '',
-    mkdirSync: () => {},
-    writeFileSync: () => {},
+    writeEnvFile: () => {},
     initializeRuntime: () => ({ ok: false }),
     statusFromEnv: () => blockedStatus,
   }), 1);
@@ -325,6 +382,8 @@ test('production setup, mfa enrollment, and setup check work end to end without 
   const setupOut = execFileSync(process.execPath, [
     path.join(ROOT, 'scripts', 'setup.js'),
     '--production',
+    '--customer-id',
+    'cu-setup',
     '--skip-install',
     '--env',
     envPath,
@@ -334,6 +393,7 @@ test('production setup, mfa enrollment, and setup check work end to end without 
   assert.match(parsed.ADMIN_TOTP_SECRET, /^[A-Z2-7]{16,}$/);
   assert.match(parsed.ADMIN_PASSWORD, /^Ps-/);
   assert.match(parsed.INGEST_API_KEY, /^ps_ingest_/);
+  assert.strictEqual(parsed.REDACTWALL_LICENSE_CUSTOMER_ID, 'cu-setup');
   assert.strictEqual(parsed.REDACTWALL_DB_PATH, dbPath);
   assert.strictEqual(fs.existsSync(dbPath), true);
   assert.match(setupOut, /Preflight: ok \(ready\)/);

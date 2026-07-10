@@ -7,7 +7,11 @@
  * connector SDK before any model receives it.
  */
 const { fetchWithTimeout } = require('../guard');
-const { connectorHealthCheck, htmlToText, sanitizeToolResult } = require('../sdk');
+const { connectorHealthCheck, executeConnectorTool, htmlToText } = require('../sdk');
+const {
+  cancelResponseBody,
+  readBoundedText: readSharedBoundedText,
+} = require('../../shared/bounded-response');
 
 const DEFAULT_GRAPH_ROOT = 'https://graph.microsoft.com/v1.0';
 const DEFAULT_MAX_BYTES = 512 * 1024;
@@ -113,12 +117,6 @@ function responseContentType(response) {
   return compactLabel(headerValue(response.headers, 'content-type').split(';')[0], 'unknown', 80);
 }
 
-function responseContentLength(response) {
-  const raw = headerValue(response.headers, 'content-length');
-  const n = Number(raw);
-  return Number.isFinite(n) && n >= 0 ? n : null;
-}
-
 function maxBytes(opts = {}) {
   const n = Number(opts.maxBytes ?? DEFAULT_MAX_BYTES);
   if (!Number.isFinite(n)) return DEFAULT_MAX_BYTES;
@@ -134,38 +132,11 @@ function isTextContentType(contentType, opts = {}) {
 }
 
 async function readBoundedText(response, opts = {}) {
-  const limit = maxBytes(opts);
-  const declared = responseContentLength(response);
-  if (declared != null && declared > limit) {
-    throw new Error(`Microsoft 365 content exceeds ${limit} byte limit`);
-  }
-
-  if (response.body && typeof response.body.getReader === 'function') {
-    const decoder = new TextDecoder();
-    const reader = response.body.getReader();
-    let total = 0;
-    let text = '';
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      total += value.byteLength;
-      if (total > limit) throw new Error(`Microsoft 365 content exceeds ${limit} byte limit`);
-      text += decoder.decode(value, { stream: true });
-    }
-    text += decoder.decode();
-    return { text, sizeBytes: total };
-  }
-
-  if (typeof response.arrayBuffer === 'function') {
-    const buffer = Buffer.from(await response.arrayBuffer());
-    if (buffer.length > limit) throw new Error(`Microsoft 365 content exceeds ${limit} byte limit`);
-    return { text: buffer.toString('utf8'), sizeBytes: buffer.length };
-  }
-
-  const text = typeof response.text === 'function' ? await response.text() : '';
-  const size = Buffer.byteLength(text, 'utf8');
-  if (size > limit) throw new Error(`Microsoft 365 content exceeds ${limit} byte limit`);
-  return { text, sizeBytes: size };
+  return readSharedBoundedText(response, {
+    maxBytes: maxBytes(opts),
+    timeoutMs: opts.responseTimeoutMs || opts.timeoutMs,
+    label: 'Microsoft 365 content',
+  });
 }
 
 function graphScopes(opts = {}) {
@@ -199,11 +170,13 @@ async function fetchDriveItemContent(args = {}, opts = {}) {
 
   if (!response || !response.ok) {
     const status = response && response.status ? response.status : 'unknown';
+    if (response) await cancelResponseBody(response);
     throw new Error(`Microsoft 365 content fetch failed with HTTP ${status}`);
   }
 
   const contentType = responseContentType(response);
   if (!isTextContentType(contentType, opts)) {
+    await cancelResponseBody(response);
     throw new Error(`Microsoft 365 content type is not text-readable: ${contentType}`);
   }
 
@@ -234,6 +207,7 @@ async function fetchGraphJson(url, operation, opts = {}) {
 
   if (!response || !response.ok) {
     const status = response && response.status ? response.status : 'unknown';
+    if (response) await cancelResponseBody(response);
     throw new Error(`Microsoft 365 ${operation} failed with HTTP ${status}`);
   }
   const body = await readBoundedText(response, opts);
@@ -329,8 +303,7 @@ async function fetchListItemFields(args = {}, opts = {}) {
 }
 
 async function sanitizeDriveItemContent(args = {}, opts = {}) {
-  const raw = await fetchDriveItemContent(args, opts);
-  return sanitizeToolResult(raw, {
+  return executeConnectorTool((toolArgs) => fetchDriveItemContent(toolArgs, opts), args, {
     agent: opts.agent,
     connector: 'microsoft365',
     tool: 'driveItem.getContent',
@@ -338,8 +311,7 @@ async function sanitizeDriveItemContent(args = {}, opts = {}) {
 }
 
 async function sanitizeSitePageContent(args = {}, opts = {}) {
-  const raw = await fetchSitePageContent(args, opts);
-  return sanitizeToolResult(raw, {
+  return executeConnectorTool((toolArgs) => fetchSitePageContent(toolArgs, opts), args, {
     agent: opts.agent,
     connector: 'microsoft365',
     tool: 'sites.page.get',
@@ -347,8 +319,7 @@ async function sanitizeSitePageContent(args = {}, opts = {}) {
 }
 
 async function sanitizeListItemFields(args = {}, opts = {}) {
-  const raw = await fetchListItemFields(args, opts);
-  return sanitizeToolResult(raw, {
+  return executeConnectorTool((toolArgs) => fetchListItemFields(toolArgs, opts), args, {
     agent: opts.agent,
     connector: 'microsoft365',
     tool: 'sites.listItem.get',

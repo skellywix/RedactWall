@@ -48,10 +48,10 @@ Notes:
 1. **IdP groups (recommended).** SCIM-provisioned users inherit the role from
    their group's display name (`security_admin` / `approver` / `operator` /
    `auditor` — case-insensitive, spaces and dashes tolerated). Users with no
-   role-mapped group default to `auditor` — the safe floor: they can look and
-   export, never change. OIDC sign-ins resolve through the same SCIM record,
-   so deactivating the user in the IdP revokes console access, live sessions,
-   and the seat.
+   direct role and no role-mapped group have no console access until an
+   administrator assigns one. OIDC sign-ins resolve through the same SCIM
+   record, so removing the role or deactivating the user in the IdP revokes
+   console access, live sessions, and the seat.
 2. **Local accounts (small pilots, break-glass).** One local account per role
    via env: `ADMIN_USER`/`ADMIN_PASSWORD` (+ TOTP), `APPROVER_*`,
    `AUDITOR_*`, `OPERATOR_*`. Usernames must be distinct or the extra account

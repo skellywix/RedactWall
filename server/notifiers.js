@@ -12,9 +12,12 @@ const { safeSensor } = require('./sensor-metadata');
 const routing = require('./routing');
 const smtp = require('./smtp');
 const { outboundHttpsUrl } = require('./url-policy');
+const { sanitizeSensitiveText } = require('./sensitive-text');
+const { cancelResponseBody, readBoundedJson } = require('../sensors/shared/bounded-response');
 
 const MAX_LABELS = 20;
 const MAX_REASONS = 8;
+const MAX_NOTIFIER_RESPONSE_BYTES = 256 * 1024;
 const DEFAULT_LINEAR_API_URL = 'https://api.linear.app/graphql';
 // Bound outbound notifier requests so a hung webhook/ticket endpoint cannot
 // stall an approval action that awaits notification delivery.
@@ -265,6 +268,13 @@ function boundedText(value, limit = 80) {
   return text ? text.slice(0, limit) : null;
 }
 
+function ticketExternalId(value, limit = 120) {
+  if (typeof value !== 'string' && !Number.isSafeInteger(value)) return null;
+  const text = String(value).trim();
+  if (!text || text.length > limit || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(text)) return null;
+  return sanitizeSensitiveText(text, limit) === text ? text : null;
+}
+
 function priorityForTicket(payload) {
   if (payload.action === 'APPROVAL_ESCALATED') return 'high';
   if (payload.maxSeverity >= 4 || payload.riskScore >= 75) return 'critical';
@@ -424,27 +434,51 @@ function headersForChannel(channel) {
   return headers;
 }
 
-async function linearResponseResult(res) {
-  if (!res || !res.ok || typeof res.json !== 'function') return { reason: null, issue: null };
+async function linearResponseResult(res, opts = {}) {
+  if (!res || !res.ok) return { reason: null, issue: null };
   try {
-    const data = await res.json();
-    if (data && ((Array.isArray(data.errors) && data.errors.length) || data.data?.issueCreate?.success === false)) {
+    const { json: data } = await readBoundedJson(res, {
+      maxBytes: MAX_NOTIFIER_RESPONSE_BYTES,
+      timeoutMs: opts.responseTimeoutMs || OUTBOUND_TIMEOUT_MS,
+      label: 'Linear response',
+    });
+    const creation = data && data.data && data.data.issueCreate;
+    if ((data && Array.isArray(data.errors) && data.errors.length) || (creation && creation.success === false)) {
       return { reason: 'graphql_error', issue: null };
     }
-    const issue = data && data.data && data.data.issueCreate && data.data.issueCreate.issue;
+    const issue = creation && creation.success === true && creation.issue;
+    const identifier = issue && ticketExternalId(issue.identifier);
+    const id = issue && ticketExternalId(issue.id);
+    if (!issue || (!identifier && !id)) return { reason: 'invalid_graphql_response', issue: null };
     return {
       reason: null,
-      issue: issue && typeof issue === 'object'
-        ? {
-          id: boundedText(issue.id, 120),
-          identifier: boundedText(issue.identifier, 120),
-          url: boundedText(issue.url, 2048),
-          title: boundedText(issue.title, 240),
-        }
-        : null,
+      issue: {
+        id,
+        identifier,
+        url: boundedText(issue.url, 2048),
+        title: boundedText(issue.title, 240),
+      },
     };
   } catch {
     return { reason: 'invalid_graphql_response', issue: null };
+  }
+}
+
+async function jiraResponseResult(res, opts = {}) {
+  try {
+    const { json: issue } = await readBoundedJson(res, {
+      maxBytes: MAX_NOTIFIER_RESPONSE_BYTES,
+      timeoutMs: opts.responseTimeoutMs || OUTBOUND_TIMEOUT_MS,
+      label: 'Jira response',
+    });
+    const externalId = issue && typeof issue === 'object'
+      ? ticketExternalId(issue.key) || ticketExternalId(issue.id)
+      : null;
+    return externalId
+      ? { reason: null, issue: { externalId } }
+      : { reason: 'invalid_jira_response', issue: null };
+  } catch {
+    return { reason: 'invalid_jira_response', issue: null };
   }
 }
 
@@ -452,13 +486,18 @@ async function postJson(channel, payload, opts = {}) {
   const fetchImpl = opts.fetch || fetch;
   const res = await fetchImpl(channel.url, {
     method: 'POST',
+    redirect: 'error',
     headers: headersForChannel(channel),
     body: JSON.stringify(bodyForChannel(channel, payload)),
     signal: outboundSignal(),
   });
-  const linearResult = channel.type === 'linear' ? await linearResponseResult(res) : { reason: null, issue: null };
-  if (linearResult.reason) return { channel: channel.name || channel.type, sent: false, reason: linearResult.reason };
-  if (channel.type === 'linear' && res && res.ok) {
+  if (!res || !res.ok) {
+    await cancelResponseBody(res);
+    return { channel: channel.name || channel.type, sent: false, reason: 'http_' + (res && res.status) };
+  }
+  if (channel.type === 'linear') {
+    const linearResult = await linearResponseResult(res, opts);
+    if (linearResult.reason) return { channel: channel.name || channel.type, sent: false, reason: linearResult.reason };
     const issue = linearResult.issue || {};
     return {
       channel: channel.name || channel.type,
@@ -468,18 +507,19 @@ async function postJson(channel, payload, opts = {}) {
       url: issue.url || null,
     };
   }
-  if (channel.type === 'jira' && res && res.ok) {
-    const issue = typeof res.json === 'function' ? await res.json().catch(() => ({})) : {};
+  if (channel.type === 'jira') {
+    const jiraResult = await jiraResponseResult(res, opts);
+    if (jiraResult.reason) return { channel: channel.name || channel.type, sent: false, reason: jiraResult.reason };
+    const issue = jiraResult.issue;
     return {
       channel: channel.name || channel.type,
       sent: true,
       status: res.status,
-      externalId: (issue && (issue.key || issue.id)) || null,
+      externalId: issue.externalId,
     };
   }
-  return res && res.ok
-    ? { channel: channel.name || channel.type, sent: true, status: res.status }
-    : { channel: channel.name || channel.type, sent: false, reason: 'http_' + (res && res.status) };
+  await cancelResponseBody(res);
+  return { channel: channel.name || channel.type, sent: true, status: res.status };
 }
 
 function deliveryStatus(result) {

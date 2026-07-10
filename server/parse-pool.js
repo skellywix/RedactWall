@@ -10,7 +10,8 @@
  *
  * Exposes the same extractText(name, buf, opts) contract and error codes as
  * server/processors.js so call sites and sensors need no other changes.
- * REDACTWALL_PARSE_ISOLATION=off falls back to in-process extraction.
+ * REDACTWALL_PARSE_ISOLATION=off only permits bounded plain-text decoding in
+ * process; synchronous rich/container parsers always remain isolated.
  */
 require('./env').loadEnv();
 const { fork } = require('child_process');
@@ -66,6 +67,7 @@ function spawnWorker() {
     serialization: 'advanced',
     stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
     execArgv: ['--max-old-space-size=' + childHeapMb()],
+    env: { ...process.env, REDACTWALL_PARSE_CHILD: '1' },
   });
   const worker = { child, task: null, tasksDone: 0 };
   child.on('message', (msg) => {
@@ -149,9 +151,11 @@ function pump() {
 
 /** Same contract as processors.extractText, but preemptible and fault-isolated. */
 async function extractText(name, buf, opts = {}) {
-  if (!poolEnabled()) return processors.extractText(name, buf, opts);
   const p = processors.PROCESSORS.find((x) => x.supports(name));
   if (!p || p.requiresOcr) return processors.extractText(name, buf, opts);
+  // The off switch is only safe for bounded, linear plain-text decoding.
+  // Container parsers stay in a killable child even when isolation is disabled.
+  if (!poolEnabled() && !p.requiresIsolation) return processors.extractText(name, buf, opts);
   if (queue.length >= queueMax()) return failResult({ processorId: p.id }, 'extract_failed');
   return new Promise((resolve) => {
     const task = {
