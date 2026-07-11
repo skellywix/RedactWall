@@ -48,10 +48,12 @@ export async function fetchAuditLog(limit = 500): Promise<AuditLog | null> {
  * Item-level audit trail for one held/decided prompt (BLOCKED -> APPROVAL_ROUTED
  * -> REVEAL_RAW -> APPROVED ...). Uses the server's queryId filter; returns the
  * entries alone (integrity is a whole-chain property surfaced in the Audit view).
+ * Returns null when the trail is unavailable or malformed - callers must not
+ * present that as a verified-empty history.
  */
-export async function fetchAuditForQuery(queryId: string, limit = 50): Promise<AuditEntry[]> {
+export async function fetchAuditForQuery(queryId: string, limit = 50): Promise<AuditEntry[] | null> {
   const body = await apiJson<AuditLog>(`/api/audit?queryId=${encodeURIComponent(queryId)}&limit=${limit}`);
-  return body && Array.isArray(body.entries) ? body.entries : [];
+  return body && Array.isArray(body.entries) ? body.entries : null;
 }
 
 function downloadJson(payload: unknown, name: string): void {

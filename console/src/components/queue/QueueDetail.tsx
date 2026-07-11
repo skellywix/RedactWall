@@ -172,20 +172,37 @@ function ReassignControl({ query, me, busy, onAssign }: { query: QueueQuery; me:
   );
 }
 
+function AuditTrailNote({ text }: { text: string }) {
+  return (
+    <div className="query-audit">
+      <label>Audit trail</label>
+      <p className="query-audit-note">{text}</p>
+    </div>
+  );
+}
+
 /** Item-level audit trail for the selected incident, oldest event first. */
 function QueryAuditTrail({ queryId }: { queryId: string }) {
   const [entries, setEntries] = useState<AuditEntry[] | null>(null);
+  const [loaded, setLoaded] = useState(false);
   useEffect(() => {
     let cancelled = false;
     setEntries(null);
+    setLoaded(false);
     void fetchAuditForQuery(queryId).then((rows) => {
-      if (!cancelled) setEntries(rows);
+      if (cancelled) return;
+      setEntries(rows);
+      setLoaded(true);
     });
     return () => {
       cancelled = true;
     };
   }, [queryId]);
-  if (!entries?.length) return null;
+  // Loading, unavailable, and verified-empty are different evidence claims;
+  // none of them may render as the same blank panel.
+  if (!loaded) return <AuditTrailNote text="Loading audit trail..." />;
+  if (!entries) return <AuditTrailNote text="Audit trail unavailable. Refresh to retry." />;
+  if (!entries.length) return <AuditTrailNote text="No audit events recorded for this item." />;
   const chronological = [...entries].reverse();
   return (
     <div className="query-audit">
