@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import { api, apiErrorSummary, apiJson } from '../lib/api';
 import { fetchQueue, type QueueQuery } from '../api/queries';
 import { EmptyState } from '../components/Panel';
+import { canDecide } from '../components/queue/format';
 import { navigate } from '../lib/router';
 import { useSession } from '../lib/session';
 import { useEventStream } from '../lib/sse';
@@ -1369,10 +1370,10 @@ function SegmentCard({ card, selected, onSegment }: { card: SegmentCardInfo; sel
   );
 }
 
-function SegmentLensEmpty() {
+function SegmentLensEmpty({ detail }: { detail?: string }) {
   return (
     <div className="segment-lens is-empty" aria-label="Posture segment lens">
-      <div className="segment-lens-summary">Segments will appear after sanitized activity arrives.</div>
+      <div className="segment-lens-summary">{detail || 'Segments will appear after sanitized activity arrives.'}</div>
       <label className="segment-select">
         <span>Posture segment</span>
         <select value="all" aria-label="Posture segment" disabled>
@@ -1387,10 +1388,14 @@ function SegmentLensEmpty() {
 function SegmentLens({ segments, onSegment }: { segments: SegmentsReport | null; onSegment: (id: string) => void }) {
   if (!segments) return <SegmentLensEmpty />;
   const summary = segments.summary ?? {};
+  // summary.selectedId is the server's authoritative statement of which
+  // segment this payload is scoped to; active is descriptive metadata and
+  // cannot stand in for it.
+  const selectedId = summary.selectedId || '';
+  if (!selectedId) return <SegmentLensEmpty detail="Segment scope unavailable. Refresh posture." />;
   const active = segments.active ?? null;
   const filters = segments.filters?.length ? segments.filters : [{ id: 'all', label: 'All segments', typeLabel: 'All' }];
   const matrix = segments.matrix ?? [];
-  const selectedId = summary.selectedId || active?.id || 'all';
   const activeLabel = active ? `${active.typeLabel || 'Segment'}: ${active.label || 'Unknown'}` : 'All segments';
   return (
     <div className="segment-lens" aria-label="Posture segment lens">
@@ -1803,7 +1808,9 @@ function InventorySection({ inventory }: { inventory: AiInventoryReport | null }
   return (
     <Section title="AI Vendor Inventory" summary={summaryText}>
       <div className="ai-inventory-grid" id="aiInventoryRows" aria-live="polite">
-        {rows.length ? (
+        {!inventory ? (
+          <EmptyState title="Inventory unavailable" detail="AI inventory appears after posture refresh." />
+        ) : rows.length ? (
           rows.map((item) => <InventoryRow key={item.id} item={item} />)
         ) : (
           <EmptyState title="No AI inventory" detail="No governed, shadow, or endpoint AI tools observed." />
@@ -2246,11 +2253,13 @@ function ControlGraphSection({ graph }: { graph: ControlGraphReport | null }) {
   const summaryText = graph
     ? `${num(summary.nodes)} nodes / ${num(summary.edges)} links / ${num(summary.highRiskAssets)} high risk / ${summary.privacy || 'prompt bodies excluded'}`
     : 'Waiting for data';
-  const empty = !graph || (!nodes.length && !edges.length);
+  const empty = !nodes.length && !edges.length;
   return (
     <Section title="AI Control Graph" summary={summaryText}>
       <div className="control-graph" id="controlGraphMap" aria-live="polite">
-        {empty ? (
+        {!graph ? (
+          <EmptyState title="Graph unavailable" detail="Control graph appears after posture refresh." />
+        ) : empty ? (
           <EmptyState title="No graph" detail="Awaiting events." />
         ) : (
           <>
@@ -2738,7 +2747,7 @@ function QualityBars({ quality }: { quality: FeedbackQualitySummary }) {
   );
 }
 
-function CandidateRow({ item, verdicts }: { item: FeedbackCandidate; verdicts: VerdictControl }) {
+function CandidateRow({ item, verdicts, allowed }: { item: FeedbackCandidate; verdicts: VerdictControl; allowed: boolean }) {
   const verdictButton = (verdict: 'valid' | 'false_positive', label: string) => {
     const state = verdicts.states.get(`${item.queryId}:${item.detectorId}:${verdict}`);
     return (
@@ -2760,8 +2769,14 @@ function CandidateRow({ item, verdicts }: { item: FeedbackCandidate; verdicts: V
       </div>
       <span>{item.detectorIds?.join(', ') || 'detector'}</span>
       <div className="action-workflow-controls">
-        {verdictButton('valid', 'Valid')}
-        {verdictButton('false_positive', 'Noisy')}
+        {allowed ? (
+          <>
+            {verdictButton('valid', 'Valid')}
+            {verdictButton('false_positive', 'Noisy')}
+          </>
+        ) : (
+          <span title="Feedback requires Security Admin or the assigned approver">Read-only</span>
+        )}
       </div>
     </div>
   );
@@ -2775,7 +2790,7 @@ function detectorFeedbackSummary(report: FeedbackReport | null): string {
   return quality ? `${num(quality.score)}/100 eval / ${counts}` : counts;
 }
 
-function DetectorFeedbackSection({ report, verdicts }: { report: FeedbackReport | null; verdicts: VerdictControl }) {
+function DetectorFeedbackSection({ report, verdicts, canJudge }: { report: FeedbackReport | null; verdicts: VerdictControl; canJudge: (queryId: string) => boolean }) {
   const summary = report?.summary ?? null;
   const quality = report?.quality?.summary ?? null;
   const detectors = (report?.detectors ?? []).slice(0, 4);
@@ -2811,7 +2826,7 @@ function DetectorFeedbackSection({ report, verdicts }: { report: FeedbackReport 
               </div>
             ) : null}
             {candidates.map((item) => (
-              <CandidateRow key={`${item.queryId}:${item.detectorId}`} item={item} verdicts={verdicts} />
+              <CandidateRow key={`${item.queryId}:${item.detectorId}`} item={item} verdicts={verdicts} allowed={canJudge(item.queryId)} />
             ))}
           </>
         )}
@@ -2820,14 +2835,14 @@ function DetectorFeedbackSection({ report, verdicts }: { report: FeedbackReport 
   );
 }
 
-function InsightGrid({ report, feedback, verdicts }: { report: Posture | null; feedback: FeedbackReport | null; verdicts: VerdictControl }) {
+function InsightGrid({ report, feedback, verdicts, canJudge }: { report: Posture | null; feedback: FeedbackReport | null; verdicts: VerdictControl; canJudge: (queryId: string) => boolean }) {
   return (
     <div className="signal-insight-grid">
       <TrendSection trend={report?.trend ?? []} />
       <ControlOutcomesSection controls={report?.controls ?? []} />
       <BehaviorBaselinesSection baselines={report?.behaviorBaselines ?? null} />
       <DecisionQualitySection quality={report?.decisionQuality ?? null} />
-      <DetectorFeedbackSection report={feedback} verdicts={verdicts} />
+      <DetectorFeedbackSection report={feedback} verdicts={verdicts} canJudge={canJudge} />
     </div>
   );
 }
@@ -3020,12 +3035,15 @@ function InspectorAside({ ui, surfaces, events }: { ui: MonitorUi; surfaces: Pos
 interface SignalLayoutProps {
   surfaces: PostureSurfaceInfo[];
   events: MonitorEventInfo[];
+  loaded: boolean;
   ui: MonitorUi;
   search: SearchUi;
   recentEventId: string;
 }
 
-function SignalLayout({ surfaces, events, ui, search, recentEventId }: SignalLayoutProps) {
+// `loaded` distinguishes a missing posture payload from a verified-empty or
+// filtered-out result; only the latter two may claim "No matches"/"No events".
+function SignalLayout({ surfaces, events, loaded, ui, search, recentEventId }: SignalLayoutProps) {
   const visibleSurfaces = useMemo(
     () => surfaces.filter((item) => matchesStatus(item, ui.statusFilter) && matchesSearch(item, search.state, ui.term)),
     [surfaces, ui.statusFilter, search.state, ui.term],
@@ -3037,21 +3055,25 @@ function SignalLayout({ surfaces, events, ui, search, recentEventId }: SignalLay
   return (
     <div className="signal-layout">
       <div className="signal-main-stack">
-        <Section title="Surfaces" summary={visibleSurfaces.length ? `${visibleSurfaces.length} visible` : 'No matches'}>
+        <Section title="Surfaces" summary={visibleSurfaces.length ? `${visibleSurfaces.length} visible` : loaded ? 'No matches' : 'Waiting for data'}>
           <div className="surveillance-grid" role="list" aria-label="Monitored systems">
             {visibleSurfaces.length ? (
               visibleSurfaces.map((item) => <SurfacePanel key={item.id} item={item} ui={ui} />)
-            ) : (
+            ) : loaded ? (
               <EmptyState title="No matches" detail="Adjust status or search." />
+            ) : (
+              <EmptyState title="Posture unavailable" detail="Surfaces appear after posture refresh." />
             )}
           </div>
         </Section>
-        <Section title="Activity" summary={visibleEvents.length ? `${visibleEvents.length} visible` : 'No matches'}>
+        <Section title="Activity" summary={visibleEvents.length ? `${visibleEvents.length} visible` : loaded ? 'No matches' : 'Waiting for data'}>
           <div className="activity-feed" role="listbox" aria-label="Signal event timeline">
             {visibleEvents.length ? (
               visibleEvents.map((event) => <EventRow key={event.id} event={event} ui={ui} isNew={event.id === recentEventId} />)
-            ) : (
+            ) : loaded ? (
               <EmptyState title="No events" detail="Clear search or broaden status." />
+            ) : (
+              <EmptyState title="Posture unavailable" detail="Events appear after posture refresh." />
             )}
           </div>
         </Section>
@@ -3080,6 +3102,18 @@ export default function Monitor() {
   const workflow = useActionWorkflow(isAdmin, me ? me.user : '', posture.load);
   const snapshot = useSocSnapshot(isAdmin);
   const verdicts = useDetectorVerdicts(feedback.load);
+  // The server only accepts detector feedback from a Security Admin or the
+  // approver a candidate's query is assigned to (requireFeedbackAccess); the
+  // verdict buttons must not claim otherwise. A candidate outside the loaded
+  // queue window cannot be verified, so it stays read-only for approvers.
+  const canJudge = useCallback(
+    (queryId: string) => {
+      if (me?.role === 'security_admin') return true;
+      const row = activity.rows.find((q) => q.id === queryId);
+      return Boolean(row && canDecide(me, row));
+    },
+    [me, activity.rows],
+  );
 
   const reloadLive = useCallback(() => {
     void posture.load();
@@ -3119,8 +3153,8 @@ export default function Monitor() {
         <ControlGraphSection graph={report?.controlGraph ?? null} />
         <WorkbenchSection hardening={report?.hardening ?? null} isAdmin={isAdmin} snapshot={snapshot} />
         <SiemSection siem={siem} canUse={canUseSiem} />
-        <InsightGrid report={report} feedback={feedback.report} verdicts={verdicts} />
-        <SignalLayout surfaces={surfaces} events={events} ui={ui} search={search} recentEventId={recentEventId} />
+        <InsightGrid report={report} feedback={feedback.report} verdicts={verdicts} canJudge={canJudge} />
+        <SignalLayout surfaces={surfaces} events={events} loaded={Boolean(report)} ui={ui} search={search} recentEventId={recentEventId} />
       </div>
     </div>
   );
