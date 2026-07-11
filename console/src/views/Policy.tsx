@@ -1096,12 +1096,17 @@ function setupChecklist(policy: PolicyDoc, preflight: Preflight | null, coverage
   return [
     {
       label: 'Admin access',
-      state: checkGroupState(preflight, ['admin_password', 'admin_password_strength', 'admin_mfa', 'session_secret']),
+      state: checkGroupState(preflight, [
+        'admin_password', 'admin_password_strength', 'admin_mfa', 'admin_mfa_secret',
+        'session_secret', 'session_secret_strength',
+      ]),
       detail: 'MFA, password, session',
     },
     {
       label: 'Identity provider',
-      state: checkGroupState(preflight, ['oidc_config', 'oidc_scim_users', 'scim_bearer_token_strength']),
+      state: checkGroupState(preflight, [
+        'oidc_config', 'oidc_client_secret_strength', 'oidc_endpoints', 'oidc_scim_users', 'scim_bearer_token_strength',
+      ]),
       detail: 'OIDC and SCIM',
     },
     { label: 'Deploy sensors', state: sensorCount ? 'good' : 'warn', detail: `${sensorCount} observed` },
@@ -1172,7 +1177,7 @@ function HealthCard({ policy, preflight, coverage }: CardProps) {
 }
 
 const ENV_GROUPS: [string, string[]][] = [
-  ['Admin auth', ['admin_password', 'admin_password_strength', 'admin_mfa']],
+  ['Admin auth', ['admin_password', 'admin_password_strength', 'admin_mfa', 'admin_mfa_secret']],
   ['Sensor ingest key', ['ingest_key', 'ingest_key_strength']],
   ['Session secret', ['session_secret', 'session_secret_strength']],
   ['Raw approval encryption', ['raw_prompt_encryption', 'data_key_strength']],
