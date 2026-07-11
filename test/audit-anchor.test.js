@@ -13,6 +13,11 @@ const privatePaths = require('../server/private-path');
 const fileMutationLock = require('../server/file-mutation-lock');
 
 const WORKER_COUNT = 12;
+const TEST_OWNER_IDENTITY = {
+  processSid: 'S-1-5-21-1000-1000-1000-1001',
+  ownerSid: 'S-1-5-21-1000-1000-1000-1001',
+};
+const TEST_OWNER_SID = 'S-1-5-21-100-200-300-1001';
 
 function tempRoot(t, label) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `redactwall-${label}-`));
@@ -69,6 +74,9 @@ function aclHarness(options) {
     && normalize(target).startsWith(`${normalize(options.inheritFrom)}${path.sep}`)
     && secured.has(normalize(options.inheritFrom));
   return function spawnIcacls(command, args) {
+    if (command === 'powershell.exe') {
+      return { status: 0, stdout: `redactwall-owner-v1|${TEST_OWNER_SID}|${TEST_OWNER_SID}` };
+    }
     assert.strictEqual(command, 'icacls.exe');
     const target = path.resolve(args[0]);
     if (args.length === 1) {
@@ -120,7 +128,7 @@ test('audit-directory ACL hardening occurs only while its trusted bootstrap lock
   const directory = path.join(root, 'audit');
   const privateLockRoot = path.join(root, 'locks');
   const principal = 'TEST\\audit-owner';
-  const security = { platform: 'win32', principal, privateLockRoot };
+  const security = { platform: 'win32', principal, ownerIdentity: TEST_OWNER_IDENTITY, privateLockRoot };
   const directoryLock = fileMutationLock.lockPathFor(
     privatePaths.privateDirectoryLockTarget(directory, security),
   );
@@ -156,6 +164,7 @@ test('audit-anchor initialization honors its full sixty-second lock budget', (t)
   const privatePathSecurity = {
     platform: 'win32',
     principal,
+    ownerIdentity: TEST_OWNER_IDENTITY,
     privateLockRoot: path.join(root, 'locks'),
     spawn: aclHarness({ principal }),
   };
@@ -205,6 +214,81 @@ test('audit-anchor initialization honors its full sixty-second lock budget', (t)
   }
 });
 
+test('audit transaction preparation uses the full routine lock budget', (t) => {
+  const root = tempRoot(t, 'audit-anchor-transaction-lock-budget');
+  const directory = path.join(root, 'audit');
+  const checkpointPath = path.join(directory, '.audit-integrity-checkpoint.json');
+  const clock = { simulated: false, index: 0, observed: 0 };
+  const times = [0, 15_000, auditAnchor._internal.TRANSACTION_LOCK_TIMEOUT_MS];
+  const anchor = auditAnchor.openAuditAnchor({
+    directory,
+    checkpointPath,
+    allowBootstrap: true,
+    env: {},
+    now() {
+      if (!clock.simulated) return Date.now();
+      clock.observed = times[Math.min(clock.index, times.length - 1)];
+      clock.index += 1;
+      return clock.observed;
+    },
+    sleep() {},
+  });
+  const held = fileMutationLock.acquireFileMutationLockSync(checkpointPath);
+  try {
+    clock.simulated = true;
+    assert.throws(
+      () => anchor.prepareTransactionCommit({}, [{}]),
+      (error) => error && error.code === 'FILE_MUTATION_LOCK_TIMEOUT',
+    );
+    assert.strictEqual(
+      clock.observed,
+      auditAnchor._internal.TRANSACTION_LOCK_TIMEOUT_MS,
+      'pre-COMMIT checkpoint contention retains the routine thirty-second ceiling',
+    );
+    assert.strictEqual(anchor.status().ok, true, 'ordinary healthy lock contention is transient');
+  } finally {
+    fileMutationLock.releaseFileMutationLock(held);
+  }
+});
+
+test('checkpoint lock storage failure marks audit readiness unhealthy', (t) => {
+  const root = tempRoot(t, 'audit-anchor-lock-storage-failure');
+  const directory = path.join(root, 'audit');
+  let denyCheckpointParent = false;
+  const fsImpl = new Proxy(fs, {
+    get(target, property) {
+      if (property === 'mkdirSync') {
+        return (targetPath, options) => {
+          if (denyCheckpointParent && path.resolve(targetPath) === path.resolve(directory)) {
+            const error = new Error('synthetic checkpoint parent denial');
+            error.code = 'EACCES';
+            throw error;
+          }
+          return target.mkdirSync(targetPath, options);
+        };
+      }
+      const value = target[property];
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  const rows = [];
+  const database = auditDatabase(rows);
+  const anchor = auditAnchor.openAuditAnchor({ directory, allowBootstrap: true, env: {}, fs: fsImpl });
+  assert.deepStrictEqual(anchor.verifyDatabase(database), { ok: true, count: 0 });
+  const entry = anchor.authenticate(auditIntegrity.ZERO, {
+    id: 'a_lock_storage_failure', ts: '2026-07-10T12:00:00.000Z',
+    action: 'LOCK_STORAGE_TEST', queryId: '', actor: 'test', detail: 'sanitized',
+  });
+  rows.push({ seq: 1, entry: JSON.stringify(entry) });
+  denyCheckpointParent = true;
+  assert.throws(
+    () => anchor.prepareTransactionCommit(database, [entry]),
+    (error) => error && error.code === 'EACCES',
+  );
+  assert.strictEqual(anchor.status().ok, false);
+  assert.strictEqual(anchor.status().reason, 'checkpoint-unavailable');
+});
+
 test('later Windows checkpoint writes inspect but never re-harden the audit directory', (t) => {
   const root = tempRoot(t, 'audit-anchor-checkpoint-acl');
   const directory = path.join(root, 'audit');
@@ -224,6 +308,7 @@ test('later Windows checkpoint writes inspect but never re-harden the audit dire
     privatePathSecurity: {
       platform: 'win32',
       principal,
+      ownerIdentity: TEST_OWNER_IDENTITY,
       privateLockRoot: path.join(root, 'locks'),
       spawn: spawnIcacls,
     },
@@ -256,11 +341,437 @@ function auditDatabase(rows) {
       if (sql === 'SELECT seq, entry FROM audit WHERE seq = ?') {
         return { get: (seq) => rows.find((row) => row.seq === seq) };
       }
+      if (sql === 'SELECT seq, entry FROM audit ORDER BY seq DESC LIMIT ?') {
+        return { all: (limit) => rows.slice().sort((a, b) => b.seq - a.seq).slice(0, limit) };
+      }
       if (sql === 'SELECT id FROM queries') return { all: () => [] };
       throw new Error(`unexpected audit test query: ${sql}`);
     },
   };
 }
+
+test('steady-state pending proof avoids redundant sidecar ACL subprocesses', (t) => {
+  const root = tempRoot(t, 'audit-anchor-steady-acl');
+  const directory = path.join(root, 'audit');
+  const principal = 'TEST\\audit-owner';
+  const calls = [];
+  const harness = aclHarness({ principal, inheritFrom: directory });
+  const spawn = (command, args, options) => {
+    calls.push({ command, args: args.slice() });
+    return harness(command, args, options);
+  };
+  const rows = [];
+  const database = auditDatabase(rows);
+  const anchor = auditAnchor.openAuditAnchor({
+    directory,
+    allowBootstrap: true,
+    env: {},
+    privatePathSecurity: {
+      platform: 'win32',
+      principal,
+      ownerIdentity: TEST_OWNER_IDENTITY,
+      privateLockRoot: path.join(root, 'locks'),
+      spawn,
+    },
+  });
+  assert.deepStrictEqual(anchor.verifyDatabase(database), { ok: true, count: 0 });
+  calls.length = 0;
+  const entry = anchor.authenticate(auditIntegrity.ZERO, {
+    id: 'a_steady_acl',
+    ts: '2026-07-10T12:00:00.000Z',
+    action: 'STEADY_ACL_TEST',
+    queryId: '',
+    actor: 'test',
+    detail: 'sanitized',
+  });
+  rows.push({ seq: 1, entry: JSON.stringify(entry) });
+  anchor.prepareTransactionCommit(database, [entry]);
+
+  assert.strictEqual(calls.length, 4, 'one parent check plus owner, inheritance, and temp DACL proof');
+  assert.ok(calls.every(({ command }) => command === 'icacls.exe'));
+  assert.deepStrictEqual(calls[0].args, [directory]);
+  assert.ok(calls[1].args.includes('/setowner'));
+  assert.ok(calls[2].args.includes('/inheritance:d'));
+  assert.strictEqual(calls[3].args.length, 1, 'the protected temp DACL is inspected once');
+  assert.ok(!calls.some(({ args }) => args.includes('/reset') || args.includes('/grant:r')));
+  assert.ok(!calls.some(({ args }) => [anchor.paths.statePath, anchor.paths.checkpointPath]
+    .includes(path.resolve(args[0]))), 'trusted HMAC reads do not respawn file ACL probes');
+
+  anchor.transactionCommitted(database);
+  assert.deepStrictEqual(anchor.advanceCheckpoint(database), { ok: true, count: 1 });
+});
+
+test('pending publication rejects a temp-to-destination identity substitution', (t) => {
+  const root = tempRoot(t, 'audit-anchor-publish-identity');
+  const directory = path.join(root, 'audit');
+  const pendingPath = path.join(directory, '.audit-integrity-pending.json');
+  let substituteIdentity = false;
+  const fsImpl = new Proxy(fs, {
+    get(target, property) {
+      if (property === 'lstatSync') {
+        return (file, options) => {
+          const stat = target.lstatSync(file, options);
+          if (!substituteIdentity || path.resolve(file) !== path.resolve(pendingPath)) return stat;
+          const changed = Object.create(stat);
+          const next = typeof stat.ino === 'bigint' ? stat.ino + 1n : stat.ino + 1;
+          Object.defineProperty(changed, 'ino', { value: next });
+          return changed;
+        };
+      }
+      const value = target[property];
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  const rows = [];
+  const database = auditDatabase(rows);
+  const anchor = auditAnchor.openAuditAnchor({
+    directory,
+    pendingPath,
+    allowBootstrap: true,
+    env: {},
+    fs: fsImpl,
+  });
+  assert.deepStrictEqual(anchor.verifyDatabase(database), { ok: true, count: 0 });
+  const entry = anchor.authenticate(auditIntegrity.ZERO, {
+    id: 'a_identity_swap',
+    ts: '2026-07-10T12:00:00.000Z',
+    action: 'IDENTITY_SWAP_TEST',
+    queryId: '',
+    actor: 'test',
+    detail: 'sanitized',
+  });
+  rows.push({ seq: 1, entry: JSON.stringify(entry) });
+  substituteIdentity = true;
+  assert.throws(
+    () => anchor.prepareTransactionCommit(database, [entry]),
+    /changed during publication/,
+  );
+  assert.strictEqual(fs.existsSync(pendingPath), false, 'failed first publication is rolled back');
+});
+
+test('pending publication fails closed when the filesystem exposes no stable file id', (t) => {
+  const root = tempRoot(t, 'audit-anchor-zero-file-identity');
+  const directory = path.join(root, 'audit');
+  const pendingPath = path.join(directory, '.audit-integrity-pending.json');
+  let zeroPendingTempIdentity = false;
+  const fsImpl = new Proxy(fs, {
+    get(target, property) {
+      if (property === 'lstatSync') {
+        return (file, options) => {
+          const stat = target.lstatSync(file, options);
+          if (!zeroPendingTempIdentity || !String(file).includes('.audit-integrity-pending.json.')
+              || !String(file).endsWith('.tmp')) return stat;
+          const changed = Object.create(stat);
+          Object.defineProperty(changed, 'ino', { value: typeof stat.ino === 'bigint' ? 0n : 0 });
+          return changed;
+        };
+      }
+      const value = target[property];
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  const rows = [];
+  const database = auditDatabase(rows);
+  const anchor = auditAnchor.openAuditAnchor({ directory, pendingPath, allowBootstrap: true, env: {}, fs: fsImpl });
+  assert.deepStrictEqual(anchor.verifyDatabase(database), { ok: true, count: 0 });
+  const entry = anchor.authenticate(auditIntegrity.ZERO, {
+    id: 'a_zero_file_id', ts: '2026-07-10T12:00:00.000Z',
+    action: 'ZERO_FILE_ID_TEST', queryId: '', actor: 'test', detail: 'sanitized',
+  });
+  rows.push({ seq: 1, entry: JSON.stringify(entry) });
+  zeroPendingTempIdentity = true;
+  assert.throws(
+    () => anchor.prepareTransactionCommit(database, [entry]),
+    /audit integrity sidecar has no stable filesystem identity/,
+  );
+  assert.strictEqual(fs.existsSync(pendingPath), false);
+});
+
+test('pending publication rejects a verified sidecar directory identity swap', (t) => {
+  const root = tempRoot(t, 'audit-anchor-directory-identity');
+  const directory = path.join(root, 'audit');
+  const pendingPath = path.join(directory, '.audit-integrity-pending.json');
+  let substituteDirectoryIdentity = false;
+  const fsImpl = new Proxy(fs, {
+    get(target, property) {
+      if (property === 'renameSync') {
+        return (source, destination) => {
+          const result = target.renameSync(source, destination);
+          if (path.resolve(destination) === path.resolve(pendingPath)) {
+            substituteDirectoryIdentity = true;
+          }
+          return result;
+        };
+      }
+      if (property === 'lstatSync') {
+        return (file, options) => {
+          const stat = target.lstatSync(file, options);
+          if (!substituteDirectoryIdentity || path.resolve(file) !== path.resolve(directory)) return stat;
+          const changed = Object.create(stat);
+          const next = typeof stat.ino === 'bigint' ? stat.ino + 1n : stat.ino + 1;
+          Object.defineProperty(changed, 'ino', { value: next });
+          return changed;
+        };
+      }
+      const value = target[property];
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  const principal = 'TEST\\audit-owner';
+  const rows = [];
+  const database = auditDatabase(rows);
+  const anchor = auditAnchor.openAuditAnchor({
+    directory,
+    pendingPath,
+    allowBootstrap: true,
+    env: {},
+    fs: fsImpl,
+    privatePathSecurity: {
+      platform: 'win32',
+      principal,
+      ownerIdentity: TEST_OWNER_IDENTITY,
+      privateLockRoot: path.join(root, 'locks'),
+      spawn: aclHarness({ principal, inheritFrom: directory }),
+    },
+  });
+  assert.deepStrictEqual(anchor.verifyDatabase(database), { ok: true, count: 0 });
+  const entry = anchor.authenticate(auditIntegrity.ZERO, {
+    id: 'a_directory_swap', ts: '2026-07-10T12:00:00.000Z',
+    action: 'DIRECTORY_SWAP_TEST', queryId: '', actor: 'test', detail: 'sanitized',
+  });
+  rows.push({ seq: 1, entry: JSON.stringify(entry) });
+  assert.throws(
+    () => anchor.prepareTransactionCommit(database, [entry]),
+    /audit integrity directory identity changed/,
+  );
+  assert.strictEqual(fs.existsSync(pendingPath), false, 'failed publication rolls back the pending witness');
+  assert.strictEqual(anchor.status().ok, false);
+});
+
+test('final bound-directory verification remains inside exact pending rollback scope', (t) => {
+  const root = tempRoot(t, 'audit-anchor-directory-rollback-scope');
+  const directory = path.join(root, 'audit');
+  const pendingPath = path.join(directory, '.audit-integrity-pending.json');
+  let replacingPending = false;
+  let postRenameDirectoryStats = 0;
+  const fsImpl = new Proxy(fs, {
+    get(target, property) {
+      if (property === 'renameSync') {
+        return (source, destination) => {
+          const replacesPending = path.resolve(destination) === path.resolve(pendingPath)
+            && target.existsSync(destination);
+          const result = target.renameSync(source, destination);
+          if (replacesPending) replacingPending = true;
+          return result;
+        };
+      }
+      if (property === 'lstatSync') {
+        return (file, options) => {
+          const stat = target.lstatSync(file, options);
+          if (!replacingPending || path.resolve(file) !== path.resolve(directory)) return stat;
+          postRenameDirectoryStats += 1;
+          if (postRenameDirectoryStats === 1) return stat;
+          const changed = Object.create(stat);
+          Object.defineProperty(changed, 'ino', {
+            value: typeof stat.ino === 'bigint' ? stat.ino + 1n : stat.ino + 1,
+          });
+          return changed;
+        };
+      }
+      const value = target[property];
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  const principal = 'TEST\\audit-owner';
+  const rows = [];
+  const database = auditDatabase(rows);
+  const anchor = auditAnchor.openAuditAnchor({
+    directory,
+    pendingPath,
+    allowBootstrap: true,
+    env: {},
+    fs: fsImpl,
+    privatePathSecurity: {
+      platform: 'win32',
+      principal,
+      ownerIdentity: TEST_OWNER_IDENTITY,
+      privateLockRoot: path.join(root, 'locks'),
+      spawn: aclHarness({ principal, inheritFrom: directory }),
+    },
+  });
+  assert.deepStrictEqual(anchor.verifyDatabase(database), { ok: true, count: 0 });
+  const first = anchor.authenticate(auditIntegrity.ZERO, {
+    id: 'a_rollback_scope_1', ts: '2026-07-10T12:00:00.000Z',
+    action: 'ROLLBACK_SCOPE_TEST', queryId: '', actor: 'test', detail: 'sanitized',
+  });
+  rows.push({ seq: 1, entry: JSON.stringify(first) });
+  anchor.prepareTransactionCommit(database, [first]);
+  anchor.transactionCommitted(database);
+  const priorPending = fs.readFileSync(pendingPath);
+
+  const second = anchor.authenticate(first.hash, {
+    id: 'a_rollback_scope_2', ts: '2026-07-10T12:00:01.000Z',
+    action: 'ROLLBACK_SCOPE_TEST', queryId: '', actor: 'test', detail: 'sanitized',
+  });
+  rows.push({ seq: 2, entry: JSON.stringify(second) });
+  assert.throws(
+    () => anchor.prepareTransactionCommit(database, [second]),
+    /audit integrity directory identity changed/,
+  );
+  assert.deepStrictEqual(fs.readFileSync(pendingPath), priorPending, 'the exact prior pending witness is restored');
+  assert.strictEqual(postRenameDirectoryStats, 2, 'both fallible final checks ran before rollback authority was released');
+});
+
+test('Windows atomic replacement accepts retained destination creation time but binds the file id', (t) => {
+  const root = tempRoot(t, 'audit-anchor-windows-replace-identity');
+  const directory = path.join(root, 'audit');
+  const pendingPath = path.join(directory, '.audit-integrity-pending.json');
+  let replacedExistingPending = false;
+  const fsImpl = new Proxy(fs, {
+    get(target, property) {
+      if (property === 'renameSync') {
+        return (source, destination) => {
+          if (path.resolve(destination) === path.resolve(pendingPath) && target.existsSync(destination)) {
+            replacedExistingPending = true;
+          }
+          return target.renameSync(source, destination);
+        };
+      }
+      if (property === 'lstatSync') {
+        return (file, options) => {
+          const stat = target.lstatSync(file, options);
+          if (!replacedExistingPending || path.resolve(file) !== path.resolve(pendingPath)) return stat;
+          const changed = Object.create(stat);
+          const delta = typeof stat.birthtimeNs === 'bigint' ? 1_000_000n : 1;
+          if (stat.birthtimeNs !== undefined) {
+            Object.defineProperty(changed, 'birthtimeNs', { value: stat.birthtimeNs - delta });
+          } else {
+            Object.defineProperty(changed, 'birthtimeMs', { value: stat.birthtimeMs - delta });
+          }
+          return changed;
+        };
+      }
+      const value = target[property];
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  const principal = 'TEST\\audit-owner';
+  const rows = [];
+  const database = auditDatabase(rows);
+  const anchor = auditAnchor.openAuditAnchor({
+    directory,
+    pendingPath,
+    allowBootstrap: true,
+    env: {},
+    fs: fsImpl,
+    privatePathSecurity: {
+      platform: 'win32',
+      principal,
+      ownerIdentity: TEST_OWNER_IDENTITY,
+      privateLockRoot: path.join(root, 'locks'),
+      spawn: aclHarness({ principal, inheritFrom: directory }),
+    },
+  });
+  assert.deepStrictEqual(anchor.verifyDatabase(database), { ok: true, count: 0 });
+  const first = anchor.authenticate(auditIntegrity.ZERO, {
+    id: 'a_windows_replace_1', ts: '2026-07-10T12:00:00.000Z',
+    action: 'WINDOWS_REPLACE_TEST', queryId: '', actor: 'test', detail: 'sanitized',
+  });
+  rows.push({ seq: 1, entry: JSON.stringify(first) });
+  anchor.prepareTransactionCommit(database, [first]);
+  anchor.transactionCommitted(database);
+  const second = anchor.authenticate(first.hash, {
+    id: 'a_windows_replace_2', ts: '2026-07-10T12:00:01.000Z',
+    action: 'WINDOWS_REPLACE_TEST', queryId: '', actor: 'test', detail: 'sanitized',
+  });
+  rows.push({ seq: 2, entry: JSON.stringify(second) });
+  assert.doesNotThrow(() => anchor.prepareTransactionCommit(database, [second]));
+  anchor.transactionCommitted(database);
+  assert.strictEqual(JSON.parse(fs.readFileSync(pendingPath, 'utf8')).count, 2);
+});
+
+test('steady-state prepare re-authenticates the durable audit state', (t) => {
+  const root = tempRoot(t, 'audit-anchor-state-reauth-prepare');
+  const directory = path.join(root, 'audit');
+  const rows = [];
+  const database = auditDatabase(rows);
+  const anchor = auditAnchor.openAuditAnchor({ directory, allowBootstrap: true, env: {} });
+  assert.deepStrictEqual(anchor.verifyDatabase(database), { ok: true, count: 0 });
+  const state = JSON.parse(fs.readFileSync(anchor.paths.statePath, 'utf8'));
+  fs.writeFileSync(anchor.paths.statePath, JSON.stringify({ ...state, mac: '0'.repeat(64) }), { mode: 0o600 });
+  const entry = anchor.authenticate(auditIntegrity.ZERO, {
+    id: 'a_tampered_state_prepare', ts: '2026-07-10T12:00:00.000Z',
+    action: 'STATE_REAUTH_TEST', queryId: '', actor: 'test', detail: 'sanitized',
+  });
+  rows.push({ seq: 1, entry: JSON.stringify(entry) });
+  assert.throws(
+    () => anchor.prepareTransactionCommit(database, [entry]),
+    /audit integrity state authentication failed/,
+  );
+});
+
+test('self-signed replacement state cannot rotate the pinned embedded audit key', (t) => {
+  const root = tempRoot(t, 'audit-anchor-state-key-continuity');
+  const directory = path.join(root, 'audit');
+  const rows = [];
+  const database = auditDatabase(rows);
+  const anchor = auditAnchor.openAuditAnchor({ directory, allowBootstrap: true, env: {} });
+  assert.deepStrictEqual(anchor.verifyDatabase(database), { ok: true, count: 0 });
+  const originalBytes = fs.readFileSync(anchor.paths.statePath);
+  const originalState = JSON.parse(originalBytes);
+  const pinnedKey = Buffer.from(originalState.key, 'base64');
+  const replacementKey = Buffer.alloc(32, 0x5a);
+  fs.writeFileSync(
+    anchor.paths.statePath,
+    JSON.stringify(auditAnchor._internal.signedState(
+      replacementKey,
+      originalState.checkpointCreated,
+      true,
+      originalState.pendingProtocol,
+    )),
+    { mode: 0o600 },
+  );
+  const entry = anchor.authenticate(auditIntegrity.ZERO, {
+    id: 'a_replacement_key_prepare', ts: '2026-07-10T12:00:00.000Z',
+    action: 'STATE_KEY_CONTINUITY_TEST', queryId: '', actor: 'test', detail: 'sanitized',
+  });
+  rows.push({ seq: 1, entry: JSON.stringify(entry) });
+  assert.throws(
+    () => anchor.prepareTransactionCommit(database, [entry]),
+    (error) => error && error.code === 'REDACTWALL_AUDIT_STATE_CONTINUITY',
+  );
+  assert.strictEqual(anchor.status().ok, false);
+  assert.throws(
+    () => anchor.requireMutationReady(database),
+    (error) => error && error.code === 'REDACTWALL_AUDIT_CHECKPOINT_UNHEALTHY',
+  );
+
+  rows.pop();
+  fs.writeFileSync(anchor.paths.statePath, originalBytes, { mode: 0o600 });
+  assert.deepStrictEqual(anchor.requireMutationReady(database), { ok: true, count: 0 });
+  const after = anchor.authenticate(auditIntegrity.ZERO, {
+    id: 'a_original_key_retained', ts: '2026-07-10T12:00:01.000Z',
+    action: 'STATE_KEY_CONTINUITY_TEST', queryId: '', actor: 'test', detail: 'sanitized',
+  });
+  assert.strictEqual(auditIntegrity.validAuthenticatedEntry(after, pinnedKey), true);
+  assert.strictEqual(auditIntegrity.validAuthenticatedEntry(after, replacementKey), false);
+});
+
+test('steady-state checkpoint advance refuses a missing durable audit state', (t) => {
+  const root = tempRoot(t, 'audit-anchor-state-reauth-advance');
+  const directory = path.join(root, 'audit');
+  const rows = [];
+  const database = auditDatabase(rows);
+  const anchor = auditAnchor.openAuditAnchor({ directory, allowBootstrap: true, env: {} });
+  assert.deepStrictEqual(anchor.verifyDatabase(database), { ok: true, count: 0 });
+  fs.unlinkSync(anchor.paths.statePath);
+  assert.deepStrictEqual(anchor.advanceCheckpoint(database), {
+    ok: false,
+    count: 0,
+    reason: 'checkpoint-unavailable',
+  });
+  assert.strictEqual(anchor.status().ok, false);
+});
 
 function failingCheckpointFs(checkpointPath, failure) {
   const checkpoint = path.resolve(checkpointPath);
@@ -307,6 +818,8 @@ test('failed checkpoint publication freezes mutation, rejects tail truncation, a
     detail: 'sanitized',
   });
   rows.push({ seq: 1, entry: JSON.stringify(entry) });
+  anchor.prepareTransactionCommit(database, [entry]);
+  anchor.transactionCommitted(database);
   failure.enabled = true;
   assert.deepStrictEqual(anchor.advanceCheckpoint(database), {
     ok: false,
@@ -330,6 +843,64 @@ test('failed checkpoint publication freezes mutation, rejects tail truncation, a
   assert.strictEqual(JSON.parse(fs.readFileSync(checkpointPath, 'utf8')).head, entry.hash);
 });
 
+test('protocol-enabled restart refuses an authenticated tail that has no pending commit proof', (t) => {
+  const root = tempRoot(t, 'audit-anchor-missing-pending');
+  const directory = path.join(root, 'audit');
+  const rows = [];
+  const database = auditDatabase(rows);
+  const options = {
+    directory,
+    allowBootstrap: true,
+    env: {},
+  };
+  const first = auditAnchor.openAuditAnchor(options);
+  assert.deepStrictEqual(first.verifyDatabase(database), { ok: true, count: 0 });
+  const entry = first.authenticate(auditIntegrity.ZERO, {
+    id: 'a_without_pending',
+    ts: '2026-07-10T12:00:00.000Z',
+    action: 'MISSING_PENDING_TEST',
+    queryId: '',
+    actor: 'test',
+    detail: 'sanitized',
+  });
+  rows.push({ seq: 1, entry: JSON.stringify(entry) });
+
+  const restarted = auditAnchor.openAuditAnchor({ ...options, allowBootstrap: false });
+  assert.deepStrictEqual(restarted.verifyDatabase(database), {
+    ok: false,
+    count: 1,
+    reason: 'pending-missing',
+  });
+});
+
+test('legacy authenticated state upgrades only after its current checkpoint verifies', (t) => {
+  const root = tempRoot(t, 'audit-anchor-protocol-upgrade');
+  const directory = path.join(root, 'audit');
+  const statePath = path.join(directory, '.audit-integrity-state.json');
+  const checkpointPath = path.join(directory, '.audit-integrity-checkpoint.json');
+  const env = { REDACTWALL_AUDIT_KEY: 'legacy-audit-key-for-protocol-upgrade' };
+  const key = auditAnchor._internal.configuredKey(env);
+  privatePaths.withPrivateDirectoryMutationLockSync(directory, () => {
+    auditAnchor._internal.writePrivateJson(
+      statePath,
+      auditAnchor._internal.signedState(key, true, false, false),
+    );
+    auditAnchor._internal.writePrivateJson(
+      checkpointPath,
+      auditIntegrity.createCheckpoint(0, auditIntegrity.ZERO, key, 0),
+    );
+  }, { label: 'audit integrity directory', ownerLabel: 'audit integrity directory' });
+  const anchor = auditAnchor.openAuditAnchor({
+    directory,
+    allowBootstrap: false,
+    env,
+  });
+  assert.deepStrictEqual(anchor.verifyDatabase(auditDatabase([])), { ok: true, count: 0 });
+  const upgraded = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+  assert.strictEqual(upgraded.version, 2);
+  assert.strictEqual(upgraded.pendingProtocol, true);
+});
+
 test('POSIX audit-anchor initialization creates owner-only durable state', {
   skip: process.platform === 'win32' && 'POSIX permissions are not meaningful on Windows',
 }, (t) => {
@@ -346,6 +917,28 @@ test('POSIX audit-anchor initialization creates owner-only durable state', {
   assert.strictEqual(fs.statSync(directory).mode & 0o777, 0o700);
   assert.strictEqual(fs.statSync(anchor.paths.statePath).mode & 0o777, 0o600);
   assert.strictEqual(fs.statSync(anchor.paths.checkpointPath).mode & 0o777, 0o600);
+});
+
+test('POSIX initialization prepares distinct missing sidecar parents before binding them', {
+  skip: process.platform === 'win32' && 'POSIX permissions are not meaningful on Windows',
+}, (t) => {
+  const root = tempRoot(t, 'audit-anchor-distinct-posix-parents');
+  const directory = path.join(root, 'anchor');
+  const statePath = path.join(root, 'state-parent', 'state.json');
+  const checkpointPath = path.join(root, 'checkpoint-parent', 'checkpoint.json');
+  const pendingPath = path.join(root, 'pending-parent', 'pending.json');
+  const anchor = auditAnchor.openAuditAnchor({
+    directory,
+    statePath,
+    checkpointPath,
+    pendingPath,
+    allowBootstrap: true,
+    env: {},
+  });
+  assert.deepStrictEqual(anchor.verifyDatabase(auditDatabase([])), { ok: true, count: 0 });
+  for (const parent of [directory, path.dirname(statePath), path.dirname(checkpointPath), path.dirname(pendingPath)]) {
+    assert.strictEqual(fs.statSync(parent).mode & 0o777, 0o700);
+  }
 });
 
 test('mixed-case Windows audit path aliases acquire one bootstrap lock', {
@@ -368,6 +961,7 @@ test('mixed-case Windows audit path aliases acquire one bootstrap lock', {
     privatePathSecurity: {
       platform: 'win32',
       principal,
+      ownerIdentity: TEST_OWNER_IDENTITY,
       privateLockRoot,
       spawn: spawnIcacls,
     },
@@ -391,6 +985,7 @@ test('audit anchor refuses authenticated state planted before Windows directory 
     privatePathSecurity: {
       platform: 'win32',
       principal,
+      ownerIdentity: TEST_OWNER_IDENTITY,
       privateLockRoot,
       spawn: spawnIcacls,
     },

@@ -375,7 +375,11 @@ test('setup main supports injected help, check, write, and blocked status flows'
 test('production setup, mfa enrollment, and setup check work end to end without setup leaking secrets', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-setup-prod-'));
   const envPath = path.join(dir, 'pilot.env');
-  const dbPath = path.join(dir, 'redactwall.db').replace(/\\/g, '/');
+  // Production SQLite owns and hardens its complete parent directory before
+  // publishing any state. Keep the operator env file outside that dedicated
+  // directory so this happy-path fixture does not plant unrelated broad-ACL
+  // state beside the future database.
+  const dbPath = path.join(dir, 'data', 'redactwall.db').replace(/\\/g, '/');
   fs.writeFileSync(envPath, `REDACTWALL_DB_PATH=${dbPath}\n`);
   const env = childEnv();
 

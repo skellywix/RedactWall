@@ -9,6 +9,10 @@ const crypto = require('node:crypto');
 const privatePaths = require('../server/private-path');
 const policyBundle = require('../server/policy-bundle');
 const fileMutationLock = require('../server/file-mutation-lock');
+const TEST_OWNER_IDENTITY = Object.freeze({
+  processSid: 'S-1-5-21-100-200-300-1001',
+  ownerSid: 'S-1-5-21-100-200-300-1001',
+});
 
 function tempFile(t, label, body = 'private material') {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), `redactwall-${label}-`));
@@ -33,6 +37,7 @@ test('shared Windows private-path hardening resets, grants, and verifies only ow
     platform: 'win32',
     directory: false,
     principal: 'TEST\\policy-user',
+    ownerIdentity: TEST_OWNER_IDENTITY,
     label: 'policy material',
     spawn(command, args, options) {
       calls.push({ command, args, options });
@@ -50,6 +55,83 @@ test('shared Windows private-path hardening resets, grants, and verifies only ow
   assert.ok(calls.every((call) => call.options.windowsHide === true));
 });
 
+test('trusted-parent file protection converts inherited ACEs and verifies the exact contract', (t) => {
+  const file = tempFile(t, 'private-inherited-acl');
+  const calls = [];
+  assert.strictEqual(privatePaths.protectInheritedPrivateFile(file, {
+    platform: 'win32',
+    principal: 'TEST\\policy-user',
+    ownerIdentity: TEST_OWNER_IDENTITY,
+    label: 'inherited policy material',
+    spawn(command, args) {
+      calls.push({ command, args });
+      return args.length === 1
+        ? { status: 0, stdout: exactAcl(file) }
+        : { status: 0, stdout: 'processed 1 file' };
+    },
+  }), file);
+  assert.deepStrictEqual(calls, [
+    { command: 'icacls.exe', args: [file, '/setowner', 'TEST\\policy-user', '/q'] },
+    { command: 'icacls.exe', args: [file, '/inheritance:d', '/q'] },
+    { command: 'icacls.exe', args: [file] },
+  ]);
+});
+
+test('trusted-parent file protection rejects copied inherited ACEs that are not private', (t) => {
+  const file = tempFile(t, 'private-inherited-broad');
+  const broad = exactAcl(file).replace(
+    'Successfully processed 1 files',
+    '          BUILTIN\\Users:(RX)\r\nSuccessfully processed 1 files',
+  );
+  assert.throws(() => privatePaths.protectInheritedPrivateFile(file, {
+    platform: 'win32',
+    principal: 'TEST\\policy-user',
+    ownerIdentity: TEST_OWNER_IDENTITY,
+    label: 'inherited policy material',
+    spawn(_command, args) {
+      return args.length === 1
+        ? { status: 0, stdout: broad }
+        : { status: 0, stdout: 'processed 1 file' };
+    },
+  }), /ACL verification failed/);
+});
+
+test('real Windows trusted-parent publication produces a protected private file', {
+  skip: process.platform !== 'win32' && 'Windows ACL inheritance is Windows-specific',
+}, (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-private-inheritance-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  privatePaths.withPrivateDirectoryMutationLockSync(directory, () => {
+    const file = path.join(directory, 'material');
+    fs.writeFileSync(file, 'private material', { flag: 'wx', mode: 0o600 });
+    privatePaths.protectInheritedPrivateFile(file, { label: 'inherited private material' });
+    assert.doesNotThrow(() => privatePaths.assertPrivatePath(file, {
+      label: 'inherited private material',
+    }));
+  }, {
+    directory: true,
+    label: 'private inheritance directory',
+    ownerLabel: 'private inheritance directory',
+  });
+});
+
+test('durable publication restores exact prior bytes when final verification fails', (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-private-publish-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const target = path.join(directory, 'state.json');
+  const staged = path.join(directory, '.state.json.staged');
+  fs.writeFileSync(target, 'exact prior bytes');
+  fs.writeFileSync(staged, 'untrusted replacement');
+  assert.throws(() => privatePaths.publishFileDurably(staged, target, {
+    verifyPublished(file) {
+      assert.strictEqual(fs.readFileSync(file, 'utf8'), 'untrusted replacement');
+      throw new Error('synthetic final verification failure');
+    },
+  }), /synthetic final verification failure/);
+  assert.strictEqual(fs.readFileSync(target, 'utf8'), 'exact prior bytes');
+  assert.strictEqual(fs.existsSync(staged), false);
+});
+
 test('shared Windows ACL verification fails closed on inherited or extra principals', (t) => {
   const file = tempFile(t, 'private-acl-broad');
   const broad = exactAcl(file).replace(
@@ -60,6 +142,7 @@ test('shared Windows ACL verification fails closed on inherited or extra princip
     platform: 'win32',
     directory: false,
     principal: 'TEST\\policy-user',
+    ownerIdentity: TEST_OWNER_IDENTITY,
     label: 'policy material',
     spawn() { return { status: 0, stdout: broad }; },
   }), /ACL verification failed/);
@@ -85,7 +168,57 @@ test('shared Windows ACL verification rejects an exact DACL with a foreign descr
       ownerSid: 'S-1-5-21-100-200-300-1002',
     },
     spawn() { return { status: 0, stdout: exactAcl(file) }; },
-  }), /owner verification failed/);
+  }), /ACL verification failed/);
+});
+
+test('shared Windows ACL verification rejects descriptor drift during inspection', (t) => {
+  const file = tempFile(t, 'private-acl-drift');
+  let stats = 0;
+  const fsImpl = {
+    ...fs,
+    lstatSync(target) {
+      const stat = fs.lstatSync(target);
+      stats += 1;
+      if (stats === 1) return stat;
+      const changed = Object.create(stat);
+      Object.defineProperty(changed, 'ctimeMs', { value: stat.ctimeMs + stats });
+      return changed;
+    },
+  };
+  assert.throws(() => privatePaths.assertPrivatePath(file, {
+    fs: fsImpl,
+    platform: 'win32',
+    directory: false,
+    principal: 'TEST\\policy-user',
+    ownerIdentity: TEST_OWNER_IDENTITY,
+    label: 'policy material',
+    spawn() { return { status: 0, stdout: exactAcl(file) }; },
+  }), /changed during Windows security verification/);
+});
+
+test('shared Windows directory verification tolerates entry churn only after equal security snapshots', (t) => {
+  const directory = path.dirname(tempFile(t, 'private-directory-churn'));
+  let stats = 0;
+  const fsImpl = {
+    ...fs,
+    lstatSync(target) {
+      const stat = fs.lstatSync(target);
+      stats += 1;
+      const changed = Object.create(stat);
+      Object.defineProperty(changed, 'ctimeMs', { value: stat.ctimeMs + stats });
+      return changed;
+    },
+  };
+  assert.strictEqual(privatePaths.assertPrivatePath(directory, {
+    fs: fsImpl,
+    platform: 'win32',
+    directory: true,
+    principal: 'TEST\\policy-user',
+    ownerIdentity: TEST_OWNER_IDENTITY,
+    label: 'policy directory',
+    spawn() { return { status: 0, stdout: exactAcl(directory) }; },
+  }), directory);
+  assert.ok(stats >= 3, 'security was sampled twice before entry churn was accepted');
 });
 
 test('policy signing-key initialization uses the shared verified Windows ACL contract', (t) => {
@@ -100,6 +233,7 @@ test('policy signing-key initialization uses the shared verified Windows ACL con
   const privatePathSecurity = {
     platform: 'win32',
     principal: 'TEST\\policy-user',
+    ownerIdentity: TEST_OWNER_IDENTITY,
     privateLockRoot,
   };
   const directoryLockPath = fileMutationLock.lockPathFor(
@@ -164,9 +298,10 @@ test('policy signing key rejects attacker bytes planted during directory ACL har
     privatePathSecurity: {
       platform: 'win32',
       principal,
+      ownerIdentity: TEST_OWNER_IDENTITY,
       privateLockRoot: path.join(root, 'locks'),
       spawn(command, args) {
-        if (args[0] === dir && args.includes('/reset')) {
+        if (args[0] === dir && args.includes('/setowner')) {
           fs.writeFileSync(keyFile, attackerKey, { mode: 0o600 });
           planted = true;
         }

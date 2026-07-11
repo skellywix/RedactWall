@@ -13,6 +13,7 @@ const seedScript = path.join(repoRoot, 'scripts', 'seed-runtime-policy.js');
 const serverEntry = path.join(repoRoot, 'server', 'app.js');
 const packagedPolicy = path.join(repoRoot, 'config', 'policy.json');
 const packagedDetectors = path.join(repoRoot, 'config', 'custom-detectors.json');
+const FIRST_BOOT_READY_TIMEOUT_MS = process.platform === 'win32' ? 60_000 : 20_000;
 const { seedRuntimeConfiguration } = require(seedScript);
 
 function tempDir() {
@@ -63,8 +64,8 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function waitForReady(child, port, output) {
-  const deadline = Date.now() + 20000;
+async function waitForReady(child, port, output, timeoutMs = 20_000) {
+  const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (child.exitCode !== null) throw new Error(`server exited before readiness\n${output()}`);
     const response = await fetch(`http://127.0.0.1:${port}/readyz`, {
@@ -90,6 +91,7 @@ function productionEnv(root, targets, port) {
     NODE_ENV: 'production',
     PORT: String(port),
     REDACTWALL_ENV_PATH: path.join(root, 'missing.env'),
+    REDACTWALL_DATA_DIR: path.join(root, 'data'),
     REDACTWALL_DB_PATH: path.join(root, 'data', 'redactwall.db'),
     REDACTWALL_POLICY_PATH: targets.policy,
     REDACTWALL_CUSTOM_DETECTORS_PATH: targets.customDetectors,
@@ -130,15 +132,7 @@ test('first boot seeds policy and custom detectors at mode 0600, then preserves 
     const targets = runtimePaths(root);
     fs.writeFileSync(policySource, '{"enforcementMode":"block","marker":"packaged"}\n');
     fs.writeFileSync(detectorSource, '{"detectors":[],"marker":"packaged"}\n');
-    const chmodCalls = [];
-    const fsImpl = Object.create(fs);
-    fsImpl.chmodSync = (file, mode) => {
-      chmodCalls.push({ file, mode });
-      fs.chmodSync(file, mode);
-    };
-
     const first = seedRuntimeConfiguration({
-      fs: fsImpl,
       policySourcePath: policySource,
       policyTargetPath: targets.policy,
       customDetectorsSourcePath: detectorSource,
@@ -148,14 +142,17 @@ test('first boot seeds policy and custom detectors at mode 0600, then preserves 
     assert.strictEqual(first.customDetectors.seeded, true);
     assert.strictEqual(fs.readFileSync(targets.policy, 'utf8'), fs.readFileSync(policySource, 'utf8'));
     assert.strictEqual(fs.readFileSync(targets.customDetectors, 'utf8'), fs.readFileSync(detectorSource, 'utf8'));
-    assert.deepStrictEqual(chmodCalls.filter((call) => call.mode === 0o600).map((call) => call.mode), [0o600, 0o600]);
     if (process.platform === 'win32') {
-      assert.doesNotThrow(() => require('../server/private-path').assertPrivatePath(path.dirname(targets.policy), {
-        directory: true,
-        label: 'runtime configuration directory',
+      const assertPrivatePath = require('../server/private-path').assertPrivatePath;
+      assert.doesNotThrow(() => assertPrivatePath(path.dirname(targets.policy), {
+        directory: true, label: 'runtime configuration directory',
       }));
+      assert.doesNotThrow(() => assertPrivatePath(targets.policy, { label: 'runtime policy' }));
+      assert.doesNotThrow(() => assertPrivatePath(targets.customDetectors, { label: 'runtime custom detectors' }));
     } else {
       assert.strictEqual(fs.statSync(path.dirname(targets.policy)).mode & 0o777, 0o700);
+      assert.strictEqual(fs.statSync(targets.policy).mode & 0o777, 0o600);
+      assert.strictEqual(fs.statSync(targets.customDetectors).mode & 0o777, 0o600);
     }
 
     fs.writeFileSync(targets.policy, '{"enforcementMode":"warn","marker":"customer"}\n');
@@ -220,6 +217,48 @@ test('runtime seeding rolls back a first publication when directory durability f
     fsImpl.fsyncSync = (descriptor) => {
       if (targetLinked && fs.fstatSync(descriptor).isDirectory()) {
         const error = new Error('synthetic directory durability failure');
+        error.code = 'EIO';
+        throw error;
+      }
+      return fs.fsyncSync(descriptor);
+    };
+
+    assert.throws(() => seedRuntimeConfiguration({
+      fs: fsImpl,
+      policySourcePath: source,
+      policyTargetPath: target,
+      customDetectorsTargetPath: '',
+    }), (error) => error && error.code === 'EIO');
+    assert.strictEqual(fs.existsSync(target), false);
+    assert.deepStrictEqual(
+      fs.readdirSync(path.dirname(target)).filter((name) => name.includes('.seed-')),
+      [],
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('runtime seeding never publishes staged bytes that could not be flushed', () => {
+  const root = tempDir();
+  try {
+    const source = path.join(root, 'packaged-policy.json');
+    const target = path.join(root, 'data', 'policy.json');
+    fs.writeFileSync(source, '{"enforcementMode":"block"}\n');
+    const stagingDescriptors = new Set();
+    const fsImpl = Object.create(fs);
+    fsImpl.openSync = (file, flags, ...rest) => {
+      const descriptor = fs.openSync(file, flags, ...rest);
+      if (String(file).startsWith(`${target}.seed-`)) stagingDescriptors.add(descriptor);
+      return descriptor;
+    };
+    fsImpl.closeSync = (descriptor) => {
+      stagingDescriptors.delete(descriptor);
+      return fs.closeSync(descriptor);
+    };
+    fsImpl.fsyncSync = (descriptor) => {
+      if (stagingDescriptors.has(descriptor)) {
+        const error = new Error('synthetic staged-file flush failure');
         error.code = 'EIO';
         throw error;
       }
@@ -323,7 +362,12 @@ test('fresh runtime volume reaches production readyz after packaged config seedi
     });
     child.stdout.on('data', (chunk) => { stdout += chunk; });
     child.stderr.on('data', (chunk) => { stderr += chunk; });
-    const ready = await waitForReady(child, port, () => `${stdout}\n${stderr}`);
+    const ready = await waitForReady(
+      child,
+      port,
+      () => `${stdout}\n${stderr}`,
+      FIRST_BOOT_READY_TIMEOUT_MS,
+    );
     assert.deepStrictEqual(ready, { ready: true, database: true, configuration: 'ok' });
   } finally {
     if (child) await stopChild(child);

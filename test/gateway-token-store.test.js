@@ -214,6 +214,7 @@ test('gateway token ACL contract removes inheritance and grants owner plus Local
     platform: 'win32',
     directory: false,
     principal: 'TEST\\gateway-user',
+    ownerIdentity: { processSid: 'S-1-5-21-1-2-3-1001', ownerSid: 'S-1-5-21-1-2-3-1001' },
     spawn(command, args, options) {
       calls.push({ command, args, options });
       return { status: 0, stdout: 'processed 1 file' };
@@ -235,6 +236,7 @@ test('gateway token ACL hardening fails closed', (t) => {
     platform: 'win32',
     directory: false,
     principal: 'TEST\\gateway-user',
+    ownerIdentity: { processSid: 'S-1-5-21-1-2-3-1001', ownerSid: 'S-1-5-21-1-2-3-1001' },
     spawn() {
       calls += 1;
       return calls === 1 ? { status: 0 } : { status: 5, stderr: 'access denied' };

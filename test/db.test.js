@@ -215,12 +215,18 @@ test('tampering with an audit detail breaks the chain (then restores)', () => {
   const e = db.appendAudit({ action: 'BLOCKED', actor: 'x', detail: 'original detail' });
   const original = db._db.prepare('SELECT entry FROM audit WHERE id = ?').get(e.id).entry;
   db._db.exec('DROP TRIGGER audit_append_only_update');
-  db._db.prepare('UPDATE audit SET entry = ? WHERE id = ?').run(JSON.stringify({ ...e, detail: 'rewritten' }), e.id);
-  const v = db.verifyAuditChain();
-  assert.strictEqual(v.ok, false, 'edited detail must fail verification');
-  assert.strictEqual(v.reason, 'chain');
-  db._db.prepare('UPDATE audit SET entry = ? WHERE id = ?').run(original, e.id); // restore for later subtests
-  db._db.exec("CREATE TRIGGER audit_append_only_update BEFORE UPDATE ON audit BEGIN SELECT RAISE(ABORT, 'audit log is append-only'); END");
+  try {
+    db._db.prepare('UPDATE audit SET entry = ? WHERE id = ?').run(JSON.stringify({ ...e, detail: 'rewritten' }), e.id);
+    const v = db.verifyAuditChain();
+    assert.strictEqual(v.ok, false, 'edited detail must fail verification');
+    assert.strictEqual(v.reason, 'checkpoint-truncated');
+  } finally {
+    // A failed verification deliberately freezes later mutations. Always put
+    // the out-of-band fixture back before asking the anchor to clear that
+    // fail-closed state, even if an assertion above changes in the future.
+    db._db.prepare('UPDATE audit SET entry = ? WHERE id = ?').run(original, e.id);
+    db._db.exec("CREATE TRIGGER audit_append_only_update BEFORE UPDATE ON audit BEGIN SELECT RAISE(ABORT, 'audit log is append-only'); END");
+  }
   assert.strictEqual(db.verifyAuditChain().ok, true, 'chain clean after restore');
 });
 

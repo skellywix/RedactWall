@@ -85,7 +85,14 @@ function writeAuthenticatedPgFixture(dumpPath, { embedded = false } = {}) {
   return {
     manifestPath,
     env,
-    security: { privatePathSecurity: { platform: 'win32', principal, spawn } },
+    security: {
+      privatePathSecurity: {
+        platform: 'win32',
+        principal,
+        spawn,
+        ownerIdentity: { processSid: 'S-1-5-21-1000', ownerSid: 'S-1-5-21-1000' },
+      },
+    },
     key,
   };
 }
@@ -423,6 +430,45 @@ test('Postgres restore aborts before pg_restore and cleans staging when file fsy
 
   assert.strictEqual(toolCalls, 0);
   assert.strictEqual(failNextFileFsync, false, 'the injected file fsync boundary was reached');
+  assert.deepStrictEqual(restoreStagingEntries(restoreDir), []);
+});
+
+test('Postgres restore rejects a staging-directory fsync failure and removes the snapshot', () => {
+  const restoreDir = path.join(tempRoot, 'restore-snapshot-directory-fsync');
+  fs.mkdirSync(restoreDir);
+  const dumpPath = path.join(restoreDir, 'directory-fsync.dump');
+  fs.writeFileSync(dumpPath, Buffer.from('PGDMP\0directory-fsync-failure'));
+  const fixture = writeAuthenticatedPgFixture(dumpPath);
+  const originalFsync = fs.fsyncSync;
+  let failedDirectoryFsync = false;
+  let toolCalls = 0;
+  fs.fsyncSync = (fd) => {
+    if (!failedDirectoryFsync && fs.fstatSync(fd).isDirectory()) {
+      failedDirectoryFsync = true;
+      const error = new Error('synthetic restore staging directory fsync EIO');
+      error.code = 'EIO';
+      throw error;
+    }
+    return originalFsync(fd);
+  };
+  try {
+    assert.throws(() => backup._internal.restorePgBackup({
+      file: dumpPath,
+      to: 'redactwall_restore_directory_fsync_target',
+      manifestFile: fixture.manifestPath,
+      env: fixture.env,
+      security: { ...fixture.security, platform: 'linux' },
+    }, {
+      connectionString: 'postgresql://app:private@db.internal/source?sslmode=require',
+      restoreStagingParent: restoreDir,
+      runPgTool: () => { toolCalls += 1; },
+    }), /synthetic restore staging directory fsync EIO/);
+  } finally {
+    fs.fsyncSync = originalFsync;
+  }
+
+  assert.strictEqual(toolCalls, 0);
+  assert.strictEqual(failedDirectoryFsync, true);
   assert.deepStrictEqual(restoreStagingEntries(restoreDir), []);
 });
 

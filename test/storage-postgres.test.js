@@ -255,6 +255,13 @@ test('db.js contract holds on Postgres (migrations, RLS, immutability, chain)', 
   });
   assert.strictEqual(results.auditChain.value.ok, true);
   assert.ok(results.auditChain.value.count >= 2);
+  assert.deepStrictEqual(results.auditPendingBatch.value, {
+    exactEntry: true,
+    exactHead: true,
+    countAdvanced: true,
+    cleared: true,
+    chainOk: true,
+  });
   assert.deepStrictEqual(results.vendorHeartbeatCas.value, {
     newerApplied: true,
     olderApplied: false,

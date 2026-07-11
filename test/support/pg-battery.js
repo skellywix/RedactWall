@@ -5,6 +5,7 @@
  * db singleton binds to the Postgres driver via REDACTWALL_DB_DRIVER.
  */
 const crypto = require('node:crypto');
+const fs = require('node:fs');
 const results = {};
 
 function attempt(name, fn) {
@@ -71,6 +72,24 @@ attempt('auditChain', () => {
   db.appendAudit({ action: 'PG_TEST', actor: 'battery', detail: 'first' });
   db.appendAudit({ action: 'PG_TEST', actor: 'battery', detail: 'second' });
   return db.verifyAuditChain();
+});
+
+attempt('auditPendingBatch', () => {
+  const entries = db.appendAudits([
+    { action: 'PG_PENDING_BATCH_1', actor: 'battery', detail: 'first batch entry' },
+    { action: 'PG_PENDING_BATCH_2', actor: 'battery', detail: 'second batch entry' },
+    { action: 'PG_PENDING_BATCH_3', actor: 'battery', detail: 'third batch entry' },
+  ]);
+  const pendingPath = db._auditAnchorPaths.pendingPath;
+  const pending = JSON.parse(fs.readFileSync(pendingPath, 'utf8'));
+  const verified = db.verifyAuditChain();
+  return {
+    exactEntry: pending.entryId === entries[2].id,
+    exactHead: pending.head === entries[2].hash,
+    countAdvanced: pending.count === verified.count,
+    cleared: !fs.existsSync(pendingPath),
+    chainOk: verified.ok,
+  };
 });
 
 attempt('vendorHeartbeatCas', () => {

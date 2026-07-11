@@ -94,6 +94,7 @@ const auditAnchor = openAuditAnchor({
   directory: AUDIT_DIR,
   statePath: process.env.REDACTWALL_AUDIT_STATE_PATH,
   checkpointPath: process.env.REDACTWALL_AUDIT_CHECKPOINT_PATH,
+  pendingPath: process.env.REDACTWALL_AUDIT_PENDING_PATH,
   // Migration 8 is the durable one-time bootstrap marker. Under the same
   // interprocess sidecar lock, create/load the private state first and only
   // then record migrations. A crash can therefore leave state without v8
@@ -103,6 +104,7 @@ const auditAnchor = openAuditAnchor({
 });
 const appliedMigrations = auditAnchor.initialization || [];
 wireTenantContext();
+const recordAuditTransactionEntry = storage.installAuditTransactionProtocol(sdb, auditAnchor);
 
 
 const id = (p) => p + '_' + crypto.randomBytes(8).toString('hex');
@@ -466,12 +468,11 @@ function appendAuditRecord(event) {
     id: body.id, ts: body.ts, action: body.action, queryId: body.queryId || null,
     actor: body.actor || null, prevHash, hash, entry: JSON.stringify(entry),
   });
-  // The database transaction commits after this helper returns. The audit
-  // anchor advances after the current I/O batch so concurrent commits share a
-  // durable checkpoint write. If the process dies first, startup accepts only
-  // correctly HMAC-authenticated rows beyond the older checkpoint and advances
-  // it before becoming ready.
-  auditAnchor.scheduleVerification(sdb);
+  // The outer transaction adapter writes an independently authenticated
+  // high-water sidecar after every nested savepoint succeeds and before COMMIT.
+  // A crash before the batched checkpoint publication therefore cannot turn a
+  // deleted committed tail into an apparently valid older database.
+  recordAuditTransactionEntry(entry);
   return entry;
 }
 

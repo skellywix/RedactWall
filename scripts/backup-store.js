@@ -28,6 +28,7 @@ const {
   validPostgresTlsUrl,
   withoutPostgresConnectionEnv,
 } = require('../server/postgres-url');
+const RESTORE_COPY_BUFFER_BYTES = 64 * 1024;
 
 function parseArgs(argv) {
   const out = { _: [] };
@@ -49,8 +50,18 @@ function parseArgs(argv) {
 
 function sha256File(file) {
   const h = crypto.createHash('sha256');
-  h.update(fs.readFileSync(file));
-  return h.digest('hex');
+  const buffer = Buffer.alloc(RESTORE_COPY_BUFFER_BYTES);
+  let fd;
+  try {
+    fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+    while (true) {
+      const count = fs.readSync(fd, buffer, 0, buffer.length, null);
+      if (!count) return h.digest('hex');
+      h.update(buffer.subarray(0, count));
+    }
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
 }
 
 function nowStamp(date = new Date()) {
@@ -66,7 +77,6 @@ const AUDIT_STATE_NAME = '.audit-integrity-state.json';
 const AUDIT_CHECKPOINT_NAME = '.audit-integrity-checkpoint.json';
 const MAX_AUDIT_STATE_BYTES = 8 * 1024;
 const MAX_AUDIT_CHECKPOINT_BYTES = 4 * 1024;
-const RESTORE_COPY_BUFFER_BYTES = 64 * 1024;
 const MANIFEST_AUTH_VERSION = 1;
 const WINDOWS_DACL_RESTORE = [
   '$path = $env:REDACTWALL_ACL_TARGET;',
@@ -194,6 +204,17 @@ function createPrivateStagingDir(parent = os.tmpdir(), security = {}) {
   }
 }
 
+function withPrivateRestoreDirectory(target, security, callback) {
+  const privatePathSecurity = security.privatePathSecurity || security;
+  return privatePaths.withPrivateDirectoryMutationLockSync(path.dirname(target), callback, {
+    ...privatePathSecurity,
+    fs,
+    directory: true,
+    label: 'SQLite restore directory',
+    ownerLabel: 'SQLite restore directory',
+  });
+}
+
 function sqliteSidecarPaths(file) {
   return SQLITE_SIDECAR_SUFFIXES.map((suffix) => `${file}${suffix}`);
 }
@@ -311,6 +332,41 @@ function copyOpenedRestoreArtifact(sourceFd, targetFd, maxBytes, label) {
   }
 }
 
+function openStableRestoreSource(source, expectedBytes, maxBytes, label) {
+  const before = fs.lstatSync(source);
+  assertStableRestoreSource(before, expectedBytes, maxBytes, label);
+  const fd = fs.openSync(source, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+  try {
+    const stat = fs.fstatSync(fd);
+    assertStableRestoreSource(stat, expectedBytes, maxBytes, label);
+    if (!sameFileIdentity(before, stat) || stat.mtimeMs !== before.mtimeMs
+        || stat.ctimeMs !== before.ctimeMs) throw new Error(`${label} changed while opening`);
+    return { fd, stat };
+  } catch (error) {
+    fs.closeSync(fd);
+    throw error;
+  }
+}
+
+function assertRestoreSourceUnchanged(fd, opened, copied, expectedBytes, label) {
+  const after = fs.fstatSync(fd);
+  if (copied !== expectedBytes || after.size !== opened.size
+      || after.mtimeMs !== opened.mtimeMs || after.ctimeMs !== opened.ctimeMs
+      || !sameFileIdentity(opened, after)) throw new Error(`${label} changed while copying`);
+}
+
+function finishRestoreArtifactCopy(sourceFd, targetFd, target, complete) {
+  let failure = null;
+  for (const fd of [targetFd, sourceFd]) {
+    if (fd === undefined) continue;
+    try { fs.closeSync(fd); } catch (error) { failure ||= error; }
+  }
+  if (!complete) {
+    try { fs.rmSync(target, { force: true }); } catch (error) { failure ||= error; }
+  }
+  if (failure) throw failure;
+}
+
 function copyPrivateRestoreArtifact(source, target, {
   expectedBytes,
   maxBytes = expectedBytes,
@@ -321,32 +377,19 @@ function copyPrivateRestoreArtifact(source, target, {
       || !Number.isSafeInteger(maxBytes) || maxBytes < expectedBytes) {
     throw new Error(`${label} has an invalid authenticated size`);
   }
-  const before = fs.lstatSync(source);
-  assertStableRestoreSource(before, expectedBytes, maxBytes, label);
-  const noFollow = fs.constants.O_NOFOLLOW || 0;
-  let sourceFd;
+  const sourceFile = openStableRestoreSource(source, expectedBytes, maxBytes, label);
   let targetFd;
   let complete = false;
   try {
-    sourceFd = fs.openSync(source, fs.constants.O_RDONLY | noFollow);
-    const opened = fs.fstatSync(sourceFd);
-    assertStableRestoreSource(opened, expectedBytes, maxBytes, label);
-    if (!sameFileIdentity(before, opened) || opened.mtimeMs !== before.mtimeMs
-        || opened.ctimeMs !== before.ctimeMs) throw new Error(`${label} changed while opening`);
     targetFd = fs.openSync(target, 'wx', PRIVATE_FILE_MODE);
     restrictPath(target, { ...security, directory: false });
-    const copied = copyOpenedRestoreArtifact(sourceFd, targetFd, maxBytes, label);
-    const after = fs.fstatSync(sourceFd);
-    if (copied !== expectedBytes || after.size !== opened.size
-        || after.mtimeMs !== opened.mtimeMs || after.ctimeMs !== opened.ctimeMs
-        || !sameFileIdentity(opened, after)) throw new Error(`${label} changed while copying`);
+    const copied = copyOpenedRestoreArtifact(sourceFile.fd, targetFd, maxBytes, label);
+    assertRestoreSourceUnchanged(sourceFile.fd, sourceFile.stat, copied, expectedBytes, label);
     fs.fsyncSync(targetFd);
     complete = true;
     return target;
   } finally {
-    if (targetFd !== undefined) fs.closeSync(targetFd);
-    if (sourceFd !== undefined) fs.closeSync(sourceFd);
-    if (!complete) fs.rmSync(target, { force: true });
+    finishRestoreArtifactCopy(sourceFile.fd, targetFd, target, complete);
   }
 }
 
@@ -1354,7 +1397,7 @@ function validatePgRestoreSnapshot(staged, manifest, env, security) {
     independentManifestKey(anchor),
   );
   if (!result.ok) throw new Error(`backup artifacts changed during restore: ${result.reason}`);
-  return { anchor, descriptors };
+  return anchor;
 }
 
 function createPgRestoreSnapshot(file, manifest, env, security, stagingParent = os.tmpdir()) {
@@ -1365,9 +1408,9 @@ function createPgRestoreSnapshot(file, manifest, env, security, stagingParent = 
     const source = pgRestoreArtifactPaths(database);
     const staged = pgRestoreArtifactPaths(database, staging);
     copyPgRestoreArtifacts(source, staged, manifest, security);
-    const verified = validatePgRestoreSnapshot(staged, manifest, env, security);
+    const anchor = validatePgRestoreSnapshot(staged, manifest, env, security);
     complete = true;
-    return { ...verified, archive: staged.database, staging };
+    return { anchor, archive: staged.database, staging };
   } finally {
     if (!complete) fs.rmSync(staging, { recursive: true, force: true });
   }
@@ -1641,64 +1684,66 @@ function restoreBackup({ file, to, manifestFile, force = false, security = {}, e
     { target, sqlite: true },
     { target: targetAuditPaths.directory, directory: true },
   ]);
-  assertWritable(target, force, { sqlite: true });
-  assertWritable(targetAuditPaths.directory, force);
-  const staging = createPrivateStagingDir(path.dirname(target), security);
-  const stagedTarget = path.join(staging, path.basename(target));
-  const stagedAuditDirectory = path.join(staging, 'audit-integrity');
-  const stagedAuditState = path.join(stagedAuditDirectory, AUDIT_STATE_NAME);
-  const stagedAuditCheckpoint = path.join(stagedAuditDirectory, AUDIT_CHECKPOINT_NAME);
-  try {
-    fs.copyFileSync(path.resolve(file), stagedTarget, fs.constants.COPYFILE_EXCL);
-    restrictPath(stagedTarget, { ...security, directory: false });
-    fsyncFile(stagedTarget);
-    fs.mkdirSync(stagedAuditDirectory, { mode: PRIVATE_DIR_MODE });
-    restrictPath(stagedAuditDirectory, { ...security, directory: true });
-    fs.copyFileSync(sourceAuditPaths.statePath, stagedAuditState, fs.constants.COPYFILE_EXCL);
-    restrictPath(stagedAuditState, { ...security, directory: false });
-    fsyncFile(stagedAuditState);
-    fs.copyFileSync(sourceAuditPaths.checkpointPath, stagedAuditCheckpoint, fs.constants.COPYFILE_EXCL);
-    restrictPath(stagedAuditCheckpoint, { ...security, directory: false });
-    fsyncFile(stagedAuditCheckpoint);
-    assertNoSqliteSidecars(stagedTarget);
-    const stagedDescriptors = {
-      database: artifactDescriptor(stagedTarget),
-      auditState: artifactDescriptor(stagedAuditState),
-      auditCheckpoint: artifactDescriptor(stagedAuditCheckpoint),
-    };
-    if (stagedDescriptors.database.sha256 !== verification.backupSha256
-        || stagedDescriptors.auditState.sha256 !== verification.auditStateSha256
-        || stagedDescriptors.auditCheckpoint.sha256 !== verification.auditCheckpointSha256) {
-      throw new Error('backup artifacts changed during restore');
+  return withPrivateRestoreDirectory(target, security, () => {
+    assertWritable(target, force, { sqlite: true });
+    assertWritable(targetAuditPaths.directory, force);
+    const staging = createPrivateStagingDir(path.dirname(target), security);
+    const stagedTarget = path.join(staging, path.basename(target));
+    const stagedAuditDirectory = path.join(staging, 'audit-integrity');
+    const stagedAuditState = path.join(stagedAuditDirectory, AUDIT_STATE_NAME);
+    const stagedAuditCheckpoint = path.join(stagedAuditDirectory, AUDIT_CHECKPOINT_NAME);
+    try {
+      fs.copyFileSync(path.resolve(file), stagedTarget, fs.constants.COPYFILE_EXCL);
+      restrictPath(stagedTarget, { ...security, directory: false });
+      fsyncFile(stagedTarget);
+      fs.mkdirSync(stagedAuditDirectory, { mode: PRIVATE_DIR_MODE });
+      restrictPath(stagedAuditDirectory, { ...security, directory: true });
+      fs.copyFileSync(sourceAuditPaths.statePath, stagedAuditState, fs.constants.COPYFILE_EXCL);
+      restrictPath(stagedAuditState, { ...security, directory: false });
+      fsyncFile(stagedAuditState);
+      fs.copyFileSync(sourceAuditPaths.checkpointPath, stagedAuditCheckpoint, fs.constants.COPYFILE_EXCL);
+      restrictPath(stagedAuditCheckpoint, { ...security, directory: false });
+      fsyncFile(stagedAuditCheckpoint);
+      assertNoSqliteSidecars(stagedTarget);
+      const stagedDescriptors = {
+        database: artifactDescriptor(stagedTarget),
+        auditState: artifactDescriptor(stagedAuditState),
+        auditCheckpoint: artifactDescriptor(stagedAuditCheckpoint),
+      };
+      if (stagedDescriptors.database.sha256 !== verification.backupSha256
+          || stagedDescriptors.auditState.sha256 !== verification.auditStateSha256
+          || stagedDescriptors.auditCheckpoint.sha256 !== verification.auditCheckpointSha256) {
+        throw new Error('backup artifacts changed during restore');
+      }
+      const stagedAnchor = loadAuthenticatedAuditAnchor({
+        statePath: stagedAuditState,
+        checkpointPath: stagedAuditCheckpoint,
+      }, env, security);
+      const auditIntegrityResult = inspectAuthenticatedSqliteSnapshot(
+        stagedTarget,
+        stagedAnchor,
+        security,
+        true,
+      ).auditIntegrity;
+      if (!auditIntegrityResult.ok) throw new Error('refusing to publish a restored database with broken audit integrity');
+      publishPrivateFiles([
+        { staged: stagedTarget, target, sqlite: true },
+        { staged: stagedAuditDirectory, target: targetAuditPaths.directory, directory: true },
+      ], { force, security });
+      return {
+        ok: true,
+        restoredTo: target,
+        file: target,
+        backupSha256: sha256File(target),
+        auditIntegrity: auditIntegrityResult,
+        auditStateFile: targetAuditPaths.statePath,
+        auditCheckpointFile: targetAuditPaths.checkpointPath,
+        unverifiable: verification.unverifiable,
+      };
+    } finally {
+      fs.rmSync(staging, { recursive: true, force: true });
     }
-    const stagedAnchor = loadAuthenticatedAuditAnchor({
-      statePath: stagedAuditState,
-      checkpointPath: stagedAuditCheckpoint,
-    }, env, security);
-    const auditIntegrityResult = inspectAuthenticatedSqliteSnapshot(
-      stagedTarget,
-      stagedAnchor,
-      security,
-      true,
-    ).auditIntegrity;
-    if (!auditIntegrityResult.ok) throw new Error('refusing to publish a restored database with broken audit integrity');
-    publishPrivateFiles([
-      { staged: stagedTarget, target, sqlite: true },
-      { staged: stagedAuditDirectory, target: targetAuditPaths.directory, directory: true },
-    ], { force, security });
-    return {
-      ok: true,
-      restoredTo: target,
-      file: target,
-      backupSha256: sha256File(target),
-      auditIntegrity: auditIntegrityResult,
-      auditStateFile: targetAuditPaths.statePath,
-      auditCheckpointFile: targetAuditPaths.checkpointPath,
-      unverifiable: verification.unverifiable,
-    };
-  } finally {
-    fs.rmSync(staging, { recursive: true, force: true });
-  }
+  });
 }
 
 async function main(argv = process.argv.slice(2), deps = {}) {
@@ -1746,6 +1791,7 @@ module.exports = {
   verifyRestoredPgDatabase,
   _internal: {
     createPrivateStagingDir,
+    withPrivateRestoreDirectory,
     inspectSqliteSnapshot,
     pgDatabaseName,
     captureWindowsDacl,

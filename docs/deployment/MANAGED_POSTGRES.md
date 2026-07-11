@@ -175,12 +175,16 @@ Behavior on Postgres:
   exists. PostgreSQL manifests created before this authenticated artifact-set
   contract are intentionally rejected; replace them with a fresh backup.
 - `backup:restore` authenticates the complete manifest and verifies every
-  artifact hash first, then runs
-  `pg_restore --no-owner --no-privileges --exit-on-error` into the named
-  target database (bare name = same server; a full `postgresql://` URL is
-  also accepted), then verifies the restored audit chain through the
-  production driver. `--force` adds `--clean --if-exists`, but cannot bypass a
-  missing, unsigned, or invalid authenticated manifest.
+  artifact hash first. It then copies the dump and audit sidecars through
+  stable handles into a private local staging directory, enforces their
+  authenticated sizes, fsyncs and revalidates that snapshot, and gives only
+  the staged dump to
+  `pg_restore --no-owner --no-privileges --exit-on-error`. The staged files
+  remain private until post-restore audit verification finishes and are
+  removed on success or failure. The named target may be a bare database name
+  on the same server or a full `postgresql://` URL. `--force` still only adds
+  `--clean --if-exists`; it cannot bypass a missing, unsigned, or invalid
+  authenticated manifest.
 - `backup:drill` restores into a uniquely named scratch database
   (`redactwall_drill_<hex>`), verifies the audit hash-chain and row counts
   there, and always drops the scratch database — `--keep` retains only the

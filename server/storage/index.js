@@ -10,11 +10,13 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const crypto = require('crypto');
 const { MIGRATIONS } = require('./migrations');
 const { parsePostgresConnectionUrl, validPostgresTlsUrl } = require('../postgres-url');
 const privatePaths = require('../private-path');
 
 const SQLITE_SIDECAR_SUFFIXES = ['-wal', '-shm', '-journal'];
+const SQLITE_INITIALIZATION_LOCK_TIMEOUT_MS = 60_000;
 const POSTGRES_MIGRATION_LOCK = 4021989;
 
 function restrictPrivatePath(target, options = {}) {
@@ -47,14 +49,36 @@ function resolvedSqliteSecurity(security = {}) {
   };
 }
 
+function sqliteInitializationSecurity(security = {}) {
+  const nested = security.lockOptions || {};
+  const lockTimeoutMs = security.lockTimeoutMs
+    ?? nested.lockTimeoutMs
+    ?? SQLITE_INITIALIZATION_LOCK_TIMEOUT_MS;
+  const lockTimeoutMaximumMs = security.lockTimeoutMaximumMs
+    ?? nested.lockTimeoutMaximumMs
+    ?? SQLITE_INITIALIZATION_LOCK_TIMEOUT_MS;
+  return {
+    ...security,
+    lockTimeoutMs,
+    lockTimeoutMaximumMs,
+    lockOptions: { ...nested, lockTimeoutMs, lockTimeoutMaximumMs },
+  };
+}
+
 function openConfiguredSqlite(dbPath) {
   const Database = require('better-sqlite3');
   const driver = new Database(dbPath);
   try {
+    try { driver.pragma('busy_timeout = 5000'); } catch {}
     try { driver.pragma('journal_mode = WAL'); } catch { try { driver.pragma('journal_mode = DELETE'); } catch {} }
     try { driver.pragma('synchronous = NORMAL'); } catch {}
     try { driver.pragma('foreign_keys = ON'); } catch {}
-    driver.exec('CREATE TABLE IF NOT EXISTS _probe (x); DROP TABLE _probe;');
+    const probeTable = `_redactwall_probe_${process.pid}_${crypto.randomBytes(8).toString('hex')}`;
+    const probe = driver.transaction(() => {
+      driver.exec(`CREATE TABLE "${probeTable}" (x); DROP TABLE "${probeTable}";`);
+    });
+    if (typeof probe.immediate === 'function') probe.immediate();
+    else probe();
     return driver;
   } catch (error) {
     try { driver.close(); } catch {}
@@ -116,9 +140,10 @@ function openSqlite(env, dataDir, security) {
   const production = String(env.NODE_ENV || '').trim().toLowerCase() === 'production';
   try {
     if (production && dbPath === ':memory:') throw new Error('in-memory SQLite is not durable');
+    const requirePrivateDirectory = production || security?.requirePrivateDirectory === true;
     driver = sqliteDriverAt(dbPath, {
-      ...security,
-      requirePrivateDirectory: production || security?.requirePrivateDirectory === true,
+      ...(requirePrivateDirectory ? sqliteInitializationSecurity(security) : security),
+      requirePrivateDirectory,
     });
   } catch (e) {
     if (production) {
@@ -280,7 +305,15 @@ function installAuditTransactionProtocol(driver, anchor) {
       const frame = { outer: frames.length === 0, entries: [], prepared: false };
       frames.push(frame);
       try {
-        const result = nativeTransaction(...args);
+        // SQLite's deferred BEGIN lets two processes read the same audit head,
+        // after which the loser cannot upgrade its stale snapshot to a writer.
+        // BEGIN IMMEDIATE obtains the single-writer slot before that read and
+        // respects busy_timeout. The Postgres bridge has no variant and keeps
+        // using its transaction-scoped advisory audit lock.
+        const runner = frame.outer && typeof nativeTransaction.immediate === 'function'
+          ? nativeTransaction.immediate
+          : nativeTransaction;
+        const result = runner(...args);
         frames.pop();
         if (frame.outer) {
           if (frame.prepared) anchor.transactionCommitted(driver);
@@ -291,8 +324,13 @@ function installAuditTransactionProtocol(driver, anchor) {
       } catch (error) {
         frames.pop();
         if (frame.outer && frame.prepared) {
-          try { anchor.transactionRolledBack(); }
-          catch (rollbackError) { error.auditRollbackError = rollbackError; }
+          // The transaction callback already completed and its durable pending
+          // record was published. A later error is a COMMIT-phase outcome
+          // ambiguity: the server may have applied COMMIT and lost only the
+          // response. Never erase the high-water without conclusive rollback
+          // proof, or a deleted committed tail could be hidden on restart.
+          try { anchor.transactionCommitUncertain(driver); }
+          catch (uncertainError) { error.auditCommitUncertainError = uncertainError; }
         }
         throw error;
       }
@@ -313,6 +351,7 @@ module.exports = {
   installAuditTransactionProtocol,
   MIGRATIONS,
   _internal: {
+    SQLITE_INITIALIZATION_LOCK_TIMEOUT_MS,
     POSTGRES_MIGRATION_LOCK,
     restrictPrivatePath,
     restrictSqliteArtifacts,

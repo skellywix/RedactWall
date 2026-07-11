@@ -177,7 +177,7 @@ function chatFixture({ host, sendButton, accountRegion = '', contenteditable = f
       window.__uploaded = [];
       const composer = document.querySelector('#prompt-textarea');
       const sent = document.querySelector('#sent');
-      const button = document.querySelector('button');
+      const button = document.querySelector('button[data-testid="send-button"], button.sendButton_demo');
       const upload = document.querySelector('#file-upload');
       function send() {
         const value = (('value' in composer ? composer.value : composer.textContent) || '').trim();
@@ -607,17 +607,27 @@ test.describe('browser extension live smoke', () => {
         }),
       );
 
-      // The probe runs on load + retries; the coach toast appears for a personal account.
+      await applyFixturePolicyToPage(context, page, baseURL, 'chatgpt.com', coachPolicy);
+      // Prove the same reloaded document and policy state used for submission
+      // also classified and coached the personal account.
       await expect(page.locator('.ps-account-coach')).toContainText('personal account', { timeout: 20000 });
 
-      await applyFixturePolicyToPage(context, page, baseURL, 'chatgpt.com');
-      await page.locator('#prompt-textarea').fill('What are our branch hours this week?');
+      const prompt = 'What are our branch hours this week?';
+      await page.locator('#prompt-textarea').fill(prompt);
       await page.locator('button[data-testid="send-button"]').click();
-      await page.waitForTimeout(400);
+      // Allowed sends resume only after the control-plane record commits. Wait
+      // for that user-visible outcome instead of racing durable Windows audit
+      // publication with a fixed sleep.
+      await expect(page.locator('[data-sent]')).toHaveCount(1, { timeout: 20000 });
 
       const rows = await (await request.get('/api/queries?limit=100')).json();
-      const personal = rows.filter((r) => r.accountType === 'personal');
-      expect(personal.length).toBeGreaterThan(0);
+      const personal = rows.find((r) => r.user === 'browser-smoke@example.test'
+        && r.source === 'browser_extension'
+        && r.channel === 'submit'
+        && r.destination === 'chatgpt.com'
+        && r.accountType === 'personal'
+        && r.redactedPrompt === prompt);
+      expect(personal).toBeTruthy();
       // No raw account email is ever stored.
       expect(JSON.stringify(rows)).not.toContain('jane.roe@gmail.com');
     } finally {

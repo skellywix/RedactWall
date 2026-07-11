@@ -13,8 +13,8 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 const fileMutationLock = require('../server/file-mutation-lock');
 const privatePaths = require('../server/private-path');
-const TOKEN_LOCK_TIMEOUT_MS = 15000;
-const TOKEN_DIRECTORY_INIT_TIMEOUT_MS = 60000;
+const TOKEN_LOCK_TIMEOUT_MS = 30_000;
+const TOKEN_DIRECTORY_INIT_TIMEOUT_MS = 60_000;
 const TOKEN_STORE_MAX_BYTES = 16 * 1024 * 1024;
 const _securedParents = new Set();
 let _windowsPrincipal = '';
@@ -44,6 +44,7 @@ function secureParent(p) {
     label: 'gateway token directory',
     ownerLabel: 'gateway token directory',
     lockTimeoutMs: TOKEN_DIRECTORY_INIT_TIMEOUT_MS,
+    lockTimeoutMaximumMs: TOKEN_DIRECTORY_INIT_TIMEOUT_MS,
   };
   if (!_securedParents.has(dir)) {
     privatePaths.withPrivateDirectoryMutationLockSync(dir, () => {}, security);
@@ -125,6 +126,7 @@ function loadStore(tokensPath) {
 function acquireStoreLock(p) {
   return fileMutationLock.acquireFileMutationLockSync(p, {
     lockTimeoutMs: TOKEN_LOCK_TIMEOUT_MS,
+    lockTimeoutMaximumMs: TOKEN_LOCK_TIMEOUT_MS,
   });
 }
 
@@ -133,24 +135,29 @@ function releaseStoreLock(lock) {
 }
 
 function saveStoreAtomic(store, p) {
-  const dir = secureParent(p);
+  const dir = path.resolve(path.dirname(p));
   const temp = path.join(dir, `.${path.basename(p)}.${process.pid}.${crypto.randomBytes(8).toString('hex')}.tmp`);
   let fd;
   try {
     fd = fs.openSync(temp, 'wx', 0o600);
-    restrictPrivatePath(temp, { directory: false, fresh: true });
+    privatePaths.securePrivatePath(temp, {
+      directory: false,
+      fresh: true,
+      label: 'gateway token store staging file',
+      ownerLabel: 'gateway token store',
+    });
     fs.writeFileSync(fd, JSON.stringify(store, null, 2) + '\n', { encoding: 'utf8' });
     fs.fsyncSync(fd);
     fs.closeSync(fd);
     fd = undefined;
+    const staged = fs.lstatSync(temp);
     privatePaths.publishFileDurably(temp, p, { fs });
-    assertPrivateStore(p);
-    privatePaths.assertPrivatePath(dir, {
-      fs,
-      directory: true,
-      label: 'gateway token directory',
-      ownerLabel: 'gateway token directory',
-    });
+    const published = fs.lstatSync(p);
+    if (!published.isFile() || published.isSymbolicLink() || published.nlink !== 1
+        || (staged.dev && published.dev && staged.dev !== published.dev)
+        || (staged.ino && published.ino && staged.ino !== published.ino)) {
+      throw new Error('gateway token store changed during publication');
+    }
     _storeCache.delete(p);
   } finally {
     if (fd !== undefined) try { fs.closeSync(fd); } catch { /* best effort */ }

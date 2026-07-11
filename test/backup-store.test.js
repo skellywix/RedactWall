@@ -18,6 +18,7 @@ const db = require('../server/db');
 const backup = require('../scripts/backup-store');
 const auditIntegrity = require('../server/audit-integrity');
 const auditAnchor = require('../server/audit-anchor')._internal;
+const privatePaths = require('../server/private-path');
 
 function captureConsole() {
   const lines = [];
@@ -40,11 +41,13 @@ function canonicalDacl(sddl) {
 }
 
 const FAKE_WINDOWS_ACL = {
+  ownerIdentity: { processSid: 'S-1-5-21-100-200-300-1001', ownerSid: 'S-1-5-21-100-200-300-1001' },
   captureDacl: () => 'D:P(A;;FA;;;SY)',
   restoreDacl: () => {},
   privatePathSecurity: {
     platform: 'win32',
     principal: 'TEST\\backup-user',
+    ownerIdentity: { processSid: 'S-1-5-21-100-200-300-1001', ownerSid: 'S-1-5-21-100-200-300-1001' },
     spawn(_command, args) {
       const target = String(args[0] || 'artifact');
       return {
@@ -75,9 +78,19 @@ function portableAuditPaths(file) {
   };
 }
 
+function preparePrivateRestoreDirectory(directory, callback = () => {}, security = {}) {
+  return privatePaths.withPrivateDirectoryMutationLockSync(directory, callback, {
+    ...(security.privatePathSecurity || security),
+    directory: true,
+    label: 'test SQLite restore directory',
+    ownerLabel: 'test SQLite restore directory',
+  });
+}
+
 function restoredServerDbEnv(dbPath) {
   const env = {
     ...process.env,
+    NODE_ENV: 'production',
     REDACTWALL_ENV_PATH: path.join(tempRoot, 'no.env'),
     REDACTWALL_DB_DRIVER: 'sqlite',
     REDACTWALL_DB_PATH: dbPath,
@@ -87,6 +100,7 @@ function restoredServerDbEnv(dbPath) {
   delete env.REDACTWALL_AUDIT_DIR;
   delete env.REDACTWALL_AUDIT_STATE_PATH;
   delete env.REDACTWALL_AUDIT_CHECKPOINT_PATH;
+  delete env.REDACTWALL_AUDIT_PENDING_PATH;
   delete env.REDACTWALL_DATABASE_URL;
   delete env.DATABASE_URL;
   return env;
@@ -249,8 +263,9 @@ test('backup and restore publish the exact authenticated artifact set with priva
 
   const restoreDir = path.join(tempRoot, 'private-restore');
   const target = path.join(restoreDir, 'redactwall.db');
-  fs.mkdirSync(restoreDir, { recursive: true });
-  fs.writeFileSync(`${target}-wal`, 'stale sidecar');
+  preparePrivateRestoreDirectory(restoreDir, () => {
+    fs.writeFileSync(`${target}-wal`, 'stale sidecar');
+  });
   assert.throws(() => backup.restoreBackup({ file: result.file, to: target }), /sidecar|already exists/);
 
   const restored = backup.restoreBackup({ file: result.file, to: target, force: true });
@@ -500,14 +515,15 @@ test('forced restore restores the complete prior SQLite artifact set when sideca
   const created = await backup.createBackup({ outDir: path.join(tempRoot, 'force-restore-source'), dbModule: db });
   const outDir = path.join(tempRoot, 'force-restore-rollback');
   const target = path.join(outDir, 'redactwall.db');
-  fs.mkdirSync(outDir, { recursive: true });
   const before = new Map([
     [target, Buffer.from('prior database bytes')],
     [`${target}-wal`, Buffer.from('prior wal bytes')],
     [`${target}-shm`, Buffer.from('prior shm bytes')],
     [`${target}-journal`, Buffer.from('prior journal bytes')],
   ]);
-  for (const [artifact, bytes] of before) fs.writeFileSync(artifact, bytes);
+  preparePrivateRestoreDirectory(outDir, () => {
+    for (const [artifact, bytes] of before) fs.writeFileSync(artifact, bytes);
+  }, FAKE_WINDOWS_ACL);
   const priorAuditDirectory = `${target}.audit-integrity`;
   const priorAuditState = path.join(priorAuditDirectory, '.audit-integrity-state.json');
   const priorAuditCheckpoint = path.join(priorAuditDirectory, '.audit-integrity-checkpoint.json');
@@ -1230,8 +1246,10 @@ test('SQLite backup creation requires an external audit key', () => {
 
 test('restore refuses to overwrite an existing target unless forced', async () => {
   const result = await backup.createBackup({ outDir: path.join(tempRoot, 'overwrite'), dbModule: db });
-  const target = path.join(tempRoot, 'existing.db');
-  fs.writeFileSync(target, 'already here');
+  const target = path.join(tempRoot, 'existing-restore', 'redactwall.db');
+  preparePrivateRestoreDirectory(path.dirname(target), () => {
+    fs.writeFileSync(target, 'already here');
+  });
   assert.throws(() => backup.restoreBackup({ file: result.file, to: target }), /already exists/);
   assert.strictEqual(backup.restoreBackup({ file: result.file, to: target, force: true }).ok, true);
 });

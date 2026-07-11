@@ -20,7 +20,7 @@ const privatePaths = require('./private-path');
 const DATA_DIR = path.join(__dirname, '..', 'data');
 const SESSION_SECRET_FILE = '.session-secret';
 const SESSION_SECRET_PATTERN = /^[a-f0-9]{64}$/;
-const PRIVATE_INIT_LOCK_TIMEOUT_MS = 30_000;
+const PRIVATE_INIT_LOCK_TIMEOUT_MS = 60_000;
 
 function secretDataDir(env, explicit) {
   return explicit
@@ -36,6 +36,15 @@ function privatePathOptions(opts, fsImpl, label, directory) {
     fs: fsImpl,
     label,
     directory,
+  };
+}
+
+function privateInitializationLockOptions(opts, fsImpl) {
+  return {
+    lockTimeoutMs: PRIVATE_INIT_LOCK_TIMEOUT_MS,
+    lockTimeoutMaximumMs: PRIVATE_INIT_LOCK_TIMEOUT_MS,
+    ...(opts.lockOptions || {}),
+    fs: fsImpl,
   };
 }
 
@@ -87,12 +96,9 @@ function resolveSecret(opts = {}) {
   const configured = env.REDACTWALL_SECRET || env.PROMPTWALL_SECRET || env.SENTINEL_SECRET;
   if (configured) return { secret: configured, source: 'env' };
   const file = path.join(dataDir, SESSION_SECRET_FILE);
+  const lockOptions = privateInitializationLockOptions(opts, fsImpl);
   return privatePaths.withPrivateDirectoryMutationLockSync(dataDir, () => {
-    const lock = fileMutationLock.acquireFileMutationLockSync(file, {
-      lockTimeoutMs: PRIVATE_INIT_LOCK_TIMEOUT_MS,
-      ...(opts.lockOptions || {}),
-      fs: fsImpl,
-    });
+    const lock = fileMutationLock.acquireFileMutationLockSync(file, lockOptions);
     try {
       try {
         return { secret: readStoredSecret(file, opts, fsImpl), source: 'file' };
@@ -107,8 +113,9 @@ function resolveSecret(opts = {}) {
     }
   }, {
     ...privatePathOptions(opts, fsImpl, 'session secret directory', true),
-    lockOptions: opts.lockOptions,
-    lockTimeoutMs: opts.lockOptions?.lockTimeoutMs ?? PRIVATE_INIT_LOCK_TIMEOUT_MS,
+    lockOptions,
+    lockTimeoutMs: lockOptions.lockTimeoutMs,
+    lockTimeoutMaximumMs: lockOptions.lockTimeoutMaximumMs,
   });
 }
 const { secret: SECRET, source: SECRET_SOURCE } = resolveSecret();
@@ -543,6 +550,7 @@ module.exports = {
   SECRET_SOURCE, SECRET_IS_STABLE: ['env', 'file', 'generated'].includes(SECRET_SOURCE),
   SESSION_COOKIE_NAME, LEGACY_SESSION_COOKIE_NAMES,
   _internal: {
+    PRIVATE_INIT_LOCK_TIMEOUT_MS,
     resolveSecret,
     ACCOUNTS,
     attemptCount: () => attempts.size,

@@ -12,6 +12,10 @@ const privatePaths = require('../server/private-path');
 const fileMutationLock = require('../server/file-mutation-lock');
 
 const STORAGE_MODULE = path.join(__dirname, '..', 'server', 'storage', 'index.js');
+const TEST_OWNER_IDENTITY = Object.freeze({
+  processSid: 'S-1-5-21-100-200-300-1001',
+  ownerSid: 'S-1-5-21-100-200-300-1001',
+});
 
 function seedV7AdminDatabase(dbPath) {
   const db = new Database(dbPath);
@@ -105,6 +109,7 @@ test('SQLite ACL contract covers the directory and db, WAL, shared-memory, and r
     platform: 'win32',
     directory: true,
     principal: 'TEST\\sqlite-user',
+    ownerIdentity: TEST_OWNER_IDENTITY,
     spawn(command, args, options) {
       calls.push({ command, args, options });
       return { status: 0, stdout: 'processed 1 file' };
@@ -113,6 +118,7 @@ test('SQLite ACL contract covers the directory and db, WAL, shared-memory, and r
   _internal.restrictSqliteArtifacts(dbPath, {
     platform: 'win32',
     principal: 'TEST\\sqlite-user',
+    ownerIdentity: TEST_OWNER_IDENTITY,
     spawn(command, args, options) {
       calls.push({ command, args, options });
       return { status: 0, stdout: 'processed 1 file' };
@@ -152,6 +158,7 @@ test('production SQLite startup fails closed when an icacls command cannot prote
     sqliteSecurity: {
       platform: 'win32',
       principal: 'TEST\\sqlite-user',
+      ownerIdentity: TEST_OWNER_IDENTITY,
       privateLockRoot: path.join(root, 'locks'),
       spawn() { return { status: 5, stderr: 'access denied' }; },
     },
@@ -308,12 +315,20 @@ test('eight production SQLite processes serialize Windows first boot through the
   const dbPath = path.join(dbDir, 'redactwall.db');
   const bootstrapLock = fileMutationLock.lockPathFor(privatePaths.privateDirectoryLockTarget(dbDir));
   t.after(() => {
-    fs.rmSync(root, { recursive: true, force: true });
-    fs.rmSync(bootstrapLock, { recursive: true, force: true });
+    const cleanup = { recursive: true, force: true, maxRetries: 5, retryDelay: 100 };
+    fs.rmSync(root, cleanup);
+    fs.rmSync(bootstrapLock, cleanup);
   });
 
-  const results = await Promise.all(Array.from({ length: 8 }, (_, index) => sqliteOpenWorker(dbPath, index)));
-  assert.deepStrictEqual(new Set(results), new Set(Array.from({ length: 8 }, (_, index) => String(index))));
+  const settled = await Promise.allSettled(
+    Array.from({ length: 8 }, (_, index) => sqliteOpenWorker(dbPath, index)),
+  );
+  const outcomes = settled.map((result) => (
+    result.status === 'fulfilled'
+      ? result.value
+      : `${result.reason?.code || 'ERROR'}: ${result.reason?.message || result.reason}`
+  ));
+  assert.deepStrictEqual(outcomes, Array.from({ length: 8 }, (_, index) => String(index)));
   assert.strictEqual(fs.existsSync(bootstrapLock), false);
   assert.ok(fs.existsSync(dbPath));
 });

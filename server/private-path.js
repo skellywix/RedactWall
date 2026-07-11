@@ -18,17 +18,23 @@ const PRIVATE_DIRECTORY_LOCK_TIMEOUT_MS = 30_000;
 const WINDOWS_PRIVATE_LOCK_ROOT = '.redactwall-private-locks';
 const WINDOWS_LOCAL_SYSTEM_SID = 'S-1-5-18';
 const WINDOWS_OWNER_PATH_ENV = 'REDACTWALL_PRIVATE_OWNER_PATH';
+const WINDOWS_OWNER_CACHE_LIMIT = 512;
+const WINDOWS_SECURITY_STABILITY_ATTEMPTS = 8;
+const _windowsOwnerCache = new Map();
+let _windowsPrincipalCache = '';
 const WINDOWS_OWNER_INSPECTION_SCRIPT = Buffer.from([
   "$ErrorActionPreference = 'Stop'",
   '[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)',
   '$identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()',
-  `$item = Get-Item -LiteralPath $env:${WINDOWS_OWNER_PATH_ENV} -Force`,
-  '$acl = Get-Acl -LiteralPath $item.FullName',
+  `$ownerPath = $env:${WINDOWS_OWNER_PATH_ENV}`,
+  '$section = [System.Security.AccessControl.AccessControlSections]::Owner',
+  'if ([System.IO.Directory]::Exists($ownerPath)) { $acl = [System.IO.Directory]::GetAccessControl($ownerPath, $section) } elseif ([System.IO.File]::Exists($ownerPath)) { $acl = [System.IO.File]::GetAccessControl($ownerPath, $section) } else { throw "private path does not exist" }',
   '$owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value',
   "[Console]::Out.Write('redactwall-owner-v1|' + $identity.User.Value + '|' + $owner)",
 ].join('; '), 'utf16le').toString('base64');
 
 function windowsPrincipal(spawn = spawnSync, label = 'private path') {
+  if (spawn === spawnSync && _windowsPrincipalCache) return _windowsPrincipalCache;
   let result;
   try {
     result = spawn('whoami.exe', [], { encoding: 'utf8', windowsHide: true });
@@ -40,6 +46,7 @@ function windowsPrincipal(spawn = spawnSync, label = 'private path') {
     const detail = String(result?.stderr || result?.error?.message || 'no principal returned').trim();
     throw new Error(`failed to identify the ${label} owner with whoami: ${detail}`);
   }
+  if (spawn === spawnSync) _windowsPrincipalCache = principal;
   return principal;
 }
 
@@ -74,6 +81,15 @@ function normalizeWindowsSid(value) {
   return /^S-\d+(?:-\d+)+$/.test(sid) ? sid : '';
 }
 
+function cleanWindowsPowerShellEnvironment(target) {
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) {
+    if (key.toLowerCase() === 'psmodulepath') delete env[key];
+  }
+  env[WINDOWS_OWNER_PATH_ENV] = path.resolve(target);
+  return env;
+}
+
 function windowsOwnerIdentity(target, spawn = spawnSync, label = 'private path') {
   let result;
   try {
@@ -82,7 +98,7 @@ function windowsOwnerIdentity(target, spawn = spawnSync, label = 'private path')
     ], {
       encoding: 'utf8',
       windowsHide: true,
-      env: { ...process.env, [WINDOWS_OWNER_PATH_ENV]: path.resolve(target) },
+      env: cleanWindowsPowerShellEnvironment(target),
     });
   } catch (error) {
     result = { error };
@@ -91,17 +107,41 @@ function windowsOwnerIdentity(target, spawn = spawnSync, label = 'private path')
     /^redactwall-owner-v1\|(S-\d+(?:-\d+)+)\|(S-\d+(?:-\d+)+)$/i,
   );
   if (!result || result.error || result.status !== 0 || !match) {
-    const detail = String(result?.stderr || result?.error?.message || 'no owner SID returned').trim();
+    const detail = String(result?.stderr || result?.error?.message || 'no owner SID returned')
+      .replace(/\s+/g, ' ').trim().slice(0, 240);
     throw new Error(`failed to inspect the ${label} owner: ${detail}`);
   }
   return { processSid: normalizeWindowsSid(match[1]), ownerSid: normalizeWindowsSid(match[2]) };
 }
 
-function resolvedOwnerIdentity(target, options, spawn) {
+function windowsOwnerStamp(stat) {
+  return [stat.dev, stat.ino, stat.birthtimeMs, stat.ctimeMs, stat.mode].join(':');
+}
+
+function cacheWindowsOwner(target, stamp, identity) {
+  const key = path.resolve(target).toLowerCase();
+  _windowsOwnerCache.delete(key);
+  _windowsOwnerCache.set(key, { stamp, identity });
+  if (_windowsOwnerCache.size > WINDOWS_OWNER_CACHE_LIMIT) {
+    _windowsOwnerCache.delete(_windowsOwnerCache.keys().next().value);
+  }
+}
+
+function resolvedOwnerIdentity(target, options, spawn, stat) {
   const supplied = typeof options.ownerIdentity === 'function'
     ? options.ownerIdentity(target)
     : options.ownerIdentity;
-  const identity = supplied || windowsOwnerIdentity(target, spawn, options.ownerLabel || options.label);
+  let identity = supplied;
+  const stamp = stat && spawn === spawnSync ? windowsOwnerStamp(stat) : '';
+  const key = stamp ? path.resolve(target).toLowerCase() : '';
+  if (!identity && stamp) {
+    const cached = _windowsOwnerCache.get(key);
+    if (cached?.stamp === stamp) identity = cached.identity;
+  }
+  if (!identity) {
+    identity = windowsOwnerIdentity(target, spawn, options.ownerLabel || options.label);
+    if (stamp) cacheWindowsOwner(target, stamp, identity);
+  }
   const processSid = normalizeWindowsSid(identity?.processSid);
   const ownerSid = normalizeWindowsSid(identity?.ownerSid);
   if (!processSid || !ownerSid) throw new Error(`${options.label || 'private path'} Windows owner verification failed`);
@@ -112,23 +152,41 @@ function privateWindowsOwner(identity) {
   return identity.ownerSid === identity.processSid || identity.ownerSid === WINDOWS_LOCAL_SYSTEM_SID;
 }
 
-function assertPrivateWindowsOwner(target, options = {}, spawn = spawnSync) {
-  if (!privateWindowsOwner(resolvedOwnerIdentity(target, options, spawn))) {
+function assertPrivateWindowsOwner(target, options = {}, spawn = spawnSync, stat) {
+  if (!privateWindowsOwner(resolvedOwnerIdentity(target, options, spawn, stat))) {
     throw new Error(`${options.label || 'private path'} Windows owner verification failed`);
   }
   return target;
 }
 
-function inspectPrivateWindowsPath(target, principal, spawn = spawnSync, options = {}) {
+function privateAclFingerprint(listing) {
+  return String(listing || '').toLowerCase().split(/\r?\n/)
+    .filter((line) => /:\s*(?:\([^)]*\))+/.test(line))
+    .map((line) => line.trim().replace(/\s+/g, ' '))
+    .sort().join('\n');
+}
+
+function privateWindowsSecurityFingerprint(target, principal, spawn, options, stat) {
+  const fingerprint = privateWindowsDaclFingerprint(target, principal, spawn);
+  if (!fingerprint) return '';
+  const identity = resolvedOwnerIdentity(target, options, spawn, stat);
+  if (!privateWindowsOwner(identity)) return '';
+  return `${identity.processSid}|${identity.ownerSid}|${fingerprint}`;
+}
+
+function privateWindowsDaclFingerprint(target, principal, spawn) {
   let result;
   try {
     result = spawn('icacls.exe', [target], { encoding: 'utf8', windowsHide: true });
   } catch (error) {
     result = { error };
   }
-  return !!result && !result.error && result.status === 0
-    && privateAclListing(result.stdout, principal)
-    && privateWindowsOwner(resolvedOwnerIdentity(target, options, spawn));
+  if (!result || result.error || result.status !== 0 || !privateAclListing(result.stdout, principal)) return '';
+  return privateAclFingerprint(result.stdout);
+}
+
+function inspectPrivateWindowsPath(target, principal, spawn = spawnSync, options = {}, stat) {
+  return !!privateWindowsSecurityFingerprint(target, principal, spawn, options, stat);
 }
 
 function pathStat(target, options = {}) {
@@ -145,7 +203,7 @@ function pathStat(target, options = {}) {
 }
 
 function restrictPrivatePath(target, options = {}) {
-  const { directory, fsImpl } = pathStat(target, options);
+  const { stat, directory, fsImpl } = pathStat(target, options);
   const platform = options.platform || process.platform;
   if (platform !== 'win32') {
     fsImpl.chmodSync(target, directory ? 0o700 : 0o600);
@@ -157,9 +215,9 @@ function restrictPrivatePath(target, options = {}) {
   if (options.fresh === true) {
     checkedIcacls(spawn, [target, '/setowner', principal, '/q'], target, options.label);
   } else {
-    assertPrivateWindowsOwner(target, options, spawn);
-    checkedIcacls(spawn, [target, '/reset', '/q'], target, options.label);
+    assertPrivateWindowsOwner(target, options, spawn, stat);
   }
+  checkedIcacls(spawn, [target, '/reset', '/q'], target, options.label);
   checkedIcacls(spawn, [
     target, '/inheritance:r', '/grant:r',
     `${principal}:${inheritance}(F)`, `*S-1-5-18:${inheritance}(F)`, '/q',
@@ -176,16 +234,89 @@ function assertPrivatePath(target, options = {}) {
   }
   const spawn = options.spawn || spawnSync;
   const principal = options.principal || windowsPrincipal(spawn, options.ownerLabel || 'private path');
-  if (!inspectPrivateWindowsPath(target, principal, spawn, options)) {
-    throw new Error(`${options.label || 'private path'} Windows ACL verification failed`);
+  let before = stat;
+  let previousSecurity = '';
+  for (let attempt = 0; attempt < WINDOWS_SECURITY_STABILITY_ATTEMPTS; attempt += 1) {
+    const security = privateWindowsSecurityFingerprint(target, principal, spawn, options, before);
+    if (!security) {
+      throw new Error(`${options.label || 'private path'} Windows ACL verification failed`);
+    }
+    const after = pathStat(target, { ...options, directory }).stat;
+    if (!sameIdentity(before, after)) {
+      throw new Error(`${options.label || 'private path'} changed during Windows security verification`);
+    }
+    if (before.ctimeMs === after.ctimeMs) return target;
+    // Directory entry creation changes directory ctime even when its security
+    // descriptor does not. Two equal complete ACL+owner snapshots on the same
+    // inode distinguish that expected churn from security-descriptor drift.
+    if (directory && previousSecurity && previousSecurity === security) return target;
+    previousSecurity = security;
+    before = after;
   }
-  return target;
+  throw new Error(`${options.label || 'private path'} changed during Windows security verification`);
+}
+
+// Recheck the complete DACL and path identity after a full owner+ACL proof has
+// established a trusted parent. This intentionally does not replace the full
+// assertion at startup; it carries that proof across entry churn without a
+// redundant PowerShell owner process on every commit.
+function assertPrivatePathDacl(target, options = {}) {
+  const { stat, directory } = pathStat(target, options);
+  const platform = options.platform || process.platform;
+  if (platform !== 'win32') {
+    if ((stat.mode & 0o077) !== 0) throw new Error(`${options.label || 'private path'} permissions are too broad`);
+    return target;
+  }
+  const spawn = options.spawn || spawnSync;
+  const principal = options.principal || windowsPrincipal(spawn, options.ownerLabel || 'private path');
+  let before = stat;
+  let previousSecurity = '';
+  for (let attempt = 0; attempt < WINDOWS_SECURITY_STABILITY_ATTEMPTS; attempt += 1) {
+    const security = privateWindowsDaclFingerprint(target, principal, spawn);
+    if (!security) throw new Error(`${options.label || 'private path'} Windows ACL verification failed`);
+    const after = pathStat(target, { ...options, directory }).stat;
+    if (!sameIdentity(before, after)) {
+      throw new Error(`${options.label || 'private path'} changed during Windows security verification`);
+    }
+    if (before.ctimeMs === after.ctimeMs) return target;
+    if (directory && previousSecurity && previousSecurity === security) return target;
+    previousSecurity = security;
+    before = after;
+  }
+  throw new Error(`${options.label || 'private path'} changed during Windows security verification`);
 }
 
 function securePrivatePath(target, options = {}) {
   restrictPrivatePath(target, options);
   assertPrivatePath(target, options);
   return target;
+}
+
+// A file created exclusively inside an already-verified private directory has
+// exactly the directory's two inherited ACEs. Protect that inherited DACL,
+// converting it to explicit ACEs, then verify the complete owner and ACL
+// contract. Callers must verify and retain control of the parent before create.
+function protectInheritedPrivateFile(target, options = {}) {
+  const { directory, fsImpl } = pathStat(target, { ...options, directory: false });
+  if (directory) throw new Error(`${options.label || 'private file'} is not a safe regular file`);
+  const platform = options.platform || process.platform;
+  if (platform !== 'win32') {
+    fsImpl.chmodSync(target, 0o600);
+    return assertPrivatePath(target, { ...options, fs: fsImpl, directory: false });
+  }
+  const spawn = options.spawn || spawnSync;
+  const principal = options.principal || windowsPrincipal(spawn, options.ownerLabel || 'private file');
+  checkedIcacls(spawn, [target, '/setowner', principal, '/q'], target, options.label);
+  checkedIcacls(spawn, [target, '/inheritance:d', '/q'], target, options.label);
+  const verification = {
+    ...options,
+    fs: fsImpl,
+    directory: false,
+    principal,
+  };
+  return options.verifyOwner === false
+    ? assertPrivatePathDacl(target, verification)
+    : assertPrivatePath(target, verification);
 }
 
 function mutationLockOptions(options, fsImpl) {
@@ -464,6 +595,12 @@ function publishFileDurably(temp, target, options = {}) {
     fsImpl.renameSync(temp, target);
     try {
       fsyncDirectory(path.dirname(target), options);
+      if (typeof options.verifyPublished === 'function') {
+        const verified = options.verifyPublished(target);
+        if (verified && typeof verified.then === 'function') {
+          throw new TypeError('synchronous publication verifier returned a promise');
+        }
+      }
     } catch (error) {
       rollbackPublishedFile(target, hasBackup ? backup : '', options, error);
       hasBackup = false;
@@ -502,7 +639,9 @@ module.exports = {
   inspectPrivateWindowsPath,
   restrictPrivatePath,
   assertPrivatePath,
+  assertPrivatePathDacl,
   securePrivatePath,
+  protectInheritedPrivateFile,
   privateDirectoryLockTarget,
   withPrivateDirectoryMutationLockSync,
   readBoundedRegularFile,

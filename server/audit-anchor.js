@@ -18,8 +18,11 @@ const {
   withFileMutationLockSync,
 } = require('./file-mutation-lock');
 const {
+  windowsPrincipal,
   assertPrivatePath,
+  assertPrivatePathDacl,
   securePrivatePath,
+  protectInheritedPrivateFile,
   withPrivateDirectoryMutationLockSync,
   readBoundedRegularFile,
   fsyncDirectory,
@@ -32,6 +35,7 @@ const PENDING_VERSION = 1;
 const MAX_STATE_BYTES = 8 * 1024;
 const MAX_CHECKPOINT_BYTES = 4 * 1024;
 const MAX_PENDING_BYTES = 8 * 1024;
+const TRANSACTION_LOCK_TIMEOUT_MS = 30_000;
 const INITIALIZATION_LOCK_TIMEOUT_MS = 60_000;
 
 function sidecarSecurity(options, directory, label) {
@@ -41,6 +45,19 @@ function sidecarSecurity(options, directory, label) {
     directory,
     label,
     ownerLabel: label,
+  };
+}
+
+function resolvedAuditOptions(input) {
+  const security = input.privatePathSecurity || {};
+  const platform = security.platform || input.platform || process.platform;
+  if (platform !== 'win32' || security.principal) return input;
+  return {
+    ...input,
+    privatePathSecurity: {
+      ...security,
+      principal: windowsPrincipal(security.spawn, 'audit integrity sidecar'),
+    },
   };
 }
 
@@ -62,10 +79,6 @@ function requirePrivateDirectory(directory, options = {}) {
 }
 
 function withPreparedAuditDirectories(directories, callback, options = {}) {
-  if (sidecarPlatform(options) !== 'win32') {
-    ensurePrivateDirectory(directories[0], options);
-    return callback();
-  }
   const byLockIdentity = new Map();
   for (const directory of directories) {
     const resolved = path.resolve(directory);
@@ -75,6 +88,10 @@ function withPreparedAuditDirectories(directories, callback, options = {}) {
   const unique = [...byLockIdentity.entries()]
     .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
     .map(([, resolved]) => resolved);
+  if (sidecarPlatform(options) !== 'win32') {
+    for (const directory of unique) ensurePrivateDirectory(directory, options);
+    return callback();
+  }
   const lockTimeoutMs = options.initializationLockTimeoutMs
     ?? options.lockTimeoutMs
     ?? INITIALIZATION_LOCK_TIMEOUT_MS;
@@ -89,21 +106,95 @@ function withPreparedAuditDirectories(directories, callback, options = {}) {
   return prepare(0);
 }
 
-function writePrivateJson(file, value, options = {}) {
+function privateFileIdentity(fsImpl, file) {
+  const stat = fsImpl.lstatSync(file, { bigint: true });
+  if (String(stat.dev) === '0' || String(stat.ino) === '0') {
+    throw new Error('audit integrity sidecar has no stable filesystem identity');
+  }
+  return stat;
+}
+
+function privateBirthtime(stat) {
+  return stat.birthtimeNs ?? stat.birthtimeMs;
+}
+
+function samePrivateFileIdentity(left, right, platform = process.platform) {
+  return String(left.dev) === String(right.dev)
+    && String(left.ino) === String(right.ino)
+    // NTFS preserves the replaced destination's creation timestamp even though
+    // rename installs the source file ID. Device + file ID are the stable
+    // handle identity on Windows; requiring birthtime rejects every atomic
+    // overwrite after the first publication.
+    && (platform === 'win32' || String(privateBirthtime(left)) === String(privateBirthtime(right)))
+    && String(left.size) === String(right.size)
+    && String(left.nlink) === '1'
+    && String(right.nlink) === '1';
+}
+
+function privateDirectoryIdentity(fsImpl, directory, platform = process.platform) {
+  const stat = fsImpl.lstatSync(directory, { bigint: true });
+  const dev = String(stat.dev);
+  const ino = String(stat.ino);
+  const birthtime = String(privateBirthtime(stat));
+  if (!stat.isDirectory() || stat.isSymbolicLink() || dev === '0' || ino === '0'
+      || (platform === 'win32' && (birthtime === '0' || birthtime === 'undefined'))) {
+    throw new Error('audit integrity directory has no stable filesystem identity');
+  }
+  return { dev, ino, birthtime };
+}
+
+function samePrivateDirectoryIdentity(left, right) {
+  return !!left && !!right && left.dev === right.dev && left.ino === right.ino
+    && left.birthtime === right.birthtime;
+}
+
+function writePrivateJsonInternal(file, value, options, trustedDirectory) {
   const fsImpl = options.fs || fs;
-  const directory = requirePrivateDirectory(path.dirname(file), options);
+  const directory = trustedDirectory
+    ? path.dirname(file)
+    : requirePrivateDirectory(path.dirname(file), options);
+  const verifyTrustedDirectory = trustedDirectory && typeof options.verifyTrustedDirectory === 'function'
+    ? options.verifyTrustedDirectory
+    : null;
   const temp = path.join(directory, `.${path.basename(file)}.${process.pid}.${crypto.randomBytes(12).toString('hex')}.tmp`);
   let fd;
   try {
+    if (verifyTrustedDirectory) verifyTrustedDirectory(directory);
     fd = fsImpl.openSync(temp, 'wx', 0o600);
     fsImpl.writeFileSync(fd, JSON.stringify(value), 'utf8');
     fsImpl.fsyncSync(fd);
     fsImpl.fchmodSync(fd, 0o600);
     fsImpl.closeSync(fd);
     fd = undefined;
-    securePrivatePath(temp, sidecarSecurity(options, false, 'audit integrity sidecar'));
-    publishFileDurably(temp, file, { ...options, fs: fsImpl });
-    securePrivatePath(file, sidecarSecurity(options, false, 'audit integrity sidecar'));
+    if (trustedDirectory) {
+      protectInheritedPrivateFile(temp, {
+        ...sidecarSecurity(options, false, 'audit integrity sidecar'),
+        verifyOwner: false,
+      });
+    } else {
+      // Bootstrap and backup paths have not yet retained a trusted-parent
+      // proof. Keep the complete owner plus reset/grant hardening contract.
+      securePrivatePath(temp, sidecarSecurity(options, false, 'audit integrity sidecar'));
+    }
+    if (verifyTrustedDirectory) verifyTrustedDirectory(directory);
+    const before = privateFileIdentity(fsImpl, temp);
+    publishFileDurably(temp, file, {
+      ...options,
+      fs: fsImpl,
+      verifyPublished(published) {
+        const after = privateFileIdentity(fsImpl, published);
+        if (!samePrivateFileIdentity(before, after, sidecarPlatform(options))) {
+          throw new Error('audit integrity sidecar changed during publication');
+        }
+        if (verifyTrustedDirectory) verifyTrustedDirectory(directory);
+        if (trustedDirectory && typeof options.verifyTrustedPublication === 'function') {
+          options.verifyTrustedPublication();
+        }
+        if (!trustedDirectory) {
+          securePrivatePath(published, sidecarSecurity(options, false, 'audit integrity sidecar'));
+        }
+      },
+    });
     return file;
   } finally {
     if (fd !== undefined) { try { fsImpl.closeSync(fd); } catch {} }
@@ -111,15 +202,39 @@ function writePrivateJson(file, value, options = {}) {
   }
 }
 
-function readPrivateJson(file, maxBytes, options = {}) {
-  const fsImpl = options.fs || fs;
-  assertPrivatePath(file, sidecarSecurity(options, false, 'audit integrity sidecar'));
+function writePrivateJson(file, value, options = {}) {
+  return writePrivateJsonInternal(file, value, options, false);
+}
+
+function writeTrustedPrivateJson(file, value, options = {}) {
+  return writePrivateJsonInternal(file, value, options, true);
+}
+
+function parsePrivateJson(file, maxBytes, options) {
   const value = JSON.parse(readBoundedRegularFile(file, {
     ...sidecarSecurity(options, false, 'audit integrity sidecar'),
     maxBytes,
   }).toString('utf8'));
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('audit integrity sidecar is malformed');
   return value;
+}
+
+function readPrivateJson(file, maxBytes, options = {}) {
+  assertPrivatePath(file, sidecarSecurity(options, false, 'audit integrity sidecar'));
+  return parsePrivateJson(file, maxBytes, options);
+}
+
+function readTrustedPrivateJson(file, maxBytes, options = {}) {
+  const verifyTrustedDirectory = typeof options.verifyTrustedDirectory === 'function'
+    ? options.verifyTrustedDirectory
+    : null;
+  const directory = path.dirname(file);
+  if (verifyTrustedDirectory) verifyTrustedDirectory(directory);
+  try {
+    return parsePrivateJson(file, maxBytes, options);
+  } finally {
+    if (verifyTrustedDirectory) verifyTrustedDirectory(directory);
+  }
 }
 
 function configuredKey(env = process.env) {
@@ -155,8 +270,9 @@ function signedState(key, checkpointCreated, embedded, pendingProtocol = true) {
   return { ...body, mac: integrity.hmac(key, integrity.canonical(body)) };
 }
 
-function loadState(file, externalKey, options = {}) {
-  const raw = readPrivateJson(file, MAX_STATE_BYTES, options);
+function loadState(file, externalKey, options = {}, trustedDirectory = false) {
+  const read = trustedDirectory ? readTrustedPrivateJson : readPrivateJson;
+  const raw = read(file, MAX_STATE_BYTES, options);
   const embedded = typeof raw.key === 'string' && raw.key.length > 0;
   const key = externalKey || (embedded ? Buffer.from(raw.key, 'base64') : null);
   if (!key || key.length < 32) throw new Error('audit authentication key is unavailable');
@@ -224,7 +340,8 @@ function sameCheckpoint(left, right) {
     && left.seq === right.seq && left.head === right.head && left.mac === right.mac;
 }
 
-function openAuditAnchor(options = {}) {
+function openAuditAnchor(inputOptions = {}) {
+  const options = resolvedAuditOptions(inputOptions);
   const env = options.env || process.env;
   const directory = path.resolve(options.directory);
   const statePath = path.resolve(options.statePath || path.join(directory, '.audit-integrity-state.json'));
@@ -232,6 +349,16 @@ function openAuditAnchor(options = {}) {
   const pendingPath = path.resolve(options.pendingPath || path.join(directory, '.audit-integrity-pending.json'));
   const fsImpl = options.fs || fs;
   const externalKey = configuredKey(env);
+  const sidecarDirectories = [...new Map([
+    directory,
+    path.dirname(statePath),
+    path.dirname(checkpointPath),
+    path.dirname(pendingPath),
+  ].map((item) => {
+    const resolved = path.resolve(item);
+    const identity = sidecarPlatform(options) === 'win32' ? resolved.toLowerCase() : resolved;
+    return [identity, resolved];
+  })).values()];
 
   let state;
   let initialization;
@@ -263,6 +390,24 @@ function openAuditAnchor(options = {}) {
     });
   }, options);
 
+  // Carry the full startup owner+DACL proof through steady-state operations by
+  // binding every sidecar directory to its nonzero filesystem identity. A
+  // parent-level rename can make the original directory unavailable, but it
+  // cannot substitute a foreign directory without tripping these checks.
+  const sidecarDirectoryProofs = new Map();
+  for (const sidecarDirectory of sidecarDirectories) {
+    const before = privateDirectoryIdentity(fsImpl, sidecarDirectory, sidecarPlatform(options));
+    assertPrivatePath(
+      sidecarDirectory,
+      sidecarSecurity(options, true, 'audit integrity directory'),
+    );
+    const after = privateDirectoryIdentity(fsImpl, sidecarDirectory, sidecarPlatform(options));
+    if (!samePrivateDirectoryIdentity(before, after)) {
+      throw new Error('audit integrity directory changed during startup verification');
+    }
+    sidecarDirectoryProofs.set(sidecarDirectory, after);
+  }
+
   let lastError = null;
   // A failed sidecar publication happens after the database transaction that
   // produced this authenticated tail has committed. Keep that exact high-water
@@ -272,20 +417,87 @@ function openAuditAnchor(options = {}) {
   let requiredCheckpoint = null;
   let preparedTransaction = null;
   let scheduled = false;
+  let initialVerificationPending = true;
 
-  function loadCheckpointUnlocked() {
+  function sidecarDirectoryProof(directory) {
+    const resolved = path.resolve(directory);
+    const identity = sidecarPlatform(options) === 'win32' ? resolved.toLowerCase() : resolved;
+    for (const [sidecarDirectory, proof] of sidecarDirectoryProofs) {
+      const candidate = sidecarPlatform(options) === 'win32'
+        ? sidecarDirectory.toLowerCase()
+        : sidecarDirectory;
+      if (candidate === identity) return { directory: sidecarDirectory, proof };
+    }
+    throw new Error('audit integrity sidecar escaped its verified directory');
+  }
+
+  function assertBoundSidecarDirectoryUnlocked(directory) {
+    const bound = sidecarDirectoryProof(directory);
+    const current = privateDirectoryIdentity(fsImpl, bound.directory, sidecarPlatform(options));
+    if (!samePrivateDirectoryIdentity(bound.proof, current)) {
+      throw new Error('audit integrity directory identity changed');
+    }
+    return bound.directory;
+  }
+
+  function trustedSidecarOptions() {
+    return {
+      ...options,
+      verifyTrustedDirectory: assertBoundSidecarDirectoryUnlocked,
+      verifyTrustedPublication: assertBoundSidecarDirectoriesUnlocked,
+    };
+  }
+
+  function reloadTrustedStateUnlocked() {
+    const candidate = loadState(statePath, externalKey, trustedSidecarOptions(), true);
+    const sameKey = Buffer.isBuffer(state.key) && Buffer.isBuffer(candidate.key)
+      && state.key.length === candidate.key.length
+      && crypto.timingSafeEqual(state.key, candidate.key);
+    if (!sameKey || candidate.embedded !== state.embedded
+        || candidate.checkpointCreated !== state.checkpointCreated
+        || candidate.pendingProtocol !== state.pendingProtocol) {
+      const error = new Error('audit integrity state continuity failed');
+      error.code = 'REDACTWALL_AUDIT_STATE_CONTINUITY';
+      throw error;
+    }
+    state = candidate;
+    return state;
+  }
+
+  function assertTrustedSidecarDirectoriesUnlocked() {
+    for (const sidecarDirectory of sidecarDirectories) {
+      assertBoundSidecarDirectoryUnlocked(sidecarDirectory);
+      assertPrivatePathDacl(
+        sidecarDirectory,
+        sidecarSecurity(options, true, 'audit integrity directory'),
+      );
+      assertBoundSidecarDirectoryUnlocked(sidecarDirectory);
+    }
+  }
+
+  function assertBoundSidecarDirectoriesUnlocked() {
+    for (const sidecarDirectory of sidecarDirectories) {
+      assertBoundSidecarDirectoryUnlocked(sidecarDirectory);
+    }
+  }
+
+  function loadCheckpointUnlocked(trustedDirectory = false) {
     try {
-      return readPrivateJson(checkpointPath, MAX_CHECKPOINT_BYTES, options);
+      return trustedDirectory
+        ? readTrustedPrivateJson(checkpointPath, MAX_CHECKPOINT_BYTES, trustedSidecarOptions())
+        : readPrivateJson(checkpointPath, MAX_CHECKPOINT_BYTES, options);
     } catch (error) {
       if (error && error.code === 'ENOENT') return null;
       throw error;
     }
   }
 
-  function loadPendingUnlocked() {
+  function loadPendingUnlocked(trustedDirectory = false) {
     let pending;
     try {
-      pending = readPrivateJson(pendingPath, MAX_PENDING_BYTES, options);
+      pending = trustedDirectory
+        ? readTrustedPrivateJson(pendingPath, MAX_PENDING_BYTES, trustedSidecarOptions())
+        : readPrivateJson(pendingPath, MAX_PENDING_BYTES, options);
     } catch (error) {
       if (error && error.code === 'ENOENT') return null;
       throw error;
@@ -298,14 +510,20 @@ function openAuditAnchor(options = {}) {
     return pending;
   }
 
-  function removePendingUnlocked() {
-    try {
+  function removePendingUnlocked(trustedDirectory = false) {
+    if (!trustedDirectory) {
       assertPrivatePath(pendingPath, sidecarSecurity(options, false, 'audit integrity sidecar'));
-      fsImpl.unlinkSync(pendingPath);
-      fsyncDirectory(path.dirname(pendingPath), { ...options, fs: fsImpl });
-    } catch (error) {
-      if (!error || error.code !== 'ENOENT') throw error;
+    } else {
+      assertBoundSidecarDirectoryUnlocked(path.dirname(pendingPath));
     }
+    try {
+      fsImpl.unlinkSync(pendingPath);
+    } catch (error) {
+      if (error && error.code === 'ENOENT') return;
+      throw error;
+    }
+    fsyncDirectory(path.dirname(pendingPath), { ...options, fs: fsImpl });
+    if (trustedDirectory) assertBoundSidecarDirectoryUnlocked(path.dirname(pendingPath));
   }
 
   function databaseCount(database) {
@@ -353,19 +571,25 @@ function openAuditAnchor(options = {}) {
     }
   }
 
-  function publishCheckpointUnlocked(current, next) {
+  function publishCheckpointUnlocked(current, next, trustedDirectory = false) {
     if (sameCheckpoint(current, next)) {
       settleRequiredCheckpoint(current);
       return;
     }
     rememberRequiredCheckpoint(next);
-    writePrivateJson(checkpointPath, next, options);
+    const write = trustedDirectory ? writeTrustedPrivateJson : writePrivateJson;
+    write(checkpointPath, next, trustedDirectory ? trustedSidecarOptions() : options);
     settleRequiredCheckpoint(next);
   }
 
-  function markCheckpointProtocolUnlocked() {
+  function markCheckpointProtocolUnlocked(trustedDirectory = false) {
     if (state.checkpointCreated && state.pendingProtocol) return;
-    writePrivateJson(statePath, signedState(state.key, true, state.embedded, true), options);
+    const write = trustedDirectory ? writeTrustedPrivateJson : writePrivateJson;
+    write(
+      statePath,
+      signedState(state.key, true, state.embedded, true),
+      trustedDirectory ? trustedSidecarOptions() : options,
+    );
     state = { ...state, checkpointCreated: true, pendingProtocol: true };
   }
 
@@ -377,16 +601,28 @@ function openAuditAnchor(options = {}) {
     return null;
   }
 
-  function clearPendingIfCoveredUnlocked(pending, checkpoint) {
-    if (!pending || !checkpoint) return;
-    if (checkpoint.count < pending.count || checkpoint.seq < pending.seq) return;
-    removePendingUnlocked();
+  function checkpointAuthenticationFailureUnlocked(database, checkpoint) {
+    if (!checkpoint || integrity.validCheckpoint(checkpoint, state.key)) return null;
+    return { ok: false, count: databaseCount(database), reason: 'checkpoint-authentication' };
   }
 
-  function fullVerifyUnlocked(database, checkpoint, pending = loadPendingUnlocked()) {
+  function clearPendingIfCoveredUnlocked(pending, checkpoint, trustedDirectory = false) {
+    if (!pending || !checkpoint) return;
+    if (checkpoint.count < pending.count || checkpoint.seq < pending.seq) return;
+    removePendingUnlocked(trustedDirectory);
+  }
+
+  function fullVerifyUnlocked(
+    database,
+    checkpoint,
+    pending = loadPendingUnlocked(),
+    trustedDirectory = false,
+  ) {
     if (!checkpoint && state.checkpointCreated) {
       return { ok: false, count: database.prepare('SELECT COUNT(*) n FROM audit').get().n, reason: 'checkpoint-missing' };
     }
+    const checkpointFailure = checkpointAuthenticationFailureUnlocked(database, checkpoint);
+    if (checkpointFailure) return checkpointFailure;
     const pendingFailure = pendingTailFailureUnlocked(database, pending);
     if (pendingFailure) return pendingFailure;
     const missingPending = missingPendingFailureUnlocked(database, checkpoint, pending);
@@ -401,18 +637,30 @@ function openAuditAnchor(options = {}) {
       onVerified(next) { verifiedCheckpoint = next; },
     });
     if (!result.ok) return result;
-    publishCheckpointUnlocked(checkpoint, verifiedCheckpoint);
-    clearPendingIfCoveredUnlocked(pending, verifiedCheckpoint);
-    markCheckpointProtocolUnlocked();
+    publishCheckpointUnlocked(checkpoint, verifiedCheckpoint, trustedDirectory);
+    clearPendingIfCoveredUnlocked(pending, verifiedCheckpoint, trustedDirectory);
+    markCheckpointProtocolUnlocked(trustedDirectory);
+    if (trustedDirectory) assertBoundSidecarDirectoriesUnlocked();
     return result;
   }
 
   function verifyDatabase(database) {
+    const firstVerification = initialVerificationPending;
+    initialVerificationPending = false;
     try {
       const result = withFileMutationLockSync(checkpointPath, () => {
         state = loadState(statePath, externalKey, options);
         return fullVerifyUnlocked(database, loadCheckpointUnlocked(), loadPendingUnlocked());
-      }, { ...options, fs: fsImpl });
+      }, {
+        ...options,
+        fs: fsImpl,
+        ...(firstVerification ? {
+          lockTimeoutMs: options.initializationLockTimeoutMs
+            ?? options.lockTimeoutMs
+            ?? INITIALIZATION_LOCK_TIMEOUT_MS,
+          lockTimeoutMaximumMs: INITIALIZATION_LOCK_TIMEOUT_MS,
+        } : {}),
+      });
       lastError = result.ok ? null : result;
       return result;
     } catch (error) {
@@ -424,18 +672,20 @@ function openAuditAnchor(options = {}) {
   function advanceCheckpoint(database) {
     try {
       const result = withFileMutationLockSync(checkpointPath, () => {
-        state = loadState(statePath, externalKey, options);
-        const checkpoint = loadCheckpointUnlocked();
-        const pending = loadPendingUnlocked();
+        assertTrustedSidecarDirectoriesUnlocked();
+        reloadTrustedStateUnlocked();
+        const checkpoint = loadCheckpointUnlocked(true);
+        const pending = loadPendingUnlocked(true);
+        const checkpointFailure = checkpointAuthenticationFailureUnlocked(database, checkpoint);
+        if (checkpointFailure) return checkpointFailure;
         const pendingFailure = pendingTailFailureUnlocked(database, pending);
         if (pendingFailure) return pendingFailure;
         const missingPending = missingPendingFailureUnlocked(database, checkpoint, pending);
         if (missingPending) return missingPending;
         const requiredFailure = requiredTailFailureUnlocked(database);
         if (requiredFailure) return requiredFailure;
-        if (!checkpoint || !Number.isSafeInteger(checkpoint.seq)
-            || !integrity.validCheckpoint(checkpoint, state.key)) {
-          return fullVerifyUnlocked(database, checkpoint, pending);
+        if (!checkpoint) {
+          return fullVerifyUnlocked(database, checkpoint, pending, true);
         }
         const count = databaseCount(database);
         if (!Number.isSafeInteger(count) || count < checkpoint.count) {
@@ -443,7 +693,7 @@ function openAuditAnchor(options = {}) {
         }
         const storedRows = database.prepare('SELECT seq, entry FROM audit WHERE seq > ? ORDER BY seq ASC').all(checkpoint.seq);
         if (count !== checkpoint.count + storedRows.length) {
-          return fullVerifyUnlocked(database, checkpoint, pending);
+          return fullVerifyUnlocked(database, checkpoint, pending, true);
         }
         let head = checkpoint.head;
         let seq = checkpoint.seq;
@@ -463,6 +713,7 @@ function openAuditAnchor(options = {}) {
           publishCheckpointUnlocked(
             checkpoint,
             integrity.createCheckpoint(count, head, state.key, seq),
+            true,
           );
         } else {
           settleRequiredCheckpoint(checkpoint);
@@ -470,8 +721,9 @@ function openAuditAnchor(options = {}) {
         const published = storedRows.length
           ? integrity.createCheckpoint(count, head, state.key, seq)
           : checkpoint;
-        clearPendingIfCoveredUnlocked(pending, published);
-        markCheckpointProtocolUnlocked();
+        clearPendingIfCoveredUnlocked(pending, published, true);
+        markCheckpointProtocolUnlocked(true);
+        assertBoundSidecarDirectoriesUnlocked();
         return { ok: true, count };
       }, { ...options, fs: fsImpl });
       lastError = result.ok ? null : result;
@@ -480,6 +732,189 @@ function openAuditAnchor(options = {}) {
       lastError = error;
       return { ok: false, count: 0, reason: 'checkpoint-unavailable' };
     }
+  }
+
+  function protocolError(message, reason = 'pending-diverged') {
+    const error = new Error(message);
+    error.code = 'REDACTWALL_AUDIT_PENDING_UNHEALTHY';
+    error.integrity = { ok: false, count: 0, reason };
+    return error;
+  }
+
+  function validatedCheckpointUnlocked(trustedDirectory = false) {
+    const checkpoint = loadCheckpointUnlocked(trustedDirectory);
+    if (!checkpoint) {
+      if (state.checkpointCreated) throw protocolError('audit checkpoint is missing', 'checkpoint-missing');
+      return null;
+    }
+    if (!integrity.validCheckpoint(checkpoint, state.key)) {
+      throw protocolError('audit checkpoint authentication failed', 'checkpoint-authentication');
+    }
+    return checkpoint;
+  }
+
+  function durableHighWater(checkpoint, pending) {
+    const zero = { count: 0, seq: 0, head: integrity.ZERO };
+    if (!checkpoint && !pending) return zero;
+    if (!checkpoint) return pending;
+    if (!pending) return checkpoint;
+    if (checkpoint.count === pending.count
+        && (checkpoint.seq !== pending.seq || checkpoint.head !== pending.head)) {
+      throw protocolError('audit checkpoint and pending high-water diverge');
+    }
+    return checkpoint.count >= pending.count ? checkpoint : pending;
+  }
+
+  function transactionTail(database, entries) {
+    const rows = database.prepare('SELECT seq, entry FROM audit ORDER BY seq DESC LIMIT ?')
+      .all(entries.length)
+      .reverse();
+    if (rows.length !== entries.length) {
+      throw protocolError('audit transaction tail is incomplete');
+    }
+    let previous = null;
+    for (let index = 0; index < rows.length; index += 1) {
+      let stored;
+      try { stored = JSON.parse(rows[index].entry); } catch { stored = null; }
+      const expected = entries[index];
+      const seq = Number(rows[index].seq);
+      if (!stored || !expected || stored.id !== expected.id || stored.hash !== expected.hash
+          || !Number.isSafeInteger(seq) || seq <= 0
+          || !integrity.validAuthenticatedEntry(stored, state.key)
+          || (previous && (stored.prevHash !== previous.hash || seq <= previous.seq))) {
+        throw protocolError('audit transaction tail does not match its authenticated entries');
+      }
+      previous = { hash: stored.hash, seq };
+    }
+    return {
+      first: entries[0],
+      last: entries[entries.length - 1],
+      lastSeq: Number(rows[rows.length - 1].seq),
+    };
+  }
+
+  function verifyLegacyTailUnlocked(database, checkpoint) {
+    let verified;
+    const result = integrity.verifyAuditChainForDatabase(database, {
+      key: state.key,
+      checkpoint,
+      allowCheckpointBootstrap: !checkpoint && !state.checkpointCreated,
+      onVerified(next) { verified = next; },
+    });
+    if (!result.ok || !verified) {
+      throw protocolError('legacy audit tail cannot be authenticated', result.reason || 'chain');
+    }
+    return verified;
+  }
+
+  function prepareTransactionCommit(database, entries) {
+    if (preparedTransaction) throw new Error('an audit transaction is already prepared');
+    if (!Array.isArray(entries) || !entries.length) return;
+    let lock;
+    let prepared = false;
+    let prepareError = null;
+    try {
+      lock = acquireFileMutationLockSync(checkpointPath, {
+        ...options,
+        fs: fsImpl,
+        lockTimeoutMs: options.transactionLockTimeoutMs
+          ?? options.lockTimeoutMs
+          ?? TRANSACTION_LOCK_TIMEOUT_MS,
+        lockTimeoutMaximumMs: TRANSACTION_LOCK_TIMEOUT_MS,
+      });
+      assertTrustedSidecarDirectoriesUnlocked();
+      reloadTrustedStateUnlocked();
+      const checkpoint = validatedCheckpointUnlocked(true);
+      const previousPending = loadPendingUnlocked(true);
+      const pendingFailure = pendingTailFailureUnlocked(database, previousPending);
+      if (pendingFailure) {
+        throw protocolError('audit pending high-water no longer exists', pendingFailure.reason);
+      }
+
+      const count = databaseCount(database);
+      const priorCount = count - entries.length;
+      if (!Number.isSafeInteger(priorCount) || priorCount < 0) {
+        throw protocolError('audit transaction count is inconsistent');
+      }
+      if (checkpoint && checkpoint.count > priorCount) {
+        throw protocolError('audit transaction begins behind its checkpoint', 'checkpoint-truncated');
+      }
+      if (previousPending && previousPending.count > priorCount) {
+        throw protocolError('audit transaction begins behind its pending high-water', 'checkpoint-truncated');
+      }
+
+      let durable = durableHighWater(checkpoint, previousPending);
+      const tail = transactionTail(database, entries);
+      if (durable.count !== priorCount) {
+        if (state.pendingProtocol) {
+          throw protocolError('a committed audit tail has no durable pending high-water', 'pending-missing');
+        }
+        durable = verifyLegacyTailUnlocked(database, checkpoint);
+        if (durable.count !== count) {
+          throw protocolError('legacy audit tail count is inconsistent');
+        }
+      } else if (tail.first.prevHash !== durable.head) {
+        throw protocolError('audit transaction does not extend the durable high-water', 'chain');
+      }
+
+      const nextCheckpoint = integrity.createCheckpoint(count, tail.last.hash, state.key, tail.lastSeq);
+      const nextPending = signedPending(nextCheckpoint, tail.last.id, state.key);
+      writeTrustedPrivateJson(pendingPath, nextPending, trustedSidecarOptions());
+      preparedTransaction = {
+        lock,
+      };
+      prepared = true;
+    } catch (error) {
+      prepareError = error;
+      // Healthy replicas may contend on the bounded interprocess lock. Storage,
+      // cleanup, or trust failures are different: readiness must freeze until
+      // the exact durable sidecars can be verified again.
+      if (!error || error.code !== 'FILE_MUTATION_LOCK_TIMEOUT') lastError = error;
+      throw error;
+    } finally {
+      if (lock && !prepared) {
+        try {
+          releaseFileMutationLock(lock);
+        } catch (releaseError) {
+          if (prepareError) {
+            prepareError.lockReleaseError = releaseError;
+            lastError = prepareError;
+          } else {
+            lastError = releaseError;
+            throw releaseError;
+          }
+        }
+      }
+    }
+  }
+
+  function transactionCommitted(database) {
+    const transaction = preparedTransaction;
+    if (!transaction) return;
+    preparedTransaction = null;
+    try {
+      releaseFileMutationLock(transaction.lock);
+    } catch (error) {
+      lastError = error;
+    }
+    scheduleVerification(database);
+  }
+
+  function transactionCommitUncertain(database) {
+    const transaction = preparedTransaction;
+    if (!transaction) return;
+    preparedTransaction = null;
+    const uncertainty = { ok: false, count: 0, reason: 'commit-uncertain' };
+    try {
+      releaseFileMutationLock(transaction.lock);
+    } catch (error) {
+      uncertainty.cause = error;
+    }
+    // Preserve the newly published pending high-water. Reconciliation may
+    // prove that COMMIT applied and safely advance it; a missing row remains a
+    // hard failure instead of being mistaken for a normal rollback.
+    lastError = uncertainty;
+    scheduleVerification(database);
   }
 
   function requireMutationReady(database) {
@@ -516,6 +951,9 @@ function openAuditAnchor(options = {}) {
     },
     verifyDatabase,
     advanceCheckpoint,
+    prepareTransactionCommit,
+    transactionCommitted,
+    transactionCommitUncertain,
     requireMutationReady,
     scheduleVerification,
     initialization,
@@ -527,19 +965,23 @@ function openAuditAnchor(options = {}) {
         : (lastError ? 'checkpoint-unavailable' : (requiredCheckpoint ? 'checkpoint-pending' : null)),
       statePath,
       checkpointPath,
+      pendingPath,
     }),
-    paths: { statePath, checkpointPath },
+    paths: { statePath, checkpointPath, pendingPath },
   };
 }
 
 module.exports = {
   openAuditAnchor,
   _internal: {
+    TRANSACTION_LOCK_TIMEOUT_MS,
     INITIALIZATION_LOCK_TIMEOUT_MS,
     configuredKey,
     keyId,
     loadState,
     signedState,
+    signedPending,
+    validPending,
     writePrivateJson,
     readPrivateJson,
   },

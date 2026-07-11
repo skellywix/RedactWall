@@ -20,6 +20,10 @@ process.env.LOGIN_WINDOW_MS = '100000';
 const auth = require('../server/auth');
 const privatePaths = require('../server/private-path');
 const fileMutationLock = require('../server/file-mutation-lock');
+const TEST_OWNER_IDENTITY = Object.freeze({
+  processSid: 'S-1-5-21-100-200-300-1001',
+  ownerSid: 'S-1-5-21-100-200-300-1001',
+});
 
 function resolveSecretInChild(dataDir) {
   const script = [
@@ -313,6 +317,37 @@ test('eight concurrent local processes converge on one exclusively published ses
   }
 });
 
+test('session-secret initialization honors its full sixty-second lock budget', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rw-auth-secret-lock-budget-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  privatePaths.withPrivateDirectoryMutationLockSync(dir, () => {}, {
+    directory: true,
+    label: 'session secret test directory',
+  });
+  const lockTarget = privatePaths.privateDirectoryLockTarget(dir);
+  const held = fileMutationLock.acquireFileMutationLockSync(lockTarget);
+  try {
+    const times = [0, 30_000, auth._internal.PRIVATE_INIT_LOCK_TIMEOUT_MS];
+    let index = 0;
+    let observed = 0;
+    assert.throws(() => auth._internal.resolveSecret({
+      dataDir: dir,
+      env: {},
+      lockOptions: {
+        now() {
+          observed = times[Math.min(index, times.length - 1)];
+          index += 1;
+          return observed;
+        },
+        sleep() {},
+      },
+    }), (error) => error && error.code === 'FILE_MUTATION_LOCK_TIMEOUT');
+    assert.strictEqual(observed, auth._internal.PRIVATE_INIT_LOCK_TIMEOUT_MS);
+  } finally {
+    fileMutationLock.releaseFileMutationLock(held);
+  }
+});
+
 test('session secret hardens its directory before acquiring the target publication lock', (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rw-auth-secret-lock-order-'));
   const dir = path.join(root, 'data');
@@ -322,6 +357,7 @@ test('session secret hardens its directory before acquiring the target publicati
   const privatePathSecurity = {
     platform: 'win32',
     principal,
+    ownerIdentity: TEST_OWNER_IDENTITY,
     privateLockRoot: path.join(root, 'locks'),
   };
   const directoryLockPath = fileMutationLock.lockPathFor(
@@ -375,6 +411,7 @@ test('session secret rejects bytes planted while an inherited directory ACL is b
     privatePathSecurity: {
       platform: 'win32',
       principal,
+      ownerIdentity: TEST_OWNER_IDENTITY,
       privateLockRoot: path.join(root, 'locks'),
       spawn(command, args) {
         if (args[0] === dir && args.includes('/reset')) {

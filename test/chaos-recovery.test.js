@@ -18,8 +18,12 @@ const REPO_ROOT = path.join(__dirname, '..');
 const SERVER_ENTRY = path.join(REPO_ROOT, 'server', 'app.js');
 const INGEST_KEY = 'chaos-ingest-key';
 const SYNTHETIC_SSN = '524-71-9043';
-const READY_TIMEOUT_MS = 20000;
-const REQUEST_TIMEOUT_MS = 10000;
+const READY_TIMEOUT_MS = process.platform === 'win32' ? 60_000 : 20_000;
+const INSPECT_TIMEOUT_MS = process.platform === 'win32' ? 60_000 : 30_000;
+// This suite proves crash durability and exact-once storage, not request
+// latency. Windows commits also perform synchronous OS owner and ACL checks;
+// their separate performance coverage should not turn this proof into a race.
+const REQUEST_TIMEOUT_MS = process.platform === 'win32' ? 120_000 : 10_000;
 
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-chaos-test-'));
 const children = new Set();
@@ -28,6 +32,7 @@ function serverEnv(dbPath, port) {
   return {
     ...process.env,
     REDACTWALL_ENV_PATH: path.join(tempRoot, 'no.env'),
+    REDACTWALL_DATA_DIR: path.dirname(dbPath),
     REDACTWALL_DB_PATH: dbPath,
     REDACTWALL_SECRET: 'chaos-secret-stable',
     REDACTWALL_DATA_KEY: 'chaos-data-key-stable',
@@ -113,7 +118,7 @@ function inspectStore(dbPath) {
       total: rows.length,
       parsedOk: rows.every((row) => row && typeof row.id === 'string' && typeof row.status === 'string'),
     }));
-  `], { cwd: REPO_ROOT, env: serverEnv(dbPath, 0), encoding: 'utf8', timeout: 30000 });
+  `], { cwd: REPO_ROOT, env: serverEnv(dbPath, 0), encoding: 'utf8', timeout: INSPECT_TIMEOUT_MS });
   assert.strictEqual(result.status, 0, result.stderr);
   return JSON.parse(result.stdout);
 }
@@ -166,7 +171,18 @@ test('100 concurrent gate posts all respond and land exactly once in the store',
     postGate(port, gatePrompt(i), `load-${i}@example.test`).then(async (res) => ({ status: res.status, body: await res.json() }))));
 
   assert.strictEqual(responses.length, 100);
-  assert.ok(responses.every((r) => r.status === 200), 'every concurrent gate post must get a decision');
+  const failures = responses.filter((response) => response.status !== 200);
+  const failureSummary = failures.slice(0, 20).map(({ status, body }) => ({
+    status,
+    error: body && typeof body.error === 'string' ? body.error : null,
+    code: body && typeof body.code === 'string' ? body.code : null,
+    decision: body && typeof body.decision === 'string' ? body.decision : null,
+  }));
+  assert.strictEqual(
+    failures.length,
+    0,
+    `every concurrent gate post must get a decision; failures=${JSON.stringify(failureSummary)}`,
+  );
   const ids = new Set(responses.map((r) => r.body.id));
   assert.strictEqual(ids.size, 100, 'every decision must reference a distinct stored query');
 

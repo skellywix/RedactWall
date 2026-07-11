@@ -1639,23 +1639,20 @@ test('native handoff safe wrapper logs unexpected async failures', async () => {
   fs.writeFileSync(handoffPath, JSON.stringify(event));
   const originalError = console.error;
   const errors = [];
+  let result;
   try {
     console.error = (...args) => errors.push(args.join(' '));
-    processNativeHandoffFileSafe(handoffPath, {
+    result = await processNativeHandoffFileSafe(handoffPath, {
       secret,
       now: new Date('2026-06-26T15:01:00.000Z'),
       retryNativeHandoff: false,
       report: async () => { throw new Error('control plane unavailable'); },
     });
-    const deadline = Date.now() + 2000;
-    while (!errors.some((line) => /native handoff failed: control plane unavailable/.test(line))
-        && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    }
   } finally {
     console.error = originalError;
   }
 
+  assert.deepStrictEqual(result, { status: 'retry_scheduled', reason: 'native_handoff_failed' });
   assert.ok(errors.some((line) => /native handoff failed: control plane unavailable/.test(line)));
   fs.rmSync(dir, { recursive: true, force: true });
 });

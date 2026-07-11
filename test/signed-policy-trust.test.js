@@ -14,6 +14,10 @@ const privatePaths = require('../server/private-path');
 const signedPolicy = require('../sensors/shared/signed-policy');
 const endpoint = require('../sensors/endpoint-agent/agent');
 const mcp = require('../sensors/mcp-guard/guard');
+const TEST_OWNER_IDENTITY = Object.freeze({
+  processSid: 'S-1-5-21-100-200-300-1001',
+  ownerSid: 'S-1-5-21-100-200-300-1001',
+});
 
 const roots = [];
 function tempDir(label) {
@@ -450,6 +454,7 @@ test('signed policy cache publication uses the shared verified Windows ACL contr
   const privatePathSecurity = {
     platform: 'win32',
     principal,
+    ownerIdentity: TEST_OWNER_IDENTITY,
     privateLockRoot: path.join(fixture.dir, 'locks'),
   };
   const directoryLockPath = fileMutationLock.lockPathFor(

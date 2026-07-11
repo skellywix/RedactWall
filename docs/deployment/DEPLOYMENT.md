@@ -1494,6 +1494,12 @@ npm run backup:verify -- data/restored-redactwall.db \
   --manifest backups/redactwall-YYYY-MM-DDTHH-MM-SS-sssZ.db.manifest.json
 ```
 
+The restore destination must be a dedicated private data directory. RedactWall
+creates and hardens a missing or empty destination directory before publishing
+the database. It refuses pre-existing state in an untrusted directory; an
+existing non-empty destination must already satisfy the runtime private-path
+contract.
+
 The restored database is byte-identical to the verified backup, so its original
 manifest remains the hash-bound verification record. A restored copy without
 that explicit manifest is intentionally reported as unverifiable.

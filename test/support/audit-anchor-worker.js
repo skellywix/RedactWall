@@ -10,6 +10,10 @@ const privateLockRoot = path.resolve(process.env.PRIVATE_LOCK_ROOT);
 const coordination = path.resolve(process.env.COORDINATION_DIRECTORY);
 const workerId = String(process.env.WORKER_ID || process.pid);
 const principal = 'TEST\\audit-owner';
+const ownerIdentity = {
+  processSid: 'S-1-5-21-1000-1000-1000-1001',
+  ownerSid: 'S-1-5-21-1000-1000-1000-1001',
+};
 const sleepBuffer = new Int32Array(new SharedArrayBuffer(4));
 
 function sleep(milliseconds) {
@@ -77,6 +81,7 @@ const anchor = openAuditAnchor({
   privatePathSecurity: {
     platform: 'win32',
     principal,
+    ownerIdentity,
     privateLockRoot,
     spawn: simulatedIcacls,
   },
