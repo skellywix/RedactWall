@@ -43,14 +43,43 @@ export async function api(path: string, opts: ApiOptions = {}): Promise<Response
   return res;
 }
 
+// A 403 body only matters for the tiny license error codes, but this runs for
+// every denial the app receives, so never buffer more than that.
+const FORBIDDEN_BODY_LIMIT = 2048;
+
+/** Read the `error` code from at most FORBIDDEN_BODY_LIMIT bytes of a denial body. */
+async function forbiddenErrorCode(res: Response): Promise<string> {
+  const reader = res.clone().body?.getReader();
+  if (!reader) return '';
+  const decoder = new TextDecoder();
+  let text = '';
+  try {
+    while (text.length <= FORBIDDEN_BODY_LIMIT) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += decoder.decode(value, { stream: true });
+    }
+  } catch {
+    return '';
+  } finally {
+    void reader.cancel().catch(() => {});
+  }
+  if (text.length > FORBIDDEN_BODY_LIMIT) return '';
+  try {
+    return String((JSON.parse(text) as { error?: string }).error || '');
+  } catch {
+    return '';
+  }
+}
+
 /** Distinguish an expired license (read-only past the grace window) from a role denial. */
 async function warnForbidden(res: Response): Promise<void> {
-  const body = (await res.clone().json().catch(() => ({}))) as { error?: string };
-  if (body.error === 'license_readonly') {
+  const code = await forbiddenErrorCode(res);
+  if (code === 'license_readonly') {
     toast('License is read-only past the grace window. Install a renewal license to make changes.', 'warn');
     return;
   }
-  if (body.error === 'license_revoked') {
+  if (code === 'license_revoked') {
     toast('License revoked by the vendor. AI use is blocked; contact your vendor to restore access.', 'warn');
     return;
   }
