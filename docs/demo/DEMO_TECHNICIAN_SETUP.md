@@ -16,10 +16,10 @@ This section is generated from the app by `npm run docs:demo-guide`. Do not hand
 
 | Source | Current value |
 | --- | --- |
-| App package | `redactwall@0.3.0` |
+| App package | `redactwall@0.4.0` |
 | Active repo folder | `redactwall` |
 | Server entrypoint | `server/app.js` |
-| Browser extension | `RedactWall - AI Data Guard` version `0.3.0` |
+| Browser extension | `RedactWall - AI Data Guard` version `0.4.0` |
 | Default enforcement mode | `block` |
 | Block thresholds | severity `2`, risk score `20` |
 | Raw approval retention | enabled for `30` day(s) |
