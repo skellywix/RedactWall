@@ -288,16 +288,34 @@ function useDetectorsMeta(active: boolean): DetectorsMeta | null {
 function useActivityRows() {
   const [rows, setRows] = useState<ActivityQuery[] | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [stale, setStale] = useState(false);
   const [recentId, setRecentId] = useState('');
   const newRowTimer = useRef(0);
+  // Monotonic request id plus a buffer of SSE rows received mid-fetch: an
+  // older refresh response must not overwrite rows the stream delivered after
+  // that refresh started, and a superseded refresh must not land at all.
+  const reqId = useRef(0);
+  const sseSinceLoad = useRef<ActivityQuery[]>([]);
   const load = useCallback(async () => {
+    const seq = ++reqId.current;
+    sseSinceLoad.current = [];
     const next = await apiJson<ActivityQuery[]>(`/api/queries?limit=${ROW_LIMIT}`);
-    setRows((prev) => next ?? prev); // refresh failure keeps stale rows, like legacy
+    if (seq !== reqId.current) return;
+    if (!next) {
+      setStale(true); // keep the rows on refresh failure, but label them stale
+      setLoaded(true);
+      return;
+    }
+    const fresh = sseSinceLoad.current;
+    const freshIds = new Set(fresh.map((q) => q.id));
+    setRows([...fresh, ...next.filter((q) => !freshIds.has(q.id))].slice(0, ROW_LIMIT));
+    setStale(false);
     setLoaded(true);
   }, []);
   const onQuery = useCallback((data: unknown) => {
     const row = asEventRow(data);
     if (!row) return;
+    sseSinceLoad.current = [row, ...sseSinceLoad.current.filter((q) => q.id !== row.id)].slice(0, ROW_LIMIT);
     setRows((prev) => [row, ...(prev ?? []).filter((q) => q.id !== row.id)].slice(0, ROW_LIMIT));
     setRecentId(row.id);
     window.clearTimeout(newRowTimer.current);
@@ -308,7 +326,7 @@ function useActivityRows() {
     return () => window.clearTimeout(newRowTimer.current);
   }, [load]);
   useEventStream({ query: onQuery, decision: load });
-  return { rows, loaded, recentId };
+  return { rows, loaded, stale, recentId };
 }
 
 /** Filter order matches legacy: range -> search -> paginate; page resets on any control change. */
@@ -862,7 +880,7 @@ function ActivityBody(props: ActivityBodyProps) {
 }
 
 export default function Activity() {
-  const { rows, loaded, recentId } = useActivityRows();
+  const { rows, loaded, stale, recentId } = useActivityRows();
   const list = useMemo(() => rows ?? [], [rows]);
   const table = useActivityTable(list);
   const savedViews = useSavedViews();
@@ -876,7 +894,9 @@ export default function Activity() {
   const openChip = useCallback((detail: string, anchor: DOMRect) => setPopover({ detail, ...popoverPosition(anchor) }), []);
   const closeChip = useCallback(() => setPopover(null), []);
 
-  const metaLine = !loaded ? 'Loading' : `${table.filtered.length} shown / ${list.length} events`;
+  const metaLine = !loaded
+    ? 'Loading'
+    : `${table.filtered.length} shown / ${list.length} events${stale ? ' / stale: refresh failed' : ''}`;
   return (
     <div className="activity-view">
       <Toolbar table={table} views={savedViews.views} onSaveView={() => savedViews.save(currentView(table))} onExport={() => exportActivityCsv(table.filtered)} />
