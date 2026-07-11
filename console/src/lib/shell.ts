@@ -62,7 +62,12 @@ export function useShellData(): ShellData {
 
   const refreshPosture = useCallback(async () => {
     const posture = await fetchPosture();
-    if (!posture) return;
+    if (!posture) {
+      // Stats keep advancing LAST UPDATED, so a stale SECURE/MONITORING chip
+      // would read as fresh; null returns the rail to its CHECKING state.
+      setSurfaces(null);
+      return;
+    }
     setSurfaces(posture.surfaces ?? []);
     setLastUpdated(timestamp());
   }, []);
