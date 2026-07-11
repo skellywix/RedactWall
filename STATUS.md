@@ -148,6 +148,24 @@ drag/drop or file-open interception inside every desktop AI app.
 
 ## Done (recent highlights)
 
+- 2026-07-11: Console correctness pass — fixed the eight frontend blockers
+  from the external UI-redesign handoff audit as they exist on main: Monitor
+  requires the authoritative `segments.summary.selectedId` (no `active.id`
+  guess), null posture sections render "unavailable" instead of false
+  "No AI inventory"/"No graph"/"No events" claims, detector-feedback verdict
+  buttons mirror the server's `requireFeedbackAccess` rule (read-only unless
+  Security Admin or the assigned approver), Policy readiness groups include
+  the omitted `admin_mfa_secret`/`session_secret_strength`/
+  `oidc_client_secret_strength`/`oidc_endpoints` checks, the shell rail drops
+  stale SECURE/MONITORING chips after a failed posture refresh, Activity
+  labels stale rows and guards the SSE-vs-refresh race, the per-item audit
+  trail distinguishes loading/unavailable/verified-empty, and the 403 denial
+  body read is bounded (2 KiB). Also regenerated the demo-guide snapshots
+  (v0.4.0 drift). Evidence: `npm run review:ci` green (full node + browser
+  suites, sync-check, eval floors). Note: the redesign branch itself
+  (+6,321/−1,785) was never pushed and still lives only in the local
+  `RedactWall-ui-redesign` worktree; these fixes are on
+  `claude/redactwall-ui-completion-vf68cs` against main.
 - 2026-07-04: Documentation/process overhaul + full-codebase security/perf
   hardening — removed stale QA logs (`.codex/`), superseded `REVIEW.md`, dead
   `server/index.js`; added `ROADMAP.md`, `CHANGELOG.md`, `SECURITY.md`, and
