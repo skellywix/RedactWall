@@ -134,7 +134,7 @@ test('administration nav exposes users, roles, and licensing workflows', async (
   await expect(page.getByRole('heading', { name: 'Install Signed License' })).toBeVisible();
 
   await page.goto(replacementUrl || '');
-  await expect(page.getByRole('heading', { name: 'Set password' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Set up your account' })).toBeVisible();
   await expect(page).toHaveURL(/\/accept-invite\.html$/);
   expect(page.url()).not.toContain('token=');
   await page.getByLabel('Display name').fill('E2E Accepted Auditor');

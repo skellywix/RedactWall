@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const { defineConfig, devices } = require('@playwright/test');
+const { sanitizedEnvironment } = require('./scripts/playwright-env');
 
 const port = Number(process.env.PLAYWRIGHT_PORT || 4210);
 const baseURL = `http://127.0.0.1:${port}`;
@@ -17,14 +18,20 @@ function resolveChromium() {
   try {
     const dir = fs.readdirSync(root).find((name) => /^chromium-\d+$/.test(name));
     if (!dir) return undefined;
-    for (const rel of ['chrome-linux/chrome', 'chrome-linux64/chrome', 'chrome-mac/Chromium.app/Contents/MacOS/Chromium']) {
+    for (const rel of [
+      'chrome-linux/chrome',
+      'chrome-linux64/chrome',
+      'chrome-mac/Chromium.app/Contents/MacOS/Chromium',
+      'chrome-win/chrome.exe',
+      'chrome-win64/chrome.exe',
+    ]) {
       const candidate = path.join(root, dir, rel);
       if (fs.existsSync(candidate)) return candidate;
     }
   } catch { /* fall back to default resolution */ }
   return undefined;
 }
-const chromiumPath = resolveChromium();
+const chromiumPath = process.env.PLAYWRIGHT_CHROMIUM_PATH || resolveChromium();
 const launchOptions = chromiumPath ? { executablePath: chromiumPath } : {};
 
 module.exports = defineConfig({
@@ -37,19 +44,17 @@ module.exports = defineConfig({
   use: {
     baseURL,
     trace: 'retain-on-failure',
-    // Sandboxes with a pre-installed Chromium (e.g. remote agent containers)
-    // can point at it instead of downloading the pinned build. Unset = default.
-    ...(process.env.PLAYWRIGHT_CHROMIUM_PATH
-      ? { launchOptions: { executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH } }
-      : {}),
   },
   webServer: {
     command: 'node scripts/playwright-server.js',
     url: `${baseURL}/healthz`,
-    timeout: 30000,
+    // Windows first boot performs required private-state owner and ACL probes.
+    // The measured initialization budget is 60 seconds; routine tests retain
+    // the normal per-test timeout above.
+    timeout: 60000,
     reuseExistingServer: false,
     env: {
-      ...process.env,
+      ...sanitizedEnvironment(process.env),
       PORT: String(port),
     },
   },

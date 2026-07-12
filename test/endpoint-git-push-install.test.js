@@ -9,6 +9,21 @@ const { execFileSync, spawnSync } = require('node:child_process');
 
 const root = path.join(__dirname, '..');
 
+// When this suite runs under a git hook (the repo's pre-commit gate), git
+// exports GIT_DIR / GIT_INDEX_FILE / GIT_COMMON_DIR etc. into the hook
+// environment. A child `git init`/installer inheriting those operates on the
+// REPOSITORY's gitdir instead of the pilot fixture — in a linked worktree the
+// hook path resolves nowhere, and worse, `git init` can rewrite the live
+// repository's config. Every spawned git (direct or via the PowerShell
+// installer) must therefore run with a scrubbed environment.
+function gitCleanEnv() {
+  const env = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (!/^GIT_/i.test(key)) env[key] = value;
+  }
+  return env;
+}
+
 function tempDir(t, prefix = 'ps-git-push-install-') {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -38,6 +53,7 @@ function runPowerShell(args, opts = {}) {
     cwd: root,
     encoding: 'utf8',
     windowsHide: true,
+    env: gitCleanEnv(),
     ...opts,
   });
   if (result.status !== 0) {
@@ -56,7 +72,7 @@ test('install and uninstall git push guard hook in a pilot repository', (t) => {
   const configPath = path.join(dir, 'endpoint-agent.env');
   fs.mkdirSync(repo, { recursive: true });
   fs.writeFileSync(configPath, 'INGEST_API_KEY=unit-key\n');
-  execFileSync('git', ['init'], { cwd: repo, stdio: 'ignore' });
+  execFileSync('git', ['init'], { cwd: repo, stdio: 'ignore', env: gitCleanEnv() });
 
   runPowerShell([
     '-File', path.join(root, 'scripts', 'install-git-push-guard.ps1'),
@@ -95,7 +111,7 @@ test('installer refuses to overwrite unmanaged pre-push hook without force', (t)
   const dir = tempDir(t);
   const repo = path.join(dir, 'repo');
   fs.mkdirSync(repo, { recursive: true });
-  execFileSync('git', ['init'], { cwd: repo, stdio: 'ignore' });
+  execFileSync('git', ['init'], { cwd: repo, stdio: 'ignore', env: gitCleanEnv() });
   const hookPath = path.join(repo, '.git', 'hooks', 'pre-push');
   fs.writeFileSync(hookPath, '#!/bin/sh\necho existing\n');
 
@@ -105,7 +121,7 @@ test('installer refuses to overwrite unmanaged pre-push hook without force', (t)
     '-File', path.join(root, 'scripts', 'install-git-push-guard.ps1'),
     '-RepoPath', repo,
     '-InstallRoot', root,
-  ], { cwd: root, encoding: 'utf8', windowsHide: true });
+  ], { cwd: root, encoding: 'utf8', windowsHide: true, env: gitCleanEnv() });
 
   assert.notStrictEqual(result.status, 0);
   assert.match(result.stderr + result.stdout, /pre-push hook already exists/);

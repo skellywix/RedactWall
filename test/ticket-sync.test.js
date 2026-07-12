@@ -5,6 +5,7 @@ const assert = require('node:assert');
 const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { EventEmitter } = require('node:events');
 
 process.env.ADMIN_PASSWORD = 'unit-pass';
 process.env.REDACTWALL_SECRET = 'unit-secret-stable';
@@ -39,6 +40,73 @@ function jsonResponse(body, status = 200, headers = {}) {
     status,
     headers: { 'content-type': 'application/json', ...headers },
   });
+}
+
+function syncRow(id, refs = 1) {
+  return {
+    id,
+    ticketRefs: Array.from({ length: refs }, (_, index) => ({
+      channel: 'jira',
+      externalId: `${id}-${index + 1}`,
+      status: 'open',
+      statusCategory: 'new',
+      syncedAt: null,
+    })),
+  };
+}
+
+function mutableSyncDb(rows, list = () => rows) {
+  return {
+    listQueries: list,
+    mutateQueryWithAudit(id, mutate, audit) {
+      const index = rows.findIndex((row) => row.id === id);
+      if (index < 0) return { outcome: 'missing', row: null };
+      const patch = mutate(rows[index]);
+      if (!patch) return { outcome: 'unchanged', row: rows[index] };
+      const updated = { ...rows[index], ...patch };
+      audit(updated);
+      rows[index] = updated;
+      return { outcome: 'updated', row: updated };
+    },
+  };
+}
+
+function fakeResponse() {
+  const response = new EventEmitter();
+  response.statusCode = 200;
+  response.body = null;
+  response.destroyed = false;
+  response.writableEnded = false;
+  response.status = (statusCode) => {
+    response.statusCode = statusCode;
+    return response;
+  };
+  response.json = (body) => {
+    response.body = body;
+    response.writableEnded = true;
+    return response;
+  };
+  return response;
+}
+
+function fakeRequest(complete = true) {
+  const request = new EventEmitter();
+  request.aborted = false;
+  request.complete = complete;
+  return request;
+}
+
+function completedSyncResult() {
+  return {
+    status: 'complete',
+    checked: 0,
+    matched: 0,
+    checksAttempted: 0,
+    updated: 0,
+    succeeded: 0,
+    failed: 0,
+    generatedAt: '2026-07-10T12:00:00.000Z',
+  };
 }
 
 test('jira ticket creation captures the issue key as delivery metadata', async () => {
@@ -93,6 +161,9 @@ test('ticket sync stamps jira status back onto the query without ticket bodies',
     },
   });
   assert.strictEqual(result.updated, 1);
+  assert.ok(result.succeeded >= 1, 'successful provider polls are counted');
+  assert.ok(result.failed >= 0);
+  assert.match(result.generatedAt, /^\d{4}-\d{2}-\d{2}T/);
 
   const stored = db.getQuery(syncQuery.id);
   assert.strictEqual(stored.ticketRefs[0].status, 'In Review');
@@ -110,7 +181,7 @@ test('ticket sync skips done tickets and tolerates fetch failures', async () => 
     destination: 'chatgpt.com',
     ticketRefs: [{ channel: 'jira', externalId: 'SEC-77', status: 'Done', statusCategory: 'done', syncedAt: null }],
   });
-  createTicketQuery({
+  const openQuery = createTicketQuery({
     status: 'pending',
     user: 'open@example.test',
     destination: 'chatgpt.com',
@@ -128,7 +199,226 @@ test('ticket sync skips done tickets and tolerates fetch failures', async () => 
   });
   assert.ok(fetched >= 1, 'open tickets are polled');
   assert.strictEqual(result.updated, 0, 'failures never fabricate a status change');
+  assert.ok(result.failed >= 1, 'provider failures remain visible to the caller');
   assert.strictEqual(db.getQuery(doneQuery.id).ticketRefs[0].status, 'Done', 'done tickets are left alone');
+  const candidates = db.listTicketSyncQueries({ limit: 500 });
+  assert.ok(candidates.some((row) => row.id === openQuery.id), 'database candidate query retains open tickets');
+  assert.ok(!candidates.some((row) => row.id === doneQuery.id), 'database candidate query excludes terminal tickets');
+});
+
+test('ticket sync summary distinguishes complete provider checks from partial failure', async () => {
+  const now = new Date('2026-07-10T12:00:00.000Z');
+  const rows = [
+    {
+      id: 'q_ticket_ok',
+      ticketRefs: [{ channel: 'jira', externalId: 'SEC-201', status: 'open', statusCategory: 'new', syncedAt: null }],
+    },
+    {
+      id: 'q_ticket_failed',
+      ticketRefs: [{ channel: 'jira', externalId: 'SEC-202', status: 'open', statusCategory: 'new', syncedAt: null }],
+    },
+  ];
+  const fakeDb = {
+    listQueries: () => rows,
+    mutateQueryWithAudit: (id, mutate, audit) => {
+      const current = rows.find((row) => row.id === id);
+      const patch = mutate(current);
+      const row = { ...current, ...patch };
+      audit(row);
+      return { outcome: 'updated', row };
+    },
+  };
+  const result = await ticketSync.syncTicketStatuses({
+    db: fakeDb,
+    now,
+    channels: new Map([['jira', JIRA_CHANNEL]]),
+    fetchImpl: async (url) => {
+      if (url.includes('SEC-202')) throw new Error('provider unavailable');
+      return jsonResponse({ fields: { status: { name: 'In Review', statusCategory: { key: 'indeterminate' } } } });
+    },
+  });
+
+  assert.deepStrictEqual(result, {
+    status: 'partial',
+    checked: 2,
+    matched: 2,
+    checksAttempted: 2,
+    updated: 1,
+    succeeded: 1,
+    failed: 1,
+    generatedAt: now.toISOString(),
+    reason: 'provider_failures',
+  });
+});
+
+test('ticket sync enforces one total reference cap across every matching query', async () => {
+  const rows = [syncRow('q_cap_1', 3), syncRow('q_cap_2', 2), syncRow('q_cap_3', 2)];
+  let fetched = 0;
+  const result = await ticketSync.syncTicketStatuses({
+    db: mutableSyncDb(rows),
+    channels: new Map([['jira', JIRA_CHANNEL]]),
+    maxChecks: 3,
+    fetchImpl: async (_url, opts) => {
+      fetched += 1;
+      assert.ok(opts.signal instanceof AbortSignal, 'every provider call receives the shared bounded signal');
+      return jsonResponse({ fields: { status: { name: 'open', statusCategory: { key: 'new' } } } });
+    },
+  });
+
+  assert.strictEqual(fetched, 3);
+  assert.deepStrictEqual(
+    {
+      status: result.status,
+      reason: result.reason,
+      checked: result.checked,
+      matched: result.matched,
+      checksAttempted: result.checksAttempted,
+      succeeded: result.succeeded,
+      failed: result.failed,
+    },
+    {
+      status: 'partial',
+      reason: 'check_limit_reached',
+      checked: 1,
+      matched: 3,
+      checksAttempted: 3,
+      succeeded: 3,
+      failed: 0,
+    },
+  );
+});
+
+test('ticket sync filters ticket candidates before applying the query limit', async () => {
+  const rows = [
+    ...Array.from({ length: 500 }, (_, index) => ({ id: `newer-no-ticket-${index}` })),
+    syncRow('older-open-ticket'),
+  ];
+  let listOptions;
+  let fetched = 0;
+  const result = await ticketSync.syncTicketStatuses({
+    db: mutableSyncDb(rows, (options) => {
+        listOptions = options;
+        return options.all ? rows : rows.slice(0, options.limit);
+      }),
+    channels: new Map([['jira', JIRA_CHANNEL]]),
+    maxChecks: 1,
+    fetchImpl: async () => {
+      fetched += 1;
+      return jsonResponse({ fields: { status: { name: 'open', statusCategory: { key: 'new' } } } });
+    },
+  });
+
+  assert.deepStrictEqual(listOptions, { all: true });
+  assert.strictEqual(fetched, 1);
+  assert.strictEqual(result.matched, 1);
+  assert.strictEqual(result.checked, 1);
+});
+
+test('ticket sync rotates attempted rows so the check cap cannot starve later open tickets', async () => {
+  const rows = Array.from({ length: 70 }, (_, index) => syncRow(`q_fair_${String(index).padStart(2, '0')}`));
+  const seen = new Set();
+  const fakeDb = mutableSyncDb(rows);
+  const run = (now) => ticketSync.syncTicketStatuses({
+    db: fakeDb,
+    now,
+    channels: new Map([['jira', JIRA_CHANNEL]]),
+    maxChecks: 64,
+    fetchImpl: async (url) => {
+      seen.add(url);
+      return jsonResponse({ fields: { status: { name: 'open', statusCategory: { key: 'new' } } } });
+    },
+  });
+
+  const first = await run(new Date('2026-07-10T12:00:00.000Z'));
+  assert.strictEqual(first.reason, 'check_limit_reached');
+  assert.strictEqual(seen.size, 64);
+  await run(new Date('2026-07-10T12:01:00.000Z'));
+  assert.strictEqual(seen.size, 70, 'a second bounded run reaches every previously unattempted ticket');
+  assert.ok(rows.every((row) => row.ticketRefs[0].lastAttemptAt), 'attempt ordering is durably recorded');
+});
+
+test('ticket sync aborts a hung provider at the total wall-clock deadline', async () => {
+  const rows = [syncRow('q_deadline_1'), syncRow('q_deadline_2')];
+  let providerSignal;
+  const startedAt = Date.now();
+  const result = await ticketSync.syncTicketStatuses({
+    db: mutableSyncDb(rows),
+    channels: new Map([['jira', JIRA_CHANNEL]]),
+    totalTimeoutMs: 25,
+    fetchImpl: async (_url, opts) => new Promise((resolve, reject) => {
+      providerSignal = opts.signal;
+      opts.signal.addEventListener('abort', () => reject(opts.signal.reason), { once: true });
+    }),
+  });
+
+  assert.ok(Date.now() - startedAt < 1000, 'total deadline stops serial provider work promptly');
+  assert.strictEqual(providerSignal.aborted, true);
+  assert.strictEqual(result.status, 'partial');
+  assert.strictEqual(result.reason, 'deadline_exceeded');
+  assert.strictEqual(result.checked, 1);
+  assert.strictEqual(result.matched, 2);
+  assert.strictEqual(result.checksAttempted, 1);
+  assert.strictEqual(result.succeeded, 0);
+  assert.strictEqual(result.failed, 0, 'deadline cancellation is not mislabeled as a provider failure');
+});
+
+test('ticket sync request cancellation propagates when the client disconnects', async () => {
+  let sharedSignal;
+  let providerSignal;
+  const handler = ticketSync.createTicketSyncRequestHandler(({ signal }) => {
+    sharedSignal = signal;
+    return ticketSync.syncTicketStatuses({
+      db: { listQueries: () => [syncRow('q_disconnect')] },
+      channels: new Map([['jira', JIRA_CHANNEL]]),
+      signal,
+      fetchImpl: async (_url, opts) => new Promise((resolve, reject) => {
+        providerSignal = opts.signal;
+        opts.signal.addEventListener('abort', () => reject(opts.signal.reason), { once: true });
+      }),
+    });
+  });
+  const request = fakeRequest(false);
+  const response = fakeResponse();
+  const pending = handler(request, response, (err) => { throw err; });
+
+  request.emit('close');
+  await pending;
+
+  assert.strictEqual(sharedSignal.aborted, true);
+  assert.strictEqual(sharedSignal.reason.code, 'client_disconnected');
+  assert.strictEqual(providerSignal.aborted, true, 'disconnect reaches the in-flight provider fetch');
+  assert.strictEqual(response.body, null, 'a disconnected socket receives no late response');
+  assert.strictEqual(request.listenerCount('close'), 0);
+  assert.strictEqual(response.listenerCount('close'), 0);
+});
+
+test('ticket sync request rejects overlap and releases single-flight after completion', async () => {
+  let releaseFirst;
+  let runs = 0;
+  const firstGate = new Promise((resolve) => { releaseFirst = resolve; });
+  const handler = ticketSync.createTicketSyncRequestHandler(async () => {
+    runs += 1;
+    if (runs === 1) return firstGate;
+    return completedSyncResult();
+  });
+  const firstResponse = fakeResponse();
+  const first = handler(fakeRequest(), firstResponse, (err) => { throw err; });
+
+  const overlapResponse = fakeResponse();
+  await handler(fakeRequest(), overlapResponse, (err) => { throw err; });
+  assert.strictEqual(overlapResponse.statusCode, 409);
+  assert.deepStrictEqual(overlapResponse.body, { status: 'busy', reason: 'ticket_sync_in_progress' });
+  assert.strictEqual(runs, 1, 'overlap never starts another provider sweep');
+
+  releaseFirst(completedSyncResult());
+  await first;
+  assert.strictEqual(firstResponse.statusCode, 200);
+  assert.strictEqual(firstResponse.body.status, 'complete');
+
+  const nextResponse = fakeResponse();
+  await handler(fakeRequest(), nextResponse, (err) => { throw err; });
+  assert.strictEqual(runs, 2, 'single-flight is released only after the prior run settles');
+  assert.strictEqual(nextResponse.body.status, 'complete');
 });
 
 test('linear status fetch uses the graphql state shape', async () => {

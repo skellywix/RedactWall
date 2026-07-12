@@ -1,12 +1,19 @@
-import type { FocusEvent, MouseEvent, ReactElement } from 'react';
-import type { LiveState } from '../lib/shell';
+import type { ReactElement, RefObject } from 'react';
+import type { LiveState, PostureState } from '../lib/shell';
 import LiveStatus from './LiveStatus';
 import ThemeToggle from './ThemeToggle';
 
 interface TopbarProps {
   who: string;
   liveState: LiveState;
+  postureState: PostureState;
   lastUpdated: string;
+  routeLabel: string;
+  contextLabel: string;
+  navOpen: boolean;
+  menuButtonRef: RefObject<HTMLButtonElement | null>;
+  paletteButtonRef: RefObject<HTMLButtonElement | null>;
+  onOpenNav: () => void;
   onOpenPalette: () => void;
   onSignOut: () => void;
 }
@@ -18,42 +25,61 @@ const SEARCH_ICON = (
 const LOGOUT_ICON = (
   <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M10 6H6v12h4m4-3 3-3-3-3m3 3H9" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg>
 );
+const MENU_ICON = (
+  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" /></svg>
+);
 
-export default function Topbar({ who, liveState, lastUpdated, onOpenPalette, onSignOut }: TopbarProps): ReactElement {
-  // The input never keeps focus: blur before opening so closing the palette
-  // cannot restore focus here and immediately re-open it.
-  const openFromMouse = (event: MouseEvent<HTMLElement>) => {
-    event.preventDefault();
-    onOpenPalette();
-  };
-  const openFromFocus = (event: FocusEvent<HTMLInputElement>) => {
-    event.currentTarget.blur();
-    onOpenPalette();
-  };
-
+export default function Topbar({
+  who,
+  liveState,
+  postureState,
+  lastUpdated,
+  routeLabel,
+  contextLabel,
+  navOpen,
+  menuButtonRef,
+  paletteButtonRef,
+  onOpenNav,
+  onOpenPalette,
+  onSignOut,
+}: TopbarProps): ReactElement {
   return (
     <header className="app-topbar">
-      <label className="search" htmlFor="globalSearch">
+      <button
+        ref={menuButtonRef}
+        className="app-menu-button ghost"
+        type="button"
+        aria-label="Open navigation menu"
+        aria-controls="primary-navigation"
+        aria-expanded={navOpen}
+        onClick={onOpenNav}
+      >
+        {MENU_ICON}
+      </button>
+      <div className="app-route-context" aria-live="polite">
+        <strong>{routeLabel}</strong>
+        <span>{contextLabel}</span>
+      </div>
+      <button
+        ref={paletteButtonRef}
+        className="search app-palette-launcher"
+        id="globalSearch"
+        type="button"
+        aria-label="Open the command palette"
+        aria-keyshortcuts="Control+K Meta+K"
+        onClick={onOpenPalette}
+      >
         {SEARCH_ICON}
-        <input
-          id="globalSearch"
-          type="search"
-          autoComplete="off"
-          readOnly
-          placeholder="Search FCU evidence or actions"
-          aria-label="Open the command palette"
-          onMouseDown={openFromMouse}
-          onFocus={openFromFocus}
-        />
+        <span>Search FCU evidence or actions</span>
         <kbd aria-hidden="true">Ctrl K</kbd>
-      </label>
+      </button>
       <div className="spacer"></div>
-      <LiveStatus state={liveState} lastUpdated={lastUpdated} />
+      <LiveStatus state={liveState} postureState={postureState} lastUpdated={lastUpdated} />
       <ThemeToggle />
-      <span className="who" id="who">{who}</span>
+      <span className="who" id="who" title={who}>{who}</span>
       <button className="ghost" id="logout" type="button" onClick={onSignOut}>
         {LOGOUT_ICON}
-        Sign out
+        <span>Sign out</span>
       </button>
     </header>
   );

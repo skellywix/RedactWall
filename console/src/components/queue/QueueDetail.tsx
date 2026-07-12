@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { fetchAuditForQuery, type AuditEntry } from '../../api/audit';
-import type { AssignmentPatch, QueueQuery, RevealResult } from '../../api/queries';
+import { fetchAuditForQuery, type QueryAuditResult } from '../../api/audit';
+import { isHeldQueryStatus, type AssignmentPatch, type QueueQuery, type RevealResult } from '../../api/queries';
 import type { Me } from '../../lib/session';
 import { EmptyState } from '../Panel';
 import { FindingChips } from './FindingChips';
@@ -100,7 +100,7 @@ function RevealControl({ query, reveal, me, busy, onReveal }: { query: QueueQuer
 }
 
 function DecisionControls({ query, me, busy, note, onNote, onApprove, onDeny, onReveal, reveal }: QueueDetailProps & { query: QueueQuery }) {
-  if (query.status !== 'pending') {
+  if (!isHeldQueryStatus(query.status)) {
     return query.decisionNote ? <div className="readonly-note">Note: {query.decisionNote}</div> : null;
   }
   if (!canDecide(me, query)) {
@@ -142,7 +142,7 @@ function ReassignControl({ query, me, busy, onAssign }: { query: QueueQuery; me:
     setGroup(query.assignedGroup ?? '');
     setRole(query.assignedRole ?? '');
   }, [query.id, query.assignedUser, query.assignedGroup, query.assignedRole]);
-  if (me?.role !== 'security_admin' || query.status !== 'pending') return null;
+  if (me?.role !== 'security_admin' || !isHeldQueryStatus(query.status)) return null;
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
     onAssign(query.id, { assignedUser: user.trim(), assignedGroup: group.trim(), assignedRole: role.trim() });
@@ -174,22 +174,65 @@ function ReassignControl({ query, me, busy, onAssign }: { query: QueueQuery; me:
 
 /** Item-level audit trail for the selected incident, oldest event first. */
 function QueryAuditTrail({ queryId }: { queryId: string }) {
-  const [entries, setEntries] = useState<AuditEntry[] | null>(null);
+  const [history, setHistory] = useState<QueryAuditResult | { kind: 'loading' }>({ kind: 'loading' });
   useEffect(() => {
     let cancelled = false;
-    setEntries(null);
-    void fetchAuditForQuery(queryId).then((rows) => {
-      if (!cancelled) setEntries(rows);
-    });
+    setHistory({ kind: 'loading' });
+    void fetchAuditForQuery(queryId)
+      .then((result) => {
+        if (!cancelled) setHistory(result);
+      })
+      .catch(() => {
+        if (!cancelled) setHistory({ kind: 'unavailable', reason: 'unavailable_or_malformed' });
+      });
     return () => {
       cancelled = true;
     };
   }, [queryId]);
-  if (!entries?.length) return null;
-  const chronological = [...entries].reverse();
+  if (history.kind === 'loading') {
+    return (
+      <div className="query-audit" role="status" aria-live="polite">
+        <label>Audit trail</label>
+        <div className="readonly-note">Loading verified audit history…</div>
+      </div>
+    );
+  }
+  if (history.kind === 'unavailable') {
+    const detail = history.reason === 'integrity_failure'
+      ? 'Audit history integrity could not be verified. Entries are withheld.'
+      : 'Audit history is unavailable or malformed. No empty-history conclusion can be drawn.';
+    return (
+      <div className="query-audit" role="alert">
+        <label>Audit trail</label>
+        <div className="readonly-note">{detail}</div>
+      </div>
+    );
+  }
+  if (!history.entries.length) {
+    const detail = history.window.complete
+      ? 'Audit chain verified. The complete retained audit set has no entries for this incident.'
+      : 'Audit chain verified. No entries were found in the verified recent window; older entries may exist.';
+    return (
+      <div className="query-audit" role="status">
+        <label>Audit trail</label>
+        <div className="readonly-note">{detail}</div>
+      </div>
+    );
+  }
+  const chronological = [...history.entries].reverse();
+  const omittedMatches = history.window.returnedEntries < history.window.matchedEntries;
+  let windowNote = '';
+  if (!history.window.complete) {
+    windowNote = omittedMatches
+      ? `Showing ${history.window.returnedEntries} of ${history.window.matchedEntries} matching entries found in the verified recent window; older entries may exist.`
+      : `Showing ${history.entries.length} matching entries from the verified recent window; older entries may exist.`;
+  } else if (omittedMatches) {
+    windowNote = `Showing ${history.window.returnedEntries} of ${history.window.matchedEntries} verified matching entries.`;
+  }
   return (
-    <div className="query-audit">
+    <div className="query-audit" aria-label="Verified audit trail">
       <label>Audit trail</label>
+      {windowNote ? <div className="readonly-note">{windowNote}</div> : null}
       <ul className="query-audit-list">
         {chronological.map((entry) => (
           <li key={entry.id}>
@@ -217,13 +260,13 @@ export function QueueDetail(props: QueueDetailProps) {
       <FindingChips findings={query.findings} categories={query.categories} />
       {(query.reasons || []).length ? <div className="reasons">{(query.reasons || []).join('; ')}</div> : null}
       <DecisionControls {...props} query={query} />
-      {query.status !== 'pending' ? (
+      {!isHeldQueryStatus(query.status) ? (
         <div className="actions">
           <RevealControl query={query} reveal={reveal} me={me} busy={busy} onReveal={onReveal} />
         </div>
       ) : null}
       <ReassignControl query={query} me={me} busy={busy} onAssign={onAssign} />
-      <QueryAuditTrail queryId={query.id} />
+      <QueryAuditTrail key={query.id} queryId={query.id} />
     </>
   );
 }

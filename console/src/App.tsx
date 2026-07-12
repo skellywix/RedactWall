@@ -1,12 +1,13 @@
-import { Suspense, lazy, useCallback, useEffect, useState, type ComponentType, type Dispatch, type LazyExoticComponent, type SetStateAction } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useRef, useState, type ComponentType, type LazyExoticComponent, type MouseEvent } from 'react';
 import CommandPalette, { type PaletteEntry } from './components/CommandPalette';
 import NavRail, { type NavItem } from './components/NavRail';
 import Topbar from './components/Topbar';
 import { NAV_ICONS } from './components/navIcons';
-import { apiJson, initCsrf } from './lib/api';
+import { api, apiErrorSummary, initCsrf } from './lib/api';
 import { navigate, useHashRoute } from './lib/router';
 import { roleLabel, useSession } from './lib/session';
 import { useShellData } from './lib/shell';
+import { toast } from './lib/toast';
 
 const Overview = lazy(() => import('./views/Overview'));
 const Queue = lazy(() => import('./views/Queue'));
@@ -79,6 +80,7 @@ const GROUPS: RouteGroup[] = [
 ];
 
 const ROUTES: Route[] = GROUPS.flatMap((group) => group.items);
+const LEGACY_ACTIVITY_VIEWS_KEY = 'redactwall.savedViews';
 
 function visibleGroupsForRole(role?: string | null): RouteGroup[] {
   return GROUPS
@@ -90,12 +92,22 @@ function visibleGroupsForRole(role?: string | null): RouteGroup[] {
 }
 
 async function signOut(): Promise<void> {
-  await apiJson('/api/logout', { method: 'POST' });
+  const response = await api('/api/logout', { method: 'POST', allowAuthError: true });
+  if (response?.status === 401) {
+    await apiErrorSummary(response, '');
+    window.location.href = '/login.html';
+    return;
+  }
+  if (!response?.ok) {
+    if (response) await apiErrorSummary(response, '');
+    toast('Sign out failed. Your current session remains open.', 'error');
+    return;
+  }
   window.location.href = '/login.html';
 }
 
-// Legacy palette parity: flip the theme by clicking the ThemeToggle button so
-// its pressed state stays in sync with the shared body[data-theme] attribute.
+// Keep palette theme changes on the same persisted control path as direct
+// theme-toggle clicks.
 function toggleColorTheme(): void {
   const next = document.body.dataset.theme === 'dark' ? 'light' : 'dark';
   document.querySelector<HTMLButtonElement>(`.theme-toggle [data-theme-choice="${next}"]`)?.click();
@@ -106,17 +118,18 @@ const PALETTE_ACTIONS: PaletteEntry[] = [
   { group: 'Actions', label: 'Sign out', icon: null, run: () => void signOut() },
 ];
 
-function usePaletteHotkey(setOpen: Dispatch<SetStateAction<boolean>>): void {
+function usePaletteHotkey(open: boolean, onOpen: () => void, onClose: () => void): void {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
-        setOpen((open) => !open);
+        if (open) onClose();
+        else if (!document.querySelector('dialog[open]')) onOpen();
       }
     };
     document.addEventListener('keydown', onKeyDown, true);
     return () => document.removeEventListener('keydown', onKeyDown, true);
-  }, [setOpen]);
+  }, [onClose, onOpen, open]);
 }
 
 export default function App() {
@@ -124,12 +137,21 @@ export default function App() {
   const { me, loading } = useSession();
   const [csrfReady, setCsrfReady] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [navOpen, setNavOpen] = useState(false);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const paletteButtonRef = useRef<HTMLButtonElement>(null);
   const shell = useShellData();
 
   useEffect(() => {
     initCsrf().finally(() => setCsrfReady(true));
   }, []);
-  usePaletteHotkey(setPaletteOpen);
+  useEffect(() => {
+    try {
+      localStorage.removeItem(LEGACY_ACTIVITY_VIEWS_KEY);
+    } catch {
+      // Storage can be blocked; cleanup must not prevent the authenticated UI.
+    }
+  }, []);
   const visibleGroups = visibleGroupsForRole(me?.role);
   const visibleRoutes = visibleGroups.flatMap((group) => group.items);
 
@@ -138,8 +160,33 @@ export default function App() {
   const active = visibleRoutes.find((r) => r.path === route.split('?')[0]) ?? visibleRoutes[0] ?? ROUTES[0];
   const View = active.view;
   const who = loading ? 'Signing in…' : me ? `${me.user} / ${roleLabel(me.role)}` : 'Session unavailable';
-  const openPalette = useCallback(() => setPaletteOpen(true), []);
+  const closeNav = useCallback(() => setNavOpen(false), []);
+  const openNav = useCallback(() => {
+    setPaletteOpen(false);
+    setNavOpen(true);
+  }, []);
+  const openPalette = useCallback(() => {
+    setNavOpen(false);
+    setPaletteOpen(true);
+  }, []);
   const closePalette = useCallback(() => setPaletteOpen(false), []);
+  usePaletteHotkey(paletteOpen, openPalette, closePalette);
+
+  useEffect(() => closeNav(), [closeNav, route]);
+  useEffect(() => {
+    const desktop = window.matchMedia('(min-width: 901px)');
+    const closeAtDesktop = () => {
+      if (desktop.matches) closeNav();
+    };
+    closeAtDesktop();
+    desktop.addEventListener('change', closeAtDesktop);
+    return () => desktop.removeEventListener('change', closeAtDesktop);
+  }, [closeNav]);
+
+  const skipToContent = (event: MouseEvent<HTMLAnchorElement>) => {
+    event.preventDefault();
+    document.getElementById('main-content')?.focus({ preventScroll: false });
+  };
   const paletteEntries: PaletteEntry[] = [
     ...visibleRoutes.map((visibleRoute) => ({
       group: 'Navigate',
@@ -152,10 +199,35 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <NavRail groups={visibleGroups} activePath={active.path} pending={shell.pending} surfaces={shell.surfaces} version={shell.version} />
+      <a className="skip-link" href="#main-content" onClick={skipToContent}>Skip to main content</a>
+      <NavRail
+        groups={visibleGroups}
+        activePath={active.path}
+        held={shell.held}
+        surfaces={shell.surfaces}
+        postureState={shell.postureState}
+        postureUpdatedAt={shell.lastUpdated}
+        version={shell.version}
+        mobileOpen={navOpen}
+        returnFocusRef={menuButtonRef}
+        onClose={closeNav}
+      />
       <div className="app-main">
-        <Topbar who={who} liveState={shell.liveState} lastUpdated={shell.lastUpdated} onOpenPalette={openPalette} onSignOut={() => void signOut()} />
-        <main className="app-content">
+        <Topbar
+          who={who}
+          liveState={shell.liveState}
+          postureState={shell.postureState}
+          lastUpdated={shell.lastUpdated}
+          routeLabel={active.label}
+          contextLabel="Texas FCU · Authenticated console"
+          navOpen={navOpen}
+          menuButtonRef={menuButtonRef}
+          paletteButtonRef={paletteButtonRef}
+          onOpenNav={openNav}
+          onOpenPalette={openPalette}
+          onSignOut={() => void signOut()}
+        />
+        <main id="main-content" className="app-content" tabIndex={-1} aria-busy={!csrfReady}>
           {csrfReady ? (
             <Suspense fallback={<div className="app-loading">Loading view…</div>}>
               <View />
@@ -165,7 +237,7 @@ export default function App() {
           )}
         </main>
       </div>
-      {paletteOpen ? <CommandPalette entries={paletteEntries} onClose={closePalette} /> : null}
+      {paletteOpen ? <CommandPalette entries={paletteEntries} returnFocusRef={paletteButtonRef} onClose={closePalette} /> : null}
     </div>
   );
 }

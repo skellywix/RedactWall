@@ -36,7 +36,7 @@ test('login page discovers optional OIDC without exposing secrets', () => {
   assert.match(server, /app\.get\('\/api\/login-options'/);
   assert.match(server, /oidc\.publicOptions\(\)/);
   assert.match(loginHtml, /id="oidc" hidden/);
-  assert.match(loginJs, /fetch\('\/api\/login-options'\)/);
+  assert.match(loginJs, /fetch\('\/api\/login-options', \{ redirect: 'error' \}\)/);
   assert.match(loginJs, /location\.href = body\.oidc\.startUrl/);
   assert.doesNotMatch(loginJs, /OIDC_CLIENT_SECRET|client_secret/i);
 });

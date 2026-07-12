@@ -20,7 +20,13 @@ function resolveChromiumExecutable() {
   try {
     const dirs = fs.readdirSync(browsersRoot).filter((n) => /^chromium-\d+$/.test(n));
     for (const dir of dirs) {
-      for (const rel of ['chrome-linux/chrome', 'chrome-linux64/chrome', 'chrome-mac/Chromium.app/Contents/MacOS/Chromium']) {
+      for (const rel of [
+        'chrome-linux/chrome',
+        'chrome-linux64/chrome',
+        'chrome-mac/Chromium.app/Contents/MacOS/Chromium',
+        'chrome-win/chrome.exe',
+        'chrome-win64/chrome.exe',
+      ]) {
         const candidate = path.join(browsersRoot, dir, rel);
         if (fs.existsSync(candidate)) return candidate;
       }
@@ -28,7 +34,7 @@ function resolveChromiumExecutable() {
   } catch { /* fall through to default resolution */ }
   return undefined;
 }
-const chromiumExecutablePath = resolveChromiumExecutable();
+const chromiumExecutablePath = process.env.PLAYWRIGHT_CHROMIUM_PATH || resolveChromiumExecutable();
 const artifactDir = path.join(root, 'test-results', 'browser-extension');
 const fixturePolicy = {
   enforcementMode: 'block',
@@ -530,7 +536,36 @@ async function expectElementInsideViewport(page, locator) {
   expect(box.x + box.width).toBeLessThanOrEqual(viewport.width + 1);
 }
 
+async function expectUiMotionSettled(locator) {
+  await expect(locator).toBeVisible();
+  await expect.poll(
+    () => locator.evaluate((element) => (
+      element.getAnimations({ subtree: true }).every((animation) => animation.playState === 'finished')
+    )),
+    { timeout: 5000, intervals: [25, 50, 100] },
+  ).toBe(true);
+}
+
 test.describe('browser extension live smoke', () => {
+  let policyBeforeTest;
+
+  test.beforeEach(async ({ request }) => {
+    await loginAdminApi(request);
+    const response = await request.get('/api/policy');
+    expect(response.ok()).toBeTruthy();
+    policyBeforeTest = await response.json();
+  });
+
+  test.afterEach(async ({ request }) => {
+    if (!policyBeforeTest) return;
+    const csrfToken = await loginAdminApi(request);
+    const response = await request.put('/api/policy', {
+      headers: { 'x-csrf-token': csrfToken },
+      data: policyBeforeTest,
+    });
+    expect(response.ok()).toBeTruthy();
+    policyBeforeTest = null;
+  });
   test.setTimeout(90000);
 
   test('blocks a synthetic SSN, polls its approval, and resumes only after release', async ({ baseURL, request }, testInfo) => {
@@ -566,7 +601,7 @@ test.describe('browser extension live smoke', () => {
       await page.locator('button[data-testid="send-button"]').click();
       await expect(page.locator('.ps-banner')).toBeVisible();
       await expect(page.locator('[data-sent]')).toHaveCount(0);
-      await page.waitForTimeout(200);
+      await expectUiMotionSettled(blockBanner);
       fs.mkdirSync(artifactDir, { recursive: true });
       await page.screenshot({ path: path.join(artifactDir, 'chatgpt-blocked.png'), fullPage: true });
 
@@ -746,7 +781,7 @@ test.describe('browser extension live smoke', () => {
       await expect(page.locator('.ps-banner')).not.toContainText('US_SSN');
       await expect(page.locator('.ps-coach')).toContainText('member ID');
       await expect(page.locator('[data-sent]')).toHaveCount(0);
-      await page.waitForTimeout(200);
+      await expectUiMotionSettled(page.locator('.ps-banner'));
       fs.mkdirSync(artifactDir, { recursive: true });
       await page.screenshot({ path: path.join(artifactDir, 'poe-blocked.png'), fullPage: true });
     } finally {
@@ -783,10 +818,12 @@ test.describe('browser extension live smoke', () => {
       });
 
       expect(prevented).toBe(true);
-      await expect(page.locator('.ps-toast')).toContainText('blocked file drops');
-      await expect(page.locator('.ps-toast')).not.toContainText('member-loan.txt');
+      const dropToast = page.locator('.ps-toast');
+      await expect(dropToast).toContainText('blocked file drops');
+      await expect(dropToast).toContainText('recorded the decision');
+      await expect(dropToast).not.toContainText('member-loan.txt');
       await expect(page.locator('[data-sent]')).toHaveCount(0);
-      await page.waitForTimeout(200);
+      await expectUiMotionSettled(dropToast);
       fs.mkdirSync(artifactDir, { recursive: true });
       await page.screenshot({ path: path.join(artifactDir, 'chatgpt-drop-blocked.png'), fullPage: true });
     } finally {
@@ -980,10 +1017,12 @@ test.describe('browser extension live smoke', () => {
       const prevented = await syntheticCopyFromResponse(page, 'Synthetic response contains member SSN 123-45-6789');
 
       expect(prevented).toBe(true);
-      await expect(page.locator('.ps-toast')).toContainText('blocked copy');
-      await expect(page.locator('.ps-toast')).not.toContainText('123-45-6789');
+      const copyToast = page.locator('.ps-toast');
+      await expect(copyToast).toContainText('blocked copy');
+      await expect(copyToast).toContainText('recorded the decision');
+      await expect(copyToast).not.toContainText('123-45-6789');
       await expect(page.locator('[data-sent]')).toHaveCount(0);
-      await page.waitForTimeout(200);
+      await expectUiMotionSettled(copyToast);
       fs.mkdirSync(artifactDir, { recursive: true });
       await page.screenshot({ path: path.join(artifactDir, 'chatgpt-copy-blocked.png'), fullPage: true });
     } finally {

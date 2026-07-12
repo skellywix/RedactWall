@@ -252,15 +252,18 @@ test('legitimate state transition keeps evidence binding intact', () => {
   assert.strictEqual(db.verifyAuditChain().ok, true, 'transition + its audit event stay consistent');
 });
 
-test('stats count only real blocked statuses for todayBlocked', () => {
-  const before = db.stats().todayBlocked;
-  for (const status of ['pending', 'file_blocked_unscanned', 'response_flagged', 'response_blocked', 'action_blocked']) {
+test('stats count the configured guardrail-attention statuses for todayBlocked', () => {
+  const before = db.stats();
+  for (const status of ['pending', 'pending_justification', 'file_blocked_unscanned', 'response_flagged', 'response_blocked', 'action_blocked']) {
     createQuery({ status, user: 'metric', redactedPrompt: '[' + status + ']' });
   }
   for (const status of ['allowed', 'redacted', 'response_redacted', 'paste_flagged', 'shadow_ai', 'warned_sent', 'justified']) {
     createQuery({ status, user: 'metric', redactedPrompt: '[' + status + ']' });
   }
-  assert.strictEqual(db.stats().todayBlocked - before, 5);
+  const after = db.stats();
+  assert.strictEqual(after.todayBlocked - before.todayBlocked, 6);
+  assert.strictEqual(after.pending - before.pending, 1, 'legacy pending remains exact approval-pending');
+  assert.strictEqual(after.held - before.held, 2, 'held combines approval and justification queues');
 });
 
 test('seat stats count unique billable users by tenant', () => {

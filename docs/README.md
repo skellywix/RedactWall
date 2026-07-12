@@ -2,7 +2,7 @@
 
 Use this index when you know the job but not the file name. Files are
 organized by topic: `deployment/`, `demo/`, `identity/`, `connectors/`,
-`reference/`, `security/`, `product/`, and `process/`.
+`reference/`, `security/`, `product/`, `process/`, and `frontend/`.
 
 ## Start Here
 
@@ -15,6 +15,13 @@ organized by topic: `deployment/`, `demo/`, `identity/`, `connectors/`,
 | Run a sales or customer demo | `../DEMO_INSTALL_GUIDE.md` |
 | Present the client-facing story | `demo/SALES_DEMO_GUIDE.md` |
 | Prepare a demo machine | `demo/DEMO_TECHNICIAN_SETUP.md` |
+| Maintain the console design system | `frontend/DESIGN_SYSTEM.md` |
+
+## Frontend (`frontend/`)
+
+| Topic | Document |
+|-------|----------|
+| Console design tokens, shared states, responsive rules, and accessibility contract | `frontend/DESIGN_SYSTEM.md` |
 
 ## Deployment (`deployment/`)
 

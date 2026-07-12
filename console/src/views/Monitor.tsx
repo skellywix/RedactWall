@@ -1,11 +1,30 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { api, apiErrorSummary, apiJson } from '../lib/api';
+import { validZipArchive } from '../api/evidence';
 import { fetchQueue, type QueueQuery } from '../api/queries';
 import { EmptyState } from '../components/Panel';
+import {
+  CommandCenterBrief,
+  type BriefTone,
+  type CommandCenterBriefItem,
+} from '../components/monitor/CommandCenterBrief';
+import {
+  MonitorWorkspaceGroup,
+  MonitorWorkspaceNav,
+  type MonitorWorkspaceItem,
+} from '../components/monitor/MonitorWorkspace';
+import { api, apiErrorSummary, apiJsonBounded, responseBytesBounded, responseJsonBounded } from '../lib/api';
 import { navigate } from '../lib/router';
 import { useSession } from '../lib/session';
 import { useEventStream } from '../lib/sse';
+import { decodeSocNotifyResponse, isCompleteSiemPackageResponse } from '../lib/strict-console-response';
 import { toast } from '../lib/toast';
+import './Monitor.css';
+
+const POSTURE_RESPONSE_MAX_BYTES = 8 * 1024 * 1024;
+const FEEDBACK_RESPONSE_MAX_BYTES = 4 * 1024 * 1024;
+const SIEM_JSON_MAX_BYTES = 4 * 1024 * 1024;
+const SIEM_ZIP_MAX_BYTES = 16 * 1024 * 1024;
+const NOTIFY_RESPONSE_MAX_BYTES = 64 * 1024;
 
 /**
  * AI Command Center (legacy tab-monitor). One GET /api/posture payload drives
@@ -55,6 +74,9 @@ interface ProofItem {
   detail?: string;
   evidenceAt?: string | null;
   areaLabel?: string;
+  source?: string;
+  action?: string;
+  targetTab?: string;
 }
 
 interface ProofLedger {
@@ -92,17 +114,26 @@ interface HardeningArea {
 }
 
 interface MissionCurrent {
+  id?: string;
   label?: string;
   areaLabel?: string;
+  status?: string;
   detail?: string;
   command?: string;
   validation?: string;
+  targetTab?: string;
+  owner?: string;
+  source?: string;
 }
 
 interface MissionLaneInfo {
   id: string;
   label?: string;
   state?: string;
+  status?: string;
+  score?: number;
+  owner?: string;
+  source?: string;
   targetTab?: string;
   done?: number;
   total?: number;
@@ -113,7 +144,7 @@ interface HardeningMission {
   title?: string;
   state?: string;
   status?: string;
-  progress?: { percent?: number };
+  progress?: { done?: number; total?: number; open?: number; percent?: number };
   current?: MissionCurrent | null;
   proofLedger?: ProofLedger;
   lanes?: MissionLaneInfo[];
@@ -131,6 +162,9 @@ interface SegmentFilterInfo {
   id: string;
   typeLabel?: string;
   label?: string;
+  state?: string;
+  events?: number;
+  controlRate?: number;
 }
 
 interface SegmentCardInfo extends SegmentFilterInfo {
@@ -143,7 +177,15 @@ interface SegmentsReport {
   active?: SegmentCardInfo | null;
   filters?: SegmentFilterInfo[];
   matrix?: SegmentCardInfo[];
-  summary?: { selectedId?: string; visibleEvents?: number; attention?: number; privacy?: string };
+  summary?: {
+    selectedId?: string;
+    visibleEvents?: number;
+    total?: number;
+    critical?: number;
+    attention?: number;
+    ready?: number;
+    privacy?: string;
+  };
 }
 
 interface BaselineDimension {
@@ -157,7 +199,7 @@ interface BaselineDimension {
 }
 
 interface BehaviorBaselinesReport {
-  summary?: { anomalies?: number; critical?: number; warning?: number };
+  summary?: { activeEvents?: number; anomalies?: number; critical?: number; warning?: number };
   dimensions?: BaselineDimension[];
 }
 
@@ -456,6 +498,9 @@ interface Posture {
   controls?: ControlOutcome[];
 }
 
+type PostureLoadState = 'loading' | 'switching' | 'ready' | 'partial' | 'stale' | 'unavailable';
+type AuxiliaryLoadState = 'loading' | 'ready' | 'stale' | 'unavailable';
+
 // ---------------------------------------------------------------------------
 // Detector feedback + SIEM package types
 // ---------------------------------------------------------------------------
@@ -483,6 +528,8 @@ interface FeedbackCandidate {
   destination?: string;
   status?: string;
   riskScore?: number;
+  /** Server-derived authority for this exact query and signed-in requester. */
+  canFeedback?: boolean;
 }
 
 interface FeedbackQualitySummary {
@@ -519,9 +566,12 @@ interface SiemTransport {
 
 interface SiemPrivacyFlags {
   rawPromptBodies?: boolean;
+  redactedPromptBodies?: boolean;
   tokenVaultValues?: boolean;
   rawFindingValues?: boolean;
+  secretsOrCredentials?: boolean;
   rawUrlsOrFilePaths?: boolean;
+  sampleData?: string;
 }
 
 interface SiemProfile {
@@ -540,7 +590,7 @@ interface SiemProfile {
 }
 
 interface SiemPackage {
-  summary?: { searches?: number; samplePayloads?: number; packageFiles?: number };
+  summary?: { profileCount?: number; searches?: number; samplePayloads?: number; dashboards?: number; packageFiles?: number };
   privacy?: SiemPrivacyFlags;
   profiles?: SiemProfile[];
 }
@@ -556,6 +606,150 @@ const fmtTime = (iso?: string | null) =>
 function num(value: unknown): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function isReportedNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function isReportedText(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function reportedArrayCount<T>(items: T[] | undefined, singular: string, plural = `${singular}s`): string {
+  if (!Array.isArray(items)) return `${plural} not reported`;
+  return `${items.length} ${items.length === 1 ? singular : plural}`;
+}
+
+function reportedNumberCount(value: unknown, singular: string, plural = `${singular}s`): string {
+  if (!isReportedNumber(value)) return `${plural} not reported`;
+  return `${value} ${value === 1 ? singular : plural}`;
+}
+
+function hasReportedNumbers(values: unknown[]): boolean {
+  return values.every(isReportedNumber);
+}
+
+function hasUniqueReportedIds(rows: Array<{ id?: string }>): boolean {
+  const ids = rows.map((row) => row.id);
+  return ids.every(isReportedText) && new Set(ids).size === ids.length;
+}
+
+function reportedStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => isReportedText(item));
+}
+
+function proofItemReported(item: ProofItem | null | undefined): item is ProofItem {
+  return Boolean(
+    item
+    && isReportedText(item.id)
+    && isReportedText(item.label)
+    && isReportedText(item.status)
+    && isReportedText(item.detail)
+    && (item.evidenceAt === null || item.evidenceAt === undefined || typeof item.evidenceAt === 'string')
+  );
+}
+
+function proofLedgerReported(ledger: ProofLedger | null | undefined, requireCurrent = false): ledger is ProofLedger {
+  if (!ledger || !hasReportedNumbers([ledger.verified, ledger.attention, ledger.missing, ledger.total])) return false;
+  if (num(ledger.verified) + num(ledger.attention) + num(ledger.missing) !== ledger.total) return false;
+  if (requireCurrent && !Object.prototype.hasOwnProperty.call(ledger, 'current')) return false;
+  return ledger.current === null || ledger.current === undefined || proofItemReported(ledger.current);
+}
+
+function playbookStepReported(step: PlaybookStep): boolean {
+  return isReportedText(step.id)
+    && isReportedText(step.label)
+    && isReportedText(step.status)
+    && isReportedText(step.detail)
+    && (step.command === undefined || typeof step.command === 'string')
+    && (step.validation === undefined || typeof step.validation === 'string');
+}
+
+function hardeningAreaReported(area: HardeningArea): boolean {
+  if (!isReportedText(area.id) || !isReportedText(area.label) || !isReportedText(area.description)) return false;
+  if (!isReportedNumber(area.score) || !isReportedText(area.state) || !isReportedText(area.owner) || !isReportedText(area.source)) return false;
+  if (!reportedStringArray(area.evidence) || !reportedStringArray(area.gaps)) return false;
+  if (!Array.isArray(area.proofs) || !area.proofs.every(proofItemReported)) return false;
+  if (!proofLedgerReported(area.proofLedger) || area.proofLedger.total !== area.proofs.length) return false;
+  return Array.isArray(area.playbook) && area.playbook.every(playbookStepReported);
+}
+
+function missionCurrentReported(current: MissionCurrent | null | undefined): boolean {
+  if (current === null) return true;
+  return Boolean(
+    current
+    && isReportedText(current.id)
+    && isReportedText(current.label)
+    && isReportedText(current.areaLabel)
+    && isReportedText(current.status)
+    && isReportedText(current.detail)
+    && typeof current.command === 'string'
+    && typeof current.validation === 'string'
+  );
+}
+
+function missionLaneReported(lane: MissionLaneInfo): boolean {
+  return isReportedText(lane.id)
+    && isReportedText(lane.label)
+    && isReportedText(lane.state)
+    && isReportedText(lane.status)
+    && isReportedNumber(lane.score)
+    && isReportedText(lane.owner)
+    && isReportedText(lane.source)
+    && isReportedText(lane.targetTab)
+    && hasReportedNumbers([lane.done, lane.total])
+    && num(lane.done) <= num(lane.total)
+    && isReportedText(lane.nextStep);
+}
+
+function hardeningMissionReported(mission: HardeningMission | null | undefined, areaIds: Set<string>): boolean {
+  const progress = mission?.progress;
+  const lanes = mission?.lanes;
+  if (!mission || !isReportedText(mission.title) || !isReportedText(mission.state) || !isReportedText(mission.status)) return false;
+  if (!progress || !hasReportedNumbers([progress.done, progress.total, progress.open, progress.percent])) return false;
+  if (num(progress.done) + num(progress.open) !== progress.total || num(progress.percent) < 0 || num(progress.percent) > 100) return false;
+  if (!missionCurrentReported(mission.current) || !proofLedgerReported(mission.proofLedger, true)) return false;
+  return Array.isArray(lanes)
+    && lanes.every(missionLaneReported)
+    && hasUniqueReportedIds(lanes)
+    && lanes.length === areaIds.size
+    && lanes.every((lane) => areaIds.has(lane.id));
+}
+
+function hardeningReported(hardening: HardeningReport | null | undefined): boolean {
+  const areas = hardening?.areas;
+  if (!hardening || !isReportedNumber(hardening.score) || !isReportedText(hardening.state) || !Array.isArray(areas)) return false;
+  if (!areas.every(hardeningAreaReported) || !hasUniqueReportedIds(areas)) return false;
+  const areaIds = new Set(areas.map((area) => area.id));
+  const proofTotal = areas.reduce((sum, area) => sum + num(area.proofLedger?.total), 0);
+  return proofLedgerReported(hardening.proofLedger, true)
+    && hardening.proofLedger.total === proofTotal
+    && hardeningMissionReported(hardening.mission, areaIds)
+    && hardening.mission?.proofLedger?.total === proofTotal;
+}
+
+function actionQueueReported(rows: PostureAction[] | undefined): rows is PostureAction[] {
+  if (!Array.isArray(rows) || !hasUniqueReportedIds(rows)) return false;
+  return rows.every((item) => (
+    isReportedText(item.id)
+    && isReportedText(item.severity)
+    && isReportedText(item.category)
+    && isReportedText(item.label)
+    && isReportedText(item.detail)
+    && isReportedText(item.action)
+    && isReportedText(item.targetTab)
+    && isReportedText(item.workflowStatus)
+    && typeof item.workflowOwner === 'string'
+    && typeof item.workflowSnoozeUntil === 'string'
+    && typeof item.workflowUpdatedAt === 'string'
+    && isReportedText(item.workflowProofState)
+    && (item.command === undefined || typeof item.command === 'string')
+  ));
+}
+
+function reportedNumberValue(value: unknown): number | string {
+  return isReportedNumber(value) ? value : 'Not reported';
 }
 
 const clampPct = (value: number) => Math.max(5, Math.min(100, Math.round(value)));
@@ -597,7 +791,7 @@ function readinessTone(state?: string): string {
 function segmentTone(state?: string): string {
   if (state === 'critical') return 'critical';
   if (state === 'attention') return 'warning';
-  return 'ready';
+  return state === 'ready' ? 'ready' : 'warning';
 }
 
 const baselineTone = (state?: string) => (state === 'critical' ? 'critical' : state === 'warning' ? 'attention' : 'ready');
@@ -692,6 +886,14 @@ function actionWorkflowMeta(item: PostureAction): string {
   return parts.join(' / ');
 }
 
+function actionIsVerifiedComplete(item: PostureAction): boolean {
+  return item.workflowStatus === 'resolved' && ['resolved', 'verified', 'proof_verified'].includes(item.workflowProofState || '');
+}
+
+function actionNeedsAttention(item: PostureAction): boolean {
+  return !actionIsVerifiedComplete(item);
+}
+
 function metricJumpTarget(metricId: string): string {
   const id = metricId.toLowerCase();
   if (id.includes('sensor') || id.includes('coverage')) return 'coverage';
@@ -727,11 +929,18 @@ function jumpToTab(tab: string): void {
   if (route) navigate(route);
 }
 
-function scrollToAnchor(anchorId: string): void {
+function scrollToAnchor(anchorId: string, moveFocus = false): void {
   const target = document.getElementById(anchorId);
   if (!target) return;
+  const workspace = target instanceof HTMLDetailsElement ? target : target.closest('details');
+  if (workspace instanceof HTMLDetailsElement) workspace.open = true;
   const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   target.scrollIntoView({ block: 'start', behavior: reduce ? 'auto' : 'smooth' });
+  if (!moveFocus) return;
+  const focusTarget = workspace instanceof HTMLDetailsElement ? workspace.querySelector('summary') : target;
+  if (!(focusTarget instanceof HTMLElement)) return;
+  if (!focusTarget.matches('button,a,input,select,textarea,summary,[tabindex]')) focusTarget.tabIndex = -1;
+  focusTarget.focus({ preventScroll: true });
 }
 
 // ---------------------------------------------------------------------------
@@ -810,17 +1019,78 @@ function statusCounts(records: SignalRecordInfo[]): Record<string, number> {
   return counts;
 }
 
+function surfacesReported(surfaces: PostureSurfaceInfo[] | undefined): surfaces is PostureSurfaceInfo[] {
+  return Array.isArray(surfaces) && surfaces.every((surface) => (
+    isReportedText(surface.id)
+    && isReportedText(surface.name)
+    && isReportedText(surface.status)
+    && isReportedText(surface.source)
+    && hasReportedNumbers([surface.health, surface.confidence])
+  ));
+}
+
+function eventsReported(events: MonitorEventInfo[] | undefined): events is MonitorEventInfo[] {
+  return Array.isArray(events) && events.every((event) => (
+    isReportedText(event.id)
+    && isReportedText(event.timestamp)
+    && isReportedText(event.severity)
+    && isReportedText(event.status)
+    && isReportedText(event.source)
+    && isReportedText(event.title)
+    && isReportedText(event.description)
+    && isReportedNumber(event.confidence)
+  ));
+}
+
 // ---------------------------------------------------------------------------
 // Fetchers
 // ---------------------------------------------------------------------------
 
 function fetchMonitorPosture(segment: string): Promise<Posture | null> {
   const param = segment && segment !== 'all' ? `&segment=${encodeURIComponent(segment)}` : '';
-  return apiJson<Posture>(`/api/posture?limit=5000${param}`);
+  return apiJsonBounded<Posture>(`/api/posture?limit=5000${param}`, POSTURE_RESPONSE_MAX_BYTES);
+}
+
+/**
+ * A posture response may advance the visible scope only when the server binds
+ * it to that exact scope. Conflicting response metadata is treated as
+ * unverified rather than guessing which field is authoritative.
+ */
+function boundPostureSegment(report: Posture): string | null {
+  const summaryId = report.segments?.summary?.selectedId;
+  const activeId = report.segments?.active?.id;
+  if (!isReportedText(summaryId) || summaryId.length > 180) return null;
+  if (activeId !== undefined && activeId !== null && (!isReportedText(activeId) || activeId.length > 180)) return null;
+  if (summaryId && activeId && summaryId !== activeId) return null;
+  return summaryId;
+}
+
+function postureFullyReported(report: Posture): boolean {
+  return Boolean(
+    isReportedText(report.generatedAt)
+    && segmentsReported(report.segments ?? null)
+    && metricsReported(report.metrics)
+    && objectivesReported(report.objectives)
+    && actionQueueReported(report.actionQueue)
+    && hardeningReported(report.hardening)
+    && inventoryReported(report.aiInventory ?? null)
+    && agenticMcpReported(report.agenticMcp ?? null)
+    && threatGuardrailsReported(report.threatGuardrails ?? null)
+    && controlGraphReported(report.controlGraph ?? null)
+    && behaviorBaselinesReported(report.behaviorBaselines ?? null)
+    && decisionQualityReported(report.decisionQuality ?? null)
+    && trendReported(report.trend)
+    && controlsReported(report.controls)
+    && surfacesReported(report.surfaces)
+    && eventsReported(report.events)
+  );
 }
 
 function fetchFeedbackReport(): Promise<FeedbackReport | null> {
-  return apiJson<FeedbackReport>('/api/detector-feedback/report?queryLimit=1000&feedbackLimit=1000');
+  return apiJsonBounded<FeedbackReport>(
+    '/api/detector-feedback/report?queryLimit=1000&feedbackLimit=1000',
+    FEEDBACK_RESPONSE_MAX_BYTES,
+  );
 }
 
 interface PostureActionPayload {
@@ -868,18 +1138,22 @@ async function fetchSiemPackage(profile: string): Promise<{ pkg: SiemPackage | n
   if (!response || !response.ok) {
     return { pkg: null, error: response && response.status === 400 ? 'unsupported_profile' : 'load_failed' };
   }
-  try {
-    return { pkg: (await response.json()) as SiemPackage, error: '' };
-  } catch {
-    return { pkg: null, error: 'load_failed' };
-  }
+  const pkg = await responseJsonBounded<unknown>(response, SIEM_JSON_MAX_BYTES);
+  return isCompleteSiemPackageResponse(pkg)
+    ? { pkg: pkg as SiemPackage, error: '' }
+    : { pkg: null, error: 'unverified_package' };
 }
 
 /** Returns a toast-safe error summary, or null when the ZIP download started. */
 async function downloadSiemZip(profile: string): Promise<string | null> {
   const response = await api(`/api/integrations/siem/package?profile=${encodeURIComponent(profile)}&format=zip`);
   if (!response || !response.ok) return apiErrorSummary(response, 'SIEM package download failed');
-  const url = URL.createObjectURL(await response.blob());
+  const contentType = String(response.headers.get('content-type') || '').split(';', 1)[0].trim().toLowerCase();
+  const bytes = contentType === 'application/zip'
+    ? await responseBytesBounded(response, SIEM_ZIP_MAX_BYTES)
+    : null;
+  if (!bytes || !validZipArchive(bytes)) return 'SIEM package download failed: malformed or oversized archive';
+  const url = URL.createObjectURL(new Blob([bytes], { type: 'application/zip' }));
   const link = Object.assign(document.createElement('a'), {
     href: url,
     download: `redactwall-siem-${profile || 'all'}-package.zip`,
@@ -898,48 +1172,77 @@ async function downloadSiemZip(profile: string): Promise<string | null> {
 function usePosture(segment: string) {
   const [report, setReport] = useState<Posture | null>(null);
   const [lastUpdated, setLastUpdated] = useState(() => new Date().toISOString());
+  const [state, setState] = useState<PostureLoadState>('loading');
+  const [verifiedSegment, setVerifiedSegment] = useState('all');
+  const hasReport = useRef(false);
+  const verifiedSegmentRef = useRef('all');
   // Monotonic request id: a slow posture build for a superseded segment must not
   // overwrite the report the user is now looking at.
   const reqId = useRef(0);
   const load = useCallback(async () => {
     const seq = ++reqId.current;
+    if (!hasReport.current) setState('loading');
+    else if (segment !== verifiedSegmentRef.current) setState('switching');
     const body = await fetchMonitorPosture(segment);
     if (seq !== reqId.current) return body;
-    if (body) {
+    const nextVerifiedSegment = body ? boundPostureSegment(body) : null;
+    if (body && nextVerifiedSegment === segment) {
+      hasReport.current = true;
+      verifiedSegmentRef.current = nextVerifiedSegment;
+      setVerifiedSegment(nextVerifiedSegment);
       setReport(body);
       setLastUpdated(body.generatedAt || new Date().toISOString());
+      setState(postureFullyReported(body) ? 'ready' : 'partial');
+    } else {
+      setState(hasReport.current ? 'stale' : 'unavailable');
     }
-    return body;
+    return body && nextVerifiedSegment === segment ? body : null;
   }, [segment]);
   useEffect(() => {
     void load();
   }, [load]);
-  return { report, lastUpdated, load };
+  return { report, lastUpdated, state, verifiedSegment, load };
 }
 
 function useFeedbackReport() {
   const [report, setReport] = useState<FeedbackReport | null>(null);
+  const [state, setState] = useState<AuxiliaryLoadState>('loading');
+  const hasReport = useRef(false);
   const load = useCallback(async () => {
     const body = await fetchFeedbackReport();
-    if (body) setReport(body);
+    if (body) {
+      hasReport.current = true;
+      setReport(body);
+      setState('ready');
+    } else {
+      setState(hasReport.current ? 'stale' : 'unavailable');
+    }
   }, []);
   useEffect(() => {
     void load();
   }, [load]);
-  return { report, load };
+  return { report, state, load };
 }
 
 /** Loaded activity window backing the decision pivot counts. */
 function useActivityRows() {
-  const [rows, setRows] = useState<QueueQuery[]>([]);
+  const [rows, setRows] = useState<QueueQuery[] | null>(null);
+  const [state, setState] = useState<AuxiliaryLoadState>('loading');
+  const hasRows = useRef(false);
   const load = useCallback(async () => {
     const next = await fetchQueue('all');
-    if (next) setRows(next);
+    if (next) {
+      hasRows.current = true;
+      setRows(next);
+      setState('ready');
+    } else {
+      setState(hasRows.current ? 'stale' : 'unavailable');
+    }
   }, []);
   useEffect(() => {
     void load();
   }, [load]);
-  return { rows, load };
+  return { rows, state, load };
 }
 
 interface SiemState {
@@ -982,9 +1285,14 @@ function useSiemPackage(role: string | null): SiemState {
   }, [load]);
   const download = useCallback(async () => {
     setDownloading(true);
-    const failure = await downloadSiemZip(profile);
-    setDownloading(false);
-    if (failure) toast(failure, 'error');
+    try {
+      const failure = await downloadSiemZip(profile);
+      if (failure) toast(failure, 'error');
+    } catch {
+      toast('SIEM package download failed', 'error');
+    } finally {
+      setDownloading(false);
+    }
   }, [profile]);
   return { pkg, error, loading, downloading, profile, setProfile, load, download };
 }
@@ -1013,11 +1321,11 @@ function useMonitorRefresh(
   return { refreshing, recentEventId, refresh };
 }
 
-function useActionWorkflow(isAdmin: boolean, user: string, reload: () => Promise<Posture | null>) {
+function useActionWorkflow(canWrite: boolean, user: string, reload: () => Promise<Posture | null>) {
   const [busyKey, setBusyKey] = useState('');
   const run = useCallback(
     async (id: string, status: WorkflowStatus) => {
-      if (!isAdmin) {
+      if (!canWrite) {
         toast('Request not allowed for this session.');
         return;
       }
@@ -1027,7 +1335,7 @@ function useActionWorkflow(isAdmin: boolean, user: string, reload: () => Promise
       setBusyKey('');
       if (error) toast(error);
     },
-    [isAdmin, user, reload],
+    [canWrite, user, reload],
   );
   return { busyKey, run };
 }
@@ -1038,38 +1346,50 @@ interface SnapshotControl {
   send: () => Promise<void>;
 }
 
-function useSocSnapshot(isAdmin: boolean): SnapshotControl {
+function useSocSnapshot(canSend: boolean): SnapshotControl {
   const [status, setStatus] = useState('SOC SNAPSHOT READY');
   const [sending, setSending] = useState(false);
   const send = useCallback(async () => {
-    if (!isAdmin) return;
+    if (!canSend) return;
     setSending(true);
     setStatus('SENDING');
     try {
       const response = await api('/api/posture/notify', { method: 'POST' });
-      const body = response ? ((await response.json().catch(() => ({}))) as { sent?: boolean; reason?: string }) : {};
-      if (response?.ok && body.sent) setStatus('SENT TO SOC');
-      else setStatus(`NOT SENT - ${humanize(body.reason || 'not configured')}`.slice(0, 80));
+      if (!response?.ok) {
+        const error = await apiErrorSummary(response, 'request failed');
+        setStatus(`NOT SENT - ${humanize(error)}`.slice(0, 80));
+        return;
+      }
+      const body = decodeSocNotifyResponse(await responseJsonBounded<unknown>(response, NOTIFY_RESPONSE_MAX_BYTES));
+      if (body?.sent === true && response.status === 200) setStatus('SENT TO SOC');
+      else if (body?.sent === false && response.status === 202) {
+        setStatus(`NOT SENT - ${humanize(body.reason || 'not configured')}`.slice(0, 80));
+      } else setStatus('NOT SENT - UNVERIFIED RESPONSE');
     } catch {
       setStatus('SEND FAILED');
     } finally {
       setSending(false);
     }
-  }, [isAdmin]);
+  }, [canSend]);
   return { status, sending, send };
 }
 
 type VerdictState = 'busy' | 'failed';
 
 interface VerdictControl {
+  canSubmit: boolean;
   states: ReadonlyMap<string, VerdictState>;
   submit: (queryId: string, detectorId: string, verdict: 'valid' | 'false_positive') => Promise<void>;
 }
 
-function useDetectorVerdicts(reload: () => Promise<void>): VerdictControl {
+function useDetectorVerdicts(reload: () => Promise<void>, canSubmit: boolean): VerdictControl {
   const [states, setStates] = useState<ReadonlyMap<string, VerdictState>>(new Map());
   const submit = useCallback(
     async (queryId: string, detectorId: string, verdict: 'valid' | 'false_positive') => {
+      if (!canSubmit) {
+        toast('Request not allowed for this session.');
+        return;
+      }
       const key = `${queryId}:${detectorId}:${verdict}`;
       setStates((prev) => new Map(prev).set(key, 'busy'));
       const ok = await postDetectorFeedback(queryId, detectorId, verdict);
@@ -1081,9 +1401,9 @@ function useDetectorVerdicts(reload: () => Promise<void>): VerdictControl {
         return next;
       });
     },
-    [reload],
+    [canSubmit, reload],
   );
-  return { states, submit };
+  return { canSubmit, states, submit };
 }
 
 interface MonitorSelection {
@@ -1209,6 +1529,15 @@ function Section({ title, summary, actions, children }: SectionProps) {
   );
 }
 
+function PermissionNote({ id, children }: { id: string; children: ReactNode }) {
+  return (
+    <p className="monitor-permission-note" id={id} tabIndex={0}>
+      <span aria-hidden="true">Permission</span>
+      {children}
+    </p>
+  );
+}
+
 interface MeterRowProps {
   label: string;
   side: string;
@@ -1239,12 +1568,27 @@ function MeterRow({ label, side, width, tone, ariaLabel, detail }: MeterRowProps
 
 interface ConsoleHeaderProps {
   critical: boolean;
+  state: PostureLoadState;
   lastUpdated: string;
   refreshing: boolean;
   onRefresh: () => void;
 }
 
-function ConsoleHeader({ critical, lastUpdated, refreshing, onRefresh }: ConsoleHeaderProps) {
+function consolePresence(state: PostureLoadState, critical: boolean, lastUpdated: string): { dot: string; label: string; updated: string } {
+  if (state === 'loading') return { dot: 'loading', label: 'SYNCING', updated: 'AWAITING POSTURE' };
+  if (state === 'switching') return { dot: 'loading', label: 'SWITCHING SCOPE', updated: `SHOWING ${fmtTime(lastUpdated)} SNAPSHOT` };
+  if (state === 'unavailable') return { dot: 'error', label: 'UNAVAILABLE', updated: 'NO VERIFIED POSTURE' };
+  if (state === 'stale') return { dot: 'warning', label: 'STALE', updated: `LAST VERIFIED ${fmtTime(lastUpdated)}` };
+  if (state === 'partial') return { dot: 'warning', label: 'PARTIAL', updated: `INCOMPLETE SNAPSHOT ${fmtTime(lastUpdated)}` };
+  return {
+    dot: critical ? 'error' : 'online',
+    label: critical ? 'ATTENTION' : 'LIVE',
+    updated: `UPDATED ${fmtTime(lastUpdated)}`,
+  };
+}
+
+function ConsoleHeader({ critical, state, lastUpdated, refreshing, onRefresh }: ConsoleHeaderProps) {
+  const presence = consolePresence(state, critical, lastUpdated);
   return (
     <div className="signal-console-header">
       <div className="signal-console-title">
@@ -1256,13 +1600,13 @@ function ConsoleHeader({ critical, lastUpdated, refreshing, onRefresh }: Console
       <div className="signal-header-actions">
         <div className="signal-live-summary">
           <SignalDot
-            status={critical ? 'error' : 'online'}
-            label={critical ? 'Command center has critical signals' : 'Command center online'}
+            status={presence.dot}
+            label={`Command center ${presence.label.toLowerCase()}`}
             pulse
           />
-          {critical ? 'ATTENTION' : 'LIVE'}
+          {presence.label}
         </div>
-        <span className="signal-updated">UPDATED {fmtTime(lastUpdated)}</span>
+        <span className="signal-updated">{presence.updated}</span>
         <button className="system-button primary" type="button" disabled={refreshing} aria-busy={refreshing} onClick={onRefresh}>
           {refreshing ? (
             <>
@@ -1280,24 +1624,26 @@ function ConsoleHeader({ critical, lastUpdated, refreshing, onRefresh }: Console
 
 interface StatusChipProps {
   option: { id: string; label: string };
-  count: number;
+  count?: number;
   selected: boolean;
   onFilter: (id: string) => void;
 }
 
 function StatusChip({ option, count, selected, onFilter }: StatusChipProps) {
   const statusClass = option.id === 'warning' ? ' status-warning' : option.id === 'error' ? ' status-error' : '';
+  const reported = isReportedNumber(count);
   return (
     <button
       className={`signal-chip${statusClass}${selected ? ' is-selected' : ''}`}
       type="button"
       aria-pressed={selected}
-      disabled={!count}
+      disabled={!reported || count === 0}
+      title={reported ? undefined : 'Status count not reported'}
       onClick={() => onFilter(option.id)}
     >
       {option.id === 'all' ? null : <SignalDot status={option.id} label={`${option.label} status filter`} />}
       <span>{option.label}</span>
-      <b>{count}</b>
+      <b>{reported ? count : '—'}</b>
     </button>
   );
 }
@@ -1305,7 +1651,7 @@ function StatusChip({ option, count, selected, onFilter }: StatusChipProps) {
 interface MonitorToolbarProps {
   term: string;
   search: SearchUi;
-  counts: Record<string, number>;
+  counts: Record<string, number> | null;
   filter: string;
   onTerm: (value: string) => void;
   onFocus: (value: boolean) => void;
@@ -1343,7 +1689,7 @@ function MonitorToolbar({ term, search, counts, filter, onTerm, onFocus, onFilte
       </div>
       <div className="signal-filters" aria-label="Status filters">
         {STATUS_OPTIONS.map((option) => (
-          <StatusChip key={option.id} option={option} count={counts[option.id] ?? 0} selected={filter === option.id} onFilter={onFilter} />
+          <StatusChip key={option.id} option={option} count={counts ? (counts[option.id] ?? 0) : undefined} selected={filter === option.id} onFilter={onFilter} />
         ))}
       </div>
     </div>
@@ -1362,8 +1708,8 @@ function SegmentCard({ card, selected, onSegment }: { card: SegmentCardInfo; sel
       <strong>{card.label || 'Unknown'}</strong>
       <small>{card.detail || ''}</small>
       <b>
-        {num(card.score)}
-        <em>/100</em>
+        {reportedNumberValue(card.score)}
+        <em>{isReportedNumber(card.score) ? '/100' : ''}</em>
       </b>
     </button>
   );
@@ -1372,7 +1718,7 @@ function SegmentCard({ card, selected, onSegment }: { card: SegmentCardInfo; sel
 function SegmentLensEmpty() {
   return (
     <div className="segment-lens is-empty" aria-label="Posture segment lens">
-      <div className="segment-lens-summary">Segments will appear after sanitized activity arrives.</div>
+      <div className="segment-lens-summary">Segment scope not reported in the latest posture.</div>
       <label className="segment-select">
         <span>Posture segment</span>
         <select value="all" aria-label="Posture segment" disabled>
@@ -1384,33 +1730,107 @@ function SegmentLensEmpty() {
   );
 }
 
+interface SegmentSelectControlProps {
+  segments: SegmentsReport | null;
+  selectedId: string;
+  onSegment: (id: string) => void;
+  compact?: boolean;
+}
+
+function SegmentSelectControl({ segments, selectedId, onSegment, compact = false }: SegmentSelectControlProps) {
+  const filters = segments?.filters?.length ? segments.filters : [{ id: 'all', label: 'All segments', typeLabel: 'All' }];
+  const value = filters.some((item) => item.id === selectedId) ? selectedId : (segments?.summary?.selectedId || 'all');
+  return (
+    <label className={compact ? 'command-scope-select' : 'segment-select'}>
+      <span>{compact ? 'Change scope' : 'Posture segment'}</span>
+      <select value={value} aria-label={compact ? 'Command center scope' : 'Posture segment'} disabled={!segments} onChange={(event) => onSegment(event.target.value)}>
+        {filters.map((item) => (
+          <option key={item.id} value={item.id}>
+            {item.typeLabel || 'Segment'} - {item.label || item.id}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function metricsReported(metrics: PostureMetric[] | undefined): metrics is PostureMetric[] {
+  return Array.isArray(metrics) && metrics.every((metric) => (
+    isReportedText(metric.id)
+    && isReportedText(metric.label)
+    && (isReportedText(metric.value) || isReportedNumber(metric.value))
+    && isReportedText(metric.status)
+  ));
+}
+
+function objectivesReported(objectives: PostureObjective[] | undefined): objectives is PostureObjective[] {
+  return Array.isArray(objectives) && objectives.every((objective) => (
+    isReportedText(objective.id)
+    && isReportedText(objective.label)
+    && isReportedText(objective.state)
+    && isReportedNumber(objective.score)
+  ));
+}
+
+function segmentsReported(segments: SegmentsReport | null): boolean {
+  const summary = segments?.summary;
+  const active = segments?.active;
+  const filters = segments?.filters;
+  const matrix = segments?.matrix;
+  const segmentStates = new Set(['ready', 'attention', 'critical']);
+  const isCount = (value: unknown): value is number => isReportedNumber(value) && Number.isSafeInteger(value) && value >= 0;
+  const isScore = (value: unknown): value is number => isCount(value) && value <= 100;
+  if (!summary || !isReportedText(summary.selectedId) || !isCount(summary.visibleEvents)
+    || !isCount(summary.total) || !isCount(summary.critical) || !isCount(summary.attention) || !isCount(summary.ready)) return false;
+  if (summary.critical + summary.attention + summary.ready !== summary.total) return false;
+  if (!isReportedText(summary.privacy) || !Array.isArray(filters) || !filters.length || !hasUniqueReportedIds(filters)) return false;
+  if (!filters.every((item) => (
+    isReportedText(item.label)
+    && isReportedText(item.typeLabel)
+    && (item.state === undefined || segmentStates.has(item.state))
+    && (item.events === undefined || isCount(item.events))
+    && (item.controlRate === undefined || isScore(item.controlRate))
+  ))) return false;
+  if (!Array.isArray(matrix) || !matrix.length || !hasUniqueReportedIds(matrix)) return false;
+  if (!matrix.every((item) => (
+    isReportedText(item.id)
+    && isReportedText(item.label)
+    && isReportedText(item.typeLabel)
+    && segmentStates.has(item.state || '')
+    && isScore(item.score)
+  ))) return false;
+  if (!filters.some((item) => item.id === 'all')) return false;
+  if (summary.selectedId === 'all') return active === null && matrix.some((item) => item.id === 'all');
+  return Boolean(
+    active
+    && active.id === summary.selectedId
+    && isReportedText(active.label)
+    && isReportedText(active.typeLabel)
+    && segmentStates.has(active.state || '')
+    && isScore(active.score)
+    && filters.some((item) => item.id === summary.selectedId)
+    && matrix.some((item) => item.id === summary.selectedId)
+  );
+}
+
 function SegmentLens({ segments, onSegment }: { segments: SegmentsReport | null; onSegment: (id: string) => void }) {
-  if (!segments) return <SegmentLensEmpty />;
+  const reported = segmentsReported(segments);
+  if (!segments || !reported) return <SegmentLensEmpty />;
   const summary = segments.summary ?? {};
   const active = segments.active ?? null;
-  const filters = segments.filters?.length ? segments.filters : [{ id: 'all', label: 'All segments', typeLabel: 'All' }];
   const matrix = segments.matrix ?? [];
-  const selectedId = summary.selectedId || active?.id || 'all';
+  const selectedId = summary.selectedId || 'all';
   const activeLabel = active ? `${active.typeLabel || 'Segment'}: ${active.label || 'Unknown'}` : 'All segments';
   return (
     <div className="segment-lens" aria-label="Posture segment lens">
       <div className="segment-lens-summary">
         <b>{activeLabel}</b>
         <span>
-          {num(summary.visibleEvents)} visible events / {num(summary.attention)} attention /{' '}
+          {reportedNumberCount(summary.visibleEvents, 'visible event')} / {reportedNumberCount(summary.attention, 'attention item')} /{' '}
           {summary.privacy || 'metadata only; prompt bodies excluded'}
         </span>
       </div>
-      <label className="segment-select">
-        <span>Posture segment</span>
-        <select value={selectedId} aria-label="Posture segment" onChange={(event) => onSegment(event.target.value)}>
-          {filters.map((item) => (
-            <option key={item.id} value={item.id}>
-              {item.typeLabel || 'Segment'} - {item.label || item.id}
-            </option>
-          ))}
-        </select>
-      </label>
+      <SegmentSelectControl segments={segments} selectedId={selectedId} onSegment={onSegment} />
       <div className="segment-matrix" aria-live="polite">
         {matrix.length ? (
           matrix.slice(0, 8).map((card) => <SegmentCard key={card.id} card={card} selected={card.id === selectedId} onSegment={onSegment} />)
@@ -1459,15 +1879,19 @@ function MetricCard({ metric, updating, lastUpdated }: { metric: PostureMetric; 
   );
 }
 
-function MetricGrid({ metrics, refreshing, fallbackUpdated }: { metrics: PostureMetric[]; refreshing: boolean; fallbackUpdated: string }) {
+function MetricGrid({ metrics, refreshing, fallbackUpdated }: { metrics?: PostureMetric[]; refreshing: boolean; fallbackUpdated: string }) {
+  const reported = metricsReported(metrics);
+  const rows = reported ? metrics : [];
   return (
     <div className="metric-grid" aria-live="polite">
-      {metrics.length ? (
-        metrics.map((metric) => (
+      {!reported ? (
+        <EmptyState title="Posture metrics not reported" detail="The latest posture did not include metric evidence." />
+      ) : rows.length ? (
+        rows.map((metric) => (
           <MetricCard key={metric.id} metric={metric} updating={refreshing} lastUpdated={metric.lastUpdated || fallbackUpdated} />
         ))
       ) : (
-        <EmptyState title="Awaiting telemetry" detail="Metrics appear once posture data loads." />
+        <EmptyState title="No posture metrics" detail="The verified posture explicitly contained no metrics." />
       )}
     </div>
   );
@@ -1484,20 +1908,31 @@ const DECISION_PIVOTS: Array<{ token: string; label: string }> = [
   { token: 'approved', label: 'Approved' },
 ];
 
-function DecisionPivots({ rows }: { rows: QueueQuery[] }) {
-  const count = (token: string) => rows.filter((q) => String(q.status || '').toLowerCase().includes(token)).length;
+function auxiliaryStateLabel(state: AuxiliaryLoadState, subject: string): string {
+  const label = `${subject.charAt(0).toUpperCase()}${subject.slice(1)}`;
+  if (state === 'loading') return `Loading ${subject}`;
+  if (state === 'unavailable') return `${label} unavailable`;
+  if (state === 'stale') return `Last verified ${subject}`;
+  return '';
+}
+
+function DecisionPivots({ rows, state }: { rows: QueueQuery[] | null; state: AuxiliaryLoadState }) {
+  const count = (token: string) => rows?.filter((q) => String(q.status || '').toLowerCase().includes(token)).length;
+  const stateLabel = auxiliaryStateLabel(state, 'activity');
   return (
     <div className="signal-filters decision-pivots" aria-label="Decision pivots into Exam Activity" aria-live="polite">
+      {stateLabel ? <span className={`decision-pivot-state state-${state}`}>{stateLabel}</span> : null}
       {DECISION_PIVOTS.map((pivot) => (
         <button
           key={pivot.token}
           className="signal-chip"
           type="button"
+          disabled={!rows}
           title={`Open Exam Activity filtered to status:${pivot.token}`}
           onClick={() => navigate(`/activity?q=${encodeURIComponent('status:' + pivot.token)}`)}
         >
           <span>{pivot.label}</span>
-          <b>{count(pivot.token)}</b>
+          <b>{count(pivot.token) ?? 'Not reported'}</b>
         </button>
       ))}
     </div>
@@ -1508,24 +1943,33 @@ function DecisionPivots({ rows }: { rows: QueueQuery[] }) {
 // Hardening mission + operator flow
 // ---------------------------------------------------------------------------
 
+function proofLedgerSummary(ledger?: ProofLedger): string {
+  if (!ledger) return 'Proof ledger not reported';
+  const parts = [
+    isReportedNumber(ledger.verified) ? `${ledger.verified} verified` : null,
+    isReportedNumber(ledger.attention) ? `${ledger.attention} attention` : null,
+    isReportedNumber(ledger.missing) ? `${ledger.missing} missing` : null,
+  ].filter((part): part is string => Boolean(part));
+  return parts.length ? parts.join(' / ') : 'Proof counts not reported';
+}
+
 function MissionPrimary({ mission }: { mission: HardeningMission }) {
-  const current = mission.current ?? null;
-  const ledger = mission.proofLedger ?? {};
-  const proofCurrent = ledger.current ?? null;
-  const proofSummary = num(ledger.total)
-    ? `${num(ledger.verified)} verified / ${num(ledger.attention)} attention / ${num(ledger.missing)} missing`
-    : 'No proof items';
+  const current = mission.current && typeof mission.current === 'object' ? mission.current : null;
+  const ledger = mission.proofLedger;
+  const proofCurrent = ledger?.current && typeof ledger.current === 'object' ? ledger.current : null;
+  const progress = isReportedNumber(mission.progress?.percent) ? `${mission.progress.percent}%` : 'Progress not reported';
   return (
     <div className="mission-primary">
       <div className="mission-kicker">
         <SignalDot status={mission.status || 'warning'} label={`${mission.title || 'Hardening mission'} ${mission.state || 'attention'}`} />
         <span>{mission.title || 'Hardening mission'}</span>
-        <b>{num(mission.progress?.percent)}%</b>
+        <b>{progress}</b>
       </div>
-      <h3>{current ? current.label : 'Deployment proof complete'}</h3>
+      <h3>{current ? current.label || 'Current mission step' : 'Current mission step not reported'}</h3>
       <p>
-        {current ? current.areaLabel : 'Gateway, AI assets, and MCP agents'} ·{' '}
-        {current ? current.detail : 'All hardening steps are proven from sanitized telemetry and policy state.'}
+        {current
+          ? `${current.areaLabel || 'Readiness area'} · ${current.detail || 'Step detail not reported.'}`
+          : 'The latest posture did not include a current mission step.'}
       </p>
       {current?.command ? (
         <div className="mission-command">
@@ -1533,16 +1977,16 @@ function MissionPrimary({ mission }: { mission: HardeningMission }) {
           <CopyCommandButton command={current.command} />
         </div>
       ) : null}
-      <small>{current?.validation || 'Evidence export and SOC posture state are ready.'}</small>
+      <small>{current?.validation || 'Current validation not reported.'}</small>
       <div className="mission-proof-ledger">
         <b>Proof ledger</b>
-        <span>{proofSummary}</span>
+        <span>{proofLedgerSummary(ledger)}</span>
         {proofCurrent ? (
           <small>
             {proofCurrent.areaLabel || 'Readiness area'}: {proofCurrent.label || 'Evidence item'}
           </small>
         ) : (
-          <small>All proof rows are verified.</small>
+          <small>Current proof item not reported.</small>
         )}
       </div>
     </div>
@@ -1550,13 +1994,12 @@ function MissionPrimary({ mission }: { mission: HardeningMission }) {
 }
 
 function MissionLane({ lane }: { lane: MissionLaneInfo }) {
+  const progress = isReportedNumber(lane.done) && isReportedNumber(lane.total) ? `${lane.done}/${lane.total}` : 'Not reported';
   return (
     <button className={`mission-lane ${readinessTone(lane.state)}`} type="button" role="listitem" onClick={() => jumpToTab(lane.targetTab || 'coverage')}>
       <span>{lane.label || 'Readiness area'}</span>
-      <b>
-        {num(lane.done)}/{num(lane.total)}
-      </b>
-      <small>{lane.nextStep || 'Complete'}</small>
+      <b>{progress}</b>
+      <small>{lane.nextStep || 'Next step not reported'}</small>
     </button>
   );
 }
@@ -1565,7 +2008,7 @@ function MissionBanner({ mission }: { mission: HardeningMission | null }) {
   if (!mission) {
     return (
       <div aria-live="polite">
-        <EmptyState title="No mission" detail="Refresh posture." />
+        <EmptyState title="Hardening mission not reported" detail="The latest posture did not include mission evidence." />
       </div>
     );
   }
@@ -1574,17 +2017,27 @@ function MissionBanner({ mission }: { mission: HardeningMission | null }) {
       <div className={`hardening-mission ${readinessTone(mission.state)}`}>
         <MissionPrimary mission={mission} />
         <div className="mission-progress" role="list" aria-label="Hardening mission lanes">
-          {(mission.lanes ?? []).map((lane) => (
+          {Array.isArray(mission.lanes) ? mission.lanes.map((lane) => (
             <MissionLane key={lane.id} lane={lane} />
-          ))}
+          )) : <EmptyState title="Mission lanes not reported" detail="Lane progress was omitted from the latest posture." />}
         </div>
       </div>
     </div>
   );
 }
 
-function HardeningList({ label, items, fallback }: { label: string; items?: string[]; fallback: string }) {
-  const rows = items?.length ? items : [fallback];
+function HardeningList({
+  label,
+  items,
+  missingFallback,
+  emptyFallback,
+}: {
+  label: string;
+  items?: string[];
+  missingFallback: string;
+  emptyFallback: string;
+}) {
+  const rows = !Array.isArray(items) ? [missingFallback] : items.length ? items : [emptyFallback];
   return (
     <div className="hardening-list">
       <b>{label}</b>
@@ -1635,15 +2088,33 @@ function operatorSteps(posture: Posture): OperatorStep[] {
   ];
 }
 
+function operatorFlowReported(posture: Posture): boolean {
+  const threat = posture.threatGuardrails?.summary;
+  const inventory = posture.aiInventory?.summary;
+  const behavior = posture.behaviorBaselines?.summary;
+  const mcp = posture.agenticMcp?.summary;
+  const graph = posture.controlGraph?.summary;
+  const ledger = posture.hardening?.mission?.proofLedger ?? posture.hardening?.proofLedger;
+  return actionQueueReported(posture.actionQueue) && proofLedgerReported(ledger, true) && hasReportedNumbers([
+    threat?.events, threat?.activeRules, threat?.critical, threat?.blocked,
+    inventory?.highRiskAssets, inventory?.unapprovedLocalTools, inventory?.activeDestinations,
+    behavior?.activeEvents, behavior?.anomalies, behavior?.critical, behavior?.warning,
+    mcp?.activeAgents,
+    graph?.highRiskAssets, graph?.shadowAssets, graph?.nodes, graph?.controlledLinks,
+    ledger?.verified, ledger?.attention, ledger?.missing,
+  ]);
+}
+
 function OperatorFlow({ posture }: { posture: Posture | null }) {
-  const rows = posture ? operatorSteps(posture) : [];
+  const reported = Boolean(posture && operatorFlowReported(posture));
+  const rows = posture && reported ? operatorSteps(posture) : [];
   const urgent = rows.filter((row) => row.tone === 'critical').length;
   const attention = rows.filter((row) => row.tone === 'attention').length;
   const ready = rows.filter((row) => row.tone === 'ready').length;
   return (
-    <Section title="FCU Operator Flow" summary={posture ? `${urgent} urgent / ${attention} attention / ${ready} ready` : 'Waiting for data'}>
+    <Section title="FCU Operator Flow" summary={reported ? `${urgent} urgent / ${attention} attention / ${ready} ready` : 'Operator flow not reported'}>
       <div className="operator-flow-board" aria-live="polite">
-        {posture ? (
+        {reported ? (
           rows.map((row) => (
             <button key={row.id} className={`operator-flow-card ${row.tone}`} type="button" onClick={() => scrollToAnchor(row.target)}>
               <span>{row.title}</span>
@@ -1653,7 +2124,7 @@ function OperatorFlow({ posture }: { posture: Posture | null }) {
             </button>
           ))
         ) : (
-          <EmptyState title="Waiting" detail="Posture refresh pending." />
+          <EmptyState title="Operator flow not reported" detail="Required threat, behavior, asset, graph, action, or proof counts were omitted." />
         )}
       </div>
     </Section>
@@ -1672,16 +2143,19 @@ interface WorkflowRunner {
 interface ActionRowProps {
   item: PostureAction;
   rank: number;
-  isAdmin: boolean;
+  canWrite: boolean;
   workflow: WorkflowRunner;
 }
 
-function ActionControls({ item, isAdmin, workflow }: Omit<ActionRowProps, 'rank'>) {
+const POSTURE_ACTION_PERMISSION_ID = 'postureActionPermission';
+
+function ActionControls({ item, canWrite, workflow }: Omit<ActionRowProps, 'rank'>) {
   const workflowButton = (status: WorkflowStatus, label: string) => (
     <button
       className="ghost mini"
       type="button"
-      disabled={!isAdmin || workflow.busyKey === `${item.id}:${status}`}
+      disabled={!canWrite || workflow.busyKey === `${item.id}:${status}`}
+      aria-describedby={!canWrite ? POSTURE_ACTION_PERMISSION_ID : undefined}
       onClick={() => void workflow.run(item.id, status)}
     >
       {label}
@@ -1701,7 +2175,7 @@ function ActionControls({ item, isAdmin, workflow }: Omit<ActionRowProps, 'rank'
   );
 }
 
-function ActionRow({ item, rank, isAdmin, workflow }: ActionRowProps) {
+function ActionRow({ item, rank, canWrite, workflow }: ActionRowProps) {
   const severity = item.severity === 'critical' || item.severity === 'info' ? item.severity : 'warning';
   const meta = actionWorkflowMeta(item);
   return (
@@ -1717,40 +2191,71 @@ function ActionRow({ item, rank, isAdmin, workflow }: ActionRowProps) {
         <small>{item.detail || ''}</small>
         {meta ? <small className="action-workflow-meta">{meta}</small> : null}
       </div>
-      <ActionControls item={item} isAdmin={isAdmin} workflow={workflow} />
+      <ActionControls item={item} canWrite={canWrite} workflow={workflow} />
     </article>
   );
 }
 
-function ActionQueueSection({ rows, isAdmin, workflow }: { rows: PostureAction[]; isAdmin: boolean; workflow: WorkflowRunner }) {
+function actionQueueSummary(rows: PostureAction[] | undefined, state: PostureLoadState): string {
+  if (state === 'loading') return 'Syncing verified action state';
+  if (state === 'unavailable') return 'Action state unavailable';
+  if (!rows) return 'Not included in the latest posture';
   const critical = rows.filter((item) => item.severity === 'critical').length;
   const warning = rows.filter((item) => item.severity === 'warning').length;
   const routed = rows.filter((item) => item.workflowStatus === 'assigned' || item.workflowStatus === 'snoozed').length;
-  const summary = rows.length ? `${rows.length} actions / ${critical} critical / ${warning} warning / ${routed} routed` : 'All clear';
+  const prefix = state === 'stale' ? 'Last verified / ' : '';
+  return rows.length ? `${prefix}${rows.length} actions / ${critical} critical / ${warning} warning / ${routed} routed` : `${prefix}All clear`;
+}
+
+function ActionQueueEmpty({ rows, state }: { rows: PostureAction[] | undefined; state: PostureLoadState }) {
+  if (state === 'loading') return <EmptyState title="Loading action state" detail="Waiting for the current sanitized posture." />;
+  if (state === 'unavailable') return <EmptyState title="Action state unavailable" detail="Refresh before treating the queue as clear." />;
+  if (!rows) return <EmptyState title="Action status not reported" detail="The latest posture did not include an action queue." />;
+  if (state === 'stale') return <EmptyState title="No gaps in the last verified queue" detail="The latest refresh failed, so this is not a current all-clear." />;
+  return <EmptyState title="No action gaps" detail="Current hardening gaps are clear." />;
+}
+
+interface ActionQueueSectionProps {
+  rows: PostureAction[] | undefined;
+  state: PostureLoadState;
+  canWrite: boolean;
+  workflow: WorkflowRunner;
+}
+
+function ActionQueueSection({ rows, state, canWrite, workflow }: ActionQueueSectionProps) {
   return (
-    <Section title="Exam Action Queue" summary={summary}>
-      <div className="action-queue" id="hardeningActionQueue" aria-live="polite">
-        {rows.length ? (
-          rows.map((item, index) => <ActionRow key={item.id} item={item} rank={index + 1} isAdmin={isAdmin} workflow={workflow} />)
+    <Section title="Urgent Action Queue" summary={actionQueueSummary(rows, state)}>
+      {!canWrite ? (
+        <PermissionNote id={POSTURE_ACTION_PERMISSION_ID}>
+          Security Admin or Operations Administrator access is required to update posture actions.
+        </PermissionNote>
+      ) : null}
+      <div className="action-queue" id="hardeningActionQueue" aria-live="polite" aria-busy={state === 'loading'}>
+        {rows?.length ? (
+          rows.map((item, index) => <ActionRow key={item.id} item={item} rank={index + 1} canWrite={canWrite} workflow={workflow} />)
         ) : (
-          <EmptyState title="No action gaps" detail="Hardening gaps are clear." />
+          <ActionQueueEmpty rows={rows} state={state} />
         )}
       </div>
     </Section>
   );
 }
 
-function ObjectivesSection({ objectives }: { objectives: PostureObjective[] }) {
-  const covered = objectives.filter((item) => item.state === 'covered').length;
+function ObjectivesSection({ objectives }: { objectives?: PostureObjective[] }) {
+  const reported = objectivesReported(objectives);
+  const rows = reported ? objectives : [];
+  const covered = rows.filter((item) => item.state === 'covered').length;
   return (
-    <Section title="Exam Posture Objectives" summary={objectives.length ? `${covered}/${objectives.length} covered` : 'Waiting for data'}>
+    <Section title="Exam Posture Objectives" summary={!reported ? 'Objectives not reported' : rows.length ? `${covered}/${rows.length} covered` : 'No objectives'}>
       <div className="posture-objectives">
-        {objectives.length ? (
-          objectives.map((item) => (
+        {!reported ? (
+          <EmptyState title="Posture objectives not reported" detail="The latest posture did not include examiner objectives." />
+        ) : rows.length ? (
+          rows.map((item) => (
             <article key={item.id} className={`objective-card ${item.state === 'covered' ? 'good' : 'warn'}`}>
               <div className="objective-score">
-                <b>{num(item.score)}</b>
-                <span>/100</span>
+                <b>{reportedNumberValue(item.score)}</b>
+                <span>{isReportedNumber(item.score) ? '/100' : ''}</span>
               </div>
               <div className="objective-body">
                 <div className="objective-title">{item.label}</div>
@@ -1760,7 +2265,7 @@ function ObjectivesSection({ objectives }: { objectives: PostureObjective[] }) {
             </article>
           ))
         ) : (
-          <EmptyState title="No posture data" detail="Refresh posture." />
+          <EmptyState title="No posture objectives" detail="The verified posture explicitly contained no objectives." />
         )}
       </div>
     </Section>
@@ -1794,16 +2299,53 @@ function InventoryRow({ item }: { item: InventoryItem }) {
   );
 }
 
+function inventoryReported(inventory: AiInventoryReport | null): boolean {
+  const summary = inventory?.summary;
+  const apps = inventory?.apps;
+  const tools = inventory?.tools;
+  const itemReported = (item: InventoryItem) => (
+    isReportedText(item.id)
+    && isReportedText(item.name)
+    && isReportedText(item.kind)
+    && isReportedText(item.state)
+    && isReportedText(item.status)
+    && isReportedText(item.source)
+    && isReportedNumber(item.riskScore)
+    && isReportedText(item.riskLevel)
+    && (item.kind === 'Endpoint tool' || isReportedNumber(item.events))
+  );
+  if (!summary || !Array.isArray(apps) || !Array.isArray(tools)) return false;
+  if (!apps.every(itemReported) || !tools.every(itemReported)) return false;
+  if (!hasReportedNumbers([
+    summary.sanctioned,
+    summary.shadow,
+    summary.highRiskAssets,
+    summary.unapprovedLocalTools,
+    summary.activeDestinations,
+  ])) return false;
+  const all = [...apps, ...tools];
+  return Boolean(
+    summary.sanctioned === apps.filter((item) => item.state === 'sanctioned').length
+    && summary.shadow === apps.filter((item) => item.state === 'shadow').length
+    && summary.activeDestinations === apps.filter((item) => Number(item.events) > 0).length
+    && summary.highRiskAssets === all.filter((item) => item.riskLevel === 'critical' || item.riskLevel === 'high').length
+    && (all.length > 0 || summary.unapprovedLocalTools === 0)
+  );
+}
+
 function InventorySection({ inventory }: { inventory: AiInventoryReport | null }) {
+  const reported = inventoryReported(inventory);
   const summary = inventory?.summary ?? {};
   const rows = [...(inventory?.apps ?? []), ...(inventory?.tools ?? [])].slice(0, 12);
-  const summaryText = inventory
+  const summaryText = reported
     ? `${num(summary.sanctioned)} sanctioned / ${num(summary.shadow)} shadow / ${num(summary.highRiskAssets)} high risk`
-    : 'Waiting for data';
+    : 'AI inventory not reported';
   return (
     <Section title="AI Vendor Inventory" summary={summaryText}>
       <div className="ai-inventory-grid" id="aiInventoryRows" aria-live="polite">
-        {rows.length ? (
+        {!reported ? (
+          <EmptyState title="AI inventory not reported" detail="Required inventory counts, apps, or tools were omitted from the latest posture." />
+        ) : rows.length ? (
           rows.map((item) => <InventoryRow key={item.id} item={item} />)
         ) : (
           <EmptyState title="No AI inventory" detail="No governed, shadow, or endpoint AI tools observed." />
@@ -2037,6 +2579,61 @@ function AgenticMcpBody({ mcp }: { mcp: AgenticMcpReport }) {
   );
 }
 
+function agenticMcpReported(mcp: AgenticMcpReport | null): boolean {
+  const summary = mcp?.summary;
+  const registry = mcp?.connectorRegistry?.summary;
+  const policy = mcp?.policy;
+  const agents = mcp?.agents;
+  const tools = mcp?.tools;
+  const requests = mcp?.requests;
+  const profiles = mcp?.connectorRegistry?.profiles;
+  if (!summary || !registry || !policy || !Array.isArray(agents) || !Array.isArray(tools) || !Array.isArray(requests) || !Array.isArray(profiles)) return false;
+  const rowReported = (row: McpRow) => (
+    isReportedText(row.id)
+    && isReportedText(row.name)
+    && isReportedText(row.state)
+    && isReportedText(row.status)
+    && isReportedNumber(row.events)
+    && isReportedNumber(row.riskScore)
+  );
+  const profileReported = (profile: ConnectorProfile) => (
+    isReportedText(profile.id)
+    && isReportedText(profile.label)
+    && isReportedText(profile.category)
+    && isReportedText(profile.stage)
+    && isReportedText(profile.status)
+    && typeof profile.runtimePresent === 'boolean'
+    && typeof profile.configured === 'boolean'
+    && typeof profile.installProof === 'boolean'
+    && Array.isArray(profile.operations)
+    && isReportedNumber(profile.scopeCount)
+  );
+  const bucketReported = (bucket?: McpPolicyBucket) => (
+    isReportedNumber(bucket?.count)
+    && Array.isArray(bucket?.examples)
+    && bucket.examples.every(isReportedText)
+    && bucket.examples.length === Math.min(bucket.count, 6)
+  );
+  if (!agents.every(rowReported) || !tools.every(rowReported) || !profiles.every(profileReported)) return false;
+  if (!requests.every((request) => isReportedText(request.id) && isReportedText(request.label) && isReportedText(request.state) && isReportedNumber(request.events))) return false;
+  if (!bucketReported(policy.allowed) || !bucketReported(policy.blocked) || !bucketReported(policy.approvalRequired)) return false;
+  if (typeof registry.installProof !== 'boolean' || !isReportedText(registry.nextConnector) || !isReportedText(policy.registryMode)) return false;
+  if (!hasReportedNumbers([
+    summary.events, summary.activeAgents, summary.activeTools, summary.controlled, summary.blocked,
+    registry.shipped, registry.profiles, registry.profileTemplates, registry.shippedRuntimePresent,
+  ])) return false;
+  return Boolean(
+    summary.activeAgents === agents.length
+    && summary.activeTools === tools.length
+    && summary.events === requests.reduce((sum, request) => sum + Number(request.events), 0)
+    && summary.registryMode === policy.registryMode
+    && registry.profiles === profiles.length
+    && registry.shipped === profiles.filter((profile) => profile.stage === 'shipped').length
+    && registry.profileTemplates === profiles.filter((profile) => profile.stage === 'template').length
+    && registry.shippedRuntimePresent === profiles.filter((profile) => profile.stage === 'shipped' && profile.runtimePresent).length
+  );
+}
+
 function agenticMcpSummary(mcp: AgenticMcpReport): string {
   const summary = mcp.summary ?? {};
   const registry = mcp.connectorRegistry?.summary ?? {};
@@ -2052,10 +2649,13 @@ function agenticMcpSummary(mcp: AgenticMcpReport): string {
 }
 
 function AgenticMcpSection({ mcp }: { mcp: AgenticMcpReport | null }) {
+  const reported = agenticMcpReported(mcp);
   return (
-    <Section title="Agentic MCP Control" summary={mcp ? agenticMcpSummary(mcp) : 'Waiting for data'}>
+    <Section title="Agentic MCP Control" summary={reported && mcp ? agenticMcpSummary(mcp) : 'MCP control details not reported'}>
       <div className="agentic-mcp-board" id="agenticMcpRows" aria-live="polite">
-        {mcp ? <AgenticMcpBody mcp={mcp} /> : <EmptyState title="No MCP control data" detail="MCP guard traffic and policy state will appear after posture refresh." />}
+        {reported && mcp
+          ? <AgenticMcpBody mcp={mcp} />
+          : <EmptyState title="MCP control details not reported" detail="Required MCP counts, registry, policy, agents, tools, or requests were omitted." />}
       </div>
     </Section>
   );
@@ -2147,15 +2747,57 @@ function ThreatColumns({ data }: { data: ThreatGuardrailsReport }) {
   );
 }
 
+function threatGuardrailsReported(data: ThreatGuardrailsReport | null): boolean {
+  const summary = data?.summary;
+  const rules = data?.rules;
+  const controls = data?.controls;
+  const recent = data?.recent;
+  if (!summary || !Array.isArray(rules) || !Array.isArray(controls) || !Array.isArray(recent)) return false;
+  if (!hasReportedNumbers([
+    summary.events,
+    summary.detections,
+    summary.activeRules,
+    summary.blocked,
+    summary.critical,
+    summary.promptInjection,
+    summary.unsafeOutput,
+  ])) return false;
+  if (!rules.every((rule) => (
+    isReportedText(rule.id)
+    && isReportedText(rule.label)
+    && isReportedText(rule.framework)
+    && isReportedText(rule.state)
+    && isReportedText(rule.status)
+    && isReportedNumber(rule.events)
+  ))) return false;
+  if (!controls.every((control) => isReportedText(control.label) && isReportedText(control.state) && isReportedText(control.detail))) return false;
+  if (!recent.every((event) => (
+    isReportedText(event.id)
+    && isReportedText(event.severity)
+    && isReportedText(event.status)
+    && isReportedText(event.decision)
+    && isReportedText(event.title)
+    && Array.isArray(event.threats)
+  ))) return false;
+  return Boolean(
+    summary.activeRules === rules.filter((rule) => Number(rule.events) > 0).length
+    && summary.detections === rules.reduce((sum, rule) => sum + Number(rule.events), 0)
+    && summary.promptInjection === Number(rules.find((rule) => rule.id === 'prompt_injection')?.events ?? 0)
+    && summary.unsafeOutput === Number(rules.find((rule) => rule.id === 'unsafe_output')?.events ?? 0)
+    && ((summary.events === 0) === (recent.length === 0))
+  );
+}
+
 function ThreatGuardrailsSection({ data }: { data: ThreatGuardrailsReport | null }) {
+  const reported = threatGuardrailsReported(data);
   const summary = data?.summary ?? {};
-  const summaryText = data
+  const summaryText = reported
     ? `${num(summary.events)} events / ${num(summary.activeRules)} active rules / ${summary.privacy || 'prompt bodies excluded'}`
-    : 'Waiting for data';
+    : 'AI threat guardrails not reported';
   return (
     <Section title="AI Threat Guardrails" summary={summaryText}>
       <div className="agentic-mcp-board" id="threatGuardrailsRows" aria-live="polite">
-        {data ? (
+        {reported && data ? (
           <>
             <div className="agentic-mcp-kpis">
               <McpKpi label="Events" value={num(summary.events)} meta={`${num(summary.detections)} detections`} />
@@ -2166,7 +2808,7 @@ function ThreatGuardrailsSection({ data }: { data: ThreatGuardrailsReport | null
             <ThreatColumns data={data} />
           </>
         ) : (
-          <EmptyState title="No AI threat data" detail="Threat guardrails appear after posture refresh." />
+          <EmptyState title="AI threat guardrails not reported" detail="Required threat counts, guardrails, controls, or recent events were omitted." />
         )}
       </div>
     </Section>
@@ -2238,19 +2880,50 @@ function GraphEdges({ edges, nodes, summary }: { edges: GraphEdge[]; nodes: Grap
   );
 }
 
+function controlGraphReported(graph: ControlGraphReport | null): boolean {
+  const summary = graph?.summary;
+  const lanes = graph?.lanes;
+  const nodes = graph?.nodes;
+  const edges = graph?.edges;
+  if (!summary || !Array.isArray(lanes) || !Array.isArray(nodes) || !Array.isArray(edges)) return false;
+  if (!hasReportedNumbers([
+    summary.nodes,
+    summary.edges,
+    summary.highRiskAssets,
+    summary.shadowAssets,
+    summary.mcpLinks,
+    summary.controlledLinks,
+  ])) return false;
+  if (!lanes.every((lane) => isReportedText(lane.id) && isReportedText(lane.label) && isReportedNumber(lane.count))) return false;
+  if (!nodes.every((node) => isReportedText(node.id) && isReportedText(node.lane) && isReportedText(node.label) && isReportedText(node.status))) return false;
+  if (!edges.every((edge) => isReportedText(edge.id) && isReportedText(edge.from) && isReportedText(edge.to) && isReportedText(edge.status) && isReportedNumber(edge.events))) return false;
+  const nodeIds = new Set(nodes.map((node) => node.id));
+  const laneIds = new Set(lanes.map((lane) => lane.id));
+  return Boolean(
+    summary.nodes === nodes.length
+    && summary.edges === edges.length
+    && nodes.every((node) => laneIds.has(node.lane || ''))
+    && edges.every((edge) => nodeIds.has(edge.from || '') && nodeIds.has(edge.to || ''))
+    && lanes.every((lane) => lane.count === nodes.filter((node) => node.lane === lane.id).length)
+  );
+}
+
 function ControlGraphSection({ graph }: { graph: ControlGraphReport | null }) {
+  const reported = controlGraphReported(graph);
   const summary = graph?.summary ?? {};
   const lanes = graph?.lanes ?? [];
   const nodes = graph?.nodes ?? [];
   const edges = graph?.edges ?? [];
-  const summaryText = graph
+  const summaryText = reported
     ? `${num(summary.nodes)} nodes / ${num(summary.edges)} links / ${num(summary.highRiskAssets)} high risk / ${summary.privacy || 'prompt bodies excluded'}`
-    : 'Waiting for data';
-  const empty = !graph || (!nodes.length && !edges.length);
+    : 'AI control graph not reported';
+  const empty = reported && !nodes.length && !edges.length;
   return (
     <Section title="AI Control Graph" summary={summaryText}>
       <div className="control-graph" id="controlGraphMap" aria-live="polite">
-        {empty ? (
+        {!reported ? (
+          <EmptyState title="AI control graph not reported" detail="Required graph counts, lanes, nodes, or links were omitted." />
+        ) : empty ? (
           <EmptyState title="No graph" detail="Awaiting events." />
         ) : (
           <>
@@ -2271,16 +2944,16 @@ function ControlGraphSection({ graph }: { graph: ControlGraphReport | null }) {
 // Hardening workbench + SOC snapshot
 // ---------------------------------------------------------------------------
 
-function ProofLedgerBlock({ ledger, proofs }: { ledger: ProofLedger; proofs: ProofItem[] }) {
+function ProofLedgerBlock({ ledger, proofs }: { ledger?: ProofLedger; proofs?: ProofItem[] }) {
   return (
     <div className="hardening-proof-ledger">
       <div className="proof-ledger-head">
         <b>Evidence ledger</b>
-        <span>
-          {num(ledger.verified)} verified / {num(ledger.attention)} attention / {num(ledger.missing)} missing
-        </span>
+        <span>{proofLedgerSummary(ledger)}</span>
       </div>
-      {proofs.length ? (
+      {!Array.isArray(proofs) ? (
+        <p className="hardening-step-empty">Proof rows not reported.</p>
+      ) : proofs.length ? (
         proofs.map((proof, index) => (
           <div key={proof.id ?? index} className={`proof-row ${proof.status || 'missing'}`}>
             <span>{proofStatusLabel(proof.status)}</span>
@@ -2300,11 +2973,13 @@ function ProofLedgerBlock({ ledger, proofs }: { ledger: ProofLedger; proofs: Pro
   );
 }
 
-function RunbookBlock({ steps }: { steps: PlaybookStep[] }) {
+function RunbookBlock({ steps }: { steps?: PlaybookStep[] }) {
   return (
     <div className="hardening-runbook">
       <b>Runbook</b>
-      {steps.length ? (
+      {!Array.isArray(steps) ? (
+        <p className="hardening-step-empty">Runbook steps not reported.</p>
+      ) : steps.length ? (
         steps.map((step, index) => (
           <div key={step.id ?? index} className={`hardening-step ${step.status || 'todo'}`}>
             <div className="hardening-step-head">
@@ -2325,6 +3000,7 @@ function RunbookBlock({ steps }: { steps: PlaybookStep[] }) {
 
 function HardeningAreaCard({ area }: { area: HardeningArea }) {
   const status = area.state === 'ready' ? 'online' : area.state === 'blocked' ? 'error' : 'warning';
+  const scoreReported = isReportedNumber(area.score);
   return (
     <article className={`hardening-card ${readinessTone(area.state)}`}>
       <div className="hardening-head">
@@ -2333,39 +3009,59 @@ function HardeningAreaCard({ area }: { area: HardeningArea }) {
           <strong>{area.label || ''}</strong>
         </div>
         <div className="hardening-score">
-          {num(area.score)}
-          <span>/100</span>
+          {scoreReported ? area.score : 'Not reported'}
+          {scoreReported ? <span>/100</span> : null}
         </div>
       </div>
       <p className="hardening-desc">{area.description || ''}</p>
       <div className="hardening-meta">
-        <span>{area.owner || 'security'}</span>
-        <span>{area.source || 'control'}</span>
+        <span>{area.owner || 'Owner not reported'}</span>
+        <span>{area.source || 'Source not reported'}</span>
       </div>
       <div className="hardening-lists">
-        <HardeningList label="Proof" items={area.evidence?.slice(0, 3)} fallback="Awaiting proof" />
-        <HardeningList label="Gaps" items={area.gaps?.slice(0, 3)} fallback="No open gaps" />
+        <HardeningList
+          label="Proof"
+          items={area.evidence?.slice(0, 3)}
+          missingFallback="Proof state not reported"
+          emptyFallback="No proof items reported"
+        />
+        <HardeningList
+          label="Gaps"
+          items={area.gaps?.slice(0, 3)}
+          missingFallback="Gap state not reported"
+          emptyFallback="No open gaps reported"
+        />
       </div>
-      <ProofLedgerBlock ledger={area.proofLedger ?? {}} proofs={(area.proofs ?? []).slice(0, 6)} />
-      <RunbookBlock steps={(area.playbook ?? []).slice(0, 5)} />
+      <ProofLedgerBlock ledger={area.proofLedger} proofs={area.proofs?.slice(0, 6)} />
+      <RunbookBlock steps={area.playbook?.slice(0, 5)} />
       <TabJump tab={area.targetTab || 'coverage'} label={area.action || 'Open'} />
     </article>
   );
 }
 
-function WorkbenchSection({ hardening, isAdmin, snapshot }: { hardening: HardeningReport | null; isAdmin: boolean; snapshot: SnapshotControl }) {
-  const areas = hardening?.areas ?? [];
+const SOC_SNAPSHOT_PERMISSION_ID = 'socSnapshotPermission';
+
+function WorkbenchSection({ hardening, canSendSnapshot, snapshot }: { hardening: HardeningReport | null; canSendSnapshot: boolean; snapshot: SnapshotControl }) {
+  const areasReported = Array.isArray(hardening?.areas);
+  const areas = areasReported ? hardening?.areas ?? [] : [];
   const ready = areas.filter((area) => area.state === 'ready').length;
-  const summary = areas.length ? `${ready}/${areas.length} ready / ${num(hardening?.score)} overall` : 'Waiting for data';
+  const readinessReported = areas.every((area) => Boolean(area.state));
+  const score = isReportedNumber(hardening?.score) ? `${hardening.score} overall` : 'overall score not reported';
+  const summary = !areasReported
+    ? 'Hardening areas not reported'
+    : areas.length
+      ? `${readinessReported ? `${ready}/${areas.length} ready` : 'readiness state not reported'} / ${score}`
+      : 'No hardening areas reported';
   const actions = (
     <div className="signal-header-actions">
       <span className="signal-updated">{snapshot.status}</span>
       <button
         className="system-button secondary"
         type="button"
-        disabled={snapshot.sending || !isAdmin}
+        disabled={snapshot.sending || !canSendSnapshot}
         aria-busy={snapshot.sending}
-        title={isAdmin ? 'Send sanitized posture snapshot' : 'Security Admin required'}
+        aria-describedby={!canSendSnapshot ? SOC_SNAPSHOT_PERMISSION_ID : undefined}
+        title={canSendSnapshot ? 'Send sanitized posture snapshot' : 'Security Admin required'}
         onClick={() => void snapshot.send()}
       >
         {snapshot.sending ? (
@@ -2381,6 +3077,11 @@ function WorkbenchSection({ hardening, isAdmin, snapshot }: { hardening: Hardeni
   );
   return (
     <Section title="Hardening Workbench" summary={summary} actions={actions}>
+      {!canSendSnapshot ? (
+        <PermissionNote id={SOC_SNAPSHOT_PERMISSION_ID}>
+          Security Admin access is required to send SOC snapshots.
+        </PermissionNote>
+      ) : null}
       <div className="hardening-board" aria-live="polite">
         {areas.length ? (
           areas.map((area) => <HardeningAreaCard key={area.id} area={area} />)
@@ -2403,6 +3104,8 @@ const SIEM_PROFILES: Array<{ value: string; label: string }> = [
   { value: 'chronicle', label: 'Google SecOps' },
   { value: 'servicenow', label: 'ServiceNow' },
 ];
+
+const SIEM_PERMISSION_ID = 'siemPackagePermission';
 
 function siemSummary(siem: SiemState, canUse: boolean): string {
   if (!canUse) return 'Security Admin or Auditor required';
@@ -2515,7 +3218,13 @@ function SiemSection({ siem, canUse }: { siem: SiemState; canUse: boolean }) {
     <div className="signal-header-actions">
       <label className="siem-profile-select">
         Profile
-        <select value={siem.profile} disabled={busy || !canUse} aria-label="SIEM package profile" onChange={(event) => siem.setProfile(event.target.value)}>
+        <select
+          value={siem.profile}
+          disabled={busy || !canUse}
+          aria-label="SIEM package profile"
+          aria-describedby={!canUse ? SIEM_PERMISSION_ID : undefined}
+          onChange={(event) => siem.setProfile(event.target.value)}
+        >
           {SIEM_PROFILES.map((option) => (
             <option key={option.value} value={option.value}>
               {option.label}
@@ -2528,6 +3237,7 @@ function SiemSection({ siem, canUse }: { siem: SiemState; canUse: boolean }) {
         type="button"
         disabled={busy || !canUse || Boolean(siem.error)}
         aria-busy={busy}
+        aria-describedby={!canUse ? SIEM_PERMISSION_ID : undefined}
         onClick={() => void siem.download()}
       >
         {busy ? (
@@ -2543,6 +3253,11 @@ function SiemSection({ siem, canUse }: { siem: SiemState; canUse: boolean }) {
   );
   return (
     <Section title="SOC Integration Pack" summary={siemSummary(siem, canUse)} actions={actions}>
+      {!canUse ? (
+        <PermissionNote id={SIEM_PERMISSION_ID}>
+          Security Admin or Auditor access is required to prepare or download SIEM packages.
+        </PermissionNote>
+      ) : null}
       <div className="siem-package-board" id="siemPackagePreview" aria-live="polite">
         <SiemBody siem={siem} canUse={canUse} />
       </div>
@@ -2572,14 +3287,25 @@ function TrendDayCol({ row, max }: { row: TrendDay; max: number }) {
   );
 }
 
-function TrendSection({ trend }: { trend: TrendDay[] }) {
-  const max = Math.max(1, ...trend.map((row) => num(row.events)));
-  const total = trend.reduce((sum, row) => sum + num(row.events), 0);
+function trendReported(trend: TrendDay[] | undefined): trend is TrendDay[] {
+  return Array.isArray(trend) && trend.every((row) => (
+    typeof row.date === 'string'
+    && hasReportedNumbers([row.events, row.blocked, row.redacted, row.coached, row.allowed])
+  ));
+}
+
+function TrendSection({ trend }: { trend?: TrendDay[] }) {
+  const reported = trendReported(trend);
+  const rows = reported ? trend : [];
+  const max = Math.max(1, ...rows.map((row) => num(row.events)));
+  const total = rows.reduce((sum, row) => sum + num(row.events), 0);
   return (
-    <Section title="Risk Trend" summary={trend.length ? `${total} events / ${trend.length} days` : 'Waiting for data'}>
+    <Section title="Risk Trend" summary={!reported ? 'Risk trend not reported' : rows.length ? `${total} events / ${rows.length} days` : 'No trend activity'}>
       <div className="trend-chart" aria-live="polite">
-        {trend.length ? (
-          trend.map((row, index) => <TrendDayCol key={row.date ?? index} row={row} max={max} />)
+        {!reported ? (
+          <EmptyState title="Risk trend not reported" detail="Required daily trend counts were omitted from the latest posture." />
+        ) : rows.length ? (
+          rows.map((row, index) => <TrendDayCol key={row.date ?? index} row={row} max={max} />)
         ) : (
           <EmptyState title="No trend data" detail="Recent activity appears here." />
         )}
@@ -2588,13 +3314,24 @@ function TrendSection({ trend }: { trend: TrendDay[] }) {
   );
 }
 
-function ControlOutcomesSection({ controls }: { controls: ControlOutcome[] }) {
-  const total = controls.reduce((sum, row) => sum + num(row.events), 0);
+function controlsReported(controls: ControlOutcome[] | undefined): controls is ControlOutcome[] {
+  return Array.isArray(controls) && controls.every((row) => (
+    typeof row.label === 'string'
+    && hasReportedNumbers([row.events, row.blocked, row.redacted, row.coached])
+  ));
+}
+
+function ControlOutcomesSection({ controls }: { controls?: ControlOutcome[] }) {
+  const reported = controlsReported(controls);
+  const rows = reported ? controls : [];
+  const total = rows.reduce((sum, row) => sum + num(row.events), 0);
   return (
-    <Section title="Control Outcomes" summary={controls.length ? `${controls.length} control paths` : 'Waiting for data'}>
+    <Section title="Control Outcomes" summary={!reported ? 'Control outcomes not reported' : rows.length ? `${rows.length} control paths` : 'No control outcomes'}>
       <div className="control-breakdown" aria-live="polite">
-        {controls.length ? (
-          controls.map((row) => {
+        {!reported ? (
+          <EmptyState title="Control outcomes not reported" detail="Required control-path counts were omitted from the latest posture." />
+        ) : rows.length ? (
+          rows.map((row) => {
             const events = num(row.events);
             const controlled = num(row.blocked) + num(row.redacted) + num(row.coached);
             return (
@@ -2615,16 +3352,37 @@ function ControlOutcomesSection({ controls }: { controls: ControlOutcome[] }) {
   );
 }
 
+function behaviorBaselinesReported(baselines: BehaviorBaselinesReport | null): boolean {
+  const summary = baselines?.summary;
+  const dimensions = baselines?.dimensions;
+  if (!summary || !Array.isArray(dimensions)) return false;
+  if (!hasReportedNumbers([summary.activeEvents, summary.anomalies, summary.critical, summary.warning])) return false;
+  if (!dimensions.every((dimension) => (
+    isReportedText(dimension.id)
+    && (isReportedText(dimension.label) || isReportedText(dimension.title))
+    && isReportedText(dimension.state)
+    && isReportedNumber(dimension.score)
+  ))) return false;
+  return Boolean(
+    summary.anomalies === dimensions.length
+    && summary.critical === dimensions.filter((dimension) => dimension.state === 'critical').length
+    && summary.warning === dimensions.filter((dimension) => dimension.state === 'warning').length
+  );
+}
+
 function BehaviorBaselinesSection({ baselines }: { baselines: BehaviorBaselinesReport | null }) {
+  const reported = behaviorBaselinesReported(baselines);
   const summary = baselines?.summary ?? {};
   const rows = (baselines?.dimensions ?? []).slice(0, 6);
-  const summaryText = baselines
+  const summaryText = reported
     ? `${num(summary.anomalies)} anomalies / ${num(summary.critical)} critical / ${num(summary.warning)} watch`
-    : 'Waiting for data';
+    : 'Behavior baselines not reported';
   return (
     <Section title="Behavior Baselines" summary={summaryText}>
       <div className="control-breakdown behavior-baselines" id="behaviorBaselineRows" aria-live="polite">
-        {rows.length ? (
+        {!reported ? (
+          <EmptyState title="Behavior baselines not reported" detail="Required anomaly counts or baseline dimensions were omitted." />
+        ) : rows.length ? (
           rows.map((item) => (
             <button key={item.id} className={`behavior-baseline-row ${baselineTone(item.state)}`} type="button" onClick={() => jumpToTab(item.targetTab || 'activity')}>
               <span>{baselineStateLabel(item.state)}</span>
@@ -2636,7 +3394,10 @@ function BehaviorBaselinesSection({ baselines }: { baselines: BehaviorBaselinesR
             </button>
           ))
         ) : (
-          <EmptyState title="No behavior anomalies" detail="Recent metadata matches the learned baseline." />
+          <EmptyState
+            title={num(summary.activeEvents) > 0 ? 'No behavior anomalies' : 'No baseline activity'}
+            detail={num(summary.activeEvents) > 0 ? 'Observed metadata matches the learned baseline.' : 'No eligible recent metadata was available for baseline comparison.'}
+          />
         )}
       </div>
     </Section>
@@ -2645,18 +3406,44 @@ function BehaviorBaselinesSection({ baselines }: { baselines: BehaviorBaselinesR
 
 const dqTone = (state?: string) => `tone-${state === 'ready' ? 'secure' : state === 'blocked' ? 'critical' : 'warn'}`;
 
+function decisionQualityReported(quality: DecisionQualityInfo | null): boolean {
+  const summary = quality?.summary;
+  const cards = quality?.cards;
+  const hotspots = quality?.hotspots;
+  if (!summary || !Array.isArray(cards) || !Array.isArray(hotspots)) return false;
+  if (!hasReportedNumbers([summary.controlRate, summary.pendingReviews, summary.overrideWatch])) return false;
+  if (!cards.every((card) => (
+    isReportedText(card.id)
+    && isReportedText(card.label)
+    && isReportedNumber(card.score)
+    && isReportedText(card.state)
+    && (isReportedText(card.value) || isReportedNumber(card.value))
+  ))) return false;
+  if (!hotspots.every((hotspot) => (
+    isReportedText(hotspot.id)
+    && isReportedText(hotspot.kind)
+    && isReportedText(hotspot.label)
+    && hasReportedNumbers([hotspot.events, hotspot.sensitive])
+  ))) return false;
+  return cards.length > 0 || hotspots.length > 0
+    || (summary.controlRate === 0 && summary.pendingReviews === 0 && summary.overrideWatch === 0);
+}
+
 function DecisionQualitySection({ quality }: { quality: DecisionQualityInfo | null }) {
+  const reported = decisionQualityReported(quality);
   const summary = quality?.summary ?? null;
   const cards = quality?.cards ?? [];
   const hotspots = (quality?.hotspots ?? []).slice(0, 4);
-  const summaryText = summary
+  const summaryText = reported && summary
     ? `${num(summary.controlRate)}% controlled / ${num(summary.pendingReviews)} pending / ${num(summary.overrideWatch)} overrides`
-    : 'Waiting for data';
+    : 'Reviewer decision quality not reported';
   return (
     <Section title="Reviewer Decision Quality" summary={summaryText}>
       <div className="control-breakdown" id="decisionQualityRows" aria-live="polite">
-        {!summary ? (
-          <EmptyState title="No reviewer decision data" detail="Recent approval, coaching, and override outcomes appear here." />
+        {!reported || !summary ? (
+          <EmptyState title="Reviewer decision quality not reported" detail="Required quality counts, score cards, or hotspots were omitted." />
+        ) : !cards.length && !hotspots.length ? (
+          <EmptyState title="No reviewer decision hotspots" detail="The verified snapshot contained no scored cards or decision hotspots." />
         ) : (
           <>
             {cards.map((card) => (
@@ -2738,11 +3525,33 @@ function QualityBars({ quality }: { quality: FeedbackQualitySummary }) {
   );
 }
 
+const DETECTOR_FEEDBACK_PERMISSION_ID = 'detectorFeedbackPermission';
+
+function candidatePermissionId(item: FeedbackCandidate): string {
+  const token = `${item.queryId}-${item.detectorId}`.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 140);
+  return `detector-feedback-candidate-${token}`;
+}
+
 function CandidateRow({ item, verdicts }: { item: FeedbackCandidate; verdicts: VerdictControl }) {
+  const candidateAllowed = item.canFeedback === true;
+  const canSubmit = verdicts.canSubmit && candidateAllowed;
+  const permissionId = verdicts.canSubmit && !candidateAllowed ? candidatePermissionId(item) : DETECTOR_FEEDBACK_PERMISSION_ID;
+  const disabledTitle = !verdicts.canSubmit
+    ? 'Security Admin or Member Data Reviewer required'
+    : item.canFeedback === false
+      ? 'This candidate is assigned to another reviewer or role'
+      : 'Candidate authorization not reported';
   const verdictButton = (verdict: 'valid' | 'false_positive', label: string) => {
     const state = verdicts.states.get(`${item.queryId}:${item.detectorId}:${verdict}`);
     return (
-      <button className="ghost mini" type="button" disabled={state === 'busy'} onClick={() => void verdicts.submit(item.queryId, item.detectorId, verdict)}>
+      <button
+        className="ghost mini"
+        type="button"
+        disabled={!canSubmit || state === 'busy'}
+        aria-describedby={!canSubmit ? permissionId : undefined}
+        title={canSubmit ? `Mark detector ${label.toLowerCase()}` : disabledTitle}
+        onClick={() => void verdicts.submit(item.queryId, item.detectorId, verdict)}
+      >
         {state === 'failed' ? 'Retry' : label}
       </button>
     );
@@ -2754,6 +3563,11 @@ function CandidateRow({ item, verdicts }: { item: FeedbackCandidate; verdicts: V
         <span>
           {item.destination || ''} / {item.status || ''}
         </span>
+        {verdicts.canSubmit && !candidateAllowed ? (
+          <small id={permissionId}>
+            {item.canFeedback === false ? 'Assigned to another reviewer or role.' : 'Candidate authorization not reported.'}
+          </small>
+        ) : null}
       </div>
       <div className="control-bar" role="img" aria-label={`${item.detectorId} risk ${num(item.riskScore)}`}>
         <i style={{ '--w': `${clampPct(num(item.riskScore))}%` } as CSSProperties} />
@@ -2767,27 +3581,68 @@ function CandidateRow({ item, verdicts }: { item: FeedbackCandidate; verdicts: V
   );
 }
 
-function detectorFeedbackSummary(report: FeedbackReport | null): string {
-  const summary = report?.summary;
-  if (!summary) return 'Waiting for data';
-  const counts = `${num(summary.noisy)} noisy / ${num(summary.valid)} valid / ${num(summary.reviewCandidates)} candidates`;
-  const quality = report?.quality?.summary;
-  return quality ? `${num(quality.score)}/100 eval / ${counts}` : counts;
+function feedbackQualityReported(quality: FeedbackQualitySummary | undefined): quality is FeedbackQualitySummary {
+  return Boolean(
+    quality
+    && typeof quality.floorsMet === 'boolean'
+    && hasReportedNumbers([
+      quality.score, quality.failures, quality.semanticRecall, quality.semanticPrecision,
+      quality.structuredRecall, quality.structuredF1, quality.benignFalsePositives, quality.baitFalsePositives,
+    ]),
+  );
 }
 
-function DetectorFeedbackSection({ report, verdicts }: { report: FeedbackReport | null; verdicts: VerdictControl }) {
+function detectorFeedbackReported(report: FeedbackReport | null): boolean {
+  const summary = report?.summary;
+  return Boolean(
+    summary
+    && Array.isArray(report?.detectors)
+    && Array.isArray(report?.reviewQueue)
+    && report.detectors.every((item) => hasReportedNumbers([item.total, item.falsePositive, item.tooSensitive]))
+    && report.reviewQueue.every((item) => (
+      typeof item.queryId === 'string'
+      && typeof item.detectorId === 'string'
+      && isReportedNumber(item.riskScore)
+      && typeof item.canFeedback === 'boolean'
+    ))
+    && hasReportedNumbers([summary.noisy, summary.valid, summary.reviewCandidates]),
+  );
+}
+
+function detectorFeedbackSummary(report: FeedbackReport | null, state: AuxiliaryLoadState): string {
+  const summary = report?.summary;
+  if (!summary || !detectorFeedbackReported(report)) return auxiliaryStateLabel(state, 'detector feedback') || 'Feedback details not reported';
+  const counts = `${num(summary.noisy)} noisy / ${num(summary.valid)} valid / ${num(summary.reviewCandidates)} candidates`;
+  const quality = report?.quality?.summary;
+  const verified = feedbackQualityReported(quality) ? `${num(quality.score)}/100 eval / ${counts}` : counts;
+  return state === 'stale' ? `Last verified / ${verified}` : verified;
+}
+
+function DetectorFeedbackSection({ report, state, verdicts }: { report: FeedbackReport | null; state: AuxiliaryLoadState; verdicts: VerdictControl }) {
+  const reported = detectorFeedbackReported(report);
   const summary = report?.summary ?? null;
   const quality = report?.quality?.summary ?? null;
+  const qualityReported = feedbackQualityReported(quality ?? undefined);
   const detectors = (report?.detectors ?? []).slice(0, 4);
   const candidates = (report?.reviewQueue ?? []).slice(0, 4);
   return (
-    <Section title="Detection Feedback" summary={detectorFeedbackSummary(report)}>
+    <Section title="Detection Feedback" summary={detectorFeedbackSummary(report, state)}>
+      {!verdicts.canSubmit ? (
+        <PermissionNote id={DETECTOR_FEEDBACK_PERMISSION_ID}>
+          Security Admin or Member Data Reviewer access is required to submit detector feedback.
+        </PermissionNote>
+      ) : null}
       <div className="control-breakdown" id="detectorFeedbackRows" aria-live="polite">
-        {!summary ? (
-          <EmptyState title="No detector feedback" detail="Validated and noisy detections appear here without prompt bodies." />
+        {!summary || !reported ? (
+          <EmptyState
+            title={state === 'loading' ? 'Loading detector feedback' : state === 'unavailable' ? 'Detector feedback unavailable' : 'Feedback details not reported'}
+            detail={state === 'unavailable' ? 'Refresh before treating review candidates as zero.' : 'Required counts, detector rows, candidates, or candidate authority were not fully reported.'}
+          />
         ) : (
           <>
-            {quality ? <QualityBars quality={quality} /> : null}
+            {report?.quality && !qualityReported ? (
+              <EmptyState title="Detection quality not reported" detail="The held-out quality summary was incomplete; candidate authorization remains independently verified." />
+            ) : quality && qualityReported ? <QualityBars quality={quality} /> : null}
             {detectors.length ? (
               detectors.map((row) => (
                 <FeedbackBar
@@ -2820,14 +3675,14 @@ function DetectorFeedbackSection({ report, verdicts }: { report: FeedbackReport 
   );
 }
 
-function InsightGrid({ report, feedback, verdicts }: { report: Posture | null; feedback: FeedbackReport | null; verdicts: VerdictControl }) {
+function InsightGrid({ report, feedback, feedbackState, verdicts }: { report: Posture | null; feedback: FeedbackReport | null; feedbackState: AuxiliaryLoadState; verdicts: VerdictControl }) {
   return (
     <div className="signal-insight-grid">
-      <TrendSection trend={report?.trend ?? []} />
-      <ControlOutcomesSection controls={report?.controls ?? []} />
+      <TrendSection trend={report?.trend} />
+      <ControlOutcomesSection controls={report?.controls} />
       <BehaviorBaselinesSection baselines={report?.behaviorBaselines ?? null} />
       <DecisionQualitySection quality={report?.decisionQuality ?? null} />
-      <DetectorFeedbackSection report={feedback} verdicts={verdicts} />
+      <DetectorFeedbackSection report={feedback} state={feedbackState} verdicts={verdicts} />
     </div>
   );
 }
@@ -3018,37 +3873,47 @@ function InspectorAside({ ui, surfaces, events }: { ui: MonitorUi; surfaces: Pos
 }
 
 interface SignalLayoutProps {
-  surfaces: PostureSurfaceInfo[];
-  events: MonitorEventInfo[];
+  surfaces?: PostureSurfaceInfo[];
+  events?: MonitorEventInfo[];
   ui: MonitorUi;
   search: SearchUi;
   recentEventId: string;
 }
 
 function SignalLayout({ surfaces, events, ui, search, recentEventId }: SignalLayoutProps) {
+  const surfaceRows = surfacesReported(surfaces) ? surfaces : null;
+  const eventRows = eventsReported(events) ? events : null;
   const visibleSurfaces = useMemo(
-    () => surfaces.filter((item) => matchesStatus(item, ui.statusFilter) && matchesSearch(item, search.state, ui.term)),
-    [surfaces, ui.statusFilter, search.state, ui.term],
+    () => (surfaceRows ?? []).filter((item) => matchesStatus(item, ui.statusFilter) && matchesSearch(item, search.state, ui.term)),
+    [surfaceRows, ui.statusFilter, search.state, ui.term],
   );
   const visibleEvents = useMemo(
-    () => events.filter((event) => matchesStatus(event, ui.statusFilter) && matchesSearch(event, search.state, ui.term)),
-    [events, ui.statusFilter, search.state, ui.term],
+    () => (eventRows ?? []).filter((event) => matchesStatus(event, ui.statusFilter) && matchesSearch(event, search.state, ui.term)),
+    [eventRows, ui.statusFilter, search.state, ui.term],
   );
   return (
     <div className="signal-layout">
       <div className="signal-main-stack">
-        <Section title="Surfaces" summary={visibleSurfaces.length ? `${visibleSurfaces.length} visible` : 'No matches'}>
+        <Section title="Surfaces" summary={!surfaceRows ? 'Surfaces not reported' : !surfaceRows.length ? 'No monitored surfaces' : visibleSurfaces.length ? `${visibleSurfaces.length} visible` : 'No matches'}>
           <div className="surveillance-grid" role="list" aria-label="Monitored systems">
-            {visibleSurfaces.length ? (
+            {!surfaceRows ? (
+              <EmptyState title="Surfaces not reported" detail="The latest posture omitted monitored-surface evidence." />
+            ) : !surfaceRows.length ? (
+              <EmptyState title="No monitored surfaces" detail="The verified posture explicitly contained no monitored surfaces." />
+            ) : visibleSurfaces.length ? (
               visibleSurfaces.map((item) => <SurfacePanel key={item.id} item={item} ui={ui} />)
             ) : (
               <EmptyState title="No matches" detail="Adjust status or search." />
             )}
           </div>
         </Section>
-        <Section title="Activity" summary={visibleEvents.length ? `${visibleEvents.length} visible` : 'No matches'}>
+        <Section title="Activity" summary={!eventRows ? 'Activity events not reported' : !eventRows.length ? 'No recent events' : visibleEvents.length ? `${visibleEvents.length} visible` : 'No matches'}>
           <div className="activity-feed" role="listbox" aria-label="Signal event timeline">
-            {visibleEvents.length ? (
+            {!eventRows ? (
+              <EmptyState title="Activity events not reported" detail="The latest posture omitted recent live-event evidence." />
+            ) : !eventRows.length ? (
+              <EmptyState title="No recent events" detail="The verified posture explicitly contained no recent events." />
+            ) : visibleEvents.length ? (
               visibleEvents.map((event) => <EventRow key={event.id} event={event} ui={ui} isNew={event.id === recentEventId} />)
             ) : (
               <EmptyState title="No events" detail="Clear search or broaden status." />
@@ -3056,7 +3921,257 @@ function SignalLayout({ surfaces, events, ui, search, recentEventId }: SignalLay
           </div>
         </Section>
       </div>
-      <InspectorAside ui={ui} surfaces={surfaces} events={events} />
+      <InspectorAside ui={ui} surfaces={surfaceRows ?? []} events={eventRows ?? []} />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Task-first operational brief + workspace summaries
+// ---------------------------------------------------------------------------
+
+function briefTone(status: string | undefined, state: PostureLoadState): BriefTone {
+  const normalized = String(status || '').toLowerCase();
+  if (state === 'unavailable' || ['critical', 'error', 'blocked'].includes(normalized)) return 'critical';
+  if (state === 'loading') return 'neutral';
+  if (state === 'switching' || state === 'partial' || state === 'stale' || ['warning', 'attention'].includes(normalized)) return 'attention';
+  return normalized ? 'ready' : 'neutral';
+}
+
+function missingBrief(id: string, label: string, state: PostureLoadState, detail: string): CommandCenterBriefItem {
+  const loading = state === 'loading';
+  const unavailable = state === 'unavailable';
+  return {
+    id,
+    label,
+    value: loading ? 'Syncing' : unavailable ? 'Unavailable' : 'Not reported',
+    detail: loading ? 'Waiting for verified posture.' : unavailable ? 'Refresh before relying on this state.' : detail,
+    tone: briefTone(undefined, state),
+  };
+}
+
+function metricById(report: Posture, id: string): PostureMetric | undefined {
+  return report.metrics?.find((metric) => metric.id === id);
+}
+
+function enforcementBrief(report: Posture | null, state: PostureLoadState): CommandCenterBriefItem {
+  if (!report) return missingBrief('enforcement', 'Enforcement health', state, 'Health was not included.');
+  const control = metricById(report, 'controlled-sensitive');
+  const score = report.hardening?.score;
+  if (score === undefined && !control) return missingBrief('enforcement', 'Enforcement health', state, 'Health was not included.');
+  const controlValue = control ? `${control.value}${control.unit || ''} control rate` : 'Control rate not reported';
+  return {
+    id: 'enforcement',
+    label: 'Enforcement health',
+    value: score === undefined ? `${control?.value ?? '-'}${control?.unit || ''}` : `${num(score)}/100`,
+    detail: `${controlValue} / ${report.hardening?.mission?.status || report.hardening?.state || 'posture available'}`,
+    tone: briefTone(report.hardening?.state || control?.status, state),
+  };
+}
+
+function urgentBrief(report: Posture | null, state: PostureLoadState): CommandCenterBriefItem {
+  if (!report) return missingBrief('actions', 'Urgent actions', state, 'Action state was not included.');
+  const rows = report.actionQueue;
+  if (!rows) return missingBrief('actions', 'Urgent actions', state, 'Action state was not included.');
+  if (!rows.length) {
+    return {
+      id: 'actions',
+      label: 'Urgent actions',
+      value: 'Clear',
+      detail: 'The verified action queue is explicitly empty.',
+      tone: briefTone('ready', state),
+    };
+  }
+  const open = rows.filter(actionNeedsAttention);
+  const complete = rows.filter(actionIsVerifiedComplete);
+  const critical = open.filter((item) => item.severity === 'critical').length;
+  const routed = open.filter((item) => item.workflowStatus === 'assigned' || item.workflowStatus === 'snoozed').length;
+  const proofPending = open.filter((item) => item.workflowProofState === 'proof_pending').length;
+  const proofUnreported = open.filter((item) => item.workflowStatus === 'resolved' && !item.workflowProofState).length;
+  return {
+    id: 'actions',
+    label: 'Urgent actions',
+    value: open.length ? `${open.length} open` : 'Clear',
+    detail: open.length
+      ? `${critical} critical / ${routed} routed / ${proofPending} proof pending / ${proofUnreported} proof status not reported / ${complete.length} verified complete`
+      : `${complete.length} explicitly resolved with verified proof / no open gaps`,
+    tone: briefTone(critical ? 'critical' : open.length ? 'attention' : 'ready', state),
+  };
+}
+
+function scopeLabel(segments: SegmentsReport, segmentId: string): string {
+  if (segmentId === 'all') return 'All activity';
+  const filter = segments.filters?.find((item) => item.id === segmentId);
+  const active = segments.active?.id === segmentId ? segments.active : null;
+  return filter?.label || active?.label || segmentId;
+}
+
+function scopeBrief(
+  report: Posture | null,
+  state: PostureLoadState,
+  verifiedSegment: string,
+  requestedSegment: string,
+): CommandCenterBriefItem {
+  if (!report?.segments) return missingBrief('scope', 'Active scope', state, 'Scope detail was not included.');
+  const segments = report.segments;
+  const label = scopeLabel(segments, verifiedSegment);
+  const requestedLabel = scopeLabel(segments, requestedSegment);
+  const summary = segments.summary ?? {};
+  const stateDetail = state === 'switching'
+    ? `Switching to ${requestedLabel}; showing verified ${label}`
+    : state === 'stale' && requestedSegment !== verifiedSegment
+      ? `Switch failed; showing last verified ${label}`
+      : state === 'stale'
+        ? `Refresh failed; showing last verified ${label}`
+        : `Showing verified ${label}`;
+  const visible = reportedNumberCount(summary.visibleEvents, 'visible event');
+  const attention = reportedNumberCount(summary.attention, 'attention item');
+  const scopedAttention = segments.active
+    ? segments.active.state !== 'ready'
+    : isReportedNumber(summary.attention) && summary.attention > 0;
+  return {
+    id: 'scope',
+    label: 'Active scope',
+    value: label,
+    detail: `${stateDetail} / ${visible} / ${attention} / ${summary.privacy || 'privacy detail not reported'}`,
+    tone: briefTone(scopedAttention ? 'attention' : undefined, state),
+  };
+}
+
+function sensorBrief(report: Posture | null, state: PostureLoadState): CommandCenterBriefItem {
+  if (!report) return missingBrief('sensors', 'Sensor coverage', state, 'Coverage was not included.');
+  const metric = metricById(report, 'active-sensors');
+  if (!metric) return missingBrief('sensors', 'Sensor coverage', state, 'Required sensor coverage was not included.');
+  return {
+    id: 'sensors',
+    label: 'Sensor coverage',
+    value: `${metric.value}${metric.unit || ''}`,
+    detail: 'Required browser, endpoint, and MCP enforcement surfaces.',
+    tone: briefTone(metric.status, state),
+  };
+}
+
+function evidenceAge(generatedAt: string): { label: string; status: string } {
+  const ageMs = Date.now() - new Date(generatedAt).getTime();
+  if (!Number.isFinite(ageMs)) return { label: 'Timestamp missing', status: 'warning' };
+  const minutes = Math.max(0, Math.floor(ageMs / 60_000));
+  if (minutes < 1) return { label: 'Just now', status: 'ready' };
+  if (minutes < 60) return { label: `${minutes}m old`, status: minutes > 15 ? 'warning' : 'ready' };
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return { label: `${hours}h old`, status: 'warning' };
+  return { label: `${Math.floor(hours / 24)}d old`, status: 'critical' };
+}
+
+function evidenceBrief(report: Posture | null, state: PostureLoadState): CommandCenterBriefItem {
+  if (!report?.generatedAt) return missingBrief('evidence', 'Evidence freshness', state, 'A generation timestamp was not included.');
+  const ledger = report.hardening?.mission?.proofLedger ?? report.hardening?.proofLedger;
+  const age = evidenceAge(report.generatedAt);
+  const proofDetail = proofLedgerSummary(ledger);
+  return {
+    id: 'evidence',
+    label: 'Evidence freshness',
+    value: age.label,
+    detail: `${proofDetail} / generated ${fmt(report.generatedAt)} / prompt bodies excluded`,
+    tone: briefTone(age.status, state),
+  };
+}
+
+interface OperationalBriefProps {
+  report: Posture | null;
+  state: PostureLoadState;
+  requestedSegment: string;
+  verifiedSegment: string;
+  onSegment: (id: string) => void;
+}
+
+function OperationalBrief({ report, state, requestedSegment, verifiedSegment, onSegment }: OperationalBriefProps) {
+  const items = [
+    { ...enforcementBrief(report, state), actionLabel: 'Review enforcement', onActivate: () => scrollToAnchor('workspace-enforcement', true) },
+    { ...urgentBrief(report, state), actionLabel: 'Work queue', onActivate: () => scrollToAnchor('hardeningActionQueue', true) },
+    {
+      ...scopeBrief(report, state, verifiedSegment, requestedSegment),
+      control: <SegmentSelectControl segments={report?.segments ?? null} selectedId={requestedSegment} onSegment={onSegment} compact />,
+      actionLabel: 'Review scope detail',
+      onActivate: () => scrollToAnchor('workspace-enforcement', true),
+    },
+    { ...sensorBrief(report, state), actionLabel: 'Inspect surfaces', onActivate: () => scrollToAnchor('workspace-live', true) },
+    { ...evidenceBrief(report, state), actionLabel: 'Prepare evidence', onActivate: () => scrollToAnchor('workspace-evidence', true) },
+  ];
+  return <CommandCenterBrief items={items} />;
+}
+
+const MONITOR_WORKSPACES: MonitorWorkspaceItem[] = [
+  { id: 'workspace-enforcement', label: 'Enforcement & scope', description: 'Policy health, mission, and objectives' },
+  { id: 'workspace-estate', label: 'AI estate & guardrails', description: 'Assets, MCP, threats, and graph' },
+  { id: 'workspace-evidence', label: 'Evidence operations', description: 'Proof, snapshots, and SIEM package' },
+  { id: 'workspace-intelligence', label: 'Decision intelligence', description: 'Trends, feedback, and outcomes' },
+  { id: 'workspace-live', label: 'Live signals', description: 'Search, surfaces, activity, and inspector' },
+];
+
+function enforcementWorkspaceSummary(report: Posture | null): string {
+  if (!report) return 'Waiting for verified posture';
+  const mission = report.hardening?.mission?.status || report.hardening?.state || 'mission not reported';
+  const metrics = metricsReported(report.metrics) ? reportedArrayCount(report.metrics, 'metric') : 'metrics not reported';
+  const objectives = objectivesReported(report.objectives) ? reportedArrayCount(report.objectives, 'objective') : 'objectives not reported';
+  return `${metrics} / ${objectives} / ${mission}`;
+}
+
+function estateWorkspaceSummary(report: Posture | null): string {
+  if (!report) return 'Waiting for verified posture';
+  const inventory = report.aiInventory ?? null;
+  const mcp = report.agenticMcp ?? null;
+  const threat = report.threatGuardrails ?? null;
+  const graph = report.controlGraph ?? null;
+  const assets = inventoryReported(inventory)
+    ? reportedNumberCount((inventory?.apps?.length ?? 0) + (inventory?.tools?.length ?? 0), 'asset')
+    : 'assets not reported';
+  const agents = agenticMcpReported(mcp) ? reportedNumberCount(mcp?.summary?.activeAgents, 'MCP agent') : 'MCP control not reported';
+  const threats = threatGuardrailsReported(threat) ? reportedNumberCount(threat?.summary?.events, 'threat event') : 'threat events not reported';
+  const nodes = controlGraphReported(graph) ? reportedNumberCount(graph?.summary?.nodes, 'graph node') : 'graph nodes not reported';
+  return `${assets} / ${agents} / ${threats} / ${nodes}`;
+}
+
+function evidenceWorkspaceSummary(report: Posture | null, siem: SiemState, canUse: boolean): string {
+  if (!report && !siem.pkg) return canUse ? 'Waiting for proof and package data' : 'Role-scoped evidence controls';
+  return `${reportedArrayCount(report?.hardening?.areas, 'hardening area')} / ${siemSummary(siem, canUse)}`;
+}
+
+function intelligenceWorkspaceSummary(
+  report: Posture | null,
+  feedback: FeedbackReport | null,
+  feedbackState: AuxiliaryLoadState,
+  activityRows: QueueQuery[] | null,
+  activityState: AuxiliaryLoadState,
+): string {
+  const candidates = feedback?.summary?.reviewCandidates;
+  const candidateSummary = detectorFeedbackReported(feedback)
+    ? reportedNumberCount(candidates, 'candidate')
+    : auxiliaryStateLabel(feedbackState, 'detector feedback') || 'Detector feedback not reported';
+  const activitySummary = activityRows ? `${activityRows.length} decisions` : auxiliaryStateLabel(activityState, 'activity');
+  if (!report) return `${activitySummary} / ${candidateSummary}`;
+  const trendSummary = trendReported(report.trend) ? reportedArrayCount(report.trend, 'trend day') : 'trend days not reported';
+  const controlSummary = controlsReported(report.controls) ? reportedArrayCount(report.controls, 'control path') : 'control paths not reported';
+  return `${trendSummary} / ${controlSummary} / ${activitySummary} / ${candidateSummary}`;
+}
+
+function liveWorkspaceSummary(report: Posture | null): string {
+  if (!report) return 'Waiting for live surfaces and events';
+  const surfaces = surfacesReported(report.surfaces) ? reportedArrayCount(report.surfaces, 'surface') : 'surfaces not reported';
+  const events = eventsReported(report.events) ? reportedArrayCount(report.events, 'recent event') : 'recent events not reported';
+  return `${surfaces} / ${events}`;
+}
+
+function MonitorDataNotice({ state, onRefresh }: { state: PostureLoadState; onRefresh: () => void }) {
+  if (state !== 'partial' && state !== 'stale' && state !== 'unavailable') return null;
+  const message = state === 'stale'
+    ? 'The latest posture refresh failed. Values below are the last verified snapshot and are not a current all-clear.'
+    : state === 'partial'
+      ? 'The current posture is scope-verified but incomplete. Missing evidence is marked not reported and is not a current all-clear.'
+      : 'Current posture is unavailable. RedactWall is not substituting zeroes or an all-clear state.';
+  return (
+    <div className="monitor-data-notice" role="alert">
+      <span>{message}</span>
+      <button className="system-button secondary" type="button" onClick={onRefresh}>Retry posture</button>
     </div>
   );
 }
@@ -3065,11 +4180,26 @@ function SignalLayout({ surfaces, events, ui, search, recentEventId }: SignalLay
 // View
 // ---------------------------------------------------------------------------
 
+interface MonitorCapabilities {
+  canWritePostureActions: boolean;
+  canWriteDetectorFeedback: boolean;
+  canSendSocSnapshot: boolean;
+  canUseSiem: boolean;
+}
+
+function monitorCapabilities(role: string | null): MonitorCapabilities {
+  return {
+    canWritePostureActions: role === 'security_admin' || role === 'operator',
+    canWriteDetectorFeedback: role === 'security_admin' || role === 'approver',
+    canSendSocSnapshot: role === 'security_admin',
+    canUseSiem: role === 'security_admin' || role === 'auditor',
+  };
+}
+
 export default function Monitor() {
   const { me } = useSession();
   const role = me ? me.role : null;
-  const isAdmin = role === 'security_admin';
-  const canUseSiem = role === 'security_admin' || role === 'auditor';
+  const capabilities = monitorCapabilities(role);
   const [segment, setSegment] = useState('all');
   const posture = usePosture(segment);
   const siem = useSiemPackage(role);
@@ -3077,9 +4207,9 @@ export default function Monitor() {
   const activity = useActivityRows();
   const { refreshing, recentEventId, refresh } = useMonitorRefresh(posture.load, siem.load, feedback.load, activity.load);
   const ui = useMonitorUi();
-  const workflow = useActionWorkflow(isAdmin, me ? me.user : '', posture.load);
-  const snapshot = useSocSnapshot(isAdmin);
-  const verdicts = useDetectorVerdicts(feedback.load);
+  const workflow = useActionWorkflow(capabilities.canWritePostureActions, me ? me.user : '', posture.load);
+  const snapshot = useSocSnapshot(capabilities.canSendSocSnapshot);
+  const verdicts = useDetectorVerdicts(feedback.load, capabilities.canWriteDetectorFeedback);
 
   const reloadLive = useCallback(() => {
     void posture.load();
@@ -3089,38 +4219,97 @@ export default function Monitor() {
 
   const report = posture.report;
   const search = searchUiState(ui.term, ui.focused, refreshing);
-  const surfaces = report?.surfaces ?? [];
-  const events = report?.events ?? [];
-  const critical = surfaces.some((item) => item.status === 'error') || events.some((event) => event.severity === 'critical');
+  const surfaces = report?.surfaces;
+  const events = report?.events;
+  const reportedSurfaces = surfacesReported(surfaces) ? surfaces : [];
+  const reportedEvents = eventsReported(events) ? events : [];
+  const critical = reportedSurfaces.some((item) => item.status === 'error') || reportedEvents.some((event) => event.severity === 'critical');
 
   return (
     <div className="monitor-view">
       <div className="signal-console" aria-label="Texas FCU Command Center">
-        <ConsoleHeader critical={critical} lastUpdated={posture.lastUpdated} refreshing={refreshing} onRefresh={() => void refresh()} />
-        <MonitorToolbar
-          term={ui.term}
-          search={search}
-          counts={statusCounts([...surfaces, ...events])}
-          filter={ui.statusFilter}
-          onTerm={ui.setTerm}
-          onFocus={ui.setFocused}
-          onFilter={ui.setStatusFilter}
+        <ConsoleHeader
+          critical={critical}
+          state={posture.state}
+          lastUpdated={posture.lastUpdated}
+          refreshing={refreshing}
+          onRefresh={() => void refresh()}
         />
-        <SegmentLens segments={report?.segments ?? null} onSegment={setSegment} />
-        <MetricGrid metrics={report?.metrics ?? []} refreshing={refreshing} fallbackUpdated={report?.generatedAt || posture.lastUpdated} />
-        <DecisionPivots rows={activity.rows} />
-        <MissionBanner mission={report?.hardening?.mission ?? null} />
-        <OperatorFlow posture={report} />
-        <ActionQueueSection rows={report?.actionQueue ?? []} isAdmin={isAdmin} workflow={workflow} />
-        <ObjectivesSection objectives={report?.objectives ?? []} />
-        <InventorySection inventory={report?.aiInventory ?? null} />
-        <AgenticMcpSection mcp={report?.agenticMcp ?? null} />
-        <ThreatGuardrailsSection data={report?.threatGuardrails ?? null} />
-        <ControlGraphSection graph={report?.controlGraph ?? null} />
-        <WorkbenchSection hardening={report?.hardening ?? null} isAdmin={isAdmin} snapshot={snapshot} />
-        <SiemSection siem={siem} canUse={canUseSiem} />
-        <InsightGrid report={report} feedback={feedback.report} verdicts={verdicts} />
-        <SignalLayout surfaces={surfaces} events={events} ui={ui} search={search} recentEventId={recentEventId} />
+        <MonitorDataNotice state={posture.state} onRefresh={() => void refresh()} />
+        <OperationalBrief
+          report={report}
+          state={posture.state}
+          requestedSegment={segment}
+          verifiedSegment={posture.verifiedSegment}
+          onSegment={setSegment}
+        />
+        <div className="monitor-primary-actions">
+          <ActionQueueSection rows={report?.actionQueue} state={posture.state} canWrite={capabilities.canWritePostureActions} workflow={workflow} />
+        </div>
+        <MonitorWorkspaceNav items={MONITOR_WORKSPACES} />
+
+        <MonitorWorkspaceGroup
+          id="workspace-enforcement"
+          label="Enforcement & scope"
+          description="Active policy posture, scope, mission progress, and examiner objectives."
+          summary={enforcementWorkspaceSummary(report)}
+        >
+          <SegmentLens segments={report?.segments ?? null} onSegment={setSegment} />
+          <MetricGrid metrics={report?.metrics} refreshing={refreshing} fallbackUpdated={report?.generatedAt || posture.lastUpdated} />
+          <MissionBanner mission={report?.hardening?.mission ?? null} />
+          <OperatorFlow posture={report} />
+          <ObjectivesSection objectives={report?.objectives} />
+        </MonitorWorkspaceGroup>
+
+        <MonitorWorkspaceGroup
+          id="workspace-estate"
+          label="AI estate & guardrails"
+          description="Sanctioned and shadow AI assets, agentic MCP control, threat guardrails, and control paths."
+          summary={estateWorkspaceSummary(report)}
+        >
+          <InventorySection inventory={report?.aiInventory ?? null} />
+          <AgenticMcpSection mcp={report?.agenticMcp ?? null} />
+          <ThreatGuardrailsSection data={report?.threatGuardrails ?? null} />
+          <ControlGraphSection graph={report?.controlGraph ?? null} />
+        </MonitorWorkspaceGroup>
+
+        <MonitorWorkspaceGroup
+          id="workspace-evidence"
+          label="Evidence operations"
+          description="Hardening proof, sanitized SOC notifications, and role-scoped SIEM delivery packages."
+          summary={evidenceWorkspaceSummary(report, siem, capabilities.canUseSiem)}
+        >
+          <WorkbenchSection hardening={report?.hardening ?? null} canSendSnapshot={capabilities.canSendSocSnapshot} snapshot={snapshot} />
+          <SiemSection siem={siem} canUse={capabilities.canUseSiem} />
+        </MonitorWorkspaceGroup>
+
+        <MonitorWorkspaceGroup
+          id="workspace-intelligence"
+          label="Decision intelligence"
+          description="Decision pivots, risk trends, control outcomes, behavior baselines, and detector feedback."
+          summary={intelligenceWorkspaceSummary(report, feedback.report, feedback.state, activity.rows, activity.state)}
+        >
+          <DecisionPivots rows={activity.rows} state={activity.state} />
+          <InsightGrid report={report} feedback={feedback.report} feedbackState={feedback.state} verdicts={verdicts} />
+        </MonitorWorkspaceGroup>
+
+        <MonitorWorkspaceGroup
+          id="workspace-live"
+          label="Live signals"
+          description="Status filtering, surface health, recent activity, drill-through detail, and selection inspector."
+          summary={liveWorkspaceSummary(report)}
+        >
+          <MonitorToolbar
+            term={ui.term}
+            search={search}
+            counts={surfacesReported(surfaces) && eventsReported(events) ? statusCounts([...surfaces, ...events]) : null}
+            filter={ui.statusFilter}
+            onTerm={ui.setTerm}
+            onFocus={ui.setFocused}
+            onFilter={ui.setStatusFilter}
+          />
+          <SignalLayout surfaces={surfaces} events={events} ui={ui} search={search} recentEventId={recentEventId} />
+        </MonitorWorkspaceGroup>
       </div>
     </div>
   );

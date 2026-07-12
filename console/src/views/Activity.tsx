@@ -1,10 +1,16 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { QueueQuery } from '../api/queries';
+import { syncTicketStatuses } from '../api/evidence';
+import {
+  decodePublicQuery,
+  decodePublicQuerySnapshot,
+  type QueueQuery,
+  type ScoreBreakdownEntry,
+} from '../api/queries';
 import { EmptyState, Panel } from '../components/Panel';
-import { apiJson } from '../lib/api';
+import { apiJson, apiJsonBounded } from '../lib/api';
 import { downloadCsv, csvStamp } from '../lib/csv';
 import { navigate } from '../lib/router';
-import { roleLabel } from '../lib/session';
+import { roleLabel, useSession } from '../lib/session';
 import { useEventStream } from '../lib/sse';
 import { toast } from '../lib/toast';
 import './Activity.css';
@@ -19,25 +25,7 @@ import './Activity.css';
  * (same grammar as the legacy global search: user:/actor:/dest:/destination:/status:/sev:/severity:/source:/action:).
  */
 
-interface ScoreBreakdownEntry {
-  kind?: string;
-  type?: string;
-  severity?: number;
-  severityLabel?: string;
-  confidence?: string;
-  points?: number;
-  regulations?: string[];
-}
-
-interface ActivityQuery extends QueueQuery {
-  actor?: string;
-  action?: string;
-  workflowReason?: string;
-  escalationReason?: string;
-  notificationStatus?: string;
-  notificationChannels?: string[];
-  scoreBreakdown?: ScoreBreakdownEntry[];
-}
+type ActivityQuery = QueueQuery;
 
 interface DetectorsMeta {
   severityLabels?: Record<string, string>;
@@ -50,6 +38,8 @@ interface SavedView {
   range?: number;
   pageSize?: number;
 }
+
+type SavedViewDraft = Omit<SavedView, 'name'>;
 
 interface PageSlice {
   rows: ActivityQuery[];
@@ -68,6 +58,12 @@ interface PopoverState {
 
 type Tone = 'good' | 'bad' | 'warn' | 'info';
 type ChipOpener = (detail: string, anchor: DOMRect) => void;
+type ActivityDataState = 'loading' | 'ready' | 'stale' | 'unavailable';
+
+interface SequencedActivityEvent {
+  sequence: number;
+  row: ActivityQuery;
+}
 
 const ACTIVITY_COLS = ['time', 'source', 'user', 'destination', 'owner', 'severity', 'risk', 'detected', 'status'] as const;
 type ActivityCol = (typeof ACTIVITY_COLS)[number];
@@ -93,12 +89,21 @@ const RANGE_OPTIONS = [
 const SIZE_OPTIONS = [10, 25, 50, 100].map((size) => ({ value: size, label: `${size} rows` }));
 
 const COLS_KEY = 'redactwall.activityCols';
-const VIEWS_KEY = 'redactwall.savedViews';
 const SAVED_VIEWS_MAX = 12;
 const ROW_LIMIT = 200;
+const SEARCH_MAX_CHARS = 512;
+const ACTIVITY_RESPONSE_MAX_BYTES = 8 * 1024 * 1024;
+let sessionSavedViews: SavedView[] = [];
+let sessionViewSequence = 1;
 
 const fmt = (iso?: string) => (iso ? new Date(iso).toLocaleString() : '-');
 const humanize = (value?: string) => (value || '-').replace(/_/g, ' ');
+const statusCheckCount = (count: number) => `${count} status ${count === 1 ? 'check' : 'checks'}`;
+const ticketSyncStopLabel = (reason?: string) => reason === 'deadline_exceeded'
+  ? 'wall-clock safety deadline reached'
+  : reason === 'check_limit_reached'
+    ? 'status-check safety cap reached'
+    : 'one or more provider checks failed';
 const sevClass = (label?: string) => (label || 'low').toLowerCase();
 
 /** Port of the legacy dashboard statusTone(). */
@@ -233,28 +238,24 @@ function readHiddenCols(): ReadonlySet<string> {
   return new Set(readStoredArray(COLS_KEY).filter((value): value is string => typeof value === 'string'));
 }
 
-function isSavedView(value: unknown): value is SavedView {
-  return Boolean(value) && typeof value === 'object' && typeof (value as { name?: unknown }).name === 'string';
-}
-
-function readSavedViews(): SavedView[] {
-  return readStoredArray(VIEWS_KEY).filter(isSavedView);
-}
-
 // ---- SSE payload + hash-seed narrowing ----
 
 function asEventRow(data: unknown): ActivityQuery | null {
-  if (!data || typeof data !== 'object') return null;
-  const payload = (data as { query?: unknown }).query;
-  if (!payload || typeof payload !== 'object') return null;
-  const row = payload as Record<string, unknown>;
-  if (typeof row.id !== 'string' || !row.id || typeof row.status !== 'string') return null;
-  return payload as ActivityQuery;
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
+  return decodePublicQuery((data as { query?: unknown }).query);
+}
+
+function mergeActivityRows(snapshot: ActivityQuery[], events: SequencedActivityEvent[]): ActivityQuery[] {
+  let rows = snapshot;
+  for (const event of events) {
+    rows = [event.row, ...rows.filter((row) => row.id !== event.row.id)];
+  }
+  return rows.slice(0, ROW_LIMIT);
 }
 
 function searchSeedFromHash(): string {
   const query = location.hash.split('?')[1] || '';
-  return new URLSearchParams(query).get('q') || '';
+  return (new URLSearchParams(query).get('q') || '').slice(0, SEARCH_MAX_CHARS);
 }
 
 // ---- Detectors meta: fetched lazily on first expand, cached module-level ----
@@ -287,28 +288,54 @@ function useDetectorsMeta(active: boolean): DetectorsMeta | null {
 
 function useActivityRows() {
   const [rows, setRows] = useState<ActivityQuery[] | null>(null);
-  const [loaded, setLoaded] = useState(false);
+  const [state, setState] = useState<ActivityDataState>('loading');
   const [recentId, setRecentId] = useState('');
   const newRowTimer = useRef(0);
+  const rowsRef = useRef<ActivityQuery[] | null>(null);
+  const requestRef = useRef(0);
+  const eventSequenceRef = useRef(0);
+  const eventsRef = useRef<SequencedActivityEvent[]>([]);
   const load = useCallback(async () => {
-    const next = await apiJson<ActivityQuery[]>(`/api/queries?limit=${ROW_LIMIT}`);
-    setRows((prev) => next ?? prev); // refresh failure keeps stale rows, like legacy
-    setLoaded(true);
+    const requestId = ++requestRef.current;
+    const startedAtSequence = eventSequenceRef.current;
+    const payload = await apiJsonBounded<unknown>(`/api/queries?limit=${ROW_LIMIT}`, ACTIVITY_RESPONSE_MAX_BYTES);
+    const next = decodePublicQuerySnapshot(payload);
+    if (requestId !== requestRef.current) return;
+    if (!next) {
+      setState(rowsRef.current ? 'stale' : 'unavailable');
+      return;
+    }
+    const laterEvents = eventsRef.current.filter((event) => event.sequence > startedAtSequence);
+    const merged = mergeActivityRows(next, laterEvents);
+    eventsRef.current = [];
+    rowsRef.current = merged;
+    setRows(merged);
+    setState('ready');
   }, []);
   const onQuery = useCallback((data: unknown) => {
     const row = asEventRow(data);
     if (!row) return;
-    setRows((prev) => [row, ...(prev ?? []).filter((q) => q.id !== row.id)].slice(0, ROW_LIMIT));
+    const event = { sequence: ++eventSequenceRef.current, row };
+    eventsRef.current = [...eventsRef.current.slice(-(ROW_LIMIT - 1)), event];
+    setRows((prev) => {
+      const next = mergeActivityRows(prev ?? [], [event]);
+      rowsRef.current = next;
+      return next;
+    });
+    setState((current) => current === 'unavailable' ? 'stale' : current);
     setRecentId(row.id);
     window.clearTimeout(newRowTimer.current);
     newRowTimer.current = window.setTimeout(() => setRecentId(''), 1000);
   }, []);
   useEffect(() => {
-    load();
-    return () => window.clearTimeout(newRowTimer.current);
+    void load();
+    return () => {
+      requestRef.current += 1;
+      window.clearTimeout(newRowTimer.current);
+    };
   }, [load]);
   useEventStream({ query: onQuery, decision: load });
-  return { rows, loaded, recentId };
+  return { rows, state, recentId };
 }
 
 /** Filter order matches legacy: range -> search -> paginate; page resets on any control change. */
@@ -322,7 +349,7 @@ function useActivityTable(rows: ActivityQuery[]) {
     [rows, rangeDays, search],
   );
   const applySearch = useCallback((value: string) => {
-    setSearch(value);
+    setSearch(value.slice(0, SEARCH_MAX_CHARS));
     setPage(1);
   }, []);
   const applyRange = (value: number) => { setRangeDays(value); setPage(1); };
@@ -339,12 +366,14 @@ function useActivityTable(rows: ActivityQuery[]) {
 type ActivityTableState = ReturnType<typeof useActivityTable>;
 
 function useSavedViews() {
-  const [views, setViews] = useState<SavedView[]>(readSavedViews);
-  const save = (view: SavedView) => {
-    const next = [view, ...views.filter((v) => v.name !== view.name)].slice(0, SAVED_VIEWS_MAX);
-    localStorage.setItem(VIEWS_KEY, JSON.stringify(next));
+  const [views, setViews] = useState<SavedView[]>(() => sessionSavedViews);
+  const save = (view: SavedViewDraft) => {
+    const namedView = { ...view, name: `Session view ${sessionViewSequence}` };
+    sessionViewSequence += 1;
+    const next = [namedView, ...sessionSavedViews].slice(0, SAVED_VIEWS_MAX);
+    sessionSavedViews = next;
     setViews(next);
-    toast(`View "${view.name}" saved.`, 'good');
+    toast('Session view saved in memory until this tab is refreshed.', 'good');
   };
   return { views, save };
 }
@@ -361,11 +390,9 @@ function useHiddenCols() {
   return { hidden, toggle };
 }
 
-function currentView(table: ActivityTableState): SavedView {
-  const search = table.search.trim();
+function currentView(table: ActivityTableState): SavedViewDraft {
   return {
-    name: search || (table.rangeDays ? `last ${table.rangeDays}d` : 'all activity'),
-    search,
+    search: table.search.trim(),
     range: table.rangeDays,
     pageSize: table.pageSize,
   };
@@ -376,8 +403,12 @@ function currentView(table: ActivityTableState): SavedView {
 interface ToolbarProps {
   table: ActivityTableState;
   views: SavedView[];
+  canSyncTickets: boolean;
+  ticketSyncBusy: boolean;
+  ticketSyncMessage: string;
   onSaveView: () => void;
   onExport: () => void;
+  onSyncTickets: () => void;
 }
 
 function NumberSelect({ ariaLabel, value, options, fallback, onChange }: {
@@ -401,14 +432,14 @@ function NumberSelect({ ariaLabel, value, options, fallback, onChange }: {
 function SavedViewsPicker({ views, onApply }: { views: SavedView[]; onApply: (view: SavedView) => void }) {
   return (
     <select
-      aria-label="Saved views"
+      aria-label="Session activity views"
       value=""
       onChange={(event) => {
         const view = views[Number(event.target.value)];
         if (view) onApply(view);
       }}
     >
-      <option value="">Saved views…</option>
+      <option value="">Session views…</option>
       {views.map((view, index) => (
         <option key={view.name} value={index}>
           {view.name}
@@ -418,40 +449,53 @@ function SavedViewsPicker({ views, onApply }: { views: SavedView[]; onApply: (vi
   );
 }
 
-function ToolbarActions({ table, views, onSaveView, onExport }: ToolbarProps) {
+function ToolbarActions({ table, views, canSyncTickets, ticketSyncBusy, onSaveView, onExport, onSyncTickets }: ToolbarProps) {
   return (
     <div className="console-frame-actions">
       <input
         type="search"
         aria-label="Search activity"
         placeholder="Search: employee: dest: status: sev: source: or masked text"
+        maxLength={SEARCH_MAX_CHARS}
         value={table.search}
         onChange={(event) => table.applySearch(event.target.value)}
       />
       <SavedViewsPicker views={views} onApply={table.applyView} />
-      <button className="ghost" type="button" title="Save the current search, time range, and page size as a named view" onClick={onSaveView}>
-        Save view
+      <button className="ghost" type="button" title="Keep the current filters in memory until this browser tab is refreshed" onClick={onSaveView}>
+        Save session view
       </button>
       <NumberSelect ariaLabel="Activity time range" value={table.rangeDays} options={RANGE_OPTIONS} fallback={0} onChange={table.applyRange} />
       <NumberSelect ariaLabel="Rows per page" value={table.pageSize} options={SIZE_OPTIONS} fallback={10} onChange={table.resize} />
       <button className="ghost" type="button" onClick={onExport}>
         Export CSV
       </button>
+      {canSyncTickets ? (
+        <button className="ghost" type="button" disabled={ticketSyncBusy} onClick={onSyncTickets}>
+          {ticketSyncBusy ? 'Syncing tickets…' : 'Sync Jira / Linear'}
+        </button>
+      ) : null}
     </div>
   );
 }
 
 function Toolbar(props: ToolbarProps) {
   return (
-    <div className="console-frame-header">
-      <div className="console-frame-title">
-        <div>
-          <h2>Exam Activity</h2>
-          <p>Review recent Texas FCU AI events, decisions, owners, and sanitized member-data context.</p>
+    <>
+      <div className="console-frame-header">
+        <div className="console-frame-title">
+          <div>
+            <h2>Exam Activity</h2>
+            <p>Review recent Texas FCU AI events, decisions, owners, and sanitized member-data context.</p>
+          </div>
         </div>
+        <ToolbarActions {...props} />
       </div>
-      <ToolbarActions {...props} />
-    </div>
+      {props.ticketSyncMessage ? (
+        <div className="ticket-sync-status" role="status" aria-live="polite">
+          {props.ticketSyncMessage}
+        </div>
+      ) : null}
+    </>
   );
 }
 
@@ -825,7 +869,7 @@ function Pager({ slice, onPage }: { slice: PageSlice; onPage: (page: number) => 
 // ---- View ----
 
 interface ActivityBodyProps {
-  loaded: boolean;
+  state: ActivityDataState;
   rows: ActivityQuery[] | null;
   table: ActivityTableState;
   cols: ActivityCol[];
@@ -839,12 +883,22 @@ interface ActivityBodyProps {
 }
 
 function ActivityBody(props: ActivityBodyProps) {
-  const { loaded, rows, table } = props;
-  if (!loaded) return <div className="app-loading">Loading activity…</div>;
-  if (!rows) return <EmptyState title="Activity unavailable" detail="Could not load activity. Refresh to retry." />;
-  if (!rows.length) return <EmptyState title="No gated member-data events yet" detail="AI events appear here as the sensors report them." />;
+  const { state, rows, table } = props;
+  if (state === 'loading') return <div className="app-loading">Loading activity…</div>;
+  if (state === 'unavailable' || !rows) {
+    return <EmptyState title="Activity unavailable" detail="No verified activity snapshot is available. Refresh to retry." />;
+  }
+  if (state === 'stale' && !rows.length) {
+    return <EmptyState title="Activity snapshot stale" detail="The last verified snapshot was empty, but the latest refresh failed. No current empty-state conclusion can be drawn." />;
+  }
+  if (!rows.length) return <EmptyState title="No gated member-data events yet" detail="The current verified snapshot contains no activity events." />;
   return (
     <>
+      {state === 'stale' ? (
+        <div className="ticket-sync-status" role="alert">
+          Activity refresh failed. Showing verified activity received so far; current events may be missing.
+        </div>
+      ) : null}
       <ColumnChooser hidden={props.hidden} onToggle={props.onToggleCol} />
       <ActivityTable
         slice={table.slice}
@@ -862,27 +916,69 @@ function ActivityBody(props: ActivityBodyProps) {
 }
 
 export default function Activity() {
-  const { rows, loaded, recentId } = useActivityRows();
+  const { me } = useSession();
+  const { rows, state, recentId } = useActivityRows();
   const list = useMemo(() => rows ?? [], [rows]);
   const table = useActivityTable(list);
   const savedViews = useSavedViews();
   const cols = useHiddenCols();
   const [expandedId, setExpandedId] = useState('');
   const [popover, setPopover] = useState<PopoverState | null>(null);
+  const [ticketSyncBusy, setTicketSyncBusy] = useState(false);
+  const [ticketSyncMessage, setTicketSyncMessage] = useState('');
   const meta = useDetectorsMeta(Boolean(expandedId));
 
   const visibleCols = ACTIVITY_COLS.filter((col) => !cols.hidden.has(col));
   const toggleRow = (id: string) => setExpandedId((prev) => (prev === id ? '' : id));
   const openChip = useCallback((detail: string, anchor: DOMRect) => setPopover({ detail, ...popoverPosition(anchor) }), []);
   const closeChip = useCallback(() => setPopover(null), []);
+  const runTicketSync = async () => {
+    setTicketSyncBusy(true);
+    setTicketSyncMessage('Synchronizing configured Jira and Linear ticket status…');
+    try {
+      const result = await syncTicketStatuses();
+      if (!result) {
+        setTicketSyncMessage('Ticket synchronization is unavailable. Retry when the control plane is ready.');
+      } else if (result.status === 'busy') {
+        setTicketSyncMessage('Ticket synchronization is already running. Wait for the active check to finish.');
+      } else if (result.reason === 'no_ticket_channels') {
+        setTicketSyncMessage('No Jira or Linear ticket channels are configured. No records were changed.');
+      } else if (result.status === 'skipped') {
+        setTicketSyncMessage('Ticket synchronization is unavailable because its data store is not ready.');
+      } else if (result.status === 'partial') {
+        setTicketSyncMessage(
+          `Ticket synchronization partial (${ticketSyncStopLabel(result.reason)}): ${statusCheckCount(result.checksAttempted)} attempted across ${result.checked} of ${result.matched} matching records; ${result.succeeded} succeeded, ${result.failed} failed; ${result.updated} updated.`,
+        );
+      } else {
+        setTicketSyncMessage(
+          `Ticket synchronization complete: ${statusCheckCount(result.checksAttempted)} completed across ${result.checked} matching records; ${result.updated} updated.`,
+        );
+      }
+    } finally {
+      setTicketSyncBusy(false);
+    }
+  };
 
-  const metaLine = !loaded ? 'Loading' : `${table.filtered.length} shown / ${list.length} events`;
+  const metaLine = state === 'loading'
+    ? 'Loading'
+    : state === 'unavailable'
+      ? 'Unavailable'
+      : `${table.filtered.length} shown / ${list.length} events${state === 'stale' ? ' / stale snapshot' : ''}`;
   return (
     <div className="activity-view">
-      <Toolbar table={table} views={savedViews.views} onSaveView={() => savedViews.save(currentView(table))} onExport={() => exportActivityCsv(table.filtered)} />
+      <Toolbar
+        table={table}
+        views={savedViews.views}
+        canSyncTickets={me?.role === 'security_admin'}
+        ticketSyncBusy={ticketSyncBusy}
+        ticketSyncMessage={ticketSyncMessage}
+        onSaveView={() => savedViews.save(currentView(table))}
+        onExport={() => exportActivityCsv(table.filtered)}
+        onSyncTickets={() => void runTicketSync()}
+      />
       <Panel title="Gated Member-Data Events" meta={metaLine}>
         <ActivityBody
-          loaded={loaded}
+          state={state}
           rows={rows}
           table={table}
           cols={visibleCols}

@@ -411,9 +411,11 @@ function SortableTh({ label, k, sort, onSort }: SortableThProps) {
       className={active ? 'sorted' : undefined}
       data-sort-dir={active ? dir : undefined}
       aria-sort={active ? (sort.dir > 0 ? 'ascending' : 'descending') : undefined}
-      onClick={() => onSort(k)}
+      aria-label={label}
     >
-      {label}
+      <button className="catalog-sort-trigger" type="button" onClick={() => onSort(k)}>
+        {label}
+      </button>
     </th>
   );
 }

@@ -55,16 +55,26 @@ function walkFiles(relDir) {
   return files;
 }
 
+function singleMatchingAsset(paths, pattern, label) {
+  const matches = paths.filter((assetPath) => pattern.test(assetPath.replaceAll('\\', '/')));
+  assert.strictEqual(matches.length, 1, `expected one ${label} asset, found ${matches.length}`);
+  return matches[0];
+}
+
 test('shipped static frontend assets stay within transfer budgets', () => {
   // The legacy static console (index.html, dashboard.js, and the feature JS
   // bundles) was removed in favor of the built React console under
   // server/public/app (budgeted separately below). What still ships as static
-  // top-level assets are the login page and the console stylesheets.
+  // top-level assets are the shared auth pages and the console stylesheets.
   const totals = assertAssetBudgets([
     { path: 'server/public/console-base.css', maxRawBytes: 130_000, maxGzipBytes: 24_000 },
     { path: 'server/public/console-theme.css', maxRawBytes: 24_000, maxGzipBytes: 6_000 },
+    { path: 'server/public/auth-surface.css', maxRawBytes: 6_000, maxGzipBytes: 1_800 },
     { path: 'server/public/login.html', maxRawBytes: 12_000, maxGzipBytes: 5_000 },
+    { path: 'server/public/auth-response.js', maxRawBytes: 4_000, maxGzipBytes: 1_500 },
     { path: 'server/public/login.js', maxRawBytes: 6_000, maxGzipBytes: 2_500 },
+    { path: 'server/public/accept-invite.html', maxRawBytes: 4_000, maxGzipBytes: 1_600 },
+    { path: 'server/public/accept-invite.js', maxRawBytes: 4_000, maxGzipBytes: 1_600 },
   ]);
 
   assertWithin('shipped static frontend raw total', totals.rawBytes, 160_000);
@@ -78,15 +88,47 @@ test('console app bundle stays within transfer budgets', (t) => {
     t.skip('console bundle not built (npm run console:build)');
     return;
   }
-  const totals = walkFiles(path.join('server', 'public', 'app'))
+  const builtAssets = walkFiles(path.join('server', 'public', 'app'));
+  const totals = builtAssets
     .map(readAsset)
     .reduce((acc, asset) => ({
       rawBytes: acc.rawBytes + asset.rawBytes,
       gzipBytes: acc.gzipBytes + asset.gzipBytes,
     }), { rawBytes: 0, gzipBytes: 0 });
 
-  assertWithin('console app bundle raw total', totals.rawBytes, 700_000);
-  assertWithin('console app bundle gzip total', totals.gzipBytes, 200_000);
+  // The redesign adds 18 route-complete workflows, strict response decoders,
+  // truthful evidence states, and the interactive exposure map; the merged
+  // credit-union surfaces (FFIEC frameworks rollup, board-training attestation)
+  // add a few more KB. Ceilings are re-measured against that integrated build
+  // at 762,502 raw / 228,498 gzip bytes. Retain about five percent measured
+  // headroom while also guarding the initial shell and the two largest lazy
+  // routes so total growth cannot hide an expensive first load or route
+  // regression.
+  assertWithin('console app bundle raw total', totals.rawBytes, 801_000);
+  assertWithin('console app bundle gzip total', totals.gzipBytes, 240_000);
+
+  assertAssetBudgets([
+    {
+      path: singleMatchingAsset(builtAssets, /\/assets\/index-[^/]+\.js$/, 'console shell JavaScript'),
+      maxRawBytes: 240_000,
+      maxGzipBytes: 76_000,
+    },
+    {
+      path: singleMatchingAsset(builtAssets, /\/assets\/index-[^/]+\.css$/, 'console shell stylesheet'),
+      maxRawBytes: 8_500,
+      maxGzipBytes: 2_200,
+    },
+    {
+      path: singleMatchingAsset(builtAssets, /\/assets\/Monitor-[^/]+\.js$/, 'Command Center JavaScript'),
+      maxRawBytes: 100_000,
+      maxGzipBytes: 27_000,
+    },
+    {
+      path: singleMatchingAsset(builtAssets, /\/assets\/Policy-[^/]+\.js$/, 'Policy JavaScript'),
+      maxRawBytes: 80_000,
+      maxGzipBytes: 22_000,
+    },
+  ]);
 });
 
 test('browser extension assets stay within install package budgets', () => {

@@ -8,6 +8,8 @@ const os = require('node:os');
 const path = require('node:path');
 
 process.env.ADMIN_PASSWORD = 'unit-pass';
+process.env.APPROVER_USER = 'feedback-approver';
+process.env.APPROVER_PASSWORD = 'feedback-approver-pass';
 process.env.REDACTWALL_SECRET = 'unit-secret-stable';
 process.env.REDACTWALL_DATA_KEY = 'unit-data-key-stable';
 process.env.INGEST_API_KEY = 'unit-ingest-key';
@@ -35,9 +37,9 @@ async function jsonFetch(port, apiPath, { method = 'POST', body, headers = {} } 
   });
 }
 
-async function login(port) {
+async function login(port, user = 'admin', password = 'unit-pass') {
   const res = await jsonFetch(port, '/api/login', {
-    body: { user: 'admin', password: 'unit-pass' },
+    body: { user, password },
   });
   assert.strictEqual(res.status, 200);
   const cookie = (res.headers.get('set-cookie') || '').split(';')[0];
@@ -47,7 +49,7 @@ async function login(port) {
   return { cookie, csrfToken };
 }
 
-function seedQuery(id = 'q_feedback') {
+function seedQuery(id = 'q_feedback', overrides = {}) {
   return db.createQuery({
     id,
     createdAt: '2026-07-04T14:00:00.000Z',
@@ -64,6 +66,7 @@ function seedQuery(id = 'q_feedback') {
     maxSeverity: 4,
     redactedPrompt: 'Member [US_SSN] flagged for feedback',
     _rawPrompt: 'Member SSN 524-71-9043 flagged for feedback',
+    ...overrides,
   });
 }
 
@@ -119,6 +122,51 @@ test('detector feedback records sanitized query-scoped tuning signals', async ()
     assert.strictEqual(pack.detectorFeedback.summary.falsePositive, 1);
     assert.strictEqual(pack.detectorFeedback.detectors[0].detectorId, 'US_SSN');
     assert.strictEqual(JSON.stringify(pack.detectorFeedback).includes('524-71-9043'), false);
+  } finally {
+    await close(server);
+  }
+});
+
+test('detector feedback report exposes requester-specific candidate authority without weakening POST authorization', async () => {
+  const owned = seedQuery('q_feedback_owned', {
+    assignedRole: 'approver',
+    assignedUser: ' FEEDBACK-APPROVER ',
+    riskScore: 99,
+  });
+  const forbidden = seedQuery('q_feedback_forbidden', {
+    assignedRole: 'security_admin',
+    assignedUser: null,
+    riskScore: 98,
+  });
+  const server = await listen(app);
+  try {
+    const port = server.address().port;
+    const approver = await login(port, 'feedback-approver', 'feedback-approver-pass');
+    const headers = { cookie: approver.cookie, 'x-csrf-token': approver.csrfToken };
+    const reportRes = await jsonFetch(port, '/api/detector-feedback/report?queryLimit=100&feedbackLimit=100', {
+      method: 'GET',
+      headers: { cookie: approver.cookie },
+    });
+    assert.strictEqual(reportRes.status, 200);
+    const report = await reportRes.json();
+    const ownedCandidate = report.reviewQueue.find((item) => item.queryId === owned.id);
+    const forbiddenCandidate = report.reviewQueue.find((item) => item.queryId === forbidden.id);
+    assert.ok(ownedCandidate);
+    assert.ok(forbiddenCandidate);
+    assert.strictEqual(ownedCandidate.canFeedback, true);
+    assert.strictEqual(forbiddenCandidate.canFeedback, false);
+    assert.strictEqual(JSON.stringify(report).includes('524-71-9043'), false);
+
+    const accepted = await jsonFetch(port, `/api/queries/${owned.id}/detector-feedback`, {
+      headers,
+      body: { detectorId: 'US_SSN', verdict: 'valid', reason: 'candidate_authority_test' },
+    });
+    assert.strictEqual(accepted.status, 200);
+    const denied = await jsonFetch(port, `/api/queries/${forbidden.id}/detector-feedback`, {
+      headers,
+      body: { detectorId: 'US_SSN', verdict: 'valid', reason: 'candidate_authority_test' },
+    });
+    assert.strictEqual(denied.status, 403);
   } finally {
     await close(server);
   }

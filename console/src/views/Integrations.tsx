@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
-import { api, apiJson, apiSend } from '../lib/api';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { api, apiErrorSummary, apiJson, apiSend, responseJsonBounded } from '../lib/api';
+import { useSession } from '../lib/session';
+import { isExactEmailSuccess } from '../lib/strict-console-response';
 import { toast } from '../lib/toast';
 import './Integrations.css';
 
@@ -79,29 +81,210 @@ interface TestOutcome {
   at: string;
 }
 
-const EMPTY_SUBSCRIPTIONS: SubscriptionsResponse = { destinations: [], supportedTypes: [] };
-
 const DELIVERY_TONE: Record<string, string> = { delivered: 'tone-low', failed: 'tone-critical', deduped: 'tone-neutral' };
+const DELIVERY_STATUSES = new Set(['delivered', 'failed', 'deduped']);
+const TEST_STATUSES = new Set(['delivered', 'failed']);
+const MAX_DESTINATIONS = 500;
+const MAX_DELIVERIES = 2000;
+const MAX_EVENT_TYPES = 64;
+
+type DeliveryDataState = 'loading' | 'ready' | 'stale' | 'unavailable';
+type NotificationState = 'permission' | DeliveryDataState;
 
 const fmtTime = (iso?: string) => (iso ? new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-');
 const recipientCount = (count: number) => `${count} recipient${count === 1 ? '' : 's'}`;
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function boundedString(value: unknown, max: number, allowEmpty = false): string | null {
+  if (typeof value !== 'string' || value.length > max || (!allowEmpty && !value.trim())) return null;
+  return value;
+}
+
+function boundedInteger(value: unknown, min: number, max: number): number | null {
+  return Number.isSafeInteger(value) && Number(value) >= min && Number(value) <= max ? Number(value) : null;
+}
+
+function validTimestamp(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) return false;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) && new Date(timestamp).toISOString() === value;
+}
+
+function boundedStringList(value: unknown, maxItems: number, maxLength: number): string[] | null {
+  if (!Array.isArray(value) || value.length > maxItems) return null;
+  const strings = value.map((item) => boundedString(item, maxLength));
+  if (strings.some((item) => item === null) || new Set(strings).size !== strings.length) return null;
+  return strings as string[];
+}
+
+function decodeDestination(value: unknown): SubscriptionDestination | null {
+  if (!isRecord(value)) return null;
+  const id = boundedString(value.id, 64);
+  const name = boundedString(value.name, 120);
+  const type = boundedString(value.type, 40);
+  const minRisk = boundedInteger(value.minRisk, 0, 100);
+  const minSeverity = boundedInteger(value.minSeverity, 0, 5);
+  const eventTypes = value.eventTypes === null ? null : boundedStringList(value.eventTypes, MAX_EVENT_TYPES, 64);
+  const urlHost = value.urlHost === null ? null : boundedString(value.urlHost, 260);
+  const recipients = value.recipients === undefined ? undefined : boundedInteger(value.recipients, 1, 1000);
+  if (!id || !name || !type || minRisk === null || minSeverity === null || eventTypes === null && value.eventTypes !== null
+    || urlHost === null && value.urlHost !== null || value.recipients !== undefined && recipients === null) return null;
+  if (type === 'email' && recipients === undefined) return null;
+  const destination: SubscriptionDestination = { id, name, type, minRisk, minSeverity, eventTypes, urlHost };
+  if (typeof recipients === 'number') destination.recipients = recipients;
+  return destination;
+}
+
+function decodeSubscriptions(value: unknown): SubscriptionsResponse | null {
+  if (!isRecord(value) || !Array.isArray(value.destinations) || value.destinations.length > MAX_DESTINATIONS) return null;
+  const destinations = value.destinations.map(decodeDestination);
+  const supportedTypes = boundedStringList(value.supportedTypes, 64, 40);
+  if (!supportedTypes || destinations.some((item) => item === null)) return null;
+  const ids = destinations.map((item) => item!.id);
+  const supported = new Set(supportedTypes);
+  if (new Set(ids).size !== ids.length || destinations.some((item) => (
+    item!.type === 'email'
+      ? item!.recipients === undefined || item!.urlHost !== null
+      : !supported.has(item!.type) || item!.recipients !== undefined || item!.urlHost === null
+  ))) return null;
+  return { destinations: destinations as SubscriptionDestination[], supportedTypes };
+}
+
+function decodeDelivery(value: unknown): DeliveryRecord | null {
+  if (!isRecord(value)) return null;
+  const id = boundedString(value.id, 128);
+  const destId = boundedString(value.destId, 64);
+  const status = boundedString(value.status, 24);
+  const destName = value.destName === undefined ? undefined : boundedString(value.destName, 120);
+  const type = value.type === undefined ? undefined : boundedString(value.type, 40);
+  const attempts = value.attempts === undefined ? undefined : boundedInteger(value.attempts, 0, 8);
+  const httpStatus = value.httpStatus === undefined || value.httpStatus === null
+    ? value.httpStatus as undefined | null
+    : boundedInteger(value.httpStatus, 100, 599);
+  if (!id || !destId || !status || !DELIVERY_STATUSES.has(status) || !validTimestamp(value.ts)
+    || value.destName !== undefined && destName === null || value.type !== undefined && type === null
+    || value.attempts !== undefined && attempts === null || value.httpStatus !== undefined && value.httpStatus !== null && httpStatus === null) return null;
+  const delivery: DeliveryRecord = {
+    id,
+    ts: value.ts,
+    destId,
+    status,
+  };
+  if (typeof destName === 'string') delivery.destName = destName;
+  if (typeof type === 'string') delivery.type = type;
+  if (typeof attempts === 'number') delivery.attempts = attempts;
+  if (typeof httpStatus === 'number' || httpStatus === null) delivery.httpStatus = httpStatus;
+  return delivery;
+}
+
+function decodeDeliveries(value: unknown): { deliveries: DeliveryRecord[] } | null {
+  if (!isRecord(value) || !Array.isArray(value.deliveries) || value.deliveries.length > MAX_DELIVERIES) return null;
+  const deliveries = value.deliveries.map(decodeDelivery);
+  if (deliveries.some((item) => item === null)) return null;
+  const ids = deliveries.map((item) => item!.id);
+  return new Set(ids).size === ids.length ? { deliveries: deliveries as DeliveryRecord[] } : null;
+}
+
+function decodeNotificationsStatus(value: unknown): NotificationsStatus | null {
+  if (!isRecord(value) || !isRecord(value.smtp) || !Array.isArray(value.emailDestinations)
+    || value.emailDestinations.length > MAX_DESTINATIONS || !isRecord(value.digest)) return null;
+  const smtp = value.smtp;
+  const configured = smtp.configured;
+  const host = smtp.host === null ? null : boundedString(smtp.host, 260);
+  const port = smtp.port === null ? null : boundedInteger(smtp.port, 1, 65535);
+  const secure = smtp.secure;
+  const from = smtp.from === null ? null : boundedString(smtp.from, 320);
+  if (typeof configured !== 'boolean' || host === null && smtp.host !== null || port === null && smtp.port !== null
+    || typeof secure !== 'string' || !['starttls', 'tls', 'none'].includes(secure) || from === null && smtp.from !== null
+    || typeof smtp.authConfigured !== 'boolean'
+    || configured && (!host || port === null || !from)
+    || !configured && (host !== null || port !== null || from !== null)) return null;
+  const emailDestinations = value.emailDestinations.map((item) => {
+    if (!isRecord(item)) return null;
+    const id = boundedString(item.id, 64);
+    const name = boundedString(item.name, 120);
+    const recipients = boundedInteger(item.recipients, 1, 1000);
+    const eventTypes = item.eventTypes === null ? null : boundedStringList(item.eventTypes, MAX_EVENT_TYPES, 64);
+    return id && name && recipients !== null && (eventTypes !== null || item.eventTypes === null)
+      ? { id, name, recipients }
+      : null;
+  });
+  if (emailDestinations.some((item) => item === null)) return null;
+  const emailDestinationIds = emailDestinations.map((item) => item!.id);
+  if (new Set(emailDestinationIds).size !== emailDestinationIds.length) return null;
+  const intervalHours = boundedInteger(value.digest.intervalHours, 1, 8760);
+  if (intervalHours === null) return null;
+  let last: NotificationsStatus['digest']['last'] = null;
+  if (value.digest.last !== null) {
+    if (!isRecord(value.digest.last) || !validTimestamp(value.digest.last.at)) return null;
+    const delivered = boundedInteger(value.digest.last.delivered, 0, MAX_DESTINATIONS);
+    const total = boundedInteger(value.digest.last.total, 0, MAX_DESTINATIONS);
+    const actor = boundedString(value.digest.last.actor, 128);
+    if (delivered === null || total === null || delivered > total || !actor) return null;
+    last = { at: value.digest.last.at, delivered, total, actor };
+  }
+  return {
+    smtp: { configured, host, port, secure: secure as SmtpStatus['secure'], from, authConfigured: smtp.authConfigured },
+    emailDestinations: emailDestinations.map((item) => ({ name: item!.name, recipients: item!.recipients })),
+    digest: { intervalHours, last },
+  };
+}
+
+function decodeSubscriptionTest(value: unknown, id: string): { result: { status: string; attempts: number } } | null {
+  if (!isRecord(value) || !isRecord(value.result) || value.result.destId !== id) return null;
+  const status = boundedString(value.result.status, 24);
+  const attempts = boundedInteger(value.result.attempts, 0, 8);
+  const httpStatus = value.result.httpStatus === null ? null : boundedInteger(value.result.httpStatus, 100, 599);
+  if (!status || !TEST_STATUSES.has(status) || attempts === null
+    || status === 'delivered' && attempts === 0
+    || httpStatus === null && value.result.httpStatus !== null) return null;
+  return { result: { status, attempts } };
+}
+
+function safeEmailFailure(value: unknown): string | null {
+  const error = boundedString(value, 120);
+  if (!error) return null;
+  if (error === 'smtp_not_configured') return 'SMTP relay is not configured';
+  if (error === 'no_valid_recipients' || error === 'provide a recipient address') return 'provide a valid recipient address';
+  return 'SMTP delivery failed';
+}
+
+function decodeEmailResult(value: unknown, allowValidationError = false): { ok: boolean; error?: string } | null {
+  if (isExactEmailSuccess(value)) return { ok: true };
+  if (!isRecord(value) || value.ok === true) return null;
+  if (value.ok !== false && !(allowValidationError && value.ok === undefined)) return null;
+  const error = safeEmailFailure(value.error);
+  return error ? { ok: false, error } : null;
+}
+
+function decodeDigestResult(value: unknown): { results: { status: string }[] } | null {
+  if (!isRecord(value) || !Array.isArray(value.results) || value.results.length > MAX_DESTINATIONS) return null;
+  const results = value.results.map((item) => {
+    if (!isRecord(item) || typeof item.status !== 'string' || !DELIVERY_STATUSES.has(item.status)) return null;
+    return { status: item.status };
+  });
+  return results.some((item) => item === null) ? null : { results: results as { status: string }[] };
+}
+
 // ---- Fetchers ----
 
-function fetchSubscriptions(): Promise<SubscriptionsResponse | null> {
-  return apiJson<SubscriptionsResponse>('/api/subscriptions');
+async function fetchSubscriptions(): Promise<SubscriptionsResponse | null> {
+  return decodeSubscriptions(await apiJson<unknown>('/api/subscriptions'));
 }
 
-function fetchDeliveries(): Promise<{ deliveries: DeliveryRecord[] } | null> {
-  return apiJson<{ deliveries: DeliveryRecord[] }>('/api/subscriptions/deliveries');
+async function fetchDeliveries(): Promise<{ deliveries: DeliveryRecord[] } | null> {
+  return decodeDeliveries(await apiJson<unknown>('/api/subscriptions/deliveries'));
 }
 
-function fetchNotificationsStatus(): Promise<NotificationsStatus | null> {
-  return apiJson<NotificationsStatus>('/api/notifications/status');
+async function fetchNotificationsStatus(): Promise<NotificationsStatus | null> {
+  return decodeNotificationsStatus(await apiJson<unknown>('/api/notifications/status'));
 }
 
-function postSubscriptionTest(id: string): Promise<{ result: { status: string; attempts?: number } } | null> {
-  return apiSend<{ result: { status: string; attempts?: number } }>(`/api/subscriptions/${encodeURIComponent(id)}/test`, 'POST');
+async function postSubscriptionTest(id: string): Promise<{ result: { status: string; attempts: number } } | null> {
+  return decodeSubscriptionTest(await apiSend<unknown>(`/api/subscriptions/${encodeURIComponent(id)}/test`, 'POST'), id);
 }
 
 /** Parses the body even on 400 so the server's rejection reason reaches the inline result, as legacy did. */
@@ -113,67 +296,95 @@ async function postTestEmail(to: string): Promise<{ ok?: boolean; error?: string
   });
   if (!res) return null;
   try {
-    return (await res.json()) as { ok?: boolean; error?: string };
+    if (res.status === 200) return decodeEmailResult(await responseJsonBounded<unknown>(res));
+    if (res.status === 400) return decodeEmailResult(await responseJsonBounded<unknown>(res), true);
+    if (!res.ok) return { ok: false, error: await apiErrorSummary(res, 'SMTP delivery failed') };
+    return null;
   } catch {
     return null;
   }
 }
 
-function postDigestSend(): Promise<{ results: { status: string }[] } | null> {
-  return apiSend<{ results: { status: string }[] }>('/api/reports/digest/send', 'POST', {});
+async function postDigestSend(): Promise<{ results: { status: string }[] } | null> {
+  return decodeDigestResult(await apiSend<unknown>('/api/reports/digest/send', 'POST', {}));
 }
 
 // ---- Data hooks ----
 
 function useIntegrationsData() {
-  const [subs, setSubs] = useState<SubscriptionsResponse>(EMPTY_SUBSCRIPTIONS);
-  const [deliveries, setDeliveries] = useState<DeliveryRecord[]>([]);
-  const [loaded, setLoaded] = useState(false);
+  const [subs, setSubs] = useState<SubscriptionsResponse | null>(null);
+  const [deliveries, setDeliveries] = useState<DeliveryRecord[] | null>(null);
+  const [state, setState] = useState<DeliveryDataState>('loading');
+  const hasSnapshot = useRef(false);
+  const requestVersion = useRef(0);
   const load = useCallback(async () => {
-    try {
-      const [subsBody, deliveryBody] = await Promise.all([fetchSubscriptions(), fetchDeliveries()]);
-      setSubs(subsBody ?? EMPTY_SUBSCRIPTIONS);
-      setDeliveries(deliveryBody?.deliveries ?? []);
-    } finally {
-      setLoaded(true);
+    const version = ++requestVersion.current;
+    const [subsBody, deliveryBody] = await Promise.all([fetchSubscriptions(), fetchDeliveries()]);
+    if (version !== requestVersion.current) return;
+    if (subsBody && Array.isArray(subsBody.destinations) && Array.isArray(subsBody.supportedTypes)
+      && deliveryBody && Array.isArray(deliveryBody.deliveries)) {
+      hasSnapshot.current = true;
+      setSubs(subsBody);
+      setDeliveries(deliveryBody.deliveries);
+      setState('ready');
+      return;
     }
+    setState(hasSnapshot.current ? 'stale' : 'unavailable');
   }, []);
   useEffect(() => {
-    load();
+    void load();
   }, [load]);
-  return { subs, deliveries, loaded, load };
+  return { subs, deliveries, state, load };
 }
 
-function useNotificationsStatus() {
+function useNotificationsStatus(enabled: boolean) {
   const [status, setStatus] = useState<NotificationsStatus | null>(null);
-  const [statusLoaded, setStatusLoaded] = useState(false);
+  const [state, setState] = useState<NotificationState>(enabled ? 'loading' : 'permission');
+  const hasSnapshot = useRef(false);
+  const requestVersion = useRef(0);
   const loadStatus = useCallback(async () => {
-    try {
-      setStatus(await fetchNotificationsStatus());
-    } finally {
-      setStatusLoaded(true);
+    const version = ++requestVersion.current;
+    if (!enabled) {
+      hasSnapshot.current = false;
+      setStatus(null);
+      setState('permission');
+      return;
     }
-  }, []);
+    if (!hasSnapshot.current) setState('loading');
+    const next = await fetchNotificationsStatus();
+    if (version !== requestVersion.current) return;
+    if (next) {
+      hasSnapshot.current = true;
+      setStatus(next);
+      setState('ready');
+      return;
+    }
+    setState(hasSnapshot.current ? 'stale' : 'unavailable');
+  }, [enabled]);
   useEffect(() => {
-    loadStatus();
+    void loadStatus();
   }, [loadStatus]);
-  return { status, statusLoaded, loadStatus };
+  return { status, state, loadStatus };
 }
 
 /** Per-destination test state: last outcome badge (session-only) + in-flight flag. No toast — the badge is the feedback. */
 function useSubscriptionTests(reload: () => Promise<void>) {
   const [results, setResults] = useState<ReadonlyMap<string, TestOutcome>>(new Map());
   const [testing, setTesting] = useState<ReadonlySet<string>>(new Set());
+  const inFlight = useRef(new Set<string>());
   const runTest = async (id: string) => {
+    if (inFlight.current.has(id)) return;
+    inFlight.current.add(id);
     setTesting((prev) => new Set(prev).add(id));
     try {
       const body = await postSubscriptionTest(id);
       const outcome: TestOutcome = body?.result
         ? { status: body.result.status, attempts: body.result.attempts || 0, at: new Date().toLocaleTimeString() }
-        : { status: 'failed', attempts: 0, at: new Date().toLocaleTimeString() };
+        : { status: 'unavailable', attempts: 0, at: new Date().toLocaleTimeString() };
       setResults((prev) => new Map(prev).set(id, outcome));
       await reload();
     } finally {
+      inFlight.current.delete(id);
       setTesting((prev) => {
         const next = new Set(prev);
         next.delete(id);
@@ -213,7 +424,7 @@ function IntegrationsHeader({ onRefresh }: { onRefresh: () => void }) {
   );
 }
 
-function Kpi({ value, label, hint }: { value: number; label: string; hint: string }) {
+function Kpi({ value, label, hint }: { value: ReactNode; label: string; hint: string }) {
   return (
     <div className="insights-kpi">
       <span className="insights-kpi-value">{value}</span>
@@ -223,11 +434,26 @@ function Kpi({ value, label, hint }: { value: number; label: string; hint: strin
   );
 }
 
-function KpiStrip({ subs, deliveries }: { subs: SubscriptionsResponse; deliveries: DeliveryRecord[] }) {
+function KpiStrip({ subs, deliveries, state }: {
+  subs: SubscriptionsResponse | null;
+  deliveries: DeliveryRecord[] | null;
+  state: DeliveryDataState;
+}) {
+  const fallback = state === 'loading' ? '…' : '—';
+  if (!subs || !deliveries) {
+    return (
+      <div className="insights-kpis" aria-label={`Evidence delivery ${state}`}>
+        <Kpi value={fallback} label="Evidence routes" hint="not verified" />
+        <Kpi value={fallback} label="Delivered" hint="not verified" />
+        <Kpi value={fallback} label="Failed" hint="not verified" />
+        <Kpi value={fallback} label="Supported" hint="not verified" />
+      </div>
+    );
+  }
   const delivered = deliveries.filter((d) => d.status === 'delivered').length;
   const failed = deliveries.filter((d) => d.status === 'failed').length;
   return (
-    <div className="insights-kpis">
+    <div className="insights-kpis" aria-label={state === 'stale' ? 'Last verified evidence delivery totals' : 'Verified evidence delivery totals'}>
       <Kpi value={subs.destinations.length} label="Evidence routes" hint="named destinations" />
       <Kpi value={delivered} label="Delivered" hint="recent events" />
       <Kpi value={failed} label="Failed" hint="needs attention" />
@@ -263,22 +489,25 @@ function SmtpField({ label, value }: { label: string; value: string }) {
   );
 }
 
-function SmtpStatusGrid({ status, loaded }: { status: NotificationsStatus | null; loaded: boolean }) {
-  if (!loaded) return <div className="integrations-smtp app-loading">Syncing notification status…</div>;
-  if (!status) {
+function SmtpStatusGrid({ status, state }: { status: NotificationsStatus | null; state: NotificationState }) {
+  if (state === 'loading') return <div className="integrations-smtp app-loading">Syncing notification status…</div>;
+  if (!status || state === 'unavailable') {
     return (
-      <div className="integrations-smtp">
-        <div className="empty">Notification status needs a Security Admin session.</div>
+      <div className="integrations-smtp" role="alert">
+        <div className="empty">Notification status is unavailable. Refresh before treating SMTP or digest delivery as unconfigured.</div>
       </div>
     );
   }
   return (
-    <div className="inspector-grid integrations-smtp" aria-live="polite">
-      <SmtpField label="SMTP relay" value={smtpRelayValue(status.smtp)} />
-      <SmtpField label="From address" value={status.smtp.from || '-'} />
-      <SmtpField label="Email destinations" value={emailDestinationsValue(status.emailDestinations)} />
-      <SmtpField label="Daily digest" value={digestValue(status.digest)} />
-    </div>
+    <>
+      {state === 'stale' ? <div className="readonly-note" role="alert">Showing the last verified notification snapshot after refresh failed.</div> : null}
+      <div className="inspector-grid integrations-smtp" aria-live="polite">
+        <SmtpField label="SMTP relay" value={smtpRelayValue(status.smtp)} />
+        <SmtpField label="From address" value={status.smtp.from || '-'} />
+        <SmtpField label="Email destinations" value={emailDestinationsValue(status.emailDestinations)} />
+        <SmtpField label="Daily digest" value={digestValue(status.digest)} />
+      </div>
+    </>
   );
 }
 
@@ -287,23 +516,35 @@ function TestEmailForm() {
   const [to, setTo] = useState('');
   const [result, setResult] = useState('');
   const [sending, setSending] = useState(false);
+  const sendingRef = useRef(false);
   const send = async () => {
+    if (sendingRef.current) return;
     const trimmed = to.trim();
     if (!trimmed) {
       setResult('Enter a recipient address first.');
       return;
     }
+    sendingRef.current = true;
     setSending(true);
     setResult('Sending...');
-    const body = await postTestEmail(trimmed);
-    const ok = Boolean(body?.ok);
-    setResult(ok ? `Delivered to ${trimmed}.` : `Failed: ${body?.error || 'check the SMTP settings'}.`);
-    toast(ok ? 'Test email delivered.' : 'Test email failed - see the panel for the reason.', ok ? 'good' : 'error');
-    setSending(false);
+    try {
+      const body = await postTestEmail(trimmed);
+      if (!body) {
+        setResult('Result unavailable. Review delivery history before retrying.');
+        toast('Test email response could not be verified.', 'error');
+        return;
+      }
+      const ok = body.ok === true;
+      setResult(ok ? `Delivered to ${trimmed}.` : `Failed: ${body?.error || 'check the SMTP settings'}.`);
+      toast(ok ? 'Test email delivered.' : 'Test email failed - see the panel for the reason.', ok ? 'good' : 'error');
+    } finally {
+      sendingRef.current = false;
+      setSending(false);
+    }
   };
   return (
     <div className="catalog-form-body">
-      <input type="text" placeholder="you@example.test" aria-label="Test email recipient" value={to} onChange={(event) => setTo(event.target.value)} />
+      <input type="email" maxLength={320} placeholder="you@example.test" aria-label="Test email recipient" value={to} onChange={(event) => setTo(event.target.value)} />
       <button className="ghost" type="button" disabled={sending} onClick={send}>
         Send test email
       </button>
@@ -314,12 +555,15 @@ function TestEmailForm() {
 
 interface EmailDigestPanelProps {
   status: NotificationsStatus | null;
-  statusLoaded: boolean;
+  state: NotificationState;
+  canManage: boolean;
   digestBusy: boolean;
   onDigest: () => void;
 }
 
-function EmailDigestPanel({ status, statusLoaded, digestBusy, onDigest }: EmailDigestPanelProps) {
+const NOTIFICATION_PERMISSION_ID = 'notification-admin-permission';
+
+function EmailDigestPanel({ status, state, canManage, digestBusy, onDigest }: EmailDigestPanelProps) {
   return (
     <div className="panel wide-panel">
       <div className="panel-head">
@@ -330,15 +574,25 @@ function EmailDigestPanel({ status, statusLoaded, digestBusy, onDigest }: EmailD
         <button
           className="ghost mini"
           type="button"
-          disabled={digestBusy}
+          disabled={digestBusy || !canManage}
+          aria-describedby={!canManage ? NOTIFICATION_PERMISSION_ID : undefined}
           title="Dispatch the daily digest to every destination subscribed to the digest event type"
           onClick={onDigest}
         >
           {digestBusy ? 'Sending…' : 'Send digest now'}
         </button>
       </div>
-      <SmtpStatusGrid status={status} loaded={statusLoaded} />
-      <TestEmailForm />
+      {!canManage ? (
+        <div id={NOTIFICATION_PERMISSION_ID} className="system-state system-permission" role="status">
+          <strong>Security Admin access required</strong>
+          <p>Operators can inspect and test SIEM/SOAR evidence routes. SMTP status, test email, and digest dispatch remain Security Admin actions.</p>
+        </div>
+      ) : (
+        <>
+          <SmtpStatusGrid status={status} state={state} />
+          <TestEmailForm />
+        </>
+      )}
     </div>
   );
 }
@@ -390,26 +644,34 @@ function SubscriptionRow({ dest, outcome, testing, onTest }: SubscriptionRowProp
 }
 
 interface SubscriptionsPanelProps {
-  destinations: SubscriptionDestination[];
-  loaded: boolean;
+  destinations: SubscriptionDestination[] | null;
+  state: DeliveryDataState;
   tests: ReturnType<typeof useSubscriptionTests>;
 }
 
-function SubscriptionsPanel({ destinations, loaded, tests }: SubscriptionsPanelProps) {
+function SubscriptionsPanel({ destinations, state, tests }: SubscriptionsPanelProps) {
   const renderRows = () => {
-    if (!loaded) return <div className="app-loading">Syncing subscriptions…</div>;
-    if (!destinations.length) {
-      return <div className="insights-empty">No subscriptions configured. Add destinations in config/subscriptions.json.</div>;
+    if (state === 'loading') return <div className="app-loading">Syncing subscriptions…</div>;
+    if (!destinations) {
+      return <div className="system-state system-unavailable" role="alert"><strong>Subscriptions unavailable</strong><p>No verified evidence-route snapshot is available.</p></div>;
     }
-    return destinations.map((dest) => (
-      <SubscriptionRow
-        key={dest.id}
-        dest={dest}
-        outcome={tests.results.get(dest.id) ?? null}
-        testing={tests.testing.has(dest.id)}
-        onTest={() => tests.runTest(dest.id)}
-      />
-    ));
+    if (!destinations.length) {
+      return <div className="insights-empty">{state === 'stale' ? 'The last verified snapshot had no subscriptions; the current state is unknown.' : 'No subscriptions configured. Add destinations in config/subscriptions.json.'}</div>;
+    }
+    return (
+      <>
+        {state === 'stale' ? <div className="readonly-note" role="alert">Showing last verified evidence routes after refresh failed.</div> : null}
+        {destinations.map((dest) => (
+          <SubscriptionRow
+            key={dest.id}
+            dest={dest}
+            outcome={tests.results.get(dest.id) ?? null}
+            testing={tests.testing.has(dest.id)}
+            onTest={() => tests.runTest(dest.id)}
+          />
+        ))}
+      </>
+    );
   };
   return (
     <div className="panel wide-panel">
@@ -441,23 +703,35 @@ function DeliveryRow({ rec }: { rec: DeliveryRecord }) {
   );
 }
 
-function DeliveryHistoryPanel({ deliveries, loaded }: { deliveries: DeliveryRecord[]; loaded: boolean }) {
+function DeliveryHistoryPanel({ deliveries, state }: { deliveries: DeliveryRecord[] | null; state: DeliveryDataState }) {
   const renderRows = () => {
-    if (!loaded) {
+    if (state === 'loading') {
       return (
         <tr>
           <td colSpan={6} className="insights-empty">Syncing deliveries…</td>
         </tr>
       );
     }
-    if (!deliveries.length) {
+    if (!deliveries) {
       return (
         <tr>
-          <td colSpan={6} className="insights-empty">No deliveries yet.</td>
+          <td colSpan={6} className="insights-empty">Delivery history unavailable. No verified empty-state conclusion can be drawn.</td>
         </tr>
       );
     }
-    return deliveries.map((rec) => <DeliveryRow key={rec.id} rec={rec} />);
+    if (!deliveries.length) {
+      return (
+        <tr>
+          <td colSpan={6} className="insights-empty">{state === 'stale' ? 'The last verified snapshot had no deliveries; the current state is unknown.' : 'No deliveries yet.'}</td>
+        </tr>
+      );
+    }
+    return (
+      <>
+        {state === 'stale' ? <tr><td colSpan={6} className="readonly-note">Showing last verified delivery history after refresh failed.</td></tr> : null}
+        {deliveries.map((rec) => <DeliveryRow key={rec.id} rec={rec} />)}
+      </>
+    );
   };
   return (
     <div className="panel wide-panel">
@@ -481,7 +755,7 @@ function DeliveryHistoryPanel({ deliveries, loaded }: { deliveries: DeliveryReco
         <tbody>{renderRows()}</tbody>
       </table>
       <div className="integrity" aria-label="Delivery status legend">
-        Status legend: <b>delivered</b> = destination accepted the event · <b>retrying</b> = temporary failure, retried with backoff ·{' '}
+        Status legend: <b>delivered</b> = destination accepted the event · <b>deduped</b> = a recent identical event was already accepted ·{' '}
         <b>failed</b> = gave up after retries; use Send test to re-check the destination.
       </div>
     </div>
@@ -491,32 +765,55 @@ function DeliveryHistoryPanel({ deliveries, loaded }: { deliveries: DeliveryReco
 // ---- View ----
 
 export default function Integrations() {
-  const { subs, deliveries, loaded, load } = useIntegrationsData();
-  const { status, statusLoaded, loadStatus } = useNotificationsStatus();
+  const { me } = useSession();
+  const canManageNotifications = me?.role === 'security_admin';
+  const { subs, deliveries, state, load } = useIntegrationsData();
+  const { status, state: notificationState, loadStatus } = useNotificationsStatus(canManageNotifications);
   const tests = useSubscriptionTests(load);
   const [digestBusy, setDigestBusy] = useState(false);
+  const digestBusyRef = useRef(false);
 
   const sendDigest = async () => {
+    if (!canManageNotifications || digestBusyRef.current) return;
+    digestBusyRef.current = true;
     setDigestBusy(true);
-    const body = await postDigestSend();
-    if (body) {
-      const delivered = body.results.filter((r) => r.status === 'delivered').length;
-      toast(`Digest dispatched: ${delivered}/${body.results.length} destination(s) delivered.`, 'good');
-    } else {
+    try {
+      const body = await postDigestSend();
+      if (body) {
+        const delivered = body.results.filter((r) => r.status === 'delivered').length;
+        const complete = body.results.length > 0 && delivered === body.results.length;
+        const message = body.results.length
+          ? `Digest dispatch verified: ${delivered}/${body.results.length} destination(s) delivered.`
+          : 'Digest dispatch verified with no configured destinations.';
+        toast(message, complete ? 'good' : 'warn');
+      } else {
+        toast('Digest response could not be verified. Review delivery history before retrying.', 'error');
+      }
+      await Promise.all([loadStatus(), load()]);
+    } catch {
       toast('Digest send failed.', 'error');
+    } finally {
+      digestBusyRef.current = false;
+      setDigestBusy(false);
     }
-    setDigestBusy(false);
-    await Promise.all([loadStatus(), load()]);
   };
+
+  const refresh = () => Promise.all([load(), loadStatus()]).then(() => undefined);
 
   return (
     <div className="integrations-view">
-      <IntegrationsHeader onRefresh={load} />
-      <KpiStrip subs={subs} deliveries={deliveries} />
-      <EmailDigestPanel status={status} statusLoaded={statusLoaded} digestBusy={digestBusy} onDigest={sendDigest} />
+      <IntegrationsHeader onRefresh={() => void refresh()} />
+      <KpiStrip subs={subs} deliveries={deliveries} state={state} />
+      <EmailDigestPanel
+        status={status}
+        state={notificationState}
+        canManage={canManageNotifications}
+        digestBusy={digestBusy}
+        onDigest={() => void sendDigest()}
+      />
       <div className="insights-grid">
-        <SubscriptionsPanel destinations={subs.destinations} loaded={loaded} tests={tests} />
-        <DeliveryHistoryPanel deliveries={deliveries} loaded={loaded} />
+        <SubscriptionsPanel destinations={subs?.destinations ?? null} state={state} tests={tests} />
+        <DeliveryHistoryPanel deliveries={deliveries} state={state} />
       </div>
     </div>
   );

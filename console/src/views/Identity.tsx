@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { EmptyState } from '../components/Panel';
-import { api, apiErrorSummary, apiSend } from '../lib/api';
+import { api, apiErrorSummary, apiSend, responseJsonBounded } from '../lib/api';
 import { useSession } from '../lib/session';
+import {
+  isCompleteAdminDirectoryResponse,
+  isCompleteInvitationResponse,
+  isCompleteRolesResponse,
+} from '../lib/strict-console-response';
 import './Identity.css';
 
 /**
@@ -132,7 +137,12 @@ interface AdminDirectory {
     overLimit: boolean;
     tenantId: string | null;
     saasMode: boolean;
+    seatLimitValid: boolean;
   };
+}
+
+function isAdminDirectory(value: unknown): value is AdminDirectory {
+  return isCompleteAdminDirectoryResponse(value);
 }
 
 function absoluteInviteUrl(invite: AdminInvitation | null): string {
@@ -145,6 +155,8 @@ interface GuideFetch {
   error: string | null;
 }
 
+const DIRECTORY_RESPONSE_MAX_BYTES = 4 * 1024 * 1024;
+
 /** Mirrors legacy loadIdentitySetup: parse the body even on non-2xx so a 400 { error } reaches the UI. */
 async function fetchIdentitySetupGuide(provider: string, tenantId: string): Promise<GuideFetch> {
   const params = new URLSearchParams({ provider });
@@ -153,7 +165,7 @@ async function fetchIdentitySetupGuide(provider: string, tenantId: string): Prom
   if (!res) return { guide: null, error: null };
   let body: unknown;
   try {
-    body = await res.json();
+    body = await responseJsonBounded<unknown>(res);
   } catch {
     return { guide: null, error: null };
   }
@@ -166,19 +178,19 @@ async function fetchIdentitySetupGuide(provider: string, tenantId: string): Prom
 async function fetchRoles(): Promise<AdminRole[]> {
   const res = await api('/api/admin/roles');
   if (!res?.ok) throw new Error('roles unavailable');
-  const body = await res.json() as { roles?: unknown };
-  if (!Array.isArray(body?.roles)) throw new Error('roles response invalid');
-  return body.roles as AdminRole[];
+  const body = await responseJsonBounded<unknown>(res);
+  if (!isCompleteRolesResponse(body)) throw new Error('roles response invalid');
+  return (body as { roles: AdminRole[] }).roles;
 }
 
 async function fetchDirectory(): Promise<AdminDirectory> {
   const res = await api('/api/admin/users');
   if (!res?.ok) throw new Error('directory unavailable');
-  const body = await res.json() as Partial<AdminDirectory>;
-  if (!body || !Array.isArray(body.users) || !Array.isArray(body.invitations) || !body.seatReport) {
+  const body = await responseJsonBounded<unknown>(res, DIRECTORY_RESPONSE_MAX_BYTES);
+  if (!isAdminDirectory(body)) {
     throw new Error('directory response invalid');
   }
-  return body as AdminDirectory;
+  return body;
 }
 
 const fmt = (iso?: string) => (iso ? new Date(iso).toLocaleString() : '-');
@@ -636,11 +648,15 @@ function InviteForm({ roles, invalidatedInvitationId, onCreated }: { roles: Admi
       setError(await apiErrorSummary(res, 'Could not create invite'));
       return;
     }
-    const invite = (await res.json()) as AdminInvitation;
-    setCreated(invite);
+    const invite = await responseJsonBounded<unknown>(res);
+    if (!isCompleteInvitationResponse(invite, true)) {
+      setError('Invite response could not be verified. Refresh invitations before retrying.');
+      return;
+    }
+    setCreated(invite as AdminInvitation);
     setUserName('');
     setDisplayName('');
-    onCreated(invite);
+    onCreated(invite as AdminInvitation);
   };
 
   return (
@@ -748,27 +764,52 @@ function UsersAndRoles({ directory, roles, error, loading, reload, setDirectory,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    if (res?.ok) setDirectory((await res.json()) as AdminDirectory);
+    if (res?.ok) {
+      const next = await responseJsonBounded<unknown>(res, DIRECTORY_RESPONSE_MAX_BYTES);
+      if (isAdminDirectory(next)) setDirectory(next);
+      else await reload();
+    }
   };
   const postUser = async (user: AdminUser, action: 'disable' | 'reactivate', promptLabel: string) => {
     const why = reason(promptLabel);
     if (!why) return;
-    const res = await apiSend<AdminDirectory>(`/api/admin/users/${encodeURIComponent(user.id)}/${action}`, 'POST', { reason: why });
-    if (res) setDirectory(res);
+    const res = await api(`/api/admin/users/${encodeURIComponent(user.id)}/${action}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason: why }),
+    });
+    if (!res?.ok) return;
+    const next = await responseJsonBounded<unknown>(res, DIRECTORY_RESPONSE_MAX_BYTES);
+    if (isAdminDirectory(next)) setDirectory(next);
+    else await reload();
   };
   const resend = async (invite: AdminInvitation) => {
     const why = reason('Reason for resending the invite');
     if (!why) return;
-    const replacement = await apiSend<AdminInvitation>(`/api/admin/users/invitations/${encodeURIComponent(invite.id)}/resend`, 'POST', { reason: why });
-    if (!replacement) return;
-    setReplacementInvite(replacement);
+    const res = await api(`/api/admin/users/invitations/${encodeURIComponent(invite.id)}/resend`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason: why }),
+    });
+    if (!res?.ok) return;
+    const replacement = await responseJsonBounded<unknown>(res);
+    if (isCompleteInvitationResponse(replacement, true)) setReplacementInvite(replacement as AdminInvitation);
     await reload();
   };
   const revoke = async (invite: AdminInvitation) => {
     const why = reason('Reason for revoking the invite');
     if (!why) return;
-    const revoked = await apiSend(`/api/admin/users/invitations/${encodeURIComponent(invite.id)}/revoke`, 'POST', { reason: why });
-    if (!revoked) return;
+    const res = await api(`/api/admin/users/invitations/${encodeURIComponent(invite.id)}/revoke`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason: why }),
+    });
+    if (!res?.ok) return;
+    const revoked = await responseJsonBounded<unknown>(res);
+    if (!isCompleteInvitationResponse(revoked)) {
+      await reload();
+      return;
+    }
     if (replacementInvite?.id === invite.id) setReplacementInvite(null);
     await reload();
   };

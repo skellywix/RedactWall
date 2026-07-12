@@ -10,3 +10,99 @@
   gap: 14px;
   align-content: start;
 }
+
+.compliance-trust-package {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--blue);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+
+.compliance-eyebrow {
+  color: var(--blue);
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.compliance-trust-package h2 {
+  margin: 3px 0 0;
+  font-size: 15px;
+}
+
+.compliance-trust-package p {
+  max-width: 760px;
+  margin: 5px 0 0;
+  color: var(--mut);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.compliance-trust-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex: 0 0 auto;
+}
+
+.compliance-trust-actions > span {
+  flex-basis: 100%;
+  max-width: 320px;
+  color: var(--mut);
+  font-size: 11.5px;
+  text-align: right;
+}
+
+.compliance-export-permission {
+  flex-basis: 100%;
+  max-width: 420px;
+  color: var(--mut);
+  font-size: 11.5px;
+  line-height: 1.4;
+  text-align: right;
+}
+
+.compliance-download-status.is-downloaded {
+  color: var(--green);
+}
+
+.compliance-download-status.is-forbidden,
+.compliance-download-status.is-session,
+.compliance-download-status.is-malformed,
+.compliance-download-status.is-oversize,
+.compliance-download-status.is-unavailable {
+  color: var(--amber);
+}
+
+@media (max-width: 760px) {
+  .compliance-trust-package {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .compliance-trust-actions {
+    justify-content: stretch;
+  }
+
+  .compliance-trust-actions .system-button {
+    flex: 1 1 140px;
+    min-height: 44px;
+  }
+
+  .compliance-trust-actions > span {
+    max-width: none;
+    text-align: left;
+  }
+
+  .compliance-export-permission {
+    max-width: none;
+    text-align: left;
+  }
+}

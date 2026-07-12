@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react';
-import { useColorTheme, type ColorTheme } from '../lib/theme';
+import { useColorTheme } from '../lib/theme';
 
 // Sun / moon glyphs, verbatim from the legacy theme toggle (index.html header).
 const SUN = (
@@ -21,35 +21,24 @@ const MOON = (
   />
 );
 
-const CHOICES: { value: ColorTheme; label: string; icon: ReactElement }[] = [
-  { value: 'light', label: 'Switch to light', icon: SUN },
-  { value: 'dark', label: 'Switch to dark', icon: MOON },
-];
-
-/** Segmented light/dark control. Styled by `.theme-toggle` in console-base.css. */
+/** One named toggle exposes the action and avoids overlapping focus targets. */
 export default function ThemeToggle(): ReactElement {
   const { theme, setTheme } = useColorTheme();
+  const nextTheme = theme === 'dark' ? 'light' : 'dark';
+  const label = `Switch to ${nextTheme} theme`;
   return (
-    <div className="theme-toggle" role="group" aria-label="Color theme">
-      {CHOICES.map((choice) => {
-        const selected = theme === choice.value;
-        return (
-          <button
-            key={choice.value}
-            type="button"
-            data-theme-choice={choice.value}
-            className={selected ? 'active' : ''}
-            aria-pressed={selected}
-            title={choice.label}
-            aria-label={choice.label}
-            onClick={() => setTheme(choice.value)}
-          >
-            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              {choice.icon}
-            </svg>
-          </button>
-        );
-      })}
+    <div className="theme-toggle">
+      <button
+        type="button"
+        data-theme-choice={nextTheme}
+        title={label}
+        aria-label={label}
+        onClick={() => setTheme(nextTheme)}
+      >
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          {nextTheme === 'light' ? SUN : MOON}
+        </svg>
+      </button>
     </div>
   );
 }

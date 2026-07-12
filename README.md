@@ -53,12 +53,13 @@ The dashboard and API run on `http://localhost:4000` by default. The generated a
 
 The browser console is the operator-facing control plane. It ships as a
 Vite/React/TypeScript app served at `/app` (behind the same login and CSRF gate
-as the rest of the API), with a grouped sidebar — Operate, Analyze, Govern,
-System — a Ctrl/Cmd-K command palette, and light/dark themes (dark by default).
-It has one focused screen per task: overview, approval queue, AI Command Center,
-all activity, insights, sensor coverage, data lineage, decision quality, app
-catalog, compliance, identity, configuration, deploy, integrations, audit log,
-and updates. The overview opens on the AI Data Leak Exposure Map, an interactive
+as the rest of the API), with Member Defense, Risk & Proof, Governance, and
+Administration route groups, a Ctrl/Cmd-K command palette, and light/dark
+themes (dark by default). It has one focused screen per task, including the
+overview, approval queue, AI Command Center, activity, insights, sensor
+coverage, data lineage, decision quality, app catalog, compliance and NCUA
+readiness, identity, licensing, policy, deployment, integrations, audit, and
+controlled updates. The overview opens on the AI Data Leak Exposure Map, an interactive
 graph that attributes sanitized flows to departments as they pass RedactWall
 controls on the way to AI destinations. The queue, command-center, and
 configuration views are optimized for guided operator flow, guided policy setup,
@@ -69,7 +70,9 @@ raw prompt content by default.
 
 `/` redirects to `/app/`; it is the only operator console (the original static
 console was retired). Build the React bundle with `npm run console:build` (CI
-builds it automatically); it emits to `server/public/app/`.
+builds it automatically); it emits to `server/public/app/`. Frontend tokens,
+shared states, responsive rules, and accessibility requirements are documented
+in [`docs/frontend/DESIGN_SYSTEM.md`](docs/frontend/DESIGN_SYSTEM.md).
 
 Run the default test suite:
 

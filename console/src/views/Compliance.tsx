@@ -1,8 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  canReadAuditExports,
+  downloadTrustPackage,
+  type TrustPackageDownloadResult,
+  type TrustPackageFormat,
+} from '../api/evidence';
 import { EmptyState } from '../components/Panel';
-import { apiJson } from '../lib/api';
+import { apiJsonBounded } from '../lib/api';
 import { downloadCsv, csvStamp } from '../lib/csv';
 import { navigate } from '../lib/router';
+import { useSession } from '../lib/session';
 import { toast } from '../lib/toast';
 import './Compliance.css';
 
@@ -15,9 +22,8 @@ import './Compliance.css';
  *     credit-union families) evaluated against the active policy, detector
  *     inventory, audit-chain verification, coverage, and EDM status.
  *     Any console role can read it; no query params, no CSRF (GET).
- *   GET /api/export/evidence — opened in a new tab only (Security Admin or
- *     Auditor; other roles get a JSON 403 in that tab, as legacy did). The
- *     response is never parsed here.
+ *   GET /api/export/evidence is exposed only to Security Admin and Auditor
+ *     sessions. Other roles receive a truthful disabled permission state.
  * No SSE (legacy reloads only on tab activation/Refresh), no mutations, no
  * step-up. CSV export is client-side over the last loaded controls —
  * server-vetted metadata only, no prompt content.
@@ -35,23 +41,57 @@ interface ControlMapping {
   lastVerifiedAt: string | null;
 }
 
-interface ComplianceResponse {
-  disclaimer?: string;
-  controlMappings: ControlMapping[];
-}
-
 interface ComplianceData {
   controls: ControlMapping[];
   disclaimer: string;
 }
 
+const CONTROL_STATES = new Set<ControlState>(['covered', 'attention', 'not_provided']);
+const CONTROL_MAPPINGS_MAX = 100;
+const CONTROL_LIST_MAX = 16;
+const COMPLIANCE_RESPONSE_MAX_BYTES = 512 * 1024;
+
+function boundedText(value: unknown, max: number): string | null {
+  return typeof value === 'string' && value.length > 0 && value.length <= max ? value : null;
+}
+
+function boundedTextList(value: unknown, maxChars: number): string[] | null {
+  if (!Array.isArray(value) || !value.length || value.length > CONTROL_LIST_MAX) return null;
+  const items = value.map((item) => boundedText(item, maxChars));
+  return items.every((item): item is string => item !== null) ? items : null;
+}
+
+function decodeControlMapping(value: unknown): ControlMapping | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  const id = boundedText(row.id, 80);
+  const title = boundedText(row.title, 180);
+  const summary = boundedText(row.summary, 1_200);
+  const controlFamilies = boundedTextList(row.controlFamilies, 220);
+  const evidence = boundedTextList(row.evidence, 220);
+  const state = typeof row.state === 'string' && CONTROL_STATES.has(row.state as ControlState)
+    ? row.state as ControlState
+    : null;
+  if (!id || !/^[a-z0-9_/-]+$/.test(id) || !title || !summary || !state || !controlFamilies || !evidence) return null;
+  const lastVerifiedAt = row.lastVerifiedAt === null ? null : boundedText(row.lastVerifiedAt, 40);
+  if (row.lastVerifiedAt !== null && lastVerifiedAt === null) return null;
+  if (lastVerifiedAt !== null && !Number.isFinite(Date.parse(lastVerifiedAt))) return null;
+  return { id, title, state, controlFamilies, evidence, summary, lastVerifiedAt };
+}
+
+function decodeComplianceResponse(value: unknown): ComplianceData | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const body = value as Record<string, unknown>;
+  if (!Array.isArray(body.controlMappings) || body.controlMappings.length > CONTROL_MAPPINGS_MAX) return null;
+  const controls = body.controlMappings.map(decodeControlMapping);
+  if (!controls.every((control): control is ControlMapping => control !== null)) return null;
+  if (new Set(controls.map((control) => control.id)).size !== controls.length) return null;
+  const disclaimer = body.disclaimer === undefined ? '' : boundedText(body.disclaimer, 1_200);
+  return disclaimer === null ? null : { controls, disclaimer };
+}
+
 async function fetchCompliance(): Promise<ComplianceData | null> {
-  const body = await apiJson<ComplianceResponse>('/api/compliance');
-  if (!body || !Array.isArray(body.controlMappings)) return null;
-  return {
-    controls: body.controlMappings,
-    disclaimer: typeof body.disclaimer === 'string' ? body.disclaimer : '',
-  };
+  return decodeComplianceResponse(await apiJsonBounded<unknown>('/api/compliance', COMPLIANCE_RESPONSE_MAX_BYTES));
 }
 
 // ---- Constants (ported verbatim from dashboard.js renderCompliance) ----
@@ -122,7 +162,15 @@ function RefreshIcon() {
   );
 }
 
-function ComplianceHeader({ busy, onRefresh }: { busy: boolean; onRefresh: () => void }) {
+function ComplianceHeader({ busy, canExport, sessionLoading, onRefresh }: {
+  busy: boolean;
+  canExport: boolean;
+  sessionLoading: boolean;
+  onRefresh: () => void;
+}) {
+  const exportPermission = sessionLoading
+    ? 'Checking evidence export permission…'
+    : 'Global Administrator or Examiner/Auditor access is required to export evidence.';
   return (
     <div className="console-frame-header">
       <div className="console-frame-title">
@@ -135,13 +183,29 @@ function ComplianceHeader({ busy, onRefresh }: { busy: boolean; onRefresh: () =>
         </div>
       </div>
       <div className="console-frame-actions">
-        <a className="system-button secondary" href="/api/export/evidence" target="_blank" rel="noopener">
-          Export evidence pack
-        </a>
+        {canExport ? (
+          <a className="system-button secondary" href="/api/export/evidence" target="_blank" rel="noopener">
+            Export evidence pack
+          </a>
+        ) : (
+          <button
+            className="system-button secondary"
+            type="button"
+            disabled
+            aria-describedby="complianceExportPermission"
+          >
+            Export evidence pack
+          </button>
+        )}
         <button className="system-button secondary" type="button" disabled={busy} onClick={onRefresh}>
           <RefreshIcon />
           {busy ? 'Mapping…' : 'Refresh'}
         </button>
+        {!canExport ? (
+          <span className="compliance-export-permission" id="complianceExportPermission" role="note">
+            {exportPermission}
+          </span>
+        ) : null}
       </div>
     </div>
   );
@@ -170,6 +234,102 @@ function KpiRow({ controls }: { controls: ControlMapping[] }) {
       <Kpi label="AI frameworks" value="5" hint="NIST/ISO 42001/EU AI Act/OWASP/ATLAS" />
       <Kpi label="Evidence" value="prompt-free" hint="hashes & metadata only" />
     </div>
+  );
+}
+
+type TrustDownloadState = {
+  kind: 'idle' | 'loading' | TrustPackageDownloadResult['kind'];
+  message: string;
+};
+
+function trustDownloadMessage(result: TrustPackageDownloadResult, format: TrustPackageFormat): TrustDownloadState {
+  const label = format.toUpperCase();
+  if (result.kind === 'downloaded') return { kind: result.kind, message: `${label} security trust package download started.` };
+  if (result.kind === 'forbidden') {
+    return { kind: result.kind, message: 'This session is not permitted to download the security trust package.' };
+  }
+  if (result.kind === 'session') return { kind: result.kind, message: 'Your session expired. Redirecting to sign in…' };
+  if (result.kind === 'oversize') {
+    return { kind: result.kind, message: 'The security trust package exceeded the safe download limit and was not saved.' };
+  }
+  if (result.kind === 'malformed') {
+    return { kind: result.kind, message: 'The security trust package response was malformed and was not saved.' };
+  }
+  return { kind: result.kind, message: 'The security trust package is unavailable. Retry when the control plane is ready.' };
+}
+
+function TrustPackagePanel({ canExport, sessionLoading }: { canExport: boolean; sessionLoading: boolean }) {
+  const [activeFormat, setActiveFormat] = useState<TrustPackageFormat | null>(null);
+  const [downloadState, setDownloadState] = useState<TrustDownloadState>({
+    kind: 'idle',
+    message: 'Choose JSON for review or ZIP for a complete handoff bundle.',
+  });
+  const permission = sessionLoading
+    ? 'Checking export permission…'
+    : 'Global Administrator or Examiner/Auditor access is required to export this package.';
+  const runDownload = async (format: TrustPackageFormat) => {
+    if (!canExport || activeFormat) return;
+    setActiveFormat(format);
+    setDownloadState({ kind: 'loading', message: `Preparing the ${format.toUpperCase()} security trust package…` });
+    try {
+      setDownloadState(trustDownloadMessage(await downloadTrustPackage(format), format));
+    } finally {
+      setActiveFormat(null);
+    }
+  };
+  return (
+    <section className="compliance-trust-package" aria-labelledby="trustPackageTitle" aria-busy={Boolean(activeFormat)}>
+      <div>
+        <span className="compliance-eyebrow">Vendor risk and examiner handoff</span>
+        <h2 id="trustPackageTitle">Security Trust Package</h2>
+        <p>
+          Export the current self-attested control posture, validation commands, documentation pointers,
+          and bounded dependency inventory. Prompt bodies, secrets, raw findings, and raw audit details are excluded.
+        </p>
+      </div>
+      <div className="compliance-trust-actions">
+        {canExport ? (
+          <>
+            <button
+              className="system-button secondary"
+              type="button"
+              data-testid="trust-package-json"
+              disabled={Boolean(activeFormat)}
+              aria-describedby="trustPackageDownloadStatus"
+              onClick={() => void runDownload('json')}
+            >
+              {activeFormat === 'json' ? 'Preparing JSON…' : 'Download JSON'}
+            </button>
+            <button
+              className="system-button primary"
+              type="button"
+              data-testid="trust-package-zip"
+              disabled={Boolean(activeFormat)}
+              aria-describedby="trustPackageDownloadStatus"
+              onClick={() => void runDownload('zip')}
+            >
+              {activeFormat === 'zip' ? 'Preparing ZIP…' : 'Download ZIP'}
+            </button>
+          </>
+        ) : (
+          <>
+            <button className="system-button secondary" type="button" disabled aria-describedby="trustPackagePermission">Download JSON</button>
+            <button className="system-button primary" type="button" disabled aria-describedby="trustPackagePermission">Download ZIP</button>
+          </>
+        )}
+        {!canExport ? <span id="trustPackagePermission" role="note">{permission}</span> : null}
+        {canExport ? (
+          <span
+            className={`compliance-download-status is-${downloadState.kind}`}
+            id="trustPackageDownloadStatus"
+            role="status"
+            aria-live="polite"
+          >
+            {downloadState.message}
+          </span>
+        ) : null}
+      </div>
+    </section>
   );
 }
 
@@ -303,35 +463,55 @@ function ControlCard({ control }: { control: ControlMapping }) {
   );
 }
 
+function ComplianceDisclaimer({ text }: { text: string }) {
+  if (!text) return null;
+  return (
+    <p
+      className="compliance-disclaimer"
+      role="note"
+      style={{
+        margin: '0 0 12px',
+        padding: '10px 14px',
+        fontSize: '13px',
+        lineHeight: 1.5,
+        color: 'var(--muted, #5b6472)',
+        border: '1px solid var(--border, #d9dee6)',
+        borderRadius: '8px',
+        background: 'var(--surface-2, #f6f8fb)',
+      }}
+    >
+      {text}
+    </p>
+  );
+}
+
 export default function Compliance() {
+  const { me, loading: sessionLoading } = useSession();
   const { controls, disclaimer, loaded, busy, load } = useComplianceControls();
+  const canExport = canReadAuditExports(me?.role);
 
   const renderBody = () => {
     if (!loaded) return <div className="app-loading">Mapping compliance controls…</div>;
     if (!controls) {
       return <EmptyState title="FCU control mapping unavailable" detail="Could not load control mappings. Refresh to retry." />;
     }
+    if (!controls.length) {
+      return (
+        <>
+          <ComplianceDisclaimer text={disclaimer} />
+          <TrustPackagePanel canExport={canExport} sessionLoading={sessionLoading} />
+          <EmptyState
+            title="No control mappings reported"
+            detail="The control-plane response was valid but contained no control mappings. No coverage conclusion can be drawn."
+          />
+        </>
+      );
+    }
     return (
       <>
-        {disclaimer ? (
-          <p
-            className="compliance-disclaimer"
-            role="note"
-            style={{
-              margin: '0 0 12px',
-              padding: '10px 14px',
-              fontSize: '13px',
-              lineHeight: 1.5,
-              color: 'var(--muted, #5b6472)',
-              border: '1px solid var(--border, #d9dee6)',
-              borderRadius: '8px',
-              background: 'var(--surface-2, #f6f8fb)',
-            }}
-          >
-            {disclaimer}
-          </p>
-        ) : null}
+        <ComplianceDisclaimer text={disclaimer} />
         <KpiRow controls={controls} />
+        <TrustPackagePanel canExport={canExport} sessionLoading={sessionLoading} />
         <RecommendationsPanel controls={controls} onExportCsv={() => exportControlsCsv(controls)} />
         <FrameworksPanel controls={controls} />
         <div className="insights-grid">
@@ -345,7 +525,7 @@ export default function Compliance() {
 
   return (
     <div className="compliance-view">
-      <ComplianceHeader busy={busy} onRefresh={load} />
+      <ComplianceHeader busy={busy} canExport={canExport} sessionLoading={sessionLoading} onRefresh={load} />
       {renderBody()}
     </div>
   );

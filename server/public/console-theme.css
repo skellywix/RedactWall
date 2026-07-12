@@ -1,28 +1,48 @@
-/* ============================================================================
-   RedactWall — "The Examiner's Instrument" design system (authority layer).
-
-   Rationale (stated so future sessions reuse it instead of re-converging):
-   1. POINT OF VIEW — a precision instrument for regulated finance: calm,
-      engraved, dense-but-legible. Hairline rules instead of soft shadows,
-      squared geometry, no decorative gradients or ambient art.
-   2. TYPE — engineered system stack: 13px base, tracked uppercase micro-labels
-      for structure, tabular numerals globally (an audit console is numbers).
-   3. COLOR — graphite (dark) / paper (light) neutrals. Iris is INTERACTION
-      only. Severity is a fixed, glyph-reinforced scale used identically in
-      chips, spines, stats, and charts: block/critical=red, high/justify=amber,
-      medium/warn=yellow, allow/good=green, info=iris. Never color alone:
-      severity chips carry shape glyphs for colorblind operators.
-   4. MOTION — 130ms ease-out on state; one signature motion (queue rows
-      settle); prefers-reduced-motion collapses everything.
-   Signature: the VERDICT SPINE — a 2px left edge in severity color on every
-   element that carries a verdict (stats, selected queue rows, active panels).
-   Layout and responsive behavior live in the base sheet; this layer is
-   presentation + additive wayfinding (nav groups, command palette) only.
-   ========================================================================== */
+/* RedactWall "Examiner's Instrument" token authority and presentation layer.
+   The documented rationale and usage contract live in
+   docs/frontend/DESIGN_SYSTEM.md. */
 
 :root,
 body[data-theme="light"] {
   color-scheme: light;
+  /* Foundation tokens. This file is the only token authority. */
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI Variable Text", "Segoe UI", Inter, Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Cascadia Mono", "Liberation Mono", monospace;
+  --text-xs: 0.6875rem;
+  --text-sm: 0.75rem;
+  --text-md: 0.8125rem;
+  --text-base: 0.875rem;
+  --text-lg: 1rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.625rem;
+  --leading-tight: 1.2;
+  --leading-normal: 1.5;
+  --space-0: 0;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+  --size-control: 2rem;
+  --size-target: 2.75rem;
+  --size-rail: 15rem;
+  --size-topbar: 4rem;
+  --radius-xs: 3px;
+  --radius-sm: 5px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-pill: 999px;
+  --motion-instant: 80ms;
+  --motion-fast: 130ms cubic-bezier(0.2, 0.6, 0.3, 1);
+  --motion-standard: 200ms cubic-bezier(0.2, 0.6, 0.3, 1);
+  --motion-expressive: 320ms cubic-bezier(0.2, 0.7, 0.2, 1);
+  --z-sticky: 20;
+  --z-backdrop: 40;
+  --z-dialog: 50;
   --bg: #f4f5f7;
   --panel: #ffffff;
   --panel2: #f8f9fb;
@@ -67,9 +87,17 @@ body[data-theme="light"] {
   --shadow: 0 1px 2px rgba(16, 22, 34, 0.06);
   --shadow-raised: 0 1px 2px rgba(16, 22, 34, 0.06), 0 8px 24px rgba(16, 22, 34, 0.08);
   --shadow-pop: 0 2px 6px rgba(16, 22, 34, 0.08), 0 20px 48px rgba(16, 22, 34, 0.16);
-  --fast: 130ms cubic-bezier(0.2, 0.6, 0.3, 1);
-  --radius: 8px;
-  --radius-sm: 5px;
+  --fast: var(--motion-fast);
+  --radius: var(--radius-md);
+  --status-info: var(--blue);
+  --status-safe: var(--green);
+  --status-warning: var(--amber);
+  --status-critical: var(--red);
+  --status-info-bg: var(--blue-bg);
+  --status-safe-bg: var(--green-bg);
+  --status-warning-bg: var(--amber-bg);
+  --status-critical-bg: var(--red-bg);
+  --border-hairline: 1px solid var(--line);
 }
 
 body[data-theme="dark"] {
@@ -163,6 +191,64 @@ body[data-theme="dark"] {
 body::before { display: none; content: none; }
 .theme-canvas { display: none; }
 h2, h3 { letter-spacing: -0.015em; }
+html { scroll-padding-top: calc(var(--size-topbar) + var(--space-4)); }
+
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+  box-shadow: var(--focus-ring);
+  scroll-margin-block: calc(var(--size-topbar) + var(--space-4));
+}
+
+/* Shared presentation patterns. View slices can adopt these without creating
+   one-off card, field, toolbar, or state styles. */
+.system-page-header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding-block: var(--space-2) var(--space-4);
+  border-bottom: var(--border-hairline);
+}
+.system-page-header h1 { margin: 0; font-size: var(--text-2xl); line-height: var(--leading-tight); }
+.system-page-header p { max-width: 70ch; margin: var(--space-1) 0 0; color: var(--mut); }
+.system-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.system-field { display: grid; gap: var(--space-2); min-width: 0; }
+.system-field > label { color: var(--soft); font-size: var(--text-sm); font-weight: 650; }
+.system-field > :is(input, select, textarea) { width: 100%; min-height: var(--size-target); }
+.system-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 1.625rem;
+  padding: var(--space-1) var(--space-2);
+  border: var(--border-hairline);
+  border-radius: var(--radius-xs);
+  font-size: var(--text-sm);
+  font-weight: 700;
+}
+.system-status[data-tone="info"] { color: var(--status-info); background: var(--status-info-bg); }
+.system-status[data-tone="safe"] { color: var(--status-safe); background: var(--status-safe-bg); }
+.system-status[data-tone="warning"] { color: var(--status-warning); background: var(--status-warning-bg); }
+.system-status[data-tone="critical"] { color: var(--status-critical); background: var(--status-critical-bg); }
+.system-state {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-2);
+  padding: var(--space-6);
+  border: var(--border-hairline);
+  border-inline-start: 3px solid var(--state-accent, var(--line2));
+  border-radius: var(--radius-md);
+  background: var(--panel2);
+  color: var(--mut);
+}
+.system-state > :is(h2, h3, strong) { margin: 0; color: var(--txt); }
+.system-state > p { max-width: 68ch; margin: 0; }
+.system-empty { --state-accent: var(--mut); }
+.system-unavailable { --state-accent: var(--status-critical); }
+.system-stale { --state-accent: var(--status-warning); }
+.system-permission { --state-accent: var(--status-info); }
+.system-success { --state-accent: var(--status-safe); }
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb {
@@ -180,6 +266,26 @@ h2, h3 { letter-spacing: -0.015em; }
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+  html { scroll-behavior: auto !important; }
+}
+
+@media (forced-colors: active) {
+  :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+    outline: 2px solid Highlight;
+    box-shadow: none;
+  }
+  .system-status,
+  .system-state,
+  .status-chip,
+  .tab.active {
+    border: 1px solid CanvasText;
+  }
+  .status-light,
+  .sev::before,
+  .chip.category::before {
+    background: CanvasText;
+    forced-color-adjust: none;
   }
 }
 
@@ -572,67 +678,41 @@ tbody tr { transition: background var(--fast); }
   .status-line { border: 0; background: transparent; padding: 2px 8px; }
 }
 
-/* ---- Celestial theme dial: shows the current sky; one turn flips it -------
-   The pressed button (current theme) renders the visible body — moon in dark,
-   sun in light. The other button is stacked on top, fully transparent, so any
-   click on the dial lands on it and turns the sky over. Both buttons stay in
-   the accessibility tree with their names and pressed states. */
+/* ---- Theme toggle --------------------------------------------------------- */
 .theme-toggle {
-  position: relative;
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  display: grid;
+  place-items: center;
+}
+.theme-toggle button {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  margin: 0;
   padding: 0;
   border: 1px solid var(--line);
   border-radius: 50%;
   background: var(--panel2);
   display: grid;
   place-items: center;
-  overflow: hidden;
-}
-.theme-toggle button {
-  grid-area: 1 / 1;
-  width: 100%;
-  height: 100%;
-  min-height: 0;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 50%;
-  background: transparent;
-  display: grid;
-  place-items: center;
   font-size: 0;
   line-height: 0;
+  transition: background var(--motion-fast), border-color var(--motion-fast), color var(--motion-fast);
 }
 .theme-toggle button svg {
   width: 16px;
   height: 16px;
   display: block;
 }
-/* Current theme's body is the visible face of the dial. */
-.theme-toggle button[aria-pressed="true"] {
-  z-index: 0;
-  box-shadow: none;
-  background: transparent;
-}
-.theme-toggle button[aria-pressed="true"] svg {
-  animation: celestialTurn 420ms cubic-bezier(0.3, 0.7, 0.2, 1.1);
-}
-/* The other body waits invisibly on top and catches the click. */
-.theme-toggle button[aria-pressed="false"] {
-  z-index: 1;
-  opacity: 0;
-}
-.theme-toggle:hover { border-color: var(--line2); background: var(--surface-hover); }
-#themeLight svg { color: var(--amber-vivid); }  /* the sun */
-#themeDark svg { color: var(--soft); }          /* the moon */
-@keyframes celestialTurn {
-  from { transform: rotate(-200deg) scale(0.3); opacity: 0; }
-  60% { transform: rotate(12deg) scale(1.06); opacity: 1; }
-  to { transform: rotate(0deg) scale(1); }
-}
+.theme-toggle button:hover { border-color: var(--line2); background: var(--surface-hover); }
+.theme-toggle button[data-theme-choice="light"] svg { color: var(--amber-vivid); }
+.theme-toggle button[data-theme-choice="dark"] svg { color: var(--soft); }
 @media (max-width: 760px) {
-  .theme-toggle { width: 32px; display: grid; grid-template-columns: none; justify-self: end; }
+  .theme-toggle { width: var(--size-target); height: var(--size-target); justify-self: end; }
 }
 
 /* ---- Login: same instrument, quieter room ----------------------------------- */

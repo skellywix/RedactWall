@@ -1,20 +1,27 @@
 import { useCallback, useEffect, useState } from 'react';
 import { EmptyState } from '../components/Panel';
-import { api, apiErrorSummary, apiJson, apiSend } from '../lib/api';
+import { api, apiErrorSummary, apiJsonBounded, apiSend, responseJsonBounded } from '../lib/api';
 import { useSession } from '../lib/session';
+import {
+  decodeSubmittedLicensePayload,
+  isCompleteLicenseSeatsResponse,
+  isCompleteLicenseStatusResponse,
+  isCompleteRenewalResponse,
+  licenseStatusMatchesSubmitted,
+} from '../lib/strict-console-response';
 import './Licensing.css';
 
 interface LicenseStatus {
   state: string;
-  plan?: string;
-  seats?: number;
-  customer?: string;
-  customerId?: string;
-  features?: string[];
-  expires?: string;
-  graceEndsAt?: string;
-  daysRemaining?: number | null;
-  reason?: string;
+  plan: string | null;
+  seats: number | null;
+  customer: string | null;
+  customerId: string | null;
+  features: string[];
+  expires: string | null;
+  graceEndsAt: string | null;
+  daysRemaining: number | null;
+  reason: string | null;
   renewalRequests?: RenewalRequest[];
 }
 
@@ -43,7 +50,9 @@ interface SeatUser {
 interface SeatReport {
   license: LicenseStatus;
   tenantId: string | null;
+  saasMode: boolean;
   seatLimit: number;
+  seatLimitValid: boolean;
   seatsUsed: number;
   seatsRemaining: number | null;
   overLimit: boolean;
@@ -51,6 +60,8 @@ interface SeatReport {
   releasedSeats: number;
   users: SeatUser[];
 }
+
+const LICENSING_RESPONSE_MAX_BYTES = 4 * 1024 * 1024;
 
 const fmt = (iso?: string | null) => (iso ? new Date(iso).toLocaleString() : '-');
 const humanize = (value?: string) => (value || '-').replace(/_/g, ' ');
@@ -153,8 +164,12 @@ function RenewalPanel({ onCreated }: { onCreated: () => void }) {
       setMessage(await apiErrorSummary(res, 'Could not create renewal request'));
       return;
     }
-    const created = await res.json() as { request: RenewalRequest };
-    setMessage(`Renewal request ${created.request.id} created`);
+    const created = await responseJsonBounded<unknown>(res);
+    if (!isCompleteRenewalResponse(created)) {
+      setMessage('Renewal may have been created, but the response could not be verified. Refresh before retrying.');
+      return;
+    }
+    setMessage(`Renewal request ${(created as { request: RenewalRequest }).request.id} created`);
     setRequestedSeats('');
     setContactEmail('');
     setNote('');
@@ -187,6 +202,11 @@ function InstallPanel({ onInstalled }: { onInstalled: () => void }) {
 
   const submit = async () => {
     setMessage('');
+    const submitted = decodeSubmittedLicensePayload(licenseText);
+    if (!submitted) {
+      setMessage('Signed license payload could not be verified. The pasted value was not changed.');
+      return;
+    }
     const res = await api('/api/admin/license/install', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -194,6 +214,11 @@ function InstallPanel({ onInstalled }: { onInstalled: () => void }) {
     });
     if (!res || !res.ok) {
       setMessage(await apiErrorSummary(res, 'Could not install license'));
+      return;
+    }
+    const installed = await responseJsonBounded<unknown>(res);
+    if (!licenseStatusMatchesSubmitted(installed, submitted)) {
+      setMessage('License may have been installed, but the response could not be verified. Refresh licensing before retrying.');
       return;
     }
     setLicenseText('');
@@ -250,17 +275,32 @@ export default function Licensing() {
   const canManage = me?.role === 'security_admin';
   const [license, setLicense] = useState<LicenseStatus | null>(null);
   const [seats, setSeats] = useState<SeatReport | null>(null);
+  const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [nextLicense, nextSeats] = await Promise.all([
-        apiJson<LicenseStatus>('/api/admin/license'),
-        apiJson<SeatReport>('/api/admin/license/seats'),
+      const [licenseBody, seatsBody] = await Promise.all([
+        apiJsonBounded<unknown>('/api/admin/license', LICENSING_RESPONSE_MAX_BYTES),
+        apiJsonBounded<unknown>('/api/admin/license/seats', LICENSING_RESPONSE_MAX_BYTES),
       ]);
+      if (!isCompleteLicenseStatusResponse(licenseBody, true) || !isCompleteLicenseSeatsResponse(seatsBody)) {
+        setError('Licensing response could not be verified.');
+        return;
+      }
+      const nextLicense = licenseBody as LicenseStatus;
+      const nextSeats = seatsBody as SeatReport;
+      const matchingLicense = ['state', 'plan', 'seats', 'customer', 'customerId', 'expires', 'graceEndsAt', 'daysRemaining', 'reason']
+        .every((key) => nextLicense[key as keyof LicenseStatus] === nextSeats.license[key as keyof LicenseStatus])
+        && JSON.stringify(nextLicense.features) === JSON.stringify(nextSeats.license.features);
+      if (!matchingLicense) {
+        setError('License and seat responses did not describe the same verified license.');
+        return;
+      }
       setLicense(nextLicense);
       setSeats(nextSeats);
+      setError('');
     } finally {
       setLoading(false);
     }
@@ -280,7 +320,7 @@ export default function Licensing() {
 
   if (!license || !seats) {
     if (loading) return <div className="app-loading">Loading licensing…</div>;
-    return <EmptyState title="Licensing unavailable" detail="Could not load license status. Refresh to retry." />;
+    return <EmptyState title="Licensing unavailable" detail="Could not load a complete license and seat snapshot. No seat totals were inferred. Refresh to retry." />;
   }
 
   return (
@@ -296,6 +336,7 @@ export default function Licensing() {
           <button className="ghost" type="button" onClick={() => void load()}>Refresh</button>
         </div>
       </div>
+      {error ? <div className="readonly-note" role="alert">{error} Showing the last verified licensing snapshot.</div> : null}
       <LicenseCards license={license} seats={seats} />
       <SeatTable users={seats.users} canManage={canManage} onAssign={(user) => void seatAction(user, 'assign')} onRelease={(user) => void seatAction(user, 'release')} />
       <div className="licensing-grid">

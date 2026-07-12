@@ -34,6 +34,7 @@ const root = path.join(__dirname, '..');
 const dashboardCss = fs.readFileSync(path.join(root, 'server', 'public', 'console-base.css'), 'utf8');
 const loginHtml = fs.readFileSync(path.join(root, 'server', 'public', 'login.html'), 'utf8');
 const loginJs = fs.readFileSync(path.join(root, 'server', 'public', 'login.js'), 'utf8');
+const authResponseJs = fs.readFileSync(path.join(root, 'server', 'public', 'auth-response.js'), 'utf8');
 const manifest = JSON.parse(fs.readFileSync(path.join(root, 'sensors', 'browser-extension', 'manifest.json'), 'utf8'));
 const contentJs = fs.readFileSync(path.join(root, 'sensors', 'browser-extension', 'content.js'), 'utf8');
 const backgroundJs = fs.readFileSync(path.join(root, 'sensors', 'browser-extension', 'background.js'), 'utf8');
@@ -384,11 +385,13 @@ for (let i = 0; i < 30; i += 1) {
 const securityStaticCases = [
   () => assert.strictEqual(/\son[a-z]+\s*=/.test(loginHtml), false),
   () => assert.strictEqual(/<script>\s*\S/.test(loginHtml), false),
+  () => expectContains(loginHtml, '<script src="/auth-response.js" defer></script>'),
   () => expectContains(loginHtml, '<script src="/login.js" defer></script>'),
-  () => expectContains(loginJs, "fetch('/api/login-options')"),
+  () => expectContains(loginJs, "fetch('/api/login-options', { redirect: 'error' })"),
+  () => expectContains(authResponseJs, 'DEFAULT_MAX_BYTES = 16 * 1024'),
   () => assert.ok(!/client_secret|OIDC_CLIENT_SECRET/.test(loginJs)),
-  () => expectContains(loginHtml, 'Hash-chained audit history'),
-  () => expectContains(loginHtml, 'Local-first detection posture'),
+  () => expectContains(loginHtml, 'Hash-chained audit'),
+  () => expectContains(loginHtml, 'Local-first detection'),
 ];
 for (let i = 0; i < securityStaticCases.length; i += 1) {
   add('static-ui', `static security marker ${i + 1}`, securityStaticCases[i]);
@@ -396,9 +399,9 @@ for (let i = 0; i < securityStaticCases.length; i += 1) {
 
 const responsiveMarkers = [
   /@media\(max-width:1180px\)/, /content-tabs\{display:flex;top:0/, /@media\(max-width:760px\)/,
-  /@media\(max-width:820px\)/, /grid-template-columns:minmax\(0,1fr\)/, /overflow-x:auto/,
+  /@media\(max-width:900px\)/, /grid-template-columns:minmax\(0,1fr\)/, /overflow-x:auto/,
   /minmax\(0,1fr\)/, /word-break:break-word/, /overflow-wrap:anywhere/, /scrollbar-width:none/,
-  /position:sticky/, /max-width:460px/, /width:min\(100%,920px\)/, /height:100vh/,
+  /position:sticky/, /max-width:460px/, /width:min\(430px,calc\(100vw - 32px\)/, /height:100vh/,
   /min-height:44px/, /min-height:40px/, /border-radius:8px/, /letter-spacing:0/,
   /prefers-reduced-motion/, /queue-density-compact/, /body\[data-theme="dark"\]/, /aria-hidden="true"/,
   /viewport/, /device-width/,
@@ -437,7 +440,8 @@ function addHttpCases(ctx) {
     ['/api/coverage', 401], ['/api/lineage', 401], ['/api/risk', 401], ['/api/preflight', 401], ['/api/export/evidence', 401],
     ['/api/billing/seats', 401], ['/api/metrics', 401], ['/api/update/status', 401], ['/api/identity/setup-guide', 401],
     ['/api/policy/templates', 401], ['/api/policy/impact', 401], ['/api/destinations/review', 401], ['/api/v1/policy', 401], ['/api/v1/detectors', 401],
-    ['/api/login-options', 200], ['/missing-page', 404], ['/console-base.css', 200], ['/login.js', 200], ['/api/stream', 401],
+    ['/api/login-options', 200], ['/missing-page', 404], ['/console-base.css', 200], ['/auth-surface.css', 200], ['/auth-response.js', 200], ['/login.js', 200],
+    ['/accept-invite.html', 200], ['/accept-invite.js', 200], ['/api/stream', 401],
     ['/api/queries/not-real-id', 401], ['/api/v1/status/not-real-id', 401], ['/api/update/check', 401], ['/api/update/apply', 401],
     ['/api/update/restart', 401], ['/api/logout', 401], ['/api/retention/purge', 401],
   ];
@@ -486,7 +490,7 @@ function addHttpCases(ctx) {
     });
   }
 
-  const headerRoutes = ['/healthz', '/readyz', '/login.html', '/console-base.css', '/console-theme.css', '/favicon.svg', '/login.js', '/api/login-options'];
+  const headerRoutes = ['/healthz', '/readyz', '/login.html', '/accept-invite.html', '/console-base.css', '/console-theme.css', '/auth-surface.css', '/favicon.svg', '/auth-response.js', '/login.js', '/accept-invite.js', '/api/login-options'];
   for (let i = 0; i < 20; i += 1) {
     const route = headerRoutes[i % headerRoutes.length];
     add('http-webapp', `security header ${i + 1} ${route}`, async () => {
@@ -549,11 +553,11 @@ test('1000-case webapp QA matrix passes', async () => {
       'detector-negative': 120,
       'policy-destination': 140,
       'validation-schema': 220,
-      'static-ui': 35,
+      'static-ui': 37,
       'browser-extension-static': 50,
-      'http-webapp': 110,
+      'http-webapp': 114,
     });
-    assert.strictEqual(cases.length, 855);
+    assert.strictEqual(cases.length, 861);
 
     const failures = [];
     for (let i = 0; i < cases.length; i += 1) {

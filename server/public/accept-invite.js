@@ -7,14 +7,16 @@ const errorBox = document.getElementById('err');
 const successPanel = document.getElementById('success');
 const acceptedUser = document.getElementById('acceptedUser');
 const loginLink = document.getElementById('loginLink');
+const boundedResponse = window.RedactWallAuthResponse;
 
 const token = new URLSearchParams(String(location.hash || '').replace(/^#/, '')).get('token') || '';
 // Capture the fragment in memory, then remove all URL parameters before the
 // user enters a password. Legacy query-token links deliberately fail closed.
 try { history.replaceState(null, document.title, location.pathname); } catch {}
 
-function showError(message) {
+function showError(message, input) {
   errorBox.textContent = message || '';
+  if (message && input) input.focus();
 }
 
 function setInvalid(input, invalid) {
@@ -35,12 +37,12 @@ form.addEventListener('submit', async (event) => {
   const password = passwordInput.value;
   if (password.length < 12) {
     setInvalid(passwordInput, true);
-    showError('Password must be at least 12 characters.');
+    showError('Password must be at least 12 characters.', passwordInput);
     return;
   }
   if (password !== confirmInput.value) {
     setInvalid(confirmInput, true);
-    showError('Passwords do not match.');
+    showError('Passwords do not match.', confirmInput);
     return;
   }
 
@@ -48,6 +50,7 @@ form.addEventListener('submit', async (event) => {
   try {
     const response = await fetch('/api/invitations/accept', {
       method: 'POST',
+      redirect: 'error',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         token,
@@ -55,14 +58,23 @@ form.addEventListener('submit', async (event) => {
         displayName: displayNameInput.value.trim() || undefined,
       }),
     });
-    const body = await response.json().catch(() => ({}));
+    const body = await boundedResponse?.readJson(response);
     if (!response.ok) {
-      showError(body.error === 'invalid_or_expired_invitation'
+      showError(body?.error === 'invalid_or_expired_invitation'
         ? 'Invite is invalid, expired, already used, or revoked.'
         : 'Could not accept invite. Ask your administrator to resend it.');
       return;
     }
-    acceptedUser.textContent = `${body.user} is ready as ${body.roleLabel || body.role || 'staff user'}.`;
+    if (!body || typeof body.user !== 'string' || !body.user.trim()) {
+      showError('Invite acceptance could not be verified. Sign in only after your administrator confirms the account.');
+      return;
+    }
+    const role = typeof body.roleLabel === 'string' && body.roleLabel.trim()
+      ? body.roleLabel.trim()
+      : typeof body.role === 'string' && body.role.trim()
+        ? body.role.trim()
+        : 'staff user';
+    acceptedUser.textContent = `${body.user} is ready as ${role}.`;
     loginLink.href = `/login.html#user=${encodeURIComponent(body.user || '')}`;
     form.hidden = true;
     successPanel.hidden = false;

@@ -6,23 +6,43 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { clearApplicationEnvironment } = require('./playwright-env');
 
 const root = path.join(__dirname, '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-e2e-'));
 const policyPath = path.join(tempDir, 'policy.json');
 fs.copyFileSync(path.join(root, 'config', 'policy.json'), policyPath);
+// The data directory must not exist yet: private-path trust can only be
+// established before the directory's first file, so the server must create and
+// trust it on boot. Pre-seeding any file into it (like the copied policy, which
+// therefore stays in tempDir) fails preflight with
+// PRIVATE_DIRECTORY_UNTRUSTED_STATE.
+const dataDir = path.join(tempDir, 'data');
 
-process.env.PORT = process.env.PORT || '4210';
-process.env.ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'e2e-pass';
-process.env.OPERATOR_USER = process.env.OPERATOR_USER || 'e2e-operator';
-process.env.OPERATOR_PASSWORD = process.env.OPERATOR_PASSWORD || 'e2e-operator-pass';
-process.env.AUDITOR_USER = process.env.AUDITOR_USER || 'e2e-auditor';
-process.env.AUDITOR_PASSWORD = process.env.AUDITOR_PASSWORD || 'e2e-auditor-pass';
-process.env.REDACTWALL_SECRET = process.env.REDACTWALL_SECRET || 'e2e-session-secret';
-process.env.REDACTWALL_DATA_KEY = process.env.REDACTWALL_DATA_KEY || 'e2e-data-key';
-process.env.INGEST_API_KEY = process.env.INGEST_API_KEY || 'e2e-ingest-key';
-process.env.REDACTWALL_DB_PATH = process.env.REDACTWALL_DB_PATH || path.join(tempDir, 'redactwall.db');
-process.env.REDACTWALL_POLICY_PATH = process.env.REDACTWALL_POLICY_PATH || policyPath;
+const requestedPort = process.env.PORT || '4210';
+clearApplicationEnvironment(process.env);
+Object.assign(process.env, {
+  PORT: requestedPort,
+  NODE_ENV: 'test',
+  ADMIN_USER: 'admin',
+  ADMIN_PASSWORD: 'e2e-pass',
+  OPERATOR_USER: 'e2e-operator',
+  OPERATOR_PASSWORD: 'e2e-operator-pass',
+  AUDITOR_USER: 'e2e-auditor',
+  AUDITOR_PASSWORD: 'e2e-auditor-pass',
+  REDACTWALL_SECRET: 'e2e-session-secret',
+  REDACTWALL_DATA_KEY: 'e2e-data-key',
+  INGEST_API_KEY: 'e2e-ingest-key',
+  REDACTWALL_DB_DRIVER: 'sqlite',
+  REDACTWALL_DB_PATH: path.join(dataDir, 'redactwall.db'),
+  REDACTWALL_DATA_DIR: dataDir,
+  REDACTWALL_AUDIT_DIR: path.join(dataDir, 'audit'),
+  REDACTWALL_POLICY_PATH: policyPath,
+  REDACTWALL_ENV_PATH: path.join(tempDir, 'missing.env'),
+  REDACTWALL_SUBSCRIPTIONS_PATH: path.join(tempDir, 'subscriptions.json'),
+  REDACTWALL_UPDATE_CONFIG_PATH: path.join(tempDir, 'update-config.json'),
+  REDACTWALL_UPDATE_STATE_PATH: path.join(tempDir, 'update-state.json'),
+});
 
 const app = require('../server/app');
 const server = app.startServer(Number(process.env.PORT));

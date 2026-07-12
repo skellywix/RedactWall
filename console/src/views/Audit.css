@@ -220,3 +220,123 @@
   font-size: 12px;
   line-height: 1.5;
 }
+
+.audit-permission {
+  flex-basis: 100%;
+  color: var(--mut);
+  font-size: 12px;
+}
+
+/* ---- Safe-to-send receipt verification ----------------------------------- */
+.receipt-verifier {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+
+.receipt-verifier-copy {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.receipt-verifier-copy h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.receipt-verifier-copy p {
+  margin: 4px 0 0;
+  color: var(--mut);
+  font-size: 12.5px;
+}
+
+.receipt-privacy {
+  padding: 4px 8px;
+  border: 1px solid var(--green);
+  border-radius: var(--radius-sm);
+  background: var(--green-bg);
+  color: var(--green);
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.receipt-verifier form {
+  display: grid;
+  gap: 8px;
+}
+
+.receipt-verifier label {
+  color: var(--soft);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.receipt-verifier textarea {
+  width: 100%;
+  min-height: 124px;
+  resize: vertical;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--code-bg);
+  color: var(--txt);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.receipt-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.receipt-result {
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel2);
+  color: var(--soft);
+  font-size: 12.5px;
+}
+
+.receipt-result.is-valid {
+  border-color: var(--green);
+  background: var(--green-bg);
+  color: var(--green);
+}
+
+.receipt-result.is-invalid {
+  border-color: var(--red);
+  background: var(--red-bg);
+  color: var(--red);
+}
+
+.receipt-result.is-unavailable,
+.receipt-result.is-forbidden,
+.receipt-result.is-session {
+  border-color: var(--amber);
+  background: var(--amber-bg);
+  color: var(--amber);
+}
+
+@media (max-width: 640px) {
+  .audit-toolbar > label,
+  .audit-toolbar select,
+  .audit-export {
+    width: 100%;
+  }
+
+  .receipt-actions .system-button {
+    flex: 1 1 140px;
+    min-height: 44px;
+  }
+}

@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
+import type { Dispatch, ReactNode, SetStateAction } from 'react';
 import {
   applyPolicyTemplate,
   fetchPolicy,
   fetchPolicyTemplates,
+  policyMatchesCoreUpdate,
   postPolicyImpact,
   putPolicy,
+  readPolicyImpactResponse,
+  readPolicyResponse,
   type EnforcementMode,
   type ImpactDelta,
   type ImpactOutcome,
@@ -16,12 +19,17 @@ import {
   type ResponseScanMode,
 } from '../api/policy';
 import { EmptyState, Panel } from '../components/Panel';
-import { api, apiErrorSummary, apiJson } from '../lib/api';
+import PolicyDisclosure from '../components/policy/PolicyDisclosure';
+import { api, apiErrorSummary, apiJson, apiJsonBounded, responseJsonBounded } from '../lib/api';
 import { csvStamp } from '../lib/csv';
 import { routeHref } from '../lib/router';
 import { roleLabel, useSession } from '../lib/session';
+import { isCompleteDetectorTestResult } from '../lib/strict-console-response';
 import { toast } from '../lib/toast';
 import './Policy.css';
+
+const POLICY_RESPONSE_MAX_BYTES = 4 * 1024 * 1024;
+const SMALL_RESPONSE_MAX_BYTES = 1024 * 1024;
 
 /**
  * Configuration view (full port of the legacy #tab-policy Configuration tab).
@@ -209,6 +217,14 @@ function ruleList(value: unknown): RuleJson[] {
   return Array.isArray(value) ? value.filter((item): item is RuleJson => Boolean(item) && typeof item === 'object') : [];
 }
 
+function ruleTextList(value: string): RuleJson[] {
+  try {
+    return ruleList(JSON.parse(value || '[]'));
+  } catch {
+    return [];
+  }
+}
+
 function ruleStr(rule: RuleJson, key: string): string {
   const value = rule[key];
   return typeof value === 'string' ? value : '';
@@ -262,6 +278,156 @@ interface Preflight {
   checks?: PreflightCheck[];
 }
 
+/**
+ * Current server/preflight.js evidence contract. Readiness fails closed when a
+ * response omits any member, while additional future checks still contribute
+ * to the reported score and failures.
+ */
+const EXPECTED_PREFLIGHT_CHECK_IDS = [
+  'admin_password',
+  'admin_password_strength',
+  'admin_mfa',
+  'admin_mfa_secret',
+  'operator_credentials',
+  'operator_user_distinct',
+  'operator_password_strength',
+  'approver_credentials',
+  'approver_user_distinct',
+  'approver_password_strength',
+  'auditor_credentials',
+  'auditor_user_distinct',
+  'auditor_password_strength',
+  'ingest_key',
+  'ingest_key_strength',
+  'scim_bearer_token_strength',
+  'oidc_config',
+  'oidc_client_secret_strength',
+  'oidc_scim_users',
+  'oidc_endpoints',
+  'oidc_https',
+  'session_secret',
+  'session_secret_strength',
+  'raw_prompt_encryption',
+  'data_key_strength',
+  'secure_cookie',
+  'db_driver',
+  'sqlite_local_disk',
+  'postgres_tls',
+  'postgres_tenant_context',
+  'public_url',
+  'connected_license_url',
+  'connected_license_auth',
+  'connected_license_verdict_key',
+  'custom_detectors',
+  'policy_file',
+  'policy_signing_key',
+  'exact_match',
+  'license_customer_binding',
+  'saas_tenant_id',
+  'saas_seat_limit',
+  'saas_tenant_context',
+  'saas_user_identity',
+] as const;
+
+type ExpectedPreflightCheckId = (typeof EXPECTED_PREFLIGHT_CHECK_IDS)[number];
+
+interface EnvironmentGroup {
+  key: string;
+  label: string;
+  ids: readonly ExpectedPreflightCheckId[];
+}
+
+/** Every expected readiness check belongs to exactly one actionable row. */
+const ENV_GROUPS = [
+  {
+    key: 'admin-auth',
+    label: 'Admin auth',
+    ids: ['admin_password', 'admin_password_strength', 'admin_mfa', 'admin_mfa_secret'],
+  },
+  {
+    key: 'operator-access',
+    label: 'Operator access',
+    ids: ['operator_credentials', 'operator_user_distinct', 'operator_password_strength'],
+  },
+  {
+    key: 'approver-access',
+    label: 'Approver access',
+    ids: ['approver_credentials', 'approver_user_distinct', 'approver_password_strength'],
+  },
+  {
+    key: 'auditor-access',
+    label: 'Auditor access',
+    ids: ['auditor_credentials', 'auditor_user_distinct', 'auditor_password_strength'],
+  },
+  {
+    key: 'sensor-ingest',
+    label: 'Sensor ingest key',
+    ids: ['ingest_key', 'ingest_key_strength'],
+  },
+  {
+    key: 'identity-provider',
+    label: 'Identity provider',
+    ids: [
+      'scim_bearer_token_strength',
+      'oidc_config',
+      'oidc_client_secret_strength',
+      'oidc_scim_users',
+      'oidc_endpoints',
+      'oidc_https',
+    ],
+  },
+  {
+    key: 'session-cookies',
+    label: 'Session and cookies',
+    ids: ['session_secret', 'session_secret_strength', 'secure_cookie'],
+  },
+  {
+    key: 'approval-encryption',
+    label: 'Raw approval encryption',
+    ids: ['raw_prompt_encryption', 'data_key_strength'],
+  },
+  {
+    key: 'evidence-store',
+    label: 'Evidence store',
+    ids: ['db_driver', 'sqlite_local_disk', 'postgres_tls', 'postgres_tenant_context'],
+  },
+  {
+    key: 'public-url',
+    label: 'Public URL',
+    ids: ['public_url'],
+  },
+  {
+    key: 'connected-license',
+    label: 'Connected license',
+    ids: ['connected_license_url', 'connected_license_auth', 'connected_license_verdict_key'],
+  },
+  {
+    key: 'policy-integrity',
+    label: 'Policy integrity',
+    ids: ['custom_detectors', 'policy_file', 'policy_signing_key', 'exact_match'],
+  },
+  {
+    key: 'license-binding',
+    label: 'License binding',
+    ids: ['license_customer_binding'],
+  },
+  {
+    key: 'tenant-controls',
+    label: 'Tenant controls',
+    ids: ['saas_tenant_id', 'saas_seat_limit', 'saas_tenant_context', 'saas_user_identity'],
+  },
+] as const satisfies readonly EnvironmentGroup[];
+
+type EnvironmentGroupKey = (typeof ENV_GROUPS)[number]['key'];
+
+function environmentGroupIds(...keys: EnvironmentGroupKey[]): ExpectedPreflightCheckId[] {
+  const requested = new Set<EnvironmentGroupKey>(keys);
+  return ENV_GROUPS.flatMap<ExpectedPreflightCheckId>((group) => requested.has(group.key) ? [...group.ids] : []);
+}
+
+const ADMIN_ACCESS_CHECK_IDS = environmentGroupIds('admin-auth', 'session-cookies');
+const IDENTITY_PROVIDER_CHECK_IDS = environmentGroupIds('identity-provider');
+
 interface CoverageSensor {
   source?: string;
   events?: number;
@@ -277,12 +443,48 @@ interface Coverage {
   totals?: { fleetAttention?: number };
 }
 
+type OptionalEvidenceState = 'loading' | 'ready' | 'stale' | 'unavailable';
+
+function retainEvidenceState(current: OptionalEvidenceState): OptionalEvidenceState {
+  return current === 'ready' || current === 'stale' ? 'stale' : 'unavailable';
+}
+
+function acceptOptionalEvidence<T>(
+  next: T | null,
+  setValue: (value: T) => void,
+  setState: Dispatch<SetStateAction<OptionalEvidenceState>>,
+): void {
+  if (next) setValue(next);
+  setState(next ? 'ready' : retainEvidenceState);
+}
+
+function coverageAttentionText(coverage: Coverage | null, state: OptionalEvidenceState): string {
+  if (state === 'loading') return 'Loading';
+  if (state === 'unavailable') return 'Unavailable';
+  const attention = coverage?.totals?.fleetAttention;
+  const value = typeof attention === 'number' ? String(attention) : 'Not reported';
+  return state === 'stale' ? `Last verified: ${value}` : value;
+}
+
+function coverageMetaText(coverage: Coverage | null, state: OptionalEvidenceState): string {
+  const value = coverageAttentionText(coverage, state);
+  if (state === 'loading' || state === 'unavailable') return `fleet ${value.toLowerCase()}`;
+  return value === 'Not reported' ? 'fleet attention not reported' : `${value} attention`;
+}
+
+function templateCountText(templates: PolicyTemplate[], state: OptionalEvidenceState): string {
+  if (state === 'loading') return 'Loading';
+  if (state === 'unavailable') return 'Unavailable';
+  const count = `${templates.length} available`;
+  return state === 'stale' ? `${count} · last verified` : count;
+}
+
 function fetchPreflight(): Promise<Preflight | null> {
   return apiJson<Preflight>('/api/preflight');
 }
 
 function fetchCoverage(): Promise<Coverage | null> {
-  return apiJson<Coverage>('/api/coverage');
+  return apiJsonBounded<Coverage>('/api/coverage', POLICY_RESPONSE_MAX_BYTES);
 }
 
 function withTimeout<T>(promise: Promise<T | null>, ms: number): Promise<T | null> {
@@ -303,23 +505,55 @@ interface ConfigHealth {
   state: CardState;
   failed: number;
   label: string;
+  complete: boolean;
+  reported: number;
+  expected: number;
+  missing: number;
 }
 
 function configHealth(preflight: Preflight | null): ConfigHealth {
   const checks = preflight?.checks || [];
   const ok = checks.filter((check) => check.ok).length;
   const score = checks.length ? Math.round((ok / checks.length) * 100) : 0;
-  const state: CardState = preflight?.level === 'blocked' ? 'bad' : score < 100 ? 'warn' : 'good';
-  return { score, ok, total: checks.length, state, failed: checks.length - ok, label: preflight?.level ? humanize(preflight.level) : 'unknown' };
+  const coverage = checkGroupCoverage(preflight, EXPECTED_PREFLIGHT_CHECK_IDS);
+  const state: CardState = preflight?.level === 'blocked' ? 'bad' : !coverage.complete || score < 100 ? 'warn' : 'good';
+  return {
+    score,
+    ok,
+    total: checks.length,
+    state,
+    failed: checks.length - ok,
+    label: preflight?.level ? humanize(preflight.level) : 'unknown',
+    complete: coverage.complete,
+    reported: coverage.reported,
+    expected: coverage.expected,
+    missing: coverage.expected - coverage.reported,
+  };
 }
 
-function checkGroupState(preflight: Preflight | null, ids: string[]): CardState {
+interface CheckGroupCoverage {
+  reported: number;
+  expected: number;
+  complete: boolean;
+}
+
+function checkGroupCoverage(preflight: Preflight | null, ids: readonly string[]): CheckGroupCoverage {
+  const available = new Set((preflight?.checks || []).map((check) => check.id));
+  const expected = new Set(ids).size;
+  const reported = [...new Set(ids)].filter((id) => available.has(id)).length;
+  return { reported, expected, complete: expected > 0 && reported === expected };
+}
+
+function checkGroupState(preflight: Preflight | null, ids: readonly string[]): CardState {
   const byId = new Map((preflight?.checks || []).map((check): [string, PreflightCheck] => [check.id, check]));
   const selected = ids.map((id) => byId.get(id)).filter((check): check is PreflightCheck => Boolean(check));
-  if (!selected.length) return 'warn';
   if (selected.some((check) => !check.ok && check.severity === 'error')) return 'bad';
-  if (selected.some((check) => !check.ok)) return 'warn';
+  if (!checkGroupCoverage(preflight, ids).complete || selected.some((check) => !check.ok)) return 'warn';
   return 'good';
+}
+
+function checkCoverageText(coverage: CheckGroupCoverage): string {
+  return coverage.reported ? `${coverage.reported}/${coverage.expected} checks reported` : 'Not reported';
 }
 
 function stateLabel(state: CardState): string {
@@ -335,28 +569,33 @@ interface DetectorMeta {
 
 interface TestFinding {
   type: string;
-  severity?: number;
-  severityLabel?: string;
-  confidence?: string;
+  severity: number;
+  severityLabel: string;
+  confidence: string;
+  masked: string;
   score?: number;
-  regulations?: string[];
+  regulations: string[];
 }
 
 interface BreakdownEntry {
-  kind?: string;
+  kind: string;
   type: string;
-  severityLabel?: string;
-  confidence?: string;
-  points?: number;
-  regulations?: string[];
+  severity: number;
+  severityLabel: string;
+  confidence: string;
+  points: number;
+  regulations: string[];
 }
 
 interface DetectorTestResult {
-  decision: string;
-  reasons?: string[];
-  riskScore?: number;
-  scoreBreakdown?: BreakdownEntry[];
-  findings?: TestFinding[];
+  decision: 'allow' | 'block';
+  reasons: string[];
+  riskScore: number;
+  maxSeverityLabel: string;
+  regulations: string[];
+  scoreBreakdown: BreakdownEntry[];
+  findings: TestFinding[];
+  categories: Array<{ category: string; confidence: string }>;
 }
 
 let detectorMetaCache: Promise<DetectorMeta | null> | null = null;
@@ -455,7 +694,7 @@ function updateFromDraft(draft: Draft): PolicyUpdate {
   };
 }
 
-/** Full PUT /api/policy body — PolicyUpdate plus the fields this view now edits. */
+/** Full PUT /api/policy body: PolicyUpdate plus the fields this view now edits. */
 interface FullPolicyUpdate extends PolicyUpdate {
   requiredSensors: string[];
   desiredSensorVersions: Record<string, string>;
@@ -468,7 +707,7 @@ interface FullPolicyUpdate extends PolicyUpdate {
   policyExceptions: unknown[];
 }
 
-/** Null (after a toast) when a rule JSON textarea does not parse — save/preview abort. */
+/** Null (after a toast) when a rule JSON textarea does not parse; save/preview aborts. */
 function buildUpdate(draft: Draft): FullPolicyUpdate | null {
   const approvalRoutingRules = parseJsonArray(draft.approvalRoutingRules, 'Approval routing rules');
   if (!approvalRoutingRules) return null;
@@ -534,20 +773,6 @@ function useStatusLine(): StatusLine {
 
 // ---- Mutations -----------------------------------------------------------------
 
-async function requestJson<T>(request: Promise<Response | null>, fallback: string): Promise<T | null> {
-  const res = await request;
-  if (!res || !res.ok) {
-    toast(await apiErrorSummary(res, fallback), 'error');
-    return null;
-  }
-  try {
-    return (await res.json()) as T;
-  } catch {
-    toast(fallback, 'error');
-    return null;
-  }
-}
-
 async function savePolicyDraft(draft: Draft | null, adopt: (policy: PolicyDoc) => void, status: StatusLine): Promise<void> {
   if (!draft) return;
   const body = buildUpdate(draft);
@@ -558,14 +783,23 @@ async function savePolicyDraft(draft: Draft | null, adopt: (policy: PolicyDoc) =
     status.set(await apiErrorSummary(res, 'Could not save'));
     return;
   }
-  const saved = (await res.json().catch(() => null)) as PolicyDoc | null;
-  if (saved) adopt(saved);
+  const saved = await readPolicyResponse(res);
+  if (!saved || !policyMatchesCoreUpdate(saved, body)) {
+    status.set('Save response could not be verified. Reload policy before making another change.');
+    return;
+  }
+  adopt(saved);
   status.set('Saved', 4000);
 }
 
-function readinessSummary(health: ConfigHealth, impact: PolicyImpact | null): string {
+function readinessSummary(preflight: Preflight | null, impact: PolicyImpact | null): string {
   const impactText = impact?.summary ? ` / ${impact.summary.changed || 0} policy impact change(s)` : '';
-  if (health.state === 'bad') return `${health.failed} blocking check(s)${impactText}`;
+  if (!preflight) return `Readiness checks unavailable${impactText}`;
+  if (preflight.level === 'blocked' && !preflight.checks?.length) return `Readiness blocked; check details not reported${impactText}`;
+  if (!preflight.checks?.length) return `Readiness checks not reported${impactText}`;
+  const health = configHealth(preflight);
+  if (health.state === 'bad') return `${health.failed ? `${health.failed} blocking check(s)` : 'Readiness reported blocked'}${impactText}`;
+  if (!health.complete) return `Readiness incomplete: ${health.reported}/${health.expected} expected checks reported${impactText}`;
   return `${health.failed} warning(s), ${health.ok}/${health.total || 0} checks ready${impactText}`;
 }
 
@@ -573,8 +807,8 @@ interface TestCtx {
   draft: Draft | null;
   readOnly: boolean;
   setImpact: (impact: PolicyImpact | null) => void;
-  setPreflight: (preflight: Preflight | null) => void;
-  setCoverage: (coverage: Coverage | null) => void;
+  acceptPreflight: (preflight: Preflight | null) => void;
+  acceptCoverage: (coverage: Coverage | null) => void;
   status: StatusLine;
 }
 
@@ -588,29 +822,37 @@ async function runConfigurationTest(ctx: TestCtx): Promise<void> {
     withTimeout(fetchCoverage(), OPTIONAL_TIMEOUT_MS),
     body ? postPolicyImpact(body) : Promise.resolve<Response | null>(null),
   ]);
-  ctx.setPreflight(preflight);
-  if (coverage) ctx.setCoverage(coverage);
+  ctx.acceptPreflight(preflight);
+  ctx.acceptCoverage(coverage);
   let impact: PolicyImpact | null = null;
   if (body) {
     if (!impactRes || !impactRes.ok) {
       ctx.status.set(await apiErrorSummary(impactRes, 'Could not preview impact'));
       return;
     }
-    impact = (await impactRes.json().catch(() => null)) as PolicyImpact | null;
-    if (impact) ctx.setImpact(impact);
+    impact = await readPolicyImpactResponse(impactRes);
+    if (!impact) {
+      ctx.status.set('Policy impact response could not be verified. Retry the configuration test.');
+      return;
+    }
+    ctx.setImpact(impact);
   }
-  ctx.status.set(readinessSummary(configHealth(preflight), impact), 3600);
+  ctx.status.set(readinessSummary(preflight, impact), 3600);
 }
 
-/** POST /api/retention/purge — purges retained raw approval data past rawRetentionDays. */
+/** POST /api/retention/purge purges retained raw approval data past rawRetentionDays. */
 async function runRetentionPurge(status: StatusLine): Promise<void> {
   const res = await api('/api/retention/purge', { method: 'POST' });
   if (!res || !res.ok) {
     toast(await apiErrorSummary(res, 'Could not run purge'), 'error');
     return;
   }
-  const body = (await res.json().catch(() => ({}))) as { purged?: number };
-  status.set(`Purged ${body.purged || 0} record(s)`, 4000);
+  const body = await responseJsonBounded<{ purged?: number }>(res, SMALL_RESPONSE_MAX_BYTES);
+  if (!body || !Number.isSafeInteger(body.purged) || Number(body.purged) < 0) {
+    status.set('Purge completed, but the result could not be verified. Review the audit trail before retrying.');
+    return;
+  }
+  status.set(`Purged ${body.purged} record(s)`, 4000);
 }
 
 /** GET /api/policy -> pretty-printed blob download (CSP-safe anchor click). */
@@ -631,18 +873,28 @@ async function exportPolicyJson(): Promise<void> {
 
 interface MutationCtx {
   draft: Draft | null;
+  templates: PolicyTemplate[];
   readOnly: boolean;
   adopt: (policy: PolicyDoc) => void;
-  load: () => Promise<void>;
   setImpact: (impact: PolicyImpact | null) => void;
   setBusy: (busy: boolean) => void;
-  setPreflight: (preflight: Preflight | null) => void;
-  setCoverage: (coverage: Coverage | null) => void;
+  acceptPreflight: (preflight: Preflight | null) => void;
+  acceptCoverage: (coverage: Coverage | null) => void;
   status: StatusLine;
 }
 
-function usePolicyMutations(ctx: MutationCtx) {
-  const { draft, readOnly, adopt, load, setImpact, setBusy, setPreflight, setCoverage, status } = ctx;
+function usePolicyMutations(ctx: MutationCtx, acceptTemplates: (templates: PolicyTemplate[] | null) => void) {
+  const {
+    draft,
+    templates,
+    readOnly,
+    adopt,
+    setImpact,
+    setBusy,
+    acceptPreflight,
+    acceptCoverage,
+    status,
+  } = ctx;
   const wrap = (action: () => Promise<void>) => async () => {
     setBusy(true);
     try {
@@ -652,15 +904,25 @@ function usePolicyMutations(ctx: MutationCtx) {
     }
   };
   const save = wrap(() => savePolicyDraft(draft, adopt, status));
-  const testConfiguration = wrap(() => runConfigurationTest({ draft, readOnly, setImpact, setPreflight, setCoverage, status }));
+  const testConfiguration = wrap(() => runConfigurationTest({ draft, readOnly, setImpact, acceptPreflight, acceptCoverage, status }));
   const purge = wrap(() => runRetentionPurge(status));
   const applyTemplate = (id: string) =>
     wrap(async () => {
-      const merged = await requestJson<PolicyDoc>(applyPolicyTemplate(id), 'Could not apply template');
-      if (!merged) return;
+      const res = await applyPolicyTemplate(id);
+      if (!res || !res.ok) {
+        toast(await apiErrorSummary(res, 'Could not apply template'), 'error');
+        return;
+      }
+      const template = templates.find((candidate) => candidate.id === id);
+      const merged = await readPolicyResponse(res);
+      if (!template || !merged || !policyMatchesCoreUpdate(merged, template.policy)) {
+        toast('Template may have been applied, but the response could not be verified. Reload policy before retrying.', 'error');
+        return;
+      }
+      adopt(merged);
       toast('Template applied.', 'good');
       setImpact(null);
-      await load(); // refetch: the saved policy is re-normalized server-side
+      acceptTemplates(await withTimeout(fetchPolicyTemplates(), OPTIONAL_TIMEOUT_MS));
     })();
   return { save, testConfiguration, purge, applyTemplate };
 }
@@ -668,10 +930,13 @@ function usePolicyMutations(ctx: MutationCtx) {
 function usePolicyEditor(readOnly: boolean) {
   const [policy, setPolicy] = useState<PolicyDoc | null>(null);
   const [templates, setTemplates] = useState<PolicyTemplate[]>([]);
+  const [templatesState, setTemplatesState] = useState<OptionalEvidenceState>('loading');
   const [draft, setDraft] = useState<Draft | null>(null);
   const [impact, setImpact] = useState<PolicyImpact | null>(null);
   const [preflight, setPreflight] = useState<Preflight | null>(null);
+  const [preflightState, setPreflightState] = useState<OptionalEvidenceState>('loading');
   const [coverage, setCoverage] = useState<Coverage | null>(null);
+  const [coverageState, setCoverageState] = useState<OptionalEvidenceState>('loading');
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const status = useStatusLine();
@@ -680,28 +945,61 @@ function usePolicyEditor(readOnly: boolean) {
     setPolicy(next);
     setDraft(draftFromPolicy(next));
   }, []);
+  const acceptPreflight = useCallback((next: Preflight | null) => {
+    acceptOptionalEvidence(next, setPreflight, setPreflightState);
+  }, []);
+  const acceptCoverage = useCallback((next: Coverage | null) => {
+    acceptOptionalEvidence(next, setCoverage, setCoverageState);
+  }, []);
+  const acceptTemplates = useCallback((next: PolicyTemplate[] | null) => {
+    acceptOptionalEvidence(next, setTemplates, setTemplatesState);
+  }, []);
   const load = useCallback(async () => {
-    const optional = Promise.all([withTimeout(fetchPreflight(), OPTIONAL_TIMEOUT_MS), withTimeout(fetchCoverage(), OPTIONAL_TIMEOUT_MS)]);
-    const [pol, tpls] = await Promise.all([fetchPolicy(), fetchPolicyTemplates()]);
-    const [pf, cov] = await optional;
+    const optionalTask = Promise.all([withTimeout(fetchPreflight(), OPTIONAL_TIMEOUT_MS), withTimeout(fetchCoverage(), OPTIONAL_TIMEOUT_MS)])
+      .then(([pf, cov]) => {
+        acceptPreflight(pf);
+        acceptCoverage(cov);
+      });
+    const templatesTask = withTimeout(fetchPolicyTemplates(), OPTIONAL_TIMEOUT_MS).then(acceptTemplates);
+    const pol = await fetchPolicy();
     if (pol) adopt(pol);
-    if (tpls) setTemplates(tpls);
-    setPreflight(pf);
-    if (cov) setCoverage(cov);
     setLoaded(true);
-  }, [adopt]);
+    await Promise.all([optionalTask, templatesTask]);
+  }, [acceptCoverage, acceptPreflight, acceptTemplates, adopt]);
   useEffect(() => {
     load();
   }, [load]);
 
-  const mutations = usePolicyMutations({ draft, readOnly, adopt, load, setImpact, setBusy, setPreflight, setCoverage, status });
-  const patch = (change: Partial<Draft>) => setDraft((current) => (current ? { ...current, ...change } : current));
+  const mutations = usePolicyMutations({
+    draft, templates, readOnly, adopt, setImpact, setBusy, acceptPreflight, acceptCoverage, status,
+  }, acceptTemplates);
+  const patch = (change: Partial<Draft>) => {
+    status.set('');
+    setImpact(null);
+    setDraft((current) => (current ? { ...current, ...change } : current));
+  };
   const discard = () => {
     if (policy) setDraft(draftFromPolicy(policy));
     setImpact(null);
     status.set('');
   };
-  return { policy, templates, draft, impact, preflight, coverage, loaded, busy, status, patch, discard, ...mutations };
+  return {
+    policy,
+    templates,
+    templatesState,
+    draft,
+    impact,
+    preflight,
+    preflightState,
+    coverage,
+    coverageState,
+    loaded,
+    busy,
+    status,
+    patch,
+    discard,
+    ...mutations,
+  };
 }
 
 // ---- Small shared UI atoms -------------------------------------------------------
@@ -720,6 +1018,21 @@ function StatusChip({ tone, label, detail }: { tone: CardState; label: string; d
 function StatePill({ state, label }: { state: CardState; label?: string }) {
   const text = label ?? stateLabel(state);
   return <StatusChip tone={state} label={text} detail={`Verification state: ${text}\nSystem health: ${stateLabel(state)}`} />;
+}
+
+function EvidenceNotice({ state, subject }: { state: OptionalEvidenceState; subject: string }) {
+  if (state === 'ready') return null;
+  const copy = state === 'loading'
+    ? [`Loading ${subject}`, 'Waiting for a verified response.']
+    : state === 'stale'
+      ? [`Showing last verified ${subject}`, 'The latest refresh failed. Values below are not a current all-clear.']
+      : [`${subject[0].toUpperCase()}${subject.slice(1)} unavailable`, 'No verified evidence is available. Retry before drawing a conclusion.'];
+  return (
+    <div className={`system-state system-${state}`} role={state === 'loading' ? 'status' : 'alert'}>
+      <strong>{copy[0]}</strong>
+      <p>{copy[1]}</p>
+    </div>
+  );
 }
 
 function textChips(items: string[]): ReactNode[] {
@@ -1022,13 +1335,37 @@ function HardStops({ items }: { items: string[] }) {
   );
 }
 
-function TemplatePicker({ templates, disabled, onApply }: { templates: PolicyTemplate[]; disabled: boolean; onApply: (id: string) => void }) {
+function TemplatePicker({
+  templates,
+  state,
+  disabled,
+  onApply,
+}: {
+  templates: PolicyTemplate[];
+  state: OptionalEvidenceState;
+  disabled: boolean;
+  onApply: (id: string) => void;
+}) {
   const [pending, setPending] = useState<PolicyTemplate | null>(null);
-  if (!templates.length) return null;
+  if (!templates.length) {
+    const copy: Record<OptionalEvidenceState, [string, string]> = {
+      loading: ['Loading policy templates', 'Waiting for the template catalog.'],
+      ready: ['No policy templates configured', 'The verified template catalog is empty.'],
+      stale: ['Last verified template catalog was empty', 'The latest refresh failed, so the empty catalog is not a current result.'],
+      unavailable: ['Policy templates unavailable', 'The template catalog could not be verified. Retry before assuming no templates exist.'],
+    };
+    return (
+      <section className={`system-state system-${state === 'ready' ? 'empty' : state}`} role={state === 'unavailable' || state === 'stale' ? 'alert' : 'status'}>
+        <strong>{copy[state][0]}</strong>
+        <p>{copy[state][1]}</p>
+      </section>
+    );
+  }
   return (
     <section className="policy-section">
       <h3>Policy templates</h3>
       <p className="policy-hint">Start from the NCUA / GLBA credit-union preset, then tune thresholds and destinations. Applying saves immediately.</p>
+      <EvidenceNotice state={state} subject="policy templates" />
       <div className="policy-chips">
         {templates.map((template) => (
           <button
@@ -1079,7 +1416,9 @@ function TemplateConfirm(props: { template: PolicyTemplate; disabled: boolean; o
 interface CardProps {
   policy: PolicyDoc;
   preflight: Preflight | null;
+  preflightState: OptionalEvidenceState;
   coverage: Coverage | null;
+  coverageState: OptionalEvidenceState;
 }
 
 interface ChecklistItem {
@@ -1088,33 +1427,74 @@ interface ChecklistItem {
   detail: string;
 }
 
-function setupChecklist(policy: PolicyDoc, preflight: Preflight | null, coverage: Coverage | null): ChecklistItem[] {
+function evidenceTone(state: OptionalEvidenceState, current: CardState): CardState {
+  if (state === 'ready') return current;
+  return state === 'stale' && current === 'bad' ? 'bad' : 'warn';
+}
+
+function evidenceDetail(state: OptionalEvidenceState, value: string): string {
+  if (state === 'loading') return 'Loading';
+  if (state === 'unavailable') return 'Unavailable';
+  return state === 'stale' ? `Last verified: ${value}` : value;
+}
+
+function setupChecklist(
+  policy: PolicyDoc,
+  preflight: Preflight | null,
+  coverage: Coverage | null,
+  preflightState: OptionalEvidenceState,
+  coverageState: OptionalEvidenceState,
+): ChecklistItem[] {
   const health = configHealth(preflight);
-  const sensorCount = (coverage?.sensors || []).filter((sensor) => sensor.events || sensor.required).length;
+  const sensorCount = (coverage?.sensors || []).filter((sensor) => typeof sensor.events === 'number' && sensor.events > 0).length;
+  const checksReported = Boolean(preflight?.checks?.length);
+  const sensorsReported = Array.isArray(coverage?.sensors);
+  const adminCoverage = checkGroupCoverage(preflight, ADMIN_ACCESS_CHECK_IDS);
+  const identityCoverage = checkGroupCoverage(preflight, IDENTITY_PROVIDER_CHECK_IDS);
+  const adminState = checkGroupState(preflight, ADMIN_ACCESS_CHECK_IDS);
+  const identityState = checkGroupState(preflight, IDENTITY_PROVIDER_CHECK_IDS);
+  const healthState: CardState = preflight?.level === 'blocked' ? 'bad' : checksReported && health.complete ? health.state : 'warn';
   const governed = policy.governedDestinations.length;
   const routing = ruleList(policy.approvalRoutingRules).length;
   return [
     {
       label: 'Admin access',
-      state: checkGroupState(preflight, ['admin_password', 'admin_password_strength', 'admin_mfa', 'session_secret']),
-      detail: 'MFA, password, session',
+      state: evidenceTone(preflightState, adminState),
+      detail: evidenceDetail(preflightState, adminCoverage.complete ? 'MFA, password, session' : checkCoverageText(adminCoverage)),
     },
     {
       label: 'Identity provider',
-      state: checkGroupState(preflight, ['oidc_config', 'oidc_scim_users', 'scim_bearer_token_strength']),
-      detail: 'OIDC and SCIM',
+      state: evidenceTone(preflightState, identityState),
+      detail: evidenceDetail(preflightState, identityCoverage.complete ? 'OIDC and SCIM' : checkCoverageText(identityCoverage)),
     },
-    { label: 'Deploy sensors', state: sensorCount ? 'good' : 'warn', detail: `${sensorCount} observed` },
+    {
+      label: 'Deploy sensors',
+      state: evidenceTone(coverageState, sensorsReported && sensorCount ? 'good' : 'warn'),
+      detail: evidenceDetail(coverageState, sensorsReported ? `${sensorCount} observed` : 'Not reported'),
+    },
     { label: 'Define destinations', state: governed ? 'good' : 'warn', detail: `${governed} governed` },
     { label: 'Choose policy mode', state: policy.enforcementMode ? 'good' : 'warn', detail: humanize(policy.enforcementMode) },
     { label: 'Set approval routing', state: routing ? 'good' : 'warn', detail: `${routing} rules` },
     { label: 'Review DLP rules', state: policy.alwaysBlock.length ? 'good' : 'warn', detail: `${policy.alwaysBlock.length} hard stops` },
-    { label: 'Test configuration', state: health.state === 'bad' ? 'bad' : 'good', detail: `${health.ok}/${health.total} checks` },
+    {
+      label: 'Test configuration',
+      state: evidenceTone(preflightState, healthState),
+      detail: evidenceDetail(
+        preflightState,
+        checksReported
+          ? !health.complete
+            ? `${health.reported}/${health.expected} expected checks reported`
+            : preflight?.level === 'blocked' && !health.failed
+              ? 'Blocked state reported'
+              : `${health.ok}/${health.total} checks`
+          : 'Not reported',
+      ),
+    },
   ];
 }
 
-function SetupChecklistCard({ policy, preflight, coverage }: CardProps) {
-  const items = setupChecklist(policy, preflight, coverage);
+function SetupChecklistCard({ policy, preflight, preflightState, coverage, coverageState }: CardProps) {
+  const items = setupChecklist(policy, preflight, coverage, preflightState, coverageState);
   const done = items.filter((item) => item.state === 'good').length;
   return (
     <div className="config-card pad">
@@ -1138,13 +1518,41 @@ function SetupChecklistCard({ policy, preflight, coverage }: CardProps) {
   );
 }
 
-function HealthCard({ policy, preflight, coverage }: CardProps) {
+function HealthCard({ policy, preflight, preflightState, coverage, coverageState }: CardProps) {
   const health = configHealth(preflight);
+  const checksReported = Boolean(preflight?.checks?.length);
+  const scoreReported = (preflightState === 'ready' || preflightState === 'stale') && health.complete;
+  const healthTone = evidenceTone(preflightState, preflight?.level === 'blocked' ? 'bad' : checksReported ? health.state : 'warn');
+  const healthLabel = preflightState === 'loading'
+    ? 'Loading'
+    : preflightState === 'unavailable'
+      ? 'Unavailable'
+      : preflightState === 'stale'
+        ? health.complete ? 'Last verified' : 'Last verified incomplete'
+        : preflight?.level === 'blocked'
+          ? 'Blocked'
+          : !checksReported
+            ? 'Not reported'
+            : !health.complete
+              ? 'Incomplete'
+              : health.state === 'good' ? 'Good' : health.label;
   const rows: [string, string][] = [
     ['Sensors', `${strArray(policy.requiredSensors).length} required`],
     ['Destinations', `${policy.governedDestinations.length} governed`],
-    ['Fleet gaps', String(coverage?.totals?.fleetAttention || 0)],
-    ['Preflight checks', `${health.failed} open`],
+    ['Fleet gaps', coverageAttentionText(coverage, coverageState)],
+    [
+      'Preflight checks',
+      evidenceDetail(
+        preflightState,
+        !checksReported
+          ? 'Not reported'
+          : !health.complete
+            ? `${health.reported}/${health.expected} expected checks reported`
+            : preflight?.level === 'blocked' && !health.failed
+              ? 'Blocked state reported'
+              : `${health.failed} open`,
+      ),
+    ],
   ];
   return (
     <div className="config-card pad">
@@ -1153,11 +1561,11 @@ function HealthCard({ policy, preflight, coverage }: CardProps) {
           <h3>Policy Health</h3>
           <p>Readiness across auth, sensors, member data, and AI governance.</p>
         </div>
-        <StatePill state={health.state} label={health.state === 'good' ? 'Good' : health.label} />
+        <StatePill state={healthTone} label={healthLabel} />
       </div>
-      <div className={`health-score ${health.state}`}>
-        <b>{health.score}</b>
-        <span>/ 100</span>
+      <div className={`health-score ${healthTone}`}>
+        <b>{scoreReported ? health.score : 'Not reported'}</b>
+        <span>{scoreReported ? `/ 100${preflightState === 'stale' ? ' last verified' : ''}` : 'not verified'}</span>
       </div>
       <div className="health-rows">
         {rows.map(([label, value]) => (
@@ -1171,16 +1579,18 @@ function HealthCard({ policy, preflight, coverage }: CardProps) {
   );
 }
 
-const ENV_GROUPS: [string, string[]][] = [
-  ['Admin auth', ['admin_password', 'admin_password_strength', 'admin_mfa']],
-  ['Sensor ingest key', ['ingest_key', 'ingest_key_strength']],
-  ['Session secret', ['session_secret', 'session_secret_strength']],
-  ['Raw approval encryption', ['raw_prompt_encryption', 'data_key_strength']],
-  ['Evidence store', ['sqlite_local_disk']],
-  ['Tenant controls', ['saas_tenant_id', 'saas_seat_limit', 'saas_tenant_context', 'saas_user_identity']],
-];
+function EvidenceAwarePill(props: { evidenceState: OptionalEvidenceState; current: CardState; label?: string }) {
+  if (props.evidenceState === 'loading') return <StatePill state="warn" label="Loading" />;
+  if (props.evidenceState === 'unavailable') return <StatePill state="warn" label="Unavailable" />;
+  if (props.evidenceState === 'stale') {
+    return <StatePill state={props.current === 'bad' ? 'bad' : 'warn'} label={`Last verified: ${props.label || stateLabel(props.current)}`} />;
+  }
+  return <StatePill state={props.current} label={props.label} />;
+}
 
-function EnvironmentCard({ preflight }: { preflight: Preflight | null }) {
+function EnvironmentCard({ preflight, preflightState }: { preflight: Preflight | null; preflightState: OptionalEvidenceState }) {
+  const runtimeReported = typeof preflight?.production === 'boolean';
+  const runtimeState: CardState = preflight?.production ? 'good' : 'warn';
   return (
     <div className="config-card pad">
       <h3>Control Plane Settings</h3>
@@ -1189,17 +1599,28 @@ function EnvironmentCard({ preflight }: { preflight: Preflight | null }) {
         <div className="settings-row">
           <span>Runtime</span>
           <b>
-            <StatePill state={preflight?.production ? 'good' : 'warn'} label={preflight?.production ? 'Production' : 'Local / pilot'} />
+            <EvidenceAwarePill
+              evidenceState={preflightState}
+              current={runtimeState}
+              label={runtimeReported ? (preflight?.production ? 'Production' : 'Local / pilot') : 'Not reported'}
+            />
           </b>
         </div>
-        {ENV_GROUPS.map(([label, ids]) => (
-          <div key={label} className="settings-row">
-            <span>{label}</span>
-            <b>
-              <StatePill state={checkGroupState(preflight, ids)} />
-            </b>
-          </div>
-        ))}
+        {ENV_GROUPS.map(({ key, label, ids }) => {
+          const coverage = checkGroupCoverage(preflight, ids);
+          return (
+            <div key={key} className="settings-row" data-readiness-group={key}>
+              <span>{label}</span>
+              <b>
+                <EvidenceAwarePill
+                  evidenceState={preflightState}
+                  current={checkGroupState(preflight, ids)}
+                  label={coverage.complete ? undefined : checkCoverageText(coverage)}
+                />
+              </b>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -1207,10 +1628,16 @@ function EnvironmentCard({ preflight }: { preflight: Preflight | null }) {
 
 function StatusCards(props: CardProps) {
   return (
-    <div className="policy-cards">
-      <SetupChecklistCard {...props} />
-      <HealthCard {...props} />
-      <EnvironmentCard preflight={props.preflight} />
+    <div className="policy-evidence-detail">
+      <div className="policy-evidence-notices">
+        <EvidenceNotice state={props.preflightState} subject="readiness checks" />
+        <EvidenceNotice state={props.coverageState} subject="fleet coverage" />
+      </div>
+      <div className="policy-cards">
+        <SetupChecklistCard {...props} />
+        <HealthCard {...props} />
+        <EnvironmentCard preflight={props.preflight} preflightState={props.preflightState} />
+      </div>
     </div>
   );
 }
@@ -1221,12 +1648,36 @@ const SENSOR_LABELS: Record<string, [string, string]> = {
   mcp_guard: ['MCP Guard', 'Agent tool calls and document context'],
 };
 
-function SensorCard({ id, policy, coverage }: { id: string; policy: PolicyDoc; coverage: Coverage | null }) {
+function SensorCard(props: { id: string; policy: PolicyDoc; coverage: Coverage | null; coverageState: OptionalEvidenceState }) {
+  const { id, policy, coverage, coverageState } = props;
   const [label, detail] = id in SENSOR_LABELS ? SENSOR_LABELS[id] : [humanize(id), 'Custom sensor'];
-  const sensor: CoverageSensor = (coverage?.sensors || []).find((item) => item.source === id) ?? {};
+  const sensor = (coverage?.sensors || []).find((item) => item.source === id);
+  const sensorsReported = Array.isArray(coverage?.sensors);
   const required = strArray(policy.requiredSensors).includes(id);
-  const state: CardState = sensor.installHealth?.state === 'attention' ? 'warn' : sensor.events || required ? 'good' : 'warn';
-  const version = strMap(policy.desiredSensorVersions)[id] || sensor.desiredVersion || sensor.latestVersion || '-';
+  const events = typeof sensor?.events === 'number' ? sensor.events : null;
+  const currentState: CardState = sensor?.installHealth?.state === 'attention' ? 'warn' : events && events > 0 ? 'good' : 'warn';
+  const version = strMap(policy.desiredSensorVersions)[id] || sensor?.desiredVersion || sensor?.latestVersion || '-';
+  const currentLabel = events && events > 0
+    ? 'Observed'
+    : sensor && events === null
+      ? `${required ? 'Required' : 'Optional'} · status not reported`
+      : required ? 'Required · not observed' : 'Optional · not observed';
+  const eventText = coverageState === 'loading'
+    ? 'Loading'
+    : coverageState === 'unavailable'
+      ? 'Unavailable'
+      : coverageState === 'stale'
+        ? events === null ? 'Not reported (last verified)' : `${events} (last verified)`
+        : events === null ? (sensorsReported && !sensor ? 'Not observed' : 'Not reported') : String(events);
+  const lastSeenText = coverageState === 'loading'
+    ? 'Loading'
+    : coverageState === 'unavailable'
+      ? 'Unavailable'
+      : sensor?.lastSeen
+        ? `${fmt(sensor.lastSeen)}${coverageState === 'stale' ? ' (last verified)' : ''}`
+        : coverageState === 'stale'
+          ? 'Not reported (last verified)'
+          : sensorsReported ? (sensor ? 'Not reported' : 'No events observed') : 'Not reported';
   return (
     <div className="sensor-card">
       <div className="sensor-head">
@@ -1234,7 +1685,7 @@ function SensorCard({ id, policy, coverage }: { id: string; policy: PolicyDoc; c
           <b>{label}</b>
           <p>{detail}</p>
         </div>
-        <StatePill state={state} label={sensor.events ? 'Observed' : required ? 'Required' : 'Optional'} />
+        <EvidenceAwarePill evidenceState={coverageState} current={currentState} label={currentLabel} />
       </div>
       <dl>
         <div>
@@ -1243,11 +1694,11 @@ function SensorCard({ id, policy, coverage }: { id: string; policy: PolicyDoc; c
         </div>
         <div>
           <dt>Events</dt>
-          <dd>{sensor.events || 0}</dd>
+          <dd>{eventText}</dd>
         </div>
         <div>
           <dt>Last seen</dt>
-          <dd>{sensor.lastSeen ? fmt(sensor.lastSeen) : 'No events yet'}</dd>
+          <dd>{lastSeenText}</dd>
         </div>
       </dl>
       <a className="ghost mini" href={routeHref('/coverage')}>
@@ -1257,7 +1708,8 @@ function SensorCard({ id, policy, coverage }: { id: string; policy: PolicyDoc; c
   );
 }
 
-function SensorSetupCard({ policy, coverage }: { policy: PolicyDoc; coverage: Coverage | null }) {
+function SensorSetupCard(props: { policy: PolicyDoc; coverage: Coverage | null; coverageState: OptionalEvidenceState }) {
+  const { policy, coverage, coverageState } = props;
   const ids = [...new Set(['browser_extension', 'endpoint_agent', 'mcp_guard', ...strArray(policy.requiredSensors)])];
   return (
     <div className="config-card pad">
@@ -1272,7 +1724,7 @@ function SensorSetupCard({ policy, coverage }: { policy: PolicyDoc; coverage: Co
       </div>
       <div className="sensor-cards">
         {ids.map((id) => (
-          <SensorCard key={id} id={id} policy={policy} coverage={coverage} />
+          <SensorCard key={id} id={id} policy={policy} coverage={coverage} coverageState={coverageState} />
         ))}
       </div>
     </div>
@@ -1756,8 +2208,8 @@ function McpSection({ policy, draft, readOnly, disabled, patch, status }: Sectio
   );
 }
 
-function routingChips(policy: PolicyDoc): ReactNode[] {
-  return ruleList(policy.approvalRoutingRules).map((rule, index) => (
+function routingRuleChips(rules: RuleJson[]): ReactNode[] {
+  return rules.map((rule, index) => (
     <span key={ruleStr(rule, 'id') || index} className="chip">
       <b>{ruleStr(rule, 'id')}</b> {ruleStr(rule, 'assignedGroup')} / {roleLabel(ruleStr(rule, 'assignedRole'))} {matcherSummary(rule)}
     </span>
@@ -1765,24 +2217,34 @@ function routingChips(policy: PolicyDoc): ReactNode[] {
 }
 
 function RoutingSection({ policy, draft, readOnly, disabled, patch, status }: SectionProps) {
+  // Keep an invalid draft intact. Save/Test surfaces the existing validation
+  // error while this overview simply reports no parseable rules.
+  const rules = readOnly ? ruleList(policy.approvalRoutingRules) : ruleTextList(draft.approvalRoutingRules);
   return (
     <section className="policy-section">
       <h3>Approval routing</h3>
       <p className="policy-hint">Route held prompts to the right group and role with SLA context.</p>
+      <ChipRow chips={routingRuleChips(rules)} empty="default routing" />
       {readOnly ? (
-        <ChipRow chips={routingChips(policy)} empty="default routing" />
+        <div className="readonly-note">Read-only view</div>
       ) : (
-        <>
-          <JsonTextarea
-            ariaLabel="Approval routing rules"
-            value={draft.approvalRoutingRules}
-            placeholder={ROUTING_PLACEHOLDER}
-            minHeight={160}
-            disabled={disabled}
-            onChange={(value) => patch(textPatch('approvalRoutingRules', value))}
-          />
-          <RouteBuilder value={draft.approvalRoutingRules} onChange={(value) => patch(textPatch('approvalRoutingRules', value))} status={status} />
-        </>
+        <details className="policy-inline-disclosure">
+          <summary>
+            <span>Configure approval routes</span>
+            <small>{rules.length} draft rule{rules.length === 1 ? '' : 's'}</small>
+          </summary>
+          <div className="policy-inline-disclosure-body">
+            <JsonTextarea
+              ariaLabel="Approval routing rules"
+              value={draft.approvalRoutingRules}
+              placeholder={ROUTING_PLACEHOLDER}
+              minHeight={160}
+              disabled={disabled}
+              onChange={(value) => patch(textPatch('approvalRoutingRules', value))}
+            />
+            <RouteBuilder value={draft.approvalRoutingRules} onChange={(value) => patch(textPatch('approvalRoutingRules', value))} status={status} />
+          </div>
+        </details>
       )}
     </section>
   );
@@ -1804,72 +2266,75 @@ function exceptionChips(policy: PolicyDoc): ReactNode[] {
   ));
 }
 
-function AdvancedRulesSection({ policy, draft, readOnly, disabled, patch, onPurge }: SectionProps & { onPurge: () => void }) {
+function ScopesExceptionsSection({ policy, draft, readOnly, disabled, patch, status }: SectionProps) {
   return (
-    <section className="policy-section">
-      <h3>Advanced policy JSON</h3>
-      <p className="policy-hint">Edit scoped enforcement and time-bound exceptions directly when the guided builders are not enough.</p>
-      <div className="policy-advanced-grid">
-        {readOnly ? (
-          <>
-            <ReadonlyChips label="Scoped enforcement rules" chips={scopeChips(policy)} empty="no scoped rules" />
-            <ReadonlyChips label="Time-bound exceptions" chips={exceptionChips(policy)} empty="no exceptions" />
-          </>
-        ) : (
-          <>
-            <ListField
-              label="Scoped enforcement rules"
-              value={draft.policyScopes}
-              placeholder={SCOPES_PLACEHOLDER}
-              minHeight={190}
-              disabled={disabled}
-              onChange={(value) => patch(textPatch('policyScopes', value))}
-            />
-            <ListField
-              label="Time-bound exceptions"
-              value={draft.policyExceptions}
-              placeholder={EXCEPTIONS_PLACEHOLDER}
-              minHeight={190}
-              disabled={disabled}
-              onChange={(value) => patch(textPatch('policyExceptions', value))}
-            />
-          </>
-        )}
-      </div>
-      {readOnly ? (
-        <div className="readonly-note">Read-only auditor view</div>
+    <>
+      {readOnly ? null : (
+        <div className="policy-builder-grid">
+          <ScopeBuilder
+            value={draft.policyScopes}
+            onChange={(value) => patch(textPatch('policyScopes', value))}
+            status={status}
+          />
+          <ExceptionBuilder
+            value={draft.policyExceptions}
+            onChange={(value) => patch(textPatch('policyExceptions', value))}
+            status={status}
+          />
+        </div>
+      )}
+      <section className="policy-section">
+        <h3>Scoped enforcement and exceptions</h3>
+        <p className="policy-hint">Edit scoped enforcement and time-bound exceptions directly when the guided builders are not enough.</p>
+        <div className="policy-advanced-grid">
+          {readOnly ? (
+            <>
+              <ReadonlyChips label="Scoped enforcement rules" chips={scopeChips(policy)} empty="no scoped rules" />
+              <ReadonlyChips label="Time-bound exceptions" chips={exceptionChips(policy)} empty="no exceptions" />
+            </>
+          ) : (
+            <>
+              <ListField
+                label="Scoped enforcement rules"
+                value={draft.policyScopes}
+                placeholder={SCOPES_PLACEHOLDER}
+                minHeight={190}
+                disabled={disabled}
+                onChange={(value) => patch(textPatch('policyScopes', value))}
+              />
+              <ListField
+                label="Time-bound exceptions"
+                value={draft.policyExceptions}
+                placeholder={EXCEPTIONS_PLACEHOLDER}
+                minHeight={190}
+                disabled={disabled}
+                onChange={(value) => patch(textPatch('policyExceptions', value))}
+              />
+            </>
+          )}
+        </div>
+        {readOnly ? <div className="readonly-note">Read-only view</div> : null}
+      </section>
+    </>
+  );
+}
+
+function RetentionTools(props: { readOnly: boolean; disabled: boolean; retentionDays: string; onPurge: () => void }) {
+  return (
+    <section className="policy-section policy-retention-tools">
+      <h3>Delete expired retained approval data</h3>
+      <p className="policy-hint">
+        Purges encrypted raw approval records older than the current {props.retentionDays || 'configured'}-day retention window. This
+        cannot be undone and does not change the policy document.
+      </p>
+      {props.readOnly ? (
+        <div className="readonly-note">Read-only view: Security Admin required to run retention purge</div>
       ) : (
-        <button type="button" className="btn" disabled={disabled} onClick={onPurge}>
+        <button type="button" className="policy-btn danger" disabled={props.disabled} onClick={props.onPurge}>
           Run retention purge
         </button>
       )}
     </section>
-  );
-}
-
-function RuleSections(props: SectionProps & { onPurge: () => void }) {
-  return (
-    <>
-      <BrowserActionsSection {...props} />
-      <FleetPostureSection {...props} />
-      <McpSection {...props} />
-      <RoutingSection {...props} />
-      {props.readOnly ? null : (
-        <div className="policy-builder-grid">
-          <ScopeBuilder
-            value={props.draft.policyScopes}
-            onChange={(value) => props.patch(textPatch('policyScopes', value))}
-            status={props.status}
-          />
-          <ExceptionBuilder
-            value={props.draft.policyExceptions}
-            onChange={(value) => props.patch(textPatch('policyExceptions', value))}
-            status={props.status}
-          />
-        </div>
-      )}
-      <AdvancedRulesSection {...props} />
-    </>
   );
 }
 
@@ -1991,19 +2456,28 @@ function DetectionTester() {
     setTesting(true);
     try {
       const [meta, res] = await Promise.all([detectorMetaOnce(), postDetectorTest(sample)]);
-      const result = res && res.ok ? ((await res.json().catch(() => null)) as DetectorTestResult | null) : null;
-      setView(result ? { kind: 'result', result, meta } : { kind: 'note', text: 'Test failed - check your session.' });
+      const raw = res?.ok
+        ? await responseJsonBounded<unknown>(res, SMALL_RESPONSE_MAX_BYTES)
+        : null;
+      const result = isCompleteDetectorTestResult(raw) ? raw as DetectorTestResult : null;
+      setView(result
+        ? { kind: 'result', result, meta }
+        : { kind: 'note', text: res?.ok ? 'Test response could not be verified.' : 'Test failed - check your session.' });
     } finally {
       setTesting(false);
     }
   };
-  const runButton = (
-    <button type="button" className="ghost mini" disabled={testing} onClick={run}>
-      {testing ? 'Testing…' : 'Test detection'}
-    </button>
-  );
   return (
-    <Panel title="Member Data Test Bench" meta={runButton}>
+    <section className="policy-section policy-test-bench" aria-labelledby="policy-test-bench-title">
+      <div className="policy-section-head">
+        <div>
+          <h3 id="policy-test-bench-title">Member Data Test Bench</h3>
+          <p className="policy-hint">Exercise the live detector with synthetic member data.</p>
+        </div>
+        <button type="button" className="policy-btn" disabled={testing} onClick={run}>
+          {testing ? 'Testing…' : 'Test detection'}
+        </button>
+      </div>
       <p className="policy-hint">
         Paste sample text to see exactly how the live policy would score and decide it - the sample is analyzed in memory and never
         stored or logged
@@ -2020,7 +2494,7 @@ function DetectionTester() {
       <div aria-live="polite">
         <TesterResultView view={view} />
       </div>
-    </Panel>
+    </section>
   );
 }
 
@@ -2117,7 +2591,7 @@ function ImpactPreview({ impact }: { impact: PolicyImpact }) {
     <section className="policy-section policy-impact" aria-live="polite">
       <h3>Impact preview</h3>
       <p className="policy-hint">
-        Draft policy replayed against {impact.summary.sampleSize} recent events. Metadata only — prompt bodies are excluded.
+        Draft policy replayed against {impact.summary.sampleSize} recent events. Metadata only; prompt bodies are excluded.
       </p>
       <ImpactSummary summary={impact.summary} />
       <OutcomeTable current={impact.summary.current} proposed={impact.summary.proposed} />
@@ -2146,24 +2620,93 @@ function advancedFields(policy: PolicyDoc): Record<string, unknown> {
 
 function AdvancedJson({ policy }: { policy: PolicyDoc }) {
   return (
-    <details className="policy-advanced">
-      <summary>Advanced policy fields (read-only)</summary>
+    <section className="policy-section policy-advanced" aria-labelledby="policy-unmanaged-fields-title">
+      <h3 id="policy-unmanaged-fields-title">Unmanaged policy fields</h3>
       <p className="policy-hint">
         Detector ignore lists, scanner ignore rules, corporate AI account policy, and unmanaged-install handling are edited via the API
         or configuration files. Saving here leaves them unchanged.
       </p>
       <pre>{JSON.stringify(advancedFields(policy), null, 2)}</pre>
-    </details>
+    </section>
   );
 }
 
 // ---- Header / action rows ------------------------------------------------------------------
 
-function HeaderRow({ preflight }: { preflight: Preflight | null }) {
+interface ReadinessPresentation {
+  tone: CardState;
+  label: string;
+  detail: string;
+}
+
+function readinessPresentation(preflight: Preflight | null, state: OptionalEvidenceState, health: ConfigHealth): ReadinessPresentation {
+  if (state === 'loading') return { tone: 'warn', label: 'Checking readiness', detail: 'Waiting for verified readiness checks' };
+  if (state === 'unavailable') return { tone: 'warn', label: 'Readiness unavailable', detail: 'No verified readiness evidence is available' };
+  if (state === 'stale') {
+    const tone = preflight?.level === 'blocked' ? 'bad' : 'warn';
+    if (!health.total) return { tone, label: 'Readiness stale', detail: 'Last verified snapshot did not report checks' };
+    if (!health.complete) {
+      return {
+        tone,
+        label: 'Readiness stale',
+        detail: `Last verified snapshot incomplete: ${health.reported}/${health.expected} expected checks; latest refresh failed`,
+      };
+    }
+    return { tone, label: 'Readiness stale', detail: `Last verified: ${health.score}/100; latest refresh failed` };
+  }
+  if (preflight?.level === 'blocked') {
+    const missing = health.complete ? '' : `; ${health.reported}/${health.expected} expected checks reported`;
+    const detail = health.failed ? `${health.failed} check${health.failed === 1 ? '' : 's'} block readiness${missing}` : `The preflight response reported a blocked state${missing}`;
+    return { tone: 'bad', label: 'Readiness blocked', detail };
+  }
+  if (!health.total) return { tone: 'warn', label: 'Readiness incomplete', detail: 'The verified response did not report any checks' };
+  if (!health.complete) {
+    return {
+      tone: 'warn',
+      label: 'Readiness incomplete',
+      detail: `${health.reported}/${health.expected} expected checks reported; ${health.missing} missing`,
+    };
+  }
+  return {
+    tone: health.state,
+    label: `${health.score}/100 ${health.state === 'good' ? 'ready' : health.label}`,
+    detail: health.failed ? `${health.failed} check${health.failed === 1 ? '' : 's'} need attention` : 'All expected checks ready',
+  };
+}
+
+function HeaderRow(props: {
+  preflight: Preflight | null;
+  preflightState: OptionalEvidenceState;
+  draft: Draft;
+  coverage: Coverage | null;
+  coverageState: OptionalEvidenceState;
+}) {
+  const { preflight, preflightState, draft, coverage, coverageState } = props;
   const health = configHealth(preflight);
+  const readiness = readinessPresentation(preflight, preflightState, health);
+  const metrics: [string, string][] = [
+    ['Active mode', humanize(draft.enforcementMode)],
+    ['Governed destinations', String(parseList(draft.governedDestinations).length)],
+    ['Approval routes', String(ruleTextList(draft.approvalRoutingRules).length)],
+    ['Fleet attention', coverageAttentionText(coverage, coverageState)],
+  ];
   return (
     <div className="policy-head-row">
-      <StatePill state={health.state} label={`${health.score}/100 ready`} />
+      <div className="policy-readiness-summary">
+        <span className="policy-eyebrow">Operational readiness</span>
+        <div>
+          <StatePill state={readiness.tone} label={readiness.label} />
+          <span>{readiness.detail}</span>
+        </div>
+      </div>
+      <dl className="policy-head-metrics">
+        {metrics.map(([label, value]) => (
+          <div key={label}>
+            <dt>{label}</dt>
+            <dd>{value}</dd>
+          </div>
+        ))}
+      </dl>
       <button
         type="button"
         className="ghost"
@@ -2187,24 +2730,39 @@ interface ActionRowProps {
 }
 
 function ActionRow({ readOnly, busy, dirty, statusText, onSave, onTest, onDiscard }: ActionRowProps) {
+  const statusTone = /could not|invalid|required|must be|blocking|failed|unavailable/i.test(statusText)
+    ? 'error'
+    : /saved|purged|applied|ready/i.test(statusText)
+      ? 'success'
+      : 'neutral';
   return (
-    <div className="policy-actions">
-      <button type="button" className="policy-btn" disabled={busy || !dirty} onClick={onDiscard}>
-        Discard changes
-      </button>
-      <button type="button" className="policy-btn" disabled={busy} onClick={onTest}>
-        Test configuration
-      </button>
-      {readOnly ? (
-        <span className="policy-readonly-note">Read-only view — Security Admin required to edit</span>
-      ) : (
-        <button type="button" className="policy-btn primary" disabled={busy} onClick={onSave}>
-          Save changes
+    <div className="policy-actions" aria-busy={busy}>
+      <div className="policy-action-buttons">
+        <button type="button" className="policy-btn" disabled={busy || !dirty} onClick={onDiscard}>
+          Discard changes
         </button>
-      )}
-      <span className="save-status" role="status">
-        {statusText}
-      </span>
+        <button type="button" className="policy-btn" disabled={busy} onClick={onTest}>
+          Test configuration
+        </button>
+        {readOnly ? (
+          <span className="policy-readonly-note">Read-only view: Security Admin required to edit</span>
+        ) : (
+          <button type="button" className="policy-btn primary" disabled={busy || !dirty} onClick={onSave}>
+            Save changes
+          </button>
+        )}
+      </div>
+      <div className="policy-save-state">
+        <span className={`policy-draft-state ${dirty ? 'dirty' : 'clean'}`}>
+          <span aria-hidden="true" />
+          {dirty ? 'Unsaved changes' : 'No pending changes'}
+        </span>
+        {statusText ? (
+          <span className={`save-status ${statusTone}`} role="status" aria-live="polite">
+            {statusText}
+          </span>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -2213,9 +2771,12 @@ interface EditorProps {
   policy: PolicyDoc;
   draft: Draft;
   templates: PolicyTemplate[];
+  templatesState: OptionalEvidenceState;
   impact: PolicyImpact | null;
   preflight: Preflight | null;
+  preflightState: OptionalEvidenceState;
   coverage: Coverage | null;
+  coverageState: OptionalEvidenceState;
   readOnly: boolean;
   busy: boolean;
   dirty: boolean;
@@ -2232,9 +2793,20 @@ function PolicyEditor(props: EditorProps) {
   const { policy, draft, readOnly, busy, patch, status } = props;
   const disabled = readOnly || busy;
   const section: SectionProps = { policy, draft, readOnly, disabled, patch, status };
+  const fleetAttention = coverageMetaText(props.coverage, props.coverageState);
+  const browserRuleCount = ruleTextList(draft.blockedBrowserActions).length;
+  const mcpRuleCount = parseList(draft.mcpAllowedTools).length + parseList(draft.mcpBlockedTools).length + parseList(draft.mcpApprovalRequiredTools).length;
+  const scopeCount = ruleTextList(draft.policyScopes).length;
+  const exceptionCount = ruleTextList(draft.policyExceptions).length;
   return (
     <div className="policy-editor">
-      <HeaderRow preflight={props.preflight} />
+      <HeaderRow
+        preflight={props.preflight}
+        preflightState={props.preflightState}
+        draft={draft}
+        coverage={props.coverage}
+        coverageState={props.coverageState}
+      />
       <ActionRow
         readOnly={readOnly}
         busy={busy}
@@ -2244,17 +2816,115 @@ function PolicyEditor(props: EditorProps) {
         onTest={props.onTest}
         onDiscard={props.onDiscard}
       />
-      {props.impact ? <ImpactPreview impact={props.impact} /> : <ImpactHint />}
-      <StatusCards policy={policy} preflight={props.preflight} coverage={props.coverage} />
-      <SensorSetupCard policy={policy} coverage={props.coverage} />
-      <ModePicker mode={draft.enforcementMode} disabled={disabled} onChange={(mode) => patch({ enforcementMode: mode })} />
-      <ThresholdFields draft={draft} disabled={disabled} patch={patch} />
-      <HandlingFields draft={draft} disabled={disabled} patch={patch} />
-      <DestinationLists draft={draft} disabled={disabled} patch={patch} />
-      <HardStops items={policy.alwaysBlock} />
-      <TemplatePicker templates={props.templates} disabled={disabled} onApply={props.onApplyTemplate} />
-      <RuleSections {...section} onPurge={props.onPurge} />
-      <AdvancedJson policy={policy} />
+
+      <section className="policy-primary" aria-labelledby="policy-primary-title">
+        <div className="policy-primary-head">
+          <div>
+            <span className="policy-eyebrow">Active decision path</span>
+            <h3 id="policy-primary-title">Enforcement essentials</h3>
+            <p>Set the default decision, member-data thresholds, governed destinations, and approval ownership.</p>
+          </div>
+          <StatusChip tone={draft.enforcementMode === 'block' ? 'good' : 'warn'} label={humanize(draft.enforcementMode)} />
+        </div>
+        <ModePicker mode={draft.enforcementMode} disabled={disabled} onChange={(mode) => patch({ enforcementMode: mode })} />
+        <div className="policy-core-grid">
+          <div className="policy-core-column">
+            <ThresholdFields draft={draft} disabled={disabled} patch={patch} />
+            <HandlingFields draft={draft} disabled={disabled} patch={patch} />
+          </div>
+          <DestinationLists draft={draft} disabled={disabled} patch={patch} />
+        </div>
+        <RoutingSection {...section} />
+        <HardStops items={policy.alwaysBlock} />
+      </section>
+
+      <div className="policy-workbench" aria-label="Policy verification tools">
+        <DetectionTester />
+        {props.impact ? <ImpactPreview impact={props.impact} /> : <ImpactHint />}
+      </div>
+
+      <section className="policy-secondary" aria-labelledby="policy-secondary-title">
+        <div className="policy-secondary-head">
+          <div>
+            <span className="policy-eyebrow">Progressive controls</span>
+            <h3 id="policy-secondary-title">Additional policy controls</h3>
+          </div>
+          <span>Open only the area you need. Draft changes remain visible in the save bar above.</span>
+        </div>
+        <div className="policy-disclosure-stack">
+          <PolicyDisclosure
+            section="fleet"
+            title="Readiness and fleet detail"
+            description="Setup checks, control-plane posture, sensor coverage, and desired versions."
+            meta={`${strArray(policy.requiredSensors).length} required · ${fleetAttention}`}
+          >
+            <StatusCards
+              policy={policy}
+              preflight={props.preflight}
+              preflightState={props.preflightState}
+              coverage={props.coverage}
+              coverageState={props.coverageState}
+            />
+            <SensorSetupCard policy={policy} coverage={props.coverage} coverageState={props.coverageState} />
+            <FleetPostureSection {...section} />
+          </PolicyDisclosure>
+
+          <PolicyDisclosure
+            section="templates"
+            title="Policy templates"
+            description="Apply a saved NCUA / GLBA starting point before fine-tuning."
+            meta={templateCountText(props.templates, props.templatesState)}
+          >
+            <TemplatePicker templates={props.templates} state={props.templatesState} disabled={disabled} onApply={props.onApplyTemplate} />
+          </PolicyDisclosure>
+
+          <PolicyDisclosure
+            section="browser-actions"
+            title="Browser action controls"
+            description="Block paste, drop, copy, or download actions on selected destinations."
+            meta={`${browserRuleCount} rule${browserRuleCount === 1 ? '' : 's'}`}
+          >
+            <BrowserActionsSection {...section} />
+          </PolicyDisclosure>
+
+          <PolicyDisclosure
+            section="mcp"
+            title="MCP tool governance"
+            description="Allow, block, or require approval for connector tool patterns."
+            meta={`${mcpRuleCount} pattern${mcpRuleCount === 1 ? '' : 's'}`}
+          >
+            <McpSection {...section} />
+          </PolicyDisclosure>
+
+          <PolicyDisclosure
+            section="scopes"
+            title="Scopes and time-bound exceptions"
+            description="Target enforcement by user, group, destination, category, or detector."
+            meta={`${scopeCount} scope${scopeCount === 1 ? '' : 's'} · ${exceptionCount} exception${exceptionCount === 1 ? '' : 's'}`}
+          >
+            <ScopesExceptionsSection {...section} />
+          </PolicyDisclosure>
+
+          <PolicyDisclosure
+            section="advanced"
+            title="Advanced policy JSON"
+            description="Review fields intentionally managed through the API or configuration files."
+            meta="Read-only"
+          >
+            <AdvancedJson policy={policy} />
+          </PolicyDisclosure>
+
+          <PolicyDisclosure
+            section="retention"
+            title="Destructive retention tools"
+            description="Permanently purge encrypted raw approval data outside the retention window."
+            meta={draft.rawRetentionDays ? `${draft.rawRetentionDays} days` : 'Not reported'}
+            tone="danger"
+          >
+            <RetentionTools readOnly={readOnly} disabled={disabled} retentionDays={draft.rawRetentionDays} onPurge={props.onPurge} />
+          </PolicyDisclosure>
+        </div>
+      </section>
     </div>
   );
 }
@@ -2267,7 +2937,6 @@ export default function Policy() {
 
   return (
     <div className="policy-view">
-      <DetectionTester />
       <Panel title="Policy Configuration" meta={!loaded ? 'Loading' : policy ? metaLine(policy) : 'Waiting for data'}>
         {loaded && !policy ? (
           <EmptyState title="Policy unavailable" detail="The enforcement policy could not be loaded. Refresh or check the server." />
@@ -2276,9 +2945,12 @@ export default function Policy() {
             policy={policy}
             draft={draft}
             templates={editor.templates}
+            templatesState={editor.templatesState}
             impact={editor.impact}
             preflight={editor.preflight}
+            preflightState={editor.preflightState}
             coverage={editor.coverage}
+            coverageState={editor.coverageState}
             readOnly={readOnly}
             busy={editor.busy}
             dirty={isDirty(policy, draft)}

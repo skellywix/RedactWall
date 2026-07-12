@@ -2609,13 +2609,13 @@ app.get('/api/queries', auth.requireAuth, (req, res) => {
 });
 
 // Two-way ticket state: pull Jira/Linear issue status back onto queries.
-app.post('/api/tickets/sync', ...adminWrite, async (req, res) => {
-  const result = await ticketSync.syncTicketStatuses({
+const ticketSyncRequest = ticketSync.createTicketSyncRequestHandler(({ signal }) =>
+  ticketSync.syncTicketStatuses({
     db,
+    signal,
     onUpdate: (updated) => broadcast('query', { type: 'ticket_synced', query: publicQuery(updated) }),
-  });
-  res.json(result);
-});
+  }));
+app.post('/api/tickets/sync', ...adminWrite, ticketSyncRequest);
 
 app.get('/api/queries/:id', auth.requireAuth, (req, res) => {
   const q = db.getQuery(req.params.id);
@@ -3011,10 +3011,12 @@ app.get('/api/posture', auth.requireAuth, (req, res) => {
 });
 
 app.get('/api/detector-feedback/report', auth.requireAuth, (req, res) => {
+  const rows = db.listQueries({ limit: boundedApiLimit(req.query.queryLimit, 1000) });
   res.json({
     ...detectorFeedback.report({
-      rows: db.listQueries({ limit: boundedApiLimit(req.query.queryLimit, 1000) }),
+      rows,
       feedback: db.listDetectorFeedback({ limit: boundedApiLimit(req.query.feedbackLimit, 1000) }),
+      canFeedback: (query) => roles.canDecideQuery(req.user, query),
     }),
     quality: detectionQuality.report(),
   });
@@ -3549,14 +3551,37 @@ app.put('/api/policy/apply-template', ...adminWrite, validation.validateBody(val
   res.json(committed.policy);
 });
 
+const AUDIT_QUERY_SCAN_LIMIT = 2000;
+
+function auditWindowMetadata(scope, integrity, scannedEntries, matchedEntries, returnedEntries) {
+  const totalEntries = integrity.count;
+  return {
+    scope,
+    scannedEntries,
+    totalEntries,
+    matchedEntries,
+    returnedEntries,
+    complete: integrity.ok === true && scannedEntries === totalEntries,
+  };
+}
+
 app.get('/api/audit', auth.requireAuth, (req, res) => {
   const queryId = String(req.query.queryId || '').trim();
-  const entries = queryId
-    ? db.listAudit(2000).filter((e) => e.queryId === queryId).slice(0, boundedApiLimit(req.query.limit, 50))
-    : db.listAudit(boundedApiLimit(req.query.limit, 200));
+  const resultLimit = boundedApiLimit(req.query.limit, queryId ? 50 : 200);
+  const scanned = db.listAudit(queryId ? AUDIT_QUERY_SCAN_LIMIT : resultLimit);
+  const matched = queryId ? scanned.filter((entry) => entry.queryId === queryId) : scanned;
+  const entries = matched.slice(0, resultLimit);
+  const integrity = db.verifyAuditChain();
   res.json({
     entries,
-    integrity: db.verifyAuditChain(),
+    integrity,
+    window: auditWindowMetadata(
+      queryId ? 'query' : 'all',
+      integrity,
+      scanned.length,
+      matched.length,
+      entries.length,
+    ),
     retention: 'Append-only and hash-chained: entries are never edited or purged for the life of this database. Export an evidence pack for long-term archives.',
   });
 });

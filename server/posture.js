@@ -26,7 +26,18 @@ const BLOCKED_STATUSES = new Set([
 ]);
 const REDACTED_STATUSES = new Set(['redacted', 'response_redacted']);
 const ALLOWED_STATUSES = new Set(['allowed', 'approved']);
+const HELD_STATUSES = new Set(['pending', 'pending_justification']);
 const COACHING_STATUSES = new Set(['warned', 'justified', 'pending_justification', 'blocked_by_user', 'paste_flagged']);
+// These statuses record an explicit policy decision that permits the sanitized
+// flow to continue. This is not delivery confirmation: it intentionally
+// excludes warnings that have not been accepted, local paste coaching,
+// observations, shadow sightings, and unknown outcomes.
+const CONTINUED_STATUSES = new Set([
+  ...ALLOWED_STATUSES,
+  'redacted',
+  'warned_sent',
+  'justified',
+]);
 const EVENTLESS_STATUSES = new Set(['sensor_heartbeat']);
 // SSNs (contiguous, dashed, or space-grouped), PANs (contiguous or space/dash
 // grouped), and common secret-key prefixes. One shared predicate so every
@@ -149,6 +160,14 @@ function isRedacted(q) {
 
 function isAllowed(q) {
   return ALLOWED_STATUSES.has(String(q && q.status || ''));
+}
+
+function isContinued(q) {
+  return CONTINUED_STATUSES.has(String(q && q.status || ''));
+}
+
+function isHeld(q) {
+  return HELD_STATUSES.has(String(q && q.status || ''));
 }
 
 function categoryLabels(q) {
@@ -535,7 +554,7 @@ function addDecisionHotspot(map, kind, label, q, nowMs) {
   else if (isRedacted(q)) row.redacted += events;
   else if (isAllowed(q)) row.allowed += events;
   else if (COACHING_STATUSES.has(q.status)) row.coached += events;
-  if (q.status === 'pending' || q.status === 'pending_justification') row.pending += events;
+  if (isHeld(q)) row.pending += events;
   if (isEscalated(q, nowMs)) row.escalated += events;
   row.maxRiskScore = Math.max(row.maxRiskScore, n(q.riskScore));
   if (!row.lastSeen || String(q.createdAt || '') > row.lastSeen) row.lastSeen = q.createdAt || null;
@@ -545,7 +564,7 @@ function addDecisionHotspot(map, kind, label, q, nowMs) {
 function decisionQuality(rows, nowMs) {
   const active = (rows || []).filter((q) => q && !EVENTLESS_STATUSES.has(q.status));
   const sensitive = active.filter(isSensitive);
-  const pending = active.filter((q) => q.status === 'pending' || q.status === 'pending_justification');
+  const pending = active.filter(isHeld);
   const approvals = active.filter((q) => q.status === 'approved');
   const denials = active.filter((q) => q.status === 'denied');
   const justified = active.filter((q) => q.status === 'justified');
@@ -1641,8 +1660,9 @@ function objectives({ rows, policy, coverageReport, auditIntegrity, nowMs, harde
   const unresolvedShadow = n(totals.unresolvedShadowDestinations);
   const controlConfig = configuredActionControls(policy);
   const actionScore = pct(Object.values(controlConfig).filter(Boolean).length, Object.keys(controlConfig).length);
-  const escalated = rows.filter((q) => q.status === 'pending' && isEscalated(q, nowMs)).length;
-  const pending = rows.filter((q) => q.status === 'pending').length;
+  const pendingRows = rows.filter(isHeld);
+  const escalated = pendingRows.filter((q) => isEscalated(q, nowMs)).length;
+  const pending = pendingRows.length;
   const workflowScore = pending ? Math.max(0, 100 - (escalated * 35)) : 100;
 
   return [
@@ -1777,8 +1797,9 @@ function surfaces({ rows, coverageReport, policy, auditIntegrity, nowMs, hardeni
   const required = new Set(((coverageReport && coverageReport.sensors) || []).filter((sensor) => sensor.required).map((sensor) => sensor.source));
   for (const source of ['browser_extension', 'endpoint_agent', 'mcp_guard']) required.add(source);
   if (((coverageReport && coverageReport.sensors) || []).some((sensor) => sensor.source === 'proxy')) required.add('proxy');
-  const pending = rows.filter((q) => q.status === 'pending').length;
-  const escalated = rows.filter((q) => q.status === 'pending' && isEscalated(q, nowMs)).length;
+  const pendingRows = rows.filter(isHeld);
+  const pending = pendingRows.length;
+  const escalated = pendingRows.filter((q) => isEscalated(q, nowMs)).length;
   const policyControls = configuredActionControls(policy);
   const configuredControls = Object.values(policyControls).filter(Boolean).length;
   const shadowAttention = n(totals.unresolvedShadowDestinations);
@@ -2299,14 +2320,15 @@ function segmentState(row = {}) {
 function finalizeSegment(row = {}) {
   const users = row.users instanceof Set ? row.users.size : n(row.users);
   const destinations = row.destinations instanceof Set ? row.destinations.size : n(row.destinations);
-  const controlRate = n(row.sensitive) ? pct(row.controlled, row.sensitive) : 100;
-  const score = bound(
+  const hasEvidence = n(row.events) > 0;
+  const controlRate = n(row.sensitive) ? pct(row.controlled, row.sensitive) : hasEvidence ? 100 : 0;
+  const score = hasEvidence ? bound(
     controlRate
       - Math.min(35, Math.round(n(row.maxRiskScore) / 3))
       - Math.min(25, n(row.shadow) * 5)
       - Math.min(30, n(row.pending) * 10),
-  );
-  const state = segmentState({ ...row, score, controlRate });
+  ) : 0;
+  const state = hasEvidence ? segmentState({ ...row, score, controlRate }) : 'attention';
   return {
     id: row.id,
     type: row.type,
@@ -2327,41 +2349,16 @@ function finalizeSegment(row = {}) {
     users,
     destinations,
     lastSeen: row.lastSeen || null,
-    detail: `${n(row.controlled)}/${n(row.sensitive)} sensitive controlled / ${users} user${users === 1 ? '' : 's'} / ${destinations} AI destination${destinations === 1 ? '' : 's'}`,
+    detail: hasEvidence
+      ? `${n(row.controlled)}/${n(row.sensitive)} sensitive controlled / ${users} user${users === 1 ? '' : 's'} / ${destinations} AI destination${destinations === 1 ? '' : 's'}`
+      : 'Verified empty aggregate; no readiness score is available',
   };
 }
 
-function aggregateSegmentView(matrix = []) {
-  const totals = matrix.reduce((acc, item) => {
-    acc.events += n(item.events);
-    acc.sensitive += n(item.sensitive);
-    acc.controlled += n(item.controlled);
-    acc.pending += n(item.pending);
-    acc.shadow += n(item.shadow);
-    acc.maxRiskScore = Math.max(acc.maxRiskScore, n(item.maxRiskScore));
-    if (item.state === 'critical') acc.critical += 1;
-    else if (item.state === 'attention') acc.attention += 1;
-    return acc;
-  }, { events: 0, sensitive: 0, controlled: 0, pending: 0, shadow: 0, maxRiskScore: 0, critical: 0, attention: 0 });
-  const controlRate = n(totals.sensitive) ? pct(totals.controlled, totals.sensitive) : 100;
-  return {
-    id: 'all',
-    state: totals.critical ? 'critical' : totals.attention ? 'attention' : 'ready',
-    score: bound(controlRate - Math.min(35, Math.round(totals.maxRiskScore / 3)) - Math.min(25, totals.shadow * 5) - Math.min(30, totals.pending * 10)),
-    events: totals.events,
-    sensitive: totals.sensitive,
-    controlled: totals.controlled,
-    pending: totals.pending,
-    shadow: totals.shadow,
-    controlRate,
-    maxRiskScore: bound(totals.maxRiskScore),
-    detail: `${totals.events} events / ${totals.attention} attention / ${totals.critical} critical`,
-  };
-}
-
-function savedOwnerViews(matrix = [], selectedId = '') {
+function savedOwnerViews(matrix = [], selectedId = '', aggregate = finalizeSegment({
+  id: 'all', type: 'all', typeLabel: 'All', label: 'All activity',
+})) {
   const byId = new Map(matrix.map((item) => [item.id, item]));
-  const aggregate = aggregateSegmentView(matrix);
   return OWNER_VIEW_TEMPLATES.map((template) => {
     const match = template.segmentCandidates.includes('all')
       ? aggregate
@@ -2369,6 +2366,7 @@ function savedOwnerViews(matrix = [], selectedId = '') {
     const fallbackSegmentId = template.segmentCandidates.map(normalizedSegmentId).find(Boolean) || 'all';
     const segmentId = match && match.id ? match.id : fallbackSegmentId;
     const hasSegment = !!(match && match.id && segmentId !== 'all');
+    const hasAggregate = !!(match && match.id === 'all');
     return {
       id: template.id,
       segmentId,
@@ -2377,8 +2375,8 @@ function savedOwnerViews(matrix = [], selectedId = '') {
       reviewerRole: template.reviewerRole,
       assignmentHint: template.assignmentHint,
       selected: segmentId === selectedId || (!selectedId && segmentId === 'all'),
-      state: match ? match.state : 'ready',
-      score: match ? match.score : 100,
+      state: match ? match.state : 'attention',
+      score: match ? match.score : 0,
       events: match ? match.events : 0,
       sensitive: match ? match.sensitive : 0,
       controlled: match ? match.controlled : 0,
@@ -2387,14 +2385,16 @@ function savedOwnerViews(matrix = [], selectedId = '') {
       coached: match ? match.coached : 0,
       pending: match ? match.pending : 0,
       shadow: match ? match.shadow : 0,
-      controlRate: match ? match.controlRate : 100,
+      controlRate: match ? match.controlRate : 0,
       maxRiskScore: match ? match.maxRiskScore : 0,
       users: match ? match.users : 0,
       destinations: match ? match.destinations : 0,
       attention: match ? n(match.pending) + n(match.shadow) : 0,
       detail: hasSegment
         ? `${template.ownerGroup} / ${template.reviewerRole} / ${match.detail}`
-        : `${template.ownerGroup} / ${template.reviewerRole} / no matching segment yet`,
+        : hasAggregate
+          ? `${template.ownerGroup} / ${template.reviewerRole} / ${match.detail}`
+          : `${template.ownerGroup} / ${template.reviewerRole} / no matching segment yet`,
     };
   });
 }
@@ -2427,48 +2427,59 @@ function ownerViewCards(views = []) {
   }));
 }
 
+function emptySegmentBucket(extra = {}) {
+  return {
+    events: 0,
+    sensitive: 0,
+    controlled: 0,
+    blocked: 0,
+    redacted: 0,
+    coached: 0,
+    pending: 0,
+    shadow: 0,
+    maxRiskScore: 0,
+    users: new Set(),
+    destinations: new Set(),
+    lastSeen: null,
+    ...extra,
+  };
+}
+
+function tallySegmentBucket(bucket, row, events) {
+  const sensitive = isSensitive(row);
+  const controlled = sensitive && (isBlocked(row) || isRedacted(row)
+    || COACHING_STATUSES.has(row.status) || row.status === 'approved' || row.status === 'denied');
+  bucket.events += events;
+  bucket.sensitive += sensitive ? events : 0;
+  bucket.controlled += controlled ? events : 0;
+  bucket.blocked += isBlocked(row) ? events : 0;
+  bucket.redacted += isRedacted(row) ? events : 0;
+  bucket.coached += COACHING_STATUSES.has(row.status) ? events : 0;
+  bucket.pending += isHeld(row) ? events : 0;
+  bucket.shadow += isShadowAi(row) ? events : 0;
+  bucket.maxRiskScore = Math.max(bucket.maxRiskScore, n(row.riskScore), n(row.maxSeverity) >= 4 ? 80 : 0);
+  if (row.user && row.user !== 'unknown') bucket.users.add(safeText(row.user, '', 120));
+  const destination = coverage.normalizeDestination(row.destination || '');
+  if (destination && !NON_AI_INVENTORY_DESTINATIONS.has(destination)) bucket.destinations.add(destination);
+  if (row.createdAt && (!bucket.lastSeen || String(row.createdAt) > String(bucket.lastSeen))) bucket.lastSeen = row.createdAt;
+}
+
 function postureSegments({ rows = [], selectedRows = [], segment = '', identityGroups = {} } = {}) {
   const groupsByUser = identityGroupMap(identityGroups);
   const buckets = new Map();
+  const aggregateBucket = emptySegmentBucket({ id: 'all', type: 'all', typeLabel: 'All', label: 'All activity' });
   for (const row of Array.isArray(rows) ? rows : []) {
     if (!row || EVENTLESS_STATUSES.has(row.status)) continue;
     const segments = rowSegments(row, groupsByUser);
     const events = eventWeight(row);
-    const sensitive = isSensitive(row);
-    const controlled = sensitive && (isBlocked(row) || isRedacted(row) || COACHING_STATUSES.has(row.status) || row.status === 'approved' || row.status === 'denied');
+    tallySegmentBucket(aggregateBucket, row, events);
     for (const item of segments) {
-      const bucket = buckets.get(item.id) || {
-        ...item,
-        events: 0,
-        sensitive: 0,
-        controlled: 0,
-        blocked: 0,
-        redacted: 0,
-        coached: 0,
-        pending: 0,
-        shadow: 0,
-        maxRiskScore: 0,
-        users: new Set(),
-        destinations: new Set(),
-        lastSeen: null,
-      };
-      bucket.events += events;
-      bucket.sensitive += sensitive ? events : 0;
-      bucket.controlled += controlled ? events : 0;
-      bucket.blocked += isBlocked(row) ? events : 0;
-      bucket.redacted += isRedacted(row) ? events : 0;
-      bucket.coached += COACHING_STATUSES.has(row.status) ? events : 0;
-      bucket.pending += row.status === 'pending' ? events : 0;
-      bucket.shadow += isShadowAi(row) ? events : 0;
-      bucket.maxRiskScore = Math.max(bucket.maxRiskScore, n(row.riskScore), n(row.maxSeverity) >= 4 ? 80 : 0);
-      if (row.user && row.user !== 'unknown') bucket.users.add(safeText(row.user, '', 120));
-      const destination = coverage.normalizeDestination(row.destination || '');
-      if (destination && !NON_AI_INVENTORY_DESTINATIONS.has(destination)) bucket.destinations.add(destination);
-      if (row.createdAt && (!bucket.lastSeen || String(row.createdAt) > String(bucket.lastSeen))) bucket.lastSeen = row.createdAt;
+      const bucket = buckets.get(item.id) || emptySegmentBucket(item);
+      tallySegmentBucket(bucket, row, events);
       buckets.set(item.id, bucket);
     }
   }
-  const baseMatrix = [...buckets.values()]
+  const fullMatrix = [...buckets.values()]
     .map(finalizeSegment)
     .sort((a, b) => {
       const rank = { critical: 0, attention: 1, ready: 2 };
@@ -2476,10 +2487,10 @@ function postureSegments({ rows = [], selectedRows = [], segment = '', identityG
         || b.maxRiskScore - a.maxRiskScore
         || b.events - a.events
         || a.label.localeCompare(b.label);
-    })
-    .slice(0, 16);
+    });
   const selectedId = normalizedSegmentId(segment);
-  const views = savedOwnerViews(baseMatrix, selectedId || 'all');
+  const aggregate = finalizeSegment(aggregateBucket);
+  const views = savedOwnerViews(fullMatrix, selectedId || 'all', aggregate);
   // Two owner templates can resolve to the same segment (or both fall back to
   // 'all'), so dedupe the owner cards by resolved id before concatenating —
   // otherwise the matrix carries duplicate ids and the console renders
@@ -2490,17 +2501,17 @@ function postureSegments({ rows = [], selectedRows = [], segment = '', identityG
     seenCardIds.add(card.id);
     return true;
   });
-  const matrix = [
+  const displayMatrix = [
     ...ownerCards,
-    ...baseMatrix.filter((item) => !seenCardIds.has(item.id)),
+    ...fullMatrix.filter((item) => !seenCardIds.has(item.id)),
   ].slice(0, 16);
-  const active = selectedId ? baseMatrix.find((item) => item.id === selectedId) || {
+  const active = selectedId ? fullMatrix.find((item) => item.id === selectedId) || {
     id: selectedId,
     type: selectedId.split(':')[0],
     typeLabel: SEGMENT_TYPES[selectedId.split(':')[0]] || 'Segment',
     label: 'No matching segment',
-    state: 'ready',
-    score: 100,
+    state: 'attention',
+    score: 0,
     events: 0,
     sensitive: 0,
     controlled: 0,
@@ -2509,40 +2520,52 @@ function postureSegments({ rows = [], selectedRows = [], segment = '', identityG
     coached: 0,
     pending: 0,
     shadow: 0,
-    controlRate: 100,
+    controlRate: 0,
     maxRiskScore: 0,
     users: 0,
     destinations: 0,
-    detail: 'No sanitized evidence matched this segment.',
+    detail: 'Verified empty: no sanitized evidence matched this segment. This is not a readiness score.',
   } : null;
+  const matrix = active && !displayMatrix.some((item) => item.id === active.id)
+    ? [active, ...displayMatrix].slice(0, 16)
+    : displayMatrix;
+  const leadingFilters = fullMatrix.slice(0, 16);
+  const filterSegments = active && !leadingFilters.some((item) => item.id === active.id)
+    ? [active, ...leadingFilters].slice(0, 16)
+    : leadingFilters;
+  const filters = [
+    {
+      id: 'all',
+      type: 'all',
+      typeLabel: 'All',
+      label: 'All segments',
+      state: aggregate.state,
+    },
+    ...filterSegments,
+  ].map((item) => ({
+    id: item.id,
+    type: item.type,
+    typeLabel: item.typeLabel,
+    label: item.label,
+    state: item.state,
+    events: item.events,
+    controlRate: item.controlRate,
+  }));
   return {
     active,
-    filters: [
-      {
-        id: 'all',
-        type: 'all',
-        typeLabel: 'All',
-        label: 'All segments',
-        state: 'ready',
-      },
-      ...baseMatrix.map((item) => ({
-        id: item.id,
-        type: item.type,
-        typeLabel: item.typeLabel,
-        label: item.label,
-        state: item.state,
-        events: item.events,
-        controlRate: item.controlRate,
-      })),
-    ],
+    filters,
     views,
     matrix,
     summary: {
-      total: baseMatrix.length,
+      total: fullMatrix.length,
       ownerViews: views.length,
-      critical: baseMatrix.filter((item) => item.state === 'critical').length,
-      attention: baseMatrix.filter((item) => item.state === 'attention').length,
-      ready: baseMatrix.filter((item) => item.state === 'ready').length,
+      critical: fullMatrix.filter((item) => item.state === 'critical').length,
+      attention: fullMatrix.filter((item) => item.state === 'attention').length,
+      ready: fullMatrix.filter((item) => item.state === 'ready').length,
+      ownerCritical: views.filter((item) => item.state === 'critical').length,
+      ownerAttention: views.filter((item) => item.state === 'attention').length,
+      ownerReady: views.filter((item) => item.state === 'ready').length,
+      selectedAttention: active && active.state !== 'ready' ? 1 : 0,
       selectedId: selectedId || 'all',
       selectedLabel: active ? active.label : 'All segments',
       visibleEvents: (Array.isArray(selectedRows) ? selectedRows : []).filter((row) => row && !EVENTLESS_STATUSES.has(row.status)).length,
@@ -2563,22 +2586,26 @@ function leakSegmentFor(row, groupsByUser) {
 function leakBucket(extra = {}) {
   return {
     events: 0, sensitive: 0, controlled: 0, blocked: 0, redacted: 0, coached: 0,
-    pending: 0, shadow: 0, uncontrolled: 0, maxRiskScore: 0, lastSeen: null, ...extra,
+    pending: 0, shadow: 0, uncontrolled: 0, continued: 0, uncontrolledContinued: 0,
+    maxRiskScore: 0, lastSeen: null, ...extra,
   };
 }
 
 function leakTally(bucket, row, events) {
   const sensitive = isSensitive(row);
   const controlled = sensitive && (isBlocked(row) || isRedacted(row) || COACHING_STATUSES.has(String(row.status || '')) || row.status === 'approved' || row.status === 'denied');
+  const uncontrolled = sensitive && !controlled && !isHeld(row);
   bucket.events += events;
   bucket.sensitive += sensitive ? events : 0;
   bucket.controlled += controlled ? events : 0;
   bucket.blocked += isBlocked(row) ? events : 0;
   bucket.redacted += isRedacted(row) ? events : 0;
   bucket.coached += COACHING_STATUSES.has(String(row.status || '')) ? events : 0;
-  bucket.pending += row.status === 'pending' ? events : 0;
+  bucket.pending += isHeld(row) ? events : 0;
   bucket.shadow += isShadowAi(row) ? events : 0;
-  bucket.uncontrolled += sensitive && !controlled && row.status !== 'pending' ? events : 0;
+  bucket.uncontrolled += uncontrolled ? events : 0;
+  bucket.continued += isContinued(row) ? events : 0;
+  bucket.uncontrolledContinued += uncontrolled && isContinued(row) ? events : 0;
   bucket.maxRiskScore = Math.max(n(bucket.maxRiskScore), n(row.riskScore), n(row.maxSeverity) >= 4 ? 80 : 0);
   if (row.createdAt && (!bucket.lastSeen || String(row.createdAt) > String(bucket.lastSeen))) bucket.lastSeen = row.createdAt;
 }
@@ -2633,7 +2660,9 @@ function leakMapGraph({ rows = [], identityGroups = {}, inventory = {} } = {}) {
   const edges = new Map();
   const categoryTotals = new Map();
   for (const row of Array.isArray(rows) ? rows : []) {
-    if (!row || EVENTLESS_STATUSES.has(row.status)) continue;
+    // This map is intentionally request-directional. AI response inspection
+    // belongs to the response control surfaces, not a team-to-provider path.
+    if (!row || EVENTLESS_STATUSES.has(row.status) || row.channel === 'ai_response' || String(row.status || '').startsWith('response_')) continue;
     const destination = coverage.normalizeDestination(row.destination || '');
     if (!destination || NON_AI_INVENTORY_DESTINATIONS.has(destination)) continue;
     const events = eventWeight(row);
@@ -2678,7 +2707,7 @@ function leakMapGraph({ rows = [], identityGroups = {}, inventory = {} } = {}) {
     .slice(0, LEAK_MAP_LIMITS.categories)
     .map(([label, events]) => ({ label, events }));
   const totals = leakNode([...edges.values()].reduce((acc, edge) => {
-    for (const key of ['events', 'sensitive', 'controlled', 'blocked', 'redacted', 'coached', 'pending', 'shadow', 'uncontrolled']) acc[key] += n(edge[key]);
+    for (const key of ['events', 'sensitive', 'controlled', 'blocked', 'redacted', 'coached', 'pending', 'shadow', 'uncontrolled', 'continued', 'uncontrolledContinued']) acc[key] += n(edge[key]);
     return acc;
   }, leakBucket({ id: 'all', label: 'All flows' })));
   return {
@@ -2696,6 +2725,8 @@ function leakMapGraph({ rows = [], identityGroups = {}, inventory = {} } = {}) {
       sensitive: totals.sensitive,
       controlled: totals.controlled,
       uncontrolled: totals.uncontrolled,
+      continued: totals.continued,
+      uncontrolledContinued: totals.uncontrolledContinued,
       pending: totals.pending,
       shadow: totals.shadow,
       controlRate: totals.controlRate,
@@ -3232,7 +3263,7 @@ function metrics({ rows, coverageReport, auditIntegrity, nowMs }) {
   const avgRisk = sensitiveRows.length
     ? Math.round(sensitiveRows.reduce((sum, q) => sum + n(q.riskScore), 0) / sensitiveRows.length)
     : 0;
-  const pending = rows.filter((q) => q.status === 'pending').length;
+  const pending = rows.filter(isHeld).length;
   return [
     {
       id: 'active-sensors',
@@ -3322,7 +3353,7 @@ function summarize({
   const blockedRows = cleanRows.filter(isBlocked);
   const redactedRows = cleanRows.filter(isRedacted);
   const coachedRows = cleanRows.filter((q) => COACHING_STATUSES.has(q.status));
-  const pendingRows = cleanRows.filter((q) => q.status === 'pending');
+  const pendingRows = cleanRows.filter(isHeld);
   const agenticMcp = agenticMcpPosture({ rows: cleanRows, policy });
   const inventory = aiInventory({ coverageReport: report, agenticMcp });
   const threatReport = threatGuardrails({ rows: cleanRows, policy });

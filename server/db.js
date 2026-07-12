@@ -417,6 +417,50 @@ function listQueries(filter = {}) {
   const rows = sdb.prepare(`SELECT data FROM queries${clause} ORDER BY createdAt DESC, seq DESC${tail}`).all(...params);
   return rows.map((r) => JSON.parse(r.data));
 }
+
+const openTicketQuerySql = DRIVER_KIND === 'postgres' ? `
+  SELECT q.data FROM queries q
+  WHERE EXISTS (
+    SELECT 1
+    FROM jsonb_array_elements(
+      CASE WHEN jsonb_typeof(q.data::jsonb->'ticketRefs') = 'array'
+        THEN q.data::jsonb->'ticketRefs' ELSE '[]'::jsonb END
+    ) AS ref(value)
+    WHERE lower(COALESCE(ref.value->>'statusCategory', ''))
+      NOT IN ('done', 'completed', 'canceled', 'cancelled')
+  )
+  ORDER BY COALESCE((
+    SELECT MIN(COALESCE(ref.value->>'lastAttemptAt', ''))
+    FROM jsonb_array_elements(
+      CASE WHEN jsonb_typeof(q.data::jsonb->'ticketRefs') = 'array'
+        THEN q.data::jsonb->'ticketRefs' ELSE '[]'::jsonb END
+    ) AS ref(value)
+    WHERE lower(COALESCE(ref.value->>'statusCategory', ''))
+      NOT IN ('done', 'completed', 'canceled', 'cancelled')
+  ), '') ASC, q.createdAt ASC, q.seq ASC
+  LIMIT ?
+` : `
+  SELECT q.data FROM queries q
+  WHERE json_type(q.data, '$.ticketRefs') = 'array'
+    AND EXISTS (
+      SELECT 1 FROM json_each(q.data, '$.ticketRefs') AS ref
+      WHERE lower(COALESCE(json_extract(ref.value, '$.statusCategory'), ''))
+        NOT IN ('done', 'completed', 'canceled', 'cancelled')
+    )
+  ORDER BY COALESCE((
+    SELECT MIN(COALESCE(json_extract(ref.value, '$.lastAttemptAt'), ''))
+    FROM json_each(q.data, '$.ticketRefs') AS ref
+    WHERE lower(COALESCE(json_extract(ref.value, '$.statusCategory'), ''))
+      NOT IN ('done', 'completed', 'canceled', 'cancelled')
+  ), '') ASC, q.createdAt ASC, q.seq ASC
+  LIMIT ?
+`;
+const qOpenTicketQueries = sdb.prepare(openTicketQuerySql);
+
+function listTicketSyncQueries(filter = {}) {
+  const limit = boundedLimit(filter.limit, 500, filter.maxLimit || 5000);
+  return qOpenTicketQueries.all(limit).map((row) => JSON.parse(row.data));
+}
 // Read-modify-write wrapped in a transaction so concurrent updates can't race.
 // A single-writer SQLite transaction already serializes this; on a shared
 // Postgres plane two instances could both read the pre-image under READ
@@ -1496,6 +1540,7 @@ function stats() {
   return {
     total,
     pending: counts.pending || 0,
+    held: (counts.pending || 0) + (counts.pending_justification || 0),
     approved: counts.approved || 0,
     denied: counts.denied || 0,
     allowed: counts.allowed || 0,
@@ -1986,7 +2031,7 @@ function recentDeliverySuccess(destId, dedupeKey, sinceIso) {
 module.exports = {
   createQuery, createQueryWithAudit, createQueryWithAudits, createQueriesWithAudits,
   getQuery, getIdempotentIngestQuery, getIdempotentIngestReplay,
-  listQueries, updateQuery, transitionQueryWithAudit, mutateQueryWithAudit,
+  listQueries, listTicketSyncQueries, updateQuery, transitionQueryWithAudit, mutateQueryWithAudit,
   createDetectorFeedback, listDetectorFeedback,
   purgeRetainedSensitiveData,
   appendAudit, appendAudits, mutateWithAudit, listAudit, verifyAuditChain, auditHealth, stats, seatStats, postureActionStates,

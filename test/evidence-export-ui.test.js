@@ -28,9 +28,12 @@ test('Compliance view exposes a sanitized evidence export action', () => {
 
 test('evidence export code path fetches /api/export/evidence and writes redactwall-evidence', () => {
   const exportBody = sourceBetween(auditApi, 'export async function exportEvidencePack', '\n}');
-  assert.match(exportBody, /api\('\/api\/export\/evidence\?queryLimit=1000&auditLimit=1000'\)/);
+  // The fetch is a template literal so the optional examinerProfile can be
+  // appended, but the bounded queryLimit/auditLimit params are always present.
+  assert.match(exportBody, /api\(`\/api\/export\/evidence\?queryLimit=1000&auditLimit=1000/);
   assert.match(exportBody, /redactwall-evidence-\$\{stamp\}\.json/);
-  assert.match(exportBody, /downloadJson\(pack, /);
+  // The pack is decoded/validated before it is written to disk.
+  assert.match(exportBody, /downloadJson\(decodedPack, /);
 });
 
 test('evidence export never calls reveal or raw-prompt APIs', () => {

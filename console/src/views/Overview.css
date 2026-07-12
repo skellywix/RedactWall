@@ -1,44 +1,89 @@
-/* Overview KPI stat band + top-detections bars. Mirrors the legacy queue-tab
-   .stat "verdict spine" and .barrow instrument styling using the shared
-   console-theme.css tokens (severity: critical=red, warn=amber, secure=green,
-   live=blue; never color alone — each card carries a status light). */
+/* Overview evidence hierarchy. Urgent queue and enforcement counts stay large;
+   cumulative reviewer outcomes remain visible in a quieter secondary band. */
+.overview-evidence,
+.overview-entities {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.overview-section-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+
+.overview-section-head > div {
+  min-width: 0;
+}
+
+.overview-section-head h3 {
+  margin: 0;
+  color: var(--text-strong, var(--txt));
+  font-size: var(--text-md, 13px);
+  font-weight: 700;
+}
+
+.overview-section-head p {
+  margin: 3px 0 0;
+  color: var(--mut);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.overview-section-head > span {
+  flex: 0 0 auto;
+  color: var(--mut);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
 
 .overview-stats {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
 }
 
 .overview-stat {
   position: relative;
-  padding: 12px 15px;
+  min-width: 0;
+  padding: 12px 14px;
+  overflow: hidden;
   border: 1px solid var(--line);
-  border-radius: var(--radius, 8px);
+  border-radius: var(--radius-sm, 5px);
   background: var(--panel2);
   box-shadow: var(--shadow);
 }
 
-/* Verdict spine: 2px left rule in severity color. */
 .overview-stat::before {
   content: '';
   position: absolute;
+  top: 0;
+  bottom: 0;
   left: 0;
-  top: 12px;
-  bottom: 12px;
   width: 2px;
-  border-radius: 0 2px 2px 0;
   background: var(--blue);
 }
 
-.overview-stat-label {
+.overview-stat-label,
+.overview-review-stats dt {
   display: flex;
   align-items: center;
   gap: 7px;
+  min-width: 0;
   color: var(--mut);
-  font-size: 11px;
-  font-weight: 600;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.065em;
+  line-height: 1.35;
   text-transform: uppercase;
-  letter-spacing: 0.07em;
 }
 
 .overview-stat-light {
@@ -50,62 +95,88 @@
 }
 
 .overview-stat-value {
-  margin-top: 10px;
-  font-size: 26px;
-  font-weight: 700;
-  line-height: 1.1;
-  letter-spacing: -0.02em;
+  margin-top: 9px;
+  color: var(--text-strong, var(--txt));
+  font-size: clamp(22px, 2.2vw, 28px);
+  font-weight: 750;
   font-variant-numeric: tabular-nums;
+  letter-spacing: -0.025em;
+  line-height: 1.05;
+  overflow-wrap: anywhere;
 }
 
 .overview-stat-detail {
   margin-top: 4px;
   color: var(--mut);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .overview-stat.tone-critical::before,
-.overview-stat.tone-critical .overview-stat-light { background: var(--red); }
+.overview-stat.tone-critical .overview-stat-light,
+.overview-review-stats .tone-critical .overview-stat-light { background: var(--red); }
 .overview-stat.tone-warn::before,
-.overview-stat.tone-warn .overview-stat-light { background: var(--amber); }
+.overview-stat.tone-warn .overview-stat-light,
+.overview-review-stats .tone-warn .overview-stat-light { background: var(--amber); }
 .overview-stat.tone-secure::before,
-.overview-stat.tone-secure .overview-stat-light { background: var(--green); }
+.overview-stat.tone-secure .overview-stat-light,
+.overview-review-stats .tone-secure .overview-stat-light { background: var(--green); }
 .overview-stat.tone-critical .overview-stat-value { color: var(--red); }
 .overview-stat.tone-warn .overview-stat-value { color: var(--amber); }
 .overview-stat.tone-secure .overview-stat-value { color: var(--green); }
 
-.overview-entities {
+.overview-review-stats {
   display: grid;
-  gap: 6px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm, 5px);
+  background: var(--line);
 }
 
-.overview-entities-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-  padding-top: 4px;
-  border-top: 1px solid var(--line);
-  color: var(--soft);
+.overview-review-stats > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 10px;
+  min-width: 0;
+  padding: 9px 11px;
+  background: var(--panel);
 }
 
-.overview-entities-head span {
+.overview-review-stats dd {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  align-self: center;
+  margin: 0;
+  color: var(--txt);
+  font-size: 17px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+}
+
+.overview-review-stats small {
   color: var(--mut);
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
+  font-size: 10.5px;
+}
+
+.overview-entities {
+  padding-bottom: 2px;
 }
 
 .overview-barrow {
   display: grid;
-  grid-template-columns: 120px minmax(0, 1fr) 34px;
+  grid-template-columns: minmax(100px, 150px) minmax(0, 1fr) 34px;
   gap: 10px;
   align-items: center;
+  min-width: 0;
   color: var(--soft);
-  font-size: 12.5px;
+  font-size: 12px;
 }
 
 .overview-barrow-name {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -113,21 +184,74 @@
 
 .overview-bar {
   height: 8px;
+  overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 999px;
-  background: var(--panel);
-  overflow: hidden;
+  background: var(--panel2);
 }
 
 .overview-bar i {
   display: block;
-  height: 100%;
   width: var(--w, 0%);
+  height: 100%;
   background: var(--blue);
 }
 
 .overview-barrow-count {
-  text-align: right;
   color: var(--mut);
   font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.overview-stats-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+  padding: 11px 13px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--blue);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+
+.overview-stats-notice.is-stale {
+  border-left-color: var(--amber);
+  background: var(--amber-bg);
+}
+
+.overview-stats-notice.is-unavailable {
+  border-left-color: var(--red);
+  background: var(--red-bg);
+}
+
+.overview-stats-notice strong {
+  color: var(--txt);
+  font-size: 12.5px;
+}
+
+.overview-stats-notice p {
+  margin: 3px 0 0;
+  color: var(--mut);
+  font-size: 11.5px;
+}
+
+@media (max-width: 1100px) {
+  .overview-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 720px) {
+  .overview-section-head { align-items: flex-start; }
+  .overview-stats-notice { align-items: flex-start; flex-direction: column; }
+  .overview-review-stats { grid-template-columns: minmax(0, 1fr); }
+  .overview-barrow { grid-template-columns: minmax(88px, 120px) minmax(0, 1fr) 30px; gap: 8px; }
+}
+
+@media (max-width: 480px) {
+  .overview-section-head { display: grid; }
+  .overview-section-head > span { justify-self: start; }
+  .overview-stats { grid-template-columns: minmax(0, 1fr); }
+  .overview-barrow { grid-template-columns: minmax(0, 1fr) 32px; }
+  .overview-barrow-name { grid-column: 1 / -1; white-space: normal; }
 }

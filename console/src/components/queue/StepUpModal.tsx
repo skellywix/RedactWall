@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
+import { useModalFocus } from '../system/useModalFocus';
 
 interface StepUpModalProps {
   title: string;
@@ -14,13 +15,32 @@ interface StepUpModalProps {
  * The password lives only in local state and is handed to the caller once;
  * the component unmounts (and the state is dropped) right after.
  */
-export function StepUpModal({ title, message, confirmLabel, confirmClass, onConfirm, onCancel }: StepUpModalProps) {
+export function StepUpModal({
+  title,
+  message,
+  confirmLabel,
+  confirmClass,
+  onConfirm,
+  onCancel,
+}: StepUpModalProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const passwordRef = useRef<HTMLInputElement>(null);
+  const titleId = useId();
+  const descriptionId = useId();
   const [password, setPassword] = useState('');
+
+  // Register focus management before showModal() runs so the shared hook
+  // captures the launcher, not the dialog's browser-selected autofocus field.
+  useModalFocus({ containerRef: dialogRef, initialFocusRef: passwordRef, open: true, onDismiss: onCancel });
 
   useEffect(() => {
     const dialog = dialogRef.current;
-    if (dialog && !dialog.open) dialog.showModal();
+    if (dialog && !dialog.open) {
+      dialog.showModal();
+    }
+    return () => {
+      if (dialog?.open) dialog.close();
+    };
   }, []);
 
   const submit = (event: FormEvent) => {
@@ -32,7 +52,9 @@ export function StepUpModal({ title, message, confirmLabel, confirmClass, onConf
     <dialog
       ref={dialogRef}
       className="stepup-dialog"
-      aria-label={title}
+      aria-labelledby={titleId}
+      aria-describedby={descriptionId}
+      aria-modal="true"
       onCancel={(event) => {
         event.preventDefault();
         onCancel();
@@ -40,12 +62,13 @@ export function StepUpModal({ title, message, confirmLabel, confirmClass, onConf
     >
       <form className="stepup-panel" onSubmit={submit}>
         <div>
-          <h2>{title}</h2>
-          <p>{message}</p>
+          <h2 id={titleId}>{title}</h2>
+          <p id={descriptionId}>{message}</p>
         </div>
         <label>
           Account password
           <input
+            ref={passwordRef}
             type="password"
             autoComplete="current-password"
             required

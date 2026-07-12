@@ -1,6 +1,8 @@
-import type { ReactElement } from 'react';
+import { Fragment, useRef, type ReactElement, type RefObject } from 'react';
 import type { PostureSurface } from '../api/posture';
 import { navigate } from '../lib/router';
+import type { PostureState } from '../lib/shell';
+import { useModalFocus } from './system/useModalFocus';
 
 export interface NavItem {
   path: string;
@@ -16,9 +18,14 @@ export interface NavGroup {
 interface NavRailProps {
   groups: NavGroup[];
   activePath: string;
-  pending: number;
+  held: number | null | undefined;
   surfaces: PostureSurface[] | null;
+  postureState: PostureState;
+  postureUpdatedAt: string;
   version: string;
+  mobileOpen: boolean;
+  returnFocusRef: RefObject<HTMLButtonElement | null>;
+  onClose: () => void;
 }
 
 // Brand mark, verbatim from the legacy rail (server/public/index.html).
@@ -33,11 +40,29 @@ interface RailChip {
   live: boolean;
 }
 
+function postureFallbackChip(state: PostureState, updatedAt: string, subject: string): RailChip | null {
+  if (state === 'ready') return null;
+  if (state === 'stale') {
+    return {
+      tone: 'warn',
+      label: 'LAST VERIFIED',
+      detail: `LAST VERIFIED ${updatedAt}: ${subject} is stale; current status is unknown.`,
+      live: false,
+    };
+  }
+  if (state === 'unavailable') {
+    return { tone: 'critical', label: 'UNAVAILABLE', detail: `UNAVAILABLE: ${subject} could not be verified.`, live: false };
+  }
+  return { tone: 'live', label: 'CHECKING', detail: `CHECKING: ${subject} is loading.`, live: false };
+}
+
 // Chip derivations ported from the legacy renderRailStatus() (dashboard.js).
-function hashChainChip(surfaces: PostureSurface[] | null): RailChip {
+function hashChainChip(surfaces: PostureSurface[] | null, state: PostureState, updatedAt: string): RailChip {
+  const fallback = postureFallbackChip(state, updatedAt, 'audit-chain posture');
+  if (fallback) return fallback;
   const audit = (surfaces ?? []).find((surface) => surface.id === 'surface-audit-evidence');
   if (!audit) {
-    return { tone: 'live', label: 'CHECKING', detail: 'CHECKING: audit chain status loads with posture telemetry.', live: false };
+    return { tone: 'warn', label: 'NOT REPORTED', detail: 'NOT REPORTED: the verified posture response omitted audit-chain status.', live: false };
   }
   const ok = audit.status === 'online';
   const label = ok ? 'SECURE' : 'REVIEW';
@@ -46,10 +71,12 @@ function hashChainChip(surfaces: PostureSurface[] | null): RailChip {
 
 const SENSOR_SURFACE = /^surface-(browser_extension|endpoint_agent|mcp_guard|proxy)$/;
 
-function localScanChip(surfaces: PostureSurface[] | null): RailChip {
+function localScanChip(surfaces: PostureSurface[] | null, state: PostureState, updatedAt: string): RailChip {
+  const fallback = postureFallbackChip(state, updatedAt, 'local-sensor posture');
+  if (fallback) return fallback;
   const sensors = (surfaces ?? []).filter((surface) => SENSOR_SURFACE.test(String(surface.id)));
   if (!sensors.length) {
-    return { tone: 'live', label: 'CHECKING', detail: 'CHECKING: sensor scan status loads with posture telemetry.', live: false };
+    return { tone: 'warn', label: 'NOT REPORTED', detail: 'NOT REPORTED: the verified posture response omitted local-sensor status.', live: false };
   }
   const online = sensors.filter((surface) => surface.status === 'online').length;
   const label = online ? 'MONITORING' : 'IDLE';
@@ -63,24 +90,29 @@ function localScanChip(surfaces: PostureSurface[] | null): RailChip {
 
 function StatusChip({ chip }: { chip: RailChip }) {
   return (
-    <button className={`status-chip tone-${chip.tone}`} type="button" title={chip.detail}>
+    <span className={`status-chip tone-${chip.tone}`} title={chip.detail} aria-label={chip.detail}>
       <span className={`status-light tone-${chip.tone}${chip.live ? ' is-live' : ''}`} aria-hidden="true"></span>
       {chip.label}
-    </button>
+    </span>
   );
 }
 
-function RailStatus({ surfaces, version }: { surfaces: PostureSurface[] | null; version: string }) {
+function RailStatus({ surfaces, postureState, postureUpdatedAt, version }: {
+  surfaces: PostureSurface[] | null;
+  postureState: PostureState;
+  postureUpdatedAt: string;
+  version: string;
+}) {
   return (
     <div className="rail-status">
       <div className="rail-group-label" aria-hidden="true">System status</div>
       <div className="status-line">
         <span>Hash chain</span>
-        <StatusChip chip={hashChainChip(surfaces)} />
+        <StatusChip chip={hashChainChip(surfaces, postureState, postureUpdatedAt)} />
       </div>
       <div className="status-line">
         <span>Local scan</span>
-        <StatusChip chip={localScanChip(surfaces)} />
+        <StatusChip chip={localScanChip(surfaces, postureState, postureUpdatedAt)} />
       </div>
       <div className="status-line">
         <span>Version</span>
@@ -90,42 +122,74 @@ function RailStatus({ surfaces, version }: { surfaces: PostureSurface[] | null; 
   );
 }
 
-function NavTab({ item, active, badge }: { item: NavItem; active: boolean; badge: number }) {
+function NavTab({ item, active, badge, onNavigate }: { item: NavItem; active: boolean; badge: number | null | undefined; onNavigate: () => void }) {
+  const selectRoute = () => {
+    navigate(item.path);
+    onNavigate();
+  };
   return (
     <button
       type="button"
       className={active ? 'tab active' : 'tab'}
       aria-current={active ? 'page' : undefined}
-      onClick={() => navigate(item.path)}
+      onClick={selectRoute}
     >
       <span className="tab-icon" aria-hidden="true">{item.icon}</span>
       {item.label}
-      {badge > 0 ? <span className="badge">{badge}</span> : null}
+      {badge === null
+        ? <span className="badge" title="Held queue total not reported" aria-label="Held queue total not reported">?</span>
+        : typeof badge === 'number' && badge > 0 ? <span className="badge" aria-label={`${badge} held for review or justification`}>{badge}</span> : null}
     </button>
   );
 }
 
-export default function NavRail({ groups, activePath, pending, surfaces, version }: NavRailProps) {
+export default function NavRail({ groups, activePath, held, surfaces, postureState, postureUpdatedAt, version, mobileOpen, returnFocusRef, onClose }: NavRailProps) {
+  const railRef = useRef<HTMLElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  useModalFocus({ containerRef: railRef, initialFocusRef: closeRef, returnFocusRef, open: mobileOpen, onDismiss: onClose });
+
   return (
-    <aside className="app-rail">
-      <div className="brand">
-        <div className="logo" aria-hidden="true">{LOGO}</div>
-        <div>
-          <h1>RedactWall</h1>
-          <p>Texas FCU AI DLP</p>
-        </div>
-      </div>
-      <nav className="tabs" aria-label="Primary">
-        {groups.map((group) => (
-          <div key={group.label} className="app-rail-group">
-            <div className="rail-group-label" aria-hidden="true">{group.label}</div>
-            {group.items.map((item) => (
-              <NavTab key={item.path} item={item} active={item.path === activePath} badge={item.path === '/queue' ? pending : 0} />
-            ))}
+    <Fragment>
+      <div className={mobileOpen ? 'app-nav-backdrop is-open' : 'app-nav-backdrop'} aria-hidden="true" onMouseDown={onClose}></div>
+      <aside
+        ref={railRef}
+        id="primary-navigation"
+        className={mobileOpen ? 'app-rail is-mobile-open' : 'app-rail'}
+        role={mobileOpen ? 'dialog' : undefined}
+        aria-modal={mobileOpen ? true : undefined}
+        aria-label={mobileOpen ? 'Navigation menu' : undefined}
+        tabIndex={mobileOpen ? -1 : undefined}
+      >
+        <div className="app-rail-brand-row">
+          <div className="brand">
+            <div className="logo" aria-hidden="true">{LOGO}</div>
+            <div>
+              <h1>RedactWall</h1>
+              <p>Texas FCU AI DLP</p>
+            </div>
           </div>
-        ))}
-      </nav>
-      <RailStatus surfaces={surfaces} version={version} />
-    </aside>
+          <button ref={closeRef} className="app-nav-close ghost" type="button" aria-label="Close navigation menu" onClick={onClose}>
+            <span aria-hidden="true">×</span>
+          </button>
+        </div>
+        <nav className="tabs app-rail-nav" aria-label="Primary">
+          {groups.map((group) => (
+            <div key={group.label} className="app-rail-group">
+              <div className="rail-group-label" aria-hidden="true">{group.label}</div>
+              {group.items.map((item) => (
+                <NavTab
+                  key={item.path}
+                  item={item}
+                  active={item.path === activePath}
+                  badge={item.path === '/queue' ? held : 0}
+                  onNavigate={onClose}
+                />
+              ))}
+            </div>
+          ))}
+        </nav>
+        <RailStatus surfaces={surfaces} postureState={postureState} postureUpdatedAt={postureUpdatedAt} version={version} />
+      </aside>
+    </Fragment>
   );
 }

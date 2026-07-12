@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react';
 import { EmptyState } from '../components/Panel';
-import { api, apiJson } from '../lib/api';
+import { api, apiJsonBounded, responseJsonBounded } from '../lib/api';
 import { useSession } from '../lib/session';
 import { useEventStream } from '../lib/sse';
+import { isCompleteCoverageReport } from '../lib/strict-console-response';
 import { toast } from '../lib/toast';
 import './Coverage.css';
 
@@ -126,9 +127,11 @@ interface ReviewRequest {
 }
 
 const FLEET_TIMEOUT_MS = 2500;
+const COVERAGE_RESPONSE_MAX_BYTES = 4 * 1024 * 1024;
 
-function fetchCoverage(): Promise<CoverageReport | null> {
-  return apiJson<CoverageReport>('/api/coverage');
+async function fetchCoverage(): Promise<CoverageReport | null> {
+  const body = await apiJsonBounded<unknown>('/api/coverage', COVERAGE_RESPONSE_MAX_BYTES);
+  return isCompleteCoverageReport(body) ? body as CoverageReport : null;
 }
 
 /** Legacy parity: the fleet fetch is abandoned after 2.5s so a slow matrix never delays the tab. */
@@ -136,7 +139,7 @@ async function fetchFleet(): Promise<FleetSummary | null> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FLEET_TIMEOUT_MS);
   try {
-    return await apiJson<FleetSummary>('/api/fleet', { signal: controller.signal });
+    return await apiJsonBounded<FleetSummary>('/api/fleet', COVERAGE_RESPONSE_MAX_BYTES, { signal: controller.signal });
   } catch {
     return null;
   } finally {
@@ -144,18 +147,32 @@ async function fetchFleet(): Promise<FleetSummary | null> {
   }
 }
 
-async function postDestinationReview(request: ReviewRequest, reason: string): Promise<CoverageReport | null> {
+interface DestinationReviewResult {
+  coverage: CoverageReport | null;
+  error: string;
+}
+
+async function postDestinationReview(request: ReviewRequest, reason: string): Promise<DestinationReviewResult> {
   const res = await api('/api/destinations/review', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ destination: request.destination, decision: request.decision, reason }),
   });
-  if (!res || !res.ok) return null;
+  if (!res || !res.ok) return { coverage: null, error: 'Destination review could not be saved.' };
   try {
-    const body = (await res.json()) as { coverage?: CoverageReport };
-    return body.coverage ?? null;
+    const body = await responseJsonBounded<unknown>(res, COVERAGE_RESPONSE_MAX_BYTES);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return { coverage: null, error: 'Destination review response could not be verified.' };
+    }
+    const candidate = body as Record<string, unknown>;
+    if (candidate.destination !== request.destination
+      || candidate.decision !== request.decision
+      || !isCompleteCoverageReport(candidate.coverage)) {
+      return { coverage: null, error: 'Destination review response could not be verified.' };
+    }
+    return { coverage: candidate.coverage as CoverageReport, error: '' };
   } catch {
-    return null;
+    return { coverage: null, error: 'Destination review response could not be verified.' };
   }
 }
 
@@ -338,12 +355,16 @@ const REFRESH_ICON = (
 function useCoverageData() {
   const [coverage, setCoverage] = useState<CoverageReport | null>(null);
   const [fleet, setFleet] = useState<FleetSummary | null>(null);
+  const [error, setError] = useState('');
   const [loaded, setLoaded] = useState(false);
   const load = useCallback(async () => {
     try {
       const [nextCoverage, nextFleet] = await Promise.all([fetchCoverage(), fetchFleet()]);
       if (nextFleet) setFleet(nextFleet);
-      if (nextCoverage) setCoverage(nextCoverage);
+      if (nextCoverage) {
+        setCoverage(nextCoverage);
+        setError('');
+      } else setError('Coverage response could not be verified.');
     } finally {
       setLoaded(true);
     }
@@ -353,13 +374,17 @@ function useCoverageData() {
   }, [load]);
   useEventStream({ query: load });
   const applyCoverage = useCallback((report: CoverageReport) => setCoverage(report), []);
-  return { coverage, fleet, loaded, load, applyCoverage };
+  return { coverage, fleet, error, loaded, load, applyCoverage };
 }
 
 function useDestinationReview(applyCoverage: (report: CoverageReport) => void) {
   const [request, setRequest] = useState<ReviewRequest | null>(null);
+  const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const open = useCallback((destination: string, decision: ReviewDecision) => setRequest({ destination, decision }), []);
+  const open = useCallback((destination: string, decision: ReviewDecision) => {
+    setError('');
+    setRequest({ destination, decision });
+  }, []);
   const cancel = useCallback(() => setRequest(null), []);
   const confirm = async (reason: string) => {
     if (!request) return;
@@ -367,14 +392,19 @@ function useDestinationReview(applyCoverage: (report: CoverageReport) => void) {
     setRequest(null);
     setBusy(true);
     try {
-      const fresh = await postDestinationReview(pending, reason);
-      if (fresh) applyCoverage(fresh);
-      else toast('Destination review could not be saved.', 'error');
+      const result = await postDestinationReview(pending, reason);
+      if (result.coverage) {
+        applyCoverage(result.coverage);
+        setError('');
+      } else {
+        setError(`${result.error} Showing the last verified coverage snapshot.`);
+        toast(result.error, 'error');
+      }
     } finally {
       setBusy(false);
     }
   };
-  return { request, busy, open, cancel, confirm };
+  return { request, error, busy, open, cancel, confirm };
 }
 
 interface StatusChipProps {
@@ -855,8 +885,6 @@ function CoverageHeader() {
   );
 }
 
-const EMPTY_REPORT: CoverageReport = {};
-
 export default function Coverage() {
   const { me } = useSession();
   const data = useCoverageData();
@@ -872,10 +900,24 @@ export default function Coverage() {
     );
   }
 
-  const report = data.coverage ?? EMPTY_REPORT;
+  if (!data.coverage) {
+    return (
+      <div className="coverage-view">
+        <CoverageHeader />
+        <EmptyState
+          title="Coverage unavailable"
+          detail="No complete, verified coverage report is available. RedactWall did not substitute zero posture values."
+        />
+      </div>
+    );
+  }
+
+  const report = data.coverage;
   return (
     <div className="coverage-view">
       <CoverageHeader />
+      {data.error ? <div className="readonly-note" role="alert">{data.error} Showing the last verified coverage snapshot.</div> : null}
+      {review.error ? <div className="readonly-note" role="alert">{review.error}</div> : null}
       <FleetMatrixPanel users={data.fleet?.users ?? []} />
       <div className="coverage-grid">
         <PosturePanel report={report} onRefresh={() => void data.load()} />

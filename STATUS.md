@@ -10,6 +10,24 @@ logs were pruned on 2026-07-04; they are preserved in git history
 
 Roadmap references (N*/X*) point at `ROADMAP.md`.
 
+### Frontend redesign branch 2026-07-10 (`codex/frontend-ui-redesign`, worktree `RedactWall-ui-redesign`)
+
+The redesign is implemented on the audit-hardened `main` base but is not yet
+delivery-complete. A continuation audit
+closed additional response-bounding, auth recovery-code, logout, role-parity,
+truthful-state, approval-audit, reversible policy-mutation, accessibility,
+table-workflow, and map-performance gaps. Focused TypeScript/build/static tests
+pass, and the complete serial Chromium run passes 169/169 tests across 19
+specs, including the 21 live extension flows. Full detail is in
+`PLANS/frontend-ui-ux-redesign.md` under the resume and continuation logs.
+
+Remaining release gates are explicit: close the final fresh-review findings,
+commit and merge this redesign plus the owner platform, run the responsive
+screenshot review and `npm run review:ci` from the final integrated tree, then
+push and verify GitHub CI. The prior audit-checkpoint/private-path blockers are
+already integrated into `main`; no completion claim is made until the final
+merged proof runs.
+
 ### Adversarial review 2026-07-08 — fix ledger (`claude/adversarial-codebase-review-xpfuyj`)
 
 Full report + repro: the review artifact. Each fix below ships with a
@@ -47,20 +65,20 @@ identities cannot sign in · A3 logout persistently revokes the specific session
 
 **Active engineering thread — stack upgrade** (`PLANS/stack-upgrade-plan.md`):
 
-- WS1 A3: **DONE.** All 16 operator views are ported to the React `/app`
-  console — Overview, Approval Queue, AI Command Center, All Activity,
+- WS1 A3: **DONE.** All 18 operator views are ported to the React `/app`
+  console: Overview, Approval Queue, AI Command Center, All Activity,
   Insights, Sensor Coverage, Data Lineage, Decision Quality, App Catalog,
-  Compliance, Identity, Configuration, Deploy, Integrations, Audit Log,
-  Updates — plus the shell chrome (grouped Operate/Analyze/Govern/System rail
+  Compliance, NCUA Readiness, Identity, Policy Configuration, Licensing,
+  Deploy, Integrations, Audit Log, and Updates. The shell chrome includes a grouped Operate/Analyze/Govern/System rail
   with icons and a live pending badge, Ctrl/Cmd-K command palette, LIVE + last-
   updated indicators, sign out, system-status footer). The instrument design
   system (fonts, tokens, leak-map animation, selectors) lives in
   `server/public/console-base.css` so the console renders as designed in
   light/dark (dark default).
   Queue assignee editor, per-query audit trail, billing/seats, and the Command
-  Center decision pivots all carried over. Evidence: `e2e/console-parity.spec.js`
-  (all 16 routes, zero console errors) and `e2e/console-design.spec.js` (32
-  dark+light screenshots).
+  Center decision pivots all carried over. Coverage definitions now span all
+  18 routes in `e2e/console-parity.spec.js` and 36 dark/light captures in
+  `e2e/console-design.spec.js`; final regenerated proof remains gated above.
 - WS1 A4 (cutover) — **DONE.** The legacy static console is retired: `/`
   redirects to `/app/`, and `server/public/{index.html,dashboard.js}` plus the
   15 feature-renderer JS files were deleted (the shared `console-base.css`,

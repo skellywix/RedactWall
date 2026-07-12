@@ -320,6 +320,14 @@ test('posture summarizes live AI security objectives without prompt bodies', () 
   assert.strictEqual(report.segments.summary.selectedId, 'all');
   assert.strictEqual(report.segments.summary.privacy, 'metadata only; prompt bodies excluded');
   assert.strictEqual(report.segments.summary.ownerViews, 5);
+  assert.strictEqual(
+    report.segments.summary.critical + report.segments.summary.attention + report.segments.summary.ready,
+    report.segments.summary.total,
+  );
+  assert.strictEqual(
+    report.segments.summary.ownerCritical + report.segments.summary.ownerAttention + report.segments.summary.ownerReady,
+    report.segments.summary.ownerViews,
+  );
   assert.ok(report.segments.views.some((item) => item.id === 'owner:lending' && item.segmentId === 'group:redactwall-lending' && item.reviewerRole === 'approver'));
   assert.ok(report.segments.views.some((item) => item.id === 'owner:it' && item.reviewerRole === 'operator'));
   assert.ok(report.segments.matrix.some((item) => item.type === 'owner' && item.label === 'Lending' && item.ownerGroup === 'Lending'));
@@ -371,6 +379,45 @@ test('posture summarizes live AI security objectives without prompt bodies', () 
   assert.ok(lending.segments.matrix.some((item) => item.id === 'group:redactwall-operations'));
   assert.ok(!JSON.stringify(lending).includes('524-71-9043'));
   assert.ok(!JSON.stringify(lending).includes('Member SSN'));
+
+  const unmatched = posture.summarize({
+    rows,
+    policy,
+    auditIntegrity: { ok: true, count: 8 },
+    segmentId: 'group:no-current-evidence',
+    identityGroups: {},
+    now: '2026-07-03T00:00:00.000Z',
+    env: {},
+  });
+  assert.strictEqual(unmatched.segments.active.id, 'group:no-current-evidence');
+  assert.strictEqual(unmatched.segments.active.state, 'attention');
+  assert.strictEqual(unmatched.segments.active.score, 0);
+  assert.strictEqual(unmatched.segments.active.controlRate, 0);
+  assert.match(unmatched.segments.active.detail, /Verified empty.*not a readiness score/i);
+  assert.strictEqual(unmatched.segments.summary.selectedAttention, 1);
+  assert.ok(unmatched.segments.filters.some((item) => item.id === 'group:no-current-evidence'));
+  assert.ok(unmatched.segments.matrix.some((item) => item.id === 'group:no-current-evidence'));
+
+  const empty = posture.summarize({
+    rows: [],
+    policy,
+    auditIntegrity: { ok: true, count: 0 },
+    now: '2026-07-03T00:00:00.000Z',
+    env: {},
+  });
+  const unmatchedOwnerViews = empty.segments.views.filter((item) => /no matching segment/i.test(item.detail));
+  assert.ok(unmatchedOwnerViews.length > 0);
+  assert.ok(unmatchedOwnerViews.every((item) => item.state === 'attention' && item.score === 0));
+  const executive = empty.segments.views.find((item) => item.label === 'Executive Office');
+  assert.ok(executive);
+  assert.strictEqual(executive.state, 'attention');
+  assert.strictEqual(executive.score, 0);
+  assert.strictEqual(executive.controlRate, 0);
+  assert.match(executive.detail, /verified empty aggregate.*no readiness score/i);
+  assert.strictEqual(empty.segments.summary.total, 0);
+  assert.strictEqual(empty.segments.summary.critical + empty.segments.summary.attention + empty.segments.summary.ready, 0);
+  assert.strictEqual(empty.segments.summary.ownerAttention > 0, true);
+  assert.ok(!empty.segments.matrix.some((item) => item.label === 'Executive Office' && item.state === 'ready'));
 });
 
 test('posture covers low-risk, coaching, shadow-only, and missing-sensor edge states', () => {
@@ -476,6 +523,70 @@ test('posture covers low-risk, coaching, shadow-only, and missing-sensor edge st
   )));
 });
 
+test('owner aggregate counts each event once and segment state counts partition the base matrix', () => {
+  const report = posture.summarize({
+    rows: [{
+      id: 'single-safe-event',
+      createdAt: '2026-07-03T10:00:00.000Z',
+      status: 'allowed',
+      user: 'analyst@example.test',
+      orgId: 'one-org',
+      destination: 'chatgpt.com',
+      source: 'browser_extension',
+      channel: 'submit',
+    }],
+    policy: {},
+    auditIntegrity: { ok: true, count: 1 },
+    now: '2026-07-03T11:00:00.000Z',
+    env: {},
+  });
+  const executive = report.segments.views.find((item) => item.label === 'Executive Office');
+  assert.ok(executive);
+  assert.strictEqual(executive.events, 1);
+  assert.strictEqual(
+    report.segments.summary.critical + report.segments.summary.attention + report.segments.summary.ready,
+    report.segments.summary.total,
+  );
+  assert.strictEqual(
+    report.segments.summary.ownerCritical + report.segments.summary.ownerAttention + report.segments.summary.ownerReady,
+    report.segments.summary.ownerViews,
+  );
+});
+
+test('selected segments and totals remain truthful beyond the bounded display matrix', () => {
+  const manyRows = Array.from({ length: 20 }, (_, index) => ({
+    id: `segment-row-${index}`,
+    createdAt: `2026-07-03T10:${String(index).padStart(2, '0')}:00.000Z`,
+    status: 'allowed',
+    user: `analyst-${index}@example.test`,
+    orgId: `org-${index}`,
+    destination: 'chatgpt.com',
+    source: 'browser_extension',
+    channel: 'submit',
+  }));
+  const report = posture.summarize({
+    rows: manyRows,
+    policy: {},
+    auditIntegrity: { ok: true, count: manyRows.length },
+    segmentId: 'org:org-19',
+    now: '2026-07-03T11:00:00.000Z',
+    env: {},
+  });
+
+  assert.strictEqual(report.segments.active.id, 'org:org-19');
+  assert.strictEqual(report.segments.active.label, 'org-19');
+  assert.strictEqual(report.segments.active.events, 1);
+  assert.strictEqual(report.segments.summary.total, 21);
+  assert.strictEqual(
+    report.segments.summary.critical + report.segments.summary.attention + report.segments.summary.ready,
+    report.segments.summary.total,
+  );
+  assert.ok(report.segments.matrix.some((item) => item.id === 'org:org-19'));
+  assert.ok(report.segments.filters.some((item) => item.id === 'org:org-19'));
+  assert.ok(report.segments.matrix.length <= 16);
+  assert.ok(report.segments.filters.length <= 17);
+});
+
 test('posture leak map attributes sanitized flows to identity segments', () => {
   const coverageReport = coverage.summarize(rows, policy);
   const report = posture.summarize({
@@ -507,6 +618,41 @@ test('posture leak map attributes sanitized flows to identity segments', () => {
   const serialized = JSON.stringify(map);
   assert.strictEqual(serialized.includes('524-71-9043'), false);
   assert.strictEqual(serialized.includes('rawPrompt'), false);
+});
+
+test('justification-only holds remain non-clear across every posture aggregate', () => {
+  const report = posture.summarize({
+    rows: [{
+      id: 'justify-only',
+      createdAt: '2026-07-03T10:00:00.000Z',
+      status: 'pending_justification',
+      user: 'member-service@example.test',
+      orgId: 'cu-member-services',
+      destination: 'chatgpt.com',
+      source: 'browser_extension',
+      channel: 'submit',
+      categories: ['PII'],
+      entityCounts: { US_SSN: 1 },
+      riskScore: 80,
+      maxSeverity: 4,
+      slaDueAt: '2026-07-03T10:10:00.000Z',
+    }],
+    policy: {},
+    auditIntegrity: { ok: true, count: 1 },
+    now: '2026-07-03T11:00:00.000Z',
+    env: {},
+  });
+
+  assert.strictEqual(report.summary.pending, 1);
+  assert.strictEqual(report.summary.approvalEscalated, 1);
+  assert.strictEqual(report.decisionQuality.summary.pendingReviews, 1);
+  assert.strictEqual(report.decisionQuality.summary.escalatedReviews, 1);
+  assert.ok(report.objectives.some((item) => item.id === 'approval_sla_control' && item.score < 100));
+  assert.ok(report.surfaces.some((item) => item.id === 'surface-approval-workflow' && item.status === 'error' && item.health < 96));
+  assert.ok(report.metrics.some((item) => item.id === 'critical-holds' && item.value === 1 && item.status === 'critical'));
+  assert.ok(report.segments.matrix.some((item) => item.id === 'org:cu-member-services' && item.pending === 1));
+  assert.strictEqual(report.leakMap.summary.pending, 1);
+  assert.strictEqual(report.leakMap.summary.continued, 0);
 });
 
 test('posture leak map flags uncontrolled and shadow flows per segment', () => {

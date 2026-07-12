@@ -185,7 +185,7 @@ test('shell chrome: nav groups, queue badge, LIVE indicator, sign-out, command p
 
   // Topbar telemetry + session controls, same ids the legacy console exposed.
   await expect(page.locator('#liveTxt')).toHaveText('LIVE');
-  await expect(page.locator('#lastUpdated')).toContainText('LAST UPDATED');
+  await expect(page.locator('#lastUpdated')).toContainText('POSTURE VERIFIED');
   await expect(page.locator('#who')).toContainText('admin / Global Administrator');
   await expect(page.locator('#logout')).toHaveText(/Sign out/);
 

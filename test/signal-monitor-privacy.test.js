@@ -29,9 +29,12 @@ test('Texas FCU Command Center feed drives off sanitized posture metadata', () =
   assert.match(monitor, /Sanitized member-data posture[\s\S]*without prompt bodies/);
   assert.match(monitor, /Texas FCU Command Center/);
 
-  // The feed is built from posture surfaces/events, not canned raw fixtures.
-  assert.match(monitor, /const surfaces = report\?\.surfaces \?\? \[\];/);
-  assert.match(monitor, /const events = report\?\.events \?\? \[\];/);
+  // The feed is built from validated posture surfaces/events, not canned raw
+  // fixtures: typed reporters gate what renders.
+  assert.match(monitor, /function surfacesReported\(surfaces: PostureSurfaceInfo\[\] \| undefined\)/);
+  assert.match(monitor, /function eventsReported\(events: MonitorEventInfo\[\] \| undefined\)/);
+  assert.match(monitor, /surfacesReported\(report\.surfaces\)/);
+  assert.match(monitor, /eventsReported\(report\.events\)/);
 
   // No part of the view references raw prompt bodies or the reveal route.
   assert.doesNotMatch(monitor, RAW_REVEAL, 'Monitor view must not surface raw prompt text or /reveal');

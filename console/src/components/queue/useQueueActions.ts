@@ -5,6 +5,7 @@ import {
   assignQuery,
   bulkDecision,
   denyQuery,
+  isHeldQueryStatus,
   probeStepUp,
   revealQuery,
   type AssignmentPatch,
@@ -108,8 +109,8 @@ export function useQueueActions(load: () => void, authProvider?: string) {
     setBusy(true);
     const result = await denyQuery(id, note.trim());
     setBusy(false);
-    if (result.error) {
-      toast(result.error, 'error');
+    if (!result.data) {
+      toast(result.error || 'Deny failed.', 'error');
       return;
     }
     toast('Prompt denied.', 'good');
@@ -128,8 +129,8 @@ export function useQueueActions(load: () => void, authProvider?: string) {
     setBusy(true);
     const result = await assignQuery(id, patch);
     setBusy(false);
-    if (result.error) {
-      toast(result.error, 'error');
+    if (!result.data) {
+      toast(result.error || 'Reassign failed.', 'error');
       return;
     }
     toast('Assignment updated.', 'good');
@@ -143,8 +144,8 @@ export function useQueueActions(load: () => void, authProvider?: string) {
 
   const runApprove = async (id: string, password: string) => {
     const result = await approveQuery(id, note.trim(), password);
-    if (result.error) {
-      toast(result.error, 'error');
+    if (!result.data) {
+      toast(result.error || 'Approve failed.', 'error');
       return;
     }
     toast('Prompt approved and released.', 'good');
@@ -199,11 +200,11 @@ export function useQueueActions(load: () => void, authProvider?: string) {
     await runStepUpAction(request, password);
   };
 
-  /** Drop checks and revealed text for items no longer in (or no longer pending in) the list. */
+  /** Drop checks and revealed text for items no longer in (or no longer held in) the list. */
   const pruneTo = useCallback((rows: QueueQuery[]) => {
     const ids = new Set(rows.map((q) => q.id));
-    const pending = new Set(rows.filter((q) => q.status === 'pending').map((q) => q.id));
-    setChecked((prev) => new Set([...prev].filter((id) => pending.has(id))));
+    const heldIds = new Set(rows.filter((q) => isHeldQueryStatus(q.status)).map((q) => q.id));
+    setChecked((prev) => new Set([...prev].filter((id) => heldIds.has(id))));
     setReveals((prev) => new Map([...prev].filter(([id]) => ids.has(id))));
   }, []);
 

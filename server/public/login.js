@@ -2,11 +2,14 @@ const f = document.getElementById('f');
 const userInput = document.getElementById('user');
 const passwordInput = document.getElementById('password');
 const otpInput = document.getElementById('otp');
+const submitButton = document.getElementById('submit');
 const errorBox = document.getElementById('err');
 const oidcButton = document.getElementById('oidc');
 const demoHint = document.getElementById('demoHint');
 const params = new URLSearchParams(location.search);
 const fragmentParams = new URLSearchParams(String(location.hash || '').replace(/^#/, ''));
+const boundedResponse = window.RedactWallAuthResponse;
+let submitting = false;
 
 const invitedUser = fragmentParams.get('user');
 if (invitedUser) userInput.value = invitedUser;
@@ -38,14 +41,18 @@ function setInvalidFields(fields = []) {
 function showError(message, fields = []) {
   errorBox.textContent = message || '';
   setInvalidFields(fields);
+  if (message && fields.length) {
+    const firstInvalid = { user: userInput, password: passwordInput, otp: otpInput }[fields[0]];
+    firstInvalid?.focus();
+  }
 }
 
 async function loadLoginOptions() {
   try {
-    const r = await fetch('/api/login-options');
+    const r = await fetch('/api/login-options', { redirect: 'error' });
     if (!r.ok) return;
-    const body = await r.json();
-    if (body.oidc && body.oidc.enabled && body.oidc.startUrl) {
+    const body = await boundedResponse?.readJson(r);
+    if (body?.oidc?.enabled === true && body.oidc.startUrl === '/auth/oidc/start') {
       oidcButton.hidden = false;
       oidcButton.onclick = () => {
         location.href = body.oidc.startUrl;
@@ -57,19 +64,42 @@ async function loadLoginOptions() {
 }
 
 loadLoginOptions();
+passwordInput.focus();
 
 f.addEventListener('submit', async (e) => {
   e.preventDefault();
+  if (submitting) return;
+  submitting = true;
+  submitButton.disabled = true;
+  f.setAttribute('aria-busy', 'true');
   showError('');
-  const r = await fetch('/api/login', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ user: userInput.value, password: passwordInput.value, otp: otpInput.value }),
-  });
-  if (r.ok) location.href = '/app/';
-  else {
-    const body = await r.json().catch(() => ({}));
-    if (body.mfaRequired) showError('Enter the current authenticator code.', ['otp']);
-    else showError('Invalid credentials. Try again.', ['user', 'password']);
+  let completed = false;
+  try {
+    const r = await fetch('/api/login', {
+      method: 'POST',
+      redirect: 'error',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user: userInput.value, password: passwordInput.value, otp: otpInput.value }),
+    });
+    if (r.ok) {
+      try { void r.body?.cancel(); } catch {}
+      completed = true;
+      location.href = '/app/';
+      return;
+    }
+    const body = await boundedResponse?.readJson(r);
+    if (body?.mfaRequired === true) {
+      showError('Enter your current authenticator or recovery code.', ['otp']);
+    } else {
+      showError('Invalid credentials. Try again.', ['user', 'password']);
+    }
+  } catch {
+    showError('Sign-in service is unavailable. Try again.', ['user', 'password']);
+  } finally {
+    if (!completed) {
+      submitting = false;
+      submitButton.disabled = false;
+      f.removeAttribute('aria-busy');
+    }
   }
 });

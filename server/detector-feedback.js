@@ -85,13 +85,13 @@ function emptyDetectorRow(detectorId) {
   };
 }
 
-function candidateForQuery(q = {}, feedbackByQuery = new Map(), known = knownDetectorIds()) {
+function candidateForQuery(q = {}, feedbackByQuery = new Map(), known = knownDetectorIds(), canFeedback) {
   const detectorIds = detectorIdsForQuery(q, known);
   if (!detectorIds.length) return null;
   const feedback = feedbackByQuery.get(q.id) || [];
   const reviewed = new Set(feedback.map((item) => item.detectorId));
   const detectorId = detectorIds.find((id) => !reviewed.has(id)) || detectorIds[0];
-  return {
+  const candidate = {
     queryId: safeText(q.id, '', 80),
     createdAt: safeText(q.createdAt, '', 80),
     detectorId,
@@ -105,9 +105,11 @@ function candidateForQuery(q = {}, feedbackByQuery = new Map(), known = knownDet
     feedbackCount: feedback.length,
     reviewed: feedback.length > 0,
   };
+  if (typeof canFeedback === 'function') candidate.canFeedback = Boolean(canFeedback(q));
+  return candidate;
 }
 
-function report({ rows = [], feedback = [], generatedAt = new Date().toISOString() } = {}) {
+function report({ rows = [], feedback = [], generatedAt = new Date().toISOString(), canFeedback } = {}) {
   const publicRows = (Array.isArray(feedback) ? feedback : []).map(publicFeedback);
   const byQuery = new Map();
   const byDetector = new Map();
@@ -138,9 +140,12 @@ function report({ rows = [], feedback = [], generatedAt = new Date().toISOString
   const reviewQueue = (Array.isArray(rows) ? rows : [])
     .slice()
     .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
-    .map((q) => candidateForQuery(q, byQuery, known))
+    .map((q) => candidateForQuery(q, byQuery, known, canFeedback))
     .filter(Boolean)
-    .sort((a, b) => Number(a.reviewed) - Number(b.reviewed) || b.riskScore - a.riskScore || String(b.createdAt).localeCompare(String(a.createdAt)))
+    .sort((a, b) => Number(b.canFeedback === true) - Number(a.canFeedback === true)
+      || Number(a.reviewed) - Number(b.reviewed)
+      || b.riskScore - a.riskScore
+      || String(b.createdAt).localeCompare(String(a.createdAt)))
     .slice(0, 10);
   const total = publicRows.length;
   const falsePositive = publicRows.filter((item) => item.verdict === 'false_positive').length;

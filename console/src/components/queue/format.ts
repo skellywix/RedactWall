@@ -1,4 +1,4 @@
-import type { QueueQuery, RevealResult } from '../../api/queries';
+import { isHeldQueryStatus, type QueueQuery, type RevealResult } from '../../api/queries';
 import type { Me } from '../../lib/session';
 
 /** Display helpers ported from the legacy dashboard so the queue reads the same. */
@@ -34,12 +34,13 @@ const BAD_STATUSES = [
   'injection_blocked', 'response_flagged', 'response_blocked', 'seat_limit_blocked', 'ocr_required',
   'file_blocked_unscanned',
 ];
-const WARN_STATUSES = ['pending', 'shadow_ai', 'paste_flagged', 'flagged'];
+const WARN_STATUSES = ['shadow_ai', 'paste_flagged', 'flagged'];
 
 export type StatusTone = 'good' | 'bad' | 'warn' | 'info';
 
 export function statusTone(status?: string): StatusTone {
   const s = String(status || '').toLowerCase();
+  if (isHeldQueryStatus(s)) return 'warn';
   if (GOOD_STATUSES.includes(s)) return 'good';
   if (BAD_STATUSES.includes(s)) return 'bad';
   if (WARN_STATUSES.includes(s)) return 'warn';
@@ -58,7 +59,7 @@ function samePrincipal(left?: string, right?: string): boolean {
 }
 
 export function canDecide(me: Me | null, query: QueueQuery): boolean {
-  if (!me) return false;
+  if (!me || !isHeldQueryStatus(query.status)) return false;
   if (me.role === 'security_admin') return true;
   if (me.role !== 'approver') return false;
   return query.assignedRole === 'approver' && (!query.assignedUser || samePrincipal(query.assignedUser, me.user));

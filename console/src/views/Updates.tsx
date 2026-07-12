@@ -1,18 +1,20 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { api, apiErrorSummary } from '../lib/api';
+import { api, apiErrorSummary, responseJsonBounded } from '../lib/api';
+import { isExactRestartScheduled } from '../lib/strict-console-response';
 import { Panel } from '../components/Panel';
 import { useSession } from '../lib/session';
 import { toast } from '../lib/toast';
 import './Updates.css';
 
 /**
- * Software-update console (admin only). Route contract from server/app.js + server/updater.js:
+ * Software-update console. Route contract from server/app.js + server/updater.js:
  *   GET  /api/update/status   -> full status {ok, inProgress, config, repo|null, safety, lastRun|null, error}
  *   PUT  /api/update/config   -> body {remoteName, branch, installMode, restartCommand, restartAfterUpdate};
- *                                returns the full status object again on success
+ *                                Security Admin only; returns the full status object again on success
  *   POST /api/update/check    -> no body; {updateAvailable, ...}
  *   POST /api/update/apply    -> body {confirmBackup: true}; runs synchronously, can take minutes
  *   POST /api/update/restart  -> no body; 403 when restart execution is disabled on the host
+ * Status and action routes allow Security Admin and Operations Administrator.
  * Error bodies are {error: <short, already-redacted string>} - safe to toast. No password step-up.
  */
 
@@ -71,7 +73,70 @@ interface UpdateStatus {
 }
 
 interface UpdateCheckResult {
-  updateAvailable?: boolean;
+  updateAvailable: boolean;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+const isString = (value: unknown) => typeof value === 'string';
+const isBoolean = (value: unknown) => typeof value === 'boolean';
+const isOptionalString = (value: unknown) => value === undefined || isString(value);
+const isOptionalBoolean = (value: unknown) => value === undefined || isBoolean(value);
+
+function isUpdateConfig(value: unknown): value is UpdateConfig {
+  if (!isRecord(value)) return false;
+  const strings = ['remoteName', 'branch', 'installMode', 'restartCommand', 'restartCommandSource', 'configPath', 'backupDir'];
+  return strings.every((key) => isString(value[key]))
+    && isBoolean(value.restartAfterUpdate)
+    && isBoolean(value.restartEnabled);
+}
+
+function isUpdateRepo(value: unknown): value is UpdateRepo {
+  if (!isRecord(value) || !isString(value.branch) || !isString(value.head) || !isString(value.remoteUrl)) {
+    return false;
+  }
+  return Array.isArray(value.dirtyFiles) && value.dirtyFiles.every((item) => (
+    isRecord(item) && isString(item.status) && isString(item.path)
+  ));
+}
+
+function isAuditIntegrity(value: unknown): value is AuditIntegrity {
+  return isRecord(value)
+    && isBoolean(value.ok)
+    && typeof value.count === 'number'
+    && Number.isSafeInteger(value.count)
+    && value.count >= 0;
+}
+
+function isUpdateSafety(value: unknown): value is UpdateSafety {
+  return isRecord(value)
+    && isString(value.backupDir)
+    && isAuditIntegrity(value.auditIntegrity)
+    && isBoolean(value.sourceTreeClean)
+    && isBoolean(value.configuredBranch)
+    && isBoolean(value.githubRemote);
+}
+
+function isUpdateLastRun(value: unknown): value is UpdateLastRun {
+  if (!isRecord(value) || !isString(value.status)) return false;
+  const strings = ['stage', 'startedAt', 'completedAt', 'fromCommit', 'toCommit', 'error'];
+  if (!strings.every((key) => isOptionalString(value[key])) || !isOptionalBoolean(value.restartRequired)) return false;
+  return value.backup === undefined || (
+    isRecord(value.backup) && isOptionalString(value.backup.manifestFile)
+  );
+}
+
+function isUpdateStatus(value: unknown): value is UpdateStatus {
+  if (!isRecord(value) || typeof value.ok !== 'boolean' || typeof value.inProgress !== 'boolean') return false;
+  if (!isUpdateConfig(value.config) || !isUpdateSafety(value.safety) || !isOptionalString(value.error)) return false;
+  if (value.repo !== null && !isUpdateRepo(value.repo)) return false;
+  return value.lastRun === null || isUpdateLastRun(value.lastRun);
+}
+
+function responseError(value: unknown, fallback: string): string {
+  return isRecord(value) && typeof value.error === 'string' && value.error ? value.error : fallback;
 }
 
 /** Action outcome: exactly one of data/error is set. Error text is server-redacted, safe to toast. */
@@ -88,7 +153,8 @@ async function updateSend<T>(path: string, method: string, body: unknown, fallba
   if (!res) return { data: null, error: fallback };
   if (!res.ok) return { data: null, error: await apiErrorSummary(res, fallback) };
   try {
-    return { data: (await res.json()) as T, error: null };
+    const data = await responseJsonBounded<T>(res);
+    return data === null ? { data: null, error: fallback } : { data, error: null };
   } catch {
     return { data: null, error: fallback };
   }
@@ -98,14 +164,17 @@ async function updateSend<T>(path: string, method: string, body: unknown, fallba
 async function fetchUpdateStatus(): Promise<{ status: UpdateStatus | null; error: string }> {
   const res = await api('/api/update/status');
   if (!res) return { status: null, error: 'Update status unavailable.' };
-  let body: UpdateStatus | null = null;
+  if (res.status === 403) {
+    return { status: null, error: await apiErrorSummary(res, 'Update status unavailable.') };
+  }
+  let body: unknown = null;
   try {
-    body = (await res.json()) as UpdateStatus;
+    body = await responseJsonBounded<unknown>(res);
   } catch {
     body = null;
   }
-  if (!res.ok || !body || typeof body !== 'object') {
-    return { status: null, error: body?.error || 'Update status unavailable.' };
+  if (!res.ok || !isUpdateStatus(body)) {
+    return { status: null, error: responseError(body, 'Update status unavailable.') };
   }
   return { status: body, error: '' };
 }
@@ -397,11 +466,12 @@ function ConfigFields({ form, disabled, onChange }: ConfigFieldsProps) {
 interface ConfigCardProps {
   config: UpdateConfig;
   disabled: boolean;
+  canConfigure: boolean;
   saveStatus: string;
   onSave: (form: ConfigFormState) => void;
 }
 
-function ConfigCard({ config, disabled, saveStatus, onSave }: ConfigCardProps) {
+function ConfigCard({ config, disabled, canConfigure, saveStatus, onSave }: ConfigCardProps) {
   const [form, setForm] = useState(() => formFromConfig(config));
   useEffect(() => {
     setForm(formFromConfig(config));
@@ -411,6 +481,11 @@ function ConfigCard({ config, disabled, saveStatus, onSave }: ConfigCardProps) {
     <div className="config-card pad">
       <h3>Controlled Update Configuration</h3>
       <p>Fill these once for the production host. Settings are stored beside the active evidence database, not in source.</p>
+      {!canConfigure ? (
+        <div className="readonly-note" data-testid="update-config-permission">
+          Security Admin access is required to change update configuration. Current settings are read-only.
+        </div>
+      ) : null}
       <ConfigFields form={form} disabled={disabled} onChange={patch} />
       <p className="config-subtitle">Backend restart execution requires REDACTWALL_UPDATE_RESTART_ENABLED=true on the host.</p>
       <div className="update-action-row">
@@ -418,7 +493,7 @@ function ConfigCard({ config, disabled, saveStatus, onSave }: ConfigCardProps) {
           <CheckIcon />
           Save configuration
         </button>
-        <span className="save-status" role="status">
+        <span className="save-status" role="status" aria-label="Update configuration status">
           {saveStatus}
         </span>
       </div>
@@ -560,7 +635,7 @@ function useUpdateActions(store: ReturnType<typeof useUpdateStore>) {
         restartAfterUpdate: form.restartAfterUpdate,
       };
       const result = await updateSend<UpdateStatus>('/api/update/config', 'PUT', body, 'Could not save');
-      if (!result.data) {
+      if (!isUpdateStatus(result.data)) {
         setSaveStatus(result.error || 'Could not save');
         return;
       }
@@ -580,7 +655,7 @@ function useUpdateActions(store: ReturnType<typeof useUpdateStore>) {
       // check result so the "Update available"/"Current" pill survives instead of
       // being wiped by the reload milliseconds later.
       await store.load();
-      if (!result.data) {
+      if (!result.data || typeof result.data.updateAvailable !== 'boolean') {
         store.setPillOverride({ state: 'bad', label: 'Check failed' });
         toast(result.error || 'Could not check GitHub', 'error');
       } else if (result.data.updateAvailable) {
@@ -617,6 +692,10 @@ function useUpdateActions(store: ReturnType<typeof useUpdateStore>) {
         toast(result.error, 'error');
         return;
       }
+      if (!isExactRestartScheduled(result.data)) {
+        toast('Restart response could not be verified. Check service status before retrying.', 'error');
+        return;
+      }
       store.setPillOverride({ state: 'warn', label: 'Restarting' });
     } finally {
       setBusy(false);
@@ -635,7 +714,8 @@ function useUpdateActions(store: ReturnType<typeof useUpdateStore>) {
 
 interface UpdatesBodyProps {
   sessionLoading: boolean;
-  isAdmin: boolean;
+  canOperate: boolean;
+  canConfigure: boolean;
   store: ReturnType<typeof useUpdateStore>;
   actions: ReturnType<typeof useUpdateActions>;
 }
@@ -643,9 +723,9 @@ interface UpdatesBodyProps {
 /** Stable fallback so ConfigCard's reset effect only fires when the status object changes. */
 const EMPTY_CONFIG: UpdateConfig = {};
 
-function UpdatesBody({ sessionLoading, isAdmin, store, actions }: UpdatesBodyProps) {
-  if (!sessionLoading && !isAdmin) {
-    return <div className="readonly-note">Use a Security Admin account to configure and run application updates.</div>;
+function UpdatesBody({ sessionLoading, canOperate, canConfigure, store, actions }: UpdatesBodyProps) {
+  if (!sessionLoading && !canOperate) {
+    return <div className="readonly-note">Security Admin or Operations Administrator access is required to run application updates.</div>;
   }
   if (sessionLoading || !store.loaded) return <div className="app-loading">Loading update status…</div>;
   if (!store.status) return <div className="readonly-note">{store.loadError || 'Update status unavailable.'}</div>;
@@ -664,7 +744,8 @@ function UpdatesBody({ sessionLoading, isAdmin, store, actions }: UpdatesBodyPro
       <PreservationCard status={status} dirtyDetail={flags.dirtyDetail} />
       <ConfigCard
         config={status.config || EMPTY_CONFIG}
-        disabled={status.inProgress || actions.busy}
+        disabled={!canConfigure || status.inProgress || actions.busy}
+        canConfigure={canConfigure}
         saveStatus={actions.saveStatus}
         onSave={actions.saveConfig}
       />
@@ -673,9 +754,9 @@ function UpdatesBody({ sessionLoading, isAdmin, store, actions }: UpdatesBodyPro
   );
 }
 
-function headerMeta(sessionLoading: boolean, isAdmin: boolean, store: ReturnType<typeof useUpdateStore>): ReactNode {
+function headerMeta(sessionLoading: boolean, canOperate: boolean, store: ReturnType<typeof useUpdateStore>): ReactNode {
   if (sessionLoading) return 'Loading';
-  if (!isAdmin) return <StatePill pill={{ state: 'warn', label: 'Admin only' }} />;
+  if (!canOperate) return <StatePill pill={{ state: 'warn', label: 'No access' }} />;
   if (!store.loaded) return 'Loading';
   if (!store.status) return <StatePill pill={{ state: 'bad', label: 'Unavailable' }} />;
   return <StatePill pill={store.pillOverride ?? updateStatusState(store.status)} />;
@@ -683,15 +764,22 @@ function headerMeta(sessionLoading: boolean, isAdmin: boolean, store: ReturnType
 
 export default function Updates() {
   const { me, loading: sessionLoading } = useSession();
-  const isAdmin = me?.role === 'security_admin';
-  const store = useUpdateStore(!sessionLoading && isAdmin);
+  const canConfigure = me?.role === 'security_admin';
+  const canOperate = canConfigure || me?.role === 'operator';
+  const store = useUpdateStore(!sessionLoading && canOperate);
   const actions = useUpdateActions(store);
 
   return (
     <div className="updates-view">
-      <Panel title="Controlled Updates" meta={headerMeta(sessionLoading, isAdmin, store)}>
+      <Panel title="Controlled Updates" meta={headerMeta(sessionLoading, canOperate, store)}>
         <p className="app-note">Pull approved RedactWall releases from GitHub while preserving Texas FCU evidence data, logs, and backups.</p>
-        <UpdatesBody sessionLoading={sessionLoading} isAdmin={isAdmin} store={store} actions={actions} />
+        <UpdatesBody
+          sessionLoading={sessionLoading}
+          canOperate={canOperate}
+          canConfigure={canConfigure}
+          store={store}
+          actions={actions}
+        />
       </Panel>
       {actions.confirming ? (
         <ConfirmDialog

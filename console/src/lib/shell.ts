@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { fetchPosture, type PostureSurface } from '../api/posture';
+import { fetchPostureResult, type PostureSurface } from '../api/posture';
 import { asStats, fetchStats } from '../api/stats';
 import { apiJson } from './api';
 
@@ -12,6 +12,7 @@ import { apiJson } from './api';
  */
 
 export type LiveState = 'live' | 'reconnecting';
+export type PostureState = 'loading' | 'ready' | 'stale' | 'unavailable';
 
 type StreamHandlers = Record<string, (data: unknown) => void>;
 
@@ -42,10 +43,14 @@ function useShellStream(handlers: StreamHandlers, onState: (state: LiveState) =>
 }
 
 export interface ShellData {
-  pending: number;
+  /** Combined held count. Null means an older backend did not report it. */
+  held: number | null | undefined;
   surfaces: PostureSurface[] | null;
   version: string;
   liveState: LiveState;
+  /** Freshness of the posture-backed rail indicators, independent of SSE health. */
+  postureState: PostureState;
+  /** Time of the last successful posture response, never a stats-only update. */
   lastUpdated: string;
 }
 
@@ -54,24 +59,35 @@ function timestamp(): string {
 }
 
 export function useShellData(): ShellData {
-  const [pending, setPending] = useState(0);
+  const [held, setHeld] = useState<number | null | undefined>(undefined);
   const [surfaces, setSurfaces] = useState<PostureSurface[] | null>(null);
   const [version, setVersion] = useState('-');
-  const [liveState, setLiveState] = useState<LiveState>('live');
+  const [liveState, setLiveState] = useState<LiveState>('reconnecting');
+  const [postureState, setPostureState] = useState<PostureState>('loading');
   const [lastUpdated, setLastUpdated] = useState('-');
+  const statsRequestRef = useRef(0);
+  const postureRequestRef = useRef(0);
+  const hasPostureRef = useRef(false);
 
   const refreshPosture = useCallback(async () => {
-    const posture = await fetchPosture();
-    if (!posture) return;
-    setSurfaces(posture.surfaces ?? []);
+    const requestId = ++postureRequestRef.current;
+    const result = await fetchPostureResult();
+    if (requestId !== postureRequestRef.current) return;
+    if (!result.ok || !Array.isArray(result.report.surfaces)) {
+      setPostureState(hasPostureRef.current ? 'stale' : 'unavailable');
+      return;
+    }
+    hasPostureRef.current = true;
+    setSurfaces(result.report.surfaces);
+    setPostureState('ready');
     setLastUpdated(timestamp());
   }, []);
 
   const refresh = useCallback(async () => {
+    const requestId = ++statsRequestRef.current;
     const stats = await fetchStats();
-    if (stats) {
-      setPending(stats.pending);
-      setLastUpdated(timestamp());
+    if (requestId === statsRequestRef.current && stats) {
+      setHeld(stats.held);
     }
     await refreshPosture();
   }, [refreshPosture]);
@@ -80,8 +96,8 @@ export function useShellData(): ShellData {
     (data: unknown) => {
       const stats = asStats(data);
       if (stats) {
-        setPending(stats.pending);
-        setLastUpdated(timestamp());
+        statsRequestRef.current += 1;
+        setHeld(stats.held);
       }
       void refreshPosture();
     },
@@ -97,5 +113,5 @@ export function useShellData(): ShellData {
 
   useShellStream({ query: () => void refresh(), decision: () => void refresh(), stats: onStats }, setLiveState);
 
-  return { pending, surfaces, version, liveState, lastUpdated };
+  return { held, surfaces, version, liveState, postureState, lastUpdated };
 }

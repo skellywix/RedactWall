@@ -1,4 +1,5 @@
 import { toast } from './toast';
+import { cancelResponseBody, readBoundedBytesBody, readBoundedJsonBody } from './bounded-response';
 
 /**
  * Same-origin API client. Faithful port of the legacy dashboard `api()`
@@ -10,15 +11,25 @@ import { toast } from './toast';
 let csrfToken = '';
 
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+const ERROR_BODY_MAX_BYTES = 8 * 1024;
+const ERROR_BODY_TIMEOUT_MS = 2_000;
+const DEFAULT_JSON_BODY_MAX_BYTES = 1024 * 1024;
+const JSON_BODY_TIMEOUT_MS = 15_000;
+
+interface ApiErrorBody {
+  error?: string;
+  fields?: string[];
+}
+
+const errorBodyCache = new WeakMap<Response, Promise<ApiErrorBody | null>>();
 
 export interface ApiOptions extends RequestInit {
   allowAuthError?: boolean;
 }
 
 export async function initCsrf(): Promise<void> {
-  const res = await api('/api/csrf');
-  if (!res || !res.ok) return;
-  const body = (await res.json()) as { csrfToken?: string };
+  const body = await apiJsonBounded<{ csrfToken?: string }>('/api/csrf', 16 * 1024);
+  if (!body) return;
   csrfToken = body.csrfToken || '';
 }
 
@@ -29,13 +40,17 @@ export async function api(path: string, opts: ApiOptions = {}): Promise<Response
   if (csrfToken && MUTATING.has(method)) headers.set('x-csrf-token', csrfToken);
   let res: Response;
   try {
-    res = await fetch(path, { ...fetchOpts, headers });
+    // Authenticated console requests must never replay their cookie-bound
+    // mutation body to a redirected endpoint. API routes are same-origin and
+    // return explicit status codes, so any redirect is an invalid response.
+    res = await fetch(path, { ...fetchOpts, headers, redirect: 'error' });
   } catch {
     // Network failure / server restart: collapse to the null path callers already
     // handle for a non-ok response, instead of an unhandled promise rejection.
     return null;
   }
   if (res.status === 401 && !allowAuthError) {
+    cancelResponseBody(res);
     location.href = '/login.html';
     return null;
   }
@@ -43,9 +58,33 @@ export async function api(path: string, opts: ApiOptions = {}): Promise<Response
   return res;
 }
 
+function normalizeErrorBody(value: unknown): ApiErrorBody | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const body = value as Record<string, unknown>;
+  const error = typeof body.error === 'string' && body.error.length <= 160 ? body.error : undefined;
+  const fields = Array.isArray(body.fields)
+    && body.fields.length <= 32
+    && body.fields.every((field) => typeof field === 'string' && field.length <= 160)
+    ? body.fields as string[]
+    : undefined;
+  return error || fields ? { ...(error ? { error } : {}), ...(fields ? { fields } : {}) } : {};
+}
+
+async function readBoundedErrorBody(response: Response): Promise<ApiErrorBody | null> {
+  return normalizeErrorBody(await readBoundedJsonBody(response, ERROR_BODY_MAX_BYTES, ERROR_BODY_TIMEOUT_MS));
+}
+
+function boundedErrorBody(response: Response): Promise<ApiErrorBody | null> {
+  const cached = errorBodyCache.get(response);
+  if (cached) return cached;
+  const pending = readBoundedErrorBody(response);
+  errorBodyCache.set(response, pending);
+  return pending;
+}
+
 /** Distinguish an expired license (read-only past the grace window) from a role denial. */
 async function warnForbidden(res: Response): Promise<void> {
-  const body = (await res.clone().json().catch(() => ({}))) as { error?: string };
+  const body = await boundedErrorBody(res) || {};
   if (body.error === 'license_readonly') {
     toast('License is read-only past the grace window. Install a renewal license to make changes.', 'warn');
     return;
@@ -58,13 +97,24 @@ async function warnForbidden(res: Response): Promise<void> {
 }
 
 export async function apiJson<T>(path: string, opts: ApiOptions = {}): Promise<T | null> {
+  return apiJsonBounded<T>(path, DEFAULT_JSON_BODY_MAX_BYTES, opts);
+}
+
+export async function apiJsonBounded<T>(path: string, maxBytes: number, opts: ApiOptions = {}): Promise<T | null> {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) return null;
   const res = await api(path, opts);
   if (!res || !res.ok) return null;
-  try {
-    return (await res.json()) as T;
-  } catch {
-    return null;
-  }
+  return await readBoundedJsonBody(res, maxBytes, JSON_BODY_TIMEOUT_MS) as T | null;
+}
+
+export async function responseJsonBounded<T>(response: Response, maxBytes = DEFAULT_JSON_BODY_MAX_BYTES): Promise<T | null> {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) return null;
+  return await readBoundedJsonBody(response, maxBytes, JSON_BODY_TIMEOUT_MS) as T | null;
+}
+
+export async function responseBytesBounded(response: Response, maxBytes: number): Promise<Uint8Array<ArrayBuffer> | null> {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) return null;
+  return readBoundedBytesBody(response, maxBytes, JSON_BODY_TIMEOUT_MS);
 }
 
 export async function apiSend<T>(path: string, method: string, body?: unknown): Promise<T | null> {
@@ -77,12 +127,8 @@ export async function apiSend<T>(path: string, method: string, body?: unknown): 
 
 export async function apiErrorSummary(response: Response | null, fallback: string): Promise<string> {
   if (!response) return fallback;
-  try {
-    const body = (await response.clone().json()) as { fields?: string[]; error?: string };
-    if (Array.isArray(body.fields) && body.fields.length) return `${fallback}: ${body.fields.join(', ')}`;
-    if (body.error) return `${fallback}: ${body.error}`;
-  } catch {
-    // fall through to the generic message
-  }
+  const body = await boundedErrorBody(response);
+  if (body?.fields?.length) return `${fallback}: ${body.fields.join(', ')}`;
+  if (body?.error) return `${fallback}: ${body.error}`;
   return fallback;
 }
