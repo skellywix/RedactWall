@@ -9,6 +9,66 @@ reconstructed from `ITERATIONS.md` and git history.
 
 ## [Unreleased]
 
+### Security & durability hardening (audit / private storage / backup)
+
+This is a large, security-critical hardening pass across the audit chain,
+Windows private-storage layer, backup/restore, browser-extension policy trust,
+gateway/sensor egress, and identity/auth. Full narrative in
+`docs/process/DURABILITY_HARDENING_2026-07.md`.
+
+- **Tamper-evident audit chain.** Audit entries are now HMAC-authenticated (not
+  just SHA-linked): a database writer can recompute every hash link and still
+  fails verification. An external, authenticated checkpoint plus a durable
+  "pending high-water" protocol makes the chain crash-safe — a committed tail
+  can no longer be deleted after a crash and accepted against an older
+  checkpoint. Checkpoint fields are authenticated before any of them influence
+  protocol logic. For the Postgres customer-silo, audit state is bound to a
+  single database scope (migration 10) so a restored or cloned database cannot
+  reuse another database's sidecar. A one-time legacy bootstrap upgrades a valid
+  pre-migration-8 chain exactly once and rejects a forged tail.
+- **Windows private storage.** Private files and directories are verified by
+  real owner SID + complete DACL, and bound by exact BigInt device/file identity
+  (Node's Number-rounded NTFS inode can collide — a real path-swap bypass, now
+  closed). Removal uses an exact delete-on-close handle so a published file
+  cannot be swapped mid-operation. A trusted-parent fast path cuts a steady-state
+  audit commit from ~24 owner/ACL subprocesses to 4 without weakening the startup
+  proof. Lock budgets are 30 s routine / 60 s first-boot initialization only.
+  The Windows principal is read from the System32 `whoami.exe` by absolute path
+  (a PATH-resolved `whoami` — e.g. Git's coreutils build — omits the machine
+  prefix and broke every owner comparison, and could otherwise be spoofed).
+- **Backup / restore.** Backup manifests are HMAC-authenticated with an
+  externally configured key. Artifact publication is atomic with exact-byte
+  rollback and quarantine. A post-commit cleanup failure no longer reports an
+  already-published backup as failed — it attaches a sanitized committed-cleanup
+  warning with exact recovery paths (an operation retry could otherwise
+  duplicate). Postgres restore refuses in-place `--force`; it creates a guarded,
+  connection-disabled, randomly-named database, verifies it is empty, re-signs
+  the audit scope, and enables it only at the end. The shipped image now carries
+  PostgreSQL 17 `pg_dump`/`pg_restore`.
+- **Browser extension.** Policy bundles are signed over a **canonical** form:
+  Chrome's `chrome.storage` recursively alphabetizes stored object keys, which
+  broke raw `JSON.stringify` signatures after persistence. Signed-policy trust
+  pins an Ed25519 key, keeps a verified last-known-good cache with rollback
+  resistance, and fails closed with no trusted policy. Managed-storage
+  enablement is administrator-owned. Token rehydration happens on an isolated
+  extension-only surface, never the provider DOM.
+- **Gateway & sensors.** Encoded-content egress bypasses are closed (unpadded /
+  UTF-16 Base64, Base64 split across adjacent structured parts, SSE delta
+  reconstruction, binary Git diffs). All control-plane response reads are bounded
+  and time-boxed; remote control planes are HTTPS-only (dev-only insecure
+  override). Native endpoint handoff is idempotent through an immutable,
+  HMAC-authenticated replay snapshot committed in the same transaction as the
+  query and audit. The optional standalone gateway returns `501` for AWS Bedrock
+  event-stream routes rather than silently mishandling them.
+- **Identity / auth / control-plane.** Per-source login spray limiting with
+  finite bounded parsing (rejects `Infinity`/`NaN` config). Local login, OIDC
+  callback, recovery-code use, and privilege step-up append their audit event
+  **before** any session cookie is issued; recovery-code consumption is
+  transactional. SCIM `PUT` clears omitted optional identity bindings and revokes
+  sessions; an unassigned SCIM/OIDC identity gets no default role. Every
+  administrative or SCIM mutation is coupled to its hash-chained audit append and
+  rolls back together.
+
 ### Changed
 
 - **EDM version 2 migration.** Offline exact-match packs now use SHA-256 and a
@@ -20,7 +80,30 @@ reconstructed from `ITERATIONS.md` and git history.
   covered by mandatory built-in and tuned custom detectors; they must not be
   moved into an offline sensor-visible fingerprint pack.
 
+## [0.4.0] - 2026-07-09
+
 ### Added
+
+- **Credit-union AI-compliance wedge (examiner-ready).** The examiner evidence
+  pack (schemaVersion 3) now emits a first-class `complianceDisclaimer`
+  ("evidence pointers, not certification"), a `controlTests` rollup for NCUA
+  Part 748 Appendix A ("regularly test key controls") with an honest per-signal
+  `lastTestedAt`, and an `aupCrosswalk` mapping AI Acceptable-Use-Policy clauses
+  to the controls that enforce them (RedactWall ships no board-adoptable AUP
+  prose). A rendered human-readable report is available via
+  `export-evidence-pack.js --format md`. Control-family labels now include the
+  **FFIEC** IT Handbook booklets alongside NCUA/GLBA/NIST. A new
+  `ai_acceptable_use` control and a board cybersecurity-training / oversight
+  **attestation** (`POST /api/ncua/board-training`, recorded in the
+  tamper-evident audit chain) capture two named 2026 NCUA exam priorities. The
+  Security Trust Package gains per-control **assurance levels**
+  (self-attested / ci-verified; nothing third-party-verified), an NCUA-mapped
+  due-diligence questionnaire, and SAMPLE (non-binding) DPA/BAA/GLBA flow-down
+  templates. A disabled-by-default, context-gated **core-banking detector pack**
+  (Jack Henry/Symitar, Corelation, Fiserv, Finastra) and a CSV `--column` flag
+  for local roster **Exact Data Match** fingerprinting protect a credit union's
+  own member identifiers. Ships with a 30-day pilot playbook and an
+  `aws-silo-smoke` acceptance check. See `PLANS/credit-union-tuning.md`.
 
 - **Connected deployment (Phase B/C).** The optional vendor-side second-layer
   scanner (`REDACTWALL_SEMANTIC_REMOTE_URL`) now requires HTTPS for any remote

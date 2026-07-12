@@ -3611,7 +3611,7 @@ app.get('/api/export/evidence', ...auditRead, (req, res) => {
     ...(license.entitled('ncua_readiness') ? {
       useCases: db.listAiUseCases(),
       incidents: db.listAiIncidents(),
-      boardPacket: { lastGeneratedAt: db.lastAuditActionAt('BOARD_PACKET_EXPORTED') },
+      boardPacket: { lastGeneratedAt: db.lastAuditActionAt('BOARD_PACKET_EXPORTED'), training: db.lastBoardTrainingAttestation() },
     } : {}),
     examinerProfile: req.query.examinerProfile,
     report: { schedule: evidenceScheduleSummary() },
@@ -3647,7 +3647,7 @@ function ncuaModuleInputs(generatedAt) {
   return {
     useCases: ncuaReadiness.useCasesSummary(db.listAiUseCases(), generatedAt),
     incidents: ncuaReadiness.incidentsSummary(db.listAiIncidents(), generatedAt),
-    boardPacket: { lastGeneratedAt: db.lastAuditActionAt('BOARD_PACKET_EXPORTED') },
+    boardPacket: { lastGeneratedAt: db.lastAuditActionAt('BOARD_PACKET_EXPORTED'), training: db.lastBoardTrainingAttestation() },
   };
 }
 
@@ -3847,6 +3847,21 @@ app.post('/api/ncua/board-packet', auth.requireAuth, auth.requireCsrf, auth.requ
     detail: `score=${packet.readiness.score}; state=${packet.readiness.state}`,
   });
   res.json(packet);
+});
+
+// Board cybersecurity-training / oversight attestation — a named 2026 NCUA exam
+// priority. Records a bounded completion date + minutes reference into the
+// tamper-evident audit chain (no PII/prompt text). POST + CSRF because it
+// appends attestation history the board_reporting control surfaces.
+app.post('/api/ncua/board-training', auth.requireAuth, auth.requireCsrf, auth.requireRole(roles.SECURITY_ADMIN, roles.AUDITOR), requireNcuaEntitled, validation.validateBody(validation.boardTrainingSchema), (req, res) => {
+  const trainingCompletedAt = String(req.body.trainingCompletedAt);
+  const reference = req.body.reference ? String(req.body.reference).slice(0, 120) : '';
+  db.appendAudit({
+    action: 'BOARD_TRAINING_ATTESTED',
+    actor: req.user.user,
+    detail: JSON.stringify({ trainingCompletedAt, reference }),
+  });
+  res.json(db.lastBoardTrainingAttestation());
 });
 
 app.get('/api/policy', auth.requireAuth, (req, res) => res.json(policy.loadPolicy()));

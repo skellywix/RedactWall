@@ -569,6 +569,13 @@ const incidentStatusSchema = z.object({
   notes: useCaseTextSchema(240).optional(),
 }).strict();
 
+// Board cybersecurity-training / oversight attestation (a named 2026 NCUA exam
+// priority). Self-attested date + a bounded minutes reference; no PII/prompt text.
+const boardTrainingSchema = z.object({
+  trainingCompletedAt: useCaseDateSchema,
+  reference: useCaseTextSchema(120).optional(),
+}).strict();
+
 function safeOperatorText(value) {
   const text = String(value || '');
   return !/[\u0000-\u001F]/.test(text) && !SENSITIVE_ROUTING_CODE.test(text);
@@ -946,6 +953,7 @@ module.exports = {
   useCaseReviewSchema,
   incidentSchema,
   incidentStatusSchema,
+  boardTrainingSchema,
   postureActionSchema,
   detectorFeedbackSchema,
   policyUpdateSchema,

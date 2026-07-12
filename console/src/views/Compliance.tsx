@@ -69,6 +69,7 @@ const FRAMEWORKS: Array<{ key: string; match: RegExp }> = [
   { key: 'OWASP LLM Top 10', match: /OWASP LLM/i },
   { key: 'MITRE ATLAS', match: /MITRE ATLAS/i },
   { key: 'GLBA / NCUA', match: /GLBA|NCUA/i },
+  { key: 'FFIEC', match: /FFIEC/i },
   { key: 'HIPAA', match: /HIPAA/i },
   { key: 'PCI DSS', match: /PCI/i },
 ];
