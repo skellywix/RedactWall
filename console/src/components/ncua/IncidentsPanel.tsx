@@ -164,7 +164,7 @@ export default function IncidentsPanel() {
       <div className="panel-head">
         <div>
           <h2>72-hour incident readiness</h2>
-          <span>NCUA cyber-incident reporting clock for Texas FCUs (12 CFR 748.1(c)) with derived prompt-free timelines</span>
+          <span>NCUA cyber-incident reporting clock (12 CFR 748.1(c)) with derived prompt-free timelines</span>
         </div>
         {isAdmin && (
           <button className="ghost mini" type="button" onClick={() => setAdding((v) => !v)}>
@@ -180,7 +180,7 @@ export default function IncidentsPanel() {
           <div className="empty">Could not load incidents — refresh the page to retry.</div>
         ) : !rows.length ? (
           <div className="empty">
-            No AI incidents on record. When a Texas FCU event set looks like a reportable exposure, open an incident here -
+            No AI incidents on record. When an event set looks like a reportable exposure, open an incident here -
             the 72-hour reporting clock and a prompt-free timeline are tracked automatically.
           </div>
         ) : (

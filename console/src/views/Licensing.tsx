@@ -76,7 +76,7 @@ function LicenseCards({ license, seats }: { license: LicenseStatus; seats: SeatR
   return (
     <div className="identity-summary licensing-cards">
       <Metric label="License State" value={humanize(license.state)} hint={license.reason || 'signed license status'} />
-      <Metric label="Plan" value={plan} hint={license.customer || 'Texas FCU customer'} />
+      <Metric label="Plan" value={plan} hint={license.customer || 'Licensed customer'} />
       <Metric label="Seats Used" value={`${seats.seatsUsed} / ${limit}`} hint={seats.overLimit ? 'over licensed seats' : 'metered sensor users'} />
       <Metric label="Renewal" value={license.daysRemaining ?? '-'} hint={license.expires ? `expires ${fmt(license.expires)}` : 'no expiration loaded'} />
     </div>
@@ -171,7 +171,7 @@ function RenewalPanel({ onCreated }: { onCreated: () => void }) {
       </div>
       <div className="licensing-form">
         <input aria-label="Requested seats" inputMode="numeric" placeholder="Requested seats" value={requestedSeats} onChange={(event) => setRequestedSeats(event.target.value)} />
-        <input aria-label="Contact email" placeholder="admin@texasfcu.org" value={contactEmail} onChange={(event) => setContactEmail(event.target.value)} />
+        <input aria-label="Contact email" placeholder="admin@yourinstitution.org" value={contactEmail} onChange={(event) => setContactEmail(event.target.value)} />
         <textarea aria-label="Renewal note" placeholder="Renewal note" value={note} onChange={(event) => setNote(event.target.value)} />
         <button className="primary" type="button" onClick={submit}>Request renewal</button>
         {message ? <div className="readonly-note">{message}</div> : null}
@@ -272,7 +272,7 @@ export default function Licensing() {
 
   const seatAction = async (user: SeatUser, action: 'assign' | 'release') => {
     const label = action === 'assign' ? 'Reason for reassigning this license' : 'Reason for releasing this license';
-    const reason = window.prompt(label, 'Texas FCU license administration approved') || '';
+    const reason = window.prompt(label, 'License administration approved') || '';
     if (!reason) return;
     await apiSend(`/api/admin/license/seats/${action}`, 'POST', { userKey: user.userName, reason });
     await load();
@@ -289,7 +289,7 @@ export default function Licensing() {
         <div className="console-frame-title">
           <div>
             <h2>Licensing</h2>
-            <p>Renewals, signed licenses, and Texas FCU staff seat usage.</p>
+            <p>Renewals, signed licenses, and staff seat usage.</p>
           </div>
         </div>
         <div className="console-frame-actions">

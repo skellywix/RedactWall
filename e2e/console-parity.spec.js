@@ -88,14 +88,14 @@ async function createHeldPrompt(request, suffix) {
 // console/src/views/*.tsx), never a nav label, so a blank view cannot pass.
 const ROUTES = {
   operate: [
-    { hash: '/', heading: 'Texas FCU Overview' },
+    { hash: '/', heading: 'Institution Overview' },
     { hash: '/queue', heading: 'Member Data Queue' },
-    { hash: '/monitor', heading: 'Texas FCU Command Center' },
+    { hash: '/monitor', heading: 'AI Command Center' },
     { hash: '/activity', heading: 'Gated Member-Data Events' },
   ],
   analyze: [
     { hash: '/insights', heading: 'Member Data Insights' },
-    { hash: '/coverage', heading: 'Texas FCU Coverage' },
+    { hash: '/coverage', heading: 'Institution Coverage' },
     { hash: '/lineage', heading: 'Member Data Lineage' },
     { hash: '/decision-quality', heading: 'Reviewer Decision Quality' },
     { hash: '/audit', heading: 'Examiner Audit Chain' },
@@ -103,13 +103,13 @@ const ROUTES = {
   govern: [
     { hash: '/catalog', heading: 'AI Vendor Catalog' },
     { hash: '/compliance', heading: 'NCUA / GLBA Controls' },
-    { hash: '/ncua', heading: 'Texas FCU Readiness' },
+    { hash: '/ncua', heading: 'Examiner Readiness' },
     { hash: '/policy', heading: 'Policy Configuration' },
   ],
   system: [
     { hash: '/identity', heading: 'Users & Roles' },
     { hash: '/licensing', heading: 'Licensing' },
-    { hash: '/deploy', heading: 'Texas FCU sensor rollout' },
+    { hash: '/deploy', heading: 'Sensor rollout' },
     { hash: '/integrations', heading: 'Evidence Delivery' },
     { hash: '/updates', heading: 'Controlled Updates' },
   ],
@@ -151,8 +151,8 @@ test('NCUA use-case inventory and incident panels mount with their empty states'
   await createHeldPrompt(request, '8106');
   await login(page);
   await page.goto('/app/#/ncua');
-  await expect(page.getByRole('heading', { name: 'Texas FCU AI use-case inventory', exact: true })).toBeVisible();
-  await expect(page.locator('.panel', { hasText: 'Texas FCU AI use-case inventory' }).locator('.empty'))
+  await expect(page.getByRole('heading', { name: 'AI use-case inventory', exact: true })).toBeVisible();
+  await expect(page.locator('.panel', { hasText: 'AI use-case inventory' }).locator('.empty'))
     .toContainText('No AI use cases recorded yet');
   await expect(page.getByRole('heading', { name: '72-hour incident readiness', exact: true })).toBeVisible();
   await expect(page.locator('.panel', { hasText: '72-hour incident readiness' }).locator('.empty'))
@@ -171,7 +171,7 @@ test('shell chrome: nav groups, queue badge, LIVE indicator, sign-out, command p
   await login(page);
 
   await page.goto('/app/');
-  await expect(page.getByRole('heading', { name: 'Texas FCU Overview', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Institution Overview', exact: true })).toBeVisible();
 
   // All four capability groups exist in the rail.
   for (const label of ['Member Defense', 'Risk & Proof', 'Governance', 'Administration']) {

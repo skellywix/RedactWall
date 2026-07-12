@@ -20,14 +20,14 @@ const AUP_CROSSWALK = [
   },
   {
     id: 'approved_destinations_only',
-    clause: 'Only approved, sanctioned AI destinations may be used for credit-union work.',
+    clause: 'Only approved, sanctioned AI destinations may be used for institution work.',
     enforcedBy: ['ai_usage_governance'],
     policySignals: ['governedDestinations', 'blockUnapprovedAiDestinations'],
     evidence: ['policy.governedDestinations', 'coverage.shadowAi'],
   },
   {
     id: 'no_personal_ai_accounts',
-    clause: 'Personal AI accounts must not be used to process credit-union or member data.',
+    clause: 'Personal AI accounts must not be used to process institution, customer, or member data.',
     enforcedBy: ['ai_usage_governance'],
     policySignals: ['personalAccountAction'],
     evidence: ['policy.personalAccountAction'],

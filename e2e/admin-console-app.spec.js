@@ -73,7 +73,7 @@ test('console shell renders the live session and pilot view after login', async 
 
   await page.goto('/app/');
   await expect(page.locator('#who')).toContainText('admin / Global Administrator');
-  await expect(page.getByRole('heading', { name: 'Texas FCU Overview' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Institution Overview' })).toBeVisible();
 
   await page.getByRole('button', { name: 'Reviewer Decisions' }).click();
   await expect(page).toHaveURL(/\/app\/#\/decision-quality$/);
@@ -105,7 +105,7 @@ test('administration nav exposes users, roles, and licensing workflows', async (
   await inviteForm.getByLabel('Staff email').fill(inviteEmail);
   await inviteForm.getByLabel('Display name').fill('E2E Admin User');
   await inviteForm.getByLabel('Role').selectOption('auditor');
-  await inviteForm.getByLabel('Reason').fill('E2E Texas FCU admin invite');
+  await inviteForm.getByLabel('Reason').fill('E2E admin invite');
   await inviteForm.getByRole('button', { name: 'Create invite' }).click();
   await expect(inviteForm).toContainText('Invite link');
   const inviteUrl = await inviteForm.locator('.invite-url .mono').textContent();
@@ -233,7 +233,7 @@ test('overview leak exposure map renders the sanitized department graph', async 
   await login(page);
 
   await page.goto('/app/');
-  await expect(page.locator('.leak-map-section')).toContainText('Texas FCU AI Exposure Map');
+  await expect(page.locator('.leak-map-section')).toContainText('AI Exposure Map');
   await expect(page.locator('#leakMapSummary')).toContainText('prompt bodies excluded');
   await expect(page.locator('#leakMapStage svg')).toBeVisible();
   await expect(page.locator('#leakMapStage .leak-wall')).toBeVisible();

@@ -269,7 +269,7 @@ function CatalogHeader({ busy, onImport, onAdd, onRefresh }: CatalogHeaderProps)
           <h2>AI Vendor Catalog</h2>
           <p>
             Discovered AI vendors and internal assistants with app-risk attributes, sanctioned status, and one-click
-            govern / allow / block for Texas FCU teams. Discovery is metadata only.
+            govern / allow / block for institution teams. Discovery is metadata only.
           </p>
         </div>
       </div>
@@ -359,7 +359,7 @@ function ImportForm({ onSaved, onClose }: FormPanelProps) {
   };
   return (
     <div className="panel catalog-form">
-      <div className="panel-head"><div><h2>Import from Texas FCU proxy/DNS log</h2><span>One hostname per line, or host,count pairs - metadata only</span></div></div>
+      <div className="panel-head"><div><h2>Import from institution proxy/DNS log</h2><span>One hostname per line, or host,count pairs - metadata only</span></div></div>
       <div className="catalog-form-body catalog-form-column">
         <textarea rows={4} placeholder={'cu-assistant.internal\nchat.example.ai,42'} aria-label="Hostnames to import" value={csv} onChange={(event) => setCsv(event.target.value)} />
         <div className="catalog-form-actions">
@@ -673,7 +673,7 @@ function TablePanel({ apps, sort, onSort, actions, isAdmin, loaded, busy, failed
       <div className="panel-head">
         <div>
           <h2>Discovered AI vendors</h2>
-          <span>Risk score, attributes, discovery source, and FCU governance decision - click a column to sort</span>
+          <span>Risk score, attributes, discovery source, and governance decision - click a column to sort</span>
         </div>
         {actions.selected.size > 0 ? (
           <BulkBar count={actions.selected.size} reason={actions.bulkReason} acting={actions.acting} onReason={actions.setBulkReason} onDecision={actions.runBulk} />

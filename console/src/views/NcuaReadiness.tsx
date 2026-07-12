@@ -121,9 +121,9 @@ function Header({ busy, onRefresh }: { busy: boolean; onRefresh: () => void }) {
     <div className="console-frame-header">
       <div className="console-frame-title">
         <div>
-          <h2>Texas FCU Readiness</h2>
+          <h2>Examiner Readiness</h2>
           <p>
-            Examiner readiness for Texas-based Federal Credit Unions: NCUA Part 748 / GLBA control coverage,
+            Examiner readiness for federally insured credit unions and other regulated institutions: NCUA Part 748 / GLBA control coverage,
             member-data outcomes, structured hard stops, high-entropy EDM, shadow-AI review, board packets, and live prompt-free evidence.
           </p>
         </div>
@@ -158,7 +158,7 @@ function KpiRow({ report }: { report: NcuaReport }) {
   return (
     <div className="insights-kpis">
       <Kpi label="Readiness score" value={`${report.score}/100`} hint={report.state.replace('_', ' ')} />
-      <Kpi label="Texas member-data prevented" value={`${memberData.prevented}/${memberData.events}`} hint={`${memberData.redacted} redacted, ${memberData.released} released after review`} />
+      <Kpi label="Member-data prevented" value={`${memberData.prevented}/${memberData.events}`} hint={`${memberData.redacted} redacted, ${memberData.released} released after review`} />
       <Kpi label="Unreviewed AI apps" value={String(shadowAi.unsanctioned + shadowAi.underReview)} hint={`${shadowAi.unreviewedEvents} sightings pending review`} />
       <Kpi
         label="EDM fingerprints"
@@ -295,7 +295,7 @@ function UpsellNotice() {
         <div>
           <h2>Not included in this license</h2>
           <span>
-            The Texas FCU Readiness Center is licensed as an add-on (included with Enterprise). Evidence export and every
+            The Examiner Readiness Center is licensed as an add-on (included with Enterprise). Evidence export and every
             security function keep working; ask your account contact for the `ncua_readiness` feature, then install
             the updated license under Licensing.
           </span>
@@ -329,7 +329,7 @@ export default function NcuaReadiness() {
           <EdmPanel edm={report.panels.edm} />
           <CountsPanel
             title="Shadow AI"
-            hint="AI destinations seen by Texas FCU sensors, by review status"
+            hint="AI destinations seen by institution sensors, by review status"
             linkLabel="Review in Catalog"
             linkPath="/catalog"
             rows={[

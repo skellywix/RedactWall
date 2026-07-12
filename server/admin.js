@@ -2,7 +2,7 @@
 /**
  * Customer administration domain helpers.
  *
- * This module presents one FCU-facing directory from four sources:
+ * This module presents one institution-facing directory from four sources:
  * environment break-glass accounts, local invite accounts, SCIM identities,
  * and observed sensor users. It keeps seat-management metadata separate from
  * historical sensor events so licensing actions never erase examiner evidence.

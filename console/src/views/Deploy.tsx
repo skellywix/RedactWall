@@ -181,7 +181,7 @@ export default function Deploy() {
     if (!loaded) {
       return <div className="app-loading">Building sensor packages… the first build after a restart takes a few seconds.</div>;
     }
-    if (!report) return <div className="empty">Texas FCU sensor packages are unavailable - retry, or confirm you have the operator or security admin role.</div>;
+    if (!report) return <div className="empty">Sensor packages are unavailable - retry, or confirm you have the operator or security admin role.</div>;
     return (
       <div className="queue-list deploy-list">
         {report.artifacts.map((artifact) => (
@@ -201,12 +201,12 @@ export default function Deploy() {
   const historyMeta = !loaded ? 'Loading' : `${report?.history.length ?? 0} downloads`;
   return (
     <div className="deploy-view">
-      <Panel title="Texas FCU sensor rollout" meta={packagesMeta}>
+      <Panel title="Sensor rollout" meta={packagesMeta}>
         <p className="app-note">Built on demand from this control plane&apos;s exact version for browser, endpoint, and MCP rollout; every download is audited.</p>
         {renderPackages()}
       </Panel>
       <Panel title="Rollout history" meta={historyMeta}>
-        <p className="app-note">Who pulled which package for Texas FCU deployment, straight from the tamper-evident audit chain.</p>
+        <p className="app-note">Who pulled which package for deployment, straight from the tamper-evident audit chain.</p>
         {renderHistory()}
       </Panel>
     </div>

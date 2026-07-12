@@ -1,5 +1,5 @@
 'use strict';
-/** Texas FCU Command Center must describe and render sanitized telemetry, not raw prompt logs. */
+/** AI Command Center must describe and render sanitized telemetry, not raw prompt logs. */
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
@@ -24,10 +24,10 @@ function sourceBetween(text, startNeedle, endNeedle) {
   return text.slice(start, end);
 }
 
-test('Texas FCU Command Center feed drives off sanitized posture metadata', () => {
+test('AI Command Center feed drives off sanitized posture metadata', () => {
   // Header copy names the privacy stance the console must uphold.
   assert.match(monitor, /Sanitized member-data posture[\s\S]*without prompt bodies/);
-  assert.match(monitor, /Texas FCU Command Center/);
+  assert.match(monitor, /AI Command Center/);
 
   // The feed is built from posture surfaces/events, not canned raw fixtures.
   assert.match(monitor, /const surfaces = report\?\.surfaces \?\? \[\];/);
@@ -37,7 +37,7 @@ test('Texas FCU Command Center feed drives off sanitized posture metadata', () =
   assert.doesNotMatch(monitor, RAW_REVEAL, 'Monitor view must not surface raw prompt text or /reveal');
 });
 
-test('Texas FCU Command Center live stream carries only sanitized signals', () => {
+test('AI Command Center live stream carries only sanitized signals', () => {
   // Monitor consumes the shared SSE hook rather than opening its own raw feed.
   assert.match(monitor, /import \{ useEventStream \} from '\.\.\/lib\/sse'/);
   const streamWiring = sourceBetween(monitor, 'const reloadLive', 'const report = posture.report;');

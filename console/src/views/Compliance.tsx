@@ -129,7 +129,7 @@ function ComplianceHeader({ busy, onRefresh }: { busy: boolean; onRefresh: () =>
         <div>
           <h2>NCUA / GLBA Controls</h2>
           <p>
-            Texas Federal Credit Union control coverage for NCUA Part 748, GLBA safeguards, board oversight, incident
+            Financial-institution control coverage for NCUA Part 748, GLBA safeguards, board oversight, incident
             readiness, and AI-governance frameworks. Prompt-free evidence mapped from live RedactWall telemetry.
           </p>
         </div>
@@ -165,7 +165,7 @@ function KpiRow({ controls }: { controls: ControlMapping[] }) {
   const pct = controls.length ? Math.round((covered / controls.length) * 100) : 0;
   return (
     <div className="insights-kpis">
-      <Kpi label="FCU controls covered" value={`${covered}/${controls.length}`} hint={`${pct}% coverage`} />
+      <Kpi label="Controls covered" value={`${covered}/${controls.length}`} hint={`${pct}% coverage`} />
       <Kpi label="Needs examiner prep" value={String(attention)} hint="action required" />
       <Kpi label="AI frameworks" value="5" hint="NIST/ISO 42001/EU AI Act/OWASP/ATLAS" />
       <Kpi label="Evidence" value="prompt-free" hint="hashes & metadata only" />
@@ -263,7 +263,7 @@ function FrameworksPanel({ controls }: { controls: ControlMapping[] }) {
       <div className="panel-head">
         <div>
           <h2>AI governance frameworks</h2>
-          <span>Secondary framework coverage for Texas FCU AI oversight</span>
+          <span>Secondary framework coverage for institution AI oversight</span>
         </div>
       </div>
       <div className="compliance-frameworks">
@@ -309,7 +309,7 @@ export default function Compliance() {
   const renderBody = () => {
     if (!loaded) return <div className="app-loading">Mapping compliance controls…</div>;
     if (!controls) {
-      return <EmptyState title="FCU control mapping unavailable" detail="Could not load control mappings. Refresh to retry." />;
+      return <EmptyState title="Control mapping unavailable" detail="Could not load control mappings. Refresh to retry." />;
     }
     return (
       <>

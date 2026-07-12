@@ -163,7 +163,7 @@ export default function Queue() {
     if (!loaded) return <div className="app-loading">Loading queue…</div>;
     if (!rows?.length) {
       return statusFilter === 'pending' ? (
-        <EmptyState title="Member-data queue clear" detail="No Texas FCU prompts are awaiting approval." />
+        <EmptyState title="Approval queue clear" detail="No prompts are awaiting approval." />
       ) : (
         <EmptyState title="No matches" detail="No member-data events have this status yet." />
       );

@@ -41,9 +41,9 @@ const GROUPS: RouteGroup[] = [
   {
     label: 'Member Defense',
     items: [
-      { path: '/', label: 'Texas FCU Overview', icon: NAV_ICONS.overview, view: Overview },
+      { path: '/', label: 'Institution Overview', icon: NAV_ICONS.overview, view: Overview },
       { path: '/queue', label: 'Member Data Queue', icon: NAV_ICONS.queue, view: Queue },
-      { path: '/monitor', label: 'FCU Command Center', icon: NAV_ICONS.monitor, view: Monitor },
+      { path: '/monitor', label: 'AI Command Center', icon: NAV_ICONS.monitor, view: Monitor },
       { path: '/activity', label: 'Exam Activity', icon: NAV_ICONS.activity, view: Activity },
     ],
   },
@@ -51,7 +51,7 @@ const GROUPS: RouteGroup[] = [
     label: 'Risk & Proof',
     items: [
       { path: '/insights', label: 'Member Risk Insights', icon: NAV_ICONS.insights, view: Insights },
-      { path: '/coverage', label: 'Texas FCU Coverage', icon: NAV_ICONS.coverage, view: Coverage },
+      { path: '/coverage', label: 'Institution Coverage', icon: NAV_ICONS.coverage, view: Coverage },
       { path: '/lineage', label: 'Member Data Lineage', icon: NAV_ICONS.lineage, view: Lineage },
       { path: '/decision-quality', label: 'Reviewer Decisions', icon: NAV_ICONS.decisionQuality, view: DecisionQuality },
       { path: '/audit', label: 'Examiner Audit Chain', icon: NAV_ICONS.audit, view: Audit },
@@ -62,7 +62,7 @@ const GROUPS: RouteGroup[] = [
     items: [
       { path: '/catalog', label: 'AI Vendor Catalog', icon: NAV_ICONS.catalog, view: Catalog },
       { path: '/compliance', label: 'NCUA / GLBA Controls', icon: NAV_ICONS.compliance, view: Compliance },
-      { path: '/ncua', label: 'Texas FCU Readiness', icon: NAV_ICONS.ncua, view: NcuaReadiness },
+      { path: '/ncua', label: 'Examiner Readiness', icon: NAV_ICONS.ncua, view: NcuaReadiness },
       { path: '/policy', label: 'Policy Configuration', icon: NAV_ICONS.policy, view: Policy },
     ],
   },

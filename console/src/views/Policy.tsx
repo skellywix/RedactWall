@@ -875,7 +875,7 @@ function SelectField(props: {
 function ModePicker({ mode, disabled, onChange }: { mode: EnforcementMode; disabled: boolean; onChange: (mode: EnforcementMode) => void }) {
   return (
     <section className="policy-section">
-      <h3>Texas FCU policy mode</h3>
+      <h3>Institution policy mode</h3>
       <p className="policy-hint">
         What every RedactWall sensor does when it sees member information. Hard-stop identifiers still block regardless of mode.
       </p>
@@ -981,7 +981,7 @@ function DestinationLists({ draft, disabled, patch }: FieldProps) {
   return (
     <section className="policy-section">
       <h3>AI vendor governance</h3>
-      <p className="policy-hint">One destination per line; * wildcards allowed. Allowed entries override blocks for approved Texas FCU use cases.</p>
+      <p className="policy-hint">One destination per line; * wildcards allowed. Allowed entries override blocks for approved institution use cases.</p>
       <div className="policy-list-grid">
         {DESTINATION_FIELDS.map(([key, label, placeholder]) => (
           <label key={key} className="policy-list-field">
@@ -1028,7 +1028,7 @@ function TemplatePicker({ templates, disabled, onApply }: { templates: PolicyTem
   return (
     <section className="policy-section">
       <h3>Policy templates</h3>
-      <p className="policy-hint">Start from the NCUA / GLBA credit-union preset, then tune thresholds and destinations. Applying saves immediately.</p>
+      <p className="policy-hint">Start from the NCUA / GLBA financial-institution preset, then tune thresholds and destinations. Applying saves immediately.</p>
       <div className="policy-chips">
         {templates.map((template) => (
           <button
@@ -1120,8 +1120,8 @@ function SetupChecklistCard({ policy, preflight, coverage }: CardProps) {
     <div className="config-card pad">
       <div className="sensor-head">
         <div>
-          <h3>Texas FCU Setup Checklist</h3>
-          <p>Fast path from install to governed Texas FCU pilot.</p>
+          <h3>Institution Setup Checklist</h3>
+          <p>Fast path from install to governed institution pilot.</p>
         </div>
         <StatusChip tone={done === items.length ? 'good' : 'warn'} label={`${done}/${items.length} ready`} />
       </div>
@@ -1263,7 +1263,7 @@ function SensorSetupCard({ policy, coverage }: { policy: PolicyDoc; coverage: Co
     <div className="config-card pad">
       <div className="sensor-head">
         <div>
-          <h3>Texas FCU Sensor Setup</h3>
+          <h3>Sensor Setup</h3>
           <p>Deploy and manage the branch browser, endpoint, and MCP control points that feed one shared policy.</p>
         </div>
         <a className="ghost mini" href={routeHref('/coverage')}>

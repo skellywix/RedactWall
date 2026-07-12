@@ -1249,7 +1249,7 @@ function ConsoleHeader({ critical, lastUpdated, refreshing, onRefresh }: Console
     <div className="signal-console-header">
       <div className="signal-console-title">
         <div>
-          <h2>Texas FCU Command Center</h2>
+          <h2>AI Command Center</h2>
           <p>Sanitized member-data posture, control outcomes, and examiner proof without prompt bodies.</p>
         </div>
       </div>
@@ -1641,7 +1641,7 @@ function OperatorFlow({ posture }: { posture: Posture | null }) {
   const attention = rows.filter((row) => row.tone === 'attention').length;
   const ready = rows.filter((row) => row.tone === 'ready').length;
   return (
-    <Section title="FCU Operator Flow" summary={posture ? `${urgent} urgent / ${attention} attention / ${ready} ready` : 'Waiting for data'}>
+    <Section title="Operator Flow" summary={posture ? `${urgent} urgent / ${attention} attention / ${ready} ready` : 'Waiting for data'}>
       <div className="operator-flow-board" aria-live="polite">
         {posture ? (
           rows.map((row) => (
@@ -3095,7 +3095,7 @@ export default function Monitor() {
 
   return (
     <div className="monitor-view">
-      <div className="signal-console" aria-label="Texas FCU Command Center">
+      <div className="signal-console" aria-label="AI Command Center">
         <ConsoleHeader critical={critical} lastUpdated={posture.lastUpdated} refreshing={refreshing} onRefresh={() => void refresh()} />
         <MonitorToolbar
           term={ui.term}

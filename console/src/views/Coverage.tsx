@@ -849,7 +849,7 @@ function ReasonDialog({ request, onConfirm, onCancel }: ReasonDialogProps) {
 function CoverageHeader() {
   return (
     <header className="coverage-header">
-      <h2>Texas FCU Coverage</h2>
+      <h2>Institution Coverage</h2>
       <p>Track branch browser coverage, endpoint posture, MCP guardrails, governed AI vendors, and shadow-AI gaps.</p>
     </header>
   );
@@ -881,7 +881,7 @@ export default function Coverage() {
         <PosturePanel report={report} onRefresh={() => void data.load()} />
         <SensorMixPanel sensors={report.sensors ?? []} />
         <FleetHealthPanel rows={report.fleet ?? []} />
-        <CoveragePanel title="Endpoint AI Tools" subtitle="Sanitized local app and agent CLI inventory across FCU workstations">
+        <CoveragePanel title="Endpoint AI Tools" subtitle="Sanitized local app and agent CLI inventory across institution workstations">
           <InventoryList
             rows={report.endpointAiTools ?? []}
             name={(row) => row.label || row.id || 'Unknown AI tool'}
@@ -890,7 +890,7 @@ export default function Coverage() {
             emptyDetail="No endpoint AI inventory reported."
           />
         </CoveragePanel>
-        <CoveragePanel title="Endpoint MCP Servers" subtitle="Shadow-MCP discovery for Texas FCU teams: server id, client, and transport only">
+        <CoveragePanel title="Endpoint MCP Servers" subtitle="Shadow-MCP discovery for institution teams: server id, client, and transport only">
           <InventoryList
             rows={report.endpointMcpServers ?? []}
             name={(row) => row.id || 'unknown server'}

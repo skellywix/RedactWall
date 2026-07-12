@@ -17,7 +17,7 @@ process.env.APPROVER_PASSWORD = 'reviewer-pass';
 process.env.REDACTWALL_SECRET = 'unit-secret-stable';
 process.env.REDACTWALL_DATA_KEY = 'unit-data-key-stable';
 process.env.INGEST_API_KEY = 'unit-ingest-key';
-process.env.REDACTWALL_TENANT_ID = 'texas-fcu';
+process.env.REDACTWALL_TENANT_ID = 'example-fi';
 process.env.REDACTWALL_SEAT_LIMIT = '2';
 delete process.env.REDACTWALL_PUBLIC_URL;
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rw-admin-api-'));
@@ -87,9 +87,9 @@ function createObservedQuery(query) {
   return db.createQueryWithAudit(query, { action: 'ALLOWED', actor: 'admin-api-test' });
 }
 
-test('administration read routes expose FCU role labels and directory sources', async () => withServer(async (port) => {
+test('administration read routes expose institution role labels and directory sources', async () => withServer(async (port) => {
   db.saveScimUser({ userName: 'scim-admin@example.test', displayName: 'SCIM Admin', active: true, role: 'security_admin' });
-  createObservedQuery({ status: 'allowed', user: 'lender@example.test', orgId: 'texas-fcu', destination: 'chatgpt.com' });
+  createObservedQuery({ status: 'allowed', user: 'lender@example.test', orgId: 'example-fi', destination: 'chatgpt.com' });
 
   const rolesRes = await json(port, '/api/admin/roles', { cookie: sessions.operator });
   assert.strictEqual(rolesRes.status, 200);
@@ -139,7 +139,7 @@ test('directory activity merges preserve authoritative identity state and contro
     scimActive.userName,
     scimInactive.userName,
   ]) {
-    createObservedQuery({ status: 'allowed', user, orgId: 'texas-fcu', destination: 'chatgpt.com' });
+    createObservedQuery({ status: 'allowed', user, orgId: 'example-fi', destination: 'chatgpt.com' });
   }
 
   const byUser = new Map(adminDomain.directory(db, auth).users.map((user) => [user.userName.toLowerCase(), user]));
@@ -395,8 +395,8 @@ test('administration audit entries use opaque references instead of identity or 
 
   const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
   const licensePayload = {
-    customer: 'Texas FCU',
-    customerId: 'texas-fcu',
+    customer: 'Example Financial Institution',
+    customerId: 'example-fi',
     plan: 'standard',
     seats: 2,
     features: [],
@@ -586,7 +586,7 @@ test('user lifecycle routes enforce last global administrator and audit changes'
 
   const reactivate = await json(port, `/api/admin/users/local:${user.id}/reactivate`, {
     method: 'POST',
-    body: { reason: 'returned to FCU AI oversight' },
+    body: { reason: 'returned to AI oversight' },
   });
   assert.strictEqual(reactivate.status, 200);
 
@@ -597,7 +597,7 @@ test('user lifecycle routes enforce last global administrator and audit changes'
 }));
 
 test('licensing routes keep user PII out of request targets while releasing and assigning seats', async () => withServer(async (port, server) => {
-  createObservedQuery({ status: 'allowed', user: 'loan-officer@example.test', orgId: 'texas-fcu', destination: 'chatgpt.com' });
+  createObservedQuery({ status: 'allowed', user: 'loan-officer@example.test', orgId: 'example-fi', destination: 'chatgpt.com' });
   const requestTargets = [];
   server.on('request', (req) => {
     if (String(req.url || '').startsWith('/api/admin/license/seats/')) requestTargets.push(req.url);
@@ -643,7 +643,7 @@ test('licensing routes keep user PII out of request targets while releasing and 
   const renewalBody = await renewal.json();
   assert.strictEqual(renewalBody.request.requestedSeats, 12);
   assert.strictEqual(renewalBody.request.note, '[REDACTED: CONFIDENTIAL_BUSINESS]');
-  assert.strictEqual(renewalBody.renewal.tenantId, 'texas-fcu');
+  assert.strictEqual(renewalBody.renewal.tenantId, 'example-fi');
 
   const licenseStatus = await json(port, '/api/admin/license');
   assert.strictEqual(licenseStatus.status, 200);

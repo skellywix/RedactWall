@@ -200,7 +200,7 @@ function IntegrationsHeader({ onRefresh }: { onRefresh: () => void }) {
       <div className="console-frame-title">
         <div>
           <h2>Evidence Delivery</h2>
-          <p>SIEM, SOAR, email, digest, and AI Gateway delivery for Texas FCU security teams. Every delivered event is prompt-free.</p>
+          <p>SIEM, SOAR, email, digest, and AI Gateway delivery for institution security teams. Every delivered event is prompt-free.</p>
         </div>
       </div>
       <div className="console-frame-actions">

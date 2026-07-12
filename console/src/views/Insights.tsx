@@ -241,7 +241,7 @@ function InsightsHeader(props: HeaderProps) {
       <div className="console-frame-title">
         <div>
           <h2>Member Data Insights</h2>
-          <p>Real-time analytics on Texas FCU AI use, member-data exposure risk, detections, and shadow AI - metadata only, no prompt content.</p>
+          <p>Real-time analytics on institution AI use, sensitive-data exposure risk, detections, and shadow AI - metadata only, no prompt content.</p>
         </div>
       </div>
       <HeaderActions {...props} />
@@ -578,7 +578,7 @@ function InsightPanel({ title, subtitle, wide, children }: InsightPanelProps) {
 function ChartsRow({ report }: { report: InsightsReport }) {
   return (
     <>
-      <InsightPanel wide title="Texas FCU AI Activity" subtitle="Decisions per day across the window">
+      <InsightPanel wide title="Institution AI Activity" subtitle="Decisions per day across the window">
         <div className="insights-chart">
           <SeriesChart series={report.series} />
         </div>
@@ -606,12 +606,12 @@ function BreakdownRow({ report }: { report: InsightsReport }) {
           <TopBars items={report.topDetectors} />
         </div>
       </InsightPanel>
-      <InsightPanel title="Sensitive FCU Categories" subtitle="Semantic and intent classes">
+      <InsightPanel title="Sensitive Categories" subtitle="Semantic and intent classes">
         <div className="insights-bars">
           <TopBars items={report.topCategories} />
         </div>
       </InsightPanel>
-      <InsightPanel wide title="Top AI Destinations" subtitle="Where Texas FCU traffic goes, with app-risk attributes">
+      <InsightPanel wide title="Top AI Destinations" subtitle="Where AI traffic goes, with app-risk attributes">
         <DestinationsTable rows={report.topDestinations} />
       </InsightPanel>
       <InsightPanel title="Shadow AI by Provider" subtitle="Ungoverned AI usage discovered">

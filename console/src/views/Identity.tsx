@@ -286,7 +286,7 @@ function IdentityHeader({ onTest, canManage }: { onTest: () => void; canManage: 
       <div className="console-frame-title">
         <div>
           <h2>Users &amp; Roles</h2>
-          <p>Administer Texas FCU staff access, reviewer roles, IdP setup, and break-glass readiness.</p>
+          <p>Administer institution staff access, reviewer roles, IdP setup, and break-glass readiness.</p>
         </div>
       </div>
       {canManage ? <div className="console-frame-actions">
@@ -343,7 +343,7 @@ function TenantInput({ onCommit }: { onCommit: (value: string) => void }) {
     <input
       type="text"
       aria-label="Tenant or domain"
-      placeholder="tenant id or texasfcu.org"
+      placeholder="tenant id or yourinstitution.org"
       value={draft}
       onChange={(event) => setDraft(event.target.value)}
       onBlur={() => onCommit(draft.trim())}
@@ -500,7 +500,7 @@ function AdminTabs({ active, onChange }: { active: 'users' | 'setup'; onChange: 
 
 function RoleMatrix({ roles }: { roles: AdminRole[] }) {
   return (
-    <IdentityPanel title="Role Matrix" hint="FCU-facing labels mapped to fixed RedactWall permissions">
+    <IdentityPanel title="Role Matrix" hint="Institution-facing labels mapped to fixed RedactWall permissions">
       <div className="role-matrix">
         {roles.map((role) => (
           <div className="role-card" key={role.id}>
@@ -521,7 +521,7 @@ function DirectoryKpis({ directory }: { directory: AdminDirectory }) {
   const seatLimit = directory.seatReport.seatLimit || 'Unmetered';
   return (
     <div className="identity-summary">
-      <div className="mini-kpi"><b>Active Staff Users</b><em>{active}</em><span>FCU console directory</span></div>
+      <div className="mini-kpi"><b>Active Staff Users</b><em>{active}</em><span>Console directory</span></div>
       <div className="mini-kpi"><b>Member Data Reviewers</b><em>{reviewers}</em><span>approval-ready staff</span></div>
       <div className="mini-kpi"><b>Pending Invites</b><em>{pending}</em><span>local invite flow</span></div>
       <div className="mini-kpi"><b>License Seats</b><em>{directory.seatReport.seatsUsed} / {seatLimit}</em><span>{directory.seatReport.overLimit ? 'over limit' : 'current usage'}</span></div>
@@ -614,7 +614,7 @@ function InviteForm({ roles, invalidatedInvitationId, onCreated }: { roles: Admi
   const [userName, setUserName] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [role, setRole] = useState('auditor');
-  const [reason, setReason] = useState('Texas FCU staff access approved');
+  const [reason, setReason] = useState('Staff access approved');
   const [error, setError] = useState('');
   const [created, setCreated] = useState<AdminInvitation | null>(null);
   const inviteRoles = roles.filter((item) => item.id !== 'security_admin');
@@ -644,9 +644,9 @@ function InviteForm({ roles, invalidatedInvitationId, onCreated }: { roles: Admi
   };
 
   return (
-    <IdentityPanel title="Invite Staff User" hint="IdP-first, with local invite fallback for smaller FCUs">
+    <IdentityPanel title="Invite Staff User" hint="IdP-first, with local invite fallback for smaller institutions">
       <div className="invite-form">
-        <input aria-label="Staff email" placeholder="staff@texasfcu.org" value={userName} onChange={(event) => setUserName(event.target.value)} />
+        <input aria-label="Staff email" placeholder="staff@yourinstitution.org" value={userName} onChange={(event) => setUserName(event.target.value)} />
         <input aria-label="Display name" placeholder="Display name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
         <select aria-label="Role" value={role} onChange={(event) => setRole(event.target.value)}>
           {inviteRoles.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
@@ -741,7 +741,7 @@ function UsersAndRoles({ directory, roles, error, loading, reload, setDirectory,
   canManage: boolean;
 }) {
   const [replacementInvite, setReplacementInvite] = useState<AdminInvitation | null>(null);
-  const reason = (label: string) => window.prompt(label, 'Texas FCU administration change approved') || '';
+  const reason = (label: string) => window.prompt(label, 'Administration change approved') || '';
   const patchUser = async (user: AdminUser, body: Record<string, unknown>) => {
     const res = await api(`/api/admin/users/${encodeURIComponent(user.id)}`, {
       method: 'PATCH',
@@ -794,7 +794,7 @@ function UsersAndRoles({ directory, roles, error, loading, reload, setDirectory,
   return (
     <div className={`identity-grid${loading ? ' is-loading' : ''}`} data-loading-label={loading ? 'LOADING' : undefined}>
       {error ? <div className="readonly-note" role="alert">{error} Showing the last verified snapshot.</div> : null}
-      <IdentityPanel title="Administration Overview" hint="Texas FCU staff access and license-visible user footprint" wide tools={<button className="ghost" type="button" onClick={() => void reload()}><RefreshIcon /> Refresh</button>}>
+      <IdentityPanel title="Administration Overview" hint="Institution staff access and license-visible user footprint" wide tools={<button className="ghost" type="button" onClick={() => void reload()}><RefreshIcon /> Refresh</button>}>
         <DirectoryKpis directory={directory} />
       </IdentityPanel>
       <RoleMatrix roles={roles} />
@@ -808,7 +808,7 @@ function UsersAndRoles({ directory, roles, error, loading, reload, setDirectory,
           }}
         />
       ) : (
-        <IdentityPanel title="Invite Staff User" hint="IdP-first, with local invite fallback for smaller FCUs">
+        <IdentityPanel title="Invite Staff User" hint="IdP-first, with local invite fallback for smaller institutions">
           <p className="readonly-note">Global Administrator access is required to change identity or invitations.</p>
         </IdentityPanel>
       )}
@@ -844,7 +844,7 @@ function GuidePanels({ guide }: { guide: IdentitySetupGuide | null }) {
       <IdentityPanel title="Environment" hint="Server-side settings" wide>
         <EnvTable rows={guide?.env ?? []} />
       </IdentityPanel>
-      <IdentityPanel title="Reviewer Groups" hint="Provisioned Texas FCU team names">
+      <IdentityPanel title="Reviewer Groups" hint="Provisioned team names">
         <RoleGroupsTable rows={guide?.roleGroups ?? []} />
       </IdentityPanel>
       <IdentityPanel title="Validation" hint="Readiness checks">
@@ -916,7 +916,7 @@ export default function Identity() {
         <div className="identity-grid">
           <IdentityPanel
             title="Identity Setup"
-            hint="SCIM, OIDC, and Texas FCU reviewer-routing values"
+            hint="SCIM, OIDC, and reviewer-routing values"
             wide
             loading={loading}
             tools={<SetupTools provider={provider} onProvider={setProvider} onTenant={setTenant} onRefresh={load} />}

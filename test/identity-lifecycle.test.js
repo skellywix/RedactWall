@@ -491,14 +491,14 @@ test('scim deactivation releases the seat and blocks sensor ingest', () => {
 
 test('released license seats free capacity while the released identity stays blocked', () => {
   const env = {
-    REDACTWALL_TENANT_ID: 'seat-release-fcu',
+    REDACTWALL_TENANT_ID: 'seat-release-fi',
     REDACTWALL_SEAT_LIMIT: '1',
   };
   const releasedUser = 'released-seat@example.test';
   db.createQuery({
     status: 'allowed',
     user: releasedUser,
-    orgId: 'seat-release-fcu',
+    orgId: 'seat-release-fi',
     destination: 'chatgpt.com',
   });
   assert.strictEqual(tenant.seatReport(db, env).seatsUsed, 1);
@@ -513,7 +513,7 @@ test('released license seats free capacity while the released identity stays blo
   assert.strictEqual(tenant.seatReport(db, env).seatsUsed, 0, 'release frees the consumed seat');
 
   const released = tenant.validateSensorAccess({
-    body: { user: releasedUser, orgId: 'seat-release-fcu', destination: 'chatgpt.com' },
+    body: { user: releasedUser, orgId: 'seat-release-fi', destination: 'chatgpt.com' },
     db,
     env,
   });
@@ -522,7 +522,7 @@ test('released license seats free capacity while the released identity stays blo
   assert.strictEqual(released.statusCode, 403);
 
   const replacement = tenant.validateSensorAccess({
-    body: { user: 'replacement@example.test', orgId: 'seat-release-fcu', destination: 'chatgpt.com' },
+    body: { user: 'replacement@example.test', orgId: 'seat-release-fi', destination: 'chatgpt.com' },
     db,
     env,
   });
@@ -536,7 +536,7 @@ test('released license seats free capacity while the released identity stays blo
     actor: 'admin',
   });
   const reassigned = tenant.validateSensorAccess({
-    body: { user: releasedUser, orgId: 'seat-release-fcu', destination: 'chatgpt.com' },
+    body: { user: releasedUser, orgId: 'seat-release-fi', destination: 'chatgpt.com' },
     db,
     env,
   });

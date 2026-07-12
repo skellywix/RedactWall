@@ -447,7 +447,7 @@ function Toolbar(props: ToolbarProps) {
       <div className="console-frame-title">
         <div>
           <h2>Exam Activity</h2>
-          <p>Review recent Texas FCU AI events, decisions, owners, and sanitized member-data context.</p>
+          <p>Review recent AI events, decisions, owners, and sanitized event context.</p>
         </div>
       </div>
       <ToolbarActions {...props} />

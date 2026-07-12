@@ -112,7 +112,7 @@ export default function NavRail({ groups, activePath, pending, surfaces, version
         <div className="logo" aria-hidden="true">{LOGO}</div>
         <div>
           <h1>RedactWall</h1>
-          <p>Texas FCU AI DLP</p>
+          <p>Financial Institution AI DLP</p>
         </div>
       </div>
       <nav className="tabs" aria-label="Primary">

@@ -690,7 +690,7 @@ export default function Updates() {
   return (
     <div className="updates-view">
       <Panel title="Controlled Updates" meta={headerMeta(sessionLoading, isAdmin, store)}>
-        <p className="app-note">Pull approved RedactWall releases from GitHub while preserving Texas FCU evidence data, logs, and backups.</p>
+        <p className="app-note">Pull approved RedactWall releases from GitHub while preserving institution evidence data, logs, and backups.</p>
         <UpdatesBody sessionLoading={sessionLoading} isAdmin={isAdmin} store={store} actions={actions} />
       </Panel>
       {actions.confirming ? (

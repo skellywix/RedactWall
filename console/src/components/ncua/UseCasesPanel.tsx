@@ -60,7 +60,7 @@ function AddForm({ onSaved }: { onSaved: () => void }) {
 
   const submit = async () => {
     if (!destination.trim() || !department.trim()) {
-      toast('Destination host and Texas FCU team are required.', 'error');
+      toast('Destination host and team are required.', 'error');
       return;
     }
     setBusy(true);
@@ -90,7 +90,7 @@ function AddForm({ onSaved }: { onSaved: () => void }) {
   return (
     <div className="ncua-usecase-form">
       <input placeholder="AI tool host (chat.openai.com)" value={destination} onChange={(e) => setDestination(e.target.value)} />
-      <input placeholder="Texas FCU team (Lending)" value={department} onChange={(e) => setDepartment(e.target.value)} />
+      <input placeholder="Team (Lending)" value={department} onChange={(e) => setDepartment(e.target.value)} />
       <input placeholder="Owner (name or email)" value={owner} onChange={(e) => setOwner(e.target.value)} />
       <input placeholder="Approved use (one line)" value={approvedUse} onChange={(e) => setApprovedUse(e.target.value)} />
       <input placeholder="Allowed data classes (MEMBER_ID, LOAN_NUMBER)" value={dataClasses} onChange={(e) => setDataClasses(e.target.value)} />
@@ -154,7 +154,7 @@ export default function UseCasesPanel() {
     <div className="panel wide-panel">
       <div className="panel-head">
         <div>
-          <h2>Texas FCU AI use-case inventory</h2>
+          <h2>AI use-case inventory</h2>
           <span>Who may use which AI tool for what, by team - the inventory an examiner asks for first</span>
         </div>
         {isAdmin && (
@@ -171,7 +171,7 @@ export default function UseCasesPanel() {
           <div className="empty">Could not load the inventory — refresh the page to retry.</div>
         ) : !rows.length ? (
           <div className="empty">
-            No AI use cases recorded yet. Inventory each Texas FCU team's approved tools, owners, and allowed data
+            No AI use cases recorded yet. Inventory each team's approved tools, owners, and allowed data
             classes - distinct records per team keep "ChatGPT in Lending" separate from Marketing.
           </div>
         ) : (

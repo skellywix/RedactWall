@@ -3,7 +3,7 @@
 Read this before changing anything. It is the agent-memory file: how we work, how to prove a change works, the invariants you may not break, and the mistakes not to repeat. Update it when you learn something (see "Mistake log"). `CLAUDE.md`, if present, may extend this.
 
 ## What this project is
-RedactWall is a compliance-grade DLP layer that inspects prompts/files headed to AI tools and **warns / requires justification / redacts / blocks** by policy, with a tamper-evident audit log. Three sensors (browser `sensors/browser-extension/`, `sensors/endpoint-agent/`, `sensors/mcp-guard/`) all run the SAME local engine and report to one server. Sold to regulated shops (credit unions; NCUA/GLBA/PCI/HIPAA) — an examiner will inspect this.
+RedactWall is a compliance-grade DLP layer that inspects prompts/files headed to AI tools and **warns / requires justification / redacts / blocks** by policy, with a tamper-evident audit log. Three sensors (browser `sensors/browser-extension/`, `sensors/endpoint-agent/`, `sensors/mcp-guard/`) all run the SAME local engine and report to one server. Sold to regulated shops (credit unions, banks, and other financial institutions; NCUA/GLBA/PCI/HIPAA) — an examiner will inspect this.
 
 ## How we work (manager-of-agents)
 Plan → Implement → Validate. Spend most effort planning. See `.claude/skills/`:

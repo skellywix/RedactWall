@@ -24,7 +24,7 @@ function approvalRate(stats: Stats): string {
 /** Mirrors the legacy queue-tab KPI band (dashboard.js loadStats cards). */
 function statCards(stats: Stats): StatCard[] {
   return [
-    { key: 'pending', value: stats.pending, label: 'Member-data queue', detail: 'held for FCU review', tone: 'critical' },
+    { key: 'pending', value: stats.pending, label: 'Sensitive-data queue', detail: 'held for review', tone: 'critical' },
     { key: 'blocked', value: stats.todayBlocked, label: 'Blocked today', detail: 'member-data stops', tone: 'warn' },
     { key: 'approved', value: stats.approved, label: 'Approved releases', detail: 'admin reviewed', tone: 'secure' },
     { key: 'denied', value: stats.denied, label: 'Denied releases', detail: 'never sent', tone: 'critical' },
@@ -103,10 +103,10 @@ export default function Overview() {
   });
 
   return (
-    <Panel title="Texas FCU Overview" meta={!loaded ? 'Loading' : stats ? summaryLine(stats) : 'Waiting for data'}>
+    <Panel title="Institution Overview" meta={!loaded ? 'Loading' : stats ? summaryLine(stats) : 'Waiting for data'}>
       <LeakMap map={posture?.leakMap ?? null} surfaces={posture?.surfaces} />
       {!stats && loaded ? (
-        <EmptyState title="No FCU evidence yet" detail="Live counters appear once branch, browser, endpoint, or MCP sensors report activity." />
+        <EmptyState title="No evidence yet" detail="Live counters appear once branch, browser, endpoint, or MCP sensors report activity." />
       ) : stats ? (
         <>
           <StatBand stats={stats} />

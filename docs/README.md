@@ -12,6 +12,7 @@ organized by topic: `deployment/`, `demo/`, `identity/`, `connectors/`,
 | Install or operate RedactWall | `deployment/DEPLOYMENT.md` |
 | Run a production pilot handoff | `deployment/TECHNICIAN_DEPLOYMENT_GUIDE.md` |
 | Deploy the customer-silo AWS shape | `deployment/AWS_SAAS_DEPLOYMENT.md` |
+| See what is still missing for a paid AWS launch | `deployment/AWS_LAUNCH_GAP_ANALYSIS.md` |
 | Run a sales or customer demo | `../DEMO_INSTALL_GUIDE.md` |
 | Present the client-facing story | `demo/SALES_DEMO_GUIDE.md` |
 | Prepare a demo machine | `demo/DEMO_TECHNICIAN_SETUP.md` |
@@ -88,7 +89,7 @@ organized by topic: `deployment/`, `demo/`, `identity/`, `connectors/`,
 | Topic | Document |
 |-------|----------|
 | Product roadmap | `../ROADMAP.md` |
-| Texas FCU product map and tab positioning | `product/TEXAS_FCU_PRODUCT_MAP.md` |
+| Financial-institution product map and tab positioning | `product/PRODUCT_MAP.md` |
 | Competitive positioning and product direction | `product/COMPETITIVE_ALIGNMENT.md` |
 | Feature benchmark vs. market leaders | `product/COMPETITIVE_BENCHMARK_2026.md` |
 | Sales battlecard vs. Nightfall AI (internal) | `product/BATTLECARD_NIGHTFALL.md` |
