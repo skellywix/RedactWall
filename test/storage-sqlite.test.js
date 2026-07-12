@@ -182,7 +182,7 @@ test('production SQLite startup fails closed and restores umask when the Windows
       platform: 'win32',
       privateLockRoot: path.join(root, 'locks'),
       spawn(command) {
-        assert.strictEqual(command, 'whoami.exe');
+        assert.match(command, /[\\/]System32[\\/]whoami\.exe$/i);
         throw new Error('adapter unavailable');
       },
     },

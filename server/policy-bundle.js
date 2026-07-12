@@ -9,13 +9,14 @@ const {
   securePrivatePath,
   readBoundedRegularFile,
   publishFileExclusiveDurably,
+  removeExactPublicationFile,
   withPrivateDirectoryMutationLockSync,
 } = require('./private-path');
 
 const BUNDLE_VERSION = 1;
 const DEFAULT_TTL_MS = 15 * 60 * 1000;
 const MAX_KEY_BYTES = 16 * 1024;
-const PRIVATE_INIT_LOCK_TIMEOUT_MS = 30_000;
+const PRIVATE_INIT_LOCK_TIMEOUT_MS = 60_000;
 let cachedKeys = null;
 let cachedKeyFile = '';
 
@@ -68,6 +69,9 @@ function createPrivateKeyExclusive(file, fsImpl = fs, options = {}) {
   const pem = generated.privateKey.export({ type: 'pkcs8', format: 'pem' });
   const temp = path.join(dir, `.${path.basename(file)}.${crypto.randomBytes(16).toString('hex')}.tmp`);
   let fd;
+  let stagedIdentity;
+  let sourceConsumed = false;
+  let publishedKeys;
   try {
     fd = fsImpl.openSync(temp, 'wx', 0o600);
     fsImpl.writeFileSync(fd, pem);
@@ -76,16 +80,29 @@ function createPrivateKeyExclusive(file, fsImpl = fs, options = {}) {
     fsImpl.closeSync(fd);
     fd = undefined;
     securePrivatePath(temp, privateSecurity(options, fsImpl, false));
+    stagedIdentity = fsImpl.lstatSync(temp, { bigint: true });
     // Hard-link publication is atomic and refuses to replace a concurrently
     // published identity. The surrounding interprocess lock serializes normal
     // initializers; this exclusive publication is the final collision guard.
-    publishFileExclusiveDurably(temp, file, { ...options, fs: fsImpl });
+    publishFileExclusiveDurably(temp, file, {
+      ...options,
+      fs: fsImpl,
+      consumeSource: true,
+      verifyPublished(publishedFile) {
+        publishedKeys = readPrivateKey(publishedFile, fsImpl, options);
+      },
+    });
+    sourceConsumed = true;
   } finally {
-    if (fd !== undefined) { try { fsImpl.closeSync(fd); } catch {} }
-    try { fsImpl.unlinkSync(temp); } catch {}
+    if (fd !== undefined) {
+      if (!stagedIdentity) try { stagedIdentity = fsImpl.fstatSync(fd, { bigint: true }); } catch {}
+      try { fsImpl.closeSync(fd); } catch {}
+    }
+    if (!sourceConsumed && stagedIdentity) {
+      try { removeExactPublicationFile(temp, stagedIdentity, { ...options, fs: fsImpl }); } catch {}
+    }
   }
-  securePrivatePath(file, privateSecurity(options, fsImpl, false));
-  return readPrivateKey(file, fsImpl, options);
+  return publishedKeys;
 }
 
 function loadOrCreateKeypair(options = {}) {
@@ -111,12 +128,14 @@ function loadOrCreateKeypair(options = {}) {
     }, {
       ...options,
       lockTimeoutMs: options.lockTimeoutMs ?? PRIVATE_INIT_LOCK_TIMEOUT_MS,
+      lockTimeoutMaximumMs: options.lockTimeoutMaximumMs ?? PRIVATE_INIT_LOCK_TIMEOUT_MS,
       fs: fsImpl,
     });
   }, {
     ...options,
     ...privateSecurity(options, fsImpl, true),
     lockTimeoutMs: options.lockTimeoutMs ?? PRIVATE_INIT_LOCK_TIMEOUT_MS,
+    lockTimeoutMaximumMs: options.lockTimeoutMaximumMs ?? PRIVATE_INIT_LOCK_TIMEOUT_MS,
   });
 }
 

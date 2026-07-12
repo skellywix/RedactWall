@@ -251,6 +251,31 @@ test('audit transaction preparation uses the full routine lock budget', (t) => {
   }
 });
 
+test('external audit coordination receives the full first-verification timeout budget', (t) => {
+  const root = tempRoot(t, 'audit-anchor-external-lock-budget');
+  const calls = [];
+  const anchor = auditAnchor.openAuditAnchor({
+    directory: path.join(root, 'audit'),
+    allowBootstrap: true,
+    env: {},
+    withCoordinationLock(callback, options = {}) {
+      calls.push({ ...options });
+      return callback();
+    },
+  });
+  const database = auditDatabase([]);
+
+  assert.strictEqual(calls[0].timeoutMs, auditAnchor._internal.INITIALIZATION_LOCK_TIMEOUT_MS);
+  assert.deepStrictEqual(anchor.verifyDatabase(database), { ok: true, count: 0 });
+  assert.strictEqual(
+    calls[1].timeoutMs,
+    auditAnchor._internal.INITIALIZATION_LOCK_TIMEOUT_MS,
+    'the first database verification keeps the initialization-only sixty-second budget',
+  );
+  assert.deepStrictEqual(anchor.verifyDatabase(database), { ok: true, count: 0 });
+  assert.strictEqual(calls[2].timeoutMs, undefined, 'steady-state coordination uses the routine default');
+});
+
 test('checkpoint lock storage failure marks audit readiness unhealthy', (t) => {
   const root = tempRoot(t, 'audit-anchor-lock-storage-failure');
   const directory = path.join(root, 'audit');
@@ -444,7 +469,7 @@ test('pending publication rejects a temp-to-destination identity substitution', 
   substituteIdentity = true;
   assert.throws(
     () => anchor.prepareTransactionCommit(database, [entry]),
-    /changed during publication/,
+    /changed during (?:linking|publication)/,
   );
   assert.strictEqual(fs.existsSync(pendingPath), false, 'failed first publication is rolled back');
 });
@@ -482,7 +507,7 @@ test('pending publication fails closed when the filesystem exposes no stable fil
   zeroPendingTempIdentity = true;
   assert.throws(
     () => anchor.prepareTransactionCommit(database, [entry]),
-    /audit integrity sidecar has no stable filesystem identity/,
+    /audit integrity sidecar (?:has no stable filesystem identity|changed during Windows security verification)/,
   );
   assert.strictEqual(fs.existsSync(pendingPath), false);
 });
@@ -494,9 +519,9 @@ test('pending publication rejects a verified sidecar directory identity swap', (
   let substituteDirectoryIdentity = false;
   const fsImpl = new Proxy(fs, {
     get(target, property) {
-      if (property === 'renameSync') {
+      if (property === 'linkSync') {
         return (source, destination) => {
-          const result = target.renameSync(source, destination);
+          const result = target.linkSync(source, destination);
           if (path.resolve(destination) === path.resolve(pendingPath)) {
             substituteDirectoryIdentity = true;
           }
@@ -554,14 +579,14 @@ test('final bound-directory verification remains inside exact pending rollback s
   const pendingPath = path.join(directory, '.audit-integrity-pending.json');
   let replacingPending = false;
   let postRenameDirectoryStats = 0;
+  let pendingPublications = 0;
   const fsImpl = new Proxy(fs, {
     get(target, property) {
-      if (property === 'renameSync') {
+      if (property === 'linkSync') {
         return (source, destination) => {
-          const replacesPending = path.resolve(destination) === path.resolve(pendingPath)
-            && target.existsSync(destination);
-          const result = target.renameSync(source, destination);
-          if (replacesPending) replacingPending = true;
+          const publishesPending = path.resolve(destination) === path.resolve(pendingPath);
+          const result = target.linkSync(source, destination);
+          if (publishesPending && ++pendingPublications >= 2) replacingPending = true;
           return result;
         };
       }
@@ -777,14 +802,16 @@ function failingCheckpointFs(checkpointPath, failure) {
   const checkpoint = path.resolve(checkpointPath);
   return new Proxy(fs, {
     get(target, property) {
-      if (property === 'renameSync') {
+      if (property === 'linkSync') {
         return (source, destination) => {
-          if (failure.enabled && path.resolve(destination) === checkpoint) {
+          if (failure.enabled
+              && path.resolve(destination) === checkpoint
+              && String(source).endsWith('.tmp')) {
             const error = new Error('synthetic checkpoint publication denial');
             error.code = 'EACCES';
             throw error;
           }
-          return target.renameSync(source, destination);
+          return target.linkSync(source, destination);
         };
       }
       const value = target[property];
@@ -873,6 +900,101 @@ test('protocol-enabled restart refuses an authenticated tail that has no pending
   });
 });
 
+test('first bootstrap checkpoints a valid legacy unkeyed tail before enabling the pending protocol', (t) => {
+  const root = tempRoot(t, 'audit-anchor-legacy-bootstrap');
+  const directory = path.join(root, 'audit');
+  const unsigned = {
+    id: 'a_legacy_bootstrap',
+    ts: '2026-07-10T12:00:00.000Z',
+    action: 'LEGACY_BOOTSTRAP_TEST',
+    queryId: '',
+    actor: 'legacy-system',
+    detail: 'sanitized legacy evidence',
+    prevHash: auditIntegrity.ZERO,
+  };
+  const legacy = { ...unsigned, hash: auditIntegrity.sha(auditIntegrity.canonical(unsigned)) };
+  const database = auditDatabase([{ seq: 1, entry: JSON.stringify(legacy) }]);
+
+  const anchor = auditAnchor.openAuditAnchor({ directory, allowBootstrap: true, env: {} });
+  const initialState = JSON.parse(fs.readFileSync(anchor.paths.statePath, 'utf8'));
+  assert.strictEqual(initialState.version, 1, 'the one-time legacy bootstrap must precede protocol-v2 enforcement');
+  assert.deepStrictEqual(anchor.verifyDatabase(database), { ok: true, count: 1 });
+
+  const checkpoint = JSON.parse(fs.readFileSync(anchor.paths.checkpointPath, 'utf8'));
+  assert.strictEqual(checkpoint.count, 1);
+  assert.strictEqual(checkpoint.seq, 1);
+  assert.strictEqual(checkpoint.head, legacy.hash);
+  const upgradedState = JSON.parse(fs.readFileSync(anchor.paths.statePath, 'utf8'));
+  assert.strictEqual(upgradedState.version, 2);
+  assert.strictEqual(upgradedState.pendingProtocol, true);
+
+  const restarted = auditAnchor.openAuditAnchor({ directory, allowBootstrap: false, env: {} });
+  assert.deepStrictEqual(restarted.verifyDatabase(database), { ok: true, count: 1 });
+});
+
+test('migration-complete restart cannot bless a tail injected before the first checkpoint', (t) => {
+  const root = tempRoot(t, 'audit-anchor-bootstrap-crash');
+  const directory = path.join(root, 'audit');
+  auditAnchor.openAuditAnchor({ directory, allowBootstrap: true, env: {} });
+  const unsigned = {
+    id: 'a_forged_after_migration',
+    ts: '2026-07-10T12:00:00.000Z',
+    action: 'FORGED_BOOTSTRAP_TEST',
+    queryId: '',
+    actor: 'attacker',
+    detail: 'forged but self-consistent',
+    prevHash: auditIntegrity.ZERO,
+  };
+  const forged = { ...unsigned, hash: auditIntegrity.sha(auditIntegrity.canonical(unsigned)) };
+  const database = auditDatabase([{ seq: 1, entry: JSON.stringify(forged) }]);
+
+  const restarted = auditAnchor.openAuditAnchor({ directory, allowBootstrap: false, env: {} });
+  assert.deepStrictEqual(restarted.verifyDatabase(database), {
+    ok: false,
+    count: 1,
+    reason: 'checkpoint-missing',
+  });
+});
+
+test('pre-migration restart cannot bootstrap a forged tail from protocol-v2 state without its checkpoint', (t) => {
+  const root = tempRoot(t, 'audit-anchor-v2-missing-checkpoint');
+  const directory = path.join(root, 'audit');
+  const statePath = path.join(directory, '.audit-integrity-state.json');
+  const env = { REDACTWALL_AUDIT_KEY: 'protocol-v2-missing-checkpoint-test-key' };
+  const key = auditAnchor._internal.configuredKey(env);
+  privatePaths.withPrivateDirectoryMutationLockSync(directory, () => {
+    auditAnchor._internal.writePrivateJson(
+      statePath,
+      auditAnchor._internal.signedState(key, true, false, true),
+    );
+  }, { label: 'audit integrity directory', ownerLabel: 'audit integrity directory' });
+
+  const unsigned = {
+    id: 'a_forged_pre_migration_v2',
+    ts: '2026-07-10T12:00:00.000Z',
+    action: 'FORGED_BOOTSTRAP_TEST',
+    queryId: '',
+    actor: 'attacker',
+    detail: 'forged but self-consistent',
+    prevHash: auditIntegrity.ZERO,
+  };
+  const forged = { ...unsigned, hash: auditIntegrity.sha(auditIntegrity.canonical(unsigned)) };
+  const database = auditDatabase([{ seq: 1, entry: JSON.stringify(forged) }]);
+
+  assert.throws(
+    () => auditAnchor.openAuditAnchor({
+      directory,
+      allowBootstrap: true,
+      env,
+      initialize({ bootstrapLegacyDatabase }) {
+        bootstrapLegacyDatabase(database);
+      },
+    }),
+    /legacy audit bootstrap failed \(checkpoint-missing\)/,
+  );
+  assert.strictEqual(fs.existsSync(path.join(directory, '.audit-integrity-checkpoint.json')), false);
+});
+
 test('legacy authenticated state upgrades only after its current checkpoint verifies', (t) => {
   const root = tempRoot(t, 'audit-anchor-protocol-upgrade');
   const directory = path.join(root, 'audit');
@@ -899,6 +1021,181 @@ test('legacy authenticated state upgrades only after its current checkpoint veri
   const upgraded = JSON.parse(fs.readFileSync(statePath, 'utf8'));
   assert.strictEqual(upgraded.version, 2);
   assert.strictEqual(upgraded.pendingProtocol, true);
+});
+
+test('authenticated audit state is bound to one opaque database scope', (t) => {
+  const root = tempRoot(t, 'audit-anchor-database-scope');
+  const directory = path.join(root, 'audit');
+  const firstScope = 'a'.repeat(64);
+  const secondScope = 'b'.repeat(64);
+  const first = auditAnchor.openAuditAnchor({
+    directory,
+    allowBootstrap: true,
+    databaseScope: firstScope,
+    env: {},
+  });
+  const state = JSON.parse(fs.readFileSync(first.paths.statePath, 'utf8'));
+  assert.strictEqual(state.version, 3);
+  assert.strictEqual(state.databaseScope, firstScope);
+  assert.match(state.mac, /^[a-f0-9]{64}$/);
+
+  assert.throws(
+    () => auditAnchor.openAuditAnchor({
+      directory,
+      allowBootstrap: true,
+      databaseScope: secondScope,
+      env: {},
+    }),
+    (error) => error
+      && error.message === 'audit integrity state database scope mismatch'
+      && !error.message.includes(firstScope)
+      && !error.message.includes(secondScope),
+  );
+
+  state.databaseScope = secondScope;
+  fs.writeFileSync(first.paths.statePath, JSON.stringify(state));
+  assert.throws(
+    () => auditAnchor.openAuditAnchor({
+      directory,
+      allowBootstrap: true,
+      databaseScope: secondScope,
+      env: {},
+    }),
+    /audit integrity state authentication failed/,
+  );
+});
+
+test('a live anchor rejects a valid same-key state replacement from another database scope', (t) => {
+  const root = tempRoot(t, 'audit-anchor-live-database-scope-replacement');
+  const directory = path.join(root, 'audit');
+  const firstScope = 'd'.repeat(64);
+  const secondScope = 'e'.repeat(64);
+  const env = { REDACTWALL_AUDIT_KEY: 'shared-external-key-for-live-scope-replacement' };
+  const database = auditDatabase([]);
+  const anchor = auditAnchor.openAuditAnchor({
+    directory,
+    allowBootstrap: true,
+    databaseScope: firstScope,
+    env,
+  });
+  assert.deepStrictEqual(anchor.verifyDatabase(database), { ok: true, count: 0 });
+
+  const active = JSON.parse(fs.readFileSync(anchor.paths.statePath, 'utf8'));
+  const key = auditAnchor._internal.configuredKey(env);
+  fs.writeFileSync(
+    anchor.paths.statePath,
+    JSON.stringify(auditAnchor._internal.signedState(
+      key,
+      active.checkpointCreated,
+      active.embedded,
+      active.pendingProtocol,
+      secondScope,
+    )),
+  );
+
+  assert.deepStrictEqual(anchor.verifyDatabase(database), {
+    ok: false,
+    count: 0,
+    reason: 'checkpoint-unavailable',
+  });
+  assert.strictEqual(anchor.status().ok, false);
+});
+
+test('a verified unscoped state upgrades without breaking legacy compatibility', (t) => {
+  const root = tempRoot(t, 'audit-anchor-database-scope-upgrade');
+  const directory = path.join(root, 'audit');
+  const database = auditDatabase([]);
+  const legacy = auditAnchor.openAuditAnchor({ directory, allowBootstrap: true, env: {} });
+  assert.deepStrictEqual(legacy.verifyDatabase(database), { ok: true, count: 0 });
+  assert.strictEqual(
+    JSON.parse(fs.readFileSync(legacy.paths.statePath, 'utf8')).databaseScope,
+    undefined,
+  );
+
+  const databaseScope = 'c'.repeat(64);
+  const upgraded = auditAnchor.openAuditAnchor({
+    directory,
+    allowBootstrap: false,
+    databaseScope,
+    env: {},
+    initialize({ bindDatabaseScope }) {
+      bindDatabaseScope(database);
+    },
+  });
+  const state = JSON.parse(fs.readFileSync(upgraded.paths.statePath, 'utf8'));
+  assert.strictEqual(state.version, 3);
+  assert.strictEqual(state.databaseScope, databaseScope);
+  assert.strictEqual(state.pendingProtocol, true);
+  const claim = JSON.parse(fs.readFileSync(`${upgraded.paths.statePath}.database-scope-claim`, 'utf8'));
+  assert.strictEqual(claim.databaseScope, databaseScope);
+  assert.match(claim.mac, /^[a-f0-9]{64}$/);
+  assert.deepStrictEqual(upgraded.verifyDatabase(database), { ok: true, count: 0 });
+});
+
+test('failed exclusive state cleanup quarantines and preserves a replacement', (t) => {
+  const root = tempRoot(t, 'audit-anchor-exclusive-cleanup-race');
+  const directory = path.join(root, 'audit');
+  const statePath = path.join(directory, 'state.json');
+  const movedOriginal = path.join(directory, 'original-owned');
+  const principal = 'TEST\\audit-owner';
+  const privatePathSecurity = {
+    platform: 'win32',
+    principal,
+    ownerIdentity: TEST_OWNER_IDENTITY,
+    privateLockRoot: path.join(root, 'locks'),
+    spawn: aclHarness({ principal }),
+  };
+  fs.mkdirSync(directory);
+  privatePaths.securePrivatePath(directory, {
+    ...privatePathSecurity,
+    directory: true,
+    label: 'audit integrity directory',
+    ownerLabel: 'audit integrity directory',
+  });
+  let mismatchInjected = false;
+  let cleanupSwapped = false;
+  let quarantinePath = null;
+  const fsImpl = new Proxy(fs, {
+    get(target, property) {
+      if (property === 'lstatSync') {
+        return (targetPath, options) => {
+          const stat = target.lstatSync(targetPath, options);
+          if (!mismatchInjected && path.resolve(targetPath) === path.resolve(statePath)
+              && Number(stat.nlink) === 2) {
+            mismatchInjected = true;
+            return { ...stat, size: stat.size + 1n };
+          }
+          return stat;
+        };
+      }
+      if (property === 'renameSync') {
+        return (source, destination) => {
+          if (!cleanupSwapped && path.resolve(source) === path.resolve(statePath)
+              && path.basename(destination).includes('.failed-new-state-')) {
+            cleanupSwapped = true;
+            quarantinePath = destination;
+            target.renameSync(source, movedOriginal);
+            target.writeFileSync(source, 'replacement-owned');
+          }
+          return target.renameSync(source, destination);
+        };
+      }
+      const value = target[property];
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+
+  assert.throws(
+    () => auditAnchor._internal.writeNewPrivateJson(statePath, { version: 1 }, {
+      fs: fsImpl,
+      privatePathSecurity,
+    }),
+    /changed replacement retained at/,
+  );
+  assert.strictEqual(mismatchInjected, true);
+  assert.strictEqual(cleanupSwapped, true);
+  assert.strictEqual(fs.readFileSync(quarantinePath, 'utf8'), 'replacement-owned');
+  assert.strictEqual(fs.existsSync(movedOriginal), true, 'the originally linked inode was not confused with the replacement');
 });
 
 test('POSIX audit-anchor initialization creates owner-only durable state', {
@@ -939,6 +1236,18 @@ test('POSIX initialization prepares distinct missing sidecar parents before bind
   for (const parent of [directory, path.dirname(statePath), path.dirname(checkpointPath), path.dirname(pendingPath)]) {
     assert.strictEqual(fs.statSync(parent).mode & 0o777, 0o700);
   }
+});
+
+test('POSIX audit-directory preparation preserves case-distinct paths', {
+  skip: process.platform === 'win32' && 'Windows paths are case-insensitive',
+}, (t) => {
+  const root = tempRoot(t, 'audit-anchor-case-distinct-posix-parents');
+  const lower = path.join(root, 'audit');
+  const upper = path.join(root, 'AUDIT');
+  auditAnchor._internal.withPreparedAuditDirectories([lower, upper], () => {
+    assert.strictEqual(fs.existsSync(lower), true);
+    assert.strictEqual(fs.existsSync(upper), true);
+  }, { platform: 'linux' });
 });
 
 test('mixed-case Windows audit path aliases acquire one bootstrap lock', {

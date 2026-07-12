@@ -8,6 +8,7 @@ const path = require('node:path');
 const { main } = require('../scripts/license-issue');
 const license = require('../server/license');
 const privatePaths = require('../server/private-path');
+const WINDOWS_O_TEMPORARY = 0x40;
 
 function writePrivateKey(file, key) {
   fs.writeFileSync(file, key.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
@@ -218,6 +219,16 @@ test('license output cannot clobber the signing key or an existing file without 
     assert.deepStrictEqual(forced.exitCodes, []);
     assert.notDeepStrictEqual(fs.readFileSync(outPath), sentinel);
     assert.deepStrictEqual(fs.readFileSync(keyPath), privateBytes);
+
+    const linkedOut = path.join(tmp, 'linked-output.lic');
+    const linkedAlias = path.join(tmp, 'linked-output-alias.lic');
+    fs.writeFileSync(linkedOut, sentinel, { mode: 0o600 });
+    fs.linkSync(linkedOut, linkedAlias);
+    const linked = invoke([...baseArgs, '--out', linkedOut, '--force']);
+    assert.deepStrictEqual(linked.exitCodes, [1]);
+    assert.ok(linked.errors.some((message) => /single-link regular file/.test(message)));
+    assert.deepStrictEqual(fs.readFileSync(linkedOut), sentinel);
+    assert.deepStrictEqual(fs.readFileSync(linkedAlias), sentinel);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -241,7 +252,150 @@ test('keypair initialization rejects directory-fsync EIO without leaving a parti
   }
 });
 
-test('forced license publication rejects directory-fsync EIO and restores exact prior bytes', () => {
+test('keypair initialization rolls back either canonical key when staging-source cleanup fails', () => {
+  for (const failedName of ['license-signing-key.pem', 'license-signing-pub.pem']) {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rw-license-keypair-source-cleanup-'));
+    const keyDir = path.join(tmp, 'offline-keys');
+    const failedTarget = path.join(keyDir, failedName);
+    const originalLink = fs.linkSync;
+    const originalOpen = fs.openSync;
+    const originalUnlink = fs.unlinkSync;
+    let staged = '';
+    let denied = false;
+    fs.linkSync = (source, destination) => {
+      if (path.resolve(destination) === path.resolve(failedTarget) && !staged) {
+        staged = path.resolve(source);
+      }
+      return originalLink(source, destination);
+    };
+    fs.openSync = (candidate, flags, mode) => {
+      if (!denied && staged && path.resolve(candidate) === staged
+          && typeof flags === 'number' && (flags & WINDOWS_O_TEMPORARY) === WINDOWS_O_TEMPORARY) {
+        denied = true;
+        const error = new Error('synthetic license key staging unlink EIO');
+        error.code = 'EIO';
+        throw error;
+      }
+      return originalOpen(candidate, flags, mode);
+    };
+    fs.unlinkSync = (candidate) => {
+      if (!denied && staged && path.resolve(candidate) === staged) {
+        denied = true;
+        const error = new Error('synthetic license key staging unlink EIO');
+        error.code = 'EIO';
+        throw error;
+      }
+      return originalUnlink(candidate);
+    };
+    const errors = [];
+    const exitCodes = [];
+    try {
+      main(['--init-keypair', keyDir], {
+        console: { log() {}, error: (message) => errors.push(String(message)) },
+        setExitCode: (code) => exitCodes.push(code),
+      });
+    } finally {
+      fs.linkSync = originalLink;
+      fs.openSync = originalOpen;
+      fs.unlinkSync = originalUnlink;
+    }
+
+    try {
+      assert.strictEqual(denied, true);
+      assert.deepStrictEqual(exitCodes, [1]);
+      assert.ok(errors.length >= 1);
+      assert.strictEqual(fs.existsSync(path.join(keyDir, 'license-signing-key.pem')), false);
+      assert.strictEqual(fs.existsSync(path.join(keyDir, 'license-signing-pub.pem')), false);
+      if (fs.existsSync(keyDir)) {
+        for (const entry of fs.readdirSync(keyDir)) {
+          const stat = fs.lstatSync(path.join(keyDir, entry), { bigint: true });
+          if (stat.isFile()) assert.strictEqual(stat.nlink, 1n);
+        }
+      }
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  }
+});
+
+test('keypair failure cleanup preserves a replacement at the staging pathname', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rw-license-keypair-stage-replacement-'));
+  const keyDir = path.join(tmp, 'offline-keys');
+  const privatePath = path.join(keyDir, 'license-signing-key.pem');
+  const replacement = Buffer.from('replacement-license-staging-bytes');
+  const originalLink = fs.linkSync;
+  let staged = '';
+  fs.linkSync = (source, destination) => {
+    if (path.resolve(destination) === path.resolve(privatePath) && !staged) {
+      staged = path.resolve(source);
+      fs.renameSync(source, `${source}.retained-original`);
+      fs.writeFileSync(source, replacement, { mode: 0o600 });
+      const error = new Error('synthetic license staging publication collision');
+      error.code = 'EIO';
+      throw error;
+    }
+    return originalLink(source, destination);
+  };
+  const exitCodes = [];
+  try {
+    main(['--init-keypair', keyDir], {
+      console: { log() {}, error() {} },
+      setExitCode: (code) => exitCodes.push(code),
+    });
+  } finally {
+    fs.linkSync = originalLink;
+  }
+
+  try {
+    assert.deepStrictEqual(exitCodes, [1]);
+    assert.ok(staged);
+    assert.strictEqual(fs.existsSync(privatePath), false);
+    assert.deepStrictEqual(fs.readFileSync(staged), replacement);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('keypair rollback preserves a replacement published over the committed private key', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rw-license-keypair-rollback-replacement-'));
+  const keyDir = path.join(tmp, 'offline-keys');
+  const privatePath = path.join(keyDir, 'license-signing-key.pem');
+  const publicPath = path.join(keyDir, 'license-signing-pub.pem');
+  const replacement = Buffer.from('replacement-canonical-private-key');
+  const originalLink = fs.linkSync;
+  let replaced = false;
+  fs.linkSync = (source, destination) => {
+    if (path.resolve(destination) === path.resolve(publicPath) && !replaced) {
+      replaced = true;
+      fs.unlinkSync(privatePath);
+      fs.writeFileSync(privatePath, replacement, { mode: 0o600 });
+      const error = new Error('synthetic public-key publication failure');
+      error.code = 'EIO';
+      throw error;
+    }
+    return originalLink(source, destination);
+  };
+  const exitCodes = [];
+  try {
+    main(['--init-keypair', keyDir], {
+      console: { log() {}, error() {} },
+      setExitCode: (code) => exitCodes.push(code),
+    });
+  } finally {
+    fs.linkSync = originalLink;
+  }
+
+  try {
+    assert.strictEqual(replaced, true);
+    assert.deepStrictEqual(exitCodes, [1]);
+    assert.deepStrictEqual(fs.readFileSync(privatePath), replacement);
+    assert.strictEqual(fs.existsSync(publicPath), false);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('forced license publication rejects directory-fsync EIO and retains exact recovery bytes', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rw-license-output-durable-'));
   const keyPath = path.join(tmp, 'private.pem');
   const outPath = path.join(tmp, 'redactwall.lic');
@@ -266,9 +420,11 @@ test('forced license publication rejects directory-fsync EIO and restores exact 
       setExitCode: (code) => exitCodes.push(code),
     }));
     assert.deepStrictEqual(exitCodes, [1]);
-    assert.ok(errors.some((message) => /directory fsync EIO/.test(message)));
+    assert.ok(errors.some((message) => /prior publication was retained/.test(message)));
     assert.deepStrictEqual(fs.readFileSync(outPath), baseline);
-    assert.deepStrictEqual(fs.readdirSync(tmp).sort(), ['private.pem', 'redactwall.lic']);
+    const recovery = fs.readdirSync(tmp).filter((name) => name.includes('.rollback.') || name.includes('.failed-publication.'));
+    assert.ok(recovery.length >= 1, 'commit-uncertain recovery artifacts remain private and available');
+    assert.ok(recovery.some((name) => fs.readFileSync(path.join(tmp, name)).equals(baseline)));
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

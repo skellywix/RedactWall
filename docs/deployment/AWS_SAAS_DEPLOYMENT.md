@@ -301,7 +301,9 @@ operational. That migration should include:
 
 - Postgres datastore: SHIPPED behind `REDACTWALL_DB_DRIVER=postgres` with
   tenant-scoped queries (indexed `orgId` + forced row-level security) and a
-  database-enforced append-only audit table.
+  database-enforced append-only audit table. A multi-replica plane also needs
+  one POSIX-compatible shared audit-anchor volume mounted at the same absolute
+  `REDACTWALL_AUDIT_DIR` on every host; independent sidecars are unsupported.
 - Database migrations: SHIPPED (auto-applied ordered history on startup for
   SQLite and Postgres). Backup/restore runbooks: SHIPPED (`npm run backup`,
   `npm run backup:drill`, scheduled-backup installers; `pg_dump`/snapshots on

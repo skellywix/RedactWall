@@ -132,6 +132,254 @@ test('durable publication restores exact prior bytes when final verification fai
   assert.strictEqual(fs.existsSync(staged), false);
 });
 
+test('durable publication preserves a changed replacement and the prior rollback artifact', (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-private-publish-race-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const target = path.join(directory, 'state.json');
+  const staged = path.join(directory, '.state.json.staged');
+  const moved = path.join(directory, 'published-moved-aside');
+  fs.writeFileSync(target, 'exact prior bytes');
+  fs.writeFileSync(staged, 'new publication');
+  let failure;
+  try {
+    privatePaths.publishFileDurably(staged, target, {
+      verifyPublished(file) {
+        fs.renameSync(file, moved);
+        fs.writeFileSync(file, 'replacement-owned');
+        throw new Error('synthetic changed replacement');
+      },
+    });
+  } catch (error) { failure = error; }
+  assert.strictEqual(failure?.code, 'PRIVATE_PATH_PUBLICATION_UNCERTAIN');
+  assert.strictEqual(fs.readFileSync(target, 'utf8'), 'replacement-owned');
+  assert.strictEqual(fs.readFileSync(moved, 'utf8'), 'new publication');
+  assert.ok(failure.rollbackPath && fs.existsSync(failure.rollbackPath));
+  assert.strictEqual(fs.readFileSync(failure.rollbackPath, 'utf8'), 'exact prior bytes');
+});
+
+test('rollback restoration retains its exact guard when the restored path is swapped before source unlink', (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-private-restore-link-race-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const target = path.join(directory, 'state.json');
+  const staged = path.join(directory, '.state.json.staged');
+  const publishedMoved = path.join(directory, 'published-moved');
+  const restoredMoved = path.join(directory, 'restored-moved');
+  fs.writeFileSync(target, 'prior');
+  fs.writeFileSync(staged, 'new-publication');
+  let swapped = false;
+  const fsImpl = {
+    ...fs,
+    unlinkSync(candidate) {
+      if (process.platform !== 'win32' && !swapped
+          && String(candidate).includes('.failed-publication.')) {
+        swapped = true;
+        fs.renameSync(target, restoredMoved);
+        fs.writeFileSync(target, 'newest-replacement', { flag: 'wx' });
+      }
+      return fs.unlinkSync(candidate);
+    },
+  };
+  let failure;
+  assert.throws(() => privatePaths.publishFileDurably(staged, target, {
+    fs: fsImpl,
+    onBeforeExactFileDeleteClose({ target: cleanupTarget }) {
+      if (!swapped && String(cleanupTarget).includes('.failed-publication.')) {
+        swapped = true;
+        fs.renameSync(target, restoredMoved);
+        fs.writeFileSync(target, 'newest-replacement', { flag: 'wx' });
+      }
+    },
+    verifyPublished(file) {
+      fs.renameSync(file, publishedMoved);
+      fs.writeFileSync(file, 'changed-replacement', { flag: 'wx' });
+      throw new Error('synthetic verification failure');
+    },
+  }), (error) => {
+    failure = error;
+    return error && error.code === 'PRIVATE_PATH_PUBLICATION_UNCERTAIN';
+  });
+  assert.strictEqual(swapped, true);
+  assert.strictEqual(fs.readFileSync(target, 'utf8'), 'newest-replacement');
+  assert.ok(failure.additionalRetainedPath && fs.existsSync(failure.additionalRetainedPath));
+  assert.strictEqual(fs.readFileSync(failure.additionalRetainedPath, 'utf8'), 'changed-replacement');
+  assert.ok(failure.rollbackPath && fs.existsSync(failure.rollbackPath));
+  assert.strictEqual(fs.readFileSync(failure.rollbackPath, 'utf8'), 'prior');
+});
+
+test('durable publication preserves a target replaced before prior-state quarantine', (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-private-pre-quarantine-race-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const target = path.join(directory, 'state.json');
+  const staged = path.join(directory, '.state.json.staged');
+  const movedPrior = path.join(directory, 'prior-moved-by-other-writer');
+  fs.writeFileSync(target, 'exact prior bytes');
+  fs.writeFileSync(staged, 'new publication');
+  let replaced = false;
+  const fsImpl = {
+    ...fs,
+    renameSync(source, destination) {
+      if (!replaced && source === target && destination.includes('.rollback.')) {
+        replaced = true;
+        fs.renameSync(target, movedPrior);
+        fs.writeFileSync(target, 'replacement-owned');
+      }
+      return fs.renameSync(source, destination);
+    },
+  };
+  assert.throws(() => privatePaths.publishFileDurably(staged, target, { fs: fsImpl }),
+    (error) => error?.code === 'PRIVATE_PATH_PUBLICATION_UNCERTAIN');
+  assert.strictEqual(fs.readFileSync(target, 'utf8'), 'replacement-owned');
+  assert.strictEqual(fs.readFileSync(movedPrior, 'utf8'), 'exact prior bytes');
+  assert.strictEqual(fs.existsSync(staged), false, 'the publisher removes its exact unused staging artifact');
+});
+
+test('durable publication preserves a replacement created before its exclusive link', (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-private-pre-link-race-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const target = path.join(directory, 'state.json');
+  const staged = path.join(directory, '.state.json.staged');
+  fs.writeFileSync(target, 'exact prior bytes');
+  fs.writeFileSync(staged, 'new publication');
+  let replaced = false;
+  const fsImpl = {
+    ...fs,
+    linkSync(source, destination) {
+      if (!replaced && source === staged && destination === target) {
+        replaced = true;
+        fs.writeFileSync(target, 'replacement-owned', { flag: 'wx' });
+      }
+      return fs.linkSync(source, destination);
+    },
+  };
+  let failure;
+  try { privatePaths.publishFileDurably(staged, target, { fs: fsImpl }); }
+  catch (error) { failure = error; }
+  assert.strictEqual(failure?.code, 'PRIVATE_PATH_PUBLICATION_UNCERTAIN');
+  assert.strictEqual(fs.readFileSync(target, 'utf8'), 'replacement-owned');
+  assert.ok(failure.rollbackPath && fs.existsSync(failure.rollbackPath));
+  assert.strictEqual(fs.readFileSync(failure.rollbackPath, 'utf8'), 'exact prior bytes');
+  assert.strictEqual(fs.existsSync(staged), false, 'the publisher removes its exact unused staging artifact');
+});
+
+test('first durable publication preserves a changed replacement instead of deleting it', (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-private-first-publish-race-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const target = path.join(directory, 'state.json');
+  const staged = path.join(directory, '.state.json.staged');
+  const moved = path.join(directory, 'published-moved-aside');
+  fs.writeFileSync(staged, 'new publication');
+  assert.throws(() => privatePaths.publishFileDurably(staged, target, {
+    verifyPublished(file) {
+      fs.renameSync(file, moved);
+      fs.writeFileSync(file, 'replacement-owned');
+      throw new Error('synthetic changed replacement');
+    },
+  }), (error) => error?.code === 'PRIVATE_PATH_PUBLICATION_UNCERTAIN');
+  assert.strictEqual(fs.readFileSync(target, 'utf8'), 'replacement-owned');
+  assert.strictEqual(fs.readFileSync(moved, 'utf8'), 'new publication');
+});
+
+test('exclusive durable publication preserves a changed replacement', (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-private-exclusive-race-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const target = path.join(directory, 'state.json');
+  const staged = path.join(directory, '.state.json.staged');
+  const moved = path.join(directory, 'published-moved-aside');
+  fs.writeFileSync(staged, 'new publication');
+  assert.throws(() => privatePaths.publishFileExclusiveDurably(staged, target, {
+    verifyPublished(file) {
+      fs.renameSync(file, moved);
+      fs.writeFileSync(file, 'replacement-owned');
+      throw new Error('synthetic changed replacement');
+    },
+  }), (error) => error?.code === 'PRIVATE_PATH_PUBLICATION_UNCERTAIN');
+  assert.strictEqual(fs.readFileSync(target, 'utf8'), 'replacement-owned');
+  assert.strictEqual(fs.readFileSync(moved, 'utf8'), 'new publication');
+  assert.strictEqual(fs.readFileSync(staged, 'utf8'), 'new publication');
+});
+
+test('successful durable publication removes and flushes its rollback link', (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-private-publish-clean-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const target = path.join(directory, 'state.json');
+  const staged = path.join(directory, '.state.json.staged');
+  fs.writeFileSync(target, 'prior');
+  fs.writeFileSync(staged, 'next');
+  privatePaths.publishFileDurably(staged, target);
+  assert.strictEqual(fs.readFileSync(target, 'utf8'), 'next');
+  assert.deepStrictEqual(fs.readdirSync(directory), ['state.json']);
+});
+
+test('post-commit rollback cleanup failure returns success and latches a sanitized warning', (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-private-committed-cleanup-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  privatePaths._resetCommittedCleanupHealthForTest();
+  t.after(() => privatePaths._resetCommittedCleanupHealthForTest());
+  const target = path.join(directory, 'state.json');
+  const staged = path.join(directory, '.state.json.staged');
+  fs.writeFileSync(target, 'prior');
+  fs.writeFileSync(staged, 'committed-next');
+  let warning;
+  const fsImpl = {
+    ...fs,
+    renameSync(source, destination) {
+      if (String(source).includes('.rollback.') && String(destination).includes('.cleanup.')) {
+        const error = new Error('synthetic rollback cleanup EIO');
+        error.code = 'EIO';
+        throw error;
+      }
+      return fs.renameSync(source, destination);
+    },
+  };
+
+  assert.strictEqual(privatePaths.publishFileDurably(staged, target, {
+    fs: fsImpl,
+    cleanupComponent: 'test-publication',
+    onCommittedCleanupWarning(value) { warning = value; },
+  }), target);
+  assert.strictEqual(fs.readFileSync(target, 'utf8'), 'committed-next');
+  const rollback = fs.readdirSync(directory).find((entry) => entry.includes('.rollback.'));
+  assert.ok(rollback);
+  assert.strictEqual(fs.readFileSync(path.join(directory, rollback), 'utf8'), 'prior');
+  assert.deepStrictEqual(
+    { component: warning.component, phase: warning.phase, code: warning.code },
+    { component: 'test-publication', phase: 'rollback-artifact-cleanup', code: 'EIO' },
+  );
+  assert.strictEqual(privatePaths.committedCleanupHealth().ok, false);
+});
+
+test('post-commit exact-handle cleanup preserves a final pathname replacement', {
+  skip: process.platform !== 'win32' ? 'exact delete-on-close coverage is Windows-specific' : false,
+}, (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-private-final-cleanup-race-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  privatePaths._resetCommittedCleanupHealthForTest();
+  t.after(() => privatePaths._resetCommittedCleanupHealthForTest());
+  const target = path.join(directory, 'state.json');
+  const staged = path.join(directory, '.state.json.staged');
+  fs.writeFileSync(target, 'prior');
+  fs.writeFileSync(staged, 'next');
+  let replacementPath = '';
+  const warnings = [];
+  const result = privatePaths.publishFileDurably(staged, target, {
+    onBeforeExactFileDeleteClose({ target: cleanupTarget }) {
+      if (replacementPath || !String(cleanupTarget).includes('.cleanup.')) return;
+      const movedExact = `${cleanupTarget}.moved-exact`;
+      fs.renameSync(cleanupTarget, movedExact);
+      fs.writeFileSync(cleanupTarget, 'new-owner-replacement', { flag: 'wx' });
+      replacementPath = cleanupTarget;
+    },
+    onCommittedCleanupWarning(warning) { warnings.push(warning); },
+  });
+  assert.strictEqual(result, target);
+  assert.strictEqual(fs.readFileSync(target, 'utf8'), 'next');
+  assert.ok(replacementPath && fs.existsSync(replacementPath));
+  assert.strictEqual(fs.readFileSync(replacementPath, 'utf8'), 'new-owner-replacement');
+  assert.strictEqual(warnings.length, 1);
+  assert.strictEqual(warnings[0].retainedPath, replacementPath);
+  assert.strictEqual(privatePaths.committedCleanupHealth().ok, false);
+});
+
 test('shared Windows ACL verification fails closed on inherited or extra principals', (t) => {
   const file = tempFile(t, 'private-acl-broad');
   const broad = exactAcl(file).replace(
@@ -154,6 +402,22 @@ test('shared Windows ACL verification fails closed on inherited or extra princip
     exactAcl(file).replace('(F)', '(DENY)(F)'),
     'TEST\\policy-user',
   ), false);
+  assert.strictEqual(privatePaths.privateAclListing([
+    `${file} EVILTEST\\policy-user:(F)`,
+    '          NT AUTHORITY\\SYSTEM:(F)',
+  ].join('\r\n'), 'TEST\\policy-user'), false, 'principal suffix collisions are foreign ACEs');
+  assert.strictEqual(privatePaths.privateAclListing([
+    `${file} NT AUTHORITY\\SYSTEM:(F)`,
+    '          BUILTIN\\Users:(F)',
+  ].join('\r\n'), 'NT AUTHORITY\\SYSTEM'), false, 'LocalSystem cannot hide an extra ACE');
+  assert.strictEqual(privatePaths.privateAclListing(
+    `${file} NT AUTHORITY\\SYSTEM:(F)`,
+    'NT AUTHORITY\\SYSTEM',
+  ), true, 'LocalSystem deduplicates the owner and system principal');
+  assert.strictEqual(privatePaths.privateAclListing(
+    `${file} S-1-5-18:(OI)(CI)(F)`,
+    'S-1-5-18',
+  ), true, 'the LocalSystem SID alias is accepted exactly');
 });
 
 test('shared Windows ACL verification rejects an exact DACL with a foreign descriptor owner', (t) => {
@@ -274,7 +538,6 @@ test('policy signing-key initialization uses the shared verified Windows ACL con
   assert.strictEqual(keyPublishedUnderBothLocks, true);
   assert.strictEqual(fs.existsSync(lockPath), false);
   assert.strictEqual(fs.existsSync(directoryLockPath), false);
-  assert.ok(calls.some((call) => call.args[0] === keyFile && call.args.includes('/grant:r')));
   assert.ok(calls.some((call) => call.args.length === 1 && call.args[0] === keyFile));
   assert.ok(calls.every((call) => call.command === 'icacls.exe' && call.options.windowsHide === true));
 });
@@ -362,6 +625,43 @@ test('bounded handle reads reject path-to-handle identity swaps', (t) => {
     },
   };
   assert.throws(() => privatePaths.readBoundedRegularFile(file, {
+    fs: fsImpl,
+    maxBytes: 1024,
+    label: 'policy public-key file',
+  }), /changed while opening/);
+});
+
+test('bounded handle reads compare exact file ids when Number-rounded NTFS identities collide', (t) => {
+  const requested = tempFile(t, 'private-rounded-id-a', 'trusted-public-key');
+  const replacement = path.join(path.dirname(requested), 'private-rounded-id-b');
+  fs.writeFileSync(replacement, 'attacker-public-key', { mode: 0o600 });
+  const requestedId = 10414574140023031n;
+  const replacementId = 10414574140023032n;
+  assert.strictEqual(Number(requestedId), Number(replacementId), 'fixture must reproduce Number rounding');
+  const withIdentity = (stat, exact, ino) => {
+    const changed = Object.create(stat);
+    Object.defineProperties(changed, {
+      dev: { value: exact ? 3n : 3 },
+      ino: { value: exact ? ino : Number(ino) },
+    });
+    return changed;
+  };
+  const fsImpl = {
+    ...fs,
+    lstatSync(target, options) {
+      const exact = options?.bigint === true;
+      return withIdentity(fs.lstatSync(target, options), exact, requestedId);
+    },
+    openSync(target, flags, mode) {
+      return fs.openSync(target === requested ? replacement : target, flags, mode);
+    },
+    fstatSync(descriptor, options) {
+      const exact = options?.bigint === true;
+      return withIdentity(fs.fstatSync(descriptor, options), exact, replacementId);
+    },
+  };
+
+  assert.throws(() => privatePaths.readBoundedRegularFile(requested, {
     fs: fsImpl,
     maxBytes: 1024,
     label: 'policy public-key file',

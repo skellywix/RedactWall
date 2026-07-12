@@ -14,7 +14,15 @@ RUN --mount=type=cache,target=/root/.npm npm ci --prefix console
 COPY . .
 RUN npm run build --prefix console
 
-FROM node:22-bookworm-slim AS runtime
+# PostgreSQL's supported client image supplies pg_dump/pg_restore 17 so the
+# documented backup and drill commands work inside the shipped container too.
+# Node is copied from the matching Debian builder image; the database server
+# entrypoint is never used.
+FROM postgres:17-bookworm AS runtime
+RUN groupadd --gid 1000 node \
+    && useradd --uid 1000 --gid 1000 --create-home --shell /usr/sbin/nologin node
+COPY --from=builder /usr/local/ /usr/local/
+RUN node --version && pg_dump --version && pg_restore --version
 ENV NODE_ENV=production \
     PORT=4000 \
     REDACTWALL_DB_PATH=/data/redactwall.db \

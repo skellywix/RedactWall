@@ -305,16 +305,19 @@ test('a newly verified policy is not activated when durable cache publication fa
   const persisted = fs.readFileSync(fixture.cachePath);
 
   const failingFs = Object.create(fs);
-  failingFs.renameSync = (source, destination) => {
-    if (path.resolve(destination) === path.resolve(fixture.cachePath)) {
+  let failedPublication = false;
+  failingFs.linkSync = (source, destination) => {
+    if (!failedPublication && path.resolve(destination) === path.resolve(fixture.cachePath)) {
+      failedPublication = true;
       const error = new Error('simulated cache publication failure');
       error.code = 'EACCES';
       throw error;
     }
-    return fs.renameSync(source, destination);
+    return fs.linkSync(source, destination);
   };
   const rejected = signedPolicy.acceptSignedPolicyBundle(newest, { ...options, fs: failingFs });
   assert.deepStrictEqual(rejected, { ok: false, reason: 'policy_cache_unavailable' });
+  assert.strictEqual(failedPublication, true);
   assert.deepStrictEqual(fs.readFileSync(fixture.cachePath), persisted);
 
   // A failed publication must not advance the process-local high-water mark.

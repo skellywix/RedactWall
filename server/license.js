@@ -45,6 +45,8 @@ MCowBQYDK2VwAyEA0lard41yplR7X9CCdwvvvbjWIPUGOisoi4jfQV1GY6c=
 
 const DEFAULT_GRACE_DAYS = 30;
 const MAX_LICENSE_FILE_BYTES = 64 * 1024;
+const MAX_LICENSE_FILE_BYTES_BIGINT = BigInt(MAX_LICENSE_FILE_BYTES);
+const LICENSE_DIRECTORY_INIT_TIMEOUT_MS = 60_000;
 const PLANS = ['standard', 'enterprise'];
 
 function embeddedPublicKey() {
@@ -58,7 +60,20 @@ function licensePath() {
   return path.join(path.dirname(base), 'redactwall.lic');
 }
 
-function writeLicenseBytesAtomically(contents, options = {}) {
+function licenseDirectorySecurity(options = {}, fsImpl = options.fs || fs) {
+  return {
+    ...options,
+    fs: fsImpl,
+    directory: true,
+    label: 'license directory',
+    ownerLabel: 'license directory',
+    lockTimeoutMs: options.licenseDirectoryLockTimeoutMs || LICENSE_DIRECTORY_INIT_TIMEOUT_MS,
+    lockTimeoutMaximumMs: LICENSE_DIRECTORY_INIT_TIMEOUT_MS,
+    cleanupComponent: 'license-directory-lock',
+  };
+}
+
+function writeLicenseBytesAtomicallyUnlocked(contents, options = {}) {
   const fsImpl = options.fs || fs;
   const target = options.path || licensePath();
   const directory = path.dirname(target);
@@ -66,107 +81,431 @@ function writeLicenseBytesAtomically(contents, options = {}) {
   const mode = options.mode == null ? 0o600 : options.mode;
   let descriptor = null;
   let created = false;
+  let stagedIdentity = null;
   try {
     fsImpl.mkdirSync(directory, { recursive: true, mode: 0o700 });
     descriptor = fsImpl.openSync(temp, 'wx', mode);
     created = true;
+    const openedPath = exactLstat(fsImpl, temp);
+    const openedHandle = exactFstat(fsImpl, descriptor);
+    if (!sameLicenseSnapshot(openedPath, openedHandle)) {
+      throw licenseReadFailure('license staging file changed while opening');
+    }
+    stagedIdentity = openedPath;
+    privatePaths.securePrivatePath(temp, {
+      ...options,
+      fs: fsImpl,
+      directory: false,
+      fresh: true,
+      label: 'license staging file',
+      ownerLabel: 'license file',
+    });
+    const securedPath = exactLstat(fsImpl, temp);
+    const securedHandle = exactFstat(fsImpl, descriptor);
+    if (!sameLicenseSnapshot(securedPath, securedHandle)) {
+      throw licenseReadFailure('license staging file changed while securing');
+    }
+    stagedIdentity = securedPath;
     fsImpl.writeFileSync(descriptor, contents);
     fsImpl.fsyncSync(descriptor);
     fsImpl.fchmodSync(descriptor, mode);
+    const writtenHandle = exactFstat(fsImpl, descriptor);
+    const writtenPath = exactLstat(fsImpl, temp);
+    if (!sameLicenseSnapshot(writtenHandle, writtenPath)
+        || writtenHandle.size !== BigInt(Buffer.byteLength(contents))) {
+      throw licenseReadFailure('license staging file changed while writing');
+    }
+    stagedIdentity = writtenPath;
     fsImpl.closeSync(descriptor);
     descriptor = null;
-    privatePaths.publishFileDurably(temp, target, { ...options, fs: fsImpl });
+    const callerVerify = options.verifyPublished;
+    const publish = options.exclusive
+      ? privatePaths.publishFileExclusiveDurably
+      : privatePaths.publishFileDurably;
+    publish(temp, target, {
+      ...options,
+      fs: fsImpl,
+      cleanupComponent: 'license-file-publication',
+      ...(options.exclusive ? { consumeSource: true } : {}),
+      verifyPublished(published) {
+        privatePaths.assertPrivatePath(published, {
+          ...options,
+          fs: fsImpl,
+          directory: false,
+          label: 'license file',
+          ownerLabel: 'license file',
+        });
+        const identity = inspectLicenseFile(published, fsImpl);
+        if (!identity) throw licenseReadFailure('published license is unavailable');
+        if (typeof options.onPublishedIdentity === 'function') options.onPublishedIdentity(identity);
+        if (typeof callerVerify === 'function') return callerVerify(published);
+        return undefined;
+      },
+    });
     created = false;
-    try { fsImpl.chmodSync(target, mode); } catch {}
   } catch (error) {
     if (descriptor !== null) {
       try { fsImpl.closeSync(descriptor); } catch {}
     }
     if (created) {
-      try { fsImpl.unlinkSync(temp); } catch {}
+      if (stagedIdentity) {
+        try { removeExactLicenseArtifact(temp, stagedIdentity, { ...options, fs: fsImpl }); }
+        catch (cleanupError) {
+          if (!cleanupError || cleanupError.code !== 'ENOENT') {
+            if (error && (typeof error === 'object' || typeof error === 'function')) {
+              try { error.cleanupError = cleanupError; } catch {}
+              for (const field of ['retainedPath', 'additionalRetainedPath', 'removedPath']) {
+                if (cleanupError && cleanupError[field]) {
+                  try { if (!error[field]) error[field] = cleanupError[field]; } catch {}
+                }
+              }
+            }
+          }
+        }
+      } else if (error && (typeof error === 'object' || typeof error === 'function')) {
+        try { if (!error.retainedPath) error.retainedPath = temp; } catch {}
+      }
     }
     throw error;
   }
   return target;
 }
 
-function writeLicenseAtomically(text, options = {}) {
-  return writeLicenseBytesAtomically(
-    Buffer.from(`${String(text || '').trim()}\n`, 'utf8'),
-    options,
-  );
+function writeLicenseBytesAtomically(contents, options = {}) {
+  const fsImpl = options.fs || fs;
+  const target = path.resolve(options.path || licensePath());
+  return privatePaths.withPrivateDirectoryMutationLockSync(path.dirname(target), () => (
+    writeLicenseBytesAtomicallyUnlocked(contents, {
+      ...options,
+      fs: fsImpl,
+      path: target,
+    })
+  ), licenseDirectorySecurity(options, fsImpl));
 }
 
-function removeLicenseFile(options = {}) {
-  const fsImpl = options.fs || fs;
-  const target = options.path || licensePath();
-  try {
-    fsImpl.unlinkSync(target);
-  } catch (error) {
-    if (!error || error.code !== 'ENOENT') throw error;
+function licenseTextBytes(text) {
+  return Buffer.from(`${String(text || '').trim()}\n`, 'utf8');
+}
+
+function writeLicenseAtomicallyUnlocked(text, options = {}) {
+  return writeLicenseBytesAtomicallyUnlocked(licenseTextBytes(text), options);
+}
+
+function writeLicenseAtomically(text, options = {}) {
+  return writeLicenseBytesAtomically(licenseTextBytes(text), options);
+}
+
+function exactLstat(fsImpl, target) {
+  return fsImpl.lstatSync(target, { bigint: true });
+}
+
+function exactFstat(fsImpl, descriptor) {
+  return fsImpl.fstatSync(descriptor, { bigint: true });
+}
+
+function stableLicenseFile(stat) {
+  return !!stat && typeof stat.dev === 'bigint' && typeof stat.ino === 'bigint'
+    && typeof stat.size === 'bigint' && typeof stat.mode === 'bigint'
+    && stat.dev > 0n && stat.ino > 0n && stat.size >= 0n
+    && stat.isFile() && !stat.isSymbolicLink() && stat.nlink === 1n;
+}
+
+function sameStatTime(left, right, name) {
+  const ns = `${name}Ns`;
+  if (left[ns] !== undefined || right[ns] !== undefined) {
+    return left[ns] !== undefined && right[ns] !== undefined && left[ns] === right[ns];
   }
-  privatePaths.fsyncDirectory(path.dirname(target), { ...options, fs: fsImpl });
+  const ms = `${name}Ms`;
+  return left[ms] !== undefined && right[ms] !== undefined && left[ms] === right[ms];
+}
+
+function sameLicenseSnapshot(left, right) {
+  return stableLicenseFile(left) && stableLicenseFile(right)
+    && left.dev === right.dev && left.ino === right.ino && left.size === right.size
+    && sameStatTime(left, right, 'mtime') && sameStatTime(left, right, 'ctime');
+}
+
+function licenseReadFailure(message, cause) {
+  const error = new Error(message);
+  error.code = 'LICENSE_FILE_READ_FAILED';
+  if (cause) error.cause = cause;
+  return error;
+}
+
+function inspectLicenseFile(target, fsImpl) {
+  let before;
+  try {
+    before = exactLstat(fsImpl, target);
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return null;
+    throw licenseReadFailure('license file could not be inspected', error);
+  }
+  if (!stableLicenseFile(before) || before.size > MAX_LICENSE_FILE_BYTES_BIGINT) {
+    throw licenseReadFailure('license path is not a bounded regular file');
+  }
+  return before;
+}
+
+function readLicenseSnapshot(target, before, fsImpl) {
+  const output = Buffer.alloc(MAX_LICENSE_FILE_BYTES + 1);
+  const noFollow = fs.constants.O_NOFOLLOW || 0;
+  let descriptor;
+  try {
+    descriptor = fsImpl.openSync(target, fs.constants.O_RDONLY | noFollow);
+    const opened = exactFstat(fsImpl, descriptor);
+    if (!sameLicenseSnapshot(before, opened)) throw licenseReadFailure('license file changed while opening');
+    let offset = 0;
+    while (offset < output.length) {
+      const count = fsImpl.readSync(descriptor, output, offset, output.length - offset, null);
+      if (!count) break;
+      offset += count;
+    }
+    const after = exactFstat(fsImpl, descriptor);
+    const pathAfter = exactLstat(fsImpl, target);
+    if (offset > MAX_LICENSE_FILE_BYTES || BigInt(offset) !== opened.size
+        || !sameLicenseSnapshot(opened, after) || !sameLicenseSnapshot(after, pathAfter)) {
+      throw licenseReadFailure('license file changed while reading');
+    }
+    return output.subarray(0, offset);
+  } catch (error) {
+    if (error && error.code === 'LICENSE_FILE_READ_FAILED') throw error;
+    throw licenseReadFailure('license file could not be read', error);
+  } finally {
+    if (descriptor !== undefined) try { fsImpl.closeSync(descriptor); } catch {}
+  }
 }
 
 function licenseFileSnapshot(target, options = {}) {
   const fsImpl = options.fs || fs;
-  let before;
-  try {
-    before = fsImpl.lstatSync(target);
-  } catch (error) {
-    if (error && error.code === 'ENOENT') return { exists: false };
-    const wrapped = new Error('license file could not be inspected');
-    wrapped.code = 'LICENSE_FILE_READ_FAILED';
-    wrapped.cause = error;
-    throw wrapped;
+  const before = inspectLicenseFile(target, fsImpl);
+  if (!before) return { exists: false };
+  const contents = readLicenseSnapshot(target, before, fsImpl);
+  const after = inspectLicenseFile(target, fsImpl);
+  if (!after || !sameLicenseSnapshot(before, after)) {
+    throw licenseReadFailure('license file changed after reading');
   }
-  if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1
-      || before.size > MAX_LICENSE_FILE_BYTES) {
-    const error = new Error('license path is not a bounded regular file');
-    error.code = 'LICENSE_FILE_READ_FAILED';
-    throw error;
-  }
-  let contents;
-  let after;
-  try {
-    contents = fsImpl.readFileSync(target);
-    after = fsImpl.lstatSync(target);
-  } catch (error) {
-    const wrapped = new Error('license file could not be read');
-    wrapped.code = 'LICENSE_FILE_READ_FAILED';
-    wrapped.cause = error;
-    throw wrapped;
-  }
-  if (!after.isFile() || after.isSymbolicLink() || after.nlink !== 1
-      || contents.length !== before.size || after.size !== before.size
-      || (before.dev && after.dev && before.dev !== after.dev)
-      || (before.ino && after.ino && before.ino !== after.ino)
-      || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs) {
-    const error = new Error('license file changed while reading');
-    error.code = 'LICENSE_FILE_READ_FAILED';
-    throw error;
-  }
-  return { exists: true, contents, mode: before.mode & 0o777 };
+  return { exists: true, contents, mode: Number(before.mode & 0o777n), identity: after };
 }
 
-function restoreLicenseSnapshot(target, snapshot, options = {}) {
+function restoreLicenseSnapshotUnlocked(target, snapshot, options = {}) {
   if (snapshot.exists) {
-    writeLicenseBytesAtomically(snapshot.contents, {
+    writeLicenseBytesAtomicallyUnlocked(snapshot.contents, {
       ...options,
       path: target,
       mode: snapshot.mode,
+      exclusive: true,
     });
-  } else {
-    removeLicenseFile({ ...options, path: target });
+    return;
+  }
+  const current = inspectLicenseFile(target, options.fs || fs);
+  if (current) {
+    throw licenseReadFailure('a replacement license appeared during rollback');
+  }
+}
+
+function restoreLicenseSnapshot(target, snapshot, options = {}) {
+  const fsImpl = options.fs || fs;
+  const resolved = path.resolve(target);
+  return privatePaths.withPrivateDirectoryMutationLockSync(path.dirname(resolved), () => (
+    restoreLicenseSnapshotUnlocked(resolved, snapshot, { ...options, fs: fsImpl })
+  ), licenseDirectorySecurity(options, fsImpl));
+}
+
+function licenseRollbackFailure(message, cause, details = {}) {
+  const error = new Error(message);
+  error.code = 'LICENSE_ROLLBACK_FAILED';
+  error.cause = cause;
+  Object.assign(error, details);
+  return error;
+}
+
+function sameLicenseCandidate(left, right) {
+  return !!left?.exists && !!right?.exists
+    && stableLicenseFile(left.identity) && stableLicenseFile(right.identity)
+    && left.identity.dev === right.identity.dev && left.identity.ino === right.identity.ino
+    && left.identity.nlink === 1n && right.identity.nlink === 1n
+    && Buffer.isBuffer(left.contents) && Buffer.isBuffer(right.contents)
+    && left.contents.equals(right.contents);
+}
+
+function linkedLicenseStat(target, expectedLinks, fsImpl) {
+  const stat = exactLstat(fsImpl, target);
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.dev <= 0n || stat.ino <= 0n
+      || stat.nlink !== BigInt(expectedLinks)) {
+    throw new Error('retained license artifact has no stable identity');
+  }
+  return stat;
+}
+
+function sameLinkedLicense(left, right) {
+  return left.dev === right.dev && left.ino === right.ino && left.size === right.size
+    && sameStatTime(left, right, 'mtime');
+}
+
+function removeExactLicenseArtifact(target, expected, options = {}) {
+  const fsImpl = options.fs || fs;
+  try {
+    privatePaths.removeExactPublicationFile(target, expected, { ...options, fs: fsImpl });
+    if ((options.platform || process.platform) !== 'win32') {
+      privatePaths.fsyncDirectory(path.dirname(target), { ...options, fs: fsImpl });
+    }
+  } catch (error) {
+    if (!error.retainedPath && !error.additionalRetainedPath && !error.removedPath) {
+      try { exactLstat(fsImpl, target); error.retainedPath = target; }
+      catch (inspectError) {
+        if (inspectError && inspectError.code === 'ENOENT') error.removedPath = target;
+      }
+    }
+    throw error;
+  }
+}
+
+function restoreChangedLicense(quarantine, target, options, originalError) {
+  const fsImpl = options.fs || fs;
+  const guard = `${quarantine}.restore.${process.pid}.${crypto.randomBytes(12).toString('hex')}`;
+  let quarantinePresent = true;
+  let guardPresent = false;
+  try {
+    const source = licenseFileSnapshot(quarantine, { ...options, fs: fsImpl });
+    if (!source.exists) throw new Error('changed license replacement is unavailable');
+    fsImpl.linkSync(quarantine, target);
+    fsImpl.linkSync(quarantine, guard);
+    guardPresent = true;
+    let restored = linkedLicenseStat(target, 3, fsImpl);
+    let retained = linkedLicenseStat(guard, 3, fsImpl);
+    const sourceLink = linkedLicenseStat(quarantine, 3, fsImpl);
+    if (!sameLinkedLicense(source.identity, restored) || !sameLinkedLicense(source.identity, retained)
+        || !sameLinkedLicense(source.identity, sourceLink)) {
+      throw new Error('changed license replacement could not be identity-bound');
+    }
+    removeExactLicenseArtifact(quarantine, sourceLink, options);
+    quarantinePresent = false;
+    restored = linkedLicenseStat(target, 2, fsImpl);
+    retained = linkedLicenseStat(guard, 2, fsImpl);
+    if (!sameLinkedLicense(source.identity, restored) || !sameLinkedLicense(source.identity, retained)) {
+      throw new Error('changed license replacement changed during restoration');
+    }
+    removeExactLicenseArtifact(guard, retained, options);
+    guardPresent = false;
+    restored = linkedLicenseStat(target, 1, fsImpl);
+    if (!sameLinkedLicense(source.identity, restored)) {
+      throw new Error('changed license replacement changed after restoration');
+    }
+  } catch (error) {
+    throw licenseRollbackFailure('changed license replacement was retained for recovery', originalError || error, {
+      ...(error.retainedPath
+        ? { retainedPath: error.retainedPath }
+        : (quarantinePresent ? { retainedPath: quarantine } : {})),
+      ...(error.additionalRetainedPath
+        ? { additionalRetainedPath: error.additionalRetainedPath }
+        : (guardPresent ? { additionalRetainedPath: guard } : {})),
+      ...(error.removedPath ? { removedPath: error.removedPath } : {}),
+      replacementPath: target,
+    });
+  }
+  throw licenseRollbackFailure('license changed during rollback; replacement was preserved', originalError, {
+    replacementPath: target,
+  });
+}
+
+function rollbackLicenseCandidate(target, before, candidate, options, originalError) {
+  const fsImpl = options.fs || fs;
+  const quarantine = `${target}.failed-install.${process.pid}.${crypto.randomBytes(12).toString('hex')}`;
+  try {
+    fsImpl.renameSync(target, quarantine);
+  } catch (error) {
+    throw licenseRollbackFailure('license rollback could not quarantine the installed candidate', originalError || error);
+  }
+  let quarantined;
+  try { quarantined = licenseFileSnapshot(quarantine, { ...options, fs: fsImpl }); }
+  catch (error) {
+    throw licenseRollbackFailure('license rollback retained an unverifiable replacement', originalError || error, {
+      retainedPath: quarantine,
+    });
+  }
+  if (!sameLicenseCandidate(candidate, quarantined)) {
+    restoreChangedLicense(quarantine, target, options, originalError);
+  }
+  try {
+    restoreLicenseSnapshotUnlocked(target, before, options);
+  } catch (error) {
+    throw licenseRollbackFailure('prior license could not be restored', originalError || error, {
+      retainedPath: quarantine,
+    });
+  }
+  let exact;
+  try { exact = licenseFileSnapshot(quarantine, { ...options, fs: fsImpl }); }
+  catch (error) {
+    throw licenseRollbackFailure('installed license quarantine could not be reverified', originalError || error, {
+      retainedPath: quarantine,
+    });
+  }
+  if (!sameLicenseCandidate(candidate, exact)) {
+    throw licenseRollbackFailure('installed license quarantine changed before cleanup', originalError, {
+      retainedPath: quarantine,
+    });
+  }
+  const cleanupGuard = `${quarantine}.cleanup.${process.pid}.${crypto.randomBytes(12).toString('hex')}`;
+  let quarantinePresent = true;
+  let guardPresent = false;
+  try {
+    fsImpl.linkSync(quarantine, cleanupGuard);
+    guardPresent = true;
+    const source = linkedLicenseStat(quarantine, 2, fsImpl);
+    const guard = linkedLicenseStat(cleanupGuard, 2, fsImpl);
+    if (!sameLinkedLicense(candidate.identity, source) || !sameLinkedLicense(candidate.identity, guard)) {
+      throw new Error('installed license cleanup guard changed');
+    }
+    removeExactLicenseArtifact(quarantine, source, options);
+    quarantinePresent = false;
+    const retained = licenseFileSnapshot(cleanupGuard, { ...options, fs: fsImpl });
+    if (!sameLicenseCandidate(candidate, retained)) {
+      throw new Error('installed license cleanup guard changed after quarantine removal');
+    }
+    removeExactLicenseArtifact(cleanupGuard, retained.identity, options);
+    guardPresent = false;
+  } catch (error) {
+    throw licenseRollbackFailure('installed license quarantine could not be removed', originalError || error, {
+      ...(error.retainedPath
+        ? { retainedPath: error.retainedPath }
+        : (quarantinePresent ? { retainedPath: quarantine } : {})),
+      ...(error.additionalRetainedPath
+        ? { additionalRetainedPath: error.additionalRetainedPath }
+        : (guardPresent ? { additionalRetainedPath: cleanupGuard } : {})),
+      ...(error.removedPath ? { removedPath: error.removedPath } : {}),
+    });
   }
 }
 
 function runLicenseFileMutation(target, callback, options) {
   const before = licenseFileSnapshot(target, options);
-  let written = false;
+  let candidate = null;
+  let publicationCommitted = false;
   const write = (text) => {
-    const result = writeLicenseAtomically(text, { ...options, path: target });
-    written = true;
+    const expectedContents = Buffer.from(`${String(text || '').trim()}\n`, 'utf8');
+    let publishedIdentity = null;
+    const priorIdentityObserver = options.onPublishedIdentity;
+    const result = writeLicenseAtomicallyUnlocked(text, {
+      ...options,
+      path: target,
+      onPublishedIdentity(identity) {
+        publishedIdentity = identity;
+        if (typeof priorIdentityObserver === 'function') priorIdentityObserver(identity);
+      },
+    });
+    publicationCommitted = true;
+    if (!publishedIdentity) throw licenseReadFailure('installed license identity was not captured');
+    candidate = {
+      exists: true,
+      contents: expectedContents,
+      mode: Number(publishedIdentity.mode & 0o777n),
+      identity: publishedIdentity,
+    };
+    const verified = licenseFileSnapshot(target, options);
+    if (!sameLicenseCandidate(candidate, verified)) {
+      throw licenseReadFailure('installed license could not be verified');
+    }
+    candidate = verified;
     return result;
   };
   try {
@@ -176,16 +515,18 @@ function runLicenseFileMutation(target, callback, options) {
     }
     return result;
   } catch (error) {
-    if (!written) throw error;
+    if (!publicationCommitted || !candidate) throw error;
     try {
-      restoreLicenseSnapshot(target, before, options);
+      rollbackLicenseCandidate(target, before, candidate, options, error);
       refresh();
     } catch (rollbackError) {
-      const failure = new Error('license rollback failed after control-plane commit error');
-      failure.code = 'LICENSE_ROLLBACK_FAILED';
-      failure.cause = error;
-      failure.rollbackCause = rollbackError;
-      throw failure;
+      if (rollbackError && rollbackError.code === 'LICENSE_ROLLBACK_FAILED') {
+        rollbackError.originalCause = error;
+        throw rollbackError;
+      }
+      throw licenseRollbackFailure('license rollback failed after control-plane commit error', error, {
+        rollbackCause: rollbackError,
+      });
     }
     throw error;
   }
@@ -198,23 +539,29 @@ function mutationOptions(options, fsImpl) {
 function withLicenseFileMutation(callback, options = {}) {
   const fsImpl = options.fs || fs;
   const target = path.resolve(options.path || licensePath());
-  fsImpl.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
-  return fileMutationLock.withFileMutationLockSync(
-    target,
-    () => runLicenseFileMutation(target, callback, mutationOptions(options, fsImpl)),
-    mutationOptions(options, fsImpl),
-  );
+  return privatePaths.withPrivateDirectoryMutationLockSync(path.dirname(target), () => (
+    fileMutationLock.withFileMutationLockSync(
+      target,
+      () => runLicenseFileMutation(target, callback, {
+        ...mutationOptions(options, fsImpl),
+      }),
+      { ...mutationOptions(options, fsImpl), cleanupComponent: 'license-file-lock' },
+    )
+  ), licenseDirectorySecurity(options, fsImpl));
 }
 
 async function withLicenseFileMutationAsync(callback, options = {}) {
   const fsImpl = options.fs || fs;
   const target = path.resolve(options.path || licensePath());
-  fsImpl.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
-  return fileMutationLock.withFileMutationLock(
-    target,
-    () => runLicenseFileMutation(target, callback, mutationOptions(options, fsImpl)),
-    mutationOptions(options, fsImpl),
-  );
+  return privatePaths.withPrivateDirectoryMutationLock(path.dirname(target), () => (
+    fileMutationLock.withFileMutationLock(
+      target,
+      () => runLicenseFileMutation(target, callback, {
+        ...mutationOptions(options, fsImpl),
+      }),
+      { ...mutationOptions(options, fsImpl), cleanupComponent: 'license-file-lock' },
+    )
+  ), licenseDirectorySecurity(options, fsImpl));
 }
 
 function normalizeCustomerId(value) {
@@ -319,10 +666,53 @@ let _vendorStale = false;
 
 function killed() { return _vendorRevoked || _vendorStale; }
 
+function readTrustedLicenseText(target, options = {}) {
+  const fsImpl = options.fs || fs;
+  try { exactLstat(fsImpl, target); }
+  catch (error) {
+    if (error && error.code === 'ENOENT') throw error;
+    throw licenseReadFailure('license file could not be inspected', error);
+  }
+  const directory = path.dirname(path.resolve(target));
+  privatePaths.assertPrivatePath(directory, {
+    ...options,
+    fs: fsImpl,
+    directory: true,
+    label: 'license directory',
+    ownerLabel: 'license directory',
+  });
+  privatePaths.assertPrivatePath(target, {
+    ...options,
+    fs: fsImpl,
+    directory: false,
+    label: 'license file',
+    ownerLabel: 'license file',
+  });
+  const snapshot = licenseFileSnapshot(target, { ...options, fs: fsImpl });
+  if (!snapshot.exists) {
+    const error = new Error('license file is missing');
+    error.code = 'ENOENT';
+    throw error;
+  }
+  privatePaths.assertPrivatePath(directory, {
+    ...options,
+    fs: fsImpl,
+    directory: true,
+    label: 'license directory',
+    ownerLabel: 'license directory',
+  });
+  return snapshot.contents.toString('utf8');
+}
+
 function loadStatus(now = Date.now(), deps = {}) {
-  const read = deps.readFile || ((p) => fs.readFileSync(p, 'utf8'));
+  const suppliedRead = typeof deps.readFile === 'function' ? deps.readFile : null;
+  const read = suppliedRead || ((p) => readTrustedLicenseText(p, deps));
   let text = '';
-  try { text = read(deps.licensePath || licensePath()); } catch (_) { return { state: 'unlicensed', payload: null, reason: 'missing' }; }
+  try { text = read(deps.licensePath || licensePath()); }
+  catch (error) {
+    const missing = suppliedRead || (error && error.code === 'ENOENT');
+    return { state: 'unlicensed', payload: null, reason: missing ? 'missing' : 'storage_unavailable' };
+  }
   const verifyOptions = { now };
   for (const key of ['publicKeyPem', 'expectedCustomerId', 'env']) {
     if (Object.prototype.hasOwnProperty.call(deps, key)) verifyOptions[key] = deps[key];
@@ -482,7 +872,6 @@ module.exports = {
   requireWritable,
   licensePath,
   writeLicenseAtomically,
-  removeLicenseFile,
   withLicenseFileMutation,
   withLicenseFileMutationAsync,
   configuredCustomerBinding,

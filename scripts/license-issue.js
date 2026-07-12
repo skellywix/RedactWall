@@ -20,6 +20,11 @@ const license = require('../server/license');
 const fileMutationLock = require('../server/file-mutation-lock');
 const privatePaths = require('../server/private-path');
 
+function committedCleanupWarning(warning) {
+  const retained = warning && warning.retainedPath ? `; retained=${warning.retainedPath}` : '';
+  process.stderr.write(`[warn] committed license artifact needs cleanup (${warning.code})${retained}\n`);
+}
+
 function parseArgs(argv) {
   const opts = { features: [] };
   for (let i = 0; i < argv.length; i++) {
@@ -50,11 +55,27 @@ function comparablePath(filePath) {
   return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
 }
 
+function existingStableFile(filePath, label) {
+  let stat;
+  try {
+    stat = fs.lstatSync(filePath, { bigint: true });
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return null;
+    throw error;
+  }
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1n
+      || typeof stat.dev !== 'bigint' || typeof stat.ino !== 'bigint'
+      || stat.dev <= 0n || stat.ino <= 0n) {
+    throw new Error(`${label} must be a single-link regular file with a stable filesystem identity`);
+  }
+  return stat;
+}
+
 function sameFile(left, right) {
   if (comparablePath(left) === comparablePath(right)) return true;
-  if (!fs.existsSync(left) || !fs.existsSync(right)) return false;
-  const a = fs.statSync(left);
-  const b = fs.statSync(right);
+  const a = existingStableFile(left, 'offline license signing key');
+  const b = existingStableFile(right, 'license output');
+  if (!a || !b) return false;
   return a.dev === b.dev && a.ino === b.ino;
 }
 
@@ -74,6 +95,7 @@ function assertKeypairAbsent(paths) {
 function stagePrivateFile(target, contents, label) {
   const temp = `${target}.${process.pid}.${crypto.randomBytes(8).toString('hex')}.tmp`;
   let fd;
+  let identity;
   try {
     fd = fs.openSync(temp, 'wx', 0o600);
     privatePaths.securePrivatePath(temp, {
@@ -85,23 +107,61 @@ function stagePrivateFile(target, contents, label) {
     });
     fs.writeFileSync(fd, contents);
     fs.fsyncSync(fd);
+    identity = fs.fstatSync(fd, { bigint: true });
     fs.closeSync(fd);
     fd = undefined;
-    return temp;
+    return { path: temp, identity };
   } catch (error) {
-    if (fd !== undefined) try { fs.closeSync(fd); } catch {}
-    try { fs.unlinkSync(temp); } catch {}
+    if (fd !== undefined) {
+      if (!identity) try { identity = fs.fstatSync(fd, { bigint: true }); } catch {}
+      try { fs.closeSync(fd); } catch {}
+    }
+    if (identity) try { privatePaths.removeExactPublicationFile(temp, identity, { fs }); } catch {}
     throw error;
   }
 }
 
+function cleanupStagedFile(stage) {
+  if (!stage || !stage.identity) return;
+  try { privatePaths.removeExactPublicationFile(stage.path, stage.identity, { fs }); } catch {}
+}
+
+function verifyPublishedPrivateFile(file, expectedContents, label) {
+  privatePaths.assertPrivatePath(file, {
+    fs,
+    directory: false,
+    label,
+    ownerLabel: label,
+  });
+  const expected = Buffer.isBuffer(expectedContents)
+    ? expectedContents
+    : Buffer.from(expectedContents);
+  const published = privatePaths.readBoundedRegularFile(file, {
+    fs,
+    maxBytes: Math.max(expected.length, 1),
+    label,
+  });
+  if (!published.equals(expected)) throw new Error(`${label} changed during publication verification`);
+  const identity = fs.lstatSync(file, { bigint: true });
+  if (!identity.isFile() || identity.isSymbolicLink() || identity.nlink !== 1n
+      || identity.dev <= 0n || identity.ino <= 0n) {
+    throw new Error(`${label} has no stable single-file identity`);
+  }
+  return identity;
+}
+
 function rollbackKeypair(paths, published, originalError) {
-  try {
-    if (published.pub) fs.unlinkSync(paths.pub);
-    if (published.priv) fs.unlinkSync(paths.priv);
-    privatePaths.fsyncDirectory(path.dirname(paths.priv), { fs });
-  } catch (rollbackError) {
-    originalError.rollbackError = rollbackError;
+  const failures = [];
+  for (const [file, identity] of [[paths.pub, published.pub], [paths.priv, published.priv]]) {
+    if (!identity) continue;
+    try { privatePaths.removeExactPublicationFile(file, identity, { fs }); }
+    catch (error) { failures.push(error); }
+  }
+  try { privatePaths.fsyncDirectory(path.dirname(paths.priv), { fs }); }
+  catch (error) { failures.push(error); }
+  if (failures.length) {
+    [originalError.rollbackError] = failures;
+    if (failures.length > 1) originalError.additionalRollbackErrors = failures.slice(1);
   }
 }
 
@@ -110,17 +170,35 @@ function publishKeypair(paths, privatePem, publicPem) {
   let tempPub;
   let privPublished = false;
   let pubPublished = false;
+  let privIdentity;
+  let pubIdentity;
   try {
     tempPub = stagePrivateFile(paths.pub, publicPem, 'offline license public-key staging file');
-    privatePaths.publishFileExclusiveDurably(tempPriv, paths.priv, { fs });
+    privatePaths.publishFileExclusiveDurably(tempPriv.path, paths.priv, {
+      fs,
+      consumeSource: true,
+      verifyPublished(publishedFile) {
+        privIdentity = verifyPublishedPrivateFile(publishedFile, privatePem, 'offline license private key');
+      },
+    });
     privPublished = true;
-    privatePaths.publishFileExclusiveDurably(tempPub, paths.pub, { fs });
+    privatePaths.publishFileExclusiveDurably(tempPub.path, paths.pub, {
+      fs,
+      consumeSource: true,
+      verifyPublished(publishedFile) {
+        pubIdentity = verifyPublishedPrivateFile(publishedFile, publicPem, 'offline license public key');
+      },
+    });
     pubPublished = true;
   } catch (error) {
-    rollbackKeypair(paths, { priv: privPublished, pub: pubPublished }, error);
+    rollbackKeypair(paths, {
+      priv: privPublished ? privIdentity : null,
+      pub: pubPublished ? pubIdentity : null,
+    }, error);
     throw error;
   } finally {
-    for (const temp of [tempPriv, tempPub]) if (temp) try { fs.unlinkSync(temp); } catch {}
+    if (!privPublished) cleanupStagedFile(tempPriv);
+    if (!pubPublished) cleanupStagedFile(tempPub);
   }
 }
 
@@ -162,20 +240,26 @@ function readSigningKey(file) {
 function publishLicense(out, body, force) {
   const target = path.resolve(out);
   const temp = stagePrivateFile(target, body, 'license output staging file');
+  let sourceConsumed = false;
+  const verifyPublished = (publishedFile) => {
+    verifyPublishedPrivateFile(publishedFile, body, 'license output file');
+  };
   try {
-    if (force) privatePaths.publishFileDurably(temp, target, { fs });
-    else privatePaths.publishFileExclusiveDurably(temp, target, { fs });
-    try { fs.unlinkSync(temp); } catch (error) {
-      if (!error || error.code !== 'ENOENT') throw error;
-    }
-    privatePaths.assertPrivatePath(target, {
+    if (force) privatePaths.publishFileDurably(temp.path, target, {
       fs,
-      directory: false,
-      label: 'license output file',
-      ownerLabel: 'license output file',
+      cleanupComponent: 'issued-license-publication',
+      onCommittedCleanupWarning: committedCleanupWarning,
+      verifyPublished,
     });
+    else privatePaths.publishFileExclusiveDurably(temp.path, target, {
+      fs,
+      consumeSource: true,
+      cleanupComponent: 'issued-license-publication',
+      verifyPublished,
+    });
+    sourceConsumed = true;
   } finally {
-    try { fs.unlinkSync(temp); } catch {}
+    if (!sourceConsumed) cleanupStagedFile(temp);
   }
 }
 
@@ -205,7 +289,11 @@ function issue(opts, io, setExitCode) {
     if (!check.ok) { io.error(`self-verify failed: ${check.reason}`); return setExitCode(1); }
     publishLicense(out, `${licText}\n`, opts.force === true);
     io.log(`Wrote ${out} for ${payload.customer} (${payload.plan}, ${payload.seats} seats, expires ${payload.expires})`);
-  }, { fs });
+  }, {
+    fs,
+    cleanupComponent: 'issued-license-lock',
+    onCommittedCleanupWarning: committedCleanupWarning,
+  });
 }
 
 function main(argv = process.argv.slice(2), deps = {}) {

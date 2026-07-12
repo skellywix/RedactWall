@@ -16,7 +16,7 @@ const privatePaths = require('../server/private-path');
 const TOKEN_LOCK_TIMEOUT_MS = 30_000;
 const TOKEN_DIRECTORY_INIT_TIMEOUT_MS = 60_000;
 const TOKEN_STORE_MAX_BYTES = 16 * 1024 * 1024;
-const _securedParents = new Set();
+const _securedParents = new Map();
 let _windowsPrincipal = '';
 
 function windowsPrincipal(spawn = spawnSync) {
@@ -46,11 +46,27 @@ function secureParent(p) {
     lockTimeoutMs: TOKEN_DIRECTORY_INIT_TIMEOUT_MS,
     lockTimeoutMaximumMs: TOKEN_DIRECTORY_INIT_TIMEOUT_MS,
   };
-  if (!_securedParents.has(dir)) {
-    privatePaths.withPrivateDirectoryMutationLockSync(dir, () => {}, security);
-    _securedParents.add(dir);
+  const exactDirectoryIdentity = () => {
+    const stat = fs.lstatSync(dir, { bigint: true });
+    if (!stat.isDirectory() || stat.isSymbolicLink() || stat.dev === 0n || stat.ino === 0n) {
+      throw new Error('gateway token directory has no stable filesystem identity');
+    }
+    return { dev: stat.dev, ino: stat.ino, birthtime: stat.birthtimeNs ?? stat.birthtimeMs };
+  };
+  const sameDirectoryIdentity = (left, right) => left.dev === right.dev && left.ino === right.ino
+    && String(left.birthtime) === String(right.birthtime);
+  const proof = _securedParents.get(dir);
+  if (!proof) {
+    let initialized;
+    privatePaths.withPrivateDirectoryMutationLockSync(dir, () => { initialized = exactDirectoryIdentity(); }, security);
+    _securedParents.set(dir, initialized);
   } else {
-    privatePaths.assertPrivatePath(dir, security);
+    const before = exactDirectoryIdentity();
+    if (!sameDirectoryIdentity(proof, before)) throw new Error('gateway token directory identity changed');
+    privatePaths.assertPrivatePathDacl(dir, security);
+    if (!sameDirectoryIdentity(proof, exactDirectoryIdentity())) {
+      throw new Error('gateway token directory identity changed');
+    }
   }
   return dir;
 }
@@ -79,7 +95,8 @@ function tokenHash(raw) {
 // changes the stamp, so revocation still takes effect on the next request.
 const _storeCache = new Map(); // path -> { stamp, store }
 function storeStamp(stat) {
-  return stat ? [stat.mtimeMs, stat.ctimeMs, stat.birthtimeMs, stat.size, stat.ino].join(':') : 'none';
+  return stat ? [stat.mtimeNs ?? stat.mtimeMs, stat.ctimeNs ?? stat.ctimeMs,
+    stat.birthtimeNs ?? stat.birthtimeMs, stat.size, stat.dev, stat.ino].join(':') : 'none';
 }
 
 function readStoreFresh(p, strict = false) {
@@ -113,7 +130,7 @@ function loadStore(tokensPath) {
   secureStoreForRead(p);
   let stamp = 'none';
   try {
-    const st = fs.lstatSync(p);
+    const st = fs.lstatSync(p, { bigint: true });
     stamp = storeStamp(st);
   } catch { /* missing file — stamp stays 'none' */ }
   const cached = _storeCache.get(p);
@@ -134,42 +151,72 @@ function releaseStoreLock(lock) {
   fileMutationLock.releaseFileMutationLock(lock);
 }
 
+function storeFileIdentity(file) {
+  const stat = fs.lstatSync(file, { bigint: true });
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.dev === 0n || stat.ino === 0n
+      || stat.nlink !== 1n || stat.size <= 0n) {
+    throw new Error('gateway token store has no stable filesystem identity');
+  }
+  return stat;
+}
+
+function sameStoreFileIdentity(left, right) {
+  return left.dev === right.dev && left.ino === right.ino
+    && left.size === right.size && left.nlink === 1n && right.nlink === 1n;
+}
+
 function saveStoreAtomic(store, p) {
   const dir = path.resolve(path.dirname(p));
   const temp = path.join(dir, `.${path.basename(p)}.${process.pid}.${crypto.randomBytes(8).toString('hex')}.tmp`);
   let fd;
+  let publicationStarted = false;
   try {
     fd = fs.openSync(temp, 'wx', 0o600);
-    privatePaths.securePrivatePath(temp, {
+    privatePaths.protectInheritedPrivateFile(temp, {
       directory: false,
-      fresh: true,
       label: 'gateway token store staging file',
       ownerLabel: 'gateway token store',
+      verifyOwner: false,
     });
     fs.writeFileSync(fd, JSON.stringify(store, null, 2) + '\n', { encoding: 'utf8' });
     fs.fsyncSync(fd);
     fs.closeSync(fd);
     fd = undefined;
-    const staged = fs.lstatSync(temp);
-    privatePaths.publishFileDurably(temp, p, { fs });
-    const published = fs.lstatSync(p);
-    if (!published.isFile() || published.isSymbolicLink() || published.nlink !== 1
-        || (staged.dev && published.dev && staged.dev !== published.dev)
-        || (staged.ino && published.ino && staged.ino !== published.ino)) {
-      throw new Error('gateway token store changed during publication');
-    }
+    const staged = storeFileIdentity(temp);
+    publicationStarted = true;
+    privatePaths.publishFileDurably(temp, p, {
+      fs,
+      cleanupComponent: 'gateway-token-store',
+      verifyPublished(publishedPath) {
+        const published = storeFileIdentity(publishedPath);
+        if (!sameStoreFileIdentity(staged, published)) {
+          throw new Error('gateway token store changed during publication');
+        }
+        privatePaths.assertPrivatePathDacl(publishedPath, {
+          fs,
+          directory: false,
+          label: 'gateway token store',
+          ownerLabel: 'gateway token store',
+        });
+        privatePaths.assertPrivatePathDacl(dir, {
+          fs,
+          directory: true,
+          label: 'gateway token directory',
+          ownerLabel: 'gateway token directory',
+        });
+      },
+    });
     _storeCache.delete(p);
   } finally {
     if (fd !== undefined) try { fs.closeSync(fd); } catch { /* best effort */ }
-    try { fs.unlinkSync(temp); } catch { /* already published or best effort */ }
+    if (!publicationStarted) try { fs.unlinkSync(temp); } catch { /* staging cleanup only */ }
   }
 }
 
 function mutateStore(tokensPath, mutate) {
   const p = path.resolve(tokensPath || defaultTokensPath());
   secureParent(p);
-  const lock = acquireStoreLock(p);
-  try {
+  return fileMutationLock.withFileMutationLockSync(p, () => {
     secureParent(p);
     try {
       assertPrivateStore(p);
@@ -180,9 +227,20 @@ function mutateStore(tokensPath, mutate) {
     const result = mutate(store);
     if (result.changed !== false) saveStoreAtomic(store, p);
     return result.value;
-  } finally {
-    releaseStoreLock(lock);
-  }
+  }, {
+    lockTimeoutMs: TOKEN_LOCK_TIMEOUT_MS,
+    lockTimeoutMaximumMs: TOKEN_LOCK_TIMEOUT_MS,
+    cleanupComponent: 'gateway-token-store-lock',
+  });
+}
+
+function storageHealth() {
+  const publication = privatePaths.committedCleanupHealth();
+  const locking = fileMutationLock.committedCleanupHealth();
+  return {
+    ok: publication.ok && locking.ok,
+    reason: publication.ok && locking.ok ? null : 'gateway-token-storage-cleanup-degraded',
+  };
 }
 
 // Create a token, persist only its hash, and return the raw token ONCE.
@@ -231,6 +289,7 @@ module.exports = {
   listTokens,
   tokenHash,
   defaultTokensPath,
+  storageHealth,
   _internal: {
     restrictPrivatePath,
     windowsPrincipal,

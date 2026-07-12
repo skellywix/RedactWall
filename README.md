@@ -24,7 +24,8 @@ The repository does not have a `src/` directory. The source code lives under `se
 - Express 5 for the HTTP API and dashboard server
 - `better-sqlite3` for local SQLite storage, with an optional managed Postgres
   driver (`pg`) behind `REDACTWALL_DB_DRIVER=postgres` for the shared control
-  plane (see `docs/deployment/MANAGED_POSTGRES.md`)
+  plane. Multi-replica Postgres also requires one shared durable audit-anchor
+  volume; see `docs/deployment/MANAGED_POSTGRES.md`.
 - `helmet` and `cookie-parser` for HTTP hardening and session cookies
 - `zod` for request validation
 - `adm-zip` and `pdf-parse` for Office/PDF text extraction
@@ -197,6 +198,9 @@ Important settings:
 | `ADMIN_TOTP_SECRET` | Security Admin MFA secret. Required by production preflight. |
 | `REDACTWALL_SECRET` (legacy `PROMPTWALL_SECRET`/`SENTINEL_SECRET`) | Session signing secret. |
 | `REDACTWALL_DATA_KEY` (legacy `PROMPTWALL_DATA_KEY`/`SENTINEL_DATA_KEY`) | Encryption key for retained approval prompt data. |
+| `REDACTWALL_PG_MAINTENANCE_DATABASE` | Maintenance database used when guarded restore targets a full PostgreSQL URL. Defaults to `postgres`; bare-name restores use the configured source database. |
+| `REDACTWALL_AUDIT_DIR` / `REDACTWALL_AUDIT_KEY` | Durable audit-anchor directory and independent HMAC root. Compose leaves the directory unset for SQLite compatibility; Postgres requires one explicit absolute shared directory. |
+| `REDACTWALL_LICENSE_PATH` | Mutable offline-license file. Docker Compose keeps it at `/data/redactwall.lic` on the persistent volume. |
 | `INGEST_API_KEY` or `REDACTWALL_INGEST_API_KEY` | API key used by sensors for `/api/v1/*` ingest routes. |
 | `SCIM_BEARER_TOKEN` or `REDACTWALL_SCIM_BEARER_TOKEN` | Enables `/scim/v2/*` provisioning routes when set. |
 | `OIDC_*` or `REDACTWALL_OIDC_*` | Optional console SSO settings. |

@@ -36,6 +36,8 @@ const DEFAULT_DESIRED_SENSOR_VERSIONS = Object.fromEntries(
   DEFAULT_REQUIRED_SENSORS.map((source) => [source, pkg.version]),
 );
 const EXCEPTION_REVIEW_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+const MAX_POLICY_FILE_BYTES = 4 * 1024 * 1024;
+const MAX_POLICY_FILE_BYTES_BIGINT = BigInt(MAX_POLICY_FILE_BYTES);
 
 const DEFAULT_POLICY = {
   enforcementMode: 'block',
@@ -649,27 +651,51 @@ function writePolicyBytesAtomically(configPath, data, options = {}) {
   const fsImpl = options.fs || fs;
   const dir = path.dirname(configPath);
   const mode = options.mode == null ? 0o600 : options.mode;
+  const contents = Buffer.isBuffer(data) ? Buffer.from(data) : Buffer.from(String(data), 'utf8');
   const baseNonce = options.nonce || crypto.randomBytes(12).toString('hex');
   const safeNonce = String(baseNonce).replace(/[^A-Za-z0-9_-]/g, '')
     || crypto.randomBytes(12).toString('hex');
   const tempPath = path.join(dir, `.${path.basename(configPath)}.${process.pid}.${safeNonce}.tmp`);
   let fileDescriptor = null;
   let tempCreated = false;
+  let publishedCandidate = null;
 
   try {
     fsImpl.mkdirSync(dir, { recursive: true, mode: 0o700 });
     fileDescriptor = fsImpl.openSync(tempPath, 'wx', mode);
     tempCreated = true;
-    fsImpl.writeFileSync(fileDescriptor, data, 'utf8');
+    fsImpl.writeFileSync(fileDescriptor, contents);
     fsImpl.fsyncSync(fileDescriptor);
     fsImpl.closeSync(fileDescriptor);
     fileDescriptor = null;
-    privatePaths.publishFileDurably(tempPath, configPath, { ...options, fs: fsImpl });
+    // Publication owns the staged pathname from this point, including every
+    // rollback/recovery artifact on failure.
     tempCreated = false;
+    const callerVerify = options.verifyPublished;
+    const publish = options.exclusive
+      ? privatePaths.publishFileExclusiveDurably
+      : privatePaths.publishFileDurably;
+    publish(tempPath, configPath, {
+      ...options,
+      fs: fsImpl,
+      cleanupComponent: 'policy-file-publication',
+      ...(options.exclusive ? { consumeSource: true } : {}),
+      verifyPublished(published) {
+        const candidate = policyFileSnapshot(published, { ...options, fs: fsImpl });
+        if (!candidate.exists || !candidate.contents.equals(contents)) {
+          throw policyReadFailure('published policy bytes could not be verified');
+        }
+        publishedCandidate = candidate;
+        if (typeof callerVerify === 'function') return callerVerify(published);
+        return undefined;
+      },
+    });
   } catch (error) {
     cleanupPolicyTemp(fsImpl, fileDescriptor, tempPath, tempCreated);
     throw error;
   }
+  if (!publishedCandidate) throw policyReadFailure('published policy identity was not captured');
+  return publishedCandidate;
 }
 
 function normalizedPolicyForWrite(p) {
@@ -681,30 +707,113 @@ function normalizedPolicyForWrite(p) {
   return parsedPolicy.data;
 }
 
-function writePolicyAtomically(configPath, p, options = {}) {
+function writePolicyWithCandidate(configPath, p, options = {}) {
   const normalized = normalizedPolicyForWrite(p);
-  writePolicyBytesAtomically(configPath, `${JSON.stringify(normalized, null, 2)}\n`, options);
-  return normalized;
+  const candidate = writePolicyBytesAtomically(
+    configPath,
+    `${JSON.stringify(normalized, null, 2)}\n`,
+    options,
+  );
+  return { normalized, candidate };
+}
+
+function writePolicyAtomically(configPath, p, options = {}) {
+  return writePolicyWithCandidate(configPath, p, options).normalized;
+}
+
+function exactPolicyLstat(fsImpl, target) {
+  return fsImpl.lstatSync(target, { bigint: true });
+}
+
+function exactPolicyFstat(fsImpl, descriptor) {
+  return fsImpl.fstatSync(descriptor, { bigint: true });
+}
+
+function stablePolicyFile(stat, expectedLinks = 1n) {
+  return !!stat && typeof stat.dev === 'bigint' && typeof stat.ino === 'bigint'
+    && typeof stat.size === 'bigint' && typeof stat.mode === 'bigint'
+    && stat.dev > 0n && stat.ino > 0n && stat.size >= 0n
+    && stat.isFile() && !stat.isSymbolicLink() && stat.nlink === expectedLinks;
+}
+
+function samePolicyStatTime(left, right, name) {
+  const ns = `${name}Ns`;
+  if (left[ns] !== undefined || right[ns] !== undefined) {
+    return left[ns] !== undefined && right[ns] !== undefined && left[ns] === right[ns];
+  }
+  const ms = `${name}Ms`;
+  return left[ms] !== undefined && right[ms] !== undefined && left[ms] === right[ms];
+}
+
+function samePolicySnapshot(left, right) {
+  return stablePolicyFile(left) && stablePolicyFile(right)
+    && left.dev === right.dev && left.ino === right.ino && left.size === right.size
+    && samePolicyStatTime(left, right, 'mtime') && samePolicyStatTime(left, right, 'ctime');
+}
+
+function policyReadFailure(message, cause) {
+  const error = new Error(message);
+  error.code = 'POLICY_FILE_INVALID';
+  if (cause) error.cause = cause;
+  return error;
+}
+
+function inspectPolicyFile(configPath, fsImpl) {
+  let before;
+  try { before = exactPolicyLstat(fsImpl, configPath); }
+  catch (error) {
+    if (error && error.code === 'ENOENT') return null;
+    throw policyReadFailure('policy file could not be inspected', error);
+  }
+  if (!stablePolicyFile(before) || before.size > MAX_POLICY_FILE_BYTES_BIGINT) {
+    throw policyReadFailure('policy path is not a bounded private regular file');
+  }
+  return before;
+}
+
+function readPolicySnapshot(configPath, before, fsImpl) {
+  const output = Buffer.alloc(Math.min(MAX_POLICY_FILE_BYTES + 1, Number(before.size) + 1));
+  const noFollow = fs.constants.O_NOFOLLOW || 0;
+  let descriptor;
+  try {
+    descriptor = fsImpl.openSync(configPath, fs.constants.O_RDONLY | noFollow);
+    const opened = exactPolicyFstat(fsImpl, descriptor);
+    if (!samePolicySnapshot(before, opened)) throw policyReadFailure('policy file changed while opening');
+    let offset = 0;
+    while (offset < output.length) {
+      const count = fsImpl.readSync(descriptor, output, offset, output.length - offset, null);
+      if (!count) break;
+      offset += count;
+    }
+    const after = exactPolicyFstat(fsImpl, descriptor);
+    const pathAfter = exactPolicyLstat(fsImpl, configPath);
+    if (offset > MAX_POLICY_FILE_BYTES || BigInt(offset) !== opened.size
+        || !samePolicySnapshot(opened, after) || !samePolicySnapshot(after, pathAfter)) {
+      throw policyReadFailure('policy file changed while reading');
+    }
+    return output.subarray(0, offset);
+  } catch (error) {
+    if (error && error.code === 'POLICY_FILE_INVALID') throw error;
+    throw policyReadFailure('policy file could not be read', error);
+  } finally {
+    if (descriptor !== undefined) try { fsImpl.closeSync(descriptor); } catch {}
+  }
 }
 
 function policyFileSnapshot(configPath = CONFIG_PATH, options = {}) {
   const fsImpl = options.fs || fs;
-  let stat;
-  try {
-    stat = fsImpl.lstatSync(configPath);
-  } catch (error) {
-    if (error && error.code === 'ENOENT') return { exists: false };
-    throw error;
-  }
-  if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1) {
-    const error = new Error('policy path is not a private regular file');
-    error.code = 'POLICY_FILE_INVALID';
-    throw error;
+  const before = inspectPolicyFile(configPath, fsImpl);
+  if (!before) return { exists: false };
+  const contents = readPolicySnapshot(configPath, before, fsImpl);
+  const after = inspectPolicyFile(configPath, fsImpl);
+  if (!after || !samePolicySnapshot(before, after)) {
+    throw policyReadFailure('policy file changed after reading');
   }
   return {
     exists: true,
-    contents: fsImpl.readFileSync(configPath),
-    mode: stat.mode & 0o777,
+    contents,
+    mode: Number(before.mode & 0o777n),
+    identity: after,
   };
 }
 
@@ -739,18 +848,186 @@ function stalePolicyError() {
   return error;
 }
 
+function policyRollbackFailure(message, cause, details = {}) {
+  const error = new Error(message);
+  error.code = 'POLICY_ROLLBACK_FAILED';
+  error.cause = cause;
+  Object.assign(error, details);
+  return error;
+}
+
+function samePolicyCandidate(left, right) {
+  return !!left?.exists && !!right?.exists
+    && stablePolicyFile(left.identity) && stablePolicyFile(right.identity)
+    && left.identity.dev === right.identity.dev && left.identity.ino === right.identity.ino
+    && Buffer.isBuffer(left.contents) && Buffer.isBuffer(right.contents)
+    && left.contents.equals(right.contents);
+}
+
+function linkedPolicyStat(target, expectedLinks, fsImpl) {
+  const stat = exactPolicyLstat(fsImpl, target);
+  if (!stablePolicyFile(stat, BigInt(expectedLinks))) {
+    throw new Error('retained policy artifact has no stable identity');
+  }
+  return stat;
+}
+
+function sameLinkedPolicy(left, right) {
+  return left.dev === right.dev && left.ino === right.ino && left.size === right.size
+    && samePolicyStatTime(left, right, 'mtime');
+}
+
+function removeExactPolicyArtifact(target, expected, options = {}) {
+  const fsImpl = options.fs || fs;
+  try {
+    privatePaths.removeExactPublicationFile(target, expected, { ...options, fs: fsImpl });
+  } catch (error) {
+    if (!error.retainedPath && !error.additionalRetainedPath && !error.removedPath) {
+      try { exactPolicyLstat(fsImpl, target); error.retainedPath = target; }
+      catch (inspectError) {
+        if (inspectError && inspectError.code === 'ENOENT') error.removedPath = target;
+      }
+    }
+    throw error;
+  }
+}
+
 function restorePolicySnapshot(configPath, snapshot, options = {}) {
   const fsImpl = options.fs || fs;
   if (snapshot.exists) {
-    writePolicyBytesAtomically(configPath, snapshot.contents, { ...options, mode: snapshot.mode });
-    return;
+    return writePolicyBytesAtomically(configPath, snapshot.contents, {
+      ...options,
+      nonce: undefined,
+      mode: snapshot.mode,
+      exclusive: true,
+    });
   }
+  const current = inspectPolicyFile(configPath, fsImpl);
+  if (current) {
+    const error = policyReadFailure('a replacement policy appeared during rollback');
+    error.replacementPath = configPath;
+    throw error;
+  }
+  return null;
+}
+
+function restoreChangedPolicy(quarantine, configPath, options, originalError) {
+  const fsImpl = options.fs || fs;
+  const guard = `${quarantine}.restore.${process.pid}.${crypto.randomBytes(12).toString('hex')}`;
+  let quarantinePresent = true;
+  let guardPresent = false;
   try {
-    fsImpl.unlinkSync(configPath);
-    privatePaths.fsyncDirectory(path.dirname(configPath), { ...options, fs: fsImpl });
+    const source = policyFileSnapshot(quarantine, { ...options, fs: fsImpl });
+    if (!source.exists) throw new Error('changed policy replacement is unavailable');
+    fsImpl.linkSync(quarantine, configPath);
+    fsImpl.linkSync(quarantine, guard);
+    guardPresent = true;
+    let restored = linkedPolicyStat(configPath, 3, fsImpl);
+    let retained = linkedPolicyStat(guard, 3, fsImpl);
+    const sourceLink = linkedPolicyStat(quarantine, 3, fsImpl);
+    if (!sameLinkedPolicy(source.identity, restored) || !sameLinkedPolicy(source.identity, retained)
+        || !sameLinkedPolicy(source.identity, sourceLink)) {
+      throw new Error('changed policy replacement could not be identity-bound');
+    }
+    removeExactPolicyArtifact(quarantine, sourceLink, options);
+    quarantinePresent = false;
+    restored = linkedPolicyStat(configPath, 2, fsImpl);
+    retained = linkedPolicyStat(guard, 2, fsImpl);
+    if (!sameLinkedPolicy(source.identity, restored) || !sameLinkedPolicy(source.identity, retained)) {
+      throw new Error('changed policy replacement changed during restoration');
+    }
+    removeExactPolicyArtifact(guard, retained, options);
+    guardPresent = false;
+    restored = linkedPolicyStat(configPath, 1, fsImpl);
+    if (!sameLinkedPolicy(source.identity, restored)) {
+      throw new Error('changed policy replacement changed after restoration');
+    }
   } catch (error) {
-    if (!error || error.code !== 'ENOENT') throw error;
+    throw policyRollbackFailure('changed policy replacement was retained for recovery', originalError || error, {
+      ...(error.retainedPath
+        ? { retainedPath: error.retainedPath }
+        : (quarantinePresent ? { retainedPath: quarantine } : {})),
+      ...(error.additionalRetainedPath
+        ? { additionalRetainedPath: error.additionalRetainedPath }
+        : (guardPresent ? { additionalRetainedPath: guard } : {})),
+      ...(error.removedPath ? { removedPath: error.removedPath } : {}),
+      replacementPath: configPath,
+    });
   }
+  throw policyRollbackFailure('policy changed during rollback; replacement was preserved', originalError, {
+    replacementPath: configPath,
+  });
+}
+
+function cleanupPolicyCandidate(quarantine, candidate, options, originalError) {
+  const fsImpl = options.fs || fs;
+  const guard = `${quarantine}.cleanup.${process.pid}.${crypto.randomBytes(12).toString('hex')}`;
+  let quarantinePresent = true;
+  let guardPresent = false;
+  try {
+    fsImpl.linkSync(quarantine, guard);
+    guardPresent = true;
+    const source = linkedPolicyStat(quarantine, 2, fsImpl);
+    const retained = linkedPolicyStat(guard, 2, fsImpl);
+    if (!sameLinkedPolicy(candidate.identity, source) || !sameLinkedPolicy(candidate.identity, retained)) {
+      throw new Error('policy cleanup guard changed');
+    }
+    removeExactPolicyArtifact(quarantine, source, options);
+    quarantinePresent = false;
+    const exact = policyFileSnapshot(guard, { ...options, fs: fsImpl });
+    if (!samePolicyCandidate(candidate, exact)) throw new Error('policy cleanup guard changed after removal');
+    removeExactPolicyArtifact(guard, exact.identity, options);
+    guardPresent = false;
+  } catch (error) {
+    throw policyRollbackFailure('policy candidate quarantine could not be removed', originalError || error, {
+      ...(error.retainedPath
+        ? { retainedPath: error.retainedPath }
+        : (quarantinePresent ? { retainedPath: quarantine } : {})),
+      ...(error.additionalRetainedPath
+        ? { additionalRetainedPath: error.additionalRetainedPath }
+        : (guardPresent ? { additionalRetainedPath: guard } : {})),
+      ...(error.removedPath ? { removedPath: error.removedPath } : {}),
+    });
+  }
+}
+
+function rollbackPolicyCandidate(configPath, before, candidate, options, originalError) {
+  const fsImpl = options.fs || fs;
+  const quarantine = `${configPath}.failed-mutation.${process.pid}.${crypto.randomBytes(12).toString('hex')}`;
+  try { fsImpl.renameSync(configPath, quarantine); }
+  catch (error) {
+    throw policyRollbackFailure('policy rollback could not quarantine the published candidate', originalError || error);
+  }
+  let quarantined;
+  try { quarantined = policyFileSnapshot(quarantine, { ...options, fs: fsImpl }); }
+  catch (error) {
+    throw policyRollbackFailure('policy rollback retained an unverifiable replacement', originalError || error, {
+      retainedPath: quarantine,
+    });
+  }
+  if (!samePolicyCandidate(candidate, quarantined)) {
+    restoreChangedPolicy(quarantine, configPath, options, originalError);
+  }
+  try { restorePolicySnapshot(configPath, before, options); }
+  catch (error) {
+    throw policyRollbackFailure('prior policy could not be restored', originalError || error, {
+      retainedPath: quarantine,
+      ...(error.replacementPath ? { replacementPath: error.replacementPath } : {}),
+    });
+  }
+  let exact;
+  try { exact = policyFileSnapshot(quarantine, { ...options, fs: fsImpl }); }
+  catch (error) {
+    throw policyRollbackFailure('policy candidate quarantine could not be reverified', originalError || error, {
+      retainedPath: quarantine,
+    });
+  }
+  if (!samePolicyCandidate(candidate, exact)) {
+    throw policyRollbackFailure('policy candidate quarantine changed before cleanup', originalError, {
+      retainedPath: quarantine,
+    });
+  }
+  cleanupPolicyCandidate(quarantine, candidate, options, originalError);
 }
 
 function invalidatePolicyCache(configPath) {
@@ -759,23 +1036,38 @@ function invalidatePolicyCache(configPath) {
 
 function createPolicyMutationWriter(configPath, state, options) {
   return (nextPolicy) => {
-    const saved = writePolicyAtomically(configPath, nextPolicy, options);
+    const { normalized: saved, candidate: publishedCandidate } = writePolicyWithCandidate(
+      configPath,
+      nextPolicy,
+      options,
+    );
     state.written = true;
+    state.candidate = publishedCandidate;
+    const verified = policyFileSnapshot(configPath, options);
+    if (!samePolicyCandidate(publishedCandidate, verified)) {
+      throw policyReadFailure('published policy changed before mutation commit');
+    }
+    state.candidate = verified;
     invalidatePolicyCache(configPath);
     return normalizePolicy(saved);
   };
 }
 
-function rollbackPolicyMutation(configPath, before, originalError, options) {
+function rollbackPolicyMutation(configPath, before, candidate, originalError, options) {
   try {
-    restorePolicySnapshot(configPath, before, options);
-    invalidatePolicyCache(configPath);
+    rollbackPolicyCandidate(configPath, before, candidate, options, originalError);
   } catch (rollbackError) {
+    if (rollbackError && rollbackError.code === 'POLICY_ROLLBACK_FAILED') {
+      rollbackError.originalCause = originalError;
+      throw rollbackError;
+    }
     const failure = new Error('policy rollback failed after control-plane commit error');
     failure.code = 'POLICY_ROLLBACK_FAILED';
     failure.cause = originalError;
     failure.rollbackCause = rollbackError;
     throw failure;
+  } finally {
+    invalidatePolicyCache(configPath);
   }
 }
 
@@ -783,7 +1075,7 @@ function runPolicyFileMutation(configPath, expectedPolicy, callback, options) {
   const before = policyFileSnapshot(configPath, options);
   const current = policyFromSnapshot(before);
   if (!policiesEqual(current, expectedPolicy)) throw stalePolicyError();
-  const state = { written: false };
+  const state = { written: false, candidate: null };
   const write = createPolicyMutationWriter(configPath, state, options);
   try {
     const result = callback({ current, write });
@@ -792,7 +1084,9 @@ function runPolicyFileMutation(configPath, expectedPolicy, callback, options) {
     }
     return result;
   } catch (error) {
-    if (state.written) rollbackPolicyMutation(configPath, before, error, options);
+    if (state.written && state.candidate) {
+      rollbackPolicyMutation(configPath, before, state.candidate, error, options);
+    }
     throw error;
   }
 }
@@ -802,7 +1096,7 @@ function withPolicyFileMutation(expectedPolicy, callback, options = {}) {
   return fileMutationLock.withFileMutationLockSync(
     configPath,
     () => runPolicyFileMutation(configPath, expectedPolicy, callback, options),
-    options,
+    { ...options, cleanupComponent: 'policy-file-lock' },
   );
 }
 
@@ -811,7 +1105,7 @@ async function withPolicyFileMutationAsync(expectedPolicy, callback, options = {
   return fileMutationLock.withFileMutationLock(
     configPath,
     () => runPolicyFileMutation(configPath, expectedPolicy, callback, options),
-    options,
+    { ...options, cleanupComponent: 'policy-file-lock' },
   );
 }
 
@@ -821,7 +1115,7 @@ function savePolicy(p, options = {}) {
     const saved = writePolicyAtomically(configPath, p, options);
     invalidatePolicyCache(configPath);
     return normalizePolicy(saved);
-  }, options);
+  }, { ...options, cleanupComponent: 'policy-file-lock' });
 }
 
 // Every hard-stop (alwaysBlock) type, including per-scope additions. These must

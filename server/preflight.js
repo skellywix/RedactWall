@@ -4,6 +4,7 @@
  * must not start with defaults that would undermine admin or sensor security.
  */
 const crypto = require('crypto');
+const path = require('path');
 const { withEnvAliases } = require('./env');
 const { configuredCustomerBinding, EMBEDDED_PUBLIC_KEY_PEM } = require('./license');
 const { publicOrigin } = require('./public-url');
@@ -104,6 +105,7 @@ function configStatus(input = {}) {
   const dbPath = input.dbPath || env.REDACTWALL_DB_PATH || '';
   const dbPathReason = cloudSyncedPathReason(dbPath);
   const databaseUrl = input.databaseUrl ?? env.REDACTWALL_DATABASE_URL ?? env.DATABASE_URL ?? '';
+  const auditDir = String(input.auditDir ?? env.REDACTWALL_AUDIT_DIR ?? '').trim();
   const configuredPublicUrl = String(input.publicUrl ?? env.REDACTWALL_PUBLIC_URL ?? '').trim();
   const publicUrlValid = !configuredPublicUrl || !!publicOrigin(configuredPublicUrl, { production });
   const licenseServerUrl = String(env.REDACTWALL_LICENSE_SERVER_URL || '').trim();
@@ -399,6 +401,13 @@ function configStatus(input = {}) {
       'error',
       'Postgres uses one unambiguous connection URL with supported parameters and required TLS.',
       'Set REDACTWALL_DATABASE_URL with explicit host, user, and database plus sslmode=require, verify-ca, or verify-full. Only non-production loopback may omit TLS.',
+    ),
+    check(
+      'postgres_shared_audit_dir',
+      dbDriver !== 'postgres' || (!!auditDir && path.isAbsolute(auditDir)),
+      'error',
+      'Postgres replicas use one explicit absolute path on their shared durable audit-anchor volume.',
+      'Set REDACTWALL_AUDIT_DIR to the same absolute shared-volume path on every Postgres replica.',
     ),
     check(
       'postgres_tenant_context',

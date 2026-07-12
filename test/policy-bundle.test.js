@@ -14,6 +14,7 @@ test.after(() => fs.rmSync(process.env.REDACTWALL_DATA_DIR, { recursive: true, f
 const pb = require('../server/policy-bundle');
 
 const POLICY = { enforcementMode: 'block', alwaysBlock: ['US_SSN', 'CREDIT_CARD'], blockRiskScore: 25 };
+const WINDOWS_O_TEMPORARY = 0x40;
 
 test('a fresh bundle verifies with the published public key', () => {
   const bundle = pb.buildBundle(POLICY);
@@ -77,4 +78,83 @@ test('a malformed bundle returns {ok:false} and never throws (fail closed)', () 
     assert.doesNotThrow(() => { result = pb.verifyBundle(bad, pb.publicKeyPem()); });
     assert.strictEqual(result.ok, false);
   }
+});
+
+test('policy key publication rolls back instead of leaving an nlink=2 target when source cleanup fails', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rw-policy-key-source-cleanup-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const file = path.join(root, 'private', '.policy-bundle-key.pem');
+  let staged = '';
+  let denied = false;
+  const fsImpl = {
+    ...fs,
+    linkSync(source, destination) {
+      if (path.resolve(destination) === path.resolve(file) && !staged) {
+        staged = path.resolve(source);
+      }
+      return fs.linkSync(source, destination);
+    },
+    openSync(target, flags, mode) {
+      if (!denied && staged && path.resolve(target) === staged
+          && typeof flags === 'number' && (flags & WINDOWS_O_TEMPORARY) === WINDOWS_O_TEMPORARY) {
+        denied = true;
+        const error = new Error('synthetic policy key staging unlink EIO');
+        error.code = 'EIO';
+        throw error;
+      }
+      return fs.openSync(target, flags, mode);
+    },
+    unlinkSync(target) {
+      if (!denied && staged && path.resolve(target) === staged) {
+        denied = true;
+        const error = new Error('synthetic policy key staging unlink EIO');
+        error.code = 'EIO';
+        throw error;
+      }
+      return fs.unlinkSync(target);
+    },
+  };
+
+  assert.throws(
+    () => pb.loadOrCreateKeypair({ keyFile: file, fs: fsImpl }),
+    (error) => error?.code === 'POLICY_SIGNING_KEY_UNAVAILABLE',
+  );
+  assert.strictEqual(denied, true);
+  assert.strictEqual(fs.existsSync(file), false, 'unverified multi-link target is rolled back');
+  if (fs.existsSync(path.dirname(file))) {
+    for (const entry of fs.readdirSync(path.dirname(file))) {
+      const stat = fs.lstatSync(path.join(path.dirname(file), entry), { bigint: true });
+      if (stat.isFile()) assert.strictEqual(stat.nlink, 1n);
+    }
+  }
+});
+
+test('policy key failure cleanup preserves a replacement at the staging pathname', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rw-policy-key-stage-replacement-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const file = path.join(root, 'private', '.policy-bundle-key.pem');
+  const replacement = Buffer.from('replacement-policy-staging-bytes');
+  let staged = '';
+  const fsImpl = {
+    ...fs,
+    linkSync(source, destination) {
+      if (path.resolve(destination) === path.resolve(file) && !staged) {
+        staged = path.resolve(source);
+        fs.renameSync(source, `${source}.retained-original`);
+        fs.writeFileSync(source, replacement, { mode: 0o600 });
+        const error = new Error('synthetic policy key publication collision');
+        error.code = 'EIO';
+        throw error;
+      }
+      return fs.linkSync(source, destination);
+    },
+  };
+
+  assert.throws(
+    () => pb.loadOrCreateKeypair({ keyFile: file, fs: fsImpl }),
+    (error) => error?.code === 'POLICY_SIGNING_KEY_UNAVAILABLE',
+  );
+  assert.ok(staged);
+  assert.strictEqual(fs.existsSync(file), false);
+  assert.deepStrictEqual(fs.readFileSync(staged), replacement);
 });

@@ -11,6 +11,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const license = require('../server/license');
+const privatePaths = require('../server/private-path');
 
 const { privateKey, publicKey } = crypto.generateKeyPairSync('ed25519');
 const PUB = publicKey.export({ type: 'spki', format: 'pem' }).toString();
@@ -54,9 +55,147 @@ function runLicenseWorker(environment) {
   });
 }
 
-test('license mutation lock prevents one replica rollback from overwriting another replica install', async (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-license-race-'));
+function privateLicenseRoot(t, prefix) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  privatePaths.withPrivateDirectoryMutationLockSync(root, () => {}, {
+    fs,
+    directory: true,
+    label: 'test license directory',
+    ownerLabel: 'test license directory',
+    lockTimeoutMs: 60_000,
+    lockTimeoutMaximumMs: 60_000,
+  });
+  return root;
+}
+
+test('license mutation rollback restores prior bytes only while the installed candidate is exact', (t) => {
+  const root = privateLicenseRoot(t, 'redactwall-license-exact-rollback-');
+  const target = path.join(root, 'redactwall.lic');
+  fs.writeFileSync(target, 'prior-license\r\n', { mode: 0o600 });
+  const failure = new Error('synthetic audit failure');
+  assert.throws(() => license.withLicenseFileMutation(({ write }) => {
+    write('candidate-license');
+    throw failure;
+  }, { path: target }), (error) => error === failure);
+  assert.deepStrictEqual(fs.readFileSync(target), Buffer.from('prior-license\r\n'));
+});
+
+for (const priorExists of [true, false]) {
+  test(`license rollback preserves a changed replacement when prior ${priorExists ? 'exists' : 'is absent'}`, (t) => {
+    const root = priorExists
+      ? privateLicenseRoot(t, 'redactwall-license-changed-rollback-')
+      : fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-license-changed-rollback-'));
+    if (!priorExists) t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const target = path.join(root, 'redactwall.lic');
+    if (priorExists) fs.writeFileSync(target, 'prior-license', { mode: 0o600 });
+    let failure;
+    assert.throws(() => license.withLicenseFileMutation(({ write }) => {
+      write('candidate-license');
+      fs.writeFileSync(target, 'replacement-owned-by-another-writer', { mode: 0o600 });
+      throw new Error('synthetic audit failure');
+    }, { path: target }), (error) => {
+      failure = error;
+      return error?.code === 'LICENSE_ROLLBACK_FAILED';
+    });
+    assert.strictEqual(fs.readFileSync(target, 'utf8'), 'replacement-owned-by-another-writer');
+    assert.strictEqual(failure.replacementPath, target);
+  });
+}
+
+test('license rollback preserves a replacement created after candidate quarantine', (t) => {
+  const root = privateLicenseRoot(t, 'redactwall-license-post-quarantine-race-');
+  const target = path.join(root, 'redactwall.lic');
+  fs.writeFileSync(target, 'prior-license', { mode: 0o600 });
+  let replaced = false;
+  const fsImpl = {
+    ...fs,
+    renameSync(source, destination) {
+      const result = fs.renameSync(source, destination);
+      if (!replaced && source === target && destination.includes('.failed-install.')) {
+        replaced = true;
+        fs.writeFileSync(target, 'replacement-owned-by-another-writer', { flag: 'wx', mode: 0o600 });
+      }
+      return result;
+    },
+  };
+  let failure;
+  assert.throws(() => license.withLicenseFileMutation(({ write }) => {
+    write('candidate-license');
+    throw new Error('synthetic audit failure');
+  }, { path: target, fs: fsImpl }), (error) => {
+    failure = error;
+    return error?.code === 'LICENSE_ROLLBACK_FAILED';
+  });
+  assert.strictEqual(replaced, true);
+  assert.strictEqual(fs.readFileSync(target, 'utf8'), 'replacement-owned-by-another-writer');
+  assert.ok(failure.retainedPath && fs.existsSync(failure.retainedPath));
+  assert.strictEqual(fs.readFileSync(failure.retainedPath, 'utf8'), 'candidate-license\n');
+});
+
+test('license publication applies the shared exact Windows private-file ACL contract', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-license-windows-acl-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const target = path.join(root, 'redactwall.lic');
+  const principal = 'TEST\\license-user';
+  const calls = [];
+  const ownerIdentity = {
+    processSid: 'S-1-5-21-100-200-300-1001',
+    ownerSid: 'S-1-5-21-100-200-300-1001',
+  };
+  const exactAcl = (file) => [
+    `${file} ${principal}:(F)`,
+    '          NT AUTHORITY\\SYSTEM:(F)',
+  ].join('\r\n');
+  license.writeLicenseAtomically('candidate-license', {
+    path: target,
+    platform: 'win32',
+    principal,
+    ownerIdentity,
+    spawn(command, args) {
+      calls.push({ command, args: args.slice() });
+      return args.length === 1
+        ? { status: 0, stdout: exactAcl(args[0]) }
+        : { status: 0, stdout: 'processed 1 file' };
+    },
+  });
+  assert.strictEqual(fs.readFileSync(target, 'utf8'), 'candidate-license\n');
+  assert.ok(calls.some(({ args }) => args.includes('/setowner')));
+  assert.ok(calls.some(({ args }) => args.includes('/inheritance:r')));
+  assert.ok(calls.some(({ args }) => args.length === 1 && path.resolve(args[0]) === target));
+});
+
+test('license publication failure never deletes a replaced staging pathname', (t) => {
+  const root = privateLicenseRoot(t, 'redactwall-license-staging-replacement-');
+  const target = path.join(root, 'redactwall.lic');
+  const replacement = Buffer.from('replacement-owned-by-another-writer', 'utf8');
+  const originalPublish = privatePaths.publishFileDurably;
+  let stagingPath = '';
+  let retainedOriginal = '';
+  const publicationFailure = new Error('synthetic license publication failure');
+  privatePaths.publishFileDurably = (temp) => {
+    stagingPath = temp;
+    retainedOriginal = `${temp}.original`;
+    fs.renameSync(temp, retainedOriginal);
+    fs.writeFileSync(temp, replacement, { flag: 'wx', mode: 0o600 });
+    throw publicationFailure;
+  };
+  try {
+    assert.throws(
+      () => license.writeLicenseAtomically('candidate-license', { path: target }),
+      (error) => error === publicationFailure && error.retainedPath === stagingPath,
+    );
+  } finally {
+    privatePaths.publishFileDurably = originalPublish;
+  }
+  assert.ok(stagingPath);
+  assert.deepStrictEqual(fs.readFileSync(stagingPath), replacement);
+  assert.strictEqual(fs.readFileSync(retainedOriginal, 'utf8'), 'candidate-license\n');
+  assert.strictEqual(fs.existsSync(target), false);
+});
+
+test('license mutation lock prevents one replica rollback from overwriting another replica install', async (t) => {
+  const root = privateLicenseRoot(t, 'redactwall-license-race-');
   const licensePath = path.join(root, 'redactwall.lic');
   const readyFile = path.join(root, 'rollback-ready');
   const attemptFile = path.join(root, 'commit-attempt');
@@ -93,6 +232,135 @@ test('license mutation lock prevents one replica rollback from overwriting anoth
   assert.strictEqual(rolledBack.stdout, 'rolled-back');
   assert.strictEqual(committed.stdout, 'committed');
   assert.deepStrictEqual(fs.readFileSync(licensePath), Buffer.from('candidate-from-committing-worker\n'));
+});
+
+test('license rollback snapshots reject Number-rounded path-to-handle file ID collisions', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-license-rounded-id-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const requested = path.join(root, 'redactwall.lic');
+  const replacement = path.join(root, 'replacement.lic');
+  fs.writeFileSync(requested, 'trusted-license', { mode: 0o600 });
+  fs.writeFileSync(replacement, 'hostile-license', { mode: 0o600 });
+  const requestedId = 10414574140023031n;
+  const replacementId = 10414574140023032n;
+  assert.strictEqual(Number(requestedId), Number(replacementId), 'fixture must reproduce Number rounding');
+  const baseline = fs.lstatSync(requested, { bigint: true });
+  const withSnapshot = (stat, exact, ino) => {
+    const changed = Object.create(stat);
+    Object.defineProperties(changed, {
+      dev: { value: exact ? 3n : 3 },
+      ino: { value: exact ? ino : Number(ino) },
+      size: { value: exact ? baseline.size : Number(baseline.size) },
+      mtimeNs: { value: baseline.mtimeNs },
+      ctimeNs: { value: baseline.ctimeNs },
+      mtimeMs: { value: exact ? baseline.mtimeMs : Number(baseline.mtimeMs) },
+      ctimeMs: { value: exact ? baseline.ctimeMs : Number(baseline.ctimeMs) },
+    });
+    return changed;
+  };
+  const fsImpl = {
+    ...fs,
+    lstatSync(target, options) {
+      const exact = options?.bigint === true;
+      return withSnapshot(fs.lstatSync(target, options), exact, requestedId);
+    },
+    openSync(target, flags, mode) {
+      return fs.openSync(target === requested ? replacement : target, flags, mode);
+    },
+    fstatSync(descriptor, options) {
+      const exact = options?.bigint === true;
+      return withSnapshot(fs.fstatSync(descriptor, options), exact, replacementId);
+    },
+  };
+
+  assert.throws(
+    () => license._internal.licenseFileSnapshot(requested, { fs: fsImpl }),
+    (error) => error && error.code === 'LICENSE_FILE_READ_FAILED'
+      && /changed while opening/.test(error.message),
+  );
+});
+
+test('public license writers cannot forge parent trust for planted state', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-license-planted-parent-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const target = path.join(root, 'redactwall.lic');
+  fs.writeFileSync(target, 'planted-license', { mode: 0o600 });
+
+  assert.throws(() => license.writeLicenseAtomically('candidate-license', {
+    path: target,
+    parentTrustHeld: true,
+  }), (error) => error && error.code === 'PRIVATE_DIRECTORY_UNTRUSTED_STATE');
+  assert.strictEqual(fs.readFileSync(target, 'utf8'), 'planted-license');
+  assert.throws(() => license.withLicenseFileMutation(({ write }) => write('candidate-license'), {
+    path: target,
+    parentTrustHeld: true,
+  }), (error) => error && error.code === 'PRIVATE_DIRECTORY_UNTRUSTED_STATE');
+  assert.strictEqual(fs.readFileSync(target, 'utf8'), 'planted-license');
+});
+
+test('default runtime license loading is bounded and rejects linked paths', (t) => {
+  const oversizedRoot = privateLicenseRoot(t, 'redactwall-license-runtime-bounded-');
+  const oversized = path.join(oversizedRoot, 'redactwall.lic');
+  license.writeLicenseAtomically(sign(base), { path: oversized });
+  assert.strictEqual(license.loadStatus(NOW, {
+    licensePath: oversized,
+    publicKeyPem: PUB,
+    ...EXPECTED_CUSTOMER,
+  }).state, 'active');
+  fs.writeFileSync(oversized, Buffer.alloc(64 * 1024 + 1, 0x61), { mode: 0o600 });
+  assert.strictEqual(license.loadStatus(NOW, {
+    licensePath: oversized,
+    publicKeyPem: PUB,
+    ...EXPECTED_CUSTOMER,
+  }).reason, 'storage_unavailable');
+
+  const linkedRoot = privateLicenseRoot(t, 'redactwall-license-runtime-linked-');
+  const outside = path.join(linkedRoot, 'outside-license');
+  const linked = path.join(linkedRoot, 'redactwall.lic');
+  fs.writeFileSync(outside, sign(base), { mode: 0o600 });
+  try { fs.symlinkSync(outside, linked, 'file'); }
+  catch (error) {
+    if (process.platform === 'win32' && ['EPERM', 'EACCES'].includes(error.code)) return;
+    throw error;
+  }
+  assert.strictEqual(license.loadStatus(NOW, {
+    licensePath: linked,
+    publicKeyPem: PUB,
+    ...EXPECTED_CUSTOMER,
+  }).reason, 'storage_unavailable');
+});
+
+test('post-publication license verification failure restores the exact prior file', (t) => {
+  const root = privateLicenseRoot(t, 'redactwall-license-post-publish-verify-');
+  const target = path.join(root, 'redactwall.lic');
+  fs.writeFileSync(target, 'prior-license', { mode: 0o600 });
+  let identityCaptured = false;
+  let targetStatsAfterCapture = 0;
+  let injected = false;
+  const fsImpl = {
+    ...fs,
+    lstatSync(candidate, options) {
+      if (identityCaptured && path.resolve(String(candidate)) === target
+          && options && options.bigint === true) {
+        targetStatsAfterCapture += 1;
+        if (targetStatsAfterCapture === 2) {
+          injected = true;
+          const error = new Error('synthetic post-publication license verification EIO');
+          error.code = 'EIO';
+          throw error;
+        }
+      }
+      return fs.lstatSync(candidate, options);
+    },
+  };
+
+  assert.throws(() => license.withLicenseFileMutation(({ write }) => write('candidate-license'), {
+    path: target,
+    fs: fsImpl,
+    onPublishedIdentity() { identityCaptured = true; },
+  }), /license file could not be inspected|post-publication license verification EIO/);
+  assert.strictEqual(injected, true);
+  assert.strictEqual(fs.readFileSync(target, 'utf8'), 'prior-license');
 });
 
 test('verifies a well-formed license', () => {

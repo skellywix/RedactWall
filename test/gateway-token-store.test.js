@@ -147,7 +147,7 @@ test('eight gateway processes recover a crashed Windows bootstrap and preserve e
   for (const item of minted) assert.ok(tokens.resolveToken(item.token, store));
 });
 
-test('gateway token mutation rejects directory-fsync EIO and restores the exact store', (t) => {
+test('gateway token mutation rejects directory-fsync EIO and retains exact recovery artifacts', (t) => {
   const store = tempStore(t);
   tokens.mintToken({ user: 'baseline@example.test' }, store);
   const baseline = fs.readFileSync(store);
@@ -160,15 +160,63 @@ test('gateway token mutation rejects directory-fsync EIO and restores the exact 
     }
     return originalFsync(fd);
   };
+  let failure;
   try {
     assert.throws(
       () => tokens.mintToken({ user: 'must-not-persist@example.test' }, store),
-      /synthetic token-store directory fsync EIO/,
+      (error) => {
+        failure = error;
+        return error?.code === 'PRIVATE_PATH_PUBLICATION_UNCERTAIN';
+      },
     );
   } finally {
     fs.fsyncSync = originalFsync;
   }
   assert.deepStrictEqual(fs.readFileSync(store), baseline);
+  assert.ok(failure.retainedPath && fs.existsSync(failure.retainedPath));
+  assert.deepStrictEqual(fs.readFileSync(failure.retainedPath), baseline);
+});
+
+test('gateway token mutation restores exact prior bytes when published identity verification fails', (t) => {
+  const store = tempStore(t);
+  tokens.mintToken({ user: 'baseline@example.test' }, store);
+  const baseline = fs.readFileSync(store);
+  const originalLstat = fs.lstatSync;
+  const originalPublish = privatePaths.publishFileDurably;
+  let substitutedPublication = false;
+  privatePaths.publishFileDurably = (source, destination, options = {}) => originalPublish(
+    source,
+    destination,
+    {
+      ...options,
+      verifyPublished(file) {
+        substitutedPublication = true;
+        if (typeof options.verifyPublished === 'function') return options.verifyPublished(file);
+        return undefined;
+      },
+    },
+  );
+  fs.lstatSync = (target, options) => {
+    const stat = originalLstat(target, options);
+    if (!substitutedPublication || path.resolve(target) !== path.resolve(store)) return stat;
+    substitutedPublication = false;
+    const changed = Object.create(stat);
+    Object.defineProperty(changed, 'ino', {
+      value: typeof stat.ino === 'bigint' ? stat.ino + 1n : stat.ino + 1,
+    });
+    return changed;
+  };
+  try {
+    assert.throws(
+      () => tokens.mintToken({ user: 'must-not-persist@example.test' }, store),
+      /gateway token store changed during publication/,
+    );
+  } finally {
+    fs.lstatSync = originalLstat;
+    privatePaths.publishFileDurably = originalPublish;
+  }
+  assert.deepStrictEqual(fs.readFileSync(store), baseline);
+  assert.strictEqual(tokens.listTokens(store).length, 1);
   assert.deepStrictEqual(
     fs.readdirSync(path.dirname(store)).filter((name) => name.includes('.tmp') || name.includes('.rollback.')),
     [],
@@ -273,7 +321,7 @@ test('gateway token directory and store have a protected two-principal Windows D
   assert.strictEqual(broadGrant.status, 0, broadGrant.stderr);
 
   tokens.mintToken({ user: 'acl-proof@example.test' }, store);
-  const owner = String(spawnSync('whoami.exe', [], { encoding: 'utf8', windowsHide: true }).stdout || '').trim().toLowerCase();
+  const owner = String(spawnSync(path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'whoami.exe'), [], { encoding: 'utf8', windowsHide: true }).stdout || '').trim().toLowerCase();
   for (const target of [dir, store]) {
     const acl = spawnSync('icacls.exe', [target], {
       encoding: 'utf8',

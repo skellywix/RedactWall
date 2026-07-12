@@ -62,15 +62,17 @@ test('drill passes end-to-end and prints a prompt-free PASS report', async () =>
   assert.strictEqual(report.restored.queryCount, db.stats().total);
   assert.strictEqual(report.restored.auditChainOk, true);
   assert.strictEqual(report.rawPromptBodiesIncluded, false);
-  assert.deepStrictEqual(report.artifacts, { keptAt: drillDir });
+  assert.match(path.basename(report.artifacts.keptAt), /^\.redactwall-drill-/);
+  assert.strictEqual(path.dirname(report.artifacts.keptAt), drillDir);
 
   const output = io.lines.join('\n');
   assert.ok(!output.includes(SECRET));
   assert.ok(!output.includes('Member SSN'));
-  assert.ok(fs.readdirSync(drillDir).some((name) => name.endsWith('.db')));
-  assert.ok(fs.readdirSync(drillDir).some((name) => name.endsWith('.db.audit-state.json')));
-  assert.ok(fs.readdirSync(drillDir).some((name) => name.endsWith('.db.audit-checkpoint.json')));
-  const restoredPath = path.join(drillDir, 'drill-restore', 'restored-redactwall.db');
+  const keptAt = report.artifacts.keptAt;
+  assert.ok(fs.readdirSync(keptAt).some((name) => name.endsWith('.db')));
+  assert.ok(fs.readdirSync(keptAt).some((name) => name.endsWith('.db.audit-state.json')));
+  assert.ok(fs.readdirSync(keptAt).some((name) => name.endsWith('.db.audit-checkpoint.json')));
+  const restoredPath = path.join(keptAt, 'restored-redactwall.db');
   assert.ok(fs.existsSync(restoredPath));
   assert.deepStrictEqual(fs.readdirSync(`${restoredPath}.audit-integrity`).sort(), [
     '.audit-integrity-checkpoint.json',
@@ -84,6 +86,49 @@ test('drill without --keep cleans up every artifact it created', async () => {
   assert.strictEqual(report.pass, true);
   assert.deepStrictEqual(report.artifacts, { cleanedUp: true });
   assert.deepStrictEqual(fs.readdirSync(drillDir), []);
+});
+
+test('drill never reuses or removes an operator preplanted drill-restore directory', async () => {
+  const drillDir = path.join(tempRoot, 'drill-preplanted');
+  const sentinel = path.join(drillDir, 'drill-restore', 'operator-owned.txt');
+  fs.mkdirSync(path.dirname(sentinel), { recursive: true });
+  fs.writeFileSync(sentinel, 'preserve operator data');
+
+  const report = await drill.runDrill({ backupDir: drillDir, dbModule: db });
+
+  assert.strictEqual(report.pass, true);
+  assert.strictEqual(fs.readFileSync(sentinel, 'utf8'), 'preserve operator data');
+  assert.deepStrictEqual(fs.readdirSync(drillDir), ['drill-restore']);
+});
+
+test('SQLite restore and inspection failures clean the owned private workspace', async (t) => {
+  for (const failurePoint of ['restore', 'inspection']) {
+    await t.test(failurePoint, async () => {
+      const drillDir = path.join(tempRoot, `drill-${failurePoint}-failure`);
+      let workspace;
+      await assert.rejects(() => drill.runDrill({
+        backupDir: drillDir,
+        dbModule: db,
+        createBackup: async (options) => {
+          workspace = options.outDir;
+          return backup.createBackup(options);
+        },
+        restoreBackup: failurePoint === 'restore'
+          ? ({ to }) => {
+              fs.writeFileSync(to, 'sensitive partial restore');
+              fs.mkdirSync(`${to}.audit-integrity`);
+              fs.writeFileSync(path.join(`${to}.audit-integrity`, 'partial'), 'sensitive');
+              throw new Error('synthetic SQLite restore failure');
+            }
+          : backup.restoreBackup,
+        inspectRestoredDb: failurePoint === 'inspection'
+          ? () => { throw new Error('synthetic SQLite inspection failure'); }
+          : drill.inspectRestoredDb,
+      }), new RegExp(`synthetic SQLite ${failurePoint} failure`));
+      assert.strictEqual(fs.existsSync(workspace), false);
+      assert.deepStrictEqual(fs.readdirSync(drillDir), []);
+    });
+  }
 });
 
 test('a corrupted backup file fails the drill', async () => {
@@ -137,6 +182,16 @@ test('argument parser accepts only the documented drill flags', () => {
   assert.deepStrictEqual(drill.parseArgs([]), { keep: false });
   assert.deepStrictEqual(drill.parseArgs(['--backup-dir', 'backups', '--keep']), { keep: true, backupDir: 'backups' });
   assert.throws(() => drill.parseArgs(['--bogus']), /unknown argument/);
+  assert.throws(() => drill.parseArgs(['--backup-dir']), /requires a value/);
+  assert.throws(() => drill.parseArgs(['--backup-dir', '--keep']), /requires a value/);
+});
+
+test('drill cleanup identity comparison does not round distinct filesystem ids', () => {
+  const shared = { dev: 7n, birthtimeNs: 11n };
+  const left = { ...shared, ino: 9007199254740992n };
+  const right = { ...shared, ino: 9007199254740993n };
+  assert.strictEqual(Number(left.ino), Number(right.ino), 'fixture collides after unsafe Number coercion');
+  assert.strictEqual(drill._internal.sameArtifactIdentity(left, right), false);
 });
 
 test.after(() => {

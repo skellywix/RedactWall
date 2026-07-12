@@ -20,6 +20,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 const Database = require('better-sqlite3');
+const { parse: parsePgConnectionString } = require('pg-connection-string');
 const auditIntegrity = require('../server/audit-integrity');
 const auditAnchorInternal = require('../server/audit-anchor')._internal;
 const privatePaths = require('../server/private-path');
@@ -29,6 +30,7 @@ const {
   withoutPostgresConnectionEnv,
 } = require('../server/postgres-url');
 const RESTORE_COPY_BUFFER_BYTES = 64 * 1024;
+const VALUE_OPTIONS = new Set(['out', 'file', 'manifest', 'to', 'audit-dir']);
 
 function parseArgs(argv) {
   const out = { _: [] };
@@ -42,6 +44,10 @@ function parseArgs(argv) {
     if (key === 'force') {
       out.force = true;
       continue;
+    }
+    if (!VALUE_OPTIONS.has(key)) throw new Error(`unknown option: --${key}`);
+    if (i + 1 >= argv.length || argv[i + 1].startsWith('--')) {
+      throw new Error(`--${key} requires a value`);
     }
     out[key] = argv[++i];
   }
@@ -78,6 +84,23 @@ const AUDIT_CHECKPOINT_NAME = '.audit-integrity-checkpoint.json';
 const MAX_AUDIT_STATE_BYTES = 8 * 1024;
 const MAX_AUDIT_CHECKPOINT_BYTES = 4 * 1024;
 const MANIFEST_AUTH_VERSION = 1;
+const SQLITE_BACKUP_FORMAT = 'sqlite-backup';
+const SQLITE_RESTORED_FORMAT = 'sqlite-restored-runtime';
+const SQLITE_RUNTIME_LAYOUT = 'runtime-audit-directory';
+const POSTGRES_AUDIT_SCOPE_TABLE = 'public.redactwall_audit_scope';
+const PG_DEFAULT_PORT = 5432;
+const PG_SNAPSHOT_DEFAULT_OPTIONS = '-c client_min_messages=notice';
+const PG_SNAPSHOT_DEFAULT_APPLICATION = 'redactwall-backup-snapshot';
+const SUPPORTED_PG_RESTORE_MAJORS = new Set([16, 17]);
+const PG_RESTORE_CONNECTION_LIMIT = 2;
+const PG_RESTORE_SESSION_DRAIN_TIMEOUT_MS = 5000;
+const DEFAULT_PG_MAINTENANCE_DATABASE = 'postgres';
+const PG_DATABASE_IDENTIFIER_RE = /^[A-Za-z_][A-Za-z0-9_$]{0,62}$/;
+const PG_RESTORE_SESSION_WAIT = new Int32Array(new SharedArrayBuffer(4));
+const CONCLUSIVE_PG_DATABASE_MUTATION_REJECTIONS = new Set([
+  '0A000', '22023', '25001', '3D000', '42501', '42601', '42704', '42P04', '55006',
+]);
+const privateStagingProofs = new Map();
 const WINDOWS_DACL_RESTORE = [
   '$path = $env:REDACTWALL_ACL_TARGET;',
   '$section = [System.Security.AccessControl.AccessControlSections]::Access;',
@@ -110,7 +133,11 @@ function ensureParent(file) {
 }
 
 function windowsPrincipal(spawn = spawnSync) {
-  const result = spawn('whoami.exe', [], { encoding: 'utf8', windowsHide: true });
+  // System32 path only: a PATH-resolved whoami can be shadowed (Git's sh
+  // ships one that omits the machine prefix) and would break or spoof every
+  // owner comparison.
+  const whoami = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'whoami.exe');
+  const result = spawn(whoami, [], { encoding: 'utf8', windowsHide: true });
   const principal = String(result.stdout || '').trim();
   if (result.error || result.status !== 0 || !principal) {
     const detail = String(result.stderr || result.error?.message || 'no principal returned').trim();
@@ -196,12 +223,214 @@ function restrictPath(target, options = {}) {
 function createPrivateStagingDir(parent = os.tmpdir(), security = {}) {
   fs.mkdirSync(parent, { recursive: true });
   const staging = fs.mkdtempSync(path.join(parent, '.redactwall-backup-'));
+  privateStagingProofs.set(comparablePath(staging), exactDirectoryStat(staging, 'private backup staging directory'));
   try {
     return restrictPath(staging, { ...security, directory: true });
   } catch (error) {
-    fs.rmSync(staging, { recursive: true, force: true });
+    try { cleanupPrivateStagingDirectory(staging); }
+    catch (cleanupError) {
+      throw new AggregateError(
+        [error, cleanupError],
+        `failed to secure private backup staging; ${cleanupError.message}`,
+      );
+    }
     throw error;
   }
+}
+
+function sameDirectoryIdentity(left, right) {
+  return sameFileIdentity(left, right) && left.birthtimeNs === right.birthtimeNs;
+}
+
+function retainChangedStagingDirectory(quarantine, original) {
+  let retainedAt = quarantine;
+  if (!pathEntryExists(original) && pathEntryExists(quarantine)) {
+    try {
+      fs.renameSync(quarantine, original);
+      retainedAt = original;
+    } catch {
+      // Keep the changed path at its unpredictable quarantine name when the
+      // public pathname is concurrently occupied or cannot be restored.
+    }
+  }
+  try { privatePaths.fsyncDirectory(path.dirname(original), { fs }); } catch {}
+  return retainedAt;
+}
+
+function cleanupPrivateStagingDirectory(staging, label = 'private backup staging directory') {
+  if (!staging) return;
+  const resolved = path.resolve(staging);
+  const key = comparablePath(resolved);
+  const expected = privateStagingProofs.get(key);
+  if (!expected) throw new Error(`${label} cleanup has no filesystem identity proof: ${resolved}`);
+  const quarantine = quarantinePath(resolved, 'cleanup');
+  try {
+    fs.renameSync(resolved, quarantine);
+  } catch (error) {
+    if (error && error.code === 'ENOENT') {
+      throw new Error(`${label} cleanup refused; tracked staging disappeared from ${resolved}`, { cause: error });
+    }
+    const cleanupError = new Error(`${label} cleanup refused; staging retained at ${resolved}`, {
+      cause: error,
+    });
+    cleanupError.code = error && error.code || 'BACKUP_STAGING_CLEANUP_FAILED';
+    cleanupError.retainedPath = resolved;
+    cleanupError.recoveryPaths = [resolved];
+    throw cleanupError;
+  }
+
+  let current;
+  try {
+    current = exactDirectoryStat(quarantine, `quarantined ${label}`);
+  } catch (error) {
+    privateStagingProofs.delete(key);
+    const retainedAt = retainChangedStagingDirectory(quarantine, resolved);
+    const cleanupError = new Error(`${label} cleanup refused; unverifiable replacement retained at ${retainedAt}`, {
+      cause: error,
+    });
+    cleanupError.retainedPath = retainedAt;
+    cleanupError.recoveryPaths = [retainedAt];
+    throw cleanupError;
+  }
+  if (!sameDirectoryIdentity(expected, current)) {
+    privateStagingProofs.delete(key);
+    const retainedAt = retainChangedStagingDirectory(quarantine, resolved);
+    const error = new Error(`${label} cleanup refused; changed replacement retained at ${retainedAt}`);
+    error.retainedPath = retainedAt;
+    error.recoveryPaths = [retainedAt];
+    throw error;
+  }
+
+  try {
+    fs.rmSync(quarantine, { recursive: true });
+  } catch (error) {
+    const cleanupError = new Error(`${label} cleanup failed; exact staging retained at ${quarantine}`, {
+      cause: error,
+    });
+    cleanupError.code = error && error.code || 'BACKUP_STAGING_CLEANUP_FAILED';
+    cleanupError.retainedPath = quarantine;
+    cleanupError.recoveryPaths = [quarantine];
+    throw cleanupError;
+  }
+  privateStagingProofs.delete(key);
+  if (pathEntryExists(quarantine)) {
+    const error = new Error(`${label} cleanup removed the owned staging but a changed replacement was retained at ${quarantine}`);
+    error.retainedPath = quarantine;
+    error.recoveryPaths = [quarantine];
+    throw error;
+  }
+}
+
+function cleanupPrivateStagingDirectories(stagingDirectories) {
+  const failures = [];
+  for (const staging of stagingDirectories.filter(Boolean)) {
+    try { cleanupPrivateStagingDirectory(staging); }
+    catch (error) { failures.push(error); }
+  }
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1) {
+    const error = new AggregateError(failures, failures.map((failure) => failure.message).join('; '));
+    error.recoveryPaths = [...new Set(failures.flatMap((failure) => failure.recoveryPaths || []))];
+    if (error.recoveryPaths[0]) error.retainedPath = error.recoveryPaths[0];
+    throw error;
+  }
+}
+
+function cleanupPrivateStagingAfterOperation(
+  stagingDirectories,
+  operationError = null,
+  operationFailed = operationError !== null && operationError !== undefined,
+) {
+  try {
+    cleanupPrivateStagingDirectories(stagingDirectories);
+  } catch (cleanupError) {
+    if (!operationFailed) throw cleanupError;
+    const operationMessage = operationError && typeof operationError.message === 'string'
+      ? operationError.message : 'operation failed';
+    throw new AggregateError(
+      [operationError, cleanupError],
+      `${operationMessage}; private staging cleanup also failed: ${cleanupError.message}`,
+      { cause: operationError },
+    );
+  }
+}
+
+function committedCleanupRecoveryPaths(error, additional = []) {
+  const paths = [
+    ...additional,
+    ...(Array.isArray(error && error.recoveryPaths) ? error.recoveryPaths : []),
+    error && error.retainedPath,
+    error && error.additionalRetainedPath,
+  ];
+  return [...new Set(paths.filter((value) => typeof value === 'string' && value.trim())
+    .map((value) => path.resolve(value)))];
+}
+
+function attachCommittedCleanupWarning(result, error, {
+  security = {},
+  component,
+  phase,
+  recoveryPaths = [],
+} = {}) {
+  const retained = committedCleanupRecoveryPaths(error, recoveryPaths);
+  if (retained[0] && !error.retainedPath) error.retainedPath = retained[0];
+  const warning = {
+    ...privatePaths.notifyCommittedCleanupWarning(error, {
+      ...security,
+      cleanupComponent: component,
+    }, phase),
+    committed: true,
+    recovery: {
+      paths: retained,
+      requiresExactIdentityVerification: true,
+    },
+  };
+  if (result && typeof result === 'object') {
+    result.cleanupDegraded = true;
+    result.cleanupWarnings = [
+      ...(Array.isArray(result.cleanupWarnings) ? result.cleanupWarnings : []),
+      warning,
+    ];
+  }
+  return warning;
+}
+
+function cleanupPrivateStagingAfterCommit(stagingDirectories, result, options) {
+  try {
+    cleanupPrivateStagingDirectories(stagingDirectories);
+  } catch (error) {
+    attachCommittedCleanupWarning(result, error, options);
+  }
+}
+
+function stagingProof(staging, label) {
+  const resolved = path.resolve(staging);
+  const key = comparablePath(resolved);
+  const expected = privateStagingProofs.get(key);
+  if (!expected) throw new Error(`${label} has no filesystem identity proof: ${resolved}`);
+  return { expected, key, resolved };
+}
+
+function retireTransferredPrivateStaging(staging, target, label) {
+  const proof = stagingProof(staging, label);
+  if (pathEntryExists(proof.resolved)) {
+    throw new Error(`${label} transfer left the original staging pathname occupied: ${proof.resolved}`);
+  }
+  const current = exactDirectoryStat(target, `${label} transfer target`);
+  if (!sameDirectoryIdentity(proof.expected, current)) {
+    throw new Error(`${label} transfer target identity changed: ${target}`);
+  }
+  privateStagingProofs.delete(proof.key);
+}
+
+function retireRemovedPrivateStaging(staging, removedTarget, removedIdentity, label) {
+  const proof = stagingProof(staging, label);
+  if (!sameDirectoryIdentity(proof.expected, removedIdentity)
+      || pathEntryExists(proof.resolved)
+      || pathEntryExists(removedTarget)) {
+    throw new Error(`${label} removal could not prove the transferred staging was deleted`);
+  }
+  privateStagingProofs.delete(proof.key);
 }
 
 function withPrivateRestoreDirectory(target, security, callback) {
@@ -212,6 +441,17 @@ function withPrivateRestoreDirectory(target, security, callback) {
     directory: true,
     label: 'SQLite restore directory',
     ownerLabel: 'SQLite restore directory',
+  });
+}
+
+function withPrivatePgAuditParent(auditDirectory, security, callback) {
+  const privatePathSecurity = security.privatePathSecurity || security;
+  return privatePaths.withPrivateDirectoryMutationLockSync(path.dirname(auditDirectory), callback, {
+    ...privatePathSecurity,
+    fs,
+    directory: true,
+    label: 'Postgres restore audit parent',
+    ownerLabel: 'Postgres restore audit parent',
   });
 }
 
@@ -299,14 +539,52 @@ function fsyncFile(file) {
 }
 
 function sameFileIdentity(left, right) {
-  if (left.dev && right.dev && left.dev !== right.dev) return false;
-  if (left.ino && right.ino && left.ino !== right.ino) return false;
-  return true;
+  return left.dev !== 0n && left.ino !== 0n
+    && left.dev === right.dev && left.ino === right.ino;
+}
+
+function sameArtifactIdentity(left, right, directory = false) {
+  if (!sameFileIdentity(left, right)) return false;
+  if (directory) return left.birthtimeNs === right.birthtimeNs;
+  return left.size === right.size
+    && (process.platform === 'win32' || left.birthtimeNs === right.birthtimeNs);
+}
+
+function sameStableFileStat(left, right) {
+  return sameFileIdentity(left, right)
+    && left.mtimeNs === right.mtimeNs
+    && left.ctimeNs === right.ctimeNs
+    && left.birthtimeNs === right.birthtimeNs;
+}
+
+function exactDirectoryStat(directory, label) {
+  const stat = fs.lstatSync(directory, { bigint: true });
+  if (!stat.isDirectory() || stat.isSymbolicLink?.() || stat.dev === 0n || stat.ino === 0n) {
+    throw new Error(`${label} is not a stable directory`);
+  }
+  return stat;
+}
+
+function capturePendingFreeDirectory(pendingPath, label) {
+  const directory = path.dirname(pendingPath);
+  const before = exactDirectoryStat(directory, label);
+  if (pathEntryExists(pendingPath)) throw new Error(`${label} contains pending audit high-water state`);
+  const after = exactDirectoryStat(directory, label);
+  if (!sameStableFileStat(before, after)) throw new Error(`${label} changed while checking pending state`);
+  return after;
+}
+
+function assertPendingFreeDirectoryUnchanged(pendingPath, expected, label) {
+  if (pathEntryExists(pendingPath)) throw new Error(`${label} contains pending audit high-water state`);
+  const after = exactDirectoryStat(path.dirname(pendingPath), label);
+  if (!sameStableFileStat(expected, after)) throw new Error(`${label} changed during restore`);
 }
 
 function assertStableRestoreSource(stat, expectedBytes, maxBytes, label) {
-  if (!stat.isFile() || stat.isSymbolicLink?.() || (stat.nlink && stat.nlink !== 1)
-      || stat.size !== expectedBytes || stat.size > maxBytes) {
+  const expected = BigInt(expectedBytes);
+  const maximum = BigInt(maxBytes);
+  if (!stat.isFile() || stat.isSymbolicLink?.() || stat.nlink !== 1n
+      || stat.size !== expected || stat.size > maximum) {
     throw new Error(`${label} is not the authenticated regular file`);
   }
 }
@@ -333,14 +611,13 @@ function copyOpenedRestoreArtifact(sourceFd, targetFd, maxBytes, label) {
 }
 
 function openStableRestoreSource(source, expectedBytes, maxBytes, label) {
-  const before = fs.lstatSync(source);
+  const before = fs.lstatSync(source, { bigint: true });
   assertStableRestoreSource(before, expectedBytes, maxBytes, label);
   const fd = fs.openSync(source, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
   try {
-    const stat = fs.fstatSync(fd);
+    const stat = fs.fstatSync(fd, { bigint: true });
     assertStableRestoreSource(stat, expectedBytes, maxBytes, label);
-    if (!sameFileIdentity(before, stat) || stat.mtimeMs !== before.mtimeMs
-        || stat.ctimeMs !== before.ctimeMs) throw new Error(`${label} changed while opening`);
+    if (!sameStableFileStat(before, stat)) throw new Error(`${label} changed while opening`);
     return { fd, stat };
   } catch (error) {
     fs.closeSync(fd);
@@ -349,19 +626,18 @@ function openStableRestoreSource(source, expectedBytes, maxBytes, label) {
 }
 
 function assertRestoreSourceUnchanged(fd, opened, copied, expectedBytes, label) {
-  const after = fs.fstatSync(fd);
+  const after = fs.fstatSync(fd, { bigint: true });
   if (copied !== expectedBytes || after.size !== opened.size
-      || after.mtimeMs !== opened.mtimeMs || after.ctimeMs !== opened.ctimeMs
-      || !sameFileIdentity(opened, after)) throw new Error(`${label} changed while copying`);
+      || !sameStableFileStat(opened, after)) throw new Error(`${label} changed while copying`);
 }
 
-function finishRestoreArtifactCopy(sourceFd, targetFd, target, complete) {
+function finishRestoreArtifactCopy(sourceFd, targetFd, target, targetCreated, complete) {
   let failure = null;
   for (const fd of [targetFd, sourceFd]) {
     if (fd === undefined) continue;
     try { fs.closeSync(fd); } catch (error) { failure ||= error; }
   }
-  if (!complete) {
+  if (targetCreated && !complete) {
     try { fs.rmSync(target, { force: true }); } catch (error) { failure ||= error; }
   }
   if (failure) throw failure;
@@ -379,9 +655,11 @@ function copyPrivateRestoreArtifact(source, target, {
   }
   const sourceFile = openStableRestoreSource(source, expectedBytes, maxBytes, label);
   let targetFd;
+  let targetCreated = false;
   let complete = false;
   try {
     targetFd = fs.openSync(target, 'wx', PRIVATE_FILE_MODE);
+    targetCreated = true;
     restrictPath(target, { ...security, directory: false });
     const copied = copyOpenedRestoreArtifact(sourceFile.fd, targetFd, maxBytes, label);
     assertRestoreSourceUnchanged(sourceFile.fd, sourceFile.stat, copied, expectedBytes, label);
@@ -389,31 +667,20 @@ function copyPrivateRestoreArtifact(source, target, {
     complete = true;
     return target;
   } finally {
-    finishRestoreArtifactCopy(sourceFile.fd, targetFd, target, complete);
+    finishRestoreArtifactCopy(sourceFile.fd, targetFd, target, targetCreated, complete);
   }
 }
 
 function fsyncPublishedArtifact(item) {
   if (item.directory) privatePaths.fsyncDirectory(item.target, { fs });
   else fsyncFile(item.target);
-  privatePaths.fsyncDirectory(path.dirname(item.target), { fs });
-  if (!item.directory) privatePaths.fsyncDirectory(path.dirname(item.staged), { fs });
-}
-
-function cleanupRollbackDirs(state) {
-  const failures = [];
-  for (const directory of state.directories.values()) {
-    try {
-      fs.rmSync(directory, { recursive: true, force: true });
-    } catch (error) {
-      failures.push(error);
-    }
-  }
-  if (failures.length) {
-    const remaining = [...state.directories.values()].filter((directory) => fs.existsSync(directory));
-    throw new Error(`failed to remove private rollback state; recovery directories remain: ${remaining.join(', ')}`, {
-      cause: failures[0],
-    });
+  const targetParent = path.dirname(item.target);
+  const stagedParent = path.dirname(item.staged);
+  privatePaths.fsyncDirectory(targetParent, { fs });
+  if (comparablePath(stagedParent) !== comparablePath(targetParent)) {
+    // A cross-directory rename is not durable until both the removed source
+    // entry and the installed destination entry have reached their parents.
+    privatePaths.fsyncDirectory(stagedParent, { fs });
   }
 }
 
@@ -433,30 +700,139 @@ function restoreArtifactPermissions(target, permissions, security = {}) {
   }
 }
 
+function exactArtifactStat(target, directory, label = 'backup artifact') {
+  const stat = fs.lstatSync(target, { bigint: true });
+  if (stat.isSymbolicLink?.() || stat.dev === 0n || stat.ino === 0n
+      || (directory ? !stat.isDirectory() : !stat.isFile())) {
+    throw new Error(`${label} has no stable filesystem identity: ${target}`);
+  }
+  return stat;
+}
+
 function assertExistingArtifactType(target, directory) {
-  const stat = fs.lstatSync(target);
-  if (stat.isSymbolicLink() || (directory ? !stat.isDirectory() : !stat.isFile())
-      || (!directory && stat.nlink && stat.nlink !== 1)) {
+  const stat = exactArtifactStat(target, directory, 'replacement artifact');
+  if (!directory && stat.nlink !== 1n) {
     throw new Error(`refusing unsafe replacement artifact: ${target}`);
+  }
+  return stat;
+}
+
+function quarantinePath(target, purpose) {
+  return path.join(
+    path.dirname(target),
+    `.${path.basename(target)}.${purpose}-${process.pid}-${crypto.randomBytes(12).toString('hex')}`,
+  );
+}
+
+function quarantinedArtifactMatchesPublication(artifact, current) {
+  if (!sameArtifactIdentity(artifact.identity, current, artifact.directory)) return false;
+  if (artifact.directory || current.nlink === 1n) return true;
+  if (artifact.finalStat || current.nlink !== 2n) return false;
+  try {
+    const staged = exactArtifactStat(artifact.staged, false, 'linked staging artifact');
+    return staged.nlink === 2n && sameArtifactIdentity(artifact.identity, staged, false);
+  } catch {
+    return false;
   }
 }
 
-function restoreMovedArtifacts(state, items, clearTargets = false) {
-  if (clearTargets) {
-    for (const item of items) removeTargetArtifacts(item.target, item.sqlite, item.directory);
+function quarantineOwnedArtifact(artifact) {
+  if (!pathEntryExists(artifact.target)) {
+    return { retained: [`${artifact.target} (missing after publication)`], blocked: [] };
   }
+  const quarantine = quarantinePath(artifact.target, 'quarantine');
+  try {
+    fs.renameSync(artifact.target, quarantine);
+  } catch (error) {
+    return {
+      retained: [],
+      blocked: [`${artifact.target} (${error.code || error.message})`],
+    };
+  }
+  try {
+    const current = exactArtifactStat(quarantine, artifact.directory, 'quarantined backup artifact');
+    if (!quarantinedArtifactMatchesPublication(artifact, current)) {
+      return { retained: [quarantine], blocked: [] };
+    }
+    fs.rmSync(quarantine, { recursive: artifact.directory, force: true });
+    privatePaths.fsyncDirectory(path.dirname(artifact.target), { fs });
+    return { retained: [], blocked: [] };
+  } catch {
+    return { retained: [quarantine], blocked: [] };
+  }
+}
+
+function removePublishedArtifacts(published) {
+  const result = { retained: [], blocked: [] };
+  for (const artifact of [...published].reverse()) {
+    const removed = quarantineOwnedArtifact(artifact);
+    result.retained.push(...removed.retained);
+    result.blocked.push(...removed.blocked);
+  }
+  return result;
+}
+
+function cleanupRollbackDirs(state) {
+  const result = { retained: [], blocked: [] };
+  for (const artifact of state.directories.values()) {
+    const removed = quarantineOwnedArtifact({ ...artifact, target: artifact.path, directory: true });
+    result.retained.push(...removed.retained);
+    result.blocked.push(...removed.blocked);
+  }
+  if (result.retained.length || result.blocked.length) {
+    const remaining = [...result.retained, ...result.blocked];
+    const error = new Error(`failed to remove private rollback state; recovery directories or paths remain: ${remaining.join(', ')}`);
+    error.code = 'BACKUP_ROLLBACK_CLEANUP_FAILED';
+    error.recoveryPaths = result.retained.slice();
+    if (error.recoveryPaths[0]) error.retainedPath = error.recoveryPaths[0];
+    throw error;
+  }
+}
+
+function quarantineRollbackCollisions(state) {
+  const retained = [];
+  const blocked = [];
+  for (const artifact of state.moved) {
+    if (!pathEntryExists(artifact.target)) continue;
+    const quarantine = quarantinePath(artifact.target, 'retained');
+    try {
+      fs.renameSync(artifact.target, quarantine);
+      retained.push(quarantine);
+    } catch (error) {
+      blocked.push(`${artifact.target} (${error.code || error.message})`);
+    }
+  }
+  return { retained, blocked };
+}
+
+function restoreMovedArtifacts(state) {
   const failures = [];
   for (const artifact of [...state.moved].reverse()) {
     try {
-      fs.rmSync(artifact.target, { recursive: artifact.directory, force: true });
+      if (pathEntryExists(artifact.target)) {
+        throw new Error(`rollback target is occupied: ${artifact.target}`);
+      }
+      const stagedIdentity = exactArtifactStat(artifact.staged, artifact.directory, 'rollback artifact');
+      if (!sameArtifactIdentity(artifact.identity, stagedIdentity, artifact.directory)) {
+        throw new Error(`rollback artifact identity changed: ${artifact.staged}`);
+      }
       fs.renameSync(artifact.staged, artifact.target);
+      const restoredIdentity = exactArtifactStat(artifact.target, artifact.directory, 'restored rollback artifact');
+      if (!sameArtifactIdentity(artifact.identity, restoredIdentity, artifact.directory)) {
+        throw new Error(`restored rollback artifact identity changed: ${artifact.target}`);
+      }
       restoreArtifactPermissions(artifact.target, artifact.permissions, state.security);
+      fsyncPublishedArtifact({
+        staged: artifact.staged,
+        target: artifact.target,
+        directory: artifact.directory,
+      });
     } catch (error) {
       failures.push(error);
     }
   }
   if (failures.length) {
-    const recoveryDirs = [...state.directories.values()].join(', ');
+    const recoveryDirs = [...state.directories.values()].map((entry) => entry.path).join(', ');
     throw new Error(`failed to restore replaced backup artifacts; recovery state remains in: ${recoveryDirs}`, {
       cause: failures[0],
     });
@@ -470,15 +846,23 @@ function stageExistingArtifacts(items, security = {}) {
     for (const item of items) {
       for (const target of targetArtifacts(item.target, item.sqlite)) {
         if (!pathEntryExists(target)) continue;
-        assertExistingArtifactType(target, item.directory === true);
         const parent = path.dirname(target);
         if (!state.directories.has(parent)) {
-          state.directories.set(parent, createPrivateStagingDir(parent, security));
+          const rollbackDirectory = createPrivateStagingDir(parent, security);
+          state.directories.set(parent, {
+            path: rollbackDirectory,
+            identity: exactDirectoryStat(rollbackDirectory, 'private rollback directory'),
+          });
         }
-        const staged = path.join(state.directories.get(parent), `${state.moved.length}-${path.basename(target)}`);
+        const staged = path.join(state.directories.get(parent).path, `${state.moved.length}-${path.basename(target)}`);
         const permissions = captureArtifactPermissions(target, security);
+        const identity = assertExistingArtifactType(target, item.directory === true);
         fs.renameSync(target, staged);
-        state.moved.push({ target, staged, permissions, directory: item.directory === true });
+        const movedIdentity = exactArtifactStat(staged, item.directory === true, 'staged rollback artifact');
+        if (!sameArtifactIdentity(identity, movedIdentity, item.directory === true)) {
+          throw new Error(`replacement artifact identity changed while staging: ${target}`);
+        }
+        state.moved.push({ target, staged, permissions, identity, directory: item.directory === true });
         restrictPath(staged, { ...security, directory: item.directory === true });
       }
     }
@@ -493,17 +877,47 @@ function publishStagedFiles(items, security = {}) {
   const published = [];
   try {
     for (const item of items) {
+      const identity = exactArtifactStat(item.staged, item.directory === true, 'staged publication artifact');
+      if (!item.directory && identity.nlink !== 1n) {
+        throw new Error(`staged publication artifact has unexpected links: ${item.staged}`);
+      }
       if (item.directory) fs.renameSync(item.staged, item.target);
       else fs.linkSync(item.staged, item.target);
-      published.push(item);
+      const artifact = { ...item, identity, directory: item.directory === true };
+      published.push(artifact);
+      const targetIdentity = exactArtifactStat(item.target, item.directory === true, 'published backup artifact');
+      if (!sameArtifactIdentity(identity, targetIdentity, item.directory === true)) {
+        throw new Error(`published backup artifact identity changed: ${item.target}`);
+      }
       if (!item.directory) fs.unlinkSync(item.staged);
       restrictPath(item.target, { ...security, directory: item.directory === true });
       if (item.sqlite) assertNoSqliteSidecars(item.target);
       fsyncPublishedArtifact(item);
+      const finalIdentity = exactArtifactStat(item.target, item.directory === true, 'published backup artifact');
+      if (!sameArtifactIdentity(identity, finalIdentity, item.directory === true)
+          || (!item.directory && finalIdentity.nlink !== 1n)) {
+        throw new Error(`published backup artifact identity changed: ${item.target}`);
+      }
+      artifact.finalStat = finalIdentity;
     }
+    return published;
   } catch (error) {
-    for (const item of published) removeTargetArtifacts(item.target, item.sqlite, item.directory);
+    error.publishedArtifacts = published;
     throw error;
+  }
+}
+
+function assertPublishedArtifactsCurrent(published) {
+  for (const artifact of published) {
+    const current = exactArtifactStat(
+      artifact.target,
+      artifact.directory,
+      'verified published backup artifact',
+    );
+    if (!sameStableFileStat(artifact.finalStat, current)
+        || (!artifact.directory && current.nlink !== 1n)) {
+      throw new Error(`published backup artifact identity changed during verification: ${artifact.target}`);
+    }
   }
 }
 
@@ -512,29 +926,58 @@ function publishStagedFiles(items, security = {}) {
  * Staging lives in each target's parent, so a hard link is an atomic,
  * same-filesystem no-replace operation and preserves the private mode/ACL.
  */
-function publishPrivateFiles(items, { force = false, security = {} } = {}) {
+function publishPrivateFiles(items, { force = false, security = {}, verify = null } = {}) {
   assertDistinctArtifactTargets(items);
   for (const item of items) assertWritable(item.target, force, { sqlite: item.sqlite });
-  if (!force) return publishStagedFiles(items, security);
-
-  const rollback = stageExistingArtifacts(items, security);
+  const rollback = force ? stageExistingArtifacts(items, security) : null;
+  let published = [];
+  let verification;
   try {
-    publishStagedFiles(items, security);
+    published = publishStagedFiles(items, security);
+    verification = typeof verify === 'function' ? verify() : undefined;
+    assertPublishedArtifactsCurrent(published);
   } catch (error) {
-    try {
-      restoreMovedArtifacts(rollback, items, true);
-    } catch (rollbackError) {
-      throw new Error(`backup publish failed; ${rollbackError.message}`, { cause: error });
+    published = error.publishedArtifacts || published;
+    const cleanup = removePublishedArtifacts(published);
+    let retained = cleanup.retained;
+    let blocked = cleanup.blocked;
+    if (rollback && blocked.length === 0) {
+      const collisions = quarantineRollbackCollisions(rollback);
+      retained = retained.concat(collisions.retained);
+      blocked = blocked.concat(collisions.blocked);
+    }
+    if (rollback && blocked.length === 0) {
+      try {
+        restoreMovedArtifacts(rollback);
+      } catch (rollbackError) {
+        throw new Error(`backup publish failed (${error.message}); ${rollbackError.message}`, { cause: error });
+      }
+    }
+    if (blocked.length) {
+      const recovery = rollback ? [...rollback.directories.values()].map((entry) => entry.path) : [];
+      throw new Error(`backup publish failed (${error.message}); public paths could not be cleared: ${blocked.join(', ')}; recovery state remains: ${recovery.join(', ')}`, {
+        cause: error,
+      });
+    }
+    if (retained.length) {
+      throw new Error(`backup publish failed (${error.message}); changed artifacts were preserved at: ${retained.join(', ')}`, { cause: error });
     }
     throw error;
   }
-  try {
-    cleanupRollbackDirs(rollback);
-  } catch (error) {
-    throw new Error(`backup publish succeeded, but prior artifacts remain in private recovery directories: ${error.message}`, {
-      cause: error,
-    });
+  if (rollback) {
+    try {
+      cleanupRollbackDirs(rollback);
+    } catch (error) {
+      attachCommittedCleanupWarning(verification, error, {
+        security,
+        component: 'backup-artifact-publication',
+        phase: 'rollback-artifact-cleanup',
+        recoveryPaths: [...rollback.directories.values()].map((entry) => entry.path)
+          .filter((directory) => pathEntryExists(directory)),
+      });
+    }
   }
+  return verification;
 }
 
 function snapshotStatsFromRows(rows, date = new Date()) {
@@ -567,6 +1010,7 @@ function inspectSqliteSnapshot(file, security = {}, anchor = null) {
   const staging = createPrivateStagingDir(os.tmpdir(), security);
   const inspectionFile = path.join(staging, 'inspection.db');
   let dbFile;
+  let operationError;
   try {
     fs.copyFileSync(file, inspectionFile, fs.constants.COPYFILE_EXCL);
     restrictPath(inspectionFile, { ...security, directory: false });
@@ -584,9 +1028,12 @@ function inspectSqliteSnapshot(file, security = {}, anchor = null) {
         dbFile.prepare('SELECT status, createdAt, data FROM queries ORDER BY seq ASC').all(),
       ),
     };
+  } catch (error) {
+    operationError = error;
+    throw error;
   } finally {
     if (dbFile) dbFile.close();
-    fs.rmSync(staging, { recursive: true, force: true });
+    cleanupPrivateStagingAfterOperation([staging], operationError);
   }
 }
 
@@ -599,11 +1046,16 @@ function backupAuditArtifactPaths(file) {
 }
 
 function restoredAuditAnchorPaths(file) {
-  const directory = `${path.resolve(file)}.audit-integrity`;
+  return runtimeAuditAnchorPaths(`${path.resolve(file)}.audit-integrity`);
+}
+
+function runtimeAuditAnchorPaths(directory) {
+  const resolved = path.resolve(directory);
   return {
-    directory,
-    statePath: path.join(directory, AUDIT_STATE_NAME),
-    checkpointPath: path.join(directory, AUDIT_CHECKPOINT_NAME),
+    directory: resolved,
+    statePath: path.join(resolved, AUDIT_STATE_NAME),
+    checkpointPath: path.join(resolved, AUDIT_CHECKPOINT_NAME),
+    pendingPath: path.join(resolved, '.audit-integrity-pending.json'),
   };
 }
 
@@ -634,6 +1086,8 @@ function loadAuthenticatedAuditAnchor(paths, env = process.env, security = {}) {
     loaded.key,
     loaded.checkpointCreated,
     loaded.embedded,
+    loaded.pendingProtocol,
+    loaded.databaseScope,
   );
   if (!loaded.checkpointCreated || !sameCanonicalJson(state, expectedState)) {
     throw new Error('audit integrity state authentication failed');
@@ -745,6 +1199,13 @@ function validateArtifactManifest(manifest, driver, paths, descriptors) {
 }
 
 function validateSqliteManifest(manifest, paths, descriptors, key) {
+  const portableLayout = manifest && manifest.format === SQLITE_BACKUP_FORMAT
+    && manifest.artifactLayout === undefined;
+  const runtimeLayout = manifest && manifest.format === SQLITE_RESTORED_FORMAT
+    && manifest.artifactLayout === SQLITE_RUNTIME_LAYOUT;
+  if (!portableLayout && !runtimeLayout) {
+    return { ok: false, reason: 'unsupported-layout' };
+  }
   const artifacts = validateArtifactManifest(manifest, 'sqlite', paths, descriptors);
   if (!artifacts.ok) return artifacts;
   if (!validManifestAuthentication(manifest, key)) {
@@ -770,6 +1231,40 @@ function authenticateManifest(manifest, key) {
       mac: auditIntegrity.hmac(key, auditIntegrity.canonical(body)),
     },
   };
+}
+
+function buildRestoredSqliteManifest(sourceManifest, descriptors, key) {
+  const {
+    manifestAuthentication: sourceAuthentication,
+    artifacts: _sourceArtifacts,
+    backupFile: sourceBackupFile,
+    backupBytes: _sourceBackupBytes,
+    backupSha256: sourceBackupSha256,
+    format: _sourceFormat,
+    artifactLayout: _sourceLayout,
+    restoredAt: _previousRestoredAt,
+    restoredFrom: _previousRestore,
+    note: _sourceNote,
+    ...metadata
+  } = sourceManifest;
+  return authenticateManifest({
+    ...metadata,
+    schemaVersion: 2,
+    driver: 'sqlite',
+    format: SQLITE_RESTORED_FORMAT,
+    artifactLayout: SQLITE_RUNTIME_LAYOUT,
+    restoredAt: new Date().toISOString(),
+    restoredFrom: {
+      backupFile: sourceBackupFile,
+      backupSha256: sourceBackupSha256,
+      manifestMac: sourceAuthentication.mac,
+    },
+    backupFile: descriptors.database.file,
+    backupBytes: descriptors.database.bytes,
+    backupSha256: descriptors.database.sha256,
+    artifacts: descriptors,
+    note: 'This authenticated manifest binds the restored database to its runtime audit state and checkpoint sidecars.',
+  }, key);
 }
 
 function validManifestAuthentication(manifest, key) {
@@ -803,6 +1298,11 @@ function validatePgManifest(manifest, paths, descriptors, checkpoint, key) {
       || manifest.backupIntegrity.count !== checkpoint.count
       || !sameCanonicalJson(manifest.sourceIntegrity, manifest.backupIntegrity)) {
     return { ok: false, reason: 'integrity-metadata-mismatch' };
+  }
+  try {
+    validatePgDatabaseDefinition(manifest.sourceDatabaseDefinition);
+  } catch {
+    return { ok: false, reason: 'database-definition' };
   }
   return artifacts;
 }
@@ -909,6 +1409,38 @@ function pgConnectionEnv(connectionString) {
   return env;
 }
 
+/**
+ * Explicit node-postgres authority matching the validated URL/libpq target.
+ * Every field that node-postgres otherwise fills from PG* is set here. The
+ * password stays non-enumerable and is supplied by a function even when empty,
+ * preventing pgpass/PGPASSWORD fallback without exposing it in logged config.
+ */
+function pgClientConfig(connectionString, options = {}) {
+  assertPostgresConnectionUrl(connectionString, options);
+  const parsed = parsePostgresConnectionUrl(connectionString);
+  const nodeParsed = parsePgConnectionString(parsed.raw);
+  const config = {
+    host: parsed.host,
+    port: parsed.port ? Number(parsed.port) : PG_DEFAULT_PORT,
+    user: parsed.user,
+    database: parsed.database,
+    ssl: Object.prototype.hasOwnProperty.call(nodeParsed, 'ssl') ? nodeParsed.ssl : false,
+    options: parsed.query.options || PG_SNAPSHOT_DEFAULT_OPTIONS,
+    application_name: parsed.query.application_name || PG_SNAPSHOT_DEFAULT_APPLICATION,
+    connectionTimeoutMillis: 0,
+    client_encoding: 'UTF8',
+    replication: 'false',
+    sslnegotiation: 'postgres',
+  };
+  Object.defineProperty(config, 'password', {
+    configurable: false,
+    enumerable: false,
+    writable: false,
+    value: () => parsed.password,
+  });
+  return config;
+}
+
 function pgDatabaseName(connectionString) {
   return parsePostgresConnectionUrl(connectionString).database;
 }
@@ -921,6 +1453,81 @@ function deriveDatabaseUrl(baseConnectionString, to) {
     return url.toString();
   }
   return new URL(to).toString();
+}
+
+function requirePgDatabaseIdentifier(value, label = 'Postgres database') {
+  const name = String(value || '');
+  if (!PG_DATABASE_IDENTIFIER_RE.test(name)) {
+    throw new Error(`${label} name must be a 1-63 byte unquoted Postgres identifier`);
+  }
+  return name;
+}
+
+function quotePgIdentifier(value) {
+  return `"${String(value).replace(/"/g, '""')}"`;
+}
+
+function quotePgLiteral(value) {
+  return `'${String(value).replace(/'/g, "''")}'`;
+}
+
+function pgDatabaseDefinitionClauses(value, targetServerMajor) {
+  const definition = validatePgDatabaseDefinition(value);
+  if (![16, 17].includes(Number(targetServerMajor))
+      || (definition.localeProvider === 'builtin' && Number(targetServerMajor) < 17)) {
+    throw new Error('Postgres target cannot reproduce the authenticated source database definition');
+  }
+  const clauses = [
+    `ENCODING ${quotePgLiteral(definition.encoding)}`,
+    `LOCALE_PROVIDER ${definition.localeProvider}`,
+    `LC_COLLATE ${quotePgLiteral(definition.lcCollate)}`,
+    `LC_CTYPE ${quotePgLiteral(definition.lcCtype)}`,
+  ];
+  if (definition.localeProvider === 'icu') clauses.push(`ICU_LOCALE ${quotePgLiteral(definition.locale)}`);
+  if (definition.localeProvider === 'builtin') clauses.push(`BUILTIN_LOCALE ${quotePgLiteral(definition.locale)}`);
+  if (definition.icuRules) clauses.push(`ICU_RULES ${quotePgLiteral(definition.icuRules)}`);
+  return clauses;
+}
+
+function pgUrlForDatabase(connectionString, database) {
+  const name = requirePgDatabaseIdentifier(database);
+  const url = new URL(connectionString);
+  url.pathname = `/${name}`;
+  return url.toString();
+}
+
+function pgRestoreDatabasePlan(baseConnectionString, to, env = process.env, randomBytes = crypto.randomBytes) {
+  const fullTarget = /^(?:postgres|postgresql):\/\//i.test(String(to || ''));
+  if (!fullTarget) requirePgDatabaseIdentifier(to, 'Postgres restore target');
+  const targetUrl = deriveDatabaseUrl(baseConnectionString, to);
+  assertPostgresConnectionUrl(targetUrl, { env });
+  const targetDatabase = requirePgDatabaseIdentifier(pgDatabaseName(targetUrl), 'Postgres restore target');
+  const maintenanceDatabase = fullTarget
+    ? requirePgDatabaseIdentifier(
+        env.REDACTWALL_PG_MAINTENANCE_DATABASE || DEFAULT_PG_MAINTENANCE_DATABASE,
+        'Postgres maintenance database',
+      )
+    : pgDatabaseName(baseConnectionString);
+  const maintenanceUrl = fullTarget
+    ? pgUrlForDatabase(targetUrl, maintenanceDatabase)
+    : baseConnectionString;
+  assertPostgresConnectionUrl(maintenanceUrl, { env });
+  const entropy = randomBytes(12);
+  if (!Buffer.isBuffer(entropy) || entropy.length !== 12) {
+    throw new Error('Postgres restore staging-name entropy is unavailable');
+  }
+  const stagingDatabase = requirePgDatabaseIdentifier(
+    `redactwall_restore_${entropy.toString('hex')}`,
+    'Postgres restore staging database',
+  );
+  return {
+    maintenanceUrl,
+    maintenanceDatabase,
+    targetUrl,
+    targetDatabase,
+    stagingUrl: pgUrlForDatabase(targetUrl, stagingDatabase),
+    stagingDatabase,
+  };
 }
 
 /** Credential-free form for output: user and host stay, the password goes. */
@@ -1007,6 +1614,17 @@ async function verifyPgSnapshotIntegrity(client, anchor) {
   for (const entry of rows) {
     if (entry.queryId && entry.contentHash) latest.set(entry.queryId, entry);
   }
+  const queryRows = await client.query('SELECT id FROM queries ORDER BY id ASC');
+  for (const row of queryRows.rows) {
+    if (!latest.has(row.id)) {
+      return {
+        ok: false,
+        count: rows.length,
+        reason: 'evidence-unanchored',
+        queryId: row.id,
+      };
+    }
+  }
   const liveHashes = new Map();
   const ids = [...latest.keys()];
   for (let i = 0; i < ids.length; i += 500) {
@@ -1047,6 +1665,60 @@ function assertSnapshotId(snapshotId) {
   return value;
 }
 
+const PG_LOCALE_PROVIDERS = Object.freeze({ c: 'libc', i: 'icu', b: 'builtin' });
+
+function validatePgDatabaseDefinition(value) {
+  const definition = value && typeof value === 'object' ? value : null;
+  const serverMajor = Number(definition && definition.serverMajor);
+  const provider = String(definition && definition.localeProvider || '');
+  const encoding = String(definition && definition.encoding || '');
+  const lcCollate = String(definition && definition.lcCollate || '');
+  const lcCtype = String(definition && definition.lcCtype || '');
+  const locale = definition && definition.locale == null ? null : String(definition.locale);
+  const rules = definition && definition.icuRules == null ? null : String(definition.icuRules);
+  if (![16, 17].includes(serverMajor)
+      || !['libc', 'icu', 'builtin'].includes(provider)
+      || (provider === 'builtin' && serverMajor < 17)
+      || !/^[A-Z0-9_-]{1,32}$/.test(encoding)
+      || !lcCollate || !lcCtype
+      || [lcCollate, lcCtype, locale, rules].some((item) => item && (item.includes('\0') || item.length > 4096))
+      || (provider !== 'libc' && !locale)
+      || (provider !== 'icu' && rules)) {
+    throw new Error('Postgres source database definition is invalid or unsupported');
+  }
+  return { serverMajor, encoding, localeProvider: provider, lcCollate, lcCtype, locale, icuRules: rules };
+}
+
+async function readPgDatabaseDefinition(client) {
+  const version = await client.query("SELECT current_setting('server_version_num') AS n");
+  const serverVersionNum = Number(version.rows[0] && version.rows[0].n);
+  const serverMajor = Math.floor(serverVersionNum / 10000);
+  if (!SUPPORTED_PG_RESTORE_MAJORS.has(serverMajor)) {
+    throw new Error('Postgres source database definition is unsupported for this server version');
+  }
+  const localeColumn = serverMajor >= 17 ? 'datlocale' : 'daticulocale';
+  const result = await client.query(`
+    SELECT pg_catalog.pg_encoding_to_char(encoding) AS encoding,
+           datlocprovider::text AS provider,
+           datcollate AS lc_collate,
+           datctype AS lc_ctype,
+           ${localeColumn} AS locale,
+           daticurules AS icu_rules
+      FROM pg_catalog.pg_database
+     WHERE datname = current_database()
+  `);
+  const row = result.rows[0] || {};
+  return validatePgDatabaseDefinition({
+    serverMajor,
+    encoding: row.encoding,
+    localeProvider: PG_LOCALE_PROVIDERS[row.provider],
+    lcCollate: row.lc_collate,
+    lcCtype: row.lc_ctype,
+    locale: row.locale,
+    icuRules: row.icu_rules,
+  });
+}
+
 async function readPgSnapshotEvidence(client, sourceAnchor) {
   const verified = await verifyPgSnapshotIntegrity(client, sourceAnchor);
   if (!verified.ok) {
@@ -1056,16 +1728,22 @@ async function readPgSnapshotEvidence(client, sourceAnchor) {
   const queryRows = await client.query(
     'SELECT status, "createdAt" AS "createdAt", data FROM queries ORDER BY seq ASC',
   );
-  return { sourceIntegrity, exactCheckpoint, stats: snapshotStatsFromRows(queryRows.rows) };
+  const databaseDefinition = await readPgDatabaseDefinition(client);
+  return {
+    sourceIntegrity,
+    exactCheckpoint,
+    stats: snapshotStatsFromRows(queryRows.rows),
+    databaseDefinition,
+  };
 }
 
 async function withPgSnapshot(connectionString, callback, options = {}) {
   assertPostgresConnectionUrl(connectionString, options);
-  const createClient = options.createClient || ((url) => {
+  const createClient = options.createClient || ((config) => {
     const { Client } = require('pg');
-    return new Client({ connectionString: url });
+    return new Client(config);
   });
-  const client = createClient(connectionString);
+  const client = createClient(pgClientConfig(connectionString, options));
   let transactionOpen = false;
   await client.connect();
   try {
@@ -1095,6 +1773,7 @@ function buildPgManifest({
   sourceIntegrity,
   checkpoint,
   stats,
+  databaseDefinition,
   key,
 }) {
   const backupSha256 = descriptors.database.sha256;
@@ -1113,9 +1792,21 @@ function buildPgManifest({
     backupIntegrity: sourceIntegrity,
     checkpoint,
     stats,
+    sourceDatabaseDefinition: validatePgDatabaseDefinition(databaseDefinition),
     rawPromptBodiesIncluded: false,
     note: 'The dump and authenticated audit sidecars are sensitive runtime state. This manifest contains no prompt bodies and no connection credentials; verify restores with backup-drill.',
   }, key);
+}
+
+function pgDumpArgs(snapshotId, connectionString, stagedBackup) {
+  return [
+    '--format=custom',
+    '--enable-row-security',
+    `--snapshot=${assertSnapshotId(snapshotId)}`,
+    `--exclude-table=${POSTGRES_AUDIT_SCOPE_TABLE}`,
+    `--dbname=${pgDatabaseName(connectionString)}`,
+    `--file=${stagedBackup}`,
+  ];
 }
 
 /**
@@ -1155,6 +1846,9 @@ async function createPgBackup({
   assertWritable(manifestPath, force);
   let backupStaging;
   let manifestStaging;
+  let operationError;
+  let operationFailed = false;
+  let committedResult;
 
   try {
     backupStaging = createPrivateStagingDir(path.dirname(backupFile), security);
@@ -1171,6 +1865,7 @@ async function createPgBackup({
       if (!evidence.stats || !Number.isSafeInteger(evidence.stats.total) || evidence.stats.total < 0) {
         throw new Error('Postgres snapshot did not provide a valid query count');
       }
+      const databaseDefinition = validatePgDatabaseDefinition(evidence.databaseDefinition);
       if (!evidence.exactCheckpoint
           || !auditIntegrity.validCheckpoint(evidence.exactCheckpoint, sourceAnchor.key)
           || evidence.exactCheckpoint.count !== evidence.sourceIntegrity.count) {
@@ -1179,18 +1874,13 @@ async function createPgBackup({
       // --enable-row-security: queries has FORCE ROW LEVEL SECURITY, which
       // pg_dump otherwise refuses as a non-BYPASSRLS role. The exported
       // snapshot binds the dump to the exact rows counted and verified here.
-      pgRunner('pg_dump', [
-        '--format=custom',
-        '--enable-row-security',
-        `--snapshot=${snapshotId}`,
-        `--dbname=${pgDatabaseName(connString)}`,
-        `--file=${stagedBackup}`,
-      ], connString);
+      pgRunner('pg_dump', pgDumpArgs(snapshotId, connString, stagedBackup), connString);
       if (!isPgDumpFile(stagedBackup)) throw new Error('pg_dump did not produce a valid custom-format archive');
       return {
         sourceIntegrity: evidence.sourceIntegrity,
         exactCheckpoint: evidence.exactCheckpoint,
         stats: evidence.stats,
+        databaseDefinition,
       };
     }, { sourceAnchor });
     restrictPath(stagedBackup, { ...security, directory: false });
@@ -1209,17 +1899,21 @@ async function createPgBackup({
       sourceIntegrity: snapshotEvidence.sourceIntegrity,
       checkpoint: snapshotEvidence.exactCheckpoint,
       stats: snapshotEvidence.stats,
+      databaseDefinition: snapshotEvidence.databaseDefinition,
       key: manifestKey,
     });
     writePrivateFile(stagedManifest, JSON.stringify(manifest, null, 2), security);
-    publishPrivateFiles([
+    const verified = publishPrivateFiles([
       { staged: stagedBackup, target: backupFile },
       { staged: stagedAuditState, target: auditPaths.statePath },
       { staged: stagedAuditCheckpoint, target: auditPaths.checkpointPath },
       { staged: stagedManifest, target: manifestPath },
-    ], { force, security });
-    const verified = verifyPgBackup({ file: backupFile, manifestFile: manifestPath, security, env });
-    return {
+    ], {
+      force,
+      security,
+      verify: () => verifyPgBackup({ file: backupFile, manifestFile: manifestPath, security, env }),
+    });
+    committedResult = {
       ...verified,
       auditIntegrity: snapshotEvidence.sourceIntegrity,
       manifestFile: manifestPath,
@@ -1227,9 +1921,21 @@ async function createPgBackup({
       auditCheckpointFile: auditPaths.checkpointPath,
       manifest,
     };
+    return committedResult;
+  } catch (error) {
+    operationFailed = true;
+    operationError = error;
+    throw error;
   } finally {
-    if (backupStaging) fs.rmSync(backupStaging, { recursive: true, force: true });
-    if (manifestStaging) fs.rmSync(manifestStaging, { recursive: true, force: true });
+    if (operationFailed) {
+      cleanupPrivateStagingAfterOperation([backupStaging, manifestStaging], operationError, true);
+    } else {
+      cleanupPrivateStagingAfterCommit([backupStaging, manifestStaging], committedResult, {
+        security,
+        component: 'postgres-backup',
+        phase: 'private-staging-cleanup',
+      });
+    }
   }
 }
 
@@ -1308,35 +2014,250 @@ function verifyPgBackup(options = {}) {
   return inspectPgBackupArtifactSet(options).verification;
 }
 
+function verifyRestoredPgDriver(driver, anchor) {
+  let exactCheckpoint = null;
+  let auditIntegrityResult = anchor
+    ? auditIntegrity.verifyAuditChainForDatabase(driver, {
+        key: anchor.key,
+        checkpoint: anchor.checkpoint,
+        onVerified(checkpoint) { exactCheckpoint = checkpoint; },
+      })
+    : { ok: false, count: 0, reason: 'checkpoint-unavailable' };
+  if (auditIntegrityResult.ok && !sameCanonicalJson(anchor.checkpoint, exactCheckpoint)) {
+    auditIntegrityResult = {
+      ok: false,
+      count: auditIntegrityResult.count,
+      reason: 'checkpoint-not-snapshot-head',
+    };
+  }
+  return {
+    auditIntegrity: auditIntegrityResult,
+    queryCount: driver.prepare('SELECT COUNT(*) n FROM queries').get().n,
+    auditCount: driver.prepare('SELECT COUNT(*) n FROM audit').get().n,
+  };
+}
+
 /** Open the restored database through the production driver and measure it. */
 function verifyRestoredPgDatabase(targetUrl, anchor) {
   assertPostgresConnectionUrl(targetUrl);
   const { createPgDriver } = require('../server/storage/pg-driver');
   const driver = createPgDriver(targetUrl);
-  try {
-    let exactCheckpoint = null;
-    let auditIntegrityResult = anchor
-      ? auditIntegrity.verifyAuditChainForDatabase(driver, {
-          key: anchor.key,
-          checkpoint: anchor.checkpoint,
-          onVerified(checkpoint) { exactCheckpoint = checkpoint; },
-        })
-      : { ok: false, count: 0, reason: 'checkpoint-unavailable' };
-    if (auditIntegrityResult.ok && !sameCanonicalJson(anchor.checkpoint, exactCheckpoint)) {
-      auditIntegrityResult = {
-        ok: false,
-        count: auditIntegrityResult.count,
-        reason: 'checkpoint-not-snapshot-head',
-      };
+  try { return verifyRestoredPgDriver(driver, anchor); }
+  finally { driver.close(); }
+}
+
+const PG_RESTORE_INVENTORY_NAMES = Object.freeze([
+  'relations',
+  'routines',
+  'types',
+  'operators',
+  'collations',
+  'conversions',
+  'text_search_configurations',
+  'text_search_dictionaries',
+  'text_search_parsers',
+  'text_search_templates',
+  'operator_classes',
+  'operator_families',
+  'extended_statistics',
+  'public_schema_metadata',
+  'current_database_metadata',
+  'extra_schemas',
+  'extensions',
+  'event_triggers',
+  'publications',
+  'subscriptions_current_database',
+  'default_acls',
+  'database_role_settings',
+  'foreign_data_wrappers',
+  'foreign_servers',
+  'user_mappings',
+  'large_objects',
+  'user_casts',
+  'user_access_methods',
+  'user_languages',
+  'security_labels',
+]);
+
+function pgRestoreInventorySql(serverVersionNum, options = {}) {
+  const major = Math.floor(Number(serverVersionNum) / 10000);
+  if (!Number.isSafeInteger(major) || !SUPPORTED_PG_RESTORE_MAJORS.has(major)) {
+    throw new Error('Postgres restore target inventory is unsupported for this server version');
+  }
+  const expectedConnectionLimit = options.expectedDatabaseConnectionLimit === undefined
+    ? -1 : Number(options.expectedDatabaseConnectionLimit);
+  if (!Number.isSafeInteger(expectedConnectionLimit) || expectedConnectionLimit < -1) {
+    throw new Error('Postgres restore target connection-limit expectation is invalid');
+  }
+  const databaseAclPredicate = options.expectedDatabaseOwnerOnlyAcl === true
+    ? `AND datacl IS NOT NULL
+       AND (SELECT COUNT(*) FROM current_database_acl) = 3
+       AND (SELECT COUNT(*) FROM current_database_acl
+             WHERE grantor = current_user::pg_catalog.regrole
+               AND grantee = current_user::pg_catalog.regrole
+               AND is_grantable = false
+               AND privilege_type IN ('CREATE', 'CONNECT', 'TEMPORARY')) = 3`
+    : 'AND datacl IS NULL';
+  return `
+    WITH user_namespaces AS (
+      SELECT oid
+        FROM pg_catalog.pg_namespace
+       WHERE nspname NOT IN ('pg_catalog', 'information_schema')
+         AND nspname NOT LIKE 'pg_toast%'
+         AND nspname NOT LIKE 'pg_temp_%'
+    ), public_schema AS (
+      SELECT oid, nspowner, nspacl,
+             pg_catalog.obj_description(oid, 'pg_namespace') AS description
+        FROM pg_catalog.pg_namespace
+       WHERE nspname = 'public'
+    ), public_schema_acl AS (
+      SELECT acl.grantor, acl.grantee, acl.privilege_type, acl.is_grantable
+        FROM public_schema schema_row
+        CROSS JOIN LATERAL pg_catalog.aclexplode(schema_row.nspacl) acl
+    ), current_database_row AS (
+      SELECT oid, datdba, datistemplate, datallowconn, datconnlimit, datacl,
+             pg_catalog.shobj_description(oid, 'pg_database') AS description
+        FROM pg_catalog.pg_database
+       WHERE datname = current_database()
+    ), current_database_acl AS (
+      SELECT acl.grantor, acl.grantee, acl.privilege_type, acl.is_grantable
+        FROM current_database_row db
+        CROSS JOIN LATERAL pg_catalog.aclexplode(db.datacl) acl
+    )
+    SELECT 'relations' AS name, COUNT(*) AS n
+      FROM pg_catalog.pg_class o JOIN user_namespaces ns ON ns.oid = o.relnamespace
+    UNION ALL SELECT 'routines', COUNT(*)
+      FROM pg_catalog.pg_proc o JOIN user_namespaces ns ON ns.oid = o.pronamespace
+    UNION ALL SELECT 'types', COUNT(*)
+      FROM pg_catalog.pg_type o JOIN user_namespaces ns ON ns.oid = o.typnamespace
+    UNION ALL SELECT 'operators', COUNT(*)
+      FROM pg_catalog.pg_operator o JOIN user_namespaces ns ON ns.oid = o.oprnamespace
+    UNION ALL SELECT 'collations', COUNT(*)
+      FROM pg_catalog.pg_collation o JOIN user_namespaces ns ON ns.oid = o.collnamespace
+    UNION ALL SELECT 'conversions', COUNT(*)
+      FROM pg_catalog.pg_conversion o JOIN user_namespaces ns ON ns.oid = o.connamespace
+    UNION ALL SELECT 'text_search_configurations', COUNT(*)
+      FROM pg_catalog.pg_ts_config o JOIN user_namespaces ns ON ns.oid = o.cfgnamespace
+    UNION ALL SELECT 'text_search_dictionaries', COUNT(*)
+      FROM pg_catalog.pg_ts_dict o JOIN user_namespaces ns ON ns.oid = o.dictnamespace
+    UNION ALL SELECT 'text_search_parsers', COUNT(*)
+      FROM pg_catalog.pg_ts_parser o JOIN user_namespaces ns ON ns.oid = o.prsnamespace
+    UNION ALL SELECT 'text_search_templates', COUNT(*)
+      FROM pg_catalog.pg_ts_template o JOIN user_namespaces ns ON ns.oid = o.tmplnamespace
+    UNION ALL SELECT 'operator_classes', COUNT(*)
+      FROM pg_catalog.pg_opclass o JOIN user_namespaces ns ON ns.oid = o.opcnamespace
+    UNION ALL SELECT 'operator_families', COUNT(*)
+      FROM pg_catalog.pg_opfamily o JOIN user_namespaces ns ON ns.oid = o.opfnamespace
+    UNION ALL SELECT 'extended_statistics', COUNT(*)
+      FROM pg_catalog.pg_statistic_ext o JOIN user_namespaces ns ON ns.oid = o.stxnamespace
+    UNION ALL SELECT 'public_schema_metadata',
+      CASE WHEN
+        (SELECT COUNT(*) FROM public_schema) = 1
+        AND (SELECT COUNT(*) FROM public_schema
+              WHERE nspowner = 'pg_database_owner'::pg_catalog.regrole
+                AND description = 'standard public schema') = 1
+        AND (SELECT COUNT(*) FROM public_schema_acl) = 3
+        AND (SELECT COUNT(*) FROM public_schema_acl
+              WHERE grantor = 'pg_database_owner'::pg_catalog.regrole
+                AND is_grantable = false
+                AND (
+                  (grantee = 0 AND privilege_type = 'USAGE')
+                  OR (grantee = 'pg_database_owner'::pg_catalog.regrole
+                      AND privilege_type IN ('CREATE', 'USAGE'))
+                )) = 3
+        THEN 0 ELSE 1
+      END
+    UNION ALL SELECT 'current_database_metadata',
+      CASE WHEN
+        (SELECT COUNT(*) FROM current_database_row
+          WHERE datdba = current_user::pg_catalog.regrole
+            AND datistemplate = false
+            AND datallowconn = true
+            AND datconnlimit = ${expectedConnectionLimit}
+            ${databaseAclPredicate}
+            AND description IS NULL) = 1
+        AND NOT EXISTS (
+          SELECT 1
+            FROM pg_catalog.pg_shseclabel label
+            JOIN current_database_row db ON db.oid = label.objoid
+           WHERE label.classoid = 'pg_database'::pg_catalog.regclass
+        )
+        THEN 0 ELSE 1
+      END
+    UNION ALL SELECT 'extra_schemas', COUNT(*)
+      FROM user_namespaces WHERE oid <> 'public'::pg_catalog.regnamespace
+    UNION ALL SELECT 'extensions', COUNT(*)
+      FROM pg_catalog.pg_extension WHERE extname <> 'plpgsql'
+    UNION ALL SELECT 'event_triggers', COUNT(*) FROM pg_catalog.pg_event_trigger
+    UNION ALL SELECT 'publications', COUNT(*) FROM pg_catalog.pg_publication
+    UNION ALL SELECT 'subscriptions_current_database', COUNT(*)
+      FROM pg_catalog.pg_subscription o JOIN current_database_row db ON db.oid = o.subdbid
+    UNION ALL SELECT 'default_acls', COUNT(*) FROM pg_catalog.pg_default_acl
+    UNION ALL SELECT 'database_role_settings', COUNT(*)
+      FROM pg_catalog.pg_db_role_setting o JOIN current_database_row db ON db.oid = o.setdatabase
+    UNION ALL SELECT 'foreign_data_wrappers', COUNT(*) FROM pg_catalog.pg_foreign_data_wrapper
+    UNION ALL SELECT 'foreign_servers', COUNT(*) FROM pg_catalog.pg_foreign_server
+    UNION ALL SELECT 'user_mappings', COUNT(*) FROM pg_catalog.pg_user_mappings
+    UNION ALL SELECT 'large_objects', COUNT(*) FROM pg_catalog.pg_largeobject_metadata
+    UNION ALL SELECT 'user_casts', COUNT(*) FROM pg_catalog.pg_cast WHERE oid >= 16384
+    UNION ALL SELECT 'user_access_methods', COUNT(*) FROM pg_catalog.pg_am WHERE oid >= 16384
+    UNION ALL SELECT 'user_languages', COUNT(*) FROM pg_catalog.pg_language WHERE oid >= 16384
+    UNION ALL SELECT 'security_labels', COUNT(*) FROM pg_catalog.pg_seclabel
+  `;
+}
+
+function parsePgRestoreInventory(rows) {
+  if (!Array.isArray(rows)) throw new Error('Postgres restore target inventory is invalid');
+  const inventory = Object.create(null);
+  const expected = new Set(PG_RESTORE_INVENTORY_NAMES);
+  for (const row of rows) {
+    const name = String(row && row.name || '');
+    const count = Number(row && row.n);
+    if (!expected.delete(name) || !Number.isSafeInteger(count) || count < 0) {
+      throw new Error('Postgres restore target inventory is invalid');
     }
-    return {
-      auditIntegrity: auditIntegrityResult,
-      queryCount: driver.prepare('SELECT COUNT(*) n FROM queries').get().n,
-      auditCount: driver.prepare('SELECT COUNT(*) n FROM audit').get().n,
-    };
+    inventory[name] = count;
+  }
+  if (expected.size) throw new Error('Postgres restore target inventory is incomplete');
+  return inventory;
+}
+
+function inspectEmptyPgRestoreTarget(targetUrl, deps = {}) {
+  assertPostgresConnectionUrl(targetUrl);
+  const createPgDriver = deps.createPgDriver || require('../server/storage/pg-driver').createPgDriver;
+  const driver = createPgDriver(targetUrl);
+  try {
+    const versionRow = driver.prepare("SELECT current_setting('server_version_num') AS n").get();
+    const serverVersionNum = Number(versionRow && versionRow.n);
+    if (!Number.isSafeInteger(serverVersionNum) || serverVersionNum < 1) {
+      throw new Error('Postgres restore target server version is unavailable');
+    }
+    const rows = driver.prepare(pgRestoreInventorySql(serverVersionNum, deps)).all();
+    const inventory = parsePgRestoreInventory(rows);
+    const objectCount = Object.values(inventory).reduce((sum, count) => {
+      const next = sum + count;
+      if (!Number.isSafeInteger(next)) {
+        throw new Error('Postgres restore target inventory count is invalid');
+      }
+      return next;
+    }, 0);
+    return { empty: objectCount === 0, objectCount, serverVersionNum, inventory };
   } finally {
     driver.close();
   }
+}
+
+function assertEmptyPgRestoreTarget(targetUrl, deps = {}) {
+  const inspect = deps.inspectPgRestoreTarget || inspectEmptyPgRestoreTarget;
+  const result = inspect(targetUrl, deps);
+  if (!result || result.empty !== true || result.objectCount !== 0) {
+    const nonempty = Object.entries(result && result.inventory || {})
+      .filter(([, count]) => Number(count) !== 0)
+      .map(([name, count]) => `${name}=${Number(count)}`)
+      .join(', ');
+    throw new Error(`Postgres restore staging database is not fresh and empty${nonempty ? ` (${nonempty})` : ''}`);
+  }
+  return result;
 }
 
 function pgRestoreArtifactPaths(database, directory = null) {
@@ -1404,15 +2325,829 @@ function createPgRestoreSnapshot(file, manifest, env, security, stagingParent = 
   const database = path.resolve(file);
   const staging = createPrivateStagingDir(stagingParent, security);
   let complete = false;
+  let operationError;
   try {
     const source = pgRestoreArtifactPaths(database);
     const staged = pgRestoreArtifactPaths(database, staging);
     copyPgRestoreArtifacts(source, staged, manifest, security);
     const anchor = validatePgRestoreSnapshot(staged, manifest, env, security);
     complete = true;
-    return { anchor, archive: staged.database, staging };
+    return {
+      anchor,
+      archive: staged.database,
+      auditState: staged.auditState,
+      auditCheckpoint: staged.auditCheckpoint,
+      staging,
+    };
+  } catch (error) {
+    operationError = error;
+    throw error;
   } finally {
-    if (!complete) fs.rmSync(staging, { recursive: true, force: true });
+    if (!complete) cleanupPrivateStagingAfterOperation([staging], operationError);
+  }
+}
+
+function requireNewPgAuditDirectory(auditDir) {
+  if (typeof auditDir !== 'string' || !auditDir.trim()) {
+    throw new Error('Postgres restore requires an explicit new --audit-dir <directory>');
+  }
+  const paths = runtimeAuditAnchorPaths(auditDir);
+  if (pathEntryExists(paths.directory)) {
+    throw new Error(`Postgres restore target audit directory already exists: ${paths.directory}`);
+  }
+  return paths;
+}
+
+function createPgRuntimeAuditStaging(snapshot, manifest, targetPaths, env, security) {
+  const staging = createPrivateStagingDir(path.dirname(targetPaths.directory), security);
+  let complete = false;
+  let operationError;
+  try {
+    const stagedPaths = runtimeAuditAnchorPaths(staging);
+    copyPrivateRestoreArtifact(snapshot.auditState, stagedPaths.statePath, {
+      expectedBytes: manifest.artifacts.auditState.bytes,
+      maxBytes: MAX_AUDIT_STATE_BYTES,
+      label: 'Postgres runtime audit state',
+      security,
+    });
+    copyPrivateRestoreArtifact(snapshot.auditCheckpoint, stagedPaths.checkpointPath, {
+      expectedBytes: manifest.artifacts.auditCheckpoint.bytes,
+      maxBytes: MAX_AUDIT_CHECKPOINT_BYTES,
+      label: 'Postgres runtime audit checkpoint',
+      security,
+    });
+    if (pathEntryExists(stagedPaths.pendingPath)) {
+      throw new Error('Postgres runtime audit staging unexpectedly contains pending high-water state');
+    }
+    privatePaths.fsyncDirectory(staging, { fs });
+    const anchor = loadAuthenticatedAuditAnchor(stagedPaths, env, security);
+    if (!sameCanonicalJson(anchor.state, snapshot.anchor.state)
+        || !sameCanonicalJson(anchor.checkpoint, snapshot.anchor.checkpoint)) {
+      throw new Error('Postgres runtime audit state changed while staging');
+    }
+    complete = true;
+    return { anchor, paths: stagedPaths, staging };
+  } catch (error) {
+    operationError = error;
+    throw error;
+  } finally {
+    if (!complete) cleanupPrivateStagingAfterOperation([staging], operationError);
+  }
+}
+
+function requirePgDatabaseScope(value) {
+  if (!auditAnchorInternal.validDatabaseScope(value)) {
+    throw new Error('Postgres restore target audit database identity is unavailable');
+  }
+  return value;
+}
+
+function targetPgDatabaseScopeForDriver(driver) {
+  if (!driver || typeof driver.auditDatabaseScope !== 'function') {
+    throw new Error('Postgres restore target audit database identity is unavailable');
+  }
+  return requirePgDatabaseScope(driver.auditDatabaseScope());
+}
+
+function targetPgDatabaseScope(targetUrl, deps = {}) {
+  assertPostgresConnectionUrl(targetUrl, deps);
+  const createDriver = deps.createPgDriver || require('../server/storage/pg-driver').createPgDriver;
+  const driver = createDriver(targetUrl);
+  try { return targetPgDatabaseScopeForDriver(driver); }
+  finally { driver?.close?.(); }
+}
+
+function replaceStagedPgRuntimeState(staged, snapshot, databaseScope, env, security) {
+  const scope = requirePgDatabaseScope(databaseScope);
+  if (snapshot.anchor.state.databaseScope === scope) {
+    throw new Error('Postgres restore target retained the source audit database identity');
+  }
+  const rebound = auditAnchorInternal.signedState(
+    snapshot.anchor.key,
+    snapshot.anchor.state.checkpointCreated,
+    snapshot.anchor.embedded,
+    snapshot.anchor.state.pendingProtocol,
+    scope,
+  );
+  const replacement = `${staged.paths.statePath}.${process.pid}.${crypto.randomBytes(12).toString('hex')}.rebind`;
+  try {
+    writePrivateFile(replacement, JSON.stringify(rebound), security);
+    fs.renameSync(replacement, staged.paths.statePath);
+    restrictPath(staged.paths.statePath, { ...security, directory: false });
+    fsyncFile(staged.paths.statePath);
+    privatePaths.fsyncDirectory(staged.staging, { fs });
+  } finally {
+    fs.rmSync(replacement, { force: true });
+  }
+  const anchor = loadAuthenticatedAuditAnchor(staged.paths, env, security);
+  if (anchor.state.databaseScope !== scope
+      || !sameCanonicalJson(anchor.checkpoint, snapshot.anchor.checkpoint)) {
+    throw new Error('Postgres runtime audit state rebind verification failed');
+  }
+  staged.anchor = anchor;
+  return staged;
+}
+
+function assertPublishedDirectoryIdentity(target, expected) {
+  const current = exactDirectoryStat(target, 'Postgres restore audit directory');
+  if (!sameDirectoryIdentity(expected, current)) {
+    throw new Error('Postgres restore audit directory identity changed during publication');
+  }
+  return current;
+}
+
+function retainChangedPgAuditQuarantine(quarantine, target) {
+  let retainedAt = quarantine;
+  if (!pathEntryExists(target) && pathEntryExists(quarantine)) {
+    try {
+      fs.renameSync(quarantine, target);
+      retainedAt = target;
+    } catch {
+      // A concurrently occupied target or a failed rename leaves the changed
+      // directory at its private quarantine path. Never delete either path.
+    }
+  }
+  try { privatePaths.fsyncDirectory(path.dirname(target), { fs }); } catch {}
+  return retainedAt;
+}
+
+function removePublishedPgAuditDirectory(target, expected, originalError) {
+  const quarantine = path.join(
+    path.dirname(target),
+    `.${path.basename(target)}.failed-${process.pid}-${crypto.randomBytes(12).toString('hex')}`,
+  );
+  try {
+    // Move first so a replacement installed at the public pathname after a
+    // check can never be recursively removed. The unpredictable quarantine
+    // name is inside the trusted private parent held by the mutation lock.
+    fs.renameSync(target, quarantine);
+  } catch (renameError) {
+    throw new Error('Postgres runtime audit publication failed; refusing cleanup because the published directory could not be quarantined', {
+      cause: originalError || renameError,
+    });
+  }
+  let quarantinedIdentity;
+  try {
+    quarantinedIdentity = exactDirectoryStat(quarantine, 'Postgres restore quarantined audit directory');
+  } catch (identityError) {
+    const retainedAt = retainChangedPgAuditQuarantine(quarantine, target);
+    throw new Error(`Postgres runtime audit publication failed; refusing to remove an unverifiable replacement directory retained at ${retainedAt}`, {
+      cause: originalError || identityError,
+    });
+  }
+  if (!sameDirectoryIdentity(expected, quarantinedIdentity)) {
+    const retainedAt = retainChangedPgAuditQuarantine(quarantine, target);
+    throw new Error(`Postgres runtime audit publication failed; refusing to remove a changed replacement directory retained at ${retainedAt}`, {
+      cause: originalError,
+    });
+  }
+  fs.rmSync(quarantine, { recursive: true, force: true });
+  privatePaths.fsyncDirectory(path.dirname(target), { fs });
+}
+
+function publishNewPgRuntimeAuditDirectory(staged, targetPaths, env, security) {
+  if (pathEntryExists(targetPaths.directory)) {
+    throw new Error(`Postgres restore target audit directory already exists: ${targetPaths.directory}`);
+  }
+  let publishedIdentity = null;
+  try {
+    // The parent is private and held under its mutation lock for this whole
+    // operation, so the absence check plus rename is no-replace for actors in
+    // RedactWall's trust model. Identity pinning protects every later cleanup.
+    fs.renameSync(staged.staging, targetPaths.directory);
+    publishedIdentity = exactDirectoryStat(targetPaths.directory, 'Postgres restore audit directory');
+    assertPublishedDirectoryIdentity(targetPaths.directory, publishedIdentity);
+    restrictPath(targetPaths.directory, { ...security, directory: true });
+    assertPublishedDirectoryIdentity(targetPaths.directory, publishedIdentity);
+    fsyncPublishedArtifact({
+      staged: staged.staging,
+      target: targetPaths.directory,
+      directory: true,
+    });
+    assertPublishedDirectoryIdentity(targetPaths.directory, publishedIdentity);
+    if (pathEntryExists(targetPaths.pendingPath)) {
+      throw new Error('Postgres restore published unexpected pending high-water state');
+    }
+    assertPublishedDirectoryIdentity(targetPaths.directory, publishedIdentity);
+    const anchor = loadAuthenticatedAuditAnchor(targetPaths, env, security);
+    assertPublishedDirectoryIdentity(targetPaths.directory, publishedIdentity);
+    if (!sameCanonicalJson(anchor.state, staged.anchor.state)
+        || !sameCanonicalJson(anchor.checkpoint, staged.anchor.checkpoint)) {
+      throw new Error('Postgres restore published different runtime audit state');
+    }
+    retireTransferredPrivateStaging(
+      staged.staging,
+      targetPaths.directory,
+      'Postgres runtime audit staging',
+    );
+    staged.staging = null;
+    return anchor;
+  } catch (error) {
+    if (publishedIdentity) {
+      try {
+        removePublishedPgAuditDirectory(targetPaths.directory, publishedIdentity, error);
+        retireRemovedPrivateStaging(
+          staged.staging,
+          targetPaths.directory,
+          publishedIdentity,
+          'Postgres runtime audit staging',
+        );
+        staged.staging = null;
+      } catch (cleanupError) {
+        throw new Error(`Postgres runtime audit publication failed and cleanup was incomplete: ${cleanupError.message}`, {
+          cause: error,
+        });
+      }
+    }
+    throw error;
+  }
+}
+
+function pgDatabaseCatalogRow(driver, name) {
+  const row = driver.prepare(`
+    SELECT oid::text AS oid,
+           datname,
+           datdba::text AS owner_oid,
+           pg_catalog.pg_get_userbyid(datdba) AS owner_name,
+           datallowconn,
+           datconnlimit,
+           datistemplate
+      FROM pg_catalog.pg_database
+     WHERE datname = ?
+  `).get(name);
+  return row || null;
+}
+
+function pgDatabaseSessions(driver, name) {
+  return driver.prepare(`
+    SELECT pid, backend_start::text AS backend_start
+      FROM pg_catalog.pg_stat_activity
+     WHERE datname = ?
+     ORDER BY pid
+  `).all(name);
+}
+
+function waitForNoPgDatabaseSessions(driver, name, timeoutMs = PG_RESTORE_SESSION_DRAIN_TIMEOUT_MS) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const active = pgDatabaseSessions(driver, name);
+    if (active.length === 0) return;
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      throw new Error('Postgres restore database still has active connections and was retained');
+    }
+    Atomics.wait(PG_RESTORE_SESSION_WAIT, 0, 0, Math.min(25, remaining));
+  }
+}
+
+function samePgDatabaseIdentity(expected, actual) {
+  return !!expected && !!actual
+    && String(expected.oid) === String(actual.oid)
+    && String(expected.owner_oid) === String(actual.owner_oid);
+}
+
+function assertPgDatabaseState(actual, expected, label) {
+  if (!samePgDatabaseIdentity(expected, actual)
+      || actual.datname !== expected.datname
+      || actual.datistemplate !== false
+      || (expected.datallowconn !== undefined && actual.datallowconn !== expected.datallowconn)
+      || (expected.datconnlimit !== undefined && Number(actual.datconnlimit) !== expected.datconnlimit)) {
+    throw new Error(`${label} database identity or state changed`);
+  }
+  return actual;
+}
+
+function pgRestoreRole(driver) {
+  const row = driver.prepare(`
+    SELECT active.rolname AS role_name,
+           active.oid::text AS owner_oid,
+           active.rolsuper AS role_super,
+           active.rolcreatedb AS role_createdb,
+           login.rolname AS session_role_name,
+           login.oid::text AS session_owner_oid,
+           login.rolsuper AS session_super,
+           login.rolcreatedb AS session_createdb,
+           (SELECT COUNT(*)::int FROM pg_catalog.pg_auth_members membership
+             WHERE membership.roleid = active.oid) AS granted_member_count
+      FROM pg_catalog.pg_roles active
+      JOIN pg_catalog.pg_roles login ON login.rolname = session_user
+     WHERE active.rolname = current_user
+  `).get();
+  if (!row || row.role_super !== false || row.role_createdb !== true
+      || row.session_super !== false || row.session_createdb !== true
+      || row.role_name !== row.session_role_name || row.owner_oid !== row.session_owner_oid
+      || Number(row.granted_member_count) !== 0) {
+    throw new Error(
+      'Postgres guarded restore requires one directly authenticated non-superuser CREATEDB role with no granted members',
+    );
+  }
+  return { name: String(row.role_name), oid: String(row.owner_oid) };
+}
+
+function pgDatabaseAclRows(driver, name) {
+  return driver.prepare(`
+    SELECT acl.grantor::text AS grantor_oid,
+           acl.grantee::text AS grantee_oid,
+           acl.privilege_type,
+           acl.is_grantable
+      FROM pg_catalog.pg_database db
+      CROSS JOIN LATERAL pg_catalog.aclexplode(db.datacl) acl
+     WHERE db.datname = ?
+     ORDER BY acl.grantee, acl.privilege_type
+  `).all(name);
+}
+
+function assertPgOwnerOnlyDatabaseAcl(driver, name, ownerOid) {
+  const privileges = pgDatabaseAclRows(driver, name);
+  const names = privileges.map((row) => String(row.privilege_type)).sort();
+  if (privileges.length !== 3
+      || privileges.some((row) => row.grantor_oid !== ownerOid
+        || row.grantee_oid !== ownerOid || row.is_grantable !== false)
+      || names.join(',') !== 'CONNECT,CREATE,TEMPORARY') {
+    throw new Error('Postgres restore staging database access is not owner-only');
+  }
+}
+
+function pgGuardSession(driver) {
+  const row = driver.prepare(`
+    SELECT pg_backend_pid() AS pid,
+           current_database() AS database_name,
+           backend_start::text AS backend_start
+      FROM pg_catalog.pg_stat_activity
+     WHERE pid = pg_backend_pid()
+  `).get();
+  if (!row || !Number.isSafeInteger(Number(row.pid)) || !row.backend_start) {
+    throw new Error('Postgres restore guard identity is unavailable');
+  }
+  return { pid: Number(row.pid), database: String(row.database_name), backendStart: String(row.backend_start) };
+}
+
+function enablePgRestoreTarget(maintenance, targetDatabase, stagingIdentity) {
+  let alterError = null;
+  try {
+    maintenance.exec(`ALTER DATABASE ${quotePgIdentifier(targetDatabase)} WITH ALLOW_CONNECTIONS true`);
+  } catch (error) {
+    alterError = error;
+  }
+  let current;
+  try {
+    current = pgDatabaseCatalogRow(maintenance, targetDatabase);
+  } catch (error) {
+    const uncertain = new Error('Postgres restore target enable outcome is uncertain', {
+      cause: alterError || error,
+    });
+    uncertain.pgEnableOutcome = 'ambiguous';
+    throw uncertain;
+  }
+  try {
+    return assertPgDatabaseState(current, {
+      ...stagingIdentity, datname: targetDatabase, datallowconn: true, datconnlimit: -1,
+    }, 'enabled Postgres restore');
+  } catch (stateError) {
+    if (samePgDatabaseIdentity(stagingIdentity, current) && current.datallowconn === false) {
+      const frozen = alterError || stateError;
+      frozen.pgEnableOutcome = 'frozen';
+      throw frozen;
+    }
+    stateError.pgEnableOutcome = 'ambiguous';
+    throw stateError;
+  }
+}
+
+function createPgRestoreControl(plan, databaseDefinition, deps = {}) {
+  const createDriver = deps.createControlPgDriver
+    || deps.createPgDriver
+    || require('../server/storage/pg-driver').createPgDriver;
+  const createGuardDriver = deps.createGuardPgDriver || createDriver;
+  const maintenance = createDriver(plan.maintenanceUrl);
+  let guard = null;
+  let guardIdentity = null;
+  let role = null;
+  let stagingIdentity = null;
+
+  const sessions = (name) => pgDatabaseSessions(maintenance, name);
+
+  function assertOnlyGuard() {
+    if (!guard || !guardIdentity) throw new Error('Postgres restore guard is not open');
+    const live = pgGuardSession(guard);
+    if (live.pid !== guardIdentity.pid
+        || live.database !== guardIdentity.database
+        || live.backendStart !== guardIdentity.backendStart) {
+      throw new Error('Postgres restore guard connection changed');
+    }
+    const active = sessions(plan.stagingDatabase);
+    if (active.length !== 1
+        || Number(active[0].pid) !== guardIdentity.pid
+        || String(active[0].backend_start) !== guardIdentity.backendStart) {
+      throw new Error('Postgres restore staging database has an unexpected connection');
+    }
+  }
+
+  function freeze(name, expected) {
+    maintenance.exec(`ALTER DATABASE ${quotePgIdentifier(name)} WITH ALLOW_CONNECTIONS false`);
+    maintenance.exec(`ALTER DATABASE ${quotePgIdentifier(name)} WITH CONNECTION LIMIT -1`);
+    return assertPgDatabaseState(pgDatabaseCatalogRow(maintenance, name), {
+      ...expected,
+      datname: name,
+      datallowconn: false,
+      datconnlimit: -1,
+    }, 'frozen Postgres restore');
+  }
+
+  return {
+    preflight() {
+      role = pgRestoreRole(maintenance);
+      if (pgDatabaseCatalogRow(maintenance, plan.targetDatabase)) {
+        throw new Error(`Postgres restore target database already exists: ${plan.targetDatabase}`);
+      }
+      if (pgDatabaseCatalogRow(maintenance, plan.stagingDatabase)) {
+        throw new Error('Postgres restore staging-name collision');
+      }
+      const version = maintenance.prepare("SELECT current_setting('server_version_num') AS n").get();
+      const targetServerMajor = Math.floor(Number(version && version.n) / 10000);
+      if (!SUPPORTED_PG_RESTORE_MAJORS.has(targetServerMajor)) {
+        throw new Error('Postgres guarded restore is unsupported for this target server version');
+      }
+      return { role, targetServerMajor };
+    },
+    createStaging(targetServerMajor) {
+      const clauses = pgDatabaseDefinitionClauses(databaseDefinition, targetServerMajor);
+      maintenance.exec(`
+        CREATE DATABASE ${quotePgIdentifier(plan.stagingDatabase)}
+          WITH TEMPLATE template0
+               OWNER ${quotePgIdentifier(role.name)}
+               ALLOW_CONNECTIONS false
+               CONNECTION LIMIT ${PG_RESTORE_CONNECTION_LIMIT}
+               ${clauses.join('\n               ')}
+      `);
+      const row = pgDatabaseCatalogRow(maintenance, plan.stagingDatabase);
+      stagingIdentity = assertPgDatabaseState(row, {
+        oid: row && row.oid,
+        owner_oid: role.oid,
+        datname: plan.stagingDatabase,
+        datallowconn: false,
+        datconnlimit: PG_RESTORE_CONNECTION_LIMIT,
+      }, 'created Postgres restore staging');
+      return stagingIdentity;
+    },
+    openGuard() {
+      maintenance.exec(
+        `REVOKE CONNECT, TEMPORARY ON DATABASE ${quotePgIdentifier(plan.stagingDatabase)} FROM PUBLIC`,
+      );
+      assertPgOwnerOnlyDatabaseAcl(maintenance, plan.stagingDatabase, role.oid);
+      maintenance.exec(`ALTER DATABASE ${quotePgIdentifier(plan.stagingDatabase)} WITH ALLOW_CONNECTIONS true`);
+      assertPgDatabaseState(pgDatabaseCatalogRow(maintenance, plan.stagingDatabase), {
+        ...stagingIdentity,
+        datname: plan.stagingDatabase,
+        datallowconn: true,
+        datconnlimit: PG_RESTORE_CONNECTION_LIMIT,
+      }, 'guarded Postgres restore staging');
+      guard = createGuardDriver(plan.stagingUrl);
+      guardIdentity = pgGuardSession(guard);
+      if (guardIdentity.database !== plan.stagingDatabase) {
+        throw new Error('Postgres restore guard connected to the wrong database');
+      }
+      assertOnlyGuard();
+      return guard;
+    },
+    guardDriver: () => guard,
+    assertOnlyGuard,
+    freeze() { return freeze(plan.stagingDatabase, stagingIdentity); },
+    closeGuardAndAssertNoConnections() {
+      guard?.close?.();
+      guard = null;
+      guardIdentity = null;
+      waitForNoPgDatabaseSessions(maintenance, plan.stagingDatabase);
+    },
+    rename() {
+      if (pgDatabaseCatalogRow(maintenance, plan.targetDatabase)) {
+        const error = new Error(`Postgres restore target database appeared before rename: ${plan.targetDatabase}`);
+        error.code = '42P04';
+        throw error;
+      }
+      maintenance.exec(
+        `ALTER DATABASE ${quotePgIdentifier(plan.stagingDatabase)} RENAME TO ${quotePgIdentifier(plan.targetDatabase)}`,
+      );
+      const renamed = pgDatabaseCatalogRow(maintenance, plan.targetDatabase);
+      assertPgDatabaseState(renamed, {
+        ...stagingIdentity,
+        datname: plan.targetDatabase,
+        datallowconn: false,
+        datconnlimit: -1,
+      }, 'renamed Postgres restore');
+      if (pgDatabaseCatalogRow(maintenance, plan.stagingDatabase)) {
+        throw new Error('Postgres restore staging name survived rename');
+      }
+      return renamed;
+    },
+    enable() {
+      return enablePgRestoreTarget(maintenance, plan.targetDatabase, stagingIdentity);
+    },
+    reconcileRename() {
+      const staging = pgDatabaseCatalogRow(maintenance, plan.stagingDatabase);
+      const target = pgDatabaseCatalogRow(maintenance, plan.targetDatabase);
+      if (samePgDatabaseIdentity(stagingIdentity, staging)) return 'staging';
+      if (!staging && samePgDatabaseIdentity(stagingIdentity, target) && target.datallowconn === false) return 'target';
+      return 'ambiguous';
+    },
+    cleanupOwnedStaging() {
+      if (!stagingIdentity) return;
+      freeze(plan.stagingDatabase, stagingIdentity);
+      guard?.close?.();
+      guard = null;
+      guardIdentity = null;
+      waitForNoPgDatabaseSessions(maintenance, plan.stagingDatabase);
+      assertPgDatabaseState(pgDatabaseCatalogRow(maintenance, plan.stagingDatabase), {
+        ...stagingIdentity,
+        datname: plan.stagingDatabase,
+        datallowconn: false,
+        datconnlimit: -1,
+      }, 'owned Postgres restore staging cleanup');
+      maintenance.exec(`DROP DATABASE ${quotePgIdentifier(plan.stagingDatabase)}`);
+      if (pgDatabaseCatalogRow(maintenance, plan.stagingDatabase)) {
+        throw new Error('owned Postgres restore staging database remained after DROP');
+      }
+      stagingIdentity = null;
+    },
+    close() {
+      guard?.close?.();
+      guard = null;
+      maintenance?.close?.();
+    },
+  };
+}
+
+function requirePgRestoreDatabaseIdentity(value) {
+  const name = requirePgDatabaseIdentifier(value && value.name, 'Postgres cleanup target');
+  const oid = String(value && value.oid || '');
+  const ownerOid = String(value && value.ownerOid || '');
+  if (!/^[1-9][0-9]*$/.test(oid) || !/^[1-9][0-9]*$/.test(ownerOid)) {
+    throw new Error('Postgres cleanup database identity is invalid');
+  }
+  return { name, oid, ownerOid };
+}
+
+function pgCleanupMaintenanceUrl(connectionString, targetName, env) {
+  assertPostgresConnectionUrl(connectionString, { env });
+  if (pgDatabaseName(connectionString) !== targetName) return connectionString;
+  const maintenanceName = requirePgDatabaseIdentifier(
+    env.REDACTWALL_PG_MAINTENANCE_DATABASE || DEFAULT_PG_MAINTENANCE_DATABASE,
+    'Postgres maintenance database',
+  );
+  return pgUrlForDatabase(connectionString, maintenanceName);
+}
+
+/** Drop only the exact database returned by guarded restore; never force sessions. */
+function cleanupPgRestoreDatabase({
+  connectionString = pgConnectionString(), databaseIdentity, env = process.env,
+} = {}, deps = {}) {
+  const identity = requirePgRestoreDatabaseIdentity(databaseIdentity);
+  const createDriver = deps.createPgDriver || require('../server/storage/pg-driver').createPgDriver;
+  const maintenance = createDriver(pgCleanupMaintenanceUrl(connectionString, identity.name, env));
+  try {
+    const role = pgRestoreRole(maintenance);
+    if (role.oid !== identity.ownerOid) {
+      throw new Error('Postgres cleanup role does not own the guarded restore database');
+    }
+    const expected = { oid: identity.oid, owner_oid: identity.ownerOid };
+    const current = pgDatabaseCatalogRow(maintenance, identity.name);
+    if (!current) return { ok: true, alreadyAbsent: true, databaseIdentity: identity };
+    assertPgDatabaseState(current, { ...expected, datname: identity.name }, 'Postgres cleanup target');
+    maintenance.exec(`ALTER DATABASE ${quotePgIdentifier(identity.name)} WITH ALLOW_CONNECTIONS false`);
+    maintenance.exec(`ALTER DATABASE ${quotePgIdentifier(identity.name)} WITH CONNECTION LIMIT -1`);
+    assertPgDatabaseState(pgDatabaseCatalogRow(maintenance, identity.name), {
+      ...expected, datname: identity.name, datallowconn: false, datconnlimit: -1,
+    }, 'frozen Postgres cleanup target');
+    waitForNoPgDatabaseSessions(maintenance, identity.name);
+    assertPgDatabaseState(pgDatabaseCatalogRow(maintenance, identity.name), {
+      ...expected, datname: identity.name, datallowconn: false, datconnlimit: -1,
+    }, 'drained Postgres cleanup target');
+    maintenance.exec(`DROP DATABASE ${quotePgIdentifier(identity.name)}`);
+    if (pgDatabaseCatalogRow(maintenance, identity.name)) {
+      throw new Error('Postgres cleanup target remained after DROP');
+    }
+    return { ok: true, alreadyAbsent: false, databaseIdentity: identity };
+  } catch (error) {
+    throw new Error(
+      `Postgres guarded restore cleanup did not conclusively remove ${identity.name}; inspect its exact database identity before manual cleanup: ${error.message}`,
+      { cause: error },
+    );
+  } finally {
+    maintenance.close();
+  }
+}
+
+function runAndVerifyPgRestore(snapshot, targetUrl, flags, deps, control) {
+  (deps.runPgTool || runPgTool)(
+    'pg_restore',
+    [...flags, `--dbname=${pgDatabaseName(targetUrl)}`, snapshot.archive],
+    targetUrl,
+  );
+  control.assertOnlyGuard();
+  control.freeze();
+  const guard = control.guardDriver();
+  const inspection = deps.verifyRestoredPgDatabase
+    ? deps.verifyRestoredPgDatabase(targetUrl, snapshot.anchor, guard)
+    : verifyRestoredPgDriver(guard, snapshot.anchor);
+  if (!inspection.auditIntegrity || !inspection.auditIntegrity.ok) {
+    throw new Error(`refusing to publish Postgres runtime audit state after failed restore verification: ${inspection.auditIntegrity?.reason || 'unknown'}`);
+  }
+  const databaseScope = deps.targetPgDatabaseScope
+    ? deps.targetPgDatabaseScope(targetUrl, guard)
+    : targetPgDatabaseScopeForDriver(guard);
+  control.assertOnlyGuard();
+  return { ...inspection, databaseScope: requirePgDatabaseScope(databaseScope) };
+}
+
+function pgRestoreResult(verification, inspection, targetUrl, auditPaths, databaseIdentity) {
+  return {
+    ok: true,
+    driver: 'postgres',
+    file: verification.file,
+    backupSha256: verification.backupSha256,
+    manifestOk: verification.manifestOk,
+    auditIntegrity: inspection.auditIntegrity,
+    queryCount: inspection.queryCount,
+    auditCount: inspection.auditCount,
+    auditDirectory: auditPaths.directory,
+    auditStateFile: auditPaths.statePath,
+    auditCheckpointFile: auditPaths.checkpointPath,
+    auditPendingFile: auditPaths.pendingPath,
+    restoredTo: sanitizeDatabaseUrl(targetUrl),
+    databaseIdentity: {
+      name: String(databaseIdentity.datname),
+      oid: String(databaseIdentity.oid),
+      ownerOid: String(databaseIdentity.owner_oid),
+    },
+  };
+}
+
+function pgCreateOutcomeIsConclusive(error) {
+  return CONCLUSIVE_PG_DATABASE_MUTATION_REJECTIONS.has(String(error && error.code || ''));
+}
+
+function pgRestoreRecoveryError(state, error, retained, cleanupError = null) {
+  const target = state.plan.targetDatabase;
+  const staging = state.plan.stagingDatabase;
+  const details = cleanupError ? ` Cleanup also failed: ${cleanupError.message}.` : '';
+  const enableUncertain = state.enableAttempted && !state.enabled && error.pgEnableOutcome !== 'frozen';
+  const manual = retained === 'target'
+    ? enableUncertain
+      ? `Target ${target} was retained and may already be connectable. Inspect its exact OID and connection state immediately; disable connections before any manual recovery.`
+      : `Target ${target} was retained. Inspect pg_database and the runtime audit directory; keep it non-connectable until publication is verified, then enable or remove it manually.`
+    : retained === 'ambiguous'
+      ? `Database transition outcome is uncertain. Inspect both staging ${staging} and target ${target}; remove neither until exact ownership and OID are proven.`
+      : `Staging database ${staging} was retained. Inspect pg_database and remove it manually only after its owner and OID are proven.`;
+  return new Error(`Postgres guarded restore failed in phase ${state.phase}: ${error.message}.${details} ${manual}`, {
+    cause: error,
+  });
+}
+
+function handlePgRestoreDatabaseFailure(state, control, error) {
+  if (state.createUncertain) return pgRestoreRecoveryError(state, error, 'ambiguous');
+  if (state.renameAttempted && !state.renamed) {
+    try {
+      const location = control.reconcileRename();
+      if (location === 'target') {
+        state.renamed = true;
+        state.stagingOwned = false;
+      } else if (location === 'ambiguous') {
+        return pgRestoreRecoveryError(state, error, 'ambiguous');
+      }
+    } catch (reconcileError) {
+      return pgRestoreRecoveryError(state, error, 'ambiguous', reconcileError);
+    }
+  }
+  if (state.renamed) return pgRestoreRecoveryError(state, error, 'target');
+  if (!state.stagingOwned) return error;
+  try {
+    control.cleanupOwnedStaging();
+    state.stagingOwned = false;
+    return error;
+  } catch (cleanupError) {
+    return pgRestoreRecoveryError(state, error, 'staging', cleanupError);
+  }
+}
+
+function restorePgBackupLocked(context) {
+  const { file, inspected, targetAuditPaths, databasePlan, flags, env, security, deps } = context;
+  requireNewPgAuditDirectory(targetAuditPaths.directory);
+  const snapshot = createPgRestoreSnapshot(
+    file,
+    inspected.manifest,
+    env,
+    security,
+    deps.restoreStagingParent || os.tmpdir(),
+  );
+  let runtimeStaging;
+  let operationError;
+  let control;
+  let stagingCleanupAttempted = false;
+  const state = {
+    phase: 'artifact-staging',
+    plan: databasePlan,
+    stagingOwned: false,
+    createUncertain: false,
+    renameAttempted: false,
+    renamed: false,
+    published: false,
+    enableAttempted: false,
+    enabled: false,
+  };
+  try {
+    runtimeStaging = createPgRuntimeAuditStaging(snapshot, inspected.manifest, targetAuditPaths, env, security);
+    if (pathEntryExists(targetAuditPaths.directory)) {
+      throw new Error(`Postgres restore target audit directory already exists: ${targetAuditPaths.directory}`);
+    }
+    const controlFactory = deps.createPgRestoreControl || createPgRestoreControl;
+    control = controlFactory(databasePlan, inspected.manifest.sourceDatabaseDefinition, deps);
+    state.phase = 'preflight';
+    const preflight = control.preflight();
+    state.phase = 'create-staging';
+    try {
+      control.createStaging(preflight.targetServerMajor);
+      state.stagingOwned = true;
+    } catch (error) {
+      if (!pgCreateOutcomeIsConclusive(error)) state.createUncertain = true;
+      throw error;
+    }
+    state.phase = 'open-guard';
+    control.openGuard();
+    if (deps.beforeGuardInventory) deps.beforeGuardInventory({ state, control, databasePlan });
+    state.phase = 'guard-inventory';
+    assertEmptyPgRestoreTarget(databasePlan.stagingUrl, {
+      ...deps,
+      expectedDatabaseConnectionLimit: PG_RESTORE_CONNECTION_LIMIT,
+      expectedDatabaseOwnerOnlyAcl: true,
+    });
+    control.assertOnlyGuard();
+    if (deps.afterGuardInventory) deps.afterGuardInventory({ state, control, databasePlan });
+    state.phase = 'restore-and-verify';
+    const inspection = runAndVerifyPgRestore(snapshot, databasePlan.stagingUrl, flags, deps, control);
+    replaceStagedPgRuntimeState(
+      runtimeStaging,
+      snapshot,
+      inspection.databaseScope,
+      env,
+      security,
+    );
+    state.phase = 'close-guard';
+    control.closeGuardAndAssertNoConnections();
+    state.phase = 'rename';
+    state.renameAttempted = true;
+    const renamedIdentity = control.rename();
+    state.renamed = true;
+    state.stagingOwned = false;
+    state.phase = 'publish-runtime-audit';
+    (deps.publishPgRuntimeAuditDirectory || publishNewPgRuntimeAuditDirectory)(
+      runtimeStaging,
+      targetAuditPaths,
+      env,
+      security,
+    );
+    state.published = true;
+    const result = pgRestoreResult(
+      inspected.verification,
+      inspection,
+      databasePlan.targetUrl,
+      targetAuditPaths,
+      renamedIdentity,
+    );
+    state.phase = 'pre-enable-staging-cleanup';
+    stagingCleanupAttempted = true;
+    (deps.cleanupPgRestoreStaging || cleanupPrivateStagingAfterOperation)([
+      snapshot.staging,
+      runtimeStaging && runtimeStaging.staging,
+    ]);
+    state.phase = 'enable-target';
+    state.enableAttempted = true;
+    control.enable();
+    state.enabled = true;
+    try { control.close(); } catch {}
+    control = null;
+    state.phase = 'complete';
+    return result;
+  } catch (error) {
+    operationError = control ? handlePgRestoreDatabaseFailure(state, control, error) : error;
+    throw operationError;
+  } finally {
+    let closeError = null;
+    try { control?.close?.(); }
+    catch (error) { closeError = error; }
+    const finalizationError = closeError && operationError
+      ? new AggregateError(
+          [operationError, closeError],
+          `${operationError.message}; Postgres restore control cleanup also failed: ${closeError.message}`,
+          { cause: operationError },
+        )
+      : closeError;
+    if (!stagingCleanupAttempted) {
+      cleanupPrivateStagingAfterOperation([
+        snapshot.staging,
+        runtimeStaging && runtimeStaging.staging,
+      ], finalizationError || operationError);
+    }
+    if (finalizationError) throw finalizationError;
   }
 }
 
@@ -1421,10 +3156,12 @@ function restorePgBackup({
   file,
   to,
   manifestFile,
+  auditDir,
   force = false,
   security = {},
   env = process.env,
 } = {}, deps = {}) {
+  const targetAuditPaths = requireNewPgAuditDirectory(auditDir);
   const inspected = inspectPgBackupArtifactSet({ file, manifestFile, security, env });
   const { verification } = inspected;
   if (!verification.ok) {
@@ -1434,40 +3171,23 @@ function restorePgBackup({
         : 'refusing to restore a backup with missing or invalid authenticated audit sidecars'
       : 'refusing to restore a backup that does not verify');
   }
-  const targetUrl = deriveDatabaseUrl(deps.connectionString || pgConnectionString(), to);
-  assertPostgresConnectionUrl(targetUrl, deps);
-  const flags = ['--no-owner', '--no-privileges', '--exit-on-error', '--single-transaction'];
-  if (force) flags.push('--clean', '--if-exists');
-  const snapshot = createPgRestoreSnapshot(
-    file,
-    inspected.manifest,
-    env,
-    security,
-    deps.restoreStagingParent || os.tmpdir(),
-  );
-  try {
-    (deps.runPgTool || runPgTool)(
-      'pg_restore',
-      [...flags, `--dbname=${pgDatabaseName(targetUrl)}`, snapshot.archive],
-      targetUrl,
-    );
-    const inspection = (deps.verifyRestoredPgDatabase || verifyRestoredPgDatabase)(targetUrl, snapshot.anchor);
-    return {
-      ok: inspection.auditIntegrity.ok,
-      driver: 'postgres',
-      file: verification.file,
-      backupSha256: verification.backupSha256,
-      manifestOk: verification.manifestOk,
-      auditIntegrity: inspection.auditIntegrity,
-      queryCount: inspection.queryCount,
-      auditCount: inspection.auditCount,
-      auditStateFile: verification.auditStateFile,
-      auditCheckpointFile: verification.auditCheckpointFile,
-      restoredTo: sanitizeDatabaseUrl(targetUrl),
-    };
-  } finally {
-    fs.rmSync(snapshot.staging, { recursive: true, force: true });
+  if (force) {
+    throw new Error('Postgres restore does not support --force; the requested target database must not exist');
   }
+  const connectionString = deps.connectionString || pgConnectionString();
+  const databasePlan = pgRestoreDatabasePlan(
+    connectionString,
+    to,
+    env,
+    deps.randomBytes || crypto.randomBytes,
+  );
+  const flags = ['--no-owner', '--no-privileges', '--exit-on-error', '--single-transaction'];
+  const context = { file, inspected, targetAuditPaths, databasePlan, flags, env, security, deps };
+  return withPrivatePgAuditParent(
+    targetAuditPaths.directory,
+    security,
+    () => restorePgBackupLocked(context),
+  );
 }
 
 // ---- SQLite mode + driver dispatch --------------------------------------------
@@ -1484,13 +3204,18 @@ function verifyBackup({ file, manifestFile, security = {}, env = process.env } =
   const runtimeAuditPaths = restoredAuditAnchorPaths(dbPath);
   const hasBackupAuditArtifact = pathEntryExists(backupAuditPaths.statePath)
     || pathEntryExists(backupAuditPaths.checkpointPath);
+  const runtimeManifest = manifest && manifest.format === SQLITE_RESTORED_FORMAT
+    && manifest.artifactLayout === SQLITE_RUNTIME_LAYOUT;
+  const pendingPresent = runtimeManifest && pathEntryExists(runtimeAuditPaths.pendingPath);
   // A restored runtime intentionally uses server/db's normal audit directory,
   // while a portable backup keeps its two authenticated files beside the DB.
-  // A present manifest always selects the portable layout, so missing backup
-  // artifacts cannot be disguised by adding a runtime directory.
-  const auditPaths = !manifest && !hasBackupAuditArtifact && pathEntryExists(runtimeAuditPaths.directory)
+  // Only the authenticated runtime format selects the runtime layout. Other
+  // present manifests stay on the portable paths and fail validation if edited.
+  const auditPaths = runtimeManifest
     ? runtimeAuditPaths
-    : backupAuditPaths;
+    : !manifest && !hasBackupAuditArtifact && pathEntryExists(runtimeAuditPaths.directory)
+      ? runtimeAuditPaths
+      : backupAuditPaths;
   const paths = {
     database: dbPath,
     auditState: auditPaths.statePath,
@@ -1529,7 +3254,13 @@ function verifyBackup({ file, manifestFile, security = {}, env = process.env } =
           }
         : validateSqliteManifest(manifest, paths, descriptors, manifestKey);
   let auditIntegrityResult;
-  if (anchor) {
+  if (pendingPresent) {
+    auditIntegrityResult = {
+      ok: false,
+      count: anchor ? anchor.checkpoint.count : 0,
+      reason: 'audit-pending-present',
+    };
+  } else if (anchor) {
     auditIntegrityResult = inspectAuthenticatedSqliteSnapshot(dbPath, anchor, security, true).auditIntegrity;
   } else {
     auditIntegrityResult = {
@@ -1547,6 +3278,8 @@ function verifyBackup({ file, manifestFile, security = {}, env = process.env } =
     backupSha256,
     auditStateFile: auditPaths.statePath,
     auditCheckpointFile: auditPaths.checkpointPath,
+    auditPendingFile: runtimeManifest ? runtimeAuditPaths.pendingPath : null,
+    auditPendingPresent: !!pendingPresent,
     auditStateSha256: descriptors.auditState ? descriptors.auditState.sha256 : null,
     auditCheckpointSha256: descriptors.auditCheckpoint ? descriptors.auditCheckpoint.sha256 : null,
     auditIntegrity: auditIntegrityResult,
@@ -1600,6 +3333,9 @@ async function createSqliteBackup({
   assertWritable(manifestPath, force);
   let backupStaging;
   let manifestStaging;
+  let operationError;
+  let operationFailed = false;
+  let committedResult;
 
   try {
     backupStaging = createPrivateStagingDir(path.dirname(backupFile), security);
@@ -1628,7 +3364,7 @@ async function createSqliteBackup({
     const manifest = authenticateManifest({
       schemaVersion: 2,
       driver: 'sqlite',
-      format: 'sqlite-backup',
+      format: SQLITE_BACKUP_FORMAT,
       createdAt: new Date().toISOString(),
       service: { name: 'RedactWall', version: require('../package.json').version },
       sourceDbFile: path.basename(db._dbPath || 'redactwall.db'),
@@ -1644,30 +3380,237 @@ async function createSqliteBackup({
       note: 'The backup database and authenticated audit sidecars are sensitive runtime state. This manifest contains no prompt bodies.',
     }, manifestKey);
     writePrivateFile(stagedManifest, JSON.stringify(manifest, null, 2), security);
-    publishPrivateFiles([
+    const verified = publishPrivateFiles([
       { staged: stagedBackup, target: backupFile, sqlite: true },
       { staged: stagedAuditState, target: auditPaths.statePath },
       { staged: stagedAuditCheckpoint, target: auditPaths.checkpointPath },
       { staged: stagedManifest, target: manifestPath },
-    ], { force, security });
-    const verified = verifyBackup({ file: backupFile, manifestFile: manifestPath, security, env });
-    return {
+    ], {
+      force,
+      security,
+      verify: () => verifyBackup({ file: backupFile, manifestFile: manifestPath, security, env }),
+    });
+    committedResult = {
       ...verified,
       manifestFile: manifestPath,
       auditStateFile: auditPaths.statePath,
       auditCheckpointFile: auditPaths.checkpointPath,
       manifest,
     };
+    return committedResult;
+  } catch (error) {
+    operationFailed = true;
+    operationError = error;
+    throw error;
   } finally {
-    if (backupStaging) fs.rmSync(backupStaging, { recursive: true, force: true });
-    if (manifestStaging) fs.rmSync(manifestStaging, { recursive: true, force: true });
+    if (operationFailed) {
+      cleanupPrivateStagingAfterOperation([backupStaging, manifestStaging], operationError, true);
+    } else {
+      cleanupPrivateStagingAfterCommit([backupStaging, manifestStaging], committedResult, {
+        security,
+        component: 'sqlite-backup',
+        phase: 'private-staging-cleanup',
+      });
+    }
   }
 }
 
-function restoreBackup({ file, to, manifestFile, force = false, security = {}, env = process.env } = {}) {
+function sqliteRestoreContext(file, to, manifestFile, verification) {
+  const target = path.resolve(to);
+  const source = path.resolve(file);
+  const sourceManifestPath = path.resolve(manifestFile || `${source}.manifest.json`);
+  const targetAuditPaths = restoredAuditAnchorPaths(target);
+  const targetManifestPath = `${target}.manifest.json`;
+  return {
+    source,
+    target,
+    sourceManifestPath,
+    sourceManifest: JSON.parse(fs.readFileSync(sourceManifestPath, 'utf8')),
+    sourceAuditPaths: {
+      statePath: verification.auditStateFile,
+      checkpointPath: verification.auditCheckpointFile,
+    },
+    sourcePendingPath: verification.auditPendingFile,
+    targetAuditPaths,
+    targetManifestPath,
+  };
+}
+
+function assertSqliteRestoreTargets(context, force) {
+  assertDistinctArtifactTargets([
+    { target: context.target, sqlite: true },
+    { target: context.targetAuditPaths.directory, directory: true },
+    { target: context.targetManifestPath },
+  ]);
+  assertWritable(context.target, force, { sqlite: true });
+  assertWritable(context.targetAuditPaths.directory, force);
+  assertWritable(context.targetManifestPath, force);
+}
+
+function copySqliteRestoreAuditSidecars(context, staged, security) {
+  fs.mkdirSync(staged.auditDirectory, { mode: PRIVATE_DIR_MODE });
+  restrictPath(staged.auditDirectory, { ...security, directory: true });
+  copyPrivateRestoreArtifact(context.sourceAuditPaths.statePath, staged.auditState, {
+    expectedBytes: context.sourceManifest.artifacts.auditState.bytes,
+    maxBytes: MAX_AUDIT_STATE_BYTES,
+    label: 'SQLite audit state sidecar',
+    security,
+  });
+  copyPrivateRestoreArtifact(context.sourceAuditPaths.checkpointPath, staged.auditCheckpoint, {
+    expectedBytes: context.sourceManifest.artifacts.auditCheckpoint.bytes,
+    maxBytes: MAX_AUDIT_CHECKPOINT_BYTES,
+    label: 'SQLite audit checkpoint sidecar',
+    security,
+  });
+  privatePaths.fsyncDirectory(staged.auditDirectory, { fs });
+}
+
+function createSqliteRestoreStaging(context, security) {
+  const staging = createPrivateStagingDir(path.dirname(context.target), security);
+  const staged = {
+    staging,
+    database: path.join(staging, path.basename(context.target)),
+    auditDirectory: path.join(staging, 'audit-integrity'),
+    manifest: path.join(staging, path.basename(context.targetManifestPath)),
+  };
+  staged.auditState = path.join(staged.auditDirectory, AUDIT_STATE_NAME);
+  staged.auditCheckpoint = path.join(staged.auditDirectory, AUDIT_CHECKPOINT_NAME);
+  try {
+    const sourceDirectory = context.sourcePendingPath
+      ? capturePendingFreeDirectory(context.sourcePendingPath, 'SQLite runtime restore source')
+      : null;
+    copyPrivateRestoreArtifact(context.source, staged.database, {
+      expectedBytes: context.sourceManifest.artifacts.database.bytes,
+      label: 'SQLite backup database',
+      security,
+    });
+    copySqliteRestoreAuditSidecars(context, staged, security);
+    if (sourceDirectory) {
+      assertPendingFreeDirectoryUnchanged(
+        context.sourcePendingPath,
+        sourceDirectory,
+        'SQLite runtime restore source',
+      );
+    }
+    assertNoSqliteSidecars(staged.database);
+    return staged;
+  } catch (error) {
+    cleanupPrivateStagingAfterOperation([staging], error);
+    throw error;
+  }
+}
+
+function validateStableSqliteSource(context, staged, key) {
+  const descriptors = {
+    database: artifactDescriptor(staged.database, context.source),
+    auditState: artifactDescriptor(staged.auditState, context.sourceAuditPaths.statePath),
+    auditCheckpoint: artifactDescriptor(staged.auditCheckpoint, context.sourceAuditPaths.checkpointPath),
+  };
+  const result = validateSqliteManifest(context.sourceManifest, {
+    database: context.source,
+    auditState: context.sourceAuditPaths.statePath,
+    auditCheckpoint: context.sourceAuditPaths.checkpointPath,
+  }, descriptors, key);
+  if (!result.ok) throw new Error(`backup artifacts changed during restore: ${result.reason}`);
+}
+
+function validateSqliteRestoreStaging(context, staged, env, security) {
+  const anchor = loadAuthenticatedAuditAnchor({
+    directory: staged.auditDirectory,
+    statePath: staged.auditState,
+    checkpointPath: staged.auditCheckpoint,
+  }, env, security);
+  const key = independentManifestKey(anchor);
+  validateStableSqliteSource(context, staged, key);
+  const audit = inspectAuthenticatedSqliteSnapshot(staged.database, anchor, security, true).auditIntegrity;
+  if (!audit.ok) throw new Error('refusing to publish a restored database with broken audit integrity');
+  return key;
+}
+
+function sqliteTargetDescriptors(context, staged) {
+  return {
+    database: artifactDescriptor(staged.database, context.target),
+    auditState: artifactDescriptor(staged.auditState, context.targetAuditPaths.statePath),
+    auditCheckpoint: artifactDescriptor(staged.auditCheckpoint, context.targetAuditPaths.checkpointPath),
+  };
+}
+
+function publishSqliteRestore(context, staged, key, force, security, env) {
+  const manifest = buildRestoredSqliteManifest(
+    context.sourceManifest,
+    sqliteTargetDescriptors(context, staged),
+    key,
+  );
+  writePrivateFile(staged.manifest, JSON.stringify(manifest, null, 2), security);
+  const verified = publishPrivateFiles([
+    { staged: staged.database, target: context.target, sqlite: true },
+    { staged: staged.auditDirectory, target: context.targetAuditPaths.directory, directory: true },
+    { staged: staged.manifest, target: context.targetManifestPath },
+  ], {
+    force,
+    security,
+    verify() {
+      if (pathEntryExists(context.targetAuditPaths.pendingPath)) {
+        throw new Error('restored SQLite target unexpectedly contains pending audit high-water state');
+      }
+      const result = verifyBackup({
+        file: context.target,
+        manifestFile: context.targetManifestPath,
+        security,
+        env,
+      });
+      if (!result.ok) {
+        throw new Error(`restored SQLite artifact set failed target-layout verification: ${result.manifestReason || result.auditIntegrity.reason || 'unknown'}`);
+      }
+      return result;
+    },
+  });
+  return { verified, manifest };
+}
+
+function restoreSqliteBackup(context, force, security, env) {
+  return withPrivateRestoreDirectory(context.target, security, () => {
+    assertSqliteRestoreTargets(context, force);
+    const staged = createSqliteRestoreStaging(context, security);
+    let operationError;
+    let operationFailed = false;
+    let committedResult;
+    try {
+      const key = validateSqliteRestoreStaging(context, staged, env, security);
+      const { verified, manifest } = publishSqliteRestore(context, staged, key, force, security, env);
+      committedResult = {
+        ...verified,
+        restoredTo: context.target,
+        file: context.target,
+        manifestFile: context.targetManifestPath,
+        manifest,
+        auditStateFile: context.targetAuditPaths.statePath,
+        auditCheckpointFile: context.targetAuditPaths.checkpointPath,
+        sourceManifestFile: context.sourceManifestPath,
+      };
+      return committedResult;
+    } catch (error) {
+      operationFailed = true;
+      operationError = error;
+      throw error;
+    } finally {
+      if (operationFailed) {
+        cleanupPrivateStagingAfterOperation([staged.staging], operationError, true);
+      } else {
+        cleanupPrivateStagingAfterCommit([staged.staging], committedResult, {
+          security,
+          component: 'sqlite-restore',
+          phase: 'private-staging-cleanup',
+        });
+      }
+    }
+  });
+}
+
+function restoreBackup({ file, to, manifestFile, auditDir, force = false, security = {}, env = process.env } = {}) {
   if (!to) throw new Error('--to is required');
   if (file && isPgDumpFile(path.resolve(file))) {
-    return restorePgBackup({ file, to, manifestFile, force, security, env });
+    return restorePgBackup({ file, to, manifestFile, auditDir, force, security, env });
   }
   const verification = verifyBackup({ file, manifestFile, security, env });
   if (!verification.ok) {
@@ -1677,73 +3620,7 @@ function restoreBackup({ file, to, manifestFile, force = false, security = {}, e
         : 'refusing to restore a backup with missing or invalid authenticated audit sidecars'
       : 'refusing to restore a backup that does not verify');
   }
-  const target = path.resolve(to);
-  const sourceAuditPaths = backupAuditArtifactPaths(path.resolve(file));
-  const targetAuditPaths = restoredAuditAnchorPaths(target);
-  assertDistinctArtifactTargets([
-    { target, sqlite: true },
-    { target: targetAuditPaths.directory, directory: true },
-  ]);
-  return withPrivateRestoreDirectory(target, security, () => {
-    assertWritable(target, force, { sqlite: true });
-    assertWritable(targetAuditPaths.directory, force);
-    const staging = createPrivateStagingDir(path.dirname(target), security);
-    const stagedTarget = path.join(staging, path.basename(target));
-    const stagedAuditDirectory = path.join(staging, 'audit-integrity');
-    const stagedAuditState = path.join(stagedAuditDirectory, AUDIT_STATE_NAME);
-    const stagedAuditCheckpoint = path.join(stagedAuditDirectory, AUDIT_CHECKPOINT_NAME);
-    try {
-      fs.copyFileSync(path.resolve(file), stagedTarget, fs.constants.COPYFILE_EXCL);
-      restrictPath(stagedTarget, { ...security, directory: false });
-      fsyncFile(stagedTarget);
-      fs.mkdirSync(stagedAuditDirectory, { mode: PRIVATE_DIR_MODE });
-      restrictPath(stagedAuditDirectory, { ...security, directory: true });
-      fs.copyFileSync(sourceAuditPaths.statePath, stagedAuditState, fs.constants.COPYFILE_EXCL);
-      restrictPath(stagedAuditState, { ...security, directory: false });
-      fsyncFile(stagedAuditState);
-      fs.copyFileSync(sourceAuditPaths.checkpointPath, stagedAuditCheckpoint, fs.constants.COPYFILE_EXCL);
-      restrictPath(stagedAuditCheckpoint, { ...security, directory: false });
-      fsyncFile(stagedAuditCheckpoint);
-      assertNoSqliteSidecars(stagedTarget);
-      const stagedDescriptors = {
-        database: artifactDescriptor(stagedTarget),
-        auditState: artifactDescriptor(stagedAuditState),
-        auditCheckpoint: artifactDescriptor(stagedAuditCheckpoint),
-      };
-      if (stagedDescriptors.database.sha256 !== verification.backupSha256
-          || stagedDescriptors.auditState.sha256 !== verification.auditStateSha256
-          || stagedDescriptors.auditCheckpoint.sha256 !== verification.auditCheckpointSha256) {
-        throw new Error('backup artifacts changed during restore');
-      }
-      const stagedAnchor = loadAuthenticatedAuditAnchor({
-        statePath: stagedAuditState,
-        checkpointPath: stagedAuditCheckpoint,
-      }, env, security);
-      const auditIntegrityResult = inspectAuthenticatedSqliteSnapshot(
-        stagedTarget,
-        stagedAnchor,
-        security,
-        true,
-      ).auditIntegrity;
-      if (!auditIntegrityResult.ok) throw new Error('refusing to publish a restored database with broken audit integrity');
-      publishPrivateFiles([
-        { staged: stagedTarget, target, sqlite: true },
-        { staged: stagedAuditDirectory, target: targetAuditPaths.directory, directory: true },
-      ], { force, security });
-      return {
-        ok: true,
-        restoredTo: target,
-        file: target,
-        backupSha256: sha256File(target),
-        auditIntegrity: auditIntegrityResult,
-        auditStateFile: targetAuditPaths.statePath,
-        auditCheckpointFile: targetAuditPaths.checkpointPath,
-        unverifiable: verification.unverifiable,
-      };
-    } finally {
-      fs.rmSync(staging, { recursive: true, force: true });
-    }
-  });
+  return restoreSqliteBackup(sqliteRestoreContext(file, to, manifestFile, verification), force, security, env);
 }
 
 async function main(argv = process.argv.slice(2), deps = {}) {
@@ -1766,7 +3643,13 @@ async function main(argv = process.argv.slice(2), deps = {}) {
   } else if (command === 'verify') {
     result = verify({ file: args.file || positional[0], manifestFile: args.manifest });
   } else if (command === 'restore') {
-    result = restore({ file: args.file || positional[0], to: args.to || positional[1], manifestFile: args.manifest, force: args.force });
+    result = restore({
+      file: args.file || positional[0],
+      to: args.to || positional[1],
+      manifestFile: args.manifest,
+      auditDir: args['audit-dir'],
+      force: args.force,
+    });
   }
   else throw new Error(`unknown command: ${command}`);
   io.log(JSON.stringify(result, null, 2));
@@ -1784,13 +3667,17 @@ module.exports = {
   restoreBackup,
   isPgDumpFile,
   pgConnectionEnv,
+  pgClientConfig,
   assertPostgresConnectionUrl,
   deriveDatabaseUrl,
   sanitizeDatabaseUrl,
   runPgTool,
   verifyRestoredPgDatabase,
+  cleanupPgRestoreDatabase,
   _internal: {
     createPrivateStagingDir,
+    cleanupPrivateStagingDirectory,
+    copyPrivateRestoreArtifact,
     withPrivateRestoreDirectory,
     inspectSqliteSnapshot,
     pgDatabaseName,
@@ -1799,7 +3686,26 @@ module.exports = {
     snapshotStatsFromRows,
     sqliteSidecarPaths,
     verifyPgSnapshotIntegrity,
+    inspectEmptyPgRestoreTarget,
+    pgRestoreInventorySql,
+    parsePgRestoreInventory,
+    PG_RESTORE_INVENTORY_NAMES,
+    pgRestoreDatabasePlan,
+    createPgRestoreControl,
+    enablePgRestoreTarget,
+    cleanupPgRestoreDatabase,
+    pgRestoreRole,
+    pgDatabaseCatalogRow,
+    samePgDatabaseIdentity,
+    validatePgDatabaseDefinition,
+    pgDatabaseDefinitionClauses,
+    verifyRestoredPgDriver,
+    targetPgDatabaseScopeForDriver,
     restorePgBackup,
     withPgSnapshot,
+    pgDumpArgs,
+    targetPgDatabaseScope,
+    replaceStagedPgRuntimeState,
+    fsyncPublishedArtifact,
   },
 };

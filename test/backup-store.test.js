@@ -20,12 +20,46 @@ const auditIntegrity = require('../server/audit-integrity');
 const auditAnchor = require('../server/audit-anchor')._internal;
 const privatePaths = require('../server/private-path');
 
+const TEST_PG_DATABASE_DEFINITION = Object.freeze({
+  serverMajor: 17,
+  encoding: 'UTF8',
+  localeProvider: 'libc',
+  lcCollate: 'C',
+  lcCtype: 'C',
+  locale: null,
+  icuRules: null,
+});
+
 function captureConsole() {
   const lines = [];
   return {
     lines,
     log(message) { lines.push(message); },
   };
+}
+
+async function withOneFailedPrivateStagingRemoval(cleanupParent, callback) {
+  const originalRmSync = fs.rmSync;
+  const expectedParent = path.resolve(cleanupParent);
+  let retainedPath = '';
+  fs.rmSync = function failOneCommittedStagingRemoval(target, options) {
+    const candidate = String(target);
+    if (!retainedPath && path.basename(candidate).includes('.cleanup-')
+        && path.resolve(path.dirname(candidate)) === expectedParent
+        && fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) {
+      retainedPath = candidate;
+      const error = new Error('synthetic committed staging cleanup failure');
+      error.code = 'EIO';
+      throw error;
+    }
+    return originalRmSync.call(fs, target, options);
+  };
+  try {
+    const result = await callback();
+    return { result, retainedPath };
+  } finally {
+    fs.rmSync = originalRmSync;
+  }
 }
 
 function permissionBits(file) {
@@ -155,6 +189,7 @@ test('backup workflow verifies and restores audit evidence without leaking manif
   const verified = backup.verifyBackup({ file: result.file, manifestFile: result.manifestFile });
   assert.strictEqual(verified.ok, true);
   assert.strictEqual(verified.backupSha256, result.backupSha256);
+  const sourceManifestBytes = fs.readFileSync(result.manifestFile);
 
   const restoredPath = path.join(tempRoot, 'restored', 'redactwall.db');
   const restored = backup.restoreBackup({ file: result.file, to: restoredPath });
@@ -163,11 +198,58 @@ test('backup workflow verifies and restores audit evidence without leaking manif
   assert.strictEqual(restored.unverifiable, false, 'the source manifest was verified before restore');
   assert.ok(fs.existsSync(restored.auditStateFile));
   assert.ok(fs.existsSync(restored.auditCheckpointFile));
-  // The restored copy has no sibling manifest, but its runtime sidecars still
-  // authenticate the exact snapshot head.
-  const restoredVerify = backup.verifyBackup({ file: restoredPath });
+  assert.ok(fs.existsSync(restored.manifestFile));
+  assert.deepStrictEqual(fs.readFileSync(result.manifestFile), sourceManifestBytes);
+  assert.strictEqual(restored.manifest.format, 'sqlite-restored-runtime');
+  assert.strictEqual(restored.manifest.artifactLayout, 'runtime-audit-directory');
+  assert.strictEqual(
+    restored.manifest.restoredFrom.manifestMac,
+    result.manifest.manifestAuthentication.mac,
+  );
+  assert.strictEqual(restored.manifest.artifacts.auditState.file, '.audit-integrity-state.json');
+  assert.strictEqual(restored.manifest.artifacts.auditCheckpoint.file, '.audit-integrity-checkpoint.json');
+  assert.ok(!JSON.stringify(restored.manifest).includes(secret));
+  const restoredVerify = backup.verifyBackup({
+    file: restoredPath,
+    manifestFile: restored.manifestFile,
+  });
+  assert.strictEqual(restoredVerify.ok, true);
   assert.strictEqual(restoredVerify.auditIntegrity.ok, true);
-  assert.strictEqual(restoredVerify.unverifiable, true);
+  assert.strictEqual(restoredVerify.manifestOk, true);
+  assert.strictEqual(restoredVerify.unverifiable, false);
+  assert.strictEqual(restoredVerify.auditStateFile, restored.auditStateFile);
+  assert.strictEqual(restoredVerify.auditCheckpointFile, restored.auditCheckpointFile);
+
+  const verifyCli = spawnSync(process.execPath, [
+    path.join(__dirname, '..', 'scripts', 'backup-store.js'),
+    'verify',
+    restoredPath,
+    '--manifest',
+    restored.manifestFile,
+  ], {
+    cwd: path.join(__dirname, '..'),
+    encoding: 'utf8',
+    env: restoredServerDbEnv(restoredPath),
+  });
+  assert.strictEqual(verifyCli.status, 0, verifyCli.stderr || verifyCli.stdout);
+  const cliVerification = JSON.parse(verifyCli.stdout);
+  assert.strictEqual(cliVerification.ok, true);
+  assert.strictEqual(cliVerification.manifestOk, true);
+  assert.strictEqual(cliVerification.auditStateFile, restored.auditStateFile);
+  assert.strictEqual(cliVerification.auditCheckpointFile, restored.auditCheckpointFile);
+
+  const targetManifestBytes = fs.readFileSync(restored.manifestFile);
+  const editedTargetManifest = JSON.parse(targetManifestBytes.toString('utf8'));
+  editedTargetManifest.restoredAt = new Date(Date.now() + 1000).toISOString();
+  fs.writeFileSync(restored.manifestFile, JSON.stringify(editedTargetManifest, null, 2));
+  const editedVerification = backup.verifyBackup({
+    file: restoredPath,
+    manifestFile: restored.manifestFile,
+  });
+  assert.strictEqual(editedVerification.ok, false);
+  assert.strictEqual(editedVerification.auditIntegrity.ok, true);
+  assert.strictEqual(editedVerification.manifestReason, 'manifest-authentication');
+  fs.writeFileSync(restored.manifestFile, targetManifestBytes);
 
   const productionLoad = spawnSync(process.execPath, ['-e', `
     const db = require('./server/db');
@@ -242,6 +324,71 @@ test('SQLite manifest counts come from the copied snapshot despite writes around
   assert.strictEqual(checkpoint.head, snapshotHead);
 });
 
+test('restoring a SQLite runtime refuses invalid or authenticated pending audit high-water state', async () => {
+  const source = await backup.createBackup({
+    outDir: path.join(tempRoot, 'runtime-pending-source'),
+    dbModule: db,
+  });
+  const runtimePath = path.join(tempRoot, 'runtime-pending-restored', 'redactwall.db');
+  const runtime = backup.restoreBackup({ file: source.file, to: runtimePath });
+  const pendingPath = runtime.auditPendingFile;
+  assert.ok(pendingPath);
+
+  fs.writeFileSync(pendingPath, '{"invalid":true}');
+  let verification = backup.verifyBackup({ file: runtimePath, manifestFile: runtime.manifestFile });
+  assert.strictEqual(verification.ok, false);
+  assert.strictEqual(verification.auditIntegrity.reason, 'audit-pending-present');
+  const invalidTarget = path.join(tempRoot, 'runtime-pending-invalid-target', 'redactwall.db');
+  assert.throws(() => backup.restoreBackup({ file: runtimePath, to: invalidTarget }), /does not verify/);
+  assert.strictEqual(fs.existsSync(invalidTarget), false);
+  fs.rmSync(pendingPath);
+
+  const key = auditAnchor.configuredKey(process.env);
+  const checkpoint = JSON.parse(fs.readFileSync(runtime.auditCheckpointFile, 'utf8'));
+  const ahead = auditIntegrity.createCheckpoint(
+    checkpoint.count + 1,
+    auditIntegrity.sha('synthetic future audit head'),
+    key,
+    checkpoint.seq + 1,
+  );
+  const signedPending = auditAnchor.signedPending(ahead, 'a_synthetic_future', key);
+  assert.strictEqual(auditAnchor.validPending(signedPending, key), true);
+  fs.writeFileSync(pendingPath, JSON.stringify(signedPending));
+  verification = backup.verifyBackup({ file: runtimePath, manifestFile: runtime.manifestFile });
+  assert.strictEqual(verification.ok, false);
+  assert.strictEqual(verification.auditIntegrity.reason, 'audit-pending-present');
+  const validTarget = path.join(tempRoot, 'runtime-pending-valid-target', 'redactwall.db');
+  assert.throws(() => backup.restoreBackup({ file: runtimePath, to: validTarget }), /does not verify/);
+  assert.strictEqual(fs.existsSync(validTarget), false);
+
+  fs.rmSync(pendingPath);
+  assert.strictEqual(backup.verifyBackup({ file: runtimePath, manifestFile: runtime.manifestFile }).ok, true);
+
+  const originalFsync = fs.fsyncSync;
+  const runtimeBytes = fs.statSync(runtimePath).size;
+  let injectedDuringCopy = false;
+  fs.fsyncSync = (fd) => {
+    const result = originalFsync(fd);
+    if (!injectedDuringCopy && fs.fstatSync(fd).isFile() && fs.fstatSync(fd).size === runtimeBytes) {
+      injectedDuringCopy = true;
+      fs.writeFileSync(pendingPath, '{"appeared":"during-copy"}');
+    }
+    return result;
+  };
+  const racedTarget = path.join(tempRoot, 'runtime-pending-raced-target', 'redactwall.db');
+  try {
+    assert.throws(
+      () => backup.restoreBackup({ file: runtimePath, to: racedTarget }),
+      /pending audit high-water state|changed during restore/,
+    );
+  } finally {
+    fs.fsyncSync = originalFsync;
+    fs.rmSync(pendingPath, { force: true });
+  }
+  assert.strictEqual(injectedDuringCopy, true);
+  assert.strictEqual(fs.existsSync(racedTarget), false);
+});
+
 test('backup and restore publish the exact authenticated artifact set with private POSIX modes', async () => {
   const outDir = path.join(tempRoot, 'private-artifacts');
   const result = await backup.createBackup({ outDir, dbModule: db });
@@ -273,6 +420,7 @@ test('backup and restore publish the exact authenticated artifact set with priva
   assert.deepStrictEqual(fs.readdirSync(restoreDir).sort(), [
     'redactwall.db',
     'redactwall.db.audit-integrity',
+    'redactwall.db.manifest.json',
   ]);
   assert.deepStrictEqual(fs.readdirSync(`${target}.audit-integrity`).sort(), [
     '.audit-integrity-checkpoint.json',
@@ -283,7 +431,23 @@ test('backup and restore publish the exact authenticated artifact set with priva
     assert.strictEqual(permissionBits(`${target}.audit-integrity`), 0o700);
     assert.strictEqual(permissionBits(restored.auditStateFile), 0o600);
     assert.strictEqual(permissionBits(restored.auditCheckpointFile), 0o600);
+    assert.strictEqual(permissionBits(restored.manifestFile), 0o600);
   }
+});
+
+test('stable restore copy never deletes a target that it did not create', () => {
+  const source = path.join(tempRoot, 'stable-copy-source');
+  const target = path.join(tempRoot, 'stable-copy-existing-target');
+  const sourceBytes = Buffer.from('authenticated source bytes');
+  const existingBytes = Buffer.from('preexisting target bytes');
+  fs.writeFileSync(source, sourceBytes);
+  fs.writeFileSync(target, existingBytes);
+
+  assert.throws(() => backup._internal.copyPrivateRestoreArtifact(source, target, {
+    expectedBytes: sourceBytes.length,
+    security: { platform: process.platform },
+  }), /EEXIST|exist/i);
+  assert.deepStrictEqual(fs.readFileSync(target), existingBytes);
 });
 
 test('private staging directories are mode 0700 on POSIX', { skip: process.platform === 'win32' }, () => {
@@ -291,8 +455,74 @@ test('private staging directories are mode 0700 on POSIX', { skip: process.platf
   try {
     assert.strictEqual(permissionBits(staging), 0o700);
   } finally {
-    fs.rmSync(staging, { recursive: true, force: true });
+    backup._internal.cleanupPrivateStagingDirectory(staging);
   }
+});
+
+test('private staging cleanup preserves a replacement swapped onto the owned pathname', () => {
+  const staging = backup._internal.createPrivateStagingDir(tempRoot);
+  const movedOriginal = `${staging}-original`;
+  const sentinel = path.join(staging, 'replacement.txt');
+
+  fs.renameSync(staging, movedOriginal);
+  fs.mkdirSync(staging);
+  fs.writeFileSync(sentinel, 'replacement that cleanup must retain');
+
+  assert.throws(
+    () => backup._internal.cleanupPrivateStagingDirectory(staging),
+    /changed replacement retained/i,
+  );
+  assert.strictEqual(fs.readFileSync(sentinel, 'utf8'), 'replacement that cleanup must retain');
+  assert.strictEqual(fs.existsSync(movedOriginal), true, 'the originally owned directory was never deleted by pathname');
+
+  fs.rmSync(staging, { recursive: true, force: true });
+  fs.rmSync(movedOriginal, { recursive: true, force: true });
+});
+
+test('private staging cleanup reports a tracked directory moved away from its pathname', () => {
+  const staging = backup._internal.createPrivateStagingDir(tempRoot);
+  const moved = `${staging}-moved`;
+  const secret = path.join(staging, 'sensitive-backup.txt');
+  fs.writeFileSync(secret, 'sensitive staging bytes');
+  fs.renameSync(staging, moved);
+
+  assert.throws(
+    () => backup._internal.cleanupPrivateStagingDirectory(staging),
+    /tracked staging disappeared/i,
+  );
+  assert.strictEqual(fs.readFileSync(path.join(moved, 'sensitive-backup.txt'), 'utf8'), 'sensitive staging bytes');
+
+  fs.renameSync(moved, staging);
+  backup._internal.cleanupPrivateStagingDirectory(staging);
+});
+
+test('cross-directory artifact publication fsyncs the target and both rename parents', () => {
+  const sourceParent = path.join(tempRoot, 'fsync-source-parent');
+  const targetParent = path.join(tempRoot, 'fsync-target-parent');
+  const target = path.join(targetParent, 'published-directory');
+  fs.mkdirSync(sourceParent, { recursive: true });
+  fs.mkdirSync(target, { recursive: true });
+
+  const fsyncs = [];
+  const originalFsyncDirectory = privatePaths.fsyncDirectory;
+  privatePaths.fsyncDirectory = (directory) => {
+    fsyncs.push(path.resolve(directory));
+  };
+  try {
+    backup._internal.fsyncPublishedArtifact({
+      staged: path.join(sourceParent, 'staged-directory'),
+      target,
+      directory: true,
+    });
+  } finally {
+    privatePaths.fsyncDirectory = originalFsyncDirectory;
+  }
+
+  assert.deepStrictEqual(fsyncs, [
+    path.resolve(target),
+    path.resolve(targetParent),
+    path.resolve(sourceParent),
+  ]);
 });
 
 test('Windows ACL hardening fails closed when icacls cannot protect a destination', () => {
@@ -411,6 +641,43 @@ test('forced backup replacement restores the complete prior artifact set when pu
   );
 });
 
+test('failed forced publication preserves a replacement swapped onto an earlier published path', async () => {
+  const outDir = path.join(tempRoot, 'force-backup-identity-swap');
+  const file = path.join(outDir, 'redactwall.db');
+  const manifestFile = `${file}.manifest.json`;
+  const initial = await backup.createBackup({ file, manifestFile, dbModule: db });
+  const prior = new Map([
+    [file, fs.readFileSync(file)],
+    [initial.auditStateFile, fs.readFileSync(initial.auditStateFile)],
+    [initial.auditCheckpointFile, fs.readFileSync(initial.auditCheckpointFile)],
+    [manifestFile, fs.readFileSync(manifestFile)],
+  ]);
+  const replacement = Buffer.from('replacement that must survive cleanup');
+  const originalLinkSync = fs.linkSync;
+  fs.linkSync = function swapPublishedTargetBeforeLaterFailure(source, target) {
+    if (path.resolve(target) === path.resolve(initial.auditStateFile)) {
+      fs.rmSync(file, { force: true });
+      fs.writeFileSync(file, replacement);
+      throw new Error('synthetic later publication failure');
+    }
+    return originalLinkSync.call(fs, source, target);
+  };
+  try {
+    await assert.rejects(
+      () => backup.createBackup({ file, manifestFile, dbModule: db, force: true }),
+      /changed artifacts were preserved/,
+    );
+  } finally {
+    fs.linkSync = originalLinkSync;
+  }
+
+  for (const [artifact, bytes] of prior) assert.deepStrictEqual(fs.readFileSync(artifact), bytes);
+  const retained = fs.readdirSync(outDir).filter((name) => name.startsWith('.redactwall.db.quarantine-'));
+  assert.strictEqual(retained.length, 1);
+  assert.deepStrictEqual(fs.readFileSync(path.join(outDir, retained[0])), replacement);
+  fs.rmSync(path.join(outDir, retained[0]), { force: true });
+});
+
 test('forced backup publication rejects directory-fsync EIO and restores the exact artifact set', async () => {
   const outDir = path.join(tempRoot, 'force-backup-durability');
   const file = path.join(outDir, 'redactwall.db');
@@ -440,10 +707,14 @@ test('forced backup publication rejects directory-fsync EIO and restores the exa
     fs.fsyncSync = originalFsync;
   }
   for (const [artifact, bytes] of before) assert.deepStrictEqual(fs.readFileSync(artifact), bytes);
+  const recovery = fs.readdirSync(outDir).filter((name) => name.startsWith('.redactwall-backup-'));
+  assert.strictEqual(recovery.length, 1, 'failed rollback durability proof retains its private recovery directory');
+  assert.deepStrictEqual(fs.readdirSync(path.join(outDir, recovery[0])), []);
   assert.deepStrictEqual(
-    fs.readdirSync(outDir).sort(),
+    fs.readdirSync(outDir).filter((name) => !recovery.includes(name)).sort(),
     [...before.keys()].map((artifact) => path.basename(artifact)).sort(),
   );
+  fs.rmSync(path.join(outDir, recovery[0]), { recursive: true, force: true });
 });
 
 test('forced replacement refuses linked artifacts before moving or hardening them', async () => {
@@ -468,7 +739,7 @@ test('forced replacement refuses linked artifacts before moving or hardening the
   assert.strictEqual(backup.verifyBackup({ file: result.file }).ok, true);
 });
 
-test('rollback cleanup failure retains the valid newly published backup set', async () => {
+test('rollback cleanup failure returns committed success with recovery metadata', async () => {
   const outDir = path.join(tempRoot, 'force-backup-cleanup-failure');
   const file = path.join(outDir, 'redactwall.db');
   const manifestFile = `${file}.manifest.json`;
@@ -479,6 +750,8 @@ test('rollback cleanup failure retains the valid newly published backup set', as
 
   const originalRmSync = fs.rmSync;
   let recoveryDir = '';
+  const hookWarnings = [];
+  privatePaths._resetCommittedCleanupHealthForTest();
   fs.rmSync = function failRollbackCleanup(target, options) {
     const candidate = String(target);
     if (!recoveryDir && path.dirname(candidate) === outDir && fs.existsSync(candidate)
@@ -489,14 +762,37 @@ test('rollback cleanup failure retains the valid newly published backup set', as
     }
     return originalRmSync.call(fs, target, options);
   };
+  let result;
   try {
-    await assert.rejects(
-      () => backup.createBackup({ file, manifestFile, dbModule: db, force: true }),
-      /publish succeeded.*recovery director/i,
-    );
+    result = await backup.createBackup({
+      file,
+      manifestFile,
+      dbModule: db,
+      force: true,
+      security: { onCommittedCleanupWarning: (warning) => hookWarnings.push(warning) },
+    });
   } finally {
     fs.rmSync = originalRmSync;
   }
+
+  assert.strictEqual(result.ok, true);
+  assert.strictEqual(result.cleanupDegraded, true);
+  assert.strictEqual(result.cleanupWarnings.length, 1);
+  assert.strictEqual(result.cleanupWarnings[0].component, 'backup-artifact-publication');
+  assert.strictEqual(result.cleanupWarnings[0].phase, 'rollback-artifact-cleanup');
+  assert.strictEqual(result.cleanupWarnings[0].committed, true);
+  assert.strictEqual(result.cleanupWarnings[0].recovery.requiresExactIdentityVerification, true);
+  assert.ok(result.cleanupWarnings[0].recovery.paths.includes(path.resolve(recoveryDir)));
+  assert.strictEqual(hookWarnings.length, 1);
+  assert.strictEqual(privatePaths.committedCleanupHealth().ok, false);
+
+  let exitCode;
+  await backup.main(['create'], {
+    createBackup: async () => result,
+    console: captureConsole(),
+    setExitCode: (code) => { exitCode = code; },
+  });
+  assert.strictEqual(exitCode, undefined, 'committed cleanup degradation does not request a retrying CLI exit');
 
   const verified = backup.verifyBackup({ file, manifestFile });
   assert.strictEqual(verified.ok, true, 'the newly published backup remains verifiable');
@@ -509,6 +805,62 @@ test('rollback cleanup failure retains the valid newly published backup set', as
   }
   assert.ok(recoveryDir && fs.existsSync(recoveryDir), 'old artifacts remain in the reported private recovery directory');
   originalRmSync(recoveryDir, { recursive: true, force: true });
+  privatePaths._resetCommittedCleanupHealthForTest();
+});
+
+test('successful SQLite backup reports committed staging cleanup degradation', async () => {
+  const outDir = path.join(tempRoot, 'sqlite-committed-staging-cleanup');
+  const hookWarnings = [];
+  privatePaths._resetCommittedCleanupHealthForTest();
+
+  const { result, retainedPath } = await withOneFailedPrivateStagingRemoval(outDir, () => backup.createBackup({
+    outDir,
+    dbModule: db,
+    security: { onCommittedCleanupWarning: (warning) => hookWarnings.push(warning) },
+  }));
+
+  assert.strictEqual(result.ok, true);
+  assert.strictEqual(result.cleanupDegraded, true);
+  assert.strictEqual(result.cleanupWarnings.length, 1);
+  assert.strictEqual(result.cleanupWarnings[0].component, 'sqlite-backup');
+  assert.strictEqual(result.cleanupWarnings[0].phase, 'private-staging-cleanup');
+  assert.deepStrictEqual(result.cleanupWarnings[0].recovery.paths, [path.resolve(retainedPath)]);
+  assert.strictEqual(hookWarnings.length, 1);
+  assert.strictEqual(privatePaths.committedCleanupHealth().ok, false);
+  assert.strictEqual(backup.verifyBackup({ file: result.file, manifestFile: result.manifestFile }).ok, true);
+
+  fs.rmSync(retainedPath, { recursive: true, force: true });
+  privatePaths._resetCommittedCleanupHealthForTest();
+});
+
+test('successful SQLite restore reports committed staging cleanup degradation', async () => {
+  const source = await backup.createBackup({
+    outDir: path.join(tempRoot, 'sqlite-restore-cleanup-source'),
+    dbModule: db,
+  });
+  const target = path.join(tempRoot, 'sqlite-restore-cleanup-target', 'redactwall.db');
+  const hookWarnings = [];
+  privatePaths._resetCommittedCleanupHealthForTest();
+
+  const { result, retainedPath } = await withOneFailedPrivateStagingRemoval(path.dirname(target), () => backup.restoreBackup({
+    file: source.file,
+    manifestFile: source.manifestFile,
+    to: target,
+    security: { onCommittedCleanupWarning: (warning) => hookWarnings.push(warning) },
+  }));
+
+  assert.strictEqual(result.ok, true);
+  assert.strictEqual(result.cleanupDegraded, true);
+  assert.strictEqual(result.cleanupWarnings.length, 1);
+  assert.strictEqual(result.cleanupWarnings[0].component, 'sqlite-restore');
+  assert.strictEqual(result.cleanupWarnings[0].phase, 'private-staging-cleanup');
+  assert.deepStrictEqual(result.cleanupWarnings[0].recovery.paths, [path.resolve(retainedPath)]);
+  assert.strictEqual(hookWarnings.length, 1);
+  assert.strictEqual(privatePaths.committedCleanupHealth().ok, false);
+  assert.strictEqual(backup.verifyBackup({ file: target, manifestFile: result.manifestFile }).ok, true);
+
+  fs.rmSync(retainedPath, { recursive: true, force: true });
+  privatePaths._resetCommittedCleanupHealthForTest();
 });
 
 test('forced restore restores the complete prior SQLite artifact set when sidecar validation fails', async () => {
@@ -550,12 +902,66 @@ test('forced restore restores the complete prior SQLite artifact set when sideca
   }), /unexpected sidecar/i);
 
   for (const [artifact, bytes] of before) assert.deepStrictEqual(fs.readFileSync(artifact), bytes);
-  assert.deepStrictEqual(fs.readdirSync(outDir).sort(), [
+  const retained = fs.readdirSync(outDir).filter((name) => name.includes('.redactwall.db-wal.retained-'));
+  assert.strictEqual(retained.length, 1, 'the racing sidecar is preserved instead of deleted by pathname');
+  assert.strictEqual(fs.readFileSync(path.join(outDir, retained[0]), 'utf8'), 'synthetic racing sidecar');
+  assert.deepStrictEqual(fs.readdirSync(outDir).filter((name) => !retained.includes(name)).sort(), [
     'redactwall.db',
     'redactwall.db.audit-integrity',
     'redactwall.db-journal',
     'redactwall.db-shm',
     'redactwall.db-wal',
+  ].sort());
+  fs.rmSync(path.join(outDir, retained[0]), { force: true });
+});
+
+test('forced SQLite restore keeps rollback state until pending-free target verification passes', async () => {
+  const created = await backup.createBackup({ outDir: path.join(tempRoot, 'post-verify-restore-source'), dbModule: db });
+  const outDir = path.join(tempRoot, 'post-verify-restore-rollback');
+  const target = path.join(outDir, 'redactwall.db');
+  const manifest = `${target}.manifest.json`;
+  const auditDirectory = `${target}.audit-integrity`;
+  const state = path.join(auditDirectory, '.audit-integrity-state.json');
+  const checkpoint = path.join(auditDirectory, '.audit-integrity-checkpoint.json');
+  const pending = path.join(auditDirectory, '.audit-integrity-pending.json');
+  const before = new Map([
+    [target, Buffer.from('prior target database')],
+    [manifest, Buffer.from('prior target manifest')],
+    [state, Buffer.from('prior target state')],
+    [checkpoint, Buffer.from('prior target checkpoint')],
+  ]);
+  preparePrivateRestoreDirectory(outDir, () => {
+    fs.mkdirSync(auditDirectory);
+    for (const [artifact, bytes] of before) fs.writeFileSync(artifact, bytes);
+  }, FAKE_WINDOWS_ACL);
+
+  let injected = false;
+  assert.throws(() => backup.restoreBackup({
+    file: created.file,
+    manifestFile: created.manifestFile,
+    to: target,
+    force: true,
+    security: {
+      platform: 'win32',
+      principal: 'TEST\\backup-user',
+      ...FAKE_WINDOWS_ACL,
+      spawn(_command, args) {
+        if (!injected && path.resolve(args[0]) === path.resolve(manifest) && args.includes('/grant:r')) {
+          fs.writeFileSync(pending, 'synthetic pending high-water');
+          injected = true;
+        }
+        return { status: 0 };
+      },
+    },
+  }), /pending audit high-water/i);
+
+  assert.strictEqual(injected, true);
+  assert.strictEqual(fs.existsSync(pending), false);
+  for (const [artifact, bytes] of before) assert.deepStrictEqual(fs.readFileSync(artifact), bytes);
+  assert.deepStrictEqual(fs.readdirSync(outDir).sort(), [
+    'redactwall.db',
+    'redactwall.db.audit-integrity',
+    'redactwall.db.manifest.json',
   ].sort());
 });
 
@@ -824,6 +1230,7 @@ test('Postgres backup output and manifest use the same private exact artifact co
       sourceIntegrity: { ok: true, count: checkpoint.count },
       exactCheckpoint: checkpoint,
       stats: { total: 0, pending: 0, approved: 0, denied: 0, allowed: 0, todayBlocked: 0, topEntities: [] },
+      databaseDefinition: TEST_PG_DATABASE_DEFINITION,
     }),
     runPgTool(tool, args) {
       assert.strictEqual(tool, 'pg_dump');
@@ -869,6 +1276,7 @@ test('Postgres backup output and manifest use the same private exact artifact co
         file: result.file,
         manifestFile: result.manifestFile,
         to: 'postgresql://restore@db.example.test/redactwall_restore?sslmode=require',
+        auditDir: path.join(tempRoot, 'pg-unauthenticated-restore', 'audit'),
         force: true,
       }), /does not verify/i, 'force must not bypass a present unauthenticated Postgres manifest');
     }
@@ -893,6 +1301,7 @@ test('Postgres dump and manifest evidence share one exported snapshot', async ()
       todayBlocked: 2,
       topEntities: [['US_SSN', 3]],
     },
+    databaseDefinition: TEST_PG_DATABASE_DEFINITION,
   };
   const result = await backup.createBackup({
     outDir: path.join(tempRoot, 'pg-snapshot-orchestration'),
@@ -940,6 +1349,11 @@ test('Postgres snapshot coordinator holds a repeatable-read read-only transactio
         return { rows: [{ snapshot_id: '00000003-0000001C-1' }] };
       }
       if (sql === 'SELECT seq, entry FROM audit ORDER BY seq ASC') return { rows: [] };
+      if (sql === 'SELECT id FROM queries ORDER BY id ASC') return { rows: [] };
+      if (sql === "SELECT current_setting('server_version_num') AS n") return { rows: [{ n: '170000' }] };
+      if (sql.includes('pg_encoding_to_char')) {
+        return { rows: [{ encoding: 'UTF8', provider: 'c', lc_collate: 'C', lc_ctype: 'C', locale: null, icu_rules: null }] };
+      }
       if (sql.startsWith('SELECT status,')) {
         return {
           rows: [{
@@ -968,16 +1382,17 @@ test('Postgres snapshot coordinator holds a repeatable-read read-only transactio
   );
 
   assert.strictEqual(result, 'dump-finished');
-  assert.deepStrictEqual(events, [
+  assert.deepStrictEqual(events.slice(0, 7), [
     'connect',
     'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY',
     'SELECT pg_export_snapshot() AS snapshot_id',
     'SELECT seq, entry FROM audit ORDER BY seq ASC',
+    'SELECT id FROM queries ORDER BY id ASC',
     'SELECT status, "createdAt" AS "createdAt", data FROM queries ORDER BY seq ASC',
-    'callback',
-    'COMMIT',
-    'end',
+    "SELECT current_setting('server_version_num') AS n",
   ]);
+  assert.match(events[7], /pg_encoding_to_char\(encoding\).*datlocale/s);
+  assert.deepStrictEqual(events.slice(8), ['callback', 'COMMIT', 'end']);
 });
 
 test('Postgres snapshot integrity verifies both the hash chain and bound query evidence', async () => {
@@ -1004,6 +1419,7 @@ test('Postgres snapshot integrity verifies both the hash chain and bound query e
   const clientFor = (storedQuery) => ({
     async query(sql, params) {
       if (sql.startsWith('SELECT seq, entry FROM audit')) return { rows: [{ seq: 1, entry: JSON.stringify(entry) }] };
+      if (sql === 'SELECT id FROM queries ORDER BY id ASC') return { rows: [{ id: query.id }] };
       assert.deepStrictEqual(params, [[query.id]]);
       return storedQuery === null
         ? { rows: [] }
@@ -1295,9 +1711,14 @@ test('argument parser preserves positional paths for npm-run portability', () =>
     { _: ['verify'], file: 'backups/redactwall.db', manifest: 'manifest.json' },
   );
   assert.deepStrictEqual(
-    backup.parseArgs(['restore', 'backups/redactwall.db', 'data/restored.db', '--force']),
-    { _: ['restore', 'backups/redactwall.db', 'data/restored.db'], force: true },
+    backup.parseArgs(['restore', 'backups/redactwall.db', 'data/restored.db', '--audit-dir', 'data/restore-audit', '--force']),
+    { _: ['restore', 'backups/redactwall.db', 'data/restored.db'], 'audit-dir': 'data/restore-audit', force: true },
   );
+  assert.throws(
+    () => backup.parseArgs(['restore', 'backup.dump', 'target', '--audit-dir', '--force']),
+    /--audit-dir requires a value/,
+  );
+  assert.throws(() => backup.parseArgs(['verify', 'backup.db', '--unknown', 'value']), /unknown option/);
 });
 
 test('main dispatches create, verify, and restore commands with JSON output', async () => {
@@ -1321,13 +1742,13 @@ test('main dispatches create, verify, and restore commands with JSON output', as
 
   assert.deepStrictEqual(await backup.main(['create', 'out-dir', '--file', 'backup.db', '--manifest', 'manifest.json', '--force'], deps), { ok: true, command: 'create' });
   assert.deepStrictEqual(await backup.main(['verify', 'backup.db', '--manifest', 'manifest.json'], deps), { ok: true, command: 'verify' });
-  assert.deepStrictEqual(await backup.main(['restore', 'backup.db', 'restore.db', '--force'], deps), { ok: true, command: 'restore' });
+  assert.deepStrictEqual(await backup.main(['restore', 'backup.db', 'restore.db', '--audit-dir', 'runtime-audit', '--force'], deps), { ok: true, command: 'restore' });
   await assert.rejects(() => backup.main(['unknown'], deps), /unknown command/);
 
   assert.deepStrictEqual(calls, [
     ['create', { outDir: 'out-dir', file: 'backup.db', manifestFile: 'manifest.json', force: true }],
     ['verify', { file: 'backup.db', manifestFile: 'manifest.json' }],
-    ['restore', { file: 'backup.db', to: 'restore.db', manifestFile: undefined, force: true }],
+    ['restore', { file: 'backup.db', to: 'restore.db', manifestFile: undefined, auditDir: 'runtime-audit', force: true }],
   ]);
   assert.strictEqual(JSON.parse(io.lines[0]).command, 'create');
   assert.strictEqual(JSON.parse(io.lines[1]).command, 'verify');

@@ -430,6 +430,22 @@ test('gateway health endpoints report ready only when the control plane answers'
   assert.strictEqual(notReady.json.ready, false);
 });
 
+test('gateway readiness exposes committed token-store cleanup degradation', async (t) => {
+  const tp = tmpTokens(t);
+  const original = tokens.storageHealth;
+  tokens.storageHealth = () => ({ ok: false, reason: 'gateway-token-storage-cleanup-degraded' });
+  t.after(() => { tokens.storageHealth = original; });
+  const gateway = createGateway({ provider: 'mock', client: stubClient(), agentTokensPath: tp });
+  const response = await listenAndRequest(gateway.app, { method: 'GET', pathName: '/readyz' });
+  assert.strictEqual(response.status, 503);
+  assert.deepStrictEqual(response.json, {
+    ready: false,
+    controlPlane: false,
+    durableStorage: false,
+    error: 'gateway_token_storage_cleanup_degraded',
+  });
+});
+
 test('gateway blocks the response when the scan itself errors (fail closed)', async (t) => {
   const tp = tmpTokens(t);
   const { token } = tokens.mintToken({ user: 'a@x' }, tp);

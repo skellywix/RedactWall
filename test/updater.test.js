@@ -313,21 +313,48 @@ test('updater rejects unsafe config values before writing settings', () => {
   }
 });
 
-test('updater atomic config write preserves the old file and removes staging data on rename failure', () => {
+test('explicit updater data roots override process-level config paths', () => {
+  const explicitRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-updater-explicit-root-'));
+  const envRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-updater-env-root-'));
+  const envTarget = path.join(envRoot, 'update-settings.json');
+  const previousConfigPath = process.env.REDACTWALL_UPDATE_CONFIG_PATH;
+  process.env.REDACTWALL_UPDATE_CONFIG_PATH = envTarget;
+  try {
+    updater.saveConfig(testConfig(), { dataRoot: explicitRoot });
+    assert.strictEqual(fs.existsSync(path.join(explicitRoot, 'update-settings.json')), true);
+    assert.strictEqual(fs.existsSync(envTarget), false);
+  } finally {
+    if (previousConfigPath === undefined) delete process.env.REDACTWALL_UPDATE_CONFIG_PATH;
+    else process.env.REDACTWALL_UPDATE_CONFIG_PATH = previousConfigPath;
+    fs.rmSync(explicitRoot, { recursive: true, force: true });
+    fs.rmSync(envRoot, { recursive: true, force: true });
+  }
+});
+
+test('updater atomic config write preserves the old file and removes staging data on exclusive-link failure', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-updater-atomic-config-'));
   const file = path.join(root, 'update-settings.json');
   const baseline = Buffer.from('{"baseline":true}\n');
   fs.writeFileSync(file, baseline);
+  let rejectedPublication = false;
   const failingFs = new Proxy(fs, {
     get(target, property) {
-      if (property === 'renameSync') return () => { throw new Error('synthetic rename failure'); };
+      if (property === 'linkSync') {
+        return (source, destination) => {
+          if (!rejectedPublication && path.resolve(destination) === file) {
+            rejectedPublication = true;
+            throw new Error('synthetic link failure');
+          }
+          return fs.linkSync(source, destination);
+        };
+      }
       return Reflect.get(target, property);
     },
   });
   try {
     assert.throws(
       () => updater.saveConfig(testConfig(), { dataRoot: root, fs: failingFs }),
-      /synthetic rename failure/,
+      /synthetic link failure/,
     );
     assert.deepStrictEqual(fs.readFileSync(file), baseline);
     assert.deepStrictEqual(
@@ -356,12 +383,30 @@ test('updater config write rejects directory-fsync EIO and restores exact prior 
     },
   };
   try {
+    let failure;
     assert.throws(
       () => updater.saveConfig(testConfig(), { dataRoot: root, fs: failingFs }),
-      /synthetic directory fsync EIO/,
+      (error) => {
+        failure = error;
+        for (let current = error; current; current = current.cause) {
+          if (current.message === 'synthetic directory fsync EIO') return true;
+        }
+        return false;
+      },
     );
     assert.deepStrictEqual(fs.readFileSync(file), baseline);
-    assert.deepStrictEqual(fs.readdirSync(root), ['update-settings.json']);
+    assert.ok(failure.retainedPath && fs.existsSync(failure.retainedPath));
+    assert.deepStrictEqual(fs.readFileSync(failure.retainedPath), baseline);
+    assert.ok(failure.additionalRetainedPath && fs.existsSync(failure.additionalRetainedPath));
+    assert.deepStrictEqual(fs.readFileSync(failure.additionalRetainedPath), baseline);
+    assert.deepStrictEqual(
+      fs.readdirSync(root).sort(),
+      [
+        'update-settings.json',
+        path.basename(failure.retainedPath),
+        path.basename(failure.additionalRetainedPath),
+      ].sort(),
+    );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -383,6 +428,82 @@ test('first-time audited config save removes the new file when audit persistence
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('updater audit failure restores the exact prior configuration bytes', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-updater-audit-restore-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const file = path.join(root, 'update-settings.json');
+  const baseline = Buffer.from(`${JSON.stringify({
+    ...testConfig(),
+    installMode: 'npm-ci-omit-dev',
+  }, null, 4).replace(/\n/g, '\r\n')}\r\n`);
+  fs.writeFileSync(file, baseline, { mode: 0o600 });
+
+  await assert.rejects(
+    updater.saveConfigWithAudit(testConfig(), () => {
+      throw new Error('synthetic updater audit failure');
+    }, { dataRoot: root }),
+    /could not be audited/,
+  );
+
+  assert.deepStrictEqual(fs.readFileSync(file), baseline);
+  assert.deepStrictEqual(fs.readdirSync(root), ['update-settings.json']);
+});
+
+test('updater rollback preserves a same-inode byte replacement after audit failure', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-updater-audit-same-inode-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const file = path.join(root, 'update-settings.json');
+  fs.writeFileSync(file, JSON.stringify({ ...testConfig(), installMode: 'npm-ci-omit-dev' }));
+  let replacement;
+  let candidateIdentity;
+  let failure;
+
+  await assert.rejects(updater.saveConfigWithAudit(testConfig(), () => {
+    const candidate = fs.readFileSync(file);
+    replacement = Buffer.from(candidate.toString('utf8').replace('"branch": "main"', '"branch": "evil"'));
+    assert.strictEqual(replacement.length, candidate.length);
+    const times = fs.statSync(file);
+    candidateIdentity = fs.lstatSync(file, { bigint: true });
+    fs.writeFileSync(file, replacement);
+    fs.utimesSync(file, times.atime, times.mtime);
+    const changedIdentity = fs.lstatSync(file, { bigint: true });
+    assert.strictEqual(changedIdentity.dev, candidateIdentity.dev);
+    assert.strictEqual(changedIdentity.ino, candidateIdentity.ino);
+    throw new Error('synthetic updater audit failure');
+  }, { dataRoot: root }), (error) => {
+    failure = error;
+    return error && error.code === 'UPDATE_CONFIG_ROLLBACK_FAILED';
+  });
+
+  assert.strictEqual(failure.replacementPath, file);
+  assert.deepStrictEqual(fs.readFileSync(file), replacement);
+  const preservedIdentity = fs.lstatSync(file, { bigint: true });
+  assert.strictEqual(preservedIdentity.dev, candidateIdentity.dev);
+  assert.strictEqual(preservedIdentity.ino, candidateIdentity.ino);
+});
+
+test('missing-before updater rollback preserves a pathname replacement after audit failure', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-updater-audit-path-replacement-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const file = path.join(root, 'update-settings.json');
+  const displacedCandidate = path.join(root, 'published-updater-candidate.json');
+  const replacement = Buffer.from('non-cooperating updater replacement\n');
+  let failure;
+
+  await assert.rejects(updater.saveConfigWithAudit(testConfig(), () => {
+    fs.renameSync(file, displacedCandidate);
+    fs.writeFileSync(file, replacement, { flag: 'wx', mode: 0o600 });
+    throw new Error('synthetic updater audit failure');
+  }, { dataRoot: root }), (error) => {
+    failure = error;
+    return error && error.code === 'UPDATE_CONFIG_ROLLBACK_FAILED';
+  });
+
+  assert.strictEqual(failure.replacementPath, file);
+  assert.deepStrictEqual(fs.readFileSync(file), replacement);
+  assert.strictEqual(JSON.parse(fs.readFileSync(displacedCandidate, 'utf8')).branch, 'main');
 });
 
 test('two updater processes serialize failed rollback before a successful writer', async (t) => {

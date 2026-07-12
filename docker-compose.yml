@@ -34,6 +34,13 @@ services:
       REDACTWALL_DATA_KEY_PREVIOUS: ${REDACTWALL_DATA_KEY_PREVIOUS:-}
       REDACTWALL_DB_DRIVER: ${REDACTWALL_DB_DRIVER:-}
       REDACTWALL_DATABASE_URL: ${REDACTWALL_DATABASE_URL:-}
+      REDACTWALL_PG_MAINTENANCE_DATABASE: ${REDACTWALL_PG_MAINTENANCE_DATABASE:-}
+      # Keep this unset for SQLite so existing installs retain the derived
+      # /data/redactwall.db.audit-integrity path. Postgres must set one explicit
+      # absolute path shared by every replica.
+      REDACTWALL_AUDIT_DIR: ${REDACTWALL_AUDIT_DIR:-}
+      REDACTWALL_AUDIT_KEY: ${REDACTWALL_AUDIT_KEY:-}
+      REDACTWALL_LICENSE_PATH: ${REDACTWALL_LICENSE_PATH:-/data/redactwall.lic}
       OIDC_ISSUER: ${OIDC_ISSUER:-}
       OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
       OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}

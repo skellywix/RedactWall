@@ -94,10 +94,30 @@ function safeEventFileName(id) {
   return safe || `handoff-${Date.now()}`;
 }
 
+function verifyPublishedEvent(file, body) {
+  privatePaths.assertPrivatePath(file, {
+    fs,
+    directory: false,
+    label: 'native handoff event',
+    ownerLabel: 'native handoff event',
+  });
+  const expected = Buffer.from(body, 'utf8');
+  const published = privatePaths.readBoundedRegularFile(file, {
+    fs,
+    maxBytes: Math.max(expected.length, 1),
+    label: 'native handoff event',
+  });
+  if (!published.equals(expected)) {
+    throw new Error('native handoff event changed during publication verification');
+  }
+}
+
 function writeAtomicJson(file, body) {
   const dir = path.dirname(file);
   const tmp = path.join(dir, `${path.basename(file)}.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`);
   let fd;
+  let stagedIdentity;
+  let sourceConsumed = false;
   try {
     fd = fs.openSync(tmp, 'wx', 0o600);
     privatePaths.securePrivatePath(tmp, {
@@ -111,10 +131,23 @@ function writeAtomicJson(file, body) {
     fs.fsyncSync(fd);
     fs.closeSync(fd);
     fd = undefined;
-    privatePaths.publishFileExclusiveDurably(tmp, file, { fs });
+    stagedIdentity = fs.lstatSync(tmp, { bigint: true });
+    privatePaths.publishFileExclusiveDurably(tmp, file, {
+      fs,
+      consumeSource: true,
+      verifyPublished(publishedFile) {
+        verifyPublishedEvent(publishedFile, body);
+      },
+    });
+    sourceConsumed = true;
   } finally {
-    if (fd !== undefined) try { fs.closeSync(fd); } catch {}
-    try { fs.unlinkSync(tmp); } catch {}
+    if (fd !== undefined) {
+      if (!stagedIdentity) try { stagedIdentity = fs.fstatSync(fd, { bigint: true }); } catch {}
+      try { fs.closeSync(fd); } catch {}
+    }
+    if (!sourceConsumed && stagedIdentity) {
+      try { privatePaths.removeExactPublicationFile(tmp, stagedIdentity, { fs }); } catch {}
+    }
   }
 }
 

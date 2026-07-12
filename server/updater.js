@@ -17,12 +17,15 @@ const { execFile } = require('child_process');
 
 const backupStore = require('../scripts/backup-store');
 const fileMutationLock = require('./file-mutation-lock');
-const { fsyncDirectory, publishFileDurably, securePrivatePath } = require('./private-path');
+const privatePaths = require('./private-path');
+const { securePrivatePath } = privatePaths;
 
 const ROOT = path.resolve(__dirname, '..');
 const COMMAND_TIMEOUT_MS = 2 * 60 * 1000;
 const UPDATE_TIMEOUT_MS = 8 * 60 * 1000;
 const MAX_BUFFER = 512 * 1024;
+const MAX_UPDATER_FILE_BYTES = 4 * 1024 * 1024;
+const MAX_UPDATE_CONFIG_BYTES = 64 * 1024;
 const DEFAULT_CONFIG = {
   remoteName: 'origin',
   branch: 'main',
@@ -54,10 +57,14 @@ function dataRoot(opts = {}) {
 }
 
 function configPath(opts = {}) {
+  if (opts.configPath) return path.resolve(opts.configPath);
+  if (opts.dataRoot) return path.join(dataRoot(opts), 'update-settings.json');
   return process.env.REDACTWALL_UPDATE_CONFIG_PATH || path.join(dataRoot(opts), 'update-settings.json');
 }
 
 function statePath(opts = {}) {
+  if (opts.statePath) return path.resolve(opts.statePath);
+  if (opts.dataRoot) return path.join(dataRoot(opts), 'update-state.json');
   return process.env.REDACTWALL_UPDATE_STATE_PATH || path.join(dataRoot(opts), 'update-state.json');
 }
 
@@ -82,9 +89,17 @@ function writeFileAtomic(file, contents, opts = {}) {
   const fsImpl = opts.fs || fs;
   ensureParent(file, fsImpl);
   const mode = opts.mode == null ? 0o600 : opts.mode;
+  const contentsBuffer = Buffer.isBuffer(contents)
+    ? Buffer.from(contents)
+    : Buffer.from(String(contents), 'utf8');
+  if (contentsBuffer.length > MAX_UPDATER_FILE_BYTES) {
+    throw updateFileFailure('updater file exceeds its size limit');
+  }
   const suffix = (opts.randomBytes || crypto.randomBytes)(8).toString('hex');
   const tmp = `${file}.${process.pid}.${suffix}.tmp`;
   let fd;
+  let publicationStarted = false;
+  let publishedCandidate = null;
   try {
     fd = fsImpl.openSync(tmp, 'wx', mode);
     securePrivatePath(tmp, {
@@ -94,49 +109,353 @@ function writeFileAtomic(file, contents, opts = {}) {
       label: 'updater staging file',
       ownerLabel: 'updater staging file',
     });
-    fsImpl.writeFileSync(fd, contents);
+    fsImpl.writeFileSync(fd, contentsBuffer);
     if (typeof fsImpl.fsyncSync === 'function') fsImpl.fsyncSync(fd);
     fsImpl.closeSync(fd);
     fd = undefined;
-    publishFileDurably(tmp, file, { fs: fsImpl });
+    publicationStarted = true;
+    const callerVerify = opts.verifyPublished;
+    const publish = opts.exclusive
+      ? privatePaths.publishFileExclusiveDurably
+      : privatePaths.publishFileDurably;
+    publish(tmp, file, {
+      ...opts,
+      fs: fsImpl,
+      cleanupComponent: 'updater-file-publication',
+      ...(opts.exclusive ? { consumeSource: true } : {}),
+      verifyPublished(published) {
+        const candidate = updaterFileSnapshot(published, {
+          ...opts,
+          fs: fsImpl,
+          maxBytes: MAX_UPDATER_FILE_BYTES,
+        });
+        if (!candidate.exists || !candidate.contents.equals(contentsBuffer)) {
+          throw updateFileFailure('published updater file bytes could not be verified');
+        }
+        publishedCandidate = candidate;
+        if (typeof callerVerify === 'function') return callerVerify(published);
+        return undefined;
+      },
+    });
   } catch (error) {
     if (fd !== undefined) {
       try { fsImpl.closeSync(fd); } catch {}
     }
-    try { fsImpl.unlinkSync(tmp); } catch {}
+    if (!publicationStarted) try { fsImpl.unlinkSync(tmp); } catch {}
     throw error;
   }
+  if (!publishedCandidate) throw updateFileFailure('published updater file identity was not captured');
+  return publishedCandidate;
 }
 
 function writeJson(file, value, opts = {}) {
-  writeFileAtomic(file, JSON.stringify(value, null, 2), opts);
+  return writeFileAtomic(file, JSON.stringify(value, null, 2), opts);
+}
+
+function exactUpdaterLstat(fsImpl, target) {
+  return fsImpl.lstatSync(target, { bigint: true });
+}
+
+function exactUpdaterFstat(fsImpl, descriptor) {
+  return fsImpl.fstatSync(descriptor, { bigint: true });
+}
+
+function stableUpdaterFile(stat, expectedLinks = 1n) {
+  return !!stat && typeof stat.dev === 'bigint' && typeof stat.ino === 'bigint'
+    && typeof stat.size === 'bigint' && typeof stat.mode === 'bigint'
+    && stat.dev > 0n && stat.ino > 0n && stat.size >= 0n
+    && stat.isFile() && !stat.isSymbolicLink() && stat.nlink === expectedLinks;
+}
+
+function sameUpdaterStatTime(left, right, name) {
+  const ns = `${name}Ns`;
+  if (left[ns] !== undefined || right[ns] !== undefined) {
+    return left[ns] !== undefined && right[ns] !== undefined && left[ns] === right[ns];
+  }
+  const ms = `${name}Ms`;
+  return left[ms] !== undefined && right[ms] !== undefined && left[ms] === right[ms];
+}
+
+function sameUpdaterSnapshot(left, right) {
+  return stableUpdaterFile(left) && stableUpdaterFile(right)
+    && left.dev === right.dev && left.ino === right.ino && left.size === right.size
+    && sameUpdaterStatTime(left, right, 'mtime') && sameUpdaterStatTime(left, right, 'ctime');
+}
+
+function updateFileFailure(message, cause) {
+  const error = publicFailure(message, 500);
+  error.code = 'UPDATE_CONFIG_FILE_INVALID';
+  if (cause) error.cause = cause;
+  return error;
+}
+
+function inspectUpdaterFile(file, fsImpl, maxBytes) {
+  let before;
+  try { before = exactUpdaterLstat(fsImpl, file); }
+  catch (error) {
+    if (error && error.code === 'ENOENT') return null;
+    throw updateFileFailure('update configuration could not be inspected', error);
+  }
+  if (!stableUpdaterFile(before) || before.size > BigInt(maxBytes)) {
+    throw updateFileFailure('update configuration path is not a bounded private regular file');
+  }
+  return before;
+}
+
+function readUpdaterSnapshot(file, before, fsImpl, maxBytes) {
+  const output = Buffer.alloc(Math.min(maxBytes + 1, Number(before.size) + 1));
+  const noFollow = fs.constants.O_NOFOLLOW || 0;
+  let descriptor;
+  try {
+    descriptor = fsImpl.openSync(file, fs.constants.O_RDONLY | noFollow);
+    const opened = exactUpdaterFstat(fsImpl, descriptor);
+    if (!sameUpdaterSnapshot(before, opened)) {
+      throw updateFileFailure('update configuration changed while opening');
+    }
+    let offset = 0;
+    while (offset < output.length) {
+      const count = fsImpl.readSync(descriptor, output, offset, output.length - offset, null);
+      if (!count) break;
+      offset += count;
+    }
+    const after = exactUpdaterFstat(fsImpl, descriptor);
+    const pathAfter = exactUpdaterLstat(fsImpl, file);
+    if (offset > maxBytes || BigInt(offset) !== opened.size
+        || !sameUpdaterSnapshot(opened, after) || !sameUpdaterSnapshot(after, pathAfter)) {
+      throw updateFileFailure('update configuration changed while reading');
+    }
+    return output.subarray(0, offset);
+  } catch (error) {
+    if (error && error.code === 'UPDATE_CONFIG_FILE_INVALID') throw error;
+    throw updateFileFailure('update configuration could not be read', error);
+  } finally {
+    if (descriptor !== undefined) try { fsImpl.closeSync(descriptor); } catch {}
+  }
+}
+
+function updaterFileSnapshot(file, opts = {}) {
+  const fsImpl = opts.fs || fs;
+  const maxBytes = opts.maxBytes || MAX_UPDATE_CONFIG_BYTES;
+  const before = inspectUpdaterFile(file, fsImpl, maxBytes);
+  if (!before) return { exists: false };
+  const contents = readUpdaterSnapshot(file, before, fsImpl, maxBytes);
+  const after = inspectUpdaterFile(file, fsImpl, maxBytes);
+  if (!after || !sameUpdaterSnapshot(before, after)) {
+    throw updateFileFailure('update configuration changed after reading');
+  }
+  return {
+    exists: true,
+    contents,
+    mode: Number(before.mode & 0o777n),
+    identity: after,
+  };
 }
 
 function fileSnapshot(file, opts = {}) {
+  return updaterFileSnapshot(file, { ...opts, maxBytes: MAX_UPDATE_CONFIG_BYTES });
+}
+
+function updateRollbackFailure(message, cause, details = {}) {
+  const error = publicFailure('update configuration audit failed and the prior file could not be restored', 500);
+  error.message = message;
+  error.code = 'UPDATE_CONFIG_ROLLBACK_FAILED';
+  error.cause = cause;
+  Object.assign(error, details);
+  return error;
+}
+
+function sameUpdaterCandidate(left, right) {
+  return !!left?.exists && !!right?.exists
+    && stableUpdaterFile(left.identity) && stableUpdaterFile(right.identity)
+    && left.identity.dev === right.identity.dev && left.identity.ino === right.identity.ino
+    && Buffer.isBuffer(left.contents) && Buffer.isBuffer(right.contents)
+    && left.contents.equals(right.contents);
+}
+
+function linkedUpdaterStat(target, expectedLinks, fsImpl) {
+  const stat = exactUpdaterLstat(fsImpl, target);
+  if (!stableUpdaterFile(stat, BigInt(expectedLinks))) {
+    throw new Error('retained updater artifact has no stable identity');
+  }
+  return stat;
+}
+
+function sameLinkedUpdater(left, right) {
+  return left.dev === right.dev && left.ino === right.ino && left.size === right.size
+    && sameUpdaterStatTime(left, right, 'mtime');
+}
+
+function removeExactUpdaterArtifact(target, expected, opts = {}) {
   const fsImpl = opts.fs || fs;
-  let stat;
   try {
-    stat = fsImpl.lstatSync(file);
+    privatePaths.removeExactPublicationFile(target, expected, { ...opts, fs: fsImpl });
   } catch (error) {
-    if (error && error.code === 'ENOENT') return { exists: false };
+    if (!error.retainedPath && !error.additionalRetainedPath && !error.removedPath) {
+      try { exactUpdaterLstat(fsImpl, target); error.retainedPath = target; }
+      catch (inspectError) {
+        if (inspectError && inspectError.code === 'ENOENT') error.removedPath = target;
+      }
+    }
     throw error;
   }
-  if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1) {
-    throw publicFailure('update configuration path is not a private regular file');
-  }
-  return { exists: true, contents: fsImpl.readFileSync(file), mode: stat.mode & 0o777 };
 }
 
 function restoreFileSnapshot(file, snapshot, opts = {}) {
   const fsImpl = opts.fs || fs;
   if (snapshot.exists) {
-    writeFileAtomic(file, snapshot.contents, { ...opts, mode: snapshot.mode });
-    return;
+    return writeFileAtomic(file, snapshot.contents, {
+      ...opts,
+      mode: snapshot.mode,
+      exclusive: true,
+      randomBytes: crypto.randomBytes,
+    });
   }
-  try { fsImpl.unlinkSync(file); } catch (error) {
-    if (error && error.code !== 'ENOENT') throw error;
+  const current = inspectUpdaterFile(file, fsImpl, MAX_UPDATE_CONFIG_BYTES);
+  if (current) {
+    const error = updateFileFailure('a replacement update configuration appeared during rollback');
+    error.replacementPath = file;
+    throw error;
   }
-  fsyncDirectory(path.dirname(file), { fs: fsImpl });
+  return null;
+}
+
+function restoreChangedUpdaterFile(quarantine, file, opts, originalError) {
+  const fsImpl = opts.fs || fs;
+  const guard = `${quarantine}.restore.${process.pid}.${crypto.randomBytes(12).toString('hex')}`;
+  let quarantinePresent = true;
+  let guardPresent = false;
+  try {
+    const source = updaterFileSnapshot(quarantine, {
+      ...opts,
+      fs: fsImpl,
+      maxBytes: MAX_UPDATER_FILE_BYTES,
+    });
+    if (!source.exists) throw new Error('changed updater replacement is unavailable');
+    fsImpl.linkSync(quarantine, file);
+    fsImpl.linkSync(quarantine, guard);
+    guardPresent = true;
+    let restored = linkedUpdaterStat(file, 3, fsImpl);
+    let retained = linkedUpdaterStat(guard, 3, fsImpl);
+    const sourceLink = linkedUpdaterStat(quarantine, 3, fsImpl);
+    if (!sameLinkedUpdater(source.identity, restored) || !sameLinkedUpdater(source.identity, retained)
+        || !sameLinkedUpdater(source.identity, sourceLink)) {
+      throw new Error('changed updater replacement could not be identity-bound');
+    }
+    removeExactUpdaterArtifact(quarantine, sourceLink, opts);
+    quarantinePresent = false;
+    restored = linkedUpdaterStat(file, 2, fsImpl);
+    retained = linkedUpdaterStat(guard, 2, fsImpl);
+    if (!sameLinkedUpdater(source.identity, restored) || !sameLinkedUpdater(source.identity, retained)) {
+      throw new Error('changed updater replacement changed during restoration');
+    }
+    removeExactUpdaterArtifact(guard, retained, opts);
+    guardPresent = false;
+    restored = linkedUpdaterStat(file, 1, fsImpl);
+    if (!sameLinkedUpdater(source.identity, restored)) {
+      throw new Error('changed updater replacement changed after restoration');
+    }
+  } catch (error) {
+    throw updateRollbackFailure('changed updater replacement was retained for recovery', originalError || error, {
+      ...(error.retainedPath
+        ? { retainedPath: error.retainedPath }
+        : (quarantinePresent ? { retainedPath: quarantine } : {})),
+      ...(error.additionalRetainedPath
+        ? { additionalRetainedPath: error.additionalRetainedPath }
+        : (guardPresent ? { additionalRetainedPath: guard } : {})),
+      ...(error.removedPath ? { removedPath: error.removedPath } : {}),
+      replacementPath: file,
+    });
+  }
+  throw updateRollbackFailure('update configuration changed during rollback; replacement was preserved', originalError, {
+    replacementPath: file,
+  });
+}
+
+function cleanupUpdaterCandidate(quarantine, candidate, opts, originalError) {
+  const fsImpl = opts.fs || fs;
+  const guard = `${quarantine}.cleanup.${process.pid}.${crypto.randomBytes(12).toString('hex')}`;
+  let quarantinePresent = true;
+  let guardPresent = false;
+  try {
+    fsImpl.linkSync(quarantine, guard);
+    guardPresent = true;
+    const source = linkedUpdaterStat(quarantine, 2, fsImpl);
+    const retained = linkedUpdaterStat(guard, 2, fsImpl);
+    if (!sameLinkedUpdater(candidate.identity, source) || !sameLinkedUpdater(candidate.identity, retained)) {
+      throw new Error('updater cleanup guard changed');
+    }
+    removeExactUpdaterArtifact(quarantine, source, opts);
+    quarantinePresent = false;
+    const exact = updaterFileSnapshot(guard, {
+      ...opts,
+      fs: fsImpl,
+      maxBytes: MAX_UPDATER_FILE_BYTES,
+    });
+    if (!sameUpdaterCandidate(candidate, exact)) {
+      throw new Error('updater cleanup guard changed after quarantine removal');
+    }
+    removeExactUpdaterArtifact(guard, exact.identity, opts);
+    guardPresent = false;
+  } catch (error) {
+    throw updateRollbackFailure('updater candidate quarantine could not be removed', originalError || error, {
+      ...(error.retainedPath
+        ? { retainedPath: error.retainedPath }
+        : (quarantinePresent ? { retainedPath: quarantine } : {})),
+      ...(error.additionalRetainedPath
+        ? { additionalRetainedPath: error.additionalRetainedPath }
+        : (guardPresent ? { additionalRetainedPath: guard } : {})),
+      ...(error.removedPath ? { removedPath: error.removedPath } : {}),
+    });
+  }
+}
+
+function rollbackUpdaterCandidate(file, before, candidate, opts, originalError) {
+  const fsImpl = opts.fs || fs;
+  const quarantine = `${file}.failed-mutation.${process.pid}.${crypto.randomBytes(12).toString('hex')}`;
+  try { fsImpl.renameSync(file, quarantine); }
+  catch (error) {
+    throw updateRollbackFailure('updater rollback could not quarantine the published candidate', originalError || error);
+  }
+  let quarantined;
+  try {
+    quarantined = updaterFileSnapshot(quarantine, {
+      ...opts,
+      fs: fsImpl,
+      maxBytes: MAX_UPDATER_FILE_BYTES,
+    });
+  } catch (error) {
+    throw updateRollbackFailure('updater rollback retained an unverifiable replacement', originalError || error, {
+      retainedPath: quarantine,
+    });
+  }
+  if (!sameUpdaterCandidate(candidate, quarantined)) {
+    restoreChangedUpdaterFile(quarantine, file, opts, originalError);
+  }
+  try { restoreFileSnapshot(file, before, opts); }
+  catch (error) {
+    throw updateRollbackFailure('prior update configuration could not be restored', originalError || error, {
+      retainedPath: quarantine,
+      ...(error.replacementPath ? { replacementPath: error.replacementPath } : {}),
+    });
+  }
+  let exact;
+  try {
+    exact = updaterFileSnapshot(quarantine, {
+      ...opts,
+      fs: fsImpl,
+      maxBytes: MAX_UPDATER_FILE_BYTES,
+    });
+  } catch (error) {
+    throw updateRollbackFailure('updater candidate quarantine could not be reverified', originalError || error, {
+      retainedPath: quarantine,
+    });
+  }
+  if (!sameUpdaterCandidate(candidate, exact)) {
+    throw updateRollbackFailure('updater candidate quarantine changed before cleanup', originalError, {
+      retainedPath: quarantine,
+    });
+  }
+  cleanupUpdaterCandidate(quarantine, candidate, opts, originalError);
 }
 
 function normalizeConfig(input = {}) {
@@ -184,7 +503,10 @@ function saveConfigUnlocked(input = {}, opts = {}) {
 
 function saveConfig(input = {}, opts = {}) {
   const file = configPath(opts);
-  return fileMutationLock.withFileMutationLockSync(file, () => saveConfigUnlocked(input, opts), opts);
+  return fileMutationLock.withFileMutationLockSync(file, () => saveConfigUnlocked(input, opts), {
+    ...opts,
+    cleanupComponent: 'updater-config-lock',
+  });
 }
 
 async function saveConfigWithAudit(input = {}, appendAudit, opts = {}) {
@@ -193,19 +515,27 @@ async function saveConfigWithAudit(input = {}, appendAudit, opts = {}) {
   const config = normalizedConfigForWrite(input);
   return fileMutationLock.withFileMutationLock(file, async () => {
     const before = fileSnapshot(file, opts);
-    writeJson(file, config, opts);
+    const candidate = writeJson(file, config, opts);
     try {
       await appendAudit(config);
       return config;
-    } catch {
+    } catch (auditError) {
       try {
-        restoreFileSnapshot(file, before, opts);
-      } catch {
-        throw publicFailure('update configuration audit failed and the prior file could not be restored', 500);
+        rollbackUpdaterCandidate(file, before, candidate, opts, auditError);
+      } catch (rollbackError) {
+        if (rollbackError && rollbackError.code === 'UPDATE_CONFIG_ROLLBACK_FAILED') {
+          rollbackError.originalCause = auditError;
+          throw rollbackError;
+        }
+        throw updateRollbackFailure('update configuration rollback failed after audit failure', auditError, {
+          rollbackCause: rollbackError,
+        });
       }
-      throw publicFailure('update configuration could not be audited', 500);
+      const failure = publicFailure('update configuration could not be audited', 500);
+      failure.cause = auditError;
+      throw failure;
     }
-  }, opts);
+  }, { ...opts, cleanupComponent: 'updater-config-lock' });
 }
 
 function validateConfig(config) {

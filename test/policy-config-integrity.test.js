@@ -13,6 +13,7 @@ const fileMutationLock = require('../server/file-mutation-lock');
 const mutationWorker = path.join(__dirname, 'support', 'file-mutation-worker.js');
 const GENERATION_A = 'linux:11111111-1111-4111-8111-111111111111:1000';
 const GENERATION_B = 'linux:22222222-2222-4222-8222-222222222222:2000';
+const WINDOWS_O_TEMPORARY = 0x40;
 
 function writeConfig(file, value) {
   fs.writeFileSync(file, typeof value === 'string' ? value : JSON.stringify(value));
@@ -169,7 +170,7 @@ test('never-seen absent optional native policy uses healthy conservative default
   });
 });
 
-test('atomic policy save fsyncs the file, renames within one directory, fsyncs the directory, and leaves no temp file', (t) => {
+test('atomic policy save quarantines prior state, links exclusively, fsyncs, and leaves no temp file', (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rw-policy-save-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const target = path.join(dir, 'policy.json');
@@ -189,6 +190,10 @@ test('atomic policy save fsyncs the file, renames within one directory, fsyncs t
       calls.push(['rename', path.resolve(from), path.resolve(to)]);
       return fs.renameSync(from, to);
     },
+    linkSync(from, to) {
+      calls.push(['link', path.resolve(from), path.resolve(to)]);
+      return fs.linkSync(from, to);
+    },
   };
 
   policy.writePolicyAtomically(target, { ...policy.DEFAULT_POLICY, enforcementMode: 'justify' }, {
@@ -197,22 +202,23 @@ test('atomic policy save fsyncs the file, renames within one directory, fsyncs t
   });
 
   assert.strictEqual(JSON.parse(fs.readFileSync(target, 'utf8')).enforcementMode, 'justify');
-  const rename = calls.find((entry) => entry[0] === 'rename');
-  assert.ok(rename);
-  assert.strictEqual(path.dirname(rename[1]), dir);
-  assert.strictEqual(rename[2], target);
+  const quarantine = calls.find((entry) => entry[0] === 'rename' && entry[1] === target);
+  assert.ok(quarantine && quarantine[2].startsWith(`${target}.rollback.`));
+  const publication = calls.find((entry) => entry[0] === 'link' && entry[2] === target);
+  assert.ok(publication);
+  assert.strictEqual(path.dirname(publication[1]), dir);
   assert.ok(calls.filter((entry) => entry[0] === 'fsync').length >= 2, 'file and directory are fsynced');
   assert.deepStrictEqual(fs.readdirSync(dir), ['policy.json']);
 });
 
-test('atomic policy save cleans its same-directory temp file after a rename failure', (t) => {
+test('atomic policy save cleans its same-directory temp file after an exclusive-link failure', (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rw-policy-save-fail-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const target = path.join(dir, 'policy.json');
   const fsImpl = {
     ...fs,
-    renameSync() {
-      const error = new Error('synthetic rename failure');
+    linkSync() {
+      const error = new Error('synthetic link failure');
       error.code = 'EIO';
       throw error;
     },
@@ -223,7 +229,7 @@ test('atomic policy save cleans its same-directory temp file after a rename fail
       fs: fsImpl,
       nonce: crypto.randomBytes(4).toString('hex'),
     }),
-    /synthetic rename failure/,
+    /synthetic link failure/,
   );
   assert.deepStrictEqual(fs.readdirSync(dir), []);
 });
@@ -304,6 +310,84 @@ test('policy mutation rejects a stale pre-lock policy without writing', (t) => {
   );
   assert.strictEqual(callbackRan, false);
   assert.strictEqual(JSON.parse(fs.readFileSync(file, 'utf8')).enforcementMode, 'warn');
+});
+
+test('policy mutation audit failure restores the exact prior bytes', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rw-policy-audit-restore-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'policy.json');
+  const baselinePolicy = { ...policy.DEFAULT_POLICY, enforcementMode: 'block' };
+  const baseline = Buffer.from(`${JSON.stringify(baselinePolicy, null, 4).replace(/\n/g, '\r\n')}\r\n`);
+  fs.writeFileSync(file, baseline, { mode: 0o600 });
+
+  assert.throws(() => policy.withPolicyFileMutation(baselinePolicy, ({ write }) => {
+    write({ ...baselinePolicy, enforcementMode: 'warn' });
+    throw new Error('synthetic policy audit failure');
+  }, { configPath: file }), /synthetic policy audit failure/);
+
+  assert.deepStrictEqual(fs.readFileSync(file), baseline);
+  assert.deepStrictEqual(fs.readdirSync(dir), ['policy.json']);
+});
+
+test('policy rollback preserves a same-inode byte replacement after audit failure', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rw-policy-audit-same-inode-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'policy.json');
+  const baseline = { ...policy.DEFAULT_POLICY, enforcementMode: 'block' };
+  writeConfig(file, baseline);
+  let replacement;
+  let candidateIdentity;
+  let failure;
+
+  assert.throws(() => policy.withPolicyFileMutation(baseline, ({ write }) => {
+    write({ ...baseline, enforcementMode: 'warn' });
+    const candidate = fs.readFileSync(file);
+    replacement = Buffer.from(candidate.toString('utf8').replace(
+      '"enforcementMode": "warn"',
+      '"enforcementMode": "evil"',
+    ));
+    assert.strictEqual(replacement.length, candidate.length);
+    const times = fs.statSync(file);
+    candidateIdentity = fs.lstatSync(file, { bigint: true });
+    fs.writeFileSync(file, replacement);
+    fs.utimesSync(file, times.atime, times.mtime);
+    const changedIdentity = fs.lstatSync(file, { bigint: true });
+    assert.strictEqual(changedIdentity.dev, candidateIdentity.dev);
+    assert.strictEqual(changedIdentity.ino, candidateIdentity.ino);
+    throw new Error('synthetic policy audit failure');
+  }, { configPath: file }), (error) => {
+    failure = error;
+    return error && error.code === 'POLICY_ROLLBACK_FAILED';
+  });
+
+  assert.strictEqual(failure.replacementPath, file);
+  assert.deepStrictEqual(fs.readFileSync(file), replacement);
+  const preservedIdentity = fs.lstatSync(file, { bigint: true });
+  assert.strictEqual(preservedIdentity.dev, candidateIdentity.dev);
+  assert.strictEqual(preservedIdentity.ino, candidateIdentity.ino);
+});
+
+test('missing-before policy rollback preserves a pathname replacement after audit failure', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rw-policy-audit-path-replacement-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'policy.json');
+  const displacedCandidate = path.join(dir, 'published-policy-candidate.json');
+  const replacement = Buffer.from('non-cooperating policy replacement\n');
+  let failure;
+
+  assert.throws(() => policy.withPolicyFileMutation(policy.DEFAULT_POLICY, ({ write }) => {
+    write({ ...policy.DEFAULT_POLICY, enforcementMode: 'warn' });
+    fs.renameSync(file, displacedCandidate);
+    fs.writeFileSync(file, replacement, { flag: 'wx', mode: 0o600 });
+    throw new Error('synthetic policy audit failure');
+  }, { configPath: file }), (error) => {
+    failure = error;
+    return error && error.code === 'POLICY_ROLLBACK_FAILED';
+  });
+
+  assert.strictEqual(failure.replacementPath, file);
+  assert.deepStrictEqual(fs.readFileSync(file), replacement);
+  assert.strictEqual(JSON.parse(fs.readFileSync(displacedCandidate, 'utf8')).enforcementMode, 'warn');
 });
 
 test('policy mutation lock never reaps an old lock whose owner is still alive', (t) => {
@@ -541,6 +625,81 @@ test('a late reclaimer cannot unlink a replacement token owner', (t) => {
   fileMutationLock.releaseFileMutationLock(replacement);
 });
 
+test('two dead-owner reclaimers tolerate the first one removing the lock directory', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rw-policy-lock-double-reclaim-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'policy.json');
+  const lockPath = fileMutationLock.lockPathFor(file);
+  writeLockOwner(lockPath, {
+    version: 3,
+    pid: 4242,
+    hostname: 'redactwall-double-reclaimer',
+    processStart: '1000',
+    generation: GENERATION_A,
+  });
+  let hookCalls = 0;
+
+  const acquired = fileMutationLock.acquireFileMutationLockSync(file, {
+    hostname: 'redactwall-double-reclaimer',
+    pid: 5252,
+    processStart: '2000',
+    generation: GENERATION_B,
+    processKill: () => {},
+    lockTimeoutMs: 100,
+    onBeforeReclaim({ ownerPath }) {
+      hookCalls += 1;
+      removeExactLockOwner(lockPath, ownerPath);
+    },
+  });
+
+  assert.strictEqual(hookCalls, 1);
+  assert.ok(acquired && fs.existsSync(acquired.ownerPath));
+  fileMutationLock.releaseFileMutationLock(acquired);
+  assert.strictEqual(fs.existsSync(lockPath), false);
+});
+
+test('dead-owner reclaim retries transient Windows quarantine denials against the exact owner', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rw-policy-lock-reclaim-retry-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'policy.json');
+  const lockPath = fileMutationLock.lockPathFor(file);
+  writeLockOwner(lockPath, {
+    version: 3,
+    pid: 4242,
+    hostname: 'redactwall-reclaim-retry',
+    processStart: '1000',
+    generation: GENERATION_A,
+  });
+  let denials = 0;
+  const fsImpl = {
+    ...fs,
+    renameSync(source, destination) {
+      if (source === lockPath && destination.includes('.cleanup.') && denials < 2) {
+        denials += 1;
+        const error = new Error('transient Windows directory denial');
+        error.code = 'EPERM';
+        throw error;
+      }
+      return fs.renameSync(source, destination);
+    },
+  };
+
+  const acquired = fileMutationLock.acquireFileMutationLockSync(file, {
+    fs: fsImpl,
+    hostname: 'redactwall-reclaim-retry',
+    pid: 5252,
+    processStart: '2000',
+    generation: GENERATION_B,
+    processKill: () => {},
+    lockTimeoutMs: 200,
+  });
+
+  assert.strictEqual(denials, 2);
+  assert.ok(acquired && fs.existsSync(acquired.ownerPath));
+  fileMutationLock.releaseFileMutationLock(acquired);
+  assert.strictEqual(fs.existsSync(lockPath), false);
+});
+
 test('an empty crash-orphan directory is reclaimed under Windows rename semantics', (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rw-policy-lock-empty-windows-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -597,28 +756,35 @@ test('lock release reports persistent cleanup denial and can be retried exactly'
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rw-policy-lock-release-retry-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const file = path.join(dir, 'policy.json');
-  let denyOwnerUnlink = true;
+  let denyOwnerDelete = true;
   const fsImpl = {
     ...fs,
-    unlinkSync(target) {
-      if (denyOwnerUnlink && String(target).includes('.mutation.lock')) {
+    openSync(target, flags, mode) {
+      if (denyOwnerDelete && String(target).includes('.mutation.lock')
+          && String(target).includes('.cleanup.') && typeof flags === 'number'
+          && (flags & WINDOWS_O_TEMPORARY) === WINDOWS_O_TEMPORARY) {
         const error = new Error('persistent scanner denial');
         error.code = 'EPERM';
         throw error;
       }
-      return fs.unlinkSync(target);
+      return fs.openSync(target, flags, mode);
     },
   };
   const lock = fileMutationLock.acquireFileMutationLockSync(file, { fs: fsImpl });
 
+  let cleanupFailure;
   assert.throws(
     () => fileMutationLock.releaseFileMutationLock(lock),
-    (error) => error && error.code === 'FILE_MUTATION_LOCK_CLEANUP',
+    (error) => {
+      cleanupFailure = error;
+      return error && error.code === 'FILE_MUTATION_LOCK_CLEANUP';
+    },
   );
   assert.strictEqual(lock.released, false, 'failed cleanup must not claim release');
-  assert.strictEqual(fs.existsSync(lock.ownerPath), true);
+  assert.ok(cleanupFailure.retainedPath && fs.existsSync(cleanupFailure.retainedPath));
+  assert.strictEqual(fs.readdirSync(cleanupFailure.retainedPath).length, 1);
 
-  denyOwnerUnlink = false;
+  denyOwnerDelete = false;
   fileMutationLock.releaseFileMutationLock(lock);
   assert.strictEqual(lock.released, true);
   assert.strictEqual(fs.existsSync(lock.lockPath), false);
@@ -629,11 +795,23 @@ test('an empty lock directory does not retain a released-owner token after clean
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const file = path.join(dir, 'policy.json');
   const before = fileMutationLock._internal.releasedOwnerTokenCount();
-  let denyRmdir = true;
+  let denyDirectoryDelete = true;
   const fsImpl = {
     ...fs,
+    openSync(target, flags, mode) {
+      if (denyDirectoryDelete && String(target).includes('.mutation.lock')
+          && String(target).includes('.cleanup.') && typeof flags === 'number'
+          && (flags & WINDOWS_O_TEMPORARY) === WINDOWS_O_TEMPORARY
+          && fs.lstatSync(target).isDirectory()) {
+        const error = new Error('persistent directory scanner denial');
+        error.code = 'EPERM';
+        throw error;
+      }
+      return fs.openSync(target, flags, mode);
+    },
     rmdirSync(target) {
-      if (denyRmdir && String(target).endsWith('.mutation.lock')) {
+      if (process.platform !== 'win32' && denyDirectoryDelete
+          && String(target).includes('.mutation.lock')) {
         const error = new Error('persistent directory scanner denial');
         error.code = 'EPERM';
         throw error;
@@ -643,14 +821,21 @@ test('an empty lock directory does not retain a released-owner token after clean
   };
   const lock = fileMutationLock.acquireFileMutationLockSync(file, { fs: fsImpl });
 
+  let cleanupFailure;
   assert.throws(
     () => fileMutationLock.releaseFileMutationLock(lock),
-    (error) => error && error.code === 'FILE_MUTATION_LOCK_CLEANUP',
+    (error) => {
+      cleanupFailure = error;
+      return error && error.code === 'FILE_MUTATION_LOCK_CLEANUP';
+    },
   );
-  assert.deepStrictEqual(fs.readdirSync(lock.lockPath), []);
+  assert.ok(cleanupFailure.retainedPath && fs.existsSync(cleanupFailure.retainedPath));
+  assert.deepStrictEqual(fs.readdirSync(cleanupFailure.retainedPath), []);
   assert.strictEqual(fileMutationLock._internal.releasedOwnerTokenCount(), before);
 
-  denyRmdir = false;
+  denyDirectoryDelete = false;
+  fileMutationLock.releaseFileMutationLock(lock);
+  assert.strictEqual(fs.existsSync(cleanupFailure.retainedPath), false);
   const recovered = fileMutationLock.acquireFileMutationLockSync(file, { fs: fsImpl, lockTimeoutMs: 200 });
   fileMutationLock.releaseFileMutationLock(recovered);
   assert.strictEqual(fs.existsSync(lock.lockPath), false);
@@ -660,16 +845,18 @@ test('callback failures remain primary when lock cleanup also fails', (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rw-policy-lock-error-order-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const file = path.join(dir, 'policy.json');
-  let denyOwnerUnlink = true;
+  let denyOwnerDelete = true;
   const fsImpl = {
     ...fs,
-    unlinkSync(target) {
-      if (denyOwnerUnlink && String(target).includes('.mutation.lock')) {
+    openSync(target, flags, mode) {
+      if (denyOwnerDelete && String(target).includes('.mutation.lock')
+          && String(target).includes('.cleanup.') && typeof flags === 'number'
+          && (flags & WINDOWS_O_TEMPORARY) === WINDOWS_O_TEMPORARY) {
         const error = new Error('persistent scanner denial');
         error.code = 'EPERM';
         throw error;
       }
-      return fs.unlinkSync(target);
+      return fs.openSync(target, flags, mode);
     },
   };
   const callbackError = new Error('synthetic mutation failure');
@@ -681,10 +868,199 @@ test('callback failures remain primary when lock cleanup also fails', (t) => {
       && error.cleanupError.code === 'FILE_MUTATION_LOCK_CLEANUP',
   );
 
-  denyOwnerUnlink = false;
+  denyOwnerDelete = false;
   const recovered = fileMutationLock.acquireFileMutationLockSync(file, { fs: fsImpl, lockTimeoutMs: 200 });
   fileMutationLock.releaseFileMutationLock(recovered);
   assert.strictEqual(fs.existsSync(fileMutationLock.lockPathFor(file)), false);
+});
+
+test('sync and async lock wrappers preserve every falsy thrown value when cleanup also fails', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rw-policy-lock-falsy-throw-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const thrownValues = [undefined, null, false, 0, '', NaN];
+  let cleanupDenials = 0;
+  const fsImpl = {
+    ...fs,
+    openSync(target, flags, mode) {
+      if (String(target).includes('.mutation.lock') && String(target).includes('.cleanup.')
+          && typeof flags === 'number' && (flags & WINDOWS_O_TEMPORARY) === WINDOWS_O_TEMPORARY) {
+        cleanupDenials += 1;
+        const error = new Error('persistent falsy-throw cleanup denial');
+        error.code = 'EPERM';
+        throw error;
+      }
+      return fs.openSync(target, flags, mode);
+    },
+    unlinkSync(target) {
+      if (String(target).includes('.mutation.lock') && String(target).includes('.cleanup.')) {
+        cleanupDenials += 1;
+        const error = new Error('persistent falsy-throw cleanup denial');
+        error.code = 'EPERM';
+        throw error;
+      }
+      return fs.unlinkSync(target);
+    },
+  };
+  const capture = async (action) => {
+    let didThrow = false;
+    let caught;
+    try { await action(); } catch (error) {
+      didThrow = true;
+      caught = error;
+    }
+    return { didThrow, caught };
+  };
+
+  for (let index = 0; index < thrownValues.length; index += 1) {
+    const thrown = thrownValues[index];
+    const syncResult = await capture(() => fileMutationLock.withFileMutationLockSync(
+      path.join(dir, `sync-${index}.json`),
+      () => { throw thrown; },
+      { fs: fsImpl },
+    ));
+    assert.strictEqual(syncResult.didThrow, true);
+    assert.strictEqual(Object.is(syncResult.caught, thrown), true);
+
+    const asyncResult = await capture(() => fileMutationLock.withFileMutationLock(
+      path.join(dir, `async-${index}.json`),
+      async () => { throw thrown; },
+      { fs: fsImpl },
+    ));
+    assert.strictEqual(asyncResult.didThrow, true);
+    assert.strictEqual(Object.is(asyncResult.caught, thrown), true);
+  }
+
+  assert.ok(cleanupDenials > 0, 'release cleanup failures were exercised');
+  assert.ok(fs.readdirSync(dir).some((entry) => entry.includes('.cleanup.')),
+    'failed cleanup retains exact lock recovery artifacts');
+});
+
+test('successful mutation remains committed when lock release cleanup fails', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rw-policy-lock-committed-warning-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'policy.json');
+  fileMutationLock._resetCommittedCleanupHealthForTest();
+  t.after(() => fileMutationLock._resetCommittedCleanupHealthForTest());
+  let denyOwnerDelete = true;
+  let warning;
+  const fsImpl = {
+    ...fs,
+    openSync(target, flags, mode) {
+      if (denyOwnerDelete && String(target).includes('.mutation.lock')
+          && String(target).includes('.cleanup.') && typeof flags === 'number'
+          && (flags & WINDOWS_O_TEMPORARY) === WINDOWS_O_TEMPORARY) {
+        const error = new Error('persistent committed cleanup denial');
+        error.code = 'EPERM';
+        throw error;
+      }
+      return fs.openSync(target, flags, mode);
+    },
+  };
+  let committed = false;
+  const value = fileMutationLock.withFileMutationLockSync(file, () => {
+    committed = true;
+    return 42;
+  }, {
+    fs: fsImpl,
+    cleanupComponent: 'test-policy-lock',
+    onCommittedCleanupWarning(result) { warning = result; },
+  });
+
+  assert.strictEqual(value, 42);
+  assert.strictEqual(committed, true);
+  assert.strictEqual(warning.code, 'FILE_MUTATION_LOCK_CLEANUP');
+  assert.strictEqual(warning.component, 'test-policy-lock');
+  assert.ok(warning.retainedPath && fs.existsSync(warning.retainedPath));
+  assert.strictEqual(fileMutationLock.committedCleanupHealth().ok, false);
+  denyOwnerDelete = false;
+  fs.rmSync(warning.retainedPath, { recursive: true, force: true });
+});
+
+test('exact-handle lock release preserves a final owner pathname replacement', {
+  skip: process.platform !== 'win32' ? 'exact delete-on-close coverage is Windows-specific' : false,
+}, (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rw-policy-lock-final-owner-race-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  fileMutationLock._resetCommittedCleanupHealthForTest();
+  t.after(() => fileMutationLock._resetCommittedCleanupHealthForTest());
+  const file = path.join(dir, 'policy.json');
+  let replacementPath = '';
+  let warning;
+  const result = fileMutationLock.withFileMutationLockSync(file, () => 42, {
+    onBeforeExactOwnerDeleteClose({ ownerPath }) {
+      if (replacementPath) return;
+      const movedExact = `${ownerPath}.moved-exact`;
+      fs.renameSync(ownerPath, movedExact);
+      fs.writeFileSync(ownerPath, 'replacement-owner-bytes\n', { flag: 'wx', mode: 0o600 });
+      replacementPath = ownerPath;
+    },
+    onCommittedCleanupWarning(value) { warning = value; },
+  });
+  assert.strictEqual(result, 42);
+  assert.ok(replacementPath);
+  assert.ok(warning && warning.retainedPath && fs.existsSync(warning.retainedPath));
+  assert.strictEqual(
+    fs.readFileSync(path.join(warning.retainedPath, path.basename(replacementPath)), 'utf8'),
+    'replacement-owner-bytes\n',
+  );
+  assert.strictEqual(fileMutationLock.committedCleanupHealth().ok, false);
+});
+
+test('empty lock cleanup quarantines a post-validation replacement instead of deleting it', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rw-policy-lock-empty-postcheck-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'policy.json');
+  const lockPath = fileMutationLock.lockPathFor(file);
+  const displaced = `${lockPath}.displaced`;
+  fs.mkdirSync(lockPath, { mode: 0o700 });
+  let retainedPath = '';
+  let swapped = false;
+  const fsImpl = {
+    ...fs,
+    renameSync(source, destination) {
+      if (!swapped && source === lockPath && String(destination).includes('.empty-cleanup.')) {
+        swapped = true;
+        fs.renameSync(lockPath, displaced);
+        fs.mkdirSync(lockPath, { mode: 0o700 });
+      }
+      return fs.renameSync(source, destination);
+    },
+  };
+
+  assert.throws(() => fileMutationLock.acquireFileMutationLockSync(file, {
+    fs: fsImpl,
+    lockTimeoutMs: 100,
+    lockRetryMs: 1,
+  }), (error) => {
+    retainedPath = error && (error.retainedPath || error.cause?.retainedPath);
+    return error && error.code === 'FILE_MUTATION_LOCK_CLEANUP';
+  });
+  assert.strictEqual(swapped, true);
+  assert.ok(fs.existsSync(displaced), 'the originally validated empty directory remains untouched');
+  assert.ok(retainedPath && fs.existsSync(retainedPath), 'the replacement is retained under quarantine');
+});
+
+test('exact-handle empty lock cleanup preserves a final directory replacement', {
+  skip: process.platform !== 'win32' ? 'exact delete-on-close coverage is Windows-specific' : false,
+}, (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rw-policy-lock-empty-final-race-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'policy.json');
+  const lockPath = fileMutationLock.lockPathFor(file);
+  fs.mkdirSync(lockPath, { mode: 0o700 });
+  let replacementPath = '';
+  assert.throws(() => fileMutationLock.acquireFileMutationLockSync(file, {
+    lockTimeoutMs: 100,
+    lockRetryMs: 1,
+    onBeforeExactDirectoryDeleteClose({ directory }) {
+      if (replacementPath || !String(directory).includes('.empty-cleanup.')) return;
+      fs.renameSync(directory, `${directory}.moved-exact`);
+      fs.mkdirSync(directory, { mode: 0o700 });
+      replacementPath = directory;
+    },
+  }), (error) => error && error.code === 'FILE_MUTATION_LOCK_CLEANUP');
+  assert.ok(replacementPath && fs.existsSync(replacementPath));
+  assert.deepStrictEqual(fs.readdirSync(replacementPath), []);
 });
 
 test('a delayed empty-directory reclaimer preserves a concurrently published owner', (t) => {
@@ -729,6 +1105,163 @@ test('lock release never removes a replacement owned by another writer', (t) => 
 
   assert.strictEqual(fs.readFileSync(replacement.ownerPath, 'utf8'), replacement.contents);
   fileMutationLock.releaseFileMutationLock(replacement);
+});
+
+test('lock release quarantines and preserves an owner replaced at the cleanup boundary', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rw-policy-lock-release-boundary-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'policy.json');
+  const lockPath = fileMutationLock.lockPathFor(file);
+  let armed = false;
+  let lock;
+  const replacement = 'replacement-owner-bytes\n';
+  const fsImpl = {
+    ...fs,
+    renameSync(source, destination) {
+      if (armed && path.resolve(source) === path.resolve(lockPath)) {
+        armed = false;
+        fs.unlinkSync(lock.ownerPath);
+        fs.writeFileSync(lock.ownerPath, replacement, { mode: 0o600 });
+      }
+      return fs.renameSync(source, destination);
+    },
+  };
+  lock = fileMutationLock.acquireFileMutationLockSync(file, { fs: fsImpl });
+  armed = true;
+  let failure;
+  assert.throws(() => fileMutationLock.releaseFileMutationLock(lock), (error) => {
+    failure = error;
+    return error?.code === 'FILE_MUTATION_LOCK_CLEANUP';
+  });
+  assert.ok(failure.retainedPath && fs.existsSync(failure.retainedPath));
+  assert.strictEqual(fs.readFileSync(path.join(failure.retainedPath, lock.ownerName), 'utf8'), replacement);
+});
+
+test('dead-owner reclaim preserves an owner replaced at the cleanup boundary', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rw-policy-lock-reclaim-boundary-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'policy.json');
+  const lockPath = fileMutationLock.lockPathFor(file);
+  const existing = writeLockOwner(lockPath, {
+    version: 3,
+    pid: 4242,
+    hostname: 'redactwall-reclaim-boundary',
+    processStart: '1000',
+    generation: GENERATION_A,
+  });
+  const replacement = 'replacement-owner-bytes\n';
+  let armed = true;
+  const fsImpl = {
+    ...fs,
+    renameSync(source, destination) {
+      if (armed && path.resolve(source) === path.resolve(lockPath)) {
+        armed = false;
+        fs.unlinkSync(existing.ownerPath);
+        fs.writeFileSync(existing.ownerPath, replacement, { mode: 0o600 });
+      }
+      return fs.renameSync(source, destination);
+    },
+  };
+  let failure;
+  assert.throws(() => fileMutationLock.acquireFileMutationLockSync(file, {
+    fs: fsImpl,
+    hostname: 'redactwall-reclaim-boundary',
+    pid: 5252,
+    processStart: '2000',
+    generation: GENERATION_B,
+    processKill: () => {},
+    lockTimeoutMs: 100,
+  }), (error) => {
+    failure = error;
+    return error?.code === 'FILE_MUTATION_LOCK_CLEANUP';
+  });
+  assert.ok(failure.retainedPath && fs.existsSync(failure.retainedPath));
+  assert.strictEqual(fs.readFileSync(path.join(failure.retainedPath, existing.ownerName), 'utf8'), replacement);
+});
+
+test('acquisition-error cleanup preserves an owner replaced at quarantine', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rw-policy-lock-acquire-cleanup-boundary-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'policy.json');
+  const lockPath = fileMutationLock.lockPathFor(file);
+  let published = false;
+  let injectedFailure = false;
+  let cleanup = false;
+  let ownerName = '';
+  const replacement = 'replacement-owner-bytes\n';
+  const fsImpl = {
+    ...fs,
+    renameSync(source, destination) {
+      if (path.resolve(destination) === path.resolve(lockPath)) published = true;
+      else if (published && path.resolve(source) === path.resolve(lockPath)) {
+        cleanup = true;
+        ownerName = fs.readdirSync(lockPath)[0];
+        const ownerPath = path.join(lockPath, ownerName);
+        fs.unlinkSync(ownerPath);
+        fs.writeFileSync(ownerPath, replacement, { mode: 0o600 });
+      }
+      return fs.renameSync(source, destination);
+    },
+    lstatSync(target, options) {
+      if (published && !injectedFailure && path.resolve(String(target)) === path.resolve(lockPath)) {
+        injectedFailure = true;
+        const error = new Error('synthetic post-publication inspection failure');
+        error.code = 'EIO';
+        throw error;
+      }
+      return fs.lstatSync(target, options);
+    },
+  };
+  let failure;
+  assert.throws(() => fileMutationLock.acquireFileMutationLockSync(file, { fs: fsImpl }), (error) => {
+    failure = error;
+    return error?.code === 'FILE_MUTATION_LOCK_CLEANUP';
+  });
+  assert.strictEqual(cleanup, true);
+  assert.ok(failure.retainedPath && fs.existsSync(failure.retainedPath));
+  assert.strictEqual(fs.readFileSync(path.join(failure.retainedPath, ownerName), 'utf8'), replacement);
+});
+
+test('lock owner publication rejects Number-rounded path-to-handle file ID collisions', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rw-policy-lock-rounded-id-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'policy.json');
+  const requestedId = 10414574140023031n;
+  const openedId = 10414574140023032n;
+  assert.strictEqual(Number(requestedId), Number(openedId), 'fixture must reproduce Number rounding');
+  const withIdentity = (stat, exact, ino) => {
+    const changed = Object.create(stat);
+    Object.defineProperties(changed, {
+      dev: { value: exact ? 3n : 3 },
+      ino: { value: exact ? ino : Number(ino) },
+    });
+    return changed;
+  };
+  const fsImpl = {
+    ...fs,
+    lstatSync(target, options) {
+      const exact = options?.bigint === true;
+      const stat = fs.lstatSync(target, options);
+      return path.basename(String(target)).startsWith('owner.')
+        ? withIdentity(stat, exact, requestedId)
+        : stat;
+    },
+    fstatSync(descriptor, options) {
+      const exact = options?.bigint === true;
+      return withIdentity(fs.fstatSync(descriptor, options), exact, openedId);
+    },
+  };
+
+  let failure;
+  assert.throws(
+    () => fileMutationLock.acquireFileMutationLockSync(file, { fs: fsImpl }),
+    (error) => {
+      failure = error;
+      return error?.code === 'FILE_MUTATION_LOCK_CLEANUP'
+        && /owner changed while opening/.test(String(error.cause?.message || ''));
+    },
+  );
+  assert.ok(failure.retainedPath && fs.existsSync(failure.retainedPath));
 });
 
 test('a crashed lock owner is proven dead and reclaimed before the next policy write', async (t) => {

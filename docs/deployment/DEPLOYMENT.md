@@ -159,7 +159,28 @@ volume:
 REDACTWALL_DB_PATH=/data/redactwall.db
 REDACTWALL_POLICY_PATH=/data/policy.json
 REDACTWALL_CUSTOM_DETECTORS_PATH=/data/custom-detectors.json
+REDACTWALL_LICENSE_PATH=/data/redactwall.lic
 ```
+
+Compose intentionally passes `REDACTWALL_AUDIT_DIR` as empty unless the
+operator sets it. SQLite then retains its established derived path,
+`/data/redactwall.db.audit-integrity`, so upgrading an existing named volume
+does not strand its authenticated checkpoint. Do not introduce a different
+audit path during a SQLite upgrade.
+
+Postgres requires an explicit absolute path on the shared durable volume. For a
+fresh Compose Postgres deployment, set a path such as
+`REDACTWALL_AUDIT_DIR=/data/audit-integrity` in `.env`. A pre-scope Postgres
+deployment that previously used the derived Compose path normally has its
+authoritative sidecars at `/data/.audit-integrity`; keep that exact path for the
+upgrade rather than copying the files to a new directory.
+
+Before the v3 database-scope upgrade, drain every control-plane replica, back up
+the database and audit directory together, and start exactly one upgraded
+replica against the existing database, key, and exact audit path. Wait for
+`/readyz` and `verifyAuditChain()` to pass so the signed state is durably bound
+to that database. Only then start the remaining upgraded replicas with the same
+mount and path. Do not run pre-v3 and v3 replicas concurrently.
 
 ## Health Checks
 
@@ -1420,7 +1441,8 @@ synchronous storage interface runs on Postgres:
 
 ```
 REDACTWALL_DB_DRIVER=postgres
-REDACTWALL_DATABASE_URL=postgresql://redactwall_app@db.internal:5432/redactwall
+REDACTWALL_DATABASE_URL=postgresql://redactwall_app@db.internal:5432/redactwall?sslmode=verify-full
+REDACTWALL_AUDIT_DIR=/var/lib/redactwall/shared-audit
 ```
 
 For the full operator runbook — application-role setup, migration workflow,
@@ -1437,15 +1459,20 @@ What you get on the Postgres driver:
   `orgId` column with `FORCE ROW LEVEL SECURITY`; setting the
   `redactwall.org_id` session context confines reads and writes to one tenant.
   Run the application as a NON-superuser role (superusers bypass RLS).
-- **Multiple control-plane replicas** can share one Postgres; set the same
-  `REDACTWALL_SECRET` on every instance so sessions and receipts stay valid
-  across replicas, and put the replicas behind your load balancer.
+- **Multiple control-plane replicas** can share one Postgres only when every
+  instance also mounts the same durable POSIX audit-anchor volume at the same
+  absolute `REDACTWALL_AUDIT_DIR`. Set the same `REDACTWALL_SECRET`,
+  `REDACTWALL_DATA_KEY`, and `REDACTWALL_AUDIT_KEY` on every instance, use the
+  same numeric UID/GID, and put the replicas behind your load balancer.
+  Independent or copied audit directories are unsupported and fail closed.
 
 Backups on Postgres work through the same tooling as SQLite: `npm run backup`
 drives `pg_dump` (custom format) when the store runs on the Postgres driver,
 and `npm run backup:drill` verifies a restore into a scratch database — see
-`docs/deployment/MANAGED_POSTGRES.md`. Managed-provider snapshots/PITR remain a good
-complement. After restoring any Postgres backup, `node -e
+`docs/deployment/MANAGED_POSTGRES.md`. Managed-provider snapshots/PITR are only
+a complement: a database-only rollback cannot replace the matching authenticated
+audit-anchor bundle. Drain every replica during restore and publish a new runtime
+audit directory with the restore command. After restoring any Postgres backup, `node -e
 "console.log(JSON.stringify(require('./server/db').verifyAuditChain()))"`
 must report `ok: true` before the restored plane serves traffic.
 
@@ -1491,7 +1518,7 @@ For an offline restore, stop the RedactWall process, restore to a new local-disk
 ```bash
 npm run backup:restore -- backups/redactwall-YYYY-MM-DDTHH-MM-SS-sssZ.db data/restored-redactwall.db
 npm run backup:verify -- data/restored-redactwall.db \
-  --manifest backups/redactwall-YYYY-MM-DDTHH-MM-SS-sssZ.db.manifest.json
+  --manifest data/restored-redactwall.db.manifest.json
 ```
 
 The restore destination must be a dedicated private data directory. RedactWall
@@ -1500,12 +1527,69 @@ the database. It refuses pre-existing state in an untrusted directory; an
 existing non-empty destination must already satisfy the runtime private-path
 contract.
 
-The restored database is byte-identical to the verified backup, so its original
-manifest remains the hash-bound verification record. A restored copy without
-that explicit manifest is intentionally reported as unverifiable.
+The restore first authenticates the original portable manifest without changing
+it. It then publishes `restored-redactwall.db.manifest.json`, a new
+HMAC-authenticated target-layout manifest that binds the restored database to
+the runtime state and checkpoint under
+`restored-redactwall.db.audit-integrity/`. The second command above therefore
+verifies the exact files the server will open and must print `ok: true`.
+Do not treat an active runtime path as a replacement for a portable backup.
+Verification and re-restore fail closed whenever the runtime audit directory
+contains a pending high-water file, including a correctly authenticated one;
+the running store must reconcile that state before another backup is taken.
 
-Use `--force` only when intentionally replacing an existing restore target. It
-never bypasses a missing, unsigned, or invalid authenticated manifest.
+For SQLite only, use `--force` when intentionally replacing an existing restore
+target. It never bypasses a missing, unsigned, or invalid authenticated
+manifest, and the prior artifact set remains recoverable until target-layout
+verification succeeds.
+
+For Postgres, provide an absent database name and a new, explicit runtime audit
+directory. Do not pre-create either target:
+
+```bash
+npm run backup:restore -- backups/redactwall-YYYY-MM-DDTHH-MM-SS-sssZ.dump \
+  restored_database --audit-dir /var/lib/redactwall/restores/restored_database-audit
+```
+
+Postgres restore rejects `--force` and any existing target database.
+`pg_restore --clean` is not a replacement operation because it leaves target-only objects
+behind; choose a different absent name for every restore attempt. The authenticated
+manifest includes the PostgreSQL 16/17 source encoding and locale definition so
+restore can reproduce it from `template0` or fail closed.
+
+The connection URL must authenticate directly as the intended database owner:
+a non-superuser `CREATEDB` role with no granted members. A superuser using
+`SET ROLE` is rejected. Restore creates an unconnectable cryptorandom staging
+database, restricts it to that owner, holds a stable guard while
+`pg_restore --single-transaction` uses the second connection slot, verifies the
+restored evidence, freezes it, proves zero sessions, and renames the same OID to
+the requested target. It publishes and fsyncs the authenticated runtime state
+before enabling the target as the final fallible step. The owner-only database
+ACL remains in place. Grant `CREATEDB` only for the offline maintenance window
+and revoke it after restore and any drill cleanup. Drain every process holding
+that credential first: the guard is not an isolation boundary against another
+cluster superuser or a process using the same restore credential.
+
+For a bare target name, restore uses the configured source database as its
+maintenance connection. For a full PostgreSQL URL, it uses the same authority
+and `REDACTWALL_PG_MAINTENANCE_DATABASE` (default `postgres`). Configure the
+restored plane with
+`REDACTWALL_AUDIT_DIR=/var/lib/redactwall/restores/restored_database-audit`
+before running the post-restore `verifyAuditChain()` gate. The JSON result names
+the exact runtime audit paths and the restored database name, OID, and owner OID.
+
+Failures are identity-safe. RedactWall drops only a conclusively owned
+pre-rename staging OID. It never deletes an uncertain create/rename outcome by
+name. A failure after rename retains the target non-connectable; if final-enable
+readback is uncertain, the error warns that the target may already be
+connectable. Inspect the exact reported OID, disable connections before manual
+recovery, and preserve the runtime audit directory until its publication state
+is proven.
+
+The shipped Docker image includes PostgreSQL 17 `pg_dump` and `pg_restore`
+clients, and the image build executes both `--version` checks. Use a host
+checkout or rebuild on a newer PostgreSQL client base before backing up a server
+newer than 17.
 
 After backup verification and any restore drill, generate an examiner pack that
 records both statuses without embedding the `.db` content:
@@ -1555,14 +1639,20 @@ npm run backup:drill
 ```
 
 The drill creates a fresh backup, verifies the manifest hash, restores the
-backup to a scratch path, re-opens the restored database read-only, and
+backup to a scratch path or absent guarded Postgres database, and
 checks that the restored audit hash-chain verifies and that the restored row
 counts match the manifest. It prints a prompt-free JSON report (hashes,
 counts, and PASS/FAIL checks only) and exits non-zero on any mismatch — wire
 it into monitoring so a failed drill pages someone. Use
 `-- --backup-dir <dir>` to run the drill against a specific backup location
-and `-- --keep` to retain the drill backup and restored copy for inspection;
-without `--keep` the drill removes everything it created.
+and `-- --keep` to retain the drill backup, restored copy, and runtime audit
+state for inspection. Every run uses a new owner-only `.redactwall-drill-*`
+child of that directory; the JSON report's `artifacts.keptAt` field names the
+exact retained child. Without `--keep`, the drill removes that child only.
+For Postgres, the drill never pre-creates or force-drops the scratch database.
+It cleans up only the exact database identity returned by guarded restore. If
+ownership is unknown or exact cleanup fails, the private workspace and runtime
+audit state are retained and reported for manual recovery.
 
 A passing drill proves the backup path works end to end: the live store's
 audit chain is intact, the backup is byte-identical to what the manifest
@@ -1571,9 +1661,9 @@ tamper-evident chain still verify.
 
 ### What Backups Do Not Cover
 
-The backup and drill cover only the SQLite evidence store. A full
-disaster-recovery kit must also capture, through your configuration
-management or secret manager:
+The backup and drill cover the configured SQLite or Postgres evidence store,
+but not the rest of the deployment. A full disaster-recovery kit must also
+capture, through your configuration management or secret manager:
 
 - `.env` secrets — above all `REDACTWALL_DATA_KEY` / `REDACTWALL_SECRET`
   (without them, sealed raw prompts in a restored store cannot be revealed),

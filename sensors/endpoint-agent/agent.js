@@ -674,13 +674,13 @@ async function statStableFile(full, opts = {}) {
   const wait = opts.sleep || sleep;
   let prev;
   for (let i = 0; i < MAX_FILE_SETTLE_POLLS; i += 1) {
-    let stat; try { stat = fs.statSync(full); } catch { return null; }
+    let stat; try { stat = fs.statSync(full, { bigint: true }); } catch { return null; }
     if (!stat.isFile()) return stat;
     if (settleMs <= 0 || (prev !== undefined && stat.size === prev)) return stat;
     prev = stat.size;
     await wait(settleMs);
   }
-  try { return fs.statSync(full); } catch { return null; }
+  try { return fs.statSync(full, { bigint: true }); } catch { return null; }
 }
 
 function pathWithin(root, candidate) {
@@ -688,18 +688,57 @@ function pathWithin(root, candidate) {
   return relative === '' || (!relative.startsWith('..' + path.sep) && relative !== '..' && !path.isAbsolute(relative));
 }
 
+function exactIntegerValue(value) {
+  if (typeof value === 'bigint') return value;
+  if (typeof value === 'number' && Number.isSafeInteger(value)) return BigInt(value);
+  return null;
+}
+
+function exactStatInteger(value, positive = false) {
+  const exact = exactIntegerValue(value);
+  if (exact === null) return null;
+  return (!positive || exact > 0n) && exact >= 0n ? exact : null;
+}
+
+function sameExactStatInteger(left, right, positive = false) {
+  const exactLeft = exactStatInteger(left, positive);
+  const exactRight = exactStatInteger(right, positive);
+  return exactLeft !== null && exactRight !== null && exactLeft === exactRight;
+}
+
+function sameSnapshotTime(left, right, nsField, msField) {
+  const leftNs = left && left[nsField];
+  const rightNs = right && right[nsField];
+  if (leftNs !== undefined || rightNs !== undefined) {
+    const exactLeft = exactIntegerValue(leftNs);
+    const exactRight = exactIntegerValue(rightNs);
+    return exactLeft !== null && exactRight !== null && exactLeft === exactRight;
+  }
+  return Number.isFinite(left && left[msField])
+    && Number.isFinite(right && right[msField])
+    && left[msField] === right[msField];
+}
+
+function singleRegularFile(stat, requireLinkCheck = false) {
+  if (!stat || typeof stat.isFile !== 'function' || !stat.isFile()) return false;
+  if (requireLinkCheck && typeof stat.isSymbolicLink !== 'function') return false;
+  if (typeof stat.isSymbolicLink === 'function' && stat.isSymbolicLink()) return false;
+  return exactStatInteger(stat.dev, true) !== null
+    && exactStatInteger(stat.ino, true) !== null
+    && exactStatInteger(stat.nlink) === 1n;
+}
+
 function sameFileIdentity(left, right) {
-  if (!left || !right) return false;
-  if (left.dev !== right.dev) return false;
-  if (left.ino && right.ino && left.ino !== right.ino) return false;
-  return true;
+  return !!left && !!right
+    && sameExactStatInteger(left.dev, right.dev, true)
+    && sameExactStatInteger(left.ino, right.ino, true);
 }
 
 function sameFileSnapshot(left, right) {
   return sameFileIdentity(left, right)
-    && left.size === right.size
-    && left.mtimeMs === right.mtimeMs
-    && left.ctimeMs === right.ctimeMs;
+    && sameExactStatInteger(left.size, right.size)
+    && sameSnapshotTime(left, right, 'mtimeNs', 'mtimeMs')
+    && sameSnapshotTime(left, right, 'ctimeNs', 'ctimeMs');
 }
 
 function pathHasLink(root, full) {
@@ -710,15 +749,22 @@ function pathHasLink(root, full) {
     current = path.join(current, part);
     entries.push(current);
   }
-  return entries.some((entry) => fs.lstatSync(entry).isSymbolicLink());
+  return entries.some((entry) => fs.lstatSync(entry, { bigint: true }).isSymbolicLink());
 }
 
 function safeOpenPath(full, root, openedStat) {
   if (!pathWithin(root, full) || pathHasLink(root, full)) return false;
+  const link = fs.lstatSync(full, { bigint: true });
+  if (!singleRegularFile(openedStat) || !singleRegularFile(link, true)
+      || !sameFileIdentity(openedStat, link)) return false;
   const realRoot = fs.realpathSync(root);
   const realFile = fs.realpathSync(full);
   if (!pathWithin(realRoot, realFile)) return false;
-  return sameFileIdentity(openedStat, fs.statSync(full));
+  const pathStat = fs.statSync(full, { bigint: true });
+  return singleRegularFile(pathStat)
+    && sameFileSnapshot(openedStat, link)
+    && sameFileSnapshot(openedStat, pathStat)
+    && sameFileSnapshot(link, pathStat);
 }
 
 function readBoundedFd(fd, maxBytes) {
@@ -740,16 +786,25 @@ async function readStableFileSnapshot(full, root, maxBytes, opts = {}) {
   let fd;
   try {
     fd = fs.openSync(full, fs.constants.O_RDONLY | noFollow);
-    const before = fs.fstatSync(fd);
-    if (!before.isFile() || !safeOpenPath(full, root, before)) return { error: 'unsafe_file_reference' };
-    if (before.size > maxBytes) return { error: 'file_too_large' };
+    const before = fs.fstatSync(fd, { bigint: true });
+    const beforeSize = exactStatInteger(before.size);
+    const byteLimit = exactStatInteger(maxBytes);
+    if (!singleRegularFile(before) || beforeSize === null || byteLimit === null
+        || !safeOpenPath(full, root, before)) return { error: 'unsafe_file_reference' };
+    if (beforeSize > byteLimit) return { error: 'file_too_large' };
     if (typeof opts.onFileOpened === 'function') await opts.onFileOpened({ fd, full, stat: before });
     const buffer = readBoundedFd(fd, maxBytes);
-    const after = fs.fstatSync(fd);
-    if (buffer.length > maxBytes || after.size > maxBytes) return { error: 'file_too_large' };
-    if (!sameFileSnapshot(before, after) || buffer.length !== after.size) return { error: 'file_changed_during_inspection' };
+    const after = fs.fstatSync(fd, { bigint: true });
+    const afterSize = exactStatInteger(after.size);
+    if (!singleRegularFile(after) || afterSize === null) return { error: 'file_changed_during_inspection' };
+    if (buffer.length > maxBytes || afterSize > byteLimit) return { error: 'file_too_large' };
+    if (!sameFileSnapshot(before, after) || BigInt(buffer.length) !== afterSize) return { error: 'file_changed_during_inspection' };
     if (!safeOpenPath(full, root, after)) return { error: 'file_changed_during_inspection' };
-    return { buffer, stat: after };
+    const final = fs.fstatSync(fd, { bigint: true });
+    if (!singleRegularFile(final) || !sameFileSnapshot(after, final)) {
+      return { error: 'file_changed_during_inspection' };
+    }
+    return { buffer, stat: final };
   } catch {
     return { error: 'unsafe_file_reference' };
   } finally {
@@ -854,33 +909,48 @@ async function scanAbsoluteFile(filePath, opts = {}) {
   return scanResolvedFile(path.basename(full), full, root, opts);
 }
 
-function removeHandoffEventFile(file, opts = {}) {
-  try {
-    fs.rmSync(file, { force: true });
-  } catch {
-    if (!opts.silent) console.error('  native handoff cleanup failed');
+function removeHandoffEventFile(file, fileIdentity, opts = {}) {
+  if (!fileIdentity) return false;
+  const upstreamWarning = opts.onCommittedCleanupWarning;
+  const removed = nativeHandoff.removeAcceptedHandoffFile(file, fileIdentity, {
+    ...opts,
+    onCommittedCleanupWarning(warning) {
+      if (typeof upstreamWarning === 'function') upstreamWarning(warning);
+      if (!opts.silent) console.error('  native handoff cleanup failed:', warning.code || 'cleanup_failed');
+    },
+  });
+  if (!removed && !opts.silent && fs.existsSync(file)) {
+    console.error('  native handoff cleanup retained a changed replacement');
   }
+  return removed;
 }
 
 async function processNativeHandoffFile(file, opts = {}) {
   let event;
+  let eventFileIdentity = null;
   try {
-    event = nativeHandoff.readHandoffFile(file, opts);
+    const accepted = nativeHandoff.readHandoffFileSnapshot(file, opts);
+    event = accepted.event;
+    eventFileIdentity = accepted.fileIdentity;
   } catch (e) {
+    eventFileIdentity = e && e.fileIdentity || null;
     if (e && e.message === 'native handoff event is outside the allowed time window') {
       try {
-        const acceptedEarlier = nativeHandoff.readHandoffFile(file, {
+        const acceptedEarlier = nativeHandoff.readHandoffFileSnapshot(file, {
           ...opts,
           ttlMs: Number.MAX_SAFE_INTEGER,
           now: new Date(),
         });
-        const prior = nativeHandoff.readHandoffClaim(acceptedEarlier, file, opts);
-        if (prior && (prior.state === 'claimed' || prior.state === 'terminal')) event = acceptedEarlier;
+        const prior = nativeHandoff.readHandoffClaim(acceptedEarlier.event, file, opts);
+        if (prior && (prior.state === 'claimed' || prior.state === 'terminal')) {
+          event = acceptedEarlier.event;
+          eventFileIdentity = acceptedEarlier.fileIdentity;
+        }
       } catch {}
     }
     if (!event) {
       if (!opts.silent) console.error('  native handoff rejected:', e.message);
-      if (opts.removeRejected) removeHandoffEventFile(file, opts);
+      if (opts.removeRejected) removeHandoffEventFile(file, eventFileIdentity, opts);
       return { status: 'rejected', reason: e.message };
     }
     // A signature-valid event accepted while fresh may finish after its
@@ -906,10 +976,10 @@ async function processNativeHandoffFile(file, opts = {}) {
     return result;
   }, opts);
   if (!claim.claimed) {
-    if (!opts.keepHandoffFile) removeHandoffEventFile(file, opts);
+    if (!opts.keepHandoffFile) removeHandoffEventFile(file, eventFileIdentity, opts);
     return { status: 'replayed', reason: 'native handoff event was already consumed', terminal: claim.terminal };
   }
-  if (!opts.keepHandoffFile) removeHandoffEventFile(file, opts);
+  if (!opts.keepHandoffFile) removeHandoffEventFile(file, eventFileIdentity, opts);
   return { status: 'processed', event, result: claim.result, terminal: claim.terminal };
 }
 

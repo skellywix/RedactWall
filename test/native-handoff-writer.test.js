@@ -9,6 +9,7 @@ const writer = require('../sensors/endpoint-agent/write-handoff');
 const handoff = require('../sensors/endpoint-agent/native-handoff');
 
 const SECRET = 'native-handoff-secret-000000000000000001';
+const WINDOWS_O_TEMPORARY = 0x40;
 
 function tempDir(t, prefix = 'ps-native-handoff-writer-') {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -277,10 +278,96 @@ test('writer rejects directory-fsync EIO and removes the unpublished event', (t)
   try {
     assert.throws(
       () => writer._internal.writeAtomicJson(target, '{"ok":true}\n'),
-      /synthetic handoff directory fsync EIO/,
+      (error) => error?.message === 'synthetic handoff directory fsync EIO'
+        || error?.cause?.message === 'synthetic handoff directory fsync EIO',
     );
   } finally {
     fs.fsyncSync = originalFsync;
   }
   assert.deepStrictEqual(fs.readdirSync(dir), []);
+});
+
+test('writer rolls back the visible event when staging-source cleanup fails', (t) => {
+  const dir = tempDir(t);
+  const target = path.join(dir, 'source-cleanup.json');
+  const originalLink = fs.linkSync;
+  const originalOpen = fs.openSync;
+  const originalUnlink = fs.unlinkSync;
+  let staged = '';
+  let denied = false;
+  fs.linkSync = (source, destination) => {
+    if (path.resolve(destination) === path.resolve(target) && !staged) {
+      staged = path.resolve(source);
+    }
+    return originalLink(source, destination);
+  };
+  fs.openSync = (candidate, flags, mode) => {
+    if (!denied && staged && path.resolve(candidate) === staged
+        && typeof flags === 'number' && (flags & WINDOWS_O_TEMPORARY) === WINDOWS_O_TEMPORARY) {
+      denied = true;
+      const error = new Error('synthetic native handoff staging unlink EIO');
+      error.code = 'EIO';
+      throw error;
+    }
+    return originalOpen(candidate, flags, mode);
+  };
+  fs.unlinkSync = (candidate) => {
+    if (!denied && staged && path.resolve(candidate) === staged) {
+      denied = true;
+      const error = new Error('synthetic native handoff staging unlink EIO');
+      error.code = 'EIO';
+      throw error;
+    }
+    return originalUnlink(candidate);
+  };
+  try {
+    assert.throws(
+      () => writer._internal.writeAtomicJson(target, '{"ok":true}\n'),
+      (error) => error?.code === 'EIO'
+        || error?.cause?.code === 'EIO'
+        || /publication cleanup/.test(String(error?.message || '')),
+    );
+  } finally {
+    fs.linkSync = originalLink;
+    fs.openSync = originalOpen;
+    fs.unlinkSync = originalUnlink;
+  }
+
+  assert.strictEqual(denied, true);
+  assert.strictEqual(fs.existsSync(target), false, 'unverified multi-link event is rolled back');
+  for (const entry of fs.readdirSync(dir)) {
+    const stat = fs.lstatSync(path.join(dir, entry), { bigint: true });
+    if (stat.isFile()) assert.strictEqual(stat.nlink, 1n);
+  }
+});
+
+test('writer failure cleanup preserves a replacement at the staging pathname', (t) => {
+  const dir = tempDir(t);
+  const target = path.join(dir, 'stage-replacement.json');
+  const replacement = Buffer.from('replacement-native-staging-bytes');
+  const originalLink = fs.linkSync;
+  let staged = '';
+  fs.linkSync = (source, destination) => {
+    if (path.resolve(destination) === path.resolve(target) && !staged) {
+      staged = path.resolve(source);
+      fs.renameSync(source, `${source}.retained-original`);
+      fs.writeFileSync(source, replacement, { mode: 0o600 });
+      const error = new Error('synthetic native handoff publication collision');
+      error.code = 'EIO';
+      throw error;
+    }
+    return originalLink(source, destination);
+  };
+  try {
+    assert.throws(
+      () => writer._internal.writeAtomicJson(target, '{"ok":true}\n'),
+      /synthetic native handoff publication collision/,
+    );
+  } finally {
+    fs.linkSync = originalLink;
+  }
+
+  assert.ok(staged);
+  assert.strictEqual(fs.existsSync(target), false);
+  assert.deepStrictEqual(fs.readFileSync(staged), replacement);
 });

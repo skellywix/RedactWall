@@ -8,10 +8,11 @@
  * proves the audit chain plus row counts survived the round trip.
  *
  * Postgres (REDACTWALL_DB_DRIVER=postgres): dumps with pg_dump, restores into a
- * uniquely named scratch database on the same server, verifies the audit
- * chain and counts there, and always drops the scratch database afterwards
- * (--keep retains only the dump + manifest). The connected role needs
- * CREATEDB for the scratch restore.
+ * uniquely named absent scratch database through backup-store's guarded
+ * restore protocol, verifies the audit chain and counts there, and removes
+ * only the exact database identity returned by that restore. --keep retains
+ * the unique private drill workspace. The connected role must be a
+ * non-superuser with CREATEDB for the scratch restore.
  *
  * Either way the report contains only hashes, counts, and check results —
  * never prompt text or connection credentials.
@@ -23,25 +24,168 @@ const path = require('path');
 const crypto = require('crypto');
 const Database = require('better-sqlite3');
 const backup = require('./backup-store');
+const privatePaths = require('../server/private-path');
 
 function parseArgs(argv) {
   const out = { keep: false };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--keep') out.keep = true;
-    else if (arg === '--backup-dir') out.backupDir = argv[++i];
+    else if (arg === '--backup-dir') {
+      if (i + 1 >= argv.length || argv[i + 1].startsWith('--')) {
+        throw new Error('--backup-dir requires a value');
+      }
+      out.backupDir = argv[++i];
+    }
     else throw new Error(`unknown argument: ${arg} (expected --backup-dir <dir> and/or --keep)`);
   }
   return out;
 }
 
-function resolveWorkDir(backupDir) {
-  if (backupDir) {
-    const dir = path.resolve(backupDir);
-    fs.mkdirSync(dir, { recursive: true });
-    return { dir, owned: false };
+function exactArtifactStat(target, directory, label) {
+  const stat = fs.lstatSync(target, { bigint: true });
+  if (stat.isSymbolicLink?.() || stat.dev === 0n || stat.ino === 0n
+      || (directory ? !stat.isDirectory() : !stat.isFile())
+      || (!directory && stat.nlink !== 1n)) {
+    throw new Error(`${label} has no stable filesystem identity: ${target}`);
   }
-  return { dir: fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-drill-')), owned: true };
+  return stat;
+}
+
+function sameArtifactIdentity(expected, actual) {
+  return expected.dev === actual.dev && expected.ino === actual.ino
+    && expected.birthtimeNs === actual.birthtimeNs;
+}
+
+function privateDirectoryOptions(security, label) {
+  return {
+    ...(security.privatePathSecurity || security),
+    fs,
+    directory: true,
+    fresh: true,
+    label,
+    ownerLabel: label,
+  };
+}
+
+function securePrivateDirectory(target, security, label, expected) {
+  const options = privateDirectoryOptions(security, label);
+  privatePaths.restrictPrivatePath(target, options);
+  privatePaths.assertPrivatePath(target, options);
+  const current = exactArtifactStat(target, true, label);
+  if (!sameArtifactIdentity(expected, current)) throw new Error(`${label} changed while securing it`);
+}
+
+function createWorkDir(backupDir, security = {}) {
+  const parent = path.resolve(backupDir || os.tmpdir());
+  fs.mkdirSync(parent, { recursive: true });
+  const dir = fs.mkdtempSync(path.join(parent, '.redactwall-drill-'));
+  const workDir = {
+    dir,
+    parent,
+    identity: exactArtifactStat(dir, true, 'backup drill workspace'),
+    artifacts: new Map(),
+  };
+  try {
+    securePrivateDirectory(dir, security, 'backup drill workspace', workDir.identity);
+    return workDir;
+  } catch (error) {
+    try { cleanupWorkDir(workDir); } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], `failed to secure backup drill workspace; ${cleanupError.message}`);
+    }
+    throw error;
+  }
+}
+
+function childRelativePath(workDir, target) {
+  const resolved = path.resolve(target);
+  const relative = path.relative(workDir.dir, resolved);
+  if (!relative || relative.startsWith(`..${path.sep}`) || relative === '..' || path.isAbsolute(relative)) {
+    throw new Error(`backup drill artifact escaped its private workspace: ${resolved}`);
+  }
+  return relative;
+}
+
+function trackArtifact(workDir, target, directory, label) {
+  if (!target) return;
+  const relative = childRelativePath(workDir, target);
+  const identity = exactArtifactStat(path.resolve(target), directory, label);
+  workDir.artifacts.set(relative, { directory, identity, label });
+}
+
+function trackCreatedArtifacts(workDir, created) {
+  if (!created) return;
+  for (const [field, target] of Object.entries({
+    file: created.file,
+    auditStateFile: created.auditStateFile,
+    auditCheckpointFile: created.auditCheckpointFile,
+    manifestFile: created.manifestFile,
+  })) trackArtifact(workDir, target, false, `backup drill ${field}`);
+}
+
+function createPrivateChildDirectory(workDir, target, security, label) {
+  fs.mkdirSync(target, { mode: 0o700 });
+  trackArtifact(workDir, target, true, label);
+  const expected = workDir.artifacts.get(childRelativePath(workDir, target)).identity;
+  securePrivateDirectory(target, security, label, expected);
+}
+
+function trackRestoredArtifacts(workDir, restored) {
+  if (!restored) return;
+  const files = [restored.file, restored.manifestFile, restored.auditStateFile, restored.auditCheckpointFile];
+  const directories = new Set(files.filter(Boolean).map((file) => path.dirname(path.resolve(file))));
+  for (const directory of directories) {
+    if (directory !== workDir.dir) trackArtifact(workDir, directory, true, 'backup drill restored directory');
+  }
+  for (const file of files) trackArtifact(workDir, file, false, 'backup drill restored artifact');
+}
+
+function pathEntryExists(target) {
+  try { fs.lstatSync(target); return true; } catch (error) {
+    if (error && error.code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
+function retainedWorkspacePath(quarantine, original) {
+  if (!pathEntryExists(original) && pathEntryExists(quarantine)) {
+    try { fs.renameSync(quarantine, original); return original; } catch {}
+  }
+  return quarantine;
+}
+
+function assertQuarantinedWorkspace(workDir, quarantine) {
+  const current = exactArtifactStat(quarantine, true, 'quarantined backup drill workspace');
+  if (!sameArtifactIdentity(workDir.identity, current)) {
+    throw new Error('backup drill workspace identity changed before cleanup');
+  }
+  for (const [relative, artifact] of workDir.artifacts) {
+    const target = path.join(quarantine, relative);
+    const stat = exactArtifactStat(target, artifact.directory, artifact.label);
+    if (!sameArtifactIdentity(artifact.identity, stat)) {
+      throw new Error(`${artifact.label} identity changed before cleanup: ${target}`);
+    }
+  }
+}
+
+function cleanupWorkDir(workDir) {
+  const quarantine = path.join(
+    workDir.parent,
+    `.${path.basename(workDir.dir)}.cleanup-${process.pid}-${crypto.randomBytes(12).toString('hex')}`,
+  );
+  try {
+    fs.renameSync(workDir.dir, quarantine);
+  } catch (error) {
+    throw new Error(`backup drill cleanup refused; workspace retained at ${workDir.dir}`, { cause: error });
+  }
+  try {
+    assertQuarantinedWorkspace(workDir, quarantine);
+  } catch (error) {
+    const retainedAt = retainedWorkspacePath(quarantine, workDir.dir);
+    throw new Error(`backup drill cleanup refused; changed workspace or artifacts retained at ${retainedAt}`, { cause: error });
+  }
+  fs.rmSync(quarantine, { recursive: true, force: true });
+  privatePaths.fsyncDirectory(workDir.parent, { fs });
 }
 
 /** Open the restored copy read-only and measure it independently. */
@@ -100,31 +244,7 @@ function buildReport({ created, verified, restored, inspection, workDir, keep })
   };
 }
 
-function cleanupArtifacts(workDir, created, restoredPath) {
-  fs.rmSync(path.dirname(restoredPath), { recursive: true, force: true });
-  if (workDir.owned) {
-    fs.rmSync(workDir.dir, { recursive: true, force: true });
-    return;
-  }
-  for (const suffix of ['', '-wal', '-shm', '-journal']) fs.rmSync(created.file + suffix, { force: true });
-  if (created.auditStateFile) fs.rmSync(created.auditStateFile, { force: true });
-  if (created.auditCheckpointFile) fs.rmSync(created.auditCheckpointFile, { force: true });
-  fs.rmSync(created.manifestFile, { force: true });
-}
-
 // ---- Postgres drill ----------------------------------------------------------
-
-async function withPgClient(connectionString, fn) {
-  backup.assertPostgresConnectionUrl(connectionString);
-  const { Client } = require('pg');
-  const client = new Client({ connectionString });
-  await client.connect();
-  try {
-    return await fn(client);
-  } finally {
-    await client.end();
-  }
-}
 
 function pgDrillChecks({ created, verified, restored }) {
   const manifest = created.manifest || {};
@@ -167,35 +287,158 @@ function buildPgReport({ created, verified, restored, scratchDb, workDir, keep }
   };
 }
 
-function cleanupPgArtifacts(workDir, created) {
-  if (workDir.owned) {
-    fs.rmSync(workDir.dir, { recursive: true, force: true });
-    return;
-  }
-  fs.rmSync(created.file, { force: true });
-  fs.rmSync(created.manifestFile, { force: true });
+async function captureCleanupFailure(failures, label, action) {
+  try { await action(); } catch (error) { failures.push({ label, error }); }
 }
 
-/** Dump → restore into a scratch database → verify there → drop it (always). */
+function throwPgDrillFailure(primaryError, cleanupFailures, recoveryWorkspace = null) {
+  if (primaryError && cleanupFailures.length === 0 && !recoveryWorkspace) throw primaryError;
+  if (!primaryError && cleanupFailures.length === 0 && !recoveryWorkspace) return;
+  const details = cleanupFailures
+    .map((failure) => `${failure.label}: ${failure.error.message}`)
+    .join('; ');
+  const recovery = recoveryWorkspace
+    ? `; private recovery workspace retained at ${recoveryWorkspace}` : '';
+  const message = primaryError
+    ? `Postgres backup drill failed: ${primaryError.message}${details ? `; cleanup also failed: ${details}` : ''}${recovery}`
+    : `Postgres backup drill cleanup failed: ${details}${recovery}`;
+  const errors = [primaryError, ...cleanupFailures.map((failure) => failure.error)].filter(Boolean);
+  throw new AggregateError(errors, message);
+}
+
+function exactPgRestoreIdentity(restored, scratchDb) {
+  const identity = restored && restored.databaseIdentity;
+  const oid = String(identity && identity.oid || '');
+  const ownerOid = String(identity && identity.ownerOid || '');
+  if (!restored || restored.ok !== true || !identity || identity.name !== scratchDb
+      || !/^[1-9][0-9]*$/.test(oid) || !/^[1-9][0-9]*$/.test(ownerOid)) {
+    throw new Error(
+      `Postgres guarded restore did not return the exact identity for ${scratchDb}; automatic database cleanup was skipped`,
+    );
+  }
+  return { name: scratchDb, oid, ownerOid };
+}
+
+async function performPgDrill(context, state) {
+  const created = await context.create({ outDir: context.workDir.dir, dbModule: context.db });
+  trackCreatedArtifacts(context.workDir, created);
+  const verified = context.verify({ file: created.file, manifestFile: created.manifestFile });
+  let restored = null;
+  if (verified.ok) {
+    createPrivateChildDirectory(context.workDir, context.runtimeRoot, context.opts.security || {}, 'Postgres drill runtime directory');
+    state.restoreAttempted = true;
+    restored = await context.restore({
+      file: created.file,
+      to: context.scratchDb,
+      manifestFile: created.manifestFile,
+      auditDir: context.auditDir,
+    });
+    state.databaseIdentity = exactPgRestoreIdentity(restored, context.scratchDb);
+    trackRestoredArtifacts(context.workDir, restored);
+  }
+  return buildPgReport({
+    created, verified, restored, scratchDb: context.scratchDb,
+    workDir: context.workDir.dir, keep: !!context.opts.keep,
+  });
+}
+
+async function cleanupPgDrill(context, state, primaryError) {
+  const cleanupFailures = [];
+  if (state.databaseIdentity) {
+    await captureCleanupFailure(cleanupFailures, 'guarded scratch database cleanup', async () => {
+      const result = await context.cleanupDatabase({
+        connectionString: context.connectionString,
+        databaseIdentity: state.databaseIdentity,
+        env: context.env,
+      });
+      if (!result || result.ok !== true) {
+        throw new Error('guarded restore cleanup did not confirm removal');
+      }
+    });
+  }
+  const databaseCleanupFailed = cleanupFailures.length > 0;
+  const ownershipUnknown = !!primaryError && state.restoreAttempted && !state.databaseIdentity;
+  const recoveryWorkspace = databaseCleanupFailed || ownershipUnknown ? context.workDir.dir : null;
+  if (!context.opts.keep && !recoveryWorkspace) {
+    await captureCleanupFailure(cleanupFailures, 'workspace cleanup hook', async () => {
+      if (context.opts.beforeWorkspaceCleanup) await context.opts.beforeWorkspaceCleanup(context);
+    });
+    await captureCleanupFailure(cleanupFailures, 'private drill workspace', () => cleanupWorkDir(context.workDir));
+  }
+  return { cleanupFailures, recoveryWorkspace };
+}
+
+/** Dump → guarded restore into an absent scratch name → exact-identity cleanup. */
 async function runPgDrill(opts, db, create) {
   const connectionString = process.env.REDACTWALL_DATABASE_URL || process.env.DATABASE_URL;
   if (!connectionString) throw new Error('postgres drill requires REDACTWALL_DATABASE_URL');
   backup.assertPostgresConnectionUrl(connectionString);
-  const workDir = resolveWorkDir(opts.backupDir);
+  const workDir = createWorkDir(opts.backupDir, opts.security);
   const scratchDb = 'redactwall_drill_' + crypto.randomBytes(5).toString('hex');
-  const created = await create({ outDir: workDir.dir, dbModule: db });
-  const verified = backup.verifyBackup({ file: created.file, manifestFile: created.manifestFile });
-  let restored = null;
-  if (verified.ok) {
-    await withPgClient(connectionString, (client) => client.query(`CREATE DATABASE ${scratchDb}`));
-    try {
-      restored = backup.restoreBackup({ file: created.file, to: scratchDb });
-    } finally {
-      await withPgClient(connectionString, (client) => client.query(`DROP DATABASE IF EXISTS ${scratchDb} WITH (FORCE)`));
-    }
+  const runtimeRoot = path.join(workDir.dir, `${scratchDb}-runtime`);
+  const context = {
+    opts, db, create, connectionString, workDir, scratchDb, runtimeRoot,
+    auditDir: path.join(runtimeRoot, 'audit'),
+    env: opts.env || process.env,
+    verify: opts.verifyBackup || backup.verifyBackup,
+    restore: opts.restoreBackup || backup.restoreBackup,
+    cleanupDatabase: opts.cleanupPgRestoreDatabase || backup.cleanupPgRestoreDatabase,
+  };
+  const state = { databaseIdentity: null, restoreAttempted: false };
+  let report;
+  let primaryError = null;
+  try { report = await performPgDrill(context, state); } catch (error) { primaryError = error; }
+  const cleanup = await cleanupPgDrill(context, state, primaryError);
+  throwPgDrillFailure(primaryError, cleanup.cleanupFailures, cleanup.recoveryWorkspace);
+  return report;
+}
+
+async function performSqliteDrill(context) {
+  const created = await context.create({ outDir: context.workDir.dir, dbModule: context.db });
+  trackCreatedArtifacts(context.workDir, created);
+  const verified = context.verify({ file: created.file, manifestFile: created.manifestFile });
+  const restored = verified.ok
+    ? context.restore({ file: created.file, to: context.restoredPath, force: true })
+    : null;
+  trackRestoredArtifacts(context.workDir, restored);
+  const inspection = restored ? context.inspect(context.restoredPath) : null;
+  return buildReport({
+    created, verified, restored, inspection,
+    workDir: context.workDir.dir, keep: !!context.opts.keep,
+  });
+}
+
+function throwSqliteDrillFailure(primaryError, cleanupFailures) {
+  if (!primaryError && cleanupFailures.length === 0) return;
+  const errors = [primaryError, ...cleanupFailures.map((failure) => failure.error)].filter(Boolean);
+  if (errors.length === 1) throw errors[0];
+  const details = cleanupFailures.map((failure) => `${failure.label}: ${failure.error.message}`).join('; ');
+  const message = primaryError
+    ? `SQLite backup drill failed: ${primaryError.message}; cleanup also failed: ${details}`
+    : `SQLite backup drill cleanup failed: ${details}`;
+  throw new AggregateError(errors, message);
+}
+
+async function runSqliteDrill(opts, db, create) {
+  const workDir = createWorkDir(opts.backupDir, opts.security);
+  const context = {
+    opts, db, create, workDir,
+    restoredPath: path.join(workDir.dir, 'restored-redactwall.db'),
+    verify: opts.verifyBackup || backup.verifyBackup,
+    restore: opts.restoreBackup || backup.restoreBackup,
+    inspect: opts.inspectRestoredDb || inspectRestoredDb,
+  };
+  let report;
+  let primaryError = null;
+  try { report = await performSqliteDrill(context); } catch (error) { primaryError = error; }
+  const cleanupFailures = [];
+  if (!opts.keep) {
+    await captureCleanupFailure(cleanupFailures, 'workspace cleanup hook', async () => {
+      if (opts.beforeWorkspaceCleanup) await opts.beforeWorkspaceCleanup(context);
+    });
+    await captureCleanupFailure(cleanupFailures, 'private drill workspace', () => cleanupWorkDir(workDir));
   }
-  const report = buildPgReport({ created, verified, restored, scratchDb, workDir: workDir.dir, keep: !!opts.keep });
-  if (!opts.keep) cleanupPgArtifacts(workDir, created);
+  throwSqliteDrillFailure(primaryError, cleanupFailures);
   return report;
 }
 
@@ -210,17 +453,7 @@ async function runDrill(opts = {}) {
   const db = opts.dbModule || require('../server/db');
   const create = opts.createBackup || backup.createBackup;
   if ((db._driverKind || 'sqlite') === 'postgres') return runPgDrill(opts, db, create);
-  const workDir = resolveWorkDir(opts.backupDir);
-  const restoredPath = path.join(workDir.dir, 'drill-restore', 'restored-redactwall.db');
-  const created = await create({ outDir: workDir.dir, dbModule: db });
-  const verified = backup.verifyBackup({ file: created.file, manifestFile: created.manifestFile });
-  const restored = verified.ok
-    ? backup.restoreBackup({ file: created.file, to: restoredPath, force: true })
-    : null;
-  const inspection = restored ? inspectRestoredDb(restoredPath) : null;
-  const report = buildReport({ created, verified, restored, inspection, workDir: workDir.dir, keep: !!opts.keep });
-  if (!opts.keep) cleanupArtifacts(workDir, created, restoredPath);
-  return report;
+  return runSqliteDrill(opts, db, create);
 }
 
 async function main(argv = process.argv.slice(2), deps = {}) {
@@ -243,4 +476,11 @@ module.exports = {
   runDrill,
   inspectRestoredDb,
   main,
+  _internal: {
+    cleanupWorkDir,
+    createWorkDir,
+    exactArtifactStat,
+    sameArtifactIdentity,
+    exactPgRestoreIdentity,
+  },
 };

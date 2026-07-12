@@ -28,17 +28,22 @@ function waitImmediate() {
 test('checkpoint EACCES makes readiness fail and freezes audit-coupled mutation until synchronous repair', async (t) => {
   const checkpointPath = path.resolve(db._auditAnchorPaths.checkpointPath);
   const beforeCheckpoint = JSON.parse(fs.readFileSync(checkpointPath, 'utf8'));
-  const originalRename = fs.renameSync;
+  // Checkpoint publication commits a staged .tmp file through an exclusive
+  // hard link; rollback restores from quarantine through linkSync too, so the
+  // denial must match only the staged-candidate source.
+  const originalLink = fs.linkSync;
   let denyCheckpointPublication = true;
-  fs.renameSync = function injectedCheckpointRename(source, destination) {
-    if (denyCheckpointPublication && path.resolve(destination) === checkpointPath) {
+  fs.linkSync = function injectedCheckpointLink(source, destination) {
+    if (denyCheckpointPublication
+        && path.resolve(destination) === checkpointPath
+        && String(source).endsWith('.tmp')) {
       const error = new Error('synthetic checkpoint publication denial');
       error.code = 'EACCES';
       throw error;
     }
-    return originalRename.call(this, source, destination);
+    return originalLink.call(this, source, destination);
   };
-  t.after(() => { fs.renameSync = originalRename; });
+  t.after(() => { fs.linkSync = originalLink; });
 
   const server = await listen(app);
   t.after(() => new Promise((resolve) => server.close(resolve)));
@@ -91,7 +96,9 @@ test('checkpoint EACCES makes readiness fail and freezes audit-coupled mutation 
   assert.strictEqual(db.auditHealth().ok, true);
   assert.ok(db.listAudit(50).some((entry) => entry.id === recovered.id));
   assert.strictEqual(db.verifyAuditChain().ok, true);
-  assert.strictEqual((await fetch(`http://127.0.0.1:${port}/readyz`)).status, 200);
+  const recoveredReadiness = await fetch(`http://127.0.0.1:${port}/readyz`);
+  const recoveredBody = await recoveredReadiness.text();
+  assert.strictEqual(recoveredReadiness.status, 200, recoveredBody);
 });
 
 test.after(() => {

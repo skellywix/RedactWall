@@ -34,6 +34,7 @@ const methods = {
     (saved) => ({ action: payload.action, actor: 'postgres-race-test', detail: `invitation=${saved.id}` }),
   ).result,
   listAuditActions: () => db.listAudit(100).map((entry) => entry.action),
+  appendAudit: (payload) => db.appendAudit(payload),
   verifyAudit: () => db.verifyAuditChain(),
   applyVendorHeartbeat: (payload) => db.applyVendorHeartbeat(payload),
   lastVendorHeartbeat: (payload) => db.lastVendorHeartbeat(payload.customerId, payload.customerRef),

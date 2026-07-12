@@ -13,6 +13,7 @@ process.env.REDACTWALL_DB_PATH = path.join(dbDir, 'test.db');
 
 const app = require('../server/app');
 const db = require('../server/db');
+const privatePaths = require('../server/private-path');
 const { listen } = require('./support/listen');
 
 // Close the SQLite handle before deleting: Windows cannot unlink open files.
@@ -54,6 +55,22 @@ test('readiness endpoint is reachable through the importable app', async (t) => 
   assert.strictEqual(body.ready, true);
   assert.strictEqual(body.database, true);
   assert.ok(['ok', 'warnings'].includes(body.configuration));
+});
+
+test('readiness exposes committed durable-state cleanup degradation', async (t) => {
+  const original = privatePaths.committedCleanupHealth;
+  privatePaths.committedCleanupHealth = () => ({ ok: false, reason: 'durable-storage-cleanup-degraded' });
+  t.after(() => { privatePaths.committedCleanupHealth = original; });
+  const server = await listen(app);
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const { port } = server.address();
+
+  const res = await fetch(`http://127.0.0.1:${port}/readyz`);
+  assert.strictEqual(res.status, 503);
+  const body = await res.json();
+  assert.strictEqual(body.ready, false);
+  assert.strictEqual(body.durableStorage, false);
+  assert.strictEqual(body.error, 'durable_storage_cleanup_degraded');
 });
 
 test('unauthenticated navigation redirects pages but returns API auth errors', async (t) => {

@@ -25,6 +25,8 @@ Postgres 16 and 17 are exercised in CI.
 ```text
 REDACTWALL_DB_DRIVER=postgres
 REDACTWALL_DATABASE_URL=postgresql://redactwall_app:<password>@db.internal:5432/redactwall?sslmode=require
+REDACTWALL_AUDIT_DIR=/var/lib/redactwall/shared-audit
+REDACTWALL_AUDIT_KEY=<independent-32-plus-character-secret>
 ```
 
 `DATABASE_URL` is accepted as a fallback when `REDACTWALL_DATABASE_URL` is not
@@ -33,9 +35,42 @@ when your provider supports it); the connection string carries credentials, so
 keep it in your secret manager and never in shell history, logs, or manifests.
 RedactWall's own tooling never echoes it.
 
-All control-plane replicas must also share the same `REDACTWALL_SECRET` and
-`REDACTWALL_DATA_KEY` so sessions, receipts, and sealed prompts stay valid
-across replicas.
+All control-plane replicas must share the same `REDACTWALL_SECRET`,
+`REDACTWALL_DATA_KEY`, and preferably an explicit `REDACTWALL_AUDIT_KEY` so
+sessions, receipts, sealed prompts, and audit authentication stay valid across
+replicas. They must also mount one durable POSIX-compatible audit volume at the
+same absolute `REDACTWALL_AUDIT_DIR`. The volume must provide coherent reads,
+same-filesystem atomic rename, file and directory `fsync`, and identical numeric
+UID/GID ownership on every host. Independent directories, copied sidecars, and
+eventually synchronized replicas are unsupported and fail closed.
+
+Postgres advisory lock `4021990` coordinates every runtime checkpoint, pending
+high-water, and startup migration operation inside that database. The signed
+audit state is also bound to the database identity, so reusing one audit
+directory/key across different databases fails before mutation. A connection or host
+failure releases that coordination automatically; the hostname/PID filesystem
+lock remains a SQLite-only mechanism. The shared audit volume is therefore a
+required readiness dependency, not an optional cache.
+
+### Upgrade Existing Audit State To Database Scope v3
+
+This upgrade changes authenticated enforcement state and is not a rolling
+mixed-version migration. Drain every control-plane replica first and capture a
+database backup plus the exact existing audit directory. Keep the same audit
+key and do not copy or rename the sidecars during the upgrade.
+
+For older Docker Compose Postgres installs that did not set
+`REDACTWALL_AUDIT_DIR`, the derived path was normally
+`/data/.audit-integrity`. Set that exact absolute path explicitly before the
+first upgraded boot. Fresh deployments may choose a new shared path such as
+`/data/audit-integrity`.
+
+Start exactly one v3 replica against the existing database and audit directory.
+It verifies the complete legacy tail, durably binds the signed state to the
+database scope, and must reach `/readyz` with `verifyAuditChain().ok === true`.
+Only after that succeeds may the remaining upgraded replicas start with the
+same code, key, mount, UID/GID, and absolute path. Never run a pre-v3 replica
+beside a v3 replica.
 
 ## Application Role Setup
 
@@ -148,8 +183,10 @@ The standard backup tooling works on Postgres when the driver is Postgres
 ```bash
 npm run backup -- backups          # pg_dump custom-format .dump + manifest
 npm run backup:verify -- backups/redactwall-<stamp>.dump
-npm run backup:restore -- backups/redactwall-<stamp>.dump <database-name-or-url>
-npm run backup:drill               # dump, restore to a scratch DB, verify, drop
+# The requested name and audit directory must both be absent; restore creates them.
+npm run backup:restore -- backups/redactwall-<stamp>.dump <database-name-or-url> \
+  --audit-dir /var/lib/redactwall/restores/<database>-audit
+npm run backup:drill               # guarded scratch restore, verify, exact cleanup
 ```
 
 Behavior on Postgres:
@@ -161,7 +198,9 @@ Behavior on Postgres:
 - `backup` drives `pg_dump --format=custom --enable-row-security` and writes
   the dump, authenticated audit state/checkpoint sidecars, and an HMAC-bound
   verifier-first manifest. The authentication covers every artifact hash,
-  the exact checkpoint, sizes, row counts, and source audit-chain result —
+  the exact checkpoint, sizes, row counts, source audit-chain result, and the
+  PostgreSQL 16/17 database encoding, locale provider, collation, ctype, ICU
+  locale, and ICU rules needed to reproduce the database from `template0` —
   never prompt bodies and never
   connection credentials (credentials pass to `pg_dump`/`pg_restore` via
   libpq environment variables, not argv). A blank tenant context sees every
@@ -179,20 +218,62 @@ Behavior on Postgres:
   stable handles into a private local staging directory, enforces their
   authenticated sizes, fsyncs and revalidates that snapshot, and gives only
   the staged dump to
-  `pg_restore --no-owner --no-privileges --exit-on-error`. The staged files
+  `pg_restore --no-owner --no-privileges --exit-on-error --single-transaction`. The staged files
   remain private until post-restore audit verification finishes and are
   removed on success or failure. The named target may be a bare database name
-  on the same server or a full `postgresql://` URL. `--force` still only adds
-  `--clean --if-exists`; it cannot bypass a missing, unsigned, or invalid
-  authenticated manifest.
+  on the same server or a full `postgresql://` URL. An explicit `--audit-dir`
+  is required and must name a new destination under a trusted private parent.
+  The requested target database must not exist. Restore refuses an existing
+  name before database creation. In-place
+  `--force` is rejected because `pg_restore --clean` cannot remove target-only
+  objects; choose another absent name instead.
+- Restore creates a cryptorandom staging database from `template0` with the
+  authenticated source definition. It starts non-connectable, revokes public
+  `CONNECT`/`TEMPORARY`, permits only its direct owner, and then holds one stable
+  guard session while the single-transaction restore uses the second slot.
+  After audit and row verification through that guard, restore freezes the
+  database, closes the guard, proves zero sessions, and renames the same OID to
+  the requested target. It publishes and fsyncs the authenticated runtime state
+  while the target is still non-connectable, removes private staging, and makes
+  the target connectable as the final fallible step. The owner-only database ACL
+  remains in place. The result includes the exact database name, OID, and owner
+  OID, plus the runtime paths, and proves that no pending high-water file exists.
+  Point the restored service at that directory with
+  `REDACTWALL_AUDIT_DIR`. A missing, unsigned, invalid, or scope-mismatched
+  authenticated manifest always fails closed.
 - `backup:drill` restores into a uniquely named scratch database
   (`redactwall_drill_<hex>`), verifies the audit hash-chain and row counts
-  there, and always drops the scratch database — `--keep` retains only the
-  dump and manifest. The connecting role therefore needs `CREATEDB` for
-  drills; either grant it to a dedicated maintenance role or run the drill
-  with a separate elevated `REDACTWALL_DATABASE_URL`.
+  there, and cleans up only the exact name/OID/owner identity returned by the
+  guarded restore. It never pre-creates the name, guesses ownership after an
+  error, or uses `DROP ... FORCE`. If restore ownership is unknown or exact
+  cleanup fails, the private workspace and runtime audit state are retained and
+  reported for manual recovery. Owned files
+  are cleaned through an identity-pinned unique workspace; changed replacement
+  paths are preserved and reported. `--keep` retains that complete workspace.
+- Guarded restore and drill require the URL to authenticate directly as one
+  non-superuser `CREATEDB` role that has no granted members. `SET ROLE` from a
+  superuser or another login is rejected. Run the restore as the intended
+  database owner (normally the offline `redactwall_app` role with `CREATEDB`
+  granted only for the maintenance window), then revoke `CREATEDB` afterward.
+  A bare target name uses the configured source database as the maintenance
+  connection. A full target URL uses the same authority and connects through
+  `REDACTWALL_PG_MAINTENANCE_DATABASE` when set, otherwise `postgres`.
+- Run this as an offline maintenance operation after draining every application
+  process that holds the restore credential. The two-slot guard is not an
+  isolation boundary against another cluster superuser or a process holding
+  that same credential; those actors remain inside the database trust boundary.
+- Before manual recovery, inspect both the reported name and OID. A conclusive
+  pre-rename failure removes only the owned staging OID. An uncertain create or
+  rename is never dropped automatically. A failure after rename retains the
+  target non-connectable; an uncertain final-enable response explicitly warns
+  that it may already be connectable. Disable connections before investigating
+  an uncertain enable, and do not remove either database or audit directory by
+  name alone.
 - `pg_dump`/`pg_restore` must be on `PATH` with a major version at least the
-  server's (Debian/Ubuntu: `apt-get install postgresql-client`; RHEL/Amazon
+  server's. The shipped Docker image includes PostgreSQL 17 clients and proves
+  their versions during image build. Use a host checkout or a rebuilt image
+  with a newer client before operating a newer server. Native installs can use
+  Debian/Ubuntu: `apt-get install postgresql-client`; RHEL/Amazon
   Linux: `dnf install postgresql16`; macOS: `brew install libpq`). If they
   are missing the tools fail with an install hint; they never silently fall
   back to SQLite mode.
@@ -205,6 +286,7 @@ the drill is what proves either path actually restores. After **any** restore
 traffic until:
 
 ```bash
+export REDACTWALL_AUDIT_DIR=/var/lib/redactwall/restores/<database>-audit
 node -e "const v=require('./server/db').verifyAuditChain(); console.log(JSON.stringify(v)); if(!v.ok) process.exit(1)"
 ```
 

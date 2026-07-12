@@ -85,22 +85,73 @@ function wireTenantContext(
 // A configured Postgres silo without its session GUC would hit the RLS policy's
 // intentionally unscoped operator branch. Let any wiring failure abort module
 // initialization so readiness can never report healthy cross-tenant access.
-const AUDIT_DIR = path.resolve(process.env.REDACTWALL_AUDIT_DIR || (
+const CONFIGURED_AUDIT_DIR = String(process.env.REDACTWALL_AUDIT_DIR || '').trim();
+if (DRIVER_KIND === 'postgres' && (!CONFIGURED_AUDIT_DIR || !path.isAbsolute(CONFIGURED_AUDIT_DIR))) {
+  const error = new Error('Postgres requires an absolute REDACTWALL_AUDIT_DIR on one shared durable audit volume');
+  error.code = 'REDACTWALL_SHARED_AUDIT_DIR_REQUIRED';
+  throw error;
+}
+const AUDIT_DIR = path.resolve(CONFIGURED_AUDIT_DIR || (
   DB_PATH && DB_PATH !== 'postgres' && DB_PATH !== ':memory:'
     ? `${DB_PATH}.audit-integrity`
     : path.join(process.env.REDACTWALL_DATA_DIR || DATA_DIR, '.audit-integrity')
 ));
+function sameAuditDirectory(left, right, platform = process.platform) {
+  const resolvedLeft = path.resolve(left);
+  const resolvedRight = path.resolve(right);
+  return platform === 'win32'
+    ? resolvedLeft.toLowerCase() === resolvedRight.toLowerCase()
+    : resolvedLeft === resolvedRight;
+}
+function auditSidecarPath(envName, fileName) {
+  const configured = String(process.env[envName] || '').trim();
+  const resolved = path.resolve(configured || path.join(AUDIT_DIR, fileName));
+  if (DRIVER_KIND === 'postgres' && !sameAuditDirectory(path.dirname(resolved), AUDIT_DIR)) {
+    const error = new Error(`${envName} must stay inside the shared REDACTWALL_AUDIT_DIR`);
+    error.code = 'REDACTWALL_SHARED_AUDIT_PATH_REQUIRED';
+    throw error;
+  }
+  return resolved;
+}
+const AUDIT_STATE_PATH = auditSidecarPath('REDACTWALL_AUDIT_STATE_PATH', '.audit-integrity-state.json');
+const AUDIT_CHECKPOINT_PATH = auditSidecarPath(
+  'REDACTWALL_AUDIT_CHECKPOINT_PATH',
+  '.audit-integrity-checkpoint.json',
+);
+const AUDIT_PENDING_PATH = auditSidecarPath('REDACTWALL_AUDIT_PENDING_PATH', '.audit-integrity-pending.json');
+const DATABASE_AUDIT_SCOPE = DRIVER_KIND === 'postgres' && typeof sdb.auditDatabaseScope === 'function'
+  ? sdb.auditDatabaseScope()
+  : null;
+if (DRIVER_KIND === 'postgres' && !DATABASE_AUDIT_SCOPE) {
+  const error = new Error('Postgres audit database identity is unavailable');
+  error.code = 'REDACTWALL_POSTGRES_AUDIT_SCOPE_UNAVAILABLE';
+  throw error;
+}
+const postgresAuditCoordination = DRIVER_KIND === 'postgres' ? {
+  withCoordinationLock: (callback, options) => sdb.withAuditAppendLock(callback, options),
+  transactionCoordinationHeld: () => sdb.auditAppendLockHeld(),
+} : {};
 const auditAnchor = openAuditAnchor({
   directory: AUDIT_DIR,
-  statePath: process.env.REDACTWALL_AUDIT_STATE_PATH,
-  checkpointPath: process.env.REDACTWALL_AUDIT_CHECKPOINT_PATH,
-  pendingPath: process.env.REDACTWALL_AUDIT_PENDING_PATH,
+  statePath: AUDIT_STATE_PATH,
+  checkpointPath: AUDIT_CHECKPOINT_PATH,
+  pendingPath: AUDIT_PENDING_PATH,
+  databaseScope: DATABASE_AUDIT_SCOPE,
+  ...postgresAuditCoordination,
   // Migration 8 is the durable one-time bootstrap marker. Under the same
   // interprocess sidecar lock, create/load the private state first and only
   // then record migrations. A crash can therefore leave state without v8
   // (safe to resume), never v8 without state (indistinguishable from tamper).
   allowBootstrap: () => !storage.migrationApplied(sdb, DRIVER_KIND, 8),
-  initialize: () => storage.runMigrations(sdb, DRIVER_KIND),
+  initialize: ({ bootstrapLegacyDatabase, bindDatabaseScope }) => {
+    const migrations = storage.runMigrations(sdb, DRIVER_KIND, {
+      beforeMigration({ driver, migration }) {
+        if (migration.version === 8) bootstrapLegacyDatabase(driver);
+      },
+    });
+    bindDatabaseScope(sdb);
+    return migrations;
+  },
 });
 const appliedMigrations = auditAnchor.initialization || [];
 wireTenantContext();
@@ -429,16 +480,22 @@ function queryContentHash(qid) {
 const aLast = sdb.prepare('SELECT hash FROM audit ORDER BY seq DESC LIMIT 1');
 const aInsert = sdb.prepare('INSERT INTO audit (id, ts, action, queryId, actor, prevHash, hash, entry) VALUES (@id, @ts, @action, @queryId, @actor, @prevHash, @hash, @entry)');
 
+function requireAuditMutationReady() {
+  if (typeof sdb.auditAnchorReconciled === 'function' && sdb.auditAnchorReconciled()) return;
+  auditAnchor.requireMutationReady(sdb);
+  if (typeof sdb.markAuditAnchorReconciled === 'function') sdb.markAuditAnchorReconciled();
+}
+
 function appendAuditRecord(event) {
   // Once asynchronous checkpoint publication reports a failure, no further
   // audit-coupled mutation may begin until the exact committed tail has been
   // synchronously verified and durably repaired. This call never appends an
   // audit row itself, so it cannot recurse through this path.
-  auditAnchor.requireMutationReady(sdb);
   // Serialize concurrent appends on a shared database (Postgres multi-instance)
   // so the read-head-then-insert below is atomic and the hash chain cannot fork.
   // No-op on SQLite, whose single-writer transaction already serializes writes.
   if (typeof sdb.lockAuditAppend === 'function') sdb.lockAuditAppend();
+  requireAuditMutationReady();
   const last = aLast.get();
   const prevHash = last ? last.hash : ZERO;
   const contentHash = event.queryId ? queryContentHash(event.queryId) : undefined;
@@ -491,7 +548,10 @@ const appendAudits = sdb.transaction((events) => {
 // every identity, invitation, seat, or renewal row and any revocation rows.
 const mutateWithAudit = sdb.transaction((mutate, auditForResult) => {
   if (typeof mutate !== 'function') throw new TypeError('mutateWithAudit requires a mutation function');
-  auditAnchor.requireMutationReady(sdb);
+  // SQLite can prove the local checkpoint is writable before any mutation
+  // callback runs. Postgres acquires its shared advisory coordination only
+  // while appending evidence, after caller-owned row locks are established.
+  if (DRIVER_KIND !== 'postgres') auditAnchor.requireMutationReady(sdb);
   const result = mutate();
   if (result == null) return { result, audit: null };
   const event = typeof auditForResult === 'function' ? auditForResult(result) : auditForResult;
@@ -1392,6 +1452,7 @@ function verifyAuditChain() {
 }
 
 function auditHealth() {
+  if (DRIVER_KIND === 'postgres') auditAnchor.advanceCheckpoint(sdb);
   const status = auditAnchor.status();
   return {
     ok: status.ok,
@@ -1854,6 +1915,7 @@ const applyVendorHeartbeat = sdb.transaction((input) => {
   // and appending. Pre-v9 processes do not read this row and must be drained
   // before migration 9 is enabled (see CONNECTED_DEPLOYMENT.md).
   if (typeof sdb.lockAuditAppend === 'function') sdb.lockAuditAppend();
+  requireAuditMutationReady();
   const auditState = vendorAuditState(candidate.customerId, candidate.customerRef);
   if (auditState && auditState.issuedAt >= candidate.issuedAt) {
     vendorStateReplace.run({ ...auditState, customerId: candidate.customerId });

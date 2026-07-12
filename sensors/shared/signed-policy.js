@@ -16,7 +16,7 @@ const {
 const BUNDLE_VERSION = 1;
 const MAX_BUNDLE_BYTES = 512 * 1024;
 const MAX_CLOCK_SKEW_MS = 5 * 60 * 1000;
-const PRIVATE_INIT_LOCK_TIMEOUT_MS = 30_000;
+const PRIVATE_INIT_LOCK_TIMEOUT_MS = 60_000;
 const runtimeHighWater = new Map();
 
 function arrayIndexKey(value) {
@@ -179,6 +179,7 @@ function persistSignedPolicyBundleUnlocked(bundle, options = {}) {
   const dir = path.dirname(file);
   const temp = path.join(dir, `.${path.basename(file)}.${crypto.randomBytes(16).toString('hex')}.tmp`);
   let fd;
+  let publicationStarted = false;
   try {
     fd = fsImpl.openSync(temp, 'wx', 0o600);
     fsImpl.writeFileSync(fd, body, 'utf8');
@@ -187,11 +188,16 @@ function persistSignedPolicyBundleUnlocked(bundle, options = {}) {
     fsImpl.closeSync(fd);
     fd = undefined;
     securePrivatePath(temp, cacheSecurity(options, false));
-    publishFileDurably(temp, file, { ...options, fs: fsImpl });
+    publicationStarted = true;
+    publishFileDurably(temp, file, {
+      ...options,
+      fs: fsImpl,
+      cleanupComponent: 'signed-policy-cache-publication',
+    });
     return file;
   } finally {
     if (fd !== undefined) { try { fsImpl.closeSync(fd); } catch {} }
-    try { fsImpl.unlinkSync(temp); } catch {}
+    if (!publicationStarted) try { fsImpl.unlinkSync(temp); } catch {}
   }
 }
 
@@ -238,12 +244,16 @@ function acceptSignedPolicyBundle(bundle, options = {}) {
       }, {
         ...options,
         lockTimeoutMs: options.lockTimeoutMs ?? PRIVATE_INIT_LOCK_TIMEOUT_MS,
+        lockTimeoutMaximumMs: options.lockTimeoutMaximumMs ?? PRIVATE_INIT_LOCK_TIMEOUT_MS,
         fs: options.fs || fs,
+        cleanupComponent: 'signed-policy-cache-lock',
       });
     }, {
       ...options,
       ...cacheSecurity(options, true),
       lockTimeoutMs: options.lockTimeoutMs ?? PRIVATE_INIT_LOCK_TIMEOUT_MS,
+      lockTimeoutMaximumMs: options.lockTimeoutMaximumMs ?? PRIVATE_INIT_LOCK_TIMEOUT_MS,
+      cleanupComponent: 'signed-policy-cache-directory-lock',
     });
     if (!result.ok) return result;
     persisted = result.persisted;

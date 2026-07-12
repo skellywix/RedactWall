@@ -8,11 +8,16 @@
  * synchronous storage contract without an async rewrite.
  */
 const path = require('path');
+const crypto = require('crypto');
 const { Worker, MessageChannel, receiveMessageOnPort } = require('worker_threads');
 const { parsePostgresConnectionUrl, withoutPostgresConnectionEnv } = require('../postgres-url');
 
 const DEFAULT_STATEMENT_TIMEOUT_MS = 25000;
 const BRIDGE_GRACE_MS = 5000;
+const DEFAULT_AUDIT_LOCK_TIMEOUT_MS = 30000;
+const MAX_AUDIT_LOCK_TIMEOUT_MS = 60000;
+const POSTGRES_AUDIT_SCOPE_LOCK = 4021988;
+const AUDIT_LOCK_WAIT = new Int32Array(new SharedArrayBuffer(4));
 
 function boundedInt(value, fallback, min, max) {
   const parsed = Number(value);
@@ -154,6 +159,8 @@ function createPgDriver(connectionString) {
     if (code !== 0) recordFault(new Error(`worker exited with code ${code}`));
   });
   let txDepth = 0;
+  let auditAppendLockHeld = false;
+  let auditAnchorReconciled = false;
   let callSeq = 0;
 
   function call(op, sql, params) {
@@ -202,12 +209,66 @@ function createPgDriver(connectionString) {
         throw err;
       } finally {
         txDepth -= 1;
+        if (txDepth === 0) {
+          auditAppendLockHeld = false;
+          auditAnchorReconciled = false;
+        }
       }
     };
   }
 
+  function acquireAuditAppendLock(timeoutMs = DEFAULT_AUDIT_LOCK_TIMEOUT_MS) {
+    if (txDepth <= 0) throw new Error('Postgres audit append lock requires an active transaction');
+    const timeout = boundedInt(timeoutMs, DEFAULT_AUDIT_LOCK_TIMEOUT_MS, 1, MAX_AUDIT_LOCK_TIMEOUT_MS);
+    const deadline = Date.now() + timeout;
+    for (;;) {
+      const row = call('query', 'SELECT pg_try_advisory_xact_lock($1) AS locked', [4021990]).rows[0];
+      if (row && row.locked === true) {
+        auditAppendLockHeld = true;
+        return;
+      }
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        const error = new Error('Postgres audit coordination lock timed out');
+        error.code = 'POSTGRES_AUDIT_LOCK_TIMEOUT';
+        throw error;
+      }
+      Atomics.wait(AUDIT_LOCK_WAIT, 0, 0, Math.min(25, remaining));
+    }
+  }
+
+  function auditDatabaseScope() {
+    return transaction(() => {
+      call('query', 'SELECT pg_advisory_xact_lock($1)', [POSTGRES_AUDIT_SCOPE_LOCK]);
+      call('query', `
+        CREATE TABLE IF NOT EXISTS redactwall_audit_scope (
+          singleton SMALLINT PRIMARY KEY CHECK (singleton = 1),
+          scope_id UUID UNIQUE NOT NULL
+        )
+      `, []);
+      call('query', `
+        INSERT INTO redactwall_audit_scope (singleton, scope_id)
+        VALUES (1, $1::uuid)
+        ON CONFLICT (singleton) DO NOTHING
+      `, [crypto.randomUUID()]);
+      const row = call(
+        'query',
+        'SELECT scope_id::text AS scope_id FROM redactwall_audit_scope WHERE singleton = 1',
+        [],
+      ).rows[0];
+      const stableId = String(row && row.scope_id || '').toLowerCase();
+      if (!/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(stableId)) {
+        throw new Error('Postgres audit database identity is unavailable');
+      }
+      return crypto.createHash('sha256')
+        .update(`redactwall:postgres-audit-scope:v1:${stableId}`)
+        .digest('hex');
+    })();
+  }
+
   return {
     kind: 'postgres',
+    auditDatabaseScope,
     prepare,
     exec: (sql) => { call('query', quoteCamelIdentifiers(sql), []); },
     transaction,
@@ -215,7 +276,22 @@ function createPgDriver(connectionString) {
     // a transaction-scoped advisory lock makes the read-head-then-insert append
     // atomic, so two instances cannot both link a new entry to the same
     // prevHash and permanently fork the chain. Released on COMMIT/ROLLBACK.
-    lockAuditAppend: () => { call('query', 'SELECT pg_advisory_xact_lock($1)', [4021990]); },
+    lockAuditAppend: () => {
+      acquireAuditAppendLock();
+    },
+    auditAppendLockHeld: () => txDepth > 0 && auditAppendLockHeld,
+    auditAnchorReconciled: () => txDepth > 0 && auditAnchorReconciled,
+    markAuditAnchorReconciled: () => {
+      if (txDepth <= 0 || !auditAppendLockHeld) {
+        throw new Error('Postgres audit reconciliation requires the audit coordination lock');
+      }
+      auditAnchorReconciled = true;
+    },
+    withAuditAppendLock: (callback, options = {}) => transaction(() => {
+      if (typeof callback !== 'function') throw new TypeError('audit coordination callback is required');
+      acquireAuditAppendLock(options.timeoutMs);
+      return callback();
+    })(),
     // Serialize a read-modify-write on one query id across instances sharing the
     // database: a transaction-scoped advisory lock keyed on the id makes
     // updateQuery's SELECT-then-UPDATE atomic so two concurrent patches can't

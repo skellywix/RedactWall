@@ -145,7 +145,8 @@ own encrypted EBS volume, and the app manages its own schema.
      example daily snapshots, 14-day retention) per customer volume.
 - **Later, not now:** the Postgres driver is already shipped
   (`REDACTWALL_DB_DRIVER=postgres`, tenant row-level security, same migration
-  history). When you outgrow silos and build the shared plane,
+  history). Its multi-replica shape requires one shared durable audit-anchor
+  volume in addition to Postgres. When you outgrow silos and build the shared plane,
   `docs/deployment/MANAGED_POSTGRES.md` is the operator runbook. Nothing about launch
   depends on it.
 

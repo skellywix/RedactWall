@@ -21,8 +21,17 @@ process.env.INGEST_API_KEY = 'unit-ingest-key';
 process.env.REDACTWALL_LICENSE_PUBLIC_KEY = PUB;
 process.env.REDACTWALL_LICENSE_CUSTOMER_ID = 'cu-1';
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pw-license-api-'));
+const licenseDir = path.join(tmp, 'license');
+require('../server/private-path').withPrivateDirectoryMutationLockSync(licenseDir, () => {}, {
+  fs,
+  directory: true,
+  label: 'test license directory',
+  ownerLabel: 'test license directory',
+  lockTimeoutMs: 60_000,
+  lockTimeoutMaximumMs: 60_000,
+});
 process.env.REDACTWALL_DB_PATH = path.join(tmp, 'test.db');
-process.env.REDACTWALL_LICENSE_PATH = path.join(tmp, 'redactwall.lic');
+process.env.REDACTWALL_LICENSE_PATH = path.join(licenseDir, 'redactwall.lic');
 process.env.REDACTWALL_POLICY_PATH = path.join(tmp, 'policy.json');
 fs.writeFileSync(process.env.REDACTWALL_POLICY_PATH, JSON.stringify({ enforcementMode: 'block', blockMinSeverity: 2, blockRiskScore: 20 }));
 

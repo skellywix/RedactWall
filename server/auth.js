@@ -68,6 +68,7 @@ function readStoredSecret(file, opts, fsImpl) {
 function publishStoredSecret(file, secret, opts, fsImpl) {
   const temp = `${file}.${process.pid}.${crypto.randomBytes(8).toString('hex')}.tmp`;
   let fd;
+  let publicationStarted = false;
   try {
     fd = fsImpl.openSync(temp, 'wx', 0o600);
     fsImpl.writeFileSync(fd, secret, 'utf8');
@@ -78,13 +79,18 @@ function publishStoredSecret(file, secret, opts, fsImpl) {
       ...privatePathOptions(opts, fsImpl, 'temporary session secret', false),
       fresh: true,
     });
-    privatePaths.publishFileExclusiveDurably(temp, file, { ...opts, fs: fsImpl });
-    fsImpl.unlinkSync(temp);
+    publicationStarted = true;
+    privatePaths.publishFileExclusiveDurably(temp, file, {
+      ...opts,
+      fs: fsImpl,
+      consumeSource: true,
+      cleanupComponent: 'session-secret-publication',
+    });
     if (readStoredSecret(file, opts, fsImpl) !== secret) throw new Error('persisted session secret verification failed');
     return secret;
   } finally {
     if (fd !== undefined) try { fsImpl.closeSync(fd); } catch { /* best effort */ }
-    try { fsImpl.unlinkSync(temp); } catch { /* already published or best effort */ }
+    if (!publicationStarted) try { fsImpl.unlinkSync(temp); } catch { /* staging cleanup only */ }
   }
 }
 
@@ -99,17 +105,29 @@ function resolveSecret(opts = {}) {
   const lockOptions = privateInitializationLockOptions(opts, fsImpl);
   return privatePaths.withPrivateDirectoryMutationLockSync(dataDir, () => {
     const lock = fileMutationLock.acquireFileMutationLockSync(file, lockOptions);
+    let committed = false;
     try {
       try {
-        return { secret: readStoredSecret(file, opts, fsImpl), source: 'file' };
+        const existing = { secret: readStoredSecret(file, opts, fsImpl), source: 'file' };
+        committed = true;
+        return existing;
       } catch (error) {
         if (!error || error.code !== 'ENOENT') throw error;
       }
       const secret = randomBytes(32).toString('hex');
       if (!SESSION_SECRET_PATTERN.test(secret)) throw new Error('generated session secret is invalid');
-      return { secret: publishStoredSecret(file, secret, opts, fsImpl), source: 'generated' };
+      const generated = { secret: publishStoredSecret(file, secret, opts, fsImpl), source: 'generated' };
+      committed = true;
+      return generated;
     } finally {
-      fileMutationLock.releaseFileMutationLock(lock);
+      try { fileMutationLock.releaseFileMutationLock(lock); }
+      catch (error) {
+        if (!committed) throw error;
+        fileMutationLock.notifyCommittedCleanupWarning(error, {
+          ...opts,
+          cleanupComponent: 'session-secret-lock',
+        });
+      }
     }
   }, {
     ...privatePathOptions(opts, fsImpl, 'session secret directory', true),

@@ -3,6 +3,8 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const crypto = require('node:crypto');
+const os = require('node:os');
+const path = require('node:path');
 const preflight = require('../server/preflight');
 
 const unsafe = {
@@ -886,6 +888,7 @@ test('production Postgres preflight skips SQLite paths and requires a TLS connec
     INGEST_API_KEY: 'ps_ingest_' + 'a'.repeat(32),
     REDACTWALL_SECRET: 's'.repeat(32),
     REDACTWALL_DATA_KEY: 'd'.repeat(32),
+    REDACTWALL_AUDIT_DIR: path.join(os.tmpdir(), 'redactwall-postgres-preflight-audit'),
   };
   const inputs = {
     adminPasswordIsDefault: false,
@@ -922,6 +925,7 @@ test('production Postgres preflight skips SQLite paths and requires a TLS connec
         assert.strictEqual(status.ready, true, `${driver} ${protocol} ${sslmode}`);
         assert.strictEqual(status.checks.find((item) => item.id === 'sqlite_local_disk').ok, true);
         assert.strictEqual(status.checks.find((item) => item.id === 'postgres_tls').ok, true);
+        assert.strictEqual(status.checks.find((item) => item.id === 'postgres_shared_audit_dir').ok, true);
         assert.doesNotMatch(JSON.stringify(status), new RegExp(password));
       }
     }
@@ -950,6 +954,20 @@ test('production Postgres preflight skips SQLite paths and requires a TLS connec
     assert.strictEqual(status.ready, false, databaseUrl || 'missing URL');
     assert.strictEqual(postgresCheck && postgresCheck.ok, false, databaseUrl || 'missing URL');
     assert.doesNotMatch(JSON.stringify(status), new RegExp(password));
+  }
+
+  for (const invalidAuditDir of ['', 'relative/audit']) {
+    const status = preflight.configStatus({
+      env: {
+        ...common,
+        REDACTWALL_AUDIT_DIR: invalidAuditDir,
+        REDACTWALL_DB_DRIVER: 'postgres',
+        REDACTWALL_DATABASE_URL: `postgresql://redactwall:${password}@db.internal:5432/redactwall?sslmode=require`,
+      },
+      ...inputs,
+    });
+    assert.strictEqual(status.ready, false);
+    assert.strictEqual(status.checks.find((item) => item.id === 'postgres_shared_audit_dir').ok, false);
   }
 });
 

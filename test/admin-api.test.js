@@ -21,8 +21,17 @@ process.env.REDACTWALL_TENANT_ID = 'texas-fcu';
 process.env.REDACTWALL_SEAT_LIMIT = '2';
 delete process.env.REDACTWALL_PUBLIC_URL;
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rw-admin-api-'));
+const licenseDir = path.join(tmp, 'license');
+require('../server/private-path').withPrivateDirectoryMutationLockSync(licenseDir, () => {}, {
+  fs,
+  directory: true,
+  label: 'test license directory',
+  ownerLabel: 'test license directory',
+  lockTimeoutMs: 60_000,
+  lockTimeoutMaximumMs: 60_000,
+});
 process.env.REDACTWALL_DB_PATH = path.join(tmp, 'test.db');
-process.env.REDACTWALL_LICENSE_PATH = path.join(tmp, 'redactwall.lic');
+process.env.REDACTWALL_LICENSE_PATH = path.join(licenseDir, 'redactwall.lic');
 
 const app = require('../server/app');
 const auth = require('../server/auth');

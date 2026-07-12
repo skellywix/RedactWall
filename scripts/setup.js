@@ -21,6 +21,11 @@ const ROOT = path.resolve(__dirname, '..');
 const DEFAULT_ENV_PATH = path.join(ROOT, '.env');
 const NODE_MAJOR_MIN = 22;
 
+function committedCleanupWarning(warning) {
+  const retained = warning && warning.retainedPath ? `; retained=${warning.retainedPath}` : '';
+  process.stderr.write(`[warn] committed setup file needs cleanup (${warning.code})${retained}\n`);
+}
+
 const ENV_ORDER = [
   'PORT',
   'NODE_ENV',
@@ -311,6 +316,7 @@ function writeEnvAtomic(filePath, body, deps = {}) {
   const nonce = `${process.pid}.${crypto.randomBytes(8).toString('hex')}`;
   const tempPath = path.join(dir, `.${path.basename(filePath)}.${nonce}.tmp`);
   let fd;
+  let publicationStarted = false;
   fsImpl.mkdirSync(dir, { recursive: true });
   try {
     fd = fsImpl.openSync(tempPath, 'wx', 0o600);
@@ -325,7 +331,12 @@ function writeEnvAtomic(filePath, body, deps = {}) {
     fsImpl.fsyncSync(fd);
     fsImpl.closeSync(fd);
     fd = undefined;
-    publishFileDurably(tempPath, filePath, { fs: fsImpl });
+    publicationStarted = true;
+    publishFileDurably(tempPath, filePath, {
+      fs: fsImpl,
+      cleanupComponent: 'setup-environment-publication',
+      onCommittedCleanupWarning: deps.onCommittedCleanupWarning || committedCleanupWarning,
+    });
     assertPrivatePath(filePath, {
       fs: fsImpl,
       directory: false,
@@ -334,7 +345,7 @@ function writeEnvAtomic(filePath, body, deps = {}) {
     });
   } catch (error) {
     if (fd !== undefined) try { fsImpl.closeSync(fd); } catch {}
-    try { fsImpl.unlinkSync(tempPath); } catch {}
+    if (!publicationStarted) try { fsImpl.unlinkSync(tempPath); } catch {}
     throw error;
   }
 }

@@ -27,6 +27,11 @@ const fileMutationLock = require('../server/file-mutation-lock');
 
 const PROFILE = detector.EDM_PROFILE;
 
+function committedCleanupWarning(warning) {
+  const retained = warning && warning.retainedPath ? `; retained=${warning.retainedPath}` : '';
+  process.stderr.write(`[warn] committed EDM pack needs cleanup (${warning.code})${retained}\n`);
+}
+
 function arg(name, fallback, argv = process.argv.slice(2)) {
   const i = argv.indexOf('--' + name);
   return i !== -1 && argv[i + 1] ? argv[i + 1] : fallback;
@@ -96,6 +101,7 @@ function writePrivatePack(outPath, output) {
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
   const temp = path.join(path.dirname(outPath), `.${path.basename(outPath)}.${process.pid}.${crypto.randomBytes(8).toString('hex')}.tmp`);
   let fd;
+  let publicationStarted = false;
   try {
     fd = fs.openSync(temp, 'wx', 0o600);
     privatePaths.securePrivatePath(temp, { fresh: true, label: 'EDM fingerprint pack staging file' });
@@ -103,11 +109,15 @@ function writePrivatePack(outPath, output) {
     fs.fsyncSync(fd);
     fs.closeSync(fd);
     fd = undefined;
-    privatePaths.publishFileDurably(temp, outPath);
+    publicationStarted = true;
+    privatePaths.publishFileDurably(temp, outPath, {
+      cleanupComponent: 'edm-pack-publication',
+      onCommittedCleanupWarning: committedCleanupWarning,
+    });
     privatePaths.assertPrivatePath(outPath, { label: 'EDM fingerprint pack' });
   } finally {
     if (fd !== undefined) try { fs.closeSync(fd); } catch { /* preserve original error */ }
-    try { fs.unlinkSync(temp); } catch { /* renamed or best-effort cleanup */ }
+    if (!publicationStarted) try { fs.unlinkSync(temp); } catch { /* staging cleanup only */ }
   }
 }
 
@@ -174,6 +184,9 @@ function main(argv = process.argv.slice(2), io = process) {
     writePrivatePack(outPath, JSON.stringify(result.pack, null, 2) + '\n');
     io.stdout.write(`EDM watchlist written to ${outPath}\n  eligible values read: ${result.values}\n  fingerprints added: ${result.added}\n  total fingerprints: ${result.pack.fingerprints.length}\n  (plaintext was not copied; only salted SHA-256 fingerprints are stored)\n`);
     return result;
+  }, {
+    cleanupComponent: 'edm-pack-lock',
+    onCommittedCleanupWarning: committedCleanupWarning,
   });
 }
 

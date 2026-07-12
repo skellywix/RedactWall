@@ -64,9 +64,18 @@ test('wireTenantContext aborts unscoped SaaS and production Postgres startup', (
 
 test('configured Postgres tenant-context failure aborts datastore initialization', () => {
   const child = spawnSync(process.execPath, ['-e', `
+    const crypto = require('crypto');
     const storage = require('./server/storage');
+    // The stub must satisfy the Postgres audit database-scope and append-lock
+    // contract so initialization reaches tenant-context wiring, which is the
+    // boundary under test.
     storage.openStore = () => ({
-      driver: { setTenantContext() { throw new Error('synthetic tenant context failure'); } },
+      driver: {
+        setTenantContext() { throw new Error('synthetic tenant context failure'); },
+        auditDatabaseScope: () => crypto.createHash('sha256').update('synthetic-test-scope').digest('hex'),
+        withAuditAppendLock: (callback) => callback(),
+        auditAppendLockHeld: () => false,
+      },
       kind: 'postgres',
       dbPath: 'postgres',
     });

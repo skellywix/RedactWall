@@ -3,7 +3,9 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 
 const root = path.join(__dirname, '..');
 const compose = fs.readFileSync(path.join(root, 'docker-compose.yml'), 'utf8');
@@ -49,6 +51,10 @@ test('docker compose passes production setup secrets into the container', () => 
     'REDACTWALL_DATA_KEY_PREVIOUS',
     'REDACTWALL_DB_DRIVER',
     'REDACTWALL_DATABASE_URL',
+    'REDACTWALL_PG_MAINTENANCE_DATABASE',
+    'REDACTWALL_AUDIT_DIR',
+    'REDACTWALL_AUDIT_KEY',
+    'REDACTWALL_LICENSE_PATH',
     'OIDC_ISSUER',
     'OIDC_CLIENT_ID',
     'OIDC_CLIENT_SECRET',
@@ -78,9 +84,64 @@ test('docker compose keeps sqlite state on a named local volume', () => {
   assert.strictEqual(env.get('REDACTWALL_DB_PATH'), '/data/redactwall.db');
   assert.strictEqual(env.get('REDACTWALL_POLICY_PATH'), '${REDACTWALL_POLICY_PATH:-/data/policy.json}');
   assert.strictEqual(env.get('REDACTWALL_CUSTOM_DETECTORS_PATH'), '${REDACTWALL_CUSTOM_DETECTORS_PATH:-/data/custom-detectors.json}');
+  assert.strictEqual(env.get('REDACTWALL_PG_MAINTENANCE_DATABASE'), '${REDACTWALL_PG_MAINTENANCE_DATABASE:-}');
+  assert.strictEqual(env.get('REDACTWALL_AUDIT_DIR'), '${REDACTWALL_AUDIT_DIR:-}');
+  assert.strictEqual(env.get('REDACTWALL_LICENSE_PATH'), '${REDACTWALL_LICENSE_PATH:-/data/redactwall.lic}');
   assert.match(compose, /-\s*redactwall-data:\/data/);
   assert.match(compose, /^volumes:\r?\n\s+redactwall-data:/m);
   assert.doesNotMatch(compose, /\.\.?:\/data/);
+});
+
+test('existing Compose SQLite sidecars survive a second boot with an empty audit override', {
+  timeout: 300_000,
+}, (t) => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-compose-upgrade-'));
+  const dbPath = path.join(dataDir, 'redactwall.db');
+  const env = {
+    ...process.env,
+    NODE_ENV: 'test',
+    REDACTWALL_ENV_PATH: path.join(dataDir, 'missing.env'),
+    REDACTWALL_DB_DRIVER: 'sqlite',
+    REDACTWALL_DB_PATH: dbPath,
+    REDACTWALL_DATA_DIR: dataDir,
+    REDACTWALL_SECRET: 'compose-upgrade-secret-stable',
+    REDACTWALL_AUDIT_KEY: 'compose-upgrade-audit-key-stable',
+    REDACTWALL_AUDIT_STATE_PATH: '',
+    REDACTWALL_AUDIT_CHECKPOINT_PATH: '',
+    REDACTWALL_AUDIT_PENDING_PATH: '',
+  };
+  delete env.REDACTWALL_AUDIT_DIR;
+  t.after(() => fs.rmSync(dataDir, { recursive: true, force: true }));
+
+  const run = (seed, auditDir) => {
+    const childEnv = { ...env };
+    if (auditDir !== undefined) childEnv.REDACTWALL_AUDIT_DIR = auditDir;
+    const script = `
+      const db = require('./server/db');
+      if (${JSON.stringify(seed)}) db.appendAudit({ action: 'COMPOSE_UPGRADE_BASELINE', actor: 'docker-test', detail: 'sanitized' });
+      const verification = db.verifyAuditChain();
+      console.log(JSON.stringify({ verification, paths: db._auditAnchorPaths }));
+      db._db.close();
+    `;
+    const result = spawnSync(process.execPath, ['-e', script], {
+      cwd: root,
+      env: childEnv,
+      encoding: 'utf8',
+      timeout: 120_000,
+      windowsHide: true,
+    });
+    assert.strictEqual(result.status, 0, result.stderr || result.stdout);
+    return JSON.parse(result.stdout.trim().split(/\r?\n/).at(-1));
+  };
+
+  const first = run(true, undefined);
+  const second = run(false, '');
+  const expectedAuditDir = path.resolve(`${dbPath}.audit-integrity`);
+  assert.strictEqual(first.verification.ok, true);
+  assert.strictEqual(second.verification.ok, true);
+  assert.strictEqual(path.dirname(first.paths.statePath), expectedAuditDir);
+  assert.strictEqual(path.dirname(second.paths.statePath), expectedAuditDir);
+  assert.strictEqual(fs.existsSync(path.join(dataDir, 'audit-integrity')), false);
 });
 
 test('gateway tokens use a separate private volume and never mount control-plane evidence', () => {
@@ -119,6 +180,16 @@ test('docker runtime is hardened for customer-silo operation', () => {
   assert.match(compose, /stop_grace_period:\s+30s/);
 });
 
+test('read-only non-root runtime keeps the mutable license on the writable data volume', () => {
+  const env = composeEnvironment();
+  assert.strictEqual(env.get('REDACTWALL_LICENSE_PATH'), '${REDACTWALL_LICENSE_PATH:-/data/redactwall.lic}');
+  assert.match(compose, /redactwall:[\s\S]*?read_only:\s+true/);
+  assert.match(compose, /-\s*redactwall-data:\/data/);
+  assert.match(dockerfile, /RUN mkdir -p \/data[\s\S]*?chown -R node:node \/data/);
+  assert.match(dockerfile, /USER node/);
+  assert.match(dockerfile, /VOLUME \["\/data", "\/gateway-data"\]/);
+});
+
 test('docker host ports default to loopback and the gateway uses loopback control-plane transport', () => {
   assert.match(compose, /"\$\{REDACTWALL_BIND_ADDRESS:-127\.0\.0\.1\}:\$\{PORT:-4000\}:4000"/);
   assert.match(compose, /"\$\{REDACTWALL_GATEWAY_BIND_ADDRESS:-127\.0\.0\.1\}:\$\{GATEWAY_PORT:-4100\}:4100"/);
@@ -138,6 +209,12 @@ test('docker image copies runtime files instead of the whole builder tree', () =
   for (const pattern of [/^test$/m, /^e2e$/m, /^docs$/m, /^PLANS$/m, /^dist$/m, /^data$/m]) {
     assert.match(dockerignore, pattern);
   }
+});
+
+test('docker runtime ships PostgreSQL 17 backup and restore clients', () => {
+  assert.match(dockerfile, /FROM postgres:17-bookworm AS runtime/);
+  assert.match(dockerfile, /pg_dump --version && pg_restore --version/);
+  assert.match(dockerfile, /COPY --from=builder \/usr\/local\/ \/usr\/local\//);
 });
 
 test('docker entrypoint fail-loud seeds policy and custom detectors before startup', () => {
@@ -165,6 +242,7 @@ test('deployment docs describe compose readiness and persistent state', () => {
   assert.match(deployment, /Docker Compose/);
   assert.match(deployment, /REDACTWALL_DB_PATH` to\s+`\/data\/redactwall\.db`/);
   assert.match(deployment, /REDACTWALL_POLICY_PATH` to\s+`\/data\/policy\.json`/);
+  assert.match(deployment, /REDACTWALL_LICENSE_PATH=\/data\/redactwall\.lic/);
   assert.match(deployment, /checks `\/readyz` for container\s+health/);
   assert.match(deployment, /production preflight readiness is blocked/);
   assert.match(deployment, /read-only root filesystem/);

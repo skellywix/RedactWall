@@ -218,7 +218,7 @@ function migrationApplied(driver, kind, version) {
  * existed (has `queries`, no migration rows) is stamped at the baseline
  * version instead of re-running it.
  */
-function runMigrationsUnlocked(driver, kind) {
+function runMigrationsUnlocked(driver, kind, options = {}) {
   driver.exec(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
       version   INTEGER PRIMARY KEY,
@@ -240,6 +240,9 @@ function runMigrationsUnlocked(driver, kind) {
     if (applied.has(migration.version)) continue;
     const sql = migration[kind];
     if (!sql) throw new Error(`migration ${migration.version} has no ${kind} variant`);
+    if (typeof options.beforeMigration === 'function') {
+      options.beforeMigration({ driver, kind, migration });
+    }
     driver.transaction(() => {
       driver.exec(sql);
       record.run(migration.version, migration.name, new Date().toISOString());
@@ -260,11 +263,11 @@ function runMigrationsUnlocked(driver, kind) {
   return results;
 }
 
-function runMigrations(driver, kind) {
-  if (kind !== 'postgres') return runMigrationsUnlocked(driver, kind);
+function runMigrations(driver, kind, options = {}) {
+  if (kind !== 'postgres') return runMigrationsUnlocked(driver, kind, options);
   return driver.transaction(() => {
     driver.prepare('SELECT pg_advisory_xact_lock(?)').get(POSTGRES_MIGRATION_LOCK);
-    return runMigrationsUnlocked(driver, kind);
+    return runMigrationsUnlocked(driver, kind, options);
   })();
 }
 

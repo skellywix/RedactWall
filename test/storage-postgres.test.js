@@ -14,6 +14,7 @@ const { execFileSync, fork } = require('node:child_process');
 const { openStore } = require('../server/storage');
 const { MIGRATIONS } = require('../server/storage/migrations');
 const { hash32 } = require('../server/storage/pg-driver');
+const fileMutationLock = require('../server/file-mutation-lock');
 
 const ADMIN_URL = process.env.REDACTWALL_TEST_PG_URL || '';
 const auditDirs = [];
@@ -130,7 +131,7 @@ async function createFreshDatabase() {
   return url.toString();
 }
 
-async function startIdentityWorker(databaseUrl, auditDir) {
+async function startIdentityWorker(databaseUrl, auditDir, envOverrides = {}) {
   const child = fork(path.join(__dirname, 'support', 'pg-identity-worker.js'), [], {
     cwd: path.join(__dirname, '..'),
     env: {
@@ -143,6 +144,7 @@ async function startIdentityWorker(databaseUrl, auditDir) {
       REDACTWALL_SECRET: 'unit-secret-stable',
       REDACTWALL_DATA_KEY: 'unit-data-key-stable',
       ADMIN_PASSWORD: 'unit-pass',
+      ...envOverrides,
     },
     stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
   });
@@ -329,6 +331,110 @@ test('independent Postgres replicas share the vendor verdict high-water and stat
     assert.strictEqual((await first.call('verifyAudit')).ok, true);
   } finally {
     await Promise.allSettled([first.close(), second.close()]);
+  }
+});
+
+test('Postgres first boot permits only the replica using the durable shared audit directory', {
+  skip: !ADMIN_URL && 'REDACTWALL_TEST_PG_URL not set',
+  timeout: 90000,
+}, async () => {
+  const databaseUrl = await createFreshDatabase();
+  const results = await Promise.allSettled([
+    startIdentityWorker(databaseUrl, freshAuditDir()),
+    startIdentityWorker(databaseUrl, freshAuditDir()),
+  ]);
+  const ready = results.filter((result) => result.status === 'fulfilled');
+  const rejected = results.filter((result) => result.status === 'rejected');
+  assert.strictEqual(ready.length, 1, JSON.stringify(results.map((result) => (
+    result.status === 'fulfilled' ? result.status : result.reason.message
+  ))));
+  assert.strictEqual(rejected.length, 1, 'migration 8 must prevent a second independent anchor bootstrap');
+  assert.match(rejected[0].reason.message, /audit integrity state is missing after initialization/);
+  try {
+    assert.strictEqual((await ready[0].value.call('verifyAudit')).ok, true);
+  } finally {
+    await ready[0].value.close();
+  }
+});
+
+test('one authenticated audit directory cannot be shared by two Postgres databases', {
+  skip: !ADMIN_URL && 'REDACTWALL_TEST_PG_URL not set',
+  timeout: 90000,
+}, async () => {
+  const firstApplicationUrl = await createFreshDatabase();
+  const secondApplicationUrl = await createFreshDatabase();
+  const adminTarget = (applicationUrl) => {
+    const url = new URL(ADMIN_URL);
+    url.pathname = new URL(applicationUrl).pathname;
+    return url.toString();
+  };
+  const auditDir = freshAuditDir();
+  const results = await Promise.allSettled([
+    startIdentityWorker(adminTarget(firstApplicationUrl), auditDir),
+    startIdentityWorker(adminTarget(secondApplicationUrl), auditDir),
+  ]);
+  const ready = results.filter((result) => result.status === 'fulfilled');
+  const rejected = results.filter((result) => result.status === 'rejected');
+  assert.strictEqual(ready.length, 1, JSON.stringify(results.map((result) => (
+    result.status === 'fulfilled' ? result.status : result.reason.message
+  ))));
+  assert.strictEqual(rejected.length, 1);
+  assert.match(rejected[0].reason.message, /audit integrity state database scope mismatch/);
+  try {
+    assert.strictEqual((await ready[0].value.call('verifyAudit')).ok, true);
+  } finally {
+    await ready[0].value.close();
+  }
+});
+
+test('POSIX Postgres sidecar overrides cannot escape through case folding', {
+  skip: (!ADMIN_URL && 'REDACTWALL_TEST_PG_URL not set')
+    || (process.platform === 'win32' && 'Windows paths are case-insensitive'),
+  timeout: 60000,
+}, async () => {
+  const databaseUrl = await createFreshDatabase();
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-pg-audit-case-'));
+  auditDirs.push(root);
+  const auditDir = path.join(root, 'audit');
+  const escapedState = path.join(root, 'AUDIT', '.audit-integrity-state.json');
+  await assert.rejects(
+    startIdentityWorker(databaseUrl, auditDir, {
+      REDACTWALL_AUDIT_STATE_PATH: escapedState,
+    }),
+    /REDACTWALL_AUDIT_STATE_PATH must stay inside the shared REDACTWALL_AUDIT_DIR/,
+  );
+});
+
+test('Postgres shared-anchor commits ignore a stale hostname-owned filesystem checkpoint lock', {
+  skip: !ADMIN_URL && 'REDACTWALL_TEST_PG_URL not set',
+  timeout: 60000,
+}, async () => {
+  const databaseUrl = await createFreshDatabase();
+  const auditDir = freshAuditDir();
+  const worker = await startIdentityWorker(databaseUrl, auditDir);
+  const checkpoint = path.join(auditDir, '.audit-integrity-checkpoint.json');
+  const lockPath = fileMutationLock.lockPathFor(checkpoint);
+  const token = crypto.randomBytes(24).toString('hex');
+  const ownerName = fileMutationLock._internal.ownerFileName(token);
+  fs.mkdirSync(lockPath, { mode: 0o700 });
+  fs.writeFileSync(path.join(lockPath, ownerName), `${JSON.stringify({
+    version: 3,
+    pid: 999999,
+    hostname: 'retired-remote-replica',
+    processStart: '1',
+    generation: 'linux:00000000-0000-0000-0000-000000000001:1',
+    token,
+  })}\n`, { mode: 0o600 });
+  try {
+    const entry = await worker.call('appendAudit', {
+      action: 'PG_SHARED_ANCHOR_LOCK_TEST', actor: 'replica-test', detail: 'sanitized',
+    });
+    assert.strictEqual(entry.action, 'PG_SHARED_ANCHOR_LOCK_TEST');
+    assert.strictEqual((await worker.call('verifyAudit')).ok, true);
+    assert.strictEqual(fs.existsSync(lockPath), true, 'Postgres coordination never reclaims remote file locks');
+  } finally {
+    await worker.close();
+    fs.rmSync(lockPath, { recursive: true, force: true });
   }
 });
 

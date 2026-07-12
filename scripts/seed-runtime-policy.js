@@ -26,6 +26,7 @@ function publishRuntimeFile(sourcePath, targetPath, options, fsImpl) {
   const nonce = crypto.randomBytes(8).toString('hex');
   const tempPath = `${targetPath}.seed-${process.pid}-${nonce}`;
   let descriptor;
+  let publicationStarted = false;
   try {
     fsImpl.copyFileSync(sourcePath, tempPath, fs.constants.COPYFILE_EXCL);
     fsImpl.chmodSync(tempPath, 0o600);
@@ -43,9 +44,12 @@ function publishRuntimeFile(sourcePath, targetPath, options, fsImpl) {
       ownerLabel: 'runtime configuration staging file',
     });
     try {
+      publicationStarted = true;
       privatePaths.publishFileExclusiveDurably(tempPath, targetPath, {
         ...(options.privatePathSecurity || {}),
         fs: fsImpl,
+        consumeSource: true,
+        cleanupComponent: 'runtime-policy-seed',
       });
     } catch (err) {
       if (err && err.code === 'EEXIST') return { seeded: false, reason: options.existingReason };
@@ -56,7 +60,7 @@ function publishRuntimeFile(sourcePath, targetPath, options, fsImpl) {
     if (descriptor !== undefined) {
       try { fsImpl.closeSync(descriptor); } catch {}
     }
-    fsImpl.rmSync(tempPath, { force: true });
+    if (!publicationStarted) fsImpl.rmSync(tempPath, { force: true });
   }
 }
 

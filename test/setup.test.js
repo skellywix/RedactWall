@@ -221,12 +221,27 @@ test('atomic env writer rejects a real directory-fsync failure and restores exac
     },
   };
 
+  let failure;
   assert.throws(
     () => writeEnvAtomic(envPath, 'NEW=2\n', { fs: failingFs }),
-    /injected directory durability failure/,
+    (error) => {
+      failure = error;
+      for (let current = error; current; current = current.cause) {
+        if (current.message === 'injected directory durability failure') return true;
+      }
+      return false;
+    },
   );
   assert.deepStrictEqual(fs.readFileSync(envPath), baseline);
-  assert.deepStrictEqual(fs.readdirSync(dir), ['.env']);
+  assert.ok(failure.retainedPath && fs.existsSync(failure.retainedPath));
+  assert.deepStrictEqual(fs.readFileSync(failure.retainedPath), baseline);
+  assert.ok(failure.additionalRetainedPath && fs.existsSync(failure.additionalRetainedPath));
+  assert.deepStrictEqual(fs.readFileSync(failure.additionalRetainedPath), baseline);
+  assert.deepStrictEqual(fs.readdirSync(dir).sort(), [
+    '.env',
+    path.basename(failure.retainedPath),
+    path.basename(failure.additionalRetainedPath),
+  ].sort());
 });
 
 test('parseArgs supports check and alternate env file', () => {

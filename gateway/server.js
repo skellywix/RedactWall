@@ -438,8 +438,19 @@ function createGateway(overrides = {}) {
     return !verdict._failClosed;
   }
   app.get('/readyz', async (req, res) => {
+    const localStorage = typeof tokens.storageHealth === 'function'
+      ? tokens.storageHealth()
+      : { ok: true };
+    if (!localStorage.ok) {
+      return res.status(503).json({
+        ready: false,
+        controlPlane: false,
+        durableStorage: false,
+        error: 'gateway_token_storage_cleanup_degraded',
+      });
+    }
     const ready = await probeReady();
-    res.status(ready ? 200 : 503).json({ ready, controlPlane: ready });
+    return res.status(ready ? 200 : 503).json({ ready, controlPlane: ready });
   });
   app.get('/metrics', (req, res) => res.json({ uptimeSec: Math.round(process.uptime()), provider: cfg.provider, ...metrics }));
 

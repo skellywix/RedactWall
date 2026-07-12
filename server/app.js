@@ -74,6 +74,8 @@ const { validOidcUrl } = require('./oidc-url');
 const { createSessionAuthorizationCheck } = require('./session-authorization');
 const identitySetup = require('./identity-setup');
 const updater = require('./updater');
+const privatePaths = require('./private-path');
+const fileMutationLock = require('./file-mutation-lock');
 const { boundedTimeoutMs, requestBodyDeadline, requestBodyDeadlineExpired } = require('./request-body-deadline');
 
 auth.setAccountLookup((userName) => adminDomain.accountLookup(db, userName));
@@ -184,6 +186,18 @@ app.get('/readyz', (req, res) => {
         audit: false,
         configuration: cfg.level,
         error: 'audit_checkpoint_unavailable',
+      });
+    }
+    const publicationCleanup = privatePaths.committedCleanupHealth();
+    const lockCleanup = fileMutationLock.committedCleanupHealth();
+    if (!publicationCleanup.ok || !lockCleanup.ok) {
+      return res.status(503).json({
+        ready: false,
+        database: true,
+        audit: true,
+        durableStorage: false,
+        configuration: cfg.level,
+        error: 'durable_storage_cleanup_degraded',
       });
     }
     res.status(cfg.ready ? 200 : 503).json({ ready: cfg.ready, database: true, configuration: cfg.level });

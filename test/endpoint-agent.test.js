@@ -1188,6 +1188,114 @@ test('fd-bound endpoint reads reject a large path replacement after open', async
   assert.ok(!JSON.stringify(reportRequest).includes('sensitive bytes'));
 });
 
+test('endpoint scans reject distinct BigInt file identities that collide as Numbers', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-agent-bigint-identity-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const full = path.join(dir, 'visible.txt');
+  const redirected = path.join(dir, 'redirected.txt');
+  fs.writeFileSync(full, 'Public branch schedule.');
+  fs.writeFileSync(redirected, 'Synthetic SSN 524-71-9043.');
+  const pathId = 10414574140023031n;
+  const handleId = 10414574140023032n;
+  assert.strictEqual(Number(pathId), Number(handleId));
+  assert.strictEqual(_internal.sameFileIdentity({ dev: 0n, ino: pathId }, { dev: 0n, ino: pathId }), false);
+  assert.strictEqual(_internal.sameFileIdentity({ dev: 1n, ino: 0n }, { dev: 1n, ino: 0n }), false);
+  assert.strictEqual(
+    _internal.sameFileIdentity({ dev: 1, ino: Number(pathId) }, { dev: 1, ino: Number(handleId) }),
+    false,
+  );
+  const safeNumberStat = { dev: 1, ino: 2, size: 3, mtimeMs: 4.5, ctimeMs: 5.5 };
+  assert.strictEqual(_internal.sameFileSnapshot(safeNumberStat, { ...safeNumberStat }), true);
+
+  const originals = {
+    openSync: fs.openSync,
+    statSync: fs.statSync,
+    lstatSync: fs.lstatSync,
+    fstatSync: fs.fstatSync,
+  };
+  const withIdentity = (stat, id) => {
+    const exact = typeof stat.dev === 'bigint';
+    const changed = Object.create(stat);
+    Object.defineProperties(changed, {
+      dev: { value: exact ? 1n : 1 },
+      ino: { value: exact ? id : Number(id) },
+      nlink: { value: exact ? 1n : 1 },
+    });
+    return changed;
+  };
+  const callStat = (method, target, options) => options === undefined
+    ? method(target) : method(target, options);
+  let reportRequest;
+  try {
+    fs.openSync = (target, ...args) => originals.openSync(
+      path.resolve(String(target)) === full ? redirected : target,
+      ...args,
+    );
+    fs.statSync = (target, options) => withIdentity(
+      callStat(originals.statSync, target, options),
+      path.resolve(String(target)) === full ? pathId : handleId,
+    );
+    fs.lstatSync = (target, options) => withIdentity(
+      callStat(originals.lstatSync, target, options),
+      path.resolve(String(target)) === full ? pathId : handleId,
+    );
+    fs.fstatSync = (fd, options) => withIdentity(callStat(originals.fstatSync, fd, options), handleId);
+
+    const result = await scanFile(path.basename(full), {
+      watchDir: dir,
+      scanner: scannerConfig({ ignoreDirectories: [], ignoreFilenames: [], ignoreExtensions: [], maxFileBytes: 1024 }),
+      report: async (request) => {
+        reportRequest = request;
+        return { decision: 'block', status: 'pending', id: 'q_bigint_identity' };
+      },
+    });
+
+    assert.strictEqual(result.status, 'unsafe_file_reference');
+    assert.strictEqual(reportRequest.clientOutcome, 'scan_unavailable');
+    assert.ok(!JSON.stringify(reportRequest).includes('524-71-9043'));
+  } finally {
+    Object.assign(fs, originals);
+  }
+});
+
+test('endpoint reads reject multiply linked files', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-agent-hardlink-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const full = path.join(dir, 'visible.txt');
+  fs.writeFileSync(full, 'Public branch schedule.');
+  fs.linkSync(full, path.join(dir, 'alias.txt'));
+
+  assert.deepStrictEqual(
+    await _internal.readStableFileSnapshot(full, dir, 1024),
+    { error: 'unsafe_file_reference' },
+  );
+});
+
+test('endpoint reads reject in-place changes during the final path snapshot', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-agent-final-path-race-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const full = path.join(dir, 'visible.txt');
+  fs.writeFileSync(full, 'Public branch schedule.');
+  const originalStatSync = fs.statSync;
+  let targetStats = 0;
+  try {
+    fs.statSync = function mutateDuringFinalPathStat(target, options) {
+      if (path.resolve(String(target)) === full) {
+        targetStats += 1;
+        if (targetStats === 2) fs.appendFileSync(full, ' Synthetic SSN 524-71-9043.');
+      }
+      return originalStatSync.call(fs, target, options);
+    };
+    assert.deepStrictEqual(
+      await _internal.readStableFileSnapshot(full, dir, 1024),
+      { error: 'file_changed_during_inspection' },
+    );
+    assert.strictEqual(targetStats, 2, 'the mutation occurred during the final path stat');
+  } finally {
+    fs.statSync = originalStatSync;
+  }
+});
+
 test('endpoint scans reject linked paths that escape a watched root', async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-agent-link-root-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -1356,6 +1464,238 @@ test('native handoff claims stop duplicate watcher and restart replay before rep
   const claims = fs.readdirSync(path.join(handoffDir, nativeHandoff.CONSUMED_DIR_NAME));
   assert.strictEqual(claims.length, 1);
   assert.match(claims[0], /^[0-9a-f]{64}\.claim$/);
+});
+
+test('native handoff cleanup preserves a filename replacement published during processing', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-agent-native-cleanup-replacement-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const source = path.join(dir, 'source.txt');
+  const handoffDir = path.join(dir, 'handoff');
+  nativeHandoff.ensurePrivateDirectory(handoffDir);
+  fs.writeFileSync(source, 'Public branch schedule.');
+  const secret = 'native-handoff-secret-000000000000000001';
+  const base = {
+    version: nativeHandoff.EVENT_VERSION,
+    createdAt: '2026-06-26T15:00:00.000Z',
+    operation: 'upload',
+    filePath: source,
+    destination: { app: 'Desktop AI' },
+    user: 'native-user@example.test',
+  };
+  const accepted = nativeHandoff.signHandoffEvent({
+    ...base,
+    id: 'evt_cleanup_accepted',
+    nonce: 'nonce-cleanup-accepted',
+  }, secret);
+  const replacement = nativeHandoff.signHandoffEvent({
+    ...base,
+    id: 'evt_cleanup_replacement',
+    nonce: 'nonce-cleanup-replacement',
+  }, secret);
+  const handoffPath = path.join(handoffDir, 'event.json');
+  const movedAccepted = path.join(handoffDir, 'accepted-moved-aside.json');
+  const replacementBody = JSON.stringify(replacement);
+  fs.writeFileSync(handoffPath, JSON.stringify(accepted), { mode: 0o600 });
+
+  const result = await processNativeHandoffFile(handoffPath, {
+    secret,
+    silent: true,
+    now: new Date('2026-06-26T15:01:00.000Z'),
+    report: async () => {
+      fs.renameSync(handoffPath, movedAccepted);
+      fs.writeFileSync(handoffPath, replacementBody, { flag: 'wx', mode: 0o600 });
+      return { decision: 'allow', status: 'allowed', id: 'q_native_cleanup_replacement' };
+    },
+  });
+
+  assert.strictEqual(result.status, 'processed');
+  assert.strictEqual(fs.readFileSync(handoffPath, 'utf8'), replacementBody);
+  assert.strictEqual(fs.existsSync(movedAccepted), true);
+});
+
+test('native handoff cleanup preserves same-inode rewritten event bytes with restored metadata', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-agent-native-cleanup-digest-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  nativeHandoff.ensurePrivateDirectory(dir);
+  const source = path.join(dir, 'source.txt');
+  fs.writeFileSync(source, 'ordinary public text');
+  const handoffPath = path.join(dir, 'handoff.json');
+  const secret = 'native-handoff-secret-000000000000000001';
+  const signed = nativeHandoff.signHandoffEvent({
+    version: nativeHandoff.EVENT_VERSION,
+    id: 'evt_cleanup_digest',
+    createdAt: '2026-06-26T15:00:00.000Z',
+    operation: 'upload',
+    filePath: source,
+    destination: { app: 'Desktop AI' },
+    user: 'native-user@example.test',
+    nonce: 'nonce-cleanup-digest',
+  }, secret);
+  const acceptedBody = JSON.stringify(signed);
+  const replacementBody = acceptedBody.replace('Desktop AI', 'Desktop XX');
+  assert.strictEqual(Buffer.byteLength(replacementBody), Buffer.byteLength(acceptedBody));
+  fs.writeFileSync(handoffPath, acceptedBody, { mode: 0o600 });
+  const fixedTime = new Date('2026-06-26T15:00:30.000Z');
+  fs.utimesSync(handoffPath, fixedTime, fixedTime);
+  const acceptedStat = fs.lstatSync(handoffPath, { bigint: true });
+
+  const result = await processNativeHandoffFile(handoffPath, {
+    secret,
+    silent: true,
+    now: new Date('2026-06-26T15:01:00.000Z'),
+    report: async () => {
+      fs.writeFileSync(handoffPath, replacementBody, { mode: 0o600 });
+      fs.utimesSync(handoffPath, fixedTime, fixedTime);
+      const replacementStat = fs.lstatSync(handoffPath, { bigint: true });
+      assert.strictEqual(replacementStat.dev, acceptedStat.dev);
+      assert.strictEqual(replacementStat.ino, acceptedStat.ino);
+      assert.strictEqual(replacementStat.size, acceptedStat.size);
+      assert.strictEqual(replacementStat.mtimeNs, acceptedStat.mtimeNs);
+      return { decision: 'allow', status: 'allowed', id: 'q_native_cleanup_digest' };
+    },
+  });
+
+  assert.strictEqual(result.status, 'processed');
+  assert.strictEqual(fs.readFileSync(handoffPath, 'utf8'), replacementBody);
+  const preservedStat = fs.lstatSync(handoffPath, { bigint: true });
+  assert.strictEqual(preservedStat.dev, acceptedStat.dev);
+  assert.strictEqual(preservedStat.ino, acceptedStat.ino);
+});
+
+test('rejected native handoff cleanup preserves same-inode rewritten bytes with restored metadata', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-agent-native-rejected-digest-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  nativeHandoff.ensurePrivateDirectory(dir);
+  const source = path.join(dir, 'source.txt');
+  fs.writeFileSync(source, 'ordinary public text');
+  const handoffPath = path.join(dir, 'handoff.json');
+  const secret = 'native-handoff-secret-000000000000000001';
+  const invalid = {
+    ...nativeHandoff.signHandoffEvent({
+      version: nativeHandoff.EVENT_VERSION,
+      id: 'evt_rejected_cleanup_digest',
+      createdAt: '2026-06-26T15:00:00.000Z',
+      operation: 'upload',
+      filePath: source,
+      destination: { app: 'Desktop AI' },
+      user: 'native-user@example.test',
+      nonce: 'nonce-rejected-cleanup-digest',
+    }, secret),
+    signature: '0'.repeat(64),
+  };
+  const acceptedBody = JSON.stringify(invalid);
+  const replacementBody = acceptedBody.replace('Desktop AI', 'Desktop XX');
+  assert.strictEqual(Buffer.byteLength(replacementBody), Buffer.byteLength(acceptedBody));
+  fs.writeFileSync(handoffPath, acceptedBody, { mode: 0o600 });
+  const fixedTime = new Date('2026-06-26T15:00:30.000Z');
+  fs.utimesSync(handoffPath, fixedTime, fixedTime);
+  const acceptedStat = fs.lstatSync(handoffPath, { bigint: true });
+  const originalRename = fs.renameSync;
+  let rewritten = false;
+  fs.renameSync = (sourcePath, destinationPath) => {
+    if (!rewritten && path.resolve(String(sourcePath)) === handoffPath
+        && String(destinationPath).includes('.processed.')) {
+      fs.writeFileSync(handoffPath, replacementBody, { mode: 0o600 });
+      fs.utimesSync(handoffPath, fixedTime, fixedTime);
+      const replacementStat = fs.lstatSync(handoffPath, { bigint: true });
+      assert.strictEqual(replacementStat.dev, acceptedStat.dev);
+      assert.strictEqual(replacementStat.ino, acceptedStat.ino);
+      assert.strictEqual(replacementStat.size, acceptedStat.size);
+      assert.strictEqual(replacementStat.mtimeNs, acceptedStat.mtimeNs);
+      rewritten = true;
+    }
+    return originalRename(sourcePath, destinationPath);
+  };
+
+  let result;
+  try {
+    result = await processNativeHandoffFile(handoffPath, {
+      secret,
+      removeRejected: true,
+      silent: true,
+      now: new Date('2026-06-26T15:01:00.000Z'),
+    });
+  } finally {
+    fs.renameSync = originalRename;
+  }
+
+  assert.strictEqual(result.status, 'rejected');
+  assert.strictEqual(rewritten, true);
+  assert.strictEqual(fs.readFileSync(handoffPath, 'utf8'), replacementBody);
+  const preservedStat = fs.lstatSync(handoffPath, { bigint: true });
+  assert.strictEqual(preservedStat.dev, acceptedStat.dev);
+  assert.strictEqual(preservedStat.ino, acceptedStat.ino);
+});
+
+test('replayed native handoff cleanup preserves same-inode rewritten bytes with restored metadata', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-agent-native-replayed-digest-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  nativeHandoff.ensurePrivateDirectory(dir);
+  const source = path.join(dir, 'source.txt');
+  fs.writeFileSync(source, 'ordinary public text');
+  const handoffPath = path.join(dir, 'handoff.json');
+  const secret = 'native-handoff-secret-000000000000000001';
+  const signed = nativeHandoff.signHandoffEvent({
+    version: nativeHandoff.EVENT_VERSION,
+    id: 'evt_replayed_cleanup_digest',
+    createdAt: '2026-06-26T15:00:00.000Z',
+    operation: 'upload',
+    filePath: source,
+    destination: { app: 'Desktop AI' },
+    user: 'native-user@example.test',
+    nonce: 'nonce-replayed-cleanup-digest',
+  }, secret);
+  const acceptedBody = JSON.stringify(signed);
+  const replacementBody = acceptedBody.replace('Desktop AI', 'Desktop XX');
+  assert.strictEqual(Buffer.byteLength(replacementBody), Buffer.byteLength(acceptedBody));
+  fs.writeFileSync(handoffPath, acceptedBody, { mode: 0o600 });
+  const common = {
+    secret,
+    silent: true,
+    now: new Date('2026-06-26T15:01:00.000Z'),
+  };
+  const first = await processNativeHandoffFile(handoffPath, {
+    ...common,
+    keepHandoffFile: true,
+    report: async () => ({ decision: 'allow', status: 'allowed', id: 'q_native_replayed_digest' }),
+  });
+  assert.strictEqual(first.status, 'processed');
+  const fixedTime = new Date('2026-06-26T15:00:30.000Z');
+  fs.utimesSync(handoffPath, fixedTime, fixedTime);
+  const acceptedStat = fs.lstatSync(handoffPath, { bigint: true });
+  const originalRename = fs.renameSync;
+  let rewritten = false;
+  fs.renameSync = (sourcePath, destinationPath) => {
+    if (!rewritten && path.resolve(String(sourcePath)) === handoffPath
+        && String(destinationPath).includes('.processed.')) {
+      fs.writeFileSync(handoffPath, replacementBody, { mode: 0o600 });
+      fs.utimesSync(handoffPath, fixedTime, fixedTime);
+      const replacementStat = fs.lstatSync(handoffPath, { bigint: true });
+      assert.strictEqual(replacementStat.dev, acceptedStat.dev);
+      assert.strictEqual(replacementStat.ino, acceptedStat.ino);
+      assert.strictEqual(replacementStat.size, acceptedStat.size);
+      assert.strictEqual(replacementStat.mtimeNs, acceptedStat.mtimeNs);
+      rewritten = true;
+    }
+    return originalRename(sourcePath, destinationPath);
+  };
+
+  let replay;
+  try {
+    replay = await processNativeHandoffFile(handoffPath, {
+      ...common,
+      report: async () => { throw new Error('replayed handoff must not report again'); },
+    });
+  } finally {
+    fs.renameSync = originalRename;
+  }
+
+  assert.strictEqual(replay.status, 'replayed');
+  assert.strictEqual(rewritten, true);
+  assert.strictEqual(fs.readFileSync(handoffPath, 'utf8'), replacementBody);
+  const preservedStat = fs.lstatSync(handoffPath, { bigint: true });
+  assert.strictEqual(preservedStat.dev, acceptedStat.dev);
+  assert.strictEqual(preservedStat.ino, acceptedStat.ino);
 });
 
 test('native handoff missing target records a terminal fail-closed result', async (t) => {
@@ -1595,24 +1935,29 @@ test('native handoff cleanup failures are logged without throwing', async () => 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ps-agent-native-cleanup-'));
   const handoffPath = path.join(dir, 'bad.json');
   fs.writeFileSync(handoffPath, JSON.stringify({ version: nativeHandoff.EVENT_VERSION, signature: '0'.repeat(64) }));
-  const originalRmSync = fs.rmSync;
+  const originalUnlinkSync = fs.unlinkSync;
   const originalError = console.error;
   const errors = [];
   try {
-    fs.rmSync = (target, opts) => {
-      if (target === handoffPath && opts && opts.force) throw new Error('cleanup denied');
-      return originalRmSync(target, opts);
-    };
+    if (process.platform !== 'win32') {
+      fs.unlinkSync = (target) => {
+        if (String(target).includes('.processed.')) throw new Error('cleanup denied');
+        return originalUnlinkSync(target);
+      };
+    }
     console.error = (...args) => errors.push(args.join(' '));
     const res = await processNativeHandoffFile(handoffPath, {
       secret: 'native-handoff-secret-000000000000000001',
       removeRejected: true,
+      onBeforeExactFileDeleteClose() {
+        throw new Error('cleanup denied');
+      },
     });
     assert.strictEqual(res.status, 'rejected');
     assert.ok(errors.some((line) => /native handoff cleanup failed/.test(line)));
   } finally {
     console.error = originalError;
-    fs.rmSync = originalRmSync;
+    fs.unlinkSync = originalUnlinkSync;
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
