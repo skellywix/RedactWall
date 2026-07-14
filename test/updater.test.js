@@ -11,10 +11,24 @@ const updater = require('../server/updater');
 const fileMutationLock = require('../server/file-mutation-lock');
 
 const mutationWorker = path.join(__dirname, 'support', 'file-mutation-worker.js');
+const localGitEnvironmentVariables = Object.freeze([
+  'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_CONFIG', 'GIT_CONFIG_PARAMETERS',
+  'GIT_CONFIG_COUNT', 'GIT_OBJECT_DIRECTORY', 'GIT_DIR', 'GIT_WORK_TREE',
+  'GIT_IMPLICIT_WORK_TREE', 'GIT_GRAFT_FILE', 'GIT_INDEX_FILE',
+  'GIT_NO_REPLACE_OBJECTS', 'GIT_REPLACE_REF_BASE', 'GIT_PREFIX',
+  'GIT_INTERNAL_SUPER_PREFIX', 'GIT_SHALLOW_FILE', 'GIT_COMMON_DIR',
+]);
+
+function isolatedGitEnvironment() {
+  const env = { ...process.env };
+  for (const variable of localGitEnvironmentVariables) delete env[variable];
+  return env;
+}
 
 function git(cwd, args) {
   return execFileSync('git', args, {
     cwd,
+    env: isolatedGitEnvironment(),
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
   }).trim();
@@ -111,6 +125,30 @@ async function waitForChild(child) {
   if (child.exitCode === null) await new Promise((resolve) => child.once('exit', resolve));
   assert.strictEqual(child.exitCode, 0, child.output);
 }
+
+test('nested updater Git fixtures ignore parent-repository local environment', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'redactwall-updater-git-env-'));
+  const repo = path.join(root, 'repo');
+  const poisoned = {
+    GIT_DIR: path.join(root, 'foreign.git'),
+    GIT_WORK_TREE: path.join(root, 'foreign-worktree'),
+    GIT_INDEX_FILE: path.join(root, 'foreign.index'),
+    GIT_PREFIX: 'foreign-prefix',
+  };
+  const prior = Object.fromEntries(Object.keys(poisoned).map((key) => [key, process.env[key]]));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  try {
+    Object.assign(process.env, poisoned);
+    initRepo(repo);
+    commitFile(repo, 'version.txt', 'one\n', 'initial');
+    assert.strictEqual(git(repo, ['log', '-1', '--format=%s']), 'initial');
+  } finally {
+    for (const [key, value] of Object.entries(prior)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
 
 test('updater fast-forwards a clean checkout after backup', async (t) => {
   const fixture = makeRemoteFixture(t);

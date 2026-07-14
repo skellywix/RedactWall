@@ -101,8 +101,9 @@ gateway/sensor egress, and identity/auth. Full narrative in
   due-diligence questionnaire, and SAMPLE (non-binding) DPA/BAA/GLBA flow-down
   templates. A disabled-by-default, context-gated **core-banking detector pack**
   (Jack Henry/Symitar, Corelation, Fiserv, Finastra) and a CSV `--column` flag
-  for local roster **Exact Data Match** fingerprinting protect a credit union's
-  own member identifiers. Ships with a 30-day pilot playbook and an
+  for local high-entropy random-ID **Exact Data Match** fingerprinting complement
+  tuned detectors for enumerable identifiers. Ships with a 30-day pilot
+  playbook and an
   `aws-silo-smoke` acceptance check. See `PLANS/credit-union-tuning.md`.
 
 - **Connected deployment (Phase B/C).** The optional vendor-side second-layer
