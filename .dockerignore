@@ -13,6 +13,14 @@ test-results
 .playwright-cli/
 sensors/browser-extension/_metadata/
 test
+# The server's detection-quality posture endpoint evaluates this bounded,
+# synthetic corpus at runtime. Keep only that exact data file in the build
+# context; no test code enters the customer image.
+!test/
+test/*
+!test/fixtures/
+test/fixtures/*
+!test/fixtures/semantic-eval.json
 suite
 e2e
 docs
@@ -40,3 +48,4 @@ PLANS
 **/id_ed25519
 console/node_modules
 server/public/app
+server/public/.customer-console-build.json

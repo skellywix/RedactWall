@@ -1,23 +1,25 @@
 # License Signing Key Setup
 
-How the vendor generates the real Ed25519 license signing keypair, embeds the
-public key in the product, protects the private key, and issues customer
+How the vendor generates the real Ed25519 license signing keypair, provisions
+the public trust anchor, protects the private key, and issues customer
 licenses. This is the mechanical companion to
 `docs/process/CUSTOMER_LICENSING.md`, which defines the commercial model
 (plans, seats, expiry behavior, pricing shape).
 
 Do this **once, before the first commercial release**. `server/license.js`
-ships with a placeholder public key; a license signed with any key you
-generate will not verify until the placeholder is replaced.
+ships with a placeholder public key for development. A production license will
+not verify until its real public trust anchor is supplied through the supported
+AWS secret or embedded in a separately distributed air-gapped build.
 
 ## How verification works
 
 A license is an offline, signed file — never a phone-home check:
 
 - `redactwall.lic` = `base64(payload JSON)` + `.` + `base64(Ed25519 signature)`.
-- The server verifies it at boot and re-checks daily against a public key
-  **embedded in the product** (`EMBEDDED_PUBLIC_KEY_PEM` in
-  `server/license.js`).
+- The server verifies it at boot and on every managed-license status check
+  against a configured Ed25519 public key. AWS silos use
+  `REDACTWALL_LICENSE_PUBLIC_KEY_B64`; air-gapped distributions may embed the
+  same key in `server/license.js`.
 - Every license must carry a tenant-style `customerId`: 2 to 63 lowercase
   letters, digits, underscores, or hyphens, starting with a letter or digit.
   At install and boot the
@@ -51,23 +53,36 @@ This writes two files into the directory:
 
 The command also prints the public PEM to the terminal.
 
-## Step 2 — Embed the public key in the product
+## Step 2 — Provision the public trust anchor
 
-Open `server/license.js`, find the marked placeholder constant
-`EMBEDDED_PUBLIC_KEY_PEM`, and replace its PEM block with the contents of
-`license-signing-pub.pem`. Commit the change — the public key is not a
-secret, and shipping it in the repo/image is the point: every deployed
-control plane can then verify your signatures with zero egress.
+For an AWS customer silo, convert `license-signing-pub.pem` to one-line SPKI DER
+base64 and set `REDACTWALL_LICENSE_PUBLIC_KEY_B64` in that customer's immutable
+Secrets Manager version. `AWS_SAAS_DEPLOYMENT.md` has the exact command. The
+public key is not secret. The private key must never enter AWS.
+
+For a separately shipped air-gapped image, embed the public trust anchor at
+build time without changing source:
+
+```bash
+PUBLIC_KEY_B64="$(openssl pkey -pubin -in ~/redactwall-license-keys/license-signing-pub.pem -outform DER | base64 | tr -d '\\r\\n')"
+docker build --build-arg REDACTWALL_LICENSE_PUBLIC_KEY_B64="$PUBLIC_KEY_B64" -t redactwall:licensed .
+```
+
+The Docker build runs the same trust-anchor gate and fails if the value is not
+a valid Ed25519 public key or is the known placeholder. The resulting image
+verifies signatures with zero runtime configuration and zero egress. The
+public key is intentionally visible in image metadata; never pass the private
+signing key as a build argument or environment variable.
 
 Run the gate to confirm nothing depended on the placeholder:
 
 ```bash
+npm run license:trust-check -- --public-key-file ~/redactwall-license-keys/license-signing-pub.pem
 npm test -- test/license.test.js test/license-api.test.js
 ```
 
-Ship the change in the next image build. Any deployment still running an
-older image verifies against the old embedded key, so replace the key
-**before** the first licensed deployment rather than after.
+Managed production preflight and the release trust check reject the known
+placeholder. Complete this step before the first licensed deployment.
 
 ## Step 3 — Protect the private key
 
@@ -153,27 +168,27 @@ Billing state never disables the security function — by design
 
 ## Renewals
 
-Issue a new license file with the new expiry (and trued-up seats), install it
-over the old one via either install path. No downtime, no restart required —
-the server refreshes its license status on install.
+Issue a new license file with the new expiry and trued-up seats. Self-managed
+installations may use an authenticated in-app install path. AWS customer silos
+must publish a new immutable secret version and run `npm run silo:deploy`; their
+in-app installers intentionally return `license_managed_externally`.
 
 ## Rotation (compromised or lost key)
 
-There is no key server, so rotation is a product update:
+There is no dynamic trust-key server. Rotation is an explicit customer rollout:
 
 1. Generate a fresh keypair (Step 1) into a new directory.
-2. Replace `EMBEDDED_PUBLIC_KEY_PEM` with the new public key and ship a new
-   image version.
-3. Update every customer stack to that image (standard upgrade path in
-   `docs/deployment/PRODUCTION_LAUNCH_GUIDE.md`, Phase 9).
-4. Re-issue and re-install every active customer's license signed with the
-   new key — old licenses stop verifying on the new image, so coordinate the
-   re-issue with the rollout (customers fall back to `grace`-style behavior
-   only after their old license fails verification, so install the new
-   license immediately after upgrading each stack).
+2. Re-issue every active customer's license with the new private key.
+3. For each AWS silo, publish one immutable secret version containing both the
+   new signed license and new `REDACTWALL_LICENSE_PUBLIC_KEY_B64`, then apply it
+   through `npm run silo:deploy`. The host validates the pair together before
+   cutover.
+4. For embedded air-gapped builds, rebuild with the new public key build
+   argument, ship the matching image and license together, and verify before
+   retiring the old pair.
 5. Destroy the compromised private key and note the rotation in your customer
    registry.
 
-If a customer cannot upgrade immediately, `REDACTWALL_LICENSE_PUBLIC_KEY` can
-override the embedded key per deployment as a bridge — use it sparingly and
-remove it once the image is current.
+Never update only the public key or only the license. Managed mode treats a
+missing or unverifiable authoritative license as readonly and unready; it never
+falls back to demo entitlements.

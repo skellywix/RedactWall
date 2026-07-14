@@ -11,6 +11,8 @@ const { spawnSync } = require('child_process');
 
 const { parseEnv, withEnvAliases } = require('../server/env');
 const preflight = require('../server/preflight');
+const license = require('../server/license');
+const { isDeploymentId } = require('../server/deployment-identity');
 const {
   assertPrivatePath,
   publishFileDurably,
@@ -34,6 +36,7 @@ const ENV_ORDER = [
   'REDACTWALL_DB_PATH',
   'REDACTWALL_SAAS_MODE',
   'REDACTWALL_TENANT_ID',
+  'REDACTWALL_CONNECTED_DEPLOYMENT_ID',
   'REDACTWALL_LICENSE_CUSTOMER_ID',
   'REDACTWALL_SEAT_LIMIT',
   'REDACTWALL_REQUIRE_TENANT_CONTEXT',
@@ -86,18 +89,23 @@ function nativeDataPath() {
 
 function buildEnv(opts = {}) {
   const production = !!opts.production;
+  const deploymentId = exactDeploymentId(opts.deploymentId);
+  const customerId = String(opts.customerId || '').trim().toLowerCase();
+  const connected = production || !!deploymentId;
   return {
     PORT: '4000',
     NODE_ENV: production ? 'production' : 'development',
     HTTPS: production ? 'true' : 'false',
     COOKIE_SECURE: production ? 'true' : 'false',
     REDACTWALL_DB_PATH: nativeDataPath(),
-    REDACTWALL_SAAS_MODE: 'false',
-    REDACTWALL_TENANT_ID: '',
-    REDACTWALL_LICENSE_CUSTOMER_ID: String(opts.customerId || '').trim().toLowerCase(),
+    REDACTWALL_SAAS_MODE: connected ? 'true' : 'false',
+    REDACTWALL_LICENSE_MODE: connected ? 'connected' : 'offline',
+    REDACTWALL_TENANT_ID: connected ? customerId : '',
+    REDACTWALL_CONNECTED_DEPLOYMENT_ID: deploymentId,
+    REDACTWALL_LICENSE_CUSTOMER_ID: customerId,
     REDACTWALL_SEAT_LIMIT: '',
-    REDACTWALL_REQUIRE_TENANT_CONTEXT: 'false',
-    REDACTWALL_REQUIRE_USER_IDENTITY: 'false',
+    REDACTWALL_REQUIRE_TENANT_CONTEXT: connected ? 'true' : 'false',
+    REDACTWALL_REQUIRE_USER_IDENTITY: connected ? 'true' : 'false',
     ADMIN_USER: 'admin',
     ADMIN_PASSWORD: randomPassword(),
     ADMIN_TOTP_SECRET: production ? randomBase32(32) : '',
@@ -125,6 +133,35 @@ function buildEnv(opts = {}) {
   };
 }
 
+function exactDeploymentId(value) {
+  if (value === undefined || value === null || value === '') return '';
+  if (!isDeploymentId(value)) {
+    const error = new Error('Vendor-issued deployment identity must match dep_ plus 32 lowercase hexadecimal characters');
+    error.code = 'REDACTWALL_DEPLOYMENT_ID_INVALID';
+    throw error;
+  }
+  return value;
+}
+
+function deploymentIdFromSources(...sources) {
+  const key = 'REDACTWALL_CONNECTED_DEPLOYMENT_ID';
+  let resolved = '';
+  for (const source of sources) {
+    if (!source || typeof source !== 'object' || !Object.prototype.hasOwnProperty.call(source, key)) {
+      continue;
+    }
+    const candidate = exactDeploymentId(source[key]);
+    if (!candidate) continue;
+    if (resolved && resolved !== candidate) {
+      const error = new Error('Vendor-issued deployment identity is immutable after enrollment');
+      error.code = 'REDACTWALL_DEPLOYMENT_ID_IMMUTABLE';
+      throw error;
+    }
+    resolved = candidate;
+  }
+  return resolved;
+}
+
 function placeholderValue(key, value) {
   const v = String(value || '').trim();
   if (key === 'ADMIN_PASSWORD') return !v || v === 'ChangeMe!2026';
@@ -133,22 +170,44 @@ function placeholderValue(key, value) {
   if (key === 'REDACTWALL_SECRET' || key === 'REDACTWALL_DATA_KEY') return !v;
   if (key === 'REDACTWALL_DB_PATH') return !v;
   if (key === 'REDACTWALL_SEAT_LIMIT') return false;
-  if (key === 'REDACTWALL_TENANT_ID' || key === 'REDACTWALL_LICENSE_CUSTOMER_ID') return false;
+  if (key === 'REDACTWALL_TENANT_ID'
+      || key === 'REDACTWALL_CONNECTED_DEPLOYMENT_ID'
+      || key === 'REDACTWALL_LICENSE_CUSTOMER_ID') return false;
   return false;
 }
 
 function mergeEnv(existing, generated, opts = {}) {
   const out = { ...(existing || {}) };
+  const deploymentId = mergedDeploymentId(existing, generated);
   for (const [key, value] of Object.entries(generated)) {
+    if (key === 'REDACTWALL_CONNECTED_DEPLOYMENT_ID') continue;
     const shouldReplace = opts.force || !Object.prototype.hasOwnProperty.call(out, key) || placeholderValue(key, out[key]);
     if (shouldReplace) out[key] = value;
   }
+  if (deploymentId.present) out.REDACTWALL_CONNECTED_DEPLOYMENT_ID = deploymentId.value;
   if (opts.production) {
     if (opts.force || !out.NODE_ENV || out.NODE_ENV === 'development') out.NODE_ENV = 'production';
     if (opts.force || !out.HTTPS || out.HTTPS === 'false') out.HTTPS = 'true';
     if (opts.force || !out.COOKIE_SECURE || out.COOKIE_SECURE === 'false') out.COOKIE_SECURE = 'true';
   }
   return out;
+}
+
+function mergedDeploymentId(existing = {}, generated = {}) {
+  const key = 'REDACTWALL_CONNECTED_DEPLOYMENT_ID';
+  const hasExisting = Object.prototype.hasOwnProperty.call(existing, key);
+  const hasRequested = Object.prototype.hasOwnProperty.call(generated, key);
+  const current = hasExisting ? exactDeploymentId(existing[key]) : '';
+  const requested = hasRequested ? exactDeploymentId(generated[key]) : '';
+  if (current && requested && current !== requested) {
+    const error = new Error('Vendor-issued deployment identity is immutable after enrollment');
+    error.code = 'REDACTWALL_DEPLOYMENT_ID_IMMUTABLE';
+    throw error;
+  }
+  return {
+    present: hasExisting || hasRequested,
+    value: current || requested,
+  };
 }
 
 function quoteEnvValue(value) {
@@ -174,6 +233,8 @@ function renderEnv(values, opts = {}) {
   ['PORT', 'NODE_ENV', 'HTTPS', 'COOKIE_SECURE', 'REDACTWALL_DB_PATH'].forEach(add);
   lines.push('', '# SaaS/customer tenancy. Enable these for a paid customer stack.');
   ['REDACTWALL_SAAS_MODE', 'REDACTWALL_TENANT_ID', 'REDACTWALL_SEAT_LIMIT', 'REDACTWALL_REQUIRE_TENANT_CONTEXT', 'REDACTWALL_REQUIRE_USER_IDENTITY'].forEach(add);
+  lines.push('', '# Vendor-issued immutable identity for one connected deployment.');
+  ['REDACTWALL_CONNECTED_DEPLOYMENT_ID'].forEach(add);
   lines.push('', '# Stable customer slug for licensed standalone deployments.');
   ['REDACTWALL_LICENSE_CUSTOMER_ID'].forEach(add);
   lines.push('', '# Security Admin console');
@@ -195,12 +256,16 @@ function readEnvFile(envPath = DEFAULT_ENV_PATH) {
   return parseEnv(fs.readFileSync(envPath, 'utf8')).parsed;
 }
 
-function effectiveEnv(envPath = DEFAULT_ENV_PATH) {
-  return withEnvAliases({ ...readEnvFile(envPath), ...process.env });
+function effectiveEnv(envPath = DEFAULT_ENV_PATH, env = process.env) {
+  return withEnvAliases({ ...readEnvFile(envPath), ...env });
 }
 
 function statusFromEnv(env) {
   const resolved = withEnvAliases(env);
+  const managedLicenseHealth = license.managedLicenseHealth({
+    env: resolved,
+    ...(resolved.REDACTWALL_LICENSE_PATH ? { licensePath: resolved.REDACTWALL_LICENSE_PATH } : {}),
+  });
   return preflight.configStatus({
     env: resolved,
     adminPasswordIsDefault: !resolved.ADMIN_PASSWORD || resolved.ADMIN_PASSWORD === 'ChangeMe!2026',
@@ -209,6 +274,8 @@ function statusFromEnv(env) {
     dataCryptoEnabled: !!(resolved.REDACTWALL_DATA_KEY || resolved.REDACTWALL_SECRET),
     cookieSecure: preflight.bool(resolved.COOKIE_SECURE || resolved.HTTPS),
     requireLicenseBinding: true,
+    managedLicenseHealth,
+    licenseTrustAnchorStatus: license.productionTrustAnchorStatus(resolved),
   });
 }
 
@@ -231,6 +298,13 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (arg === '--customer-id') {
       opts.customerId = String(argv[++i] || '').trim();
       if (!opts.customerId) throw new Error('--customer-id requires a customer slug');
+    }
+    else if (arg === '--deployment-id') {
+      const deploymentId = argv[++i];
+      if (deploymentId === undefined || deploymentId === '') {
+        throw new Error('--deployment-id requires an exact vendor-issued deployment identity');
+      }
+      opts.deploymentId = exactDeploymentId(deploymentId);
     }
     else if (arg === '--env') opts.envPath = path.resolve(argv[++i] || DEFAULT_ENV_PATH);
     else if (arg === '--help' || arg === '-h') opts.help = true;
@@ -305,6 +379,7 @@ function printHelp(io = console) {
     '  --with-browser     Also install Chromium for Playwright E2E tests',
     '  --force            Replace existing generated/default .env values',
     '  --customer-id <id> Stable licensed-customer slug for a standalone deployment',
+    '  --deployment-id <dep_...> Enroll the exact vendor-issued connected deployment identity once',
     '  --check            Check current config and exit without writing',
     '  --env <path>       Use a non-default env file path',
   ].join('\n'));
@@ -352,17 +427,17 @@ function writeEnvAtomic(filePath, body, deps = {}) {
 
 function main(argv = process.argv.slice(2), deps = {}) {
   const io = deps.console || console;
+  const env = deps.env || process.env;
   const checkNodeVersion = deps.assertNodeVersion || assertNodeVersion;
   const install = deps.installDependencies || installDependencies;
   const initRuntime = deps.initializeRuntime || initializeRuntime;
-  const loadEffectiveEnv = deps.effectiveEnv || effectiveEnv;
+  const loadEffectiveEnv = deps.effectiveEnv || ((envPath) => effectiveEnv(envPath, env));
   const readEnv = deps.readEnvFile || readEnvFile;
   const build = deps.buildEnv || buildEnv;
   const merge = deps.mergeEnv || mergeEnv;
   const render = deps.renderEnv || renderEnv;
   const statusForEnv = deps.statusFromEnv || statusFromEnv;
   const writeEnvFile = deps.writeEnvFile || writeEnvAtomic;
-  const env = deps.env || process.env;
   const opts = parseArgs(argv);
   if (opts.help) {
     printHelp(io);
@@ -370,16 +445,32 @@ function main(argv = process.argv.slice(2), deps = {}) {
   }
   checkNodeVersion();
 
+  const existing = readEnv(opts.envPath);
+  const requested = opts.deploymentId
+    ? { REDACTWALL_CONNECTED_DEPLOYMENT_ID: opts.deploymentId }
+    : {};
+  const configuredDeploymentId = deploymentIdFromSources(existing, env, requested);
+
   if (opts.check) {
-    const status = statusForEnv(loadEffectiveEnv(opts.envPath));
+    const effective = loadEffectiveEnv(opts.envPath);
+    deploymentIdFromSources(existing, env, requested, effective);
+    const status = statusForEnv(effective);
     printStatus(status, io);
     return status.ready ? 0 : 1;
   }
 
+  let generated = build(opts);
+  const effectiveDeploymentId = deploymentIdFromSources(
+    existing, env, generated,
+  ) || configuredDeploymentId;
+  if (effectiveDeploymentId) {
+    generated = {
+      ...generated,
+      REDACTWALL_CONNECTED_DEPLOYMENT_ID: effectiveDeploymentId,
+    };
+  }
+  const merged = merge(existing, generated, opts);
   if (!opts.skipInstall) install(opts);
-
-  const generated = build(opts);
-  const merged = merge(readEnv(opts.envPath), generated, opts);
   writeEnvFile(opts.envPath, render(merged, opts));
 
   const audit = initRuntime(opts.envPath);

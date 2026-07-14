@@ -26,6 +26,68 @@ const base = { customer: 'Test CU', customerId: 'cu-1', plan: 'standard', seats:
 const NOW = Date.parse('2026-07-05T00:00:00Z');
 const EXPECTED_CUSTOMER = { expectedCustomerId: base.customerId };
 
+test('externally managed missing or corrupt licenses fail closed without weakening unlicensed demo mode', (t) => {
+  const previous = process.env.REDACTWALL_LICENSE_MANAGED_EXTERNALLY;
+  t.after(() => {
+    if (previous === undefined) delete process.env.REDACTWALL_LICENSE_MANAGED_EXTERNALLY;
+    else process.env.REDACTWALL_LICENSE_MANAGED_EXTERNALLY = previous;
+    license.refresh({ readFile: () => '', publicKeyPem: PUB, ...EXPECTED_CUSTOMER });
+  });
+
+  process.env.REDACTWALL_LICENSE_MANAGED_EXTERNALLY = 'true';
+  license.refresh({ readFile: () => 'corrupt.license', publicKeyPem: PUB, ...EXPECTED_CUSTOMER });
+  assert.strictEqual(license.status().state, 'readonly');
+  assert.match(license.publicStatus().reason, /^managed_license_/);
+  assert.strictEqual(license.entitled('ncua_readiness'), false);
+  assert.strictEqual(license.managedLicenseHealth({
+    env: process.env,
+    status: { state: 'unlicensed', payload: null, reason: 'bad_signature' },
+  }).ok, false);
+
+  license.refresh({
+    readFile: () => sign({ ...base, plan: 'enterprise', features: ['ncua_readiness'] }),
+    publicKeyPem: PUB,
+    now: NOW,
+    ...EXPECTED_CUSTOMER,
+  });
+  assert.strictEqual(license.status().state, 'readonly');
+  assert.strictEqual(license.status().payload, null,
+    'managed mode must use the freshly failed file base, not the cached enterprise payload');
+  assert.strictEqual(license.entitled('ncua_readiness'), false);
+
+  let responseCode = 0;
+  let nextCalled = false;
+  license.requireWritable(
+    { path: '/api/admin/policy', method: 'POST' },
+    { status(code) { responseCode = code; return { json() {} }; } },
+    () => { nextCalled = true; },
+  );
+  assert.strictEqual(responseCode, 403);
+  assert.strictEqual(nextCalled, false);
+
+  delete process.env.REDACTWALL_LICENSE_MANAGED_EXTERNALLY;
+  license.refresh({ readFile: () => '', publicKeyPem: PUB, ...EXPECTED_CUSTOMER });
+  assert.strictEqual(license.status().state, 'unlicensed');
+  assert.strictEqual(license.entitled('ncua_readiness'), true, 'ordinary local demo mode remains unchanged');
+});
+
+test('production trust-anchor status rejects the known placeholder and accepts base64 SPKI Ed25519', () => {
+  const placeholder = license.productionTrustAnchorStatus({});
+  assert.strictEqual(placeholder.ok, false);
+  assert.strictEqual(placeholder.placeholder, true);
+  const der = publicKey.export({ type: 'spki', format: 'der' });
+  const configured = license.productionTrustAnchorStatus({
+    REDACTWALL_LICENSE_PUBLIC_KEY_B64: der.toString('base64'),
+  });
+  assert.strictEqual(configured.ok, true);
+  assert.strictEqual(configured.ed25519, true);
+  const privateConfigured = license.productionTrustAnchorStatus({
+    REDACTWALL_LICENSE_PUBLIC_KEY: privateKey.export({ type: 'pkcs8', format: 'pem' }),
+  });
+  assert.strictEqual(privateConfigured.ok, false);
+  assert.strictEqual(privateConfigured.ed25519, false);
+});
+
 function waitForFile(file, timeoutMs = 15_000) {
   const deadline = Date.now() + timeoutMs;
   return new Promise((resolve, reject) => {
@@ -374,6 +436,9 @@ test('rejects tampering, wrong key, malformed, and missing without throwing', ()
   assert.strictEqual(license.verifyLicenseText(good.slice(0, 10) + 'X' + good.slice(11), { publicKeyPem: PUB, now: NOW }).reason, 'bad_signature');
   const otherPub = crypto.generateKeyPairSync('ed25519').publicKey.export({ type: 'spki', format: 'pem' }).toString();
   assert.strictEqual(license.verifyLicenseText(good, { publicKeyPem: otherPub, now: NOW }).reason, 'bad_signature');
+  assert.strictEqual(license.verifyLicenseText(good, {
+    publicKeyPem: privateKey.export({ type: 'pkcs8', format: 'pem' }), now: NOW,
+  }).reason, 'bad_public_key');
   assert.strictEqual(license.verifyLicenseText('not-a-license', { publicKeyPem: PUB }).reason, 'malformed');
   assert.strictEqual(license.verifyLicenseText('', { publicKeyPem: PUB }).reason, 'missing');
   assert.strictEqual(license.verifyLicenseText('garbage.garbage', { publicKeyPem: PUB }).reason, 'bad_signature');
@@ -525,28 +590,7 @@ test('entitled: demo mode grants all, licensed installs need the flag or enterpr
   license.refresh({ publicKeyPem: PUB, now: NOW, readFile: () => { throw new Error('missing'); } });
 });
 
-test('vendor revocation overlays the file state, survives refresh, and only a signed active verdict clears it', () => {
-  license.refresh({ publicKeyPem: PUB, now: NOW, readFile: () => sign(base), ...EXPECTED_CUSTOMER });
-  assert.strictEqual(license.status().state, 'active');
-
-  const entitledBefore = license.entitled('ncua_readiness');
-  license.applyVendorVerdict(true);
-  assert.strictEqual(license.status().state, 'revoked');
-  assert.strictEqual(license.isRevoked(), true);
-  assert.strictEqual(license.publicStatus().reason, 'vendor_revoked');
-  // Entitlement is preserved (payload persists) — revocation does not zero it.
-  assert.strictEqual(license.entitled('ncua_readiness'), entitledBefore);
-
-  // A file refresh (e.g. reinstall) does NOT clear a vendor revocation.
-  license.refresh({ publicKeyPem: PUB, now: NOW, readFile: () => sign(base), ...EXPECTED_CUSTOMER });
-  assert.strictEqual(license.status().state, 'revoked');
-
-  license.applyVendorVerdict(false);
-  assert.strictEqual(license.status().state, 'active');
-  license.refresh({ publicKeyPem: PUB, now: NOW, readFile: () => { throw new Error('none'); } });
-});
-
-test('license state changes roll back when their immutable audit cannot commit', () => {
+test('license refresh rolls back when its immutable audit cannot commit', () => {
   license.refresh({ publicKeyPem: PUB, now: NOW, readFile: () => sign(base), ...EXPECTED_CUSTOMER });
   const active = license.status();
   assert.throws(() => license.refresh({
@@ -555,18 +599,39 @@ test('license state changes roll back when their immutable audit cannot commit',
     appendAudit: () => { throw new Error('audit down'); },
   }), /audit down/);
   assert.deepStrictEqual(license.status(), active);
+});
 
-  license.applyVendorVerdict(true);
-  assert.throws(() => license.applyVendorVerdict(false, {
-    appendAudit: () => { throw new Error('audit down'); },
-  }), /audit down/);
-  assert.strictEqual(license.isRevoked(), true);
+test('offline verifier exposes no mutable vendor verdict overlay', () => {
+  assert.strictEqual(license.applyVendorVerdict, undefined);
+  assert.strictEqual(license.setVendorStale, undefined);
+  assert.strictEqual(license.isRevoked, undefined);
+});
 
-  license.applyVendorVerdict(false);
-  license.setVendorStale(true);
-  assert.throws(() => license.setVendorStale(false, {
-    appendAudit: () => { throw new Error('audit down'); },
-  }), /audit down/);
-  assert.strictEqual(license.isRevoked(), true);
-  license.setVendorStale(false);
+test('managed connected fallback health requires active exact deployment binding', () => {
+  const deploymentId = 'dep_0123456789abcdef0123456789abcdef';
+  const env = {
+    REDACTWALL_LICENSE_MANAGED_EXTERNALLY: 'true',
+    REDACTWALL_LICENSE_MODE: 'connected',
+    REDACTWALL_CONNECTED_DEPLOYMENT_ID: deploymentId,
+  };
+  const status = (payload, state = 'active') => ({ state, payload, reason: null });
+  const compatible = license.managedLicenseHealth({
+    env,
+    status: status({ ...base, status: 'active', deploymentId }),
+  });
+  assert.strictEqual(compatible.connectedFallbackCompatible, true);
+  assert.strictEqual(compatible.connectedFallbackReason, null);
+
+  for (const [payload, state, reason] of [
+    [{ ...base, deploymentId }, 'active', 'status_missing'],
+    [{ ...base, status: 'paused', deploymentId }, 'active', 'status_not_active'],
+    [{ ...base, status: 'active' }, 'active', 'deployment_missing'],
+    [{ ...base, status: 'active', deploymentId: 'deployment_legacy_001' }, 'active', 'deployment_invalid'],
+    [{ ...base, status: 'active', deploymentId: 'dep_fedcba9876543210fedcba9876543210' }, 'active', 'deployment_mismatch'],
+    [{ ...base, status: 'active', deploymentId }, 'grace', 'license_not_active'],
+  ]) {
+    const health = license.managedLicenseHealth({ env, status: status(payload, state) });
+    assert.strictEqual(health.connectedFallbackCompatible, false, reason);
+    assert.strictEqual(health.connectedFallbackReason, reason);
+  }
 });

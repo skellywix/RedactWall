@@ -146,6 +146,89 @@ test('SaaS seat limit allows known users and blocks new users', () => {
   assert.strictEqual(blocked.audit, true);
 });
 
+test('connected signed seat authority overrides static limits and treats zero as configured', () => {
+  const lowered = tenant.validateSensorAccess({
+    body: { orgId: 'cu-acme', user: 'new-user@example.test' },
+    db: fakeDb(['analyst@example.test']),
+    env: { ...saasEnv, REDACTWALL_SEAT_LIMIT: '100' },
+    seatLimitOverride: 1,
+  });
+  assert.strictEqual(lowered.ok, false);
+  assert.strictEqual(lowered.status, 'seat_limit_blocked');
+  assert.strictEqual(lowered.seatLimit, 1);
+
+  const zero = tenant.validateSensorAccess({
+    body: { orgId: 'cu-acme', user: 'analyst@example.test' },
+    db: fakeDb(['analyst@example.test']),
+    env: { ...saasEnv, REDACTWALL_SEAT_LIMIT: '100' },
+    seatLimitOverride: 0,
+  });
+  assert.strictEqual(zero.ok, false);
+  assert.strictEqual(zero.status, 'seat_limit_blocked');
+  assert.strictEqual(zero.seatLimit, 0);
+
+  const report = tenant.seatReport(
+    fakeDb(['analyst@example.test']),
+    { ...saasEnv, REDACTWALL_SEAT_LIMIT: '100' },
+    { seatLimitOverride: 0 },
+  );
+  assert.strictEqual(report.seatLimit, 0);
+  assert.strictEqual(report.seatLimitValid, true);
+  assert.strictEqual(report.seatLimitConfigured, true);
+  assert.strictEqual(report.overLimit, true);
+});
+
+test('malformed durable seat statistics fail closed and never coerce into spare capacity', () => {
+  const invalidStats = [
+    { seatsUsed: '1', users: [{ user: 'known@example.test' }] },
+    { seatsUsed: Number.NaN, users: [] },
+    { seatsUsed: -1, users: [] },
+    { seatsUsed: 0.5, users: [] },
+    { seatsUsed: 1_000_001, users: [] },
+    { seatsUsed: 0 },
+    { seatsUsed: 0, users: {} },
+    { seatsUsed: 1, users: [null] },
+    { seatsUsed: 0, users: [{ user: 'known@example.test' }] },
+  ];
+
+  for (const stats of invalidStats) {
+    const db = { seatStats: () => stats };
+    const result = tenant.validateSensorAccess({
+      body: { orgId: 'cu-acme', user: 'new-user@example.test' },
+      db,
+      env: { ...saasEnv, REDACTWALL_SEAT_LIMIT: '100' },
+      seatLimitOverride: 100,
+    });
+    assert.strictEqual(result.ok, false, JSON.stringify(stats));
+    assert.strictEqual(result.statusCode, 503, JSON.stringify(stats));
+    assert.strictEqual(result.status, 'seat_state_invalid', JSON.stringify(stats));
+    assert.strictEqual(result.audit, false, JSON.stringify(stats));
+
+    const report = tenant.seatReport(db, saasEnv, { seatLimitOverride: 100 });
+    assert.strictEqual(report.seatStateValid, false, JSON.stringify(stats));
+    assert.strictEqual(report.seatsRemaining, null, JSON.stringify(stats));
+    assert.strictEqual(report.users.length, 0, JSON.stringify(stats));
+  }
+
+  const missingOrFailedStores = [
+    null,
+    {},
+    { seatStats() { throw new Error('synthetic seat read failure'); } },
+  ];
+  for (const [index, db] of missingOrFailedStores.entries()) {
+    const result = tenant.validateSensorAccess({
+      body: { orgId: 'cu-acme', user: 'new-user@example.test' },
+      db,
+      env: { ...saasEnv, REDACTWALL_SEAT_LIMIT: '100' },
+      seatLimitOverride: 100,
+    });
+    assert.strictEqual(result.ok, false, `missing store ${index}`);
+    assert.strictEqual(result.statusCode, 503, `missing store ${index}`);
+    assert.strictEqual(result.status, 'seat_state_invalid', `missing store ${index}`);
+    assert.strictEqual(result.audit, false, `missing store ${index}`);
+  }
+});
+
 test('SaaS sensor access fails closed when paid seat limit is missing or invalid', () => {
   for (const seatLimit of [undefined, '', '0', '-1', '1.5', 'not-a-number']) {
     const env = {

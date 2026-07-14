@@ -36,11 +36,6 @@ const methods = {
   listAuditActions: () => db.listAudit(100).map((entry) => entry.action),
   appendAudit: (payload) => db.appendAudit(payload),
   verifyAudit: () => db.verifyAuditChain(),
-  applyVendorHeartbeat: (payload) => db.applyVendorHeartbeat(payload),
-  lastVendorHeartbeat: (payload) => db.lastVendorHeartbeat(payload.customerId, payload.customerRef),
-  vendorHeartbeatEvidence: () => db.listAudit(500)
-    .filter((entry) => entry.action === 'VENDOR_HEARTBEAT_OK')
-    .map((entry) => JSON.parse(entry.detail).issuedAt),
   createIdempotentIngest: (payload) => db.createQueryWithAudit(
     payload.query,
     payload.audit,

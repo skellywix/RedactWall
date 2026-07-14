@@ -6,11 +6,19 @@
 const crypto = require('crypto');
 const path = require('path');
 const { withEnvAliases } = require('./env');
-const { configuredCustomerBinding, EMBEDDED_PUBLIC_KEY_PEM } = require('./license');
+const {
+  configuredCustomerBinding,
+  EMBEDDED_PUBLIC_KEY_PEM,
+  productionTrustAnchorStatus,
+  publicKeyFromBase64,
+} = require('./license');
 const { publicOrigin } = require('./public-url');
 const { validPostgresTlsUrl } = require('./postgres-url');
 const { validOidcUrl } = require('./oidc-url');
 const { outboundHttpsUrlWithoutParameters } = require('./url-policy');
+const { isDeploymentId } = require('./deployment-identity');
+const connectedLicenseConfig = require('./connected-license-config');
+const vendorControlProtocol = require('./vendor-control-protocol');
 
 function bool(value) {
   return ['1', 'true', 'yes', 'on'].includes(String(value || '').toLowerCase());
@@ -36,6 +44,8 @@ const TENANT_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{1,62}$/;
 const SQLITE_DRIVERS = new Set(['sqlite', 'sqlite3']);
 const POSTGRES_DRIVERS = new Set(['postgres', 'postgresql', 'pg']);
 const LICENSE_HEARTBEAT_TOKEN_PATTERN = /^[A-Za-z0-9._~+/=-]{32,256}$/;
+const VENDOR_CONTROL_TIMEOUT_MIN_MS = 1;
+const VENDOR_CONTROL_TIMEOUT_MAX_MS = 30_000;
 
 function hasMinLength(value, min) {
   return String(value || '').trim().length >= min;
@@ -56,7 +66,13 @@ function positiveInteger(value) {
 }
 
 function validEd25519PublicKey(value) {
+  if (containsPrivateKeyMaterial(value)) return false;
   try { return crypto.createPublicKey(value).asymmetricKeyType === 'ed25519'; } catch { return false; }
+}
+
+function containsPrivateKeyMaterial(value) {
+  try { return crypto.createPrivateKey(value).type === 'private'; }
+  catch { return false; }
 }
 
 function distinctEd25519PublicKeys(left, right) {
@@ -64,6 +80,67 @@ function distinctEd25519PublicKeys(left, right) {
     const first = crypto.createPublicKey(left).export({ type: 'spki', format: 'der' });
     const second = crypto.createPublicKey(right).export({ type: 'spki', format: 'der' });
     return first.length !== second.length || !crypto.timingSafeEqual(first, second);
+  } catch { return false; }
+}
+
+function connectedOrigin(value) {
+  const normalized = outboundHttpsUrlWithoutParameters(value);
+  if (!normalized) return '';
+  try {
+    const url = new URL(normalized);
+    return url.pathname === '/' ? url.toString() : '';
+  } catch { return ''; }
+}
+
+function exactBoolean(value) {
+  return value === true || value === false || value === 'true' || value === 'false';
+}
+
+function booleanEnabled(value) {
+  return value === true || value === 'true';
+}
+
+function validChannelToken(value) {
+  return typeof value === 'string' && LICENSE_HEARTBEAT_TOKEN_PATTERN.test(value);
+}
+
+function connectedCredentialStatus(env) {
+  const heartbeat = env.REDACTWALL_VENDOR_CONTROL_HEARTBEAT_TOKEN;
+  const acknowledgement = env.REDACTWALL_VENDOR_CONTROL_ACKNOWLEDGEMENT_TOKEN;
+  const diagnostic = env.REDACTWALL_VENDOR_CONTROL_DIAGNOSTIC_TOKEN;
+  const shadowCandidate = env.REDACTWALL_VENDOR_CONTROL_SHADOW_CANDIDATE_TOKEN;
+  const configured = [heartbeat, acknowledgement, diagnostic, shadowCandidate]
+    .filter((value) => value !== undefined && value !== null && value !== '');
+  const required = validChannelToken(heartbeat) && validChannelToken(acknowledgement);
+  const allValid = configured.every(validChannelToken);
+  const distinct = new Set(configured).size === configured.length;
+  const consents = exactBoolean(env.REDACTWALL_VENDOR_CONTROL_DIAGNOSTICS_ENABLED)
+    && exactBoolean(env.REDACTWALL_VENDOR_CONTROL_SHADOW_INTELLIGENCE_ENABLED);
+  const optionalPresent = (!booleanEnabled(env.REDACTWALL_VENDOR_CONTROL_DIAGNOSTICS_ENABLED)
+      || validChannelToken(diagnostic))
+    && (!booleanEnabled(env.REDACTWALL_VENDOR_CONTROL_SHADOW_INTELLIGENCE_ENABLED)
+      || validChannelToken(shadowCandidate));
+  return Object.freeze({ required, allValid, distinct, consents, optionalPresent });
+}
+
+function connectedTimingStatus(env) {
+  try {
+    vendorControlProtocol.heartbeatIntervalMs(
+      env.REDACTWALL_VENDOR_CONTROL_HEARTBEAT_INTERVAL_MS,
+    );
+  } catch { return false; }
+  const raw = env.REDACTWALL_VENDOR_CONTROL_TIMEOUT_MS;
+  if (raw === undefined || raw === null || raw === '') return true;
+  const timeout = Number(raw);
+  return Number.isInteger(timeout)
+    && timeout >= VENDOR_CONTROL_TIMEOUT_MIN_MS
+    && timeout <= VENDOR_CONTROL_TIMEOUT_MAX_MS;
+}
+
+function connectedEntitlementKeyStatus(env) {
+  try {
+    connectedLicenseConfig.connectedVerificationKeys(env);
+    return true;
   } catch { return false; }
 }
 
@@ -108,11 +185,25 @@ function configStatus(input = {}) {
   const auditDir = String(input.auditDir ?? env.REDACTWALL_AUDIT_DIR ?? '').trim();
   const configuredPublicUrl = String(input.publicUrl ?? env.REDACTWALL_PUBLIC_URL ?? '').trim();
   const publicUrlValid = !configuredPublicUrl || !!publicOrigin(configuredPublicUrl, { production });
+  const licenseMode = String(env.REDACTWALL_LICENSE_MODE || '').trim().toLowerCase()
+    || (env.REDACTWALL_LICENSE_SERVER_URL ? 'connected' : 'offline');
   const licenseServerUrl = String(env.REDACTWALL_LICENSE_SERVER_URL || '').trim();
-  const connectedLicense = !!licenseServerUrl;
-  const licenseServerToken = String(env.REDACTWALL_LICENSE_SERVER_TOKEN || '');
-  const verdictPublicKey = String(env.REDACTWALL_LICENSE_VERDICT_PUBLIC_KEY || '');
-  const licenseRootPublicKey = String(env.REDACTWALL_LICENSE_PUBLIC_KEY || EMBEDDED_PUBLIC_KEY_PEM);
+  const connectedLicense = licenseMode === 'connected';
+  const connectedPrimaryRequired = production && input.requireLicenseBinding === true;
+  const licenseModeValid = (licenseMode === 'offline' || connectedLicense)
+    && (!connectedPrimaryRequired || connectedLicense);
+  const legacyLicenseServerToken = env.REDACTWALL_LICENSE_SERVER_TOKEN;
+  const connectedCredentials = connectedCredentialStatus(env);
+  const verdictPublicKey = String(env.REDACTWALL_LICENSE_VERDICT_PUBLIC_KEY || '')
+    || publicKeyFromBase64(env.REDACTWALL_LICENSE_VERDICT_PUBLIC_KEY_B64);
+  const verdictNextPublicKey = String(env.REDACTWALL_LICENSE_VERDICT_NEXT_PUBLIC_KEY || '')
+    || publicKeyFromBase64(env.REDACTWALL_LICENSE_VERDICT_NEXT_PUBLIC_KEY_B64);
+  const licenseRootPublicKey = String(env.REDACTWALL_LICENSE_PUBLIC_KEY || '')
+    || publicKeyFromBase64(env.REDACTWALL_LICENSE_PUBLIC_KEY_B64)
+    || EMBEDDED_PUBLIC_KEY_PEM;
+  const trustAnchor = input.licenseTrustAnchorStatus || productionTrustAnchorStatus(env);
+  const managedLicense = input.managedLicenseHealth || { ok: true, managed: false, reason: null };
+  const externallyManagedLicense = bool(env.REDACTWALL_LICENSE_MANAGED_EXTERNALLY);
   const adminUser = String(input.adminUser ?? env.ADMIN_USER ?? 'admin').trim();
   const adminPassword = input.adminPassword ?? env.ADMIN_PASSWORD ?? '';
   const adminTotpSecret = input.adminTotpSecret ?? env.ADMIN_TOTP_SECRET ?? '';
@@ -134,6 +225,9 @@ function configStatus(input = {}) {
   const auditorPrincipal = auditorUser.toLowerCase();
   const saasMode = bool(input.saasMode ?? env.REDACTWALL_SAAS_MODE);
   const tenantId = input.tenantId ?? env.REDACTWALL_TENANT_ID ?? '';
+  const connectedDeploymentId = input.connectedDeploymentId
+    ?? env.REDACTWALL_CONNECTED_DEPLOYMENT_ID
+    ?? '';
   const licenseCustomerId = input.licenseCustomerId ?? env.REDACTWALL_LICENSE_CUSTOMER_ID ?? '';
   const licenseBinding = configuredCustomerBinding({
     ...env,
@@ -418,7 +512,7 @@ function configStatus(input = {}) {
     ),
     check(
       'public_url',
-      publicUrlValid,
+      publicUrlValid && (!production || !externallyManagedLicense || !!configuredPublicUrl),
       severity,
       'The configured public console origin is safe for invitation links.',
       production
@@ -426,28 +520,119 @@ function configStatus(input = {}) {
         : 'Set REDACTWALL_PUBLIC_URL to a valid HTTP(S) origin without credentials, query parameters, or fragments.',
     ),
     check(
-      'connected_license_url',
-      !connectedLicense || !!outboundHttpsUrlWithoutParameters(licenseServerUrl),
+      'license_mode',
+      licenseModeValid,
       'error',
-      'Connected licensing uses an approved HTTPS vendor endpoint.',
-      'Set REDACTWALL_LICENSE_SERVER_URL to a public or private HTTPS endpoint without credentials, query parameters, or fragments.',
+      connectedPrimaryRequired
+        ? 'Production licensing is connected to the vendor control plane.'
+        : 'License connectivity mode is explicitly offline or connected.',
+      connectedPrimaryRequired
+        ? 'Set REDACTWALL_LICENSE_MODE=connected and complete vendor enrollment; offline artifacts are outage fallback only.'
+        : 'Set REDACTWALL_LICENSE_MODE to offline or connected.',
+    ),
+    check(
+      'license_root_trust_anchor',
+      !production || !externallyManagedLicense || trustAnchor.ok === true,
+      'error',
+      'Externally managed production uses a valid non-placeholder Ed25519 offline license trust anchor.',
+      'Set REDACTWALL_LICENSE_PUBLIC_KEY or REDACTWALL_LICENSE_PUBLIC_KEY_B64 to the production offline-root public key; the known placeholder is rejected.',
+    ),
+    check(
+      'managed_license_source',
+      managedLicense.ok !== false && (
+        !production || !connectedLicense || !externallyManagedLicense
+        || managedLicense.connectedFallbackCompatible === true
+      ),
+      'error',
+      'The externally managed license source is present and signature-valid.',
+      'Restore the host-managed signed license through the immutable deployment workflow; managed production never falls back to demo entitlements.',
+    ),
+    check(
+      'connected_offline_fallback',
+      !production || !connectedLicense || !externallyManagedLicense
+        || managedLicense.connectedFallbackCompatible === true,
+      'error',
+      'The connected outage artifact is active and bound to this exact customer deployment.',
+      'Install a vendor-signed fallback artifact with status active and the exact configured dep_ deployment identity; legacy customer-only licenses are not connected fallback authority.',
+    ),
+    check(
+      'connected_license_url',
+      (!connectedLicense && !licenseServerUrl)
+        || (connectedLicense && !!connectedOrigin(licenseServerUrl)),
+      'error',
+      'Connected licensing uses an approved HTTPS vendor origin.',
+      'Set REDACTWALL_LICENSE_SERVER_URL to the vendor HTTPS origin without a path, credentials, query parameters, or fragment.',
     ),
     check(
       'connected_license_auth',
-      !connectedLicense || LICENSE_HEARTBEAT_TOKEN_PATTERN.test(licenseServerToken),
+      !connectedLicense || (
+        connectedCredentials.required
+        && connectedCredentials.allValid
+        && connectedCredentials.distinct
+      ),
       'error',
-      'Connected licensing has a customer-specific bearer credential.',
-      'Set REDACTWALL_LICENSE_SERVER_TOKEN to the 32-to-256-character customer token issued by the vendor.',
+      'Connected licensing has distinct customer heartbeat and acknowledgement credentials.',
+      'Set the vendor-issued REDACTWALL_VENDOR_CONTROL_HEARTBEAT_TOKEN and REDACTWALL_VENDOR_CONTROL_ACKNOWLEDGEMENT_TOKEN; every configured channel credential must be unique.',
+    ),
+    check(
+      'connected_license_optional_channels',
+      !connectedLicense || (
+        connectedCredentials.consents && connectedCredentials.optionalPresent
+      ),
+      'error',
+      'Optional diagnostic and Shadow AI channels have explicit consent and scoped credentials.',
+      'Set both vendor-control consent flags to exact true or false, and configure the matching purpose-specific token for every enabled optional channel.',
+    ),
+    check(
+      'connected_license_legacy_auth',
+      !connectedLicense || !production || !legacyLicenseServerToken,
+      'error',
+      'Connected production does not accept the legacy shared license-server token.',
+      'Remove REDACTWALL_LICENSE_SERVER_TOKEN and use the purpose-specific vendor-control channel credentials.',
+    ),
+    check(
+      'connected_license_timing',
+      !connectedLicense || connectedTimingStatus(env),
+      'error',
+      'Connected heartbeat cadence and total request deadline are within protocol bounds.',
+      'Set REDACTWALL_VENDOR_CONTROL_HEARTBEAT_INTERVAL_MS to 30000..300000 and REDACTWALL_VENDOR_CONTROL_TIMEOUT_MS to 1..30000, or omit them for defaults.',
+    ),
+    check(
+      'connected_license_tenant_id',
+      !connectedLicense || hasValidTenantId(tenantId),
+      'error',
+      'Connected licensing is bound to an explicit customer tenant.',
+      'Set REDACTWALL_TENANT_ID to the vendor-enrolled customer slug; REDACTWALL_LICENSE_CUSTOMER_ID cannot supply connected scope.',
+    ),
+    check(
+      'connected_license_deployment_id',
+      !connectedLicense || isDeploymentId(connectedDeploymentId),
+      'error',
+      'Connected licensing is bound to an exact vendor-issued deployment identity.',
+      'Set REDACTWALL_CONNECTED_DEPLOYMENT_ID to the exact dep_ plus 32 lowercase hexadecimal characters issued during enrollment, with no surrounding whitespace.',
     ),
     check(
       'connected_license_verdict_key',
-      !connectedLicense || (
+      (!connectedLicense && !verdictPublicKey)
+      || (connectedLicense && (
         validEd25519PublicKey(verdictPublicKey)
         && distinctEd25519PublicKeys(verdictPublicKey, licenseRootPublicKey)
-      ),
+        && (!verdictNextPublicKey || (
+          validEd25519PublicKey(verdictNextPublicKey)
+          && distinctEd25519PublicKeys(verdictPublicKey, verdictNextPublicKey)
+          && distinctEd25519PublicKeys(verdictNextPublicKey, licenseRootPublicKey)
+        ))
+      )),
       'error',
       'Connected licensing has a dedicated Ed25519 verdict public key.',
       'Set REDACTWALL_LICENSE_VERDICT_PUBLIC_KEY to the vendor online-verdict public key, not the offline license-root key.',
+    ),
+    check(
+      'connected_entitlement_keys',
+      !connectedLicense || connectedEntitlementKeyStatus(env),
+      'error',
+      'Connected entitlements use exact current/next Ed25519 trust pins and fingerprint key IDs.',
+      'Configure the offline fallback, online verdict, and entitlement public identities with exact rw-entitlement- plus full SPKI SHA-256 key IDs; identities must be pairwise distinct.',
     ),
     check(
       'custom_detectors',
@@ -493,10 +678,12 @@ function configStatus(input = {}) {
     ),
     check(
       'saas_seat_limit',
-      !saasConfigured || positiveInteger(seatLimit),
+      !saasConfigured || connectedLicense || positiveInteger(seatLimit),
       severity,
-      'SaaS seat limit is configured.',
-      'Set REDACTWALL_SEAT_LIMIT to the purchased positive seat count.',
+      connectedLicense
+        ? 'Connected production receives its seat limit from signed vendor entitlements.'
+        : 'SaaS seat limit is configured.',
+      'Set REDACTWALL_SEAT_LIMIT to the purchased positive seat count, or complete connected vendor enrollment.',
     ),
     check(
       'saas_tenant_context',

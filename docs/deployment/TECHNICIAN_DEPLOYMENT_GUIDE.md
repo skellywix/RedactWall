@@ -1,7 +1,13 @@
 # Technician Production Deployment Guide
 
-This guide is for the technicians who install RedactWall for a paying
-customer and hand the environment over as production ready.
+> **Connected-first prerequisite:** Owner enrollment must first publish the
+> exact deployment identity, purpose-separated channel credentials, verifier
+> pins, signed entitlement, and deployment-bound active outage artifact. The
+> customer deployment command fails closed when any value is missing or stale.
+
+This guide describes the technician workflow for installing RedactWall and
+handing the environment over as production ready after the release gate above
+has closed.
 
 Use it as the install-day runbook. `docs/deployment/DEPLOYMENT.md` and
 `docs/deployment/AWS_SAAS_DEPLOYMENT.md` are the deeper reference docs.
@@ -13,6 +19,8 @@ A customer is production ready only when all of these are true:
 - The customer has one isolated AWS customer-silo stack.
 - The public console URL is HTTPS with a customer-approved DNS name.
 - `/healthz` and `/readyz` return HTTP 200.
+- The Licensing tab reports `active` with the contracted tenant, plan, seats,
+  and expiry.
 - Production preflight has no blockers.
 - Security Admin MFA is enrolled and tested.
 - Browser extension policy, endpoint agent config, and any MCP guard config use
@@ -40,17 +48,21 @@ The supported paid-customer deployment today is one AWS stack per customer:
 
 - Application Load Balancer at the edge.
 - Amazon Linux 2023 EC2 host running the Docker image.
-- Encrypted EBS-backed local disk mounted into the container at `/data`.
+- Separately modeled, encrypted, retained EBS data volume mounted through the
+  identity-verified `/var/lib/redactwall/runtime` host path at `/data`.
 - SQLite evidence store at `/data/redactwall.db`.
-- AWS Secrets Manager for admin, MFA, session, data encryption, and ingest
-  secrets.
+- AWS Secrets Manager for the signed bounded outage fallback plus admin, MFA, session,
+  data encryption, and ingest secrets. The private license signing key remains
+  on the approved offline signing workstation.
 - CloudWatch Logs for container logs.
 - Systems Manager Session Manager for operator access. No SSH ingress is
   required by the template.
 - App-level SaaS controls:
   - `REDACTWALL_SAAS_MODE=true`
   - `REDACTWALL_TENANT_ID=<customer-slug>`
-  - `REDACTWALL_SEAT_LIMIT=<paid-seat-count>`
+  - `REDACTWALL_CONNECTED_DEPLOYMENT_ID=dep_<32-lowercase-hex>`
+  - `REDACTWALL_LICENSE_MANAGED_EXTERNALLY=true`
+  - `REDACTWALL_LICENSE_MODE=connected`
   - `REDACTWALL_REQUIRE_TENANT_CONTEXT=true`
   - `REDACTWALL_REQUIRE_USER_IDENTITY=true`
 
@@ -92,7 +104,8 @@ Collect this before install day:
 | --- | --- |
 | Customer display name | Legal or operating name. |
 | Tenant slug | Lowercase, 2-63 chars, `a-z`, `0-9`, `_`, or `-`; example `cu-acme`. |
-| Paid seat count | Positive integer for `REDACTWALL_SEAT_LIMIT`. |
+| Owner enrollment | Exact tenant, immutable `dep_` deployment id, plan, seats, and feature entitlement. |
+| Outage fallback expiry | Owner-issued active fallback expiry and approved maximum outage window. |
 | AWS account id and region | Region must have ACM, ECR, EC2, ELB, CloudWatch, Secrets Manager, and SSM. |
 | VPC id | VPC for the customer stack. |
 | Public subnet ids | At least two public subnets for the ALB. |
@@ -241,17 +254,39 @@ human-readable tag when supplying CloudFormation `ImageUri`.
 ## Phase 4: Create The Customer Secret
 
 Use the env file from Phase 1 as the source for strong generated values, or use
-the customer's approved vault-generated values. Create a temporary secret JSON
-outside the repo:
+the customer's approved vault-generated values. Obtain the exact active,
+deployment-bound fallback and public trust pins from Owner enrollment. Create a
+temporary secret JSON outside the repo:
 
 ```powershell
+$DeploymentId = "dep_0123456789abcdef0123456789abcdef"
+$OfflineRootPublicKey = "X:\secure-offline\license-signing-public.pem"
+$LicensePath = "X:\owner-handoff\$TenantId-$DeploymentId-fallback.lic"
+
+$LicenseText = [System.IO.File]::ReadAllText($LicensePath).TrimEnd([char[]]"`r`n")
+if ([string]::IsNullOrWhiteSpace($LicenseText) -or
+    $LicenseText.Length -gt 65535 -or
+    $LicenseText -match '[\x00-\x1f\x7f]') {
+  throw "The issued license is not a bounded one-line envelope."
+}
+$LicenseRootPublicKeyB64 = node -e "const c=require('crypto'),f=require('fs');const k=c.createPublicKey(f.readFileSync(process.argv[1]));process.stdout.write(k.export({type:'spki',format:'der'}).toString('base64'))" $OfflineRootPublicKey
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($LicenseRootPublicKeyB64)) {
+  throw "The production license-root public key could not be encoded."
+}
+npm run license:trust-check -- --public-key-file $OfflineRootPublicKey
+if ($LASTEXITCODE -ne 0) { throw "The production license-root trust check failed." }
+
 $SecretPath = Join-Path $env:TEMP "redactwall-$TenantId-secret.json"
 $SecretJson = @{
   ADMIN_PASSWORD = "<16-plus-random-chars>"
   ADMIN_TOTP_SECRET = "<base32-totp-secret>"
   REDACTWALL_SECRET = "<32-plus-random-chars>"
   REDACTWALL_DATA_KEY = "<32-plus-random-chars>"
+  REDACTWALL_LICENSE = $LicenseText
+  REDACTWALL_LICENSE_PUBLIC_KEY_B64 = $LicenseRootPublicKeyB64
   INGEST_API_KEY = "<32-plus-random-chars>"
+  OPERATOR_USER = ""
+  OPERATOR_PASSWORD = ""
   SCIM_BEARER_TOKEN = "<32-plus-random-chars-or-empty>"
   OIDC_ISSUER = "<tenant-specific-issuer-or-empty>"
   OIDC_CLIENT_ID = "<web-client-id-or-empty>"
@@ -263,6 +298,21 @@ $SecretJson = @{
   AUDITOR_PASSWORD = "<16-plus-random-chars-or-empty>"
   SIEM_WEBHOOK_URL = ""
   SIEM_WEBHOOK_TOKEN = ""
+  REDACTWALL_LICENSE_SERVER_URL = "https://license.vendor.example"
+  REDACTWALL_VENDOR_CONTROL_HEARTBEAT_TOKEN = "<owner-issued-32-plus-chars>"
+  REDACTWALL_VENDOR_CONTROL_ACKNOWLEDGEMENT_TOKEN = "<distinct-owner-issued-32-plus-chars>"
+  REDACTWALL_VENDOR_CONTROL_DIAGNOSTIC_TOKEN = ""
+  REDACTWALL_VENDOR_CONTROL_SHADOW_CANDIDATE_TOKEN = ""
+  REDACTWALL_VENDOR_CONTROL_DIAGNOSTICS_ENABLED = "false"
+  REDACTWALL_VENDOR_CONTROL_SHADOW_INTELLIGENCE_ENABLED = "false"
+  REDACTWALL_VENDOR_CONTROL_HEARTBEAT_INTERVAL_MS = ""
+  REDACTWALL_VENDOR_CONTROL_TIMEOUT_MS = ""
+  REDACTWALL_LICENSE_VERDICT_PUBLIC_KEY_B64 = "<current-online-verdict-public-SPKI-DER-base64>"
+  REDACTWALL_LICENSE_VERDICT_NEXT_PUBLIC_KEY_B64 = ""
+  REDACTWALL_ENTITLEMENT_PUBLIC_KEY_B64 = "<current-entitlement-public-SPKI-DER-base64>"
+  REDACTWALL_ENTITLEMENT_KEY_ID = "rw-entitlement-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  REDACTWALL_ENTITLEMENT_NEXT_PUBLIC_KEY_B64 = ""
+  REDACTWALL_ENTITLEMENT_NEXT_KEY_ID = ""
 } | ConvertTo-Json -Depth 2
 
 [System.IO.File]::WriteAllText(
@@ -270,22 +320,56 @@ $SecretJson = @{
   $SecretJson,
   [System.Text.UTF8Encoding]::new($false)
 )
+$LicenseText = $null
+$LicenseRootPublicKeyB64 = $null
 ```
+
+The `.lic` file is a signed bounded outage artifact, not primary commercial
+authority. Its embedded `status` must be `active`; `customerId` and
+`deploymentId` must exactly equal `$TenantId` and `$DeploymentId`.
+Never add the private signing key or its passphrase to the secret JSON. The
+CloudFormation bootstrap writes only the signed envelope to the encrypted data
+volume after the pulled production image verifies its Ed25519 signature,
+tenant and deployment binding, purpose-separated public pins, credential and
+consent pairings, and active state over stdin with no network. The artifact is
+never a process argument. The application verifies it again at startup.
 
 Create or update the AWS secret:
 
 ```powershell
 $SecretName = "redactwall/$TenantId"
-aws secretsmanager create-secret `
-  --name $SecretName `
-  --secret-string file://$SecretPath `
-  --region $AwsRegion
+aws secretsmanager describe-secret --secret-id $SecretName --region $AwsRegion 2>$null
+if ($LASTEXITCODE -eq 0) {
+  $LicenseSecretVersionId = aws secretsmanager put-secret-value `
+    --secret-id $SecretName `
+    --secret-string file://$SecretPath `
+    --query VersionId `
+    --output text `
+    --region $AwsRegion
+} else {
+  $LicenseSecretVersionId = aws secretsmanager create-secret `
+    --name $SecretName `
+    --secret-string file://$SecretPath `
+    --query VersionId `
+    --output text `
+    --region $AwsRegion
+}
+if ($LASTEXITCODE -ne 0 -or
+    $LicenseSecretVersionId -notmatch '^[A-Za-z0-9-]{32,64}$') {
+  throw "The immutable Secrets Manager version id was not returned."
+}
 ```
 
+`$LicenseSecretVersionId` is non-secret deployment metadata. It binds cfn-init to
+the exact immutable secret snapshot and must be passed to CloudFormation. Merely
+changing `AWSCURRENT` behind the same secret ARN does not trigger cfn-hup.
+
 If the secret already exists, use the customer's approved secret-update process.
-Do not overwrite production secrets casually. After the secret exists and the MFA
-seed is enrolled, remove the local temporary secret file according to the
-customer's secure deletion process.
+Do not overwrite production secrets casually. After the secret exists and the
+MFA seed is enrolled, remove the local temporary secret file according to the
+customer's secure deletion process. Move the issued `.lic` file into the
+approved customer handoff record or remove its temporary copy; keep the offline
+private key in its original protected location.
 
 ## Phase 5: Deploy The Customer Stack
 
@@ -296,43 +380,150 @@ $StackName = "redactwall-$TenantId"
 $VpcId = "vpc-xxxxxxxx"
 $PublicSubnetIds = "subnet-aaaaaaa,subnet-bbbbbbb"
 $InstanceSubnetId = "subnet-aaaaaaa"
+$InstanceAvailabilityZone = "us-east-1a" # must be the AZ of InstanceSubnetId
+$DataStackName = "$StackName-data"
 $CertificateArn = "arn:aws:acm:us-east-1:123456789012:certificate/example"
 $PublicHostname = "$TenantId.redactwall.customer.example"
-$SeatLimit = 25
 $SecretArn = aws secretsmanager describe-secret `
   --secret-id "redactwall/$TenantId" `
   --query ARN `
   --output text `
   --region $AwsRegion
+$AmiId = aws ssm get-parameter `
+  --name /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64 `
+  --query Parameter.Value --output text --region $AwsRegion
+$ArtifactBucket = npm run --silent silo:artifacts:init -- --region $AwsRegion
 ```
 
-Validate the template:
+The artifact bootstrap is a one-time account-and-region step. It enforces
+private access, default encryption, versioning, bucket-owner enforcement,
+TLS-only access, same-account bucket-policy writers, and expected-owner checks
+on every S3 operation. Store CloudFormation templates only. Never upload
+customer secret JSON, licenses, private keys, or other runtime secrets.
+
+Create the retained data stack once and capture its exact volume id:
+
+```powershell
+aws cloudformation deploy `
+  --template-file infra/aws/customer-data-volume.yml `
+  --stack-name $DataStackName `
+  --region $AwsRegion `
+  --parameter-overrides TenantId=$TenantId AvailabilityZone=$InstanceAvailabilityZone
+$DataVolumeId = aws cloudformation describe-stacks `
+  --stack-name $DataStackName --region $AwsRegion `
+  --query "Stacks[0].Outputs[?OutputKey=='DataVolumeId'].OutputValue" --output text
+if ($DataVolumeId -notmatch '^vol-[a-f0-9]{8,17}$') { throw "Invalid retained data volume id" }
+```
+
+Snapshot recovery is explicit: create a new durable-data stack and pass both
+`SnapshotId=snap-...` and `SourceDataVolumeId=vol-...`, then use the maintenance
+restore workflow below. The source id and tenant must match the marker stored in
+the snapshot. A preformatted volume without that marker is rejected. Only a
+blank, no-snapshot companion volume no more than one hour old can receive a new
+version 3 marker. Snapshot recovery rewrites the existing marker as version 4
+with the new volume and retained source lineage.
+
+Validate the small durable-data template directly. The application template is
+larger than CloudFormation's inline template limit. The deploy wrapper uploads
+it by SHA-256, captures the exact S3 `VersionId`, verifies that version's S3
+checksum and encryption, then uses the same version-bound `TemplateURL` for
+validation and stack mutation:
 
 ```powershell
 aws cloudformation validate-template `
-  --template-body file://infra/aws/customer-silo.yml `
+  --template-body file://infra/aws/customer-data-volume.yml `
   --region $AwsRegion
 ```
 
 Deploy:
 
 ```powershell
-aws cloudformation deploy `
-  --template-file infra/aws/customer-silo.yml `
+npm run silo:deploy -- `
   --stack-name $StackName `
-  --capabilities CAPABILITY_NAMED_IAM `
   --region $AwsRegion `
-  --parameter-overrides `
-    VpcId=$VpcId `
-    PublicSubnetIds=$PublicSubnetIds `
-    InstanceSubnetId=$InstanceSubnetId `
-    ImageUri=$Image `
-    SecretArn=$SecretArn `
-    TenantId=$TenantId `
-    SeatLimit=$SeatLimit `
-    CertificateArn=$CertificateArn `
-    PublicHostname=$PublicHostname
+  --vpc-id $VpcId `
+  --public-subnet-ids $PublicSubnetIds `
+  --instance-subnet-id $InstanceSubnetId `
+  --instance-availability-zone $InstanceAvailabilityZone `
+  --data-stack-name $DataStackName `
+  --data-volume-id $DataVolumeId `
+  --ami-id $AmiId `
+  --artifact-bucket $ArtifactBucket `
+  --image-uri $Image `
+  --secret-arn $SecretArn `
+  --secret-version-id $LicenseSecretVersionId `
+  --tenant-id $TenantId `
+  --deployment-id $DeploymentId `
+  --certificate-arn $CertificateArn `
+  --public-hostname $PublicHostname
 ```
+
+This is the supported update command. It prevalidates the image and immutable
+secret on the current host, applies the stack, then waits for a bounded SSM
+apply-and-attest command. Do not accept CloudFormation `UPDATE_COMPLETE` alone
+as evidence that the requested runtime is live.
+It refuses to change the tenant, deployment identity, data stack, data volume, Availability Zone,
+AMI, instance type, or root volume on an existing silo. A stack policy denies
+ordinary instance and attachment replacement. It also validates the live
+volume's encryption, gp3 and non-MultiAttach topology, CloudFormation ownership
+tags, tenant tags, exact attachment, and the certificate's account, region,
+`ISSUED` status, and hostname coverage before mutation.
+
+The command intentionally refuses an older root-volume-only stack that does
+not publish `DataVolumeId` and `InstanceAvailabilityZone`. Take and verify a
+backup, create the retained-volume stack, and restore through the documented
+backup/restore workflow. Do not let an in-place template update create an empty
+data volume beside the only copy of customer evidence.
+
+Owner-signed connected entitlements are the plan, seat, feature, pause, and
+revoke authority. Do not use the in-console license installer. For an outage
+fallback or public-pin rotation, publish a new immutable secret version, capture
+its returned version id, and rerun this command with the same exact
+`--deployment-id`. The host rejects an inactive, missing, malformed, or sibling
+deployment fallback before changing the installed file. The template also sets
+`REDACTWALL_LICENSE_MANAGED_EXTERNALLY=true`; both in-app license-install APIs
+return `license_managed_externally` without changing the file.
+
+For an AMI, instance-type, or root-volume replacement, schedule an outage,
+copy the complete deploy command above, keep every argument, set only the
+approved replacement values, and replace its first line with:
+
+```powershell
+npm run silo:maintenance -- --mode replace-instance `
+```
+
+For volume snapshot recovery, create a new durable-data stack from the snapshot,
+copy the complete deploy command, change only its data stack, volume, and source
+volume arguments, and replace its first line with:
+
+```powershell
+npm run silo:maintenance -- --mode restore-volume `
+```
+
+The maintenance command creates a verified authenticated recovery set in a
+root-owned sibling outside the candidate data mount, captures and verifies the
+exact prior versioned template contract, stops and drains the only writer,
+deregisters it from the ALB, deletes the application stack to detach the gp3
+volume, and creates the requested stack. If creation fails, it deletes the
+failed stack, redeploys that captured prior template version, restores the
+retained backup, verifies the audit chain, and only then starts the prior
+writer. A failed restore or verification remains stopped and deregistered.
+Update customer DNS to the returned ALB DNS name after either cutover or
+rollback. Never update the original durable-data stack in place and never
+attach or detach the evidence volume by hand.
+
+If apply-and-attest reports `committed_cleanup_pending`, the healthy runtime is
+already committed but exact prior artifacts remain journaled. Rerun the same
+deploy command. Cleanup runs before the same-configuration fast path on every
+attempt, the warning remains visible while failure repeats, and a different
+configuration is rejected until cleanup and warning removal both succeed.
+
+Every production silo is connected. Heartbeat and acknowledgement credentials
+are mandatory and distinct. Enabled diagnostic or Shadow AI candidate channels
+require their own distinct credential and exact consent. Current offline,
+online-verdict, and entitlement public pins are mandatory and pairwise distinct;
+next entitlement key and exact key ID rotate as a pair. Never reuse signing
+identities across purposes or add the removed shared license-server token.
 
 Get the ALB DNS target for the customer alias and the canonical URL:
 
@@ -399,6 +590,8 @@ Inside the SSM session:
 ```bash
 sudo docker ps
 sudo docker logs --tail 100 redactwall
+sudo stat -c '%u:%g %a %h %s' /etc/redactwall/license/redactwall.lic
+sudo /usr/local/sbin/redactwall-verify-data-volume
 sudo docker exec redactwall node -e "const v=require('./server/db').verifyAuditChain(); console.log(JSON.stringify(v)); if(!v.ok) process.exit(1)"
 sudo docker exec redactwall npm run backup -- /data/backups
 ```
@@ -430,21 +623,23 @@ With the customer's Security Admin:
 2. Log in with `ADMIN_USER` and `ADMIN_PASSWORD`.
 3. Enter the current MFA code from the enrolled authenticator app.
 4. Open the dashboard preflight view and confirm no blockers.
-5. Select the agreed policy template.
-6. Confirm the approval queue is empty before sensor rollout.
-7. Confirm approver login, if configured, can approve or deny assigned approval
+5. Open the Licensing tab and confirm `active`, the expected tenant, plan,
+   seats, and expiry. Do not paste or capture the license envelope in evidence.
+6. Select the agreed policy template.
+7. Confirm the approval queue is empty before sensor rollout.
+8. Confirm approver login, if configured, can approve or deny assigned approval
    items and cannot reveal raw prompts, purge retention, edit policy, or review
    governed destinations.
-8. Confirm auditor login, if configured, can view sanitized evidence and cannot
+9. Confirm auditor login, if configured, can view sanitized evidence and cannot
    approve, deny, reveal, purge, or edit policy.
-9. If SCIM or OIDC is planned, open the dashboard Identity tab or run
+10. If SCIM or OIDC is planned, open the dashboard Identity tab or run
    `npm run identity:setup -- --provider entra --base-url https://<customer-host> --tenant-id <tenant>`
    or `npm run identity:setup -- --provider okta --base-url https://<customer-host> --tenant-id <customer.okta.com>`
    and attach only the secret-free values to the handoff.
-10. If SCIM is configured, have the identity admin call
+11. If SCIM is configured, have the identity admin call
    `/scim/v2/ServiceProviderConfig` with the bearer token and confirm
    `patch.supported=true` and `filter.supported=true`.
-11. If OIDC is configured, confirm the login page shows `Continue with SSO`,
+12. If OIDC is configured, confirm the login page shows `Continue with SSO`,
     sign in as one active SCIM-provisioned test user, and verify `/api/me`
     reports the expected role without using a local console password.
 
@@ -593,9 +788,9 @@ Run these before customer handoff:
   `SEAT_LIMIT_BLOCKED`.
 - `/api/billing/seats` shows the expected test users.
 
-Coordinate seat-limit tests with the customer. If the customer purchased only a
-small number of seats, use a temporary test stack or reset test data before
-production use.
+Coordinate the signed-entitlement seat test with the customer and Owner. If the
+customer purchased only a small number of seats, use an Owner-approved temporary
+entitlement on a test deployment; never add a local static seat override.
 
 ## Phase 12: Backup And Recovery Evidence
 
@@ -647,8 +842,8 @@ On Linux or AWS Docker hosts, put the schedule config in the mounted data folder
 and install the standard systemd timer:
 
 ```bash
-sudo cp config/evidence-schedule.example.json /var/lib/redactwall/evidence-schedule.json
-sudo editor /var/lib/redactwall/evidence-schedule.json
+sudo cp config/evidence-schedule.example.json /var/lib/redactwall/runtime/evidence-schedule.json
+sudo editor /var/lib/redactwall/runtime/evidence-schedule.json
 sudo npm run evidence:pack:install-systemd -- \
   --mode docker \
   --container redactwall \
@@ -715,7 +910,8 @@ If deployment fails before customer use:
 1. Stop sensor rollout.
 2. Save CloudFormation events and CloudWatch logs.
 3. Fix the blocker and redeploy, or delete the failed stack.
-4. Confirm whether the EC2 root EBS volume was retained.
+4. Record the `DataVolumeId` output and verify the separately modeled customer
+   data volume remains retained. The replaceable EC2 root volume is disposable.
 5. Do not delete retained volumes until evidence disposition is approved.
 
 If a secret is exposed:

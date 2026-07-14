@@ -106,6 +106,21 @@ test('storage rejects ambiguous Postgres URLs before creating a driver', () => {
   assert.strictEqual(attempts, 0, 'the driver is never created for an ambiguous connection URL');
 });
 
+test('Postgres audit scope pins and qualifies its database-local authority', () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, '..', 'server', 'storage', 'pg-driver.js'),
+    'utf8',
+  );
+  const body = source.match(/function auditDatabaseScope\(\) \{[\s\S]*?\n  \}/)?.[0] || '';
+  const pin = body.indexOf('SET LOCAL search_path = public, pg_catalog, pg_temp');
+  const lock = body.indexOf('pg_advisory_xact_lock');
+  const create = body.indexOf('CREATE TABLE IF NOT EXISTS public.redactwall_audit_scope');
+  assert.ok(pin >= 0 && pin < lock && lock < create);
+  assert.match(body, /INSERT INTO public\.redactwall_audit_scope/);
+  assert.match(body, /FROM public\.redactwall_audit_scope WHERE singleton = 1/);
+  assert.doesNotMatch(body, /(?:TABLE IF NOT EXISTS|INSERT INTO|FROM) redactwall_audit_scope\b/);
+});
+
 async function createFreshDatabase() {
   const { Client } = require('pg');
   const admin = new Client({ connectionString: ADMIN_URL });
@@ -264,13 +279,6 @@ test('db.js contract holds on Postgres (migrations, RLS, immutability, chain)', 
     cleared: true,
     chainOk: true,
   });
-  assert.deepStrictEqual(results.vendorHeartbeatCas.value, {
-    newerApplied: true,
-    olderApplied: false,
-    status: 'revoked',
-    issuedAt: 3000,
-    chainOk: true,
-  });
   assert.strictEqual(results.auditImmutable.value.blocked, true, 'audit UPDATE must be refused on Postgres');
   assert.deepStrictEqual(results.tenantScoping.value, { alphaOnly: true, betaOnly: true });
   assert.deepStrictEqual(results.rowLevelSecurity.value, {
@@ -287,51 +295,9 @@ test('db.js contract holds on Postgres (migrations, RLS, immutability, chain)', 
   assert.deepStrictEqual(results.seatWindow.value, { windowed: 1, lifetime: 2 });
   assert.deepStrictEqual(results.mfaRecovery.value, { first: true, second: false, used: true });
   assert.deepStrictEqual(results.administration.value, { user: true, invite: true, seat: true, renewal: true });
-});
-
-test('independent Postgres replicas share the vendor verdict high-water and status', {
-  skip: !ADMIN_URL && 'REDACTWALL_TEST_PG_URL not set',
-  timeout: 60000,
-}, async () => {
-  const databaseUrl = await createFreshDatabase();
-  const auditDir = freshAuditDir();
-  const [first, second] = await Promise.all([
-    startIdentityWorker(databaseUrl, auditDir),
-    startIdentityWorker(databaseUrl, auditDir),
-  ]);
-  const customerId = 'cu-pg-replica-vendor';
-  const customerRef = 'license_' + crypto.createHash('sha256').update(customerId).digest('base64url').slice(0, 24);
-  const record = (issuedAt, status) => {
-    const state = { customerId, issuedAt, contactAt: issuedAt, status };
-    return {
-      ...state,
-      customerRef,
-      audits: [{
-        action: 'VENDOR_HEARTBEAT_OK', actor: 'vendor',
-        detail: JSON.stringify({ customerRef, issuedAt, contactAt: issuedAt, status }),
-      }],
-    };
-  };
-  try {
-    const [newer, older] = await Promise.all([
-      first.call('applyVendorHeartbeat', record(5000, 'revoked')),
-      second.call('applyVendorHeartbeat', record(4000, 'active')),
-    ]);
-    assert.strictEqual(newer.applied, true);
-    assert.ok(typeof older.applied === 'boolean');
-    assert.deepStrictEqual(await first.call('lastVendorHeartbeat', { customerId, customerRef }), {
-      issuedAt: 5000, contactAt: 5000, status: 'revoked',
-    });
-    assert.deepStrictEqual(await second.call('lastVendorHeartbeat', { customerId, customerRef }), {
-      issuedAt: 5000, contactAt: 5000, status: 'revoked',
-    });
-    const evidence = await first.call('vendorHeartbeatEvidence');
-    assert.deepStrictEqual(evidence, older.applied ? [5000, 4000] : [5000],
-      'an older heartbeat may commit first, but never after the newer verdict');
-    assert.strictEqual((await first.call('verifyAudit')).ok, true);
-  } finally {
-    await Promise.allSettled([first.close(), second.close()]);
-  }
+  assert.deepStrictEqual(results.customerDiagnostics.value, {
+    delivered: true, replay: true, immutable: true, pending: 0,
+  });
 });
 
 test('Postgres first boot permits only the replica using the durable shared audit directory', {

@@ -239,21 +239,25 @@ function createPgDriver(connectionString) {
 
   function auditDatabaseScope() {
     return transaction(() => {
+      // Database scope is durable security authority. Never let a URL, role,
+      // or caller-provided search_path redirect its bootstrap into pg_temp or
+      // another writable schema.
+      call('query', 'SET LOCAL search_path = public, pg_catalog, pg_temp', []);
       call('query', 'SELECT pg_advisory_xact_lock($1)', [POSTGRES_AUDIT_SCOPE_LOCK]);
       call('query', `
-        CREATE TABLE IF NOT EXISTS redactwall_audit_scope (
+        CREATE TABLE IF NOT EXISTS public.redactwall_audit_scope (
           singleton SMALLINT PRIMARY KEY CHECK (singleton = 1),
           scope_id UUID UNIQUE NOT NULL
         )
       `, []);
       call('query', `
-        INSERT INTO redactwall_audit_scope (singleton, scope_id)
+        INSERT INTO public.redactwall_audit_scope (singleton, scope_id)
         VALUES (1, $1::uuid)
         ON CONFLICT (singleton) DO NOTHING
       `, [crypto.randomUUID()]);
       const row = call(
         'query',
-        'SELECT scope_id::text AS scope_id FROM redactwall_audit_scope WHERE singleton = 1',
+        'SELECT scope_id::text AS scope_id FROM public.redactwall_audit_scope WHERE singleton = 1',
         [],
       ).rows[0];
       const stableId = String(row && row.scope_id || '').toLowerCase();

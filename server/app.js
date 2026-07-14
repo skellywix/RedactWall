@@ -60,7 +60,8 @@ const releaseTokens = require('./release-token');
 const receipts = require('./receipts');
 const tenant = require('./tenant');
 const license = require('./license');
-const vendorLink = require('./vendor-link');
+const connectedLicensing = require('./connected-license-runtime');
+const customerDiagnostics = require('./customer-diagnostic-runtime');
 const exactMatch = require('./exact-match');
 const ncuaReadiness = require('./ncua-readiness');
 const openapi = require('./openapi');
@@ -77,6 +78,76 @@ const updater = require('./updater');
 const privatePaths = require('./private-path');
 const fileMutationLock = require('./file-mutation-lock');
 const { boundedTimeoutMs, requestBodyDeadline, requestBodyDeadlineExpired } = require('./request-body-deadline');
+
+const CONNECTED_LICENSE_MODE = connectedLicensing.connectedLicenseMode(process.env);
+let connectedLicenseRuntime = null;
+const serverRuntimeStops = new WeakMap();
+
+function currentConnectedLicenseRuntime() {
+  if (!CONNECTED_LICENSE_MODE) return null;
+  if (!connectedLicenseRuntime) {
+    connectedLicenseRuntime = connectedLicensing.createConnectedLicenseRuntimeFromEnvironment({
+      env: process.env,
+      db,
+      license,
+      packageVersion: require('../package.json').version,
+    });
+  }
+  return connectedLicenseRuntime;
+}
+
+function stopConnectedLicenseRuntime() {
+  return connectedLicenseRuntime ? connectedLicenseRuntime.stop() : null;
+}
+
+function exactDiagnosticSender(runtime) {
+  if (!runtime || typeof runtime.sendDiagnostic !== 'function') return null;
+  return async (event) => {
+    const result = await runtime.sendDiagnostic(event);
+    return Boolean(result && result.ok === true && result.accepted === true);
+  };
+}
+
+function configuredCustomerDiagnosticRuntime(activeConnectedRuntime, opts) {
+  const sender = exactDiagnosticSender(activeConnectedRuntime);
+  const factory = opts.createCustomerDiagnosticRuntime
+    || customerDiagnostics.createCustomerDiagnosticRuntimeFromEnvironment;
+  const runtime = factory({
+    env: process.env,
+    db,
+    componentVersion: require('../package.json').version,
+    ...(sender ? { sender } : {}),
+  });
+  if (!runtime || typeof runtime.status !== 'function'
+      || typeof runtime.start !== 'function' || typeof runtime.stop !== 'function') {
+    throw new Error('Customer diagnostic runtime configuration rejected');
+  }
+  const status = runtime.status();
+  if (status && status.enabled === true && !sender) {
+    throw new Error('Customer diagnostic runtime requires connected delivery');
+  }
+  return runtime;
+}
+
+function memoizedRuntimeStopper(stoppers) {
+  let pending = null;
+  return () => {
+    if (!pending) pending = stopRuntimesInOrder(stoppers);
+    return pending;
+  };
+}
+
+async function stopRuntimesInOrder(stoppers) {
+  let failed = false;
+  for (const stop of stoppers) {
+    if (typeof stop !== 'function') continue;
+    try {
+      const result = await stop();
+      if (result && result.ok === false) failed = true;
+    } catch { failed = true; }
+  }
+  return failed ? { ok: false, reason: 'runtime_stop_failed' } : { ok: true };
+}
 
 auth.setAccountLookup((userName) => adminDomain.accountLookup(db, userName));
 // A session's signed role is only a claim about login time. Re-read mutable
@@ -175,9 +246,20 @@ app.use(cookieParser());
 // ---- Health / readiness (public, no sensitive data) -------------------------
 app.get('/healthz', (req, res) => res.json({ status: 'ok', service: 'redactwall', version: require('../package.json').version }));
 app.get('/readyz', (req, res) => {
+  let cfg;
   try {
     db.stats();
-    const cfg = currentPreflight();
+  } catch {
+    return res.status(503).json({ ready: false, database: false, error: 'database_unavailable' });
+  }
+  try {
+    cfg = currentPreflight();
+  } catch {
+    return res.status(503).json({
+      ready: false, database: true, configuration: 'invalid', error: 'configuration_unavailable',
+    });
+  }
+  try {
     const audit = db.auditHealth();
     if (!audit.ok) {
       return res.status(503).json({
@@ -200,10 +282,40 @@ app.get('/readyz', (req, res) => {
         error: 'durable_storage_cleanup_degraded',
       });
     }
-    res.status(cfg.ready ? 200 : 503).json({ ready: cfg.ready, database: true, configuration: cfg.level });
   } catch {
-    res.status(503).json({ ready: false, database: false, error: 'database_unavailable' });
+    return res.status(503).json({
+      ready: false, database: true, audit: false, configuration: cfg.level,
+      error: 'audit_checkpoint_unavailable',
+    });
   }
+  let connected;
+  let licensing;
+  try {
+    connected = currentConnectedLicenseRuntime();
+    licensing = connected
+      ? connected.serviceReadiness() : { ok: true, serviceReady: true, connected: false };
+  } catch {
+    return res.status(503).json({
+      ready: false,
+      database: true,
+      audit: true,
+      configuration: cfg.level,
+      licensing: 'unavailable',
+      licensingReason: 'connected_runtime_unavailable',
+      error: 'connected_licensing_unavailable',
+    });
+  }
+  const ready = cfg.ready && licensing.serviceReady === true;
+  return res.status(ready ? 200 : 503).json({
+    ready,
+    database: true,
+    audit: true,
+    configuration: cfg.level,
+    ...(connected ? {
+      licensing: licensing.ok ? 'ready' : 'restricted',
+      licensingReason: licensing.reason || null,
+    } : {}),
+  });
 });
 
 // ---- Live updates (Server-Sent Events) --------------------------------------
@@ -328,6 +440,8 @@ function currentPreflight() {
     policyStatus: policy.policyStatus(),
     exactMatchStatus: exactMatch.status(),
     policySigningKeyStatus: policyBundle.signingKeyStatus({ initialize: true }),
+    managedLicenseHealth: license.managedLicenseHealth(),
+    licenseTrustAnchorStatus: license.productionTrustAnchorStatus(process.env),
   });
 }
 
@@ -547,53 +661,48 @@ function writeBillingBlock(body, { status, action, reasons, detail, seatLimit = 
   return row;
 }
 
-// Vendor kill-switch (connected mode): an active revocation or a stale vendor
-// link blocks ALL sensor ingest, fail-closed, with a distinct status so this
-// reads as a licensing action, not an outage. Nothing fails open.
-function reconcileVendorLicenseState() {
-  if (!vendorLink.enabled()) return { ok: true, synced: false };
-  return vendorLink.reconcileSharedState({
-    lastVendorHeartbeat: (customerId, customerRef) => db.lastVendorHeartbeat(customerId, customerRef),
-  });
-}
-
-function sharedLicenseRevoked() {
-  reconcileVendorLicenseState();
-  return license.isRevoked();
-}
-
 function sharedLicenseStatus() {
-  reconcileVendorLicenseState();
-  return license.publicStatus();
+  const connected = currentConnectedLicenseRuntime();
+  if (connected) return connected.publicStatus();
+  return { ...license.publicStatus(), managedExternally: license.managedExternally() };
 }
 
 function requireWritableSharedLicense(req, res, next) {
-  reconcileVendorLicenseState();
+  const connected = currentConnectedLicenseRuntime();
+  if (connected) return connected.requireWritable(req, res, next);
   return license.requireWritable(req, res, next);
 }
 
-function blockIfRevoked(req, res) {
-  if (!sharedLicenseRevoked()) return false;
-  const body = req.body || {};
-  const row = writeBillingBlock(body, {
-    status: 'license_revoked',
-    action: 'LICENSE_REVOKED_BLOCK',
-    reasons: ['license_revoked'],
-    detail: 'tenantRef=' + adminAuditReference('tenant', body.orgId || tenant.config().tenantId || 'unknown'),
-  });
-  if (isIdempotentReplay(row)) {
-    res.json(nativeIdempotentReplayResponse(row));
-    return true;
-  }
-  broadcast('query', { type: 'license_revoked', query: publicQuery(row) });
-  res.status(403).json({ id: row.id, error: 'license revoked', decision: 'block', status: 'license_revoked' });
-  return true;
+function featureEntitled(feature) {
+  const connected = currentConnectedLicenseRuntime();
+  return connected ? connected.featureEnabled(feature) : license.entitled(feature);
+}
+
+function connectedSeatOptions() {
+  const connected = currentConnectedLicenseRuntime();
+  if (!connected) return {};
+  try {
+    const authority = connected.seatAuthority();
+    if (authority?.configured === true && Number.isSafeInteger(authority.seatLimit)
+        && authority.seatLimit >= 0 && authority.seatLimit <= 1_000_000) {
+      return { seatLimitOverride: authority.seatLimit };
+    }
+  } catch {}
+  // Preserve an explicit invalid connected authority. Omitting the override
+  // would silently restore the customer-local REDACTWALL_SEAT_LIMIT.
+  return { seatLimitOverride: null };
+}
+
+function licensedSeatReport() {
+  return tenant.seatReport(db, process.env, connectedSeatOptions());
 }
 
 function enforceTenantForSensor(req, res) {
-  if (blockIfRevoked(req, res)) return false;
-
-  const check = tenant.validateSensorAccess({ body: req.body || {}, db });
+  const check = tenant.validateSensorAccess({
+    body: req.body || {},
+    db,
+    ...connectedSeatOptions(),
+  });
   if (check.ok) {
     req.body.orgId = check.orgId || null;
     return true;
@@ -606,9 +715,9 @@ function enforceTenantForSensor(req, res) {
       action: check.action,
       reasons: [check.message],
       detail: 'tenantRef=' + adminAuditReference('tenant', check.orgId || tenant.config().tenantId || 'unknown')
-        + '; seats=' + (check.seatsUsed || 0) + '/' + (check.seatLimit || 0),
-      seatLimit: check.seatLimit || null,
-      seatsUsed: check.seatsUsed || null,
+        + '; seats=' + (check.seatsUsed ?? 0) + '/' + (check.seatLimit ?? 0),
+      seatLimit: check.seatLimit ?? null,
+      seatsUsed: check.seatsUsed ?? null,
     });
     if (isIdempotentReplay(row)) {
       res.json(nativeIdempotentReplayResponse(row));
@@ -622,8 +731,8 @@ function enforceTenantForSensor(req, res) {
       error: check.message,
       decision: 'block',
       status: check.status,
-      seatLimit: check.seatLimit || undefined,
-      seatsUsed: check.seatsUsed || undefined,
+      seatLimit: check.seatLimit ?? undefined,
+      seatsUsed: check.seatsUsed ?? undefined,
     });
     return false;
   }
@@ -632,43 +741,10 @@ function enforceTenantForSensor(req, res) {
     error: check.message,
     decision: 'block',
     status: check.status,
-    seatLimit: check.seatLimit || undefined,
-    seatsUsed: check.seatsUsed || undefined,
+    seatLimit: check.seatLimit ?? undefined,
+    seatsUsed: check.seatsUsed ?? undefined,
   });
   return false;
-}
-
-// Connected-mode license heartbeat (opt-in via REDACTWALL_LICENSE_SERVER_URL).
-// Fire-and-forget: a failed or unreachable heartbeat never throws; a stale link
-// fails CLOSED, never open (server/vendor-link.js). Dormant otherwise.
-function runVendorHeartbeat() {
-  if (!vendorLink.enabled()) return Promise.resolve();
-  return vendorLink.heartbeat({
-    seatReport: tenant.seatReport(db),
-    version: require('../package.json').version,
-    appendAudit: (rec) => db.appendAudit(rec),
-    appendAudits: (records) => db.appendAudits(records),
-    applyVendorHeartbeat: (record) => db.applyVendorHeartbeat(record),
-    lastVendorHeartbeat: (customerId, customerRef) => db.lastVendorHeartbeat(customerId, customerRef),
-  }).catch(() => {});
-}
-
-// Restore a persisted vendor revocation and evaluate staleness at boot, BEFORE
-// the server accepts ingest, so a kill-switch survives restart and a stale link
-// is already blocking on the first request. Synchronous by design.
-function runVendorRestore() {
-  if (!vendorLink.enabled()) return;
-  try {
-    vendorLink.restore({
-      appendAudit: (rec) => db.appendAudit(rec),
-      // Tamper-evident kill-switch anchors from the hash-chained audit, so the
-      // deletable state file cannot lift a revocation or reset staleness.
-      lastVendorHeartbeat: (customerId, customerRef) => db.lastVendorHeartbeat(customerId, customerRef),
-      firstAuditAt: () => db.firstAuditAt(),
-    });
-  } catch (_) {
-    license.setVendorStale(true);
-  }
 }
 
 function runRetentionPurge({ actor = 'system', now = new Date() } = {}) {
@@ -1228,6 +1304,78 @@ function nativeReplaySnapshotResponse(snapshot) {
   };
 }
 
+function connectedEgressRestriction() {
+  const connected = currentConnectedLicenseRuntime();
+  if (!connected) return null;
+  let disposition;
+  try { disposition = connected.disposition(); }
+  catch { disposition = null; }
+  if (disposition?.protectedEgress === 'allow') return null;
+  const reason = /^[a-z][a-z0-9_.:-]{0,79}$/.test(String(disposition?.reason || ''))
+    ? disposition.reason : 'connected_state_invalid';
+  return Object.freeze({ reason });
+}
+
+function connectedRestrictionResponse(res, restriction, options = {}) {
+  return res.status(403).json({
+    ...(options.id ? { id: options.id } : {}),
+    error: 'license_restricted',
+    reason: restriction.reason,
+    decision: 'block',
+    status: 'license_restricted',
+    ...(options.idempotentReplay ? { idempotentReplay: true } : {}),
+    ...(options.released === false ? { released: false } : {}),
+  });
+}
+
+function replayAuthorizesEgress(response) {
+  return ['allow', 'redact', 'warn'].includes(response?.decision) || response?.released === true;
+}
+
+function sendNativeReplayResponse(res, snapshot) {
+  const response = nativeReplaySnapshotResponse(snapshot);
+  const restriction = replayAuthorizesEgress(response) ? connectedEgressRestriction() : null;
+  return restriction
+    ? connectedRestrictionResponse(res, restriction, { id: response.id, idempotentReplay: true })
+    : res.json(response);
+}
+
+function sendNativeIdempotentReplay(res, row) {
+  const snapshot = row && row[IDEMPOTENT_REPLAY_SNAPSHOT];
+  if (!snapshot) return res.json(nativeIdempotentReplayResponse(row));
+  return sendNativeReplayResponse(res, snapshot);
+}
+
+function restrictConnectedEgress(res, query, { actor = 'system', detail = 'protected egress' } = {}) {
+  const restriction = connectedEgressRestriction();
+  if (!restriction) return false;
+  const row = createQueryWithAudit({
+    ...query,
+    status: 'license_restricted',
+    mode: 'billing',
+    reasons: [
+      ...(Array.isArray(query.reasons) ? query.reasons : []),
+      `Connected licensing restriction: ${restriction.reason}`,
+    ],
+    _rawPrompt: undefined,
+    _tokenVault: undefined,
+    tokenizedPrompt: undefined,
+  }, {
+    action: 'LICENSE_EGRESS_RESTRICTED',
+    actor,
+    detail: `${detail}; reason=${restriction.reason}`,
+  });
+  if (isIdempotentReplay(row)) {
+    sendNativeIdempotentReplay(res, row);
+    return true;
+  }
+  emitSecurityAlert(row, 'LICENSE_EGRESS_RESTRICTED');
+  broadcast('query', { type: 'license_restricted', query: publicQuery(row) });
+  broadcast('stats', db.stats());
+  connectedRestrictionResponse(res, restriction, { id: row.id });
+  return true;
+}
+
 function committedNativeIngest(body = {}) {
   if (!body.idempotency) return null;
   return db.getIdempotentIngestReplay({ ...body.idempotency, orgId: body.orgId || null });
@@ -1236,7 +1384,7 @@ function committedNativeIngest(body = {}) {
 app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gateSchema), async (req, res) => {
   if (!enforceTenantForSensor(req, res)) return;
   const committed = committedNativeIngest(req.body || {});
-  if (committed) return res.json(nativeReplaySnapshotResponse(committed));
+  if (committed) return sendNativeReplayResponse(res, committed);
   const {
     prompt, user = 'unknown', destination = 'unknown', sourceIp = null,
     source = 'api', channel = 'submit', clientOutcome = null, note: rawNote = '', orgId = null,
@@ -1436,7 +1584,7 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
     const row = createQueryWithAudit({ status: 'blocked_unscannable', mode: 'block', ...base }, {
       action: 'OPAQUE_ENCODED_BLOCKED', actor: user, detail: `${source}/${channel}: uninspectable reversible encoding`,
     });
-    if (isIdempotentReplay(row)) return res.json(nativeIdempotentReplayResponse(row));
+    if (isIdempotentReplay(row)) return sendNativeIdempotentReplay(res, row);
     emitSecurityAlert(row, 'OPAQUE_ENCODED_BLOCKED');
     broadcast('query', { type: 'blocked_unscannable', query: publicQuery(row) });
     broadcast('stats', db.stats());
@@ -1458,7 +1606,7 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
     const row = createQueryWithAudit({ status: 'injection_blocked', ...base }, {
       action: 'INJECTION_BLOCKED', actor: user, detail: note || 'hidden instructions detected',
     });
-    if (isIdempotentReplay(row)) return res.json(nativeIdempotentReplayResponse(row));
+    if (isIdempotentReplay(row)) return sendNativeIdempotentReplay(res, row);
     emitSecurityAlert(row, 'INJECTION_BLOCKED');
     broadcast('query', { type: 'injection_blocked', query: publicQuery(row) });
     broadcast('stats', db.stats());
@@ -1491,7 +1639,7 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
     const row = createQueryWithAudit({ status: 'shadow_ai', ...base }, {
       action: 'SHADOW_AI', actor: user, detail: `ungoverned AI tool: ${destination}`,
     });
-    if (isIdempotentReplay(row)) return res.json(nativeIdempotentReplayResponse(row));
+    if (isIdempotentReplay(row)) return sendNativeIdempotentReplay(res, row);
     emitSecurityAlert(row, 'SHADOW_AI');
     broadcast('query', { type: 'shadow_ai', query: publicQuery(row) });
     broadcast('stats', db.stats());
@@ -1502,7 +1650,7 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
     const status = clientOutcome === 'ocr_required' ? 'ocr_required' : 'file_blocked_unscanned';
     const action = status === 'ocr_required' ? 'FILE_OCR_REQUIRED' : 'FILE_BLOCKED_UNSCANNED';
     const row = createQueryWithAudit({ status, ...base }, { action, actor: user, detail: note || 'file blocked unscanned' });
-    if (isIdempotentReplay(row)) return res.json(nativeIdempotentReplayResponse(row));
+    if (isIdempotentReplay(row)) return sendNativeIdempotentReplay(res, row);
     emitSecurityAlert(row, action);
     broadcast('query', { type: status, query: publicQuery(row) });
     broadcast('stats', db.stats());
@@ -1510,10 +1658,13 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
   }
 
   if (verdict.decision === 'allow' && !remoteHold) {
+    if (restrictConnectedEgress(res, base, {
+      actor: user, detail: `${source}/${channel}: inspected allow withheld`,
+    })) return;
     const row = createQueryWithAudit({ status: 'allowed', ...base }, {
       action: 'ALLOWED', actor: user, detail: `${source} risk ${analysis.riskScore}`,
     });
-    if (isIdempotentReplay(row)) return res.json(nativeIdempotentReplayResponse(row));
+    if (isIdempotentReplay(row)) return sendNativeIdempotentReplay(res, row);
     emitSecurityAlert(row, 'ALLOWED');
     broadcast('query', { type: 'allowed', query: publicQuery(row) });
     broadcast('stats', db.stats());
@@ -1527,7 +1678,7 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
     const row = createQueryWithAudit({ status: 'paste_flagged', mode: decisionPolicy.enforcementMode || 'block', ...base }, {
       action: 'PASTE_FLAGGED', actor: user, detail: note || `${source}/paste: ${verdict.reasons.join('; ')}`,
     });
-    if (isIdempotentReplay(row)) return res.json(nativeIdempotentReplayResponse(row));
+    if (isIdempotentReplay(row)) return sendNativeIdempotentReplay(res, row);
     emitSecurityAlert(row, 'PASTE_FLAGGED');
     broadcast('query', { type: 'paste_flagged', query: publicQuery(row) });
     broadcast('stats', db.stats());
@@ -1571,6 +1722,11 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
   // (same held-item machinery as a policy block), never issued as sent/allowed.
   if (remoteHold && status !== 'redacted' && status !== 'blocked_by_user') status = 'pending';
 
+  if (['redacted', 'warned', 'warned_sent', 'justified'].includes(status)
+      && restrictConnectedEgress(res, base, {
+        actor: user, detail: `${source}/${channel}: inspected ${status} withheld`,
+      })) return;
+
   // Reversible tokenization: replace each detected value with a stable typed
   // placeholder and seal the token->value map (the "vault") at rest. The caller
   // sends `tokenizedPrompt` to the AI; POST /api/v1/rehydrate restores the real
@@ -1596,7 +1752,7 @@ app.post('/api/v1/gate', checkIngestKey, validation.validateBody(validation.gate
     _tokenVault: tokenVault,
     tokenizedPrompt,
   }, { action, actor: user, detail: `${source}/${channel}: ${verdict.reasons.join('; ')}` });
-  if (isIdempotentReplay(row)) return res.json(nativeIdempotentReplayResponse(row));
+  if (isIdempotentReplay(row)) return sendNativeIdempotentReplay(res, row);
   emitSecurityAlert(row, action);
   broadcast('query', { type: status, query: publicQuery(row) });
   broadcast('stats', db.stats());
@@ -1698,9 +1854,6 @@ app.post('/api/v1/heartbeat', checkIngestKey, validation.validateBody(validation
 // sealed vault for this query. Lets a proxy/SDK restore the model's answer
 // after a 'redact'-mode send. Audit-logged; never returns the vault itself.
 app.post('/api/v1/rehydrate', checkIngestKey, validation.validateBody(validation.rehydrateSchema), (req, res) => {
-  // A revoked license closes the token-rehydration surface too (it recovers
-  // original PII behind redaction tokens), consistent with the ingest gate.
-  if (sharedLicenseRevoked()) return res.status(403).json({ error: 'license revoked', status: 'license_revoked' });
   const { id, text } = req.body || {};
   const q = id && db.getQuery(id);
   if (!q) return res.status(404).json({ error: 'not found' });
@@ -1710,6 +1863,8 @@ app.post('/api/v1/rehydrate', checkIngestKey, validation.validateBody(validation
   const mapJson = dataCrypto.open(q._tokenVault);
   if (mapJson == null) return res.status(409).json({ error: 'vault unavailable (no/incorrect data key)' });
   let map; try { map = JSON.parse(mapJson); } catch { return res.status(500).json({ error: 'vault corrupt' }); }
+  const restriction = connectedEgressRestriction();
+  if (restriction) return connectedRestrictionResponse(res, restriction, { id: q.id });
   const out = detector.detokenize(typeof text === 'string' ? text : '', map);
   db.appendAudit({ action: 'REHYDRATE', queryId: q.id, actor: q.user || 'sensor', detail: `re-hydrated ${Object.keys(map).length} token(s)` });
   res.json({ id: q.id, text: out, rehydrated: true });
@@ -1872,6 +2027,9 @@ app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation
   }
 
   if (verdict.decision === 'allow') {
+    if (restrictConnectedEgress(res, base, {
+      actor: user, detail: `${source}/${channel}: inspected file allow withheld`,
+    })) return;
     const row = createQueryWithAudit({ status: 'allowed', ...base }, {
       action: 'FILE_ALLOWED', actor: user, detail: fileLabel + ' risk ' + analysis.riskScore,
     });
@@ -1885,6 +2043,10 @@ app.post('/api/v1/scan-file', checkIngestKey, validation.validateBody(validation
     : mode === 'warn' ? 'warned'
     : mode === 'justify' ? 'pending_justification'
     : 'pending';
+  if (['redacted', 'warned'].includes(status)
+      && restrictConnectedEgress(res, base, {
+        actor: user, detail: `${source}/${channel}: inspected file ${status} withheld`,
+      })) return;
   const rawFile = '[file:' + fileLabel + ']\n' + extracted.text.slice(0, 5000);
   let tokenizedPrompt, tokenVault;
   if (status === 'redacted') {
@@ -1970,6 +2132,29 @@ app.post('/api/v1/scan-response', checkIngestKey, validation.validateBody(valida
 
   const leaked = findings.length > 0 || categories.length > 0;
   const outcome = responseScanOutcome(pol.responseScanMode);
+  const responseAuthorizesEgress = !leaked || outcome.decision !== 'block';
+  if (responseAuthorizesEgress && restrictConnectedEgress(res, {
+    status: 'license_restricted',
+    mode: 'response_block',
+    user,
+    orgId,
+    destination,
+    source,
+    channel: 'ai_response',
+    sensor,
+    redactedPrompt: '[AI response withheld by connected licensing]',
+    findings,
+    categories,
+    entityCounts: analysis.entityCounts,
+    riskScore: analysis.riskScore,
+    maxSeverity: analysis.maxSeverity,
+    maxSeverityLabel: analysis.maxSeverityLabel,
+    scoreBreakdown: analysis.scoreBreakdown,
+    regulations: analysis.regulations,
+    reasons: leaked
+      ? ['Sensitive data present in AI response', `Response scan mode: ${outcome.decision}`]
+      : ['Nothing sensitive detected'],
+  }, { actor: user, detail: `${source}/ai_response: inspected response withheld` })) return;
   if (leaked) {
     const row = createQueryWithAudit({ status: outcome.status, mode: 'response_' + outcome.decision, user, orgId, destination, source, channel: 'ai_response', sensor,
       redactedPrompt: '[AI response] ' + redacted, findings, categories, entityCounts: analysis.entityCounts,
@@ -1992,10 +2177,6 @@ app.post('/api/v1/scan-response', checkIngestKey, validation.validateBody(valida
     reasons: leaked ? ['Sensitive data present in AI response', 'Response scan mode: ' + outcome.decision] : ['Nothing sensitive detected'],
   });
 });
-
-function revokedReleaseResponse(res) {
-  return res.status(403).json({ error: 'license_revoked', status: 'license_revoked', released: false });
-}
 
 function justificationResolution(outcome) {
   return outcome === 'justified'
@@ -2023,7 +2204,6 @@ function transitionJustification(q, outcome, note) {
 }
 
 function resolveJustificationRequest(req, res) {
-  if (sharedLicenseRevoked()) return revokedReleaseResponse(res);
   const q = db.getQuery(req.params.id);
   if (!q) return res.status(404).json({ error: 'not found' });
   if (q.status !== 'pending_justification' || q.mode !== 'justify') {
@@ -2036,6 +2216,10 @@ function resolveJustificationRequest(req, res) {
   const note = sanitizeDecisionNote(req.body.note);
   if (req.body.outcome === 'justified' && note.trim().length < 4) {
     return res.status(400).json({ error: 'a business reason of at least 4 characters is required' });
+  }
+  const restriction = req.body.outcome === 'justified' ? connectedEgressRestriction() : null;
+  if (restriction) {
+    return connectedRestrictionResponse(res, restriction, { id: q.id, released: false });
   }
   const { resolution, transition } = transitionJustification(q, req.body.outcome, note);
   if (transition.outcome !== 'updated') return res.status(409).json({ error: 'already decided' });
@@ -2050,7 +2234,6 @@ app.post('/api/v1/justify/:id', checkIngestKey,
 
 // Client polls for release decision.
 app.get('/api/v1/status/:id', checkIngestKey, (req, res) => {
-  if (sharedLicenseRevoked()) return revokedReleaseResponse(res);
   const q = db.getQuery(req.params.id);
   if (!q) return res.status(404).json({ error: 'not found' });
   const releaseToken = req.get('x-release-token') || '';
@@ -2059,6 +2242,10 @@ app.get('/api/v1/status/:id', checkIngestKey, (req, res) => {
     return res.status(401).json({ error: 'invalid release token' });
   }
   const released = q.status === 'approved' || q.status === 'allowed' || q.status === 'justified';
+  const restriction = released ? connectedEgressRestriction() : null;
+  if (restriction) {
+    return connectedRestrictionResponse(res, restriction, { id: q.id, released: false });
+  }
   res.json({ id: q.id, status: q.status, released });
 });
 
@@ -2361,6 +2548,9 @@ function rejectInvitationAcceptance(res, attemptKey) {
 }
 
 async function installLicenseFromRequest(req, res, { requireReason = false } = {}) {
+  if (CONNECTED_LICENSE_MODE || license.managedExternally()) {
+    return res.status(409).json({ error: 'license_managed_externally' });
+  }
   const reason = adminReason(req.body);
   if (requireReason && !reason) return res.status(400).json({ error: 'invalid request body', fields: ['reason'] });
   const text = String(req.body.license || '');
@@ -2425,7 +2615,7 @@ app.get('/api/admin/roles', ...administrationRead, (req, res) => {
 });
 
 app.get('/api/admin/users', ...administrationRead, (req, res) => {
-  res.json(adminDomain.directory(db, auth));
+  res.json(adminDomain.directory(db, auth, process.env, connectedSeatOptions()));
 });
 
 app.post('/api/admin/users/invitations', ...administrationWrite, validation.validateBody(validation.adminInvitationSchema), (req, res, next) => {
@@ -2527,7 +2717,7 @@ app.patch('/api/admin/users/:id', ...administrationWrite, validation.validateBod
     }),
   );
   if (!result) return res.status(404).json({ error: 'user_not_found_or_readonly' });
-  res.json(adminDomain.directory(db, auth));
+  res.json(adminDomain.directory(db, auth, process.env, connectedSeatOptions()));
 });
 
 app.post('/api/admin/users/:id/disable', ...administrationWrite, validation.validateBody(validation.adminReasonSchema), (req, res) => {
@@ -2539,7 +2729,7 @@ app.post('/api/admin/users/:id/disable', ...administrationWrite, validation.vali
     (disabled) => ({ action: 'ADMIN_USER_DISABLED', actor: req.user.user, detail: `target=${disabled.kind}:${disabled.user.id}; reasonRef=${adminReasonAuditReference(req.body)}` }),
   );
   if (!result) return res.status(404).json({ error: 'user_not_found_or_readonly' });
-  res.json(adminDomain.directory(db, auth));
+  res.json(adminDomain.directory(db, auth, process.env, connectedSeatOptions()));
 });
 
 app.post('/api/admin/users/:id/reactivate', ...administrationWrite, validation.validateBody(validation.adminReasonSchema), (req, res) => {
@@ -2548,7 +2738,7 @@ app.post('/api/admin/users/:id/reactivate', ...administrationWrite, validation.v
     (reactivated) => ({ action: 'ADMIN_USER_REACTIVATED', actor: req.user.user, detail: `target=${reactivated.kind}:${reactivated.user.id}; reasonRef=${adminReasonAuditReference(req.body)}` }),
   );
   if (!result) return res.status(404).json({ error: 'user_not_found_or_readonly' });
-  res.json(adminDomain.directory(db, auth));
+  res.json(adminDomain.directory(db, auth, process.env, connectedSeatOptions()));
 });
 
 app.get('/api/admin/license', ...administrationRead, (req, res) => {
@@ -2559,7 +2749,9 @@ app.get('/api/admin/license', ...administrationRead, (req, res) => {
 });
 
 app.get('/api/admin/license/seats', ...administrationRead, (req, res) => {
-  res.json(adminDomain.seats(db, auth, sharedLicenseStatus()));
+  res.json(adminDomain.seats(
+    db, auth, sharedLicenseStatus(), process.env, connectedSeatOptions(),
+  ));
 });
 
 app.post('/api/admin/license/seats/assign', ...administrationWrite, validation.validateBody(validation.adminSeatAssignmentSchema), (req, res) => {
@@ -2567,7 +2759,12 @@ app.post('/api/admin/license/seats/assign', ...administrationWrite, validation.v
     () => adminDomain.saveSeatState(db, req.body.userKey, 'assigned', adminReason(req.body), req.user.user),
     (saved) => ({ action: 'LICENSE_SEAT_ASSIGNED', actor: req.user.user, detail: `assignment=${saved.id}; status=assigned; reasonRef=${adminAuditReference('reason', saved.reason)}` }),
   );
-  res.json({ assignment, seats: adminDomain.seats(db, auth, sharedLicenseStatus()) });
+  res.json({
+    assignment,
+    seats: adminDomain.seats(
+      db, auth, sharedLicenseStatus(), process.env, connectedSeatOptions(),
+    ),
+  });
 });
 
 app.post('/api/admin/license/seats/release', ...administrationWrite, validation.validateBody(validation.adminSeatAssignmentSchema), (req, res) => {
@@ -2575,12 +2772,17 @@ app.post('/api/admin/license/seats/release', ...administrationWrite, validation.
     () => adminDomain.saveSeatState(db, req.body.userKey, 'released', adminReason(req.body), req.user.user),
     (saved) => ({ action: 'LICENSE_SEAT_RELEASED', actor: req.user.user, detail: `assignment=${saved.id}; status=released; reasonRef=${adminAuditReference('reason', saved.reason)}` }),
   );
-  res.json({ assignment, seats: adminDomain.seats(db, auth, sharedLicenseStatus()) });
+  res.json({
+    assignment,
+    seats: adminDomain.seats(
+      db, auth, sharedLicenseStatus(), process.env, connectedSeatOptions(),
+    ),
+  });
 });
 
 app.post('/api/admin/license/renewal-request', ...administrationWrite, validation.validateBody(validation.licenseRenewalRequestSchema), (req, res) => {
   const currentLicense = sharedLicenseStatus();
-  const seatReport = tenant.seatReport(db);
+  const seatReport = licensedSeatReport();
   const { result: request } = db.mutateWithAudit(
     () => db.createLicenseRenewalRequest({
       orgId: seatReport.tenantId,
@@ -2807,16 +3009,16 @@ app.get('/api/insights', auth.requireAuth, (req, res) => {
 });
 
 app.get('/api/billing/seats', ...adminRead, (req, res) => {
-  res.json({ ...tenant.seatReport(db), license: sharedLicenseStatus() });
+  res.json({ ...licensedSeatReport(), license: sharedLicenseStatus() });
 });
 
 app.get('/api/billing/license', ...adminRead, (req, res) => {
   res.json(sharedLicenseStatus());
 });
 
-// Installing a renewal must always work, even in readonly state — so this is
-// NOT gated by license.requireWritable (adminRead has no requireWritable; the
-// POST uses an explicit chain without it).
+// Installing a renewal must work in readonly state, so this is not gated by
+// license.requireWritable. Deployments with a host-managed immutable license
+// source explicitly reject both install routes inside installLicenseFromRequest.
 app.post('/api/billing/license',
   auth.requireAuth, auth.requireCsrf, auth.requireRole(roles.SECURITY_ADMIN),
   validation.validateBody(validation.licenseInstallSchema),
@@ -3608,7 +3810,7 @@ app.get('/api/export/evidence', ...auditRead, (req, res) => {
     audit: db.listAudit(auditLimit),
     edm: exactMatch.publicSummary(),
     catalog: appCatalog.reviewRollup(),
-    ...(license.entitled('ncua_readiness') ? {
+    ...(featureEntitled('ncua_readiness') ? {
       useCases: db.listAiUseCases(),
       incidents: db.listAiIncidents(),
       boardPacket: { lastGeneratedAt: db.lastAuditActionAt('BOARD_PACKET_EXPORTED'), training: db.lastBoardTrainingAttestation() },
@@ -3643,7 +3845,7 @@ function controlMappingInputs() {
 }
 
 function ncuaModuleInputs(generatedAt) {
-  if (!license.entitled('ncua_readiness')) return { useCases: null, incidents: null, boardPacket: null };
+  if (!featureEntitled('ncua_readiness')) return { useCases: null, incidents: null, boardPacket: null };
   return {
     useCases: ncuaReadiness.useCasesSummary(db.listAiUseCases(), generatedAt),
     incidents: ncuaReadiness.incidentsSummary(db.listAiIncidents(), generatedAt),
@@ -3693,7 +3895,7 @@ function incidentsWithTimelines(incidents) {
 // The NCUA module's mutation gate: reads stay open (they carry the entitled
 // flag instead) so the console can render the upsell state.
 function requireNcuaEntitled(req, res, next) {
-  if (license.entitled('ncua_readiness')) return next();
+  if (featureEntitled('ncua_readiness')) return next();
   return res.status(403).json({ error: 'not_entitled' });
 }
 
@@ -3722,7 +3924,7 @@ app.get('/api/compliance', auth.requireAuth, (req, res) => {
 // report is withheld for licensed installs without the add-on) but never
 // evidence export; demo mode (unlicensed) is always entitled.
 app.get('/api/ncua/readiness', auth.requireAuth, (req, res) => {
-  const entitled = license.entitled('ncua_readiness');
+  const entitled = featureEntitled('ncua_readiness');
   if (!entitled) return res.json({ entitled, report: null });
   res.json({ entitled, report: buildNcuaReport() });
 });
@@ -3732,7 +3934,7 @@ app.get('/api/ncua/readiness', auth.requireAuth, (req, res) => {
 // report; mutations are Security Admin + CSRF and audit enum/count detail
 // only — never the operator's free text.
 app.get('/api/ncua/use-cases', auth.requireAuth, (req, res) => {
-  const entitled = license.entitled('ncua_readiness');
+  const entitled = featureEntitled('ncua_readiness');
   res.json({ entitled, useCases: entitled ? db.listAiUseCases() : [] });
 });
 
@@ -3781,7 +3983,7 @@ app.post('/api/ncua/use-cases/:id/review', ...adminWrite, requireNcuaEntitled, v
 // status and deadline metadata plus referenced query ids; timelines are
 // derived from sanitized queries on read.
 app.get('/api/ncua/incidents', auth.requireAuth, (req, res) => {
-  const entitled = license.entitled('ncua_readiness');
+  const entitled = featureEntitled('ncua_readiness');
   res.json({ entitled, incidents: entitled ? incidentsWithTimelines(db.listAiIncidents()) : [] });
 });
 
@@ -3838,7 +4040,7 @@ app.post('/api/ncua/incidents/:id/status', ...adminWrite, requireNcuaEntitled, v
 app.post('/api/ncua/board-packet', auth.requireAuth, auth.requireCsrf, auth.requireRole(roles.SECURITY_ADMIN, roles.AUDITOR), requireNcuaEntitled, (req, res) => {
   const packet = ncuaReadiness.boardPacket({
     report: buildNcuaReport(),
-    seatReport: tenant.seatReport(db),
+    seatReport: licensedSeatReport(),
     licenseStatus: sharedLicenseStatus(),
   });
   db.appendAudit({
@@ -3972,8 +4174,18 @@ function logStartup(port, deps = {}) {
     io.log(`  Raw-prompt retention: encrypted at rest (AES-256-GCM), held items only; finalized records purge after ${days} day(s).`);
   }
   io.log(`  Ingest key: ${ingestKey === 'dev-ingest-key' ? 'dev-ingest-key (override with INGEST_API_KEY)' : 'configured'}`);
-  const lic = (deps.license || license).publicStatus();
-  if (lic.state === 'unlicensed') io.log('  License: unlicensed (demo mode) — detection and enforcement run; install a license to unlock the admin console fully.');
+  const lic = deps.licenseStatus
+    ? deps.licenseStatus()
+    : (CONNECTED_LICENSE_MODE
+      ? currentConnectedLicenseRuntime().publicStatus()
+      : (deps.license || license).publicStatus());
+  if (lic.connected && ['paused', 'revoked', 'restricted'].includes(lic.state)) {
+    io.log(`  [!] Connected license is ${lic.state}; protected egress is blocked while local DLP and evidence remain online.`);
+  } else if (lic.connected && lic.state === 'degraded_fallback') {
+    io.log(`  [!] Connected license is using bounded outage fallback until ${lic.fallbackUntil || 'unknown'}.`);
+  } else if (lic.connected) {
+    io.log(`  License: connected ${lic.plan || 'standard'} plan, ${lic.seats ?? 0} seats.`);
+  } else if (lic.state === 'unlicensed') io.log('  License: unlicensed (demo mode) — detection and enforcement run; install a license to unlock the admin console fully.');
   else if (lic.state === 'grace') io.log(`  [!] License expired ${lic.expires} — in grace until ${lic.graceEndsAt}; admin console goes read-only after that.`);
   else if (lic.state === 'readonly') io.log('  [!] License past grace — admin console is READ-ONLY. Detection, enforcement, approvals, and evidence export still run. Install a renewal to restore config writes.');
   else io.log(`  License: ${lic.plan} plan, ${lic.seats} seats, expires ${lic.expires}.`);
@@ -3995,37 +4207,63 @@ function startServer(port = PORT, opts = {}) {
     for (const blocker of blockers) console.error('[preflight] ' + blocker);
     throw new Error('Production preflight failed');
   }
+  const activeConnectedRuntime = Object.prototype.hasOwnProperty.call(opts, 'connectedLicenseRuntime')
+    ? opts.connectedLicenseRuntime : currentConnectedLicenseRuntime();
+  const activeDiagnosticRuntime = Object.prototype.hasOwnProperty.call(opts, 'customerDiagnosticRuntime')
+    ? opts.customerDiagnosticRuntime
+    : configuredCustomerDiagnosticRuntime(activeConnectedRuntime, opts);
+  const stopActiveRuntimes = memoizedRuntimeStopper([
+    activeDiagnosticRuntime && (() => activeDiagnosticRuntime.stop()),
+    activeConnectedRuntime && (() => activeConnectedRuntime.stop()),
+  ]);
   retentionPurge();
   workflowEscalation();
-  const licenseCycle = opts.runLicenseRefresh || (() => {
-    license.refresh({ appendAudit: (rec) => db.appendAudit(rec) });
-    runVendorHeartbeat();
-  });
-  // Load the license BEFORE restoring vendor state: restore() checks the
-  // persisted verdict's customer binding against the installed license, so the
-  // license file must already be loaded or a persisted revocation is dropped.
+  const licenseCycle = opts.runLicenseRefresh
+    || (() => license.refresh({ appendAudit: (rec) => db.appendAudit(rec) }));
+  // The offline artifact is loaded in both modes. In connected mode it is only
+  // bounded outage authority. In offline-only mode it remains the primary
+  // license, and no vendor network heartbeat is started.
   license.refresh({ appendAudit: (rec) => db.appendAudit(rec) });
-  // Kill-switch state must be in effect before the first request; restore is
-  // synchronous, the heartbeat that follows only refreshes it.
-  runVendorRestore();
-  licenseCycle();
-  const server = appToListen.listen(port, () => {
-    const address = server.address();
-    log(address && address.port ? address.port : port);
-  });
+  try {
+    if (activeConnectedRuntime) {
+      const started = activeConnectedRuntime.start();
+      if (!started || started.ok !== true) throw new Error('Connected license runtime failed to start');
+    }
+    const diagnosticStarted = activeDiagnosticRuntime.start();
+    if (!diagnosticStarted || diagnosticStarted.ok !== true) {
+      throw new Error('Customer diagnostic runtime failed to start');
+    }
+  } catch (error) {
+    stopActiveRuntimes().catch(() => {});
+    throw error;
+  }
+  if (!activeConnectedRuntime) licenseCycle();
+  let server;
+  try {
+    server = appToListen.listen(port, () => {
+      const address = server.address();
+      log(address && address.port ? address.port : port);
+    });
+  } catch (error) {
+    stopActiveRuntimes().catch(() => {});
+    throw error;
+  }
+  serverRuntimeStops.set(server, stopActiveRuntimes);
   const retentionTimer = setIntervalFn(() => retentionPurge(), 60 * 60 * 1000);
   const workflowTimer = setIntervalFn(() => workflowEscalation(), 5 * 60 * 1000);
   const staleTimer = setIntervalFn(() => staleSweep(), 60 * 60 * 1000);
-  const licenseTimer = setIntervalFn(licenseCycle, 24 * 60 * 60 * 1000);
+  const licenseTimer = activeConnectedRuntime
+    ? null : setIntervalFn(licenseCycle, 24 * 60 * 60 * 1000);
   retentionTimer.unref();
   workflowTimer.unref();
   staleTimer.unref();
-  licenseTimer.unref();
+  if (licenseTimer) licenseTimer.unref();
   server.on('close', () => {
     clearIntervalFn(retentionTimer);
     clearIntervalFn(workflowTimer);
     clearIntervalFn(staleTimer);
-    clearIntervalFn(licenseTimer);
+    if (licenseTimer) clearIntervalFn(licenseTimer);
+    stopActiveRuntimes().catch(() => {});
   });
   return server;
 }
@@ -4037,20 +4275,67 @@ function installShutdownHandlers(server, deps = {}) {
   const clearTimeoutFn = deps.clearTimeout || clearTimeout;
   const exit = deps.exit || ((code) => process.exit(code));
   const parsePoolModule = deps.parsePool || parsePool;
+  const stopRuntimes = deps.stopRuntimes
+    || serverRuntimeStops.get(server)
+    || memoizedRuntimeStopper([
+      deps.stopCustomerDiagnosticRuntime,
+      deps.stopConnectedLicenseRuntime || stopConnectedLicenseRuntime,
+    ]);
+  let shuttingDown = false;
+  let finished = false;
   const shutdown = (signal) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
     io.log(`RedactWall received ${signal}; shutting down`);
+    const finish = (code, timeout) => {
+      if (finished) return;
+      finished = true;
+      if (timeout) clearTimeoutFn(timeout);
+      try { parsePoolModule.shutdown(); } catch {}
+      exit(code);
+    };
     const timeout = setTimeoutFn(() => {
       // Forced exit still SIGKILLs any extraction children so a bomb parse
       // mid-flight cannot outlive the server as an orphan pegging a CPU.
-      try { parsePoolModule.shutdown(); } catch {}
-      exit(1);
+      finish(1, null);
     }, 10000);
     if (timeout.unref) timeout.unref();
-    server.close(() => {
-      clearTimeoutFn(timeout);
-      try { parsePoolModule.shutdown(); } catch {}
-      exit(0);
-    });
+    let runtimeSettled = false;
+    let runtimeFailed = false;
+    let serverSettled = false;
+    let serverFailed = false;
+    const maybeFinish = () => {
+      if (runtimeSettled && serverSettled) {
+        finish(runtimeFailed || serverFailed ? 1 : 0, timeout);
+      }
+    };
+    let runtimeStop;
+    try { runtimeStop = stopRuntimes(); }
+    catch { runtimeFailed = true; runtimeSettled = true; }
+    if (!runtimeSettled && runtimeStop && typeof runtimeStop.then === 'function') {
+      Promise.resolve(runtimeStop).then((result) => {
+        runtimeFailed = Boolean(result && result.ok === false);
+        runtimeSettled = true;
+        maybeFinish();
+      }, () => {
+        runtimeFailed = true;
+        runtimeSettled = true;
+        maybeFinish();
+      });
+    } else if (!runtimeSettled) {
+      runtimeFailed = Boolean(runtimeStop && runtimeStop.ok === false);
+      runtimeSettled = true;
+    }
+    try {
+      server.close(() => {
+        serverSettled = true;
+        maybeFinish();
+      });
+    } catch {
+      serverFailed = true;
+      serverSettled = true;
+      maybeFinish();
+    }
   };
   proc.once('SIGTERM', () => shutdown('SIGTERM'));
   proc.once('SIGINT', () => shutdown('SIGINT'));
@@ -4076,9 +4361,6 @@ app._internal = {
   currentSecurityTrustPackage,
   installShutdownHandlers,
   allowOidcAttempt,
-  reconcileVendorLicenseState,
-  sharedLicenseRevoked,
-  runVendorRestore,
 };
 
 module.exports = app;

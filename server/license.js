@@ -1,28 +1,29 @@
 'use strict';
 /**
- * Offline license verification (ROADMAP N7).
+ * Offline license verification for connected outage fallback and local
+ * development compatibility.
  *
  * A `redactwall.lic` file is `base64(payloadJSON).base64(ed25519Signature)`,
  * where the signature is over the UTF-8 bytes of the base64-payload string
  * (signing the encoded form avoids any JSON canonicalization question). It is
- * verified at boot and re-checked daily against an EMBEDDED public key. This is
- * the AIR-GAPPED default — no license server, no phone-home — so offline
- * credit-union deployments work with zero egress.
+ * verified at boot and re-checked daily against a configured public key.
+ * Production customer authorization is connected-first. This artifact is not
+ * primary production authority and cannot be manually selected to bypass the
+ * vendor control plane.
  *
- * The license never fails OPEN. In the offline model: absence or invalidity =
- * demo mode (zero gating); past the grace window it degrades the ADMIN CONSOLE
- * to read-only for configuration routes while detection, enforcement, the
+ * The license never disables the security function. In an ordinary local
+ * developer install, absence or invalidity means demo mode. In an explicitly
+ * externally managed production install, that same condition is readonly,
+ * unready, and grants no licensed feature entitlements. Past the grace window
+ * the ADMIN CONSOLE also becomes read-only while detection, enforcement, the
  * approval workflow, audit, and evidence export keep running.
  *
- * CONNECTED mode (opt-in, server/vendor-link.js) adds a vendor kill-switch: a
- * signed heartbeat verdict from the vendor can move the effective state to
- * 'revoked', which locks the console like readonly AND fail-closed-blocks
- * sensor ingest (`license_revoked`). A revoked customer loses USE of AI through
- * the product — the strongest data protection, not its absence; nothing ever
- * fails open. Revocation is only ever set by a signature-verified vendor
- * verdict (applyVendorVerdict), never by the local file, so it cannot be
- * cleared by a customer reinstalling a license. It is an overlay on top of the
- * file-derived state and survives refresh().
+ * Connected production enforcement is owned by connected-license-runtime and
+ * its deployment-bound online verdict and entitlement stores. This module has
+ * no network client or vendor-state overlay. Its signed artifact is secondary
+ * outage authority in connected mode. Offline mode remains available only to
+ * local development and explicit legacy compatibility paths that do not pass
+ * customer production preflight.
  *
  * The vendor's PRIVATE signing key lives offline (see scripts/license-issue.js
  * --init-keypair) and is never in the repo. Tests inject a throwaway public key
@@ -35,6 +36,7 @@ const env = require('./env');
 const tenant = require('./tenant');
 const privatePaths = require('./private-path');
 const fileMutationLock = require('./file-mutation-lock');
+const { isDeploymentId } = require('./deployment-identity');
 
 // Placeholder public key. Regenerate offline with
 // `node scripts/license-issue.js --init-keypair <dir>` before the first
@@ -42,6 +44,7 @@ const fileMutationLock = require('./file-mutation-lock');
 const EMBEDDED_PUBLIC_KEY_PEM = `-----BEGIN PUBLIC KEY-----
 MCowBQYDK2VwAyEA0lard41yplR7X9CCdwvvvbjWIPUGOisoi4jfQV1GY6c=
 -----END PUBLIC KEY-----`;
+const PLACEHOLDER_PUBLIC_KEY_DER_SHA256 = '3beb99dc9379698e76a5ae310c7be6df4cc5f28ad98b927205b668c83a58ee65';
 
 const DEFAULT_GRACE_DAYS = 30;
 const MAX_LICENSE_FILE_BYTES = 64 * 1024;
@@ -49,8 +52,64 @@ const MAX_LICENSE_FILE_BYTES_BIGINT = BigInt(MAX_LICENSE_FILE_BYTES);
 const LICENSE_DIRECTORY_INIT_TIMEOUT_MS = 60_000;
 const PLANS = ['standard', 'enterprise'];
 
-function embeddedPublicKey() {
-  return process.env.REDACTWALL_LICENSE_PUBLIC_KEY || process.env.PROMPTWALL_LICENSE_PUBLIC_KEY || process.env.SENTINEL_LICENSE_PUBLIC_KEY || EMBEDDED_PUBLIC_KEY_PEM;
+function publicKeyFromBase64(value) {
+  const encoded = String(value || '').trim();
+  if (!encoded || encoded.length > 4096 || !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) return '';
+  try {
+    const der = Buffer.from(encoded, 'base64');
+    if (!der.length || der.toString('base64') !== encoded) return '';
+    return crypto.createPublicKey({ key: der, format: 'der', type: 'spki' })
+      .export({ type: 'spki', format: 'pem' })
+      .toString();
+  } catch {
+    return '';
+  }
+}
+
+function configuredPublicKey(source = process.env) {
+  const resolved = source || {};
+  const pem = resolved.REDACTWALL_LICENSE_PUBLIC_KEY
+    || resolved.PROMPTWALL_LICENSE_PUBLIC_KEY
+    || resolved.SENTINEL_LICENSE_PUBLIC_KEY;
+  if (pem) return String(pem);
+  return publicKeyFromBase64(resolved.REDACTWALL_LICENSE_PUBLIC_KEY_B64);
+}
+
+function embeddedPublicKey(source = process.env) {
+  return configuredPublicKey(source) || EMBEDDED_PUBLIC_KEY_PEM;
+}
+
+function publicKeyFingerprint(value) {
+  if (containsPrivateKeyMaterial(value)) return '';
+  try {
+    const der = crypto.createPublicKey(value).export({ type: 'spki', format: 'der' });
+    return crypto.createHash('sha256').update(der).digest('hex');
+  } catch {
+    return '';
+  }
+}
+
+function productionTrustAnchorStatus(source = process.env) {
+  const selected = embeddedPublicKey(source);
+  const fingerprint = publicKeyFingerprint(selected);
+  let ed25519 = false;
+  try {
+    ed25519 = !containsPrivateKeyMaterial(selected)
+      && crypto.createPublicKey(selected).asymmetricKeyType === 'ed25519';
+  } catch {}
+  return {
+    ok: ed25519 && !!fingerprint && fingerprint !== PLACEHOLDER_PUBLIC_KEY_DER_SHA256,
+    configured: !!configuredPublicKey(source),
+    placeholder: fingerprint === PLACEHOLDER_PUBLIC_KEY_DER_SHA256,
+    ed25519,
+    fingerprint: fingerprint || null,
+  };
+}
+
+function managedExternally(source = process.env) {
+  return ['1', 'true', 'yes', 'on'].includes(
+    String((source || {}).REDACTWALL_LICENSE_MANAGED_EXTERNALLY || '').trim().toLowerCase(),
+  );
 }
 
 function licensePath() {
@@ -615,7 +674,10 @@ function verifyLicenseText(text, options = {}) {
   const payloadB64 = raw.slice(0, dot);
   const sigB64 = raw.slice(dot + 1);
   let pub;
-  try { pub = crypto.createPublicKey(publicKeyPem); } catch (_) { return { ok: false, reason: 'bad_public_key' }; }
+  try {
+    if (containsPrivateKeyMaterial(publicKeyPem)) throw new Error();
+    pub = crypto.createPublicKey(publicKeyPem);
+  } catch (_) { return { ok: false, reason: 'bad_public_key' }; }
   let valid = false;
   try { valid = crypto.verify(null, Buffer.from(payloadB64, 'utf8'), pub, Buffer.from(sigB64, 'base64')); } catch (_) { valid = false; }
   if (!valid) return { ok: false, reason: 'bad_signature' };
@@ -639,6 +701,11 @@ function verifyLicenseText(text, options = {}) {
   return { ok: true, payload: { ...payload, customerId } };
 }
 
+function containsPrivateKeyMaterial(value) {
+  try { return crypto.createPrivateKey(value).type === 'private'; }
+  catch { return false; }
+}
+
 // missing/invalid -> 'unlicensed'; before expiry -> 'active'; within grace ->
 // 'grace'; past grace -> 'readonly'.
 function evaluate(payload, now = Date.now()) {
@@ -652,19 +719,6 @@ function evaluate(payload, now = Date.now()) {
 }
 
 let _status = { state: 'unlicensed', payload: null, reason: 'missing' };
-// Vendor kill-switch overlay (connected mode). TWO independent inputs, both
-// driven by server/vendor-link.js:
-//  - _vendorRevoked: an explicit signature-verified 'revoked' verdict.
-//  - _vendorStale:   heartbeat-or-die — no successful vendor contact within the
-//                    tolerance window. This is what defeats a hostile
-//                    self-hosted customer who blocks egress: without a fresh
-//                    signed 'active' verdict the install fails CLOSED, it does
-//                    not drift back to active.
-// Either flag blocks; both survive refresh() (file reload never clears them).
-let _vendorRevoked = false;
-let _vendorStale = false;
-
-function killed() { return _vendorRevoked || _vendorStale; }
 
 function readTrustedLicenseText(target, options = {}) {
   const fsImpl = options.fs || fs;
@@ -722,12 +776,64 @@ function loadStatus(now = Date.now(), deps = {}) {
   return { state: evaluate(v.payload, now), payload: v.payload, reason: null };
 }
 
-// Effective state = file-derived state, overridden to 'revoked' when the vendor
-// kill-switch is active (explicit revoke OR stale). Payload/reason are
-// preserved so publicStatus and entitlement still describe the customer.
-function effectiveStatus() {
-  if (killed()) return { ..._status, state: 'revoked' };
-  return _status;
+// Managed installs always refresh the file first so a stale cached payload
+// cannot keep fallback entitlements alive. Connected pause/revoke authority is
+// evaluated separately by connected-license-runtime.
+function effectiveStatus(source = process.env) {
+  let base = _status;
+  if (managedExternally(source)) {
+    const live = loadStatus(Date.now(), { env: source });
+    if (live.state === 'unlicensed') {
+      base = { ...live, state: 'readonly', reason: `managed_license_${live.reason || 'unavailable'}` };
+    } else base = live;
+  }
+  return base;
+}
+
+function managedLicenseHealth(options = {}) {
+  const source = options.env || process.env;
+  if (!managedExternally(source)) return { ok: true, managed: false, reason: null };
+  const selected = options.status || loadStatus(options.now || Date.now(), { ...options, env: source });
+  const fallback = connectedFallbackHealth(selected, source);
+  return {
+    ok: selected.state !== 'unlicensed' && !!selected.payload,
+    managed: true,
+    reason: selected.state === 'unlicensed' ? (selected.reason || 'unavailable') : null,
+    state: selected.state,
+    connectedFallbackCompatible: fallback.compatible,
+    connectedFallbackReason: fallback.reason,
+  };
+}
+
+function connectedFallbackHealth(selected, source) {
+  const mode = String(source.REDACTWALL_LICENSE_MODE || '').trim().toLowerCase();
+  if (mode !== 'connected') return { compatible: null, reason: null };
+  const payload = selected && selected.payload;
+  if (!payload || selected.state !== 'active') {
+    return { compatible: false, reason: 'license_not_active' };
+  }
+  if (!Object.prototype.hasOwnProperty.call(payload, 'status')) {
+    return { compatible: false, reason: 'status_missing' };
+  }
+  if (payload.status !== 'active') {
+    return { compatible: false, reason: 'status_not_active' };
+  }
+  if (!Object.prototype.hasOwnProperty.call(payload, 'deploymentId')
+      || payload.deploymentId === null || payload.deploymentId === undefined
+      || payload.deploymentId === '') {
+    return { compatible: false, reason: 'deployment_missing' };
+  }
+  if (!isDeploymentId(payload.deploymentId)) {
+    return { compatible: false, reason: 'deployment_invalid' };
+  }
+  const configured = source.REDACTWALL_CONNECTED_DEPLOYMENT_ID;
+  if (!isDeploymentId(configured)) {
+    return { compatible: false, reason: 'configured_deployment_invalid' };
+  }
+  if (payload.deploymentId !== configured) {
+    return { compatible: false, reason: 'deployment_mismatch' };
+  }
+  return { compatible: true, reason: null };
 }
 
 function refresh(deps = {}) {
@@ -751,55 +857,6 @@ function refresh(deps = {}) {
   }
   return effectiveStatus();
 }
-
-function auditKillSwitch(prevEffective, source, deps) {
-  const nextEffective = effectiveStatus().state;
-  if (deps.appendAudit && (prevEffective !== nextEffective)) {
-    deps.appendAudit({
-      action: 'LICENSE_STATE_CHANGED',
-      actor: source,
-      detail: `from=${prevEffective}; to=${nextEffective}; source=${source}`,
-    });
-  }
-  return effectiveStatus();
-}
-
-function vendorStateSnapshot() {
-  return { revoked: _vendorRevoked, stale: _vendorStale };
-}
-
-function restoreVendorState(snapshot) {
-  _vendorRevoked = snapshot.revoked === true;
-  _vendorStale = snapshot.stale === true;
-  return effectiveStatus();
-}
-
-function applyVendorState(next = {}, deps = {}) {
-  const previous = vendorStateSnapshot();
-  const prevEffective = effectiveStatus().state;
-  if (Object.prototype.hasOwnProperty.call(next, 'revoked')) _vendorRevoked = next.revoked === true;
-  if (Object.prototype.hasOwnProperty.call(next, 'stale')) _vendorStale = next.stale === true;
-  try {
-    return auditKillSwitch(prevEffective, deps.source || 'vendor', deps);
-  } catch (error) {
-    restoreVendorState(previous);
-    throw error;
-  }
-}
-
-// Apply a signature-verified vendor 'revoked'/'active' verdict (connected mode
-// only, driven by vendor-link after freshness + customer-binding checks).
-function applyVendorVerdict(revoked, deps = {}) {
-  return applyVendorState({ revoked }, { ...deps, source: 'vendor' });
-}
-
-// Heartbeat-or-die: vendor-link sets this true when contact is stale beyond
-// the tolerance window and false on a successful heartbeat.
-function setVendorStale(stale, deps = {}) {
-  return applyVendorState({ stale }, { ...deps, source: 'vendor_staleness' });
-}
-
-function isRevoked() { return killed(); }
 
 function status() { return effectiveStatus(); }
 
@@ -825,37 +882,37 @@ function publicStatus() {
     expires: p ? p.expires : null,
     graceEndsAt: graceEndsAt(p),
     daysRemaining: days,
-    reason: _vendorRevoked ? 'vendor_revoked' : (_vendorStale ? 'vendor_unreachable' : (s.reason || null)),
+    reason: s.reason || null,
   };
 }
 
 // Feature entitlement for licensed console modules (first consumer: the NCUA
-// Readiness Center). Unlicensed = demo mode, which shows every module — the
-// license philosophy above gates nothing until a customer is licensed. For
+// Readiness Center). Unlicensed developer mode shows every module; an
+// externally managed missing/invalid license is converted to readonly and
+// grants none. For
 // licensed installs the feature flag or the enterprise plan grants access;
 // the payload persists through 'grace' and 'readonly', so entitlement
 // correctly survives expiry (readonly already blocks writes elsewhere).
 function entitled(feature) {
   const s = status();
-  if (s.state === 'unlicensed') return true;
+  if (s.state === 'unlicensed') return !managedExternally();
   const p = s.payload || {};
   const features = Array.isArray(p.features) ? p.features : [];
   return features.includes(feature) || p.plan === 'enterprise';
 }
 
-// Express middleware: in 'readonly' or vendor-'revoked' state, block admin
+// Express middleware: in 'readonly' state, block admin
 // configuration writes EXCEPT under /api/queries/ (reveal/assign support the
 // approval workflow, which must never be impaired) and the license-install
-// route itself (renewal must always be installable). A revoked install can
-// still install a fresh license, but only a signed vendor 'active' verdict
-// clears the revocation.
+// route itself (renewal must always be installable). Connected restrictions
+// are enforced by connected-license-runtime before this local fallback check.
 function requireWritable(req, res, next) {
   const state = status().state;
-  if (state !== 'readonly' && state !== 'revoked') return next();
+  if (state !== 'readonly') return next();
   if (req.path.startsWith('/api/queries/')) return next();
   if (req.path === '/api/billing/license' && req.method === 'POST') return next();
   if (req.path === '/api/admin/license/install' && req.method === 'POST') return next();
-  return res.status(403).json({ error: state === 'revoked' ? 'license_revoked' : 'license_readonly' });
+  return res.status(403).json({ error: 'license_readonly' });
 }
 
 module.exports = {
@@ -863,26 +920,26 @@ module.exports = {
   evaluate,
   loadStatus,
   refresh,
-  applyVendorVerdict,
-  setVendorStale,
-  isRevoked,
   status,
   publicStatus,
   entitled,
   requireWritable,
   licensePath,
+  readTrustedLicenseText,
   writeLicenseAtomically,
   withLicenseFileMutation,
   withLicenseFileMutationAsync,
   configuredCustomerBinding,
   normalizeCustomerId,
   validCustomerId,
+  managedExternally,
+  managedLicenseHealth,
+  productionTrustAnchorStatus,
+  publicKeyFromBase64,
   EMBEDDED_PUBLIC_KEY_PEM,
+  PLACEHOLDER_PUBLIC_KEY_DER_SHA256,
   DEFAULT_GRACE_DAYS,
   _internal: {
-    applyVendorState,
-    vendorStateSnapshot,
-    restoreVendorState,
     licenseFileSnapshot,
     restoreLicenseSnapshot,
   },

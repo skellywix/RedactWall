@@ -2,6 +2,7 @@
 /** Docker first boot must seed runtime config atomically without clobbering customer state. */
 const test = require('node:test');
 const assert = require('node:assert');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const net = require('node:net');
 const os = require('node:os');
@@ -64,17 +65,24 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function waitForReady(child, port, output, timeoutMs = 20_000) {
+async function waitForReadyzSettled(child, port, output, timeoutMs = 20_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (child.exitCode !== null) throw new Error(`server exited before readiness\n${output()}`);
     const response = await fetch(`http://127.0.0.1:${port}/readyz`, {
       signal: AbortSignal.timeout(1000),
     }).catch(() => null);
-    if (response && response.ok) return response.json();
+    if (response) {
+      const body = await response.json().catch(() => null);
+      // Boot is settled once the database is up and configuration evaluated;
+      // connected licensing may still hold readiness closed by design.
+      if (body && body.database === true && body.configuration === 'ok') {
+        return { status: response.status, body };
+      }
+    }
     await delay(100);
   }
-  throw new Error(`timed out waiting for readiness\n${output()}`);
+  throw new Error(`timed out waiting for a settled readyz\n${output()}`);
 }
 
 function stopChild(child) {
@@ -116,13 +124,42 @@ function productionEnv(root, targets, port) {
     OIDC_TOKEN_ENDPOINT: '',
     OIDC_JWKS_URI: '',
     REDACTWALL_SAAS_MODE: '',
-    REDACTWALL_TENANT_ID: '',
-    REDACTWALL_LICENSE_CUSTOMER_ID: 'runtime-seed-test',
+    REDACTWALL_TENANT_ID: 'customer_runtime_seed',
+    REDACTWALL_LICENSE_CUSTOMER_ID: 'customer_runtime_seed',
     REDACTWALL_SEAT_LIMIT: '',
-    REDACTWALL_REQUIRE_TENANT_CONTEXT: '',
-    REDACTWALL_REQUIRE_USER_IDENTITY: '',
+    REDACTWALL_REQUIRE_TENANT_CONTEXT: 'true',
+    REDACTWALL_REQUIRE_USER_IDENTITY: 'true',
+    REDACTWALL_VENDOR_CONTROL_DIAGNOSTICS_ENABLED: 'false',
+    REDACTWALL_VENDOR_CONTROL_SHADOW_INTELLIGENCE_ENABLED: 'false',
+    // Production licensing is connected-first: a fresh volume boots with the
+    // provisioned connected identity but stays unready until enrollment ACKs.
+    REDACTWALL_LICENSE_MODE: 'connected',
+    REDACTWALL_LICENSE_PATH: path.join(root, 'license.key'),
+    REDACTWALL_LICENSE_SERVER_URL: 'https://license.vendor.example/',
+    REDACTWALL_CONNECTED_DEPLOYMENT_ID: 'dep_0123456789abcdef0123456789abcdef',
+    REDACTWALL_VENDOR_CONTROL_HEARTBEAT_TOKEN: 'rwcp_heartbeat_0123456789abcdef0123456789',
+    REDACTWALL_VENDOR_CONTROL_ACKNOWLEDGEMENT_TOKEN: 'rwcp_acknowledgement_0123456789abcdef01',
+    REDACTWALL_LICENSE_PUBLIC_KEY: connectedTestKeys.offline,
+    REDACTWALL_LICENSE_VERDICT_PUBLIC_KEY: connectedTestKeys.verdict,
+    REDACTWALL_ENTITLEMENT_PUBLIC_KEY: connectedTestKeys.entitlement,
+    REDACTWALL_ENTITLEMENT_KEY_ID: connectedTestKeys.entitlementKeyId,
   };
 }
+
+const connectedTestKeys = (() => {
+  const pem = (key) => key.export({ type: 'spki', format: 'pem' });
+  const offline = crypto.generateKeyPairSync('ed25519').publicKey;
+  const verdict = crypto.generateKeyPairSync('ed25519').publicKey;
+  const entitlement = crypto.generateKeyPairSync('ed25519').publicKey;
+  const entitlementFingerprint = crypto.createHash('sha256')
+    .update(entitlement.export({ type: 'spki', format: 'der' })).digest('hex');
+  return {
+    offline: pem(offline),
+    verdict: pem(verdict),
+    entitlement: pem(entitlement),
+    entitlementKeyId: `rw-entitlement-${entitlementFingerprint}`,
+  };
+})();
 
 test('first boot seeds policy and custom detectors at mode 0600, then preserves customer edits', () => {
   const root = tempDir();
@@ -362,13 +399,22 @@ test('fresh runtime volume reaches production readyz after packaged config seedi
     });
     child.stdout.on('data', (chunk) => { stdout += chunk; });
     child.stderr.on('data', (chunk) => { stderr += chunk; });
-    const ready = await waitForReady(
+    const settled = await waitForReadyzSettled(
       child,
       port,
       () => `${stdout}\n${stderr}`,
       FIRST_BOOT_READY_TIMEOUT_MS,
     );
-    assert.deepStrictEqual(ready, { ready: true, database: true, configuration: 'ok' });
+    // A fresh connected production volume boots cleanly but must stay unready
+    // until its first vendor enrollment acknowledgement is durably applied.
+    assert.strictEqual(settled.status, 503, JSON.stringify(settled.body));
+    assert.strictEqual(settled.body.ready, false);
+    assert.strictEqual(settled.body.database, true);
+    assert.strictEqual(settled.body.audit, true);
+    assert.strictEqual(settled.body.configuration, 'ok');
+    assert.strictEqual(settled.body.licensing, 'restricted');
+    assert.match(String(settled.body.licensingReason || ''),
+      /pending|acknowledgement|enrollment|generation/i);
   } finally {
     if (child) await stopChild(child);
     fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });

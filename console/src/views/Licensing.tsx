@@ -15,6 +15,7 @@ interface LicenseStatus {
   graceEndsAt?: string;
   daysRemaining?: number | null;
   reason?: string;
+  managedExternally?: boolean;
   renewalRequests?: RenewalRequest[];
 }
 
@@ -219,6 +220,24 @@ function InstallPanel({ onInstalled }: { onInstalled: () => void }) {
   );
 }
 
+function ManagedLicensePanel() {
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <div>
+          <h2>Host-managed license</h2>
+          <span>Renewals are applied through the immutable deployment workflow</span>
+        </div>
+      </div>
+      <p className="readonly-note">
+        This silo uses its selected Secrets Manager version as the license source of truth. Issue the renewal,
+        publish a new immutable secret version, then run the supported silo deployment command. In-console
+        installation is disabled.
+      </p>
+    </div>
+  );
+}
+
 function RenewalHistory({ requests }: { requests: RenewalRequest[] }) {
   return (
     <div className="panel">
@@ -302,7 +321,9 @@ export default function Licensing() {
         {canManage ? (
           <>
             <RenewalPanel onCreated={() => void load()} />
-            <InstallPanel onInstalled={() => void load()} />
+            {license.managedExternally
+              ? <ManagedLicensePanel />
+              : <InstallPanel onInstalled={() => void load()} />}
           </>
         ) : (
           <div className="panel">

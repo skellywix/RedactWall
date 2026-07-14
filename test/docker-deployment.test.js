@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const { validateCustomerDockerfile } = require('../scripts/validate-customer-dockerfile');
 
 const root = path.join(__dirname, '..');
 const compose = fs.readFileSync(path.join(root, 'docker-compose.yml'), 'utf8');
@@ -200,11 +201,25 @@ test('docker host ports default to loopback and the gateway uses loopback contro
 });
 
 test('docker image copies runtime files instead of the whole builder tree', () => {
-  assert.doesNotMatch(dockerfile, /COPY --from=builder \/app \/app/);
-  assert.match(dockerfile, /COPY --from=builder --chown=node:node \/app\/node_modules \.\/node_modules/);
+  validateCustomerDockerfile(dockerfile);
+  const runtimeMarker = dockerfile.match(/^FROM postgres:17-bookworm AS runtime\s*$/m);
+  assert.ok(runtimeMarker, 'runtime stage marker is present');
+  const runtimeCopies = dockerfile.slice(runtimeMarker.index).match(/^COPY .+$/gm) || [];
+  assert.doesNotMatch(dockerfile, /COPY --from=[^ ]+ \/usr\/local\/ \/usr\/local\//);
+  assert.match(dockerfile, /COPY --from=production-dependencies --chown=node:node \/app\/node_modules \.\/node_modules/);
+  assert.match(dockerfile, /node scripts\/stage-customer-runtime\.js --out \/tmp\/customer-runtime/);
+  assert.match(dockerfile, /COPY --from=artifact-builder --chown=node:node \/tmp\/customer-runtime\/ \.\//);
+  assert.deepStrictEqual(runtimeCopies, [
+    'COPY --from=node-runtime-source /usr/local/bin/node /usr/local/bin/node',
+    'COPY --from=node-runtime-source /usr/local/lib/node_modules/npm/ /usr/local/lib/node_modules/npm/',
+    'COPY --from=production-dependencies --chown=node:node /app/node_modules ./node_modules',
+    'COPY --from=artifact-builder --chown=node:node /tmp/customer-runtime/ ./',
+  ]);
   assert.match(dockerfile, /REDACTWALL_POLICY_PATH=\/data\/policy\.json/);
   assert.match(dockerfile, /NPM_CONFIG_CACHE=\/tmp\/\.npm/);
   assert.match(dockerfile, /ENTRYPOINT \["sh", "scripts\/docker-entrypoint\.sh"\]/);
+  assert.match(dockerfile, /node scripts\/verify-customer-image-content\.js/);
+  assert.match(dockerfile, /verify-customer-image-content\.js --root \//);
   assert.ok(fs.existsSync(entrypointPath), 'runtime policy-seeding entrypoint exists');
   for (const pattern of [/^test$/m, /^e2e$/m, /^docs$/m, /^PLANS$/m, /^dist$/m, /^data$/m]) {
     assert.match(dockerignore, pattern);
@@ -214,7 +229,20 @@ test('docker image copies runtime files instead of the whole builder tree', () =
 test('docker runtime ships PostgreSQL 17 backup and restore clients', () => {
   assert.match(dockerfile, /FROM postgres:17-bookworm AS runtime/);
   assert.match(dockerfile, /pg_dump --version && pg_restore --version/);
-  assert.match(dockerfile, /COPY --from=builder \/usr\/local\/ \/usr\/local\//);
+  assert.match(dockerfile, /COPY --from=node-runtime-source \/usr\/local\/bin\/node \/usr\/local\/bin\/node/);
+  assert.match(dockerfile, /ln -s \.\.\/lib\/node_modules\/npm\/bin\/npm-cli\.js \/usr\/local\/bin\/npm/);
+  assert.match(dockerfile, /node --version && npm --version/);
+});
+
+test('docker image supports a build-time production license trust anchor', () => {
+  assert.match(dockerfile, /ARG REDACTWALL_LICENSE_PUBLIC_KEY_B64=""/);
+  assert.match(dockerfile, /REDACTWALL_LICENSE_PUBLIC_KEY_B64=\$\{REDACTWALL_LICENSE_PUBLIC_KEY_B64\}/);
+  assert.match(dockerfile, /node scripts\/check-license-trust-anchor\.js/);
+  assert.ok(
+    dockerfile.indexOf('/tmp/customer-runtime/ ./')
+      < dockerfile.indexOf('node scripts/check-license-trust-anchor.js'),
+    'the trust-anchor checker is copied before the build gate runs',
+  );
 });
 
 test('docker entrypoint fail-loud seeds policy and custom detectors before startup', () => {
@@ -230,10 +258,14 @@ test('docker entrypoint fail-loud seeds policy and custom detectors before start
 });
 
 test('runtime image ships the gateway source the gateway profile runs', () => {
+  const runtimeManifest = JSON.parse(fs.readFileSync(
+    path.join(root, 'packaging', 'customer-runtime-files.json'), 'utf8',
+  ));
   // The compose gateway profile runs `node gateway/server.js` from this image,
-  // so the runtime stage must COPY gateway/ or the profile crash-loops.
+  // so the positive runtime inventory must stage that exact entrypoint.
   assert.match(compose, /command:\s*\["node",\s*"gateway\/server\.js"\]/);
-  assert.match(dockerfile, /COPY --chown=node:node gateway \.\/gateway/);
+  assert.ok(runtimeManifest.authoredFiles.includes('gateway/server.js'));
+  assert.match(dockerfile, /COPY --from=artifact-builder --chown=node:node \/tmp\/customer-runtime\/ \.\//);
   // gateway/ must not be excluded from the build context either.
   assert.doesNotMatch(dockerignore, /^gateway$/m);
 });

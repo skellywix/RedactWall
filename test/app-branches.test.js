@@ -523,10 +523,17 @@ test('app internals cover ingest throttle, startup logging, server timers, and s
   assert.ok(logs.some((line) => /raw prompts are NOT stored/.test(line)));
   assert.ok(logs.some((line) => /14 day/.test(line)));
 
+  let blockedRuntimeStarts = 0;
   assert.throws(() => internal.startServer(0, {
     currentPreflight: () => ({ ready: false }),
     preflight: { summarizeFailures: () => ['missing secret'] },
+    connectedLicenseRuntime: {
+      start: () => { blockedRuntimeStarts += 1; return { ok: true }; },
+      stop: () => Promise.resolve({ ok: true }),
+    },
+    app: { listen: () => { throw new Error('listen must not run'); } },
   }), /Production preflight failed/);
+  assert.equal(blockedRuntimeStarts, 0);
 
   const calls = [];
   const timers = [];
@@ -571,6 +578,105 @@ test('app internals cover ingest throttle, startup logging, server timers, and s
   assert.ok(calls.includes('log:4521'));
   assert.deepStrictEqual(cleared.sort((a, b) => a - b), [5 * 60 * 1000, 60 * 60 * 1000, 60 * 60 * 1000, 24 * 60 * 60 * 1000].sort((a, b) => a - b));
 
+  const connectedCalls = [];
+  const connectedTimers = [];
+  let connectedCloseHandler = null;
+  let diagnosticSender = null;
+  let diagnosticResult = { ok: true, accepted: true };
+  const connectedRuntime = {
+    start() { connectedCalls.push('runtime-start'); return { ok: true }; },
+    stop() { connectedCalls.push('runtime-stop'); return Promise.resolve({ ok: true }); },
+    sendDiagnostic(value) {
+      connectedCalls.push(`diagnostic-send:${value.kind}`);
+      return Promise.resolve(diagnosticResult);
+    },
+  };
+  const diagnosticRuntime = {
+    status: () => ({ enabled: true }),
+    start() { connectedCalls.push('diagnostic-start'); return { ok: true }; },
+    stop() { connectedCalls.push('diagnostic-stop'); return Promise.resolve({ ok: true }); },
+  };
+  const connectedServer = internal.startServer(0, {
+    currentPreflight: () => ({ ready: true }),
+    preflight: { summarizeFailures: () => [] },
+    runRetentionPurge: () => connectedCalls.push('retention'),
+    runWorkflowEscalation: () => connectedCalls.push('workflow'),
+    runSensorStaleSweep: () => connectedCalls.push('stale'),
+    runLicenseRefresh: () => connectedCalls.push('legacy-license-cycle'),
+    connectedLicenseRuntime: connectedRuntime,
+    createCustomerDiagnosticRuntime(options) {
+      diagnosticSender = options.sender;
+      return diagnosticRuntime;
+    },
+    app: {
+      listen(_port, cb) {
+        connectedCalls.push('listen');
+        assert.ok(connectedCalls.indexOf('runtime-start') < connectedCalls.indexOf('listen'));
+        assert.ok(connectedCalls.indexOf('diagnostic-start') < connectedCalls.indexOf('listen'));
+        assert.ok(connectedCalls.indexOf('runtime-start') < connectedCalls.indexOf('diagnostic-start'));
+        setImmediate(cb);
+        return {
+          address: () => ({ port: 4522 }),
+          on(event, handler) { if (event === 'close') connectedCloseHandler = handler; },
+        };
+      },
+    },
+    logStartup: () => {},
+    setInterval: (_fn, ms) => {
+      connectedTimers.push(ms);
+      return { unref() {} };
+    },
+    clearInterval: () => {},
+  });
+  assert.ok(connectedServer);
+  assert.equal(typeof diagnosticSender, 'function');
+  assert.equal(await diagnosticSender({ kind: 'diagnostic.event.v1' }), true);
+  diagnosticResult = { ok: false, accepted: false, failureClass: 'protocol_rejected' };
+  assert.equal(await diagnosticSender({ kind: 'diagnostic.event.v1' }), false);
+  assert.equal(connectedCalls.includes('legacy-license-cycle'), false);
+  assert.equal(connectedTimers.includes(24 * 60 * 60 * 1000), false);
+  connectedCloseHandler();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(connectedCalls.indexOf('diagnostic-stop') < connectedCalls.indexOf('runtime-stop'));
+  assert.equal(connectedCalls.filter((call) => call === 'diagnostic-stop').length, 1);
+  assert.equal(connectedCalls.filter((call) => call === 'runtime-stop').length, 1);
+
+  const failedDiagnosticCalls = [];
+  assert.throws(() => internal.startServer(0, {
+    currentPreflight: () => ({ ready: true }),
+    preflight: { summarizeFailures: () => [] },
+    runRetentionPurge: () => {},
+    runWorkflowEscalation: () => {},
+    connectedLicenseRuntime: {
+      start: () => { failedDiagnosticCalls.push('runtime-start'); return { ok: true }; },
+      stop: () => { failedDiagnosticCalls.push('runtime-stop'); return Promise.resolve({ ok: true }); },
+    },
+    customerDiagnosticRuntime: {
+      start: () => { failedDiagnosticCalls.push('diagnostic-start'); return { ok: false }; },
+      stop: () => { failedDiagnosticCalls.push('diagnostic-stop'); return Promise.resolve({ ok: true }); },
+    },
+    app: { listen: () => { throw new Error('listen must not run'); } },
+  }), /diagnostic runtime failed to start/i);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepStrictEqual(failedDiagnosticCalls, [
+    'runtime-start', 'diagnostic-start', 'diagnostic-stop', 'runtime-stop',
+  ]);
+
+  let rollbackStops = 0;
+  assert.throws(() => internal.startServer(0, {
+    currentPreflight: () => ({ ready: true }),
+    preflight: { summarizeFailures: () => [] },
+    runRetentionPurge: () => {},
+    runWorkflowEscalation: () => {},
+    connectedLicenseRuntime: {
+      start: () => ({ ok: true }),
+      stop: () => { rollbackStops += 1; return Promise.resolve({ ok: true }); },
+    },
+    app: { listen: () => { throw new Error('synthetic listen failure'); } },
+  }), /synthetic listen failure/);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(rollbackStops, 1);
+
   const signals = {};
   const exits = [];
   let timeoutCallback = null;
@@ -591,10 +697,49 @@ test('app internals cover ingest throttle, startup logging, server timers, and s
   assert.strictEqual(typeof signals.SIGTERM, 'function');
   assert.strictEqual(typeof signals.SIGINT, 'function');
   shutdown('SIGTERM');
+  await new Promise((resolve) => setImmediate(resolve));
   assert.strictEqual(clearedTimeout, 'timeout');
   assert.deepStrictEqual(exits, [0]);
   timeoutCallback();
-  assert.deepStrictEqual(exits, [0, 1]);
+  assert.deepStrictEqual(exits, [0]);
+
+  let deferredClose;
+  let resolveDiagnosticStop;
+  let resolveStop;
+  let diagnosticStopCalls = 0;
+  let stopCalls = 0;
+  const deferredExits = [];
+  const deferredShutdown = internal.installShutdownHandlers({
+    close(cb) { deferredClose = cb; },
+  }, {
+    process: { once() {} },
+    console: { log() {} },
+    stopCustomerDiagnosticRuntime: () => {
+      diagnosticStopCalls += 1;
+      return new Promise((resolve) => { resolveDiagnosticStop = resolve; });
+    },
+    stopConnectedLicenseRuntime: () => {
+      stopCalls += 1;
+      return new Promise((resolve) => { resolveStop = resolve; });
+    },
+    setTimeout: () => ({ unref() {} }),
+    clearTimeout() {},
+    exit: (code) => deferredExits.push(code),
+    parsePool: { shutdown() {} },
+  });
+  deferredShutdown('SIGTERM');
+  deferredShutdown('SIGINT');
+  assert.equal(diagnosticStopCalls, 1);
+  assert.equal(stopCalls, 0);
+  resolveDiagnosticStop({ ok: true });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(stopCalls, 1);
+  resolveStop({ ok: false, reason: 'connector_stop_failed' });
+  await Promise.resolve();
+  assert.deepStrictEqual(deferredExits, []);
+  deferredClose();
+  await Promise.resolve();
+  assert.deepStrictEqual(deferredExits, [1]);
 });
 
 test.after(() => {

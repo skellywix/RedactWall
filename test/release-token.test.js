@@ -27,7 +27,6 @@ const { listen } = require('./support/listen');
 const db = require('../server/db');
 const releaseTokens = require('../server/release-token');
 const dataCrypto = require('../server/crypto');
-const license = require('../server/license');
 
 
 function close(server) {
@@ -119,19 +118,6 @@ test('held prompt status polling requires the matching release token', async () 
   });
   assert.strictEqual(released.status, 200);
   assert.deepStrictEqual(await released.json(), { id: held.id, status: 'approved', released: true });
-
-  license.applyVendorVerdict(true);
-  try {
-    const revoked = await fetch(statusUrl, {
-      headers: { 'x-api-key': 'unit-ingest-key', 'x-release-token': held.releaseToken },
-    });
-    assert.strictEqual(revoked.status, 403);
-    assert.deepStrictEqual(await revoked.json(), {
-      error: 'license_revoked', status: 'license_revoked', released: false,
-    });
-  } finally {
-    license.applyVendorVerdict(false);
-  }
 
   const publicQuery = await fetch(`http://127.0.0.1:${port}/api/queries/${held.id}`, {
     headers: { cookie },
@@ -226,23 +212,6 @@ test('pending justification polling requires its item-specific release token', a
       body: { outcome: 'justified', note: 'Approved member-service workflow' },
     });
     assert.strictEqual(wrongResolution.status, 401);
-
-    license.applyVendorVerdict(true);
-    try {
-      const revoked = await jsonFetch(port, `/api/v1/justify/${encodeURIComponent(held.id)}`, {
-        headers: { 'x-api-key': 'unit-ingest-key', 'x-release-token': held.releaseToken },
-        body: { outcome: 'justified', note: 'Approved member-service workflow' },
-      });
-      assert.strictEqual(revoked.status, 403);
-      assert.deepStrictEqual(await revoked.json(), {
-        error: 'license_revoked', status: 'license_revoked', released: false,
-      });
-      assert.strictEqual(db.getQuery(held.id).status, 'pending_justification');
-      assert.ok(db.getQuery(held.id)._rawPrompt, 'revocation leaves held evidence intact');
-      assert.ok(db.getQuery(held.id)._releaseTokenHash, 'revocation does not consume authorization');
-    } finally {
-      license.applyVendorVerdict(false);
-    }
 
     const resolutionNote = 'Approved member 524-71-9043 at borrower@example.test';
     const auditCountBefore = db.listAudit(1000).filter((entry) => entry.queryId === held.id && entry.action === 'JUSTIFIED').length;

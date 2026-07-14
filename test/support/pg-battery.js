@@ -4,8 +4,8 @@
  * selects, printing one JSON result blob. Run in a child process so the
  * db singleton binds to the Postgres driver via REDACTWALL_DB_DRIVER.
  */
-const crypto = require('node:crypto');
 const fs = require('node:fs');
+const crypto = require('node:crypto');
 const results = {};
 
 function attempt(name, fn) {
@@ -89,31 +89,6 @@ attempt('auditPendingBatch', () => {
     countAdvanced: pending.count === verified.count,
     cleared: !fs.existsSync(pendingPath),
     chainOk: verified.ok,
-  };
-});
-
-attempt('vendorHeartbeatCas', () => {
-  const customerId = 'cu-pg-vendor';
-  const customerRef = 'license_' + crypto.createHash('sha256').update(customerId).digest('base64url').slice(0, 24);
-  const record = (issuedAt, status) => {
-    const state = { customerId, issuedAt, contactAt: issuedAt, status };
-    return {
-      ...state,
-      customerRef,
-      audits: [{
-        action: 'VENDOR_HEARTBEAT_OK', actor: 'vendor',
-        detail: JSON.stringify({ customerRef, issuedAt, contactAt: issuedAt, status }),
-      }],
-    };
-  };
-  const newer = db.applyVendorHeartbeat(record(3000, 'revoked'));
-  const older = db.applyVendorHeartbeat(record(2000, 'active'));
-  return {
-    newerApplied: newer.applied,
-    olderApplied: older.applied,
-    status: db.lastVendorHeartbeat(customerId, customerRef).status,
-    issuedAt: db.lastVendorHeartbeat(customerId, customerRef).issuedAt,
-    chainOk: db.verifyAuditChain().ok,
   };
 });
 
@@ -283,6 +258,79 @@ attempt('administration', () => {
     seat: db.getLicenseSeatAssignment(seat.userKey).status === 'released',
     renewal: db.listLicenseRenewalRequests().some((row) => row.id === renewal.id),
   };
+});
+
+attempt('customerDiagnostics', () => {
+  const customerId = 'cu-diagnostic';
+  const deploymentId = 'dep_55555555555555555555555555555555';
+  const key = Buffer.alloc(32, 0x5d);
+  const authority = Object.freeze({
+    sign(message) {
+      return Object.freeze({
+        keyId: 'pg-customer-diagnostic-test-v1',
+        mac: crypto.createHmac('sha256', key).update(message, 'utf8').digest('hex'),
+      });
+    },
+    verify(message, proof) {
+      if (!proof || proof.keyId !== 'pg-customer-diagnostic-test-v1'
+          || !/^[a-f0-9]{64}$/.test(String(proof.mac || ''))) return false;
+      const expected = crypto.createHmac('sha256', key).update(message, 'utf8').digest();
+      const actual = Buffer.from(proof.mac, 'hex');
+      return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
+    },
+  });
+  const { createCustomerDiagnosticOutbox } = require('../../server/customer-diagnostic-outbox');
+  db.setTenantContext(customerId);
+  try {
+    const options = {
+      storage: db.customerDiagnosticStorage(),
+      integrityAuthority: authority,
+      customerId,
+      deploymentId,
+      clock: () => Date.parse('2026-07-13T12:00:00.000Z'),
+      leaseMs: 5_000,
+    };
+    const queue = createCustomerDiagnosticOutbox(options);
+    const event = {
+      schemaVersion: 1,
+      messageId: crypto.randomUUID(),
+      customerId,
+      deploymentId,
+      kind: 'diagnostic.event.v1',
+      correlationId: crypto.randomUUID(),
+      component: 'connector',
+      code: 'CONNECTOR_TIMEOUT',
+      severity: 'warning',
+      outcome: 'retrying',
+      countBucket: '1',
+      sizeBucket: 'none',
+      durationBucket: '1-5s',
+      retryState: 'scheduled',
+      componentVersion: '1.2.3',
+      occurredAt: '2026-07-13T12:00:00.000Z',
+    };
+    const accepted = queue.enqueue(event);
+    const lease = queue.leaseReady({ limit: 1 })[0];
+    const delivered = queue.recordDelivery({
+      messageId: lease.messageId,
+      payloadDigest: lease.payloadDigest,
+      leaseId: lease.leaseId,
+      accepted: true,
+    });
+    const restarted = createCustomerDiagnosticOutbox(options);
+    const replay = restarted.enqueue({ ...event });
+    let immutable = false;
+    try {
+      db._db.prepare(`UPDATE customer_diagnostic_audit SET action = ?
+        WHERE customer_id = ?`).run('ALTERED', customerId);
+    } catch (error) { immutable = /append-only/.test(error.message); }
+    return {
+      delivered: delivered.delivered,
+      replay: replay.duplicate && replay.digest === accepted.digest,
+      immutable,
+      pending: restarted.pendingCount(),
+    };
+  } finally { db.setTenantContext(''); }
 });
 
 process.stdout.write(JSON.stringify(results));

@@ -6,6 +6,7 @@ const crypto = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
 const preflight = require('../server/preflight');
+const connectedLicenseConfig = require('../server/connected-license-config');
 
 const unsafe = {
   adminPasswordIsDefault: true,
@@ -14,6 +15,37 @@ const unsafe = {
   dataCryptoEnabled: false,
   cookieSecure: false,
 };
+
+function publicPem(key) {
+  return key.export({ type: 'spki', format: 'pem' });
+}
+
+function entitlementKeyId(key) {
+  const der = key.export({ type: 'spki', format: 'der' });
+  return `rw-entitlement-${crypto.createHash('sha256').update(der).digest('hex')}`;
+}
+
+function connectedEnv(overrides = {}) {
+  const offline = crypto.generateKeyPairSync('ed25519').publicKey;
+  const verdict = crypto.generateKeyPairSync('ed25519').publicKey;
+  const entitlement = crypto.generateKeyPairSync('ed25519').publicKey;
+  return {
+    NODE_ENV: 'development',
+    REDACTWALL_LICENSE_MODE: 'connected',
+    REDACTWALL_LICENSE_SERVER_URL: 'https://license.vendor.example/',
+    REDACTWALL_TENANT_ID: 'cu-one',
+    REDACTWALL_CONNECTED_DEPLOYMENT_ID: 'dep_0123456789abcdef0123456789abcdef',
+    REDACTWALL_VENDOR_CONTROL_HEARTBEAT_TOKEN: 'rwcp_heartbeat_0123456789abcdef0123456789',
+    REDACTWALL_VENDOR_CONTROL_ACKNOWLEDGEMENT_TOKEN: 'rwcp_acknowledgement_0123456789abcdef01',
+    REDACTWALL_VENDOR_CONTROL_DIAGNOSTICS_ENABLED: 'false',
+    REDACTWALL_VENDOR_CONTROL_SHADOW_INTELLIGENCE_ENABLED: 'false',
+    REDACTWALL_LICENSE_PUBLIC_KEY: publicPem(offline),
+    REDACTWALL_LICENSE_VERDICT_PUBLIC_KEY: publicPem(verdict),
+    REDACTWALL_ENTITLEMENT_PUBLIC_KEY: publicPem(entitlement),
+    REDACTWALL_ENTITLEMENT_KEY_ID: entitlementKeyId(entitlement),
+    ...overrides,
+  };
+}
 
 test('development preflight keeps demos runnable but reports warnings', () => {
   const status = preflight.configStatus({ env: { NODE_ENV: 'development' }, ...unsafe });
@@ -119,7 +151,7 @@ test('connected-license preflight requires an authenticated dedicated verdict tr
   const insecure = preflight.configStatus({
     env: {
       NODE_ENV: 'development',
-      REDACTWALL_LICENSE_SERVER_URL: 'https://license.vendor.example/heartbeat',
+      REDACTWALL_LICENSE_SERVER_URL: 'https://license.vendor.example/',
     },
   });
   for (const id of ['connected_license_auth', 'connected_license_verdict_key']) {
@@ -133,7 +165,7 @@ test('connected-license preflight requires an authenticated dedicated verdict tr
     const parameterized = preflight.configStatus({
       env: {
         NODE_ENV: 'development',
-        REDACTWALL_LICENSE_SERVER_URL: `https://license.vendor.example/heartbeat${suffix}`,
+        REDACTWALL_LICENSE_SERVER_URL: `https://license.vendor.example/${suffix}`,
       },
     });
     assert.strictEqual(parameterized.checks.find((item) => item.id === 'connected_license_url').ok, false);
@@ -141,29 +173,210 @@ test('connected-license preflight requires an authenticated dedicated verdict tr
 
   const { publicKey: licenseRoot } = crypto.generateKeyPairSync('ed25519');
   const reused = preflight.configStatus({
-    env: {
-      NODE_ENV: 'development',
-      REDACTWALL_LICENSE_SERVER_URL: 'https://license.vendor.example/heartbeat',
-      REDACTWALL_LICENSE_SERVER_TOKEN: 'rwls_customer_0123456789abcdef0123456789',
+    env: connectedEnv({
       REDACTWALL_LICENSE_PUBLIC_KEY: licenseRoot.export({ type: 'spki', format: 'pem' }),
       REDACTWALL_LICENSE_VERDICT_PUBLIC_KEY: licenseRoot.export({ type: 'spki', format: 'pem' }),
-    },
+    }),
   });
   assert.strictEqual(reused.checks.find((item) => item.id === 'connected_license_verdict_key').ok, false);
 
+  const verdictPair = crypto.generateKeyPairSync('ed25519');
+  const privatePin = preflight.configStatus({
+    env: connectedEnv({
+      REDACTWALL_LICENSE_PUBLIC_KEY: licenseRoot.export({ type: 'spki', format: 'pem' }),
+      REDACTWALL_LICENSE_VERDICT_PUBLIC_KEY: verdictPair.privateKey.export({
+        type: 'pkcs8', format: 'pem',
+      }),
+    }),
+  });
+  assert.strictEqual(
+    privatePin.checks.find((item) => item.id === 'connected_license_verdict_key').ok,
+    false,
+  );
+
   const { publicKey } = crypto.generateKeyPairSync('ed25519');
   const secure = preflight.configStatus({
-    env: {
-      NODE_ENV: 'development',
-      REDACTWALL_LICENSE_SERVER_URL: 'https://license.vendor.example/heartbeat',
-      REDACTWALL_LICENSE_SERVER_TOKEN: 'rwls_customer_0123456789abcdef0123456789',
+    env: connectedEnv({
       REDACTWALL_LICENSE_PUBLIC_KEY: licenseRoot.export({ type: 'spki', format: 'pem' }),
       REDACTWALL_LICENSE_VERDICT_PUBLIC_KEY: publicKey.export({ type: 'spki', format: 'pem' }),
-    },
+    }),
   });
   assert.strictEqual(secure.checks.find((item) => item.id === 'connected_license_url').ok, true);
   assert.strictEqual(secure.checks.find((item) => item.id === 'connected_license_auth').ok, true);
   assert.strictEqual(secure.checks.find((item) => item.id === 'connected_license_verdict_key').ok, true);
+  assert.strictEqual(secure.checks.find((item) => item.id === 'connected_entitlement_keys').ok, true);
+});
+
+test('connected-license preflight requires the tenant and exact deployment identity', () => {
+  const { publicKey: offlineRoot } = crypto.generateKeyPairSync('ed25519');
+  const { publicKey: verdictRoot } = crypto.generateKeyPairSync('ed25519');
+  const deploymentId = 'dep_0123456789abcdef0123456789abcdef';
+  const connected = connectedEnv({
+    REDACTWALL_LICENSE_PUBLIC_KEY: offlineRoot.export({ type: 'spki', format: 'pem' }),
+    REDACTWALL_LICENSE_VERDICT_PUBLIC_KEY: verdictRoot.export({ type: 'spki', format: 'pem' }),
+    REDACTWALL_TENANT_ID: 'cu-one',
+    REDACTWALL_CONNECTED_DEPLOYMENT_ID: deploymentId,
+  });
+  const valid = preflight.configStatus({ env: connected });
+  assert.strictEqual(valid.ready, true);
+  assert.strictEqual(valid.checks.find((item) => item.id === 'connected_license_tenant_id').ok, true);
+  assert.strictEqual(valid.checks.find((item) => item.id === 'connected_license_deployment_id').ok, true);
+
+  const legacyOnly = preflight.configStatus({
+    env: {
+      ...connected,
+      REDACTWALL_TENANT_ID: '',
+      REDACTWALL_LICENSE_CUSTOMER_ID: 'cu-one',
+    },
+  });
+  assert.strictEqual(
+    legacyOnly.checks.find((item) => item.id === 'connected_license_tenant_id').ok,
+    false,
+  );
+  assert.strictEqual(legacyOnly.ready, false);
+
+  for (const candidate of [
+    '',
+    'deployment_config_001',
+    ` ${deploymentId}`,
+    `${deploymentId} `,
+  ]) {
+    const status = preflight.configStatus({
+      env: { ...connected, REDACTWALL_CONNECTED_DEPLOYMENT_ID: candidate },
+    });
+    assert.strictEqual(
+      status.checks.find((item) => item.id === 'connected_license_deployment_id').ok,
+      false,
+      JSON.stringify(candidate),
+    );
+    assert.strictEqual(status.ready, false, JSON.stringify(candidate));
+  }
+});
+
+test('connected production requires distinct channel credentials and rejects legacy auth', () => {
+  const legacy = preflight.configStatus({
+    env: connectedEnv({
+      NODE_ENV: 'production',
+      REDACTWALL_LICENSE_SERVER_TOKEN: 'legacy_shared_token_0123456789abcdef0123',
+    }),
+  });
+  assert.strictEqual(
+    legacy.checks.find((item) => item.id === 'connected_license_legacy_auth').ok,
+    false,
+  );
+
+  const reused = preflight.configStatus({
+    env: connectedEnv({
+      REDACTWALL_VENDOR_CONTROL_ACKNOWLEDGEMENT_TOKEN:
+        'rwcp_heartbeat_0123456789abcdef0123456789',
+    }),
+  });
+  assert.strictEqual(reused.checks.find((item) => item.id === 'connected_license_auth').ok, false);
+
+  const missingConsent = preflight.configStatus({
+    env: connectedEnv({ REDACTWALL_VENDOR_CONTROL_DIAGNOSTICS_ENABLED: '' }),
+  });
+  assert.strictEqual(
+    missingConsent.checks.find((item) => item.id === 'connected_license_optional_channels').ok,
+    false,
+  );
+
+  const enabledWithoutCredential = preflight.configStatus({
+    env: connectedEnv({ REDACTWALL_VENDOR_CONTROL_DIAGNOSTICS_ENABLED: 'true' }),
+  });
+  assert.strictEqual(
+    enabledWithoutCredential.checks.find((item) => item.id === 'connected_license_optional_channels').ok,
+    false,
+  );
+
+  for (const value of ['29999', '300001']) {
+    const timing = preflight.configStatus({
+      env: connectedEnv({ REDACTWALL_VENDOR_CONTROL_HEARTBEAT_INTERVAL_MS: value }),
+    });
+    assert.strictEqual(
+      timing.checks.find((item) => item.id === 'connected_license_timing').ok,
+      false,
+    );
+  }
+});
+
+test('externally managed connected production requires a deployment-bound active outage artifact', () => {
+  const env = connectedEnv({
+    NODE_ENV: 'production',
+    REDACTWALL_LICENSE_MANAGED_EXTERNALLY: 'true',
+  });
+  const incompatible = preflight.configStatus({
+    env,
+    requireLicenseBinding: true,
+    managedLicenseHealth: {
+      ok: true,
+      managed: true,
+      state: 'active',
+      connectedFallbackCompatible: false,
+      connectedFallbackReason: 'deployment_missing',
+    },
+  });
+  assert.strictEqual(
+    incompatible.checks.find((item) => item.id === 'connected_offline_fallback').ok,
+    false,
+  );
+  assert.strictEqual(
+    incompatible.checks.find((item) => item.id === 'managed_license_source').ok,
+    false,
+  );
+  assert.strictEqual(incompatible.ready, false);
+
+  const compatible = preflight.configStatus({
+    env,
+    requireLicenseBinding: true,
+    managedLicenseHealth: {
+      ok: true,
+      managed: true,
+      state: 'active',
+      connectedFallbackCompatible: true,
+      connectedFallbackReason: null,
+    },
+  });
+  assert.strictEqual(
+    compatible.checks.find((item) => item.id === 'connected_offline_fallback').ok,
+    true,
+  );
+  assert.strictEqual(
+    compatible.checks.find((item) => item.id === 'managed_license_source').ok,
+    true,
+  );
+});
+
+test('connected scope parser rejects deployment identity whitespace without normalization', () => {
+  const deploymentId = 'dep_0123456789abcdef0123456789abcdef';
+  assert.deepStrictEqual(connectedLicenseConfig.connectedScopeFromEnv({
+    REDACTWALL_TENANT_ID: ' cu-one ',
+    REDACTWALL_CONNECTED_DEPLOYMENT_ID: deploymentId,
+  }, () => {}), { customerId: 'cu-one', deploymentId });
+
+  for (const candidate of [` ${deploymentId}`, `${deploymentId} `]) {
+    assert.throws(
+      () => connectedLicenseConfig.connectedScopeFromEnv({
+        REDACTWALL_TENANT_ID: 'cu-one',
+        REDACTWALL_CONNECTED_DEPLOYMENT_ID: candidate,
+      }, () => {}),
+      (error) => error && error.code === 'CONNECTED_ENTITLEMENT_SCOPE_REQUIRED',
+    );
+  }
+
+  for (const candidate of [
+    123,
+    new String(deploymentId),
+    { toString: () => deploymentId },
+  ]) {
+    assert.throws(
+      () => connectedLicenseConfig.connectedScopeFromEnv({
+        REDACTWALL_TENANT_ID: 'cu-one',
+        REDACTWALL_CONNECTED_DEPLOYMENT_ID: candidate,
+      }, () => {}),
+      (error) => error && error.code === 'CONNECTED_ENTITLEMENT_SCOPE_REQUIRED',
+    );
+  }
 });
 
 test('public invite URL preflight rejects cleartext production origins and warns on malformed development values', () => {
@@ -187,6 +400,74 @@ test('public invite URL preflight rejects cleartext production origins and warns
     env: { NODE_ENV: 'production', REDACTWALL_PUBLIC_URL: 'https://redactwall.example.test/console' },
   });
   assert.strictEqual(secure.checks.find((item) => item.id === 'public_url').ok, true);
+});
+
+test('externally managed production requires an absolute URL, non-placeholder root, and healthy license source', () => {
+  const { publicKey } = crypto.generateKeyPairSync('ed25519');
+  const publicKeyB64 = publicKey.export({ type: 'spki', format: 'der' }).toString('base64');
+  const base = {
+    NODE_ENV: 'production',
+    REDACTWALL_LICENSE_MANAGED_EXTERNALLY: 'true',
+    REDACTWALL_LICENSE_MODE: 'offline',
+  };
+  const blocked = preflight.configStatus({
+    env: base,
+    managedLicenseHealth: { ok: false, managed: true, reason: 'missing' },
+  });
+  for (const id of ['public_url', 'license_root_trust_anchor', 'managed_license_source']) {
+    assert.strictEqual(blocked.checks.find((item) => item.id === id).ok, false, id);
+  }
+
+  const configured = preflight.configStatus({
+    env: {
+      ...base,
+      REDACTWALL_PUBLIC_URL: 'https://cu-test.redactwall.example',
+      REDACTWALL_LICENSE_PUBLIC_KEY_B64: publicKeyB64,
+    },
+    managedLicenseHealth: { ok: true, managed: true, reason: null },
+  });
+  for (const id of ['public_url', 'license_root_trust_anchor', 'managed_license_source']) {
+    assert.strictEqual(configured.checks.find((item) => item.id === id).ok, true, id);
+  }
+});
+
+test('explicit offline licensing rejects connected fields and connected mode requires all three inputs', () => {
+  const offline = preflight.configStatus({
+    env: {
+      NODE_ENV: 'development',
+      REDACTWALL_LICENSE_MODE: 'offline',
+      REDACTWALL_LICENSE_SERVER_URL: 'https://license.example.test/heartbeat',
+    },
+  });
+  assert.strictEqual(offline.checks.find((item) => item.id === 'connected_license_url').ok, false);
+
+  const connected = preflight.configStatus({
+    env: { NODE_ENV: 'development', REDACTWALL_LICENSE_MODE: 'connected' },
+  });
+  for (const id of ['connected_license_url', 'connected_license_auth', 'connected_license_verdict_key']) {
+    assert.strictEqual(connected.checks.find((item) => item.id === id).ok, false, id);
+  }
+});
+
+test('customer production licensing is connected-only while development may remain offline', () => {
+  for (const env of [
+    { NODE_ENV: 'production' },
+    { NODE_ENV: 'production', REDACTWALL_LICENSE_MODE: 'offline' },
+  ]) {
+    const status = preflight.configStatus({ env, requireLicenseBinding: true });
+    const mode = status.checks.find((item) => item.id === 'license_mode');
+    assert.ok(mode);
+    assert.strictEqual(mode.ok, false);
+    assert.strictEqual(status.ready, false);
+  }
+
+  const development = preflight.configStatus({
+    env: { NODE_ENV: 'development', REDACTWALL_LICENSE_MODE: 'offline' },
+  });
+  assert.strictEqual(
+    development.checks.find((item) => item.id === 'license_mode').ok,
+    true,
+  );
 });
 
 test('production preflight passes with stable secrets and secure cookies', () => {

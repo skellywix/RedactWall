@@ -1,0 +1,88 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Durable retained RedactWall customer evidence volume. Deploy separately from the replaceable application stack.
+
+Parameters:
+  TenantId:
+    Type: String
+    AllowedPattern: '^[a-z0-9][a-z0-9_-]{1,62}$'
+    Description: Lowercase customer tenant slug.
+  AvailabilityZone:
+    Type: AWS::EC2::AvailabilityZone::Name
+    Description: Availability Zone shared by the customer application subnet.
+  DataVolumeGb:
+    Type: Number
+    Default: 40
+    MinValue: 20
+    MaxValue: 2048
+    Description: Size for a fresh volume. Snapshot restores inherit the snapshot size.
+  SnapshotId:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^snap-[a-f0-9]{8,17}$'
+    Description: Optional authenticated backup snapshot used only for an explicit restore.
+  SourceDataVolumeId:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^vol-[a-f0-9]{8,17}$'
+    Description: Required with SnapshotId. Must match the volumeId stored in the restored filesystem marker.
+  KmsKeyId:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^(?:arn:(?:aws|aws-us-gov|aws-cn):kms:[a-z0-9-]+:[0-9]{12}:key/[a-f0-9-]{16,64}|alias/[A-Za-z0-9/_-]{1,256})$'
+    Description: Optional customer-managed KMS key ARN or alias. Empty uses the account EBS key.
+
+Rules:
+  SnapshotContinuityPair:
+    Assertions:
+      - Assert:
+          Fn::Or:
+            - Fn::And:
+                - Fn::Equals: [!Ref SnapshotId, '']
+                - Fn::Equals: [!Ref SourceDataVolumeId, '']
+            - Fn::And:
+                - Fn::Not: [Fn::Equals: [!Ref SnapshotId, '']]
+                - Fn::Not: [Fn::Equals: [!Ref SourceDataVolumeId, '']]
+        AssertDescription: SnapshotId and SourceDataVolumeId must be supplied together or both left empty.
+
+Conditions:
+  HasSnapshot: !Not [!Equals [!Ref SnapshotId, '']]
+  HasKmsKey: !Not [!Equals [!Ref KmsKeyId, '']]
+
+Resources:
+  CustomerDataVolume:
+    Type: AWS::EC2::Volume
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      AvailabilityZone: !Ref AvailabilityZone
+      Encrypted: true
+      KmsKeyId: !If [HasKmsKey, !Ref KmsKeyId, !Ref 'AWS::NoValue']
+      Size: !If [HasSnapshot, !Ref 'AWS::NoValue', !Ref DataVolumeGb]
+      SnapshotId: !If [HasSnapshot, !Ref SnapshotId, !Ref 'AWS::NoValue']
+      VolumeType: gp3
+      Tags:
+        - Key: Name
+          Value: !Sub redactwall-${TenantId}-data
+        - Key: RedactWallTenant
+          Value: !Ref TenantId
+        - Key: RedactWallPurpose
+          Value: evidence-store
+        - Key: RedactWallAuthority
+          Value: retained-external
+
+Outputs:
+  DataVolumeId:
+    Description: Exact retained volume id to pass to customer-silo.yml.
+    Value: !Ref CustomerDataVolume
+  AvailabilityZone:
+    Description: Availability Zone the application subnet must use.
+    Value: !Ref AvailabilityZone
+  SourceDataVolumeId:
+    Description: Empty for a fresh volume, or the prior marker id required for snapshot continuity adoption.
+    Value: !Ref SourceDataVolumeId
+  SnapshotId:
+    Description: Source snapshot id when this volume was explicitly restored.
+    Value: !Ref SnapshotId
+  TenantId:
+    Description: Tenant permanently bound to this data authority.
+    Value: !Ref TenantId

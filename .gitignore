@@ -10,6 +10,7 @@ dist/
 output/
 # built console bundle — generated from console/ by `npm run console:build`
 server/public/app/
+server/public/.customer-console-build.json
 test-results/
 playwright-report/
 .playwright-cli/

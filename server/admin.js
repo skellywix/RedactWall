@@ -204,8 +204,18 @@ function applyLicenseState(users, assignments) {
   });
 }
 
-function directory(db, auth, env = process.env) {
-  const seatReport = tenant.seatReport(db, env);
+function projectedSeatReport(db, env, options) {
+  if (!options || !Object.hasOwn(options, 'seatLimitOverride')) {
+    return tenant.seatReport(db, env);
+  }
+  return tenant.seatReport(db, env, {
+    seatLimitOverride: options.seatLimitOverride === undefined
+      ? null : options.seatLimitOverride,
+  });
+}
+
+function directory(db, auth, env = process.env, options = {}) {
+  const seatReport = projectedSeatReport(db, env, options);
   const assignments = db.listLicenseSeatAssignments();
   const map = new Map();
   for (const record of staticDirectoryRecords(auth)) mergeUser(map, record);
@@ -396,8 +406,8 @@ function reactivateUser(db, id) {
   return { kind: target.kind, user: db.saveScimUser({ ...target.user, active: true }) };
 }
 
-function seats(db, auth, licenseStatus, env = process.env) {
-  const dir = directory(db, auth || { listStaticAccounts: () => [] }, env);
+function seats(db, auth, licenseStatus, env = process.env, options = {}) {
+  const dir = directory(db, auth || { listStaticAccounts: () => [] }, env, options);
   const assignments = db.listLicenseSeatAssignments();
   const releasedSeats = assignments.filter((item) => item.status === 'released').length;
   const assignedSeats = assignments.filter((item) => item.status === 'assigned').length;

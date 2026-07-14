@@ -6,7 +6,10 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const Database = require('better-sqlite3');
-const { installAuditTransactionProtocol } = require('../server/storage');
+const {
+  installAuditTransactionProtocol,
+  isAuditCommitUncertainError,
+} = require('../server/storage');
 const { openAuditAnchor } = require('../server/audit-anchor');
 const auditIntegrity = require('../server/audit-integrity');
 
@@ -80,13 +83,40 @@ test('Postgres-compatible COMMIT response failure is treated as commit-uncertain
   const transaction = driver.transaction(() => record({ id: 'a_rollback' }));
   driver.failNextCommit();
 
-  assert.throws(transaction, /synthetic Postgres COMMIT failure/);
+  let error;
+  try { transaction(); } catch (caught) { error = caught; }
+  assert.match(error.message, /synthetic Postgres COMMIT failure/);
+  assert.equal(isAuditCommitUncertainError(error), true);
   assert.deepStrictEqual(events, [
     'BEGIN',
     'PREPARE',
     'ROLLBACK',
     'ANCHOR UNCERTAIN',
   ]);
+});
+
+test('uncertainty cleanup never masks frozen or primitive COMMIT errors', () => {
+  for (const original of [Object.freeze(new Error('frozen commit failure')), 0]) {
+    const driver = {
+      transaction(callback) {
+        return () => {
+          callback();
+          throw original;
+        };
+      },
+    };
+    const record = installAuditTransactionProtocol(driver, {
+      prepareTransactionCommit() {},
+      transactionCommitted() {},
+      transactionCommitUncertain() { throw new Error('uncertainty cleanup failed'); },
+    });
+    let caught = Symbol('not thrown');
+    try { driver.transaction(() => record({ id: 'a_uncertain' }))(); }
+    catch (error) { caught = error; }
+    if (typeof original === 'object') assert.strictEqual(caught, original);
+    else assert.strictEqual(caught.cause, original);
+    assert.equal(isAuditCommitUncertainError(caught), true);
+  }
 });
 
 test('rolled-back nested savepoint entries never enter the outer pending batch', () => {

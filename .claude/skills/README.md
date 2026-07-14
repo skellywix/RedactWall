@@ -17,7 +17,7 @@ Long-form history stays in the existing `ITERATIONS.md` / `CHANGELOG.md`.
 | Skill | What it does |
 |-------|--------------|
 | `daily-triage-loop` | Morning heartbeat: scan CI/issues/commits + tests, engine sync, audit chain → prioritized `STATUS.md`. Read-only on code. |
-| `goal-contract-loop` | Turn a fuzzy objective into a contract (end state, evidence cmd, constraints, budget); iterate until evidence passes. Pairs with `/goal`. |
+| `goal-contract-loop` | Freeze a scope-aware RedactWall contract, map every acceptance predicate to evidence, preserve invariants, and iterate through independent review. Pairs with `/goal`. |
 | `maker-checker-loop` | Maker drafts in a worktree; adversarial checker runs the full gate and compliance review before a human sees it. |
 | `durable-memory-loop` | The on-disk state discipline; Ralph-style fresh-context passes that do one task and update state. |
 | `weekly-review-loop` | Anti-comprehension-debt pass: digest what shipped, read diffs you didn't write, full verification sweep, prune memory. |

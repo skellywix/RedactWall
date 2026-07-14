@@ -9,11 +9,12 @@ customer on AWS requires. Re-audit it before the first customer handover.
 
 | Piece | Where | State |
 |---|---|---|
-| Customer-silo CloudFormation (ALB + HTTPS-only, EC2, hardened Docker, Secrets Manager, CloudWatch Logs, SSM access, cfn-hup updates) | `infra/aws/customer-silo.yml` | Ready; validate per runbook |
+| Customer-silo CloudFormation (ALB + HTTPS-only, EC2, external retained encrypted evidence volume, hardened Docker, Secrets Manager, CloudWatch Logs, SSM access) | `infra/aws/customer-data-volume.yml`, `infra/aws/customer-silo.yml` | Shipped; bootstrap the private artifact bucket, create the durable-data stack once, then use synchronous deploy or explicit maintenance replacement per runbook |
 | SaaS-mode tenant + seat enforcement (fail closed) | server (`REDACTWALL_SAAS_MODE`, `REDACTWALL_TENANT_ID`, `REDACTWALL_SEAT_LIMIT`) | Shipped, test-covered |
 | Deploy runbook (image → secret → stack → sensors → validate → evidence timer) | `docs/deployment/AWS_SAAS_DEPLOYMENT.md` | Complete for the in-template scope |
 | Acceptance smoke for a deployed silo | `npm run silo:smoke` (`scripts/aws-silo-smoke.js`) | Shipped |
 | Offline Ed25519 licensing + issuance CLI | `server/license.js`, `docs/deployment/LICENSE_KEY_SETUP.md`, `docs/process/CUSTOMER_LICENSING.md` | Shipped — but see Blocker 1 |
+| Signed customer-license bootstrap | `infra/aws/customer-silo.yml`, secret field `REDACTWALL_LICENSE` | Shipped; tenant/seat-bound, journaled, crash-recoverable, private-key-free |
 | Connected-mode license verdict server (vendor side) | `infra/license-server/` (Caddy + systemd + verdict-only Ed25519 service) | Scaffolded + interop-tested; needs a deployed vendor instance |
 | Postgres driver + migrations + RLS (future shared plane) | `REDACTWALL_DB_DRIVER=postgres`, `docs/deployment/MANAGED_POSTGRES.md` | Shipped; NOT used for silo v1 |
 | Backup/restore + drills | `npm run backup`, `backup:drill`, scheduled installers | Shipped app-level |
@@ -21,41 +22,37 @@ customer on AWS requires. Re-audit it before the first customer handover.
 
 ## Launch blockers (do these before taking money)
 
-1. **Production license signing key.** `server/license.js` ships with a
-   placeholder embedded public key. Follow `LICENSE_KEY_SETUP.md`: generate the
-   offline Ed25519 keypair on a trusted machine, embed the public key, protect
-   the private key (it can mint licenses for any customer). Until then no real
-   license verifies. This is also the prerequisite for the kill-switch items
-   (G2/G3/G5) parked in `STATUS.md`.
-2. **License install is missing from the AWS runbook and template.**
-   `docker-compose.yml` wires `REDACTWALL_LICENSE_PATH=/data/redactwall.lic`;
-   `infra/aws/customer-silo.yml` sets no license env at all. Add
-   `REDACTWALL_LICENSE_PATH=/data/redactwall.lic` to the template's container
-   env, and add a runbook step: issue the customer license (bound to the same
-   `customerId` as `TenantId`), copy it to `/var/lib/redactwall/redactwall.lic`
-   via Session Manager, restart, confirm the Licensing tab shows the plan.
-3. **Vendor license/heartbeat server is not deployed.** `infra/license-server/`
+1. **Production license signing key.** `server/license.js` retains a placeholder
+   only for development. Follow `LICENSE_KEY_SETUP.md`: generate the offline
+   Ed25519 keypair on a trusted machine, put the public SPKI DER base64 in the
+   customer secret, and protect the private key (it can mint licenses for any
+   customer). Production preflight and `npm run license:trust-check` reject the
+   known placeholder.
+2. **Vendor license/heartbeat server is not deployed.** `infra/license-server/`
    is code, not a running endpoint. Stand it up (the free-tier EC2 + Caddy +
    systemd shape it was built for), give it a stable DNS name + TLS, and keep
    the verdict signing key separate from the offline root. Remember the
    7-day heartbeat staleness fails CLOSED for connected-mode customers — the
    vendor box needs monitoring, or first customers ship offline-mode only
    (which is a valid v1 call; decide explicitly).
-4. **DNS + ACM per customer.** The template requires `CertificateArn` +
+3. **DNS + ACM per customer.** The template requires `CertificateArn` +
    `PublicHostname`. You need a domain strategy (e.g.
    `<tenant>.redactwall.example`), an ACM cert in the deployment region, and a
-   Route53 (or customer-DNS) alias step. Currently manual and undocumented as
-   an owned checklist item.
-5. **Pricing + legal sign-off.** `docs/product/CU_PRICING.md` figures are DRAFT
+   Route53 (or customer-DNS) alias step. The runbooks document the handoff, but
+   account ownership, certificate validation, and alias creation remain manual
+   third-party integration steps.
+4. **Pricing + legal sign-off.** `docs/product/CU_PRICING.md` figures are DRAFT
    and the `docs/legal/` DPA/GLBA templates are samples pending counsel
    (`COUNSEL_HANDOFF_CHECKLIST.md`). A paid deployment needs a signed order
    form, executed DPA, and a committed per-seat price.
-6. **Security decisions parked in `STATUS.md` need a call before a regulated
-   customer audit:** C1 (audit chain is unkeyed — HMAC-keying requires a
-   one-time migration), N2 (EDM fingerprints use a fast hash), G2/G3/G5
-   (kill-switch hardening tied to real key issuance), N8 (HA gateway TLS certs
-   at deploy). Shipping v1 without them may be acceptable — but write the
-   decision down in `DECISIONS.md` either way.
+5. **Remaining security decisions need a call before a regulated customer
+   audit:** N2 (EDM fingerprints use a fast hash), G2 (connected production
+   still accepts an environment override for the offline license-root public
+   key), and N8 (HA gateway TLS certificates are supplied at deploy). C1 is no
+   longer open: audit entries, pending high-water state, and the external
+   checkpoint are HMAC-authenticated. G3 clock-rollback protection and G5
+   wiped-cache recovery are also implemented and test-covered. If the remaining
+   risks are accepted for v1, record the decision in `DECISIONS.md`.
 
 ## Operational gaps (template/runbook additions, first week of ownership)
 
@@ -80,9 +77,13 @@ customer on AWS requires. Re-audit it before the first customer handover.
    digest-pinned to ECR, and records the digest; deploys can stay manual
    `cloudformation deploy` per customer.
 6. **Patching cadence.** AL2023 host + Docker base image updates: enable SSM
-   Patch Manager baseline or schedule a monthly redeploy with a fresh AMI
-   (`AmiId` already resolves latest via SSM parameter — a stack update picks it
-   up; write the cadence down).
+   Patch Manager baseline or schedule a monthly planned-outage replacement
+   through `npm run silo:maintenance -- --mode replace-instance`. Ordinary
+   deploys freeze host topology and the stack policy denies create-before-delete
+   replacement because gp3 cannot be attached to two instances. The separately
+   modeled data volume is retained and identity-checked across maintenance;
+   never perform an ad hoc AMI replacement or accept health without the
+   applied-state attestation.
 7. **Cost guardrails.** Per-silo cost is roughly ALB (~$16/mo) + t3.small/medium
    + EBS + logs ≈ $40–60/mo/customer. Set an AWS Budget alert per account and
    fold the number into pricing floor math.
@@ -113,12 +114,20 @@ Vendor-side one-time:
 Per customer:
 5. Pick `TenantId` (= license `customerId`) and seat count; issue the license.
 6. Provision DNS hostname + ACM certificate in the target region.
-7. Create the customer secret in Secrets Manager (runbook §2).
+7. Create the customer secret in Secrets Manager with all required runtime
+   values plus the signed `REDACTWALL_LICENSE` envelope and public trust anchor,
+   never the private signing key, and record the returned immutable `VersionId`
+   (runbook §2).
 8. Build/push or reuse the digest-pinned image (runbook §1).
-9. `aws cloudformation validate-template` then `deploy` (runbook §3), with the
-   added `REDACTWALL_LICENSE_PATH` env once Blocker 2 lands.
-10. Install the customer license into `/var/lib/redactwall` via Session
-    Manager; restart; verify Licensing tab.
+9. Bootstrap the private versioned CloudFormation artifact bucket once, then
+   run `npm run silo:deploy` (runbook §3), passing the exact AMI, artifact bucket,
+   and secret version. The command uploads the content-addressed template,
+   binds validation and deployment to its exact S3 `VersionId`, verifies its
+   S3 checksum, encryption, and expected bucket owner, and returns only after the
+   exact image, secret version, license, container, and data-volume identities
+   are applied and attested.
+10. Verify the Licensing tab reports the contracted active tenant, plan, seats,
+    and expiry. No manual Session Manager copy is required.
 11. Add alarms + AWS Backup plan (until they are folded into the template).
 12. Configure managed sensors (runbook §4); verify tenant rejection + seat
     blocking (runbook §5); run `npm run silo:smoke`.

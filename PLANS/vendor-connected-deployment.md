@@ -1,6 +1,11 @@
 # Vendor-Connected Deployment — Codebase Audit And Plan
 
-Audited 2026-07-08 against the full codebase. Direction (vendor decision,
+> **Superseded 2026-07-13.** This file records the retired v1 design. Its
+> `server/vendor-link.js`, shared token, daily heartbeat, and mutable `revoked`
+> overlay are removed. The active connected-first contract is
+> `docs/reference/VENDOR_CONTROL_PROTOCOL.md` and the goal-contract backlog.
+
+Audited 2026-07-08 against the then-current codebase. Direction (vendor decision,
 supersedes the prior zero-egress-only posture): deployments may have **full
 egress to the vendor's AWS** — online license checks, seat-count reporting,
 a vendor kill-switch, and vendor-side second-layer content scanning
@@ -112,7 +117,8 @@ separate SKU. Every claim below carries verified references.
 
 ## Implementation Sequence
 
-- **Phase A — connected licensing** — **SHIPPED** (`server/vendor-link.js`, `revoked` state + fail-closed ingest gate, gateway covered transitively, 30-day seat window, `docs/CONNECTED_DEPLOYMENT.md`, tests). Remaining original bullet detail: (`server/vendor-link.js` + license
+- **Phase A — connected licensing** — **RETIRED AND REPLACED** by the strict
+  connected-first runtime and vendor-control protocol. Historical detail: (`server/vendor-link.js` + license
   `revoked` state + ingest gate + gateway check + heartbeat with seat
   counts + tests updating `test/license*.test.js` pins + 30-day seat
   window fix).

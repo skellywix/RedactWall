@@ -84,116 +84,16 @@ test('audit chain verifies over many sequential appends (no dropped links)', () 
   assert.ok(v.count >= 1000);
 });
 
-function vendorHeartbeatRecord(customerId, issuedAt, status, contactAt = issuedAt) {
-  const state = { customerId, issuedAt, contactAt, status };
-  const customerRef = 'license_' + crypto.createHash('sha256').update(customerId).digest('base64url').slice(0, 24);
-  return {
-    ...state,
-    customerRef,
-    audits: [{
-      action: 'VENDOR_HEARTBEAT_OK',
-      actor: 'vendor',
-      detail: JSON.stringify({ customerRef, issuedAt, contactAt, status }),
-    }],
-  };
-}
-
-test('vendor heartbeat CAS preserves the newest shared verdict and its audit atomically', () => {
-  const customerId = 'cu-vendor-cas';
-  const newerRecord = vendorHeartbeatRecord(customerId, 3000, 'revoked');
-  const newer = db.applyVendorHeartbeat(newerRecord);
-  const older = db.applyVendorHeartbeat(vendorHeartbeatRecord(customerId, 2000, 'active'));
-
-  assert.strictEqual(newer.applied, true);
-  assert.strictEqual(older.applied, false);
-  assert.deepStrictEqual(older.state, {
-    customerId, issuedAt: 3000, contactAt: 3000, status: 'revoked',
-  });
-  assert.deepStrictEqual(db.lastVendorHeartbeat(customerId, newerRecord.customerRef), {
-    issuedAt: 3000, contactAt: 3000, status: 'revoked',
-  });
-  const evidence = db.listAudit(5000).filter((entry) => {
-    if (entry.action !== 'VENDOR_HEARTBEAT_OK') return false;
-    try { return JSON.parse(entry.detail).issuedAt === 3000; } catch (_) { return false; }
-  });
-  assert.strictEqual(evidence.length, 1, 'losing CAS does not append contradictory evidence');
-  assert.strictEqual(db.verifyAuditChain().ok, true);
-});
-
-test('vendor state rolls back when its required audit evidence cannot append', () => {
-  const customerId = 'cu-vendor-audit-rollback';
-  const record = vendorHeartbeatRecord(customerId, 4000, 'revoked');
-  db._db.exec(`
-    CREATE TRIGGER vendor_heartbeat_audit_fail
-    BEFORE INSERT ON audit
-    WHEN NEW.action = 'VENDOR_HEARTBEAT_OK'
-    BEGIN SELECT RAISE(ABORT, 'forced vendor audit failure'); END;
-  `);
-  try {
-    assert.throws(
-      () => db.applyVendorHeartbeat(record),
-      /forced vendor audit failure/,
-    );
-  } finally {
-    db._db.exec('DROP TRIGGER vendor_heartbeat_audit_fail');
-  }
-  assert.strictEqual(db.lastVendorHeartbeat(customerId, record.customerRef), null, 'failed evidence append rolls back shared state');
-  const retry = db.applyVendorHeartbeat(record);
-  assert.strictEqual(retry.applied, true);
-  assert.deepStrictEqual(db.lastVendorHeartbeat(customerId, record.customerRef), {
-    issuedAt: 4000, contactAt: 4000, status: 'revoked',
-  });
-  assert.strictEqual(db.verifyAuditChain().ok, true);
-});
-
-test('vendor CAS backfills the v9 row from newer pre-migration audit evidence', () => {
-  const customerId = 'cu-vendor-upgrade';
-  db.appendAudit({
-    action: 'VENDOR_HEARTBEAT_OK',
-    actor: 'vendor',
-    detail: JSON.stringify({ issuedAt: 7000, contactAt: 7000, status: 'revoked' }),
-  });
-  const candidate = vendorHeartbeatRecord(customerId, 6000, 'active');
-  const result = db.applyVendorHeartbeat(candidate);
-
-  assert.strictEqual(result.applied, false);
-  assert.deepStrictEqual(result.state, {
-    customerId, issuedAt: 7000, contactAt: 7000, status: 'revoked',
-  });
+test('released vendor_license_state schema remains inert historical storage', () => {
+  const customerId = 'cu-historical-vendor-row';
+  db._db.prepare(
+    'INSERT INTO vendor_license_state ("customerId", "issuedAt", "contactAt", status) VALUES (?, ?, ?, ?)',
+  ).run(customerId, 10000, 10000, 'revoked');
   assert.deepStrictEqual(db._db.prepare(
-    'SELECT "customerId", "issuedAt", "contactAt", status FROM vendor_license_state WHERE "customerId" = ?',
-  ).get(customerId), {
-    customerId, issuedAt: 7000, contactAt: 7000, status: 'revoked',
-  });
-  assert.strictEqual(db.verifyAuditChain().ok, true);
-});
-
-test('vendor reconciliation rejects table-only rollback of an audited revocation', () => {
-  const customerId = 'cu-vendor-table-tamper';
-  const record = vendorHeartbeatRecord(customerId, 8000, 'revoked');
-  db.applyVendorHeartbeat(record);
-  db._db.prepare(
-    'UPDATE vendor_license_state SET "issuedAt" = ?, "contactAt" = ?, status = ? WHERE "customerId" = ?',
-  ).run(9000, 9000, 'active', customerId);
-
-  assert.throws(
-    () => db.lastVendorHeartbeat(customerId, record.customerRef),
-    (error) => error && error.code === 'VENDOR_STATE_INTEGRITY',
-  );
-  assert.strictEqual(db.verifyAuditChain().ok, true, 'state-table tamper cannot rewrite authenticated audit');
-});
-
-test('authenticated vendor audit outranks a rolled-back shared-state row', () => {
-  const customerId = 'cu-vendor-table-rollback';
-  const record = vendorHeartbeatRecord(customerId, 10000, 'revoked');
-  db.applyVendorHeartbeat(record);
-  db._db.prepare(
-    'UPDATE vendor_license_state SET "issuedAt" = ?, "contactAt" = ?, status = ? WHERE "customerId" = ?',
-  ).run(9000, 9000, 'active', customerId);
-
-  assert.deepStrictEqual(db.lastVendorHeartbeat(customerId, record.customerRef), {
-    issuedAt: 10000, contactAt: 10000, status: 'revoked',
-  });
+    'SELECT "customerId", status FROM vendor_license_state WHERE "customerId" = ?',
+  ).get(customerId), { customerId, status: 'revoked' });
+  assert.strictEqual(db.applyVendorHeartbeat, undefined);
+  assert.strictEqual(db.lastVendorHeartbeat, undefined);
 });
 
 test('audit table is append-only: SQL tampering is refused outright', () => {

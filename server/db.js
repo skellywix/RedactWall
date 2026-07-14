@@ -30,6 +30,18 @@ const crypto = require('crypto');
 const storage = require('./storage');
 const integrity = require('./audit-integrity');
 const { openAuditAnchor } = require('./audit-anchor');
+const { createConnectedEntitlementStore } = require('./connected-entitlement-store');
+const { createConnectedOnlineRegistryStore } = require('./connected-online-registry-store');
+const {
+  createConnectedHeartbeatApplyStore,
+  createConnectedHeartbeatTransactionCoordinator,
+} = require('./connected-heartbeat-apply-store');
+const {
+  createConnectedAcknowledgedAuthorityStore,
+} = require('./connected-acknowledged-authority-store');
+const { createCustomerDiagnosticStorage } = require('./customer-diagnostic-storage');
+const connectedLicenseConfig = require('./connected-license-config');
+const onlineVerdict = require('./connected-online-verdict');
 const tenant = require('./tenant');
 
 const DATA_DIR = path.join(__dirname, '..', 'data');
@@ -42,6 +54,7 @@ const store = storage.openStore({ env: process.env, dataDir: DATA_DIR });
 const sdb = store.driver;
 const DB_PATH = store.dbPath;
 const DRIVER_KIND = store.kind;
+const connectedHeartbeatTransactionCoordinator = createConnectedHeartbeatTransactionCoordinator();
 
 /** Postgres row-level security context; no-op on single-node SQLite. */
 function setTenantContext(orgId) {
@@ -247,6 +260,12 @@ function buildIngestReplaySnapshot(row) {
       ? row.categories.slice(0, 250).map((category) => boundedReplayString(category, 80)) : [],
     reasons: Array.isArray(row.reasons)
       ? row.reasons.slice(0, 40).map((reason) => boundedReplayString(reason, 240)) : [],
+    ...(Number.isSafeInteger(row && row.seatLimit)
+      && row.seatLimit >= 0 && row.seatLimit <= 1_000_000
+      ? { seatLimit: row.seatLimit } : {}),
+    ...(Number.isSafeInteger(row && row.seatsUsed)
+      && row.seatsUsed >= 0 && row.seatsUsed <= 1_000_000
+      ? { seatsUsed: row.seatsUsed } : {}),
   };
 }
 
@@ -268,8 +287,9 @@ function validReplayFinding(finding) {
 }
 
 function validIngestReplaySnapshot(snapshot) {
-  const fields = ['id', 'decision', 'mode', 'status', 'riskScore', 'findings', 'categories', 'reasons'];
-  if (!hasExactKeys(snapshot, fields)) return false;
+  const required = ['id', 'decision', 'mode', 'status', 'riskScore', 'findings', 'categories', 'reasons'];
+  const fields = [...required, 'seatLimit', 'seatsUsed'];
+  if (!hasExactKeys(snapshot, fields, required)) return false;
   if (typeof snapshot.id !== 'string' || !/^q_[0-9a-f]{16}$/.test(snapshot.id)) return false;
   if (!['allow', 'redact', 'warn', 'log', 'block'].includes(snapshot.decision)) return false;
   if (snapshot.decision !== replayDecisionForStatus(snapshot.status)) return false;
@@ -280,6 +300,12 @@ function validIngestReplaySnapshot(snapshot) {
       || !snapshot.findings.every(validReplayFinding)) return false;
   if (!Array.isArray(snapshot.categories) || snapshot.categories.length > 250
       || !snapshot.categories.every((value) => typeof value === 'string' && value.length <= 80)) return false;
+  if (snapshot.seatLimit !== undefined
+      && (!Number.isSafeInteger(snapshot.seatLimit)
+        || snapshot.seatLimit < 0 || snapshot.seatLimit > 1_000_000)) return false;
+  if (snapshot.seatsUsed !== undefined
+      && (!Number.isSafeInteger(snapshot.seatsUsed)
+        || snapshot.seatsUsed < 0 || snapshot.seatsUsed > 1_000_000)) return false;
   return Array.isArray(snapshot.reasons) && snapshot.reasons.length <= 40
     && snapshot.reasons.every((value) => typeof value === 'string' && value.length <= 240);
 }
@@ -499,6 +525,21 @@ function appendAuditRecord(event) {
   const last = aLast.get();
   const prevHash = last ? last.hash : ZERO;
   const contentHash = event.queryId ? queryContentHash(event.queryId) : undefined;
+  const connectedAuthorityRef = String(event.connectedAuthorityRef || '');
+  if (connectedAuthorityRef && !/^connected_[A-Za-z0-9_-]{16,96}$/.test(connectedAuthorityRef)) {
+    throw new TypeError('connected authority audit reference is invalid');
+  }
+  const connectedAckRef = String(event.connectedAckRef || '');
+  if (connectedAckRef && !/^connected_ack_[A-Za-z0-9_-]{16,96}$/.test(connectedAckRef)) {
+    throw new TypeError('connected acknowledgement audit reference is invalid');
+  }
+  const diagnosticCheckpointRef = String(event.diagnosticCheckpointRef || '');
+  const diagnosticCheckpointAction = event.action === 'CUSTOMER_DIAGNOSTIC_CHECKPOINTED';
+  if ((diagnosticCheckpointRef
+      && !/^diagnostic_checkpoint_[A-Za-z0-9_-]{16,96}$/.test(diagnosticCheckpointRef))
+      || Boolean(diagnosticCheckpointRef) !== diagnosticCheckpointAction) {
+    throw new TypeError('customer diagnostic checkpoint audit reference is invalid');
+  }
   const ingestEvidence = event.ingestIdempotency;
   if (ingestEvidence && (!hasExactKeys(ingestEvidence, ['version', 'identityHash', 'snapshotHash', 'snapshot'])
       || ingestEvidence.version !== 1
@@ -516,6 +557,9 @@ function appendAuditRecord(event) {
     queryId: event.queryId || '',
     actor: event.actor || '',
     detail: event.detail || '',
+    ...(connectedAuthorityRef ? { connectedAuthorityRef } : {}),
+    ...(connectedAckRef ? { connectedAckRef } : {}),
+    ...(diagnosticCheckpointRef ? { diagnosticCheckpointRef } : {}),
     ...(contentHash ? { contentHash } : {}),
     ...(ingestEvidence ? { ingestIdempotency: ingestEvidence } : {}),
   };
@@ -1792,7 +1836,7 @@ function lastAuditActionAt(action) {
 // The most recent board cybersecurity-training / oversight attestation, read
 // back from the tamper-evident audit chain (a BOARD_TRAINING_ATTESTED entry
 // whose detail is JSON: { trainingCompletedAt, reference }). Bounded date +
-// reference only, no PII. Same structured-read pattern as lastVendorHeartbeat.
+// reference only, no PII.
 function lastBoardTrainingAttestation() {
   const row = sdb.prepare("SELECT ts, entry FROM audit WHERE action = 'BOARD_TRAINING_ATTESTED' ORDER BY seq DESC LIMIT 1").get();
   if (!row) return null;
@@ -1808,152 +1852,306 @@ function lastBoardTrainingAttestation() {
   } catch (_) { return null; }
 }
 
-// Durable, tamper-evident anchors for the connected-mode kill-switch. The
-// vendor state file (server/vendor-link.js) is a fast cache but is
-// operator-writable/deletable; the hash-chained audit is not (editing it breaks
-// verifyAuditChain). A dedicated row supplies the cross-replica CAS while the
-// audit supplies the authenticated fallback and detects a rolled-back row.
-const vendorStateByCustomer = sdb.prepare(
-  'SELECT "customerId", "issuedAt", "contactAt", status FROM vendor_license_state WHERE "customerId" = ?',
-);
-const latestVendorState = sdb.prepare(
-  'SELECT "customerId", "issuedAt", "contactAt", status FROM vendor_license_state ORDER BY "issuedAt" DESC LIMIT 1',
-);
-const vendorHeartbeatAudits = sdb.prepare(
-  "SELECT entry FROM audit WHERE action = 'VENDOR_HEARTBEAT_OK' ORDER BY seq DESC",
-);
-const vendorStateCas = sdb.prepare(`
-  INSERT INTO vendor_license_state ("customerId", "issuedAt", "contactAt", status)
-  VALUES (@customerId, @issuedAt, @contactAt, @status)
-  ON CONFLICT("customerId") DO UPDATE SET
-    "issuedAt" = excluded."issuedAt",
-    "contactAt" = excluded."contactAt",
-    status = excluded.status
-  WHERE excluded."issuedAt" > vendor_license_state."issuedAt"
-  RETURNING "customerId", "issuedAt", "contactAt", status
-`);
-const vendorStateReplace = sdb.prepare(`
-  UPDATE vendor_license_state
-  SET "issuedAt" = @issuedAt, "contactAt" = @contactAt, status = @status
-  WHERE "customerId" = @customerId
-`);
+// Connected-first entitlement authority. Unlike the legacy active/revoked
+// migration-9 row, this store binds one exact deployment, signed plan,
+// seats, features, pause/revoke state, monotonic high-water, trusted time, and
+// its acknowledgement outbox. Every state transition and ACK enqueue shares
+// the same datastore transaction and tamper-evident audit append.
+let connectedEntitlements = null;
+let connectedEntitlementBinding = null;
 
-function normalizedVendorState(row, fallbackCustomerId = '') {
-  if (!row) return null;
-  const customerId = String(row.customerId || fallbackCustomerId || '').trim();
-  const issuedAt = Number(row.issuedAt);
-  const contactAt = Number(row.contactAt);
-  const status = String(row.status || '');
-  if (!customerId || !Number.isSafeInteger(issuedAt) || !Number.isSafeInteger(contactAt)
-      || issuedAt < 0 || contactAt < 0 || !['active', 'revoked'].includes(status)) return null;
-  return { customerId, issuedAt, contactAt, status };
-}
-
-function earlierDuplicateVendorState(current, candidate) {
-  if (!current) return candidate;
-  if (candidate.issuedAt > current.issuedAt) return candidate;
-  if (candidate.issuedAt < current.issuedAt) return current;
-  return {
-    ...current,
-    contactAt: Math.min(current.contactAt, candidate.contactAt),
-    status: current.status === 'revoked' || candidate.status === 'revoked' ? 'revoked' : 'active',
-  };
-}
-
-function vendorAuditState(customerId = '', customerRef = '') {
-  let result = null;
-  for (const row of vendorHeartbeatAudits.all()) {
-    try {
-      const detail = JSON.parse(JSON.parse(row.entry).detail);
-      if (detail.customerRef && (!customerRef || String(detail.customerRef) !== customerRef)) continue;
-      const eventCustomerId = String(detail.customerId || customerId || '').trim();
-      if (customerId && detail.customerId && eventCustomerId !== customerId) continue;
-      const candidate = normalizedVendorState({ ...detail, customerId: eventCustomerId });
-      if (candidate) result = earlierDuplicateVendorState(result, candidate);
-    } catch (_) { /* malformed authenticated evidence is ignored here; chain verification reports it */ }
-  }
-  return result;
-}
-
-function vendorStateIntegrityError() {
-  const error = new Error('shared vendor state is not anchored by matching audit evidence');
-  error.code = 'VENDOR_STATE_INTEGRITY';
-  return error;
-}
-
-function sameVendorState(left, right) {
-  return !!left && !!right && left.issuedAt === right.issuedAt
-    && left.contactAt === right.contactAt && left.status === right.status;
-}
-
-function lastVendorHeartbeat(customerId = '', customerRef = '') {
-  const wanted = String(customerId || '').trim();
-  const row = wanted ? vendorStateByCustomer.get(wanted) : latestVendorState.get();
-  const tableState = normalizedVendorState(row, wanted);
-  const auditState = vendorAuditState(wanted || (tableState && tableState.customerId) || '', customerRef);
-  if (!tableState) {
-    return auditState
-      ? { issuedAt: auditState.issuedAt, contactAt: auditState.contactAt, status: auditState.status }
-      : null;
-  }
-  if (!auditState || tableState.issuedAt > auditState.issuedAt
-      || (tableState.issuedAt === auditState.issuedAt && !sameVendorState(tableState, auditState))) {
-    throw vendorStateIntegrityError();
-  }
-  return { issuedAt: auditState.issuedAt, contactAt: auditState.contactAt, status: auditState.status };
-}
-
-function checkedVendorHeartbeat(input = {}) {
-  const state = normalizedVendorState(input);
-  if (!state) throw new TypeError('applyVendorHeartbeat requires a valid vendor state');
-  const customerRef = String(input.customerRef || '');
-  if (!/^license_[A-Za-z0-9_-]{24}$/.test(customerRef)) {
-    throw new TypeError('applyVendorHeartbeat requires an opaque customer reference');
-  }
-  if (!Array.isArray(input.audits) || !input.audits.length) {
-    throw new TypeError('applyVendorHeartbeat requires audit events');
-  }
-  const heartbeat = input.audits.find((event) => event && event.action === 'VENDOR_HEARTBEAT_OK');
-  if (!heartbeat) throw new TypeError('applyVendorHeartbeat requires heartbeat evidence');
-  let detail;
-  try { detail = JSON.parse(heartbeat.detail); } catch (_) { detail = null; }
-  const evidence = normalizedVendorState(detail, state.customerId);
-  if (!evidence || String(detail.customerRef || '') !== customerRef
-      || evidence.customerId !== state.customerId || evidence.issuedAt !== state.issuedAt
-      || evidence.contactAt !== state.contactAt || evidence.status !== state.status) {
-    throw new TypeError('vendor state and heartbeat evidence must match');
-  }
-  return { ...state, customerRef, audits: input.audits };
-}
-
-const applyVendorHeartbeat = sdb.transaction((input) => {
-  const candidate = checkedVendorHeartbeat(input);
-  const changed = normalizedVendorState(vendorStateCas.get(candidate), candidate.customerId);
-  // The row upsert serializes this customer across SQLite processes and
-  // Postgres replicas. Hold the audit lock while reconciling pre-v9 evidence
-  // and appending. Pre-v9 processes do not read this row and must be drained
-  // before migration 9 is enabled (see CONNECTED_DEPLOYMENT.md).
-  if (typeof sdb.lockAuditAppend === 'function') sdb.lockAuditAppend();
-  requireAuditMutationReady();
-  const auditState = vendorAuditState(candidate.customerId, candidate.customerRef);
-  if (auditState && auditState.issuedAt >= candidate.issuedAt) {
-    vendorStateReplace.run({ ...auditState, customerId: candidate.customerId });
-    return { applied: false, state: { ...auditState, customerId: candidate.customerId }, audits: [] };
-  }
-  if (!changed) {
-    const tableState = normalizedVendorState(vendorStateByCustomer.get(candidate.customerId), candidate.customerId);
-    if (!auditState || !tableState || tableState.issuedAt > auditState.issuedAt
-        || (tableState.issuedAt === auditState.issuedAt && !sameVendorState(tableState, auditState))) {
-      throw vendorStateIntegrityError();
+function connectedEntitlementStore() {
+  const binding = connectedScopeFromEnv();
+  if (connectedEntitlements) {
+    if (binding.customerId !== connectedEntitlementBinding.customerId
+        || binding.deploymentId !== connectedEntitlementBinding.deploymentId) {
+      const error = new Error('connected entitlement deployment identity changed after initialization');
+      error.code = 'CONNECTED_ENTITLEMENT_SCOPE_CHANGED';
+      throw error;
     }
-    if (auditState.issuedAt > tableState.issuedAt) {
-      vendorStateReplace.run({ ...auditState, customerId: candidate.customerId });
-    }
-    return { applied: false, state: { ...auditState, customerId: candidate.customerId }, audits: [] };
+    return connectedEntitlements;
   }
-  const audits = candidate.audits.map((event) => appendAuditRecord(event));
-  return { applied: true, state: changed, audits };
-});
+  connectedEntitlementBinding = binding;
+  connectedEntitlements = createConnectedEntitlementStore({
+    ...binding,
+    driver: sdb,
+    appendAudit: appendAuditRecord,
+    authorityReference: (customerId, deploymentId) => connectedReference(
+      'redactwall.connected-authority-reference.v1',
+      `${customerId}\0${deploymentId}`,
+      'connected_',
+    ),
+    ackReference: (ackId) => connectedReference(
+      'redactwall.connected-ack-reference.v1',
+      ackId,
+      'connected_ack_',
+    ),
+    verifyAuditState: () => auditAnchor.advanceCheckpoint(sdb),
+    verifyAuditEntry: (entry) => auditAnchor.verifyAuthenticatedEntry(entry),
+    verificationKeys: connectedVerificationKeys,
+    offlinePublicKey: connectedOfflinePublicKey,
+    compositeCoordinator: connectedHeartbeatTransactionCoordinator,
+  });
+  return connectedEntitlements;
+}
+
+function connectedScopeFromEnv() {
+  return connectedLicenseConfig.connectedScopeFromEnv(process.env, stateConnectedScopeProbe);
+}
+
+function stateConnectedScopeProbe(customerId, deploymentId) {
+  return require('./connected-entitlement-state').initialState(customerId, deploymentId);
+}
+
+function connectedReference(domain, value, prefix) {
+  const authenticated = auditAnchor.authenticate(ZERO, { domain, value: String(value || '') });
+  return `${prefix}${authenticated.mac.slice(0, 48)}`;
+}
+
+function connectedVerificationKeys() {
+  return connectedLicenseConfig.connectedVerificationKeys(process.env);
+}
+
+function connectedOfflinePublicKey() {
+  return connectedLicenseConfig.connectedOfflinePublicKey(process.env);
+}
+
+function connectedPublicKey(pemName, base64Name) {
+  return connectedLicenseConfig.connectedPublicKey(process.env, pemName, base64Name);
+}
+
+function publicKeyFingerprint(value) {
+  return connectedLicenseConfig.publicKeyFingerprint(value);
+}
+
+function applyConnectedEntitlement(input) {
+  return connectedEntitlementStore().applyEntitlement(input);
+}
+
+function recordConnectedEntitlementFailure(input) {
+  return connectedHeartbeatApplyStore().recordFailure(input);
+}
+
+function connectedEntitlementState(customerId, deploymentId) {
+  return connectedEntitlementStore().getState(customerId, deploymentId);
+}
+
+function connectedEntitlementDisposition(customerId, deploymentId, input) {
+  return connectedEntitlementStore().disposition(customerId, deploymentId, input);
+}
+
+function pendingConnectedAcknowledgements(input) {
+  return connectedHeartbeatApplyStore().listPendingAcknowledgements(input);
+}
+
+function connectedAcknowledgementHealth(customerId, deploymentId) {
+  return connectedHeartbeatApplyStore().acknowledgementHealth(customerId, deploymentId);
+}
+
+function recordConnectedAcknowledgementResult(input) {
+  return connectedHeartbeatApplyStore().recordAckResult(input);
+}
+
+// Connected online-registry authority. This is a second monotonic domain, not
+// an alias for entitlementVersion. The store verifies the exact v2 signed
+// verdict inside the state transaction and anchors its high-water to the same
+// tamper-evident customer audit boundary.
+let connectedOnlineRegistry = null;
+let connectedOnlineRegistryBinding = null;
+
+function connectedOnlineRegistryStore() {
+  const binding = connectedScopeFromEnv();
+  if (connectedOnlineRegistry) {
+    if (binding.customerId !== connectedOnlineRegistryBinding.customerId
+        || binding.deploymentId !== connectedOnlineRegistryBinding.deploymentId) {
+      const error = new Error('connected online registry identity changed after initialization');
+      error.code = 'CONNECTED_REGISTRY_SCOPE_CHANGED';
+      throw error;
+    }
+    return connectedOnlineRegistry;
+  }
+  connectedOnlineRegistryBinding = binding;
+  connectedOnlineRegistry = createConnectedOnlineRegistryStore({
+    ...binding,
+    driver: sdb,
+    appendAudit: appendAuditRecord,
+    registryReference: (customerId, deploymentId) => connectedReference(
+      'redactwall.connected-registry-reference.v1',
+      `${customerId}\0${deploymentId}`,
+      'connected_registry_',
+    ),
+    verifyAuditState: () => auditAnchor.advanceCheckpoint(sdb),
+    verifyAuditEntry: (entry) => auditAnchor.verifyAuthenticatedEntry(entry),
+    verifyVerdict: verifyConnectedOnlineVerdict,
+    compositeCoordinator: connectedHeartbeatTransactionCoordinator,
+  });
+  return connectedOnlineRegistry;
+}
+
+function verifyConnectedOnlineVerdict(text) {
+  const config = connectedOnlineVerdictKeys();
+  return onlineVerdict.verifySignedOnlineVerdict(text, config.keyring, {
+    forbiddenPublicKeyFingerprints: config.forbiddenPublicKeyFingerprints,
+  });
+}
+
+function connectedOnlineVerdictKeys() {
+  const current = connectedPublicKey(
+    'REDACTWALL_LICENSE_VERDICT_PUBLIC_KEY',
+    'REDACTWALL_LICENSE_VERDICT_PUBLIC_KEY_B64',
+  );
+  if (!current) {
+    const error = new Error('connected online-verdict public key is not configured');
+    error.code = 'CONNECTED_REGISTRY_KEY_REQUIRED';
+    throw error;
+  }
+  const keyring = new Map([[onlineVerdict.keyIdForPublicKey(current), current]]);
+  const next = connectedPublicKey(
+    'REDACTWALL_LICENSE_VERDICT_NEXT_PUBLIC_KEY',
+    'REDACTWALL_LICENSE_VERDICT_NEXT_PUBLIC_KEY_B64',
+  );
+  if (next) {
+    const nextKeyId = onlineVerdict.keyIdForPublicKey(next);
+    if (keyring.has(nextKeyId)) {
+      const error = new Error('connected online-verdict current and next keys must differ');
+      error.code = 'CONNECTED_REGISTRY_KEY_ID_DUPLICATE';
+      throw error;
+    }
+    keyring.set(nextKeyId, next);
+  }
+  const forbidden = connectedOnlineForbiddenFingerprints();
+  return { keyring, forbiddenPublicKeyFingerprints: forbidden };
+}
+
+function connectedOnlineForbiddenFingerprints() {
+  const keys = [
+    connectedOfflinePublicKey(),
+    connectedPublicKey('REDACTWALL_ENTITLEMENT_PUBLIC_KEY', 'REDACTWALL_ENTITLEMENT_PUBLIC_KEY_B64'),
+    connectedPublicKey(
+      'REDACTWALL_ENTITLEMENT_NEXT_PUBLIC_KEY', 'REDACTWALL_ENTITLEMENT_NEXT_PUBLIC_KEY_B64',
+    ),
+  ].filter(Boolean);
+  return keys.map((value) => publicKeyFingerprint(value));
+}
+
+function applyConnectedOnlineVerdict(input) {
+  return connectedOnlineRegistryStore().applyVerdict(input);
+}
+
+function connectedOnlineRegistryState(customerId, deploymentId) {
+  return connectedOnlineRegistryStore().getState(customerId, deploymentId);
+}
+
+function connectedOnlineRegistryGeneration(customerId, deploymentId) {
+  return connectedOnlineRegistryStore().registryGeneration(customerId, deploymentId);
+}
+
+function connectedOnlineRegistryDisposition(customerId, deploymentId, entitlementDisposition) {
+  return connectedOnlineRegistryStore().disposition(
+    customerId, deploymentId, entitlementDisposition,
+  );
+}
+
+let connectedAcknowledgedAuthorities = null;
+let connectedAcknowledgedAuthorityBinding = null;
+
+function connectedAcknowledgedAuthorityStore() {
+  const binding = connectedScopeFromEnv();
+  if (connectedAcknowledgedAuthorities) {
+    if (binding.customerId !== connectedAcknowledgedAuthorityBinding.customerId
+        || binding.deploymentId !== connectedAcknowledgedAuthorityBinding.deploymentId) {
+      const error = new Error('connected acknowledged authority identity changed after initialization');
+      error.code = 'CONNECTED_ACKNOWLEDGED_AUTHORITY_SCOPE_CHANGED';
+      throw error;
+    }
+    return connectedAcknowledgedAuthorities;
+  }
+  connectedAcknowledgedAuthorityBinding = binding;
+  connectedAcknowledgedAuthorities = createConnectedAcknowledgedAuthorityStore({
+    ...binding,
+    driver: sdb,
+    entitlementStore: connectedEntitlementStore(),
+    appendAudit: appendAuditRecord,
+    authorityReference: (customerId, deploymentId) => connectedReference(
+      'redactwall.connected-acknowledged-authority-reference.v1',
+      `${customerId}\0${deploymentId}`,
+      'connected_ack_authority_',
+    ),
+    ackReference: (ackId) => connectedReference(
+      'redactwall.connected-ack-reference.v1',
+      ackId,
+      'connected_ack_',
+    ),
+    verifyAuditState: () => auditAnchor.advanceCheckpoint(sdb),
+    verifyAuditEntry: (entry) => auditAnchor.verifyAuthenticatedEntry(entry),
+    compositeCoordinator: connectedHeartbeatTransactionCoordinator,
+  });
+  return connectedAcknowledgedAuthorities;
+}
+
+// The heartbeat response carries two independently signed authorities. The
+// outer transaction below is the only production boundary allowed to accept
+// them together, so a failure in either verifier, high-water transition, ACK
+// enqueue, or audit append rolls back the complete response.
+let connectedHeartbeatApplications = null;
+
+function connectedHeartbeatApplyStore() {
+  if (connectedHeartbeatApplications) return connectedHeartbeatApplications;
+  connectedHeartbeatApplications = createConnectedHeartbeatApplyStore({
+    driver: sdb,
+    entitlementStore: connectedEntitlementStore(),
+    registryStore: connectedOnlineRegistryStore(),
+    acknowledgedAuthorityStore: connectedAcknowledgedAuthorityStore(),
+    verifyAuditState: () => auditAnchor.advanceCheckpoint(sdb),
+    coordinator: connectedHeartbeatTransactionCoordinator,
+  });
+  return connectedHeartbeatApplications;
+}
+
+function applyConnectedHeartbeatResponse(input) {
+  return connectedHeartbeatApplyStore().applyHeartbeatResponse(input);
+}
+
+function connectedHeartbeatState(customerId, deploymentId) {
+  return connectedHeartbeatApplyStore().getState(customerId, deploymentId);
+}
+
+function connectedLicensingDisposition(customerId, deploymentId, input) {
+  return connectedHeartbeatApplyStore().disposition(customerId, deploymentId, input);
+}
+
+function connectedEntitlementVersion(customerId, deploymentId) {
+  return connectedHeartbeatApplyStore().entitlementVersion(customerId, deploymentId);
+}
+
+// Customer diagnostics share the customer datastore and its transaction
+// boundary, but use a purpose-separated customer-local integrity authority.
+// The storage facade itself has no key material and can therefore be reused by
+// runtime restarts without copying diagnostic payloads into another store.
+let customerDiagnostics = null;
+function customerDiagnosticStorage() {
+  if (!customerDiagnostics) {
+    const latestMainAuditCheckpoint = sdb.prepare(`SELECT entry FROM audit
+      WHERE diagnostic_checkpoint_ref = ? ORDER BY seq DESC LIMIT 1`);
+    customerDiagnostics = createCustomerDiagnosticStorage({
+      driver: sdb,
+      driverKind: DRIVER_KIND,
+      appendMainAudit: appendAuditRecord,
+      checkpointReference: ({ customerId, deploymentId }) => connectedReference(
+        'redactwall.customer-diagnostic-checkpoint-reference.v1',
+        `${customerId}\0${deploymentId}`,
+        'diagnostic_checkpoint_',
+      ),
+      loadMainAuditCheckpoint: ({ checkpointRef }) => {
+        const row = latestMainAuditCheckpoint.get(checkpointRef);
+        return row ? JSON.parse(row.entry) : null;
+      },
+      verifyMainAudit: () => auditAnchor.advanceCheckpoint(sdb),
+      verifyMainAuditEntry: (entry) => auditAnchor.verifyAuthenticatedEntry(entry),
+    });
+  }
+  return customerDiagnostics;
+}
 
 function firstAuditAt() {
   const row = sdb.prepare('SELECT ts FROM audit ORDER BY seq ASC LIMIT 1').get();
@@ -2002,7 +2200,16 @@ module.exports = {
   getAiApp, listAiApps, upsertAiApp,
   listAiUseCases, upsertAiUseCase, reviewAiUseCase,
   listAiIncidents, createAiIncident, setAiIncidentStatus, lastAuditActionAt,
-  applyVendorHeartbeat, lastBoardTrainingAttestation, lastVendorHeartbeat, firstAuditAt,
+  lastBoardTrainingAttestation, firstAuditAt,
+  recordConnectedEntitlementFailure,
+  connectedEntitlementState,
+  pendingConnectedAcknowledgements, connectedAcknowledgementHealth,
+  recordConnectedAcknowledgementResult,
+  connectedOnlineRegistryState,
+  connectedOnlineRegistryGeneration,
+  applyConnectedHeartbeatResponse, connectedHeartbeatState,
+  connectedLicensingDisposition, connectedEntitlementVersion,
+  customerDiagnosticStorage,
   recordDelivery, listDeliveries, recentDeliverySuccess,
   setTenantContext,
   _canonical: canonical, _db: sdb, _dbPath: DB_PATH, _driverKind: DRIVER_KIND,
@@ -2015,5 +2222,14 @@ module.exports = {
     parsePostureActionDetail,
     POSTURE_ACTION_AUDIT,
     wireTenantContext,
+    connectedScopeFromEnv,
+    connectedVerificationKeys,
+    publicKeyFingerprint,
+    ...(process.env.NODE_ENV === 'test' ? {
+      applyConnectedEntitlement,
+      applyConnectedOnlineVerdict,
+      connectedEntitlementDisposition,
+      connectedOnlineRegistryDisposition,
+    } : {}),
   },
 };

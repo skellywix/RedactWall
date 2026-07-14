@@ -18,6 +18,8 @@ const privatePaths = require('../private-path');
 const SQLITE_SIDECAR_SUFFIXES = ['-wal', '-shm', '-journal'];
 const SQLITE_INITIALIZATION_LOCK_TIMEOUT_MS = 60_000;
 const POSTGRES_MIGRATION_LOCK = 4021989;
+const AUDIT_COMMIT_UNCERTAIN_ERRORS = new WeakSet();
+const AUDIT_IMMEDIATE_TRANSACTION_RUNNERS = new WeakSet();
 
 function restrictPrivatePath(target, options = {}) {
   return privatePaths.restrictPrivatePath(target, {
@@ -197,7 +199,9 @@ function openStore({ env = process.env, dataDir, createPgDriver, sqliteSecurity 
 
 function tableExists(driver, kind, table) {
   if (kind === 'postgres') {
-    const row = driver.prepare('SELECT to_regclass(?) AS reg').get(table);
+    const row = driver.prepare(
+      "SELECT pg_catalog.to_regclass('public.' || ?) AS reg",
+    ).get(table);
     return !!(row && row.reg);
   }
   const row = driver.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(table);
@@ -210,7 +214,8 @@ function baselineTables(kind) {
 
 function migrationApplied(driver, kind, version) {
   if (!tableExists(driver, kind, 'schema_migrations')) return false;
-  return !!driver.prepare('SELECT version FROM schema_migrations WHERE version = ?').get(version);
+  const ledger = kind === 'postgres' ? 'public.schema_migrations' : 'schema_migrations';
+  return !!driver.prepare(`SELECT version FROM ${ledger} WHERE version = ?`).get(version);
 }
 
 /**
@@ -219,16 +224,19 @@ function migrationApplied(driver, kind, version) {
  * version instead of re-running it.
  */
 function runMigrationsUnlocked(driver, kind, options = {}) {
+  const ledger = kind === 'postgres' ? 'public.schema_migrations' : 'schema_migrations';
   driver.exec(`
-    CREATE TABLE IF NOT EXISTS schema_migrations (
+    CREATE TABLE IF NOT EXISTS ${ledger} (
       version   INTEGER PRIMARY KEY,
       name      TEXT NOT NULL,
       appliedAt TEXT NOT NULL
     );
   `);
-  const appliedRows = driver.prepare('SELECT version FROM schema_migrations').all();
+  const appliedRows = driver.prepare(`SELECT version FROM ${ledger}`).all();
   const applied = new Set(appliedRows.map((row) => Number(row.version)));
-  const record = driver.prepare('INSERT INTO schema_migrations (version, name, appliedAt) VALUES (?, ?, ?)');
+  const record = driver.prepare(
+    `INSERT INTO ${ledger} (version, name, appliedAt) VALUES (?, ?, ?)`,
+  );
 
   if (!applied.size && tableExists(driver, kind, 'queries')) {
     record.run(1, 'baseline', new Date().toISOString());
@@ -266,6 +274,10 @@ function runMigrationsUnlocked(driver, kind, options = {}) {
 function runMigrations(driver, kind, options = {}) {
   if (kind !== 'postgres') return runMigrationsUnlocked(driver, kind, options);
   return driver.transaction(() => {
+    // Never inherit a connection-string, role, or caller search_path for DDL.
+    // The exact public customer schema is the only creation namespace, while
+    // pg_catalog remains available only for built-in resolution.
+    driver.exec('SET LOCAL search_path = public, pg_catalog, pg_temp');
     driver.prepare('SELECT pg_advisory_xact_lock(?)').get(POSTGRES_MIGRATION_LOCK);
     return runMigrationsUnlocked(driver, kind, options);
   })();
@@ -304,7 +316,7 @@ function installAuditTransactionProtocol(driver, anchor) {
       return result;
     });
 
-    return (...args) => {
+    const auditAwareRunner = (...args) => {
       const frame = { outer: frames.length === 0, entries: [], prepared: false };
       frames.push(frame);
       try {
@@ -324,20 +336,42 @@ function installAuditTransactionProtocol(driver, anchor) {
           frames[frames.length - 1].entries.push(...frame.entries);
         }
         return result;
-      } catch (error) {
+      } catch (caught) {
         frames.pop();
+        let error = caught;
         if (frame.outer && frame.prepared) {
           // The transaction callback already completed and its durable pending
           // record was published. A later error is a COMMIT-phase outcome
           // ambiguity: the server may have applied COMMIT and lost only the
           // response. Never erase the high-water without conclusive rollback
           // proof, or a deleted committed tail could be hidden on restart.
+          if (!error || (typeof error !== 'object' && typeof error !== 'function')) {
+            error = new Error('audit transaction COMMIT outcome is uncertain', { cause: caught });
+          }
+          AUDIT_COMMIT_UNCERTAIN_ERRORS.add(error);
           try { anchor.transactionCommitUncertain(driver); }
-          catch (uncertainError) { error.auditCommitUncertainError = uncertainError; }
+          catch (uncertainError) {
+            if (error && (typeof error === 'object' || typeof error === 'function')) {
+              try {
+                Object.defineProperty(error, 'auditCommitUncertainCause', {
+                  value: uncertainError,
+                  configurable: true,
+                });
+              } catch { /* Preserve frozen and non-extensible original errors. */ }
+            }
+          }
         }
         throw error;
       }
     };
+    // A caller that must hold one SQLite snapshot across multiple reads needs
+    // evidence that this adapter will take the native BEGIN IMMEDIATE path.
+    // Do not mark generic transaction implementations: Postgres must instead
+    // prove coordination with its transaction-scoped audit advisory lock.
+    if (typeof nativeTransaction.immediate === 'function') {
+      AUDIT_IMMEDIATE_TRANSACTION_RUNNERS.add(auditAwareRunner);
+    }
+    return auditAwareRunner;
   };
 
   return function recordAuditEntry(entry) {
@@ -347,11 +381,22 @@ function installAuditTransactionProtocol(driver, anchor) {
   };
 }
 
+function isAuditCommitUncertainError(value) {
+  return Boolean(value && (typeof value === 'object' || typeof value === 'function')
+    && AUDIT_COMMIT_UNCERTAIN_ERRORS.has(value));
+}
+
+function isAuditImmediateTransactionRunner(value) {
+  return Boolean(value && AUDIT_IMMEDIATE_TRANSACTION_RUNNERS.has(value));
+}
+
 module.exports = {
   openStore,
   runMigrations,
   migrationApplied,
   installAuditTransactionProtocol,
+  isAuditCommitUncertainError,
+  isAuditImmediateTransactionRunner,
   MIGRATIONS,
   _internal: {
     SQLITE_INITIALIZATION_LOCK_TIMEOUT_MS,
@@ -360,5 +405,7 @@ module.exports = {
     restrictSqliteArtifacts,
     sqliteArtifactPaths,
     installAuditTransactionProtocol,
+    isAuditCommitUncertainError,
+    isAuditImmediateTransactionRunner,
   },
 };

@@ -20,6 +20,7 @@ process.env.REDACTWALL_SECRET = 'unit-secret-stable';
 process.env.INGEST_API_KEY = 'unit-ingest-key';
 process.env.REDACTWALL_LICENSE_PUBLIC_KEY = PUB;
 process.env.REDACTWALL_LICENSE_CUSTOMER_ID = 'cu-1';
+delete process.env.REDACTWALL_LICENSE_MANAGED_EXTERNALLY;
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pw-license-api-'));
 const licenseDir = path.join(tmp, 'license');
 require('../server/private-path').withPrivateDirectoryMutationLockSync(licenseDir, () => {}, {
@@ -38,8 +39,6 @@ fs.writeFileSync(process.env.REDACTWALL_POLICY_PATH, JSON.stringify({ enforcemen
 const app = require('../server/app');
 const db = require('../server/db');
 const license = require('../server/license');
-const vendorLink = require('../server/vendor-link');
-const { opaqueReference } = require('../server/audit-reference');
 const { listen } = require('./support/listen');
 
 test.after(() => { try { db._db.close(); } catch {} fs.rmSync(tmp, { recursive: true, force: true }); });
@@ -103,7 +102,8 @@ test('past-grace license makes config read-only but never disables the security 
     assert.strictEqual((await blocked.json()).error, 'license_readonly', apiPath);
   }
 
-  // 4) Installing a fresh valid license clears readonly (the install route is never gated).
+  // 4) Installing a fresh valid license clears readonly unless the deployment
+  // explicitly delegates license mutation to an external durable workflow.
   const install = await jsonFetch(port, '/api/admin/license/install', {
     headers: { cookie, 'x-csrf-token': csrfToken },
     body: { license: signLicense(), reason: 'restore licensed administration' },
@@ -119,6 +119,62 @@ test('past-grace license makes config read-only but never disables the security 
   // 6) No raw license text leaks into audit entries.
   const audit = await (await fetch(`http://127.0.0.1:${port}/api/audit`, { headers: { cookie } })).json();
   assert.ok(!JSON.stringify(audit).includes('.'.repeat(0) + signLicense().slice(0, 30)), 'no raw license material in audit');
+});
+
+test('externally managed deployments expose their source of truth and reject both in-app license installers', async (t) => {
+  const originalBytes = fs.existsSync(process.env.REDACTWALL_LICENSE_PATH)
+    ? fs.readFileSync(process.env.REDACTWALL_LICENSE_PATH)
+    : null;
+  const parkedLicense = `${process.env.REDACTWALL_LICENSE_PATH}.managed-readiness-test`;
+  fs.writeFileSync(process.env.REDACTWALL_LICENSE_PATH, signLicense());
+  license.refresh();
+  process.env.REDACTWALL_LICENSE_MANAGED_EXTERNALLY = 'true';
+  t.after(() => {
+    if (fs.existsSync(parkedLicense)) fs.rmSync(parkedLicense, { force: true });
+    if (originalBytes === null) fs.rmSync(process.env.REDACTWALL_LICENSE_PATH, { force: true });
+    else fs.writeFileSync(process.env.REDACTWALL_LICENSE_PATH, originalBytes);
+    delete process.env.REDACTWALL_LICENSE_MANAGED_EXTERNALLY;
+    license.refresh();
+  });
+  const beforeBytes = fs.existsSync(process.env.REDACTWALL_LICENSE_PATH)
+    ? fs.readFileSync(process.env.REDACTWALL_LICENSE_PATH)
+    : null;
+  const beforeStatus = license.status();
+
+  const server = await listen(app);
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const { port } = server.address();
+  const { cookie, csrfToken } = await login(port);
+  const status = await (await fetch(`http://127.0.0.1:${port}/api/billing/license`, { headers: { cookie } })).json();
+  assert.strictEqual(status.managedExternally, true);
+
+  for (const [apiPath, body] of [
+    ['/api/admin/license/install', { license: signLicense({ seats: 60 }), reason: 'must use immutable AWS secret version' }],
+    ['/api/billing/license', { license: signLicense({ seats: 60 }) }],
+  ]) {
+    const response = await jsonFetch(port, apiPath, {
+      headers: { cookie, 'x-csrf-token': csrfToken },
+      body,
+    });
+    assert.strictEqual(response.status, 409, apiPath);
+    assert.strictEqual((await response.json()).error, 'license_managed_externally', apiPath);
+  }
+  const afterBytes = fs.existsSync(process.env.REDACTWALL_LICENSE_PATH)
+    ? fs.readFileSync(process.env.REDACTWALL_LICENSE_PATH)
+    : null;
+  assert.deepStrictEqual(afterBytes, beforeBytes);
+  assert.deepStrictEqual(license.status(), beforeStatus);
+
+  assert.ok(beforeBytes, 'managed-license readiness regression requires an installed license');
+  fs.renameSync(process.env.REDACTWALL_LICENSE_PATH, parkedLicense);
+  const missingReady = await fetch(`http://127.0.0.1:${port}/readyz`);
+  assert.strictEqual(missingReady.status, 503);
+  const missingStatus = await (await fetch(`http://127.0.0.1:${port}/api/billing/license`, { headers: { cookie } })).json();
+  assert.strictEqual(missingStatus.state, 'readonly');
+  assert.match(missingStatus.reason, /^managed_license_/);
+  assert.strictEqual(license.entitled('ncua_readiness'), false);
+  fs.renameSync(parkedLicense, process.env.REDACTWALL_LICENSE_PATH);
+  license.refresh();
 });
 
 test('license file and in-memory state roll back when immutable install audit fails', async (t) => {
@@ -155,160 +211,30 @@ test('license file and in-memory state roll back when immutable install audit fa
   assert.ok(!db.listAudit(100).some((entry) => entry.action === 'LICENSE_INSTALLED' && /seats=99/.test(entry.detail || '')));
 });
 
-test('vendor revocation fail-closed-blocks ingest but never disables evidence export', async (t) => {
-  license.refresh({ readFile: () => signLicense(), now: Date.now() });
-  license.applyVendorVerdict(true, { appendAudit: (r) => db.appendAudit(r) });
-  t.after(() => license.applyVendorVerdict(false));
-  assert.strictEqual(license.status().state, 'revoked');
-  assert.strictEqual(license.publicStatus().reason, 'vendor_revoked');
-
-  const server = await listen(app);
-  t.after(() => new Promise((r) => server.close(r)));
-  const { port } = server.address();
-  const { cookie, csrfToken } = await login(port);
-
-  // 1) EVERY sensor ingest path is fail-closed-blocked with a DISTINCT status
-  //    (not an outage) — gate, scan-file, scan-response, heartbeat, discovery,
-  //    and token rehydration.
-  const key = { 'x-api-key': 'unit-ingest-key' };
-  const revokedTenant = 'revoked-tenant';
-  const nativeGateBody = {
-    prompt: 'anything at all',
-    user: 'u@cu.org',
-    destination: 'chatgpt.com',
-    orgId: revokedTenant,
-    source: 'endpoint_agent',
-    channel: 'file_upload',
-    sensor: { name: 'endpoint_agent', version: '1.0.0', platform: 'test' },
-    idempotency: { scope: 'native_handoff_v1', key: 'e'.repeat(64) },
-  };
-  const gate = await jsonFetch(port, '/api/v1/gate', { headers: key, body: nativeGateBody });
-  assert.strictEqual(gate.status, 403);
-  const gateBody = await gate.json();
-  assert.strictEqual(gateBody.decision, 'block');
-  assert.strictEqual(gateBody.status, 'license_revoked');
-  assert.match(gateBody.id, /^q_/);
-  const gateRetry = await jsonFetch(port, '/api/v1/gate', { headers: key, body: nativeGateBody });
-  assert.strictEqual(gateRetry.status, 200);
-  const gateRetryBody = await gateRetry.json();
-  assert.strictEqual(gateRetryBody.id, gateBody.id);
-  assert.strictEqual(gateRetryBody.status, 'license_revoked');
-  assert.strictEqual(gateRetryBody.idempotentReplay, true);
-  assert.strictEqual(db.listAudit(500).filter((entry) => entry.queryId === gateBody.id).length, 1);
-
-  const scanFile = await jsonFetch(port, '/api/v1/scan-file', { headers: key, body: { filename: 'x.txt', contentBase64: Buffer.from('hi').toString('base64'), user: 'u@cu.org' } });
-  assert.strictEqual(scanFile.status, 403);
-  assert.strictEqual((await scanFile.json()).status, 'license_revoked');
-
-  const scanResp = await jsonFetch(port, '/api/v1/scan-response', { headers: key, body: { text: 'model reply', user: 'u@cu.org' } });
-  assert.strictEqual(scanResp.status, 403);
-
-  const hb = await jsonFetch(port, '/api/v1/heartbeat', { headers: key, body: { user: 'u@cu.org', checks: [] } });
-  assert.strictEqual(hb.status, 403);
-
-  const disc = await jsonFetch(port, '/api/v1/discovery', { headers: key, body: { sightings: [{ destination: 'chatgpt.com' }] } });
-  assert.strictEqual(disc.status, 403);
-
-  const rehydrate = await jsonFetch(port, '/api/v1/rehydrate', { headers: { ...key, 'x-release-token': 'x' }, body: { id: 'nonexistent', text: 't' } });
-  assert.strictEqual(rehydrate.status, 403);
-  assert.strictEqual((await rehydrate.json()).status, 'license_revoked');
-
-  // 2) Config writes are blocked with license_revoked.
-  const put = await jsonFetch(port, '/api/policy', { method: 'PUT', headers: { cookie, 'x-csrf-token': csrfToken }, body: { enforcementMode: 'warn' } });
-  assert.strictEqual(put.status, 403);
-  assert.strictEqual((await put.json()).error, 'license_revoked');
-
-  // 3) Evidence export STILL works — data protection is never disabled.
-  assert.strictEqual((await fetch(`http://127.0.0.1:${port}/api/export/evidence`, { headers: { cookie } })).status, 200);
-
-  // 4) A signed 'active' verdict clears the kill-switch and ingest resumes.
-  license.applyVendorVerdict(false, { appendAudit: (r) => db.appendAudit(r) });
-  const gate2 = await jsonFetch(port, '/api/v1/gate', { headers: { 'x-api-key': 'unit-ingest-key' }, body: { prompt: 'benign text', user: 'u@cu.org', destination: 'chatgpt.com' } });
-  assert.strictEqual(gate2.status, 200);
-
-  // 5) The revocation is recorded prompt-free in the audit chain.
-  const audit = await (await fetch(`http://127.0.0.1:${port}/api/audit`, { headers: { cookie } })).json();
-  const auditWire = JSON.stringify(audit);
-  assert.ok(auditWire.includes('LICENSE_REVOKED_BLOCK'));
-  assert.match(auditWire, /tenantRef=tenant_[A-Za-z0-9_-]{24}/);
-  assert.ok(!auditWire.includes(revokedTenant), 'audit detail stores only an opaque tenant reference');
-  assert.strictEqual(db.verifyAuditChain().ok, true);
-});
-
-test('the next authorization request adopts a newer revocation committed by another replica', async (t) => {
-  const previousUrl = process.env.REDACTWALL_LICENSE_SERVER_URL;
-  const previousToken = process.env.REDACTWALL_LICENSE_SERVER_TOKEN;
-  process.env.REDACTWALL_LICENSE_SERVER_URL = 'https://license.example.test/heartbeat';
-  process.env.REDACTWALL_LICENSE_SERVER_TOKEN = 'rwls_replica_request_test_0123456789abcdef';
-  license.refresh({ readFile: () => signLicense(), now: Date.now() });
-  license.applyVendorVerdict(false);
-  license.setVendorStale(false);
-  vendorLink._internal.reset();
+test('historical vendor-license rows cannot authorize or revoke offline decisions', (t) => {
+  const customerId = 'cu-inert-vendor-row';
+  const row = db._db.prepare(`
+    INSERT INTO vendor_license_state ("customerId", "issuedAt", "contactAt", status)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT("customerId") DO UPDATE SET
+      "issuedAt" = excluded."issuedAt", "contactAt" = excluded."contactAt", status = excluded.status
+  `);
   t.after(() => {
-    if (previousUrl === undefined) delete process.env.REDACTWALL_LICENSE_SERVER_URL;
-    else process.env.REDACTWALL_LICENSE_SERVER_URL = previousUrl;
-    if (previousToken === undefined) delete process.env.REDACTWALL_LICENSE_SERVER_TOKEN;
-    else process.env.REDACTWALL_LICENSE_SERVER_TOKEN = previousToken;
-    license.applyVendorVerdict(false);
-    license.setVendorStale(false);
-    vendorLink._internal.reset();
+    db._db.prepare('DELETE FROM vendor_license_state WHERE "customerId" = ?').run(customerId);
+    license.refresh({ readFile: () => { throw new Error('none'); } });
   });
 
-  const issuedAt = Date.now();
-  const customerId = 'cu-1';
-  const customerRef = opaqueReference('license', customerId);
-  const state = { customerId, customerRef, issuedAt, contactAt: issuedAt, status: 'revoked' };
-  const committed = db.applyVendorHeartbeat({
-    ...state,
-    audits: [{
-      action: 'VENDOR_HEARTBEAT_OK',
-      actor: 'vendor',
-      detail: JSON.stringify({ customerRef, issuedAt, contactAt: issuedAt, status: 'revoked' }),
-    }],
-  });
-  assert.strictEqual(committed.applied, true);
-  assert.strictEqual(license.isRevoked(), false, 'replica B is still locally active before its next request');
+  license.refresh({ readFile: () => { throw new Error('none'); }, now: Date.now() });
+  assert.strictEqual(license.status().state, 'unlicensed');
+  row.run(customerId, 1, 1, 'active');
+  assert.strictEqual(license.status().state, 'unlicensed', 'an old active row grants nothing');
 
-  const server = await listen(app);
-  t.after(() => new Promise((resolve) => server.close(resolve)));
-  const { port } = server.address();
-  const gate = await jsonFetch(port, '/api/v1/gate', {
-    headers: { 'x-api-key': 'unit-ingest-key' },
-    body: { prompt: 'benign text', user: 'replica-b@cu.test', destination: 'chatgpt.com' },
-  });
-  assert.strictEqual(gate.status, 403);
-  assert.strictEqual((await gate.json()).status, 'license_revoked');
-  assert.strictEqual(license.publicStatus().reason, 'vendor_revoked');
-});
-
-test('boot restore failure is fail-closed before the first ingest', async (t) => {
-  const previousUrl = process.env.REDACTWALL_LICENSE_SERVER_URL;
-  const originalReader = db.lastVendorHeartbeat;
-  process.env.REDACTWALL_LICENSE_SERVER_URL = 'https://license.example.test/heartbeat';
   license.refresh({ readFile: () => signLicense(), now: Date.now() });
-  license.applyVendorVerdict(false);
-  license.setVendorStale(false);
-  db.lastVendorHeartbeat = () => { throw new Error('synthetic shared-state read failure'); };
-  app._internal.runVendorRestore();
-  assert.strictEqual(license.isRevoked(), true);
-  assert.strictEqual(license.publicStatus().reason, 'vendor_unreachable');
-  t.after(() => {
-    db.lastVendorHeartbeat = originalReader;
-    if (previousUrl === undefined) delete process.env.REDACTWALL_LICENSE_SERVER_URL;
-    else process.env.REDACTWALL_LICENSE_SERVER_URL = previousUrl;
-    license.applyVendorVerdict(false);
-    license.setVendorStale(false);
-  });
-
-  const server = await listen(app);
-  t.after(() => new Promise((resolve) => server.close(resolve)));
-  const { port } = server.address();
-  const gate = await jsonFetch(port, '/api/v1/gate', {
-    headers: { 'x-api-key': 'unit-ingest-key' },
-    body: { prompt: 'benign text', user: 'restore-failure@cu.test', destination: 'chatgpt.com' },
-  });
-  assert.strictEqual(gate.status, 403);
-  assert.strictEqual((await gate.json()).status, 'license_revoked');
+  assert.strictEqual(license.status().state, 'active');
+  row.run(customerId, 2, 2, 'revoked');
+  assert.strictEqual(license.status().state, 'active', 'an old revoked row cannot override the signed file');
+  assert.strictEqual(db.applyVendorHeartbeat, undefined);
+  assert.strictEqual(db.lastVendorHeartbeat, undefined);
 });
 
 test('invalid license install is rejected with a reason and audited', async (t) => {

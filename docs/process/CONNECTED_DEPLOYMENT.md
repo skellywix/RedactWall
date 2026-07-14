@@ -1,129 +1,174 @@
 # Connected Deployment (Vendor-Managed SKU)
 
-RedactWall ships in two deployment modes. This guide covers the **connected**
-mode; the default remains fully air-gapped.
+RedactWall production customer silos use the **connected** mode. An offline
+artifact remains secondary, deployment-bound outage authority. Offline mode is
+limited to local development and explicit legacy compatibility; it does not
+pass customer production preflight.
 
-| | Air-gapped (default) | Connected (opt-in) |
+| | Offline-only | Connected production |
 |---|---|---|
-| License check | Offline Ed25519 file, no network | Offline file **plus** a signed vendor heartbeat |
-| Vendor egress | None (zero phone-home) | License heartbeat to your license server only |
-| Kill-switch | None | Vendor can revoke → all AI use blocked |
-| Seat reporting | Local only (`/api/billing/seats`) | Counts sent to the vendor on the heartbeat |
+| License check | Offline Ed25519 file, no network | Signed online registry verdict plus signed entitlement; offline artifact is bounded fallback only |
+| Vendor egress | None | Strict `POST /v1/heartbeat` and `POST /v1/acknowledgements` channels |
+| Vendor restriction | None | Pause/revoke blocks protected egress while local DLP, admin, and evidence stay online |
+| Seat reporting | Local only (`/api/billing/seats`) | Prompt-free aggregate counts in the strict heartbeat |
 | Second-layer scan | On-device only | Optional vendor-side scanner (`REDACTWALL_SEMANTIC_REMOTE_URL`) |
 
-Connected mode is **entirely opt-in**: with none of the env vars below set, a
-deployment behaves exactly as the air-gapped SKU. Nothing in connected mode
-ever fails open — a revoked or unreachable state blocks AI use (maximal data
-protection); it never disables detection.
+The customer protocol is implemented by `server/vendor-control-client.js`,
+`server/vendor-control-connector.js`, and `server/connected-license-runtime.js`.
+Its exact route, schema, key, replay, timeout, and ACK contract is frozen in
+`docs/reference/VENDOR_CONTROL_PROTOCOL.md`. The customer-local sensor health
+route `POST /api/v1/heartbeat` is separate and remains supported.
 
-## License heartbeat + kill-switch
+Nothing in connected mode fails open. Only a narrowly classified transport
+outage may enter the bounded offline fallback. A signed pause/revoke, invalid
+artifact, protocol rejection, replay, or integrity failure cannot use fallback.
 
-Set the license server URL to enable the daily heartbeat (`server/vendor-link.js`):
+## Removed legacy v1 heartbeat
 
-```
-REDACTWALL_LICENSE_SERVER_URL=https://license.yourvendor.example/heartbeat
-REDACTWALL_LICENSE_SERVER_TOKEN=<customer-specific-random-token>
-REDACTWALL_LICENSE_VERDICT_PUBLIC_KEY="-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----"
-REDACTWALL_LICENSE_SERVER_TIMEOUT_MS=8000   # optional, default 8000, max 30000
-```
+The former daily `server/vendor-link.js` client, shared
+`REDACTWALL_LICENSE_SERVER_TOKEN`, mutable license overlay, and unversioned
+vendor `/heartbeat` route are removed. Do not configure or restore them.
+
+Connected production uses an exact HTTPS origin in
+`REDACTWALL_LICENSE_SERVER_URL`; the client appends the frozen
+`/v1/heartbeat` or `/v1/acknowledgements` path for those channels. The current
+customer connector reserves `/v1/diagnostics` and
+`/v1/shadow-ai/candidates`, but those optional channels remain
+integration-gated until the committed Owner service freezes matching ingestion
+semantics. Connected production requires:
+
+- the vendor-issued `REDACTWALL_TENANT_ID` and immutable
+  `REDACTWALL_CONNECTED_DEPLOYMENT_ID` in the exact
+  `dep_<32 lowercase hex>` form;
+- distinct heartbeat and acknowledgement credentials, plus distinct optional
+  diagnostics and Shadow AI candidate credentials;
+- explicit diagnostics and Shadow AI consent booleans;
+- current online-verdict and entitlement Ed25519 public pins, optional next
+  pins, and full SPKI-fingerprint key IDs; and
+- the bounded heartbeat interval and total request timeout described in
+  `docs/reference/VENDOR_CONTROL_PROTOCOL.md`.
+
+Do not put a bearer credential, query, fragment, or route path in the configured
+origin. Do not reuse a credential or signing identity across purposes.
 
 ### Migrating an existing connected deployment
 
-The authenticated verdict protocol intentionally has no fallback to the former
-license-root-signed format. For an existing connected customer:
+The v2 protocol intentionally has no alias or key-identity fallback to v1. A
+legacy customer-only offline license is not a connected outage artifact. The
+Owner provisioning flow must issue a replacement whose signed payload includes
+the exact customer, exact active deployment, and `status: "active"`.
 
-1. Create the dedicated online verdict key, customer token registry, and a new
-   license-service endpoint without copying the offline private root.
-2. Upgrade the customer control plane to a build that supports the dedicated
-   verdict key.
-3. In one maintenance change, set the new URL, customer token, and verdict
-   public key, then restart and verify a fresh `VENDOR_HEARTBEAT_OK` audit row.
-4. Complete every customer migration inside the configured staleness window,
-   then retire the legacy endpoint and remove any offline root material that
-   was previously present on an online host.
+For an existing customer:
 
-Do not point an old control plane at the new service or configure the offline
-license public key as the verdict key. Both combinations fail closed by design.
+1. Create or recover the Owner enrollment for the exact customer and
+   deployment. Generate purpose-separated channel credentials and signing
+   identities. Never copy the offline private root into the online verdict or
+   license service.
+2. Drain every customer control-plane replica that predates the composite
+   connected-state migrations. Mixed old and new replicas are not supported.
+3. Install the exact connected origin, scope, channel credentials, consents,
+   current and optional next public pins, and the new deployment-bound outage
+   artifact through the managed deployment workflow.
+4. Start one upgraded replica so it can migrate and reconcile durable state,
+   then start only upgraded replicas. The silo remains unready until a signed
+   nonzero registry generation and signed entitlement are atomically applied
+   and their ordered acknowledgements are durably accepted.
+5. Verify the prompt-free heartbeat, independent registry and entitlement
+   high-waters, delivered-before-applied acknowledgements, customer audit
+   evidence, and protected-egress enforcement before restoring normal traffic.
+6. Revoke the v1 credential and remove every legacy endpoint and configuration
+   value after all deployments have completed the migration.
 
-For the schema-9 shared verdict-state upgrade, drain **every** control-plane
-replica before starting the new build, allow one upgraded replica to complete
-the migration, then start the remaining upgraded replicas. Do not run pre-v9
-and v9 replicas together: pre-v9 processes do not reconcile the shared verdict
-row on authorization requests and therefore cannot safely participate in a
-rolling connected-mode upgrade. Verify all replicas report the new version and
-a fresh `VENDOR_HEARTBEAT_OK` entry before restoring load-balancer traffic.
+A signed pause or revoke remains effective across restart and reinstall. It
+blocks protected AI egress, but the local DLP engine, customer administration,
+audit, approval, and evidence surfaces remain available. An online active
+registry verdict cannot clear an entitlement pause or revoke.
 
-Schema 10 has the same no-mixed-control-plane requirement for native handoff
-idempotency. Drain every pre-v10 control-plane replica, let one upgraded
-replica apply `native-handoff-ingest-idempotency`, then start only v10-capable
-replicas before restoring traffic. Upgrade endpoint agents immediately after
-the control plane. Pre-v10 agents do not send the opaque signed-event identity,
-so their in-flight native handoffs retain the old at-least-once reporting risk;
-the server cannot safely invent an identity for them from a free-text note.
+#### AWS stacks created before `DeploymentId`
 
-- The URL must be **HTTPS** and public (loopback / link-local / cloud-metadata
-  hosts are rejected), without credentials, query parameters, or fragments.
-  Private RFC1918 hosts are allowed for internal license servers.
-- On boot and every 24h the control plane authenticates with its
-  customer-specific bearer token and POSTs a **prompt-free** body:
-  `{ customerId, plan, seatsUsed, seatLimit, version, sentAt }` — seat counts
-  and license identifiers only, never prompts, findings, member data, or the
-  per-user roster.
-- The server replies with a domain-separated signed verdict
-  `base64(json).base64(ed25519sig)` over
-  `{ kind, status: "active" | "revoked", customerId, issuedAt }`. It uses a
-  dedicated online verdict key that is separate from the offline license root.
-  The control plane verifies the signature against
-  `REDACTWALL_LICENSE_VERDICT_PUBLIC_KEY`, checks `customerId` matches the
-  installed license, and requires `issuedAt` to be **strictly newer** than the
-  last applied verdict. The server must therefore stamp a fresh `issuedAt`
-  (e.g. current time) on **every** heartbeat response — only a fresh verdict
-  counts as live contact. This makes verdicts non-replayable: a captured older
-  `active` verdict can neither keep an install alive nor lift a revocation.
-  Customer and vendor clocks must stay synchronized; verdicts more than five
-  minutes from the control-plane clock are rejected without advancing replay
-  high-water.
-  The customer token is also bound to an explicit vendor-side customer and
-  plan allowlist, so the endpoint is not an anonymous signing oracle.
+An AWS application stack that does not already publish `DeploymentId` is not an
+updatable connected stack. `silo:deploy` refuses it, and `silo:maintenance`
+cannot infer or add the missing identity. Do not rename a customer-only license,
+invent a deployment id, or force the CloudFormation parameter into that stack.
 
-**Revoking a customer.** Have your license server return a signed
-`{ status: "revoked" }` verdict for that `customerId`. On the next heartbeat
-(or immediately, if you also disable their license reissue) the control plane
-moves to the `revoked` state:
+Use this planned-outage migration:
 
-- Every sensor ingest path (`/api/v1/gate`, scan-file, scan-response,
-  heartbeat, discovery) **fail-closed-blocks** with status `license_revoked` —
-  browser extension, endpoint agent, MCP guard, and the AI gateway (which calls
-  `/api/v1/gate`) all stop passing AI traffic.
-- The admin console goes read-only (`license_revoked` on config writes); the
-  license-install route stays open so a renewal can be applied.
-- Evidence export, audit, and the approval workflow keep working — you are
-  cutting off *use of AI through the product*, not the customer's data
-  protection or their examiner evidence.
-- Reinstalling a license does **not** self-clear a revocation; only a fresh
-  signed `active` verdict from your server lifts it. The revocation is
-  persisted in the shared datastore (with `redactwall.vendor` as a private
-  signed-verdict cache) and restored at boot **before** the control plane
-  accepts any ingest, so it survives a restart and is enforced by every
-  upgraded replica on its next authorization request.
+The executable authority is `node scripts/aws-legacy-connected-migrate.js`.
+Run its ordered `plan`, `freeze`, `cutover`, and `commit` commands exactly as
+documented in `docs/deployment/AWS_SAAS_DEPLOYMENT.md`. `plan` publishes a
+private HMAC-authenticated manifest, a separately keyed monotonic
+witness/tombstone, and an independent external lease. The plan binds the exact
+source customer, source secret ARN/version, live versioned template bytes,
+complete private deploy-argument snapshot, retained volume, image, target
+secret version, fallback digest, trust-pin fingerprints, and opaque channel
+credential references. `freeze` works without
+`/etc/redactwall/maintenance-context.json`, waits for ALB deregistration, stops
+the exact legacy writer, and only then creates the final authenticated backup.
+Its checkpoint also binds the verified audit head, count, and sequence. `abort`
+is allowed only before source deletion and restores writer readiness plus ALB
+service before releasing the lease. `rollback-check` is mandatory before any
+legacy restoration and permanently fails after
+`connected_authority_committed`.
 
-**Heartbeat-or-die.** Connected mode requires periodic fresh contact to keep
-serving. If no fresh, verified verdict arrives within
-`REDACTWALL_LICENSE_MAX_STALENESS_DAYS` (default 7), the install fails
-**closed** (`vendor_unreachable`) — so a customer who firewalls the license
-server or deletes local state cannot escape a revocation by simply going
-offline; without your renewed `active` verdicts they stop passing AI traffic.
-Set the tolerance to balance kill-switch responsiveness against surviving a
-vendor-side outage. A short transient outage inside the window changes nothing.
+1. In Owner, create the exact customer enrollment and one new immutable
+   `dep_<32 lowercase hex>` deployment. Issue its distinct heartbeat and
+   acknowledgement credentials, current trust pins and key IDs, and an active
+   outage fallback signed for that exact customer and deployment.
+2. Freeze legacy configuration changes. Record the exact stable complete stack
+   id, template version, image digest, secret version, instance id, data-volume
+   identity, and audit-chain head.
+3. With the exact legacy image, create and verify an authenticated evidence
+   backup. Copy the backup, manifest, and required sidecars to a root-owned
+   retained location and take the approved encrypted retained-volume snapshot.
+   A root-volume-only legacy stack must be restored into the separately retained
+   data-volume design before connected cutover.
+4. Begin the outage. Deregister the only writer from the ALB and wait for drain,
+   stop that exact writer, create and verify the final backup from the stopped
+   volume, and delete the legacy application stack so the volume is detached.
+   Keep the captured legacy template and recovery evidence intact.
+5. Create a fresh connected application stack with the Owner-issued customer and
+   deployment identity, the exact connected secret version, and either the same
+   retained volume or an approved snapshot-restored volume whose lineage names
+   the prior volume. This is reprovisioning, not an in-place update.
+6. If cutover is interrupted, run `reconcile` against the exact private
+   manifest and independent witness before any retry. If fresh provisioning
+   fails, run `rollback-check` and then
+   `cleanup-failed-candidate`. The latter removes only an exact operation-owned
+   failed StackId. Restore the captured legacy stack and verified backup only
+   from the resulting `rollback_ready` state. Do not delete the retained
+   recovery set or advance Owner enrollment from ambiguous evidence.
+7. Before restoring traffic, prove `/readyz`, one authenticated prompt-free
+   heartbeat with a nonzero monotonic registry generation, the signed entitlement
+   version, and durable delivered then applied acknowledgement acceptance. Record
+   the resulting Owner audit references and customer audit-chain verification.
 
-> Sensor-side display: a revoked control plane returns a distinct
-> `license_revoked` status in the response body and records it in the audit
-> chain. Sensors currently render their generic fail-closed message on any
-> block; surfacing the licensing reason in the sensor UI is a follow-up.
->
-> The heartbeat POSTs to the operator-configured URL over HTTPS (loopback/
-> metadata IP literals are rejected). Point it only at a license host you
-> control; the body is non-sensitive (seat counts + license ids).
+The commit command accepts no scalar authority inputs. It requires raw Owner
+durable-ACK and customer acknowledged-high-water receipts. Production verifiers
+must authenticate each raw receipt and bind the exact customer, deployment,
+operation, StackId, instance, container, registry generation/state digest,
+entitlement version/artifact digest, delivered then applied acceptance, audit
+heads/references, and authority fingerprints before a publication CAS can
+advance the one-way tombstone. The current standalone CLI deliberately returns
+`RELEASE-BLOCKED` until those Owner and customer verifier adapters are injected.
+The production legacy recreate/restore adapter is likewise release-blocked
+until it can attest exact candidate cleanup, a newly returned operation-owned
+legacy StackId, stopped-writer recovery digests, writer readiness, and ALB
+health before lease release. This supported-workflow fence is not a claim that
+AWS can cryptographically disable a manually reconstructed obsolete image. The
+release gate also requires the customer connected high-water to survive restart
+and Owner to revoke the legacy license and channel credentials.
+
+Downtime begins when the legacy writer is stopped and ends only after the fresh
+connected target is healthy and the customer DNS alias reaches the new ALB.
+Stacks that already publish the exact `DeploymentId` use the normal
+`silo:maintenance` lock, latch, checkpoint, and rollback workflow instead.
+
+Only a classified `transport_unavailable` result may enter offline fallback.
+The fallback defaults to 72 hours, is capped at seven days, and can only reduce
+authority to the signed fallback plan, seats, features, and deadline. Protocol,
+authentication, signature, replay, schema, and integrity failures never enter
+fallback. An exact verdict replay is not fresh vendor contact, and no offline
+artifact can clear a newer connected restriction.
 
 ## Seat window
 

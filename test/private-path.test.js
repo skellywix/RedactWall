@@ -55,6 +55,34 @@ test('shared Windows private-path hardening resets, grants, and verifies only ow
   assert.ok(calls.every((call) => call.options.windowsHide === true));
 });
 
+test('Windows security subprocesses carry the bounded initialization deadline', (t) => {
+  const file = tempFile(t, 'private-bounded-security-probe');
+  const principal = 'TEST\\policy-user';
+  const calls = [];
+  const spawn = (command, args, options) => {
+    calls.push({ command, args, options });
+    const executable = path.basename(String(command)).toLowerCase();
+    if (executable === 'whoami.exe') return { status: 0, stdout: `${principal}\n` };
+    if (executable === 'powershell.exe') {
+      return {
+        status: 0,
+        stdout: `redactwall-owner-v1|${TEST_OWNER_IDENTITY.processSid}|${TEST_OWNER_IDENTITY.ownerSid}`,
+      };
+    }
+    return args.length === 1
+      ? { status: 0, stdout: exactAcl(file, principal) }
+      : { status: 0, stdout: 'processed 1 file' };
+  };
+
+  privatePaths.securePrivatePath(file, {
+    platform: 'win32', directory: false, label: 'bounded security probe', spawn,
+  });
+
+  assert.ok(calls.length >= 5, 'the complete principal, ACL mutation, owner, and DACL proof ran');
+  assert.ok(calls.every((call) => call.options?.timeout === 60000),
+    'every synchronous Windows security child must have the same explicit 60-second deadline');
+});
+
 test('trusted-parent file protection converts inherited ACEs and verifies the exact contract', (t) => {
   const file = tempFile(t, 'private-inherited-acl');
   const calls = [];

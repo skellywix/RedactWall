@@ -21,7 +21,7 @@ at `/app` inside the server image is the only console.
 
 - [ ] Phase 0 — AWS account, region, and naming decisions made
 - [ ] Phase 1 — Domain in Route 53, ACM wildcard certificate issued
-- [ ] Phase 2 — Real license keypair generated, placeholder public key replaced, image in ECR
+- [ ] Phase 2 — Real license keypair generated, public trust anchor verified, image in ECR
 - [ ] Phase 3 — Backup and snapshot strategy in place
 - [ ] Phase 4 — Vendor admin stack live at `admin.<domain>`
 - [ ] Phase 5 — Demo stack live at `demo.<domain>`, seeded, reset procedure written down
@@ -88,21 +88,20 @@ HTTPS with the same certificate; DNS decides which stack a hostname reaches.
 
 Do these once before the first production deploy.
 
-1. **Replace the placeholder license public key.** `server/license.js` ships
-   with a placeholder Ed25519 public key; licenses you issue will not verify
-   against it. Generate the real vendor keypair **offline**:
+1. **Provision the production license trust anchor.** `server/license.js` ships
+   with a development placeholder that production preflight rejects. Generate
+   the real vendor keypair **offline**:
 
    ```bash
    npm run license:issue -- --init-keypair ~/redactwall-license-keys
    ```
 
-   Paste the printed public PEM into `server/license.js` (the marked
-   placeholder), commit that change, and store the private key
-   (`license-signing-key.pem`) somewhere durable and offline (password
-   manager plus an offline backup). The private key never enters the repo,
-   the image, or AWS. Losing it means you cannot issue or renew any customer
-   license; leaking it means anyone can mint licenses. Full walkthrough,
-   including rotation: `docs/deployment/LICENSE_KEY_SETUP.md`.
+   AWS silos receive the public SPKI DER base64 in their immutable customer
+   secret. Verify it with `npm run license:trust-check -- --public-key-file
+   ~/redactwall-license-keys/license-signing-pub.pem`. Store the private key
+   (`license-signing-key.pem`) somewhere durable and offline. The private key
+   never enters the repo, image, or AWS. Full walkthrough, including rotation:
+   `docs/deployment/LICENSE_KEY_SETUP.md`.
 2. **Run the full review gate** on the commit you are about to ship:
 
    ```bash
@@ -167,22 +166,28 @@ watching, and it is the environment you will use daily.
 2. Deploy the stack:
 
    ```bash
-   aws cloudformation deploy \
-     --template-file infra/aws/customer-silo.yml \
+   ARTIFACT_BUCKET=$(npm run --silent silo:artifacts:init -- --region <region>)
+   AMI_ID=$(aws ssm get-parameter \
+     --name /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64 \
+     --query Parameter.Value --output text --region <region>)
+   npm run silo:deploy -- \
      --stack-name redactwall-vendor-ops \
-     --capabilities CAPABILITY_NAMED_IAM \
-     --parameter-overrides \
-       VpcId=<vpc> PublicSubnetIds=<a,b> InstanceSubnetId=<a> \
-       ImageUri=<ecr-image> SecretArn=<vendor-ops-secret-arn> \
-       TenantId=vendor-ops SeatLimit=10 \
-       CertificateArn=<acm-arn> PublicHostname=admin.<domain>
+     --region <region> --vpc-id <vpc> --public-subnet-ids <a,b> \
+     --instance-subnet-id <a> --instance-availability-zone <az> \
+     --data-stack-name redactwall-vendor-ops-data \
+     --data-volume-id <output-from-customer-data-volume-stack> \
+     --ami-id "$AMI_ID" --artifact-bucket "$ARTIFACT_BUCKET" \
+     --image-uri <ecr-image> --secret-arn <vendor-ops-secret-arn> \
+     --secret-version-id <immutable-version-id> \
+     --tenant-id vendor-ops --deployment-id dep_<32-lowercase-hex> \
+     --certificate-arn <acm-arn> --public-hostname admin.<domain>
    ```
 
 3. Point `admin.<domain>` at the stack's ALB, enroll the admin TOTP secret in
    your authenticator, log in at `https://admin.<domain>/app`, and confirm
    `/healthz` and `/readyz` are green.
-4. Optionally issue yourself an internal license (Phase 6 step 4) so the
-   vendor stack runs in the same licensed state customers see.
+4. Confirm the required internal license is active and the applied-state
+   attestation matches the selected immutable secret version.
 
 Be honest with yourself about what this portal is at launch: there is **no
 cross-customer single pane yet** — each silo has its own console, and the
@@ -228,25 +233,18 @@ is under an hour of operator time. Full detail: `docs/deployment/AWS_SAAS_DEPLOY
 1. **Secret.** Create `redactwall/<customer-slug>` in Secrets Manager from the
    §2 template; generate values with `npm run setup:prod` and the MFA URI with
    `npm run mfa:uri -- --issuer "RedactWall <customer-slug>"`.
-2. **Stack.** Deploy `redactwall-<customer-slug>` with `TenantId`, the
-   purchased `SeatLimit`, the shared `CertificateArn`, the certificate-covered
+2. **Stack.** Deploy `redactwall-<customer-slug>` with `TenantId`, the immutable
+   Owner-issued `DeploymentId`, the shared `CertificateArn`, the certificate-covered
    `PublicHostname`, and the current `ImageUri`. The stack enables SaaS mode
    (`REDACTWALL_SAAS_MODE=true`,
    tenant context and managed identity required), so events with the wrong or
-   missing `orgId` are rejected and over-seat identities are blocked as
+   missing `orgId` are rejected and identities beyond the signed connected entitlement are blocked as
    `SEAT_LIMIT_BLOCKED` without storing prompt bodies.
 3. **DNS.** Alias `<customer-slug>.<domain>` to the stack's ALB.
-4. **License.** Issue the signed license with the offline private key from
-   Phase 2, then install it:
-
-   ```bash
-   npm run license:issue -- \
-     --key ~/redactwall-license-keys/license-signing-key.pem \
-     --customer "Acme Credit Union" --customer-id cu-acme \
-     --plan standard --seats 120 \
-     --expires 2027-08-01 --grace-days 30 \
-     --out redactwall.lic
-   ```
+4. **Connected authority.** Complete Owner enrollment and install only the
+   Owner-issued active outage fallback plus purpose-separated public pins and
+   channel credentials. Plan, seats, features, pause, and revoke remain signed
+   connected-entitlement authority; never add a local static seat override.
 
    Install via the console's Configuration tab (paste the file contents) or
    `POST /api/billing/license`. The install is recorded in the audit log,

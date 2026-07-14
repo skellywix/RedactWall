@@ -3,6 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { execFileSync } = require('node:child_process');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -27,6 +28,8 @@ const {
 } = require('../scripts/setup');
 
 const ROOT = path.join(__dirname, '..');
+const DEPLOYMENT_ID = 'dep_0123456789abcdef0123456789abcdef';
+const OTHER_DEPLOYMENT_ID = 'dep_fedcba9876543210fedcba9876543210';
 const SETUP_ENV_KEYS = [
   'PORT',
   'NODE_ENV',
@@ -35,6 +38,7 @@ const SETUP_ENV_KEYS = [
   'REDACTWALL_DB_PATH',
   'REDACTWALL_SAAS_MODE',
   'REDACTWALL_TENANT_ID',
+  'REDACTWALL_CONNECTED_DEPLOYMENT_ID',
   'REDACTWALL_LICENSE_CUSTOMER_ID',
   'REDACTWALL_SEAT_LIMIT',
   'REDACTWALL_REQUIRE_TENANT_CONTEXT',
@@ -69,6 +73,7 @@ const SETUP_ENV_KEYS = [
   'REDACTWALL_DB_PATH',
   'REDACTWALL_SAAS_MODE',
   'REDACTWALL_TENANT_ID',
+  'REDACTWALL_CONNECTED_DEPLOYMENT_ID',
   'REDACTWALL_LICENSE_CUSTOMER_ID',
   'REDACTWALL_SEAT_LIMIT',
   'REDACTWALL_REQUIRE_TENANT_CONTEXT',
@@ -87,7 +92,39 @@ const SETUP_ENV_KEYS = [
   'REDACTWALL_OIDC_JWKS_URI',
   'REDACTWALL_REQUEST_TIMEOUT_MS',
   'REDACTWALL_ENV_PATH',
+  'REDACTWALL_LICENSE_MODE',
+  'REDACTWALL_LICENSE_SERVER_URL',
+  'REDACTWALL_VENDOR_CONTROL_HEARTBEAT_TOKEN',
+  'REDACTWALL_VENDOR_CONTROL_ACKNOWLEDGEMENT_TOKEN',
+  'REDACTWALL_VENDOR_CONTROL_DIAGNOSTICS_ENABLED',
+  'REDACTWALL_VENDOR_CONTROL_SHADOW_INTELLIGENCE_ENABLED',
+  'REDACTWALL_LICENSE_PUBLIC_KEY_B64',
+  'REDACTWALL_LICENSE_VERDICT_PUBLIC_KEY_B64',
+  'REDACTWALL_ENTITLEMENT_PUBLIC_KEY_B64',
+  'REDACTWALL_ENTITLEMENT_KEY_ID',
 ];
+
+function connectedSetupEnv(customerId = 'cu-setup', deploymentId = DEPLOYMENT_ID) {
+  const offline = crypto.generateKeyPairSync('ed25519').publicKey;
+  const verdict = crypto.generateKeyPairSync('ed25519').publicKey;
+  const entitlement = crypto.generateKeyPairSync('ed25519').publicKey;
+  const publicDer = (key) => key.export({ type: 'spki', format: 'der' });
+  return {
+    REDACTWALL_LICENSE_MODE: 'connected',
+    REDACTWALL_LICENSE_SERVER_URL: 'https://license.vendor.example/',
+    REDACTWALL_TENANT_ID: customerId,
+    REDACTWALL_CONNECTED_DEPLOYMENT_ID: deploymentId,
+    REDACTWALL_VENDOR_CONTROL_HEARTBEAT_TOKEN: 'setup_heartbeat_0123456789abcdef0123456789',
+    REDACTWALL_VENDOR_CONTROL_ACKNOWLEDGEMENT_TOKEN: 'setup_acknowledgement_0123456789abcdef01',
+    REDACTWALL_VENDOR_CONTROL_DIAGNOSTICS_ENABLED: 'false',
+    REDACTWALL_VENDOR_CONTROL_SHADOW_INTELLIGENCE_ENABLED: 'false',
+    REDACTWALL_LICENSE_PUBLIC_KEY_B64: publicDer(offline).toString('base64'),
+    REDACTWALL_LICENSE_VERDICT_PUBLIC_KEY_B64: publicDer(verdict).toString('base64'),
+    REDACTWALL_ENTITLEMENT_PUBLIC_KEY_B64: publicDer(entitlement).toString('base64'),
+    REDACTWALL_ENTITLEMENT_KEY_ID: `rw-entitlement-${crypto.createHash('sha256')
+      .update(publicDer(entitlement)).digest('hex')}`,
+  };
+}
 
 function childEnv() {
   const env = { ...process.env };
@@ -95,7 +132,7 @@ function childEnv() {
   return env;
 }
 
-test('production setup env passes deployment preflight', () => {
+test('production setup enrolls connected licensing and stays blocked until vendor configuration', () => {
   const env = buildEnv({ production: true });
   const unboundStatus = statusFromEnv(env);
 
@@ -109,20 +146,46 @@ test('production setup env passes deployment preflight', () => {
   assert.strictEqual(env.OIDC_SCOPE, 'openid email profile');
   assert.ok(env.REDACTWALL_SECRET.length >= 32);
   assert.ok(env.REDACTWALL_DATA_KEY.length >= 32);
-  assert.strictEqual(env.REDACTWALL_SAAS_MODE, 'false');
+  assert.strictEqual(env.REDACTWALL_SAAS_MODE, 'true');
+  assert.strictEqual(env.REDACTWALL_REQUIRE_TENANT_CONTEXT, 'true');
+  assert.strictEqual(env.REDACTWALL_REQUIRE_USER_IDENTITY, 'true');
+  assert.strictEqual(env.REDACTWALL_LICENSE_MODE, 'connected');
+  assert.strictEqual(env.REDACTWALL_CONNECTED_DEPLOYMENT_ID, '');
   assert.strictEqual(env.REDACTWALL_LICENSE_CUSTOMER_ID, '');
   assert.strictEqual(unboundStatus.ready, false);
   assert.strictEqual(unboundStatus.checks.find((item) => item.id === 'license_customer_binding').ok, false);
 
-  const boundEnv = buildEnv({ production: true, customerId: 'CU-Setup' });
+  const boundEnv = buildEnv({
+    production: true,
+    customerId: 'CU-Setup',
+    deploymentId: DEPLOYMENT_ID,
+  });
   assert.strictEqual(boundEnv.REDACTWALL_LICENSE_CUSTOMER_ID, 'cu-setup');
+  assert.strictEqual(boundEnv.REDACTWALL_TENANT_ID, 'cu-setup');
+  assert.strictEqual(boundEnv.REDACTWALL_CONNECTED_DEPLOYMENT_ID, DEPLOYMENT_ID);
   const status = statusFromEnv(boundEnv);
-  assert.strictEqual(status.ready, true);
-  assert.strictEqual(status.level, 'ok');
+  assert.strictEqual(status.ready, false);
+  assert.strictEqual(status.level, 'blocked');
+  assert.strictEqual(status.checks.find((item) => item.id === 'license_mode').ok, true);
+  assert.strictEqual(status.checks.find((item) => item.id === 'connected_license_url').ok, false);
+});
+
+test('production setup check evaluates the configured managed license file', () => {
+  const env = {
+    ...buildEnv({ production: true, customerId: 'cu-setup' }),
+    REDACTWALL_LICENSE_MANAGED_EXTERNALLY: 'true',
+    REDACTWALL_LICENSE_PATH: path.join(os.tmpdir(), 'redactwall-license-does-not-exist.lic'),
+  };
+  const status = statusFromEnv(env);
+  const managed = status.checks.find((item) => item.id === 'managed_license_source');
+  assert.ok(managed);
+  assert.strictEqual(managed.ok, false);
+  assert.strictEqual(status.ready, false);
 });
 
 test('setup preflight accepts RedactWall env aliases', () => {
   const status = statusFromEnv({
+    ...connectedSetupEnv('cu-acme'),
     NODE_ENV: 'production',
     HTTPS: 'true',
     COOKIE_SECURE: 'true',
@@ -163,6 +226,54 @@ test('mergeEnv replaces placeholders but preserves custom values', () => {
   assert.strictEqual(merged.INGEST_API_KEY, 'generated-key');
   assert.strictEqual(merged.REDACTWALL_SECRET, 'generated-secret');
   assert.strictEqual(merged.SIEM_WEBHOOK_URL, 'https://soc.example.test/hook');
+});
+
+test('setup enrolls an exact vendor deployment identity once and never replaces it', () => {
+  const generated = buildEnv({ deploymentId: DEPLOYMENT_ID });
+  assert.strictEqual(generated.REDACTWALL_CONNECTED_DEPLOYMENT_ID, DEPLOYMENT_ID);
+  assert.strictEqual(
+    mergeEnv({ REDACTWALL_CONNECTED_DEPLOYMENT_ID: '' }, generated)
+      .REDACTWALL_CONNECTED_DEPLOYMENT_ID,
+    DEPLOYMENT_ID,
+  );
+  assert.strictEqual(
+    mergeEnv(
+      { REDACTWALL_CONNECTED_DEPLOYMENT_ID: DEPLOYMENT_ID },
+      buildEnv(),
+      { force: true },
+    ).REDACTWALL_CONNECTED_DEPLOYMENT_ID,
+    DEPLOYMENT_ID,
+  );
+
+  assert.throws(
+    () => mergeEnv(
+      { REDACTWALL_CONNECTED_DEPLOYMENT_ID: DEPLOYMENT_ID },
+      buildEnv({ deploymentId: OTHER_DEPLOYMENT_ID }),
+      { force: true },
+    ),
+    /deployment identity/i,
+  );
+  assert.throws(
+    () => mergeEnv(
+      { REDACTWALL_CONNECTED_DEPLOYMENT_ID: ` ${DEPLOYMENT_ID}` },
+      buildEnv(),
+    ),
+    /deployment identity/i,
+  );
+  assert.throws(
+    () => buildEnv({ deploymentId: 'deployment_setup_001' }),
+    /deployment identity/i,
+  );
+  for (const candidate of [
+    123,
+    new String(DEPLOYMENT_ID),
+    { toString: () => DEPLOYMENT_ID },
+  ]) {
+    assert.throws(
+      () => buildEnv({ deploymentId: candidate }),
+      /deployment identity/i,
+    );
+  }
 });
 
 test('renderEnv quotes only values that need quoting', () => {
@@ -245,17 +356,126 @@ test('atomic env writer rejects a real directory-fsync failure and restores exac
 });
 
 test('parseArgs supports check and alternate env file', () => {
-  const opts = parseArgs(['--check', '--skip-install', '--with-browser', '--force', '--customer-id', 'cu-setup', '--prod', '--env', 'demo.env']);
+  const opts = parseArgs(['--check', '--skip-install', '--with-browser', '--force', '--customer-id', 'cu-setup', '--deployment-id', DEPLOYMENT_ID, '--prod', '--env', 'demo.env']);
   assert.strictEqual(opts.check, true);
   assert.strictEqual(opts.skipInstall, true);
   assert.strictEqual(opts.withBrowser, true);
   assert.strictEqual(opts.force, true);
   assert.strictEqual(opts.customerId, 'cu-setup');
+  assert.strictEqual(opts.deploymentId, DEPLOYMENT_ID);
   assert.strictEqual(opts.production, true);
   assert.match(opts.envPath, /demo\.env$/);
   assert.strictEqual(parseArgs(['--help']).help, true);
   assert.throws(() => parseArgs(['--bad']), /Unknown option: --bad/);
   assert.throws(() => parseArgs(['--customer-id']), /requires a customer slug/);
+  assert.throws(() => parseArgs(['--deployment-id']), /deployment identity/i);
+  assert.throws(() => parseArgs(['--deployment-id', ` ${DEPLOYMENT_ID}`]), /deployment identity/i);
+});
+
+test('setup rejects malformed or mismatched existing deployment identity before side effects', () => {
+  for (const fixture of [
+    {
+      argv: ['--skip-install'],
+      existing: { REDACTWALL_CONNECTED_DEPLOYMENT_ID: 'deployment_setup_001' },
+    },
+    {
+      argv: ['--skip-install', '--force', '--deployment-id', OTHER_DEPLOYMENT_ID],
+      existing: { REDACTWALL_CONNECTED_DEPLOYMENT_ID: DEPLOYMENT_ID },
+    },
+  ]) {
+    let installed = false;
+    let initialized = false;
+    let wrote = false;
+    assert.throws(() => main(fixture.argv, {
+      env: {},
+      assertNodeVersion: () => {},
+      installDependencies: () => { installed = true; },
+      readEnvFile: () => fixture.existing,
+      writeEnvFile: () => { wrote = true; },
+      initializeRuntime: () => { initialized = true; return { ok: true }; },
+      statusFromEnv: () => ({ ready: true, level: 'ok', checks: [] }),
+    }), /deployment identity/i);
+    assert.strictEqual(installed, false);
+    assert.strictEqual(initialized, false);
+    assert.strictEqual(wrote, false);
+  }
+});
+
+test('setup compares file, process, and CLI deployment identities before every side effect', () => {
+  for (const argv of [
+    ['--skip-install'],
+    ['--skip-install', '--force'],
+    ['--check'],
+  ]) {
+    const calls = [];
+    assert.throws(() => main(argv, {
+      env: { REDACTWALL_CONNECTED_DEPLOYMENT_ID: DEPLOYMENT_ID },
+      assertNodeVersion: () => { calls.push('node'); },
+      installDependencies: () => { calls.push('install'); },
+      readEnvFile: () => ({ REDACTWALL_CONNECTED_DEPLOYMENT_ID: OTHER_DEPLOYMENT_ID }),
+      effectiveEnv: () => ({ REDACTWALL_CONNECTED_DEPLOYMENT_ID: DEPLOYMENT_ID }),
+      buildEnv: () => { calls.push('build'); return {}; },
+      statusFromEnv: () => { calls.push('status'); return { ready: true, checks: [] }; },
+      writeEnvFile: () => { calls.push('write'); },
+      initializeRuntime: () => { calls.push('runtime'); return { ok: true }; },
+    }), (error) => error && error.code === 'REDACTWALL_DEPLOYMENT_ID_IMMUTABLE');
+    assert.deepStrictEqual(calls, ['node']);
+  }
+
+  const malformedCalls = [];
+  assert.throws(() => main(['--check'], {
+    env: { REDACTWALL_CONNECTED_DEPLOYMENT_ID: DEPLOYMENT_ID },
+    assertNodeVersion: () => { malformedCalls.push('node'); },
+    readEnvFile: () => ({ REDACTWALL_CONNECTED_DEPLOYMENT_ID: ` ${DEPLOYMENT_ID}` }),
+    effectiveEnv: () => ({ REDACTWALL_CONNECTED_DEPLOYMENT_ID: DEPLOYMENT_ID }),
+    statusFromEnv: () => { malformedCalls.push('status'); return { ready: true, checks: [] }; },
+  }), (error) => error && error.code === 'REDACTWALL_DEPLOYMENT_ID_INVALID');
+  assert.deepStrictEqual(malformedCalls, ['node']);
+});
+
+test('setup persists a sole process deployment identity without rotating it', () => {
+  let written = '';
+  const code = main(['--skip-install'], {
+    env: { REDACTWALL_CONNECTED_DEPLOYMENT_ID: DEPLOYMENT_ID },
+    console: { log() {} },
+    assertNodeVersion: () => {},
+    buildEnv: () => ({ REDACTWALL_DB_PATH: 'data/test.db', REDACTWALL_CONNECTED_DEPLOYMENT_ID: '' }),
+    readEnvFile: () => ({}),
+    renderEnv: (values) => JSON.stringify(values),
+    writeEnvFile: (_file, body) => { written = body; },
+    initializeRuntime: () => ({ ok: true }),
+    statusFromEnv: () => ({ ready: true, level: 'ok', checks: [] }),
+  });
+  assert.strictEqual(code, 0);
+  assert.strictEqual(JSON.parse(written).REDACTWALL_CONNECTED_DEPLOYMENT_ID, DEPLOYMENT_ID);
+});
+
+test('force mismatch preserves the exact existing env bytes', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rw-setup-deployment-id-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const envPath = path.join(dir, 'redactwall.env');
+  const baseline = Buffer.from([
+    0x23, 0x20, 0x70, 0x72, 0x69, 0x6f, 0x72, 0x0d, 0x0a,
+    ...Buffer.from(`REDACTWALL_CONNECTED_DEPLOYMENT_ID=${DEPLOYMENT_ID}\r\n`, 'utf8'),
+  ]);
+  fs.writeFileSync(envPath, baseline);
+  let wrote = false;
+
+  assert.throws(() => main([
+    '--skip-install',
+    '--force',
+    '--deployment-id',
+    OTHER_DEPLOYMENT_ID,
+    '--env',
+    envPath,
+  ], {
+    env: {},
+    assertNodeVersion: () => {},
+    writeEnvFile: () => { wrote = true; },
+    initializeRuntime: () => { throw new Error('runtime initialization must not run'); },
+  }), /deployment identity/i);
+  assert.strictEqual(wrote, false);
+  assert.deepStrictEqual(fs.readFileSync(envPath), baseline);
 });
 
 test('setup helpers cover placeholder, env-file, install, and console output branches', (t) => {
@@ -395,7 +615,10 @@ test('production setup, mfa enrollment, and setup check work end to end without 
   // directory so this happy-path fixture does not plant unrelated broad-ACL
   // state beside the future database.
   const dbPath = path.join(dir, 'data', 'redactwall.db').replace(/\\/g, '/');
-  fs.writeFileSync(envPath, `REDACTWALL_DB_PATH=${dbPath}\n`);
+  const enrollment = connectedSetupEnv();
+  const initialEnv = { REDACTWALL_DB_PATH: dbPath, ...enrollment };
+  fs.writeFileSync(envPath, `${Object.entries(initialEnv)
+    .map(([key, value]) => `${key}=${value}`).join('\n')}\n`);
   const env = childEnv();
 
   const setupOut = execFileSync(process.execPath, [
@@ -403,6 +626,8 @@ test('production setup, mfa enrollment, and setup check work end to end without 
     '--production',
     '--customer-id',
     'cu-setup',
+    '--deployment-id',
+    DEPLOYMENT_ID,
     '--skip-install',
     '--env',
     envPath,
@@ -413,6 +638,9 @@ test('production setup, mfa enrollment, and setup check work end to end without 
   assert.match(parsed.ADMIN_PASSWORD, /^Ps-/);
   assert.match(parsed.INGEST_API_KEY, /^ps_ingest_/);
   assert.strictEqual(parsed.REDACTWALL_LICENSE_CUSTOMER_ID, 'cu-setup');
+  assert.strictEqual(parsed.REDACTWALL_TENANT_ID, 'cu-setup');
+  assert.strictEqual(parsed.REDACTWALL_LICENSE_MODE, 'connected');
+  assert.strictEqual(parsed.REDACTWALL_CONNECTED_DEPLOYMENT_ID, DEPLOYMENT_ID);
   assert.strictEqual(parsed.REDACTWALL_DB_PATH, dbPath);
   assert.strictEqual(fs.existsSync(dbPath), true);
   assert.match(setupOut, /Preflight: ok \(ready\)/);

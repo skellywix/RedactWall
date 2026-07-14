@@ -1,5 +1,15 @@
 # RedactWall License Heartbeat Server (connected mode)
 
+> **Legacy v1 reference only:** this directory still implements the removed
+> shared-token `/heartbeat` contract. It is not the connected-first production
+> license service and must not be deployed for a new customer. The supported
+> licensing service exposes only `POST /v1/heartbeat`; the separate
+> `POST /v1/acknowledgements` channel is routed to Owner. They use distinct
+> credentials. The heartbeat returns the signed registry verdict plus signed
+> entitlement projection and the service never receives the offline private
+> root. See `docs/reference/VENDOR_CONTROL_PROTOCOL.md`. Keep this service
+> disabled until the committed replacement lands and the old route is deleted.
+
 This is the vendor-side reference service for
 `docs/process/CONNECTED_DEPLOYMENT.md`. A customer control plane sends a
 prompt-free, authenticated heartbeat. The service returns an Ed25519-signed

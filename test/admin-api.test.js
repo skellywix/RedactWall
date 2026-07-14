@@ -164,6 +164,43 @@ test('directory activity merges preserve authoritative identity state and contro
   }
 });
 
+test('admin seat projections honor an exact connected seat limit including zero', () => {
+  const env = {
+    ...process.env,
+    REDACTWALL_TENANT_ID: 'example-fi',
+    REDACTWALL_SEAT_LIMIT: '99',
+  };
+  const connectedSeatAuthority = { seatLimitOverride: 0 };
+
+  const directory = adminDomain.directory(db, auth, env, connectedSeatAuthority);
+  assert.strictEqual(directory.seatReport.seatLimit, 0);
+  assert.strictEqual(directory.seatReport.seatLimitConfigured, true);
+  assert.strictEqual(directory.seatReport.seatLimitValid, true);
+  assert.strictEqual(directory.seatReport.overLimit, directory.seatReport.seatsUsed > 0);
+
+  const seats = adminDomain.seats(
+    db,
+    auth,
+    { state: 'active', managedExternally: true },
+    env,
+    connectedSeatAuthority,
+  );
+  assert.strictEqual(seats.seatLimit, 0);
+  assert.strictEqual(seats.seatLimitConfigured, true);
+  assert.strictEqual(seats.seatLimitValid, true);
+  assert.strictEqual(seats.overLimit, seats.seatsUsed > 0);
+
+  const malformedAuthority = adminDomain.directory(db, auth, env, {
+    seatLimitOverride: undefined,
+  });
+  assert.strictEqual(malformedAuthority.seatReport.seatLimit, 0);
+  assert.strictEqual(malformedAuthority.seatReport.seatLimitConfigured, true);
+  assert.strictEqual(malformedAuthority.seatReport.seatLimitValid, false);
+
+  const offlineDirectory = adminDomain.directory(db, auth, env);
+  assert.strictEqual(offlineDirectory.seatReport.seatLimit, 99);
+});
+
 test('local-account login throttling canonicalizes whitespace and case variants', async () => withServer(async (port) => {
   const userName = 'throttle.target@example.test';
   const password = 'Correct-local-pass-2026';

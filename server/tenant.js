@@ -70,23 +70,63 @@ function config(env = process.env) {
   };
 }
 
-function seatReport(db, env = process.env) {
+function configWithSeatOverride(env, seatLimitOverride) {
   const cfg = config(env);
+  if (seatLimitOverride === undefined) return cfg;
+  const valid = Number.isSafeInteger(seatLimitOverride)
+    && seatLimitOverride >= 0 && seatLimitOverride <= 1_000_000;
+  return {
+    ...cfg,
+    saasMode: true,
+    seatLimit: valid ? seatLimitOverride : 0,
+    seatLimitConfigured: true,
+    seatLimitValid: valid,
+    requireTenantContext: true,
+    requireUserIdentity: true,
+  };
+}
+
+function checkedSeatStats(db, orgId) {
+  if (!db || typeof db.seatStats !== 'function') {
+    return { valid: false, seatsUsed: 0, users: [] };
+  }
+  let stats;
+  try { stats = db.seatStats({ orgId }); }
+  catch { return { valid: false, seatsUsed: 0, users: [] }; }
+  const users = stats && Array.isArray(stats.users) ? stats.users : null;
+  const seatsUsed = stats && stats.seatsUsed;
+  const normalizedUsers = users && users.map((item) => (
+    item && typeof item === 'object' && !Array.isArray(item)
+      && typeof item.user === 'string' ? normalizeUser(item.user) : ''
+  ));
+  const uniqueUsers = normalizedUsers && new Set(normalizedUsers);
+  const valid = !!stats && typeof stats === 'object' && !Array.isArray(stats)
+    && Number.isSafeInteger(seatsUsed) && seatsUsed >= 0 && seatsUsed <= 1_000_000
+    && Array.isArray(users) && normalizedUsers.every(isBillableUser)
+    && uniqueUsers.size === users.length && seatsUsed === users.length;
+  return valid
+    ? { valid: true, seatsUsed, users }
+    : { valid: false, seatsUsed: 0, users: [] };
+}
+
+function seatReport(db, env = process.env, options = {}) {
+  const cfg = configWithSeatOverride(env, options.seatLimitOverride);
   const orgId = cfg.tenantId || null;
-  const stats = db && typeof db.seatStats === 'function'
-    ? db.seatStats({ orgId })
-    : { users: [], seatsUsed: 0 };
-  const seatsUsed = Number(stats.seatsUsed || 0);
+  const stats = checkedSeatStats(db, orgId);
+  const seatsUsed = stats.seatsUsed;
   const seatLimit = cfg.seatLimit || 0;
   return {
     tenantId: cfg.tenantId || null,
     saasMode: cfg.saasMode,
     seatLimit,
+    seatLimitConfigured: cfg.seatLimitConfigured,
     seatLimitValid: !cfg.saasMode || cfg.seatLimitValid,
+    seatStateValid: stats.valid,
     seatsUsed,
-    seatsRemaining: seatLimit ? Math.max(0, seatLimit - seatsUsed) : null,
-    overLimit: !!(seatLimit && seatsUsed > seatLimit),
-    users: stats.users || [],
+    seatsRemaining: stats.valid && cfg.seatLimitConfigured
+      ? Math.max(0, seatLimit - seatsUsed) : null,
+    overLimit: !stats.valid || !!(cfg.seatLimitConfigured && seatsUsed > seatLimit),
+    users: stats.users,
   };
 }
 
@@ -118,8 +158,10 @@ function releasedSeatResult(user, cfg, seatsUsed) {
   };
 }
 
-function validateSensorAccess({ body = {}, db, env = process.env } = {}) {
-  const cfg = config(env);
+function validateSensorAccess({
+  body = {}, db, env = process.env, seatLimitOverride = undefined,
+} = {}) {
+  const cfg = configWithSeatOverride(env, seatLimitOverride);
   const sensorUser = normalizeUser(body.user);
   if (sensorUser && db && typeof db.scimIdentityInactive === 'function' && db.scimIdentityInactive(sensorUser)) {
     return deactivatedIdentityResult(sensorUser, cfg);
@@ -129,7 +171,9 @@ function validateSensorAccess({ body = {}, db, env = process.env } = {}) {
   if (sensorUser && db && typeof db.getLicenseSeatAssignment === 'function') {
     const assignment = db.getLicenseSeatAssignment(sensorUser);
     if (assignment && assignment.status === 'released') {
-      return releasedSeatResult(sensorUser, cfg, seatReport(db, env).seatsUsed);
+      return releasedSeatResult(
+        sensorUser, cfg, seatReport(db, env, { seatLimitOverride }).seatsUsed,
+      );
     }
   }
   if (!cfg.saasMode) {
@@ -191,10 +235,21 @@ function validateSensorAccess({ body = {}, db, env = process.env } = {}) {
     };
   }
 
-  if (cfg.seatLimit > 0 && isBillableUser(sensorUser)) {
-    const report = seatReport(db, env);
+  if (cfg.seatLimitConfigured && isBillableUser(sensorUser)) {
+    const report = seatReport(db, env, { seatLimitOverride });
+    if (!report.seatStateValid) {
+      return {
+        ok: false,
+        statusCode: 503,
+        status: 'seat_state_invalid',
+        action: 'SEAT_STATE_INVALID',
+        message: 'seat state is invalid',
+        audit: false,
+        orgId: cfg.tenantId,
+      };
+    }
     const known = report.users.some((item) => normalizeUser(item.user) === sensorUser);
-    if (!known && report.seatsUsed >= cfg.seatLimit) {
+    if (cfg.seatLimit === 0 || (!known && report.seatsUsed >= cfg.seatLimit)) {
       return {
         ok: false,
         statusCode: 402,

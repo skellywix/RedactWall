@@ -20,6 +20,7 @@ const WINDOWS_LOCAL_SYSTEM_SID = 'S-1-5-18';
 const WINDOWS_OWNER_PATH_ENV = 'REDACTWALL_PRIVATE_OWNER_PATH';
 const WINDOWS_OWNER_CACHE_LIMIT = 512;
 const WINDOWS_SECURITY_STABILITY_ATTEMPTS = 8;
+const WINDOWS_SECURITY_PROBE_TIMEOUT_MS = 60_000;
 // libuv maps the Windows CRT _O_TEMPORARY flag to an exact handle-backed
 // delete-on-close operation. Node does not currently expose the constant, but
 // accepts the CRT value on Windows. Never use this value on POSIX, where the
@@ -51,7 +52,9 @@ function windowsPrincipal(spawn = spawnSync, label = 'private path') {
   if (spawn === spawnSync && _windowsPrincipalCache) return _windowsPrincipalCache;
   let result;
   try {
-    result = spawn(windowsWhoamiPath(), [], { encoding: 'utf8', windowsHide: true });
+    result = spawn(windowsWhoamiPath(), [], {
+      encoding: 'utf8', windowsHide: true, timeout: WINDOWS_SECURITY_PROBE_TIMEOUT_MS,
+    });
   } catch (error) {
     result = { error };
   }
@@ -67,7 +70,9 @@ function windowsPrincipal(spawn = spawnSync, label = 'private path') {
 function checkedIcacls(spawn, args, target, label = '') {
   let result;
   try {
-    result = spawn('icacls.exe', args, { encoding: 'utf8', windowsHide: true });
+    result = spawn('icacls.exe', args, {
+      encoding: 'utf8', windowsHide: true, timeout: WINDOWS_SECURITY_PROBE_TIMEOUT_MS,
+    });
   } catch (error) {
     result = { error };
   }
@@ -125,6 +130,7 @@ function windowsOwnerIdentity(target, spawn = spawnSync, label = 'private path')
     ], {
       encoding: 'utf8',
       windowsHide: true,
+      timeout: WINDOWS_SECURITY_PROBE_TIMEOUT_MS,
       env: cleanWindowsPowerShellEnvironment(target),
     });
   } catch (error) {
@@ -255,7 +261,9 @@ function privateWindowsSecurityFingerprint(target, principal, spawn, options, st
 function privateWindowsDaclFingerprint(target, principal, spawn) {
   let result;
   try {
-    result = spawn('icacls.exe', [target], { encoding: 'utf8', windowsHide: true });
+    result = spawn('icacls.exe', [target], {
+      encoding: 'utf8', windowsHide: true, timeout: WINDOWS_SECURITY_PROBE_TIMEOUT_MS,
+    });
   } catch (error) {
     result = { error };
   }
