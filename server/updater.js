@@ -31,6 +31,13 @@ const DEFAULT_CONFIG = {
   restartAfterUpdate: false,
 };
 const SAFE_RESTART_COMMAND = /^[A-Za-z0-9 ._:/\\@+=,-]+$/;
+const GIT_LOCAL_ENVIRONMENT_VARIABLES = Object.freeze([
+  'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_CONFIG', 'GIT_CONFIG_PARAMETERS',
+  'GIT_CONFIG_COUNT', 'GIT_OBJECT_DIRECTORY', 'GIT_DIR', 'GIT_WORK_TREE',
+  'GIT_IMPLICIT_WORK_TREE', 'GIT_GRAFT_FILE', 'GIT_INDEX_FILE',
+  'GIT_NO_REPLACE_OBJECTS', 'GIT_REPLACE_REF_BASE', 'GIT_PREFIX',
+  'GIT_INTERNAL_SUPER_PREFIX', 'GIT_SHALLOW_FILE', 'GIT_COMMON_DIR',
+]);
 
 let activeRun = null;
 let cachedDb = null;
@@ -272,10 +279,17 @@ function commandFailureMessage(file, args = []) {
   return `${action} failed`;
 }
 
+function isolatedGitEnvironment(environment = process.env) {
+  const env = { ...environment };
+  for (const variable of GIT_LOCAL_ENVIRONMENT_VARIABLES) delete env[variable];
+  return env;
+}
+
 async function git(args, opts = {}) {
   const result = await runCommand('git', args, {
     ...opts,
     cwd: opts.repoRoot || opts.cwd || ROOT,
+    env: isolatedGitEnvironment(opts.env),
     publicError: opts.publicError || `git ${args[0] || 'command'} failed`,
   });
   return result.stdout;
@@ -408,6 +422,7 @@ async function checkForUpdates(opts = {}) {
   const behind = Number(await git(['rev-list', '--count', `HEAD..${remoteRef}`], opts)) || 0;
   const ancestor = await runCommand('git', ['merge-base', '--is-ancestor', 'HEAD', remoteRef], {
     cwd: opts.repoRoot || ROOT,
+    env: isolatedGitEnvironment(opts.env),
     allowExitCodes: [0, 1],
     publicError: 'could not compare local and remote commits',
   });

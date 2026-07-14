@@ -9,9 +9,13 @@
  *
  *   node scripts/edm-fingerprint.js --in secret-values.txt
  *   printf '550e8400-e29b-41d4-a716-446655440000\n' | node scripts/edm-fingerprint.js
+ *   node scripts/edm-fingerprint.js --in random-identifiers.csv --column "Random Identifier"
  *
  * Flags:
  *   --in <file>     Read values from a file instead of stdin.
+ *   --column <c>    Treat the input as CSV and fingerprint one column: a header
+ *                   name (skips the header row) or a 1-based index (all rows).
+ *                   Runs locally; only salted one-way hashes are ever written.
  *   --out <file>    Output path (default config/exact-match.json).
  *   --salt <value>  Reuse an existing salt (default: generate a fresh one and
  *                   reuse the salt already in --out if present, so appends work).
@@ -41,6 +45,53 @@ function readInput(argv) {
 function compatibleProfile(value) {
   return value && value.formatVersion === PROFILE.formatVersion
     && value.algorithm === PROFILE.algorithm && value.valuePolicy === PROFILE.valuePolicy;
+}
+
+// Minimal CSV field parser: handles quoted fields, escaped ("") quotes, and
+// commas inside quotes. Assumes rows are newline-separated (no embedded
+// newlines in fields).
+function parseCsvLine(line) {
+  const out = [];
+  let field = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (line[i + 1] === '"') { field += '"'; i++; } else inQuotes = false;
+      } else field += ch;
+    } else if (ch === '"') inQuotes = true;
+    else if (ch === ',') { out.push(field); field = ''; } else field += ch;
+  }
+  out.push(field);
+  return out;
+}
+
+// Extract one column of values from CSV text. `column` is a header name
+// (case-insensitive; the header row is skipped) or a 1-based index (all rows).
+function valuesFromCsv(text, column) {
+  const lines = String(text || '').split(/\r?\n/).filter((l) => l.length);
+  if (!lines.length) return [];
+  let idx;
+  let dataStart;
+  if (/^\d+$/.test(String(column))) {
+    idx = Number(column) - 1;
+    if (!Number.isSafeInteger(idx) || idx < 0) throw new Error('--column index must be a positive integer');
+    dataStart = 0;
+  } else {
+    const header = parseCsvLine(lines[0]).map((h) => h.trim().toLowerCase());
+    idx = header.indexOf(String(column).trim().toLowerCase());
+    if (idx === -1) {
+      throw new Error(`--column "${column}" not found in CSV header: ${parseCsvLine(lines[0]).join(', ')}`);
+    }
+    dataStart = 1;
+  }
+  const out = [];
+  for (let r = dataStart; r < lines.length; r++) {
+    const v = (parseCsvLine(lines[r])[idx] || '').trim();
+    if (v) out.push(v);
+  }
+  return out;
 }
 
 function readExisting(outPath) {
@@ -135,7 +186,10 @@ function buildPack(argv, contents, existing) {
     );
   }
 
-  const values = inputValues(contents);
+  const column = arg('column', null, argv);
+  const values = column
+    ? valuesFromCsv(contents, column).map((value, index) => ({ value, line: index + 1 }))
+    : inputValues(contents);
   validateValues(values, minLen);
   const set = new Set(priorFingerprints);
   let added = 0;
@@ -185,4 +239,12 @@ if (require.main === module) {
   }
 }
 
-module.exports = { buildPack, compatibleProfile, inputValues, main, validateValues };
+module.exports = {
+  buildPack,
+  compatibleProfile,
+  inputValues,
+  main,
+  parseCsvLine,
+  validateValues,
+  valuesFromCsv,
+};

@@ -20,7 +20,30 @@ reconstructed from `ITERATIONS.md` and git history.
   covered by mandatory built-in and tuned custom detectors; they must not be
   moved into an offline sensor-visible fingerprint pack.
 
+## [0.4.0] - 2026-07-09
+
 ### Added
+
+- **Credit-union AI-compliance wedge (examiner-ready).** The examiner evidence
+  pack (schemaVersion 3) now emits a first-class `complianceDisclaimer`
+  ("evidence pointers, not certification"), a `controlTests` rollup for NCUA
+  Part 748 Appendix A ("regularly test key controls") with an honest per-signal
+  `lastTestedAt`, and an `aupCrosswalk` mapping AI Acceptable-Use-Policy clauses
+  to the controls that enforce them (RedactWall ships no board-adoptable AUP
+  prose). A rendered human-readable report is available via
+  `export-evidence-pack.js --format md`. Control-family labels now include the
+  **FFIEC** IT Handbook booklets alongside NCUA/GLBA/NIST. A new
+  `ai_acceptable_use` control and a board cybersecurity-training / oversight
+  **attestation** (`POST /api/ncua/board-training`, recorded in the
+  tamper-evident audit chain) capture two named 2026 NCUA exam priorities. The
+  Security Trust Package gains per-control **assurance levels**
+  (self-attested / ci-verified; nothing third-party-verified), an NCUA-mapped
+  due-diligence questionnaire, and SAMPLE (non-binding) DPA/BAA/GLBA flow-down
+  templates. A disabled-by-default, context-gated **core-banking detector pack**
+  (Jack Henry/Symitar, Corelation, Fiserv, Finastra) and a CSV `--column` flag
+  for local high-entropy random-ID **Exact Data Match** fingerprinting complement
+  tuned detectors for enumerable member identifiers. Ships with a 30-day pilot playbook and an
+  `aws-silo-smoke` acceptance check. See `PLANS/credit-union-tuning.md`.
 
 - **Connected deployment (Phase B/C).** The optional vendor-side second-layer
   scanner (`REDACTWALL_SEMANTIC_REMOTE_URL`) now requires HTTPS for any remote

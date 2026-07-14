@@ -500,12 +500,16 @@ test('mixed sensor versions emit sanitized SIEM version-gap alert', async () => 
       assert.strictEqual(res.status, 200);
     }
 
-    await waitFor(() => sent.some((alert) => alert.action === 'SENSOR_VERSION_GAP'));
-    const gap = sent.find((alert) => alert.action === 'SENSOR_VERSION_GAP');
+    // Both sent versions are behind the desired (release) version, so each event
+    // fires a gap alert; wait for the one that has observed both versions.
+    const hasBoth = (alert) => alert.action === 'SENSOR_VERSION_GAP'
+      && (alert.sensorVersionGap.versions || []).some((v) => v.version === '0.2.9');
+    await waitFor(() => sent.some(hasBoth));
+    const gap = [...sent].reverse().find(hasBoth);
     const wire = JSON.stringify(gap);
     assert.strictEqual(gap.source, 'browser_extension');
     assert.strictEqual(gap.sensorVersionGap.versionHealth, 'outdated');
-    assert.strictEqual(gap.sensorVersionGap.desiredVersion, '0.3.0');
+    assert.strictEqual(gap.sensorVersionGap.desiredVersion, '0.4.0');
     assert.ok(gap.sensorVersionGap.versions.some((v) => v.version === '0.3.0'));
     assert.ok(gap.sensorVersionGap.versions.some((v) => v.version === '0.2.9'));
     assert.ok(!wire.includes('ps_ingest_should_not_leave'));
@@ -1571,7 +1575,7 @@ test('sensor policy endpoint publishes detector and scanner controls', async () 
   assert.ok(Array.isArray(body.requiredSensors));
   assert.ok(body.requiredSensors.includes('browser_extension'));
   assert.ok(body.desiredSensorVersions && typeof body.desiredSensorVersions === 'object');
-  assert.strictEqual(body.desiredSensorVersions.browser_extension, '0.3.0');
+  assert.strictEqual(body.desiredSensorVersions.browser_extension, '0.4.0');
   assert.ok(body.scanner && typeof body.scanner === 'object');
   assert.ok(Array.isArray(body.scanner.ignoreDirectories));
   assert.ok(Array.isArray(body.scanner.ignoreFilenames));
