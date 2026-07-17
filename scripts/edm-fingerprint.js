@@ -16,6 +16,8 @@
  *   --column <c>    Treat the input as CSV and fingerprint one column: a header
  *                   name (skips the header row) or a 1-based index (all rows).
  *                   Runs locally; only salted one-way hashes are ever written.
+ *   --allow-sparse  With --column: skip rows whose selected cell is empty or
+ *                   missing instead of failing; the skipped count is reported.
  *   --out <file>    Output path (default config/exact-match.json).
  *   --salt <value>  Reuse an existing salt (default: generate a fresh one and
  *                   reuse the salt already in --out if present, so appends work).
@@ -48,8 +50,11 @@ function compatibleProfile(value) {
 }
 
 // Minimal CSV field parser: handles quoted fields, escaped ("") quotes, and
-// commas inside quotes. Assumes rows are newline-separated (no embedded
-// newlines in fields).
+// commas inside quotes. Fail-closed on structure it cannot represent: a quote
+// opening mid-field or a line ending inside an open quote (which is what an
+// embedded newline in a quoted field looks like after splitting) throws, so a
+// malformed roster can never silently shift or drop the fingerprinted column.
+// Error messages carry structure only — never cell contents.
 function parseCsvLine(line) {
   const out = [];
   let field = '';
@@ -60,38 +65,67 @@ function parseCsvLine(line) {
       if (ch === '"') {
         if (line[i + 1] === '"') { field += '"'; i++; } else inQuotes = false;
       } else field += ch;
-    } else if (ch === '"') inQuotes = true;
-    else if (ch === ',') { out.push(field); field = ''; } else field += ch;
+    } else if (ch === '"') {
+      if (field.length) throw new Error('quote opened mid-field');
+      inQuotes = true;
+    } else if (ch === ',') { out.push(field); field = ''; } else field += ch;
   }
+  if (inQuotes) throw new Error('quote not closed before end of line (embedded newlines in fields are not supported)');
   out.push(field);
   return out;
 }
 
-// Extract one column of values from CSV text. `column` is a header name
-// (case-insensitive; the header row is skipped) or a 1-based index (all rows).
-function valuesFromCsv(text, column) {
-  const lines = String(text || '').split(/\r?\n/).filter((l) => l.length);
-  if (!lines.length) return [];
-  let idx;
-  let dataStart;
+// Resolve `column` (header name, case-insensitive, or 1-based index) against
+// the header row. Ambiguous duplicate header matches and unknown names throw
+// with structural detail only (column counts, never header cell contents).
+function selectCsvColumn(headerCells, column) {
   if (/^\d+$/.test(String(column))) {
-    idx = Number(column) - 1;
+    const idx = Number(column) - 1;
     if (!Number.isSafeInteger(idx) || idx < 0) throw new Error('--column index must be a positive integer');
-    dataStart = 0;
-  } else {
-    const header = parseCsvLine(lines[0]).map((h) => h.trim().toLowerCase());
-    idx = header.indexOf(String(column).trim().toLowerCase());
-    if (idx === -1) {
-      throw new Error(`--column "${column}" not found in CSV header: ${parseCsvLine(lines[0]).join(', ')}`);
-    }
-    dataStart = 1;
+    return { idx, dataStart: 0 };
   }
-  const out = [];
-  for (let r = dataStart; r < lines.length; r++) {
-    const v = (parseCsvLine(lines[r])[idx] || '').trim();
-    if (v) out.push(v);
+  const wanted = String(column).trim().toLowerCase();
+  const matches = [];
+  headerCells.forEach((h, i) => { if (h.trim().toLowerCase() === wanted) matches.push(i); });
+  if (!matches.length) {
+    throw new Error(`--column "${column}" not found in CSV header (${headerCells.length} column${headerCells.length === 1 ? '' : 's'})`);
   }
-  return out;
+  if (matches.length > 1) {
+    throw new Error(`--column "${column}" matches ${matches.length} CSV header columns; use a 1-based index instead`);
+  }
+  return { idx: matches[0], dataStart: 1 };
+}
+
+// Extract one column of values from CSV text as { values, skipped }, where
+// values carry their physical 1-based source line and skipped lists rows whose
+// selected cell is empty/missing. Callers fail closed on skipped rows unless
+// sparse input was explicitly allowed.
+function valuesFromCsv(text, column, options = {}) {
+  const rows = [];
+  String(text || '').split(/\r?\n/).forEach((raw, index) => {
+    if (!raw.length) return;
+    let cells;
+    try { cells = parseCsvLine(raw); }
+    catch (e) { throw new Error(`CSV row ${index + 1}: ${e.message}; no output was written`); }
+    rows.push({ line: index + 1, cells });
+  });
+  if (!rows.length) return { values: [], skipped: [] };
+  const { idx, dataStart } = selectCsvColumn(rows[0].cells, column);
+  const values = [];
+  const skipped = [];
+  for (let r = dataStart; r < rows.length; r++) {
+    const value = (rows[r].cells[idx] || '').trim();
+    if (value) values.push({ value, line: rows[r].line });
+    else skipped.push(rows[r].line);
+  }
+  if (skipped.length && !options.allowSparse) {
+    const shown = skipped.slice(0, 12).join(', ');
+    throw new Error(
+      `${skipped.length} CSV row(s) have an empty or missing selected column; fix the export or pass ` +
+      `--allow-sparse to skip them (line${skipped.length === 1 ? '' : 's'} ${shown}${skipped.length > 12 ? ', ...' : ''}); no output was written`
+    );
+  }
+  return { values, skipped };
 }
 
 function readExisting(outPath) {
@@ -186,10 +220,8 @@ function buildPack(argv, contents, existing) {
     );
   }
 
-  const column = arg('column', null, argv);
-  const values = column
-    ? valuesFromCsv(contents, column).map((value, index) => ({ value, line: index + 1 }))
-    : inputValues(contents);
+  const input = packInputValues(argv, contents);
+  const values = input.values;
   validateValues(values, minLen);
   const set = new Set(priorFingerprints);
   let added = 0;
@@ -216,8 +248,22 @@ function buildPack(argv, contents, existing) {
       fingerprints: Array.from(set),
     },
     values: values.length,
+    skippedRows: input.skippedRows,
     added,
   };
+}
+
+// Select the pack's input values: one CSV column when --column is given
+// (fail-closed — a column that yields nothing is an error, not an empty pack),
+// otherwise one value per line.
+function packInputValues(argv, contents) {
+  const column = arg('column', null, argv);
+  if (!column) return { values: inputValues(contents), skippedRows: 0 };
+  const extracted = valuesFromCsv(contents, column, { allowSparse: argv.includes('--allow-sparse') });
+  if (!extracted.values.length) {
+    throw new Error(`--column "${column}" produced no eligible values; no output was written`);
+  }
+  return { values: extracted.values, skippedRows: extracted.skipped.length };
 }
 
 function main(argv = process.argv.slice(2), io = process) {
@@ -226,7 +272,8 @@ function main(argv = process.argv.slice(2), io = process) {
   return fileMutationLock.withFileMutationLockSync(outPath, () => {
     const result = buildPack(argv, contents, readExisting(outPath));
     writePrivatePack(outPath, JSON.stringify(result.pack, null, 2) + '\n');
-    io.stdout.write(`EDM watchlist written to ${outPath}\n  eligible values read: ${result.values}\n  fingerprints added: ${result.added}\n  total fingerprints: ${result.pack.fingerprints.length}\n  (plaintext was not copied; only salted SHA-256 fingerprints are stored)\n`);
+    const skipped = result.skippedRows ? `  rows skipped (empty selected column): ${result.skippedRows}\n` : '';
+    io.stdout.write(`EDM watchlist written to ${outPath}\n  eligible values read: ${result.values}\n${skipped}  fingerprints added: ${result.added}\n  total fingerprints: ${result.pack.fingerprints.length}\n  (plaintext was not copied; only salted SHA-256 fingerprints are stored)\n`);
     return result;
   });
 }
@@ -245,6 +292,7 @@ module.exports = {
   inputValues,
   main,
   parseCsvLine,
+  selectCsvColumn,
   validateValues,
   valuesFromCsv,
 };

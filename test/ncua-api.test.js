@@ -466,35 +466,40 @@ test('incident and board-packet routes respect the entitlement gate', async () =
       headers: { cookie: session.cookie, 'x-csrf-token': session.csrfToken },
     });
     assert.strictEqual(packet.status, 403);
+    const training = await postJson(port, '/api/ncua/board-training', session, { trainingCompletedAt: '2026-07-01' });
+    assert.strictEqual(training.status, 403);
     const list = await fetch(`http://127.0.0.1:${port}/api/ncua/incidents`, { headers: { cookie: session.cookie } });
     assert.deepStrictEqual(await list.json(), { entitled: false, incidents: [] });
     setLicense(null);
   });
 });
 
-test('board training attestation: CSRF-gated, audit is JSON date+reference, control reflects it', async () => {
+test('board training attestation: CSRF-gated, admin-only, audit is JSON date+reference, control reflects it', async () => {
   await withServer(async (port) => {
-    const auditorCookie = await login(port, 'auditor', 'auditor-pass');
-    const csrfRes = await fetch(`http://127.0.0.1:${port}/api/csrf`, { headers: { cookie: auditorCookie } });
-    const { csrfToken } = await csrfRes.json();
+    const session = await adminSession(port);
 
     // CSRF-less POST is rejected.
-    assert.strictEqual((await fetch(`http://127.0.0.1:${port}/api/ncua/board-training`, { method: 'POST', headers: { cookie: auditorCookie } })).status, 403);
+    assert.strictEqual((await fetch(`http://127.0.0.1:${port}/api/ncua/board-training`, { method: 'POST', headers: { cookie: session.cookie } })).status, 403);
+
+    // The read-only AUDITOR role cannot attest an external fact.
+    const auditorCookie = await login(port, 'auditor', 'auditor-pass');
+    const auditorCsrf = (await (await fetch(`http://127.0.0.1:${port}/api/csrf`, { headers: { cookie: auditorCookie } })).json()).csrfToken;
+    const auditorPost = await postJson(port, '/api/ncua/board-training', { cookie: auditorCookie, csrfToken: auditorCsrf }, { trainingCompletedAt: '2026-07-01' });
+    assert.strictEqual(auditorPost.status, 403);
 
     // A malformed date is rejected by the schema.
-    const bad = await fetch(`http://127.0.0.1:${port}/api/ncua/board-training`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', cookie: auditorCookie, 'x-csrf-token': csrfToken },
-      body: JSON.stringify({ trainingCompletedAt: 'not-a-date' }),
-    });
+    const bad = await postJson(port, '/api/ncua/board-training', session, { trainingCompletedAt: 'not-a-date' });
     assert.strictEqual(bad.status, 400);
 
+    // Contact-detail references (emails, phone-length digit runs) are rejected
+    // before they can reach the append-only audit chain.
+    for (const reference of ['jane.doe@example.com', 'call 512-555-1234']) {
+      const pii = await postJson(port, '/api/ncua/board-training', session, { trainingCompletedAt: '2026-07-01', reference });
+      assert.strictEqual(pii.status, 400);
+    }
+
     // A valid attestation records date + reference.
-    const res = await fetch(`http://127.0.0.1:${port}/api/ncua/board-training`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', cookie: auditorCookie, 'x-csrf-token': csrfToken },
-      body: JSON.stringify({ trainingCompletedAt: '2026-07-01', reference: 'Board minutes 2026-Q2' }),
-    });
+    const res = await postJson(port, '/api/ncua/board-training', session, { trainingCompletedAt: '2026-07-01', reference: 'Board minutes 2026-Q2' });
     assert.strictEqual(res.status, 200);
     const stored = await res.json();
     assert.strictEqual(stored.trainingCompletedAt, '2026-07-01');

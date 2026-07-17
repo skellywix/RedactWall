@@ -3838,8 +3838,10 @@ app.post('/api/ncua/board-packet', auth.requireAuth, auth.requireCsrf, auth.requ
 // Board cybersecurity-training / oversight attestation — a named 2026 NCUA exam
 // priority. Records a bounded completion date + minutes reference into the
 // tamper-evident audit chain (no PII/prompt text). POST + CSRF because it
-// appends attestation history the board_reporting control surfaces.
-app.post('/api/ncua/board-training', auth.requireAuth, auth.requireCsrf, auth.requireRole(roles.SECURITY_ADMIN, roles.AUDITOR), requireNcuaEntitled, validation.validateBody(validation.boardTrainingSchema), (req, res) => {
+// appends attestation history the board_reporting control surfaces. Security
+// Admin only: unlike board-packet (which records that an export happened),
+// this asserts an external fact, so the read-only AUDITOR role may not write it.
+app.post('/api/ncua/board-training', auth.requireAuth, auth.requireCsrf, auth.requireRole(roles.SECURITY_ADMIN), requireNcuaEntitled, validation.validateBody(validation.boardTrainingSchema), (req, res) => {
   const trainingCompletedAt = String(req.body.trainingCompletedAt);
   const reference = req.body.reference ? String(req.body.reference).slice(0, 120) : '';
   db.appendAudit({

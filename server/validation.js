@@ -570,10 +570,17 @@ const incidentStatusSchema = z.object({
 }).strict();
 
 // Board cybersecurity-training / oversight attestation (a named 2026 NCUA exam
-// priority). Self-attested date + a bounded minutes reference; no PII/prompt text.
+// priority). Self-attested date + a bounded minutes reference. The reference
+// lands verbatim in the append-only audit chain and examiner summaries, so on
+// top of useCaseTextSchema (control chars, SSN/card shapes) it also rejects
+// email addresses and phone-length digit runs (9+, separators allowed) —
+// dates like "2026-06-15" (8 digits) still pass.
+const BOARD_REFERENCE_CONTACT = /@|\d(?:[\s().-]{0,2}\d){8}/;
 const boardTrainingSchema = z.object({
   trainingCompletedAt: useCaseDateSchema,
-  reference: useCaseTextSchema(120).optional(),
+  reference: useCaseTextSchema(120)
+    .refine((value) => !BOARD_REFERENCE_CONTACT.test(value), { message: 'reference must not contain contact details or identifier digit runs' })
+    .optional(),
 }).strict();
 
 function safeOperatorText(value) {
