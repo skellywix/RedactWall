@@ -430,7 +430,10 @@ function validEvidenceFindings(value: unknown): boolean {
     && boundedTextValue(item.type, 80)
     && typeof item.severity === 'number' && Number.isFinite(item.severity)
     && typeof item.score === 'number' && Number.isFinite(item.score)
-    && boundedTextValue(item.masked, 240));
+    // `masked` is deliberately absent when the server's sanitizeClientMask()
+    // discarded a missing or still-sensitive mask — a privacy-preserving
+    // omission must not void the whole evidence pack.
+    && (item.masked === undefined || boundedTextValue(item.masked, 240)));
 }
 
 function validEvidenceCounts(value: unknown): boolean {

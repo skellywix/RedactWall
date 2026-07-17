@@ -50,6 +50,20 @@ test('frontend decoder whitelists a complete server leak-map snapshot', async ()
   assert.strictEqual(JSON.stringify(decoded).includes('must not cross'), false);
 });
 
+test('producer and decoder agree at the leak-map wire-contract boundaries', async () => {
+  const { decodeLeakMapReport } = await helpers;
+  const longDestination = `${'a'.repeat(245)}.example`; // 253 chars — the hostname maximum
+  const rows = [row('long', longDestination, 'allowed')];
+  for (let i = 0; i < 17; i += 1) {
+    rows.push({ ...row(`src-${i}`, 'allowed.example', 'allowed'), source: `sensor_${i}` });
+  }
+  const original = posture.leakMapGraph({ rows });
+  assert.strictEqual(original.channels.length, 16, 'producer caps channels at the decoder limit');
+  const decoded = decodeLeakMapReport(original);
+  assert.ok(decoded, 'a server-valid report with a maximum-length destination must decode');
+  assert.ok(decoded.destinations.some((item) => item.id === longDestination));
+});
+
 test('frontend decoder rejects ambiguous continuation counts and graph relationships', async () => {
   const { decodeLeakMapReport } = await helpers;
   const original = posture.leakMapGraph({ rows: [row('allowed', 'allowed.example', 'allowed')] });

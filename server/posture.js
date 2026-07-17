@@ -2574,7 +2574,10 @@ function postureSegments({ rows = [], selectedRows = [], segment = '', identityG
   };
 }
 
-const LEAK_MAP_LIMITS = Object.freeze({ segments: 6, destinations: 8, edges: 18, categories: 6 });
+// Wire contract with console/src/components/overview/leakMapTraffic.ts
+// (MAP_LIMITS): the producer owns the bounded representation, and the decoder
+// rejects anything larger — an uncapped array here blanks the whole Overview.
+const LEAK_MAP_LIMITS = Object.freeze({ segments: 6, channels: 16, destinations: 8, edges: 18, categories: 6 });
 
 function leakSegmentFor(row, groupsByUser) {
   const segments = rowSegments(row, groupsByUser);
@@ -2694,7 +2697,7 @@ function leakMapGraph({ rows = [], identityGroups = {}, inventory = {} } = {}) {
   }
   const segmentRows = [...segments.values()].map(leakNode).sort(leakRank).slice(0, LEAK_MAP_LIMITS.segments);
   const destinationRows = [...destinations.values()].map(leakNode).sort(leakRank).slice(0, LEAK_MAP_LIMITS.destinations);
-  const channelRows = [...channels.values()].map(leakNode).sort((a, b) => n(b.events) - n(a.events));
+  const channelRows = [...channels.values()].map(leakNode).sort((a, b) => n(b.events) - n(a.events)).slice(0, LEAK_MAP_LIMITS.channels);
   const keptSegments = new Set(segmentRows.map((item) => item.id));
   const keptDestinations = new Set(destinationRows.map((item) => item.id));
   const edgeRows = [...edges.values()]

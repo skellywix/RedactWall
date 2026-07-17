@@ -75,6 +75,13 @@ test('activity sequences snapshots against SSE and renders stale evidence explic
   assert.match(activity, /No current empty-state conclusion can be drawn/);
 });
 
+test('evidence decoder accepts findings whose mask was privacy-omitted by the server', () => {
+  const audit = source('console/src/api/audit.ts');
+  // sanitizeClientMask() deliberately drops missing/still-sensitive masks; the
+  // decoder must treat an absent `masked` as valid, never voiding the pack.
+  assert.match(audit, /item\.masked === undefined \|\| boundedTextValue\(item\.masked, 240\)/);
+});
+
 test('query audit history distinguishes complete empty, bounded-window empty, unavailable, loading, and entries', () => {
   const audit = source('console/src/api/audit.ts');
   const detail = source('console/src/components/queue/QueueDetail.tsx');

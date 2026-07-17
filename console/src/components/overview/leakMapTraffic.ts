@@ -157,8 +157,12 @@ function validCountRelationships(item: DecodedNode): boolean {
 
 function decodeNode(value: unknown, kind: 'segment' | 'channel' | 'destination' | 'edge'): DecodedNode | null {
   if (!isRecord(value)) return null;
-  const id = boundedText(value.id, 180);
-  const label = kind === 'edge' ? id : boundedText(value.label, 140);
+  // Length bounds mirror what server/posture.js can legitimately emit:
+  // destination ids/labels are normalized hostnames (up to 253 chars) and an
+  // edge id is `segment->destination`. Tighter caps here rejected the whole
+  // report — and blanked the Overview — on one long but valid destination.
+  const id = boundedText(value.id, kind === 'edge' ? 512 : 253);
+  const label = kind === 'edge' ? id : boundedText(value.label, 253);
   const status = boundedText(value.status, 16);
   const lastSeen = optionalText(value.lastSeen, 64);
   const typeLabel = optionalText(value.typeLabel, 40);
@@ -195,8 +199,8 @@ function decodeNode(value: unknown, kind: 'segment' | 'channel' | 'destination' 
 function decodeEdge(value: unknown): DecodedEdge | null {
   const node = decodeNode(value, 'edge');
   if (!node || !isRecord(value) || !Array.isArray(value.categories) || value.categories.length > 3) return null;
-  const from = boundedText(value.from, 180);
-  const to = boundedText(value.to, 180);
+  const from = boundedText(value.from, 253);
+  const to = boundedText(value.to, 253);
   const via = boundedText(value.via, 40);
   const viaLabel = optionalText(value.viaLabel, 40);
   const categories = value.categories.map(decodeCategory);
